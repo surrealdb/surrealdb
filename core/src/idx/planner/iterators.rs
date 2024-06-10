@@ -6,8 +6,8 @@ use crate::idx::ft::termdocs::TermsDocs;
 use crate::idx::ft::{FtIndex, HitsIterator};
 use crate::idx::planner::plan::RangeValue;
 use crate::key::index::Index;
-use crate::kvs;
-use crate::kvs::{Key, Limit, ScanPage};
+use crate::kvs::Key;
+use crate::kvs::Transaction;
 use crate::sql::statements::DefineIndexStatement;
 use crate::sql::{Array, Ident, Thing, Value};
 use radix_trie::Trie;
@@ -118,20 +118,20 @@ impl ThingIterator {
 	pub(crate) async fn next_batch<B: IteratorBatch>(
 		&mut self,
 		ctx: &Context<'_>,
-		tx: &mut kvs::Transaction,
+		txn: &Transaction,
 		size: u32,
 	) -> Result<B, Error> {
 		match self {
-			Self::IndexEqual(i) => i.next_batch(tx, size).await,
-			Self::UniqueEqual(i) => i.next_batch(tx).await,
-			Self::IndexRange(i) => i.next_batch(tx, size).await,
-			Self::UniqueRange(i) => i.next_batch(tx, size).await,
-			Self::IndexUnion(i) => i.next_batch(ctx, tx, size).await,
-			Self::UniqueUnion(i) => i.next_batch(ctx, tx, size).await,
-			Self::Matches(i) => i.next_batch(ctx, tx, size).await,
+			Self::IndexEqual(i) => i.next_batch(txn, size).await,
+			Self::UniqueEqual(i) => i.next_batch(txn).await,
+			Self::IndexRange(i) => i.next_batch(txn, size).await,
+			Self::UniqueRange(i) => i.next_batch(txn, size).await,
+			Self::IndexUnion(i) => i.next_batch(ctx, txn, size).await,
+			Self::UniqueUnion(i) => i.next_batch(ctx, txn, size).await,
+			Self::Matches(i) => i.next_batch(ctx, txn, size).await,
 			Self::Knn(i) => i.next_batch(ctx, size).await,
-			Self::IndexJoin(i) => Box::pin(i.next_batch(ctx, tx, size)).await,
-			Self::UniqueJoin(i) => Box::pin(i.next_batch(ctx, tx, size)).await,
+			Self::IndexJoin(i) => Box::pin(i.next_batch(ctx, txn, size)).await,
+			Self::UniqueJoin(i) => Box::pin(i.next_batch(ctx, txn, size)).await,
 		}
 	}
 }
@@ -164,7 +164,7 @@ impl IndexEqualThingIterator {
 	}
 
 	async fn next_scan<B: IteratorBatch>(
-		tx: &mut kvs::Transaction,
+		tx: &Transaction,
 		irf: IteratorRef,
 		beg: &mut Vec<u8>,
 		end: &[u8],
@@ -172,16 +172,7 @@ impl IndexEqualThingIterator {
 	) -> Result<B, Error> {
 		let min = beg.clone();
 		let max = end.to_owned();
-		let res = tx
-			.scan_paged(
-				ScanPage {
-					range: min..max,
-					limit: Limit::Limited(limit),
-				},
-				limit,
-			)
-			.await?;
-		let res = res.values;
+		let res = tx.scan(min..max, limit).await?;
 		if let Some((key, _)) = res.last() {
 			let mut key = key.clone();
 			key.push(0x00);
@@ -194,7 +185,7 @@ impl IndexEqualThingIterator {
 
 	async fn next_batch<B: IteratorBatch>(
 		&mut self,
-		tx: &mut kvs::Transaction,
+		tx: &Transaction,
 		limit: u32,
 	) -> Result<B, Error> {
 		Self::next_scan(tx, self.irf, &mut self.beg, &self.end, limit).await
@@ -306,21 +297,12 @@ impl IndexRangeThingIterator {
 
 	async fn next_batch<B: IteratorBatch>(
 		&mut self,
-		tx: &mut kvs::Transaction,
+		tx: &Transaction,
 		limit: u32,
 	) -> Result<B, Error> {
 		let min = self.r.beg.clone();
 		let max = self.r.end.clone();
-		let res = tx
-			.scan_paged(
-				ScanPage {
-					range: min..max,
-					limit: Limit::Limited(limit),
-				},
-				limit,
-			)
-			.await?;
-		let res = res.values;
+		let res = tx.scan(min..max, limit).await?;
 		if let Some((key, _)) = res.last() {
 			self.r.beg.clone_from(key);
 			self.r.beg.push(0x00);
@@ -369,7 +351,7 @@ impl IndexUnionThingIterator {
 	async fn next_batch<B: IteratorBatch>(
 		&mut self,
 		ctx: &Context<'_>,
-		tx: &mut kvs::Transaction,
+		tx: &Transaction,
 		limit: u32,
 	) -> Result<B, Error> {
 		while let Some(r) = &mut self.current {
@@ -423,7 +405,7 @@ impl JoinThingIterator {
 	async fn next_current_remote_batch(
 		&mut self,
 		ctx: &Context<'_>,
-		tx: &mut kvs::Transaction,
+		tx: &Transaction,
 		limit: u32,
 	) -> Result<bool, Error> {
 		while !ctx.is_done() {
@@ -444,7 +426,7 @@ impl JoinThingIterator {
 	async fn next_current_local<F>(
 		&mut self,
 		ctx: &Context<'_>,
-		tx: &mut kvs::Transaction,
+		tx: &Transaction,
 		limit: u32,
 		new_iter: F,
 	) -> Result<bool, Error>
@@ -471,7 +453,7 @@ impl JoinThingIterator {
 	async fn next_batch<F, B: IteratorBatch>(
 		&mut self,
 		ctx: &Context<'_>,
-		tx: &mut kvs::Transaction,
+		tx: &Transaction,
 		limit: u32,
 		new_iter: F,
 	) -> Result<B, Error>
@@ -508,7 +490,7 @@ impl IndexJoinThingIterator {
 	async fn next_batch<B: IteratorBatch>(
 		&mut self,
 		ctx: &Context<'_>,
-		tx: &mut kvs::Transaction,
+		tx: &Transaction,
 		limit: u32,
 	) -> Result<B, Error> {
 		let new_iter = |ns: &str, db: &str, ix_what: &Ident, ix_name: &Ident, value: Value| {
@@ -541,10 +523,7 @@ impl UniqueEqualThingIterator {
 		}
 	}
 
-	async fn next_batch<B: IteratorBatch>(
-		&mut self,
-		tx: &mut kvs::Transaction,
-	) -> Result<B, Error> {
+	async fn next_batch<B: IteratorBatch>(&mut self, tx: &Transaction) -> Result<B, Error> {
 		if let Some(key) = self.key.take() {
 			if let Some(val) = tx.get(key).await? {
 				let record = (val.into(), self.irf.into(), None);
@@ -612,7 +591,7 @@ impl UniqueRangeThingIterator {
 
 	async fn next_batch<B: IteratorBatch>(
 		&mut self,
-		tx: &mut kvs::Transaction,
+		tx: &Transaction,
 		mut limit: u32,
 	) -> Result<B, Error> {
 		if self.done {
@@ -621,17 +600,9 @@ impl UniqueRangeThingIterator {
 		let min = self.r.beg.clone();
 		let max = self.r.end.clone();
 		limit += 1;
-		let res = tx
-			.scan_paged(
-				ScanPage {
-					range: min..max,
-					limit: Limit::Limited(limit),
-				},
-				limit,
-			)
-			.await?;
-		let mut records = B::with_capacity(res.values.len());
-		for (k, v) in res.values {
+		let res = tx.scan(min..max, limit).await?;
+		let mut records = B::with_capacity(res.len());
+		for (k, v) in res {
 			limit -= 1;
 			if limit == 0 {
 				self.r.beg = k;
@@ -682,7 +653,7 @@ impl UniqueUnionThingIterator {
 	async fn next_batch<B: IteratorBatch>(
 		&mut self,
 		ctx: &Context<'_>,
-		tx: &mut kvs::Transaction,
+		tx: &Transaction,
 		limit: u32,
 	) -> Result<B, Error> {
 		let limit = limit as usize;
@@ -717,7 +688,7 @@ impl UniqueJoinThingIterator {
 	async fn next_batch<B: IteratorBatch>(
 		&mut self,
 		ctx: &Context<'_>,
-		tx: &mut kvs::Transaction,
+		tx: &Transaction,
 		limit: u32,
 	) -> Result<B, Error> {
 		let new_iter = |ns: &str, db: &str, ix_what: &Ident, ix_name: &Ident, value: Value| {
@@ -756,7 +727,7 @@ impl MatchesThingIterator {
 	async fn next_batch<B: IteratorBatch>(
 		&mut self,
 		ctx: &Context<'_>,
-		tx: &mut kvs::Transaction,
+		tx: &Transaction,
 		limit: u32,
 	) -> Result<B, Error> {
 		if let Some(hits) = &mut self.hits {

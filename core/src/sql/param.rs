@@ -69,12 +69,10 @@ impl Param {
 				Some(v) => v.compute(stk, ctx, opt, doc).await,
 				// The param has not been set locally
 				None => {
-					let val = {
-						// Claim transaction
-						let mut run = ctx.tx_lock().await;
-						// Get the param definition
-						run.get_and_cache_db_param(opt.ns()?, opt.db()?, v).await
-					};
+					// Ensure a database is set
+					opt.valid_for_db()?;
+					// Fetch a defined param if set
+					let val = ctx.tx().get_db_param(opt.ns()?, opt.db()?, v).await;
 					// Check if the param has been set globally
 					match val {
 						// The param has been set globally
@@ -104,6 +102,10 @@ impl Param {
 							val.value.compute(stk, ctx, opt, doc).await
 						}
 						// The param has not been set globally
+						Err(Error::PaNotFound {
+							..
+						}) => Ok(Value::None),
+						// There was another request error
 						Err(_) => Ok(Value::None),
 					}
 				}

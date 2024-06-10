@@ -1,6 +1,6 @@
 //! Stores a heartbeat per registered cluster node
 use crate::dbs::node::{KeyTimestamp, Timestamp};
-use crate::key::error::KeyCategory;
+use crate::key::category::Category;
 use crate::key::key_req::KeyRequirements;
 use derive::Key;
 use serde::{Deserialize, Serialize};
@@ -20,8 +20,8 @@ pub struct Hb {
 }
 
 impl KeyRequirements for Hb {
-	fn key_category(&self) -> KeyCategory {
-		KeyCategory::Heartbeat
+	fn key_category(&self) -> Category {
+		Category::Heartbeat
 	}
 }
 

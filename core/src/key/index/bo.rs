@@ -1,7 +1,7 @@
 //! Stores the offsets
 use crate::idx::docids::DocId;
 use crate::idx::ft::terms::TermId;
-use crate::key::error::KeyCategory;
+use crate::key::category::Category;
 use crate::key::key_req::KeyRequirements;
 use derive::Key;
 use serde::{Deserialize, Serialize};
@@ -26,8 +26,8 @@ pub struct Bo<'a> {
 }
 
 impl KeyRequirements for Bo<'_> {
-	fn key_category(&self) -> KeyCategory {
-		KeyCategory::IndexOffset
+	fn key_category(&self) -> Category {
+		Category::IndexOffset
 	}
 }
 

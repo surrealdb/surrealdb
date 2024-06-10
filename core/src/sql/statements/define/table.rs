@@ -1,25 +1,23 @@
+use super::DefineFieldStatement;
 use crate::ctx::Context;
 use crate::dbs::{Force, Options};
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::iam::{Action, ResourceKind};
-use crate::sql::{
-	changefeed::ChangeFeed,
-	fmt::{is_pretty, pretty_indent},
-	statements::UpdateStatement,
-	Base, Ident, Object, Permissions, Strand, Value, Values, View,
-};
-use std::sync::Arc;
-
+use crate::sql::fmt::{is_pretty, pretty_indent};
+use crate::sql::paths::{IN, OUT};
 use crate::sql::statements::info::InfoStructure;
-use crate::sql::{Idiom, Kind, Part, Table, TableType};
+use crate::sql::{
+	changefeed::ChangeFeed, statements::UpdateStatement, Base, Ident, Object, Output, Permissions,
+	Strand, Value, Values, View,
+};
+use crate::sql::{Idiom, Kind, Table, TableType};
 use derive::Store;
 use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Write};
-
-use super::DefineFieldStatement;
+use std::sync::Arc;
 
 #[revisioned(revision = 3)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
@@ -50,12 +48,10 @@ impl DefineTableStatement {
 	) -> Result<Value, Error> {
 		// Allowed to run?
 		opt.is_allowed(Action::Edit, ResourceKind::Table, &Base::Db)?;
-		// Claim transaction
-		let mut run = ctx.tx_lock().await;
-		// Clear the cache
-		run.clear_cache();
-		// Check if table already exists
-		if run.get_tb(opt.ns()?, opt.db()?, &self.name).await.is_ok() {
+		// Fetch the transaction
+		let txn = ctx.tx();
+		// Check if the definition exists
+		if txn.get_tb(opt.ns()?, opt.db()?, &self.name).await.is_ok() {
 			if self.if_not_exists {
 				return Ok(Value::None);
 			} else {
@@ -66,67 +62,69 @@ impl DefineTableStatement {
 		}
 		// Process the statement
 		let key = crate::key::database::tb::new(opt.ns()?, opt.db()?, &self.name);
-		let ns = run.add_ns(opt.ns()?, opt.strict).await?;
-		let db = run.add_db(opt.ns()?, opt.db()?, opt.strict).await?;
-		let dt = if self.id.is_none() && ns.id.is_some() && db.id.is_some() {
-			DefineTableStatement {
-				id: Some(run.get_next_tb_id(ns.id.unwrap(), db.id.unwrap()).await?),
-				if_not_exists: false,
-				..self.clone()
-			}
-		} else {
-			DefineTableStatement {
-				if_not_exists: false,
-				..self.clone()
-			}
+		let ns = txn.get_or_add_ns(opt.ns()?, opt.strict).await?;
+		let db = txn.get_or_add_db(opt.ns()?, opt.db()?, opt.strict).await?;
+		let dt = DefineTableStatement {
+			id: if self.id.is_none() && ns.id.is_some() && db.id.is_some() {
+				Some(txn.lock().await.get_next_tb_id(ns.id.unwrap(), db.id.unwrap()).await?)
+			} else {
+				None
+			},
+			// Don't persist the `IF NOT EXISTS` clause to schema
+			if_not_exists: false,
+			..self.clone()
 		};
+		txn.set(key, &dt).await?;
+		// Add table relational fields
 		if let TableType::Relation(rel) = &self.kind {
-			let tb: &str = &self.name;
-			let in_kind = rel.from.clone().unwrap_or(Kind::Record(vec![]));
-			let out_kind = rel.to.clone().unwrap_or(Kind::Record(vec![]));
-			let in_key = crate::key::table::fd::new(opt.ns()?, opt.db()?, tb, "in");
-			let out_key = crate::key::table::fd::new(opt.ns()?, opt.db()?, tb, "out");
-			run.set(
-				in_key,
-				DefineFieldStatement {
-					name: Idiom(vec![Part::from("in")]),
-					what: tb.into(),
-					kind: Some(in_kind),
-					..Default::default()
-				},
-			)
-			.await?;
-			run.set(
-				out_key,
-				DefineFieldStatement {
-					name: Idiom(vec![Part::from("out")]),
-					what: tb.into(),
-					kind: Some(out_kind),
-					..Default::default()
-				},
-			)
-			.await?;
+			// Set the `in` field as a DEFINE FIELD definition
+			{
+				let key = crate::key::table::fd::new(opt.ns()?, opt.db()?, &self.name, "in");
+				let val = rel.from.clone().unwrap_or(Kind::Record(vec![]));
+				txn.set(
+					key,
+					DefineFieldStatement {
+						name: Idiom::from(IN.to_vec()),
+						what: self.name.to_owned(),
+						kind: Some(val),
+						..Default::default()
+					},
+				)
+				.await?;
+			}
+			// Set the `out` field as a DEFINE FIELD definition
+			{
+				let key = crate::key::table::fd::new(opt.ns()?, opt.db()?, &self.name, "out");
+				let val = rel.to.clone().unwrap_or(Kind::Record(vec![]));
+				txn.set(
+					key,
+					DefineFieldStatement {
+						name: Idiom::from(OUT.to_vec()),
+						what: self.name.to_owned(),
+						kind: Some(val),
+						..Default::default()
+					},
+				)
+				.await?;
+			}
 		}
-
-		let tb_key = crate::key::table::fd::prefix(opt.ns()?, opt.db()?, &self.name);
-		run.clr(tb_key).await?;
-		run.set(key, &dt).await?;
+		// Clear the cache
+		txn.clear();
+		// Record definition change
+		if dt.changefeed.is_some() {
+			txn.lock().await.record_table_change(opt.ns()?, opt.db()?, &self.name, &dt);
+		}
 		// Check if table is a view
 		if let Some(view) = &self.view {
 			// Remove the table data
 			let key = crate::key::table::all::new(opt.ns()?, opt.db()?, &self.name);
-			run.delp(key, u32::MAX).await?;
+			txn.delp(key).await?;
 			// Process each foreign table
 			for v in view.what.0.iter() {
 				// Save the view config
 				let key = crate::key::table::ft::new(opt.ns()?, opt.db()?, v, &self.name);
-				run.set(key, self).await?;
-				// Clear the cache
-				let key = crate::key::table::ft::prefix(opt.ns()?, opt.db()?, v);
-				run.clr(key).await?;
+				txn.set(key, self).await?;
 			}
-			// Release the transaction
-			drop(run);
 			// Force queries to run
 			let opt = &opt.new_with_force(Force::Table(Arc::new([dt])));
 			// Process each foreign table
@@ -134,14 +132,14 @@ impl DefineTableStatement {
 				// Process the view data
 				let stm = UpdateStatement {
 					what: Values(vec![Value::Table(v.clone())]),
+					output: Some(Output::None),
 					..UpdateStatement::default()
 				};
 				stm.compute(stk, ctx, opt, doc).await?;
 			}
-		} else if dt.changefeed.is_some() {
-			run.record_table_change(opt.ns()?, opt.db()?, self.name.0.as_str(), &dt);
 		}
-
+		// Clear the cache
+		txn.clear();
 		// Ok all good
 		Ok(Value::None)
 	}

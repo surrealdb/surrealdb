@@ -508,7 +508,7 @@ impl Iterator {
 				// Create a channel to shutdown
 				let (end, exit) = channel::bounded::<()>(1);
 				// Create an unbounded channel
-				let (chn, docs) = channel::bounded(crate::cnf::MAX_CONCURRENT_TASKS);
+				let (chn, docs) = channel::bounded(*crate::cnf::MAX_CONCURRENT_TASKS);
 				// Create an async closure for prepared values
 				let adocs = async {
 					// Process all prepared values
@@ -532,7 +532,7 @@ impl Iterator {
 					drop(chn);
 				};
 				// Create an unbounded channel
-				let (chn, vals) = channel::bounded(crate::cnf::MAX_CONCURRENT_TASKS);
+				let (chn, vals) = channel::bounded(*crate::cnf::MAX_CONCURRENT_TASKS);
 				// Create an async closure for received values
 				let avals = async {
 					// Process all received values

@@ -40,7 +40,7 @@ mod mem {
 
 	async fn new_ds(node_id: Uuid, clock_override: ClockType) -> (Datastore, Kvs) {
 		(
-			Datastore::new_full("memory", Some(clock_override))
+			Datastore::new_with_clock("memory", Some(clock_override))
 				.await
 				.unwrap()
 				.with_node_id(crate::sql::Uuid::from(node_id)),
@@ -70,7 +70,6 @@ mod mem {
 	include!("ndlq.rs");
 	include!("tblq.rs");
 	include!("tbnt.rs");
-	include!("tx_test.rs");
 }
 
 #[cfg(feature = "kv-rocksdb")]
@@ -87,7 +86,7 @@ mod rocksdb {
 	async fn new_ds(node_id: Uuid, clock_override: ClockType) -> (Datastore, Kvs) {
 		let path = TempDir::new().unwrap().path().to_string_lossy().to_string();
 		(
-			Datastore::new_full(format!("rocksdb:{path}").as_str(), Some(clock_override))
+			Datastore::new_with_clock(format!("rocksdb:{path}").as_str(), Some(clock_override))
 				.await
 				.unwrap()
 				.with_node_id(sql::Uuid::from(node_id)),
@@ -119,7 +118,6 @@ mod rocksdb {
 	include!("ndlq.rs");
 	include!("tblq.rs");
 	include!("tbnt.rs");
-	include!("tx_test.rs");
 }
 
 #[cfg(feature = "kv-tikv")]
@@ -131,13 +129,13 @@ mod tikv {
 	use serial_test::serial;
 
 	async fn new_ds(node_id: Uuid, clock_override: ClockType) -> (Datastore, Kvs) {
-		let ds = Datastore::new_full("tikv:127.0.0.1:2379", Some(clock_override))
+		let ds = Datastore::new_with_clock("tikv:127.0.0.1:2379", Some(clock_override))
 			.await
 			.unwrap()
 			.with_node_id(sql::uuid::Uuid(node_id));
 		// Clear any previous test entries
-		let mut tx = ds.transaction(Write, Optimistic).await.unwrap();
-		tx.delp(vec![], u32::MAX).await.unwrap();
+		let tx = ds.transaction(Write, Optimistic).await.unwrap();
+		tx.delp(vec![]).await.unwrap();
 		tx.commit().await.unwrap();
 		// Return the datastore
 		(ds, Kvs::Tikv)
@@ -167,7 +165,6 @@ mod tikv {
 	include!("ndlq.rs");
 	include!("tblq.rs");
 	include!("tbnt.rs");
-	include!("tx_test.rs");
 }
 
 #[cfg(feature = "kv-fdb")]
@@ -179,13 +176,14 @@ mod fdb {
 	use serial_test::serial;
 
 	async fn new_ds(node_id: Uuid, clock_override: ClockType) -> (Datastore, Kvs) {
-		let ds = Datastore::new_full("fdb:/etc/foundationdb/fdb.cluster", Some(clock_override))
-			.await
-			.unwrap()
-			.with_node_id(sql::Uuid::from(node_id));
+		let ds =
+			Datastore::new_with_clock("fdb:/etc/foundationdb/fdb.cluster", Some(clock_override))
+				.await
+				.unwrap()
+				.with_node_id(sql::Uuid::from(node_id));
 		// Clear any previous test entries
-		let mut tx = ds.transaction(Write, Optimistic).await.unwrap();
-		tx.delp(vec![], u32::MAX).await.unwrap();
+		let tx = ds.transaction(Write, Optimistic).await.unwrap();
+		tx.delp(vec![]).await.unwrap();
 		tx.commit().await.unwrap();
 		// Return the datastore
 		(ds, Kvs::Fdb)
@@ -215,7 +213,6 @@ mod fdb {
 	include!("ndlq.rs");
 	include!("tblq.rs");
 	include!("tbnt.rs");
-	include!("tx_test.rs");
 }
 
 #[cfg(feature = "kv-surrealkv")]
@@ -232,7 +229,7 @@ mod surrealkv {
 	async fn new_ds(node_id: Uuid, clock_override: ClockType) -> (Datastore, Kvs) {
 		let path = TempDir::new().unwrap().path().to_string_lossy().to_string();
 		(
-			Datastore::new_full(format!("surrealkv:{path}").as_str(), Some(clock_override))
+			Datastore::new_with_clock(format!("surrealkv:{path}").as_str(), Some(clock_override))
 				.await
 				.unwrap()
 				.with_node_id(sql::Uuid::from(node_id)),
@@ -265,5 +262,4 @@ mod surrealkv {
 	include!("ndlq.rs");
 	include!("tblq.rs");
 	include!("tbnt.rs");
-	include!("tx_test.rs");
 }

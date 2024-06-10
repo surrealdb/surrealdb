@@ -1,4 +1,3 @@
-use futures::lock::Mutex;
 use std::collections::BTreeSet;
 use std::sync::Arc;
 
@@ -105,8 +104,8 @@ async fn expired_nodes_get_live_queries_archived() {
 		.with_live(true)
 		.with_id(old_node);
 	let opt = Options::new_with_sender(&opt, sender);
-	let tx = Arc::new(Mutex::new(test.db.transaction(Write, Optimistic).await.unwrap()));
-	let ctx = ctx.set_transaction(tx);
+	let tx = test.db.transaction(Write, Optimistic).await.unwrap();
+	let ctx = ctx.with_transaction(tx.enclose());
 	let res = {
 		let mut stack = reblessive::tree::TreeStack::new();
 		stack.enter(|stk| lq.compute(stk, &ctx, &opt, None)).finish().await.unwrap()
@@ -170,8 +169,8 @@ async fn single_live_queries_are_garbage_collected() {
 
 	// We set up 2 live queries, one of which we want to garbage collect
 	trace!("Setting up live queries");
-	let tx = Arc::new(Mutex::new(test.db.transaction(Write, Optimistic).await.unwrap()));
-	let ctx = ctx.set_transaction(tx);
+	let tx = test.db.transaction(Write, Optimistic).await.unwrap();
+	let ctx = ctx.with_transaction(tx.enclose());
 	let live_query_to_delete = Uuid::parse_str("8aed07c4-9683-480e-b1e4-f0db8b331530").unwrap();
 	let live_st = LiveStatement {
 		id: sql::Uuid(live_query_to_delete),
@@ -261,8 +260,8 @@ async fn bootstrap_does_not_error_on_missing_live_queries() {
 
 	// We set up 2 live queries, one of which we want to garbage collect
 	trace!("Setting up live queries");
-	let tx = Arc::new(Mutex::new(test.db.transaction(Write, Optimistic).await.unwrap()));
-	let ctx = ctx.set_transaction(tx);
+	let tx = test.db.transaction(Write, Optimistic).await.unwrap();
+	let ctx = ctx.with_transaction(tx.enclose());
 	let live_query_to_corrupt = Uuid::parse_str("d4cee7ce-5c78-4a30-9fa9-2444d58029f6").unwrap();
 	let live_st = LiveStatement {
 		id: sql::Uuid(live_query_to_corrupt),

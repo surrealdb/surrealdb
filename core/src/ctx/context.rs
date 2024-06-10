@@ -2,15 +2,14 @@ use crate::ctx::canceller::Canceller;
 use crate::ctx::reason::Reason;
 #[cfg(feature = "http")]
 use crate::dbs::capabilities::NetTarget;
-use crate::dbs::{Capabilities, Notification, Transaction};
+use crate::dbs::{Capabilities, Notification};
 use crate::err::Error;
 use crate::idx::planner::executor::QueryExecutor;
 use crate::idx::planner::{IterationStage, QueryPlanner};
 use crate::idx::trees::store::IndexStores;
-use crate::kvs;
+use crate::kvs::Transaction;
 use crate::sql::value::Value;
 use channel::Sender;
-use futures::lock::MutexLockFuture;
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::fmt::{self, Debug};
@@ -72,7 +71,7 @@ pub struct Context<'a> {
 	// The temporary directory
 	temporary_directory: Option<Arc<PathBuf>>,
 	// An optional transaction
-	transaction: Option<Transaction>,
+	transaction: Option<Arc<Transaction>>,
 }
 
 impl<'a> Default for Context<'a> {
@@ -239,17 +238,17 @@ impl<'a> Context<'a> {
 		self.iteration_stage = Some(is);
 	}
 
-	pub(crate) fn set_transaction_mut(&mut self, txn: Transaction) {
+	pub(crate) fn set_transaction(&mut self, txn: Arc<Transaction>) {
 		self.transaction = Some(txn);
 	}
 
-	pub fn set_transaction(mut self, txn: Transaction) -> Self {
+	pub(crate) fn with_transaction(mut self, txn: Arc<Transaction>) -> Self {
 		self.transaction = Some(txn);
 		self
 	}
 
-	pub(crate) fn tx_lock(&self) -> MutexLockFuture<'_, kvs::Transaction> {
-		self.transaction.as_ref().map(|txn| txn.lock()).unwrap_or_else(|| unreachable!())
+	pub(crate) fn tx(&self) -> Arc<Transaction> {
+		self.transaction.as_ref().map(Arc::clone).unwrap_or_else(|| unreachable!())
 	}
 
 	/// Get the timeout for this operation, if any. This is useful for

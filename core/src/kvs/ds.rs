@@ -1,28 +1,4 @@
-use std::collections::{BTreeMap, BTreeSet};
-use std::fmt;
-#[cfg(any(
-	feature = "kv-mem",
-	feature = "kv-surrealkv",
-	feature = "kv-rocksdb",
-	feature = "kv-fdb",
-	feature = "kv-tikv",
-))]
-use std::path::PathBuf;
-use std::sync::Arc;
-use std::time::Duration;
-#[cfg(not(target_arch = "wasm32"))]
-use std::time::{SystemTime, UNIX_EPOCH};
-
-use channel::{Receiver, Sender};
-use futures::{lock::Mutex, Future};
-use reblessive::{tree::Stk, TreeStack};
-use tokio::sync::RwLock;
-use tracing::instrument;
-use tracing::trace;
-
-#[cfg(target_arch = "wasm32")]
-use wasmtimer::std::{SystemTime, UNIX_EPOCH};
-
+use super::tr::Transactor;
 use super::tx::Transaction;
 use crate::cf;
 use crate::ctx::Context;
@@ -41,14 +17,33 @@ use crate::key::root::hb::Hb;
 use crate::kvs::clock::SizedClock;
 #[allow(unused_imports)]
 use crate::kvs::clock::SystemClock;
-use crate::kvs::lq_cf::LiveQueryTracker;
-use crate::kvs::lq_structs::{LqValue, TrackedResult, UnreachableLqType};
-use crate::kvs::lq_v2_fut::process_lq_notifications;
+use crate::kvs::lq_structs::{LqValue, UnreachableLqType};
 use crate::kvs::{LockType, LockType::*, TransactionType, TransactionType::*};
-use crate::options::EngineOptions;
 use crate::sql::{self, statements::DefineUserStatement, Base, Query, Uuid, Value};
 use crate::syn;
 use crate::vs::{conv, Oracle, Versionstamp};
+use channel::{Receiver, Sender};
+use futures::{lock::Mutex, Future};
+use reblessive::TreeStack;
+use std::collections::{BTreeMap, BTreeSet};
+use std::fmt;
+#[cfg(any(
+	feature = "kv-mem",
+	feature = "kv-surrealkv",
+	feature = "kv-file",
+	feature = "kv-rocksdb",
+	feature = "kv-fdb",
+	feature = "kv-tikv",
+))]
+use std::path::PathBuf;
+use std::sync::Arc;
+use std::time::Duration;
+#[cfg(not(target_arch = "wasm32"))]
+use std::time::{SystemTime, UNIX_EPOCH};
+use tracing::instrument;
+use tracing::trace;
+#[cfg(target_arch = "wasm32")]
+use wasmtimer::std::{SystemTime, UNIX_EPOCH};
 
 // If there are an infinite number of heartbeats, then we want to go batch-by-batch spread over several checks
 const HEARTBEAT_BATCH_SIZE: u32 = 1000;
@@ -78,7 +73,6 @@ pub struct Datastore {
 	transaction_timeout: Option<Duration>,
 	// Capabilities for this datastore
 	capabilities: Capabilities,
-	pub(super) engine_options: EngineOptions,
 	// The versionstamp oracle for this datastore.
 	// Used only in some datastores, such as tikv.
 	versionstamp_oracle: Arc<Mutex<Oracle>>,
@@ -100,7 +94,6 @@ pub struct Datastore {
 	))]
 	// The temporary directory
 	temporary_directory: Option<Arc<PathBuf>>,
-	pub(crate) lq_cf_store: Arc<RwLock<LiveQueryTracker>>,
 }
 
 /// We always want to be circulating the live query information
@@ -184,37 +177,14 @@ impl Datastore {
 	/// # }
 	/// ```
 	pub async fn new(path: &str) -> Result<Datastore, Error> {
-		Self::new_full_impl(path, None).await
+		Self::new_with_clock(path, None).await
 	}
 
-	#[allow(dead_code)]
-	#[cfg(test)]
-	pub async fn new_full(
+	#[allow(unused_variables)]
+	pub async fn new_with_clock(
 		path: &str,
-		clock_override: Option<Arc<SizedClock>>,
+		clock: Option<Arc<SizedClock>>,
 	) -> Result<Datastore, Error> {
-		Self::new_full_impl(path, clock_override).await
-	}
-
-	#[allow(dead_code)]
-	async fn new_full_impl(
-		path: &str,
-		#[allow(unused_variables)] clock_override: Option<Arc<SizedClock>>,
-	) -> Result<Datastore, Error> {
-		#[allow(unused_variables)]
-		let default_clock: Arc<SizedClock> = Arc::new(SizedClock::System(SystemClock::new()));
-
-		// removes warning if no storage is enabled.
-		#[cfg(not(any(
-			feature = "kv-mem",
-			feature = "kv-rocksdb",
-			feature = "kv-indxdb",
-			feature = "kv-tikv",
-			feature = "kv-fdb",
-			feature = "kv-surrealkv"
-		)))]
-		let _ = (clock_override, default_clock);
-
 		// Initiate the desired datastore
 		let (inner, clock): (Result<Inner, Error>, Arc<SizedClock>) = match path {
 			// Initiate an in-memory datastore
@@ -223,10 +193,9 @@ impl Datastore {
 				{
 					info!("Starting kvs store in {}", path);
 					let v = super::mem::Datastore::new().await.map(Inner::Mem);
-					let default_clock = Arc::new(SizedClock::System(SystemClock::new()));
-					let clock = clock_override.unwrap_or(default_clock);
+					let c = clock.unwrap_or_else(|| Arc::new(SizedClock::system()));
 					info!("Started kvs store in {}", path);
-					Ok((v, clock))
+					Ok((v, c))
 				}
 				#[cfg(not(feature = "kv-mem"))]
                 return Err(Error::Ds("Cannot connect to the `memory` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
@@ -239,10 +208,9 @@ impl Datastore {
 					let s = s.trim_start_matches("file://");
 					let s = s.trim_start_matches("file:");
 					let v = super::rocksdb::Datastore::new(s).await.map(Inner::RocksDB);
-					let default_clock = Arc::new(SizedClock::System(SystemClock::new()));
-					let clock = clock_override.unwrap_or(default_clock);
+					let c = clock.unwrap_or_else(|| Arc::new(SizedClock::system()));
 					info!("Started kvs store at {}", path);
-					Ok((v, clock))
+					Ok((v, c))
 				}
 				#[cfg(not(feature = "kv-rocksdb"))]
                 return Err(Error::Ds("Cannot connect to the `rocksdb` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
@@ -255,10 +223,9 @@ impl Datastore {
 					let s = s.trim_start_matches("rocksdb://");
 					let s = s.trim_start_matches("rocksdb:");
 					let v = super::rocksdb::Datastore::new(s).await.map(Inner::RocksDB);
+					let c = clock.unwrap_or_else(|| Arc::new(SizedClock::system()));
 					info!("Started kvs store at {}", path);
-					let default_clock = Arc::new(SizedClock::System(SystemClock::new()));
-					let clock = clock_override.unwrap_or(default_clock);
-					Ok((v, clock))
+					Ok((v, c))
 				}
 				#[cfg(not(feature = "kv-rocksdb"))]
                 return Err(Error::Ds("Cannot connect to the `rocksdb` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
@@ -271,10 +238,9 @@ impl Datastore {
 					let s = s.trim_start_matches("indxdb://");
 					let s = s.trim_start_matches("indxdb:");
 					let v = super::indxdb::Datastore::new(s).await.map(Inner::IndxDB);
+					let c = clock.unwrap_or_else(|| Arc::new(SizedClock::system()));
 					info!("Started kvs store at {}", path);
-					let default_clock = Arc::new(SizedClock::System(SystemClock::new()));
-					let clock = clock_override.unwrap_or(default_clock);
-					Ok((v, clock))
+					Ok((v, c))
 				}
 				#[cfg(not(feature = "kv-indxdb"))]
                 return Err(Error::Ds("Cannot connect to the `indxdb` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
@@ -287,10 +253,9 @@ impl Datastore {
 					let s = s.trim_start_matches("tikv://");
 					let s = s.trim_start_matches("tikv:");
 					let v = super::tikv::Datastore::new(s).await.map(Inner::TiKV);
+					let c = clock.unwrap_or_else(|| Arc::new(SizedClock::system()));
 					info!("Connected to kvs store at {}", path);
-					let default_clock = Arc::new(SizedClock::System(SystemClock::new()));
-					let clock = clock_override.unwrap_or(default_clock);
-					Ok((v, clock))
+					Ok((v, c))
 				}
 				#[cfg(not(feature = "kv-tikv"))]
                 return Err(Error::Ds("Cannot connect to the `tikv` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
@@ -303,10 +268,9 @@ impl Datastore {
 					let s = s.trim_start_matches("fdb://");
 					let s = s.trim_start_matches("fdb:");
 					let v = super::fdb::Datastore::new(s).await.map(Inner::FoundationDB);
+					let c = clock.unwrap_or_else(|| Arc::new(SizedClock::system()));
 					info!("Connected to kvs store at {}", path);
-					let default_clock = Arc::new(SizedClock::System(SystemClock::new()));
-					let clock = clock_override.unwrap_or(default_clock);
-					Ok((v, clock))
+					Ok((v, c))
 				}
 				#[cfg(not(feature = "kv-fdb"))]
                 return Err(Error::Ds("Cannot connect to the `foundationdb` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
@@ -319,18 +283,15 @@ impl Datastore {
 					let s = s.trim_start_matches("surrealkv://");
 					let s = s.trim_start_matches("surrealkv:");
 					let v = super::surrealkv::Datastore::new(s).await.map(Inner::SurrealKV);
+					let c = clock.unwrap_or_else(|| Arc::new(SizedClock::system()));
 					info!("Started to kvs store at {}", path);
-					let default_clock = Arc::new(SizedClock::System(SystemClock::new()));
-					let clock = clock_override.unwrap_or(default_clock);
-					Ok((v, clock))
+					Ok((v, c))
 				}
 				#[cfg(not(feature = "kv-surrealkv"))]
                 return Err(Error::Ds("Cannot connect to the `surrealkv` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
 			}
 			// The datastore path is not valid
 			_ => {
-				// use clock_override and default_clock to remove warning when no kv is enabled.
-				let _ = default_clock;
 				info!("Unable to load the specified datastore {}", path);
 				Err(Error::Ds("Unable to load the specified datastore".into()))
 			}
@@ -339,16 +300,15 @@ impl Datastore {
 		inner.map(|inner| Self {
 			id: Uuid::new_v4(),
 			inner,
+			clock,
 			strict: false,
 			auth_enabled: false,
 			query_timeout: None,
 			transaction_timeout: None,
 			notification_channel: None,
 			capabilities: Capabilities::default(),
-			engine_options: EngineOptions::default(),
-			versionstamp_oracle: Arc::new(Mutex::new(Oracle::systime_counter())),
-			clock,
 			index_stores: IndexStores::default(),
+			versionstamp_oracle: Arc::new(Mutex::new(Oracle::systime_counter())),
 			#[cfg(feature = "jwks")]
 			jwks_cache: Arc::new(RwLock::new(JwksCache::new())),
 			#[cfg(any(
@@ -359,7 +319,6 @@ impl Datastore {
 				feature = "kv-tikv",
 			))]
 			temporary_directory: None,
-			lq_cf_store: Arc::new(RwLock::new(LiveQueryTracker::new())),
 		})
 	}
 
@@ -412,14 +371,9 @@ impl Datastore {
 		feature = "kv-fdb",
 		feature = "kv-tikv",
 	))]
+	/// Set a temporary directory for ordering of large result sets
 	pub fn with_temporary_directory(mut self, path: PathBuf) -> Self {
 		self.temporary_directory = Some(Arc::new(path));
-		self
-	}
-
-	/// Set the engine options for the datastore
-	pub fn with_engine_options(mut self, engine_options: EngineOptions) -> Self {
-		self.engine_options = engine_options;
 		self
 	}
 
@@ -447,39 +401,48 @@ impl Datastore {
 	/// Trigger the `unreachable definition` compilation error, probably due to this issue:
 	/// https://github.com/rust-lang/rust/issues/111370
 	#[allow(unreachable_code, unused_variables)]
-	pub async fn setup_initial_creds(&self, username: &str, password: &str) -> Result<(), Error> {
+	pub async fn setup_initial_creds(&self, user: &str, pass: &str) -> Result<(), Error> {
 		// Start a new writeable transaction
-		let txn = self.transaction(Write, Optimistic).await?.rollback_with_panic().enclose();
+		let txn = self.transaction(Write, Optimistic).await?.enclose();
 		// Fetch the root users from the storage
-		let users = txn.lock().await.all_root_users().await;
+		let users = txn.all_root_users().await;
 		// Process credentials, depending on existing users
 		match users {
 			Ok(v) if v.is_empty() => {
 				// Display information in the logs
-				info!("Credentials were provided, and no root users were found. The root user '{}' will be created", username);
-				// Create and save a new root user
-				let stm =
-					DefineUserStatement::from((Base::Root, username, password, INITIAL_USER_ROLE));
-				let ctx = Context::default().set_transaction(txn.clone());
+				info!("Credentials were provided, and no root users were found. The root user '{}' will be created", user);
+				// Create and new root user definition
+				let stm = DefineUserStatement::from((Base::Root, user, pass, INITIAL_USER_ROLE));
 				let opt = Options::new().with_auth(Arc::new(Auth::for_root(Role::Owner)));
-				let _ = stm.compute(&ctx, &opt, None).await?;
-				// We added a new user, so commit the transaction
-				txn.lock().await.commit().await?;
+				let ctx = Context::default().with_transaction(txn.clone());
+				// Save the new root user definnition
+				match stm.compute(&ctx, &opt, None).await {
+					Ok(_) => {
+						// Commit the transaction if all went well
+						txn.commit().await?;
+					}
+					Err(e) => {
+						// Cancel the transaction if something failed
+						txn.cancel().await?;
+						// Return the original error
+						return Err(e);
+					}
+				}
 				// Everything ok
 				Ok(())
 			}
 			Ok(_) => {
 				// Display warnings in the logs
-				warn!("Credentials were provided, but existing root users were found. The root user '{}' will not be created", username);
+				warn!("Credentials were provided, but existing root users were found. The root user '{}' will not be created", user);
 				warn!("Consider removing the --user and --pass arguments from the server start command");
 				// We didn't write anything, so just rollback
-				txn.lock().await.cancel().await?;
+				txn.cancel().await?;
 				// Everything ok
 				Ok(())
 			}
 			Err(e) => {
 				// There was an unexpected error, so rollback
-				txn.lock().await.cancel().await?;
+				txn.cancel().await?;
 				// Return any error
 				Err(e)
 			}
@@ -588,7 +551,7 @@ impl Datastore {
 		node_id: &Uuid,
 		timestamp: Timestamp,
 	) -> Result<(), Error> {
-		tx.set_nd(node_id.0).await?;
+		let tx = tx.set_nd(node_id.0).await?;
 		tx.set_hb(timestamp, node_id.0).await?;
 		Ok(())
 	}
@@ -859,36 +822,6 @@ impl Datastore {
         }
 	}
 
-	/// Poll change feeds for live query notifications
-	pub async fn process_lq_notifications(
-		&self,
-		stk: &mut Stk,
-		opt: &Options,
-	) -> Result<(), Error> {
-		process_lq_notifications(self, stk, opt).await
-	}
-
-	/// Add and kill live queries being track on the datastore
-	/// These get polled by the change feed tick
-	pub(crate) async fn handle_postprocessing_of_statements(
-		&self,
-		lqs: &Vec<TrackedResult>,
-	) -> Result<(), Error> {
-		// Lock the local live queries
-		let mut lq_cf_store = self.lq_cf_store.write().await;
-		for lq in lqs {
-			match lq {
-				TrackedResult::LiveQuery(lq) => {
-					lq_cf_store.register_live_query(lq, Versionstamp::default()).unwrap();
-				}
-				TrackedResult::KillQuery(kill_entry) => {
-					lq_cf_store.unregister_live_query(kill_entry);
-				}
-			}
-		}
-		Ok(())
-	}
-
 	async fn save_timestamp_for_versionstamp_impl(
 		&self,
 		ts: u64,
@@ -904,7 +837,7 @@ impl Datastore {
 			for db in dbs {
 				let db = db.name.as_str();
 				// TODO(SUR-341): This is incorrect, it's a [ns,db] to vs pair
-				vs = Some(tx.set_timestamp_for_versionstamp(ts, ns, db, true).await?);
+				vs = Some(tx.set_timestamp_for_versionstamp(ts, ns, db).await?);
 			}
 		}
 		tx.commit().await?;
@@ -913,8 +846,8 @@ impl Datastore {
 
 	// garbage_collect_stale_change_feeds deletes all change feed entries that are older than the watermarks.
 	pub(crate) async fn garbage_collect_stale_change_feeds(&self, ts: u64) -> Result<(), Error> {
-		let mut tx = self.transaction(Write, Optimistic).await?;
-		if let Err(e) = self.garbage_collect_stale_change_feeds_impl(ts, &mut tx).await {
+		let tx = self.transaction(Write, Optimistic).await?;
+		if let Err(e) = self.garbage_collect_stale_change_feeds_impl(&tx, ts).await {
 			return match tx.cancel().await {
                 Ok(_) => {
                     Err(e)
@@ -929,41 +862,21 @@ impl Datastore {
 
 	async fn garbage_collect_stale_change_feeds_impl(
 		&self,
+		tx: &Transaction,
 		ts: u64,
-		tx: &mut Transaction,
 	) -> Result<(), Error> {
-		// TODO Make gc batch size/limit configurable?
-		cf::gc_all_at(tx, ts, Some(100)).await?;
+		cf::gc_all_at(tx, ts).await?;
 		tx.commit().await?;
 		Ok(())
 	}
 
-	// Creates a heartbeat entry for the member indicating to the cluster
-	// that the node is alive.
-	// This is the preferred way of creating heartbeats inside the database, so try to use this.
+	// Creates a heartbeat entry indicating to the cluster that the node is alive.
 	pub async fn heartbeat(&self) -> Result<(), Error> {
 		let mut tx = self.transaction(Write, Optimistic).await?;
 		let timestamp = tx.clock().await;
-		self.heartbeat_full(&mut tx, timestamp, self.id).await?;
+		tx.set_hb(timestamp, node_id.0).await;
 		tx.commit().await
 	}
-
-	// Creates a heartbeat entry for the member indicating to the cluster
-	// that the node is alive. Intended for testing.
-	// This includes all dependencies that are hard to control and is done in such a way for testing.
-	// Inside the database, try to use the heartbeat() function instead.
-	pub async fn heartbeat_full(
-		&self,
-		tx: &mut Transaction,
-		timestamp: Timestamp,
-		node_id: Uuid,
-	) -> Result<(), Error> {
-		tx.set_hb(timestamp, node_id.0).await
-	}
-
-	// -----
-	// End cluster helpers, storage functions here
-	// -----
 
 	/// Create a new transaction on this datastore
 	///
@@ -1003,49 +916,43 @@ impl Datastore {
 			#[cfg(feature = "kv-mem")]
 			Inner::Mem(v) => {
 				let tx = v.transaction(write, lock).await?;
-				super::tx::Inner::Mem(tx)
+				super::tr::Inner::Mem(tx)
 			}
 			#[cfg(feature = "kv-rocksdb")]
 			Inner::RocksDB(v) => {
 				let tx = v.transaction(write, lock).await?;
-				super::tx::Inner::RocksDB(tx)
+				super::tr::Inner::RocksDB(tx)
 			}
 			#[cfg(feature = "kv-indxdb")]
 			Inner::IndxDB(v) => {
 				let tx = v.transaction(write, lock).await?;
-				super::tx::Inner::IndxDB(tx)
+				super::tr::Inner::IndxDB(tx)
 			}
 			#[cfg(feature = "kv-tikv")]
 			Inner::TiKV(v) => {
 				let tx = v.transaction(write, lock).await?;
-				super::tx::Inner::TiKV(tx)
+				super::tr::Inner::TiKV(tx)
 			}
 			#[cfg(feature = "kv-fdb")]
 			Inner::FoundationDB(v) => {
 				let tx = v.transaction(write, lock).await?;
-				super::tx::Inner::FoundationDB(tx)
+				super::tr::Inner::FoundationDB(tx)
 			}
 			#[cfg(feature = "kv-surrealkv")]
 			Inner::SurrealKV(v) => {
 				let tx = v.transaction(write, lock).await?;
-				super::tx::Inner::SurrealKV(tx)
+				super::tr::Inner::SurrealKV(tx)
 			}
 			#[allow(unreachable_patterns)]
 			_ => unreachable!(),
 		};
-
-		let (send, recv): (Sender<TrackedResult>, Receiver<TrackedResult>) =
-			channel::bounded(LQ_CHANNEL_SIZE);
-
-		Ok(Transaction {
+		Ok(Transaction::new(Transactor {
 			inner,
-			cache: super::cache::Cache::default(),
+			stash: super::stash::Stash::default(),
 			cf: cf::Writer::new(),
 			vso: self.versionstamp_oracle.clone(),
 			clock: self.clock.clone(),
-			prepared_async_events: (Arc::new(send), Arc::new(recv)),
-			engine_options: self.engine_options,
-		})
+		}))
 	}
 
 	/// Parse and execute an SQL query
@@ -1149,15 +1056,7 @@ impl Datastore {
 		// Store the query variables
 		let ctx = vars.attach(ctx)?;
 		// Process all statements
-		let res = exe.execute(ctx, opt, ast).await;
-		match res {
-			Ok((responses, lives)) => {
-				// Register live queries
-				self.handle_postprocessing_of_statements(&lives).await?;
-				Ok(responses)
-			}
-			Err(e) => Err(e),
-		}
+		exe.execute(ctx, opt, ast).await
 	}
 
 	/// Ensure a SQL [`Value`] is fully computed
@@ -1229,14 +1128,16 @@ impl Datastore {
 		let ctx = vars.attach(ctx)?;
 		// Start a new transaction
 		let txn = self.transaction(val.writeable().into(), Optimistic).await?.enclose();
+		// Store the transaction
+		let ctx = ctx.with_transaction(txn.clone());
 		// Compute the value
 		let res = stack.enter(|stk| val.compute(stk, &ctx, &opt, None)).finish().await;
 		// Store any data
 		match (res.is_ok(), val.writeable()) {
 			// If the compute was successful, then commit if writeable
-			(true, true) => txn.lock().await.commit().await?,
+			(true, true) => txn.commit().await?,
 			// Cancel if the compute was an error, or if readonly
-			(_, _) => txn.lock().await.cancel().await?,
+			(_, _) => txn.cancel().await?,
 		};
 		// Return result
 		res
@@ -1304,16 +1205,16 @@ impl Datastore {
 		let ctx = vars.attach(ctx)?;
 		// Start a new transaction
 		let txn = self.transaction(val.writeable().into(), Optimistic).await?.enclose();
-		let ctx = ctx.set_transaction(txn.clone());
-
+		// Store the transaction
+		let ctx = ctx.with_transaction(txn.clone());
 		// Compute the value
 		let res = stack.enter(|stk| val.compute(stk, &ctx, &opt, None)).finish().await;
 		// Store any data
 		match (res.is_ok(), val.writeable()) {
 			// If the compute was successful, then commit if writeable
-			(true, true) => txn.lock().await.commit().await?,
+			(true, true) => txn.commit().await?,
 			// Cancel if the compute was an error, or if readonly
-			(_, _) => txn.lock().await.cancel().await?,
+			(_, _) => txn.cancel().await?,
 		};
 		// Return result
 		res
@@ -1346,6 +1247,10 @@ impl Datastore {
 	/// Performs a database import from SQL
 	#[instrument(level = "debug", skip(self, sess, sql))]
 	pub async fn import(&self, sql: &str, sess: &Session) -> Result<Vec<Response>, Error> {
+		// Check if the session has expired
+		if sess.expired() {
+			return Err(Error::ExpiredSession);
+		}
 		// Execute the SQL import
 		self.execute(sql, sess, None).await
 	}
@@ -1364,7 +1269,7 @@ impl Datastore {
 		// Retrieve the provided NS and DB
 		let (ns, db) = crate::iam::check::check_ns_db(sess)?;
 		// Create a new readonly transaction
-		let mut txn = self.transaction(Read, Optimistic).await?;
+		let txn = self.transaction(Read, Optimistic).await?;
 		// Return an async export job
 		Ok(async move {
 			// Process the export
@@ -1434,8 +1339,9 @@ mod test {
 		// Set context capabilities
 		ctx.add_capabilities(dbs.capabilities.clone());
 		// Start a new transaction
-		let txn = dbs.transaction(val.writeable().into(), Optimistic).await?.enclose();
-		let ctx = ctx.set_transaction(txn);
+		let txn = dbs.transaction(val.writeable().into(), Optimistic).await?;
+		// Store the transaction
+		let ctx = ctx.with_transaction(txn.enclose());
 		// Compute the value
 		let mut stack = reblessive::tree::TreeStack::new();
 		let res = stack.enter(|stk| val.compute(stk, &ctx, &opt, None)).finish().await.unwrap();

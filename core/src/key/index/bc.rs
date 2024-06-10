@@ -1,6 +1,6 @@
 //! Stores Doc list for each term
 use crate::idx::ft::terms::TermId;
-use crate::key::error::KeyCategory;
+use crate::key::category::Category;
 use crate::key::key_req::KeyRequirements;
 use derive::Key;
 use serde::{Deserialize, Serialize};
@@ -24,8 +24,8 @@ pub struct Bc<'a> {
 }
 
 impl KeyRequirements for Bc<'_> {
-	fn key_category(&self) -> KeyCategory {
-		KeyCategory::IndexTermDocList
+	fn key_category(&self) -> Category {
+		Category::IndexTermDocList
 	}
 }
 

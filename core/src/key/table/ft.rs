@@ -1,4 +1,4 @@
-use crate::key::error::KeyCategory;
+use crate::key::category::Category;
 use crate::key::key_req::KeyRequirements;
 /// Stores a DEFINE TABLE AS config definition
 use derive::Key;
@@ -37,8 +37,8 @@ pub fn suffix(ns: &str, db: &str, tb: &str) -> Vec<u8> {
 }
 
 impl KeyRequirements for Ft<'_> {
-	fn key_category(&self) -> KeyCategory {
-		KeyCategory::TableView
+	fn key_category(&self) -> Category {
+		Category::TableView
 	}
 }
 

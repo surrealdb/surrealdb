@@ -5,6 +5,15 @@ use derive::{Key, Store};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::ops::{Add, Sub};
+use uuid::Uuid;
+
+#[revisioned(revision = 1)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash, Store)]
+#[non_exhaustive]
+pub struct Node {
+	pub id: Uuid,
+	pub heartbeat: Timestamp,
+}
 
 // NOTE: This is not a statement, but as per layering, keeping it here till we
 // have a better structure.

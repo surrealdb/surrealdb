@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::vs;
 
-use crate::key::error::KeyCategory;
+use crate::key::category::Category;
 use crate::key::key_req::KeyRequirements;
 use std::str;
 
@@ -74,8 +74,8 @@ pub fn suffix(ns: &str, db: &str) -> Vec<u8> {
 }
 
 impl KeyRequirements for Cf<'_> {
-	fn key_category(&self) -> KeyCategory {
-		KeyCategory::ChangeFeed
+	fn key_category(&self) -> Category {
+		Category::ChangeFeed
 	}
 }
 

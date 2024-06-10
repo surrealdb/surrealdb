@@ -1,6 +1,6 @@
 //! Stores BTree nodes for postings
 use crate::idx::trees::store::NodeId;
-use crate::key::error::KeyCategory;
+use crate::key::category::Category;
 use crate::key::key_req::KeyRequirements;
 use derive::Key;
 use serde::{Deserialize, Serialize};
@@ -24,8 +24,8 @@ pub struct Bp<'a> {
 }
 
 impl KeyRequirements for Bp<'_> {
-	fn key_category(&self) -> KeyCategory {
-		KeyCategory::IndexBTreeNodePostings
+	fn key_category(&self) -> Category {
+		Category::IndexBTreeNodePostings
 	}
 }
 

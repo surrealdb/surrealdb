@@ -27,6 +27,48 @@ pub struct DefineModelStatement {
 	pub if_not_exists: bool,
 }
 
+impl DefineModelStatement {
+	/// Process this type returning a computed simple Value
+	pub(crate) async fn compute(
+		&self,
+		ctx: &Context<'_>,
+		opt: &Options,
+		_doc: Option<&CursorDoc<'_>>,
+	) -> Result<Value, Error> {
+		// Allowed to run?
+		opt.is_allowed(Action::Edit, ResourceKind::Model, &Base::Db)?;
+		// Fetch the transaction
+		let txn = ctx.tx();
+		// Check if the definition exists
+		if txn.get_db_model(opt.ns()?, opt.db()?, &self.name, &self.version).await.is_ok() {
+			if self.if_not_exists {
+				return Ok(Value::None);
+			} else {
+				return Err(Error::MlAlreadyExists {
+					value: self.name.to_string(),
+				});
+			}
+		}
+		// Process the statement
+		let key = crate::key::database::ml::new(opt.ns()?, opt.db()?, &self.name, &self.version);
+		txn.get_or_add_ns(opt.ns()?, opt.strict).await?;
+		txn.get_or_add_db(opt.ns()?, opt.db()?, opt.strict).await?;
+		txn.set(
+			key,
+			DefineModelStatement {
+				// Don't persist the `IF NOT EXISTS` clause to schema
+				if_not_exists: false,
+				..self.clone()
+			},
+		)
+		.await?;
+		// Clear the cache
+		txn.clear();
+		// Ok all good
+		Ok(Value::None)
+	}
+}
+
 impl fmt::Display for DefineModelStatement {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		write!(f, "DEFINE MODEL")?;
@@ -45,50 +87,6 @@ impl fmt::Display for DefineModelStatement {
 		};
 		write!(f, "PERMISSIONS {}", self.permissions)?;
 		Ok(())
-	}
-}
-
-impl DefineModelStatement {
-	/// Process this type returning a computed simple Value
-	pub(crate) async fn compute(
-		&self,
-		ctx: &Context<'_>,
-		opt: &Options,
-		_doc: Option<&CursorDoc<'_>>,
-	) -> Result<Value, Error> {
-		// Allowed to run?
-		opt.is_allowed(Action::Edit, ResourceKind::Model, &Base::Db)?;
-		// Claim transaction
-		let mut run = ctx.tx_lock().await;
-		// Clear the cache
-		run.clear_cache();
-		// Check if model already exists
-		if run.get_db_model(opt.ns()?, opt.db()?, &self.name, &self.version).await.is_ok() {
-			if self.if_not_exists {
-				return Ok(Value::None);
-			} else {
-				return Err(Error::MlAlreadyExists {
-					value: self.name.to_string(),
-				});
-			}
-		}
-		// Process the statement
-		let key = crate::key::database::ml::new(opt.ns()?, opt.db()?, &self.name, &self.version);
-		run.add_ns(opt.ns()?, opt.strict).await?;
-		run.add_db(opt.ns()?, opt.db()?, opt.strict).await?;
-		run.set(
-			key,
-			DefineModelStatement {
-				// Don't persist the "IF NOT EXISTS" clause to schema
-				if_not_exists: false,
-				..self.clone()
-			},
-		)
-		.await?;
-		// Store the model file
-		// TODO
-		// Ok all good
-		Ok(Value::None)
 	}
 }
 

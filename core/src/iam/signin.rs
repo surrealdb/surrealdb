@@ -24,7 +24,6 @@ pub async fn signin(
 	let ns = vars.get("NS").or_else(|| vars.get("ns"));
 	let db = vars.get("DB").or_else(|| vars.get("db"));
 	let ac = vars.get("AC").or_else(|| vars.get("ac"));
-
 	// Check if the parameters exist
 	match (ns, db, ac) {
 		// DB signin with access method
@@ -106,7 +105,7 @@ pub async fn db_access(
 	vars: Object,
 ) -> Result<Option<String>, Error> {
 	// Create a new readonly transaction
-	let mut tx = kvs.transaction(Read, Optimistic).await?;
+	let tx = kvs.transaction(Read, Optimistic).await?;
 	// Fetch the specified access method from storage
 	let access = tx.get_db_access(&ns, &db, &ac).await;
 	// Ensure that the transaction is cancelled
@@ -118,7 +117,7 @@ pub async fn db_access(
 			// All access method types are supported except for JWT
 			// The JWT access method is the one that is internal to SurrealDB
 			// The equivalent of signing in with JWT is to authenticate it
-			match av.kind {
+			match av.kind.clone() {
 				AccessType::Record(at) => {
 					// Check if the record access method supports issuing tokens
 					let iss = match at.jwt.issue {

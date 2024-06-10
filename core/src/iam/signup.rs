@@ -47,7 +47,7 @@ pub async fn db_access(
 	vars: Object,
 ) -> Result<Option<String>, Error> {
 	// Create a new readonly transaction
-	let mut tx = kvs.transaction(Read, Optimistic).await?;
+	let tx = kvs.transaction(Read, Optimistic).await?;
 	// Fetch the specified access method from storage
 	let access = tx.get_db_access(&ns, &db, &ac).await;
 	// Ensure that the transaction is cancelled
@@ -57,7 +57,7 @@ pub async fn db_access(
 		Ok(av) => {
 			// Check the access method type
 			// Currently, only the record access method supports signup
-			match av.kind {
+			match av.kind.clone() {
 				AccessType::Record(at) => {
 					// Check if the record access method supports issuing tokens
 					let iss = match at.jwt.issue {

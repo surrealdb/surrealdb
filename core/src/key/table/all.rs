@@ -1,5 +1,5 @@
 //! Stores the key prefix for all keys under a table
-use crate::key::error::KeyCategory;
+use crate::key::category::Category;
 use crate::key::key_req::KeyRequirements;
 use derive::Key;
 use serde::{Deserialize, Serialize};
@@ -21,8 +21,8 @@ pub fn new<'a>(ns: &'a str, db: &'a str, tb: &'a str) -> Table<'a> {
 }
 
 impl KeyRequirements for Table<'_> {
-	fn key_category(&self) -> KeyCategory {
-		KeyCategory::TableRoot
+	fn key_category(&self) -> Category {
+		Category::TableRoot
 	}
 }
 

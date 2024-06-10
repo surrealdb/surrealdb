@@ -3,12 +3,9 @@
 mod cnf;
 
 use crate::err::Error;
-use crate::key::error::KeyCategory;
 use crate::kvs::Check;
 use crate::kvs::Key;
 use crate::kvs::Val;
-use crate::vs::{try_to_u64_be, u64_to_versionstamp, Versionstamp};
-use futures::lock::Mutex;
 use rocksdb::{
 	DBCompactionStyle, DBCompressionType, LogLevel, OptimisticTransactionDB,
 	OptimisticTransactionOptions, Options, ReadOptions, WriteOptions,
@@ -32,13 +29,13 @@ pub struct Transaction {
 	/// Should we check unhandled transactions?
 	check: Check,
 	/// The underlying datastore transaction
-	inner: Arc<Mutex<Option<rocksdb::Transaction<'static, OptimisticTransactionDB>>>>,
+	inner: Option<rocksdb::Transaction<'static, OptimisticTransactionDB>>,
 	/// The read options containing the Snapshot
 	ro: ReadOptions,
 	// The above, supposedly 'static transaction
 	// actually points here, so we need to ensure
 	// the memory is kept alive. This pointer must
-	// be declared last, so that it is dropped last
+	// be declared last, so that it is dropped last.
 	_db: Pin<Arc<OptimisticTransactionDB>>,
 }
 
@@ -154,24 +151,26 @@ impl Datastore {
 			done: false,
 			write,
 			check,
-			inner: Arc::new(Mutex::new(Some(inner))),
+			inner: Some(inner),
 			ro,
 			_db: self.db.clone(),
 		})
 	}
 }
 
-impl Transaction {
-	/// Behaviour if unclosed
-	pub(crate) fn check_level(&mut self, check: Check) {
-		self.check = check;
-	}
+impl super::api::Transaction for Transaction {
 	/// Check if closed
-	pub(crate) fn closed(&self) -> bool {
+	fn closed(&self) -> bool {
 		self.done
 	}
+
+	/// Check if writeable
+	fn writeable(&self) -> bool {
+		self.write
+	}
+
 	/// Cancel a transaction
-	pub(crate) async fn cancel(&mut self) -> Result<(), Error> {
+	async fn cancel(&mut self) -> Result<(), Error> {
 		// Check to see if transaction is closed
 		if self.done {
 			return Err(Error::TxFinished);
@@ -179,15 +178,16 @@ impl Transaction {
 		// Mark this transaction as done
 		self.done = true;
 		// Cancel this transaction
-		match self.inner.lock().await.take() {
+		match self.inner.as_ref() {
 			Some(inner) => inner.rollback()?,
 			None => unreachable!(),
 		};
 		// Continue
 		Ok(())
 	}
+
 	/// Commit a transaction
-	pub(crate) async fn commit(&mut self) -> Result<(), Error> {
+	async fn commit(&mut self) -> Result<(), Error> {
 		// Check to see if transaction is closed
 		if self.done {
 			return Err(Error::TxFinished);
@@ -198,16 +198,17 @@ impl Transaction {
 		}
 		// Mark this transaction as done
 		self.done = true;
-		// Cancel this transaction
-		match self.inner.lock().await.take() {
+		// Commit this transaction
+		match self.inner.take() {
 			Some(inner) => inner.commit()?,
 			None => unreachable!(),
 		};
 		// Continue
 		Ok(())
 	}
+
 	/// Check if a key exists
-	pub(crate) async fn exi<K>(&mut self, key: K) -> Result<bool, Error>
+	async fn exists<K>(&mut self, key: K) -> Result<bool, Error>
 	where
 		K: Into<Key>,
 	{
@@ -216,13 +217,13 @@ impl Transaction {
 			return Err(Error::TxFinished);
 		}
 		// Check the key
-		let res =
-			self.inner.lock().await.as_ref().unwrap().get_opt(key.into(), &self.ro)?.is_some();
+		let res = self.inner.as_ref().unwrap().get_opt(key.into(), &self.ro)?.is_some();
 		// Return result
 		Ok(res)
 	}
+
 	/// Fetch a key from the database
-	pub(crate) async fn get<K>(&mut self, key: K) -> Result<Option<Val>, Error>
+	async fn get<K>(&mut self, key: K) -> Result<Option<Val>, Error>
 	where
 		K: Into<Key>,
 	{
@@ -231,74 +232,13 @@ impl Transaction {
 			return Err(Error::TxFinished);
 		}
 		// Get the key
-		let res = self.inner.lock().await.as_ref().unwrap().get_opt(key.into(), &self.ro)?;
+		let res = self.inner.as_ref().unwrap().get_opt(key.into(), &self.ro)?;
 		// Return result
 		Ok(res)
 	}
-	/// Obtain a new change timestamp for a key
-	/// which is replaced with the current timestamp when the transaction is committed.
-	/// NOTE: This should be called when composing the change feed entries for this transaction,
-	/// which should be done immediately before the transaction commit.
-	/// That is to keep other transactions commit delay(pessimistic) or conflict(optimistic) as less as possible.
-	#[allow(unused)]
-	pub(crate) async fn get_timestamp<K>(&mut self, key: K) -> Result<Versionstamp, Error>
-	where
-		K: Into<Key>,
-	{
-		// Check to see if transaction is closed
-		if self.done {
-			return Err(Error::TxFinished);
-		}
-		// Write the timestamp to the "last-write-timestamp" key
-		// to ensure that no other transactions can commit with older timestamps.
-		let k: Key = key.into();
-		let prev = self.inner.lock().await.as_ref().unwrap().get_opt(k.clone(), &self.ro)?;
-		let ver = match prev {
-			Some(prev) => {
-				let slice = prev.as_slice();
-				let res: Result<[u8; 10], Error> = match slice.try_into() {
-					Ok(ba) => Ok(ba),
-					Err(e) => Err(Error::Ds(e.to_string())),
-				};
-				let array = res?;
-				let prev = try_to_u64_be(array)?;
-				prev + 1
-			}
-			None => 1,
-		};
 
-		let verbytes = u64_to_versionstamp(ver);
-
-		self.inner.lock().await.as_ref().unwrap().put(k, verbytes)?;
-		// Return the uint64 representation of the timestamp as the result
-		Ok(verbytes)
-	}
-	/// Obtain a new key that is suffixed with the change timestamp
-	pub(crate) async fn get_versionstamped_key<K>(
-		&mut self,
-		ts_key: K,
-		prefix: K,
-		suffix: K,
-	) -> Result<Vec<u8>, Error>
-	where
-		K: Into<Key>,
-	{
-		// Check to see if transaction is closed
-		if self.done {
-			return Err(Error::TxFinished);
-		}
-		// Check to see if transaction is writable
-		if !self.write {
-			return Err(Error::TxReadonly);
-		}
-		let ts = self.get_timestamp(ts_key).await?;
-		let mut k: Vec<u8> = prefix.into();
-		k.append(&mut ts.to_vec());
-		k.append(&mut suffix.into());
-		Ok(k)
-	}
 	/// Insert or update a key in the database
-	pub(crate) async fn set<K, V>(&mut self, key: K, val: V) -> Result<(), Error>
+	async fn set<K, V>(&mut self, key: K, val: V) -> Result<(), Error>
 	where
 		K: Into<Key>,
 		V: Into<Val>,
@@ -312,17 +252,13 @@ impl Transaction {
 			return Err(Error::TxReadonly);
 		}
 		// Set the key
-		self.inner.lock().await.as_ref().unwrap().put(key.into(), val.into())?;
+		self.inner.as_ref().unwrap().put(key.into(), val.into())?;
 		// Return result
 		Ok(())
 	}
+
 	/// Insert a key if it doesn't exist in the database
-	pub(crate) async fn put<K, V>(
-		&mut self,
-		category: KeyCategory,
-		key: K,
-		val: V,
-	) -> Result<(), Error>
+	async fn put<K, V>(&mut self, key: K, val: V) -> Result<(), Error>
 	where
 		K: Into<Key>,
 		V: Into<Val>,
@@ -336,21 +272,21 @@ impl Transaction {
 			return Err(Error::TxReadonly);
 		}
 		// Get the transaction
-		let inner = self.inner.lock().await;
-		let inner = inner.as_ref().unwrap();
+		let inner = self.inner.as_ref().unwrap();
 		// Get the arguments
 		let key = key.into();
 		let val = val.into();
 		// Set the key if empty
 		match inner.get_opt(&key, &self.ro)? {
 			None => inner.put(key, val)?,
-			_ => return Err(Error::TxKeyAlreadyExistsCategory(category)),
+			_ => return Err(Error::TxKeyAlreadyExists),
 		};
 		// Return result
 		Ok(())
 	}
-	/// Insert a key if it doesn't exist in the database
-	pub(crate) async fn putc<K, V>(&mut self, key: K, val: V, chk: Option<V>) -> Result<(), Error>
+
+	/// Insert a key if the current value matches a condition
+	async fn putc<K, V>(&mut self, key: K, val: V, chk: Option<V>) -> Result<(), Error>
 	where
 		K: Into<Key>,
 		V: Into<Val>,
@@ -364,8 +300,7 @@ impl Transaction {
 			return Err(Error::TxReadonly);
 		}
 		// Get the transaction
-		let inner = self.inner.lock().await;
-		let inner = inner.as_ref().unwrap();
+		let inner = self.inner.as_ref().unwrap();
 		// Get the arguments
 		let key = key.into();
 		let val = val.into();
@@ -379,8 +314,9 @@ impl Transaction {
 		// Return result
 		Ok(())
 	}
+
 	/// Delete a key
-	pub(crate) async fn del<K>(&mut self, key: K) -> Result<(), Error>
+	async fn del<K>(&mut self, key: K) -> Result<(), Error>
 	where
 		K: Into<Key>,
 	{
@@ -393,12 +329,13 @@ impl Transaction {
 			return Err(Error::TxReadonly);
 		}
 		// Remove the key
-		self.inner.lock().await.as_ref().unwrap().delete(key.into())?;
+		self.inner.as_ref().unwrap().delete(key.into())?;
 		// Return result
 		Ok(())
 	}
-	/// Delete a key
-	pub(crate) async fn delc<K, V>(&mut self, key: K, chk: Option<V>) -> Result<(), Error>
+
+	/// Delete a key if the current value matches a condition
+	async fn delc<K, V>(&mut self, key: K, chk: Option<V>) -> Result<(), Error>
 	where
 		K: Into<Key>,
 		V: Into<Val>,
@@ -412,8 +349,7 @@ impl Transaction {
 			return Err(Error::TxReadonly);
 		}
 		// Get the transaction
-		let inner = self.inner.lock().await;
-		let inner = inner.as_ref().unwrap();
+		let inner = self.inner.as_ref().unwrap();
 		// Get the arguments
 		let key = key.into();
 		let chk = chk.map(Into::into);
@@ -426,12 +362,9 @@ impl Transaction {
 		// Return result
 		Ok(())
 	}
+
 	/// Retrieve a range of keys from the databases
-	pub(crate) async fn scan<K>(
-		&mut self,
-		rng: Range<K>,
-		limit: u32,
-	) -> Result<Vec<(Key, Val)>, Error>
+	async fn keys<K>(&mut self, rng: Range<K>, limit: u32) -> Result<Vec<Key>, Error>
 	where
 		K: Into<Key>,
 	{
@@ -440,8 +373,57 @@ impl Transaction {
 			return Err(Error::TxFinished);
 		}
 		// Get the transaction
-		let inner = self.inner.lock().await;
-		let inner = inner.as_ref().unwrap();
+		let inner = self.inner.as_ref().unwrap();
+		// Convert the range to bytes
+		let rng: Range<Key> = Range {
+			start: rng.start.into(),
+			end: rng.end.into(),
+		};
+		// Create result set
+		let mut res = vec![];
+		// Set the key range
+		let beg = rng.start.as_slice();
+		let end = rng.end.as_slice();
+		// Set the ReadOptions with the snapshot
+		let mut ro = ReadOptions::default();
+		ro.set_snapshot(&inner.snapshot());
+		// Create the iterator
+		let mut iter = inner.raw_iterator_opt(ro);
+		// Seek to the start key
+		iter.seek(&rng.start);
+		// Scan the keys in the iterator
+		while iter.valid() {
+			// Check the scan limit
+			if res.len() < limit as usize {
+				// Get the key and value
+				let k = iter.key();
+				// Check the key and value
+				if let Some(k) = k {
+					if k >= beg && k < end {
+						res.push(k.to_vec());
+						iter.next();
+						continue;
+					}
+				}
+			}
+			// Exit
+			break;
+		}
+		// Return result
+		Ok(res)
+	}
+
+	/// Retrieve a range of keys from the databases
+	async fn scan<K>(&mut self, rng: Range<K>, limit: u32) -> Result<Vec<(Key, Val)>, Error>
+	where
+		K: Into<Key>,
+	{
+		// Check to see if transaction is closed
+		if self.done {
+			return Err(Error::TxFinished);
+		}
+		// Get the transaction
+		let inner = self.inner.as_ref().unwrap();
 		// Convert the range to bytes
 		let rng: Range<Key> = Range {
 			start: rng.start.into(),

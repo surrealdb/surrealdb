@@ -23,7 +23,7 @@ pub struct DocIds {
 impl DocIds {
 	pub async fn new(
 		ixs: &IndexStores,
-		tx: &mut Transaction,
+		tx: &Transaction,
 		tt: TransactionType,
 		ikb: IndexKeyBase,
 		default_btree_order: u32,
@@ -73,7 +73,7 @@ impl DocIds {
 
 	pub(crate) async fn get_doc_id(
 		&self,
-		tx: &mut Transaction,
+		tx: &Transaction,
 		doc_key: Key,
 	) -> Result<Option<DocId>, Error> {
 		self.btree.search(tx, &self.store, &doc_key).await
@@ -83,7 +83,7 @@ impl DocIds {
 	/// If the doc_id does not exists, a new one is created, and associated to the given key.
 	pub(in crate::idx) async fn resolve_doc_id(
 		&mut self,
-		tx: &mut Transaction,
+		tx: &Transaction,
 		doc_key: Key,
 	) -> Result<Resolved, Error> {
 		{
@@ -99,7 +99,7 @@ impl DocIds {
 
 	pub(in crate::idx) async fn remove_doc(
 		&mut self,
-		tx: &mut Transaction,
+		tx: &Transaction,
 		doc_key: Key,
 	) -> Result<Option<DocId>, Error> {
 		if let Some(doc_id) = self.btree.delete(tx, &mut self.store, doc_key).await? {
@@ -119,7 +119,7 @@ impl DocIds {
 
 	pub(in crate::idx) async fn get_doc_key(
 		&self,
-		tx: &mut Transaction,
+		tx: &Transaction,
 		doc_id: DocId,
 	) -> Result<Option<Key>, Error> {
 		let doc_id_key = self.index_key_base.new_bi_key(doc_id);
@@ -130,14 +130,11 @@ impl DocIds {
 		}
 	}
 
-	pub(in crate::idx) async fn statistics(
-		&self,
-		tx: &mut Transaction,
-	) -> Result<BStatistics, Error> {
+	pub(in crate::idx) async fn statistics(&self, tx: &Transaction) -> Result<BStatistics, Error> {
 		self.btree.statistics(tx, &self.store).await
 	}
 
-	pub(in crate::idx) async fn finish(&mut self, tx: &mut Transaction) -> Result<(), Error> {
+	pub(in crate::idx) async fn finish(&mut self, tx: &Transaction) -> Result<(), Error> {
 		if let Some(new_cache) = self.store.finish(tx).await? {
 			let btree = self.btree.inc_generation().clone();
 			let state = State {

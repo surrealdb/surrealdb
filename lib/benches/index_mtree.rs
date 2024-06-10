@@ -54,7 +54,7 @@ fn bench_index_mtree_dim_2048_full_cache(c: &mut Criterion) {
 
 async fn mtree_index(
 	ds: &Datastore,
-	tx: &mut Transaction,
+	tx: &Transaction,
 	dimension: usize,
 	cache_size: usize,
 	tt: TransactionType,

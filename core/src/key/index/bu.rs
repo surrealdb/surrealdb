@@ -1,6 +1,6 @@
 //! Stores terms for term_ids
 use crate::idx::ft::terms::TermId;
-use crate::key::error::KeyCategory;
+use crate::key::category::Category;
 use crate::key::key_req::KeyRequirements;
 use derive::Key;
 use serde::{Deserialize, Serialize};
@@ -24,8 +24,8 @@ pub struct Bu<'a> {
 }
 
 impl KeyRequirements for Bu<'_> {
-	fn key_category(&self) -> KeyCategory {
-		KeyCategory::IndexTerms
+	fn key_category(&self) -> Category {
+		Category::IndexTerms
 	}
 }
 

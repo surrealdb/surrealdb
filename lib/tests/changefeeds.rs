@@ -180,7 +180,6 @@ async fn database_change_feeds() -> Result<(), Error> {
 	current_time += 1;
 	dbs.tick_at(current_time).await?;
 	let mut tx = dbs.transaction(Write, Optimistic).await?;
-	tx.print_all().await;
 	tx.cancel().await?;
 
 	let res = &mut dbs.execute(sql, &ses, None).await?;

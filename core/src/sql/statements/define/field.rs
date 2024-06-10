@@ -45,13 +45,12 @@ impl DefineFieldStatement {
 	) -> Result<Value, Error> {
 		// Allowed to run?
 		opt.is_allowed(Action::Edit, ResourceKind::Field, &Base::Db)?;
-		// Claim transaction
-		let mut run = ctx.tx_lock().await;
-		// Clear the cache
-		run.clear_cache();
-		// Check if field already exists
+		// Fetch the transaction
+		let txn = ctx.tx();
+		// Get the name of the field
 		let fd = self.name.to_string();
-		if run.get_tb_field(opt.ns()?, opt.db()?, &self.what, &fd).await.is_ok() {
+		// Check if the definition exists
+		if txn.get_tb_field(opt.ns()?, opt.db()?, &self.what, &fd).await.is_ok() {
 			if self.if_not_exists {
 				return Ok(Value::None);
 			} else {
@@ -61,14 +60,14 @@ impl DefineFieldStatement {
 			}
 		}
 		// Process the statement
-		run.add_ns(opt.ns()?, opt.strict).await?;
-		run.add_db(opt.ns()?, opt.db()?, opt.strict).await?;
-
-		let tb = run.add_tb(opt.ns()?, opt.db()?, &self.what, opt.strict).await?;
 		let key = crate::key::table::fd::new(opt.ns()?, opt.db()?, &self.what, &fd);
-		run.set(
+		txn.get_or_add_ns(opt.ns()?, opt.strict).await?;
+		txn.get_or_add_db(opt.ns()?, opt.db()?, opt.strict).await?;
+		txn.get_or_add_tb(opt.ns()?, opt.db()?, &self.what, opt.strict).await?;
+		txn.set(
 			key,
 			DefineFieldStatement {
+				// Don't persist the `IF NOT EXISTS` clause to schema
 				if_not_exists: false,
 				..self.clone()
 			},
@@ -76,7 +75,7 @@ impl DefineFieldStatement {
 		.await?;
 
 		// find existing field definitions.
-		let fields = run.all_tb_fields(opt.ns()?, opt.db()?, &self.what).await.ok();
+		let fields = txn.all_tb_fields(opt.ns()?, opt.db()?, &self.what).await.ok();
 
 		// Process possible recursive_definitions.
 		if let Some(mut cur_kind) = self.kind.as_ref().and_then(|x| x.inner_kind()) {
@@ -85,10 +84,9 @@ impl DefineFieldStatement {
 				let new_kind = cur_kind.inner_kind();
 				name.0.push(Part::All);
 
+				// Get the name of the field
 				let fd = name.to_string();
 				let key = crate::key::table::fd::new(opt.ns()?, opt.db()?, &self.what, &fd);
-				run.add_ns(opt.ns()?, opt.strict).await?;
-				run.add_db(opt.ns()?, opt.db()?, opt.strict).await?;
 
 				// merge the new definition with possible existing definitions.
 				let statement = if let Some(existing) =
@@ -109,7 +107,7 @@ impl DefineFieldStatement {
 					}
 				};
 
-				run.set(key, statement).await?;
+				txn.set(key, statement).await?;
 
 				if let Some(new_kind) = new_kind {
 					cur_kind = new_kind;
@@ -118,6 +116,8 @@ impl DefineFieldStatement {
 				}
 			}
 		}
+
+		let tb = txn.get_tb(opt.ns()?, opt.db()?, &self.what).await?;
 
 		let new_tb = match (fd.as_str(), tb.kind.clone(), self.kind.clone()) {
 			("in", TableType::Relation(rel), Some(dk)) => {
@@ -156,14 +156,10 @@ impl DefineFieldStatement {
 		};
 		if let Some(tb) = new_tb {
 			let key = crate::key::database::tb::new(opt.ns()?, opt.db()?, &self.what);
-			run.set(key, &tb).await?;
-			let key = crate::key::table::ft::prefix(opt.ns()?, opt.db()?, &self.what);
-			run.clr(key).await?;
+			txn.set(key, &tb).await?;
 		}
-
 		// Clear the cache
-		let key = crate::key::table::fd::prefix(opt.ns()?, opt.db()?, &self.what);
-		run.clr(key).await?;
+		txn.clear();
 		// Ok all good
 		Ok(Value::None)
 	}

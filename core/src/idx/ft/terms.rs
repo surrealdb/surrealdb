@@ -24,7 +24,7 @@ pub(in crate::idx) struct Terms {
 impl Terms {
 	pub(super) async fn new(
 		ixs: &IndexStores,
-		tx: &mut Transaction,
+		tx: &Transaction,
 		index_key_base: IndexKeyBase,
 		default_btree_order: u32,
 		tt: TransactionType,
@@ -74,7 +74,7 @@ impl Terms {
 
 	pub(super) async fn resolve_term_id(
 		&mut self,
-		tx: &mut Transaction,
+		tx: &Transaction,
 		term: &str,
 	) -> Result<TermId, Error> {
 		let term_key = term.into();
@@ -91,7 +91,7 @@ impl Terms {
 
 	pub(super) async fn get_term_id(
 		&self,
-		tx: &mut Transaction,
+		tx: &Transaction,
 		term: &str,
 	) -> Result<Option<TermId>, Error> {
 		self.btree.search(tx, &self.store, &term.into()).await
@@ -99,7 +99,7 @@ impl Terms {
 
 	pub(super) async fn remove_term_id(
 		&mut self,
-		tx: &mut Transaction,
+		tx: &Transaction,
 		term_id: TermId,
 	) -> Result<(), Error> {
 		let term_id_key = self.index_key_base.new_bu_key(term_id);
@@ -117,11 +117,11 @@ impl Terms {
 		Ok(())
 	}
 
-	pub(super) async fn statistics(&self, tx: &mut Transaction) -> Result<BStatistics, Error> {
+	pub(super) async fn statistics(&self, tx: &Transaction) -> Result<BStatistics, Error> {
 		self.btree.statistics(tx, &self.store).await
 	}
 
-	pub(super) async fn finish(&mut self, tx: &mut Transaction) -> Result<(), Error> {
+	pub(super) async fn finish(&mut self, tx: &Transaction) -> Result<(), Error> {
 		if let Some(new_cache) = self.store.finish(tx).await? {
 			let btree = self.btree.inc_generation().clone();
 			let state = State {

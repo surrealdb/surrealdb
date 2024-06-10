@@ -31,15 +31,3 @@ pub(crate) async fn init(node_id: Uuid, clock: Arc<SizedClock>) -> Result<TestCo
 		context_id: node_id.to_string(), // The context does not always have to be a uuid
 	})
 }
-
-/// Scan the entire storage layer displaying keys
-/// Useful to debug scans ;)
-async fn _debug_scan(tx: &mut Transaction, message: &str) {
-	let r = tx.scan_paged(ScanPage::from(vec![0]..vec![u8::MAX]), u32::MAX).await.unwrap();
-	let r = r.values;
-	println!("START OF RANGE SCAN - {}", message);
-	for (k, _v) in r.iter() {
-		println!("{}", crate::key::debug::sprint_key(k));
-	}
-	println!("END OF RANGE SCAN - {}", message);
-}

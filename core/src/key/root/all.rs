@@ -1,5 +1,5 @@
 //! Stores the key prefix for all keys
-use crate::key::error::KeyCategory;
+use crate::key::category::Category;
 use crate::key::key_req::KeyRequirements;
 use derive::Key;
 use serde::{Deserialize, Serialize};
@@ -21,8 +21,8 @@ impl Default for Kv {
 }
 
 impl KeyRequirements for Kv {
-	fn key_category(&self) -> KeyCategory {
-		KeyCategory::Root
+	fn key_category(&self) -> Category {
+		Category::Root
 	}
 }
 

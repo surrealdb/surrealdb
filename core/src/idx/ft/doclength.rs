@@ -18,7 +18,7 @@ pub(super) struct DocLengths {
 impl DocLengths {
 	pub(super) async fn new(
 		ixs: &IndexStores,
-		tx: &mut Transaction,
+		tx: &Transaction,
 		ikb: IndexKeyBase,
 		default_btree_order: u32,
 		tt: TransactionType,
@@ -48,7 +48,7 @@ impl DocLengths {
 
 	pub(super) async fn get_doc_length(
 		&self,
-		tx: &mut Transaction,
+		tx: &Transaction,
 		doc_id: DocId,
 	) -> Result<Option<DocLength>, Error> {
 		self.btree.search(tx, &self.store, &doc_id.to_be_bytes().to_vec()).await
@@ -56,7 +56,7 @@ impl DocLengths {
 
 	pub(super) async fn get_doc_length_mut(
 		&mut self,
-		tx: &mut Transaction,
+		tx: &Transaction,
 		doc_id: DocId,
 	) -> Result<Option<DocLength>, Error> {
 		self.btree.search_mut(tx, &mut self.store, &doc_id.to_be_bytes().to_vec()).await
@@ -64,7 +64,7 @@ impl DocLengths {
 
 	pub(super) async fn set_doc_length(
 		&mut self,
-		tx: &mut Transaction,
+		tx: &Transaction,
 		doc_id: DocId,
 		doc_length: DocLength,
 	) -> Result<(), Error> {
@@ -74,17 +74,17 @@ impl DocLengths {
 
 	pub(super) async fn remove_doc_length(
 		&mut self,
-		tx: &mut Transaction,
+		tx: &Transaction,
 		doc_id: DocId,
 	) -> Result<Option<Payload>, Error> {
 		self.btree.delete(tx, &mut self.store, doc_id.to_be_bytes().to_vec()).await
 	}
 
-	pub(super) async fn statistics(&self, tx: &mut Transaction) -> Result<BStatistics, Error> {
+	pub(super) async fn statistics(&self, tx: &Transaction) -> Result<BStatistics, Error> {
 		self.btree.statistics(tx, &self.store).await
 	}
 
-	pub(super) async fn finish(&mut self, tx: &mut Transaction) -> Result<(), Error> {
+	pub(super) async fn finish(&mut self, tx: &Transaction) -> Result<(), Error> {
 		if let Some(new_cache) = self.store.finish(tx).await? {
 			let state = self.btree.inc_generation();
 			tx.set(self.state_key.clone(), state.try_to_val()?).await?;

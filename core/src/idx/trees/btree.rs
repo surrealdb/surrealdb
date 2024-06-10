@@ -287,7 +287,7 @@ where
 
 	pub async fn search(
 		&self,
-		tx: &mut Transaction,
+		tx: &Transaction,
 		store: &BTreeStore<BK>,
 		searched_key: &Key,
 	) -> Result<Option<Payload>, Error> {
@@ -307,7 +307,7 @@ where
 
 	pub async fn search_mut(
 		&self,
-		tx: &mut Transaction,
+		tx: &Transaction,
 		store: &mut BTreeStore<BK>,
 		searched_key: &Key,
 	) -> Result<Option<Payload>, Error> {
@@ -329,7 +329,7 @@ where
 
 	pub async fn insert(
 		&mut self,
-		tx: &mut Transaction,
+		tx: &Transaction,
 		store: &mut BTreeStore<BK>,
 		key: Key,
 		payload: Payload,
@@ -366,7 +366,7 @@ where
 
 	async fn insert_non_full(
 		&mut self,
-		tx: &mut Transaction,
+		tx: &Transaction,
 		store: &mut BTreeStore<BK>,
 		node_id: NodeId,
 		key: Key,
@@ -481,7 +481,7 @@ where
 
 	pub(in crate::idx) async fn delete(
 		&mut self,
-		tx: &mut Transaction,
+		tx: &Transaction,
 		store: &mut BTreeStore<BK>,
 		key_to_delete: Key,
 	) -> Result<Option<Payload>, Error> {
@@ -592,7 +592,7 @@ where
 
 	async fn deleted_from_internal(
 		&mut self,
-		tx: &mut Transaction,
+		tx: &Transaction,
 		store: &mut BTreeStore<BK>,
 		keys: &mut BK,
 		children: &mut Vec<NodeId>,
@@ -669,7 +669,7 @@ where
 
 	async fn find_highest(
 		&mut self,
-		tx: &mut Transaction,
+		tx: &Transaction,
 		store: &mut BTreeStore<BK>,
 		node: StoredNode<BTreeNode<BK>>,
 	) -> Result<(Key, Payload), Error> {
@@ -697,7 +697,7 @@ where
 
 	async fn find_lowest(
 		&mut self,
-		tx: &mut Transaction,
+		tx: &Transaction,
 		store: &mut BTreeStore<BK>,
 		node: StoredNode<BTreeNode<BK>>,
 	) -> Result<(Key, Payload), Error> {
@@ -725,7 +725,7 @@ where
 
 	async fn deleted_traversal(
 		&mut self,
-		tx: &mut Transaction,
+		tx: &Transaction,
 		store: &mut BTreeStore<BK>,
 		keys: &mut BK,
 		children: &mut Vec<NodeId>,
@@ -949,7 +949,7 @@ where
 
 	pub(in crate::idx) async fn statistics(
 		&self,
-		tx: &mut Transaction,
+		tx: &Transaction,
 		store: &BTreeStore<BK>,
 	) -> Result<BStatistics, Error> {
 		let mut stats = BStatistics::default();
@@ -998,7 +998,7 @@ mod tests {
 	};
 	use crate::idx::trees::store::{NodeId, TreeNode, TreeNodeProvider};
 	use crate::idx::VersionedSerdeState;
-	use crate::kvs::{Datastore, Key, LockType::*, ScanPage, Transaction, TransactionType};
+	use crate::kvs::{Datastore, Key, LockType::*, Transaction, TransactionType};
 	use rand::prelude::SliceRandom;
 	use rand::thread_rng;
 	use std::cmp::Ordering;
@@ -1432,10 +1432,7 @@ mod tests {
 		assert_eq!(s.max_depth, 3);
 		assert_eq!(s.nodes_count, 10);
 		// There should be one record per node
-		assert_eq!(
-			10,
-			tx.scan_paged(ScanPage::from(vec![]..vec![0xf]), 100).await.unwrap().values.len()
-		);
+		assert_eq!(10, tx.scan(vec![]..vec![0xf], 100).await.unwrap().len());
 
 		let nodes_count = t
 			.inspect_nodes(&mut tx, &mut st, |count, depth, node_id, node| match count {
@@ -1574,10 +1571,7 @@ mod tests {
 		assert_eq!(s.max_depth, 2);
 		assert_eq!(s.nodes_count, 7);
 		// There should be one record per node
-		assert_eq!(
-			7,
-			tx.scan_paged(ScanPage::from(vec![]..vec![0xf]), 100).await.unwrap().values.len()
-		);
+		assert_eq!(7, tx.scan(vec![]..vec![0xf], 100).await.unwrap().len());
 
 		let nodes_count = t
 			.inspect_nodes(&mut tx, &mut st, |count, depth, node_id, node| match count {
@@ -1702,7 +1696,7 @@ mod tests {
 		assert_eq!(s.max_depth, 0);
 		assert_eq!(s.nodes_count, 0);
 		// There should not be any record in the database
-		assert_eq!(0, tx.scan_paged(ScanPage::from(vec![]..vec![0xf]), 100).await?.values.len());
+		assert_eq!(0, tx.scan(vec![]..vec![0xf], 100).await.unwrap().len());
 		tx.cancel().await?;
 		Ok(())
 	}
@@ -1867,7 +1861,7 @@ mod tests {
 
 	async fn check_btree_properties<BK>(
 		t: &BTree<BK>,
-		tx: &mut Transaction,
+		tx: &Transaction,
 		st: &mut BTreeStore<BK>,
 	) -> Result<(usize, BTreeMap<String, Payload>), Error>
 	where
@@ -1919,7 +1913,7 @@ mod tests {
 		}
 	}
 
-	async fn print_tree<BK>(tx: &mut Transaction, st: &mut BTreeStore<BK>, t: &BTree<BK>)
+	async fn print_tree<BK>(tx: &Transaction, st: &mut BTreeStore<BK>, t: &BTree<BK>)
 	where
 		BK: BKeys + Debug + Clone,
 	{
@@ -1932,7 +1926,7 @@ mod tests {
 		debug!("----------------------------------");
 	}
 
-	async fn print_tree_mut<BK>(tx: &mut Transaction, st: &mut BTreeStore<BK>, t: &BTree<BK>)
+	async fn print_tree_mut<BK>(tx: &Transaction, st: &mut BTreeStore<BK>, t: &BTree<BK>)
 	where
 		BK: BKeys + Debug + Clone,
 	{
@@ -1967,7 +1961,7 @@ mod tests {
 		/// This is for debugging
 		async fn inspect_nodes<F>(
 			&self,
-			tx: &mut Transaction,
+			tx: &Transaction,
 			st: &mut BTreeStore<BK>,
 			inspect_func: F,
 		) -> Result<usize, Error>
@@ -1996,7 +1990,7 @@ mod tests {
 		/// This is for debugging
 		async fn inspect_nodes_mut<F>(
 			&self,
-			tx: &mut Transaction,
+			tx: &Transaction,
 			st: &mut BTreeStore<BK>,
 			mut inspect_func: F,
 		) -> Result<usize, Error>

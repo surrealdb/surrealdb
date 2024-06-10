@@ -1,5 +1,5 @@
 //! Stores a DEFINE ANALYZER config definition
-use crate::key::error::KeyCategory;
+use crate::key::category::Category;
 use crate::key::key_req::KeyRequirements;
 use derive::Key;
 use serde::{Deserialize, Serialize};
@@ -35,8 +35,8 @@ pub fn suffix(ns: &str, db: &str) -> Vec<u8> {
 }
 
 impl KeyRequirements for Az<'_> {
-	fn key_category(&self) -> KeyCategory {
-		KeyCategory::DatabaseAnalyzer
+	fn key_category(&self) -> Category {
+		Category::DatabaseAnalyzer
 	}
 }
 

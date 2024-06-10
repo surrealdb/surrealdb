@@ -1,66 +1,6 @@
-use crate::key::debug::sprint_key;
-use crate::key::error::KeyCategory;
+use crate::key::debug::sprint;
 use crate::kvs::lq_structs::{KillEntry, LqEntry, TrackedResult};
 use crate::sql::Strand;
-
-#[tokio::test]
-#[serial]
-async fn live_queries_sent_to_tx_are_received() {
-	let node_id = uuid::uuid!("d0f1a200-e24e-44fe-98c1-2271a5781da7");
-	let clock = Arc::new(SizedClock::Fake(FakeClock::new(Timestamp::default())));
-	let test = init(node_id, clock).await.unwrap();
-	let mut tx = test.db.transaction(Write, Optimistic).await.unwrap();
-
-	// Create live query data
-	let lq_entry = LqEntry {
-		live_id: sql::Uuid::new_v4(),
-		ns: "namespace".to_string(),
-		db: "database".to_string(),
-		stm: LiveStatement {
-			id: sql::Uuid::new_v4(),
-			node: sql::Uuid::from(node_id),
-			expr: Default::default(),
-			what: Default::default(),
-			cond: None,
-			fetch: None,
-			archived: None,
-			session: Some(Value::None),
-			auth: None,
-		},
-	};
-	tx.pre_commit_register_async_event(TrackedResult::LiveQuery(lq_entry.clone())).unwrap();
-
-	tx.commit().await.unwrap();
-
-	// Verify data
-	let live_queries = tx.consume_pending_live_queries();
-	assert_eq!(live_queries.len(), 1);
-	assert_eq!(live_queries[0], TrackedResult::LiveQuery(lq_entry));
-}
-#[tokio::test]
-#[serial]
-async fn kill_queries_sent_to_tx_are_received() {
-	let node_id = uuid::uuid!("1cae3d33-64e6-4867-bf17-d095c1b842d7");
-	let clock = Arc::new(SizedClock::Fake(FakeClock::new(Timestamp::default())));
-	let test = init(node_id, clock).await.unwrap();
-	let mut tx = test.db.transaction(Write, Optimistic).await.unwrap();
-
-	let kill_entry = KillEntry {
-		live_id: uuid::uuid!("f396c0cb-01ca-4213-a72d-b0240f6d00b2").into(),
-		ns: "some_ns".to_string(),
-		db: "some_db".to_string(),
-	};
-
-	// Create live query data
-	tx.pre_commit_register_async_event(TrackedResult::KillQuery(kill_entry.clone())).unwrap();
-
-	tx.commit().await.unwrap();
-
-	// Verify data
-	let live_queries = tx.consume_pending_live_queries();
-	assert_eq!(live_queries.len(), 1);
-	assert_eq!(live_queries[0], TrackedResult::KillQuery(kill_entry));
-}
 
 #[tokio::test]
 #[serial]
@@ -72,9 +12,7 @@ async fn delr_range_correct() {
 	// Create some data
 	let mut tx = test.db.transaction(Write, Optimistic).await.unwrap();
 	tx.putc(b"hugh\x00\x10", Value::Strand(Strand::from("0010")), None).await.unwrap();
-	tx.put(KeyCategory::ChangeFeed, b"hugh\x00\x10\x10", Value::Strand(Strand::from("001010")))
-		.await
-		.unwrap();
+	tx.put(b"hugh\x00\x10\x10", Value::Strand(Strand::from("001010"))).await.unwrap();
 	tx.putc(b"hugh\x00\x20", Value::Strand(Strand::from("0020")), None).await.unwrap();
 	tx.commit().await.unwrap();
 
@@ -137,6 +75,6 @@ async fn set_versionstamp_is_incremental() {
 		b"prefix\x00\x00\x00\x00\x00\x00\x00\x01\x00\x00suffix",
 		b"prefix\x00\x00\x00\x00\x00\x00\x00\x02\x00\x00suffix",
 	];
-	assert_eq!(found[0].0, expected_keys[0], "key was {}", sprint_key(&found[0].0));
-	assert_eq!(found[1].0, expected_keys[1], "key was {}", sprint_key(&found[1].0));
+	assert_eq!(found[0].0, expected_keys[0], "key was {}", sprint(&found[0].0));
+	assert_eq!(found[1].0, expected_keys[1], "key was {}", sprint(&found[1].0));
 }

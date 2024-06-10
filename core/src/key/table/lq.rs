@@ -1,5 +1,5 @@
 //! Stores a LIVE SELECT query definition on the table
-use crate::key::error::KeyCategory;
+use crate::key::category::Category;
 use crate::key::key_req::KeyRequirements;
 use derive::Key;
 use serde::{Deserialize, Serialize};
@@ -48,8 +48,8 @@ pub fn suffix(ns: &str, db: &str, tb: &str) -> Vec<u8> {
 }
 
 impl KeyRequirements for Lq<'_> {
-	fn key_category(&self) -> KeyCategory {
-		KeyCategory::TableLiveQuery
+	fn key_category(&self) -> Category {
+		Category::TableLiveQuery
 	}
 }
 
@@ -82,7 +82,7 @@ mod tests {
 		let live_query_id = Uuid::from_bytes([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]);
 		let val = Lq::new("testns", "testdb", "testtb", live_query_id);
 		let enc = Lq::encode(&val).unwrap();
-		println!("{:?}", debug::sprint_key(&enc));
+		println!("{:?}", debug::sprint(&enc));
 		assert_eq!(
 			enc,
 			b"/*testns\x00*testdb\x00*testtb\x00!lq\x01\x02\x03\x04\x05\x06\x07\x08\x09\x0a\x0b\x0c\x0d\x0e\x0f\x10"

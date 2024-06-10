@@ -55,7 +55,7 @@ async fn table_definitions_can_be_deleted() {
 	let node_id = Uuid::parse_str("13c0e650-1710-489e-bb80-f882bce50b56").unwrap();
 	let clock = Arc::new(SizedClock::Fake(FakeClock::new(Timestamp::default())));
 	let test = init(node_id, clock).await.unwrap();
-	let mut tx = test.db.transaction(Write, Optimistic).await.unwrap();
+	let mut tx = test.db.transaction(Write, Optimistic).await.unwrap().inner();
 
 	// Create a table definition
 	let namespace = "test_namespace";
