@@ -103,19 +103,19 @@ impl InfoStatement {
 				let mut res = Object::default();
 				// Process the databases
 				let mut tmp = Object::default();
-				for v in run.all_db(opt.ns()).await?.iter() {
+				for v in run.all_db(opt.ns()?).await?.iter() {
 					tmp.insert(v.name.to_string(), v.to_string().into());
 				}
 				res.insert("databases".to_owned(), tmp.into());
 				// Process the users
 				let mut tmp = Object::default();
-				for v in run.all_ns_users(opt.ns()).await?.iter() {
+				for v in run.all_ns_users(opt.ns()?).await?.iter() {
 					tmp.insert(v.name.to_string(), v.to_string().into());
 				}
 				res.insert("users".to_owned(), tmp.into());
 				// Process the accesses
 				let mut tmp = Object::default();
-				for v in run.all_ns_accesses_redacted(opt.ns()).await?.iter() {
+				for v in run.all_ns_accesses_redacted(opt.ns()?).await?.iter() {
 					tmp.insert(v.name.to_string(), v.to_string().into());
 				}
 				res.insert("accesses".to_owned(), tmp.into());
@@ -131,43 +131,43 @@ impl InfoStatement {
 				let mut res = Object::default();
 				// Process the users
 				let mut tmp = Object::default();
-				for v in run.all_db_users(opt.ns(), opt.db()).await?.iter() {
+				for v in run.all_db_users(opt.ns()?, opt.db()?).await?.iter() {
 					tmp.insert(v.name.to_string(), v.to_string().into());
 				}
 				res.insert("users".to_owned(), tmp.into());
 				// Process the functions
 				let mut tmp = Object::default();
-				for v in run.all_db_functions(opt.ns(), opt.db()).await?.iter() {
+				for v in run.all_db_functions(opt.ns()?, opt.db()?).await?.iter() {
 					tmp.insert(v.name.to_string(), v.to_string().into());
 				}
 				res.insert("functions".to_owned(), tmp.into());
 				// Process the models
 				let mut tmp = Object::default();
-				for v in run.all_db_models(opt.ns(), opt.db()).await?.iter() {
+				for v in run.all_db_models(opt.ns()?, opt.db()?).await?.iter() {
 					tmp.insert(format!("{}<{}>", v.name, v.version), v.to_string().into());
 				}
 				res.insert("models".to_owned(), tmp.into());
 				// Process the params
 				let mut tmp = Object::default();
-				for v in run.all_db_params(opt.ns(), opt.db()).await?.iter() {
+				for v in run.all_db_params(opt.ns()?, opt.db()?).await?.iter() {
 					tmp.insert(v.name.to_string(), v.to_string().into());
 				}
 				res.insert("params".to_owned(), tmp.into());
 				// Process the accesses
 				let mut tmp = Object::default();
-				for v in run.all_db_accesses_redacted(opt.ns(), opt.db()).await?.iter() {
+				for v in run.all_db_accesses_redacted(opt.ns()?, opt.db()?).await?.iter() {
 					tmp.insert(v.name.to_string(), v.to_string().into());
 				}
 				res.insert("accesses".to_owned(), tmp.into());
 				// Process the tables
 				let mut tmp = Object::default();
-				for v in run.all_tb(opt.ns(), opt.db()).await?.iter() {
+				for v in run.all_tb(opt.ns()?, opt.db()?).await?.iter() {
 					tmp.insert(v.name.to_string(), v.to_string().into());
 				}
 				res.insert("tables".to_owned(), tmp.into());
 				// Process the analyzers
 				let mut tmp = Object::default();
-				for v in run.all_db_analyzers(opt.ns(), opt.db()).await?.iter() {
+				for v in run.all_db_analyzers(opt.ns()?, opt.db()?).await?.iter() {
 					tmp.insert(v.name.to_string(), v.to_string().into());
 				}
 				res.insert("analyzers".to_owned(), tmp.into());
@@ -183,31 +183,31 @@ impl InfoStatement {
 				let mut res = Object::default();
 				// Process the events
 				let mut tmp = Object::default();
-				for v in run.all_tb_events(opt.ns(), opt.db(), tb).await?.iter() {
+				for v in run.all_tb_events(opt.ns()?, opt.db()?, tb).await?.iter() {
 					tmp.insert(v.name.to_string(), v.to_string().into());
 				}
 				res.insert("events".to_owned(), tmp.into());
 				// Process the fields
 				let mut tmp = Object::default();
-				for v in run.all_tb_fields(opt.ns(), opt.db(), tb).await?.iter() {
+				for v in run.all_tb_fields(opt.ns()?, opt.db()?, tb).await?.iter() {
 					tmp.insert(v.name.to_string(), v.to_string().into());
 				}
 				res.insert("fields".to_owned(), tmp.into());
 				// Process the tables
 				let mut tmp = Object::default();
-				for v in run.all_tb_views(opt.ns(), opt.db(), tb).await?.iter() {
+				for v in run.all_tb_views(opt.ns()?, opt.db()?, tb).await?.iter() {
 					tmp.insert(v.name.to_string(), v.to_string().into());
 				}
 				res.insert("tables".to_owned(), tmp.into());
 				// Process the indexes
 				let mut tmp = Object::default();
-				for v in run.all_tb_indexes(opt.ns(), opt.db(), tb).await?.iter() {
+				for v in run.all_tb_indexes(opt.ns()?, opt.db()?, tb).await?.iter() {
 					tmp.insert(v.name.to_string(), v.to_string().into());
 				}
 				res.insert("indexes".to_owned(), tmp.into());
 				// Process the live queries
 				let mut tmp = Object::default();
-				for v in run.all_tb_lives(opt.ns(), opt.db(), tb).await?.iter() {
+				for v in run.all_tb_lives(opt.ns()?, opt.db()?, tb).await?.iter() {
 					tmp.insert(v.id.to_raw(), v.to_string().into());
 				}
 				res.insert("lives".to_owned(), tmp.into());
@@ -224,8 +224,8 @@ impl InfoStatement {
 				// Process the user
 				let res = match base {
 					Base::Root => run.get_root_user(user).await?,
-					Base::Ns => run.get_ns_user(opt.ns(), user).await?,
-					Base::Db => run.get_db_user(opt.ns(), opt.db(), user).await?,
+					Base::Ns => run.get_ns_user(opt.ns()?, user).await?,
+					Base::Db => run.get_db_user(opt.ns()?, opt.db()?, user).await?,
 					_ => return Err(Error::InvalidLevel(base.to_string())),
 				};
 				// Ok all good
@@ -253,13 +253,13 @@ impl InfoStatement {
 				// Create the result set
 				let mut res = Object::default();
 				// Process the databases
-				res.insert("databases".to_owned(), process_arr(run.all_db(opt.ns()).await?));
+				res.insert("databases".to_owned(), process_arr(run.all_db(opt.ns()?).await?));
 				// Process the users
-				res.insert("users".to_owned(), process_arr(run.all_ns_users(opt.ns()).await?));
+				res.insert("users".to_owned(), process_arr(run.all_ns_users(opt.ns()?).await?));
 				// Process the accesses
 				res.insert(
 					"accesses".to_owned(),
-					process_arr(run.all_ns_accesses_redacted(opt.ns()).await?),
+					process_arr(run.all_ns_accesses_redacted(opt.ns()?).await?),
 				);
 				// Ok all good
 				Value::from(res).ok()
@@ -274,39 +274,42 @@ impl InfoStatement {
 				// Process the users
 				res.insert(
 					"users".to_owned(),
-					process_arr(run.all_db_users(opt.ns(), opt.db()).await?),
+					process_arr(run.all_db_users(opt.ns()?, opt.db()?).await?),
 				);
 				// Process the accesses
 				res.insert(
 					"accesses".to_owned(),
-					process_arr(run.all_db_accesses(opt.ns(), opt.db()).await?),
+					process_arr(run.all_db_accesses(opt.ns()?, opt.db()?).await?),
 				);
 				// Process the functions
 				res.insert(
 					"functions".to_owned(),
-					process_arr(run.all_db_functions(opt.ns(), opt.db()).await?),
+					process_arr(run.all_db_functions(opt.ns()?, opt.db()?).await?),
 				);
 				// Process the models
 				res.insert(
 					"models".to_owned(),
-					process_arr(run.all_db_models(opt.ns(), opt.db()).await?),
+					process_arr(run.all_db_models(opt.ns()?, opt.db()?).await?),
 				);
 				// Process the params
 				res.insert(
 					"params".to_owned(),
-					process_arr(run.all_db_params(opt.ns(), opt.db()).await?),
+					process_arr(run.all_db_params(opt.ns()?, opt.db()?).await?),
 				);
 				// Process the accesses
 				res.insert(
 					"accesses".to_owned(),
-					process_arr(run.all_db_accesses_redacted(opt.ns(), opt.db()).await?),
+					process_arr(run.all_db_accesses_redacted(opt.ns()?, opt.db()?).await?),
 				);
 				// Process the tables
-				res.insert("tables".to_owned(), process_arr(run.all_tb(opt.ns(), opt.db()).await?));
+				res.insert(
+					"tables".to_owned(),
+					process_arr(run.all_tb(opt.ns()?, opt.db()?).await?),
+				);
 				// Process the analyzers
 				res.insert(
 					"analyzers".to_owned(),
-					process_arr(run.all_db_analyzers(opt.ns(), opt.db()).await?),
+					process_arr(run.all_db_analyzers(opt.ns()?, opt.db()?).await?),
 				);
 				// Ok all good
 				Value::from(res).ok()
@@ -321,27 +324,27 @@ impl InfoStatement {
 				// Process the events
 				res.insert(
 					"events".to_owned(),
-					process_arr(run.all_tb_events(opt.ns(), opt.db(), tb).await?),
+					process_arr(run.all_tb_events(opt.ns()?, opt.db()?, tb).await?),
 				);
 				// Process the fields
 				res.insert(
 					"fields".to_owned(),
-					process_arr(run.all_tb_fields(opt.ns(), opt.db(), tb).await?),
+					process_arr(run.all_tb_fields(opt.ns()?, opt.db()?, tb).await?),
 				);
 				// Process the tables
 				res.insert(
 					"tables".to_owned(),
-					process_arr(run.all_tb_views(opt.ns(), opt.db(), tb).await?),
+					process_arr(run.all_tb_views(opt.ns()?, opt.db()?, tb).await?),
 				);
 				// Process the indexes
 				res.insert(
 					"indexes".to_owned(),
-					process_arr(run.all_tb_indexes(opt.ns(), opt.db(), tb).await?),
+					process_arr(run.all_tb_indexes(opt.ns()?, opt.db()?, tb).await?),
 				);
 				// Process the live queries
 				res.insert(
 					"lives".to_owned(),
-					process_arr(run.all_tb_lives(opt.ns(), opt.db(), tb).await?),
+					process_arr(run.all_tb_lives(opt.ns()?, opt.db()?, tb).await?),
 				);
 				// Ok all good
 				Value::from(res).ok()
@@ -356,8 +359,8 @@ impl InfoStatement {
 				// Process the user
 				let res = match base {
 					Base::Root => run.get_root_user(user).await?,
-					Base::Ns => run.get_ns_user(opt.ns(), user).await?,
-					Base::Db => run.get_db_user(opt.ns(), opt.db(), user).await?,
+					Base::Ns => run.get_ns_user(opt.ns()?, user).await?,
+					Base::Db => run.get_db_user(opt.ns()?, opt.db()?, user).await?,
 					_ => return Err(Error::InvalidLevel(base.to_string())),
 				};
 				// Ok all good

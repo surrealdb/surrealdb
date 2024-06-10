@@ -283,9 +283,9 @@ impl IndexStores {
 		opt: &Options,
 		ix: &DefineIndexStatement,
 		p: &HnswParams,
-	) -> SharedHnswIndex {
-		let ikb = IndexKeyBase::new(opt, ix);
-		self.0.hnsw_indexes.get(&ikb, p).await
+	) -> Result<SharedHnswIndex, Error> {
+		let ikb = IndexKeyBase::new(opt, ix)?;
+		Ok(self.0.hnsw_indexes.get(&ikb, p).await)
 	}
 
 	pub(crate) async fn index_removed(
@@ -297,7 +297,7 @@ impl IndexStores {
 	) -> Result<(), Error> {
 		self.remove_index(
 			opt,
-			tx.get_and_cache_tb_index(opt.ns(), opt.db(), tb, ix).await?.as_ref(),
+			tx.get_and_cache_tb_index(opt.ns()?, opt.db()?, tb, ix).await?.as_ref(),
 		)
 		.await
 	}
@@ -307,7 +307,7 @@ impl IndexStores {
 		opt: &Options,
 		tx: &mut Transaction,
 	) -> Result<(), Error> {
-		for tb in tx.all_tb(opt.ns(), opt.db()).await?.iter() {
+		for tb in tx.all_tb(opt.ns()?, opt.db()?).await?.iter() {
 			self.table_removed(opt, tx, &tb.name).await?;
 		}
 		Ok(())
@@ -319,14 +319,14 @@ impl IndexStores {
 		tx: &mut Transaction,
 		tb: &str,
 	) -> Result<(), Error> {
-		for ix in tx.all_tb_indexes(opt.ns(), opt.db(), tb).await?.iter() {
+		for ix in tx.all_tb_indexes(opt.ns()?, opt.db()?, tb).await?.iter() {
 			self.remove_index(opt, ix).await?;
 		}
 		Ok(())
 	}
 
 	async fn remove_index(&self, opt: &Options, ix: &DefineIndexStatement) -> Result<(), Error> {
-		let ikb = IndexKeyBase::new(opt, ix);
+		let ikb = IndexKeyBase::new(opt, ix)?;
 		match ix.index {
 			Index::Search(_) => {
 				self.remove_search_caches(ikb);

@@ -257,26 +257,26 @@ impl<'a> IndexOperation<'a> {
 		}
 	}
 
-	fn get_unique_index_key(&self, v: &'a Array) -> key::index::Index {
-		crate::key::index::Index::new(
-			self.opt.ns(),
-			self.opt.db(),
+	fn get_unique_index_key(&self, v: &'a Array) -> Result<key::index::Index, Error> {
+		Ok(crate::key::index::Index::new(
+			self.opt.ns()?,
+			self.opt.db()?,
 			&self.ix.what,
 			&self.ix.name,
 			v,
 			None,
-		)
+		))
 	}
 
-	fn get_non_unique_index_key(&self, v: &'a Array) -> key::index::Index {
-		crate::key::index::Index::new(
-			self.opt.ns(),
-			self.opt.db(),
+	fn get_non_unique_index_key(&self, v: &'a Array) -> Result<key::index::Index, Error> {
+		Ok(crate::key::index::Index::new(
+			self.opt.ns()?,
+			self.opt.db()?,
 			&self.ix.what,
 			&self.ix.name,
 			v,
 			Some(&self.rid.id),
-		)
+		))
 	}
 
 	async fn index_unique(&mut self, ctx: &Context<'_>) -> Result<(), Error> {
@@ -285,7 +285,7 @@ impl<'a> IndexOperation<'a> {
 		if let Some(o) = self.o.take() {
 			let i = Indexable::new(o, self.ix);
 			for o in i {
-				let key = self.get_unique_index_key(&o);
+				let key = self.get_unique_index_key(&o)?;
 				match run.delc(key, Some(self.rid)).await {
 					Err(Error::TxConditionNotMet) => Ok(()),
 					Err(e) => Err(e),
@@ -298,9 +298,9 @@ impl<'a> IndexOperation<'a> {
 			let i = Indexable::new(n, self.ix);
 			for n in i {
 				if !n.is_all_none_or_null() {
-					let key = self.get_unique_index_key(&n);
+					let key = self.get_unique_index_key(&n)?;
 					if run.putc(key, self.rid, None).await.is_err() {
-						let key = self.get_unique_index_key(&n);
+						let key = self.get_unique_index_key(&n)?;
 						let val = run.get(key).await?.unwrap();
 						let rid: Thing = val.into();
 						return self.err_index_exists(rid, n);
@@ -317,7 +317,7 @@ impl<'a> IndexOperation<'a> {
 		if let Some(o) = self.o.take() {
 			let i = Indexable::new(o, self.ix);
 			for o in i {
-				let key = self.get_non_unique_index_key(&o);
+				let key = self.get_non_unique_index_key(&o)?;
 				match run.delc(key, Some(self.rid)).await {
 					Err(Error::TxConditionNotMet) => Ok(()),
 					Err(e) => Err(e),
@@ -329,9 +329,9 @@ impl<'a> IndexOperation<'a> {
 		if let Some(n) = self.n.take() {
 			let i = Indexable::new(n, self.ix);
 			for n in i {
-				let key = self.get_non_unique_index_key(&n);
+				let key = self.get_non_unique_index_key(&n)?;
 				if run.putc(key, self.rid, None).await.is_err() {
-					let key = self.get_non_unique_index_key(&n);
+					let key = self.get_non_unique_index_key(&n)?;
 					let val = run.get(key).await?.unwrap();
 					let rid: Thing = val.into();
 					return self.err_index_exists(rid, n);
@@ -358,7 +358,7 @@ impl<'a> IndexOperation<'a> {
 		ctx: &Context<'_>,
 		p: &SearchParams,
 	) -> Result<(), Error> {
-		let ikb = IndexKeyBase::new(self.opt, self.ix);
+		let ikb = IndexKeyBase::new(self.opt, self.ix)?;
 
 		let mut ft = FtIndex::new(ctx, self.opt, &p.az, ikb, p, TransactionType::Write).await?;
 
@@ -377,7 +377,7 @@ impl<'a> IndexOperation<'a> {
 		p: &MTreeParams,
 	) -> Result<(), Error> {
 		let mut tx = ctx.tx_lock().await;
-		let ikb = IndexKeyBase::new(self.opt, self.ix);
+		let ikb = IndexKeyBase::new(self.opt, self.ix)?;
 		let mut mt =
 			MTreeIndex::new(ctx.get_index_stores(), &mut tx, ikb, p, TransactionType::Write)
 				.await?;
@@ -393,7 +393,7 @@ impl<'a> IndexOperation<'a> {
 	}
 
 	async fn index_hnsw(&mut self, ctx: &Context<'_>, p: &HnswParams) -> Result<(), Error> {
-		let hnsw = ctx.get_index_stores().get_index_hnsw(self.opt, self.ix, p).await;
+		let hnsw = ctx.get_index_stores().get_index_hnsw(self.opt, self.ix, p).await?;
 		let mut hnsw = hnsw.write().await;
 		// Delete the old index data
 		if let Some(o) = self.o.take() {

@@ -55,7 +55,7 @@ impl DefineTableStatement {
 		// Clear the cache
 		run.clear_cache();
 		// Check if table already exists
-		if run.get_tb(opt.ns(), opt.db(), &self.name).await.is_ok() {
+		if run.get_tb(opt.ns()?, opt.db()?, &self.name).await.is_ok() {
 			if self.if_not_exists {
 				return Ok(Value::None);
 			} else {
@@ -65,9 +65,9 @@ impl DefineTableStatement {
 			}
 		}
 		// Process the statement
-		let key = crate::key::database::tb::new(opt.ns(), opt.db(), &self.name);
-		let ns = run.add_ns(opt.ns(), opt.strict).await?;
-		let db = run.add_db(opt.ns(), opt.db(), opt.strict).await?;
+		let key = crate::key::database::tb::new(opt.ns()?, opt.db()?, &self.name);
+		let ns = run.add_ns(opt.ns()?, opt.strict).await?;
+		let db = run.add_db(opt.ns()?, opt.db()?, opt.strict).await?;
 		let dt = if self.id.is_none() && ns.id.is_some() && db.id.is_some() {
 			DefineTableStatement {
 				id: Some(run.get_next_tb_id(ns.id.unwrap(), db.id.unwrap()).await?),
@@ -84,8 +84,8 @@ impl DefineTableStatement {
 			let tb: &str = &self.name;
 			let in_kind = rel.from.clone().unwrap_or(Kind::Record(vec![]));
 			let out_kind = rel.to.clone().unwrap_or(Kind::Record(vec![]));
-			let in_key = crate::key::table::fd::new(opt.ns(), opt.db(), tb, "in");
-			let out_key = crate::key::table::fd::new(opt.ns(), opt.db(), tb, "out");
+			let in_key = crate::key::table::fd::new(opt.ns()?, opt.db()?, tb, "in");
+			let out_key = crate::key::table::fd::new(opt.ns()?, opt.db()?, tb, "out");
 			run.set(
 				in_key,
 				DefineFieldStatement {
@@ -108,21 +108,21 @@ impl DefineTableStatement {
 			.await?;
 		}
 
-		let tb_key = crate::key::table::fd::prefix(opt.ns(), opt.db(), &self.name);
+		let tb_key = crate::key::table::fd::prefix(opt.ns()?, opt.db()?, &self.name);
 		run.clr(tb_key).await?;
 		run.set(key, &dt).await?;
 		// Check if table is a view
 		if let Some(view) = &self.view {
 			// Remove the table data
-			let key = crate::key::table::all::new(opt.ns(), opt.db(), &self.name);
+			let key = crate::key::table::all::new(opt.ns()?, opt.db()?, &self.name);
 			run.delp(key, u32::MAX).await?;
 			// Process each foreign table
 			for v in view.what.0.iter() {
 				// Save the view config
-				let key = crate::key::table::ft::new(opt.ns(), opt.db(), v, &self.name);
+				let key = crate::key::table::ft::new(opt.ns()?, opt.db()?, v, &self.name);
 				run.set(key, self).await?;
 				// Clear the cache
-				let key = crate::key::table::ft::prefix(opt.ns(), opt.db(), v);
+				let key = crate::key::table::ft::prefix(opt.ns()?, opt.db()?, v);
 				run.clr(key).await?;
 			}
 			// Release the transaction
@@ -139,7 +139,7 @@ impl DefineTableStatement {
 				stm.compute(stk, ctx, opt, doc).await?;
 			}
 		} else if dt.changefeed.is_some() {
-			run.record_table_change(opt.ns(), opt.db(), self.name.0.as_str(), &dt);
+			run.record_table_change(opt.ns()?, opt.db()?, self.name.0.as_str(), &dt);
 		}
 
 		// Ok all good

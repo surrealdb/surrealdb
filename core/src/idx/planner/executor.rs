@@ -132,7 +132,7 @@ impl InnerQueryExecutor {
 						let ft_entry = match ft_map.entry(ix_ref) {
 							Entry::Occupied(e) => FtEntry::new(stk, ctx, opt, e.get(), io).await?,
 							Entry::Vacant(e) => {
-								let ikb = IndexKeyBase::new(opt, idx_def);
+								let ikb = IndexKeyBase::new(opt, idx_def)?;
 								let ft = FtIndex::new(
 									ctx,
 									opt,
@@ -174,7 +174,7 @@ impl InnerQueryExecutor {
 									.await?
 								}
 								Entry::Vacant(e) => {
-									let ikb = IndexKeyBase::new(opt, idx_def);
+									let ikb = IndexKeyBase::new(opt, idx_def)?;
 									let mut tx = ctx.tx_lock().await;
 									let mt = MTreeIndex::new(
 										ctx.get_index_stores(),
@@ -222,7 +222,7 @@ impl InnerQueryExecutor {
 									let hnsw = ctx
 										.get_index_stores()
 										.get_index_hnsw(opt, idx_def, p)
-										.await;
+										.await?;
 									let entry = HnswEntry::new(
 										stk,
 										ctx,
@@ -346,7 +346,7 @@ impl QueryExecutor {
 			match it_entry {
 				IteratorEntry::Single(_, io) => self.new_single_iterator(opt, irf, io).await,
 				IteratorEntry::Range(_, ixr, from, to) => {
-					Ok(self.new_range_iterator(opt, *ixr, from, to))
+					Ok(self.new_range_iterator(opt, *ixr, from, to)?)
 				}
 			}
 		} else {
@@ -386,19 +386,19 @@ impl QueryExecutor {
 			IndexOperator::Equality(value) | IndexOperator::Exactness(value) => {
 				Some(ThingIterator::IndexEqual(IndexEqualThingIterator::new(
 					irf,
-					opt.ns(),
-					opt.db(),
+					opt.ns()?,
+					opt.db()?,
 					&ix.what,
 					&ix.name,
 					value,
 				)))
 			}
 			IndexOperator::Union(value) => Some(ThingIterator::IndexUnion(
-				IndexUnionThingIterator::new(irf, opt.ns(), opt.db(), &ix.what, &ix.name, value),
+				IndexUnionThingIterator::new(irf, opt.ns()?, opt.db()?, &ix.what, &ix.name, value),
 			)),
 			IndexOperator::Join(ios) => {
 				let iterators = self.build_iterators(opt, irf, ios).await?;
-				let index_join = Box::new(IndexJoinThingIterator::new(irf, opt, ix, iterators));
+				let index_join = Box::new(IndexJoinThingIterator::new(irf, opt, ix, iterators)?);
 				Some(ThingIterator::IndexJoin(index_join))
 			}
 			_ => None,
@@ -411,35 +411,35 @@ impl QueryExecutor {
 		ir: IndexRef,
 		from: &RangeValue,
 		to: &RangeValue,
-	) -> Option<ThingIterator> {
+	) -> Result<Option<ThingIterator>, Error> {
 		if let Some(ix) = self.get_index_def(ir) {
 			match ix.index {
 				Index::Idx => {
-					return Some(ThingIterator::IndexRange(IndexRangeThingIterator::new(
+					return Ok(Some(ThingIterator::IndexRange(IndexRangeThingIterator::new(
 						ir,
-						opt.ns(),
-						opt.db(),
+						opt.ns()?,
+						opt.db()?,
 						&ix.what,
 						&ix.name,
 						from,
 						to,
-					)))
+					))))
 				}
 				Index::Uniq => {
-					return Some(ThingIterator::UniqueRange(UniqueRangeThingIterator::new(
+					return Ok(Some(ThingIterator::UniqueRange(UniqueRangeThingIterator::new(
 						ir,
-						opt.ns(),
-						opt.db(),
+						opt.ns()?,
+						opt.db()?,
 						&ix.what,
 						&ix.name,
 						from,
 						to,
-					)))
+					))))
 				}
 				_ => {}
 			}
 		}
-		None
+		Ok(None)
 	}
 
 	async fn new_unique_index_iterator(
@@ -453,19 +453,19 @@ impl QueryExecutor {
 			IndexOperator::Equality(value) | IndexOperator::Exactness(value) => {
 				Some(ThingIterator::UniqueEqual(UniqueEqualThingIterator::new(
 					irf,
-					opt.ns(),
-					opt.db(),
+					opt.ns()?,
+					opt.db()?,
 					&ix.what,
 					&ix.name,
 					value,
 				)))
 			}
-			IndexOperator::Union(value) => {
-				Some(ThingIterator::UniqueUnion(UniqueUnionThingIterator::new(irf, opt, ix, value)))
-			}
+			IndexOperator::Union(value) => Some(ThingIterator::UniqueUnion(
+				UniqueUnionThingIterator::new(irf, opt, ix, value)?,
+			)),
 			IndexOperator::Join(ios) => {
 				let iterators = self.build_iterators(opt, irf, ios).await?;
-				let unique_join = Box::new(UniqueJoinThingIterator::new(irf, opt, ix, iterators));
+				let unique_join = Box::new(UniqueJoinThingIterator::new(irf, opt, ix, iterators)?);
 				Some(ThingIterator::UniqueJoin(unique_join))
 			}
 			_ => None,

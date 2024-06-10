@@ -32,13 +32,13 @@ impl RemoveIndexStatement {
 			// Clear the cache
 			run.clear_cache();
 			// Delete the definition
-			let key = crate::key::table::ix::new(opt.ns(), opt.db(), &self.what, &self.name);
+			let key = crate::key::table::ix::new(opt.ns()?, opt.db()?, &self.what, &self.name);
 			run.del(key).await?;
 			// Remove the index data
-			let key = crate::key::index::all::new(opt.ns(), opt.db(), &self.what, &self.name);
+			let key = crate::key::index::all::new(opt.ns()?, opt.db()?, &self.what, &self.name);
 			run.delp(key, u32::MAX).await?;
 			// Clear the cache
-			let key = crate::key::table::ix::prefix(opt.ns(), opt.db(), &self.what);
+			let key = crate::key::table::ix::prefix(opt.ns()?, opt.db()?, &self.what);
 			run.clr(key).await?;
 			// Ok all good
 			Ok(Value::None)

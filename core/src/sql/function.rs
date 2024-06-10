@@ -216,12 +216,12 @@ impl Function {
 					// Claim transaction
 					let mut run = ctx.tx_lock().await;
 					// Get the function definition
-					let val = run.get_and_cache_db_function(opt.ns(), opt.db(), s).await?;
+					let val = run.get_and_cache_db_function(opt.ns()?, opt.db()?, s).await?;
 					drop(run);
 					val
 				};
 				// Check permissions
-				if opt.check_perms(Action::View) {
+				if opt.check_perms(Action::View)? {
 					match &val.permissions {
 						Permission::Full => (),
 						Permission::None => {

@@ -42,15 +42,15 @@ struct Inner {
 }
 
 impl IndexKeyBase {
-	pub(crate) fn new(opt: &Options, ix: &DefineIndexStatement) -> Self {
-		Self {
+	pub(crate) fn new(opt: &Options, ix: &DefineIndexStatement) -> Result<Self, Error> {
+		Ok(Self {
 			inner: Arc::new(Inner {
-				ns: opt.ns().to_string(),
-				db: opt.db().to_string(),
+				ns: opt.ns()?.to_string(),
+				db: opt.db()?.to_string(),
 				tb: ix.what.to_string(),
 				ix: ix.name.to_string(),
 			}),
-		}
+		})
 	}
 
 	fn new_bc_key(&self, term_id: TermId) -> Key {

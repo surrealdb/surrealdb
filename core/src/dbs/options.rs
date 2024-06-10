@@ -339,13 +339,13 @@ impl Options {
 	}
 
 	/// Get currently selected NS
-	pub fn ns(&self) -> &str {
-		self.ns.as_ref().map(AsRef::as_ref).unwrap()
+	pub fn ns(&self) -> Result<&str, Error> {
+		self.ns.as_ref().map(AsRef::as_ref).ok_or(Error::Unreachable("Options::ns"))
 	}
 
 	/// Get currently selected DB
-	pub fn db(&self) -> &str {
-		self.db.as_ref().map(AsRef::as_ref).unwrap()
+	pub fn db(&self) -> Result<&str, Error> {
+		self.db.as_ref().map(AsRef::as_ref).ok_or(Error::Unreachable("Options::db"))
 	}
 
 	/// Check whether this request supports realtime queries
@@ -381,11 +381,11 @@ impl Options {
 			Base::Root => res.on_root(),
 			Base::Ns => {
 				self.valid_for_ns()?;
-				res.on_ns(self.ns())
+				res.on_ns(self.ns()?)
 			}
 			Base::Db => {
 				self.valid_for_db()?;
-				res.on_db(self.ns(), self.db())
+				res.on_db(self.ns()?, self.db()?)
 			}
 			// TODO(gguillemas): This variant is kept in 2.0.0 for backward compatibility. Drop in 3.0.0.
 			Base::Sc(_) => {
@@ -406,15 +406,15 @@ impl Options {
 	///
 	/// TODO: This method is called a lot during data operations, so we decided to bypass the system's authorization mechanism.
 	/// This is a temporary solution, until we optimize the new authorization system.
-	pub fn check_perms(&self, action: Action) -> bool {
+	pub fn check_perms(&self, action: Action) -> Result<bool, Error> {
 		// If permissions are disabled, don't check permissions
 		if !self.perms {
-			return false;
+			return Ok(false);
 		}
 
 		// If auth is disabled and actor is anonymous, don't check permissions
 		if !self.auth_enabled && self.auth.is_anon() {
-			return false;
+			return Ok(false);
 		}
 
 		// Is the actor allowed to view?
@@ -424,10 +424,10 @@ impl Options {
 		let can_edit = [Role::Editor, Role::Owner].iter().any(|r| self.auth.has_role(r));
 		// Is the target database in the actor's level?
 		let db_in_actor_level = self.auth.is_root()
-			|| self.auth.is_ns() && self.auth.level().ns().unwrap() == self.ns()
+			|| self.auth.is_ns() && self.auth.level().ns().unwrap() == self.ns()?
 			|| self.auth.is_db()
-				&& self.auth.level().ns().unwrap() == self.ns()
-				&& self.auth.level().db().unwrap() == self.db();
+				&& self.auth.level().ns().unwrap() == self.ns()?
+				&& self.auth.level().db().unwrap() == self.db()?;
 
 		// Is the actor allowed to do the action on the selected database?
 		let is_allowed = match action {
@@ -442,7 +442,7 @@ impl Options {
 		};
 
 		// Check permissions if the author is not already allowed to do the action
-		!is_allowed
+		Ok(!is_allowed)
 	}
 }
 

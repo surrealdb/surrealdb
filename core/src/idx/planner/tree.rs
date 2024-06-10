@@ -545,8 +545,8 @@ struct SchemaCache {
 
 impl SchemaCache {
 	async fn new(opt: &Options, table: &Table, tx: &mut kvs::Transaction) -> Result<Self, Error> {
-		let indexes = tx.all_tb_indexes(opt.ns(), opt.db(), table).await?;
-		let fields = tx.all_tb_fields(opt.ns(), opt.db(), table).await?;
+		let indexes = tx.all_tb_indexes(opt.ns()?, opt.db()?, table).await?;
+		let fields = tx.all_tb_fields(opt.ns()?, opt.db()?, table).await?;
 		Ok(Self {
 			indexes,
 			fields,
