@@ -2,7 +2,6 @@ use crate::{dbs::Capabilities, iam::Level};
 #[cfg(any(
 	feature = "kv-mem",
 	feature = "kv-surrealkv",
-	
 	feature = "kv-rocksdb",
 	feature = "kv-fdb",
 	feature = "kv-tikv",
@@ -30,7 +29,6 @@ pub struct Config {
 	#[cfg(any(
 		feature = "kv-mem",
 		feature = "kv-surrealkv",
-		
 		feature = "kv-rocksdb",
 		feature = "kv-fdb",
 		feature = "kv-tikv",
@@ -128,7 +126,6 @@ impl Config {
 	#[cfg(any(
 		feature = "kv-mem",
 		feature = "kv-surrealkv",
-		
 		feature = "kv-rocksdb",
 		feature = "kv-fdb",
 		feature = "kv-tikv",
