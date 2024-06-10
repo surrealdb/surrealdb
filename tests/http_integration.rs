@@ -11,7 +11,7 @@ mod http_integration {
 	use test_log::test;
 	use ulid::Ulid;
 
-	use super::common::{self, PASS, StartServerArguments, USER};
+	use super::common::{self, StartServerArguments, PASS, USER};
 
 	#[test(tokio::test)]
 	async fn basic_auth() -> Result<(), Box<dyn std::error::Error>> {
