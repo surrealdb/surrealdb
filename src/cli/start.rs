@@ -96,7 +96,7 @@ pub struct StartCommandArguments {
 	#[arg(env = "SURREAL_BIND", short = 'b', long = "bind")]
 	#[arg(default_value = "127.0.0.1:8000")]
 	listen_addresses: Vec<SocketAddr>,
-	#[arg(help = "Whether to suppress the server name and version header")]
+	#[arg(help = "Whether to suppress the server name and version headers")]
 	#[arg(env = "SURREAL_NO_IDENTIFICATION_HEADERS", long)]
 	#[arg(default_value_t = false)]
 	no_identification_headers: bool,
