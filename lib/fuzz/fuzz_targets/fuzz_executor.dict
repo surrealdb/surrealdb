@@ -220,7 +220,6 @@
 "geo::hash::encode("
 "html"
 "html::"
-"html::decode("
 "html::encode("
 "html::sanitize("
 "http"
