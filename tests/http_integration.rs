@@ -379,7 +379,6 @@ mod http_integration {
 		Ok(())
 	}
 
-
 	#[test(tokio::test)]
 	async fn import_endpoint() -> Result<(), Box<dyn std::error::Error>> {
 		let (addr, _server) = common::start_server_with_defaults().await.unwrap();
