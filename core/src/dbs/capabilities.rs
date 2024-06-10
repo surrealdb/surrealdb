@@ -83,28 +83,30 @@ impl std::str::FromStr for FuncTarget {
 	type Err = ParseFuncTargetError;
 
 	fn from_str(s: &str) -> Result<Self, Self::Err> {
-		dbg!(s);
 		let s = s.trim();
 
 		if s.is_empty() {
 			return Err(ParseFuncTargetError::InvalidName);
 		}
 
-		if s.bytes().any(|x| !(x.is_ascii_alphanumeric() || x == b':')) {
-			return Err(ParseFuncTargetError::InvalidName);
-		}
-
-		if let Some(s) = s.strip_suffix("::*") {
-			if s.contains("::") {
+		if let Some(family) = s.strip_suffix("::*") {
+			if family.contains("::") {
 				return Err(ParseFuncTargetError::InvalidWildcardFamily);
 			}
 
-			return Ok(FuncTarget(s.to_string(), None));
+			if !family.bytes().all(|x| x.is_ascii_alphanumeric()) {
+				return Err(ParseFuncTargetError::InvalidName);
+			}
+
+			return Ok(FuncTarget(family.to_string(), None));
+		}
+
+		if !s.bytes().all(|x| x.is_ascii_alphanumeric() || x == b':') {
+			return Err(ParseFuncTargetError::InvalidName);
 		}
 
 		if let Some((first, rest)) = s.split_once("::") {
-			let rest = (!rest.is_empty()).then(|| rest.to_string());
-			Ok(FuncTarget(first.to_string(), rest))
+			Ok(FuncTarget(first.to_string(), Some(rest.to_string())))
 		} else {
 			Ok(FuncTarget(s.to_string(), None))
 		}
@@ -157,8 +159,17 @@ impl Target for NetTarget {
 	}
 }
 
+#[derive(Debug)]
+pub struct ParseNetTargetError;
+
+impl fmt::Display for ParseNetTargetError {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		write!(f, "The provided network target is not a valid host, ip address or ip network")
+	}
+}
+
 impl std::str::FromStr for NetTarget {
-	type Err = String;
+	type Err = ParseNetTargetError;
 
 	fn from_str(s: &str) -> Result<Self, Self::Err> {
 		// If it's a valid IPNet, return it
@@ -183,9 +194,7 @@ impl std::str::FromStr for NetTarget {
 			}
 		}
 
-		Err(format!(
-			"The provided network target `{s}` is not a valid host, ip address or ip network"
-		))
+		Err(ParseNetTargetError)
 	}
 }
 
