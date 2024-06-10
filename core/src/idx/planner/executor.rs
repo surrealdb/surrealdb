@@ -132,7 +132,7 @@ impl InnerQueryExecutor {
 						let ft_entry = match ft_map.entry(ix_ref) {
 							Entry::Occupied(e) => FtEntry::new(stk, ctx, opt, e.get(), io).await?,
 							Entry::Vacant(e) => {
-								let ikb = IndexKeyBase::new(opt, idx_def)?;
+								let ikb = IndexKeyBase::new(opt.ns()?, opt.db()?, idx_def)?;
 								let ft = FtIndex::new(
 									ctx,
 									opt,
@@ -174,7 +174,7 @@ impl InnerQueryExecutor {
 									.await?
 								}
 								Entry::Vacant(e) => {
-									let ikb = IndexKeyBase::new(opt, idx_def)?;
+									let ikb = IndexKeyBase::new(opt.ns()?, opt.db()?, idx_def)?;
 									let mut tx = ctx.tx_lock().await;
 									let mt = MTreeIndex::new(
 										ctx.get_index_stores(),

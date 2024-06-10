@@ -358,7 +358,7 @@ impl<'a> IndexOperation<'a> {
 		ctx: &Context<'_>,
 		p: &SearchParams,
 	) -> Result<(), Error> {
-		let ikb = IndexKeyBase::new(self.opt, self.ix)?;
+		let ikb = IndexKeyBase::new(self.opt.ns()?, self.opt.db()?, self.ix)?;
 
 		let mut ft = FtIndex::new(ctx, self.opt, &p.az, ikb, p, TransactionType::Write).await?;
 
@@ -377,7 +377,7 @@ impl<'a> IndexOperation<'a> {
 		p: &MTreeParams,
 	) -> Result<(), Error> {
 		let mut tx = ctx.tx_lock().await;
-		let ikb = IndexKeyBase::new(self.opt, self.ix)?;
+		let ikb = IndexKeyBase::new(self.opt.ns()?, self.opt.db()?, self.ix)?;
 		let mut mt =
 			MTreeIndex::new(ctx.get_index_stores(), &mut tx, ikb, p, TransactionType::Write)
 				.await?;

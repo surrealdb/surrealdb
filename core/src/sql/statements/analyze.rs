@@ -41,9 +41,9 @@ impl AnalyzeStatement {
 				let ix = ctx
 					.tx_lock()
 					.await
-					.get_and_cache_tb_index(opt.ns()?, opt.db()?, tb.as_str(), idx.as_str())
+					.get_and_cache_tb_index(opt.ns()?, opt.db()?, tb, idx)
 					.await?;
-				let ikb = IndexKeyBase::new(opt, &ix)?;
+				let ikb = IndexKeyBase::new(opt.ns()?, opt.db()?, &ix)?;
 
 				// Index operation dispatching
 				let value: Value = match &ix.index {

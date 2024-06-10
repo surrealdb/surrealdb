@@ -27,7 +27,9 @@ impl RemoveTableStatement {
 			// Claim transaction
 			let mut run = ctx.tx_lock().await;
 			// Remove the index stores
-			ctx.get_index_stores().table_removed(opt, &mut run, &self.name).await?;
+			ctx.get_index_stores()
+				.table_removed(&mut run, opt.ns()?, opt.db()?, &self.name)
+				.await?;
 			// Clear the cache
 			run.clear_cache();
 			// Get the defined table

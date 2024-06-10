@@ -28,7 +28,9 @@ impl RemoveIndexStatement {
 			// Claim transaction
 			let mut run = ctx.tx_lock().await;
 			// Clear the index store cache
-			ctx.get_index_stores().index_removed(opt, &mut run, &self.what, &self.name).await?;
+			ctx.get_index_stores()
+				.index_removed(&mut run, opt.ns()?, opt.db()?, &self.what, &self.name)
+				.await?;
 			// Clear the cache
 			run.clear_cache();
 			// Delete the definition
