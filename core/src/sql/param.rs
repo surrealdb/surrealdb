@@ -69,8 +69,6 @@ impl Param {
 				Some(v) => v.compute(stk, ctx, opt, doc).await,
 				// The param has not been set locally
 				None => {
-					// Check that a database is set to prevent a panic
-					opt.valid_for_db()?;
 					let val = {
 						// Claim transaction
 						let mut run = ctx.tx_lock().await;

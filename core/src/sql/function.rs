@@ -205,8 +205,6 @@ impl Function {
 				fnc::run(stk, ctx, opt, doc, s, a).await
 			}
 			Self::Custom(s, x) => {
-				// Check that a database is set to prevent a panic
-				opt.valid_for_db()?;
 				// Get the full name of this function
 				let name = format!("fn::{s}");
 				// Check this function is allowed

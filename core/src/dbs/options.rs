@@ -340,12 +340,12 @@ impl Options {
 
 	/// Get currently selected NS
 	pub fn ns(&self) -> Result<&str, Error> {
-		self.ns.as_ref().map(AsRef::as_ref).ok_or(Error::Unreachable("Options::ns"))
+		self.ns.as_ref().map(AsRef::as_ref).ok_or(Error::NsEmpty)
 	}
 
 	/// Get currently selected DB
 	pub fn db(&self) -> Result<&str, Error> {
-		self.db.as_ref().map(AsRef::as_ref).ok_or(Error::Unreachable("Options::db"))
+		self.db.as_ref().map(AsRef::as_ref).ok_or(Error::DbEmpty)
 	}
 
 	/// Check whether this request supports realtime queries
@@ -379,14 +379,8 @@ impl Options {
 		// Validate the target resource and base
 		let res = match base {
 			Base::Root => res.on_root(),
-			Base::Ns => {
-				self.valid_for_ns()?;
-				res.on_ns(self.ns()?)
-			}
-			Base::Db => {
-				self.valid_for_db()?;
-				res.on_db(self.ns()?, self.db()?)
-			}
+			Base::Ns => res.on_ns(self.ns()?),
+			Base::Db => res.on_db(self.ns()?, self.db()?),
 			// TODO(gguillemas): This variant is kept in 2.0.0 for backward compatibility. Drop in 3.0.0.
 			Base::Sc(_) => {
 				// We should not get here, the scope base is only used in parsing for backward compatibility.
