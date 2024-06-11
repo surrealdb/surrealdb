@@ -18,4 +18,5 @@ pub struct Config {
 	pub key: Option<PathBuf>,
 	pub tick_interval: Duration,
 	pub engine: Option<EngineOptions>,
+	pub no_identification_headers: bool,
 }

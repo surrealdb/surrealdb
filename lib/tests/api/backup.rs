@@ -1,6 +1,7 @@
 // Tests for exporting and importing data
 // Supported by the storage engines and the HTTP protocol
 
+use surrealdb_core::sql::Table;
 use tokio::fs::remove_file;
 
 #[test_log::test(tokio::test)]
@@ -22,6 +23,7 @@ async fn export_import() {
 
 	let res = async {
 		db.export(&file).await?;
+		db.query("REMOVE TABLE user").await?;
 		db.import(&file).await?;
 		Result::<(), Error>::Ok(())
 	}

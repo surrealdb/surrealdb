@@ -26,7 +26,8 @@ impl RemoveNamespaceStatement {
 			opt.is_allowed(Action::Edit, ResourceKind::Namespace, &Base::Root)?;
 			// Claim transaction
 			let mut run = ctx.tx_lock().await;
-			ctx.get_index_stores().namespace_removed(opt, &mut run).await?;
+			// Delete index stores instance
+			ctx.get_index_stores().namespace_removed(&mut run, &self.name).await?;
 			// Clear the cache
 			run.clear_cache();
 			// Get the definition

@@ -27,7 +27,6 @@ use flume::Receiver;
 use reqwest::ClientBuilder;
 use std::collections::HashSet;
 use std::future::Future;
-use std::marker::PhantomData;
 use std::pin::Pin;
 use std::sync::atomic::AtomicI64;
 use std::sync::Arc;
@@ -231,15 +230,14 @@ impl Connection for Any {
 				EndpointKind::Unsupported(v) => return Err(Error::Scheme(v).into()),
 			}
 
-			Ok(Surreal {
-				router: Arc::new(OnceLock::with_value(Router {
+			Ok(Surreal::new_from_router_waiter(
+				Arc::new(OnceLock::with_value(Router {
 					features,
 					sender: route_tx,
 					last_id: AtomicI64::new(0),
 				})),
-				waiter: Arc::new(watch::channel(Some(WaitFor::Connection))),
-				engine: PhantomData,
-			})
+				Arc::new(watch::channel(Some(WaitFor::Connection))),
+			))
 		})
 	}
 

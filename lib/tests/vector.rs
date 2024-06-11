@@ -170,7 +170,7 @@ async fn select_where_brute_force_knn() -> Result<(), Error> {
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 7);
 	//
-	skip_ok(res, 4);
+	skip_ok(res, 4)?;
 	//
 	let tmp = res.remove(0).result?;
 	let val = Value::parse(
@@ -229,8 +229,8 @@ async fn select_where_hnsw_knn() -> Result<(), Error> {
 		SELECT id, vector::distance::knn() AS dist FROM pts WHERE point <|2,EUCLIDEAN|> $pt;
 		SELECT id, vector::distance::knn() AS dist FROM pts WHERE point <|2,EUCLIDEAN|> $pt EXPLAIN;
 	";
-	let mut t = Test::try_new(sql).await?;
-	t.skip_ok(5);
+	let mut t = Test::new(sql).await?;
+	t.skip_ok(5)?;
 	// KNN result with HNSW index
 	t.expect_val(
 		"[
@@ -243,7 +243,7 @@ async fn select_where_hnsw_knn() -> Result<(), Error> {
 				dist: 4f
 			}
 		]",
-	);
+	)?;
 	// Explains KNN with HNSW index
 	t.expect_val(
 		"[
@@ -265,7 +265,7 @@ async fn select_where_hnsw_knn() -> Result<(), Error> {
 						operation: 'Collector'
 					}
 			]",
-	);
+	)?;
 	// KNN result with brute force
 	t.expect_val(
 		"[
@@ -278,7 +278,7 @@ async fn select_where_hnsw_knn() -> Result<(), Error> {
 				dist: 4f
 			}
 		]",
-	);
+	)?;
 	// Explain KNN with brute force
 	t.expect_val(
 		"[
@@ -301,7 +301,7 @@ async fn select_where_hnsw_knn() -> Result<(), Error> {
 					operation: 'Collector'
 				}
 			]",
-	);
+	)?;
 	Ok(())
 }
 
@@ -331,7 +331,7 @@ async fn select_mtree_knn_with_condition() -> Result<(), Error> {
 	let mut res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 5);
 	//
-	skip_ok(&mut res, 3);
+	skip_ok(&mut res, 3)?;
 	//
 	let tmp = res.remove(0).result?;
 	let val = Value::parse(
@@ -403,7 +403,7 @@ async fn select_hnsw_knn_with_condition() -> Result<(), Error> {
 	let mut res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 5);
 	//
-	skip_ok(&mut res, 3);
+	skip_ok(&mut res, 3)?;
 	//
 	let tmp = res.remove(0).result?;
 	let val = Value::parse(
@@ -474,7 +474,7 @@ async fn select_bruteforce_knn_with_condition() -> Result<(), Error> {
 	let mut res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 4);
 	//
-	skip_ok(&mut res, 2);
+	skip_ok(&mut res, 2)?;
 	//
 	let tmp = res.remove(0).result?;
 	let val = Value::parse(

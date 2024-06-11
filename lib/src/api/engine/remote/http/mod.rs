@@ -102,7 +102,6 @@ impl Surreal<Client> {
 			engine: PhantomData,
 			address: address.into_endpoint(),
 			capacity: 0,
-			client: PhantomData,
 			waiter: self.waiter.clone(),
 			response_type: PhantomData,
 		}

@@ -69,20 +69,18 @@ impl Param {
 				Some(v) => v.compute(stk, ctx, opt, doc).await,
 				// The param has not been set locally
 				None => {
-					// Check that a database is set to prevent a panic
-					opt.valid_for_db()?;
 					let val = {
 						// Claim transaction
 						let mut run = ctx.tx_lock().await;
 						// Get the param definition
-						run.get_and_cache_db_param(opt.ns(), opt.db(), v).await
+						run.get_and_cache_db_param(opt.ns()?, opt.db()?, v).await
 					};
 					// Check if the param has been set globally
 					match val {
 						// The param has been set globally
 						Ok(val) => {
 							// Check permissions
-							if opt.check_perms(Action::View) {
+							if opt.check_perms(Action::View)? {
 								match &val.permissions {
 									Permission::Full => (),
 									Permission::None => {
