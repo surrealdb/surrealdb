@@ -51,12 +51,12 @@ async fn remove_statement_table() -> Result<(), Error> {
 
 #[tokio::test]
 async fn remove_statement_namespace() -> Result<(), Error> {
-	// Namespace selected
+	// Namespace not selected
 	{
 		let sql = "
-			REMOVE NAMESPACE example;
-			DEFINE NAMESPACE example;
-			REMOVE NAMESPACE example;
+			REMOVE NAMESPACE test;
+			DEFINE NAMESPACE test;
+			REMOVE NAMESPACE test;
 		";
 		let dbs = new_ds().await?;
 		let ses = Session::owner();
@@ -70,36 +70,56 @@ async fn remove_statement_namespace() -> Result<(), Error> {
 		assert!(tmp.is_ok());
 		//
 		let tmp = res.remove(0).result;
-		println!("{:?}", tmp);
 		assert!(tmp.is_ok());
 	}
-	// Namespace not selected
+	// Namespace selected
 	{
 		let sql = "
-			REMOVE NAMESPACE example;
-			DEFINE NAMESPACE example;
-			REMOVE NAMESPACE example;
+			REMOVE NAMESPACE test;
+			DEFINE NAMESPACE test;
+			REMOVE NAMESPACE test;
 		";
 		let dbs = new_ds().await?;
 		// No namespace is selected
-		let ses = Session::owner();
+		let ses = Session::owner().with_ns("test");
 		let res = &mut dbs.execute(sql, &ses, None).await?;
 		assert_eq!(res.len(), 3);
 		//
-		let tmp = res.remove(0).result.unwrap_err();
-		assert!(matches!(tmp, Error::NsEmpty));
+		let tmp = res.remove(0).result;
+		assert!(tmp.is_err());
 		//
 		let tmp = res.remove(0).result;
 		assert!(tmp.is_ok());
 		//
-		let tmp = res.remove(0).result.unwrap_err();
-		assert!(matches!(tmp, Error::NsEmpty));
+		let tmp = res.remove(0).result;
+		assert!(tmp.is_ok());
 	}
 	Ok(())
 }
 
 #[tokio::test]
 async fn remove_statement_database() -> Result<(), Error> {
+	// Database not selected
+	{
+		let sql = "
+			REMOVE DATABASE test;
+			DEFINE DATABASE test;
+			REMOVE DATABASE test;
+		";
+		let dbs = new_ds().await?;
+		let ses = Session::owner().with_ns("test");
+		let res = &mut dbs.execute(sql, &ses, None).await?;
+		assert_eq!(res.len(), 3);
+		//
+		let tmp = res.remove(0).result;
+		assert!(tmp.is_err());
+		//
+		let tmp = res.remove(0).result;
+		assert!(tmp.is_ok());
+		//
+		let tmp = res.remove(0).result;
+		assert!(tmp.is_ok());
+	}
 	// Database selected
 	{
 		let sql = "
@@ -108,6 +128,7 @@ async fn remove_statement_database() -> Result<(), Error> {
 			REMOVE DATABASE test;
 		";
 		let dbs = new_ds().await?;
+		// No database is selected
 		let ses = Session::owner().with_ns("test").with_db("test");
 		let res = &mut dbs.execute(sql, &ses, None).await?;
 		assert_eq!(res.len(), 3);
@@ -120,28 +141,6 @@ async fn remove_statement_database() -> Result<(), Error> {
 		//
 		let tmp = res.remove(0).result;
 		assert!(tmp.is_ok());
-	}
-	// Database not selected
-	{
-		let sql = "
-			REMOVE DATABASE test;
-			DEFINE DATABASE test;
-			REMOVE DATABASE test;
-		";
-		let dbs = new_ds().await?;
-		// No database is selected
-		let ses = Session::owner().with_ns("test");
-		let res = &mut dbs.execute(sql, &ses, None).await?;
-		assert_eq!(res.len(), 3);
-		//
-		let tmp = res.remove(0).result.unwrap_err();
-		assert!(matches!(tmp, Error::DbEmpty));
-		//
-		let tmp = res.remove(0).result;
-		assert!(tmp.is_ok());
-		//
-		let tmp = res.remove(0).result.unwrap_err();
-		assert!(matches!(tmp, Error::DbEmpty));
 	}
 	Ok(())
 }
