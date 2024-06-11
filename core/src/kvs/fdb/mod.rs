@@ -90,14 +90,35 @@ impl Datastore {
 
 		match foundationdb::Database::from_path(path) {
 			Ok(db) => {
-				db.set_option(options::DatabaseOption::TransactionRetryLimit(5)).map_err(|e| {
-					Error::Ds(format!("Unable to set transaction retry limit: {}", e))
+				db.set_option(options::DatabaseOption::TransactionRetryLimit(
+					std::env::var("FDB_TRANSACTION_RETRY_LIMIT")
+						.unwrap_or_else(|_| "5".to_string())
+						.parse()
+						.map_err(|e| {
+							Error::Ds(format!("Unable to parse transaction retry limit: {}", e))
+						})?,
+				))
+				.map_err(|e| Error::Ds(format!("Unable to set transaction retry limit: {}", e)))?;
+				db.set_option(options::DatabaseOption::TransactionTimeout(
+					std::env::var("FDB_TRANSACTION_TIMEOUT")
+						.unwrap_or_else(|_| "5000".to_string())
+						.parse()
+						.map_err(|e| {
+							Error::Ds(format!("Unable to parse transaction timeout: {}", e))
+						})?,
+				))
+				.map_err(|e| Error::Ds(format!("Unable to set transaction timeout: {}", e)))?;
+				db.set_option(options::DatabaseOption::TransactionMaxRetryDelay(
+					std::env::var("FDB_TRANSACTION_MAX_RETRY_DELAY")
+						.unwrap_or_else(|_| "500".to_string())
+						.parse()
+						.map_err(|e| {
+							Error::Ds(format!("Unable to parse transaction max retry delay: {}", e))
+						})?,
+				))
+				.map_err(|e| {
+					Error::Ds(format!("Unable to set transaction max retry delay: {}", e))
 				})?;
-				db.set_option(options::DatabaseOption::TransactionTimeout(5000))
-					.map_err(|e| Error::Ds(format!("Unable to set transaction timeout: {}", e)))?;
-				db.set_option(options::DatabaseOption::TransactionMaxRetryDelay(500)).map_err(
-					|e| Error::Ds(format!("Unable to set transaction max retry delay: {}", e)),
-				)?;
 				Ok(Datastore {
 					db,
 					_fdbnet,
