@@ -1,8 +1,8 @@
-# This workflow triggers next releases
+# This workflow triggers alpha releases
 
-name: Next release
+name: Alpha release
 
-run-name: "Next release '${{ inputs.git-ref || github.ref_name }}' (publish: ${{ inputs.publish || github.event_name == 'schedule' }})"
+run-name: "Alpha release '${{ inputs.git-ref }}' (version: 2.0.0-alpha.${{ inputs.patch }}, publish: ${{ inputs.publish || github.event_name == 'schedule' }})"
 
 on:
   workflow_dispatch:
@@ -10,15 +10,17 @@ on:
       git-ref:
         required: true
         type: string
-        description: "The github ref of this next version (i.e. main, 1234567)"
+        description: "The github ref of this alpha version (i.e. main, 1234567)"
         default: main
+      patch:
+        required: true
+        type: string
+        description: "The patch of this alpha version (i.e. 1, 2)"
       publish:
         required: false
         type: boolean
         default: false
-        description: "Publish the next release"
-  schedule:
-    - cron: '0 0 * * *'
+        description: "Publish the alpha release"
 
 defaults:
   run:
@@ -29,11 +31,12 @@ permissions:
 
 jobs:
   release:
-    name: Prepare next release
+    name: Prepare alpha release
     uses: ./.github/workflows/reusable_publish_version.yml
     with:
-      environment: next
+      environment: alpha
       extra-features: storage-surrealkv
-      git-ref: ${{ inputs.git-ref || github.ref_name }}
-      publish: ${{ inputs.publish || github.event_name == 'schedule' }}
+      git-ref: ${{ inputs.git-ref }}
+      patch: ${{ inputs.patch }}
+      publish: ${{ inputs.publish }}
     secrets: inherit
