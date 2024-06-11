@@ -51,7 +51,7 @@ where
 	heuristic: Heuristic,
 }
 
-pub(super) type ElementId = u64;
+pub(crate) type ElementId = u64;
 
 impl<L0, L> Hnsw<L0, L>
 where

@@ -101,6 +101,12 @@ pub enum KeyCategory {
 	IndexBTreeNodeTerms,
 	/// crate::key::index::bu                /*{ns}*{db}*{tb}+{ix}!bu{id}
 	IndexTerms,
+	/// crate::key::index::he                /*{ns}*{db}*{tb}+{ix}!he{id}
+	IndexHnswElements,
+	/// crate::key::index::hd                /*{ns}*{db}*{tb}+{ix}!hd{id}
+	IndexHnswDodIds,
+	/// crate::key::index::ht                /*{ns}*{db}*{tb}+{ix}!ht{id}
+	IndexHnswThings,
 	/// crate::key::index                    /*{ns}*{db}*{tb}+{ix}*{fd}{id}
 	Index,
 	///
@@ -163,6 +169,9 @@ impl Display for KeyCategory {
 			KeyCategory::IndexFullTextState => "IndexFullTextState",
 			KeyCategory::IndexBTreeNodeTerms => "IndexBTreeNodeTerms",
 			KeyCategory::IndexTerms => "IndexTerms",
+			KeyCategory::IndexHnswElements => "IndexHnswElements",
+			KeyCategory::IndexHnswDodIds => "IndexHnswDodIds",
+			KeyCategory::IndexHnswThings => "IndexHnswThings",
 			KeyCategory::Index => "Index",
 			KeyCategory::ChangeFeed => "ChangeFeed",
 			KeyCategory::Thing => "Thing",
