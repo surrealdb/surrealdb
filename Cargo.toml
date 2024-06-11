@@ -119,6 +119,10 @@ tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }
 urlencoding = "2.1.3"
 uuid = { version = "1.6.1", features = ["serde", "js", "v4", "v7"] }
 
+[patch.crates-io]
+mac = "=0.1.1"
+maplit = "=1.0.2"
+
 [target.'cfg(unix)'.dependencies]
 nix = { version = "0.27.1", features = ["user"] }
 
