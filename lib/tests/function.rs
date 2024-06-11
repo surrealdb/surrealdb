@@ -1706,7 +1706,7 @@ async fn function_encode_html() -> Result<(), Error> {
 	let mut test = Test::new(sql).await?;
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::from("&lt;div&gt;Hello world!&lt;/div&gt;");
+	let val = Value::from("&lt;div&gt;Hello&#32;world!&lt;&#47;div&gt;");
 	assert_eq!(tmp, val);
 	//
 	Ok(())
