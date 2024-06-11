@@ -79,7 +79,7 @@ impl<'a> Document<'a> {
 		doc: &CursorDoc<'_>,
 	) -> Result<(), Error> {
 		// Should we run permissions checks?
-		if opt.check_perms(stm.into()) {
+		if opt.check_perms(stm.into())? {
 			// Get the table
 			let tb = self.tb(ctx, opt).await?;
 			// Process the table permissions

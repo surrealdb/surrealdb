@@ -283,50 +283,65 @@ impl IndexStores {
 		opt: &Options,
 		ix: &DefineIndexStatement,
 		p: &HnswParams,
-	) -> SharedHnswIndex {
-		let ikb = IndexKeyBase::new(opt, ix);
-		self.0.hnsw_indexes.get(&ikb, p).await
+	) -> Result<SharedHnswIndex, Error> {
+		let ikb = IndexKeyBase::new(opt.ns()?, opt.db()?, ix)?;
+		Ok(self.0.hnsw_indexes.get(&ikb, p).await)
 	}
 
 	pub(crate) async fn index_removed(
 		&self,
-		opt: &Options,
 		tx: &mut Transaction,
+		ns: &str,
+		db: &str,
 		tb: &str,
 		ix: &str,
 	) -> Result<(), Error> {
-		self.remove_index(
-			opt,
-			tx.get_and_cache_tb_index(opt.ns(), opt.db(), tb, ix).await?.as_ref(),
-		)
-		.await
+		self.remove_index(ns, db, tx.get_and_cache_tb_index(ns, db, tb, ix).await?.as_ref()).await
 	}
 
 	pub(crate) async fn namespace_removed(
 		&self,
-		opt: &Options,
 		tx: &mut Transaction,
+		ns: &str,
 	) -> Result<(), Error> {
-		for tb in tx.all_tb(opt.ns(), opt.db()).await?.iter() {
-			self.table_removed(opt, tx, &tb.name).await?;
+		for db in tx.all_db(ns).await?.iter() {
+			self.database_removed(tx, ns, &db.name).await?;
+		}
+		Ok(())
+	}
+
+	pub(crate) async fn database_removed(
+		&self,
+		tx: &mut Transaction,
+		ns: &str,
+		db: &str,
+	) -> Result<(), Error> {
+		for tb in tx.all_tb(ns, db).await?.iter() {
+			self.table_removed(tx, ns, db, &tb.name).await?;
 		}
 		Ok(())
 	}
 
 	pub(crate) async fn table_removed(
 		&self,
-		opt: &Options,
 		tx: &mut Transaction,
+		ns: &str,
+		db: &str,
 		tb: &str,
 	) -> Result<(), Error> {
-		for ix in tx.all_tb_indexes(opt.ns(), opt.db(), tb).await?.iter() {
-			self.remove_index(opt, ix).await?;
+		for ix in tx.all_tb_indexes(ns, db, tb).await?.iter() {
+			self.remove_index(ns, db, ix).await?;
 		}
 		Ok(())
 	}
 
-	async fn remove_index(&self, opt: &Options, ix: &DefineIndexStatement) -> Result<(), Error> {
-		let ikb = IndexKeyBase::new(opt, ix);
+	async fn remove_index(
+		&self,
+		ns: &str,
+		db: &str,
+		ix: &DefineIndexStatement,
+	) -> Result<(), Error> {
+		let ikb = IndexKeyBase::new(ns, db, ix)?;
 		match ix.index {
 			Index::Search(_) => {
 				self.remove_search_caches(ikb);
