@@ -1,5 +1,6 @@
 use std::hash::Hash;
 use std::net::IpAddr;
+use std::str::FromStr;
 use std::{collections::HashSet, sync::Arc};
 
 use ipnet::IpNet;
@@ -7,6 +8,7 @@ use url::Url;
 
 pub trait Target {
 	fn matches(&self, elem: &Self) -> bool;
+	fn is_valid(&self) -> bool;
 }
 
 #[derive(Debug, Clone, Hash, Eq, PartialEq)]
@@ -30,6 +32,30 @@ impl Target for FuncTarget {
 			}
 			Self(family, None) => family == &elem.0,
 		}
+	}
+
+	fn is_valid(&self) -> bool {
+		let family = &self.0;
+
+		let is_valid_custom_function = family == "fn";
+		let is_valid_ml_function = family == "ml";
+
+		is_valid_custom_function || is_valid_ml_function || self.is_valid_built_in_function()
+	}
+}
+
+impl FuncTarget {
+	fn is_valid_built_in_function(&self) -> bool {
+		let fuzzer_src = include_str!("../../../lib/fuzz/fuzz_targets/fuzz_sql_parser.dict");
+		let mut built_in_targets = fuzzer_src
+			.lines()
+			.filter(|s| s.contains("::"))
+			.map(|s| s.trim().trim_matches('"'))
+			.map(|s| s.trim_matches('(').trim_matches(')'))
+			.map(FuncTarget::from_str)
+			.filter_map(|t| t.ok());
+
+		built_in_targets.any(|t| t.matches(self))
 	}
 }
 
@@ -89,6 +115,10 @@ impl Target for NetTarget {
 				},
 			},
 		}
+	}
+
+	fn is_valid(&self) -> bool {
+		true
 	}
 }
 
