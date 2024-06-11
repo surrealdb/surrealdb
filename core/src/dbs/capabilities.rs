@@ -70,6 +70,7 @@ pub enum ParseFuncTargetError {
 	InvalidName,
 }
 
+impl std::error::Error for ParseFuncTargetError {}
 impl fmt::Display for ParseFuncTargetError {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		match *self {
@@ -167,6 +168,7 @@ impl Target for NetTarget {
 #[derive(Debug)]
 pub struct ParseNetTargetError;
 
+impl std::error::Error for ParseNetTargetError {}
 impl fmt::Display for ParseNetTargetError {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		write!(f, "The provided network target is not a valid host, ip address or ip network")
