@@ -71,21 +71,21 @@ impl Model {
 			let mut run = ctx.tx_lock().await;
 			// Get the function definition
 			let val =
-				run.get_and_cache_db_model(opt.ns(), opt.db(), &self.name, &self.version).await?;
+				run.get_and_cache_db_model(opt.ns()?, opt.db()?, &self.name, &self.version).await?;
 			drop(run);
 			val
 		};
 		// Calculate the model path
 		let path = format!(
 			"ml/{}/{}/{}-{}-{}.surml",
-			opt.ns(),
-			opt.db(),
+			opt.ns()?,
+			opt.db()?,
 			self.name,
 			self.version,
 			val.hash
 		);
 		// Check permissions
-		if opt.check_perms(Action::View) {
+		if opt.check_perms(Action::View)? {
 			match &val.permissions {
 				Permission::Full => (),
 				Permission::None => {

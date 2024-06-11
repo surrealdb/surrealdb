@@ -205,8 +205,6 @@ impl Function {
 				fnc::run(stk, ctx, opt, doc, s, a).await
 			}
 			Self::Custom(s, x) => {
-				// Check that a database is set to prevent a panic
-				opt.valid_for_db()?;
 				// Get the full name of this function
 				let name = format!("fn::{s}");
 				// Check this function is allowed
@@ -216,12 +214,12 @@ impl Function {
 					// Claim transaction
 					let mut run = ctx.tx_lock().await;
 					// Get the function definition
-					let val = run.get_and_cache_db_function(opt.ns(), opt.db(), s).await?;
+					let val = run.get_and_cache_db_function(opt.ns()?, opt.db()?, s).await?;
 					drop(run);
 					val
 				};
 				// Check permissions
-				if opt.check_perms(Action::View) {
+				if opt.check_perms(Action::View)? {
 					match &val.permissions {
 						Permission::Full => (),
 						Permission::None => {

@@ -78,12 +78,12 @@ impl KillStatement {
 		if FFLAGS.change_feed_live_queries.enabled() {
 			run.pre_commit_register_async_event(TrackedResult::KillQuery(KillEntry {
 				live_id: live_query_id,
-				ns: opt.ns().to_string(),
-				db: opt.db().to_string(),
+				ns: opt.ns()?.to_string(),
+				db: opt.db()?.to_string(),
 			}))?;
 		} else {
 			// Fetch the live query key
-			let key = crate::key::node::lq::new(opt.id()?, live_query_id.0, opt.ns(), opt.db());
+			let key = crate::key::node::lq::new(opt.id()?, live_query_id.0, opt.ns()?, opt.db()?);
 			// Fetch the live query key if it exists
 			match run.get(key).await? {
 				Some(val) => match std::str::from_utf8(&val) {
@@ -92,13 +92,13 @@ impl KillStatement {
 						let key = crate::key::node::lq::new(
 							opt.id()?,
 							live_query_id.0,
-							opt.ns(),
-							opt.db(),
+							opt.ns()?,
+							opt.db()?,
 						);
 						run.del(key).await?;
 						// Delete the table live query
 						let key =
-							crate::key::table::lq::new(opt.ns(), opt.db(), tb, live_query_id.0);
+							crate::key::table::lq::new(opt.ns()?, opt.db()?, tb, live_query_id.0);
 						run.del(key).await?;
 					}
 					_ => {

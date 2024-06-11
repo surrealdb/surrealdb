@@ -51,18 +51,21 @@ impl DefineFieldStatement {
 		run.clear_cache();
 		// Check if field already exists
 		let fd = self.name.to_string();
-		if self.if_not_exists && run.get_tb_field(opt.ns(), opt.db(), &self.what, &fd).await.is_ok()
-		{
-			return Err(Error::FdAlreadyExists {
-				value: fd,
-			});
+		if run.get_tb_field(opt.ns()?, opt.db()?, &self.what, &fd).await.is_ok() {
+			if self.if_not_exists {
+				return Ok(Value::None);
+			} else {
+				return Err(Error::FdAlreadyExists {
+					value: fd,
+				});
+			}
 		}
 		// Process the statement
-		run.add_ns(opt.ns(), opt.strict).await?;
-		run.add_db(opt.ns(), opt.db(), opt.strict).await?;
+		run.add_ns(opt.ns()?, opt.strict).await?;
+		run.add_db(opt.ns()?, opt.db()?, opt.strict).await?;
 
-		let tb = run.add_tb(opt.ns(), opt.db(), &self.what, opt.strict).await?;
-		let key = crate::key::table::fd::new(opt.ns(), opt.db(), &self.what, &fd);
+		let tb = run.add_tb(opt.ns()?, opt.db()?, &self.what, opt.strict).await?;
+		let key = crate::key::table::fd::new(opt.ns()?, opt.db()?, &self.what, &fd);
 		run.set(
 			key,
 			DefineFieldStatement {
@@ -73,7 +76,7 @@ impl DefineFieldStatement {
 		.await?;
 
 		// find existing field definitions.
-		let fields = run.all_tb_fields(opt.ns(), opt.db(), &self.what).await.ok();
+		let fields = run.all_tb_fields(opt.ns()?, opt.db()?, &self.what).await.ok();
 
 		// Process possible recursive_definitions.
 		if let Some(mut cur_kind) = self.kind.as_ref().and_then(|x| x.inner_kind()) {
@@ -83,9 +86,9 @@ impl DefineFieldStatement {
 				name.0.push(Part::All);
 
 				let fd = name.to_string();
-				let key = crate::key::table::fd::new(opt.ns(), opt.db(), &self.what, &fd);
-				run.add_ns(opt.ns(), opt.strict).await?;
-				run.add_db(opt.ns(), opt.db(), opt.strict).await?;
+				let key = crate::key::table::fd::new(opt.ns()?, opt.db()?, &self.what, &fd);
+				run.add_ns(opt.ns()?, opt.strict).await?;
+				run.add_db(opt.ns()?, opt.db()?, opt.strict).await?;
 
 				// merge the new definition with possible existing definitions.
 				let statement = if let Some(existing) =
@@ -152,14 +155,14 @@ impl DefineFieldStatement {
 			_ => None,
 		};
 		if let Some(tb) = new_tb {
-			let key = crate::key::database::tb::new(opt.ns(), opt.db(), &self.what);
+			let key = crate::key::database::tb::new(opt.ns()?, opt.db()?, &self.what);
 			run.set(key, &tb).await?;
-			let key = crate::key::table::ft::prefix(opt.ns(), opt.db(), &self.what);
+			let key = crate::key::table::ft::prefix(opt.ns()?, opt.db()?, &self.what);
 			run.clr(key).await?;
 		}
 
 		// Clear the cache
-		let key = crate::key::table::fd::prefix(opt.ns(), opt.db(), &self.what);
+		let key = crate::key::table::fd::prefix(opt.ns()?, opt.db()?, &self.what);
 		run.clr(key).await?;
 		// Ok all good
 		Ok(Value::None)

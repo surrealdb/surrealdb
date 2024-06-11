@@ -197,19 +197,24 @@ pub fn with_enough_stack(
 		.unwrap()
 }
 
+#[allow(dead_code)]
+fn skip_ok_pos(res: &mut Vec<Response>, pos: usize) -> Result<(), Error> {
+	assert!(!res.is_empty(), "At position {pos} - No more result!");
+	let r = res.remove(0).result;
+	let _ = r.is_err_and(|e| {
+		panic!("At position {pos} - Statement fails with: {e}");
+	});
+	Ok(())
+}
+
 /// Skip the specified number of successful results from a vector of responses.
 /// This function will panic if there are not enough results in the vector or if an error occurs.
 #[allow(dead_code)]
-pub fn skip_ok(res: &mut Vec<Response>, skip: usize) {
+pub fn skip_ok(res: &mut Vec<Response>, skip: usize) -> Result<(), Error> {
 	for i in 0..skip {
-		if res.is_empty() {
-			panic!("No more result #{i}");
-		}
-		let r = res.remove(0).result;
-		let _ = r.is_err_and(|e| {
-			panic!("Statement #{i} fails with: {e}");
-		});
+		skip_ok_pos(res, i)?;
 	}
+	Ok(())
 }
 
 /// Struct representing a test scenario.
@@ -238,14 +243,7 @@ impl Test {
 	/// Arguments `sql` - A string slice representing the SQL query.
 	/// Panics if an error occurs.
 	#[allow(dead_code)]
-	pub async fn new(sql: &str) -> Self {
-		Self::try_new(sql).await.unwrap_or_else(|e| panic!("{e}"))
-	}
-
-	/// Create a new instance of the Test struct and execute the given SQL statement.
-	///
-	#[allow(dead_code)]
-	pub async fn try_new(sql: &str) -> Result<Self, Error> {
+	pub async fn new(sql: &str) -> Result<Self, Error> {
 		let ds = new_ds().await?;
 		let session = Session::owner().with_ns("test").with_db("test");
 		let responses = ds.execute(sql, &session, None).await?;
@@ -260,52 +258,50 @@ impl Test {
 	/// Checks if the number of responses matches the expected size.
 	/// Panics if the number of responses does not match the expected size
 	#[allow(dead_code)]
-	pub fn expect_size(&mut self, expected: usize) -> &mut Self {
+	pub fn expect_size(&mut self, expected: usize) -> Result<&mut Self, Error> {
 		assert_eq!(
 			self.responses.len(),
 			expected,
 			"Unexpected number of results: {} - Expected: {expected}",
 			self.responses.len()
 		);
-		self
+		Ok(self)
 	}
 
 	/// Retrieves the next response from the responses list.
 	/// This method will panic if the responses list is empty, indicating that there are no more responses to retrieve.
 	/// The panic message will include the last position in the responses list before it was emptied.
 	#[allow(dead_code)]
-	pub fn next(&mut self) -> Response {
-		if self.responses.is_empty() {
-			panic!("No response left - last position: {}", self.pos);
-		}
+	pub fn next(&mut self) -> Result<Response, Error> {
+		assert!(!self.responses.is_empty(), "No response left - last position: {}", self.pos);
 		self.pos += 1;
-		self.responses.remove(0)
+		Ok(self.responses.remove(0))
 	}
 
 	/// Retrieves the next value from the responses list.
 	/// This method will panic if the responses list is empty, indicating that there are no more responses to retrieve.
 	/// The panic message will include the last position in the responses list before it was emptied.
-	pub fn next_value(&mut self) -> Value {
-		self.next()
-			.result
-			.unwrap_or_else(|e| panic!("Unexpected error: {e} - last position: {}", self.pos))
+	pub fn next_value(&mut self) -> Result<Value, Error> {
+		self.next()?.result
 	}
 
 	/// Skips a specified number of elements from the beginning of the `responses` vector
 	/// and updates the position.
 	#[allow(dead_code)]
-	pub fn skip_ok(&mut self, skip: usize) -> &mut Self {
-		skip_ok(&mut self.responses, skip);
-		self.pos += skip;
-		self
+	pub fn skip_ok(&mut self, skip: usize) -> Result<&mut Self, Error> {
+		for _ in 0..skip {
+			skip_ok_pos(&mut self.responses, self.pos)?;
+			self.pos += 1;
+		}
+		Ok(self)
 	}
 
 	/// Expects the next value to be equal to the provided value.
 	/// Panics if the expected value is not equal to the actual value.
 	/// Compliant with NaN and Constants.
 	#[allow(dead_code)]
-	pub fn expect_value(&mut self, val: Value) -> &mut Self {
-		let tmp = self.next_value();
+	pub fn expect_value(&mut self, val: Value) -> Result<&mut Self, Error> {
+		let tmp = self.next_value()?;
 		// Then check they are indeed the same values
 		//
 		// If it is a constant we need to transform it as a number
@@ -320,55 +316,65 @@ impl Test {
 			assert_eq!(tmp, val, "{tmp:#}");
 		}
 		//
-		self
+		Ok(self)
 	}
 
 	/// Expect values in the given slice to be present in the responses, following the same order.
 	#[allow(dead_code)]
-	pub fn expect_values(&mut self, values: &[Value]) -> &mut Self {
+	pub fn expect_values(&mut self, values: &[Value]) -> Result<&mut Self, Error> {
 		for value in values {
-			self.expect_value(value.clone());
+			self.expect_value(value.clone())?;
 		}
-		self
+		Ok(self)
 	}
 
 	/// Expect the given value to be equals to the next response.
 	#[allow(dead_code)]
-	pub fn expect_val(&mut self, val: &str) -> &mut Self {
+	pub fn expect_val(&mut self, val: &str) -> Result<&mut Self, Error> {
 		self.expect_value(value(val).unwrap())
 	}
 
 	#[allow(dead_code)]
 	/// Expect values in the given slice to be present in the responses, following the same order.
-	pub fn expect_vals(&mut self, vals: &[&str]) -> &mut Self {
+	pub fn expect_vals(&mut self, vals: &[&str]) -> Result<&mut Self, Error> {
 		for val in vals {
-			self.expect_val(val);
+			self.expect_val(val)?;
 		}
-		self
+		Ok(self)
 	}
 
-	/// Expects the next result to be an error with the specified error message.
+	/// Expects the next result to be an error with the given check function returning true.
 	/// This function will panic if the next result is not an error or if the error
-	/// message does not match the specified error.
+	/// message does not pass the check.
 	#[allow(dead_code)]
-	pub fn expect_error(&mut self, error: &str) -> &mut Self {
-		let tmp = self.next().result;
-		assert!(
-			matches!(
-				&tmp,
-				Err(e) if e.to_string() == error
-			),
-			"{tmp:?} didn't match {error}"
-		);
-		self
+	pub fn expect_error_func<F: Fn(&Error) -> bool>(
+		&mut self,
+		check: F,
+	) -> Result<&mut Self, Error> {
+		let tmp = self.next()?.result;
+		match &tmp {
+			Ok(val) => {
+				panic!("At position {} - Expect error, but got OK: {val}", self.pos);
+			}
+			Err(e) => {
+				assert!(check(e), "At position {} - Err didn't match: {e}", self.pos)
+			}
+		}
+		Ok(self)
 	}
 
 	#[allow(dead_code)]
-	pub fn expect_errors(&mut self, errors: &[&str]) -> &mut Self {
+	/// Expects the next result to be an error with the specified error message.
+	pub fn expect_error(&mut self, error: &str) -> Result<&mut Self, Error> {
+		self.expect_error_func(|e| e.to_string() == error)
+	}
+
+	#[allow(dead_code)]
+	pub fn expect_errors(&mut self, errors: &[&str]) -> Result<&mut Self, Error> {
 		for error in errors {
-			self.expect_error(error);
+			self.expect_error(error)?;
 		}
-		self
+		Ok(self)
 	}
 
 	/// Expects the next value to be a floating-point number and compares it with the given value.
@@ -383,8 +389,8 @@ impl Test {
 	/// Panics if the next value is not a number or if the difference
 	/// between the expected and actual value exceeds the precision.
 	#[allow(dead_code)]
-	pub fn expect_float(&mut self, val: f64, precision: f64) -> &mut Self {
-		let tmp = self.next_value();
+	pub fn expect_float(&mut self, val: f64, precision: f64) -> Result<&mut Self, Error> {
+		let tmp = self.next_value()?;
 		if let Value::Number(Number::Float(n)) = tmp {
 			let diff = (n - val).abs();
 			assert!(
@@ -394,15 +400,15 @@ impl Test {
 		} else {
 			panic!("At position {}: Value {tmp} is not a number", self.pos);
 		}
-		self
+		Ok(self)
 	}
 
 	#[allow(dead_code)]
-	pub fn expect_floats(&mut self, vals: &[f64], precision: f64) -> &mut Self {
+	pub fn expect_floats(&mut self, vals: &[f64], precision: f64) -> Result<&mut Self, Error> {
 		for val in vals {
-			self.expect_float(*val, precision);
+			self.expect_float(*val, precision)?;
 		}
-		self
+		Ok(self)
 	}
 }
 

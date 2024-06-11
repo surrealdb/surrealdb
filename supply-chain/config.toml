@@ -1820,7 +1820,7 @@ version = "0.2.15"
 criteria = "safe-to-run"
 
 [[exemptions.time]]
-version = "0.3.34"
+version = "0.3.36"
 criteria = "safe-to-deploy"
 
 [[exemptions.time-macros]]

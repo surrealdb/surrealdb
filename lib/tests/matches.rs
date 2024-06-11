@@ -21,7 +21,7 @@ async fn select_where_matches_using_index() -> Result<(), Error> {
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 5);
 	//
-	skip_ok(res, 3);
+	skip_ok(res, 3)?;
 	//
 	let tmp = res.remove(0).result?;
 	let val = Value::parse(
@@ -74,7 +74,7 @@ async fn select_where_matches_without_using_index_iterator() -> Result<(), Error
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 6);
 	//
-	skip_ok(res, 4);
+	skip_ok(res, 4)?;
 	//
 	let tmp = res.remove(0).result?;
 	let val = Value::parse(
@@ -133,7 +133,7 @@ async fn select_where_matches_using_index_and_arrays(parallel: bool) -> Result<(
 	let res = &mut dbs.execute(&sql, &ses, None).await?;
 	assert_eq!(res.len(), 5);
 	//
-	skip_ok(res, 3);
+	skip_ok(res, 3)?;
 	//
 	let tmp = res.remove(0).result?;
 	let val = Value::parse(
@@ -204,7 +204,7 @@ async fn select_where_matches_partial_highlight() -> Result<(), Error> {
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 9);
 	//
-	skip_ok(res, 3);
+	skip_ok(res, 3)?;
 	//
 	for i in 0..2 {
 		let tmp = res.remove(0).result?;
@@ -289,7 +289,7 @@ async fn select_where_matches_partial_highlight_ngram() -> Result<(), Error> {
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 10);
 	//
-	skip_ok(res, 3);
+	skip_ok(res, 3)?;
 	//
 	for i in 0..3 {
 		let tmp = res.remove(0).result?;
@@ -375,7 +375,7 @@ async fn select_where_matches_using_index_and_objects(parallel: bool) -> Result<
 	let res = &mut dbs.execute(&sql, &ses, None).await?;
 	assert_eq!(res.len(), 5);
 	//
-	skip_ok(res, 3);
+	skip_ok(res, 3)?;
 	//
 	let tmp = res.remove(0).result?;
 	let val = Value::parse(
@@ -443,7 +443,7 @@ async fn select_where_matches_using_index_offsets() -> Result<(), Error> {
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 5);
 	//
-	skip_ok(res, 4);
+	skip_ok(res, 4)?;
 	//
 	let tmp = res.remove(0).result?;
 	let val = Value::parse(
@@ -480,7 +480,7 @@ async fn select_where_matches_using_index_and_score() -> Result<(), Error> {
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 7);
 	//
-	skip_ok(res, 6);
+	skip_ok(res, 6)?;
 	//
 	let tmp = res.remove(0).result?;
 	let val = Value::parse(
@@ -517,7 +517,7 @@ async fn select_where_matches_without_using_index_and_score() -> Result<(), Erro
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 9);
 	//
-	skip_ok(res, 7);
+	skip_ok(res, 7)?;
 	//
 	let tmp = res.remove(0).result?;
 	let val = Value::parse(
@@ -565,7 +565,7 @@ async fn select_where_matches_without_complex_query() -> Result<(), Error> {
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 10);
 	//
-	skip_ok(res, 6);
+	skip_ok(res, 6)?;
 	//
 	let tmp = res.remove(0).result?;
 	let val_docs = Value::parse(
@@ -654,7 +654,7 @@ async fn select_where_matches_mixing_indexes() -> Result<(), Error> {
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 7);
 	//
-	skip_ok(res, 5);
+	skip_ok(res, 5)?;
 	//
 	let tmp = res.remove(0).result?;
 	let val = Value::parse(

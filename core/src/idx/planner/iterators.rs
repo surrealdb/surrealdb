@@ -404,10 +404,10 @@ impl JoinThingIterator {
 		opt: &Options,
 		ix: &DefineIndexStatement,
 		remote_iterators: VecDeque<ThingIterator>,
-	) -> Self {
-		Self {
-			ns: opt.ns().to_string(),
-			db: opt.db().to_string(),
+	) -> Result<Self, Error> {
+		Ok(Self {
+			ns: opt.ns()?.to_string(),
+			db: opt.db()?.to_string(),
 			ix_what: ix.what.clone(),
 			ix_name: ix.name.clone(),
 			current_remote: None,
@@ -415,7 +415,7 @@ impl JoinThingIterator {
 			remote_iterators,
 			current_local: None,
 			distinct: Default::default(),
-		}
+		})
 	}
 }
 
@@ -501,8 +501,8 @@ impl IndexJoinThingIterator {
 		opt: &Options,
 		ix: &DefineIndexStatement,
 		remote_iterators: VecDeque<ThingIterator>,
-	) -> Self {
-		Self(irf, JoinThingIterator::new(opt, ix, remote_iterators))
+	) -> Result<Self, Error> {
+		Ok(Self(irf, JoinThingIterator::new(opt, ix, remote_iterators)?))
 	}
 
 	async fn next_batch<B: IteratorBatch>(
@@ -663,20 +663,20 @@ impl UniqueUnionThingIterator {
 		opt: &Options,
 		ix: &DefineIndexStatement,
 		a: &Array,
-	) -> Self {
+	) -> Result<Self, Error> {
 		// We create a VecDeque to hold the key for each value in the array.
 		let keys: VecDeque<Key> =
 			a.0.iter()
-				.map(|v| {
+				.map(|v| -> Result<Key, Error> {
 					let a = Array::from(v.clone());
-					let key = Index::new(opt.ns(), opt.db(), &ix.what, &ix.name, &a, None).into();
-					key
+					let key = Index::new(opt.ns()?, opt.db()?, &ix.what, &ix.name, &a, None).into();
+					Ok(key)
 				})
-				.collect();
-		Self {
+				.collect::<Result<VecDeque<Key>, Error>>()?;
+		Ok(Self {
 			irf,
 			keys,
-		}
+		})
 	}
 
 	async fn next_batch<B: IteratorBatch>(
@@ -710,8 +710,8 @@ impl UniqueJoinThingIterator {
 		opt: &Options,
 		ix: &DefineIndexStatement,
 		remote_iterators: VecDeque<ThingIterator>,
-	) -> Self {
-		Self(irf, JoinThingIterator::new(opt, ix, remote_iterators))
+	) -> Result<Self, Error> {
+		Ok(Self(irf, JoinThingIterator::new(opt, ix, remote_iterators)?))
 	}
 
 	async fn next_batch<B: IteratorBatch>(

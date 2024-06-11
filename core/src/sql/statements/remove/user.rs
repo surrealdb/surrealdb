@@ -46,9 +46,9 @@ impl RemoveUserStatement {
 					// Clear the cache
 					run.clear_cache();
 					// Get the definition
-					let us = run.get_ns_user(opt.ns(), &self.name).await?;
+					let us = run.get_ns_user(opt.ns()?, &self.name).await?;
 					// Delete the definition
-					let key = crate::key::namespace::us::new(opt.ns(), &us.name);
+					let key = crate::key::namespace::us::new(opt.ns()?, &us.name);
 					run.del(key).await?;
 					// Ok all good
 					Ok(Value::None)
@@ -59,9 +59,9 @@ impl RemoveUserStatement {
 					// Clear the cache
 					run.clear_cache();
 					// Get the definition
-					let us = run.get_db_user(opt.ns(), opt.db(), &self.name).await?;
+					let us = run.get_db_user(opt.ns()?, opt.db()?, &self.name).await?;
 					// Delete the definition
-					let key = crate::key::database::us::new(opt.ns(), opt.db(), &us.name);
+					let key = crate::key::database::us::new(opt.ns()?, opt.db()?, &us.name);
 					run.del(key).await?;
 					// Ok all good
 					Ok(Value::None)

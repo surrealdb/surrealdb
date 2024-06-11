@@ -898,7 +898,7 @@ pub enum Error {
 	},
 
 	/// The requested user already exists
-	#[error("The user '{value}' already exists")]
+	#[error("The root user '{value}' already exists")]
 	UserRootAlreadyExists {
 		value: String,
 	},

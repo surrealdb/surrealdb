@@ -137,8 +137,8 @@ pub async fn init(ct: CancellationToken) -> Result<(), Error> {
 		.layer(HttpMetricsLayer)
 		.layer(SetSensitiveResponseHeadersLayer::from_shared(headers))
 		.layer(AsyncRequireAuthorizationLayer::new(auth::SurrealAuth))
-		.layer(headers::add_server_header())
-		.layer(headers::add_version_header())
+		.layer(headers::add_server_header(!opt.no_identification_headers))
+		.layer(headers::add_version_header(!opt.no_identification_headers))
 		.layer(
 			CorsLayer::new()
 				.allow_methods([

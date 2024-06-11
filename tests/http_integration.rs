@@ -11,7 +11,7 @@ mod http_integration {
 	use test_log::test;
 	use ulid::Ulid;
 
-	use super::common::{self, PASS, USER};
+	use super::common::{self, StartServerArguments, PASS, USER};
 
 	#[test(tokio::test)]
 	async fn basic_auth() -> Result<(), Box<dyn std::error::Error>> {
@@ -348,6 +348,33 @@ mod http_integration {
 
 		let res = Client::default().get(url).send().await?;
 		assert_eq!(res.status(), 200, "response: {:#?}", res);
+
+		Ok(())
+	}
+
+	#[test(tokio::test)]
+	async fn no_server_id_headers() -> Result<(), Box<dyn std::error::Error>> {
+		// default server has the id headers
+		{
+			let (addr, _server) = common::start_server_with_defaults().await.unwrap();
+			let url = &format!("http://{addr}/health");
+
+			let res = Client::default().get(url).send().await?;
+			assert!(res.headers().contains_key("server"));
+			assert!(res.headers().contains_key("surreal-version"));
+		}
+
+		// turn on the no-identification-headers option to suppress headers
+		{
+			let mut start_server_arguments = StartServerArguments::default();
+			start_server_arguments.args.push_str(" --no-identification-headers");
+			let (addr, _server) = common::start_server(start_server_arguments).await.unwrap();
+			let url = &format!("http://{addr}/health");
+
+			let res = Client::default().get(url).send().await?;
+			assert!(!res.headers().contains_key("server"));
+			assert!(!res.headers().contains_key("surreal-version"));
+		}
 
 		Ok(())
 	}

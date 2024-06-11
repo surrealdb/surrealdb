@@ -39,10 +39,14 @@ impl DefineNamespaceStatement {
 		// Clear the cache
 		run.clear_cache();
 		// Check if namespace already exists
-		if self.if_not_exists && run.get_ns(&self.name).await.is_ok() {
-			return Err(Error::NsAlreadyExists {
-				value: self.name.to_string(),
-			});
+		if run.get_ns(&self.name).await.is_ok() {
+			if self.if_not_exists {
+				return Ok(Value::None);
+			} else {
+				return Err(Error::NsAlreadyExists {
+					value: self.name.to_string(),
+				});
+			}
 		}
 		if self.id.is_none() {
 			// Set the id
