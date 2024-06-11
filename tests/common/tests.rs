@@ -40,9 +40,10 @@ async fn info() -> Result<(), Box<dyn std::error::Error>> {
 	socket
 		.send_message_query(
 			r#"
-			DEFINE ACCESS user ON DATABASE TYPE RECORD DURATION 24h
+			DEFINE ACCESS user ON DATABASE TYPE RECORD
 				SIGNUP ( CREATE user SET user = $user, pass = crypto::argon2::generate($pass) )
 				SIGNIN ( SELECT * FROM user WHERE user = $user AND crypto::argon2::compare(pass, $pass) )
+				DURATION FOR SESSION 24h
 			;
 			"#,
 		)
@@ -84,9 +85,10 @@ async fn signup() -> Result<(), Box<dyn std::error::Error>> {
 	socket
 		.send_message_query(
 			r#"
-			DEFINE ACCESS user ON DATABASE TYPE RECORD DURATION 24h
+			DEFINE ACCESS user ON DATABASE TYPE RECORD
 				SIGNUP ( CREATE user SET email = $email, pass = crypto::argon2::generate($pass) )
 				SIGNIN ( SELECT * FROM user WHERE email = $email AND crypto::argon2::compare(pass, $pass) )
+				DURATION FOR SESSION 24h
 			;"#,
 		)
 		.await?;
@@ -132,9 +134,10 @@ async fn signin() -> Result<(), Box<dyn std::error::Error>> {
 	socket
 		.send_message_query(
 			r#"
-			DEFINE ACCESS user ON DATABASE TYPE RECORD DURATION 24h
+			DEFINE ACCESS user ON DATABASE TYPE RECORD
 				SIGNUP ( CREATE user SET email = $email, pass = crypto::argon2::generate($pass) )
 				SIGNIN ( SELECT * FROM user WHERE email = $email AND crypto::argon2::compare(pass, $pass) )
+				DURATION FOR SESSION 24h
 			;"#,
 		)
 		.await?;
@@ -873,9 +876,10 @@ async fn variable_auth_live_query() -> Result<(), Box<dyn std::error::Error>> {
 	socket_permanent
 		.send_message_query(
 			r#"
-			DEFINE ACCESS user ON DATABASE TYPE RECORD DURATION 1s
+			DEFINE ACCESS user ON DATABASE TYPE RECORD
 				SIGNUP ( CREATE user SET email = $email, pass = crypto::argon2::generate($pass) )
 				SIGNIN ( SELECT * FROM user WHERE email = $email AND crypto::argon2::compare(pass, $pass) )
+				DURATION FOR SESSION 1s, FOR TOKEN 24h
 			;"#,
 		)
 		.await?;
@@ -938,9 +942,10 @@ async fn session_expiration() {
 	socket
 		.send_message_query(
 			r#"
-			DEFINE ACCESS user ON DATABASE TYPE RECORD DURATION 1s
+			DEFINE ACCESS user ON DATABASE TYPE RECORD
 				SIGNUP ( CREATE user SET email = $email, pass = crypto::argon2::generate($pass) )
 				SIGNIN ( SELECT * FROM user WHERE email = $email AND crypto::argon2::compare(pass, $pass) )
+				DURATION FOR SESSION 1s, FOR TOKEN 1d
 			;"#,
 		)
 		.await
@@ -988,12 +993,12 @@ async fn session_expiration() {
 	assert!(res["result"].is_string(), "result: {:?}", res);
 	let res = res["result"].as_str().unwrap();
 	assert!(res.starts_with("eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzUxMiJ9"), "result: {}", res);
-	// Authenticate using the token, which will expire soon
+	// Authenticate using the token, which expires in a day
 	socket.send_request("authenticate", json!([res,])).await.unwrap();
 	// Check if the session is now authenticated
 	let res = socket.send_message_query("SELECT VALUE working FROM test:1").await.unwrap();
 	assert_eq!(res[0]["result"], json!(["yes"]), "result: {:?}", res);
-	// Wait two seconds for token to expire
+	// Wait two seconds for the session to expire
 	tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
 	// Check that the session has expired and queries fail
 	let res = socket.send_request("query", json!(["SELECT VALUE working FROM test:1",])).await;
@@ -1048,9 +1053,10 @@ async fn session_expiration_operations() {
 	socket
 		.send_message_query(
 			r#"
-			DEFINE ACCESS user ON DATABASE TYPE RECORD DURATION 1s
+			DEFINE ACCESS user ON DATABASE TYPE RECORD
 				SIGNUP ( CREATE user SET email = $email, pass = crypto::argon2::generate($pass) )
 				SIGNIN ( SELECT * FROM user WHERE email = $email AND crypto::argon2::compare(pass, $pass) )
+				DURATION FOR SESSION 1s, FOR TOKEN 1d
 			;"#,
 		)
 		.await
@@ -1098,7 +1104,7 @@ async fn session_expiration_operations() {
 	assert!(res["result"].is_string(), "result: {:?}", res);
 	let res = res["result"].as_str().unwrap();
 	assert!(res.starts_with("eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzUxMiJ9"), "result: {}", res);
-	// Authenticate using the token, which will expire soon
+	// Authenticate using the token, which expires in a day
 	socket.send_request("authenticate", json!([res,])).await.unwrap();
 	// Check if the session is now authenticated
 	let res = socket.send_message_query("SELECT VALUE working FROM test:1").await.unwrap();
@@ -1304,9 +1310,10 @@ async fn session_reauthentication() {
 	socket
 		.send_message_query(
 			r#"
-			DEFINE ACCESS user ON DATABASE TYPE RECORD DURATION 1h
+			DEFINE ACCESS user ON DATABASE TYPE RECORD
 				SIGNUP ( CREATE user SET email = $email, pass = crypto::argon2::generate($pass) )
 				SIGNIN ( SELECT * FROM user WHERE email = $email AND crypto::argon2::compare(pass, $pass) )
+				DURATION FOR SESSION 1s, FOR TOKEN 24h
 			;"#,
 		)
 		.await
@@ -1392,9 +1399,10 @@ async fn session_reauthentication_expired() {
 	socket
 		.send_message_query(
 			r#"
-			DEFINE ACCESS user ON DATABASE TYPE RECORD DURATION 1s
+			DEFINE ACCESS user ON DATABASE TYPE RECORD
 				SIGNUP ( CREATE user SET email = $email, pass = crypto::argon2::generate($pass) )
 				SIGNIN ( SELECT * FROM user WHERE email = $email AND crypto::argon2::compare(pass, $pass) )
+				DURATION FOR SESSION 1s, FOR TOKEN 24h
 			;"#,
 		)
 		.await

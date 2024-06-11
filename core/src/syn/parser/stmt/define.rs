@@ -16,8 +16,8 @@ use crate::{
 		},
 		table_type,
 		tokenizer::Tokenizer,
-		AccessType, Ident, Idioms, Index, Kind, Param, Permissions, Scoring, Strand, TableType,
-		Values,
+		user, AccessType, Ident, Idioms, Index, Kind, Param, Permissions, Scoring, Strand,
+		TableType, Values,
 	},
 	syn::{
 		parser::{
@@ -182,7 +182,7 @@ impl Parser<'_> {
 			name,
 			base,
 			vec!["Viewer".into()], // New users get the viewer role by default
-			None,                  // Sessions for system users do not expire by default
+			user::UserDuration::default(),
 		);
 
 		if if_not_exists {
@@ -210,9 +210,35 @@ impl Parser<'_> {
 						res.roles.push(self.next_token_value()?);
 					}
 				}
-				t!("SESSION") => {
+				t!("DURATION") => {
 					self.pop_peek();
-					res.set_session(Some(self.next_token_value()?));
+					while self.eat(t!("FOR")) {
+						match self.peek_kind() {
+							t!("TOKEN") => {
+								self.pop_peek();
+								match self.peek_kind() {
+									t!("NONE") => {
+										// Currently, SurrealDB does not accept tokens without expiration.
+										// For this reason, some token duration must be set.
+										unexpected!(self, t!("NONE"), "a token duration");
+									}
+									_ => res.set_token_duration(Some(self.next_token_value()?)),
+								}
+							}
+							t!("SESSION") => {
+								self.pop_peek();
+								match self.peek_kind() {
+									t!("NONE") => {
+										self.pop_peek();
+										res.set_session_duration(None)
+									}
+									_ => res.set_session_duration(Some(self.next_token_value()?)),
+								}
+							}
+							_ => break,
+						}
+						self.eat(t!(","));
+					}
 				}
 				_ => break,
 			}
@@ -255,7 +281,7 @@ impl Parser<'_> {
 					match self.peek_kind() {
 						t!("JWT") => {
 							self.pop_peek();
-							res.kind = AccessType::Jwt(self.parse_jwt(None)?);
+							res.kind = AccessType::Jwt(self.parse_jwt()?);
 						}
 						t!("RECORD") => {
 							self.pop_peek();
@@ -264,15 +290,6 @@ impl Parser<'_> {
 							};
 							loop {
 								match self.peek_kind() {
-									t!("DURATION") => {
-										self.pop_peek();
-										ac.duration = Some(self.next_token_value()?);
-										// By default, token duration matches session duration
-										// The token duration can be modified in the WITH JWT clause
-										if let Some(ref mut iss) = ac.jwt.issue {
-											iss.duration = ac.duration;
-										}
-									}
 									t!("SIGNUP") => {
 										self.pop_peek();
 										ac.signup =
@@ -288,11 +305,53 @@ impl Parser<'_> {
 							}
 							if self.eat(t!("WITH")) {
 								expected!(self, t!("JWT"));
-								ac.jwt = self.parse_jwt(Some(AccessType::Record(ac.clone())))?;
+								ac.jwt = self.parse_jwt()?;
 							}
 							res.kind = AccessType::Record(ac);
 						}
 						_ => break,
+					}
+				}
+				t!("DURATION") => {
+					self.pop_peek();
+					while self.eat(t!("FOR")) {
+						match self.peek_kind() {
+							t!("GRANT") => {
+								self.pop_peek();
+								match self.peek_kind() {
+									t!("NONE") => {
+										self.pop_peek();
+										res.duration.grant = None
+									}
+									_ => res.duration.grant = Some(self.next_token_value()?),
+								}
+							}
+							t!("TOKEN") => {
+								self.pop_peek();
+								match self.peek_kind() {
+									t!("NONE") => {
+										// Currently, SurrealDB does not accept tokens without expiration.
+										// For this reason, some token duration must be set.
+										// In the future, allowing issuing tokens without expiration may be useful.
+										// Tokens issued by access methods can be consumed by third parties that support it.
+										unexpected!(self, t!("NONE"), "a token duration");
+									}
+									_ => res.duration.token = Some(self.next_token_value()?),
+								}
+							}
+							t!("SESSION") => {
+								self.pop_peek();
+								match self.peek_kind() {
+									t!("NONE") => {
+										self.pop_peek();
+										res.duration.session = None
+									}
+									_ => res.duration.session = Some(self.next_token_value()?),
+								}
+							}
+							_ => break,
+						}
+						self.eat(t!(","));
 					}
 				}
 				_ => break,
@@ -444,11 +503,7 @@ impl Parser<'_> {
 				}
 				t!("SESSION") => {
 					self.pop_peek();
-					ac.duration = Some(self.next_token_value()?);
-					// By default, token duration matches session duration.
-					if let Some(ref mut iss) = ac.jwt.issue {
-						iss.duration = ac.duration;
-					}
+					res.duration.session = Some(self.next_token_value()?);
 				}
 				t!("SIGNUP") => {
 					self.pop_peek();
@@ -1083,7 +1138,7 @@ impl Parser<'_> {
 		Ok(Kind::Record(names))
 	}
 
-	pub fn parse_jwt(&mut self, ac: Option<AccessType>) -> ParseResult<access_type::JwtAccess> {
+	pub fn parse_jwt(&mut self) -> ParseResult<access_type::JwtAccess> {
 		let mut res = access_type::JwtAccess {
 			// By default, a JWT access method is only used to verify.
 			issue: None,
@@ -1093,13 +1148,6 @@ impl Parser<'_> {
 		let mut iss = access_type::JwtAccessIssue {
 			..Default::default()
 		};
-
-		// If an access method was passed, inherit any relevant defaults.
-		// This will become a match statement whenever more access methods are available.
-		if let Some(AccessType::Record(ac)) = ac {
-			// By default, token duration is inherited from session duration in record access.
-			iss.duration = ac.duration;
-		}
 
 		match self.peek_kind() {
 			t!("ALGORITHM") => {
@@ -1175,10 +1223,6 @@ impl Parser<'_> {
 							}
 						}
 						iss.key = key;
-					}
-					t!("DURATION") => {
-						self.pop_peek();
-						iss.duration = Some(self.next_token_value()?);
 					}
 					_ => break,
 				}

@@ -4,7 +4,9 @@ use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::iam::{Action, ResourceKind};
 use crate::sql::statements::info::InfoStructure;
-use crate::sql::{escape::quote_str, fmt::Fmt, Base, Duration, Ident, Object, Strand, Value};
+use crate::sql::{
+	escape::quote_str, fmt::Fmt, user::UserDuration, Base, Duration, Ident, Object, Strand, Value,
+};
 use argon2::{
 	password_hash::{PasswordHasher, SaltString},
 	Argon2,
@@ -26,7 +28,7 @@ pub struct DefineUserStatement {
 	pub code: String,
 	pub roles: Vec<Ident>,
 	#[revision(start = 3)]
-	pub session: Option<Duration>,
+	pub duration: UserDuration,
 	pub comment: Option<Strand>,
 	#[revision(start = 2)]
 	pub if_not_exists: bool,
@@ -47,7 +49,7 @@ impl From<(Base, &str, &str, &str)> for DefineUserStatement {
 				.map(char::from)
 				.collect::<String>(),
 			roles: vec![role.into()],
-			session: None,
+			duration: UserDuration::default(),
 			comment: None,
 			if_not_exists: false,
 		}
@@ -59,13 +61,13 @@ impl DefineUserStatement {
 		name: Ident,
 		base: Base,
 		roles: Vec<Ident>,
-		session: Option<Duration>,
+		duration: UserDuration,
 	) -> Self {
 		DefineUserStatement {
 			name,
 			base,
-			roles,   // New users get the viewer role by default
-			session, // Sessions for system users do not expire by default
+			roles,
+			duration,
 			code: rand::thread_rng()
 				.sample_iter(&Alphanumeric)
 				.take(128)
@@ -86,8 +88,12 @@ impl DefineUserStatement {
 		self.hash = passhash;
 	}
 
-	pub(crate) fn set_session(&mut self, session: Option<Duration>) {
-		self.session = session;
+	pub(crate) fn set_token_duration(&mut self, duration: Option<Duration>) {
+		self.duration.token = duration;
+	}
+
+	pub(crate) fn set_session_duration(&mut self, duration: Option<Duration>) {
+		self.duration.session = duration;
 	}
 
 	/// Process this type returning a computed simple Value
@@ -107,10 +113,14 @@ impl DefineUserStatement {
 				// Clear the cache
 				run.clear_cache();
 				// Check if user already exists
-				if self.if_not_exists && run.get_root_user(&self.name).await.is_ok() {
-					return Err(Error::UserRootAlreadyExists {
-						value: self.name.to_string(),
-					});
+				if run.get_root_user(&self.name).await.is_ok() {
+					if self.if_not_exists {
+						return Ok(Value::None);
+					} else {
+						return Err(Error::UserRootAlreadyExists {
+							value: self.name.to_string(),
+						});
+					}
 				}
 				// Process the statement
 				let key = crate::key::root::us::new(&self.name);
@@ -132,15 +142,19 @@ impl DefineUserStatement {
 				// Clear the cache
 				run.clear_cache();
 				// Check if user already exists
-				if self.if_not_exists && run.get_ns_user(opt.ns(), &self.name).await.is_ok() {
-					return Err(Error::UserNsAlreadyExists {
-						value: self.name.to_string(),
-						ns: opt.ns().into(),
-					});
+				if run.get_ns_user(opt.ns()?, &self.name).await.is_ok() {
+					if self.if_not_exists {
+						return Ok(Value::None);
+					} else {
+						return Err(Error::UserNsAlreadyExists {
+							value: self.name.to_string(),
+							ns: opt.ns()?.into(),
+						});
+					}
 				}
 				// Process the statement
-				let key = crate::key::namespace::us::new(opt.ns(), &self.name);
-				run.add_ns(opt.ns(), opt.strict).await?;
+				let key = crate::key::namespace::us::new(opt.ns()?, &self.name);
+				run.add_ns(opt.ns()?, opt.strict).await?;
 				run.set(
 					key,
 					DefineUserStatement {
@@ -159,19 +173,21 @@ impl DefineUserStatement {
 				// Clear the cache
 				run.clear_cache();
 				// Check if user already exists
-				if self.if_not_exists
-					&& run.get_db_user(opt.ns(), opt.db(), &self.name).await.is_ok()
-				{
-					return Err(Error::UserDbAlreadyExists {
-						value: self.name.to_string(),
-						ns: opt.ns().into(),
-						db: opt.db().into(),
-					});
+				if run.get_db_user(opt.ns()?, opt.db()?, &self.name).await.is_ok() {
+					if self.if_not_exists {
+						return Ok(Value::None);
+					} else {
+						return Err(Error::UserDbAlreadyExists {
+							value: self.name.to_string(),
+							ns: opt.ns()?.into(),
+							db: opt.db()?.into(),
+						});
+					}
 				}
 				// Process the statement
-				let key = crate::key::database::us::new(opt.ns(), opt.db(), &self.name);
-				run.add_ns(opt.ns(), opt.strict).await?;
-				run.add_db(opt.ns(), opt.db(), opt.strict).await?;
+				let key = crate::key::database::us::new(opt.ns()?, opt.db()?, &self.name);
+				run.add_ns(opt.ns()?, opt.strict).await?;
+				run.add_db(opt.ns()?, opt.db()?, opt.strict).await?;
 				run.set(
 					key,
 					DefineUserStatement {
@@ -206,9 +222,26 @@ impl Display for DefineUserStatement {
 				&self.roles.iter().map(|r| r.to_string().to_uppercase()).collect::<Vec<String>>()
 			),
 		)?;
-		if let Some(ref v) = self.session {
-			write!(f, " SESSION {v}")?
-		}
+		// Always print relevant durations so defaults can be changed in the future
+		// If default values were not printed, exports would not be forward compatible
+		// None values need to be printed, as they are different from the default values
+		write!(f, " DURATION")?;
+		write!(
+			f,
+			" FOR TOKEN {},",
+			match self.duration.token {
+				Some(dur) => format!("{}", dur),
+				None => "NONE".to_string(),
+			}
+		)?;
+		write!(
+			f,
+			" FOR SESSION {}",
+			match self.duration.session {
+				Some(dur) => format!("{}", dur),
+				None => "NONE".to_string(),
+			}
+		)?;
 		if let Some(ref v) = self.comment {
 			write!(f, " COMMENT {v}")?
 		}
@@ -223,7 +256,7 @@ impl InfoStructure for DefineUserStatement {
 			base,
 			hash,
 			roles,
-			session,
+			duration,
 			comment,
 			..
 		} = self;
@@ -240,9 +273,10 @@ impl InfoStructure for DefineUserStatement {
 			Value::Array(roles.into_iter().map(|r| r.structure()).collect()),
 		);
 
-		if let Some(session) = session {
-			acc.insert("session".to_string(), session.into());
-		}
+		let mut dur = Object::default();
+		dur.insert("token".to_string(), duration.token.into());
+		dur.insert("session".to_string(), duration.session.into());
+		acc.insert("duration".to_string(), dur.to_string().into());
 
 		if let Some(comment) = comment {
 			acc.insert("comment".to_string(), comment.into());

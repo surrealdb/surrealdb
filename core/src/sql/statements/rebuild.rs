@@ -76,7 +76,12 @@ impl RebuildIndexStatement {
 			let ix = ctx
 				.tx_lock()
 				.await
-				.get_and_cache_tb_index(opt.ns(), opt.db(), self.what.as_str(), self.name.as_str())
+				.get_and_cache_tb_index(
+					opt.ns()?,
+					opt.db()?,
+					self.what.as_str(),
+					self.name.as_str(),
+				)
 				.await?;
 
 			// Remove the index

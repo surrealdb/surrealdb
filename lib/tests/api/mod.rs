@@ -59,9 +59,10 @@ async fn signup_record() {
 	let access = Ulid::new().to_string();
 	let sql = format!(
 		"
-        DEFINE ACCESS `{access}` ON DB TYPE RECORD DURATION 1s
+        DEFINE ACCESS `{access}` ON DB TYPE RECORD
         SIGNUP ( CREATE user SET email = $email, pass = crypto::argon2::generate($pass) )
         SIGNIN ( SELECT * FROM user WHERE email = $email AND crypto::argon2::compare(pass, $pass) )
+		DURATION FOR SESSION 1d FOR TOKEN 15s
     "
 	);
 	let response = db.query(sql).await.unwrap();
@@ -130,9 +131,10 @@ async fn signin_record() {
 	let pass = "password123";
 	let sql = format!(
 		"
-        DEFINE ACCESS `{access}` ON DB TYPE RECORD DURATION 1s
+        DEFINE ACCESS `{access}` ON DB TYPE RECORD
         SIGNUP ( CREATE user SET email = $email, pass = crypto::argon2::generate($pass) )
         SIGNIN ( SELECT * FROM user WHERE email = $email AND crypto::argon2::compare(pass, $pass) )
+		DURATION FOR SESSION 1d FOR TOKEN 15s
     "
 	);
 	let response = db.query(sql).await.unwrap();
@@ -172,9 +174,10 @@ async fn record_access_throws_error() {
 	let pass = "password123";
 	let sql = format!(
 		"
-        DEFINE ACCESS `{access}` ON DB TYPE RECORD DURATION 1s
+        DEFINE ACCESS `{access}` ON DB TYPE RECORD
         SIGNUP {{ THROW 'signup_thrown_error' }}
         SIGNIN {{ THROW 'signin_thrown_error' }}
+		DURATION FOR SESSION 1d FOR TOKEN 15s
     "
 	);
 	let response = db.query(sql).await.unwrap();
@@ -234,9 +237,10 @@ async fn record_access_invalid_query() {
 	let pass = "password123";
 	let sql = format!(
 		"
-        DEFINE ACCESS `{access}` ON DB TYPE RECORD DURATION 1s
+        DEFINE ACCESS `{access}` ON DB TYPE RECORD
         SIGNUP {{ SELECT * FROM ONLY [1, 2] }}
         SIGNIN {{ SELECT * FROM ONLY [1, 2] }}
+		DURATION FOR SESSION 1d FOR TOKEN 15s
     "
 	);
 	let response = db.query(sql).await.unwrap();

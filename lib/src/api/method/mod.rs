@@ -86,6 +86,8 @@ use std::sync::Arc;
 use std::sync::OnceLock;
 use std::time::Duration;
 
+use self::query::ValidQuery;
+
 /// Query statistics
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[non_exhaustive]
@@ -262,7 +264,6 @@ where
 			engine: PhantomData,
 			address: address.into_endpoint(),
 			capacity: 0,
-			client: PhantomData,
 			waiter: Arc::new(watch::channel(None)),
 			response_type: PhantomData,
 		}
@@ -662,11 +663,15 @@ where
 	/// # }
 	/// ```
 	pub fn query(&self, query: impl opt::IntoQuery) -> Query<C> {
-		Query {
+		let inner = query.into_query().map(|x| ValidQuery {
 			client: Cow::Borrowed(self),
-			query: vec![query.into_query()],
-			bindings: Ok(Default::default()),
+			query: x,
+			bindings: Default::default(),
 			register_live_queries: true,
+		});
+
+		Query {
+			inner,
 		}
 	}
 

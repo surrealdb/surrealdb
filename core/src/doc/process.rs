@@ -44,7 +44,7 @@ impl<'a> Document<'a> {
 				// we load the new record, and reprocess
 				Err(Error::RetryWithId(v)) => {
 					// Fetch the data from the store
-					let key = crate::key::thing::new(opt.ns(), opt.db(), &v.tb, &v.id);
+					let key = crate::key::thing::new(opt.ns()?, opt.db()?, &v.tb, &v.id);
 					let val = ctx.tx_lock().await.get(key).await?;
 					// Parse the data from the store
 					let val = match val {

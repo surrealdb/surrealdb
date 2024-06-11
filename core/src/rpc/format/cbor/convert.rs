@@ -227,7 +227,7 @@ impl TryFrom<Cbor> for Value {
 						_ => Err("Expected a CBOR array with Geometry Point values"),
 					},
 					TAG_GEOMETRY_POLYGON => match v.deref() {
-						Data::Array(v) if v.len() >= 2 => {
+						Data::Array(v) if !v.is_empty() => {
 							let lines = v
 								.iter()
 								.map(|v| match Value::try_from(Cbor(v.clone()))? {
@@ -236,19 +236,20 @@ impl TryFrom<Cbor> for Value {
 								})
 								.collect::<Result<Vec<LineString>, &str>>()?;
 
-							let first = match lines.first() {
+							let exterior = match lines.first() {
 								Some(v) => v,
 								_ => return Err(
-									"Expected a CBOR array with at least two Geometry Line values",
+									"Expected a CBOR array with at least one Geometry Line values",
 								),
 							};
+							let interiors = Vec::from(&lines[1..]);
 
 							Ok(Value::Geometry(Geometry::Polygon(Polygon::new(
-								first.clone(),
-								Vec::from(&lines[1..]),
+								exterior.clone(),
+								interiors,
 							))))
 						}
-						_ => Err("Expected a CBOR array with at least two Geometry Line values"),
+						_ => Err("Expected a CBOR array with at least one Geometry Line values"),
 					},
 					TAG_GEOMETRY_MULTIPOINT => match v.deref() {
 						Data::Array(v) => {

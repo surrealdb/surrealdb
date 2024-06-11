@@ -235,17 +235,20 @@ where
 		let neighbors = self.graph.add_node_and_bidirectional_edges(q_id, neighbors);
 
 		for e_id in neighbors {
-			let e_conn =
-				self.graph.get_edges(&e_id).unwrap_or_else(|| unreachable!("Element: {}", e_id));
-			if e_conn.len() > self.m_max {
-				if let Some(e_pt) = elements.get_vector(&e_id) {
-					let e_c = self.build_priority_list(elements, e_id, e_conn);
-					let mut e_new_conn = self.graph.new_edges();
-					heuristic.select(elements, self, e_id, e_pt, e_c, &mut e_new_conn);
-					#[cfg(debug_assertions)]
-					assert!(!e_new_conn.contains(&e_id));
-					self.graph.set_node(e_id, e_new_conn);
+			if let Some(e_conn) = self.graph.get_edges(&e_id) {
+				if e_conn.len() > self.m_max {
+					if let Some(e_pt) = elements.get_vector(&e_id) {
+						let e_c = self.build_priority_list(elements, e_id, e_conn);
+						let mut e_new_conn = self.graph.new_edges();
+						heuristic.select(elements, self, e_id, e_pt, e_c, &mut e_new_conn);
+						#[cfg(debug_assertions)]
+						assert!(!e_new_conn.contains(&e_id));
+						self.graph.set_node(e_id, e_new_conn);
+					}
 				}
+			} else {
+				#[cfg(debug_assertions)]
+				unreachable!("Element: {}", e_id);
 			}
 		}
 		eps

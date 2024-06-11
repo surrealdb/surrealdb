@@ -84,6 +84,7 @@ keyword! {
 	From => "FROM",
 	Full => "FULL",
 	Function => "FUNCTION",
+	Grant => "GRANT",
 	Group => "GROUP",
 	Highlights => "HIGHLIGHTS",
 	Hnsw => "HNSW",

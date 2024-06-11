@@ -519,6 +519,15 @@ impl From<Option<i64>> for Value {
 	}
 }
 
+impl From<Option<Duration>> for Value {
+	fn from(v: Option<Duration>) -> Self {
+		match v {
+			Some(v) => Value::from(v),
+			None => Value::None,
+		}
+	}
+}
+
 impl From<Id> for Value {
 	fn from(v: Id) -> Self {
 		match v {
@@ -2647,7 +2656,7 @@ impl Value {
 			Value::Array(v) => stk.run(|stk| v.compute(stk, ctx, opt, doc)).await,
 			Value::Object(v) => stk.run(|stk| v.compute(stk, ctx, opt, doc)).await,
 			Value::Future(v) => stk.run(|stk| v.compute(stk, ctx, opt, doc)).await,
-			Value::Constant(v) => v.compute(ctx, opt, doc).await,
+			Value::Constant(v) => v.compute(),
 			Value::Function(v) => v.compute(stk, ctx, opt, doc).await,
 			Value::Model(v) => v.compute(stk, ctx, opt, doc).await,
 			Value::Subquery(v) => stk.run(|stk| v.compute(stk, ctx, opt, doc)).await,

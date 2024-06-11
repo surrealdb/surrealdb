@@ -50,6 +50,102 @@ async fn remove_statement_table() -> Result<(), Error> {
 }
 
 #[tokio::test]
+async fn remove_statement_namespace() -> Result<(), Error> {
+	// Namespace not selected
+	{
+		let sql = "
+			REMOVE NAMESPACE test;
+			DEFINE NAMESPACE test;
+			REMOVE NAMESPACE test;
+		";
+		let dbs = new_ds().await?;
+		let ses = Session::owner();
+		let res = &mut dbs.execute(sql, &ses, None).await?;
+		assert_eq!(res.len(), 3);
+		//
+		let tmp = res.remove(0).result;
+		assert!(tmp.is_err());
+		//
+		let tmp = res.remove(0).result;
+		assert!(tmp.is_ok());
+		//
+		let tmp = res.remove(0).result;
+		assert!(tmp.is_ok());
+	}
+	// Namespace selected
+	{
+		let sql = "
+			REMOVE NAMESPACE test;
+			DEFINE NAMESPACE test;
+			REMOVE NAMESPACE test;
+		";
+		let dbs = new_ds().await?;
+		// No namespace is selected
+		let ses = Session::owner().with_ns("test");
+		let res = &mut dbs.execute(sql, &ses, None).await?;
+		assert_eq!(res.len(), 3);
+		//
+		let tmp = res.remove(0).result;
+		assert!(tmp.is_err());
+		//
+		let tmp = res.remove(0).result;
+		assert!(tmp.is_ok());
+		//
+		let tmp = res.remove(0).result;
+		assert!(tmp.is_ok());
+	}
+	Ok(())
+}
+
+#[tokio::test]
+async fn remove_statement_database() -> Result<(), Error> {
+	// Database not selected
+	{
+		let sql = "
+			REMOVE DATABASE test;
+			DEFINE DATABASE test;
+			REMOVE DATABASE test;
+		";
+		let dbs = new_ds().await?;
+		let ses = Session::owner().with_ns("test");
+		let res = &mut dbs.execute(sql, &ses, None).await?;
+		assert_eq!(res.len(), 3);
+		//
+		let tmp = res.remove(0).result;
+		assert!(tmp.is_err());
+		//
+		let tmp = res.remove(0).result;
+		assert!(tmp.is_ok());
+		//
+		let tmp = res.remove(0).result;
+		assert!(tmp.is_ok());
+	}
+	// Database selected
+	{
+		let sql = "
+			REMOVE DATABASE test;
+			DEFINE DATABASE test;
+			REMOVE DATABASE test;
+		";
+		let dbs = new_ds().await?;
+		// No database is selected
+		let ses = Session::owner().with_ns("test").with_db("test");
+		let res = &mut dbs.execute(sql, &ses, None).await?;
+		assert_eq!(res.len(), 3);
+		//
+		let tmp = res.remove(0).result;
+		assert!(tmp.is_err());
+		//
+		let tmp = res.remove(0).result;
+		assert!(tmp.is_ok());
+		//
+		let tmp = res.remove(0).result;
+		assert!(tmp.is_ok());
+	}
+	Ok(())
+}
+
+#[tokio::test]
 async fn remove_statement_analyzer() -> Result<(), Error> {
 	let sql = "
 		DEFINE ANALYZER english TOKENIZERS blank,class FILTERS lowercase,snowball(english);
@@ -662,7 +758,7 @@ async fn permissions_checks_remove_ns_access() {
 	// Define the expected results for the check statement when the test statement succeeded and when it failed
 	let check_results = [
 		vec!["{ accesses: {  }, databases: {  }, users: {  } }"],
-        vec!["{ accesses: { access: \"DEFINE ACCESS access ON NAMESPACE TYPE JWT ALGORITHM HS512 KEY '[REDACTED]' WITH ISSUER KEY '[REDACTED]' DURATION 1h\" }, databases: {  }, users: {  } }"],
+        vec!["{ accesses: { access: \"DEFINE ACCESS access ON NAMESPACE TYPE JWT ALGORITHM HS512 KEY '[REDACTED]' WITH ISSUER KEY '[REDACTED]' DURATION FOR TOKEN 1h, FOR SESSION NONE\" }, databases: {  }, users: {  } }"],
     ];
 
 	let test_cases = [
@@ -704,7 +800,7 @@ async fn permissions_checks_remove_db_access() {
 	// Define the expected results for the check statement when the test statement succeeded and when it failed
 	let check_results = [
 		vec!["{ accesses: {  }, analyzers: {  }, functions: {  }, models: {  }, params: {  }, tables: {  }, users: {  } }"],
-        vec!["{ accesses: { access: \"DEFINE ACCESS access ON DATABASE TYPE JWT ALGORITHM HS512 KEY '[REDACTED]' WITH ISSUER KEY '[REDACTED]' DURATION 1h\" }, analyzers: {  }, functions: {  }, models: {  }, params: {  }, tables: {  }, users: {  } }"],
+        vec!["{ accesses: { access: \"DEFINE ACCESS access ON DATABASE TYPE JWT ALGORITHM HS512 KEY '[REDACTED]' WITH ISSUER KEY '[REDACTED]' DURATION FOR TOKEN 1h, FOR SESSION NONE\" }, analyzers: {  }, functions: {  }, models: {  }, params: {  }, tables: {  }, users: {  } }"],
     ];
 
 	let test_cases = [
@@ -746,7 +842,7 @@ async fn permissions_checks_remove_root_user() {
 	// Define the expected results for the check statement when the test statement succeeded and when it failed
 	let check_results = [
 		vec!["{ namespaces: {  }, users: {  } }"],
-        vec!["{ namespaces: {  }, users: { user: \"DEFINE USER user ON ROOT PASSHASH 'secret' ROLES VIEWER\" } }"],
+        vec!["{ namespaces: {  }, users: { user: \"DEFINE USER user ON ROOT PASSHASH 'secret' ROLES VIEWER DURATION FOR TOKEN 1h, FOR SESSION NONE\" } }"],
     ];
 
 	let test_cases = [
@@ -788,7 +884,7 @@ async fn permissions_checks_remove_ns_user() {
 	// Define the expected results for the check statement when the test statement succeeded and when it failed
 	let check_results = [
 		vec!["{ accesses: {  }, databases: {  }, users: {  } }"],
-        vec!["{ accesses: {  }, databases: {  }, users: { user: \"DEFINE USER user ON NAMESPACE PASSHASH 'secret' ROLES VIEWER\" } }"],
+        vec!["{ accesses: {  }, databases: {  }, users: { user: \"DEFINE USER user ON NAMESPACE PASSHASH 'secret' ROLES VIEWER DURATION FOR TOKEN 1h, FOR SESSION NONE\" } }"],
     ];
 
 	let test_cases = [
@@ -830,7 +926,7 @@ async fn permissions_checks_remove_db_user() {
 	// Define the expected results for the check statement when the test statement succeeded and when it failed
 	let check_results = [
 		vec!["{ accesses: {  }, analyzers: {  }, functions: {  }, models: {  }, params: {  }, tables: {  }, users: {  } }"],
-        vec!["{ accesses: {  }, analyzers: {  }, functions: {  }, models: {  }, params: {  }, tables: {  }, users: { user: \"DEFINE USER user ON DATABASE PASSHASH 'secret' ROLES VIEWER\" } }"],
+        vec!["{ accesses: {  }, analyzers: {  }, functions: {  }, models: {  }, params: {  }, tables: {  }, users: { user: \"DEFINE USER user ON DATABASE PASSHASH 'secret' ROLES VIEWER DURATION FOR TOKEN 1h, FOR SESSION NONE\" } }"],
     ];
 
 	let test_cases = [

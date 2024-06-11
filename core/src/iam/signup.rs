@@ -87,8 +87,7 @@ pub async fn db_access(
 												iss: Some(SERVER_NAME.to_owned()),
 												iat: Some(Utc::now().timestamp()),
 												nbf: Some(Utc::now().timestamp()),
-												// Token expiration is derived from issuer duration
-												exp: expiration(iss.duration)?,
+												exp: expiration(av.duration.token)?,
 												jti: Some(Uuid::new_v4().to_string()),
 												ns: Some(ns.to_owned()),
 												db: Some(db.to_owned()),
@@ -107,8 +106,7 @@ pub async fn db_access(
 											session.db = Some(db.to_owned());
 											session.ac = Some(ac.to_owned());
 											session.rd = Some(Value::from(rid.to_owned()));
-											// Session expiration is derived from record access duration
-											session.exp = expiration(at.duration)?;
+											session.exp = expiration(av.duration.session)?;
 											session.au = Arc::new(Auth::new(Actor::new(
 												rid.to_string(),
 												Default::default(),
@@ -156,7 +154,7 @@ mod tests {
 			let sess = Session::owner().with_ns("test").with_db("test");
 			ds.execute(
 				r#"
-				DEFINE ACCESS user ON DATABASE TYPE RECORD DURATION 1h
+				DEFINE ACCESS user ON DATABASE TYPE RECORD
 					SIGNIN (
 						SELECT * FROM user WHERE name = $user AND crypto::argon2::compare(pass, $pass)
 					)
@@ -165,7 +163,9 @@ mod tests {
 							name: $user,
 							pass: crypto::argon2::generate($pass)
 						}
-					);
+					)
+					DURATION FOR SESSION 2h
+				;
 				"#,
 				&sess,
 				None,
@@ -203,14 +203,14 @@ mod tests {
 			assert!(!sess.au.has_role(&Role::Viewer), "Auth user expected to not have Viewer role");
 			assert!(!sess.au.has_role(&Role::Editor), "Auth user expected to not have Editor role");
 			assert!(!sess.au.has_role(&Role::Owner), "Auth user expected to not have Owner role");
-			// Expiration should always be set for tokens issued by SurrealDB
+			// Session expiration should match the defined duration
 			let exp = sess.exp.unwrap();
 			// Expiration should match the current time plus session duration with some margin
-			let min_exp = (Utc::now() + Duration::hours(1) - Duration::seconds(10)).timestamp();
-			let max_exp = (Utc::now() + Duration::hours(1) + Duration::seconds(10)).timestamp();
+			let min_exp = (Utc::now() + Duration::hours(2) - Duration::seconds(10)).timestamp();
+			let max_exp = (Utc::now() + Duration::hours(2) + Duration::seconds(10)).timestamp();
 			assert!(
 				exp > min_exp && exp < max_exp,
-				"Session expiration is expected to follow token duration"
+				"Session expiration is expected to match the defined duration"
 			);
 		}
 
@@ -220,7 +220,7 @@ mod tests {
 			let sess = Session::owner().with_ns("test").with_db("test");
 			ds.execute(
 				r#"
-				DEFINE ACCESS user ON DATABASE TYPE RECORD DURATION 1h
+				DEFINE ACCESS user ON DATABASE TYPE RECORD
 					SIGNIN (
 						SELECT * FROM user WHERE name = $user AND crypto::argon2::compare(pass, $pass)
 					)
@@ -229,7 +229,9 @@ mod tests {
 							name: $user,
 							pass: crypto::argon2::generate($pass)
 						}
-					);
+					)
+					DURATION FOR SESSION 2h
+				;
 				"#,
 				&sess,
 				None,
@@ -308,7 +310,6 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				&format!(
 					r#"
 				DEFINE ACCESS user ON DATABASE TYPE RECORD
-					DURATION 1h
 					SIGNIN (
 						SELECT * FROM user WHERE name = $user AND crypto::argon2::compare(pass, $pass)
 					)
@@ -319,7 +320,8 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 						}}
 					)
 				    WITH JWT ALGORITHM RS256 KEY '{public_key}'
-				        WITH ISSUER KEY '{private_key}' DURATION 15m
+				        WITH ISSUER KEY '{private_key}'
+					DURATION FOR SESSION 2h, FOR TOKEN 15m
 				;
 
 				CREATE user:test CONTENT {{
@@ -368,9 +370,9 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 			let exp = sess.exp.unwrap();
 			// Expiration should match the current time plus session duration with some margin
 			let min_sess_exp =
-				(Utc::now() + Duration::hours(1) - Duration::seconds(10)).timestamp();
+				(Utc::now() + Duration::hours(2) - Duration::seconds(10)).timestamp();
 			let max_sess_exp =
-				(Utc::now() + Duration::hours(1) + Duration::seconds(10)).timestamp();
+				(Utc::now() + Duration::hours(2) + Duration::seconds(10)).timestamp();
 			assert!(
 				exp > min_sess_exp && exp < max_sess_exp,
 				"Session expiration is expected to follow access method duration"

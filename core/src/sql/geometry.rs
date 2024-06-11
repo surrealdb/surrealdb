@@ -440,32 +440,20 @@ impl fmt::Display for Geometry {
 			),
 			Self::Polygon(v) => write!(
 				f,
-				"{{ type: 'Polygon', coordinates: [[{}]{}] }}",
-				Fmt::comma_separated(v.exterior().points().map(|v| Fmt::new(v, |v, f| write!(
-					f,
-					"[{}, {}]",
-					v.x(),
-					v.y()
-				)))),
-				Fmt::new(v.interiors(), |interiors, f| {
-					match interiors.len() {
-						0 => Ok(()),
-						_ => write!(
+				"{{ type: 'Polygon', coordinates: [{}] }}",
+				Fmt::comma_separated(once(v.exterior()).chain(v.interiors()).map(|v| Fmt::new(
+					v,
+					|v, f| write!(
+						f,
+						"[{}]",
+						Fmt::comma_separated(v.points().map(|v| Fmt::new(v, |v, f| write!(
 							f,
-							", [{}]",
-							Fmt::comma_separated(interiors.iter().map(|i| Fmt::new(i, |i, f| {
-								write!(
-									f,
-									"[{}]",
-									Fmt::comma_separated(i.points().map(|v| Fmt::new(
-										v,
-										|v, f| write!(f, "[{}, {}]", v.x(), v.y())
-									)))
-								)
-							})))
-						),
-					}
-				})
+							"[{}, {}]",
+							v.x(),
+							v.y()
+						))))
+					)
+				)))
 			),
 			Self::MultiPoint(v) => {
 				write!(
@@ -493,46 +481,28 @@ impl fmt::Display for Geometry {
 					))))
 				))))
 			),
-			Self::MultiPolygon(v) => write!(
-				f,
-				"{{ type: 'MultiPolygon', coordinates: [{}] }}",
-				Fmt::comma_separated(v.iter().map(|v| Fmt::new(v, |v, f| {
-					write!(
-						f,
-						"[[{}]{}]",
-						Fmt::comma_separated(
-							v.exterior().points().map(|v| Fmt::new(v, |v, f| write!(
-								f,
-								"[{}, {}]",
-								v.x(),
-								v.y()
-							)))
-						),
-						Fmt::new(v.interiors(), |interiors, f| {
-							match interiors.len() {
-								0 => Ok(()),
-								_ => write!(
+			Self::MultiPolygon(v) => {
+				write!(
+					f,
+					"{{ type: 'MultiPolygon', coordinates: [{}] }}",
+					Fmt::comma_separated(v.iter().map(|v| Fmt::new(v, |v, f| {
+						write!(
+							f,
+							"[{}]",
+							Fmt::comma_separated(once(v.exterior()).chain(v.interiors()).map(
+								|v| Fmt::new(v, |v, f| write!(
 									f,
-									", [{}]",
-									Fmt::comma_separated(interiors.iter().map(|i| Fmt::new(
-										i,
-										|i, f| {
-											write!(
-												f,
-												"[{}]",
-												Fmt::comma_separated(i.points().map(|v| Fmt::new(
-													v,
-													|v, f| write!(f, "[{}, {}]", v.x(), v.y())
-												)))
-											)
-										}
+									"[{}]",
+									Fmt::comma_separated(v.points().map(|v| Fmt::new(
+										v,
+										|v, f| write!(f, "[{}, {}]", v.x(), v.y())
 									)))
-								),
-							}
-						})
-					)
-				}))),
-			),
+								))
+							))
+						)
+					}))),
+				)
+			}
 			Self::Collection(v) => {
 				write!(
 					f,

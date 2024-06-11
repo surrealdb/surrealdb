@@ -51,3 +51,6 @@ pub static INSECURE_FORWARD_RECORD_ACCESS_ERRORS: Lazy<bool> =
 /// If the environment variable is not present or cannot be parsed, a default value of 50,000 is used.
 pub static EXTERNAL_SORTING_BUFFER_LIMIT: Lazy<usize> =
 	lazy_env_parse!("SURREAL_EXTERNAL_SORTING_BUFFER_LIMIT", usize, 50_000);
+
+/// The number of records that should be fetched and grouped together in an INSERT statement when exporting.
+pub static EXPORT_BATCH_SIZE: Lazy<u32> = lazy_env_parse!("SURREAL_EXPORT_BATCH_SIZE", u32, 1000);

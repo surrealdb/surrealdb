@@ -106,7 +106,7 @@ impl FtIndex {
 		tt: TransactionType,
 	) -> Result<Self, Error> {
 		let mut tx = ctx.tx_lock().await;
-		let az = tx.get_db_analyzer(opt.ns(), opt.db(), az).await?;
+		let az = tx.get_db_analyzer(opt.ns()?, opt.db()?, az).await?;
 		let res =
 			Self::with_analyzer(ctx.get_index_stores(), &mut tx, az, index_key_base, p, tt).await;
 		drop(tx);
