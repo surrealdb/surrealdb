@@ -1703,9 +1703,9 @@ async fn function_encode_html() -> Result<(), Error> {
 	let sql = r#"
 		RETURN html::encode("<div>Hello world!</div>");
 	"#;
-	let mut test = Test::new(sql).await;
+	let mut test = Test::new(sql).await?;
 	//
-	let tmp = test.next().result?;
+	let tmp = test.next()?.result?;
 	let val = Value::from("&lt;div&gt;Hello world!&lt;/div&gt;");
 	assert_eq!(tmp, val);
 	//
@@ -1717,9 +1717,9 @@ async fn function_sanitize_html() -> Result<(), Error> {
 	let sql = r#"
 		RETURN html::sanitize("XSS<script>attack</script>");
 	"#;
-	let mut test = Test::new(sql).await;
+	let mut test = Test::new(sql).await?;
 	//
-	let tmp = test.next().result?;
+	let tmp = test.next()?.result?;
 	let val = Value::from("XSS");
 	assert_eq!(tmp, val);
 	//
