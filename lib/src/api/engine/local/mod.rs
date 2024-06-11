@@ -38,6 +38,7 @@ use crate::api::engine::merge_statement;
 use crate::api::engine::patch_statement;
 use crate::api::engine::select_statement;
 use crate::api::engine::update_statement;
+use crate::api::engine::upsert_statement;
 #[cfg(not(target_arch = "wasm32"))]
 use crate::api::err::Error;
 use crate::api::Connect;
@@ -570,6 +571,14 @@ async fn router(
 			query.0 .0 = vec![Statement::Create(statement)];
 			let response = kvs.process(query, &*session, Some(vars.clone())).await?;
 			let value = take(true, response).await?;
+			Ok(DbResponse::Other(value))
+		}
+		Method::Upsert => {
+			let mut query = Query::default();
+			let (one, statement) = upsert_statement(&mut params);
+			query.0 .0 = vec![Statement::Upsert(statement)];
+			let response = kvs.process(query, &*session, Some(vars.clone())).await?;
+			let value = take(one, response).await?;
 			Ok(DbResponse::Other(value))
 		}
 		Method::Update => {
