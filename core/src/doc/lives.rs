@@ -123,7 +123,7 @@ impl<'a> Document<'a> {
 			// Create a new statement
 			let lq = Statement::from(*lv);
 			// Get the event action
-			let met = if is_delete {
+			let evt = if stm.is_delete() {
 				Value::from("DELETE")
 			} else if self.is_new() {
 				Value::from("CREATE")
@@ -168,7 +168,7 @@ impl<'a> Document<'a> {
 			// Add $before, $after, $value, and $event params
 			// to this LIVE query so that user can use these
 			// within field projections and WHERE clauses.
-			lqctx.add_value("event", met);
+			lqctx.add_value("event", evt);
 			lqctx.add_value("value", self.current.doc.deref());
 			lqctx.add_value("after", self.current.doc.deref());
 			lqctx.add_value("before", self.initial.doc.deref());

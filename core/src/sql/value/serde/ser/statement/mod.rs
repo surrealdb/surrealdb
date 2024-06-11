@@ -23,6 +23,7 @@ pub mod show;
 pub mod sleep;
 pub mod throw;
 pub mod update;
+pub mod upsert;
 pub mod vec;
 pub mod yuse;
 
@@ -86,6 +87,7 @@ impl ser::Serializer for Serializer {
 			"Sleep" => Ok(Statement::Sleep(value.serialize(sleep::Serializer.wrap())?)),
 			"Throw" => Ok(Statement::Throw(value.serialize(throw::Serializer.wrap())?)),
 			"Update" => Ok(Statement::Update(value.serialize(update::Serializer.wrap())?)),
+			"Upsert" => Ok(Statement::Upsert(value.serialize(upsert::Serializer.wrap())?)),
 			"Use" => Ok(Statement::Use(value.serialize(yuse::Serializer.wrap())?)),
 			variant => {
 				Err(Error::custom(format!("unexpected newtype variant `{name}::{variant}`")))
@@ -248,6 +250,13 @@ mod tests {
 	#[test]
 	fn update() {
 		let statement = Statement::Update(Default::default());
+		let serialized = statement.serialize(Serializer.wrap()).unwrap();
+		assert_eq!(statement, serialized);
+	}
+
+	#[test]
+	fn upsert() {
+		let statement = Statement::Upsert(Default::default());
 		let serialized = statement.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(statement, serialized);
 	}

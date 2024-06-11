@@ -35,6 +35,7 @@ mod relate;
 mod remove;
 mod select;
 mod update;
+mod upsert;
 
 impl Parser<'_> {
 	pub async fn parse_stmt_list(&mut self, ctx: &mut Stk) -> ParseResult<Statements> {
@@ -92,7 +93,8 @@ impl Parser<'_> {
 				| t!("REMOVE") | t!("SELECT")
 				| t!("LET") | t!("SHOW")
 				| t!("SLEEP") | t!("THROW")
-				| t!("UPDATE") | t!("USE")
+				| t!("UPDATE") | t!("UPSERT")
+				| t!("USE")
 		)
 	}
 
@@ -209,6 +211,10 @@ impl Parser<'_> {
 				self.pop_peek();
 				ctx.run(|ctx| self.parse_update_stmt(ctx)).await.map(Statement::Update)
 			}
+			t!("UPSERT") => {
+				self.pop_peek();
+				ctx.run(|ctx| self.parse_upsert_stmt(ctx)).await.map(Statement::Upsert)
+			}
 			t!("USE") => {
 				self.pop_peek();
 				self.parse_use_stmt().map(Statement::Use)
@@ -293,6 +299,10 @@ impl Parser<'_> {
 			t!("UPDATE") => {
 				self.pop_peek();
 				self.parse_update_stmt(ctx).await.map(Entry::Update)
+			}
+			t!("UPSERT") => {
+				self.pop_peek();
+				self.parse_upsert_stmt(ctx).await.map(Entry::Upsert)
 			}
 			_ => {
 				// TODO: Provide information about keywords.

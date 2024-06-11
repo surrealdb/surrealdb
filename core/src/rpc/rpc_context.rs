@@ -53,6 +53,7 @@ pub trait RpcContext {
 			Method::Select => self.select(params).await.map(Into::into).map_err(Into::into),
 			Method::Insert => self.insert(params).await.map(Into::into).map_err(Into::into),
 			Method::Create => self.create(params).await.map(Into::into).map_err(Into::into),
+			Method::Upsert => self.upsert(params).await.map(Into::into).map_err(Into::into),
 			Method::Update => self.update(params).await.map(Into::into).map_err(Into::into),
 			Method::Merge => self.merge(params).await.map(Into::into).map_err(Into::into),
 			Method::Patch => self.patch(params).await.map(Into::into).map_err(Into::into),
@@ -72,6 +73,7 @@ pub trait RpcContext {
 			Method::Select => self.select(params).await.map(Into::into).map_err(Into::into),
 			Method::Insert => self.insert(params).await.map(Into::into).map_err(Into::into),
 			Method::Create => self.create(params).await.map(Into::into).map_err(Into::into),
+			Method::Upsert => self.upsert(params).await.map(Into::into).map_err(Into::into),
 			Method::Update => self.update(params).await.map(Into::into).map_err(Into::into),
 			Method::Merge => self.merge(params).await.map(Into::into).map_err(Into::into),
 			Method::Patch => self.patch(params).await.map(Into::into).map_err(Into::into),
@@ -302,6 +304,39 @@ pub trait RpcContext {
 			"CREATE $what RETURN AFTER"
 		} else {
 			"CREATE $what CONTENT $data RETURN AFTER"
+		};
+		// Specify the query parameters
+		let var = Some(map! {
+			String::from("what") => what.could_be_table(),
+			String::from("data") => data,
+			=> &self.vars()
+		});
+		// Execute the query on the database
+		let mut res = self.kvs().execute(sql, self.session(), var).await?;
+		// Extract the first query result
+		let res = match one {
+			true => res.remove(0).result?.first(),
+			false => res.remove(0).result?,
+		};
+		// Return the result to the client
+		Ok(res)
+	}
+
+	// ------------------------------
+	// Methods for upserting
+	// ------------------------------
+
+	async fn upsert(&self, params: Array) -> Result<impl Into<Data>, RpcError> {
+		let Ok((what, data)) = params.needs_one_or_two() else {
+			return Err(RpcError::InvalidParams);
+		};
+		// Return a single result?
+		let one = what.is_thing();
+		// Specify the SQL query string
+		let sql = if data.is_none_or_null() {
+			"UPSERT $what RETURN AFTER"
+		} else {
+			"UPSERT $what CONTENT $data RETURN AFTER"
 		};
 		// Specify the query parameters
 		let var = Some(map! {

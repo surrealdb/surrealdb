@@ -7,15 +7,13 @@ use crate::sql::value::Value;
 use reblessive::tree::Stk;
 
 impl<'a> Document<'a> {
-	pub async fn update(
+	pub async fn upsert(
 		&mut self,
 		stk: &mut Stk,
 		ctx: &Context<'_>,
 		opt: &Options,
 		stm: &Statement<'_>,
 	) -> Result<Value, Error> {
-		// Check if record exists
-		self.empty(ctx, opt, stm).await?;
 		// Check where clause
 		self.check(stk, ctx, opt, stm).await?;
 		// Check if allowed

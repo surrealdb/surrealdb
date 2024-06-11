@@ -61,6 +61,9 @@ impl<'a> Document<'a> {
 				Statement::Create(_) => {
 					self.current.doc.compute(stk, ctx, opt, Some(&self.current)).await
 				}
+				Statement::Upsert(_) => {
+					self.current.doc.compute(stk, ctx, opt, Some(&self.current)).await
+				}
 				Statement::Update(_) => {
 					self.current.doc.compute(stk, ctx, opt, Some(&self.current)).await
 				}

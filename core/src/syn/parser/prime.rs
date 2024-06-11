@@ -389,6 +389,11 @@ impl Parser<'_> {
 				let stmt = ctx.run(|ctx| self.parse_create_stmt(ctx)).await?;
 				Subquery::Create(stmt)
 			}
+			t!("UPSERT") => {
+				self.pop_peek();
+				let stmt = ctx.run(|ctx| self.parse_upsert_stmt(ctx)).await?;
+				Subquery::Upsert(stmt)
+			}
 			t!("UPDATE") => {
 				self.pop_peek();
 				let stmt = ctx.run(|ctx| self.parse_update_stmt(ctx)).await?;
@@ -539,6 +544,11 @@ impl Parser<'_> {
 				self.pop_peek();
 				let stmt = ctx.run(|ctx| self.parse_create_stmt(ctx)).await?;
 				Subquery::Create(stmt)
+			}
+			t!("UPSERT") => {
+				self.pop_peek();
+				let stmt = ctx.run(|ctx| self.parse_upsert_stmt(ctx)).await?;
+				Subquery::Upsert(stmt)
 			}
 			t!("UPDATE") => {
 				self.pop_peek();

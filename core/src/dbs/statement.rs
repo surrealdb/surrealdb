@@ -17,6 +17,7 @@ use crate::sql::statements::relate::RelateStatement;
 use crate::sql::statements::select::SelectStatement;
 use crate::sql::statements::show::ShowStatement;
 use crate::sql::statements::update::UpdateStatement;
+use crate::sql::statements::upsert::UpsertStatement;
 use crate::sql::Explain;
 use std::fmt;
 
@@ -26,6 +27,7 @@ pub(crate) enum Statement<'a> {
 	Show(&'a ShowStatement),
 	Select(&'a SelectStatement),
 	Create(&'a CreateStatement),
+	Upsert(&'a UpsertStatement),
 	Update(&'a UpdateStatement),
 	Relate(&'a RelateStatement),
 	Delete(&'a DeleteStatement),
@@ -53,6 +55,12 @@ impl<'a> From<&'a SelectStatement> for Statement<'a> {
 impl<'a> From<&'a CreateStatement> for Statement<'a> {
 	fn from(v: &'a CreateStatement) -> Self {
 		Statement::Create(v)
+	}
+}
+
+impl<'a> From<&'a UpsertStatement> for Statement<'a> {
+	fn from(v: &'a UpsertStatement) -> Self {
+		Statement::Upsert(v)
 	}
 }
 
@@ -87,6 +95,7 @@ impl<'a> fmt::Display for Statement<'a> {
 			Statement::Show(v) => write!(f, "{v}"),
 			Statement::Select(v) => write!(f, "{v}"),
 			Statement::Create(v) => write!(f, "{v}"),
+			Statement::Upsert(v) => write!(f, "{v}"),
 			Statement::Update(v) => write!(f, "{v}"),
 			Statement::Relate(v) => write!(f, "{v}"),
 			Statement::Delete(v) => write!(f, "{v}"),
@@ -128,6 +137,7 @@ impl<'a> Statement<'a> {
 	pub fn data(&self) -> Option<&Data> {
 		match self {
 			Statement::Create(v) => v.data.as_ref(),
+			Statement::Upsert(v) => v.data.as_ref(),
 			Statement::Update(v) => v.data.as_ref(),
 			Statement::Relate(v) => v.data.as_ref(),
 			Statement::Insert(v) => v.update.as_ref(),
@@ -140,6 +150,7 @@ impl<'a> Statement<'a> {
 		match self {
 			Statement::Live(v) => v.cond.as_ref(),
 			Statement::Select(v) => v.cond.as_ref(),
+			Statement::Upsert(v) => v.cond.as_ref(),
 			Statement::Update(v) => v.cond.as_ref(),
 			Statement::Delete(v) => v.cond.as_ref(),
 			_ => None,
@@ -198,6 +209,7 @@ impl<'a> Statement<'a> {
 	pub fn output(&self) -> Option<&Output> {
 		match self {
 			Statement::Create(v) => v.output.as_ref(),
+			Statement::Upsert(v) => v.output.as_ref(),
 			Statement::Update(v) => v.output.as_ref(),
 			Statement::Relate(v) => v.output.as_ref(),
 			Statement::Delete(v) => v.output.as_ref(),
@@ -212,6 +224,7 @@ impl<'a> Statement<'a> {
 		match self {
 			Statement::Select(v) => v.parallel,
 			Statement::Create(v) => v.parallel,
+			Statement::Upsert(v) => v.parallel,
 			Statement::Update(v) => v.parallel,
 			Statement::Relate(v) => v.parallel,
 			Statement::Delete(v) => v.parallel,
