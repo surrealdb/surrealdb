@@ -3,16 +3,12 @@ mod http;
 #[cfg(feature = "protocol-ws")]
 mod ws;
 
-#[cfg(feature = "kv-fdb")]
-mod fdb;
 #[cfg(feature = "kv-indxdb")]
 mod indxdb;
 #[cfg(feature = "kv-mem")]
 mod mem;
 #[cfg(feature = "kv-rocksdb")]
 mod rocksdb;
-#[cfg(feature = "kv-speedb")]
-mod speedb;
 #[cfg(feature = "kv-surrealkv")]
 mod surrealkv;
 #[cfg(feature = "kv-tikv")]
@@ -124,13 +120,11 @@ pub enum EndpointKind {
 	Https,
 	Ws,
 	Wss,
-	FoundationDb,
 	#[cfg(target_arch = "wasm32")]
 	IndxDb,
 	Memory,
 	RocksDb,
 	File,
-	SpeeDb,
 	TiKv,
 	Unsupported(String),
 	SurrealKV,
@@ -143,13 +137,11 @@ impl From<&str> for EndpointKind {
 			"https" => Self::Https,
 			"ws" => Self::Ws,
 			"wss" => Self::Wss,
-			"fdb" => Self::FoundationDb,
 			#[cfg(target_arch = "wasm32")]
 			"indxdb" => Self::IndxDb,
 			"mem" => Self::Memory,
 			"file" => Self::File,
 			"rocksdb" => Self::RocksDb,
-			"speedb" => Self::SpeeDb,
 			"tikv" => Self::TiKv,
 			"surrealkv" => Self::SurrealKV,
 			_ => Self::Unsupported(s.to_owned()),

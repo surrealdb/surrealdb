@@ -63,21 +63,6 @@ impl Connection for Any {
 			let mut features = HashSet::new();
 
 			match EndpointKind::from(address.url.scheme()) {
-				EndpointKind::FoundationDb => {
-					#[cfg(feature = "kv-fdb")]
-					{
-						features.insert(ExtraFeatures::Backup);
-						features.insert(ExtraFeatures::LiveQueries);
-						engine::local::native::router(address, conn_tx, route_rx);
-						conn_rx.into_recv_async().await??
-					}
-
-					#[cfg(not(feature = "kv-fdb"))]
-					return Err(
-						DbError::Ds("Cannot connect to the `foundationdb` storage engine as it is not enabled in this build of SurrealDB".to_owned()).into()
-					);
-				}
-
 				EndpointKind::Memory => {
 					#[cfg(feature = "kv-mem")]
 					{
@@ -105,22 +90,6 @@ impl Connection for Any {
 					#[cfg(not(feature = "kv-rocksdb"))]
 					return Err(DbError::Ds(
 						"Cannot connect to the `rocksdb` storage engine as it is not enabled in this build of SurrealDB".to_owned(),
-					)
-					.into());
-				}
-
-				EndpointKind::SpeeDb => {
-					#[cfg(feature = "kv-speedb")]
-					{
-						features.insert(ExtraFeatures::Backup);
-						features.insert(ExtraFeatures::LiveQueries);
-						engine::local::native::router(address, conn_tx, route_rx);
-						conn_rx.into_recv_async().await??
-					}
-
-					#[cfg(not(feature = "kv-speedb"))]
-					return Err(DbError::Ds(
-						"Cannot connect to the `speedb` storage engine as it is not enabled in this build of SurrealDB".to_owned(),
 					)
 					.into());
 				}

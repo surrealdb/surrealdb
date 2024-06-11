@@ -226,42 +226,6 @@ pub struct File;
 #[derive(Debug)]
 pub struct RocksDb;
 
-/// SpeeDB database
-///
-/// # Examples
-///
-/// Instantiating a SpeeDB-backed instance
-///
-/// ```no_run
-/// # #[tokio::main]
-/// # async fn main() -> surrealdb::Result<()> {
-/// use surrealdb::Surreal;
-/// use surrealdb::engine::local::SpeeDb;
-///
-/// let db = Surreal::new::<SpeeDb>("path/to/database-folder").await?;
-/// # Ok(())
-/// # }
-/// ```
-///
-/// Instantiating a SpeeDB-backed strict instance
-///
-/// ```no_run
-/// # #[tokio::main]
-/// # async fn main() -> surrealdb::Result<()> {
-/// use surrealdb::opt::Config;
-/// use surrealdb::Surreal;
-/// use surrealdb::engine::local::SpeeDb;
-///
-/// let config = Config::default().strict();
-/// let db = Surreal::new::<SpeeDb>(("path/to/database-folder", config)).await?;
-/// # Ok(())
-/// # }
-/// ```
-#[cfg(feature = "kv-speedb")]
-#[cfg_attr(docsrs, doc(cfg(feature = "kv-speedb")))]
-#[derive(Debug)]
-pub struct SpeeDb;
-
 /// IndxDB database
 ///
 /// # Examples
@@ -334,42 +298,37 @@ pub struct IndxDb;
 #[derive(Debug)]
 pub struct TiKv;
 
-/// FoundationDB database
+/// SurrealKV database
 ///
 /// # Examples
 ///
-/// Instantiating a FoundationDB-backed instance
+/// Instantiating a SurrealKV-backed instance
 ///
 /// ```no_run
 /// # #[tokio::main]
 /// # async fn main() -> surrealdb::Result<()> {
 /// use surrealdb::Surreal;
-/// use surrealdb::engine::local::FDb;
+/// use surrealdb::engine::local::SurrealKV;
 ///
-/// let db = Surreal::new::<FDb>("path/to/fdb.cluster").await?;
+/// let db = Surreal::new::<SurrealKV>("path/to/database-folder").await?;
 /// # Ok(())
 /// # }
 /// ```
 ///
-/// Instantiating a FoundationDB-backed strict instance
+/// Instantiating a SurrealKV-backed strict instance
 ///
 /// ```no_run
 /// # #[tokio::main]
 /// # async fn main() -> surrealdb::Result<()> {
 /// use surrealdb::opt::Config;
 /// use surrealdb::Surreal;
-/// use surrealdb::engine::local::FDb;
+/// use surrealdb::engine::local::SurrealKV;
 ///
 /// let config = Config::default().strict();
-/// let db = Surreal::new::<FDb>(("path/to/fdb.cluster", config)).await?;
+/// let db = Surreal::new::<SurrealKV>((""path/to/database-folder", config)).await?;
 /// # Ok(())
 /// # }
 /// ```
-#[cfg(feature = "kv-fdb")]
-#[cfg_attr(docsrs, doc(cfg(feature = "kv-fdb")))]
-#[derive(Debug)]
-pub struct FDb;
-
 #[cfg(feature = "kv-surrealkv")]
 #[cfg_attr(docsrs, doc(cfg(feature = "kv-surrealkv")))]
 #[derive(Debug)]

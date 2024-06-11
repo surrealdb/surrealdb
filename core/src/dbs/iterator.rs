@@ -299,9 +299,7 @@ impl Iterator {
 				feature = "kv-surrealkv",
 				feature = "kv-file",
 				feature = "kv-rocksdb",
-				feature = "kv-fdb",
 				feature = "kv-tikv",
-				feature = "kv-speedb"
 			))]
 			ctx,
 			stm,

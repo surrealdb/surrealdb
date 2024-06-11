@@ -550,29 +550,6 @@ jobs:
       - name: Test rocksdb engine
         run: cargo make ci-api-integration-rocksdb
 
-  speedb-engine:
-    name: SpeeDB engine
-    runs-on: ubuntu-latest
-    steps:
-      - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          toolchain: stable
-
-      - name: Checkout sources
-        uses: actions/checkout@v4
-
-      - name: Setup cache
-        uses: Swatinem/rust-cache@v2
-        with:
-          save-if: ${{ github.ref == 'refs/heads/main' }}
-
-      - name: Install cargo-make
-        run: cargo install --debug --locked cargo-make
-
-      - name: Test speedb engine
-        run: cargo make ci-api-integration-speedb
-
   tikv-engine:
     name: TiKV engine
     runs-on: ubuntu-latest
@@ -606,43 +583,6 @@ jobs:
 
       - name: Test tikv engine
         run: cargo make ci-api-integration-tikv
-
-      - name: Debug info
-        if: always()
-        run: |
-          set -x
-          free -m
-          df -h
-          ps auxf
-          cat /tmp/surrealdb.log || true
-
-  fdb-engine:
-    name: FoundationDB engine
-    runs-on: ubuntu-latest
-    steps:
-      - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          toolchain: stable
-
-      - name: Checkout sources
-        uses: actions/checkout@v4
-
-      - name: Setup cache
-        uses: Swatinem/rust-cache@v2
-        with:
-          save-if: ${{ github.ref == 'refs/heads/main' }}
-
-      - name: Setup FoundationDB
-        uses: foundationdb-rs/foundationdb-actions-install@v2.1.0
-        with:
-          version: "7.1.30"
-
-      - name: Install cargo-make
-        run: cargo install --debug --locked cargo-make
-
-      - name: Test fdb engine
-        run: cargo make ci-api-integration-fdb
 
       - name: Debug info
         if: always()

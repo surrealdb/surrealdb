@@ -619,22 +619,6 @@ criteria = "safe-to-deploy"
 version = "0.11.0"
 criteria = "safe-to-deploy"
 
-[[exemptions.foundationdb]]
-version = "0.8.0"
-criteria = "safe-to-deploy"
-
-[[exemptions.foundationdb-gen]]
-version = "0.8.0"
-criteria = "safe-to-deploy"
-
-[[exemptions.foundationdb-macros]]
-version = "0.2.0"
-criteria = "safe-to-deploy"
-
-[[exemptions.foundationdb-sys]]
-version = "0.8.0"
-criteria = "safe-to-deploy"
-
 [[exemptions.fst]]
 version = "0.4.7"
 criteria = "safe-to-deploy"
@@ -937,10 +921,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.librocksdb-sys]]
 version = "0.11.0+8.1.1"
-criteria = "safe-to-deploy"
-
-[[exemptions.libspeedb-sys]]
-version = "0.0.4+2.7.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.libz-sys]]
@@ -1697,10 +1677,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.spade]]
 version = "2.6.0"
-criteria = "safe-to-deploy"
-
-[[exemptions.speedb]]
-version = "0.0.4"
 criteria = "safe-to-deploy"
 
 [[exemptions.spin]]

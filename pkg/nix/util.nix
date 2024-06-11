@@ -59,24 +59,6 @@ rec {
 
   packageName = cargoToml.package.name;
 
-  fdbPackage = fdbPackages:
-    let
-      fdbPkgVersion = builtins.replaceStrings [ "." ] [ "" ] config.fdbVersion;
-    in fdbPackages."foundationdb${fdbPkgVersion}";
-
-  fdbSupported = fdbPackages:
-    let
-      package = fdbPackage fdbPackages;
-      fdbSystems = package.meta.platforms or [ ];
-    in builtins.elem system fdbSystems;
-
-  features = cargoToml.features // {
-    storage-fdb = let
-      fdbFeatureVersion =
-        builtins.replaceStrings [ "." ] [ "_" ] config.fdbVersion;
-    in [ "surrealdb/kv-fdb-${fdbFeatureVersion}" ];
-  };
-
   buildMetadata = with lib.strings;
     let
       lastModifiedDate = flake.lastModifiedDate or flake.lastModified or "";

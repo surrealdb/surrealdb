@@ -47,11 +47,11 @@ jobs:
 
       - name: Checkout changes
         uses: actions/checkout@v4
-      
+
       - name: Run benchmark
         run: |
           cargo make ci-bench -- --save-baseline current
-      
+
       - name: Copy results from AWS S3 bucket
         run: |
           BRANCH_NAME=$(echo ${{ github.head_ref || github.ref_name }} | sed 's/[^a-zA-Z0-9]/-/g')
@@ -102,14 +102,10 @@ jobs:
             features: "kv-mem"
           - target: "lib-rocksdb"
             features: "kv-rocksdb"
-          - target: "lib-fdb"
-            features: "kv-fdb-7_1"
           - target: "sdk-mem"
             features: "kv-mem"
           - target: "sdk-rocksdb"
             features: "kv-rocksdb"
-          - target: "sdk-fdb"
-            features: "kv-fdb-7_1"
           # This one fails because the server consumes too much memory and the kernel kills it. I tried with instances up to 16GB of RAM.
           # - target: "sdk-ws"
           #   features: "protocol-ws"
@@ -138,19 +134,12 @@ jobs:
           sudo apt-get -qq -y install clang curl
           cargo install --quiet --locked critcmp cargo-make
 
-      # Install FoundationDB if needed
-      - name: Setup FoundationDB
-        uses: foundationdb-rs/foundationdb-actions-install@v2.1.0
-        if: ${{ matrix.target == 'lib-fdb' || matrix.target == 'sdk-fdb' }}
-        with:
-          version: "7.1.30"
-
       # Run SurrealDB in the background if needed
       - name: Build and start SurrealDB
         if: ${{ matrix.target == 'sdk-ws' }}
         run: |
           cargo make build
-          
+
           # Kill any potential previous instance of the server. The runner may be reused.
           pkill -9 surreal || true
           ./target/release/surreal start 2>&1 >surrealdb.log &
@@ -179,7 +168,7 @@ jobs:
 
           # Kill surreal server if it's running
           pkill -9 surreal || true
-      
+
       - name: Copy results from AWS S3 bucket
         run: |
           BRANCH_NAME=$(echo ${{ github.head_ref || github.ref_name }} | sed 's/[^a-zA-Z0-9]/-/g')

@@ -5,8 +5,6 @@
 
   features = with util.features;
     [ storage-mem storage-rocksdb scripting http storage-tikv ]
-    ++ pkgs.lib.lists.optional (util.fdbSupported pkgs.fdbPackages)
-    [ storage-fdb ];
 
   buildSpec = with pkgs;
     let crossCompiling = !util.isNative target;
@@ -17,8 +15,6 @@
       nativeBuildInputs = [ pkg-config ];
 
       buildInputs = [ openssl ]
-        ++ lib.lists.optional (util.fdbSupported fdbPackages)
-        (util.fdbPackage fdbPackages);
 
       LIBCLANG_PATH = "${llvmPackages.libclang.lib}/lib";
 
