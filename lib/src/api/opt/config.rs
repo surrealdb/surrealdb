@@ -120,8 +120,8 @@ impl Config {
 	}
 
 	/// Set the capabilities for the database
-	pub fn capabilities(mut self, capabilities: Capabilities) -> Self {
-		self.capabilities = capabilities;
+	pub fn capabilities(mut self, capabilities: CapabilitiesBuilder) -> Self {
+		self.capabilities = capabilities.build();
 		self
 	}
 
