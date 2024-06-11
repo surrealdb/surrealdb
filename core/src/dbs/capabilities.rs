@@ -6,10 +6,8 @@ use std::{collections::HashSet, sync::Arc};
 use ipnet::IpNet;
 use url::Url;
 
-pub trait Target {
-	type Item: ?Sized;
-
-	fn matches(&self, elem: &Self::Item) -> bool;
+pub trait Target<Item: ?Sized = Self> {
+	fn matches(&self, elem: &Item) -> bool;
 }
 
 #[derive(Debug, Clone, Hash, Eq, PartialEq)]
@@ -41,9 +39,18 @@ impl fmt::Display for FuncTarget {
 }
 
 impl Target for FuncTarget {
-	type Item = str;
+	fn matches(&self, elem: &FuncTarget) -> bool {
+		match self {
+			Self(family, Some(name)) => {
+				family == &elem.0 && (elem.1.as_ref().is_some_and(|n| n == name))
+			}
+			Self(family, None) => family == &elem.0,
+		}
+	}
+}
 
-	fn matches(&self, elem: &Self::Item) -> bool {
+impl Target<str> for FuncTarget {
+	fn matches(&self, elem: &str) -> bool {
 		if let Some(x) = self.1.as_ref() {
 			let Some((f, r)) = elem.split_once("::") else {
 				return false;
@@ -132,8 +139,6 @@ impl fmt::Display for NetTarget {
 }
 
 impl Target for NetTarget {
-	type Item = Self;
-
 	fn matches(&self, elem: &Self) -> bool {
 		match self {
 			// If self contains a host and port, the elem must match both the host and port
@@ -200,14 +205,18 @@ impl std::str::FromStr for NetTarget {
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 #[non_exhaustive]
-pub enum Targets<T: Target + Hash + Eq + PartialEq> {
+pub enum Targets<T: Hash + Eq + PartialEq> {
 	None,
 	Some(HashSet<T>),
 	All,
 }
 
-impl<T: Target + Hash + Eq + PartialEq + fmt::Debug + fmt::Display> Targets<T> {
-	fn matches(&self, elem: &T::Item) -> bool {
+impl<T: Hash + Eq + PartialEq + fmt::Debug + fmt::Display> Targets<T> {
+	fn matches<S>(&self, elem: &S) -> bool
+	where
+		S: ?Sized,
+		T: Target<S>,
+	{
 		match self {
 			Self::None => false,
 			Self::All => true,
@@ -331,12 +340,7 @@ impl Capabilities {
 
 	// function is public API so we can't remove it, but you should prefer allows_function_name
 	pub fn allows_function(&self, target: &FuncTarget) -> bool {
-		if let Some(x) = target.1.as_ref() {
-			let target = format!("{}::{}", target.0, x);
-			self.allow_funcs.matches(&target) && !self.deny_funcs.matches(&target)
-		} else {
-			self.allow_funcs.matches(&target.0) && !self.deny_funcs.matches(&target.0)
-		}
+		self.allow_funcs.matches(target) && !self.deny_funcs.matches(target)
 	}
 
 	// doc hidden so we don't extend api in the library.
