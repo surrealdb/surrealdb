@@ -14,21 +14,6 @@ pub trait Target<Item: ?Sized = Self> {
 #[non_exhaustive]
 pub struct FuncTarget(pub String, pub Option<String>);
 
-impl FuncTarget {
-	pub fn matches_func_name(&self, name: &str) -> bool {
-		if let Some(x) = self.1.as_ref() {
-			let Some((f, r)) = name.split_once("::") else {
-				return false;
-			};
-
-			f == self.0 && r == x
-		} else {
-			let f = name.split_once("::").map(|(f, _)| f).unwrap_or(name);
-			f == self.0
-		}
-	}
-}
-
 impl fmt::Display for FuncTarget {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		match &self.1 {
