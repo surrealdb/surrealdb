@@ -50,7 +50,11 @@ async fn function_array_add() -> Result<(), Error> {
 		RETURN array::add([1,2], 3);
 		RETURN array::add([1,2], [2,3]);
 	"#;
-	Test::new(sql).await?.expect_val("[3]")?.expect_error("Incorrect arguments for function array::add(). Argument 1 was the wrong type. Expected a array but found 3")?
+	let error = "Incorrect arguments for function array::add(). Argument 1 was the wrong type. Expected a array but found 3";
+	Test::new(sql)
+		.await?
+		.expect_val("[3]")?
+		.expect_error(error)?
 		.expect_vals(&["[1,2]", "[1,2,3]", "[1,2,3]"])?;
 	Ok(())
 }
@@ -62,9 +66,8 @@ async fn function_array_all() -> Result<(), Error> {
 		RETURN array::all("some text");
 		RETURN array::all([1,2,"text",3,NONE,3,4]);
 	"#;
-	Test::new(sql).await?.expect_val("true")?
-		.expect_error("Incorrect arguments for function array::all(). Argument 1 was the wrong type. Expected a array but found 'some text'")?
-		.expect_val("false")?;
+	let error = "Incorrect arguments for function array::all(). Argument 1 was the wrong type. Expected a array but found 'some text'";
+	Test::new(sql).await?.expect_val("true")?.expect_error(error)?.expect_val("false")?;
 	Ok(())
 }
 
@@ -75,7 +78,8 @@ async fn function_array_any() -> Result<(), Error> {
 		RETURN array::any("some text");
 		RETURN array::any([1,2,"text",3,NONE,3,4]);
 	"#;
-	Test::new(sql).await?.expect_val("false")?.expect_error("Incorrect arguments for function array::any(). Argument 1 was the wrong type. Expected a array but found 'some text'")?.expect_val("true")?;
+	let error = "Incorrect arguments for function array::any(). Argument 1 was the wrong type. Expected a array but found 'some text'";
+	Test::new(sql).await?.expect_val("false")?.expect_error(error)?.expect_val("true")?;
 	Ok(())
 }
 
@@ -86,9 +90,8 @@ async fn function_array_append() -> Result<(), Error> {
 		RETURN array::append(3, true);
 		RETURN array::append([1,2], [2,3]);
 	"#;
-	Test::new(sql).await?.expect_val("[3]")?
-		.expect_error("Incorrect arguments for function array::append(). Argument 1 was the wrong type. Expected a array but found 3")?
-		.expect_val( "[1,2,[2,3]]")?;
+	let error = "Incorrect arguments for function array::append(). Argument 1 was the wrong type. Expected a array but found 3";
+	Test::new(sql).await?.expect_val("[3]")?.expect_error(error)?.expect_val("[1,2,[2,3]]")?;
 	Ok(())
 }
 
@@ -174,7 +177,11 @@ async fn function_array_combine() -> Result<(), Error> {
 		RETURN array::combine(3, true);
 		RETURN array::combine([1,2], [2,3]);
 	"#;
-	Test::new(sql).await?.expect_val("[]")?.expect_error("Incorrect arguments for function array::combine(). Argument 1 was the wrong type. Expected a array but found 3")?
+	let error = "Incorrect arguments for function array::combine(). Argument 1 was the wrong type. Expected a array but found 3";
+	Test::new(sql)
+		.await?
+		.expect_val("[]")?
+		.expect_error(error)?
 		.expect_val("[ [1,2], [1,3], [2,2], [2,3] ]")?;
 	Ok(())
 }
@@ -186,10 +193,17 @@ async fn function_array_clump() -> Result<(), Error> {
 		RETURN array::clump([0, 1, 2], 2);
 		RETURN array::clump([0, 1, 2], 3);
 		RETURN array::clump([0, 1, 2, 3, 4, 5], 3);
+		RETURN array::clump([0, 1, 2], 0);
 	"#;
-	let desired_responses =
-		["[[0, 1], [2, 3]]", "[[0, 1], [2]]", "[[0, 1, 2]]", "[[0, 1, 2], [3, 4, 5]]"];
-	test_queries(sql, &desired_responses).await
+	let error = "Incorrect arguments for function array::clump(). The second argument must be an integer greater than 0";
+	Test::new(sql)
+		.await?
+		.expect_val("[[0, 1], [2, 3]]")?
+		.expect_val("[[0, 1], [2]]")?
+		.expect_val("[[0, 1, 2]]")?
+		.expect_val("[[0, 1, 2], [3, 4, 5]]")?
+		.expect_error(error)?;
+	Ok(())
 }
 
 #[tokio::test]
@@ -199,8 +213,8 @@ async fn function_array_complement() -> Result<(), Error> {
 		RETURN array::complement(3, true);
 		RETURN array::complement([1,2,3,4], [3,4,5,6]);
 	"#;
-	Test::new(sql).await?.expect_val("[]")?.expect_error( "Incorrect arguments for function array::complement(). Argument 1 was the wrong type. Expected a array but found 3")?
-		.expect_val( "[1,2]")?;
+	let error = "Incorrect arguments for function array::complement(). Argument 1 was the wrong type. Expected a array but found 3";
+	Test::new(sql).await?.expect_val("[]")?.expect_error(error)?.expect_val("[1,2]")?;
 	Ok(())
 }
 
@@ -215,8 +229,10 @@ async fn function_array_concat() -> Result<(), Error> {
 	"#;
 	Test::new(sql).await?
 		.expect_error("Incorrect arguments for function array::concat(). Expected at least one argument")?
-		.expect_val( "[]")?
-		.expect_error( "Incorrect arguments for function array::concat(). Argument 1 was the wrong type. Expected a array but found 3")?
+		.expect_val("[]")?
+		.expect_error(
+			"Incorrect arguments for function array::concat(). Argument 1 was the wrong type. Expected a array but found 3"
+		)?
 		.expect_vals(&["[1,2,3,4,3,4,5,6]", "[1,2,3,4,3,4,5,6,5,6,7,8,7,8,9,0]"])?;
 	Ok(())
 }
@@ -228,10 +244,8 @@ async fn function_array_difference() -> Result<(), Error> {
 		RETURN array::difference(3, true);
 		RETURN array::difference([1,2,3,4], [3,4,5,6]);
 	"#;
-	Test::new(sql).await?
-		.expect_val("[]")?
-		.expect_error("Incorrect arguments for function array::difference(). Argument 1 was the wrong type. Expected a array but found 3")?
-		.expect_val("[1,2,5,6]")?;
+	let error = "Incorrect arguments for function array::difference(). Argument 1 was the wrong type. Expected a array but found 3";
+	Test::new(sql).await?.expect_val("[]")?.expect_error(error)?.expect_val("[1,2,5,6]")?;
 	Ok(())
 }
 
@@ -252,7 +266,8 @@ async fn function_array_distinct() -> Result<(), Error> {
 	assert!(
 		matches!(
 			&tmp,
-			Err(e) if e.to_string() == "Incorrect arguments for function array::distinct(). Argument 1 was the wrong type. Expected a array but found 'some text'"
+			Err(e) if e.to_string() ==
+				"Incorrect arguments for function array::distinct(). Argument 1 was the wrong type. Expected a array but found 'some text'"
 		),
 		"{tmp:?}"
 	);
@@ -327,7 +342,8 @@ async fn function_array_flatten() -> Result<(), Error> {
 	assert!(
 		matches!(
 			&tmp,
-			Err(e) if e.to_string() == "Incorrect arguments for function array::flatten(). Argument 1 was the wrong type. Expected a array but found 'some text'"
+			Err(e) if e.to_string() ==
+				"Incorrect arguments for function array::flatten(). Argument 1 was the wrong type. Expected a array but found 'some text'"
 		),
 		"{tmp:?}"
 	);
@@ -360,7 +376,8 @@ async fn function_array_group() -> Result<(), Error> {
 	assert!(
 		matches!(
 			&tmp,
-			Err(e) if e.to_string() == "Incorrect arguments for function array::group(). Argument 1 was the wrong type. Expected a array but found 3"
+			Err(e) if e.to_string() ==
+				"Incorrect arguments for function array::group(). Argument 1 was the wrong type. Expected a array but found 3"
 		),
 		"{tmp:?}"
 	);
@@ -418,7 +435,8 @@ async fn function_array_intersect() -> Result<(), Error> {
 	assert!(
 		matches!(
 			&tmp,
-			Err(e) if e.to_string() == "Incorrect arguments for function array::intersect(). Argument 1 was the wrong type. Expected a array but found 3"
+			Err(e) if e.to_string() ==
+				"Incorrect arguments for function array::intersect(). Argument 1 was the wrong type. Expected a array but found 3"
 		),
 		"{tmp:?}"
 	);
@@ -500,7 +518,8 @@ async fn function_array_len() -> Result<(), Error> {
 	assert!(
 		matches!(
 			&tmp,
-			Err(e) if e.to_string() == "Incorrect arguments for function array::len(). Argument 1 was the wrong type. Expected a array but found 'some text'"
+			Err(e) if e.to_string() ==
+				"Incorrect arguments for function array::len(). Argument 1 was the wrong type. Expected a array but found 'some text'"
 		),
 		"{tmp:?}"
 	);
@@ -577,7 +596,8 @@ async fn function_array_max() -> Result<(), Error> {
 	assert!(
 		matches!(
 			&tmp,
-			Err(e) if e.to_string() == "Incorrect arguments for function array::max(). Argument 1 was the wrong type. Expected a array but found 'some text'"
+			Err(e) if e.to_string() ==
+				"Incorrect arguments for function array::max(). Argument 1 was the wrong type. Expected a array but found 'some text'"
 		),
 		"{tmp:?}"
 	);
@@ -606,7 +626,8 @@ async fn function_array_min() -> Result<(), Error> {
 	assert!(
 		matches!(
 			&tmp,
-			Err(e) if e.to_string() == "Incorrect arguments for function array::min(). Argument 1 was the wrong type. Expected a array but found 'some text'"
+			Err(e) if e.to_string() ==
+				"Incorrect arguments for function array::min(). Argument 1 was the wrong type. Expected a array but found 'some text'"
 		),
 		"{tmp:?}"
 	);
@@ -635,7 +656,8 @@ async fn function_array_pop() -> Result<(), Error> {
 	assert!(
 		matches!(
 			&tmp,
-			Err(e) if e.to_string() == "Incorrect arguments for function array::pop(). Argument 1 was the wrong type. Expected a array but found 'some text'"
+			Err(e) if e.to_string() ==
+				"Incorrect arguments for function array::pop(). Argument 1 was the wrong type. Expected a array but found 'some text'"
 		),
 		"{tmp:?}"
 	);
@@ -664,7 +686,8 @@ async fn function_array_prepend() -> Result<(), Error> {
 	assert!(
 		matches!(
 			&tmp,
-			Err(e) if e.to_string() == "Incorrect arguments for function array::prepend(). Argument 1 was the wrong type. Expected a array but found 3"
+			Err(e) if e.to_string() ==
+				"Incorrect arguments for function array::prepend(). Argument 1 was the wrong type. Expected a array but found 3"
 		),
 		"{tmp:?}"
 	);
@@ -693,7 +716,8 @@ async fn function_array_push() -> Result<(), Error> {
 	assert!(
 		matches!(
 			&tmp,
-			Err(e) if e.to_string() == "Incorrect arguments for function array::push(). Argument 1 was the wrong type. Expected a array but found 3"
+			Err(e) if e.to_string() ==
+				"Incorrect arguments for function array::push(). Argument 1 was the wrong type. Expected a array but found 3"
 		),
 		"{tmp:?}"
 	);
@@ -751,7 +775,8 @@ async fn function_array_reverse() -> Result<(), Error> {
 	assert!(
 		matches!(
 			&tmp,
-			Err(e) if e.to_string() == "Incorrect arguments for function array::reverse(). Argument 1 was the wrong type. Expected a array but found 3"
+			Err(e) if e.to_string() ==
+				"Incorrect arguments for function array::reverse(). Argument 1 was the wrong type. Expected a array but found 3"
 		),
 		"{tmp:?}"
 	);
@@ -782,7 +807,8 @@ async fn function_array_shuffle() -> Result<(), Error> {
 	assert!(
 		matches!(
 			&tmp,
-			Err(e) if e.to_string() == "Incorrect arguments for function array::shuffle(). Argument 1 was the wrong type. Expected a array but found 3"
+			Err(e) if e.to_string() ==
+				"Incorrect arguments for function array::shuffle(). Argument 1 was the wrong type. Expected a array but found 3"
 		),
 		"{tmp:?}"
 	);
@@ -821,7 +847,8 @@ async fn function_array_slice() -> Result<(), Error> {
 	assert!(
 		matches!(
 			&tmp,
-			Err(e) if e.to_string() == "Incorrect arguments for function array::slice(). Argument 1 was the wrong type. Expected a array but found 3"
+			Err(e) if e.to_string() ==
+				"Incorrect arguments for function array::slice(). Argument 1 was the wrong type. Expected a array but found 3"
 		),
 		"{tmp:?}"
 	);
@@ -870,7 +897,8 @@ async fn function_array_sort() -> Result<(), Error> {
 	assert!(
 		matches!(
 			&tmp,
-			Err(e) if e.to_string() == "Incorrect arguments for function array::sort(). Argument 1 was the wrong type. Expected a array but found 3"
+			Err(e) if e.to_string() ==
+				"Incorrect arguments for function array::sort(). Argument 1 was the wrong type. Expected a array but found 3"
 		),
 		"{tmp:?}"
 	);
@@ -915,7 +943,8 @@ async fn function_array_sort_asc() -> Result<(), Error> {
 	assert!(
 		matches!(
 			&tmp,
-			Err(e) if e.to_string() == "Incorrect arguments for function array::sort::asc(). Argument 1 was the wrong type. Expected a array but found 3"
+			Err(e) if e.to_string() ==
+				"Incorrect arguments for function array::sort::asc(). Argument 1 was the wrong type. Expected a array but found 3"
 		),
 		"{tmp:?}"
 	);
@@ -944,7 +973,8 @@ async fn function_array_sort_desc() -> Result<(), Error> {
 	assert!(
 		matches!(
 			&tmp,
-			Err(e) if e.to_string() == "Incorrect arguments for function array::sort::desc(). Argument 1 was the wrong type. Expected a array but found 3"
+			Err(e) if e.to_string() ==
+				"Incorrect arguments for function array::sort::desc(). Argument 1 was the wrong type. Expected a array but found 3"
 		),
 		"{tmp:?}"
 	);
@@ -993,7 +1023,8 @@ async fn function_array_union() -> Result<(), Error> {
 	assert!(
 		matches!(
 			&tmp,
-			Err(e) if e.to_string() == "Incorrect arguments for function array::union(). Argument 1 was the wrong type. Expected a array but found 3",
+			Err(e) if e.to_string() ==
+				"Incorrect arguments for function array::union(). Argument 1 was the wrong type. Expected a array but found 3",
 		),
 		"{tmp:?}"
 	);
@@ -1027,7 +1058,8 @@ async fn function_bytes_len() -> Result<(), Error> {
 	assert!(
 		matches!(
 			&tmp,
-			Err(e) if e.to_string() == "Incorrect arguments for function bytes::len(). Argument 1 was the wrong type. Expected a bytes but found true"
+			Err(e) if e.to_string() ==
+				"Incorrect arguments for function bytes::len(). Argument 1 was the wrong type. Expected a bytes but found true"
 		),
 		"{tmp:?}"
 	);
@@ -1135,7 +1167,9 @@ async fn function_crypto_sha512() -> Result<(), Error> {
 	let mut test = Test::new(sql).await?;
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::from("39f0160c946c4c53702112d6ef3eea7957ea8e1c78787a482a89f8b0a8860a20ecd543432e4a187d9fdcd1c415cf61008e51a7e8bf2f22ac77e458789c9cdccc");
+	let val = Value::from(
+		"39f0160c946c4c53702112d6ef3eea7957ea8e1c78787a482a89f8b0a8860a20ecd543432e4a187d9fdcd1c415cf61008e51a7e8bf2f22ac77e458789c9cdccc"
+	);
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -1784,9 +1818,8 @@ async fn function_math_bottom() -> Result<(), Error> {
 		RETURN math::bottom([1,2,3], 1);
 		RETURN math::bottom([1,2,3], 2);
 	"#;
-	Test::new(sql).await?
-		.expect_error("Incorrect arguments for function math::bottom(). The second argument must be an integer greater than 0.")?
-		.expect_vals( &["[1]", "[2, 1]"])?;
+	let error = "Incorrect arguments for function math::bottom(). The second argument must be an integer greater than 0.";
+	Test::new(sql).await?.expect_error(error)?.expect_vals(&["[1]", "[2, 1]"])?;
 	Ok(())
 }
 
@@ -1867,7 +1900,8 @@ async fn function_math_fixed() -> Result<(), Error> {
 	assert!(
 		matches!(
 			&tmp,
-			Err(e) if e.to_string() == "Incorrect arguments for function math::fixed(). The second argument must be an integer greater than 0."
+			Err(e) if e.to_string() ==
+				"Incorrect arguments for function math::fixed(). The second argument must be an integer greater than 0."
 		),
 		"{tmp:?}"
 	);
@@ -2336,7 +2370,9 @@ async fn function_math_sqrt() -> Result<(), Error> {
 	assert_eq!(tmp, val);
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::parse("10.07472083980494220820325739456714210123675076934383520155548236146713380225253351613768233376490240");
+	let val = Value::parse(
+		"10.07472083980494220820325739456714210123675076934383520155548236146713380225253351613768233376490240"
+	);
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -4583,7 +4619,10 @@ async fn function_type_is_bytes() -> Result<(), Error> {
 #[tokio::test]
 async fn function_type_is_collection() -> Result<(), Error> {
 	let sql = r#"
-		LET $collection = <geometry<collection>> { type: 'GeometryCollection', geometries: [{ type: 'MultiPoint', coordinates: [[10, 11.2], [10.5, 11.9]] }] };
+		LET $collection = <geometry<collection>> {
+			type: 'GeometryCollection', 
+			geometries: [{ type: 'MultiPoint', coordinates: [[10, 11.2], [10.5, 11.9]] }]
+		};
 		RETURN type::is::collection($collection);
 		RETURN type::is::collection("123");
 	"#;
@@ -4783,7 +4822,10 @@ async fn function_type_is_null() -> Result<(), Error> {
 #[tokio::test]
 async fn function_type_is_multiline() -> Result<(), Error> {
 	let sql = r#"
-		LET $multiline = <geometry<multiline>> { type: 'MultiLineString', coordinates: [[[10, 11.2], [10.5, 11.9]], [[11, 12.2], [11.5, 12.9], [12, 13]]] };
+		LET $multiline = <geometry<multiline>> {
+			type: 'MultiLineString',
+			coordinates: [[[10, 11.2], [10.5, 11.9]], [[11, 12.2], [11.5, 12.9], [12, 13]]]
+		};
 		RETURN type::is::multiline($multiline);
 		RETURN type::is::multiline("123");
 	"#;
@@ -4831,7 +4873,10 @@ async fn function_type_is_multipoint() -> Result<(), Error> {
 #[tokio::test]
 async fn function_type_is_multipolygon() -> Result<(), Error> {
 	let sql = r#"
-		LET $multipolygon = <geometry<multipolygon>> { type: 'MultiPolygon', coordinates: [[[[10, 11.2], [10.5, 11.9], [10.8, 12], [10, 11.2]]], [[[9, 11.2], [10.5, 11.9], [10.3, 13], [9, 11.2]]]] };
+		LET $multipolygon = <geometry<multipolygon>> {
+			type: 'MultiPolygon', 
+			coordinates: [[[[10, 11.2], [10.5, 11.9], [10.8, 12], [10, 11.2]]], [[[9, 11.2], [10.5, 11.9], [10.3, 13], [9, 11.2]]]]
+		};
 		RETURN type::is::multipolygon($multipolygon);
 		RETURN type::is::multipolygon("123");
 	"#;
@@ -4927,7 +4972,18 @@ async fn function_type_is_point() -> Result<(), Error> {
 #[tokio::test]
 async fn function_type_is_polygon() -> Result<(), Error> {
 	let sql = r#"
-		LET $polygon = <geometry<polygon>> { type: 'Polygon', coordinates: [[[-0.38314819, 51.37692386], [0.1785278, 51.37692386], [0.1785278, 51.6146057], [-0.38314819, 51.6146057], [-0.38314819, 51.37692386]]] };
+		LET $polygon = <geometry<polygon>> {
+			type: 'Polygon', 
+			coordinates: [
+				[
+					[-0.38314819, 51.37692386],
+					[0.1785278, 51.37692386],
+					[0.1785278, 51.6146057],
+					[-0.38314819, 51.6146057],
+					[-0.38314819, 51.37692386]
+				]
+			]
+		};
 		RETURN type::is::polygon($polygon);
 		RETURN type::is::polygon("123");
 	"#;
@@ -5923,24 +5979,40 @@ async fn function_custom_optional_args() -> Result<(), Error> {
 	let val = Value::parse("[]");
 	assert_eq!(tmp, val);
 	//
+	let error = "Query should have failed with error: Incorrect arguments for function fn::a(). The function expects 1 argument.";
 	match test.next()?.result {
-		Err(surrealdb::error::Db::InvalidArguments { name, message }) if name == "fn::one_arg" && message == "The function expects 1 argument." => (),
-		_ => panic!("Query should have failed with error: Incorrect arguments for function fn::a(). The function expects 1 argument.")
+		Err(surrealdb::error::Db::InvalidArguments {
+			name,
+			message,
+		}) if name == "fn::one_arg" && message == "The function expects 1 argument." => (),
+		_ => panic!("{}", error),
 	}
 	//
+	let error = "Query should have failed with error: Incorrect arguments for function fn::last_option(). The function expects 1 to 2 arguments.";
 	match test.next()?.result {
-		Err(surrealdb::error::Db::InvalidArguments { name, message }) if name == "fn::last_option" && message == "The function expects 1 to 2 arguments." => (),
-		_ => panic!("Query should have failed with error: Incorrect arguments for function fn::last_option(). The function expects 1 to 2 arguments.")
+		Err(surrealdb::error::Db::InvalidArguments {
+			name,
+			message,
+		}) if name == "fn::last_option" && message == "The function expects 1 to 2 arguments." => (),
+		_ => panic!("{}", error),
 	}
 	//
+	let error = "Query should have failed with error: Incorrect arguments for function fn::middle_option(). The function expects 3 arguments.";
 	match test.next()?.result {
-		Err(surrealdb::error::Db::InvalidArguments { name, message }) if name == "fn::middle_option" && message == "The function expects 3 arguments." => (),
-		_ => panic!("Query should have failed with error: Incorrect arguments for function fn::middle_option(). The function expects 3 arguments.")
+		Err(surrealdb::error::Db::InvalidArguments {
+			name,
+			message,
+		}) if name == "fn::middle_option" && message == "The function expects 3 arguments." => (),
+		_ => panic!("{}", error),
 	}
 	//
+	let error = "Query should have failed with error: Incorrect arguments for function fn::zero_arg(). The function expects 0 arguments.";
 	match test.next()?.result {
-		Err(surrealdb::error::Db::InvalidArguments { name, message }) if name == "fn::zero_arg" && message == "The function expects 0 arguments." => (),
-		_ => panic!("Query should have failed with error: Incorrect arguments for function fn::zero_arg(). The function expects 0 arguments.")
+		Err(surrealdb::error::Db::InvalidArguments {
+			name,
+			message,
+		}) if name == "fn::zero_arg" && message == "The function expects 0 arguments." => (),
+		_ => panic!("{}", error),
 	}
 	//
 	let tmp = test.next()?.result?;
