@@ -102,19 +102,13 @@ impl Method {
 		matches!(
 			self,
 			Method::Ping
-				| Method::Info
-				| Method::Select
-				| Method::Insert
-				| Method::Create
-				| Method::Update
-				| Method::Merge
-				| Method::Patch
-				| Method::Delete
+				| Method::Info | Method::Select
+				| Method::Insert | Method::Create
+				| Method::Update | Method::Merge
+				| Method::Patch | Method::Delete
 				| Method::Version
-				| Method::Query
-				| Method::Relate
-				| Method::Run
-				| Method::Unknown
+				| Method::Query | Method::Relate
+				| Method::Run | Method::Unknown
 		)
 	}
 }

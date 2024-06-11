@@ -64,7 +64,7 @@ impl DefineAnalyzerStatement {
 		.await?;
 		// Release the transaction
 		drop(run); // Do we really need this?
-			 // Ok all good
+		   // Ok all good
 		Ok(Value::None)
 	}
 }
