@@ -1,3 +1,4 @@
+use crate::cnf::INSECURE_FORWARD_RECORD_ACCESS_ERRORS;
 use crate::dbs::Session;
 use crate::err::Error;
 #[cfg(feature = "jwks")]
@@ -150,7 +151,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 		}
 	}
 	// Check the token authentication claims
-	match token_data.claims {
+	match token_data.claims.clone() {
 		// Check if this is record access
 		Claims {
 			ns: Some(ns),
@@ -164,28 +165,59 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			// Create a new readonly transaction
 			let mut tx = kvs.transaction(Read, Optimistic).await?;
 			// Parse the record id
-			let id = syn::thing(&id)?;
+			let mut rid = syn::thing(&id)?;
 			// Get the database access method
 			let de = tx.get_db_access(&ns, &db, &ac).await?;
 			// Obtain the configuration to verify the token based on the access method
-			let cf = match de.kind {
-				AccessType::Record(ac) => match ac.jwt.verify {
-					JwtAccessVerify::Key(key) => config(key.alg, key.key),
-					#[cfg(feature = "jwks")]
-					JwtAccessVerify::Jwks(jwks) => {
-						if let Some(kid) = token_data.header.kid {
-							jwks::config(kvs, &kid, &jwks.url, token_data.header.alg).await
-						} else {
-							Err(Error::MissingTokenHeader("kid".to_string()))
+			let (at, cf) = match de.kind {
+				AccessType::Record(at) => {
+					let cf = match at.jwt.verify.clone() {
+						JwtAccessVerify::Key(key) => config(key.alg, key.key),
+						#[cfg(feature = "jwks")]
+						JwtAccessVerify::Jwks(jwks) => {
+							if let Some(kid) = token_data.header.kid {
+								jwks::config(kvs, &kid, &jwks.url, token_data.header.alg).await
+							} else {
+								Err(Error::MissingTokenHeader("kid".to_string()))
+							}
 						}
-					}
-					#[cfg(not(feature = "jwks"))]
-					_ => return Err(Error::AccessMethodMismatch),
-				},
+						#[cfg(not(feature = "jwks"))]
+						_ => return Err(Error::AccessMethodMismatch),
+					}?;
+
+					(at, cf)
+				}
 				_ => return Err(Error::AccessMethodMismatch),
-			}?;
+			};
 			// Verify the token
 			decode::<Claims>(token, &cf.0, &cf.1)?;
+			// AUTHENTICATE clause
+			if let Some(ac) = at.authenticate {
+				// Setup the system session for finding the signin record
+				let mut sess = Session::editor().with_ns(&ns).with_db(&db);
+				sess.rd = Some(rid.clone().into());
+				sess.tk = Some(token_data.claims.clone().into());
+				sess.ip = session.ip.clone();
+				sess.or = session.or.clone();
+				// Compute the value with the params
+				match kvs.evaluate(ac, &sess, None).await {
+					Ok(val) => match val.record() {
+						Some(id) => {
+							// Update rid with result from AUTHENTICATE clause
+							rid = id;
+							// We don't generate the token in this scenario, so unlike signin/signup, no need to update claims.
+						}
+						_ => return Err(Error::InvalidAuth),
+					},
+					Err(e) => {
+						return match e {
+							Error::Thrown(_) => Err(e),
+							e if *INSECURE_FORWARD_RECORD_ACCESS_ERRORS => Err(e),
+							_ => Err(Error::InvalidAuth),
+						}
+					}
+				}
+			}
 			// Log the success
 			debug!("Authenticated with record access method `{}`", ac);
 			// Set the session
@@ -193,12 +225,12 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			session.ns = Some(ns.to_owned());
 			session.db = Some(db.to_owned());
 			session.ac = Some(ac.to_owned());
-			session.rd = Some(Value::from(id.to_owned()));
+			session.rd = Some(Value::from(rid.to_owned()));
 			session.exp = expiration(de.duration.session)?;
 			session.au = Arc::new(Auth::new(Actor::new(
-				id.to_string(),
+				rid.to_string(),
 				Default::default(),
-				Level::Record(ns, db, id.to_string()),
+				Level::Record(ns, db, rid.to_string()),
 			)));
 			Ok(())
 		}

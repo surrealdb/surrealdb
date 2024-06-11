@@ -300,6 +300,11 @@ impl Parser<'_> {
 										ac.signin =
 											Some(stk.run(|stk| self.parse_value(stk)).await?);
 									}
+									t!("AUTHENTICATE") => {
+										self.pop_peek();
+										ac.authenticate =
+											Some(stk.run(|stk| self.parse_value(stk)).await?);
+									}
 									_ => break,
 								}
 							}
@@ -512,6 +517,10 @@ impl Parser<'_> {
 				t!("SIGNIN") => {
 					self.pop_peek();
 					ac.signin = Some(stk.run(|stk| self.parse_value(stk)).await?);
+				}
+				t!("AUTHENTICATE") => {
+					self.pop_peek();
+					ac.authenticate = Some(stk.run(|stk| self.parse_value(stk)).await?);
 				}
 				_ => break,
 			}

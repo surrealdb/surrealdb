@@ -141,10 +141,11 @@ pub async fn db_access(
 									match val.record() {
 										// There is a record returned
 										Some(rid) => {
+											let mut rid = rid;
 											// Create the authentication key
 											let key = config(iss.alg, iss.key)?;
 											// Create the authentication claim
-											let val = Claims {
+											let mut claims = Claims {
 												iss: Some(SERVER_NAME.to_owned()),
 												iat: Some(Utc::now().timestamp()),
 												nbf: Some(Utc::now().timestamp()),
@@ -156,13 +157,41 @@ pub async fn db_access(
 												id: Some(rid.to_raw()),
 												..Claims::default()
 											};
+											// AUTHENTICATE clause
+											if let Some(ac) = at.authenticate {
+												// Setup the system session for finding the signin record
+												let mut sess =
+													Session::editor().with_ns(&ns).with_db(&db);
+												sess.rd = Some(rid.clone().into());
+												sess.tk = Some(claims.clone().into());
+												sess.ip = session.ip.clone();
+												sess.or = session.or.clone();
+												// Compute the value with the params
+												match kvs.evaluate(ac, &sess, None).await {
+													Ok(val) => match val.record() {
+														Some(id) => {
+															// Update rid with result from AUTHENTICATE clause
+															rid = id;
+															claims.id = Some(rid.to_raw());
+														}
+														_ => return Err(Error::InvalidAuth),
+													},
+													Err(e) => {
+														return match e {
+															Error::Thrown(_) => Err(e),
+															e if *INSECURE_FORWARD_RECORD_ACCESS_ERRORS => Err(e),
+															_ => Err(Error::InvalidAuth),
+														}
+													}
+												}
+											}
 											// Log the authenticated access method info
 											trace!("Signing in with access method `{}`", ac);
 											// Create the authentication token
 											let enc =
-												encode(&Header::new(iss.alg.into()), &val, &key);
+												encode(&Header::new(iss.alg.into()), &claims, &key);
 											// Set the authentication on the session
-											session.tk = Some(val.into());
+											session.tk = Some(claims.into());
 											session.ns = Some(ns.to_owned());
 											session.db = Some(db.to_owned());
 											session.ac = Some(ac.to_owned());

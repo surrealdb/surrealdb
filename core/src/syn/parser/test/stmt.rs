@@ -1024,6 +1024,7 @@ fn parse_define_access_record() {
 				kind: AccessType::Record(RecordAccess {
 					signup: None,
 					signin: None,
+					authenticate: None,
 					jwt: JwtAccess {
 						verify: JwtAccessVerify::Key(JwtAccessVerifyKey {
 							alg: Algorithm::Hs384,
@@ -1061,6 +1062,7 @@ fn parse_define_access_record() {
 				kind: AccessType::Record(RecordAccess {
 					signup: None,
 					signin: None,
+					authenticate: None,
 					jwt: JwtAccess {
 						verify: JwtAccessVerify::Key(JwtAccessVerifyKey {
 							alg: Algorithm::Ps512,
@@ -1097,6 +1099,7 @@ fn parse_define_access_record() {
 				kind: AccessType::Record(RecordAccess {
 					signup: None,
 					signin: None,
+					authenticate: None,
 					jwt: JwtAccess {
 						verify: JwtAccessVerify::Key(JwtAccessVerifyKey {
 							alg: Algorithm::Rs256,
@@ -1144,6 +1147,7 @@ fn parse_define_access_record_with_jwt() {
 			kind: AccessType::Record(RecordAccess {
 				signup: None,
 				signin: None,
+				authenticate: None,
 				jwt: JwtAccess {
 					verify: JwtAccessVerify::Key(JwtAccessVerifyKey {
 						alg: Algorithm::EdDSA,
