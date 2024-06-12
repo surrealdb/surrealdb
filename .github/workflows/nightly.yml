@@ -29,6 +29,6 @@ jobs:
     with:
       environment: nightly
       extra-features: storage-surrealkv
-      git-ref: 1.x
+      git-ref: main
       publish: ${{ inputs.publish || github.event_name == 'schedule' }}
     secrets: inherit
