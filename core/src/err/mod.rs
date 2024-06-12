@@ -18,7 +18,6 @@ use bincode::Error as BincodeError;
 	feature = "kv-rocksdb",
 	feature = "kv-fdb",
 	feature = "kv-tikv",
-	feature = "kv-speedb"
 ))]
 use ext_sort::SortError;
 use fst::Error as FstError;
@@ -1078,13 +1077,6 @@ impl From<tikv::Error> for Error {
 	}
 }
 
-#[cfg(feature = "kv-speedb")]
-impl From<speedb::Error> for Error {
-	fn from(e: speedb::Error) -> Error {
-		Error::Tx(e.to_string())
-	}
-}
-
 #[cfg(feature = "kv-rocksdb")]
 impl From<rocksdb::Error> for Error {
 	fn from(e: rocksdb::Error) -> Error {
@@ -1125,7 +1117,6 @@ impl From<reqwest::Error> for Error {
 	feature = "kv-rocksdb",
 	feature = "kv-fdb",
 	feature = "kv-tikv",
-	feature = "kv-speedb"
 ))]
 impl<S, D, I> From<SortError<S, D, I>> for Error
 where
