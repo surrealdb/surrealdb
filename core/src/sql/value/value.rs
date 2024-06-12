@@ -17,7 +17,7 @@ use crate::sql::{
 };
 use chrono::{DateTime, Utc};
 use derive::Store;
-use geo::Point;
+use geo_types::{LineString, MultiLineString, MultiPoint, MultiPolygon, Point, Polygon};
 use reblessive::tree::Stk;
 use revision::revisioned;
 use rust_decimal::prelude::*;
@@ -2663,6 +2663,129 @@ impl Value {
 			Value::Expression(v) => stk.run(|stk| v.compute(stk, ctx, opt, doc)).await,
 			_ => Ok(self.to_owned()),
 		}
+	}
+
+	pub(crate) fn to_geometry(v: &Value) -> Option<Geometry> {
+		let Value::Object(v) = v else {
+			return None;
+		};
+
+		if v.len() == 2 {
+			if let Some(Value::Strand(type_)) = v.get("type") {
+				if let Some(coords) = v.get("coordinates") {
+					let type_ = type_.0.as_str();
+
+					return match type_ {
+						"Point" => Value::to_point(coords).map(Geometry::from),
+						"LineString" => Value::to_line(coords).map(Geometry::from),
+						"Polygon" => Value::to_polygon(coords).map(Geometry::from),
+						"MultiPoint" => Value::to_multipoint(coords).map(Geometry::from),
+						"MultiLineString" => Value::to_multiline(coords).map(Geometry::from),
+						"MultiPolygon" => Value::to_multipolygon(coords).map(Geometry::from),
+						_ => None,
+					};
+				}
+
+				if type_.0 == "GeometryCollection" {
+					if let Some(geometries) = v.get("geometries") {
+						return Value::to_collection(geometries).map(Geometry::from);
+					}
+				}
+			}
+		}
+
+		None
+	}
+
+	pub(crate) fn to_collection(v: &Value) -> Option<Vec<Geometry>> {
+		let Value::Array(v) = v else {
+			return None;
+		};
+		let mut res = Vec::new();
+		for x in v.iter() {
+			if let Value::Geometry(x) = x {
+				res.push(x.to_owned());
+			} else {
+				res.push(Self::to_geometry(x)?);
+			}
+		}
+		Some(res)
+	}
+
+	pub(crate) fn to_multipolygon(v: &Value) -> Option<MultiPolygon<f64>> {
+		let Value::Array(v) = v else {
+			return None;
+		};
+		let mut res = Vec::new();
+		for x in v.iter() {
+			res.push(Self::to_polygon(x)?);
+		}
+		Some(MultiPolygon::new(res))
+	}
+
+	pub(crate) fn to_multiline(v: &Value) -> Option<MultiLineString<f64>> {
+		let Value::Array(v) = v else {
+			return None;
+		};
+		let mut res = Vec::new();
+		for x in v.iter() {
+			res.push(Self::to_line(x)?);
+		}
+		Some(MultiLineString::new(res))
+	}
+
+	pub(crate) fn to_multipoint(v: &Value) -> Option<MultiPoint<f64>> {
+		let Value::Array(v) = v else {
+			return None;
+		};
+		let mut res = Vec::new();
+		for x in v.iter() {
+			res.push(Self::to_point(x)?);
+		}
+		Some(MultiPoint::new(res))
+	}
+
+	pub(crate) fn to_polygon(v: &Value) -> Option<Polygon<f64>> {
+		let Value::Array(v) = v else {
+			return None;
+		};
+		if v.is_empty() {
+			return None;
+		}
+		let first = Self::to_line(&v[0])?;
+		let mut res = Vec::new();
+		for x in &v[1..] {
+			res.push(Self::to_line(x)?);
+		}
+		Some(Polygon::new(first, res))
+	}
+
+	pub(crate) fn to_line(v: &Value) -> Option<LineString<f64>> {
+		let Value::Array(v) = v else {
+			return None;
+		};
+		let mut res = Vec::new();
+		for x in v.iter() {
+			res.push(Self::to_point(x)?);
+		}
+		Some(LineString::from(res))
+	}
+
+	pub(crate) fn to_point(v: &Value) -> Option<Point<f64>> {
+		let Value::Array(v) = v else {
+			return None;
+		};
+		if v.len() != 2 {
+			return None;
+		}
+		// FIXME: This truncates decimals and large integers into a f64.
+		let Value::Number(ref a) = v.0[0] else {
+			return None;
+		};
+		let Value::Number(ref b) = v.0[1] else {
+			return None;
+		};
+		Some(Point::from((a.clone().try_into().ok()?, b.clone().try_into().ok()?)))
 	}
 }
 
