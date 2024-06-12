@@ -39,4 +39,5 @@ jobs:
       git-ref: ${{ inputs.git-ref }}
       patch: ${{ inputs.patch }}
       publish: ${{ inputs.publish }}
+      create-release: ${{ inputs.publish }}
     secrets: inherit
