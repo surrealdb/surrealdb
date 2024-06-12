@@ -4,7 +4,6 @@ use crate::dbs::plan::Explanation;
 #[cfg(any(
 	feature = "kv-mem",
 	feature = "kv-surrealkv",
-	feature = "kv-file",
 	feature = "kv-rocksdb",
 	feature = "kv-fdb",
 	feature = "kv-tikv",
@@ -22,7 +21,6 @@ pub(super) enum Results {
 	#[cfg(any(
 		feature = "kv-mem",
 		feature = "kv-surrealkv",
-		feature = "kv-file",
 		feature = "kv-rocksdb",
 		feature = "kv-fdb",
 		feature = "kv-tikv",
@@ -37,7 +35,6 @@ impl Results {
 		#[cfg(any(
 			feature = "kv-mem",
 			feature = "kv-surrealkv",
-			feature = "kv-file",
 			feature = "kv-rocksdb",
 			feature = "kv-fdb",
 			feature = "kv-tikv",
@@ -51,7 +48,6 @@ impl Results {
 		#[cfg(any(
 			feature = "kv-mem",
 			feature = "kv-surrealkv",
-			feature = "kv-file",
 			feature = "kv-rocksdb",
 			feature = "kv-fdb",
 			feature = "kv-tikv",
@@ -80,7 +76,6 @@ impl Results {
 			#[cfg(any(
 				feature = "kv-mem",
 				feature = "kv-surrealkv",
-				feature = "kv-file",
 				feature = "kv-rocksdb",
 				feature = "kv-fdb",
 				feature = "kv-tikv",
@@ -101,7 +96,6 @@ impl Results {
 			#[cfg(any(
 				feature = "kv-mem",
 				feature = "kv-surrealkv",
-				feature = "kv-file",
 				feature = "kv-rocksdb",
 				feature = "kv-fdb",
 				feature = "kv-tikv",
@@ -118,7 +112,6 @@ impl Results {
 			#[cfg(any(
 				feature = "kv-mem",
 				feature = "kv-surrealkv",
-				feature = "kv-file",
 				feature = "kv-rocksdb",
 				feature = "kv-fdb",
 				feature = "kv-tikv",
@@ -135,7 +128,6 @@ impl Results {
 			#[cfg(any(
 				feature = "kv-mem",
 				feature = "kv-surrealkv",
-				feature = "kv-file",
 				feature = "kv-rocksdb",
 				feature = "kv-fdb",
 				feature = "kv-tikv",
@@ -151,7 +143,6 @@ impl Results {
 			#[cfg(any(
 				feature = "kv-mem",
 				feature = "kv-surrealkv",
-				feature = "kv-file",
 				feature = "kv-rocksdb",
 				feature = "kv-fdb",
 				feature = "kv-tikv",
@@ -170,7 +161,6 @@ impl Results {
 			#[cfg(any(
 				feature = "kv-mem",
 				feature = "kv-surrealkv",
-				feature = "kv-file",
 				feature = "kv-rocksdb",
 				feature = "kv-fdb",
 				feature = "kv-tikv",

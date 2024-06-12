@@ -238,7 +238,6 @@ impl<'a> Statement<'a> {
 	#[cfg(any(
 		feature = "kv-mem",
 		feature = "kv-surrealkv",
-		feature = "kv-file",
 		feature = "kv-rocksdb",
 		feature = "kv-fdb",
 		feature = "kv-tikv",

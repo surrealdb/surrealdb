@@ -1,6 +1,5 @@
 use crate::ctx::canceller::Canceller;
 use crate::ctx::reason::Reason;
-use crate::dbs::capabilities::FuncTarget;
 #[cfg(feature = "http")]
 use crate::dbs::capabilities::NetTarget;
 use crate::dbs::{Capabilities, Notification, Transaction};
@@ -18,13 +17,11 @@ use std::fmt::{self, Debug};
 #[cfg(any(
 	feature = "kv-mem",
 	feature = "kv-surrealkv",
-	feature = "kv-file",
 	feature = "kv-rocksdb",
 	feature = "kv-fdb",
 	feature = "kv-tikv",
 ))]
 use std::path::PathBuf;
-use std::str::FromStr;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
@@ -68,7 +65,6 @@ pub struct Context<'a> {
 	#[cfg(any(
 		feature = "kv-mem",
 		feature = "kv-surrealkv",
-		feature = "kv-file",
 		feature = "kv-rocksdb",
 		feature = "kv-fdb",
 		feature = "kv-tikv",
@@ -104,7 +100,6 @@ impl<'a> Context<'a> {
 		#[cfg(any(
 			feature = "kv-mem",
 			feature = "kv-surrealkv",
-			feature = "kv-file",
 			feature = "kv-rocksdb",
 			feature = "kv-fdb",
 			feature = "kv-tikv",
@@ -125,7 +120,6 @@ impl<'a> Context<'a> {
 			#[cfg(any(
 				feature = "kv-mem",
 				feature = "kv-surrealkv",
-				feature = "kv-file",
 				feature = "kv-rocksdb",
 				feature = "kv-fdb",
 				feature = "kv-tikv",
@@ -154,7 +148,6 @@ impl<'a> Context<'a> {
 			#[cfg(any(
 				feature = "kv-mem",
 				feature = "kv-surrealkv",
-				feature = "kv-file",
 				feature = "kv-rocksdb",
 				feature = "kv-fdb",
 				feature = "kv-tikv",
@@ -180,7 +173,6 @@ impl<'a> Context<'a> {
 			#[cfg(any(
 				feature = "kv-mem",
 				feature = "kv-surrealkv",
-				feature = "kv-file",
 				feature = "kv-rocksdb",
 				feature = "kv-fdb",
 				feature = "kv-tikv",
@@ -318,7 +310,6 @@ impl<'a> Context<'a> {
 	#[cfg(any(
 		feature = "kv-mem",
 		feature = "kv-surrealkv",
-		feature = "kv-file",
 		feature = "kv-rocksdb",
 		feature = "kv-fdb",
 		feature = "kv-tikv",
@@ -380,12 +371,7 @@ impl<'a> Context<'a> {
 
 	/// Check if a function is allowed
 	pub fn check_allowed_function(&self, target: &str) -> Result<(), Error> {
-		let func_target = FuncTarget::from_str(target).map_err(|_| Error::InvalidFunction {
-			name: target.to_string(),
-			message: "Invalid function name".to_string(),
-		})?;
-
-		if !self.capabilities.allows_function(&func_target) {
+		if !self.capabilities.allows_function_name(target) {
 			return Err(Error::FunctionNotAllowed(target.to_string()));
 		}
 		Ok(())
