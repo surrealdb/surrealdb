@@ -415,13 +415,10 @@ impl CapabilitiesBuilder {
 	}
 
 	pub(crate) fn build(self) -> Capabilities {
-		let cap = self
-			.cap
+		self.cap
 			.with_functions(self.allow_funcs)
 			.without_functions(self.deny_funcs)
 			.with_network_targets(self.allow_net)
-			.without_network_targets(self.deny_net);
-
-		cap
+			.without_network_targets(self.deny_net)
 	}
 }
