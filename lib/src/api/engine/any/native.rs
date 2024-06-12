@@ -109,22 +109,6 @@ impl Connection for Any {
 					.into());
 				}
 
-				EndpointKind::SpeeDb => {
-					#[cfg(feature = "kv-speedb")]
-					{
-						features.insert(ExtraFeatures::Backup);
-						features.insert(ExtraFeatures::LiveQueries);
-						engine::local::native::router(address, conn_tx, route_rx);
-						conn_rx.into_recv_async().await??
-					}
-
-					#[cfg(not(feature = "kv-speedb"))]
-					return Err(DbError::Ds(
-						"Cannot connect to the `speedb` storage engine as it is not enabled in this build of SurrealDB".to_owned(),
-					)
-					.into());
-				}
-
 				EndpointKind::TiKv => {
 					#[cfg(feature = "kv-tikv")]
 					{

@@ -4,11 +4,9 @@ use crate::dbs::plan::Explanation;
 #[cfg(any(
 	feature = "kv-mem",
 	feature = "kv-surrealkv",
-	feature = "kv-file",
 	feature = "kv-rocksdb",
 	feature = "kv-fdb",
 	feature = "kv-tikv",
-	feature = "kv-speedb"
 ))]
 use crate::dbs::store::file_store::FileCollector;
 use crate::dbs::store::MemoryCollector;
@@ -23,11 +21,9 @@ pub(super) enum Results {
 	#[cfg(any(
 		feature = "kv-mem",
 		feature = "kv-surrealkv",
-		feature = "kv-file",
 		feature = "kv-rocksdb",
 		feature = "kv-fdb",
 		feature = "kv-tikv",
-		feature = "kv-speedb"
 	))]
 	File(Box<FileCollector>),
 	Groups(GroupsCollector),
@@ -39,11 +35,9 @@ impl Results {
 		#[cfg(any(
 			feature = "kv-mem",
 			feature = "kv-surrealkv",
-			feature = "kv-file",
 			feature = "kv-rocksdb",
 			feature = "kv-fdb",
 			feature = "kv-tikv",
-			feature = "kv-speedb"
 		))]
 		ctx: &Context<'_>,
 		stm: &Statement<'_>,
@@ -54,11 +48,9 @@ impl Results {
 		#[cfg(any(
 			feature = "kv-mem",
 			feature = "kv-surrealkv",
-			feature = "kv-file",
 			feature = "kv-rocksdb",
 			feature = "kv-fdb",
 			feature = "kv-tikv",
-			feature = "kv-speedb"
 		))]
 		if stm.tempfiles() {
 			if let Some(temp_dir) = ctx.temporary_directory() {
@@ -84,11 +76,9 @@ impl Results {
 			#[cfg(any(
 				feature = "kv-mem",
 				feature = "kv-surrealkv",
-				feature = "kv-file",
 				feature = "kv-rocksdb",
 				feature = "kv-fdb",
 				feature = "kv-tikv",
-				feature = "kv-speedb"
 			))]
 			Self::File(e) => {
 				e.push(val)?;
@@ -106,11 +96,9 @@ impl Results {
 			#[cfg(any(
 				feature = "kv-mem",
 				feature = "kv-surrealkv",
-				feature = "kv-file",
 				feature = "kv-rocksdb",
 				feature = "kv-fdb",
 				feature = "kv-tikv",
-				feature = "kv-speedb"
 			))]
 			Self::File(f) => f.sort(orders),
 			_ => {}
@@ -124,11 +112,9 @@ impl Results {
 			#[cfg(any(
 				feature = "kv-mem",
 				feature = "kv-surrealkv",
-				feature = "kv-file",
 				feature = "kv-rocksdb",
 				feature = "kv-fdb",
 				feature = "kv-tikv",
-				feature = "kv-speedb"
 			))]
 			Self::File(f) => f.start_limit(start, limit),
 			Self::Groups(_) => {}
@@ -142,11 +128,9 @@ impl Results {
 			#[cfg(any(
 				feature = "kv-mem",
 				feature = "kv-surrealkv",
-				feature = "kv-file",
 				feature = "kv-rocksdb",
 				feature = "kv-fdb",
 				feature = "kv-tikv",
-				feature = "kv-speedb"
 			))]
 			Self::File(e) => e.len(),
 			Self::Groups(g) => g.len(),
@@ -159,11 +143,9 @@ impl Results {
 			#[cfg(any(
 				feature = "kv-mem",
 				feature = "kv-surrealkv",
-				feature = "kv-file",
 				feature = "kv-rocksdb",
 				feature = "kv-fdb",
 				feature = "kv-tikv",
-				feature = "kv-speedb"
 			))]
 			Self::File(f) => f.take_vec()?,
 			_ => vec![],
@@ -179,11 +161,9 @@ impl Results {
 			#[cfg(any(
 				feature = "kv-mem",
 				feature = "kv-surrealkv",
-				feature = "kv-file",
 				feature = "kv-rocksdb",
 				feature = "kv-fdb",
 				feature = "kv-tikv",
-				feature = "kv-speedb"
 			))]
 			Self::File(e) => {
 				e.explain(exp);

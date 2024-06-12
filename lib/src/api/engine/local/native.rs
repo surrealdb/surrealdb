@@ -147,11 +147,9 @@ pub(crate) fn router(
 		#[cfg(any(
 			feature = "kv-mem",
 			feature = "kv-surrealkv",
-			feature = "kv-file",
 			feature = "kv-rocksdb",
 			feature = "kv-fdb",
 			feature = "kv-tikv",
-			feature = "kv-speedb"
 		))]
 		let kvs = match address.config.temporary_directory {
 			Some(tmp_dir) => kvs.with_temporary_directory(tmp_dir),
