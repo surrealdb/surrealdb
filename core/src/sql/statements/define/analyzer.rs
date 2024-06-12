@@ -39,7 +39,7 @@ impl DefineAnalyzerStatement {
 		// Clear the cache
 		run.clear_cache();
 		// Check if analyzer already exists
-		if run.get_db_analyzer(opt.ns(), opt.db(), &self.name).await.is_ok() {
+		if run.get_db_analyzer(opt.ns()?, opt.db()?, &self.name).await.is_ok() {
 			if self.if_not_exists {
 				return Ok(Value::None);
 			} else {
@@ -49,9 +49,9 @@ impl DefineAnalyzerStatement {
 			}
 		}
 		// Process the statement
-		let key = crate::key::database::az::new(opt.ns(), opt.db(), &self.name);
-		run.add_ns(opt.ns(), opt.strict).await?;
-		run.add_db(opt.ns(), opt.db(), opt.strict).await?;
+		let key = crate::key::database::az::new(opt.ns()?, opt.db()?, &self.name);
+		run.add_ns(opt.ns()?, opt.strict).await?;
+		run.add_db(opt.ns()?, opt.db()?, opt.strict).await?;
 		// Persist the definition
 		run.set(
 			key,

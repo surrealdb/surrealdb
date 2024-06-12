@@ -14,6 +14,8 @@ impl<'a> Document<'a> {
 		opt: &Options,
 		stm: &Statement<'_>,
 	) -> Result<Value, Error> {
+		// Check if record exists
+		self.empty(ctx, opt, stm).await?;
 		// Check where clause
 		self.check(stk, ctx, opt, stm).await?;
 		// Check if allowed

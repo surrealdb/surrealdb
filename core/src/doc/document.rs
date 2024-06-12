@@ -152,7 +152,7 @@ impl<'a> Document<'a> {
 		// Get the record id
 		let rid = self.id.as_ref().unwrap();
 		// Get the table definition
-		let tb = run.get_and_cache_tb(opt.ns(), opt.db(), &rid.tb).await;
+		let tb = run.get_and_cache_tb(opt.ns()?, opt.db()?, &rid.tb).await;
 		// Return the table or attempt to define it
 		match tb {
 			// The table doesn't exist
@@ -162,9 +162,9 @@ impl<'a> Document<'a> {
 				// Allowed to run?
 				opt.is_allowed(Action::Edit, ResourceKind::Table, &Base::Db)?;
 				// We can create the table automatically
-				run.add_and_cache_ns(opt.ns(), opt.strict).await?;
-				run.add_and_cache_db(opt.ns(), opt.db(), opt.strict).await?;
-				run.add_and_cache_tb(opt.ns(), opt.db(), &rid.tb, opt.strict).await
+				run.add_and_cache_ns(opt.ns()?, opt.strict).await?;
+				run.add_and_cache_db(opt.ns()?, opt.db()?, opt.strict).await?;
+				run.add_and_cache_tb(opt.ns()?, opt.db()?, &rid.tb, opt.strict).await
 			}
 			// There was an error
 			Err(err) => Err(err),
@@ -181,7 +181,7 @@ impl<'a> Document<'a> {
 		// Get the record id
 		let id = self.id.as_ref().unwrap();
 		// Get the table definitions
-		ctx.tx_lock().await.all_tb_views(opt.ns(), opt.db(), &id.tb).await
+		ctx.tx_lock().await.all_tb_views(opt.ns()?, opt.db()?, &id.tb).await
 	}
 	/// Get the events for this document
 	pub async fn ev(
@@ -192,7 +192,7 @@ impl<'a> Document<'a> {
 		// Get the record id
 		let id = self.id.as_ref().unwrap();
 		// Get the event definitions
-		ctx.tx_lock().await.all_tb_events(opt.ns(), opt.db(), &id.tb).await
+		ctx.tx_lock().await.all_tb_events(opt.ns()?, opt.db()?, &id.tb).await
 	}
 	/// Get the fields for this document
 	pub async fn fd(
@@ -203,7 +203,7 @@ impl<'a> Document<'a> {
 		// Get the record id
 		let id = self.id.as_ref().unwrap();
 		// Get the field definitions
-		ctx.tx_lock().await.all_tb_fields(opt.ns(), opt.db(), &id.tb).await
+		ctx.tx_lock().await.all_tb_fields(opt.ns()?, opt.db()?, &id.tb).await
 	}
 	/// Get the indexes for this document
 	pub async fn ix(
@@ -214,7 +214,7 @@ impl<'a> Document<'a> {
 		// Get the record id
 		let id = self.id.as_ref().unwrap();
 		// Get the index definitions
-		ctx.tx_lock().await.all_tb_indexes(opt.ns(), opt.db(), &id.tb).await
+		ctx.tx_lock().await.all_tb_indexes(opt.ns()?, opt.db()?, &id.tb).await
 	}
 	// Get the lives for this document
 	pub async fn lv(
@@ -225,6 +225,6 @@ impl<'a> Document<'a> {
 		// Get the record id
 		let id = self.id.as_ref().unwrap();
 		// Get the table definition
-		ctx.tx_lock().await.all_tb_lives(opt.ns(), opt.db(), &id.tb).await
+		ctx.tx_lock().await.all_tb_lives(opt.ns()?, opt.db()?, &id.tb).await
 	}
 }

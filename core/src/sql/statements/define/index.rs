@@ -44,7 +44,7 @@ impl DefineIndexStatement {
 		// Clear the cache
 		run.clear_cache();
 		// Check if index already exists
-		if run.get_tb_index(opt.ns(), opt.db(), &self.what, &self.name).await.is_ok() {
+		if run.get_tb_index(opt.ns()?, opt.db()?, &self.what, &self.name).await.is_ok() {
 			if self.if_not_exists {
 				return Ok(Value::None);
 			} else {
@@ -54,16 +54,16 @@ impl DefineIndexStatement {
 			}
 		}
 		// If we are strict, check that the table exists
-		run.check_ns_db_tb(opt.ns(), opt.db(), &self.what, opt.strict).await?;
+		run.check_ns_db_tb(opt.ns()?, opt.db()?, &self.what, opt.strict).await?;
 		// Does the table exists?
-		match run.get_and_cache_tb(opt.ns(), opt.db(), &self.what).await {
+		match run.get_and_cache_tb(opt.ns()?, opt.db()?, &self.what).await {
 			Ok(db) => {
 				// Are we SchemaFull?
 				if db.full {
 					// Check that the fields exists
 					for idiom in self.cols.iter() {
 						if let Some(Part::Field(id)) = idiom.first() {
-							run.get_tb_field(opt.ns(), opt.db(), &self.what, id).await?;
+							run.get_tb_field(opt.ns()?, opt.db()?, &self.what, id).await?;
 						}
 					}
 				}
@@ -77,10 +77,10 @@ impl DefineIndexStatement {
 		}
 
 		// Process the statement
-		let key = crate::key::table::ix::new(opt.ns(), opt.db(), &self.what, &self.name);
-		run.add_ns(opt.ns(), opt.strict).await?;
-		run.add_db(opt.ns(), opt.db(), opt.strict).await?;
-		run.add_tb(opt.ns(), opt.db(), &self.what, opt.strict).await?;
+		let key = crate::key::table::ix::new(opt.ns()?, opt.db()?, &self.what, &self.name);
+		run.add_ns(opt.ns()?, opt.strict).await?;
+		run.add_db(opt.ns()?, opt.db()?, opt.strict).await?;
+		run.add_tb(opt.ns()?, opt.db()?, &self.what, opt.strict).await?;
 		run.set(
 			key,
 			DefineIndexStatement {
@@ -91,10 +91,10 @@ impl DefineIndexStatement {
 		)
 		.await?;
 		// Remove the index data
-		let key = crate::key::index::all::new(opt.ns(), opt.db(), &self.what, &self.name);
+		let key = crate::key::index::all::new(opt.ns()?, opt.db()?, &self.what, &self.name);
 		run.delp(key, u32::MAX).await?;
 		// Clear the cache
-		let key = crate::key::table::ix::prefix(opt.ns(), opt.db(), &self.what);
+		let key = crate::key::table::ix::prefix(opt.ns()?, opt.db()?, &self.what);
 		run.clr(key).await?;
 		// Release the transaction
 		drop(run);

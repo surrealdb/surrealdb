@@ -41,7 +41,7 @@ impl DefineParamStatement {
 		// Clear the cache
 		run.clear_cache();
 		// Check if param already exists
-		if run.get_db_param(opt.ns(), opt.db(), &self.name).await.is_ok() {
+		if run.get_db_param(opt.ns()?, opt.db()?, &self.name).await.is_ok() {
 			if self.if_not_exists {
 				return Ok(Value::None);
 			} else {
@@ -51,9 +51,9 @@ impl DefineParamStatement {
 			}
 		}
 		// Process the statement
-		let key = crate::key::database::pa::new(opt.ns(), opt.db(), &self.name);
-		run.add_ns(opt.ns(), opt.strict).await?;
-		run.add_db(opt.ns(), opt.db(), opt.strict).await?;
+		let key = crate::key::database::pa::new(opt.ns()?, opt.db()?, &self.name);
+		run.add_ns(opt.ns()?, opt.strict).await?;
+		run.add_db(opt.ns()?, opt.db()?, opt.strict).await?;
 		run.set(
 			key,
 			DefineParamStatement {

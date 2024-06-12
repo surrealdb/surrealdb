@@ -31,13 +31,13 @@ impl RemoveFieldStatement {
 			run.clear_cache();
 			// Get the definition
 			let fd_name = self.name.to_string();
-			let fd = run.get_tb_field(opt.ns(), opt.db(), &self.what, &fd_name).await?;
+			let fd = run.get_tb_field(opt.ns()?, opt.db()?, &self.what, &fd_name).await?;
 			// Delete the definition
 			let fd_name = fd.name.to_string();
-			let key = crate::key::table::fd::new(opt.ns(), opt.db(), &self.what, &fd_name);
+			let key = crate::key::table::fd::new(opt.ns()?, opt.db()?, &self.what, &fd_name);
 			run.del(key).await?;
 			// Clear the cache
-			let key = crate::key::table::fd::prefix(opt.ns(), opt.db(), &self.what);
+			let key = crate::key::table::fd::prefix(opt.ns()?, opt.db()?, &self.what);
 			run.clr(key).await?;
 			// Ok all good
 			Ok(Value::None)

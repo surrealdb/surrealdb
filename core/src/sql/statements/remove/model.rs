@@ -30,7 +30,8 @@ impl RemoveModelStatement {
 			// Clear the cache
 			run.clear_cache();
 			// Delete the definition
-			let key = crate::key::database::ml::new(opt.ns(), opt.db(), &self.name, &self.version);
+			let key =
+				crate::key::database::ml::new(opt.ns()?, opt.db()?, &self.name, &self.version);
 			run.del(key).await?;
 			// Remove the model file
 			// TODO

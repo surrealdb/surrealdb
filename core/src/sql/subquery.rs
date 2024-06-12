@@ -6,6 +6,7 @@ use crate::sql::statements::rebuild::RebuildStatement;
 use crate::sql::statements::{
 	CreateStatement, DefineStatement, DeleteStatement, IfelseStatement, InsertStatement,
 	OutputStatement, RelateStatement, RemoveStatement, SelectStatement, UpdateStatement,
+	UpsertStatement,
 };
 use crate::sql::value::Value;
 use reblessive::tree::Stk;
@@ -16,7 +17,7 @@ use std::fmt::{self, Display, Formatter};
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Subquery";
 
-#[revisioned(revision = 2)]
+#[revisioned(revision = 3)]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
 #[serde(rename = "$surrealdb::private::sql::Subquery")]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
@@ -35,7 +36,8 @@ pub enum Subquery {
 	Remove(RemoveStatement),
 	#[revision(start = 2)]
 	Rebuild(RebuildStatement),
-	// Add new variants here
+	#[revision(start = 3)]
+	Upsert(UpsertStatement),
 }
 
 impl PartialOrd for Subquery {
@@ -54,6 +56,7 @@ impl Subquery {
 			Self::Output(v) => v.writeable(),
 			Self::Select(v) => v.writeable(),
 			Self::Create(v) => v.writeable(),
+			Self::Upsert(v) => v.writeable(),
 			Self::Update(v) => v.writeable(),
 			Self::Delete(v) => v.writeable(),
 			Self::Relate(v) => v.writeable(),
@@ -87,6 +90,7 @@ impl Subquery {
 			Self::Remove(ref v) => v.compute(&ctx, opt, doc).await,
 			Self::Select(ref v) => v.compute(stk, &ctx, opt, doc).await,
 			Self::Create(ref v) => v.compute(stk, &ctx, opt, doc).await,
+			Self::Upsert(ref v) => v.compute(stk, &ctx, opt, doc).await,
 			Self::Update(ref v) => v.compute(stk, &ctx, opt, doc).await,
 			Self::Delete(ref v) => v.compute(stk, &ctx, opt, doc).await,
 			Self::Relate(ref v) => v.compute(stk, &ctx, opt, doc).await,
@@ -102,6 +106,7 @@ impl Display for Subquery {
 			Self::Output(v) => write!(f, "({v})"),
 			Self::Select(v) => write!(f, "({v})"),
 			Self::Create(v) => write!(f, "({v})"),
+			Self::Upsert(v) => write!(f, "({v})"),
 			Self::Update(v) => write!(f, "({v})"),
 			Self::Delete(v) => write!(f, "({v})"),
 			Self::Relate(v) => write!(f, "({v})"),

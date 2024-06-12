@@ -142,19 +142,19 @@ impl DefineUserStatement {
 				// Clear the cache
 				run.clear_cache();
 				// Check if user already exists
-				if run.get_ns_user(opt.ns(), &self.name).await.is_ok() {
+				if run.get_ns_user(opt.ns()?, &self.name).await.is_ok() {
 					if self.if_not_exists {
 						return Ok(Value::None);
 					} else {
 						return Err(Error::UserNsAlreadyExists {
 							value: self.name.to_string(),
-							ns: opt.ns().into(),
+							ns: opt.ns()?.into(),
 						});
 					}
 				}
 				// Process the statement
-				let key = crate::key::namespace::us::new(opt.ns(), &self.name);
-				run.add_ns(opt.ns(), opt.strict).await?;
+				let key = crate::key::namespace::us::new(opt.ns()?, &self.name);
+				run.add_ns(opt.ns()?, opt.strict).await?;
 				run.set(
 					key,
 					DefineUserStatement {
@@ -173,21 +173,21 @@ impl DefineUserStatement {
 				// Clear the cache
 				run.clear_cache();
 				// Check if user already exists
-				if run.get_db_user(opt.ns(), opt.db(), &self.name).await.is_ok() {
+				if run.get_db_user(opt.ns()?, opt.db()?, &self.name).await.is_ok() {
 					if self.if_not_exists {
 						return Ok(Value::None);
 					} else {
 						return Err(Error::UserDbAlreadyExists {
 							value: self.name.to_string(),
-							ns: opt.ns().into(),
-							db: opt.db().into(),
+							ns: opt.ns()?.into(),
+							db: opt.db()?.into(),
 						});
 					}
 				}
 				// Process the statement
-				let key = crate::key::database::us::new(opt.ns(), opt.db(), &self.name);
-				run.add_ns(opt.ns(), opt.strict).await?;
-				run.add_db(opt.ns(), opt.db(), opt.strict).await?;
+				let key = crate::key::database::us::new(opt.ns()?, opt.db()?, &self.name);
+				run.add_ns(opt.ns()?, opt.strict).await?;
+				run.add_db(opt.ns()?, opt.db()?, opt.strict).await?;
 				run.set(
 					key,
 					DefineUserStatement {

@@ -143,7 +143,7 @@ async fn field_definition_empty_nested_objects() -> Result<(), Error> {
 	let sql = "
 		DEFINE TABLE person SCHEMAFULL;
 		DEFINE FIELD settings on person TYPE object;
-		UPDATE person:test CONTENT {
+		UPSERT person:test CONTENT {
 		    settings: {
 		        nested: {
 		            object: {
@@ -195,7 +195,7 @@ async fn field_definition_empty_nested_arrays() -> Result<(), Error> {
 	let sql = "
 		DEFINE TABLE person SCHEMAFULL;
 		DEFINE FIELD settings on person TYPE object;
-		UPDATE person:test CONTENT {
+		UPSERT person:test CONTENT {
 		    settings: {
 		        nested: [
 					1,
@@ -249,7 +249,7 @@ async fn field_definition_empty_nested_flexible() -> Result<(), Error> {
 	let sql = "
 		DEFINE TABLE person SCHEMAFULL;
 		DEFINE FIELD settings on person FLEXIBLE TYPE object;
-		UPDATE person:test CONTENT {
+		UPSERT person:test CONTENT {
 		    settings: {
 				nested: {
 		            object: {
@@ -465,9 +465,9 @@ async fn field_definition_default_value() -> Result<(), Error> {
 		CREATE product:test SET tertiary = 123;
 		CREATE product:test;
 		--
-		UPDATE product:test SET primary = 654.321;
-		UPDATE product:test SET secondary = false;
-		UPDATE product:test SET tertiary = 'something';
+		UPSERT product:test SET primary = 654.321;
+		UPSERT product:test SET secondary = false;
+		UPSERT product:test SET tertiary = 'something';
 	";
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
@@ -872,8 +872,8 @@ async fn field_definition_readonly() -> Result<(), Error> {
 		DEFINE TABLE person SCHEMAFULL;
 		DEFINE FIELD birthdate ON person TYPE datetime READONLY;
 		CREATE person:test SET birthdate = d'2023-12-13T21:27:55.632Z';
-		UPDATE person:test SET birthdate = d'2023-12-13T21:27:55.632Z';
-		UPDATE person:test SET birthdate = d'2024-12-13T21:27:55.632Z';
+		UPSERT person:test SET birthdate = d'2023-12-13T21:27:55.632Z';
+		UPSERT person:test SET birthdate = d'2024-12-13T21:27:55.632Z';
 	";
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");

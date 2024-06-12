@@ -38,7 +38,7 @@ impl DefineDatabaseStatement {
 		// Clear the cache
 		run.clear_cache();
 		// Check if database already exists
-		if run.get_db(opt.ns(), &self.name).await.is_ok() {
+		if run.get_db(opt.ns()?, &self.name).await.is_ok() {
 			if self.if_not_exists {
 				return Ok(Value::None);
 			} else {
@@ -48,8 +48,8 @@ impl DefineDatabaseStatement {
 			}
 		}
 		// Process the statement
-		let key = crate::key::namespace::db::new(opt.ns(), &self.name);
-		let ns = run.add_ns(opt.ns(), opt.strict).await?;
+		let key = crate::key::namespace::db::new(opt.ns()?, &self.name);
+		let ns = run.add_ns(opt.ns()?, opt.strict).await?;
 		// Set the id
 		if self.id.is_none() && ns.id.is_some() {
 			// Set the id

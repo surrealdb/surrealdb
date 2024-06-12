@@ -30,12 +30,12 @@ impl RemoveEventStatement {
 			// Clear the cache
 			run.clear_cache();
 			// Get the definition
-			let ev = run.get_tb_event(opt.ns(), opt.db(), &self.what, &self.name).await?;
+			let ev = run.get_tb_event(opt.ns()?, opt.db()?, &self.what, &self.name).await?;
 			// Delete the definition
-			let key = crate::key::table::ev::new(opt.ns(), opt.db(), &ev.what, &ev.name);
+			let key = crate::key::table::ev::new(opt.ns()?, opt.db()?, &ev.what, &ev.name);
 			run.del(key).await?;
 			// Clear the cache
-			let key = crate::key::table::ev::prefix(opt.ns(), opt.db(), &ev.what);
+			let key = crate::key::table::ev::prefix(opt.ns()?, opt.db()?, &ev.what);
 			run.clr(key).await?;
 			// Ok all good
 			Ok(Value::None)
