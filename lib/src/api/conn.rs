@@ -92,6 +92,8 @@ pub enum Method {
 	Unset,
 	/// Performs an update operation
 	Update,
+	/// Performs an upsert operation
+	Upsert,
 	/// Selects a namespace and database to use
 	Use,
 	/// Queries the version of the server

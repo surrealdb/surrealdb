@@ -425,7 +425,7 @@ mod http_integration {
 				-- TABLE DATA: foo
 				-- ------------------------------
 
-				UPDATE foo:bvklxkhtxumyrfzqoc5i CONTENT { id: foo:bvklxkhtxumyrfzqoc5i };
+				INSERT { id: foo:bvklxkhtxumyrfzqoc5i };
 
 				-- ------------------------------
 				-- TRANSACTION

@@ -281,6 +281,8 @@ pub fn synchronous(
 		"string::words" => string::words,
 		"string::distance::hamming" => string::distance::hamming,
 		"string::distance::levenshtein" => string::distance::levenshtein,
+		"string::html::encode" => string::html::encode,
+		"string::html::sanitize" => string::html::sanitize,
 		"string::is::alphanum" => string::is::alphanum,
 		"string::is::alpha" => string::is::alpha,
 		"string::is::ascii" => string::is::ascii,

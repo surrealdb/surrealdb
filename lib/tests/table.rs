@@ -23,11 +23,11 @@ async fn define_foreign_table() -> Result<(), Error> {
 			GROUP BY age
 		;
 		INFO FOR TABLE person;
-		UPDATE person:one SET age = 39, score = 70;
+		UPSERT person:one SET age = 39, score = 70;
 		SELECT * FROM person_by_age;
-		UPDATE person:two SET age = 39, score = 80;
+		UPSERT person:two SET age = 39, score = 80;
 		SELECT * FROM person_by_age;
-		UPDATE person:two SET age = 39, score = 90;
+		UPSERT person:two SET age = 39, score = 90;
 		SELECT * FROM person_by_age;
 	";
 	let dbs = new_ds().await?;
