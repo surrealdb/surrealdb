@@ -107,6 +107,7 @@ impl Parser<'_> {
 	}
 
 	pub async fn parse_thing_or_table(&mut self, ctx: &mut Stk) -> ParseResult<Value> {
+		self.glue()?;
 		if self.peek_token_at(1).kind == t!(":") {
 			self.parse_thing(ctx).await.map(Value::Thing)
 		} else {
