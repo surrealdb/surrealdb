@@ -364,6 +364,7 @@ impl<'a> Lexer<'a> {
 				Some(x) if !x.is_ascii_alphanumeric() => {
 					t!("f")
 				}
+				None => t!("f"),
 				_ => {
 					return self.lex_ident_from_next_byte(b'f');
 				}
