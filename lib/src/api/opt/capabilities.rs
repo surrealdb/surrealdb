@@ -34,10 +34,14 @@ use surrealdb_core::dbs::capabilities::{
 /// With the combination of both these lists you can filter subgroups. For example:
 /// ```
 /// # use surrealdb::opt::capabilities::CapabilitiesBuilder;
-/// # fn cap() -> CapabilitiesBuilder{
+/// # fn cap() -> surrealdb::Result<CapabilitiesBuilder>{
+/// # let cap =
 /// CapabilitiesBuilder::none()
-///     .with_allow_function("http::*")
-///     .with_deny_function("http::post")
+///     .with_allow_function("http::*")?
+///     .with_deny_function("http::post")?
+///
+///  # ;
+///  # Ok(cap)
 /// # }
 /// ```
 ///
@@ -53,7 +57,7 @@ use surrealdb_core::dbs::capabilities::{
 /// Create a new instance, and allow all capabilities
 #[cfg_attr(feature = "kv-rocksdb", doc = "```no_run")]
 #[cfg_attr(not(feature = "kv-rocksdb"), doc = "```ignore")]
-/// # use surrealdb::opt::capabilities::Capabilities;
+/// # use surrealdb::opt::capabilities::CapabilitiesBuilder;
 /// # use surrealdb::opt::Config;
 /// # use surrealdb::Surreal;
 /// # use surrealdb::engine::local::File;
@@ -71,20 +75,19 @@ use surrealdb_core::dbs::capabilities::{
 /// # use std::str::FromStr;
 /// # use surrealdb::engine::local::File;
 /// # use surrealdb::opt::capabilities::CapabilitiesBuilder;
-/// # use surrealdb::opt::capabilities::FuncTarget;
-/// # use surrealdb::opt::capabilities::Targets;
 /// # use surrealdb::opt::Config;
 /// # use surrealdb::Surreal;
 /// # #[tokio::main]
 /// # async fn main() -> surrealdb::Result<()> {
 /// let capabilities = CapabilitiesBuilder::default()
-///     .without_functions("http::*");
+///     .with_deny_function("http::*")?;
 /// let config = Config::default().capabilities(capabilities);
 /// let db = Surreal::new::<File>(("temp.db", config)).await?;
 /// # Ok(())
 /// # }
 /// ```
 ///
+#[derive(Debug, Clone)]
 pub struct CapabilitiesBuilder {
 	cap: Capabilities,
 	allow_funcs: Targets<FuncTarget>,
@@ -93,10 +96,16 @@ pub struct CapabilitiesBuilder {
 	deny_net: Targets<NetTarget>,
 }
 
+impl Default for CapabilitiesBuilder {
+	fn default() -> Self {
+		Self::new()
+	}
+}
+
 impl CapabilitiesBuilder {
-    /// Create a builder with default capabilities enabled.
-    ///
-    /// Default capabilities enables live query notifications and all (non-scripting) functions.
+	/// Create a builder with default capabilities enabled.
+	///
+	/// Default capabilities enables live query notifications and all (non-scripting) functions.
 	pub fn new() -> Self {
 		CapabilitiesBuilder {
 			cap: Capabilities::default(),
@@ -107,7 +116,7 @@ impl CapabilitiesBuilder {
 		}
 	}
 
-    /// Create a builder with all capabilities enabled.
+	/// Create a builder with all capabilities enabled.
 	pub fn all() -> Self {
 		CapabilitiesBuilder {
 			cap: Capabilities::all(),
@@ -118,7 +127,7 @@ impl CapabilitiesBuilder {
 		}
 	}
 
-    /// Create a builder with all capabilities disabled.
+	/// Create a builder with all capabilities disabled.
 	pub fn none() -> Self {
 		CapabilitiesBuilder {
 			cap: Capabilities::default(),
@@ -129,7 +138,7 @@ impl CapabilitiesBuilder {
 		}
 	}
 
-    /// Set whether to enable the embedded javascript scripting runtime.
+	/// Set whether to enable the embedded javascript scripting runtime.
 	pub fn with_scripting(self, enabled: bool) -> Self {
 		Self {
 			cap: self.cap.with_scripting(enabled),
@@ -137,7 +146,7 @@ impl CapabilitiesBuilder {
 		}
 	}
 
-    /// TODO
+	/// TODO
 	pub fn with_quest_access(self, enabled: bool) -> Self {
 		Self {
 			cap: self.cap.with_guest_access(enabled),
@@ -145,7 +154,7 @@ impl CapabilitiesBuilder {
 		}
 	}
 
-    /// Set wether to enable live query notifications.
+	/// Set wether to enable live query notifications.
 	pub fn with_live_query_notifications(self, enabled: bool) -> Self {
 		Self {
 			cap: self.cap.with_live_query_notifications(enabled),
@@ -153,58 +162,58 @@ impl CapabilitiesBuilder {
 		}
 	}
 
-    /// Set the allow list to allow all functions
+	/// Set the allow list to allow all functions
 	pub fn allow_all_functions(&mut self) -> &mut Self {
 		self.allow_funcs = Targets::All;
 		self
 	}
 
-    /// Set the allow list to allow all functions
+	/// Set the allow list to allow all functions
 	pub fn with_allow_all_functions(mut self) -> Self {
 		self.allow_all_functions();
 		self
 	}
 
-    /// Set the deny list to deny all functions
+	/// Set the deny list to deny all functions
 	pub fn deny_all_functions(&mut self) -> &mut Self {
 		self.deny_funcs = Targets::All;
 		self
 	}
 
-    /// Set the deny list to deny all functions
+	/// Set the deny list to deny all functions
 	pub fn with_deny_all_function(mut self) -> Self {
 		self.deny_all_functions();
 		self
 	}
 
-    /// Set the allow list to allow no function
+	/// Set the allow list to allow no function
 	pub fn allow_none_functions(&mut self) -> &mut Self {
 		self.allow_funcs = Targets::None;
 		self
 	}
 
-    /// Set the allow list to allow no function
+	/// Set the allow list to allow no function
 	pub fn with_allow_none_functions(mut self) -> Self {
 		self.allow_none_functions();
 		self
 	}
 
-    /// Set the deny list to deny no function
+	/// Set the deny list to deny no function
 	pub fn deny_none_functions(&mut self) -> &mut Self {
 		self.deny_funcs = Targets::None;
 		self
 	}
 
-    /// Set the deny list to deny no function
+	/// Set the deny list to deny no function
 	pub fn with_deny_none_function(mut self) -> Self {
 		self.deny_none_functions();
 		self
 	}
 
-    /// Add a function to the allow lists
-    ///
-    /// Adding a function to the allow list overwrites previously set allow-all or allow-none
-    /// filters.
+	/// Add a function to the allow lists
+	///
+	/// Adding a function to the allow list overwrites previously set allow-all or allow-none
+	/// filters.
 	pub fn allow_function<S: AsRef<str>>(
 		&mut self,
 		func: S,
@@ -212,10 +221,10 @@ impl CapabilitiesBuilder {
 		self.allow_function_str(func.as_ref())
 	}
 
-    /// Add a function to the allow lists
-    ///
-    /// Adding a function to the allow list overwrites previously set allow-all or allow-none
-    /// filters.
+	/// Add a function to the allow lists
+	///
+	/// Adding a function to the allow list overwrites previously set allow-all or allow-none
+	/// filters.
 	pub fn with_allow_function<S: AsRef<str>>(
 		mut self,
 		func: S,
@@ -240,10 +249,10 @@ impl CapabilitiesBuilder {
 		Ok(self)
 	}
 
-    /// Add a function to the deny lists
-    ///
-    /// Adding a function to the deny list overwrites previously set deny-all or deny-none
-    /// filters.
+	/// Add a function to the deny lists
+	///
+	/// Adding a function to the deny list overwrites previously set deny-all or deny-none
+	/// filters.
 	pub fn deny_function<S: AsRef<str>>(
 		&mut self,
 		func: S,
@@ -251,10 +260,10 @@ impl CapabilitiesBuilder {
 		self.deny_function_str(func.as_ref())
 	}
 
-    /// Add a function to the deny lists
-    ///
-    /// Adding a function to the deny list overwrites previously set deny-all or deny-none
-    /// filters.
+	/// Add a function to the deny lists
+	///
+	/// Adding a function to the deny list overwrites previously set deny-all or deny-none
+	/// filters.
 	pub fn with_deny_function<S: AsRef<str>>(
 		mut self,
 		func: S,
@@ -279,58 +288,58 @@ impl CapabilitiesBuilder {
 		Ok(self)
 	}
 
-    /// Set the allow list to allow all net targets
+	/// Set the allow list to allow all net targets
 	pub fn allow_all_net_targets(&mut self) -> &mut Self {
 		self.allow_net = Targets::All;
 		self
 	}
 
-    /// Set the allow list to allow all net targets
+	/// Set the allow list to allow all net targets
 	pub fn with_allow_all_net_targets(mut self) -> Self {
 		self.allow_all_net_targets();
 		self
 	}
 
-    /// Set the deny list to deny all net targets
+	/// Set the deny list to deny all net targets
 	pub fn deny_all_net_targets(&mut self) -> &mut Self {
 		self.deny_net = Targets::All;
 		self
 	}
 
-    /// Set the deny list to deny all net targets
+	/// Set the deny list to deny all net targets
 	pub fn with_deny_all_net_target(mut self) -> Self {
 		self.deny_all_net_targets();
 		self
 	}
 
-    /// Set the allow list to allow no net targets
+	/// Set the allow list to allow no net targets
 	pub fn allow_none_net_targets(&mut self) -> &mut Self {
 		self.allow_net = Targets::None;
 		self
 	}
 
-    /// Set the allow list to allow no net targets
+	/// Set the allow list to allow no net targets
 	pub fn with_allow_none_net_targets(mut self) -> Self {
 		self.allow_none_net_targets();
 		self
 	}
 
-    /// Set the deny list to deny no net targets
+	/// Set the deny list to deny no net targets
 	pub fn deny_none_net_targets(&mut self) -> &mut Self {
 		self.deny_net = Targets::None;
 		self
 	}
 
-    /// Set the deny list to deny no net targets
+	/// Set the deny list to deny no net targets
 	pub fn with_deny_none_net_target(mut self) -> Self {
 		self.deny_none_net_targets();
 		self
 	}
 
-    /// Add a net target to the allow lists
-    ///
-    /// Adding a net target to the allow list overwrites previously set allow-all or allow-none
-    /// filters.
+	/// Add a net target to the allow lists
+	///
+	/// Adding a net target to the allow list overwrites previously set allow-all or allow-none
+	/// filters.
 	pub fn allow_net_target<S: AsRef<str>>(
 		&mut self,
 		func: S,
@@ -338,10 +347,10 @@ impl CapabilitiesBuilder {
 		self.allow_net_target_str(func.as_ref())
 	}
 
-    /// Add a net target to the allow lists
-    ///
-    /// Adding a net target to the allow list overwrites previously set allow-all or allow-none
-    /// filters.
+	/// Add a net target to the allow lists
+	///
+	/// Adding a net target to the allow list overwrites previously set allow-all or allow-none
+	/// filters.
 	pub fn with_allow_net_target<S: AsRef<str>>(
 		mut self,
 		func: S,
@@ -366,10 +375,10 @@ impl CapabilitiesBuilder {
 		Ok(self)
 	}
 
-    /// Add a net target to the deny lists
-    ///
-    /// Adding a net target to the deny list overwrites previously set deny-all or deny-none
-    /// filters.
+	/// Add a net target to the deny lists
+	///
+	/// Adding a net target to the deny list overwrites previously set deny-all or deny-none
+	/// filters.
 	pub fn deny_net_target<S: AsRef<str>>(
 		&mut self,
 		func: S,
@@ -377,10 +386,10 @@ impl CapabilitiesBuilder {
 		self.deny_net_target_str(func.as_ref())
 	}
 
-    /// Add a net target to the deny lists
-    ///
-    /// Adding a net target to the deny list overwrites previously set deny-all or deny-none
-    /// filters.
+	/// Add a net target to the deny lists
+	///
+	/// Adding a net target to the deny list overwrites previously set deny-all or deny-none
+	/// filters.
 	pub fn with_deny_net_target<S: AsRef<str>>(
 		mut self,
 		func: S,

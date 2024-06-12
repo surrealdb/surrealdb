@@ -4,9 +4,8 @@ use crate::cli::abstraction::{
 };
 use crate::err::Error;
 use clap::Args;
-use surrealdb::dbs::Capabilities;
 use surrealdb::engine::any::{connect, IntoEndpoint};
-use surrealdb::opt::Config;
+use surrealdb::opt::{capabilities::CapabilitiesBuilder, Config};
 
 #[derive(Args, Debug)]
 pub struct ImportCommandArguments {
@@ -41,7 +40,7 @@ pub async fn init(
 	// Initialize opentelemetry and logging
 	crate::telemetry::builder().with_log_level("info").init();
 	// Default datastore configuration for local engines
-	let config = Config::new().capabilities(Capabilities::all());
+	let config = Config::new().capabilities(CapabilitiesBuilder::all());
 
 	// If username and password are specified, and we are connecting to a remote SurrealDB server, then we need to authenticate.
 	// If we are connecting directly to a datastore (i.e. file://local.db or tikv://...), then we don't need to authenticate because we use an embedded (local) SurrealDB instance with auth disabled.

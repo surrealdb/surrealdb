@@ -304,8 +304,8 @@ pub fn connect(address: impl IntoEndpoint) -> Connect<Any, Surreal<Any>> {
 #[cfg(all(test, feature = "kv-mem"))]
 mod tests {
 	use super::*;
-	use crate::dbs::Capabilities;
 	use crate::opt::auth::Root;
+	use crate::opt::capabilities::CapabilitiesBuilder;
 	use crate::sql;
 	use crate::sql::Value;
 
@@ -342,9 +342,10 @@ mod tests {
 			username: "root",
 			password: "root",
 		};
-		let db = connect(("memory", Config::new().user(creds).capabilities(Capabilities::all())))
-			.await
-			.unwrap();
+		let db =
+			connect(("memory", Config::new().user(creds).capabilities(CapabilitiesBuilder::all())))
+				.await
+				.unwrap();
 		db.use_ns("N").use_db("D").await.unwrap();
 
 		// The client needs to sign in before it can access anything

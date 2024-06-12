@@ -1,4 +1,4 @@
-use crate::{dbs::Capabilities, iam::Level};
+use crate::{dbs::Capabilities, iam::Level, opt::capabilities::CapabilitiesBuilder};
 #[cfg(any(
 	feature = "kv-mem",
 	feature = "kv-surrealkv",

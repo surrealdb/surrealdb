@@ -11,10 +11,9 @@ use rustyline::validate::{ValidationContext, ValidationResult, Validator};
 use rustyline::{Completer, Editor, Helper, Highlighter, Hinter};
 use serde::Serialize;
 use serde_json::ser::PrettyFormatter;
-use surrealdb::dbs::Capabilities;
 use surrealdb::engine::any::{connect, IntoEndpoint};
 use surrealdb::method::{Stats, WithStats};
-use surrealdb::opt::Config;
+use surrealdb::opt::{capabilities::CapabilitiesBuilder, Config};
 use surrealdb::sql::{self, Statement, Value};
 use surrealdb::{Notification, Response};
 
@@ -64,7 +63,7 @@ pub async fn init(
 	// Initialize opentelemetry and logging
 	crate::telemetry::builder().with_log_level("warn").init();
 	// Default datastore configuration for local engines
-	let config = Config::new().capabilities(Capabilities::all());
+	let config = Config::new().capabilities(CapabilitiesBuilder::all());
 
 	// If username and password are specified, and we are connecting to a remote SurrealDB server, then we need to authenticate.
 	// If we are connecting directly to a datastore (i.e. file://local.db or tikv://...), then we don't need to authenticate because we use an embedded (local) SurrealDB instance with auth disabled.
