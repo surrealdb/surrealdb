@@ -9,14 +9,14 @@ use surrealdb::iam::Role;
 use surrealdb::sql::Value;
 
 #[tokio::test]
-async fn update_merge_and_content() -> Result<(), Error> {
+async fn upsert_merge_and_content() -> Result<(), Error> {
 	let sql = "
 		CREATE person:test CONTENT { name: 'Tobie' };
-		UPDATE person:test CONTENT { name: 'Jaime' };
-		UPDATE person:test CONTENT 'some content';
-		UPDATE person:test REPLACE 'some content';
-		UPDATE person:test MERGE { age: 50 };
-		UPDATE person:test MERGE 'some content';
+		UPSERT person:test CONTENT { name: 'Jaime' };
+		UPSERT person:test CONTENT 'some content';
+		UPSERT person:test REPLACE 'some content';
+		UPSERT person:test MERGE { age: 50 };
+		UPSERT person:test MERGE 'some content';
 	";
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
@@ -79,7 +79,7 @@ async fn update_merge_and_content() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn update_simple_with_input() -> Result<(), Error> {
+async fn upsert_simple_with_input() -> Result<(), Error> {
 	let sql = "
 		DEFINE FIELD name ON TABLE person
 			ASSERT
@@ -95,12 +95,12 @@ async fn update_simple_with_input() -> Result<(), Error> {
 					$value
 				END
 		;
-		CREATE person:test;
-		UPDATE person:test CONTENT { name: 'Tobie' };
-		UPDATE person:test REPLACE { name: 'jaime' };
-		UPDATE person:test MERGE { name: 'Jaime' };
-		UPDATE person:test SET name = 'tobie';
-		UPDATE person:test SET name = 'Tobie';
+		UPSERT person:test;
+		UPSERT person:test CONTENT { name: 'Tobie' };
+		UPSERT person:test REPLACE { name: 'jaime' };
+		UPSERT person:test MERGE { name: 'Jaime' };
+		UPSERT person:test SET name = 'tobie';
+		UPSERT person:test SET name = 'Tobie';
 		SELECT * FROM person:test;
 	";
 	let dbs = new_ds().await?;
@@ -208,12 +208,12 @@ async fn update_complex_with_input() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn update_with_return_clause() -> Result<(), Error> {
+async fn upsert_with_return_clause() -> Result<(), Error> {
 	let sql = "
 		CREATE person:test SET age = 18, name = 'John';
-		UPDATE person:test SET age = 25 RETURN VALUE $before;
-		UPDATE person:test SET age = 30 RETURN VALUE { old_age: $before.age, new_age: $after.age };
-		UPDATE person:test SET age = 35 RETURN age, name;
+		UPSERT person:test SET age = 25 RETURN VALUE $before;
+		UPSERT person:test SET age = 30 RETURN VALUE { old_age: $before.age, new_age: $after.age };
+		UPSERT person:test SET age = 35 RETURN age, name;
 		DELETE person:test RETURN VALUE $before;
 	";
 	let dbs = new_ds().await?;
@@ -312,10 +312,34 @@ async fn common_permissions_checks(auth_enabled: bool) {
 		((("NS", "DB").into(), Role::Viewer), ("NS", "OTHER_DB"), false, "viewer at database level should not be able to update a record on another database"),
 		((("NS", "DB").into(), Role::Viewer), ("OTHER_NS", "DB"), false, "viewer at database level should not be able to update a record on another namespace even if the database name matches"),
 	];
-	let statement = "UPDATE person:test CONTENT { name: 'Name' };";
+	let statement = "UPSERT person:test CONTENT { name: 'Name' };";
 
 	for ((level, role), (ns, db), should_succeed, msg) in tests.into_iter() {
 		let sess = Session::for_level(level, role).with_ns(ns).with_db(db);
+
+		// Test the statement when the table has to be created
+
+		{
+			let ds = new_ds().await.unwrap().with_auth_enabled(auth_enabled);
+
+			let mut resp = ds.execute(statement, &sess, None).await.unwrap();
+			let res = resp.remove(0).output();
+
+			if should_succeed {
+				assert!(res.is_ok() && res.unwrap() != Value::parse("[]"), "{}", msg);
+			} else if res.is_ok() {
+				assert!(res.unwrap() == Value::parse("[]"), "{}", msg);
+			} else {
+				// Not allowed to create a table
+				let err = res.unwrap_err().to_string();
+				assert!(
+					err.contains("Not enough permissions to perform this action"),
+					"{}: {}",
+					msg,
+					err
+				)
+			}
+		}
 
 		// Test the statement when the table already exists
 		{
@@ -413,7 +437,25 @@ async fn check_permissions_auth_enabled() {
 	// Test Anonymous user
 	//
 
-	let statement = "UPDATE person:test CONTENT { name: 'Name' };";
+	let statement = "UPSERT person:test CONTENT { name: 'Name' };";
+
+	// When the table doesn't exist
+	{
+		let ds = new_ds().await.unwrap().with_auth_enabled(auth_enabled);
+
+		let mut resp = ds
+			.execute(statement, &Session::default().with_ns("NS").with_db("DB"), None)
+			.await
+			.unwrap();
+		let res = resp.remove(0).output();
+
+		let err = res.unwrap_err().to_string();
+		assert!(
+			err.contains("Not enough permissions to perform this action"),
+			"anonymous user should not be able to create the table: {}",
+			err
+		);
+	}
 
 	// When the table grants no permissions
 	{
@@ -525,7 +567,24 @@ async fn check_permissions_auth_disabled() {
 	// Test Anonymous user
 	//
 
-	let statement = "UPDATE person:test CONTENT { name: 'Name' };";
+	let statement = "UPSERT person:test CONTENT { name: 'Name' };";
+
+	// When the table doesn't exist
+	{
+		let ds = new_ds().await.unwrap().with_auth_enabled(auth_enabled);
+
+		let mut resp = ds
+			.execute(statement, &Session::default().with_ns("NS").with_db("DB"), None)
+			.await
+			.unwrap();
+		let res = resp.remove(0).output();
+
+		assert!(
+			res.unwrap() != Value::parse("[]"),
+			"{}",
+			"anonymous user should be able to create the table"
+		);
+	}
 
 	// When the table grants no permissions
 	{

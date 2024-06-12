@@ -175,6 +175,7 @@ keyword! {
 	Unique => "UNIQUE",
 	Unset => "UNSET",
 	Update => "UPDATE",
+	Upsert => "UPSERT",
 	Uppercase => "UPPERCASE",
 	Url => "URL",
 	Use => "USE",

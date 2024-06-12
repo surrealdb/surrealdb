@@ -15,6 +15,7 @@ pub enum Method {
 	Select,
 	Insert,
 	Create,
+	Upsert,
 	Update,
 	Merge,
 	Patch,
@@ -45,6 +46,7 @@ impl Method {
 			"select" => Self::Select,
 			"insert" => Self::Insert,
 			"create" => Self::Create,
+			"upsert" => Self::Upsert,
 			"update" => Self::Update,
 			"merge" => Self::Merge,
 			"patch" => Self::Patch,
@@ -76,6 +78,7 @@ impl Method {
 			Self::Select => "select",
 			Self::Insert => "insert",
 			Self::Create => "create",
+			Self::Upsert => "upsert",
 			Self::Update => "update",
 			Self::Merge => "merge",
 			Self::Patch => "patch",
@@ -104,9 +107,9 @@ impl Method {
 			Method::Ping
 				| Method::Info | Method::Select
 				| Method::Insert | Method::Create
-				| Method::Update | Method::Merge
-				| Method::Patch | Method::Delete
-				| Method::Version
+				| Method::Update | Method::Upsert
+				| Method::Merge | Method::Patch
+				| Method::Delete | Method::Version
 				| Method::Query | Method::Relate
 				| Method::Run | Method::Unknown
 		)

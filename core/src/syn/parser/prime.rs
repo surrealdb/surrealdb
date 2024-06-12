@@ -81,6 +81,7 @@ impl Parser<'_> {
 			t!("RETURN")
 			| t!("SELECT")
 			| t!("CREATE")
+			| t!("UPSERT")
 			| t!("UPDATE")
 			| t!("DELETE")
 			| t!("RELATE")
@@ -241,6 +242,7 @@ impl Parser<'_> {
 			t!("RETURN")
 			| t!("SELECT")
 			| t!("CREATE")
+			| t!("UPSERT")
 			| t!("UPDATE")
 			| t!("DELETE")
 			| t!("RELATE")
@@ -388,6 +390,11 @@ impl Parser<'_> {
 				self.pop_peek();
 				let stmt = ctx.run(|ctx| self.parse_create_stmt(ctx)).await?;
 				Subquery::Create(stmt)
+			}
+			t!("UPSERT") => {
+				self.pop_peek();
+				let stmt = ctx.run(|ctx| self.parse_upsert_stmt(ctx)).await?;
+				Subquery::Upsert(stmt)
 			}
 			t!("UPDATE") => {
 				self.pop_peek();
@@ -539,6 +546,11 @@ impl Parser<'_> {
 				self.pop_peek();
 				let stmt = ctx.run(|ctx| self.parse_create_stmt(ctx)).await?;
 				Subquery::Create(stmt)
+			}
+			t!("UPSERT") => {
+				self.pop_peek();
+				let stmt = ctx.run(|ctx| self.parse_upsert_stmt(ctx)).await?;
+				Subquery::Upsert(stmt)
 			}
 			t!("UPDATE") => {
 				self.pop_peek();
