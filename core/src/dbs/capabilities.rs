@@ -1,3 +1,4 @@
+use std::fmt;
 use std::hash::Hash;
 use std::net::IpAddr;
 use std::{collections::HashSet, sync::Arc};
@@ -5,16 +6,16 @@ use std::{collections::HashSet, sync::Arc};
 use ipnet::IpNet;
 use url::Url;
 
-pub trait Target {
-	fn matches(&self, elem: &Self) -> bool;
+pub trait Target<Item: ?Sized = Self> {
+	fn matches(&self, elem: &Item) -> bool;
 }
 
 #[derive(Debug, Clone, Hash, Eq, PartialEq)]
 #[non_exhaustive]
 pub struct FuncTarget(pub String, pub Option<String>);
 
-impl std::fmt::Display for FuncTarget {
-	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl fmt::Display for FuncTarget {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		match &self.1 {
 			Some(name) => write!(f, "{}:{}", self.0, name),
 			None => write!(f, "{}::*", self.0),
@@ -23,7 +24,7 @@ impl std::fmt::Display for FuncTarget {
 }
 
 impl Target for FuncTarget {
-	fn matches(&self, elem: &Self) -> bool {
+	fn matches(&self, elem: &FuncTarget) -> bool {
 		match self {
 			Self(family, Some(name)) => {
 				family == &elem.0 && (elem.1.as_ref().is_some_and(|n| n == name))
@@ -33,18 +34,75 @@ impl Target for FuncTarget {
 	}
 }
 
+impl Target<str> for FuncTarget {
+	fn matches(&self, elem: &str) -> bool {
+		if let Some(x) = self.1.as_ref() {
+			let Some((f, r)) = elem.split_once("::") else {
+				return false;
+			};
+
+			f == self.0 && r == x
+		} else {
+			let f = elem.split_once("::").map(|(f, _)| f).unwrap_or(elem);
+			f == self.0
+		}
+	}
+}
+
+#[derive(Debug, Clone)]
+pub enum ParseFuncTargetError {
+	InvalidWildcardFamily,
+	InvalidName,
+}
+
+impl std::error::Error for ParseFuncTargetError {}
+impl fmt::Display for ParseFuncTargetError {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		match *self {
+			ParseFuncTargetError::InvalidName => {
+				write!(f, "invalid function target name")
+			}
+			ParseFuncTargetError::InvalidWildcardFamily => {
+				write!(
+					f,
+					"invalid function target wildcard family, only first part of function can be wildcarded"
+				)
+			}
+		}
+	}
+}
+
 impl std::str::FromStr for FuncTarget {
-	type Err = String;
+	type Err = ParseFuncTargetError;
 
 	fn from_str(s: &str) -> Result<Self, Self::Err> {
-		// 'family::*' is treated as 'family'. They both match all functions in the family.
-		let s = s.replace("::*", "");
+		let s = s.trim();
 
-		let target = match s.split_once("::") {
-			Some((family, name)) => Self(family.to_string(), Some(name.to_string())),
-			_ => Self(s.to_string(), None),
-		};
-		Ok(target)
+		if s.is_empty() {
+			return Err(ParseFuncTargetError::InvalidName);
+		}
+
+		if let Some(family) = s.strip_suffix("::*") {
+			if family.contains("::") {
+				return Err(ParseFuncTargetError::InvalidWildcardFamily);
+			}
+
+			if !family.bytes().all(|x| x.is_ascii_alphanumeric()) {
+				return Err(ParseFuncTargetError::InvalidName);
+			}
+
+			return Ok(FuncTarget(family.to_string(), None));
+		}
+
+		if !s.bytes().all(|x| x.is_ascii_alphanumeric() || x == b':') {
+			return Err(ParseFuncTargetError::InvalidName);
+		}
+
+		if let Some((first, rest)) = s.split_once("::") {
+			Ok(FuncTarget(first.to_string(), Some(rest.to_string())))
+		} else {
+			Ok(FuncTarget(s.to_string(), None))
+		}
 	}
 }
 
@@ -56,8 +114,8 @@ pub enum NetTarget {
 }
 
 // impl display
-impl std::fmt::Display for NetTarget {
-	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl fmt::Display for NetTarget {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		match self {
 			Self::Host(host, Some(port)) => write!(f, "{}:{}", host, port),
 			Self::Host(host, None) => write!(f, "{}", host),
@@ -92,8 +150,18 @@ impl Target for NetTarget {
 	}
 }
 
+#[derive(Debug)]
+pub struct ParseNetTargetError;
+
+impl std::error::Error for ParseNetTargetError {}
+impl fmt::Display for ParseNetTargetError {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		write!(f, "The provided network target is not a valid host, ip address or ip network")
+	}
+}
+
 impl std::str::FromStr for NetTarget {
-	type Err = String;
+	type Err = ParseNetTargetError;
 
 	fn from_str(s: &str) -> Result<Self, Self::Err> {
 		// If it's a valid IPNet, return it
@@ -118,22 +186,24 @@ impl std::str::FromStr for NetTarget {
 			}
 		}
 
-		Err(format!(
-			"The provided network target `{s}` is not a valid host, ip address or ip network"
-		))
+		Err(ParseNetTargetError)
 	}
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 #[non_exhaustive]
-pub enum Targets<T: Target + Hash + Eq + PartialEq> {
+pub enum Targets<T: Hash + Eq + PartialEq> {
 	None,
 	Some(HashSet<T>),
 	All,
 }
 
-impl<T: Target + Hash + Eq + PartialEq + std::fmt::Debug + std::fmt::Display> Targets<T> {
-	fn matches(&self, elem: &T) -> bool {
+impl<T: Hash + Eq + PartialEq + fmt::Debug + fmt::Display> Targets<T> {
+	fn matches<S>(&self, elem: &S) -> bool
+	where
+		S: ?Sized,
+		T: Target<S>,
+	{
 		match self {
 			Self::None => false,
 			Self::All => true,
@@ -142,8 +212,8 @@ impl<T: Target + Hash + Eq + PartialEq + std::fmt::Debug + std::fmt::Display> Ta
 	}
 }
 
-impl<T: Target + Hash + Eq + PartialEq + std::fmt::Display> std::fmt::Display for Targets<T> {
-	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl<T: Target + Hash + Eq + PartialEq + fmt::Display> fmt::Display for Targets<T> {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		match self {
 			Self::None => write!(f, "none"),
 			Self::All => write!(f, "all"),
@@ -169,8 +239,8 @@ pub struct Capabilities {
 	deny_net: Arc<Targets<NetTarget>>,
 }
 
-impl std::fmt::Display for Capabilities {
-	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl fmt::Display for Capabilities {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		write!(
             f,
             "scripting={}, guest_access={}, live_query_notifications={}, allow_funcs={}, deny_funcs={}, allow_net={}, deny_net={}",
@@ -255,7 +325,14 @@ impl Capabilities {
 		self.live_query_notifications
 	}
 
+	// function is public API so we can't remove it, but you should prefer allows_function_name
 	pub fn allows_function(&self, target: &FuncTarget) -> bool {
+		self.allow_funcs.matches(target) && !self.deny_funcs.matches(target)
+	}
+
+	// doc hidden so we don't extend api in the library.
+	#[doc(hidden)]
+	pub fn allows_function_name(&self, target: &str) -> bool {
 		self.allow_funcs.matches(target) && !self.deny_funcs.matches(target)
 	}
 
@@ -272,31 +349,25 @@ mod tests {
 	use super::*;
 
 	#[test]
+	fn test_invalid_func_target() {
+		FuncTarget::from_str("te::*st").unwrap_err();
+		FuncTarget::from_str("\0::st").unwrap_err();
+		FuncTarget::from_str("").unwrap_err();
+		FuncTarget::from_str("❤️").unwrap_err();
+	}
+
+	#[test]
 	fn test_func_target() {
-		assert!(FuncTarget::from_str("test")
-			.unwrap()
-			.matches(&FuncTarget::from_str("test").unwrap()));
-		assert!(!FuncTarget::from_str("test")
-			.unwrap()
-			.matches(&FuncTarget::from_str("test2").unwrap()));
+		assert!(FuncTarget::from_str("test").unwrap().matches("test"));
+		assert!(!FuncTarget::from_str("test").unwrap().matches("test2"));
 
-		assert!(!FuncTarget::from_str("test::")
-			.unwrap()
-			.matches(&FuncTarget::from_str("test").unwrap()));
+		assert!(!FuncTarget::from_str("test::").unwrap().matches("test"));
 
-		assert!(FuncTarget::from_str("test::*")
-			.unwrap()
-			.matches(&FuncTarget::from_str("test::name").unwrap()));
-		assert!(!FuncTarget::from_str("test::*")
-			.unwrap()
-			.matches(&FuncTarget::from_str("test2::name").unwrap()));
+		assert!(FuncTarget::from_str("test::*").unwrap().matches("test::name"));
+		assert!(!FuncTarget::from_str("test::*").unwrap().matches("test2::name"));
 
-		assert!(FuncTarget::from_str("test::name")
-			.unwrap()
-			.matches(&FuncTarget::from_str("test::name").unwrap()));
-		assert!(!FuncTarget::from_str("test::name")
-			.unwrap()
-			.matches(&FuncTarget::from_str("test::name2").unwrap()));
+		assert!(FuncTarget::from_str("test::name").unwrap().matches("test::name"));
+		assert!(!FuncTarget::from_str("test::name").unwrap().matches("test::name2"));
 	}
 
 	#[test]
@@ -448,17 +519,17 @@ mod tests {
 	#[test]
 	fn test_targets() {
 		assert!(Targets::<NetTarget>::All.matches(&NetTarget::from_str("example.com").unwrap()));
-		assert!(Targets::<FuncTarget>::All.matches(&FuncTarget::from_str("http::get").unwrap()));
+		assert!(Targets::<FuncTarget>::All.matches("http::get"));
 		assert!(!Targets::<NetTarget>::None.matches(&NetTarget::from_str("example.com").unwrap()));
-		assert!(!Targets::<FuncTarget>::None.matches(&FuncTarget::from_str("http::get").unwrap()));
+		assert!(!Targets::<FuncTarget>::None.matches("http::get"));
 		assert!(Targets::<NetTarget>::Some([NetTarget::from_str("example.com").unwrap()].into())
 			.matches(&NetTarget::from_str("example.com").unwrap()));
 		assert!(!Targets::<NetTarget>::Some([NetTarget::from_str("example.com").unwrap()].into())
 			.matches(&NetTarget::from_str("www.example.com").unwrap()));
 		assert!(Targets::<FuncTarget>::Some([FuncTarget::from_str("http::get").unwrap()].into())
-			.matches(&FuncTarget::from_str("http::get").unwrap()));
+			.matches("http::get"));
 		assert!(!Targets::<FuncTarget>::Some([FuncTarget::from_str("http::get").unwrap()].into())
-			.matches(&FuncTarget::from_str("http::post").unwrap()));
+			.matches("http::post"));
 	}
 
 	#[test]

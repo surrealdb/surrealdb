@@ -341,41 +341,6 @@ mod api_integration {
 		include!("api/backup.rs");
 	}
 
-	#[cfg(feature = "kv-speedb")]
-	mod speedb {
-		use super::*;
-		use surrealdb::engine::local::Db;
-		use surrealdb::engine::local::SpeeDb;
-
-		async fn new_db() -> (SemaphorePermit<'static>, Surreal<Db>) {
-			let permit = PERMITS.acquire().await.unwrap();
-			let path = format!("/tmp/{}.db", Ulid::new());
-			let root = Root {
-				username: ROOT_USER,
-				password: ROOT_PASS,
-			};
-			let config = Config::new()
-				.user(root)
-				.tick_interval(TICK_INTERVAL)
-				.capabilities(Capabilities::all());
-			let db = Surreal::new::<SpeeDb>((path, config)).await.unwrap();
-			db.signin(root).await.unwrap();
-			(permit, db)
-		}
-
-		#[test_log::test(tokio::test)]
-		async fn any_engine_can_connect() {
-			let path = format!("{}.db", Ulid::new());
-			surrealdb::engine::any::connect(format!("speedb://{path}")).await.unwrap();
-			surrealdb::engine::any::connect(format!("speedb:///tmp/{path}")).await.unwrap();
-			tokio::fs::remove_dir_all(path).await.unwrap();
-		}
-
-		include!("api/mod.rs");
-		include!("api/live.rs");
-		include!("api/backup.rs");
-	}
-
 	#[cfg(feature = "kv-tikv")]
 	mod tikv {
 		use super::*;

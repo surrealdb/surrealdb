@@ -17,6 +17,7 @@ use crate::{
 			ForeachStatement, IfelseStatement, InfoStatement, InsertStatement, KillStatement,
 			OutputStatement, RelateStatement, RemoveFieldStatement, RemoveFunctionStatement,
 			RemoveStatement, SelectStatement, SetStatement, ThrowStatement, UpdateStatement,
+			UpsertStatement,
 		},
 		tokenizer::Tokenizer,
 		Algorithm, Array, Base, Block, Cond, Data, Datetime, Dir, Duration, Edges, Explain,
@@ -99,6 +100,7 @@ static SOURCE: &str = r#"
 	REMOVE FUNCTION fn::foo::bar();
 	REMOVE FIELD foo.bar[10] ON bar;
 	UPDATE ONLY <future> { "text" }, a->b UNSET foo... , a->b, c[*] WHERE true RETURN DIFF TIMEOUT 1s PARALLEL;
+	UPSERT ONLY <future> { "text" }, a->b UNSET foo... , a->b, c[*] WHERE true RETURN DIFF TIMEOUT 1s PARALLEL;
 "#;
 
 fn statements() -> Vec<Statement> {
@@ -634,6 +636,40 @@ fn statements() -> Vec<Statement> {
 			if_exists: false,
 		})),
 		Statement::Update(UpdateStatement {
+			only: true,
+			what: Values(vec![
+				Value::Future(Box::new(Future(Block(vec![Entry::Value(Value::Strand(Strand(
+					"text".to_string(),
+				)))])))),
+				Value::Idiom(Idiom(vec![
+					Part::Field(Ident("a".to_string())),
+					Part::Graph(Graph {
+						dir: Dir::Out,
+						what: Tables(vec![Table("b".to_string())]),
+						expr: Fields::all(),
+						..Default::default()
+					}),
+				])),
+			]),
+			cond: Some(Cond(Value::Bool(true))),
+			data: Some(Data::UnsetExpression(vec![
+				Idiom(vec![Part::Field(Ident("foo".to_string())), Part::Flatten]),
+				Idiom(vec![
+					Part::Field(Ident("a".to_string())),
+					Part::Graph(Graph {
+						dir: Dir::Out,
+						what: Tables(vec![Table("b".to_string())]),
+						expr: Fields::all(),
+						..Default::default()
+					}),
+				]),
+				Idiom(vec![Part::Field(Ident("c".to_string())), Part::All]),
+			])),
+			output: Some(Output::Diff),
+			timeout: Some(Timeout(Duration(std::time::Duration::from_secs(1)))),
+			parallel: true,
+		}),
+		Statement::Upsert(UpsertStatement {
 			only: true,
 			what: Values(vec![
 				Value::Future(Box::new(Future(Block(vec![Entry::Value(Value::Strand(Strand(

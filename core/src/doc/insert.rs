@@ -44,6 +44,7 @@ impl<'a> Document<'a> {
 		}
 	}
 	// Attempt to run an INSERT clause
+	#[inline(always)]
 	async fn insert_create(
 		&mut self,
 		stk: &mut Stk,
@@ -81,6 +82,7 @@ impl<'a> Document<'a> {
 		self.pluck(stk, ctx, opt, stm).await
 	}
 	// Attempt to run an UPDATE clause
+	#[inline(always)]
 	async fn insert_update(
 		&mut self,
 		stk: &mut Stk,

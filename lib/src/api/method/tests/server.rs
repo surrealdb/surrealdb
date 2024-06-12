@@ -67,16 +67,18 @@ pub(super) fn mock(route_rx: Receiver<Option<Route>>) {
 					}
 					_ => unreachable!(),
 				},
-				Method::Update | Method::Merge | Method::Patch => match &params[..] {
-					[Value::Thing(..)] | [Value::Thing(..), _] => {
-						Ok(DbResponse::Other(to_value(User::default()).unwrap()))
+				Method::Upsert | Method::Update | Method::Merge | Method::Patch => {
+					match &params[..] {
+						[Value::Thing(..)] | [Value::Thing(..), _] => {
+							Ok(DbResponse::Other(to_value(User::default()).unwrap()))
+						}
+						[Value::Table(..) | Value::Array(..) | Value::Range(..)]
+						| [Value::Table(..) | Value::Array(..) | Value::Range(..), _] => {
+							Ok(DbResponse::Other(Value::Array(Default::default())))
+						}
+						_ => unreachable!(),
 					}
-					[Value::Table(..) | Value::Array(..) | Value::Range(..)]
-					| [Value::Table(..) | Value::Array(..) | Value::Range(..), _] => {
-						Ok(DbResponse::Other(Value::Array(Default::default())))
-					}
-					_ => unreachable!(),
-				},
+				}
 				Method::Insert => match &params[..] {
 					[Value::Table(..), Value::Array(..)] => {
 						Ok(DbResponse::Other(Value::Array(Default::default())))

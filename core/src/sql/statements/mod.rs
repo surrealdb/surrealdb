@@ -24,6 +24,7 @@ pub(crate) mod show;
 pub(crate) mod sleep;
 pub(crate) mod throw;
 pub(crate) mod update;
+pub(crate) mod upsert;
 pub(crate) mod r#use;
 
 pub use self::analyze::AnalyzeStatement;
@@ -50,6 +51,7 @@ pub use self::show::ShowStatement;
 pub use self::sleep::SleepStatement;
 pub use self::throw::ThrowStatement;
 pub use self::update::UpdateStatement;
+pub use self::upsert::UpsertStatement;
 
 pub use self::define::{
 	DefineAccessStatement, DefineAnalyzerStatement, DefineDatabaseStatement, DefineEventStatement,

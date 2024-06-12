@@ -19,6 +19,7 @@ use crate::api::engine::patch_statement;
 use crate::api::engine::remote::duration_from_str;
 use crate::api::engine::select_statement;
 use crate::api::engine::update_statement;
+use crate::api::engine::upsert_statement;
 use crate::api::err::Error;
 use crate::api::method::query::QueryResult;
 use crate::api::Connect;
@@ -463,6 +464,14 @@ async fn router(
 			let request =
 				client.post(path).headers(headers.clone()).auth(auth).body(statement.to_string());
 			let value = take(true, request).await?;
+			Ok(DbResponse::Other(value))
+		}
+		Method::Upsert => {
+			let path = base_url.join(SQL_PATH)?;
+			let (one, statement) = upsert_statement(&mut params);
+			let request =
+				client.post(path).headers(headers.clone()).auth(auth).body(statement.to_string());
+			let value = take(one, request).await?;
 			Ok(DbResponse::Other(value))
 		}
 		Method::Update => {
