@@ -167,9 +167,6 @@ pub(crate) static PATHS: phf::Map<UniCase<&'static str>, PathKind> = phf_map! {
 		UniCase::ascii("geo::hash::decode") => PathKind::Function,
 		UniCase::ascii("geo::hash::encode") => PathKind::Function,
 		//
-		UniCase::ascii("html::encode") => PathKind::Function,
-		UniCase::ascii("html::sanitize") => PathKind::Function,
-		//
 		UniCase::ascii("math::abs") => PathKind::Function,
 		UniCase::ascii("math::acos") => PathKind::Function,
 		UniCase::ascii("math::asin") => PathKind::Function,
@@ -269,6 +266,8 @@ pub(crate) static PATHS: phf::Map<UniCase<&'static str>, PathKind> = phf_map! {
 		UniCase::ascii("string::words") => PathKind::Function,
 		UniCase::ascii("string::distance::hamming") => PathKind::Function,
 		UniCase::ascii("string::distance::levenshtein") => PathKind::Function,
+		UniCase::ascii("string::html::encode") => PathKind::Function,
+		UniCase::ascii("string::html::sanitize") => PathKind::Function,
 		UniCase::ascii("string::is::alphanum") => PathKind::Function,
 		UniCase::ascii("string::is::alpha") => PathKind::Function,
 		UniCase::ascii("string::is::ascii") => PathKind::Function,

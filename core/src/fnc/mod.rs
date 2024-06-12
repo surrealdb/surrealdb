@@ -16,7 +16,6 @@ pub mod crypto;
 pub mod duration;
 pub mod encoding;
 pub mod geo;
-pub mod html;
 pub mod http;
 pub mod math;
 pub mod meta;
@@ -176,9 +175,6 @@ pub fn synchronous(
 		"geo::hash::decode" => geo::hash::decode,
 		"geo::hash::encode" => geo::hash::encode,
 		//
-		"html::encode" => html::encode,
-		"html::sanitize" => html::sanitize,
-		//
 		"math::abs" => math::abs,
 		"math::acos" => math::acos,
 		"math::acot" => math::acot,
@@ -285,6 +281,8 @@ pub fn synchronous(
 		"string::words" => string::words,
 		"string::distance::hamming" => string::distance::hamming,
 		"string::distance::levenshtein" => string::distance::levenshtein,
+		"string::html::encode" => string::html::encode,
+		"string::html::sanitize" => string::html::sanitize,
 		"string::is::alphanum" => string::is::alphanum,
 		"string::is::alpha" => string::is::alpha,
 		"string::is::ascii" => string::is::ascii,

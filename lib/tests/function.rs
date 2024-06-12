@@ -1695,38 +1695,6 @@ async fn function_parse_geo_hash_decode() -> Result<(), Error> {
 }
 
 // --------------------------------------------------
-// html
-// --------------------------------------------------
-
-#[tokio::test]
-async fn function_encode_html() -> Result<(), Error> {
-	let sql = r#"
-		RETURN html::encode("<div>Hello world!</div>");
-	"#;
-	let mut test = Test::new(sql).await?;
-	//
-	let tmp = test.next()?.result?;
-	let val = Value::from("&lt;div&gt;Hello&#32;world!&lt;&#47;div&gt;");
-	assert_eq!(tmp, val);
-	//
-	Ok(())
-}
-
-#[tokio::test]
-async fn function_sanitize_html() -> Result<(), Error> {
-	let sql = r#"
-		RETURN html::sanitize("XSS<script>attack</script>");
-	"#;
-	let mut test = Test::new(sql).await?;
-	//
-	let tmp = test.next()?.result?;
-	let val = Value::from("XSS");
-	assert_eq!(tmp, val);
-	//
-	Ok(())
-}
-
-// --------------------------------------------------
 // math
 // --------------------------------------------------
 
@@ -3221,6 +3189,34 @@ async fn function_search_analyzer_invalid_function_name() -> Result<(), Error> {
 		}
 		r => panic!("Unexpected result: {:?}", r),
 	}
+	Ok(())
+}
+
+#[tokio::test]
+async fn function_encode_html() -> Result<(), Error> {
+	let sql = r#"
+		RETURN string::html::encode("<div>Hello world!</div>");
+	"#;
+	let mut test = Test::new(sql).await?;
+	//
+	let tmp = test.next()?.result?;
+	let val = Value::from("&lt;div&gt;Hello&#32;world!&lt;&#47;div&gt;");
+	assert_eq!(tmp, val);
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn function_sanitize_html() -> Result<(), Error> {
+	let sql = r#"
+		RETURN string::html::sanitize("XSS<script>attack</script>");
+	"#;
+	let mut test = Test::new(sql).await?;
+	//
+	let tmp = test.next()?.result?;
+	let val = Value::from("XSS");
+	assert_eq!(tmp, val);
+	//
 	Ok(())
 }
 

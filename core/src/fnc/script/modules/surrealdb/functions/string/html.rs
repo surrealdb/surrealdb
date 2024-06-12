@@ -6,7 +6,7 @@ pub struct Package;
 
 impl_module_def!(
 	Package,
-	"html",
+	"string::html",
 	"encode" => run,
 	"sanitize" => run
 );

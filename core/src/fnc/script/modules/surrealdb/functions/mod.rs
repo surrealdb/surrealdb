@@ -14,7 +14,6 @@ mod crypto;
 mod duration;
 mod encoding;
 mod geo;
-mod html;
 mod http;
 mod math;
 mod meta;
@@ -41,7 +40,6 @@ impl_module_def!(
 	"duration" => (duration::Package),
 	"encoding" => (encoding::Package),
 	"geo" => (geo::Package),
-	"html" => (html::Package),
 	"http" => (http::Package),
 	"math" => (math::Package),
 	"meta" => (meta::Package),
