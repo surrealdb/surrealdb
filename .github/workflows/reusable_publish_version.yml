@@ -744,11 +744,11 @@ jobs:
           echo ${{ needs.prepare-vars.outputs.git-ref }} > latest.txt
           aws s3 cp --cache-control 'no-store' latest.txt s3://download.surrealdb.com/latest.txt
 
-      - name: Set latest beta version
-        if: ${{ inputs.publish && inputs.environment == 'beta' }}
+      - name: Set latest alpha or beta version
+        if: ${{ inputs.publish && (inputs.environment == 'alpha' || inputs.environment == 'beta') }}
         run: |
-          echo ${{ needs.prepare-vars.outputs.git-ref }} > beta.txt
-          aws s3 cp --cache-control 'no-store' beta.txt s3://download.surrealdb.com/beta.txt
+          echo ${{ needs.prepare-vars.outputs.git-ref }} > ${{ inputs.environment }}.txt
+          aws s3 cp --cache-control 'no-store' ${{ inputs.environment }}.txt s3://download.surrealdb.com/${{ inputs.environment }}.txt
 
       - name: Publish binaries
         run: |
