@@ -172,7 +172,7 @@ pub mod html {
 	use crate::sql::value::Value;
 
 	pub fn encode((arg,): (String,)) -> Result<Value, Error> {
-		Ok(ammonia::clean_text(&arg).to_string().into())
+		Ok(ammonia::clean_text(&arg).into())
 	}
 
 	pub fn sanitize((arg,): (String,)) -> Result<Value, Error> {
