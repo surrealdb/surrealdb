@@ -18,7 +18,7 @@ dependencies = ["cargo-upgrade", "cargo-update"]
 category = "LOCAL USAGE"
 command = "cargo"
 env = { RUSTDOCFLAGS = "--cfg surrealdb_unstable" }
-args = ["doc", "--open", "--no-deps", "--package", "surrealdb", "--features", "rustls,native-tls,protocol-ws,protocol-http,kv-mem,kv-speedb,kv-rocksdb,kv-tikv,http,scripting,jwks"]
+args = ["doc", "--open", "--no-deps", "--package", "surrealdb", "--features", "rustls,native-tls,protocol-ws,protocol-http,kv-mem,kv-rocksdb,kv-tikv,http,scripting,jwks"]
 
 # Test
 [tasks.test]

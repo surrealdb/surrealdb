@@ -1,8 +1,8 @@
 //! Dynamic support for any engine
 //!
 //! SurrealDB supports various ways of storing and accessing your data. For storing data we support a number of
-//! key value stores. These are RocksDB, SpeeDB, TiKV, FoundationDB and an in-memory store. We call these
-//! local engines. RocksDB and SpeeDB are file-based, single node key value stores. TiKV and FoundationDB are
+//! key value stores. These are SurrealKV, RocksDB, TiKV, FoundationDB and an in-memory store. We call these
+//! local engines. SurrealKV and RocksDB are file-based, single node key value stores. TiKV and FoundationDB are
 //! are distributed stores that can scale horizontally across multiple nodes. The in-memory store does not persist
 //! your data, it only stores it in memory. All these can be embedded in your application, so you don't need to
 //! spin up a SurrealDB server first in order to use them. We also support spinning up a server externally and then
@@ -270,14 +270,14 @@ impl Surreal<Any> {
 /// // Instantiate an in-memory instance
 /// let db = connect("mem://").await?;
 ///
-/// // Instantiate an file-backed instance (currently uses RocksDB)
+/// // Instantiate a file-backed instance (currently uses RocksDB)
 /// let db = connect("file://path/to/database-folder").await?;
 ///
-/// /// // Instantiate an RocksDB-backed instance
+/// // Instantiate a RocksDB-backed instance
 /// let db = connect("rocksdb://path/to/database-folder").await?;
 ///
-/// // Instantiate an SpeeDB-backed instance
-/// let db = connect("speedb://path/to/database-folder").await?;
+/// // Instantiate a SurrealKV-backed instance
+/// let db = connect("surrealkv://path/to/database-folder").await?;
 ///
 /// // Instantiate an IndxDB-backed instance
 /// let db = connect("indxdb://DatabaseName").await?;

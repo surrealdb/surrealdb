@@ -26,7 +26,6 @@ resolver = "2"
 default = ["kv-mem"]
 kv-mem = ["dep:echodb", "tokio/time", "dep:tempfile", "dep:ext-sort"]
 kv-indxdb = ["dep:indxdb"]
-kv-speedb = ["dep:speedb", "tokio/time", "dep:tempfile", "dep:ext-sort"]
 kv-rocksdb = ["dep:rocksdb", "tokio/time", "dep:tempfile", "dep:ext-sort"]
 kv-tikv = ["dep:tikv", "dep:tempfile", "dep:ext-sort"]
 kv-fdb-5_1 = ["foundationdb/fdb-5_1", "kv-fdb", "dep:tempfile", "dep:ext-sort"]
@@ -141,7 +140,6 @@ serde_json = "1.0.108"
 sha1 = "0.10.6"
 sha2 = "0.10.8"
 snap = "1.1.0"
-speedb = { version = "0.0.4", features = ["lz4", "snappy"], optional = true }
 storekey = "0.5.0"
 surrealkv = { version = "0.1.5", optional = true }
 surrealml = { version = "0.1.1", optional = true, package = "surrealml-core" }

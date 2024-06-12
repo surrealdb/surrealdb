@@ -22,7 +22,6 @@ use std::fmt::{self, Debug};
 	feature = "kv-rocksdb",
 	feature = "kv-fdb",
 	feature = "kv-tikv",
-	feature = "kv-speedb"
 ))]
 use std::path::PathBuf;
 use std::str::FromStr;
@@ -73,7 +72,6 @@ pub struct Context<'a> {
 		feature = "kv-rocksdb",
 		feature = "kv-fdb",
 		feature = "kv-tikv",
-		feature = "kv-speedb"
 	))]
 	// The temporary directory
 	temporary_directory: Option<Arc<PathBuf>>,
@@ -110,7 +108,6 @@ impl<'a> Context<'a> {
 			feature = "kv-rocksdb",
 			feature = "kv-fdb",
 			feature = "kv-tikv",
-			feature = "kv-speedb"
 		))]
 		temporary_directory: Option<Arc<PathBuf>>,
 	) -> Result<Context<'a>, Error> {
@@ -132,7 +129,6 @@ impl<'a> Context<'a> {
 				feature = "kv-rocksdb",
 				feature = "kv-fdb",
 				feature = "kv-tikv",
-				feature = "kv-speedb"
 			))]
 			temporary_directory,
 			transaction: None,
@@ -162,7 +158,6 @@ impl<'a> Context<'a> {
 				feature = "kv-rocksdb",
 				feature = "kv-fdb",
 				feature = "kv-tikv",
-				feature = "kv-speedb"
 			))]
 			temporary_directory: None,
 			transaction: None,
@@ -189,7 +184,6 @@ impl<'a> Context<'a> {
 				feature = "kv-rocksdb",
 				feature = "kv-fdb",
 				feature = "kv-tikv",
-				feature = "kv-speedb"
 			))]
 			temporary_directory: parent.temporary_directory.clone(),
 			transaction: parent.transaction.clone(),
@@ -328,7 +322,6 @@ impl<'a> Context<'a> {
 		feature = "kv-rocksdb",
 		feature = "kv-fdb",
 		feature = "kv-tikv",
-		feature = "kv-speedb"
 	))]
 	/// Return the location of the temporary directory if any
 	pub fn temporary_directory(&self) -> Option<&Arc<PathBuf>> {
