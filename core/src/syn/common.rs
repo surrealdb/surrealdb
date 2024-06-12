@@ -49,6 +49,21 @@ impl Location {
 
 	pub fn of_offset(source: &str, offset: usize) -> Self {
 		assert!(offset <= source.len(), "tried to find location of substring in unrelated string");
+
+		if offset == source.len() {
+			// Eof character
+
+			let (last_line, column) = LineIterator::new(source)
+				.enumerate()
+				.last()
+				.map(|(idx, (l, _))| (idx, l.len()))
+				.unwrap_or((0, 0));
+			return Self {
+				line: last_line + 1,
+				column: column + 1,
+			};
+		}
+
 		// Bytes of input prior to line being iterated.
 		let mut bytes_prior = 0;
 		for (line_idx, (line, seperator_len)) in LineIterator::new(source).enumerate() {
@@ -108,6 +123,22 @@ impl Location {
 		// Bytes of input before substr.
 		let offset = span.offset as usize;
 		let end = offset + span.len as usize;
+
+		if span.len == 0 && source.len() == span.offset as usize {
+			// EOF span
+			let (last_line, column) = LineIterator::new(source)
+				.enumerate()
+				.last()
+				.map(|(idx, (l, _))| (idx, l.len()))
+				.unwrap_or((0, 0));
+			return Self {
+				line: last_line + 1,
+				column,
+			}..Self {
+				line: last_line + 1,
+				column: column + 1,
+			};
+		}
 
 		// Bytes of input prior to line being iteratated.
 		let mut bytes_prior = 0;

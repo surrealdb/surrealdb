@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 //! Module containing the implementation of the surrealql tokens, lexer, and parser.
 
 use crate::{
@@ -21,8 +19,7 @@ pub trait Parse<T> {
 #[cfg(test)]
 mod test;
 
-use lexer::Lexer;
-use parser::{ParseError, ParseErrorKind, Parser};
+use parser::Parser;
 use reblessive::Stack;
 
 /// Takes a string and returns if it could be a reserved keyword in certain contexts.
@@ -134,26 +131,16 @@ pub fn idiom(input: &str) -> Result<Idiom, Error> {
 /// Parse a datetime without enclosing delimiters from a string.
 pub fn datetime_raw(input: &str) -> Result<Datetime, Error> {
 	debug!("parsing datetime, input = {input}");
-	let mut lexer = Lexer::new(input.as_bytes());
-	lexer
-		.lex_datetime_raw_err()
-		.map_err(|e| {
-			ParseError::new(
-				ParseErrorKind::InvalidToken(lexer::Error::DateTime(e)),
-				lexer.current_span(),
-			)
-		})
-		.map_err(|e| e.render_on(input))
-		.map_err(Error::InvalidQuery)
+	let mut parser = Parser::new(input.as_bytes());
+	parser.parse_inner_datetime().map_err(|e| e.render_on(input)).map_err(Error::InvalidQuery)
 }
 
 /// Parse a duration from a string.
 pub fn duration(input: &str) -> Result<Duration, Error> {
 	debug!("parsing duration, input = {input}");
-	let mut lexer = Lexer::new(input.as_bytes());
-	lexer
-		.lex_only_duration()
-		.map_err(|e| ParseError::new(ParseErrorKind::InvalidToken(e), lexer.current_span()))
+	let mut parser = Parser::new(input.as_bytes());
+	parser
+		.next_token_value::<Duration>()
 		.map_err(|e| e.render_on(input))
 		.map_err(Error::InvalidQuery)
 }
