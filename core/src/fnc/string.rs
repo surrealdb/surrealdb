@@ -167,6 +167,19 @@ pub mod distance {
 	}
 }
 
+pub mod html {
+	use crate::err::Error;
+	use crate::sql::value::Value;
+
+	pub fn encode((arg,): (String,)) -> Result<Value, Error> {
+		Ok(ammonia::clean_text(&arg).into())
+	}
+
+	pub fn sanitize((arg,): (String,)) -> Result<Value, Error> {
+		Ok(ammonia::clean(&arg).into())
+	}
+}
+
 pub mod is {
 	use crate::err::Error;
 	use crate::sql::value::Value;
@@ -609,6 +622,24 @@ mod tests {
 		let input = (String::from("foo-bar").into(),);
 		let value = super::is::uuid(input).unwrap();
 		assert_eq!(value, Value::Bool(false));
+	}
+
+	#[test]
+	fn html_encode() {
+		let value = super::html::encode((String::from("<div>Hello world!</div>"),)).unwrap();
+		assert_eq!(value, Value::Strand("&lt;div&gt;Hello&#32;world!&lt;&#47;div&gt;".into()));
+
+		let value = super::html::encode((String::from("SurrealDB"),)).unwrap();
+		assert_eq!(value, Value::Strand("SurrealDB".into()));
+	}
+
+	#[test]
+	fn html_sanitize() {
+		let value = super::html::sanitize((String::from("<div>Hello world!</div>"),)).unwrap();
+		assert_eq!(value, Value::Strand("<div>Hello world!</div>".into()));
+
+		let value = super::html::sanitize((String::from("XSS<script>attack</script>"),)).unwrap();
+		assert_eq!(value, Value::Strand("XSS".into()));
 	}
 
 	#[test]

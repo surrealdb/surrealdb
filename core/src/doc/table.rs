@@ -13,7 +13,7 @@ use crate::sql::part::Part;
 use crate::sql::paths::ID;
 use crate::sql::statements::delete::DeleteStatement;
 use crate::sql::statements::ifelse::IfelseStatement;
-use crate::sql::statements::update::UpdateStatement;
+use crate::sql::statements::upsert::UpsertStatement;
 use crate::sql::statements::{DefineTableStatement, SelectStatement};
 use crate::sql::subquery::Subquery;
 use crate::sql::thing::Thing;
@@ -219,12 +219,12 @@ impl<'a> Document<'a> {
 										}
 										// Update the value in the table
 										_ => {
-											let stm = UpdateStatement {
+											let stm = UpsertStatement {
 												what: Values(vec![Value::from(rid)]),
 												data: Some(
 													self.full(stk, ctx, opt, &tb.expr).await?,
 												),
-												..UpdateStatement::default()
+												..UpsertStatement::default()
 											};
 											// Execute the statement
 											stm.compute(stk, ctx, opt, None).await?;
@@ -257,10 +257,10 @@ impl<'a> Document<'a> {
 								}
 								// Update the value in the table
 								_ => {
-									let stm = UpdateStatement {
+									let stm = UpsertStatement {
 										what: Values(vec![Value::from(rid)]),
 										data: Some(self.full(stk, ctx, opt, &tb.expr).await?),
-										..UpdateStatement::default()
+										..UpsertStatement::default()
 									};
 									// Execute the statement
 									stm.compute(stk, ctx, opt, None).await?;
@@ -321,10 +321,10 @@ impl<'a> Document<'a> {
 			id: fdc.group_ids.into(),
 		};
 		let what = Values(vec![Value::from(thg.clone())]);
-		let stm = UpdateStatement {
+		let stm = UpsertStatement {
 			what,
 			data: Some(Data::SetExpression(set_ops)),
-			..UpdateStatement::default()
+			..UpsertStatement::default()
 		};
 		stm.compute(stk, ctx, opt, None).await?;
 

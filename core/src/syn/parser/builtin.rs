@@ -1,8 +1,11 @@
 use super::{ParseResult, Parser};
 use crate::{
-	sql::{Constant, Function, Ident, Value},
+	sql::{Constant, Function, Value},
 	syn::{
-		parser::{mac::expected, ParseError, ParseErrorKind},
+		parser::{
+			mac::{expected, unexpected},
+			ParseError, ParseErrorKind,
+		},
 		token::{t, Span},
 	},
 };
@@ -266,6 +269,8 @@ pub(crate) static PATHS: phf::Map<UniCase<&'static str>, PathKind> = phf_map! {
 		UniCase::ascii("string::words") => PathKind::Function,
 		UniCase::ascii("string::distance::hamming") => PathKind::Function,
 		UniCase::ascii("string::distance::levenshtein") => PathKind::Function,
+		UniCase::ascii("string::html::encode") => PathKind::Function,
+		UniCase::ascii("string::html::sanitize") => PathKind::Function,
 		UniCase::ascii("string::is::alphanum") => PathKind::Function,
 		UniCase::ascii("string::is::alpha") => PathKind::Function,
 		UniCase::ascii("string::is::ascii") => PathKind::Function,
@@ -438,15 +443,16 @@ impl Parser<'_> {
 	pub async fn parse_builtin(&mut self, stk: &mut Stk, start: Span) -> ParseResult<Value> {
 		let mut last_span = start;
 		while self.eat(t!("::")) {
-			self.next_token_value::<Ident>()?;
+			let t = self.glue_ident(false)?;
+			if !t.kind.can_be_identifier() {
+				unexpected!(self, t.kind, "an identifier")
+			}
+			self.pop_peek();
 			last_span = self.last_span();
 		}
 
 		let span = start.covers(last_span);
-		let slice = self.lexer.reader.span(span);
-
-		// parser implementations guarentess that the slice is a valid utf8 string.
-		let str = std::str::from_utf8(slice).unwrap();
+		let str = self.span_str(span);
 
 		match PATHS.get_entry(&UniCase::ascii(str)) {
 			Some((_, PathKind::Constant(x))) => Ok(Value::Constant(x.clone())),

@@ -30,8 +30,9 @@ impl<'a> Document<'a> {
 			// Process the statement
 			let res = match stm {
 				Statement::Select(_) => doc.select(stk, ctx, opt, stm).await,
-				Statement::Update(_) => doc.update(stk, ctx, opt, stm).await,
 				Statement::Create(_) => doc.create(stk, ctx, opt, stm).await,
+				Statement::Upsert(_) => doc.upsert(stk, ctx, opt, stm).await,
+				Statement::Update(_) => doc.update(stk, ctx, opt, stm).await,
 				Statement::Relate(_) => doc.relate(stk, ctx, opt, stm).await,
 				Statement::Delete(_) => doc.delete(stk, ctx, opt, stm).await,
 				Statement::Insert(_) => doc.insert(stk, ctx, opt, stm).await,

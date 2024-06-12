@@ -8,9 +8,8 @@ use crate::sql::{value::TryNeg, Cast, Expression, Number, Operator, Value};
 use crate::syn::token::Token;
 use crate::syn::{
 	parser::{mac::expected, ParseErrorKind, ParseResult, Parser},
-	token::{t, NumberKind, TokenKind},
+	token::{t, TokenKind},
 };
-use std::cmp::Ordering;
 
 impl Parser<'_> {
 	/// Parsers a generic value.
@@ -124,20 +123,47 @@ impl Parser<'_> {
 	fn prefix_binding_power(&mut self, token: TokenKind) -> Option<((), u8)> {
 		match token {
 			t!("!") | t!("+") | t!("-") => Some(((), 19)),
-			t!("<") if self.peek_token_at(1).kind != t!("FUTURE") => Some(((), 20)),
+			t!("<") => {
+				if self.peek_token_at(1).kind != t!("FUTURE") {
+					Some(((), 20))
+				} else {
+					None
+				}
+			}
 			_ => None,
 		}
 	}
 
 	async fn parse_prefix_op(&mut self, ctx: &mut Stk, min_bp: u8) -> ParseResult<Value> {
-		const I64_ABS_MAX: u64 = 9223372036854775808;
-
-		let token = self.next();
+		let token = self.peek();
 		let operator = match token.kind {
-			t!("+") => Operator::Add,
-			t!("-") => Operator::Neg,
-			t!("!") => Operator::Not,
+			t!("+") => {
+				// +123 is a single number token, so parse it as such
+				let p = self.peek_whitespace_token_at(1);
+				if matches!(p.kind, TokenKind::Digits) {
+					return self.next_token_value::<Number>().map(Value::Number);
+				}
+				self.pop_peek();
+
+				Operator::Add
+			}
+			t!("-") => {
+				// -123 is a single number token, so parse it as such
+				let p = self.peek_whitespace_token_at(1);
+				if matches!(p.kind, TokenKind::Digits) {
+					return self.next_token_value::<Number>().map(Value::Number);
+				}
+
+				self.pop_peek();
+
+				Operator::Neg
+			}
+			t!("!") => {
+				self.pop_peek();
+				Operator::Not
+			}
 			t!("<") => {
+				self.pop_peek();
 				let kind = self.parse_kind(ctx, token.span).await?;
 				let value = ctx.run(|ctx| self.pratt_parse_expr(ctx, min_bp)).await?;
 				let cast = Cast(kind, value);
@@ -146,29 +172,6 @@ impl Parser<'_> {
 			// should be unreachable as we previously check if the token was a prefix op.
 			_ => unreachable!(),
 		};
-
-		// HACK: The way we handle numbers in the parser has one downside: We can't parse i64::MIN
-		// directly.
-		// The tokens [`-`, `1232`] are parsed independently where - is parsed as a unary operator then 1232
-		// as a positive i64 integer. This results in a problem when 9223372036854775808 is the
-		// positive integer. This is larger then i64::MAX so the parser fallsback to parsing a
-		// floating point number. However -9223372036854775808 does fit in a i64 but the parser is,
-		// when parsing the number, unaware that the number will be negative.
-		// To handle this correctly we parse negation operator followed by an integer here so we can
-		// make sure this specific case is handled correctly.
-		if let Operator::Neg = operator {
-			// parse -12301230 immediately as a negative number,
-			if let TokenKind::Number(NumberKind::Integer) = self.peek_kind() {
-				let token = self.next();
-				let number = self.token_value::<u64>(token)?;
-				let number = match number.cmp(&I64_ABS_MAX) {
-					Ordering::Less => Number::Int(-(number as i64)),
-					Ordering::Equal => Number::Int(i64::MIN),
-					Ordering::Greater => self.token_value::<Number>(token)?.try_neg().unwrap(),
-				};
-				return Ok(Value::Number(number));
-			}
-		}
 
 		let v = ctx.run(|ctx| self.pratt_parse_expr(ctx, min_bp)).await?;
 
@@ -195,17 +198,18 @@ impl Parser<'_> {
 			})))
 		}
 	}
+
 	pub fn parse_knn(&mut self, token: Token) -> ParseResult<Operator> {
 		let amount = self.next_token_value()?;
 		let op = if self.eat(t!(",")) {
-			let token = self.next();
-			match &token.kind {
-				TokenKind::Distance(k) => {
+			match self.peek_kind(){
+				TokenKind::Distance(ref k) => {
+					self.pop_peek();
 					let d = self.convert_distance(k).map(Some)?;
 					Operator::Knn(amount, d)
 				},
-				TokenKind::Number(NumberKind::Integer) => {
-					let ef = self.token_value(token)?;
+				TokenKind::Digits | TokenKind::Number(_) => {
+					let ef = self.next_token_value()?;
 					Operator::Ann(amount, ef)
 				}
 				_ => {

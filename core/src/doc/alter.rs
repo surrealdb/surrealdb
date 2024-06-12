@@ -40,6 +40,11 @@ impl<'a> Document<'a> {
 					let data = data.compute(stk, ctx, opt, Some(&self.current)).await?;
 					self.current.doc.to_mut().replace(data)?
 				}
+				Data::UnsetExpression(i) => {
+					for i in i.iter() {
+						self.current.doc.to_mut().del(stk, ctx, opt, i).await?
+					}
+				}
 				Data::SetExpression(x) => {
 					for x in x.iter() {
 						let v = x.2.compute(stk, ctx, opt, Some(&self.current)).await?;
@@ -61,11 +66,6 @@ impl<'a> Document<'a> {
 							}
 							_ => unreachable!(),
 						}
-					}
-				}
-				Data::UnsetExpression(i) => {
-					for i in i.iter() {
-						self.current.doc.to_mut().del(stk, ctx, opt, i).await?
 					}
 				}
 				Data::UpdateExpression(x) => {

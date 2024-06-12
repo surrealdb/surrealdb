@@ -9,6 +9,7 @@ use crate::sql::statements::{
 	BreakStatement, ContinueStatement, CreateStatement, DefineStatement, DeleteStatement,
 	ForeachStatement, IfelseStatement, InsertStatement, OutputStatement, RelateStatement,
 	RemoveStatement, SelectStatement, SetStatement, ThrowStatement, UpdateStatement,
+	UpsertStatement,
 };
 use crate::sql::value::Value;
 use reblessive::tree::Stk;
@@ -84,6 +85,9 @@ impl Block {
 					v.compute(stk, &ctx, opt, doc).await?;
 				}
 				Entry::Create(v) => {
+					v.compute(stk, &ctx, opt, doc).await?;
+				}
+				Entry::Upsert(v) => {
 					v.compute(stk, &ctx, opt, doc).await?;
 				}
 				Entry::Update(v) => {
@@ -178,7 +182,7 @@ impl InfoStructure for Block {
 	}
 }
 
-#[revisioned(revision = 2)]
+#[revisioned(revision = 3)]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
@@ -201,6 +205,8 @@ pub enum Entry {
 	Foreach(ForeachStatement),
 	#[revision(start = 2)]
 	Rebuild(RebuildStatement),
+	#[revision(start = 3)]
+	Upsert(UpsertStatement),
 }
 
 impl PartialOrd for Entry {
@@ -219,6 +225,7 @@ impl Entry {
 			Self::Ifelse(v) => v.writeable(),
 			Self::Select(v) => v.writeable(),
 			Self::Create(v) => v.writeable(),
+			Self::Upsert(v) => v.writeable(),
 			Self::Update(v) => v.writeable(),
 			Self::Delete(v) => v.writeable(),
 			Self::Relate(v) => v.writeable(),
@@ -243,6 +250,7 @@ impl Display for Entry {
 			Self::Ifelse(v) => write!(f, "{v}"),
 			Self::Select(v) => write!(f, "{v}"),
 			Self::Create(v) => write!(f, "{v}"),
+			Self::Upsert(v) => write!(f, "{v}"),
 			Self::Update(v) => write!(f, "{v}"),
 			Self::Delete(v) => write!(f, "{v}"),
 			Self::Relate(v) => write!(f, "{v}"),

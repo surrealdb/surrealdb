@@ -49,6 +49,7 @@ impl From<&Statement<'_>> for Action {
 			Statement::Select(_) => Action::View,
 			Statement::Show(_) => Action::View,
 			Statement::Create(_) => Action::Edit,
+			Statement::Upsert(_) => Action::Edit,
 			Statement::Update(_) => Action::Edit,
 			Statement::Relate(_) => Action::Edit,
 			Statement::Delete(_) => Action::Edit,

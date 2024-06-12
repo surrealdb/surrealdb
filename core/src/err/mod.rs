@@ -14,11 +14,9 @@ use bincode::Error as BincodeError;
 #[cfg(any(
 	feature = "kv-mem",
 	feature = "kv-surrealkv",
-	feature = "kv-file",
 	feature = "kv-rocksdb",
 	feature = "kv-fdb",
 	feature = "kv-tikv",
-	feature = "kv-speedb"
 ))]
 use ext_sort::SortError;
 use fst::Error as FstError;
@@ -443,6 +441,12 @@ pub enum Error {
 	/// Can not execute CREATE statement using the specified value
 	#[error("Can not execute CREATE statement using value '{value}'")]
 	CreateStatement {
+		value: String,
+	},
+
+	/// Can not execute UPSERT statement using the specified value
+	#[error("Can not execute UPSERT statement using value '{value}'")]
+	UpsertStatement {
 		value: String,
 	},
 
@@ -1072,13 +1076,6 @@ impl From<tikv::Error> for Error {
 	}
 }
 
-#[cfg(feature = "kv-speedb")]
-impl From<speedb::Error> for Error {
-	fn from(e: speedb::Error) -> Error {
-		Error::Tx(e.to_string())
-	}
-}
-
 #[cfg(feature = "kv-rocksdb")]
 impl From<rocksdb::Error> for Error {
 	fn from(e: rocksdb::Error) -> Error {
@@ -1115,11 +1112,9 @@ impl From<reqwest::Error> for Error {
 #[cfg(any(
 	feature = "kv-mem",
 	feature = "kv-surrealkv",
-	feature = "kv-file",
 	feature = "kv-rocksdb",
 	feature = "kv-fdb",
 	feature = "kv-tikv",
-	feature = "kv-speedb"
 ))]
 impl<S, D, I> From<SortError<S, D, I>> for Error
 where

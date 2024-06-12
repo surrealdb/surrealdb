@@ -292,6 +292,8 @@
 "string::distance::hamming("
 "string::distance::levenshtein("
 "string::endsWith("
+"string::html::encode("
+"string::html::sanitize("
 "string::is::alphanum("
 "string::is::alpha("
 "string::is::ascii("
