@@ -348,6 +348,17 @@ pub fn remove((mut array, mut index): (Array, i64)) -> Result<Value, Error> {
 	Ok(array.into())
 }
 
+pub fn repeat((value, count): (Value, i64)) -> Result<Value, Error> {
+	if count < 0 {
+		return Err(Error::InvalidArguments {
+			name: String::from("array::repeat"),
+			message: String::from(format!("Argument 2 was the wrong type. Expected a positive number but found {count}")),
+		});
+	}
+
+	Ok(Array(std::iter::repeat(value).take(count as usize).collect()).into())
+}
+
 pub fn reverse((mut array,): (Array,)) -> Result<Value, Error> {
 	array.reverse();
 	Ok(array.into())

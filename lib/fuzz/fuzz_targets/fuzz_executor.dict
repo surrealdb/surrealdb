@@ -187,6 +187,7 @@
 "array::push("
 "array::range("
 "array::remove("
+"array::repeat("
 "array::reverse("
 "array::shuffle("
 "array::slice("
