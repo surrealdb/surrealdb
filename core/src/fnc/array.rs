@@ -135,20 +135,22 @@ pub fn distinct((array,): (Array,)) -> Result<Value, Error> {
 	Ok(array.uniq().into())
 }
 
-pub fn fill((mut array, value, start, end): (Array, Value, Option<isize>, Option<isize>)) -> Result<Value, Error> {
+pub fn fill(
+	(mut array, value, start, end): (Array, Value, Option<isize>, Option<isize>),
+) -> Result<Value, Error> {
 	let min = 0;
 	let max = array.len();
 	let negative_max = -(max as isize);
 
 	let start = match start {
 		Some(start) if negative_max <= start && start < 0 => (start + max as isize) as usize,
-  		Some(start) if start < negative_max => 0,
+		Some(start) if start < negative_max => 0,
 		Some(start) => start as usize,
 		None => min,
 	};
 	let end = match end {
 		Some(end) if negative_max <= end && end < 0 => (end + max as isize) as usize,
-  		Some(end) if end < negative_max => 0,
+		Some(end) if end < negative_max => 0,
 		Some(end) => end as usize,
 		None => max,
 	};
@@ -164,7 +166,7 @@ pub fn fill((mut array, value, start, end): (Array, Value, Option<isize>, Option
 			}
 		}
 	}
-	
+
 	Ok(array.into())
 }
 
@@ -352,10 +354,12 @@ pub fn range((start, count): (i64, i64)) -> Result<Value, Error> {
 	if count < 0 {
 		return Err(Error::InvalidArguments {
 			name: String::from("array::range"),
-			message: String::from(format!("Argument 1 was the wrong type. Expected a positive number but found {count}")),
+			message: format!(
+				"Argument 1 was the wrong type. Expected a positive number but found {count}"
+			),
 		});
 	}
-	
+
 	if let Some(end) = start.checked_add(count - 1) {
 		Ok(Array((start..=end).map(Value::from).collect::<Vec<_>>()).into())
 	} else {
@@ -385,7 +389,9 @@ pub fn repeat((value, count): (Value, i64)) -> Result<Value, Error> {
 	if count < 0 {
 		return Err(Error::InvalidArguments {
 			name: String::from("array::repeat"),
-			message: String::from(format!("Argument 2 was the wrong type. Expected a positive number but found {count}")),
+			message: format!(
+				"Argument 2 was the wrong type. Expected a positive number but found {count}"
+			),
 		});
 	}
 
@@ -462,7 +468,9 @@ pub fn swap((mut array, from, to): (Array, isize, isize)) -> Result<Value, Error
 	let from = match from {
 		from if from < negative_max || from >= max as isize => Err(Error::InvalidArguments {
 			name: String::from("array::swap"),
-			message: String::from(format!("Argument 1 is out of range. Expected a number between {negative_max} and {max}")),
+			message: format!(
+				"Argument 1 is out of range. Expected a number between {negative_max} and {max}"
+			),
 		}),
 		from if negative_max <= from && from < min => Ok((from + max as isize) as usize),
 		from => Ok(from as usize),
@@ -471,7 +479,9 @@ pub fn swap((mut array, from, to): (Array, isize, isize)) -> Result<Value, Error
 	let to = match to {
 		to if to < negative_max || to >= max as isize => Err(Error::InvalidArguments {
 			name: String::from("array::swap"),
-			message: String::from(format!("Argument 2 is out of range. Expected a number between {negative_max} and {max}")),
+			message: format!(
+				"Argument 2 is out of range. Expected a number between {negative_max} and {max}"
+			),
 		}),
 		to if negative_max <= to && to < min => Ok((to + max as isize) as usize),
 		to => Ok(to as usize),
