@@ -147,7 +147,7 @@ impl CapabilitiesBuilder {
 	}
 
 	/// TODO
-	pub fn with_quest_access(self, enabled: bool) -> Self {
+	pub fn with_guest_access(self, enabled: bool) -> Self {
 		Self {
 			cap: self.cap.with_guest_access(enabled),
 			..self
