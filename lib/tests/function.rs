@@ -280,6 +280,31 @@ async fn function_array_distinct() -> Result<(), Error> {
 }
 
 #[tokio::test]
+async fn function_array_fill() -> Result<(), Error> {
+	let sql = r#"
+		RETURN array::fill([1,2,3,4,5], 10);
+		RETURN array::fill([1,2,3,4,5], 10, 0, 7);
+		RETURN array::fill([1,NONE,NONE,NONE,NONE], 10, 1);
+		RETURN array::fill([1,NONE,3,4,5], 10, 1, 2);
+		RETURN array::fill([1,2,3,4,5], 10, 1, 1);
+		RETURN array::fill([1,2,3,4,5], 10, 7, 7);
+		RETURN array::fill([1,2,3,4,5], 10, 7, 9);
+		RETURN array::fill([1,2,NONE,4,5], 10, -3, -2);
+	"#;
+	//
+	Test::new(sql).await?
+		.expect_val("[10,10,10,10,10]")?
+		.expect_val("[10,10,10,10,10]")?
+		.expect_val("[1,10,10,10,10]")?
+		.expect_val("[1,10,3,4,5]")?
+		.expect_val("[1,2,3,4,5]")?
+		.expect_val("[1,2,3,4,5]")?
+		.expect_val("[1,2,3,4,5]")?
+		.expect_val("[1,2,10,4,5]")?;
+	Ok(())
+}
+
+#[tokio::test]
 async fn function_array_filter_index() -> Result<(), Error> {
 	let sql = r#"RETURN array::filter_index([0, 1, 2], 1);
 RETURN array::filter_index([0, 0, 2], 0);
