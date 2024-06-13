@@ -1,50 +1,78 @@
 use criterion::measurement::WallTime;
 use criterion::{criterion_group, criterion_main, BenchmarkGroup, Criterion, Throughput};
 use futures::executor::block_on;
-use rand::prelude::ThreadRng;
-use rand::{thread_rng, Rng};
+use futures::lock::Mutex;
+use rand::rngs::StdRng;
+use rand::{Rng, SeedableRng};
 use reblessive::TreeStack;
-use std::time::Duration;
-use surrealdb::idx::docids::DocId;
-use surrealdb::idx::trees::mtree::{MState, MTree};
-use surrealdb::idx::trees::store::TreeNodeProvider;
-use surrealdb::idx::trees::vector::Vector;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
 use surrealdb::kvs::Datastore;
 use surrealdb::kvs::LockType::Optimistic;
 use surrealdb::kvs::TransactionType::{Read, Write};
-use surrealdb::sql::index::Distance;
-use tokio::runtime::Runtime;
+use surrealdb_core::ctx::Context;
+use surrealdb_core::idx::planner::checker::MTreeConditionChecker;
+use surrealdb_core::idx::trees::mtree::MTreeIndex;
+use surrealdb_core::idx::IndexKeyBase;
+use surrealdb_core::kvs::{Transaction, TransactionType};
+use surrealdb_core::sql::index::{Distance, MTreeParams, VectorType};
+use surrealdb_core::sql::{Id, Number, Thing, Value};
+use tokio::runtime::{Builder, Runtime};
+use tokio::task;
 
 fn bench_index_mtree_dim_3(c: &mut Criterion) {
-	bench_index_mtree(c, 1_000, 100_000, 3, 120, 100);
+	bench_index_mtree(c, 250, 25_000, 3, 100);
 }
 
 fn bench_index_mtree_dim_3_full_cache(c: &mut Criterion) {
-	bench_index_mtree(c, 1_000, 100_000, 3, 120, 0);
+	bench_index_mtree(c, 250, 25_000, 3, 0);
 }
 
 fn bench_index_mtree_dim_50(c: &mut Criterion) {
-	bench_index_mtree(c, 100, 10_000, 50, 20, 100);
+	bench_index_mtree(c, 100, 10_000, 50, 100);
 }
 
 fn bench_index_mtree_dim_50_full_cache(c: &mut Criterion) {
-	bench_index_mtree(c, 100, 10_000, 50, 20, 0);
+	bench_index_mtree(c, 100, 10_000, 50, 0);
 }
 
 fn bench_index_mtree_dim_300(c: &mut Criterion) {
-	bench_index_mtree(c, 50, 5_000, 300, 40, 100);
+	bench_index_mtree(c, 50, 5_000, 300, 100);
 }
 
 fn bench_index_mtree_dim_300_full_cache(c: &mut Criterion) {
-	bench_index_mtree(c, 50, 5_000, 300, 40, 0);
+	bench_index_mtree(c, 50, 5_000, 300, 0);
 }
 
 fn bench_index_mtree_dim_2048(c: &mut Criterion) {
-	bench_index_mtree(c, 10, 1_000, 2048, 60, 100);
+	bench_index_mtree(c, 10, 1_000, 2048, 100);
 }
 
 fn bench_index_mtree_dim_2048_full_cache(c: &mut Criterion) {
-	bench_index_mtree(c, 10, 1_000, 2048, 60, 0);
+	bench_index_mtree(c, 10, 1_000, 2048, 0);
+}
+
+async fn mtree_index(
+	ds: &Datastore,
+	tx: &mut Transaction,
+	dimension: usize,
+	cache_size: usize,
+	tt: TransactionType,
+) -> MTreeIndex {
+	let p = MTreeParams::new(
+		dimension as u16,
+		Distance::Euclidean,
+		VectorType::F64,
+		40,
+		100,
+		cache_size as u32,
+		cache_size as u32,
+	);
+	MTreeIndex::new(ds.index_store(), tx, IndexKeyBase::default(), &p, tt).await.unwrap()
+}
+
+fn runtime() -> Runtime {
+	Builder::new_multi_thread().worker_threads(4).enable_all().build().unwrap()
 }
 
 fn bench_index_mtree(
@@ -52,7 +80,6 @@ fn bench_index_mtree(
 	debug_samples_len: usize,
 	release_samples_len: usize,
 	vector_dimension: usize,
-	measurement_secs: u64,
 	cache_size: usize,
 ) {
 	let samples_len = if cfg!(debug_assertions) {
@@ -66,10 +93,10 @@ fn bench_index_mtree(
 
 	// Indexing benchmark group
 	{
-		let mut group = get_group(c, "index_mtree_insert", samples_len, measurement_secs);
+		let mut group = get_group(c, "index_mtree_insert", samples_len);
 		let id = format!("len_{}_dim_{}_cache_{}", samples_len, vector_dimension, cache_size);
 		group.bench_function(id, |b| {
-			b.to_async(Runtime::new().unwrap())
+			b.to_async(runtime())
 				.iter(|| insert_objects(&ds, samples_len, vector_dimension, cache_size));
 		});
 		group.finish();
@@ -77,15 +104,15 @@ fn bench_index_mtree(
 
 	// Knn lookup benchmark group
 	{
-		let mut group = get_group(c, "index_mtree_lookup", samples_len, 10);
+		let mut group = get_group(c, "index_mtree_lookup", samples_len);
 		for knn in [1, 10] {
 			let id = format!(
 				"knn_{}_len_{}_dim_{}_cache_{}",
 				knn, samples_len, vector_dimension, cache_size
 			);
 			group.bench_function(id, |b| {
-				b.to_async(Runtime::new().unwrap()).iter(|| {
-					knn_lookup_objects(&ds, samples_len, vector_dimension, knn, cache_size)
+				b.to_async(runtime()).iter(|| {
+					knn_lookup_objects(&ds, samples_len, vector_dimension, cache_size, knn)
 				});
 			});
 		}
@@ -97,24 +124,18 @@ fn get_group<'a>(
 	c: &'a mut Criterion,
 	group_name: &str,
 	samples_len: usize,
-	measurement_secs: u64,
 ) -> BenchmarkGroup<'a, WallTime> {
 	let mut group = c.benchmark_group(group_name);
 	group.throughput(Throughput::Elements(samples_len as u64));
 	group.sample_size(10);
-	group.measurement_time(Duration::from_secs(measurement_secs));
 	group
 }
-fn random_object(rng: &mut ThreadRng, vector_size: usize) -> Vector {
+fn random_object(rng: &mut StdRng, vector_size: usize) -> Vec<Number> {
 	let mut vec = Vec::with_capacity(vector_size);
 	for _ in 0..vector_size {
-		vec.push(rng.gen_range(-1.0..=1.0));
+		vec.push(rng.gen_range(-1.0..=1.0).into());
 	}
-	Vector::F32(vec)
-}
-
-fn mtree() -> MTree {
-	MTree::new(MState::new(40), Distance::Euclidean)
+	vec
 }
 
 async fn insert_objects(
@@ -123,27 +144,22 @@ async fn insert_objects(
 	vector_size: usize,
 	cache_size: usize,
 ) {
-	let mut rng = thread_rng();
-	let mut t = mtree();
 	let mut tx = ds.transaction(Write, Optimistic).await.unwrap();
-	let mut s =
-		ds.index_store().get_store_mtree(TreeNodeProvider::Debug, 0, Write, cache_size).await;
-
+	let mut mt = mtree_index(ds, &mut tx, vector_size, cache_size, Write).await;
 	let mut stack = TreeStack::new();
+	let mut rng = StdRng::from_entropy();
 	stack
 		.enter(|stk| async {
 			for i in 0..samples_size {
-				let object = random_object(&mut rng, vector_size).into();
+				let vector: Vec<Number> = random_object(&mut rng, vector_size);
 				// Insert the sample
-				t.insert(stk, &mut tx, &mut s, object, i as DocId).await.unwrap();
+				let rid = Thing::from(("test", Id::from(i as i64)));
+				mt.index_document(stk, &mut tx, &rid, &vec![Value::from(vector)]).await.unwrap();
 			}
 		})
 		.finish()
 		.await;
-
-	if let Some(new_cache) = s.finish(&mut tx).await.unwrap() {
-		ds.index_store().advance_store_mtree(new_cache);
-	}
+	mt.finish(&mut tx).await.unwrap();
 	tx.commit().await.unwrap();
 }
 
@@ -151,19 +167,44 @@ async fn knn_lookup_objects(
 	ds: &Datastore,
 	samples_size: usize,
 	vector_size: usize,
-	knn: usize,
 	cache_size: usize,
+	knn: usize,
 ) {
-	let mut rng = thread_rng();
-	let t = mtree();
-	let mut tx = ds.transaction(Read, Optimistic).await.unwrap();
-	let s = ds.index_store().get_store_mtree(TreeNodeProvider::Debug, 0, Read, cache_size).await;
-	for _ in 0..samples_size {
-		let object = random_object(&mut rng, vector_size).into();
-		// Insert the sample
-		t.knn_search(&mut tx, &s, &object, knn).await.unwrap();
+	let txn = Arc::new(Mutex::new(ds.transaction(Read, Optimistic).await.unwrap()));
+	let mut tx = txn.lock().await;
+	let mt = Arc::new(mtree_index(ds, &mut tx, vector_size, cache_size, Read).await);
+	drop(tx);
+	let ctx = Arc::new(Context::default().set_transaction(txn));
+
+	let counter = Arc::new(AtomicUsize::new(0));
+
+	let mut consumers = Vec::with_capacity(4);
+	for _ in 0..4 {
+		let (ctx, mt, counter) = (ctx.clone(), mt.clone(), counter.clone());
+		let c = task::spawn(async move {
+			let mut rng = StdRng::from_entropy();
+			while counter.fetch_add(1, Ordering::Relaxed) < samples_size {
+				let object = random_object(&mut rng, vector_size);
+				knn_lookup_object(mt.as_ref(), &ctx, object, knn).await;
+			}
+		});
+		consumers.push(c);
 	}
-	tx.rollback_with_panic();
+	for c in consumers {
+		c.await.unwrap();
+	}
+}
+
+async fn knn_lookup_object(mt: &MTreeIndex, ctx: &Context<'_>, object: Vec<Number>, knn: usize) {
+	let mut stack = TreeStack::new();
+	stack
+		.enter(|stk| async {
+			let chk = MTreeConditionChecker::new(&ctx);
+			let r = mt.knn_search(stk, ctx, &object, knn, chk).await.unwrap();
+			assert_eq!(r.len(), knn);
+		})
+		.finish()
+		.await;
 }
 
 criterion_group!(

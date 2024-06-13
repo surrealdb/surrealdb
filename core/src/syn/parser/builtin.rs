@@ -1,8 +1,11 @@
 use super::{ParseResult, Parser};
 use crate::{
-	sql::{Constant, Function, Ident, Value},
+	sql::{Constant, Function, Value},
 	syn::{
-		parser::{mac::expected, ParseError, ParseErrorKind},
+		parser::{
+			mac::{expected, unexpected},
+			ParseError, ParseErrorKind,
+		},
 		token::{t, Span},
 	},
 };
@@ -115,6 +118,7 @@ pub(crate) static PATHS: phf::Map<UniCase<&'static str>, PathKind> = phf_map! {
 		UniCase::ascii("array::push") => PathKind::Function,
 		UniCase::ascii("array::remove") => PathKind::Function,
 		UniCase::ascii("array::reverse") => PathKind::Function,
+		UniCase::ascii("array::shuffle") => PathKind::Function,
 		UniCase::ascii("array::slice") => PathKind::Function,
 		UniCase::ascii("array::sort") => PathKind::Function,
 		UniCase::ascii("array::transpose") => PathKind::Function,
@@ -168,11 +172,25 @@ pub(crate) static PATHS: phf::Map<UniCase<&'static str>, PathKind> = phf_map! {
 		UniCase::ascii("geo::hash::encode") => PathKind::Function,
 		//
 		UniCase::ascii("math::abs") => PathKind::Function,
+		UniCase::ascii("math::acos") => PathKind::Function,
+		UniCase::ascii("math::asin") => PathKind::Function,
+		UniCase::ascii("math::acot") => PathKind::Function,
+		UniCase::ascii("math::atan") => PathKind::Function,
 		UniCase::ascii("math::bottom") => PathKind::Function,
 		UniCase::ascii("math::ceil") => PathKind::Function,
+		UniCase::ascii("math::clamp") => PathKind::Function,
+		UniCase::ascii("math::cos") => PathKind::Function,
+		UniCase::ascii("math::cot") => PathKind::Function,
+		UniCase::ascii("math::deg2rad") => PathKind::Function,
 		UniCase::ascii("math::fixed") => PathKind::Function,
 		UniCase::ascii("math::floor") => PathKind::Function,
 		UniCase::ascii("math::interquartile") => PathKind::Function,
+		UniCase::ascii("math::lerp") => PathKind::Function,
+		UniCase::ascii("math::lerpangle") => PathKind::Function,
+		UniCase::ascii("math::ln") => PathKind::Function,
+		UniCase::ascii("math::log") => PathKind::Function,
+		UniCase::ascii("math::log2") => PathKind::Function,
+		UniCase::ascii("math::log10") => PathKind::Function,
 		UniCase::ascii("math::max") => PathKind::Function,
 		UniCase::ascii("math::mean") => PathKind::Function,
 		UniCase::ascii("math::median") => PathKind::Function,
@@ -184,8 +202,12 @@ pub(crate) static PATHS: phf::Map<UniCase<&'static str>, PathKind> = phf_map! {
 		UniCase::ascii("math::pow") => PathKind::Function,
 		UniCase::ascii("math::product") => PathKind::Function,
 		UniCase::ascii("math::round") => PathKind::Function,
+		UniCase::ascii("math::rad2deg") => PathKind::Function,
+		UniCase::ascii("math::sign") => PathKind::Function,
+		UniCase::ascii("math::sin") => PathKind::Function,
 		UniCase::ascii("math::spread") => PathKind::Function,
 		UniCase::ascii("math::sqrt") => PathKind::Function,
+		UniCase::ascii("math::tan") => PathKind::Function,
 		UniCase::ascii("math::stddev") => PathKind::Function,
 		UniCase::ascii("math::sum") => PathKind::Function,
 		UniCase::ascii("math::top") => PathKind::Function,
@@ -226,8 +248,8 @@ pub(crate) static PATHS: phf::Map<UniCase<&'static str>, PathKind> = phf_map! {
 		UniCase::ascii("session::ip") => PathKind::Function,
 		UniCase::ascii("session::ns") => PathKind::Function,
 		UniCase::ascii("session::origin") => PathKind::Function,
-		UniCase::ascii("session::sc") => PathKind::Function,
-		UniCase::ascii("session::sd") => PathKind::Function,
+		UniCase::ascii("session::ac") => PathKind::Function,
+		UniCase::ascii("session::rd") => PathKind::Function,
 		UniCase::ascii("session::token") => PathKind::Function,
 		//
 		UniCase::ascii("string::concat") => PathKind::Function,
@@ -248,6 +270,8 @@ pub(crate) static PATHS: phf::Map<UniCase<&'static str>, PathKind> = phf_map! {
 		UniCase::ascii("string::words") => PathKind::Function,
 		UniCase::ascii("string::distance::hamming") => PathKind::Function,
 		UniCase::ascii("string::distance::levenshtein") => PathKind::Function,
+		UniCase::ascii("string::html::encode") => PathKind::Function,
+		UniCase::ascii("string::html::sanitize") => PathKind::Function,
 		UniCase::ascii("string::is::alphanum") => PathKind::Function,
 		UniCase::ascii("string::is::alpha") => PathKind::Function,
 		UniCase::ascii("string::is::ascii") => PathKind::Function,
@@ -255,6 +279,9 @@ pub(crate) static PATHS: phf::Map<UniCase<&'static str>, PathKind> = phf_map! {
 		UniCase::ascii("string::is::domain") => PathKind::Function,
 		UniCase::ascii("string::is::email") => PathKind::Function,
 		UniCase::ascii("string::is::hexadecimal") => PathKind::Function,
+		UniCase::ascii("string::is::ip") => PathKind::Function,
+		UniCase::ascii("string::is::ipv4") => PathKind::Function,
+		UniCase::ascii("string::is::ipv6") => PathKind::Function,
 		UniCase::ascii("string::is::latitude") => PathKind::Function,
 		UniCase::ascii("string::is::longitude") => PathKind::Function,
 		UniCase::ascii("string::is::numeric") => PathKind::Function,
@@ -353,6 +380,7 @@ pub(crate) static PATHS: phf::Map<UniCase<&'static str>, PathKind> = phf_map! {
 		UniCase::ascii("vector::distance::chebyshev") => PathKind::Function,
 		UniCase::ascii("vector::distance::euclidean") => PathKind::Function,
 		UniCase::ascii("vector::distance::hamming") => PathKind::Function,
+		UniCase::ascii("vector::distance::knn") => PathKind::Function,
 		UniCase::ascii("vector::distance::mahalanobis") => PathKind::Function,
 		UniCase::ascii("vector::distance::manhattan") => PathKind::Function,
 		UniCase::ascii("vector::distance::minkowski") => PathKind::Function,
@@ -405,6 +433,7 @@ pub(crate) static PATHS: phf::Map<UniCase<&'static str>, PathKind> = phf_map! {
 		UniCase::ascii("math::LOG10_E") => PathKind::Constant(Constant::MathLog10E),
 		UniCase::ascii("math::LOG2_10") => PathKind::Constant(Constant::MathLog210),
 		UniCase::ascii("math::LOG2_E") => PathKind::Constant(Constant::MathLog2E),
+		UniCase::ascii("math::NEG_INF") => PathKind::Constant(Constant::MathNegInf),
 		UniCase::ascii("math::PI") => PathKind::Constant(Constant::MathPi),
 		UniCase::ascii("math::SQRT_2") => PathKind::Constant(Constant::MathSqrt2),
 		UniCase::ascii("math::TAU") => PathKind::Constant(Constant::MathTau),
@@ -415,15 +444,16 @@ impl Parser<'_> {
 	pub async fn parse_builtin(&mut self, stk: &mut Stk, start: Span) -> ParseResult<Value> {
 		let mut last_span = start;
 		while self.eat(t!("::")) {
-			self.next_token_value::<Ident>()?;
+			let t = self.glue_ident(false)?;
+			if !t.kind.can_be_identifier() {
+				unexpected!(self, t.kind, "an identifier")
+			}
+			self.pop_peek();
 			last_span = self.last_span();
 		}
 
 		let span = start.covers(last_span);
-		let slice = self.lexer.reader.span(span);
-
-		// parser implementations guarentess that the slice is a valid utf8 string.
-		let str = std::str::from_utf8(slice).unwrap();
+		let str = self.span_str(span);
 
 		match PATHS.get_entry(&UniCase::ascii(str)) {
 			Some((_, PathKind::Constant(x))) => Ok(Value::Constant(x.clone())),

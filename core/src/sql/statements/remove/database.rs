@@ -1,5 +1,5 @@
 use crate::ctx::Context;
-use crate::dbs::{Options, Transaction};
+use crate::dbs::Options;
 use crate::err::Error;
 use crate::iam::{Action, ResourceKind};
 use crate::sql::{Base, Ident, Value};
@@ -20,26 +20,23 @@ pub struct RemoveDatabaseStatement {
 
 impl RemoveDatabaseStatement {
 	/// Process this type returning a computed simple Value
-	pub(crate) async fn compute(
-		&self,
-		_ctx: &Context<'_>,
-		opt: &Options,
-		txn: &Transaction,
-	) -> Result<Value, Error> {
+	pub(crate) async fn compute(&self, ctx: &Context<'_>, opt: &Options) -> Result<Value, Error> {
 		let future = async {
 			// Allowed to run?
 			opt.is_allowed(Action::Edit, ResourceKind::Database, &Base::Ns)?;
 			// Claim transaction
-			let mut run = txn.lock().await;
+			let mut run = ctx.tx_lock().await;
+			// Remove index store
+			ctx.get_index_stores().database_removed(&mut run, opt.ns()?, &self.name).await?;
 			// Clear the cache
 			run.clear_cache();
 			// Get the definition
-			let db = run.get_db(opt.ns(), &self.name).await?;
+			let db = run.get_db(opt.ns()?, &self.name).await?;
 			// Delete the definition
-			let key = crate::key::namespace::db::new(opt.ns(), &db.name);
+			let key = crate::key::namespace::db::new(opt.ns()?, &db.name);
 			run.del(key).await?;
 			// Delete the resource data
-			let key = crate::key::database::all::new(opt.ns(), &db.name);
+			let key = crate::key::database::all::new(opt.ns()?, &db.name);
 			run.delp(key, u32::MAX).await?;
 			// Ok all good
 			Ok(Value::None)

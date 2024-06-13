@@ -1,7 +1,7 @@
 #![allow(clippy::derive_ord_xor_partial_ord)]
 
 use crate::ctx::Context;
-use crate::dbs::{Options, Transaction};
+use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::fnc::util::string::fuzzy::Fuzzy;
@@ -13,7 +13,7 @@ use crate::sql::{
 	model::Model,
 	Array, Block, Bytes, Cast, Constant, Datetime, Duration, Edges, Expression, Function, Future,
 	Geometry, Idiom, Kind, Mock, Number, Object, Operation, Param, Part, Query, Range, Regex,
-	Strand, Subquery, Table, Thing, Uuid,
+	Strand, Subquery, Table, Tables, Thing, Uuid,
 };
 use chrono::{DateTime, Utc};
 use derive::Store;
@@ -55,6 +55,12 @@ impl IntoIterator for Values {
 impl Display for Values {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
 		Display::fmt(&Fmt::comma_separated(&self.0), f)
+	}
+}
+
+impl From<&Tables> for Values {
+	fn from(tables: &Tables) -> Self {
+		Self(tables.0.iter().map(|t| Value::Table(t.clone())).collect())
 	}
 }
 
@@ -506,6 +512,15 @@ impl From<Option<String>> for Value {
 
 impl From<Option<i64>> for Value {
 	fn from(v: Option<i64>) -> Self {
+		match v {
+			Some(v) => Value::from(v),
+			None => Value::None,
+		}
+	}
+}
+
+impl From<Option<Duration>> for Value {
+	fn from(v: Option<Duration>) -> Self {
 		match v {
 			Some(v) => Value::from(v),
 			None => Value::None,
@@ -2626,27 +2641,26 @@ impl Value {
 		stk: &mut Stk,
 		ctx: &Context<'_>,
 		opt: &Options,
-		txn: &Transaction,
 		doc: Option<&CursorDoc<'_>>,
 	) -> Result<Value, Error> {
 		// Prevent infinite recursion due to casting, expressions, etc.
 		let opt = &opt.dive(1)?;
 
 		match self {
-			Value::Cast(v) => v.compute(stk, ctx, opt, txn, doc).await,
-			Value::Thing(v) => stk.run(|stk| v.compute(stk, ctx, opt, txn, doc)).await,
-			Value::Block(v) => stk.run(|stk| v.compute(stk, ctx, opt, txn, doc)).await,
-			Value::Range(v) => stk.run(|stk| v.compute(stk, ctx, opt, txn, doc)).await,
-			Value::Param(v) => stk.run(|stk| v.compute(stk, ctx, opt, txn, doc)).await,
-			Value::Idiom(v) => stk.run(|stk| v.compute(stk, ctx, opt, txn, doc)).await,
-			Value::Array(v) => stk.run(|stk| v.compute(stk, ctx, opt, txn, doc)).await,
-			Value::Object(v) => stk.run(|stk| v.compute(stk, ctx, opt, txn, doc)).await,
-			Value::Future(v) => stk.run(|stk| v.compute(stk, ctx, opt, txn, doc)).await,
-			Value::Constant(v) => v.compute(ctx, opt, txn, doc).await,
-			Value::Function(v) => v.compute(stk, ctx, opt, txn, doc).await,
-			Value::Model(v) => v.compute(stk, ctx, opt, txn, doc).await,
-			Value::Subquery(v) => stk.run(|stk| v.compute(stk, ctx, opt, txn, doc)).await,
-			Value::Expression(v) => stk.run(|stk| v.compute(stk, ctx, opt, txn, doc)).await,
+			Value::Cast(v) => v.compute(stk, ctx, opt, doc).await,
+			Value::Thing(v) => stk.run(|stk| v.compute(stk, ctx, opt, doc)).await,
+			Value::Block(v) => stk.run(|stk| v.compute(stk, ctx, opt, doc)).await,
+			Value::Range(v) => stk.run(|stk| v.compute(stk, ctx, opt, doc)).await,
+			Value::Param(v) => stk.run(|stk| v.compute(stk, ctx, opt, doc)).await,
+			Value::Idiom(v) => stk.run(|stk| v.compute(stk, ctx, opt, doc)).await,
+			Value::Array(v) => stk.run(|stk| v.compute(stk, ctx, opt, doc)).await,
+			Value::Object(v) => stk.run(|stk| v.compute(stk, ctx, opt, doc)).await,
+			Value::Future(v) => stk.run(|stk| v.compute(stk, ctx, opt, doc)).await,
+			Value::Constant(v) => v.compute(),
+			Value::Function(v) => v.compute(stk, ctx, opt, doc).await,
+			Value::Model(v) => v.compute(stk, ctx, opt, doc).await,
+			Value::Subquery(v) => stk.run(|stk| v.compute(stk, ctx, opt, doc)).await,
+			Value::Expression(v) => stk.run(|stk| v.compute(stk, ctx, opt, doc)).await,
 			_ => Ok(self.to_owned()),
 		}
 	}

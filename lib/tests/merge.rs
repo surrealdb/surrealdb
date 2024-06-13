@@ -9,8 +9,8 @@ use surrealdb::sql::Value;
 #[tokio::test]
 async fn merge_record() -> Result<(), Error> {
 	let sql = "
-		UPDATE person:test SET name.initials = 'TMH', name.first = 'Tobie', name.last = 'Morgan Hitchcock';
-		UPDATE person:test MERGE {
+		UPSERT person:test SET name.initials = 'TMH', name.first = 'Tobie', name.last = 'Morgan Hitchcock';
+		UPSERT person:test MERGE {
 			name: {
 				title: 'Mr',
 				initials: NONE,

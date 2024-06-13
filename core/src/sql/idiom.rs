@@ -1,5 +1,5 @@
 use crate::ctx::Context;
-use crate::dbs::{Options, Transaction};
+use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::sql::statements::info::InfoStructure;
@@ -160,28 +160,23 @@ impl Idiom {
 		stk: &mut Stk,
 		ctx: &Context<'_>,
 		opt: &Options,
-		txn: &Transaction,
 		doc: Option<&CursorDoc<'_>>,
 	) -> Result<Value, Error> {
 		match self.first() {
 			// The starting part is a value
 			Some(Part::Start(v)) => {
-				v.compute(stk, ctx, opt, txn, doc)
+				v.compute(stk, ctx, opt, doc)
 					.await?
-					.get(stk, ctx, opt, txn, doc, self.as_ref().next())
+					.get(stk, ctx, opt, doc, self.as_ref().next())
 					.await?
-					.compute(stk, ctx, opt, txn, doc)
+					.compute(stk, ctx, opt, doc)
 					.await
 			}
 			// Otherwise use the current document
 			_ => match doc {
 				// There is a current document
 				Some(v) => {
-					v.doc
-						.get(stk, ctx, opt, txn, doc, self)
-						.await?
-						.compute(stk, ctx, opt, txn, doc)
-						.await
+					v.doc.get(stk, ctx, opt, doc, self).await?.compute(stk, ctx, opt, doc).await
 				}
 				// There isn't any document
 				None => Ok(Value::None),

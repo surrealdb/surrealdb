@@ -1,5 +1,5 @@
 use crate::ctx::Context;
-use crate::dbs::{Options, Transaction};
+use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::sql::{escape::escape_rid, id::Id, Strand, Value};
@@ -105,12 +105,11 @@ impl Thing {
 		stk: &mut Stk,
 		ctx: &Context<'_>,
 		opt: &Options,
-		txn: &Transaction,
 		doc: Option<&CursorDoc<'_>>,
 	) -> Result<Value, Error> {
 		Ok(Value::Thing(Thing {
 			tb: self.tb.clone(),
-			id: self.id.compute(stk, ctx, opt, txn, doc).await?,
+			id: self.id.compute(stk, ctx, opt, doc).await?,
 		}))
 	}
 }

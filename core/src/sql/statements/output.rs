@@ -1,5 +1,5 @@
 use crate::ctx::Context;
-use crate::dbs::{Options, Transaction};
+use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::sql::fetch::Fetchs;
@@ -30,17 +30,16 @@ impl OutputStatement {
 		stk: &mut Stk,
 		ctx: &Context<'_>,
 		opt: &Options,
-		txn: &Transaction,
 		doc: Option<&CursorDoc<'_>>,
 	) -> Result<Value, Error> {
 		// Ensure futures are processed
 		let opt = &opt.new_with_futures(true);
 		// Process the output value
-		let mut val = self.what.compute(stk, ctx, opt, txn, doc).await?;
+		let mut val = self.what.compute(stk, ctx, opt, doc).await?;
 		// Fetch any
 		if let Some(fetchs) = &self.fetch {
 			for fetch in fetchs.iter() {
-				val.fetch(stk, ctx, opt, txn, fetch).await?;
+				val.fetch(stk, ctx, opt, fetch).await?;
 			}
 		}
 		//

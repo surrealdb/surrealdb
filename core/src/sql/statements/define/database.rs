@@ -1,5 +1,5 @@
 use crate::ctx::Context;
-use crate::dbs::{Options, Transaction};
+use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::iam::{Action, ResourceKind};
@@ -27,26 +27,29 @@ impl DefineDatabaseStatement {
 	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
-		_ctx: &Context<'_>,
+		ctx: &Context<'_>,
 		opt: &Options,
-		txn: &Transaction,
 		_doc: Option<&CursorDoc<'_>>,
 	) -> Result<Value, Error> {
 		// Allowed to run?
 		opt.is_allowed(Action::Edit, ResourceKind::Database, &Base::Ns)?;
 		// Claim transaction
-		let mut run = txn.lock().await;
+		let mut run = ctx.tx_lock().await;
 		// Clear the cache
 		run.clear_cache();
 		// Check if database already exists
-		if self.if_not_exists && run.get_db(opt.ns(), &self.name).await.is_ok() {
-			return Err(Error::DbAlreadyExists {
-				value: self.name.to_string(),
-			});
+		if run.get_db(opt.ns()?, &self.name).await.is_ok() {
+			if self.if_not_exists {
+				return Ok(Value::None);
+			} else {
+				return Err(Error::DbAlreadyExists {
+					value: self.name.to_string(),
+				});
+			}
 		}
 		// Process the statement
-		let key = crate::key::namespace::db::new(opt.ns(), &self.name);
-		let ns = run.add_ns(opt.ns(), opt.strict).await?;
+		let key = crate::key::namespace::db::new(opt.ns()?, &self.name);
+		let ns = run.add_ns(opt.ns()?, opt.strict).await?;
 		// Set the id
 		if self.id.is_none() && ns.id.is_some() {
 			// Set the id

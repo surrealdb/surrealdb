@@ -1,16 +1,20 @@
 pub mod cache;
+pub(crate) mod hnsw;
 mod lru;
 pub(crate) mod tree;
 
+use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::err::Error;
 use crate::idx::trees::bkeys::{FstKeys, TrieKeys};
 use crate::idx::trees::btree::{BTreeNode, BTreeStore};
 use crate::idx::trees::mtree::{MTreeNode, MTreeStore};
 use crate::idx::trees::store::cache::{TreeCache, TreeCaches};
+use crate::idx::trees::store::hnsw::{HnswIndexes, SharedHnswIndex};
 use crate::idx::trees::store::tree::{TreeRead, TreeWrite};
 use crate::idx::IndexKeyBase;
 use crate::kvs::{Key, Transaction, TransactionType, Val};
+use crate::sql::index::HnswParams;
 use crate::sql::statements::DefineIndexStatement;
 use crate::sql::Index;
 use std::fmt::{Debug, Display, Formatter};
@@ -60,6 +64,22 @@ where
 		match self {
 			Self::Read(r) => r.get_node(tx, node_id).await,
 			_ => Err(Error::Unreachable("TreeStore::get_node")),
+		}
+	}
+
+	pub(in crate::idx) async fn get_node_txn(
+		&self,
+		ctx: &Context<'_>,
+		node_id: NodeId,
+	) -> Result<Arc<StoredNode<N>>, Error> {
+		match self {
+			Self::Read(r) => {
+				let mut tx = ctx.tx_lock().await;
+				let n = r.get_node(&mut tx, node_id).await;
+				drop(tx);
+				n
+			}
+			_ => Err(Error::Unreachable("TreeStore::get_node_txn")),
 		}
 	}
 
@@ -199,6 +219,7 @@ struct Inner {
 	btree_fst_caches: TreeCaches<BTreeNode<FstKeys>>,
 	btree_trie_caches: TreeCaches<BTreeNode<TrieKeys>>,
 	mtree_caches: TreeCaches<MTreeNode>,
+	hnsw_indexes: HnswIndexes,
 }
 impl Default for IndexStores {
 	fn default() -> Self {
@@ -206,6 +227,7 @@ impl Default for IndexStores {
 			btree_fst_caches: TreeCaches::default(),
 			btree_trie_caches: TreeCaches::default(),
 			mtree_caches: TreeCaches::default(),
+			hnsw_indexes: HnswIndexes::default(),
 		}))
 	}
 }
@@ -256,50 +278,79 @@ impl IndexStores {
 		self.0.mtree_caches.new_cache(new_cache);
 	}
 
-	pub(crate) async fn index_removed(
+	pub(crate) async fn get_index_hnsw(
 		&self,
 		opt: &Options,
+		ix: &DefineIndexStatement,
+		p: &HnswParams,
+	) -> Result<SharedHnswIndex, Error> {
+		let ikb = IndexKeyBase::new(opt.ns()?, opt.db()?, ix)?;
+		Ok(self.0.hnsw_indexes.get(&ikb, p).await)
+	}
+
+	pub(crate) async fn index_removed(
+		&self,
 		tx: &mut Transaction,
+		ns: &str,
+		db: &str,
 		tb: &str,
 		ix: &str,
 	) -> Result<(), Error> {
-		self.remove_index(
-			opt,
-			tx.get_and_cache_tb_index(opt.ns(), opt.db(), tb, ix).await?.as_ref(),
-		)
+		self.remove_index(ns, db, tx.get_and_cache_tb_index(ns, db, tb, ix).await?.as_ref()).await
 	}
 
 	pub(crate) async fn namespace_removed(
 		&self,
-		opt: &Options,
 		tx: &mut Transaction,
+		ns: &str,
 	) -> Result<(), Error> {
-		for tb in tx.all_tb(opt.ns(), opt.db()).await?.iter() {
-			self.table_removed(opt, tx, &tb.name).await?;
+		for db in tx.all_db(ns).await?.iter() {
+			self.database_removed(tx, ns, &db.name).await?;
+		}
+		Ok(())
+	}
+
+	pub(crate) async fn database_removed(
+		&self,
+		tx: &mut Transaction,
+		ns: &str,
+		db: &str,
+	) -> Result<(), Error> {
+		for tb in tx.all_tb(ns, db).await?.iter() {
+			self.table_removed(tx, ns, db, &tb.name).await?;
 		}
 		Ok(())
 	}
 
 	pub(crate) async fn table_removed(
 		&self,
-		opt: &Options,
 		tx: &mut Transaction,
+		ns: &str,
+		db: &str,
 		tb: &str,
 	) -> Result<(), Error> {
-		for ix in tx.all_tb_indexes(opt.ns(), opt.db(), tb).await?.iter() {
-			self.remove_index(opt, ix)?;
+		for ix in tx.all_tb_indexes(ns, db, tb).await?.iter() {
+			self.remove_index(ns, db, ix).await?;
 		}
 		Ok(())
 	}
 
-	fn remove_index(&self, opt: &Options, ix: &DefineIndexStatement) -> Result<(), Error> {
-		let ikb = IndexKeyBase::new(opt, ix);
+	async fn remove_index(
+		&self,
+		ns: &str,
+		db: &str,
+		ix: &DefineIndexStatement,
+	) -> Result<(), Error> {
+		let ikb = IndexKeyBase::new(ns, db, ix)?;
 		match ix.index {
 			Index::Search(_) => {
 				self.remove_search_caches(ikb);
 			}
 			Index::MTree(_) => {
 				self.remove_mtree_caches(ikb);
+			}
+			Index::Hnsw(_) => {
+				self.remove_hnsw_index(ikb).await;
 			}
 			_ => {}
 		}
@@ -318,9 +369,14 @@ impl IndexStores {
 		self.0.mtree_caches.remove_caches(&TreeNodeProvider::Vector(ikb.clone()));
 	}
 
-	pub fn is_empty(&self) -> bool {
+	async fn remove_hnsw_index(&self, ikb: IndexKeyBase) {
+		self.0.hnsw_indexes.remove(&ikb).await;
+	}
+
+	pub async fn is_empty(&self) -> bool {
 		self.0.mtree_caches.is_empty()
 			&& self.0.btree_fst_caches.is_empty()
 			&& self.0.btree_trie_caches.is_empty()
+			&& self.0.hnsw_indexes.is_empty().await
 	}
 }

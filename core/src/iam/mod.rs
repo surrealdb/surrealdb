@@ -7,6 +7,7 @@ pub mod base;
 pub mod check;
 pub mod clear;
 pub mod entities;
+pub mod issue;
 #[cfg(feature = "jwks")]
 pub mod jwks;
 pub mod policies;

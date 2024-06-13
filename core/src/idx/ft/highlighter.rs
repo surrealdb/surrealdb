@@ -6,6 +6,35 @@ use std::collections::hash_map::Entry as HEntry;
 use std::collections::BTreeMap;
 use std::collections::HashMap;
 
+pub(crate) struct HighlightParams {
+	prefix: Value,
+	suffix: Value,
+	match_ref: Value,
+	partial: bool,
+}
+
+impl TryFrom<(Value, Value, Value, Option<Value>)> for HighlightParams {
+	type Error = Error;
+
+	fn try_from(
+		(prefix, suffix, match_ref, partial): (Value, Value, Value, Option<Value>),
+	) -> Result<Self, Error> {
+		let partial = partial.map(|p| p.convert_to_bool()).unwrap_or(Ok(false))?;
+		Ok(Self {
+			prefix,
+			suffix,
+			match_ref,
+			partial,
+		})
+	}
+}
+
+impl HighlightParams {
+	pub(crate) fn match_ref(&self) -> &Value {
+		&self.match_ref
+	}
+}
+
 pub(super) struct Highlighter {
 	prefix: Vec<char>,
 	suffix: Vec<char>,
@@ -14,22 +43,16 @@ pub(super) struct Highlighter {
 }
 
 impl Highlighter {
-	pub(super) fn new(
-		prefix: Value,
-		suffix: Value,
-		partial: bool,
-		idiom: &Idiom,
-		doc: &Value,
-	) -> Self {
-		let prefix = prefix.to_raw_string().chars().collect();
-		let suffix = suffix.to_raw_string().chars().collect();
+	pub(super) fn new(hlp: HighlightParams, idiom: &Idiom, doc: &Value) -> Self {
+		let prefix = hlp.prefix.to_raw_string().chars().collect();
+		let suffix = hlp.suffix.to_raw_string().chars().collect();
 		// Extract the fields we want to highlight
 		let fields = doc.walk(idiom);
 		Self {
 			fields,
 			prefix,
 			suffix,
-			offseter: Offseter::new(partial),
+			offseter: Offseter::new(hlp.partial),
 		}
 	}
 

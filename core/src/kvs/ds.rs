@@ -1,21 +1,11 @@
 use std::collections::{BTreeMap, BTreeSet};
-#[cfg(any(
-	feature = "kv-surrealkv",
-	feature = "kv-file",
-	feature = "kv-rocksdb",
-	feature = "kv-fdb",
-	feature = "kv-tikv",
-	feature = "kv-speedb"
-))]
-use std::env;
 use std::fmt;
 #[cfg(any(
+	feature = "kv-mem",
 	feature = "kv-surrealkv",
-	feature = "kv-file",
 	feature = "kv-rocksdb",
 	feature = "kv-fdb",
 	feature = "kv-tikv",
-	feature = "kv-speedb"
 ))]
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -67,6 +57,9 @@ const LQ_CHANNEL_SIZE: usize = 100;
 // The batch size used for non-paged operations (i.e. if there are more results, they are ignored)
 const NON_PAGED_BATCH_SIZE: u32 = 100_000;
 
+// The role assigned to the initial user created when starting the server with credentials for the first time
+const INITIAL_USER_ROLE: &str = "owner";
+
 /// The underlying datastore instance which stores the dataset.
 #[allow(dead_code)]
 #[non_exhaustive]
@@ -79,9 +72,6 @@ pub struct Datastore {
 	strict: bool,
 	// Whether authentication is enabled on this datastore.
 	auth_enabled: bool,
-	// Whether authentication level is enabled on this datastore.
-	// TODO(gguillemas): Remove this field once the legacy authentication is deprecated in v2.0.0
-	auth_level_enabled: bool,
 	// The maximum duration timeout for running multiple statements in a query
 	query_timeout: Option<Duration>,
 	// The maximum duration timeout for running multiple statements in a transaction
@@ -102,15 +92,14 @@ pub struct Datastore {
 	// The JWKS object cache
 	jwks_cache: Arc<RwLock<JwksCache>>,
 	#[cfg(any(
+		feature = "kv-mem",
 		feature = "kv-surrealkv",
-		feature = "kv-file",
 		feature = "kv-rocksdb",
 		feature = "kv-fdb",
 		feature = "kv-tikv",
-		feature = "kv-speedb"
 	))]
 	// The temporary directory
-	temporary_directory: Arc<PathBuf>,
+	temporary_directory: Option<Arc<PathBuf>>,
 	pub(crate) lq_cf_store: Arc<RwLock<LiveQueryTracker>>,
 }
 
@@ -124,8 +113,6 @@ pub(super) enum Inner {
 	Mem(super::mem::Datastore),
 	#[cfg(feature = "kv-rocksdb")]
 	RocksDB(super::rocksdb::Datastore),
-	#[cfg(feature = "kv-speedb")]
-	SpeeDB(super::speedb::Datastore),
 	#[cfg(feature = "kv-indxdb")]
 	IndxDB(super::indxdb::Datastore),
 	#[cfg(feature = "kv-tikv")]
@@ -144,8 +131,6 @@ impl fmt::Display for Datastore {
 			Inner::Mem(_) => write!(f, "memory"),
 			#[cfg(feature = "kv-rocksdb")]
 			Inner::RocksDB(_) => write!(f, "rocksdb"),
-			#[cfg(feature = "kv-speedb")]
-			Inner::SpeeDB(_) => write!(f, "speedb"),
 			#[cfg(feature = "kv-indxdb")]
 			Inner::IndxDB(_) => write!(f, "indxdb"),
 			#[cfg(feature = "kv-tikv")]
@@ -223,7 +208,6 @@ impl Datastore {
 		#[cfg(not(any(
 			feature = "kv-mem",
 			feature = "kv-rocksdb",
-			feature = "kv-speedb",
 			feature = "kv-indxdb",
 			feature = "kv-tikv",
 			feature = "kv-fdb",
@@ -277,22 +261,6 @@ impl Datastore {
 				}
 				#[cfg(not(feature = "kv-rocksdb"))]
                 return Err(Error::Ds("Cannot connect to the `rocksdb` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
-			}
-			// Parse and initiate an SpeeDB database
-			s if s.starts_with("speedb:") => {
-				#[cfg(feature = "kv-speedb")]
-				{
-					info!("Starting kvs store at {}", path);
-					let s = s.trim_start_matches("speedb://");
-					let s = s.trim_start_matches("speedb:");
-					let v = super::speedb::Datastore::new(s).await.map(Inner::SpeeDB);
-					info!("Started kvs store at {}", path);
-					let default_clock = Arc::new(SizedClock::System(SystemClock::new()));
-					let clock = clock_override.unwrap_or(default_clock);
-					Ok((v, clock))
-				}
-				#[cfg(not(feature = "kv-speedb"))]
-                return Err(Error::Ds("Cannot connect to the `speedb` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
 			}
 			// Parse and initiate an IndxDB database
 			s if s.starts_with("indxdb:") => {
@@ -372,8 +340,6 @@ impl Datastore {
 			inner,
 			strict: false,
 			auth_enabled: false,
-			// TODO(gguillemas): Remove this field once the legacy authentication is deprecated in v2.0.0
-			auth_level_enabled: false,
 			query_timeout: None,
 			transaction_timeout: None,
 			notification_channel: None,
@@ -385,14 +351,13 @@ impl Datastore {
 			#[cfg(feature = "jwks")]
 			jwks_cache: Arc::new(RwLock::new(JwksCache::new())),
 			#[cfg(any(
+				feature = "kv-mem",
 				feature = "kv-surrealkv",
-				feature = "kv-file",
 				feature = "kv-rocksdb",
 				feature = "kv-fdb",
 				feature = "kv-tikv",
-				feature = "kv-speedb"
 			))]
-			temporary_directory: Arc::new(env::temp_dir()),
+			temporary_directory: None,
 			lq_cf_store: Arc::new(RwLock::new(LiveQueryTracker::new())),
 		})
 	}
@@ -433,13 +398,6 @@ impl Datastore {
 		self
 	}
 
-	/// Set whether authentication levels are enabled for this Datastore
-	/// TODO(gguillemas): Remove this method once the legacy authentication is deprecated in v2.0.0
-	pub fn with_auth_level_enabled(mut self, enabled: bool) -> Self {
-		self.auth_level_enabled = enabled;
-		self
-	}
-
 	/// Set specific capabilities for this Datastore
 	pub fn with_capabilities(mut self, caps: Capabilities) -> Self {
 		self.capabilities = caps;
@@ -447,15 +405,14 @@ impl Datastore {
 	}
 
 	#[cfg(any(
+		feature = "kv-mem",
 		feature = "kv-surrealkv",
-		feature = "kv-file",
 		feature = "kv-rocksdb",
 		feature = "kv-fdb",
 		feature = "kv-tikv",
-		feature = "kv-speedb"
 	))]
-	pub fn with_temporary_directory(mut self, path: Option<PathBuf>) -> Self {
-		self.temporary_directory = Arc::new(path.unwrap_or_else(env::temp_dir));
+	pub fn with_temporary_directory(mut self, path: PathBuf) -> Self {
+		self.temporary_directory = Some(Arc::new(path));
 		self
 	}
 
@@ -472,28 +429,6 @@ impl Datastore {
 	/// Is authentication enabled for this Datastore?
 	pub fn is_auth_enabled(&self) -> bool {
 		self.auth_enabled
-	}
-
-	#[cfg(any(
-		feature = "kv-surrealkv",
-		feature = "kv-file",
-		feature = "kv-rocksdb",
-		feature = "kv-fdb",
-		feature = "kv-tikv",
-		feature = "kv-speedb"
-	))]
-	pub(crate) fn is_memory(&self) -> bool {
-		#[cfg(feature = "kv-mem")]
-		if matches!(self.inner, Inner::Mem(_)) {
-			return true;
-		};
-		false
-	}
-
-	/// Is authentication level enabled for this Datastore?
-	/// TODO(gguillemas): Remove this method once the legacy authentication is deprecated in v2.0.0
-	pub fn is_auth_level_enabled(&self) -> bool {
-		self.auth_level_enabled
 	}
 
 	/// Does the datastore allow connections to a network target?
@@ -521,11 +456,12 @@ impl Datastore {
 			Ok(v) if v.is_empty() => {
 				// Display information in the logs
 				info!("Credentials were provided, and no root users were found. The root user '{}' will be created", username);
-				// Create and save a new root users
-				let stm = DefineUserStatement::from((Base::Root, username, password));
-				let ctx = Context::default();
+				// Create and save a new root user
+				let stm =
+					DefineUserStatement::from((Base::Root, username, password, INITIAL_USER_ROLE));
+				let ctx = Context::default().set_transaction(txn.clone());
 				let opt = Options::new().with_auth(Arc::new(Auth::for_root(Role::Owner)));
-				let _ = stm.compute(&ctx, &opt, &txn, None).await?;
+				let _ = stm.compute(&ctx, &opt, None).await?;
 				// We added a new user, so commit the transaction
 				txn.lock().await.commit().await?;
 				// Everything ok
@@ -1042,22 +978,25 @@ impl Datastore {
 	///     Ok(())
 	/// }
 	/// ```
+	#[allow(unreachable_code)]
 	pub async fn transaction(
 		&self,
 		write: TransactionType,
 		lock: LockType,
 	) -> Result<Transaction, Error> {
-		#![allow(unused_variables)]
+		#[allow(unused_variables)]
 		let write = match write {
 			Read => false,
 			Write => true,
 		};
 
+		#[allow(unused_variables)]
 		let lock = match lock {
 			Pessimistic => true,
 			Optimistic => false,
 		};
 
+		#[allow(unused_variables)]
 		let inner = match &self.inner {
 			#[cfg(feature = "kv-mem")]
 			Inner::Mem(v) => {
@@ -1068,11 +1007,6 @@ impl Datastore {
 			Inner::RocksDB(v) => {
 				let tx = v.transaction(write, lock).await?;
 				super::tx::Inner::RocksDB(tx)
-			}
-			#[cfg(feature = "kv-speedb")]
-			Inner::SpeeDB(v) => {
-				let tx = v.transaction(write, lock).await?;
-				super::tx::Inner::SpeeDB(tx)
 			}
 			#[cfg(feature = "kv-indxdb")]
 			Inner::IndxDB(v) => {
@@ -1101,7 +1035,6 @@ impl Datastore {
 		let (send, recv): (Sender<TrackedResult>, Receiver<TrackedResult>) =
 			channel::bounded(LQ_CHANNEL_SIZE);
 
-		#[allow(unreachable_code)]
 		Ok(Transaction {
 			inner,
 			cache: super::cache::Cache::default(),
@@ -1197,21 +1130,11 @@ impl Datastore {
 			self.capabilities.clone(),
 			self.index_stores.clone(),
 			#[cfg(any(
+				feature = "kv-mem",
 				feature = "kv-surrealkv",
-				feature = "kv-file",
 				feature = "kv-rocksdb",
 				feature = "kv-fdb",
 				feature = "kv-tikv",
-				feature = "kv-speedb"
-			))]
-			self.is_memory(),
-			#[cfg(any(
-				feature = "kv-surrealkv",
-				feature = "kv-file",
-				feature = "kv-rocksdb",
-				feature = "kv-fdb",
-				feature = "kv-tikv",
-				feature = "kv-speedb"
 			))]
 			self.temporary_directory.clone(),
 		)?;
@@ -1305,7 +1228,7 @@ impl Datastore {
 		// Start a new transaction
 		let txn = self.transaction(val.writeable().into(), Optimistic).await?.enclose();
 		// Compute the value
-		let res = stack.enter(|stk| val.compute(stk, &ctx, &opt, &txn, None)).finish().await;
+		let res = stack.enter(|stk| val.compute(stk, &ctx, &opt, None)).finish().await;
 		// Store any data
 		match (res.is_ok(), val.writeable()) {
 			// If the compute was successful, then commit if writeable
@@ -1320,7 +1243,7 @@ impl Datastore {
 	/// Evaluates a SQL [`Value`] without checking authenticating config
 	/// This is used in very specific cases, where we do not need to check
 	/// whether authentication is enabled, or guest access is disabled.
-	/// For example, this is used when processing a SCOPE SIGNUP or SCOPE
+	/// For example, this is used when processing a record access SIGNUP or
 	/// SIGNIN clause, which still needs to work without guest access.
 	///
 	/// ```rust,no_run
@@ -1379,8 +1302,10 @@ impl Datastore {
 		let ctx = vars.attach(ctx)?;
 		// Start a new transaction
 		let txn = self.transaction(val.writeable().into(), Optimistic).await?.enclose();
+		let ctx = ctx.set_transaction(txn.clone());
+
 		// Compute the value
-		let res = stack.enter(|stk| val.compute(stk, &ctx, &opt, &txn, None)).finish().await;
+		let res = stack.enter(|stk| val.compute(stk, &ctx, &opt, None)).finish().await;
 		// Store any data
 		match (res.is_ok(), val.writeable()) {
 			// If the compute was successful, then commit if writeable
@@ -1508,10 +1433,10 @@ mod test {
 		ctx.add_capabilities(dbs.capabilities.clone());
 		// Start a new transaction
 		let txn = dbs.transaction(val.writeable().into(), Optimistic).await?.enclose();
+		let ctx = ctx.set_transaction(txn);
 		// Compute the value
 		let mut stack = reblessive::tree::TreeStack::new();
-		let res =
-			stack.enter(|stk| val.compute(stk, &ctx, &opt, &txn, None)).finish().await.unwrap();
+		let res = stack.enter(|stk| val.compute(stk, &ctx, &opt, None)).finish().await.unwrap();
 		assert_eq!(res, Value::Number(Number::Int(2)));
 		Ok(())
 	}

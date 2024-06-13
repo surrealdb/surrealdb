@@ -2,16 +2,15 @@ use crate::ctx::Context;
 use crate::dbs::group::GroupsCollector;
 use crate::dbs::plan::Explanation;
 #[cfg(any(
+	feature = "kv-mem",
 	feature = "kv-surrealkv",
-	feature = "kv-file",
 	feature = "kv-rocksdb",
 	feature = "kv-fdb",
 	feature = "kv-tikv",
-	feature = "kv-speedb"
 ))]
 use crate::dbs::store::file_store::FileCollector;
 use crate::dbs::store::MemoryCollector;
-use crate::dbs::{Options, Statement, Transaction};
+use crate::dbs::{Options, Statement};
 use crate::err::Error;
 use crate::sql::{Orders, Value};
 use reblessive::tree::Stk;
@@ -20,12 +19,11 @@ pub(super) enum Results {
 	None,
 	Memory(MemoryCollector),
 	#[cfg(any(
+		feature = "kv-mem",
 		feature = "kv-surrealkv",
-		feature = "kv-file",
 		feature = "kv-rocksdb",
 		feature = "kv-fdb",
 		feature = "kv-tikv",
-		feature = "kv-speedb"
 	))]
 	File(Box<FileCollector>),
 	Groups(GroupsCollector),
@@ -35,12 +33,11 @@ impl Results {
 	pub(super) fn prepare(
 		&mut self,
 		#[cfg(any(
+			feature = "kv-mem",
 			feature = "kv-surrealkv",
-			feature = "kv-file",
 			feature = "kv-rocksdb",
 			feature = "kv-fdb",
 			feature = "kv-tikv",
-			feature = "kv-speedb"
 		))]
 		ctx: &Context<'_>,
 		stm: &Statement<'_>,
@@ -49,15 +46,16 @@ impl Results {
 			return Ok(Self::Groups(GroupsCollector::new(stm)));
 		}
 		#[cfg(any(
+			feature = "kv-mem",
 			feature = "kv-surrealkv",
-			feature = "kv-file",
 			feature = "kv-rocksdb",
 			feature = "kv-fdb",
 			feature = "kv-tikv",
-			feature = "kv-speedb"
 		))]
-		if !ctx.is_memory() {
-			return Ok(Self::File(Box::new(FileCollector::new(ctx.temporary_directory())?)));
+		if stm.tempfiles() {
+			if let Some(temp_dir) = ctx.temporary_directory() {
+				return Ok(Self::File(Box::new(FileCollector::new(temp_dir)?)));
+			}
 		}
 		Ok(Self::Memory(Default::default()))
 	}
@@ -67,7 +65,6 @@ impl Results {
 		stk: &mut Stk,
 		ctx: &Context<'_>,
 		opt: &Options,
-		txn: &Transaction,
 		stm: &Statement<'_>,
 		val: Value,
 	) -> Result<(), Error> {
@@ -77,18 +74,17 @@ impl Results {
 				s.push(val);
 			}
 			#[cfg(any(
+				feature = "kv-mem",
 				feature = "kv-surrealkv",
-				feature = "kv-file",
 				feature = "kv-rocksdb",
 				feature = "kv-fdb",
 				feature = "kv-tikv",
-				feature = "kv-speedb"
 			))]
 			Self::File(e) => {
 				e.push(val)?;
 			}
 			Self::Groups(g) => {
-				g.push(stk, ctx, opt, txn, stm, val).await?;
+				g.push(stk, ctx, opt, stm, val).await?;
 			}
 		}
 		Ok(())
@@ -98,12 +94,11 @@ impl Results {
 		match self {
 			Self::Memory(m) => m.sort(orders),
 			#[cfg(any(
+				feature = "kv-mem",
 				feature = "kv-surrealkv",
-				feature = "kv-file",
 				feature = "kv-rocksdb",
 				feature = "kv-fdb",
 				feature = "kv-tikv",
-				feature = "kv-speedb"
 			))]
 			Self::File(f) => f.sort(orders),
 			_ => {}
@@ -115,12 +110,11 @@ impl Results {
 			Self::None => {}
 			Self::Memory(m) => m.start_limit(start, limit),
 			#[cfg(any(
+				feature = "kv-mem",
 				feature = "kv-surrealkv",
-				feature = "kv-file",
 				feature = "kv-rocksdb",
 				feature = "kv-fdb",
 				feature = "kv-tikv",
-				feature = "kv-speedb"
 			))]
 			Self::File(f) => f.start_limit(start, limit),
 			Self::Groups(_) => {}
@@ -132,12 +126,11 @@ impl Results {
 			Self::None => 0,
 			Self::Memory(s) => s.len(),
 			#[cfg(any(
+				feature = "kv-mem",
 				feature = "kv-surrealkv",
-				feature = "kv-file",
 				feature = "kv-rocksdb",
 				feature = "kv-fdb",
 				feature = "kv-tikv",
-				feature = "kv-speedb"
 			))]
 			Self::File(e) => e.len(),
 			Self::Groups(g) => g.len(),
@@ -148,12 +141,11 @@ impl Results {
 		Ok(match self {
 			Self::Memory(m) => m.take_vec(),
 			#[cfg(any(
+				feature = "kv-mem",
 				feature = "kv-surrealkv",
-				feature = "kv-file",
 				feature = "kv-rocksdb",
 				feature = "kv-fdb",
 				feature = "kv-tikv",
-				feature = "kv-speedb"
 			))]
 			Self::File(f) => f.take_vec()?,
 			_ => vec![],
@@ -167,12 +159,11 @@ impl Results {
 				s.explain(exp);
 			}
 			#[cfg(any(
+				feature = "kv-mem",
 				feature = "kv-surrealkv",
-				feature = "kv-file",
 				feature = "kv-rocksdb",
 				feature = "kv-fdb",
 				feature = "kv-tikv",
-				feature = "kv-speedb"
 			))]
 			Self::File(e) => {
 				e.explain(exp);

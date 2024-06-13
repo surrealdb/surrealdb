@@ -1,5 +1,5 @@
 use crate::ctx::Context;
-use crate::dbs::{Options, Transaction};
+use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::iam::{Action, ResourceKind};
@@ -28,30 +28,31 @@ impl DefineEventStatement {
 	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
-		_ctx: &Context<'_>,
+		ctx: &Context<'_>,
 		opt: &Options,
-		txn: &Transaction,
 		_doc: Option<&CursorDoc<'_>>,
 	) -> Result<Value, Error> {
 		// Allowed to run?
 		opt.is_allowed(Action::Edit, ResourceKind::Event, &Base::Db)?;
 		// Claim transaction
-		let mut run = txn.lock().await;
+		let mut run = ctx.tx_lock().await;
 		// Clear the cache
 		run.clear_cache();
 		// Check if event already exists
-		if self.if_not_exists
-			&& run.get_tb_event(opt.ns(), opt.db(), &self.what, &self.name).await.is_ok()
-		{
-			return Err(Error::EvAlreadyExists {
-				value: self.name.to_string(),
-			});
+		if run.get_tb_event(opt.ns()?, opt.db()?, &self.what, &self.name).await.is_ok() {
+			if self.if_not_exists {
+				return Ok(Value::None);
+			} else {
+				return Err(Error::EvAlreadyExists {
+					value: self.name.to_string(),
+				});
+			}
 		}
 		// Process the statement
-		let key = crate::key::table::ev::new(opt.ns(), opt.db(), &self.what, &self.name);
-		run.add_ns(opt.ns(), opt.strict).await?;
-		run.add_db(opt.ns(), opt.db(), opt.strict).await?;
-		run.add_tb(opt.ns(), opt.db(), &self.what, opt.strict).await?;
+		let key = crate::key::table::ev::new(opt.ns()?, opt.db()?, &self.what, &self.name);
+		run.add_ns(opt.ns()?, opt.strict).await?;
+		run.add_db(opt.ns()?, opt.db()?, opt.strict).await?;
+		run.add_tb(opt.ns()?, opt.db()?, &self.what, opt.strict).await?;
 		run.set(
 			key,
 			DefineEventStatement {
@@ -61,7 +62,7 @@ impl DefineEventStatement {
 		)
 		.await?;
 		// Clear the cache
-		let key = crate::key::table::ev::prefix(opt.ns(), opt.db(), &self.what);
+		let key = crate::key::table::ev::prefix(opt.ns()?, opt.db()?, &self.what);
 		run.clr(key).await?;
 		// Ok all good
 		Ok(Value::None)

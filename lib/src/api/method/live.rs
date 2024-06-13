@@ -93,25 +93,19 @@ macro_rules! into_future {
 						Resource::Edges(edges) => return Err(Error::LiveOnEdges(edges).into()),
 					},
 				}
-				let query = Query {
-					client: client.clone(),
-					query: vec![Ok(vec![Statement::Live(stmt)])],
-					bindings: Ok(Default::default()),
-					register_live_queries: false,
-				};
+				let query = Query::new(
+					client.clone(),
+					vec![Statement::Live(stmt)],
+					Default::default(),
+					false,
+				);
 				let id: Value = query.await?.take(0)?;
 				let rx = register::<Client>(router, id.clone()).await?;
-				Ok(Stream {
+				Ok(Stream::new(
+					Surreal::new_from_router_waiter(client.router.clone(), client.waiter.clone()),
 					id,
-					rx: Some(rx),
-					client: Surreal {
-						router: client.router.clone(),
-						waiter: client.waiter.clone(),
-						engine: PhantomData,
-					},
-					response_type: PhantomData,
-					engine: PhantomData,
-				})
+					Some(rx),
+				))
 			})
 		}
 	};
@@ -175,6 +169,22 @@ pub struct Stream<'r, C: Connection, R> {
 	pub(crate) id: Value,
 	pub(crate) rx: Option<Receiver<dbs::Notification>>,
 	pub(crate) response_type: PhantomData<R>,
+}
+
+impl<'r, C: Connection, R> Stream<'r, C, R> {
+	pub(crate) fn new(
+		client: Surreal<Any>,
+		id: Value,
+		rx: Option<Receiver<dbs::Notification>>,
+	) -> Self {
+		Self {
+			id,
+			rx,
+			client,
+			response_type: PhantomData,
+			engine: PhantomData,
+		}
+	}
 }
 
 macro_rules! poll_next {

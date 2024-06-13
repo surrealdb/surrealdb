@@ -1,5 +1,5 @@
 use futures::future::join_all;
-use std::collections::HashMap;
+use hashbrown::HashMap;
 use std::sync::atomic::Ordering::Relaxed;
 use std::sync::atomic::{AtomicBool, AtomicUsize};
 use tokio::sync::Mutex;
@@ -47,7 +47,10 @@ where
 		// Locate the shard
 		let n = key as usize % self.shards_count;
 		// Get and promote the key
-		self.shards[n].lock().await.get_and_promote(key)
+		let mut shard = self.shards[n].lock().await;
+		let v = shard.get_and_promote(key);
+		drop(shard);
+		v
 	}
 
 	pub(super) async fn insert<K: Into<CacheKey>>(&self, key: K, val: V) {
@@ -55,7 +58,9 @@ where
 		// Locate the shard
 		let shard = key as usize % self.shards_count;
 		// Insert the key/object in the shard and get the new length
-		let new_length = self.shards[shard].lock().await.insert(key, val, self.full.load(Relaxed));
+		let mut s = self.shards[shard].lock().await;
+		let new_length = s.insert(key, val, self.full.load(Relaxed));
+		drop(s);
 		// Update lengths
 		self.check_length(new_length, shard);
 	}
@@ -65,7 +70,9 @@ where
 		// Locate the shard
 		let shard = key as usize % self.shards_count;
 		// Remove the key
-		let new_length = self.shards[shard].lock().await.remove(key);
+		let mut s = self.shards[shard].lock().await;
+		let new_length = s.remove(key);
+		drop(s);
 		// Update lengths
 		self.check_length(new_length, shard);
 	}
@@ -94,7 +101,9 @@ where
 			.shards
 			.iter()
 			.map(|s| async {
-				let shard = s.lock().await.duplicate(filter);
+				let s = s.lock().await;
+				let shard = s.duplicate(filter);
+				drop(s);
 				(shard.map.len(), Mutex::new(shard))
 			})
 			.collect();

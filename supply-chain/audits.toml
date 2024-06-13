@@ -34,6 +34,12 @@ user-id = 145457 # Tobie Morgan Hitchcock (tobiemh)
 start = "2022-01-27"
 end = "2025-01-24"
 
+[[trusted.hashbrown]]
+criteria = "safe-to-deploy"
+user-id = 2915 # Amanieu d'Antras (Amanieu)
+start = "2019-04-02"
+end = "2025-05-02"
+
 [[trusted.indxdb]]
 criteria = "safe-to-deploy"
 user-id = 145457 # Tobie Morgan Hitchcock (tobiemh)

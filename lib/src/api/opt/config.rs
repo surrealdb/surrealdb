@@ -1,11 +1,10 @@
 use crate::{dbs::Capabilities, iam::Level};
 #[cfg(any(
+	feature = "kv-mem",
 	feature = "kv-surrealkv",
-	feature = "kv-file",
 	feature = "kv-rocksdb",
 	feature = "kv-fdb",
 	feature = "kv-tikv",
-	feature = "kv-speedb"
 ))]
 use std::path::PathBuf;
 use std::time::Duration;
@@ -27,12 +26,11 @@ pub struct Config {
 	pub(crate) tick_interval: Option<Duration>,
 	pub(crate) capabilities: Capabilities,
 	#[cfg(any(
+		feature = "kv-mem",
 		feature = "kv-surrealkv",
-		feature = "kv-file",
 		feature = "kv-rocksdb",
 		feature = "kv-fdb",
 		feature = "kv-tikv",
-		feature = "kv-speedb"
 	))]
 	pub(crate) temporary_directory: Option<PathBuf>,
 }
@@ -122,13 +120,13 @@ impl Config {
 		self.capabilities = capabilities;
 		self
 	}
+
 	#[cfg(any(
+		feature = "kv-mem",
 		feature = "kv-surrealkv",
-		feature = "kv-file",
 		feature = "kv-rocksdb",
 		feature = "kv-fdb",
 		feature = "kv-tikv",
-		feature = "kv-speedb"
 	))]
 	pub fn temporary_directory(mut self, path: Option<PathBuf>) -> Self {
 		self.temporary_directory = path;

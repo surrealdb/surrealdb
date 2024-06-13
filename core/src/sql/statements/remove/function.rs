@@ -1,5 +1,5 @@
 use crate::ctx::Context;
-use crate::dbs::{Options, Transaction};
+use crate::dbs::Options;
 use crate::err::Error;
 use crate::iam::{Action, ResourceKind};
 use crate::sql::{Base, Ident, Value};
@@ -20,23 +20,18 @@ pub struct RemoveFunctionStatement {
 
 impl RemoveFunctionStatement {
 	/// Process this type returning a computed simple Value
-	pub(crate) async fn compute(
-		&self,
-		_ctx: &Context<'_>,
-		opt: &Options,
-		txn: &Transaction,
-	) -> Result<Value, Error> {
+	pub(crate) async fn compute(&self, ctx: &Context<'_>, opt: &Options) -> Result<Value, Error> {
 		let future = async {
 			// Allowed to run?
 			opt.is_allowed(Action::Edit, ResourceKind::Function, &Base::Db)?;
 			// Claim transaction
-			let mut run = txn.lock().await;
+			let mut run = ctx.tx_lock().await;
 			// Clear the cache
 			run.clear_cache();
 			// Get the definition
-			let fc = run.get_db_function(opt.ns(), opt.db(), &self.name).await?;
+			let fc = run.get_db_function(opt.ns()?, opt.db()?, &self.name).await?;
 			// Delete the definition
-			let key = crate::key::database::fc::new(opt.ns(), opt.db(), &fc.name);
+			let key = crate::key::database::fc::new(opt.ns()?, opt.db()?, &fc.name);
 			run.del(key).await?;
 			// Ok all good
 			Ok(Value::None)

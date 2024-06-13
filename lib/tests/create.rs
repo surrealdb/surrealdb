@@ -210,8 +210,8 @@ async fn create_with_custom_function() -> Result<(), Error> {
 #[tokio::test]
 async fn create_or_insert_with_permissions() -> Result<(), Error> {
 	let sql = "
-		CREATE user:test;
 		DEFINE TABLE user SCHEMAFULL PERMISSIONS FULL;
+		CREATE user:test;
 		DEFINE TABLE demo SCHEMAFULL PERMISSIONS FOR select, create, update WHERE user = $auth.id;
 		DEFINE FIELD user ON TABLE demo VALUE $auth.id;
 	";
@@ -236,7 +236,7 @@ async fn create_or_insert_with_permissions() -> Result<(), Error> {
 		CREATE demo SET id = demo:one;
 		INSERT INTO demo (id) VALUES (demo:two);
 	";
-	let ses = Session::for_scope("test", "test", "test", Thing::from(("user", "test")).into());
+	let ses = Session::for_record("test", "test", "test", Thing::from(("user", "test")).into());
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 2);
 	//
@@ -394,6 +394,56 @@ async fn create_with_unique_index_on_two_fields() -> Result<(), Error> {
 	} else {
 		panic!("An error was expected.")
 	}
+	Ok(())
+}
+
+#[tokio::test]
+async fn create_with_subquery_execution() -> Result<(), Error> {
+	let sql = "
+		CREATE person:test CONTENT {
+			address: (CREATE ONLY address CONTENT {
+				id: 'test', city: 'London'
+			})
+		};
+		SELECT * FROM person, address;
+	";
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 2);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
+			{
+				address: {
+					city: 'London',
+					id: address:test
+				},
+				id: person:test
+			}
+		]",
+	);
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
+			{
+				address: {
+					city: 'London',
+					id: address:test
+				},
+				id: person:test
+			},
+			{
+				city: 'London',
+				id: address:test
+			}
+		]",
+	);
+	assert_eq!(tmp, val);
+	//
 	Ok(())
 }
 

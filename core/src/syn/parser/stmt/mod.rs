@@ -35,6 +35,7 @@ mod relate;
 mod remove;
 mod select;
 mod update;
+mod upsert;
 
 impl Parser<'_> {
 	pub async fn parse_stmt_list(&mut self, ctx: &mut Stk) -> ParseResult<Statements> {
@@ -42,7 +43,10 @@ impl Parser<'_> {
 		loop {
 			match self.peek_kind() {
 				// consume any possible empty statements.
-				t!(";") => continue,
+				t!(";") => {
+					self.pop_peek();
+					continue;
+				}
 				t!("eof") => break,
 				_ => {
 					let stmt = ctx.run(|ctx| self.parse_stmt(ctx)).await?;
@@ -89,7 +93,8 @@ impl Parser<'_> {
 				| t!("REMOVE") | t!("SELECT")
 				| t!("LET") | t!("SHOW")
 				| t!("SLEEP") | t!("THROW")
-				| t!("UPDATE") | t!("USE")
+				| t!("UPDATE") | t!("UPSERT")
+				| t!("USE")
 		)
 	}
 
@@ -206,6 +211,10 @@ impl Parser<'_> {
 				self.pop_peek();
 				ctx.run(|ctx| self.parse_update_stmt(ctx)).await.map(Statement::Update)
 			}
+			t!("UPSERT") => {
+				self.pop_peek();
+				ctx.run(|ctx| self.parse_upsert_stmt(ctx)).await.map(Statement::Upsert)
+			}
 			t!("USE") => {
 				self.pop_peek();
 				self.parse_use_stmt().map(Statement::Use)
@@ -290,6 +299,10 @@ impl Parser<'_> {
 			t!("UPDATE") => {
 				self.pop_peek();
 				self.parse_update_stmt(ctx).await.map(Entry::Update)
+			}
+			t!("UPSERT") => {
+				self.pop_peek();
+				self.parse_upsert_stmt(ctx).await.map(Entry::Upsert)
 			}
 			_ => {
 				// TODO: Provide information about keywords.
@@ -438,10 +451,6 @@ impl Parser<'_> {
 			t!("ROOT") => InfoStatement::Root(false),
 			t!("NAMESPACE") => InfoStatement::Ns(false),
 			t!("DATABASE") => InfoStatement::Db(false),
-			t!("SCOPE") => {
-				let ident = self.next_token_value()?;
-				InfoStatement::Sc(ident, false)
-			}
 			t!("TABLE") => {
 				let ident = self.next_token_value()?;
 				InfoStatement::Tb(ident, false)
@@ -467,12 +476,8 @@ impl Parser<'_> {
 	/// Expects `KILL` to already be consumed.
 	pub(crate) fn parse_kill_stmt(&mut self) -> ParseResult<KillStatement> {
 		let id = match self.peek_kind() {
-			TokenKind::Uuid => self.next_token_value().map(Value::Uuid)?,
-			t!("$param") => {
-				let token = self.pop_peek();
-				let param = self.token_value(token)?;
-				Value::Param(param)
-			}
+			t!("u\"") | t!("u'") => self.next_token_value().map(Value::Uuid)?,
+			t!("$param") => self.next_token_value().map(Value::Param)?,
 			x => unexpected!(self, x, "a UUID or a parameter"),
 		};
 		Ok(KillStatement {
@@ -605,10 +610,12 @@ impl Parser<'_> {
 
 		expected!(self, t!("SINCE"));
 
-		let next = self.next();
+		let next = self.peek();
 		let since = match next.kind {
-			TokenKind::Number(_) => ShowSince::Versionstamp(self.token_value(next)?),
-			TokenKind::DateTime => ShowSince::Timestamp(self.token_value(next)?),
+			TokenKind::Digits | TokenKind::Number(_) => {
+				ShowSince::Versionstamp(self.next_token_value()?)
+			}
+			t!("d\"") | t!("d'") => ShowSince::Timestamp(self.next_token_value()?),
 			x => unexpected!(self, x, "a version stamp or a date-time"),
 		};
 
