@@ -315,6 +315,24 @@ pub fn push((mut array, value): (Array, Value)) -> Result<Value, Error> {
 	Ok(array.into())
 }
 
+pub fn range((start, count): (i64, i64)) -> Result<Value, Error> {
+	if count < 0 {
+		return Err(Error::InvalidArguments {
+			name: String::from("array::range"),
+			message: String::from(format!("Argument 1 was the wrong type. Expected a positive number but found {count}")),
+		});
+	}
+	
+	if let Some(end) = start.checked_add(count - 1) {
+		Ok(Array((start..=end).map(Value::from).collect::<Vec<_>>()).into())
+	} else {
+		Err(Error::InvalidArguments {
+			name: String::from("array::range"),
+			message: String::from("The range overflowed the maximum value for an integer"),
+		})
+	}
+}
+
 pub fn remove((mut array, mut index): (Array, i64)) -> Result<Value, Error> {
 	// Negative index means start from the back
 	if index < 0 {

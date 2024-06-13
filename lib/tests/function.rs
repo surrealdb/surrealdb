@@ -730,6 +730,27 @@ async fn function_array_push() -> Result<(), Error> {
 }
 
 #[tokio::test]
+async fn function_array_range() -> Result<(), Error> {
+	let sql = r#"
+		RETURN array::range(1, 10);
+		RETURN array::range(3, 1);
+		RETURN array::range(44, 0);
+		RETURN array::range(0, -1);
+		RETURN array::range(0, -256);
+		RETURN array::range(9223372036854775800, 100);
+	"#;
+	//
+	Test::new(sql).await?
+		.expect_val("[1,2,3,4,5,6,7,8,9,10]")?
+		.expect_val("[3]")?
+		.expect_val("[]")?
+		.expect_error("Incorrect arguments for function array::range(). Argument 1 was the wrong type. Expected a positive number but found -1")?
+		.expect_error("Incorrect arguments for function array::range(). Argument 1 was the wrong type. Expected a positive number but found -256")?
+		.expect_error("Incorrect arguments for function array::range(). The range overflowed the maximum value for an integer")?;
+	Ok(())
+}
+
+#[tokio::test]
 async fn function_array_remove() -> Result<(), Error> {
 	let sql = r#"
 		RETURN array::remove([3], 0);
@@ -6086,7 +6107,7 @@ pub async fn function_http_get_from_script() -> Result<(), Error> {
 
 #[cfg(not(feature = "http"))]
 #[tokio::test]
-pub async fn function_http_disabled() {
+pub async fn function_http_disabled() -> Result<(), Error> {
 	Test::new(
 		r#"
 	RETURN http::get({});
@@ -6097,8 +6118,7 @@ pub async fn function_http_disabled() {
 	RETURN http::delete({});
 	"#,
 	)
-	.await
-	.unwrap()
+	.await?
 	.expect_errors(&[
 		"Remote HTTP request functions are not enabled",
 		"Remote HTTP request functions are not enabled",
@@ -6106,8 +6126,8 @@ pub async fn function_http_disabled() {
 		"Remote HTTP request functions are not enabled",
 		"Remote HTTP request functions are not enabled",
 		"Remote HTTP request functions are not enabled",
-	])
-	.unwrap();
+	])?;
+	Ok(())
 }
 
 // Tests for custom defined functions

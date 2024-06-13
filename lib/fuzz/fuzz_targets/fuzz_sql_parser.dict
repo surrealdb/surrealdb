@@ -184,6 +184,7 @@
 "array::pop("
 "array::prepend("
 "array::push("
+"array::range("
 "array::remove("
 "array::reverse("
 "array::shuffle("
