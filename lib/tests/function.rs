@@ -292,7 +292,8 @@ async fn function_array_fill() -> Result<(), Error> {
 		RETURN array::fill([1,2,NONE,4,5], 10, -3, -2);
 	"#;
 	//
-	Test::new(sql).await?
+	Test::new(sql)
+		.await?
 		.expect_val("[10,10,10,10,10]")?
 		.expect_val("[10,10,10,10,10]")?
 		.expect_val("[1,10,10,10,10]")?
