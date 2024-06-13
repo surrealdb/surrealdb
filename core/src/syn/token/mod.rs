@@ -78,6 +78,8 @@ pub enum Operator {
 	Divide,
 	/// `×` or `∙`
 	Mult,
+	/// `%`
+	Modulo,
 	/// `||`
 	Or,
 	/// `&&`
@@ -156,6 +158,7 @@ impl Operator {
 			Operator::Or => "||",
 			Operator::And => "&&",
 			Operator::Mult => "×",
+			Operator::Modulo => "%",
 			Operator::LessEqual => "<=",
 			Operator::GreaterEqual => ">=",
 			Operator::Star => "*",

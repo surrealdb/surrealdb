@@ -281,6 +281,7 @@ impl<'a> Lexer<'a> {
 				}
 				_ => t!("/"),
 			},
+			b'%' => t!("%"),
 			b'*' => match self.reader.peek() {
 				Some(b'*') => {
 					self.reader.next();
