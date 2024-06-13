@@ -45,6 +45,7 @@ impl_module_def!(
 	"prepend" => run,
 	"range" => run,
 	"remove" => run,
+	"repeat" => run,
 	"reverse" => run,
 	"shuffle" => run,
 	"slice" => run,

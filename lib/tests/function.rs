@@ -780,6 +780,27 @@ async fn function_array_remove() -> Result<(), Error> {
 }
 
 #[tokio::test]
+async fn function_array_repeat() -> Result<(), Error> {
+	let sql = r#"
+		RETURN array::repeat(1, 10);
+		RETURN array::repeat("hello", 2);
+		RETURN array::repeat(NONE, 3);
+		RETURN array::repeat(44, 0);
+		RETURN array::repeat(0, -1);
+		RETURN array::repeat(0, -256);
+	"#;
+	//
+	Test::new(sql).await?
+		.expect_val("[1,1,1,1,1,1,1,1,1,1]")?
+		.expect_val(r#"["hello","hello"]"#)?
+		.expect_val("[NONE,NONE,NONE]")?
+		.expect_val("[]")?
+		.expect_error("Incorrect arguments for function array::repeat(). Argument 2 was the wrong type. Expected a positive number but found -1")?
+		.expect_error("Incorrect arguments for function array::repeat(). Argument 2 was the wrong type. Expected a positive number but found -256")?;
+	Ok(())
+}
+
+#[tokio::test]
 async fn function_array_reverse() -> Result<(), Error> {
 	let sql = r#"
 		RETURN array::reverse([]);
