@@ -146,7 +146,8 @@ impl CapabilitiesBuilder {
 		}
 	}
 
-	/// TODO
+	/// Set whether to ellow non-authenticated user to execute queries when authentication is
+	/// enabled.
 	pub fn with_guest_access(self, enabled: bool) -> Self {
 		Self {
 			cap: self.cap.with_guest_access(enabled),
