@@ -13,6 +13,7 @@ use std::process::Command;
 use surrealdb::env::{arch, os};
 
 pub(crate) const ROOT: &str = "https://download.surrealdb.com";
+const ALPHA: &str = "alpha";
 const BETA: &str = "beta";
 const LATEST: &str = "latest";
 const NIGHTLY: &str = "nightly";
@@ -20,13 +21,16 @@ const NIGHTLY: &str = "nightly";
 #[derive(Args, Debug)]
 pub struct UpgradeCommandArguments {
 	/// Install the latest nightly version
-	#[arg(long, conflicts_with = "beta", conflicts_with = "version")]
+	#[arg(long, conflicts_with = "alpha", conflicts_with = "beta", conflicts_with = "version")]
 	nightly: bool,
 	/// Install the latest beta version
-	#[arg(long, conflicts_with = "nightly", conflicts_with = "version")]
+	#[arg(long, conflicts_with = "nightly", conflicts_with = "beta", conflicts_with = "version")]
+	alpha: bool,
+	/// Install the latest beta version
+	#[arg(long, conflicts_with = "nightly", conflicts_with = "alpha", conflicts_with = "version")]
 	beta: bool,
 	/// Install a specific version
-	#[arg(long, conflicts_with = "nightly", conflicts_with = "beta")]
+	#[arg(long, conflicts_with = "nightly", conflicts_with = "alpha", conflicts_with = "beta")]
 	version: Option<String>,
 	/// Don't actually replace the executable
 	#[arg(long)]
@@ -42,6 +46,8 @@ impl UpgradeCommandArguments {
 
 		if self.nightly || version.as_deref() == Some(NIGHTLY) {
 			Ok(Cow::Borrowed(NIGHTLY))
+		} else if self.alpha || version.as_deref() == Some(ALPHA) {
+			client.fetch(ALPHA).await
 		} else if self.beta || version.as_deref() == Some(BETA) {
 			client.fetch(BETA).await
 		} else if let Some(version) = version {
@@ -111,7 +117,7 @@ pub async fn init(args: UpgradeCommandArguments) -> Result<(), Error> {
 	let new_version = args.version().await?;
 
 	// Parsed version numbers follow semver format (major.minor.patch)
-	if new_version != NIGHTLY && new_version != BETA {
+	if new_version != NIGHTLY && new_version != ALPHA && new_version != BETA {
 		let old_version_parsed = parse_version(&old_version)?;
 		let new_version_parsed = parse_version(&new_version)?;
 
