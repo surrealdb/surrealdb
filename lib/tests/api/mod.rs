@@ -1086,24 +1086,52 @@ async fn delete_record_large_range() {
 	drop(permit);
 
 	let table = "user";
-
-	for id in 0..2500 {
+	// Fill the table with users
+	for id in 0..3500 {
 		let sql = format!("CREATE user:i{id:04} SET name = '{id}';");
 		let response = db.query(sql).bind(("table", table)).await.unwrap();
 		response.check().unwrap();
 	}
+
 	// The first record
 	let users: Vec<RecordBuf> = db.delete(table).range("i0000".."i0001").await.unwrap();
 	assert_eq!(users.len(), 1);
+	let expected = RecordBuf {
+		id: thing("user:i0000").unwrap(),
+		name: "0".to_owned(),
+	};
+	assert_eq!(users[0], expected);
+
 	// The last record
-	let users: Vec<RecordBuf> = db.delete(table).range("i2499".."i9999").await.unwrap();
+	let users: Vec<RecordBuf> = db.delete(table).range("i3499".."i9999").await.unwrap();
 	assert_eq!(users.len(), 1);
+	let expected = RecordBuf {
+		id: thing("user:i3499").unwrap(),
+		name: "3499".to_owned(),
+	};
+	assert_eq!(users[0], expected);
+
 	// 1015 record (TIKV: one full batch and one partial)
-	let users: Vec<RecordBuf> = db.delete(table).range("i0010".."i1025").await.unwrap();
+	let users: Vec<RecordBuf> = db.delete(table).range("i1010".."i2025").await.unwrap();
 	assert_eq!(users.len(), 1015);
-	// Every records
+	let expected = RecordBuf {
+		id: thing("user:i1010").unwrap(),
+		name: "1010".to_owned(),
+	};
+	assert_eq!(users[0], expected);
+
+	// Every records left
 	let users: Vec<RecordBuf> = db.delete(table).range("i0000".."i9999").await.unwrap();
-	assert_eq!(users.len(), 2500);
+	assert_eq!(users.len(), 2483);
+	let expected = RecordBuf {
+		id: thing("user:i0001").unwrap(),
+		name: "1".to_owned(),
+	};
+	assert_eq!(users[0], expected);
+
+	// No records left
+	let users: Vec<RecordBuf> = db.delete(table).range("i0000".."i9999").await.unwrap();
+	assert_eq!(users.len(), 0);
 }
 
 #[test_log::test(tokio::test)]
