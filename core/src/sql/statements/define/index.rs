@@ -34,15 +34,8 @@ impl DefineIndexStatement {
 		opt.is_allowed(Action::Edit, ResourceKind::Index, &Base::Db)?;
 		// Claim transaction
 		let mut run = txn.lock().await;
-		// Check if index already exists
-		let index_exists =
-			run.get_and_cache_tb_index(opt.ns(), opt.db(), &self.what, &self.name).await.is_ok();
 		// Clear the cache
 		run.clear_cache();
-		// Clear the index store cache
-		if index_exists {
-			ctx.get_index_stores().index_removed(opt, &mut run, &self.what, &self.name).await?;
-		}
 		// Process the statement
 		let key = crate::key::table::ix::new(opt.ns(), opt.db(), &self.what, &self.name);
 		run.add_ns(opt.ns(), opt.strict).await?;
