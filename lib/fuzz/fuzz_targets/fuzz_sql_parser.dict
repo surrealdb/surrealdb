@@ -194,6 +194,7 @@
 "array::sort("
 "array::sort::asc("
 "array::sort::desc("
+"array::swap("
 "array::transpose("
 "array::union("
 "count("

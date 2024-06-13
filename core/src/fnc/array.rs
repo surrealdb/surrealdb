@@ -144,7 +144,7 @@ pub fn fill((mut array, value, start, end): (Array, Value, Option<isize>, Option
 		Some(start) if negative_max <= start && start < 0 => (start + max as isize) as usize,
   		Some(start) if start < negative_max => 0,
 		Some(start) => start as usize,
-		None => 0,
+		None => min,
 	};
 	let end = match end {
 		Some(end) if negative_max <= end && end < 0 => (end + max as isize) as usize,
@@ -399,7 +399,7 @@ pub fn reverse((mut array,): (Array,)) -> Result<Value, Error> {
 
 pub fn shuffle((mut array,): (Array,)) -> Result<Value, Error> {
 	let mut rng = rand::thread_rng();
-	array.0.shuffle(&mut rng);
+	array.shuffle(&mut rng);
 	Ok(array.into())
 }
 
@@ -452,6 +452,33 @@ pub fn sort((mut array, order): (Array, Option<Value>)) -> Result<Value, Error> 
 			Ok(array.into())
 		}
 	}
+}
+
+pub fn swap((mut array, from, to): (Array, isize, isize)) -> Result<Value, Error> {
+	let min = 0;
+	let max = array.len();
+	let negative_max = -(max as isize);
+
+	let from = match from {
+		from if from < negative_max || from >= max as isize => Err(Error::InvalidArguments {
+			name: String::from("array::swap"),
+			message: String::from(format!("Argument 1 is out of range. Expected a number between {negative_max} and {max}")),
+		}),
+		from if negative_max <= from && from < min => Ok((from + max as isize) as usize),
+		from => Ok(from as usize),
+	}?;
+
+	let to = match to {
+		to if to < negative_max || to >= max as isize => Err(Error::InvalidArguments {
+			name: String::from("array::swap"),
+			message: String::from(format!("Argument 2 is out of range. Expected a number between {negative_max} and {max}")),
+		}),
+		to if negative_max <= to && to < min => Ok((to + max as isize) as usize),
+		to => Ok(to as usize),
+	}?;
+
+	array.swap(from, to);
+	Ok(array.into())
 }
 
 pub fn transpose((array,): (Array,)) -> Result<Value, Error> {

@@ -51,6 +51,7 @@ impl_module_def!(
 	"shuffle" => run,
 	"slice" => run,
 	"sort" => (sort::Package),
+	"swap" => run,
 	"transpose" => run,
 	"union" => run,
 	"windows" => run

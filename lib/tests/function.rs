@@ -1054,6 +1054,27 @@ async fn function_array_sort_desc() -> Result<(), Error> {
 }
 
 #[tokio::test]
+async fn function_array_swap() -> Result<(), Error> {
+	let sql = r#"
+		RETURN array::swap([1,2,3,4,5], 1, 2);
+		RETURN array::swap([1,2,3,4,5], 1, 1);
+		RETURN array::swap([1,2,3,4,5], -1, -2);
+		RETURN array::swap([1,2,3,4,5], -5, -4);
+		RETURN array::swap([1,2,3,4,5], 8, 1);
+		RETURN array::swap([1,2,3,4,5], 1, -8);
+	"#;
+	//
+	Test::new(sql).await?
+		.expect_val("[1,3,2,4,5]")?
+		.expect_val("[1,2,3,4,5]")?
+		.expect_val("[1,2,3,5,4]")?
+		.expect_val("[2,1,3,4,5]")?
+		.expect_error("Incorrect arguments for function array::swap(). Argument 1 is out of range. Expected a number between -5 and 5")?
+		.expect_error("Incorrect arguments for function array::swap(). Argument 2 is out of range. Expected a number between -5 and 5")?;
+	Ok(())
+}
+
+#[tokio::test]
 async fn function_array_transpose() -> Result<(), Error> {
 	let sql = r#"
 		RETURN array::transpose([[0, 1], [2, 3]]);
