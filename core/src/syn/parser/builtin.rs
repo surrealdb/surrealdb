@@ -117,6 +117,7 @@ pub(crate) static PATHS: phf::Map<UniCase<&'static str>, PathKind> = phf_map! {
 		UniCase::ascii("array::prepend") => PathKind::Function,
 		UniCase::ascii("array::push") => PathKind::Function,
 		UniCase::ascii("array::remove") => PathKind::Function,
+		UniCase::ascii("array::range") => PathKind::Function,
 		UniCase::ascii("array::reverse") => PathKind::Function,
 		UniCase::ascii("array::shuffle") => PathKind::Function,
 		UniCase::ascii("array::slice") => PathKind::Function,

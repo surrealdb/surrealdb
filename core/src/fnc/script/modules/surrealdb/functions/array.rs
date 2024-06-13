@@ -43,6 +43,7 @@ impl_module_def!(
 	"pop" => run,
 	"push" => run,
 	"prepend" => run,
+	"range" => run,
 	"remove" => run,
 	"reverse" => run,
 	"shuffle" => run,
