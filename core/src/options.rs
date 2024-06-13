@@ -23,3 +23,10 @@ impl Default for EngineOptions {
 		}
 	}
 }
+
+impl EngineOptions {
+	pub fn with_tick_interval(mut self, tick_interval: Duration) -> Self {
+		self.tick_interval = tick_interval;
+		self
+	}
+}

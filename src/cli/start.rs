@@ -15,6 +15,7 @@ use std::path::PathBuf;
 use std::time::Duration;
 use surrealdb::engine::any::IntoEndpoint;
 use surrealdb::engine::tasks::start_tasks;
+use surrealdb::options::EngineOptions;
 use tokio_util::sync::CancellationToken;
 
 #[derive(Args, Debug)]
@@ -177,7 +178,7 @@ pub async fn init(
 		no_identification_headers,
 		crt: web.as_ref().and_then(|x| x.web_crt.clone()),
 		key: web.as_ref().and_then(|x| x.web_key.clone()),
-		engine: None,
+		engine: Some(EngineOptions::default().with_tick_interval(tick_interval)),
 	});
 	// This is the cancellation token propagated down to
 	// all the async functions that needs to be stopped gracefully.
@@ -187,9 +188,10 @@ pub async fn init(
 	// Start the kvs server
 	dbs::init(dbs).await?;
 	// Start the node agent
-	let mut opt = config::CF.get().unwrap().engine.unwrap_or_default();
-	opt.tick_interval = tick_interval;
-	let (tasks, task_chans) = start_tasks(&opt, DB.get().unwrap().clone());
+	let (tasks, task_chans) = start_tasks(
+		&config::CF.get().unwrap().engine.unwrap_or_default(),
+		DB.get().unwrap().clone(),
+	);
 	// Start the web server
 	net::init(ct.clone()).await?;
 	// Shutdown and stop closed tasks
