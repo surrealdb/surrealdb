@@ -29,6 +29,7 @@ use crate::dbs::node::ClusterMembership;
 use crate::dbs::node::Timestamp;
 use crate::err::Error;
 use crate::idg::u32::U32;
+#[cfg(debug_assertions)]
 use crate::key::debug::sprint_key;
 use crate::key::error::KeyCategory;
 use crate::key::key_req::KeyRequirements;
@@ -45,8 +46,10 @@ use crate::sql::paths::OUT;
 use crate::sql::thing::Thing;
 use crate::sql::Strand;
 use crate::sql::Value;
+#[cfg(debug_assertions)]
+use crate::vs::conv;
+use crate::vs::Oracle;
 use crate::vs::Versionstamp;
-use crate::vs::{conv, Oracle};
 
 use super::kv::Add;
 use super::kv::Convert;
