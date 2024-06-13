@@ -113,7 +113,7 @@ impl Parser<'_> {
 			| t!("<|") => Some((9, 10)),
 
 			t!("+") | t!("-") => Some((11, 12)),
-			t!("*") | t!("×") | t!("/") | t!("÷") => Some((13, 14)),
+			t!("*") | t!("×") | t!("/") | t!("÷") | t!("%") => Some((13, 14)),
 			t!("**") => Some((15, 16)),
 			t!("?:") | t!("??") => Some((17, 18)),
 			_ => None,
@@ -271,6 +271,7 @@ impl Parser<'_> {
 			t!("-") => Operator::Sub,
 			t!("*") | t!("×") => Operator::Mul,
 			t!("/") | t!("÷") => Operator::Div,
+			t!("%") => Operator::Rem,
 			t!("∋") | t!("CONTAINS") => Operator::Contain,
 			t!("∌") | t!("CONTAINSNOT") => Operator::NotContain,
 			t!("∈") | t!("INSIDE") => Operator::Inside,
