@@ -135,6 +135,39 @@ pub fn distinct((array,): (Array,)) -> Result<Value, Error> {
 	Ok(array.uniq().into())
 }
 
+pub fn fill((mut array, value, start, end): (Array, Value, Option<isize>, Option<isize>)) -> Result<Value, Error> {
+	let min = 0;
+	let max = array.len();
+	let negative_max = -(max as isize);
+
+	let start = match start {
+		Some(start) if negative_max <= start && start < 0 => (start + max as isize) as usize,
+  		Some(start) if start < negative_max => 0,
+		Some(start) => start as usize,
+		None => 0,
+	};
+	let end = match end {
+		Some(end) if negative_max <= end && end < 0 => (end + max as isize) as usize,
+  		Some(end) if end < negative_max => 0,
+		Some(end) => end as usize,
+		None => max,
+	};
+
+	if start == min && end >= max {
+		array.fill(value);
+	} else {
+		let range = start..end;
+
+		if let Some(subslice) = array.get_mut(range) {
+			for elem in subslice {
+				*elem = value.clone();
+			}
+		}
+	}
+	
+	Ok(array.into())
+}
+
 pub fn filter_index((array, value): (Array, Value)) -> Result<Value, Error> {
 	Ok(array
 		.iter()

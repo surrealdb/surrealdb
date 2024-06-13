@@ -23,6 +23,7 @@ impl_module_def!(
 	"concat" => run,
 	"difference" => run,
 	"distinct" => run,
+	"fill" => run,
 	"filter_index" => run,
 	"find_index" => run,
 	"first" => run,

@@ -110,6 +110,7 @@ pub fn synchronous(
 		"array::concat" => array::concat,
 		"array::difference" => array::difference,
 		"array::distinct" => array::distinct,
+		"array::fill" => array::fill,
 		"array::filter_index" => array::filter_index,
 		"array::find_index" => array::find_index,
 		"array::first" => array::first,
