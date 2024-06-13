@@ -14,11 +14,11 @@ use crate::idx::planner::iterators::{
 	UniqueEqualThingIterator, UniqueJoinThingIterator, UniqueRangeThingIterator,
 	UniqueUnionThingIterator,
 };
-use crate::idx::planner::knn::KnnPriorityList;
+use crate::idx::planner::knn::{KnnBruteForceResult, KnnPriorityList};
 use crate::idx::planner::plan::IndexOperator::Matches;
 use crate::idx::planner::plan::{IndexOperator, IndexOption, RangeValue};
 use crate::idx::planner::tree::{IdiomPosition, IndexRef, IndexesMap};
-use crate::idx::planner::{IterationStage, KnnSet};
+use crate::idx::planner::IterationStage;
 use crate::idx::trees::mtree::MTreeIndex;
 use crate::idx::trees::store::hnsw::SharedHnswIndex;
 use crate::idx::IndexKeyBase;
@@ -32,9 +32,29 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
-pub(super) type KnnEntry = (KnnPriorityList, Idiom, Arc<Vec<Number>>, Distance);
-pub(super) type KnnExpressions = HashMap<Arc<Expression>, (u32, Idiom, Arc<Vec<Number>>, Distance)>;
-pub(super) type AnnExpressions = HashMap<Arc<Expression>, (usize, Idiom, Arc<Vec<Number>>, usize)>;
+pub(super) type KnnBruteForceEntry = (KnnPriorityList, Idiom, Arc<Vec<Number>>, Distance);
+
+pub(super) struct KnnBruteForceExpression {
+	k: u32,
+	id: Idiom,
+	obj: Arc<Vec<Number>>,
+	d: Distance,
+}
+
+impl KnnBruteForceExpression {
+	pub(super) fn new(k: u32, id: Idiom, obj: Arc<Vec<Number>>, d: Distance) -> Self {
+		Self {
+			k,
+			id,
+			obj,
+			d,
+		}
+	}
+}
+
+pub(super) type KnnBruteForceExpressions = HashMap<Arc<Expression>, KnnBruteForceExpression>;
+
+pub(super) type KnnExpressions = HashSet<Arc<Expression>>;
 
 #[derive(Clone)]
 pub(crate) struct QueryExecutor(Arc<InnerQueryExecutor>);
@@ -48,7 +68,7 @@ pub(super) struct InnerQueryExecutor {
 	index_definitions: Vec<DefineIndexStatement>,
 	mt_entries: HashMap<Arc<Expression>, MtEntry>,
 	hnsw_entries: HashMap<Arc<Expression>, HnswEntry>,
-	knn_entries: HashMap<Arc<Expression>, KnnEntry>,
+	knn_bruteforce_entries: HashMap<Arc<Expression>, KnnBruteForceEntry>,
 }
 
 impl From<InnerQueryExecutor> for QueryExecutor {
@@ -81,6 +101,7 @@ impl IteratorEntry {
 	}
 }
 impl InnerQueryExecutor {
+	#[allow(clippy::too_many_arguments)]
 	pub(super) async fn new(
 		ctx: &Context<'_>,
 		opt: &Options,
@@ -88,6 +109,7 @@ impl InnerQueryExecutor {
 		table: &Table,
 		im: IndexesMap,
 		knns: KnnExpressions,
+		kbtes: KnnBruteForceExpressions,
 	) -> Result<Self, Error> {
 		let mut mr_entries = HashMap::default();
 		let mut exp_entries = HashMap::default();
@@ -96,7 +118,7 @@ impl InnerQueryExecutor {
 		let mut mt_entries = HashMap::default();
 		let mut hnsw_map: HashMap<IndexRef, SharedHnswIndex> = HashMap::default();
 		let mut hnsw_entries = HashMap::default();
-		let mut knn_entries = HashMap::with_capacity(knns.len());
+		let mut knn_bruteforce_entries = HashMap::with_capacity(knns.len());
 
 		// Create all the instances of FtIndex
 		// Build the FtEntries and map them to Idioms and MatchRef
@@ -182,8 +204,9 @@ impl InnerQueryExecutor {
 			}
 		}
 
-		for (exp, (knn, id, obj, dist)) in knns {
-			knn_entries.insert(exp, (KnnPriorityList::new(knn as usize), id, obj, dist));
+		for (exp, knn) in kbtes {
+			knn_bruteforce_entries
+				.insert(exp, (KnnPriorityList::new(knn.k as usize), knn.id, knn.obj, knn.d));
 		}
 
 		Ok(Self {
@@ -195,7 +218,7 @@ impl InnerQueryExecutor {
 			index_definitions: im.definitions,
 			mt_entries,
 			hnsw_entries,
-			knn_entries,
+			knn_bruteforce_entries,
 		})
 	}
 
@@ -217,18 +240,12 @@ impl QueryExecutor {
 		exp: &Expression,
 	) -> Result<Value, Error> {
 		if let Some(IterationStage::Iterate(e)) = ctx.get_iteration_stage() {
-			if let Some(e) = e {
-				if let Some(e) = e.get(thg.tb.as_str()) {
-					if let Some(things) = e.get(exp) {
-						if things.contains(thg) {
-							return Ok(Value::Bool(true));
-						}
-					}
-				}
+			if let Some(results) = e {
+				return Ok(results.contains(exp, thg).into());
 			}
 			Ok(Value::Bool(false))
 		} else {
-			if let Some((p, id, val, dist)) = self.0.knn_entries.get(exp) {
+			if let Some((p, id, val, dist)) = self.0.knn_bruteforce_entries.get(exp) {
 				let v: Vec<Number> = id.compute(ctx, opt, txn, doc).await?.try_into()?;
 				let dist = dist.compute(&v, val.as_ref())?;
 				p.add(dist, thg).await;
@@ -237,20 +254,20 @@ impl QueryExecutor {
 		}
 	}
 
-	pub(super) async fn build_knn_set(&self) -> KnnSet {
-		let mut set = HashMap::with_capacity(self.0.knn_entries.len());
-		for (exp, (p, _, _, _)) in &self.0.knn_entries {
-			set.insert(exp.clone(), p.build().await);
+	pub(super) async fn build_bruteforce_knn_result(&self) -> KnnBruteForceResult {
+		let mut result = KnnBruteForceResult::with_capacity(self.0.knn_bruteforce_entries.len());
+		for (e, (p, _, _, _)) in &self.0.knn_bruteforce_entries {
+			result.insert(e.clone(), p.build().await);
 		}
-		set
+		result
 	}
 
 	pub(crate) fn is_table(&self, tb: &str) -> bool {
 		self.0.table.eq(tb)
 	}
 
-	pub(crate) fn has_knn(&self) -> bool {
-		!self.0.knn_entries.is_empty()
+	pub(crate) fn has_bruteforce_knn(&self) -> bool {
+		!self.0.knn_bruteforce_entries.is_empty()
 	}
 
 	/// Returns `true` if the expression is matching the current iterator.
