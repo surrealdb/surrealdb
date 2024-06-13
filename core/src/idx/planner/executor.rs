@@ -221,7 +221,7 @@ impl InnerQueryExecutor {
 								Entry::Vacant(e) => {
 									let hnsw = ctx
 										.get_index_stores()
-										.get_index_hnsw(opt, idx_def, p)
+										.get_index_hnsw(ctx, opt, idx_def, p)
 										.await?;
 									let entry = HnswEntry::new(
 										stk,
@@ -796,13 +796,14 @@ impl HnswEntry {
 		ef: u32,
 		cond: Option<Arc<Cond>>,
 	) -> Result<Self, Error> {
+		let h = h.read().await;
 		let cond_checker = if let Some(cond) = cond {
 			HnswConditionChecker::new_cond(ctx, opt, cond)
 		} else {
-			HnswConditionChecker::default()
+			HnswConditionChecker::new()
 		};
-		let h = h.read().await;
-		let res = h.knn_search(v, n as usize, ef as usize, stk, cond_checker).await?;
+		let mut tx = ctx.tx_lock().await;
+		let res = h.knn_search(v, n as usize, ef as usize, stk, &mut tx, cond_checker).await?;
 		drop(h);
 		Ok(Self {
 			res,

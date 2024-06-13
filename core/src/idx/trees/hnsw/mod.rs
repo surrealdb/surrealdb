@@ -15,6 +15,7 @@ use crate::idx::trees::hnsw::index::{HnswCheckedSearchContext, VecDocs};
 use crate::idx::trees::hnsw::layer::HnswLayer;
 use crate::idx::trees::knn::DoublePriorityQueue;
 use crate::idx::trees::vector::SharedVector;
+use crate::kvs::Transaction;
 use crate::sql::index::HnswParams;
 use rand::prelude::SmallRng;
 use rand::{Rng, SeedableRng};
@@ -226,6 +227,7 @@ where
 		hnsw_docs: &HnswDocs,
 		vec_docs: &VecDocs,
 		stk: &mut Stk,
+		tx: &mut Transaction,
 		chk: &mut HnswConditionChecker<'_>,
 	) -> Result<Vec<(f64, ElementId)>, Error> {
 		if let Some((ep_dist, ep_id)) = self.search_ep(&search.pt) {
@@ -239,7 +241,7 @@ where
 				);
 				let w = self
 					.layer0
-					.search_single_checked(&search_ctx, ep_pt, ep_dist, ep_id, stk, chk)
+					.search_single_checked(&search_ctx, ep_pt, ep_dist, ep_id, stk, tx, chk)
 					.await?;
 				return Ok(w.to_vec_limit(search.k));
 			}
@@ -301,6 +303,7 @@ mod tests {
 	use crate::idx::trees::knn::tests::{new_vectors_from_file, TestCollection};
 	use crate::idx::trees::knn::{Ids64, KnnResult, KnnResultBuilder};
 	use crate::idx::trees::vector::{SharedVector, Vector};
+	use crate::kvs::Transaction;
 	use crate::sql::index::{Distance, HnswParams, VectorType};
 	use hashbrown::{hash_map::Entry, HashMap, HashSet};
 	use ndarray::Array1;
@@ -464,15 +467,16 @@ mod tests {
 
 	async fn find_collection_hnsw_index(
 		stk: &mut Stk,
+		tx: &mut Transaction,
 		h: &mut HnswIndex,
 		collection: &TestCollection,
 	) {
 		let max_knn = 20.min(collection.len());
 		for (doc_id, obj) in collection.to_vec_ref() {
 			for knn in 1..max_knn {
-				let mut chk = HnswConditionChecker::default();
+				let mut chk = HnswConditionChecker::new();
 				let search = HnswSearch::new(obj.clone(), knn, 500);
-				let res = h.search(&search, stk, &mut chk).await.unwrap();
+				let res = h.search(&search, stk, tx, &mut chk).await.unwrap();
 				if knn == 1 && res.docs.len() == 1 && res.docs[0].1 > 0.0 {
 					let docs: Vec<DocId> = res.docs.iter().map(|(d, _)| *d).collect();
 					if collection.is_unique() {
@@ -528,7 +532,7 @@ mod tests {
 			p.dimension as usize,
 			&p.distance,
 		);
-		let mut h = HnswIndex::new(&p);
+		let mut h = HnswIndex::new("test", &p).await.unwrap();
 		let map = insert_collection_hnsw_index(&mut h, &collection);
 		let mut stack = reblessive::tree::TreeStack::new();
 		stack
@@ -616,7 +620,7 @@ mod tests {
 				Some(ingest_limit),
 			)?));
 
-		let mut h = HnswIndex::new(&p);
+		let mut h = HnswIndex::new(&p).await?;
 		info!("Insert collection");
 		for (doc_id, obj) in collection.to_vec_ref() {
 			h.insert(obj.clone(), *doc_id);

@@ -20,7 +20,7 @@ pub struct Hd<'a> {
 	_e: u8,
 	_f: u8,
 	_g: u8,
-	pub doc_id: DocId,
+	pub doc_id: Option<DocId>,
 }
 
 impl KeyRequirements for Hd<'_> {
@@ -30,7 +30,7 @@ impl KeyRequirements for Hd<'_> {
 }
 
 impl<'a> Hd<'a> {
-	pub fn new(ns: &'a str, db: &'a str, tb: &'a str, ix: &'a str, doc_id: DocId) -> Self {
+	pub fn new(ns: &'a str, db: &'a str, tb: &'a str, ix: &'a str, doc_id: Option<DocId>) -> Self {
 		Self {
 			__: b'/',
 			_a: b'*',
@@ -61,7 +61,7 @@ mod tests {
 			"testdb",
 			"testtb",
 			"testix",
-			7
+			Some(7)
 		);
 		let enc = Hd::encode(&val).unwrap();
 		assert_eq!(enc, b"/*testns\0*testdb\0*testtb\0+testix\0!hd\0\0\0\0\0\0\0\x07");

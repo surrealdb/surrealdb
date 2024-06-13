@@ -1,3 +1,4 @@
+use crate::ctx::Context;
 use crate::err::Error;
 use crate::idx::docids::DocId;
 use crate::idx::planner::checker::HnswConditionChecker;
@@ -8,8 +9,10 @@ use crate::idx::trees::hnsw::flavor::HnswFlavor;
 use crate::idx::trees::hnsw::{ElementId, HnswSearch};
 use crate::idx::trees::knn::{Ids64, KnnResult, KnnResultBuilder};
 use crate::idx::trees::vector::{SharedVector, Vector};
+use crate::idx::IndexKeyBase;
+use crate::kvs::Transaction;
 use crate::sql::index::{HnswParams, VectorType};
-use crate::sql::{Number, Thing, Value};
+use crate::sql::{Id, Number, Value};
 use hashbrown::hash_map::Entry;
 use hashbrown::HashMap;
 use reblessive::tree::Stk;
@@ -72,19 +75,30 @@ impl<'a> HnswCheckedSearchContext<'a> {
 }
 
 impl HnswIndex {
-	pub fn new(p: &HnswParams) -> Self {
-		Self {
+	pub async fn new(
+		ctx: &Context<'_>,
+		ikb: IndexKeyBase,
+		tb: String,
+		p: &HnswParams,
+	) -> Result<Self, Error> {
+		let mut tx = ctx.tx_lock().await;
+		Ok(Self {
 			dim: p.dimension as usize,
 			vector_type: p.vector_type,
 			hnsw: HnswFlavor::new(p),
-			docs: HnswDocs::default(),
+			docs: HnswDocs::new(&mut tx, tb, ikb).await?,
 			vec_docs: HashMap::default(),
-		}
+		})
 	}
 
-	pub fn index_document(&mut self, rid: &Thing, content: &Vec<Value>) -> Result<(), Error> {
+	pub async fn index_document(
+		&mut self,
+		tx: &mut Transaction,
+		id: &Id,
+		content: &Vec<Value>,
+	) -> Result<(), Error> {
 		// Resolve the doc_id
-		let doc_id = self.docs.resolve(rid);
+		let doc_id = self.docs.resolve(tx, id).await?;
 		// Index the values
 		for value in content {
 			// Extract the vector
@@ -127,12 +141,13 @@ impl HnswIndex {
 		}
 	}
 
-	pub(crate) fn remove_document(
+	pub(crate) async fn remove_document(
 		&mut self,
-		rid: &Thing,
+		tx: &mut Transaction,
+		id: &Id,
 		content: &Vec<Value>,
 	) -> Result<(), Error> {
-		if let Some(doc_id) = self.docs.remove(rid) {
+		if let Some(doc_id) = self.docs.remove(tx, id).await? {
 			for v in content {
 				// Extract the vector
 				let vector = Vector::try_from_value(self.vector_type, self.dim, v)?;
@@ -150,6 +165,7 @@ impl HnswIndex {
 		k: usize,
 		ef: usize,
 		stk: &mut Stk,
+		tx: &mut Transaction,
 		mut chk: HnswConditionChecker<'_>,
 	) -> Result<VecDeque<KnnIteratorResult>, Error> {
 		// Extract the vector
@@ -157,8 +173,8 @@ impl HnswIndex {
 		vector.check_dimension(self.dim)?;
 		let search = HnswSearch::new(vector, k, ef);
 		// Do the search
-		let result = self.search(&search, stk, &mut chk).await?;
-		let res = chk.convert_result(&self.docs, result.docs).await?;
+		let result = self.search(&search, stk, tx, &mut chk).await?;
+		let res = chk.convert_result(tx, &self.docs, result.docs).await?;
 		Ok(res)
 	}
 
@@ -166,13 +182,16 @@ impl HnswIndex {
 		&self,
 		search: &HnswSearch,
 		stk: &mut Stk,
+		tx: &mut Transaction,
 		chk: &mut HnswConditionChecker<'_>,
 	) -> Result<KnnResult, Error> {
 		// Do the search
 		let neighbors = match chk {
 			HnswConditionChecker::Hnsw(_) => self.hnsw.knn_search(search),
 			HnswConditionChecker::HnswCondition(_) => {
-				self.hnsw.knn_search_checked(search, &self.docs, &self.vec_docs, stk, chk).await?
+				self.hnsw
+					.knn_search_checked(search, &self.docs, &self.vec_docs, stk, tx, chk)
+					.await?
 			}
 		};
 		Ok(self.build_result(neighbors, search.k, chk))

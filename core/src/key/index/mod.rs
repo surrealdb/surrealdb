@@ -13,7 +13,7 @@ pub mod bt;
 pub mod bu;
 pub mod hd;
 pub mod he;
-pub mod ht;
+pub mod hi;
 pub mod vm;
 
 use crate::key::error::KeyCategory;

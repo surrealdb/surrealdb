@@ -6,6 +6,7 @@ pub mod trees;
 use crate::err::Error;
 use crate::idx::docids::DocId;
 use crate::idx::ft::terms::TermId;
+use crate::idx::trees::hnsw::ElementId;
 use crate::idx::trees::store::NodeId;
 use crate::key::index::bc::Bc;
 use crate::key::index::bd::Bd;
@@ -18,9 +19,13 @@ use crate::key::index::bp::Bp;
 use crate::key::index::bs::Bs;
 use crate::key::index::bt::Bt;
 use crate::key::index::bu::Bu;
+use crate::key::index::hd::Hd;
+use crate::key::index::he::He;
+use crate::key::index::hi::Hi;
 use crate::key::index::vm::Vm;
 use crate::kvs::{Key, Val};
 use crate::sql::statements::DefineIndexStatement;
+use crate::sql::{Id, Thing};
 use revision::Revisioned;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
@@ -174,6 +179,39 @@ impl IndexKeyBase {
 		.into()
 	}
 
+	fn new_hd_key(&self, doc_id: Option<DocId>) -> Key {
+		Hd::new(
+			self.inner.ns.as_str(),
+			self.inner.db.as_str(),
+			self.inner.tb.as_str(),
+			self.inner.ix.as_str(),
+			doc_id,
+		)
+		.into()
+	}
+
+	fn new_he_key(&self, element_id: ElementId) -> Key {
+		He::new(
+			self.inner.ns.as_str(),
+			self.inner.db.as_str(),
+			self.inner.tb.as_str(),
+			self.inner.ix.as_str(),
+			element_id,
+		)
+		.into()
+	}
+
+	fn new_hi_key(&self, id: &Id) -> Key {
+		Hi::new(
+			self.inner.ns.as_str(),
+			self.inner.db.as_str(),
+			self.inner.tb.as_str(),
+			self.inner.ix.as_str(),
+			id,
+		)
+		.into()
+	}
+
 	fn new_vm_key(&self, node_id: Option<NodeId>) -> Key {
 		Vm::new(
 			self.inner.ns.as_str(),
@@ -201,3 +239,5 @@ where
 		Ok(Self::deserialize_revisioned(&mut val.as_slice())?)
 	}
 }
+
+impl VersionedSerdeState for Thing {}

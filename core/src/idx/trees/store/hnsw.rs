@@ -1,3 +1,5 @@
+use crate::ctx::Context;
+use crate::err::Error;
 use crate::idx::trees::hnsw::index::HnswIndex;
 use crate::idx::IndexKeyBase;
 use crate::kvs::Key;
@@ -18,25 +20,32 @@ impl Default for HnswIndexes {
 }
 
 impl HnswIndexes {
-	pub(super) async fn get(&self, ikb: &IndexKeyBase, p: &HnswParams) -> SharedHnswIndex {
+	pub(super) async fn get(
+		&self,
+		ctx: &Context<'_>,
+		tb: &String,
+		ikb: &IndexKeyBase,
+		p: &HnswParams,
+	) -> Result<SharedHnswIndex, Error> {
 		let key = ikb.new_vm_key(None);
 		let r = self.0.read().await;
 		let h = r.get(&key).cloned();
 		drop(r);
 		if let Some(h) = h {
-			return h;
+			return Ok(h);
 		}
 		let mut w = self.0.write().await;
 		let ix = match w.entry(key) {
 			Entry::Occupied(e) => e.get().clone(),
 			Entry::Vacant(e) => {
-				let h = Arc::new(RwLock::new(HnswIndex::new(p)));
+				let h =
+					Arc::new(RwLock::new(HnswIndex::new(ctx, ikb.clone(), tb.clone(), p).await?));
 				e.insert(h.clone());
 				h
 			}
 		};
 		drop(w);
-		ix
+		Ok(ix)
 	}
 
 	pub(super) async fn remove(&self, ikb: &IndexKeyBase) {

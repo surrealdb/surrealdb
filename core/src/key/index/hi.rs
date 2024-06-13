@@ -1,13 +1,13 @@
 //! Stores Things of an HNSW index
 use crate::key::error::KeyCategory;
 use crate::key::key_req::KeyRequirements;
-use crate::sql::Thing;
+use crate::sql::Id;
 use derive::Key;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Key)]
 #[non_exhaustive]
-pub struct Ht<'a> {
+pub struct Hi<'a> {
 	__: u8,
 	_a: u8,
 	pub ns: &'a str,
@@ -20,17 +20,17 @@ pub struct Ht<'a> {
 	_e: u8,
 	_f: u8,
 	_g: u8,
-	pub thing: Thing,
+	pub id: &'a Id,
 }
 
-impl KeyRequirements for Ht<'_> {
+impl KeyRequirements for Hi<'_> {
 	fn key_category(&self) -> KeyCategory {
 		KeyCategory::IndexHnswThings
 	}
 }
 
-impl<'a> Ht<'a> {
-	pub fn new(ns: &'a str, db: &'a str, tb: &'a str, ix: &'a str, thing: Thing) -> Self {
+impl<'a> Hi<'a> {
+	pub fn new(ns: &'a str, db: &'a str, tb: &'a str, ix: &'a str, id: &'a Id) -> Self {
 		Self {
 			__: b'/',
 			_a: b'*',
@@ -43,21 +43,20 @@ impl<'a> Ht<'a> {
 			ix,
 			_e: b'!',
 			_f: b'h',
-			_g: b't',
-			thing,
+			_g: b'i',
+			id,
 		}
 	}
 }
 
 #[cfg(test)]
 mod tests {
-	use crate::syn::Parse;
 
 	#[test]
 	fn key() {
 		use super::*;
-		let val = Ht::new("testns", "testdb", "testtb", "testix", Thing::parse("test:1"));
-		let enc = Ht::encode(&val).unwrap();
+		let val = Hi::new("testns", "testdb", "testtb", "testix", &Id::Number(1));
+		let enc = Hi::encode(&val).unwrap();
 		assert_eq!(
 			enc,
 			b"/*testns\0*testdb\0*testtb\0+testix\0!httest\0\0\0\0\0\x80\0\0\0\0\0\0\x01",
@@ -65,7 +64,7 @@ mod tests {
 			String::from_utf8_lossy(&enc)
 		);
 
-		let dec = Ht::decode(&enc).unwrap();
+		let dec = Hi::decode(&enc).unwrap();
 		assert_eq!(val, dec);
 	}
 }
