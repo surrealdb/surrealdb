@@ -174,7 +174,6 @@ pub async fn init(
 		path,
 		user,
 		pass,
-		tick_interval,
 		no_identification_headers,
 		crt: web.as_ref().and_then(|x| x.web_crt.clone()),
 		key: web.as_ref().and_then(|x| x.web_key.clone()),
@@ -188,10 +187,9 @@ pub async fn init(
 	// Start the kvs server
 	dbs::init(dbs).await?;
 	// Start the node agent
-	let (tasks, task_chans) = start_tasks(
-		&config::CF.get().unwrap().engine.unwrap_or_default(),
-		DB.get().unwrap().clone(),
-	);
+	let mut opt = config::CF.get().unwrap().engine.unwrap_or_default();
+	opt.tick_interval = tick_interval;
+	let (tasks, task_chans) = start_tasks(&opt, DB.get().unwrap().clone());
 	// Start the web server
 	net::init(ct.clone()).await?;
 	// Shutdown and stop closed tasks
