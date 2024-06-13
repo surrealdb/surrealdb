@@ -377,7 +377,7 @@ impl Transaction {
 	pub(crate) async fn scan<K>(
 		&mut self,
 		rng: Range<K>,
-		limit: u32,
+		mut limit: u32,
 	) -> Result<Vec<(Key, Val)>, Error>
 	where
 		K: Into<Key>,
@@ -387,18 +387,38 @@ impl Transaction {
 			return Err(Error::TxFinished);
 		}
 		// Convert the range to bytes
-		let rng: Range<Key> = Range {
-			start: rng.start.into(),
-			end: rng.end.into(),
-		};
-		// Scan the keys
-		let res = self.inner.scan(rng, limit).await?;
-		let res = res.map(|kv| (Key::from(kv.0), kv.1)).collect();
+		let mut start = rng.start.into();
+		let end = rng.end.into();
+
+		// Stores the collected keys
+		let mut res = Vec::new();
+		// Batch retrieval
+		while limit > 0 {
+			// We don't want to retrieve more than 1000 keys per batch
+			let batch = limit.min(1000);
+			// Scan a batch of key/value pairs
+			let kvs = self.inner.scan(start.clone()..end.clone(), batch).await?;
+			// Count how many keys has been collected
+			let mut collected = 0;
+			// Retrieve the keys/values
+			for kv in kvs {
+				collected += 1;
+				start = kv.0.into();
+				res.push((start.clone(), kv.1));
+				limit -= 1;
+				// Increment the start key to meet the next key
+				start.push(0);
+			}
+			// If we didn't collect any key we're done
+			if collected == 0 {
+				break;
+			}
+		}
 		// Return result
 		Ok(res)
 	}
 	/// Delete a range of keys from the databases
-	pub(crate) async fn delr<K>(&mut self, rng: Range<K>, limit: u32) -> Result<(), Error>
+	pub(crate) async fn delr<K>(&mut self, rng: Range<K>, mut limit: u32) -> Result<(), Error>
 	where
 		K: Into<Key>,
 	{
@@ -415,11 +435,26 @@ impl Transaction {
 			start: rng.start.into(),
 			end: rng.end.into(),
 		};
-		// Scan the keys
-		let res = self.inner.scan_keys(rng, limit).await?;
-		// Delete all the keys
-		for key in res {
-			self.inner.delete(key).await?;
+
+		// Batch retrieval
+		while limit > 0 {
+			// We don't want to retrieve more than 1000 keys
+			let batch = limit.min(1000);
+			// Return the keys that have not yet been deleted
+			let res = self.inner.scan_keys(rng.clone(), batch).await?;
+			// Count how many keys has been collected
+			let mut collected = 0;
+			// Delete all the keys
+			for key in res {
+				collected += 1;
+				self.inner.delete(key.clone()).await?;
+				// Decrease the number of key left to find
+				limit -= 1;
+			}
+			// If we didn't collect any key we're done
+			if collected == 0 {
+				break;
+			}
 		}
 		// Return result
 		Ok(())
