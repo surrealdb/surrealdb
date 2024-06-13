@@ -1080,6 +1080,33 @@ async fn delete_record_range() {
 }
 
 #[test_log::test(tokio::test)]
+async fn delete_record_large_range() {
+	let (permit, db) = new_db().await;
+	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
+	drop(permit);
+
+	let table = "user";
+
+	for id in 0..10000 {
+		let sql = format!("CREATE user:i{id:05} SET name = '{id}';");
+		let response = db.query(sql).bind(("table", table)).await.unwrap();
+		response.check().unwrap();
+	}
+	// 1 record
+	let users: Vec<RecordBuf> = db.delete(table).range("i00000".."i00001").await.unwrap();
+	assert_eq!(users.len(), 1);
+	// 1015 record (TIKV: one full batch and one partial)
+	let users: Vec<RecordBuf> = db.delete(table).range("i00010".."i01025").await.unwrap();
+	assert_eq!(users.len(), 1015);
+	// Every records
+	let users: Vec<RecordBuf> = db.delete(table).range("i00000".."i99999").await.unwrap();
+	assert_eq!(users.len(), 10000);
+	// The last record
+	let users: Vec<RecordBuf> = db.delete(table).range("i09999".."i99999").await.unwrap();
+	assert_eq!(users.len(), 1);
+}
+
+#[test_log::test(tokio::test)]
 async fn changefeed() {
 	let (permit, db) = new_db().await;
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
