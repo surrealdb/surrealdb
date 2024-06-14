@@ -3,6 +3,7 @@ use crate::idx::docids::DocId;
 use crate::idx::{IndexKeyBase, VersionedSerdeState};
 use crate::kvs::{Key, Transaction};
 use crate::sql::{Id, Thing};
+use derive::Store;
 use revision::revisioned;
 use roaring::RoaringTreemap;
 use serde::{Deserialize, Serialize};
@@ -16,7 +17,7 @@ pub(in crate::idx) struct HnswDocs {
 }
 
 #[revisioned(revision = 1)]
-#[derive(Default, Clone, Serialize, Deserialize)]
+#[derive(Default, Clone, Serialize, Deserialize, Store)]
 #[non_exhaustive]
 struct State {
 	available: RoaringTreemap,
