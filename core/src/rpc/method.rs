@@ -24,6 +24,7 @@ pub enum Method {
 	Query,
 	Relate,
 	Run,
+	Clear,
 }
 
 impl Method {
@@ -55,6 +56,7 @@ impl Method {
 			"query" => Self::Query,
 			"relate" => Self::Relate,
 			"run" => Self::Run,
+			"clear" => Self::Clear,
 			_ => Self::Unknown,
 		}
 	}
@@ -87,6 +89,7 @@ impl Method {
 			Self::Query => "query",
 			Self::Relate => "relate",
 			Self::Run => "run",
+			Self::Clear => "clear",
 		}
 	}
 }

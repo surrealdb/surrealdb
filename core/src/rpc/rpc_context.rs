@@ -62,6 +62,7 @@ pub trait RpcContext {
 			Method::Query => self.query(params).await.map(Into::into).map_err(Into::into),
 			Method::Relate => self.relate(params).await.map(Into::into).map_err(Into::into),
 			Method::Run => self.run(params).await.map(Into::into).map_err(Into::into),
+			Method::Clear => self.clear().await.map(Into::into).map_err(Into::into),
 			Method::Unknown => Err(RpcError::MethodNotFound),
 		}
 	}
@@ -593,6 +594,22 @@ pub trait RpcContext {
 		res.remove(0).result.map_err(Into::into)
 	}
 
+	// ------------------------------
+	// Methods to clear current session
+	// ------------------------------
+
+	async fn clear(&mut self) -> Result<impl Into<Data>, RpcError> {
+		let session = self.session_mut();
+
+		crate::iam::clear::clear(session)?;
+		session.ns = None;
+		session.db = None;
+		
+		self.vars_mut().clear();
+
+		Ok(Value::None)
+	}
+	
 	// ------------------------------
 	// Private methods
 	// ------------------------------

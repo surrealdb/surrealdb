@@ -423,4 +423,18 @@ impl RpcContext for Connection {
 		surrealdb::iam::verify::token(DB.get().unwrap(), &mut self.session, &token.0).await?;
 		Ok(Value::None)
 	}
+
+	async fn clear(&mut self) -> Result<impl Into<Data>, RpcError> {
+		LIVE_QUERIES.write().await.retain(|_, v| *v != self.id);
+
+		let session = self.session_mut();
+
+		surrealdb::iam::clear::clear(session)?;
+		session.ns = None;
+		session.db = None;
+		
+		self.vars_mut().clear();
+
+		Ok(Value::None)
+	}
 }
