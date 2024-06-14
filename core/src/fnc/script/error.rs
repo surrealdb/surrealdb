@@ -12,10 +12,7 @@ impl From<js::CaughtError<'_>> for Error {
 							Some(file) => format!(" at {file}:{line}"),
 							None => String::default(),
 						},
-						match e.message() {
-							Some(message) => message,
-							None => String::default(),
-						},
+						e.message().unwrap_or_default(),
 						match e.stack() {
 							Some(stack) => format!("\n{stack}"),
 							None => String::default(),
