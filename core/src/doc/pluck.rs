@@ -61,6 +61,9 @@ impl<'a> Document<'a> {
 				Statement::Create(_) => {
 					self.current.doc.compute(stk, ctx, opt, Some(&self.current)).await
 				}
+				Statement::Upsert(_) => {
+					self.current.doc.compute(stk, ctx, opt, Some(&self.current)).await
+				}
 				Statement::Update(_) => {
 					self.current.doc.compute(stk, ctx, opt, Some(&self.current)).await
 				}
@@ -76,7 +79,7 @@ impl<'a> Document<'a> {
 		// Check if this record exists
 		if self.id.is_some() {
 			// Should we run permissions checks?
-			if opt.check_perms(Action::View) {
+			if opt.check_perms(Action::View)? {
 				// Loop through all field statements
 				for fd in self.fd(ctx, opt).await?.iter() {
 					// Loop over each field in document

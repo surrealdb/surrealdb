@@ -39,7 +39,7 @@ impl DefineEventStatement {
 		// Clear the cache
 		run.clear_cache();
 		// Check if event already exists
-		if run.get_tb_event(opt.ns(), opt.db(), &self.what, &self.name).await.is_ok() {
+		if run.get_tb_event(opt.ns()?, opt.db()?, &self.what, &self.name).await.is_ok() {
 			if self.if_not_exists {
 				return Ok(Value::None);
 			} else {
@@ -49,10 +49,10 @@ impl DefineEventStatement {
 			}
 		}
 		// Process the statement
-		let key = crate::key::table::ev::new(opt.ns(), opt.db(), &self.what, &self.name);
-		run.add_ns(opt.ns(), opt.strict).await?;
-		run.add_db(opt.ns(), opt.db(), opt.strict).await?;
-		run.add_tb(opt.ns(), opt.db(), &self.what, opt.strict).await?;
+		let key = crate::key::table::ev::new(opt.ns()?, opt.db()?, &self.what, &self.name);
+		run.add_ns(opt.ns()?, opt.strict).await?;
+		run.add_db(opt.ns()?, opt.db()?, opt.strict).await?;
+		run.add_tb(opt.ns()?, opt.db()?, &self.what, opt.strict).await?;
 		run.set(
 			key,
 			DefineEventStatement {
@@ -62,7 +62,7 @@ impl DefineEventStatement {
 		)
 		.await?;
 		// Clear the cache
-		let key = crate::key::table::ev::prefix(opt.ns(), opt.db(), &self.what);
+		let key = crate::key::table::ev::prefix(opt.ns()?, opt.db()?, &self.what);
 		run.clr(key).await?;
 		// Ok all good
 		Ok(Value::None)

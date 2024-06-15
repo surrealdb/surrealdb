@@ -99,7 +99,8 @@ pub fn boolean_xor((lh, rh): (Array, Array)) -> Result<Value, Error> {
 }
 
 pub fn clump((array, clump_size): (Array, i64)) -> Result<Value, Error> {
-	Ok(array.clump(clump_size as usize).into())
+	let clump_size = clump_size.max(0) as usize;
+	Ok(array.clump(clump_size)?.into())
 }
 
 pub fn combine((array, other): (Array, Array)) -> Result<Value, Error> {

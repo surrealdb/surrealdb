@@ -30,16 +30,16 @@ impl<'a> Document<'a> {
 			// Get temporary edge references
 			let (ref o, ref i) = (Dir::Out, Dir::In);
 			// Store the left pointer edge
-			let key = crate::key::graph::new(opt.ns(), opt.db(), &l.tb, &l.id, o, rid);
+			let key = crate::key::graph::new(opt.ns()?, opt.db()?, &l.tb, &l.id, o, rid);
 			run.set(key, vec![]).await?;
 			// Store the left inner edge
-			let key = crate::key::graph::new(opt.ns(), opt.db(), &rid.tb, &rid.id, i, l);
+			let key = crate::key::graph::new(opt.ns()?, opt.db()?, &rid.tb, &rid.id, i, l);
 			run.set(key, vec![]).await?;
 			// Store the right inner edge
-			let key = crate::key::graph::new(opt.ns(), opt.db(), &rid.tb, &rid.id, o, r);
+			let key = crate::key::graph::new(opt.ns()?, opt.db()?, &rid.tb, &rid.id, o, r);
 			run.set(key, vec![]).await?;
 			// Store the right pointer edge
-			let key = crate::key::graph::new(opt.ns(), opt.db(), &r.tb, &r.id, i, rid);
+			let key = crate::key::graph::new(opt.ns()?, opt.db()?, &r.tb, &r.id, i, rid);
 			run.set(key, vec![]).await?;
 			// Store the edges on the record
 			self.current.doc.to_mut().put(&*EDGE, Value::Bool(true));

@@ -416,7 +416,8 @@ impl Drop for Test {
 	/// Drops the instance of the struct
 	/// This method will panic if there are remaining responses that have not been checked.
 	fn drop(&mut self) {
-		if !self.responses.is_empty() {
+		// Check for a panic to make sure test doesnt cause a double panic.
+		if !std::thread::panicking() && !self.responses.is_empty() {
 			panic!("Not every response has been checked");
 		}
 	}

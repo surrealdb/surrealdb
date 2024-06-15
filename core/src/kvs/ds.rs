@@ -3,11 +3,9 @@ use std::fmt;
 #[cfg(any(
 	feature = "kv-mem",
 	feature = "kv-surrealkv",
-	feature = "kv-file",
 	feature = "kv-rocksdb",
 	feature = "kv-fdb",
 	feature = "kv-tikv",
-	feature = "kv-speedb"
 ))]
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -96,11 +94,9 @@ pub struct Datastore {
 	#[cfg(any(
 		feature = "kv-mem",
 		feature = "kv-surrealkv",
-		feature = "kv-file",
 		feature = "kv-rocksdb",
 		feature = "kv-fdb",
 		feature = "kv-tikv",
-		feature = "kv-speedb"
 	))]
 	// The temporary directory
 	temporary_directory: Option<Arc<PathBuf>>,
@@ -117,8 +113,6 @@ pub(super) enum Inner {
 	Mem(super::mem::Datastore),
 	#[cfg(feature = "kv-rocksdb")]
 	RocksDB(super::rocksdb::Datastore),
-	#[cfg(feature = "kv-speedb")]
-	SpeeDB(super::speedb::Datastore),
 	#[cfg(feature = "kv-indxdb")]
 	IndxDB(super::indxdb::Datastore),
 	#[cfg(feature = "kv-tikv")]
@@ -137,8 +131,6 @@ impl fmt::Display for Datastore {
 			Inner::Mem(_) => write!(f, "memory"),
 			#[cfg(feature = "kv-rocksdb")]
 			Inner::RocksDB(_) => write!(f, "rocksdb"),
-			#[cfg(feature = "kv-speedb")]
-			Inner::SpeeDB(_) => write!(f, "speedb"),
 			#[cfg(feature = "kv-indxdb")]
 			Inner::IndxDB(_) => write!(f, "indxdb"),
 			#[cfg(feature = "kv-tikv")]
@@ -216,7 +208,6 @@ impl Datastore {
 		#[cfg(not(any(
 			feature = "kv-mem",
 			feature = "kv-rocksdb",
-			feature = "kv-speedb",
 			feature = "kv-indxdb",
 			feature = "kv-tikv",
 			feature = "kv-fdb",
@@ -270,22 +261,6 @@ impl Datastore {
 				}
 				#[cfg(not(feature = "kv-rocksdb"))]
                 return Err(Error::Ds("Cannot connect to the `rocksdb` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
-			}
-			// Parse and initiate an SpeeDB database
-			s if s.starts_with("speedb:") => {
-				#[cfg(feature = "kv-speedb")]
-				{
-					info!("Starting kvs store at {}", path);
-					let s = s.trim_start_matches("speedb://");
-					let s = s.trim_start_matches("speedb:");
-					let v = super::speedb::Datastore::new(s).await.map(Inner::SpeeDB);
-					info!("Started kvs store at {}", path);
-					let default_clock = Arc::new(SizedClock::System(SystemClock::new()));
-					let clock = clock_override.unwrap_or(default_clock);
-					Ok((v, clock))
-				}
-				#[cfg(not(feature = "kv-speedb"))]
-                return Err(Error::Ds("Cannot connect to the `speedb` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
 			}
 			// Parse and initiate an IndxDB database
 			s if s.starts_with("indxdb:") => {
@@ -378,11 +353,9 @@ impl Datastore {
 			#[cfg(any(
 				feature = "kv-mem",
 				feature = "kv-surrealkv",
-				feature = "kv-file",
 				feature = "kv-rocksdb",
 				feature = "kv-fdb",
 				feature = "kv-tikv",
-				feature = "kv-speedb"
 			))]
 			temporary_directory: None,
 			lq_cf_store: Arc::new(RwLock::new(LiveQueryTracker::new())),
@@ -434,11 +407,9 @@ impl Datastore {
 	#[cfg(any(
 		feature = "kv-mem",
 		feature = "kv-surrealkv",
-		feature = "kv-file",
 		feature = "kv-rocksdb",
 		feature = "kv-fdb",
 		feature = "kv-tikv",
-		feature = "kv-speedb"
 	))]
 	pub fn with_temporary_directory(mut self, path: PathBuf) -> Self {
 		self.temporary_directory = Some(Arc::new(path));
@@ -1037,11 +1008,6 @@ impl Datastore {
 				let tx = v.transaction(write, lock).await?;
 				super::tx::Inner::RocksDB(tx)
 			}
-			#[cfg(feature = "kv-speedb")]
-			Inner::SpeeDB(v) => {
-				let tx = v.transaction(write, lock).await?;
-				super::tx::Inner::SpeeDB(tx)
-			}
 			#[cfg(feature = "kv-indxdb")]
 			Inner::IndxDB(v) => {
 				let tx = v.transaction(write, lock).await?;
@@ -1166,11 +1132,9 @@ impl Datastore {
 			#[cfg(any(
 				feature = "kv-mem",
 				feature = "kv-surrealkv",
-				feature = "kv-file",
 				feature = "kv-rocksdb",
 				feature = "kv-fdb",
 				feature = "kv-tikv",
-				feature = "kv-speedb"
 			))]
 			self.temporary_directory.clone(),
 		)?;

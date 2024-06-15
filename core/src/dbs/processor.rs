@@ -123,6 +123,8 @@ impl<'a> Processor<'a> {
 				Iterable::Value(v) => self.process_value(stk, ctx, opt, stm, v).await?,
 				Iterable::Thing(v) => self.process_thing(stk, ctx, opt, stm, v).await?,
 				Iterable::Defer(v) => self.process_defer(stk, ctx, opt, stm, v).await?,
+				Iterable::Range(v) => self.process_range(stk, ctx, opt, stm, v).await?,
+				Iterable::Edges(e) => self.process_edge(stk, ctx, opt, stm, e).await?,
 				Iterable::Table(v) => {
 					if let Some(qp) = ctx.get_query_planner() {
 						if let Some(exe) = qp.get_query_executor(&v.0) {
@@ -135,8 +137,6 @@ impl<'a> Processor<'a> {
 					}
 					self.process_table(stk, ctx, opt, stm, &v).await?
 				}
-				Iterable::Range(v) => self.process_range(stk, ctx, opt, stm, v).await?,
-				Iterable::Edges(e) => self.process_edge(stk, ctx, opt, stm, e).await?,
 				Iterable::Index(t, irf) => {
 					if let Some(qp) = ctx.get_query_planner() {
 						if let Some(exe) = qp.get_query_executor(&t.0) {
@@ -187,9 +187,9 @@ impl<'a> Processor<'a> {
 		v: Thing,
 	) -> Result<(), Error> {
 		// Check that the table exists
-		ctx.tx_lock().await.check_ns_db_tb(opt.ns(), opt.db(), &v.tb, opt.strict).await?;
+		ctx.tx_lock().await.check_ns_db_tb(opt.ns()?, opt.db()?, &v.tb, opt.strict).await?;
 		// Fetch the data from the store
-		let key = thing::new(opt.ns(), opt.db(), &v.tb, &v.id);
+		let key = thing::new(opt.ns()?, opt.db()?, &v.tb, &v.id);
 		let val = ctx.tx_lock().await.get(key).await?;
 		// Parse the data from the store
 		let val = Operable::Value(match val {
@@ -216,7 +216,7 @@ impl<'a> Processor<'a> {
 		v: Thing,
 	) -> Result<(), Error> {
 		// Check that the table exists
-		ctx.tx_lock().await.check_ns_db_tb(opt.ns(), opt.db(), &v.tb, opt.strict).await?;
+		ctx.tx_lock().await.check_ns_db_tb(opt.ns()?, opt.db()?, &v.tb, opt.strict).await?;
 		// Process the document record
 		let pro = Processed {
 			rid: Some(v),
@@ -238,9 +238,9 @@ impl<'a> Processor<'a> {
 		o: Value,
 	) -> Result<(), Error> {
 		// Check that the table exists
-		ctx.tx_lock().await.check_ns_db_tb(opt.ns(), opt.db(), &v.tb, opt.strict).await?;
+		ctx.tx_lock().await.check_ns_db_tb(opt.ns()?, opt.db()?, &v.tb, opt.strict).await?;
 		// Fetch the data from the store
-		let key = thing::new(opt.ns(), opt.db(), &v.tb, &v.id);
+		let key = thing::new(opt.ns()?, opt.db()?, &v.tb, &v.id);
 		let val = ctx.tx_lock().await.get(key).await?;
 		// Parse the data from the store
 		let x = match val {
@@ -273,9 +273,9 @@ impl<'a> Processor<'a> {
 		o: Option<Value>,
 	) -> Result<(), Error> {
 		// Check that the table exists
-		ctx.tx_lock().await.check_ns_db_tb(opt.ns(), opt.db(), &v.tb, opt.strict).await?;
+		ctx.tx_lock().await.check_ns_db_tb(opt.ns()?, opt.db()?, &v.tb, opt.strict).await?;
 		// Fetch the data from the store
-		let key = thing::new(opt.ns(), opt.db(), &v.tb, &v.id);
+		let key = thing::new(opt.ns()?, opt.db()?, &v.tb, &v.id);
 		let val = ctx.tx_lock().await.get(key).await?;
 		// Parse the data from the store
 		let x = match val {
@@ -304,10 +304,10 @@ impl<'a> Processor<'a> {
 		v: &Table,
 	) -> Result<(), Error> {
 		// Check that the table exists
-		ctx.tx_lock().await.check_ns_db_tb(opt.ns(), opt.db(), v, opt.strict).await?;
+		ctx.tx_lock().await.check_ns_db_tb(opt.ns()?, opt.db()?, v, opt.strict).await?;
 		// Prepare the start and end keys
-		let beg = thing::prefix(opt.ns(), opt.db(), v);
-		let end = thing::suffix(opt.ns(), opt.db(), v);
+		let beg = thing::prefix(opt.ns()?, opt.db()?, v);
+		let end = thing::suffix(opt.ns()?, opt.db()?, v);
 		// Loop until no more keys
 		let mut next_page = Some(ScanPage::from(beg..end));
 		while let Some(page) = next_page {
@@ -358,23 +358,23 @@ impl<'a> Processor<'a> {
 		v: Range,
 	) -> Result<(), Error> {
 		// Check that the table exists
-		ctx.tx_lock().await.check_ns_db_tb(opt.ns(), opt.db(), &v.tb, opt.strict).await?;
+		ctx.tx_lock().await.check_ns_db_tb(opt.ns()?, opt.db()?, &v.tb, opt.strict).await?;
 		// Prepare the range start key
 		let beg = match &v.beg {
-			Bound::Unbounded => thing::prefix(opt.ns(), opt.db(), &v.tb),
-			Bound::Included(id) => thing::new(opt.ns(), opt.db(), &v.tb, id).encode().unwrap(),
+			Bound::Unbounded => thing::prefix(opt.ns()?, opt.db()?, &v.tb),
+			Bound::Included(id) => thing::new(opt.ns()?, opt.db()?, &v.tb, id).encode().unwrap(),
 			Bound::Excluded(id) => {
-				let mut key = thing::new(opt.ns(), opt.db(), &v.tb, id).encode().unwrap();
+				let mut key = thing::new(opt.ns()?, opt.db()?, &v.tb, id).encode().unwrap();
 				key.push(0x00);
 				key
 			}
 		};
 		// Prepare the range end key
 		let end = match &v.end {
-			Bound::Unbounded => thing::suffix(opt.ns(), opt.db(), &v.tb),
-			Bound::Excluded(id) => thing::new(opt.ns(), opt.db(), &v.tb, id).encode().unwrap(),
+			Bound::Unbounded => thing::suffix(opt.ns()?, opt.db()?, &v.tb),
+			Bound::Excluded(id) => thing::new(opt.ns()?, opt.db()?, &v.tb, id).encode().unwrap(),
 			Bound::Included(id) => {
-				let mut key = thing::new(opt.ns(), opt.db(), &v.tb, id).encode().unwrap();
+				let mut key = thing::new(opt.ns()?, opt.db()?, &v.tb, id).encode().unwrap();
 				key.push(0x00);
 				key
 			}
@@ -429,8 +429,8 @@ impl<'a> Processor<'a> {
 		e: Edges,
 	) -> Result<(), Error> {
 		// Pull out options
-		let ns = opt.ns();
-		let db = opt.db();
+		let ns = opt.ns()?;
+		let db = opt.db()?;
 		let tb = &e.from.tb;
 		let id = &e.from.id;
 		// Fetch start and end key pairs
@@ -522,7 +522,7 @@ impl<'a> Processor<'a> {
 					// Parse the data from the store
 					let gra: graph::Graph = graph::Graph::decode(&k)?;
 					// Fetch the data from the store
-					let key = thing::new(opt.ns(), opt.db(), gra.ft, &gra.fk);
+					let key = thing::new(opt.ns()?, opt.db()?, gra.ft, &gra.fk);
 					let val = ctx.tx_lock().await.get(key).await?;
 					let rid = Thing::from((gra.ft, gra.fk));
 					// Parse the data from the store
@@ -555,7 +555,7 @@ impl<'a> Processor<'a> {
 		irf: IteratorRef,
 	) -> Result<(), Error> {
 		// Check that the table exists
-		ctx.tx_lock().await.check_ns_db_tb(opt.ns(), opt.db(), &table.0, opt.strict).await?;
+		ctx.tx_lock().await.check_ns_db_tb(opt.ns()?, opt.db()?, &table.0, opt.strict).await?;
 		if let Some(exe) = ctx.get_query_executor() {
 			if let Some(mut iterator) = exe.new_iterator(opt, irf).await? {
 				// Get the first batch
@@ -623,7 +623,7 @@ impl Iterable {
 		thg: &Thing,
 	) -> Result<Value, Error> {
 		// Fetch the data from the store
-		let key = thing::new(opt.ns(), opt.db(), &thg.tb, &thg.id);
+		let key = thing::new(opt.ns()?, opt.db()?, &thg.tb, &thg.id);
 		// Fetch and parse the data from the store
 		let val = tx.get(key).await?.map(Value::from).unwrap_or(Value::None);
 		// Return the result

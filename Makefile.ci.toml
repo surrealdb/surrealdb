@@ -17,7 +17,7 @@ args = ["check", "--locked", "--package", "surrealdb", "--features", "protocol-w
 category = "CI - CHECK"
 command = "cargo"
 env = { RUSTFLAGS = "--cfg surrealdb_unstable" }
-args = ["clippy", "--all-targets", "--features", "storage-mem,storage-rocksdb,storage-speedb,storage-tikv,storage-fdb,scripting,http,jwks", "--tests", "--benches", "--examples", "--bins", "--", "-D", "warnings"]
+args = ["clippy", "--all-targets", "--features", "storage-mem,storage-rocksdb,storage-tikv,storage-fdb,scripting,http,jwks", "--tests", "--benches", "--examples", "--bins", "--", "-D", "warnings"]
 
 #
 # Integration Tests
@@ -140,11 +140,6 @@ run_task = { name = ["test-kvs", "test-api-integration"], fork = true, parallel 
 [tasks.ci-api-integration-rocksdb]
 category = "CI - INTEGRATION TESTS"
 env = { _TEST_API_ENGINE = "rocksdb", _TEST_FEATURES = "kv-rocksdb" }
-run_task = { name = ["test-kvs", "test-api-integration"], fork = true, parallel = true }
-
-[tasks.ci-api-integration-speedb]
-category = "CI - INTEGRATION TESTS"
-env = { _TEST_API_ENGINE = "speedb", _TEST_FEATURES = "kv-speedb" }
 run_task = { name = ["test-kvs", "test-api-integration"], fork = true, parallel = true }
 
 [tasks.ci-api-integration-fdb]

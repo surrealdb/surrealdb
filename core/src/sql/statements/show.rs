@@ -60,8 +60,8 @@ impl ShowStatement {
 		let tb = self.table.as_deref();
 		let r = crate::cf::read(
 			&mut run,
-			opt.ns(),
-			opt.db(),
+			opt.ns()?,
+			opt.db()?,
 			tb.map(|x| x.as_str()),
 			self.since.clone(),
 			self.limit,
