@@ -7,6 +7,7 @@ use std::mem;
 pub(super) struct MemoryCollector(Vec<Value>);
 
 impl MemoryCollector {
+	#[inline]
 	pub(super) fn push(&mut self, val: Value) {
 		self.0.push(val);
 	}
@@ -15,6 +16,7 @@ impl MemoryCollector {
 		self.0.sort_by(|a, b| orders.compare(a, b));
 	}
 
+	#[inline]
 	pub(super) fn len(&self) -> usize {
 		self.0.len()
 	}
