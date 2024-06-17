@@ -34,10 +34,10 @@ use surrealdb_core::dbs::capabilities::{
 ///
 /// With the combination of both these lists you can filter subgroups. For example:
 /// ```
-/// # use surrealdb::opt::capabilities::CapabilitiesBuilder;
-/// # fn cap() -> surrealdb::Result<CapabilitiesBuilder>{
+/// # use surrealdb::opt::capabilities::Capabilities;
+/// # fn cap() -> surrealdb::Result<Capabilities>{
 /// # let cap =
-/// CapabilitiesBuilder::none()
+/// Capabilities::none()
 ///     .with_allow_function("http::*")?
 ///     .with_deny_function("http::post")?
 ///
@@ -58,13 +58,13 @@ use surrealdb_core::dbs::capabilities::{
 /// Create a new instance, and allow all capabilities
 #[cfg_attr(feature = "kv-rocksdb", doc = "```no_run")]
 #[cfg_attr(not(feature = "kv-rocksdb"), doc = "```ignore")]
-/// # use surrealdb::opt::capabilities::CapabilitiesBuilder;
+/// # use surrealdb::opt::capabilities::Capabilities;
 /// # use surrealdb::opt::Config;
 /// # use surrealdb::Surreal;
 /// # use surrealdb::engine::local::File;
 /// # #[tokio::main]
 /// # async fn main() -> surrealdb::Result<()> {
-/// let capabilities = CapabilitiesBuilder::all();
+/// let capabilities = Capabilities::all();
 /// let config = Config::default().capabilities(capabilities);
 /// let db = Surreal::new::<File>(("temp.db", config)).await?;
 /// # Ok(())
@@ -75,12 +75,12 @@ use surrealdb_core::dbs::capabilities::{
 #[cfg_attr(not(feature = "kv-rocksdb"), doc = "```ignore")]
 /// # use std::str::FromStr;
 /// # use surrealdb::engine::local::File;
-/// # use surrealdb::opt::capabilities::CapabilitiesBuilder;
+/// # use surrealdb::opt::capabilities::Capabilities;
 /// # use surrealdb::opt::Config;
 /// # use surrealdb::Surreal;
 /// # #[tokio::main]
 /// # async fn main() -> surrealdb::Result<()> {
-/// let capabilities = CapabilitiesBuilder::default()
+/// let capabilities = Capabilities::default()
 ///     .with_deny_function("http::*")?;
 /// let config = Config::default().capabilities(capabilities);
 /// let db = Surreal::new::<File>(("temp.db", config)).await?;
