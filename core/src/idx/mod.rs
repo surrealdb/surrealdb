@@ -190,6 +190,7 @@ impl IndexKeyBase {
 		.into()
 	}
 
+	#[allow(unused)]
 	fn new_he_key(&self, element_id: ElementId) -> Key {
 		He::new(
 			self.inner.ns.as_str(),
@@ -201,7 +202,7 @@ impl IndexKeyBase {
 		.into()
 	}
 
-	fn new_hi_key(&self, id: &Id) -> Key {
+	fn new_hi_key(&self, id: Id) -> Key {
 		Hi::new(
 			self.inner.ns.as_str(),
 			self.inner.db.as_str(),
@@ -225,19 +226,19 @@ impl IndexKeyBase {
 }
 
 /// This trait provides `Revision` based default implementations for serialization/deserialization
-trait VersionedSerdeState
+trait VersionedStore
 where
 	Self: Sized + Serialize + DeserializeOwned + Revisioned,
 {
-	fn try_to_val(&self) -> Result<Val, Error> {
+	fn try_into(&self) -> Result<Val, Error> {
 		let mut val = Vec::new();
 		self.serialize_revisioned(&mut val)?;
 		Ok(val)
 	}
 
-	fn try_from_val(val: Val) -> Result<Self, Error> {
+	fn try_from(val: Val) -> Result<Self, Error> {
 		Ok(Self::deserialize_revisioned(&mut val.as_slice())?)
 	}
 }
 
-impl VersionedSerdeState for Thing {}
+impl VersionedStore for Thing {}

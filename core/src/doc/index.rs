@@ -398,11 +398,11 @@ impl<'a> IndexOperation<'a> {
 		let mut tx = ctx.tx_lock().await;
 		// Delete the old index data
 		if let Some(o) = self.o.take() {
-			hnsw.remove_document(&mut tx, &self.rid.id, &o).await?;
+			hnsw.remove_document(&mut tx, self.rid.id.clone(), &o).await?;
 		}
 		// Create the new index data
 		if let Some(n) = self.n.take() {
-			hnsw.index_document(&mut tx, &self.rid.id, &n).await?;
+			hnsw.index_document(&mut tx, self.rid.id.clone(), &n).await?;
 		}
 		Ok(())
 	}

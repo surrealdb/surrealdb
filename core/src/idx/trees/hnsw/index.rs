@@ -94,7 +94,7 @@ impl HnswIndex {
 	pub async fn index_document(
 		&mut self,
 		tx: &mut Transaction,
-		id: &Id,
+		id: Id,
 		content: &Vec<Value>,
 	) -> Result<(), Error> {
 		// Resolve the doc_id
@@ -144,7 +144,7 @@ impl HnswIndex {
 	pub(crate) async fn remove_document(
 		&mut self,
 		tx: &mut Transaction,
-		id: &Id,
+		id: Id,
 		content: &Vec<Value>,
 	) -> Result<(), Error> {
 		if let Some(doc_id) = self.docs.remove(tx, id).await? {
@@ -161,11 +161,11 @@ impl HnswIndex {
 
 	pub async fn knn_search(
 		&self,
+		ctx: &Context<'_>,
+		stk: &mut Stk,
 		pt: &[Number],
 		k: usize,
 		ef: usize,
-		stk: &mut Stk,
-		tx: &mut Transaction,
 		mut chk: HnswConditionChecker<'_>,
 	) -> Result<VecDeque<KnnIteratorResult>, Error> {
 		// Extract the vector
@@ -173,16 +173,16 @@ impl HnswIndex {
 		vector.check_dimension(self.dim)?;
 		let search = HnswSearch::new(vector, k, ef);
 		// Do the search
-		let result = self.search(&search, stk, tx, &mut chk).await?;
-		let res = chk.convert_result(tx, &self.docs, result.docs).await?;
+		let result = self.search(ctx, stk, &search, &mut chk).await?;
+		let res = chk.convert_result(ctx, &self.docs, result.docs).await?;
 		Ok(res)
 	}
 
 	pub(super) async fn search(
 		&self,
-		search: &HnswSearch,
+		ctx: &Context<'_>,
 		stk: &mut Stk,
-		tx: &mut Transaction,
+		search: &HnswSearch,
 		chk: &mut HnswConditionChecker<'_>,
 	) -> Result<KnnResult, Error> {
 		// Do the search
@@ -190,7 +190,7 @@ impl HnswIndex {
 			HnswConditionChecker::Hnsw(_) => self.hnsw.knn_search(search),
 			HnswConditionChecker::HnswCondition(_) => {
 				self.hnsw
-					.knn_search_checked(search, &self.docs, &self.vec_docs, stk, tx, chk)
+					.knn_search_checked(ctx, stk, search, &self.docs, &self.vec_docs, chk)
 					.await?
 			}
 		};

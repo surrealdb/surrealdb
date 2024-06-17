@@ -1,3 +1,4 @@
+use crate::ctx::Context;
 use crate::err::Error;
 use crate::idx::planner::checker::HnswConditionChecker;
 use crate::idx::trees::dynamicset::DynamicSet;
@@ -7,7 +8,6 @@ use crate::idx::trees::hnsw::index::HnswCheckedSearchContext;
 use crate::idx::trees::hnsw::{ElementId, HnswElements};
 use crate::idx::trees::knn::DoublePriorityQueue;
 use crate::idx::trees::vector::SharedVector;
-use crate::kvs::Transaction;
 use hashbrown::HashSet;
 use reblessive::tree::Stk;
 
@@ -56,21 +56,22 @@ where
 		self.search(elements, pt, candidates, visited, w, ef)
 	}
 
+	#[allow(clippy::too_many_arguments)]
 	pub(super) async fn search_single_checked(
 		&self,
+		ctx: &Context<'_>,
+		stk: &mut Stk,
 		search: &HnswCheckedSearchContext<'_>,
 		ep_pt: &SharedVector,
 		ep_dist: f64,
 		ep_id: ElementId,
-		stk: &mut Stk,
-		tx: &mut Transaction,
 		chk: &mut HnswConditionChecker<'_>,
 	) -> Result<DoublePriorityQueue, Error> {
 		let visited = HashSet::from([ep_id]);
 		let candidates = DoublePriorityQueue::from(ep_dist, ep_id);
 		let mut w = DoublePriorityQueue::default();
-		Self::add_if_truthy(search, &mut w, ep_pt, ep_dist, ep_id, stk, tx, chk).await?;
-		self.search_checked(search, candidates, visited, w, stk, tx, chk).await
+		Self::add_if_truthy(ctx, stk, search, &mut w, ep_pt, ep_dist, ep_id, chk).await?;
+		self.search_checked(ctx, stk, search, candidates, visited, w, chk).await
 	}
 
 	pub(super) fn search_multi(
@@ -152,14 +153,15 @@ where
 		w
 	}
 
+	#[allow(clippy::too_many_arguments)]
 	pub(super) async fn search_checked(
 		&self,
+		ctx: &Context<'_>,
+		stk: &mut Stk,
 		search: &HnswCheckedSearchContext<'_>,
 		mut candidates: DoublePriorityQueue,
 		mut visited: HashSet<ElementId>,
 		mut w: DoublePriorityQueue,
-		stk: &mut Stk,
-		tx: &mut Transaction,
 		chk: &mut HnswConditionChecker<'_>,
 	) -> Result<DoublePriorityQueue, Error> {
 		let mut f_dist = w.peek_last_dist().unwrap_or(f64::MAX);
@@ -182,8 +184,10 @@ where
 						let e_dist = elements.distance(e_pt, pt);
 						if e_dist < f_dist || w.len() < ef {
 							candidates.push(e_dist, e_id);
-							if Self::add_if_truthy(search, &mut w, e_pt, e_dist, e_id, stk, tx, chk)
-								.await?
+							if Self::add_if_truthy(
+								ctx, stk, search, &mut w, e_pt, e_dist, e_id, chk,
+							)
+							.await?
 							{
 								f_dist = w.peek_last_dist().unwrap(); // w can't be empty
 							}
@@ -195,18 +199,19 @@ where
 		Ok(w)
 	}
 
+	#[allow(clippy::too_many_arguments)]
 	pub(super) async fn add_if_truthy(
+		ctx: &Context<'_>,
+		stk: &mut Stk,
 		search: &HnswCheckedSearchContext<'_>,
 		w: &mut DoublePriorityQueue,
 		e_pt: &SharedVector,
 		e_dist: f64,
 		e_id: ElementId,
-		stk: &mut Stk,
-		tx: &mut Transaction,
 		chk: &mut HnswConditionChecker<'_>,
 	) -> Result<bool, Error> {
 		if let Some(docs) = search.get_docs(e_pt) {
-			if chk.check_truthy(stk, tx, search.docs(), docs).await? {
+			if chk.check_truthy(ctx, stk, search.docs(), docs).await? {
 				w.push(e_dist, e_id);
 				if w.len() > search.ef() {
 					if let Some((_, id)) = w.pop_last() {

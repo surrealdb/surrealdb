@@ -1,6 +1,7 @@
+use crate::ctx::Context;
 use crate::err::Error;
 use crate::idx::docids::DocId;
-use crate::idx::{IndexKeyBase, VersionedSerdeState};
+use crate::idx::{IndexKeyBase, VersionedStore};
 use crate::kvs::{Key, Transaction};
 use crate::sql::{Id, Thing};
 use derive::Store;
@@ -11,6 +12,7 @@ use serde::{Deserialize, Serialize};
 pub(in crate::idx) struct HnswDocs {
 	tb: String,
 	ikb: IndexKeyBase,
+	#[allow(unused)]
 	state_key: Key,
 	state_updated: bool,
 	state: State,
@@ -24,13 +26,13 @@ struct State {
 	next_doc_id: DocId,
 }
 
-impl VersionedSerdeState for State {}
+impl VersionedStore for State {}
 
 impl HnswDocs {
 	pub async fn new(tx: &mut Transaction, tb: String, ikb: IndexKeyBase) -> Result<Self, Error> {
 		let state_key = ikb.new_hd_key(None);
 		let state = if let Some(k) = tx.get(state_key.clone()).await? {
-			State::try_from_val(k)?
+			VersionedStore::try_from(k)?
 		} else {
 			State::default()
 		};
@@ -43,15 +45,16 @@ impl HnswDocs {
 		})
 	}
 
-	pub(super) async fn resolve(&mut self, tx: &mut Transaction, id: &Id) -> Result<DocId, Error> {
-		let id_key = self.ikb.new_hi_key(id);
-		if let Some(v) = tx.get(&id_key).await? {
-			Ok(v.into())
+	pub(super) async fn resolve(&mut self, tx: &mut Transaction, id: Id) -> Result<DocId, Error> {
+		let id_key = self.ikb.new_hi_key(id.clone());
+		if let Some(v) = tx.get(id_key.clone()).await? {
+			let doc_id = u64::from_be_bytes(v.try_into().unwrap());
+			Ok(doc_id)
 		} else {
 			let doc_id = self.next_doc_id();
-			tx.set(&id_key, doc_id.into()).await?;
+			tx.set(id_key, doc_id.to_be_bytes()).await?;
 			let doc_key = self.ikb.new_hd_key(Some(doc_id));
-			tx.set(&id_key, id.into()).await?;
+			tx.set(doc_key, id).await?;
 			Ok(doc_id)
 		}
 	}
@@ -70,11 +73,11 @@ impl HnswDocs {
 
 	pub(in crate::idx) async fn get_thing(
 		&self,
-		tx: &mut Transaction,
+		ctx: &Context<'_>,
 		doc_id: DocId,
 	) -> Result<Option<Thing>, Error> {
 		let doc_key = self.ikb.new_hd_key(Some(doc_id));
-		if let Some(val) = tx.get(doc_key).await? {
+		if let Some(val) = ctx.tx_lock().await.get(doc_key).await? {
 			let id: Id = val.into();
 			Ok(Some(Thing::from((self.tb.to_owned(), id))))
 		} else {
@@ -85,18 +88,18 @@ impl HnswDocs {
 	pub(super) async fn remove(
 		&mut self,
 		tx: &mut Transaction,
-		id: &Id,
+		id: Id,
 	) -> Result<Option<DocId>, Error> {
-		let doc_key: Key = id.into();
-		if let Some(doc_id) = self.doc_ids.remove(&doc_key) {
-			let n = doc_id as usize;
-			if n < self.ids_doc.len() {
-				self.ids_doc[n] = None;
-			}
-			self.available.insert(doc_id);
-			Some(doc_id)
+		let id_key = self.ikb.new_hi_key(id);
+		if let Some(v) = tx.get(id_key.clone()).await? {
+			let doc_id = u64::from_be_bytes(v.try_into().unwrap());
+			let doc_key = self.ikb.new_hd_key(Some(doc_id));
+			tx.del(doc_key).await?;
+			tx.del(id_key).await?;
+			self.state.available.insert(doc_id);
+			Ok(Some(doc_id))
 		} else {
-			None
+			Ok(None)
 		}
 	}
 }

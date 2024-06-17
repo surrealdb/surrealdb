@@ -4,7 +4,7 @@ use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::sql::{escape::escape_rid, Array, Number, Object, Strand, Thing, Uuid, Value};
-use derive::Store;
+use derive::Key;
 use nanoid::nanoid;
 use reblessive::tree::Stk;
 use revision::revisioned;
@@ -24,7 +24,7 @@ pub enum Gen {
 }
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize, Store, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize, Key, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub enum Id {

@@ -1,3 +1,4 @@
+use crate::ctx::Context;
 use crate::err::Error;
 use crate::idx::planner::checker::HnswConditionChecker;
 use crate::idx::trees::dynamicset::{ArraySet, HashBrownSet};
@@ -5,7 +6,6 @@ use crate::idx::trees::hnsw::docs::HnswDocs;
 use crate::idx::trees::hnsw::index::VecDocs;
 use crate::idx::trees::hnsw::{ElementId, Hnsw, HnswSearch};
 use crate::idx::trees::vector::SharedVector;
-use crate::kvs::Transaction;
 use crate::sql::index::HnswParams;
 use reblessive::tree::Stk;
 
@@ -111,55 +111,55 @@ impl HnswFlavor {
 	}
 	pub(super) async fn knn_search_checked(
 		&self,
+		ctx: &Context<'_>,
+		stk: &mut Stk,
 		search: &HnswSearch,
 		hnsw_docs: &HnswDocs,
 		vec_docs: &VecDocs,
-		stk: &mut Stk,
-		tx: &mut Transaction,
 		chk: &mut HnswConditionChecker<'_>,
 	) -> Result<Vec<(f64, ElementId)>, Error> {
 		match self {
 			HnswFlavor::H5_9(h) => {
-				h.knn_search_checked(search, hnsw_docs, vec_docs, stk, tx, chk).await
+				h.knn_search_checked(ctx, stk, search, hnsw_docs, vec_docs, chk).await
 			}
 			HnswFlavor::H5_17(h) => {
-				h.knn_search_checked(search, hnsw_docs, vec_docs, stk, tx, chk).await
+				h.knn_search_checked(ctx, stk, search, hnsw_docs, vec_docs, chk).await
 			}
 			HnswFlavor::H5_25(h) => {
-				h.knn_search_checked(search, hnsw_docs, vec_docs, stk, tx, chk).await
+				h.knn_search_checked(ctx, stk, search, hnsw_docs, vec_docs, chk).await
 			}
 			HnswFlavor::H5set(h) => {
-				h.knn_search_checked(search, hnsw_docs, vec_docs, stk, tx, chk).await
+				h.knn_search_checked(ctx, stk, search, hnsw_docs, vec_docs, chk).await
 			}
 			HnswFlavor::H9_17(h) => {
-				h.knn_search_checked(search, hnsw_docs, vec_docs, stk, tx, chk).await
+				h.knn_search_checked(ctx, stk, search, hnsw_docs, vec_docs, chk).await
 			}
 			HnswFlavor::H9_25(h) => {
-				h.knn_search_checked(search, hnsw_docs, vec_docs, stk, tx, chk).await
+				h.knn_search_checked(ctx, stk, search, hnsw_docs, vec_docs, chk).await
 			}
 			HnswFlavor::H9set(h) => {
-				h.knn_search_checked(search, hnsw_docs, vec_docs, stk, tx, chk).await
+				h.knn_search_checked(ctx, stk, search, hnsw_docs, vec_docs, chk).await
 			}
 			HnswFlavor::H13_25(h) => {
-				h.knn_search_checked(search, hnsw_docs, vec_docs, stk, tx, chk).await
+				h.knn_search_checked(ctx, stk, search, hnsw_docs, vec_docs, chk).await
 			}
 			HnswFlavor::H13set(h) => {
-				h.knn_search_checked(search, hnsw_docs, vec_docs, stk, tx, chk).await
+				h.knn_search_checked(ctx, stk, search, hnsw_docs, vec_docs, chk).await
 			}
 			HnswFlavor::H17set(h) => {
-				h.knn_search_checked(search, hnsw_docs, vec_docs, stk, tx, chk).await
+				h.knn_search_checked(ctx, stk, search, hnsw_docs, vec_docs, chk).await
 			}
 			HnswFlavor::H21set(h) => {
-				h.knn_search_checked(search, hnsw_docs, vec_docs, stk, tx, chk).await
+				h.knn_search_checked(ctx, stk, search, hnsw_docs, vec_docs, chk).await
 			}
 			HnswFlavor::H25set(h) => {
-				h.knn_search_checked(search, hnsw_docs, vec_docs, stk, tx, chk).await
+				h.knn_search_checked(ctx, stk, search, hnsw_docs, vec_docs, chk).await
 			}
 			HnswFlavor::H29set(h) => {
-				h.knn_search_checked(search, hnsw_docs, vec_docs, stk, tx, chk).await
+				h.knn_search_checked(ctx, stk, search, hnsw_docs, vec_docs, chk).await
 			}
 			HnswFlavor::Hset(h) => {
-				h.knn_search_checked(search, hnsw_docs, vec_docs, stk, tx, chk).await
+				h.knn_search_checked(ctx, stk, search, hnsw_docs, vec_docs, chk).await
 			}
 		}
 	}

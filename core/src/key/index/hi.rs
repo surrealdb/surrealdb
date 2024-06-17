@@ -20,7 +20,7 @@ pub struct Hi<'a> {
 	_e: u8,
 	_f: u8,
 	_g: u8,
-	pub id: &'a Id,
+	pub id: Id,
 }
 
 impl KeyRequirements for Hi<'_> {
@@ -30,7 +30,7 @@ impl KeyRequirements for Hi<'_> {
 }
 
 impl<'a> Hi<'a> {
-	pub fn new(ns: &'a str, db: &'a str, tb: &'a str, ix: &'a str, id: &'a Id) -> Self {
+	pub fn new(ns: &'a str, db: &'a str, tb: &'a str, ix: &'a str, id: Id) -> Self {
 		Self {
 			__: b'/',
 			_a: b'*',
@@ -55,7 +55,7 @@ mod tests {
 	#[test]
 	fn key() {
 		use super::*;
-		let val = Hi::new("testns", "testdb", "testtb", "testix", &Id::Number(1));
+		let val = Hi::new("testns", "testdb", "testtb", "testix", Id::Number(1));
 		let enc = Hi::encode(&val).unwrap();
 		assert_eq!(
 			enc,

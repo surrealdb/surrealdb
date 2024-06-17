@@ -103,8 +103,8 @@ impl IteratorEntry {
 impl InnerQueryExecutor {
 	#[allow(clippy::too_many_arguments)]
 	pub(super) async fn new(
-		stk: &mut Stk,
 		ctx: &Context<'_>,
+		stk: &mut Stk,
 		opt: &Options,
 		table: &Table,
 		im: IndexesMap,
@@ -207,8 +207,8 @@ impl InnerQueryExecutor {
 							let entry = match hnsw_map.entry(ix_ref) {
 								Entry::Occupied(e) => {
 									HnswEntry::new(
-										stk,
 										ctx,
+										stk,
 										opt,
 										e.get().clone(),
 										a,
@@ -224,8 +224,8 @@ impl InnerQueryExecutor {
 										.get_index_hnsw(ctx, opt, idx_def, p)
 										.await?;
 									let entry = HnswEntry::new(
-										stk,
 										ctx,
+										stk,
 										opt,
 										hnsw.clone(),
 										a,
@@ -787,8 +787,8 @@ pub(super) struct HnswEntry {
 impl HnswEntry {
 	#[allow(clippy::too_many_arguments)]
 	async fn new(
-		stk: &mut Stk,
 		ctx: &Context<'_>,
+		stk: &mut Stk,
 		opt: &Options,
 		h: SharedHnswIndex,
 		v: &[Number],
@@ -802,8 +802,7 @@ impl HnswEntry {
 		} else {
 			HnswConditionChecker::new()
 		};
-		let mut tx = ctx.tx_lock().await;
-		let res = h.knn_search(v, n as usize, ef as usize, stk, &mut tx, cond_checker).await?;
+		let res = h.knn_search(ctx, stk, v, n as usize, ef as usize, cond_checker).await?;
 		drop(h);
 		Ok(Self {
 			res,
