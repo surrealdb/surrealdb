@@ -14,6 +14,7 @@ pub mod bu;
 pub mod hd;
 pub mod he;
 pub mod hi;
+pub mod hv;
 pub mod vm;
 
 use crate::key::error::KeyCategory;

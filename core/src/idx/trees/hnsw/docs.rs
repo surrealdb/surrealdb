@@ -1,10 +1,16 @@
 use crate::ctx::Context;
 use crate::err::Error;
 use crate::idx::docids::DocId;
+use crate::idx::trees::hnsw::flavor::HnswFlavor;
+use crate::idx::trees::hnsw::ElementId;
+use crate::idx::trees::knn::Ids64;
+use crate::idx::trees::vector::SharedVector;
 use crate::idx::{IndexKeyBase, VersionedStore};
 use crate::kvs::{Key, Transaction};
 use crate::sql::{Id, Thing};
 use derive::Store;
+use hashbrown::hash_map::Entry;
+use hashbrown::HashMap;
 use revision::revisioned;
 use roaring::RoaringTreemap;
 use serde::{Deserialize, Serialize};
@@ -29,7 +35,11 @@ struct State {
 impl VersionedStore for State {}
 
 impl HnswDocs {
-	pub async fn new(tx: &mut Transaction, tb: String, ikb: IndexKeyBase) -> Result<Self, Error> {
+	pub(in crate::idx) async fn new(
+		tx: &mut Transaction,
+		tb: String,
+		ikb: IndexKeyBase,
+	) -> Result<Self, Error> {
 		let state_key = ikb.new_hd_key(None);
 		let state = if let Some(k) = tx.get(state_key.clone()).await? {
 			VersionedStore::try_from(k)?
@@ -100,6 +110,56 @@ impl HnswDocs {
 			Ok(Some(doc_id))
 		} else {
 			Ok(None)
+		}
+	}
+}
+
+pub(in crate::idx) struct VecDocs {
+	ikb: IndexKeyBase,
+	map: HashMap<SharedVector, (Ids64, ElementId)>,
+}
+
+impl VecDocs {
+	pub(super) fn new(ikb: IndexKeyBase) -> Self {
+		Self {
+			ikb,
+			map: HashMap::default(),
+		}
+	}
+
+	pub(super) fn get_docs(&self, pt: &SharedVector) -> Option<&Ids64> {
+		self.map.get(pt).map(|(doc_ids, _)| doc_ids)
+	}
+
+	pub(super) fn insert(&mut self, o: SharedVector, d: DocId, h: &mut HnswFlavor) {
+		match self.map.entry(o) {
+			Entry::Occupied(mut e) => {
+				let (docs, element_id) = e.get_mut();
+				if let Some(new_docs) = docs.insert(d) {
+					let element_id = *element_id;
+					e.insert((new_docs, element_id));
+				}
+			}
+			Entry::Vacant(e) => {
+				let o = e.key().clone();
+				let element_id = h.insert(o);
+				e.insert((Ids64::One(d), element_id));
+			}
+		}
+	}
+
+	pub(super) fn remove(&mut self, o: SharedVector, d: DocId, h: &mut HnswFlavor) {
+		if let Entry::Occupied(mut e) = self.map.entry(o) {
+			let (docs, e_id) = e.get_mut();
+			if let Some(new_docs) = docs.remove(d) {
+				let e_id = *e_id;
+				if new_docs.is_empty() {
+					e.remove();
+					h.remove(e_id);
+				} else {
+					e.insert((new_docs, e_id));
+				}
+			}
 		}
 	}
 }

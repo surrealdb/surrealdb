@@ -64,7 +64,7 @@ mod tests {
 			Some(7)
 		);
 		let enc = Hd::encode(&val).unwrap();
-		assert_eq!(enc, b"/*testns\0*testdb\0*testtb\0+testix\0!hd\0\0\0\0\0\0\0\x07");
+		assert_eq!(enc, b"/*testns\0*testdb\0*testtb\0+testix\0!hd\x01\0\0\0\0\0\0\0\x07");
 
 		let dec = Hd::decode(&enc).unwrap();
 		assert_eq!(val, dec);

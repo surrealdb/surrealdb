@@ -28,9 +28,9 @@ pub enum Vector {
 }
 
 #[revisioned(revision = 1)]
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Serialize, Deserialize)]
 #[non_exhaustive]
-enum SerializedVector {
+pub enum SerializedVector {
 	F64(Vec<f64>),
 	F32(Vec<f32>),
 	I64(Vec<i64>),

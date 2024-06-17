@@ -3,17 +3,16 @@ use crate::err::Error;
 use crate::idx::docids::DocId;
 use crate::idx::planner::checker::HnswConditionChecker;
 use crate::idx::planner::iterators::KnnIteratorResult;
-use crate::idx::trees::hnsw::docs::HnswDocs;
+use crate::idx::trees::hnsw::docs::{HnswDocs, VecDocs};
 use crate::idx::trees::hnsw::elements::HnswElements;
 use crate::idx::trees::hnsw::flavor::HnswFlavor;
 use crate::idx::trees::hnsw::{ElementId, HnswSearch};
-use crate::idx::trees::knn::{Ids64, KnnResult, KnnResultBuilder};
+use crate::idx::trees::knn::{KnnResult, KnnResultBuilder};
 use crate::idx::trees::vector::{SharedVector, Vector};
 use crate::idx::IndexKeyBase;
 use crate::kvs::Transaction;
 use crate::sql::index::{HnswParams, VectorType};
 use crate::sql::{Id, Number, Value};
-use hashbrown::hash_map::Entry;
 use hashbrown::HashMap;
 use reblessive::tree::Stk;
 use std::collections::VecDeque;
@@ -25,8 +24,6 @@ pub struct HnswIndex {
 	docs: HnswDocs,
 	vec_docs: VecDocs,
 }
-
-pub(super) type VecDocs = HashMap<SharedVector, (Ids64, ElementId)>;
 
 pub(super) struct HnswCheckedSearchContext<'a> {
 	elements: &'a HnswElements,
@@ -65,8 +62,8 @@ impl<'a> HnswCheckedSearchContext<'a> {
 		self.docs
 	}
 
-	pub(super) fn get_docs(&self, pt: &SharedVector) -> Option<&Ids64> {
-		self.vec_docs.get(pt).map(|(doc_ids, _)| doc_ids)
+	pub(super) fn vec_docs(&self) -> &VecDocs {
+		self.vec_docs
 	}
 
 	pub(super) fn elements(&self) -> &HnswElements {
@@ -86,8 +83,8 @@ impl HnswIndex {
 			dim: p.dimension as usize,
 			vector_type: p.vector_type,
 			hnsw: HnswFlavor::new(p),
-			docs: HnswDocs::new(&mut tx, tb, ikb).await?,
-			vec_docs: HashMap::default(),
+			docs: HnswDocs::new(&mut tx, tb, ikb.clone()).await?,
+			vec_docs: VecDocs::new(ikb),
 		})
 	}
 
@@ -110,35 +107,11 @@ impl HnswIndex {
 	}
 
 	pub(super) fn insert(&mut self, o: SharedVector, d: DocId) {
-		match self.vec_docs.entry(o) {
-			Entry::Occupied(mut e) => {
-				let (docs, element_id) = e.get_mut();
-				if let Some(new_docs) = docs.insert(d) {
-					let element_id = *element_id;
-					e.insert((new_docs, element_id));
-				}
-			}
-			Entry::Vacant(e) => {
-				let o = e.key().clone();
-				let element_id = self.hnsw.insert(o);
-				e.insert((Ids64::One(d), element_id));
-			}
-		}
+		self.vec_docs.insert(o, d, &mut self.hnsw);
 	}
 
 	pub(super) fn remove(&mut self, o: SharedVector, d: DocId) {
-		if let Entry::Occupied(mut e) = self.vec_docs.entry(o) {
-			let (docs, e_id) = e.get_mut();
-			if let Some(new_docs) = docs.remove(d) {
-				let e_id = *e_id;
-				if new_docs.is_empty() {
-					e.remove();
-					self.hnsw.remove(e_id);
-				} else {
-					e.insert((new_docs, e_id));
-				}
-			}
-		}
+		self.vec_docs.remove(o, d, &mut self.hnsw);
 	}
 
 	pub(crate) async fn remove_document(
@@ -207,7 +180,7 @@ impl HnswIndex {
 		for (e_dist, e_id) in neighbors {
 			if builder.check_add(e_dist) {
 				if let Some(v) = self.hnsw.get_vector(&e_id) {
-					if let Some((docs, _)) = self.vec_docs.get(v) {
+					if let Some(docs) = self.vec_docs.get_docs(v) {
 						let evicted_docs = builder.add(e_dist, docs);
 						chk.expires(evicted_docs);
 					}

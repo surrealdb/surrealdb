@@ -3,7 +3,7 @@ use crate::err::Error;
 use crate::idx::planner::checker::HnswConditionChecker;
 use crate::idx::trees::dynamicset::{ArraySet, HashBrownSet};
 use crate::idx::trees::hnsw::docs::HnswDocs;
-use crate::idx::trees::hnsw::index::VecDocs;
+use crate::idx::trees::hnsw::docs::VecDocs;
 use crate::idx::trees::hnsw::{ElementId, Hnsw, HnswSearch};
 use crate::idx::trees::vector::SharedVector;
 use crate::sql::index::HnswParams;

@@ -10,9 +10,11 @@ use crate::err::Error;
 use crate::idx::planner::checker::HnswConditionChecker;
 use crate::idx::trees::dynamicset::DynamicSet;
 use crate::idx::trees::hnsw::docs::HnswDocs;
+use crate::idx::trees::hnsw::docs::VecDocs;
 use crate::idx::trees::hnsw::elements::HnswElements;
 use crate::idx::trees::hnsw::heuristic::Heuristic;
-use crate::idx::trees::hnsw::index::{HnswCheckedSearchContext, VecDocs};
+use crate::idx::trees::hnsw::index::HnswCheckedSearchContext;
+
 use crate::idx::trees::hnsw::layer::HnswLayer;
 use crate::idx::trees::knn::DoublePriorityQueue;
 use crate::idx::trees::vector::SharedVector;

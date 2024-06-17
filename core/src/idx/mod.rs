@@ -8,6 +8,7 @@ use crate::idx::docids::DocId;
 use crate::idx::ft::terms::TermId;
 use crate::idx::trees::hnsw::ElementId;
 use crate::idx::trees::store::NodeId;
+use crate::idx::trees::vector::SerializedVector;
 use crate::key::index::bc::Bc;
 use crate::key::index::bd::Bd;
 use crate::key::index::bf::Bf;
@@ -22,6 +23,7 @@ use crate::key::index::bu::Bu;
 use crate::key::index::hd::Hd;
 use crate::key::index::he::He;
 use crate::key::index::hi::Hi;
+use crate::key::index::hv::Hv;
 use crate::key::index::vm::Vm;
 use crate::kvs::{Key, Val};
 use crate::sql::statements::DefineIndexStatement;
@@ -209,6 +211,17 @@ impl IndexKeyBase {
 			self.inner.tb.as_str(),
 			self.inner.ix.as_str(),
 			id,
+		)
+		.into()
+	}
+
+	fn new_hv_key(&self, vec: Arc<SerializedVector>) -> Key {
+		Hv::new(
+			self.inner.ns.as_str(),
+			self.inner.db.as_str(),
+			self.inner.tb.as_str(),
+			self.inner.ix.as_str(),
+			vec,
 		)
 		.into()
 	}

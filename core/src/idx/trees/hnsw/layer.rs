@@ -210,7 +210,7 @@ where
 		e_id: ElementId,
 		chk: &mut HnswConditionChecker<'_>,
 	) -> Result<bool, Error> {
-		if let Some(docs) = search.get_docs(e_pt) {
+		if let Some(docs) = search.vec_docs().get_docs(e_pt) {
 			if chk.check_truthy(ctx, stk, search.docs(), docs).await? {
 				w.push(e_dist, e_id);
 				if w.len() > search.ef() {

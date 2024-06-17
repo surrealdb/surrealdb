@@ -55,11 +55,11 @@ mod tests {
 	#[test]
 	fn key() {
 		use super::*;
-		let val = Hi::new("testns", "testdb", "testtb", "testix", Id::Number(1));
+		let val = Hi::new("testns", "testdb", "testtb", "testix", Id::String("testid".to_string()));
 		let enc = Hi::encode(&val).unwrap();
 		assert_eq!(
 			enc,
-			b"/*testns\0*testdb\0*testtb\0+testix\0!httest\0\0\0\0\0\x80\0\0\0\0\0\0\x01",
+			b"/*testns\0*testdb\0*testtb\0+testix\0!hi\0\0\0\x01testid\0",
 			"{}",
 			String::from_utf8_lossy(&enc)
 		);
