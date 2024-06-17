@@ -28,7 +28,7 @@ impl FromArg for String {
 
 impl FromArg for Strand {
 	fn from_arg(arg: Value) -> Result<Self, Error> {
-		arg.coerce_to_strand()
+		arg.coerce_to_string().map(Strand)
 	}
 }
 

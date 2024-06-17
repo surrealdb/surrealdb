@@ -76,10 +76,10 @@ pub fn replace((val, old_or_regexp, new): (String, Value, String)) -> Result<Val
 				let increase = new.len() - old.len();
 				limit(
 					"string::replace",
-					val.len().saturating_add(val.matches(&old.0).count().saturating_mul(increase)),
+					val.len().saturating_add(val.matches(&old).count().saturating_mul(increase)),
 				)?;
 			}
-			Ok(val.replace(&old.0, &new).into())
+			Ok(val.replace(&old, &new).into())
 		}
 		Value::Regex(r) => Ok(r.0.replace_all(&val, new).into_owned().into()),
 		_ => Err(Error::InvalidArguments {
@@ -257,7 +257,7 @@ pub mod is {
 
 	pub fn uuid((arg,): (Value,)) -> Result<Value, Error> {
 		Ok(match arg {
-			Value::Strand(v) => Uuid::parse_str(v.as_string().as_str()).is_ok(),
+			Value::Strand(v) => Uuid::parse_str(v.as_str()).is_ok(),
 			Value::Uuid(_) => true,
 			_ => false,
 		}

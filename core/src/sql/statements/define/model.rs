@@ -108,7 +108,7 @@ impl InfoStructure for DefineModelStatement {
 		acc.insert("version".to_string(), version.into());
 
 		if let Some(comment) = comment {
-			acc.insert("comment".to_string(), comment.into());
+			acc.insert("comment".to_string(), comment.0.into());
 		}
 
 		acc.insert("permissions".to_string(), permissions.structure());

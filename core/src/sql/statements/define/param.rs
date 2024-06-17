@@ -107,7 +107,7 @@ impl InfoStructure for DefineParamStatement {
 		acc.insert("value".to_string(), value.structure());
 
 		if let Some(comment) = comment {
-			acc.insert("comment".to_string(), comment.into());
+			acc.insert("comment".to_string(), comment.0.into());
 		}
 
 		acc.insert("permissions".to_string(), permissions.structure());

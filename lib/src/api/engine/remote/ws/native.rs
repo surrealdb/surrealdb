@@ -242,12 +242,12 @@ pub(crate) fn router(
 							match method {
 								Method::Set => {
 									if let [Value::Strand(key), value] = &params[..2] {
-										var_stash.insert(id, (key.0.clone(), value.clone()));
+										var_stash.insert(id, (key.clone(), value.clone()));
 									}
 								}
 								Method::Unset => {
 									if let [Value::Strand(key)] = &params[..1] {
-										vars.swap_remove(&key.0);
+										vars.swap_remove(key);
 									}
 								}
 								Method::Live => {

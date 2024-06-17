@@ -272,7 +272,7 @@ where
 			if let Value::Array(array) = &mut bindings {
 				if let [Value::Strand(key), value] = &mut array.0[..] {
 					let mut map = BTreeMap::new();
-					map.insert(mem::take(&mut key.0), mem::take(value));
+					map.insert(mem::take(key), mem::take(value));
 					bindings = map.into();
 				}
 			}

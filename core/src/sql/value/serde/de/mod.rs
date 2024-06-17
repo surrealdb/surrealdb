@@ -224,7 +224,7 @@ fn into_json(value: Value, simplify: bool) -> JsonValue {
 			Number::Float(float) => float.into(),
 			Number::Decimal(decimal) => json!(decimal),
 		},
-		Value::Strand(strand) => strand.0.into(),
+		Value::Strand(strand) => strand.into(),
 		Value::Duration(duration) => match simplify {
 			true => duration.to_raw().into(),
 			false => json!(duration.0),

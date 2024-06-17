@@ -127,7 +127,7 @@ impl InfoStructure for DefineAnalyzerStatement {
 		}
 
 		if let Some(comment) = comment {
-			acc.insert("comment".to_string(), comment.into());
+			acc.insert("comment".to_string(), comment.0.into());
 		}
 
 		Value::Object(acc)

@@ -97,7 +97,7 @@ impl RpcContext for PostRpcContext<'_> {
 		let Ok(Value::Strand(token)) = params.needs_one() else {
 			return Err(RpcError::InvalidParams);
 		};
-		surrealdb::iam::verify::token(self.kvs, &mut self.session, &token.0).await?;
+		surrealdb::iam::verify::token(self.kvs, &mut self.session, &token).await?;
 		Ok(Value::None)
 	}
 }

@@ -37,9 +37,9 @@ impl Parser<'_> {
 				self.parse_json_array(ctx, token.span).await.map(Value::Array)
 			}
 			TokenKind::Qoute(QouteKind::Plain | QouteKind::PlainDouble) => {
-				let strand: Strand = self.next_token_value()?;
+				let Strand(strand) = self.next_token_value()?;
 				if self.legacy_strands {
-					if let Some(x) = self.reparse_legacy_strand(ctx, &strand.0).await {
+					if let Some(x) = self.reparse_legacy_strand(ctx, &strand).await {
 						return Ok(x);
 					}
 				}

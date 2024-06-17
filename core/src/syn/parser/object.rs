@@ -128,7 +128,7 @@ impl Parser<'_> {
 					return self
 						.parse_object_from_map(
 							ctx,
-							BTreeMap::from([(key, Value::Strand(type_value.into()))]),
+							BTreeMap::from([(key, Value::Strand(type_value))]),
 							start,
 						)
 						.await
@@ -143,7 +143,7 @@ impl Parser<'_> {
 						.parse_object_from_key(
 							ctx,
 							coord_key,
-							BTreeMap::from([(key, Value::Strand(type_value.into()))]),
+							BTreeMap::from([(key, Value::Strand(type_value))]),
 							start,
 						)
 						.await
@@ -164,7 +164,7 @@ impl Parser<'_> {
 							.parse_object_from_map(
 								ctx,
 								BTreeMap::from([
-									(key, Value::Strand(type_value.into())),
+									(key, Value::Strand(type_value)),
 									(coord_key, value),
 								]),
 								start,
@@ -194,20 +194,20 @@ impl Parser<'_> {
 					}
 
 					return Ok(Value::Object(Object(BTreeMap::from([
-						(key, Value::Strand(type_value.into())),
+						(key, Value::Strand(type_value)),
 						(coord_key, Value::Array(x)),
 					]))));
 				}
 
 				// Couldn't convert so it is a normal object.
 				Ok(Value::Object(Object(BTreeMap::from([
-					(key, Value::Strand(type_value.into())),
+					(key, Value::Strand(type_value)),
 					(coord_key, value),
 				]))))
 			}
 			// key was not one of the allowed keys so it is a normal object.
 			_ => {
-				let object = BTreeMap::from([(key, Value::Strand(type_value.into()))]);
+				let object = BTreeMap::from([(key, Value::Strand(type_value))]);
 
 				if self.eat(t!(",")) {
 					self.parse_object_from_map(ctx, object, start).await.map(Value::Object)
@@ -317,13 +317,13 @@ impl Parser<'_> {
 			self.expect_closing_delimiter(t!("}"), start)?;
 			return Ok(Value::Object(Object(BTreeMap::from([
 				(key, value),
-				(type_key, Value::Strand(type_value.into())),
+				(type_key, Value::Strand(type_value)),
 			]))));
 		}
 
 		self.parse_object_from_map(
 			ctx,
-			BTreeMap::from([(key, value), (type_key, Value::Strand(type_value.into()))]),
+			BTreeMap::from([(key, value), (type_key, Value::Strand(type_value))]),
 			start,
 		)
 		.await
@@ -398,13 +398,13 @@ impl Parser<'_> {
 			self.expect_closing_delimiter(t!("}"), start)?;
 			return Ok(Value::Object(Object(BTreeMap::from([
 				(key, value),
-				(type_key, Value::Strand(type_value.into())),
+				(type_key, Value::Strand(type_value)),
 			]))));
 		}
 
 		self.parse_object_from_map(
 			ctx,
-			BTreeMap::from([(key, value), (type_key, Value::Strand(type_value.into()))]),
+			BTreeMap::from([(key, value), (type_key, Value::Strand(type_value))]),
 			start,
 		)
 		.await
@@ -451,10 +451,7 @@ impl Parser<'_> {
 		if !self.eat(t!(",")) {
 			// there is not second field. not a geometry
 			self.expect_closing_delimiter(t!("}"), start)?;
-			return Ok(Value::Object(Object(BTreeMap::from([(
-				key,
-				Value::Strand(strand.into()),
-			)]))));
+			return Ok(Value::Object(Object(BTreeMap::from([(key, Value::Strand(strand))]))));
 		}
 		let coord_key = self.parse_object_key()?;
 		if coord_key != "coordinates" {
@@ -464,7 +461,7 @@ impl Parser<'_> {
 				.parse_object_from_key(
 					ctx,
 					coord_key,
-					BTreeMap::from([(key, Value::Strand(strand.into()))]),
+					BTreeMap::from([(key, Value::Strand(strand))]),
 					start,
 				)
 				.await
@@ -488,7 +485,7 @@ impl Parser<'_> {
 			return self
 				.parse_object_from_map(
 					ctx,
-					BTreeMap::from([(key, Value::Strand(strand.into())), (coord_key, value)]),
+					BTreeMap::from([(key, Value::Strand(strand)), (coord_key, value)]),
 					start,
 				)
 				.await
@@ -498,7 +495,7 @@ impl Parser<'_> {
 		let Some(v) = capture(&value) else {
 			// failed to match the geometry value, just a plain object.
 			return Ok(Value::Object(Object(BTreeMap::from([
-				(key, Value::Strand(strand.into())),
+				(key, Value::Strand(strand)),
 				(coord_key, value),
 			]))));
 		};

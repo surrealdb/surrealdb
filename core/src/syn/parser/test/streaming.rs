@@ -638,9 +638,9 @@ fn statements() -> Vec<Statement> {
 		Statement::Update(UpdateStatement {
 			only: true,
 			what: Values(vec![
-				Value::Future(Box::new(Future(Block(vec![Entry::Value(Value::Strand(Strand(
+				Value::Future(Box::new(Future(Block(vec![Entry::Value(Value::Strand(
 					"text".to_string(),
-				)))])))),
+				))])))),
 				Value::Idiom(Idiom(vec![
 					Part::Field(Ident("a".to_string())),
 					Part::Graph(Graph {
@@ -672,9 +672,9 @@ fn statements() -> Vec<Statement> {
 		Statement::Upsert(UpsertStatement {
 			only: true,
 			what: Values(vec![
-				Value::Future(Box::new(Future(Block(vec![Entry::Value(Value::Strand(Strand(
+				Value::Future(Box::new(Future(Block(vec![Entry::Value(Value::Strand(
 					"text".to_string(),
-				)))])))),
+				))])))),
 				Value::Idiom(Idiom(vec![
 					Part::Field(Ident("a".to_string())),
 					Part::Graph(Graph {

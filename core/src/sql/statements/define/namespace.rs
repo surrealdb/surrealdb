@@ -97,7 +97,7 @@ impl InfoStructure for DefineNamespaceStatement {
 		acc.insert("name".to_string(), name.structure());
 
 		if let Some(comment) = comment {
-			acc.insert("comment".to_string(), comment.into());
+			acc.insert("comment".to_string(), comment.0.into());
 		}
 
 		Value::Object(acc)

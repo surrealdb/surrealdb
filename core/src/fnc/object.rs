@@ -2,15 +2,13 @@ use std::collections::BTreeMap;
 
 use crate::err::Error;
 use crate::sql::value::Value;
-use crate::sql::{Array, Object, Strand};
+use crate::sql::{Array, Object};
 
 pub fn entries((object,): (Object,)) -> Result<Value, Error> {
 	Ok(Value::Array(Array(
 		object
 			.iter()
-			.map(|(k, v)| {
-				Value::Array(Array(vec![Value::Strand(Strand(k.to_owned())), v.to_owned()]))
-			})
+			.map(|(k, v)| Value::Array(Array(vec![Value::Strand(k.to_owned()), v.to_owned()])))
 			.collect(),
 	)))
 }
@@ -23,7 +21,7 @@ pub fn from_entries((array,): (Array,)) -> Result<Value, Error> {
 			Value::Array(Array(entry)) if entry.len() == 2 => {
 				let key = match entry.first() {
 					Some(v) => match v {
-						Value::Strand(v) => v.to_owned().to_raw(),
+						Value::Strand(v) => v.to_owned(),
 						v => v.to_string(),
 					},
 					_ => {
@@ -63,7 +61,7 @@ pub fn len((object,): (Object,)) -> Result<Value, Error> {
 }
 
 pub fn keys((object,): (Object,)) -> Result<Value, Error> {
-	Ok(Value::Array(Array(object.keys().map(|v| Value::Strand(Strand(v.to_owned()))).collect())))
+	Ok(Value::Array(Array(object.keys().map(|v| Value::Strand(v.to_owned())).collect())))
 }
 
 pub fn values((object,): (Object,)) -> Result<Value, Error> {

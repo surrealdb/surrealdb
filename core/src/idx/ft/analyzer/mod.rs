@@ -9,8 +9,8 @@ use crate::idx::ft::postings::TermFrequency;
 use crate::idx::ft::terms::{TermId, TermLen, Terms};
 use crate::sql::statements::DefineAnalyzerStatement;
 use crate::sql::tokenizer::Tokenizer as SqlTokenizer;
+use crate::sql::Function;
 use crate::sql::Value;
-use crate::sql::{Function, Strand};
 use filter::Filter;
 use reblessive::tree::Stk;
 use std::collections::hash_map::Entry;
@@ -241,7 +241,7 @@ impl Analyzer {
 		tks: &mut Vec<Tokens>,
 	) -> Result<(), Error> {
 		match val {
-			Value::Strand(s) => tks.push(self.generate_tokens(stk, ctx, opt, stage, s.0).await?),
+			Value::Strand(s) => tks.push(self.generate_tokens(stk, ctx, opt, stage, s).await?),
 			Value::Number(n) => {
 				tks.push(self.generate_tokens(stk, ctx, opt, stage, n.to_string()).await?)
 			}
@@ -272,10 +272,10 @@ impl Analyzer {
 		mut input: String,
 	) -> Result<Tokens, Error> {
 		if let Some(function_name) = self.function.clone() {
-			let fns = Function::Custom(function_name.clone(), vec![Value::Strand(Strand(input))]);
+			let fns = Function::Custom(function_name.clone(), vec![Value::Strand(input)]);
 			let val = fns.compute(stk, ctx, opt, None).await?;
 			if let Value::Strand(val) = val {
-				input = val.0;
+				input = val;
 			} else {
 				return Err(Error::InvalidFunction {
 					name: function_name,

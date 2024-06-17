@@ -45,7 +45,7 @@ pub async fn delete(_: &Context<'_>, (_, _): (Value, Option<Value>)) -> Result<V
 fn try_as_uri(fn_name: &str, value: Value) -> Result<crate::sql::Strand, Error> {
 	match value {
 		// Pre-check URI.
-		Value::Strand(uri) if crate::fnc::util::http::uri_is_valid(&uri) => Ok(uri),
+		Value::Strand(uri) if crate::fnc::util::http::uri_is_valid(&uri) => Ok(uri.into()),
 		_ => Err(Error::InvalidArguments {
 			name: fn_name.to_owned(),
 			// Assumption is that URI is first argument.

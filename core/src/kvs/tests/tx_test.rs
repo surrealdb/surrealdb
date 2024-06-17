@@ -71,11 +71,11 @@ async fn delr_range_correct() {
 
 	// Create some data
 	let mut tx = test.db.transaction(Write, Optimistic).await.unwrap();
-	tx.putc(b"hugh\x00\x10", Value::Strand(Strand::from("0010")), None).await.unwrap();
-	tx.put(KeyCategory::ChangeFeed, b"hugh\x00\x10\x10", Value::Strand(Strand::from("001010")))
+	tx.putc(b"hugh\x00\x10", Value::Strand("0010".to_owned()), None).await.unwrap();
+	tx.put(KeyCategory::ChangeFeed, b"hugh\x00\x10\x10", Value::Strand("001010".to_owned()))
 		.await
 		.unwrap();
-	tx.putc(b"hugh\x00\x20", Value::Strand(Strand::from("0020")), None).await.unwrap();
+	tx.putc(b"hugh\x00\x20", Value::Strand("0020".to_owned()), None).await.unwrap();
 	tx.commit().await.unwrap();
 
 	// Check we have all data

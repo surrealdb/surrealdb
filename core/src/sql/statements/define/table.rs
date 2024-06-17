@@ -249,7 +249,7 @@ impl InfoStructure for DefineTableStatement {
 		}
 
 		if let Some(comment) = comment {
-			acc.insert("comment".to_string(), comment.into());
+			acc.insert("comment".to_string(), comment.0.into());
 		}
 
 		acc.insert("kind".to_string(), kind.structure());

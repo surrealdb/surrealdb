@@ -2128,9 +2128,9 @@ fn parse_update() {
 		Statement::Update(UpdateStatement {
 			only: true,
 			what: Values(vec![
-				Value::Future(Box::new(Future(Block(vec![Entry::Value(Value::Strand(Strand(
+				Value::Future(Box::new(Future(Block(vec![Entry::Value(Value::Strand(
 					"text".to_string()
-				)))])))),
+				))])))),
 				Value::Idiom(Idiom(vec![
 					Part::Field(Ident("a".to_string())),
 					Part::Graph(Graph {
@@ -2174,9 +2174,9 @@ fn parse_upsert() {
 		Statement::Upsert(UpsertStatement {
 			only: true,
 			what: Values(vec![
-				Value::Future(Box::new(Future(Block(vec![Entry::Value(Value::Strand(Strand(
+				Value::Future(Box::new(Future(Block(vec![Entry::Value(Value::Strand(
 					"text".to_string()
-				)))])))),
+				))])))),
 				Value::Idiom(Idiom(vec![
 					Part::Field(Ident("a".to_string())),
 					Part::Graph(Graph {

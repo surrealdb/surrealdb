@@ -279,7 +279,7 @@ impl InfoStructure for DefineUserStatement {
 		acc.insert("duration".to_string(), dur.to_string().into());
 
 		if let Some(comment) = comment {
-			acc.insert("comment".to_string(), comment.into());
+			acc.insert("comment".to_string(), comment.0.into());
 		}
 
 		Value::Object(acc)

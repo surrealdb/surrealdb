@@ -6,6 +6,7 @@ use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::fnc::util::string::fuzzy::Fuzzy;
 use crate::sql::statements::info::InfoStructure;
+use crate::sql::Strand;
 use crate::sql::{
 	array::Uniq,
 	fmt::{Fmt, Pretty},
@@ -13,7 +14,7 @@ use crate::sql::{
 	model::Model,
 	Array, Block, Bytes, Cast, Constant, Datetime, Duration, Edges, Expression, Function, Future,
 	Geometry, Idiom, Kind, Mock, Number, Object, Operation, Param, Part, Query, Range, Regex,
-	Strand, Subquery, Table, Tables, Thing, Uuid,
+	Subquery, Table, Tables, Thing, Uuid,
 };
 use chrono::{DateTime, Utc};
 use derive::Store;
@@ -82,7 +83,7 @@ pub enum Value {
 	Null,
 	Bool(bool),
 	Number(Number),
-	Strand(Strand),
+	Strand(String),
 	Duration(Duration),
 	Datetime(Datetime),
 	Uuid(Uuid),
@@ -200,7 +201,7 @@ impl From<Number> for Value {
 
 impl From<Strand> for Value {
 	fn from(v: Strand) -> Self {
-		Value::Strand(v)
+		Value::Strand(v.0)
 	}
 }
 
@@ -380,13 +381,13 @@ impl From<Decimal> for Value {
 
 impl From<String> for Value {
 	fn from(v: String) -> Self {
-		Self::Strand(Strand::from(v))
+		Self::Strand(v)
 	}
 }
 
 impl From<&str> for Value {
 	fn from(v: &str) -> Self {
-		Self::Strand(Strand::from(v))
+		Self::Strand(v.to_owned())
 	}
 }
 
@@ -684,7 +685,7 @@ impl TryFrom<Value> for String {
 	type Error = Error;
 	fn try_from(value: Value) -> Result<Self, Self::Error> {
 		match value {
-			Value::Strand(x) => Ok(x.into()),
+			Value::Strand(x) => Ok(x),
 			_ => Err(Error::TryFrom(value.to_string(), "String")),
 		}
 	}
@@ -1054,7 +1055,7 @@ impl Value {
 	/// Convert this Value into a String
 	pub fn as_string(self) -> String {
 		match self {
-			Value::Strand(v) => v.0,
+			Value::Strand(v) => v,
 			Value::Uuid(v) => v.to_raw(),
 			Value::Datetime(v) => v.to_raw(),
 			_ => self.to_string(),
@@ -1064,7 +1065,7 @@ impl Value {
 	/// Converts this Value into an unquoted String
 	pub fn as_raw_string(self) -> String {
 		match self {
-			Value::Strand(v) => v.0,
+			Value::Strand(v) => v,
 			Value::Uuid(v) => v.to_raw(),
 			Value::Datetime(v) => v.to_raw(),
 			_ => self.to_string(),
@@ -1078,7 +1079,7 @@ impl Value {
 	/// Converts this Value into an unquoted String
 	pub fn to_raw_string(&self) -> String {
 		match self {
-			Value::Strand(v) => v.0.to_owned(),
+			Value::Strand(v) => v.clone(),
 			Value::Uuid(v) => v.to_raw(),
 			Value::Datetime(v) => v.to_raw(),
 			_ => self.to_string(),
@@ -1090,7 +1091,7 @@ impl Value {
 		match self {
 			Value::Idiom(v) => v.simplify(),
 			Value::Param(v) => v.to_raw().into(),
-			Value::Strand(v) => v.0.to_string().into(),
+			Value::Strand(v) => v.to_string().into(),
 			Value::Datetime(v) => v.0.to_string().into(),
 			Value::Future(_) => "future".to_string().into(),
 			Value::Function(v) => v.to_idiom(),
@@ -1152,7 +1153,7 @@ impl Value {
 	/// Treat a string as a table name
 	pub fn could_be_table(self) -> Value {
 		match self {
-			Value::Strand(v) => Value::Table(v.0.into()),
+			Value::Strand(v) => Value::Table(v.into()),
 			_ => self,
 		}
 	}
@@ -1203,7 +1204,7 @@ impl Value {
 			Kind::Float => self.coerce_to_float().map(Value::from),
 			Kind::Decimal => self.coerce_to_decimal().map(Value::from),
 			Kind::Number => self.coerce_to_number().map(Value::from),
-			Kind::String => self.coerce_to_strand().map(Value::from),
+			Kind::String => self.coerce_to_string().map(Value::from),
 			Kind::Datetime => self.coerce_to_datetime().map(Value::from),
 			Kind::Duration => self.coerce_to_duration().map(Value::from),
 			Kind::Object => self.coerce_to_object().map(Value::from),
@@ -1486,23 +1487,6 @@ impl Value {
 			// Allow any datetime value
 			Value::Datetime(v) => Ok(v.to_raw()),
 			// Allow any string value
-			Value::Strand(v) => Ok(v.as_string()),
-			// Anything else raises an error
-			_ => Err(Error::CoerceTo {
-				from: self,
-				into: "string".into(),
-			}),
-		}
-	}
-
-	/// Try to coerce this value to a `Strand`
-	pub(crate) fn coerce_to_strand(self) -> Result<Strand, Error> {
-		match self {
-			// Allow any uuid value
-			Value::Uuid(v) => Ok(v.to_raw().into()),
-			// Allow any datetime value
-			Value::Datetime(v) => Ok(v.to_raw().into()),
-			// Allow any string value
 			Value::Strand(v) => Ok(v),
 			// Anything else raises an error
 			_ => Err(Error::CoerceTo {
@@ -1758,7 +1742,7 @@ impl Value {
 			Kind::Float => self.convert_to_float().map(Value::from),
 			Kind::Decimal => self.convert_to_decimal().map(Value::from),
 			Kind::Number => self.convert_to_number().map(Value::from),
-			Kind::String => self.convert_to_strand().map(Value::from),
+			Kind::String => self.convert_to_string().map(Value::from),
 			Kind::Datetime => self.convert_to_datetime().map(Value::from),
 			Kind::Duration => self.convert_to_duration().map(Value::from),
 			Kind::Object => self.convert_to_object().map(Value::from),
@@ -2007,36 +1991,6 @@ impl Value {
 			_ => Ok(self.as_string()),
 		}
 	}
-
-	/// Try to convert this value to a `Strand`
-	pub(crate) fn convert_to_strand(self) -> Result<Strand, Error> {
-		match self {
-			// Bytes can't convert to strings
-			Value::Bytes(_) => Err(Error::ConvertTo {
-				from: self,
-				into: "string".into(),
-			}),
-			// None can't convert to a string
-			Value::None => Err(Error::ConvertTo {
-				from: self,
-				into: "string".into(),
-			}),
-			// Null can't convert to a string
-			Value::Null => Err(Error::ConvertTo {
-				from: self,
-				into: "string".into(),
-			}),
-			// Allow any string value
-			Value::Strand(v) => Ok(v),
-			// Stringify anything else
-			Value::Uuid(v) => Ok(v.to_raw().into()),
-			// Stringify anything else
-			Value::Datetime(v) => Ok(v.to_raw().into()),
-			// Stringify anything else
-			_ => Ok(self.to_string().into()),
-		}
-	}
-
 	/// Try to convert this value to a `Uuid`
 	pub(crate) fn convert_to_uuid(self) -> Result<Uuid, Error> {
 		match self {
@@ -2112,7 +2066,7 @@ impl Value {
 			// Bytes are allowed
 			Value::Bytes(v) => Ok(v),
 			// Strings can be converted to bytes
-			Value::Strand(s) => Ok(Bytes(s.0.into_bytes())),
+			Value::Strand(s) => Ok(Bytes(s.into_bytes())),
 			// Anything else raises an error
 			_ => Err(Error::ConvertTo {
 				from: self,
@@ -2678,7 +2632,7 @@ impl TryAdd for Value {
 	fn try_add(self, other: Self) -> Result<Self, Error> {
 		Ok(match (self, other) {
 			(Self::Number(v), Self::Number(w)) => Self::Number(v.try_add(w)?),
-			(Self::Strand(v), Self::Strand(w)) => Self::Strand(v + w),
+			(Self::Strand(v), Self::Strand(w)) => Self::Strand(v + &w),
 			(Self::Datetime(v), Self::Duration(w)) => Self::Datetime(w + v),
 			(Self::Duration(v), Self::Datetime(w)) => Self::Datetime(v + w),
 			(Self::Duration(v), Self::Duration(w)) => Self::Duration(v + w),

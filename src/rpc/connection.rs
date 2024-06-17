@@ -420,7 +420,7 @@ impl RpcContext for Connection {
 		let Ok(Value::Strand(token)) = params.needs_one() else {
 			return Err(RpcError::InvalidParams);
 		};
-		surrealdb::iam::verify::token(DB.get().unwrap(), &mut self.session, &token.0).await?;
+		surrealdb::iam::verify::token(DB.get().unwrap(), &mut self.session, &token).await?;
 		Ok(Value::None)
 	}
 }

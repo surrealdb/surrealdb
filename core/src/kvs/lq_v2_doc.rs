@@ -80,7 +80,7 @@ mod test {
 	#[test]
 	fn test_construct_document_create() {
 		let thing = Thing::from(("table", "id"));
-		let value = Value::Strand(Strand::from("value"));
+		let value = Value::Strand("value".to_owned());
 		let tb_mutation = TableMutation::Set(thing.clone(), value);
 		let doc = construct_document(&tb_mutation).unwrap();
 		let doc = doc.unwrap();
@@ -107,8 +107,8 @@ mod test {
 	fn test_construct_document_update() {
 		let thing = Thing::from(("table", "id"));
 		let current_value = Value::Object(Object(map! {
-			"first_field".to_string() => Value::Strand(Strand::from("first_value")),
-			"second_field".to_string() => Value::Strand(Strand::from("second_value")),
+			"first_field".to_string() => Value::Strand("first_value".to_owned()),
+			"second_field".to_string() => Value::Strand("second_value".to_owned()),
 		}));
 		let operations = vec![
 			Operation::Remove {
@@ -116,16 +116,16 @@ mod test {
 			},
 			Operation::Replace {
 				path: Idiom::from("second_field"),
-				value: Value::Strand(Strand::from("original_value")),
+				value: Value::Strand("original_value".to_owned()),
 			},
 			Operation::Add {
 				path: Idiom::from("third_field"),
-				value: Value::Strand(Strand::from("third_value")),
+				value: Value::Strand("third_value".to_owned()),
 			},
 		];
 		let expected_original = Value::Object(Object(map! {
-			"second_field".to_string() => Value::Strand(Strand::from("original_value")),
-			"third_field".to_string() => Value::Strand(Strand::from("third_value")),
+			"second_field".to_string() => Value::Strand("original_value".to_owned()),
+			"third_field".to_string() => Value::Strand("third_value".to_owned()),
 		}));
 		let tb_mutation =
 			TableMutation::SetWithDiff(thing.clone(), current_value.clone(), operations);
@@ -163,7 +163,7 @@ mod test {
 		let thing = Thing::from(("table", "id"));
 		let original = Value::Object(Object(map! {
 			"id".to_string() => Value::Thing(thing.clone()),
-			"some_key".to_string() => Value::Strand(Strand::from("some_value")),
+			"some_key".to_string() => Value::Strand("some_value".to_owned()),
 		}));
 		let tb_mutation = TableMutation::DelWithOriginal(thing.clone(), original);
 		let doc = construct_document(&tb_mutation).unwrap();
@@ -267,7 +267,7 @@ mod test_check_lqs_and_send_notifications {
 		// WHEN:
 		// Construct document we are validating
 		let record_id = Thing::from((SETUP.tb.as_str(), "id"));
-		let value = Value::Strand(Strand::from("value"));
+		let value = Value::Strand("value".to_owned());
 		let tb_mutation = TableMutation::Set(record_id.clone(), value);
 		let doc = construct_document(&tb_mutation).unwrap().unwrap();
 
@@ -294,7 +294,7 @@ mod test_check_lqs_and_send_notifications {
 			notification.fuzzy_eq(&Notification::new(
 				Uuid::default(),
 				Action::Create,
-				Value::Strand(Strand::from("value"))
+				Value::Strand("value".to_owned())
 			)),
 			"{:?}",
 			notification
@@ -315,7 +315,7 @@ mod test_check_lqs_and_send_notifications {
 		// WHEN:
 		// Construct document we are validating
 		let record_id = Thing::from((SETUP.tb.as_str(), "id"));
-		let value = Value::Strand(Strand::from("value"));
+		let value = Value::Strand("value".to_owned());
 		let tb_mutation = TableMutation::Set(record_id.clone(), value);
 		let doc = construct_document(&tb_mutation).unwrap().unwrap();
 
@@ -357,9 +357,9 @@ mod test_check_lqs_and_send_notifications {
 	fn a_live_query_statement() -> LiveStatement {
 		let mut stm = LiveStatement::new(Fields::all());
 		let mut session: BTreeMap<String, Value> = BTreeMap::new();
-		session.insert(OBJ_PATH_ACCESS.to_string(), Value::Strand(Strand::from("access")));
-		session.insert(OBJ_PATH_AUTH.to_string(), Value::Strand(Strand::from("auth")));
-		session.insert(OBJ_PATH_TOKEN.to_string(), Value::Strand(Strand::from("token")));
+		session.insert(OBJ_PATH_ACCESS.to_string(), Value::Strand("access".to_owned()));
+		session.insert(OBJ_PATH_AUTH.to_string(), Value::Strand("auth".to_owned()));
+		session.insert(OBJ_PATH_TOKEN.to_string(), Value::Strand("token".to_owned()));
 		let session = Value::Object(Object::from(session));
 		stm.session = Some(session);
 		stm.auth = Some(Auth::for_db(Role::Owner, "namespace", "database"));

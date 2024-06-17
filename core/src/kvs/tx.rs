@@ -1885,7 +1885,7 @@ impl Transaction {
 		let val = self.get(key).await?.ok_or(Error::LqNotFound {
 			value: lq.to_string(),
 		})?;
-		Value::from(val).convert_to_strand()
+		Value::from(val).convert_to_string().map(Strand)
 	}
 
 	/// Retrieve a specific table definition.

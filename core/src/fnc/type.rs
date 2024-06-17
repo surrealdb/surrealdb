@@ -7,7 +7,7 @@ use crate::err::Error;
 use crate::sql::table::Table;
 use crate::sql::thing::Thing;
 use crate::sql::value::Value;
-use crate::sql::{Id, Range, Strand};
+use crate::sql::{Id, Range};
 use crate::syn;
 use reblessive::tree::Stk;
 
@@ -84,7 +84,7 @@ pub fn point((val,): (Value,)) -> Result<Value, Error> {
 }
 
 pub fn string((val,): (Value,)) -> Result<Value, Error> {
-	val.convert_to_strand().map(Value::from)
+	val.convert_to_string().map(Value::from)
 }
 
 pub fn table((val,): (Value,)) -> Result<Value, Error> {
@@ -98,12 +98,12 @@ pub fn thing((arg1, arg2): (Value, Option<Value>)) -> Result<Value, Error> {
 	match (arg1, arg2) {
 		// Empty table name
 		(Value::Strand(arg1), _) if arg1.is_empty() => Err(Error::TbInvalid {
-			value: arg1.as_string(),
+			value: arg1,
 		}),
 
 		// Empty ID part
 		(_, Some(Value::Strand(arg2))) if arg2.is_empty() => Err(Error::IdInvalid {
-			value: arg2.as_string(),
+			value: arg2,
 		}),
 
 		// Handle second argument
@@ -175,8 +175,8 @@ pub fn range(args: Vec<Value>) -> Result<Value, Error> {
 					.to_string(),
 			})?;
 			match x {
-				Value::Strand(Strand(x)) if x == "included" => Bound::Included(start),
-				Value::Strand(Strand(x)) if x == "excluded" => Bound::Excluded(start),
+				Value::Strand(x) if x == "included" => Bound::Included(start),
+				Value::Strand(x) if x == "excluded" => Bound::Excluded(start),
 				x => {
 					return Err(Error::ConvertTo {
 						from: x.clone(),
@@ -193,8 +193,8 @@ pub fn range(args: Vec<Value>) -> Result<Value, Error> {
 				message: "Can't define an inclusion for end if there is no end bound".to_string(),
 			})?;
 			match x {
-				Value::Strand(Strand(x)) if x == "included" => Bound::Included(end),
-				Value::Strand(Strand(x)) if x == "excluded" => Bound::Excluded(end),
+				Value::Strand(x) if x == "included" => Bound::Included(end),
+				Value::Strand(x) if x == "excluded" => Bound::Excluded(end),
 				x => {
 					return Err(Error::ConvertTo {
 						from: x.clone(),

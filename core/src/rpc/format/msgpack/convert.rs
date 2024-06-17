@@ -117,7 +117,7 @@ impl TryFrom<Value> for Pack {
 				#[allow(unreachable_patterns)]
 				_ => unreachable!(),
 			},
-			Value::Strand(v) => Ok(Pack(Data::String(v.0.into()))),
+			Value::Strand(v) => Ok(Pack(Data::String(v.into()))),
 			Value::Duration(v) => Ok(Pack(Data::Ext(TAG_DURATION, v.to_raw().as_bytes().to_vec()))),
 			Value::Datetime(v) => Ok(Pack(Data::Ext(TAG_DATETIME, v.to_raw().as_bytes().to_vec()))),
 			Value::Uuid(v) => Ok(Pack(Data::Ext(TAG_UUID, v.to_raw().as_bytes().to_vec()))),

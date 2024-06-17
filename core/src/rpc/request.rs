@@ -44,7 +44,7 @@ impl TryFrom<Value> for Request {
 		};
 		// Fetch the 'method' argument
 		let method = match val.pick(&*METHOD) {
-			Value::Strand(v) => v.to_raw(),
+			Value::Strand(v) => v,
 			_ => return Err(RpcError::InvalidRequest),
 		};
 		// Fetch the 'params' argument

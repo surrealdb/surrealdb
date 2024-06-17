@@ -104,7 +104,7 @@ fn parse_record_string_2() {
 		res,
 		Value::Thing(Thing {
 			tb: "a".to_owned(),
-			id: Id::Array(Array(vec![Value::Strand(Strand("foo".to_owned()))]))
+			id: Id::Array(Array(vec![Value::Strand("foo".to_owned())]))
 		})
 	)
 }

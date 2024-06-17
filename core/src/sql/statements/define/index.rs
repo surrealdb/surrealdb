@@ -149,7 +149,7 @@ impl InfoStructure for DefineIndexStatement {
 		acc.insert("index".to_string(), index.structure());
 
 		if let Some(comment) = comment {
-			acc.insert("comment".to_string(), comment.into());
+			acc.insert("comment".to_string(), comment.0.into());
 		}
 
 		Value::Object(acc)

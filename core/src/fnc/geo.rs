@@ -65,6 +65,7 @@ pub mod hash {
 	use crate::fnc::util::geo;
 	use crate::sql::geometry::Geometry;
 	use crate::sql::value::Value;
+	use crate::sql::Strand;
 
 	pub fn encode((point, len): (Value, Option<usize>)) -> Result<Value, Error> {
 		let len = match len {
@@ -84,7 +85,7 @@ pub mod hash {
 
 	pub fn decode((arg,): (Value,)) -> Result<Value, Error> {
 		match arg {
-			Value::Strand(v) => Ok(geo::decode(v).into()),
+			Value::Strand(v) => Ok(geo::decode(Strand(v)).into()),
 			_ => Ok(Value::None),
 		}
 	}

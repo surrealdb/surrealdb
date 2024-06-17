@@ -6,7 +6,7 @@ use crate::{
 	dbs::{QueryType, Response, Session},
 	kvs::Datastore,
 	rpc::args::Take,
-	sql::{Array, Function, Model, Statement, Strand, Value},
+	sql::{Array, Function, Model, Statement, Value},
 };
 
 use super::{method::Method, response::Data, rpc_error::RpcError};
@@ -94,10 +94,10 @@ pub trait RpcContext {
 	async fn yuse(&mut self, params: Array) -> Result<impl Into<Data>, RpcError> {
 		let (ns, db) = params.needs_two()?;
 		if let Value::Strand(ns) = ns {
-			self.session_mut().ns = Some(ns.0);
+			self.session_mut().ns = Some(ns);
 		}
 		if let Value::Strand(db) = db {
-			self.session_mut().db = Some(db.0);
+			self.session_mut().db = Some(db);
 		}
 		Ok(Value::None)
 	}
@@ -141,7 +141,7 @@ pub trait RpcContext {
 			return Err(RpcError::InvalidParams);
 		};
 		let mut tmp_session = self.session().clone();
-		crate::iam::verify::token(self.kvs(), &mut tmp_session, &token.0).await?;
+		crate::iam::verify::token(self.kvs(), &mut tmp_session, &token).await?;
 		*self.session_mut() = tmp_session;
 		Ok(Value::None)
 	}
@@ -171,15 +171,15 @@ pub trait RpcContext {
 		};
 		// Specify the query parameters
 		let var = Some(map! {
-			key.0.clone() => Value::None,
+			key.clone() => Value::None,
 			=> &self.vars()
 		});
 		// Compute the specified parameter
 		match self.kvs().compute(val, self.session(), var).await? {
 			// Remove the variable if undefined
-			Value::None => self.vars_mut().remove(&key.0),
+			Value::None => self.vars_mut().remove(&key),
 			// Store the variable if defined
-			v => self.vars_mut().insert(key.0, v),
+			v => self.vars_mut().insert(key, v),
 		};
 		Ok(Value::Null)
 	}
@@ -188,7 +188,7 @@ pub trait RpcContext {
 		let Ok(Value::Strand(key)) = params.needs_one() else {
 			return Err(RpcError::InvalidParams);
 		};
-		self.vars_mut().remove(&key.0);
+		self.vars_mut().remove(&key);
 		Ok(Value::Null)
 	}
 
@@ -558,13 +558,12 @@ pub trait RpcContext {
 	// ------------------------------
 
 	async fn run(&self, params: Array) -> Result<impl Into<Data>, RpcError> {
-		let Ok((Value::Strand(Strand(func_name)), version, args)) = params.needs_one_two_or_three()
-		else {
+		let Ok((Value::Strand(func_name), version, args)) = params.needs_one_two_or_three() else {
 			return Err(RpcError::InvalidParams);
 		};
 
 		let version = match version {
-			Value::Strand(Strand(v)) => Some(v),
+			Value::Strand(v) => Some(v),
 			Value::None | Value::Null => None,
 			_ => return Err(RpcError::InvalidParams),
 		};

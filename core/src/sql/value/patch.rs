@@ -31,10 +31,8 @@ impl Value {
 					if let Value::Strand(p) = value {
 						if let Value::Strand(v) = tmp_val.pick(&path) {
 							let dmp = dmp::new();
-							let pch = dmp.patch_from_text(p.as_string()).map_err(|e| {
-								Error::InvalidPatch {
-									message: format!("{e:?}"),
-								}
+							let pch = dmp.patch_from_text(p).map_err(|e| Error::InvalidPatch {
+								message: format!("{e:?}"),
 							})?;
 							let (txt, _) = dmp.patch_apply(&pch, v.as_str()).map_err(|e| {
 								Error::InvalidPatch {

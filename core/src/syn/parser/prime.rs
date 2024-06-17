@@ -174,13 +174,13 @@ impl Parser<'_> {
 				Value::Uuid(uuid)
 			}
 			t!("'") | t!("\"") | TokenKind::Strand => {
-				let s = self.next_token_value::<Strand>()?;
+				let Strand(strand) = self.next_token_value()?;
 				if self.legacy_strands {
-					if let Some(x) = self.reparse_legacy_strand(ctx, &s.0).await {
+					if let Some(x) = self.reparse_legacy_strand(ctx, &strand).await {
 						return Ok(x);
 					}
 				}
-				Value::Strand(s)
+				Value::Strand(strand)
 			}
 			t!("+") | t!("-") | TokenKind::Number(_) | TokenKind::Digits | TokenKind::Duration => {
 				self.parse_number_like_prime()?
