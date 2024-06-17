@@ -3,7 +3,8 @@
 use std::collections::HashSet;
 
 use surrealdb_core::dbs::capabilities::{
-	Capabilities, FuncTarget, NetTarget, ParseFuncTargetError, ParseNetTargetError, Targets,
+	Capabilities as CoreCapabilities, FuncTarget, NetTarget, ParseFuncTargetError,
+	ParseNetTargetError, Targets,
 };
 
 /// Capabilities are used to limit what a user can do to the system.
@@ -88,27 +89,27 @@ use surrealdb_core::dbs::capabilities::{
 /// ```
 ///
 #[derive(Debug, Clone)]
-pub struct CapabilitiesBuilder {
-	cap: Capabilities,
+pub struct Capabilities {
+	cap: CoreCapabilities,
 	allow_funcs: Targets<FuncTarget>,
 	deny_funcs: Targets<FuncTarget>,
 	allow_net: Targets<NetTarget>,
 	deny_net: Targets<NetTarget>,
 }
 
-impl Default for CapabilitiesBuilder {
+impl Default for Capabilities {
 	fn default() -> Self {
 		Self::new()
 	}
 }
 
-impl CapabilitiesBuilder {
+impl Capabilities {
 	/// Create a builder with default capabilities enabled.
 	///
 	/// Default capabilities enables live query notifications and all (non-scripting) functions.
 	pub fn new() -> Self {
-		CapabilitiesBuilder {
-			cap: Capabilities::default(),
+		Capabilities {
+			cap: CoreCapabilities::default(),
 			allow_funcs: Targets::All,
 			deny_funcs: Targets::None,
 			allow_net: Targets::None,
@@ -118,8 +119,8 @@ impl CapabilitiesBuilder {
 
 	/// Create a builder with all capabilities enabled.
 	pub fn all() -> Self {
-		CapabilitiesBuilder {
-			cap: Capabilities::all(),
+		Capabilities {
+			cap: CoreCapabilities::all(),
 			allow_funcs: Targets::All,
 			deny_funcs: Targets::None,
 			allow_net: Targets::All,
@@ -129,8 +130,8 @@ impl CapabilitiesBuilder {
 
 	/// Create a builder with all capabilities disabled.
 	pub fn none() -> Self {
-		CapabilitiesBuilder {
-			cap: Capabilities::default(),
+		Capabilities {
+			cap: CoreCapabilities::default(),
 			allow_funcs: Targets::None,
 			deny_funcs: Targets::None,
 			allow_net: Targets::None,
@@ -415,7 +416,7 @@ impl CapabilitiesBuilder {
 		Ok(self)
 	}
 
-	pub(crate) fn build(self) -> Capabilities {
+	pub(crate) fn build(self) -> CoreCapabilities {
 		self.cap
 			.with_functions(self.allow_funcs)
 			.without_functions(self.deny_funcs)
