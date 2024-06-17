@@ -182,8 +182,6 @@ where
 					}),
 					Err(_) => Err(crate::Error::from(Error::NotLiveQuery(idx))),
 				};
-
-				dbg!(&response);
 				response.live_queries.insert(idx, res);
 			}
 

@@ -1365,7 +1365,7 @@ async fn select_with_uuid_value() -> Result<(), Error> {
 						plan: {
 							index: 'sessionUid',
 							operator: '=',
-							value: '00ad70db-f435-442e-9012-1cd853102084'
+							value: u'00ad70db-f435-442e-9012-1cd853102084'
 						},
 						table: 'sessions'
 					},
@@ -1388,7 +1388,7 @@ async fn select_with_uuid_value() -> Result<(), Error> {
 			r#"[
 				{
                		"id": sessions:1,
- 					"sessionUid": "00ad70db-f435-442e-9012-1cd853102084"
+ 					"sessionUid": u"00ad70db-f435-442e-9012-1cd853102084"
     			}
 			]"#,
 		);
