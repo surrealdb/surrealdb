@@ -12,7 +12,6 @@ mod api_integration {
 	use std::sync::Arc;
 	use std::sync::Mutex;
 	use std::time::Duration;
-	use surrealdb::dbs::capabilities::Capabilities;
 	use surrealdb::error::Api as ApiError;
 	use surrealdb::error::Db as DbError;
 	use surrealdb::opt::auth::Database;
@@ -20,6 +19,7 @@ mod api_integration {
 	use surrealdb::opt::auth::Namespace;
 	use surrealdb::opt::auth::Record as RecordAccess;
 	use surrealdb::opt::auth::Root;
+	use surrealdb::opt::capabilities::Capabilities;
 	use surrealdb::opt::Config;
 	use surrealdb::opt::PatchOp;
 	use surrealdb::opt::Resource;

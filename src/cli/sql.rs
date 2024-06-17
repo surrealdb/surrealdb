@@ -11,10 +11,9 @@ use rustyline::validate::{ValidationContext, ValidationResult, Validator};
 use rustyline::{Completer, Editor, Helper, Highlighter, Hinter};
 use serde::Serialize;
 use serde_json::ser::PrettyFormatter;
-use surrealdb::dbs::Capabilities;
 use surrealdb::engine::any::{connect, IntoEndpoint};
 use surrealdb::method::{Stats, WithStats};
-use surrealdb::opt::Config;
+use surrealdb::opt::{capabilities::Capabilities, Config};
 use surrealdb::sql::{self, Statement, Value};
 use surrealdb::{Notification, Response};
 

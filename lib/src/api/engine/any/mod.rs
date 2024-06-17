@@ -304,8 +304,8 @@ pub fn connect(address: impl IntoEndpoint) -> Connect<Any, Surreal<Any>> {
 #[cfg(all(test, feature = "kv-mem"))]
 mod tests {
 	use super::*;
-	use crate::dbs::Capabilities;
 	use crate::opt::auth::Root;
+	use crate::opt::capabilities::Capabilities;
 	use crate::sql;
 	use crate::sql::Value;
 
