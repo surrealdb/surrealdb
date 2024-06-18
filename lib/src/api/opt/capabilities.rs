@@ -131,7 +131,7 @@ impl Capabilities {
 	/// Create a builder with all capabilities disabled.
 	pub fn none() -> Self {
 		Capabilities {
-			cap: CoreCapabilities::default(),
+			cap: CoreCapabilities::none(),
 			allow_funcs: Targets::None,
 			deny_funcs: Targets::None,
 			allow_net: Targets::None,
