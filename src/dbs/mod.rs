@@ -65,7 +65,6 @@ Function names must be in the form <family>[::<name>]. For example:
 	#[arg(env = "SURREAL_CAPS_ALLOW_FUNC", long, conflicts_with = "allow_all")]
 	// If the arg is provided without value, then assume it's "", which gets parsed into Targets::All
 	#[arg(default_missing_value_os = "", num_args = 0..)]
-	#[arg(default_value_os = "")] // Allow all functions by default
 	#[arg(value_parser = super::cli::validator::func_targets)]
 	allow_funcs: Option<Targets<FuncTarget>>,
 
