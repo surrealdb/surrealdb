@@ -37,17 +37,27 @@ pub struct Tasks {
 impl Tasks {
 	#[cfg(not(target_arch = "wasm32"))]
 	pub async fn resolve(self) -> Result<(), RootError> {
-		self.nd.await.map_err(|e| {
-			error!("Node agent task failed: {}", e);
-			let inner_err = crate::err::Error::NodeAgent("node task failed and has been logged");
-			RootError::Db(inner_err)
-		})?;
-		self.lq.await.map_err(|e| {
-			error!("Live query task failed: {}", e);
-			let inner_err =
-				crate::err::Error::NodeAgent("live query task failed and has been logged");
-			RootError::Db(inner_err)
-		})?;
+		match self.nd.await {
+			// cancelling this task is fine, and can happen when surrealdb exits.
+			Ok(_) => {}
+			Err(e) if e.is_cancelled() => {}
+			Err(e) => {
+				error!("Node agent task failed: {}", e);
+				let inner_err =
+					crate::err::Error::NodeAgent("node task failed and has been logged");
+				return Err(RootError::Db(inner_err));
+			}
+		}
+		match self.lq.await {
+			Ok(_) => {}
+			Err(e) if e.is_cancelled() => {}
+			Err(e) => {
+				error!("Live query task failed: {}", e);
+				let inner_err =
+					crate::err::Error::NodeAgent("live query task failed and has been logged");
+				return Err(RootError::Db(inner_err));
+			}
+		};
 		Ok(())
 	}
 }
