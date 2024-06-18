@@ -331,6 +331,7 @@ pub async fn root_user(
 #[cfg(test)]
 mod tests {
 	use super::*;
+	use crate::dbs::capabilities::{Capabilities, Targets};
 	use crate::iam::Role;
 	use chrono::Duration;
 	use jsonwebtoken::{decode, Algorithm, DecodingKey, Validation};
@@ -340,7 +341,10 @@ mod tests {
 	async fn test_signin_record() {
 		// Test with correct credentials
 		{
-			let ds = Datastore::new("memory").await.unwrap();
+			let ds = Datastore::new("memory")
+				.await
+				.unwrap()
+				.with_capabilities(Capabilities::default().with_functions(Targets::All));
 			let sess = Session::owner().with_ns("test").with_db("test");
 			ds.execute(
 				r#"
@@ -504,7 +508,10 @@ VBIovic5l0xFkEHskAjFTevO86Fsz1C2aSeRKSqGFoOQ0tmJzBEs1R6KqnHInicD
 TQrKhArgLXX4v3CddjfTRJkFWDbE/CkvKZNOrcf1nhaGCPspRJj2KUkj1Fhl9Cnc
 dn/RsYEONbwQSjIfMPkvxF+8HQ==
 -----END PRIVATE KEY-----"#;
-			let ds = Datastore::new("memory").await.unwrap();
+			let ds = Datastore::new("memory")
+				.await
+				.unwrap()
+				.with_capabilities(Capabilities::default().with_functions(Targets::All));
 			let sess = Session::owner().with_ns("test").with_db("test");
 			ds.execute(
 				&format!(
