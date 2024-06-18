@@ -256,7 +256,7 @@ impl Default for Capabilities {
 			guest_access: false,
 			live_query_notifications: true,
 
-			allow_funcs: Arc::new(Targets::All),
+			allow_funcs: Arc::new(Targets::None),
 			deny_funcs: Arc::new(Targets::None),
 			allow_net: Arc::new(Targets::None),
 			deny_net: Arc::new(Targets::None),
@@ -274,6 +274,19 @@ impl Capabilities {
 			allow_funcs: Arc::new(Targets::All),
 			deny_funcs: Arc::new(Targets::None),
 			allow_net: Arc::new(Targets::All),
+			deny_net: Arc::new(Targets::None),
+		}
+	}
+
+	pub fn none() -> Self {
+		Self {
+			scripting: false,
+			guest_access: false,
+			live_query_notifications: false,
+
+			allow_funcs: Arc::new(Targets::None),
+			deny_funcs: Arc::new(Targets::None),
+			allow_net: Arc::new(Targets::None),
 			deny_net: Arc::new(Targets::None),
 		}
 	}

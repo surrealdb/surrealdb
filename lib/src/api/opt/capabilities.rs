@@ -106,11 +106,11 @@ impl Default for Capabilities {
 impl Capabilities {
 	/// Create a builder with default capabilities enabled.
 	///
-	/// Default capabilities enables live query notifications and all (non-scripting) functions.
+	/// Default capabilities enables live query notifications.
 	pub fn new() -> Self {
 		Capabilities {
 			cap: CoreCapabilities::default(),
-			allow_funcs: Targets::All,
+			allow_funcs: Targets::None,
 			deny_funcs: Targets::None,
 			allow_net: Targets::None,
 			deny_net: Targets::None,
@@ -131,7 +131,7 @@ impl Capabilities {
 	/// Create a builder with all capabilities disabled.
 	pub fn none() -> Self {
 		Capabilities {
-			cap: CoreCapabilities::default(),
+			cap: CoreCapabilities::none(),
 			allow_funcs: Targets::None,
 			deny_funcs: Targets::None,
 			allow_net: Targets::None,
