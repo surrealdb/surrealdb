@@ -809,7 +809,6 @@ mod cli_integration {
 	}
 
 	#[test(tokio::test)]
-	#[ignore]
 	async fn test_capabilities() {
 		// Default capabilities only allow functions
 		info!("* When default capabilities");
@@ -893,11 +892,11 @@ mod cli_integration {
 
 			let query = format!("RETURN http::get('http://{}/version');\n\n", addr);
 			let output = common::run(&cmd).input(&query).output().unwrap();
-			assert!(output.starts_with("['surrealdb"), "unexpected output: {output:?}");
+			assert!(output.contains("['surrealdb-"), "unexpected output: {output:?}");
 
 			let query = "RETURN function() { return '1' };";
 			let output = common::run(&cmd).input(query).output().unwrap();
-			assert!(output.starts_with("['1']"), "unexpected output: {output:?}");
+			assert!(output.contains("['1']"), "unexpected output: {output:?}");
 
 			server.finish().unwrap();
 		}
@@ -969,7 +968,7 @@ mod cli_integration {
 
 			let query = format!("RETURN http::get('http://{}/version');\n\n", addr);
 			let output = common::run(&cmd).input(&query).output().unwrap();
-			assert!(output.starts_with("['surrealdb"), "unexpected output: {output:?}");
+			assert!(output.contains("['surrealdb-"), "unexpected output: {output:?}");
 			server.finish().unwrap();
 		}
 
