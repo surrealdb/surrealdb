@@ -106,6 +106,7 @@ impl InfoStructure for DefineFunctionStatement {
 				.collect::<Vec<Value>>()
 				.into(),
 			"block".to_string() => self.block.structure(),
+			"permissions".to_string() => self.permissions.structure(),
 			"comment".to_string(), if let Some(v) = self.comment => v.into(),
 		})
 	}
