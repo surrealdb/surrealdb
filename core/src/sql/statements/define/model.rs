@@ -3,11 +3,9 @@ use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::iam::{Action, ResourceKind};
+use crate::sql::fmt::{is_pretty, pretty_indent};
 use crate::sql::statements::info::InfoStructure;
-use crate::sql::{
-	fmt::{is_pretty, pretty_indent},
-	Base, Ident, Object, Permission, Strand, Value,
-};
+use crate::sql::{Base, Ident, Permission, Strand, Value};
 use derive::Store;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -94,25 +92,11 @@ impl DefineModelStatement {
 
 impl InfoStructure for DefineModelStatement {
 	fn structure(self) -> Value {
-		let Self {
-			name,
-			version,
-			comment,
-			permissions,
-			..
-		} = self;
-		let mut acc = Object::default();
-
-		acc.insert("name".to_string(), name.structure());
-
-		acc.insert("version".to_string(), version.into());
-
-		if let Some(comment) = comment {
-			acc.insert("comment".to_string(), comment.into());
-		}
-
-		acc.insert("permissions".to_string(), permissions.structure());
-
-		Value::Object(acc)
+		Value::from(map! {
+			"name".to_string() => self.name.structure(),
+			"version".to_string() => self.version.into(),
+			"permissions".to_string() => self.permissions.structure(),
+			"comment".to_string(), if let Some(v) = self.comment => v.into(),
+		})
 	}
 }

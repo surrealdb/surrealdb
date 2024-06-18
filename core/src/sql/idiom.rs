@@ -46,6 +46,12 @@ impl Display for Idioms {
 	}
 }
 
+impl InfoStructure for Idioms {
+	fn structure(self) -> Value {
+		self.to_string().into()
+	}
+}
+
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[serde(rename = "$surrealdb::private::sql::Idiom")]
@@ -199,12 +205,6 @@ impl Display for Idiom {
 			),
 			f,
 		)
-	}
-}
-
-impl InfoStructure for Idioms {
-	fn structure(self) -> Value {
-		self.to_string().into()
 	}
 }
 

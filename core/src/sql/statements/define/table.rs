@@ -1,25 +1,23 @@
+use super::DefineFieldStatement;
 use crate::ctx::Context;
 use crate::dbs::{Force, Options};
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::iam::{Action, ResourceKind};
+use crate::sql::statements::info::InfoStructure;
 use crate::sql::{
 	changefeed::ChangeFeed,
 	fmt::{is_pretty, pretty_indent},
 	statements::UpdateStatement,
-	Base, Ident, Object, Permissions, Strand, Value, Values, View,
+	Base, Ident, Permissions, Strand, Value, Values, View,
 };
-use std::sync::Arc;
-
-use crate::sql::statements::info::InfoStructure;
-use crate::sql::{Idiom, Kind, Part, Table, TableType};
+use crate::sql::{Idiom, Kind, Part, TableType};
 use derive::Store;
 use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Write};
-
-use super::DefineFieldStatement;
+use std::sync::Arc;
 
 #[revisioned(revision = 3)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
@@ -148,21 +146,18 @@ impl DefineTableStatement {
 }
 
 impl DefineTableStatement {
+	/// Checks if this is a TYPE RELATION table
 	pub fn is_relation(&self) -> bool {
 		matches!(self.kind, TableType::Relation(_))
 	}
-
+	/// Checks if this table allows graph edges / relations
 	pub fn allows_relation(&self) -> bool {
 		matches!(self.kind, TableType::Relation(_) | TableType::Any)
 	}
-
+	/// Checks if this table allows normal records / documents
 	pub fn allows_normal(&self) -> bool {
 		matches!(self.kind, TableType::Normal | TableType::Any)
 	}
-}
-
-fn get_tables_from_kind(tables: &[Table]) -> String {
-	tables.iter().map(|t| t.0.as_str()).collect::<Vec<_>>().join(" | ")
 }
 
 impl Display for DefineTableStatement {
@@ -179,11 +174,11 @@ impl Display for DefineTableStatement {
 			}
 			TableType::Relation(rel) => {
 				f.write_str(" RELATION")?;
-				if let Some(Kind::Record(kind)) = &rel.from {
-					write!(f, " IN {}", get_tables_from_kind(kind))?;
+				if let Some(kind) = &rel.from {
+					write!(f, " IN {kind}")?;
 				}
-				if let Some(Kind::Record(kind)) = &rel.to {
-					write!(f, " OUT {}", get_tables_from_kind(kind))?;
+				if let Some(kind) = &rel.to {
+					write!(f, " OUT {kind}")?;
 				}
 			}
 			TableType::Any => {
@@ -220,40 +215,15 @@ impl Display for DefineTableStatement {
 
 impl InfoStructure for DefineTableStatement {
 	fn structure(self) -> Value {
-		let Self {
-			name,
-			drop,
-			full,
-			view,
-			permissions,
-			changefeed,
-			comment,
-			kind,
-			..
-		} = self;
-		let mut acc = Object::default();
-
-		acc.insert("name".to_string(), name.structure());
-
-		acc.insert("drop".to_string(), drop.into());
-		acc.insert("full".to_string(), full.into());
-
-		if let Some(view) = view {
-			acc.insert("view".to_string(), view.structure());
-		}
-
-		acc.insert("permissions".to_string(), permissions.structure());
-
-		if let Some(changefeed) = changefeed {
-			acc.insert("changefeed".to_string(), changefeed.structure());
-		}
-
-		if let Some(comment) = comment {
-			acc.insert("comment".to_string(), comment.into());
-		}
-
-		acc.insert("kind".to_string(), kind.structure());
-
-		Value::Object(acc)
+		Value::from(map! {
+			"name".to_string() => self.name.structure(),
+			"drop".to_string() => self.drop.into(),
+			"full".to_string() => self.full.into(),
+			"kind".to_string() => self.kind.structure(),
+			"view".to_string(), if let Some(v) = self.view => v.structure(),
+			"changefeed".to_string(), if let Some(v) = self.changefeed => v.structure(),
+			"permissions".to_string() => self.permissions.structure(),
+			"comment".to_string(), if let Some(v) = self.comment => v.into(),
+		})
 	}
 }

@@ -4,7 +4,7 @@ use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::iam::{Action, ResourceKind};
 use crate::sql::statements::info::InfoStructure;
-use crate::sql::{access::AccessDuration, AccessType, Base, Ident, Object, Strand, Value};
+use crate::sql::{access::AccessDuration, AccessType, Base, Ident, Strand, Value};
 use derive::Store;
 use rand::distributions::Alphanumeric;
 use rand::Rng;
@@ -188,36 +188,16 @@ impl Display for DefineAccessStatement {
 
 impl InfoStructure for DefineAccessStatement {
 	fn structure(self) -> Value {
-		let Self {
-			name,
-			base,
-			kind,
-			duration,
-			comment,
-			..
-		} = self;
-		let mut acc = Object::default();
-
-		acc.insert("name".to_string(), name.structure());
-
-		acc.insert("base".to_string(), base.structure());
-
-		let mut dur = Object::default();
-		if kind.can_issue_grants() {
-			dur.insert("grant".to_string(), duration.grant.into());
-		}
-		if kind.can_issue_tokens() {
-			dur.insert("token".to_string(), duration.token.into());
-		}
-		dur.insert("session".to_string(), duration.session.into());
-		acc.insert("duration".to_string(), dur.to_string().into());
-
-		acc.insert("kind".to_string(), kind.structure());
-
-		if let Some(comment) = comment {
-			acc.insert("comment".to_string(), comment.into());
-		}
-
-		Value::Object(acc)
+		Value::from(map! {
+			"name".to_string() => self.name.structure(),
+			"base".to_string() => self.base.structure(),
+			"duration".to_string() => Value::from(map!{
+				"session".to_string() => self.duration.session.into(),
+				"grant".to_string(), if self.kind.can_issue_grants() => self.duration.grant.into(),
+				"token".to_string(), if self.kind.can_issue_tokens() => self.duration.token.into(),
+			}),
+			"kind".to_string() => self.kind.structure(),
+			"comment".to_string(), if let Some(v) = self.comment => v.into(),
+		})
 	}
 }
