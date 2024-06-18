@@ -809,9 +809,8 @@ mod cli_integration {
 	}
 
 	#[test(tokio::test)]
-	#[ignore]
 	async fn test_capabilities() {
-		// Default capabilities only allow functions
+		// Default capabilities only allow live query notifications
 		info!("* When default capabilities");
 		{
 			let (addr, mut server) = common::start_server(StartServerArguments {
@@ -826,25 +825,24 @@ mod cli_integration {
 				throwaway = Ulid::new()
 			);
 
-			let query = "RETURN http::get('http://127.0.0.1/');\n\n";
+			let query = "RETURN string::lowercase('TEST');\n\n";
 			let output = common::run(&cmd).input(query).output().unwrap();
 			assert!(
-				output.contains("Access to network target 'http://127.0.0.1/' is not allowed"),
+				output.contains("Function 'string::lowercase' is not allowed"),
 				"unexpected output: {output:?}"
 			);
 
 			let query = "RETURN function() { return '1' };";
 			let output = common::run(&cmd).input(query).output().unwrap();
 			assert!(
-				output.contains("Scripting functions are not allowed")
-					|| output.contains("Embedded functions are not enabled"),
+				output.contains("Scripting functions are not allowed"),
 				"unexpected output: {output:?}"
 			);
 
 			server.finish().unwrap();
 		}
 
-		// Deny all, denies all users to execute functions and access any network address
+		// Deny all, same as default capabilities but without live query notifications
 		info!("* When all capabilities are denied");
 		{
 			let (addr, mut server) = common::start_server(StartServerArguments {
@@ -869,8 +867,7 @@ mod cli_integration {
 			let query = "RETURN function() { return '1' };";
 			let output = common::run(&cmd).input(query).output().unwrap();
 			assert!(
-				output.contains("Scripting functions are not allowed")
-					|| output.contains("Embedded functions are not enabled"),
+				output.contains("Scripting functions are not allowed"),
 				"unexpected output: {output:?}"
 			);
 			server.finish().unwrap();
@@ -893,11 +890,11 @@ mod cli_integration {
 
 			let query = format!("RETURN http::get('http://{}/version');\n\n", addr);
 			let output = common::run(&cmd).input(&query).output().unwrap();
-			assert!(output.starts_with("['surrealdb"), "unexpected output: {output:?}");
+			assert!(output.contains("['surrealdb-"), "unexpected output: {output:?}");
 
 			let query = "RETURN function() { return '1' };";
 			let output = common::run(&cmd).input(query).output().unwrap();
-			assert!(output.starts_with("['1']"), "unexpected output: {output:?}");
+			assert!(output.contains("['1']"), "unexpected output: {output:?}");
 
 			server.finish().unwrap();
 		}
@@ -969,7 +966,7 @@ mod cli_integration {
 
 			let query = format!("RETURN http::get('http://{}/version');\n\n", addr);
 			let output = common::run(&cmd).input(&query).output().unwrap();
-			assert!(output.starts_with("['surrealdb"), "unexpected output: {output:?}");
+			assert!(output.contains("['surrealdb-"), "unexpected output: {output:?}");
 			server.finish().unwrap();
 		}
 
