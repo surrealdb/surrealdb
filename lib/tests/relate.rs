@@ -180,3 +180,55 @@ async fn relate_with_param_or_subquery() -> Result<(), Error> {
 	assert_eq!(tmp, val);
 	Ok(())
 }
+
+#[tokio::test]
+async fn schemafull_relate() -> Result<(), Error> {
+	let sql = r#"
+	INSERT INTO person [
+		{ id: 1 },
+		{ id: 2 }
+	];
+
+	DEFINE TABLE likes SCHEMAFULL;
+	DEFINE FIELD in   ON likes TYPE record<person>;
+	DEFINE FIELD out  ON likes TYPE record<person>;
+	DEFINE FIELD reason ON likes TYPE string;
+
+	RELATE person:1 -> likes -> person:2 CONTENT {id: 1, reason: "nice smile"};
+	"#;
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 6);
+
+	let tmp = res.remove(0).result?;
+
+	let val = Value::parse(
+		"[
+			{id: person:1},
+			{id: person:2}
+        ]",
+	);
+	assert_eq!(tmp, val);
+
+	for _ in 0..4 {
+		let tmp = res.remove(0).result?;
+		let val = Value::None;
+		assert_eq!(tmp, val);
+	}
+
+	let val = Value::parse(
+		"[
+			{
+				id: likes:1,
+				in: person:1,
+				out: person:2,
+				reason: 'nice smile'
+			}
+        ]",
+	);
+	let tmp = res.remove(0).result?;
+	assert_eq!(tmp, val);
+
+	Ok(())
+}
