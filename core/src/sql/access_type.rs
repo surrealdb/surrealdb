@@ -30,22 +30,17 @@ impl Display for AccessType {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		match self {
 			AccessType::Jwt(ac) => {
-				f.write_str(" JWT")?;
-				match &ac.verify {
-					JwtAccessVerify::Key(ref v) => {
-						write!(f, " ALGORITHM {} KEY {}", v.alg, quote_str(&v.key))?
-					}
-					JwtAccessVerify::Jwks(ref v) => write!(f, " JWKS {}", quote_str(&v.url))?,
-				}
+				write!(f, "JWT {}", ac)?;
 			}
 			AccessType::Record(ac) => {
-				f.write_str(" RECORD")?;
+				f.write_str("RECORD")?;
 				if let Some(ref v) = ac.signup {
 					write!(f, " SIGNUP {v}")?
 				}
 				if let Some(ref v) = ac.signin {
 					write!(f, " SIGNIN {v}")?
 				}
+        write!(f, " WITH JWT {}", ac.jwt)?;
 			}
 		}
 		Ok(())
@@ -129,7 +124,7 @@ impl Display for JwtAccess {
 				write!(f, "ALGORITHM {} KEY {}", v.alg, quote_str(&v.key))?;
 			}
 			JwtAccessVerify::Jwks(ref v) => {
-				write!(f, "JWKS {}", quote_str(&v.url),)?;
+				write!(f, "URL {}", quote_str(&v.url),)?;
 			}
 		}
 		if let Some(iss) = &self.issue {
@@ -144,7 +139,7 @@ impl InfoStructure for JwtAccess {
 		Value::from(map! {
 			"verify".to_string() => match self.verify {
 				JwtAccessVerify::Jwks(v) => Value::from(map!{
-					"jwks".to_string() => v.url.into(),
+					"url".to_string() => v.url.into(),
 				}),
 				JwtAccessVerify::Key(v) => Value::from(map!{
 					"alg".to_string() => v.alg.structure(),
