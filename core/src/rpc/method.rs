@@ -1,4 +1,10 @@
+#[cfg(test)]
+use strum::IntoEnumIterator;
+#[cfg(test)]
+use strum_macros::EnumIter;
+
 #[non_exhaustive]
+#[cfg_attr(test, derive(Debug, Copy, Clone, PartialEq, EnumIter))]
 pub enum Method {
 	Unknown,
 	Ping,
@@ -140,5 +146,22 @@ impl Method {
 				| Method::Query | Method::Relate
 				| Method::Run | Method::Unknown
 		)
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	#[test]
+	fn all_variants_from_u8() {
+		for method in Method::iter() {
+			assert_eq!(method.clone(), Method::from(method as u8));
+		}
+	}
+
+	#[test]
+	fn unknown_from_out_of_range_u8() {
+		assert_eq!(Method::Unknown, Method::from(182));
 	}
 }
