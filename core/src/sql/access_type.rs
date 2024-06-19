@@ -192,13 +192,7 @@ impl Display for AccessType {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		match self {
 			AccessType::Jwt(ac) => {
-				f.write_str("JWT")?;
-				match &ac.verify {
-					JwtAccessVerify::Key(ref v) => {
-						write!(f, " ALGORITHM {} KEY {}", v.alg, quote_str(&v.key))?
-					}
-					JwtAccessVerify::Jwks(ref v) => write!(f, " URL {}", quote_str(&v.url))?,
-				}
+				write!(f, "JWT {}", ac)?;
 			}
 			AccessType::Record(ac) => {
 				f.write_str("RECORD")?;
@@ -247,7 +241,7 @@ impl Display for JwtAccess {
 				write!(f, "ALGORITHM {} KEY {}", v.alg, quote_str(&v.key))?;
 			}
 			JwtAccessVerify::Jwks(ref v) => {
-				write!(f, "JWKS {}", quote_str(&v.url),)?;
+				write!(f, "URL {}", quote_str(&v.url),)?;
 			}
 		}
 		if let Some(iss) = &self.issue {
