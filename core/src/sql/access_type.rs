@@ -192,7 +192,7 @@ impl Display for AccessType {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		match self {
 			AccessType::Jwt(ac) => {
-				f.write_str(" JWT")?;
+				f.write_str("JWT")?;
 				match &ac.verify {
 					JwtAccessVerify::Key(ref v) => {
 						write!(f, " ALGORITHM {} KEY {}", v.alg, quote_str(&v.key))?
@@ -201,7 +201,7 @@ impl Display for AccessType {
 				}
 			}
 			AccessType::Record(ac) => {
-				f.write_str(" RECORD")?;
+				f.write_str("RECORD")?;
 				if let Some(ref v) = ac.signup {
 					write!(f, " SIGNUP {v}")?
 				}
