@@ -40,7 +40,7 @@ impl Display for AccessType {
 				if let Some(ref v) = ac.signin {
 					write!(f, " SIGNIN {v}")?
 				}
-        write!(f, " WITH JWT {}", ac.jwt)?;
+				write!(f, " WITH JWT {}", ac.jwt)?;
 			}
 		}
 		Ok(())
@@ -220,7 +220,7 @@ impl InfoStructure for JwtAccessVerify {
 	fn structure(self) -> Value {
 		match self {
 			JwtAccessVerify::Jwks(v) => Value::from(map! {
-				"jwks".to_string() => v.url.into(),
+				"url".to_string() => v.url.into(),
 			}),
 			JwtAccessVerify::Key(v) => Value::from(map! {
 				"alg".to_string() => v.alg.structure(),
