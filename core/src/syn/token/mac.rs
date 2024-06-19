@@ -160,6 +160,9 @@ macro_rules! t {
 	("+") => {
 		$crate::syn::token::TokenKind::Operator($crate::syn::token::Operator::Add)
 	};
+	("%") => {
+		$crate::syn::token::TokenKind::Operator($crate::syn::token::Operator::Modulo)
+	};
 	("-") => {
 		$crate::syn::token::TokenKind::Operator($crate::syn::token::Operator::Subtract)
 	};

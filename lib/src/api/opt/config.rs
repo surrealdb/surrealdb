@@ -1,4 +1,4 @@
-use crate::{dbs::Capabilities, iam::Level};
+use crate::opt::capabilities::Capabilities;
 #[cfg(any(
 	feature = "kv-mem",
 	feature = "kv-surrealkv",
@@ -8,6 +8,7 @@ use crate::{dbs::Capabilities, iam::Level};
 ))]
 use std::path::PathBuf;
 use std::time::Duration;
+use surrealdb_core::{dbs::Capabilities as CoreCapabilities, iam::Level};
 
 /// Configuration for server connection, including: strictness, notifications, query_timeout, transaction_timeout
 #[derive(Debug, Clone, Default)]
@@ -24,7 +25,7 @@ pub struct Config {
 	pub(crate) username: String,
 	pub(crate) password: String,
 	pub(crate) tick_interval: Option<Duration>,
-	pub(crate) capabilities: Capabilities,
+	pub(crate) capabilities: CoreCapabilities,
 	#[cfg(any(
 		feature = "kv-mem",
 		feature = "kv-surrealkv",
@@ -117,7 +118,7 @@ impl Config {
 
 	/// Set the capabilities for the database
 	pub fn capabilities(mut self, capabilities: Capabilities) -> Self {
-		self.capabilities = capabilities;
+		self.capabilities = capabilities.build();
 		self
 	}
 
