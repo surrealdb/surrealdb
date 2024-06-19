@@ -197,7 +197,7 @@ impl Display for AccessType {
 					JwtAccessVerify::Key(ref v) => {
 						write!(f, " ALGORITHM {} KEY {}", v.alg, quote_str(&v.key))?
 					}
-					JwtAccessVerify::Jwks(ref v) => write!(f, " JWKS {}", quote_str(&v.url))?,
+					JwtAccessVerify::Jwks(ref v) => write!(f, " URL {}", quote_str(&v.url))?,
 				}
 			}
 			AccessType::Record(ac) => {
@@ -208,6 +208,7 @@ impl Display for AccessType {
 				if let Some(ref v) = ac.signin {
 					write!(f, " SIGNIN {v}")?
 				}
+				write!(f, " WITH JWT {}", ac.jwt)?;
 			}
 		}
 		Ok(())
@@ -265,7 +266,7 @@ impl InfoStructure for JwtAccess {
 				acc.insert("key".to_string(), v.key.into());
 			}
 			JwtAccessVerify::Jwks(v) => {
-				acc.insert("jwks".to_string(), v.url.into());
+				acc.insert("url".to_string(), v.url.into());
 			}
 		}
 		if let Some(v) = self.issue {
