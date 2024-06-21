@@ -311,9 +311,9 @@ async fn define_statement_event() -> Result<(), Error> {
 			CREATE activity SET user = $this, value = $after.email, action = $event
 		);
 		INFO FOR TABLE user;
-		UPDATE user:test SET email = 'info@surrealdb.com', updated_at = time::now();
-		UPDATE user:test SET email = 'info@surrealdb.com', updated_at = time::now();
-		UPDATE user:test SET email = 'test@surrealdb.com', updated_at = time::now();
+		UPSERT user:test SET email = 'info@surrealdb.com', updated_at = time::now();
+		UPSERT user:test SET email = 'info@surrealdb.com', updated_at = time::now();
+		UPSERT user:test SET email = 'test@surrealdb.com', updated_at = time::now();
 		SELECT count() FROM activity GROUP ALL;
 	";
 	let mut t = Test::new(sql).await?;
@@ -349,9 +349,9 @@ async fn define_statement_event_when_event() -> Result<(), Error> {
 			CREATE activity SET user = $this, value = $after.email, action = $event
 		);
 		INFO FOR TABLE user;
-		UPDATE user:test SET email = 'info@surrealdb.com', updated_at = time::now();
-		UPDATE user:test SET email = 'info@surrealdb.com', updated_at = time::now();
-		UPDATE user:test SET email = 'test@surrealdb.com', updated_at = time::now();
+		UPSERT user:test SET email = 'info@surrealdb.com', updated_at = time::now();
+		UPSERT user:test SET email = 'info@surrealdb.com', updated_at = time::now();
+		UPSERT user:test SET email = 'test@surrealdb.com', updated_at = time::now();
 		SELECT count() FROM activity GROUP ALL;
 	";
 	let mut t = Test::new(sql).await?;
@@ -384,7 +384,7 @@ async fn define_statement_event_check_doc_always_populated() -> Result<(), Error
 			CREATE type::thing('log', $event) SET this = $doc, value = $value, before = $before, after = $after;
 		};
 		CREATE test:1 SET num = 1;
-		UPDATE test:1 set num = 2;
+		UPSERT test:1 set num = 2;
 		DELETE test:1;
 		SELECT * FROM log;
 	";
@@ -445,9 +445,9 @@ async fn define_statement_event_when_logic() -> Result<(), Error> {
 			CREATE activity SET user = $this, value = $after.email, action = $event
 		);
 		INFO FOR TABLE user;
-		UPDATE user:test SET email = 'info@surrealdb.com', updated_at = time::now();
-		UPDATE user:test SET email = 'info@surrealdb.com', updated_at = time::now();
-		UPDATE user:test SET email = 'test@surrealdb.com', updated_at = time::now();
+		UPSERT user:test SET email = 'info@surrealdb.com', updated_at = time::now();
+		UPSERT user:test SET email = 'info@surrealdb.com', updated_at = time::now();
+		UPSERT user:test SET email = 'test@surrealdb.com', updated_at = time::now();
 		SELECT count() FROM activity GROUP ALL;
 	";
 	let mut t = Test::new(sql).await?;
@@ -637,8 +637,8 @@ async fn define_statement_index_single_simple() -> Result<(), Error> {
 		REMOVE INDEX test ON user;
 		DEFINE INDEX test ON user COLUMNS age;
 		INFO FOR TABLE user;
-		UPDATE user:1 SET age = 24;
-		UPDATE user:2 SET age = 11;
+		UPSERT user:1 SET age = 24;
+		UPSERT user:2 SET age = 11;
 	";
 	let mut t = Test::new(sql).await?;
 	t.skip_ok(5)?;

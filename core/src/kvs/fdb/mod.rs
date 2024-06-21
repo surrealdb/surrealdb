@@ -1,11 +1,13 @@
 #![cfg(feature = "kv-fdb")]
 
+mod cnf;
+
 use crate::err::Error;
 use crate::kvs::Check;
 use crate::kvs::Key;
 use crate::kvs::Val;
 use crate::vs::{u64_to_versionstamp, Versionstamp};
-use foundationdb::options;
+use foundationdb::options::DatabaseOption;
 use futures::TryStreamExt;
 use std::ops::Range;
 use std::sync::Arc;
@@ -90,14 +92,23 @@ impl Datastore {
 
 		match foundationdb::Database::from_path(path) {
 			Ok(db) => {
-				db.set_option(options::DatabaseOption::TransactionRetryLimit(5)).map_err(|e| {
-					Error::Ds(format!("Unable to set transaction retry limit: {}", e))
+				// Set the transaction timeout
+				db.set_option(DatabaseOption::TransactionTimeout(
+					*cnf::FOUNDATIONDB_TRANSACTION_TIMEOUT,
+				))
+				.map_err(|e| Error::Ds(format!("Unable to set transaction timeout: {e}")))?;
+				// Set the transaction retry liimt
+				db.set_option(DatabaseOption::TransactionRetryLimit(
+					*cnf::FOUNDATIONDB_TRANSACTION_RETRY_LIMIT,
+				))
+				.map_err(|e| Error::Ds(format!("Unable to set transaction retry limit: {e}")))?;
+				// Set the transaction max retry delay
+				db.set_option(DatabaseOption::TransactionMaxRetryDelay(
+					*cnf::FOUNDATIONDB_TRANSACTION_MAX_RETRY_DELAY,
+				))
+				.map_err(|e| {
+					Error::Ds(format!("Unable to set transaction max retry delay: {e}"))
 				})?;
-				db.set_option(options::DatabaseOption::TransactionTimeout(5000))
-					.map_err(|e| Error::Ds(format!("Unable to set transaction timeout: {}", e)))?;
-				db.set_option(options::DatabaseOption::TransactionMaxRetryDelay(500)).map_err(
-					|e| Error::Ds(format!("Unable to set transaction max retry delay: {}", e)),
-				)?;
 				Ok(Datastore {
 					db,
 					_fdbnet,

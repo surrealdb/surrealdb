@@ -28,7 +28,7 @@ impl<'a> Document<'a> {
 		// Loop through all event statements
 		for ev in self.ev(ctx, opt).await?.iter() {
 			// Get the event action
-			let met = if stm.is_delete() {
+			let evt = if stm.is_delete() {
 				Value::from("DELETE")
 			} else if self.is_new() {
 				Value::from("CREATE")
@@ -42,7 +42,7 @@ impl<'a> Document<'a> {
 			};
 			// Configure the context
 			let mut ctx = Context::new(ctx);
-			ctx.add_value("event", met);
+			ctx.add_value("event", evt);
 			ctx.add_value("value", doc.doc.deref());
 			ctx.add_value("after", self.current.doc.deref());
 			ctx.add_value("before", self.initial.doc.deref());

@@ -25,7 +25,7 @@ use crate::{
 			RemoveFieldStatement, RemoveFunctionStatement, RemoveIndexStatement,
 			RemoveNamespaceStatement, RemoveParamStatement, RemoveStatement, RemoveTableStatement,
 			RemoveUserStatement, SelectStatement, SetStatement, ThrowStatement, UpdateStatement,
-			UseStatement,
+			UpsertStatement, UseStatement,
 		},
 		tokenizer::Tokenizer,
 		user::UserDuration,
@@ -1133,6 +1133,7 @@ fn parse_define_access_record() {
 	}
 }
 
+#[test]
 fn parse_define_access_record_with_jwt() {
 	let res = test_parse!(
 		parse_stmt,
@@ -2129,6 +2130,52 @@ fn parse_update() {
 	assert_eq!(
 		res,
 		Statement::Update(UpdateStatement {
+			only: true,
+			what: Values(vec![
+				Value::Future(Box::new(Future(Block(vec![Entry::Value(Value::Strand(Strand(
+					"text".to_string()
+				)))])))),
+				Value::Idiom(Idiom(vec![
+					Part::Field(Ident("a".to_string())),
+					Part::Graph(Graph {
+						dir: Dir::Out,
+						what: Tables(vec![Table("b".to_string())]),
+						expr: Fields::all(),
+						..Default::default()
+					})
+				]))
+			]),
+			cond: Some(Cond(Value::Bool(true))),
+			data: Some(Data::UnsetExpression(vec![
+				Idiom(vec![Part::Field(Ident("foo".to_string())), Part::Flatten]),
+				Idiom(vec![
+					Part::Field(Ident("a".to_string())),
+					Part::Graph(Graph {
+						dir: Dir::Out,
+						what: Tables(vec![Table("b".to_string())]),
+						expr: Fields::all(),
+						..Default::default()
+					})
+				]),
+				Idiom(vec![Part::Field(Ident("c".to_string())), Part::All])
+			])),
+			output: Some(Output::Diff),
+			timeout: Some(Timeout(Duration(std::time::Duration::from_secs(1)))),
+			parallel: true,
+		})
+	);
+}
+
+#[test]
+fn parse_upsert() {
+	let res = test_parse!(
+		parse_stmt,
+		r#"UPSERT ONLY <future> { "text" }, a->b UNSET foo... , a->b, c[*] WHERE true RETURN DIFF TIMEOUT 1s PARALLEL"#
+	)
+	.unwrap();
+	assert_eq!(
+		res,
+		Statement::Upsert(UpsertStatement {
 			only: true,
 			what: Values(vec![
 				Value::Future(Box::new(Future(Block(vec![Entry::Value(Value::Strand(Strand(

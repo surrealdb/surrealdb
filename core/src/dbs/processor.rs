@@ -123,6 +123,8 @@ impl<'a> Processor<'a> {
 				Iterable::Value(v) => self.process_value(stk, ctx, opt, stm, v).await?,
 				Iterable::Thing(v) => self.process_thing(stk, ctx, opt, stm, v).await?,
 				Iterable::Defer(v) => self.process_defer(stk, ctx, opt, stm, v).await?,
+				Iterable::Range(v) => self.process_range(stk, ctx, opt, stm, v).await?,
+				Iterable::Edges(e) => self.process_edge(stk, ctx, opt, stm, e).await?,
 				Iterable::Table(v) => {
 					if let Some(qp) = ctx.get_query_planner() {
 						if let Some(exe) = qp.get_query_executor(&v.0) {
@@ -135,8 +137,6 @@ impl<'a> Processor<'a> {
 					}
 					self.process_table(stk, ctx, opt, stm, &v).await?
 				}
-				Iterable::Range(v) => self.process_range(stk, ctx, opt, stm, v).await?,
-				Iterable::Edges(e) => self.process_edge(stk, ctx, opt, stm, e).await?,
 				Iterable::Index(t, irf) => {
 					if let Some(qp) = ctx.get_query_planner() {
 						if let Some(exe) = qp.get_query_executor(&t.0) {

@@ -24,6 +24,24 @@ impl<'a> Document<'a> {
 					});
 				}
 			}
+			Statement::Upsert(_) => {
+				if !tb.allows_normal() {
+					return Err(Error::TableCheck {
+						thing: rid.to_string(),
+						relation: false,
+						target_type: tb.kind.clone(),
+					});
+				}
+			}
+			Statement::Relate(_) => {
+				if !tb.allows_relation() {
+					return Err(Error::TableCheck {
+						thing: rid.to_string(),
+						relation: true,
+						target_type: tb.kind.clone(),
+					});
+				}
+			}
 			Statement::Insert(_) => match self.extras {
 				Workable::Relate(_, _, _) => {
 					if !tb.allows_relation() {
@@ -44,15 +62,6 @@ impl<'a> Document<'a> {
 					}
 				}
 			},
-			Statement::Relate(_) => {
-				if !tb.allows_relation() {
-					return Err(Error::TableCheck {
-						thing: rid.to_string(),
-						relation: true,
-						target_type: tb.kind.clone(),
-					});
-				}
-			}
 			_ => {}
 		}
 		// Carry on

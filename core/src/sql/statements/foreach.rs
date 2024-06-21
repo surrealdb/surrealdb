@@ -63,6 +63,7 @@ impl ForeachStatement {
 							Entry::Ifelse(v) => stk.run(|stk| v.compute(stk, &ctx, opt, doc)).await,
 							Entry::Select(v) => stk.run(|stk| v.compute(stk, &ctx, opt, doc)).await,
 							Entry::Create(v) => stk.run(|stk| v.compute(stk, &ctx, opt, doc)).await,
+							Entry::Upsert(v) => stk.run(|stk| v.compute(stk, &ctx, opt, doc)).await,
 							Entry::Update(v) => stk.run(|stk| v.compute(stk, &ctx, opt, doc)).await,
 							Entry::Delete(v) => stk.run(|stk| v.compute(stk, &ctx, opt, doc)).await,
 							Entry::Relate(v) => stk.run(|stk| v.compute(stk, &ctx, opt, doc)).await,

@@ -10,15 +10,15 @@ use surrealdb::sql::Value;
 #[tokio::test]
 async fn strict_typing_inline() -> Result<(), Error> {
 	let sql = "
-		UPDATE person:test SET age = <int> NONE;
-		UPDATE person:test SET age = <int> '18';
-		UPDATE person:test SET enabled = <bool | int> NONE;
-		UPDATE person:test SET enabled = <bool | int> true;
-		UPDATE person:test SET name = <string> 'Tobie Morgan Hitchcock';
-		UPDATE person:test SET scores = <set<float>> [1,1,2,2,3,3,4,4,5,5];
-		UPDATE person:test SET scores = <array<float>> [1,1,2,2,3,3,4,4,5,5];
-		UPDATE person:test SET scores = <set<float, 5>> [1,1,2,2,3,3,4,4,5,5];
-		UPDATE person:test SET scores = <array<float, 5>> [1,1,2,2,3,3,4,4,5,5];
+		UPSERT person:test SET age = <int> NONE;
+		UPSERT person:test SET age = <int> '18';
+		UPSERT person:test SET enabled = <bool | int> NONE;
+		UPSERT person:test SET enabled = <bool | int> true;
+		UPSERT person:test SET name = <string> 'Tobie Morgan Hitchcock';
+		UPSERT person:test SET scores = <set<float>> [1,1,2,2,3,3,4,4,5,5];
+		UPSERT person:test SET scores = <array<float>> [1,1,2,2,3,3,4,4,5,5];
+		UPSERT person:test SET scores = <set<float, 5>> [1,1,2,2,3,3,4,4,5,5];
+		UPSERT person:test SET scores = <array<float, 5>> [1,1,2,2,3,3,4,4,5,5];
 	";
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
@@ -131,10 +131,10 @@ async fn strict_typing_defined() -> Result<(), Error> {
 		DEFINE FIELD enabled ON person TYPE bool | int;
 		DEFINE FIELD name ON person TYPE string;
 		DEFINE FIELD scores ON person TYPE set<float, 5>;
-		UPDATE person:test SET age = NONE, enabled = NONE, name = NONE, scored = [1,1,2,2,3,3,4,4,5,5];
-		UPDATE person:test SET age = 18, enabled = NONE, name = NONE, scored = [1,1,2,2,3,3,4,4,5,5];
-		UPDATE person:test SET age = 18, enabled = true, name = NONE, scored = [1,1,2,2,3,3,4,4,5,5];
-		UPDATE person:test SET age = 18, enabled = true, name = 'Tobie Morgan Hitchcock', scores = [1,1,2,2,3,3,4,4,5,5];
+		UPSERT person:test SET age = NONE, enabled = NONE, name = NONE, scored = [1,1,2,2,3,3,4,4,5,5];
+		UPSERT person:test SET age = 18, enabled = NONE, name = NONE, scored = [1,1,2,2,3,3,4,4,5,5];
+		UPSERT person:test SET age = 18, enabled = true, name = NONE, scored = [1,1,2,2,3,3,4,4,5,5];
+		UPSERT person:test SET age = 18, enabled = true, name = 'Tobie Morgan Hitchcock', scores = [1,1,2,2,3,3,4,4,5,5];
 	";
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
@@ -193,23 +193,23 @@ async fn strict_typing_none_null() -> Result<(), Error> {
 	let sql = "
 		DEFINE TABLE person SCHEMAFULL;
 		DEFINE FIELD name ON TABLE person TYPE option<string>;
-		UPDATE person:test SET name = 'Tobie';
-		UPDATE person:test SET name = NULL;
-		UPDATE person:test SET name = NONE;
+		UPSERT person:test SET name = 'Tobie';
+		UPSERT person:test SET name = NULL;
+		UPSERT person:test SET name = NONE;
 		--
 		REMOVE TABLE person;
 		DEFINE TABLE person SCHEMAFULL;
 		DEFINE FIELD name ON TABLE person TYPE option<string | null>;
-		UPDATE person:test SET name = 'Tobie';
-		UPDATE person:test SET name = NULL;
-		UPDATE person:test SET name = NONE;
+		UPSERT person:test SET name = 'Tobie';
+		UPSERT person:test SET name = NULL;
+		UPSERT person:test SET name = NONE;
 		--
 		REMOVE TABLE person;
 		DEFINE TABLE person SCHEMAFULL;
 		DEFINE FIELD name ON TABLE person TYPE string | null;
-		UPDATE person:test SET name = 'Tobie';
-		UPDATE person:test SET name = NULL;
-		UPDATE person:test SET name = NONE;
+		UPSERT person:test SET name = 'Tobie';
+		UPSERT person:test SET name = NULL;
+		UPSERT person:test SET name = NONE;
 	";
 	let mut t = Test::new(sql).await?;
 	//
