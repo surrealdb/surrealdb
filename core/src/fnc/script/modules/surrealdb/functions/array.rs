@@ -31,6 +31,7 @@ impl_module_def!(
 	"group" => run,
 	"insert" => run,
 	"intersect" => run,
+	"is_empty" => run,
 	"join" => run,
 	"knn" => run,
 	"last" => run,

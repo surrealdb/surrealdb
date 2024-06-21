@@ -475,6 +475,17 @@ async fn function_array_intersect() -> Result<(), Error> {
 }
 
 #[tokio::test]
+async fn function_array_is_empty() -> Result<(), Error> {
+	let sql = r#"
+		RETURN array::is_empty([]);
+		RETURN array::is_empty([1,2,3,4,5]);
+	"#;
+	//
+	Test::new(sql).await?.expect_val("true")?.expect_val("false")?;
+	Ok(())
+}
+
+#[tokio::test]
 async fn function_string_join_arr() -> Result<(), Error> {
 	let sql = r#"
 		RETURN array::join([], "");
