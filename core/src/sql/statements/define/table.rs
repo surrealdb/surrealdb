@@ -174,11 +174,19 @@ impl Display for DefineTableStatement {
 			}
 			TableType::Relation(rel) => {
 				f.write_str(" RELATION")?;
-				if let Some(kind) = &rel.from {
-					write!(f, " IN {kind}")?;
+				if let Some(Kind::Record(kind)) = &rel.from {
+					write!(
+						f,
+						" IN {}",
+						kind.iter().map(|t| t.0.as_str()).collect::<Vec<_>>().join(" | ")
+					)?;
 				}
-				if let Some(kind) = &rel.to {
-					write!(f, " OUT {kind}")?;
+				if let Some(Kind::Record(kind)) = &rel.to {
+					write!(
+						f,
+						" OUT {}",
+						kind.iter().map(|t| t.0.as_str()).collect::<Vec<_>>().join(" | ")
+					)?;
 				}
 			}
 			TableType::Any => {
