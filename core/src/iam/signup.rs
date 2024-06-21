@@ -103,8 +103,8 @@ pub async fn db_access(
 													Session::editor().with_ns(&ns).with_db(&db);
 												sess.rd = Some(rid.clone().into());
 												sess.tk = Some(claims.clone().into());
-												sess.ip = session.ip.clone();
-												sess.or = session.or.clone();
+												sess.ip.clone_from(&session.ip);
+												sess.or.clone_from(&session.or);
 												// Compute the value with the params
 												match kvs.evaluate(ac, &sess, None).await {
 													Ok(val) => match val.record() {
