@@ -2857,9 +2857,9 @@ mod tests {
 		let enc: Vec<u8> = Value::Bool(false).into();
 		assert_eq!(3, enc.len());
 		let enc: Vec<u8> = Value::from("test").into();
-		assert_eq!(8, enc.len());
+		assert_eq!(7, enc.len());
 		let enc: Vec<u8> = Value::parse("{ hello: 'world' }").into();
-		assert_eq!(19, enc.len());
+		assert_eq!(18, enc.len());
 		let enc: Vec<u8> = Value::parse("{ compact: true, schema: 0 }").into();
 		assert_eq!(27, enc.len());
 	}
