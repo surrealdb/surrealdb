@@ -3,8 +3,6 @@ use super::kv::Add;
 use super::Key;
 use super::Val;
 use crate::cf;
-use crate::cnf::NORMAL_FETCH_SIZE;
-use crate::dbs::node::ClusterMembership;
 use crate::dbs::node::Timestamp;
 use crate::err::Error;
 use crate::idg::u32::U32;
@@ -12,22 +10,17 @@ use crate::idg::u32::U32;
 use crate::key::debug::sprint;
 use crate::kvs::batch::Batch;
 use crate::kvs::clock::SizedClock;
-use crate::kvs::lq_structs::LqValue;
 use crate::kvs::stash::Stash;
 use crate::sql;
 use crate::sql::thing::Thing;
 use crate::sql::Value;
-use crate::vs::Oracle;
 use crate::vs::Versionstamp;
-use futures::lock::Mutex;
 use sql::statements::DefineTableStatement;
-use sql::statements::LiveStatement;
 use std::borrow::Cow;
 use std::fmt;
 use std::fmt::Debug;
 use std::ops::Range;
 use std::sync::Arc;
-use uuid::Uuid;
 
 /// Used to determine the behaviour when a transaction is not closed correctly
 #[derive(Default)]
@@ -77,7 +70,6 @@ pub struct Transactor {
 	pub(super) inner: Inner,
 	pub(super) stash: Stash,
 	pub(super) cf: cf::Writer,
-	pub(super) vso: Arc<Mutex<Oracle>>,
 	pub(super) clock: Arc<SizedClock>,
 }
 
@@ -424,7 +416,7 @@ impl Transactor {
 	}
 
 	// --------------------------------------------------
-	// Superimposed methods
+	// Additional methods
 	// --------------------------------------------------
 
 	/// Clock retrieves the current timestamp, without guaranteeing
@@ -436,254 +428,7 @@ impl Transactor {
 	///
 	/// Public for tests, but not required for usage from a user perspective.
 	pub async fn clock(&self) -> Timestamp {
-		// Use a timestamp oracle if available
 		self.clock.now().await
-	}
-
-	/// Sets a node cluster registration entry
-	pub async fn set_nd(&mut self, id: Uuid) -> Result<(), Error> {
-		let key = crate::key::root::nd::Nd::new(id);
-		let val = ClusterMembership {
-			name: id.to_string(),
-			heartbeat: self.clock().await,
-		};
-		match self.put(key, val).await {
-			// This node registration already exists
-			Err(Error::TxKeyAlreadyExists) => Err(Error::ClAlreadyExists {
-				value: id.to_string(),
-			}),
-			// There was an error with the request
-			Err(err) => Err(err),
-			// Everything is ok
-			Ok(_) => Ok(()),
-		}
-	}
-
-	/// Deletes a node cluster registration entry
-	pub async fn del_nd(&mut self, node: Uuid) -> Result<(), Error> {
-		let key = crate::key::root::nd::Nd::new(node);
-		self.del(key).await
-	}
-
-	/// Scans the node cluster membership entries
-	pub async fn scan_nd(&mut self, batch: u32) -> Result<Vec<ClusterMembership>, Error> {
-		let beg = crate::key::root::nd::Nd::prefix();
-		let end = crate::key::root::nd::Nd::suffix();
-		let mut out: Vec<ClusterMembership> = vec![];
-		// Start processing
-		let mut next = Some(beg..end);
-		while let Some(rng) = next {
-			let res = self.batch(rng, batch, true).await?;
-			next = res.next;
-			for (_, v) in res.values.into_iter() {
-				out.push(v.into());
-			}
-		}
-		Ok(out)
-	}
-
-	/// Sets a hearbeat with a specific timestamp for a node
-	pub async fn set_hb(&mut self, timestamp: Timestamp, id: Uuid) -> Result<(), Error> {
-		let key = crate::key::root::hb::Hb::new(timestamp, id);
-		self.put(
-			key,
-			ClusterMembership {
-				name: id.to_string(),
-				heartbeat: timestamp,
-			},
-		)
-		.await?;
-		Ok(())
-	}
-
-	/// Deletes a hearbeat with a specific timestamp for a node
-	pub async fn del_hb(&mut self, timestamp: Timestamp, id: Uuid) -> Result<(), Error> {
-		let key = crate::key::root::hb::Hb::new(timestamp, id);
-		self.del(key).await
-	}
-
-	pub async fn delr_hb(&mut self, ts: Vec<crate::key::root::hb::Hb>) -> Result<(), Error> {
-		for hb in ts.into_iter() {
-			self.del(hb).await?;
-		}
-		Ok(())
-	}
-
-	/// Scans up until the heartbeat timestamp and returns the discovered nodes
-	pub async fn scan_hb(
-		&mut self,
-		time_to: &Timestamp,
-		batch: u32,
-	) -> Result<Vec<crate::key::root::hb::Hb>, Error> {
-		let beg = crate::key::root::hb::Hb::prefix();
-		let end = crate::key::root::hb::Hb::suffix(time_to);
-		let mut out: Vec<crate::key::root::hb::Hb> = vec![];
-		// Start processing
-		let mut next = Some(beg..end);
-		while let Some(rng) = next {
-			let res = self.batch(rng, batch, false).await?;
-			next = res.next;
-			for (k, _) in res.values.into_iter() {
-				out.push(crate::key::root::hb::Hb::decode(k.as_slice())?);
-			}
-		}
-		Ok(out)
-	}
-
-	//
-	//
-	//
-	//
-	//
-	//
-	//
-	//
-	//
-	//
-
-	// Delete the live query notification registry on the table
-	pub async fn del_ndlq(&mut self, nd: Uuid, lq: Uuid, ns: &str, db: &str) -> Result<(), Error> {
-		let key = crate::key::node::lq::Lq::new(nd, lq, ns, db);
-		self.del(key).await
-	}
-
-	pub async fn del_tblq(&mut self, ns: &str, db: &str, tb: &str, lv: Uuid) -> Result<(), Error> {
-		trace!("del_lv: ns={:?} db={:?} tb={:?} lv={:?}", ns, db, tb, lv);
-		let key = crate::key::table::lq::new(ns, db, tb, lv);
-		self.del(key).await
-	}
-
-	pub async fn scan_ndlq<'a>(&mut self, node: &Uuid, batch: u32) -> Result<Vec<LqValue>, Error> {
-		let beg = crate::key::node::lq::prefix_nd(node);
-		let end = crate::key::node::lq::suffix_nd(node);
-		let mut out: Vec<LqValue> = vec![];
-		let mut next = Some(beg..end);
-		while let Some(rng) = next {
-			let res = self.batch(rng, batch, true).await?;
-			next = res.next;
-			for (k, v) in res.values.into_iter() {
-				let lv = crate::key::node::lq::Lq::decode(k.as_slice())?;
-				let tb: String = String::from_utf8(v).unwrap();
-				out.push(LqValue {
-					nd: lv.nd.into(),
-					ns: lv.ns.to_string(),
-					db: lv.db.to_string(),
-					tb,
-					lq: lv.lq.into(),
-				});
-			}
-		}
-		Ok(out)
-	}
-
-	pub async fn scan_tblq<'a>(
-		&mut self,
-		ns: &str,
-		db: &str,
-		tb: &str,
-		batch: u32,
-	) -> Result<Vec<LqValue>, Error> {
-		let mut out = vec![];
-		let beg = crate::key::table::lq::prefix(ns, db, tb);
-		let end = crate::key::table::lq::suffix(ns, db, tb);
-		let mut next = Some(beg..end);
-		while let Some(rng) = next {
-			let res = self.batch(rng, batch, true).await?;
-			next = res.next;
-			for (k, v) in res.values.into_iter() {
-				let lv = crate::key::table::lq::Lq::decode(k.as_slice())?;
-				let val: LiveStatement = v.into();
-				out.push(LqValue {
-					nd: val.node,
-					ns: lv.ns.to_string(),
-					db: lv.db.to_string(),
-					tb: lv.tb.to_string(),
-					lq: val.id,
-				});
-			}
-		}
-		Ok(out)
-	}
-
-	/// Add live query to table
-	pub async fn putc_tblq(
-		&mut self,
-		ns: &str,
-		db: &str,
-		tb: &str,
-		live_stm: LiveStatement,
-		expected: Option<LiveStatement>,
-	) -> Result<(), Error> {
-		let key = crate::key::table::lq::new(ns, db, tb, live_stm.id.0);
-		let key_enc = crate::key::table::lq::Lq::encode(&key)?;
-		#[cfg(debug_assertions)]
-		trace!("putc_tblq ({:?}): key={:?}", &live_stm.id, sprint(&key_enc));
-		self.putc(key_enc, live_stm, expected).await
-	}
-
-	pub async fn putc_ndlq(
-		&mut self,
-		nd: Uuid,
-		lq: Uuid,
-		ns: &str,
-		db: &str,
-		tb: &str,
-		chk: Option<&str>,
-	) -> Result<(), Error> {
-		let key = crate::key::node::lq::new(nd, lq, ns, db);
-		self.putc(key, tb, chk).await
-	}
-
-	pub async fn all_lq(&mut self, nd: &uuid::Uuid) -> Result<Vec<LqValue>, Error> {
-		let mut out = vec![];
-		let beg = crate::key::node::lq::prefix_nd(nd);
-		let end = crate::key::node::lq::suffix_nd(nd);
-		let mut next = Some(beg..end);
-		while let Some(rng) = next {
-			let res = self.batch(rng, *NORMAL_FETCH_SIZE, true).await?;
-			next = res.next;
-			for (k, v) in res.values.into_iter() {
-				let lqk = crate::key::node::lq::Lq::decode(k.as_slice())?;
-				let lqv = LqValue {
-					nd: (*nd).into(),
-					ns: lqk.ns.to_string(),
-					db: lqk.db.to_string(),
-					lq: lqk.lq.into(),
-					tb: String::from_utf8(v).map_err(|e| {
-						Error::Internal(format!("Failed to decode a value while reading LQ: {}", e))
-					})?,
-				};
-				out.push(lqv);
-			}
-		}
-		Ok(out)
-	}
-
-	// --------------------------------------------------
-	// Additional methods
-	// --------------------------------------------------
-
-	#[allow(unused)]
-	async fn get_non_monotonic_versionstamp(&mut self) -> Result<Versionstamp, Error> {
-		Ok(self.vso.lock().await.now())
-	}
-
-	#[allow(unused)]
-	async fn get_non_monotonic_versionstamped_key<K>(
-		&mut self,
-		prefix: K,
-		suffix: K,
-	) -> Result<Vec<u8>, Error>
-	where
-		K: Into<Key>,
-	{
-		let prefix: Key = prefix.into();
-		let suffix: Key = suffix.into();
-		let ts = self.get_non_monotonic_versionstamp().await?;
-		let mut k: Vec<u8> = prefix.clone();
-		k.append(&mut ts.to_vec());
-		k.append(&mut suffix.clone());
-		Ok(k)
 	}
 
 	// change will record the change in the changefeed if enabled.

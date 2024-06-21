@@ -1,6 +1,6 @@
 //! Stores cluster membership information
+use crate::key::category::Categorise;
 use crate::key::category::Category;
-use crate::key::key_req::KeyRequirements;
 use derive::Key;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -18,8 +18,24 @@ pub struct Nd {
 	pub nd: Uuid,
 }
 
-impl KeyRequirements for Nd {
-	fn key_category(&self) -> Category {
+pub fn new(nd: Uuid) -> Nd {
+	Nd::new(nd)
+}
+
+pub fn prefix() -> Vec<u8> {
+	let mut k = crate::key::root::all::new().encode().unwrap();
+	k.extend_from_slice(&[b'!', b'n', b'd', 0x00]);
+	k
+}
+
+pub fn suffix() -> Vec<u8> {
+	let mut k = crate::key::root::all::new().encode().unwrap();
+	k.extend_from_slice(&[b'!', b'n', b'd', 0xff]);
+	k
+}
+
+impl Categorise for Nd {
+	fn categorise(&self) -> Category {
 		Category::Node
 	}
 }
@@ -33,18 +49,6 @@ impl Nd {
 			_c: b'd',
 			nd,
 		}
-	}
-
-	pub fn prefix() -> Vec<u8> {
-		let mut k = crate::key::root::all::new().encode().unwrap();
-		k.extend_from_slice(&[b'!', b'n', b'd', 0x00]);
-		k
-	}
-
-	pub fn suffix() -> Vec<u8> {
-		let mut k = crate::key::root::all::new().encode().unwrap();
-		k.extend_from_slice(&[b'!', b'n', b'd', 0xff]);
-		k
 	}
 }
 
@@ -61,13 +65,13 @@ mod tests {
 
 	#[test]
 	fn test_prefix() {
-		let val = super::Nd::prefix();
+		let val = super::prefix();
 		assert_eq!(val, b"/!nd\0")
 	}
 
 	#[test]
 	fn test_suffix() {
-		let val = super::Nd::suffix();
+		let val = super::suffix();
 		assert_eq!(val, b"/!nd\xff")
 	}
 }

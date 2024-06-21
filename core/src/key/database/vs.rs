@@ -1,6 +1,6 @@
 //! Stores database versionstamps
+use crate::key::category::Categorise;
 use crate::key::category::Category;
-use crate::key::key_req::KeyRequirements;
 use derive::Key;
 use serde::{Deserialize, Serialize};
 
@@ -23,8 +23,8 @@ pub fn new<'a>(ns: &'a str, db: &'a str) -> Vs<'a> {
 	Vs::new(ns, db)
 }
 
-impl KeyRequirements for Vs<'_> {
-	fn key_category(&self) -> Category {
+impl Categorise for Vs<'_> {
+	fn categorise(&self) -> Category {
 		Category::DatabaseVersionstamp
 	}
 }

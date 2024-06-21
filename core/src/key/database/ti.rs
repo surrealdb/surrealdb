@@ -1,6 +1,6 @@
 //! Stores the next and available freed IDs for documents
+use crate::key::category::Categorise;
 use crate::key::category::Category;
-use crate::key::key_req::KeyRequirements;
 use derive::Key;
 use serde::{Deserialize, Serialize};
 
@@ -22,8 +22,8 @@ pub fn new(ns: u32, db: u32) -> Ti {
 	Ti::new(ns, db)
 }
 
-impl KeyRequirements for Ti {
-	fn key_category(&self) -> Category {
+impl Categorise for Ti {
+	fn categorise(&self) -> Category {
 		Category::DatabaseTableIdentifier
 	}
 }

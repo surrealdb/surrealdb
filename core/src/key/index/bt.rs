@@ -1,7 +1,7 @@
 //! Stores BTree nodes for terms
 use crate::idx::trees::store::NodeId;
+use crate::key::category::Categorise;
 use crate::key::category::Category;
-use crate::key::key_req::KeyRequirements;
 use derive::Key;
 use serde::{Deserialize, Serialize};
 
@@ -23,8 +23,8 @@ pub struct Bt<'a> {
 	pub node_id: Option<NodeId>,
 }
 
-impl KeyRequirements for Bt<'_> {
-	fn key_category(&self) -> Category {
+impl Categorise for Bt<'_> {
+	fn categorise(&self) -> Category {
 		Category::IndexBTreeNodeTerms
 	}
 }

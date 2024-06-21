@@ -241,7 +241,7 @@ pub trait Transaction {
 			}
 			None => 1,
 		};
-		// Convert the
+		// Convert the timestamp to a versionstamp
 		let verbytes = crate::vs::u64_to_versionstamp(ver);
 		// Store the timestamp to prevent other transactions from committing
 		self.set(key.as_slice(), verbytes.to_vec()).await?;

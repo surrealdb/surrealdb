@@ -151,10 +151,7 @@ pub(crate) fn router(
 			feature = "kv-fdb",
 			feature = "kv-tikv",
 		))]
-		let kvs = match address.config.temporary_directory {
-			Some(tmp_dir) => kvs.with_temporary_directory(tmp_dir),
-			_ => kvs,
-		};
+		let kvs = kvs.with_temporary_directory(address.config.temporary_directory);
 
 		let kvs = Arc::new(kvs);
 		let mut vars = BTreeMap::new();

@@ -18,7 +18,7 @@ mod cache;
 mod clock;
 mod ds;
 mod export;
-mod nd;
+mod node;
 mod scanner;
 mod stash;
 mod tr;
@@ -31,8 +31,6 @@ mod mem;
 mod rocksdb;
 mod surrealkv;
 mod tikv;
-
-pub(crate) mod lq_structs;
 
 #[cfg(test)]
 mod tests;

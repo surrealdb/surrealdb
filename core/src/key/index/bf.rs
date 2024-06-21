@@ -1,8 +1,8 @@
 //! Stores Term/Doc frequency
 use crate::idx::docids::DocId;
 use crate::idx::ft::terms::TermId;
+use crate::key::category::Categorise;
 use crate::key::category::Category;
-use crate::key::key_req::KeyRequirements;
 use derive::Key;
 use serde::{Deserialize, Serialize};
 
@@ -25,8 +25,8 @@ pub struct Bf<'a> {
 	pub doc_id: DocId,
 }
 
-impl KeyRequirements for Bf<'_> {
-	fn key_category(&self) -> Category {
+impl Categorise for Bf<'_> {
+	fn categorise(&self) -> Category {
 		Category::IndexTermDocFrequency
 	}
 }

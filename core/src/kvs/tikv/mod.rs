@@ -6,13 +6,15 @@ use crate::kvs::Key;
 use crate::kvs::Val;
 use crate::vs::{u64_to_versionstamp, Versionstamp};
 use std::ops::Range;
+use std::pin::Pin;
+use std::sync::Arc;
 use tikv::CheckLevel;
 use tikv::TimestampExt;
 use tikv::TransactionOptions;
 
 #[non_exhaustive]
 pub struct Datastore {
-	db: tikv::TransactionClient,
+	db: Pin<Arc<tikv::TransactionClient>>,
 }
 
 #[non_exhaustive]
@@ -25,6 +27,11 @@ pub struct Transaction {
 	check: Check,
 	/// The underlying datastore transaction
 	inner: tikv::Transaction,
+	// The above, supposedly 'static transaction
+	// actually points here, so we need to ensure
+	// the memory is kept alive. This pointer must
+	// be declared last, so that it is dropped last.
+	db: Pin<Arc<tikv::TransactionClient>>,
 }
 
 impl Drop for Transaction {
@@ -62,7 +69,7 @@ impl Datastore {
 	pub(crate) async fn new(path: &str) -> Result<Datastore, Error> {
 		match tikv::TransactionClient::new(vec![path]).await {
 			Ok(db) => Ok(Datastore {
-				db,
+				db: Arc::pin(db),
 			}),
 			Err(e) => Err(Error::Ds(e.to_string())),
 		}
@@ -98,6 +105,7 @@ impl Datastore {
 				check,
 				write,
 				inner,
+				db: self.db.clone(),
 			}),
 			Err(e) => Err(Error::Tx(e.to_string())),
 		}
@@ -308,6 +316,25 @@ impl super::api::Transaction for Transaction {
 		Ok(())
 	}
 
+	/// Delete a range of keys from the databases
+	async fn delr<K>(&mut self, rng: Range<K>) -> Result<(), Error>
+	where
+		K: Into<Key>,
+	{
+		// Check to see if transaction is closed
+		if self.done {
+			return Err(Error::TxFinished);
+		}
+		// Check to see if transaction is writable
+		if !self.write {
+			return Err(Error::TxReadonly);
+		}
+		// Delete the key range
+		self.db.unsafe_destroy_range(rng.start.into()..rng.end.into()).await?;
+		// Return result
+		Ok(())
+	}
+
 	/// Delete a range of keys from the database
 	async fn keys<K>(&mut self, rng: Range<K>, limit: u32) -> Result<Vec<Key>, Error>
 	where
@@ -365,7 +392,7 @@ impl super::api::Transaction for Transaction {
 		// Calculate the version key
 		let key = key.into();
 		// Get the transaction version
-		let ver = self.inner.get_current_timestamp().await?.version();
+		let ver = self.inner.current_timestamp().await?.version();
 		// Convert the value to a versionstamp
 		let verbytes = u64_to_versionstamp(ver);
 		// Calculate the previous version value
@@ -379,7 +406,7 @@ impl super::api::Transaction for Transaction {
 				return Err(Error::TxFailure);
 			}
 		};
-		// Convert the
+		// Convert the timestamp to a versionstamp
 		let verbytes = crate::vs::u64_to_versionstamp(ver);
 		// Store the timestamp to prevent other transactions from committing
 		self.set(key.as_slice(), verbytes.to_vec()).await?;

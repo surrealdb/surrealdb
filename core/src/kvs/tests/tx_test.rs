@@ -1,5 +1,4 @@
 use crate::key::debug::sprint;
-use crate::kvs::lq_structs::{KillEntry, LqEntry, TrackedResult};
 use crate::sql::Strand;
 
 #[tokio::test]

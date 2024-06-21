@@ -1,4 +1,5 @@
 use super::Key;
+use crate::dbs::node::Node;
 use crate::sql::statements::DefineAccessStatement;
 use crate::sql::statements::DefineAnalyzerStatement;
 use crate::sql::statements::DefineDatabaseStatement;
@@ -46,6 +47,8 @@ pub(super) enum Entry {
 	Any(Arc<dyn Any + Send + Sync>),
 	/// A cached record document content
 	Val(Arc<Value>),
+	/// A slice of Node specified at the root.
+	Nds(Arc<[Node]>),
 	/// A slice of DefineUserStatement specified at the root.
 	Rus(Arc<[DefineUserStatement]>),
 	/// A slice of DefineNamespaceStatement specified on a namespace.
@@ -88,6 +91,14 @@ impl Entry {
 	pub(super) fn into_type<T: Send + Sync + 'static>(self: Entry) -> Arc<T> {
 		match self {
 			Entry::Any(v) => v.downcast::<T>().unwrap(),
+			_ => unreachable!(),
+		}
+	}
+	/// Converts this cache entry into a slice of [`Node`].
+	/// This panics if called on a cache entry that is not an [`Entry::Nds`].
+	pub(super) fn into_nds(self) -> Arc<[Node]> {
+		match self {
+			Entry::Nds(v) => v,
 			_ => unreachable!(),
 		}
 	}

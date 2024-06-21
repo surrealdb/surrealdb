@@ -1,6 +1,6 @@
 //! Stores database timestamps
+use crate::key::category::Categorise;
 use crate::key::category::Category;
-use crate::key::key_req::KeyRequirements;
 use derive::Key;
 use serde::{Deserialize, Serialize};
 
@@ -39,8 +39,8 @@ pub fn suffix(ns: &str, db: &str) -> Vec<u8> {
 	k
 }
 
-impl KeyRequirements for Ts<'_> {
-	fn key_category(&self) -> Category {
+impl Categorise for Ts<'_> {
+	fn categorise(&self) -> Category {
 		Category::DatabaseTimestamp
 	}
 }

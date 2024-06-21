@@ -5,27 +5,23 @@ use crate::ctx::Context;
 #[cfg(feature = "jwks")]
 use crate::dbs::capabilities::NetTarget;
 use crate::dbs::{
-	node::Timestamp, Attach, Capabilities, Executor, Notification, Options, Response, Session,
-	Variables,
+	Attach, Capabilities, Executor, Notification, Options, Response, Session, Variables,
 };
 use crate::err::Error;
 #[cfg(feature = "jwks")]
 use crate::iam::jwks::JwksCache;
 use crate::iam::{Action, Auth, Error as IamError, Resource, Role};
 use crate::idx::trees::store::IndexStores;
-use crate::key::root::hb::Hb;
 use crate::kvs::clock::SizedClock;
 #[allow(unused_imports)]
 use crate::kvs::clock::SystemClock;
-use crate::kvs::lq_structs::{LqValue, UnreachableLqType};
 use crate::kvs::{LockType, LockType::*, TransactionType, TransactionType::*};
-use crate::sql::{self, statements::DefineUserStatement, Base, Query, Uuid, Value};
+use crate::sql::{statements::DefineUserStatement, Base, Query, Value};
 use crate::syn;
-use crate::vs::{conv, Oracle, Versionstamp};
+use crate::vs::{conv, Versionstamp};
 use channel::{Receiver, Sender};
-use futures::{lock::Mutex, Future};
+use futures::Future;
 use reblessive::TreeStack;
-use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 #[cfg(any(
 	feature = "kv-mem",
@@ -42,6 +38,7 @@ use std::time::Duration;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tracing::instrument;
 use tracing::trace;
+use uuid::Uuid;
 #[cfg(target_arch = "wasm32")]
 use wasmtimer::std::{SystemTime, UNIX_EPOCH};
 
@@ -73,13 +70,10 @@ pub struct Datastore {
 	transaction_timeout: Option<Duration>,
 	// Capabilities for this datastore
 	capabilities: Capabilities,
-	// The versionstamp oracle for this datastore.
-	// Used only in some datastores, such as tikv.
-	versionstamp_oracle: Arc<Mutex<Oracle>>,
 	// Whether this datastore enables live query notifications to subscribers
 	pub(super) notification_channel: Option<(Sender<Notification>, Receiver<Notification>)>,
 	// Clock for tracking time. It is read only and accessible to all transactions. It is behind a mutex as tests may write to it.
-	clock: Arc<SizedClock>,
+	pub(super) clock: Arc<SizedClock>,
 	// The index store cache
 	index_stores: IndexStores,
 	#[cfg(feature = "jwks")]
@@ -95,10 +89,6 @@ pub struct Datastore {
 	// The temporary directory
 	temporary_directory: Option<Arc<PathBuf>>,
 }
-
-/// We always want to be circulating the live query information
-/// And we will sometimes have an error attached but still not want to lose the LQ.
-pub(crate) type BootstrapOperationResult = (LqValue, Option<Error>);
 
 #[allow(clippy::large_enum_variant)]
 pub(super) enum Inner {
@@ -308,7 +298,6 @@ impl Datastore {
 			notification_channel: None,
 			capabilities: Capabilities::default(),
 			index_stores: IndexStores::default(),
-			versionstamp_oracle: Arc::new(Mutex::new(Oracle::systime_counter())),
 			#[cfg(feature = "jwks")]
 			jwks_cache: Arc::new(RwLock::new(JwksCache::new())),
 			#[cfg(any(
@@ -372,8 +361,8 @@ impl Datastore {
 		feature = "kv-tikv",
 	))]
 	/// Set a temporary directory for ordering of large result sets
-	pub fn with_temporary_directory(mut self, path: PathBuf) -> Self {
-		self.temporary_directory = Some(Arc::new(path));
+	pub fn with_temporary_directory(mut self, path: Option<PathBuf>) -> Self {
+		self.temporary_directory = path.map(Arc::new);
 		self
 	}
 
@@ -397,10 +386,17 @@ impl Datastore {
 		&self.jwks_cache
 	}
 
-	/// Setup the initial credentials
-	/// Trigger the `unreachable definition` compilation error, probably due to this issue:
-	/// https://github.com/rust-lang/rust/issues/111370
-	#[allow(unreachable_code, unused_variables)]
+	// Initialise the cluster and run bootstrap utilities
+	pub async fn bootstrap(&self) -> Result<(), Error> {
+		// Insert this node in the cluster
+		self.insert_node(self.id).await?;
+		// Mark expired nodes as archived
+		self.expire_nodes().await?;
+		// Everything ok
+		Ok(())
+	}
+
+	/// Setup the initial cluster access credentials
 	pub async fn setup_initial_creds(&self, user: &str, pass: &str) -> Result<(), Error> {
 		// Start a new writeable transaction
 		let txn = self.transaction(Write, Optimistic).await?.enclose();
@@ -449,334 +445,6 @@ impl Datastore {
 		}
 	}
 
-	// Initialise bootstrap with implicit values intended for runtime
-	// An error indicates that a failure happened, but that does not mean that the bootstrap
-	// completely failed. It may have partially completed. It certainly has side-effects
-	// that weren't reversed, as it tries to bootstrap and garbage collect to the best of its
-	// ability.
-	// NOTE: If you get rust mutex deadlocks, check your transactions around this method.
-	// This should be called before any transactions are made in release mode
-	// In tests, it should be outside any other transaction - in isolation.
-	// We cannot easily systematise this, since we aren't counting transactions created.
-	pub async fn bootstrap(&self) -> Result<(), Error> {
-		// First we clear unreachable state that could exist by upgrading from
-		// previous beta versions
-		trace!("Clearing unreachable state");
-		let mut tx = self.transaction(Write, Optimistic).await?;
-		match self.clear_unreachable_state(&mut tx).await {
-			Ok(_) => tx.commit().await,
-			Err(e) => {
-				let msg = format!("Error clearing unreachable cluster state at bootstrap: {:?}", e);
-				error!(msg);
-				tx.cancel().await?;
-				Err(Error::Tx(msg))
-			}
-		}?;
-
-		trace!("Bootstrapping {}", self.id);
-		let mut tx = self.transaction(Write, Optimistic).await?;
-		let archived = match self.register_remove_and_archive(&mut tx, &self.id).await {
-			Ok(archived) => {
-				tx.commit().await?;
-				archived
-			}
-			Err(e) => {
-				error!("Error bootstrapping mark phase: {:?}", e);
-				tx.cancel().await?;
-				return Err(e);
-			}
-		};
-		// Filtered includes all lqs that should be used in subsequent step
-		// Currently that is all of them, no matter the error encountered
-		let mut filtered: Vec<LqValue> = vec![];
-		// err is used to aggregate all errors across all stages
-		let mut err = vec![];
-		for res in archived {
-			match res {
-				(lq, Some(e)) => {
-					filtered.push(lq);
-					err.push(e);
-				}
-				(lq, None) => {
-					filtered.push(lq);
-				}
-			}
-		}
-
-		let mut tx = self.transaction(Write, Optimistic).await?;
-		let val = self.remove_archived(&mut tx, filtered).await;
-		let resolve_err = match val {
-			Ok(_) => tx.commit().await,
-			Err(e) => {
-				error!("Error bootstrapping sweep phase: {:?}", e);
-				match tx.cancel().await {
-					Ok(_) => Err(e),
-					Err(e) => {
-						// We have a nested error
-						Err(Error::Tx(format!("Error bootstrapping sweep phase: {:?} and error cancelling transaction: {:?}", e, e)))
-					}
-				}
-			}
-		};
-		if let Err(e) = resolve_err {
-			err.push(e);
-		}
-		if !err.is_empty() {
-			error!("Error bootstrapping sweep phase: {:?}", err);
-			return Err(Error::Tx(format!("Error bootstrapping sweep phase: {:?}", err)));
-		}
-		Ok(())
-	}
-
-	// Node registration + "mark" stage of mark-and-sweep gc
-	pub async fn register_remove_and_archive(
-		&self,
-		tx: &mut Transaction,
-		node_id: &Uuid,
-	) -> Result<Vec<BootstrapOperationResult>, Error> {
-		trace!("Registering node {}", node_id);
-		let timestamp = tx.clock().await;
-		self.register_membership(tx, node_id, timestamp).await?;
-		// Determine the timeout for when a cluster node is expired
-		let ts_expired = (&timestamp - &sql::duration::Duration::from_secs(5))?;
-		let dead = self.remove_dead_nodes(tx, &ts_expired).await?;
-		trace!("Archiving dead nodes: {:?}", dead);
-		self.archive_dead_lqs(tx, &dead, node_id).await
-	}
-
-	// Adds entries to the KV store indicating membership information
-	pub async fn register_membership(
-		&self,
-		tx: &mut Transaction,
-		node_id: &Uuid,
-		timestamp: Timestamp,
-	) -> Result<(), Error> {
-		let tx = tx.set_nd(node_id.0).await?;
-		tx.set_hb(timestamp, node_id.0).await?;
-		Ok(())
-	}
-
-	/// Delete dead heartbeats and nodes
-	/// Returns node IDs
-	pub async fn remove_dead_nodes(
-		&self,
-		tx: &mut Transaction,
-		ts: &Timestamp,
-	) -> Result<Vec<Uuid>, Error> {
-		let hbs = self.delete_dead_heartbeats(tx, ts).await?;
-		trace!("Found {} expired heartbeats", hbs.len());
-		let mut nodes = vec![];
-		for hb in hbs {
-			trace!("Deleting node {}", &hb.nd);
-			// TODO should be delr in case of nested entries
-			tx.del_nd(hb.nd).await?;
-			nodes.push(crate::sql::uuid::Uuid::from(hb.nd));
-		}
-		Ok(nodes)
-	}
-
-	/// Accepts cluster IDs
-	/// Archives related live queries
-	/// Returns live query keys that can be used for deletes
-	///
-	/// The reason we archive first is to stop other nodes from picking it up for further updates
-	/// This means it will be easier to wipe the range in a subsequent transaction
-	pub async fn archive_dead_lqs(
-		&self,
-		tx: &mut Transaction,
-		nodes: &[Uuid],
-		this_node_id: &Uuid,
-	) -> Result<Vec<BootstrapOperationResult>, Error> {
-		let mut archived = vec![];
-		for nd in nodes.iter() {
-			trace!("Archiving node {}", &nd);
-			// Scan on node prefix for LQ space
-			let node_lqs = tx.scan_ndlq(nd, NON_PAGED_BATCH_SIZE).await?;
-			trace!("Found {} LQ entries for {:?}", node_lqs.len(), nd);
-			for lq in node_lqs {
-				trace!("Archiving query {:?}", &lq);
-				let node_archived_lqs =
-					match self.archive_lv_for_node(tx, &lq.nd, *this_node_id).await {
-						Ok(lq) => lq,
-						Err(e) => {
-							error!("Error archiving lqs during bootstrap phase: {:?}", e);
-							vec![]
-						}
-					};
-				// We need to add lv nodes not found so that they can be deleted in second stage
-				for lq_value in node_archived_lqs {
-					archived.push(lq_value);
-				}
-			}
-		}
-		Ok(archived)
-	}
-
-	pub async fn remove_archived(
-		&self,
-		tx: &mut Transaction,
-		archived: Vec<LqValue>,
-	) -> Result<(), Error> {
-		trace!("Gone into removing archived: {:?}", archived.len());
-		for lq in archived {
-			// Delete the cluster key, used for finding LQ associated with a node
-			let key = crate::key::node::lq::new(lq.nd.0, lq.lq.0, &lq.ns, &lq.db);
-			tx.del(key).await?;
-			// Delete the table key, used for finding LQ associated with a table
-			let key = crate::key::table::lq::new(&lq.ns, &lq.db, &lq.tb, lq.lq.0);
-			tx.del(key).await?;
-		}
-		Ok(())
-	}
-
-	pub async fn clear_unreachable_state(&self, tx: &mut Transaction) -> Result<(), Error> {
-		// Scan nodes
-		let cluster = tx.scan_nd(NON_PAGED_BATCH_SIZE).await?;
-		trace!("Found {} nodes", cluster.len());
-		let mut unreachable_nodes = BTreeMap::new();
-		for cl in &cluster {
-			unreachable_nodes.insert(cl.name.clone(), cl.clone());
-		}
-		// Scan all heartbeats
-		let end_of_time = Timestamp {
-			// We remove one, because the scan range adds one
-			value: u64::MAX - 1,
-		};
-		let hbs = tx.scan_hb(&end_of_time, NON_PAGED_BATCH_SIZE).await?;
-		trace!("Found {} heartbeats", hbs.len());
-		for hb in hbs {
-			match unreachable_nodes.remove(&hb.nd.to_string()) {
-				None => {
-					// Didnt exist in cluster and should be deleted
-					tx.del_hb(hb.hb, hb.nd).await?;
-				}
-				Some(_) => {}
-			}
-		}
-		// Remove unreachable nodes
-		for (_, cl) in unreachable_nodes {
-			trace!("Removing unreachable node {}", cl.name);
-			tx.del_nd(
-				uuid::Uuid::parse_str(&cl.name).map_err(|e| {
-					Error::Unimplemented(format!("cluster id was not uuid: {:?}", e))
-				})?,
-			)
-			.await?;
-		}
-		// Scan node live queries for every node
-		let mut nd_lq_set: BTreeSet<UnreachableLqType> = BTreeSet::new();
-		for cl in &cluster {
-			let nds = tx.scan_ndlq(&uuid::Uuid::parse_str(&cl.name).map_err(|e| {
-                Error::Unimplemented(format!("cluster id was not uuid when parsing to aggregate cluster live queries: {:?}", e))
-            })?, NON_PAGED_BATCH_SIZE).await?;
-			nd_lq_set.extend(nds.into_iter().map(UnreachableLqType::Nd));
-		}
-		trace!("Found {} node live queries", nd_lq_set.len());
-		// Scan tables for all live queries
-		// let mut tb_lqs: Vec<LqValue> = vec![];
-		let mut tb_lq_set: BTreeSet<UnreachableLqType> = BTreeSet::new();
-		for ndlq in &nd_lq_set {
-			let lq = ndlq.get_inner();
-			let tbs = tx.scan_tblq(&lq.ns, &lq.db, &lq.tb, NON_PAGED_BATCH_SIZE).await?;
-			tb_lq_set.extend(tbs.into_iter().map(UnreachableLqType::Tb));
-		}
-		trace!("Found {} table live queries", tb_lq_set.len());
-		// Find and delete missing
-		for missing in nd_lq_set.symmetric_difference(&tb_lq_set) {
-			match missing {
-				UnreachableLqType::Nd(ndlq) => {
-					warn!("Deleting ndlq {:?}", &ndlq);
-					tx.del_ndlq(ndlq.nd.0, ndlq.lq.0, &ndlq.ns, &ndlq.db).await?;
-				}
-				UnreachableLqType::Tb(tblq) => {
-					warn!("Deleting tblq {:?}", &tblq);
-					tx.del_tblq(&tblq.ns, &tblq.db, &tblq.tb, tblq.lq.0).await?;
-				}
-			}
-		}
-		trace!("Successfully cleared cluster of unreachable state");
-		Ok(())
-	}
-
-	// Garbage collection task to run when a client disconnects from a surrealdb node
-	// i.e. we know the node, we are not performing a full wipe on the node
-	// and the wipe must be fully performed by this node
-	pub async fn garbage_collect_dead_session(
-		&self,
-		live_queries: &[uuid::Uuid],
-	) -> Result<(), Error> {
-		let mut tx = self.transaction(Write, Optimistic).await?;
-
-		// Find all the LQs we own, so that we can get the ns/ds from provided uuids
-		// We may improve this in future by tracking in web layer
-		let lqs = tx.scan_ndlq(&self.id, NON_PAGED_BATCH_SIZE).await?;
-		let mut hits = vec![];
-		for lq_value in lqs {
-			if live_queries.contains(&lq_value.lq) {
-				hits.push(lq_value.clone());
-				let lq = crate::key::node::lq::Lq::new(
-					lq_value.nd.0,
-					lq_value.lq.0,
-					lq_value.ns.as_str(),
-					lq_value.db.as_str(),
-				);
-				tx.del(lq).await?;
-				trace!("Deleted lq {:?} as part of session garbage collection", lq_value.clone());
-			}
-		}
-
-		// Now delete the table entries for the live queries
-		for lq in hits {
-			let lv =
-				crate::key::table::lq::new(lq.ns.as_str(), lq.db.as_str(), lq.tb.as_str(), lq.lq.0);
-			tx.del(lv.clone()).await?;
-			trace!("Deleted lv {:?} as part of session garbage collection", lv);
-		}
-		tx.commit().await
-	}
-
-	// Returns a list of live query IDs
-	pub async fn archive_lv_for_node(
-		&self,
-		tx: &mut Transaction,
-		nd: &Uuid,
-		this_node_id: Uuid,
-	) -> Result<Vec<BootstrapOperationResult>, Error> {
-		let lqs = tx.all_lq(nd).await?;
-		trace!("Archiving lqs and found {} LQ entries for {}", lqs.len(), nd);
-		let mut ret: Vec<BootstrapOperationResult> = vec![];
-		for lq in lqs {
-			let lv_res =
-				tx.get_tb_live(lq.ns.as_str(), lq.db.as_str(), lq.tb.as_str(), &lq.lq).await;
-			if let Err(e) = lv_res {
-				error!("Error getting live query for node {}: {:?}", nd, e);
-				ret.push((lq, Some(e)));
-				continue;
-			}
-			let lv = lv_res.unwrap();
-			let archived_lvs = lv.clone().archive(this_node_id);
-			tx.putc_tblq(&lq.ns, &lq.db, &lq.tb, archived_lvs, Some(lv)).await?;
-			ret.push((lq, None));
-		}
-		Ok(ret)
-	}
-
-	/// Given a timestamp, delete all the heartbeats that have expired
-	/// Return the removed heartbeats as they will contain node information
-	pub async fn delete_dead_heartbeats(
-		&self,
-		tx: &mut Transaction,
-		ts: &Timestamp,
-	) -> Result<Vec<Hb>, Error> {
-		let dead = tx.scan_hb(ts, HEARTBEAT_BATCH_SIZE).await?;
-		// Delete the heartbeat and everything nested
-		tx.delr_hb(dead.clone(), NON_PAGED_BATCH_SIZE).await?;
-		for dead_node in dead.clone() {
-			tx.del_nd(dead_node.nd).await?;
-		}
-		Ok::<Vec<Hb>, Error>(dead)
-	}
-
 	// tick is called periodically to perform maintenance tasks.
 	// This is called every TICK_INTERVAL.
 	pub async fn tick(&self) -> Result<(), Error> {
@@ -795,8 +463,15 @@ impl Datastore {
 		trace!("Ticking at timestamp {} ({:?})", ts, conv::u64_to_versionstamp(ts));
 		let _vs = self.save_timestamp_for_versionstamp(ts).await?;
 		self.garbage_collect_stale_change_feeds(ts).await?;
-		// TODO Add LQ GC
-		// TODO Add Node GC?
+		// Update this node in the cluster
+		self.update_node(self.id).await?;
+		// Mark expired nodes as archived
+		self.expire_nodes().await?;
+		// Cleanup expired nodes data
+		self.cleanup_nodes().await?;
+		// Garbage collect other data
+		self.garbage_collect().await?;
+		// Everything ok
 		Ok(())
 	}
 
@@ -837,7 +512,7 @@ impl Datastore {
 			for db in dbs {
 				let db = db.name.as_str();
 				// TODO(SUR-341): This is incorrect, it's a [ns,db] to vs pair
-				vs = Some(tx.set_timestamp_for_versionstamp(ts, ns, db).await?);
+				vs = Some(tx.lock().await.set_timestamp_for_versionstamp(ts, ns, db).await?);
 			}
 		}
 		tx.commit().await?;
@@ -868,14 +543,6 @@ impl Datastore {
 		cf::gc_all_at(tx, ts).await?;
 		tx.commit().await?;
 		Ok(())
-	}
-
-	// Creates a heartbeat entry indicating to the cluster that the node is alive.
-	pub async fn heartbeat(&self) -> Result<(), Error> {
-		let mut tx = self.transaction(Write, Optimistic).await?;
-		let timestamp = tx.clock().await;
-		tx.set_hb(timestamp, node_id.0).await;
-		tx.commit().await
 	}
 
 	/// Create a new transaction on this datastore
@@ -950,7 +617,6 @@ impl Datastore {
 			inner,
 			stash: super::stash::Stash::default(),
 			cf: cf::Writer::new(),
-			vso: self.versionstamp_oracle.clone(),
 			clock: self.clock.clone(),
 		}))
 	}
@@ -1024,7 +690,7 @@ impl Datastore {
 		}
 		// Create a new query options
 		let opt = Options::default()
-			.with_id(self.id.0)
+			.with_id(self.id)
 			.with_ns(sess.ns())
 			.with_db(sess.db())
 			.with_live(sess.live())
@@ -1103,7 +769,7 @@ impl Datastore {
 		}
 		// Create a new query options
 		let opt = Options::default()
-			.with_id(self.id.0)
+			.with_id(self.id)
 			.with_ns(sess.ns())
 			.with_db(sess.db())
 			.with_live(sess.live())
@@ -1180,7 +846,7 @@ impl Datastore {
 		let mut stack = TreeStack::new();
 		// Create a new query options
 		let opt = Options::default()
-			.with_id(self.id.0)
+			.with_id(self.id)
 			.with_ns(sess.ns())
 			.with_db(sess.db())
 			.with_live(sess.live())
@@ -1325,7 +991,7 @@ mod test {
 		let dbs = Datastore::new("memory").await.unwrap().with_capabilities(Capabilities::all());
 
 		let opt = Options::default()
-			.with_id(dbs.id.0)
+			.with_id(dbs.id)
 			.with_ns(Some("test".into()))
 			.with_db(Some("test".into()))
 			.with_live(false)

@@ -228,41 +228,26 @@ pub async fn init(
 	if unauthenticated {
 		warn!("❌🔒 IMPORTANT: Authentication is disabled. This is not recommended for production use. 🔒❌");
 	}
-
-	let caps = caps.into();
+	// Log the specified server capabilities
 	debug!("Server capabilities: {caps}");
-
-	#[allow(unused_mut)]
 	// Parse and setup the desired kv datastore
-	let mut dbs = Datastore::new(&opt.path)
+	let dbs = Datastore::new(&opt.path)
 		.await?
 		.with_notifications()
 		.with_strict_mode(strict_mode)
 		.with_query_timeout(query_timeout)
 		.with_transaction_timeout(transaction_timeout)
 		.with_auth_enabled(!unauthenticated)
+		.with_temporary_directory(temporary_directory)
 		.with_capabilities(caps);
-
-	let mut dbs = match temporary_directory {
-		Some(tmp_dir) => dbs.with_temporary_directory(tmp_dir),
-		_ => dbs,
-	};
-
-	if let Some(engine_options) = opt.engine {
-		dbs = dbs.with_engine_options(engine_options);
+	// Setup initial server auth credentials
+	if let (Some(ref user), Some(ref pass)) = (opt.user, opt.pass) {
+		dbs.setup_initial_creds(user, pass).await?;
 	}
-	// Make immutable
-	let dbs = dbs;
-
+	// Bootstrap the datastore
 	dbs.bootstrap().await?;
-
-	if let Some(user) = opt.user.as_ref() {
-		dbs.setup_initial_creds(user, opt.pass.as_ref().unwrap()).await?;
-	}
-
 	// Store database instance
 	let _ = DB.set(Arc::new(dbs));
-
 	// All ok
 	Ok(())
 }

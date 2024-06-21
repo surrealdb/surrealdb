@@ -1,6 +1,6 @@
 //! Stores the key prefix for all keys under a database
+use crate::key::category::Categorise;
 use crate::key::category::Category;
-use crate::key::key_req::KeyRequirements;
 use derive::Key;
 use serde::{Deserialize, Serialize};
 
@@ -18,8 +18,8 @@ pub fn new<'a>(ns: &'a str, db: &'a str) -> All<'a> {
 	All::new(ns, db)
 }
 
-impl KeyRequirements for All<'_> {
-	fn key_category(&self) -> Category {
+impl Categorise for All<'_> {
+	fn categorise(&self) -> Category {
 		Category::DatabaseRoot
 	}
 }

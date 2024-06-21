@@ -1,6 +1,6 @@
+//! Stores a DEFINE TABLE AS config definition
+use crate::key::category::Categorise;
 use crate::key::category::Category;
-use crate::key::key_req::KeyRequirements;
-/// Stores a DEFINE TABLE AS config definition
 use derive::Key;
 use serde::{Deserialize, Serialize};
 
@@ -36,8 +36,8 @@ pub fn suffix(ns: &str, db: &str, tb: &str) -> Vec<u8> {
 	k
 }
 
-impl KeyRequirements for Ft<'_> {
-	fn key_category(&self) -> Category {
+impl Categorise for Ft<'_> {
+	fn categorise(&self) -> Category {
 		Category::TableView
 	}
 }

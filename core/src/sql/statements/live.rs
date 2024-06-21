@@ -104,14 +104,19 @@ impl LiveStatement {
 			Value::Table(tb) => {
 				// Store the current Node ID
 				stm.node = nid.into();
+				// Get the NS and DB
+				let ns = opt.ns()?;
+				let db = opt.db()?;
 				// Get the transaction
 				let txn = ctx.tx();
 				// Lock the transaction
 				let mut txn = txn.lock().await;
 				// Insert the node live query
-				txn.putc_ndlq(nid, id, opt.ns()?, opt.db()?, tb.as_str(), None).await?;
+				let key = crate::key::node::lq::new(nid, id, ns, db);
+				txn.put(key, tb.as_str()).await?;
 				// Insert the table live query
-				txn.putc_tblq(opt.ns()?, opt.db()?, &tb, stm, None).await?;
+				let key = crate::key::table::lq::new(ns, db, &tb, id);
+				txn.put(key, stm).await?;
 			}
 			v => {
 				return Err(Error::LiveStatement {

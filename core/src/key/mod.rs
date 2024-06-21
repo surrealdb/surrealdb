@@ -62,7 +62,6 @@ pub(crate) mod database;
 pub(crate) mod debug;
 pub(crate) mod graph;
 pub(crate) mod index;
-pub(crate) mod key_req;
 pub(crate) mod namespace;
 pub(crate) mod node;
 pub(crate) mod root;

@@ -2,6 +2,8 @@ use super::batch::Batch;
 use super::Convert;
 use super::Key;
 use super::Val;
+use crate::cnf::NORMAL_FETCH_SIZE;
+use crate::dbs::node::Node;
 use crate::err::Error;
 use crate::kvs::cache::Entry;
 use crate::kvs::cache::EntryWeighter;
@@ -29,6 +31,7 @@ use quick_cache::sync::Cache;
 use std::fmt::Debug;
 use std::ops::Range;
 use std::sync::Arc;
+use uuid::Uuid;
 
 #[non_exhaustive]
 pub struct Transaction {
@@ -232,7 +235,7 @@ impl Transaction {
 		K: Into<Key> + Debug,
 	{
 		Scanner::Begin {
-			batch: 100,
+			batch: *NORMAL_FETCH_SIZE,
 			store: self,
 			range: Range {
 				start: rng.start.into(),
@@ -244,6 +247,23 @@ impl Transaction {
 	// --------------------------------------------------
 	// Cache methods
 	// --------------------------------------------------
+
+	pub async fn all_nodes(&self) -> Result<Arc<[Node]>, Error> {
+		let key = crate::key::root::nd::prefix();
+		let res = self.cache.get_value_or_guard_async(&key).await;
+		Ok(match res {
+			Ok(val) => val,
+			Err(cache) => {
+				let end = crate::key::root::nd::suffix();
+				let val = self.getr(key..end).await?;
+				let val = val.convert().into();
+				let val = Entry::Nds(Arc::clone(&val));
+				let _ = cache.insert(val.clone());
+				val
+			}
+		}
+		.into_nds())
+	}
 
 	/// Retrieve all ROOT level users in a datastore.
 	pub async fn all_root_users(&self) -> Result<Arc<[DefineUserStatement]>, Error> {
@@ -598,6 +618,25 @@ impl Transaction {
 			}
 		}
 		.into_lvs())
+	}
+
+	/// Retrieve a specific namespace definition.
+	pub async fn get_node(&self, id: Uuid) -> Result<Arc<Node>, Error> {
+		let key = crate::key::root::nd::new(id).encode()?;
+		let res = self.cache.get_value_or_guard_async(&key).await;
+		Ok(match res {
+			Ok(val) => val,
+			Err(cache) => {
+				let val = self.get(key).await?.ok_or(Error::NdNotFound {
+					value: id.to_string(),
+				})?;
+				let val: Node = val.into();
+				let val = Entry::Any(Arc::new(val));
+				let _ = cache.insert(val.clone());
+				val
+			}
+		}
+		.into_type())
 	}
 
 	/// Retrieve a specific namespace user definition.

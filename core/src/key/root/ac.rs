@@ -1,5 +1,6 @@
+//! Stores a DEFINE ACCESS ON ROOT config definition
+use crate::key::category::Categorise;
 use crate::key::category::Category;
-use crate::key::key_req::KeyRequirements;
 use derive::Key;
 use serde::{Deserialize, Serialize};
 
@@ -29,8 +30,8 @@ pub fn suffix() -> Vec<u8> {
 	k
 }
 
-impl KeyRequirements for Ac<'_> {
-	fn key_category(&self) -> Category {
+impl Categorise for Ac<'_> {
+	fn categorise(&self) -> Category {
 		Category::Access
 	}
 }
