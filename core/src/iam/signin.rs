@@ -1329,7 +1329,10 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 
 			match res {
 				Err(Error::Thrown(e)) if e == "This user is not enabled" => {} // ok
-				_ => panic!("Expected authentication to failed due to user not being enabled"),
+				res => panic!(
+				    "Expected authentication to failed due to user not being enabled, but instead received: {:?}",
+					res
+				),
 			}
 		}
 
@@ -1340,7 +1343,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 			ds.execute(
 				r#"
 				DEFINE ACCESS user ON DATABASE TYPE RECORD
-					SIGNUP (
+					SIGNIN (
 					   SELECT * FROM type::thing('user', $id)
 					)
 					AUTHENTICATE {}
@@ -1375,7 +1378,10 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 
 			match res {
 				Err(Error::InvalidAuth) => {} // ok
-				_ => panic!("Expected authentication to generally fail"),
+				res => panic!(
+					"Expected authentication to generally fail, but instead received: {:?}",
+					res
+				),
 			}
 		}
 	}
