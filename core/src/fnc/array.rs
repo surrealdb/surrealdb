@@ -157,19 +157,17 @@ pub fn fill(
 
 	if start == min && end >= max {
 		array.fill(value);
-	} else {
-		if end > start {
-			let end_minus_one = end - 1;
+	} else if end > start {
+		let end_minus_one = end - 1;
 
-			for i in start..end_minus_one {
-				if let Some(elem) = array.get_mut(i) {
-					*elem = value.clone();
-				}
+		for i in start..end_minus_one {
+			if let Some(elem) = array.get_mut(i) {
+				*elem = value.clone();
 			}
+		}
 
-			if let Some(last_elem) = array.get_mut(end_minus_one) {
-				*last_elem = value;
-			}
+		if let Some(last_elem) = array.get_mut(end_minus_one) {
+			*last_elem = value;
 		}
 	}
 
