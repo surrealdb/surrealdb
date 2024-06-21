@@ -1208,4 +1208,175 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 			assert!(res.is_err(), "Unexpected successful signin: {:?}", res);
 		}
 	}
+
+	#[tokio::test]
+	async fn test_signin_record_and_authenticate_clause() {
+		// Test with correct credentials
+		{
+			let ds = Datastore::new("memory").await.unwrap();
+			let sess = Session::owner().with_ns("test").with_db("test");
+			ds.execute(
+				r#"
+				DEFINE ACCESS user ON DATABASE TYPE RECORD
+					SIGNIN (
+						SELECT * FROM type::thing('user', $id)
+					)
+					AUTHENTICATE (
+					    -- More real world example would be an external authentication provider generating a token with only some identifier or email
+						-- which you would use to lookup the user id
+						-- This simple n+1 example however shows that you can overwrite a user id like this.
+					    SELECT * FROM type::thing('user', meta::id($auth) + 1)
+					)
+					DURATION FOR SESSION 2h
+				;
+
+				CREATE user:1, user:2;
+				"#,
+				&sess,
+				None,
+			)
+			.await
+			.unwrap();
+
+			// Signin with the user
+			let mut sess = Session {
+				ns: Some("test".to_string()),
+				db: Some("test".to_string()),
+				..Default::default()
+			};
+			let mut vars: HashMap<&str, Value> = HashMap::new();
+			vars.insert("id", 1.into());
+			let res = db_access(
+				&ds,
+				&mut sess,
+				"test".to_string(),
+				"test".to_string(),
+				"user".to_string(),
+				vars.into(),
+			)
+			.await;
+
+			assert!(res.is_ok(), "Failed to signin with credentials: {:?}", res);
+			assert_eq!(sess.ns, Some("test".to_string()));
+			assert_eq!(sess.db, Some("test".to_string()));
+			assert_eq!(sess.au.id(), "user:2");
+			assert!(sess.au.is_record());
+			assert_eq!(sess.au.level().ns(), Some("test"));
+			assert_eq!(sess.au.level().db(), Some("test"));
+			assert_eq!(sess.au.level().id(), Some("user:2"));
+			// Record users should not have roles
+			assert!(!sess.au.has_role(&Role::Viewer), "Auth user expected to not have Viewer role");
+			assert!(!sess.au.has_role(&Role::Editor), "Auth user expected to not have Editor role");
+			assert!(!sess.au.has_role(&Role::Owner), "Auth user expected to not have Owner role");
+			// Expiration should match the defined duration
+			let exp = sess.exp.unwrap();
+			// Expiration should match the current time plus session duration with some margin
+			let min_exp = (Utc::now() + Duration::hours(2) - Duration::seconds(10)).timestamp();
+			let max_exp = (Utc::now() + Duration::hours(2) + Duration::seconds(10)).timestamp();
+			assert!(
+				exp > min_exp && exp < max_exp,
+				"Session expiration is expected to follow the defined duration"
+			);
+		}
+
+		// Test being able to fail authentication
+		{
+			let ds = Datastore::new("memory").await.unwrap();
+			let sess = Session::owner().with_ns("test").with_db("test");
+			ds.execute(
+				r#"
+				DEFINE ACCESS user ON DATABASE TYPE RECORD
+					SIGNIN (
+						SELECT * FROM type::thing('user', $id)
+					)
+					AUTHENTICATE {
+					    -- Not just signin, this clause runs across signin, signup and authenticate, which makes it a nice place to centralize logic
+					    IF !$auth.enabled {
+							THROW "This user is not enabled";
+						};
+
+						-- Always need to return the user id back, otherwise auth generically fails
+						RETURN $auth;
+					}
+					DURATION FOR SESSION 2h
+				;
+
+				CREATE user:1 SET enabled = false;
+				"#,
+				&sess,
+				None,
+			)
+			.await
+			.unwrap();
+
+			// Signin with the user
+			let mut sess = Session {
+				ns: Some("test".to_string()),
+				db: Some("test".to_string()),
+				..Default::default()
+			};
+			let mut vars: HashMap<&str, Value> = HashMap::new();
+			vars.insert("id", 1.into());
+			let res = db_access(
+				&ds,
+				&mut sess,
+				"test".to_string(),
+				"test".to_string(),
+				"user".to_string(),
+				vars.into(),
+			)
+			.await;
+
+			match res {
+				Err(Error::Thrown(e)) if e == "This user is not enabled" => {} // ok
+				_ => panic!("Expected authentication to failed due to user not being enabled"),
+			}
+		}
+
+		// Test AUTHENTICATE clause not returning a value
+		{
+			let ds = Datastore::new("memory").await.unwrap();
+			let sess = Session::owner().with_ns("test").with_db("test");
+			ds.execute(
+				r#"
+				DEFINE ACCESS user ON DATABASE TYPE RECORD
+					SIGNUP (
+					   SELECT * FROM type::thing('user', $id)
+					)
+					AUTHENTICATE {}
+					DURATION FOR SESSION 2h
+				;
+
+				CREATE user:1;
+				"#,
+				&sess,
+				None,
+			)
+			.await
+			.unwrap();
+
+			// Signin with the user
+			let mut sess = Session {
+				ns: Some("test".to_string()),
+				db: Some("test".to_string()),
+				..Default::default()
+			};
+			let mut vars: HashMap<&str, Value> = HashMap::new();
+			vars.insert("id", 1.into());
+			let res = db_access(
+				&ds,
+				&mut sess,
+				"test".to_string(),
+				"test".to_string(),
+				"user".to_string(),
+				vars.into(),
+			)
+			.await;
+
+			match res {
+				Err(Error::InvalidAuth) => {} // ok
+				_ => panic!("Expected authentication to generally fail"),
+			}
+		}
+	}
 }
