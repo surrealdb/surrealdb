@@ -414,6 +414,7 @@ impl Parser<'_> {
 				(Some(ns), db)
 			}
 			t!("DATABASE") => {
+				self.pop_peek();
 				let db = self.next_token_value::<Ident>()?;
 				(None, Some(db.0))
 			}
