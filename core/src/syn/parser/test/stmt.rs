@@ -1130,6 +1130,7 @@ fn parse_define_access_record() {
 	}
 }
 
+#[test]
 fn parse_define_access_record_with_jwt() {
 	let res = test_parse!(
 		parse_stmt,
