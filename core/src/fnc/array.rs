@@ -160,14 +160,14 @@ pub fn fill(
 	} else {
 		if end > start {
 			let end_minus_one = end - 1;
-		
-			for i in start..end_minus_one { 
-				if let Some(elem) = array.get_mut(i) { 
-					*elem = value.clone(); 
+
+			for i in start..end_minus_one {
+				if let Some(elem) = array.get_mut(i) {
+					*elem = value.clone();
 				}
 			}
-			
-			if let Some(last_elem) = array.get_mut(end_minus_one) { 
+
+			if let Some(last_elem) = array.get_mut(end_minus_one) {
 				*last_elem = value;
 			}
 		}
@@ -240,6 +240,10 @@ pub fn insert((mut array, value, index): (Array, Value, Option<i64>)) -> Result<
 
 pub fn intersect((array, other): (Array, Array)) -> Result<Value, Error> {
 	Ok(array.intersect(other).into())
+}
+
+pub fn is_empty((array,): (Array,)) -> Result<Value, Error> {
+	Ok(array.is_empty().into())
 }
 
 pub fn join((arr, sep): (Array, String)) -> Result<Value, Error> {

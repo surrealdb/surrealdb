@@ -173,6 +173,7 @@
 "array::group("
 "array::insert("
 "array::intersect("
+"array::is_empty("
 "array::join("
 "array::last("
 "array::len("

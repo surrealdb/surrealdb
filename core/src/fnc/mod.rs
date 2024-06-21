@@ -118,6 +118,7 @@ pub fn synchronous(
 		"array::group" => array::group,
 		"array::insert" => array::insert,
 		"array::intersect" => array::intersect,
+		"array::is_empty" => array::is_empty,
 		"array::join" => array::join,
 		"array::last" => array::last,
 		"array::len" => array::len,
