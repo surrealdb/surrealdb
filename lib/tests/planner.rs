@@ -1302,7 +1302,7 @@ async fn select_with_datetime_value() -> Result<(), Error> {
 						plan: {
 							index: 'createdAt',
 							operator: '=',
-							value: '2023-12-25T17:13:01.940183014Z'
+							value: d'2023-12-25T17:13:01.940183014Z'
 						},
 						table: 'test_user'
 					},
@@ -1324,7 +1324,7 @@ async fn select_with_datetime_value() -> Result<(), Error> {
 		let val = Value::parse(
 			r#"[
 				{
-        			"created_at": "2023-12-25T17:13:01.940183014Z",
+        			"created_at": d"2023-12-25T17:13:01.940183014Z",
         			"id": test_user:1
     			}
 			]"#,
