@@ -1789,6 +1789,30 @@ fn parse_use() {
 }
 
 #[test]
+fn parse_use_lowercase() {
+	let res = test_parse!(parse_stmt, r"use ns foo").unwrap();
+	let expect = Statement::Use(UseStatement {
+		ns: Some("foo".to_owned()),
+		db: None,
+	});
+	assert_eq!(res, expect);
+
+	let res = test_parse!(parse_stmt, r"use db foo").unwrap();
+	let expect = Statement::Use(UseStatement {
+		ns: None,
+		db: Some("foo".to_owned()),
+	});
+	assert_eq!(res, expect);
+
+	let res = test_parse!(parse_stmt, r"use ns bar db foo").unwrap();
+	let expect = Statement::Use(UseStatement {
+		ns: Some("bar".to_owned()),
+		db: Some("foo".to_owned()),
+	});
+	assert_eq!(res, expect);
+}
+
+#[test]
 fn parse_value_stmt() {
 	let res = test_parse!(parse_stmt, r"1s").unwrap();
 	let expect = Statement::Value(Value::Duration(Duration(std::time::Duration::from_secs(1))));
