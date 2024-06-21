@@ -100,6 +100,7 @@ pub use self::fetch::Fetch;
 pub use self::fetch::Fetchs;
 pub use self::field::Field;
 pub use self::field::Fields;
+pub use self::filter::Filter;
 pub use self::function::Function;
 pub use self::future::Future;
 pub use self::geometry::Geometry;
