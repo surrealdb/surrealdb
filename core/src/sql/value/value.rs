@@ -5,6 +5,7 @@ use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::fnc::util::string::fuzzy::Fuzzy;
+use crate::sql::escape::quote_plain_str;
 use crate::sql::statements::info::InfoStructure;
 use crate::sql::Strand;
 use crate::sql::{
@@ -2554,7 +2555,7 @@ impl fmt::Display for Value {
 			Value::Param(v) => write!(f, "{v}"),
 			Value::Range(v) => write!(f, "{v}"),
 			Value::Regex(v) => write!(f, "{v}"),
-			Value::Strand(v) => write!(f, "{v}"),
+			Value::Strand(v) => write!(f, "{}", quote_plain_str(v)),
 			Value::Query(v) => write!(f, "{v}"),
 			Value::Subquery(v) => write!(f, "{v}"),
 			Value::Table(v) => write!(f, "{v}"),
