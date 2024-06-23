@@ -611,7 +611,7 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Setup FoundationDB
-        uses: foundationdb-rs/foundationdb-actions-install@v2.1.0
+        uses: foundationdb-rs/foundationdb-actions-install@v.2.2.0
         with:
           version: "7.1.30"
 

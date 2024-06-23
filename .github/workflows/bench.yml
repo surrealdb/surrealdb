@@ -140,7 +140,7 @@ jobs:
 
       # Install FoundationDB if needed
       - name: Setup FoundationDB
-        uses: foundationdb-rs/foundationdb-actions-install@v2.1.0
+        uses: foundationdb-rs/foundationdb-actions-install@v.2.2.0
         if: ${{ matrix.target == 'lib-fdb' || matrix.target == 'sdk-fdb' }}
         with:
           version: "7.1.30"
