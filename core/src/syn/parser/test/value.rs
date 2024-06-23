@@ -3,9 +3,7 @@ use std::collections::BTreeMap;
 use reblessive::Stack;
 
 use crate::{
-	sql::{
-		Array, Constant, Id, Number, Object, Query, Statement, Statements, Strand, Thing, Value,
-	},
+	sql::{Array, Constant, Id, Number, Object, Query, Statement, Statements, Thing, Value},
 	syn::parser::{mac::test_parse, Parser},
 };
 

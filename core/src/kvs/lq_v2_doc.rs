@@ -75,7 +75,7 @@ mod test {
 	use crate::cf::TableMutation;
 	use crate::kvs::lq_v2_doc::construct_document;
 	use crate::sql::statements::DefineTableStatement;
-	use crate::sql::{Idiom, Object, Operation, Strand, Thing, Value};
+	use crate::sql::{Idiom, Object, Operation, Thing, Value};
 
 	#[test]
 	fn test_construct_document_create() {
@@ -212,7 +212,7 @@ mod test_check_lqs_and_send_notifications {
 	use crate::kvs::Datastore;
 	use crate::sql::paths::{OBJ_PATH_ACCESS, OBJ_PATH_AUTH, OBJ_PATH_TOKEN};
 	use crate::sql::statements::{CreateStatement, DeleteStatement, LiveStatement};
-	use crate::sql::{Fields, Object, Strand, Table, Thing, Uuid, Value, Values};
+	use crate::sql::{Fields, Object, Table, Thing, Uuid, Value, Values};
 
 	const SETUP: Lazy<Arc<TestSuite>> = Lazy::new(|| Arc::new(block_on(setup_test_suite_init())));
 

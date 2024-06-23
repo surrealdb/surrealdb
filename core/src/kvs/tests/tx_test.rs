@@ -1,7 +1,6 @@
 use crate::key::debug::sprint_key;
 use crate::key::error::KeyCategory;
 use crate::kvs::lq_structs::{KillEntry, LqEntry, TrackedResult};
-use crate::sql::Strand;
 
 #[tokio::test]
 #[serial]

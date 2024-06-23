@@ -163,7 +163,7 @@ mod tests {
 	};
 	use crate::sql::thing::Thing;
 	use crate::sql::value::Value;
-	use crate::sql::{Datetime, Idiom, Number, Object, Operation, Strand};
+	use crate::sql::{Datetime, Idiom, Number, Object, Operation};
 	use crate::vs;
 	use crate::vs::{conv, Versionstamp};
 

@@ -517,7 +517,7 @@ impl Parser<'_> {
 
 #[cfg(test)]
 mod tests {
-	use crate::sql::{Expression, Id, Number, Object, Param, Strand, Thing};
+	use crate::sql::{Expression, Id, Number, Object, Param, Thing};
 	use crate::syn::Parse;
 
 	use super::*;
