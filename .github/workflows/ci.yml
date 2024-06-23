@@ -307,7 +307,7 @@ jobs:
 
   test:
     name: Test workspace
-    runs-on: [ "self-hosted", "arm64", "builder" ]
+    runs-on: ["self-hosted", "arm64", "builder"]
     steps:
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -666,7 +666,6 @@ jobs:
     name: Database Upgrade from previous versions
     runs-on: ubuntu-latest
     steps:
-
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
