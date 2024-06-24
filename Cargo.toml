@@ -150,10 +150,10 @@ serial_test = "2.0.0"
 temp-env = { version = "0.3.6", features = ["async_closure"] }
 test-log = { version = "0.2.13", features = ["trace"] }
 tokio-stream = { version = "0.1", features = ["net"] }
-tokio-tungstenite = { version = "0.20.1" }
+tokio-tungstenite = { version = "0.23.1" }
 tonic = "0.11.0"
 ulid = "1.1.0"
-wiremock = "0.5.22"
+wiremock = "0.6.0"
 
 [build-dependencies]
 semver = "1.0.20"

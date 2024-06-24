@@ -154,7 +154,7 @@ tokio = { version = "1.34.0", default-features = false, features = [
     "time",
     "sync",
 ] }
-tokio-tungstenite = { version = "0.20.1", optional = true }
+tokio-tungstenite = { version = "0.23.1", optional = true }
 uuid = { version = "1.6.1", features = ["serde", "v4", "v7"] }
 
 [lib]
