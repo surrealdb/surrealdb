@@ -152,6 +152,6 @@ mod tests {
 		let res = subquery(sql);
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
-		assert_eq!("(CREATE ONLY Person SET name='foo' RETURN VALUE id)", format!("{}", out))
+		assert_eq!("(CREATE ONLY Person SET name = 'foo' RETURN VALUE id)", format!("{}", out))
 	}
 }
