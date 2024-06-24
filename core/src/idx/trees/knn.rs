@@ -626,7 +626,6 @@ pub(super) mod tests {
 	use rand::prelude::SmallRng;
 	use rand::{Rng, SeedableRng};
 	use roaring::RoaringTreemap;
-	use rust_decimal::prelude::Zero;
 	use std::cmp::Reverse;
 	use std::collections::{BTreeSet, BinaryHeap, VecDeque};
 	use std::fs::File;
@@ -692,35 +691,27 @@ pub(super) mod tests {
 		Ok(res)
 	}
 
+	pub(in crate::idx::trees) fn new_random_vec_value(
+		rng: &mut SmallRng,
+		dim: usize,
+		gen: &RandomItemGenerator,
+	) -> Vec<Number> {
+		let mut vec: Vec<Number> = Vec::with_capacity(dim);
+		for _ in 0..dim {
+			vec.push(gen.generate(rng));
+		}
+		vec
+	}
+
 	pub(in crate::idx::trees) fn new_random_vec(
 		rng: &mut SmallRng,
 		t: VectorType,
 		dim: usize,
 		gen: &RandomItemGenerator,
 	) -> SharedVector {
-		let mut vec: Vec<Number> = Vec::with_capacity(dim);
-		for _ in 0..dim {
-			vec.push(gen.generate(rng));
-		}
+		let vec: Vec<Number> = new_random_vec_value(rng, dim, gen);
 		let vec = Vector::try_from_vector(t, &vec).unwrap();
-		if vec.is_null() {
-			// Some similarities (cosine) is undefined for null vector.
-			new_random_vec(rng, t, dim, gen)
-		} else {
-			vec.into()
-		}
-	}
-
-	impl Vector {
-		pub(super) fn is_null(&self) -> bool {
-			match self {
-				Self::F64(a) => !a.iter().any(|a| !a.is_zero()),
-				Self::F32(a) => !a.iter().any(|a| !a.is_zero()),
-				Self::I64(a) => !a.iter().any(|a| !a.is_zero()),
-				Self::I32(a) => !a.iter().any(|a| !a.is_zero()),
-				Self::I16(a) => !a.iter().any(|a| !a.is_zero()),
-			}
-		}
+		vec.into()
 	}
 
 	impl TestCollection {
@@ -792,22 +783,32 @@ pub(super) mod tests {
 	}
 
 	pub(in crate::idx::trees) enum RandomItemGenerator {
-		Int(i64, i64),
-		Float(f64, f64),
+		Int(i64, i64, bool),
+		Float(f64, f64, bool),
 	}
 
 	impl RandomItemGenerator {
 		pub(in crate::idx::trees) fn new(dist: &Distance, dim: usize) -> Self {
 			match dist {
-				Distance::Jaccard => Self::Int(0, (dim / 2) as i64),
-				Distance::Hamming => Self::Int(0, 2),
-				_ => Self::Float(-20.0, 20.0),
+				Distance::Jaccard => Self::Int(0, (dim / 2) as i64, true),
+				Distance::Hamming => Self::Int(0, 2, true),
+				Distance::Cosine => Self::Float(-1.0, 1.0, false),
+				_ => Self::Float(-20.0, 20.0, true),
 			}
 		}
 		fn generate(&self, rng: &mut SmallRng) -> Number {
-			match self {
-				RandomItemGenerator::Int(from, to) => Number::Int(rng.gen_range(*from..*to)),
-				RandomItemGenerator::Float(from, to) => Number::Float(rng.gen_range(*from..=*to)),
+			let (n, zero_allowed) = match self {
+				RandomItemGenerator::Int(from, to, zero_allowed) => {
+					(Number::Int(rng.gen_range(*from..*to)), zero_allowed)
+				}
+				RandomItemGenerator::Float(from, to, zero_allowed) => {
+					(Number::Float(rng.gen_range(*from..=*to)), zero_allowed)
+				}
+			};
+			if !zero_allowed && n.is_zero() {
+				self.generate(rng)
+			} else {
+				n
 			}
 		}
 	}

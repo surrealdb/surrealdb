@@ -1471,27 +1471,32 @@ impl VersionedSerdeState for MState {}
 
 #[cfg(test)]
 mod tests {
+	use crate::ctx::Context;
 	use futures::lock::Mutex;
 	use hashbrown::{HashMap, HashSet};
 	use reblessive::tree::Stk;
 	use std::collections::VecDeque;
 	use std::sync::Arc;
 
-	use crate::ctx::Context;
 	use crate::err::Error;
 	use test_log::test;
 
 	use crate::idx::docids::{DocId, DocIds};
 	use crate::idx::planner::checker::MTreeConditionChecker;
-	use crate::idx::trees::knn::tests::TestCollection;
-	use crate::idx::trees::mtree::{MState, MTree, MTreeNode, MTreeSearchContext, MTreeStore};
+	use crate::idx::trees::knn::tests::{
+		get_seed_rnd, new_random_vec_value, RandomItemGenerator, TestCollection,
+	};
+	use crate::idx::trees::mtree::{
+		MState, MTree, MTreeIndex, MTreeNode, MTreeSearchContext, MTreeStore,
+	};
 	use crate::idx::trees::store::{NodeId, TreeNodeProvider, TreeStore};
 	use crate::idx::trees::vector::SharedVector;
 	use crate::idx::IndexKeyBase;
 	use crate::kvs::LockType::*;
 	use crate::kvs::Transaction;
 	use crate::kvs::{Datastore, TransactionType};
-	use crate::sql::index::{Distance, VectorType};
+	use crate::sql::index::{Distance, MTreeParams, VectorType};
+	use crate::sql::{Id, Thing, Value};
 
 	async fn new_operation<'a>(
 		ds: &Datastore,
@@ -2165,5 +2170,103 @@ mod tests {
 		} else {
 			*max = Some(val);
 		}
+	}
+
+	#[test(tokio::test(flavor = "multi_thread"))]
+	async fn test_large_batch() -> Result<(), Error> {
+		let (insert_len, update_len, query_len, dimension) = if cfg!(debug_assertions) {
+			(10_000, 1000, 100, 4) // Debug is slow
+		} else {
+			(100_000, 10_000, 1000, 128) // Release is fast
+		};
+		let ds = Datastore::new("memory").await?;
+		let p = Arc::new(MTreeParams {
+			dimension,
+			_distance: Default::default(),
+			distance: Distance::Cosine,
+			vector_type: VectorType::F32,
+			capacity: 40,
+			doc_ids_order: 100,
+			doc_ids_cache: 100,
+			mtree_cache: 100,
+		});
+		// Index samples
+		let mut stack = reblessive::tree::TreeStack::new();
+		let _ = stack
+			.enter(|stk| async {
+				let mut rng = get_seed_rnd();
+				let gen = RandomItemGenerator::new(&p.distance, p.dimension as usize);
+				// Indexing samples
+				let contents = {
+					let mut tx = ds.transaction(TransactionType::Write, Optimistic).await?;
+					let mut idx = MTreeIndex::new(
+						ds.index_store(),
+						&mut tx,
+						IndexKeyBase::default(),
+						p.as_ref(),
+						TransactionType::Write,
+					)
+					.await?;
+					let mut contents = Vec::with_capacity(insert_len as usize);
+					for i in 0..insert_len {
+						let vec = new_random_vec_value(&mut rng, p.dimension as usize, &gen);
+						let thg = Thing::from(("t", Id::Number(i)));
+						let content = vec![Value::from(vec.clone())];
+						idx.index_document(stk, &mut tx, &thg, &content).await?;
+						contents.push(content);
+					}
+					idx.finish(&mut tx).await?;
+					tx.commit().await?;
+					contents
+				};
+				// Updating samples
+				{
+					let mut tx = ds.transaction(TransactionType::Write, Optimistic).await?;
+					let mut idx = MTreeIndex::new(
+						ds.index_store(),
+						&mut tx,
+						IndexKeyBase::default(),
+						p.as_ref(),
+						TransactionType::Write,
+					)
+					.await?;
+					for i in 0..update_len {
+						let thg = Thing::from(("t", Id::Number(i)));
+						let content = &contents[i as usize];
+						idx.remove_document(stk, &mut tx, &thg, content).await?;
+						let new_content = vec![Value::from(new_random_vec_value(
+							&mut rng,
+							p.dimension as usize,
+							&gen,
+						))];
+						idx.index_document(stk, &mut tx, &thg, &new_content).await?;
+					}
+					idx.finish(&mut tx).await?;
+					tx.commit().await?;
+				}
+				// Searching
+				{
+					let mut tx = ds.transaction(TransactionType::Read, Optimistic).await?;
+					let idx = MTreeIndex::new(
+						ds.index_store(),
+						&mut tx,
+						IndexKeyBase::default(),
+						p.as_ref(),
+						TransactionType::Read,
+					)
+					.await?;
+					let ctx = Context::default().set_transaction(Arc::new(Mutex::new(tx)));
+					for i in 0..query_len {
+						let vec = new_random_vec_value(&mut rng, p.dimension as usize, &gen);
+						let cond_checker = MTreeConditionChecker::new(&ctx);
+						let res = idx.knn_search(stk, &ctx, &vec, 10, cond_checker).await?;
+						assert_eq!(res.len(), 10, "{i}");
+					}
+				}
+				Ok::<(), Error>(())
+			})
+			.finish()
+			.await?;
+		Ok(())
 	}
 }
