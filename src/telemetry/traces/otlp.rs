@@ -1,6 +1,6 @@
-use opentelemetry::sdk::trace::Tracer;
 use opentelemetry::trace::TraceError;
 use opentelemetry_otlp::WithExportConfig;
+use opentelemetry_sdk::trace::Tracer;
 use tracing::Subscriber;
 use tracing_subscriber::Layer;
 
@@ -18,9 +18,9 @@ where
 fn tracer() -> Result<Tracer, TraceError> {
 	opentelemetry_otlp::new_pipeline()
 		.tracing()
-		.with_exporter(opentelemetry_otlp::new_exporter().tonic().with_env())
+		.with_exporter(opentelemetry_otlp::new_exporter().tonic())
 		.with_trace_config(
-			opentelemetry::sdk::trace::config().with_resource(OTEL_DEFAULT_RESOURCE.clone()),
+			opentelemetry_sdk::trace::config().with_resource(OTEL_DEFAULT_RESOURCE.clone()),
 		)
-		.install_batch(opentelemetry::runtime::Tokio)
+		.install_batch(opentelemetry_sdk::runtime::Tokio)
 }

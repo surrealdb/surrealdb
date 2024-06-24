@@ -70,7 +70,7 @@ hyper = "1.2.0"
 once_cell = "1.18.0"
 opentelemetry = { version = "0.23.0", features = [] }
 opentelemetry-otlp = { version = "0.16.0", features = ["metrics"] }
-opentelemetry_sdk = "0.23.0"
+opentelemetry_sdk = { version = "0.23.0", features = ["rt-tokio"] }
 pin-project-lite = "0.2.13"
 pprof = { version = "0.13.0", features = [
     "flamegraph",

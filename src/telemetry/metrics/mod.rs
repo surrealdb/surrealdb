@@ -6,17 +6,18 @@ use std::time::Duration;
 use once_cell::sync::Lazy;
 use opentelemetry::Context as TelemetryContext;
 use opentelemetry::{
-	metrics::{Meter, MeterProvider, MetricsError},
-	sdk::{
-		export::metrics::aggregation,
-		metrics::{
-			controllers::{self, BasicController},
-			processors, selectors,
-		},
-	},
+	metrics::{Meter, MetricsError},
+	// sdk::{
+	// 	export::metrics::aggregation,
+	// 	metrics::{
+	// 		controllers::{self, BasicController},
+	// 		processors, selectors,
+	// 	},
+	// },
 };
 use opentelemetry_otlp::MetricsExporterBuilder;
-use opentelemetry_sdk::export;
+use opentelemetry_sdk::metrics::data::Temporality;
+// use opentelemetry_sdk::export;
 use opentelemetry_sdk::runtime;
 
 pub use self::http::tower_layer::HttpMetricsLayer;
@@ -51,7 +52,7 @@ const HISTOGRAM_BUCKETS_BYTES: &[f64] = &[
 
 fn build_controller(boundaries: &'static [f64]) -> BasicController {
 	let exporter = MetricsExporterBuilder::from(opentelemetry_otlp::new_exporter().tonic())
-		.build_metrics_exporter(Box::new(aggregation::cumulative_temporality_selector()))
+		.build_metrics_exporter(Box::new(Temporality::Cumulative), todo!())
 		.unwrap();
 
 	let builder = controllers::basic(processors::factory(
