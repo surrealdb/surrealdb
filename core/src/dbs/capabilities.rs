@@ -278,6 +278,19 @@ impl Capabilities {
 		}
 	}
 
+	pub fn none() -> Self {
+		Self {
+			scripting: false,
+			guest_access: false,
+			live_query_notifications: false,
+
+			allow_funcs: Arc::new(Targets::None),
+			deny_funcs: Arc::new(Targets::None),
+			allow_net: Arc::new(Targets::None),
+			deny_net: Arc::new(Targets::None),
+		}
+	}
+
 	pub fn with_scripting(mut self, scripting: bool) -> Self {
 		self.scripting = scripting;
 		self
