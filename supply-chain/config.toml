@@ -215,9 +215,9 @@ criteria = "safe-to-deploy"
 version = "1.0.3"
 criteria = "safe-to-deploy"
 
-[[exemptions.axum]]
-version = "0.6.20"
-criteria = "safe-to-deploy"
+# [[exemptions.axum]]
+# version = "0.6.20"
+# criteria = "safe-to-deploy"
 
 [[exemptions.axum]]
 version = "0.7.5"

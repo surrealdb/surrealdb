@@ -7,7 +7,6 @@ use once_cell::sync::Lazy;
 use opentelemetry::Context as TelemetryContext;
 use opentelemetry::{
 	metrics::{Meter, MeterProvider, MetricsError},
-	runtime,
 	sdk::{
 		export::metrics::aggregation,
 		metrics::{
@@ -17,6 +16,8 @@ use opentelemetry::{
 	},
 };
 use opentelemetry_otlp::MetricsExporterBuilder;
+use opentelemetry_sdk::export;
+use opentelemetry_sdk::runtime;
 
 pub use self::http::tower_layer::HttpMetricsLayer;
 use self::ws::observe_active_connection;
