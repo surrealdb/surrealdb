@@ -1,5 +1,4 @@
-use super::capabilities::Capabilities;
-use crate::cnf;
+use crate::cnf::MAX_COMPUTATION_DEPTH;
 use crate::dbs::Notification;
 use crate::err::Error;
 use crate::iam::{Action, Auth, ResourceKind, Role};
@@ -17,6 +16,7 @@ use uuid::Uuid;
 /// whether field/event/table queries should be processed (useful
 /// when importing data, where these queries might fail).
 #[derive(Clone, Debug)]
+#[non_exhaustive]
 pub struct Options {
 	/// Current Node ID
 	id: Option<Uuid>,
@@ -25,7 +25,7 @@ pub struct Options {
 	/// Currently selected DB
 	db: Option<Arc<str>>,
 	/// Approximately how large is the current call stack?
-	dive: u8,
+	dive: u32,
 	/// Connection authentication data
 	pub auth: Arc<Auth>,
 	/// Is authentication enabled?
@@ -46,11 +46,10 @@ pub struct Options {
 	pub projections: bool,
 	/// The channel over which we send notifications
 	pub sender: Option<Sender<Notification>>,
-	/// Datastore capabilities
-	pub capabilities: Arc<Capabilities>,
 }
 
 #[derive(Clone, Debug)]
+#[non_exhaustive]
 pub enum Force {
 	All,
 	None,
@@ -81,7 +80,7 @@ impl Options {
 			id: None,
 			ns: None,
 			db: None,
-			dive: 0,
+			dive: *MAX_COMPUTATION_DEPTH,
 			live: false,
 			perms: true,
 			force: Force::None,
@@ -92,7 +91,6 @@ impl Options {
 			auth_enabled: true,
 			sender: None,
 			auth: Arc::new(Auth::default()),
-			capabilities: Arc::new(Capabilities::default()),
 		}
 	}
 
@@ -117,7 +115,7 @@ impl Options {
 	/// instances when there is doubt.
 	pub fn with_required(
 		mut self,
-		node_id: uuid::Uuid,
+		node_id: Uuid,
 		ns: Option<Arc<str>>,
 		db: Option<Arc<str>>,
 		auth: Arc<Auth>,
@@ -126,6 +124,12 @@ impl Options {
 		self.ns = ns;
 		self.db = db;
 		self.auth = auth;
+		self
+	}
+
+	/// Set the maximum depth a computation can reach.
+	pub fn with_max_computation_depth(mut self, depth: u32) -> Self {
+		self.dive = depth;
 		self
 	}
 
@@ -207,12 +211,6 @@ impl Options {
 		self
 	}
 
-	/// Create a new Options object with the given Capabilities
-	pub fn with_capabilities(mut self, capabilities: Arc<Capabilities>) -> Self {
-		self.capabilities = capabilities;
-		self
-	}
-
 	// --------------------------------------------------
 
 	/// Create a new Options object for a subquery
@@ -220,7 +218,6 @@ impl Options {
 		Self {
 			sender: self.sender.clone(),
 			auth: self.auth.clone(),
-			capabilities: self.capabilities.clone(),
 			ns: self.ns.clone(),
 			db: self.db.clone(),
 			force: self.force.clone(),
@@ -234,7 +231,6 @@ impl Options {
 		Self {
 			sender: self.sender.clone(),
 			auth: self.auth.clone(),
-			capabilities: self.capabilities.clone(),
 			ns: self.ns.clone(),
 			db: self.db.clone(),
 			force,
@@ -247,7 +243,6 @@ impl Options {
 		Self {
 			sender: self.sender.clone(),
 			auth: self.auth.clone(),
-			capabilities: self.capabilities.clone(),
 			ns: self.ns.clone(),
 			db: self.db.clone(),
 			force: self.force.clone(),
@@ -261,7 +256,6 @@ impl Options {
 		Self {
 			sender: self.sender.clone(),
 			auth: self.auth.clone(),
-			capabilities: self.capabilities.clone(),
 			ns: self.ns.clone(),
 			db: self.db.clone(),
 			force: self.force.clone(),
@@ -275,7 +269,6 @@ impl Options {
 		Self {
 			sender: self.sender.clone(),
 			auth: self.auth.clone(),
-			capabilities: self.capabilities.clone(),
 			ns: self.ns.clone(),
 			db: self.db.clone(),
 			force: self.force.clone(),
@@ -289,7 +282,6 @@ impl Options {
 		Self {
 			sender: self.sender.clone(),
 			auth: self.auth.clone(),
-			capabilities: self.capabilities.clone(),
 			ns: self.ns.clone(),
 			db: self.db.clone(),
 			force: self.force.clone(),
@@ -302,7 +294,6 @@ impl Options {
 	pub fn new_with_sender(&self, sender: Sender<Notification>) -> Self {
 		Self {
 			auth: self.auth.clone(),
-			capabilities: self.capabilities.clone(),
 			ns: self.ns.clone(),
 			db: self.db.clone(),
 			force: self.force.clone(),
@@ -326,21 +317,18 @@ impl Options {
 	/// The parameter is the approximate cost of the operation (more concretely, the size of the
 	/// stack frame it uses relative to a simple function call). When in doubt, use a value of 1.
 	pub fn dive(&self, cost: u8) -> Result<Self, Error> {
-		let dive = self.dive.saturating_add(cost);
-		if dive <= *cnf::MAX_COMPUTATION_DEPTH {
-			Ok(Self {
-				sender: self.sender.clone(),
-				auth: self.auth.clone(),
-				capabilities: self.capabilities.clone(),
-				ns: self.ns.clone(),
-				db: self.db.clone(),
-				force: self.force.clone(),
-				dive,
-				..*self
-			})
-		} else {
-			Err(Error::ComputationDepthExceeded)
+		if self.dive < cost as u32 {
+			return Err(Error::ComputationDepthExceeded);
 		}
+		Ok(Self {
+			sender: self.sender.clone(),
+			auth: self.auth.clone(),
+			ns: self.ns.clone(),
+			db: self.db.clone(),
+			force: self.force.clone(),
+			dive: self.dive - cost as u32,
+			..*self
+		})
 	}
 
 	// --------------------------------------------------
@@ -351,15 +339,13 @@ impl Options {
 	}
 
 	/// Get currently selected NS
-	pub fn ns(&self) -> &str {
-		self.ns.as_ref().map(AsRef::as_ref).unwrap()
-		// self.ns.as_ref().map(AsRef::as_ref).ok_or(Error::Unreachable)
+	pub fn ns(&self) -> Result<&str, Error> {
+		self.ns.as_ref().map(AsRef::as_ref).ok_or(Error::NsEmpty)
 	}
 
 	/// Get currently selected DB
-	pub fn db(&self) -> &str {
-		self.db.as_ref().map(AsRef::as_ref).unwrap()
-		// self.db.as_ref().map(AsRef::as_ref).ok_or(Error::Unreachable)
+	pub fn db(&self) -> Result<&str, Error> {
+		self.db.as_ref().map(AsRef::as_ref).ok_or(Error::DbEmpty)
 	}
 
 	/// Check whether this request supports realtime queries
@@ -393,17 +379,12 @@ impl Options {
 		// Validate the target resource and base
 		let res = match base {
 			Base::Root => res.on_root(),
-			Base::Ns => {
-				self.valid_for_ns()?;
-				res.on_ns(self.ns())
-			}
-			Base::Db => {
-				self.valid_for_db()?;
-				res.on_db(self.ns(), self.db())
-			}
-			Base::Sc(sc) => {
-				self.valid_for_db()?;
-				res.on_scope(self.ns(), self.db(), sc)
+			Base::Ns => res.on_ns(self.ns()?),
+			Base::Db => res.on_db(self.ns()?, self.db()?),
+			// TODO(gguillemas): This variant is kept in 2.0.0 for backward compatibility. Drop in 3.0.0.
+			Base::Sc(_) => {
+				// We should not get here, the scope base is only used in parsing for backward compatibility.
+				return Err(Error::InvalidAuth);
 			}
 		};
 
@@ -419,15 +400,15 @@ impl Options {
 	///
 	/// TODO: This method is called a lot during data operations, so we decided to bypass the system's authorization mechanism.
 	/// This is a temporary solution, until we optimize the new authorization system.
-	pub fn check_perms(&self, action: Action) -> bool {
+	pub fn check_perms(&self, action: Action) -> Result<bool, Error> {
 		// If permissions are disabled, don't check permissions
 		if !self.perms {
-			return false;
+			return Ok(false);
 		}
 
 		// If auth is disabled and actor is anonymous, don't check permissions
 		if !self.auth_enabled && self.auth.is_anon() {
-			return false;
+			return Ok(false);
 		}
 
 		// Is the actor allowed to view?
@@ -437,10 +418,10 @@ impl Options {
 		let can_edit = [Role::Editor, Role::Owner].iter().any(|r| self.auth.has_role(r));
 		// Is the target database in the actor's level?
 		let db_in_actor_level = self.auth.is_root()
-			|| self.auth.is_ns() && self.auth.level().ns().unwrap() == self.ns()
+			|| self.auth.is_ns() && self.auth.level().ns().unwrap() == self.ns()?
 			|| self.auth.is_db()
-				&& self.auth.level().ns().unwrap() == self.ns()
-				&& self.auth.level().db().unwrap() == self.db();
+				&& self.auth.level().ns().unwrap() == self.ns()?
+				&& self.auth.level().db().unwrap() == self.db()?;
 
 		// Is the actor allowed to do the action on the selected database?
 		let is_allowed = match action {
@@ -455,7 +436,7 @@ impl Options {
 		};
 
 		// Check permissions if the author is not already allowed to do the action
-		!is_allowed
+		Ok(!is_allowed)
 	}
 }
 

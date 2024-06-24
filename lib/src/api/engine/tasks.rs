@@ -1,6 +1,7 @@
 use flume::Sender;
 use futures::StreamExt;
 use futures_concurrency::stream::Merge;
+use reblessive::TreeStack;
 #[cfg(target_arch = "wasm32")]
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -12,7 +13,6 @@ use tokio::task::JoinHandle;
 use crate::dbs::Options;
 use crate::fflags::FFLAGS;
 use crate::kvs::Datastore;
-#[cfg(feature = "sql2")]
 use crate::options::EngineOptions;
 
 use crate::engine::IntervalStream;
@@ -37,45 +37,35 @@ pub struct Tasks {
 impl Tasks {
 	#[cfg(not(target_arch = "wasm32"))]
 	pub async fn resolve(self) -> Result<(), RootError> {
-		self.nd.await.map_err(|e| {
-			error!("Node agent task failed: {}", e);
-			#[cfg(not(feature = "sql2"))]
-			let inner_err = crate::err::Error::Unreachable(
-				"This feature won't go live with sql1, so delete this branching",
-			);
-			#[cfg(feature = "sql2")]
-			let inner_err = crate::err::Error::NodeAgent("node task failed and has been logged");
-			RootError::Db(inner_err)
-		})?;
-		self.lq.await.map_err(|e| {
-			error!("Live query task failed: {}", e);
-			#[cfg(not(feature = "sql2"))]
-			let inner_err = crate::err::Error::Unreachable(
-				"This feature won't go live with sql1, so delete this branching",
-			);
-			#[cfg(feature = "sql2")]
-			let inner_err = crate::err::Error::NodeAgent("live query task failed and has been logged");
-			RootError::Db(inner_err)
-		})?;
+		match self.nd.await {
+			// cancelling this task is fine, and can happen when surrealdb exits.
+			Ok(_) => {}
+			Err(e) if e.is_cancelled() => {}
+			Err(e) => {
+				error!("Node agent task failed: {}", e);
+				let inner_err =
+					crate::err::Error::NodeAgent("node task failed and has been logged");
+				return Err(RootError::Db(inner_err));
+			}
+		}
+		match self.lq.await {
+			Ok(_) => {}
+			Err(e) if e.is_cancelled() => {}
+			Err(e) => {
+				error!("Live query task failed: {}", e);
+				let inner_err =
+					crate::err::Error::NodeAgent("live query task failed and has been logged");
+				return Err(RootError::Db(inner_err));
+			}
+		};
 		Ok(())
 	}
 }
 
 /// Starts tasks that are required for the correct running of the engine
-pub fn start_tasks(
-	#[cfg(feature = "sql2")] opt: &EngineOptions,
-	dbs: Arc<Datastore>,
-) -> (Tasks, [Sender<()>; 2]) {
-	let nd = init(
-		#[cfg(feature = "sql2")]
-		opt,
-		dbs.clone(),
-	);
-	let lq = live_query_change_feed(
-		#[cfg(feature = "sql2")]
-		opt,
-		dbs,
-	);
+pub fn start_tasks(opt: &EngineOptions, dbs: Arc<Datastore>) -> (Tasks, [Sender<()>; 2]) {
+	let nd = init(opt, dbs.clone());
+	let lq = live_query_change_feed(opt, dbs);
 	let cancellation_channels = [nd.1, lq.1];
 	(
 		Tasks {
@@ -92,16 +82,9 @@ pub fn start_tasks(
 //
 // This function needs to be called before after the dbs::init and before the net::init functions.
 // It needs to be before net::init because the net::init function blocks until the web server stops.
-fn init(
-	#[cfg(feature = "sql2")] opt: &EngineOptions,
-	dbs: Arc<Datastore>,
-) -> (FutureTask, Sender<()>) {
-	#[cfg(feature = "sql2")]
+fn init(opt: &EngineOptions, dbs: Arc<Datastore>) -> (FutureTask, Sender<()>) {
 	let _init = crate::dbs::LoggingLifecycle::new("node agent initialisation".to_string());
-	#[cfg(feature = "sql2")]
 	let tick_interval = opt.tick_interval;
-	#[cfg(not(feature = "sql2"))]
-	let tick_interval = Duration::from_secs(1);
 
 	trace!("Ticker interval is {:?}", tick_interval);
 	#[cfg(target_arch = "wasm32")]
@@ -113,7 +96,6 @@ fn init(
 	let (tx, rx) = flume::bounded(1);
 
 	let _fut = spawn_future(async move {
-		#[cfg(feature = "sql2")]
 		let _lifecycle = crate::dbs::LoggingLifecycle::new("heartbeat task".to_string());
 		let ticker = interval_ticker(tick_interval).await;
 		let streams = (
@@ -142,14 +124,8 @@ fn init(
 }
 
 // Start live query on change feeds notification processing
-fn live_query_change_feed(
-	#[cfg(feature = "sql2")] opt: &EngineOptions,
-	dbs: Arc<Datastore>,
-) -> (FutureTask, Sender<()>) {
-	#[cfg(feature = "sql2")]
+fn live_query_change_feed(opt: &EngineOptions, dbs: Arc<Datastore>) -> (FutureTask, Sender<()>) {
 	let tick_interval = opt.tick_interval;
-	#[cfg(not(feature = "sql2"))]
-	let tick_interval = Duration::from_secs(1);
 
 	#[cfg(target_arch = "wasm32")]
 	let completed_status = Arc::new(AtomicBool::new(false));
@@ -160,7 +136,8 @@ fn live_query_change_feed(
 	let (tx, rx) = flume::bounded(1);
 
 	let _fut = spawn_future(async move {
-		#[cfg(feature = "sql2")]
+		let mut stack = TreeStack::new();
+
 		let _lifecycle = crate::dbs::LoggingLifecycle::new("live query agent task".to_string());
 		if !FFLAGS.change_feed_live_queries.enabled() {
 			// TODO verify test fails since return without completion
@@ -180,7 +157,9 @@ fn live_query_change_feed(
 
 		let opt = Options::default();
 		while let Some(Some(_)) = streams.next().await {
-			if let Err(e) = dbs.process_lq_notifications(&opt).await {
+			if let Err(e) =
+				stack.enter(|stk| dbs.process_lq_notifications(stk, &opt)).finish().await
+			{
 				error!("Error running node agent tick: {}", e);
 				break;
 			}
@@ -212,20 +191,14 @@ async fn interval_ticker(interval: Duration) -> IntervalStream {
 mod test {
 	use crate::engine::tasks::start_tasks;
 	use crate::kvs::Datastore;
-	#[cfg(feature = "sql2")]
 	use crate::options::EngineOptions;
 	use std::sync::Arc;
 
 	#[test_log::test(tokio::test)]
 	pub async fn tasks_complete() {
-		#[cfg(feature = "sql2")]
 		let opt = EngineOptions::default();
 		let dbs = Arc::new(Datastore::new("memory").await.unwrap());
-		let (val, chans) = start_tasks(
-			#[cfg(feature = "sql2")]
-			&opt,
-			dbs.clone(),
-		);
+		let (val, chans) = start_tasks(&opt, dbs.clone());
 		for chan in chans {
 			chan.send(()).unwrap();
 		}

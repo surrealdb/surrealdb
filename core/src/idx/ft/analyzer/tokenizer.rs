@@ -5,7 +5,7 @@ use crate::idx::ft::offsets::{Offset, Position};
 use crate::sql::tokenizer::Tokenizer as SqlTokenizer;
 use crate::sql::Value;
 
-pub(super) struct Tokens {
+pub(in crate::idx) struct Tokens {
 	/// The input string
 	i: String,
 	/// The final list of tokens
@@ -26,20 +26,15 @@ impl Tokens {
 
 	pub(super) fn filter(self, f: &Filter) -> Result<Tokens, Error> {
 		let mut tks = Vec::new();
-		let mut res = vec![];
-		for t in self.t {
-			if t.is_empty() {
+		for tk in self.t {
+			if tk.is_empty() {
 				continue;
 			}
-			let c = t.get_str(&self.i)?;
-			let r = f.apply_filter(c);
-			res.push((t, r));
-		}
-		for (tk, fr) in res {
-			match fr {
+			let c = tk.get_str(&self.i)?;
+			match f.apply_filter(c) {
 				FilterResult::Term(t) => match t {
 					Term::Unchanged => tks.push(tk),
-					Term::NewTerm(s) => tks.push(tk.new_token(s)),
+					Term::NewTerm(t, s) => tks.push(tk.new_token(t, s)),
 				},
 				FilterResult::Terms(ts) => {
 					let mut already_pushed = false;
@@ -51,7 +46,7 @@ impl Tokens {
 									already_pushed = true;
 								}
 							}
-							Term::NewTerm(s) => tks.push(tk.new_token(s)),
+							Term::NewTerm(t, s) => tks.push(tk.new_token(t, s)),
 						}
 					}
 				}
@@ -97,7 +92,7 @@ pub(super) enum Token {
 }
 
 impl Token {
-	fn new_token(&self, term: String) -> Self {
+	fn new_token(&self, term: String, start: Position) -> Self {
 		let len = term.chars().count() as u32;
 		match self {
 			Token::Ref {
@@ -105,7 +100,7 @@ impl Token {
 				bytes,
 				..
 			} => Token::String {
-				chars: *chars,
+				chars: (chars.0, chars.1 + start, chars.2),
 				bytes: *bytes,
 				term,
 				len,
@@ -115,7 +110,7 @@ impl Token {
 				bytes,
 				..
 			} => Token::String {
-				chars: *chars,
+				chars: (chars.0, chars.1 + start, chars.2),
 				bytes: *bytes,
 				term,
 				len,
@@ -176,7 +171,7 @@ impl Token {
 						"Unable to extract the token. The offset position ({s},{e}) is out of range ({l})."
 					)));
 				}
-				Ok(&i[(bytes.0 as usize)..(bytes.1 as usize)])
+				Ok(&i[s..e])
 			}
 			Token::String {
 				term,

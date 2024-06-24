@@ -1,6 +1,5 @@
 use crate::ctx::Context;
 use crate::dbs::Options;
-use crate::dbs::Transaction;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::iam::{Action, ResourceKind};
@@ -18,9 +17,10 @@ use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::fmt::{Display, Formatter};
 
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[revisioned(revision = 1)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
+#[non_exhaustive]
 pub enum AnalyzeStatement {
 	Idx(Ident, Ident),
 }
@@ -31,7 +31,6 @@ impl AnalyzeStatement {
 		&self,
 		ctx: &Context<'_>,
 		opt: &Options,
-		txn: &Transaction,
 		_doc: Option<&CursorDoc<'_>>,
 	) -> Result<Value, Error> {
 		match self {
@@ -39,30 +38,23 @@ impl AnalyzeStatement {
 				// Allowed to run?
 				opt.is_allowed(Action::View, ResourceKind::Index, &Base::Db)?;
 				// Read the index
-				let ix = txn
-					.lock()
+				let ix = ctx
+					.tx_lock()
 					.await
-					.get_and_cache_tb_index(opt.ns(), opt.db(), tb.as_str(), idx.as_str())
+					.get_and_cache_tb_index(opt.ns()?, opt.db()?, tb, idx)
 					.await?;
-				let ikb = IndexKeyBase::new(opt, &ix);
+				let ikb = IndexKeyBase::new(opt.ns()?, opt.db()?, &ix)?;
 
 				// Index operation dispatching
 				let value: Value = match &ix.index {
 					Index::Search(p) => {
-						let ft = FtIndex::new(
-							ctx.get_index_stores(),
-							opt,
-							txn,
-							p.az.as_str(),
-							ikb,
-							p,
-							TransactionType::Read,
-						)
-						.await?;
-						ft.statistics(txn).await?.into()
+						let ft =
+							FtIndex::new(ctx, opt, p.az.as_str(), ikb, p, TransactionType::Read)
+								.await?;
+						ft.statistics(ctx).await?.into()
 					}
 					Index::MTree(p) => {
-						let mut tx = txn.lock().await;
+						let mut tx = ctx.tx_lock().await;
 						let mt = MTreeIndex::new(
 							ctx.get_index_stores(),
 							&mut tx,

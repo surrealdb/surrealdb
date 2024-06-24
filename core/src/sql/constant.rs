@@ -1,6 +1,3 @@
-use crate::ctx::Context;
-use crate::dbs::{Options, Transaction};
-use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::sql::value::Value;
 use crate::sql::Datetime;
@@ -13,10 +10,11 @@ use std::fmt;
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Constant";
 
+#[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[serde(rename = "$surrealdb::private::sql::Constant")]
-#[revisioned(revision = 1)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
+#[non_exhaustive]
 pub enum Constant {
 	MathE,
 	MathFrac1Pi,
@@ -35,6 +33,7 @@ pub enum Constant {
 	MathLog10E,
 	MathLog210,
 	MathLog2E,
+	MathNegInf,
 	MathPi,
 	MathSqrt2,
 	MathTau,
@@ -69,6 +68,7 @@ impl Constant {
 			Self::MathLog10E => ConstantValue::Float(f64c::LOG10_E),
 			Self::MathLog210 => ConstantValue::Float(f64c::LOG2_10),
 			Self::MathLog2E => ConstantValue::Float(f64c::LOG2_E),
+			Self::MathNegInf => ConstantValue::Float(f64::NEG_INFINITY),
 			Self::MathPi => ConstantValue::Float(f64c::PI),
 			Self::MathSqrt2 => ConstantValue::Float(f64c::SQRT_2),
 			Self::MathTau => ConstantValue::Float(f64c::TAU),
@@ -76,13 +76,7 @@ impl Constant {
 		}
 	}
 	/// Process this type returning a computed simple Value
-	pub(crate) async fn compute(
-		&self,
-		_ctx: &Context<'_>,
-		_opt: &Options,
-		_txn: &Transaction,
-		_doc: Option<&CursorDoc<'_>>,
-	) -> Result<Value, Error> {
+	pub fn compute(&self) -> Result<Value, Error> {
 		Ok(match self.value() {
 			ConstantValue::Datetime(d) => d.into(),
 			ConstantValue::Float(f) => f.into(),
@@ -110,6 +104,7 @@ impl fmt::Display for Constant {
 			Self::MathLog10E => "math::LOG10_E",
 			Self::MathLog210 => "math::LOG2_10",
 			Self::MathLog2E => "math::LOG2_E",
+			Self::MathNegInf => "math::NEG_INF",
 			Self::MathPi => "math::PI",
 			Self::MathSqrt2 => "math::SQRT_2",
 			Self::MathTau => "math::TAU",

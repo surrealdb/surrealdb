@@ -1,5 +1,6 @@
 use once_cell::sync::Lazy;
 use std::time::Duration;
+use surrealdb::{lazy_env_parse, lazy_env_parse_or_else};
 
 pub const LOGO: &str = "
  .d8888b.                                             888 8888888b.  888888b.
@@ -31,45 +32,31 @@ pub const APP_ENDPOINT: &str = "https://surrealdb.com/app";
 pub const WEBSOCKET_PING_FREQUENCY: Duration = Duration::from_secs(5);
 
 /// What is the maximum WebSocket frame size (defaults to 16 MiB)
-pub static WEBSOCKET_MAX_FRAME_SIZE: Lazy<usize> = Lazy::new(|| {
-	option_env!("SURREAL_WEBSOCKET_MAX_FRAME_SIZE")
-		.and_then(|s| s.parse::<usize>().ok())
-		.unwrap_or(16 << 20)
-});
+pub static WEBSOCKET_MAX_FRAME_SIZE: Lazy<usize> =
+	lazy_env_parse!("SURREAL_WEBSOCKET_MAX_FRAME_SIZE", usize, 16 << 20);
 
 /// What is the maximum WebSocket message size (defaults to 128 MiB)
-pub static WEBSOCKET_MAX_MESSAGE_SIZE: Lazy<usize> = Lazy::new(|| {
-	option_env!("SURREAL_WEBSOCKET_MAX_MESSAGE_SIZE")
-		.and_then(|s| s.parse::<usize>().ok())
-		.unwrap_or(128 << 20)
-});
+pub static WEBSOCKET_MAX_MESSAGE_SIZE: Lazy<usize> =
+	lazy_env_parse!("SURREAL_WEBSOCKET_MAX_MESSAGE_SIZE", usize, 128 << 20);
 
 /// How many concurrent tasks can be handled on each WebSocket (defaults to 24)
-pub static WEBSOCKET_MAX_CONCURRENT_REQUESTS: Lazy<usize> = Lazy::new(|| {
-	option_env!("SURREAL_WEBSOCKET_MAX_CONCURRENT_REQUESTS")
-		.and_then(|s| s.parse::<usize>().ok())
-		.unwrap_or(24)
-});
+pub static WEBSOCKET_MAX_CONCURRENT_REQUESTS: Lazy<usize> =
+	lazy_env_parse!("SURREAL_WEBSOCKET_MAX_CONCURRENT_REQUESTS", usize, 24);
 
 /// What is the runtime thread memory stack size (defaults to 10MiB)
-pub static RUNTIME_STACK_SIZE: Lazy<usize> = Lazy::new(|| {
-	// Stack frames are generally larger in debug mode.
-	let default = if cfg!(debug_assertions) {
-		20 * 1024 * 1024 // 20MiB in debug mode
-	} else {
-		10 * 1024 * 1024 // 10MiB in release mode
-	};
-	option_env!("SURREAL_RUNTIME_STACK_SIZE")
-		.and_then(|s| s.parse::<usize>().ok())
-		.unwrap_or(default)
-});
+pub static RUNTIME_STACK_SIZE: Lazy<usize> =
+	lazy_env_parse_or_else!("SURREAL_RUNTIME_STACK_SIZE", usize, |_| {
+		// Stack frames are generally larger in debug mode.
+		if cfg!(debug_assertions) {
+			20 * 1024 * 1024 // 20MiB in debug mode
+		} else {
+			10 * 1024 * 1024 // 10MiB in release mode
+		}
+	});
 
 /// How many threads which can be started for blocking operations (defaults to 512)
-pub static RUNTIME_MAX_BLOCKING_THREADS: Lazy<usize> = Lazy::new(|| {
-	option_env!("SURREAL_RUNTIME_MAX_BLOCKING_THREADS")
-		.and_then(|s| s.parse::<usize>().ok())
-		.unwrap_or(512)
-});
+pub static RUNTIME_MAX_BLOCKING_THREADS: Lazy<usize> =
+	lazy_env_parse!("SURREAL_RUNTIME_MAX_BLOCKING_THREADS", usize, 512);
 
 /// The version identifier of this build
 pub static PKG_VERSION: Lazy<String> = Lazy::new(|| match option_env!("SURREAL_BUILD_METADATA") {

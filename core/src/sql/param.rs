@@ -1,21 +1,23 @@
 use crate::{
 	ctx::Context,
-	dbs::{Options, Transaction},
+	dbs::Options,
 	doc::CursorDoc,
 	err::Error,
 	iam::Action,
 	sql::{ident::Ident, value::Value, Permission},
 };
+use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::{fmt, ops::Deref, str};
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Param";
 
+#[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[serde(rename = "$surrealdb::private::sql::Param")]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[revisioned(revision = 1)]
+#[non_exhaustive]
 pub struct Param(pub Ident);
 
 impl From<Ident> for Param {
@@ -47,9 +49,9 @@ impl Param {
 	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
+		stk: &mut Stk,
 		ctx: &Context<'_>,
 		opt: &Options,
-		txn: &Transaction,
 		doc: Option<&CursorDoc<'_>>,
 	) -> Result<Value, Error> {
 		// Find the variable by name
@@ -57,30 +59,28 @@ impl Param {
 			// This is a special param
 			"this" | "self" => match doc {
 				// The base document exists
-				Some(v) => v.doc.compute(ctx, opt, txn, doc).await,
+				Some(v) => v.doc.compute(stk, ctx, opt, doc).await,
 				// The base document does not exist
 				None => Ok(Value::None),
 			},
 			// This is a normal param
 			v => match ctx.value(v) {
 				// The param has been set locally
-				Some(v) => v.compute(ctx, opt, txn, doc).await,
+				Some(v) => v.compute(stk, ctx, opt, doc).await,
 				// The param has not been set locally
 				None => {
-					// Check that a database is set to prevent a panic
-					opt.valid_for_db()?;
 					let val = {
 						// Claim transaction
-						let mut run = txn.lock().await;
+						let mut run = ctx.tx_lock().await;
 						// Get the param definition
-						run.get_and_cache_db_param(opt.ns(), opt.db(), v).await
+						run.get_and_cache_db_param(opt.ns()?, opt.db()?, v).await
 					};
 					// Check if the param has been set globally
 					match val {
 						// The param has been set globally
 						Ok(val) => {
 							// Check permissions
-							if opt.check_perms(Action::View) {
+							if opt.check_perms(Action::View)? {
 								match &val.permissions {
 									Permission::Full => (),
 									Permission::None => {
@@ -92,7 +92,7 @@ impl Param {
 										// Disable permissions
 										let opt = &opt.new_with_perms(false);
 										// Process the PERMISSION clause
-										if !e.compute(ctx, opt, txn, doc).await?.is_truthy() {
+										if !e.compute(stk, ctx, opt, doc).await?.is_truthy() {
 											return Err(Error::ParamPermissions {
 												name: v.to_owned(),
 											});
@@ -101,7 +101,7 @@ impl Param {
 								}
 							}
 							// Return the computed value
-							val.value.compute(ctx, opt, txn, doc).await
+							val.value.compute(stk, ctx, opt, doc).await
 						}
 						// The param has not been set globally
 						Err(_) => Ok(Value::None),

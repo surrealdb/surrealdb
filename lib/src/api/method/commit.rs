@@ -22,7 +22,7 @@ where
 
 	fn into_future(self) -> Self::IntoFuture {
 		Box::pin(async move {
-			self.client.query(CommitStatement).await?;
+			self.client.query(CommitStatement::default()).await?;
 			Ok(self.client)
 		})
 	}

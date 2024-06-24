@@ -9,8 +9,10 @@ use roaring::RoaringTreemap;
 use serde::{Deserialize, Serialize};
 
 pub(crate) type TermId = u64;
+pub(crate) type TermLen = u32;
 
-pub(super) struct Terms {
+pub(in crate::idx) struct Terms {
+	ixs: IndexStores,
 	state_key: Key,
 	index_key_base: IndexKeyBase,
 	btree: BTree<FstKeys>,
@@ -43,6 +45,7 @@ impl Terms {
 			)
 			.await;
 		Ok(Self {
+			ixs: ixs.clone(),
 			state_key,
 			index_key_base,
 			btree: BTree::new(state.btree),
@@ -119,7 +122,7 @@ impl Terms {
 	}
 
 	pub(super) async fn finish(&mut self, tx: &mut Transaction) -> Result<(), Error> {
-		if self.store.finish(tx).await? {
+		if let Some(new_cache) = self.store.finish(tx).await? {
 			let btree = self.btree.inc_generation().clone();
 			let state = State {
 				btree,
@@ -127,21 +130,22 @@ impl Terms {
 				next_term_id: self.next_term_id,
 			};
 			tx.set(self.state_key.clone(), state.try_to_val()?).await?;
+			self.ixs.advance_store_btree_fst(new_cache);
 		}
 		Ok(())
 	}
 }
 
-#[derive(Serialize, Deserialize)]
 #[revisioned(revision = 1)]
+#[derive(Serialize, Deserialize)]
 struct State {
 	btree: BState,
 	available_ids: Option<RoaringTreemap>,
 	next_term_id: TermId,
 }
 
-#[derive(Serialize, Deserialize)]
 #[revisioned(revision = 1)]
+#[derive(Serialize, Deserialize)]
 struct State1 {
 	btree: BState1,
 	available_ids: Option<RoaringTreemap>,
@@ -150,8 +154,8 @@ struct State1 {
 
 impl VersionedSerdeState for State1 {}
 
-#[derive(Serialize, Deserialize)]
 #[revisioned(revision = 1)]
+#[derive(Serialize, Deserialize)]
 struct State1skip {
 	btree: BState1skip,
 	available_ids: Option<RoaringTreemap>,

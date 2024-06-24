@@ -1,16 +1,18 @@
 use crate::ctx::Context;
-use crate::dbs::{Iterator, Options, Statement, Transaction};
+use crate::dbs::{Iterator, Options, Statement};
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::sql::{Cond, Output, Timeout, Value, Values};
 use derive::Store;
+use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
+#[revisioned(revision = 2)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[revisioned(revision = 2)]
+#[non_exhaustive]
 pub struct DeleteStatement {
 	#[revision(start = 2)]
 	pub only: bool,
@@ -29,9 +31,9 @@ impl DeleteStatement {
 	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
+		stk: &mut Stk,
 		ctx: &Context<'_>,
 		opt: &Options,
-		txn: &Transaction,
 		doc: Option<&CursorDoc<'_>>,
 	) -> Result<Value, Error> {
 		// Valid options?
@@ -44,8 +46,8 @@ impl DeleteStatement {
 		let opt = &opt.new_with_futures(false).with_projections(false);
 		// Loop over the delete targets
 		for w in self.what.0.iter() {
-			let v = w.compute(ctx, opt, txn, doc).await?;
-			i.prepare(ctx, opt, txn, &stm, v).await.map_err(|e| match e {
+			let v = w.compute(stk, ctx, opt, doc).await?;
+			i.prepare(stk, ctx, opt, &stm, v).await.map_err(|e| match e {
 				Error::InvalidStatementTarget {
 					value: v,
 				} => Error::DeleteStatement {
@@ -55,7 +57,7 @@ impl DeleteStatement {
 			})?;
 		}
 		// Output the results
-		match i.output(ctx, opt, txn, &stm).await? {
+		match i.output(stk, ctx, opt, &stm).await? {
 			// This is a single record result
 			Value::Array(mut a) if self.only => match a.len() {
 				// There was exactly one result

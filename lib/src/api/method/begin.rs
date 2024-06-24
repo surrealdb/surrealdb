@@ -25,7 +25,7 @@ where
 
 	fn into_future(self) -> Self::IntoFuture {
 		Box::pin(async move {
-			self.client.query(BeginStatement).await?;
+			self.client.query(BeginStatement::default()).await?;
 			Ok(Transaction {
 				client: self.client,
 			})

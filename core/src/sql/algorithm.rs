@@ -1,10 +1,13 @@
+use crate::sql::statements::info::InfoStructure;
+use crate::sql::Value;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
+#[revisioned(revision = 1)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[revisioned(revision = 1)]
+#[non_exhaustive]
 pub enum Algorithm {
 	EdDSA,
 	Es256,
@@ -19,7 +22,33 @@ pub enum Algorithm {
 	Rs256,
 	Rs384,
 	Rs512,
-	Jwks, // Not an argorithm.
+}
+
+impl Algorithm {
+	// Does the algorithm use the same key for signing and verification?
+	pub(crate) fn is_symmetric(self) -> bool {
+		matches!(self, Algorithm::Hs256 | Algorithm::Hs384 | Algorithm::Hs512)
+	}
+}
+
+impl From<Algorithm> for jsonwebtoken::Algorithm {
+	fn from(val: Algorithm) -> Self {
+		match val {
+			Algorithm::Hs256 => jsonwebtoken::Algorithm::HS256,
+			Algorithm::Hs384 => jsonwebtoken::Algorithm::HS384,
+			Algorithm::Hs512 => jsonwebtoken::Algorithm::HS512,
+			Algorithm::EdDSA => jsonwebtoken::Algorithm::EdDSA,
+			Algorithm::Es256 => jsonwebtoken::Algorithm::ES256,
+			Algorithm::Es384 => jsonwebtoken::Algorithm::ES384,
+			Algorithm::Es512 => jsonwebtoken::Algorithm::ES384,
+			Algorithm::Ps256 => jsonwebtoken::Algorithm::PS256,
+			Algorithm::Ps384 => jsonwebtoken::Algorithm::PS384,
+			Algorithm::Ps512 => jsonwebtoken::Algorithm::PS512,
+			Algorithm::Rs256 => jsonwebtoken::Algorithm::RS256,
+			Algorithm::Rs384 => jsonwebtoken::Algorithm::RS384,
+			Algorithm::Rs512 => jsonwebtoken::Algorithm::RS512,
+		}
+	}
 }
 
 impl Default for Algorithm {
@@ -44,7 +73,11 @@ impl fmt::Display for Algorithm {
 			Self::Rs256 => "RS256",
 			Self::Rs384 => "RS384",
 			Self::Rs512 => "RS512",
-			Self::Jwks => "JWKS", // Not an algorithm.
 		})
+	}
+}
+impl InfoStructure for Algorithm {
+	fn structure(self) -> Value {
+		self.to_string().into()
 	}
 }

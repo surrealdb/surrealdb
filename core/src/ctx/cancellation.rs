@@ -6,6 +6,7 @@ use trice::Instant;
 
 /// A 'static view into the cancellation status of a Context.
 #[derive(Clone, Debug, Default)]
+#[non_exhaustive]
 pub struct Cancellation {
 	deadline: Option<Instant>,
 	cancellations: Vec<Arc<AtomicBool>>,

@@ -76,6 +76,8 @@ pub fn try_u128_to_versionstamp(v: u128) -> Result<[u8; 10], Error> {
 }
 
 /// Take the most significant, time-based bytes and ignores the last 2 bytes
+///
+/// You probably want `to_u128_be` instead
 #[doc(hidden)]
 pub fn versionstamp_to_u64(vs: &Versionstamp) -> u64 {
 	u64::from_be_bytes(vs[..8].try_into().unwrap())
@@ -95,6 +97,7 @@ pub fn to_u128_be(vs: [u8; 10]) -> u128 {
 }
 
 #[derive(Error)]
+#[non_exhaustive]
 pub enum Error {
 	#[error("invalid versionstamp")]
 	// InvalidVersionstamp is returned when a versionstamp has an unexpected length.

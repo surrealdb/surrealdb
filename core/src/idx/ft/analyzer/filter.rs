@@ -1,10 +1,16 @@
 use crate::err::Error;
 use crate::idx::ft::analyzer::tokenizer::Tokens;
+use crate::idx::ft::offsets::Position;
 use crate::sql::filter::Filter as SqlFilter;
 use crate::sql::language::Language;
 use deunicode::deunicode;
 use rust_stemmers::{Algorithm, Stemmer};
 
+#[derive(Clone, Copy)]
+pub(super) enum FilteringStage {
+	Indexing,
+	Querying,
+}
 pub(super) enum Filter {
 	Stemmer(Stemmer),
 	Ascii,
@@ -49,22 +55,33 @@ impl From<SqlFilter> for Filter {
 }
 
 impl Filter {
-	pub(super) fn from(f: Option<Vec<SqlFilter>>) -> Option<Vec<Filter>> {
-		if let Some(f) = f {
-			let mut r = Vec::with_capacity(f.len());
-			for f in f {
-				r.push(f.into());
-			}
+	pub(super) fn from(fs: Option<Vec<SqlFilter>>) -> Option<Vec<Filter>> {
+		if let Some(fs) = fs {
+			let r = fs.into_iter().map(|f| f.into()).collect();
 			Some(r)
 		} else {
 			None
 		}
 	}
 
-	pub(super) fn apply_filters(mut t: Tokens, f: &Option<Vec<Filter>>) -> Result<Tokens, Error> {
-		if let Some(f) = f {
-			for f in f {
-				t = t.filter(f)?;
+	fn is_stage(&self, stage: FilteringStage) -> bool {
+		if let FilteringStage::Querying = stage {
+			!matches!(self, Filter::EdgeNgram(_, _) | Filter::Ngram(_, _))
+		} else {
+			true
+		}
+	}
+
+	pub(super) fn apply_filters(
+		mut t: Tokens,
+		f: &Option<Vec<Filter>>,
+		stage: FilteringStage,
+	) -> Result<Tokens, Error> {
+		if let Some(filters) = f {
+			for filter in filters {
+				if filter.is_stage(stage) {
+					t = t.filter(filter)?;
+				}
 			}
 		}
 		Ok(t)
@@ -88,7 +105,7 @@ impl Filter {
 		} else if s.eq(c) {
 			FilterResult::Term(Term::Unchanged)
 		} else {
-			FilterResult::Term(Term::NewTerm(s))
+			FilterResult::Term(Term::NewTerm(s, 0))
 		}
 	}
 
@@ -121,20 +138,17 @@ impl Filter {
 			return FilterResult::Ignore;
 		}
 		let mut ng = vec![];
-		let r1 = 0..(l - min);
+		let r1 = 0..=(l - min);
 		let max = max as usize;
 		for s in r1 {
-			let mut e = s + max;
-			if e > l {
-				e = l;
-			}
-			let r2 = (s + min)..(e + 1);
+			let e = (s + max).min(l);
+			let r2 = (s + min)..=e;
 			for p in r2 {
 				let n = &c[s..p];
 				if c.eq(n) {
 					ng.push(Term::Unchanged);
 				} else {
-					ng.push(Term::NewTerm(n.iter().collect()));
+					ng.push(Term::NewTerm(n.iter().collect(), s as Position));
 				}
 			}
 		}
@@ -149,20 +163,17 @@ impl Filter {
 		if l < min {
 			return FilterResult::Ignore;
 		}
-		let mut max = max as usize;
-		if max > l {
-			max = l;
-		}
-		let mut ng = vec![];
-		let r = min..(max + 1);
-		for p in r {
-			let n = &c[0..p];
-			if c.eq(n) {
-				ng.push(Term::Unchanged);
-			} else {
-				ng.push(Term::NewTerm(n.iter().collect()));
-			}
-		}
+		let max = (max as usize).min(l);
+		let ng = (min..=max)
+			.map(|p| {
+				let n = &c[0..p];
+				if c.eq(n) {
+					Term::Unchanged
+				} else {
+					Term::NewTerm(n.iter().collect(), 0)
+				}
+			})
+			.collect();
 		FilterResult::Terms(ng)
 	}
 }
@@ -175,12 +186,13 @@ pub(super) enum FilterResult {
 
 pub(super) enum Term {
 	Unchanged,
-	NewTerm(String),
+	NewTerm(String, Position),
 }
 
 #[cfg(test)]
 mod tests {
-	use crate::idx::ft::analyzer::tests::test_analyzer;
+	use crate::idx::ft::analyzer::tests::{test_analyzer, test_analyzer_tokens};
+	use crate::idx::ft::analyzer::tokenizer::Token;
 
 	#[tokio::test]
 	async fn test_arabic_stemmer() {
@@ -702,7 +714,93 @@ mod tests {
 		test_analyzer(
 			"ANALYZER test TOKENIZERS blank,class FILTERS lowercase,ngram(2,3);",
 			"Ālea iacta est",
-			&["āl", "āle", "le", "lea", "ia", "iac", "ac", "act", "ct", "cta", "es", "est"],
+			&[
+				"āl", "āle", "le", "lea", "ea", "ia", "iac", "ac", "act", "ct", "cta", "ta", "es",
+				"est", "st",
+			],
+		)
+		.await;
+	}
+
+	#[tokio::test]
+	async fn test_ngram_tokens() {
+		test_analyzer_tokens(
+			"ANALYZER test TOKENIZERS blank,class FILTERS lowercase,ngram(2,3);",
+			"Ālea iacta",
+			&vec![
+				Token::String {
+					chars: (0, 0, 4),
+					bytes: (0, 5),
+					term: "āl".to_string(),
+					len: 2,
+				},
+				Token::String {
+					chars: (0, 0, 4),
+					bytes: (0, 5),
+					term: "āle".to_string(),
+					len: 3,
+				},
+				Token::String {
+					chars: (0, 1, 4),
+					bytes: (0, 5),
+					term: "le".to_string(),
+					len: 2,
+				},
+				Token::String {
+					chars: (0, 1, 4),
+					bytes: (0, 5),
+					term: "lea".to_string(),
+					len: 3,
+				},
+				Token::String {
+					chars: (0, 2, 4),
+					bytes: (0, 5),
+					term: "ea".to_string(),
+					len: 2,
+				},
+				Token::String {
+					chars: (5, 5, 10),
+					bytes: (6, 11),
+					term: "ia".to_string(),
+					len: 2,
+				},
+				Token::String {
+					chars: (5, 5, 10),
+					bytes: (6, 11),
+					term: "iac".to_string(),
+					len: 3,
+				},
+				Token::String {
+					chars: (5, 6, 10),
+					bytes: (6, 11),
+					term: "ac".to_string(),
+					len: 2,
+				},
+				Token::String {
+					chars: (5, 6, 10),
+					bytes: (6, 11),
+					term: "act".to_string(),
+					len: 3,
+				},
+				Token::String {
+					chars: (5, 7, 10),
+					bytes: (6, 11),
+					term: "ct".to_string(),
+					len: 2,
+				},
+				Token::String {
+					chars: (5, 7, 10),
+					bytes: (6, 11),
+					term: "cta".to_string(),
+					len: 3,
+				},
+				Token::String {
+					chars: (5, 8, 10),
+					bytes: (6, 11),
+					term: "ta".to_string(),
+					len: 2,
+				},
+			],
 		)
 		.await;
 	}
@@ -713,6 +811,34 @@ mod tests {
 			"ANALYZER test TOKENIZERS blank,class FILTERS lowercase,edgengram(2,3);",
 			"Ālea iacta est",
 			&["āl", "āle", "ia", "iac", "es", "est"],
+		)
+		.await;
+	}
+
+	#[tokio::test]
+	async fn test_lowercase_tokens() {
+		test_analyzer_tokens(
+			"ANALYZER test TOKENIZERS blank,class FILTERS lowercase",
+			"Ālea IactA!",
+			&[
+				Token::String {
+					chars: (0, 0, 4),
+					bytes: (0, 5),
+					term: "ālea".to_string(),
+					len: 4,
+				},
+				Token::String {
+					chars: (5, 5, 10),
+					bytes: (6, 11),
+					term: "iacta".to_string(),
+					len: 5,
+				},
+				Token::Ref {
+					chars: (10, 10, 11),
+					bytes: (11, 12),
+					len: 1,
+				},
+			],
 		)
 		.await;
 	}

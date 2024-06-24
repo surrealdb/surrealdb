@@ -4,6 +4,7 @@ use crate::sql::duration;
 
 #[derive(Clone, Trace)]
 #[js::class]
+#[non_exhaustive]
 pub struct Duration {
 	#[qjs(skip_trace)]
 	pub(crate) value: Option<duration::Duration>,

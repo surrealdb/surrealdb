@@ -2,7 +2,7 @@ use crate::api::{err::Error, Response as QueryResponse, Result};
 use crate::method;
 use crate::method::{Stats, Stream};
 use crate::sql::from_value;
-use crate::sql::{self, statements::*, Array, Object, Statement, Statements, Value};
+use crate::sql::{self, statements::*, Statement, Statements, Value};
 use crate::{syn, Notification};
 use futures::future::Either;
 use futures::stream::select_all;
@@ -18,15 +18,13 @@ pub trait IntoQuery {
 
 impl IntoQuery for sql::Query {
 	fn into_query(self) -> Result<Vec<Statement>> {
-		let sql::Query(Statements(statements)) = self;
-		Ok(statements)
+		Ok(self.0 .0)
 	}
 }
 
 impl IntoQuery for Statements {
 	fn into_query(self) -> Result<Vec<Statement>> {
-		let Statements(statements) = self;
-		Ok(statements)
+		Ok(self.0)
 	}
 }
 
@@ -220,7 +218,7 @@ where
 			}
 		};
 		let result = match value {
-			Value::Array(Array(vec)) => match &mut vec[..] {
+			Value::Array(vec) => match &mut vec.0[..] {
 				[] => Ok(None),
 				[value] => {
 					let value = mem::take(value);
@@ -265,7 +263,7 @@ impl QueryResult<Value> for (usize, &str) {
 		};
 
 		let value = match value {
-			Value::Object(Object(object)) => object.remove(key).unwrap_or_default(),
+			Value::Object(object) => object.remove(key).unwrap_or_default(),
 			_ => Value::None,
 		};
 
@@ -297,7 +295,7 @@ where
 			}
 		};
 		let value = match value {
-			Value::Array(Array(vec)) => match &mut vec[..] {
+			Value::Array(vec) => match &mut vec.0[..] {
 				[] => {
 					response.results.swap_remove(&index);
 					return Ok(None);
@@ -319,7 +317,7 @@ where
 				response.results.swap_remove(&index);
 				Ok(None)
 			}
-			Value::Object(Object(object)) => {
+			Value::Object(object) => {
 				if object.is_empty() {
 					response.results.swap_remove(&index);
 					return Ok(None);
@@ -345,7 +343,7 @@ where
 	fn query_result(self, response: &mut QueryResponse) -> Result<Vec<T>> {
 		let vec = match response.results.swap_remove(&self) {
 			Some((_, result)) => match result? {
-				Value::Array(Array(vec)) => vec,
+				Value::Array(vec) => vec.0,
 				vec => vec![vec],
 			},
 			None => {
@@ -369,7 +367,7 @@ where
 		let mut response = match response.results.get_mut(&index) {
 			Some((_, result)) => match result {
 				Ok(val) => match val {
-					Value::Array(Array(vec)) => mem::take(vec),
+					Value::Array(vec) => mem::take(&mut vec.0),
 					val => {
 						let val = mem::take(val);
 						vec![val]
@@ -387,7 +385,7 @@ where
 		};
 		let mut vec = Vec::with_capacity(response.len());
 		for value in response.iter_mut() {
-			if let Value::Object(Object(object)) = value {
+			if let Value::Object(object) = value {
 				if let Some(value) = object.remove(key) {
 					vec.push(value);
 				}

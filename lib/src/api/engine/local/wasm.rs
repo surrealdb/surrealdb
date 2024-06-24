@@ -65,15 +65,14 @@ impl Connection for Db {
 			let mut features = HashSet::new();
 			features.insert(ExtraFeatures::LiveQueries);
 
-			Ok(Surreal {
-				router: Arc::new(OnceLock::with_value(Router {
+			Ok(Surreal::new_from_router_waiter(
+				Arc::new(OnceLock::with_value(Router {
 					features,
 					sender: route_tx,
 					last_id: AtomicI64::new(0),
 				})),
-				waiter: Arc::new(watch::channel(Some(WaitFor::Connection))),
-				engine: PhantomData,
-			})
+				Arc::new(watch::channel(Some(WaitFor::Connection))),
+			))
 		})
 	}
 
@@ -147,11 +146,8 @@ pub(crate) fn router(
 		let mut live_queries = HashMap::new();
 		let mut session = Session::default().with_rt(true);
 
-		let tick_interval = address.config.tick_interval.unwrap_or(DEFAULT_TICK_INTERVAL);
-		let opt = EngineOptions {
-			tick_interval,
-			..Default::default()
-		};
+		let mut opt = EngineOptions::default();
+		opt.tick_interval = address.config.tick_interval.unwrap_or(DEFAULT_TICK_INTERVAL);
 		let (_tasks, task_chans) = start_tasks(&opt, kvs.clone());
 
 		let mut notifications = kvs.notifications();

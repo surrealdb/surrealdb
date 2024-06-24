@@ -17,7 +17,7 @@ mod sync;
 mod tracer;
 mod version;
 
-#[cfg(any(feature = "ml", feature = "ml2"))]
+#[cfg(feature = "ml")]
 mod ml;
 
 use crate::cli::CF;
@@ -35,7 +35,7 @@ use http::header;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
-use surrealdb::headers::{DB, ID, NS};
+use surrealdb::headers::{AUTH_DB, AUTH_NS, DB, ID, NS};
 use tokio_util::sync::CancellationToken;
 use tower::ServiceBuilder;
 use tower_http::add_extension::AddExtensionLayer;
@@ -106,6 +106,8 @@ pub async fn init(ct: CancellationToken) -> Result<(), Error> {
 		NS.clone(),
 		DB.clone(),
 		ID.clone(),
+		AUTH_NS.clone(),
+		AUTH_DB.clone(),
 	];
 
 	#[cfg(not(feature = "http-compression"))]
@@ -117,6 +119,8 @@ pub async fn init(ct: CancellationToken) -> Result<(), Error> {
 		NS.clone(),
 		DB.clone(),
 		ID.clone(),
+		AUTH_NS.clone(),
+		AUTH_DB.clone(),
 	];
 
 	let service = service
@@ -133,8 +137,8 @@ pub async fn init(ct: CancellationToken) -> Result<(), Error> {
 		.layer(HttpMetricsLayer)
 		.layer(SetSensitiveResponseHeadersLayer::from_shared(headers))
 		.layer(AsyncRequireAuthorizationLayer::new(auth::SurrealAuth))
-		.layer(headers::add_server_header())
-		.layer(headers::add_version_header())
+		.layer(headers::add_server_header(!opt.no_identification_headers))
+		.layer(headers::add_version_header(!opt.no_identification_headers))
 		.layer(
 			CorsLayer::new()
 				.allow_methods([
@@ -166,7 +170,7 @@ pub async fn init(ct: CancellationToken) -> Result<(), Error> {
 		.merge(signup::router())
 		.merge(key::router());
 
-	#[cfg(any(feature = "ml", feature = "ml2"))]
+	#[cfg(feature = "ml")]
 	let axum_app = axum_app.merge(ml::router());
 
 	let axum_app = axum_app.layer(service);

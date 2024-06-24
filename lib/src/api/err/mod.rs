@@ -8,6 +8,7 @@ use crate::sql::Value;
 use serde::Serialize;
 use std::io;
 use std::path::PathBuf;
+use surrealdb_core::dbs::capabilities::{ParseFuncTargetError, ParseNetTargetError};
 use thiserror::Error;
 
 /// An error originating from a remote SurrealDB database
@@ -194,6 +195,36 @@ pub enum Error {
 	/// Called `Response::take` or `Response::stream` on a query response more than once
 	#[error("Tried to take a query response that has already been taken")]
 	ResponseAlreadyTaken,
+
+	/// Tried to insert on an object
+	#[error("Insert queries on objects not supported: {0}")]
+	InsertOnObject(Object),
+
+	/// Tried to insert on an array
+	#[error("Insert queries on arrays not supported: {0}")]
+	InsertOnArray(Array),
+
+	/// Tried to insert on an edge or edges
+	#[error("Insert queries on edges not supported: {0}")]
+	InsertOnEdges(Edges),
+
+	#[error("{0}")]
+	InvalidNetTarget(#[from] ParseNetTargetError),
+
+	#[error("{0}")]
+	InvalidFuncTarget(#[from] ParseFuncTargetError),
+}
+
+impl From<ParseNetTargetError> for crate::Error {
+	fn from(e: ParseNetTargetError) -> Self {
+		Self::Api(Error::from(e))
+	}
+}
+
+impl From<ParseFuncTargetError> for crate::Error {
+	fn from(e: ParseFuncTargetError) -> Self {
+		Self::Api(Error::from(e))
+	}
 }
 
 #[cfg(feature = "protocol-http")]

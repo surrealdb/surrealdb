@@ -2,6 +2,7 @@ mod parse;
 use parse::Parse;
 mod helpers;
 use helpers::new_ds;
+use helpers::skip_ok;
 use surrealdb::dbs::Session;
 use surrealdb::err::Error;
 use surrealdb::sql::Value;
@@ -414,10 +415,10 @@ async fn select_multi_aggregate() -> Result<(), Error> {
 								'math::mean'
 							],
 							one: [
-								'math::sun'
+								'math::sum'
 							],
 							two: [
-								'math::sun'
+								'math::sum'
 							]
 						},
 						type: 'Group'
@@ -566,10 +567,10 @@ async fn select_multi_aggregate_composed() -> Result<(), Error> {
 								'first'
 							],
 							one: [
-								'math::sun'
+								'math::sum'
 							],
 							two: [
-								'math::sun'
+								'math::sum'
 							]
 						},
 						type: 'Group'
@@ -577,6 +578,97 @@ async fn select_multi_aggregate_composed() -> Result<(), Error> {
 					operation: 'Collector'
 				}
 			]",
+	);
+	assert_eq!(format!("{tmp:#}"), format!("{val:#}"));
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn select_array_group_group_by() -> Result<(), Error> {
+	let sql = "
+		CREATE test:1 SET user = 1, role = 1;
+        CREATE test:2 SET user = 1, role = 2;
+        CREATE test:3 SET user = 2, role = 1;
+        CREATE test:4 SET user = 2, role = 2;
+        SELECT user, array::group(role) FROM test GROUP BY user;
+	";
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let mut res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 5);
+	//
+	skip_ok(&mut res, 4)?;
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		r#"[
+                {
+                        "array::group": [
+                                1,2
+                        ],
+                        user: 1
+                },
+                {
+                        "array::group": [
+                                1,2
+                        ],
+                        user: 2
+                }
+        ]"#,
+	);
+	assert_eq!(format!("{tmp:#}"), format!("{val:#}"));
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn select_array_count_subquery_group_by() -> Result<(), Error> {
+	let sql = r#"
+		CREATE table CONTENT { bar: "hello", foo: "Man"};
+		CREATE table CONTENT { bar: "hello", foo: "World"};
+		CREATE table CONTENT { bar: "world"};
+		SELECT COUNT(foo != none) FROM table GROUP ALL EXPLAIN;
+		SELECT COUNT(foo != none) FROM table GROUP ALL;
+	"#;
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let mut res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 5);
+	//
+	skip_ok(&mut res, 3)?;
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		r#"[
+				{
+					detail: {
+						table: 'table'
+					},
+					operation: 'Iterate Table'
+				},
+				{
+					detail: {
+						idioms: {
+							count: [
+								'count+func'
+							]
+						},
+						type: 'Group'
+					},
+					operation: 'Collector'
+				}
+			]"#,
+	);
+	assert_eq!(format!("{tmp:#}"), format!("{val:#}"));
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		r#"[
+					{
+						count: 2
+					}
+				]"#,
 	);
 	assert_eq!(format!("{tmp:#}"), format!("{val:#}"));
 	//

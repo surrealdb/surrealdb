@@ -16,7 +16,6 @@ use crate::iam::Level;
 use crate::kvs::Datastore;
 use crate::opt::auth::Root;
 use crate::opt::WaitFor;
-#[cfg(feature = "sql2")]
 use crate::options::EngineOptions;
 use flume::Receiver;
 use flume::Sender;
@@ -28,7 +27,6 @@ use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::future::Future;
-use std::marker::PhantomData;
 use std::pin::Pin;
 use std::sync::atomic::AtomicI64;
 use std::sync::Arc;
@@ -65,15 +63,14 @@ impl Connection for Db {
 			features.insert(ExtraFeatures::Backup);
 			features.insert(ExtraFeatures::LiveQueries);
 
-			Ok(Surreal {
-				router: Arc::new(OnceLock::with_value(Router {
+			Ok(Surreal::new_from_router_waiter(
+				Arc::new(OnceLock::with_value(Router {
 					features,
 					sender: route_tx,
 					last_id: AtomicI64::new(0),
 				})),
-				waiter: Arc::new(watch::channel(Some(WaitFor::Connection))),
-				engine: PhantomData,
-			})
+				Arc::new(watch::channel(Some(WaitFor::Connection))),
+			))
 		})
 	}
 
@@ -147,27 +144,32 @@ pub(crate) fn router(
 			.with_transaction_timeout(address.config.transaction_timeout)
 			.with_capabilities(address.config.capabilities);
 
+		#[cfg(any(
+			feature = "kv-mem",
+			feature = "kv-surrealkv",
+			feature = "kv-rocksdb",
+			feature = "kv-fdb",
+			feature = "kv-tikv",
+		))]
+		let kvs = match address.config.temporary_directory {
+			Some(tmp_dir) => kvs.with_temporary_directory(tmp_dir),
+			_ => kvs,
+		};
+
 		let kvs = Arc::new(kvs);
 		let mut vars = BTreeMap::new();
 		let mut live_queries = HashMap::new();
 		let mut session = Session::default().with_rt(true);
 
-		#[cfg(feature = "sql2")]
 		let opt = {
-			let tick_interval = address
+			let mut engine_options = EngineOptions::default();
+			engine_options.tick_interval = address
 				.config
 				.tick_interval
 				.unwrap_or(crate::api::engine::local::DEFAULT_TICK_INTERVAL);
-			EngineOptions {
-				tick_interval,
-				..Default::default()
-			}
+			engine_options
 		};
-		let (tasks, task_chans) = start_tasks(
-			#[cfg(feature = "sql2")]
-			&opt,
-			kvs.clone(),
-		);
+		let (tasks, task_chans) = start_tasks(&opt, kvs.clone());
 
 		let mut notifications = kvs.notifications();
 		let notification_stream = poll_fn(move |cx| match &mut notifications {

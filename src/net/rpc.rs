@@ -5,8 +5,7 @@ use crate::cnf;
 use crate::dbs::DB;
 use crate::err::Error;
 use crate::rpc::connection::Connection;
-use crate::rpc::format::Format;
-use crate::rpc::format::PROTOCOLS;
+use crate::rpc::format::HttpFormat;
 use crate::rpc::post_context::PostRpcContext;
 use crate::rpc::response::IntoRpcResponse;
 use crate::rpc::WEBSOCKETS;
@@ -22,6 +21,8 @@ use bytes::Bytes;
 use http::HeaderValue;
 
 use surrealdb::dbs::Session;
+use surrealdb::rpc::format::Format;
+use surrealdb::rpc::format::PROTOCOLS;
 use surrealdb::rpc::method::Method;
 use tower_http::request_id::RequestId;
 use uuid::Uuid;

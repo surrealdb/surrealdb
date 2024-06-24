@@ -1,32 +1,36 @@
 use crate::ctx::Context;
-use crate::dbs::{Options, Transaction};
+use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::sql::value::Value;
 use derive::Store;
+use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
-#[cfg(any(feature = "ml", feature = "ml2"))]
+#[cfg(feature = "ml")]
 use crate::iam::Action;
-#[cfg(any(feature = "ml", feature = "ml2"))]
+#[cfg(feature = "ml")]
+use crate::ml::errors::error::SurrealError;
+#[cfg(feature = "ml")]
 use crate::ml::execution::compute::ModelComputation;
-#[cfg(any(feature = "ml", feature = "ml2"))]
+#[cfg(feature = "ml")]
 use crate::ml::storage::surml_file::SurMlFile;
-#[cfg(any(feature = "ml", feature = "ml2"))]
+#[cfg(feature = "ml")]
 use crate::sql::Permission;
-#[cfg(any(feature = "ml", feature = "ml2"))]
+#[cfg(feature = "ml")]
 use futures::future::try_join_all;
-#[cfg(any(feature = "ml", feature = "ml2"))]
+#[cfg(feature = "ml")]
 use std::collections::HashMap;
 
-#[cfg(any(feature = "ml", feature = "ml2"))]
+#[cfg(feature = "ml")]
 const ARGUMENTS: &str = "The model expects 1 argument. The argument can be either a number, an object, or an array of numbers.";
 
+#[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[revisioned(revision = 1)]
+#[non_exhaustive]
 pub struct Model {
 	pub name: String,
 	pub version: String,
@@ -47,12 +51,12 @@ impl fmt::Display for Model {
 }
 
 impl Model {
-	#[cfg(any(feature = "ml", feature = "ml2"))]
+	#[cfg(feature = "ml")]
 	pub(crate) async fn compute(
 		&self,
+		stk: &mut Stk,
 		ctx: &Context<'_>,
 		opt: &Options,
-		txn: &Transaction,
 		doc: Option<&CursorDoc<'_>>,
 	) -> Result<Value, Error> {
 		// Ensure futures are run
@@ -64,21 +68,24 @@ impl Model {
 		// Get the model definition
 		let val = {
 			// Claim transaction
-			let mut run = txn.lock().await;
+			let mut run = ctx.tx_lock().await;
 			// Get the function definition
-			run.get_and_cache_db_model(opt.ns(), opt.db(), &self.name, &self.version).await?
+			let val =
+				run.get_and_cache_db_model(opt.ns()?, opt.db()?, &self.name, &self.version).await?;
+			drop(run);
+			val
 		};
 		// Calculate the model path
 		let path = format!(
 			"ml/{}/{}/{}-{}-{}.surml",
-			opt.ns(),
-			opt.db(),
+			opt.ns()?,
+			opt.db()?,
 			self.name,
 			self.version,
 			val.hash
 		);
 		// Check permissions
-		if opt.check_perms(Action::View) {
+		if opt.check_perms(Action::View)? {
 			match &val.permissions {
 				Permission::Full => (),
 				Permission::None => {
@@ -90,7 +97,7 @@ impl Model {
 					// Disable permissions
 					let opt = &opt.new_with_perms(false);
 					// Process the PERMISSION clause
-					if !e.compute(ctx, opt, txn, doc).await?.is_truthy() {
+					if !stk.run(|stk| e.compute(stk, ctx, opt, doc)).await?.is_truthy() {
 						return Err(Error::FunctionPermissions {
 							name: self.name.to_owned(),
 						});
@@ -99,8 +106,11 @@ impl Model {
 			}
 		}
 		// Compute the function arguments
-		let mut args =
-			try_join_all(self.args.iter().map(|v| v.compute(ctx, opt, txn, doc))).await?;
+		let mut args = stk
+			.scope(|stk| {
+				try_join_all(self.args.iter().map(|v| stk.run(|stk| v.compute(stk, ctx, opt, doc))))
+			})
+			.await?;
 		// Check the minimum argument length
 		if args.len() != 1 {
 			return Err(Error::InvalidArguments {
@@ -125,11 +135,15 @@ impl Model {
 				let bytes = crate::obs::get(&path).await?;
 				// Run the compute in a blocking task
 				let outcome = tokio::task::spawn_blocking(move || {
-					let mut file = SurMlFile::from_bytes(bytes).unwrap();
+					let mut file = SurMlFile::from_bytes(bytes).map_err(|err: SurrealError| {
+						Error::ModelComputation(err.message.to_string())
+					})?;
 					let compute_unit = ModelComputation {
 						surml_file: &mut file,
 					};
-					compute_unit.buffered_compute(&mut args).map_err(Error::ModelComputation)
+					compute_unit.buffered_compute(&mut args).map_err(|err: SurrealError| {
+						Error::ModelComputation(err.message.to_string())
+					})
 				})
 				.await
 				.unwrap()?;
@@ -149,11 +163,15 @@ impl Model {
 				let tensor = ndarray::arr1::<f32>(&[args]).into_dyn();
 				// Run the compute in a blocking task
 				let outcome = tokio::task::spawn_blocking(move || {
-					let mut file = SurMlFile::from_bytes(bytes).unwrap();
+					let mut file = SurMlFile::from_bytes(bytes).map_err(|err: SurrealError| {
+						Error::ModelComputation(err.message.to_string())
+					})?;
 					let compute_unit = ModelComputation {
 						surml_file: &mut file,
 					};
-					compute_unit.raw_compute(tensor, None).map_err(Error::ModelComputation)
+					compute_unit.raw_compute(tensor, None).map_err(|err: SurrealError| {
+						Error::ModelComputation(err.message.to_string())
+					})
 				})
 				.await
 				.unwrap()?;
@@ -177,11 +195,15 @@ impl Model {
 				let tensor = ndarray::arr1::<f32>(&args).into_dyn();
 				// Run the compute in a blocking task
 				let outcome = tokio::task::spawn_blocking(move || {
-					let mut file = SurMlFile::from_bytes(bytes).unwrap();
+					let mut file = SurMlFile::from_bytes(bytes).map_err(|err: SurrealError| {
+						Error::ModelComputation(err.message.to_string())
+					})?;
 					let compute_unit = ModelComputation {
 						surml_file: &mut file,
 					};
-					compute_unit.raw_compute(tensor, None).map_err(Error::ModelComputation)
+					compute_unit.raw_compute(tensor, None).map_err(|err: SurrealError| {
+						Error::ModelComputation(err.message.to_string())
+					})
 				})
 				.await
 				.unwrap()?;
@@ -196,12 +218,12 @@ impl Model {
 		}
 	}
 
-	#[cfg(not(any(feature = "ml", feature = "ml2")))]
+	#[cfg(not(feature = "ml"))]
 	pub(crate) async fn compute(
 		&self,
+		_stk: &mut Stk,
 		_ctx: &Context<'_>,
 		_opt: &Options,
-		_txn: &Transaction,
 		_doc: Option<&CursorDoc<'_>>,
 	) -> Result<Value, Error> {
 		Err(Error::InvalidModel {

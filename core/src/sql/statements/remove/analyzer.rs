@@ -1,5 +1,5 @@
 use crate::ctx::Context;
-use crate::dbs::{Options, Transaction};
+use crate::dbs::Options;
 use crate::err::Error;
 use crate::iam::{Action, ResourceKind};
 use crate::sql::{Base, Ident, Value};
@@ -8,9 +8,10 @@ use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Formatter};
 
+#[revisioned(revision = 2)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[revisioned(revision = 2)]
+#[non_exhaustive]
 pub struct RemoveAnalyzerStatement {
 	pub name: Ident,
 	#[revision(start = 2)]
@@ -18,30 +19,25 @@ pub struct RemoveAnalyzerStatement {
 }
 
 impl RemoveAnalyzerStatement {
-	pub(crate) async fn compute(
-		&self,
-		_ctx: &Context<'_>,
-		opt: &Options,
-		txn: &Transaction,
-	) -> Result<Value, Error> {
-		match async {
+	pub(crate) async fn compute(&self, ctx: &Context<'_>, opt: &Options) -> Result<Value, Error> {
+		let future = async {
 			// Allowed to run?
 			opt.is_allowed(Action::Edit, ResourceKind::Analyzer, &Base::Db)?;
 			// Claim transaction
-			let mut run = txn.lock().await;
+			let mut run = ctx.tx_lock().await;
 			// Clear the cache
 			run.clear_cache();
 			// Get the definition
-			let az = run.get_db_analyzer(opt.ns(), opt.db(), &self.name).await?;
+			let az = run.get_db_analyzer(opt.ns()?, opt.db()?, &self.name).await?;
 			// Delete the definition
-			let key = crate::key::database::az::new(opt.ns(), opt.db(), &az.name);
+			let key = crate::key::database::az::new(opt.ns()?, opt.db()?, &az.name);
 			run.del(key).await?;
 			// TODO Check that the analyzer is not used in any schema
 			// Ok all good
 			Ok(Value::None)
 		}
-		.await
-		{
+		.await;
+		match future {
 			Err(Error::AzNotFound {
 				..
 			}) if self.if_exists => Ok(Value::None),

@@ -1,17 +1,19 @@
 use crate::ctx::Context;
-use crate::dbs::{Options, Transaction};
+use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::sql::fmt::{fmt_separated_by, is_pretty, pretty_indent, Fmt, Pretty};
 use crate::sql::Value;
 use derive::Store;
+use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Write};
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[revisioned(revision = 1)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
+#[non_exhaustive]
 pub struct IfelseStatement {
 	/// The first if condition followed by a body, followed by any number of else if's
 	pub exprs: Vec<(Value, Value)>,
@@ -38,19 +40,19 @@ impl IfelseStatement {
 	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
+		stk: &mut Stk,
 		ctx: &Context<'_>,
 		opt: &Options,
-		txn: &Transaction,
 		doc: Option<&CursorDoc<'_>>,
 	) -> Result<Value, Error> {
 		for (ref cond, ref then) in &self.exprs {
-			let v = cond.compute(ctx, opt, txn, doc).await?;
+			let v = cond.compute(stk, ctx, opt, doc).await?;
 			if v.is_truthy() {
-				return then.compute(ctx, opt, txn, doc).await;
+				return then.compute(stk, ctx, opt, doc).await;
 			}
 		}
 		match self.close {
-			Some(ref v) => v.compute(ctx, opt, txn, doc).await,
+			Some(ref v) => v.compute(stk, ctx, opt, doc).await,
 			None => Ok(Value::None),
 		}
 	}

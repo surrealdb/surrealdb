@@ -27,7 +27,6 @@ use flume::Receiver;
 use reqwest::ClientBuilder;
 use std::collections::HashSet;
 use std::future::Future;
-use std::marker::PhantomData;
 use std::pin::Pin;
 use std::sync::atomic::AtomicI64;
 use std::sync::Arc;
@@ -106,22 +105,6 @@ impl Connection for Any {
 					#[cfg(not(feature = "kv-rocksdb"))]
 					return Err(DbError::Ds(
 						"Cannot connect to the `rocksdb` storage engine as it is not enabled in this build of SurrealDB".to_owned(),
-					)
-					.into());
-				}
-
-				EndpointKind::SpeeDb => {
-					#[cfg(feature = "kv-speedb")]
-					{
-						features.insert(ExtraFeatures::Backup);
-						features.insert(ExtraFeatures::LiveQueries);
-						engine::local::native::router(address, conn_tx, route_rx);
-						conn_rx.into_recv_async().await??
-					}
-
-					#[cfg(not(feature = "kv-speedb"))]
-					return Err(DbError::Ds(
-						"Cannot connect to the `speedb` storage engine as it is not enabled in this build of SurrealDB".to_owned(),
 					)
 					.into());
 				}
@@ -231,15 +214,14 @@ impl Connection for Any {
 				EndpointKind::Unsupported(v) => return Err(Error::Scheme(v).into()),
 			}
 
-			Ok(Surreal {
-				router: Arc::new(OnceLock::with_value(Router {
+			Ok(Surreal::new_from_router_waiter(
+				Arc::new(OnceLock::with_value(Router {
 					features,
 					sender: route_tx,
 					last_id: AtomicI64::new(0),
 				})),
-				waiter: Arc::new(watch::channel(Some(WaitFor::Connection))),
-				engine: PhantomData,
-			})
+				Arc::new(watch::channel(Some(WaitFor::Connection))),
+			))
 		})
 	}
 

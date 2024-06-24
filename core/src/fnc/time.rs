@@ -244,7 +244,7 @@ pub mod from {
 	use crate::err::Error;
 	use crate::sql::datetime::Datetime;
 	use crate::sql::value::Value;
-	use chrono::{NaiveDateTime, Offset, TimeZone, Utc};
+	use chrono::DateTime;
 
 	pub fn nanos((val,): (i64,)) -> Result<Value, Error> {
 		const NANOS_PER_SEC: i64 = 1_000_000_000;
@@ -252,14 +252,8 @@ pub mod from {
 		let seconds = val.div_euclid(NANOS_PER_SEC);
 		let nanoseconds = val.rem_euclid(NANOS_PER_SEC) as u32;
 
-		match NaiveDateTime::from_timestamp_opt(seconds, nanoseconds) {
-			Some(v) => match Utc.fix().from_local_datetime(&v).earliest() {
-				Some(v) => Ok(Datetime::from(v.with_timezone(&Utc)).into()),
-				None => Err(Error::InvalidArguments {
-					name: String::from("time::from::nanos"),
-					message: String::from("The first argument must be an in-bounds number of nanoseconds relative to January 1, 1970 0:00:00 UTC."),
-				}),
-			}
+		match DateTime::from_timestamp(seconds, nanoseconds) {
+			Some(v) => Ok(Datetime::from(v).into()),
 			None => Err(Error::InvalidArguments {
 				name: String::from("time::from::nanos"),
 				message: String::from("The first argument must be an in-bounds number of nanoseconds relative to January 1, 1970 0:00:00 UTC."),
@@ -268,14 +262,8 @@ pub mod from {
 	}
 
 	pub fn micros((val,): (i64,)) -> Result<Value, Error> {
-		match NaiveDateTime::from_timestamp_micros(val) {
-			Some(v) => match Utc.fix().from_local_datetime(&v).earliest() {
-				Some(v) => Ok(Datetime::from(v.with_timezone(&Utc)).into()),
-				None => Err(Error::InvalidArguments {
-					name: String::from("time::from::micros"),
-					message: String::from("The first argument must be an in-bounds number of microseconds relative to January 1, 1970 0:00:00 UTC."),
-				}),
-			}
+		match DateTime::from_timestamp_micros(val) {
+			Some(v) => Ok(Datetime::from(v).into()),
 			None => Err(Error::InvalidArguments {
 				name: String::from("time::from::micros"),
 				message: String::from("The first argument must be an in-bounds number of microseconds relative to January 1, 1970 0:00:00 UTC."),
@@ -284,14 +272,8 @@ pub mod from {
 	}
 
 	pub fn millis((val,): (i64,)) -> Result<Value, Error> {
-		match NaiveDateTime::from_timestamp_millis(val) {
-			Some(v) => match Utc.fix().from_local_datetime(&v).earliest() {
-				Some(v) => Ok(Datetime::from(v.with_timezone(&Utc)).into()),
-				None => Err(Error::InvalidArguments {
-					name: String::from("time::from::millis"),
-					message: String::from("The first argument must be an in-bounds number of milliseconds relative to January 1, 1970 0:00:00 UTC."),
-				}),
-			}
+		match DateTime::from_timestamp_millis(val) {
+			Some(v) => Ok(Datetime::from(v).into()),
 			None => Err(Error::InvalidArguments {
 				name: String::from("time::from::millis"),
 				message: String::from("The first argument must be an in-bounds number of milliseconds relative to January 1, 1970 0:00:00 UTC."),
@@ -300,14 +282,8 @@ pub mod from {
 	}
 
 	pub fn secs((val,): (i64,)) -> Result<Value, Error> {
-		match NaiveDateTime::from_timestamp_opt(val, 0) {
-			Some(v) => match Utc.fix().from_local_datetime(&v).earliest() {
-				Some(v) => Ok(Datetime::from(v.with_timezone(&Utc)).into()),
-				None => Err(Error::InvalidArguments {
-					name: String::from("time::from::secs"),
-					message: String::from("The first argument must be an in-bounds number of seconds relative to January 1, 1970 0:00:00 UTC."),
-				}),
-			}
+		match DateTime::from_timestamp(val, 0) {
+			Some(v) => Ok(Datetime::from(v).into()),
 			None => Err(Error::InvalidArguments {
 				name: String::from("time::from::secs"),
 				message: String::from("The first argument must be an in-bounds number of seconds relative to January 1, 1970 0:00:00 UTC."),
@@ -316,14 +292,8 @@ pub mod from {
 	}
 
 	pub fn unix((val,): (i64,)) -> Result<Value, Error> {
-		match NaiveDateTime::from_timestamp_opt(val, 0) {
-			Some(v) => match Utc.fix().from_local_datetime(&v).earliest() {
-				Some(v) => Ok(Datetime::from(v.with_timezone(&Utc)).into()),
-				None => Err(Error::InvalidArguments {
-					name: String::from("time::from::unix"),
-					message: String::from("The first argument must be an in-bounds number of seconds relative to January 1, 1970 0:00:00 UTC."),
-				}),
-			}
+		match DateTime::from_timestamp(val, 0) {
+			Some(v) => Ok(Datetime::from(v).into()),
 			None => Err(Error::InvalidArguments {
 				name: String::from("time::from::unix"),
 				message: String::from("The first argument must be an in-bounds number of seconds relative to January 1, 1970 0:00:00 UTC."),

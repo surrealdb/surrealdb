@@ -10,7 +10,7 @@ use std::task::{Context, Poll};
 pin_project! {
 	/// Future for the [`try_join_all_buffered`] function.
 	#[must_use = "futures do nothing unless you `.await` or poll them"]
-	pub struct TryJoinAllBuffered<F, I>
+	#[non_exhaustive] pub struct TryJoinAllBuffered<F, I>
 	where
 		F: TryFuture,
 		I: Iterator<Item = F>,

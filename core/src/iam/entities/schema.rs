@@ -16,7 +16,7 @@ pub static DEFAULT_CEDAR_SCHEMA: Lazy<serde_json::Value> = Lazy::new(|| {
 					},
 				},
 				"entityTypes": {
-					// Represents the Root, Namespace, Database and Scope levels
+					// Represents the Root, Namespace, Database and Record levels
 					"Level": {
 						"shape": {
 							"type": "Record",
@@ -24,7 +24,7 @@ pub static DEFAULT_CEDAR_SCHEMA: Lazy<serde_json::Value> = Lazy::new(|| {
 								"type": { "type": "String", "required": true },
 								"ns": { "type": "String", "required": false },
 								"db": { "type": "String", "required": false },
-								"scope": { "type": "String", "required": false },
+								"rid": { "type": "String", "required": false },
 								"table": { "type": "String", "required": false },
 								"level" : { "type": "Entity", "name": "Level", "required": true },
 							}
@@ -36,7 +36,7 @@ pub static DEFAULT_CEDAR_SCHEMA: Lazy<serde_json::Value> = Lazy::new(|| {
 					"Any": {"shape": {"type": "Resource"}, "memberOfTypes": ["Level"]},
 					"Namespace": {"shape": {"type": "Resource"}, "memberOfTypes": ["Level"]},
 					"Database": {"shape": {"type": "Resource"}, "memberOfTypes": ["Level"]},
-					"Scope": {"shape": {"type": "Resource"}, "memberOfTypes": ["Level"]},
+					"Record": {"shape": {"type": "Resource"}, "memberOfTypes": ["Level"]},
 					"Table": {"shape": {"type": "Resource"}, "memberOfTypes": ["Level"]},
 					"Document": {"shape": {"type": "Resource"}, "memberOfTypes": ["Level"]},
 					"Option": {"shape": {"type": "Resource"}, "memberOfTypes": ["Level"]},
@@ -65,14 +65,14 @@ pub static DEFAULT_CEDAR_SCHEMA: Lazy<serde_json::Value> = Lazy::new(|| {
 					"View": {
 						"appliesTo": {
 							"principalTypes": [ "Actor" ],
-							"resourceTypes": [ "Any", "Namespace", "Database", "Scope", "Table", "Document", "Option", "Function", "Analyzer", "Parameter", "Event", "Field", "Index", "Actor" ],
+							"resourceTypes": [ "Any", "Namespace", "Database", "Record", "Table", "Document", "Option", "Function", "Analyzer", "Parameter", "Event", "Field", "Index", "Actor" ],
 
 						},
 					},
 					"Edit": {
 						"appliesTo": {
 							"principalTypes": [ "Actor" ],
-							"resourceTypes": [ "Any", "Namespace", "Database", "Scope", "Table", "Document", "Option", "Function", "Analyzer", "Parameter", "Event", "Field", "Index", "Actor" ],
+							"resourceTypes": [ "Any", "Namespace", "Database", "Record", "Table", "Document", "Option", "Function", "Analyzer", "Parameter", "Event", "Field", "Index", "Actor" ],
 						},
 					},
 				},

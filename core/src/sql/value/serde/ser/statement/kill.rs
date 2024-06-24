@@ -7,6 +7,7 @@ use serde::ser::Error as _;
 use serde::ser::Impossible;
 use serde::ser::Serialize;
 
+#[non_exhaustive]
 pub struct Serializer;
 
 impl ser::Serializer for Serializer {
@@ -34,6 +35,7 @@ impl ser::Serializer for Serializer {
 }
 
 #[derive(Default)]
+#[non_exhaustive]
 pub struct SerializeKillStatement {
 	id: Option<Value>,
 }
@@ -70,7 +72,6 @@ impl serde::ser::SerializeStruct for SerializeKillStatement {
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::sql::statements::kill::KillStatement;
 
 	#[test]
 	fn default() {

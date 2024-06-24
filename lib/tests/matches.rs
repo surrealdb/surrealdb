@@ -1,6 +1,7 @@
 mod parse;
 use parse::Parse;
 mod helpers;
+use crate::helpers::skip_ok;
 use helpers::new_ds;
 use surrealdb::dbs::Session;
 use surrealdb::err::Error;
@@ -20,9 +21,8 @@ async fn select_where_matches_using_index() -> Result<(), Error> {
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 5);
 	//
-	let _ = res.remove(0).result?;
-	let _ = res.remove(0).result?;
-	let _ = res.remove(0).result?;
+	skip_ok(res, 3)?;
+	//
 	let tmp = res.remove(0).result?;
 	let val = Value::parse(
 		"[
@@ -37,11 +37,11 @@ async fn select_where_matches_using_index() -> Result<(), Error> {
 						},
 						operation: 'Iterate Index'
 					},
-						{
-							detail: {
-								type: 'Store'
-							},
-							operation: 'Collector'
+					{
+						detail: {
+							type: 'Memory'
+						},
+						operation: 'Collector'
 					}
 			]",
 	);
@@ -74,10 +74,8 @@ async fn select_where_matches_without_using_index_iterator() -> Result<(), Error
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 6);
 	//
-	let _ = res.remove(0).result?;
-	let _ = res.remove(0).result?;
-	let _ = res.remove(0).result?;
-	let _ = res.remove(0).result?;
+	skip_ok(res, 4)?;
+	//
 	let tmp = res.remove(0).result?;
 	let val = Value::parse(
 		"[
@@ -89,7 +87,7 @@ async fn select_where_matches_without_using_index_iterator() -> Result<(), Error
 				},
 				{
 					detail: {
-						type: 'Store'
+						type: 'Memory'
 					},
 					operation: 'Collector'
 				},
@@ -135,9 +133,7 @@ async fn select_where_matches_using_index_and_arrays(parallel: bool) -> Result<(
 	let res = &mut dbs.execute(&sql, &ses, None).await?;
 	assert_eq!(res.len(), 5);
 	//
-	let _ = res.remove(0).result?;
-	let _ = res.remove(0).result?;
-	let _ = res.remove(0).result?;
+	skip_ok(res, 3)?;
 	//
 	let tmp = res.remove(0).result?;
 	let val = Value::parse(
@@ -155,7 +151,7 @@ async fn select_where_matches_using_index_and_arrays(parallel: bool) -> Result<(
 					},
 					{
 						detail: {
-							type: 'Store'
+							type: 'Memory'
 						},
 						operation: 'Collector'
 					}
@@ -205,12 +201,10 @@ async fn select_where_matches_partial_highlight() -> Result<(), Error> {
 	";
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None).await?;
+	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 9);
 	//
-	for _ in 0..3 {
-		let _ = res.remove(0).result?;
-	}
+	skip_ok(res, 3)?;
 	//
 	for i in 0..2 {
 		let tmp = res.remove(0).result?;
@@ -276,6 +270,91 @@ async fn select_where_matches_partial_highlight() -> Result<(), Error> {
 	Ok(())
 }
 
+#[tokio::test]
+async fn select_where_matches_partial_highlight_ngram() -> Result<(), Error> {
+	let sql = r"
+		CREATE blog:1 SET content = 'Hello World!';
+		DEFINE ANALYZER simple TOKENIZERS blank,class FILTERS lowercase,ngram(1,32);
+		DEFINE INDEX blog_content ON blog FIELDS content SEARCH ANALYZER simple BM25 HIGHLIGHTS;
+		SELECT id, search::highlight('<em>', '</em>', 1) AS content FROM blog WHERE content @1@ 'Hello';
+		SELECT id, search::highlight('<em>', '</em>', 1) AS content FROM blog WHERE content @1@ 'el';
+		SELECT id, search::highlight('<em>', '</em>', 1, false) AS content FROM blog WHERE content @1@ 'el';
+		SELECT id, search::highlight('<em>', '</em>', 1, true) AS content FROM blog WHERE content @1@ 'el';
+		SELECT id, search::offsets(1) AS content FROM blog WHERE content @1@ 'el';
+		SELECT id, search::offsets(1, false) AS content FROM blog WHERE content @1@ 'el';
+		SELECT id, search::offsets(1, true) AS content FROM blog WHERE content @1@ 'el';
+	";
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 10);
+	//
+	skip_ok(res, 3)?;
+	//
+	for i in 0..3 {
+		let tmp = res.remove(0).result?;
+		let val = Value::parse(
+			"[
+			{
+				id: blog:1,
+				content: '<em>Hello</em> World!'
+			}
+		]",
+		);
+		assert_eq!(format!("{:#}", tmp), format!("{:#}", val), "{i}");
+	}
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
+			{
+				id: blog:1,
+				content: 'H<em>el</em>lo World!'
+			}
+		]",
+	);
+	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+	//
+	for i in 0..2 {
+		let tmp = res.remove(0).result?;
+		let val = Value::parse(
+			"[
+					{
+						content: {
+							0: [
+								{
+									e: 5,
+									s: 0
+								}
+							]
+						},
+						id: blog:1
+					}
+				]",
+		);
+		assert_eq!(format!("{:#}", tmp), format!("{:#}", val), "{i}");
+	}
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
+					{
+						content: {
+							0: [
+								{
+									e: 3,
+									s: 1
+								}
+							]
+						},
+						id: blog:1
+					}
+				]",
+	);
+	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+	Ok(())
+}
+
 async fn select_where_matches_using_index_and_objects(parallel: bool) -> Result<(), Error> {
 	let p = if parallel {
 		"PARALLEL"
@@ -296,9 +375,7 @@ async fn select_where_matches_using_index_and_objects(parallel: bool) -> Result<
 	let res = &mut dbs.execute(&sql, &ses, None).await?;
 	assert_eq!(res.len(), 5);
 	//
-	let _ = res.remove(0).result?;
-	let _ = res.remove(0).result?;
-	let _ = res.remove(0).result?;
+	skip_ok(res, 3)?;
 	//
 	let tmp = res.remove(0).result?;
 	let val = Value::parse(
@@ -316,7 +393,7 @@ async fn select_where_matches_using_index_and_objects(parallel: bool) -> Result<
 					},
 					{
 						detail: {
-							type: 'Store'
+							type: 'Memory'
 						},
 						operation: 'Collector'
 					}
@@ -366,9 +443,8 @@ async fn select_where_matches_using_index_offsets() -> Result<(), Error> {
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 5);
 	//
-	for _ in 0..4 {
-		let _ = res.remove(0).result?;
-	}
+	skip_ok(res, 4)?;
+	//
 	let tmp = res.remove(0).result?;
 	let val = Value::parse(
 		"[
@@ -404,9 +480,8 @@ async fn select_where_matches_using_index_and_score() -> Result<(), Error> {
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 7);
 	//
-	for _ in 0..6 {
-		let _ = res.remove(0).result?;
-	}
+	skip_ok(res, 6)?;
+	//
 	let tmp = res.remove(0).result?;
 	let val = Value::parse(
 		"[
@@ -442,10 +517,8 @@ async fn select_where_matches_without_using_index_and_score() -> Result<(), Erro
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 9);
 	//
-	for _ in 0..7 {
-		let _ = res.remove(0).result?;
-	}
-
+	skip_ok(res, 7)?;
+	//
 	let tmp = res.remove(0).result?;
 	let val = Value::parse(
 		"[
@@ -492,10 +565,8 @@ async fn select_where_matches_without_complex_query() -> Result<(), Error> {
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 10);
 	//
-	for _ in 0..6 {
-		let _ = res.remove(0).result?;
-	}
-
+	skip_ok(res, 6)?;
+	//
 	let tmp = res.remove(0).result?;
 	let val_docs = Value::parse(
 		"[
@@ -551,7 +622,7 @@ async fn select_where_matches_without_complex_query() -> Result<(), Error> {
 			},
 			{
 				detail: {
-					type: 'Store'
+					type: 'Memory'
 				},
 				operation: 'Collector'
 			}
@@ -564,5 +635,72 @@ async fn select_where_matches_without_complex_query() -> Result<(), Error> {
 
 	let tmp = res.remove(0).result?;
 	assert_eq!(format!("{:#}", tmp), format!("{:#}", val_docs));
+	Ok(())
+}
+
+#[tokio::test]
+async fn select_where_matches_mixing_indexes() -> Result<(), Error> {
+	let sql = r"
+		DEFINE ANALYZER edgeNgram TOKENIZERS class FILTERS lowercase,ascii,edgeNgram(1,10);
+		DEFINE INDEX idxPersonName ON TABLE person COLUMNS name SEARCH ANALYZER edgeNgram BM25;
+		DEFINE INDEX idxSecurityNumber ON TABLE person COLUMNS securityNumber UNIQUE;
+		CREATE person:1 content {name: 'Tobie', securityNumber: '123456'};
+		CREATE person:2 content {name: 'Jaime', securityNumber: 'ABCDEF'};
+		SELECT * FROM person WHERE name @@ 'Tobie' || securityNumber == '123456' EXPLAIN;
+		SELECT * FROM person WHERE name @@ 'Tobie' || securityNumber == '123456';
+	";
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 7);
+	//
+	skip_ok(res, 5)?;
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
+				{
+					detail: {
+						plan: {
+							index: 'idxPersonName',
+							operator: '@@',
+							value: 'Tobie'
+						},
+						table: 'person'
+					},
+					operation: 'Iterate Index'
+				},
+				{
+					detail: {
+						plan: {
+							index: 'idxSecurityNumber',
+							operator: '==',
+							value: '123456'
+						},
+						table: 'person'
+					},
+					operation: 'Iterate Index'
+				},
+				{
+					detail: {
+						type: 'Memory'
+					},
+					operation: 'Collector'
+				}
+			]",
+	);
+	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
+				{
+					id: person:1,
+					name: 'Tobie',
+					securityNumber: '123456'
+				}
+			]",
+	);
+	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
 	Ok(())
 }

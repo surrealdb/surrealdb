@@ -8,29 +8,35 @@ use surrealdb::sql::parse;
 pub struct ValidateCommandArguments {
 	#[arg(help = "Glob pattern for the files to validate")]
 	#[arg(default_value = "**/*.surql")]
-	pattern: String,
+	patterns: Vec<String>,
 }
 
 pub async fn init(args: ValidateCommandArguments) -> Result<(), Error> {
 	let ValidateCommandArguments {
-		pattern,
+		patterns,
 	} = args;
 
-	let entries = match glob(&pattern) {
-		Ok(entries) => entries,
-		Err(error) => {
-			eprintln!("Error parsing glob pattern {pattern}: {error}");
+	let mut entries = vec![];
 
-			return Err(Error::Io(IoError::new(
-				ErrorKind::Other,
-				format!("Error parsing glob pattern {pattern}: {error}"),
-			)));
-		}
-	};
+	for pattern in patterns {
+		let pattern_entries = match glob(&pattern) {
+			Ok(entries) => entries,
+			Err(error) => {
+				eprintln!("Error parsing glob pattern {pattern}: {error}");
+
+				return Err(Error::Io(IoError::new(
+					ErrorKind::Other,
+					format!("Error parsing glob pattern {pattern}: {error}"),
+				)));
+			}
+		};
+
+		entries.extend(pattern_entries.flatten());
+	}
 
 	let mut has_entries = false;
 
-	for entry in entries.flatten() {
+	for entry in entries {
 		let file_content = tokio::fs::read_to_string(entry.clone()).await?;
 		let parse_result = parse(&file_content);
 
@@ -50,12 +56,8 @@ pub async fn init(args: ValidateCommandArguments) -> Result<(), Error> {
 	}
 
 	if !has_entries {
-		eprintln!("No files found for pattern {pattern}");
-
-		return Err(Error::Io(IoError::new(
-			ErrorKind::NotFound,
-			format!("No files found for pattern {pattern}"),
-		)));
+		eprintln!("No files found");
+		return Err(Error::Io(IoError::new(ErrorKind::NotFound, "No files found".to_string())));
 	}
 
 	Ok(())

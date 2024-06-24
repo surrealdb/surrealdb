@@ -1,7 +1,7 @@
 use rand::{thread_rng, Rng};
 use std::error::Error;
 use std::fs::File;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::{Command, ExitStatus, Stdio};
 use std::{env, fs};
 use tokio::time;
@@ -146,22 +146,24 @@ pub fn tmp_file(name: &str) -> String {
 }
 
 pub struct StartServerArguments {
+	pub path: Option<String>,
 	pub auth: bool,
 	pub tls: bool,
 	pub wait_is_ready: bool,
-	pub enable_auth_level: bool,
 	pub tick_interval: time::Duration,
+	pub temporary_directory: Option<String>,
 	pub args: String,
 }
 
 impl Default for StartServerArguments {
 	fn default() -> Self {
 		Self {
+			path: None,
 			auth: true,
 			tls: false,
 			wait_is_ready: true,
-			enable_auth_level: false,
 			tick_interval: time::Duration::new(1, 0),
+			temporary_directory: None,
 			args: "--allow-all".to_string(),
 		}
 	}
@@ -175,29 +177,34 @@ pub async fn start_server_without_auth() -> Result<(String, Child), Box<dyn Erro
 	.await
 }
 
-pub async fn start_server_with_auth_level() -> Result<(String, Child), Box<dyn Error>> {
+pub async fn start_server_with_defaults() -> Result<(String, Child), Box<dyn Error>> {
+	start_server(StartServerArguments::default()).await
+}
+
+pub async fn start_server_with_temporary_directory(
+	path: &str,
+) -> Result<(String, Child), Box<dyn Error>> {
 	start_server(StartServerArguments {
-		enable_auth_level: true,
+		temporary_directory: Some(path.to_string()),
 		..Default::default()
 	})
 	.await
 }
 
-pub async fn start_server_with_defaults() -> Result<(String, Child), Box<dyn Error>> {
-	start_server(StartServerArguments::default()).await
-}
-
 pub async fn start_server(
 	StartServerArguments {
+		path,
 		auth,
 		tls,
 		wait_is_ready,
-		enable_auth_level,
 		tick_interval,
+		temporary_directory,
 		args,
 	}: StartServerArguments,
 ) -> Result<(String, Child), Box<dyn Error>> {
 	let mut rng = thread_rng();
+
+	let path = path.unwrap_or("memory".to_string());
 
 	let mut extra_args = args.clone();
 	if tls {
@@ -212,12 +219,8 @@ pub async fn start_server(
 		extra_args.push_str(format!(" --web-crt {crt_path} --web-key {key_path}").as_str());
 	}
 
-	if auth {
-		extra_args.push_str(" --auth");
-	}
-
-	if enable_auth_level {
-		extra_args.push_str(" --auth-level-enabled");
+	if !auth {
+		extra_args.push_str(" --unauthenticated");
 	}
 
 	if !tick_interval.is_zero() {
@@ -225,11 +228,15 @@ pub async fn start_server(
 		extra_args.push_str(format!(" --tick-interval {sec}s").as_str());
 	}
 
+	if let Some(path) = temporary_directory {
+		extra_args.push_str(format!(" --temporary-directory {path}").as_str());
+	}
+
 	'retry: for _ in 0..3 {
 		let port: u16 = rng.gen_range(13000..24000);
 		let addr = format!("127.0.0.1:{port}");
 
-		let start_args = format!("start --bind {addr} memory --no-banner --log trace --user {USER} --pass {PASS} {extra_args}");
+		let start_args = format!("start --bind {addr} {path} --no-banner --log trace --user {USER} --pass {PASS} {extra_args}");
 
 		info!("starting server with args: {start_args}");
 

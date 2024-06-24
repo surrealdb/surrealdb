@@ -8,6 +8,7 @@ use ser::Serializer as _;
 use serde::ser::Impossible;
 use serde::ser::Serialize;
 
+#[non_exhaustive]
 pub struct Serializer;
 
 impl ser::Serializer for Serializer {
@@ -41,6 +42,7 @@ impl ser::Serializer for Serializer {
 	}
 }
 
+#[non_exhaustive]
 pub struct SerializeGroupVec(Vec<Group>);
 
 impl serde::ser::SerializeSeq for SerializeGroupVec {

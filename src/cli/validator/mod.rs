@@ -14,7 +14,6 @@ pub(crate) fn path_valid(v: &str) -> Result<String, String> {
 		"memory" => Ok(v.to_string()),
 		v if v.starts_with("file:") => Ok(v.to_string()),
 		v if v.starts_with("rocksdb:") => Ok(v.to_string()),
-		v if v.starts_with("speedb:") => Ok(v.to_string()),
 		v if v.starts_with("surrealkv:") => Ok(v.to_string()),
 		v if v.starts_with("tikv:") => Ok(v.to_string()),
 		v if v.starts_with("fdb:") => Ok(v.to_string()),
@@ -22,15 +21,28 @@ pub(crate) fn path_valid(v: &str) -> Result<String, String> {
 	}
 }
 
-pub(crate) fn file_exists(path: &str) -> Result<PathBuf, String> {
+pub(crate) fn path_exists(path: &str) -> Result<PathBuf, String> {
 	let path = Path::new(path);
 	if !*path.try_exists().as_ref().map_err(ToString::to_string)? {
-		return Err(String::from("Ensure the file exists"));
+		return Err(String::from("Ensure the path exists"));
 	}
+	Ok(path.to_owned())
+}
+
+pub(crate) fn file_exists(path: &str) -> Result<PathBuf, String> {
+	let path = path_exists(path)?;
 	if !path.is_file() {
 		return Err(String::from("Ensure the path is a file"));
 	}
-	Ok(path.to_owned())
+	Ok(path)
+}
+
+pub(crate) fn dir_exists(path: &str) -> Result<PathBuf, String> {
+	let path = path_exists(path)?;
+	if !path.is_dir() {
+		return Err(String::from("Ensure the path is a directory"));
+	}
+	Ok(path)
 }
 
 pub(crate) fn endpoint_valid(v: &str) -> Result<String, String> {
@@ -46,8 +58,8 @@ pub(crate) fn endpoint_valid(v: &str) -> Result<String, String> {
 
 	let scheme = split_endpoint(v).0;
 	match scheme {
-		"http" | "https" | "ws" | "wss" | "fdb" | "mem" | "rocksdb" | "speedb" | "surrealkv"
-		| "file" | "tikv" => Ok(v.to_string()),
+		"http" | "https" | "ws" | "wss" | "fdb" | "mem" | "rocksdb" | "surrealkv" | "file"
+		| "tikv" => Ok(v.to_string()),
 		_ => Err(String::from("Provide a valid database connection string")),
 	}
 }
@@ -73,7 +85,7 @@ pub(crate) fn net_targets(value: &str) -> Result<Targets<NetTarget>, String> {
 	let mut result = HashSet::new();
 
 	for target in value.split(',').filter(|s| !s.is_empty()) {
-		result.insert(NetTarget::from_str(target)?);
+		result.insert(NetTarget::from_str(target).map_err(|e| e.to_string())?);
 	}
 
 	Ok(Targets::Some(result))
@@ -87,7 +99,7 @@ pub(crate) fn func_targets(value: &str) -> Result<Targets<FuncTarget>, String> {
 	let mut result = HashSet::new();
 
 	for target in value.split(',').filter(|s| !s.is_empty()) {
-		result.insert(FuncTarget::from_str(target)?);
+		result.insert(FuncTarget::from_str(target).map_err(|e| e.to_string())?);
 	}
 
 	Ok(Targets::Some(result))

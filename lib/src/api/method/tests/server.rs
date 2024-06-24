@@ -4,7 +4,6 @@ use crate::api::conn::Method;
 use crate::api::conn::Route;
 use crate::api::Response as QueryResponse;
 use crate::sql::to_value;
-use crate::sql::Array;
 use crate::sql::Value;
 use flume::Receiver;
 use futures::StreamExt;
@@ -64,17 +63,28 @@ pub(super) fn mock(route_rx: Receiver<Option<Route>>) {
 				Method::Select | Method::Delete => match &params[..] {
 					[Value::Thing(..)] => Ok(DbResponse::Other(to_value(User::default()).unwrap())),
 					[Value::Table(..) | Value::Array(..) | Value::Range(..)] => {
-						Ok(DbResponse::Other(Value::Array(Array(Vec::new()))))
+						Ok(DbResponse::Other(Value::Array(Default::default())))
 					}
 					_ => unreachable!(),
 				},
-				Method::Update | Method::Merge | Method::Patch => match &params[..] {
-					[Value::Thing(..)] | [Value::Thing(..), _] => {
-						Ok(DbResponse::Other(to_value(User::default()).unwrap()))
+				Method::Upsert | Method::Update | Method::Merge | Method::Patch => {
+					match &params[..] {
+						[Value::Thing(..)] | [Value::Thing(..), _] => {
+							Ok(DbResponse::Other(to_value(User::default()).unwrap()))
+						}
+						[Value::Table(..) | Value::Array(..) | Value::Range(..)]
+						| [Value::Table(..) | Value::Array(..) | Value::Range(..), _] => {
+							Ok(DbResponse::Other(Value::Array(Default::default())))
+						}
+						_ => unreachable!(),
 					}
-					[Value::Table(..) | Value::Array(..) | Value::Range(..)]
-					| [Value::Table(..) | Value::Array(..) | Value::Range(..), _] => {
-						Ok(DbResponse::Other(Value::Array(Array(Vec::new()))))
+				}
+				Method::Insert => match &params[..] {
+					[Value::Table(..), Value::Array(..)] => {
+						Ok(DbResponse::Other(Value::Array(Default::default())))
+					}
+					[Value::Table(..), _] => {
+						Ok(DbResponse::Other(to_value(User::default()).unwrap()))
 					}
 					_ => unreachable!(),
 				},

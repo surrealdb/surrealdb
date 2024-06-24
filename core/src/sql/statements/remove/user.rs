@@ -1,5 +1,5 @@
 use crate::ctx::Context;
-use crate::dbs::{Options, Transaction};
+use crate::dbs::Options;
 use crate::err::Error;
 use crate::iam::{Action, ResourceKind};
 use crate::sql::{Base, Ident, Value};
@@ -8,9 +8,10 @@ use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Formatter};
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[revisioned(revision = 2)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
+#[non_exhaustive]
 pub struct RemoveUserStatement {
 	pub name: Ident,
 	pub base: Base,
@@ -20,20 +21,15 @@ pub struct RemoveUserStatement {
 
 impl RemoveUserStatement {
 	/// Process this type returning a computed simple Value
-	pub(crate) async fn compute(
-		&self,
-		_ctx: &Context<'_>,
-		opt: &Options,
-		txn: &Transaction,
-	) -> Result<Value, Error> {
-		match async {
+	pub(crate) async fn compute(&self, ctx: &Context<'_>, opt: &Options) -> Result<Value, Error> {
+		let future = async {
 			// Allowed to run?
 			opt.is_allowed(Action::Edit, ResourceKind::Actor, &self.base)?;
 
 			match self.base {
 				Base::Root => {
 					// Claim transaction
-					let mut run = txn.lock().await;
+					let mut run = ctx.tx_lock().await;
 					// Clear the cache
 					run.clear_cache();
 					// Get the definition
@@ -46,26 +42,26 @@ impl RemoveUserStatement {
 				}
 				Base::Ns => {
 					// Claim transaction
-					let mut run = txn.lock().await;
+					let mut run = ctx.tx_lock().await;
 					// Clear the cache
 					run.clear_cache();
 					// Get the definition
-					let us = run.get_ns_user(opt.ns(), &self.name).await?;
+					let us = run.get_ns_user(opt.ns()?, &self.name).await?;
 					// Delete the definition
-					let key = crate::key::namespace::us::new(opt.ns(), &us.name);
+					let key = crate::key::namespace::us::new(opt.ns()?, &us.name);
 					run.del(key).await?;
 					// Ok all good
 					Ok(Value::None)
 				}
 				Base::Db => {
 					// Claim transaction
-					let mut run = txn.lock().await;
+					let mut run = ctx.tx_lock().await;
 					// Clear the cache
 					run.clear_cache();
 					// Get the definition
-					let us = run.get_db_user(opt.ns(), opt.db(), &self.name).await?;
+					let us = run.get_db_user(opt.ns()?, opt.db()?, &self.name).await?;
 					// Delete the definition
-					let key = crate::key::database::us::new(opt.ns(), opt.db(), &us.name);
+					let key = crate::key::database::us::new(opt.ns()?, opt.db()?, &us.name);
 					run.del(key).await?;
 					// Ok all good
 					Ok(Value::None)
@@ -73,8 +69,8 @@ impl RemoveUserStatement {
 				_ => Err(Error::InvalidLevel(self.base.to_string())),
 			}
 		}
-		.await
-		{
+		.await;
+		match future {
 			Err(e) if self.if_exists => match e {
 				Error::UserRootNotFound {
 					..

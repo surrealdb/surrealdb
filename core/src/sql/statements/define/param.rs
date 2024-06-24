@@ -1,18 +1,21 @@
 use crate::ctx::Context;
-use crate::dbs::{Options, Transaction};
+use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::iam::{Action, ResourceKind};
 use crate::sql::fmt::{is_pretty, pretty_indent};
-use crate::sql::{Base, Ident, Permission, Strand, Value};
+use crate::sql::statements::info::InfoStructure;
+use crate::sql::{Base, Ident, Object, Permission, Strand, Value};
 use derive::Store;
+use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Write};
 
+#[revisioned(revision = 2)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[revisioned(revision = 2)]
+#[non_exhaustive]
 pub struct DefineParamStatement {
 	pub name: Ident,
 	pub value: Value,
@@ -26,32 +29,36 @@ impl DefineParamStatement {
 	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
+		stk: &mut Stk,
 		ctx: &Context<'_>,
 		opt: &Options,
-		txn: &Transaction,
 		doc: Option<&CursorDoc<'_>>,
 	) -> Result<Value, Error> {
 		// Allowed to run?
 		opt.is_allowed(Action::Edit, ResourceKind::Parameter, &Base::Db)?;
 		// Claim transaction
-		let mut run = txn.lock().await;
+		let mut run = ctx.tx_lock().await;
 		// Clear the cache
 		run.clear_cache();
 		// Check if param already exists
-		if self.if_not_exists && run.get_db_param(opt.ns(), opt.db(), &self.name).await.is_ok() {
-			return Err(Error::PaAlreadyExists {
-				value: self.name.to_string(),
-			});
+		if run.get_db_param(opt.ns()?, opt.db()?, &self.name).await.is_ok() {
+			if self.if_not_exists {
+				return Ok(Value::None);
+			} else {
+				return Err(Error::PaAlreadyExists {
+					value: self.name.to_string(),
+				});
+			}
 		}
 		// Process the statement
-		let key = crate::key::database::pa::new(opt.ns(), opt.db(), &self.name);
-		run.add_ns(opt.ns(), opt.strict).await?;
-		run.add_db(opt.ns(), opt.db(), opt.strict).await?;
+		let key = crate::key::database::pa::new(opt.ns()?, opt.db()?, &self.name);
+		run.add_ns(opt.ns()?, opt.strict).await?;
+		run.add_db(opt.ns()?, opt.db()?, opt.strict).await?;
 		run.set(
 			key,
 			DefineParamStatement {
 				// Compute the param
-				value: self.value.compute(ctx, opt, txn, doc).await?,
+				value: self.value.compute(stk, ctx, opt, doc).await?,
 				// Don't persist the "IF NOT EXISTS" clause to schema
 				if_not_exists: false,
 				..self.clone()
@@ -81,5 +88,30 @@ impl Display for DefineParamStatement {
 		};
 		write!(f, "PERMISSIONS {}", self.permissions)?;
 		Ok(())
+	}
+}
+
+impl InfoStructure for DefineParamStatement {
+	fn structure(self) -> Value {
+		let Self {
+			name,
+			value,
+			comment,
+			permissions,
+			..
+		} = self;
+		let mut acc = Object::default();
+
+		acc.insert("name".to_string(), name.structure());
+
+		acc.insert("value".to_string(), value.structure());
+
+		if let Some(comment) = comment {
+			acc.insert("comment".to_string(), comment.into());
+		}
+
+		acc.insert("permissions".to_string(), permissions.structure());
+
+		Value::Object(acc)
 	}
 }

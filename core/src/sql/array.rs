@@ -1,11 +1,12 @@
 use crate::ctx::Context;
-use crate::dbs::{Options, Transaction};
+use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::sql::{
 	fmt::{pretty_indent, Fmt, Pretty},
 	Number, Operation, Value,
 };
+use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
@@ -16,10 +17,11 @@ use std::ops::DerefMut;
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Array";
 
+#[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[serde(rename = "$surrealdb::private::sql::Array")]
-#[revisioned(revision = 1)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
+#[non_exhaustive]
 pub struct Array(pub Vec<Value>);
 
 impl From<Value> for Array {
@@ -132,14 +134,14 @@ impl Array {
 	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
+		stk: &mut Stk,
 		ctx: &Context<'_>,
 		opt: &Options,
-		txn: &Transaction,
 		doc: Option<&CursorDoc<'_>>,
 	) -> Result<Value, Error> {
 		let mut x = Self::with_capacity(self.len());
 		for v in self.iter() {
-			match v.compute(ctx, opt, txn, doc).await {
+			match v.compute(stk, ctx, opt, doc).await {
 				Ok(v) => x.push(v),
 				Err(e) => return Err(e),
 			};
@@ -238,16 +240,24 @@ impl<T> Abolish<T> for Vec<T> {
 // ------------------------------
 
 pub(crate) trait Clump<T> {
-	fn clump(self, clump_size: usize) -> T;
+	fn clump(self, clump_size: usize) -> Result<T, Error>;
 }
 
 impl Clump<Array> for Array {
-	fn clump(self, clump_size: usize) -> Array {
-		self.0
+	fn clump(self, clump_size: usize) -> Result<Array, Error> {
+		if clump_size < 1 {
+			return Err(Error::InvalidArguments {
+				name: "array::clump".to_string(),
+				message: "The second argument must be an integer greater than 0".to_string(),
+			});
+		}
+
+		Ok(self
+			.0
 			.chunks(clump_size)
 			.map::<Value, _>(|chunk| chunk.to_vec().into())
 			.collect::<Vec<_>>()
-			.into()
+			.into())
 	}
 }
 

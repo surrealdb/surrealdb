@@ -6,13 +6,15 @@ use crate::key::debug::sprint_key;
 use crate::kvs::Check;
 use crate::kvs::Key;
 use crate::kvs::Val;
-use crate::vs::{u64_to_versionstamp, versionstamp_to_u64, Versionstamp};
+use crate::vs::{try_to_u64_be, u64_to_versionstamp, Versionstamp};
 use std::ops::Range;
 
+#[non_exhaustive]
 pub struct Datastore {
 	db: echodb::Db<Key, Val>,
 }
 
+#[non_exhaustive]
 pub struct Transaction {
 	/// Is the transaction complete?
 	done: bool,
@@ -182,7 +184,7 @@ impl Transaction {
 					Err(e) => Err(Error::Ds(e.to_string())),
 				};
 				let array = res?;
-				let prev = versionstamp_to_u64(&array);
+				let prev = try_to_u64_be(array)?;
 				prev + 1
 			}
 			None => 1,
@@ -343,7 +345,7 @@ impl Transaction {
 			end: rng.end.into(),
 		};
 		// Scan the keys
-		let res = self.inner.scan(rng, limit)?;
+		let res = self.inner.scan(rng, limit as usize)?;
 		// Return result
 		Ok(res)
 	}

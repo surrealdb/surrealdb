@@ -1,10 +1,11 @@
 use crate::ctx::Context;
-use crate::dbs::{Options, Transaction};
+use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::sql::{escape::escape_rid, id::Id, Strand, Value};
 use crate::syn;
 use derive::Store;
+use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
@@ -12,10 +13,11 @@ use std::str::FromStr;
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Thing";
 
+#[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[serde(rename = "$surrealdb::private::sql::Thing")]
-#[revisioned(revision = 1)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
+#[non_exhaustive]
 pub struct Thing {
 	/// Table name
 	pub tb: String,
@@ -100,14 +102,14 @@ impl Thing {
 	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
+		stk: &mut Stk,
 		ctx: &Context<'_>,
 		opt: &Options,
-		txn: &Transaction,
 		doc: Option<&CursorDoc<'_>>,
 	) -> Result<Value, Error> {
 		Ok(Value::Thing(Thing {
 			tb: self.tb.clone(),
-			id: self.id.compute(ctx, opt, txn, doc).await?,
+			id: self.id.compute(stk, ctx, opt, doc).await?,
 		}))
 	}
 }

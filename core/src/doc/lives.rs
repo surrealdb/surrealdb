@@ -1,20 +1,21 @@
 use crate::ctx::Context;
+use crate::dbs::Action;
 use crate::dbs::Notification;
 use crate::dbs::Options;
 use crate::dbs::Statement;
-use crate::dbs::{Action, Transaction};
 use crate::doc::CursorDoc;
 use crate::doc::Document;
 use crate::err::Error;
 use crate::fflags::FFLAGS;
+use crate::sql::paths::AC;
 use crate::sql::paths::META;
-use crate::sql::paths::SC;
-use crate::sql::paths::SD;
+use crate::sql::paths::RD;
 use crate::sql::paths::TK;
 use crate::sql::permission::Permission;
 use crate::sql::statements::LiveStatement;
 use crate::sql::Value;
 use channel::Sender;
+use reblessive::tree::Stk;
 use std::ops::Deref;
 use std::sync::Arc;
 use uuid::Uuid;
@@ -22,9 +23,9 @@ use uuid::Uuid;
 impl<'a> Document<'a> {
 	pub async fn lives(
 		&self,
-		_ctx: &Context<'_>,
+		stk: &mut Stk,
+		ctx: &Context<'_>,
 		opt: &Options,
-		txn: &Transaction,
 		stm: &Statement<'_>,
 	) -> Result<(), Error> {
 		// Check if changed
@@ -39,9 +40,9 @@ impl<'a> Document<'a> {
 		// Check if we can send notifications
 		if let Some(chn) = &opt.sender {
 			// Loop through all index statements
-			let lq_stms = self.lv(opt, txn).await?;
+			let lq_stms = self.lv(ctx, opt).await?;
 			let borrows = lq_stms.iter().collect::<Vec<_>>();
-			self.check_lqs_and_send_notifications(opt, stm, txn, borrows.as_slice(), chn).await?;
+			self.check_lqs_and_send_notifications(stk, opt, stm, borrows.as_slice(), chn).await?;
 		}
 		// Carry on
 		Ok(())
@@ -50,16 +51,16 @@ impl<'a> Document<'a> {
 	/// Check the WHERE clause for a LIVE query
 	async fn lq_check(
 		&self,
+		stk: &mut Stk,
 		ctx: &Context<'_>,
 		opt: &Options,
-		txn: &Transaction,
 		stm: &Statement<'_>,
 		doc: &CursorDoc<'_>,
 	) -> Result<(), Error> {
 		// Check where condition
 		if let Some(cond) = stm.conds() {
 			// Check if the expression is truthy
-			if !cond.compute(ctx, opt, txn, Some(doc)).await?.is_truthy() {
+			if !cond.compute(stk, ctx, opt, Some(doc)).await?.is_truthy() {
 				// Ignore this document
 				return Err(Error::Ignore);
 			}
@@ -67,19 +68,20 @@ impl<'a> Document<'a> {
 		// Carry on
 		Ok(())
 	}
+
 	/// Check any PERRMISSIONS for a LIVE query
 	async fn lq_allow(
 		&self,
+		stk: &mut Stk,
 		ctx: &Context<'_>,
 		opt: &Options,
-		txn: &Transaction,
 		stm: &Statement<'_>,
 		doc: &CursorDoc<'_>,
 	) -> Result<(), Error> {
 		// Should we run permissions checks?
-		if opt.check_perms(stm.into()) {
+		if opt.check_perms(stm.into())? {
 			// Get the table
-			let tb = self.tb(opt, txn).await?;
+			let tb = self.tb(ctx, opt).await?;
 			// Process the table permissions
 			match &tb.permissions.select {
 				Permission::None => return Err(Error::Ignore),
@@ -88,7 +90,7 @@ impl<'a> Document<'a> {
 					// Disable permissions
 					let opt = &opt.new_with_perms(false);
 					// Process the PERMISSION clause
-					if !e.compute(ctx, opt, txn, Some(doc)).await?.is_truthy() {
+					if !e.compute(stk, ctx, opt, Some(doc)).await?.is_truthy() {
 						return Err(Error::Ignore);
 					}
 				}
@@ -101,9 +103,9 @@ impl<'a> Document<'a> {
 	/// Process live query for notifications
 	pub(crate) async fn check_lqs_and_send_notifications(
 		&self,
+		stk: &mut Stk,
 		opt: &Options,
 		stm: &Statement<'_>,
-		txn: &Transaction,
 		live_statements: &[&LiveStatement],
 		sender: &Sender<Notification>,
 	) -> Result<(), Error> {
@@ -111,11 +113,17 @@ impl<'a> Document<'a> {
 			"Called check_lqs_and_send_notifications with {} live statements",
 			live_statements.len()
 		);
+		// Technically this isnt the condition - the `lives` function is passing in the currently evaluated statement
+		// but the ds.rs invocation of this function is reconstructing this statement
+		let is_delete = match FFLAGS.change_feed_live_queries.enabled() {
+			true => self.is_delete(),
+			false => stm.is_delete(),
+		};
 		for lv in live_statements {
 			// Create a new statement
 			let lq = Statement::from(*lv);
 			// Get the event action
-			let met = if stm.is_delete() {
+			let evt = if stm.is_delete() {
 				Value::from("DELETE")
 			} else if self.is_new() {
 				Value::from("CREATE")
@@ -123,7 +131,7 @@ impl<'a> Document<'a> {
 				Value::from("UPDATE")
 			};
 			// Check if this is a delete statement
-			let doc = match stm.is_delete() {
+			let doc = match is_delete {
 				true => &self.initial,
 				false => &self.current,
 			};
@@ -148,8 +156,8 @@ impl<'a> Document<'a> {
 			// This ensures that we are using the session
 			// of the user who created the LIVE query.
 			let mut lqctx = Context::background();
-			lqctx.add_value("auth", sess.pick(SD.as_ref()));
-			lqctx.add_value("scope", sess.pick(SC.as_ref()));
+			lqctx.add_value("access", sess.pick(AC.as_ref()));
+			lqctx.add_value("auth", sess.pick(RD.as_ref()));
 			lqctx.add_value("token", sess.pick(TK.as_ref()));
 			lqctx.add_value("session", sess);
 			// We need to create a new options which we will
@@ -160,14 +168,14 @@ impl<'a> Document<'a> {
 			// Add $before, $after, $value, and $event params
 			// to this LIVE query so that user can use these
 			// within field projections and WHERE clauses.
-			lqctx.add_value("event", met);
+			lqctx.add_value("event", evt);
 			lqctx.add_value("value", self.current.doc.deref());
 			lqctx.add_value("after", self.current.doc.deref());
 			lqctx.add_value("before", self.initial.doc.deref());
 			// First of all, let's check to see if the WHERE
 			// clause of the LIVE query is matched by this
 			// document. If it is then we can continue.
-			match self.lq_check(&lqctx, &lqopt, txn, &lq, doc).await {
+			match self.lq_check(stk, &lqctx, &lqopt, &lq, doc).await {
 				Err(Error::Ignore) => {
 					trace!("live query did not match the where clause, skipping");
 					continue;
@@ -179,7 +187,7 @@ impl<'a> Document<'a> {
 			// clause for this table allows this document to
 			// be viewed by the user who created this LIVE
 			// query. If it does, then we can continue.
-			match self.lq_allow(&lqctx, &lqopt, txn, &lq, doc).await {
+			match self.lq_allow(stk, &lqctx, &lqopt, &lq, doc).await {
 				Err(Error::Ignore) => {
 					trace!("live query did not have permission to view this document, skipping");
 					continue;
@@ -203,10 +211,9 @@ impl<'a> Document<'a> {
 				node_id,
 				lv.node.0
 			);
-			if stm.is_delete() {
+			if is_delete {
 				// Send a DELETE notification
 				if node_matches_live_query {
-					trace!("Sending lq delete notification");
 					sender
 						.send(Notification {
 							id: lv.id,
@@ -216,9 +223,14 @@ impl<'a> Document<'a> {
 								let lqopt: &Options = &lqopt.new_with_futures(true);
 								// Output the full document before any changes were applied
 								let mut value =
-									doc.doc.compute(&lqctx, lqopt, txn, Some(doc)).await?;
+									doc.doc.compute(stk, &lqctx, lqopt, Some(doc)).await?;
+
+								// TODO(SUR-349): We need an empty object instead of Value::None for serialisation
+								if value.is_none() {
+									value = Value::Object(Default::default());
+								}
 								// Remove metadata fields on output
-								value.del(&lqctx, lqopt, txn, &*META).await?;
+								value.del(stk, &lqctx, lqopt, &*META).await?;
 								// Output result
 								value
 							},
@@ -233,7 +245,7 @@ impl<'a> Document<'a> {
 						.send(Notification {
 							id: lv.id,
 							action: Action::Create,
-							result: self.pluck(&lqctx, &lqopt, txn, &lq).await?,
+							result: self.pluck(stk, &lqctx, &lqopt, &lq).await?,
 						})
 						.await?;
 				}
@@ -245,7 +257,7 @@ impl<'a> Document<'a> {
 						.send(Notification {
 							id: lv.id,
 							action: Action::Update,
-							result: self.pluck(&lqctx, &lqopt, txn, &lq).await?,
+							result: self.pluck(stk, &lqctx, &lqopt, &lq).await?,
 						})
 						.await?;
 				}

@@ -13,6 +13,7 @@ mod delete;
 mod export;
 mod health;
 mod import;
+mod insert;
 mod invalidate;
 mod merge;
 mod patch;
@@ -22,6 +23,7 @@ mod signin;
 mod signup;
 mod unset;
 mod update;
+mod upsert;
 mod use_db;
 mod use_ns;
 mod version;
@@ -45,6 +47,7 @@ pub use export::Backup;
 pub use export::Export;
 pub use health::Health;
 pub use import::Import;
+pub use insert::Insert;
 pub use invalidate::Invalidate;
 pub use live::Stream;
 pub use merge::Merge;
@@ -58,6 +61,7 @@ pub use signup::Signup;
 use tokio::sync::watch;
 pub use unset::Unset;
 pub use update::Update;
+pub use upsert::Upsert;
 pub use use_db::UseDb;
 pub use use_ns::UseNs;
 pub use version::Version;
@@ -83,6 +87,8 @@ use std::path::Path;
 use std::sync::Arc;
 use std::sync::OnceLock;
 use std::time::Duration;
+
+use self::query::ValidQuery;
 
 /// Query statistics
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -113,6 +119,7 @@ impl Method {
 			Method::Health => "health",
 			Method::Import => "import",
 			Method::Invalidate => "invalidate",
+			Method::Insert => "insert",
 			Method::Kill => "kill",
 			Method::Live => "live",
 			Method::Merge => "merge",
@@ -124,6 +131,7 @@ impl Method {
 			Method::Signup => "signup",
 			Method::Unset => "unset",
 			Method::Update => "update",
+			Method::Upsert => "upsert",
 			Method::Use => "use",
 			Method::Version => "version",
 		}
@@ -137,9 +145,10 @@ where
 	/// Initialises a new unconnected instance of the client
 	///
 	/// This makes it easy to create a static singleton of the client. The static singleton
-	/// ensures that a single database instance is available across very large or complicated
-	/// applications. With the singleton, only one connection to the database is instantiated,
-	/// and the database connection does not have to be shared across components or controllers.
+	/// pattern in the example below ensures that a single database instance is available
+	/// across very large or complicated applications. With the singleton, only one connection
+	/// to the database is instantiated, and the database connection does not have to be shared
+	/// across components or controllers.
 	///
 	/// # Examples
 	///
@@ -148,7 +157,6 @@ where
 	/// ```no_run
 	/// use once_cell::sync::Lazy;
 	/// use serde::{Serialize, Deserialize};
-	/// use std::borrow::Cow;
 	/// use surrealdb::Surreal;
 	/// use surrealdb::opt::auth::Root;
 	/// use surrealdb::engine::remote::ws::Ws;
@@ -159,7 +167,7 @@ where
 	///
 	/// #[derive(Serialize, Deserialize)]
 	/// struct Person {
-	///     name: Cow<'static, str>,
+	///     name: String,
 	/// }
 	///
 	/// #[tokio::main]
@@ -191,7 +199,6 @@ where
 	/// ```no_run
 	/// use once_cell::sync::Lazy;
 	/// use serde::{Serialize, Deserialize};
-	/// use std::borrow::Cow;
 	/// use surrealdb::Surreal;
 	/// use surrealdb::engine::any::Any;
 	/// use surrealdb::opt::auth::Root;
@@ -201,7 +208,7 @@ where
 	///
 	/// #[derive(Serialize, Deserialize)]
 	/// struct Person {
-	///     name: Cow<'static, str>,
+	///     name: String,
 	/// }
 	///
 	/// #[tokio::main]
@@ -260,7 +267,6 @@ where
 			engine: PhantomData,
 			address: address.into_endpoint(),
 			capacity: 0,
-			client: PhantomData,
 			waiter: Arc::new(watch::channel(None)),
 			response_type: PhantomData,
 		}
@@ -320,9 +326,9 @@ where
 	/// use serde::Serialize;
 	///
 	/// #[derive(Serialize)]
-	/// struct Name<'a> {
-	///     first: &'a str,
-	///     last: &'a str,
+	/// struct Name {
+	///     first: String,
+	///     last: String,
 	/// }
 	///
 	/// # #[tokio::main]
@@ -331,8 +337,8 @@ where
 	/// #
 	/// // Assign the variable on the connection
 	/// db.set("name", Name {
-	///     first: "Tobie",
-	///     last: "Morgan Hitchcock",
+	///     first: "Tobie".into(),
+	///     last: "Morgan Hitchcock".into(),
 	/// }).await?;
 	///
 	/// // Use the variable in a subsequent query
@@ -360,9 +366,9 @@ where
 	/// use serde::Serialize;
 	///
 	/// #[derive(Serialize)]
-	/// struct Name<'a> {
-	///     first: &'a str,
-	///     last: &'a str,
+	/// struct Name {
+	///     first: String,
+	///     last: String,
 	/// }
 	///
 	/// # #[tokio::main]
@@ -371,8 +377,8 @@ where
 	/// #
 	/// // Assign the variable on the connection
 	/// db.set("name", Name {
-	///     first: "Tobie",
-	///     last: "Morgan Hitchcock",
+	///     first: "Tobie".into(),
+	///     last: "Morgan Hitchcock".into(),
 	/// }).await?;
 	///
 	/// // Use the variable in a subsequent query
@@ -391,7 +397,7 @@ where
 		}
 	}
 
-	/// Signs up a user to a specific authentication scope
+	/// Signs up a user with a specific record access method
 	///
 	/// # Examples
 	///
@@ -399,12 +405,12 @@ where
 	/// use serde::Serialize;
 	/// use surrealdb::sql;
 	/// use surrealdb::opt::auth::Root;
-	/// use surrealdb::opt::auth::Scope;
+	/// use surrealdb::opt::auth::Record;
 	///
 	/// #[derive(Debug, Serialize)]
-	/// struct AuthParams<'a> {
-	///     email: &'a str,
-	///     password: &'a str,
+	/// struct AuthParams {
+	///     email: String,
+	///     password: String,
 	/// }
 	///
 	/// # #[tokio::main]
@@ -421,22 +427,22 @@ where
 	/// // Select the namespace/database to use
 	/// db.use_ns("namespace").use_db("database").await?;
 	///
-	/// // Define the scope
+	/// // Define the user record access
 	/// let sql = r#"
-	///     DEFINE SCOPE user_scope SESSION 24h
+	///     DEFINE ACCESS user_access ON DATABASE TYPE RECORD DURATION 24h
 	///     SIGNUP ( CREATE user SET email = $email, password = crypto::argon2::generate($password) )
 	///     SIGNIN ( SELECT * FROM user WHERE email = $email AND crypto::argon2::compare(password, $password) )
 	/// "#;
 	/// db.query(sql).await?.check()?;
 	///
 	/// // Sign a user up
-	/// db.signup(Scope {
+	/// db.signup(Record {
 	///     namespace: "namespace",
 	///     database: "database",
-	///     scope: "user_scope",
+	///     access: "user_access",
 	///     params: AuthParams {
-	///         email: "john.doe@example.com",
-	///         password: "password123",
+	///         email: "john.doe@example.com".into(),
+	///         password: "password123".into(),
 	///     },
 	/// }).await?;
 	/// #
@@ -451,7 +457,7 @@ where
 		}
 	}
 
-	/// Signs this connection in to a specific authentication scope
+	/// Signs this connection in to a specific authentication level
 	///
 	/// # Examples
 	///
@@ -528,17 +534,17 @@ where
 	/// # }
 	/// ```
 	///
-	/// Scope signin
+	/// Record signin
 	///
 	/// ```no_run
 	/// use serde::Serialize;
 	/// use surrealdb::opt::auth::Root;
-	/// use surrealdb::opt::auth::Scope;
+	/// use surrealdb::opt::auth::Record;
 	///
 	/// #[derive(Debug, Serialize)]
-	/// struct AuthParams<'a> {
-	///     email: &'a str,
-	///     password: &'a str,
+	/// struct AuthParams {
+	///     email: String,
+	///     password: String,
 	/// }
 	///
 	/// # #[tokio::main]
@@ -549,13 +555,13 @@ where
 	/// db.use_ns("namespace").use_db("database").await?;
 	///
 	/// // Sign a user in
-	/// db.signin(Scope {
+	/// db.signin(Record {
 	///     namespace: "namespace",
 	///     database: "database",
-	///     scope: "user_scope",
+	///     access: "user_access",
 	///     params: AuthParams {
-	///         email: "john.doe@example.com",
-	///         password: "password123",
+	///         email: "john.doe@example.com".into(),
+	///         password: "password123".into(),
 	///     },
 	/// }).await?;
 	/// #
@@ -660,11 +666,15 @@ where
 	/// # }
 	/// ```
 	pub fn query(&self, query: impl opt::IntoQuery) -> Query<C> {
-		Query {
+		let inner = query.into_query().map(|x| ValidQuery {
 			client: Cow::Borrowed(self),
-			query: vec![query.into_query()],
-			bindings: Ok(Default::default()),
+			query: x,
+			bindings: Default::default(),
 			register_live_queries: true,
+		});
+
+		Query {
+			inner,
 		}
 	}
 
@@ -734,8 +744,8 @@ where
 	/// }
 	///
 	/// #[derive(Serialize)]
-	/// struct User<'a> {
-	///     name: &'a str,
+	/// struct User {
+	///     name: &'static str,
 	///     settings: Settings,
 	/// }
 	///
@@ -771,6 +781,107 @@ where
 		}
 	}
 
+	/// Insert a record or records into a table
+	///
+	/// # Examples
+	///
+	/// ```no_run
+	/// use serde::Serialize;
+	/// use surrealdb::sql;
+	///
+	/// # #[derive(serde::Deserialize)]
+	/// # struct Person;
+	/// #
+	/// #[derive(Serialize)]
+	/// struct Settings {
+	///     active: bool,
+	///     marketing: bool,
+	/// }
+	///
+	/// #[derive(Serialize)]
+	/// struct User<'a> {
+	///     name: &'a str,
+	///     settings: Settings,
+	/// }
+	///
+	/// # #[tokio::main]
+	/// # async fn main() -> surrealdb::Result<()> {
+	/// # let db = surrealdb::engine::any::connect("mem://").await?;
+	/// #
+	/// // Select the namespace/database to use
+	/// db.use_ns("namespace").use_db("database").await?;
+	///
+	/// // Insert a record with a specific ID
+	/// let person: Option<Person> = db.insert(("person", "tobie"))
+	///     .content(User {
+	///         name: "Tobie",
+	///         settings: Settings {
+	///             active: true,
+	///             marketing: true,
+	///         },
+	///     })
+	///     .await?;
+	///
+	/// // Insert multiple records into the table
+	/// let people: Vec<Person> = db.insert("person")
+	///     .content(vec![
+	///         User {
+	///             name: "Tobie",
+	///             settings: Settings {
+	///                 active: true,
+	///                 marketing: false,
+	///             },
+	///         },
+	///         User {
+	///             name: "Jaime",
+	///             settings: Settings {
+	///                 active: true,
+	///                 marketing: true,
+	///             },
+	///         },
+	///     ])
+	///     .await?;
+	///
+	/// // Insert multiple records with pre-defined IDs
+	/// #[derive(Serialize)]
+	/// struct UserWithId<'a> {
+	///     id: sql::Thing,
+	///     name: &'a str,
+	///     settings: Settings,
+	/// }
+	///
+	/// let people: Vec<Person> = db.insert("person")
+	///     .content(vec![
+	///         UserWithId {
+	///             id: sql::thing("person:tobie")?,
+	///             name: "Tobie",
+	///             settings: Settings {
+	///                 active: true,
+	///                 marketing: false,
+	///             },
+	///         },
+	///         UserWithId {
+	///             id: sql::thing("person:jaime")?,
+	///             name: "Jaime",
+	///             settings: Settings {
+	///                 active: true,
+	///                 marketing: true,
+	///             },
+	///         },
+	///     ])
+	///     .await?;
+	/// #
+	/// # Ok(())
+	/// # }
+	/// ```
+	pub fn insert<R>(&self, resource: impl opt::IntoResource<R>) -> Insert<C, R> {
+		Insert {
+			client: Cow::Borrowed(self),
+			resource: resource.into_resource(),
+			response_type: PhantomData,
+		}
+	}
+
 	/// Updates all records in a table, or a specific record
 	///
 	/// # Examples
@@ -790,8 +901,167 @@ where
 	/// }
 	///
 	/// #[derive(Serialize)]
-	/// struct User<'a> {
-	///     name: &'a str,
+	/// struct User {
+	///     name: &'static str,
+	///     settings: Settings,
+	/// }
+	///
+	/// # #[tokio::main]
+	/// # async fn main() -> surrealdb::Result<()> {
+	/// # let db = surrealdb::engine::any::connect("mem://").await?;
+	/// #
+	/// // Select the namespace/database to use
+	/// db.use_ns("namespace").use_db("database").await?;
+	///
+	/// // Update all records in a table
+	/// let people: Vec<Person> = db.upsert("person").await?;
+	///
+	/// // Update a record with a specific ID
+	/// let person: Option<Person> = db.upsert(("person", "tobie"))
+	///     .content(User {
+	///         name: "Tobie",
+	///         settings: Settings {
+	///             active: true,
+	///             marketing: true,
+	///         },
+	///     })
+	///     .await?;
+	/// #
+	/// # Ok(())
+	/// # }
+	/// ```
+	///
+	/// Merge the current document / record data with the specified data.
+	///
+	/// ```no_run
+	/// use serde::Serialize;
+	/// use time::OffsetDateTime;
+	///
+	/// # #[derive(serde::Deserialize)]
+	/// # struct Person;
+	/// #
+	/// #[derive(Serialize)]
+	/// struct UpdatedAt {
+	///     updated_at: OffsetDateTime,
+	/// }
+	///
+	/// #[derive(Serialize)]
+	/// struct Settings {
+	///     active: bool,
+	/// }
+	///
+	/// #[derive(Serialize)]
+	/// struct User {
+	///     updated_at: OffsetDateTime,
+	///     settings: Settings,
+	/// }
+	///
+	/// # #[tokio::main]
+	/// # async fn main() -> surrealdb::Result<()> {
+	/// # let db = surrealdb::engine::any::connect("mem://").await?;
+	/// #
+	/// // Select the namespace/database to use
+	/// db.use_ns("namespace").use_db("database").await?;
+	///
+	/// // Update all records in a table
+	/// let people: Vec<Person> = db.upsert("person")
+	///     .merge(UpdatedAt {
+	///         updated_at: OffsetDateTime::now_utc(),
+	///     })
+	///     .await?;
+	///
+	/// // Update a record with a specific ID
+	/// let person: Option<Person> = db.upsert(("person", "tobie"))
+	///     .merge(User {
+	///         updated_at: OffsetDateTime::now_utc(),
+	///         settings: Settings {
+	///             active: true,
+	///         },
+	///     })
+	///     .await?;
+	/// #
+	/// # Ok(())
+	/// # }
+	/// ```
+	///
+	/// Apply [JSON Patch](https://jsonpatch.com) changes to all records, or a specific record, in the database.
+	///
+	/// ```no_run
+	/// use serde::Serialize;
+	/// use surrealdb::opt::PatchOp;
+	/// use time::OffsetDateTime;
+	///
+	/// # #[derive(serde::Deserialize)]
+	/// # struct Person;
+	/// #
+	/// #[derive(Serialize)]
+	/// struct UpdatedAt {
+	///     updated_at: OffsetDateTime,
+	/// }
+	///
+	/// #[derive(Serialize)]
+	/// struct Settings {
+	///     active: bool,
+	/// }
+	///
+	/// #[derive(Serialize)]
+	/// struct User {
+	///     updated_at: OffsetDateTime,
+	///     settings: Settings,
+	/// }
+	///
+	/// # #[tokio::main]
+	/// # async fn main() -> surrealdb::Result<()> {
+	/// # let db = surrealdb::engine::any::connect("mem://").await?;
+	/// #
+	/// // Select the namespace/database to use
+	/// db.use_ns("namespace").use_db("database").await?;
+	///
+	/// // Update all records in a table
+	/// let people: Vec<Person> = db.upsert("person")
+	///     .patch(PatchOp::replace("/created_at", OffsetDateTime::now_utc()))
+	///     .await?;
+	///
+	/// // Update a record with a specific ID
+	/// let person: Option<Person> = db.upsert(("person", "tobie"))
+	///     .patch(PatchOp::replace("/settings/active", false))
+	///     .patch(PatchOp::add("/tags", ["developer", "engineer"]))
+	///     .patch(PatchOp::remove("/temp"))
+	///     .await?;
+	/// #
+	/// # Ok(())
+	/// # }
+	/// ```
+	pub fn upsert<R>(&self, resource: impl opt::IntoResource<R>) -> Upsert<C, R> {
+		Upsert {
+			client: Cow::Borrowed(self),
+			resource: resource.into_resource(),
+			range: None,
+			response_type: PhantomData,
+		}
+	}
+
+	/// Updates all records in a table, or a specific record
+	///
+	/// # Examples
+	///
+	/// Replace the current document / record data with the specified data.
+	///
+	/// ```no_run
+	/// use serde::Serialize;
+	///
+	/// # #[derive(serde::Deserialize)]
+	/// # struct Person;
+	/// #
+	/// #[derive(Serialize)]
+	/// struct Settings {
+	///     active: bool,
+	///     marketing: bool,
+	/// }
+	///
+	/// #[derive(Serialize)]
+	/// struct User {
+	///     name: &'static str,
 	///     settings: Settings,
 	/// }
 	///

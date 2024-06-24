@@ -10,6 +10,7 @@ use uuid::Uuid;
 ///
 /// The value of the lv is the statement.
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Key)]
+#[non_exhaustive]
 pub struct Lq<'a> {
 	__: u8,
 	_a: u8,

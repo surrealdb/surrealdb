@@ -2,6 +2,7 @@ use crate::err::Error;
 use crate::sql::value::serde::ser;
 use serde::ser::Impossible;
 
+#[non_exhaustive]
 pub struct Serializer;
 
 impl ser::Serializer for Serializer {

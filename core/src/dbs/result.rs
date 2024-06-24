@@ -1,17 +1,178 @@
 use crate::ctx::Context;
 use crate::dbs::group::GroupsCollector;
 use crate::dbs::plan::Explanation;
-use crate::dbs::store::StoreCollector;
-use crate::dbs::{Options, Statement, Transaction};
+#[cfg(any(
+	feature = "kv-mem",
+	feature = "kv-surrealkv",
+	feature = "kv-rocksdb",
+	feature = "kv-fdb",
+	feature = "kv-tikv",
+))]
+use crate::dbs::store::file_store::FileCollector;
+use crate::dbs::store::MemoryCollector;
+use crate::dbs::{Options, Statement};
 use crate::err::Error;
-use crate::sql::Value;
-use std::cmp::Ordering;
-use std::slice::IterMut;
+use crate::sql::{Orders, Value};
+use reblessive::tree::Stk;
 
 pub(super) enum Results {
 	None,
-	Store(StoreCollector),
+	Memory(MemoryCollector),
+	#[cfg(any(
+		feature = "kv-mem",
+		feature = "kv-surrealkv",
+		feature = "kv-rocksdb",
+		feature = "kv-fdb",
+		feature = "kv-tikv",
+	))]
+	File(Box<FileCollector>),
 	Groups(GroupsCollector),
+}
+
+impl Results {
+	pub(super) fn prepare(
+		&mut self,
+		#[cfg(any(
+			feature = "kv-mem",
+			feature = "kv-surrealkv",
+			feature = "kv-rocksdb",
+			feature = "kv-fdb",
+			feature = "kv-tikv",
+		))]
+		ctx: &Context<'_>,
+		stm: &Statement<'_>,
+	) -> Result<Self, Error> {
+		if stm.expr().is_some() && stm.group().is_some() {
+			return Ok(Self::Groups(GroupsCollector::new(stm)));
+		}
+		#[cfg(any(
+			feature = "kv-mem",
+			feature = "kv-surrealkv",
+			feature = "kv-rocksdb",
+			feature = "kv-fdb",
+			feature = "kv-tikv",
+		))]
+		if stm.tempfiles() {
+			if let Some(temp_dir) = ctx.temporary_directory() {
+				return Ok(Self::File(Box::new(FileCollector::new(temp_dir)?)));
+			}
+		}
+		Ok(Self::Memory(Default::default()))
+	}
+
+	pub(super) async fn push(
+		&mut self,
+		stk: &mut Stk,
+		ctx: &Context<'_>,
+		opt: &Options,
+		stm: &Statement<'_>,
+		val: Value,
+	) -> Result<(), Error> {
+		match self {
+			Self::None => {}
+			Self::Memory(s) => {
+				s.push(val);
+			}
+			#[cfg(any(
+				feature = "kv-mem",
+				feature = "kv-surrealkv",
+				feature = "kv-rocksdb",
+				feature = "kv-fdb",
+				feature = "kv-tikv",
+			))]
+			Self::File(e) => {
+				e.push(val)?;
+			}
+			Self::Groups(g) => {
+				g.push(stk, ctx, opt, stm, val).await?;
+			}
+		}
+		Ok(())
+	}
+
+	pub(super) fn sort(&mut self, orders: &Orders) {
+		match self {
+			Self::Memory(m) => m.sort(orders),
+			#[cfg(any(
+				feature = "kv-mem",
+				feature = "kv-surrealkv",
+				feature = "kv-rocksdb",
+				feature = "kv-fdb",
+				feature = "kv-tikv",
+			))]
+			Self::File(f) => f.sort(orders),
+			_ => {}
+		}
+	}
+
+	pub(super) fn start_limit(&mut self, start: Option<&usize>, limit: Option<&usize>) {
+		match self {
+			Self::None => {}
+			Self::Memory(m) => m.start_limit(start, limit),
+			#[cfg(any(
+				feature = "kv-mem",
+				feature = "kv-surrealkv",
+				feature = "kv-rocksdb",
+				feature = "kv-fdb",
+				feature = "kv-tikv",
+			))]
+			Self::File(f) => f.start_limit(start, limit),
+			Self::Groups(_) => {}
+		}
+	}
+
+	pub(super) fn len(&self) -> usize {
+		match self {
+			Self::None => 0,
+			Self::Memory(s) => s.len(),
+			#[cfg(any(
+				feature = "kv-mem",
+				feature = "kv-surrealkv",
+				feature = "kv-rocksdb",
+				feature = "kv-fdb",
+				feature = "kv-tikv",
+			))]
+			Self::File(e) => e.len(),
+			Self::Groups(g) => g.len(),
+		}
+	}
+
+	pub(super) fn take(&mut self) -> Result<Vec<Value>, Error> {
+		Ok(match self {
+			Self::Memory(m) => m.take_vec(),
+			#[cfg(any(
+				feature = "kv-mem",
+				feature = "kv-surrealkv",
+				feature = "kv-rocksdb",
+				feature = "kv-fdb",
+				feature = "kv-tikv",
+			))]
+			Self::File(f) => f.take_vec()?,
+			_ => vec![],
+		})
+	}
+
+	pub(super) fn explain(&self, exp: &mut Explanation) {
+		match self {
+			Self::None => exp.add_collector("None", vec![]),
+			Self::Memory(s) => {
+				s.explain(exp);
+			}
+			#[cfg(any(
+				feature = "kv-mem",
+				feature = "kv-surrealkv",
+				feature = "kv-rocksdb",
+				feature = "kv-fdb",
+				feature = "kv-tikv",
+			))]
+			Self::File(e) => {
+				e.explain(exp);
+			}
+			Self::Groups(g) => {
+				g.explain(exp);
+			}
+		}
+	}
 }
 
 impl Default for Results {
@@ -20,106 +181,8 @@ impl Default for Results {
 	}
 }
 
-impl Results {
-	pub(super) fn prepare(&mut self, stm: &Statement<'_>) -> Self {
-		if stm.expr().is_some() && stm.group().is_some() {
-			Self::Groups(GroupsCollector::new(stm))
-		} else {
-			Self::Store(StoreCollector::default())
-		}
-	}
-	pub(super) async fn push(
-		&mut self,
-		ctx: &Context<'_>,
-		opt: &Options,
-		txn: &Transaction,
-		stm: &Statement<'_>,
-		val: Value,
-	) -> Result<(), Error> {
-		match self {
-			Results::None => {}
-			Results::Store(s) => {
-				s.push(val);
-			}
-			Results::Groups(g) => {
-				g.push(ctx, opt, txn, stm, val).await?;
-			}
-		}
-		Ok(())
-	}
-
-	pub(super) fn sort_by<F>(&mut self, compare: F)
-	where
-		F: FnMut(&Value, &Value) -> Ordering,
-	{
-		if let Results::Store(s) = self {
-			s.sort_by(compare)
-		}
-	}
-
-	pub(super) fn start_limit(&mut self, start: Option<&usize>, limit: Option<&usize>) {
-		if let Results::Store(s) = self {
-			if let Some(&start) = start {
-				s.start(start);
-			}
-			if let Some(&limit) = limit {
-				s.limit(limit);
-			}
-		}
-	}
-
-	pub(super) fn len(&self) -> usize {
-		match self {
-			Results::None => 0,
-			Results::Store(s) => s.len(),
-			Results::Groups(g) => g.len(),
-		}
-	}
-
-	pub(super) async fn group(
-		&mut self,
-		ctx: &Context<'_>,
-		opt: &Options,
-		txn: &Transaction,
-		stm: &Statement<'_>,
-	) -> Result<Self, Error> {
-		Ok(match self {
-			Self::None => Self::None,
-			Self::Store(s) => Self::Store(s.take_store()),
-			Self::Groups(g) => Self::Store(g.output(ctx, opt, txn, stm).await?),
-		})
-	}
-
-	pub(super) fn take(&mut self) -> Vec<Value> {
-		if let Self::Store(s) = self {
-			s.take_vec()
-		} else {
-			vec![]
-		}
-	}
-
-	pub(super) fn explain(&self, exp: &mut Explanation) {
-		match self {
-			Results::None => exp.add_collector("None", vec![]),
-			Results::Store(s) => {
-				s.explain(exp);
-			}
-			Results::Groups(g) => {
-				g.explain(exp);
-			}
-		}
-	}
-}
-
-impl<'a> IntoIterator for &'a mut Results {
-	type Item = &'a mut Value;
-	type IntoIter = IterMut<'a, Value>;
-
-	fn into_iter(self) -> Self::IntoIter {
-		if let Results::Store(s) = self {
-			s.into_iter()
-		} else {
-			[].iter_mut()
-		}
+impl From<Vec<Value>> for Results {
+	fn from(value: Vec<Value>) -> Self {
+		Results::Memory(value.into())
 	}
 }

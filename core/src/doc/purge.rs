@@ -1,6 +1,6 @@
 use crate::ctx::Context;
+use crate::dbs::Options;
 use crate::dbs::Statement;
-use crate::dbs::{Options, Transaction};
 use crate::doc::Document;
 use crate::err::Error;
 use crate::sql::dir::Dir;
@@ -11,27 +11,26 @@ use crate::sql::paths::OUT;
 use crate::sql::statements::DeleteStatement;
 use crate::sql::table::Tables;
 use crate::sql::value::{Value, Values};
+use reblessive::tree::Stk;
 
 impl<'a> Document<'a> {
 	pub async fn purge(
 		&self,
+		stk: &mut Stk,
 		ctx: &Context<'_>,
 		opt: &Options,
-		txn: &Transaction,
 		_stm: &Statement<'_>,
 	) -> Result<(), Error> {
 		// Check if changed
 		if !self.changed() {
 			return Ok(());
 		}
-		// Clone transaction
-		let run = txn.clone();
 		// Claim transaction
-		let mut run = run.lock().await;
+		let mut run = ctx.tx_lock().await;
 		// Get the record id
 		if let Some(rid) = self.id {
 			// Purge the record data
-			let key = crate::key::thing::new(opt.ns(), opt.db(), &rid.tb, &rid.id);
+			let key = crate::key::thing::new(opt.ns()?, opt.db()?, &rid.tb, &rid.id);
 			run.del(key).await?;
 			// Purge the record edges
 			match (
@@ -43,16 +42,16 @@ impl<'a> Document<'a> {
 					// Get temporary edge references
 					let (ref o, ref i) = (Dir::Out, Dir::In);
 					// Purge the left pointer edge
-					let key = crate::key::graph::new(opt.ns(), opt.db(), &l.tb, &l.id, o, rid);
+					let key = crate::key::graph::new(opt.ns()?, opt.db()?, &l.tb, &l.id, o, rid);
 					run.del(key).await?;
 					// Purge the left inner edge
-					let key = crate::key::graph::new(opt.ns(), opt.db(), &rid.tb, &rid.id, i, l);
+					let key = crate::key::graph::new(opt.ns()?, opt.db()?, &rid.tb, &rid.id, i, l);
 					run.del(key).await?;
 					// Purge the right inner edge
-					let key = crate::key::graph::new(opt.ns(), opt.db(), &rid.tb, &rid.id, o, r);
+					let key = crate::key::graph::new(opt.ns()?, opt.db()?, &rid.tb, &rid.id, o, r);
 					run.del(key).await?;
 					// Purge the right pointer edge
-					let key = crate::key::graph::new(opt.ns(), opt.db(), &r.tb, &r.id, i, rid);
+					let key = crate::key::graph::new(opt.ns()?, opt.db()?, &r.tb, &r.id, i, rid);
 					run.del(key).await?;
 				}
 				_ => {
@@ -68,7 +67,7 @@ impl<'a> Document<'a> {
 						..DeleteStatement::default()
 					};
 					// Execute the delete statement
-					stm.compute(ctx, opt, txn, None).await?;
+					stm.compute(stk, ctx, opt, None).await?;
 				}
 			}
 		}

@@ -18,8 +18,9 @@ mod cli_integration {
 
 	use super::common::{self, StartServerArguments, PASS, USER};
 
-	const ONE_SEC: Duration = Duration::new(1, 0);
-	const TWO_SECS: Duration = Duration::new(2, 0);
+	/// This depends on the interval configuration that we cannot yet inject
+	const ONE_PERIOD: Duration = Duration::new(10, 0);
+	const TWO_PERIODS: Duration = Duration::new(20, 0);
 
 	#[test]
 	fn version_command() {
@@ -100,7 +101,7 @@ mod cli_integration {
 			let args = format!("export --conn http://{addr} {creds} --ns {ns} --db {db} -");
 			let output = common::run(&args).output().expect("failed to run stdout export: {args}");
 			assert!(output.contains("DEFINE TABLE thing TYPE ANY SCHEMALESS PERMISSIONS NONE;"));
-			assert!(output.contains("UPDATE thing:one CONTENT { id: thing:one };"));
+			assert!(output.contains("INSERT [ { id: thing:one } ];"));
 		}
 
 		info!("* Export to file");
@@ -305,7 +306,7 @@ mod cli_integration {
 	#[test(tokio::test)]
 	async fn with_auth_level() {
 		// Commands with credentials for different auth levels
-		let (addr, mut server) = common::start_server_with_auth_level().await.unwrap();
+		let (addr, mut server) = common::start_server_with_defaults().await.unwrap();
 		let creds = format!("--user {USER} --pass {PASS}");
 		let ns = Ulid::new();
 		let db = Ulid::new();
@@ -488,74 +489,6 @@ mod cli_integration {
 	}
 
 	#[test(tokio::test)]
-	// TODO(gguillemas): Remove this test once the legacy authentication is deprecated in v2.0.0
-	async fn without_auth_level() {
-		// Commands with credentials for different auth levels
-		let (addr, mut server) = common::start_server_with_defaults().await.unwrap();
-		let creds = format!("--user {USER} --pass {PASS}");
-		// Prefix with 'a' so that we don't start with a number and cause a parsing error
-		let ns = format!("a{}", Ulid::new());
-		let db = format!("a{}", Ulid::new());
-
-		info!("* Create users with identical credentials at ROOT, NS and DB levels");
-		{
-			let args = format!("sql --conn http://{addr} --db {db} --ns {ns} {creds}");
-			let _ = common::run(&args)
-				.input(format!("DEFINE USER {USER}_root ON ROOT PASSWORD '{PASS}' ROLES OWNER;
-                                                DEFINE USER {USER}_ns ON NAMESPACE PASSWORD '{PASS}' ROLES OWNER;
-                                                DEFINE USER {USER}_db ON DATABASE PASSWORD '{PASS}' ROLES OWNER;\n").as_str())
-				.output()
-				.expect("success");
-		}
-
-		info!("* Pass root level credentials and access root info");
-		{
-			let args = format!(
-				"sql --conn http://{addr} --db {db} --ns {ns} --user {USER}_root --pass {PASS}"
-			);
-			let output = common::run(&args)
-				.input(format!("USE NS {ns} DB {db}; INFO FOR ROOT;\n").as_str())
-				.output()
-				.expect("success");
-			assert!(
-				output.contains("namespaces: {"),
-				"auth level root should be able to access root info: {output}"
-			);
-		}
-
-		info!("* Pass namespace level credentials and access namespace info");
-		{
-			let args = format!(
-				"sql --conn http://{addr} --db {db} --ns {ns} --user {USER}_ns --pass {PASS}"
-			);
-			let output = common::run(&args)
-				.input(format!("USE NS {ns} DB {db}; INFO FOR NS;\n").as_str())
-				.output();
-			assert!(
-				output.clone().unwrap_err().contains("401 Unauthorized"),
-				"namespace level credentials should not work with CLI authentication: {:?}",
-				output
-			);
-		}
-
-		info!("* Pass database level credentials and access database info");
-		{
-			let args = format!(
-				"sql --conn http://{addr} --db {db} --ns {ns} --user {USER}_db --pass {PASS}"
-			);
-			let output = common::run(&args)
-				.input(format!("USE NS {ns} DB {db}; INFO FOR DB;\n").as_str())
-				.output();
-			assert!(
-				output.clone().unwrap_err().contains("401 Unauthorized"),
-				"database level credentials should not work with CLI authentication: {:?}",
-				output
-			);
-		}
-		server.finish().unwrap();
-	}
-
-	#[test(tokio::test)]
 	async fn with_anon_auth() {
 		// Commands without credentials when auth is enabled, should fail
 		let (addr, mut server) = common::start_server_with_defaults().await.unwrap();
@@ -617,7 +550,7 @@ mod cli_integration {
 			auth: false,
 			tls: false,
 			wait_is_ready: true,
-			tick_interval: ONE_SEC,
+			tick_interval: ONE_PERIOD,
 			..Default::default()
 		})
 		.await
@@ -670,6 +603,12 @@ mod cli_integration {
 				let output = remove_debug_info(output).replace('\n', "");
 				// TODO: when enabling the feature flag, turn these to `create` not `update`
 				let allowed = [
+					// Delete these
+					"[[{ changes: [{ define_table: { name: 'thing' } }], versionstamp: 1 }, { changes: [{ update: { id: thing:one } }], versionstamp: 2 }]]",
+					"[[{ changes: [{ define_table: { name: 'thing' } }], versionstamp: 1 }, { changes: [{ update: { id: thing:one } }], versionstamp: 3 }]]",
+					"[[{ changes: [{ define_table: { name: 'thing' } }], versionstamp: 2 }, { changes: [{ update: { id: thing:one } }], versionstamp: 3 }]]",
+					"[[{ changes: [{ define_table: { name: 'thing' } }], versionstamp: 2 }, { changes: [{ update: { id: thing:one } }], versionstamp: 4 }]]",
+					// Keep these
 					"[[{ changes: [{ define_table: { name: 'thing' } }], versionstamp: 65536 }, { changes: [{ update: { id: thing:one } }], versionstamp: 131072 }]]",
 					"[[{ changes: [{ define_table: { name: 'thing' } }], versionstamp: 65536 }, { changes: [{ update: { id: thing:one } }], versionstamp: 196608 }]]",
 					"[[{ changes: [{ define_table: { name: 'thing' } }], versionstamp: 131072 }, { changes: [{ update: { id: thing:one } }], versionstamp: 196608 }]]",
@@ -713,7 +652,7 @@ mod cli_integration {
 			}
 		};
 
-		sleep(TWO_SECS).await;
+		sleep(TWO_PERIODS).await;
 
 		info!("* Show changes after GC");
 		{
@@ -870,7 +809,6 @@ mod cli_integration {
 	}
 
 	#[test(tokio::test)]
-	#[ignore]
 	async fn test_capabilities() {
 		// Default capabilities only allow functions
 		info!("* When default capabilities");
@@ -954,11 +892,11 @@ mod cli_integration {
 
 			let query = format!("RETURN http::get('http://{}/version');\n\n", addr);
 			let output = common::run(&cmd).input(&query).output().unwrap();
-			assert!(output.starts_with("['surrealdb"), "unexpected output: {output:?}");
+			assert!(output.contains("['surrealdb-"), "unexpected output: {output:?}");
 
 			let query = "RETURN function() { return '1' };";
 			let output = common::run(&cmd).input(query).output().unwrap();
-			assert!(output.starts_with("['1']"), "unexpected output: {output:?}");
+			assert!(output.contains("['1']"), "unexpected output: {output:?}");
 
 			server.finish().unwrap();
 		}
@@ -1030,7 +968,7 @@ mod cli_integration {
 
 			let query = format!("RETURN http::get('http://{}/version');\n\n", addr);
 			let output = common::run(&cmd).input(&query).output().unwrap();
-			assert!(output.starts_with("['surrealdb"), "unexpected output: {output:?}");
+			assert!(output.contains("['surrealdb-"), "unexpected output: {output:?}");
 			server.finish().unwrap();
 		}
 
@@ -1120,6 +1058,69 @@ mod cli_integration {
 			let query = "RETURN 1;\n\n";
 			let output = common::run(&cmd).input(query).output().unwrap();
 			assert!(output.contains("[1]"), "unexpected output: {output:?}");
+			server.finish().unwrap();
+		}
+	}
+
+	#[test(tokio::test)]
+	async fn test_temporary_directory() {
+		info!("* The path is a non-existing directory");
+		{
+			let path = format!("surrealkv:{}", tempfile::tempdir().unwrap().path().display());
+			let res = common::start_server(StartServerArguments {
+				path: Some(path),
+				args: "".to_owned(),
+				temporary_directory: Some("/tmp/TELL-ME-THIS-FILE-DOES-NOT-EXISTS".to_owned()),
+				..Default::default()
+			})
+			.await;
+			match res {
+				Ok((_, mut server)) => {
+					server.finish().unwrap();
+					panic!("Should not be ok!");
+				}
+				Err(e) => {
+					assert_eq!(e.to_string(), "server failed to start", "{:?}", e);
+				}
+			}
+		}
+
+		info!("* The path is a file");
+		{
+			let path = format!("surrealkv:{}", tempfile::tempdir().unwrap().path().display());
+			let temp_file = tempfile::NamedTempFile::new().unwrap();
+			let res = common::start_server(StartServerArguments {
+				path: Some(path),
+				args: "".to_owned(),
+				temporary_directory: Some(format!("{}", temp_file.path().display())),
+				..Default::default()
+			})
+			.await;
+			match res {
+				Ok((_, mut server)) => {
+					server.finish().unwrap();
+					panic!("Should not be ok!");
+				}
+				Err(e) => {
+					assert_eq!(e.to_string(), "server failed to start", "{:?}", e);
+				}
+			}
+			temp_file.close().unwrap();
+		}
+
+		info!("* The path is a valid directory");
+		{
+			let path = format!("surrealkv:{}", tempfile::tempdir().unwrap().path().display());
+			let temp_dir = tempfile::tempdir().unwrap();
+			let (_, mut server) = common::start_server(StartServerArguments {
+				path: Some(path),
+				args: "".to_owned(),
+				temporary_directory: Some(format!("{}", temp_dir.path().display())),
+				..Default::default()
+			})
+			.await
+			.unwrap();
+			temp_dir.close().unwrap();
 			server.finish().unwrap();
 		}
 	}

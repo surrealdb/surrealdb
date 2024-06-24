@@ -1,6 +1,7 @@
 use super::run;
 use crate::fnc::script::modules::impl_module_def;
 
+#[non_exhaustive]
 pub struct Package;
 
 impl_module_def!(
@@ -14,6 +15,9 @@ impl_module_def!(
 	"email" => run,
 	"email" => run,
 	"hexadecimal" => run,
+	"ip" => run,
+	"ipv4" => run,
+	"ipv6" => run,
 	"latitude" => run,
 	"longitude" => run,
 	"numeric" => run,

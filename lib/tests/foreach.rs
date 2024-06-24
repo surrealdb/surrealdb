@@ -13,21 +13,21 @@ async fn foreach_simple() -> Result<(), Error> {
 			IF $test == 2 {
 				BREAK;
 			};
-			UPDATE type::thing('person', $test) SET test = $test;
+			UPSERT type::thing('person', $test) SET test = $test;
 		};
 		SELECT * FROM person;
 		FOR $test IN [4, 5, 6] {
 			IF $test == 5 {
 				CONTINUE;
 			};
-			UPDATE type::thing('person', $test) SET test = $test;
+			UPSERT type::thing('person', $test) SET test = $test;
 		};
 		SELECT * FROM person;
 		FOR $test IN <future> { [7, 8, 9] } {
 			IF $test > 8 {
 				THROW 'This is an error';
 			};
-			UPDATE type::thing('person', $test) SET test = $test;
+			UPSERT type::thing('person', $test) SET test = $test;
 		};
 		SELECT * FROM person;
 	";

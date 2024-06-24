@@ -1,12 +1,12 @@
 #[macro_use]
 extern crate tracing;
-extern crate core;
 
 #[macro_use]
 mod mac;
 
 mod cf;
-mod ctx;
+#[doc(hidden)]
+pub mod ctx;
 mod doc;
 mod exe;
 mod fnc;
@@ -34,15 +34,25 @@ pub mod idx;
 pub mod key;
 #[doc(hidden)]
 pub mod kvs;
-#[cfg(any(feature = "ml", feature = "ml2"))]
-#[doc(hidden)]
-pub mod obs;
 #[doc(hidden)]
 pub mod options;
 #[doc(hidden)]
 pub mod rpc;
 #[doc(hidden)]
 pub mod syn;
+
+#[cfg(feature = "ml")]
+#[doc(hidden)]
+pub use surrealml as ml;
+#[cfg(feature = "ml")]
+#[doc(hidden)]
+pub mod obs;
+
+#[doc(hidden)]
+pub mod test_helpers {
+	pub use crate::vs::conv::to_u128_be;
+	pub use crate::vs::generate_versionstamp_sequences;
+}
 
 #[doc(hidden)]
 /// Channels for receiving a SurrealQL database export
@@ -52,13 +62,3 @@ pub mod channel {
 	pub use channel::Receiver;
 	pub use channel::Sender;
 }
-
-#[cfg(all(feature = "ml", not(feature = "ml2")))]
-#[cfg(not(target_arch = "wasm32"))]
-#[doc(hidden)]
-pub use surrealml_core1 as ml;
-
-#[cfg(feature = "ml2")]
-#[cfg(not(target_arch = "wasm32"))]
-#[doc(hidden)]
-pub use surrealml_core2 as ml;

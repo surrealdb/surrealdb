@@ -5,6 +5,7 @@ use ser::Serializer as _;
 use serde::ser::Impossible;
 use serde::ser::Serialize;
 
+#[non_exhaustive]
 pub struct Serializer;
 
 impl ser::Serializer for Serializer {
@@ -38,6 +39,7 @@ impl ser::Serializer for Serializer {
 	}
 }
 
+#[non_exhaustive]
 pub struct SerializePolygonVec(Vec<Polygon<f64>>);
 
 impl serde::ser::SerializeSeq for SerializePolygonVec {

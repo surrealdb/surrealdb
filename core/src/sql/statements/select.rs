@@ -1,5 +1,5 @@
 use crate::ctx::Context;
-use crate::dbs::{Iterable, Iterator, Options, Statement, Transaction};
+use crate::dbs::{Iterable, Iterator, Options, Statement};
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::idx::planner::QueryPlanner;
@@ -8,13 +8,15 @@ use crate::sql::{
 	Value, Values, Version, With,
 };
 use derive::Store;
+use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
+#[revisioned(revision = 3)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
-#[revisioned(revision = 2)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
+#[non_exhaustive]
 pub struct SelectStatement {
 	pub expr: Fields,
 	pub omit: Option<Idioms>,
@@ -33,6 +35,8 @@ pub struct SelectStatement {
 	pub timeout: Option<Timeout>,
 	pub parallel: bool,
 	pub explain: Option<Explain>,
+	#[revision(start = 3)]
+	pub tempfiles: bool,
 }
 
 impl SelectStatement {
@@ -56,9 +60,9 @@ impl SelectStatement {
 	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
+		stk: &mut Stk,
 		ctx: &Context<'_>,
 		opt: &Options,
-		txn: &Transaction,
 		doc: Option<&CursorDoc<'_>>,
 	) -> Result<Value, Error> {
 		// Valid options?
@@ -71,7 +75,7 @@ impl SelectStatement {
 		let mut planner = QueryPlanner::new(opt, &self.with, &self.cond);
 		// Used for ONLY: is the limit 1?
 		let limit_is_one_or_zero = match &self.limit {
-			Some(l) => l.process(ctx, opt, txn, doc).await? <= 1,
+			Some(l) => l.process(stk, ctx, opt, doc).await? <= 1,
 			_ => false,
 		};
 		// Fail for multiple targets without a limit
@@ -80,14 +84,14 @@ impl SelectStatement {
 		}
 		// Loop over the select targets
 		for w in self.what.0.iter() {
-			let v = w.compute(ctx, opt, txn, doc).await?;
+			let v = w.compute(stk, ctx, opt, doc).await?;
 			match v {
 				Value::Table(t) => {
 					if self.only && !limit_is_one_or_zero {
 						return Err(Error::SingleOnlyOutput);
 					}
 
-					planner.add_iterables(ctx, txn, t, &mut i).await?;
+					planner.add_iterables(stk, ctx, t, &mut i).await?;
 				}
 				Value::Thing(v) => i.ingest(Iterable::Thing(v)),
 				Value::Range(v) => {
@@ -121,7 +125,7 @@ impl SelectStatement {
 					for v in v {
 						match v {
 							Value::Table(t) => {
-								planner.add_iterables(ctx, txn, t, &mut i).await?;
+								planner.add_iterables(stk, ctx, t, &mut i).await?;
 							}
 							Value::Thing(v) => i.ingest(Iterable::Thing(v)),
 							Value::Edges(v) => i.ingest(Iterable::Edges(*v)),
@@ -146,7 +150,7 @@ impl SelectStatement {
 			ctx.set_query_planner(&planner);
 		}
 		// Output the results
-		match i.output(&ctx, opt, txn, &stm).await? {
+		match i.output(stk, &ctx, opt, &stm).await? {
 			// This is a single record result
 			Value::Array(mut a) if self.only => match a.len() {
 				// There were no results

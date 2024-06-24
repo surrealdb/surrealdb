@@ -1,7 +1,8 @@
 use crate::ctx::Context;
-use crate::dbs::{Options, Transaction};
+use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
+use crate::sql::statements::info::InfoStructure;
 use crate::sql::{
 	fmt::{fmt_separated_by, Fmt},
 	part::Next,
@@ -9,6 +10,7 @@ use crate::sql::{
 	Part, Value,
 };
 use md5::{Digest, Md5};
+use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Formatter};
@@ -17,9 +19,10 @@ use std::str;
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Idiom";
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[revisioned(revision = 1)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
+#[non_exhaustive]
 pub struct Idioms(pub Vec<Idiom>);
 
 impl Deref for Idioms {
@@ -43,10 +46,11 @@ impl Display for Idioms {
 	}
 }
 
+#[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[serde(rename = "$surrealdb::private::sql::Idiom")]
-#[revisioned(revision = 1)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
+#[non_exhaustive]
 pub struct Idiom(pub Vec<Part>);
 
 impl Deref for Idiom {
@@ -62,6 +66,12 @@ impl From<String> for Idiom {
 	}
 }
 
+impl From<&str> for Idiom {
+	fn from(v: &str) -> Self {
+		Self(vec![Part::from(v)])
+	}
+}
+
 impl From<Vec<Part>> for Idiom {
 	fn from(v: Vec<Part>) -> Self {
 		Self(v)
@@ -73,6 +83,7 @@ impl From<&[Part]> for Idiom {
 		Self(v.to_vec())
 	}
 }
+
 impl From<Part> for Idiom {
 	fn from(v: Part) -> Self {
 		Self(vec![v])
@@ -146,26 +157,26 @@ impl Idiom {
 	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
+		stk: &mut Stk,
 		ctx: &Context<'_>,
 		opt: &Options,
-		txn: &Transaction,
 		doc: Option<&CursorDoc<'_>>,
 	) -> Result<Value, Error> {
 		match self.first() {
 			// The starting part is a value
 			Some(Part::Start(v)) => {
-				v.compute(ctx, opt, txn, doc)
+				v.compute(stk, ctx, opt, doc)
 					.await?
-					.get(ctx, opt, txn, doc, self.as_ref().next())
+					.get(stk, ctx, opt, doc, self.as_ref().next())
 					.await?
-					.compute(ctx, opt, txn, doc)
+					.compute(stk, ctx, opt, doc)
 					.await
 			}
 			// Otherwise use the current document
 			_ => match doc {
 				// There is a current document
 				Some(v) => {
-					v.doc.get(ctx, opt, txn, doc, self).await?.compute(ctx, opt, txn, doc).await
+					v.doc.get(stk, ctx, opt, doc, self).await?.compute(stk, ctx, opt, doc).await
 				}
 				// There isn't any document
 				None => Ok(Value::None),
@@ -188,5 +199,17 @@ impl Display for Idiom {
 			),
 			f,
 		)
+	}
+}
+
+impl InfoStructure for Idioms {
+	fn structure(self) -> Value {
+		self.to_string().into()
+	}
+}
+
+impl InfoStructure for Idiom {
+	fn structure(self) -> Value {
+		self.to_string().into()
 	}
 }

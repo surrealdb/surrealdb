@@ -9,7 +9,7 @@ FROM docker.io/rockylinux:8 as builder
 RUN yum install -y gcc-toolset-13 git cmake llvm-toolset patch zlib-devel python3.11
 
 # Install rust
-ARG RUST_VERSION=1.75.0
+ARG RUST_VERSION=1.77.0
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs > /tmp/rustup.sh
 RUN bash /tmp/rustup.sh -y --default-toolchain ${RUST_VERSION}
 ENV PATH="/root/.cargo/bin:${PATH}"

@@ -1,5 +1,13 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
+#[cfg(any(
+	feature = "kv-mem",
+	feature = "kv-surrealkv",
+	feature = "kv-rocksdb",
+	feature = "kv-fdb",
+	feature = "kv-tikv",
+))]
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 #[cfg(not(target_arch = "wasm32"))]
@@ -7,6 +15,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use channel::{Receiver, Sender};
 use futures::{lock::Mutex, Future};
+use reblessive::{tree::Stk, TreeStack};
 use tokio::sync::RwLock;
 use tracing::instrument;
 use tracing::trace;
@@ -14,18 +23,16 @@ use tracing::trace;
 #[cfg(target_arch = "wasm32")]
 use wasmtimer::std::{SystemTime, UNIX_EPOCH};
 
+use super::tx::Transaction;
 use crate::cf;
-use crate::cf::{ChangeSet, TableMutation};
 use crate::ctx::Context;
 #[cfg(feature = "jwks")]
 use crate::dbs::capabilities::NetTarget;
 use crate::dbs::{
 	node::Timestamp, Attach, Capabilities, Executor, Notification, Options, Response, Session,
-	Statement, Variables, Workable,
+	Variables,
 };
-use crate::doc::Document;
 use crate::err::Error;
-use crate::fflags::FFLAGS;
 #[cfg(feature = "jwks")]
 use crate::iam::jwks::JwksCache;
 use crate::iam::{Action, Auth, Error as IamError, Resource, Role};
@@ -34,17 +41,14 @@ use crate::key::root::hb::Hb;
 use crate::kvs::clock::SizedClock;
 #[allow(unused_imports)]
 use crate::kvs::clock::SystemClock;
-use crate::kvs::lq_structs::{
-	LqIndexKey, LqIndexValue, LqSelector, LqValue, TrackedResult, UnreachableLqType,
-};
+use crate::kvs::lq_cf::LiveQueryTracker;
+use crate::kvs::lq_structs::{LqValue, TrackedResult, UnreachableLqType};
+use crate::kvs::lq_v2_fut::process_lq_notifications;
 use crate::kvs::{LockType, LockType::*, TransactionType, TransactionType::*};
 use crate::options::EngineOptions;
-use crate::sql::statements::show::ShowSince;
 use crate::sql::{self, statements::DefineUserStatement, Base, Query, Uuid, Value};
 use crate::syn;
 use crate::vs::{conv, Oracle, Versionstamp};
-
-use super::tx::Transaction;
 
 // If there are an infinite number of heartbeats, then we want to go batch-by-batch spread over several checks
 const HEARTBEAT_BATCH_SIZE: u32 = 1000;
@@ -53,8 +57,12 @@ const LQ_CHANNEL_SIZE: usize = 100;
 // The batch size used for non-paged operations (i.e. if there are more results, they are ignored)
 const NON_PAGED_BATCH_SIZE: u32 = 100_000;
 
+// The role assigned to the initial user created when starting the server with credentials for the first time
+const INITIAL_USER_ROLE: &str = "owner";
+
 /// The underlying datastore instance which stores the dataset.
 #[allow(dead_code)]
+#[non_exhaustive]
 pub struct Datastore {
 	// The inner datastore type
 	inner: Inner,
@@ -64,27 +72,18 @@ pub struct Datastore {
 	strict: bool,
 	// Whether authentication is enabled on this datastore.
 	auth_enabled: bool,
-	// Whether authentication level is enabled on this datastore.
-	// TODO(gguillemas): Remove this field once the legacy authentication is deprecated in v2.0.0
-	auth_level_enabled: bool,
 	// The maximum duration timeout for running multiple statements in a query
 	query_timeout: Option<Duration>,
 	// The maximum duration timeout for running multiple statements in a transaction
 	transaction_timeout: Option<Duration>,
 	// Capabilities for this datastore
 	capabilities: Capabilities,
-	engine_options: EngineOptions,
+	pub(super) engine_options: EngineOptions,
 	// The versionstamp oracle for this datastore.
 	// Used only in some datastores, such as tikv.
 	versionstamp_oracle: Arc<Mutex<Oracle>>,
 	// Whether this datastore enables live query notifications to subscribers
-	notification_channel: Option<(Sender<Notification>, Receiver<Notification>)>,
-	// Map of Live Query identifier (ns+db+tb) for change feed tracking
-	// the mapping is to a list of affected live queries
-	local_live_queries: Arc<RwLock<BTreeMap<LqIndexKey, Vec<LqIndexValue>>>>,
-	// Set of tracked change feeds with associated watermarks
-	// This is updated with new/removed live queries and improves cf request performance
-	cf_watermarks: Arc<RwLock<BTreeMap<LqSelector, Versionstamp>>>,
+	pub(super) notification_channel: Option<(Sender<Notification>, Receiver<Notification>)>,
 	// Clock for tracking time. It is read only and accessible to all transactions. It is behind a mutex as tests may write to it.
 	clock: Arc<SizedClock>,
 	// The index store cache
@@ -92,6 +91,16 @@ pub struct Datastore {
 	#[cfg(feature = "jwks")]
 	// The JWKS object cache
 	jwks_cache: Arc<RwLock<JwksCache>>,
+	#[cfg(any(
+		feature = "kv-mem",
+		feature = "kv-surrealkv",
+		feature = "kv-rocksdb",
+		feature = "kv-fdb",
+		feature = "kv-tikv",
+	))]
+	// The temporary directory
+	temporary_directory: Option<Arc<PathBuf>>,
+	pub(crate) lq_cf_store: Arc<RwLock<LiveQueryTracker>>,
 }
 
 /// We always want to be circulating the live query information
@@ -104,8 +113,6 @@ pub(super) enum Inner {
 	Mem(super::mem::Datastore),
 	#[cfg(feature = "kv-rocksdb")]
 	RocksDB(super::rocksdb::Datastore),
-	#[cfg(feature = "kv-speedb")]
-	SpeeDB(super::speedb::Datastore),
 	#[cfg(feature = "kv-indxdb")]
 	IndxDB(super::indxdb::Datastore),
 	#[cfg(feature = "kv-tikv")]
@@ -124,8 +131,6 @@ impl fmt::Display for Datastore {
 			Inner::Mem(_) => write!(f, "memory"),
 			#[cfg(feature = "kv-rocksdb")]
 			Inner::RocksDB(_) => write!(f, "rocksdb"),
-			#[cfg(feature = "kv-speedb")]
-			Inner::SpeeDB(_) => write!(f, "speedb"),
 			#[cfg(feature = "kv-indxdb")]
 			Inner::IndxDB(_) => write!(f, "indxdb"),
 			#[cfg(feature = "kv-tikv")]
@@ -203,7 +208,6 @@ impl Datastore {
 		#[cfg(not(any(
 			feature = "kv-mem",
 			feature = "kv-rocksdb",
-			feature = "kv-speedb",
 			feature = "kv-indxdb",
 			feature = "kv-tikv",
 			feature = "kv-fdb",
@@ -257,22 +261,6 @@ impl Datastore {
 				}
 				#[cfg(not(feature = "kv-rocksdb"))]
                 return Err(Error::Ds("Cannot connect to the `rocksdb` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
-			}
-			// Parse and initiate an SpeeDB database
-			s if s.starts_with("speedb:") => {
-				#[cfg(feature = "kv-speedb")]
-				{
-					info!("Starting kvs store at {}", path);
-					let s = s.trim_start_matches("speedb://");
-					let s = s.trim_start_matches("speedb:");
-					let v = super::speedb::Datastore::new(s).await.map(Inner::SpeeDB);
-					info!("Started kvs store at {}", path);
-					let default_clock = Arc::new(SizedClock::System(SystemClock::new()));
-					let clock = clock_override.unwrap_or(default_clock);
-					Ok((v, clock))
-				}
-				#[cfg(not(feature = "kv-speedb"))]
-                return Err(Error::Ds("Cannot connect to the `speedb` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
 			}
 			// Parse and initiate an IndxDB database
 			s if s.starts_with("indxdb:") => {
@@ -352,8 +340,6 @@ impl Datastore {
 			inner,
 			strict: false,
 			auth_enabled: false,
-			// TODO(gguillemas): Remove this field once the legacy authentication is deprecated in v2.0.0
-			auth_level_enabled: false,
 			query_timeout: None,
 			transaction_timeout: None,
 			notification_channel: None,
@@ -362,10 +348,17 @@ impl Datastore {
 			versionstamp_oracle: Arc::new(Mutex::new(Oracle::systime_counter())),
 			clock,
 			index_stores: IndexStores::default(),
-			local_live_queries: Arc::new(RwLock::new(BTreeMap::new())),
-			cf_watermarks: Arc::new(RwLock::new(BTreeMap::new())),
 			#[cfg(feature = "jwks")]
 			jwks_cache: Arc::new(RwLock::new(JwksCache::new())),
+			#[cfg(any(
+				feature = "kv-mem",
+				feature = "kv-surrealkv",
+				feature = "kv-rocksdb",
+				feature = "kv-fdb",
+				feature = "kv-tikv",
+			))]
+			temporary_directory: None,
+			lq_cf_store: Arc::new(RwLock::new(LiveQueryTracker::new())),
 		})
 	}
 
@@ -405,16 +398,21 @@ impl Datastore {
 		self
 	}
 
-	/// Set whether authentication levels are enabled for this Datastore
-	/// TODO(gguillemas): Remove this method once the legacy authentication is deprecated in v2.0.0
-	pub fn with_auth_level_enabled(mut self, enabled: bool) -> Self {
-		self.auth_level_enabled = enabled;
-		self
-	}
-
 	/// Set specific capabilities for this Datastore
 	pub fn with_capabilities(mut self, caps: Capabilities) -> Self {
 		self.capabilities = caps;
+		self
+	}
+
+	#[cfg(any(
+		feature = "kv-mem",
+		feature = "kv-surrealkv",
+		feature = "kv-rocksdb",
+		feature = "kv-fdb",
+		feature = "kv-tikv",
+	))]
+	pub fn with_temporary_directory(mut self, path: PathBuf) -> Self {
+		self.temporary_directory = Some(Arc::new(path));
 		self
 	}
 
@@ -431,12 +429,6 @@ impl Datastore {
 	/// Is authentication enabled for this Datastore?
 	pub fn is_auth_enabled(&self) -> bool {
 		self.auth_enabled
-	}
-
-	/// Is authentication level enabled for this Datastore?
-	/// TODO(gguillemas): Remove this method once the legacy authentication is deprecated in v2.0.0
-	pub fn is_auth_level_enabled(&self) -> bool {
-		self.auth_level_enabled
 	}
 
 	/// Does the datastore allow connections to a network target?
@@ -464,11 +456,12 @@ impl Datastore {
 			Ok(v) if v.is_empty() => {
 				// Display information in the logs
 				info!("Credentials were provided, and no root users were found. The root user '{}' will be created", username);
-				// Create and save a new root users
-				let stm = DefineUserStatement::from((Base::Root, username, password));
-				let ctx = Context::default();
+				// Create and save a new root user
+				let stm =
+					DefineUserStatement::from((Base::Root, username, password, INITIAL_USER_ROLE));
+				let ctx = Context::default().set_transaction(txn.clone());
 				let opt = Options::new().with_auth(Arc::new(Auth::for_root(Role::Owner)));
-				let _ = stm.compute(&ctx, &opt, &txn, None).await?;
+				let _ = stm.compute(&ctx, &opt, None).await?;
 				// We added a new user, so commit the transaction
 				txn.lock().await.commit().await?;
 				// Everything ok
@@ -835,7 +828,7 @@ impl Datastore {
 	// It is handy for testing, because it allows you to specify the timestamp,
 	// without depending on a system clock.
 	pub async fn tick_at(&self, ts: u64) -> Result<(), Error> {
-		trace!("Ticking at timestamp {}", ts);
+		trace!("Ticking at timestamp {} ({:?})", ts, conv::u64_to_versionstamp(ts));
 		let _vs = self.save_timestamp_for_versionstamp(ts).await?;
 		self.garbage_collect_stale_change_feeds(ts).await?;
 		// TODO Add LQ GC
@@ -866,267 +859,29 @@ impl Datastore {
 	}
 
 	/// Poll change feeds for live query notifications
-	pub async fn process_lq_notifications(&self, opt: &Options) -> Result<(), Error> {
-		// Runtime feature gate, as it is not production-ready
-		if !FFLAGS.change_feed_live_queries.enabled() {
-			return Ok(());
-		}
-		// Return if there are no live queries
-		if self.notification_channel.is_none() {
-			trace!("Channels is none, short-circuiting");
-			return Ok(());
-		}
-		if self.local_live_queries.read().await.is_empty() {
-			trace!("No live queries, short-circuiting");
-			return Ok(());
-		}
-
-		// Change map includes a mapping of selector to changesets, ordered by versionstamp
-		let mut change_map: BTreeMap<LqSelector, Vec<ChangeSet>> = BTreeMap::new();
-		let mut tx = self.transaction(Read, Optimistic).await?;
-		let mut tracked_cfs = self.cf_watermarks.write().await;
-		let mut tracked_cfs_updates = Vec::with_capacity(tracked_cfs.len());
-		for (selector, vs) in tracked_cfs.iter() {
-			// Read the change feed for the selector
-			let res = cf::read(
-				&mut tx,
-				&selector.ns,
-				&selector.db,
-				// Technically, we can not fetch by table and do the per-table filtering this side.
-				// That is an improvement though
-				Some(&selector.tb),
-				ShowSince::versionstamp(vs),
-				Some(self.engine_options.live_query_catchup_size),
-			)
-			.await?;
-			// Confirm we do need to change watermark - this is technically already handled by the cf range scan
-			if res.is_empty() {
-				trace!(
-					"There were no changes in the change feed for {:?} from versionstamp {:?}",
-					selector,
-					conv::versionstamp_to_u64(vs)
-				)
-			}
-			if let Some(change_set) = res.last() {
-				if conv::versionstamp_to_u64(&change_set.0) > conv::versionstamp_to_u64(vs) {
-					trace!("Adding a change set for lq notification processing");
-					// Update the cf watermark so we can progress scans
-					// If the notifications fail from here-on, they are lost
-					// this is a separate vec that we later insert to because we are iterating immutably
-					// We shouldn't use a read lock because of consistency between watermark scans
-					tracked_cfs_updates.push((selector.clone(), change_set.0));
-					// This does not guarantee a notification, as a changeset an include many tables and many changes
-					change_map.insert(selector.clone(), res);
-				}
-			}
-		}
-		tx.cancel().await?;
-
-		// Now we update since we are no longer iterating immutably
-		for (selector, vs) in tracked_cfs_updates {
-			tracked_cfs.insert(selector, vs);
-		}
-
-		for (selector, change_sets) in change_map {
-			// find matching live queries
-			let lq_pairs: Vec<(LqIndexKey, LqIndexValue)> = {
-				let lq_lock = self.local_live_queries.read().await;
-				lq_lock
-					.iter()
-					.filter(|(k, _)| k.selector == selector)
-					.flat_map(|(lq_index, lq_values)| {
-						lq_values.iter().cloned().map(|x| (lq_index.clone(), x))
-					})
-					.to_owned()
-					.collect()
-			};
-
-			// Find relevant changes
-			let tx = Arc::new(Mutex::new(self.transaction(Read, Optimistic).await?));
-			for change_set in change_sets {
-				// TODO(phughk): this loop can be on the inside so we are only checking lqs relavant to cf change
-				for (lq_key, lq_value) in lq_pairs.iter() {
-					trace!(
-						"Processing live query for notification key={:?} and value={:?}",
-						lq_key,
-						lq_value
-					);
-					let change_vs = change_set.0;
-					let database_mutation = &change_set.1;
-					for table_mutations in database_mutation.0.iter() {
-						if table_mutations.0 == lq_key.selector.tb {
-							// Create a doc of the table value
-							// Run the 'lives' logic on the doc, while providing live queries instead of reading from storage
-							// This will generate and send notifications
-							for mutation in table_mutations.1.iter() {
-								if let Some(doc) = Self::construct_document(mutation) {
-									// We know we are only processing a single LQ at a time, so we can limit notifications to 1
-									let notification_capacity = 1;
-									// We track notifications as a separate channel in case we want to process
-									// for the current state we only forward
-									let (sender, receiver) =
-										channel::bounded(notification_capacity);
-									doc.check_lqs_and_send_notifications(
-										opt,
-										&Statement::Live(&lq_value.stm),
-										&tx,
-										[&lq_value.stm].as_slice(),
-										&sender,
-									)
-									.await
-									.map_err(|e| {
-										Error::Internal(format!(
-											"Error checking lqs for notifications: {:?}",
-											e
-										))
-									})?;
-
-									// Send the notifications to driver or api
-									// TODO: evaluate if we want channel directly instead of proxy
-									while let Ok(notification) = receiver.try_recv() {
-										trace!("Sending notification to client");
-										self.notification_channel
-											.as_ref()
-											.unwrap()
-											.0
-											.send(notification)
-											.await
-											.unwrap();
-									}
-									trace!("Ended notification sending")
-								}
-
-								// Update watermarks
-								trace!(
-									"Updating watermark to {:?} for index key {:?}",
-									change_vs,
-									lq_key
-								);
-
-								// For each live query we have processed we update the watermarks
-								self.local_live_queries.write().await.insert(
-									(*lq_key).clone(),
-									vec![LqIndexValue {
-										vs: change_vs,
-										..lq_value.clone()
-									}],
-								);
-
-								// We also update the tracked_cfs with a minimum watermark
-							}
-						}
-					}
-				}
-			}
-		}
-		Ok(())
-	}
-
-	/// Construct a document from a Change Feed mutation
-	/// This is required to perform document operations such as live query notifications
-	fn construct_document(mutation: &TableMutation) -> Option<Document> {
-		match mutation {
-			TableMutation::Set(a, b) => {
-				let doc = Document::new(None, Some(a), None, b, Workable::Normal);
-				Some(doc)
-			}
-			TableMutation::Del(a) => {
-				let doc = Document::new(None, Some(a), None, &Value::None, Workable::Normal);
-				Some(doc)
-			}
-			TableMutation::Def(_) => None,
-			TableMutation::SetPrevious(id, _old, new) => {
-				let doc = Document::new(None, Some(id), None, new, Workable::Normal);
-				// TODO set previous value
-				Some(doc)
-			}
-		}
+	pub async fn process_lq_notifications(
+		&self,
+		stk: &mut Stk,
+		opt: &Options,
+	) -> Result<(), Error> {
+		process_lq_notifications(self, stk, opt).await
 	}
 
 	/// Add and kill live queries being track on the datastore
 	/// These get polled by the change feed tick
-	pub(crate) async fn adapt_tracked_live_queries(
+	pub(crate) async fn handle_postprocessing_of_statements(
 		&self,
 		lqs: &Vec<TrackedResult>,
 	) -> Result<(), Error> {
 		// Lock the local live queries
-		let mut lq_map = self.local_live_queries.write().await;
-		let mut cf_watermarks = self.cf_watermarks.write().await;
-		let mut watermarks_to_check: Vec<LqIndexKey> = vec![];
+		let mut lq_cf_store = self.lq_cf_store.write().await;
 		for lq in lqs {
 			match lq {
 				TrackedResult::LiveQuery(lq) => {
-					let lq_index_key: LqIndexKey = lq.as_key();
-					let m = lq_map.get_mut(&lq_index_key);
-					match m {
-						Some(lq_index_value) => lq_index_value.push(lq.as_value()),
-						None => {
-							let lq_vec = vec![lq.as_value()];
-							lq_map.insert(lq_index_key.clone(), lq_vec);
-						}
-					}
-					let selector = lq_index_key.selector;
-					// TODO(phughk): - read watermark for catchup
-					// We insert the current watermark.
-					cf_watermarks.entry(selector).or_insert_with(Versionstamp::default);
+					lq_cf_store.register_live_query(lq, Versionstamp::default()).unwrap();
 				}
 				TrackedResult::KillQuery(kill_entry) => {
-					let found: Option<(LqIndexKey, LqIndexValue)> = lq_map
-						.iter_mut()
-						.filter(|(k, _)| {
-							// Get all the live queries in the ns/db pair. We don't know table
-							k.selector.ns == kill_entry.ns && k.selector.db == kill_entry.db
-						})
-						.filter_map(|(k, v)| {
-							let index = v.iter().position(|a| a.stm.id == kill_entry.live_id);
-							match index {
-								Some(i) => {
-									let v = v.remove(i);
-									// Sadly we do need to clone out of mutable reference, because of Strings
-									Some((k.clone(), v))
-								}
-								None => None,
-							}
-						})
-						.next();
-					match found {
-						None => {
-							// TODO(SUR-336): Make Live Query ID validation available at statement level, perhaps via transaction
-							trace!(
-								"Could not find live query {:?} to kill in ns/db pair {:?}",
-								&kill_entry,
-								&kill_entry.ns
-							);
-						}
-						Some(found) => {
-							trace!(
-								"Killed live query {:?} with found key {:?} and found value {:?}",
-								&kill_entry,
-								&found.0,
-								&found.1
-							);
-							// Check if we need to remove the LQ key from tracking
-							let empty = match lq_map.get(&found.0) {
-								None => false,
-								Some(v) => v.is_empty(),
-							};
-							if empty {
-								trace!("Removing live query index key {:?}", &found.0);
-								lq_map.remove(&found.0);
-							}
-							// Now add the LQ to tracked watermarks
-							watermarks_to_check.push(found.0.clone());
-						}
-					};
-				}
-			}
-		}
-		// Now check if we can stop tracking watermarks
-		for watermark in watermarks_to_check {
-			if let Some(lq) = lq_map.get(&watermark) {
-				if lq.is_empty() {
-					trace!("Removing watermark for {:?}", watermark);
-					cf_watermarks.remove(&watermark.selector);
+					lq_cf_store.unregister_live_query(kill_entry);
 				}
 			}
 		}
@@ -1223,22 +978,25 @@ impl Datastore {
 	///     Ok(())
 	/// }
 	/// ```
+	#[allow(unreachable_code)]
 	pub async fn transaction(
 		&self,
 		write: TransactionType,
 		lock: LockType,
 	) -> Result<Transaction, Error> {
-		#![allow(unused_variables)]
+		#[allow(unused_variables)]
 		let write = match write {
-			TransactionType::Read => false,
-			TransactionType::Write => true,
+			Read => false,
+			Write => true,
 		};
 
+		#[allow(unused_variables)]
 		let lock = match lock {
-			LockType::Pessimistic => true,
-			LockType::Optimistic => false,
+			Pessimistic => true,
+			Optimistic => false,
 		};
 
+		#[allow(unused_variables)]
 		let inner = match &self.inner {
 			#[cfg(feature = "kv-mem")]
 			Inner::Mem(v) => {
@@ -1249,11 +1007,6 @@ impl Datastore {
 			Inner::RocksDB(v) => {
 				let tx = v.transaction(write, lock).await?;
 				super::tx::Inner::RocksDB(tx)
-			}
-			#[cfg(feature = "kv-speedb")]
-			Inner::SpeeDB(v) => {
-				let tx = v.transaction(write, lock).await?;
-				super::tx::Inner::SpeeDB(tx)
 			}
 			#[cfg(feature = "kv-indxdb")]
 			Inner::IndxDB(v) => {
@@ -1282,7 +1035,6 @@ impl Datastore {
 		let (send, recv): (Sender<TrackedResult>, Receiver<TrackedResult>) =
 			channel::bounded(LQ_CHANNEL_SIZE);
 
-		#[allow(unreachable_code)]
 		Ok(Transaction {
 			inner,
 			cache: super::cache::Cache::default(),
@@ -1377,6 +1129,14 @@ impl Datastore {
 			self.query_timeout,
 			self.capabilities.clone(),
 			self.index_stores.clone(),
+			#[cfg(any(
+				feature = "kv-mem",
+				feature = "kv-surrealkv",
+				feature = "kv-rocksdb",
+				feature = "kv-fdb",
+				feature = "kv-tikv",
+			))]
+			self.temporary_directory.clone(),
 		)?;
 		// Setup the notification channel
 		if let Some(channel) = &self.notification_channel {
@@ -1391,7 +1151,7 @@ impl Datastore {
 		match res {
 			Ok((responses, lives)) => {
 				// Register live queries
-				self.adapt_tracked_live_queries(&lives).await?;
+				self.handle_postprocessing_of_statements(&lives).await?;
 				Ok(responses)
 			}
 			Err(e) => Err(e),
@@ -1427,6 +1187,9 @@ impl Datastore {
 		if sess.expired() {
 			return Err(Error::ExpiredSession);
 		}
+
+		let mut stack = TreeStack::new();
+
 		// Check if anonymous actors can compute values when auth is enabled
 		// TODO(sgirones): Check this as part of the authorisation layer
 		if self.auth_enabled && !self.capabilities.allows_guest_access() {
@@ -1465,7 +1228,7 @@ impl Datastore {
 		// Start a new transaction
 		let txn = self.transaction(val.writeable().into(), Optimistic).await?.enclose();
 		// Compute the value
-		let res = val.compute(&ctx, &opt, &txn, None).await;
+		let res = stack.enter(|stk| val.compute(stk, &ctx, &opt, None)).finish().await;
 		// Store any data
 		match (res.is_ok(), val.writeable()) {
 			// If the compute was successful, then commit if writeable
@@ -1480,7 +1243,7 @@ impl Datastore {
 	/// Evaluates a SQL [`Value`] without checking authenticating config
 	/// This is used in very specific cases, where we do not need to check
 	/// whether authentication is enabled, or guest access is disabled.
-	/// For example, this is used when processing a SCOPE SIGNUP or SCOPE
+	/// For example, this is used when processing a record access SIGNUP or
 	/// SIGNIN clause, which still needs to work without guest access.
 	///
 	/// ```rust,no_run
@@ -1510,6 +1273,8 @@ impl Datastore {
 		if sess.expired() {
 			return Err(Error::ExpiredSession);
 		}
+
+		let mut stack = TreeStack::new();
 		// Create a new query options
 		let opt = Options::default()
 			.with_id(self.id.0)
@@ -1537,8 +1302,10 @@ impl Datastore {
 		let ctx = vars.attach(ctx)?;
 		// Start a new transaction
 		let txn = self.transaction(val.writeable().into(), Optimistic).await?.enclose();
+		let ctx = ctx.set_transaction(txn.clone());
+
 		// Compute the value
-		let res = val.compute(&ctx, &opt, &txn, None).await;
+		let res = stack.enter(|stk| val.compute(stk, &ctx, &opt, None)).finish().await;
 		// Store any data
 		match (res.is_ok(), val.writeable()) {
 			// If the compute was successful, then commit if writeable
@@ -1618,6 +1385,59 @@ impl Datastore {
 			sess.au.is_allowed(action, &resource)?;
 		}
 		// All ok
+		Ok(())
+	}
+}
+
+#[cfg(test)]
+mod test {
+	use super::*;
+
+	#[tokio::test]
+	pub async fn very_deep_query() -> Result<(), Error> {
+		use crate::kvs::Datastore;
+		use crate::sql::{Expression, Future, Number, Operator, Value};
+		use reblessive::{Stack, Stk};
+
+		// build query manually to bypass query limits.
+		let mut stack = Stack::new();
+		async fn build_query(stk: &mut Stk, depth: usize) -> Value {
+			if depth == 0 {
+				Value::Expression(Box::new(Expression::Binary {
+					l: Value::Number(Number::Int(1)),
+					o: Operator::Add,
+					r: Value::Number(Number::Int(1)),
+				}))
+			} else {
+				let q = stk.run(|stk| build_query(stk, depth - 1)).await;
+				Value::Future(Box::new(Future::from(q)))
+			}
+		}
+		let val = stack.enter(|stk| build_query(stk, 1000)).finish();
+
+		let dbs = Datastore::new("memory").await.unwrap().with_capabilities(Capabilities::all());
+
+		let opt = Options::default()
+			.with_id(dbs.id.0)
+			.with_ns(Some("test".into()))
+			.with_db(Some("test".into()))
+			.with_live(false)
+			.with_strict(false)
+			.with_auth_enabled(false)
+			.with_max_computation_depth(u32::MAX)
+			.with_futures(true);
+
+		// Create a default context
+		let mut ctx = Context::default();
+		// Set context capabilities
+		ctx.add_capabilities(dbs.capabilities.clone());
+		// Start a new transaction
+		let txn = dbs.transaction(val.writeable().into(), Optimistic).await?.enclose();
+		let ctx = ctx.set_transaction(txn);
+		// Compute the value
+		let mut stack = reblessive::tree::TreeStack::new();
+		let res = stack.enter(|stk| val.compute(stk, &ctx, &opt, None)).finish().await.unwrap();
+		assert_eq!(res, Value::Number(Number::Int(2)));
 		Ok(())
 	}
 }

@@ -32,6 +32,7 @@ pub trait BKeys: Default + Debug + Display + Sized {
 	fn compile(&mut self) {}
 }
 
+#[non_exhaustive]
 pub struct SplitKeys<BK>
 where
 	BK: BKeys,
@@ -44,6 +45,7 @@ where
 }
 
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct FstKeys {
 	i: Inner,
 }
@@ -285,6 +287,7 @@ impl Display for FstKeys {
 }
 
 #[derive(Default, Debug, Clone)]
+#[non_exhaustive]
 pub struct TrieKeys {
 	keys: Trie<Key, Payload>,
 }

@@ -4,11 +4,16 @@ on:
       environment:
         required: true
         type: string
-        description: "The name of this release environment. It can be a 'nightly', 'beta' or 'release'"
+        description: "The name of this release environment. It can be 'nightly', 'alpha', 'beta' or 'stable'"
       git-ref:
         required: true
         type: string
         description: "The git ref of this release version. All 'actions/checkout' steps will use it"
+      patch:
+        required: false
+        type: string
+        default: "1"
+        description: "The patch release of this alpha release"
       bump-version:
         required: false
         type: boolean
@@ -32,7 +37,7 @@ on:
       rust_version:
         required: false
         type: string
-        default: "1.75.0"
+        default: "1.77.1"
         description: "The Rust version to use for building binaries"
       onnx_version:
         required: false
@@ -53,6 +58,9 @@ on:
 defaults:
   run:
     shell: bash
+
+env:
+  RUSTFLAGS: "--cfg surrealdb_unstable"
 
 jobs:
   prepare-vars:
@@ -166,12 +174,23 @@ jobs:
           # Create the tag
           git tag -a v${betaVersion} -m "Release ${betaVersion}" || true
 
+      - name: Create or patch alpha branch
+        if: ${{ inputs.environment == 'alpha' }}
+        run: |
+          set -x
+
+          currentVersion=$(taplo get -f Cargo.toml "package.version")
+
+          # Create the tag
+          alphaVersion=${currentVersion}-${{ inputs.environment }}.${{ inputs.patch }}
+          git tag -a v${alphaVersion} -m "Release ${alphaVersion}" || true
+
       - name: Push changes
         if: ${{ inputs.publish && (inputs.environment == 'beta' || inputs.environment == 'stable') }}
         run: git push
 
       - name: Push tag
-        if: ${{ inputs.publish && (inputs.environment == 'beta' || inputs.environment == 'stable') }}
+        if: ${{ inputs.publish && (inputs.environment == 'alpha' || inputs.environment == 'beta' || inputs.environment == 'stable') }}
         run: git push --tags || true
 
       - name: Set outputs
@@ -181,7 +200,11 @@ jobs:
 
           version=$(taplo get -f Cargo.toml "package.version")
 
-          if [[ "${{ inputs.publish }}" == "true" && ("${{ inputs.environment }}" == "beta" || "${{ inputs.environment }}" == "stable")  ]]; then
+          if [[ "${{ inputs.environment }}" == "alpha" ]]; then
+            version=${version}-${{ inputs.environment }}.${{ inputs.patch }}
+          fi
+
+          if [[ "${{ inputs.publish }}" == "true" && ("${{ inputs.environment }}" == "alpha" || "${{ inputs.environment }}" == "beta" || "${{ inputs.environment }}" == "stable")  ]]; then
             echo "git-ref=v${version}" >> $GITHUB_OUTPUT
           else
             echo "git-ref=${{ inputs.git-ref }}" >> $GITHUB_OUTPUT
@@ -200,7 +223,7 @@ jobs:
 
   test:
     name: Test
-    needs: [prepare-vars]
+    needs: [ prepare-vars ]
     runs-on: ubuntu-latest-16-cores
     steps:
       - name: Install stable toolchain
@@ -245,7 +268,7 @@ jobs:
 
   lint:
     name: Lint
-    needs: [prepare-vars]
+    needs: [ prepare-vars ]
     runs-on: ubuntu-latest
     steps:
       - name: Checkout sources
@@ -278,7 +301,7 @@ jobs:
   docker-builder:
     name: Prepare docker builder
     runs-on: ubuntu-latest
-    needs: [prepare-vars]
+    needs: [ prepare-vars ]
     outputs:
       name: ${{ steps.image.outputs.name }}
       tag: ${{ steps.image.outputs.tag }}
@@ -330,7 +353,7 @@ jobs:
 
   build:
     name: Build ${{ matrix.arch }} binary
-    needs: [prepare-vars, docker-builder]
+    needs: [ prepare-vars, docker-builder ]
     strategy:
       fail-fast: false
       matrix:
@@ -346,7 +369,7 @@ jobs:
               brew install protobuf
 
               # Build
-              features=storage-tikv,http-compression,sql2,jwks,${{ inputs.extra-features }}
+              features=storage-tikv,http-compression,jwks,${{ inputs.extra-features }}
 
               # Download libonnxruntime's static library and tell ORT crate to use it
               mkdir /tmp/onnxruntime
@@ -373,7 +396,7 @@ jobs:
               brew install protobuf
 
               # Build
-              features=storage-tikv,http-compression,sql2,jwks,${{ inputs.extra-features }}
+              features=storage-tikv,http-compression,jwks,${{ inputs.extra-features }}
 
               # Download libonnxruntime's static library and tell ORT crate to use it
               mkdir /tmp/onnxruntime
@@ -391,11 +414,11 @@ jobs:
 
           # Linux amd64
           - arch: x86_64-unknown-linux-gnu
-            runner: ["self-hosted", "amd64", "builder"]
+            runner: [ "self-hosted", "amd64", "builder" ]
             file: surreal-${{ needs.prepare-vars.outputs.name }}.linux-amd64
             build-step: |
               # Build
-              features=storage-tikv,http-compression,sql2,jwks,${{ inputs.extra-features }}
+              features=storage-tikv,http-compression,jwks,${{ inputs.extra-features }}
 
               # Download libonnxruntime's static library and tell ORT crate to use it
               tmpdir=$(mktemp -d)
@@ -427,13 +450,13 @@ jobs:
 
           # Linux arm64
           - arch: aarch64-unknown-linux-gnu
-            runner: ["self-hosted", "arm64", "builder"]
+            runner: [ "self-hosted", "arm64", "builder" ]
             file: surreal-${{ needs.prepare-vars.outputs.name }}.linux-arm64
             build-step: |
               set -x
 
               # Build
-              features=storage-tikv,http-compression,sql2,jwks,${{ inputs.extra-features }}
+              features=storage-tikv,http-compression,jwks,${{ inputs.extra-features }}
 
               # Download libonnxruntime's static library and tell ORT crate to use it
               tmpdir=$(mktemp -d)
@@ -474,7 +497,7 @@ jobs:
               vcpkg integrate install
 
               # Build
-              features=storage-tikv,http-compression,sql2,jwks,${{ inputs.extra-features }}
+              features=storage-tikv,http-compression,jwks,${{ inputs.extra-features }}
 
               # Download libonnxruntime's static library and tell ORT crate to use it
               tmp_dir=$(mktemp -d)
@@ -495,6 +518,9 @@ jobs:
         uses: actions/checkout@v4
         with:
           ref: ${{ needs.prepare-vars.outputs.git-ref }}
+
+      - name: Create a temporary branch
+        run: git checkout -b binary
 
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -521,10 +547,42 @@ jobs:
           set +e
           go version ; cargo version ; rustc --version ; cmake --version ; gcc --version ; g++ --version ; perl -v
 
+      - name: Patch alpha crate version
+        if: ${{ inputs.environment == 'alpha' }}
+        run: |
+          set -x
+
+          version=2.0.0-${{ inputs.environment }}.${{ inputs.patch }}
+
+          if [[ "${{ matrix.arch }}" == *apple-darwin ]]; then
+            brew install gnu-sed
+
+            if [[ "${{ matrix.arch }}" == "aarch64-apple-darwin" ]]; then
+              export PATH="/opt/homebrew/opt/gnu-sed/libexec/gnubin:$PATH"
+            else
+              export PATH="/usr/local/opt/gnu-sed/libexec/gnubin:$PATH"
+            fi
+          fi
+
+          # Update the version to a nightly one
+          sed -i "s#^version = \".*\"#version = \"${version}\"#" Cargo.toml
+          sed -i "s#^version = \".*\"#version = \"${version}\"#" lib/Cargo.toml
+          sed -i "s#^version = \".*\"#version = \"${version}\"#" core/Cargo.toml
+          sed -i "s#surrealdb = { version = \"2\"#surrealdb = { version = \"=${version}\"#" Cargo.toml
+          sed -i "s#surrealdb-core = { version = \"2\"#surrealdb-core = { version = \"=${version}\"#" lib/Cargo.toml
+
+          # Update Cargo.lock without updating dependency versions
+          cargo check --no-default-features --features storage-mem
+
+          # Temporarily commit patches
+          # These should not be pushed back to the repo
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git config user.name "github-actions[bot]"
+          git commit -am "Version patches"
+
       - name: Build step
         env:
           SURREAL_BUILD_METADATA: ${{ needs.prepare-vars.outputs.build-metadata }}
-          RUSTFLAGS: "--cfg surrealdb_unstable"
         run: ${{ matrix.build-step }}
 
       - name: Upload artifacts
@@ -539,7 +597,7 @@ jobs:
 
   publish:
     name: Publish crate and artifacts binaries
-    needs: [prepare-vars, test, lint, build]
+    needs: [ prepare-vars, test, lint, build ]
     if: ${{ inputs.publish }}
     environment: ${{ inputs.environment }}
     runs-on: ubuntu-latest
@@ -560,7 +618,7 @@ jobs:
           sudo chmod +x /usr/bin/release-plz
 
       - name: Install a TOML parser
-        if: ${{ inputs.environment == 'nightly' || inputs.environment == 'beta' }}
+        if: ${{ inputs.environment != 'stable' }}
         run: |
           curl -L https://github.com/tamasfe/taplo/releases/download/0.8.1/taplo-full-linux-x86_64.gz | gunzip - > taplo
           chmod +x taplo
@@ -596,9 +654,23 @@ jobs:
           sed -i "s#^version = \".*\"#version = \"2.0.0-${version}\"#" core/Cargo.toml
           sed -i "s#surrealdb-core2 = { version = \"=2.0.0-${currentVersion}\"#surrealdb-core2 = { version = \"=2.0.0-${version}\"#" lib/Cargo.toml
 
+      - name: Patch alpha crate version
+        if: ${{ inputs.environment == 'alpha' }}
+        run: |
+          set -x
+
+          version=2.0.$((${{ inputs.patch }} - 1))
+
+          # Update the version to a nightly one
+          sed -i "s#^version = \".*\"#version = \"${version}\"#" lib/Cargo.toml
+          sed -i "s#^version = \".*\"#version = \"${version}\"#" core/Cargo.toml
+          sed -i "s#surrealdb-core = { version = \"2\"#surrealdb-core = { version = \"=${version}\"#" lib/Cargo.toml
+
       - name: Patch nightly crate version
         if: ${{ inputs.environment == 'nightly' }}
         run: |
+          set -x
+
           # Get the date of the last commit
           date=$(git show --no-patch --format=%ad --date=format:%Y%m%d)
 
@@ -611,11 +683,11 @@ jobs:
 
           # Update the version to a nightly one
           sed -i "s#^version = \".*\"#version = \"${version}\"#" lib/Cargo.toml
-          sed -i "s#^version = \".*\"#version = \"2.0.0-${version}\"#" core/Cargo.toml
-          sed -i "s#surrealdb-core2 = { version = \"=2.0.0-${currentVersion}\"#surrealdb-core2 = { version = \"=2.0.0-${version}\"#" lib/Cargo.toml
+          sed -i "s#^version = \".*\"#version = \"${version}\"#" core/Cargo.toml
+          sed -i "s#surrealdb-core = { version = \"${major}\"#surrealdb-core = { version = \"=${version}\"#" lib/Cargo.toml
 
       - name: Patch crate name and description
-        if: ${{ inputs.environment == 'nightly' || inputs.environment == 'beta' }}
+        if: ${{ inputs.environment != 'stable' }}
         run: |
           set -x
 
@@ -624,7 +696,7 @@ jobs:
           sed -i "0,/surrealdb-core/s//surrealdb-core-${{ inputs.environment }}/" core/Cargo.toml
 
           # Patch lib dependency
-          sed -i "s#package = \"surrealdb-core\"#package = \"surrealdb-core-${{ inputs.environment }}\"#" lib/Cargo.toml
+          sed -i "s#path = \"\.\./core\", package = \"surrealdb-core\"#path = \"../core\", package = \"surrealdb-core-${{ inputs.environment }}\"#" lib/Cargo.toml
 
           # Patch the description
           sed -i "s#^description = \".*\"#description = \"A ${{ inputs.environment }} release of the surrealdb crate\"#" lib/Cargo.toml
@@ -652,7 +724,7 @@ jobs:
         with:
           name: "Release ${{ needs.prepare-vars.outputs.git-ref }}"
           tag_name: ${{ needs.prepare-vars.outputs.git-ref }}
-          prerelease: ${{ inputs.environment == 'beta' || inputs.environment == 'nightly' }}
+          prerelease: ${{ inputs.environment != 'stable' }}
           fail_on_unmatched_files: true
           files: |
             LICENSE
@@ -672,11 +744,11 @@ jobs:
           echo ${{ needs.prepare-vars.outputs.git-ref }} > latest.txt
           aws s3 cp --cache-control 'no-store' latest.txt s3://download.surrealdb.com/latest.txt
 
-      - name: Set latest beta version
-        if: ${{ inputs.publish && inputs.environment == 'beta' }}
+      - name: Set latest alpha or beta version
+        if: ${{ inputs.publish && (inputs.environment == 'alpha' || inputs.environment == 'beta') }}
         run: |
-          echo ${{ needs.prepare-vars.outputs.git-ref }} > beta.txt
-          aws s3 cp --cache-control 'no-store' beta.txt s3://download.surrealdb.com/beta.txt
+          echo ${{ needs.prepare-vars.outputs.git-ref }} > ${{ inputs.environment }}.txt
+          aws s3 cp --cache-control 'no-store' ${{ inputs.environment }}.txt s3://download.surrealdb.com/${{ inputs.environment }}.txt
 
       - name: Publish binaries
         run: |
@@ -686,7 +758,7 @@ jobs:
 
   docker:
     name: Docker images
-    needs: [prepare-vars, publish]
+    needs: [ prepare-vars, publish ]
     uses: ./.github/workflows/reusable_docker.yml
     with:
       git-ref: ${{ needs.prepare-vars.outputs.git-ref }}
@@ -698,7 +770,7 @@ jobs:
 
   package-macos:
     name: Package and publish macOS universal binary
-    needs: [prepare-vars, publish]
+    needs: [ prepare-vars, publish ]
     runs-on: macos-latest
     env:
       FILE: surreal-${{ needs.prepare-vars.outputs.name }}.darwin-universal
@@ -738,7 +810,7 @@ jobs:
   propagate:
     name: Propagate binaries to all regions
     if: ${{ inputs.publish }}
-    needs: [publish, package-macos]
+    needs: [ publish, package-macos ]
     runs-on: ubuntu-latest
     steps:
       - name: Configure AWS

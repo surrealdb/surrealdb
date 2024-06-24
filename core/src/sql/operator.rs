@@ -6,9 +6,10 @@ use std::fmt;
 use std::fmt::Write;
 
 /// Binary operators.
+#[revisioned(revision = 2)]
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
-#[revisioned(revision = 1)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
+#[non_exhaustive]
 pub enum Operator {
 	//
 	Neg, // -
@@ -59,7 +60,9 @@ pub enum Operator {
 	Outside,
 	Intersects,
 	//
-	Knn(u32, Option<Distance>), // <{k}[,{dist}]>
+	Knn(u32, Option<Distance>), // <|{k}[,{dist}]|>
+	#[revision(start = 2)]
+	Ann(u32, u32), // <|{k},{ef}|>
 	//
 	Rem, // %
 }
@@ -144,6 +147,9 @@ impl fmt::Display for Operator {
 				} else {
 					write!(f, "<|{k}|>")
 				}
+			}
+			Self::Ann(k, ef) => {
+				write!(f, "<|{k},{ef}|>")
 			}
 		}
 	}

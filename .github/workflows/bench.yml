@@ -32,7 +32,7 @@ jobs:
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: 1.75.0
+          toolchain: stable
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
@@ -120,7 +120,7 @@ jobs:
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: 1.75.0
+          toolchain: stable
 
       - name: Setup cache
         uses: Swatinem/rust-cache@v2

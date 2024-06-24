@@ -1,19 +1,27 @@
 use crate::ctx::canceller::Canceller;
 use crate::ctx::reason::Reason;
-use crate::dbs::capabilities::FuncTarget;
 #[cfg(feature = "http")]
 use crate::dbs::capabilities::NetTarget;
-use crate::dbs::{Capabilities, Notification};
+use crate::dbs::{Capabilities, Notification, Transaction};
 use crate::err::Error;
 use crate::idx::planner::executor::QueryExecutor;
 use crate::idx::planner::{IterationStage, QueryPlanner};
 use crate::idx::trees::store::IndexStores;
+use crate::kvs;
 use crate::sql::value::Value;
 use channel::Sender;
+use futures::lock::MutexLockFuture;
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::fmt::{self, Debug};
-use std::str::FromStr;
+#[cfg(any(
+	feature = "kv-mem",
+	feature = "kv-surrealkv",
+	feature = "kv-rocksdb",
+	feature = "kv-fdb",
+	feature = "kv-tikv",
+))]
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
@@ -32,6 +40,7 @@ impl<'a> From<&'a Value> for Cow<'a, Value> {
 		Cow::Borrowed(v)
 	}
 }
+#[non_exhaustive]
 pub struct Context<'a> {
 	// An optional parent context.
 	parent: Option<&'a Context<'a>>,
@@ -53,6 +62,17 @@ pub struct Context<'a> {
 	index_stores: IndexStores,
 	// Capabilities
 	capabilities: Arc<Capabilities>,
+	#[cfg(any(
+		feature = "kv-mem",
+		feature = "kv-surrealkv",
+		feature = "kv-rocksdb",
+		feature = "kv-fdb",
+		feature = "kv-tikv",
+	))]
+	// The temporary directory
+	temporary_directory: Option<Arc<PathBuf>>,
+	// An optional transaction
+	transaction: Option<Transaction>,
 }
 
 impl<'a> Default for Context<'a> {
@@ -77,6 +97,14 @@ impl<'a> Context<'a> {
 		time_out: Option<Duration>,
 		capabilities: Capabilities,
 		index_stores: IndexStores,
+		#[cfg(any(
+			feature = "kv-mem",
+			feature = "kv-surrealkv",
+			feature = "kv-rocksdb",
+			feature = "kv-fdb",
+			feature = "kv-tikv",
+		))]
+		temporary_directory: Option<Arc<PathBuf>>,
 	) -> Result<Context<'a>, Error> {
 		let mut ctx = Self {
 			values: HashMap::default(),
@@ -89,6 +117,15 @@ impl<'a> Context<'a> {
 			iteration_stage: None,
 			capabilities: Arc::new(capabilities),
 			index_stores,
+			#[cfg(any(
+				feature = "kv-mem",
+				feature = "kv-surrealkv",
+				feature = "kv-rocksdb",
+				feature = "kv-fdb",
+				feature = "kv-tikv",
+			))]
+			temporary_directory,
+			transaction: None,
 		};
 		if let Some(timeout) = time_out {
 			ctx.add_timeout(timeout)?;
@@ -108,6 +145,15 @@ impl<'a> Context<'a> {
 			iteration_stage: None,
 			capabilities: Arc::new(Capabilities::default()),
 			index_stores: IndexStores::default(),
+			#[cfg(any(
+				feature = "kv-mem",
+				feature = "kv-surrealkv",
+				feature = "kv-rocksdb",
+				feature = "kv-fdb",
+				feature = "kv-tikv",
+			))]
+			temporary_directory: None,
+			transaction: None,
 		}
 	}
 
@@ -124,6 +170,15 @@ impl<'a> Context<'a> {
 			iteration_stage: parent.iteration_stage.clone(),
 			capabilities: parent.capabilities.clone(),
 			index_stores: parent.index_stores.clone(),
+			#[cfg(any(
+				feature = "kv-mem",
+				feature = "kv-surrealkv",
+				feature = "kv-rocksdb",
+				feature = "kv-fdb",
+				feature = "kv-tikv",
+			))]
+			temporary_directory: parent.temporary_directory.clone(),
+			transaction: parent.transaction.clone(),
 		}
 	}
 
@@ -184,6 +239,19 @@ impl<'a> Context<'a> {
 		self.iteration_stage = Some(is);
 	}
 
+	pub(crate) fn set_transaction_mut(&mut self, txn: Transaction) {
+		self.transaction = Some(txn);
+	}
+
+	pub fn set_transaction(mut self, txn: Transaction) -> Self {
+		self.transaction = Some(txn);
+		self
+	}
+
+	pub(crate) fn tx_lock(&self) -> MutexLockFuture<'_, kvs::Transaction> {
+		self.transaction.as_ref().map(|txn| txn.lock()).unwrap_or_else(|| unreachable!())
+	}
+
 	/// Get the timeout for this operation, if any. This is useful for
 	/// checking if a long job should be started or not.
 	pub fn timeout(&self) -> Option<Duration> {
@@ -239,6 +307,18 @@ impl<'a> Context<'a> {
 		matches!(self.done(), Some(Reason::Timedout))
 	}
 
+	#[cfg(any(
+		feature = "kv-mem",
+		feature = "kv-surrealkv",
+		feature = "kv-rocksdb",
+		feature = "kv-fdb",
+		feature = "kv-tikv",
+	))]
+	/// Return the location of the temporary directory if any
+	pub fn temporary_directory(&self) -> Option<&Arc<PathBuf>> {
+		self.temporary_directory.as_ref()
+	}
+
 	/// Get a value from the context. If no value is stored under the
 	/// provided key, then this will return None.
 	pub fn value(&self, key: &str) -> Option<&Value> {
@@ -291,12 +371,7 @@ impl<'a> Context<'a> {
 
 	/// Check if a function is allowed
 	pub fn check_allowed_function(&self, target: &str) -> Result<(), Error> {
-		let func_target = FuncTarget::from_str(target).map_err(|_| Error::InvalidFunction {
-			name: target.to_string(),
-			message: "Invalid function name".to_string(),
-		})?;
-
-		if !self.capabilities.allows_function(&func_target) {
+		if !self.capabilities.allows_function_name(target) {
 			return Err(Error::FunctionNotAllowed(target.to_string()));
 		}
 		Ok(())

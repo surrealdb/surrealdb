@@ -1,5 +1,5 @@
 use crate::ctx::Context;
-use crate::dbs::{Options, Transaction};
+use crate::dbs::Options;
 use crate::err::Error;
 use crate::iam::{Action, ResourceKind};
 use crate::sql::{Base, Ident, Idiom, Value};
@@ -8,9 +8,10 @@ use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Formatter};
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[revisioned(revision = 2)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
+#[non_exhaustive]
 pub struct RemoveFieldStatement {
 	pub name: Idiom,
 	pub what: Ident,
@@ -20,34 +21,29 @@ pub struct RemoveFieldStatement {
 
 impl RemoveFieldStatement {
 	/// Process this type returning a computed simple Value
-	pub(crate) async fn compute(
-		&self,
-		_ctx: &Context<'_>,
-		opt: &Options,
-		txn: &Transaction,
-	) -> Result<Value, Error> {
-		match async {
+	pub(crate) async fn compute(&self, ctx: &Context<'_>, opt: &Options) -> Result<Value, Error> {
+		let future = async {
 			// Allowed to run?
 			opt.is_allowed(Action::Edit, ResourceKind::Field, &Base::Db)?;
 			// Claim transaction
-			let mut run = txn.lock().await;
+			let mut run = ctx.tx_lock().await;
 			// Clear the cache
 			run.clear_cache();
 			// Get the definition
 			let fd_name = self.name.to_string();
-			let fd = run.get_tb_field(opt.ns(), opt.db(), &self.what, &fd_name).await?;
+			let fd = run.get_tb_field(opt.ns()?, opt.db()?, &self.what, &fd_name).await?;
 			// Delete the definition
 			let fd_name = fd.name.to_string();
-			let key = crate::key::table::fd::new(opt.ns(), opt.db(), &self.what, &fd_name);
+			let key = crate::key::table::fd::new(opt.ns()?, opt.db()?, &self.what, &fd_name);
 			run.del(key).await?;
 			// Clear the cache
-			let key = crate::key::table::fd::prefix(opt.ns(), opt.db(), &self.what);
+			let key = crate::key::table::fd::prefix(opt.ns()?, opt.db()?, &self.what);
 			run.clr(key).await?;
 			// Ok all good
 			Ok(Value::None)
 		}
-		.await
-		{
+		.await;
+		match future {
 			Err(Error::FdNotFound {
 				..
 			}) if self.if_exists => Ok(Value::None),

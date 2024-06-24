@@ -9,6 +9,7 @@ use serde::ser::Impossible;
 use serde::ser::Serialize;
 use std::time::Duration;
 
+#[non_exhaustive]
 pub struct Serializer;
 
 impl ser::Serializer for Serializer {
@@ -36,9 +37,10 @@ impl ser::Serializer for Serializer {
 }
 
 #[derive(Default)]
+#[non_exhaustive]
 pub struct SerializeChangeFeed {
 	expiry: Duration,
-	store_original: bool,
+	store_diff: bool,
 }
 
 impl serde::ser::SerializeStruct for SerializeChangeFeed {
@@ -53,8 +55,8 @@ impl serde::ser::SerializeStruct for SerializeChangeFeed {
 			"expiry" => {
 				self.expiry = value.serialize(ser::duration::Serializer.wrap())?;
 			}
-			"store_original" => {
-				self.store_original = value.serialize(ser::primitive::bool::Serializer.wrap())?;
+			"store_diff" => {
+				self.store_diff = value.serialize(ser::primitive::bool::Serializer.wrap())?;
 			}
 			key => {
 				return Err(Error::custom(format!("unexpected field `ChangeFeed::{key}`")));
@@ -66,7 +68,7 @@ impl serde::ser::SerializeStruct for SerializeChangeFeed {
 	fn end(self) -> Result<Self::Ok, Error> {
 		Ok(ChangeFeed {
 			expiry: self.expiry,
-			store_original: self.store_original,
+			store_diff: self.store_diff,
 		})
 	}
 }

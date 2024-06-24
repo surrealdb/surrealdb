@@ -1,13 +1,17 @@
+use crate::sql::statements::info::InfoStructure;
+use crate::sql::Array;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::fmt::Display;
 
-use super::{Kind, Table};
+use super::{Kind, Object, Table, Value};
 
 /// The type of records stored by a table
-#[derive(Debug, Default, Serialize, Deserialize, Hash, Clone, Eq, PartialEq, PartialOrd)]
 #[revisioned(revision = 1)]
+#[derive(Debug, Default, Serialize, Deserialize, Hash, Clone, Eq, PartialEq, PartialOrd)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
+#[non_exhaustive]
 pub enum TableType {
 	#[default]
 	Any,
@@ -24,10 +28,10 @@ impl Display for TableType {
 			TableType::Relation(rel) => {
 				f.write_str(" RELATION")?;
 				if let Some(Kind::Record(kind)) = &rel.from {
-					write!(f, " IN {}", get_tables_from_kind(kind))?;
+					write!(f, " IN {}", get_tables_from_kind(kind).join(" | "))?;
 				}
 				if let Some(Kind::Record(kind)) = &rel.to {
-					write!(f, " OUT {}", get_tables_from_kind(kind))?;
+					write!(f, " OUT {}", get_tables_from_kind(kind).join(" | "))?;
 				}
 			}
 			TableType::Any => {
@@ -38,12 +42,48 @@ impl Display for TableType {
 	}
 }
 
-fn get_tables_from_kind(tables: &[Table]) -> String {
-	tables.iter().map(|t| t.0.as_str()).collect::<Vec<_>>().join(" | ")
+impl InfoStructure for TableType {
+	fn structure(self) -> Value {
+		let mut acc = Object::default();
+
+		match &self {
+			TableType::Any => {
+				acc.insert("kind".to_string(), "ANY".into());
+			}
+			TableType::Normal => {
+				acc.insert("kind".to_string(), "NORMAL".into());
+			}
+			TableType::Relation(rel) => {
+				acc.insert("kind".to_string(), "RELATION".into());
+
+				if let Some(Kind::Record(tables)) = &rel.from {
+					acc.insert(
+						"in".to_string(),
+						Value::Array(Array::from(get_tables_from_kind(tables))),
+					);
+				}
+
+				if let Some(Kind::Record(tables)) = &rel.to {
+					acc.insert(
+						"out".to_string(),
+						Value::Array(Array::from(get_tables_from_kind(tables))),
+					);
+				}
+			}
+		};
+
+		Value::Object(acc)
+	}
 }
 
-#[derive(Debug, Default, Serialize, Deserialize, Hash, Clone, Eq, PartialEq, PartialOrd)]
+fn get_tables_from_kind(tables: &[Table]) -> Vec<&str> {
+	tables.iter().map(|t| t.0.as_str()).collect::<Vec<_>>()
+}
+
 #[revisioned(revision = 1)]
+#[derive(Debug, Default, Serialize, Deserialize, Hash, Clone, Eq, PartialEq, PartialOrd)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
+#[non_exhaustive]
 pub struct Relation {
 	pub from: Option<Kind>,
 	pub to: Option<Kind>,

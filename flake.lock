@@ -7,16 +7,16 @@
         ]
       },
       "locked": {
-        "lastModified": 1706473297,
-        "narHash": "sha256-FbxuYIrHaXpsYCLtI1gCNJhd+qvERjPibXL3ctmVaCs=",
+        "lastModified": 1710886643,
+        "narHash": "sha256-saTZuv9YeZ9COHPuj8oedGdUwJZcbQ3vyRqe7NVJMsQ=",
         "owner": "ipetkov",
         "repo": "crane",
-        "rev": "fe812ef0dad5bb93a56c599d318be176d080281d",
+        "rev": "5bace74e9a65165c918205cf67ad3977fe79c584",
         "type": "github"
       },
       "original": {
         "owner": "ipetkov",
-        "ref": "v0.16.1",
+        "ref": "v0.16.3",
         "repo": "crane",
         "type": "github"
       }
@@ -29,11 +29,11 @@
         "rust-analyzer-src": "rust-analyzer-src"
       },
       "locked": {
-        "lastModified": 1709706238,
-        "narHash": "sha256-DBYWNdMGX6uWsR5KS9Vdg6vfU0QKIuPZzt2PrXmShwQ=",
+        "lastModified": 1711520562,
+        "narHash": "sha256-rVE+5nzGarXDYoXPcySg+/NpkPZu53H3YhtE1nElUhg=",
         "owner": "nix-community",
         "repo": "fenix",
-        "rev": "4dc1af0afeb1c8f50fc552c8109f7b8f603eebc0",
+        "rev": "21cf09a640b2a0b8f805aa767f42916c9579776b",
         "type": "github"
       },
       "original": {
@@ -76,11 +76,11 @@
     },
     "nixpkgs": {
       "locked": {
-        "lastModified": 1709649693,
-        "narHash": "sha256-BBBBpL+BGsiDMlkQooMwc634feFM/0lw5ghP18HJy7c=",
+        "lastModified": 1711481231,
+        "narHash": "sha256-J/fW3Xhm3WsJPNd8ksZmfMnol5aOG2qEMDPbOnNNdTQ=",
         "owner": "NixOS",
         "repo": "nixpkgs",
-        "rev": "9cd07ee45d0077b16392a877f448baffe9d07c9a",
+        "rev": "9d6ddb13cee3cc1192e4430277708c732685f38a",
         "type": "github"
       },
       "original": {
@@ -102,11 +102,11 @@
     "rust-analyzer-src": {
       "flake": false,
       "locked": {
-        "lastModified": 1709671826,
-        "narHash": "sha256-Ici6z+lmXIxcBPWTCD+YI2qJCdgpiKlOWmo92F6rOFk=",
+        "lastModified": 1711443624,
+        "narHash": "sha256-K5aLPjCF3A9ArczT5X/CKo1bfQEwGK5CsJ3eYHIjEnk=",
         "owner": "rust-lang",
         "repo": "rust-analyzer",
-        "rev": "767d5d3eab237a1fbc10d62b120020b12f6026c5",
+        "rev": "4b33850c39049047e2deb4269b60bd8330b68031",
         "type": "github"
       },
       "original": {

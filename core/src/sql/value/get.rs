@@ -1,6 +1,6 @@
 use crate::cnf::MAX_COMPUTATION_DEPTH;
 use crate::ctx::Context;
-use crate::dbs::{Options, Transaction};
+use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::exe::try_join_all_buffered;
@@ -13,22 +13,22 @@ use crate::sql::paths::ID;
 use crate::sql::statements::select::SelectStatement;
 use crate::sql::thing::Thing;
 use crate::sql::value::{Value, Values};
-use async_recursion::async_recursion;
+use reblessive::tree::Stk;
 
 impl Value {
 	/// Asynchronous method for getting a local or remote field from a `Value`
-	#[cfg_attr(not(target_arch = "wasm32"), async_recursion)]
-	#[cfg_attr(target_arch = "wasm32", async_recursion(?Send))]
+	///
+	/// Was marked recursive
 	pub(crate) async fn get(
 		&self,
+		stk: &mut Stk,
 		ctx: &Context<'_>,
 		opt: &Options,
-		txn: &Transaction,
-		doc: Option<&'async_recursion CursorDoc<'_>>,
+		doc: Option<&CursorDoc<'_>>,
 		path: &[Part],
 	) -> Result<Self, Error> {
 		// Limit recursion depth.
-		if path.len() > (*MAX_COMPUTATION_DEPTH).into() {
+		if path.len() > (*MAX_COMPUTATION_DEPTH).try_into().unwrap_or(usize::MAX) {
 			return Err(Error::ComputationDepthExceeded);
 		}
 		match path.first() {
@@ -38,15 +38,18 @@ impl Value {
 				Value::Geometry(v) => match p {
 					// If this is the 'type' field then continue
 					Part::Field(f) if f.is_type() => {
-						Value::from(v.as_type()).get(ctx, opt, txn, doc, path.next()).await
+						let v = Value::from(v.as_type());
+						stk.run(|stk| v.get(stk, ctx, opt, doc, path.next())).await
 					}
 					// If this is the 'coordinates' field then continue
 					Part::Field(f) if f.is_coordinates() && v.is_geometry() => {
-						v.as_coordinates().get(ctx, opt, txn, doc, path.next()).await
+						let v = v.as_coordinates();
+						stk.run(|stk| v.get(stk, ctx, opt, doc, path.next())).await
 					}
 					// If this is the 'geometries' field then continue
 					Part::Field(f) if f.is_geometries() && v.is_collection() => {
-						v.as_coordinates().get(ctx, opt, txn, doc, path.next()).await
+						let v = v.as_coordinates();
+						stk.run(|stk| v.get(stk, ctx, opt, doc, path.next())).await
 					}
 					// Otherwise return none
 					_ => Ok(Value::None),
@@ -62,9 +65,9 @@ impl Value {
 							// Ensure the future is processed
 							let fut = &opt.new_with_futures(true);
 							// Get the future return value
-							let val = v.compute(ctx, fut, txn, doc).await?;
+							let val = v.compute(stk, ctx, fut, doc).await?;
 							// Fetch the embedded field
-							val.get(ctx, opt, txn, doc, path).await
+							stk.run(|stk| val.get(stk, ctx, opt, doc, path)).await
 						}
 					}
 				}
@@ -75,34 +78,43 @@ impl Value {
 						Some(Value::Thing(Thing {
 							id: Id::Object(v),
 							..
-						})) => Value::Object(v.clone()).get(ctx, opt, txn, doc, path.next()).await,
+						})) => {
+							let v = Value::Object(v.clone());
+							stk.run(|stk| v.get(stk, ctx, opt, doc, path.next())).await
+						}
 						Some(Value::Thing(Thing {
 							id: Id::Array(v),
 							..
-						})) => Value::Array(v.clone()).get(ctx, opt, txn, doc, path.next()).await,
-						Some(v) => v.get(ctx, opt, txn, doc, path.next()).await,
+						})) => {
+							let v = Value::Array(v.clone());
+							stk.run(|stk| v.get(stk, ctx, opt, doc, path.next())).await
+						}
+						Some(v) => stk.run(|stk| v.get(stk, ctx, opt, doc, path.next())).await,
 						None => Ok(Value::None),
 					},
 					Part::Graph(_) => match v.rid() {
-						Some(v) => Value::Thing(v).get(ctx, opt, txn, doc, path).await,
+						Some(v) => {
+							let v = Value::Thing(v);
+							stk.run(|stk| v.get(stk, ctx, opt, doc, path)).await
+						}
 						None => Ok(Value::None),
 					},
 					Part::Field(f) => match v.get(f.as_str()) {
-						Some(v) => v.get(ctx, opt, txn, doc, path.next()).await,
+						Some(v) => stk.run(|stk| v.get(stk, ctx, opt, doc, path.next())).await,
 						None => Ok(Value::None),
 					},
 					Part::Index(i) => match v.get(&i.to_string()) {
-						Some(v) => v.get(ctx, opt, txn, doc, path.next()).await,
+						Some(v) => stk.run(|stk| v.get(stk, ctx, opt, doc, path.next())).await,
 						None => Ok(Value::None),
 					},
-					Part::Value(x) => match x.compute(ctx, opt, txn, doc).await? {
+					Part::Value(x) => match stk.run(|stk| x.compute(stk, ctx, opt, doc)).await? {
 						Value::Strand(f) => match v.get(f.as_str()) {
-							Some(v) => v.get(ctx, opt, txn, doc, path.next()).await,
+							Some(v) => stk.run(|stk| v.get(stk, ctx, opt, doc, path.next())).await,
 							None => Ok(Value::None),
 						},
 						_ => Ok(Value::None),
 					},
-					Part::All => self.get(ctx, opt, txn, doc, path.next()).await,
+					Part::All => stk.run(|stk| self.get(stk, ctx, opt, doc, path.next())).await,
 					_ => Ok(Value::None),
 				},
 				// Current value at path is an array
@@ -110,42 +122,56 @@ impl Value {
 					// Current path is an `*` part
 					Part::All | Part::Flatten => {
 						let path = path.next();
-						let futs = v.iter().map(|v| v.get(ctx, opt, txn, doc, path));
-						try_join_all_buffered(futs).await.map(Into::into)
+						stk.scope(|scope| {
+							let futs =
+								v.iter().map(|v| scope.run(|stk| v.get(stk, ctx, opt, doc, path)));
+							try_join_all_buffered(futs)
+						})
+						.await
+						.map(Into::into)
 					}
 					Part::First => match v.first() {
-						Some(v) => v.get(ctx, opt, txn, doc, path.next()).await,
+						Some(v) => stk.run(|stk| v.get(stk, ctx, opt, doc, path.next())).await,
 						None => Ok(Value::None),
 					},
 					Part::Last => match v.last() {
-						Some(v) => v.get(ctx, opt, txn, doc, path.next()).await,
+						Some(v) => stk.run(|stk| v.get(stk, ctx, opt, doc, path.next())).await,
 						None => Ok(Value::None),
 					},
 					Part::Index(i) => match v.get(i.to_usize()) {
-						Some(v) => v.get(ctx, opt, txn, doc, path.next()).await,
+						Some(v) => stk.run(|stk| v.get(stk, ctx, opt, doc, path.next())).await,
 						None => Ok(Value::None),
 					},
 					Part::Where(w) => {
 						let mut a = Vec::new();
 						for v in v.iter() {
 							let cur = v.into();
-							if w.compute(ctx, opt, txn, Some(&cur)).await?.is_truthy() {
+							if stk
+								.run(|stk| w.compute(stk, ctx, opt, Some(&cur)))
+								.await?
+								.is_truthy()
+							{
 								a.push(v.clone());
 							}
 						}
-						Value::from(a).get(ctx, opt, txn, doc, path.next()).await
+						let v = Value::from(a);
+						stk.run(|stk| v.get(stk, ctx, opt, doc, path.next())).await
 					}
-					Part::Value(x) => match x.compute(ctx, opt, txn, doc).await? {
+					Part::Value(x) => match stk.run(|stk| x.compute(stk, ctx, opt, doc)).await? {
 						Value::Number(i) => match v.get(i.to_usize()) {
-							Some(v) => v.get(ctx, opt, txn, doc, path.next()).await,
+							Some(v) => stk.run(|stk| v.get(stk, ctx, opt, doc, path.next())).await,
 							None => Ok(Value::None),
 						},
 						_ => Ok(Value::None),
 					},
-					_ => {
-						let futs = v.iter().map(|v| v.get(ctx, opt, txn, doc, path));
-						try_join_all_buffered(futs).await.map(Into::into)
-					}
+					_ => stk
+						.scope(|scope| {
+							let futs =
+								v.iter().map(|v| scope.run(|stk| v.get(stk, ctx, opt, doc, path)));
+							try_join_all_buffered(futs)
+						})
+						.await
+						.map(Into::into),
 				},
 				// Current value at path is an edges
 				Value::Edges(v) => {
@@ -162,11 +188,8 @@ impl Value {
 								what: Values(vec![Value::from(val)]),
 								..SelectStatement::default()
 							};
-							stm.compute(ctx, opt, txn, None)
-								.await?
-								.first()
-								.get(ctx, opt, txn, None, path)
-								.await
+							let v = stk.run(|stk| stm.compute(stk, ctx, opt, None)).await?.first();
+							stk.run(|stk| v.get(stk, ctx, opt, None, path)).await
 						}
 					}
 				}
@@ -193,22 +216,26 @@ impl Value {
 									..SelectStatement::default()
 								};
 								match path.len() {
-									1 => stm
-										.compute(ctx, opt, txn, None)
-										.await?
-										.all()
-										.get(ctx, opt, txn, None, ID.as_ref())
-										.await?
-										.flatten()
-										.ok(),
-									_ => stm
-										.compute(ctx, opt, txn, None)
-										.await?
-										.all()
-										.get(ctx, opt, txn, None, path.next())
-										.await?
-										.flatten()
-										.ok(),
+									1 => {
+										let v = stk
+											.run(|stk| stm.compute(stk, ctx, opt, None))
+											.await?
+											.all();
+										stk.run(|stk| v.get(stk, ctx, opt, None, ID.as_ref()))
+											.await?
+											.flatten()
+											.ok()
+									}
+									_ => {
+										let v = stk
+											.run(|stk| stm.compute(stk, ctx, opt, None))
+											.await?
+											.all();
+										stk.run(|stk| v.get(stk, ctx, opt, None, path.next()))
+											.await?
+											.flatten()
+											.ok()
+									}
 								}
 							}
 							// This is a remote field expression
@@ -218,18 +245,16 @@ impl Value {
 									what: Values(vec![Value::from(val)]),
 									..SelectStatement::default()
 								};
-								stm.compute(ctx, opt, txn, None)
-									.await?
-									.first()
-									.get(ctx, opt, txn, None, path)
-									.await
+								let v =
+									stk.run(|stk| stm.compute(stk, ctx, opt, None)).await?.first();
+								stk.run(|stk| v.get(stk, ctx, opt, None, path)).await
 							}
 						},
 					}
 				}
 				v => {
 					if matches!(p, Part::Flatten) {
-						v.get(ctx, opt, txn, None, path.next()).await
+						stk.run(|stk| v.get(stk, ctx, opt, None, path.next())).await
 					} else {
 						// Ignore everything else
 						Ok(Value::None)
@@ -252,25 +277,27 @@ mod tests {
 
 	#[tokio::test]
 	async fn get_none() {
-		let (ctx, opt, txn) = mock().await;
+		let (ctx, opt) = mock().await;
 		let idi = Idiom::default();
 		let val = Value::parse("{ test: { other: null, something: 123 } }");
-		let res = val.get(&ctx, &opt, &txn, None, &idi).await.unwrap();
+		let mut stack = reblessive::tree::TreeStack::new();
+		let res = stack.enter(|stk| val.get(stk, &ctx, &opt, None, &idi)).finish().await.unwrap();
 		assert_eq!(res, val);
 	}
 
 	#[tokio::test]
 	async fn get_basic() {
-		let (ctx, opt, txn) = mock().await;
+		let (ctx, opt) = mock().await;
 		let idi = Idiom::parse("test.something");
 		let val = Value::parse("{ test: { other: null, something: 123 } }");
-		let res = val.get(&ctx, &opt, &txn, None, &idi).await.unwrap();
+		let mut stack = reblessive::tree::TreeStack::new();
+		let res = stack.enter(|stk| val.get(stk, &ctx, &opt, None, &idi)).finish().await.unwrap();
 		assert_eq!(res, Value::from(123));
 	}
 
 	#[tokio::test]
 	async fn get_basic_deep_ok() {
-		let (ctx, opt, txn) = mock().await;
+		let (ctx, opt) = mock().await;
 		let depth = 20;
 		let idi = Idiom::parse(&format!("{}something", "test.".repeat(depth)));
 		let val = Value::parse(&format!(
@@ -278,17 +305,20 @@ mod tests {
 			"{ test: ".repeat(depth),
 			"}".repeat(depth)
 		));
-		let res = val.get(&ctx, &opt, &txn, None, &idi).await.unwrap();
+		let mut stack = reblessive::tree::TreeStack::new();
+		let res = stack.enter(|stk| val.get(stk, &ctx, &opt, None, &idi)).finish().await.unwrap();
 		assert_eq!(res, Value::from(123));
 	}
 
 	#[tokio::test]
 	async fn get_basic_deep_ko() {
-		let (ctx, opt, txn) = mock().await;
+		let (ctx, opt) = mock().await;
 		let depth = 2000;
 		let idi = Idiom::parse(&format!("{}something", "test.".repeat(depth)));
 		let val = Value::parse("{}"); // A deep enough object cannot be parsed.
-		let err = val.get(&ctx, &opt, &txn, None, &idi).await.unwrap_err();
+		let mut stack = reblessive::tree::TreeStack::new();
+		let err =
+			stack.enter(|stk| val.get(stk, &ctx, &opt, None, &idi)).finish().await.unwrap_err();
 		assert!(
 			matches!(err, Error::ComputationDepthExceeded),
 			"expected computation depth exceeded, got {:?}",
@@ -298,10 +328,11 @@ mod tests {
 
 	#[tokio::test]
 	async fn get_thing() {
-		let (ctx, opt, txn) = mock().await;
+		let (ctx, opt) = mock().await;
 		let idi = Idiom::parse("test.other");
 		let val = Value::parse("{ test: { other: test:tobie, something: 123 } }");
-		let res = val.get(&ctx, &opt, &txn, None, &idi).await.unwrap();
+		let mut stack = reblessive::tree::TreeStack::new();
+		let res = stack.enter(|stk| val.get(stk, &ctx, &opt, None, &idi)).finish().await.unwrap();
 		assert_eq!(
 			res,
 			Value::from(Thing {
@@ -313,19 +344,21 @@ mod tests {
 
 	#[tokio::test]
 	async fn get_array() {
-		let (ctx, opt, txn) = mock().await;
+		let (ctx, opt) = mock().await;
 		let idi = Idiom::parse("test.something[1]");
 		let val = Value::parse("{ test: { something: [123, 456, 789] } }");
-		let res = val.get(&ctx, &opt, &txn, None, &idi).await.unwrap();
+		let mut stack = reblessive::tree::TreeStack::new();
+		let res = stack.enter(|stk| val.get(stk, &ctx, &opt, None, &idi)).finish().await.unwrap();
 		assert_eq!(res, Value::from(456));
 	}
 
 	#[tokio::test]
 	async fn get_array_thing() {
-		let (ctx, opt, txn) = mock().await;
+		let (ctx, opt) = mock().await;
 		let idi = Idiom::parse("test.something[1]");
 		let val = Value::parse("{ test: { something: [test:tobie, test:jaime] } }");
-		let res = val.get(&ctx, &opt, &txn, None, &idi).await.unwrap();
+		let mut stack = reblessive::tree::TreeStack::new();
+		let res = stack.enter(|stk| val.get(stk, &ctx, &opt, None, &idi)).finish().await.unwrap();
 		assert_eq!(
 			res,
 			Value::from(Thing {
@@ -337,46 +370,51 @@ mod tests {
 
 	#[tokio::test]
 	async fn get_array_field() {
-		let (ctx, opt, txn) = mock().await;
+		let (ctx, opt) = mock().await;
 		let idi = Idiom::parse("test.something[1].age");
 		let val = Value::parse("{ test: { something: [{ age: 34 }, { age: 36 }] } }");
-		let res = val.get(&ctx, &opt, &txn, None, &idi).await.unwrap();
+		let mut stack = reblessive::tree::TreeStack::new();
+		let res = stack.enter(|stk| val.get(stk, &ctx, &opt, None, &idi)).finish().await.unwrap();
 		assert_eq!(res, Value::from(36));
 	}
 
 	#[tokio::test]
 	async fn get_array_fields() {
-		let (ctx, opt, txn) = mock().await;
+		let (ctx, opt) = mock().await;
 		let idi = Idiom::parse("test.something[*].age");
 		let val = Value::parse("{ test: { something: [{ age: 34 }, { age: 36 }] } }");
-		let res = val.get(&ctx, &opt, &txn, None, &idi).await.unwrap();
+		let mut stack = reblessive::tree::TreeStack::new();
+		let res = stack.enter(|stk| val.get(stk, &ctx, &opt, None, &idi)).finish().await.unwrap();
 		assert_eq!(res, Value::from(vec![34, 36]));
 	}
 
 	#[tokio::test]
 	async fn get_array_fields_flat() {
-		let (ctx, opt, txn) = mock().await;
+		let (ctx, opt) = mock().await;
 		let idi = Idiom::parse("test.something.age");
 		let val = Value::parse("{ test: { something: [{ age: 34 }, { age: 36 }] } }");
-		let res = val.get(&ctx, &opt, &txn, None, &idi).await.unwrap();
+		let mut stack = reblessive::tree::TreeStack::new();
+		let res = stack.enter(|stk| val.get(stk, &ctx, &opt, None, &idi)).finish().await.unwrap();
 		assert_eq!(res, Value::from(vec![34, 36]));
 	}
 
 	#[tokio::test]
 	async fn get_array_where_field() {
-		let (ctx, opt, txn) = mock().await;
+		let (ctx, opt) = mock().await;
 		let idi = Idiom::parse("test.something[WHERE age > 35].age");
 		let val = Value::parse("{ test: { something: [{ age: 34 }, { age: 36 }] } }");
-		let res = val.get(&ctx, &opt, &txn, None, &idi).await.unwrap();
+		let mut stack = reblessive::tree::TreeStack::new();
+		let res = stack.enter(|stk| val.get(stk, &ctx, &opt, None, &idi)).finish().await.unwrap();
 		assert_eq!(res, Value::from(vec![36]));
 	}
 
 	#[tokio::test]
 	async fn get_array_where_fields() {
-		let (ctx, opt, txn) = mock().await;
+		let (ctx, opt) = mock().await;
 		let idi = Idiom::parse("test.something[WHERE age > 35]");
 		let val = Value::parse("{ test: { something: [{ age: 34 }, { age: 36 }] } }");
-		let res = val.get(&ctx, &opt, &txn, None, &idi).await.unwrap();
+		let mut stack = reblessive::tree::TreeStack::new();
+		let res = stack.enter(|stk| val.get(stk, &ctx, &opt, None, &idi)).finish().await.unwrap();
 		assert_eq!(
 			res,
 			Value::from(vec![Value::from(map! {
@@ -387,10 +425,11 @@ mod tests {
 
 	#[tokio::test]
 	async fn get_array_where_fields_array_index() {
-		let (ctx, opt, txn) = mock().await;
+		let (ctx, opt) = mock().await;
 		let idi = Idiom::parse("test.something[WHERE age > 30][0]");
 		let val = Value::parse("{ test: { something: [{ age: 34 }, { age: 36 }] } }");
-		let res = val.get(&ctx, &opt, &txn, None, &idi).await.unwrap();
+		let mut stack = reblessive::tree::TreeStack::new();
+		let res = stack.enter(|stk| val.get(stk, &ctx, &opt, None, &idi)).finish().await.unwrap();
 		assert_eq!(
 			res,
 			Value::from(map! {
@@ -401,10 +440,11 @@ mod tests {
 
 	#[tokio::test]
 	async fn get_future_embedded_field() {
-		let (ctx, opt, txn) = mock().await;
+		let (ctx, opt) = mock().await;
 		let idi = Idiom::parse("test.something[WHERE age > 35]");
 		let val = Value::parse("{ test: <future> { { something: [{ age: 34 }, { age: 36 }] } } }");
-		let res = val.get(&ctx, &opt, &txn, None, &idi).await.unwrap();
+		let mut stack = reblessive::tree::TreeStack::new();
+		let res = stack.enter(|stk| val.get(stk, &ctx, &opt, None, &idi)).finish().await.unwrap();
 		assert_eq!(
 			res,
 			Value::from(vec![Value::from(map! {
@@ -415,12 +455,14 @@ mod tests {
 
 	#[tokio::test]
 	async fn get_future_embedded_field_with_reference() {
-		let (ctx, opt, txn) = mock().await;
+		let (ctx, opt) = mock().await;
 		let doc = Value::parse("{ name: 'Tobie', something: [{ age: 34 }, { age: 36 }] }");
 		let idi = Idiom::parse("test.something[WHERE age > 35]");
 		let val = Value::parse("{ test: <future> { { something: something } } }");
 		let cur = (&doc).into();
-		let res = val.get(&ctx, &opt, &txn, Some(&cur), &idi).await.unwrap();
+		let mut stack = reblessive::tree::TreeStack::new();
+		let res =
+			stack.enter(|stk| val.get(stk, &ctx, &opt, Some(&cur), &idi)).finish().await.unwrap();
 		assert_eq!(
 			res,
 			Value::from(vec![Value::from(map! {

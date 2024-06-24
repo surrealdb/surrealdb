@@ -1,9 +1,17 @@
 use crate::ctx::Context;
-use crate::dbs::{Options, Transaction};
+use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
+use crate::sql::Cond;
+use crate::sql::Expression;
+use crate::sql::Ident;
+use crate::sql::Idiom;
+use crate::sql::Operator;
+use crate::sql::Part;
+use crate::sql::Thing;
 use crate::sql::{strand::no_nul_bytes, Id, Value};
 use crate::syn;
+use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
@@ -11,12 +19,14 @@ use std::fmt;
 use std::ops::Bound;
 use std::str::FromStr;
 
+const ID: &str = "id";
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Range";
 
+#[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
 #[serde(rename = "$surrealdb::private::sql::Range")]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[revisioned(revision = 1)]
+#[non_exhaustive]
 pub struct Range {
 	#[serde(with = "no_nul_bytes")]
 	pub tb: String,
@@ -42,24 +52,128 @@ impl TryFrom<&str> for Range {
 }
 
 impl Range {
+	/// Construct a new range
+	pub fn new(tb: String, beg: Bound<Id>, end: Bound<Id>) -> Self {
+		Self {
+			tb,
+			beg,
+			end,
+		}
+	}
+
+	/// Convert `Range` to `Cond`
+	pub fn to_cond(self) -> Option<Cond> {
+		match (self.beg, self.end) {
+			(Bound::Unbounded, Bound::Unbounded) => None,
+			(Bound::Unbounded, Bound::Excluded(id)) => {
+				Some(Cond(Value::Expression(Box::new(Expression::new(
+					Idiom(vec![Part::from(Ident(ID.to_owned()))]).into(),
+					Operator::LessThan,
+					Thing::from((self.tb, id)).into(),
+				)))))
+			}
+			(Bound::Unbounded, Bound::Included(id)) => {
+				Some(Cond(Value::Expression(Box::new(Expression::new(
+					Idiom(vec![Part::from(Ident(ID.to_owned()))]).into(),
+					Operator::LessThanOrEqual,
+					Thing::from((self.tb, id)).into(),
+				)))))
+			}
+			(Bound::Excluded(id), Bound::Unbounded) => {
+				Some(Cond(Value::Expression(Box::new(Expression::new(
+					Idiom(vec![Part::from(Ident(ID.to_owned()))]).into(),
+					Operator::MoreThan,
+					Thing::from((self.tb, id)).into(),
+				)))))
+			}
+			(Bound::Included(id), Bound::Unbounded) => {
+				Some(Cond(Value::Expression(Box::new(Expression::new(
+					Idiom(vec![Part::from(Ident(ID.to_owned()))]).into(),
+					Operator::MoreThanOrEqual,
+					Thing::from((self.tb, id)).into(),
+				)))))
+			}
+			(Bound::Included(lid), Bound::Included(rid)) => {
+				Some(Cond(Value::Expression(Box::new(Expression::new(
+					Value::Expression(Box::new(Expression::new(
+						Idiom(vec![Part::from(Ident(ID.to_owned()))]).into(),
+						Operator::MoreThanOrEqual,
+						Thing::from((self.tb.clone(), lid)).into(),
+					))),
+					Operator::And,
+					Value::Expression(Box::new(Expression::new(
+						Idiom(vec![Part::from(Ident(ID.to_owned()))]).into(),
+						Operator::LessThanOrEqual,
+						Thing::from((self.tb, rid)).into(),
+					))),
+				)))))
+			}
+			(Bound::Included(lid), Bound::Excluded(rid)) => {
+				Some(Cond(Value::Expression(Box::new(Expression::new(
+					Value::Expression(Box::new(Expression::new(
+						Idiom(vec![Part::from(Ident(ID.to_owned()))]).into(),
+						Operator::MoreThanOrEqual,
+						Thing::from((self.tb.clone(), lid)).into(),
+					))),
+					Operator::And,
+					Value::Expression(Box::new(Expression::new(
+						Idiom(vec![Part::from(Ident(ID.to_owned()))]).into(),
+						Operator::LessThan,
+						Thing::from((self.tb, rid)).into(),
+					))),
+				)))))
+			}
+			(Bound::Excluded(lid), Bound::Included(rid)) => {
+				Some(Cond(Value::Expression(Box::new(Expression::new(
+					Value::Expression(Box::new(Expression::new(
+						Idiom(vec![Part::from(Ident(ID.to_owned()))]).into(),
+						Operator::MoreThan,
+						Thing::from((self.tb.clone(), lid)).into(),
+					))),
+					Operator::And,
+					Value::Expression(Box::new(Expression::new(
+						Idiom(vec![Part::from(Ident(ID.to_owned()))]).into(),
+						Operator::LessThanOrEqual,
+						Thing::from((self.tb, rid)).into(),
+					))),
+				)))))
+			}
+			(Bound::Excluded(lid), Bound::Excluded(rid)) => {
+				Some(Cond(Value::Expression(Box::new(Expression::new(
+					Value::Expression(Box::new(Expression::new(
+						Idiom(vec![Part::from(Ident(ID.to_owned()))]).into(),
+						Operator::MoreThan,
+						Thing::from((self.tb.clone(), lid)).into(),
+					))),
+					Operator::And,
+					Value::Expression(Box::new(Expression::new(
+						Idiom(vec![Part::from(Ident(ID.to_owned()))]).into(),
+						Operator::LessThan,
+						Thing::from((self.tb, rid)).into(),
+					))),
+				)))))
+			}
+		}
+	}
+
 	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
+		stk: &mut Stk,
 		ctx: &Context<'_>,
 		opt: &Options,
-		txn: &Transaction,
 		doc: Option<&CursorDoc<'_>>,
 	) -> Result<Value, Error> {
 		Ok(Value::Range(Box::new(Range {
 			tb: self.tb.clone(),
 			beg: match &self.beg {
-				Bound::Included(id) => Bound::Included(id.compute(ctx, opt, txn, doc).await?),
-				Bound::Excluded(id) => Bound::Excluded(id.compute(ctx, opt, txn, doc).await?),
+				Bound::Included(id) => Bound::Included(id.compute(stk, ctx, opt, doc).await?),
+				Bound::Excluded(id) => Bound::Excluded(id.compute(stk, ctx, opt, doc).await?),
 				Bound::Unbounded => Bound::Unbounded,
 			},
 			end: match &self.end {
-				Bound::Included(id) => Bound::Included(id.compute(ctx, opt, txn, doc).await?),
-				Bound::Excluded(id) => Bound::Excluded(id.compute(ctx, opt, txn, doc).await?),
+				Bound::Included(id) => Bound::Included(id.compute(stk, ctx, opt, doc).await?),
+				Bound::Excluded(id) => Bound::Excluded(id.compute(stk, ctx, opt, doc).await?),
 				Bound::Unbounded => Bound::Unbounded,
 			},
 		})))

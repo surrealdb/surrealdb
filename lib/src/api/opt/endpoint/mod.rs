@@ -11,8 +11,6 @@ mod indxdb;
 mod mem;
 #[cfg(feature = "kv-rocksdb")]
 mod rocksdb;
-#[cfg(feature = "kv-speedb")]
-mod speedb;
 #[cfg(feature = "kv-surrealkv")]
 mod surrealkv;
 #[cfg(feature = "kv-tikv")]
@@ -130,7 +128,6 @@ pub enum EndpointKind {
 	Memory,
 	RocksDb,
 	File,
-	SpeeDb,
 	TiKv,
 	Unsupported(String),
 	SurrealKV,
@@ -149,7 +146,6 @@ impl From<&str> for EndpointKind {
 			"mem" => Self::Memory,
 			"file" => Self::File,
 			"rocksdb" => Self::RocksDb,
-			"speedb" => Self::SpeeDb,
 			"tikv" => Self::TiKv,
 			"surrealkv" => Self::SurrealKV,
 			_ => Self::Unsupported(s.to_owned()),

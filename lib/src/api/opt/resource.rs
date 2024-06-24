@@ -21,11 +21,7 @@ pub enum Resource {
 impl Resource {
 	pub(crate) fn with_range(self, range: Range<Id>) -> Result<sql::Range> {
 		match self {
-			Resource::Table(Table(table)) => Ok(sql::Range {
-				tb: table,
-				beg: range.start,
-				end: range.end,
-			}),
+			Resource::Table(table) => Ok(sql::Range::new(table.0, range.start, range.end)),
 			Resource::RecordId(record_id) => Err(Error::RangeOnRecordId(record_id).into()),
 			Resource::Object(object) => Err(Error::RangeOnObject(object).into()),
 			Resource::Array(array) => Err(Error::RangeOnArray(array).into()),
@@ -219,21 +215,25 @@ fn blacklist_colon(input: &str) -> Result<()> {
 impl<R> IntoResource<Vec<R>> for &str {
 	fn into_resource(self) -> Result<Resource> {
 		blacklist_colon(self)?;
-		Ok(Resource::Table(Table(self.to_owned())))
+		let mut table = Table::default();
+		self.clone_into(&mut table.0);
+		Ok(Resource::Table(table))
 	}
 }
 
 impl<R> IntoResource<Vec<R>> for &String {
 	fn into_resource(self) -> Result<Resource> {
 		blacklist_colon(self)?;
-		Ok(Resource::Table(Table(self.to_owned())))
+		IntoResource::<Vec<R>>::into_resource(self.as_str())
 	}
 }
 
 impl<R> IntoResource<Vec<R>> for String {
 	fn into_resource(self) -> Result<Resource> {
 		blacklist_colon(&self)?;
-		Ok(Resource::Table(Table(self)))
+		let mut table = Table::default();
+		table.0 = self;
+		Ok(Resource::Table(table))
 	}
 }
 
