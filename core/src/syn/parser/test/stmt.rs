@@ -1130,6 +1130,7 @@ fn parse_define_access_record() {
 	}
 }
 
+#[test]
 fn parse_define_access_record_with_jwt() {
 	let res = test_parse!(
 		parse_stmt,
@@ -1781,6 +1782,30 @@ fn parse_use() {
 	assert_eq!(res, expect);
 
 	let res = test_parse!(parse_stmt, r"USE NS bar DB foo").unwrap();
+	let expect = Statement::Use(UseStatement {
+		ns: Some("bar".to_owned()),
+		db: Some("foo".to_owned()),
+	});
+	assert_eq!(res, expect);
+}
+
+#[test]
+fn parse_use_lowercase() {
+	let res = test_parse!(parse_stmt, r"use ns foo").unwrap();
+	let expect = Statement::Use(UseStatement {
+		ns: Some("foo".to_owned()),
+		db: None,
+	});
+	assert_eq!(res, expect);
+
+	let res = test_parse!(parse_stmt, r"use db foo").unwrap();
+	let expect = Statement::Use(UseStatement {
+		ns: None,
+		db: Some("foo".to_owned()),
+	});
+	assert_eq!(res, expect);
+
+	let res = test_parse!(parse_stmt, r"use ns bar db foo").unwrap();
 	let expect = Statement::Use(UseStatement {
 		ns: Some("bar".to_owned()),
 		db: Some("foo".to_owned()),

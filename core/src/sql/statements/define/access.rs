@@ -131,22 +131,8 @@ impl Display for DefineAccessStatement {
 		if self.if_not_exists {
 			write!(f, " IF NOT EXISTS")?
 		}
-		write!(f, " {} ON {}", self.name, self.base)?;
-		match &self.kind {
-			AccessType::Jwt(ac) => {
-				write!(f, " TYPE JWT {}", ac)?;
-			}
-			AccessType::Record(ac) => {
-				write!(f, " TYPE RECORD")?;
-				if let Some(ref v) = ac.signup {
-					write!(f, " SIGNUP {v}")?
-				}
-				if let Some(ref v) = ac.signin {
-					write!(f, " SIGNIN {v}")?
-				}
-				write!(f, " WITH JWT {}", ac.jwt)?;
-			}
-		}
+		// The specific access method definition is displayed by AccessType
+		write!(f, " {} ON {} TYPE {}", self.name, self.base, self.kind)?;
 		// Always print relevant durations so defaults can be changed in the future
 		// If default values were not printed, exports would not be forward compatible
 		// None values need to be printed, as they are different from the default values

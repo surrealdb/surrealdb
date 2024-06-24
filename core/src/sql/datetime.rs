@@ -95,7 +95,7 @@ impl Datetime {
 
 impl Display for Datetime {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-		Display::fmt(&quote_str(&self.to_raw()), f)
+		write!(f, "d{}", &quote_str(&self.to_raw()))
 	}
 }
 
