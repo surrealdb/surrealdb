@@ -62,6 +62,6 @@ impl Display for Ident {
 
 impl InfoStructure for Ident {
 	fn structure(self) -> Value {
-		self.0.into()
+		self.to_string().into()
 	}
 }

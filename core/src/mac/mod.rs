@@ -11,10 +11,10 @@ macro_rules! bytes {
 #[macro_export]
 #[doc(hidden)]
 macro_rules! map {
-    ($($k:expr => $v:expr),* $(,)? $( => $x:expr )?) => {{
+    ($($k:expr $(, if let $grant:pat = $check:expr)? $(, if $guard:expr)? => $v:expr),* $(,)? $( => $x:expr )?) => {{
         let mut m = ::std::collections::BTreeMap::new();
-        $(m.extend($x.iter().map(|(k, v)| (k.clone(), v.clone())));)?
-        $(m.insert($k, $v);)+
+    	$(m.extend($x.iter().map(|(k, v)| (k.clone(), v.clone())));)?
+		$( $(if let $grant = $check)? $(if $guard)? { m.insert($k, $v); };)+
         m
     }};
 }

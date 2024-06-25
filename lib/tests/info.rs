@@ -577,7 +577,7 @@ async fn access_info_redacted_structure() {
 		assert!(out.is_ok(), "Unexpected error: {:?}", out);
 
 		let out_expected =
-			r#"{ accesses: [{ base: 'NAMESPACE', duration: '{ session: 6h, token: 15m }', kind: { jwt: { alg: 'HS512', issuer: "{ alg: 'HS512', key: '[REDACTED]' }", key: '[REDACTED]' }, kind: 'JWT' }, name: 'access' }], databases: [], users: [] }"#.to_string();
+			r#"{ accesses: [{ base: 'NAMESPACE', duration: { session: 6h, token: 15m }, kind: { jwt: { issuer: { alg: 'HS512', key: '[REDACTED]' }, verify: { alg: 'HS512', key: '[REDACTED]' } }, kind: 'JWT' }, name: 'access' }], databases: [], users: [] }"#.to_string();
 		let out_str = out.unwrap().to_string();
 		assert_eq!(
 			out_str, out_expected,
@@ -600,7 +600,7 @@ async fn access_info_redacted_structure() {
 		assert!(out.is_ok(), "Unexpected error: {:?}", out);
 
 		let out_expected =
-			r#"{ accesses: [{ base: 'NAMESPACE', duration: '{ session: 6h, token: 15m }', kind: { jwt: { alg: 'PS512', issuer: "{ alg: 'PS512', key: '[REDACTED]' }", key: 'public' }, kind: 'JWT' }, name: 'access' }], databases: [], users: [] }"#.to_string();
+			r#"{ accesses: [{ base: 'NAMESPACE', duration: { session: 6h, token: 15m }, kind: { jwt: { issuer: { alg: 'PS512', key: '[REDACTED]' }, verify: { alg: 'PS512', key: 'public' } }, kind: 'JWT' }, name: 'access' }], databases: [], users: [] }"#.to_string();
 		let out_str = out.unwrap().to_string();
 		assert_eq!(
 			out_str, out_expected,
@@ -623,7 +623,7 @@ async fn access_info_redacted_structure() {
 		assert!(out.is_ok(), "Unexpected error: {:?}", out);
 
 		let out_expected =
-			r#"{ accesses: [{ base: 'NAMESPACE', duration: '{ session: 6h, token: 15m }', kind: { jwt: { alg: 'HS512', issuer: "{ alg: 'HS512', key: '[REDACTED]' }", key: '[REDACTED]' }, kind: 'RECORD' }, name: 'access' }], databases: [], users: [] }"#.to_string();
+			r#"{ accesses: [{ base: 'NAMESPACE', duration: { session: 6h, token: 15m }, kind: { jwt: { issuer: { alg: 'HS512', key: '[REDACTED]' }, verify: { alg: 'HS512', key: '[REDACTED]' } }, kind: 'RECORD' }, name: 'access' }], databases: [], users: [] }"#.to_string();
 		let out_str = out.unwrap().to_string();
 		assert_eq!(
 			out_str, out_expected,

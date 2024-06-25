@@ -4,7 +4,7 @@ use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::iam::{Action, ResourceKind};
 use crate::sql::statements::info::InfoStructure;
-use crate::sql::{filter::Filter, tokenizer::Tokenizer, Base, Ident, Object, Strand, Value};
+use crate::sql::{filter::Filter, tokenizer::Tokenizer, Array, Base, Ident, Strand, Value};
 use derive::Store;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -93,40 +93,14 @@ impl Display for DefineAnalyzerStatement {
 
 impl InfoStructure for DefineAnalyzerStatement {
 	fn structure(self) -> Value {
-		let Self {
-			name,
-			function,
-			tokenizers,
-			filters,
-			comment,
-			..
-		} = self;
-		let mut acc = Object::default();
-
-		acc.insert("name".to_string(), name.structure());
-
-		if let Some(function) = function {
-			acc.insert("function".to_string(), function.structure());
-		}
-
-		if let Some(tokenizers) = tokenizers {
-			acc.insert(
-				"tokenizers".to_string(),
-				Value::Array(tokenizers.into_iter().map(|t| t.to_string().into()).collect()),
-			);
-		}
-
-		if let Some(filters) = filters {
-			acc.insert(
-				"filters".to_string(),
-				Value::Array(filters.into_iter().map(|f| f.to_string().into()).collect()),
-			);
-		}
-
-		if let Some(comment) = comment {
-			acc.insert("comment".to_string(), comment.into());
-		}
-
-		Value::Object(acc)
+		Value::from(map! {
+			"name".to_string() => self.name.structure(),
+			"function".to_string(), if let Some(v) = self.function => v.structure(),
+			"tokenizers".to_string(), if let Some(v) = self.tokenizers =>
+				v.into_iter().map(|v| v.to_string().into()).collect::<Array>().into(),
+			"filters".to_string(), if let Some(v) = self.filters =>
+				v.into_iter().map(|v| v.to_string().into()).collect::<Array>().into(),
+			"comment".to_string(), if let Some(v) = self.comment => v.into(),
+		})
 	}
 }

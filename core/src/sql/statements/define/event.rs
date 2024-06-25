@@ -4,7 +4,7 @@ use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::iam::{Action, ResourceKind};
 use crate::sql::statements::info::InfoStructure;
-use crate::sql::{Base, Ident, Object, Strand, Value, Values};
+use crate::sql::{Base, Ident, Strand, Value, Values};
 use derive::Store;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -83,31 +83,12 @@ impl Display for DefineEventStatement {
 
 impl InfoStructure for DefineEventStatement {
 	fn structure(self) -> Value {
-		let Self {
-			name,
-			what,
-			when,
-			then,
-			comment,
-			..
-		} = self;
-		let mut acc = Object::default();
-
-		acc.insert("name".to_string(), name.structure());
-
-		acc.insert("what".to_string(), what.structure());
-
-		acc.insert("when".to_string(), when.structure());
-
-		acc.insert(
-			"then".to_string(),
-			Value::Array(then.0.iter().map(|v| v.to_string().into()).collect()),
-		);
-
-		if let Some(comment) = comment {
-			acc.insert("comment".to_string(), comment.into());
-		}
-
-		Value::Object(acc)
+		Value::from(map! {
+			"name".to_string() => self.name.structure(),
+			"what".to_string() => self.what.structure(),
+			"when".to_string() => self.when.structure(),
+			"then".to_string() => self.then.structure(),
+			"comment".to_string(), if let Some(v) = self.comment => v.into(),
+		})
 	}
 }

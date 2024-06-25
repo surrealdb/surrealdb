@@ -4,7 +4,7 @@ use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::iam::Auth;
 use crate::sql::statements::info::InfoStructure;
-use crate::sql::{Cond, Fetchs, Fields, Object, Uuid, Value};
+use crate::sql::{Cond, Fetchs, Fields, Uuid, Value};
 use derive::Store;
 use reblessive::tree::Stk;
 use revision::revisioned;
@@ -149,27 +149,11 @@ impl fmt::Display for LiveStatement {
 
 impl InfoStructure for LiveStatement {
 	fn structure(self) -> Value {
-		let Self {
-			expr,
-			what,
-			cond,
-			fetch,
-			..
-		} = self;
-
-		let mut acc = Object::default();
-
-		acc.insert("expr".to_string(), expr.structure());
-
-		acc.insert("what".to_string(), what.structure());
-
-		if let Some(cond) = cond {
-			acc.insert("cond".to_string(), cond.structure());
-		}
-
-		if let Some(fetch) = fetch {
-			acc.insert("fetch".to_string(), fetch.structure());
-		}
-		Value::Object(acc)
+		Value::from(map! {
+			"expr".to_string() => self.expr.structure(),
+			"what".to_string() => self.what.structure(),
+			"cond".to_string(), if let Some(v) = self.cond => v.structure(),
+			"fetch".to_string(), if let Some(v) = self.fetch => v.structure(),
+		})
 	}
 }
