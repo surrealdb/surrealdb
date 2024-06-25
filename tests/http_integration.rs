@@ -1041,11 +1041,7 @@ mod http_integration {
 				num_records - 10,
 				"body: {body}"
 			);
-			assert_eq!(
-				body[0]["result"].as_array().unwrap()[0]["id"],
-				"table:11",
-				"body: {body}"
-			);
+			assert_eq!(body[0]["result"].as_array().unwrap()[0]["id"], "table:11", "body: {body}");
 		}
 
 		// GET records with a start and limit
@@ -1059,11 +1055,7 @@ mod http_integration {
 
 			let body: serde_json::Value = serde_json::from_str(&res.text().await?).unwrap();
 			assert_eq!(body[0]["result"].as_array().unwrap().len(), 10, "body: {body}");
-			assert_eq!(
-				body[0]["result"].as_array().unwrap()[0]["id"],
-				"table:11",
-				"body: {body}"
-			);
+			assert_eq!(body[0]["result"].as_array().unwrap()[0]["id"], "table:11", "body: {body}");
 		}
 
 		// GET without authentication returns no records
@@ -1504,10 +1496,7 @@ mod http_integration {
 			);
 
 			// Verify the record doesn't have the original data
-			assert!(
-				body[0]["result"].as_array().unwrap()[0]["default"].is_null(),
-				"body: {body}"
-			);
+			assert!(body[0]["result"].as_array().unwrap()[0]["default"].is_null(), "body: {body}");
 		}
 
 		// Update one record without authentication
@@ -1635,11 +1624,8 @@ mod http_integration {
 			assert_eq!(body[0]["result"].as_array().unwrap().len(), 2, "body: {body}");
 
 			// Try to delete the record
-			let res = client
-				.delete(format!("{base_url}/1"))
-				.basic_auth(USER, Some(PASS))
-				.send()
-				.await?;
+			let res =
+				client.delete(format!("{base_url}/1")).basic_auth(USER, Some(PASS)).send().await?;
 			assert_eq!(res.status(), 200, "body: {}", res.text().await?);
 
 			// Verify only one record was deleted

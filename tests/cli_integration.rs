@@ -768,9 +768,7 @@ mod cli_integration {
 			tokio::time::timeout(time::Duration::from_secs(10), async {
 				loop {
 					if let Ok(Some(exit)) = server.status() {
-						panic!(
-							"Server unexpectedly exited after receiving first SIGINT: {exit:?}"
-						);
+						panic!("Server unexpectedly exited after receiving first SIGINT: {exit:?}");
 					}
 					tokio::time::sleep(time::Duration::from_millis(100)).await;
 				}
