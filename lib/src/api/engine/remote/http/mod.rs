@@ -35,7 +35,7 @@ use crate::method::Stats;
 use crate::opt::IntoEndpoint;
 use crate::sql::from_value;
 use crate::sql::serde::deserialize;
-use crate::sql::Value;
+use crate::Value;
 #[cfg(not(target_arch = "wasm32"))]
 use futures::TryStreamExt;
 use indexmap::IndexMap;
@@ -228,7 +228,7 @@ async fn take(one: bool, request: RequestBuilder) -> Result<Value> {
 						return Ok(mem::take(value));
 					}
 				}
-				Value::None | Value::Null => {}
+				Value::None | Value::None => {}
 				value => return Ok(value),
 			},
 			false => return Ok(value),

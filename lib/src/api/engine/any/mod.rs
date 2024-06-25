@@ -307,7 +307,7 @@ mod tests {
 	use crate::opt::auth::Root;
 	use crate::opt::capabilities::Capabilities;
 	use crate::sql;
-	use crate::sql::Value;
+	use crate::Value;
 
 	#[tokio::test]
 	async fn local_engine_without_auth() {

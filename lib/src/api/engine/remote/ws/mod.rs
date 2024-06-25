@@ -19,7 +19,7 @@ use crate::dbs::QueryMethodResponse;
 use crate::dbs::Status;
 use crate::method::Stats;
 use crate::opt::IntoEndpoint;
-use crate::sql::Value;
+use crate::value::Value;
 use indexmap::IndexMap;
 use revision::revisioned;
 use revision::Revisioned;

@@ -1,5 +1,8 @@
 use super::live;
 use super::Stream;
+use crate::value;
+use crate::Object;
+use crate::Value;
 
 use crate::api::conn::Method;
 use crate::api::conn::Param;
@@ -13,9 +16,7 @@ use crate::method::OnceLockExt;
 use crate::method::Stats;
 use crate::method::WithStats;
 use crate::sql;
-use crate::sql::to_value;
 use crate::sql::Statement;
-use crate::sql::Value;
 use crate::Notification;
 use crate::Surreal;
 use futures::future::Either;
@@ -268,12 +269,12 @@ where
 	/// ```
 	pub fn bind(self, bindings: impl Serialize) -> Self {
 		self.map_valid(move |mut valid| {
-			let mut bindings = to_value(bindings)?;
+			let mut bindings = bindings.serialize(value::Serializer)?;
 			if let Value::Array(array) = &mut bindings {
-				if let [Value::Strand(key), value] = &mut array.0[..] {
+				if let [Value::String(key), value] = &mut array.0[..] {
 					let mut map = BTreeMap::new();
-					map.insert(mem::take(&mut key.0), mem::take(value));
-					bindings = map.into();
+					map.insert(mem::take(&mut key), mem::take(value));
+					bindings = Object(map).into();
 				}
 			}
 			match &mut bindings {

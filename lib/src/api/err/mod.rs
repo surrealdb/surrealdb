@@ -4,7 +4,7 @@ use crate::sql::Edges;
 use crate::sql::FromValueError;
 use crate::sql::Object;
 use crate::sql::Thing;
-use crate::sql::Value;
+use crate::Value;
 use serde::Serialize;
 use std::io;
 use std::path::PathBuf;
@@ -213,6 +213,29 @@ pub enum Error {
 
 	#[error("{0}")]
 	InvalidFuncTarget(#[from] ParseFuncTargetError),
+
+	#[error("failed to serialize value: {0}")]
+	SerializeValue(String),
+	#[error("failed to serialize value: {0}")]
+	DeSerializeValue(String),
+}
+
+impl serde::ser::Error for Error {
+	fn custom<T>(msg: T) -> Self
+	where
+		T: std::fmt::Display,
+	{
+		Error::SerializeValue(msg.to_string())
+	}
+}
+
+impl serde::de::Error for Error {
+	fn custom<T>(msg: T) -> Self
+	where
+		T: std::fmt::Display,
+	{
+		Error::DeSerializeValue(msg.to_string())
+	}
 }
 
 impl From<ParseNetTargetError> for crate::Error {

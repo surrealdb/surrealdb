@@ -10,7 +10,7 @@ use crate::api::Connection;
 use crate::api::Result;
 use crate::method::OnceLockExt;
 use crate::sql::Id;
-use crate::sql::Value;
+use crate::Value;
 use crate::Surreal;
 use serde::de::DeserializeOwned;
 use serde::Serialize;

@@ -4,7 +4,7 @@ use crate::api::conn::Method;
 use crate::api::conn::Route;
 use crate::api::Response as QueryResponse;
 use crate::sql::to_value;
-use crate::sql::Value;
+use crate::Value;
 use flume::Receiver;
 use futures::StreamExt;
 

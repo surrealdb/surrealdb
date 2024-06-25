@@ -24,7 +24,7 @@ use crate::sql::Operator;
 use crate::sql::Part;
 use crate::sql::Statement;
 use crate::sql::Table;
-use crate::sql::Value;
+use crate::Value;
 use crate::Notification;
 use crate::Surreal;
 use channel::Receiver;

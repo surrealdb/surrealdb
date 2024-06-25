@@ -79,7 +79,7 @@ use crate::api::Surreal;
 use crate::opt::IntoExportDestination;
 use crate::opt::WaitFor;
 use crate::sql::to_value;
-use crate::sql::Value;
+use crate::Value;
 use serde::Serialize;
 use std::borrow::Cow;
 use std::marker::PhantomData;

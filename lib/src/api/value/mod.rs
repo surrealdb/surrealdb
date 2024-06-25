@@ -1,23 +1,77 @@
 use std::{
 	borrow::Borrow,
+	cmp::{Ordering, PartialEq, PartialOrd},
 	collections::{btree_map::IterMut, BTreeMap},
 	fmt,
-	str::FromStr,
+	ops::Deref,
 	time::Duration,
 };
 
 use chrono::{DateTime, Utc};
 use rust_decimal::Decimal;
+use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-#[derive(Debug, Clone)]
+mod de;
+mod deserializer;
+mod ser;
+mod serializer;
+mod sql;
+
+pub use serializer::Serializer;
+
+// Keeping bytes implementation minimal since it might be a good idea to use bytes crate here
+// instead of a plain Vec<u8>.
+#[derive(Debug, Clone, Eq, PartialEq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub struct Bytes(Vec<u8>);
 
-#[derive(Debug, Clone)]
+impl Bytes {
+	pub fn copy_from_slice(slice: &[u8]) -> Self {
+		slice.to_vec().into()
+	}
+
+	pub fn len(&self) -> usize {
+		self.0.len()
+	}
+
+	pub fn is_empty(&self) -> bool {
+		self.0.is_empty()
+	}
+}
+
+impl PartialEq<[u8]> for Bytes {
+	fn eq(&self, other: &[u8]) -> bool {
+		self.0 == other
+	}
+}
+
+impl PartialOrd<[u8]> for Bytes {
+	fn partial_cmp(&self, other: &[u8]) -> Option<Ordering> {
+		self.0.as_slice().partial_cmp(other)
+	}
+}
+
+impl Deref for Bytes {
+	type Target = [u8];
+
+	fn deref(&self) -> &Self::Target {
+		self.0.as_slice()
+	}
+}
+
+impl From<Vec<u8>> for Bytes {
+	fn from(value: Vec<u8>) -> Self {
+		Bytes(value)
+	}
+}
+
+// Keeping the Datetime wrapped, the chrono is still pre 1.0 so we can't gaurentee stability here,
+// best to keep most methods interal with maybe some functions from coverting between chrono types explicitly marked as unstable.
+#[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize)]
 pub struct Datetime(DateTime<Utc>);
 
 /// The key of a [`RecordId`].
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[non_exhaustive]
 pub enum RecordIdKey {
 	/// A string record id, like in `user:tkwse1j5o0anqjxonvzx`.
@@ -64,7 +118,7 @@ impl From<Vec<Value>> for RecordIdKey {
 ///
 /// Record id's consist of a table name and a key.
 /// For example the record id `user:tkwse1j5o0anqjxonvzx` has the table `user` and the key `tkwse1j5o0anqjxonvzx`.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RecordId {
 	table: String,
 	key: RecordIdKey,
@@ -92,7 +146,7 @@ impl RecordId {
 }
 
 #[non_exhaustive]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Number {
 	Float(f64),
 	Integer(i64),
@@ -122,8 +176,8 @@ impl<'a> ExactSizeIterator for ObjectIterMut<'a> {
 	}
 }
 
-#[derive(Debug, Default, Clone)]
-pub struct Object(BTreeMap<String, Value>);
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
+pub struct Object(pub(crate) BTreeMap<String, Value>);
 
 impl Object {
 	pub fn new() -> Self {
@@ -181,15 +235,23 @@ impl Object {
 	pub fn len(&self) -> usize {
 		self.0.len()
 	}
+
+	pub fn insert<V>(&mut self, key: String, value: V) -> Option<Value>
+	where
+		V: Into<Value>,
+	{
+		self.0.insert(key, value.into())
+	}
 }
 
 #[non_exhaustive]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Value {
-	Null,
+	None,
 	Bool(bool),
 	Number(Number),
 	Object(Object),
+	String(String),
 	Array(Vec<Value>),
 	Uuid(Uuid),
 	Datetime(Datetime),
@@ -274,7 +336,9 @@ impl_convert!(
 	(Datetime(Datetime), as_datetime, as_datetime_mut, into_dateime),
 	(Duration(Duration), as_duration, as_duration_mut, into_duration),
 	(Bytes(Bytes), as_bytes, as_bytes_mut, into_bytes),
+	(String(String), as_string, as_string_mut, into_string),
 	(RecordId(RecordId), as_record_id, as_record_id_mut, into_record_id),
+	(Object(Object), as_object, as_object_mut, into_object),
 );
 
 pub struct ConversionError {

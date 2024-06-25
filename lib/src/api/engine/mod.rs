@@ -24,8 +24,7 @@ use crate::sql::statements::UpsertStatement;
 use crate::sql::Data;
 use crate::sql::Field;
 use crate::sql::Output;
-use crate::sql::Value;
-use crate::sql::Values;
+use crate::Value;
 use futures::Stream;
 use std::mem;
 use std::pin::Pin;
@@ -41,7 +40,7 @@ use wasmtimer::std::Instant;
 use wasmtimer::tokio::Interval;
 
 #[allow(dead_code)] // used by the the embedded database and `http`
-fn split_params(params: &mut [Value]) -> (bool, Values, Value) {
+fn split_params(params: &mut [Value]) -> (bool, Vec<Value>, Value) {
 	let (what, data) = match params {
 		[what] => (mem::take(what), Value::None),
 		[what, data] => (mem::take(what), mem::take(data)),
@@ -49,15 +48,9 @@ fn split_params(params: &mut [Value]) -> (bool, Values, Value) {
 	};
 	let one = what.is_thing();
 	let what = match what {
-		Value::Array(vec) => {
-			let mut values = Values::default();
-			values.0 = vec.0;
-			values
-		}
+		Value::Array(vec) => vec,
 		value => {
-			let mut values = Values::default();
-			values.0 = vec![value];
-			values
+			vec![value]
 		}
 	};
 	(one, what, data)
@@ -67,7 +60,7 @@ fn split_params(params: &mut [Value]) -> (bool, Values, Value) {
 fn create_statement(params: &mut [Value]) -> CreateStatement {
 	let (_, what, data) = split_params(params);
 	let data = match data {
-		Value::None | Value::Null => None,
+		Value::None => None,
 		value => Some(Data::ContentExpression(value)),
 	};
 	let mut stmt = CreateStatement::default();
@@ -81,7 +74,7 @@ fn create_statement(params: &mut [Value]) -> CreateStatement {
 fn upsert_statement(params: &mut [Value]) -> (bool, UpsertStatement) {
 	let (one, what, data) = split_params(params);
 	let data = match data {
-		Value::None | Value::Null => None,
+		Value::None => None,
 		value => Some(Data::ContentExpression(value)),
 	};
 	let mut stmt = UpsertStatement::default();
@@ -95,7 +88,7 @@ fn upsert_statement(params: &mut [Value]) -> (bool, UpsertStatement) {
 fn update_statement(params: &mut [Value]) -> (bool, UpdateStatement) {
 	let (one, what, data) = split_params(params);
 	let data = match data {
-		Value::None | Value::Null => None,
+		Value::None => None,
 		value => Some(Data::ContentExpression(value)),
 	};
 	let mut stmt = UpdateStatement::default();
@@ -115,7 +108,6 @@ fn insert_statement(params: &mut [Value]) -> (bool, InsertStatement) {
 	let mut stmt = InsertStatement::default();
 	stmt.into = match what {
 		Value::None => None,
-		Value::Null => None,
 		what => Some(what),
 	};
 	stmt.data = Data::SingleExpression(data);
@@ -127,7 +119,7 @@ fn insert_statement(params: &mut [Value]) -> (bool, InsertStatement) {
 fn patch_statement(params: &mut [Value]) -> (bool, UpdateStatement) {
 	let (one, what, data) = split_params(params);
 	let data = match data {
-		Value::None | Value::Null => None,
+		Value::None => None,
 		value => Some(Data::PatchExpression(value)),
 	};
 	let mut stmt = UpdateStatement::default();
@@ -141,7 +133,7 @@ fn patch_statement(params: &mut [Value]) -> (bool, UpdateStatement) {
 fn merge_statement(params: &mut [Value]) -> (bool, UpdateStatement) {
 	let (one, what, data) = split_params(params);
 	let data = match data {
-		Value::None | Value::Null => None,
+		Value::None => None,
 		value => Some(Data::MergeExpression(value)),
 	};
 	let mut stmt = UpdateStatement::default();

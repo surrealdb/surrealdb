@@ -118,25 +118,17 @@ extern crate tracing;
 
 mod api;
 
-#[doc(inline)]
-pub use api::engine;
 #[cfg(feature = "protocol-http")]
 #[doc(hidden)]
 pub use api::headers;
+
 #[doc(inline)]
-pub use api::method;
-#[doc(inline)]
-pub use api::opt;
-#[doc(inline)]
-pub use api::Connect;
-#[doc(inline)]
-pub use api::Connection;
-#[doc(inline)]
-pub use api::Response;
-#[doc(inline)]
-pub use api::Result;
-#[doc(inline)]
-pub use api::Surreal;
+pub use api::{
+	engine, method, opt,
+	value::{self, Bytes, Datetime, Number, Object, RecordId, RecordIdKey, Value},
+	Connect, Connection, Response, Result, Surreal,
+};
+
 #[doc(inline)]
 pub use surrealdb_core::*;
 

@@ -76,7 +76,7 @@ use crate::sql::statements::KillStatement;
 use crate::sql::Query;
 use crate::sql::Statement;
 use crate::sql::Uuid;
-use crate::sql::Value;
+use crate::Value;
 use channel::Sender;
 #[cfg(feature = "ml")]
 #[cfg(not(target_arch = "wasm32"))]
@@ -418,7 +418,7 @@ async fn take(one: bool, responses: Vec<Response>) -> Result<Value> {
 						return Ok(mem::take(value));
 					}
 				}
-				Value::None | Value::Null => {}
+				Value::None | Value::None => {}
 				value => return Ok(value),
 			},
 			false => return Ok(value),

@@ -9,7 +9,7 @@ use crate::method::OnceLockExt;
 use crate::sql::Ident;
 use crate::sql::Part;
 use crate::sql::Table;
-use crate::sql::Value;
+use crate::Value;
 use crate::Surreal;
 use serde::de::DeserializeOwned;
 use serde::Serialize;

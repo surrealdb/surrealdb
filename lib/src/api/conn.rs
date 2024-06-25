@@ -6,14 +6,13 @@ use crate::api::ExtraFeatures;
 use crate::api::Result;
 use crate::api::Surreal;
 use crate::dbs::Notification;
-use crate::sql::from_value;
 use crate::sql::Query;
-use crate::sql::Value;
+use crate::Object;
+use crate::Value;
 use flume::Receiver;
 use flume::Sender;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
-use std::collections::BTreeMap;
 use std::collections::HashSet;
 use std::future::Future;
 use std::path::PathBuf;
@@ -123,7 +122,7 @@ pub(crate) enum MlConfig {
 #[derive(Debug, Default)]
 #[allow(dead_code)] // used by the embedded and remote connections
 pub struct Param {
-	pub(crate) query: Option<(Query, BTreeMap<String, Value>)>,
+	pub(crate) query: Option<(Query, Object)>,
 	pub(crate) other: Vec<Value>,
 	pub(crate) file: Option<PathBuf>,
 	pub(crate) bytes_sender: Option<channel::Sender<Result<Vec<u8>>>>,
@@ -139,7 +138,7 @@ impl Param {
 		}
 	}
 
-	pub(crate) fn query(query: Query, bindings: BTreeMap<String, Value>) -> Self {
+	pub(crate) fn query(query: Query, bindings: Object) -> Self {
 		Self {
 			query: Some((query, bindings)),
 			..Default::default()
@@ -232,7 +231,7 @@ pub trait Connection: Sized + Send + Sync + 'static {
 		Box::pin(async move {
 			let rx = self.send(router, param).await?;
 			let value = self.recv(rx).await?;
-			from_value(value).map_err(Into::into)
+			R::deserialize(value).map_err(Into::into)
 		})
 	}
 
@@ -249,8 +248,8 @@ pub trait Connection: Sized + Send + Sync + 'static {
 		Box::pin(async move {
 			let rx = self.send(router, param).await?;
 			match self.recv(rx).await? {
-				Value::None | Value::Null => Ok(None),
-				value => from_value(value).map_err(Into::into),
+				Value::None => Ok(None),
+				value => R::deserialize(value).map_err(Into::into).map(Some),
 			}
 		})
 	}
@@ -268,11 +267,11 @@ pub trait Connection: Sized + Send + Sync + 'static {
 		Box::pin(async move {
 			let rx = self.send(router, param).await?;
 			let value = match self.recv(rx).await? {
-				Value::None | Value::Null => Value::Array(Default::default()),
+				Value::None => Value::Array(Default::default()),
 				Value::Array(array) => Value::Array(array),
-				value => vec![value].into(),
+				value => Value::Array(vec![value]),
 			};
-			from_value(value).map_err(Into::into)
+			Vec::<R>::deserialize(value).map_err(Into::into)
 		})
 	}
 
@@ -288,7 +287,7 @@ pub trait Connection: Sized + Send + Sync + 'static {
 		Box::pin(async move {
 			let rx = self.send(router, param).await?;
 			match self.recv(rx).await? {
-				Value::None | Value::Null => Ok(()),
+				Value::None => Ok(()),
 				Value::Array(array) if array.is_empty() => Ok(()),
 				value => Err(Error::FromValue {
 					value,

@@ -12,7 +12,7 @@ mod tls;
 
 use crate::sql::to_value;
 use crate::sql::Thing;
-use crate::sql::Value;
+use crate::Value;
 use dmp::Diff;
 use serde::Serialize;
 

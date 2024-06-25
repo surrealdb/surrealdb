@@ -21,7 +21,7 @@ use crate::api::Surreal;
 use crate::engine::remote::ws::Data;
 use crate::engine::IntervalStream;
 use crate::opt::WaitFor;
-use crate::sql::Value;
+use crate::{Object, Value};
 use flume::Receiver;
 use futures::stream::SplitSink;
 use futures::SinkExt;
@@ -189,9 +189,9 @@ pub(crate) fn router(
 ) {
 	tokio::spawn(async move {
 		let ping = {
-			let mut request = BTreeMap::new();
-			request.insert("method".to_owned(), PING_METHOD.into());
-			let value = Value::from(request);
+			let mut request = Object::new();
+			request.insert("method".to_owned(), PING_METHOD.to_owned());
+			let value = request.into();
 			let value = serialize(&value, endpoint.supports_revision).unwrap();
 			Message::Binary(value)
 		};

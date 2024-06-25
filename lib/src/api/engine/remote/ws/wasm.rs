@@ -19,7 +19,7 @@ use crate::api::Surreal;
 use crate::engine::remote::ws::Data;
 use crate::engine::IntervalStream;
 use crate::opt::WaitFor;
-use crate::sql::Value;
+use crate::Value;
 use flume::Receiver;
 use flume::Sender;
 use futures::SinkExt;
