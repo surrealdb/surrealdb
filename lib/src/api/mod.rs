@@ -6,6 +6,7 @@ pub mod err;
 pub mod headers;
 pub mod method;
 pub mod opt;
+pub mod value;
 
 mod conn;
 
