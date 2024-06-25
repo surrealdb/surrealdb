@@ -68,9 +68,8 @@ http-body = "1.0.0"
 http-body-util = "0.1.1"
 hyper = "1.2.0"
 once_cell = "1.18.0"
-opentelemetry = { version = "0.23.0", features = [] }
-opentelemetry-otlp = { version = "0.16.0", features = ["metrics"] }
-opentelemetry_sdk = { version = "0.23.0", features = ["rt-tokio"] }
+opentelemetry = { version = "0.19", features = ["rt-tokio"] }
+opentelemetry-otlp = { version = "0.12.0", features = ["metrics"] }
 pin-project-lite = "0.2.13"
 pprof = { version = "0.13.0", features = [
     "flamegraph",
@@ -150,7 +149,7 @@ serial_test = "2.0.0"
 temp-env = { version = "0.3.6", features = ["async_closure"] }
 test-log = { version = "0.2.13", features = ["trace"] }
 tokio-stream = { version = "0.1", features = ["net"] }
-tokio-tungstenite = { version = "0.23.1" }
+tokio-tungstenite = { version = "0.21.0" }
 tonic = "0.11.0"
 ulid = "1.1.0"
 wiremock = "0.6.0"
