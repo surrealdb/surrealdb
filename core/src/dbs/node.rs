@@ -5,12 +5,13 @@ use std::ops::{Add, Sub};
 use std::time::Duration;
 use uuid::Uuid;
 
-#[revisioned(revision = 1)]
+#[revisioned(revision = 2)]
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash, Store)]
 #[non_exhaustive]
 pub struct Node {
 	pub id: Uuid,
 	pub hb: Timestamp,
+	#[revision(start = 2, default_fn = "default_gc")]
 	pub gc: bool,
 }
 
@@ -48,6 +49,10 @@ impl Node {
 			true => Some(self.id),
 			false => None,
 		}
+	}
+	// Sets the default gc value for old nodes
+	fn default_gc(_revision: u16) -> bool {
+		true
 	}
 }
 
