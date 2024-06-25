@@ -81,6 +81,7 @@ impl InfoStatement {
 				Ok(match structured {
 					true => Value::from(map! {
 						"namespaces".to_string() => process(txn.all_ns().await?),
+						"nodes".to_string() => process(txn.all_nodes().await?),
 						"users".to_string() => process(txn.all_root_users().await?),
 					}),
 					false => Value::from(map! {
@@ -88,6 +89,13 @@ impl InfoStatement {
 							let mut out = Object::default();
 							for v in txn.all_ns().await?.iter() {
 								out.insert(v.name.to_string().into(), v.to_string().into());
+							}
+							out.into()
+						},
+						"nodes".to_string() => {
+							let mut out = Object::default();
+							for v in txn.all_nodes().await?.iter() {
+								out.insert(v.id.to_string().into(), v.to_string().into());
 							}
 							out.into()
 						},
@@ -104,7 +112,7 @@ impl InfoStatement {
 			InfoStatement::Ns(structured) => {
 				// Allowed to run?
 				opt.is_allowed(Action::View, ResourceKind::Any, &Base::Ns)?;
-				// Get the NS and DB
+				// Get the NS
 				let ns = opt.ns()?;
 				// Get the transaction
 				let txn = ctx.tx();

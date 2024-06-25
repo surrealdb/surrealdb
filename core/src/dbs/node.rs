@@ -1,6 +1,9 @@
+use crate::sql::statements::info::InfoStructure;
+use crate::sql::Value;
 use derive::Store;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
+use std::fmt::{self, Display};
 use std::ops::{Add, Sub};
 use std::time::Duration;
 use uuid::Uuid;
@@ -56,6 +59,27 @@ impl Node {
 	}
 }
 
+impl Display for Node {
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		write!(f, "NODE {} SEEN {}", self.id, self.hb)?;
+		match self.gc {
+			true => write!(f, " ARCHIVED")?,
+			false => write!(f, " ACTIVE")?,
+		};
+		Ok(())
+	}
+}
+
+impl InfoStructure for Node {
+	fn structure(self) -> Value {
+		Value::from(map! {
+			"id".to_string() => Value::from(self.id),
+			"seen".to_string() => self.hb.structure(),
+			"active".to_string() => Value::from(!self.gc),
+		})
+	}
+}
+
 // This struct is meant to represent a timestamp that can be used to partially order
 // events in a cluster. It should be derived from a timestamp oracle, such as the
 // one available in TiKV via the client `TimestampExt` implementation.
@@ -97,6 +121,18 @@ impl Sub<Duration> for Timestamp {
 		Timestamp {
 			value: self.value.wrapping_sub(rhs.as_millis() as u64),
 		}
+	}
+}
+
+impl Display for Timestamp {
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		write!(f, "{}", self.value)
+	}
+}
+
+impl InfoStructure for Timestamp {
+	fn structure(self) -> Value {
+		self.value.into()
 	}
 }
 
