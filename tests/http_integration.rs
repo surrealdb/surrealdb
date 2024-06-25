@@ -35,7 +35,7 @@ mod http_integration {
 			let res = client.post(url).body("CREATE foo").send().await?;
 			assert_eq!(res.status(), 200);
 			let body = res.text().await?;
-			assert!(body.contains("Not enough permissions"), "body: {}", body);
+			assert!(body.contains("Not enough permissions"), "body: {body}");
 		}
 
 		// Request with invalid credentials, returns 401
@@ -51,7 +51,7 @@ mod http_integration {
 				client.post(url).basic_auth(USER, Some(PASS)).body("CREATE foo").send().await?;
 			assert_eq!(res.status(), 200);
 			let body = res.text().await?;
-			assert!(body.contains(r#"[{"result":[{"id":"foo:"#), "body: {}", body);
+			assert!(body.contains(r#"[{"result":[{"id":"foo:"#), "body: {body}");
 		}
 
 		// Prepare users with identical credentials on ROOT, NAMESPACE and DATABASE levels
@@ -71,7 +71,7 @@ mod http_integration {
 				client.post(url).basic_auth(USER, Some(PASS)).body("INFO FOR ROOT").send().await?;
 			assert_eq!(res.status(), 200);
 			let body: serde_json::Value = serde_json::from_str(&res.text().await?).unwrap();
-			assert_eq!(body[0]["status"], "OK", "body: {}", body);
+			assert_eq!(body[0]["status"], "OK", "body: {body}");
 		}
 
 		// Request with ROOT level access to access NS, returns 200 and succeeds
@@ -80,7 +80,7 @@ mod http_integration {
 				client.post(url).basic_auth(USER, Some(PASS)).body("INFO FOR NS").send().await?;
 			assert_eq!(res.status(), 200);
 			let body: serde_json::Value = serde_json::from_str(&res.text().await?).unwrap();
-			assert_eq!(body[0]["status"], "OK", "body: {}", body);
+			assert_eq!(body[0]["status"], "OK", "body: {body}");
 		}
 
 		// Request with ROOT level access to access DB, returns 200 and succeeds
@@ -89,7 +89,7 @@ mod http_integration {
 				client.post(url).basic_auth(USER, Some(PASS)).body("INFO FOR DB").send().await?;
 			assert_eq!(res.status(), 200);
 			let body: serde_json::Value = serde_json::from_str(&res.text().await?).unwrap();
-			assert_eq!(body[0]["status"], "OK", "body: {}", body);
+			assert_eq!(body[0]["status"], "OK", "body: {body}");
 		}
 
 		// Request with NS level access to access ROOT, returns 200 but fails
@@ -103,11 +103,10 @@ mod http_integration {
 				.await?;
 			assert_eq!(res.status(), 200);
 			let body: serde_json::Value = serde_json::from_str(&res.text().await?).unwrap();
-			assert_eq!(body[0]["status"], "ERR", "body: {}", body);
+			assert_eq!(body[0]["status"], "ERR", "body: {body}");
 			assert_eq!(
 				body[0]["result"], "IAM error: Not enough permissions to perform this action",
-				"body: {}",
-				body
+				"body: {body}"
 			);
 		}
 
@@ -122,7 +121,7 @@ mod http_integration {
 				.await?;
 			assert_eq!(res.status(), 200);
 			let body: serde_json::Value = serde_json::from_str(&res.text().await?).unwrap();
-			assert_eq!(body[0]["status"], "OK", "body: {}", body);
+			assert_eq!(body[0]["status"], "OK", "body: {body}");
 		}
 
 		// Request with NS level access to access DB, returns 200 and succeeds
@@ -136,7 +135,7 @@ mod http_integration {
 				.await?;
 			assert_eq!(res.status(), 200);
 			let body: serde_json::Value = serde_json::from_str(&res.text().await?).unwrap();
-			assert_eq!(body[0]["status"], "OK", "body: {}", body);
+			assert_eq!(body[0]["status"], "OK", "body: {body}");
 		}
 
 		// Request with DB level access to access ROOT, returns 200 but fails
@@ -151,11 +150,10 @@ mod http_integration {
 				.await?;
 			assert_eq!(res.status(), 200);
 			let body: serde_json::Value = serde_json::from_str(&res.text().await?).unwrap();
-			assert_eq!(body[0]["status"], "ERR", "body: {}", body);
+			assert_eq!(body[0]["status"], "ERR", "body: {body}");
 			assert_eq!(
 				body[0]["result"], "IAM error: Not enough permissions to perform this action",
-				"body: {}",
-				body
+				"body: {body}"
 			);
 		}
 
@@ -171,11 +169,10 @@ mod http_integration {
 				.await?;
 			assert_eq!(res.status(), 200);
 			let body: serde_json::Value = serde_json::from_str(&res.text().await?).unwrap();
-			assert_eq!(body[0]["status"], "ERR", "body: {}", body);
+			assert_eq!(body[0]["status"], "ERR", "body: {body}");
 			assert_eq!(
 				body[0]["result"], "IAM error: Not enough permissions to perform this action",
-				"body: {}",
-				body
+				"body: {body}"
 			);
 		}
 
@@ -191,7 +188,7 @@ mod http_integration {
 				.await?;
 			assert_eq!(res.status(), 200);
 			let body: serde_json::Value = serde_json::from_str(&res.text().await?).unwrap();
-			assert_eq!(body[0]["status"], "OK", "body: {}", body);
+			assert_eq!(body[0]["status"], "OK", "body: {body}");
 		}
 
 		// Request with DB level access missing NS level header, returns 401
@@ -236,7 +233,7 @@ mod http_integration {
 				.send()
 				.await?;
 			let body = res.text().await?;
-			assert!(body.contains(r#""status":"OK"#), "body: {}", body);
+			assert!(body.contains(r#""status":"OK"#), "body: {body}");
 		}
 
 		// Signin with user and get the token
@@ -266,7 +263,7 @@ mod http_integration {
 			let res = client.post(url).bearer_auth(&token).body("CREATE foo").send().await?;
 			assert_eq!(res.status(), 200, "body: {}", res.text().await?);
 			let body = res.text().await?;
-			assert!(body.contains(r#"[{"result":[{"id":"foo:"#), "body: {}", body);
+			assert!(body.contains(r#"[{"result":[{"id":"foo:"#), "body: {body}");
 
 			// Check the selected namespace and database
 			let res = client
@@ -279,8 +276,8 @@ mod http_integration {
 				.await?;
 			assert_eq!(res.status(), 200, "body: {}", res.text().await?);
 			let body = res.text().await?;
-			assert!(body.contains(&format!(r#""result":["{ns}"]"#)), "body: {}", body);
-			assert!(body.contains(&format!(r#""result":["{db}"]"#)), "body: {}", body);
+			assert!(body.contains(&format!(r#""result":["{ns}"]"#)), "body: {body}");
+			assert!(body.contains(&format!(r#""result":["{db}"]"#)), "body: {body}");
 		}
 
 		// Request with invalid token, returns 401
@@ -335,7 +332,7 @@ mod http_integration {
 			let res = client.get(url).basic_auth(USER, Some(PASS)).send().await?;
 			assert_eq!(res.status(), 200, "body: {}", res.text().await?);
 			let body = res.text().await?;
-			assert!(body.contains("DEFINE TABLE foo"), "body: {}", body);
+			assert!(body.contains("DEFINE TABLE foo"), "body: {body}");
 		}
 
 		Ok(())
@@ -347,7 +344,7 @@ mod http_integration {
 		let url = &format!("http://{addr}/health");
 
 		let res = Client::default().get(url).send().await?;
-		assert_eq!(res.status(), 200, "response: {:#?}", res);
+		assert_eq!(res.status(), 200, "response: {res:#?}");
 
 		Ok(())
 	}
@@ -445,7 +442,7 @@ mod http_integration {
 				.await?;
 			assert_eq!(res.status(), 200, "body: {}", res.text().await?);
 			let body = res.text().await?;
-			assert!(body.contains("foo:bvklxkhtxumyrfzqoc5i"), "body: {}", body);
+			assert!(body.contains("foo:bvklxkhtxumyrfzqoc5i"), "body: {body}");
 		}
 
 		Ok(())
@@ -531,7 +528,7 @@ mod http_integration {
 			assert_eq!(res.status(), 200, "body: {}", res.text().await?);
 
 			let body: serde_json::Value = serde_json::from_str(&res.text().await?).unwrap();
-			assert!(!body["token"].as_str().unwrap().to_string().is_empty(), "body: {}", body);
+			assert!(!body["token"].as_str().unwrap().to_string().is_empty(), "body: {body}");
 		}
 
 		// Signin with invalid DB credentials returns 401
@@ -599,7 +596,7 @@ mod http_integration {
 			assert_eq!(res.status(), 200, "body: {}", res.text().await?);
 
 			let body: serde_json::Value = serde_json::from_str(&res.text().await?).unwrap();
-			assert!(!body["token"].as_str().unwrap().to_string().is_empty(), "body: {}", body);
+			assert!(!body["token"].as_str().unwrap().to_string().is_empty(), "body: {body}");
 		}
 
 		// Signin with invalid NS credentials returns 401
@@ -684,7 +681,7 @@ mod http_integration {
 			assert_eq!(res.status(), 200, "body: {}", res.text().await?);
 
 			let body: serde_json::Value = serde_json::from_str(&res.text().await?).unwrap();
-			assert!(!body["token"].as_str().unwrap().to_string().is_empty(), "body: {}", body);
+			assert!(!body["token"].as_str().unwrap().to_string().is_empty(), "body: {body}");
 		}
 
 		// Signin with invalid ROOT credentials returns 401
@@ -766,8 +763,7 @@ mod http_integration {
 			let body: serde_json::Value = serde_json::from_str(&res.text().await?).unwrap();
 			assert!(
 				body["token"].as_str().unwrap().starts_with("eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzUxMiJ9"),
-				"body: {}",
-				body
+				"body: {body}"
 			);
 		}
 
@@ -802,7 +798,7 @@ mod http_integration {
 			assert_eq!(res.status(), 200);
 
 			let body = res.text().await?;
-			assert!(body.contains("Not enough permissions"), "body: {}", body);
+			assert!(body.contains("Not enough permissions"), "body: {body}");
 		}
 
 		// Creating a record with Accept JSON encoding is allowed
@@ -812,7 +808,7 @@ mod http_integration {
 			assert_eq!(res.status(), 200);
 
 			let body: serde_json::Value = serde_json::from_str(&res.text().await?).unwrap();
-			assert_eq!(body[0]["status"], "OK", "body: {}", body);
+			assert_eq!(body[0]["status"], "OK", "body: {body}");
 		}
 
 		// Creating a record with Accept CBOR encoding is allowed
@@ -941,14 +937,14 @@ mod http_integration {
 			let res = client.get(url).send().await?;
 			assert_eq!(res.status(), 200, "body: {}", res.text().await?);
 			let body = res.text().await?;
-			assert_eq!(body, r#"Save"#, "body: {}", body);
+			assert_eq!(body, r#"Save"#, "body: {body}");
 		}
 		// POST
 		{
 			let res = client.post(url).body("").send().await?;
 			assert_eq!(res.status(), 200, "body: {}", res.text().await?);
 			let body = res.text().await?;
-			assert_eq!(body, r#"Load"#, "body: {}", body);
+			assert_eq!(body, r#"Load"#, "body: {body}");
 		}
 
 		Ok(())
@@ -960,9 +956,9 @@ mod http_integration {
 		let url = &format!("http://{addr}/version");
 
 		let res = Client::default().get(url).send().await?;
-		assert_eq!(res.status(), 200, "response: {:#?}", res);
+		assert_eq!(res.status(), 200, "response: {res:#?}");
 		let body = res.text().await?;
-		assert!(body.starts_with("surrealdb-"), "body: {}", body);
+		assert!(body.starts_with("surrealdb-"), "body: {body}");
 
 		Ok(())
 	}
@@ -988,8 +984,7 @@ mod http_integration {
 		assert_eq!(
 			body[0]["result"].as_array().unwrap().len(),
 			num_records,
-			"error seeding the table: {}",
-			body
+			"error seeding the table: {body}"
 		);
 
 		Ok(())
@@ -1021,56 +1016,53 @@ mod http_integration {
 			assert_eq!(res.status(), 200, "body: {}", res.text().await?);
 
 			let body: serde_json::Value = serde_json::from_str(&res.text().await?).unwrap();
-			assert_eq!(body[0]["result"].as_array().unwrap().len(), num_records, "body: {}", body);
+			assert_eq!(body[0]["result"].as_array().unwrap().len(), num_records, "body: {body}");
 		}
 
 		// GET records with a limit
 		{
 			let res =
-				client.get(format!("{}?limit=10", url)).basic_auth(USER, Some(PASS)).send().await?;
+				client.get(format!("{url}?limit=10")).basic_auth(USER, Some(PASS)).send().await?;
 			assert_eq!(res.status(), 200, "body: {}", res.text().await?);
 
 			let body: serde_json::Value = serde_json::from_str(&res.text().await?).unwrap();
-			assert_eq!(body[0]["result"].as_array().unwrap().len(), 10, "body: {}", body);
+			assert_eq!(body[0]["result"].as_array().unwrap().len(), 10, "body: {body}");
 		}
 
 		// GET records with a start
 		{
 			let res =
-				client.get(format!("{}?start=10", url)).basic_auth(USER, Some(PASS)).send().await?;
+				client.get(format!("{url}?start=10")).basic_auth(USER, Some(PASS)).send().await?;
 			assert_eq!(res.status(), 200, "body: {}", res.text().await?);
 
 			let body: serde_json::Value = serde_json::from_str(&res.text().await?).unwrap();
 			assert_eq!(
 				body[0]["result"].as_array().unwrap().len(),
 				num_records - 10,
-				"body: {}",
-				body
+				"body: {body}"
 			);
 			assert_eq!(
 				body[0]["result"].as_array().unwrap()[0]["id"],
 				"table:11",
-				"body: {}",
-				body
+				"body: {body}"
 			);
 		}
 
 		// GET records with a start and limit
 		{
 			let res = client
-				.get(format!("{}?start=10&limit=10", url))
+				.get(format!("{url}?start=10&limit=10"))
 				.basic_auth(USER, Some(PASS))
 				.send()
 				.await?;
 			assert_eq!(res.status(), 200, "body: {}", res.text().await?);
 
 			let body: serde_json::Value = serde_json::from_str(&res.text().await?).unwrap();
-			assert_eq!(body[0]["result"].as_array().unwrap().len(), 10, "body: {}", body);
+			assert_eq!(body[0]["result"].as_array().unwrap().len(), 10, "body: {body}");
 			assert_eq!(
 				body[0]["result"].as_array().unwrap()[0]["id"],
 				"table:11",
-				"body: {}",
-				body
+				"body: {body}"
 			);
 		}
 
@@ -1080,7 +1072,7 @@ mod http_integration {
 			assert_eq!(res.status(), 200, "body: {}", res.text().await?);
 
 			let body: serde_json::Value = serde_json::from_str(&res.text().await?).unwrap();
-			assert_eq!(body[0]["result"].as_array().unwrap().len(), 0, "body: {}", body);
+			assert_eq!(body[0]["result"].as_array().unwrap().len(), 0, "body: {body}");
 		}
 
 		Ok(())
@@ -1108,7 +1100,7 @@ mod http_integration {
 			// Verify there are no records
 			let res = client.get(url).basic_auth(USER, Some(PASS)).send().await?;
 			let body: serde_json::Value = serde_json::from_str(&res.text().await?).unwrap();
-			assert_eq!(body[0]["result"].as_array().unwrap().len(), 0, "body: {}", body);
+			assert_eq!(body[0]["result"].as_array().unwrap().len(), 0, "body: {body}");
 
 			// Try to create the record
 			let res = client
@@ -1121,12 +1113,11 @@ mod http_integration {
 
 			// Verify the record was created
 			let body: serde_json::Value = serde_json::from_str(&res.text().await?).unwrap();
-			assert_eq!(body[0]["result"].as_array().unwrap().len(), 1, "body: {}", body);
+			assert_eq!(body[0]["result"].as_array().unwrap().len(), 1, "body: {body}");
 			assert_eq!(
 				body[0]["result"].as_array().unwrap()[0]["name"],
 				"record_name",
-				"body: {}",
-				body
+				"body: {body}"
 			);
 		}
 
@@ -1142,7 +1133,7 @@ mod http_integration {
 			// Verify the table is empty
 			let res = client.get(url).basic_auth(USER, Some(PASS)).send().await?;
 			let body: serde_json::Value = serde_json::from_str(&res.text().await?).unwrap();
-			assert_eq!(body[0]["result"].as_array().unwrap().len(), 0, "body: {}", body);
+			assert_eq!(body[0]["result"].as_array().unwrap().len(), 0, "body: {body}");
 		}
 
 		Ok(())
@@ -1181,15 +1172,15 @@ mod http_integration {
 			// Verify the records were updated
 			let res = client.get(url).basic_auth(USER, Some(PASS)).send().await?;
 			let body: serde_json::Value = serde_json::from_str(&res.text().await?).unwrap();
-			assert_eq!(body[0]["result"].as_array().unwrap().len(), num_records, "body: {}", body);
+			assert_eq!(body[0]["result"].as_array().unwrap().len(), num_records, "body: {body}");
 
 			// Verify the records have the new data
 			for record in body[0]["result"].as_array().unwrap() {
-				assert_eq!(record["name"], "record_name", "body: {}", body);
+				assert_eq!(record["name"], "record_name", "body: {body}");
 			}
 			// Verify the records don't have the original data
 			for record in body[0]["result"].as_array().unwrap() {
-				assert!(record["default"].is_null(), "body: {}", body);
+				assert!(record["default"].is_null(), "body: {body}");
 			}
 		}
 
@@ -1202,15 +1193,15 @@ mod http_integration {
 			// Verify the records were not updated
 			let res = client.get(url).basic_auth(USER, Some(PASS)).send().await?;
 			let body: serde_json::Value = serde_json::from_str(&res.text().await?).unwrap();
-			assert_eq!(body[0]["result"].as_array().unwrap().len(), num_records, "body: {}", body);
+			assert_eq!(body[0]["result"].as_array().unwrap().len(), num_records, "body: {body}");
 
 			// Verify the records don't have the new data
 			for record in body[0]["result"].as_array().unwrap() {
-				assert!(record["noauth"].is_null(), "body: {}", body);
+				assert!(record["noauth"].is_null(), "body: {body}");
 			}
 			// Verify the records have the original data
 			for record in body[0]["result"].as_array().unwrap() {
-				assert_eq!(record["name"], "record_name", "body: {}", body);
+				assert_eq!(record["name"], "record_name", "body: {body}");
 			}
 		}
 
@@ -1250,15 +1241,15 @@ mod http_integration {
 			// Verify the records were modified
 			let res = client.get(url).basic_auth(USER, Some(PASS)).send().await?;
 			let body: serde_json::Value = serde_json::from_str(&res.text().await?).unwrap();
-			assert_eq!(body[0]["result"].as_array().unwrap().len(), num_records, "body: {}", body);
+			assert_eq!(body[0]["result"].as_array().unwrap().len(), num_records, "body: {body}");
 
 			// Verify the records have the new data
 			for record in body[0]["result"].as_array().unwrap() {
-				assert_eq!(record["name"], "record_name", "body: {}", body);
+				assert_eq!(record["name"], "record_name", "body: {body}");
 			}
 			// Verify the records also have the original data
 			for record in body[0]["result"].as_array().unwrap() {
-				assert_eq!(record["default"], "content", "body: {}", body);
+				assert_eq!(record["default"], "content", "body: {body}");
 			}
 		}
 
@@ -1271,15 +1262,15 @@ mod http_integration {
 			// Verify the records were not modified
 			let res = client.get(url).basic_auth(USER, Some(PASS)).send().await?;
 			let body: serde_json::Value = serde_json::from_str(&res.text().await?).unwrap();
-			assert_eq!(body[0]["result"].as_array().unwrap().len(), num_records, "body: {}", body);
+			assert_eq!(body[0]["result"].as_array().unwrap().len(), num_records, "body: {body}");
 
 			// Verify the records don't have the new data
 			for record in body[0]["result"].as_array().unwrap() {
-				assert!(record["noauth"].is_null(), "body: {}", body);
+				assert!(record["noauth"].is_null(), "body: {body}");
 			}
 			// Verify the records have the original data
 			for record in body[0]["result"].as_array().unwrap() {
-				assert_eq!(record["name"], "record_name", "body: {}", body);
+				assert_eq!(record["name"], "record_name", "body: {body}");
 			}
 		}
 
@@ -1310,7 +1301,7 @@ mod http_integration {
 			// Verify there are records
 			let res = client.get(url).basic_auth(USER, Some(PASS)).send().await?;
 			let body: serde_json::Value = serde_json::from_str(&res.text().await?).unwrap();
-			assert_eq!(body[0]["result"].as_array().unwrap().len(), num_records, "body: {}", body);
+			assert_eq!(body[0]["result"].as_array().unwrap().len(), num_records, "body: {body}");
 
 			// Try to delete the records
 			let res = client.delete(url).basic_auth(USER, Some(PASS)).send().await?;
@@ -1319,7 +1310,7 @@ mod http_integration {
 			// Verify the records were deleted
 			let res = client.get(url).basic_auth(USER, Some(PASS)).send().await?;
 			let body: serde_json::Value = serde_json::from_str(&res.text().await?).unwrap();
-			assert_eq!(body[0]["result"].as_array().unwrap().len(), 0, "body: {}", body);
+			assert_eq!(body[0]["result"].as_array().unwrap().len(), 0, "body: {body}");
 		}
 
 		// Delete all records without authentication
@@ -1333,7 +1324,7 @@ mod http_integration {
 			// Verify the records were not deleted
 			let res = client.get(url).basic_auth(USER, Some(PASS)).send().await?;
 			let body: serde_json::Value = serde_json::from_str(&res.text().await?).unwrap();
-			assert_eq!(body[0]["result"].as_array().unwrap().len(), num_records, "body: {}", body);
+			assert_eq!(body[0]["result"].as_array().unwrap().len(), num_records, "body: {body}");
 		}
 
 		Ok(())
@@ -1364,7 +1355,7 @@ mod http_integration {
 			assert_eq!(res.status(), 200, "body: {}", res.text().await?);
 
 			let body: serde_json::Value = serde_json::from_str(&res.text().await?).unwrap();
-			assert_eq!(body[0]["result"].as_array().unwrap().len(), 1, "body: {}", body);
+			assert_eq!(body[0]["result"].as_array().unwrap().len(), 1, "body: {body}");
 		}
 
 		// GET without authentication returns no record
@@ -1373,7 +1364,7 @@ mod http_integration {
 			assert_eq!(res.status(), 200, "body: {}", res.text().await?);
 
 			let body: serde_json::Value = serde_json::from_str(&res.text().await?).unwrap();
-			assert_eq!(body[0]["result"].as_array().unwrap().len(), 0, "body: {}", body);
+			assert_eq!(body[0]["result"].as_array().unwrap().len(), 0, "body: {body}");
 		}
 
 		Ok(())
@@ -1409,12 +1400,11 @@ mod http_integration {
 
 			// Verify the record was created with the given ID
 			let body: serde_json::Value = serde_json::from_str(&res.text().await?).unwrap();
-			assert_eq!(body[0]["result"].as_array().unwrap().len(), 1, "body: {}", body);
+			assert_eq!(body[0]["result"].as_array().unwrap().len(), 1, "body: {body}");
 			assert_eq!(
 				body[0]["result"].as_array().unwrap()[0]["id"],
 				"table:new_id",
-				"body: {}",
-				body
+				"body: {body}"
 			);
 		}
 
@@ -1436,25 +1426,22 @@ mod http_integration {
 
 			// Verify the record was created with the given ID
 			let body: serde_json::Value = serde_json::from_str(&res.text().await?).unwrap();
-			assert_eq!(body[0]["result"].as_array().unwrap().len(), 1, "body: {}", body);
+			assert_eq!(body[0]["result"].as_array().unwrap().len(), 1, "body: {body}");
 			assert_eq!(
 				body[0]["result"].as_array().unwrap()[0]["id"],
 				"table:new_id_query",
-				"body: {}",
-				body
+				"body: {body}"
 			);
-			assert_eq!(body[0]["result"].as_array().unwrap()[0]["age"], 45, "body: {}", body);
+			assert_eq!(body[0]["result"].as_array().unwrap()[0]["age"], 45, "body: {body}");
 			assert_eq!(
 				body[0]["result"].as_array().unwrap()[0]["elems"].as_array().unwrap().len(),
 				3,
-				"body: {}",
-				body
+				"body: {body}"
 			);
 			assert_eq!(
 				body[0]["result"].as_array().unwrap()[0]["other"].as_object().unwrap()["test"],
 				true,
-				"body: {}",
-				body
+				"body: {body}"
 			);
 		}
 
@@ -1469,7 +1456,7 @@ mod http_integration {
 			// Verify the table is empty
 			let res = client.get(url).basic_auth(USER, Some(PASS)).send().await?;
 			let body: serde_json::Value = serde_json::from_str(&res.text().await?).unwrap();
-			assert_eq!(body[0]["result"].as_array().unwrap().len(), 0, "body: {}", body);
+			assert_eq!(body[0]["result"].as_array().unwrap().len(), 0, "body: {body}");
 		}
 
 		Ok(())
@@ -1507,21 +1494,19 @@ mod http_integration {
 			// Verify the record was updated
 			let res = client.get(url).basic_auth(USER, Some(PASS)).send().await?;
 			let body: serde_json::Value = serde_json::from_str(&res.text().await?).unwrap();
-			assert_eq!(body[0]["result"].as_array().unwrap()[0]["id"], "table:1", "body: {}", body);
+			assert_eq!(body[0]["result"].as_array().unwrap()[0]["id"], "table:1", "body: {body}");
 
 			// Verify the record has the new data
 			assert_eq!(
 				body[0]["result"].as_array().unwrap()[0]["name"],
 				"record_name",
-				"body: {}",
-				body
+				"body: {body}"
 			);
 
 			// Verify the record doesn't have the original data
 			assert!(
 				body[0]["result"].as_array().unwrap()[0]["default"].is_null(),
-				"body: {}",
-				body
+				"body: {body}"
 			);
 		}
 
@@ -1534,17 +1519,16 @@ mod http_integration {
 			// Verify the record was not updated
 			let res = client.get(url).basic_auth(USER, Some(PASS)).send().await?;
 			let body: serde_json::Value = serde_json::from_str(&res.text().await?).unwrap();
-			assert_eq!(body[0]["result"].as_array().unwrap()[0]["id"], "table:1", "body: {}", body);
+			assert_eq!(body[0]["result"].as_array().unwrap()[0]["id"], "table:1", "body: {body}");
 
 			// Verify the record doesn't have the new data
-			assert!(body[0]["result"].as_array().unwrap()[0]["noauth"].is_null(), "body: {}", body);
+			assert!(body[0]["result"].as_array().unwrap()[0]["noauth"].is_null(), "body: {body}");
 
 			// Verify the record has the original data
 			assert_eq!(
 				body[0]["result"].as_array().unwrap()[0]["name"],
 				"record_name",
-				"body: {}",
-				body
+				"body: {body}"
 			);
 		}
 
@@ -1583,22 +1567,20 @@ mod http_integration {
 			// Verify the records were modified
 			let res = client.get(url).basic_auth(USER, Some(PASS)).send().await?;
 			let body: serde_json::Value = serde_json::from_str(&res.text().await?).unwrap();
-			assert_eq!(body[0]["result"].as_array().unwrap()[0]["id"], "table:1", "body: {}", body);
+			assert_eq!(body[0]["result"].as_array().unwrap()[0]["id"], "table:1", "body: {body}");
 
 			// Verify the record has the new data
 			assert_eq!(
 				body[0]["result"].as_array().unwrap()[0]["name"],
 				"record_name",
-				"body: {}",
-				body
+				"body: {body}"
 			);
 
 			// Verify the record has the original data too
 			assert_eq!(
 				body[0]["result"].as_array().unwrap()[0]["default"],
 				"content",
-				"body: {}",
-				body
+				"body: {body}"
 			);
 		}
 
@@ -1611,17 +1593,16 @@ mod http_integration {
 			// Verify the record was not modified
 			let res = client.get(url).basic_auth(USER, Some(PASS)).send().await?;
 			let body: serde_json::Value = serde_json::from_str(&res.text().await?).unwrap();
-			assert_eq!(body[0]["result"].as_array().unwrap()[0]["id"], "table:1", "body: {}", body);
+			assert_eq!(body[0]["result"].as_array().unwrap()[0]["id"], "table:1", "body: {body}");
 
 			// Verify the record doesn't have the new data
-			assert!(body[0]["result"].as_array().unwrap()[0]["noauth"].is_null(), "body: {}", body);
+			assert!(body[0]["result"].as_array().unwrap()[0]["noauth"].is_null(), "body: {body}");
 
 			// Verify the record has the original data too
 			assert_eq!(
 				body[0]["result"].as_array().unwrap()[0]["default"],
 				"content",
-				"body: {}",
-				body
+				"body: {body}"
 			);
 		}
 
@@ -1651,11 +1632,11 @@ mod http_integration {
 			// Verify there are records
 			let res = client.get(base_url).basic_auth(USER, Some(PASS)).send().await?;
 			let body: serde_json::Value = serde_json::from_str(&res.text().await?).unwrap();
-			assert_eq!(body[0]["result"].as_array().unwrap().len(), 2, "body: {}", body);
+			assert_eq!(body[0]["result"].as_array().unwrap().len(), 2, "body: {body}");
 
 			// Try to delete the record
 			let res = client
-				.delete(format!("{}/1", base_url))
+				.delete(format!("{base_url}/1"))
 				.basic_auth(USER, Some(PASS))
 				.send()
 				.await?;
@@ -1664,20 +1645,20 @@ mod http_integration {
 			// Verify only one record was deleted
 			let res = client.get(base_url).basic_auth(USER, Some(PASS)).send().await?;
 			let body: serde_json::Value = serde_json::from_str(&res.text().await?).unwrap();
-			assert_eq!(body[0]["result"].as_array().unwrap().len(), 1, "body: {}", body);
-			assert_eq!(body[0]["result"].as_array().unwrap()[0]["id"], "table:2", "body: {}", body);
+			assert_eq!(body[0]["result"].as_array().unwrap().len(), 1, "body: {body}");
+			assert_eq!(body[0]["result"].as_array().unwrap()[0]["id"], "table:2", "body: {body}");
 		}
 
 		// Delete one record without authentication
 		{
 			// Try to delete the record
-			let res = client.delete(format!("{}/2", base_url)).send().await?;
+			let res = client.delete(format!("{base_url}/2")).send().await?;
 			assert_eq!(res.status(), 200, "body: {}", res.text().await?);
 
 			// Verify the record was not deleted
 			let res = client.get(base_url).basic_auth(USER, Some(PASS)).send().await?;
 			let body: serde_json::Value = serde_json::from_str(&res.text().await?).unwrap();
-			assert_eq!(body[0]["result"].as_array().unwrap().len(), 1, "body: {}", body);
+			assert_eq!(body[0]["result"].as_array().unwrap().len(), 1, "body: {body}");
 		}
 
 		Ok(())

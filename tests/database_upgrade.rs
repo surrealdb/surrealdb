@@ -274,7 +274,7 @@ mod database_upgrade {
 	}
 
 	async fn new_local_instance(file_path: &String) -> Surreal<Any> {
-		let db = connect(format!("file:{}", file_path)).await.unwrap();
+		let db = connect(format!("file:{file_path}")).await.unwrap();
 		db.use_ns(NS).await.unwrap();
 		db.use_db(DB).await.unwrap();
 		db

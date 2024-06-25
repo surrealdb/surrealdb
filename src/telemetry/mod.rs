@@ -128,7 +128,7 @@ mod tests {
 		let (addr, mut req_rx) = telemetry::traces::tests::mock_otlp_server().await;
 
 		{
-			let otlp_endpoint = format!("http://{}", addr);
+			let otlp_endpoint = format!("http://{addr}");
 			temp_env::with_vars(
 				vec![
 					("SURREAL_TRACING_TRACER", Some("otlp")),
@@ -169,7 +169,7 @@ mod tests {
 		let (addr, mut req_rx) = telemetry::traces::tests::mock_otlp_server().await;
 
 		{
-			let otlp_endpoint = format!("http://{}", addr);
+			let otlp_endpoint = format!("http://{addr}");
 			temp_env::with_vars(
 				vec![
 					("SURREAL_TRACING_TRACER", Some("otlp")),
