@@ -33,6 +33,7 @@ impl fmt::Display for Base {
 		}
 	}
 }
+
 impl InfoStructure for Base {
 	fn structure(self) -> Value {
 		self.to_string().into()

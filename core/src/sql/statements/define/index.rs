@@ -5,7 +5,7 @@ use crate::err::Error;
 use crate::iam::{Action, ResourceKind};
 use crate::sql::statements::info::InfoStructure;
 use crate::sql::{
-	statements::UpdateStatement, Base, Ident, Idioms, Index, Object, Part, Strand, Value, Values,
+	statements::UpdateStatement, Base, Ident, Idioms, Index, Part, Strand, Value, Values,
 };
 use derive::Store;
 use reblessive::tree::Stk;
@@ -130,28 +130,12 @@ impl Display for DefineIndexStatement {
 
 impl InfoStructure for DefineIndexStatement {
 	fn structure(self) -> Value {
-		let Self {
-			name,
-			what,
-			cols,
-			index,
-			comment,
-			..
-		} = self;
-		let mut acc = Object::default();
-
-		acc.insert("name".to_string(), name.structure());
-
-		acc.insert("what".to_string(), what.structure());
-
-		acc.insert("cols".to_string(), cols.structure());
-
-		acc.insert("index".to_string(), index.structure());
-
-		if let Some(comment) = comment {
-			acc.insert("comment".to_string(), comment.into());
-		}
-
-		Value::Object(acc)
+		Value::from(map! {
+			"name".to_string() => self.name.structure(),
+			"what".to_string() => self.what.structure(),
+			"cols".to_string() => self.cols.structure(),
+			"index".to_string() => self.index.structure(),
+			"comment".to_string(), if let Some(v) = self.comment => v.into(),
+		})
 	}
 }
