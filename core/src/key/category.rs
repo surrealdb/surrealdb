@@ -1,5 +1,6 @@
 use std::fmt::{Display, Formatter};
 
+#[allow(unused)]
 pub(crate) trait Categorise {
 	/// Returns the category of the key for error reporting
 	fn categorise(&self) -> Category;
@@ -7,6 +8,7 @@ pub(crate) trait Categorise {
 
 #[derive(Debug, Copy, Clone)]
 #[non_exhaustive]
+#[allow(unused)]
 pub enum Category {
 	/// crate::key::root::all                /
 	Root,

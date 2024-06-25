@@ -1,7 +1,6 @@
 use criterion::measurement::WallTime;
 use criterion::{criterion_group, criterion_main, BenchmarkGroup, Criterion, Throughput};
 use futures::executor::block_on;
-use futures::lock::Mutex;
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
 use reblessive::TreeStack;
@@ -144,8 +143,8 @@ async fn insert_objects(
 	vector_size: usize,
 	cache_size: usize,
 ) {
-	let mut tx = ds.transaction(Write, Optimistic).await.unwrap();
-	let mut mt = mtree_index(ds, &mut tx, vector_size, cache_size, Write).await;
+	let tx = ds.transaction(Write, Optimistic).await.unwrap();
+	let mut mt = mtree_index(ds, &tx, vector_size, cache_size, Write).await;
 	let mut stack = TreeStack::new();
 	let mut rng = StdRng::from_entropy();
 	stack
@@ -154,12 +153,12 @@ async fn insert_objects(
 				let vector: Vec<Number> = random_object(&mut rng, vector_size);
 				// Insert the sample
 				let rid = Thing::from(("test", Id::from(i as i64)));
-				mt.index_document(stk, &mut tx, &rid, &vec![Value::from(vector)]).await.unwrap();
+				mt.index_document(stk, &tx, &rid, &vec![Value::from(vector)]).await.unwrap();
 			}
 		})
 		.finish()
 		.await;
-	mt.finish(&mut tx).await.unwrap();
+	mt.finish(&tx).await.unwrap();
 	tx.commit().await.unwrap();
 }
 
@@ -170,11 +169,9 @@ async fn knn_lookup_objects(
 	cache_size: usize,
 	knn: usize,
 ) {
-	let txn = Arc::new(Mutex::new(ds.transaction(Read, Optimistic).await.unwrap()));
-	let mut tx = txn.lock().await;
-	let mt = Arc::new(mtree_index(ds, &mut tx, vector_size, cache_size, Read).await);
-	drop(tx);
-	let ctx = Arc::new(Context::default().set_transaction(txn));
+	let txn = ds.transaction(Read, Optimistic).await.unwrap();
+	let mt = Arc::new(mtree_index(ds, &txn, vector_size, cache_size, Read).await);
+	let ctx = Arc::new(Context::from(txn));
 
 	let counter = Arc::new(AtomicUsize::new(0));
 

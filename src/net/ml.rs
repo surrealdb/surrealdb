@@ -102,7 +102,7 @@ async fn export(
 	// Check the permissions level
 	db.check(&session, View, Model.on_db(&nsv, &dbv))?;
 	// Start a new readonly transaction
-	let mut tx = db.transaction(Read, Optimistic).await?;
+	let tx = db.transaction(Read, Optimistic).await?;
 	// Attempt to get the model definition
 	let info = tx.get_db_model(&nsv, &dbv, &name, &version).await?;
 	// Calculate the path of the model file

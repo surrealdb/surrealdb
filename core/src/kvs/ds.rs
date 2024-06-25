@@ -36,6 +36,8 @@ use std::sync::Arc;
 use std::time::Duration;
 #[cfg(not(target_arch = "wasm32"))]
 use std::time::{SystemTime, UNIX_EPOCH};
+#[cfg(feature = "jwks")]
+use tokio::sync::RwLock;
 use tracing::instrument;
 use tracing::trace;
 use uuid::Uuid;
@@ -43,11 +45,7 @@ use uuid::Uuid;
 use wasmtimer::std::{SystemTime, UNIX_EPOCH};
 
 // If there are an infinite number of heartbeats, then we want to go batch-by-batch spread over several checks
-const HEARTBEAT_BATCH_SIZE: u32 = 1000;
 const LQ_CHANNEL_SIZE: usize = 100;
-
-// The batch size used for non-paged operations (i.e. if there are more results, they are ignored)
-const NON_PAGED_BATCH_SIZE: u32 = 100_000;
 
 // The role assigned to the initial user created when starting the server with credentials for the first time
 const INITIAL_USER_ROLE: &str = "owner";
@@ -481,8 +479,8 @@ impl Datastore {
 		&self,
 		ts: u64,
 	) -> Result<Option<Versionstamp>, Error> {
-		let mut tx = self.transaction(Write, Optimistic).await?;
-		match self.save_timestamp_for_versionstamp_impl(ts, &mut tx).await {
+		let tx = self.transaction(Write, Optimistic).await?;
+		match self.save_timestamp_for_versionstamp_impl(ts, &tx).await {
             Ok(vs) => Ok(vs),
             Err(e) => {
                 match tx.cancel().await {
@@ -500,7 +498,7 @@ impl Datastore {
 	async fn save_timestamp_for_versionstamp_impl(
 		&self,
 		ts: u64,
-		tx: &mut Transaction,
+		tx: &Transaction,
 	) -> Result<Option<Versionstamp>, Error> {
 		let mut vs: Option<Versionstamp> = None;
 		let nses = tx.all_ns().await?;

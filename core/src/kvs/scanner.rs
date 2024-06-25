@@ -9,6 +9,8 @@ use std::ops::Range;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 
+type Output = Result<Vec<(Key, Val)>, Error>;
+
 pub(super) enum Scanner<'a> {
 	// The initial state of this scanner
 	Begin {
@@ -39,7 +41,7 @@ pub(super) enum Scanner<'a> {
 		// The key range for this range scan
 		range: Range<Key>,
 		// The currently awaiting range scan future
-		future: Pin<Box<dyn Future<Output = Result<Vec<(Key, Val)>, Error>> + 'a>>,
+		future: Pin<Box<dyn Future<Output = Output> + 'a>>,
 	},
 	// This scanner is complete
 	Complete,

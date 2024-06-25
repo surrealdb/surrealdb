@@ -4,7 +4,6 @@ use crate::err::Error;
 use crate::kvs::Check;
 use crate::kvs::Key;
 use crate::kvs::Val;
-use crate::vs::{try_to_u64_be, u64_to_versionstamp, Versionstamp};
 use std::ops::Range;
 
 #[non_exhaustive]
@@ -56,7 +55,7 @@ impl Drop for Transaction {
 
 impl Datastore {
 	/// Open a new database
-	pub(crate) async fn new(path: &str) -> Result<Datastore, Error> {
+	pub async fn new(path: &str) -> Result<Datastore, Error> {
 		match indxdb::db::new(path).await {
 			Ok(db) => Ok(Datastore {
 				db,
@@ -65,7 +64,7 @@ impl Datastore {
 		}
 	}
 	/// Start a new transaction
-	pub(crate) async fn transaction(&self, write: bool, _: bool) -> Result<Transaction, Error> {
+	pub async fn transaction(&self, write: bool, _: bool) -> Result<Transaction, Error> {
 		// Specify the check level
 		#[cfg(not(debug_assertions))]
 		let check = Check::Warn;
@@ -84,14 +83,19 @@ impl Datastore {
 	}
 }
 
-impl Transaction {
+impl super::api::Transaction for Transaction {
 	/// Check if closed
-	pub(crate) fn closed(&self) -> bool {
+	fn closed(&self) -> bool {
 		self.done
 	}
 
+	/// Check if writeable
+	fn writeable(&self) -> bool {
+		self.write
+	}
+
 	/// Cancel a transaction
-	pub(crate) async fn cancel(&mut self) -> Result<(), Error> {
+	async fn cancel(&mut self) -> Result<(), Error> {
 		// Check to see if transaction is closed
 		if self.done {
 			return Err(Error::TxFinished);
@@ -105,7 +109,7 @@ impl Transaction {
 	}
 
 	/// Commit a transaction
-	pub(crate) async fn commit(&mut self) -> Result<(), Error> {
+	async fn commit(&mut self) -> Result<(), Error> {
 		// Check to see if transaction is closed
 		if self.done {
 			return Err(Error::TxFinished);
@@ -123,7 +127,7 @@ impl Transaction {
 	}
 
 	/// Check if a key exists
-	pub(crate) async fn exi<K>(&mut self, key: K) -> Result<bool, Error>
+	async fn exists<K>(&mut self, key: K) -> Result<bool, Error>
 	where
 		K: Into<Key>,
 	{
@@ -138,7 +142,7 @@ impl Transaction {
 	}
 
 	/// Fetch a key from the database
-	pub(crate) async fn get<K>(&mut self, key: K) -> Result<Option<Val>, Error>
+	async fn get<K>(&mut self, key: K) -> Result<Option<Val>, Error>
 	where
 		K: Into<Key>,
 	{
@@ -153,7 +157,7 @@ impl Transaction {
 	}
 
 	/// Insert or update a key in the database
-	pub(crate) async fn set<K, V>(&mut self, key: K, val: V) -> Result<(), Error>
+	async fn set<K, V>(&mut self, key: K, val: V) -> Result<(), Error>
 	where
 		K: Into<Key>,
 		V: Into<Val>,
@@ -173,7 +177,7 @@ impl Transaction {
 	}
 
 	/// Insert a key if it doesn't exist in the database
-	pub(crate) async fn put<K, V>(&mut self, key: K, val: V) -> Result<(), Error>
+	async fn put<K, V>(&mut self, key: K, val: V) -> Result<(), Error>
 	where
 		K: Into<Key>,
 		V: Into<Val>,
@@ -193,7 +197,7 @@ impl Transaction {
 	}
 
 	/// Insert a key if the current value matches a condition
-	pub(crate) async fn putc<K, V>(&mut self, key: K, val: V, chk: Option<V>) -> Result<(), Error>
+	async fn putc<K, V>(&mut self, key: K, val: V, chk: Option<V>) -> Result<(), Error>
 	where
 		K: Into<Key>,
 		V: Into<Val>,
@@ -213,7 +217,7 @@ impl Transaction {
 	}
 
 	/// Delete a key
-	pub(crate) async fn del<K>(&mut self, key: K) -> Result<(), Error>
+	async fn del<K>(&mut self, key: K) -> Result<(), Error>
 	where
 		K: Into<Key>,
 	{
@@ -232,7 +236,7 @@ impl Transaction {
 	}
 
 	/// Delete a key if the current value matches a condition
-	pub(crate) async fn delc<K, V>(&mut self, key: K, chk: Option<V>) -> Result<(), Error>
+	async fn delc<K, V>(&mut self, key: K, chk: Option<V>) -> Result<(), Error>
 	where
 		K: Into<Key>,
 		V: Into<Val>,
@@ -252,7 +256,7 @@ impl Transaction {
 	}
 
 	/// Retrieve a range of keys from the databases
-	pub(crate) async fn keys<K>(&mut self, rng: Range<K>, limit: u32) -> Result<Vec<Key>, Error>
+	async fn keys<K>(&mut self, rng: Range<K>, limit: u32) -> Result<Vec<Key>, Error>
 	where
 		K: Into<Key>,
 	{
@@ -266,17 +270,13 @@ impl Transaction {
 			end: rng.end.into(),
 		};
 		// Scan the keys
-		let res = self.inner.keys(rng, limit as usize)?;
+		let res = self.inner.keys(rng, limit).await?;
 		// Return result
 		Ok(res)
 	}
 
 	/// Retrieve a range of keys from the databases
-	pub(crate) async fn scan<K>(
-		&mut self,
-		rng: Range<K>,
-		limit: u32,
-	) -> Result<Vec<(Key, Val)>, Error>
+	async fn scan<K>(&mut self, rng: Range<K>, limit: u32) -> Result<Vec<(Key, Val)>, Error>
 	where
 		K: Into<Key>,
 	{

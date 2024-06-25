@@ -24,7 +24,7 @@ impl Datastore {
 			// There was an error with the request
 			Err(err) => {
 				// Ensure the transaction is cancelled
-				txn.cancel().await;
+				let _ = txn.cancel().await;
 				// Check what the error was with inserting
 				match err {
 					// This node registration already exists
@@ -55,7 +55,7 @@ impl Datastore {
 		match txn.set(key, val).await {
 			// There was an error with the request
 			Err(err) => {
-				txn.cancel().await;
+				let _ = txn.cancel().await;
 				Err(err)
 			}
 			// Everything is ok
@@ -78,7 +78,7 @@ impl Datastore {
 		match txn.set(key, val).await {
 			// There was an error with the request
 			Err(err) => {
-				txn.cancel().await;
+				let _ = txn.cancel().await;
 				Err(err)
 			}
 			// Everything is ok
@@ -97,7 +97,7 @@ impl Datastore {
 		let txn = self.transaction(Write, Optimistic).await?;
 		let now = self.clock.now().await;
 		let nds = txn.all_nodes().await?;
-		for nd in nds.into_iter() {
+		for nd in nds.iter() {
 			// Check that the node is active
 			if nd.is_active() {
 				// Check if the node has expired
@@ -109,7 +109,7 @@ impl Datastore {
 					// Update the node entry
 					if let Err(err) = txn.set(key, val).await {
 						// There was an error with the request
-						txn.cancel().await;
+						let _ = txn.cancel().await;
 						return Err(err);
 					}
 				}
@@ -132,7 +132,7 @@ impl Datastore {
 			let txn = self.transaction(Read, Optimistic).await?;
 			let nds = txn.all_nodes().await?;
 			// Filter the archived nodes
-			nds.into_iter().filter_map(Node::archived).collect::<Vec<_>>()
+			nds.iter().filter_map(Node::archived).collect::<Vec<_>>()
 		};
 		// Delete the live queries
 		{
@@ -144,23 +144,23 @@ impl Datastore {
 				while let Some(rng) = next {
 					let res = txn.batch(rng, *NORMAL_FETCH_SIZE, true).await?;
 					next = res.next;
-					for (k, v) in res.values.into_iter() {
+					for (k, v) in res.values.iter() {
 						// Decode the table for this live query
-						if let Ok(tb) = std::str::from_utf8(&v) {
+						if let Ok(tb) = std::str::from_utf8(v) {
 							// Get the key for this node live query
-							let nlq = crate::key::node::lq::Lq::decode(&k)?;
+							let nlq = crate::key::node::lq::Lq::decode(k)?;
 							// Check that the node for this query is archived
 							if expired.contains(&nlq.nd) {
 								// Get the key for this table live query
 								let tlq = crate::key::table::lq::new(nlq.ns, nlq.db, tb, nlq.lq);
 								// Delete the table live query
 								if let Err(e) = txn.del(tlq).await {
-									txn.cancel().await;
+									let _ = txn.cancel().await;
 									return Err(e);
 								}
 								// Delete the node live query
 								if let Err(e) = txn.del(nlq).await {
-									txn.cancel().await;
+									let _ = txn.cancel().await;
 									return Err(e);
 								}
 							}
@@ -180,7 +180,7 @@ impl Datastore {
 				let key = crate::key::root::nd::new(*id);
 				// Delete the cluster node entry
 				if let Err(e) = txn.del(key).await {
-					txn.cancel().await;
+					let _ = txn.cancel().await;
 					return Err(e);
 				}
 			}
@@ -198,7 +198,7 @@ impl Datastore {
 			let txn = self.transaction(Read, Optimistic).await?;
 			let nds = txn.all_nodes().await?;
 			// Filter the archived nodes
-			nds.into_iter().filter_map(Node::archived).collect::<Vec<_>>()
+			nds.iter().filter_map(Node::archived).collect::<Vec<_>>()
 		};
 		// Fetch all namespaces
 		let nss = {
@@ -206,21 +206,21 @@ impl Datastore {
 			txn.all_ns().await?
 		};
 		// Loop over all namespaces
-		for ns in nss.into_iter() {
+		for ns in nss.iter() {
 			// Fetch all databases
 			let dbs = {
 				let txn = self.transaction(Read, Optimistic).await?;
 				txn.all_db(&ns.name).await?
 			};
 			// Loop over all databases
-			for db in dbs.into_iter() {
+			for db in dbs.iter() {
 				// Fetch all tables
 				let tbs = {
 					let txn = self.transaction(Read, Optimistic).await?;
 					txn.all_tb(&ns.name, &db.name).await?
 				};
 				// Loop over all tables
-				for tb in tbs.into_iter() {
+				for tb in tbs.iter() {
 					let txn = self.transaction(Write, Optimistic).await?;
 					let beg = crate::key::table::lq::prefix(&ns.name, &db.name, &tb.name);
 					let end = crate::key::table::lq::suffix(&ns.name, &db.name, &tb.name);
@@ -228,12 +228,12 @@ impl Datastore {
 					while let Some(rng) = next {
 						let res = txn.batch(rng, *NORMAL_FETCH_SIZE, false).await?;
 						next = res.next;
-						for (k, v) in res.values.into_iter() {
+						for (k, v) in res.values.iter() {
 							//
 							let stm: LiveStatement = v.into();
 							// Get the key for this node live query
-							let tlq = crate::key::table::lq::Lq::decode(&k)?;
-							// Get the node id and the live id
+							let tlq = crate::key::table::lq::Lq::decode(k)?;
+							// Get the node id and the live query id
 							let (nid, lid) = (stm.node.0, stm.id.0);
 							// Check that the node for this query is archived
 							if expired.contains(&stm.node) {
@@ -241,12 +241,12 @@ impl Datastore {
 								let nlq = crate::key::node::lq::new(nid, lid, &ns.name, &db.name);
 								// Delete the node live query
 								if let Err(e) = txn.del(nlq).await {
-									txn.cancel().await;
+									let _ = txn.cancel().await;
 									return Err(e);
 								}
 								// Delete the table live query
 								if let Err(e) = txn.del(tlq).await {
-									txn.cancel().await;
+									let _ = txn.cancel().await;
 									return Err(e);
 								}
 							}

@@ -93,25 +93,6 @@ impl<'a> Document<'a> {
 		}
 	}
 
-	/// Create a new document that is not going through the standard lifecycle of documents
-	///
-	/// This allows for it to be crafted without needing statements to operate on it
-	#[doc(hidden)]
-	pub fn new_artificial(
-		id: Option<&'a Thing>,
-		ir: Option<&'a IteratorRecord>,
-		val: Cow<'a, Value>,
-		initial: Cow<'a, Value>,
-		extras: Workable,
-	) -> Self {
-		Document {
-			id,
-			extras,
-			current: CursorDoc::new(id, ir, val),
-			initial: CursorDoc::new(id, ir, initial),
-		}
-	}
-
 	/// Get the current document, as it is being modified
 	#[allow(unused)]
 	pub(crate) fn current_doc(&self) -> &Value {
@@ -134,11 +115,6 @@ impl<'a> Document<'a> {
 	/// Check if document is being created
 	pub fn is_new(&self) -> bool {
 		self.initial.doc.is_none() && self.current.doc.is_some()
-	}
-
-	/// Check if document is being deleted
-	pub fn is_delete(&self) -> bool {
-		self.current.doc.is_none()
 	}
 
 	/// Get the table for this document

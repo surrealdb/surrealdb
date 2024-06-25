@@ -75,8 +75,7 @@ where
 		match self {
 			Self::Read(r) => {
 				let tx = ctx.tx();
-				let n = r.get_node(&tx, node_id).await;
-				n
+				r.get_node(&tx, node_id).await
 			}
 			_ => Err(Error::Unreachable("TreeStore::get_node_txn")),
 		}

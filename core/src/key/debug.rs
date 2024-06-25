@@ -4,6 +4,7 @@
 
 /// sprint_key converts a key to an escaped string.
 /// This is used for logging and debugging tests and should not be used in implementation code.
+#[cfg(debug_assertions)]
 pub fn sprint<T>(key: &T) -> String
 where
 	T: AsRef<[u8]>,

@@ -1449,7 +1449,7 @@ mod tests {
 				algorithm: jsonwebtoken::jwk::AlgorithmParameters::OctetKey(
 					jsonwebtoken::jwk::OctetKeyParameters {
 						key_type: jsonwebtoken::jwk::OctetKeyType::Octet,
-						value: STANDARD_NO_PAD.encode(&secret),
+						value: STANDARD_NO_PAD.encode(secret),
 					},
 				),
 			}],

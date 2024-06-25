@@ -29,7 +29,7 @@ pub struct StartCommandDbsOptions {
 	unauthenticated: bool,
 	#[command(flatten)]
 	#[command(next_help_heading = "Capabilities")]
-	caps: DbsCapabilities,
+	capabilities: DbsCapabilities,
 	#[arg(help = "Sets the directory for storing temporary database files")]
 	#[arg(env = "SURREAL_TEMPORARY_DIRECTORY", long = "temporary-directory")]
 	#[arg(value_parser = super::cli::validator::dir_exists)]
@@ -208,12 +208,14 @@ pub async fn init(
 		query_timeout,
 		transaction_timeout,
 		unauthenticated,
-		caps,
+		capabilities,
 		temporary_directory,
 	}: StartCommandDbsOptions,
 ) -> Result<(), Error> {
 	// Get local copy of options
 	let opt = CF.get().unwrap();
+	//
+	let capabilities = capabilities.into();
 	// Log specified strict mode
 	debug!("Database strict mode is {strict_mode}");
 	// Log specified query timeout
@@ -229,7 +231,7 @@ pub async fn init(
 		warn!("❌🔒 IMPORTANT: Authentication is disabled. This is not recommended for production use. 🔒❌");
 	}
 	// Log the specified server capabilities
-	debug!("Server capabilities: {caps}");
+	debug!("Server capabilities: {capabilities}");
 	// Parse and setup the desired kv datastore
 	let dbs = Datastore::new(&opt.path)
 		.await?
@@ -239,9 +241,9 @@ pub async fn init(
 		.with_transaction_timeout(transaction_timeout)
 		.with_auth_enabled(!unauthenticated)
 		.with_temporary_directory(temporary_directory)
-		.with_capabilities(caps);
+		.with_capabilities(capabilities);
 	// Setup initial server auth credentials
-	if let (Some(ref user), Some(ref pass)) = (opt.user, opt.pass) {
+	if let (Some(user), Some(pass)) = (opt.user.as_ref(), opt.pass.as_ref()) {
 		dbs.setup_initial_creds(user, pass).await?;
 	}
 	// Bootstrap the datastore
@@ -297,7 +299,8 @@ mod tests {
 			.get_root_user(creds.username)
 			.await
 			.unwrap()
-			.hash;
+			.hash
+			.clone();
 
 		ds.setup_initial_creds(creds.username, creds.password).await.unwrap();
 		assert_eq!(
@@ -309,6 +312,7 @@ mod tests {
 				.await
 				.unwrap()
 				.hash
+				.clone()
 		)
 	}
 

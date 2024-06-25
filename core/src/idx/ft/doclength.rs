@@ -105,16 +105,15 @@ mod tests {
 		order: u32,
 		tt: TransactionType,
 	) -> (Transaction, DocLengths) {
-		let mut tx = ds.transaction(TransactionType::Write, Optimistic).await.unwrap();
-		let dl =
-			DocLengths::new(ds.index_store(), &mut tx, IndexKeyBase::default(), order, tt, 100)
-				.await
-				.unwrap();
+		let tx = ds.transaction(TransactionType::Write, Optimistic).await.unwrap();
+		let dl = DocLengths::new(ds.index_store(), &tx, IndexKeyBase::default(), order, tt, 100)
+			.await
+			.unwrap();
 		(tx, dl)
 	}
 
-	async fn finish(mut l: DocLengths, mut tx: Transaction) {
-		l.finish(&mut tx).await.unwrap();
+	async fn finish(mut l: DocLengths, tx: Transaction) {
+		l.finish(&tx).await.unwrap();
 		tx.commit().await.unwrap()
 	}
 
@@ -126,54 +125,54 @@ mod tests {
 
 		{
 			// Check empty state
-			let (mut tx, l) = doc_length(&ds, BTREE_ORDER, TransactionType::Read).await;
-			assert_eq!(l.statistics(&mut tx).await.unwrap().keys_count, 0);
-			let dl = l.get_doc_length(&mut tx, 99).await.unwrap();
+			let (tx, l) = doc_length(&ds, BTREE_ORDER, TransactionType::Read).await;
+			assert_eq!(l.statistics(&tx).await.unwrap().keys_count, 0);
+			let dl = l.get_doc_length(&tx, 99).await.unwrap();
 			assert_eq!(dl, None);
 			tx.cancel().await.unwrap();
 		}
 
 		{
 			// Set a doc length
-			let (mut tx, mut l) = doc_length(&ds, BTREE_ORDER, TransactionType::Write).await;
-			l.set_doc_length(&mut tx, 99, 199).await.unwrap();
+			let (tx, mut l) = doc_length(&ds, BTREE_ORDER, TransactionType::Write).await;
+			l.set_doc_length(&tx, 99, 199).await.unwrap();
 			finish(l, tx).await;
 		}
 
 		{
-			let (mut tx, l) = doc_length(&ds, BTREE_ORDER, TransactionType::Read).await;
-			assert_eq!(l.statistics(&mut tx).await.unwrap().keys_count, 1);
-			let dl = l.get_doc_length(&mut tx, 99).await.unwrap();
+			let (tx, l) = doc_length(&ds, BTREE_ORDER, TransactionType::Read).await;
+			assert_eq!(l.statistics(&tx).await.unwrap().keys_count, 1);
+			let dl = l.get_doc_length(&tx, 99).await.unwrap();
 			assert_eq!(dl, Some(199));
 			tx.cancel().await.unwrap();
 		}
 
 		{
 			// Update doc length
-			let (mut tx, mut l) = doc_length(&ds, BTREE_ORDER, TransactionType::Write).await;
-			l.set_doc_length(&mut tx, 99, 299).await.unwrap();
+			let (tx, mut l) = doc_length(&ds, BTREE_ORDER, TransactionType::Write).await;
+			l.set_doc_length(&tx, 99, 299).await.unwrap();
 			finish(l, tx).await;
 		}
 
 		{
-			let (mut tx, l) = doc_length(&ds, BTREE_ORDER, TransactionType::Read).await;
-			assert_eq!(l.statistics(&mut tx).await.unwrap().keys_count, 1);
-			let dl = l.get_doc_length(&mut tx, 99).await.unwrap();
+			let (tx, l) = doc_length(&ds, BTREE_ORDER, TransactionType::Read).await;
+			assert_eq!(l.statistics(&tx).await.unwrap().keys_count, 1);
+			let dl = l.get_doc_length(&tx, 99).await.unwrap();
 			assert_eq!(dl, Some(299));
 			tx.cancel().await.unwrap();
 		}
 
 		{
 			// Remove doc lengths
-			let (mut tx, mut l) = doc_length(&ds, BTREE_ORDER, TransactionType::Write).await;
-			assert_eq!(l.remove_doc_length(&mut tx, 99).await.unwrap(), Some(299));
-			assert_eq!(l.remove_doc_length(&mut tx, 99).await.unwrap(), None);
+			let (tx, mut l) = doc_length(&ds, BTREE_ORDER, TransactionType::Write).await;
+			assert_eq!(l.remove_doc_length(&tx, 99).await.unwrap(), Some(299));
+			assert_eq!(l.remove_doc_length(&tx, 99).await.unwrap(), None);
 			finish(l, tx).await;
 		}
 
 		{
-			let (mut tx, l) = doc_length(&ds, BTREE_ORDER, TransactionType::Read).await;
-			let dl = l.get_doc_length(&mut tx, 99).await.unwrap();
+			let (tx, l) = doc_length(&ds, BTREE_ORDER, TransactionType::Read).await;
+			let dl = l.get_doc_length(&tx, 99).await.unwrap();
 			assert_eq!(dl, None);
 			tx.cancel().await.unwrap();
 		}

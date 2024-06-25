@@ -349,7 +349,7 @@ impl super::api::Transaction for Transaction {
 			end: rng.end.into(),
 		};
 		// Scan the keys
-		let res = self.inner.scan_keys(rng, limit).await?.map(|k| Key::from(k)).collect();
+		let res = self.inner.scan_keys(rng, limit).await?.map(Key::from).collect();
 		// Return result
 		Ok(res)
 	}

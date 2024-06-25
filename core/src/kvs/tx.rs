@@ -1100,7 +1100,7 @@ impl Transaction {
 
 	/// Clears all keys from the transaction cache.
 	#[inline(always)]
-	pub fn clear(&self) -> () {
+	pub fn clear(&self) {
 		self.cache.clear()
 	}
 

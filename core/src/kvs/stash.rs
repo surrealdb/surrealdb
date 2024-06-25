@@ -14,12 +14,4 @@ impl Stash {
 	pub fn get(&mut self, key: &Key) -> Option<U32> {
 		self.0.get(key).cloned()
 	}
-	/// Delete a key from the cache
-	pub fn del(&mut self, key: &Key) -> Option<U32> {
-		self.0.remove(key)
-	}
-	/// Clears a cache completely
-	pub fn clear(&mut self) {
-		self.0.clear()
-	}
 }

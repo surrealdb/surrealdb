@@ -127,11 +127,6 @@ impl LiveStatement {
 		// Return the query id
 		Ok(id.into())
 	}
-
-	pub(crate) fn archive(mut self, node_id: Uuid) -> LiveStatement {
-		self.archived = Some(node_id);
-		self
-	}
 }
 
 impl fmt::Display for LiveStatement {

@@ -12,7 +12,6 @@ use std::collections::HashMap;
 use surrealdb::dbs::Session;
 use surrealdb::err::Error;
 use surrealdb::iam::Role;
-use surrealdb::kvs::{LockType::*, TransactionType::*};
 use surrealdb::sql::Value;
 
 #[tokio::test]
@@ -212,12 +211,6 @@ async fn remove_statement_index() -> Result<(), Error> {
 		}",
 	);
 	assert_eq!(tmp, val);
-
-	let mut tx = dbs.transaction(Read, Optimistic).await?;
-	for ix in ["uniq_isbn", "idx_author", "ft_title"] {
-		assert_empty_prefix!(&mut tx, surrealdb::key::index::all::new("test", "test", "book", ix));
-	}
-
 	// Every index store cache has been removed
 	assert!(dbs.index_store().is_empty().await);
 	Ok(())

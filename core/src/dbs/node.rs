@@ -40,11 +40,11 @@ impl Node {
 	}
 	/// Check if this node is active
 	pub fn is_active(&self) -> bool {
-		self.gc == false
+		!self.gc
 	}
 	/// Check if this node is archived
 	pub fn is_archived(&self) -> bool {
-		self.gc == true
+		self.gc
 	}
 	// Return the node id if archived
 	pub fn archived(&self) -> Option<Uuid> {
@@ -84,18 +84,12 @@ impl InfoStructure for Node {
 // events in a cluster. It should be derived from a timestamp oracle, such as the
 // one available in TiKV via the client `TimestampExt` implementation.
 #[revisioned(revision = 1)]
-#[derive(Clone, Copy, Debug, Eq, PartialEq, PartialOrd, Deserialize, Serialize, Hash, Store)]
+#[derive(
+	Clone, Copy, Default, Debug, Eq, PartialEq, PartialOrd, Deserialize, Serialize, Hash, Store,
+)]
 #[non_exhaustive]
 pub struct Timestamp {
 	pub value: u64,
-}
-
-impl Default for Timestamp {
-	fn default() -> Self {
-		Self {
-			value: 0,
-		}
-	}
 }
 
 impl From<u64> for Timestamp {

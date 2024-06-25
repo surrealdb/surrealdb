@@ -80,6 +80,12 @@ impl<'a> Default for Context<'a> {
 	}
 }
 
+impl<'a> From<Transaction> for Context<'a> {
+	fn from(txn: Transaction) -> Self {
+		Context::background().with_transaction(Arc::new(txn))
+	}
+}
+
 impl<'a> Debug for Context<'a> {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		f.debug_struct("Context")
