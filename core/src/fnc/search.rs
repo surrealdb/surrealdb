@@ -13,6 +13,7 @@ pub async fn analyze(
 	(az, val): (Value, Value),
 ) -> Result<Value, Error> {
 	if let (Some(opt), Value::Strand(az), Value::Strand(val)) = (opt, az, val) {
+		// TODO: @emmanuel-keller this `into()` is expansive and clones the value
 		let az: Analyzer = ctx.tx().get_db_analyzer(opt.ns()?, opt.db()?, &az).await?.into();
 		az.analyze(stk, ctx, opt, val.0).await
 	} else {

@@ -15,7 +15,7 @@ use filter::Filter;
 use reblessive::tree::Stk;
 use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
-
+use std::sync::Arc;
 mod filter;
 mod tokenizer;
 
@@ -31,6 +31,17 @@ impl From<DefineAnalyzerStatement> for Analyzer {
 			function: az.function.map(|i| i.0),
 			tokenizers: az.tokenizers,
 			filters: Filter::from(az.filters),
+		}
+	}
+}
+
+// TODO: @emmanuel-keller we probably don't need to clone the value here
+impl From<Arc<DefineAnalyzerStatement>> for Analyzer {
+	fn from(az: Arc<DefineAnalyzerStatement>) -> Self {
+		Self {
+			function: az.function.clone().map(|i| i.0),
+			tokenizers: az.tokenizers.clone(),
+			filters: Filter::from(az.filters.clone()),
 		}
 	}
 }

@@ -106,7 +106,8 @@ impl FtIndex {
 		tt: TransactionType,
 	) -> Result<Self, Error> {
 		let tx = ctx.tx();
-		let az = tx.get_db_analyzer(opt.ns()?, opt.db()?, az).await?;
+		// TODO: @emmanuel-keller we probably don't need to clone the value here
+		let az = tx.get_db_analyzer(opt.ns()?, opt.db()?, az).await?.as_ref().to_owned();
 		let res = Self::with_analyzer(ctx.get_index_stores(), &tx, az, index_key_base, p, tt).await;
 		res
 	}
