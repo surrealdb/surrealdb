@@ -76,11 +76,6 @@ impl Datastore {
 	}
 	/// Start a new transaction
 	pub(crate) async fn transaction(&self, write: bool, lock: bool) -> Result<Transaction, Error> {
-		// TiKV currently has issues with pessimistic locks. Panic in development.
-		#[cfg(debug_assertions)]
-		if lock {
-			panic!("There are issues with pessimistic locking in TiKV");
-		}
 		// Set whether this should be an optimistic or pessimistic transaction
 		let mut opt = if lock {
 			TransactionOptions::new_pessimistic()
