@@ -140,12 +140,11 @@ pub async fn db_access(
 								Ok(val) => {
 									match val.record() {
 										// There is a record returned
-										Some(rid) => {
-											let mut rid = rid;
+										Some(mut rid) => {
 											// Create the authentication key
 											let key = config(iss.alg, iss.key)?;
 											// Create the authentication claim
-											let mut claims = Claims {
+											let claims = Claims {
 												iss: Some(SERVER_NAME.to_owned()),
 												iat: Some(Utc::now().timestamp()),
 												nbf: Some(Utc::now().timestamp()),
@@ -172,7 +171,6 @@ pub async fn db_access(
 														Some(id) => {
 															// Update rid with result from AUTHENTICATE clause
 															rid = id;
-															claims.id = Some(rid.to_raw());
 														}
 														_ => return Err(Error::InvalidAuth),
 													},

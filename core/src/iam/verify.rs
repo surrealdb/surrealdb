@@ -205,7 +205,6 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 						Some(id) => {
 							// Update rid with result from AUTHENTICATE clause
 							rid = id;
-							// We don't generate the token in this scenario, so unlike signin/signup, no need to update claims.
 						}
 						_ => return Err(Error::InvalidAuth),
 					},
