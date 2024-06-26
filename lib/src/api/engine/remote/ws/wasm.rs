@@ -22,6 +22,7 @@ use crate::opt::WaitFor;
 use crate::sql::Value;
 use flume::Receiver;
 use flume::Sender;
+use futures::FutureExt;
 use futures::SinkExt;
 use futures::StreamExt;
 use indexmap::IndexMap;
@@ -35,7 +36,6 @@ use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::future::Future;
-use std::marker::PhantomData;
 use std::mem;
 use std::pin::Pin;
 use std::sync::atomic::AtomicI64;
@@ -50,13 +50,6 @@ use wasmtimer::tokio::MissedTickBehavior;
 use ws_stream_wasm::WsEvent;
 use ws_stream_wasm::WsMessage as Message;
 use ws_stream_wasm::WsMeta;
-
-pub(crate) enum Either {
-	Request(Option<Route>),
-	Response(Message),
-	Event(WsEvent),
-	Ping,
-}
 
 impl crate::api::Connection for Client {}
 
@@ -118,11 +111,11 @@ impl Connection for Client {
 	}
 }
 
-pub(crate) fn router(
+pub(crate) async fn run_router(
 	endpoint: Endpoint,
 	capacity: usize,
 	conn_tx: Sender<Result<()>>,
-	route_rx: Receiver<Option<Route>>,
+	route_rx: Receiver<Route>,
 ) {
 	let connect = match endpoint.supports_revision {
 		true => WsMeta::connect(&endpoint.url, vec![super::REVISION_HEADER]).await,
@@ -164,8 +157,10 @@ pub(crate) fn router(
 	let mut vars = IndexMap::new();
 	let mut replay = IndexMap::new();
 
+	let mut route_stream = route_rx.stream();
+
 	'router: loop {
-		let (mut socket_sink, socket_stream) = socket.split();
+		let (mut socket_sink, mut socket_stream) = socket.split();
 
 		let mut routes = match capacity {
 			0 => HashMap::new(),
@@ -177,24 +172,23 @@ pub(crate) fn router(
 		// don't bombard the server with pings if we miss some ticks
 		interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
 
-		let pinger = IntervalStream::new(interval);
+		let mut pinger = IntervalStream::new(interval);
 
-		let streams = (
-			socket_stream.map(Either::Response),
-			route_rx.stream().map(Either::Request),
-			pinger.map(|_| Either::Ping),
-			events.map(Either::Event),
-		);
-
-		let mut merged = streams.merge();
 		let mut last_activity = Instant::now();
 
-		while let Some(either) = merged.next().await {
-			match either {
-				Either::Request(Some(Route {
-					request,
-					response,
-				})) => {
+		loop {
+			futures::select! {
+				route = route_stream.next() => {
+					let Some(Route{ request, response }) = route else {
+						match ws.close().await {
+							Ok(..) => trace!("Connection closed successfully"),
+							Err(error) => {
+								warn!("Failed to close database connection; {error}")
+							}
+						}
+						break 'router;
+					};
+
 					let (id, method, param) = request;
 					let params = match param.query {
 						Some((query, bindings)) => {
@@ -283,8 +277,14 @@ pub(crate) fn router(
 							break;
 						}
 					}
+
 				}
-				Either::Response(message) => {
+				message = socket_stream.next().fuse() => {
+					let Some(message) = message else {
+						// socket disconnected,
+						break
+					};
+
 					last_activity = Instant::now();
 					match Response::try_from(&message, endpoint.supports_revision) {
 						Ok(option) => {
@@ -391,22 +391,26 @@ pub(crate) fn router(
 						}
 					}
 				}
-				Either::Event(event) => match event {
-					WsEvent::Error => {
-						trace!("connection errored");
-						break;
+				event = events.next().fuse() => {
+					let Some(event) = event else {
+						continue;
+					};
+					match event {
+						WsEvent::Error => {
+							trace!("connection errored");
+							break;
+						}
+						WsEvent::WsErr(error) => {
+							trace!("{error}");
+						}
+						WsEvent::Closed(..) => {
+							trace!("connection closed");
+							break;
+						}
+						_ => {}
 					}
-					WsEvent::WsErr(error) => {
-						trace!("{error}");
-					}
-					WsEvent::Closed(..) => {
-						trace!("connection closed");
-						break;
-					}
-					_ => {}
-				},
-				Either::Ping => {
-					// only ping if we haven't talked to the server recently
+				}
+				_ = pinger.next().fuse() => {
 					if last_activity.elapsed() >= PING_INTERVAL {
 						trace!("Pinging the server");
 						if let Err(error) = socket_sink.send(ping.clone()).await {
@@ -414,16 +418,6 @@ pub(crate) fn router(
 							break;
 						}
 					}
-				}
-				// Close connection request received
-				Either::Request(None) => {
-					match ws.close().await {
-						Ok(..) => trace!("Connection closed successfully"),
-						Err(error) => {
-							warn!("Failed to close database connection; {error}")
-						}
-					}
-					break 'router;
 				}
 			}
 		}

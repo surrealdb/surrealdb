@@ -18,12 +18,12 @@ use crate::opt::WaitFor;
 use flume::Receiver;
 use std::collections::HashSet;
 use std::future::Future;
-use std::marker::PhantomData;
 use std::pin::Pin;
 use std::sync::atomic::AtomicI64;
 use std::sync::Arc;
 use std::sync::OnceLock;
 use tokio::sync::watch;
+use wasm_bindgen_futures::spawn_local;
 
 impl crate::api::Connection for Any {}
 
@@ -54,7 +54,7 @@ impl Connection for Any {
 					#[cfg(feature = "kv-fdb")]
 					{
 						features.insert(ExtraFeatures::LiveQueries);
-						engine::local::wasm::router(address, conn_tx, route_rx);
+						spawn_local(engine::local::wasm::run_router(address, conn_tx, route_rx));
 						conn_rx.into_recv_async().await??;
 					}
 
@@ -68,7 +68,7 @@ impl Connection for Any {
 					#[cfg(feature = "kv-indxdb")]
 					{
 						features.insert(ExtraFeatures::LiveQueries);
-						engine::local::wasm::router(address, conn_tx, route_rx);
+						spawn_local(engine::local::wasm::run_router(address, conn_tx, route_rx));
 						conn_rx.into_recv_async().await??;
 					}
 
@@ -82,7 +82,7 @@ impl Connection for Any {
 					#[cfg(feature = "kv-mem")]
 					{
 						features.insert(ExtraFeatures::LiveQueries);
-						engine::local::wasm::router(address, conn_tx, route_rx);
+						spawn_local(engine::local::wasm::run_router(address, conn_tx, route_rx));
 						conn_rx.into_recv_async().await??;
 					}
 
@@ -96,7 +96,7 @@ impl Connection for Any {
 					#[cfg(feature = "kv-rocksdb")]
 					{
 						features.insert(ExtraFeatures::LiveQueries);
-						engine::local::wasm::router(address, conn_tx, route_rx);
+						spawn_local(engine::local::wasm::run_router(address, conn_tx, route_rx));
 						conn_rx.into_recv_async().await??;
 					}
 
@@ -111,7 +111,7 @@ impl Connection for Any {
 					#[cfg(feature = "kv-surrealkv")]
 					{
 						features.insert(ExtraFeatures::LiveQueries);
-						engine::local::wasm::router(address, conn_tx, route_rx);
+						spawn_local(engine::local::wasm::run_router(address, conn_tx, route_rx));
 						conn_rx.into_recv_async().await??;
 					}
 
@@ -126,7 +126,7 @@ impl Connection for Any {
 					#[cfg(feature = "kv-tikv")]
 					{
 						features.insert(ExtraFeatures::LiveQueries);
-						engine::local::wasm::router(address, conn_tx, route_rx);
+						spawn_local(engine::local::wasm::run_router(address, conn_tx, route_rx));
 						conn_rx.into_recv_async().await??;
 					}
 
@@ -155,7 +155,9 @@ impl Connection for Any {
 						features.insert(ExtraFeatures::LiveQueries);
 						let mut endpoint = address;
 						endpoint.url = endpoint.url.join(engine::remote::ws::PATH)?;
-						engine::remote::ws::wasm::router(endpoint, capacity, conn_tx, route_rx);
+						spawn_local(engine::remote::ws::wasm::run_router(
+							endpoint, capacity, conn_tx, route_rx,
+						));
 						conn_rx.into_recv_async().await??;
 					}
 
@@ -192,7 +194,7 @@ impl Connection for Any {
 				request: (self.id, self.method, param),
 				response: sender,
 			};
-			router.sender.send_async(Some(route)).await?;
+			router.sender.send_async(route).await?;
 			Ok(receiver)
 		})
 	}

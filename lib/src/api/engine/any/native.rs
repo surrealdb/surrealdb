@@ -68,7 +68,7 @@ impl Connection for Any {
 					{
 						features.insert(ExtraFeatures::Backup);
 						features.insert(ExtraFeatures::LiveQueries);
-						engine::local::native::router(address, conn_tx, route_rx);
+						tokio::spawn(engine::local::native::run_router(address, conn_tx, route_rx));
 						conn_rx.into_recv_async().await??
 					}
 
