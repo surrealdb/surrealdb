@@ -62,7 +62,7 @@ impl InfoStructure for AccessType {
 				"jwt".to_string() => v.jwt.structure(),
 				"signup".to_string(), if let Some(v) = v.signup => v.structure(),
 				"signin".to_string(), if let Some(v) = v.signin => v.structure(),
-        "authenticate".to_string(), if let Some(v) = v.authenticate => v.structure(),
+				"authenticate".to_string(), if let Some(v) = v.authenticate => v.structure(),
 			}),
 		}
 	}
