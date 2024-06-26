@@ -1,5 +1,7 @@
 use crate::sql::datetime::Datetime;
+use crate::sql::statements::info::InfoStructure;
 use crate::sql::strand::Strand;
+use crate::sql::Value;
 use crate::syn;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -292,5 +294,11 @@ impl<'a> Sum<&'a Self> for Duration {
 		I: Iterator<Item = &'a Self>,
 	{
 		iter.fold(Duration::default(), |a, b| &a + b)
+	}
+}
+
+impl InfoStructure for Duration {
+	fn structure(self) -> Value {
+		self.to_string().into()
 	}
 }

@@ -1,11 +1,9 @@
 use crate::sql::statements::info::InfoStructure;
-use crate::sql::Array;
+use crate::sql::{Kind, Value};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::fmt::Display;
-
-use super::{Kind, Object, Table, Value};
 
 /// The type of records stored by a table
 #[revisioned(revision = 1)]
@@ -27,11 +25,11 @@ impl Display for TableType {
 			}
 			TableType::Relation(rel) => {
 				f.write_str(" RELATION")?;
-				if let Some(Kind::Record(kind)) = &rel.from {
-					write!(f, " IN {}", get_tables_from_kind(kind).join(" | "))?;
+				if let Some(kind) = &rel.from {
+					write!(f, " IN {kind}")?;
 				}
-				if let Some(Kind::Record(kind)) = &rel.to {
-					write!(f, " OUT {}", get_tables_from_kind(kind).join(" | "))?;
+				if let Some(kind) = &rel.to {
+					write!(f, " OUT {kind}")?;
 				}
 			}
 			TableType::Any => {
@@ -44,40 +42,22 @@ impl Display for TableType {
 
 impl InfoStructure for TableType {
 	fn structure(self) -> Value {
-		let mut acc = Object::default();
-
-		match &self {
-			TableType::Any => {
-				acc.insert("kind".to_string(), "ANY".into());
-			}
-			TableType::Normal => {
-				acc.insert("kind".to_string(), "NORMAL".into());
-			}
-			TableType::Relation(rel) => {
-				acc.insert("kind".to_string(), "RELATION".into());
-
-				if let Some(Kind::Record(tables)) = &rel.from {
-					acc.insert(
-						"in".to_string(),
-						Value::Array(Array::from(get_tables_from_kind(tables))),
-					);
-				}
-
-				if let Some(Kind::Record(tables)) = &rel.to {
-					acc.insert(
-						"out".to_string(),
-						Value::Array(Array::from(get_tables_from_kind(tables))),
-					);
-				}
-			}
-		};
-
-		Value::Object(acc)
+		match self {
+			TableType::Any => Value::from(map! {
+				"kind".to_string() => "ANY".into(),
+			}),
+			TableType::Normal => Value::from(map! {
+				"kind".to_string() => "NORMAL".into(),
+			}),
+			TableType::Relation(rel) => Value::from(map! {
+				"kind".to_string() => "RELATION".into(),
+				"in".to_string(), if let Some(Kind::Record(tables)) = rel.from =>
+					tables.into_iter().map(|t| t.0).collect::<Vec<_>>().into(),
+				"out".to_string(), if let Some(Kind::Record(tables)) = rel.to =>
+					tables.into_iter().map(|t| t.0).collect::<Vec<_>>().into(),
+			}),
+		}
 	}
-}
-
-fn get_tables_from_kind(tables: &[Table]) -> Vec<&str> {
-	tables.iter().map(|t| t.0.as_str()).collect::<Vec<_>>()
 }
 
 #[revisioned(revision = 1)]

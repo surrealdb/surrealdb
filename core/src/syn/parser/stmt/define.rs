@@ -31,7 +31,9 @@ use crate::{
 impl Parser<'_> {
 	pub async fn parse_define_stmt(&mut self, ctx: &mut Stk) -> ParseResult<DefineStatement> {
 		match self.next().kind {
-			t!("NAMESPACE") => self.parse_define_namespace().map(DefineStatement::Namespace),
+			t!("NAMESPACE") | t!("ns") => {
+				self.parse_define_namespace().map(DefineStatement::Namespace)
+			}
 			t!("DATABASE") => self.parse_define_database().map(DefineStatement::Database),
 			t!("FUNCTION") => self.parse_define_function(ctx).await.map(DefineStatement::Function),
 			t!("USER") => self.parse_define_user().map(DefineStatement::User),

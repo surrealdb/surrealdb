@@ -3,11 +3,9 @@ use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::iam::{Action, ResourceKind};
+use crate::sql::fmt::{is_pretty, pretty_indent};
 use crate::sql::statements::info::InfoStructure;
-use crate::sql::{
-	fmt::{is_pretty, pretty_indent},
-	Base, Block, Ident, Kind, Object, Permission, Strand, Value,
-};
+use crate::sql::{Base, Block, Ident, Kind, Permission, Strand, Value};
 use derive::Store;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -100,36 +98,16 @@ impl fmt::Display for DefineFunctionStatement {
 
 impl InfoStructure for DefineFunctionStatement {
 	fn structure(self) -> Value {
-		let Self {
-			name,
-			args,
-			block,
-			comment,
-			permissions,
-			..
-		} = self;
-		let mut acc = Object::default();
-
-		acc.insert("name".to_string(), name.structure());
-
-		acc.insert(
-			"args".to_string(),
-			Value::Array(
-				args.into_iter()
-					.map(|(n, k)| Value::Array(vec![n.structure(), k.structure()].into()))
-					.collect::<Vec<Value>>()
-					.into(),
-			),
-		);
-
-		acc.insert("block".to_string(), block.structure());
-
-		acc.insert("permissions".to_string(), permissions.structure());
-
-		if let Some(comment) = comment {
-			acc.insert("comment".to_string(), comment.into());
-		}
-
-		Value::Object(acc)
+		Value::from(map! {
+			"name".to_string() => self.name.structure(),
+			"args".to_string() => self.args
+				.into_iter()
+				.map(|(n, k)| vec![n.structure(), k.structure()].into())
+				.collect::<Vec<Value>>()
+				.into(),
+			"block".to_string() => self.block.structure(),
+			"permissions".to_string() => self.permissions.structure(),
+			"comment".to_string(), if let Some(v) = self.comment => v.into(),
+		})
 	}
 }
