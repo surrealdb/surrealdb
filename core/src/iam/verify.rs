@@ -1379,7 +1379,7 @@ mod tests {
 			// Create the token
 			let enc = match encode(&HEADER, &claims, &key) {
 				Ok(enc) => enc,
-				Err(err) => panic!("Failed to decode token: {:?}", err),
+				Err(err) => panic!("Failed to encode token: {:?}", err),
 			};
 			// Signin with the token
 			let mut sess = Session::default();
@@ -1688,7 +1688,7 @@ mod tests {
 
 	#[tokio::test]
 	async fn test_token_db_record_and_authenticate_clause() {
-		// Test with correct credentials
+		// Test with correct credentials and no additional claims
 		{
 			let secret = "jwt_secret";
 			let key = EncodingKey::from_secret(secret.as_ref());
@@ -1707,20 +1707,21 @@ mod tests {
 			let ds = Datastore::new("memory").await.unwrap();
 			let sess = Session::owner().with_ns("test").with_db("test");
 			ds.execute(
-				format!(r#"
+				format!(
+					r#"
     				DEFINE ACCESS user ON DATABASE TYPE RECORD
     					AUTHENTICATE (
-    					    -- More real world example would be an external authentication provider generating a token with only some identifier or email
-    						-- which you would use to lookup the user id
-    						-- This simple n+1 example however shows that you can overwrite a user id like this.
-    					    SELECT * FROM type::thing('user', meta::id($auth) + 1)
+							-- Simple example increasing the record identifier by one
+							SELECT * FROM type::thing('user', meta::id($auth) + 1)
     					)
  				        WITH JWT ALGORITHM HS512 KEY '{secret}'
     					DURATION FOR SESSION 2h
     				;
 
     				CREATE user:1, user:2;
-				"#).as_str(),
+				"#
+				)
+				.as_str(),
 				&sess,
 				None,
 			)
@@ -1739,11 +1740,94 @@ mod tests {
 			assert!(res.is_ok(), "Failed to signin with token: {:?}", res);
 			assert_eq!(sess.ns, Some("test".to_string()));
 			assert_eq!(sess.db, Some("test".to_string()));
+			assert_eq!(sess.ac, Some("user".to_string()));
 			assert_eq!(sess.au.id(), "user:2");
 			assert!(sess.au.is_record());
 			assert_eq!(sess.au.level().ns(), Some("test"));
 			assert_eq!(sess.au.level().db(), Some("test"));
 			assert_eq!(sess.au.level().id(), Some("user:2"));
+			// Record users should not have roles
+			assert!(!sess.au.has_role(&Role::Viewer), "Auth user expected to not have Viewer role");
+			assert!(!sess.au.has_role(&Role::Editor), "Auth user expected to not have Editor role");
+			assert!(!sess.au.has_role(&Role::Owner), "Auth user expected to not have Owner role");
+			// Expiration should match the defined duration
+			let exp = sess.exp.unwrap();
+			// Expiration should match the current time plus session duration with some margin
+			let min_exp = (Utc::now() + Duration::hours(2) - Duration::seconds(10)).timestamp();
+			let max_exp = (Utc::now() + Duration::hours(2) + Duration::seconds(10)).timestamp();
+			assert!(
+				exp > min_exp && exp < max_exp,
+				"Session expiration is expected to follow the defined duration"
+			);
+		}
+
+		// Test with correct credentials and additional claim
+		{
+			let secret = "jwt_secret";
+			let key = EncodingKey::from_secret(secret.as_ref());
+
+			let ds = Datastore::new("memory").await.unwrap();
+			let sess = Session::owner().with_ns("test").with_db("test");
+			ds.execute(
+				format!(
+					r#"
+				DEFINE ACCESS user ON DATABASE TYPE RECORD
+					SIGNIN (
+						SELECT * FROM type::thing('user', $id)
+					)
+					AUTHENTICATE (
+					    SELECT id FROM user WHERE email = $token.email
+					)
+					WITH JWT ALGORITHM HS512 KEY '{secret}'
+					DURATION FOR SESSION 2h
+				;
+
+				CREATE user:1 SET email = "info@surrealdb.com";
+				"#
+				)
+				.as_str(),
+				&sess,
+				None,
+			)
+			.await
+			.unwrap();
+
+			let now = Utc::now().timestamp();
+			let later = (Utc::now() + Duration::hours(1)).timestamp();
+			let claims_json = format!(
+				r#"
+				{{
+					"iss": "surrealdb-test",
+					"iat": {now},
+					"nbf": {now},
+					"exp": {later},
+					"ns": "test",
+					"db": "test",
+					"ac": "user",
+					"id": "user:invalid",
+					"email": "info@surrealdb.com"
+				}}
+				"#
+			);
+			let claims = serde_json::from_str::<Claims>(&claims_json).unwrap();
+			// Create the token
+			let enc = match encode(&HEADER, &claims, &key) {
+				Ok(enc) => enc,
+				Err(err) => panic!("Failed to encode token: {:?}", err),
+			};
+			// Signin with the token
+			let mut sess = Session::default();
+			let res = token(&ds, &mut sess, &enc).await;
+
+			assert!(res.is_ok(), "Failed to signin with token: {:?}", res);
+			assert_eq!(sess.ns, Some("test".to_string()));
+			assert_eq!(sess.db, Some("test".to_string()));
+			assert_eq!(sess.ac, Some("user".to_string()));
+			assert_eq!(sess.au.id(), "user:1");
+			assert!(sess.au.is_record());
+			assert_eq!(sess.au.level().ns(), Some("test"));
+			assert_eq!(sess.au.level().db(), Some("test"));
+			assert_eq!(sess.au.level().id(), Some("user:1"));
 			// Record users should not have roles
 			assert!(!sess.au.has_role(&Role::Viewer), "Auth user expected to not have Viewer role");
 			assert!(!sess.au.has_role(&Role::Editor), "Auth user expected to not have Editor role");

@@ -1222,9 +1222,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 						SELECT * FROM type::thing('user', $id)
 					)
 					AUTHENTICATE (
-					    -- More real world example would be an external authentication provider generating a token with only some identifier or email
-						-- which you would use to lookup the user id
-						-- This simple n+1 example however shows that you can overwrite a user id like this.
+						-- Simple example increasing the record identifier by one
 					    SELECT * FROM type::thing('user', meta::id($auth) + 1)
 					)
 					DURATION FOR SESSION 2h
@@ -1259,11 +1257,107 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 			assert!(res.is_ok(), "Failed to signin with credentials: {:?}", res);
 			assert_eq!(sess.ns, Some("test".to_string()));
 			assert_eq!(sess.db, Some("test".to_string()));
+			assert_eq!(sess.ac, Some("user".to_string()));
 			assert_eq!(sess.au.id(), "user:2");
 			assert!(sess.au.is_record());
 			assert_eq!(sess.au.level().ns(), Some("test"));
 			assert_eq!(sess.au.level().db(), Some("test"));
 			assert_eq!(sess.au.level().id(), Some("user:2"));
+			// Record users should not have roles
+			assert!(!sess.au.has_role(&Role::Viewer), "Auth user expected to not have Viewer role");
+			assert!(!sess.au.has_role(&Role::Editor), "Auth user expected to not have Editor role");
+			assert!(!sess.au.has_role(&Role::Owner), "Auth user expected to not have Owner role");
+			// Expiration should match the defined duration
+			let exp = sess.exp.unwrap();
+			// Expiration should match the current time plus session duration with some margin
+			let min_exp = (Utc::now() + Duration::hours(2) - Duration::seconds(10)).timestamp();
+			let max_exp = (Utc::now() + Duration::hours(2) + Duration::seconds(10)).timestamp();
+			assert!(
+				exp > min_exp && exp < max_exp,
+				"Session expiration is expected to follow the defined duration"
+			);
+		}
+
+		// Test with correct credentials and "realistic" scenario
+		{
+			let ds = Datastore::new("memory").await.unwrap();
+			let sess = Session::owner().with_ns("test").with_db("test");
+			ds.execute(
+				r#"
+				DEFINE ACCESS owner ON DATABASE TYPE RECORD
+					SIGNUP (
+						-- Allow anyone to sign up as a new company
+						-- This automatically creates an owner with the same credentials
+						CREATE company CONTENT {
+							email: $email,
+							pass: crypto::argon2::generate($pass),
+							owner: (CREATE employee CONTENT {
+								email: $email,
+								pass: $pass,
+							}),
+						}
+					)
+					SIGNIN (
+						-- Allow company owners to log in directly with the company account
+						SELECT * FROM company WHERE email = $email AND crypto::argon2::compare(pass, $pass)
+					)
+					AUTHENTICATE (
+						-- If logging in with a company account, the session will be authenticated as the first owner
+						IF meta::tb($auth) = "company" {
+							RETURN SELECT VALUE owner FROM company WHERE id = $auth
+						}
+					)
+					DURATION FOR SESSION 2h
+				;
+
+				CREATE company:1 CONTENT {
+					email: "info@example.com",
+					pass: crypto::argon2::generate("company-password"),
+					owner: employee:2,
+				};
+				CREATE employee:1 CONTENT {
+					email: "member@example.com",
+					pass: crypto::argon2::generate("member-password"),
+				};
+				CREATE employee:2 CONTENT {
+					email: "owner@example.com",
+					pass: crypto::argon2::generate("owner-password"),
+				};
+				"#,
+				&sess,
+				None,
+			)
+			.await
+			.unwrap();
+
+			// Signin with the user
+			let mut sess = Session {
+				ns: Some("test".to_string()),
+				db: Some("test".to_string()),
+				..Default::default()
+			};
+			let mut vars: HashMap<&str, Value> = HashMap::new();
+			vars.insert("email", "info@example.com".into());
+			vars.insert("pass", "company-password".into());
+			let res = db_access(
+				&ds,
+				&mut sess,
+				"test".to_string(),
+				"test".to_string(),
+				"owner".to_string(),
+				vars.into(),
+			)
+			.await;
+
+			assert!(res.is_ok(), "Failed to signin with credentials: {:?}", res);
+			assert_eq!(sess.ns, Some("test".to_string()));
+			assert_eq!(sess.db, Some("test".to_string()));
+			assert_eq!(sess.ac, Some("owner".to_string()));
+			assert_eq!(sess.au.id(), "employee:2");
+			assert!(sess.au.is_record());
+			assert_eq!(sess.au.level().ns(), Some("test"));
+			assert_eq!(sess.au.level().db(), Some("test"));
+			assert_eq!(sess.au.level().id(), Some("employee:2"));
 			// Record users should not have roles
 			assert!(!sess.au.has_role(&Role::Viewer), "Auth user expected to not have Viewer role");
 			assert!(!sess.au.has_role(&Role::Editor), "Auth user expected to not have Editor role");
