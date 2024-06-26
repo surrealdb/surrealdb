@@ -423,7 +423,7 @@ async fn router_reconnect(
 ) {
 	loop {
 		trace!("Reconnecting...");
-		match connect(&endpoint, Some(config.clone()), maybe_connector.clone()).await {
+		match connect(endpoint, Some(*config), maybe_connector.clone()).await {
 			Ok(s) => {
 				let (new_sink, new_stream) = s.split();
 				state.sink = new_sink;

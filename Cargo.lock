@@ -2178,19 +2178,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "futures-concurrency"
-version = "7.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9b590a729e1cbaf9ae3ec294143ea034d93cbb1de01c884d04bcd0af8b613d02"
-dependencies = [
- "bitvec",
- "futures-core",
- "pin-project",
- "slab",
- "smallvec",
-]
-
-[[package]]
 name = "futures-core"
 version = "0.3.30"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5952,7 +5939,6 @@ dependencies = [
  "flate2",
  "flume",
  "futures",
- "futures-concurrency",
  "geo 0.27.0",
  "hashbrown 0.14.5",
  "indexmap 2.2.6",
