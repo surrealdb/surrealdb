@@ -29,7 +29,7 @@ use futures::StreamExt;
 use futures_concurrency::stream::Merge as _;
 use indexmap::IndexMap;
 use revision::revisioned;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::collections::hash_map::Entry;
 use std::collections::BTreeMap;
 use std::collections::HashMap;
@@ -178,6 +178,14 @@ impl Connection for Client {
 	}
 }
 
+#[derive(Debug, Serialize)]
+#[revisioned(revision = 1)]
+struct RouterRequest {
+	id: Option<Value>,
+	method: Value,
+	params: Option<Value>,
+}
+
 #[allow(clippy::too_many_lines)]
 pub(crate) fn router(
 	endpoint: Endpoint,
@@ -278,16 +286,15 @@ pub(crate) fn router(
 								_ => method.as_str(),
 							};
 							let message = {
-								let mut request = BTreeMap::new();
-								request.insert("id".to_owned(), Value::from(id));
-								request.insert("method".to_owned(), method_str.into());
-								if !params.is_empty() {
-									request.insert("params".to_owned(), params.into());
-								}
-								let payload = Value::from(request);
-								trace!("Request {payload}");
+								let request = RouterRequest {
+									id: Some(Value::from(id)),
+									method: method_str.into(),
+									params: (!params.is_empty()).then(|| params.into()),
+								};
+
+								trace!("Request {:?}", request);
 								let payload =
-									serialize(&payload, endpoint.supports_revision).unwrap();
+									serialize(&request, endpoint.supports_revision).unwrap();
 								Message::Binary(payload)
 							};
 							if let Method::Authenticate
@@ -397,25 +404,13 @@ pub(crate) fn router(
 																	live_queries
 																		.remove(&live_query_id);
 																	let kill = {
-																		let mut request =
-																			BTreeMap::new();
-																		request.insert(
-																			"method".to_owned(),
-																			Method::Kill
-																				.as_str()
-																				.into(),
-																		);
-																		request.insert(
-																			"params".to_owned(),
-																			vec![Value::from(
-																				live_query_id,
-																			)]
-																			.into(),
-																		);
-																		let value =
-																			Value::from(request);
+																		let request = RouterRequest{
+																			id: None,
+																			method: Method::Kill.as_str().into(),
+																			params: Some(vec![Value::from(live_query_id)].into())
+																		};
 																		let value = serialize(
-																			&value,
+																			&request,
 																			endpoint
 																				.supports_revision,
 																		)
@@ -525,15 +520,14 @@ pub(crate) fn router(
 							}
 						}
 						for (key, value) in &vars {
-							let mut request = BTreeMap::new();
-							request.insert("method".to_owned(), Method::Set.as_str().into());
-							request.insert(
-								"params".to_owned(),
-								vec![key.as_str().into(), value.clone()].into(),
-							);
-							let payload = Value::from(request);
-							trace!("Request {payload}");
-							if let Err(error) = socket.send(Message::Binary(payload.into())).await {
+							let request = RouterRequest {
+								id: None,
+								method: Method::Set.as_str().into(),
+								params: Some(vec![key.as_str().into(), value.clone()].into()),
+							};
+							trace!("Request {:?}", request);
+							let payload = serialize(&request, endpoint.supports_revision).unwrap();
+							if let Err(error) = socket.send(Message::Binary(payload)).await {
 								trace!("{error}");
 								time::sleep(time::Duration::from_secs(1)).await;
 								continue 'reconnect;

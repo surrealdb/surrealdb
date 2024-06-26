@@ -156,7 +156,10 @@ pub(crate) struct Response {
 	pub(crate) result: ServerResult,
 }
 
-fn serialize(value: &Value, revisioned: bool) -> Result<Vec<u8>> {
+fn serialize<V>(value: &V, revisioned: bool) -> Result<Vec<u8>>
+where
+	V: serde::Serialize + Revisioned,
+{
 	if revisioned {
 		let mut buf = Vec::new();
 		value.serialize_revisioned(&mut buf).map_err(|error| crate::Error::Db(error.into()))?;
