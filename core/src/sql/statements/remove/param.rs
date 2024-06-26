@@ -1,5 +1,5 @@
 use crate::ctx::Context;
-use crate::dbs::{Options, Transaction};
+use crate::dbs::Options;
 use crate::err::Error;
 use crate::iam::{Action, ResourceKind};
 use crate::sql::{Base, Ident, Value};
@@ -8,9 +8,10 @@ use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Formatter};
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[revisioned(revision = 2)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
+#[non_exhaustive]
 pub struct RemoveParamStatement {
 	pub name: Ident,
 	#[revision(start = 2)]
@@ -19,23 +20,18 @@ pub struct RemoveParamStatement {
 
 impl RemoveParamStatement {
 	/// Process this type returning a computed simple Value
-	pub(crate) async fn compute(
-		&self,
-		_ctx: &Context<'_>,
-		opt: &Options,
-		txn: &Transaction,
-	) -> Result<Value, Error> {
+	pub(crate) async fn compute(&self, ctx: &Context<'_>, opt: &Options) -> Result<Value, Error> {
 		let future = async {
 			// Allowed to run?
 			opt.is_allowed(Action::Edit, ResourceKind::Parameter, &Base::Db)?;
 			// Claim transaction
-			let mut run = txn.lock().await;
+			let mut run = ctx.tx_lock().await;
 			// Clear the cache
 			run.clear_cache();
 			// Get the definition
-			let pa = run.get_db_param(opt.ns(), opt.db(), &self.name).await?;
+			let pa = run.get_db_param(opt.ns()?, opt.db()?, &self.name).await?;
 			// Delete the definition
-			let key = crate::key::database::pa::new(opt.ns(), opt.db(), &pa.name);
+			let key = crate::key::database::pa::new(opt.ns()?, opt.db()?, &pa.name);
 			run.del(key).await?;
 			// Ok all good
 			Ok(Value::None)

@@ -32,6 +32,7 @@ pub fn generate_versionstamp_sequences(start: Versionstamp) -> VersionstampSeque
 }
 
 #[doc(hidden)]
+#[non_exhaustive]
 pub struct VersionstampSequence {
 	next_state: Option<Versionstamp>,
 }

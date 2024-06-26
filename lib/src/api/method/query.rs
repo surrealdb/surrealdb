@@ -14,11 +14,7 @@ use crate::method::Stats;
 use crate::method::WithStats;
 use crate::sql;
 use crate::sql::to_value;
-use crate::sql::Array;
-use crate::sql::Object;
 use crate::sql::Statement;
-use crate::sql::Statements;
-use crate::sql::Strand;
 use crate::sql::Value;
 use crate::Notification;
 use crate::Surreal;
@@ -33,7 +29,6 @@ use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::future::Future;
 use std::future::IntoFuture;
-use std::marker::PhantomData;
 use std::mem;
 use std::pin::Pin;
 use std::task::Context;
@@ -43,21 +38,70 @@ use std::task::Poll;
 #[derive(Debug)]
 #[must_use = "futures do nothing unless you `.await` or poll them"]
 pub struct Query<'r, C: Connection> {
-	pub(super) client: Cow<'r, Surreal<C>>,
-	pub(super) query: Vec<Result<Vec<Statement>>>,
-	pub(super) bindings: Result<BTreeMap<String, Value>>,
-	pub(crate) register_live_queries: bool,
+	pub(crate) inner: Result<ValidQuery<'r, C>>,
 }
 
-impl<C> Query<'_, C>
+#[derive(Debug)]
+pub(crate) struct ValidQuery<'r, C: Connection> {
+	pub client: Cow<'r, Surreal<C>>,
+	pub query: Vec<Statement>,
+	pub bindings: BTreeMap<String, Value>,
+	pub register_live_queries: bool,
+}
+
+impl<'r, C> Query<'r, C>
 where
 	C: Connection,
 {
+	pub(crate) fn new(
+		client: Cow<'r, Surreal<C>>,
+		query: Vec<Statement>,
+		bindings: BTreeMap<String, Value>,
+		register_live_queries: bool,
+	) -> Self {
+		Query {
+			inner: Ok(ValidQuery {
+				client,
+				query,
+				bindings,
+				register_live_queries,
+			}),
+		}
+	}
+
+	pub(crate) fn map_valid<F>(self, f: F) -> Self
+	where
+		F: FnOnce(ValidQuery<'r, C>) -> Result<ValidQuery<'r, C>>,
+	{
+		match self.inner {
+			Ok(x) => Query {
+				inner: f(x),
+			},
+			x => Query {
+				inner: x,
+			},
+		}
+	}
+
 	/// Converts to an owned type which can easily be moved to a different thread
 	pub fn into_owned(self) -> Query<'static, C> {
+		let inner = match self.inner {
+			Ok(ValidQuery {
+				client,
+				query,
+				bindings,
+				register_live_queries,
+			}) => Ok(ValidQuery::<'static, C> {
+				client: Cow::Owned(client.into_owned()),
+				query,
+				bindings,
+				register_live_queries,
+			}),
+			Err(e) => Err(e),
+		};
+
 		Query {
-			client: Cow::Owned(self.client.into_owned()),
-			..self
+			inner,
 		}
 	}
 }
@@ -70,68 +114,79 @@ where
 	type IntoFuture = Pin<Box<dyn Future<Output = Self::Output> + Send + Sync + 'r>>;
 
 	fn into_future(self) -> Self::IntoFuture {
+		let ValidQuery {
+			client,
+			query,
+			bindings,
+			register_live_queries,
+		} = match self.inner {
+			Ok(x) => x,
+			Err(error) => return Box::pin(async move { Err(error) }),
+		};
+
+		let query_statements = query;
+
 		Box::pin(async move {
 			// Extract the router from the client
-			let router = self.client.router.extract()?;
-			// Combine all query statements supplied
-			let mut statements = Vec::with_capacity(self.query.len());
-			for query in self.query {
-				statements.extend(query?);
+			let router = client.router.extract()?;
+
+			// Collect the indexes of the live queries which should be registerd.
+			let query_indicies = if register_live_queries {
+				query_statements
+					.iter()
+					// BEGIN, COMMIT, and CANCEL don't return a result.
+					.filter(|x| {
+						!matches!(
+							x,
+							Statement::Begin(_) | Statement::Commit(_) | Statement::Cancel(_)
+						)
+					})
+					.enumerate()
+					.filter(|(_, x)| matches!(x, Statement::Live(_)))
+					.map(|(i, _)| i)
+					.collect()
+			} else {
+				Vec::new()
+			};
+
+			// If there are live queries and it is not supported, return an error.
+			if !query_indicies.is_empty() && !router.features.contains(&ExtraFeatures::LiveQueries)
+			{
+				return Err(Error::LiveQueriesNotSupported.into());
 			}
-			// Build the query and execute it
-			let query = sql::Query(Statements(statements.clone()));
-			let param = Param::query(query, self.bindings?);
+
+			let mut query = sql::Query::default();
+			query.0 .0 = query_statements;
+
+			let param = Param::query(query, bindings);
 			let mut conn = Client::new(Method::Query);
 			let mut response = conn.execute_query(router, param).await?;
-			// Register live queries if necessary
-			if self.register_live_queries {
-				let mut live_queries = IndexMap::new();
-				let mut checked = false;
-				// Adjusting offsets as a workaround to https://github.com/surrealdb/surrealdb/issues/3318
-				let mut offset = 0;
-				for (index, stmt) in statements.into_iter().enumerate() {
-					if let Statement::Live(stmt) = stmt {
-						if !checked && !router.features.contains(&ExtraFeatures::LiveQueries) {
-							return Err(Error::LiveQueriesNotSupported.into());
-						}
-						checked = true;
-						let index = index - offset;
-						if let Some((_, result)) = response.results.get(&index) {
-							let result =
-								match result {
-									Ok(id) => live::register::<Client>(router, id.clone())
-										.await
-										.map(|rx| Stream {
-											id: stmt.id.into(),
-											rx: Some(rx),
-											client: Surreal {
-												router: self.client.router.clone(),
-												waiter: self.client.waiter.clone(),
-												engine: PhantomData,
-											},
-											response_type: PhantomData,
-											engine: PhantomData,
-										}),
-									// This is a live query. We are using this as a workaround to avoid
-									// creating another public error variant for this internal error.
-									Err(..) => Err(Error::NotLiveQuery(index).into()),
-								};
-							live_queries.insert(index, result);
-						}
-					} else if matches!(
-						stmt,
-						Statement::Begin(..) | Statement::Commit(..) | Statement::Cancel(..)
-					) {
-						offset += 1;
-					}
-				}
-				response.live_queries = live_queries;
+
+			for idx in query_indicies {
+				let Some((_, result)) = response.results.get(&idx) else {
+					continue;
+				};
+
+				// This is a live query. We are using this as a workaround to avoid
+				// creating another public error variant for this internal error.
+				let res = match result {
+					Ok(id) => live::register::<Client>(router, id.clone()).await.map(|rx| {
+						Stream::new(
+							Surreal::new_from_router_waiter(
+								client.router.clone(),
+								client.waiter.clone(),
+							),
+							id.clone(),
+							Some(rx),
+						)
+					}),
+					Err(_) => Err(crate::Error::from(Error::NotLiveQuery(idx))),
+				};
+				response.live_queries.insert(idx, res);
 			}
-			response.client = Surreal {
-				router: self.client.router.clone(),
-				waiter: self.client.waiter.clone(),
-				engine: PhantomData,
-			};
+
+			response.client =
+				Surreal::new_from_router_waiter(client.router.clone(), client.waiter.clone());
 			Ok(response)
 		})
 	}
@@ -157,9 +212,12 @@ where
 	C: Connection,
 {
 	/// Chains a query onto an existing query
-	pub fn query(mut self, query: impl opt::IntoQuery) -> Self {
-		self.query.push(query.into_query());
-		self
+	pub fn query(self, query: impl opt::IntoQuery) -> Self {
+		self.map_valid(move |mut valid| {
+			let new_query = query.into_query()?;
+			valid.query.extend(new_query);
+			Ok(valid)
+		})
 	}
 
 	/// Return query statistics along with its results
@@ -208,30 +266,25 @@ where
 	/// # Ok(())
 	/// # }
 	/// ```
-	pub fn bind(mut self, bindings: impl Serialize) -> Self {
-		if let Ok(current) = &mut self.bindings {
-			match to_value(bindings) {
-				Ok(mut bindings) => {
-					if let Value::Array(Array(array)) = &mut bindings {
-						if let [Value::Strand(Strand(key)), value] = &mut array[..] {
-							let mut map = BTreeMap::new();
-							map.insert(mem::take(key), mem::take(value));
-							bindings = map.into();
-						}
-					}
-					match &mut bindings {
-						Value::Object(Object(map)) => current.append(map),
-						_ => {
-							self.bindings = Err(Error::InvalidBindings(bindings).into());
-						}
-					}
-				}
-				Err(error) => {
-					self.bindings = Err(error.into());
+	pub fn bind(self, bindings: impl Serialize) -> Self {
+		self.map_valid(move |mut valid| {
+			let mut bindings = to_value(bindings)?;
+			if let Value::Array(array) = &mut bindings {
+				if let [Value::Strand(key), value] = &mut array.0[..] {
+					let mut map = BTreeMap::new();
+					map.insert(mem::take(&mut key.0), mem::take(value));
+					bindings = map.into();
 				}
 			}
-		}
-		self
+			match &mut bindings {
+				Value::Object(map) => valid.bindings.append(&mut map.0),
+				_ => {
+					return Err(Error::InvalidBindings(bindings).into());
+				}
+			}
+
+			Ok(valid)
+		})
 	}
 }
 

@@ -1,13 +1,13 @@
 use crate::err::Error;
 use crate::idx::trees::bkeys::BKeys;
-use crate::idx::trees::store::{NodeId, StoredNode, TreeNode, TreeStore};
+use crate::idx::trees::store::{NodeId, StoreGeneration, StoredNode, TreeNode, TreeStore};
 use crate::idx::VersionedSerdeState;
 use crate::kvs::{Key, Transaction, Val};
 use crate::sql::{Object, Value};
+#[cfg(debug_assertions)]
+use hashbrown::HashSet;
 use revision::{revisioned, Revisioned};
 use serde::{Deserialize, Serialize};
-#[cfg(debug_assertions)]
-use std::collections::HashSet;
 use std::collections::VecDeque;
 use std::fmt::{Debug, Display, Formatter};
 use std::io::Cursor;
@@ -18,6 +18,7 @@ pub type Payload = u64;
 type BStoredNode<BK> = StoredNode<BTreeNode<BK>>;
 pub(in crate::idx) type BTreeStore<BK> = TreeStore<BTreeNode<BK>>;
 
+#[non_exhaustive]
 pub struct BTree<BK>
 where
 	BK: BKeys,
@@ -27,14 +28,15 @@ where
 	bk: PhantomData<BK>,
 }
 
-#[derive(Clone, Serialize, Deserialize)]
 #[revisioned(revision = 2)]
+#[derive(Clone, Serialize, Deserialize)]
+#[non_exhaustive]
 pub struct BState {
 	minimum_degree: u32,
 	root: Option<NodeId>,
 	next_node_id: NodeId,
 	#[revision(start = 2)]
-	generation: u64,
+	generation: StoreGeneration,
 }
 
 impl VersionedSerdeState for BState {
@@ -55,16 +57,16 @@ impl VersionedSerdeState for BState {
 	}
 }
 
-#[derive(Clone, Serialize, Deserialize)]
 #[revisioned(revision = 1)]
+#[derive(Clone, Serialize, Deserialize)]
 pub(in crate::idx) struct BState1 {
 	minimum_degree: u32,
 	root: Option<NodeId>,
 	next_node_id: NodeId,
 }
 
-#[derive(Clone, Serialize, Deserialize)]
 #[revisioned(revision = 1)]
+#[derive(Clone, Serialize, Deserialize)]
 pub(in crate::idx) struct BState1skip {
 	minimum_degree: u32,
 	root: Option<NodeId>,
@@ -143,6 +145,7 @@ impl From<BStatistics> for Value {
 }
 
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub enum BTreeNode<BK>
 where
 	BK: BKeys + Clone,
@@ -155,6 +158,10 @@ impl<BK> TreeNode for BTreeNode<BK>
 where
 	BK: BKeys + Clone,
 {
+	fn prepare_save(&mut self) {
+		self.keys_mut().compile();
+	}
+
 	fn try_from_val(val: Val) -> Result<Self, Error> {
 		let mut c: Cursor<Vec<u8>> = Cursor::new(val);
 		let node_type: u8 = bincode::deserialize_from(&mut c)?;
@@ -169,8 +176,7 @@ where
 		}
 	}
 
-	fn try_into_val(&mut self) -> Result<Val, Error> {
-		self.keys_mut().compile();
+	fn try_into_val(&self) -> Result<Val, Error> {
 		let mut c: Cursor<Vec<u8>> = Cursor::new(Vec::new());
 		match self {
 			BTreeNode::Internal(keys, child) => {
@@ -1014,7 +1020,7 @@ mod tests {
 	#[test]
 	fn test_node_serde_internal() {
 		let mut node = BTreeNode::Internal(FstKeys::default(), vec![]);
-		node.keys_mut().compile();
+		node.prepare_save();
 		let val = node.try_into_val().unwrap();
 		let _: BTreeNode<FstKeys> = BTreeNode::try_from_val(val).unwrap();
 	}
@@ -1022,6 +1028,7 @@ mod tests {
 	#[test]
 	fn test_node_serde_leaf() {
 		let mut node = BTreeNode::Leaf(TrieKeys::default());
+		node.prepare_save();
 		let val = node.try_into_val().unwrap();
 		let _: BTreeNode<TrieKeys> = BTreeNode::try_from_val(val).unwrap();
 	}
@@ -1504,7 +1511,7 @@ mod tests {
 	where
 		BK: BKeys + Clone + Debug,
 	{
-		if st.finish(&mut tx).await? {
+		if st.finish(&mut tx).await?.is_some() {
 			t.state.generation += 1;
 		}
 		gen += 1;

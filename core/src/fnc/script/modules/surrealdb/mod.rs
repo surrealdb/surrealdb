@@ -3,27 +3,32 @@ use js::class::OwnedBorrow;
 use js::prelude::Coerced;
 use js::Exception;
 use js::{module::ModuleDef, Class, Ctx, Function, Module, Result, String as JsString, Value};
+use reblessive::tree::Stk;
 
 use self::query::{QueryContext, QUERY_DATA_PROP_NAME};
 
 mod functions;
 pub mod query;
 
+#[non_exhaustive]
 pub struct Package;
 
 #[js::function]
 async fn value(ctx: Ctx<'_>, value: Coerced<String>) -> Result<SurValue> {
 	let value = parse_value(&value.0).map_err(|e| Exception::throw_type(&ctx, &e.to_string()))?;
 	let this = ctx.globals().get::<_, OwnedBorrow<QueryContext>>(QUERY_DATA_PROP_NAME)?;
-	let value = value
-		.compute(this.context, this.opt, this.txn, this.doc)
-		.await
-		.map_err(|e| Exception::throw_message(&ctx, &e.to_string()))?;
+	let value = Stk::enter_run(|stk| async {
+		value
+			.compute(stk, this.context, this.opt, this.doc)
+			.await
+			.map_err(|e| Exception::throw_message(&ctx, &e.to_string()))
+	})
+	.await?;
 	Ok(value)
 }
 
 impl ModuleDef for Package {
-	fn declare(decls: &mut js::module::Declarations) -> js::Result<()> {
+	fn declare(decls: &js::module::Declarations) -> js::Result<()> {
 		decls.declare("default")?;
 		decls.declare("functions")?;
 		decls.declare("version")?;
@@ -33,7 +38,7 @@ impl ModuleDef for Package {
 		Ok(())
 	}
 
-	fn evaluate<'js>(ctx: &js::Ctx<'js>, exports: &mut js::module::Exports<'js>) -> js::Result<()> {
+	fn evaluate<'js>(ctx: &js::Ctx<'js>, exports: &js::module::Exports<'js>) -> js::Result<()> {
 		let default = js::Object::new(ctx.clone())?;
 		let package = pkg::<functions::Package>(ctx, "functions")?;
 		exports.export("functions", package.clone())?;
@@ -64,5 +69,7 @@ fn pkg<'js, D>(ctx: &Ctx<'js>, name: &str) -> Result<Value<'js>>
 where
 	D: ModuleDef,
 {
-	Module::evaluate_def::<D, _>(ctx.clone(), name)?.get::<_, js::Value>("default")
+	let (m, promise) = Module::evaluate_def::<D, _>(ctx.clone(), name)?;
+	promise.finish()?;
+	m.get::<_, js::Value>("default")
 }

@@ -22,7 +22,7 @@ where
 
 	fn into_future(self) -> Self::IntoFuture {
 		Box::pin(async move {
-			self.client.query(CancelStatement).await?;
+			self.client.query(CancelStatement::default()).await?;
 			Ok(self.client)
 		})
 	}

@@ -18,14 +18,14 @@ dependencies = ["cargo-upgrade", "cargo-update"]
 category = "LOCAL USAGE"
 command = "cargo"
 env = { RUSTDOCFLAGS = "--cfg surrealdb_unstable" }
-args = ["doc", "--open", "--no-deps", "--package", "surrealdb", "--features", "rustls,native-tls,protocol-ws,protocol-http,kv-mem,kv-speedb,kv-rocksdb,kv-tikv,http,scripting,jwks,sql2"]
+args = ["doc", "--open", "--no-deps", "--package", "surrealdb", "--features", "rustls,native-tls,protocol-ws,protocol-http,kv-mem,kv-rocksdb,kv-tikv,http,scripting,jwks"]
 
 # Test
 [tasks.test]
 category = "LOCAL USAGE"
 command = "cargo"
 env = { RUSTFLAGS = "--cfg surrealdb_unstable", RUSTDOCFLAGS = "--cfg surrealdb_unstable", RUST_MIN_STACK={ value = "4194304", condition = { env_not_set = ["RUST_MIN_STACK"] } } }
-args = ["test", "--workspace", "--no-fail-fast", "--features", "sql2"]
+args = ["test", "--workspace", "--no-fail-fast"]
 
 # Check
 [tasks.cargo-check]
@@ -72,7 +72,7 @@ args = ["clean"]
 category = "LOCAL USAGE"
 command = "cargo"
 env = { RUSTFLAGS = "--cfg surrealdb_unstable" }
-args = ["bench", "--package", "surrealdb", "--no-default-features", "--features", "kv-mem,http,scripting,jwks,sql2", "--", "${@}"]
+args = ["bench", "--package", "surrealdb", "--no-default-features", "--features", "kv-mem,http,scripting,jwks", "--", "${@}"]
 
 # Run
 [tasks.run]

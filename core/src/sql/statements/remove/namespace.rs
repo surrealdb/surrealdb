@@ -1,5 +1,5 @@
 use crate::ctx::Context;
-use crate::dbs::{Options, Transaction};
+use crate::dbs::Options;
 use crate::err::Error;
 use crate::iam::{Action, ResourceKind};
 use crate::sql::{Base, Ident, Value};
@@ -8,9 +8,10 @@ use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Formatter};
 
+#[revisioned(revision = 2)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[revisioned(revision = 2)]
+#[non_exhaustive]
 pub struct RemoveNamespaceStatement {
 	pub name: Ident,
 	#[revision(start = 2)]
@@ -19,18 +20,14 @@ pub struct RemoveNamespaceStatement {
 
 impl RemoveNamespaceStatement {
 	/// Process this type returning a computed simple Value
-	pub(crate) async fn compute(
-		&self,
-		ctx: &Context<'_>,
-		opt: &Options,
-		txn: &Transaction,
-	) -> Result<Value, Error> {
+	pub(crate) async fn compute(&self, ctx: &Context<'_>, opt: &Options) -> Result<Value, Error> {
 		let future = async {
 			// Allowed to run?
 			opt.is_allowed(Action::Edit, ResourceKind::Namespace, &Base::Root)?;
 			// Claim transaction
-			let mut run = txn.lock().await;
-			ctx.get_index_stores().namespace_removed(opt, &mut run).await?;
+			let mut run = ctx.tx_lock().await;
+			// Delete index stores instance
+			ctx.get_index_stores().namespace_removed(&mut run, &self.name).await?;
 			// Clear the cache
 			run.clear_cache();
 			// Get the definition

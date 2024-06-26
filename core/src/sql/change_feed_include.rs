@@ -2,10 +2,11 @@ use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
+#[revisioned(revision = 1)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[revisioned(revision = 1)]
 /// ChangeFeedInclude statements are an appendix
+#[non_exhaustive]
 pub enum ChangeFeedInclude {
 	Original,
 }

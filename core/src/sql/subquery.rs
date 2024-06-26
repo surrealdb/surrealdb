@@ -1,12 +1,15 @@
 use crate::ctx::Context;
-use crate::dbs::{Options, Transaction};
+use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
+use crate::sql::statements::rebuild::RebuildStatement;
 use crate::sql::statements::{
 	CreateStatement, DefineStatement, DeleteStatement, IfelseStatement, InsertStatement,
 	OutputStatement, RelateStatement, RemoveStatement, SelectStatement, UpdateStatement,
+	UpsertStatement,
 };
 use crate::sql::value::Value;
+use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
@@ -14,10 +17,11 @@ use std::fmt::{self, Display, Formatter};
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Subquery";
 
+#[revisioned(revision = 3)]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
 #[serde(rename = "$surrealdb::private::sql::Subquery")]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[revisioned(revision = 1)]
+#[non_exhaustive]
 pub enum Subquery {
 	Value(Value),
 	Ifelse(IfelseStatement),
@@ -30,7 +34,10 @@ pub enum Subquery {
 	Insert(InsertStatement),
 	Define(DefineStatement),
 	Remove(RemoveStatement),
-	// Add new variants here
+	#[revision(start = 2)]
+	Rebuild(RebuildStatement),
+	#[revision(start = 3)]
+	Upsert(UpsertStatement),
 }
 
 impl PartialOrd for Subquery {
@@ -49,20 +56,22 @@ impl Subquery {
 			Self::Output(v) => v.writeable(),
 			Self::Select(v) => v.writeable(),
 			Self::Create(v) => v.writeable(),
+			Self::Upsert(v) => v.writeable(),
 			Self::Update(v) => v.writeable(),
 			Self::Delete(v) => v.writeable(),
 			Self::Relate(v) => v.writeable(),
 			Self::Insert(v) => v.writeable(),
 			Self::Define(v) => v.writeable(),
 			Self::Remove(v) => v.writeable(),
+			Self::Rebuild(v) => v.writeable(),
 		}
 	}
 	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
+		stk: &mut Stk,
 		ctx: &Context<'_>,
 		opt: &Options,
-		txn: &Transaction,
 		doc: Option<&CursorDoc<'_>>,
 	) -> Result<Value, Error> {
 		// Duplicate context
@@ -73,17 +82,19 @@ impl Subquery {
 		}
 		// Process the subquery
 		match self {
-			Self::Value(ref v) => v.compute(&ctx, opt, txn, doc).await,
-			Self::Ifelse(ref v) => v.compute(&ctx, opt, txn, doc).await,
-			Self::Output(ref v) => v.compute(&ctx, opt, txn, doc).await,
-			Self::Define(ref v) => v.compute(&ctx, opt, txn, doc).await,
-			Self::Remove(ref v) => v.compute(&ctx, opt, txn, doc).await,
-			Self::Select(ref v) => v.compute(&ctx, opt, txn, doc).await,
-			Self::Create(ref v) => v.compute(&ctx, opt, txn, doc).await,
-			Self::Update(ref v) => v.compute(&ctx, opt, txn, doc).await,
-			Self::Delete(ref v) => v.compute(&ctx, opt, txn, doc).await,
-			Self::Relate(ref v) => v.compute(&ctx, opt, txn, doc).await,
-			Self::Insert(ref v) => v.compute(&ctx, opt, txn, doc).await,
+			Self::Value(ref v) => v.compute(stk, &ctx, opt, doc).await,
+			Self::Ifelse(ref v) => v.compute(stk, &ctx, opt, doc).await,
+			Self::Output(ref v) => v.compute(stk, &ctx, opt, doc).await,
+			Self::Define(ref v) => v.compute(stk, &ctx, opt, doc).await,
+			Self::Rebuild(ref v) => v.compute(stk, &ctx, opt, doc).await,
+			Self::Remove(ref v) => v.compute(&ctx, opt, doc).await,
+			Self::Select(ref v) => v.compute(stk, &ctx, opt, doc).await,
+			Self::Create(ref v) => v.compute(stk, &ctx, opt, doc).await,
+			Self::Upsert(ref v) => v.compute(stk, &ctx, opt, doc).await,
+			Self::Update(ref v) => v.compute(stk, &ctx, opt, doc).await,
+			Self::Delete(ref v) => v.compute(stk, &ctx, opt, doc).await,
+			Self::Relate(ref v) => v.compute(stk, &ctx, opt, doc).await,
+			Self::Insert(ref v) => v.compute(stk, &ctx, opt, doc).await,
 		}
 	}
 }
@@ -95,12 +106,14 @@ impl Display for Subquery {
 			Self::Output(v) => write!(f, "({v})"),
 			Self::Select(v) => write!(f, "({v})"),
 			Self::Create(v) => write!(f, "({v})"),
+			Self::Upsert(v) => write!(f, "({v})"),
 			Self::Update(v) => write!(f, "({v})"),
 			Self::Delete(v) => write!(f, "({v})"),
 			Self::Relate(v) => write!(f, "({v})"),
 			Self::Insert(v) => write!(f, "({v})"),
 			Self::Define(v) => write!(f, "({v})"),
 			Self::Remove(v) => write!(f, "({v})"),
+			Self::Rebuild(v) => write!(f, "({v})"),
 			Self::Ifelse(v) => Display::fmt(v, f),
 		}
 	}

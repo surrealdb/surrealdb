@@ -107,6 +107,35 @@ jobs:
           echo "## :warning: Dependency check failed" >> $GITHUB_STEP_SUMMARY
           echo "See instructions in the [supply chain security process](https://github.com/surrealdb/surrealdb/blob/main/supply-chain/README.md#Process)." >> $GITHUB_STEP_SUMMARY
 
+  check-fuzzing:
+    name: Check fuzzing
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+          components: rustfmt
+
+      - name: Checkout sources
+        uses: actions/checkout@v4
+
+      - name: Setup cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Check fuzzers
+        run: cargo build --manifest-path lib/fuzz/Cargo.toml
+
+      - name: Check OSS-Fuzz
+        uses: google/oss-fuzz/infra/cifuzz/actions/build_fuzzers@master
+        with:
+          oss-fuzz-project-name: surrealdb
+          language: rust
+        # Temporarily allow this step to fail
+        continue-on-error: true
+
   check-wasm:
     name: Check Wasm
     runs-on: ubuntu-latest
@@ -315,9 +344,9 @@ jobs:
           path: target/llvm-cov/html/
           retention-days: 5
 
-  test-parser:
-    name: Test workspace with experimental parser
-    runs-on: ["self-hosted", "arm64", "builder"]
+  test-sdk-build:
+    name: Test SDK build
+    runs-on: ubuntu-latest
     steps:
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -336,24 +365,13 @@ jobs:
         run: |
           sudo apt-get -y update
 
-      - name: Free up some disk space
-        run: |
-          (set -x; df -h)
-          # Free up some disk space by removing unused files
-          (set -x; sudo rm -rf /imagegeneration || true)
-          (set -x; sudo rm -rf /opt/az || true)
-          (set -x; sudo rm -rf /opt/hostedtoolcache || true)
-          (set -x; sudo rm -rf /opt/google || true)
-          (set -x; sudo rm -rf /opt/pipx || true)
-          (set -x; df -h)
+      - name: Build local
+        working-directory: tests/sdk/local
+        run: cargo build
 
-      - name: Install cargo-make
-        run: cargo install --debug --locked cargo-make
-
-      - name: Test workspace for experimental_parser
-        env:
-          RUSTFLAGS: "--cfg surrealdb_unstable"
-        run: cargo make test-experimental-parser
+      - name: Build remote
+        working-directory: tests/sdk/remote
+        run: cargo build
 
   ws-engine:
     name: WebSocket engine
@@ -532,29 +550,6 @@ jobs:
       - name: Test rocksdb engine
         run: cargo make ci-api-integration-rocksdb
 
-  speedb-engine:
-    name: SpeeDB engine
-    runs-on: ubuntu-latest
-    steps:
-      - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          toolchain: stable
-
-      - name: Checkout sources
-        uses: actions/checkout@v4
-
-      - name: Setup cache
-        uses: Swatinem/rust-cache@v2
-        with:
-          save-if: ${{ github.ref == 'refs/heads/main' }}
-
-      - name: Install cargo-make
-        run: cargo install --debug --locked cargo-make
-
-      - name: Test speedb engine
-        run: cargo make ci-api-integration-speedb
-
   tikv-engine:
     name: TiKV engine
     runs-on: ubuntu-latest
@@ -616,7 +611,7 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Setup FoundationDB
-        uses: foundationdb-rs/foundationdb-actions-install@v2.1.0
+        uses: foundationdb-rs/foundationdb-actions-install@v.2.2.0
         with:
           version: "7.1.30"
 
@@ -671,7 +666,6 @@ jobs:
     name: Database Upgrade from previous versions
     runs-on: ubuntu-latest
     steps:
-
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
@@ -689,5 +683,6 @@ jobs:
         run: cargo install --debug --locked cargo-make
 
       - name: Test upgrade
+        # Allow breaking changes until v2 stabilises
+        continue-on-error: true
         run: cargo make ci-database-upgrade
-

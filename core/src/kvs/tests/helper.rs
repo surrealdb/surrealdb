@@ -2,6 +2,7 @@ use crate::dbs::node::Timestamp;
 use crate::err::Error;
 use crate::kvs::clock::{FakeClock, SizedClock};
 
+#[non_exhaustive]
 pub struct TestContext {
 	pub(crate) db: Datastore,
 	pub(crate) kvs: Kvs,

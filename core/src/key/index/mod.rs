@@ -87,6 +87,7 @@ impl<'a> PrefixIds<'a> {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Key)]
+#[non_exhaustive]
 pub struct Index<'a> {
 	__: u8,
 	_a: u8,

@@ -106,14 +106,18 @@ async fn expired_nodes_get_live_queries_archived() {
 		.with_id(old_node);
 	let opt = Options::new_with_sender(&opt, sender);
 	let tx = Arc::new(Mutex::new(test.db.transaction(Write, Optimistic).await.unwrap()));
-	let res = lq.compute(&ctx, &opt, &tx, None).await.unwrap();
+	let ctx = ctx.set_transaction(tx);
+	let res = {
+		let mut stack = reblessive::tree::TreeStack::new();
+		stack.enter(|stk| lq.compute(stk, &ctx, &opt, None)).finish().await.unwrap()
+	};
 	match res {
 		Value::Uuid(_) => {}
 		_ => {
 			panic!("Not a uuid: {:?}", res);
 		}
 	}
-	tx.lock().await.commit().await.unwrap();
+	ctx.tx_lock().await.commit().await.unwrap();
 
 	// Set up second node at a later timestamp
 	let new_node = Uuid::parse_str("04da7d4c-0086-4358-8318-49f0bb168fa7").unwrap();
@@ -138,6 +142,7 @@ async fn expired_nodes_get_live_queries_archived() {
 #[serial]
 async fn single_live_queries_are_garbage_collected() {
 	// Test parameters
+	let mut stack = reblessive::tree::TreeStack::new();
 	let ctx = context::Context::background();
 	let node_id = Uuid::parse_str("b1a08614-a826-4581-938d-bea17f00e253").unwrap();
 	let time = Timestamp {
@@ -166,6 +171,7 @@ async fn single_live_queries_are_garbage_collected() {
 	// We set up 2 live queries, one of which we want to garbage collect
 	trace!("Setting up live queries");
 	let tx = Arc::new(Mutex::new(test.db.transaction(Write, Optimistic).await.unwrap()));
+	let ctx = ctx.set_transaction(tx);
 	let live_query_to_delete = Uuid::parse_str("8aed07c4-9683-480e-b1e4-f0db8b331530").unwrap();
 	let live_st = LiveStatement {
 		id: sql::Uuid(live_query_to_delete),
@@ -178,8 +184,9 @@ async fn single_live_queries_are_garbage_collected() {
 		session: Some(Value::None),
 		auth: Some(Auth::for_root(Role::Owner)),
 	};
-	live_st
-		.compute(&ctx, &options, &tx, None)
+	stack
+		.enter(|stk| live_st.compute(stk, &ctx, &options, None))
+		.finish()
 		.await
 		.map_err(|e| format!("Error computing live statement: {:?} {:?}", live_st, e))
 		.unwrap();
@@ -195,12 +202,13 @@ async fn single_live_queries_are_garbage_collected() {
 		session: Some(Value::None),
 		auth: Some(Auth::for_root(Role::Owner)),
 	};
-	live_st
-		.compute(&ctx, &options, &tx, None)
+	stack
+		.enter(|stk| live_st.compute(stk, &ctx, &options, None))
+		.finish()
 		.await
 		.map_err(|e| format!("Error computing live statement: {:?} {:?}", live_st, e))
 		.unwrap();
-	tx.lock().await.commit().await.unwrap();
+	ctx.tx_lock().await.commit().await.unwrap();
 
 	// Subject: Perform the action we are testing
 	trace!("Garbage collecting dead sessions");
@@ -222,6 +230,7 @@ async fn single_live_queries_are_garbage_collected() {
 #[serial]
 async fn bootstrap_does_not_error_on_missing_live_queries() {
 	// Test parameters
+	let mut stack = reblessive::tree::TreeStack::new();
 	let ctx = context::Context::background();
 	let old_node_id = Uuid::parse_str("5f644f02-7c1a-4f8b-babd-bd9e92c1836a").unwrap();
 	let t1 = Timestamp {
@@ -253,6 +262,7 @@ async fn bootstrap_does_not_error_on_missing_live_queries() {
 	// We set up 2 live queries, one of which we want to garbage collect
 	trace!("Setting up live queries");
 	let tx = Arc::new(Mutex::new(test.db.transaction(Write, Optimistic).await.unwrap()));
+	let ctx = ctx.set_transaction(tx);
 	let live_query_to_corrupt = Uuid::parse_str("d4cee7ce-5c78-4a30-9fa9-2444d58029f6").unwrap();
 	let live_st = LiveStatement {
 		id: sql::Uuid(live_query_to_corrupt),
@@ -265,16 +275,17 @@ async fn bootstrap_does_not_error_on_missing_live_queries() {
 		session: Some(Value::None),
 		auth: Some(Auth::for_root(Role::Owner)),
 	};
-	live_st
-		.compute(&ctx, &options, &tx, None)
+	stack
+		.enter(|stk| live_st.compute(stk, &ctx, &options, None))
+		.finish()
 		.await
 		.map_err(|e| format!("Error computing live statement: {:?} {:?}", live_st, e))
 		.unwrap();
 
 	// Now we corrupt the live query entry by leaving the node entry in but removing the table entry
 	let key = crate::key::table::lq::new(namespace, database, table, live_query_to_corrupt);
-	tx.lock().await.del(key).await.unwrap();
-	tx.lock().await.commit().await.unwrap();
+	ctx.tx_lock().await.del(key).await.unwrap();
+	ctx.tx_lock().await.commit().await.unwrap();
 
 	// Subject: Perform the action we are testing
 	trace!("Bootstrapping");

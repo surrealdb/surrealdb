@@ -9,15 +9,16 @@ use super::Level;
 use cedar_policy::{Entity, EntityId, EntityTypeName, EntityUid, RestrictedExpression};
 use serde::{Deserialize, Serialize};
 
+#[revisioned(revision = 1)]
 #[derive(Clone, Default, Debug, Eq, PartialEq, PartialOrd, Hash, Serialize, Deserialize)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[revisioned(revision = 1)]
+#[non_exhaustive]
 pub enum ResourceKind {
 	#[default]
 	Any,
 	Namespace,
 	Database,
-	Scope,
+	Record,
 	Table,
 	Document,
 	Option,
@@ -39,7 +40,7 @@ impl std::fmt::Display for ResourceKind {
 			ResourceKind::Any => write!(f, "Any"),
 			ResourceKind::Namespace => write!(f, "Namespace"),
 			ResourceKind::Database => write!(f, "Database"),
-			ResourceKind::Scope => write!(f, "Scope"),
+			ResourceKind::Record => write!(f, "Record"),
 			ResourceKind::Table => write!(f, "Table"),
 			ResourceKind::Document => write!(f, "Document"),
 			ResourceKind::Option => write!(f, "Option"),
@@ -73,14 +74,15 @@ impl ResourceKind {
 		self.on_level((ns, db).into())
 	}
 
-	pub fn on_scope(self, ns: &str, db: &str, scope: &str) -> Resource {
-		self.on_level((ns, db, scope).into())
+	pub fn on_record(self, ns: &str, db: &str, rid: &str) -> Resource {
+		self.on_level((ns, db, rid).into())
 	}
 }
 
+#[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Hash, Serialize, Deserialize)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[revisioned(revision = 1)]
+#[non_exhaustive]
 pub struct Resource(String, ResourceKind, Level);
 
 impl std::fmt::Display for Resource {

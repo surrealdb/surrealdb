@@ -1,9 +1,12 @@
 use crate::ctx::Context;
-use crate::dbs::{Options, Transaction};
+use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::iam::{Action, ResourceKind};
-use crate::sql::{escape::quote_str, fmt::Fmt, Base, Ident, Strand, Value};
+use crate::sql::statements::info::InfoStructure;
+use crate::sql::{
+	escape::quote_str, fmt::Fmt, user::UserDuration, Base, Duration, Ident, Strand, Value,
+};
 use argon2::{
 	password_hash::{PasswordHasher, SaltString},
 	Argon2,
@@ -14,22 +17,25 @@ use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display};
 
+#[revisioned(revision = 3)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[revisioned(revision = 2)]
+#[non_exhaustive]
 pub struct DefineUserStatement {
 	pub name: Ident,
 	pub base: Base,
 	pub hash: String,
 	pub code: String,
 	pub roles: Vec<Ident>,
+	#[revision(start = 3)]
+	pub duration: UserDuration,
 	pub comment: Option<Strand>,
 	#[revision(start = 2)]
 	pub if_not_exists: bool,
 }
 
-impl From<(Base, &str, &str)> for DefineUserStatement {
-	fn from((base, user, pass): (Base, &str, &str)) -> Self {
+impl From<(Base, &str, &str, &str)> for DefineUserStatement {
+	fn from((base, user, pass, role): (Base, &str, &str, &str)) -> Self {
 		DefineUserStatement {
 			base,
 			name: user.into(),
@@ -42,7 +48,8 @@ impl From<(Base, &str, &str)> for DefineUserStatement {
 				.take(128)
 				.map(char::from)
 				.collect::<String>(),
-			roles: vec!["owner".into()],
+			roles: vec![role.into()],
+			duration: UserDuration::default(),
 			comment: None,
 			if_not_exists: false,
 		}
@@ -50,11 +57,17 @@ impl From<(Base, &str, &str)> for DefineUserStatement {
 }
 
 impl DefineUserStatement {
-	pub(crate) fn from_parsed_values(name: Ident, base: Base, roles: Vec<Ident>) -> Self {
+	pub(crate) fn from_parsed_values(
+		name: Ident,
+		base: Base,
+		roles: Vec<Ident>,
+		duration: UserDuration,
+	) -> Self {
 		DefineUserStatement {
 			name,
 			base,
-			roles, // New users get the viewer role by default
+			roles,
+			duration,
 			code: rand::thread_rng()
 				.sample_iter(&Alphanumeric)
 				.take(128)
@@ -75,12 +88,19 @@ impl DefineUserStatement {
 		self.hash = passhash;
 	}
 
+	pub(crate) fn set_token_duration(&mut self, duration: Option<Duration>) {
+		self.duration.token = duration;
+	}
+
+	pub(crate) fn set_session_duration(&mut self, duration: Option<Duration>) {
+		self.duration.session = duration;
+	}
+
 	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
-		_ctx: &Context<'_>,
+		ctx: &Context<'_>,
 		opt: &Options,
-		txn: &Transaction,
 		_doc: Option<&CursorDoc<'_>>,
 	) -> Result<Value, Error> {
 		// Allowed to run?
@@ -89,14 +109,18 @@ impl DefineUserStatement {
 		match self.base {
 			Base::Root => {
 				// Claim transaction
-				let mut run = txn.lock().await;
+				let mut run = ctx.tx_lock().await;
 				// Clear the cache
 				run.clear_cache();
 				// Check if user already exists
-				if self.if_not_exists && run.get_root_user(&self.name).await.is_ok() {
-					return Err(Error::UserRootAlreadyExists {
-						value: self.name.to_string(),
-					});
+				if run.get_root_user(&self.name).await.is_ok() {
+					if self.if_not_exists {
+						return Ok(Value::None);
+					} else {
+						return Err(Error::UserRootAlreadyExists {
+							value: self.name.to_string(),
+						});
+					}
 				}
 				// Process the statement
 				let key = crate::key::root::us::new(&self.name);
@@ -114,19 +138,23 @@ impl DefineUserStatement {
 			}
 			Base::Ns => {
 				// Claim transaction
-				let mut run = txn.lock().await;
+				let mut run = ctx.tx_lock().await;
 				// Clear the cache
 				run.clear_cache();
 				// Check if user already exists
-				if self.if_not_exists && run.get_ns_user(opt.ns(), &self.name).await.is_ok() {
-					return Err(Error::UserNsAlreadyExists {
-						value: self.name.to_string(),
-						ns: opt.ns().into(),
-					});
+				if run.get_ns_user(opt.ns()?, &self.name).await.is_ok() {
+					if self.if_not_exists {
+						return Ok(Value::None);
+					} else {
+						return Err(Error::UserNsAlreadyExists {
+							value: self.name.to_string(),
+							ns: opt.ns()?.into(),
+						});
+					}
 				}
 				// Process the statement
-				let key = crate::key::namespace::us::new(opt.ns(), &self.name);
-				run.add_ns(opt.ns(), opt.strict).await?;
+				let key = crate::key::namespace::us::new(opt.ns()?, &self.name);
+				run.add_ns(opt.ns()?, opt.strict).await?;
 				run.set(
 					key,
 					DefineUserStatement {
@@ -141,23 +169,25 @@ impl DefineUserStatement {
 			}
 			Base::Db => {
 				// Claim transaction
-				let mut run = txn.lock().await;
+				let mut run = ctx.tx_lock().await;
 				// Clear the cache
 				run.clear_cache();
 				// Check if user already exists
-				if self.if_not_exists
-					&& run.get_db_user(opt.ns(), opt.db(), &self.name).await.is_ok()
-				{
-					return Err(Error::UserDbAlreadyExists {
-						value: self.name.to_string(),
-						ns: opt.ns().into(),
-						db: opt.db().into(),
-					});
+				if run.get_db_user(opt.ns()?, opt.db()?, &self.name).await.is_ok() {
+					if self.if_not_exists {
+						return Ok(Value::None);
+					} else {
+						return Err(Error::UserDbAlreadyExists {
+							value: self.name.to_string(),
+							ns: opt.ns()?.into(),
+							db: opt.db()?.into(),
+						});
+					}
 				}
 				// Process the statement
-				let key = crate::key::database::us::new(opt.ns(), opt.db(), &self.name);
-				run.add_ns(opt.ns(), opt.strict).await?;
-				run.add_db(opt.ns(), opt.db(), opt.strict).await?;
+				let key = crate::key::database::us::new(opt.ns()?, opt.db()?, &self.name);
+				run.add_ns(opt.ns()?, opt.strict).await?;
+				run.add_db(opt.ns()?, opt.db()?, opt.strict).await?;
 				run.set(
 					key,
 					DefineUserStatement {
@@ -190,11 +220,47 @@ impl Display for DefineUserStatement {
 			quote_str(&self.hash),
 			Fmt::comma_separated(
 				&self.roles.iter().map(|r| r.to_string().to_uppercase()).collect::<Vec<String>>()
-			)
+			),
+		)?;
+		// Always print relevant durations so defaults can be changed in the future
+		// If default values were not printed, exports would not be forward compatible
+		// None values need to be printed, as they are different from the default values
+		write!(f, " DURATION")?;
+		write!(
+			f,
+			" FOR TOKEN {},",
+			match self.duration.token {
+				Some(dur) => format!("{}", dur),
+				None => "NONE".to_string(),
+			}
+		)?;
+		write!(
+			f,
+			" FOR SESSION {}",
+			match self.duration.session {
+				Some(dur) => format!("{}", dur),
+				None => "NONE".to_string(),
+			}
 		)?;
 		if let Some(ref v) = self.comment {
 			write!(f, " COMMENT {v}")?
 		}
 		Ok(())
+	}
+}
+
+impl InfoStructure for DefineUserStatement {
+	fn structure(self) -> Value {
+		Value::from(map! {
+			"name".to_string() => self.name.structure(),
+			"base".to_string() => self.base.structure(),
+			"hash".to_string() => self.hash.into(),
+			"roles".to_string() => self.roles.into_iter().map(Ident::structure).collect(),
+			"duration".to_string() => Value::from(map! {
+				"token".to_string() => self.duration.token.into(),
+				"session".to_string() => self.duration.session.into(),
+			}),
+			"comment".to_string(), if let Some(v) = self.comment => v.into(),
+		})
 	}
 }

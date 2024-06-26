@@ -10,6 +10,7 @@ use std::cmp::Ordering;
 /// This struct is public because it is used in Live Query errors for v1.
 /// V1 is now deprecated and the struct can be made non-public
 #[derive(Debug, Clone, Eq, PartialEq)]
+#[non_exhaustive]
 pub struct LqValue {
 	pub nd: Uuid,
 	pub ns: String,
@@ -69,7 +70,7 @@ pub(crate) struct LqSelector {
 #[derive(Ord, PartialOrd, Eq, PartialEq, Clone, Debug)]
 pub(crate) struct LqIndexKey {
 	pub(crate) selector: LqSelector,
-	lq: Uuid,
+	pub(crate) lq: Uuid,
 }
 
 /// Internal only struct
@@ -78,6 +79,7 @@ pub(crate) struct LqIndexKey {
 pub(crate) struct LqIndexValue {
 	pub(crate) stm: LiveStatement,
 	pub(crate) vs: Versionstamp,
+	// TODO(phughk, pre-2.0): unused? added because we have access to timestamp checkpoints but they arent used and this can be deleted
 	pub(crate) ts: Timestamp,
 }
 
@@ -126,11 +128,11 @@ impl LqEntry {
 		}
 	}
 
-	pub(crate) fn as_value(&self) -> LqIndexValue {
+	pub(crate) fn as_value(&self, vs: Versionstamp, ts: Timestamp) -> LqIndexValue {
 		LqIndexValue {
 			stm: self.stm.clone(),
-			vs: Versionstamp::default(),
-			ts: Timestamp::default(),
+			vs,
+			ts,
 		}
 	}
 }

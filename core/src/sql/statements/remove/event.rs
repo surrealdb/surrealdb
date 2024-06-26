@@ -1,5 +1,5 @@
 use crate::ctx::Context;
-use crate::dbs::{Options, Transaction};
+use crate::dbs::Options;
 use crate::err::Error;
 use crate::iam::{Action, ResourceKind};
 use crate::sql::{Base, Ident, Value};
@@ -8,9 +8,10 @@ use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Formatter};
 
+#[revisioned(revision = 2)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[revisioned(revision = 2)]
+#[non_exhaustive]
 pub struct RemoveEventStatement {
 	pub name: Ident,
 	pub what: Ident,
@@ -20,26 +21,21 @@ pub struct RemoveEventStatement {
 
 impl RemoveEventStatement {
 	/// Process this type returning a computed simple Value
-	pub(crate) async fn compute(
-		&self,
-		_ctx: &Context<'_>,
-		opt: &Options,
-		txn: &Transaction,
-	) -> Result<Value, Error> {
+	pub(crate) async fn compute(&self, ctx: &Context<'_>, opt: &Options) -> Result<Value, Error> {
 		let future = async {
 			// Allowed to run?
 			opt.is_allowed(Action::Edit, ResourceKind::Event, &Base::Db)?;
 			// Claim transaction
-			let mut run = txn.lock().await;
+			let mut run = ctx.tx_lock().await;
 			// Clear the cache
 			run.clear_cache();
 			// Get the definition
-			let ev = run.get_tb_event(opt.ns(), opt.db(), &self.what, &self.name).await?;
+			let ev = run.get_tb_event(opt.ns()?, opt.db()?, &self.what, &self.name).await?;
 			// Delete the definition
-			let key = crate::key::table::ev::new(opt.ns(), opt.db(), &ev.what, &ev.name);
+			let key = crate::key::table::ev::new(opt.ns()?, opt.db()?, &ev.what, &ev.name);
 			run.del(key).await?;
 			// Clear the cache
-			let key = crate::key::table::ev::prefix(opt.ns(), opt.db(), &ev.what);
+			let key = crate::key::table::ev::prefix(opt.ns()?, opt.db()?, &ev.what);
 			run.clr(key).await?;
 			// Ok all good
 			Ok(Value::None)

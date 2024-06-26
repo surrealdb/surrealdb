@@ -1,11 +1,15 @@
+use std::ops::Bound;
+
 use crate::ctx::Context;
-use crate::dbs::{Options, Transaction};
+use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::sql::table::Table;
 use crate::sql::thing::Thing;
 use crate::sql::value::Value;
+use crate::sql::{Id, Range, Strand};
 use crate::syn;
+use reblessive::tree::Stk;
 
 pub fn bool((val,): (Value,)) -> Result<Value, Error> {
 	val.convert_to_bool().map(Value::from)
@@ -24,21 +28,16 @@ pub fn duration((val,): (Value,)) -> Result<Value, Error> {
 }
 
 pub async fn field(
-	(ctx, opt, txn, doc): (
-		&Context<'_>,
-		Option<&Options>,
-		Option<&Transaction>,
-		Option<&CursorDoc<'_>>,
-	),
+	(stk, ctx, opt, doc): (&mut Stk, &Context<'_>, Option<&Options>, Option<&CursorDoc<'_>>),
 	(val,): (String,),
 ) -> Result<Value, Error> {
-	match (opt, txn) {
-		(Some(opt), Some(txn)) => {
+	match opt {
+		Some(opt) => {
 			// Parse the string as an Idiom
 			let idi = syn::idiom(&val)?;
 			// Return the Idiom or fetch the field
 			match opt.projections {
-				true => Ok(idi.compute(ctx, opt, txn, doc).await?),
+				true => Ok(idi.compute(stk, ctx, opt, doc).await?),
 				false => Ok(idi.into()),
 			}
 		}
@@ -47,23 +46,18 @@ pub async fn field(
 }
 
 pub async fn fields(
-	(ctx, opt, txn, doc): (
-		&Context<'_>,
-		Option<&Options>,
-		Option<&Transaction>,
-		Option<&CursorDoc<'_>>,
-	),
+	(stk, ctx, opt, doc): (&mut Stk, &Context<'_>, Option<&Options>, Option<&CursorDoc<'_>>),
 	(val,): (Vec<String>,),
 ) -> Result<Value, Error> {
-	match (opt, txn) {
-		(Some(opt), Some(txn)) => {
+	match opt {
+		Some(opt) => {
 			let mut args: Vec<Value> = Vec::with_capacity(val.len());
 			for v in val {
 				// Parse the string as an Idiom
 				let idi = syn::idiom(&v)?;
 				// Return the Idiom or fetch the field
 				match opt.projections {
-					true => args.push(idi.compute(ctx, opt, txn, doc).await?),
+					true => args.push(idi.compute(stk, ctx, opt, doc).await?),
 					false => args.push(idi.into()),
 				}
 			}
@@ -101,8 +95,19 @@ pub fn table((val,): (Value,)) -> Result<Value, Error> {
 }
 
 pub fn thing((arg1, arg2): (Value, Option<Value>)) -> Result<Value, Error> {
-	Ok(if let Some(arg2) = arg2 {
-		Value::Thing(Thing {
+	match (arg1, arg2) {
+		// Empty table name
+		(Value::Strand(arg1), _) if arg1.is_empty() => Err(Error::TbInvalid {
+			value: arg1.as_string(),
+		}),
+
+		// Empty ID part
+		(_, Some(Value::Strand(arg2))) if arg2.is_empty() => Err(Error::IdInvalid {
+			value: arg2.as_string(),
+		}),
+
+		// Handle second argument
+		(arg1, Some(arg2)) => Ok(Value::Thing(Thing {
 			tb: arg1.as_string(),
 			id: match arg2 {
 				Value::Thing(v) => v.id,
@@ -111,9 +116,10 @@ pub fn thing((arg1, arg2): (Value, Option<Value>)) -> Result<Value, Error> {
 				Value::Number(v) => v.into(),
 				v => v.as_string().into(),
 			},
-		})
-	} else {
-		match arg1 {
+		})),
+
+		// No second argument passed
+		(arg1, _) => Ok(match arg1 {
 			Value::Thing(v) => Ok(v),
 			Value::Strand(v) => Thing::try_from(v.as_str()).map_err(move |_| Error::ConvertTo {
 				from: Value::Strand(v),
@@ -124,8 +130,95 @@ pub fn thing((arg1, arg2): (Value, Option<Value>)) -> Result<Value, Error> {
 				into: "record".into(),
 			}),
 		}?
-		.into()
-	})
+		.into()),
+	}
+}
+
+pub fn range(args: Vec<Value>) -> Result<Value, Error> {
+	if args.len() > 4 || args.is_empty() {
+		return Err(Error::InvalidArguments {
+			name: "type::range".to_owned(),
+			message: "Expected atleast 1 and at most 4 arguments".to_owned(),
+		});
+	}
+	let mut args = args.into_iter();
+
+	// Unwrap will never trigger since length is checked above.
+	let id = args.next().unwrap().as_string();
+	let start = args.next().and_then(|x| match x {
+		Value::Thing(v) => Some(v.id),
+		Value::Array(v) => Some(v.into()),
+		Value::Object(v) => Some(v.into()),
+		Value::Number(v) => Some(v.into()),
+		Value::Null | Value::None => None,
+		v => Some(Id::from(v.as_string())),
+	});
+	let end = args.next().and_then(|x| match x {
+		Value::Thing(v) => Some(v.id),
+		Value::Array(v) => Some(v.into()),
+		Value::Object(v) => Some(v.into()),
+		Value::Number(v) => Some(v.into()),
+		Value::Null | Value::None => None,
+		v => Some(Id::from(v.as_string())),
+	});
+	let (begin, end) = if let Some(x) = args.next() {
+		let Value::Object(x) = x else {
+			return Err(Error::ConvertTo {
+				from: x,
+				into: "object".to_owned(),
+			});
+		};
+		let begin = if let Some(x) = x.get("begin") {
+			let start = start.ok_or_else(|| Error::InvalidArguments {
+				name: "type::range".to_string(),
+				message: "Can't define an inclusion for begin if there is no begin bound"
+					.to_string(),
+			})?;
+			match x {
+				Value::Strand(Strand(x)) if x == "included" => Bound::Included(start),
+				Value::Strand(Strand(x)) if x == "excluded" => Bound::Excluded(start),
+				x => {
+					return Err(Error::ConvertTo {
+						from: x.clone(),
+						into: r#""included" | "excluded""#.to_owned(),
+					})
+				}
+			}
+		} else {
+			start.map(Bound::Included).unwrap_or(Bound::Unbounded)
+		};
+		let end = if let Some(x) = x.get("end") {
+			let end = end.ok_or_else(|| Error::InvalidArguments {
+				name: "type::range".to_string(),
+				message: "Can't define an inclusion for end if there is no end bound".to_string(),
+			})?;
+			match x {
+				Value::Strand(Strand(x)) if x == "included" => Bound::Included(end),
+				Value::Strand(Strand(x)) if x == "excluded" => Bound::Excluded(end),
+				x => {
+					return Err(Error::ConvertTo {
+						from: x.clone(),
+						into: r#""included" | "excluded""#.to_owned(),
+					})
+				}
+			}
+		} else {
+			end.map(Bound::Excluded).unwrap_or(Bound::Unbounded)
+		};
+		(begin, end)
+	} else {
+		(
+			start.map(Bound::Included).unwrap_or(Bound::Unbounded),
+			end.map(Bound::Excluded).unwrap_or(Bound::Unbounded),
+		)
+	};
+
+	Ok(Range {
+		tb: id,
+		beg: begin,
+		end,
+	}
+	.into())
 }
 
 pub mod is {
@@ -232,6 +325,7 @@ pub mod is {
 
 #[cfg(test)]
 mod tests {
+	use crate::err::Error;
 	use crate::sql::value::Value;
 
 	#[test]
@@ -241,5 +335,24 @@ mod tests {
 
 		let value = super::is::array(("test".into(),)).unwrap();
 		assert_eq!(value, Value::Bool(false));
+	}
+
+	#[test]
+	fn no_empty_thing() {
+		let value = super::thing(("".into(), None));
+		let _expected = Error::TbInvalid {
+			value: "".into(),
+		};
+		if !matches!(value, Err(_expected)) {
+			panic!("An empty thing tb part should result in an error");
+		}
+
+		let value = super::thing(("table".into(), Some("".into())));
+		let _expected = Error::IdInvalid {
+			value: "".into(),
+		};
+		if !matches!(value, Err(_expected)) {
+			panic!("An empty thing id part should result in an error");
+		}
 	}
 }

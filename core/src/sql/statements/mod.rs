@@ -15,6 +15,7 @@ pub(crate) mod kill;
 pub(crate) mod live;
 pub(crate) mod option;
 pub(crate) mod output;
+pub(crate) mod rebuild;
 pub(crate) mod relate;
 pub(crate) mod remove;
 pub(crate) mod select;
@@ -23,6 +24,7 @@ pub(crate) mod show;
 pub(crate) mod sleep;
 pub(crate) mod throw;
 pub(crate) mod update;
+pub(crate) mod upsert;
 pub(crate) mod r#use;
 
 pub use self::analyze::AnalyzeStatement;
@@ -49,17 +51,18 @@ pub use self::show::ShowStatement;
 pub use self::sleep::SleepStatement;
 pub use self::throw::ThrowStatement;
 pub use self::update::UpdateStatement;
+pub use self::upsert::UpsertStatement;
 
 pub use self::define::{
-	DefineAnalyzerStatement, DefineDatabaseStatement, DefineEventStatement, DefineFieldStatement,
-	DefineFunctionStatement, DefineIndexStatement, DefineModelStatement, DefineNamespaceStatement,
-	DefineParamStatement, DefineScopeStatement, DefineStatement, DefineTableStatement,
-	DefineTokenStatement, DefineUserStatement,
+	DefineAccessStatement, DefineAnalyzerStatement, DefineDatabaseStatement, DefineEventStatement,
+	DefineFieldStatement, DefineFunctionStatement, DefineIndexStatement, DefineModelStatement,
+	DefineNamespaceStatement, DefineParamStatement, DefineStatement, DefineTableStatement,
+	DefineUserStatement,
 };
 
 pub use self::remove::{
-	RemoveAnalyzerStatement, RemoveDatabaseStatement, RemoveEventStatement, RemoveFieldStatement,
-	RemoveFunctionStatement, RemoveIndexStatement, RemoveModelStatement, RemoveNamespaceStatement,
-	RemoveParamStatement, RemoveScopeStatement, RemoveStatement, RemoveTableStatement,
-	RemoveTokenStatement, RemoveUserStatement,
+	RemoveAccessStatement, RemoveAnalyzerStatement, RemoveDatabaseStatement, RemoveEventStatement,
+	RemoveFieldStatement, RemoveFunctionStatement, RemoveIndexStatement, RemoveModelStatement,
+	RemoveNamespaceStatement, RemoveParamStatement, RemoveStatement, RemoveTableStatement,
+	RemoveUserStatement,
 };

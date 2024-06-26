@@ -6,6 +6,7 @@ use reqwest::Method;
 use crate::fnc::script::fetch::{body::Body, RequestError};
 
 #[derive(Clone, Copy, Eq, PartialEq)]
+#[non_exhaustive]
 pub enum RequestMode {
 	Navigate,
 	SameOrigin,
@@ -43,6 +44,7 @@ impl<'js> FromJs<'js> for RequestMode {
 }
 
 #[derive(Clone, Copy, Eq, PartialEq)]
+#[non_exhaustive]
 pub enum RequestCredentials {
 	Omit,
 	SameOrigin,
@@ -77,6 +79,7 @@ impl<'js> FromJs<'js> for RequestCredentials {
 }
 
 #[derive(Clone, Copy, Eq, PartialEq)]
+#[non_exhaustive]
 pub enum RequestCache {
 	Default,
 	NoStore,
@@ -120,6 +123,7 @@ impl<'js> FromJs<'js> for RequestCache {
 }
 
 #[derive(Clone, Copy, Eq, PartialEq)]
+#[non_exhaustive]
 pub enum RequestRedirect {
 	Follow,
 	Error,
@@ -154,6 +158,7 @@ impl<'js> FromJs<'js> for RequestRedirect {
 }
 
 #[derive(Clone, Copy, Eq, PartialEq)]
+#[non_exhaustive]
 pub enum ReferrerPolicy {
 	Empty,
 	NoReferrer,
@@ -204,6 +209,7 @@ impl<'js> FromJs<'js> for ReferrerPolicy {
 	}
 }
 
+#[non_exhaustive]
 pub struct RequestInit<'js> {
 	pub method: Method,
 	pub headers: Class<'js, Headers>,
@@ -337,7 +343,7 @@ impl<'js> FromJs<'js> for RequestInit<'js> {
 		}
 
 		let headers = if let Some(hdrs) = object.get::<_, Option<Object>>("headers")? {
-			if let Some(cls) = Class::<Headers>::from_object(hdrs.clone()) {
+			if let Some(cls) = Class::<Headers>::from_object(&hdrs) {
 				cls
 			} else {
 				Class::instance(ctx.clone(), Headers::new_inner(ctx, hdrs.into_value())?)?
@@ -374,6 +380,7 @@ use reqwest::{header::HeaderName, Url};
 #[allow(dead_code)]
 #[js::class]
 #[derive(Trace)]
+#[non_exhaustive]
 pub struct Request<'js> {
 	#[qjs(skip_trace)]
 	pub(crate) url: Url,
@@ -411,7 +418,7 @@ impl<'js> Request<'js> {
 				url,
 				init,
 			})
-		} else if let Some(request) = input.into_object().and_then(Class::<Self>::from_object) {
+		} else if let Some(request) = input.as_object().and_then(Class::<Self>::from_object) {
 			// existing request object, just return it
 			request.try_borrow()?.clone_js(ctx.clone())
 		} else {
@@ -544,7 +551,7 @@ mod test {
 	#[tokio::test]
 	async fn basic_request_use() {
 		create_test_context!(ctx => {
-			ctx.eval::<Promise<()>,_>(r#"
+			ctx.eval::<Promise,_>(r#"
 				(async () => {
 					assert.mustThrow(() => {
 						new Request("invalid url")
@@ -614,7 +621,7 @@ mod test {
 					assert.seq(await req_2.text(),"some text");
 
 				})()
-			"#).catch(&ctx).unwrap().await.catch(&ctx).unwrap();
+			"#).catch(&ctx).unwrap().into_future::<()>().await.catch(&ctx).unwrap();
 		})
 		.await;
 	}

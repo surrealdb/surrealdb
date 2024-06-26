@@ -1,14 +1,14 @@
 use crate::ctx::Context;
 use crate::dbs::plan::Explanation;
 use crate::dbs::store::MemoryCollector;
-use crate::dbs::{Options, Statement, Transaction};
+use crate::dbs::{Options, Statement};
 use crate::err::Error;
 use crate::sql::function::OptimisedAggregate;
 use crate::sql::value::{TryAdd, TryDiv, Value};
-use crate::sql::{Array, Field, Idiom};
+use crate::sql::{Array, Field, Function, Idiom};
+use reblessive::tree::Stk;
 use std::borrow::Cow;
 use std::collections::{BTreeMap, HashMap};
-use std::mem;
 
 pub(super) struct GroupsCollector {
 	base: Vec<Aggregator>,
@@ -21,6 +21,7 @@ struct Aggregator {
 	array: Option<Array>,
 	first_val: Option<Value>,
 	count: Option<usize>,
+	count_function: Option<(Box<Function>, usize)>,
 	math_max: Option<Value>,
 	math_min: Option<Value>,
 	math_sum: Option<Value>,
@@ -59,9 +60,9 @@ impl GroupsCollector {
 
 	pub(super) async fn push(
 		&mut self,
+		stk: &mut Stk,
 		ctx: &Context<'_>,
 		opt: &Options,
-		txn: &Transaction,
 		stm: &Statement<'_>,
 		obj: Value,
 	) -> Result<(), Error> {
@@ -80,22 +81,22 @@ impl GroupsCollector {
 				.grp
 				.entry(arr)
 				.or_insert_with(|| self.base.iter().map(|a| a.new_instance()).collect());
-			Self::pushes(ctx, opt, txn, agr, &self.idioms, obj).await?
+			Self::pushes(stk, ctx, opt, agr, &self.idioms, obj).await?
 		}
 		Ok(())
 	}
 
 	async fn pushes(
+		stk: &mut Stk,
 		ctx: &Context<'_>,
 		opt: &Options,
-		txn: &Transaction,
 		agrs: &mut [Aggregator],
 		idioms: &[Idiom],
 		obj: Value,
 	) -> Result<(), Error> {
 		for (agr, idiom) in agrs.iter_mut().zip(idioms) {
-			let val = obj.get(ctx, opt, txn, None, idiom).await?;
-			agr.push(val)?;
+			let val = stk.run(|stk| obj.get(stk, ctx, opt, None, idiom)).await?;
+			agr.push(stk, ctx, opt, val).await?;
 		}
 		Ok(())
 	}
@@ -106,16 +107,15 @@ impl GroupsCollector {
 
 	pub(super) async fn output(
 		&mut self,
+		stk: &mut Stk,
 		ctx: &Context<'_>,
 		opt: &Options,
-		txn: &Transaction,
 		stm: &Statement<'_>,
 	) -> Result<MemoryCollector, Error> {
 		let mut results = MemoryCollector::default();
 		if let Some(fields) = stm.expr() {
-			let grp = mem::take(&mut self.grp);
 			// Loop over each grouped collection
-			for (_, mut aggregator) in grp {
+			for aggregator in self.grp.values_mut() {
 				// Create a new value
 				let mut obj = Value::base();
 				// Loop over each group clause
@@ -133,27 +133,24 @@ impl GroupsCollector {
 						if let Some(idioms_pos) =
 							self.idioms.iter().position(|i| i.eq(idiom.as_ref()))
 						{
-							let agr = &mut aggregator[idioms_pos];
-							match expr {
-								Value::Function(f) if f.is_aggregate() => {
-									let a = f.get_optimised_aggregate();
-									let x = if matches!(a, OptimisedAggregate::None) {
-										// The aggregation is not optimised, let's compute it with the values
-										let vals = agr.take();
-										let x = vals
-											.all()
-											.get(ctx, opt, txn, None, idiom.as_ref())
-											.await?;
-										f.aggregate(x).compute(ctx, opt, txn, None).await?
-									} else {
-										// The aggregation is optimised, just get the value
-										agr.compute(a)?
-									};
-									obj.set(ctx, opt, txn, idiom.as_ref(), x).await?;
-								}
-								_ => {
-									let x = agr.take().first();
-									obj.set(ctx, opt, txn, idiom.as_ref(), x).await?;
+							if let Some(agr) = aggregator.get_mut(idioms_pos) {
+								match expr {
+									Value::Function(f) if f.is_aggregate() => {
+										let a = f.get_optimised_aggregate();
+										let x = if matches!(a, OptimisedAggregate::None) {
+											// The aggregation is not optimised, let's compute it with the values
+											let vals = agr.take();
+											f.aggregate(vals).compute(stk, ctx, opt, None).await?
+										} else {
+											// The aggregation is optimised, just get the value
+											agr.compute(a)?
+										};
+										obj.set(stk, ctx, opt, idiom.as_ref(), x).await?;
+									}
+									_ => {
+										let x = agr.take().first();
+										obj.set(stk, ctx, opt, idiom.as_ref(), x).await?;
+									}
 								}
 							}
 						}
@@ -179,15 +176,15 @@ impl GroupsCollector {
 
 impl Aggregator {
 	fn prepare(&mut self, expr: &Value) {
-		let a = match expr {
-			Value::Function(f) => f.get_optimised_aggregate(),
+		let (a, f) = match expr {
+			Value::Function(f) => (f.get_optimised_aggregate(), Some(f)),
 			_ => {
 				// We set it only if we don't already have an array
 				if self.array.is_none() && self.first_val.is_none() {
 					self.first_val = Some(Value::None);
 					return;
 				}
-				OptimisedAggregate::None
+				(OptimisedAggregate::None, None)
 			}
 		};
 		match a {
@@ -201,6 +198,11 @@ impl Aggregator {
 			OptimisedAggregate::Count => {
 				if self.count.is_none() {
 					self.count = Some(0);
+				}
+			}
+			OptimisedAggregate::CountFunction => {
+				if self.count_function.is_none() {
+					self.count_function = Some((f.unwrap().clone(), 0));
 				}
 			}
 			OptimisedAggregate::MathMax => {
@@ -241,6 +243,7 @@ impl Aggregator {
 			array: self.array.as_ref().map(|_| Array::new()),
 			first_val: self.first_val.as_ref().map(|_| Value::None),
 			count: self.count.as_ref().map(|_| 0),
+			count_function: self.count_function.as_ref().map(|(f, _)| (f.clone(), 0)),
 			math_max: self.math_max.as_ref().map(|_| Value::None),
 			math_min: self.math_min.as_ref().map(|_| Value::None),
 			math_sum: self.math_sum.as_ref().map(|_| 0.into()),
@@ -250,9 +253,20 @@ impl Aggregator {
 		}
 	}
 
-	fn push(&mut self, val: Value) -> Result<(), Error> {
+	async fn push(
+		&mut self,
+		stk: &mut Stk,
+		ctx: &Context<'_>,
+		opt: &Options,
+		val: Value,
+	) -> Result<(), Error> {
 		if let Some(ref mut c) = self.count {
 			*c += 1;
+		}
+		if let Some((ref f, ref mut c)) = self.count_function {
+			if f.aggregate(val.clone()).compute(stk, ctx, opt, None).await?.is_truthy() {
+				*c += 1;
+			}
 		}
 		if val.is_number() {
 			if let Some(s) = self.math_sum.take() {
@@ -307,6 +321,9 @@ impl Aggregator {
 		Ok(match a {
 			OptimisedAggregate::None => Value::None,
 			OptimisedAggregate::Count => self.count.take().map(|v| v.into()).unwrap_or(Value::None),
+			OptimisedAggregate::CountFunction => {
+				self.count_function.take().map(|(_, v)| v.into()).unwrap_or(Value::None)
+			}
 			OptimisedAggregate::MathMax => self.math_max.take().unwrap_or(Value::None),
 			OptimisedAggregate::MathMin => self.math_min.take().unwrap_or(Value::None),
 			OptimisedAggregate::MathSum => self.math_sum.take().unwrap_or(Value::None),
@@ -344,6 +361,9 @@ impl Aggregator {
 		if self.count.is_some() {
 			collections.push("count".into());
 		}
+		if self.count_function.is_some() {
+			collections.push("count+func".into());
+		}
 		if self.math_mean.is_some() {
 			collections.push("math::mean".into());
 		}
@@ -354,7 +374,7 @@ impl Aggregator {
 			collections.push("math::min".into());
 		}
 		if self.math_sum.is_some() {
-			collections.push("math::sun".into());
+			collections.push("math::sum".into());
 		}
 		if self.time_max.is_some() {
 			collections.push("time::max".into());

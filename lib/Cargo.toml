@@ -2,7 +2,7 @@
 name = "surrealdb"
 publish = true
 edition = "2021"
-version = "1.5.0"
+version = "2.0.0"
 rust-version = "1.77.0"
 readme = "CARGO.md"
 authors = ["Tobie Morgan Hitchcock <tobie@surrealdb.com>"]
@@ -26,22 +26,21 @@ resolver = "2"
 default = ["protocol-ws", "rustls"]
 protocol-http = ["dep:reqwest", "dep:tokio-util"]
 protocol-ws = ["dep:tokio-tungstenite", "dep:trice", "tokio/time"]
-kv-mem = ["surrealdb-core1/kv-mem", "surrealdb-core2/kv-mem", "tokio/time"]
-kv-indxdb = ["surrealdb-core1/kv-indxdb", "surrealdb-core2/kv-indxdb"]
-kv-speedb = ["surrealdb-core1/kv-speedb", "surrealdb-core2/kv-speedb", "tokio/time"]
-kv-rocksdb = ["surrealdb-core1/kv-rocksdb", "surrealdb-core2/kv-rocksdb", "tokio/time"]
-kv-tikv = ["surrealdb-core1/kv-tikv", "surrealdb-core2/kv-tikv"]
-kv-fdb-5_1 = ["surrealdb-core1/kv-fdb-5_1", "surrealdb-core2/kv-fdb-5_1", "kv-fdb"]
-kv-fdb-5_2 = ["surrealdb-core1/kv-fdb-5_2", "surrealdb-core2/kv-fdb-5_2", "kv-fdb"]
-kv-fdb-6_0 = ["surrealdb-core1/kv-fdb-6_0", "surrealdb-core2/kv-fdb-6_0", "kv-fdb"]
-kv-fdb-6_1 = ["surrealdb-core1/kv-fdb-6_1", "surrealdb-core2/kv-fdb-6_1", "kv-fdb"]
-kv-fdb-6_2 = ["surrealdb-core1/kv-fdb-6_2", "surrealdb-core2/kv-fdb-6_2", "kv-fdb"]
-kv-fdb-6_3 = ["surrealdb-core1/kv-fdb-6_3", "surrealdb-core2/kv-fdb-6_3", "kv-fdb"]
-kv-fdb-7_0 = ["surrealdb-core1/kv-fdb-7_0", "surrealdb-core2/kv-fdb-7_0", "kv-fdb"]
-kv-fdb-7_1 = ["surrealdb-core1/kv-fdb-7_1", "surrealdb-core2/kv-fdb-7_1", "kv-fdb"]
-kv-surrealkv = ["surrealdb-core1/kv-surrealkv", "surrealdb-core2/kv-surrealkv", "tokio/time"]
-scripting = ["surrealdb-core1/scripting", "surrealdb-core2/scripting"]
-http = ["surrealdb-core1/http", "surrealdb-core2/http"]
+kv-mem = ["surrealdb-core/kv-mem", "tokio/time"]
+kv-indxdb = ["surrealdb-core/kv-indxdb"]
+kv-rocksdb = ["surrealdb-core/kv-rocksdb", "tokio/time"]
+kv-tikv = ["surrealdb-core/kv-tikv"]
+kv-fdb-5_1 = ["surrealdb-core/kv-fdb-5_1", "kv-fdb"]
+kv-fdb-5_2 = ["surrealdb-core/kv-fdb-5_2", "kv-fdb"]
+kv-fdb-6_0 = ["surrealdb-core/kv-fdb-6_0", "kv-fdb"]
+kv-fdb-6_1 = ["surrealdb-core/kv-fdb-6_1", "kv-fdb"]
+kv-fdb-6_2 = ["surrealdb-core/kv-fdb-6_2", "kv-fdb"]
+kv-fdb-6_3 = ["surrealdb-core/kv-fdb-6_3", "kv-fdb"]
+kv-fdb-7_0 = ["surrealdb-core/kv-fdb-7_0", "kv-fdb"]
+kv-fdb-7_1 = ["surrealdb-core/kv-fdb-7_1", "kv-fdb"]
+kv-surrealkv = ["surrealdb-core/kv-surrealkv", "tokio/time"]
+scripting = ["surrealdb-core/scripting"]
+http = ["surrealdb-core/http"]
 native-tls = [
     "dep:native-tls",
     "reqwest?/native-tls",
@@ -52,11 +51,10 @@ rustls = [
     "reqwest?/rustls-tls",
     "tokio-tungstenite?/rustls-tls-webpki-roots",
 ]
-ml = ["surrealdb-core1/ml", "surrealdb-core2/ml"]
-jwks = ["surrealdb-core2/jwks", "sql2"]
-arbitrary = ["surrealdb-core1/arbitrary", "surrealdb-core2/arbitrary"]
-sql2 = ["dep:surrealdb-core2"]
-parser2 = ["surrealdb-core1/experimental-parser", "surrealdb-core2/experimental-parser"]
+ml = ["surrealdb-core/ml"]
+jwks = ["surrealdb-core/jwks"]
+arbitrary = ["surrealdb-core/arbitrary"]
+
 # Private features
 kv-fdb = ["tokio/time"]
 
@@ -92,23 +90,33 @@ reqwest = { version = "0.11.22", default-features = false, features = [
     "stream",
     "multipart",
 ], optional = true }
-revision = "0.5.0"
+revision = { version = "0.7.0", features = [
+    "chrono",
+    "geo",
+    "roaring",
+    "regex",
+    "rust_decimal",
+    "uuid",
+] }
 rust_decimal = { version = "1.33.1", features = ["maths", "serde-str"] }
-rustls = { version = "0.21.10", optional = true }
+rustls = { version = "0.21.11", optional = true }
 semver = { version = "1.0.20", features = ["serde"] }
 serde = { version = "1.0.193", features = ["derive"] }
 serde_json = "1.0.108"
-surrealdb-core1 = { version = "1", default-features = false, package = "surrealdb-core" }
-surrealdb-core2 = { version = "=2.0.0-1.5.0", default-features = false, path = "../core", package = "surrealdb-core", optional = true }
+surrealdb-core = { version = "2", default-features = false, path = "../core", package = "surrealdb-core" }
 thiserror = "1.0.50"
 tokio-util = { version = "0.7.10", optional = true, features = ["compat"] }
 tracing = "0.1.40"
 trice = { version = "0.4.0", optional = true }
 url = "2.5.0"
+reblessive = { version = "0.3.5", features = ["tree"] }
 
 [dev-dependencies]
+ciborium = "0.2.1"
 criterion = { version = "0.5.1", features = ["async_tokio"] }
 env_logger = "0.10.1"
+flate2 = "1.0.28"
+hashbrown = "0.14.5"
 pprof = { version = "0.13.0", features = ["flamegraph", "criterion"] }
 rand = "0.8.5"
 radix_trie = "0.2.1"
@@ -124,8 +132,11 @@ wiremock = "0.5.22"
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 pharos = "0.5.3"
-ring = { version = "0.17.7", features = ["wasm32_unknown_unknown_js"] } # Make ring-based dependencies work on Wasm
-tokio = { version = "1.34.0", default-features = false, features = ["rt", "sync"] }
+ring = { version = "0.17.7", features = ["wasm32_unknown_unknown_js"] }
+tokio = { version = "1.34.0", default-features = false, features = [
+    "rt",
+    "sync",
+] }
 uuid = { version = "1.6.1", features = ["serde", "js", "v4", "v7"] }
 wasm-bindgen-futures = "0.4.39"
 wasmtimer = { version = "0.2.0", default-features = false, features = [
@@ -175,9 +186,17 @@ name = "index_mtree"
 harness = false
 
 [[bench]]
+name = "index_hnsw"
+harness = false
+
+[[bench]]
 name = "move_vs_clone"
 harness = false
 
 [[bench]]
 name = "sdb"
+harness = false
+
+[[bench]]
+name = "hashset_vs_vector"
 harness = false

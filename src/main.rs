@@ -24,7 +24,6 @@ mod err;
 mod gql;
 mod mem;
 mod net;
-mod node;
 mod rpc;
 mod telemetry;
 

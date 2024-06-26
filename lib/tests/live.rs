@@ -62,6 +62,7 @@ async fn live_query_sends_registered_lq_details() -> Result<(), Error> {
 		DEFINE TABLE lq_test_123 CHANGEFEED 10m INCLUDE ORIGINAL;
 		LIVE SELECT * FROM lq_test_123;
 	";
+	let mut stack = reblessive::tree::TreeStack::new();
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test").with_rt(true);
 	let res = &mut dbs.execute(sql, &ses, None).await?;
@@ -86,7 +87,8 @@ async fn live_query_sends_registered_lq_details() -> Result<(), Error> {
 	let result = res.remove(0);
 	assert!(result.result.is_ok());
 
-	dbs.process_lq_notifications(&Default::default()).await?;
+	let def = Default::default();
+	stack.enter(|stk| dbs.process_lq_notifications(stk, &def)).finish().await?;
 
 	let notifications_chan = dbs.notifications().unwrap();
 

@@ -1,10 +1,11 @@
 use crate::ctx::Context;
-use crate::dbs::{Options, Transaction};
+use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::fnc;
 use crate::sql::operator::Operator;
 use crate::sql::value::Value;
+use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
@@ -13,10 +14,11 @@ use std::str;
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Expression";
 
 /// Binary expressions.
+#[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[serde(rename = "$surrealdb::private::sql::Expression")]
-#[revisioned(revision = 1)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
+#[non_exhaustive]
 pub enum Expression {
 	Unary {
 		o: Operator,
@@ -97,9 +99,9 @@ impl Expression {
 	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
+		stk: &mut Stk,
 		ctx: &Context<'_>,
 		opt: &Options,
-		txn: &Transaction,
 		doc: Option<&CursorDoc<'_>>,
 	) -> Result<Value, Error> {
 		let (l, o, r) = match self {
@@ -107,7 +109,7 @@ impl Expression {
 				o,
 				v,
 			} => {
-				let operand = v.compute(ctx, opt, txn, doc).await?;
+				let operand = v.compute(stk, ctx, opt, doc).await?;
 				return match o {
 					Operator::Neg => fnc::operate::neg(operand),
 					// TODO: Check if it is a number?
@@ -123,7 +125,7 @@ impl Expression {
 			} => (l, o, r),
 		};
 
-		let l = l.compute(ctx, opt, txn, doc).await?;
+		let l = l.compute(stk, ctx, opt, doc).await?;
 		match o {
 			Operator::Or => {
 				if l.is_truthy() {
@@ -147,7 +149,7 @@ impl Expression {
 			}
 			_ => {} // Continue
 		}
-		let r = r.compute(ctx, opt, txn, doc).await?;
+		let r = r.compute(stk, ctx, opt, doc).await?;
 		match o {
 			Operator::Or => fnc::operate::or(l, r),
 			Operator::And => fnc::operate::and(l, r),
@@ -184,8 +186,10 @@ impl Expression {
 			Operator::NoneInside => fnc::operate::inside_none(&l, &r),
 			Operator::Outside => fnc::operate::outside(&l, &r),
 			Operator::Intersects => fnc::operate::intersects(&l, &r),
-			Operator::Matches(_) => fnc::operate::matches(ctx, txn, doc, self).await,
-			Operator::Knn(_, _) => fnc::operate::knn(ctx, opt, txn, doc, self).await,
+			Operator::Matches(_) => fnc::operate::matches(stk, ctx, opt, doc, self, l, r).await,
+			Operator::Knn(_, _) | Operator::Ann(_, _) => {
+				fnc::operate::knn(stk, ctx, opt, doc, self).await
+			}
 			_ => unreachable!(),
 		}
 	}

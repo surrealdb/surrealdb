@@ -3,6 +3,7 @@ use js::class::Trace;
 
 #[derive(Clone, Trace)]
 #[js::class]
+#[non_exhaustive]
 pub struct Uuid {
 	#[qjs(skip_trace)]
 	pub(crate) value: Option<uuid::Uuid>,

@@ -19,8 +19,6 @@ use crate::api::Surreal;
 use crate::engine::remote::ws::Data;
 use crate::engine::IntervalStream;
 use crate::opt::WaitFor;
-use crate::sql::Array;
-use crate::sql::Strand;
 use crate::sql::Value;
 use flume::Receiver;
 use flume::Sender;
@@ -92,15 +90,14 @@ impl Connection for Client {
 			let mut features = HashSet::new();
 			features.insert(ExtraFeatures::LiveQueries);
 
-			Ok(Surreal {
-				router: Arc::new(OnceLock::with_value(Router {
+			Ok(Surreal::new_from_router_waiter(
+				Arc::new(OnceLock::with_value(Router {
 					features,
 					sender: route_tx,
 					last_id: AtomicI64::new(0),
 				})),
-				waiter: Arc::new(watch::channel(Some(WaitFor::Connection))),
-				engine: PhantomData,
-			})
+				Arc::new(watch::channel(Some(WaitFor::Connection))),
+			))
 		})
 	}
 
@@ -209,13 +206,13 @@ pub(crate) fn router(
 						};
 						match method {
 							Method::Set => {
-								if let [Value::Strand(Strand(key)), value] = &params[..2] {
-									var_stash.insert(id, (key.clone(), value.clone()));
+								if let [Value::Strand(key), value] = &params[..2] {
+									var_stash.insert(id, (key.0.clone(), value.clone()));
 								}
 							}
 							Method::Unset => {
-								if let [Value::Strand(Strand(key))] = &params[..1] {
-									vars.swap_remove(key);
+								if let [Value::Strand(key)] = &params[..1] {
+									vars.swap_remove(&key.0);
 								}
 							}
 							Method::Live => {
@@ -318,10 +315,10 @@ pub(crate) fn router(
 													if matches!(method, Method::Insert) {
 														// For insert, we need to flatten single responses in an array
 														if let Ok(Data::Other(Value::Array(
-															Array(value),
+															value,
 														))) = &mut response
 														{
-															if let [value] = &mut value[..] {
+															if let [value] = &mut value.0[..] {
 																response = Ok(Data::Other(
 																	mem::take(value),
 																));

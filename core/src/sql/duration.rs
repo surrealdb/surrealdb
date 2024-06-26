@@ -1,5 +1,7 @@
 use crate::sql::datetime::Datetime;
+use crate::sql::statements::info::InfoStructure;
 use crate::sql::strand::Strand;
+use crate::sql::Value;
 use crate::syn;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -20,9 +22,10 @@ pub(crate) static NANOSECONDS_PER_MICROSECOND: u32 = 1000;
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Duration";
 
+#[revisioned(revision = 1)]
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[serde(rename = "$surrealdb::private::sql::Duration")]
-#[revisioned(revision = 1)]
+#[non_exhaustive]
 pub struct Duration(pub time::Duration);
 
 impl From<time::Duration> for Duration {
@@ -76,6 +79,10 @@ impl Deref for Duration {
 }
 
 impl Duration {
+	/// Create a duration from both seconds and nanoseconds components
+	pub fn new(secs: u64, nanos: u32) -> Duration {
+		time::Duration::new(secs, nanos).into()
+	}
 	/// Convert the Duration to a raw String
 	pub fn to_raw(&self) -> String {
 		self.to_string()
@@ -287,5 +294,11 @@ impl<'a> Sum<&'a Self> for Duration {
 		I: Iterator<Item = &'a Self>,
 	{
 		iter.fold(Duration::default(), |a, b| &a + b)
+	}
+}
+
+impl InfoStructure for Duration {
+	fn structure(self) -> Value {
+		self.to_string().into()
 	}
 }

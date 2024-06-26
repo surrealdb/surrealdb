@@ -3,9 +3,10 @@ use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::hash::{Hash, Hasher};
 
+#[revisioned(revision = 1)]
 #[derive(Clone, Debug, PartialOrd, Serialize, Deserialize)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[revisioned(revision = 1)]
+#[non_exhaustive]
 pub enum Scoring {
 	Bm {
 		k1: f32,
@@ -50,8 +51,8 @@ impl Hash for Scoring {
 	}
 }
 
-impl Scoring {
-	pub(crate) fn bm25() -> Self {
+impl Default for Scoring {
+	fn default() -> Self {
 		Self::Bm {
 			k1: 1.2,
 			b: 0.75,

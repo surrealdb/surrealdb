@@ -1,7 +1,7 @@
 pub mod base64 {
 	use crate::err::Error;
 	use crate::sql::{Bytes, Value};
-	use base64_lib::{engine::general_purpose::STANDARD_NO_PAD, Engine};
+	use base64::{engine::general_purpose::STANDARD_NO_PAD, Engine};
 
 	pub fn encode((arg,): (Bytes,)) -> Result<Value, Error> {
 		Ok(Value::from(STANDARD_NO_PAD.encode(&*arg)))

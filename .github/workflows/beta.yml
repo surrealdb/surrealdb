@@ -43,7 +43,7 @@ jobs:
           if git branch -r | grep -w 'releases/beta'; then
             echo "branch=releases/beta" >> $GITHUB_OUTPUT
           else
-            echo "branch=main" >> $GITHUB_OUTPUT
+            echo "branch=1.x" >> $GITHUB_OUTPUT
           fi
 
   release:
@@ -59,7 +59,7 @@ jobs:
     secrets: inherit
 
   bump-version:
-    name: Bump main version
+    name: Bump 1.x version
     if: ${{ inputs.publish }}
     needs: [checks, release]
     runs-on: ubuntu-latest
@@ -101,9 +101,9 @@ jobs:
         run: |
           set -x
 
-          # Checkout the main branch
-          git fetch origin main
-          git checkout main
+          # Checkout the 1.x branch
+          git fetch origin 1.x
+          git checkout 1.x
 
           # Switch to version bump branch
           git checkout -b version-bump/v${{ steps.bump.outputs.version }}
@@ -138,7 +138,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.RELEASE_PLZ_TOKEN }}
         run: |
           set -x
-          url=$(gh pr create --base main --title "Bump version to v${{ steps.bump.outputs.version }}" --body "Update main version")
+          url=$(gh pr create --base 1.x --title "Bump version to v${{ steps.bump.outputs.version }}" --body "Update 1.x version")
           echo "url=${url}" >> $GITHUB_OUTPUT
 
       - name: Merge the PR

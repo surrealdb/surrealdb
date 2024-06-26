@@ -62,7 +62,7 @@ pub async fn update(
 	id: String,
 	person_data: Json<Person>,
 ) -> Result<Json<Option<Person>>, Custom<String>> {
-	db.update((PERSON, &*id))
+	db.upsert((PERSON, &*id))
 		.content(person_data.into_inner())
 		.await
 		.map_err(|e| Custom(Status::InternalServerError, e.to_string()))

@@ -4,6 +4,7 @@ use channel::Receiver;
 use futures::{FutureExt, Stream, StreamExt};
 
 /// A newtype struct over receiver implementing the [`Stream`] trait.
+#[non_exhaustive]
 pub struct ChannelStream<R>(Receiver<R>);
 
 impl<R> Stream for ChannelStream<R> {
@@ -17,6 +18,7 @@ impl<R> Stream for ChannelStream<R> {
 }
 
 /// A struct representing a Javascript `ReadableStream`.
+#[non_exhaustive]
 pub struct ReadableStream<R>(Pin<Box<dyn Stream<Item = R> + Send + Sync>>);
 
 impl<R> ReadableStream<R> {

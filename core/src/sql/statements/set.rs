@@ -1,17 +1,19 @@
 use crate::cnf::PROTECTED_PARAM_NAMES;
 use crate::ctx::Context;
-use crate::dbs::{Options, Transaction};
+use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::sql::Value;
 use derive::Store;
+use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[revisioned(revision = 1)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
+#[non_exhaustive]
 pub struct SetStatement {
 	pub name: String,
 	pub what: Value,
@@ -25,15 +27,15 @@ impl SetStatement {
 	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
+		stk: &mut Stk,
 		ctx: &Context<'_>,
 		opt: &Options,
-		txn: &Transaction,
 		doc: Option<&CursorDoc<'_>>,
 	) -> Result<Value, Error> {
 		// Check if the variable is a protected variable
 		match PROTECTED_PARAM_NAMES.contains(&self.name.as_str()) {
 			// The variable isn't protected and can be stored
-			false => self.what.compute(ctx, opt, txn, doc).await,
+			false => self.what.compute(stk, ctx, opt, doc).await,
 			// The user tried to set a protected variable
 			true => Err(Error::InvalidParam {
 				// Move the parameter name, as we no longer need it

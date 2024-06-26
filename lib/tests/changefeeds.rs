@@ -11,7 +11,7 @@ use surrealdb::kvs::Datastore;
 use surrealdb::kvs::LockType::Optimistic;
 use surrealdb::kvs::TransactionType::Write;
 use surrealdb::sql::Value;
-use surrealdb_core2::test_helpers::{generate_versionstamp_sequences, to_u128_be};
+use surrealdb_core::test_helpers::{generate_versionstamp_sequences, to_u128_be};
 
 mod helpers;
 
@@ -42,7 +42,7 @@ async fn database_change_feeds() -> Result<(), Error> {
 	"
 	);
 	let sql2 = "
-		UPDATE person:test CONTENT { name: 'Tobie' };
+		UPSERT person:test CONTENT { name: 'Tobie' };
 		DELETE person:test;
         SHOW CHANGES FOR TABLE person SINCE 0;
 	";
@@ -180,7 +180,6 @@ async fn database_change_feeds() -> Result<(), Error> {
 	current_time += 1;
 	dbs.tick_at(current_time).await?;
 	let mut tx = dbs.transaction(Write, Optimistic).await?;
-	#[cfg(feature = "sql2")]
 	tx.print_all().await;
 	tx.cancel().await?;
 
@@ -218,11 +217,11 @@ async fn table_change_feeds() -> Result<(), Error> {
 					$value
 				END
 		;
-		UPDATE person:test CONTENT { name: 'Tobie' };
-		UPDATE person:test REPLACE { name: 'jaime' };
-		UPDATE person:test MERGE { name: 'Jaime' };
-		UPDATE person:test SET name = 'tobie';
-		UPDATE person:test SET name = 'Tobie';
+		UPSERT person:test CONTENT { name: 'Tobie' };
+		UPSERT person:test REPLACE { name: 'jaime' };
+		UPSERT person:test MERGE { name: 'Jaime' };
+		UPSERT person:test SET name = 'tobie';
+		UPSERT person:test SET name = 'Tobie';
 		DELETE person:test;
 		CREATE person:1000 SET name = 'Yusuke';
         SHOW CHANGES FOR TABLE person SINCE 0;

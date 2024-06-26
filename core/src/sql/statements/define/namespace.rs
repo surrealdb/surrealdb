@@ -1,17 +1,19 @@
 use crate::ctx::Context;
-use crate::dbs::{Options, Transaction};
+use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::iam::{Action, ResourceKind};
+use crate::sql::statements::info::InfoStructure;
 use crate::sql::{Base, Ident, Strand, Value};
 use derive::Store;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display};
 
+#[revisioned(revision = 2)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[revisioned(revision = 2)]
+#[non_exhaustive]
 pub struct DefineNamespaceStatement {
 	pub id: Option<u32>,
 	pub name: Ident,
@@ -24,9 +26,8 @@ impl DefineNamespaceStatement {
 	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
-		_ctx: &Context<'_>,
+		ctx: &Context<'_>,
 		opt: &Options,
-		txn: &Transaction,
 		_doc: Option<&CursorDoc<'_>>,
 	) -> Result<Value, Error> {
 		// Allowed to run?
@@ -34,14 +35,18 @@ impl DefineNamespaceStatement {
 		// Process the statement
 		let key = crate::key::root::ns::new(&self.name);
 		// Claim transaction
-		let mut run = txn.lock().await;
+		let mut run = ctx.tx_lock().await;
 		// Clear the cache
 		run.clear_cache();
 		// Check if namespace already exists
-		if self.if_not_exists && run.get_ns(&self.name).await.is_ok() {
-			return Err(Error::NsAlreadyExists {
-				value: self.name.to_string(),
-			});
+		if run.get_ns(&self.name).await.is_ok() {
+			if self.if_not_exists {
+				return Ok(Value::None);
+			} else {
+				return Err(Error::NsAlreadyExists {
+					value: self.name.to_string(),
+				});
+			}
 		}
 		if self.id.is_none() {
 			// Set the id
@@ -77,5 +82,14 @@ impl Display for DefineNamespaceStatement {
 			write!(f, " COMMENT {v}")?
 		}
 		Ok(())
+	}
+}
+
+impl InfoStructure for DefineNamespaceStatement {
+	fn structure(self) -> Value {
+		Value::from(map! {
+			"name".to_string() => self.name.structure(),
+			"comment".to_string(), if let Some(v) = self.comment => v.into(),
+		})
 	}
 }

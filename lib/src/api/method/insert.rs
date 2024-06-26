@@ -52,10 +52,14 @@ macro_rules! into_future {
 			Box::pin(async move {
 				let (table, data) = match resource? {
 					Resource::Table(table) => (table.into(), Value::Object(Default::default())),
-					Resource::RecordId(record_id) => (
-						Table(record_id.tb.clone()).into(),
-						crate::map! { String::from("id") => record_id.into() }.into(),
-					),
+					Resource::RecordId(record_id) => {
+						let mut table = Table::default();
+						table.0 = record_id.tb.clone();
+						(
+							table.into(),
+							crate::map! { String::from("id") => record_id.into() }.into(),
+						)
+					}
 					Resource::Object(obj) => return Err(Error::InsertOnObject(obj).into()),
 					Resource::Array(arr) => return Err(Error::InsertOnArray(arr).into()),
 					Resource::Edges(edges) => return Err(Error::InsertOnEdges(edges).into()),
@@ -132,8 +136,12 @@ where
 						.into());
 					}
 					false => {
-						content.resource = Ok(Table(record_id.tb.clone()).into());
-						let id = Part::Field(Ident("id".to_owned()));
+						let mut table = Table::default();
+						table.0.clone_from(&record_id.tb);
+						content.resource = Ok(table.into());
+						let mut ident = Ident::default();
+						"id".clone_into(&mut ident.0);
+						let id = Part::Field(ident);
 						data.put(&[id], record_id.into());
 						content.content = data;
 					}

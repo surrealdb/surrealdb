@@ -9,8 +9,8 @@ use crate::api::method::tests::types::AuthParams;
 use crate::api::opt::auth::Database;
 use crate::api::opt::auth::Jwt;
 use crate::api::opt::auth::Namespace;
+use crate::api::opt::auth::Record;
 use crate::api::opt::auth::Root;
-use crate::api::opt::auth::Scope;
 use crate::api::opt::PatchOp;
 use crate::api::Response as QueryResponse;
 use crate::api::Surreal;
@@ -42,10 +42,10 @@ async fn api() {
 
 	// signup
 	let _: Jwt = DB
-		.signup(Scope {
+		.signup(Record {
 			namespace: "test-ns",
 			database: "test-db",
-			scope: "scope",
+			access: "access",
 			params: AuthParams {},
 		})
 		.await
@@ -77,10 +77,10 @@ async fn api() {
 		.await
 		.unwrap();
 	let _: Jwt = DB
-		.signin(Scope {
+		.signin(Record {
 			namespace: "test-ns",
 			database: "test-db",
-			scope: "scope",
+			access: "access",
 			params: AuthParams {},
 		})
 		.await
@@ -102,12 +102,12 @@ async fn api() {
 		.await
 		.unwrap();
 	let _: QueryResponse = DB
-		.query(BeginStatement)
+		.query(BeginStatement::default())
 		.query("CREATE account:one SET balance = 135605.16")
 		.query("CREATE account:two SET balance = 91031.31")
 		.query("UPDATE account:one SET balance += 300.00")
 		.query("UPDATE account:two SET balance -= 300.00")
-		.query(CommitStatement)
+		.query(CommitStatement::default())
 		.await
 		.unwrap();
 

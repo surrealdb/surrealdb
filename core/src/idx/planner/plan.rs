@@ -1,9 +1,10 @@
 use crate::err::Error;
 use crate::idx::ft::MatchRef;
-use crate::idx::planner::tree::{GroupRef, IndexRef, Node};
+use crate::idx::planner::tree::{GroupRef, IdiomPosition, IndexRef, Node};
+use crate::sql::statements::DefineIndexStatement;
 use crate::sql::with::With;
-use crate::sql::{Array, Idiom, Object};
-use crate::sql::{Expression, Operator, Value};
+use crate::sql::{Array, Expression, Idiom, Number, Object};
+use crate::sql::{Operator, Value};
 use std::collections::hash_map::Entry;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::hash::Hash;
@@ -162,48 +163,60 @@ pub(super) enum Plan {
 	SingleIndexRange(IndexRef, UnionRangeQueryBuilder),
 }
 
-#[derive(Debug, Clone, Eq, PartialEq, Hash)]
-pub(crate) struct IndexOption(Arc<Inner>);
-
-#[derive(Debug, Eq, PartialEq, Hash)]
-pub(super) struct Inner {
-	ir: IndexRef,
-	id: Arc<Idiom>,
-	op: IndexOperator,
+#[derive(Debug, Eq, PartialEq, Hash, Clone)]
+pub(super) struct IndexOption {
+	/// A reference o the index definition
+	ix_ref: IndexRef,
+	id: Idiom,
+	id_pos: IdiomPosition,
+	op: Arc<IndexOperator>,
 }
 
 #[derive(Debug, Eq, PartialEq, Hash)]
 pub(super) enum IndexOperator {
 	Equality(Value),
+	Exactness(Value),
 	Union(Array),
+	Join(Vec<IndexOption>),
 	RangePart(Operator, Value),
 	Matches(String, Option<MatchRef>),
-	Knn(Array, u32),
+	Knn(Arc<Vec<Number>>, u32),
+	Ann(Arc<Vec<Number>>, u32, u32),
 }
 
 impl IndexOption {
-	pub(super) fn new(ir: IndexRef, id: Arc<Idiom>, op: IndexOperator) -> Self {
-		Self(Arc::new(Inner {
-			ir,
+	pub(super) fn new(
+		ix_ref: IndexRef,
+		id: Idiom,
+		id_pos: IdiomPosition,
+		op: IndexOperator,
+	) -> Self {
+		Self {
+			ix_ref,
 			id,
-			op,
-		}))
+			id_pos,
+			op: Arc::new(op),
+		}
 	}
 
 	pub(super) fn require_distinct(&self) -> bool {
-		matches!(self.0.op, IndexOperator::Union(_))
+		matches!(self.op.as_ref(), IndexOperator::Union(_))
 	}
 
 	pub(super) fn ix_ref(&self) -> IndexRef {
-		self.0.ir
+		self.ix_ref
 	}
 
 	pub(super) fn op(&self) -> &IndexOperator {
-		&self.0.op
+		self.op.as_ref()
 	}
 
 	pub(super) fn id_ref(&self) -> &Idiom {
-		self.0.id.as_ref()
+		&self.id
+	}
+
+	pub(super) fn id_pos(&self) -> IdiomPosition {
+		self.id_pos
 	}
 
 	fn reduce_array(v: &Value) -> Value {
@@ -215,15 +228,32 @@ impl IndexOption {
 		v.clone()
 	}
 
-	pub(crate) fn explain(&self, e: &mut HashMap<&str, Value>) {
+	pub(crate) fn explain(&self, ix_def: &[DefineIndexStatement]) -> Value {
+		let mut e = HashMap::new();
+		if let Some(ix) = ix_def.get(self.ix_ref as usize) {
+			e.insert("index", Value::from(ix.name.0.to_owned()));
+		}
 		match self.op() {
 			IndexOperator::Equality(v) => {
 				e.insert("operator", Value::from(Operator::Equal.to_string()));
 				e.insert("value", Self::reduce_array(v));
 			}
+			IndexOperator::Exactness(v) => {
+				e.insert("operator", Value::from(Operator::Exact.to_string()));
+				e.insert("value", Self::reduce_array(v));
+			}
 			IndexOperator::Union(a) => {
 				e.insert("operator", Value::from("union"));
 				e.insert("value", Value::Array(a.clone()));
+			}
+			IndexOperator::Join(ios) => {
+				e.insert("operator", Value::from("join"));
+				let mut joins = Vec::with_capacity(ios.len());
+				for io in ios {
+					joins.push(io.explain(ix_def));
+				}
+				let joins = Value::from(joins);
+				e.insert("joins", joins);
 			}
 			IndexOperator::Matches(qs, a) => {
 				e.insert("operator", Value::from(Operator::Matches(*a).to_string()));
@@ -234,10 +264,19 @@ impl IndexOption {
 				e.insert("value", v.to_owned());
 			}
 			IndexOperator::Knn(a, k) => {
-				e.insert("operator", Value::from(format!("<{}>", k)));
-				e.insert("value", Value::Array(a.clone()));
+				let op = Value::from(Operator::Knn(*k, None).to_string());
+				let val = Value::Array(Array::from(a.as_ref().clone()));
+				e.insert("operator", op);
+				e.insert("value", val);
+			}
+			IndexOperator::Ann(a, k, ef) => {
+				let op = Value::from(Operator::Ann(*k, *ef).to_string());
+				let val = Value::Array(Array::from(a.as_ref().clone()));
+				e.insert("operator", op);
+				e.insert("value", val);
 			}
 		};
+		Value::from(e)
 	}
 }
 
@@ -391,23 +430,25 @@ impl UnionRangeQueryBuilder {
 #[cfg(test)]
 mod tests {
 	use crate::idx::planner::plan::{IndexOperator, IndexOption, RangeValue};
+	use crate::idx::planner::tree::IdiomPosition;
 	use crate::sql::{Array, Idiom, Value};
 	use crate::syn::Parse;
 	use std::collections::HashSet;
-	use std::sync::Arc;
 
 	#[test]
 	fn test_hash_index_option() {
 		let mut set = HashSet::new();
 		let io1 = IndexOption::new(
 			1,
-			Arc::new(Idiom::parse("test")),
+			Idiom::parse("test"),
+			IdiomPosition::Right,
 			IndexOperator::Equality(Value::Array(Array::from(vec!["test"]))),
 		);
 
 		let io2 = IndexOption::new(
 			1,
-			Arc::new(Idiom::parse("test")),
+			Idiom::parse("test"),
+			IdiomPosition::Right,
 			IndexOperator::Equality(Value::Array(Array::from(vec!["test"]))),
 		);
 

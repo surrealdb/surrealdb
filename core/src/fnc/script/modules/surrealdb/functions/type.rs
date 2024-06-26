@@ -5,6 +5,7 @@ use js::prelude::Async;
 
 mod is;
 
+#[non_exhaustive]
 pub struct Package;
 
 impl_module_def!(
@@ -24,5 +25,6 @@ impl_module_def!(
 	"regex" => run,
 	"string" => run,
 	"table" => run,
-	"thing" => run
+	"thing" => run,
+	"range" => run
 );

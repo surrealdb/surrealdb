@@ -103,7 +103,7 @@ pub async fn del(file: &str) -> Result<(), Error> {
 }
 
 /// Hashes the bytes of a file to a string for the storage of a file.
-pub fn hash(data: &Vec<u8>) -> String {
+pub fn hash(data: &[u8]) -> String {
 	let mut hasher = Sha1::new();
 	hasher.update(data);
 	let result = hasher.finalize();

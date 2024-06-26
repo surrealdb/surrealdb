@@ -11,10 +11,10 @@ macro_rules! bytes {
 #[macro_export]
 #[doc(hidden)]
 macro_rules! map {
-    ($($k:expr => $v:expr),* $(,)? $( => $x:expr )?) => {{
+    ($($k:expr $(, if let $grant:pat = $check:expr)? $(, if $guard:expr)? => $v:expr),* $(,)? $( => $x:expr )?) => {{
         let mut m = ::std::collections::BTreeMap::new();
-        $(m.extend($x.iter().map(|(k, v)| (k.clone(), v.clone())));)?
-        $(m.insert($k, $v);)+
+    	$(m.extend($x.iter().map(|(k, v)| (k.clone(), v.clone())));)?
+		$( $(if let $grant = $check)? $(if $guard)? { m.insert($k, $v); };)+
         m
     }};
 }
@@ -74,4 +74,129 @@ macro_rules! lazy_env_parse_or_else {
 				.unwrap_or_else($default)
 		})
 	};
+}
+
+#[cfg(test)]
+#[macro_export]
+macro_rules! async_defer{
+	(let $bind:ident = ($capture:expr) defer { $($d:tt)* } after { $($t:tt)* }) => {
+		async {
+			async_defer!(@captured);
+			async_defer!(@catch_unwind);
+
+			#[allow(unused_mut)]
+			let mut v = Some($capture);
+			#[allow(unused_mut)]
+			let mut $bind = Captured(&mut v);
+			let res = CatchUnwindFuture(async { $($t)* }).await;
+			#[allow(unused_variables,unused_mut)]
+			if let Some(mut $bind) = v.take(){
+				async { $($d)* }.await;
+			}
+			match res{
+				Ok(x) => x,
+				Err(e) => ::std::panic::resume_unwind(e)
+			}
+
+		}
+	};
+
+	(defer { $($d:tt)* } after { $($t:tt)* }) => {
+		async {
+			async_defer!(@catch_unwind);
+
+			let res = CatchUnwindFuture(async { $($t)* }).await;
+			#[allow(unused_variables)]
+			async { $($d)* }.await;
+			match res{
+				Ok(x) => x,
+				Err(e) => ::std::panic::resume_unwind(e)
+			}
+
+		}
+	};
+
+	(@captured) => {
+		// unwraps are save cause the value can only be taken by consuming captured.
+		pub struct Captured<'a,T>(&'a mut Option<T>);
+		impl<T> ::std::ops::Deref for Captured<'_,T>{
+			type Target = T;
+
+			fn deref(&self) -> &T{
+				self.0.as_ref().unwrap()
+			}
+		}
+		impl<T> ::std::ops::DerefMut for Captured<'_,T>{
+			fn deref_mut(&mut self) -> &mut T{
+				self.0.as_mut().unwrap()
+			}
+		}
+		impl<T> Captured<'_,T>{
+			#[allow(dead_code)]
+			pub fn take(self) -> T{
+				self.0.take().unwrap()
+			}
+		}
+	};
+
+	(@catch_unwind) => {
+		struct CatchUnwindFuture<F>(F);
+		impl<F,R> ::std::future::Future for CatchUnwindFuture<F>
+			where F: ::std::future::Future<Output = R>,
+		{
+			type Output = ::std::thread::Result<R>;
+
+			fn poll(self: ::std::pin::Pin<&mut Self>, cx: &mut ::std::task::Context<'_>) -> ::std::task::Poll<Self::Output>{
+				let pin = unsafe{ self.map_unchecked_mut(|x| &mut x.0) };
+				match ::std::panic::catch_unwind(::std::panic::AssertUnwindSafe(||{
+					pin.poll(cx)
+				})) {
+					Ok(x) => x.map(Ok),
+					Err(e) => ::std::task::Poll::Ready(Err(e))
+				}
+			}
+		}
+	};
+}
+
+#[cfg(test)]
+mod test {
+	#[tokio::test]
+	async fn async_defer_basic() {
+		let mut counter = 0;
+
+		async_defer!(defer {
+			assert_eq!(counter,1);
+		} after {
+			assert_eq!(counter,0);
+			counter += 1;
+		})
+		.await;
+
+		async_defer!(let t = (()) defer {
+			panic!("shouldn't be called");
+		} after {
+			assert_eq!(counter,1);
+			counter += 1;
+			t.take();
+		})
+		.await;
+	}
+
+	#[tokio::test]
+	#[should_panic(expected = "this is should be the message of the panic")]
+	async fn async_defer_panic() {
+		let mut counter = 0;
+
+		async_defer!(defer {
+			// This should still execute
+			assert_eq!(counter,1);
+			panic!("this is should be the message of the panic")
+		} after {
+			assert_eq!(counter,0);
+			counter += 1;
+			panic!("this panic should be caught")
+		})
+		.await;
+	}
 }

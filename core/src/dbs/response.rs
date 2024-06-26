@@ -10,6 +10,7 @@ use std::time::Duration;
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Response";
 
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum QueryType {
 	// Any kind of query
 	Other,
@@ -21,6 +22,7 @@ pub enum QueryType {
 
 /// The return value when running a query set on the database.
 #[derive(Debug)]
+#[non_exhaustive]
 pub struct Response {
 	pub time: Duration,
 	pub result: Result<Value, Error>,
@@ -40,10 +42,11 @@ impl Response {
 	}
 }
 
+#[revisioned(revision = 1)]
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "UPPERCASE")]
-#[revisioned(revision = 1)]
 #[doc(hidden)]
+#[non_exhaustive]
 pub enum Status {
 	Ok,
 	Err,
@@ -70,9 +73,10 @@ impl Serialize for Response {
 	}
 }
 
-#[derive(Debug, Serialize, Deserialize)]
 #[revisioned(revision = 1)]
+#[derive(Debug, Serialize, Deserialize)]
 #[doc(hidden)]
+#[non_exhaustive]
 pub struct QueryMethodResponse {
 	pub time: String,
 	pub status: Status,

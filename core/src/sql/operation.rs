@@ -3,10 +3,11 @@ use crate::sql::value::Value;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 
+#[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[serde(tag = "op")]
 #[serde(rename_all = "lowercase")]
-#[revisioned(revision = 1)]
+#[non_exhaustive]
 pub enum Operation {
 	Add {
 		path: Idiom,

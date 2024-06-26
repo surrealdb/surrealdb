@@ -2,7 +2,7 @@
 name = "surreal"
 publish = false
 edition = "2021"
-version = "1.5.0"
+version = "2.0.0"
 license-file = "LICENSE"
 authors = ["Tobie Morgan Hitchcock <tobie@surrealdb.com>"]
 
@@ -11,7 +11,6 @@ authors = ["Tobie Morgan Hitchcock <tobie@surrealdb.com>"]
 default = ["storage-mem", "storage-rocksdb", "scripting", "http"]
 storage-mem = ["surrealdb/kv-mem"]
 storage-rocksdb = ["surrealdb/kv-rocksdb"]
-storage-speedb = ["surrealdb/kv-speedb"]
 storage-tikv = ["surrealdb/kv-tikv"]
 storage-fdb = ["surrealdb/kv-fdb-7_1"]
 storage-surrealkv = ["surrealdb/kv-surrealkv"]
@@ -20,12 +19,16 @@ http = ["surrealdb/http"]
 http-compression = []
 ml = ["surrealdb/ml"]
 jwks = ["surrealdb/jwks"]
-sql2 = [] # Deprecated since v1.4
-parser2 = ["surrealdb/parser2"]
 performance-profiler = ["dep:pprof"]
 
 [workspace]
-members = ["core", "lib", "lib/examples/actix", "lib/examples/axum", "lib/examples/rocket"]
+members = [
+    "core",
+    "lib",
+    "lib/examples/actix",
+    "lib/examples/axum",
+    "lib/examples/rocket",
+]
 
 [profile.release]
 lto = true
@@ -74,18 +77,24 @@ reqwest = { version = "0.11.22", default-features = false, features = [
     "blocking",
     "gzip",
 ] }
-revision = "0.5.0"
+revision = { version = "0.7.0", features = [
+    "chrono",
+    "geo",
+    "roaring",
+    "regex",
+    "rust_decimal",
+    "uuid",
+] }
 rmpv = "1.0.1"
 rustyline = { version = "12.0.0", features = ["derive"] }
 semver = "1.0.20"
 serde = { version = "1.0.193", features = ["derive"] }
 serde_json = "1.0.108"
 serde_pack = { version = "1.1.2", package = "rmp-serde" }
-surrealdb = { version = "1", path = "lib", features = [
+surrealdb = { version = "2", path = "lib", features = [
     "protocol-http",
     "protocol-ws",
     "rustls",
-    "sql2",
 ] }
 tempfile = "3.8.1"
 thiserror = "1.0.50"

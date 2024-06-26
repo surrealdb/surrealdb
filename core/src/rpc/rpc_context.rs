@@ -1,12 +1,13 @@
 use std::collections::BTreeMap;
 
+use uuid::Uuid;
+
 use crate::{
 	dbs::{QueryType, Response, Session},
 	kvs::Datastore,
 	rpc::args::Take,
 	sql::{Array, Function, Model, Statement, Strand, Value},
 };
-use uuid::Uuid;
 
 use super::{method::Method, response::Data, rpc_error::RpcError};
 
@@ -52,6 +53,7 @@ pub trait RpcContext {
 			Method::Select => self.select(params).await.map(Into::into).map_err(Into::into),
 			Method::Insert => self.insert(params).await.map(Into::into).map_err(Into::into),
 			Method::Create => self.create(params).await.map(Into::into).map_err(Into::into),
+			Method::Upsert => self.upsert(params).await.map(Into::into).map_err(Into::into),
 			Method::Update => self.update(params).await.map(Into::into).map_err(Into::into),
 			Method::Merge => self.merge(params).await.map(Into::into).map_err(Into::into),
 			Method::Patch => self.patch(params).await.map(Into::into).map_err(Into::into),
@@ -71,6 +73,7 @@ pub trait RpcContext {
 			Method::Select => self.select(params).await.map(Into::into).map_err(Into::into),
 			Method::Insert => self.insert(params).await.map(Into::into).map_err(Into::into),
 			Method::Create => self.create(params).await.map(Into::into).map_err(Into::into),
+			Method::Upsert => self.upsert(params).await.map(Into::into).map_err(Into::into),
 			Method::Update => self.update(params).await.map(Into::into).map_err(Into::into),
 			Method::Merge => self.merge(params).await.map(Into::into).map_err(Into::into),
 			Method::Patch => self.patch(params).await.map(Into::into).map_err(Into::into),
@@ -320,6 +323,39 @@ pub trait RpcContext {
 	}
 
 	// ------------------------------
+	// Methods for upserting
+	// ------------------------------
+
+	async fn upsert(&self, params: Array) -> Result<impl Into<Data>, RpcError> {
+		let Ok((what, data)) = params.needs_one_or_two() else {
+			return Err(RpcError::InvalidParams);
+		};
+		// Return a single result?
+		let one = what.is_thing();
+		// Specify the SQL query string
+		let sql = if data.is_none_or_null() {
+			"UPSERT $what RETURN AFTER"
+		} else {
+			"UPSERT $what CONTENT $data RETURN AFTER"
+		};
+		// Specify the query parameters
+		let var = Some(map! {
+			String::from("what") => what.could_be_table(),
+			String::from("data") => data,
+			=> &self.vars()
+		});
+		// Execute the query on the database
+		let mut res = self.kvs().execute(sql, self.session(), var).await?;
+		// Extract the first query result
+		let res = match one {
+			true => res.remove(0).result?.first(),
+			false => res.remove(0).result?,
+		};
+		// Return the result to the client
+		Ok(res)
+	}
+
+	// ------------------------------
 	// Methods for updating
 	// ------------------------------
 
@@ -418,6 +454,41 @@ pub trait RpcContext {
 	}
 
 	// ------------------------------
+	// Methods for relating
+	// ------------------------------
+
+	async fn relate(&self, params: Array) -> Result<impl Into<Data>, RpcError> {
+		let Ok((from, kind, to, data)) = params.needs_three_or_four() else {
+			return Err(RpcError::InvalidParams);
+		};
+		// Return a single result?
+		let one = kind.is_thing();
+		// Specify the SQL query string
+		let sql = if data.is_none_or_null() {
+			"RELATE $from->$kind->$to"
+		} else {
+			"RELATE $from->$kind->$to CONTENT $data"
+		};
+		// Specify the query parameters
+		let var = Some(map! {
+			String::from("from") => from,
+			String::from("kind") => kind.could_be_table(),
+			String::from("to") => to,
+			String::from("data") => data,
+			=> &self.vars()
+		});
+		// Execute the query on the database
+		let mut res = self.kvs().execute(sql, self.session(), var).await?;
+		// Extract the first query result
+		let res = match one {
+			true => res.remove(0).result?.first(),
+			false => res.remove(0).result?,
+		};
+		// Return the result to the client
+		Ok(res)
+	}
+
+	// ------------------------------
 	// Methods for deleting
 	// ------------------------------
 
@@ -483,15 +554,6 @@ pub trait RpcContext {
 	}
 
 	// ------------------------------
-	// Methods for relating
-	// ------------------------------
-
-	async fn relate(&self, _params: Array) -> Result<impl Into<Data>, RpcError> {
-		let out: Result<Value, RpcError> = Err(RpcError::MethodNotFound);
-		out
-	}
-
-	// ------------------------------
 	// Methods for running functions
 	// ------------------------------
 
@@ -528,9 +590,7 @@ pub trait RpcContext {
 			.kvs()
 			.process(Statement::Value(func).into(), self.session(), Some(self.vars().clone()))
 			.await?;
-		let out = res.remove(0).result?;
-
-		Ok(out)
+		res.remove(0).result.map_err(Into::into)
 	}
 
 	// ------------------------------

@@ -1,3 +1,4 @@
+mod access;
 mod analyzer;
 mod database;
 mod event;
@@ -6,9 +7,7 @@ mod function;
 mod index;
 mod namespace;
 mod param;
-mod scope;
 mod table;
-mod token;
 mod user;
 
 use crate::err::Error;
@@ -18,6 +17,7 @@ use serde::ser::Error as _;
 use serde::ser::Impossible;
 use serde::ser::Serialize;
 
+#[non_exhaustive]
 pub struct Serializer;
 
 impl ser::Serializer for Serializer {
@@ -58,8 +58,7 @@ impl ser::Serializer for Serializer {
 			"Analyzer" => {
 				Ok(DefineStatement::Analyzer(value.serialize(analyzer::Serializer.wrap())?))
 			}
-			"Token" => Ok(DefineStatement::Token(value.serialize(token::Serializer.wrap())?)),
-			"Scope" => Ok(DefineStatement::Scope(value.serialize(scope::Serializer.wrap())?)),
+			"Access" => Ok(DefineStatement::Access(value.serialize(access::Serializer.wrap())?)),
 			"Param" => Ok(DefineStatement::Param(value.serialize(param::Serializer.wrap())?)),
 			"Table" => Ok(DefineStatement::Table(value.serialize(table::Serializer.wrap())?)),
 			"Event" => Ok(DefineStatement::Event(value.serialize(event::Serializer.wrap())?)),
@@ -107,15 +106,8 @@ mod tests {
 	}
 
 	#[test]
-	fn token() {
-		let stmt = DefineStatement::Token(Default::default());
-		let serialized = stmt.serialize(Serializer.wrap()).unwrap();
-		assert_eq!(stmt, serialized);
-	}
-
-	#[test]
-	fn scope() {
-		let stmt = DefineStatement::Scope(Default::default());
+	fn access() {
+		let stmt = DefineStatement::Access(Default::default());
 		let serialized = stmt.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(stmt, serialized);
 	}

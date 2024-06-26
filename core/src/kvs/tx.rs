@@ -9,6 +9,7 @@ use futures::lock::Mutex;
 use uuid::Uuid;
 
 use sql::permission::Permissions;
+use sql::statements::DefineAccessStatement;
 use sql::statements::DefineAnalyzerStatement;
 use sql::statements::DefineDatabaseStatement;
 use sql::statements::DefineEventStatement;
@@ -18,17 +19,17 @@ use sql::statements::DefineIndexStatement;
 use sql::statements::DefineModelStatement;
 use sql::statements::DefineNamespaceStatement;
 use sql::statements::DefineParamStatement;
-use sql::statements::DefineScopeStatement;
 use sql::statements::DefineTableStatement;
-use sql::statements::DefineTokenStatement;
 use sql::statements::DefineUserStatement;
 use sql::statements::LiveStatement;
 
 use crate::cf;
+use crate::cnf::EXPORT_BATCH_SIZE;
 use crate::dbs::node::ClusterMembership;
 use crate::dbs::node::Timestamp;
 use crate::err::Error;
 use crate::idg::u32::U32;
+#[cfg(debug_assertions)]
 use crate::key::debug::sprint_key;
 use crate::key::error::KeyCategory;
 use crate::key::key_req::KeyRequirements;
@@ -49,8 +50,8 @@ use crate::sql::Part;
 use crate::sql::Relation;
 use crate::sql::Strand;
 use crate::sql::Value;
+use crate::vs::Oracle;
 use crate::vs::Versionstamp;
-use crate::vs::{conv, Oracle};
 
 use super::kv::Add;
 use super::kv::Convert;
@@ -58,11 +59,13 @@ use super::Key;
 use super::Val;
 
 #[derive(Copy, Clone, Debug)]
+#[non_exhaustive]
 pub enum Limit {
 	Unlimited,
 	Limited(u32),
 }
 
+#[non_exhaustive]
 pub struct ScanPage<K>
 where
 	K: Into<Key> + Debug,
@@ -80,6 +83,7 @@ impl From<Range<Vec<u8>>> for ScanPage<Vec<u8>> {
 	}
 }
 
+#[non_exhaustive]
 pub struct ScanResult<K>
 where
 	K: Into<Key> + Debug,
@@ -90,6 +94,7 @@ where
 
 /// A set of undoable updates and requests against a dataset.
 #[allow(dead_code)]
+#[non_exhaustive]
 pub struct Transaction {
 	pub(super) inner: Inner,
 	pub(super) cache: Cache,
@@ -106,8 +111,6 @@ pub(super) enum Inner {
 	Mem(super::mem::Transaction),
 	#[cfg(feature = "kv-rocksdb")]
 	RocksDB(super::rocksdb::Transaction),
-	#[cfg(feature = "kv-speedb")]
-	SpeeDB(super::speedb::Transaction),
 	#[cfg(feature = "kv-indxdb")]
 	IndxDB(super::indxdb::Transaction),
 	#[cfg(feature = "kv-tikv")]
@@ -119,6 +122,7 @@ pub(super) enum Inner {
 }
 
 #[derive(Copy, Clone)]
+#[non_exhaustive]
 pub enum TransactionType {
 	Read,
 	Write,
@@ -133,6 +137,7 @@ impl From<bool> for TransactionType {
 	}
 }
 
+#[non_exhaustive]
 pub enum LockType {
 	Pessimistic,
 	Optimistic,
@@ -146,8 +151,6 @@ impl fmt::Display for Transaction {
 			Inner::Mem(_) => write!(f, "memory"),
 			#[cfg(feature = "kv-rocksdb")]
 			Inner::RocksDB(_) => write!(f, "rocksdb"),
-			#[cfg(feature = "kv-speedb")]
-			Inner::SpeeDB(_) => write!(f, "speedb"),
 			#[cfg(feature = "kv-indxdb")]
 			Inner::IndxDB(_) => write!(f, "indxdb"),
 			#[cfg(feature = "kv-tikv")]
@@ -210,11 +213,6 @@ impl Transaction {
 				inner: Inner::RocksDB(v),
 				..
 			} => v.closed(),
-			#[cfg(feature = "kv-speedb")]
-			Transaction {
-				inner: Inner::SpeeDB(v),
-				..
-			} => v.closed(),
 			#[cfg(feature = "kv-indxdb")]
 			Transaction {
 				inner: Inner::IndxDB(v),
@@ -257,11 +255,6 @@ impl Transaction {
 				inner: Inner::RocksDB(v),
 				..
 			} => v.cancel().await,
-			#[cfg(feature = "kv-speedb")]
-			Transaction {
-				inner: Inner::SpeeDB(v),
-				..
-			} => v.cancel().await,
 			#[cfg(feature = "kv-indxdb")]
 			Transaction {
 				inner: Inner::IndxDB(v),
@@ -302,11 +295,6 @@ impl Transaction {
 			#[cfg(feature = "kv-rocksdb")]
 			Transaction {
 				inner: Inner::RocksDB(v),
-				..
-			} => v.commit().await,
-			#[cfg(feature = "kv-speedb")]
-			Transaction {
-				inner: Inner::SpeeDB(v),
 				..
 			} => v.commit().await,
 			#[cfg(feature = "kv-indxdb")]
@@ -379,11 +367,6 @@ impl Transaction {
 				inner: Inner::RocksDB(v),
 				..
 			} => v.del(key).await,
-			#[cfg(feature = "kv-speedb")]
-			Transaction {
-				inner: Inner::SpeeDB(v),
-				..
-			} => v.del(key).await,
 			#[cfg(feature = "kv-indxdb")]
 			Transaction {
 				inner: Inner::IndxDB(v),
@@ -426,11 +409,6 @@ impl Transaction {
 			#[cfg(feature = "kv-rocksdb")]
 			Transaction {
 				inner: Inner::RocksDB(v),
-				..
-			} => v.exi(key).await,
-			#[cfg(feature = "kv-speedb")]
-			Transaction {
-				inner: Inner::SpeeDB(v),
 				..
 			} => v.exi(key).await,
 			#[cfg(feature = "kv-indxdb")]
@@ -478,11 +456,6 @@ impl Transaction {
 				inner: Inner::RocksDB(v),
 				..
 			} => v.get(key).await,
-			#[cfg(feature = "kv-speedb")]
-			Transaction {
-				inner: Inner::SpeeDB(v),
-				..
-			} => v.get(key).await,
 			#[cfg(feature = "kv-indxdb")]
 			Transaction {
 				inner: Inner::IndxDB(v),
@@ -527,11 +500,6 @@ impl Transaction {
 			#[cfg(feature = "kv-rocksdb")]
 			Transaction {
 				inner: Inner::RocksDB(v),
-				..
-			} => v.set(key, val).await,
-			#[cfg(feature = "kv-speedb")]
-			Transaction {
-				inner: Inner::SpeeDB(v),
 				..
 			} => v.set(key, val).await,
 			#[cfg(feature = "kv-indxdb")]
@@ -599,11 +567,6 @@ impl Transaction {
 				inner: Inner::FoundationDB(v),
 				..
 			} => v.get_timestamp().await,
-			#[cfg(feature = "kv-speedb")]
-			Transaction {
-				inner: Inner::SpeeDB(v),
-				..
-			} => v.get_timestamp(key).await,
 			#[cfg(feature = "kv-surrealkv")]
 			Transaction {
 				inner: Inner::SurrealKV(v),
@@ -698,14 +661,6 @@ impl Transaction {
 				inner: Inner::FoundationDB(v),
 				..
 			} => v.set_versionstamped_key(prefix, suffix, val).await,
-			#[cfg(feature = "kv-speedb")]
-			Transaction {
-				inner: Inner::SpeeDB(v),
-				..
-			} => {
-				let k = v.get_versionstamped_key(ts_key, prefix, suffix).await?;
-				v.set(k, val).await
-			}
 			#[cfg(feature = "kv-surrealkv")]
 			Transaction {
 				inner: Inner::SurrealKV(v),
@@ -735,11 +690,6 @@ impl Transaction {
 			#[cfg(feature = "kv-rocksdb")]
 			Transaction {
 				inner: Inner::RocksDB(v),
-				..
-			} => v.put(category, key, val).await,
-			#[cfg(feature = "kv-speedb")]
-			Transaction {
-				inner: Inner::SpeeDB(v),
 				..
 			} => v.put(category, key, val).await,
 			#[cfg(feature = "kv-indxdb")]
@@ -792,11 +742,6 @@ impl Transaction {
 				inner: Inner::RocksDB(v),
 				..
 			} => v.scan(rng, limit).await,
-			#[cfg(feature = "kv-speedb")]
-			Transaction {
-				inner: Inner::SpeeDB(v),
-				..
-			} => v.scan(rng, limit).await,
 			#[cfg(feature = "kv-indxdb")]
 			Transaction {
 				inner: Inner::IndxDB(v),
@@ -846,11 +791,6 @@ impl Transaction {
 			#[cfg(feature = "kv-rocksdb")]
 			Transaction {
 				inner: Inner::RocksDB(v),
-				..
-			} => v.scan(range, batch_limit).await,
-			#[cfg(feature = "kv-speedb")]
-			Transaction {
-				inner: Inner::SpeeDB(v),
 				..
 			} => v.scan(range, batch_limit).await,
 			#[cfg(feature = "kv-indxdb")]
@@ -921,11 +861,6 @@ impl Transaction {
 				inner: Inner::RocksDB(v),
 				..
 			} => v.putc(key, val, chk).await,
-			#[cfg(feature = "kv-speedb")]
-			Transaction {
-				inner: Inner::SpeeDB(v),
-				..
-			} => v.putc(key, val, chk).await,
 			#[cfg(feature = "kv-indxdb")]
 			Transaction {
 				inner: Inner::IndxDB(v),
@@ -970,11 +905,6 @@ impl Transaction {
 			#[cfg(feature = "kv-rocksdb")]
 			Transaction {
 				inner: Inner::RocksDB(v),
-				..
-			} => v.delc(key, chk).await,
-			#[cfg(feature = "kv-speedb")]
-			Transaction {
-				inner: Inner::SpeeDB(v),
 				..
 			} => v.delc(key, chk).await,
 			#[cfg(feature = "kv-indxdb")]
@@ -1090,6 +1020,7 @@ impl Transaction {
 			let res = res.values;
 			// Exit when settled
 			if res.is_empty() {
+				#[cfg(debug_assertions)]
 				trace!("Delr page was empty");
 				break;
 			}
@@ -1439,23 +1370,36 @@ impl Transaction {
 		})
 	}
 
-	/// Retrieve all namespace token definitions for a specific namespace.
-	pub async fn all_ns_tokens(&mut self, ns: &str) -> Result<Arc<[DefineTokenStatement]>, Error> {
-		let key = crate::key::namespace::tk::prefix(ns);
+	/// Retrieve all namespace access method definitions.
+	pub async fn all_ns_accesses(
+		&mut self,
+		ns: &str,
+	) -> Result<Arc<[DefineAccessStatement]>, Error> {
+		let key = crate::key::namespace::ac::prefix(ns);
 		Ok(if let Some(e) = self.cache.get(&key) {
-			if let Entry::Nts(v) = e {
+			if let Entry::Nas(v) = e {
 				v
 			} else {
 				unreachable!();
 			}
 		} else {
-			let beg = crate::key::namespace::tk::prefix(ns);
-			let end = crate::key::namespace::tk::suffix(ns);
+			let beg = crate::key::namespace::ac::prefix(ns);
+			let end = crate::key::namespace::ac::suffix(ns);
 			let val = self.getr(beg..end, u32::MAX).await?;
 			let val = val.convert().into();
-			self.cache.set(key, Entry::Nts(Arc::clone(&val)));
+			self.cache.set(key, Entry::Nas(Arc::clone(&val)));
 			val
 		})
+	}
+
+	/// Retrieve all namespace access method definitions in redacted form.
+	pub async fn all_ns_accesses_redacted(
+		&mut self,
+		ns: &str,
+	) -> Result<Arc<[DefineAccessStatement]>, Error> {
+		let accesses = self.all_ns_accesses(ns).await?;
+		let redacted: Vec<_> = accesses.iter().map(|statement| statement.redacted()).collect();
+		Ok(Arc::from(redacted))
 	}
 
 	/// Retrieve all database definitions for a specific namespace.
@@ -1500,27 +1444,38 @@ impl Transaction {
 		})
 	}
 
-	/// Retrieve all database token definitions for a specific database.
-	pub async fn all_db_tokens(
+	/// Retrieve all database access method definitions.
+	pub async fn all_db_accesses(
 		&mut self,
 		ns: &str,
 		db: &str,
-	) -> Result<Arc<[DefineTokenStatement]>, Error> {
-		let key = crate::key::database::tk::prefix(ns, db);
+	) -> Result<Arc<[DefineAccessStatement]>, Error> {
+		let key = crate::key::database::ac::prefix(ns, db);
 		Ok(if let Some(e) = self.cache.get(&key) {
-			if let Entry::Dts(v) = e {
+			if let Entry::Das(v) = e {
 				v
 			} else {
 				unreachable!();
 			}
 		} else {
-			let beg = crate::key::database::tk::prefix(ns, db);
-			let end = crate::key::database::tk::suffix(ns, db);
+			let beg = crate::key::database::ac::prefix(ns, db);
+			let end = crate::key::database::ac::suffix(ns, db);
 			let val = self.getr(beg..end, u32::MAX).await?;
 			let val = val.convert().into();
-			self.cache.set(key, Entry::Dts(Arc::clone(&val)));
+			self.cache.set(key, Entry::Das(Arc::clone(&val)));
 			val
 		})
+	}
+
+	/// Retrieve all database access method definitions in redacted form.
+	pub async fn all_db_accesses_redacted(
+		&mut self,
+		ns: &str,
+		db: &str,
+	) -> Result<Arc<[DefineAccessStatement]>, Error> {
+		let accesses = self.all_db_accesses(ns, db).await?;
+		let redacted: Vec<_> = accesses.iter().map(|statement| statement.redacted()).collect();
+		Ok(Arc::from(redacted))
 	}
 
 	/// Retrieve all analyzer definitions for a specific database.
@@ -1611,53 +1566,6 @@ impl Transaction {
 			let val = self.getr(beg..end, u32::MAX).await?;
 			let val = val.convert().into();
 			self.cache.set(key, Entry::Mls(Arc::clone(&val)));
-			val
-		})
-	}
-
-	/// Retrieve all scope definitions for a specific database.
-	pub async fn all_sc(
-		&mut self,
-		ns: &str,
-		db: &str,
-	) -> Result<Arc<[DefineScopeStatement]>, Error> {
-		let key = crate::key::database::sc::prefix(ns, db);
-		Ok(if let Some(e) = self.cache.get(&key) {
-			if let Entry::Scs(v) = e {
-				v
-			} else {
-				unreachable!();
-			}
-		} else {
-			let beg = crate::key::database::sc::prefix(ns, db);
-			let end = crate::key::database::sc::suffix(ns, db);
-			let val = self.getr(beg..end, u32::MAX).await?;
-			let val = val.convert().into();
-			self.cache.set(key, Entry::Scs(Arc::clone(&val)));
-			val
-		})
-	}
-
-	/// Retrieve all scope token definitions for a scope.
-	pub async fn all_sc_tokens(
-		&mut self,
-		ns: &str,
-		db: &str,
-		sc: &str,
-	) -> Result<Arc<[DefineTokenStatement]>, Error> {
-		let key = crate::key::scope::tk::prefix(ns, db, sc);
-		Ok(if let Some(e) = self.cache.get(&key) {
-			if let Entry::Sts(v) = e {
-				v
-			} else {
-				unreachable!();
-			}
-		} else {
-			let beg = crate::key::scope::tk::prefix(ns, db, sc);
-			let end = crate::key::scope::tk::suffix(ns, db, sc);
-			let val = self.getr(beg..end, u32::MAX).await?;
-			let val = val.convert().into();
-			self.cache.set(key, Entry::Sts(Arc::clone(&val)));
 			val
 		})
 	}
@@ -1860,15 +1768,15 @@ impl Transaction {
 		Ok(val.into())
 	}
 
-	/// Retrieve a specific namespace token definition.
-	pub async fn get_ns_token(
+	/// Retrieve a specific namespace access method definition.
+	pub async fn get_ns_access(
 		&mut self,
 		ns: &str,
-		nt: &str,
-	) -> Result<DefineTokenStatement, Error> {
-		let key = crate::key::namespace::tk::new(ns, nt);
-		let val = self.get(key).await?.ok_or(Error::NtNotFound {
-			value: nt.to_owned(),
+		ac: &str,
+	) -> Result<DefineAccessStatement, Error> {
+		let key = crate::key::namespace::ac::new(ns, ac);
+		let val = self.get(key).await?.ok_or(Error::NaNotFound {
+			value: ac.to_owned(),
 		})?;
 		Ok(val.into())
 	}
@@ -1913,16 +1821,16 @@ impl Transaction {
 		Ok(val.into())
 	}
 
-	/// Retrieve a specific database token definition.
-	pub async fn get_db_token(
+	/// Retrieve a specific database access method definition.
+	pub async fn get_db_access(
 		&mut self,
 		ns: &str,
 		db: &str,
-		dt: &str,
-	) -> Result<DefineTokenStatement, Error> {
-		let key = crate::key::database::tk::new(ns, db, dt);
-		let val = self.get(key).await?.ok_or(Error::DtNotFound {
-			value: dt.to_owned(),
+		ac: &str,
+	) -> Result<DefineAccessStatement, Error> {
+		let key = crate::key::database::ac::new(ns, db, ac);
+		let val = self.get(key).await?.ok_or(Error::DaNotFound {
+			value: ac.to_owned(),
 		})?;
 		Ok(val.into())
 	}
@@ -1969,35 +1877,6 @@ impl Transaction {
 		Ok(val.into())
 	}
 
-	/// Retrieve a specific scope definition.
-	pub async fn get_sc(
-		&mut self,
-		ns: &str,
-		db: &str,
-		sc: &str,
-	) -> Result<DefineScopeStatement, Error> {
-		let key = crate::key::database::sc::new(ns, db, sc);
-		let val = self.get(key).await?.ok_or(Error::ScNotFound {
-			value: sc.to_owned(),
-		})?;
-		Ok(val.into())
-	}
-
-	/// Retrieve a specific scope token definition.
-	pub async fn get_sc_token(
-		&mut self,
-		ns: &str,
-		db: &str,
-		sc: &str,
-		st: &str,
-	) -> Result<DefineTokenStatement, Error> {
-		let key = crate::key::scope::tk::new(ns, db, sc, st);
-		let val = self.get(key).await?.ok_or(Error::StNotFound {
-			value: st.to_owned(),
-		})?;
-		Ok(val.into())
-	}
-
 	/// Return the table stored at the lq address
 	pub async fn get_lq(
 		&mut self,
@@ -2037,6 +1916,7 @@ impl Transaction {
 	) -> Result<LiveStatement, Error> {
 		let key = crate::key::table::lq::new(ns, db, tb, *lv);
 		let key_enc = crate::key::table::lq::Lq::encode(&key)?;
+		#[cfg(debug_assertions)]
 		trace!("Getting lv ({:?}) {}", lv, sprint_key(&key_enc));
 		let val = self.get(key_enc).await?.ok_or(Error::LvNotFound {
 			value: lv.to_string(),
@@ -2054,6 +1934,7 @@ impl Transaction {
 	) -> Result<DefineEventStatement, Error> {
 		let key = crate::key::table::ev::new(ns, db, tb, ev);
 		let key_enc = crate::key::table::ev::Ev::encode(&key)?;
+		#[cfg(debug_assertions)]
 		trace!("Getting ev ({:?}) {}", ev, sprint_key(&key_enc));
 		let val = self.get(key_enc).await?.ok_or(Error::EvNotFound {
 			value: ev.to_string(),
@@ -2071,6 +1952,7 @@ impl Transaction {
 	) -> Result<DefineFieldStatement, Error> {
 		let key = crate::key::table::fd::new(ns, db, tb, fd);
 		let key_enc = crate::key::table::fd::Fd::encode(&key)?;
+		#[cfg(debug_assertions)]
 		trace!("Getting fd ({:?}) {}", fd, sprint_key(&key_enc));
 		let val = self.get(key_enc).await?.ok_or(Error::FdNotFound {
 			value: fd.to_string(),
@@ -2088,6 +1970,7 @@ impl Transaction {
 	) -> Result<DefineIndexStatement, Error> {
 		let key = crate::key::table::ix::new(ns, db, tb, ix);
 		let key_enc = crate::key::table::ix::Ix::encode(&key)?;
+		#[cfg(debug_assertions)]
 		trace!("Getting ix ({:?}) {}", ix, sprint_key(&key_enc));
 		let val = self.get(key_enc).await?.ok_or(Error::IxNotFound {
 			value: ix.to_string(),
@@ -2144,36 +2027,6 @@ impl Transaction {
 					Ok(val)
 				}
 				true => Err(Error::DbNotFound {
-					value,
-				}),
-			},
-			Err(e) => Err(e),
-			Ok(v) => Ok(v),
-		}
-	}
-
-	/// Add a scope with a default configuration, only if we are in dynamic mode.
-	pub async fn add_sc(
-		&mut self,
-		ns: &str,
-		db: &str,
-		sc: &str,
-		strict: bool,
-	) -> Result<DefineScopeStatement, Error> {
-		match self.get_sc(ns, db, sc).await {
-			Err(Error::ScNotFound {
-				value,
-			}) => match strict {
-				false => {
-					let key = crate::key::database::sc::new(ns, db, sc);
-					let val = DefineScopeStatement {
-						name: sc.to_owned().into(),
-						..Default::default()
-					};
-					self.put(key.key_category(), key, &val).await?;
-					Ok(val)
-				}
-				true => Err(Error::ScNotFound {
 					value,
 				}),
 			},
@@ -2518,12 +2371,12 @@ impl Transaction {
 				chn.send(bytes!("")).await?;
 			}
 		}
-		// Output TOKENS
+		// Output ACCESSES
 		{
-			let dts = self.all_db_tokens(ns, db).await?;
+			let dts = self.all_db_accesses(ns, db).await?;
 			if !dts.is_empty() {
 				chn.send(bytes!("-- ------------------------------")).await?;
-				chn.send(bytes!("-- TOKENS")).await?;
+				chn.send(bytes!("-- ACCESSES")).await?;
 				chn.send(bytes!("-- ------------------------------")).await?;
 				chn.send(bytes!("")).await?;
 				for dt in dts.iter() {
@@ -2574,31 +2427,6 @@ impl Transaction {
 				chn.send(bytes!("")).await?;
 			}
 		}
-		// Output SCOPES
-		{
-			let scs = self.all_sc(ns, db).await?;
-			if !scs.is_empty() {
-				chn.send(bytes!("-- ------------------------------")).await?;
-				chn.send(bytes!("-- SCOPES")).await?;
-				chn.send(bytes!("-- ------------------------------")).await?;
-				chn.send(bytes!("")).await?;
-				for sc in scs.iter() {
-					// Output SCOPE
-					chn.send(bytes!(format!("{sc};"))).await?;
-					// Output TOKENS
-					{
-						let sts = self.all_sc_tokens(ns, db, &sc.name).await?;
-						if !sts.is_empty() {
-							for st in sts.iter() {
-								chn.send(bytes!(format!("{st};"))).await?;
-							}
-							chn.send(bytes!("")).await?;
-						}
-					}
-				}
-				chn.send(bytes!("")).await?;
-			}
-		}
 		// Output TABLES
 		{
 			let tbs = self.all_tb(ns, db).await?;
@@ -2643,6 +2471,11 @@ impl Transaction {
 				chn.send(bytes!("")).await?;
 				chn.send(bytes!("BEGIN TRANSACTION;")).await?;
 				chn.send(bytes!("")).await?;
+				// Records to be exported, categorised by the type of INSERT statement
+				let mut exported_normal: Vec<String> =
+					Vec::with_capacity(*EXPORT_BATCH_SIZE as usize);
+				let mut exported_relation: Vec<String> =
+					Vec::with_capacity(*EXPORT_BATCH_SIZE as usize);
 				// Output TABLE data
 				for tb in tbs.iter() {
 					// Start records
@@ -2655,32 +2488,48 @@ impl Transaction {
 					let end = crate::key::thing::suffix(ns, db, &tb.name);
 					let mut nxt: Option<ScanPage<Vec<u8>>> = Some(ScanPage::from(beg..end));
 					while nxt.is_some() {
-						let res = self.scan_paged(nxt.unwrap(), 1000).await?;
+						let res = self.scan_paged(nxt.unwrap(), *EXPORT_BATCH_SIZE).await?;
 						nxt = res.next_page;
 						let res = res.values;
 						if res.is_empty() {
 							break;
 						}
-						// Loop over results
-						for (k, v) in res.into_iter() {
+
+						// Categorize results
+						for (_, v) in res.into_iter() {
 							// Parse the key and the value
-							let k: crate::key::thing::Thing = (&k).into();
 							let v: Value = (&v).into();
-							let t = Thing::from((k.tb, k.id));
 							// Check if this is a graph edge
 							match (v.pick(&*EDGE), v.pick(&*IN), v.pick(&*OUT)) {
 								// This is a graph edge record
-								(Value::Bool(true), Value::Thing(l), Value::Thing(r)) => {
-									let sql = format!("RELATE {l} -> {t} -> {r} CONTENT {v};",);
-									chn.send(bytes!(sql)).await?;
+								(Value::Bool(true), Value::Thing(_), Value::Thing(_)) => {
+									exported_relation.push(v.to_string());
 								}
 								// This is a normal record
 								_ => {
-									let sql = format!("UPDATE {t} CONTENT {v};");
-									chn.send(bytes!(sql)).await?;
+									exported_normal.push(v.to_string());
 								}
 							}
 						}
+
+						// Add batches of INSERT statements
+						// No need to chunk here, the scan it limited to 1000
+						if !exported_normal.is_empty() {
+							let values = exported_normal.join(", ");
+							let sql = format!("INSERT [ {values} ];");
+							chn.send(bytes!(sql)).await?;
+							exported_normal.clear();
+						}
+
+						// Add batches of INSERT RELATION statements
+						// No need to chunk here, the scan it limited to 1000
+						if !exported_relation.is_empty() {
+							let values = exported_relation.join(", ");
+							let sql = format!("INSERT RELATION [ {values} ];");
+							chn.send(bytes!(sql)).await?;
+							exported_relation.clear()
+						}
+
 						continue;
 					}
 					chn.send(bytes!("")).await?;
@@ -2719,7 +2568,7 @@ impl Transaction {
 		current: Cow<'_, Value>,
 		store_difference: bool,
 	) {
-		self.cf.update(ns, db, tb, id.clone(), previous, current, store_difference)
+		self.cf.record_cf_change(ns, db, tb, id.clone(), previous, current, store_difference)
 	}
 
 	// Records the table (re)definition in the changefeed if enabled.
@@ -2905,7 +2754,7 @@ impl Transaction {
 		trace!(
 			"Setting timestamp {} for versionstamp {:?} in ns: {}, db: {}",
 			ts,
-			conv::versionstamp_to_u64(&vs),
+			crate::vs::conv::versionstamp_to_u64(&vs),
 			ns,
 			db
 		);
@@ -2918,6 +2767,7 @@ impl Transaction {
 		let ts_pairs: Vec<(Vec<u8>, Vec<u8>)> = self.getr(begin..end, u32::MAX).await?;
 		let latest_ts_pair = ts_pairs.last();
 		if let Some((k, _)) = latest_ts_pair {
+			#[cfg(debug_assertions)]
 			trace!(
 				"There already was a greater committed timestamp {} in ns: {}, db: {} found: {}",
 				ts,
@@ -3014,11 +2864,6 @@ impl Transaction {
 			#[cfg(feature = "kv-rocksdb")]
 			Transaction {
 				inner: Inner::RocksDB(ref mut v),
-				..
-			} => v.check_level(check),
-			#[cfg(feature = "kv-speedb")]
-			Transaction {
-				inner: Inner::SpeeDB(ref mut v),
 				..
 			} => v.check_level(check),
 			#[cfg(feature = "kv-indxdb")]

@@ -1,5 +1,6 @@
 /// LoggingLifecycle is used to create log messages upon creation, and log messages when it is dropped
 #[doc(hidden)]
+#[non_exhaustive]
 pub struct LoggingLifecycle {
 	identifier: String,
 }

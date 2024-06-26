@@ -43,14 +43,7 @@ impl ser::Serializer for Serializer {
 	}
 
 	fn serialize_i128(self, value: i128) -> Result<Self::Ok, Error> {
-		// TODO: Replace with native 128-bit integer support.
-		// #[allow(clippy::unnecessary_fallible_conversions)] // `Decimal::from` can panic
-		// `clippy::unnecessary_fallible_conversions` not available on Rust < v1.75
-		#[allow(warnings)]
-		match Decimal::try_from(value) {
-			Ok(decimal) => Ok(decimal.into()),
-			_ => Err(Error::TryFrom(value.to_string(), "Decimal")),
-		}
+		Ok(value.into())
 	}
 
 	#[inline]
@@ -74,14 +67,7 @@ impl ser::Serializer for Serializer {
 	}
 
 	fn serialize_u128(self, value: u128) -> Result<Self::Ok, Error> {
-		// TODO: Replace with native 128-bit integer support.
-		// #[allow(clippy::unnecessary_fallible_conversions)] // `Decimal::from` can panic
-		// `clippy::unnecessary_fallible_conversions` not available on Rust < v1.75
-		#[allow(warnings)]
-		match Decimal::try_from(value) {
-			Ok(decimal) => Ok(decimal.into()),
-			_ => Err(Error::TryFrom(value.to_string(), "Decimal")),
-		}
+		Ok(value.into())
 	}
 
 	#[inline]

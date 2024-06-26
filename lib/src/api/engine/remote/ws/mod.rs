@@ -77,22 +77,21 @@ impl Surreal<Client> {
 			engine: PhantomData,
 			address: address.into_endpoint(),
 			capacity: 0,
-			client: PhantomData,
 			waiter: self.waiter.clone(),
 			response_type: PhantomData,
 		}
 	}
 }
 
-#[derive(Clone, Debug, Deserialize)]
 #[revisioned(revision = 1)]
+#[derive(Clone, Debug, Deserialize)]
 pub(crate) struct Failure {
 	pub(crate) code: i64,
 	pub(crate) message: String,
 }
 
-#[derive(Debug, Deserialize)]
 #[revisioned(revision = 1)]
+#[derive(Debug, Deserialize)]
 pub(crate) enum Data {
 	Other(Value),
 	Query(Vec<QueryMethodResponse>),
@@ -135,6 +134,7 @@ impl DbResponse {
 								(stats, Err(Error::Query(response.result.as_raw_string()).into())),
 							);
 						}
+						_ => unreachable!(),
 					}
 				}
 
@@ -149,8 +149,8 @@ impl DbResponse {
 	}
 }
 
-#[derive(Debug, Deserialize)]
 #[revisioned(revision = 1)]
+#[derive(Debug, Deserialize)]
 pub(crate) struct Response {
 	id: Option<Value>,
 	pub(crate) result: ServerResult,

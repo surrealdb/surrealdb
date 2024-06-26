@@ -11,7 +11,7 @@ use http::{request::Parts, StatusCode};
 use hyper::{Request, Response};
 use surrealdb::{
 	dbs::Session,
-	iam::verify::{basic, basic_legacy, token},
+	iam::verify::{basic, token},
 };
 use tower_http::auth::AsyncAuthorizeRequest;
 
@@ -20,9 +20,8 @@ use crate::{dbs::DB, err::Error};
 use super::{
 	client_ip::ExtractClientIP,
 	headers::{
-		parse_typed_header, SurrealAuthDatabase, SurrealAuthNamespace, SurrealDatabase,
-		SurrealDatabaseLegacy, SurrealId, SurrealIdLegacy, SurrealNamespace,
-		SurrealNamespaceLegacy,
+		parse_typed_header, SurrealAuthDatabase, SurrealAuthNamespace, SurrealDatabase, SurrealId,
+		SurrealNamespace,
 	},
 	AppState,
 };
@@ -88,34 +87,18 @@ async fn check_auth(parts: &mut Parts) -> Result<Session, Error> {
 		None
 	};
 
-	// Extract the session id from the headers. If not found, fallback to the legacy header name.
-	let id = match parse_typed_header::<SurrealId>(parts.extract::<TypedHeader<SurrealId>>().await)
-	{
-		Ok(None) => parse_typed_header::<SurrealIdLegacy>(
-			parts.extract::<TypedHeader<SurrealIdLegacy>>().await,
-		),
-		res => res,
-	}?;
+	// Extract the session id from the headers.
+	let id = parse_typed_header::<SurrealId>(parts.extract::<TypedHeader<SurrealId>>().await)?;
 
-	// Extract the namespace from the headers. If not found, fallback to the legacy header name.
-	let ns = match parse_typed_header::<SurrealNamespace>(
+	// Extract the namespace from the headers.
+	let ns = parse_typed_header::<SurrealNamespace>(
 		parts.extract::<TypedHeader<SurrealNamespace>>().await,
-	) {
-		Ok(None) => parse_typed_header::<SurrealNamespaceLegacy>(
-			parts.extract::<TypedHeader<SurrealNamespaceLegacy>>().await,
-		),
-		res => res,
-	}?;
+	)?;
 
-	// Extract the database from the headers. If not found, fallback to the legacy header name.
-	let db = match parse_typed_header::<SurrealDatabase>(
+	// Extract the database from the headers.
+	let db = parse_typed_header::<SurrealDatabase>(
 		parts.extract::<TypedHeader<SurrealDatabase>>().await,
-	) {
-		Ok(None) => parse_typed_header::<SurrealDatabaseLegacy>(
-			parts.extract::<TypedHeader<SurrealDatabaseLegacy>>().await,
-		),
-		res => res,
-	}?;
+	)?;
 
 	// Extract the authentication namespace and database from the headers.
 	let auth_ns = parse_typed_header::<SurrealAuthNamespace>(
@@ -134,24 +117,24 @@ async fn check_auth(parts: &mut Parts) -> Result<Session, Error> {
 		parts.extract_with_state(&state).await.unwrap_or(ExtractClientIP(None));
 
 	// Create session
-	#[rustfmt::skip]
-	let mut session = Session { ip, or, id, ns, db, ..Default::default() };
+	let mut session = Session::default();
+	session.ip = ip;
+	session.or = or;
+	session.id = id;
+	session.ns = ns;
+	session.db = db;
 
 	// If Basic authentication data was supplied
 	if let Ok(au) = parts.extract::<TypedHeader<Authorization<Basic>>>().await {
-		if kvs.is_auth_level_enabled() {
-			basic(
-				kvs,
-				&mut session,
-				au.username(),
-				au.password(),
-				auth_ns.as_deref(),
-				auth_db.as_deref(),
-			)
-			.await?;
-		} else {
-			basic_legacy(kvs, &mut session, au.username(), au.password()).await?;
-		}
+		basic(
+			kvs,
+			&mut session,
+			au.username(),
+			au.password(),
+			auth_ns.as_deref(),
+			auth_db.as_deref(),
+		)
+		.await?;
 	};
 
 	// If Token authentication data was supplied

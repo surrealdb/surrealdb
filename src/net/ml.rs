@@ -80,19 +80,12 @@ async fn import(
 	// Insert the file data in to the store
 	surrealdb::obs::put(&path, data).await?;
 	// Insert the model in to the database
-	db.process(
-		DefineStatement::Model(DefineModelStatement {
-			hash,
-			name: file.header.name.to_string().into(),
-			version: file.header.version.to_string(),
-			comment: Some(file.header.description.to_string().into()),
-			..Default::default()
-		})
-		.into(),
-		&session,
-		None,
-	)
-	.await?;
+	let mut model = DefineModelStatement::default();
+	model.name = file.header.name.to_string().into();
+	model.version = file.header.version.to_string();
+	model.comment = Some(file.header.description.to_string().into());
+	model.hash = hash;
+	db.process(DefineStatement::Model(model).into(), &session, None).await?;
 	//
 	Ok(output::none())
 }

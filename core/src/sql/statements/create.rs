@@ -1,23 +1,31 @@
 use crate::ctx::Context;
-use crate::dbs::{Iterator, Options, Statement, Transaction};
+use crate::dbs::{Iterator, Options, Statement};
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::sql::{Data, Output, Timeout, Value, Values};
 use derive::Store;
+use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[revisioned(revision = 2)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
+#[non_exhaustive]
 pub struct CreateStatement {
+	// A keyword modifier indicating if we are expecting a single result or several
 	#[revision(start = 2)]
 	pub only: bool,
+	// Where we are creating (i.e. table, or record ID)
 	pub what: Values,
+	// The data associated with the record being created
 	pub data: Option<Data>,
+	//  What the result of the statement should resemble (i.e. Diff or no result etc).
 	pub output: Option<Output>,
+	// The timeout for the statement
 	pub timeout: Option<Timeout>,
+	// If the statement should be run in parallel
 	pub parallel: bool,
 }
 
@@ -29,9 +37,9 @@ impl CreateStatement {
 	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
+		stk: &mut Stk,
 		ctx: &Context<'_>,
 		opt: &Options,
-		txn: &Transaction,
 		doc: Option<&CursorDoc<'_>>,
 	) -> Result<Value, Error> {
 		// Valid options?
@@ -44,8 +52,8 @@ impl CreateStatement {
 		let opt = &opt.new_with_futures(false);
 		// Loop over the create targets
 		for w in self.what.0.iter() {
-			let v = w.compute(ctx, opt, txn, doc).await?;
-			i.prepare(ctx, opt, txn, &stm, v).await.map_err(|e| match e {
+			let v = w.compute(stk, ctx, opt, doc).await?;
+			i.prepare(stk, ctx, opt, &stm, v).await.map_err(|e| match e {
 				Error::InvalidStatementTarget {
 					value: v,
 				} => Error::CreateStatement {
@@ -55,7 +63,7 @@ impl CreateStatement {
 			})?;
 		}
 		// Output the results
-		match i.output(ctx, opt, txn, &stm).await? {
+		match i.output(stk, ctx, opt, &stm).await? {
 			// This is a single record result
 			Value::Array(mut a) if self.only => match a.len() {
 				// There was exactly one result

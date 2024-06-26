@@ -48,11 +48,16 @@ build.allow_build_instructions = [
     "cargo:rustc-link-lib=static=ring",
     "cargo:rustc-link-lib=static=ring-core",
     "cargo:rustc-link-lib=static=ring-test",
-    "cargo:rustc-link-lib=static=ring_core_0_17_7_",
-    "cargo:rustc-link-lib=static=ring_core_0_17_7_test",
+    "cargo:rustc-link-lib=static=ring_core_0_17_8_",
+    "cargo:rustc-link-lib=static=ring_core_0_17_8_test",
     "cargo:rustc-link-search=native=*",
 ]
 allow_unsafe = true
+allow_apis = [
+    "fs",
+]
+
+[pkg.walkdir]
 allow_apis = [
     "fs",
 ]
@@ -606,10 +611,6 @@ from.build.allow_apis = [
 allow_unsafe = true
 
 [pkg.wasm-bindgen-shared]
-build.allow_apis = [
-    "fs",
-    "process",
-]
 build.allow_build_instructions = [
     "cargo:rustc-env=SCHEMA_FILE_HASH=*",
 ]
@@ -714,9 +715,6 @@ allow_unsafe = true
 
 [pkg.wasm-bindgen-backend]
 allow_unsafe = true
-allow_apis = [
-    "fs",
-]
 
 [pkg.alloc-stdlib]
 allow_unsafe = true
@@ -759,6 +757,12 @@ allow_unsafe = true
 
 
 [pkg.same-file]
+allow_unsafe = true
+allow_apis = [
+    "fs",
+]
+
+[pkg.atomic-waker]
 allow_unsafe = true
 
 [pkg.doc-comment]
@@ -1302,3 +1306,50 @@ allow_proc_macro = true
 allow_apis = [
     "fs",
 ]
+
+[pkg.phf_macros]
+allow_proc_macro = true
+
+[pkg.rawpointer]
+allow_unsafe = true
+
+[pkg.matrixmultiply]
+allow_unsafe = true
+
+[pkg.approx]
+allow_unsafe = true
+
+[pkg.num-complex]
+allow_unsafe = true
+
+[pkg.ndarray]
+allow_unsafe = true
+
+[pkg.ndarray-stats]
+allow_unsafe = true
+
+[pkg.noisy_float]
+allow_unsafe = true
+
+[pkg.linfa-linalg]
+allow_unsafe = true
+
+[pkg.mac]
+allow_unsafe = true
+
+[pkg.html5ever]
+build.allow_apis = [
+    "fs",
+]
+
+[pkg.futf]
+allow_unsafe = true
+
+[pkg.markup5ever]
+build.allow_apis = [
+    "fs",
+]
+allow_unsafe = true
+
+[pkg.tendril]
+allow_unsafe = true

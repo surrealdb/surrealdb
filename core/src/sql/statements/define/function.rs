@@ -1,20 +1,20 @@
 use crate::ctx::Context;
-use crate::dbs::{Options, Transaction};
+use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::iam::{Action, ResourceKind};
-use crate::sql::{
-	fmt::{is_pretty, pretty_indent},
-	Base, Block, Ident, Kind, Permission, Strand, Value,
-};
+use crate::sql::fmt::{is_pretty, pretty_indent};
+use crate::sql::statements::info::InfoStructure;
+use crate::sql::{Base, Block, Ident, Kind, Permission, Strand, Value};
 use derive::Store;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Write};
 
+#[revisioned(revision = 2)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[revisioned(revision = 2)]
+#[non_exhaustive]
 pub struct DefineFunctionStatement {
 	pub name: Ident,
 	pub args: Vec<(Ident, Kind)>,
@@ -29,27 +29,30 @@ impl DefineFunctionStatement {
 	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
-		_ctx: &Context<'_>,
+		ctx: &Context<'_>,
 		opt: &Options,
-		txn: &Transaction,
 		_doc: Option<&CursorDoc<'_>>,
 	) -> Result<Value, Error> {
 		// Allowed to run?
 		opt.is_allowed(Action::Edit, ResourceKind::Function, &Base::Db)?;
 		// Claim transaction
-		let mut run = txn.lock().await;
+		let mut run = ctx.tx_lock().await;
 		// Clear the cache
 		run.clear_cache();
 		// Check if function already exists
-		if self.if_not_exists && run.get_db_function(opt.ns(), opt.db(), &self.name).await.is_ok() {
-			return Err(Error::FcAlreadyExists {
-				value: self.name.to_string(),
-			});
+		if run.get_db_function(opt.ns()?, opt.db()?, &self.name).await.is_ok() {
+			if self.if_not_exists {
+				return Ok(Value::None);
+			} else {
+				return Err(Error::FcAlreadyExists {
+					value: self.name.to_string(),
+				});
+			}
 		}
 		// Process the statement
-		let key = crate::key::database::fc::new(opt.ns(), opt.db(), &self.name);
-		run.add_ns(opt.ns(), opt.strict).await?;
-		run.add_db(opt.ns(), opt.db(), opt.strict).await?;
+		let key = crate::key::database::fc::new(opt.ns()?, opt.db()?, &self.name);
+		run.add_ns(opt.ns()?, opt.strict).await?;
+		run.add_db(opt.ns()?, opt.db()?, opt.strict).await?;
 		run.set(
 			key,
 			DefineFunctionStatement {
@@ -90,5 +93,21 @@ impl fmt::Display for DefineFunctionStatement {
 		};
 		write!(f, "PERMISSIONS {}", self.permissions)?;
 		Ok(())
+	}
+}
+
+impl InfoStructure for DefineFunctionStatement {
+	fn structure(self) -> Value {
+		Value::from(map! {
+			"name".to_string() => self.name.structure(),
+			"args".to_string() => self.args
+				.into_iter()
+				.map(|(n, k)| vec![n.structure(), k.structure()].into())
+				.collect::<Vec<Value>>()
+				.into(),
+			"block".to_string() => self.block.structure(),
+			"permissions".to_string() => self.permissions.structure(),
+			"comment".to_string(), if let Some(v) = self.comment => v.into(),
+		})
 	}
 }

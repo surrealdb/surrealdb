@@ -2,7 +2,7 @@
 name = "surrealdb-core"
 publish = true
 edition = "2021"
-version = "2.0.0-1.5.0"
+version = "2.0.0"
 rust-version = "1.77.0"
 readme = "../lib/CARGO.md"
 authors = ["Tobie Morgan Hitchcock <tobie@surrealdb.com>"]
@@ -24,9 +24,8 @@ resolver = "2"
 [features]
 # Public features
 default = ["kv-mem"]
-kv-mem = ["dep:echodb", "tokio/time"]
+kv-mem = ["dep:echodb", "tokio/time", "dep:tempfile", "dep:ext-sort"]
 kv-indxdb = ["dep:indxdb"]
-kv-speedb = ["dep:speedb", "tokio/time", "dep:tempfile", "dep:ext-sort"]
 kv-rocksdb = ["dep:rocksdb", "tokio/time", "dep:tempfile", "dep:ext-sort"]
 kv-tikv = ["dep:tikv", "dep:tempfile", "dep:ext-sort"]
 kv-fdb-5_1 = ["foundationdb/fdb-5_1", "kv-fdb", "dep:tempfile", "dep:ext-sort"]
@@ -40,7 +39,7 @@ kv-fdb-7_1 = ["foundationdb/fdb-7_1", "kv-fdb", "dep:tempfile", "dep:ext-sort"]
 kv-surrealkv = ["dep:surrealkv", "tokio/time", "dep:tempfile", "dep:ext-sort"]
 scripting = ["dep:js"]
 http = ["dep:reqwest"]
-ml = ["dep:surrealml-core1", "dep:ndarray"]
+ml = ["dep:surrealml"]
 jwks = ["dep:reqwest"]
 arbitrary = [
     "dep:arbitrary",
@@ -49,36 +48,35 @@ arbitrary = [
     "geo-types/arbitrary",
     "uuid/arbitrary",
 ]
-experimental-parser = ["dep:phf", "dep:unicase"]
 # Private features
 kv-fdb = ["tokio/time"]
 
 [package.metadata.docs.rs]
 rustdoc-args = ["--cfg", "docsrs"]
-features = [
-    "kv-mem",
-    "kv-rocksdb",
-    "http",
-    "scripting",
-]
+features = ["kv-mem", "kv-rocksdb", "http", "scripting"]
 targets = []
 
 [dependencies]
 addr = { version = "0.15.6", default-features = false, features = ["std"] }
+ahash = "0.8.11"
+ammonia = "4.0.0"
+arbitrary = { version = "1.3.2", features = ["derive"], optional = true }
 argon2 = "0.5.2"
 ascii = { version = "0.3.2", package = "any_ascii" }
 async-recursion = "1.0.5"
-base64_lib = { version = "0.21.5", package = "base64" }
+base64 = "0.21.5"
 bcrypt = "0.15.0"
 bincode = "1.3.3"
 bytes = "1.5.0"
+ciborium = "0.2.1"
 cedar-policy = "2.4.2"
 channel = { version = "1.9.0", package = "async-channel" }
 chrono = { version = "0.4.31", features = ["serde"] }
+dashmap = "5.5.3"
 derive = { version = "0.12.0", package = "surrealdb-derive" }
 deunicode = "1.4.1"
 dmp = "0.2.0"
-echodb = { version = "0.4.0", optional = true }
+echodb = { version = "0.6.0", optional = true }
 executor = { version = "1.8.0", package = "async-executor" }
 ext-sort = { version = "^0.1.4", optional = true }
 foundationdb = { version = "0.8.0", default-features = false, features = [
@@ -88,10 +86,12 @@ fst = "0.4.7"
 futures = "0.3.29"
 fuzzy-matcher = "0.3.7"
 geo = { version = "0.27.0", features = ["use-serde"] }
+geo-types = { version = "0.7.12", features = ["arbitrary"] }
+hashbrown = { version = "0.14.5", features = ["serde"] }
 hex = { version = "0.4.3" }
 indxdb = { version = "0.4.0", optional = true }
 ipnet = "2.9.0"
-js = { version = "0.5.1", package = "rquickjs", features = [
+js = { version = "0.6.2", package = "rquickjs", features = [
     "array-buffer",
     "bindgen",
     "classes",
@@ -104,25 +104,32 @@ js = { version = "0.5.1", package = "rquickjs", features = [
 ], optional = true }
 jsonwebtoken = { version = "8.3.0-surreal.1", package = "surrealdb-jsonwebtoken" }
 lexicmp = "0.1.0"
+linfa-linalg = "=0.1.0"
 md-5 = "0.10.6"
 nanoid = "0.4.0"
-ndarray = { version = "0.15.6", optional = true }
+ndarray = { version = "=0.15.6" }
+ndarray-stats = "=0.5.1"
+num-traits = "0.2.18"
 nom = { version = "7.1.3", features = ["alloc"] }
 num_cpus = "1.16.0"
 object_store = { version = "0.8.0", optional = false }
 once_cell = "1.18.0"
 pbkdf2 = { version = "0.12.2", features = ["simple"] }
+phf = { version = "0.11.2", features = ["macros", "unicase"] }
 pin-project-lite = "0.2.13"
-quick_cache = "0.4.0"
+quick_cache = "0.5.1"
 radix_trie = { version = "0.2.1", features = ["serde"] }
 rand = "0.8.5"
+reblessive = { version = "0.3.5", features = ["tree"] }
 regex = "1.10.2"
+regex-syntax = { version = "0.8.2", optional = true, features = ["arbitrary"] }
 reqwest = { version = "0.11.22", default-features = false, features = [
     "json",
     "stream",
     "multipart",
 ], optional = true }
-revision = "0.5.0"
+revision = { version = "0.7.0", features = ["chrono", "geo", "roaring", "regex", "rust_decimal", "uuid"] }
+rmpv = "1.0.1"
 roaring = { version = "0.10.2", features = ["serde"] }
 rocksdb = { version = "0.21.0", features = ["lz4", "snappy"], optional = true }
 rust_decimal = { version = "1.33.1", features = ["maths", "serde-str"] }
@@ -134,27 +141,22 @@ serde_json = "1.0.108"
 sha1 = "0.10.6"
 sha2 = "0.10.8"
 snap = "1.1.0"
-speedb = { version = "0.0.4", features = ["lz4", "snappy"], optional = true }
 storekey = "0.5.0"
-surrealml-core1 = { version = "0.1.1", optional = true, package = "surrealml-core" }
-surrealkv = { version = "0.1.3", optional = true }
+surrealkv = { version = "0.2.0", optional = true }
+surrealml = { version = "0.1.1", optional = true, package = "surrealml-core" }
 tempfile = { version = "3.10.1", optional = true }
 thiserror = "1.0.50"
 tikv = { version = "0.2.0-surreal.2", default-features = false, package = "surrealdb-tikv-client", optional = true }
 tracing = "0.1.40"
 trice = "0.4.0"
 ulid = { version = "1.1.0", features = ["serde"] }
+unicase = "2.7.0"
 url = "2.5.0"
-phf = { version = "0.11.2", features = ["macros", "unicase"], optional = true }
-unicase = { version = "2.7.0", optional = true }
-arbitrary = { version = "1.3.2", features = ["derive"], optional = true }
-regex-syntax = { version = "0.8.2", optional = true, features = ["arbitrary"] }
-geo-types = { version = "0.7.12", features = ["arbitrary"] }
-reblessive = { version = "0.3.0" }
 
 [dev-dependencies]
 criterion = { version = "0.5.1", features = ["async_tokio"] }
 env_logger = "0.10.1"
+flate2 = "1.0.28"
 pprof = { version = "0.13.0", features = ["flamegraph", "criterion"] }
 serial_test = "2.0.0"
 temp-dir = "0.1.11"
@@ -166,8 +168,11 @@ wiremock = "0.5.22"
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 pharos = "0.5.3"
-ring = { version = "0.17.7", features = ["wasm32_unknown_unknown_js"] } # Make ring-based dependencies work on Wasm
-tokio = { version = "1.34.0", default-features = false, features = ["rt", "sync"] }
+ring = { version = "0.17.7", features = ["wasm32_unknown_unknown_js"] }
+tokio = { version = "1.34.0", default-features = false, features = [
+    "rt",
+    "sync",
+] }
 uuid = { version = "1.6.1", features = ["serde", "js", "v4", "v7"] }
 wasm-bindgen-futures = "0.4.39"
 wasmtimer = { version = "0.2.0", default-features = false, features = [

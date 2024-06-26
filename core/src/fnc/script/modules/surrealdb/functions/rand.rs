@@ -5,10 +5,11 @@ use crate::sql::value::Value;
 
 mod uuid;
 
+#[non_exhaustive]
 pub struct Package;
 
 impl js::module::ModuleDef for Package {
-	fn declare(decls: &mut js::module::Declarations) -> js::Result<()> {
+	fn declare(decls: &js::module::Declarations) -> js::Result<()> {
 		decls.declare("default")?;
 		decls.declare("bool")?;
 		decls.declare("enum")?;
@@ -21,7 +22,7 @@ impl js::module::ModuleDef for Package {
 		decls.declare("uuid")?;
 		Ok(())
 	}
-	fn evaluate<'js>(ctx: &js::Ctx<'js>, exports: &mut js::module::Exports<'js>) -> js::Result<()> {
+	fn evaluate<'js>(ctx: &js::Ctx<'js>, exports: &js::module::Exports<'js>) -> js::Result<()> {
 		let default = js::Function::new(ctx.clone(), |ctx: Ctx<'js>, args: Rest<Value>| {
 			run(ctx, "rand", args.0)
 		})?
