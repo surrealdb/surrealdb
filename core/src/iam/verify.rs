@@ -169,7 +169,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			// Get the database access method
 			let de = tx.get_db_access(&ns, &db, &ac).await?;
 			// Obtain the configuration to verify the token based on the access method
-			let (at, cf) = match de.kind {
+			let (au, cf) = match de.kind {
 				AccessType::Record(at) => {
 					let cf = match at.jwt.verify.clone() {
 						JwtAccessVerify::Key(key) => config(key.alg, key.key),
@@ -185,14 +185,14 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 						_ => return Err(Error::AccessMethodMismatch),
 					}?;
 
-					(at, cf)
+					(at.authenticate, cf)
 				}
 				_ => return Err(Error::AccessMethodMismatch),
 			};
 			// Verify the token
 			decode::<Claims>(token, &cf.0, &cf.1)?;
 			// AUTHENTICATE clause
-			if let Some(ac) = at.authenticate {
+			if let Some(au) = au {
 				// Setup the system session for finding the signin record
 				let mut sess = Session::editor().with_ns(&ns).with_db(&db);
 				sess.rd = Some(rid.clone().into());
@@ -200,7 +200,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 				sess.ip.clone_from(&session.ip);
 				sess.or.clone_from(&session.or);
 				// Compute the value with the params
-				match kvs.evaluate(ac, &sess, None).await {
+				match kvs.evaluate(au, &sess, None).await {
 					Ok(val) => match val.record() {
 						Some(id) => {
 							// Update rid with result from AUTHENTICATE clause
@@ -234,6 +234,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			Ok(())
 		}
 		// Check if this is database access
+		// This can also be record access with an authenticate clause
 		Claims {
 			ns: Some(ns),
 			db: Some(db),
@@ -247,49 +248,112 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			// Get the database access method
 			let de = tx.get_db_access(&ns, &db, &ac).await?;
 			// Obtain the configuration to verify the token based on the access method
-			let cf = match de.kind {
-				AccessType::Jwt(ac) => match ac.verify {
-					JwtAccessVerify::Key(key) => config(key.alg, key.key),
-					#[cfg(feature = "jwks")]
-					JwtAccessVerify::Jwks(jwks) => {
-						if let Some(kid) = token_data.header.kid {
-							jwks::config(kvs, &kid, &jwks.url, token_data.header.alg).await
-						} else {
-							Err(Error::MissingTokenHeader("kid".to_string()))
+			match de.kind {
+				// If the access type is Jwt, this is database access
+				AccessType::Jwt(at) => {
+					let cf = match at.verify {
+						JwtAccessVerify::Key(key) => config(key.alg, key.key),
+						#[cfg(feature = "jwks")]
+						JwtAccessVerify::Jwks(jwks) => {
+							if let Some(kid) = token_data.header.kid {
+								jwks::config(kvs, &kid, &jwks.url, token_data.header.alg).await
+							} else {
+								Err(Error::MissingTokenHeader("kid".to_string()))
+							}
 						}
+						#[cfg(not(feature = "jwks"))]
+						_ => return Err(Error::AccessMethodMismatch),
+					}?;
+
+					// Verify the token
+					decode::<Claims>(token, &cf.0, &cf.1)?;
+					// Parse the roles
+					let roles = match token_data.claims.roles {
+						// If no role is provided, grant the viewer role
+						None => vec![Role::Viewer],
+						// If roles are provided, parse them
+						Some(roles) => roles
+							.iter()
+							.map(|r| -> Result<Role, Error> {
+								Role::from_str(r.as_str()).map_err(Error::IamError)
+							})
+							.collect::<Result<Vec<_>, _>>()?,
+					};
+					// Log the success
+					debug!("Authenticated to database `{}` with access method `{}`", db, ac);
+					// Set the session
+					session.tk = Some(value);
+					session.ns = Some(ns.to_owned());
+					session.db = Some(db.to_owned());
+					session.ac = Some(ac.to_owned());
+					session.exp = expiration(de.duration.session)?;
+					session.au = Arc::new(Auth::new(Actor::new(
+						de.name.to_string(),
+						roles,
+						Level::Database(ns, db),
+					)));
+				}
+				// If the access type is Record, this is record access
+				// Record access without an "id" claim is only possible if there is an AUTHENTICATE clause
+				// The clause can make up for the missing "id" claim by resolving other claims to a specific record
+				AccessType::Record(at) => match at.authenticate {
+					Some(au) => {
+						trace!("Access method `{}` is record access with authenticate clause", ac);
+						let cf = match at.jwt.verify {
+							JwtAccessVerify::Key(key) => config(key.alg, key.key),
+							#[cfg(feature = "jwks")]
+							JwtAccessVerify::Jwks(jwks) => {
+								if let Some(kid) = token_data.header.kid {
+									jwks::config(kvs, &kid, &jwks.url, token_data.header.alg).await
+								} else {
+									Err(Error::MissingTokenHeader("kid".to_string()))
+								}
+							}
+							#[cfg(not(feature = "jwks"))]
+							_ => return Err(Error::AccessMethodMismatch),
+						}?;
+
+						// Verify the token
+						decode::<Claims>(token, &cf.0, &cf.1)?;
+						// AUTHENTICATE clause
+						// Setup the system session for finding the signin record
+						let mut sess = Session::editor().with_ns(&ns).with_db(&db);
+						sess.tk = Some(token_data.claims.clone().into());
+						sess.ip.clone_from(&session.ip);
+						sess.or.clone_from(&session.or);
+						// Compute the value with the params
+						let rid = match kvs.evaluate(au, &sess, None).await {
+							Ok(val) => match val.record() {
+								// If found, return record identifier from AUTHENTICATE clause
+								Some(id) => id,
+								_ => return Err(Error::InvalidAuth),
+							},
+							Err(e) => {
+								return match e {
+									Error::Thrown(_) => Err(e),
+									e if *INSECURE_FORWARD_RECORD_ACCESS_ERRORS => Err(e),
+									_ => Err(Error::InvalidAuth),
+								}
+							}
+						};
+						// Log the success
+						debug!("Authenticated with record access method `{}`", ac);
+						// Set the session
+						session.tk = Some(value);
+						session.ns = Some(ns.to_owned());
+						session.db = Some(db.to_owned());
+						session.ac = Some(ac.to_owned());
+						session.rd = Some(Value::from(rid.to_owned()));
+						session.exp = expiration(de.duration.session)?;
+						session.au = Arc::new(Auth::new(Actor::new(
+							rid.to_string(),
+							Default::default(),
+							Level::Record(ns, db, rid.to_string()),
+						)));
 					}
-					#[cfg(not(feature = "jwks"))]
 					_ => return Err(Error::AccessMethodMismatch),
 				},
-				_ => return Err(Error::AccessMethodMismatch),
-			}?;
-			// Verify the token
-			decode::<Claims>(token, &cf.0, &cf.1)?;
-			// Parse the roles
-			let roles = match token_data.claims.roles {
-				// If no role is provided, grant the viewer role
-				None => vec![Role::Viewer],
-				// If roles are provided, parse them
-				Some(roles) => roles
-					.iter()
-					.map(|r| -> Result<Role, Error> {
-						Role::from_str(r.as_str()).map_err(Error::IamError)
-					})
-					.collect::<Result<Vec<_>, _>>()?,
 			};
-			// Log the success
-			debug!("Authenticated to database `{}` with access method `{}`", db, ac);
-			// Set the session
-			session.tk = Some(value);
-			session.ns = Some(ns.to_owned());
-			session.db = Some(db.to_owned());
-			session.ac = Some(ac.to_owned());
-			session.exp = expiration(de.duration.session)?;
-			session.au = Arc::new(Auth::new(Actor::new(
-				de.name.to_string(),
-				roles,
-				Level::Database(ns, db),
-			)));
 			Ok(())
 		}
 		// Check if this is database authentication with user credentials
@@ -1687,7 +1751,7 @@ mod tests {
 
 	#[tokio::test]
 	async fn test_token_db_record_and_authenticate_clause() {
-		// Test with correct credentials and no additional claims
+		// Test with an "id" claim
 		{
 			let secret = "jwt_secret";
 			let key = EncodingKey::from_secret(secret.as_ref());
@@ -1760,7 +1824,7 @@ mod tests {
 			);
 		}
 
-		// Test with correct credentials and additional claim
+		// Test without an "id" claim
 		{
 			let secret = "jwt_secret";
 			let key = EncodingKey::from_secret(secret.as_ref());
@@ -1803,7 +1867,6 @@ mod tests {
 					"ns": "test",
 					"db": "test",
 					"ac": "user",
-					"id": "user:invalid",
 					"email": "info@surrealdb.com"
 				}}
 				"#
