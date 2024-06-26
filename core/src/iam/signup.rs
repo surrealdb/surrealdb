@@ -96,7 +96,7 @@ pub async fn db_access(
 												..Claims::default()
 											};
 											// AUTHENTICATE clause
-											if let Some(ac) = at.authenticate {
+											if let Some(au) = at.authenticate {
 												// Setup the system session for finding the signin record
 												let mut sess =
 													Session::editor().with_ns(&ns).with_db(&db);
@@ -105,7 +105,7 @@ pub async fn db_access(
 												sess.ip.clone_from(&session.ip);
 												sess.or.clone_from(&session.or);
 												// Compute the value with the params
-												match kvs.evaluate(ac, &sess, None).await {
+												match kvs.evaluate(au, &sess, None).await {
 													Ok(val) => match val.record() {
 														Some(id) => {
 															// Update rid with result from AUTHENTICATE clause
