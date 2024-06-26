@@ -509,11 +509,12 @@ impl HitsIterator {
 		}
 	}
 
-	#[cfg(not(target_arch = "wasm32"))]
+	#[cfg(not(any(target_arch = "wasm32", target_arch = "x86", target_arch = "arm")))]
 	pub(crate) fn len(&self) -> usize {
 		self.iter.len()
 	}
-	#[cfg(target_arch = "wasm32")]
+
+	#[cfg(any(target_arch = "wasm32", target_arch = "x86", target_arch = "arm"))]
 	pub(crate) fn len(&self) -> usize {
 		self.iter.size_hint().0
 	}
