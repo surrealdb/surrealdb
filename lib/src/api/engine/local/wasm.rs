@@ -20,14 +20,13 @@ use crate::opt::WaitFor;
 use crate::options::EngineOptions;
 use flume::Receiver;
 use flume::Sender;
-use futures::future::Either;
 use futures::stream::poll_fn;
+use futures::FutureExt;
 use futures::StreamExt;
 use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::future::Future;
-use std::marker::PhantomData;
 use std::pin::Pin;
 use std::sync::atomic::AtomicI64;
 use std::sync::Arc;
@@ -86,7 +85,7 @@ impl Connection for Db {
 				request: (0, self.method, param),
 				response: sender,
 			};
-			router.sender.send_async(Some(route)).await?;
+			router.sender.send_async(route).await?;
 			Ok(receiver)
 		})
 	}
@@ -156,15 +155,9 @@ pub(crate) async fn run_router(
 	let mut route_stream = route_rx.stream();
 
 	loop {
-		let route_future = route_stream.next();
-		let notification_future = notification_stream.next();
-
-		futures::pin_mut!(stream_future);
-		futures::pin_mut!(notification_future);
-
 		// use the less ergonomic futures::select as tokio::select is not available.
 		futures::select! {
-			route = route_future => {
+			route = route_stream.next().fuse() => {
 				let Some(route) = route else {
 					// termination requested
 					break
@@ -187,7 +180,7 @@ pub(crate) async fn run_router(
 					}
 				}
 			}
-			notification = notification_future => {
+			notification = notification_stream.next().fuse() => {
 				let Some(notification) = notification else {
 					// TODO: maybe do something else then ignore a disconnected notification
 					// channel.
