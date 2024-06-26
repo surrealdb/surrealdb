@@ -23,7 +23,6 @@ use flume::Sender;
 use futures::future::Either;
 use futures::stream::poll_fn;
 use futures::StreamExt;
-use futures_concurrency::stream::Merge as _;
 use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::collections::HashSet;
@@ -151,18 +150,27 @@ pub(crate) fn router(
 		let (_tasks, task_chans) = start_tasks(&opt, kvs.clone());
 
 		let mut notifications = kvs.notifications();
-		let notification_stream = poll_fn(move |cx| match &mut notifications {
+		let mut notification_stream = poll_fn(move |cx| match &mut notifications {
 			Some(rx) => rx.poll_next_unpin(cx),
-			None => Poll::Ready(None),
+			None => Poll::Pending,
 		});
 
-		let streams = (route_rx.stream().map(Either::Left), notification_stream.map(Either::Right));
-		let mut merged = streams.merge();
+		let mut route_stream = route_rx.stream();
 
-		while let Some(either) = merged.next().await {
-			match either {
-				Either::Left(None) => break, // Received a shutdown signal
-				Either::Left(Some(route)) => {
+		loop {
+			let route_future = route_stream.next();
+			let notification_future = notification_stream.next();
+
+			futures::pin_mut!(stream_future);
+			futures::pin_mut!(notification_future);
+
+			// use the less ergonomic futures::select as tokio::select is not available.
+			futures::select! {
+				route = route_future => {
+					let Some(route) = route else {
+						break
+					};
+
 					match super::router(
 						route.request,
 						&kvs,
@@ -180,7 +188,13 @@ pub(crate) fn router(
 						}
 					}
 				}
-				Either::Right(notification) => {
+				notification = notification_future => {
+					let Some(notification) = notification else {
+						// TODO: maybe do something else then ignore a disconnected notification
+						// channel.
+						continue;
+					};
+
 					let id = notification.id;
 					if let Some(sender) = live_queries.get(&id) {
 						if sender.send(notification).await.is_err() {

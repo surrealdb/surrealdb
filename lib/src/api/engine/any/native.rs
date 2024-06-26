@@ -83,7 +83,7 @@ impl Connection for Any {
 					{
 						features.insert(ExtraFeatures::Backup);
 						features.insert(ExtraFeatures::LiveQueries);
-						engine::local::native::router(address, conn_tx, route_rx);
+						tokio::spawn(engine::local::native::run_router(address, conn_tx, route_rx));
 						conn_rx.into_recv_async().await??
 					}
 
@@ -98,7 +98,7 @@ impl Connection for Any {
 					{
 						features.insert(ExtraFeatures::Backup);
 						features.insert(ExtraFeatures::LiveQueries);
-						engine::local::native::router(address, conn_tx, route_rx);
+						tokio::spawn(engine::local::native::run_router(address, conn_tx, route_rx));
 						conn_rx.into_recv_async().await??
 					}
 
@@ -114,7 +114,7 @@ impl Connection for Any {
 					{
 						features.insert(ExtraFeatures::Backup);
 						features.insert(ExtraFeatures::LiveQueries);
-						engine::local::native::router(address, conn_tx, route_rx);
+						tokio::spawn(engine::local::native::run_router(address, conn_tx, route_rx));
 						conn_rx.into_recv_async().await??
 					}
 
@@ -129,7 +129,7 @@ impl Connection for Any {
 					{
 						features.insert(ExtraFeatures::Backup);
 						features.insert(ExtraFeatures::LiveQueries);
-						engine::local::native::router(address, conn_tx, route_rx);
+						tokio::spawn(engine::local::native::run_router(address, conn_tx, route_rx));
 						conn_rx.into_recv_async().await??
 					}
 
@@ -162,7 +162,9 @@ impl Connection for Any {
 							client.get(base_url.join(Method::Health.as_str())?),
 						)
 						.await?;
-						engine::remote::http::native::router(base_url, client, route_rx);
+						tokio::spawn(engine::remote::http::native::run_router(
+							base_url, client, route_rx,
+						));
 					}
 
 					#[cfg(not(feature = "protocol-http"))]
@@ -195,14 +197,14 @@ impl Connection for Any {
 							maybe_connector.clone(),
 						)
 						.await?;
-						engine::remote::ws::native::router(
+						tokio::spawn(engine::remote::ws::native::run_router(
 							endpoint,
 							maybe_connector,
 							capacity,
 							config,
 							socket,
 							route_rx,
-						);
+						));
 					}
 
 					#[cfg(not(feature = "protocol-ws"))]
@@ -237,7 +239,7 @@ impl Connection for Any {
 				request: (self.id, self.method, param),
 				response: sender,
 			};
-			router.sender.send_async(Some(route)).await?;
+			router.sender.send_async(route).await?;
 			Ok(receiver)
 		})
 	}

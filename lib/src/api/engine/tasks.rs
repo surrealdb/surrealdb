@@ -1,6 +1,5 @@
 use flume::Sender;
 use futures::StreamExt;
-use futures_concurrency::stream::Merge;
 use reblessive::TreeStack;
 #[cfg(target_arch = "wasm32")]
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -97,20 +96,23 @@ fn init(opt: &EngineOptions, dbs: Arc<Datastore>) -> (FutureTask, Sender<()>) {
 
 	let _fut = spawn_future(async move {
 		let _lifecycle = crate::dbs::LoggingLifecycle::new("heartbeat task".to_string());
-		let ticker = interval_ticker(tick_interval).await;
-		let streams = (
-			ticker.map(|i| {
-				trace!("Node agent tick: {:?}", i);
-				Some(i)
-			}),
-			rx.into_stream().map(|_| None),
-		);
-		let mut streams = streams.merge();
+		let mut ticker = interval_ticker(tick_interval).await;
 
-		while let Some(Some(_)) = streams.next().await {
-			if let Err(e) = dbs.tick().await {
-				error!("Error running node agent tick: {}", e);
-				break;
+		loop {
+			tokio::select! {
+				v = ticker.next() => {
+					// ticker will never return None;
+					let i = v.unwrap();
+					trace!("Node agent tick: {:?}", i);
+					if let Err(e) = dbs.tick().await {
+						error!("Error running node agent tick: {}", e);
+						break;
+					}
+				}
+				_ = rx.recv_async() => {
+					// termination requested
+					break
+				}
 			}
 		}
 
@@ -145,25 +147,29 @@ fn live_query_change_feed(opt: &EngineOptions, dbs: Arc<Datastore>) -> (FutureTa
 			completed_status.store(true, Ordering::Relaxed);
 			return;
 		}
-		let ticker = interval_ticker(tick_interval).await;
-		let streams = (
-			ticker.map(|i| {
-				trace!("Live query agent tick: {:?}", i);
-				Some(i)
-			}),
-			rx.into_stream().map(|_| None),
-		);
-		let mut streams = streams.merge();
+		let mut ticker = interval_ticker(tick_interval).await;
 
 		let opt = Options::default();
-		while let Some(Some(_)) = streams.next().await {
-			if let Err(e) =
-				stack.enter(|stk| dbs.process_lq_notifications(stk, &opt)).finish().await
-			{
-				error!("Error running node agent tick: {}", e);
-				break;
+		loop {
+			tokio::select! {
+				v = ticker.next() => {
+					// ticker will never return None;
+					let i = v.unwrap();
+					trace!("Live query agent tick: {:?}", i);
+					if let Err(e) =
+						stack.enter(|stk| dbs.process_lq_notifications(stk, &opt)).finish().await
+					{
+						error!("Error running node agent tick: {}", e);
+						break;
+					}
+				}
+				_ = rx.recv_async() => {
+					// termination requested,
+					 break
+				}
 			}
 		}
+
 		#[cfg(target_arch = "wasm32")]
 		completed_status.store(true, Ordering::Relaxed);
 	});
