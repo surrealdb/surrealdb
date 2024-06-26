@@ -139,7 +139,9 @@ impl Connection for Any {
 				EndpointKind::Http | EndpointKind::Https => {
 					#[cfg(feature = "protocol-http")]
 					{
-						engine::remote::http::wasm::router(address, conn_tx, route_rx);
+						spawn_local(engine::remote::http::wasm::run_router(
+							address, conn_tx, route_rx,
+						));
 					}
 
 					#[cfg(not(feature = "protocol-http"))]
