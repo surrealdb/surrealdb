@@ -26,7 +26,6 @@ use futures::stream::{SplitSink, SplitStream};
 use futures::FutureExt;
 use futures::SinkExt;
 use futures::StreamExt;
-use indexmap::IndexMap;
 use pharos::Channel;
 use pharos::Events;
 use pharos::Observable;
@@ -35,7 +34,6 @@ use revision::revisioned;
 use serde::Deserialize;
 use std::collections::hash_map::Entry;
 use std::collections::BTreeMap;
-use std::collections::HashMap;
 use std::collections::HashSet;
 use std::future::Future;
 use std::mem;
@@ -146,7 +144,7 @@ async fn router_handle_request(
 		Method::Live => {
 			if let Some(sender) = param.notification_sender {
 				if let [Value::Uuid(id)] = &params[..1] {
-					state.live_queries.insert(*id, sender);
+					state.live_queries.insert(id.0, sender);
 				}
 			}
 			if response.into_send_async(Ok(DbResponse::Other(Value::None))).await.is_err() {
@@ -258,7 +256,7 @@ async fn router_handle_response(
 										let request = RouterRequest {
 											id: None,
 											method: Method::Kill.as_str().into(),
-											params: vec![Value::from(live_query_id)].into(),
+											params: Some(vec![Value::from(live_query_id)].into()),
 										};
 										let value = serialize(&request, endpoint.supports_revision)
 											.unwrap();
@@ -350,7 +348,7 @@ async fn router_reconnect(
 					let request = RouterRequest {
 						id: None,
 						method: Method::Set.as_str().into(),
-						params: vec![key.as_str().into(), value.clone()].into(),
+						params: Some(vec![key.as_str().into(), value.clone()].into()),
 					};
 					trace!("Request {:?}", request);
 					let serialize = serialize(&request, false).unwrap();
@@ -381,7 +379,7 @@ pub(crate) async fn run_router(
 		true => WsMeta::connect(&endpoint.url, vec![super::REVISION_HEADER]).await,
 		false => WsMeta::connect(&endpoint.url, None).await,
 	};
-	let (mut ws, mut socket) = match connect {
+	let (mut ws, socket) = match connect {
 		Ok(pair) => pair,
 		Err(error) => {
 			let _ = conn_tx.into_send_async(Err(error.into())).await;
@@ -413,7 +411,7 @@ pub(crate) async fn run_router(
 		Message::Binary(value)
 	};
 
-	let (mut socket_sink, mut socket_stream) = socket.split();
+	let (socket_sink, socket_stream) = socket.split();
 
 	let mut state = RouterState::new(socket_sink, socket_stream);
 
@@ -426,7 +424,6 @@ pub(crate) async fn run_router(
 
 		let mut pinger = IntervalStream::new(interval);
 
-		let mut live_queries = HashMap::new();
 		state.last_activity = Instant::now();
 		state.live_queries.clear();
 		state.routes.clear();
@@ -452,7 +449,7 @@ pub(crate) async fn run_router(
 						}
 					}
 				}
-				message = socket_stream.next().fuse() => {
+				message = state.stream.next().fuse() => {
 					let Some(message) = message else {
 						// socket disconnected,
 							router_reconnect(&mut state, &mut events, &endpoint, capacity).await;
@@ -491,7 +488,7 @@ pub(crate) async fn run_router(
 				_ = pinger.next().fuse() => {
 					if state.last_activity.elapsed() >= PING_INTERVAL {
 						trace!("Pinging the server");
-						if let Err(error) = socket_sink.send(ping.clone()).await {
+						if let Err(error) = state.sink.send(ping.clone()).await {
 							trace!("failed to ping the server; {error:?}");
 							router_reconnect(&mut state, &mut events, &endpoint, capacity).await;
 							break;
