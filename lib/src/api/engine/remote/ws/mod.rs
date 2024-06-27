@@ -20,19 +20,72 @@ use crate::dbs::Status;
 use crate::method::Stats;
 use crate::opt::IntoEndpoint;
 use crate::sql::Value;
+use flume::Sender;
 use indexmap::IndexMap;
 use revision::revisioned;
 use revision::Revisioned;
 use serde::de::DeserializeOwned;
 use serde::Deserialize;
+use serde::Serialize;
+use std::collections::HashMap;
 use std::io::Read;
 use std::marker::PhantomData;
 use std::time::Duration;
+use surrealdb_core::dbs::Notification as CoreNotification;
+use trice::Instant;
+use uuid::Uuid;
 
 pub(crate) const PATH: &str = "rpc";
 const PING_INTERVAL: Duration = Duration::from_secs(5);
 const PING_METHOD: &str = "ping";
 const REVISION_HEADER: &str = "revision";
+
+#[derive(Debug, Serialize)]
+#[revisioned(revision = 1)]
+struct RouterRequest {
+	id: Option<Value>,
+	method: Value,
+	params: Option<Value>,
+}
+
+struct RouterState<Sink, Stream, Msg> {
+	var_stash: IndexMap<i64, (String, Value)>,
+	/// Vars currently set by the set method,
+	vars: IndexMap<String, Value>,
+	/// Messages which aught to be replayed on a reconnect.
+	replay: IndexMap<Method, Msg>,
+	/// Pending live queries
+	live_queries: HashMap<Uuid, channel::Sender<CoreNotification>>,
+
+	routes: HashMap<i64, (Method, Sender<Result<DbResponse>>)>,
+
+	last_activity: Instant,
+
+	sink: Sink,
+	stream: Stream,
+}
+
+impl<Sink, Stream, Msg> RouterState<Sink, Stream, Msg> {
+	pub fn new(sink: Sink, stream: Stream) -> Self {
+		RouterState {
+			var_stash: IndexMap::new(),
+			vars: IndexMap::new(),
+			replay: IndexMap::new(),
+			live_queries: HashMap::new(),
+			routes: HashMap::new(),
+			last_activity: Instant::now(),
+			sink,
+			stream,
+		}
+	}
+}
+
+enum HandleResult {
+	/// Socket disconnected, should continue to reconnect
+	Disconnected,
+	/// Nothing wrong continue as normal.
+	Ok,
+}
 
 /// The WS scheme used to connect to `ws://` endpoints
 #[derive(Debug)]

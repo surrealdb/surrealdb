@@ -45,6 +45,19 @@ command = "cargo"
 env = { RUST_BACKTRACE = 1, RUST_LOG = { value = "cli_integration::common=debug", condition = { env_not_set = ["RUST_LOG"] } } }
 args = ["test", "--locked", "--features", "storage-mem,ml", "--workspace", "--test", "ml_integration", "--", "ml_integration", "--nocapture"]
 
+
+[tasks.ci-test-workspace]
+category = "CI - INTEGRATION TESTS"
+command = "cargo"
+args = [
+    "test", "--locked", "--no-default-features", "--features", "storage-mem,scripting,http,jwks", "--workspace", "--",
+    "--skip", "api_integration",
+    "--skip", "cli_integration",
+    "--skip", "http_integration",
+    "--skip", "ws_integration",
+    "--skip", "database_upgrade"
+]
+
 [tasks.ci-workspace-coverage]
 category = "CI - INTEGRATION TESTS"
 command = "cargo"

@@ -1,5 +1,6 @@
 use super::PATH;
 use super::{deserialize, serialize};
+use super::{HandleResult, RouterRequest};
 use crate::api::conn::Connection;
 use crate::api::conn::DbResponse;
 use crate::api::conn::Method;
@@ -22,15 +23,13 @@ use crate::engine::remote::ws::Data;
 use crate::engine::IntervalStream;
 use crate::opt::WaitFor;
 use crate::sql::Value;
-use flume::{Receiver, Sender};
+use flume::Receiver;
 use futures::stream::{SplitSink, SplitStream};
 use futures::SinkExt;
 use futures::StreamExt;
-use indexmap::IndexMap;
 use revision::revisioned;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use std::collections::hash_map::Entry;
-use std::collections::HashMap;
 use std::collections::HashSet;
 use std::future::Future;
 use std::mem;
@@ -38,7 +37,6 @@ use std::pin::Pin;
 use std::sync::atomic::AtomicI64;
 use std::sync::Arc;
 use std::sync::OnceLock;
-use surrealdb_core::dbs::Notification as CoreNotification;
 use tokio::net::TcpStream;
 use tokio::sync::watch;
 use tokio::time;
@@ -53,7 +51,6 @@ use tokio_tungstenite::Connector;
 use tokio_tungstenite::MaybeTlsStream;
 use tokio_tungstenite::WebSocketStream;
 use trice::Instant;
-use uuid::Uuid;
 
 pub(crate) const MAX_MESSAGE_SIZE: usize = 64 << 20; // 64 MiB
 pub(crate) const MAX_FRAME_SIZE: usize = 16 << 20; // 16 MiB
@@ -61,55 +58,9 @@ pub(crate) const WRITE_BUFFER_SIZE: usize = 128000; // tungstenite default
 pub(crate) const MAX_WRITE_BUFFER_SIZE: usize = WRITE_BUFFER_SIZE + MAX_MESSAGE_SIZE; // Recommended max according to tungstenite docs
 pub(crate) const NAGLE_ALG: bool = false;
 
-#[derive(Debug, Serialize)]
-#[revisioned(revision = 1)]
-struct RouterRequest {
-	id: Option<Value>,
-	method: Value,
-	params: Option<Value>,
-}
-
 type MessageSink = SplitSink<WebSocketStream<MaybeTlsStream<TcpStream>>, Message>;
 type MessageStream = SplitStream<WebSocketStream<MaybeTlsStream<TcpStream>>>;
-
-struct RouterState {
-	var_stash: IndexMap<i64, (String, Value)>,
-	/// Vars currently set by the set method,
-	vars: IndexMap<String, Value>,
-	/// Messages which aught to be replayed on a reconnect.
-	replay: IndexMap<Method, Message>,
-	/// Pending live queries
-	live_queries: HashMap<Uuid, channel::Sender<CoreNotification>>,
-
-	routes: HashMap<i64, (Method, Sender<Result<DbResponse>>)>,
-
-	last_activity: Instant,
-
-	sink: MessageSink,
-	stream: MessageStream,
-}
-
-impl RouterState {
-	pub fn new(sink: MessageSink, stream: MessageStream) -> Self {
-		RouterState {
-			var_stash: IndexMap::new(),
-			vars: IndexMap::new(),
-			replay: IndexMap::new(),
-			live_queries: HashMap::new(),
-			routes: HashMap::new(),
-			last_activity: Instant::now(),
-			sink,
-			stream,
-		}
-	}
-}
-
-pub enum HandleResult {
-	/// Socket disconnected, should continue to reconnect
-	Disconnected,
-	/// Nothing wrong continue as normal.
-	Ok,
-}
+type RouterState = super::RouterState<MessageSink, MessageStream, Message>;
 
 #[cfg(any(feature = "native-tls", feature = "rustls"))]
 impl From<Tls> for Connector {
