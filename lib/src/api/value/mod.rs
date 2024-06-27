@@ -8,6 +8,7 @@ use std::{
 };
 
 use chrono::{DateTime, Utc};
+use revision::revisioned;
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -23,6 +24,7 @@ pub use serializer::Serializer;
 // Keeping bytes implementation minimal since it might be a good idea to use bytes crate here
 // instead of a plain Vec<u8>.
 #[derive(Debug, Clone, Eq, PartialEq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[revisioned(revision = 1)]
 pub struct Bytes(Vec<u8>);
 
 impl Bytes {
@@ -68,6 +70,7 @@ impl From<Vec<u8>> for Bytes {
 // Keeping the Datetime wrapped, the chrono is still pre 1.0 so we can't gaurentee stability here,
 // best to keep most methods interal with maybe some functions from coverting between chrono types explicitly marked as unstable.
 #[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize)]
+#[revisioned(revision = 1)]
 pub struct Datetime(DateTime<Utc>);
 
 /// The key of a [`RecordId`].
@@ -120,7 +123,9 @@ impl From<Vec<Value>> for RecordIdKey {
 /// For example the record id `user:tkwse1j5o0anqjxonvzx` has the table `user` and the key `tkwse1j5o0anqjxonvzx`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RecordId {
+	#[serde(rename = "tb")]
 	table: String,
+	#[serde(rename = "id")]
 	key: RecordIdKey,
 }
 
@@ -177,6 +182,7 @@ impl<'a> ExactSizeIterator for ObjectIterMut<'a> {
 }
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
+#[revisioned(revision = 1)]
 pub struct Object(pub(crate) BTreeMap<String, Value>);
 
 impl Object {
