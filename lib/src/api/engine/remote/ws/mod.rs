@@ -43,6 +43,8 @@ const PING_METHOD: &str = "ping";
 const REVISION_HEADER: &str = "revision";
 
 /// A struct which will be serialized as a map to behave like the previously used BTreeMap.
+///
+/// This struct serializes as if it is a surrealdb_core::sql::Value::Object.
 #[derive(Debug)]
 struct RouterRequest {
 	id: Option<Value>,
@@ -321,10 +323,10 @@ where
 
 #[cfg(test)]
 mod test {
-	use std::{collections::BTreeMap, io::Cursor};
+	use std::io::Cursor;
 
 	use revision::Revisioned;
-	use surrealdb_core::sql::{Object, Value};
+	use surrealdb_core::sql::Value;
 
 	use super::RouterRequest;
 
@@ -374,7 +376,7 @@ mod test {
 			|i| {
 				let mut buf = Vec::new();
 				i.serialize_revisioned(&mut Cursor::new(&mut buf)).unwrap();
-				dbg!(buf)
+				buf
 			},
 			|b| Value::deserialize_revisioned(&mut Cursor::new(b)).unwrap(),
 		);
