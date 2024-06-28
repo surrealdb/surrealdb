@@ -81,7 +81,7 @@ impl Display for IfelseStatement {
 							})
 						}),
 						if is_pretty() {
-							fmt_separated_by("ELSE")
+							fmt_separated_by("ELSE ")
 						} else {
 							fmt_separated_by(" ELSE ")
 						},
@@ -118,7 +118,7 @@ impl Display for IfelseStatement {
 							})
 						}),
 						if is_pretty() {
-							fmt_separated_by("ELSE")
+							fmt_separated_by("ELSE ")
 						} else {
 							fmt_separated_by(" ELSE ")
 						},
@@ -142,5 +142,17 @@ impl Display for IfelseStatement {
 				Ok(())
 			}
 		}
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use crate::syn::parse;
+
+	#[test]
+	fn format_pretty() {
+		let query = parse("IF 1 { 1 } ELSE IF 2 { 2 }").unwrap();
+		assert_eq!(format!("{}", query), "IF 1 { 1 } ELSE IF 2 { 2 };");
+		assert_eq!(format!("{:#}", query), "IF 1\n\t{ 1 }\nELSE IF 2\n\t{ 2 }\n;");
 	}
 }
