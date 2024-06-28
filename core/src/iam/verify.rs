@@ -165,9 +165,9 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			// Create a new readonly transaction
 			let mut tx = kvs.transaction(Read, Optimistic).await?;
 			// Parse the record id
-			let mut rid = syn::thing(&id)?;
+			let mut rid = syn::thing(id)?;
 			// Get the database access method
-			let de = tx.get_db_access(&ns, &db, &ac).await?;
+			let de = tx.get_db_access(ns, db, ac).await?;
 			// Obtain the configuration to verify the token based on the access method
 			let (au, cf) = match de.kind {
 				AccessType::Record(at) => {
@@ -194,7 +194,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			// AUTHENTICATE clause
 			if let Some(au) = au {
 				// Setup the system session for finding the signin record
-				let mut sess = Session::editor().with_ns(&ns).with_db(&db);
+				let mut sess = Session::editor().with_ns(ns).with_db(db);
 				sess.rd = Some(rid.clone().into());
 				sess.tk = Some(token_data.claims.clone().into());
 				sess.ip.clone_from(&session.ip);
@@ -221,9 +221,9 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			debug!("Authenticated with record access method `{}`", ac);
 			// Set the session
 			session.tk = Some(value);
-			session.ns = Some(ns.to_owned());
-			session.db = Some(db.to_owned());
-			session.ac = Some(ac.to_owned());
+			session.ns = Some(ns.clone());
+			session.db = Some(db.clone());
+			session.ac = Some(ac.clone());
 			session.rd = Some(Value::from(rid.to_owned()));
 			session.exp = expiration(de.duration.session)?;
 			session.au = Arc::new(Auth::new(Actor::new(
@@ -246,7 +246,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			// Create a new readonly transaction
 			let mut tx = kvs.transaction(Read, Optimistic).await?;
 			// Get the database access method
-			let de = tx.get_db_access(&ns, &db, &ac).await?;
+			let de = tx.get_db_access(ns, db, ac).await?;
 			// Obtain the configuration to verify the token based on the access method
 			match de.kind {
 				// If the access type is Jwt, this is database access
@@ -283,9 +283,9 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 					debug!("Authenticated to database `{}` with access method `{}`", db, ac);
 					// Set the session
 					session.tk = Some(value);
-					session.ns = Some(ns.to_owned());
-					session.db = Some(db.to_owned());
-					session.ac = Some(ac.to_owned());
+					session.ns = Some(ns.clone());
+					session.db = Some(db.clone());
+					session.ac = Some(ac.clone());
 					session.exp = expiration(de.duration.session)?;
 					session.au = Arc::new(Auth::new(Actor::new(
 						de.name.to_string(),
@@ -368,7 +368,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			// Create a new readonly transaction
 			let mut tx = kvs.transaction(Read, Optimistic).await?;
 			// Get the database user
-			let de = tx.get_db_user(&ns, &db, &id).await.map_err(|e| {
+			let de = tx.get_db_user(ns, db, id).await.map_err(|e| {
 				trace!("Error while authenticating to database `{db}`: {e}");
 				Error::InvalidAuth
 			})?;
@@ -400,7 +400,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			// Create a new readonly transaction
 			let mut tx = kvs.transaction(Read, Optimistic).await?;
 			// Get the namespace access method
-			let de = tx.get_ns_access(&ns, &ac).await?;
+			let de = tx.get_ns_access(ns, ac).await?;
 			// Obtain the configuration to verify the token based on the access method
 			let cf = match de.kind {
 				AccessType::Jwt(ac) => match ac.verify {
@@ -457,7 +457,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			// Create a new readonly transaction
 			let mut tx = kvs.transaction(Read, Optimistic).await?;
 			// Get the namespace user
-			let de = tx.get_ns_user(&ns, &id).await.map_err(|e| {
+			let de = tx.get_ns_user(ns, id).await.map_err(|e| {
 				trace!("Error while authenticating to namespace `{ns}`: {e}");
 				Error::InvalidAuth
 			})?;
