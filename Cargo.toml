@@ -12,7 +12,7 @@ default = ["storage-mem", "storage-surrealkv", "storage-rocksdb", "scripting", "
 storage-mem = ["surrealdb/kv-mem"]
 storage-rocksdb = ["surrealdb/kv-rocksdb"]
 storage-tikv = ["surrealdb/kv-tikv"]
-storage-fdb = ["surrealdb/kv-fdb-7_1"]
+storage-fdb = ["surrealdb/kv-fdb"]
 storage-surrealkv = ["surrealdb/kv-surrealkv"]
 scripting = ["surrealdb/scripting"]
 http = ["surrealdb/http"]
@@ -29,6 +29,9 @@ members = [
     "lib/examples/axum",
     "lib/examples/rocket",
 ]
+
+[profile.make]
+inherits = "dev"
 
 [profile.release]
 lto = true
