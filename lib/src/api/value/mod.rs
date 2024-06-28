@@ -3,6 +3,7 @@ use std::{
 	cmp::{Ordering, PartialEq, PartialOrd},
 	collections::{btree_map::IterMut, BTreeMap},
 	fmt,
+	iter::FusedIterator,
 	ops::Deref,
 	time::Duration,
 };
@@ -247,6 +248,106 @@ impl Object {
 		V: Into<Value>,
 	{
 		self.0.insert(key, value.into())
+	}
+}
+
+struct IntoIter {
+	iter: <BTreeMap<String, Value> as IntoIterator>::IntoIter,
+}
+
+impl Iterator for IntoIter {
+	type Item = (String, Value);
+
+	fn next(&mut self) -> Option<Self::Item> {
+		self.iter.next()
+	}
+
+	fn size_hint(&self) -> (usize, Option<usize>) {
+		self.iter.size_hint()
+	}
+}
+
+impl DoubleEndedIterator for IntoIter {
+	fn next_back(&mut self) -> Option<Self::Item> {
+		self.iter.next_back()
+	}
+}
+
+impl ExactSizeIterator for IntoIter {
+	fn len(&self) -> usize {
+		self.iter.len()
+	}
+}
+
+impl FusedIterator for IntoIter {}
+
+impl IntoIterator for Object {
+	type Item = <IntoIter as Iterator>::Item;
+
+	type IntoIter = IntoIter;
+
+	fn into_iter(self) -> Self::IntoIter {
+		IntoIter {
+			iter: self.0.into_iter(),
+		}
+	}
+}
+
+#[derive(Clone)]
+struct Iter<'a> {
+	iter: <&'a BTreeMap<String, Value> as IntoIterator>::IntoIter,
+}
+
+impl<'a> IntoIterator for &'a Object {
+	type Item = <Iter<'a> as Iterator>::Item;
+
+	type IntoIter = Iter<'a>;
+
+	fn into_iter(self) -> Self::IntoIter {
+		Iter {
+			iter: &(self.0).into_iter(),
+		}
+	}
+}
+
+impl<'a> Iterator for Iter<'a> {
+	type Item = (&str, &Value);
+
+	fn next(&mut self) -> Option<Self::Item> {
+		self.iter.next()
+	}
+
+	fn size_hint(&self) -> (usize, Option<usize>) {
+		self.iter.size_hint()
+	}
+
+	fn last(self) -> Option<Self::Item>
+	where
+		Self: Sized,
+	{
+		self.iter.size_hint()
+	}
+
+	fn min(mut self) -> Option<Self::Item> {
+		self.iter.next()
+	}
+
+	fn max(mut self) -> Option<Self::Item> {
+		self.iter.next_back()
+	}
+}
+
+impl FusedIterator for Iter<'_> {}
+
+impl<'a> DoubleEndedIterator for Iter<'a> {
+	fn next_back(&mut self) -> Option<Self::Item> {
+		self.iter.next_back()
+	}
+}
+
+impl ExactSizeIterator for Iter<'a> {
+	fn len(&self) -> usize {
+		self.iter.len()
 	}
 }
 

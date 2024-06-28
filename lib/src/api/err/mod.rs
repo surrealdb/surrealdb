@@ -214,10 +214,13 @@ pub enum Error {
 	#[error("{0}")]
 	InvalidFuncTarget(#[from] ParseFuncTargetError),
 
-	#[error("failed to serialize value: {0}")]
+	#[error("failed to serialize Value: {0}")]
 	SerializeValue(String),
-	#[error("failed to serialize value: {0}")]
+	#[error("failed to deserialize Value: {0}")]
 	DeSerializeValue(String),
+
+	#[error("failed to serialize to a Value: {0}")]
+	Serializer(String),
 }
 
 impl serde::ser::Error for Error {

@@ -30,6 +30,21 @@ impl Serialize for Value {
 	}
 }
 
+impl Serialize for Number {
+	fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+	where
+		S: serde::Serializer,
+	{
+		const NAME: &str = "$surrealdb::private::sql::Number";
+
+		match self {
+			Number::Integer(ref x) => serializer.serialize_newtype_variant(NAME, 0, "Int", x),
+			Number::Float(ref x) => serializer.serialize_newtype_variant(NAME, 1, "Float", x),
+			Number::Decimal(ref x) => serializer.serialize_newtype_variant(NAME, 2, "Decimal", x),
+		}
+	}
+}
+
 impl Revisioned for Number {
 	fn revision() -> u16 {
 		1
