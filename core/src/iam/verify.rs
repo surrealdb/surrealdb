@@ -151,13 +151,13 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 		}
 	}
 	// Check the token authentication claims
-	match token_data.claims.clone() {
+	match token_data.claims {
 		// Check if this is record access
 		Claims {
-			ns: Some(ns),
-			db: Some(db),
-			ac: Some(ac),
-			id: Some(id),
+			ns: Some(ref ns),
+			db: Some(ref db),
+			ac: Some(ref ac),
+			id: Some(ref id),
 			..
 		} => {
 			// Log the decoded authentication claims
@@ -229,16 +229,16 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			session.au = Arc::new(Auth::new(Actor::new(
 				rid.to_string(),
 				Default::default(),
-				Level::Record(ns, db, rid.to_string()),
+				Level::Record(ns.clone(), db.clone(), rid.to_string()),
 			)));
 			Ok(())
 		}
 		// Check if this is database access
 		// This can also be record access with an authenticate clause
 		Claims {
-			ns: Some(ns),
-			db: Some(db),
-			ac: Some(ac),
+			ns: Some(ref ns),
+			db: Some(ref db),
+			ac: Some(ref ac),
 			..
 		} => {
 			// Log the decoded authentication claims
@@ -290,7 +290,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 					session.au = Arc::new(Auth::new(Actor::new(
 						de.name.to_string(),
 						roles,
-						Level::Database(ns, db),
+						Level::Database(ns.clone(), db.clone()),
 					)));
 				}
 				// If the access type is Record, this is record access
@@ -348,7 +348,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 						session.au = Arc::new(Auth::new(Actor::new(
 							rid.to_string(),
 							Default::default(),
-							Level::Record(ns, db, rid.to_string()),
+							Level::Record(ns.clone(), db.clone(), rid.to_string()),
 						)));
 					}
 					_ => return Err(Error::AccessMethodMismatch),
@@ -358,9 +358,9 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 		}
 		// Check if this is database authentication with user credentials
 		Claims {
-			ns: Some(ns),
-			db: Some(db),
-			id: Some(id),
+			ns: Some(ref ns),
+			db: Some(ref db),
+			id: Some(ref id),
 			..
 		} => {
 			// Log the decoded authentication claims
@@ -385,14 +385,14 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			session.au = Arc::new(Auth::new(Actor::new(
 				id.to_string(),
 				de.roles.iter().map(|r| r.into()).collect(),
-				Level::Database(ns, db),
+				Level::Database(ns.clone(), db.clone()),
 			)));
 			Ok(())
 		}
 		// Check if this is namespace access
 		Claims {
-			ns: Some(ns),
-			ac: Some(ac),
+			ns: Some(ref ns),
+			ac: Some(ref ac),
 			..
 		} => {
 			// Log the decoded authentication claims
@@ -439,14 +439,17 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			session.ns = Some(ns.to_owned());
 			session.ac = Some(ac.to_owned());
 			session.exp = expiration(de.duration.session)?;
-			session.au =
-				Arc::new(Auth::new(Actor::new(de.name.to_string(), roles, Level::Namespace(ns))));
+			session.au = Arc::new(Auth::new(Actor::new(
+				de.name.to_string(),
+				roles,
+				Level::Namespace(ns.clone()),
+			)));
 			Ok(())
 		}
 		// Check if this is namespace authentication with user credentials
 		Claims {
-			ns: Some(ns),
-			id: Some(id),
+			ns: Some(ref ns),
+			id: Some(ref id),
 			..
 		} => {
 			// Log the decoded authentication claims
@@ -470,7 +473,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			session.au = Arc::new(Auth::new(Actor::new(
 				id.to_string(),
 				de.roles.iter().map(|r| r.into()).collect(),
-				Level::Namespace(ns),
+				Level::Namespace(ns.clone()),
 			)));
 			Ok(())
 		}
