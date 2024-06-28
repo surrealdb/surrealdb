@@ -317,7 +317,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 						decode::<Claims>(token, &cf.0, &cf.1)?;
 						// AUTHENTICATE clause
 						// Setup the system session for finding the signin record
-						let mut sess = Session::editor().with_ns(&ns).with_db(&db);
+						let mut sess = Session::editor().with_ns(ns).with_db(db);
 						sess.tk = Some(token_data.claims.clone().into());
 						sess.ip.clone_from(&session.ip);
 						sess.or.clone_from(&session.or);
