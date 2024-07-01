@@ -175,11 +175,11 @@ pub(crate) async fn run_router(
 		// constantly polled.
 		None => Poll::Pending,
 	});
-	let mut route_stream = route_rx.stream();
+	let mut route_stream = route_rx.into_stream();
 
 	loop {
-		futures::select! {
-			route = route_stream.next().fuse() => {
+		tokio::select! {
+			route = route_stream.next() => {
 				let Some(route) = route else {
 					break
 				};
@@ -194,7 +194,7 @@ pub(crate) async fn run_router(
 					}
 				}
 			}
-			notification = notification_stream.next().fuse() => {
+			notification = notification_stream.next() => {
 				let Some(notification) = notification else {
 					// TODO: Maybe we should do something more then ignore a closed notifications
 					// channel?

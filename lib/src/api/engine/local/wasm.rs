@@ -152,7 +152,7 @@ pub(crate) async fn run_router(
 		None => Poll::Pending,
 	});
 
-	let mut route_stream = route_rx.stream();
+	let mut route_stream = route_rx.into_stream();
 
 	loop {
 		// use the less ergonomic futures::select as tokio::select is not available.

@@ -415,7 +415,7 @@ pub(crate) async fn run_router(
 
 	let mut state = RouterState::new(socket_sink, socket_stream);
 
-	let mut route_stream = route_rx.stream();
+	let mut route_stream = route_rx.into_stream();
 
 	'router: loop {
 		let mut interval = time::interval(PING_INTERVAL);

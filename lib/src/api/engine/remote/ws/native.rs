@@ -431,7 +431,7 @@ pub(crate) async fn run_router(
 
 	let (socket_sink, socket_stream) = socket.split();
 	let mut state = RouterState::new(socket_sink, socket_stream);
-	let mut route_stream = route_rx.stream();
+	let mut route_stream = route_rx.into_stream();
 
 	'router: loop {
 		let mut interval = time::interval(PING_INTERVAL);
@@ -439,6 +439,9 @@ pub(crate) async fn run_router(
 		interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
 
 		let mut pinger = IntervalStream::new(interval);
+		// Turn into a stream instead of calling recv_async
+		// The stream seems to be able to keep some state which would otherwise need to be
+		// recreated with each next.
 
 		state.last_activity = Instant::now();
 		state.live_queries.clear();
