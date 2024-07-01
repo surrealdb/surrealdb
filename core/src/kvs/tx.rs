@@ -1249,7 +1249,7 @@ impl Transaction {
 						}
 						// Next, dynamically define the table
 						let val = DefineTableStatement {
-							name: db.to_owned().into(),
+							name: tb.to_owned().into(),
 							..Default::default()
 						};
 						let val = {
