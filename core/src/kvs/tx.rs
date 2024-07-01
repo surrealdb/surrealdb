@@ -90,11 +90,11 @@ impl Transaction {
 	}
 
 	/// Check if a key exists in the datastore.
-	pub async fn exi<K>(&self, key: K) -> Result<bool, Error>
+	pub async fn exists<K>(&self, key: K) -> Result<bool, Error>
 	where
 		K: Into<Key> + Debug,
 	{
-		self.lock().await.exi(key).await
+		self.lock().await.exists(key).await
 	}
 
 	/// Fetch a key from the datastore.

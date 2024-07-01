@@ -8,7 +8,7 @@ async fn initialise() {
 
 #[tokio::test]
 #[serial]
-async fn exi() {
+async fn exists() {
 	// Create a new datastore
 	let node_id = Uuid::parse_str("463a5008-ee1d-43db-9662-5e752b6ea3f9").unwrap();
 	let clock = Arc::new(SizedClock::Fake(FakeClock::new(Timestamp::default())));
@@ -19,9 +19,9 @@ async fn exi() {
 	tx.commit().await.unwrap();
 	// Create a readonly transaction
 	let mut tx = ds.transaction(Read, Optimistic).await.unwrap().inner();
-	let val = tx.exi("test").await.unwrap();
+	let val = tx.exists("test").await.unwrap();
 	assert!(val);
-	let val = tx.exi("none").await.unwrap();
+	let val = tx.exists("none").await.unwrap();
 	assert!(!val);
 	tx.cancel().await.unwrap();
 }

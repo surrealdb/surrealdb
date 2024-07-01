@@ -169,13 +169,13 @@ impl Transactor {
 
 	/// Check if a key exists in the datastore.
 	#[allow(unused_variables)]
-	pub async fn exi<K>(&mut self, key: K) -> Result<bool, Error>
+	pub async fn exists<K>(&mut self, key: K) -> Result<bool, Error>
 	where
 		K: Into<Key> + Debug,
 	{
 		let key = key.into();
 		#[cfg(debug_assertions)]
-		trace!("exi {}", sprint(&key));
+		trace!("exists {}", sprint(&key));
 		expand_inner!(&mut self.inner, v => { v.exists(key).await })
 	}
 
