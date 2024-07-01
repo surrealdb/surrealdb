@@ -17,19 +17,20 @@ use std::fs;
 use std::sync::Arc;
 use url::Url;
 
-static STORE: Lazy<Arc<dyn ObjectStore>> =
-	Lazy::new(|| match std::env::var("SURREAL_OBJECT_STORE") {
+fn initialize_store(env_var: &str, default_dir: &str) -> Arc<dyn ObjectStore> {
+	match std::env::var(env_var) {
 		Ok(url) => {
-			let url = Url::parse(&url).expect("Expected a valid url for SURREAL_OBJECT_STORE");
-			let (store, _) =
-				parse_url(&url).expect("Expected a valid url for SURREAL_OBJECT_STORE");
+			let url = Url::parse(&url).expect(&format!("Expected a valid url for {}", env_var));
+			let (store, _) = parse_url(&url).expect(&format!("Expected a valid url for {}", env_var));
 			Arc::new(store)
 		}
 		Err(_) => {
-			let path = env::current_dir().unwrap().join("store");
+			let path = env::current_dir().unwrap().join(default_dir);
 			if !path.exists() || !path.is_dir() {
-				fs::create_dir_all(&path)
-					.expect("Unable to create directory structure for SURREAL_OBJECT_STORE");
+				fs::create_dir_all(&path).expect(&format!(
+					"Unable to create directory structure for {}",
+					env_var
+				));
 			}
 			#[cfg(not(target_arch = "wasm32"))]
 			{
@@ -41,33 +42,14 @@ static STORE: Lazy<Arc<dyn ObjectStore>> =
 				Arc::new(InMemory::new())
 			}
 		}
-	});
+	}
+}
+
+static STORE: Lazy<Arc<dyn ObjectStore>> =
+	Lazy::new(|| initialize_store("SURREAL_OBJECT_STORE", "store"));
 
 static CACHE: Lazy<Arc<dyn ObjectStore>> =
-	Lazy::new(|| match std::env::var("SURREAL_OBJECT_CACHE") {
-		Ok(url) => {
-			let url = Url::parse(&url).expect("Expected a valid url for SURREAL_OBJECT_CACHE");
-			let (store, _) =
-				parse_url(&url).expect("Expected a valid url for SURREAL_OBJECT_CACHE");
-			Arc::new(store)
-		}
-		Err(_) => {
-			let path = env::current_dir().unwrap().join("cache");
-			if !path.exists() || !path.is_dir() {
-				fs::create_dir_all(&path)
-					.expect("Unable to create directory structure for SURREAL_OBJECT_CACHE");
-			}
-			#[cfg(not(target_arch = "wasm32"))]
-			{
-				// As long as the provided path is correct, the following should never panic
-				Arc::new(LocalFileSystem::new_with_prefix(path).unwrap())
-			}
-			#[cfg(target_arch = "wasm32")]
-			{
-				Arc::new(InMemory::new())
-			}
-		}
-	});
+	Lazy::new(|| initialize_store("SURREAL_CACHE_STORE", "cache"));
 
 /// Streams the file from the local system or memory object storage.
 pub async fn stream(
