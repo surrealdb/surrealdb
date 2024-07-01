@@ -1,7 +1,7 @@
-use rust_decimal::{prelude::FromPrimitive, Decimal};
+use rust_decimal::Decimal;
 use serde::{
 	ser::{Impossible, SerializeSeq, SerializeTuple, SerializeTupleStruct},
-	Serialize, Serializer,
+	Serialize,
 };
 
 use crate::{api::Error, Number, Object, Value};
@@ -87,9 +87,9 @@ impl serde::Serializer for Serializer {
 		Ok(Value::Bytes(v.to_vec()))
 	}
 
-	fn serialize_some<T: ?Sized>(self, value: &T) -> Result<Self::Ok, Self::Error>
+	fn serialize_some<T>(self, value: &T) -> Result<Self::Ok, Self::Error>
 	where
-		T: serde::Serialize,
+		T: ?Sized + serde::Serialize,
 	{
 		todo!()
 	}
@@ -115,18 +115,18 @@ impl serde::Serializer for Serializer {
 		self.serialize_str(variant)
 	}
 
-	fn serialize_newtype_struct<T: ?Sized>(
+	fn serialize_newtype_struct<T>(
 		self,
 		_name: &'static str,
 		value: &T,
 	) -> Result<Self::Ok, Self::Error>
 	where
-		T: serde::Serialize,
+		T: ?Sized + serde::Serialize,
 	{
 		value.serialize(self)
 	}
 
-	fn serialize_newtype_variant<T: ?Sized>(
+	fn serialize_newtype_variant<T>(
 		self,
 		name: &'static str,
 		variant_index: u32,
@@ -134,9 +134,9 @@ impl serde::Serializer for Serializer {
 		value: &T,
 	) -> Result<Self::Ok, Self::Error>
 	where
-		T: serde::Serialize,
+		T: ?Sized + serde::Serialize,
 	{
-		let v = value.serialize(v);
+		let v = value.serialize(value);
 		let mut values = Object::new();
 		values.insert(variant.to_owned(), v);
 		Ok(Value::Object(values))
@@ -192,9 +192,9 @@ impl serde::Serializer for Serializer {
 		todo!()
 	}
 
-	fn collect_str<T: ?Sized>(self, value: &T) -> Result<Self::Ok, Self::Error>
+	fn collect_str<T>(self, value: &T) -> Result<Self::Ok, Self::Error>
 	where
-		T: std::fmt::Display,
+		T: ?Sized + std::fmt::Display,
 	{
 		Ok(Value::String(value.to_string()))
 	}
@@ -209,9 +209,9 @@ impl SerializeSeq for SerializeVec {
 
 	type Error = Error;
 
-	fn serialize_element<T: ?Sized>(&mut self, value: &T) -> Result<(), Self::Error>
+	fn serialize_element<T>(&mut self, value: &T) -> Result<(), Self::Error>
 	where
-		T: serde::Serialize,
+		T: ?Sized + serde::Serialize,
 	{
 		self.vec.push(value.serialize(Serializer)?);
 		Ok(())
@@ -227,9 +227,9 @@ impl SerializeTuple for SerializeVec {
 
 	type Error = Error;
 
-	fn serialize_element<T: ?Sized>(&mut self, value: &T) -> Result<(), Self::Error>
+	fn serialize_element<T>(&mut self, value: &T) -> Result<(), Self::Error>
 	where
-		T: serde::Serialize,
+		T: ?Sized + serde::Serialize,
 	{
 		self.vec.push(value.serialize(Serializer)?);
 		Ok(())
@@ -245,9 +245,9 @@ impl SerializeTupleStruct for SerializeVec {
 
 	type Error = Error;
 
-	fn serialize_field<T: ?Sized>(&mut self, value: &T) -> Result<(), Self::Error>
+	fn serialize_field<T>(&mut self, value: &T) -> Result<(), Self::Error>
 	where
-		T: serde::Serialize,
+		T: ?Sized + serde::Serialize,
 	{
 		self.vec.push(value.serialize(Serializer)?);
 		Ok(())
@@ -268,9 +268,9 @@ impl serde::ser::SerializeTupleVariant for SerializeTupleVariant {
 
 	type Error = Error;
 
-	fn serialize_field<T: ?Sized>(&mut self, value: &T) -> Result<(), Self::Error>
+	fn serialize_field<T>(&mut self, value: &T) -> Result<(), Self::Error>
 	where
-		T: serde::Serialize,
+		T: ?Sized + serde::Serialize,
 	{
 		self.vec.push(value.serialize(Serializer)?);
 		Ok(())
@@ -293,17 +293,17 @@ impl serde::ser::SerializeMap for SerializeMap {
 
 	type Error = Error;
 
-	fn serialize_key<T: ?Sized>(&mut self, key: &T) -> Result<(), Self::Error>
+	fn serialize_key<T>(&mut self, key: &T) -> Result<(), Self::Error>
 	where
-		T: serde::Serialize,
+		T: ?Sized + serde::Serialize,
 	{
 		self.next_key = Some(key.serialize(MapKeySerializer)?);
 		Ok(())
 	}
 
-	fn serialize_value<T: ?Sized>(&mut self, value: &T) -> Result<(), Self::Error>
+	fn serialize_value<T>(&mut self, value: &T) -> Result<(), Self::Error>
 	where
-		T: serde::Serialize,
+		T: ?Sized + serde::Serialize,
 	{
 		let v = value.serialize(Serializer)?;
 		self.map
@@ -321,13 +321,9 @@ impl serde::ser::SerializeStruct for SerializeMap {
 
 	type Error = Error;
 
-	fn serialize_field<T: ?Sized>(
-		&mut self,
-		key: &'static str,
-		value: &T,
-	) -> Result<(), Self::Error>
+	fn serialize_field<T>(&mut self, key: &'static str, value: &T) -> Result<(), Self::Error>
 	where
-		T: serde::Serialize,
+		T: ?Sized + serde::Serialize,
 	{
 		let v = value.serialize(Serializer)?;
 		self.map.insert(key.to_string(), v);
@@ -349,13 +345,9 @@ impl serde::ser::SerializeStructVariant for SerializeStructVariant {
 
 	type Error = Error;
 
-	fn serialize_field<T: ?Sized>(
-		&mut self,
-		key: &'static str,
-		value: &T,
-	) -> Result<(), Self::Error>
+	fn serialize_field<T>(&mut self, key: &'static str, value: &T) -> Result<(), Self::Error>
 	where
-		T: serde::Serialize,
+		T: ?Sized + serde::Serialize,
 	{
 		let v = value.serialize(Serializer)?;
 		self.map.insert(key.to_string(), v);
@@ -397,55 +389,59 @@ impl serde::Serializer for MapKeySerializer {
 		_name: &'static str,
 		_variant_index: u32,
 		variant: &'static str,
-	) -> Result<String> {
+	) -> Result<String, Self::Error> {
 		Ok(variant.to_owned())
 	}
 
 	#[inline]
-	fn serialize_newtype_struct<T>(self, _name: &'static str, value: &T) -> Result<String>
+	fn serialize_newtype_struct<T>(
+		self,
+		_name: &'static str,
+		value: &T,
+	) -> Result<String, Self::Error>
 	where
 		T: ?Sized + Serialize,
 	{
 		value.serialize(self)
 	}
 
-	fn serialize_bool(self, value: bool) -> Result<String> {
+	fn serialize_bool(self, value: bool) -> Result<String, Self::Error> {
 		Ok(value.to_string())
 	}
 
-	fn serialize_i8(self, value: i8) -> Result<String> {
+	fn serialize_i8(self, value: i8) -> Result<String, Self::Error> {
 		Ok(value.to_string())
 	}
 
-	fn serialize_i16(self, value: i16) -> Result<String> {
+	fn serialize_i16(self, value: i16) -> Result<String, Self::Error> {
 		Ok(value.to_string())
 	}
 
-	fn serialize_i32(self, value: i32) -> Result<String> {
+	fn serialize_i32(self, value: i32) -> Result<String, Self::Error> {
 		Ok(value.to_string())
 	}
 
-	fn serialize_i64(self, value: i64) -> Result<String> {
+	fn serialize_i64(self, value: i64) -> Result<String, Self::Error> {
 		Ok(value.to_string())
 	}
 
-	fn serialize_u8(self, value: u8) -> Result<String> {
+	fn serialize_u8(self, value: u8) -> Result<String, Self::Error> {
 		Ok(value.to_string())
 	}
 
-	fn serialize_u16(self, value: u16) -> Result<String> {
+	fn serialize_u16(self, value: u16) -> Result<String, Self::Error> {
 		Ok(value.to_string())
 	}
 
-	fn serialize_u32(self, value: u32) -> Result<String> {
+	fn serialize_u32(self, value: u32) -> Result<String, Self::Error> {
 		Ok(value.to_string())
 	}
 
-	fn serialize_u64(self, value: u64) -> Result<String> {
+	fn serialize_u64(self, value: u64) -> Result<String, Self::Error> {
 		Ok(value.to_string())
 	}
 
-	fn serialize_f32(self, value: f32) -> Result<String> {
+	fn serialize_f32(self, value: f32) -> Result<String, Self::Error> {
 		if value.is_finite() {
 			Ok(value.to_string())
 		} else {
@@ -453,7 +449,7 @@ impl serde::Serializer for MapKeySerializer {
 		}
 	}
 
-	fn serialize_f64(self, value: f64) -> Result<String> {
+	fn serialize_f64(self, value: f64) -> Result<String, Self::Error> {
 		if value.is_finite() {
 			Ok(value.to_string())
 		} else {
@@ -462,7 +458,7 @@ impl serde::Serializer for MapKeySerializer {
 	}
 
 	#[inline]
-	fn serialize_char(self, value: char) -> Result<String> {
+	fn serialize_char(self, value: char) -> Result<String, Self::Error> {
 		Ok({
 			let mut s = String::new();
 			s.push(value);
@@ -471,19 +467,19 @@ impl serde::Serializer for MapKeySerializer {
 	}
 
 	#[inline]
-	fn serialize_str(self, value: &str) -> Result<String> {
+	fn serialize_str(self, value: &str) -> Result<String, Self::Error> {
 		Ok(value.to_owned())
 	}
 
-	fn serialize_bytes(self, _value: &[u8]) -> Result<String> {
+	fn serialize_bytes(self, _value: &[u8]) -> Result<String, Self::Error> {
 		Err(key_must_be_a_string())
 	}
 
-	fn serialize_unit(self) -> Result<String> {
+	fn serialize_unit(self) -> Result<String, Self::Error> {
 		Err(key_must_be_a_string())
 	}
 
-	fn serialize_unit_struct(self, _name: &'static str) -> Result<String> {
+	fn serialize_unit_struct(self, _name: &'static str) -> Result<String, Self::Error> {
 		Err(key_must_be_a_string())
 	}
 
@@ -493,29 +489,29 @@ impl serde::Serializer for MapKeySerializer {
 		_variant_index: u32,
 		_variant: &'static str,
 		_value: &T,
-	) -> Result<String>
+	) -> Result<String, Self::Error>
 	where
 		T: ?Sized + Serialize,
 	{
 		Err(key_must_be_a_string())
 	}
 
-	fn serialize_none(self) -> Result<String> {
+	fn serialize_none(self) -> Result<String, Self::Error> {
 		Err(key_must_be_a_string())
 	}
 
-	fn serialize_some<T>(self, _value: &T) -> Result<String>
+	fn serialize_some<T>(self, _value: &T) -> Result<String, Self::Error>
 	where
 		T: ?Sized + Serialize,
 	{
 		Err(key_must_be_a_string())
 	}
 
-	fn serialize_seq(self, _len: Option<usize>) -> Result<Self::SerializeSeq> {
+	fn serialize_seq(self, _len: Option<usize>) -> Result<Self::SerializeSeq, Self::Error> {
 		Err(key_must_be_a_string())
 	}
 
-	fn serialize_tuple(self, _len: usize) -> Result<Self::SerializeTuple> {
+	fn serialize_tuple(self, _len: usize) -> Result<Self::SerializeTuple, Self::Error> {
 		Err(key_must_be_a_string())
 	}
 
@@ -523,7 +519,7 @@ impl serde::Serializer for MapKeySerializer {
 		self,
 		_name: &'static str,
 		_len: usize,
-	) -> Result<Self::SerializeTupleStruct> {
+	) -> Result<Self::SerializeTupleStruct, Self::Error> {
 		Err(key_must_be_a_string())
 	}
 
@@ -533,15 +529,19 @@ impl serde::Serializer for MapKeySerializer {
 		_variant_index: u32,
 		_variant: &'static str,
 		_len: usize,
-	) -> Result<Self::SerializeTupleVariant> {
+	) -> Result<Self::SerializeTupleVariant, Self::Error> {
 		Err(key_must_be_a_string())
 	}
 
-	fn serialize_map(self, _len: Option<usize>) -> Result<Self::SerializeMap> {
+	fn serialize_map(self, _len: Option<usize>) -> Result<Self::SerializeMap, Self::Error> {
 		Err(key_must_be_a_string())
 	}
 
-	fn serialize_struct(self, _name: &'static str, _len: usize) -> Result<Self::SerializeStruct> {
+	fn serialize_struct(
+		self,
+		_name: &'static str,
+		_len: usize,
+	) -> Result<Self::SerializeStruct, Self::Error> {
 		Err(key_must_be_a_string())
 	}
 
@@ -551,11 +551,11 @@ impl serde::Serializer for MapKeySerializer {
 		_variant_index: u32,
 		_variant: &'static str,
 		_len: usize,
-	) -> Result<Self::SerializeStructVariant> {
+	) -> Result<Self::SerializeStructVariant, Self::Error> {
 		Err(key_must_be_a_string())
 	}
 
-	fn collect_str<T>(self, value: &T) -> Result<String>
+	fn collect_str<T>(self, value: &T) -> Result<String, Self::Error>
 	where
 		T: ?Sized + std::fmt::Display,
 	{

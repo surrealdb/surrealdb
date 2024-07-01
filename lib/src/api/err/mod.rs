@@ -40,7 +40,7 @@ pub enum Error {
 	AlreadyConnected,
 
 	/// `Query::bind` not called with an object nor a key/value tuple
-	#[error("Invalid bindings: {0}")]
+	#[error("Invalid bindings: {0:?}")]
 	InvalidBindings(Value),
 
 	/// Tried to use a range query on a record ID
@@ -95,7 +95,7 @@ pub enum Error {
 	InvalidUrl(String),
 
 	/// Failed to convert a `sql::Value` to `T`
-	#[error("Failed to convert `{value}` to `T`: {error}")]
+	#[error("Failed to convert `{value:?}` to `T`: {error}")]
 	FromValue {
 		value: Value,
 		error: String,
@@ -109,7 +109,7 @@ pub enum Error {
 	},
 
 	/// Failed to serialize `sql::Value` to JSON string
-	#[error("Failed to serialize `{value}` to JSON string: {error}")]
+	#[error("Failed to serialize `{value:?}` to JSON string: {error}")]
 	ToJsonString {
 		value: Value,
 		error: String,
@@ -221,6 +221,8 @@ pub enum Error {
 
 	#[error("failed to serialize to a Value: {0}")]
 	Serializer(String),
+	#[error("failed to deserialize from a Value: {0}")]
+	Deserializer(String),
 }
 
 impl serde::ser::Error for Error {

@@ -693,6 +693,7 @@ mod tests {
 	use super::*;
 	use crate::Error::Api;
 	use serde::Deserialize;
+	use value::Serializer;
 
 	#[derive(Debug, Clone, Serialize, Deserialize)]
 	struct Summary {
@@ -850,7 +851,7 @@ mod tests {
 		let summary = Summary {
 			title: "Lorem Ipsum".to_owned(),
 		};
-		let value = to_value(summary.clone()).unwrap();
+		let value = summary.serialize(Serializer).unwrap();
 
 		let mut response = Response {
 			results: to_map(vec![Ok(value.clone())]),
@@ -879,7 +880,7 @@ mod tests {
 			title: "Lorem Ipsum".to_owned(),
 			body: "Lorem Ipsum Lorem Ipsum".to_owned(),
 		};
-		let value = to_value(article.clone()).unwrap();
+		let value = article.serialize(Serializer).unwrap();
 
 		let mut response = Response {
 			results: to_map(vec![Ok(value.clone())]),

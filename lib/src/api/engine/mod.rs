@@ -46,7 +46,7 @@ fn split_params(params: &mut [Value]) -> (bool, Vec<Value>, Value) {
 		[what, data] => (mem::take(what), mem::take(data)),
 		_ => unreachable!(),
 	};
-	let one = what.is_thing();
+	let one = what.is_record_id();
 	let what = match what {
 		Value::Array(vec) => vec,
 		value => {
@@ -61,7 +61,7 @@ fn create_statement(params: &mut [Value]) -> CreateStatement {
 	let (_, what, data) = split_params(params);
 	let data = match data {
 		Value::None => None,
-		value => Some(Data::ContentExpression(value)),
+		value => Some(Data::ContentExpression(value.into_core())),
 	};
 	let mut stmt = CreateStatement::default();
 	stmt.what = what;
@@ -108,9 +108,9 @@ fn insert_statement(params: &mut [Value]) -> (bool, InsertStatement) {
 	let mut stmt = InsertStatement::default();
 	stmt.into = match what {
 		Value::None => None,
-		what => Some(what),
+		what => Some(what.into_core()),
 	};
-	stmt.data = Data::SingleExpression(data);
+	stmt.data = Data::SingleExpression(data.into_core());
 	stmt.output = Some(Output::After);
 	(one, stmt)
 }

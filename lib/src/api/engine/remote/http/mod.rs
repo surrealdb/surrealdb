@@ -359,11 +359,11 @@ async fn router(
 			let path = base_url.join(SQL_PATH)?;
 			let mut request = client.post(path).headers(headers.clone());
 			let (ns, db) = match &mut params[..] {
-				[Value::Strand(ns), Value::Strand(db)] => {
-					(Some(mem::take(&mut ns.0)), Some(mem::take(&mut db.0)))
+				[Value::String(ns), Value::String(db)] => {
+					(Some(mem::take(ns)), Some(mem::take(db)))
 				}
-				[Value::Strand(ns), Value::None] => (Some(mem::take(&mut ns.0)), None),
-				[Value::None, Value::Strand(db)] => (None, Some(mem::take(&mut db.0))),
+				[Value::String(ns), Value::None] => (Some(mem::take(ns)), None),
+				[Value::None, Value::String(db)] => (None, Some(mem::take(db))),
 				_ => unreachable!(),
 			};
 			let ns = match ns {

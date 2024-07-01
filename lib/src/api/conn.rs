@@ -271,7 +271,7 @@ pub trait Connection: Sized + Send + Sync + 'static {
 				Value::Array(array) => Value::Array(array),
 				value => Value::Array(vec![value]),
 			};
-			Vec::<R>::deserialize(value).map_err(Into::into)
+			serde::Deserialize::deserialize(value).map_err(Into::into)
 		})
 	}
 

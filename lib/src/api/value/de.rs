@@ -3,7 +3,6 @@ use serde::{
 	de::{EnumAccess, Unexpected, VariantAccess, Visitor},
 	Deserialize, Deserializer,
 };
-use uuid::Variant;
 
 enum NumberVariant {
 	Integer,
@@ -15,8 +14,8 @@ const NUMBER_VARIANTS: &[&str] = &["Int", "Float", "Decimal"];
 
 struct NumberVariantVisitor;
 
-impl Visitor for NumberVariantVisitor {
-	type Value = ValueVariant;
+impl<'de> Visitor<'de> for NumberVariantVisitor {
+	type Value = NumberVariant;
 
 	fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
 		write!(formatter, "variant identifier")
@@ -46,12 +45,12 @@ impl Visitor for NumberVariantVisitor {
 			"Int" => NumberVariant::Integer,
 			"Float" => NumberVariant::Float,
 			"Decimal" => NumberVariant::Decimal,
-			x => Err(E::unknown_variant(x, NUMBER_VARIANTS)),
+			x => return Err(E::unknown_variant(x, NUMBER_VARIANTS)),
 		};
 		Ok(v)
 	}
 
-	fn visit_bytes<E>(self, v: &str) -> Result<Self::Value, E>
+	fn visit_bytes<E>(self, v: &[u8]) -> Result<Self::Value, E>
 	where
 		E: serde::de::Error,
 	{
@@ -59,13 +58,16 @@ impl Visitor for NumberVariantVisitor {
 			b"Int" => NumberVariant::Integer,
 			b"Float" => NumberVariant::Float,
 			b"Decimal" => NumberVariant::Decimal,
-			x => Err(E::unknown_variant(x, NUMBER_VARIANTS)),
+			x => {
+				let x = String::from_utf8_lossy(x);
+				return Err(E::unknown_variant(&x, NUMBER_VARIANTS));
+			}
 		};
 		Ok(v)
 	}
 }
 
-impl Deserialize for NumberVariant {
+impl<'de> Deserialize<'de> for NumberVariant {
 	fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
 	where
 		D: Deserializer<'de>,
@@ -87,7 +89,7 @@ impl<'de> Visitor<'de> for NumberVisitor {
 	where
 		A: serde::de::EnumAccess<'de>,
 	{
-		match EnumAccess::variant(data) {
+		match EnumAccess::variant(data)? {
 			(NumberVariant::Integer, var) => {
 				VariantAccess::newtype_variant(var).map(Number::Integer)
 			}
@@ -133,7 +135,7 @@ const VALUE_VARIANTS: &[&str] = &[
 
 struct ValueVariantVisitor;
 
-impl Visitor for ValueVariantVisitor {
+impl<'de> Visitor<'de> for ValueVariantVisitor {
 	type Value = ValueVariant;
 
 	fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
@@ -187,7 +189,7 @@ impl Visitor for ValueVariantVisitor {
 			//"Geometry" => Variant::Geometry,
 			"Bytes" => ValueVariant::Bytes,
 			"Thing" => ValueVariant::RecordId,
-			x => Err(E::unknown_variant(x, VALUE_VARIANTS)),
+			x => return Err(E::unknown_variant(x, VALUE_VARIANTS)),
 		};
 		Ok(v)
 	}
@@ -210,8 +212,8 @@ impl Visitor for ValueVariantVisitor {
 			b"Bytes" => ValueVariant::Bytes,
 			b"Thing" => ValueVariant::RecordId,
 			x => {
-				let x = String::from_utf8_lossy(v);
-				Err(E::unknown_variant(&x, VALUE_VARIANTS))
+				let x = String::from_utf8_lossy(x);
+				return Err(E::unknown_variant(&x, VALUE_VARIANTS));
 			}
 		};
 		Ok(v)
@@ -240,7 +242,7 @@ impl<'de> Visitor<'de> for ValueVisitor {
 	where
 		A: serde::de::EnumAccess<'de>,
 	{
-		match EnumAccess::variant(data) {
+		match EnumAccess::variant(data)? {
 			(ValueVariant::None, var) => {
 				VariantAccess::unit_variant(var)?;
 				Ok(Value::None)

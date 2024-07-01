@@ -21,9 +21,9 @@ impl<'de> Deserializer<'de> for Number {
 			Number::Integer(x) => visitor.visit_i64(x),
 			Number::Float(x) => visitor.visit_f64(x),
 			Number::Decimal(d) => {
-				if let Some(x) = i64::try_from(d.clone()) {
+				if let Ok(x) = i64::try_from(d.clone()) {
 					visitor.visit_i64(x)
-				} else if let Some(x) = f64::try_from(d.clone()) {
+				} else if let Ok(x) = f64::try_from(d.clone()) {
 					visitor.visit_f64(x)
 				} else {
 					visitor.visit_string(d.to_string())
@@ -47,7 +47,7 @@ where
 {
 	let len = array.len();
 	let mut deserializer = SeqDeserializer::new(array);
-	let seq = tri!(visitor.visit_seq(&mut deserializer));
+	let seq = visitor.visit_seq(&mut deserializer)?;
 	let remaining = deserializer.iter.len();
 	if remaining == 0 {
 		Ok(seq)
@@ -56,13 +56,13 @@ where
 	}
 }
 
-fn visit_object<'de, V>(object: Map<String, Value>, visitor: V) -> Result<V::Value, Error>
+fn visit_object<'de, V>(object: Object, visitor: V) -> Result<V::Value, Error>
 where
 	V: Visitor<'de>,
 {
 	let len = object.len();
 	let mut deserializer = MapDeserializer::new(object);
-	let map = tri!(visitor.visit_map(&mut deserializer));
+	let map = visitor.visit_map(&mut deserializer)?;
 	let remaining = deserializer.iter.len();
 	if remaining == 0 {
 		Ok(map)
@@ -174,22 +174,12 @@ impl<'de> Deserializer<'de> for Value {
 	#[inline]
 	fn deserialize_newtype_struct<V>(
 		self,
-		name: &'static str,
+		_name: &'static str,
 		visitor: V,
 	) -> Result<V::Value, Error>
 	where
 		V: Visitor<'de>,
 	{
-		#[cfg(feature = "raw_value")]
-		{
-			if name == crate::raw::TOKEN {
-				return visitor.visit_map(crate::raw::OwnedRawDeserializer {
-					raw_value: Some(self.to_string()),
-				});
-			}
-		}
-
-		let _ = name;
 		visitor.visit_newtype_struct(self)
 	}
 
@@ -515,32 +505,6 @@ impl<'de> MapAccess<'de> for MapDeserializer {
 			_ => None,
 		}
 	}
-}
-
-macro_rules! deserialize_value_ref_number {
-	($method:ident) => {
-		#[cfg(not(feature = "arbitrary_precision"))]
-		fn $method<V>(self, visitor: V) -> Result<V::Value, Error>
-		where
-			V: Visitor<'de>,
-		{
-			match self {
-				Value::Number(n) => n.deserialize_any(visitor),
-				_ => Err(self.invalid_type(&visitor)),
-			}
-		}
-
-		#[cfg(feature = "arbitrary_precision")]
-		fn $method<V>(self, visitor: V) -> Result<V::Value, Error>
-		where
-			V: Visitor<'de>,
-		{
-			match self {
-				Value::Number(n) => n.$method(visitor),
-				_ => self.deserialize_any(visitor),
-			}
-		}
-	};
 }
 
 fn visit_array_ref<'de, V>(array: &'de [Value], visitor: V) -> Result<V::Value, Error>
@@ -990,17 +954,17 @@ macro_rules! deserialize_numeric_key {
 		where
 			V: Visitor<'de>,
 		{
-			let mut de = crate::Deserializer::from_str(&self.key);
+			let mut de = Deserializer::from_str(&self.key);
 
-			match tri!(de.peek()) {
+			match de.peek()? {
 				Some(b'0'..=b'9' | b'-') => {}
-				_ => return Err(Error::syntax(ErrorCode::ExpectedNumericKey, 0, 0)),
+				_ => return Err(Error::Deserializer("expected numeric key".to_owned())),
 			}
 
-			let number = tri!(de.$using(visitor));
+			let number = de.$using(visitor)?;
 
-			if tri!(de.peek()).is_some() {
-				return Err(Error::syntax(ErrorCode::ExpectedNumericKey, 0, 0));
+			if de.peek()?.is_some() {
+				return Err(Error::Deserializer("expected numeric key".to_owned()));
 			}
 
 			Ok(number)
@@ -1026,12 +990,9 @@ impl<'de> serde::Deserializer<'de> for MapKeyDeserializer<'de> {
 	deserialize_numeric_key!(deserialize_u16);
 	deserialize_numeric_key!(deserialize_u32);
 	deserialize_numeric_key!(deserialize_u64);
-	#[cfg(not(feature = "float_roundtrip"))]
 	deserialize_numeric_key!(deserialize_f32);
 	deserialize_numeric_key!(deserialize_f64);
 
-	#[cfg(feature = "float_roundtrip")]
-	deserialize_numeric_key!(deserialize_f32, do_deserialize_f32);
 	deserialize_numeric_key!(deserialize_i128, do_deserialize_i128);
 	deserialize_numeric_key!(deserialize_u128, do_deserialize_u128);
 
@@ -1087,14 +1048,11 @@ impl<'de> serde::Deserializer<'de> for MapKeyDeserializer<'de> {
 	}
 }
 
+/*
 struct KeyClassifier;
 
 enum KeyClass {
 	Map(String),
-	#[cfg(feature = "arbitrary_precision")]
-	Number,
-	#[cfg(feature = "raw_value")]
-	RawValue,
 }
 
 impl<'de> DeserializeSeed<'de> for KeyClassifier {
@@ -1142,6 +1100,7 @@ impl<'de> Visitor<'de> for KeyClassifier {
 		}
 	}
 }
+*/
 
 impl Value {
 	#[cold]

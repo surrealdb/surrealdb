@@ -20,84 +20,59 @@
 //! useful is to only enable the in-memory engine (`kv-mem`) during development. Besides letting you not
 //! worry about those dependencies on your dev machine, it allows you to keep compile times low
 //! during development while allowing you to test your code fully.
+use crate::{
+	api::{
+		conn::{DbResponse, Method, Param},
+		engine::{
+			create_statement, delete_statement, insert_statement, merge_statement, patch_statement,
+			select_statement, update_statement, upsert_statement,
+		},
+		Connect, Response as QueryResponse, Result, Surreal,
+	},
+	method::Stats,
+	opt::IntoEndpoint,
+};
+use channel::Sender;
+use indexmap::IndexMap;
+use std::{
+	collections::{BTreeMap, HashMap},
+	marker::PhantomData,
+	mem,
+	sync::Arc,
+	time::Duration,
+};
+use surrealdb_core::{
+	dbs::{Notification, Response, Session},
+	kvs::Datastore,
+	sql::{statements::KillStatement, Query, Statement, Uuid, Value as CoreValue},
+};
+
+#[cfg(not(target_arch = "wasm32"))]
+use crate::api::{conn::MlConfig, err::Error};
+#[cfg(not(target_arch = "wasm32"))]
+use std::path::PathBuf;
+
+#[cfg(feature = "ml")]
+#[cfg(not(target_arch = "wasm32"))]
+use futures::StreamExt;
+#[cfg(feature = "ml")]
+#[cfg(not(target_arch = "wasm32"))]
+use surrealdb_core::{
+	iam::{check::check_ns_db, Action, ResourceKind},
+	kvs::{LockType, TransactionType},
+	ml::storage::surml_file::SurMlFile,
+	sql::statements::{DefineModelStatement, DefineStatement},
+};
+#[cfg(not(target_arch = "wasm32"))]
+use tokio::{
+	fs::OpenOptions,
+	io::{self, AsyncReadExt, AsyncWriteExt},
+};
 
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) mod native;
 #[cfg(target_arch = "wasm32")]
 pub(crate) mod wasm;
-
-use crate::api::conn::DbResponse;
-use crate::api::conn::Method;
-#[cfg(not(target_arch = "wasm32"))]
-use crate::api::conn::MlConfig;
-use crate::api::conn::Param;
-use crate::api::engine::create_statement;
-use crate::api::engine::delete_statement;
-use crate::api::engine::insert_statement;
-use crate::api::engine::merge_statement;
-use crate::api::engine::patch_statement;
-use crate::api::engine::select_statement;
-use crate::api::engine::update_statement;
-use crate::api::engine::upsert_statement;
-#[cfg(not(target_arch = "wasm32"))]
-use crate::api::err::Error;
-use crate::api::Connect;
-use crate::api::Response as QueryResponse;
-use crate::api::Result;
-use crate::api::Surreal;
-use crate::dbs::Notification;
-use crate::dbs::Response;
-use crate::dbs::Session;
-#[cfg(feature = "ml")]
-#[cfg(not(target_arch = "wasm32"))]
-use crate::iam::check::check_ns_db;
-#[cfg(feature = "ml")]
-#[cfg(not(target_arch = "wasm32"))]
-use crate::iam::Action;
-#[cfg(feature = "ml")]
-#[cfg(not(target_arch = "wasm32"))]
-use crate::iam::ResourceKind;
-use crate::kvs::Datastore;
-#[cfg(feature = "ml")]
-#[cfg(not(target_arch = "wasm32"))]
-use crate::kvs::{LockType, TransactionType};
-use crate::method::Stats;
-#[cfg(feature = "ml")]
-#[cfg(not(target_arch = "wasm32"))]
-use crate::ml::storage::surml_file::SurMlFile;
-use crate::opt::IntoEndpoint;
-#[cfg(feature = "ml")]
-#[cfg(not(target_arch = "wasm32"))]
-use crate::sql::statements::DefineModelStatement;
-#[cfg(feature = "ml")]
-#[cfg(not(target_arch = "wasm32"))]
-use crate::sql::statements::DefineStatement;
-use crate::sql::statements::KillStatement;
-use crate::sql::Query;
-use crate::sql::Statement;
-use crate::sql::Uuid;
-use crate::Value;
-use channel::Sender;
-#[cfg(feature = "ml")]
-#[cfg(not(target_arch = "wasm32"))]
-use futures::StreamExt;
-use indexmap::IndexMap;
-use std::collections::BTreeMap;
-use std::collections::HashMap;
-use std::marker::PhantomData;
-use std::mem;
-#[cfg(not(target_arch = "wasm32"))]
-use std::path::PathBuf;
-use std::sync::Arc;
-use std::time::Duration;
-#[cfg(not(target_arch = "wasm32"))]
-use tokio::fs::OpenOptions;
-#[cfg(not(target_arch = "wasm32"))]
-use tokio::io;
-#[cfg(not(target_arch = "wasm32"))]
-use tokio::io::AsyncReadExt;
-#[cfg(not(target_arch = "wasm32"))]
-use tokio::io::AsyncWriteExt;
 
 const DEFAULT_TICK_INTERVAL: Duration = Duration::from_secs(10);
 
@@ -414,11 +389,11 @@ async fn take(one: bool, responses: Vec<Response>) -> Result<Value> {
 		match one {
 			true => match value {
 				Value::Array(mut array) => {
-					if let [value] = &mut array.0[..] {
-						return Ok(mem::take(value));
+					if let [ref mut value] = array[..] {
+						return Ok(mem::replace(value, Value::None));
 					}
 				}
-				Value::None | Value::None => {}
+				Value::None => {}
 				value => return Ok(value),
 			},
 			false => return Ok(value),

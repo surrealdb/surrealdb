@@ -303,10 +303,11 @@ pub fn connect(address: impl IntoEndpoint) -> Connect<Any, Surreal<Any>> {
 
 #[cfg(all(test, feature = "kv-mem"))]
 mod tests {
+
 	use super::*;
 	use crate::opt::auth::Root;
 	use crate::opt::capabilities::Capabilities;
-	use crate::sql;
+	use crate::Object;
 	use crate::Value;
 
 	#[tokio::test]
@@ -332,7 +333,7 @@ mod tests {
 		let mut res = db.query("INFO FOR ROOT").await.unwrap();
 		let users: Value = res.take("users").unwrap();
 
-		assert_eq!(users, sql::value("{}").unwrap(), "there should be no users in the system");
+		assert_eq!(users, Value::Object(Object::new()), "there should be no users in the system");
 	}
 
 	#[tokio::test]

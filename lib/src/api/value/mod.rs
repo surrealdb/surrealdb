@@ -1,7 +1,7 @@
 use std::{
 	borrow::Borrow,
 	cmp::{Ordering, PartialEq, PartialOrd},
-	collections::{btree_map::IterMut, BTreeMap},
+	collections::{btree_map, BTreeMap},
 	fmt,
 	iter::FusedIterator,
 	ops::Deref,
@@ -152,7 +152,7 @@ impl RecordId {
 }
 
 #[non_exhaustive]
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Number {
 	Float(f64),
 	Integer(i64),
@@ -160,29 +160,31 @@ pub enum Number {
 }
 
 #[derive(Debug)]
-pub struct ObjectIterMut<'a>(IterMut<'a, String, Value>);
+pub struct IterMut<'a> {
+	iter: btree_map::IterMut<'a, String, Value>,
+}
 
-impl<'a> Iterator for ObjectIterMut<'a> {
+impl<'a> Iterator for IterMut<'a> {
 	type Item = (&'a String, &'a mut Value);
 
 	fn next(&mut self) -> Option<Self::Item> {
-		self.0.next()
+		self.iter.next()
 	}
 
 	fn size_hint(&self) -> (usize, Option<usize>) {
-		self.0.size_hint()
+		self.iter.size_hint()
 	}
 }
 
-impl<'a> std::iter::FusedIterator for ObjectIterMut<'a> {}
+impl<'a> std::iter::FusedIterator for IterMut<'a> {}
 
-impl<'a> ExactSizeIterator for ObjectIterMut<'a> {
+impl<'a> ExactSizeIterator for IterMut<'a> {
 	fn len(&self) -> usize {
-		<IterMut<'a, String, Value> as ExactSizeIterator>::len(&self.0)
+		self.iter.len()
 	}
 }
 
-#[derive(Debug, Default, Clone, Serialize, Deserialize)]
+#[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq, PartialOrd)]
 #[revisioned(revision = 1)]
 pub struct Object(pub(crate) BTreeMap<String, Value>);
 
@@ -195,52 +197,64 @@ impl Object {
 		self.0.clear()
 	}
 
-	pub fn get<Q: ?Sized>(&self, key: &Q) -> Option<&Value>
+	pub fn get<Q>(&self, key: &Q) -> Option<&Value>
 	where
 		String: Borrow<Q>,
-		Q: Ord,
+		Q: Ord + ?Sized,
 	{
 		self.0.get(key)
 	}
 
-	pub fn get_mut<Q: ?Sized>(&mut self, key: &Q) -> Option<&mut Value>
+	pub fn get_mut<Q>(&mut self, key: &Q) -> Option<&mut Value>
 	where
 		String: Borrow<Q>,
-		Q: Ord,
+		Q: Ord + ?Sized,
 	{
 		self.0.get_mut(key)
 	}
 
-	pub fn contains_key<Q: ?Sized>(&self, key: &Q) -> bool
+	pub fn contains_key<Q>(&self, key: &Q) -> bool
 	where
 		String: Borrow<Q>,
-		Q: Ord,
+		Q: ?Sized + Ord,
 	{
 		self.0.contains_key(key)
 	}
 
-	pub fn remove<Q: ?Sized>(&mut self, key: &Q) -> Option<Value>
+	pub fn remove<Q>(&mut self, key: &Q) -> Option<Value>
 	where
 		String: Borrow<Q>,
-		Q: Ord,
+		Q: ?Sized + Ord,
 	{
 		self.0.remove(key)
 	}
 
-	pub fn remove_entry<Q: ?Sized>(&mut self, key: &Q) -> Option<(String, Value)>
+	pub fn remove_entry<Q>(&mut self, key: &Q) -> Option<(String, Value)>
 	where
 		String: Borrow<Q>,
-		Q: Ord,
+		Q: ?Sized + Ord,
 	{
 		self.0.remove_entry(key)
 	}
 
-	pub fn iter_mut(&mut self) -> ObjectIterMut<'_> {
-		ObjectIterMut(self.0.iter_mut())
+	pub fn iter(&self) -> Iter<'_> {
+		Iter {
+			iter: self.0.iter(),
+		}
+	}
+
+	pub fn iter_mut(&mut self) -> IterMut<'_> {
+		IterMut {
+			iter: self.0.iter_mut(),
+		}
 	}
 
 	pub fn len(&self) -> usize {
 		self.0.len()
+	}
+
+	pub fn is_empty(&self) -> bool {
+		self.0.is_empty()
 	}
 
 	pub fn insert<V>(&mut self, key: String, value: V) -> Option<Value>
@@ -299,19 +313,17 @@ struct Iter<'a> {
 }
 
 impl<'a> IntoIterator for &'a Object {
-	type Item = <Iter<'a> as Iterator>::Item;
+	type Item = (&'a String, &'a Value);
 
 	type IntoIter = Iter<'a>;
 
 	fn into_iter(self) -> Self::IntoIter {
-		Iter {
-			iter: &(self.0).into_iter(),
-		}
+		self.iter()
 	}
 }
 
 impl<'a> Iterator for Iter<'a> {
-	type Item = (&str, &Value);
+	type Item = (&'a String, &'a Value);
 
 	fn next(&mut self) -> Option<Self::Item> {
 		self.iter.next()
@@ -325,7 +337,7 @@ impl<'a> Iterator for Iter<'a> {
 	where
 		Self: Sized,
 	{
-		self.iter.size_hint()
+		self.iter.last()
 	}
 
 	fn min(mut self) -> Option<Self::Item> {
@@ -345,15 +357,16 @@ impl<'a> DoubleEndedIterator for Iter<'a> {
 	}
 }
 
-impl ExactSizeIterator for Iter<'a> {
+impl<'a> ExactSizeIterator for Iter<'a> {
 	fn len(&self) -> usize {
 		self.iter.len()
 	}
 }
 
 #[non_exhaustive]
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, PartialOrd)]
 pub enum Value {
+	#[default]
 	None,
 	Bool(bool),
 	Number(Number),
@@ -379,13 +392,23 @@ impl Value {
 	pub fn decimal(v: Decimal) -> Self {
 		Value::Number(Number::Decimal(v))
 	}
+
+	pub(crate) fn into_core(self) -> surrealdb_core::sql::Value {
+		surrealdb_core::sql::Value::deserialize(self)
+			.expect("conversion between lib::Value and core::Value should not fail")
+	}
 }
 
 macro_rules! impl_convert(
-	($(($variant:ident($ty:ty), $as:ident,$as_mut:ident, $into:ident)),*$(,)?) => {
+	($(($variant:ident($ty:ty), $is:ident, $as:ident,$as_mut:ident, $into:ident)),*$(,)?) => {
 		impl Value{
 
 			$(
+			#[doc = concat!("Return whether the value contains a ",stringify!($ty),".")]
+			pub fn $is(&self) -> bool{
+				matches!(&self, Value::$variant(_))
+			}
+
 			#[doc = concat!("Get a reference to the internal ",stringify!($ty)," if the value is of that type")]
 			pub fn $as(&self) -> Option<&$ty>{
 				if let Value::$variant(ref x) = self{
@@ -437,15 +460,15 @@ macro_rules! impl_convert(
 );
 
 impl_convert!(
-	(Bool(bool), as_bool, as_bool_mut, into_bool),
-	(Number(Number), as_number, as_number_mut, into_number),
-	(Uuid(Uuid), as_uuid, as_uuid_mut, into_uuid),
-	(Datetime(Datetime), as_datetime, as_datetime_mut, into_dateime),
-	(Duration(Duration), as_duration, as_duration_mut, into_duration),
-	(Bytes(Bytes), as_bytes, as_bytes_mut, into_bytes),
-	(String(String), as_string, as_string_mut, into_string),
-	(RecordId(RecordId), as_record_id, as_record_id_mut, into_record_id),
-	(Object(Object), as_object, as_object_mut, into_object),
+	(Bool(bool), is_bool, as_bool, as_bool_mut, into_bool),
+	(Number(Number), is_number, as_number, as_number_mut, into_number),
+	(Uuid(Uuid), is_uuid, as_uuid, as_uuid_mut, into_uuid),
+	(Datetime(Datetime), is_datetime, as_datetime, as_datetime_mut, into_dateime),
+	(Duration(Duration), is_duration, as_duration, as_duration_mut, into_duration),
+	(Bytes(Bytes), is_bytes, as_bytes, as_bytes_mut, into_bytes),
+	(String(String), is_string, as_string, as_string_mut, into_string),
+	(RecordId(RecordId), is_record_id, as_record_id, as_record_id_mut, into_record_id),
+	(Object(Object), is_object, as_object, as_object_mut, into_object),
 );
 
 pub struct ConversionError {
