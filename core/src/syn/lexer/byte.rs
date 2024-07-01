@@ -402,13 +402,20 @@ impl<'a> Lexer<'a> {
 					return self.lex_ident_from_next_byte(b'm');
 				}
 			},
-			b's' => {
-				if self.reader.peek().map(|x| x.is_ascii_alphabetic()).unwrap_or(false) {
-					return self.lex_ident_from_next_byte(b's');
-				} else {
-					t!("s")
+			b's' => match self.reader.peek() {
+				Some(b'"') => {
+					self.reader.next();
+					t!("\"")
 				}
-			}
+				Some(b'\'') => {
+					self.reader.next();
+					t!("'")
+				}
+				Some(x) if x.is_ascii_alphabetic() => {
+					return self.lex_ident_from_next_byte(b's');
+				}
+				_ => t!("s"),
+			},
 			b'h' => {
 				if self.reader.peek().map(|x| x.is_ascii_alphabetic()).unwrap_or(false) {
 					return self.lex_ident_from_next_byte(b'h');
