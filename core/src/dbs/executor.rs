@@ -446,8 +446,7 @@ impl<'a> Executor<'a> {
 			let res = Response {
 				// Get the statement end time
 				time: now.elapsed(),
-				// TODO: Replace with `inspect_err` once stable.
-				result: res.map_err(|e| {
+				result: res.inspect_err(|&e| {
 					// Mark the error.
 					self.err = true;
 					e
