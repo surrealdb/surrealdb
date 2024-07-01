@@ -963,11 +963,11 @@ fn parse_define_access_record() {
 			_ => panic!(),
 		}
 	}
-	// Session duration and signing queries are explicitly defined.
+	// Session duration, signing and authentication queries are explicitly defined.
 	{
 		let res = test_parse!(
 			parse_stmt,
-			r#"DEFINE ACCESS a ON DB TYPE RECORD SIGNUP true SIGNIN false DURATION FOR SESSION 7d"#
+			r#"DEFINE ACCESS a ON DB TYPE RECORD SIGNUP true SIGNIN false AUTHENTICATE true DURATION FOR SESSION 7d"#
 		)
 		.unwrap();
 
@@ -993,6 +993,7 @@ fn parse_define_access_record() {
 			AccessType::Record(ac) => {
 				assert_eq!(ac.signup, Some(Value::Bool(true)));
 				assert_eq!(ac.signin, Some(Value::Bool(false)));
+				assert_eq!(ac.authenticate, Some(Value::Bool(true)));
 				match ac.jwt.verify {
 					JwtAccessVerify::Key(key) => {
 						assert_eq!(key.alg, Algorithm::Hs512);
@@ -1024,6 +1025,7 @@ fn parse_define_access_record() {
 				kind: AccessType::Record(RecordAccess {
 					signup: None,
 					signin: None,
+					authenticate: None,
 					jwt: JwtAccess {
 						verify: JwtAccessVerify::Key(JwtAccessVerifyKey {
 							alg: Algorithm::Hs384,
@@ -1061,6 +1063,7 @@ fn parse_define_access_record() {
 				kind: AccessType::Record(RecordAccess {
 					signup: None,
 					signin: None,
+					authenticate: None,
 					jwt: JwtAccess {
 						verify: JwtAccessVerify::Key(JwtAccessVerifyKey {
 							alg: Algorithm::Ps512,
@@ -1097,6 +1100,7 @@ fn parse_define_access_record() {
 				kind: AccessType::Record(RecordAccess {
 					signup: None,
 					signin: None,
+					authenticate: None,
 					jwt: JwtAccess {
 						verify: JwtAccessVerify::Key(JwtAccessVerifyKey {
 							alg: Algorithm::Rs256,
@@ -1145,6 +1149,7 @@ fn parse_define_access_record_with_jwt() {
 			kind: AccessType::Record(RecordAccess {
 				signup: None,
 				signin: None,
+				authenticate: None,
 				jwt: JwtAccess {
 					verify: JwtAccessVerify::Key(JwtAccessVerifyKey {
 						alg: Algorithm::EdDSA,
