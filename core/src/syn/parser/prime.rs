@@ -180,7 +180,7 @@ impl Parser<'_> {
 						return Ok(x);
 					}
 				}
-				Value::Strand(s)
+				return Ok(Value::Strand(s));
 			}
 			t!("+") | t!("-") | TokenKind::Number(_) | TokenKind::Digits | TokenKind::Duration => {
 				self.parse_number_like_prime()?
@@ -648,13 +648,19 @@ impl Parser<'_> {
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::syn::Parse;
+	use crate::syn::{self, Parse};
 
 	#[test]
 	fn subquery_expression_statement() {
 		let sql = "(1 + 2 + 3)";
 		let out = Value::parse(sql);
 		assert_eq!("(1 + 2 + 3)", format!("{}", out))
+	}
+
+	#[test]
+	fn invalid_idiom() {
+		let sql = "'hello'.foo";
+		syn::parse(sql).unwrap_err();
 	}
 
 	#[test]
