@@ -217,7 +217,7 @@ impl Parser<'_> {
 
 	/// Returns if the token kind could continua an idiom
 	pub fn continues_idiom(kind: TokenKind) -> bool {
-		dbg!(matches!(kind, t!("->") | t!("<->") | t!("<-") | t!("[") | t!(".") | t!("...")))
+		matches!(kind, t!("->") | t!("<->") | t!("<-") | t!("[") | t!(".") | t!("..."))
 	}
 
 	/// Parse a idiom which can only start with a graph or an identifier.
