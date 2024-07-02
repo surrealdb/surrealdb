@@ -20,7 +20,6 @@ use crate::options::EngineOptions;
 use flume::Receiver;
 use flume::Sender;
 use futures::stream::poll_fn;
-use futures::FutureExt;
 use futures::StreamExt;
 use std::collections::BTreeMap;
 use std::collections::HashMap;
