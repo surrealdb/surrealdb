@@ -312,7 +312,8 @@ impl<'a> Lexer<'a> {
 				_ => t!(":"),
 			},
 			b'$' => {
-				if self.reader.peek().map(|x| x.is_ascii_alphabetic()).unwrap_or(false) {
+				if self.reader.peek().map(|x| x.is_ascii_alphabetic() || x == b'_').unwrap_or(false)
+				{
 					return self.lex_param();
 				}
 				t!("$")

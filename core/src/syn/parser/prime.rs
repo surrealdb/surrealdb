@@ -594,13 +594,17 @@ impl Parser<'_> {
 		matches!(
 			kind,
 			t!("ANALYZE")
-				| t!("BEGIN") | t!("BREAK")
-				| t!("CANCEL") | t!("COMMIT")
-				| t!("CONTINUE") | t!("FOR")
-				| t!("INFO") | t!("KILL")
-				| t!("LIVE") | t!("OPTION")
+				| t!("BEGIN")
+				| t!("BREAK")
+				| t!("CANCEL")
+				| t!("COMMIT")
+				| t!("CONTINUE")
+				| t!("FOR") | t!("INFO")
+				| t!("KILL") | t!("LIVE")
+				| t!("OPTION")
 				| t!("LET") | t!("SHOW")
-				| t!("SLEEP") | t!("THROW")
+				| t!("SLEEP")
+				| t!("THROW")
 				| t!("USE")
 		)
 	}
@@ -730,10 +734,25 @@ mod tests {
 	fn plain_string() {
 		let sql = r#""hello""#;
 		let out = Value::parse(sql);
-		assert_eq!(r#""hello""#, format!("{}", out));
+		assert_eq!(r#"'hello'"#, format!("{}", out));
 
 		let sql = r#"s"hello""#;
 		let out = Value::parse(sql);
-		assert_eq!(r#""hello""#, format!("{}", out));
+		assert_eq!(r#"'hello'"#, format!("{}", out));
+
+		let sql = r#"s'hello'"#;
+		let out = Value::parse(sql);
+		assert_eq!(r#"'hello'"#, format!("{}", out));
+	}
+
+	#[test]
+	fn params() {
+		let sql = "$hello";
+		let out = Value::parse(sql);
+		assert_eq!("$hello", format!("{}", out));
+
+		let sql = "$__hello";
+		let out = Value::parse(sql);
+		assert_eq!("$__hello", format!("{}", out));
 	}
 }
