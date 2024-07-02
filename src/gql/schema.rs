@@ -20,6 +20,7 @@ use surrealdb::sql::{Order, Table};
 use surrealdb::sql::{Orders, Values};
 use surrealdb::sql::{Statement, Thing};
 
+use super::ext::IntoExt;
 use crate::dbs::DB;
 use crate::gql::utils::GqlValueUtils;
 use surrealdb::kvs::LockType;
@@ -45,24 +46,17 @@ macro_rules! id_input {
 }
 
 macro_rules! order {
-	(asc, $field:expr) => {
-		::surrealdb::sql::Order {
-			order: $field.into(),
-			random: false,
-			collate: false,
-			numeric: false,
-			direction: true,
-		}
-	};
-	(desc, $field:expr) => {
-		::surrealdb::sql::Order {
-			order: $field.into(),
-			random: false,
-			collate: false,
-			numeric: false,
-			direction: false,
-		}
-	};
+	(asc, $field:expr) => {{
+		let mut tmp = ::surrealdb::sql::Order::default();
+		tmp.order = $field.into();
+		tmp.direction = true;
+		tmp
+	}};
+	(desc, $field:expr) => {{
+		let mut tmp = ::surrealdb::sql::Order::default();
+		tmp.order = $field.into();
+		tmp
+	}};
 }
 
 pub async fn get_schema() -> Result<Schema, Box<dyn std::error::Error>> {
@@ -109,10 +103,7 @@ pub async fn get_schema() -> Result<Schema, Box<dyn std::error::Error>> {
 					FieldFuture::new(async move {
 						let kvs = DB.get().unwrap();
 
-						let use_stmt = Statement::Use(UseStatement {
-							db: Some(DB_NAME.to_string()),
-							ns: Some(NS_NAME.to_string()),
-						});
+						let use_stmt = Statement::Use((NS_NAME, DB_NAME).intox());
 
 						// -- debugging --
 						// let args = ctx.args;
@@ -129,17 +120,11 @@ pub async fn get_schema() -> Result<Schema, Box<dyn std::error::Error>> {
 
 						let args = ctx.args.as_index_map();
 						info!("args: {args:?}");
-						let start = args
-							.get("start")
-							.map(|v| v.as_i64())
-							.flatten()
-							.map(|s| Start(SqlValue::from(s)));
+						let start =
+							args.get("start").map(|v| v.as_i64()).flatten().map(|s| s.intox());
 
-						let limit = args
-							.get("limit")
-							.map(|v| v.as_i64())
-							.flatten()
-							.map(|l| Limit(SqlValue::from(l)));
+						let limit =
+							args.get("limit").map(|v| v.as_i64()).flatten().map(|l| l.intox());
 
 						let order = args.get("order");
 
@@ -187,21 +172,22 @@ pub async fn get_schema() -> Result<Schema, Box<dyn std::error::Error>> {
 									)
 								};
 
-								let cond = cond_from_filter(o);
+								let cond = cond_from_filter(o)?;
 
-								Some(Cond(cond))
+								Some(cond.into())
 							}
 							None => None,
 						};
 
-						let ast = Statement::Select(SelectStatement {
-							what: Values(vec![SqlValue::Table(Table(tb_name))]),
-							expr: Fields::all(),
-							start,
-							limit,
-							order: orders.map(|o| Orders(o)),
-							cond,
-							..Default::default()
+						let ast = Statement::Select({
+							let mut tmp = SelectStatement::default();
+							tmp.what = vec![SqlValue::Table(tb_name.intox())].into();
+							tmp.expr = Fields::all();
+							tmp.start = start;
+							tmp.limit = limit;
+							tmp.order = orders.map(IntoExt::intox);
+
+							tmp
 						});
 
 						info!("query ast: {ast:?}");
@@ -252,16 +238,16 @@ pub async fn get_schema() -> Result<Schema, Box<dyn std::error::Error>> {
 							Err(_) => Thing::from((tb_name, id)),
 						};
 
-						let use_stmt = Statement::Use(UseStatement {
-							db: Some(DB_NAME.to_string()),
-							ns: Some(NS_NAME.to_string()),
-						});
+						let use_stmt = Statement::Use(
+							(Some(DB_NAME.to_string()), Some(NS_NAME.to_string())).intox(),
+						);
 
-						let ast = Statement::Select(SelectStatement {
-							what: Values(vec![SqlValue::Thing(thing)]),
-							expr: Fields::all(),
-							only: true,
-							..Default::default()
+						let ast = Statement::Select({
+							let mut tmp = SelectStatement::default();
+							tmp.what = vec![SqlValue::Thing(thing)].into();
+							tmp.expr = Fields::all();
+							tmp.only = true;
+							tmp
 						});
 
 						let query = vec![use_stmt, ast].into();
@@ -346,16 +332,14 @@ pub async fn get_schema() -> Result<Schema, Box<dyn std::error::Error>> {
 				// async-graphql should validate that this is present as it is non-null
 				let id = args.get("id").map(GqlValueUtils::as_string).flatten().unwrap();
 
-				let use_stmt = Statement::Use(UseStatement {
-					db: Some(DB_NAME.to_string()),
-					ns: Some(NS_NAME.to_string()),
-				});
+				let use_stmt = Statement::Use((DB_NAME, NS_NAME).intox());
 
-				let ast = Statement::Select(SelectStatement {
-					what: Values(vec![SqlValue::Thing(id.try_into().unwrap())]),
-					expr: Fields::all(),
-					only: true,
-					..Default::default()
+				let ast = Statement::Select({
+					let mut tmp = SelectStatement::default();
+					tmp.what = vec![SqlValue::Thing(id.try_into().unwrap())].into();
+					tmp.expr = Fields::all();
+					tmp.only = true;
+					tmp
 				});
 
 				let query = vec![use_stmt, ast].into();
@@ -407,6 +391,7 @@ fn sql_value_to_gql_value(v: SqlValue) -> Result<GqlValue, ()> {
 			surrealdb::sql::Number::Int(i) => GqlValue::Number(i.into()),
 			surrealdb::sql::Number::Float(f) => GqlValue::Number(Number::from_f64(f).ok_or(())?),
 			surrealdb::sql::Number::Decimal(_) => todo!("surrealdb::sql::Number::Decimal(_) "),
+			_ => todo!(),
 		},
 		SqlValue::Strand(s) => GqlValue::String(s.0),
 		SqlValue::Duration(_) => todo!("SqlValue::Duration(_) "),
@@ -437,6 +422,7 @@ fn sql_value_to_gql_value(v: SqlValue) -> Result<GqlValue, ()> {
 		SqlValue::Expression(_) => todo!("SqlValue::Expression(_) "),
 		SqlValue::Query(_) => todo!("SqlValue::Query(_) "),
 		SqlValue::Model(_) => todo!("SqlValue::Model(_) "),
+		_ => todo!(),
 	};
 	Ok(out)
 }
@@ -471,6 +457,7 @@ fn kind_to_type(kind: Option<Kind>) -> TypeRef {
 		Kind::Either(_) => todo!("Kind::Either(_) "),
 		Kind::Set(_, _) => todo!("Kind::Set(_, _) "),
 		Kind::Array(k, _) => TypeRef::List(Box::new(kind_to_type(Some(*k)))),
+		_ => todo!(),
 	};
 
 	match optional {
@@ -521,6 +508,7 @@ fn filter_from_type(kind: Option<Kind>, filter_name: String) -> InputObject {
 		Kind::Either(_) => {}
 		Kind::Set(_, _) => {}
 		Kind::Array(_, _) => {}
+		_ => {}
 	};
 	filter
 }
@@ -532,7 +520,7 @@ fn unwrap_type(ty: TypeRef) -> TypeRef {
 	}
 }
 
-fn cond_from_filter(filter: IndexMap<Name, GqlValue>) -> Result<Cond, Error> {
+fn cond_from_filter(filter: &IndexMap<Name, GqlValue>) -> Result<Cond, Error> {
 	let mut cond = Value::None;
 
 	for (op_name, val) in filter.iter() {
@@ -542,5 +530,5 @@ fn cond_from_filter(filter: IndexMap<Name, GqlValue>) -> Result<Cond, Error> {
 		};
 		break;
 	}
-	Ok(Cond(cond))
+	Ok(cond.into())
 }

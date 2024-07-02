@@ -37,6 +37,15 @@ pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Value";
 #[non_exhaustive]
 pub struct Values(pub Vec<Value>);
 
+impl<V> From<V> for Values
+where
+	V: Into<Vec<Value>>,
+{
+	fn from(value: V) -> Self {
+		Self(value.into())
+	}
+}
+
 impl Deref for Values {
 	type Target = Vec<Value>;
 	fn deref(&self) -> &Self::Target {
