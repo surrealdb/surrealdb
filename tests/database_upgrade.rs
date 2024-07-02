@@ -23,7 +23,7 @@ mod database_upgrade {
 	const PASS: &str = "root";
 
 	// This test include a feature set that is supported since v1.0
-	async fn upgrade_test_1_0(version: &str) {
+	async fn upgrade_test_from_1_0(version: &str) {
 		// Start the docker instance
 		let (path, mut docker, client) = start_docker(version).await;
 
@@ -55,18 +55,18 @@ mod database_upgrade {
 	#[cfg(feature = "storage-rocksdb")]
 	#[serial]
 	async fn upgrade_test_from_1_0_0() {
-		upgrade_test_1_0("1.0.0").await;
+		upgrade_test_from_1_0("1.0.0").await;
 	}
 
 	#[test(tokio::test(flavor = "multi_thread"))]
 	#[cfg(feature = "storage-rocksdb")]
 	#[serial]
 	async fn upgrade_test_from_1_0_1() {
-		upgrade_test_1_0("1.0.1").await;
+		upgrade_test_from_1_0("1.0.1").await;
 	}
 
 	// This test include a feature set that since v1.1
-	async fn upgrade_test_1_1(version: &str) {
+	async fn upgrade_test_from_1_1(version: &str) {
 		// Start the docker instance
 		let (path, mut docker, client) = start_docker(version).await;
 
@@ -101,18 +101,18 @@ mod database_upgrade {
 	#[cfg(feature = "storage-rocksdb")]
 	#[serial]
 	async fn upgrade_test_from_1_1_0() {
-		upgrade_test_1_1("v1.1.0").await;
+		upgrade_test_from_1_1("v1.1.0").await;
 	}
 
 	#[test(tokio::test(flavor = "multi_thread"))]
 	#[cfg(feature = "storage-rocksdb")]
 	#[serial]
 	async fn upgrade_test_from_1_1_1() {
-		upgrade_test_1_1("v1.1.1").await;
+		upgrade_test_from_1_1("v1.1.1").await;
 	}
 
 	// This test include a feature set that is supported since 1.2
-	async fn upgrade_test_1_2(version: &str) {
+	async fn upgrade_test_from_1_2(version: &str) {
 		// Start the docker instance
 		let (path, mut docker, client) = start_docker(version).await;
 
@@ -148,70 +148,70 @@ mod database_upgrade {
 	#[cfg(feature = "storage-rocksdb")]
 	#[serial]
 	async fn upgrade_test_from_1_2_0() {
-		upgrade_test_1_2("v1.2.0").await;
+		upgrade_test_from_1_2("v1.2.0").await;
 	}
 
 	#[test(tokio::test(flavor = "multi_thread"))]
 	#[cfg(feature = "storage-rocksdb")]
 	#[serial]
 	async fn upgrade_test_from_1_2_1() {
-		upgrade_test_1_2("v1.2.1").await;
+		upgrade_test_from_1_2("v1.2.1").await;
 	}
 
 	#[test(tokio::test(flavor = "multi_thread"))]
 	#[cfg(feature = "storage-rocksdb")]
 	#[serial]
 	async fn upgrade_test_from_1_2_2() {
-		upgrade_test_1_2("v1.2.2").await;
+		upgrade_test_from_1_2("v1.2.2").await;
 	}
 
 	#[test(tokio::test(flavor = "multi_thread"))]
 	#[cfg(feature = "storage-rocksdb")]
 	#[serial]
 	async fn upgrade_test_from_1_3_0() {
-		upgrade_test_1_2("v1.3.0").await;
+		upgrade_test_from_1_2("v1.3.0").await;
 	}
 
 	#[test(tokio::test(flavor = "multi_thread"))]
 	#[cfg(feature = "storage-rocksdb")]
 	#[serial]
 	async fn upgrade_test_from_1_3_1() {
-		upgrade_test_1_2("v1.3.1").await;
+		upgrade_test_from_1_2("v1.3.1").await;
 	}
 
 	#[test(tokio::test(flavor = "multi_thread"))]
 	#[cfg(feature = "storage-rocksdb")]
 	#[serial]
 	async fn upgrade_test_from_1_4_0() {
-		upgrade_test_1_2("v1.4.0").await;
+		upgrade_test_from_1_2("v1.4.0").await;
 	}
 
 	#[test(tokio::test(flavor = "multi_thread"))]
 	#[cfg(feature = "storage-rocksdb")]
 	#[serial]
 	async fn upgrade_test_from_1_4_2() {
-		upgrade_test_1_2("v1.4.2").await;
+		upgrade_test_from_1_2("v1.4.2").await;
 	}
 
 	#[test(tokio::test(flavor = "multi_thread"))]
 	#[cfg(feature = "storage-rocksdb")]
 	#[serial]
 	async fn upgrade_test_from_1_5_0() {
-		upgrade_test_1_2("v1.5.0").await;
+		upgrade_test_from_1_2("v1.5.0").await;
 	}
 
 	#[test(tokio::test(flavor = "multi_thread"))]
 	#[cfg(feature = "storage-rocksdb")]
 	#[serial]
 	async fn upgrade_test_from_1_5_2() {
-		upgrade_test_1_2("v1.5.2").await;
+		upgrade_test_from_1_2("v1.5.2").await;
 	}
 
 	#[test(tokio::test(flavor = "multi_thread"))]
 	#[cfg(feature = "storage-rocksdb")]
 	#[serial]
 	async fn upgrade_test_from_1_5_3() {
-		upgrade_test_1_2("v1.5.3").await;
+		upgrade_test_from_1_2("v1.5.3").await;
 	}
 
 	// *******
