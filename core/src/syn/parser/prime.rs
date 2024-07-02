@@ -725,4 +725,30 @@ mod tests {
 		};
 		assert_eq!(regex, r"(?i)test/[a-z]+/\s\d\w{1}.*".parse().unwrap());
 	}
+
+	#[test]
+	fn plain_string() {
+		let sql = r#""hello""#;
+		let out = Value::parse(sql);
+		assert_eq!(r#"'hello'"#, format!("{}", out));
+
+		let sql = r#"s"hello""#;
+		let out = Value::parse(sql);
+		assert_eq!(r#"'hello'"#, format!("{}", out));
+
+		let sql = r#"s'hello'"#;
+		let out = Value::parse(sql);
+		assert_eq!(r#"'hello'"#, format!("{}", out));
+	}
+
+	#[test]
+	fn params() {
+		let sql = "$hello";
+		let out = Value::parse(sql);
+		assert_eq!("$hello", format!("{}", out));
+
+		let sql = "$__hello";
+		let out = Value::parse(sql);
+		assert_eq!("$__hello", format!("{}", out));
+	}
 }
