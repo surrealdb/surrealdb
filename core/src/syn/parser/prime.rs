@@ -594,13 +594,17 @@ impl Parser<'_> {
 		matches!(
 			kind,
 			t!("ANALYZE")
-				| t!("BEGIN") | t!("BREAK")
-				| t!("CANCEL") | t!("COMMIT")
-				| t!("CONTINUE") | t!("FOR")
-				| t!("INFO") | t!("KILL")
-				| t!("LIVE") | t!("OPTION")
+				| t!("BEGIN")
+				| t!("BREAK")
+				| t!("CANCEL")
+				| t!("COMMIT")
+				| t!("CONTINUE")
+				| t!("FOR") | t!("INFO")
+				| t!("KILL") | t!("LIVE")
+				| t!("OPTION")
 				| t!("LET") | t!("SHOW")
-				| t!("SLEEP") | t!("THROW")
+				| t!("SLEEP")
+				| t!("THROW")
 				| t!("USE")
 		)
 	}
@@ -648,7 +652,7 @@ impl Parser<'_> {
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::syn::Parse;
+	use crate::syn::{self, Parse};
 
 	#[test]
 	fn subquery_expression_statement() {
@@ -660,7 +664,7 @@ mod tests {
 	#[test]
 	fn invalid_idiom() {
 		let sql = "'hello'.foo";
-		Value::parse(sql).unwrap_err();
+		syn::parse(sql).unwrap_err();
 	}
 
 	#[test]
