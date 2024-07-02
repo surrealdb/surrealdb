@@ -211,12 +211,11 @@ async fn invalidate() -> Result<(), Box<dyn std::error::Error>> {
 	// Send INVALIDATE command
 	socket.send_request("invalidate", json!([])).await?;
 	// Verify we have an invalidated session
-	let res = socket.send_message_query("DEFINE NAMESPACE test").await?;
-	assert_eq!(res[0]["status"], "ERR", "result: {:?}", res);
+	let res = socket.send_request("query", json!(["DEFINE NAMESPACE test"])).await?;
 	assert_eq!(
-		res[0]["result"], "IAM error: Not enough permissions to perform this action",
-		"result: {:?}",
-		res
+		res["error"]["message"],
+		"There was a problem with the database: IAM error: Not enough permissions to perform this action",
+		"result: {:?}", res
 	);
 	// Test passed
 	server.finish().unwrap();
