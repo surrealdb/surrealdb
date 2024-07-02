@@ -1192,7 +1192,7 @@ impl Datastore {
 
 		// Check if anonymous actors can compute values when auth is enabled
 		// TODO(sgirones): Check this as part of the authorisation layer
-		if self.auth_enabled && !self.capabilities.allows_guest_access() {
+		if self.auth_enabled && !self.capabilities.allows_guest_access() && sess.au.is_anon() {
 			return Err(IamError::NotAllowed {
 				actor: "anonymous".to_string(),
 				action: "compute".to_string(),
