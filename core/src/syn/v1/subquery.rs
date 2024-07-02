@@ -145,4 +145,13 @@ mod tests {
 		let out = res.unwrap().1;
 		assert_eq!("(REMOVE EVENT foo_event ON foo)", format!("{}", out))
 	}
+
+	#[test]
+	fn subquery_create_with_return() {
+		let sql = "(CREATE ONLY Person SET name='foo' RETURN VALUE id)";
+		let res = subquery(sql);
+		assert!(res.is_ok());
+		let out = res.unwrap().1;
+		assert_eq!("(CREATE ONLY Person SET name = 'foo' RETURN VALUE id)", format!("{}", out))
+	}
 }

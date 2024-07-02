@@ -97,6 +97,8 @@ pub fn field(i: &str) -> IResult<&str, ()> {
 			),
 		),
 		value((), char(';')),
+		value((), char(')')),
+		value((), char('}')),
 		value((), eof),
 	)))(i)
 }
