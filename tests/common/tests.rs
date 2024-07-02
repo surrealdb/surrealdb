@@ -1476,7 +1476,7 @@ async fn session_reauthentication_expired() {
 #[test(tokio::test)]
 async fn run_functions() {
 	// Setup database server
-	let (addr, mut server) = common::start_server_with_defaults().await.unwrap();
+	let (addr, mut server) = common::start_server_with_functions().await.unwrap();
 	// Connect to WebSocket
 	let mut socket = Socket::connect(&addr, SERVER, FORMAT).await.unwrap();
 	// Authenticate the connection
