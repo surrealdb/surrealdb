@@ -180,7 +180,7 @@ impl Parser<'_> {
 						return Ok(x);
 					}
 				}
-				Value::Strand(s)
+				return Ok(Value::Strand(s));
 			}
 			t!("+") | t!("-") | TokenKind::Number(_) | TokenKind::Digits | TokenKind::Duration => {
 				self.parse_number_like_prime()?
@@ -594,13 +594,17 @@ impl Parser<'_> {
 		matches!(
 			kind,
 			t!("ANALYZE")
-				| t!("BEGIN") | t!("BREAK")
-				| t!("CANCEL") | t!("COMMIT")
-				| t!("CONTINUE") | t!("FOR")
-				| t!("INFO") | t!("KILL")
-				| t!("LIVE") | t!("OPTION")
+				| t!("BEGIN")
+				| t!("BREAK")
+				| t!("CANCEL")
+				| t!("COMMIT")
+				| t!("CONTINUE")
+				| t!("FOR") | t!("INFO")
+				| t!("KILL") | t!("LIVE")
+				| t!("OPTION")
 				| t!("LET") | t!("SHOW")
-				| t!("SLEEP") | t!("THROW")
+				| t!("SLEEP")
+				| t!("THROW")
 				| t!("USE")
 		)
 	}
@@ -655,6 +659,12 @@ mod tests {
 		let sql = "(1 + 2 + 3)";
 		let out = Value::parse(sql);
 		assert_eq!("(1 + 2 + 3)", format!("{}", out))
+	}
+
+	#[test]
+	fn invalid_idiom() {
+		let sql = "'hello'.foo";
+		Value::parse(sql).unwrap_err();
 	}
 
 	#[test]
