@@ -28,9 +28,11 @@ mod database_upgrade {
 		let (path, mut docker, client) = start_docker(version).await;
 
 		// Create the data set
+		create_data_on_docker(&client, "IDX", &DATA_IDX).await;
 		create_data_on_docker(&client, "FTS", &DATA_FTS).await;
 
 		// Check the data set
+		check_data_on_docker(&client, "IDX", &CHECK_IDX).await;
 		check_data_on_docker(&client, "FTS", &CHECK_FTS).await;
 		check_data_on_docker(&client, "DB", &CHECK_DB).await;
 
@@ -44,6 +46,7 @@ mod database_upgrade {
 		let db = new_local_instance(&path).await;
 
 		// Check that the data has properly migrated
+		check_migrated_data(&db, "IDX", &CHECK_IDX).await;
 		check_migrated_data(&db, "DB", &CHECK_DB).await;
 		check_migrated_data(&db, "FTS", &CHECK_FTS).await;
 	}
@@ -68,10 +71,12 @@ mod database_upgrade {
 		let (path, mut docker, client) = start_docker(version).await;
 
 		// Create the data set
+		create_data_on_docker(&client, "IDX", &DATA_IDX).await;
 		create_data_on_docker(&client, "FTS", &DATA_FTS).await;
 		create_data_on_docker(&client, "MTREE", &DATA_MTREE).await;
 
 		// Check the data set
+		check_data_on_docker(&client, "IDX", &CHECK_IDX).await;
 		check_data_on_docker(&client, "DB", &CHECK_DB).await;
 		check_data_on_docker(&client, "FTS", &CHECK_FTS).await;
 		check_data_on_docker(&client, "MTREE", &CHECK_MTREE_RPC).await;
@@ -86,6 +91,7 @@ mod database_upgrade {
 		let db = new_local_instance(&path).await;
 
 		// Check that the data has properly migrated
+		check_migrated_data(&db, "IDX", &CHECK_IDX).await;
 		check_migrated_data(&db, "DB", &CHECK_DB).await;
 		check_migrated_data(&db, "FTS", &CHECK_FTS).await;
 		check_migrated_data(&db, "MTREE", &CHECK_MTREE_DB).await;
@@ -111,10 +117,12 @@ mod database_upgrade {
 		let (path, mut docker, client) = start_docker(version).await;
 
 		// Create the data set
+		create_data_on_docker(&client, "IDX", &DATA_IDX).await;
 		create_data_on_docker(&client, "FTS", &DATA_FTS).await;
 		create_data_on_docker(&client, "MTREE", &DATA_MTREE).await;
 
 		// Check the data set
+		check_data_on_docker(&client, "IDX", &CHECK_IDX).await;
 		check_data_on_docker(&client, "DB", &CHECK_DB).await;
 		check_data_on_docker(&client, "FTS", &CHECK_FTS).await;
 		check_data_on_docker(&client, "MTREE", &CHECK_MTREE_RPC).await;
@@ -129,6 +137,7 @@ mod database_upgrade {
 		let db = new_local_instance(&path).await;
 
 		// Check that the data has properly migrated
+		check_migrated_data(&db, "IDX", &CHECK_IDX).await;
 		check_migrated_data(&db, "DB", &CHECK_DB).await;
 		check_migrated_data(&db, "FTS", &CHECK_FTS).await;
 		check_migrated_data(&db, "MTREE", &CHECK_MTREE_DB).await;
@@ -208,6 +217,26 @@ mod database_upgrade {
 	// *******
 	// DATASET
 	// *******
+
+	// Set of DATA for Standard and unique indexes
+	const DATA_IDX: [&str; 4] = [
+		"DEFINE INDEX uniq_name ON TABLE person COLUMNS name UNIQUE",
+		"DEFINE INDEX idx_company ON TABLE person COLUMNS company",
+		"CREATE person:tobie SET name = 'Tobie', company='SurrealDB'",
+		"CREATE person:jaime SET name = 'Jaime', company='SurrealDB'",
+	];
+
+	// Set of QUERY and RESULT to check for standard and unique indexes
+	const CHECK_IDX: [Check; 2] = [
+		(
+			"SELECT name FROM person WITH INDEX uniq_name WHERE name = 'Tobie'",
+			Expected::One("{\"name\":\"Tobie\"}"),
+		),
+		(
+			"SELECT name FROM person WITH INDEX idx_company WHERE company = 'SurrealDB'",
+			Expected::Two("{\"name\":\"Jaime\"}", "{\"name\":\"Tobie\"}"),
+		),
+	];
 
 	// Set of DATA for Full Text Search
 	const DATA_FTS: [&str; 5] = [
