@@ -179,7 +179,7 @@ pub async fn init(
 		crt: web.as_ref().and_then(|x| x.web_crt.clone()),
 		key: web.as_ref().and_then(|x| x.web_key.clone()),
 		engine: Some(EngineOptions::default().with_tick_interval(tick_interval)),
-	})?;
+	});
 	// This is the cancellation token propagated down to
 	// all the async functions that needs to be stopped gracefully.
 	let ct = CancellationToken::new();
@@ -196,8 +196,8 @@ pub async fn init(
 	net::init(ct.clone()).await?;
 	// Shutdown and stop closed tasks
 	task_chans.into_iter().for_each(|chan| {
-		if let Err(e) = chan.send(()) {
-			error!("Failed to send shutdown signal to task: {}", e);
+		if let Err(_empty_tuple) = chan.send(()) {
+			error!("Failed to send shutdown signal to task");
 		}
 	});
 	ct.cancel();

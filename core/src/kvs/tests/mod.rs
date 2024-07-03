@@ -76,7 +76,6 @@ mod mem {
 #[cfg(feature = "kv-rocksdb")]
 mod rocksdb {
 
-	use crate::fflags::FFLAGS;
 	use crate::kvs::tests::{ClockType, Kvs};
 	use crate::kvs::Datastore;
 	use crate::kvs::LockType;
@@ -126,7 +125,6 @@ mod rocksdb {
 #[cfg(feature = "kv-tikv")]
 mod tikv {
 
-	use crate::fflags::FFLAGS;
 	use crate::kvs::tests::{ClockType, Kvs};
 	use crate::kvs::Transaction;
 	use crate::kvs::{Datastore, LockType, TransactionType};
@@ -175,7 +173,6 @@ mod tikv {
 #[cfg(feature = "kv-fdb")]
 mod fdb {
 
-	use crate::fflags::FFLAGS;
 	use crate::kvs::tests::{ClockType, Kvs};
 	use crate::kvs::Transaction;
 	use crate::kvs::{Datastore, LockType, TransactionType};
@@ -224,7 +221,6 @@ mod fdb {
 #[cfg(feature = "kv-surrealkv")]
 mod surrealkv {
 
-	use crate::fflags::FFLAGS;
 	use crate::kvs::tests::{ClockType, Kvs};
 	use crate::kvs::Datastore;
 	use crate::kvs::LockType;

@@ -1,5 +1,5 @@
 use flume::{Receiver, Sender, TryRecvError};
-use futures::{Stream, StreamExt};
+use futures::{FutureExt, Stream, StreamExt};
 use futures_concurrency::stream::Merge;
 use reblessive::TreeStack;
 use std::pin::Pin;
@@ -64,50 +64,11 @@ impl Tasks {
 	}
 }
 
-/// We create our own flume streams because the default flume streams conitnue to work even if the
-/// channel has been dropped - something we dont want
-struct FlumeStream<T> {
-	receiver: Receiver<T>,
-	is_dropped: Arc<Mutex<bool>>,
-}
-
-impl<T> FlumeStream<T> {
-	fn new(receiver: Receiver<T>, is_dropped: Arc<Mutex<bool>>) -> Self {
-		FlumeStream {
-			receiver,
-			is_dropped,
-		}
-	}
-}
-
-impl<T> Stream for FlumeStream<T> {
-	type Item = T;
-
-	fn poll_next(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-		let mut is_dropped = self.is_dropped.lock().unwrap();
-		if *is_dropped {
-			// If the channel is dropped, return None
-			return Poll::Ready(None);
-		}
-
-		println!("Future polled");
-		match self.receiver.try_recv() {
-			Ok(item) => return Poll::Ready(Some(item)),
-			Err(TryRecvError::Empty) => {
-				// The channel is not yet closed and no items are available
-				return Poll::Pending;
-			}
-			Err(TryRecvError::Disconnected) => {
-				// The channel has been closed
-				*is_dropped = true;
-				return Poll::Ready(None);
-			}
-		}
-	}
-}
-
 /// Starts tasks that are required for the correct running of the engine
-pub fn start_tasks(opt: &EngineOptions, dbs: Arc<Datastore>) -> (Tasks, [Sender<()>; 2]) {
+pub fn start_tasks(
+	opt: &EngineOptions,
+	dbs: Arc<Datastore>,
+) -> (Tasks, [tokio::sync::oneshot::Sender<()>; 2]) {
 	let nd = init(opt, dbs.clone());
 	let lq = live_query_change_feed(opt, dbs);
 	let cancellation_channels = [nd.1, lq.1];
@@ -126,7 +87,10 @@ pub fn start_tasks(opt: &EngineOptions, dbs: Arc<Datastore>) -> (Tasks, [Sender<
 //
 // This function needs to be called before after the dbs::init and before the net::init functions.
 // It needs to be before net::init because the net::init function blocks until the web server stops.
-fn init(opt: &EngineOptions, dbs: Arc<Datastore>) -> (FutureTask, Sender<()>) {
+fn init(
+	opt: &EngineOptions,
+	dbs: Arc<Datastore>,
+) -> (FutureTask, tokio::sync::oneshot::Sender<()>) {
 	let _init = crate::dbs::LoggingLifecycle::new("node agent initialisation".to_string());
 	let tick_interval = opt.tick_interval;
 
@@ -137,26 +101,22 @@ fn init(opt: &EngineOptions, dbs: Arc<Datastore>) -> (FutureTask, Sender<()>) {
 	let ret_status = completed_status.clone();
 
 	// We create a channel that can be streamed that will indicate termination
-	let (tx, rx) = flume::bounded(1);
+	let (tx, rx) = tokio::sync::oneshot::channel();
 
 	let _fut = spawn_future(async move {
-		println!("Spawned future");
 		let _lifecycle = crate::dbs::LoggingLifecycle::new("heartbeat task".to_string());
 		let ticker = interval_ticker(tick_interval).await;
 		let streams = (
 			ticker.map(|i| {
-				println!("Node agent tick: {:?}", i);
 				trace!("Node agent tick: {:?}", i);
 				Some(i)
 			}),
-			FlumeStream::new(rx, Arc::new(Mutex::new(false))).map(|_| None),
-			// rx.into_stream().map(|_| None),
+			rx.into_stream().map(|_| None),
 		);
 		let mut streams = streams.merge();
 
 		while let Some(Some(_)) = streams.next().await {
 			if let Err(e) = dbs.tick().await {
-				println!("Error running node agent tick: {}", e);
 				error!("Error running node agent tick: {}", e);
 				break;
 			}
@@ -172,7 +132,10 @@ fn init(opt: &EngineOptions, dbs: Arc<Datastore>) -> (FutureTask, Sender<()>) {
 }
 
 // Start live query on change feeds notification processing
-fn live_query_change_feed(opt: &EngineOptions, dbs: Arc<Datastore>) -> (FutureTask, Sender<()>) {
+fn live_query_change_feed(
+	opt: &EngineOptions,
+	dbs: Arc<Datastore>,
+) -> (FutureTask, tokio::sync::oneshot::Sender<()>) {
 	let tick_interval = opt.tick_interval;
 	println!("Creating live query future");
 
@@ -182,7 +145,7 @@ fn live_query_change_feed(opt: &EngineOptions, dbs: Arc<Datastore>) -> (FutureTa
 	let ret_status = completed_status.clone();
 
 	// We create a channel that can be streamed that will indicate termination
-	let (tx, rx) = flume::bounded(1);
+	let (tx, rx) = tokio::sync::oneshot::channel();
 
 	let _fut = spawn_future(async move {
 		println!("Spawned live query future");
