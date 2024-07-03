@@ -2670,6 +2670,21 @@ impl Value {
 			_ => Ok(self.to_owned()),
 		}
 	}
+
+	pub(crate) async fn compute_bordered(
+		&self,
+		stk: &mut Stk,
+		ctx: &Context<'_>,
+		opt: &Options,
+		doc: Option<&CursorDoc<'_>>,
+	) -> Result<Value, Error> {
+		match self.compute(stk, ctx, opt, doc).await {
+			Err(Error::Return {
+				value,
+			}) => Ok(value),
+			res => res,
+		}
+	}
 }
 
 // ------------------------------

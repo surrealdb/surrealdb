@@ -92,7 +92,11 @@ impl Param {
 										// Disable permissions
 										let opt = &opt.new_with_perms(false);
 										// Process the PERMISSION clause
-										if !e.compute(stk, ctx, opt, doc).await?.is_truthy() {
+										if !e
+											.compute_bordered(stk, ctx, opt, doc)
+											.await?
+											.is_truthy()
+										{
 											return Err(Error::ParamPermissions {
 												name: v.to_owned(),
 											});

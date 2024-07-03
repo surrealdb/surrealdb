@@ -1305,7 +1305,7 @@ impl Datastore {
 		let ctx = ctx.set_transaction(txn.clone());
 
 		// Compute the value
-		let res = stack.enter(|stk| val.compute(stk, &ctx, &opt, None)).finish().await;
+		let res = stack.enter(|stk| val.compute_bordered(stk, &ctx, &opt, None)).finish().await;
 		// Store any data
 		match (res.is_ok(), val.writeable()) {
 			// If the compute was successful, then commit if writeable

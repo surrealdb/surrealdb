@@ -39,7 +39,7 @@ impl<'a> Document<'a> {
 						let opt = &opt.new_with_perms(false);
 						// Process the PERMISSION clause
 						if !e
-							.compute(
+							.compute_bordered(
 								stk,
 								ctx,
 								opt,

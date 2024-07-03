@@ -57,7 +57,7 @@ impl<'a> Document<'a> {
 						ctx.add_value("after", &val);
 						ctx.add_value("before", &old);
 						// Process the VALUE clause
-						val = expr.compute(stk, &ctx, opt, Some(&self.current)).await?;
+						val = expr.compute_bordered(stk, &ctx, opt, Some(&self.current)).await?;
 					}
 				}
 				// Check for a TYPE clause
@@ -88,7 +88,7 @@ impl<'a> Document<'a> {
 						ctx.add_value("after", &val);
 						ctx.add_value("before", &old);
 						// Process the VALUE clause
-						val = expr.compute(stk, &ctx, opt, Some(&self.current)).await?;
+						val = expr.compute_bordered(stk, &ctx, opt, Some(&self.current)).await?;
 					}
 				}
 				// Check for a TYPE clause
@@ -117,7 +117,11 @@ impl<'a> Document<'a> {
 					ctx.add_value("after", &val);
 					ctx.add_value("before", &old);
 					// Process the ASSERT clause
-					if !expr.compute(stk, &ctx, opt, Some(&self.current)).await?.is_truthy() {
+					if !expr
+						.compute_bordered(stk, &ctx, opt, Some(&self.current))
+						.await?
+						.is_truthy()
+					{
 						return Err(Error::FieldValue {
 							thing: rid.to_string(),
 							field: fd.name.clone(),
@@ -158,7 +162,11 @@ impl<'a> Document<'a> {
 							ctx.add_value("after", &val);
 							ctx.add_value("before", &old);
 							// Process the PERMISSION clause
-							if !e.compute(stk, &ctx, opt, Some(&self.current)).await?.is_truthy() {
+							if !e
+								.compute_bordered(stk, &ctx, opt, Some(&self.current))
+								.await?
+								.is_truthy()
+							{
 								val = old
 							}
 						}

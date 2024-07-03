@@ -231,7 +231,11 @@ impl Function {
 							// Disable permissions
 							let opt = &opt.new_with_perms(false);
 							// Process the PERMISSION clause
-							if !stk.run(|stk| e.compute(stk, ctx, opt, doc)).await?.is_truthy() {
+							if !stk
+								.run(|stk| e.compute_bordered(stk, ctx, opt, doc))
+								.await?
+								.is_truthy()
+							{
 								return Err(Error::FunctionPermissions {
 									name: s.to_owned(),
 								});
