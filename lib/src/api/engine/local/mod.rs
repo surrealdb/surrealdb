@@ -31,6 +31,8 @@ use crate::{
 	},
 	method::Stats,
 	opt::IntoEndpoint,
+	value::ToCore,
+	Value,
 };
 use channel::Sender;
 use indexmap::IndexMap;
@@ -44,8 +46,9 @@ use std::{
 use surrealdb_core::{
 	dbs::{Notification, Response, Session},
 	kvs::Datastore,
-	sql::{statements::KillStatement, Query, Statement, Uuid, Value as CoreValue},
+	sql::{statements::KillStatement, Query, Statement, Value as CoreValue},
 };
+use uuid::Uuid;
 
 #[cfg(not(target_arch = "wasm32"))]
 use crate::api::{conn::MlConfig, err::Error};
@@ -367,14 +370,22 @@ impl Surreal<Db> {
 }
 
 fn process(responses: Vec<Response>) -> QueryResponse {
-	let mut map = IndexMap::with_capacity(responses.len());
+	let mut map = IndexMap::<usize, (Stats, Result<Value>)>::with_capacity(responses.len());
 	for (index, response) in responses.into_iter().enumerate() {
 		let stats = Stats {
 			execution_time: Some(response.time),
 		};
 		match response.result {
-			Ok(value) => map.insert(index, (stats, Ok(value))),
-			Err(error) => map.insert(index, (stats, Err(error.into()))),
+			Ok(value) => {
+				let v: CoreValue = value;
+				// Deserializing from a core value should always work.
+				let v = Value::from_core(v)
+					.ok_or(crate::Error::Api(crate::api::Error::RecievedInvalidValue));
+				map.insert(index, (stats, v));
+			}
+			Err(error) => {
+				map.insert(index, (stats, Err(error.into())));
+			}
 		};
 	}
 	QueryResponse {
@@ -477,6 +488,7 @@ async fn kill_live_query(
 	let mut kill = KillStatement::default();
 	kill.id = id.into();
 	query.0 .0 = vec![Statement::Kill(kill)];
+	let vars = vars.into_iter().map(|(k, v)| (k, v.to_core())).collect();
 	let response = kvs.process(query, session, Some(vars)).await?;
 	take(true, response).await
 }
@@ -493,15 +505,15 @@ async fn router(
 	match method {
 		Method::Use => {
 			match &mut params[..] {
-				[Value::Strand(ns), Value::Strand(db)] => {
-					session.ns = Some(mem::take(&mut ns.0));
-					session.db = Some(mem::take(&mut db.0));
+				[Value::String(ref mut ns), Value::String(ref mut db)] => {
+					session.ns = Some(mem::take(ns));
+					session.db = Some(mem::take(db));
 				}
-				[Value::Strand(ns), Value::None] => {
-					session.ns = Some(mem::take(&mut ns.0));
+				[Value::String(ref mut ns), Value::None] => {
+					session.ns = Some(mem::take(ns));
 				}
-				[Value::None, Value::Strand(db)] => {
-					session.db = Some(mem::take(&mut db.0));
+				[Value::None, Value::String(ref mut db)] => {
+					session.db = Some(mem::take(db));
 				}
 				_ => unreachable!(),
 			}
@@ -512,7 +524,7 @@ async fn router(
 				[Value::Object(credentials)] => mem::take(credentials),
 				_ => unreachable!(),
 			};
-			let response = crate::iam::signup::signup(kvs, session, credentials).await?;
+			let response = crate::iam::signup::signup(kvs, session, credentials.to_core()).await?;
 			Ok(DbResponse::Other(response.into()))
 		}
 		Method::Signin => {
@@ -520,12 +532,12 @@ async fn router(
 				[Value::Object(credentials)] => mem::take(credentials),
 				_ => unreachable!(),
 			};
-			let response = crate::iam::signin::signin(kvs, session, credentials).await?;
+			let response = crate::iam::signin::signin(kvs, session, credentials.to_core()).await?;
 			Ok(DbResponse::Other(response.into()))
 		}
 		Method::Authenticate => {
 			let token = match &mut params[..] {
-				[Value::Strand(token)] => mem::take(&mut token.0),
+				[Value::String(token)] => mem::take(token),
 				_ => unreachable!(),
 			};
 			crate::iam::verify::token(kvs, session, &token).await?;
@@ -539,7 +551,8 @@ async fn router(
 			let mut query = Query::default();
 			let statement = create_statement(&mut params);
 			query.0 .0 = vec![Statement::Create(statement)];
-			let response = kvs.process(query, &*session, Some(vars.clone())).await?;
+			let vars = vars.iter().map(|(k, v)| (k.clone(), v.clone().to_core())).collect();
+			let response = kvs.process(query, &*session, Some(vars)).await?;
 			let value = take(true, response).await?;
 			Ok(DbResponse::Other(value))
 		}
@@ -547,7 +560,8 @@ async fn router(
 			let mut query = Query::default();
 			let (one, statement) = upsert_statement(&mut params);
 			query.0 .0 = vec![Statement::Upsert(statement)];
-			let response = kvs.process(query, &*session, Some(vars.clone())).await?;
+			let vars = vars.iter().map(|(k, v)| (k.clone(), v.clone().to_core())).collect();
+			let response = kvs.process(query, &*session, Some(vars)).await?;
 			let value = take(one, response).await?;
 			Ok(DbResponse::Other(value))
 		}
@@ -555,7 +569,8 @@ async fn router(
 			let mut query = Query::default();
 			let (one, statement) = update_statement(&mut params);
 			query.0 .0 = vec![Statement::Update(statement)];
-			let response = kvs.process(query, &*session, Some(vars.clone())).await?;
+			let vars = vars.iter().map(|(k, v)| (k.clone(), v.clone().to_core())).collect();
+			let response = kvs.process(query, &*session, Some(vars)).await?;
 			let value = take(one, response).await?;
 			Ok(DbResponse::Other(value))
 		}
@@ -563,7 +578,8 @@ async fn router(
 			let mut query = Query::default();
 			let (one, statement) = insert_statement(&mut params);
 			query.0 .0 = vec![Statement::Insert(statement)];
-			let response = kvs.process(query, &*session, Some(vars.clone())).await?;
+			let vars = vars.iter().map(|(k, v)| (k.clone(), v.clone().to_core())).collect();
+			let response = kvs.process(query, &*session, Some(vars)).await?;
 			let value = take(one, response).await?;
 			Ok(DbResponse::Other(value))
 		}
@@ -571,7 +587,8 @@ async fn router(
 			let mut query = Query::default();
 			let (one, statement) = patch_statement(&mut params);
 			query.0 .0 = vec![Statement::Update(statement)];
-			let response = kvs.process(query, &*session, Some(vars.clone())).await?;
+			let vars = vars.iter().map(|(k, v)| (k.clone(), v.clone().to_core())).collect();
+			let response = kvs.process(query, &*session, Some(vars)).await?;
 			let value = take(one, response).await?;
 			Ok(DbResponse::Other(value))
 		}
@@ -579,7 +596,8 @@ async fn router(
 			let mut query = Query::default();
 			let (one, statement) = merge_statement(&mut params);
 			query.0 .0 = vec![Statement::Update(statement)];
-			let response = kvs.process(query, &*session, Some(vars.clone())).await?;
+			let vars = vars.iter().map(|(k, v)| (k.clone(), v.clone().to_core())).collect();
+			let response = kvs.process(query, &*session, Some(vars)).await?;
 			let value = take(one, response).await?;
 			Ok(DbResponse::Other(value))
 		}
@@ -587,7 +605,8 @@ async fn router(
 			let mut query = Query::default();
 			let (one, statement) = select_statement(&mut params);
 			query.0 .0 = vec![Statement::Select(statement)];
-			let response = kvs.process(query, &*session, Some(vars.clone())).await?;
+			let vars = vars.iter().map(|(k, v)| (k.clone(), v.clone().to_core())).collect();
+			let response = kvs.process(query, &*session, Some(vars)).await?;
 			let value = take(one, response).await?;
 			Ok(DbResponse::Other(value))
 		}
@@ -595,15 +614,19 @@ async fn router(
 			let mut query = Query::default();
 			let (one, statement) = delete_statement(&mut params);
 			query.0 .0 = vec![Statement::Delete(statement)];
-			let response = kvs.process(query, &*session, Some(vars.clone())).await?;
+			let vars = vars.iter().map(|(k, v)| (k.clone(), v.clone().to_core())).collect();
+			let response = kvs.process(query, &*session, Some(vars)).await?;
 			let value = take(one, response).await?;
 			Ok(DbResponse::Other(value))
 		}
 		Method::Query => {
 			let response = match param.query {
 				Some((query, mut bindings)) => {
-					let mut vars = vars.clone();
-					vars.append(&mut bindings);
+					let mut vars = vars
+						.iter()
+						.map(|(k, v)| (k.clone(), v.clone().to_core()))
+						.collect::<BTreeMap<_, _>>();
+					vars.append(&mut bindings.clone().to_core().0);
 					kvs.process(query, &*session, Some(vars)).await?
 				}
 				None => unreachable!(),
@@ -752,7 +775,8 @@ async fn router(
 						}
 						.into());
 					}
-					kvs.execute(&statements, &*session, Some(vars.clone())).await?
+					let vars = vars.iter().map(|(k, v)| (k.clone(), v.to_core())).collect();
+					kvs.execute(&statements, &*session, Some(vars)).await?
 				}
 			};
 			for response in responses {
@@ -761,24 +785,25 @@ async fn router(
 			Ok(DbResponse::Other(Value::None))
 		}
 		Method::Health => Ok(DbResponse::Other(Value::None)),
-		Method::Version => Ok(DbResponse::Other(crate::env::VERSION.into())),
+		Method::Version => Ok(DbResponse::Other(crate::env::VERSION.to_string().into())),
 		Method::Set => {
 			let (key, value) = match &mut params[..2] {
-				[Value::Strand(key), value] => (mem::take(&mut key.0), mem::take(value)),
+				[Value::String(key), value] => (mem::take(key), mem::take(value)),
 				_ => unreachable!(),
 			};
 			let var = Some(crate::map! {
 				key.clone() => Value::None,
 				=> vars
 			});
-			match kvs.compute(value, &*session, var).await? {
-				Value::None => vars.remove(&key),
-				v => vars.insert(key, v),
+			match ToCore::from_core(kvs.compute(value.to_core(), &*session, var).await?) {
+				Some(Value::None) => vars.remove(&key),
+				Some(v) => vars.insert(key, v),
+				None => return Err(crate::Error::Api(crate::api::Error::RecievedInvalidValue)),
 			};
 			Ok(DbResponse::Other(Value::None))
 		}
 		Method::Unset => {
-			if let [Value::Strand(key)] = &params[..1] {
+			if let [Value::String(key)] = &params[..1] {
 				vars.remove(&key.0);
 			}
 			Ok(DbResponse::Other(Value::None))

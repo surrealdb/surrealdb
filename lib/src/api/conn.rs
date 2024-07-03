@@ -12,6 +12,7 @@ use crate::Value;
 use flume::Receiver;
 use flume::Sender;
 use serde::de::DeserializeOwned;
+use serde::Deserialize;
 use serde::Serialize;
 use std::collections::HashSet;
 use std::future::Future;
@@ -271,7 +272,7 @@ pub trait Connection: Sized + Send + Sync + 'static {
 				Value::Array(array) => Value::Array(array),
 				value => Value::Array(vec![value]),
 			};
-			serde::Deserialize::deserialize(value).map_err(Into::into)
+			Deserialize::deserialize(value).map_err(Into::into)
 		})
 	}
 

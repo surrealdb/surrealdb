@@ -223,6 +223,8 @@ pub enum Error {
 	Serializer(String),
 	#[error("failed to deserialize from a Value: {0}")]
 	Deserializer(String),
+	#[error("recieved an invalid value")]
+	RecievedInvalidValue,
 }
 
 impl serde::ser::Error for Error {

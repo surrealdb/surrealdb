@@ -14,12 +14,14 @@ use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+mod core;
 mod de;
 mod deserializer;
 mod ser;
 mod serializer;
 mod sql;
 
+pub(crate) use core::ToCore;
 pub use serializer::Serializer;
 
 // Keeping bytes implementation minimal since it might be a good idea to use bytes crate here
@@ -75,7 +77,7 @@ impl From<Vec<u8>> for Bytes {
 pub struct Datetime(DateTime<Utc>);
 
 /// The key of a [`RecordId`].
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[non_exhaustive]
 pub enum RecordIdKey {
 	/// A string record id, like in `user:tkwse1j5o0anqjxonvzx`.
@@ -122,7 +124,7 @@ impl From<Vec<Value>> for RecordIdKey {
 ///
 /// Record id's consist of a table name and a key.
 /// For example the record id `user:tkwse1j5o0anqjxonvzx` has the table `user` and the key `tkwse1j5o0anqjxonvzx`.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, PartialOrd)]
 pub struct RecordId {
 	#[serde(rename = "tb")]
 	table: String,
@@ -152,7 +154,7 @@ impl RecordId {
 }
 
 #[non_exhaustive]
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, PartialOrd)]
 pub enum Number {
 	Float(f64),
 	Integer(i64),
@@ -392,11 +394,6 @@ impl Value {
 	pub fn decimal(v: Decimal) -> Self {
 		Value::Number(Number::Decimal(v))
 	}
-
-	pub(crate) fn into_core(self) -> surrealdb_core::sql::Value {
-		surrealdb_core::sql::Value::deserialize(self)
-			.expect("conversion between lib::Value and core::Value should not fail")
-	}
 }
 
 macro_rules! impl_convert(
@@ -445,6 +442,16 @@ macro_rules! impl_convert(
 			}
 		}
 
+		impl From<Option<$ty>> for Value {
+			fn from(v: Option<$ty>) -> Self{
+				if let Some(v) = v {
+					Value::$variant(v)
+				}else{
+					Value::None
+				}
+			}
+		}
+
 		impl TryFrom<Value> for $ty {
 			type Error = ConversionError;
 
@@ -469,6 +476,7 @@ impl_convert!(
 	(String(String), is_string, as_string, as_string_mut, into_string),
 	(RecordId(RecordId), is_record_id, as_record_id, as_record_id_mut, into_record_id),
 	(Object(Object), is_object, as_object, as_object_mut, into_object),
+	(Array(Vec<Value>), is_array, as_array, as_array_mut, into_array),
 );
 
 pub struct ConversionError {
