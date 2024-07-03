@@ -1,10 +1,10 @@
 use crate::ctx::Context;
-use crate::dbs::{Options, Transaction};
+use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::iam::{Action, ResourceKind};
 use crate::sql::statements::info::InfoStructure;
-use crate::sql::{filter::Filter, tokenizer::Tokenizer, Base, Ident, Object, Strand, Value};
+use crate::sql::{filter::Filter, tokenizer::Tokenizer, Array, Base, Ident, Strand, Value};
 use derive::Store;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -28,27 +28,30 @@ pub struct DefineAnalyzerStatement {
 impl DefineAnalyzerStatement {
 	pub(crate) async fn compute(
 		&self,
-		_ctx: &Context<'_>,
+		ctx: &Context<'_>,
 		opt: &Options,
-		txn: &Transaction,
 		_doc: Option<&CursorDoc<'_>>,
 	) -> Result<Value, Error> {
 		// Allowed to run?
 		opt.is_allowed(Action::Edit, ResourceKind::Analyzer, &Base::Db)?;
 		// Claim transaction
-		let mut run = txn.lock().await;
+		let mut run = ctx.tx_lock().await;
 		// Clear the cache
 		run.clear_cache();
 		// Check if analyzer already exists
-		if self.if_not_exists && run.get_db_analyzer(opt.ns(), opt.db(), &self.name).await.is_ok() {
-			return Err(Error::AzAlreadyExists {
-				value: self.name.to_string(),
-			});
+		if run.get_db_analyzer(opt.ns()?, opt.db()?, &self.name).await.is_ok() {
+			if self.if_not_exists {
+				return Ok(Value::None);
+			} else {
+				return Err(Error::AzAlreadyExists {
+					value: self.name.to_string(),
+				});
+			}
 		}
 		// Process the statement
-		let key = crate::key::database::az::new(opt.ns(), opt.db(), &self.name);
-		run.add_ns(opt.ns(), opt.strict).await?;
-		run.add_db(opt.ns(), opt.db(), opt.strict).await?;
+		let key = crate::key::database::az::new(opt.ns()?, opt.db()?, &self.name);
+		run.add_ns(opt.ns()?, opt.strict).await?;
+		run.add_db(opt.ns()?, opt.db()?, opt.strict).await?;
 		// Persist the definition
 		run.set(
 			key,
@@ -93,40 +96,14 @@ impl Display for DefineAnalyzerStatement {
 
 impl InfoStructure for DefineAnalyzerStatement {
 	fn structure(self) -> Value {
-		let Self {
-			name,
-			function,
-			tokenizers,
-			filters,
-			comment,
-			..
-		} = self;
-		let mut acc = Object::default();
-
-		acc.insert("name".to_string(), name.structure());
-
-		if let Some(function) = function {
-			acc.insert("function".to_string(), function.structure());
-		}
-
-		if let Some(tokenizers) = tokenizers {
-			acc.insert(
-				"tokenizers".to_string(),
-				Value::Array(tokenizers.into_iter().map(|t| t.to_string().into()).collect()),
-			);
-		}
-
-		if let Some(filters) = filters {
-			acc.insert(
-				"filters".to_string(),
-				Value::Array(filters.into_iter().map(|f| f.to_string().into()).collect()),
-			);
-		}
-
-		if let Some(comment) = comment {
-			acc.insert("comment".to_string(), comment.into());
-		}
-
-		Value::Object(acc)
+		Value::from(map! {
+			"name".to_string() => self.name.structure(),
+			"function".to_string(), if let Some(v) = self.function => v.structure(),
+			"tokenizers".to_string(), if let Some(v) = self.tokenizers =>
+				v.into_iter().map(|v| v.to_string().into()).collect::<Array>().into(),
+			"filters".to_string(), if let Some(v) = self.filters =>
+				v.into_iter().map(|v| v.to_string().into()).collect::<Array>().into(),
+			"comment".to_string(), if let Some(v) = self.comment => v.into(),
+		})
 	}
 }

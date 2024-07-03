@@ -7,7 +7,7 @@ use reblessive::tree::Stk;
 
 use crate::{
 	ctx::Context,
-	dbs::{Attach, Options, Transaction},
+	dbs::{Attach, Options},
 	doc::CursorDoc,
 	sql::Value as SurValue,
 };
@@ -24,7 +24,6 @@ pub const QUERY_DATA_PROP_NAME: &str = "__query_context__";
 pub struct QueryContext<'js> {
 	pub context: &'js Context<'js>,
 	pub opt: &'js Options,
-	pub txn: &'js Transaction,
 	pub doc: Option<&'js CursorDoc<'js>>,
 }
 
@@ -78,9 +77,8 @@ pub async fn query<'js>(
 		.attach(context)
 		.map_err(|e| Exception::throw_message(&ctx, &e.to_string()))?;
 
-	let value =
-		Stk::enter_run(|stk| query.query.compute(stk, &context, this.opt, this.txn, this.doc))
-			.await
-			.map_err(|e| Exception::throw_message(&ctx, &e.to_string()))?;
+	let value = Stk::enter_run(|stk| query.query.compute(stk, &context, this.opt, this.doc))
+		.await
+		.map_err(|e| Exception::throw_message(&ctx, &e.to_string()))?;
 	Result::Ok(value)
 }

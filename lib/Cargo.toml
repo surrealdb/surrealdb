@@ -2,7 +2,7 @@
 name = "surrealdb"
 publish = true
 edition = "2021"
-version = "1.5.0"
+version = "2.0.0"
 rust-version = "1.77.0"
 readme = "CARGO.md"
 authors = ["Tobie Morgan Hitchcock <tobie@surrealdb.com>"]
@@ -28,7 +28,6 @@ protocol-http = ["dep:reqwest", "dep:tokio-util"]
 protocol-ws = ["dep:tokio-tungstenite", "dep:trice", "tokio/time"]
 kv-mem = ["surrealdb-core/kv-mem", "tokio/time"]
 kv-indxdb = ["surrealdb-core/kv-indxdb"]
-kv-speedb = ["surrealdb-core/kv-speedb", "tokio/time"]
 kv-rocksdb = ["surrealdb-core/kv-rocksdb", "tokio/time"]
 kv-tikv = ["surrealdb-core/kv-tikv"]
 kv-fdb-5_1 = ["surrealdb-core/kv-fdb-5_1", "kv-fdb"]
@@ -104,7 +103,7 @@ rustls = { version = "0.21.11", optional = true }
 semver = { version = "1.0.20", features = ["serde"] }
 serde = { version = "1.0.193", features = ["derive"] }
 serde_json = "1.0.108"
-surrealdb-core = { version = "=2.0.0-1.5.0", default-features = false, path = "../core" }
+surrealdb-core = { version = "2", default-features = false, path = "../core", package = "surrealdb-core" }
 thiserror = "1.0.50"
 tokio-util = { version = "0.7.10", optional = true, features = ["compat"] }
 tracing = "0.1.40"
@@ -113,6 +112,7 @@ url = "2.5.0"
 reblessive = { version = "0.3.5", features = ["tree"] }
 
 [dev-dependencies]
+ciborium = "0.2.1"
 criterion = { version = "0.5.1", features = ["async_tokio"] }
 env_logger = "0.10.1"
 flate2 = "1.0.28"

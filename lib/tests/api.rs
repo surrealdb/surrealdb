@@ -12,14 +12,14 @@ mod api_integration {
 	use std::sync::Arc;
 	use std::sync::Mutex;
 	use std::time::Duration;
-	use surrealdb::dbs::capabilities::Capabilities;
 	use surrealdb::error::Api as ApiError;
 	use surrealdb::error::Db as DbError;
 	use surrealdb::opt::auth::Database;
 	use surrealdb::opt::auth::Jwt;
 	use surrealdb::opt::auth::Namespace;
+	use surrealdb::opt::auth::Record as RecordAccess;
 	use surrealdb::opt::auth::Root;
-	use surrealdb::opt::auth::Scope;
+	use surrealdb::opt::capabilities::Capabilities;
 	use surrealdb::opt::Config;
 	use surrealdb::opt::PatchOp;
 	use surrealdb::opt::Resource;
@@ -333,41 +333,6 @@ mod api_integration {
 			let path = format!("{}.db", Ulid::new());
 			surrealdb::engine::any::connect(format!("rocksdb://{path}")).await.unwrap();
 			surrealdb::engine::any::connect(format!("rocksdb:///tmp/{path}")).await.unwrap();
-			tokio::fs::remove_dir_all(path).await.unwrap();
-		}
-
-		include!("api/mod.rs");
-		include!("api/live.rs");
-		include!("api/backup.rs");
-	}
-
-	#[cfg(feature = "kv-speedb")]
-	mod speedb {
-		use super::*;
-		use surrealdb::engine::local::Db;
-		use surrealdb::engine::local::SpeeDb;
-
-		async fn new_db() -> (SemaphorePermit<'static>, Surreal<Db>) {
-			let permit = PERMITS.acquire().await.unwrap();
-			let path = format!("/tmp/{}.db", Ulid::new());
-			let root = Root {
-				username: ROOT_USER,
-				password: ROOT_PASS,
-			};
-			let config = Config::new()
-				.user(root)
-				.tick_interval(TICK_INTERVAL)
-				.capabilities(Capabilities::all());
-			let db = Surreal::new::<SpeeDb>((path, config)).await.unwrap();
-			db.signin(root).await.unwrap();
-			(permit, db)
-		}
-
-		#[test_log::test(tokio::test)]
-		async fn any_engine_can_connect() {
-			let path = format!("{}.db", Ulid::new());
-			surrealdb::engine::any::connect(format!("speedb://{path}")).await.unwrap();
-			surrealdb::engine::any::connect(format!("speedb:///tmp/{path}")).await.unwrap();
 			tokio::fs::remove_dir_all(path).await.unwrap();
 		}
 

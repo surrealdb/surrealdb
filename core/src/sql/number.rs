@@ -7,6 +7,7 @@ use revision::revisioned;
 use rust_decimal::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
+use std::f64::consts::PI;
 use std::fmt::{self, Display, Formatter};
 use std::hash;
 use std::iter::Product;
@@ -391,6 +392,18 @@ impl Number {
 		self.to_float().acos().into()
 	}
 
+	pub fn asin(self) -> Self {
+		self.to_float().asin().into()
+	}
+
+	pub fn atan(self) -> Self {
+		self.to_float().atan().into()
+	}
+
+	pub fn acot(self) -> Self {
+		(PI / 2.0 - self.atan().to_float()).into()
+	}
+
 	pub fn ceil(self) -> Self {
 		match self {
 			Number::Int(v) => v.into(),
@@ -399,12 +412,104 @@ impl Number {
 		}
 	}
 
+	pub fn clamp(self, min: Self, max: Self) -> Self {
+		match (self, min, max) {
+			(Number::Int(n), Number::Int(min), Number::Int(max)) => n.clamp(min, max).into(),
+			(Number::Decimal(n), min, max) => n.clamp(min.to_decimal(), max.to_decimal()).into(),
+			(Number::Float(n), min, max) => n.clamp(min.to_float(), max.to_float()).into(),
+			(Number::Int(n), min, max) => n.to_float().clamp(min.to_float(), max.to_float()).into(),
+		}
+	}
+
+	pub fn cos(self) -> Self {
+		self.to_float().cos().into()
+	}
+
+	pub fn cot(self) -> Self {
+		(1.0 / self.to_float().tan()).into()
+	}
+
+	pub fn deg2rad(self) -> Self {
+		self.to_float().to_radians().into()
+	}
+
 	pub fn floor(self) -> Self {
 		match self {
 			Number::Int(v) => v.into(),
 			Number::Float(v) => v.floor().into(),
 			Number::Decimal(v) => v.floor().into(),
 		}
+	}
+
+	fn lerp_f64(from: f64, to: f64, factor: f64) -> f64 {
+		from + factor * (to - from)
+	}
+
+	fn lerp_decimal(from: Decimal, to: Decimal, factor: Decimal) -> Decimal {
+		from + factor * (to - from)
+	}
+
+	pub fn lerp(self, from: Self, to: Self) -> Self {
+		match (self, from, to) {
+			(Number::Decimal(val), from, to) => {
+				Self::lerp_decimal(from.to_decimal(), to.to_decimal(), val).into()
+			}
+			(val, from, to) => {
+				Self::lerp_f64(from.to_float(), to.to_float(), val.to_float()).into()
+			}
+		}
+	}
+
+	fn repeat_f64(t: f64, m: f64) -> f64 {
+		(t - (t / m).floor() * m).clamp(0.0, m)
+	}
+
+	fn repeat_decimal(t: Decimal, m: Decimal) -> Decimal {
+		(t - (t / m).floor() * m).clamp(Decimal::ZERO, m)
+	}
+
+	pub fn lerp_angle(self, from: Self, to: Self) -> Self {
+		match (self, from, to) {
+			(Number::Decimal(val), from, to) => {
+				let from = from.to_decimal();
+				let to = to.to_decimal();
+				let mut dt = Self::repeat_decimal(to - from, Decimal::from(360));
+				if dt > Decimal::from(180) {
+					dt = Decimal::from(360) - dt;
+				}
+				Self::lerp_decimal(from, from + dt, val).into()
+			}
+			(val, from, to) => {
+				let val = val.to_float();
+				let from = from.to_float();
+				let to = to.to_float();
+				let mut dt = Self::repeat_f64(to - from, 360.0);
+				if dt > 180.0 {
+					dt = 360.0 - dt;
+				}
+				Self::lerp_f64(from, from + dt, val).into()
+			}
+		}
+	}
+
+	pub fn ln(self) -> Self {
+		self.to_float().ln().into()
+	}
+
+	pub fn log(self, base: Self) -> Self {
+		self.to_float().log(base.to_float()).into()
+	}
+
+	pub fn log2(self) -> Self {
+		self.to_float().log2().into()
+	}
+
+	pub fn log10(self) -> Self {
+		self.to_float().log10().into()
+	}
+
+	pub fn rad2deg(self) -> Self {
+		self.to_float().to_degrees().into()
 	}
 
 	pub fn round(self) -> Self {
@@ -421,6 +526,22 @@ impl Number {
 			Number::Float(v) => format!("{v:.precision$}").try_into().unwrap_or_default(),
 			Number::Decimal(v) => v.round_dp(precision as u32).into(),
 		}
+	}
+
+	pub fn sign(self) -> Self {
+		match self {
+			Number::Int(n) => n.signum().into(),
+			Number::Float(n) => n.signum().into(),
+			Number::Decimal(n) => n.signum().into(),
+		}
+	}
+
+	pub fn sin(self) -> Self {
+		self.to_float().sin().into()
+	}
+
+	pub fn tan(self) -> Self {
+		self.to_float().tan().into()
 	}
 
 	pub fn sqrt(self) -> Self {

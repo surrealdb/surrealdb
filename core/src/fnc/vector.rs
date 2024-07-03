@@ -45,11 +45,14 @@ pub fn subtract((a, b): (Vec<Number>, Vec<Number>)) -> Result<Value, Error> {
 }
 
 pub mod distance {
-
+	use crate::ctx::Context;
+	use crate::doc::CursorDoc;
 	use crate::err::Error;
+	use crate::fnc::get_execution_context;
 	use crate::fnc::util::math::vector::{
 		ChebyshevDistance, EuclideanDistance, HammingDistance, ManhattanDistance, MinkowskiDistance,
 	};
+	use crate::idx::planner::IterationStage;
 	use crate::sql::{Number, Value};
 
 	pub fn chebyshev((a, b): (Vec<Number>, Vec<Number>)) -> Result<Value, Error> {
@@ -62,6 +65,30 @@ pub mod distance {
 
 	pub fn hamming((a, b): (Vec<Number>, Vec<Number>)) -> Result<Value, Error> {
 		Ok(a.hamming_distance(&b)?.into())
+	}
+
+	pub fn knn(
+		(ctx, doc): (&Context<'_>, Option<&CursorDoc<'_>>),
+		(knn_ref,): (Option<Value>,),
+	) -> Result<Value, Error> {
+		if let Some((_exe, doc, thg)) = get_execution_context(ctx, doc) {
+			if let Some(ir) = doc.ir {
+				if let Some(d) = ir.dist() {
+					return Ok(d.into());
+				}
+			}
+			if let Some(IterationStage::Iterate(Some(results))) = ctx.get_iteration_stage() {
+				let n = if let Some(Value::Number(n)) = knn_ref {
+					n.as_usize()
+				} else {
+					0
+				};
+				if let Some(d) = results.get_dist(n, thg) {
+					return Ok(d.into());
+				}
+			}
+		}
+		Ok(Value::None)
 	}
 
 	pub fn mahalanobis((_, _): (Vec<Number>, Vec<Number>)) -> Result<Value, Error> {

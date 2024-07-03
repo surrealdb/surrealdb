@@ -1,5 +1,7 @@
 use crate::{
 	sql::{
+		access::AccessDuration,
+		access_type::{AccessType, JwtAccess, JwtAccessVerify, JwtAccessVerifyKey, RecordAccess},
 		block::Entry,
 		changefeed::ChangeFeed,
 		filter::Filter,
@@ -8,13 +10,14 @@ use crate::{
 		statements::{
 			analyze::AnalyzeStatement, show::ShowSince, show::ShowStatement, sleep::SleepStatement,
 			BeginStatement, BreakStatement, CancelStatement, CommitStatement, ContinueStatement,
-			CreateStatement, DefineAnalyzerStatement, DefineDatabaseStatement,
-			DefineEventStatement, DefineFieldStatement, DefineFunctionStatement,
-			DefineIndexStatement, DefineNamespaceStatement, DefineParamStatement, DefineStatement,
-			DefineTableStatement, DefineTokenStatement, DeleteStatement, ForeachStatement,
-			IfelseStatement, InfoStatement, InsertStatement, KillStatement, OutputStatement,
-			RelateStatement, RemoveFieldStatement, RemoveFunctionStatement, RemoveStatement,
-			SelectStatement, SetStatement, ThrowStatement, UpdateStatement,
+			CreateStatement, DefineAccessStatement, DefineAnalyzerStatement,
+			DefineDatabaseStatement, DefineEventStatement, DefineFieldStatement,
+			DefineFunctionStatement, DefineIndexStatement, DefineNamespaceStatement,
+			DefineParamStatement, DefineStatement, DefineTableStatement, DeleteStatement,
+			ForeachStatement, IfelseStatement, InfoStatement, InsertStatement, KillStatement,
+			OutputStatement, RelateStatement, RemoveFieldStatement, RemoveFunctionStatement,
+			RemoveStatement, SelectStatement, SetStatement, ThrowStatement, UpdateStatement,
+			UpsertStatement,
 		},
 		tokenizer::Tokenizer,
 		Algorithm, Array, Base, Block, Cond, Data, Datetime, Dir, Duration, Edges, Explain,
@@ -46,7 +49,7 @@ static SOURCE: &str = r#"
 	DEFINE FUNCTION fn::foo::bar($a: number, $b: array<bool,3>) {
 		RETURN a
 	} COMMENT 'test' PERMISSIONS FULL;
-	DEFINE TOKEN a ON SCOPE b TYPE EDDSA VALUE "foo" COMMENT "bar";
+	DEFINE ACCESS a ON DATABASE TYPE RECORD WITH JWT ALGORITHM EDDSA KEY "foo" COMMENT "bar";
 	DEFINE PARAM $a VALUE { a: 1, "b": 3 } PERMISSIONS WHERE null;
 	DEFINE TABLE name DROP SCHEMAFUL CHANGEFEED 1s PERMISSIONS FOR SELECT WHERE a = 1 AS SELECT foo FROM bar GROUP BY foo;
 	DEFINE EVENT event ON TABLE table WHEN null THEN null,none;
@@ -73,7 +76,6 @@ static SOURCE: &str = r#"
 	IF foo { bar } ELSE IF faz { baz } ELSE { baq };
 	INFO FOR ROOT;
 	INFO FOR NAMESPACE;
-	INFO FOR SCOPE scope;
 	INFO FOR USER user ON namespace;
 	SELECT bar as foo,[1,2],bar OMIT bar FROM ONLY a,1
 		WITH INDEX index,index_2
@@ -98,6 +100,7 @@ static SOURCE: &str = r#"
 	REMOVE FUNCTION fn::foo::bar();
 	REMOVE FIELD foo.bar[10] ON bar;
 	UPDATE ONLY <future> { "text" }, a->b UNSET foo... , a->b, c[*] WHERE true RETURN DIFF TIMEOUT 1s PARALLEL;
+	UPSERT ONLY <future> { "text" }, a->b UNSET foo... , a->b, c[*] WHERE true RETURN DIFF TIMEOUT 1s PARALLEL;
 "#;
 
 fn statements() -> Vec<Statement> {
@@ -191,11 +194,27 @@ fn statements() -> Vec<Statement> {
 			permissions: Permission::Full,
 			if_not_exists: false,
 		})),
-		Statement::Define(DefineStatement::Token(DefineTokenStatement {
+		Statement::Define(DefineStatement::Access(DefineAccessStatement {
 			name: Ident("a".to_string()),
-			base: Base::Sc(Ident("b".to_string())),
-			kind: Algorithm::EdDSA,
-			code: "foo".to_string(),
+			base: Base::Db,
+			kind: AccessType::Record(RecordAccess {
+				signup: None,
+				signin: None,
+				authenticate: None,
+				jwt: JwtAccess {
+					verify: JwtAccessVerify::Key(JwtAccessVerifyKey {
+						alg: Algorithm::EdDSA,
+						key: "foo".to_string(),
+					}),
+					issue: None,
+				},
+			}),
+			// Default durations.
+			duration: AccessDuration {
+				grant: None,
+				token: Some(Duration::from_hours(1)),
+				session: None,
+			},
 			comment: Some(Strand("bar".to_string())),
 			if_not_exists: false,
 		})),
@@ -435,7 +454,6 @@ fn statements() -> Vec<Statement> {
 		}),
 		Statement::Info(InfoStatement::Root(false)),
 		Statement::Info(InfoStatement::Ns(false)),
-		Statement::Info(InfoStatement::Sc(Ident("scope".to_owned()), false)),
 		Statement::Info(InfoStatement::User(Ident("user".to_owned()), Some(Base::Ns), false)),
 		Statement::Select(SelectStatement {
 			expr: Fields(
@@ -489,6 +507,7 @@ fn statements() -> Vec<Statement> {
 			version: Some(Version(Datetime(expected_datetime))),
 			timeout: None,
 			parallel: false,
+			tempfiles: false,
 			explain: Some(Explain(true)),
 		}),
 		Statement::Set(SetStatement {
@@ -512,7 +531,7 @@ fn statements() -> Vec<Statement> {
 			error: Value::Duration(Duration(std::time::Duration::from_secs(1))),
 		}),
 		Statement::Insert(InsertStatement {
-			into: Value::Param(Param(Ident("foo".to_owned()))),
+			into: Some(Value::Param(Param(Ident("foo".to_owned())))),
 			data: Data::ValuesExpression(vec![
 				vec![
 					(
@@ -565,6 +584,7 @@ fn statements() -> Vec<Statement> {
 			output: Some(Output::After),
 			timeout: None,
 			parallel: false,
+			relation: false,
 		}),
 		Statement::Kill(KillStatement {
 			id: Value::Uuid(Uuid(uuid::uuid!("e72bee20-f49b-11ec-b939-0242ac120002"))),
@@ -617,6 +637,40 @@ fn statements() -> Vec<Statement> {
 			if_exists: false,
 		})),
 		Statement::Update(UpdateStatement {
+			only: true,
+			what: Values(vec![
+				Value::Future(Box::new(Future(Block(vec![Entry::Value(Value::Strand(Strand(
+					"text".to_string(),
+				)))])))),
+				Value::Idiom(Idiom(vec![
+					Part::Field(Ident("a".to_string())),
+					Part::Graph(Graph {
+						dir: Dir::Out,
+						what: Tables(vec![Table("b".to_string())]),
+						expr: Fields::all(),
+						..Default::default()
+					}),
+				])),
+			]),
+			cond: Some(Cond(Value::Bool(true))),
+			data: Some(Data::UnsetExpression(vec![
+				Idiom(vec![Part::Field(Ident("foo".to_string())), Part::Flatten]),
+				Idiom(vec![
+					Part::Field(Ident("a".to_string())),
+					Part::Graph(Graph {
+						dir: Dir::Out,
+						what: Tables(vec![Table("b".to_string())]),
+						expr: Fields::all(),
+						..Default::default()
+					}),
+				]),
+				Idiom(vec![Part::Field(Ident("c".to_string())), Part::All]),
+			])),
+			output: Some(Output::Diff),
+			timeout: Some(Timeout(Duration(std::time::Duration::from_secs(1)))),
+			parallel: true,
+		}),
+		Statement::Upsert(UpsertStatement {
 			only: true,
 			what: Values(vec![
 				Value::Future(Box::new(Future(Block(vec![Entry::Value(Value::Strand(Strand(

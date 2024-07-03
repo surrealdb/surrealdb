@@ -1,5 +1,5 @@
 use crate::ctx::Context;
-use crate::dbs::{Options, Transaction};
+use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::fnc;
@@ -184,7 +184,6 @@ impl Function {
 		stk: &mut Stk,
 		ctx: &Context<'_>,
 		opt: &Options,
-		txn: &Transaction,
 		doc: Option<&CursorDoc<'_>>,
 	) -> Result<Value, Error> {
 		// Ensure futures are run
@@ -198,16 +197,14 @@ impl Function {
 				let a = stk
 					.scope(|scope| {
 						try_join_all(
-							x.iter().map(|v| scope.run(|stk| v.compute(stk, ctx, opt, txn, doc))),
+							x.iter().map(|v| scope.run(|stk| v.compute(stk, ctx, opt, doc))),
 						)
 					})
 					.await?;
 				// Run the normal function
-				fnc::run(stk, ctx, opt, txn, doc, s, a).await
+				fnc::run(stk, ctx, opt, doc, s, a).await
 			}
 			Self::Custom(s, x) => {
-				// Check that a database is set to prevent a panic
-				opt.valid_for_db()?;
 				// Get the full name of this function
 				let name = format!("fn::{s}");
 				// Check this function is allowed
@@ -215,12 +212,14 @@ impl Function {
 				// Get the function definition
 				let val = {
 					// Claim transaction
-					let mut run = txn.lock().await;
+					let mut run = ctx.tx_lock().await;
 					// Get the function definition
-					run.get_and_cache_db_function(opt.ns(), opt.db(), s).await?
+					let val = run.get_and_cache_db_function(opt.ns()?, opt.db()?, s).await?;
+					drop(run);
+					val
 				};
 				// Check permissions
-				if opt.check_perms(Action::View) {
+				if opt.check_perms(Action::View)? {
 					match &val.permissions {
 						Permission::Full => (),
 						Permission::None => {
@@ -232,8 +231,7 @@ impl Function {
 							// Disable permissions
 							let opt = &opt.new_with_perms(false);
 							// Process the PERMISSION clause
-							if !stk.run(|stk| e.compute(stk, ctx, opt, txn, doc)).await?.is_truthy()
-							{
+							if !stk.run(|stk| e.compute(stk, ctx, opt, doc)).await?.is_truthy() {
 								return Err(Error::FunctionPermissions {
 									name: s.to_owned(),
 								});
@@ -265,7 +263,7 @@ impl Function {
 				let a = stk
 					.scope(|scope| {
 						try_join_all(
-							x.iter().map(|v| scope.run(|stk| v.compute(stk, ctx, opt, txn, doc))),
+							x.iter().map(|v| scope.run(|stk| v.compute(stk, ctx, opt, doc))),
 						)
 					})
 					.await?;
@@ -276,7 +274,7 @@ impl Function {
 					ctx.add_value(name.to_raw(), val.coerce_to(kind)?);
 				}
 				// Run the custom function
-				stk.run(|stk| val.block.compute(stk, &ctx, opt, txn, doc)).await
+				stk.run(|stk| val.block.compute(stk, &ctx, opt, doc)).await
 			}
 			#[allow(unused_variables)]
 			Self::Script(s, x) => {
@@ -288,13 +286,12 @@ impl Function {
 					let a = stk
 						.scope(|scope| {
 							try_join_all(
-								x.iter()
-									.map(|v| scope.run(|stk| v.compute(stk, ctx, opt, txn, doc))),
+								x.iter().map(|v| scope.run(|stk| v.compute(stk, ctx, opt, doc))),
 							)
 						})
 						.await?;
 					// Run the script function
-					fnc::script::run(ctx, opt, txn, doc, s, a).await
+					fnc::script::run(ctx, opt, doc, s, a).await
 				}
 				#[cfg(not(feature = "scripting"))]
 				{

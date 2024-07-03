@@ -5,12 +5,11 @@ use crate::dbs::distinct::AsyncDistinct;
 use crate::dbs::distinct::SyncDistinct;
 use crate::dbs::plan::Plan;
 use crate::dbs::result::Results;
+use crate::dbs::Options;
 use crate::dbs::Statement;
-use crate::dbs::{Options, Transaction};
 use crate::doc::Document;
 use crate::err::Error;
-use crate::idx::docids::DocId;
-use crate::idx::planner::executor::IteratorRef;
+use crate::idx::planner::iterators::{IteratorRecord, IteratorRef};
 use crate::idx::planner::IterationStage;
 use crate::sql::edges::Edges;
 use crate::sql::range::Range;
@@ -29,27 +28,26 @@ pub(crate) enum Iterable {
 	Edges(Edges),
 	Defer(Thing),
 	Mergeable(Thing, Value),
-	Relatable(Thing, Thing, Thing),
+	Relatable(Thing, Thing, Thing, Option<Value>),
 	Index(Table, IteratorRef),
 }
 
 pub(crate) struct Processed {
-	pub(crate) ir: Option<IteratorRef>,
 	pub(crate) rid: Option<Thing>,
-	pub(crate) doc_id: Option<DocId>,
+	pub(crate) ir: Option<IteratorRecord>,
 	pub(crate) val: Operable,
 }
 
 pub(crate) enum Operable {
 	Value(Value),
 	Mergeable(Value, Value),
-	Relatable(Thing, Value, Thing),
+	Relatable(Thing, Value, Thing, Option<Value>),
 }
 
 pub(crate) enum Workable {
 	Normal,
 	Insert(Value),
-	Relate(Thing, Thing),
+	Relate(Thing, Thing, Option<Value>),
 }
 
 #[derive(Default)]
@@ -98,7 +96,6 @@ impl Iterator {
 		stk: &mut Stk,
 		ctx: &Context<'_>,
 		opt: &Options,
-		txn: &Transaction,
 		stm: &Statement<'_>,
 		val: Value,
 	) -> Result<(), Error> {
@@ -108,7 +105,7 @@ impl Iterator {
 				// There is a data clause so fetch a record id
 				Some(data) => match stm {
 					Statement::Create(_) => {
-						let id = match data.rid(stk, ctx, opt, txn).await? {
+						let id = match data.rid(stk, ctx, opt).await? {
 							// Generate a new id from the id field
 							Some(id) => id.generate(&v, false)?,
 							// Generate a new random table id
@@ -137,7 +134,7 @@ impl Iterator {
 				// Check if there is a data clause
 				if let Some(data) = stm.data() {
 					// Check if there is an id field specified
-					if let Some(id) = data.rid(stk, ctx, opt, txn).await? {
+					if let Some(id) = data.rid(stk, ctx, opt).await? {
 						// Check to see the type of the id
 						match id {
 							// The id is a match, so don't error
@@ -165,7 +162,7 @@ impl Iterator {
 				// Check if there is a data clause
 				if let Some(data) = stm.data() {
 					// Check if there is an id field specified
-					if let Some(id) = data.rid(stk, ctx, opt, txn).await? {
+					if let Some(id) = data.rid(stk, ctx, opt).await? {
 						return Err(Error::IdMismatch {
 							value: id.to_string(),
 						});
@@ -186,7 +183,7 @@ impl Iterator {
 				// Check if there is a data clause
 				if let Some(data) = stm.data() {
 					// Check if there is an id field specified
-					if let Some(id) = data.rid(stk, ctx, opt, txn).await? {
+					if let Some(id) = data.rid(stk, ctx, opt).await? {
 						return Err(Error::IdMismatch {
 							value: id.to_string(),
 						});
@@ -205,7 +202,7 @@ impl Iterator {
 				// Check if there is a data clause
 				if let Some(data) = stm.data() {
 					// Check if there is an id field specified
-					if let Some(id) = data.rid(stk, ctx, opt, txn).await? {
+					if let Some(id) = data.rid(stk, ctx, opt).await? {
 						return Err(Error::IdMismatch {
 							value: id.to_string(),
 						});
@@ -218,7 +215,7 @@ impl Iterator {
 				// Check if there is a data clause
 				if let Some(data) = stm.data() {
 					// Check if there is an id field specified
-					if let Some(id) = data.rid(stk, ctx, opt, txn).await? {
+					if let Some(id) = data.rid(stk, ctx, opt).await? {
 						return Err(Error::IdMismatch {
 							value: id.to_string(),
 						});
@@ -241,7 +238,7 @@ impl Iterator {
 				// Check if there is a data clause
 				if let Some(data) = stm.data() {
 					// Check if there is an id field specified
-					if let Some(id) = data.rid(stk, ctx, opt, txn).await? {
+					if let Some(id) = data.rid(stk, ctx, opt).await? {
 						return Err(Error::IdMismatch {
 							value: id.to_string(),
 						});
@@ -284,7 +281,6 @@ impl Iterator {
 		stk: &mut Stk,
 		ctx: &Context<'_>,
 		opt: &Options,
-		txn: &Transaction,
 		stm: &Statement<'_>,
 	) -> Result<Value, Error> {
 		// Log the statement
@@ -293,18 +289,17 @@ impl Iterator {
 		let mut cancel_ctx = Context::new(ctx);
 		self.run = cancel_ctx.add_cancel();
 		// Process the query LIMIT clause
-		self.setup_limit(stk, &cancel_ctx, opt, txn, stm).await?;
+		self.setup_limit(stk, &cancel_ctx, opt, stm).await?;
 		// Process the query START clause
-		self.setup_start(stk, &cancel_ctx, opt, txn, stm).await?;
+		self.setup_start(stk, &cancel_ctx, opt, stm).await?;
 		// Prepare the results with possible optimisations on groups
 		self.results = self.results.prepare(
 			#[cfg(any(
+				feature = "kv-mem",
 				feature = "kv-surrealkv",
-				feature = "kv-file",
 				feature = "kv-rocksdb",
 				feature = "kv-fdb",
 				feature = "kv-tikv",
-				feature = "kv-speedb"
 			))]
 			ctx,
 			stm,
@@ -318,20 +313,20 @@ impl Iterator {
 					let is_last = matches!(s, IterationStage::Iterate(_));
 					cancel_ctx.set_iteration_stage(s);
 					if !is_last {
-						self.clone().iterate(stk, &cancel_ctx, opt, txn, stm).await?;
+						self.clone().iterate(stk, &cancel_ctx, opt, stm).await?;
 					};
 				}
 			}
-			self.iterate(stk, &cancel_ctx, opt, txn, stm).await?;
+			self.iterate(stk, &cancel_ctx, opt, stm).await?;
 			// Return any document errors
 			if let Some(e) = self.error.take() {
 				return Err(e);
 			}
 			// Process any SPLIT clause
-			self.output_split(stk, ctx, opt, txn, stm).await?;
+			self.output_split(stk, ctx, opt, stm).await?;
 			// Process any GROUP clause
 			if let Results::Groups(g) = &mut self.results {
-				self.results = Results::Memory(g.output(stk, ctx, opt, txn, stm).await?);
+				self.results = Results::Memory(g.output(stk, ctx, opt, stm).await?);
 			}
 
 			// Process any ORDER clause
@@ -346,7 +341,7 @@ impl Iterator {
 				e.add_fetch(self.results.len());
 			} else {
 				// Process any FETCH clause
-				self.output_fetch(stk, ctx, opt, txn, stm).await?;
+				self.output_fetch(stk, ctx, opt, stm).await?;
 			}
 		}
 
@@ -371,11 +366,10 @@ impl Iterator {
 		stk: &mut Stk,
 		ctx: &Context<'_>,
 		opt: &Options,
-		txn: &Transaction,
 		stm: &Statement<'_>,
 	) -> Result<(), Error> {
 		if let Some(v) = stm.limit() {
-			self.limit = Some(v.process(stk, ctx, opt, txn, None).await?);
+			self.limit = Some(v.process(stk, ctx, opt, None).await?);
 		}
 		Ok(())
 	}
@@ -386,11 +380,10 @@ impl Iterator {
 		stk: &mut Stk,
 		ctx: &Context<'_>,
 		opt: &Options,
-		txn: &Transaction,
 		stm: &Statement<'_>,
 	) -> Result<(), Error> {
 		if let Some(v) = stm.start() {
-			self.start = Some(v.process(stk, ctx, opt, txn, None).await?);
+			self.start = Some(v.process(stk, ctx, opt, None).await?);
 		}
 		Ok(())
 	}
@@ -401,7 +394,6 @@ impl Iterator {
 		stk: &mut Stk,
 		ctx: &Context<'_>,
 		opt: &Options,
-		txn: &Transaction,
 		stm: &Statement<'_>,
 	) -> Result<(), Error> {
 		if let Some(splits) = stm.split() {
@@ -420,18 +412,18 @@ impl Iterator {
 								// Make a copy of object
 								let mut obj = obj.clone();
 								// Set the value at the path
-								obj.set(stk, ctx, opt, txn, split, val).await?;
+								obj.set(stk, ctx, opt, split, val).await?;
 								// Add the object to the results
-								self.results.push(stk, ctx, opt, txn, stm, obj).await?;
+								self.results.push(stk, ctx, opt, stm, obj).await?;
 							}
 						}
 						_ => {
 							// Make a copy of object
 							let mut obj = obj.clone();
 							// Set the value at the path
-							obj.set(stk, ctx, opt, txn, split, val).await?;
+							obj.set(stk, ctx, opt, split, val).await?;
 							// Add the object to the results
-							self.results.push(stk, ctx, opt, txn, stm, obj).await?;
+							self.results.push(stk, ctx, opt, stm, obj).await?;
 						}
 					}
 				}
@@ -446,7 +438,6 @@ impl Iterator {
 		stk: &mut Stk,
 		ctx: &Context<'_>,
 		opt: &Options,
-		txn: &Transaction,
 		stm: &Statement<'_>,
 	) -> Result<(), Error> {
 		if let Some(fetchs) = stm.fetch() {
@@ -455,7 +446,7 @@ impl Iterator {
 				// Loop over each result value
 				for obj in &mut values {
 					// Fetch the value at the path
-					stk.run(|stk| obj.fetch(stk, ctx, opt, txn, fetch)).await?;
+					stk.run(|stk| obj.fetch(stk, ctx, opt, fetch)).await?;
 				}
 				self.results = values.into();
 			}
@@ -469,7 +460,6 @@ impl Iterator {
 		stk: &mut Stk,
 		ctx: &Context<'_>,
 		opt: &Options,
-		txn: &Transaction,
 		stm: &Statement<'_>,
 	) -> Result<(), Error> {
 		// Prevent deep recursion
@@ -478,7 +468,7 @@ impl Iterator {
 		let mut distinct = SyncDistinct::new(ctx);
 		// Process all prepared values
 		for v in mem::take(&mut self.entries) {
-			v.iterate(stk, ctx, opt, txn, stm, self, distinct.as_mut()).await?;
+			v.iterate(stk, ctx, opt, stm, self, distinct.as_mut()).await?;
 		}
 		// Everything processed ok
 		Ok(())
@@ -490,7 +480,6 @@ impl Iterator {
 		stk: &mut Stk,
 		ctx: &Context<'_>,
 		opt: &Options,
-		txn: &Transaction,
 		stm: &Statement<'_>,
 	) -> Result<(), Error> {
 		// Prevent deep recursion
@@ -503,7 +492,7 @@ impl Iterator {
 				let mut distinct = SyncDistinct::new(ctx);
 				// Process all prepared values
 				for v in mem::take(&mut self.entries) {
-					v.iterate(stk, ctx, opt, txn, stm, self, distinct.as_mut()).await?;
+					v.iterate(stk, ctx, opt, stm, self, distinct.as_mut()).await?;
 				}
 				// Everything processed ok
 				Ok(())
@@ -531,7 +520,7 @@ impl Iterator {
 							let mut stack = TreeStack::new();
 							stack
 								.enter(|stk| {
-									v.channel(stk, ctx, opt, txn, stm, chn_clone, distinct_clone)
+									v.channel(stk, ctx, opt, stm, chn_clone, distinct_clone)
 								})
 								.finish()
 								.await
@@ -552,9 +541,7 @@ impl Iterator {
 						e.spawn(async move {
 							let mut stack = TreeStack::new();
 							stack
-								.enter(|stk| {
-									Document::compute(stk, ctx, opt, txn, stm, chn_clone, pro)
-								})
+								.enter(|stk| Document::compute(stk, ctx, opt, stm, chn_clone, pro))
 								.finish()
 								.await
 						})
@@ -568,7 +555,7 @@ impl Iterator {
 				let aproc = async {
 					// Process all processed values
 					while let Ok(r) = vals.recv().await {
-						self.result(stk, ctx, opt, txn, stm, r).await;
+						self.result(stk, ctx, opt, stm, r).await;
 					}
 					// Shutdown the executor
 					let _ = end.send(()).await;
@@ -591,14 +578,13 @@ impl Iterator {
 		stk: &mut Stk,
 		ctx: &Context<'_>,
 		opt: &Options,
-		txn: &Transaction,
 		stm: &Statement<'_>,
 		pro: Processed,
 	) {
 		// Process the document
-		let res = stk.run(|stk| Document::process(stk, ctx, opt, txn, stm, pro)).await;
+		let res = stk.run(|stk| Document::process(stk, ctx, opt, stm, pro)).await;
 		// Process the result
-		self.result(stk, ctx, opt, txn, stm, res).await;
+		self.result(stk, ctx, opt, stm, res).await;
 	}
 
 	/// Accept a processed record result
@@ -607,7 +593,6 @@ impl Iterator {
 		stk: &mut Stk,
 		ctx: &Context<'_>,
 		opt: &Options,
-		txn: &Transaction,
 		stm: &Statement<'_>,
 		res: Result<Value, Error>,
 	) {
@@ -622,7 +607,7 @@ impl Iterator {
 				return;
 			}
 			Ok(v) => {
-				if let Err(e) = self.results.push(stk, ctx, opt, txn, stm, v).await {
+				if let Err(e) = self.results.push(stk, ctx, opt, stm, v).await {
 					self.error = Some(e);
 					self.run.cancel();
 					return;

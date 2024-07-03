@@ -50,6 +50,9 @@ impl ser::Serializer for Serializer {
 			"Create" => {
 				Ok(Entry::Create(value.serialize(ser::statement::create::Serializer.wrap())?))
 			}
+			"Upsert" => {
+				Ok(Entry::Upsert(value.serialize(ser::statement::upsert::Serializer.wrap())?))
+			}
 			"Update" => {
 				Ok(Entry::Update(value.serialize(ser::statement::update::Serializer.wrap())?))
 			}
@@ -116,6 +119,13 @@ mod tests {
 	#[test]
 	fn create() {
 		let entry = Entry::Create(Default::default());
+		let serialized = entry.serialize(Serializer.wrap()).unwrap();
+		assert_eq!(entry, serialized);
+	}
+
+	#[test]
+	fn upsert() {
+		let entry = Entry::Upsert(Default::default());
 		let serialized = entry.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(entry, serialized);
 	}

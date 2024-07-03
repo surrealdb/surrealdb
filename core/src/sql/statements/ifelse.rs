@@ -1,5 +1,5 @@
 use crate::ctx::Context;
-use crate::dbs::{Options, Transaction};
+use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::sql::fmt::{fmt_separated_by, is_pretty, pretty_indent, Fmt, Pretty};
@@ -43,17 +43,16 @@ impl IfelseStatement {
 		stk: &mut Stk,
 		ctx: &Context<'_>,
 		opt: &Options,
-		txn: &Transaction,
 		doc: Option<&CursorDoc<'_>>,
 	) -> Result<Value, Error> {
 		for (ref cond, ref then) in &self.exprs {
-			let v = cond.compute(stk, ctx, opt, txn, doc).await?;
+			let v = cond.compute(stk, ctx, opt, doc).await?;
 			if v.is_truthy() {
-				return then.compute(stk, ctx, opt, txn, doc).await;
+				return then.compute(stk, ctx, opt, doc).await;
 			}
 		}
 		match self.close {
-			Some(ref v) => v.compute(stk, ctx, opt, txn, doc).await,
+			Some(ref v) => v.compute(stk, ctx, opt, doc).await,
 			None => Ok(Value::None),
 		}
 	}
@@ -82,7 +81,7 @@ impl Display for IfelseStatement {
 							})
 						}),
 						if is_pretty() {
-							fmt_separated_by("ELSE")
+							fmt_separated_by("ELSE ")
 						} else {
 							fmt_separated_by(" ELSE ")
 						},
@@ -119,7 +118,7 @@ impl Display for IfelseStatement {
 							})
 						}),
 						if is_pretty() {
-							fmt_separated_by("ELSE")
+							fmt_separated_by("ELSE ")
 						} else {
 							fmt_separated_by(" ELSE ")
 						},
@@ -143,5 +142,17 @@ impl Display for IfelseStatement {
 				Ok(())
 			}
 		}
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use crate::syn::parse;
+
+	#[test]
+	fn format_pretty() {
+		let query = parse("IF 1 { 1 } ELSE IF 2 { 2 }").unwrap();
+		assert_eq!(format!("{}", query), "IF 1 { 1 } ELSE IF 2 { 2 };");
+		assert_eq!(format!("{:#}", query), "IF 1\n\t{ 1 }\nELSE IF 2\n\t{ 2 }\n;");
 	}
 }

@@ -1,7 +1,6 @@
 #![cfg(any(
 	feature = "kv-mem",
 	feature = "kv-rocksdb",
-	feature = "kv-speedb",
 	feature = "kv-indxdb",
 	feature = "kv-tikv",
 	feature = "kv-fdb",
@@ -18,8 +17,6 @@ pub(crate) enum Kvs {
 	#[allow(dead_code)]
 	Rocksdb,
 	#[allow(dead_code)]
-	Speedb,
-	#[allow(dead_code)]
 	Tikv,
 	#[allow(dead_code)]
 	Fdb,
@@ -34,7 +31,6 @@ type ClockType = Arc<SizedClock>;
 #[cfg(feature = "kv-mem")]
 mod mem {
 
-	use crate::fflags::FFLAGS;
 	use crate::kvs::tests::{ClockType, Kvs};
 	use crate::kvs::Datastore;
 	use crate::kvs::LockType;
@@ -104,54 +100,6 @@ mod rocksdb {
 		// Shared node id for one-off transactions
 		// We should delete this, node IDs should be known.
 		let new_tx_uuid = Uuid::parse_str("22358e5e-87bd-4040-8c63-01db896191ab").unwrap();
-		let clock = Arc::new(SizedClock::Fake(FakeClock::new(Timestamp::default())));
-		new_ds(new_tx_uuid, clock).await.0.transaction(write, lock).await.unwrap()
-	}
-
-	include!("cluster_init.rs");
-	include!("hb.rs");
-	include!("helper.rs");
-	include!("lq.rs");
-	include!("nq.rs");
-	include!("raw.rs");
-	include!("snapshot.rs");
-	include!("tb.rs");
-	include!("multireader.rs");
-	include!("multiwriter_different_keys.rs");
-	include!("multiwriter_same_keys_conflict.rs");
-	include!("timestamp_to_versionstamp.rs");
-	include!("nd.rs");
-	include!("ndlq.rs");
-	include!("tblq.rs");
-	include!("tbnt.rs");
-	include!("tx_test.rs");
-}
-
-#[cfg(feature = "kv-speedb")]
-mod speedb {
-
-	use crate::fflags::FFLAGS;
-	use crate::kvs::tests::{ClockType, Kvs};
-	use crate::kvs::Transaction;
-	use crate::kvs::{Datastore, LockType, TransactionType};
-	use serial_test::serial;
-	use temp_dir::TempDir;
-
-	async fn new_ds(node_id: Uuid, clock_override: ClockType) -> (Datastore, Kvs) {
-		let path = TempDir::new().unwrap().path().to_string_lossy().to_string();
-		(
-			Datastore::new_full(format!("speedb:{path}").as_str(), Some(clock_override))
-				.await
-				.unwrap()
-				.with_node_id(sql::Uuid::from(node_id)),
-			Kvs::Speedb,
-		)
-	}
-
-	async fn new_tx(write: TransactionType, lock: LockType) -> Transaction {
-		// Shared node id for one-off transactions
-		// We should delete this, node IDs should be known.
-		let new_tx_uuid = Uuid::parse_str("5877e580-12ac-49e4-95e1-3c407c4887f3").unwrap();
 		let clock = Arc::new(SizedClock::Fake(FakeClock::new(Timestamp::default())));
 		new_ds(new_tx_uuid, clock).await.0.transaction(write, lock).await.unwrap()
 	}

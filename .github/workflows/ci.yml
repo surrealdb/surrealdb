@@ -344,6 +344,35 @@ jobs:
           path: target/llvm-cov/html/
           retention-days: 5
 
+  test-sdk-build:
+    name: Test SDK build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+
+      - name: Checkout sources
+        uses: actions/checkout@v4
+
+      - name: Setup cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get -y update
+
+      - name: Build local
+        working-directory: tests/sdk/local
+        run: cargo build
+
+      - name: Build remote
+        working-directory: tests/sdk/remote
+        run: cargo build
+
   ws-engine:
     name: WebSocket engine
     runs-on: ubuntu-latest
@@ -521,29 +550,6 @@ jobs:
       - name: Test rocksdb engine
         run: cargo make ci-api-integration-rocksdb
 
-  speedb-engine:
-    name: SpeeDB engine
-    runs-on: ubuntu-latest
-    steps:
-      - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          toolchain: stable
-
-      - name: Checkout sources
-        uses: actions/checkout@v4
-
-      - name: Setup cache
-        uses: Swatinem/rust-cache@v2
-        with:
-          save-if: ${{ github.ref == 'refs/heads/main' }}
-
-      - name: Install cargo-make
-        run: cargo install --debug --locked cargo-make
-
-      - name: Test speedb engine
-        run: cargo make ci-api-integration-speedb
-
   tikv-engine:
     name: TiKV engine
     runs-on: ubuntu-latest
@@ -605,7 +611,7 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Setup FoundationDB
-        uses: foundationdb-rs/foundationdb-actions-install@v2.1.0
+        uses: foundationdb-rs/foundationdb-actions-install@v.2.2.0
         with:
           version: "7.1.30"
 
@@ -660,7 +666,6 @@ jobs:
     name: Database Upgrade from previous versions
     runs-on: ubuntu-latest
     steps:
-
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
         with:

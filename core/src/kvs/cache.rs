@@ -1,5 +1,6 @@
 use crate::idg::u32::U32;
 use crate::kvs::kv::Key;
+use crate::sql::statements::DefineAccessStatement;
 use crate::sql::statements::DefineAnalyzerStatement;
 use crate::sql::statements::DefineDatabaseStatement;
 use crate::sql::statements::DefineEventStatement;
@@ -9,9 +10,7 @@ use crate::sql::statements::DefineIndexStatement;
 use crate::sql::statements::DefineModelStatement;
 use crate::sql::statements::DefineNamespaceStatement;
 use crate::sql::statements::DefineParamStatement;
-use crate::sql::statements::DefineScopeStatement;
 use crate::sql::statements::DefineTableStatement;
-use crate::sql::statements::DefineTokenStatement;
 use crate::sql::statements::DefineUserStatement;
 use crate::sql::statements::LiveStatement;
 use std::collections::HashMap;
@@ -31,7 +30,7 @@ pub enum Entry {
 	// Multi definitions
 	Azs(Arc<[DefineAnalyzerStatement]>),
 	Dbs(Arc<[DefineDatabaseStatement]>),
-	Dts(Arc<[DefineTokenStatement]>),
+	Das(Arc<[DefineAccessStatement]>),
 	Dus(Arc<[DefineUserStatement]>),
 	Evs(Arc<[DefineEventStatement]>),
 	Fcs(Arc<[DefineFunctionStatement]>),
@@ -41,11 +40,9 @@ pub enum Entry {
 	Lvs(Arc<[LiveStatement]>),
 	Mls(Arc<[DefineModelStatement]>),
 	Nss(Arc<[DefineNamespaceStatement]>),
-	Nts(Arc<[DefineTokenStatement]>),
+	Nas(Arc<[DefineAccessStatement]>),
 	Nus(Arc<[DefineUserStatement]>),
 	Pas(Arc<[DefineParamStatement]>),
-	Scs(Arc<[DefineScopeStatement]>),
-	Sts(Arc<[DefineTokenStatement]>),
 	Tbs(Arc<[DefineTableStatement]>),
 	// Sequences
 	Seq(U32),
