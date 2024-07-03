@@ -243,6 +243,8 @@ impl<'a> Executor<'a> {
 			let is_stm_live = matches!(stm, Statement::Live(_));
 			// Check if this is a KILL statement
 			let is_stm_kill = matches!(stm, Statement::Kill(_));
+			// Check if this is a RETURN statement
+			let is_stm_output = matches!(stm, Statement::Output(_));
 			// Has this statement returned a value
 			let mut has_returned = false;
 			// Do we skip this statement?
@@ -490,7 +492,7 @@ impl<'a> Executor<'a> {
 			};
 			// Output the response
 			if self.txn.is_some() {
-				if has_returned {
+				if is_stm_output || has_returned {
 					buf.clear();
 					ff_txn = true;
 				}
