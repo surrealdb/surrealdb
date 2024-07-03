@@ -174,7 +174,7 @@ pub async fn get_schema() -> Result<Schema, Box<dyn std::error::Error>> {
 
 								let cond = cond_from_filter(o)?;
 
-								Some(cond.into())
+								Some(cond)
 							}
 							None => None,
 						};
@@ -526,9 +526,9 @@ fn cond_from_filter(filter: &IndexMap<Name, GqlValue>) -> Result<Cond, Error> {
 	for (op_name, val) in filter.iter() {
 		let op = match op_name.as_str() {
 			"eq" => {}
-			_ => return Err(Error::Thrown("Unsupported op".to_string())),
+			op => return Err(Error::Thrown(format!("Unsupported op: {op}"))),
 		};
 		break;
 	}
-	Ok(cond.into())
+	Ok(cond.intox())
 }

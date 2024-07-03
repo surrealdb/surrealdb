@@ -1,5 +1,5 @@
 use surrealdb::sql::{
-	statements::UseStatement, Cond, Idiom, Limit, Order, Orders, Start, Table, Value,
+	self, statements::UseStatement, Cond, Idiom, Limit, Order, Orders, Start, Table, Value,
 };
 
 pub trait IntoExt<T> {
@@ -111,3 +111,11 @@ impl FromExt<Vec<Order>> for Orders {
 		out
 	}
 }
+
+// impl FromExt<sql::Value> for Cond {
+// 	fn from(value: sql::Value) -> Self {
+// 		let mut out = Cond::default();
+// 		out.0 = value;
+// 		out
+// 	}
+// }
