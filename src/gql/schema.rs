@@ -132,7 +132,7 @@ pub async fn get_schema() -> Result<Schema, Box<dyn std::error::Error>> {
 
 						let order = args.get("order");
 
-						let filter = args.get("where");
+						let filter = args.get("filter");
 
 						let orders = match order {
 							Some(GqlValue::Object(o)) => {
