@@ -226,6 +226,7 @@ impl<'a> Executor<'a> {
 		// Initialise array of responses
 		let mut out: Vec<Response> = vec![];
 		let mut live_queries: Vec<TrackedResult> = vec![];
+		// Do we fast-forward a transaction?
 		// Set to true when we encounter a return statement in a transaction
 		let mut ff_txn = false;
 		// Process all statements in query
