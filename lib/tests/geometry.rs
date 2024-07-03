@@ -470,3 +470,225 @@ async fn geometry_inner_access() -> Result<(), Error> {
 	//
 	Ok(())
 }
+
+#[tokio::test]
+async fn geometry_point_with_params() -> Result<(), Error> {
+	let sql = "
+		LET $x = -0.118092;
+		LET $y = 51.509865;
+
+		UPDATE city:london SET centre = {
+			type: 'Point',
+			coordinates: [$x, $y]
+		};
+	";
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 3);
+	//
+	res.remove(0);
+	res.remove(0);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		r#"[
+			{
+				"centre": {
+					"type": "Point",
+					"coordinates": [-0.118092, 51.509865]
+				},
+				"id": r"city:london"
+			}
+		]"#,
+	);
+	assert_eq!(tmp, val);
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn geometry_polygon_with_params() -> Result<(), Error> {
+	let sql = "
+		LET $coords = [
+			[-0.38314819, 51.37692386], [0.1785278, 51.37692386],
+			[0.1785278, 51.61460570], [-0.38314819, 51.61460570],
+			[-0.38314819, 51.37692386]
+		];
+
+		UPDATE city:london SET area = {
+			type: 'Polygon',
+			coordinates: [$coords]
+		};
+	";
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 2);
+	//
+	res.remove(0);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		r#"[
+			{
+				"area": {
+					"type": "Polygon",
+					"coordinates": [
+						[
+							[-0.38314819, 51.37692386],
+							[0.1785278, 51.37692386],
+							[0.1785278, 51.6146057],
+							[-0.38314819, 51.6146057],
+							[-0.38314819, 51.37692386]
+						]
+					]
+				},
+				"id": r"city:london"
+			}
+		]"#,
+	);
+	assert_eq!(tmp, val);
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn geometry_multipolygon_with_params() -> Result<(), Error> {
+	let sql = "
+		LET $line1 = [ [10.0, 11.2], [10.5, 11.9], [10.8, 12.0], [10.0, 11.2] ];
+		LET $polygon2 = [[ [9.0, 11.2], [10.5, 11.9], [10.3, 13.0], [9.0, 11.2] ]];
+
+		UPDATE university:oxford SET area = {
+			type: 'MultiPolygon',
+			coordinates: [
+				[$line1],
+				$polygon2
+			]
+		};
+	";
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 3);
+	//
+	res.remove(0);
+	res.remove(0);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		r#"[
+			{
+				"area": {
+					"type": "MultiPolygon",
+					"coordinates": [
+						[
+							[[10.0, 11.2], [10.5, 11.9], [10.8, 12.0], [10.0, 11.2]]
+						],
+						[
+							[[9.0, 11.2], [10.5, 11.9], [10.3, 13.0], [9.0, 11.2]]
+						]
+					]
+				},
+				"id": r"university:oxford"
+			}
+		]"#,
+	);
+	assert_eq!(tmp, val);
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn geometry_collection_with_params() -> Result<(), Error> {
+	let sql = r#"
+		LET $geometry1 = {
+			type: "MultiPoint",
+			coordinates: [
+				[10.0, 11.2],
+				[10.5, 11.9]
+			],
+		};
+
+		LET $geometry2 = {
+			type: "Polygon",
+			coordinates: [[
+				[-0.38314819, 51.37692386], [0.1785278, 51.37692386],
+				[0.1785278, 51.61460570], [-0.38314819, 51.61460570],
+				[-0.38314819, 51.37692386]
+			]]
+		};
+
+		LET $geometry3 = {
+			type: "MultiPolygon",
+			coordinates: [
+				[
+					[ [10.0, 11.2], [10.5, 11.9], [10.8, 12.0], [10.0, 11.2] ]
+				],
+				[
+					[ [9.0, 11.2], [10.5, 11.9], [10.3, 13.0], [9.0, 11.2] ]
+				]
+			]
+		};
+
+		UPDATE university:oxford SET buildings = {
+			type: "GeometryCollection",
+			geometries: [
+				$geometry1,
+				$geometry2,
+				$geometry3
+			]
+		};
+	"#;
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 4);
+	//
+	res.remove(0);
+	res.remove(0);
+	res.remove(0);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		r#"[
+			{
+				"buildings": {
+					type: "GeometryCollection",
+					geometries: [
+						{
+							type: "MultiPoint",
+							coordinates: [
+								[10.0, 11.2],
+								[10.5, 11.9]
+							],
+						},
+						{
+							type: "Polygon",
+							coordinates: [[
+								[-0.38314819, 51.37692386], [0.1785278, 51.37692386],
+								[0.1785278, 51.61460570], [-0.38314819, 51.61460570],
+								[-0.38314819, 51.37692386]
+							]]
+						},
+						{
+							type: "MultiPolygon",
+							coordinates: [
+								[
+									[ [10.0, 11.2], [10.5, 11.9], [10.8, 12.0], [10.0, 11.2] ]
+								],
+								[
+									[ [9.0, 11.2], [10.5, 11.9], [10.3, 13.0], [9.0, 11.2] ]
+								]
+							]
+						}
+					]
+				},
+				"id": r"university:oxford"
+			}
+		]"#,
+	);
+	assert_eq!(tmp, val);
+	//
+	Ok(())
+}

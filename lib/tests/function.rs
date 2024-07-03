@@ -1648,6 +1648,17 @@ async fn function_parse_geo_centroid() -> Result<(), Error> {
 				[-0.38314819, 51.37692386]
 			]]
 		});
+
+		LET $london = [-0.039, 51.881];
+		LET $param_polygon = {
+			type: "Polygon",
+			coordinates: [[
+				$london,
+				[30.481, 50.683],
+				[25.555, 26.555]
+			]]
+		};
+		RETURN geo::centroid($param_polygon);
 	"#;
 	let mut test = Test::new(sql).await?;
 	//
@@ -1658,6 +1669,21 @@ async fn function_parse_geo_centroid() -> Result<(), Error> {
 			coordinates: [
 				-0.10231019499999999,
 				51.49576478
+			]
+		}",
+	);
+	assert_eq!(tmp, val);
+	//
+	test.next()?;
+	test.next()?;
+	//
+	let tmp = test.next()?.result?;
+	let val = Value::parse(
+		"{
+			type: 'Point',
+			coordinates: [
+				18.665666666666667,
+				43.03966666666666
 			]
 		}",
 	);
@@ -5941,7 +5967,7 @@ pub async fn function_http_get_from_script() -> Result<(), Error> {
 
 #[cfg(not(feature = "http"))]
 #[tokio::test]
-pub async fn function_http_disabled() {
+pub async fn function_http_disabled() -> Result<(), Error> {
 	Test::new(
 		r#"
 	RETURN http::get({});
@@ -5952,7 +5978,7 @@ pub async fn function_http_disabled() {
 	RETURN http::delete({});
 	"#,
 	)
-	.await
+	.await?
 	.expect_errors(&[
 		"Remote HTTP request functions are not enabled",
 		"Remote HTTP request functions are not enabled",
@@ -5960,7 +5986,8 @@ pub async fn function_http_disabled() {
 		"Remote HTTP request functions are not enabled",
 		"Remote HTTP request functions are not enabled",
 		"Remote HTTP request functions are not enabled",
-	]);
+	])?;
+	Ok(())
 }
 
 // Tests for custom defined functions

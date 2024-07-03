@@ -222,14 +222,23 @@ impl Object {
 		opt: &Options,
 		doc: Option<&CursorDoc<'_>>,
 	) -> Result<Value, Error> {
-		let mut x = BTreeMap::new();
+		let mut map = BTreeMap::new();
 		for (k, v) in self.iter() {
 			match v.compute(stk, ctx, opt, doc).await {
-				Ok(v) => x.insert(k.clone(), v),
+				Ok(v) => map.insert(k.clone(), v),
 				Err(e) => return Err(e),
 			};
 		}
-		Ok(Value::Object(Object(x)))
+
+		let value = Value::Object(Object(map));
+
+		// post-compute for Geometry types
+		let value = match Value::to_geometry(&value) {
+			Some(geometry) => Value::Geometry(geometry),
+			None => value,
+		};
+
+		Ok(value)
 	}
 
 	pub(crate) fn is_static(&self) -> bool {
