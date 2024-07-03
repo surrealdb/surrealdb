@@ -1,12 +1,9 @@
-use flume::{Receiver, Sender, TryRecvError};
-use futures::{FutureExt, Stream, StreamExt};
+use futures::{FutureExt, StreamExt};
 use futures_concurrency::stream::Merge;
 use reblessive::TreeStack;
-use std::pin::Pin;
 #[cfg(target_arch = "wasm32")]
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
-use std::task::{Context, Poll};
+use std::sync::Arc;
 use std::time::Duration;
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -137,7 +134,6 @@ fn live_query_change_feed(
 	dbs: Arc<Datastore>,
 ) -> (FutureTask, tokio::sync::oneshot::Sender<()>) {
 	let tick_interval = opt.tick_interval;
-	println!("Creating live query future");
 
 	#[cfg(target_arch = "wasm32")]
 	let completed_status = Arc::new(AtomicBool::new(false));
@@ -148,7 +144,6 @@ fn live_query_change_feed(
 	let (tx, rx) = tokio::sync::oneshot::channel();
 
 	let _fut = spawn_future(async move {
-		println!("Spawned live query future");
 		let mut stack = TreeStack::new();
 
 		let _lifecycle = crate::dbs::LoggingLifecycle::new("live query agent task".to_string());
@@ -156,20 +151,15 @@ fn live_query_change_feed(
 			// TODO verify test fails since return without completion
 			#[cfg(target_arch = "wasm32")]
 			completed_status.store(true, Ordering::Relaxed);
-			println!("Returning live query future");
 			return;
 		}
 		let ticker = interval_ticker(tick_interval).await;
 		let streams = (
 			ticker.map(|i| {
-				println!("Live query agent tick: {:?}", i);
 				trace!("Live query agent tick: {:?}", i);
 				Some(i)
 			}),
-			rx.into_stream().map(|_| {
-				println!("Live streamer tick");
-				None
-			}),
+			rx.into_stream().map(|_| None),
 		);
 		let mut streams = streams.merge();
 
@@ -178,7 +168,6 @@ fn live_query_change_feed(
 			if let Err(e) =
 				stack.enter(|stk| dbs.process_lq_notifications(stk, &opt)).finish().await
 			{
-				println!("Error running node agent tick: {}", e);
 				error!("Error running node agent tick: {}", e);
 				break;
 			}
@@ -227,16 +216,12 @@ mod test {
 
 	#[test_log::test(tokio::test)]
 	pub async fn tasks_complete_channel_closed() {
-		println!("Started test");
 		let opt = EngineOptions::default();
 		let dbs = Arc::new(Datastore::new("memory").await.unwrap());
-		println!("Starting tasks");
 		let val = {
 			let (val, _chans) = start_tasks(&opt, dbs.clone());
-			println!("Started tasks, dropping chans");
 			val
 		};
-		println!("Dropped chans");
 		tokio::time::timeout(Duration::from_secs(10), val.resolve())
 			.await
 			.map_err(|e| format!("Timed out after {e}"))
