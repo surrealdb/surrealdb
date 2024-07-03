@@ -1,9 +1,10 @@
-use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::sql::fetch::Fetchs;
 use crate::sql::value::Value;
+use crate::sql::{Ident, Idiom};
+use crate::{ctx::Context, sql::Part};
 use derive::Store;
 use reblessive::tree::Stk;
 use revision::revisioned;
@@ -39,7 +40,23 @@ impl OutputStatement {
 		// Fetch any
 		if let Some(fetchs) = &self.fetch {
 			for fetch in fetchs.iter() {
-				value.fetch(stk, ctx, opt, fetch).await?;
+				let i: &Idiom;
+				let new_idiom: Idiom;
+				if let Value::Idiom(idiom) = &fetch.0 {
+					i = idiom;
+				} else if let Value::Param(param) = &fetch.0 {
+					let p = param.compute(stk, ctx, opt, None).await?;
+					if let Value::Strand(s) = p {
+						let p: Part = Part::Field(Ident(s.0));
+						new_idiom = Idiom(vec![p]);
+						i = &new_idiom;
+					} else {
+						return Err(Error::Thrown("Parameter should be a string".to_string()));
+					}
+				} else {
+					return Err(Error::Thrown("Invalid field".to_string()));
+				}
+				value.fetch(stk, ctx, opt, i).await?;
 			}
 		}
 		//
