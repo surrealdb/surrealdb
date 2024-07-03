@@ -1,5 +1,7 @@
+use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::collections::HashSet;
+use std::fmt::format;
 
 use async_graphql::dynamic::TypeRef;
 use async_graphql::dynamic::{Enum, Type};
@@ -12,9 +14,11 @@ use async_graphql::Name;
 use async_graphql::Value as GqlValue;
 use serde_json::Number;
 use surrealdb::err::Error;
+use surrealdb::sql;
 use surrealdb::sql::statements::SelectStatement;
 use surrealdb::sql::statements::UseStatement;
-use surrealdb::sql::{Cond, Fields, Start, TableType, Value};
+use surrealdb::sql::Expression;
+use surrealdb::sql::{Cond, Fields, Start, TableType};
 use surrealdb::sql::{Kind, Limit};
 use surrealdb::sql::{Order, Table};
 use surrealdb::sql::{Orders, Values};
@@ -128,7 +132,7 @@ pub async fn get_schema() -> Result<Schema, Box<dyn std::error::Error>> {
 
 						let order = args.get("order");
 
-						let filter = args.get("filter");
+						let filter = args.get("where");
 
 						let orders = match order {
 							Some(GqlValue::Object(o)) => {
@@ -171,7 +175,6 @@ pub async fn get_schema() -> Result<Schema, Box<dyn std::error::Error>> {
 										"value doesn't fit schema, should be rejected by graphql"
 									)
 								};
-
 								let cond = cond_from_filter(o)?;
 
 								Some(cond)
@@ -186,6 +189,7 @@ pub async fn get_schema() -> Result<Schema, Box<dyn std::error::Error>> {
 							tmp.start = start;
 							tmp.limit = limit;
 							tmp.order = orders.map(IntoExt::intox);
+							tmp.cond = cond;
 
 							tmp
 						});
@@ -521,14 +525,134 @@ fn unwrap_type(ty: TypeRef) -> TypeRef {
 }
 
 fn cond_from_filter(filter: &IndexMap<Name, GqlValue>) -> Result<Cond, Error> {
-	let mut cond = Value::None;
+	val_from_filter(filter).map(IntoExt::intox)
+}
 
-	for (op_name, val) in filter.iter() {
-		let op = match op_name.as_str() {
-			"eq" => {}
-			op => return Err(Error::Thrown(format!("Unsupported op: {op}"))),
-		};
-		break;
+fn val_from_filter(filter: &IndexMap<Name, GqlValue>) -> Result<SqlValue, Error> {
+	// for (op_name, val) in filter.iter() {
+	// 	let op = match op_name.as_str() {
+	// 		"eq" => sql::Operator::Equal,
+	// 		op => return Err(Error::Thrown(format!("Unsupported op: {op}"))),
+	// 	};
+
+	// 	let val =
+	// 	break;
+	// }
+	if filter.len() != 1 {
+		return Err(Error::Thrown(format!("Table Filter must have one item")));
 	}
-	Ok(cond.intox())
+
+	let (k, v) = filter.iter().next().unwrap();
+
+	let cond = match k.as_str().to_lowercase().as_str() {
+		"or" => aggregate(v, sql::Operator::Or),
+		"and" => aggregate(v, sql::Operator::And),
+		"not" => negate(v),
+		_ => binop(k.as_str(), v),
+	};
+
+	cond
+}
+
+fn parse_op(name: impl AsRef<str>) -> Result<sql::Operator, Error> {
+	match name.as_ref() {
+		"eq" => Ok(sql::Operator::Equal),
+		op => return Err(Error::Thrown(format!("Unsupported op: {op}"))),
+	}
+}
+
+fn negate(filter: &GqlValue) -> Result<SqlValue, Error> {
+	let obj = filter.as_object().ok_or(Error::Thrown("Value of NOT must be object".to_string()))?;
+	let inner_cond = val_from_filter(obj)?;
+
+	Ok(Expression::Unary {
+		o: sql::Operator::Not,
+		v: inner_cond,
+	}
+	.into())
+}
+
+fn aggregate(filter: &GqlValue, op: sql::Operator) -> Result<SqlValue, Error> {
+	let op_str = match op {
+		sql::Operator::And => "AND",
+		sql::Operator::Or => "OR",
+		_ => panic!("aggregate can only take And or Or"),
+	};
+	let list =
+		filter.as_list().ok_or(Error::Thrown(format!("Value of {op_str} should be a list")))?;
+	let filter_arr = list
+		.iter()
+		.map(|v| v.as_object().map(val_from_filter))
+		.collect::<Option<Result<Vec<SqlValue>, Error>>>()
+		.ok_or(Error::Thrown(format!("List of {op_str} should contain objects")))??;
+
+	let mut iter = filter_arr.into_iter();
+
+	let mut cond = iter
+		.next()
+		.ok_or(Error::Thrown(format!("List of {op_str} should contain at least one object")))?;
+
+	for clause in iter {
+		cond = Expression::Binary {
+			l: clause,
+			o: op.clone(),
+			r: cond,
+		}
+		.into();
+	}
+
+	todo!()
+}
+
+fn binop(field_name: &str, val: &GqlValue) -> Result<SqlValue, Error> {
+	let obj = val.as_object().ok_or(Error::Thrown("Field filter should be object".to_string()))?;
+
+	if obj.len() != 1 {
+		return Err(Error::Thrown(format!("Field Filter must have one item")));
+	}
+
+	let lhs = sql::Value::Idiom(field_name.intox());
+
+	let (k, v) = obj.iter().next().unwrap();
+	let op = parse_op(k)?;
+
+	let rhs = gql_value_to_sql_value(v);
+
+	let expr = sql::Expression::Binary {
+		l: lhs,
+		o: op,
+		r: rhs,
+	};
+
+	Ok(expr.into())
+}
+
+fn gql_value_to_sql_value(val: &GqlValue) -> SqlValue {
+	match val {
+		GqlValue::Null => SqlValue::Null,
+		GqlValue::Number(n) => {
+			if let Some(i) = n.as_i64() {
+				SqlValue::from(i)
+			} else if let Some(f) = n.as_f64() {
+				SqlValue::from(f)
+			} else if let Some(u) = n.as_u64() {
+				SqlValue::from(u)
+			} else {
+				unreachable!("a Number can only be i64, u64 or f64");
+			}
+		}
+		GqlValue::String(s) => SqlValue::from(s.as_str()),
+		GqlValue::Boolean(b) => SqlValue::Bool(*b),
+		GqlValue::Binary(b) => SqlValue::Bytes(b.to_vec().into()),
+		GqlValue::Enum(n) => SqlValue::Strand(n.as_str().into()),
+		GqlValue::List(a) => {
+			SqlValue::Array(a.iter().map(gql_value_to_sql_value).collect::<Vec<SqlValue>>().into())
+		}
+		GqlValue::Object(o) => SqlValue::Object(
+			o.iter()
+				.map(|(k, v)| (k.to_string(), gql_value_to_sql_value(v)))
+				.collect::<BTreeMap<String, SqlValue>>()
+				.into(),
+		),
+	}
 }
