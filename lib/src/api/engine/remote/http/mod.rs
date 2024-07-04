@@ -636,5 +636,22 @@ async fn router(
 			let value = take(true, request).await?;
 			Ok(DbResponse::Other(value))
 		}
+		Method::Run => {
+			let (fn_name, fn_params) = match &params[..] {
+				[Value::Strand(n), Value::Array(p)] => (n, p),
+				_ => unreachable!(),
+			};
+			let args: Vec<(String, Value)> = fn_params
+				.iter()
+				.enumerate()
+				.map(|(i, v)| (format!("p{i}"), v.to_owned()))
+				.collect();
+			let arg_list = (0..args.len()).m
+			let statement = format!("{fn_name}()");
+			let request =
+				client.post(path).headers(headers.clone()).auth(auth).query(todo!()).body(todo!());
+
+			todo!()
+		}
 	}
 }

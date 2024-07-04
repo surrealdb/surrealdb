@@ -17,6 +17,7 @@ mod insert;
 mod invalidate;
 mod merge;
 mod patch;
+mod run;
 mod select;
 mod set;
 mod signin;
@@ -54,6 +55,7 @@ pub use merge::Merge;
 pub use patch::Patch;
 pub use query::Query;
 pub use query::QueryStream;
+pub use run::Run;
 pub use select::Select;
 pub use set::Set;
 pub use signin::Signin;
@@ -80,6 +82,7 @@ use crate::opt::IntoExportDestination;
 use crate::opt::WaitFor;
 use crate::sql::to_value;
 use crate::sql::Value;
+use run::IntoParams;
 use serde::Serialize;
 use std::borrow::Cow;
 use std::marker::PhantomData;
@@ -134,6 +137,7 @@ impl Method {
 			Method::Upsert => "upsert",
 			Method::Use => "use",
 			Method::Version => "version",
+			Method::Run => "run",
 		}
 	}
 }
@@ -1248,6 +1252,16 @@ where
 	pub fn version(&self) -> Version<C> {
 		Version {
 			client: Cow::Borrowed(self),
+		}
+	}
+
+	/// Runs a function
+	///
+	pub fn run(&self, fn_name: impl Into<String>, params: impl IntoParams) -> Run<C> {
+		Run {
+			client: Cow::Borrowed(self),
+			fn_name: fn_name.into(),
+			params: params.into_params(),
 		}
 	}
 

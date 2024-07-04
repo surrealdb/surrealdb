@@ -98,6 +98,8 @@ pub enum Method {
 	Use,
 	/// Queries the version of the server
 	Version,
+	/// Runs a function
+	Run,
 }
 
 /// The database response sent from the router to the caller

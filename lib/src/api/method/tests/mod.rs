@@ -21,6 +21,7 @@ use protocol::Client;
 use protocol::Test;
 use semver::Version;
 use std::ops::Bound;
+use surrealdb_core::sql::Value;
 use types::User;
 use types::USER;
 
@@ -168,6 +169,9 @@ async fn api() {
 
 	// version
 	let _: Version = DB.version().await.unwrap();
+
+	// run
+	let _: Value = DB.run("foo", ()).await.unwrap();
 }
 
 fn send_and_sync(_: impl Send + Sync) {}
