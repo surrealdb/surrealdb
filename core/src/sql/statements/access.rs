@@ -218,7 +218,7 @@ impl AccessStatement {
 				let base = opt.selected_base()?;
 				// Allowed to run?
 				opt.is_allowed(Action::Edit, ResourceKind::Access, &base)?;
-				let value = match base {
+				match base {
 					Base::Ns => {
 						// Claim transaction
 						let mut run = ctx.tx_lock().await;
@@ -353,16 +353,13 @@ impl AccessStatement {
 								.to_string(),
 						})
 					}
-				};
-
-				// Return the result object
-				value
+				}
 			}
 			AccessStatement::List(list) => {
 				let base = opt.selected_base()?;
 				// Allowed to run?
 				opt.is_allowed(Action::View, ResourceKind::Access, &base)?;
-				let value = match base {
+				match base {
 					Base::Ns => {
 						// Claim transaction
 						let mut run = ctx.tx_lock().await;
@@ -397,16 +394,13 @@ impl AccessStatement {
 								.to_string(),
 						})
 					}
-				};
-
-				// Return the result object
-				value
+				}
 			}
 			AccessStatement::Revoke(revoke) => {
 				let base = opt.selected_base()?;
 				// Allowed to run?
 				opt.is_allowed(Action::Edit, ResourceKind::Access, &base)?;
-				let value = match base {
+				match base {
 					Base::Ns => {
 						// Claim transaction
 						let mut run = ctx.tx_lock().await;
@@ -452,10 +446,7 @@ impl AccessStatement {
 								.to_string(),
 						})
 					}
-				};
-
-				// Return the result object
-				value
+				}
 			}
 			AccessStatement::Show(_) => Err(Error::FeatureNotYetImplemented {
 				feature: "Showing an access grant".to_string(),

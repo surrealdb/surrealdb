@@ -368,28 +368,28 @@ impl Parser<'_> {
 				expected!(self, t!("FOR"));
 				expected!(self, t!("USER"));
 				let user = self.next_token_value()?;
-				return Ok(AccessStatement::Grant(AccessStatementGrant {
+				Ok(AccessStatement::Grant(AccessStatementGrant {
 					ac,
 					subject: Some(Subject::User(user)),
-				}));
+				}))
 			}
 			t!("LIST") => {
 				self.pop_peek();
 				// TODO(PR): Implement rest of the syntax.
 				let ac = self.next_token_value()?;
-				return Ok(AccessStatement::List(AccessStatementList {
+				Ok(AccessStatement::List(AccessStatementList {
 					ac,
-				}));
+				}))
 			}
 			t!("REVOKE") => {
 				self.pop_peek();
 				let ac = self.next_token_value()?;
 				expected!(self, t!("GRANT"));
 				let gr = self.next_token_value()?;
-				return Ok(AccessStatement::Revoke(AccessStatementRevoke {
+				Ok(AccessStatement::Revoke(AccessStatementRevoke {
 					ac,
 					gr,
-				}));
+				}))
 			}
 			// TODO(PR): Implement rest of the statements.
 			x => unexpected!(self, x, "an implemented statement"),
