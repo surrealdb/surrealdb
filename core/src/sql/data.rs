@@ -60,7 +60,7 @@ impl Data {
 			Self::SetExpression(v) => match v.iter().find(|f| f.0.is_id()) {
 				Some((_, _, v)) => {
 					// This SET expression has an 'id' field
-					Ok(v.compute_bordered(stk, ctx, opt, None).await?.some())
+					Ok(v.compute(stk, ctx, opt, None).await?.some())
 				}
 				// This SET expression had no 'id' field
 				_ => Ok(None),

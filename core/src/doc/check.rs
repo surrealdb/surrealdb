@@ -27,7 +27,7 @@ impl<'a> Document<'a> {
 		// Check where condition
 		if let Some(cond) = cond {
 			// Check if the expression is truthy
-			if !cond.compute_bordered(stk, ctx, opt, Some(doc)).await?.is_truthy() {
+			if !cond.compute(stk, ctx, opt, Some(doc)).await?.is_truthy() {
 				// Ignore this document
 				return Err(Error::Ignore);
 			}

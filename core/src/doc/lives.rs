@@ -60,7 +60,7 @@ impl<'a> Document<'a> {
 		// Check where condition
 		if let Some(cond) = stm.conds() {
 			// Check if the expression is truthy
-			if !cond.compute_bordered(stk, ctx, opt, Some(doc)).await?.is_truthy() {
+			if !cond.compute(stk, ctx, opt, Some(doc)).await?.is_truthy() {
 				// Ignore this document
 				return Err(Error::Ignore);
 			}
@@ -90,7 +90,7 @@ impl<'a> Document<'a> {
 					// Disable permissions
 					let opt = &opt.new_with_perms(false);
 					// Process the PERMISSION clause
-					if !e.compute_bordered(stk, ctx, opt, Some(doc)).await?.is_truthy() {
+					if !e.compute(stk, ctx, opt, Some(doc)).await?.is_truthy() {
 						return Err(Error::Ignore);
 					}
 				}

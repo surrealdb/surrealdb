@@ -102,7 +102,7 @@ impl<'a> Document<'a> {
 							// What do we do with the initial value on UPDATE and DELETE?
 							if !targeted_force
 								&& act != Action::Create && cond
-								.compute_bordered(stk, ctx, opt, Some(&self.initial))
+								.compute(stk, ctx, opt, Some(&self.initial))
 								.await?
 								.is_truthy()
 							{
@@ -127,7 +127,7 @@ impl<'a> Document<'a> {
 							// What do we do with the current value on CREATE and UPDATE?
 							if act != Action::Delete
 								&& cond
-									.compute_bordered(stk, ctx, opt, Some(&self.current))
+									.compute(stk, ctx, opt, Some(&self.current))
 									.await?
 									.is_truthy()
 							{
@@ -204,7 +204,7 @@ impl<'a> Document<'a> {
 					match &tb.cond {
 						// There is a WHERE clause specified
 						Some(cond) => {
-							match cond.compute_bordered(stk, ctx, opt, Some(&self.current)).await? {
+							match cond.compute(stk, ctx, opt, Some(&self.current)).await? {
 								v if v.is_truthy() => {
 									// Define the statement
 									match act {
@@ -391,29 +391,25 @@ impl<'a> Document<'a> {
 							self.chg(&mut set_ops, &mut del_ops, &fdc.act, idiom, val);
 						}
 						Some("math::sum") => {
-							let val =
-								f.args()[0].compute_bordered(stk, ctx, opt, Some(fdc.doc)).await?;
+							let val = f.args()[0].compute(stk, ctx, opt, Some(fdc.doc)).await?;
 							self.chg(&mut set_ops, &mut del_ops, &fdc.act, idiom, val);
 						}
 						Some("math::min") | Some("time::min") => {
-							let val =
-								f.args()[0].compute_bordered(stk, ctx, opt, Some(fdc.doc)).await?;
+							let val = f.args()[0].compute(stk, ctx, opt, Some(fdc.doc)).await?;
 							self.min(&mut set_ops, &mut del_ops, fdc, field, idiom, val);
 						}
 						Some("math::max") | Some("time::max") => {
-							let val =
-								f.args()[0].compute_bordered(stk, ctx, opt, Some(fdc.doc)).await?;
+							let val = f.args()[0].compute(stk, ctx, opt, Some(fdc.doc)).await?;
 							self.max(&mut set_ops, &mut del_ops, fdc, field, idiom, val);
 						}
 						Some("math::mean") => {
-							let val =
-								f.args()[0].compute_bordered(stk, ctx, opt, Some(fdc.doc)).await?;
+							let val = f.args()[0].compute(stk, ctx, opt, Some(fdc.doc)).await?;
 							self.mean(&mut set_ops, &mut del_ops, &fdc.act, idiom, val);
 						}
 						_ => unreachable!(),
 					},
 					_ => {
-						let val = expr.compute_bordered(stk, ctx, opt, Some(fdc.doc)).await?;
+						let val = expr.compute(stk, ctx, opt, Some(fdc.doc)).await?;
 						self.set(&mut set_ops, idiom, val);
 					}
 				}

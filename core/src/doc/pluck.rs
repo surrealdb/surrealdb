@@ -98,7 +98,7 @@ impl<'a> Document<'a> {
 								ctx.add_value("value", &val);
 								// Process the PERMISSION clause
 								if !e
-									.compute_bordered(stk, &ctx, opt, Some(&self.current))
+									.compute(stk, &ctx, opt, Some(&self.current))
 									.await?
 									.is_truthy()
 								{
