@@ -15,7 +15,6 @@ impl<'a> Document<'a> {
 		stk: &mut Stk,
 		ctx: &Context<'_>,
 		opt: &Options,
-		txn: &Transaction,
 		stm: &Statement<'_>,
 	) -> Result<(), Error> {
 		// Check import
@@ -27,10 +26,11 @@ impl<'a> Document<'a> {
 		// Get the user applied input
 		let inp = self.initial.doc.changed(self.current.doc.as_ref());
 		// Get field definitions
-		let fds = self.fd(opt, txn).await?;
+		// let fds = self.fd(opt, txn).await?;
+		let fds = self.fd(ctx, opt).await?;
 
 		// If a scheaful table check that no excess fields have been provided
-		if self.tb(opt, txn).await?.full {
+		if self.tb(ctx, opt).await?.full {
 			let data = match stm {
 				Statement::Create(v) => v.data.as_ref(),
 				Statement::Update(v) => v.data.as_ref(),
