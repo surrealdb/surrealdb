@@ -1,4 +1,3 @@
-use flume::Sender;
 use futures::StreamExt;
 use reblessive::TreeStack;
 #[cfg(target_arch = "wasm32")]
@@ -110,7 +109,7 @@ fn init(opt: &EngineOptions, dbs: Arc<Datastore>) -> (FutureTask, oneshot::Sende
 						break;
 					}
 				}
-				_ = rx.recv_async() => {
+				_ = rx => {
 					// termination requested
 					break
 				}
@@ -167,7 +166,7 @@ fn live_query_change_feed(
 						break;
 					}
 				}
-				_ = rx.recv_async() => {
+				_ = rx => {
 					// termination requested,
 					 break
 				}
