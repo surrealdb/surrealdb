@@ -613,7 +613,7 @@ mod tests {
 		//
 		let compress = |v: &Vec<u8>| {
 			let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
-			encoder.write_all(&v).unwrap();
+			encoder.write_all(v).unwrap();
 			encoder.finish().unwrap()
 		};
 		// Generate a random vector
