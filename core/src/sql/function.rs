@@ -274,12 +274,7 @@ impl Function {
 					ctx.add_value(name.to_raw(), val.coerce_to(kind)?);
 				}
 				// Run the custom function
-				match stk.run(|stk| val.block.compute(stk, &ctx, opt, doc)).await {
-					Err(Error::Return {
-						value,
-					}) => Ok(value),
-					res => res,
-				}
+				stk.run(|stk| val.block.compute(stk, &ctx, opt, doc)).await
 			}
 			#[allow(unused_variables)]
 			Self::Script(s, x) => {
