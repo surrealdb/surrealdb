@@ -92,7 +92,7 @@ fn init(opt: &EngineOptions, dbs: Arc<Datastore>) -> (FutureTask, oneshot::Sende
 	let ret_status = completed_status.clone();
 
 	// We create a channel that can be streamed that will indicate termination
-	let (tx, rx) = oneshot::channel();
+	let (tx, mut rx) = oneshot::channel();
 
 	let _fut = spawn_future(async move {
 		let _lifecycle = crate::dbs::LoggingLifecycle::new("heartbeat task".to_string());
@@ -109,7 +109,7 @@ fn init(opt: &EngineOptions, dbs: Arc<Datastore>) -> (FutureTask, oneshot::Sende
 						break;
 					}
 				}
-				_ = rx => {
+				_ = &mut rx => {
 					// termination requested
 					break
 				}
@@ -138,7 +138,7 @@ fn live_query_change_feed(
 	let ret_status = completed_status.clone();
 
 	// We create a channel that can be streamed that will indicate termination
-	let (tx, rx) = oneshot::channel();
+	let (tx, mut rx) = oneshot::channel();
 
 	let _fut = spawn_future(async move {
 		let mut stack = TreeStack::new();
@@ -166,7 +166,7 @@ fn live_query_change_feed(
 						break;
 					}
 				}
-				_ = rx => {
+				_ = &mut rx => {
 					// termination requested,
 					 break
 				}
