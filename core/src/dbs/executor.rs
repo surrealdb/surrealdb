@@ -420,13 +420,16 @@ impl<'a> Executor<'a> {
 											.await
 									}
 								};
+								// Check if this is a RETURN statement
+								let can_return = matches!(stm, Statement::Output(_))
+									| matches!(stm, Statement::Value(_));
 								// Catch global timeout
 								let res = match ctx.is_timedout() {
 									true => Err(Error::QueryTimedout),
 									false => match res {
 										Err(Error::Return {
 											value,
-										}) => {
+										}) if can_return => {
 											has_returned = true;
 											Ok(value)
 										}
