@@ -249,8 +249,7 @@ impl<'a> Executor<'a> {
 			let mut has_returned = false;
 			// Do we skip this statement?
 			if ff_txn
-				&& !matches!(stm, Statement::Commit(_))
-				&& !matches!(stm, Statement::Cancel(_))
+				&& !matches!(stm, Statement::Commit(_) | Statement::Cancel(_))
 			{
 				debug!("Skipping statement due to fast forwarded transaction");
 				continue;
