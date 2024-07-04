@@ -214,9 +214,10 @@ pub(crate) async fn run_router(
 		}
 	}
 
+	// Stop maintenance tasks
 	for chan in task_chans {
-		if let Err(e) = chan.send(()) {
-			error!("Error sending shutdown signal to task: {}", e);
+		if let Err(_) = chan.send(()) {
+			error!("Error sending shutdown signal to task");
 		}
 	}
 	tasks.resolve().await.unwrap();

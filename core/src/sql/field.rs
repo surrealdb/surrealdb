@@ -72,6 +72,7 @@ impl InfoStructure for Fields {
 		self.to_string().into()
 	}
 }
+
 impl Fields {
 	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
