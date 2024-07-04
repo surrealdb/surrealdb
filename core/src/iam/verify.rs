@@ -353,6 +353,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 					}
 					_ => return Err(Error::AccessMethodMismatch),
 				},
+				_ => return Err(Error::AccessMethodMismatch),
 			};
 			Ok(())
 		}
