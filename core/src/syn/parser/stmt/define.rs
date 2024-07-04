@@ -309,6 +309,17 @@ impl Parser<'_> {
 							}
 							res.kind = AccessType::Record(ac);
 						}
+						t!("BEARER") => {
+							self.pop_peek();
+							let mut ac = access_type::BearerAccess {
+								..Default::default()
+							};
+							if self.eat(t!("WITH")) {
+								expected!(self, t!("JWT"));
+								ac.jwt = self.parse_jwt()?;
+							}
+							res.kind = AccessType::Bearer(ac);
+						}
 						_ => break,
 					}
 				}

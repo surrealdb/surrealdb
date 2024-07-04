@@ -1,4 +1,5 @@
-//! Stores a DEFINE ACCESS ON NAMESPACE config definition
+//! Stores a DEFINE ACCESS ON NAMESPACE configuration and grants
+pub mod gr;
 use crate::key::error::KeyCategory;
 use crate::key::key_req::KeyRequirements;
 use derive::Key;

@@ -14,9 +14,10 @@ use crate::syn::token::{t, TokenKind};
 use crate::{
 	sql::{
 		statements::{
-			analyze::AnalyzeStatement, BeginStatement, BreakStatement, CancelStatement,
-			CommitStatement, ContinueStatement, ForeachStatement, InfoStatement, OutputStatement,
-			UseStatement,
+			access::AccessStatement, access::AccessStatementGrant, access::AccessStatementList,
+			access::AccessStatementRevoke, access::Subject, analyze::AnalyzeStatement,
+			BeginStatement, BreakStatement, CancelStatement, CommitStatement, ContinueStatement,
+			ForeachStatement, InfoStatement, OutputStatement, UseStatement,
 		},
 		Expression, Operator, Statement, Statements, Value,
 	},
@@ -80,21 +81,21 @@ impl Parser<'_> {
 	fn token_kind_starts_statement(kind: TokenKind) -> bool {
 		matches!(
 			kind,
-			t!("ANALYZE")
-				| t!("BEGIN") | t!("BREAK")
-				| t!("CANCEL") | t!("COMMIT")
-				| t!("CONTINUE") | t!("CREATE")
-				| t!("DEFINE") | t!("DELETE")
-				| t!("FOR") | t!("IF")
-				| t!("INFO") | t!("INSERT")
-				| t!("KILL") | t!("LIVE")
-				| t!("OPTION") | t!("REBUILD")
-				| t!("RETURN") | t!("RELATE")
-				| t!("REMOVE") | t!("SELECT")
-				| t!("LET") | t!("SHOW")
-				| t!("SLEEP") | t!("THROW")
-				| t!("UPDATE") | t!("UPSERT")
-				| t!("USE")
+			t!("ACCESS")
+				| t!("ANALYZE") | t!("BEGIN")
+				| t!("BREAK") | t!("CANCEL")
+				| t!("COMMIT") | t!("CONTINUE")
+				| t!("CREATE") | t!("DEFINE")
+				| t!("DELETE") | t!("FOR")
+				| t!("IF") | t!("INFO")
+				| t!("INSERT") | t!("KILL")
+				| t!("LIVE") | t!("OPTION")
+				| t!("REBUILD") | t!("RETURN")
+				| t!("RELATE") | t!("REMOVE")
+				| t!("SELECT") | t!("LET")
+				| t!("SHOW") | t!("SLEEP")
+				| t!("THROW") | t!("UPDATE")
+				| t!("UPSERT") | t!("USE")
 		)
 	}
 
@@ -107,6 +108,10 @@ impl Parser<'_> {
 	async fn parse_stmt_inner(&mut self, ctx: &mut Stk) -> ParseResult<Statement> {
 		let token = self.peek();
 		match token.kind {
+			t!("ACCESS") => {
+				self.pop_peek();
+				self.parse_access().map(Statement::Access)
+			}
 			t!("ANALYZE") => {
 				self.pop_peek();
 				self.parse_analyze().map(Statement::Analyze)
@@ -350,6 +355,44 @@ impl Parser<'_> {
 				Entry::Value(Value::Expression(x))
 			}
 			_ => Entry::Value(value),
+		}
+	}
+
+	/// Parsers an access statement.
+	fn parse_access(&mut self) -> ParseResult<AccessStatement> {
+		match self.peek_kind() {
+			t!("GRANT") => {
+				self.pop_peek();
+				// TODO(PR): Implement rest of the syntax.
+				let ac = self.next_token_value()?;
+				expected!(self, t!("FOR"));
+				expected!(self, t!("USER"));
+				let user = self.next_token_value()?;
+				return Ok(AccessStatement::Grant(AccessStatementGrant {
+					ac,
+					subject: Some(Subject::User(user)),
+				}));
+			}
+			t!("LIST") => {
+				self.pop_peek();
+				// TODO(PR): Implement rest of the syntax.
+				let ac = self.next_token_value()?;
+				return Ok(AccessStatement::List(AccessStatementList {
+					ac,
+				}));
+			}
+			t!("REVOKE") => {
+				self.pop_peek();
+				let ac = self.next_token_value()?;
+				expected!(self, t!("GRANT"));
+				let gr = self.next_token_value()?;
+				return Ok(AccessStatement::Revoke(AccessStatementRevoke {
+					ac,
+					gr,
+				}));
+			}
+			// TODO(PR): Implement rest of the statements.
+			x => unexpected!(self, x, "an implemented statement"),
 		}
 	}
 

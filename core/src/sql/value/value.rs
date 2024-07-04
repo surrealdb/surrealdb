@@ -528,6 +528,15 @@ impl From<Option<Duration>> for Value {
 	}
 }
 
+impl From<Option<Datetime>> for Value {
+	fn from(v: Option<Datetime>) -> Self {
+		match v {
+			Some(v) => Value::from(v),
+			None => Value::None,
+		}
+	}
+}
+
 impl From<Id> for Value {
 	fn from(v: Id) -> Self {
 		match v {

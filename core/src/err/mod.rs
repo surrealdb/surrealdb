@@ -304,6 +304,12 @@ pub enum Error {
 		value: String,
 	},
 
+	/// The requested namespace access grant does not exist
+	#[error("The namespace access grant '{value}' does not exist")]
+	NgNotFound {
+		value: String,
+	},
+
 	/// The requested namespace login does not exist
 	#[error("The namespace login '{value}' does not exist")]
 	NlNotFound {
@@ -319,6 +325,12 @@ pub enum Error {
 	/// The requested database access method does not exist
 	#[error("The database access method '{value}' does not exist")]
 	DaNotFound {
+		value: String,
+	},
+
+	/// The requested database access grant does not exist
+	#[error("The database access grant '{value}' does not exist")]
+	DgNotFound {
 		value: String,
 	},
 

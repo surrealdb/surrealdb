@@ -12,6 +12,7 @@
 ///
 /// crate::key::namespace::all           /*{ns}
 /// crate::key::namespace::ac            /*{ns}!ac{ac}
+/// crate::key::namespace::ac::gr        /*{ns}!ac{ac}>gr{gr}
 /// crate::key::namespace::db            /*{ns}!db{db}
 /// crate::key::namespace::di            /+{ns id}!di
 /// crate::key::namespace::lg            /*{ns}!lg{lg}
@@ -19,6 +20,7 @@
 ///
 /// crate::key::database::all            /*{ns}*{db}
 /// crate::key::database::ac             /*{ns}*{db}!ac{ac}
+/// crate::key::database::ac::gr         /*{ns}*{db}!ac{ac}>gr{gr}
 /// crate::key::database::az             /*{ns}*{db}!az{az}
 /// crate::key::database::fc             /*{ns}*{db}!fn{fc}
 /// crate::key::database::lg             /*{ns}*{db}!lg{lg}

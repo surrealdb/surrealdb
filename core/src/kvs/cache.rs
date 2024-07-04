@@ -1,5 +1,6 @@
 use crate::idg::u32::U32;
 use crate::kvs::kv::Key;
+use crate::sql::statements::AccessGrant;
 use crate::sql::statements::DefineAccessStatement;
 use crate::sql::statements::DefineAnalyzerStatement;
 use crate::sql::statements::DefineDatabaseStatement;
@@ -28,6 +29,7 @@ pub enum Entry {
 	Pa(Arc<DefineParamStatement>),
 	Tb(Arc<DefineTableStatement>),
 	// Multi definitions
+	Ags(Arc<[AccessGrant]>),
 	Azs(Arc<[DefineAnalyzerStatement]>),
 	Dbs(Arc<[DefineDatabaseStatement]>),
 	Das(Arc<[DefineAccessStatement]>),

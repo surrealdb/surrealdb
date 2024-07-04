@@ -44,6 +44,10 @@ impl DefineAccessStatement {
 				ac.jwt = ac.jwt.redacted();
 				AccessType::Record(ac)
 			}
+			AccessType::Bearer(mut ac) => {
+				ac.jwt = ac.jwt.redacted();
+				AccessType::Bearer(ac)
+			}
 		};
 		das
 	}

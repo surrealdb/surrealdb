@@ -6,12 +6,12 @@ use crate::sql::statements::rebuild::RebuildStatement;
 use crate::sql::{
 	fmt::{Fmt, Pretty},
 	statements::{
-		AnalyzeStatement, BeginStatement, BreakStatement, CancelStatement, CommitStatement,
-		ContinueStatement, CreateStatement, DefineStatement, DeleteStatement, ForeachStatement,
-		IfelseStatement, InfoStatement, InsertStatement, KillStatement, LiveStatement,
-		OptionStatement, OutputStatement, RelateStatement, RemoveStatement, SelectStatement,
-		SetStatement, ShowStatement, SleepStatement, ThrowStatement, UpdateStatement,
-		UpsertStatement, UseStatement,
+		AccessStatement, AnalyzeStatement, BeginStatement, BreakStatement, CancelStatement,
+		CommitStatement, ContinueStatement, CreateStatement, DefineStatement, DeleteStatement,
+		ForeachStatement, IfelseStatement, InfoStatement, InsertStatement, KillStatement,
+		LiveStatement, OptionStatement, OutputStatement, RelateStatement, RemoveStatement,
+		SelectStatement, SetStatement, ShowStatement, SleepStatement, ThrowStatement,
+		UpdateStatement, UpsertStatement, UseStatement,
 	},
 	value::Value,
 };
@@ -55,7 +55,7 @@ impl Display for Statements {
 	}
 }
 
-#[revisioned(revision = 3)]
+#[revisioned(revision = 4)]
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
@@ -91,6 +91,8 @@ pub enum Statement {
 	Rebuild(RebuildStatement),
 	#[revision(start = 3)]
 	Upsert(UpsertStatement),
+	#[revision(start = 4)]
+	Access(AccessStatement),
 }
 
 impl Statement {
@@ -111,6 +113,7 @@ impl Statement {
 	pub(crate) fn writeable(&self) -> bool {
 		match self {
 			Self::Value(v) => v.writeable(),
+			Self::Access(_) => true,
 			Self::Analyze(_) => false,
 			Self::Break(_) => false,
 			Self::Continue(_) => false,
@@ -148,6 +151,7 @@ impl Statement {
 		doc: Option<&CursorDoc<'_>>,
 	) -> Result<Value, Error> {
 		match self {
+			Self::Access(v) => v.compute(ctx, opt, doc).await,
 			Self::Analyze(v) => v.compute(ctx, opt, doc).await,
 			Self::Break(v) => v.compute(ctx, opt, doc).await,
 			Self::Continue(v) => v.compute(ctx, opt, doc).await,
@@ -186,6 +190,7 @@ impl Display for Statement {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
 		match self {
 			Self::Value(v) => write!(Pretty::from(f), "{v}"),
+			Self::Access(v) => write!(Pretty::from(f), "{v}"),
 			Self::Analyze(v) => write!(Pretty::from(f), "{v}"),
 			Self::Begin(v) => write!(Pretty::from(f), "{v}"),
 			Self::Break(v) => write!(Pretty::from(f), "{v}"),

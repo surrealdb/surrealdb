@@ -16,6 +16,7 @@ use super::{Object, Value};
 pub enum AccessType {
 	Record(RecordAccess),
 	Jwt(JwtAccess),
+	Bearer(BearerAccess),
 }
 
 impl Default for AccessType {
@@ -35,8 +36,7 @@ impl AccessType {
 		match self {
 			// The grants for JWT and record access methods are JWT
 			AccessType::Jwt(_) | AccessType::Record(_) => false,
-			// TODO(gguillemas): This arm should be reachable by the bearer access method
-			_ => unreachable!(),
+			AccessType::Bearer(_) => true,
 		}
 	}
 	// Returns whether or not the access method can issue tokens
@@ -188,6 +188,34 @@ impl Default for RecordAccess {
 	}
 }
 
+#[revisioned(revision = 1)]
+#[derive(Debug, Serialize, Deserialize, Hash, Clone, Eq, PartialEq, PartialOrd)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
+pub struct BearerAccess {
+	pub level: BearerAccessLevel,
+	pub jwt: JwtAccess,
+}
+
+impl Default for BearerAccess {
+	fn default() -> Self {
+		Self {
+			level: BearerAccessLevel::User,
+			jwt: JwtAccess {
+				..Default::default()
+			},
+		}
+	}
+}
+
+#[revisioned(revision = 1)]
+#[derive(Debug, Serialize, Deserialize, Hash, Clone, Eq, PartialEq, PartialOrd)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
+#[non_exhaustive]
+pub enum BearerAccessLevel {
+	Record,
+	User,
+}
+
 impl Display for AccessType {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		match self {
@@ -203,6 +231,12 @@ impl Display for AccessType {
 					write!(f, " SIGNIN {v}")?
 				}
 				write!(f, " WITH JWT {}", ac.jwt)?;
+			}
+			AccessType::Bearer(ac) => {
+				f.write_str("BEARER")?;
+				if let BearerAccessLevel::Record = ac.level {
+					f.write_str(" FOR RECORD")?;
+				}
 			}
 		}
 		Ok(())
@@ -226,6 +260,18 @@ impl InfoStructure for AccessType {
 				if let Some(signin) = ac.signin {
 					acc.insert("signin".to_string(), signin.structure());
 				}
+				acc.insert("jwt".to_string(), ac.jwt.structure());
+			}
+			AccessType::Bearer(ac) => {
+				acc.insert("kind".to_string(), "BEARER".into());
+				acc.insert(
+					"level".to_string(),
+					match ac.level {
+						BearerAccessLevel::Record => "RECORD",
+						BearerAccessLevel::User => "USER",
+					}
+					.into(),
+				);
 				acc.insert("jwt".to_string(), ac.jwt.structure());
 			}
 		};

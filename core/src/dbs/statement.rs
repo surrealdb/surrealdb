@@ -9,6 +9,7 @@ use crate::sql::order::Orders;
 use crate::sql::output::Output;
 use crate::sql::split::Splits;
 use crate::sql::start::Start;
+use crate::sql::statements::access::AccessStatement;
 use crate::sql::statements::create::CreateStatement;
 use crate::sql::statements::delete::DeleteStatement;
 use crate::sql::statements::insert::InsertStatement;
@@ -32,6 +33,7 @@ pub(crate) enum Statement<'a> {
 	Relate(&'a RelateStatement),
 	Delete(&'a DeleteStatement),
 	Insert(&'a InsertStatement),
+	Access(&'a AccessStatement),
 }
 
 impl<'a> From<&'a LiveStatement> for Statement<'a> {
@@ -88,6 +90,12 @@ impl<'a> From<&'a InsertStatement> for Statement<'a> {
 	}
 }
 
+impl<'a> From<&'a AccessStatement> for Statement<'a> {
+	fn from(v: &'a AccessStatement) -> Self {
+		Statement::Access(v)
+	}
+}
+
 impl<'a> fmt::Display for Statement<'a> {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		match self {
@@ -100,6 +108,7 @@ impl<'a> fmt::Display for Statement<'a> {
 			Statement::Relate(v) => write!(f, "{v}"),
 			Statement::Delete(v) => write!(f, "{v}"),
 			Statement::Insert(v) => write!(f, "{v}"),
+			Statement::Access(v) => write!(f, "{v}"),
 		}
 	}
 }

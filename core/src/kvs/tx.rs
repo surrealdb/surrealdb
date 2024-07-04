@@ -43,6 +43,7 @@ use crate::sql;
 use crate::sql::paths::EDGE;
 use crate::sql::paths::IN;
 use crate::sql::paths::OUT;
+use crate::sql::statements::access::AccessGrant;
 use crate::sql::thing::Thing;
 use crate::sql::Strand;
 use crate::sql::Value;
@@ -1398,6 +1399,40 @@ impl Transaction {
 		Ok(Arc::from(redacted))
 	}
 
+	/// Retrieve all namespace access grants.
+	pub async fn all_ns_access_grants(
+		&mut self,
+		ns: &str,
+		ac: &str,
+	) -> Result<Arc<[AccessGrant]>, Error> {
+		let key = crate::key::namespace::ac::gr::prefix(ns, ac);
+		Ok(if let Some(e) = self.cache.get(&key) {
+			if let Entry::Ags(v) = e {
+				v
+			} else {
+				unreachable!();
+			}
+		} else {
+			let beg = crate::key::namespace::ac::gr::prefix(ns, ac);
+			let end = crate::key::namespace::ac::gr::suffix(ns, ac);
+			let val = self.getr(beg..end, u32::MAX).await?;
+			let val = val.convert().into();
+			self.cache.set(key, Entry::Ags(Arc::clone(&val)));
+			val
+		})
+	}
+
+	/// Retrieve all namespace access grants in redacted form.
+	pub async fn all_ns_access_grants_redacted(
+		&mut self,
+		ns: &str,
+		ac: &str,
+	) -> Result<Arc<[AccessGrant]>, Error> {
+		let accesses = self.all_ns_access_grants(ns, ac).await?;
+		let redacted: Vec<_> = accesses.iter().map(|statement| statement.redacted()).collect();
+		Ok(Arc::from(redacted))
+	}
+
 	/// Retrieve all database definitions for a specific namespace.
 	pub async fn all_db(&mut self, ns: &str) -> Result<Arc<[DefineDatabaseStatement]>, Error> {
 		let key = crate::key::namespace::db::prefix(ns);
@@ -1471,6 +1506,42 @@ impl Transaction {
 	) -> Result<Arc<[DefineAccessStatement]>, Error> {
 		let accesses = self.all_db_accesses(ns, db).await?;
 		let redacted: Vec<_> = accesses.iter().map(|statement| statement.redacted()).collect();
+		Ok(Arc::from(redacted))
+	}
+
+	/// Retrieve all database access grants.
+	pub async fn all_db_access_grants(
+		&mut self,
+		ns: &str,
+		db: &str,
+		ac: &str,
+	) -> Result<Arc<[AccessGrant]>, Error> {
+		let key = crate::key::database::ac::gr::prefix(ns, db, ac);
+		Ok(if let Some(e) = self.cache.get(&key) {
+			if let Entry::Ags(v) = e {
+				v
+			} else {
+				unreachable!();
+			}
+		} else {
+			let beg = crate::key::database::ac::gr::prefix(ns, db, ac);
+			let end = crate::key::database::ac::gr::suffix(ns, db, ac);
+			let val = self.getr(beg..end, u32::MAX).await?;
+			let val = val.convert().into();
+			self.cache.set(key, Entry::Ags(Arc::clone(&val)));
+			val
+		})
+	}
+
+	/// Retrieve all database access grants in redacted form.
+	pub async fn all_db_access_grants_redacted(
+		&mut self,
+		ns: &str,
+		db: &str,
+		ac: &str,
+	) -> Result<Arc<[AccessGrant]>, Error> {
+		let grants = self.all_db_access_grants(ns, db, ac).await?;
+		let redacted: Vec<_> = grants.iter().map(|statement| statement.redacted()).collect();
 		Ok(Arc::from(redacted))
 	}
 
@@ -1777,6 +1848,20 @@ impl Transaction {
 		Ok(val.into())
 	}
 
+	/// Retrieve a specific namespace access grant.
+	pub async fn get_ns_access_grant(
+		&mut self,
+		ns: &str,
+		ac: &str,
+		gr: &str,
+	) -> Result<AccessGrant, Error> {
+		let key = crate::key::namespace::ac::gr::new(ns, ac, gr);
+		let val = self.get(key).await?.ok_or(Error::NgNotFound {
+			value: gr.to_owned(),
+		})?;
+		Ok(val.into())
+	}
+
 	/// Retrieve a specific database definition.
 	pub async fn get_db(&mut self, ns: &str, db: &str) -> Result<DefineDatabaseStatement, Error> {
 		let key = crate::key::namespace::db::new(ns, db);
@@ -1825,8 +1910,23 @@ impl Transaction {
 		ac: &str,
 	) -> Result<DefineAccessStatement, Error> {
 		let key = crate::key::database::ac::new(ns, db, ac);
-		let val = self.get(key).await?.ok_or(Error::DaNotFound {
+		let val = self.get(key).await?.ok_or(Error::DgNotFound {
 			value: ac.to_owned(),
+		})?;
+		Ok(val.into())
+	}
+
+	/// Retrieve a specific database access grant.
+	pub async fn get_db_access_grant(
+		&mut self,
+		ns: &str,
+		db: &str,
+		ac: &str,
+		gr: &str,
+	) -> Result<AccessGrant, Error> {
+		let key = crate::key::database::ac::gr::new(ns, db, ac, gr);
+		let val = self.get(key).await?.ok_or(Error::DaNotFound {
+			value: gr.to_owned(),
 		})?;
 		Ok(val.into())
 	}
