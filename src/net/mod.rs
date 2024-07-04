@@ -33,6 +33,7 @@ use axum::{middleware, Router};
 use axum_server::tls_rustls::RustlsConfig;
 use axum_server::Handle;
 use http::header;
+use std::env;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
@@ -156,7 +157,7 @@ pub async fn init(ct: CancellationToken) -> Result<(), Error> {
 				.max_age(Duration::from_secs(86400)),
 		);
 
-	let axum_app = Router::new()
+	let mut axum_app = Router::new()
 		// Redirect until we provide a UI
 		.route("/", get(|| async { Redirect::temporary(cnf::APP_ENDPOINT) }))
 		.route("/status", get(|| async {}))
@@ -169,8 +170,12 @@ pub async fn init(ct: CancellationToken) -> Result<(), Error> {
 		.merge(sql::router())
 		.merge(signin::router())
 		.merge(signup::router())
-		.merge(key::router())
-		.merge(gql::router().await);
+		.merge(key::router());
+
+	if env::var("SUREALDB_GRAPHQL") == Ok("true".to_string()) {
+		info!("Starting GraphQL server");
+		axum_app = axum_app.merge(gql::router().await);
+	}
 
 	#[cfg(feature = "ml")]
 	let axum_app = axum_app.merge(ml::router());

@@ -557,6 +557,7 @@ fn val_from_filter(filter: &IndexMap<Name, GqlValue>) -> Result<SqlValue, Error>
 fn parse_op(name: impl AsRef<str>) -> Result<sql::Operator, Error> {
 	match name.as_ref() {
 		"eq" => Ok(sql::Operator::Equal),
+		"ne" => Ok(sql::Operator::NotEqual),
 		op => return Err(Error::Thrown(format!("Unsupported op: {op}"))),
 	}
 }
