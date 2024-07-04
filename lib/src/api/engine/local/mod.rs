@@ -621,7 +621,7 @@ async fn router(
 		}
 		Method::Query => {
 			let response = match param.query {
-				Some((query, mut bindings)) => {
+				Some((query, bindings)) => {
 					let mut vars = vars
 						.iter()
 						.map(|(k, v)| (k.clone(), v.clone().to_core()))
@@ -775,7 +775,7 @@ async fn router(
 						}
 						.into());
 					}
-					let vars = vars.iter().map(|(k, v)| (k.clone(), v.to_core())).collect();
+					let vars = vars.iter().map(|(k, v)| (k.clone(), v.clone().to_core())).collect();
 					kvs.execute(&statements, &*session, Some(vars)).await?
 				}
 			};
@@ -791,20 +791,27 @@ async fn router(
 				[Value::String(key), value] => (mem::take(key), mem::take(value)),
 				_ => unreachable!(),
 			};
-			let var = Some(crate::map! {
-				key.clone() => Value::None,
-				=> vars
-			});
-			match ToCore::from_core(kvs.compute(value.to_core(), &*session, var).await?) {
-				Some(Value::None) => vars.remove(&key),
-				Some(v) => vars.insert(key, v),
-				None => return Err(crate::Error::Api(crate::api::Error::RecievedInvalidValue)),
+
+			let mut new_vars: BTreeMap<String, CoreValue> =
+				vars.iter().map(|(k, v)| (k.clone(), v.clone().to_core())).collect();
+
+			new_vars.insert(key.clone(), CoreValue::None);
+
+			match kvs.compute(value.to_core(), &*session, Some(new_vars)).await? {
+				CoreValue::None => {
+					vars.remove(&key);
+				}
+				v => {
+					let v = ToCore::from_core(v)
+						.ok_or(crate::Error::Api(crate::api::Error::RecievedInvalidValue))?;
+					vars.insert(key, v);
+				}
 			};
 			Ok(DbResponse::Other(Value::None))
 		}
 		Method::Unset => {
 			if let [Value::String(key)] = &params[..1] {
-				vars.remove(&key.0);
+				vars.remove(key);
 			}
 			Ok(DbResponse::Other(Value::None))
 		}

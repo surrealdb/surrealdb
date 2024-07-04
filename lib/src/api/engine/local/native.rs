@@ -207,7 +207,7 @@ pub(crate) fn router(
 						if sender.send(notification).await.is_err() {
 							live_queries.remove(&id);
 							if let Err(error) =
-								super::kill_live_query(&kvs, id, &session, vars.clone()).await
+								super::kill_live_query(&kvs, *id, &session, vars.clone()).await
 							{
 								warn!("Failed to kill live query '{id}'; {error}");
 							}
