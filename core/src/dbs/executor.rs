@@ -421,7 +421,8 @@ impl<'a> Executor<'a> {
 									}
 								};
 								// Check if this is a RETURN statement
-								let can_return = matches!(stm, Statement::Output(_) | Statement::Value(_));
+								let can_return =
+									matches!(stm, Statement::Output(_) | Statement::Value(_));
 								// Catch global timeout
 								let res = match ctx.is_timedout() {
 									true => Err(Error::QueryTimedout),

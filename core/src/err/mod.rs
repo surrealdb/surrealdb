@@ -1011,7 +1011,7 @@ pub enum Error {
 		value: String,
 	},
 
-	/// This error is used for breaking a loop in a foreach statement
+	/// This error is used for breaking execution when a value is returned
 	#[doc(hidden)]
 	#[error("Return statement has been reached")]
 	Return {
