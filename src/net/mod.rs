@@ -24,7 +24,7 @@ use crate::cli::CF;
 use crate::cnf;
 use crate::err::Error;
 use crate::net::signals::graceful_shutdown;
-use crate::rpc::notifications;
+use crate::rpc::{notifications, RpcState};
 use crate::telemetry::metrics::HttpMetricsLayer;
 use axum::response::Redirect;
 use axum::routing::get;
@@ -179,8 +179,15 @@ pub async fn init(ct: CancellationToken) -> Result<(), Error> {
 	let handle = Handle::new();
 	// Setup the graceful shutdown handler
 	let shutdown_handler = graceful_shutdown(ct.clone(), handle.clone());
+
+	let rpc_state = Arc::new(RpcState::new());
+
+	let axum_app = axum_app.with_state(rpc_state);
+
+	let rpc_state_clone = rpc_state.clone();
+
 	// Spawn a task to handle notifications
-	tokio::spawn(async move { notifications(ct.clone()).await });
+	tokio::spawn(async move { notifications(rpc_state_clone, ct.clone()).await });
 	// If a certificate and key are specified then setup TLS
 	if let (Some(cert), Some(key)) = (&opt.crt, &opt.key) {
 		// Configure certificate and private key used by https
