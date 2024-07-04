@@ -35,6 +35,7 @@ keyword! {
 	Ascii => "ASCII",
 	Assert => "ASSERT",
 	At => "AT",
+	Authenticate => "AUTHENTICATE",
 	Bearer => "BEARER",
 	Before => "BEFORE",
 	Begin => "BEGIN",

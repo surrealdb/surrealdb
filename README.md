@@ -38,13 +38,11 @@
     &nbsp;
     <a href="https://status.surrealdb.com"><img src="https://img.shields.io/uptimerobot/ratio/7/m784409192-e472ca350bb615372ededed7?label=cloud%20uptime&style=flat-square"></a>
     &nbsp;
-    <a href="https://hub.docker.com/repository/docker/surrealdb/surrealdb"><img src="https://img.shields.io/docker/pulls/surrealdb/surrealdb?style=flat-square"></a>
-    &nbsp;
     <a href="https://github.com/surrealdb/license"><img src="https://img.shields.io/badge/license-BSL_1.1-00bfff.svg?style=flat-square"></a>
 </p>
 
 <p align="center">
-	<a href="https://hub.docker.com/repository/docker/surrealdb/surrealdb"><img src="https://img.shields.io/docker/pulls/surrealdb/surrealdb?label=docker%20pulls&style=flat-square"></a>
+    <a href="https://hub.docker.com/repository/docker/surrealdb/surrealdb"><img src="https://img.shields.io/docker/pulls/surrealdb/surrealdb?label=docker%20pulls&style=flat-square"></a>
     &nbsp;
     <a href="https://crates.io/crates/surrealdb"><img src="https://img.shields.io/crates/d/surrealdb?color=dca282&label=rust&style=flat-square"></a>
 	&nbsp;

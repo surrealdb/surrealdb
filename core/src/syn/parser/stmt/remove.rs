@@ -20,7 +20,7 @@ use crate::{
 impl Parser<'_> {
 	pub fn parse_remove_stmt(&mut self) -> ParseResult<RemoveStatement> {
 		let res = match self.next().kind {
-			t!("NAMESPACE") => {
+			t!("NAMESPACE") | t!("ns") => {
 				let if_exists = if self.eat(t!("IF")) {
 					expected!(self, t!("EXISTS"));
 					true

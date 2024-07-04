@@ -316,7 +316,7 @@ impl Parser<'_> {
 	/// Expects the next keyword to be a base.
 	pub fn parse_base(&mut self, scope_allowed: bool) -> ParseResult<Base> {
 		match self.next().kind {
-			t!("NAMESPACE") => Ok(Base::Ns),
+			t!("NAMESPACE") | t!("ns") => Ok(Base::Ns),
 			t!("DATABASE") => Ok(Base::Db),
 			t!("ROOT") => Ok(Base::Root),
 			t!("SCOPE") => {

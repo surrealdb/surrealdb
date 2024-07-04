@@ -180,7 +180,7 @@ impl Parser<'_> {
 						return Ok(x);
 					}
 				}
-				Value::Strand(s)
+				return Ok(Value::Strand(s));
 			}
 			t!("+") | t!("-") | TokenKind::Number(_) | TokenKind::Digits | TokenKind::Duration => {
 				self.parse_number_like_prime()?
@@ -648,13 +648,19 @@ impl Parser<'_> {
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::syn::Parse;
+	use crate::syn::{self, Parse};
 
 	#[test]
 	fn subquery_expression_statement() {
 		let sql = "(1 + 2 + 3)";
 		let out = Value::parse(sql);
 		assert_eq!("(1 + 2 + 3)", format!("{}", out))
+	}
+
+	#[test]
+	fn invalid_idiom() {
+		let sql = "'hello'.foo";
+		syn::parse(sql).unwrap_err();
 	}
 
 	#[test]
@@ -724,5 +730,31 @@ mod tests {
 			panic!()
 		};
 		assert_eq!(regex, r"(?i)test/[a-z]+/\s\d\w{1}.*".parse().unwrap());
+	}
+
+	#[test]
+	fn plain_string() {
+		let sql = r#""hello""#;
+		let out = Value::parse(sql);
+		assert_eq!(r#"'hello'"#, format!("{}", out));
+
+		let sql = r#"s"hello""#;
+		let out = Value::parse(sql);
+		assert_eq!(r#"'hello'"#, format!("{}", out));
+
+		let sql = r#"s'hello'"#;
+		let out = Value::parse(sql);
+		assert_eq!(r#"'hello'"#, format!("{}", out));
+	}
+
+	#[test]
+	fn params() {
+		let sql = "$hello";
+		let out = Value::parse(sql);
+		assert_eq!("$hello", format!("{}", out));
+
+		let sql = "$__hello";
+		let out = Value::parse(sql);
+		assert_eq!("$__hello", format!("{}", out));
 	}
 }

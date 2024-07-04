@@ -445,19 +445,23 @@ impl Parser<'_> {
 	/// # Parser State
 	/// Expects `USE` to already be consumed.
 	fn parse_use_stmt(&mut self) -> ParseResult<UseStatement> {
-		let (ns, db) = if self.eat(t!("NAMESPACE")) {
-			let ns = self.next_token_value::<Ident>()?.0;
-			let db = self
-				.eat(t!("DATABASE"))
-				.then(|| self.next_token_value::<Ident>())
-				.transpose()?
-				.map(|x| x.0);
-			(Some(ns), db)
-		} else {
-			expected!(self, t!("DATABASE"));
-
-			let db = self.next_token_value::<Ident>()?.0;
-			(None, Some(db))
+		let (ns, db) = match self.peek_kind() {
+			t!("NAMESPACE") | t!("ns") => {
+				self.pop_peek();
+				let ns = self.next_token_value::<Ident>()?.0;
+				let db = self
+					.eat(t!("DATABASE"))
+					.then(|| self.next_token_value::<Ident>())
+					.transpose()?
+					.map(|x| x.0);
+				(Some(ns), db)
+			}
+			t!("DATABASE") => {
+				self.pop_peek();
+				let db = self.next_token_value::<Ident>()?;
+				(None, Some(db.0))
+			}
+			x => unexpected!(self, x, "either DATABASE or NAMESPACE"),
 		};
 
 		Ok(UseStatement {
@@ -492,7 +496,7 @@ impl Parser<'_> {
 		expected!(self, t!("FOR"));
 		let mut stmt = match self.next().kind {
 			t!("ROOT") => InfoStatement::Root(false),
-			t!("NAMESPACE") => InfoStatement::Ns(false),
+			t!("NAMESPACE") | t!("ns") => InfoStatement::Ns(false),
 			t!("DATABASE") => InfoStatement::Db(false),
 			t!("TABLE") => {
 				let ident = self.next_token_value()?;

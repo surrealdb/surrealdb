@@ -3,12 +3,11 @@ use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::iam::{Action, ResourceKind};
+use crate::sql::fmt::{is_pretty, pretty_indent};
 use crate::sql::statements::info::InfoStructure;
 use crate::sql::statements::DefineTableStatement;
-use crate::sql::{
-	fmt::is_pretty, fmt::pretty_indent, Base, Ident, Idiom, Kind, Permissions, Strand, Value,
-};
-use crate::sql::{Object, Part};
+use crate::sql::Part;
+use crate::sql::{Base, Ident, Idiom, Kind, Permissions, Strand, Value};
 use crate::sql::{Relation, TableType};
 use derive::Store;
 use revision::revisioned;
@@ -210,51 +209,17 @@ impl Display for DefineFieldStatement {
 
 impl InfoStructure for DefineFieldStatement {
 	fn structure(self) -> Value {
-		let Self {
-			name,
-			what,
-			flex,
-			kind,
-			readonly,
-			value,
-			assert,
-			default,
-			permissions,
-			comment,
-			..
-		} = self;
-		let mut acc = Object::default();
-
-		acc.insert("name".to_string(), name.structure());
-
-		acc.insert("what".to_string(), what.structure());
-
-		acc.insert("flex".to_string(), flex.into());
-
-		if let Some(kind) = kind {
-			acc.insert("kind".to_string(), kind.structure());
-		}
-
-		acc.insert("readonly".to_string(), readonly.into());
-
-		if let Some(value) = value {
-			acc.insert("value".to_string(), value.structure());
-		}
-
-		if let Some(assert) = assert {
-			acc.insert("assert".to_string(), assert.structure());
-		}
-
-		if let Some(default) = default {
-			acc.insert("default".to_string(), default.structure());
-		}
-
-		acc.insert("permissions".to_string(), permissions.structure());
-
-		if let Some(comment) = comment {
-			acc.insert("comment".to_string(), comment.into());
-		}
-
-		Value::Object(acc)
+		Value::from(map! {
+			"name".to_string() => self.name.structure(),
+			"what".to_string() => self.what.structure(),
+			"flex".to_string() => self.flex.into(),
+			"kind".to_string(), if let Some(v) = self.kind => v.structure(),
+			"value".to_string(), if let Some(v) = self.value => v.structure(),
+			"assert".to_string(), if let Some(v) = self.assert => v.structure(),
+			"default".to_string(), if let Some(v) = self.default => v.structure(),
+			"readonly".to_string() => self.readonly.into(),
+			"permissions".to_string() => self.permissions.structure(),
+			"comment".to_string(), if let Some(v) = self.comment => v.into(),
+		})
 	}
 }

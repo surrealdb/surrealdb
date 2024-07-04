@@ -58,6 +58,12 @@ impl Display for Values {
 	}
 }
 
+impl InfoStructure for Values {
+	fn structure(self) -> Value {
+		self.into_iter().map(Value::structure).collect::<Vec<_>>().into()
+	}
+}
+
 impl From<&Tables> for Values {
 	fn from(tables: &Tables) -> Self {
 		Self(tables.0.iter().map(|t| Value::Table(t.clone())).collect())

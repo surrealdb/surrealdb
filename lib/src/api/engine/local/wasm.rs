@@ -198,8 +198,8 @@ pub(crate) fn router(
 
 		// Stop maintenance tasks
 		for chan in task_chans {
-			if let Err(e) = chan.send(()) {
-				error!("Error sending shutdown signal to maintenance task: {e}");
+			if let Err(_empty_tuple) = chan.send(()) {
+				error!("Error sending shutdown signal to maintenance task");
 			}
 		}
 	});

@@ -36,7 +36,7 @@ impl fmt::Display for Fetchs {
 
 impl InfoStructure for Fetchs {
 	fn structure(self) -> Value {
-		Value::Array(self.0.into_iter().map(|f| f.0.structure()).collect())
+		self.into_iter().map(Fetch::structure).collect::<Vec<_>>().into()
 	}
 }
 
@@ -56,5 +56,11 @@ impl Deref for Fetch {
 impl Display for Fetch {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
 		Display::fmt(&self.0, f)
+	}
+}
+
+impl InfoStructure for Fetch {
+	fn structure(self) -> Value {
+		self.to_string().into()
 	}
 }
