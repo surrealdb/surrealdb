@@ -93,25 +93,19 @@ macro_rules! into_future {
 						Resource::Edges(edges) => return Err(Error::LiveOnEdges(edges).into()),
 					},
 				}
-				let query = Query {
-					client: client.clone(),
-					query: vec![Ok(vec![Statement::Live(stmt)])],
-					bindings: Ok(Default::default()),
-					register_live_queries: false,
-				};
+				let query = Query::new(
+					client.clone(),
+					vec![Statement::Live(stmt)],
+					Default::default(),
+					false,
+				);
 				let id: Value = query.await?.take(0)?;
 				let rx = register::<Client>(router, id.clone()).await?;
-				Ok(Stream {
+				Ok(Stream::new(
+					Surreal::new_from_router_waiter(client.router.clone(), client.waiter.clone()),
 					id,
-					rx: Some(rx),
-					client: Surreal {
-						router: client.router.clone(),
-						waiter: client.waiter.clone(),
-						engine: PhantomData,
-					},
-					response_type: PhantomData,
-					engine: PhantomData,
-				})
+					Some(rx),
+				))
 			})
 		}
 	};
@@ -136,7 +130,7 @@ impl<'r, Client> IntoFuture for Select<'r, Client, Value, Live>
 where
 	Client: Connection,
 {
-	type Output = Result<Stream<'r, Client, Value>>;
+	type Output = Result<Stream<Value>>;
 	type IntoFuture = Pin<Box<dyn Future<Output = Self::Output> + Send + Sync + 'r>>;
 
 	into_future! {}
@@ -147,7 +141,7 @@ where
 	Client: Connection,
 	R: DeserializeOwned,
 {
-	type Output = Result<Stream<'r, Client, Option<R>>>;
+	type Output = Result<Stream<Option<R>>>;
 	type IntoFuture = Pin<Box<dyn Future<Output = Self::Output> + Send + Sync + 'r>>;
 
 	into_future! {}
@@ -158,7 +152,7 @@ where
 	Client: Connection,
 	R: DeserializeOwned,
 {
-	type Output = Result<Stream<'r, Client, Vec<R>>>;
+	type Output = Result<Stream<Vec<R>>>;
 	type IntoFuture = Pin<Box<dyn Future<Output = Self::Output> + Send + Sync + 'r>>;
 
 	into_future! {}
@@ -167,14 +161,28 @@ where
 /// A stream of live query notifications
 #[derive(Debug)]
 #[must_use = "streams do nothing unless you poll them"]
-pub struct Stream<'r, C: Connection, R> {
+pub struct Stream<R> {
 	pub(crate) client: Surreal<Any>,
 	// We no longer need the lifetime and the type parameter
 	// Leaving them in for backwards compatibility
-	pub(crate) engine: PhantomData<&'r C>,
 	pub(crate) id: Value,
 	pub(crate) rx: Option<Receiver<dbs::Notification>>,
 	pub(crate) response_type: PhantomData<R>,
+}
+
+impl<R> Stream<R> {
+	pub(crate) fn new(
+		client: Surreal<Any>,
+		id: Value,
+		rx: Option<Receiver<dbs::Notification>>,
+	) -> Self {
+		Self {
+			id,
+			rx,
+			client,
+			response_type: PhantomData,
+		}
+	}
 }
 
 macro_rules! poll_next {
@@ -192,10 +200,7 @@ macro_rules! poll_next {
 	};
 }
 
-impl<C> futures::Stream for Stream<'_, C, Value>
-where
-	C: Connection,
-{
+impl futures::Stream for Stream<Value> {
 	type Item = Notification<Value>;
 
 	poll_next! {
@@ -222,9 +227,8 @@ macro_rules! poll_next_and_convert {
 	};
 }
 
-impl<C, R> futures::Stream for Stream<'_, C, Option<R>>
+impl<R> futures::Stream for Stream<Option<R>>
 where
-	C: Connection,
 	R: DeserializeOwned + Unpin,
 {
 	type Item = Result<Notification<R>>;
@@ -232,9 +236,8 @@ where
 	poll_next_and_convert! {}
 }
 
-impl<C, R> futures::Stream for Stream<'_, C, Vec<R>>
+impl<R> futures::Stream for Stream<Vec<R>>
 where
-	C: Connection,
 	R: DeserializeOwned + Unpin,
 {
 	type Item = Result<Notification<R>>;
@@ -242,9 +245,8 @@ where
 	poll_next_and_convert! {}
 }
 
-impl<C, R> futures::Stream for Stream<'_, C, Notification<R>>
+impl<R> futures::Stream for Stream<Notification<R>>
 where
-	C: Connection,
 	R: DeserializeOwned + Unpin,
 {
 	type Item = Result<Notification<R>>;
@@ -265,10 +267,7 @@ where
 	});
 }
 
-impl<Client, R> Drop for Stream<'_, Client, R>
-where
-	Client: Connection,
-{
+impl<R> Drop for Stream<R> {
 	/// Close the live query stream
 	///
 	/// This kills the live query process responsible for this stream.

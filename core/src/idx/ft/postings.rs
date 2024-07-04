@@ -10,6 +10,7 @@ use crate::kvs::{Key, Transaction, TransactionType};
 pub(super) type TermFrequency = u64;
 
 pub(super) struct Postings {
+	ixs: IndexStores,
 	state_key: Key,
 	index_key_base: IndexKeyBase,
 	btree: BTree<TrieKeys>,
@@ -40,6 +41,7 @@ impl Postings {
 			)
 			.await;
 		Ok(Self {
+			ixs: ixs.clone(),
 			state_key,
 			index_key_base,
 			btree: BTree::new(state),
@@ -83,9 +85,10 @@ impl Postings {
 	}
 
 	pub(super) async fn finish(&mut self, tx: &mut Transaction) -> Result<(), Error> {
-		if self.store.finish(tx).await? {
+		if let Some(new_cache) = self.store.finish(tx).await? {
 			let state = self.btree.inc_generation();
 			tx.set(self.state_key.clone(), state.try_to_val()?).await?;
+			self.ixs.advance_cache_btree_trie(new_cache);
 		}
 		Ok(())
 	}

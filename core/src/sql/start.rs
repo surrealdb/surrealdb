@@ -1,5 +1,5 @@
 use crate::ctx::Context;
-use crate::dbs::{Options, Transaction};
+use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::sql::number::Number;
@@ -21,10 +21,9 @@ impl Start {
 		stk: &mut Stk,
 		ctx: &Context<'_>,
 		opt: &Options,
-		txn: &Transaction,
 		doc: Option<&CursorDoc<'_>>,
 	) -> Result<usize, Error> {
-		match self.0.compute(stk, ctx, opt, txn, doc).await {
+		match self.0.compute(stk, ctx, opt, doc).await {
 			// This is a valid starting number
 			Ok(Value::Number(Number::Int(v))) if v >= 0 => Ok(v as usize),
 			// An invalid value was specified

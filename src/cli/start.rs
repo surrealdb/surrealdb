@@ -15,6 +15,7 @@ use std::path::PathBuf;
 use std::time::Duration;
 use surrealdb::engine::any::IntoEndpoint;
 use surrealdb::engine::tasks::start_tasks;
+use surrealdb::options::EngineOptions;
 use tokio_util::sync::CancellationToken;
 
 #[derive(Args, Debug)]
@@ -92,11 +93,14 @@ pub struct StartCommandArguments {
 	#[arg(env = "SURREAL_CLIENT_IP", long)]
 	#[arg(default_value = "socket", value_enum)]
 	client_ip: ClientIp,
-	#[arg(help = "The hostname or ip address to listen for connections on")]
+	#[arg(help = "The hostname or IP address to listen for connections on")]
 	#[arg(env = "SURREAL_BIND", short = 'b', long = "bind")]
-	#[arg(default_value = "0.0.0.0:8000")]
+	#[arg(default_value = "127.0.0.1:8000")]
 	listen_addresses: Vec<SocketAddr>,
-
+	#[arg(help = "Whether to suppress the server name and version headers")]
+	#[arg(env = "SURREAL_NO_IDENTIFICATION_HEADERS", long)]
+	#[arg(default_value_t = false)]
+	no_identification_headers: bool,
 	//
 	// Database options
 	//
@@ -142,6 +146,7 @@ pub async fn init(
 		log,
 		tick_interval,
 		no_banner,
+		no_identification_headers,
 		..
 	}: StartCommandArguments,
 ) -> Result<(), Error> {
@@ -170,10 +175,10 @@ pub async fn init(
 		path,
 		user,
 		pass,
-		tick_interval,
+		no_identification_headers,
 		crt: web.as_ref().and_then(|x| x.web_crt.clone()),
 		key: web.as_ref().and_then(|x| x.web_key.clone()),
-		engine: None,
+		engine: Some(EngineOptions::default().with_tick_interval(tick_interval)),
 	});
 	// This is the cancellation token propagated down to
 	// all the async functions that needs to be stopped gracefully.
@@ -191,8 +196,8 @@ pub async fn init(
 	net::init(ct.clone()).await?;
 	// Shutdown and stop closed tasks
 	task_chans.into_iter().for_each(|chan| {
-		if let Err(e) = chan.send(()) {
-			error!("Failed to send shutdown signal to task: {}", e);
+		if let Err(_empty_tuple) = chan.send(()) {
+			error!("Failed to send shutdown signal to task");
 		}
 	});
 	ct.cancel();

@@ -14,7 +14,6 @@ pub(crate) fn path_valid(v: &str) -> Result<String, String> {
 		"memory" => Ok(v.to_string()),
 		v if v.starts_with("file:") => Ok(v.to_string()),
 		v if v.starts_with("rocksdb:") => Ok(v.to_string()),
-		v if v.starts_with("speedb:") => Ok(v.to_string()),
 		v if v.starts_with("surrealkv:") => Ok(v.to_string()),
 		v if v.starts_with("tikv:") => Ok(v.to_string()),
 		v if v.starts_with("fdb:") => Ok(v.to_string()),
@@ -38,13 +37,6 @@ pub(crate) fn file_exists(path: &str) -> Result<PathBuf, String> {
 	Ok(path)
 }
 
-#[cfg(any(
-	feature = "storage-surrealkv",
-	feature = "storage-rocksdb",
-	feature = "storage-fdb",
-	feature = "storage-tikv",
-	feature = "storage-speedb"
-))]
 pub(crate) fn dir_exists(path: &str) -> Result<PathBuf, String> {
 	let path = path_exists(path)?;
 	if !path.is_dir() {
@@ -66,8 +58,8 @@ pub(crate) fn endpoint_valid(v: &str) -> Result<String, String> {
 
 	let scheme = split_endpoint(v).0;
 	match scheme {
-		"http" | "https" | "ws" | "wss" | "fdb" | "mem" | "rocksdb" | "speedb" | "surrealkv"
-		| "file" | "tikv" => Ok(v.to_string()),
+		"http" | "https" | "ws" | "wss" | "fdb" | "mem" | "rocksdb" | "surrealkv" | "file"
+		| "tikv" => Ok(v.to_string()),
 		_ => Err(String::from("Provide a valid database connection string")),
 	}
 }
@@ -93,7 +85,7 @@ pub(crate) fn net_targets(value: &str) -> Result<Targets<NetTarget>, String> {
 	let mut result = HashSet::new();
 
 	for target in value.split(',').filter(|s| !s.is_empty()) {
-		result.insert(NetTarget::from_str(target)?);
+		result.insert(NetTarget::from_str(target).map_err(|e| e.to_string())?);
 	}
 
 	Ok(Targets::Some(result))
@@ -107,7 +99,7 @@ pub(crate) fn func_targets(value: &str) -> Result<Targets<FuncTarget>, String> {
 	let mut result = HashSet::new();
 
 	for target in value.split(',').filter(|s| !s.is_empty()) {
-		result.insert(FuncTarget::from_str(target)?);
+		result.insert(FuncTarget::from_str(target).map_err(|e| e.to_string())?);
 	}
 
 	Ok(Targets::Some(result))

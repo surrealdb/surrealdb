@@ -1,5 +1,7 @@
 //! The full type definitions for the SurrealQL query language
 
+pub(crate) mod access;
+pub(crate) mod access_type;
 pub(crate) mod algorithm;
 #[cfg(feature = "arbitrary")]
 pub(crate) mod arbitrary;
@@ -62,6 +64,7 @@ pub(crate) mod table_type;
 pub(crate) mod thing;
 pub(crate) mod timeout;
 pub(crate) mod tokenizer;
+pub(crate) mod user;
 pub(crate) mod uuid;
 pub(crate) mod value;
 pub(crate) mod version;
@@ -74,6 +77,9 @@ pub mod index;
 pub mod serde;
 pub mod statements;
 
+pub use self::access::Access;
+pub use self::access::Accesses;
+pub use self::access_type::{AccessType, JwtAccess, RecordAccess};
 pub use self::algorithm::Algorithm;
 pub use self::array::Array;
 pub use self::base::Base;
@@ -94,6 +100,7 @@ pub use self::fetch::Fetch;
 pub use self::fetch::Fetchs;
 pub use self::field::Field;
 pub use self::field::Fields;
+pub use self::filter::Filter;
 pub use self::function::Function;
 pub use self::future::Future;
 pub use self::geometry::Geometry;

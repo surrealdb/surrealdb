@@ -38,7 +38,6 @@ impl LiveQueryTracker {
 		lq_index_key: &LqEntry,
 		live_query_vs: Versionstamp,
 	) -> Result<(), &'static str> {
-		#[cfg(debug_assertions)]
 		// See if we are already tracking the query
 		let k = lq_index_key.as_key();
 		if self.local_live_queries.contains_key(&k) {
@@ -293,21 +292,18 @@ mod test {
 		tracker.register_live_query(&lq1, DEFAULT_WATERMARK).unwrap();
 
 		// Check watermark is "default"
-		let selector = {
-			let wms = tracker.get_watermarks();
-			assert_eq!(wms.len(), 1);
-			let (selector, watermark) = wms.iter().next().unwrap();
-			assert_eq!(
-				selector,
-				&LqSelector {
-					ns: NS.to_string(),
-					db: DB.to_string(),
-					tb: TB.to_string(),
-				}
-			);
-			assert_eq!(watermark, &DEFAULT_WATERMARK);
-			selector.clone()
-		};
+		let wms = tracker.get_watermarks();
+		assert_eq!(wms.len(), 1);
+		let (selector, watermark) = wms.iter().next().unwrap();
+		assert_eq!(
+			selector,
+			&LqSelector {
+				ns: NS.to_string(),
+				db: DB.to_string(),
+				tb: TB.to_string(),
+			}
+		);
+		assert_eq!(watermark, &DEFAULT_WATERMARK);
 
 		// Progress the watermark
 		let progressed_watermark = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9];

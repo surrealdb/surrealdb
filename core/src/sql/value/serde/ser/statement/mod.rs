@@ -14,6 +14,7 @@ pub mod kill;
 pub mod live;
 pub mod option;
 pub mod output;
+pub mod rebuild;
 pub mod relate;
 pub mod remove;
 pub mod select;
@@ -22,6 +23,7 @@ pub mod show;
 pub mod sleep;
 pub mod throw;
 pub mod update;
+pub mod upsert;
 pub mod vec;
 pub mod yuse;
 
@@ -76,6 +78,7 @@ impl ser::Serializer for Serializer {
 			"Live" => Ok(Statement::Live(value.serialize(live::Serializer.wrap())?)),
 			"Option" => Ok(Statement::Option(value.serialize(option::Serializer.wrap())?)),
 			"Output" => Ok(Statement::Output(value.serialize(output::Serializer.wrap())?)),
+			"Rebuild" => Ok(Statement::Rebuild(value.serialize(rebuild::Serializer.wrap())?)),
 			"Relate" => Ok(Statement::Relate(value.serialize(relate::Serializer.wrap())?)),
 			"Remove" => Ok(Statement::Remove(value.serialize(remove::Serializer.wrap())?)),
 			"Select" => Ok(Statement::Select(value.serialize(select::Serializer.wrap())?)),
@@ -84,6 +87,7 @@ impl ser::Serializer for Serializer {
 			"Sleep" => Ok(Statement::Sleep(value.serialize(sleep::Serializer.wrap())?)),
 			"Throw" => Ok(Statement::Throw(value.serialize(throw::Serializer.wrap())?)),
 			"Update" => Ok(Statement::Update(value.serialize(update::Serializer.wrap())?)),
+			"Upsert" => Ok(Statement::Upsert(value.serialize(upsert::Serializer.wrap())?)),
 			"Use" => Ok(Statement::Use(value.serialize(yuse::Serializer.wrap())?)),
 			variant => {
 				Err(Error::custom(format!("unexpected newtype variant `{name}::{variant}`")))
@@ -246,6 +250,13 @@ mod tests {
 	#[test]
 	fn update() {
 		let statement = Statement::Update(Default::default());
+		let serialized = statement.serialize(Serializer.wrap()).unwrap();
+		assert_eq!(statement, serialized);
+	}
+
+	#[test]
+	fn upsert() {
+		let statement = Statement::Upsert(Default::default());
 		let serialized = statement.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(statement, serialized);
 	}

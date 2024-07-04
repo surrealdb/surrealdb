@@ -13,19 +13,22 @@ impl Parser<'_> {
 		&mut self,
 		ctx: &mut Stk,
 	) -> ParseResult<InsertStatement> {
+		let relation = self.eat(t!("RELATION"));
 		let ignore = self.eat(t!("IGNORE"));
-		expected!(self, t!("INTO"));
-		let next = self.next();
-		// TODO: Explain that more complicated expressions are not allowed here.
-		let into = match next.kind {
-			t!("$param") => {
-				let param = self.token_value(next)?;
-				Value::Param(param)
-			}
-			_ => {
-				let table = self.token_value(next)?;
-				Value::Table(table)
-			}
+		let into = if self.eat(t!("INTO")) {
+			let r = match self.peek().kind {
+				t!("$param") => {
+					let param = self.next_token_value()?;
+					Value::Param(param)
+				}
+				_ => {
+					let table = self.next_token_value()?;
+					Value::Table(table)
+				}
+			};
+			Some(r)
+		} else {
+			None
 		};
 
 		let data = match self.peek_kind() {
@@ -82,6 +85,7 @@ impl Parser<'_> {
 			output,
 			timeout,
 			parallel,
+			relation,
 		})
 	}
 

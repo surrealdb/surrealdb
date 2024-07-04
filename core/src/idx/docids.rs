@@ -10,7 +10,8 @@ use serde::{Deserialize, Serialize};
 
 pub type DocId = u64;
 
-pub(crate) struct DocIds {
+pub struct DocIds {
+	ixs: IndexStores,
 	state_key: Key,
 	index_key_base: IndexKeyBase,
 	btree: BTree<TrieKeys>,
@@ -20,7 +21,7 @@ pub(crate) struct DocIds {
 }
 
 impl DocIds {
-	pub(in crate::idx) async fn new(
+	pub async fn new(
 		ixs: &IndexStores,
 		tx: &mut Transaction,
 		tt: TransactionType,
@@ -43,6 +44,7 @@ impl DocIds {
 			)
 			.await;
 		Ok(Self {
+			ixs: ixs.clone(),
 			state_key,
 			index_key_base: ikb,
 			btree: BTree::new(state.btree),
@@ -136,7 +138,7 @@ impl DocIds {
 	}
 
 	pub(in crate::idx) async fn finish(&mut self, tx: &mut Transaction) -> Result<(), Error> {
-		if self.store.finish(tx).await? {
+		if let Some(new_cache) = self.store.finish(tx).await? {
 			let btree = self.btree.inc_generation().clone();
 			let state = State {
 				btree,
@@ -144,6 +146,7 @@ impl DocIds {
 				next_doc_id: self.next_doc_id,
 			};
 			tx.set(self.state_key.clone(), state.try_to_val()?).await?;
+			self.ixs.advance_cache_btree_trie(new_cache);
 		}
 		Ok(())
 	}

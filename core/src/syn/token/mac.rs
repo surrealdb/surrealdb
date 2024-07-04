@@ -1,5 +1,8 @@
 /// A shorthand for token kinds.
 macro_rules! t {
+	(" ") => {
+		$crate::syn::token::TokenKind::WhiteSpace
+	};
 	("invalid") => {
 		$crate::syn::token::TokenKind::Invalid
 	};
@@ -26,25 +29,78 @@ macro_rules! t {
 	};
 
 	("r\"") => {
-		$crate::syn::token::TokenKind::OpenRecordString {
-			double: true,
-		}
+		$crate::syn::token::TokenKind::Qoute($crate::syn::token::QouteKind::RecordIdDouble)
 	};
 	("r'") => {
-		$crate::syn::token::TokenKind::OpenRecordString {
-			double: false,
-		}
+		$crate::syn::token::TokenKind::Qoute($crate::syn::token::QouteKind::RecordId)
 	};
-
+	("u\"") => {
+		$crate::syn::token::TokenKind::Qoute($crate::syn::token::QouteKind::UuidDouble)
+	};
+	("u'") => {
+		$crate::syn::token::TokenKind::Qoute($crate::syn::token::QouteKind::Uuid)
+	};
+	("d\"") => {
+		$crate::syn::token::TokenKind::Qoute($crate::syn::token::QouteKind::DateTimeDouble)
+	};
+	("d'") => {
+		$crate::syn::token::TokenKind::Qoute($crate::syn::token::QouteKind::DateTime)
+	};
+	("\"") => {
+		$crate::syn::token::TokenKind::Qoute($crate::syn::token::QouteKind::PlainDouble)
+	};
+	("'") => {
+		$crate::syn::token::TokenKind::Qoute($crate::syn::token::QouteKind::Plain)
+	};
 	("\"r") => {
-		$crate::syn::token::TokenKind::CloseRecordString {
+		$crate::syn::token::TokenKind::CloseString {
 			double: true,
 		}
 	};
 	("'r") => {
-		$crate::syn::token::TokenKind::CloseRecordString {
+		$crate::syn::token::TokenKind::CloseString {
 			double: false,
 		}
+	};
+
+	("ns") => {
+		$crate::syn::token::TokenKind::DurationSuffix($crate::syn::token::DurationSuffix::Nano)
+	};
+	("us") => {
+		$crate::syn::token::TokenKind::DurationSuffix($crate::syn::token::DurationSuffix::Micro)
+	};
+	("µs") => {
+		$crate::syn::token::TokenKind::DurationSuffix(
+			$crate::syn::token::DurationSuffix::MicroUnicode,
+		)
+	};
+	("ms") => {
+		$crate::syn::token::TokenKind::DurationSuffix($crate::syn::token::DurationSuffix::Milli)
+	};
+	("s") => {
+		$crate::syn::token::TokenKind::DurationSuffix($crate::syn::token::DurationSuffix::Second)
+	};
+	("m") => {
+		$crate::syn::token::TokenKind::DurationSuffix($crate::syn::token::DurationSuffix::Minute)
+	};
+	("h") => {
+		$crate::syn::token::TokenKind::DurationSuffix($crate::syn::token::DurationSuffix::Hour)
+	};
+	("d") => {
+		$crate::syn::token::TokenKind::DurationSuffix($crate::syn::token::DurationSuffix::Day)
+	};
+	("w") => {
+		$crate::syn::token::TokenKind::DurationSuffix($crate::syn::token::DurationSuffix::Week)
+	};
+	("y") => {
+		$crate::syn::token::TokenKind::DurationSuffix($crate::syn::token::DurationSuffix::Year)
+	};
+
+	("f") => {
+		$crate::syn::token::TokenKind::NumberSuffix($crate::syn::token::NumberSuffix::Float)
+	};
+	("dec") => {
+		$crate::syn::token::TokenKind::NumberSuffix($crate::syn::token::NumberSuffix::Decimal)
 	};
 
 	("<") => {
@@ -104,6 +160,9 @@ macro_rules! t {
 	("+") => {
 		$crate::syn::token::TokenKind::Operator($crate::syn::token::Operator::Add)
 	};
+	("%") => {
+		$crate::syn::token::TokenKind::Operator($crate::syn::token::Operator::Modulo)
+	};
 	("-") => {
 		$crate::syn::token::TokenKind::Operator($crate::syn::token::Operator::Subtract)
 	};
@@ -143,9 +202,6 @@ macro_rules! t {
 
 	("$param") => {
 		$crate::syn::token::TokenKind::Parameter
-	};
-	("123") => {
-		$crate::syn::token::TokenKind::Number(_)
 	};
 
 	("!") => {
@@ -303,6 +359,23 @@ macro_rules! t {
 	};
 	("PEARSON") => {
 		$crate::syn::token::TokenKind::Distance($crate::syn::token::DistanceKind::Pearson)
+	};
+
+	// VectorType
+	("F64") => {
+		$crate::syn::token::TokenKind::VectorType($crate::syn::token::VectorTypeKind::F64)
+	};
+	("F32") => {
+		$crate::syn::token::TokenKind::VectorType($crate::syn::token::VectorTypeKind::F32)
+	};
+	("I64") => {
+		$crate::syn::token::TokenKind::VectorType($crate::syn::token::VectorTypeKind::I64)
+	};
+	("I32") => {
+		$crate::syn::token::TokenKind::VectorType($crate::syn::token::VectorTypeKind::I32)
+	};
+	("I16") => {
+		$crate::syn::token::TokenKind::VectorType($crate::syn::token::VectorTypeKind::I16)
 	};
 
 	($t:tt) => {

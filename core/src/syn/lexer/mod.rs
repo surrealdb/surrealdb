@@ -1,13 +1,10 @@
-use crate::{
-	sql::{Datetime, Duration, Regex, Uuid},
-	syn::token::{Span, Token, TokenKind},
-};
+use std::time::Duration;
+
+use chrono::{DateTime, Utc};
 use thiserror::Error;
 
 mod byte;
 mod char;
-mod datetime;
-mod duration;
 mod ident;
 mod js;
 pub mod keywords;
@@ -15,12 +12,14 @@ mod number;
 mod reader;
 mod strand;
 mod unicode;
-mod uuid;
 
 #[cfg(test)]
 mod test;
 
 pub use reader::{BytesReader, CharError};
+use uuid::Uuid;
+
+use crate::syn::token::{Span, Token, TokenKind};
 
 /// A error returned by the lexer when an invalid token is encountered.
 ///
@@ -39,16 +38,6 @@ pub enum Error {
 	InvalidUtf8,
 	#[error("expected next character to be '{0}'")]
 	ExpectedEnd(char),
-	#[error("failed to lex date-time, {0}")]
-	DateTime(#[from] datetime::Error),
-	#[error("failed to lex uuid, {0}")]
-	Uuid(#[from] uuid::Error),
-	#[error("failed to lex duration, {0}")]
-	Duration(#[from] duration::Error),
-	#[error("failed to lex number, {0}")]
-	Number(#[from] number::Error),
-	#[error("failed to parse regex, {0}")]
-	Regex(regex::Error),
 }
 
 impl From<CharError> for Error {
@@ -78,8 +67,6 @@ pub struct Lexer<'a> {
 	pub reader: BytesReader<'a>,
 	/// The one past the last character of the previous token.
 	last_offset: u32,
-	/// The span of whitespace if it was read between two tokens.
-	whitespace_span: Option<Span>,
 	/// A buffer used to build the value of tokens which can't be read straight from the source.
 	/// like for example strings with escape characters.
 	scratch: String,
@@ -99,8 +86,7 @@ pub struct Lexer<'a> {
 	// actual number value to when the parser can decide on a format.
 	pub string: Option<String>,
 	pub duration: Option<Duration>,
-	pub datetime: Option<Datetime>,
-	pub regex: Option<Regex>,
+	pub datetime: Option<DateTime<Utc>>,
 	pub uuid: Option<Uuid>,
 	pub error: Option<Error>,
 }
@@ -115,14 +101,12 @@ impl<'a> Lexer<'a> {
 		Lexer {
 			reader,
 			last_offset: 0,
-			whitespace_span: None,
 			scratch: String::new(),
 			string: None,
-			datetime: None,
-			duration: None,
-			regex: None,
-			uuid: None,
 			error: None,
+			duration: None,
+			datetime: None,
+			uuid: None,
 		}
 	}
 
@@ -132,12 +116,7 @@ impl<'a> Lexer<'a> {
 	pub fn reset(&mut self) {
 		self.last_offset = 0;
 		self.scratch.clear();
-		self.whitespace_span = None;
 		self.string = None;
-		self.datetime = None;
-		self.duration = None;
-		self.regex = None;
-		self.uuid = None;
 		self.error = None;
 	}
 
@@ -153,29 +132,12 @@ impl<'a> Lexer<'a> {
 		Lexer {
 			reader,
 			last_offset: 0,
-			whitespace_span: None,
 			scratch: self.scratch,
 			string: self.string,
-			datetime: self.datetime,
-			duration: self.duration,
-			regex: self.regex,
-			uuid: self.uuid,
 			error: self.error,
-		}
-	}
-
-	/// return the whitespace of the last token buffered, either peeked or poped.
-	pub fn whitespace_span(&self) -> Option<Span> {
-		self.whitespace_span
-	}
-
-	/// Used for seting the span of whitespace between tokens. Will extend the current whitespace
-	/// if there already is one.
-	fn set_whitespace_span(&mut self, span: Span) {
-		if let Some(existing) = self.whitespace_span.as_mut() {
-			*existing = existing.covers(span);
-		} else {
-			self.whitespace_span = Some(span);
+			duration: self.duration,
+			datetime: self.datetime,
+			uuid: self.uuid,
 		}
 	}
 
@@ -183,11 +145,6 @@ impl<'a> Lexer<'a> {
 	///
 	/// If the lexer is at the end the source it will always return the Eof token.
 	pub fn next_token(&mut self) -> Token {
-		self.whitespace_span = None;
-		self.next_token_inner()
-	}
-
-	fn next_token_inner(&mut self) -> Token {
 		let Some(byte) = self.reader.next() else {
 			return self.eof_token();
 		};
@@ -206,17 +163,10 @@ impl<'a> Lexer<'a> {
 		Token {
 			kind: TokenKind::Eof,
 			span: Span {
-				offset: self.last_offset.saturating_sub(1),
-				len: 1,
+				offset: self.last_offset,
+				len: 0,
 			},
 		}
-	}
-
-	/// Skip the last consumed bytes in the reader.
-	///
-	/// The bytes consumed before this point won't be part of the span.
-	fn skip_offset(&mut self) {
-		self.last_offset = self.reader.offset() as u32;
 	}
 
 	/// Return an invalid token.
@@ -297,112 +247,6 @@ impl<'a> Lexer<'a> {
 		} else {
 			false
 		}
-	}
-
-	/// Lex a single `"` character with possible leading whitespace.
-	///
-	/// Used for parsing record strings.
-	pub fn lex_record_string_close(&mut self) -> Token {
-		loop {
-			let Some(byte) = self.reader.next() else {
-				return self.invalid_token(Error::UnexpectedEof);
-			};
-			match byte {
-				unicode::byte::CR
-				| unicode::byte::FF
-				| unicode::byte::LF
-				| unicode::byte::SP
-				| unicode::byte::VT
-				| unicode::byte::TAB => {
-					self.eat_whitespace();
-					continue;
-				}
-				b'"' => {
-					return self.finish_token(TokenKind::CloseRecordString {
-						double: true,
-					});
-				}
-				b'\'' => {
-					return self.finish_token(TokenKind::CloseRecordString {
-						double: false,
-					});
-				}
-				b'-' => match self.reader.next() {
-					Some(b'-') => {
-						self.eat_single_line_comment();
-						continue;
-					}
-					Some(x) => match self.reader.convert_to_char(x) {
-						Ok(c) => return self.invalid_token(Error::UnexpectedCharacter(c)),
-						Err(e) => return self.invalid_token(e.into()),
-					},
-					None => return self.invalid_token(Error::UnexpectedEof),
-				},
-				b'/' => match self.reader.next() {
-					Some(b'*') => {
-						if let Err(e) = self.eat_multi_line_comment() {
-							return self.invalid_token(e);
-						}
-						continue;
-					}
-					Some(b'/') => {
-						self.eat_single_line_comment();
-						continue;
-					}
-					Some(x) => match self.reader.convert_to_char(x) {
-						Ok(c) => return self.invalid_token(Error::UnexpectedCharacter(c)),
-						Err(e) => return self.invalid_token(e.into()),
-					},
-					None => return self.invalid_token(Error::UnexpectedEof),
-				},
-				b'#' => {
-					self.eat_single_line_comment();
-					continue;
-				}
-				x => match self.reader.convert_to_char(x) {
-					Ok(c) => return self.invalid_token(Error::UnexpectedCharacter(c)),
-					Err(e) => return self.invalid_token(e.into()),
-				},
-			}
-		}
-	}
-
-	/// Lex only a datetime without enclosing delimiters.
-	///
-	/// Used for reusing lexer lexing code for parsing datetimes. Should not be called during
-	/// normal parsing.
-	pub fn lex_only_datetime(&mut self) -> Result<Datetime, Error> {
-		self.lex_datetime_raw_err().map_err(Error::DateTime)
-	}
-
-	/// Lex only a duration.
-	///
-	/// Used for reusing lexer lexing code for parsing durations. Should not be used during normal
-	/// parsing.
-	pub fn lex_only_duration(&mut self) -> Result<Duration, Error> {
-		match self.reader.next() {
-			Some(x @ b'0'..=b'9') => {
-				self.scratch.push(x as char);
-				while let Some(x @ b'0'..=b'9') = self.reader.peek() {
-					self.reader.next();
-					self.scratch.push(x as char);
-				}
-				self.lex_duration_err().map_err(Error::Duration)
-			}
-			Some(x) => {
-				let char = self.reader.convert_to_char(x)?;
-				Err(Error::UnexpectedCharacter(char))
-			}
-			None => Err(Error::UnexpectedEof),
-		}
-	}
-
-	/// Lex only a UUID.
-	///
-	/// Used for reusing lexer lexing code for parsing UUID's. Should not be used during normal
-	/// parsing.
-	pub fn lex_only_uuid(&mut self) -> Result<Uuid, Error> {
-		Ok(self.lex_uuid_err_inner()?)
 	}
 }
 

@@ -1,7 +1,6 @@
 use crate::{
-	sql::change_feed_include::ChangeFeedInclude,
 	sql::{language::Language, Algorithm},
-	syn::token::{DistanceKind, Keyword, TokenKind},
+	syn::token::{DistanceKind, Keyword, TokenKind, VectorTypeKind},
 };
 use phf::{phf_map, phf_set};
 use unicase::UniCase;
@@ -23,6 +22,7 @@ pub static RESERVED_KEYWORD: phf::Set<UniCase<&'static str>> = phf_set! {
 	UniCase::ascii("KILL"),
 	UniCase::ascii("LIVE"),
 	UniCase::ascii("OPTION"),
+	UniCase::ascii("REBUILD"),
 	UniCase::ascii("RETURN"),
 	UniCase::ascii("RELATE"),
 	UniCase::ascii("REMOVE"),
@@ -32,6 +32,7 @@ pub static RESERVED_KEYWORD: phf::Set<UniCase<&'static str>> = phf_set! {
 	UniCase::ascii("SLEEP"),
 	UniCase::ascii("THROW"),
 	UniCase::ascii("UPDATE"),
+	UniCase::ascii("UPSERT"),
 	UniCase::ascii("USE"),
 	UniCase::ascii("DIFF"),
 	UniCase::ascii("RAND"),
@@ -54,7 +55,9 @@ pub fn could_be_reserved(s: &str) -> bool {
 /// A map for mapping keyword strings to a tokenkind,
 pub(crate) static KEYWORDS: phf::Map<UniCase<&'static str>, TokenKind> = phf_map! {
 	// Keywords
+	UniCase::ascii("ACCESS") => TokenKind::Keyword(Keyword::Access),
 	UniCase::ascii("AFTER") => TokenKind::Keyword(Keyword::After),
+	UniCase::ascii("ALGORITHM") => TokenKind::Keyword(Keyword::Algorithm),
 	UniCase::ascii("ALL") => TokenKind::Keyword(Keyword::All),
 	UniCase::ascii("ANALYZE") => TokenKind::Keyword(Keyword::Analyze),
 	UniCase::ascii("ANALYZER") => TokenKind::Keyword(Keyword::Analyzer),
@@ -64,6 +67,7 @@ pub(crate) static KEYWORDS: phf::Map<UniCase<&'static str>, TokenKind> = phf_map
 	UniCase::ascii("ASCII") => TokenKind::Keyword(Keyword::Ascii),
 	UniCase::ascii("ASSERT") => TokenKind::Keyword(Keyword::Assert),
 	UniCase::ascii("AT") => TokenKind::Keyword(Keyword::At),
+	UniCase::ascii("AUTHENTICATE") => TokenKind::Keyword(Keyword::Authenticate),
 	UniCase::ascii("BEFORE") => TokenKind::Keyword(Keyword::Before),
 	UniCase::ascii("BEGIN") => TokenKind::Keyword(Keyword::Begin),
 	UniCase::ascii("BLANK") => TokenKind::Keyword(Keyword::Blank),
@@ -99,11 +103,13 @@ pub(crate) static KEYWORDS: phf::Map<UniCase<&'static str>, TokenKind> = phf_map
 	UniCase::ascii("DROP") => TokenKind::Keyword(Keyword::Drop),
 	UniCase::ascii("DUPLICATE") => TokenKind::Keyword(Keyword::Duplicate),
 	UniCase::ascii("EDGENGRAM") => TokenKind::Keyword(Keyword::Edgengram),
+	UniCase::ascii("EFC") => TokenKind::Keyword(Keyword::Efc),
 	UniCase::ascii("EVENT") => TokenKind::Keyword(Keyword::Event),
 	UniCase::ascii("ELSE") => TokenKind::Keyword(Keyword::Else),
 	UniCase::ascii("END") => TokenKind::Keyword(Keyword::End),
 	UniCase::ascii("EXISTS") => TokenKind::Keyword(Keyword::Exists),
 	UniCase::ascii("EXPLAIN") => TokenKind::Keyword(Keyword::Explain),
+	UniCase::ascii("EXTEND_CANDIDATES") => TokenKind::Keyword(Keyword::ExtendCandidates),
 	UniCase::ascii("false") => TokenKind::Keyword(Keyword::False),
 	UniCase::ascii("FETCH") => TokenKind::Keyword(Keyword::Fetch),
 	UniCase::ascii("FIELD") => TokenKind::Keyword(Keyword::Field),
@@ -117,8 +123,10 @@ pub(crate) static KEYWORDS: phf::Map<UniCase<&'static str>, TokenKind> = phf_map
 	UniCase::ascii("FROM") => TokenKind::Keyword(Keyword::From),
 	UniCase::ascii("FULL") => TokenKind::Keyword(Keyword::Full),
 	UniCase::ascii("FUNCTION") => TokenKind::Keyword(Keyword::Function),
+	UniCase::ascii("GRANT") => TokenKind::Keyword(Keyword::Grant),
 	UniCase::ascii("GROUP") => TokenKind::Keyword(Keyword::Group),
 	UniCase::ascii("HIGHLIGHTS") => TokenKind::Keyword(Keyword::Highlights),
+	UniCase::ascii("HNSW") => TokenKind::Keyword(Keyword::Hnsw),
 	UniCase::ascii("IGNORE") => TokenKind::Keyword(Keyword::Ignore),
 	UniCase::ascii("INCLUDE") => TokenKind::Keyword(Keyword::Include),
 	UniCase::ascii("INDEX") => TokenKind::Keyword(Keyword::Index),
@@ -127,12 +135,20 @@ pub(crate) static KEYWORDS: phf::Map<UniCase<&'static str>, TokenKind> = phf_map
 	UniCase::ascii("INTO") => TokenKind::Keyword(Keyword::Into),
 	UniCase::ascii("IF") => TokenKind::Keyword(Keyword::If),
 	UniCase::ascii("IS") => TokenKind::Keyword(Keyword::Is),
+	UniCase::ascii("ISSUER") => TokenKind::Keyword(Keyword::Issuer),
+	UniCase::ascii("JWT") => TokenKind::Keyword(Keyword::Jwt),
+	UniCase::ascii("JWKS") => TokenKind::Keyword(Keyword::Jwks),
 	UniCase::ascii("KEY") => TokenKind::Keyword(Keyword::Key),
+	UniCase::ascii("KEEP_PRUNED_CONNECTIONS") => TokenKind::Keyword(Keyword::KeepPrunedConnections),
 	UniCase::ascii("KILL") => TokenKind::Keyword(Keyword::Kill),
 	UniCase::ascii("LET") => TokenKind::Keyword(Keyword::Let),
 	UniCase::ascii("LIMIT") => TokenKind::Keyword(Keyword::Limit),
 	UniCase::ascii("LIVE") => TokenKind::Keyword(Keyword::Live),
 	UniCase::ascii("LOWERCASE") => TokenKind::Keyword(Keyword::Lowercase),
+	UniCase::ascii("LM") => TokenKind::Keyword(Keyword::Lm),
+	UniCase::ascii("M") => TokenKind::Keyword(Keyword::M),
+	UniCase::ascii("M0") => TokenKind::Keyword(Keyword::M0),
+	UniCase::ascii("ML") => TokenKind::Keyword(Keyword::ML),
 	UniCase::ascii("MERGE") => TokenKind::Keyword(Keyword::Merge),
 	UniCase::ascii("MODEL") => TokenKind::Keyword(Keyword::Model),
 	UniCase::ascii("MTREE") => TokenKind::Keyword(Keyword::MTree),
@@ -150,6 +166,7 @@ pub(crate) static KEYWORDS: phf::Map<UniCase<&'static str>, TokenKind> = phf_map
 	UniCase::ascii("ONLY") => TokenKind::Keyword(Keyword::Only),
 	UniCase::ascii("OPTION") => TokenKind::Keyword(Keyword::Option),
 	UniCase::ascii("ORDER") => TokenKind::Keyword(Keyword::Order),
+	UniCase::ascii("ORIGINAL") => TokenKind::Keyword(Keyword::Original),
 	UniCase::ascii("PARALLEL") => TokenKind::Keyword(Keyword::Parallel),
 	UniCase::ascii("PARAM") => TokenKind::Keyword(Keyword::Param),
 	UniCase::ascii("PASSHASH") => TokenKind::Keyword(Keyword::Passhash),
@@ -162,6 +179,7 @@ pub(crate) static KEYWORDS: phf::Map<UniCase<&'static str>, TokenKind> = phf_map
 	UniCase::ascii("READONLY") => TokenKind::Keyword(Keyword::Readonly),
 	UniCase::ascii("RELATE") => TokenKind::Keyword(Keyword::Relate),
 	UniCase::ascii("RELATION") => TokenKind::Keyword(Keyword::Relation),
+	UniCase::ascii("REBUILD") => TokenKind::Keyword(Keyword::Rebuild),
 	UniCase::ascii("REMOVE") => TokenKind::Keyword(Keyword::Remove),
 	UniCase::ascii("REPLACE") => TokenKind::Keyword(Keyword::Replace),
 	UniCase::ascii("RETURN") => TokenKind::Keyword(Keyword::Return),
@@ -188,6 +206,7 @@ pub(crate) static KEYWORDS: phf::Map<UniCase<&'static str>, TokenKind> = phf_map
 	UniCase::ascii("STRUCTURE") => TokenKind::Keyword(Keyword::Structure),
 	UniCase::ascii("TABLE") => TokenKind::Keyword(Keyword::Table),
 	UniCase::ascii("TB") => TokenKind::Keyword(Keyword::Table),
+	UniCase::ascii("TEMPFILES") => TokenKind::Keyword(Keyword::TempFiles),
 	UniCase::ascii("TERMS_CACHE") => TokenKind::Keyword(Keyword::TermsCache),
 	UniCase::ascii("TERMS_ORDER") => TokenKind::Keyword(Keyword::TermsOrder),
 	UniCase::ascii("THEN") => TokenKind::Keyword(Keyword::Then),
@@ -202,7 +221,9 @@ pub(crate) static KEYWORDS: phf::Map<UniCase<&'static str>, TokenKind> = phf_map
 	UniCase::ascii("UNIQUE") => TokenKind::Keyword(Keyword::Unique),
 	UniCase::ascii("UNSET") => TokenKind::Keyword(Keyword::Unset),
 	UniCase::ascii("UPDATE") => TokenKind::Keyword(Keyword::Update),
+	UniCase::ascii("UPSERT") => TokenKind::Keyword(Keyword::Upsert),
 	UniCase::ascii("UPPERCASE") => TokenKind::Keyword(Keyword::Uppercase),
+	UniCase::ascii("URL") => TokenKind::Keyword(Keyword::Url),
 	UniCase::ascii("USE") => TokenKind::Keyword(Keyword::Use),
 	UniCase::ascii("USER") => TokenKind::Keyword(Keyword::User),
 	UniCase::ascii("VALUE") => TokenKind::Keyword(Keyword::Value),
@@ -245,7 +266,6 @@ pub(crate) static KEYWORDS: phf::Map<UniCase<&'static str>, TokenKind> = phf_map
 	UniCase::ascii("DURATION") => TokenKind::Keyword(Keyword::Duration),
 	UniCase::ascii("FLOAT") => TokenKind::Keyword(Keyword::Float),
 	UniCase::ascii("fn") => TokenKind::Keyword(Keyword::Fn),
-	UniCase::ascii("ml") => TokenKind::Keyword(Keyword::ML),
 	UniCase::ascii("INT") => TokenKind::Keyword(Keyword::Int),
 	UniCase::ascii("NUMBER") => TokenKind::Keyword(Keyword::Number),
 	UniCase::ascii("OBJECT") => TokenKind::Keyword(Keyword::Object),
@@ -328,7 +348,6 @@ pub(crate) static KEYWORDS: phf::Map<UniCase<&'static str>, TokenKind> = phf_map
 	UniCase::ascii("RS256") => TokenKind::Algorithm(Algorithm::Rs256),
 	UniCase::ascii("RS384") => TokenKind::Algorithm(Algorithm::Rs384),
 	UniCase::ascii("RS512") => TokenKind::Algorithm(Algorithm::Rs512),
-	UniCase::ascii("JWKS") => jwks_token_kind(), // Necessary because `phf_map!` doesn't support `cfg` attributes
 
 	// Distance
 	UniCase::ascii("CHEBYSHEV") => TokenKind::Distance(DistanceKind::Chebyshev),
@@ -340,14 +359,11 @@ pub(crate) static KEYWORDS: phf::Map<UniCase<&'static str>, TokenKind> = phf_map
 	UniCase::ascii("MINKOWSKI") => TokenKind::Distance(DistanceKind::Minkowski),
 	UniCase::ascii("PEARSON") => TokenKind::Distance(DistanceKind::Pearson),
 
-	// Change Feed keywords
-	UniCase::ascii("ORIGINAL") => TokenKind::ChangeFeedInclude(ChangeFeedInclude::Original),
-};
+	// VectorTypes
+	UniCase::ascii("F64") => TokenKind::VectorType(VectorTypeKind::F64),
+	UniCase::ascii("F32") => TokenKind::VectorType(VectorTypeKind::F32),
+	UniCase::ascii("I64") => TokenKind::VectorType(VectorTypeKind::I64),
+	UniCase::ascii("I32") => TokenKind::VectorType(VectorTypeKind::I32),
+	UniCase::ascii("I16") => TokenKind::VectorType(VectorTypeKind::I16),
 
-const fn jwks_token_kind() -> TokenKind {
-	#[cfg(feature = "jwks")]
-	let token = TokenKind::Algorithm(Algorithm::Jwks);
-	#[cfg(not(feature = "jwks"))]
-	let token = TokenKind::Identifier;
-	token
-}
+};

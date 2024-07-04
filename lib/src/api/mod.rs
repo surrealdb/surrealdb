@@ -37,7 +37,7 @@ pub type Result<T> = std::result::Result<T, crate::Error>;
 // Channel for waiters
 type Waiter = (watch::Sender<Option<WaitFor>>, watch::Receiver<Option<WaitFor>>);
 
-const SUPPORTED_VERSIONS: (&str, &str) = (">=1.0.0, <2.0.0", "20230701.55918b7c");
+const SUPPORTED_VERSIONS: (&str, &str) = (">=1.0.0, <3.0.0", "20230701.55918b7c");
 const REVISION_SUPPORTED_SERVER_VERSION: Version = Version::new(1, 2, 0);
 
 /// Connection trait implemented by supported engines
@@ -51,7 +51,6 @@ pub struct Connect<C: Connection, Response> {
 	engine: PhantomData<C>,
 	address: Result<Endpoint>,
 	capacity: usize,
-	client: PhantomData<C>,
 	waiter: Arc<Waiter>,
 	response_type: PhantomData<Response>,
 }
@@ -177,6 +176,17 @@ impl<C> Surreal<C>
 where
 	C: Connection,
 {
+	pub(crate) fn new_from_router_waiter(
+		router: Arc<OnceLock<Router>>,
+		waiter: Arc<Waiter>,
+	) -> Self {
+		Surreal {
+			router,
+			waiter,
+			engine: PhantomData,
+		}
+	}
+
 	async fn check_server_version(&self, version: &Version) -> Result<()> {
 		let (versions, build_meta) = SUPPORTED_VERSIONS;
 		// invalid version requirements should be caught during development

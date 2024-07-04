@@ -79,11 +79,13 @@ impl Parser<'_> {
 			t!("RETURN")
 			| t!("SELECT")
 			| t!("CREATE")
+			| t!("UPSERT")
 			| t!("UPDATE")
 			| t!("DELETE")
 			| t!("RELATE")
 			| t!("DEFINE")
-			| t!("REMOVE") => {
+			| t!("REMOVE")
+			| t!("REBUILD") => {
 				self.parse_inner_subquery(ctx, None).await.map(|x| Value::Subquery(Box::new(x)))
 			}
 			t!("IF") => {
@@ -105,6 +107,7 @@ impl Parser<'_> {
 	}
 
 	pub async fn parse_thing_or_table(&mut self, ctx: &mut Stk) -> ParseResult<Value> {
+		self.glue()?;
 		if self.peek_token_at(1).kind == t!(":") {
 			self.parse_thing(ctx).await.map(Value::Thing)
 		} else {

@@ -1,5 +1,5 @@
 use crate::ctx::Context;
-use crate::dbs::{Options, Transaction};
+use crate::dbs::Options;
 use crate::err::Error;
 use crate::idx::ft::analyzer::filter::FilteringStage;
 use crate::idx::ft::analyzer::tokenizer::{Tokenizer, Tokens};
@@ -64,17 +64,15 @@ impl Analyzer {
 		stk: &mut Stk,
 		ctx: &Context<'_>,
 		opt: &Options,
-		txn: &Transaction,
 		t: &Terms,
 		content: String,
 	) -> Result<(TermsList, TermsSet), Error> {
-		let tokens =
-			self.generate_tokens(stk, ctx, opt, txn, FilteringStage::Querying, content).await?;
+		let tokens = self.generate_tokens(stk, ctx, opt, FilteringStage::Querying, content).await?;
 		// We extract the term ids
 		let mut list = Vec::with_capacity(tokens.list().len());
 		let mut unique_tokens = HashSet::new();
 		let mut set = HashSet::new();
-		let mut tx = txn.lock().await;
+		let mut tx = ctx.tx_lock().await;
 		let mut has_unknown_terms = false;
 		for token in tokens.list() {
 			// Tokens can contains duplicated, not need to evaluate them again
@@ -89,6 +87,7 @@ impl Analyzer {
 				}
 			}
 		}
+		drop(tx);
 		Ok((
 			list,
 			TermsSet {
@@ -103,15 +102,14 @@ impl Analyzer {
 		stk: &mut Stk,
 		ctx: &Context<'_>,
 		opt: &Options,
-		txn: &Transaction,
 		t: &Terms,
 		content: Value,
 	) -> Result<TermsSet, Error> {
 		let mut tv = Vec::new();
-		self.analyze_value(stk, ctx, opt, txn, content, FilteringStage::Indexing, &mut tv).await?;
+		self.analyze_value(stk, ctx, opt, content, FilteringStage::Indexing, &mut tv).await?;
 		let mut set = HashSet::new();
 		let mut has_unknown_terms = false;
-		let mut tx = txn.lock().await;
+		let mut tx = ctx.tx_lock().await;
 		for tokens in tv {
 			for token in tokens.list() {
 				if let Some(term_id) =
@@ -123,6 +121,7 @@ impl Analyzer {
 				}
 			}
 		}
+		drop(tx);
 		Ok(TermsSet {
 			set,
 			has_unknown_terms,
@@ -136,7 +135,6 @@ impl Analyzer {
 		stk: &mut Stk,
 		ctx: &Context<'_>,
 		opt: &Options,
-		txn: &Transaction,
 		terms: &mut Terms,
 		field_content: Vec<Value>,
 	) -> Result<(DocLength, Vec<(TermId, TermFrequency)>), Error> {
@@ -144,16 +142,8 @@ impl Analyzer {
 		// Let's first collect all the inputs, and collect the tokens.
 		// We need to store them because everything after is zero-copy
 		let mut inputs = vec![];
-		self.analyze_content(
-			stk,
-			ctx,
-			opt,
-			txn,
-			field_content,
-			FilteringStage::Indexing,
-			&mut inputs,
-		)
-		.await?;
+		self.analyze_content(stk, ctx, opt, field_content, FilteringStage::Indexing, &mut inputs)
+			.await?;
 		// We then collect every unique terms and count the frequency
 		let mut tf: HashMap<&str, TermFrequency> = HashMap::new();
 		for tks in &inputs {
@@ -172,10 +162,11 @@ impl Analyzer {
 		}
 		// Now we can resolve the term ids
 		let mut tfid = Vec::with_capacity(tf.len());
-		let mut tx = txn.lock().await;
+		let mut tx = ctx.tx_lock().await;
 		for (t, f) in tf {
 			tfid.push((terms.resolve_term_id(&mut tx, t).await?, f));
 		}
+		drop(tx);
 		Ok((dl, tfid))
 	}
 
@@ -186,7 +177,6 @@ impl Analyzer {
 		stk: &mut Stk,
 		ctx: &Context<'_>,
 		opt: &Options,
-		txn: &Transaction,
 		terms: &mut Terms,
 		content: Vec<Value>,
 	) -> Result<(DocLength, Vec<(TermId, TermFrequency)>, Vec<(TermId, OffsetRecords)>), Error> {
@@ -194,8 +184,7 @@ impl Analyzer {
 		// Let's first collect all the inputs, and collect the tokens.
 		// We need to store them because everything after is zero-copy
 		let mut inputs = Vec::with_capacity(content.len());
-		self.analyze_content(stk, ctx, opt, txn, content, FilteringStage::Indexing, &mut inputs)
-			.await?;
+		self.analyze_content(stk, ctx, opt, content, FilteringStage::Indexing, &mut inputs).await?;
 		// We then collect every unique terms and count the frequency and extract the offsets
 		let mut tfos: HashMap<&str, Vec<Offset>> = HashMap::new();
 		for (i, tks) in inputs.iter().enumerate() {
@@ -215,63 +204,58 @@ impl Analyzer {
 		// Now we can resolve the term ids
 		let mut tfid = Vec::with_capacity(tfos.len());
 		let mut osid = Vec::with_capacity(tfos.len());
-		let mut tx = txn.lock().await;
+		let mut tx = ctx.tx_lock().await;
 		for (t, o) in tfos {
 			let id = terms.resolve_term_id(&mut tx, t).await?;
 			tfid.push((id, o.len() as TermFrequency));
 			osid.push((id, OffsetRecords(o)));
 		}
+		drop(tx);
 		Ok((dl, tfid, osid))
 	}
 
 	/// Was marked recursive
-	#[allow(clippy::too_many_arguments)]
 	async fn analyze_content(
 		&self,
 		stk: &mut Stk,
 		ctx: &Context<'_>,
 		opt: &Options,
-		txn: &Transaction,
 		content: Vec<Value>,
 		stage: FilteringStage,
 		tks: &mut Vec<Tokens>,
 	) -> Result<(), Error> {
 		for v in content {
-			self.analyze_value(stk, ctx, opt, txn, v, stage, tks).await?;
+			self.analyze_value(stk, ctx, opt, v, stage, tks).await?;
 		}
 		Ok(())
 	}
 
 	/// Was marked recursive
-	#[allow(clippy::too_many_arguments)]
 	async fn analyze_value(
 		&self,
 		stk: &mut Stk,
 		ctx: &Context<'_>,
 		opt: &Options,
-		txn: &Transaction,
 		val: Value,
 		stage: FilteringStage,
 		tks: &mut Vec<Tokens>,
 	) -> Result<(), Error> {
 		match val {
-			Value::Strand(s) => {
-				tks.push(self.generate_tokens(stk, ctx, opt, txn, stage, s.0).await?)
-			}
+			Value::Strand(s) => tks.push(self.generate_tokens(stk, ctx, opt, stage, s.0).await?),
 			Value::Number(n) => {
-				tks.push(self.generate_tokens(stk, ctx, opt, txn, stage, n.to_string()).await?)
+				tks.push(self.generate_tokens(stk, ctx, opt, stage, n.to_string()).await?)
 			}
 			Value::Bool(b) => {
-				tks.push(self.generate_tokens(stk, ctx, opt, txn, stage, b.to_string()).await?)
+				tks.push(self.generate_tokens(stk, ctx, opt, stage, b.to_string()).await?)
 			}
 			Value::Array(a) => {
 				for v in a.0 {
-					stk.run(|stk| self.analyze_value(stk, ctx, opt, txn, v, stage, tks)).await?;
+					stk.run(|stk| self.analyze_value(stk, ctx, opt, v, stage, tks)).await?;
 				}
 			}
 			Value::Object(o) => {
 				for (_, v) in o.0 {
-					stk.run(|stk| self.analyze_value(stk, ctx, opt, txn, v, stage, tks)).await?;
+					stk.run(|stk| self.analyze_value(stk, ctx, opt, v, stage, tks)).await?;
 				}
 			}
 			_ => {}
@@ -284,13 +268,12 @@ impl Analyzer {
 		stk: &mut Stk,
 		ctx: &Context<'_>,
 		opt: &Options,
-		txn: &Transaction,
 		stage: FilteringStage,
 		mut input: String,
 	) -> Result<Tokens, Error> {
 		if let Some(function_name) = self.function.clone() {
 			let fns = Function::Custom(function_name.clone(), vec![Value::Strand(Strand(input))]);
-			let val = fns.compute(stk, ctx, opt, txn, None).await?;
+			let val = fns.compute(stk, ctx, opt, None).await?;
 			if let Value::Strand(val) = val {
 				input = val.0;
 			} else {
@@ -315,10 +298,9 @@ impl Analyzer {
 		stk: &mut Stk,
 		ctx: &Context<'_>,
 		opt: &Options,
-		txn: &Transaction,
 		input: String,
 	) -> Result<Value, Error> {
-		self.generate_tokens(stk, ctx, opt, txn, FilteringStage::Indexing, input).await?.try_into()
+		self.generate_tokens(stk, ctx, opt, FilteringStage::Indexing, input).await?.try_into()
 	}
 }
 
@@ -341,6 +323,7 @@ mod tests {
 		let ds = Datastore::new("memory").await.unwrap();
 		let tx = ds.transaction(TransactionType::Read, LockType::Optimistic).await.unwrap();
 		let txn: Transaction = Arc::new(Mutex::new(tx));
+		let ctx = Context::default().set_transaction(txn);
 
 		let mut stmt = syn::parse(&format!("DEFINE {def}")).unwrap();
 		let Some(Statement::Define(DefineStatement::Analyzer(az))) = stmt.0 .0.pop() else {
@@ -350,18 +333,10 @@ mod tests {
 
 		let mut stack = reblessive::TreeStack::new();
 
-		let ctx = Context::default();
 		let opts = Options::default();
 		stack
 			.enter(|stk| {
-				a.generate_tokens(
-					stk,
-					&ctx,
-					&opts,
-					&txn,
-					FilteringStage::Indexing,
-					input.to_string(),
-				)
+				a.generate_tokens(stk, &ctx, &opts, FilteringStage::Indexing, input.to_string())
 			})
 			.finish()
 			.await

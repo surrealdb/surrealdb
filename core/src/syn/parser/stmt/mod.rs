@@ -2,6 +2,7 @@ use reblessive::Stk;
 
 use crate::enter_query_recursion;
 use crate::sql::block::Entry;
+use crate::sql::statements::rebuild::{RebuildIndexStatement, RebuildStatement};
 use crate::sql::statements::show::{ShowSince, ShowStatement};
 use crate::sql::statements::sleep::SleepStatement;
 use crate::sql::statements::{
@@ -34,6 +35,7 @@ mod relate;
 mod remove;
 mod select;
 mod update;
+mod upsert;
 
 impl Parser<'_> {
 	pub async fn parse_stmt_list(&mut self, ctx: &mut Stk) -> ParseResult<Statements> {
@@ -41,7 +43,10 @@ impl Parser<'_> {
 		loop {
 			match self.peek_kind() {
 				// consume any possible empty statements.
-				t!(";") => continue,
+				t!(";") => {
+					self.pop_peek();
+					continue;
+				}
 				t!("eof") => break,
 				_ => {
 					let stmt = ctx.run(|ctx| self.parse_stmt(ctx)).await?;
@@ -83,11 +88,12 @@ impl Parser<'_> {
 				| t!("FOR") | t!("IF")
 				| t!("INFO") | t!("INSERT")
 				| t!("KILL") | t!("LIVE")
-				| t!("OPTION") | t!("RETURN")
-				| t!("RELATE") | t!("REMOVE")
-				| t!("SELECT") | t!("LET")
-				| t!("SHOW") | t!("SLEEP")
-				| t!("THROW") | t!("UPDATE")
+				| t!("OPTION") | t!("REBUILD")
+				| t!("RETURN") | t!("RELATE")
+				| t!("REMOVE") | t!("SELECT")
+				| t!("LET") | t!("SHOW")
+				| t!("SLEEP") | t!("THROW")
+				| t!("UPDATE") | t!("UPSERT")
 				| t!("USE")
 		)
 	}
@@ -165,6 +171,10 @@ impl Parser<'_> {
 				self.pop_peek();
 				self.parse_option_stmt().map(Statement::Option)
 			}
+			t!("REBUILD") => {
+				self.pop_peek();
+				self.parse_rebuild_stmt().map(Statement::Rebuild)
+			}
 			t!("RETURN") => {
 				self.pop_peek();
 				ctx.run(|ctx| self.parse_return_stmt(ctx)).await.map(Statement::Output)
@@ -200,6 +210,10 @@ impl Parser<'_> {
 			t!("UPDATE") => {
 				self.pop_peek();
 				ctx.run(|ctx| self.parse_update_stmt(ctx)).await.map(Statement::Update)
+			}
+			t!("UPSERT") => {
+				self.pop_peek();
+				ctx.run(|ctx| self.parse_upsert_stmt(ctx)).await.map(Statement::Upsert)
 			}
 			t!("USE") => {
 				self.pop_peek();
@@ -254,6 +268,10 @@ impl Parser<'_> {
 				self.pop_peek();
 				self.parse_insert_stmt(ctx).await.map(Entry::Insert)
 			}
+			t!("REBUILD") => {
+				self.pop_peek();
+				self.parse_rebuild_stmt().map(Entry::Rebuild)
+			}
 			t!("RETURN") => {
 				self.pop_peek();
 				self.parse_return_stmt(ctx).await.map(Entry::Output)
@@ -281,6 +299,10 @@ impl Parser<'_> {
 			t!("UPDATE") => {
 				self.pop_peek();
 				self.parse_update_stmt(ctx).await.map(Entry::Update)
+			}
+			t!("UPSERT") => {
+				self.pop_peek();
+				self.parse_upsert_stmt(ctx).await.map(Entry::Upsert)
 			}
 			_ => {
 				// TODO: Provide information about keywords.
@@ -380,19 +402,23 @@ impl Parser<'_> {
 	/// # Parser State
 	/// Expects `USE` to already be consumed.
 	fn parse_use_stmt(&mut self) -> ParseResult<UseStatement> {
-		let (ns, db) = if self.eat(t!("NAMESPACE")) {
-			let ns = self.next_token_value::<Ident>()?.0;
-			let db = self
-				.eat(t!("DATABASE"))
-				.then(|| self.next_token_value::<Ident>())
-				.transpose()?
-				.map(|x| x.0);
-			(Some(ns), db)
-		} else {
-			expected!(self, t!("DATABASE"));
-
-			let db = self.next_token_value::<Ident>()?.0;
-			(None, Some(db))
+		let (ns, db) = match self.peek_kind() {
+			t!("NAMESPACE") | t!("ns") => {
+				self.pop_peek();
+				let ns = self.next_token_value::<Ident>()?.0;
+				let db = self
+					.eat(t!("DATABASE"))
+					.then(|| self.next_token_value::<Ident>())
+					.transpose()?
+					.map(|x| x.0);
+				(Some(ns), db)
+			}
+			t!("DATABASE") => {
+				self.pop_peek();
+				let db = self.next_token_value::<Ident>()?;
+				(None, Some(db.0))
+			}
+			x => unexpected!(self, x, "either DATABASE or NAMESPACE"),
 		};
 
 		Ok(UseStatement {
@@ -427,12 +453,8 @@ impl Parser<'_> {
 		expected!(self, t!("FOR"));
 		let mut stmt = match self.next().kind {
 			t!("ROOT") => InfoStatement::Root(false),
-			t!("NAMESPACE") => InfoStatement::Ns(false),
+			t!("NAMESPACE") | t!("ns") => InfoStatement::Ns(false),
 			t!("DATABASE") => InfoStatement::Db(false),
-			t!("SCOPE") => {
-				let ident = self.next_token_value()?;
-				InfoStatement::Sc(ident, false)
-			}
 			t!("TABLE") => {
 				let ident = self.next_token_value()?;
 				InfoStatement::Tb(ident, false)
@@ -458,12 +480,8 @@ impl Parser<'_> {
 	/// Expects `KILL` to already be consumed.
 	pub(crate) fn parse_kill_stmt(&mut self) -> ParseResult<KillStatement> {
 		let id = match self.peek_kind() {
-			TokenKind::Uuid => self.next_token_value().map(Value::Uuid)?,
-			t!("$param") => {
-				let token = self.pop_peek();
-				let param = self.token_value(token)?;
-				Value::Param(param)
-			}
+			t!("u\"") | t!("u'") => self.next_token_value().map(Value::Uuid)?,
+			t!("$param") => self.next_token_value().map(Value::Param)?,
 			x => unexpected!(self, x, "a UUID or a parameter"),
 		};
 		Ok(KillStatement {
@@ -515,6 +533,31 @@ impl Parser<'_> {
 			name,
 			what,
 		})
+	}
+
+	pub fn parse_rebuild_stmt(&mut self) -> ParseResult<RebuildStatement> {
+		let res = match self.next().kind {
+			t!("INDEX") => {
+				let if_exists = if self.eat(t!("IF")) {
+					expected!(self, t!("EXISTS"));
+					true
+				} else {
+					false
+				};
+				let name = self.next_token_value()?;
+				expected!(self, t!("ON"));
+				self.eat(t!("TABLE"));
+				let what = self.next_token_value()?;
+
+				RebuildStatement::Index(RebuildIndexStatement {
+					what,
+					name,
+					if_exists,
+				})
+			}
+			x => unexpected!(self, x, "a rebuild statement keyword"),
+		};
+		Ok(res)
 	}
 
 	/// Parsers a RETURN statement.
@@ -571,10 +614,12 @@ impl Parser<'_> {
 
 		expected!(self, t!("SINCE"));
 
-		let next = self.next();
+		let next = self.peek();
 		let since = match next.kind {
-			TokenKind::Number(_) => ShowSince::Versionstamp(self.token_value(next)?),
-			TokenKind::DateTime => ShowSince::Timestamp(self.token_value(next)?),
+			TokenKind::Digits | TokenKind::Number(_) => {
+				ShowSince::Versionstamp(self.next_token_value()?)
+			}
+			t!("d\"") | t!("d'") => ShowSince::Timestamp(self.next_token_value()?),
 			x => unexpected!(self, x, "a version stamp or a date-time"),
 		};
 

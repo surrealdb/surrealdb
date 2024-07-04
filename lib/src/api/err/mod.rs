@@ -8,6 +8,7 @@ use crate::sql::Value;
 use serde::Serialize;
 use std::io;
 use std::path::PathBuf;
+use surrealdb_core::dbs::capabilities::{ParseFuncTargetError, ParseNetTargetError};
 use thiserror::Error;
 
 /// An error originating from a remote SurrealDB database
@@ -206,6 +207,24 @@ pub enum Error {
 	/// Tried to insert on an edge or edges
 	#[error("Insert queries on edges not supported: {0}")]
 	InsertOnEdges(Edges),
+
+	#[error("{0}")]
+	InvalidNetTarget(#[from] ParseNetTargetError),
+
+	#[error("{0}")]
+	InvalidFuncTarget(#[from] ParseFuncTargetError),
+}
+
+impl From<ParseNetTargetError> for crate::Error {
+	fn from(e: ParseNetTargetError) -> Self {
+		Self::Api(Error::from(e))
+	}
+}
+
+impl From<ParseFuncTargetError> for crate::Error {
+	fn from(e: ParseFuncTargetError) -> Self {
+		Self::Api(Error::from(e))
+	}
 }
 
 #[cfg(feature = "protocol-http")]

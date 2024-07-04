@@ -19,7 +19,14 @@ impl Default for EngineOptions {
 		Self {
 			new_live_queries_per_transaction: 100,
 			live_query_catchup_size: 1000,
-			tick_interval: Duration::from_secs(1),
+			tick_interval: Duration::from_secs(10),
 		}
+	}
+}
+
+impl EngineOptions {
+	pub fn with_tick_interval(mut self, tick_interval: Duration) -> Self {
+		self.tick_interval = tick_interval;
+		self
 	}
 }

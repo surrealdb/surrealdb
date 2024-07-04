@@ -105,8 +105,8 @@ async fn query_root_function() -> Result<(), Error> {
 #[tokio::test]
 async fn query_root_record() -> Result<(), Error> {
 	let sql = "
-		UPDATE person:tobie SET name = 'Tobie';
-		UPDATE person:jaime SET name = 'Jaime';
+		UPSERT person:tobie SET name = 'Tobie';
+		UPSERT person:jaime SET name = 'Jaime';
 		RELATE person:tobie->knows->person:jaime SET id = 'test', brother = true;
 		<future> { person:tobie->knows->person.name };
 		person:tobie->knows->person.name;

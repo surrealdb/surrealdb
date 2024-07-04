@@ -4,9 +4,9 @@ use reblessive::Stk;
 
 use crate::{
 	sql::{
-		change_feed_include::ChangeFeedInclude, changefeed::ChangeFeed, index::Distance, Base,
-		Cond, Data, Duration, Fetch, Fetchs, Field, Fields, Group, Groups, Ident, Idiom, Output,
-		Permission, Permissions, Tables, Timeout, Value, View,
+		changefeed::ChangeFeed, index::Distance, index::VectorType, Base, Cond, Data, Duration,
+		Fetch, Fetchs, Field, Fields, Group, Groups, Ident, Idiom, Output, Permission, Permissions,
+		Tables, Timeout, Value, View,
 	},
 	syn::{
 		parser::{
@@ -14,7 +14,7 @@ use crate::{
 			mac::{expected, unexpected},
 			ParseError, ParseErrorKind, ParseResult, Parser,
 		},
-		token::{t, DistanceKind, Span, TokenKind},
+		token::{t, DistanceKind, Span, TokenKind, VectorTypeKind},
 	},
 };
 
@@ -307,15 +307,16 @@ impl Parser<'_> {
 		}
 	}
 
+	// TODO(gguillemas): Deprecated in 2.0.0. Kept for backward compatibility. Drop it in 3.0.0.
 	/// Parses a base
 	///
-	/// So either `NAMESPACE`, ~DATABASE`, `ROOT`, or `SCOPE` if `scope_allowed` is true.
+	/// So either `NAMESPACE`, `DATABASE`, `ROOT`, or `SCOPE` if `scope_allowed` is true.
 	///
 	/// # Parser state
 	/// Expects the next keyword to be a base.
 	pub fn parse_base(&mut self, scope_allowed: bool) -> ParseResult<Base> {
 		match self.next().kind {
-			t!("NAMESPACE") => Ok(Base::Ns),
+			t!("NAMESPACE") | t!("ns") => Ok(Base::Ns),
 			t!("DATABASE") => Ok(Base::Db),
 			t!("ROOT") => Ok(Base::Root),
 			t!("SCOPE") => {
@@ -327,9 +328,9 @@ impl Parser<'_> {
 			}
 			x => {
 				if scope_allowed {
-					unexpected!(self, x, "'NAMEPSPACE', 'DATABASE', 'ROOT', 'SCOPE' or 'KV'")
+					unexpected!(self, x, "'NAMEPSPACE', 'DATABASE', 'ROOT' or 'SCOPE'")
 				} else {
-					unexpected!(self, x, "'NAMEPSPACE', 'DATABASE', 'ROOT', or 'KV'")
+					unexpected!(self, x, "'NAMEPSPACE', 'DATABASE' or 'ROOT'")
 				}
 			}
 		}
@@ -341,8 +342,8 @@ impl Parser<'_> {
 	/// Expects the parser to have already eating the `CHANGEFEED` keyword
 	pub fn parse_changefeed(&mut self) -> ParseResult<ChangeFeed> {
 		let expiry = self.next_token_value::<Duration>()?.0;
-		let store_original = if self.eat(t!("INCLUDE")) {
-			expected!(self, TokenKind::ChangeFeedInclude(ChangeFeedInclude::Original));
+		let store_diff = if self.eat(t!("INCLUDE")) {
+			expected!(self, t!("ORIGINAL"));
 			true
 		} else {
 			false
@@ -350,7 +351,7 @@ impl Parser<'_> {
 
 		Ok(ChangeFeed {
 			expiry,
-			store_original,
+			store_diff,
 		})
 	}
 
@@ -381,32 +382,42 @@ impl Parser<'_> {
 		})
 	}
 
-	pub fn parse_distance(&mut self) -> ParseResult<Distance> {
-		let dist = match self.next().kind {
-			TokenKind::Distance(x) => match x {
-				DistanceKind::Chebyshev => Distance::Chebyshev,
-				DistanceKind::Cosine => Distance::Cosine,
-				DistanceKind::Euclidean => Distance::Euclidean,
-				DistanceKind::Manhattan => Distance::Manhattan,
-				DistanceKind::Hamming => Distance::Hamming,
-				DistanceKind::Jaccard => Distance::Jaccard,
-				DistanceKind::Minkowski => {
-					let distance = self.next_token_value()?;
-					Distance::Minkowski(distance)
-				}
-				DistanceKind::Pearson => Distance::Pearson,
-			},
-			x => unexpected!(self, x, "a distance measure"),
+	pub fn convert_distance(&mut self, k: &DistanceKind) -> ParseResult<Distance> {
+		let dist = match k {
+			DistanceKind::Chebyshev => Distance::Chebyshev,
+			DistanceKind::Cosine => Distance::Cosine,
+			DistanceKind::Euclidean => Distance::Euclidean,
+			DistanceKind::Manhattan => Distance::Manhattan,
+			DistanceKind::Hamming => Distance::Hamming,
+			DistanceKind::Jaccard => Distance::Jaccard,
+
+			DistanceKind::Minkowski => {
+				let distance = self.next_token_value()?;
+				Distance::Minkowski(distance)
+			}
+			DistanceKind::Pearson => Distance::Pearson,
 		};
 		Ok(dist)
 	}
 
-	pub fn try_parse_distance(&mut self) -> ParseResult<Option<Distance>> {
-		if !self.eat(t!("DISTANCE")) {
-			return Ok(None);
+	pub fn parse_distance(&mut self) -> ParseResult<Distance> {
+		match self.next().kind {
+			TokenKind::Distance(k) => self.convert_distance(&k),
+			x => unexpected!(self, x, "a distance measure"),
 		}
+	}
 
-		self.parse_distance().map(Some)
+	pub fn parse_vector_type(&mut self) -> ParseResult<VectorType> {
+		match self.next().kind {
+			TokenKind::VectorType(x) => Ok(match x {
+				VectorTypeKind::F64 => VectorType::F64,
+				VectorTypeKind::F32 => VectorType::F32,
+				VectorTypeKind::I64 => VectorType::I64,
+				VectorTypeKind::I32 => VectorType::I32,
+				VectorTypeKind::I16 => VectorType::I16,
+			}),
+			x => unexpected!(self, x, "a vector type"),
+		}
 	}
 
 	pub fn parse_custom_function_name(&mut self) -> ParseResult<Ident> {

@@ -16,7 +16,6 @@ pub(in crate::kvs) fn construct_document(
 	match mutation {
 		TableMutation::Set(id, current_value) => {
 			let doc = Document::new_artificial(
-				None,
 				Some(id),
 				None,
 				Cow::Borrowed(current_value),
@@ -31,7 +30,6 @@ pub(in crate::kvs) fn construct_document(
 					"id" => Value::Thing(id.clone()),
 				}));
 			let doc = Document::new_artificial(
-				None,
 				Some(id),
 				None,
 				Cow::Owned(Value::None),
@@ -49,7 +47,6 @@ pub(in crate::kvs) fn construct_document(
 				operations.iter().map(|op| Value::Object(Object::from(op.clone()))).collect(),
 			)))?;
 			let doc = Document::new_artificial(
-				None,
 				Some(id),
 				None,
 				Cow::Borrowed(current_value),
@@ -60,6 +57,16 @@ pub(in crate::kvs) fn construct_document(
 			// TODO(SUR-328): reverse diff and apply to doc to retrieve original version of doc
 			Ok(Some(doc))
 		}
+		TableMutation::DelWithOriginal(id, val) => {
+			let doc = Document::new_artificial(
+				Some(id),
+				None,
+				Cow::Owned(Value::None),
+				Cow::Borrowed(val),
+				Workable::Normal,
+			);
+			Ok(Some(doc))
+		}
 	}
 }
 
@@ -68,7 +75,7 @@ mod test {
 	use crate::cf::TableMutation;
 	use crate::kvs::lq_v2_doc::construct_document;
 	use crate::sql::statements::DefineTableStatement;
-	use crate::sql::{Strand, Thing, Value};
+	use crate::sql::{Idiom, Object, Operation, Strand, Thing, Value};
 
 	#[test]
 	fn test_construct_document_create() {
@@ -99,20 +106,66 @@ mod test {
 	#[test]
 	fn test_construct_document_update() {
 		let thing = Thing::from(("table", "id"));
-		let value = Value::Strand(Strand::from("value"));
-		let operations = vec![];
-		let tb_mutation = TableMutation::SetWithDiff(thing.clone(), value, operations);
+		let current_value = Value::Object(Object(map! {
+			"first_field".to_string() => Value::Strand(Strand::from("first_value")),
+			"second_field".to_string() => Value::Strand(Strand::from("second_value")),
+		}));
+		let operations = vec![
+			Operation::Remove {
+				path: Idiom::from("first_field"),
+			},
+			Operation::Replace {
+				path: Idiom::from("second_field"),
+				value: Value::Strand(Strand::from("original_value")),
+			},
+			Operation::Add {
+				path: Idiom::from("third_field"),
+				value: Value::Strand(Strand::from("third_value")),
+			},
+		];
+		let expected_original = Value::Object(Object(map! {
+			"second_field".to_string() => Value::Strand(Strand::from("original_value")),
+			"third_field".to_string() => Value::Strand(Strand::from("third_value")),
+		}));
+		let tb_mutation =
+			TableMutation::SetWithDiff(thing.clone(), current_value.clone(), operations);
 		let doc = construct_document(&tb_mutation).unwrap();
 		let doc = doc.unwrap();
 		assert!(!doc.is_new());
-		assert!(doc.initial_doc().is_strand(), "{:?}", doc.initial_doc());
-		assert!(doc.current_doc().is_strand(), "{:?}", doc.current_doc());
+		assert!(!doc.is_delete());
+		assert_eq!(doc.initial_doc(), &expected_original, "{:?}", doc.initial_doc());
+		assert_eq!(doc.current_doc(), &current_value, "{:?}", doc.current_doc());
 	}
 
 	#[test]
 	fn test_construct_document_delete() {
 		let thing = Thing::from(("table", "id"));
 		let tb_mutation = TableMutation::Del(thing.clone());
+		let doc = construct_document(&tb_mutation).unwrap();
+		let doc = doc.unwrap();
+		// The previous and current doc values are "None", so technically this is a new doc as per
+		// current == None
+		assert!(!doc.is_new(), "{:?}", doc);
+		assert!(doc.is_delete(), "{:?}", doc);
+		assert!(doc.current_doc().is_none());
+		assert!(doc.initial_doc().is_some());
+		match doc.initial_doc() {
+			Value::Object(o) => {
+				assert!(o.contains_key("id"));
+				assert_eq!(o.get("id").unwrap(), &Value::Thing(thing));
+			}
+			_ => panic!("Initial doc should be an object"),
+		}
+	}
+
+	#[test]
+	fn test_construct_document_delete_with_original() {
+		let thing = Thing::from(("table", "id"));
+		let original = Value::Object(Object(map! {
+			"id".to_string() => Value::Thing(thing.clone()),
+			"some_key".to_string() => Value::Strand(Strand::from("some_value")),
+		}));
+		let tb_mutation = TableMutation::DelWithOriginal(thing.clone(), original);
 		let doc = construct_document(&tb_mutation).unwrap();
 		let doc = doc.unwrap();
 		// The previous and current doc values are "None", so technically this is a new doc as per
@@ -156,19 +209,17 @@ mod test_check_lqs_and_send_notifications {
 	use crate::fflags::FFLAGS;
 	use crate::iam::{Auth, Role};
 	use crate::kvs::lq_v2_doc::construct_document;
-	use crate::kvs::{Datastore, LockType, TransactionType};
-	use crate::sql::paths::{OBJ_PATH_AUTH, OBJ_PATH_SCOPE, OBJ_PATH_TOKEN};
+	use crate::kvs::Datastore;
+	use crate::sql::paths::{OBJ_PATH_ACCESS, OBJ_PATH_AUTH, OBJ_PATH_TOKEN};
 	use crate::sql::statements::{CreateStatement, DeleteStatement, LiveStatement};
 	use crate::sql::{Fields, Object, Strand, Table, Thing, Uuid, Value, Values};
 
 	const SETUP: Lazy<Arc<TestSuite>> = Lazy::new(|| Arc::new(block_on(setup_test_suite_init())));
 
 	struct TestSuite {
-		ds: Datastore,
 		ns: String,
 		db: String,
 		tb: String,
-		rid: Value,
 	}
 
 	async fn setup_test_suite_init() -> TestSuite {
@@ -197,11 +248,9 @@ mod test_check_lqs_and_send_notifications {
 		.for_each(drop);
 
 		TestSuite {
-			ds,
 			ns: ns.to_string(),
 			db: db.to_string(),
 			tb: tb.to_string(),
-			rid: Value::Thing(Thing::from(("user", "test"))),
 		}
 	}
 
@@ -214,12 +263,6 @@ mod test_check_lqs_and_send_notifications {
 		// Setup channels used for listening to LQs
 		let (sender, receiver) = channel::unbounded();
 		let opt = a_usable_options(&sender);
-		let tx = SETUP
-			.ds
-			.transaction(TransactionType::Write, LockType::Optimistic)
-			.await
-			.unwrap()
-			.enclose();
 
 		// WHEN:
 		// Construct document we are validating
@@ -238,7 +281,6 @@ mod test_check_lqs_and_send_notifications {
 				stk,
 				&opt,
 				&Statement::Create(&executed_statement),
-				&tx,
 				&[&live_statement],
 				&sender,
 			)
@@ -258,7 +300,6 @@ mod test_check_lqs_and_send_notifications {
 			notification
 		);
 		assert!(receiver.try_recv().is_err());
-		tx.lock().await.cancel().await.unwrap();
 	}
 
 	#[test_log::test(tokio::test)]
@@ -270,12 +311,6 @@ mod test_check_lqs_and_send_notifications {
 		// Setup channels used for listening to LQs
 		let (sender, receiver) = channel::unbounded();
 		let opt = a_usable_options(&sender);
-		let tx = SETUP
-			.ds
-			.transaction(TransactionType::Write, LockType::Optimistic)
-			.await
-			.unwrap()
-			.enclose();
 
 		// WHEN:
 		// Construct document we are validating
@@ -294,7 +329,6 @@ mod test_check_lqs_and_send_notifications {
 				stk,
 				&opt,
 				&Statement::Delete(&executed_statement),
-				&tx,
 				&[&live_statement],
 				&sender,
 			)
@@ -316,7 +350,6 @@ mod test_check_lqs_and_send_notifications {
 			notification
 		);
 		assert!(receiver.try_recv().is_err());
-		tx.lock().await.cancel().await.unwrap();
 	}
 
 	// Live queries will have authentication info associated with them
@@ -324,8 +357,8 @@ mod test_check_lqs_and_send_notifications {
 	fn a_live_query_statement() -> LiveStatement {
 		let mut stm = LiveStatement::new(Fields::all());
 		let mut session: BTreeMap<String, Value> = BTreeMap::new();
+		session.insert(OBJ_PATH_ACCESS.to_string(), Value::Strand(Strand::from("access")));
 		session.insert(OBJ_PATH_AUTH.to_string(), Value::Strand(Strand::from("auth")));
-		session.insert(OBJ_PATH_SCOPE.to_string(), Value::Strand(Strand::from("scope")));
 		session.insert(OBJ_PATH_TOKEN.to_string(), Value::Strand(Strand::from("token")));
 		let session = Value::Object(Object::from(session));
 		stm.session = Some(session);

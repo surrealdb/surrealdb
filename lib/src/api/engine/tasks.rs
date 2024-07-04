@@ -1,5 +1,4 @@
-use flume::Sender;
-use futures::StreamExt;
+use futures::{FutureExt, StreamExt};
 use futures_concurrency::stream::Merge;
 use reblessive::TreeStack;
 #[cfg(target_arch = "wasm32")]
@@ -20,6 +19,7 @@ use crate::engine::IntervalStream;
 use crate::Error as RootError;
 #[cfg(not(target_arch = "wasm32"))]
 use tokio::spawn as spawn_future;
+use tokio::sync::oneshot;
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen_futures::spawn_local as spawn_future;
 
@@ -37,23 +37,33 @@ pub struct Tasks {
 impl Tasks {
 	#[cfg(not(target_arch = "wasm32"))]
 	pub async fn resolve(self) -> Result<(), RootError> {
-		self.nd.await.map_err(|e| {
-			error!("Node agent task failed: {}", e);
-			let inner_err = crate::err::Error::NodeAgent("node task failed and has been logged");
-			RootError::Db(inner_err)
-		})?;
-		self.lq.await.map_err(|e| {
-			error!("Live query task failed: {}", e);
-			let inner_err =
-				crate::err::Error::NodeAgent("live query task failed and has been logged");
-			RootError::Db(inner_err)
-		})?;
+		match self.nd.await {
+			// cancelling this task is fine, and can happen when surrealdb exits.
+			Ok(_) => {}
+			Err(e) if e.is_cancelled() => {}
+			Err(e) => {
+				error!("Node agent task failed: {}", e);
+				let inner_err =
+					crate::err::Error::NodeAgent("node task failed and has been logged");
+				return Err(RootError::Db(inner_err));
+			}
+		}
+		match self.lq.await {
+			Ok(_) => {}
+			Err(e) if e.is_cancelled() => {}
+			Err(e) => {
+				error!("Live query task failed: {}", e);
+				let inner_err =
+					crate::err::Error::NodeAgent("live query task failed and has been logged");
+				return Err(RootError::Db(inner_err));
+			}
+		};
 		Ok(())
 	}
 }
 
 /// Starts tasks that are required for the correct running of the engine
-pub fn start_tasks(opt: &EngineOptions, dbs: Arc<Datastore>) -> (Tasks, [Sender<()>; 2]) {
+pub fn start_tasks(opt: &EngineOptions, dbs: Arc<Datastore>) -> (Tasks, [oneshot::Sender<()>; 2]) {
 	let nd = init(opt, dbs.clone());
 	let lq = live_query_change_feed(opt, dbs);
 	let cancellation_channels = [nd.1, lq.1];
@@ -72,7 +82,7 @@ pub fn start_tasks(opt: &EngineOptions, dbs: Arc<Datastore>) -> (Tasks, [Sender<
 //
 // This function needs to be called before after the dbs::init and before the net::init functions.
 // It needs to be before net::init because the net::init function blocks until the web server stops.
-fn init(opt: &EngineOptions, dbs: Arc<Datastore>) -> (FutureTask, Sender<()>) {
+fn init(opt: &EngineOptions, dbs: Arc<Datastore>) -> (FutureTask, oneshot::Sender<()>) {
 	let _init = crate::dbs::LoggingLifecycle::new("node agent initialisation".to_string());
 	let tick_interval = opt.tick_interval;
 
@@ -83,7 +93,7 @@ fn init(opt: &EngineOptions, dbs: Arc<Datastore>) -> (FutureTask, Sender<()>) {
 	let ret_status = completed_status.clone();
 
 	// We create a channel that can be streamed that will indicate termination
-	let (tx, rx) = flume::bounded(1);
+	let (tx, rx) = oneshot::channel();
 
 	let _fut = spawn_future(async move {
 		let _lifecycle = crate::dbs::LoggingLifecycle::new("heartbeat task".to_string());
@@ -114,7 +124,10 @@ fn init(opt: &EngineOptions, dbs: Arc<Datastore>) -> (FutureTask, Sender<()>) {
 }
 
 // Start live query on change feeds notification processing
-fn live_query_change_feed(opt: &EngineOptions, dbs: Arc<Datastore>) -> (FutureTask, Sender<()>) {
+fn live_query_change_feed(
+	opt: &EngineOptions,
+	dbs: Arc<Datastore>,
+) -> (FutureTask, oneshot::Sender<()>) {
 	let tick_interval = opt.tick_interval;
 
 	#[cfg(target_arch = "wasm32")]
@@ -123,7 +136,7 @@ fn live_query_change_feed(opt: &EngineOptions, dbs: Arc<Datastore>) -> (FutureTa
 	let ret_status = completed_status.clone();
 
 	// We create a channel that can be streamed that will indicate termination
-	let (tx, rx) = flume::bounded(1);
+	let (tx, rx) = oneshot::channel();
 
 	let _fut = spawn_future(async move {
 		let mut stack = TreeStack::new();
@@ -183,6 +196,7 @@ mod test {
 	use crate::kvs::Datastore;
 	use crate::options::EngineOptions;
 	use std::sync::Arc;
+	use std::time::Duration;
 
 	#[test_log::test(tokio::test)]
 	pub async fn tasks_complete() {
@@ -193,5 +207,21 @@ mod test {
 			chan.send(()).unwrap();
 		}
 		val.resolve().await.unwrap();
+	}
+
+	#[test_log::test(tokio::test)]
+	pub async fn tasks_complete_channel_closed() {
+		let opt = EngineOptions::default();
+		let dbs = Arc::new(Datastore::new("memory").await.unwrap());
+		let val = {
+			let (val, _chans) = start_tasks(&opt, dbs.clone());
+			val
+		};
+		tokio::time::timeout(Duration::from_secs(10), val.resolve())
+			.await
+			.map_err(|e| format!("Timed out after {e}"))
+			.unwrap()
+			.map_err(|e| format!("Resolution failed: {e}"))
+			.unwrap();
 	}
 }

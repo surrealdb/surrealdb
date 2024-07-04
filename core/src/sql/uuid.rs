@@ -88,6 +88,7 @@ impl Uuid {
 
 impl Display for Uuid {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+		write!(f, "u")?;
 		Display::fmt(&quote_str(&self.0.to_string()), f)
 	}
 }

@@ -47,6 +47,7 @@ pub struct SerializeInsertStatement {
 	output: Option<Output>,
 	timeout: Option<Timeout>,
 	parallel: Option<bool>,
+	relation: Option<bool>,
 }
 
 impl serde::ser::SerializeStruct for SerializeInsertStatement {
@@ -58,9 +59,7 @@ impl serde::ser::SerializeStruct for SerializeInsertStatement {
 		T: ?Sized + Serialize,
 	{
 		match key {
-			"into" => {
-				self.into = Some(value.serialize(ser::value::Serializer.wrap())?);
-			}
+			"into" => self.into = value.serialize(ser::value::opt::Serializer.wrap())?,
 			"data" => {
 				self.data = Some(value.serialize(ser::data::Serializer.wrap())?);
 			}
@@ -79,6 +78,9 @@ impl serde::ser::SerializeStruct for SerializeInsertStatement {
 			"parallel" => {
 				self.parallel = Some(value.serialize(ser::primitive::bool::Serializer.wrap())?);
 			}
+			"relation" => {
+				self.relation = Some(value.serialize(ser::primitive::bool::Serializer.wrap())?);
+			}
 			key => {
 				return Err(Error::custom(format!("unexpected field `InsertStatement::{key}`")));
 			}
@@ -87,15 +89,16 @@ impl serde::ser::SerializeStruct for SerializeInsertStatement {
 	}
 
 	fn end(self) -> Result<Self::Ok, Error> {
-		match (self.into, self.data, self.ignore, self.parallel) {
-			(Some(into), Some(data), Some(ignore), Some(parallel)) => Ok(InsertStatement {
-				into,
+		match (self.data, self.ignore, self.parallel, self.relation) {
+			(Some(data), Some(ignore), Some(parallel), Some(relation)) => Ok(InsertStatement {
+				into: self.into,
 				data,
 				ignore,
 				parallel,
 				update: self.update,
 				output: self.output,
 				timeout: self.timeout,
+				relation,
 			}),
 			_ => Err(Error::custom("`InsertStatement` missing required value(s)")),
 		}

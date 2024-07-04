@@ -6,10 +6,8 @@ mod keyword;
 pub(crate) use keyword::keyword_t;
 pub use keyword::Keyword;
 mod mac;
-pub(crate) use mac::t;
-
-use crate::sql::change_feed_include::ChangeFeedInclude;
 use crate::sql::{language::Language, Algorithm};
+pub(crate) use mac::t;
 
 /// A location in the source passed to the lexer.
 #[derive(Clone, Copy, Eq, PartialEq, Hash, Debug)]
@@ -52,6 +50,18 @@ impl Span {
 			len: 0,
 		}
 	}
+
+	/// Returns if the given span is the next span after this one.
+	pub fn is_followed_by(&self, other: &Self) -> bool {
+		let end = self.offset as usize + self.len as usize;
+		other.offset as usize == end
+	}
+
+	/// Returns if this span immediately follows the given.
+	pub fn follows_from(&self, other: &Self) -> bool {
+		let end = self.offset as usize + self.len as usize;
+		other.offset as usize == end
+	}
 }
 
 #[repr(u8)]
@@ -68,6 +78,8 @@ pub enum Operator {
 	Divide,
 	/// `×` or `∙`
 	Mult,
+	/// `%`
+	Modulo,
 	/// `||`
 	Or,
 	/// `&&`
@@ -146,6 +158,7 @@ impl Operator {
 			Operator::Or => "||",
 			Operator::And => "&&",
 			Operator::Mult => "×",
+			Operator::Modulo => "%",
 			Operator::LessEqual => "<=",
 			Operator::GreaterEqual => ">=",
 			Operator::Star => "*",
@@ -223,54 +236,155 @@ impl DistanceKind {
 
 #[derive(Clone, Copy, Eq, PartialEq, Hash, Debug)]
 #[non_exhaustive]
-pub enum NumberKind {
-	// A plain integer number.
-	Integer,
-	// A number with a decimal postfix.
-	Decimal,
-	// A number with a decimal postfix.
-	DecimalExponent,
-	// A number with a float postfix.
+pub enum VectorTypeKind {
+	F64,
+	F32,
+	I64,
+	I32,
+	I16,
+}
+
+impl VectorTypeKind {
+	pub fn as_str(&self) -> &'static str {
+		match self {
+			Self::F64 => "F64",
+			Self::F32 => "F32",
+			Self::I64 => "I64",
+			Self::I32 => "I32",
+			Self::I16 => "I16",
+		}
+	}
+}
+
+#[derive(Clone, Copy, Eq, PartialEq, Hash, Debug)]
+pub enum DurationSuffix {
+	Nano,
+	Micro,
+	MicroUnicode,
+	Milli,
+	Second,
+	Minute,
+	Hour,
+	Day,
+	Week,
+	Year,
+}
+
+impl DurationSuffix {
+	pub fn can_be_ident(&self) -> bool {
+		!matches!(self, DurationSuffix::MicroUnicode)
+	}
+
+	pub fn as_str(&self) -> &'static str {
+		match self {
+			DurationSuffix::Nano => "ns",
+			DurationSuffix::Micro => "us",
+			DurationSuffix::MicroUnicode => "µs",
+			DurationSuffix::Milli => "ms",
+			DurationSuffix::Second => "s",
+			DurationSuffix::Minute => "m",
+			DurationSuffix::Hour => "h",
+			DurationSuffix::Day => "d",
+			DurationSuffix::Week => "w",
+			DurationSuffix::Year => "y",
+		}
+	}
+}
+
+#[derive(Clone, Copy, Eq, PartialEq, Hash, Debug)]
+pub enum NumberSuffix {
 	Float,
-	// A number with a `.3` part.
-	Mantissa,
-	// A number with a `.3e10` part.
-	MantissaExponent,
-	// A number with a `.3e10` part.
-	Exponent,
-	NaN,
+	Decimal,
+}
+
+impl Algorithm {
+	pub fn as_str(&self) -> &'static str {
+		match self {
+			Self::EdDSA => "EDDSA",
+			Self::Es256 => "ES256",
+			Self::Es384 => "ES384",
+			Self::Es512 => "ES512",
+			Self::Hs256 => "HS256",
+			Self::Hs384 => "HS384",
+			Self::Hs512 => "HS512",
+			Self::Ps256 => "PS256",
+			Self::Ps384 => "PS384",
+			Self::Ps512 => "PS512",
+			Self::Rs256 => "RS256",
+			Self::Rs384 => "RS384",
+			Self::Rs512 => "RS512",
+		}
+	}
+}
+
+#[derive(Clone, Copy, Eq, PartialEq, Hash, Debug)]
+pub enum QouteKind {
+	/// `'`
+	Plain,
+	/// `"`
+	PlainDouble,
+	/// `r'`
+	RecordId,
+	/// `r"`
+	RecordIdDouble,
+	/// `u'`
+	Uuid,
+	/// `u"`
+	UuidDouble,
+	/// `d'`
+	DateTime,
+	/// `d"`
+	DateTimeDouble,
+}
+
+impl QouteKind {
+	pub fn as_str(&self) -> &'static str {
+		match self {
+			QouteKind::Plain | QouteKind::PlainDouble => "a strand",
+			QouteKind::RecordId | QouteKind::RecordIdDouble => "a record-id strand",
+			QouteKind::Uuid | QouteKind::UuidDouble => "a uuid",
+			QouteKind::DateTime | QouteKind::DateTimeDouble => "a datetime",
+		}
+	}
+}
+
+#[derive(Clone, Copy, Eq, PartialEq, Hash, Debug)]
+pub enum NumberKind {
+	Decimal,
+	Float,
+	Integer,
+}
+
+#[derive(Clone, Copy, Eq, PartialEq, Hash, Debug)]
+pub enum DatetimeChars {
+	T,
+	Z,
 }
 
 /// The type of token
 #[derive(Clone, Copy, Eq, PartialEq, Hash, Debug)]
 #[non_exhaustive]
 pub enum TokenKind {
+	WhiteSpace,
 	Keyword(Keyword),
 	Algorithm(Algorithm),
-	ChangeFeedInclude(ChangeFeedInclude),
 	Language(Language),
 	Distance(DistanceKind),
+	VectorType(VectorTypeKind),
 	Operator(Operator),
 	OpenDelim(Delim),
 	CloseDelim(Delim),
-	// a token denoting the opening of a record string, i.e. `r"`
-	OpenRecordString {
-		double: bool,
-	},
-	/// a token denoting the clsoing of a record string, i.e. `"`
-	/// Never produced normally by the lexer.
-	CloseRecordString {
-		double: bool,
-	},
-	Regex,
-	Uuid,
-	DateTime,
+	/// a token denoting the opening of a string, i.e. `r"`
+	Qoute(QouteKind),
+	/// Not produced by the lexer but only the result of token gluing.
+	Number(NumberKind),
+	/// Not produced by the lexer but only the result of token gluing.
+	Duration,
+	/// Not produced by the lexer but only the result of token gluing.
 	Strand,
+	Regex,
 	/// A parameter like `$name`.
 	Parameter,
-	/// A duration.
-	Duration,
-	Number(NumberKind),
 	Identifier,
 	/// `<`
 	LeftChefron,
@@ -312,6 +426,18 @@ pub enum TokenKind {
 	Invalid,
 	/// A token which indicates the end of the file.
 	Eof,
+	/// A token consiting of one or more ascii digits.
+	Digits,
+	/// A identifier like token which matches a duration suffix.
+	DurationSuffix(DurationSuffix),
+	/// A part of a datetime like token which matches a duration suffix.
+	DatetimeChars(DatetimeChars),
+	/// A identifier like token which matches an exponent.
+	Exponent,
+	/// A identifier like token which matches an number suffix.
+	NumberSuffix(NumberSuffix),
+	/// The Not-A-Number number token.
+	NaN,
 }
 
 /// An assertion statically checking that the size of Tokenkind remains two bytes
@@ -319,15 +445,7 @@ const _TOKEN_KIND_SIZE_ASSERT: [(); 2] = [(); std::mem::size_of::<TokenKind>()];
 
 impl TokenKind {
 	pub fn has_data(&self) -> bool {
-		matches!(
-			self,
-			TokenKind::Identifier
-				| TokenKind::Uuid
-				| TokenKind::DateTime
-				| TokenKind::Strand
-				| TokenKind::Parameter
-				| TokenKind::Regex
-		)
+		matches!(self, TokenKind::Identifier | TokenKind::Duration)
 	}
 
 	pub fn can_be_identifier(&self) -> bool {
@@ -337,11 +455,13 @@ impl TokenKind {
 				| TokenKind::Keyword(_)
 				| TokenKind::Language(_)
 				| TokenKind::Algorithm(_)
+				| TokenKind::DatetimeChars(_)
+				| TokenKind::Distance(_),
 		)
 	}
 
-	fn algorithm_as_str(algo: Algorithm) -> &'static str {
-		match algo {
+	fn algorithm_as_str(alg: Algorithm) -> &'static str {
+		match alg {
 			Algorithm::EdDSA => "EDDSA",
 			Algorithm::Es256 => "ES256",
 			Algorithm::Es384 => "ES384",
@@ -355,7 +475,6 @@ impl TokenKind {
 			Algorithm::Rs256 => "RS256",
 			Algorithm::Rs384 => "RS384",
 			Algorithm::Rs512 => "RS512",
-			Algorithm::Jwks => "JWKS",
 		}
 	}
 
@@ -366,23 +485,16 @@ impl TokenKind {
 			TokenKind::Algorithm(x) => Self::algorithm_as_str(x),
 			TokenKind::Language(x) => x.as_str(),
 			TokenKind::Distance(x) => x.as_str(),
+			TokenKind::VectorType(x) => x.as_str(),
 			TokenKind::OpenDelim(Delim::Paren) => "(",
 			TokenKind::OpenDelim(Delim::Brace) => "{",
 			TokenKind::OpenDelim(Delim::Bracket) => "[",
 			TokenKind::CloseDelim(Delim::Paren) => ")",
 			TokenKind::CloseDelim(Delim::Brace) => "}",
 			TokenKind::CloseDelim(Delim::Bracket) => "]",
-			TokenKind::OpenRecordString {
-				..
-			} => "a record string",
-			TokenKind::CloseRecordString {
-				..
-			} => "a closing record string",
-			TokenKind::Uuid => "a uuid",
-			TokenKind::DateTime => "a date-time",
+			TokenKind::DurationSuffix(x) => x.as_str(),
 			TokenKind::Strand => "a strand",
 			TokenKind::Parameter => "a parameter",
-			TokenKind::Duration => "a duration",
 			TokenKind::Number(_) => "a number",
 			TokenKind::Identifier => "an identifier",
 			TokenKind::Regex => "a regex",
@@ -406,7 +518,15 @@ impl TokenKind {
 			TokenKind::At => "@",
 			TokenKind::Invalid => "Invalid",
 			TokenKind::Eof => "Eof",
-			TokenKind::ChangeFeedInclude(_) => "change feed include",
+			TokenKind::WhiteSpace => "whitespace",
+			TokenKind::Qoute(x) => x.as_str(),
+			TokenKind::Duration => "a duration",
+			TokenKind::Digits => "a number",
+			TokenKind::NaN => "NaN",
+			// below are small broken up tokens which are most of the time identifiers.
+			TokenKind::DatetimeChars(_) => "an identifier",
+			TokenKind::Exponent => "an identifier",
+			TokenKind::NumberSuffix(_) => "an identifier",
 		}
 	}
 }
@@ -434,5 +554,13 @@ impl Token {
 	/// Returns if the token is `end of file`.
 	pub fn is_eof(&self) -> bool {
 		matches!(self.kind, TokenKind::Eof)
+	}
+
+	pub fn is_followed_by(&self, other: &Token) -> bool {
+		self.span.is_followed_by(&other.span)
+	}
+
+	pub fn follows_from(&self, other: &Token) -> bool {
+		self.span.follows_from(&other.span)
 	}
 }

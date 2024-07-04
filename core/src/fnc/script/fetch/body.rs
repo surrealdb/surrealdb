@@ -147,7 +147,7 @@ impl<'js> FromJs<'js> for Body {
 				})
 			}
 		};
-		if let Some(x) = Class::<Blob>::from_object(object.clone()) {
+		if let Some(x) = Class::<Blob>::from_object(object) {
 			let borrow = x.borrow();
 			return Ok(Body::buffer(BodyKind::Blob(borrow.mime.clone()), borrow.data.clone()));
 		}

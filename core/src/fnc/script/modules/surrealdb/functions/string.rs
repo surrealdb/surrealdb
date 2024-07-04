@@ -2,6 +2,7 @@ use super::run;
 use crate::fnc::script::modules::impl_module_def;
 
 mod distance;
+mod html;
 mod is;
 mod semver;
 mod similarity;
@@ -16,6 +17,7 @@ impl_module_def!(
 	"contains" => run,
 	"distance" => (distance::Package),
 	"endsWith" => run,
+	"html" => (html::Package),
 	"is" => (is::Package),
 	"join" => run,
 	"len" => run,

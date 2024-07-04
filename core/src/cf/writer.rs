@@ -82,20 +82,33 @@ impl Writer {
 				tb.to_string(),
 				match store_difference {
 					true => {
-						let patches = current.diff(&previous, Idiom(Vec::new()));
-						let new_record = !previous.is_some();
-						trace!("The record is new_record={new_record} because previous is {previous:?}");
 						if previous.is_none() {
 							TableMutation::Set(id, current.into_owned())
 						} else {
-							TableMutation::SetWithDiff(id, current.into_owned(), patches)
+							// We intentionally record the patches in reverse (current -> previous)
+							// because we cannot otherwise resolve operations such as "replace" and "remove".
+							let patches_to_create_previous =
+								current.diff(&previous, Idiom::default());
+							TableMutation::SetWithDiff(
+								id,
+								current.into_owned(),
+								patches_to_create_previous,
+							)
 						}
 					}
 					false => TableMutation::Set(id, current.into_owned()),
 				},
 			);
 		} else {
-			self.buf.push(ns.to_string(), db.to_string(), tb.to_string(), TableMutation::Del(id));
+			self.buf.push(
+				ns.to_string(),
+				db.to_string(),
+				tb.to_string(),
+				match store_difference {
+					true => TableMutation::DelWithOriginal(id, previous.into_owned()),
+					false => TableMutation::Del(id),
+				},
+			);
 		}
 	}
 
@@ -138,6 +151,7 @@ mod tests {
 	use std::time::Duration;
 
 	use crate::cf::{ChangeSet, DatabaseMutation, TableMutation, TableMutations};
+	use crate::dbs::Session;
 	use crate::fflags::FFLAGS;
 	use crate::key::key_req::KeyRequirements;
 	use crate::kvs::{Datastore, LockType::*, Transaction, TransactionType::*};
@@ -149,7 +163,7 @@ mod tests {
 	};
 	use crate::sql::thing::Thing;
 	use crate::sql::value::Value;
-	use crate::sql::Datetime;
+	use crate::sql::{Datetime, Idiom, Number, Object, Operation, Strand};
 	use crate::vs;
 	use crate::vs::{conv, Versionstamp};
 
@@ -160,9 +174,9 @@ mod tests {
 	const TB: &str = "mytb";
 
 	#[tokio::test]
-	async fn test_changefeed_read_write() {
+	async fn changefeed_read_write() {
 		let ts = Datetime::default();
-		let ds = init().await;
+		let ds = init(false).await;
 
 		// Let the db remember the timestamp for the current versionstamp
 		// so that we can replay change feeds from the timestamp later.
@@ -382,9 +396,9 @@ mod tests {
 	}
 
 	#[test_log::test(tokio::test)]
-	async fn test_scan_picks_up_from_offset() {
+	async fn scan_picks_up_from_offset() {
 		// Given we have 2 entries in change feeds
-		let ds = init().await;
+		let ds = init(false).await;
 		ds.tick_at(5).await.unwrap();
 		let _id1 = record_change_feed_entry(
 			ds.transaction(Write, Optimistic).await.unwrap(),
@@ -403,18 +417,110 @@ mod tests {
 		.await;
 
 		// When we scan from the versionstamp between the changes
-		let r = change_feed(ds.transaction(Write, Optimistic).await.unwrap(), &vs2).await;
+		let r = change_feed_vs(ds.transaction(Write, Optimistic).await.unwrap(), &vs2).await;
 
 		// Then there is only 1 change
 		assert_eq!(r.len(), 1);
 		assert!(r[0].0 >= vs2, "{:?}", r);
 
 		// And scanning with previous offset includes both values (without table definitions)
-		let r = change_feed(ds.transaction(Write, Optimistic).await.unwrap(), &vs1).await;
+		let r = change_feed_vs(ds.transaction(Write, Optimistic).await.unwrap(), &vs1).await;
 		assert_eq!(r.len(), 2);
 	}
 
-	async fn change_feed(mut tx: Transaction, vs: &Versionstamp) -> Vec<ChangeSet> {
+	#[test_log::test(tokio::test)]
+	async fn set_with_diff_records_diff_to_achieve_original() {
+		if !FFLAGS.change_feed_live_queries.enabled() {
+			return;
+		}
+		let ts = Datetime::default();
+		let ds = init(true).await;
+
+		// Create a doc
+		ds.tick_at(ts.0.timestamp().try_into().unwrap()).await.unwrap();
+		let thing = Thing {
+			tb: TB.to_owned(),
+			id: Id::String("A".to_string()),
+		};
+		let ses = Session::owner().with_ns(NS).with_db(DB);
+		let res =
+			ds.execute(format!("CREATE {thing} SET value=50").as_str(), &ses, None).await.unwrap();
+		assert_eq!(res.len(), 1, "{:?}", res);
+		let res = res.into_iter().next().unwrap();
+		res.result.unwrap();
+
+		// Now update it
+		ds.tick_at((ts.0.timestamp() + 10).try_into().unwrap()).await.unwrap();
+		let res = ds
+			.execute(
+				format!("UPDATE {thing} SET value=100, new_field=\"new_value\"").as_str(),
+				&ses,
+				None,
+			)
+			.await
+			.unwrap();
+		assert_eq!(res.len(), 1, "{:?}", res);
+		let res = res.into_iter().next().unwrap();
+		res.result.unwrap();
+
+		// Now read the change feed
+		let tx = ds.transaction(Write, Optimistic).await.unwrap();
+		let r = change_feed_ts(tx, &ts).await;
+		let expected_obj_first = Value::Object(Object::from(map! {
+			"id".to_string() => Value::Thing(thing.clone()),
+			"value".to_string() => Value::Number(Number::Int(50)),
+		}));
+		let expected_obj_second = Value::Object(Object::from(map! {
+			"id".to_string() => Value::Thing(thing.clone()),
+			"value".to_string() => Value::Number(Number::Int(100)),
+			"new_field".to_string() => Value::Strand(Strand::from("new_value")),
+		}));
+		assert_eq!(r.len(), 2, "{:?}", r);
+		let expected: Vec<ChangeSet> = vec![
+			ChangeSet(
+				vs::u64_to_versionstamp(2),
+				DatabaseMutation(vec![TableMutations(
+					TB.to_string(),
+					vec![TableMutation::Set(
+						Thing::from((TB.to_string(), "A".to_string())),
+						expected_obj_first,
+					)],
+				)]),
+			),
+			ChangeSet(
+				vs::u64_to_versionstamp(4),
+				DatabaseMutation(vec![TableMutations(
+					TB.to_string(),
+					vec![TableMutation::SetWithDiff(
+						Thing::from((TB.to_string(), "A".to_string())),
+						expected_obj_second,
+						vec![
+							// We need to remove the field to achieve the previous value
+							Operation::Remove {
+								path: Idiom::from("new_field"),
+							},
+							Operation::Replace {
+								path: Idiom::from("value"),
+								value: Value::Number(Number::Int(50)),
+							},
+						],
+					)],
+				)]),
+			),
+		];
+		assert_eq!(r, expected);
+	}
+
+	async fn change_feed_ts(mut tx: Transaction, ts: &Datetime) -> Vec<ChangeSet> {
+		let r =
+			crate::cf::read(&mut tx, NS, DB, Some(TB), ShowSince::Timestamp(ts.clone()), Some(10))
+				.await
+				.unwrap();
+		tx.cancel().await.unwrap();
+		r
+	}
+
+	async fn change_feed_vs(mut tx: Transaction, vs: &Versionstamp) -> Vec<ChangeSet> {
 		let r = crate::cf::read(
 			&mut tx,
 			NS,
@@ -450,7 +556,7 @@ mod tests {
 		thing
 	}
 
-	async fn init() -> Datastore {
+	async fn init(store_diff: bool) -> Datastore {
 		let dns = DefineNamespaceStatement {
 			name: crate::sql::Ident(NS.to_string()),
 			..Default::default()
@@ -459,15 +565,15 @@ mod tests {
 			name: crate::sql::Ident(DB.to_string()),
 			changefeed: Some(ChangeFeed {
 				expiry: Duration::from_secs(10),
-				store_original: false,
+				store_diff,
 			}),
 			..Default::default()
 		};
 		let dtb = DefineTableStatement {
 			name: TB.into(),
 			changefeed: Some(ChangeFeed {
-				expiry: Duration::from_secs(10),
-				store_original: false,
+				expiry: Duration::from_secs(10 * 60),
+				store_diff,
 			}),
 			..Default::default()
 		};

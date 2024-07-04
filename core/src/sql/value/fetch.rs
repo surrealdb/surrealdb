@@ -1,5 +1,5 @@
 use crate::ctx::Context;
-use crate::dbs::{Options, Transaction};
+use crate::dbs::Options;
 use crate::err::Error;
 use crate::sql::edges::Edges;
 use crate::sql::field::{Field, Fields};
@@ -17,7 +17,6 @@ impl Value {
 		stk: &mut Stk,
 		ctx: &Context<'_>,
 		opt: &Options,
-		txn: &Transaction,
 		path: &[Part],
 	) -> Result<(), Error> {
 		match path.first() {
@@ -28,19 +27,19 @@ impl Value {
 					Part::Graph(_) => match v.rid() {
 						Some(v) => {
 							let mut v = Value::Thing(v);
-							stk.run(|stk| v.fetch(stk, ctx, opt, txn, path.next())).await
+							stk.run(|stk| v.fetch(stk, ctx, opt, path.next())).await
 						}
 						None => Ok(()),
 					},
 					Part::Field(f) => match v.get_mut(f as &str) {
-						Some(v) => stk.run(|stk| v.fetch(stk, ctx, opt, txn, path.next())).await,
+						Some(v) => stk.run(|stk| v.fetch(stk, ctx, opt, path.next())).await,
 						None => Ok(()),
 					},
 					Part::Index(i) => match v.get_mut(&i.to_string()) {
-						Some(v) => stk.run(|stk| v.fetch(stk, ctx, opt, txn, path.next())).await,
+						Some(v) => stk.run(|stk| v.fetch(stk, ctx, opt, path.next())).await,
 						None => Ok(()),
 					},
-					Part::All => stk.run(|stk| self.fetch(stk, ctx, opt, txn, path.next())).await,
+					Part::All => stk.run(|stk| self.fetch(stk, ctx, opt, path.next())).await,
 					_ => Ok(()),
 				},
 				// Current path part is an array
@@ -48,41 +47,39 @@ impl Value {
 					Part::All => {
 						let path = path.next();
 						stk.scope(|scope| {
-							let futs = v
-								.iter_mut()
-								.map(|v| scope.run(|stk| v.fetch(stk, ctx, opt, txn, path)));
+							let futs =
+								v.iter_mut().map(|v| scope.run(|stk| v.fetch(stk, ctx, opt, path)));
 							try_join_all(futs)
 						})
 						.await?;
 						Ok(())
 					}
 					Part::First => match v.first_mut() {
-						Some(v) => stk.run(|stk| v.fetch(stk, ctx, opt, txn, path.next())).await,
+						Some(v) => stk.run(|stk| v.fetch(stk, ctx, opt, path.next())).await,
 						None => Ok(()),
 					},
 					Part::Last => match v.last_mut() {
-						Some(v) => stk.run(|stk| v.fetch(stk, ctx, opt, txn, path.next())).await,
+						Some(v) => stk.run(|stk| v.fetch(stk, ctx, opt, path.next())).await,
 						None => Ok(()),
 					},
 					Part::Index(i) => match v.get_mut(i.to_usize()) {
-						Some(v) => stk.run(|stk| v.fetch(stk, ctx, opt, txn, path.next())).await,
+						Some(v) => stk.run(|stk| v.fetch(stk, ctx, opt, path.next())).await,
 						None => Ok(()),
 					},
 					Part::Where(w) => {
 						let path = path.next();
 						for v in v.iter_mut() {
 							let cur = v.into();
-							if w.compute(stk, ctx, opt, txn, Some(&cur)).await?.is_truthy() {
-								stk.run(|stk| v.fetch(stk, ctx, opt, txn, path)).await?;
+							if w.compute(stk, ctx, opt, Some(&cur)).await?.is_truthy() {
+								stk.run(|stk| v.fetch(stk, ctx, opt, path)).await?;
 							}
 						}
 						Ok(())
 					}
 					_ => {
 						stk.scope(|scope| {
-							let futs = v
-								.iter_mut()
-								.map(|v| scope.run(|stk| v.fetch(stk, ctx, opt, txn, path)));
+							let futs =
+								v.iter_mut().map(|v| scope.run(|stk| v.fetch(stk, ctx, opt, path)));
 							try_join_all(futs)
 						})
 						.await?;
@@ -108,10 +105,10 @@ impl Value {
 								..SelectStatement::default()
 							};
 							*self = stm
-								.compute(stk, ctx, opt, txn, None)
+								.compute(stk, ctx, opt, None)
 								.await?
 								.all()
-								.get(stk, ctx, opt, txn, None, path.next())
+								.get(stk, ctx, opt, None, path.next())
 								.await?
 								.flatten()
 								.ok()?;
@@ -124,7 +121,7 @@ impl Value {
 								what: Values(vec![Value::from(val)]),
 								..SelectStatement::default()
 							};
-							*self = stm.compute(stk, ctx, opt, txn, None).await?.first();
+							*self = stm.compute(stk, ctx, opt, None).await?.first();
 							Ok(())
 						}
 					}
@@ -137,9 +134,8 @@ impl Value {
 				// Current path part is an array
 				Value::Array(v) => {
 					stk.scope(|scope| {
-						let futs = v
-							.iter_mut()
-							.map(|v| scope.run(|stk| v.fetch(stk, ctx, opt, txn, path)));
+						let futs =
+							v.iter_mut().map(|v| scope.run(|stk| v.fetch(stk, ctx, opt, path)));
 						try_join_all(futs)
 					})
 					.await?;
@@ -155,7 +151,7 @@ impl Value {
 						what: Values(vec![Value::from(val)]),
 						..SelectStatement::default()
 					};
-					*self = stm.compute(stk, ctx, opt, txn, None).await?.first();
+					*self = stm.compute(stk, ctx, opt, None).await?.first();
 					Ok(())
 				}
 				// Ignore everything else

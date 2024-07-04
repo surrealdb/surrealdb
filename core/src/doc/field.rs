@@ -1,6 +1,6 @@
 use crate::ctx::Context;
+use crate::dbs::Options;
 use crate::dbs::Statement;
-use crate::dbs::{Options, Transaction};
 use crate::doc::Document;
 use crate::err::Error;
 use crate::iam::Action;
@@ -55,7 +55,7 @@ impl<'a> Document<'a> {
 		}
 
 		// Loop through all field statements
-		for fd in fds.iter() {
+		for fd in self.fd(ctx, opt).await?.iter() {
 			// Loop over each field in document
 			for (k, mut val) in self.current.doc.walk(&fd.name).into_iter() {
 				// Get the initial value
@@ -87,7 +87,7 @@ impl<'a> Document<'a> {
 						ctx.add_value("after", &val);
 						ctx.add_value("before", &old);
 						// Process the VALUE clause
-						val = expr.compute(stk, &ctx, opt, txn, Some(&self.current)).await?;
+						val = expr.compute(stk, &ctx, opt, Some(&self.current)).await?;
 					}
 				}
 				// Check for a TYPE clause
@@ -118,7 +118,7 @@ impl<'a> Document<'a> {
 						ctx.add_value("after", &val);
 						ctx.add_value("before", &old);
 						// Process the VALUE clause
-						val = expr.compute(stk, &ctx, opt, txn, Some(&self.current)).await?;
+						val = expr.compute(stk, &ctx, opt, Some(&self.current)).await?;
 					}
 				}
 				// Check for a TYPE clause
@@ -147,7 +147,7 @@ impl<'a> Document<'a> {
 					ctx.add_value("after", &val);
 					ctx.add_value("before", &old);
 					// Process the ASSERT clause
-					if !expr.compute(stk, &ctx, opt, txn, Some(&self.current)).await?.is_truthy() {
+					if !expr.compute(stk, &ctx, opt, Some(&self.current)).await?.is_truthy() {
 						return Err(Error::FieldValue {
 							thing: rid.to_string(),
 							field: fd.name.clone(),
@@ -157,7 +157,7 @@ impl<'a> Document<'a> {
 					}
 				}
 				// Check for a PERMISSIONS clause
-				if opt.check_perms(Action::Edit) {
+				if opt.check_perms(Action::Edit)? {
 					// Get the permission clause
 					let perms = if self.is_new() {
 						&fd.permissions.create
@@ -188,11 +188,7 @@ impl<'a> Document<'a> {
 							ctx.add_value("after", &val);
 							ctx.add_value("before", &old);
 							// Process the PERMISSION clause
-							if !e
-								.compute(stk, &ctx, opt, txn, Some(&self.current))
-								.await?
-								.is_truthy()
-							{
+							if !e.compute(stk, &ctx, opt, Some(&self.current)).await?.is_truthy() {
 								val = old
 							}
 						}
@@ -200,8 +196,8 @@ impl<'a> Document<'a> {
 				}
 				// Set the value of the field
 				match val {
-					Value::None => self.current.doc.to_mut().del(stk, ctx, opt, txn, &k).await?,
-					_ => self.current.doc.to_mut().set(stk, ctx, opt, txn, &k, val).await?,
+					Value::None => self.current.doc.to_mut().del(stk, ctx, opt, &k).await?,
+					_ => self.current.doc.to_mut().set(stk, ctx, opt, &k, val).await?,
 				};
 			}
 		}
