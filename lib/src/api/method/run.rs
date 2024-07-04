@@ -19,6 +19,7 @@ use std::pin::Pin;
 pub struct Run<'r, C: Connection> {
 	pub(super) client: Cow<'r, Surreal<C>>,
 	pub(super) fn_name: String,
+	pub(super) fn_version: Option<String>,
 	pub(super) params: Array,
 }
 impl<C> Run<'_, C>
@@ -38,15 +39,15 @@ impl<'r, Client> IntoFuture for Run<'r, Client>
 where
 	Client: Connection,
 {
-	type Output = Result<()>;
+	type Output = Result<Value>;
 	type IntoFuture = Pin<Box<dyn Future<Output = Self::Output> + Send + Sync + 'r>>;
 
 	fn into_future(self) -> Self::IntoFuture {
 		Box::pin(async move {
 			let mut conn = Client::new(Method::Run);
-			conn.execute_unit(
+			conn.execute(
 				self.client.router.extract()?,
-				Param::new(vec![self.fn_name.into(), self.params.into()]),
+				Param::new(vec![self.fn_name.into(), self.fn_version.into(), self.params.into()]),
 			)
 			.await
 		})
@@ -118,5 +119,30 @@ where
 		arr.push(self.1.into());
 		arr.push(self.2.into());
 		Array::from(arr)
+	}
+}
+
+pub trait IntoFn {
+	fn into_fn(self) -> (String, Option<String>);
+}
+
+impl IntoFn for String {
+	fn into_fn(self) -> (String, Option<String>) {
+		(self, None)
+	}
+}
+impl IntoFn for &str {
+	fn into_fn(self) -> (String, Option<String>) {
+		(self.to_owned(), None)
+	}
+}
+
+impl<S0, S1> IntoFn for (S0, S1)
+where
+	S0: Into<String>,
+	S1: Into<String>,
+{
+	fn into_fn(self) -> (String, Option<String>) {
+		(self.0.into(), Some(self.1.into()))
 	}
 }

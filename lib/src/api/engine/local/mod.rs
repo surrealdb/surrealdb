@@ -90,6 +90,8 @@ use std::mem;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
+use surrealdb_core::sql::Function;
+use surrealdb_core::sql::Model;
 #[cfg(not(target_arch = "wasm32"))]
 use tokio::fs::OpenOptions;
 #[cfg(not(target_arch = "wasm32"))]
@@ -823,6 +825,44 @@ async fn router(
 			};
 			live_queries.remove(&id);
 			let value = kill_live_query(kvs, id, session, vars.clone()).await?;
+			Ok(DbResponse::Other(value))
+		}
+		Method::Run => {
+			let (fn_name, fn_version, fn_params) = match &mut params[..] {
+				[Value::Strand(n), Value::Strand(v), Value::Array(p)] => (n, Some(v), p),
+				[Value::Strand(n), Value::None, Value::Array(p)] => (n, None, p),
+				_ => unreachable!(),
+			};
+			let func: Value = match &fn_name[0..4] {
+				"fn::" => {
+					Function::Custom(fn_name.chars().skip(4).collect(), fn_params.0.clone()).into()
+				}
+				"ml::" => {
+					let mut tmp = Model::default();
+
+					// 	Model {
+					// 	name: fn_name.chars().skip(4).collect(),
+					// 	version: todo!(),
+					// 	args: fn_args,
+					// }
+					tmp.name = fn_name.chars().skip(4).collect();
+					tmp.args = mem::take(fn_params).0;
+					tmp.version = mem::take(
+						fn_version
+							.ok_or(Error::Query("ML functions must have a version".to_string()))?,
+					)
+					.0
+					.into();
+					tmp
+				}
+				.into(),
+				_ => Function::Normal(mem::take(fn_name).0.into(), mem::take(fn_params).0).into(),
+			};
+			let stmt = Statement::Value(func);
+
+			let response = kvs.process(stmt.into(), &*session, Some(vars.clone())).await?;
+			let value = take(true, response).await?;
+
 			Ok(DbResponse::Other(value))
 		}
 	}

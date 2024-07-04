@@ -637,8 +637,10 @@ async fn router(
 			Ok(DbResponse::Other(value))
 		}
 		Method::Run => {
-			let (fn_name, fn_params) = match &params[..] {
-				[Value::Strand(n), Value::Array(p)] => (n, p),
+			let path = base_url.join(SQL_PATH)?;
+			let (fn_name, fn_version, fn_params) = match &params[..] {
+				[Value::Strand(n), Value::Strand(v), Value::Array(p)] => (n, Some(v), p),
+				[Value::Strand(n), Value::None, Value::Array(p)] => (n, None, p),
 				_ => unreachable!(),
 			};
 			let args: Vec<(String, Value)> = fn_params
@@ -646,12 +648,16 @@ async fn router(
 				.enumerate()
 				.map(|(i, v)| (format!("p{i}"), v.to_owned()))
 				.collect();
-			let arg_list = (0..args.len()).m
-			let statement = format!("{fn_name}()");
+			let arg_str =
+				(0..args.len()).map(|i| format!("$p{i}")).collect::<Vec<String>>().join(", ");
+			let statement = match fn_version {
+				Some(v) => format!("{fn_name}::<{v}>({arg_str})"),
+				None => format!("{fn_name}({arg_str})"),
+			};
 			let request =
-				client.post(path).headers(headers.clone()).auth(auth).query(todo!()).body(todo!());
-
-			todo!()
+				client.post(path).headers(headers.clone()).auth(auth).query(&args).body(statement);
+			let value = take(true, request).await?;
+			Ok(DbResponse::Other(value))
 		}
 	}
 }

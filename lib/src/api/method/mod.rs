@@ -55,6 +55,7 @@ pub use merge::Merge;
 pub use patch::Patch;
 pub use query::Query;
 pub use query::QueryStream;
+use run::IntoFn;
 pub use run::Run;
 pub use select::Select;
 pub use set::Set;
@@ -1257,10 +1258,12 @@ where
 
 	/// Runs a function
 	///
-	pub fn run(&self, fn_name: impl Into<String>, params: impl IntoParams) -> Run<C> {
+	pub fn run(&self, fn_name: impl IntoFn, params: impl IntoParams) -> Run<C> {
+		let (fn_name, fn_version) = fn_name.into_fn();
 		Run {
 			client: Cow::Borrowed(self),
-			fn_name: fn_name.into(),
+			fn_name,
+			fn_version,
 			params: params.into_params(),
 		}
 	}

@@ -89,7 +89,12 @@ pub(super) fn mock(route_rx: Receiver<Option<Route>>) {
 					_ => unreachable!(),
 				},
 				Method::Run => match &params[..] {
-					[Value::Strand(..), Value::Array(..)] => Ok(DbResponse::Other(Value::None)),
+					[Value::Strand(..), Value::Strand(..), Value::Array(..)] => {
+						Ok(DbResponse::Other(Value::None))
+					}
+					[Value::Strand(..), Value::None, Value::Array(..)] => {
+						Ok(DbResponse::Other(Value::None))
+					}
 					_ => unreachable!(),
 				},
 				Method::Export | Method::Import => match param.file {
