@@ -229,7 +229,7 @@ impl Fields {
 						}
 						// This expression is a normal field expression
 						_ => {
-							let expr = expr.compute(stk, ctx, opt, Some(doc)).await?;
+							let expr = expr.compute_bordered(stk, ctx, opt, Some(doc)).await?;
 							// Check if this is a single VALUE field expression
 							match self.single().is_some() {
 								false => out.set(stk, ctx, opt, name.as_ref(), expr).await?,
