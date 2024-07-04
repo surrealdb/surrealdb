@@ -88,8 +88,7 @@ where
 	T0: Into<Value>,
 {
 	fn into_params(self) -> Array {
-		let mut arr: Vec<Value> = Vec::with_capacity(1);
-		arr.push(self.0.into());
+		let arr: Vec<Value> = vec![self.0.into()];
 		Array::from(arr)
 	}
 }
@@ -100,9 +99,7 @@ where
 	T1: Into<Value>,
 {
 	fn into_params(self) -> Array {
-		let mut arr: Vec<Value> = Vec::with_capacity(1);
-		arr.push(self.0.into());
-		arr.push(self.1.into());
+		let arr: Vec<Value> = vec![self.0.into(), self.1.into()];
 		Array::from(arr)
 	}
 }
@@ -114,10 +111,7 @@ where
 	T2: Into<Value>,
 {
 	fn into_params(self) -> Array {
-		let mut arr: Vec<Value> = Vec::with_capacity(1);
-		arr.push(self.0.into());
-		arr.push(self.1.into());
-		arr.push(self.2.into());
+		let arr: Vec<Value> = vec![self.0.into(), self.1.into(), self.2.into()];
 		Array::from(arr)
 	}
 }

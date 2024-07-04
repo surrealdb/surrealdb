@@ -851,12 +851,11 @@ async fn router(
 						fn_version
 							.ok_or(Error::Query("ML functions must have a version".to_string()))?,
 					)
-					.0
-					.into();
+					.0;
 					tmp
 				}
 				.into(),
-				_ => Function::Normal(mem::take(fn_name).0.into(), mem::take(fn_params).0).into(),
+				_ => Function::Normal(mem::take(fn_name).0, mem::take(fn_params).0).into(),
 			};
 			let stmt = Statement::Value(func);
 
