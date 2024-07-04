@@ -72,13 +72,13 @@ impl InfoStructure for AccessType {
 				"authenticate".to_string(), if let Some(v) = v.authenticate => v.structure(),
 			}),
 			AccessType::Bearer(ac) => Value::from(map! {
-				"kind".to_string() => "BEARER".into(),
-				"level".to_string() => match ac.level {
-						BearerAccessLevel::Record => "RECORD",
-						BearerAccessLevel::User => "USER",
-        }.into(),
-				"jwt".to_string() => ac.jwt.structure(),
-			}),
+					"kind".to_string() => "BEARER".into(),
+					"level".to_string() => match ac.level {
+							BearerAccessLevel::Record => "RECORD",
+							BearerAccessLevel::User => "USER",
+			}.into(),
+					"jwt".to_string() => ac.jwt.structure(),
+				}),
 		}
 	}
 }
