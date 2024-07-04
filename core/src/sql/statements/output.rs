@@ -35,15 +35,17 @@ impl OutputStatement {
 		// Ensure futures are processed
 		let opt = &opt.new_with_futures(true);
 		// Process the output value
-		let mut val = self.what.compute(stk, ctx, opt, doc).await?;
+		let mut value = self.what.compute(stk, ctx, opt, doc).await?;
 		// Fetch any
 		if let Some(fetchs) = &self.fetch {
 			for fetch in fetchs.iter() {
-				val.fetch(stk, ctx, opt, fetch).await?;
+				value.fetch(stk, ctx, opt, fetch).await?;
 			}
 		}
 		//
-		Ok(val)
+		Err(Error::Return {
+			value,
+		})
 	}
 }
 

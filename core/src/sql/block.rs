@@ -112,16 +112,15 @@ impl Block {
 					v.compute(&ctx, opt, doc).await?;
 				}
 				Entry::Output(v) => {
-					// Return the RETURN value
-					return v.compute(stk, &ctx, opt, doc).await;
+					v.compute(stk, &ctx, opt, doc).await?;
 				}
 				Entry::Value(v) => {
 					if i == self.len() - 1 {
 						// If the last entry then return the value
-						return v.compute(stk, &ctx, opt, doc).await;
+						return v.compute_unbordered(stk, &ctx, opt, doc).await;
 					} else {
 						// Otherwise just process the value
-						v.compute(stk, &ctx, opt, doc).await?;
+						v.compute_unbordered(stk, &ctx, opt, doc).await?;
 					}
 				}
 			}
