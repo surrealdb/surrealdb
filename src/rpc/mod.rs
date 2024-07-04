@@ -35,7 +35,7 @@ impl RpcState {
 	pub fn new() -> Self {
 		RpcState {
 			web_sockets: WebSockets::default(),
-			live_queries: LiveQueries::default,
+			live_queries: LiveQueries::default(),
 		}
 	}
 }

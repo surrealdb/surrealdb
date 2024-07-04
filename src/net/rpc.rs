@@ -34,12 +34,11 @@ use super::headers::ContentType;
 
 use surrealdb::rpc::rpc_context::RpcContext;
 
-pub(super) fn router<S, B>() -> Router<S, B>
+pub(super) fn router<B>() -> Router<Arc<RpcState>, B>
 where
 	B: HttpBody + Send + 'static,
 	B::Data: Send,
 	B::Error: std::error::Error + Send + Sync + 'static,
-	S: Clone + Send + Sync + 'static,
 {
 	Router::new().route("/rpc", get(get_handler)).route("/rpc", post(post_handler))
 }
