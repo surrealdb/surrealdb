@@ -106,7 +106,7 @@ pub async fn db_access(
 												sess.or.clone_from(&session.or);
 												// Compute the value with the params
 												match kvs.evaluate(au, &sess, None).await {
-													Ok(val) => match val.record() {
+    												Ok(val) => match val.record() {
 														Some(id) => {
 															// Update rid with result from AUTHENTICATE clause
 															rid = id;

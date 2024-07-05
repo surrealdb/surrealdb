@@ -179,7 +179,7 @@ impl Statement {
 				// Ensure futures are processed
 				let opt = &opt.new_with_futures(true);
 				// Process the output value
-				v.compute(stk, ctx, opt, doc).await
+				v.compute_unbordered(stk, ctx, opt, doc).await
 			}
 			_ => unreachable!(),
 		}
