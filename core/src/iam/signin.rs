@@ -17,11 +17,7 @@ use std::sync::Arc;
 use subtle::ConstantTimeEq;
 use uuid::Uuid;
 
-pub async fn signin(
-	kvs: &Datastore,
-	session: &mut Session,
-	vars: Object,
-) -> Result<Option<String>, Error> {
+pub async fn signin(kvs: &Datastore, session: &mut Session, vars: Object) -> Result<String, Error> {
 	// Parse the specified variables
 	let ns = vars.get("NS").or_else(|| vars.get("ns"));
 	let db = vars.get("DB").or_else(|| vars.get("db"));
@@ -114,7 +110,7 @@ pub async fn db_access(
 	db: String,
 	ac: String,
 	vars: Object,
-) -> Result<Option<String>, Error> {
+) -> Result<String, Error> {
 	// Create a new readonly transaction
 	let mut tx = kvs.transaction(Read, Optimistic).await?;
 	// Fetch the specified access method from storage
@@ -213,7 +209,7 @@ pub async fn db_access(
 											// Check the authentication token
 											match enc {
 												// The auth token was created successfully
-												Ok(tk) => Ok(Some(tk)),
+												Ok(tk) => Ok(tk),
 												_ => Err(Error::TokenMakingFailed),
 											}
 										}
@@ -343,7 +339,7 @@ pub async fn db_user(
 	db: String,
 	user: String,
 	pass: String,
-) -> Result<Option<String>, Error> {
+) -> Result<String, Error> {
 	match verify_db_creds(kvs, &ns, &db, &user, &pass).await {
 		Ok(u) => {
 			// Create the authentication key
@@ -373,7 +369,7 @@ pub async fn db_user(
 			// Check the authentication token
 			match enc {
 				// The auth token was created successfully
-				Ok(tk) => Ok(Some(tk)),
+				Ok(tk) => Ok(tk),
 				_ => Err(Error::TokenMakingFailed),
 			}
 		}
@@ -500,7 +496,7 @@ pub async fn ns_user(
 	ns: String,
 	user: String,
 	pass: String,
-) -> Result<Option<String>, Error> {
+) -> Result<String, Error> {
 	match verify_ns_creds(kvs, &ns, &user, &pass).await {
 		Ok(u) => {
 			// Create the authentication key
@@ -528,7 +524,7 @@ pub async fn ns_user(
 			// Check the authentication token
 			match enc {
 				// The auth token was created successfully
-				Ok(tk) => Ok(Some(tk)),
+				Ok(tk) => Ok(tk),
 				_ => Err(Error::TokenMakingFailed),
 			}
 		}
@@ -542,7 +538,7 @@ pub async fn root_user(
 	session: &mut Session,
 	user: String,
 	pass: String,
-) -> Result<Option<String>, Error> {
+) -> Result<String, Error> {
 	match verify_root_creds(kvs, &user, &pass).await {
 		Ok(u) => {
 			// Create the authentication key
@@ -568,7 +564,7 @@ pub async fn root_user(
 			// Check the authentication token
 			match enc {
 				// The auth token was created successfully
-				Ok(tk) => Ok(Some(tk)),
+				Ok(tk) => Ok(tk),
 				_ => Err(Error::TokenMakingFailed),
 			}
 		}
@@ -828,7 +824,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 			);
 
 			// Decode token and check that it has been issued as intended
-			if let Ok(Some(tk)) = res {
+			if let Ok(tk) = res {
 				// Check that token can be verified with the defined algorithm
 				let val = Validation::new(Algorithm::RS256);
 				// Check that token can be verified with the defined public key
@@ -946,7 +942,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 			assert!(!sess.au.has_role(&Role::Owner), "Auth user expected to not have Owner role");
 			assert_eq!(sess.exp, None, "Session expiration is expected to match defined duration");
 			// Decode token and check that it has been issued as intended
-			if let Ok(Some(tk)) = res {
+			if let Ok(tk) = res {
 				// Decode token without validation
 				let token_data = decode::<Claims>(&tk, &DecodingKey::from_secret(&[]), &{
 					let mut validation = Validation::new(jsonwebtoken::Algorithm::HS256);
@@ -1025,7 +1021,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				"Session expiration is expected to match the defined duration"
 			);
 			// Decode token and check that it has been issued as intended
-			if let Ok(Some(tk)) = res {
+			if let Ok(tk) = res {
 				// Decode token without validation
 				let token_data = decode::<Claims>(&tk, &DecodingKey::from_secret(&[]), &{
 					let mut validation = Validation::new(jsonwebtoken::Algorithm::HS256);
@@ -1144,7 +1140,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 			assert!(!sess.au.has_role(&Role::Owner), "Auth user expected to not have Owner role");
 			assert_eq!(sess.exp, None, "Session expiration is expected to match defined duration");
 			// Decode token and check that it has been issued as intended
-			if let Ok(Some(tk)) = res {
+			if let Ok(tk) = res {
 				// Decode token without validation
 				let token_data = decode::<Claims>(&tk, &DecodingKey::from_secret(&[]), &{
 					let mut validation = Validation::new(jsonwebtoken::Algorithm::HS256);
@@ -1214,7 +1210,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				"Session expiration is expected to match the defined duration"
 			);
 			// Decode token and check that it has been issued as intended
-			if let Ok(Some(tk)) = res {
+			if let Ok(tk) = res {
 				// Decode token without validation
 				let token_data = decode::<Claims>(&tk, &DecodingKey::from_secret(&[]), &{
 					let mut validation = Validation::new(jsonwebtoken::Algorithm::HS256);
@@ -1316,7 +1312,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 			assert!(!sess.au.has_role(&Role::Owner), "Auth user expected to not have Owner role");
 			assert_eq!(sess.exp, None, "Session expiration is expected to match defined duration");
 			// Decode token and check that it has been issued as intended
-			if let Ok(Some(tk)) = res {
+			if let Ok(tk) = res {
 				// Decode token without validation
 				let token_data = decode::<Claims>(&tk, &DecodingKey::from_secret(&[]), &{
 					let mut validation = Validation::new(jsonwebtoken::Algorithm::HS256);
@@ -1381,7 +1377,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				"Session expiration is expected to match the defined duration"
 			);
 			// Decode token and check that it has been issued as intended
-			if let Ok(Some(tk)) = res {
+			if let Ok(tk) = res {
 				// Decode token without validation
 				let token_data = decode::<Claims>(&tk, &DecodingKey::from_secret(&[]), &{
 					let mut validation = Validation::new(jsonwebtoken::Algorithm::HS256);
