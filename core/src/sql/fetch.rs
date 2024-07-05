@@ -2,6 +2,7 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::err::Error;
 use crate::sql::fmt::Fmt;
+use crate::sql::index::{Distance, Distance1};
 use crate::sql::statements::info::InfoStructure;
 use crate::sql::{Idiom, Value};
 use reblessive::tree::Stk;
@@ -44,20 +45,32 @@ impl InfoStructure for Fetchs {
 	}
 }
 
-#[revisioned(revision = 1)]
+#[revisioned(revision = 2)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
-pub struct Fetch(pub Value);
+pub struct Fetch(
+	#[revision(end = 2, convert_fn = "convert_fetch_idiom")] pub Idiom,
+	#[revision(start = 2, default_fn = "default_value")] pub Value,
+);
 
 impl Fetch {
+	fn default_value(_revision: u16) -> Value {
+		Default::default()
+	}
+
+	fn convert_fetch_idiom(&mut self, _revision: u16, i: Idiom) -> Result<(), revision::Error> {
+		self.1 = Value::Idiom(i);
+		Ok(())
+	}
+
 	pub(crate) async fn compute(
 		&self,
 		stk: &mut Stk,
 		ctx: &Context<'_>,
 		opt: &Options,
 	) -> Result<Cow<Idiom>, Error> {
-		let i = match &self.0 {
+		let i = match &self.1 {
 			Value::Idiom(idiom) => Cow::Borrowed(idiom),
 			Value::Param(param) => {
 				let p = param.compute(stk, ctx, opt, None).await?;
@@ -81,16 +94,17 @@ impl Fetch {
 		Ok(i)
 	}
 }
+
 impl Deref for Fetch {
 	type Target = Value;
 	fn deref(&self) -> &Self::Target {
-		&self.0
+		&self.1
 	}
 }
 
 impl Display for Fetch {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-		Display::fmt(&self.0, f)
+		Display::fmt(&self.1, f)
 	}
 }
 
