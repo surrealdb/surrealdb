@@ -184,11 +184,12 @@ pub struct GrantBearer {
 impl GrantBearer {
 	#[doc(hidden)]
 	pub fn new() -> Self {
-		let id = random_string(20);
+		// The "SABK" prefix indicates Surreal Access Bearer Key.
+		let id = format!("SABK{}", random_string(16));
 		let secret = random_string(40);
 		Self {
 			id: id.clone().into(),
-			key: format!("surreal-{id}-{secret}").into(),
+			key: format!("{id}-{secret}").into(),
 		}
 	}
 }
@@ -416,7 +417,7 @@ impl AccessStatement {
 						let ac_str = stmt.ac.to_raw();
 						let gr_str = stmt.gr.to_raw();
 						let mut gr = run.get_ns_access_grant(opt.ns()?, &ac_str, &gr_str).await?;
-						if let Some(_) = gr.revocation {
+						if gr.revocation.is_some() {
 							// TODO(PR): Add new error.
 							return Err(Error::InvalidAuth);
 						}
@@ -438,7 +439,7 @@ impl AccessStatement {
 						let gr_str = stmt.gr.to_raw();
 						let mut gr =
 							run.get_db_access_grant(opt.ns()?, opt.db()?, &ac_str, &gr_str).await?;
-						if let Some(_) = gr.revocation {
+						if gr.revocation.is_some() {
 							// TODO(PR): Add new error.
 							return Err(Error::InvalidAuth);
 						}
