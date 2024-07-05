@@ -234,14 +234,14 @@ impl Transaction {
 	where
 		K: Into<Key> + Debug,
 	{
-		Scanner::Begin {
-			batch: *NORMAL_FETCH_SIZE,
-			store: self,
-			range: Range {
+		Scanner::new(
+			self,
+			*NORMAL_FETCH_SIZE,
+			Range {
 				start: rng.start.into(),
 				end: rng.end.into(),
 			},
-		}
+		)
 	}
 
 	// --------------------------------------------------
