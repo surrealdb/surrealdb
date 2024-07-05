@@ -67,7 +67,7 @@ impl Connection for Client {
 				capacity => flume::bounded(capacity),
 			};
 
-			router(base_url, client, route_rx);
+			tokio::spawn(run_router(base_url, client, route_rx));
 
 			let mut features = HashSet::new();
 			features.insert(ExtraFeatures::Backup);
@@ -94,30 +94,22 @@ impl Connection for Client {
 				request: (0, self.method, param),
 				response: sender,
 			};
-			router.sender.send_async(Some(route)).await?;
+			router.sender.send_async(route).await?;
 			Ok(receiver)
 		})
 	}
 }
 
-pub(crate) fn router(base_url: Url, client: reqwest::Client, route_rx: Receiver<Option<Route>>) {
-	tokio::spawn(async move {
-		let mut headers = HeaderMap::new();
-		let mut vars = IndexMap::new();
-		let mut auth = None;
-		let mut stream = route_rx.into_stream();
+pub(crate) async fn run_router(base_url: Url, client: reqwest::Client, route_rx: Receiver<Route>) {
+	let mut headers = HeaderMap::new();
+	let mut vars = IndexMap::new();
+	let mut auth = None;
+	let mut stream = route_rx.into_stream();
 
-		while let Some(Some(route)) = stream.next().await {
-			let result = super::router(
-				route.request,
-				&base_url,
-				&client,
-				&mut headers,
-				&mut vars,
-				&mut auth,
-			)
-			.await;
-			let _ = route.response.into_send_async(result).await;
-		}
-	});
+	while let Some(route) = stream.next().await {
+		let result =
+			super::router(route.request, &base_url, &client, &mut headers, &mut vars, &mut auth)
+				.await;
+		let _ = route.response.into_send_async(result).await;
+	}
 }
