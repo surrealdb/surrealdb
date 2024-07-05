@@ -169,7 +169,7 @@ pub enum Error {
 	},
 
 	/// The LIMIT clause must evaluate to a positive integer
-	#[error("Found {value} on FETCH CLAUSE, but FETCH is expected an idiom or a string")]
+	#[error("Found {value} on FETCH CLAUSE, but FETCH expects an idiom or a string")]
 	InvalidFetch {
 		value: Value,
 	},
