@@ -296,15 +296,13 @@ pub(crate) type QueryResult = Result<Value>;
 pub struct Response {
 	pub(crate) client: Surreal<Any>,
 	pub(crate) results: IndexMap<usize, (Stats, QueryResult)>,
-	pub(crate) live_queries: IndexMap<usize, Result<Stream<'static, Any, Value>>>,
+	pub(crate) live_queries: IndexMap<usize, Result<Stream<Value>>>,
 }
 
 /// A `LIVE SELECT` stream from the `query` method
 #[derive(Debug)]
 #[must_use = "streams do nothing unless you poll them"]
-pub struct QueryStream<R>(
-	pub(crate) Either<Stream<'static, Any, R>, SelectAll<Stream<'static, Any, R>>>,
-);
+pub struct QueryStream<R>(pub(crate) Either<Stream<R>, SelectAll<Stream<R>>>);
 
 impl futures::Stream for QueryStream<Value> {
 	type Item = Notification<Value>;

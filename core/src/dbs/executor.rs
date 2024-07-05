@@ -226,6 +226,9 @@ impl<'a> Executor<'a> {
 		// Initialise array of responses
 		let mut out: Vec<Response> = vec![];
 		let mut live_queries: Vec<TrackedResult> = vec![];
+		// Do we fast-forward a transaction?
+		// Set to true when we encounter a return statement in a transaction
+		let mut ff_txn = false;
 		// Process all statements in query
 		for stm in qry.into_iter() {
 			// Log the statement
@@ -242,6 +245,13 @@ impl<'a> Executor<'a> {
 			let is_stm_kill = matches!(stm, Statement::Kill(_));
 			// Check if this is a RETURN statement
 			let is_stm_output = matches!(stm, Statement::Output(_));
+			// Has this statement returned a value
+			let mut has_returned = false;
+			// Do we skip this statement?
+			if ff_txn && !matches!(stm, Statement::Commit(_) | Statement::Cancel(_)) {
+				debug!("Skipping statement due to fast forwarded transaction");
+				continue;
+			}
 			// Process a single statement
 			let res = match stm {
 				// Specify runtime options
@@ -289,6 +299,7 @@ impl<'a> Executor<'a> {
 					out.append(&mut buf);
 					debug_assert!(self.txn.is_none(), "commit(true) should have unset txn");
 					self.txn = None;
+					ff_txn = false;
 					continue;
 				}
 				// Switch to a different NS or DB
@@ -406,10 +417,21 @@ impl<'a> Executor<'a> {
 											.await
 									}
 								};
+								// Check if this is a RETURN statement
+								let can_return =
+									matches!(stm, Statement::Output(_) | Statement::Value(_));
 								// Catch global timeout
 								let res = match ctx.is_timedout() {
 									true => Err(Error::QueryTimedout),
-									false => res,
+									false => match res {
+										Err(Error::Return {
+											value,
+										}) if can_return => {
+											has_returned = true;
+											Ok(value)
+										}
+										res => res,
+									},
 								};
 								// Finalise transaction and return the result.
 								if res.is_ok() && stm.writeable() {
@@ -470,8 +492,9 @@ impl<'a> Executor<'a> {
 			};
 			// Output the response
 			if self.txn.is_some() {
-				if is_stm_output {
+				if is_stm_output || has_returned {
 					buf.clear();
+					ff_txn = true;
 				}
 				buf.push(res);
 			} else {

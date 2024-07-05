@@ -1,5 +1,6 @@
 use super::PATH;
 use super::{deserialize, serialize};
+use super::{HandleResult, RouterRequest};
 use crate::api::conn::Connection;
 use crate::api::conn::DbResponse;
 use crate::api::conn::Method;
@@ -23,16 +24,12 @@ use crate::engine::IntervalStream;
 use crate::opt::WaitFor;
 use crate::{Object, Value};
 use flume::Receiver;
-use futures::stream::SplitSink;
+use futures::stream::{SplitSink, SplitStream};
 use futures::SinkExt;
 use futures::StreamExt;
-use futures_concurrency::stream::Merge as _;
-use indexmap::IndexMap;
 use revision::revisioned;
 use serde::Deserialize;
 use std::collections::hash_map::Entry;
-use std::collections::BTreeMap;
-use std::collections::HashMap;
 use std::collections::HashSet;
 use std::future::Future;
 use std::mem;
@@ -55,19 +52,15 @@ use tokio_tungstenite::MaybeTlsStream;
 use tokio_tungstenite::WebSocketStream;
 use trice::Instant;
 
-type WsResult<T> = std::result::Result<T, WsError>;
-
 pub(crate) const MAX_MESSAGE_SIZE: usize = 64 << 20; // 64 MiB
 pub(crate) const MAX_FRAME_SIZE: usize = 16 << 20; // 16 MiB
 pub(crate) const WRITE_BUFFER_SIZE: usize = 128000; // tungstenite default
 pub(crate) const MAX_WRITE_BUFFER_SIZE: usize = WRITE_BUFFER_SIZE + MAX_MESSAGE_SIZE; // Recommended max according to tungstenite docs
 pub(crate) const NAGLE_ALG: bool = false;
 
-pub(crate) enum Either {
-	Request(Option<Route>),
-	Response(WsResult<Message>),
-	Ping,
-}
+type MessageSink = SplitSink<WebSocketStream<MaybeTlsStream<TcpStream>>, Message>;
+type MessageStream = SplitStream<WebSocketStream<MaybeTlsStream<TcpStream>>>;
+type RouterState = super::RouterState<MessageSink, MessageStream, Message>;
 
 #[cfg(any(feature = "native-tls", feature = "rustls"))]
 impl From<Tls> for Connector {
@@ -144,7 +137,7 @@ impl Connection for Client {
 				capacity => flume::bounded(capacity),
 			};
 
-			router(address, maybe_connector, capacity, config, socket, route_rx);
+			tokio::spawn(run_router(address, maybe_connector, capacity, config, socket, route_rx));
 
 			let mut features = HashSet::new();
 			features.insert(ExtraFeatures::LiveQueries);
@@ -172,384 +165,392 @@ impl Connection for Client {
 				request: (self.id, self.method, param),
 				response: sender,
 			};
-			router.sender.send_async(Some(route)).await?;
+			router.sender.send_async(route).await?;
 			Ok(receiver)
 		})
 	}
 }
 
-#[allow(clippy::too_many_lines)]
-pub(crate) fn router(
-	endpoint: Endpoint,
-	maybe_connector: Option<Connector>,
-	capacity: usize,
-	config: WebSocketConfig,
-	mut socket: WebSocketStream<MaybeTlsStream<TcpStream>>,
-	route_rx: Receiver<Option<Route>>,
-) {
-	tokio::spawn(async move {
-		let ping = {
-			let mut request = Object::new();
-			request.insert("method".to_owned(), PING_METHOD.to_owned());
-			let value = request.into();
-			let value = serialize(&value, endpoint.supports_revision).unwrap();
-			Message::Binary(value)
-		};
-
-		let mut var_stash = IndexMap::new();
-		let mut vars = IndexMap::new();
-		let mut replay = IndexMap::new();
-
-		'router: loop {
-			let (socket_sink, socket_stream) = socket.split();
-			let mut socket_sink = Socket(Some(socket_sink));
-
-			if let Socket(Some(socket_sink)) = &mut socket_sink {
-				let mut routes = match capacity {
-					0 => HashMap::new(),
-					capacity => HashMap::with_capacity(capacity),
-				};
-				let mut live_queries = HashMap::new();
-
-				let mut interval = time::interval(PING_INTERVAL);
-				// don't bombard the server with pings if we miss some ticks
-				interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
-
-				let pinger = IntervalStream::new(interval);
-
-				let streams = (
-					socket_stream.map(Either::Response),
-					route_rx.stream().map(Either::Request),
-					pinger.map(|_| Either::Ping),
-				);
-
-				let mut merged = streams.merge();
-				let mut last_activity = Instant::now();
-
-				while let Some(either) = merged.next().await {
-					match either {
-						Either::Request(Some(Route {
-							request,
-							response,
-						})) => {
-							let (id, method, param) = request;
-							let params = match param.query {
-								Some((query, bindings)) => {
-									vec![query.into(), bindings.into()]
-								}
-								None => param.other,
-							};
-							match method {
-								Method::Set => {
-									if let [Value::Strand(key), value] = &params[..2] {
-										var_stash.insert(id, (key.0.clone(), value.clone()));
-									}
-								}
-								Method::Unset => {
-									if let [Value::Strand(key)] = &params[..1] {
-										vars.swap_remove(&key.0);
-									}
-								}
-								Method::Live => {
-									if let Some(sender) = param.notification_sender {
-										if let [Value::Uuid(id)] = &params[..1] {
-											live_queries.insert(*id, sender);
-										}
-									}
-									if response
-										.into_send_async(Ok(DbResponse::Other(Value::None)))
-										.await
-										.is_err()
-									{
-										trace!("Receiver dropped");
-									}
-									// There is nothing to send to the server here
-									continue;
-								}
-								Method::Kill => {
-									if let [Value::Uuid(id)] = &params[..1] {
-										live_queries.remove(id);
-									}
-								}
-								_ => {}
-							}
-							let method_str = match method {
-								Method::Health => PING_METHOD,
-								_ => method.as_str(),
-							};
-							let message = {
-								let mut request = BTreeMap::new();
-								request.insert("id".to_owned(), Value::from(id));
-								request.insert("method".to_owned(), method_str.into());
-								if !params.is_empty() {
-									request.insert("params".to_owned(), params.into());
-								}
-								let payload = Value::from(request);
-								trace!("Request {payload}");
-								let payload =
-									serialize(&payload, endpoint.supports_revision).unwrap();
-								Message::Binary(payload)
-							};
-							if let Method::Authenticate
-							| Method::Invalidate
-							| Method::Signin
-							| Method::Signup
-							| Method::Use = method
-							{
-								replay.insert(method, message.clone());
-							}
-							match socket_sink.send(message).await {
-								Ok(..) => {
-									last_activity = Instant::now();
-									match routes.entry(id) {
-										Entry::Vacant(entry) => {
-											// Register query route
-											entry.insert((method, response));
-										}
-										Entry::Occupied(..) => {
-											let error = Error::DuplicateRequestId(id);
-											if response
-												.into_send_async(Err(error.into()))
-												.await
-												.is_err()
-											{
-												trace!("Receiver dropped");
-											}
-										}
-									}
-								}
-								Err(error) => {
-									let error = Error::Ws(error.to_string());
-									if response.into_send_async(Err(error.into())).await.is_err() {
-										trace!("Receiver dropped");
-									}
-									break;
-								}
-							}
-						}
-						Either::Response(result) => {
-							last_activity = Instant::now();
-							match result {
-								Ok(message) => {
-									match Response::try_from(&message, endpoint.supports_revision) {
-										Ok(option) => {
-											// We are only interested in responses that are not empty
-											if let Some(response) = option {
-												trace!("{response:?}");
-												match response.id {
-													// If `id` is set this is a normal response
-													Some(id) => {
-														if let Ok(id) = id.coerce_to_i64() {
-															// We can only route responses with IDs
-															if let Some((method, sender)) =
-																routes.remove(&id)
-															{
-																if matches!(method, Method::Set) {
-																	if let Some((key, value)) =
-																		var_stash.swap_remove(&id)
-																	{
-																		vars.insert(key, value);
-																	}
-																}
-																// Send the response back to the caller
-																let mut response = response.result;
-																if matches!(method, Method::Insert)
-																{
-																	// For insert, we need to flatten single responses in an array
-																	if let Ok(Data::Other(
-																		Value::Array(value),
-																	)) = &mut response
-																	{
-																		if let [value] =
-																			&mut value.0[..]
-																		{
-																			response =
-																				Ok(Data::Other(
-																					mem::take(
-																						value,
-																					),
-																				));
-																		}
-																	}
-																}
-																let _res = sender
-																	.into_send_async(
-																		DbResponse::from(response),
-																	)
-																	.await;
-															}
-														}
-													}
-													// If `id` is not set, this may be a live query notification
-													None => match response.result {
-														Ok(Data::Live(notification)) => {
-															let live_query_id = notification.id;
-															// Check if this live query is registered
-															if let Some(sender) =
-																live_queries.get(&live_query_id)
-															{
-																// Send the notification back to the caller or kill live query if the receiver is already dropped
-																if sender
-																	.send(notification)
-																	.await
-																	.is_err()
-																{
-																	live_queries
-																		.remove(&live_query_id);
-																	let kill = {
-																		let mut request =
-																			BTreeMap::new();
-																		request.insert(
-																			"method".to_owned(),
-																			Method::Kill
-																				.as_str()
-																				.into(),
-																		);
-																		request.insert(
-																			"params".to_owned(),
-																			vec![Value::from(
-																				live_query_id,
-																			)]
-																			.into(),
-																		);
-																		let value =
-																			Value::from(request);
-																		let value = serialize(
-																			&value,
-																			endpoint
-																				.supports_revision,
-																		)
-																		.unwrap();
-																		Message::Binary(value)
-																	};
-																	if let Err(error) =
-																		socket_sink.send(kill).await
-																	{
-																		trace!("failed to send kill query to the server; {error:?}");
-																		break;
-																	}
-																}
-															}
-														}
-														Ok(..) => { /* Ignored responses like pings */
-														}
-														Err(error) => error!("{error:?}"),
-													},
-												}
-											}
-										}
-										Err(error) => {
-											#[revisioned(revision = 1)]
-											#[derive(Deserialize)]
-											struct Response {
-												id: Option<Value>,
-											}
-
-											// Let's try to find out the ID of the response that failed to deserialise
-											if let Message::Binary(binary) = message {
-												if let Ok(Response {
-													id,
-												}) = deserialize(
-													&mut &binary[..],
-													endpoint.supports_revision,
-												) {
-													// Return an error if an ID was returned
-													if let Some(Ok(id)) =
-														id.map(Value::coerce_to_i64)
-													{
-														if let Some((_method, sender)) =
-															routes.remove(&id)
-														{
-															let _res = sender
-																.into_send_async(Err(error))
-																.await;
-														}
-													}
-												} else {
-													// Unfortunately, we don't know which response failed to deserialize
-													warn!(
-														"Failed to deserialise message; {error:?}"
-													);
-												}
-											}
-										}
-									}
-								}
-								Err(error) => {
-									match error {
-										WsError::ConnectionClosed => {
-											trace!("Connection successfully closed on the server");
-										}
-										error => {
-											trace!("{error}");
-										}
-									}
-									break;
-								}
-							}
-						}
-						Either::Ping => {
-							// only ping if we haven't talked to the server recently
-							if last_activity.elapsed() >= PING_INTERVAL {
-								trace!("Pinging the server");
-								if let Err(error) = socket_sink.send(ping.clone()).await {
-									trace!("failed to ping the server; {error:?}");
-									break;
-								}
-							}
-						}
-						// Close connection request received
-						Either::Request(None) => {
-							match socket_sink.send(Message::Close(None)).await {
-								Ok(..) => trace!("Connection closed successfully"),
-								Err(error) => {
-									warn!("Failed to close database connection; {error}")
-								}
-							}
-							break 'router;
-						}
-					}
+async fn router_handle_route(
+	Route {
+		request,
+		response,
+	}: Route,
+	state: &mut RouterState,
+	endpoint: &Endpoint,
+) -> HandleResult {
+	let (id, method, param) = request;
+	let params = match param.query {
+		Some((query, bindings)) => {
+			vec![query.into(), bindings.into()]
+		}
+		None => param.other,
+	};
+	match method {
+		Method::Set => {
+			if let [Value::String(key), value] = &params[..2] {
+				state.var_stash.insert(id, (key.0.clone(), value.clone()));
+			}
+		}
+		Method::Unset => {
+			if let [Value::String(key)] = &params[..1] {
+				state.vars.swap_remove(&key.0);
+			}
+		}
+		Method::Live => {
+			if let Some(sender) = param.notification_sender {
+				if let [Value::Uuid(id)] = &params[..1] {
+					state.live_queries.insert(id, sender);
 				}
 			}
+			if response.clone().into_send_async(Ok(DbResponse::Other(Value::None))).await.is_err() {
+				trace!("Receiver dropped");
+			}
+			// There is nothing to send to the server here
+		}
+		Method::Kill => {
+			if let [Value::Uuid(id)] = &params[..1] {
+				state.live_queries.remove(id);
+			}
+		}
+		_ => {}
+	}
+	let method_str = match method {
+		Method::Health => PING_METHOD,
+		_ => method.as_str(),
+	};
+	let message = {
+		let request = RouterRequest {
+			id: Some(Value::from(id)),
+			method: method_str.into(),
+			params: (!params.is_empty()).then(|| params.into()),
+		};
 
-			'reconnect: loop {
-				trace!("Reconnecting...");
-				match connect(&endpoint, Some(config), maybe_connector.clone()).await {
-					Ok(s) => {
-						socket = s;
-						for (_, message) in &replay {
-							if let Err(error) = socket.send(message.clone()).await {
-								trace!("{error}");
-								time::sleep(time::Duration::from_secs(1)).await;
-								continue 'reconnect;
-							}
-						}
-						for (key, value) in &vars {
-							let mut request = BTreeMap::new();
-							request.insert("method".to_owned(), Method::Set.as_str().into());
-							request.insert(
-								"params".to_owned(),
-								vec![key.as_str().into(), value.clone()].into(),
-							);
-							let payload = Value::from(request);
-							trace!("Request {payload}");
-							if let Err(error) = socket.send(Message::Binary(payload.into())).await {
-								trace!("{error}");
-								time::sleep(time::Duration::from_secs(1)).await;
-								continue 'reconnect;
-							}
-						}
-						trace!("Reconnected successfully");
-						break;
-					}
-					Err(error) => {
-						trace!("Failed to reconnect; {error}");
-						time::sleep(time::Duration::from_secs(1)).await;
+		trace!("Request {:?}", request);
+		let payload = serialize(&request, endpoint.supports_revision).unwrap();
+		Message::Binary(payload)
+	};
+	if let Method::Authenticate
+	| Method::Invalidate
+	| Method::Signin
+	| Method::Signup
+	| Method::Use = method
+	{
+		state.replay.insert(method, message.clone());
+	}
+	match state.sink.send(message).await {
+		Ok(_) => {
+			state.last_activity = Instant::now();
+			match state.routes.entry(id) {
+				Entry::Vacant(entry) => {
+					// Register query route
+					entry.insert((method, response));
+				}
+				Entry::Occupied(..) => {
+					let error = Error::DuplicateRequestId(id);
+					if response.into_send_async(Err(error.into())).await.is_err() {
+						trace!("Receiver dropped");
 					}
 				}
 			}
 		}
-	});
+		Err(error) => {
+			let error = Error::Ws(error.to_string());
+			if response.into_send_async(Err(error.into())).await.is_err() {
+				trace!("Receiver dropped");
+			}
+			return HandleResult::Disconnected;
+		}
+	}
+	HandleResult::Ok
+}
+
+async fn router_handle_response(
+	response: Message,
+	state: &mut RouterState,
+	endpoint: &Endpoint,
+) -> HandleResult {
+	match Response::try_from(&response, endpoint.supports_revision) {
+		Ok(option) => {
+			// We are only interested in responses that are not empty
+			if let Some(response) = option {
+				trace!("{response:?}");
+				match response.id {
+					// If `id` is set this is a normal response
+					Some(id) => {
+						if let Ok(id) = id.coerce_to_i64() {
+							// We can only route responses with IDs
+							if let Some((method, sender)) = state.routes.remove(&id) {
+								if matches!(method, Method::Set) {
+									if let Some((key, value)) = state.var_stash.swap_remove(&id) {
+										state.vars.insert(key, value);
+									}
+								}
+								// Send the response back to the caller
+								let mut response = response.result;
+								if matches!(method, Method::Insert) {
+									// For insert, we need to flatten single responses in an array
+									if let Ok(Data::Other(Value::Array(value))) = &mut response {
+										if let [value] = &mut value.0[..] {
+											response = Ok(Data::Other(mem::take(value)));
+										}
+									}
+								}
+								let _res = sender.into_send_async(DbResponse::from(response)).await;
+							}
+						}
+					}
+					// If `id` is not set, this may be a live query notification
+					None => {
+						match response.result {
+							Ok(Data::Live(notification)) => {
+								let live_query_id = notification.id;
+								// Check if this live query is registered
+								if let Some(sender) = state.live_queries.get(&live_query_id) {
+									// Send the notification back to the caller or kill live query if the receiver is already dropped
+									if sender.send(notification).await.is_err() {
+										state.live_queries.remove(&live_query_id);
+										let kill = {
+											let request = RouterRequest {
+												id: None,
+												method: Method::Kill.as_str().into(),
+												params: Some(
+													vec![Value::from(live_query_id)].into(),
+												),
+											};
+											let value =
+												serialize(&request, endpoint.supports_revision)
+													.unwrap();
+											Message::Binary(value)
+										};
+										if let Err(error) = state.sink.send(kill).await {
+											trace!("failed to send kill query to the server; {error:?}");
+											return HandleResult::Disconnected;
+										}
+									}
+								}
+							}
+							Ok(..) => { /* Ignored responses like pings */ }
+							Err(error) => error!("{error:?}"),
+						}
+					}
+				}
+			}
+		}
+		Err(error) => {
+			#[revisioned(revision = 1)]
+			#[derive(Deserialize)]
+			struct Response {
+				id: Option<Value>,
+			}
+
+			// Let's try to find out the ID of the response that failed to deserialise
+			if let Message::Binary(binary) = response {
+				if let Ok(Response {
+					id,
+				}) = deserialize(&mut &binary[..], endpoint.supports_revision)
+				{
+					// Return an error if an ID was returned
+					if let Some(Ok(id)) = id.map(Value::coerce_to_i64) {
+						if let Some((_method, sender)) = state.routes.remove(&id) {
+							let _res = sender.into_send_async(Err(error)).await;
+						}
+					}
+				} else {
+					// Unfortunately, we don't know which response failed to deserialize
+					warn!("Failed to deserialise message; {error:?}");
+				}
+			}
+		}
+	}
+	HandleResult::Ok
+}
+
+async fn router_reconnect(
+	maybe_connector: &Option<Connector>,
+	config: &WebSocketConfig,
+	state: &mut RouterState,
+	endpoint: &Endpoint,
+) {
+	loop {
+		trace!("Reconnecting...");
+		match connect(endpoint, Some(*config), maybe_connector.clone()).await {
+			Ok(s) => {
+				let (new_sink, new_stream) = s.split();
+				state.sink = new_sink;
+				state.stream = new_stream;
+				for (_, message) in &state.replay {
+					if let Err(error) = state.sink.send(message.clone()).await {
+						trace!("{error}");
+						time::sleep(time::Duration::from_secs(1)).await;
+						continue;
+					}
+				}
+				for (key, value) in &state.vars {
+					let request = RouterRequest {
+						id: None,
+						method: Method::Set.as_str().into(),
+						params: Some(vec![key.as_str().into(), value.clone()].into()),
+					};
+					trace!("Request {:?}", request);
+					let payload = serialize(&request, endpoint.supports_revision).unwrap();
+					if let Err(error) = state.sink.send(Message::Binary(payload)).await {
+						trace!("{error}");
+						time::sleep(time::Duration::from_secs(1)).await;
+						continue;
+					}
+				}
+				trace!("Reconnected successfully");
+				break;
+			}
+			Err(error) => {
+				trace!("Failed to reconnect; {error}");
+				time::sleep(time::Duration::from_secs(1)).await;
+			}
+		}
+	}
+}
+
+pub(crate) async fn run_router(
+	endpoint: Endpoint,
+	maybe_connector: Option<Connector>,
+	_capacity: usize,
+	config: WebSocketConfig,
+	socket: WebSocketStream<MaybeTlsStream<TcpStream>>,
+	route_rx: Receiver<Route>,
+) {
+	let ping = {
+		let request = RouterRequest {
+			id: None,
+			method: PING_METHOD.into(),
+			params: None,
+		};
+		let value = serialize(&request, endpoint.supports_revision).unwrap();
+		Message::Binary(value)
+	};
+
+	let (socket_sink, socket_stream) = socket.split();
+	let mut state = RouterState::new(socket_sink, socket_stream);
+	let mut route_stream = route_rx.into_stream();
+
+	'router: loop {
+		let mut interval = time::interval(PING_INTERVAL);
+		// don't bombard the server with pings if we miss some ticks
+		interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
+
+		let mut pinger = IntervalStream::new(interval);
+		// Turn into a stream instead of calling recv_async
+		// The stream seems to be able to keep some state which would otherwise need to be
+		// recreated with each next.
+
+		state.last_activity = Instant::now();
+		state.live_queries.clear();
+		state.routes.clear();
+
+		loop {
+			tokio::select! {
+				route = route_stream.next() => {
+					// handle incoming route
+
+					let Some(response) = route else {
+						// route returned none, frontend dropped the channel, meaning the router
+						// should quit.
+						match state.sink.send(Message::Close(None)).await {
+							Ok(..) => trace!("Connection closed successfully"),
+							Err(error) => {
+								warn!("Failed to close database connection; {error}")
+							}
+						}
+						break 'router;
+					};
+
+					match router_handle_route(response, &mut state, &endpoint).await {
+						HandleResult::Ok => {},
+						HandleResult::Disconnected => {
+							router_reconnect(
+								&maybe_connector,
+								&config,
+								&mut state,
+								&endpoint,
+							)
+							.await;
+							continue 'router;
+						}
+					}
+				}
+				result = state.stream.next() => {
+					// Handle result from database.
+
+					let Some(result) = result else {
+						// stream returned none meaning the connection dropped, try to reconnect.
+						router_reconnect(
+							&maybe_connector,
+							&config,
+							&mut state,
+							&endpoint,
+						)
+						.await;
+						continue 'router;
+					};
+
+					state.last_activity = Instant::now();
+					match result {
+						Ok(message) => {
+							match router_handle_response(message, &mut state, &endpoint).await {
+								HandleResult::Ok => continue,
+								HandleResult::Disconnected => {
+									router_reconnect(
+										&maybe_connector,
+										&config,
+										&mut state,
+										&endpoint,
+									)
+									.await;
+									continue 'router;
+								}
+							}
+						}
+						Err(error) => {
+							match error {
+								WsError::ConnectionClosed => {
+									trace!("Connection successfully closed on the server");
+								}
+								error => {
+									trace!("{error}");
+								}
+							}
+							router_reconnect(
+								&maybe_connector,
+								&config,
+								&mut state,
+								&endpoint,
+							)
+							.await;
+							continue 'router;
+						}
+					}
+				}
+				_ = pinger.next() => {
+					// only ping if we haven't talked to the server recently
+					if state.last_activity.elapsed() >= PING_INTERVAL {
+						trace!("Pinging the server");
+						if let Err(error) = state.sink.send(ping.clone()).await {
+							trace!("failed to ping the server; {error:?}");
+							router_reconnect(
+								&maybe_connector,
+								&config,
+								&mut state,
+								&endpoint,
+							)
+							.await;
+							continue 'router;
+						}
+					}
+
+				}
+			}
+		}
+	}
 }
 
 impl Response {
@@ -588,8 +589,6 @@ impl Response {
 	}
 }
 
-pub struct Socket(Option<SplitSink<WebSocketStream<MaybeTlsStream<TcpStream>>, Message>>);
-
 #[cfg(test)]
 mod tests {
 	use super::serialize;
@@ -613,7 +612,7 @@ mod tests {
 		//
 		let compress = |v: &Vec<u8>| {
 			let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
-			encoder.write_all(&v).unwrap();
+			encoder.write_all(v).unwrap();
 			encoder.finish().unwrap()
 		};
 		// Generate a random vector

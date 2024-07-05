@@ -8,14 +8,14 @@ use crate::Value;
 use flume::Receiver;
 use futures::StreamExt;
 
-pub(super) fn mock(route_rx: Receiver<Option<Route>>) {
+pub(super) fn mock(route_rx: Receiver<Route>) {
 	tokio::spawn(async move {
 		let mut stream = route_rx.into_stream();
 
-		while let Some(Some(Route {
+		while let Some(Route {
 			request,
 			response,
-		})) = stream.next().await
+		}) = stream.next().await
 		{
 			let (_, method, param) = request;
 			let mut params = param.other;

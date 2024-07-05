@@ -16,7 +16,9 @@ use crate::sql::range::Range;
 use crate::sql::table::Table;
 use crate::sql::thing::Thing;
 use crate::sql::value::Value;
-use reblessive::{tree::Stk, TreeStack};
+use reblessive::tree::Stk;
+#[cfg(not(target_arch = "wasm32"))]
+use reblessive::TreeStack;
 use std::mem;
 
 #[derive(Clone)]

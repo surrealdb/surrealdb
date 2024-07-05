@@ -8,7 +8,6 @@ use crate::dbs::DB;
 use crate::rpc::connection::Connection;
 use crate::rpc::response::success;
 use crate::telemetry::metrics::ws::NotificationContext;
-use once_cell::sync::Lazy;
 use opentelemetry::Context as TelemetryContext;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -25,13 +24,24 @@ type WebSockets = RwLock<HashMap<Uuid, WebSocket>>;
 /// Mapping of LIVE Query ID to WebSocket ID
 type LiveQueries = RwLock<HashMap<Uuid, Uuid>>;
 
-/// Stores the currently connected WebSockets
-pub(crate) static WEBSOCKETS: Lazy<WebSockets> = Lazy::new(WebSockets::default);
-/// Stores the currently initiated LIVE queries
-pub(crate) static LIVE_QUERIES: Lazy<LiveQueries> = Lazy::new(LiveQueries::default);
+pub struct RpcState {
+	/// Stores the currently connected WebSockets
+	pub web_sockets: WebSockets,
+	/// Stores the currently initiated LIVE queries
+	pub live_queries: LiveQueries,
+}
+
+impl RpcState {
+	pub fn new() -> Self {
+		RpcState {
+			web_sockets: WebSockets::default(),
+			live_queries: LiveQueries::default(),
+		}
+	}
+}
 
 /// Performs notification delivery to the WebSockets
-pub(crate) async fn notifications(canceller: CancellationToken) {
+pub(crate) async fn notifications(state: Arc<RpcState>, canceller: CancellationToken) {
 	// Listen to the notifications channel
 	if let Some(channel) = DB.get().unwrap().notifications() {
 		// Loop continuously
@@ -44,9 +54,9 @@ pub(crate) async fn notifications(canceller: CancellationToken) {
 				// Receive a notification on the channel
 				Ok(notification) = channel.recv() => {
 					// Find which WebSocket the notification belongs to
-					if let Some(id) = LIVE_QUERIES.read().await.get(&notification.id) {
+					if let Some(id) = state.live_queries.read().await.get(&notification.id) {
 						// Check to see if the WebSocket exists
-						if let Some(rpc) = WEBSOCKETS.read().await.get(id) {
+						if let Some(rpc) = state.web_sockets.read().await.get(id) {
 							// Serialize the message to send
 							let message = success(None, notification);
 							// Add metrics
@@ -69,21 +79,21 @@ pub(crate) async fn notifications(canceller: CancellationToken) {
 }
 
 /// Closes all WebSocket connections, waiting for graceful shutdown
-pub(crate) async fn graceful_shutdown() {
+pub(crate) async fn graceful_shutdown(state: Arc<RpcState>) {
 	// Close WebSocket connections, ensuring queued messages are processed
-	for (_, rpc) in WEBSOCKETS.read().await.iter() {
+	for (_, rpc) in state.web_sockets.read().await.iter() {
 		rpc.read().await.canceller.cancel();
 	}
 	// Wait for all existing WebSocket connections to finish sending
-	while WEBSOCKETS.read().await.len() > 0 {
+	while state.web_sockets.read().await.len() > 0 {
 		tokio::time::sleep(Duration::from_millis(100)).await;
 	}
 }
 
 /// Forces a fast shutdown of all WebSocket connections
-pub(crate) fn shutdown() {
+pub(crate) fn shutdown(state: Arc<RpcState>) {
 	// Close all WebSocket connections immediately
-	if let Ok(mut writer) = WEBSOCKETS.try_write() {
+	if let Ok(mut writer) = state.web_sockets.try_write() {
 		writer.drain();
 	}
 }
