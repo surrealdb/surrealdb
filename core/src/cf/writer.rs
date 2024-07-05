@@ -140,7 +140,7 @@ impl Writer {
 #[cfg(test)]
 mod tests {
 	use std::borrow::Cow;
-	use std::time::Duration;
+	use std::time::{Duration, Instant};
 
 	use crate::cf::{ChangeSet, DatabaseMutation, TableMutation, TableMutations};
 	use crate::dbs::Session;
