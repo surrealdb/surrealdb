@@ -1689,7 +1689,9 @@ SELECT bar as foo,[1,2],bar OMIT bar FROM ONLY a,1
 			start: Some(Start(Value::Object(Object(
 				[("a".to_owned(), Value::Bool(true))].into_iter().collect()
 			)))),
-			fetch: Some(Fetchs(vec![Fetch(Idiom(vec![Part::Field(Ident("foo".to_owned()))]))])),
+			fetch: Some(Fetchs(vec![Fetch(Value::Idiom(Idiom(vec![Part::Field(Ident(
+				"foo".to_owned()
+			))])))])),
 			version: Some(Version(Datetime(expected_datetime))),
 			timeout: None,
 			parallel: false,
@@ -1951,11 +1953,11 @@ fn parse_live() {
 	assert_eq!(
 		stmt.fetch,
 		Some(Fetchs(vec![
-			Fetch(Idiom(vec![
+			Fetch(Value::Idiom(Idiom(vec![
 				Part::Field(Ident("a".to_owned())),
 				Part::Where(Value::Idiom(Idiom(vec![Part::Field(Ident("foo".to_owned()))]))),
-			])),
-			Fetch(Idiom(vec![Part::Field(Ident("b".to_owned()))])),
+			]))),
+			Fetch(Value::Idiom(Idiom(vec![Part::Field(Ident("b".to_owned()))]))),
 		])),
 	)
 }
@@ -1979,9 +1981,9 @@ fn parse_return() {
 		res,
 		Statement::Output(OutputStatement {
 			what: Value::Idiom(Idiom(vec![Part::Field(Ident("RETRUN".to_owned()))])),
-			fetch: Some(Fetchs(vec![Fetch(Idiom(vec![Part::Field(
+			fetch: Some(Fetchs(vec![Fetch(Value::Idiom(Idiom(vec![Part::Field(
 				Ident("RETURN".to_owned()).to_owned()
-			)]))])),
+			)])))])),
 		}),
 	)
 }
