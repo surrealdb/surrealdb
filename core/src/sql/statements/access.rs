@@ -47,7 +47,7 @@ pub struct AccessStatementGrant {
 #[non_exhaustive]
 pub struct AccessStatementRevoke {
 	pub ac: Ident,
-	pub gr: Uuid,
+	pub gr: Ident,
 }
 
 #[revisioned(revision = 1)]
@@ -55,7 +55,7 @@ pub struct AccessStatementRevoke {
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub struct AccessGrant {
-	pub id: Uuid,                     // Unique grant identifier.
+	pub id: Ident,                    // Unique grant identifier.
 	pub ac: Ident,                    // Access method used to create the grant.
 	pub creation: Datetime,           // Grant creation time.
 	pub expiration: Option<Datetime>, // Grant expiration time, if any.
@@ -94,7 +94,7 @@ impl AccessGrant {
 impl From<AccessGrant> for Object {
 	fn from(grant: AccessGrant) -> Self {
 		let mut res = Object::default();
-		res.insert("id".to_owned(), Value::from(grant.id));
+		res.insert("id".to_owned(), Value::from(grant.id.to_string()));
 		res.insert("ac".to_owned(), Value::from(grant.ac.to_string()));
 		res.insert("creation".to_owned(), Value::from(grant.creation));
 		res.insert("expiration".to_owned(), Value::from(grant.expiration));
@@ -124,7 +124,7 @@ impl From<AccessGrant> for Object {
 				}
 			}
 			Grant::Bearer(bg) => {
-				gr.insert("id".to_owned(), Value::from(bg.id));
+				gr.insert("id".to_owned(), Value::from(bg.id.to_string()));
 				gr.insert("key".to_owned(), Value::from(bg.key));
 			}
 		};
@@ -177,7 +177,7 @@ pub struct GrantRecord {
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub struct GrantBearer {
-	pub id: Strand,  // Key ID
+	pub id: Ident,   // Key ID
 	pub key: Strand, // Key. Will be stored but afterwards returned redacted.
 }
 
@@ -214,7 +214,7 @@ impl AccessStatement {
 		_doc: Option<&CursorDoc<'_>>,
 	) -> Result<Value, Error> {
 		match self {
-			AccessStatement::Grant(grant) => {
+			AccessStatement::Grant(stmt) => {
 				let base = opt.selected_base()?;
 				// Allowed to run?
 				opt.is_allowed(Action::Edit, ResourceKind::Access, &base)?;
@@ -225,14 +225,14 @@ impl AccessStatement {
 						// Clear the cache
 						run.clear_cache();
 						// Read the access definition
-						let ac = run.get_ns_access(opt.ns()?, &grant.ac.to_raw()).await?;
+						let ac = run.get_ns_access(opt.ns()?, &stmt.ac.to_raw()).await?;
 						// Verify the access type
 						match ac.kind {
 							AccessType::Jwt(_) => Err(Error::FeatureNotYetImplemented {
 								feature: "Grants for JWT on namespace".to_string(),
 							}),
 							AccessType::Bearer(at) => {
-								match &grant.subject {
+								match &stmt.subject {
 									Some(Subject::User(user)) => {
 										// Grant subject must match access method level.
 										if !matches!(&at.level, BearerAccessLevel::User) {
@@ -250,11 +250,13 @@ impl AccessStatement {
 									// TODO(PR): Add new error.
 									None => return Err(Error::InvalidAuth),
 								}
+								// Create a new bearer key.
+								let grant = GrantBearer::new();
 								let gr = AccessGrant {
 									ac: ac.name,
 									// Unique grant identifier.
-									// Ref: RFC4122BIS Sec. 8.
-									id: Uuid::new_v4(),
+									// In the case of bearer grants, the key identifier.
+									id: grant.id.clone(),
 									// Current time.
 									creation: Datetime::default(),
 									// Current time plus grant duration. Only if set.
@@ -262,9 +264,8 @@ impl AccessStatement {
 									// The grant is initially not revoked.
 									revocation: None,
 									// Subject associated with the grant.
-									subject: grant.subject.clone(),
-									// Create a new bearer key.
-									grant: Grant::Bearer(GrantBearer::new()),
+									subject: stmt.subject.to_owned(),
+									grant: Grant::Bearer(grant),
 								};
 								let ac_str = gr.ac.to_raw();
 								let gr_str = gr.id.to_raw();
@@ -284,8 +285,7 @@ impl AccessStatement {
 						// Clear the cache
 						run.clear_cache();
 						// Read the access definition
-						let ac =
-							run.get_db_access(opt.ns()?, opt.db()?, &grant.ac.to_raw()).await?;
+						let ac = run.get_db_access(opt.ns()?, opt.db()?, &stmt.ac.to_raw()).await?;
 						// Verify the access type
 						match ac.kind {
 							AccessType::Jwt(_) => Err(Error::FeatureNotYetImplemented {
@@ -295,7 +295,7 @@ impl AccessStatement {
 								feature: "Grants for record on database".to_string(),
 							}),
 							AccessType::Bearer(at) => {
-								match &grant.subject {
+								match &stmt.subject {
 									Some(Subject::User(user)) => {
 										// Grant subject must match access method level.
 										if !matches!(&at.level, BearerAccessLevel::User) {
@@ -315,11 +315,13 @@ impl AccessStatement {
 									// TODO(PR): Add new error.
 									None => return Err(Error::InvalidAuth),
 								}
+								// Create a new bearer key.
+								let grant = GrantBearer::new();
 								let gr = AccessGrant {
 									ac: ac.name,
 									// Unique grant identifier.
-									// Ref: RFC4122BIS Sec. 8.
-									id: Uuid::new_v4(),
+									// In the case of bearer grants, the key identifier.
+									id: grant.id.clone(),
 									// Current time.
 									creation: Datetime::default(),
 									// Current time plus grant duration. Only if set.
@@ -327,7 +329,7 @@ impl AccessStatement {
 									// The grant is initially not revoked.
 									revocation: None,
 									// Subject associated with the grant.
-									subject: grant.subject.clone(),
+									subject: stmt.subject.clone(),
 									// Create a new bearer key.
 									grant: Grant::Bearer(GrantBearer::new()),
 								};
@@ -347,15 +349,13 @@ impl AccessStatement {
 							}
 						}
 					}
-					_ => {
-						return Err(Error::FeatureNotYetImplemented {
-							feature: "Managing access methods outside of a namespace or database"
-								.to_string(),
-						})
-					}
+					_ => Err(Error::FeatureNotYetImplemented {
+						feature: "Managing access methods outside of a namespace or database"
+							.to_string(),
+					}),
 				}
 			}
-			AccessStatement::List(list) => {
+			AccessStatement::List(stmt) => {
 				let base = opt.selected_base()?;
 				// Allowed to run?
 				opt.is_allowed(Action::View, ResourceKind::Access, &base)?;
@@ -368,7 +368,9 @@ impl AccessStatement {
 						// Get the grants for the access method
 						let mut grants = Array::default();
 						// TODO(PR): This should not return all data, only basic identifiers.
-						for v in run.all_ns_access_grants(opt.ns()?, &list.ac).await?.iter() {
+						for v in
+							run.all_ns_access_grants_redacted(opt.ns()?, &stmt.ac).await?.iter()
+						{
 							grants = grants + Value::Object(v.to_owned().into());
 						}
 						Ok(Value::Array(grants))
@@ -381,22 +383,22 @@ impl AccessStatement {
 						// Get the grants for the access method
 						let mut grants = Array::default();
 						// TODO(PR): This should not return all data, only basic identifiers.
-						for v in
-							run.all_db_access_grants(opt.ns()?, opt.db()?, &list.ac).await?.iter()
+						for v in run
+							.all_db_access_grants_redacted(opt.ns()?, opt.db()?, &stmt.ac)
+							.await?
+							.iter()
 						{
 							grants = grants + Value::Object(v.to_owned().into());
 						}
 						Ok(Value::Array(grants))
 					}
-					_ => {
-						return Err(Error::FeatureNotYetImplemented {
-							feature: "Managing access methods outside of a namespace or database"
-								.to_string(),
-						})
-					}
+					_ => Err(Error::FeatureNotYetImplemented {
+						feature: "Managing access methods outside of a namespace or database"
+							.to_string(),
+					}),
 				}
 			}
-			AccessStatement::Revoke(revoke) => {
+			AccessStatement::Revoke(stmt) => {
 				let base = opt.selected_base()?;
 				// Allowed to run?
 				opt.is_allowed(Action::Edit, ResourceKind::Access, &base)?;
@@ -407,15 +409,15 @@ impl AccessStatement {
 						// Clear the cache
 						run.clear_cache();
 						// Get the grants to revoke
-						let ac_str = revoke.ac.to_raw();
-						let gr_str = revoke.gr.to_raw();
+						let ac_str = stmt.ac.to_raw();
+						let gr_str = stmt.gr.to_raw();
 						let mut gr = run.get_ns_access_grant(opt.ns()?, &ac_str, &gr_str).await?;
 						gr.revocation = Some(Datetime::default());
 						// Process the statement
 						let key = crate::key::namespace::ac::gr::new(opt.ns()?, &ac_str, &gr_str);
 						run.add_ns(opt.ns()?, opt.strict).await?;
 						run.set(key, gr.to_owned()).await?;
-						Ok(Value::Object(gr.into()))
+						Ok(Value::Object(gr.redacted().into()))
 					}
 					Base::Db => {
 						// Claim transaction
@@ -423,8 +425,8 @@ impl AccessStatement {
 						// Clear the cache
 						run.clear_cache();
 						// Get the grants to revoke
-						let ac_str = revoke.ac.to_raw();
-						let gr_str = revoke.gr.to_raw();
+						let ac_str = stmt.ac.to_raw();
+						let gr_str = stmt.gr.to_raw();
 						let mut gr =
 							run.get_db_access_grant(opt.ns()?, opt.db()?, &ac_str, &gr_str).await?;
 						gr.revocation = Some(Datetime::default());
@@ -438,14 +440,12 @@ impl AccessStatement {
 						run.add_ns(opt.ns()?, opt.strict).await?;
 						run.add_db(opt.ns()?, opt.db()?, opt.strict).await?;
 						run.set(key, gr.to_owned()).await?;
-						Ok(Value::Object(gr.into()))
+						Ok(Value::Object(gr.redacted().into()))
 					}
-					_ => {
-						return Err(Error::FeatureNotYetImplemented {
-							feature: "Managing access methods outside of a namespace or database"
-								.to_string(),
-						})
-					}
+					_ => Err(Error::FeatureNotYetImplemented {
+						feature: "Managing access methods outside of a namespace or database"
+							.to_string(),
+					}),
 				}
 			}
 			AccessStatement::Show(_) => Err(Error::FeatureNotYetImplemented {
