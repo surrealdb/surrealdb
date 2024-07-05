@@ -405,7 +405,7 @@ fn parse_define_token_on_scope() {
 		}
 	);
 	assert_eq!(stmt.comment, Some(Strand("bar".to_string())));
-	assert_eq!(stmt.if_not_exists, false);
+	assert!(!stmt.if_not_exists);
 	match stmt.kind {
 		AccessType::Record(ac) => {
 			assert_eq!(ac.signup, None);
@@ -480,7 +480,7 @@ fn parse_define_token_jwks_on_scope() {
 		}
 	);
 	assert_eq!(stmt.comment, Some(Strand("bar".to_string())));
-	assert_eq!(stmt.if_not_exists, false);
+	assert!(!stmt.if_not_exists);
 	match stmt.kind {
 		AccessType::Record(ac) => {
 			assert_eq!(ac.signup, None);
@@ -523,7 +523,7 @@ fn parse_define_scope() {
 			session: Some(Duration::from_secs(1)),
 		}
 	);
-	assert_eq!(stmt.if_not_exists, false);
+	assert!(!stmt.if_not_exists);
 	match stmt.kind {
 		AccessType::Record(ac) => {
 			assert_eq!(ac.signup, Some(Value::Bool(true)));
@@ -942,7 +942,7 @@ fn parse_define_access_record() {
 			}
 		);
 		assert_eq!(stmt.comment, Some(Strand("bar".to_string())));
-		assert_eq!(stmt.if_not_exists, false);
+		assert!(!stmt.if_not_exists);
 		match stmt.kind {
 			AccessType::Record(ac) => {
 				assert_eq!(ac.signup, None);
@@ -988,7 +988,7 @@ fn parse_define_access_record() {
 			}
 		);
 		assert_eq!(stmt.comment, None);
-		assert_eq!(stmt.if_not_exists, false);
+		assert!(!stmt.if_not_exists);
 		match stmt.kind {
 			AccessType::Record(ac) => {
 				assert_eq!(ac.signup, Some(Value::Bool(true)));

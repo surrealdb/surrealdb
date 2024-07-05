@@ -1,8 +1,14 @@
+use std::sync::Arc;
+
 use axum_server::Handle;
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
-use crate::{err::Error, rpc, telemetry};
+use crate::{
+	err::Error,
+	rpc::{self, RpcState},
+	telemetry,
+};
 
 /// Start a graceful shutdown:
 /// * Signal the Axum Handle when a shutdown signal is received.
@@ -10,7 +16,11 @@ use crate::{err::Error, rpc, telemetry};
 /// * Flush all telemetry data.
 ///
 /// A second signal will force an immediate shutdown.
-pub fn graceful_shutdown(ct: CancellationToken, http_handle: Handle) -> JoinHandle<()> {
+pub fn graceful_shutdown(
+	state: Arc<RpcState>,
+	ct: CancellationToken,
+	http_handle: Handle,
+) -> JoinHandle<()> {
 	tokio::spawn(async move {
 		let result = listen().await.expect("Failed to listen to shutdown signal");
 		info!(target: super::LOG, "{} received. Waiting for graceful shutdown... A second signal will force an immediate shutdown", result);
@@ -18,6 +28,7 @@ pub fn graceful_shutdown(ct: CancellationToken, http_handle: Handle) -> JoinHand
 		let shutdown = {
 			let http_handle = http_handle.clone();
 			let ct = ct.clone();
+			let state_clone = state.clone();
 
 			tokio::spawn(async move {
 				// Stop accepting new HTTP requests and wait until all connections are closed
@@ -26,7 +37,7 @@ pub fn graceful_shutdown(ct: CancellationToken, http_handle: Handle) -> JoinHand
 					tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
 				}
 
-				rpc::graceful_shutdown().await;
+				rpc::graceful_shutdown(state_clone).await;
 
 				ct.cancel();
 
@@ -52,7 +63,7 @@ pub fn graceful_shutdown(ct: CancellationToken, http_handle: Handle) -> JoinHand
 				http_handle.shutdown();
 
 				// Close all WebSocket connections immediately
-				rpc::shutdown();
+				rpc::shutdown(state);
 
 				// Cancel cancellation token
 				ct.cancel();

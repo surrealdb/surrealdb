@@ -126,7 +126,7 @@ where
 	FailureClass: fmt::Display,
 {
 	fn on_failure(&mut self, error: FailureClass, latency: Duration, span: &Span) {
-		span.record("error_message", &error.to_string());
+		span.record("error_message", error.to_string());
 		span.record("http.latency.ms", latency.as_millis());
 		tracing::event!(Level::ERROR, error = error.to_string(), "response failed");
 	}

@@ -214,7 +214,7 @@ mod test_check_lqs_and_send_notifications {
 	use crate::sql::statements::{CreateStatement, DeleteStatement, LiveStatement};
 	use crate::sql::{Fields, Object, Strand, Table, Thing, Uuid, Value, Values};
 
-	const SETUP: Lazy<Arc<TestSuite>> = Lazy::new(|| Arc::new(block_on(setup_test_suite_init())));
+	static SETUP: Lazy<Arc<TestSuite>> = Lazy::new(|| Arc::new(block_on(setup_test_suite_init())));
 
 	struct TestSuite {
 		ns: String,
@@ -392,9 +392,8 @@ mod test_check_lqs_and_send_notifications {
 	fn a_usable_options(sender: &Sender<Notification>) -> Options {
 		let mut ctx = Context::default();
 		ctx.add_notifications(Some(sender));
-		let opt = Options::default()
+		Options::default()
 			.with_ns(Some(SETUP.ns.clone().into()))
-			.with_db(Some(SETUP.db.clone().into()));
-		opt
+			.with_db(Some(SETUP.db.clone().into()))
 	}
 }
