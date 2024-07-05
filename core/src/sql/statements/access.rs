@@ -12,6 +12,10 @@ use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::fmt::{Display, Formatter};
 
+pub static GRANT_BEARER_ID_PREFIX_LEGNTH: usize = 4;
+pub static GRANT_BEARER_ID_LENGTH: usize = 20;
+pub static GRANT_BEARER_KEY_LENGTH: usize = 40;
+
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
@@ -185,8 +189,11 @@ impl GrantBearer {
 	#[doc(hidden)]
 	pub fn new() -> Self {
 		// The "SABK" prefix indicates Surreal Access Bearer Key.
-		let id = format!("SABK{}", random_string(16));
-		let secret = random_string(40);
+		let id = format!(
+			"SABK{}",
+			random_string(GRANT_BEARER_ID_LENGTH - GRANT_BEARER_ID_PREFIX_LEGNTH)
+		);
+		let secret = random_string(GRANT_BEARER_KEY_LENGTH);
 		Self {
 			id: id.clone().into(),
 			key: format!("{id}-{secret}").into(),

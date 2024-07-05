@@ -7,12 +7,14 @@ use crate::iam::issue::{config, expiration};
 use crate::iam::token::{Claims, HEADER};
 use crate::iam::Auth;
 use crate::kvs::{Datastore, LockType::*, TransactionType::*};
-use crate::sql::AccessType;
+use crate::sql::statements::access;
 use crate::sql::Object;
 use crate::sql::Value;
+use crate::sql::{AccessType, Datetime};
 use chrono::Utc;
 use jsonwebtoken::{encode, EncodingKey, Header};
 use std::sync::Arc;
+use subtle::ConstantTimeEq;
 use uuid::Uuid;
 
 pub async fn signin(
@@ -55,6 +57,14 @@ pub async fn signin(
 				}
 				_ => Err(Error::MissingUserOrPass),
 			}
+		}
+		// NS signin with access method
+		(Some(ns), None, Some(ac)) => {
+			// Process the provided values
+			let ns = ns.to_raw_string();
+			let ac = ac.to_raw_string();
+			// Attempt to signin using specified access method
+			super::signin::ns_access(kvs, session, ns, ac, vars).await
 		}
 		// NS signin with user credentials
 		(Some(ns), None, None) => {
@@ -220,6 +230,105 @@ pub async fn db_access(
 						_ => Err(Error::AccessRecordNoSignin),
 					}
 				}
+				AccessType::Bearer(at) => {
+					// Check if the bearer access method supports issuing tokens
+					let iss = match at.jwt.issue {
+						Some(iss) => iss,
+						_ => return Err(Error::AccessMethodMismatch),
+					};
+					// Process the provided key
+					let key = match vars.get("key") {
+						Some(key) => &key.to_raw_string(),
+						// TODO(PR): Add new error.
+						None => return Err(Error::InvalidAuth),
+					};
+					if key.len() != access::GRANT_BEARER_KEY_LENGTH {
+						return Err(Error::InvalidAuth);
+					}
+					// Retrieve the key identifier from the provided key
+					let kid: String = key.chars().take(20).collect();
+					if kid.len() != access::GRANT_BEARER_ID_LENGTH {
+						return Err(Error::InvalidAuth);
+					}
+					// Check if the identifier corresponds to an existing grant
+					let gr = match tx.get_db_access_grant(&ns, &db, &ac, &kid).await {
+						Ok(gr) => gr,
+						Err(_) => return Err(Error::InvalidAuth),
+					};
+					// Check if the grant is revoked or expired
+					match (gr.expiration, gr.revocation) {
+						(None, None) => {}
+						(Some(exp), None) => {
+							if exp < Datetime::default() {
+								return Err(Error::InvalidAuth);
+							}
+						}
+						_ => return Err(Error::InvalidAuth),
+					}
+					// Check if the provided key matches the bearer key in the grant
+					// We use time-constant comparison to prevent timing attacks
+					if let access::Grant::Bearer(grant) = gr.grant {
+						let grant_key_bytes: &[u8] = grant.key.as_bytes();
+						let signin_key_bytes: &[u8] = key.as_bytes();
+						let ok: bool = grant_key_bytes.ct_eq(signin_key_bytes).into();
+						if !ok {
+							return Err(Error::InvalidAuth);
+						}
+					};
+					// Create the authentication key
+					let key = config(iss.alg, iss.key)?;
+					// Create the authentication claim
+					let claims = Claims {
+						iss: Some(SERVER_NAME.to_owned()),
+						iat: Some(Utc::now().timestamp()),
+						nbf: Some(Utc::now().timestamp()),
+						exp: expiration(av.duration.token)?,
+						jti: Some(Uuid::new_v4().to_string()),
+						ns: Some(ns.to_owned()),
+						db: Some(db.to_owned()),
+						ac: Some(ac.to_owned()),
+						id: match &gr.subject {
+							Some(access::Subject::User(user)) => Some(user.to_raw()),
+							Some(access::Subject::Record(rid)) => Some(rid.to_raw()),
+							None => return Err(Error::InvalidAuth),
+						},
+						..Claims::default()
+					};
+					// Log the authenticated access method info
+					trace!("Signing in with access method `{}`", ac);
+					// Create the authentication token
+					let enc = encode(&Header::new(iss.alg.into()), &claims, &key);
+					// Set the authentication on the session
+					session.tk = Some(claims.into());
+					session.ns = Some(ns.to_owned());
+					session.db = Some(db.to_owned());
+					session.ac = Some(ac.to_owned());
+					session.exp = expiration(av.duration.session)?;
+					match &gr.subject {
+						Some(access::Subject::User(user)) => {
+							session.au = Arc::new(Auth::new(Actor::new(
+								user.to_string(),
+								Default::default(),
+								Level::Database(ns, db),
+							)));
+						}
+						Some(access::Subject::Record(rid)) => {
+							session.au = Arc::new(Auth::new(Actor::new(
+								rid.to_string(),
+								Default::default(),
+								Level::Record(ns, db, rid.to_string()),
+							)));
+							session.rd = Some(Value::from(rid.to_owned()));
+						}
+						None => return Err(Error::InvalidAuth),
+					};
+					// Check the authentication token
+					match enc {
+						// The auth token was created successfully
+						Ok(tk) => Ok(Some(tk)),
+						_ => Err(Error::TokenMakingFailed),
+					}
+				}
 				_ => Err(Error::AccessMethodMismatch),
 			}
 		}
@@ -269,6 +378,119 @@ pub async fn db_user(
 			}
 		}
 		_ => Err(Error::InvalidAuth),
+	}
+}
+
+pub async fn ns_access(
+	kvs: &Datastore,
+	session: &mut Session,
+	ns: String,
+	ac: String,
+	vars: Object,
+) -> Result<Option<String>, Error> {
+	// Create a new readonly transaction
+	let mut tx = kvs.transaction(Read, Optimistic).await?;
+	// Fetch the specified access method from storage
+	let access = tx.get_ns_access(&ns, &ac).await;
+	// Ensure that the transaction is cancelled
+	tx.cancel().await?;
+	// Check the provided access method exists
+	match access {
+		Ok(av) => {
+			// Check the access method type
+			match av.kind {
+				AccessType::Bearer(at) => {
+					// Check if the bearer access method supports issuing tokens
+					let iss = match at.jwt.issue {
+						Some(iss) => iss,
+						_ => return Err(Error::AccessMethodMismatch),
+					};
+					// Process the provided key
+					let key = match vars.get("key") {
+						Some(key) => &key.to_raw_string(),
+						// TODO(PR): Add new error.
+						None => return Err(Error::InvalidAuth),
+					};
+					if key.len() != access::GRANT_BEARER_KEY_LENGTH {
+						return Err(Error::InvalidAuth);
+					}
+					// Retrieve the key identifier from the provided key
+					let kid: String = key.chars().take(20).collect();
+					if kid.len() != access::GRANT_BEARER_ID_LENGTH {
+						return Err(Error::InvalidAuth);
+					}
+					// Check if the identifier corresponds to an existing grant
+					let gr = match tx.get_ns_access_grant(&ns, &ac, &kid).await {
+						Ok(gr) => gr,
+						Err(_) => return Err(Error::InvalidAuth),
+					};
+					// Check if the grant is revoked or expired
+					match (gr.expiration, gr.revocation) {
+						(None, None) => {}
+						(Some(exp), None) => {
+							if exp < Datetime::default() {
+								return Err(Error::InvalidAuth);
+							}
+						}
+						_ => return Err(Error::InvalidAuth),
+					}
+					// Check if the provided key matches the bearer key in the grant
+					// We use time-constant comparison to prevent timing attacks
+					if let access::Grant::Bearer(grant) = gr.grant {
+						let grant_key_bytes: &[u8] = grant.key.as_bytes();
+						let signin_key_bytes: &[u8] = key.as_bytes();
+						let ok: bool = grant_key_bytes.ct_eq(signin_key_bytes).into();
+						if !ok {
+							return Err(Error::InvalidAuth);
+						}
+					};
+					// Create the authentication key
+					let key = config(iss.alg, iss.key)?;
+					// Create the authentication claim
+					let claims = Claims {
+						iss: Some(SERVER_NAME.to_owned()),
+						iat: Some(Utc::now().timestamp()),
+						nbf: Some(Utc::now().timestamp()),
+						exp: expiration(av.duration.token)?,
+						jti: Some(Uuid::new_v4().to_string()),
+						ns: Some(ns.to_owned()),
+						ac: Some(ac.to_owned()),
+						id: match &gr.subject {
+							Some(access::Subject::User(user)) => Some(user.to_raw()),
+							_ => return Err(Error::InvalidAuth),
+						},
+						..Claims::default()
+					};
+					// Log the authenticated access method info
+					trace!("Signing in with access method `{}`", ac);
+					// Create the authentication token
+					let enc = encode(&Header::new(iss.alg.into()), &claims, &key);
+					// Set the authentication on the session
+					session.tk = Some(claims.into());
+					session.ns = Some(ns.to_owned());
+					session.ac = Some(ac.to_owned());
+					session.exp = expiration(av.duration.session)?;
+					match &gr.subject {
+						Some(access::Subject::User(user)) => {
+							session.au = Arc::new(Auth::new(Actor::new(
+								user.to_string(),
+								Default::default(),
+								Level::Namespace(ns),
+							)));
+						}
+						_ => return Err(Error::InvalidAuth),
+					};
+					// Check the authentication token
+					match enc {
+						// The auth token was created successfully
+						Ok(tk) => Ok(Some(tk)),
+						_ => Err(Error::TokenMakingFailed),
+					}
+				}
+				_ => Err(Error::AccessMethodMismatch),
+			}
+		}
+		_ => Err(Error::AccessNotFound),
 	}
 }
 
