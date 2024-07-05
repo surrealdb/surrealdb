@@ -321,7 +321,7 @@ pub async fn db_access(
 					// Check the authentication token
 					match enc {
 						// The auth token was created successfully
-						Ok(tk) => Ok(Some(tk)),
+						Ok(tk) => Ok(tk),
 						_ => Err(Error::TokenMakingFailed),
 					}
 				}
@@ -383,7 +383,7 @@ pub async fn ns_access(
 	ns: String,
 	ac: String,
 	vars: Object,
-) -> Result<Option<String>, Error> {
+) -> Result<String, Error> {
 	// Create a new readonly transaction
 	let mut tx = kvs.transaction(Read, Optimistic).await?;
 	// Fetch the specified access method from storage
@@ -479,7 +479,7 @@ pub async fn ns_access(
 					// Check the authentication token
 					match enc {
 						// The auth token was created successfully
-						Ok(tk) => Ok(Some(tk)),
+						Ok(tk) => Ok(tk),
 						_ => Err(Error::TokenMakingFailed),
 					}
 				}
