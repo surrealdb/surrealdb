@@ -1910,7 +1910,7 @@ impl Transaction {
 		ac: &str,
 	) -> Result<DefineAccessStatement, Error> {
 		let key = crate::key::database::access::ac::new(ns, db, ac);
-		let val = self.get(key).await?.ok_or(Error::DgNotFound {
+		let val = self.get(key).await?.ok_or(Error::DaNotFound {
 			value: ac.to_owned(),
 		})?;
 		Ok(val.into())
@@ -1925,7 +1925,7 @@ impl Transaction {
 		gr: &str,
 	) -> Result<AccessGrant, Error> {
 		let key = crate::key::database::access::gr::new(ns, db, ac, gr);
-		let val = self.get(key).await?.ok_or(Error::DaNotFound {
+		let val = self.get(key).await?.ok_or(Error::DgNotFound {
 			value: gr.to_owned(),
 		})?;
 		Ok(val.into())
