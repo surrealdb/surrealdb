@@ -1930,7 +1930,7 @@ async fn select_with_record_id_link_no_index() -> Result<(), Error> {
 		SELECT * FROM i WHERE t.name = 'h';
 		SELECT * FROM i WHERE t.name = 'h' EXPLAIN;
 	";
-	let mut res = dbs.execute(&sql, &ses, None).await?;
+	let mut res = dbs.execute(sql, &ses, None).await?;
 	//
 	assert_eq!(res.len(), 8);
 	skip_ok(&mut res, 6)?;
@@ -1989,7 +1989,7 @@ async fn select_with_record_id_link_index() -> Result<(), Error> {
 		SELECT * FROM i WHERE t.name = 'h' EXPLAIN;
 		SELECT * FROM i WHERE t.name = 'h';
 	";
-	let mut res = dbs.execute(&sql, &ses, None).await?;
+	let mut res = dbs.execute(sql, &ses, None).await?;
 	//
 	assert_eq!(res.len(), 10);
 	skip_ok(&mut res, 8)?;
@@ -2054,7 +2054,7 @@ async fn select_with_record_id_link_unique_index() -> Result<(), Error> {
 		SELECT * FROM i WHERE t.name = 'h' EXPLAIN;
 		SELECT * FROM i WHERE t.name = 'h';
 	";
-	let mut res = dbs.execute(&sql, &ses, None).await?;
+	let mut res = dbs.execute(sql, &ses, None).await?;
 	//
 	assert_eq!(res.len(), 10);
 	skip_ok(&mut res, 8)?;
@@ -2118,7 +2118,7 @@ async fn select_with_record_id_link_unique_remote_index() -> Result<(), Error> {
 		SELECT * FROM i WHERE t.name IN ['a', 'b'] EXPLAIN;
 		SELECT * FROM i WHERE t.name IN ['a', 'b'];
 	";
-	let mut res = dbs.execute(&sql, &ses, None).await?;
+	let mut res = dbs.execute(sql, &ses, None).await?;
 	//
 	assert_eq!(res.len(), 10);
 	skip_ok(&mut res, 8)?;
@@ -2185,7 +2185,7 @@ async fn select_with_record_id_link_full_text_index() -> Result<(), Error> {
 		SELECT * FROM i WHERE t.name @@ 'world' EXPLAIN;
 		SELECT * FROM i WHERE t.name @@ 'world';
 	";
-	let mut res = dbs.execute(&sql, &ses, None).await?;
+	let mut res = dbs.execute(sql, &ses, None).await?;
 
 	assert_eq!(res.len(), 9);
 	skip_ok(&mut res, 7)?;
@@ -2242,7 +2242,7 @@ async fn select_with_record_id_link_full_text_no_record_index() -> Result<(), Er
 		SELECT * FROM i WHERE t.name @@ 'world' EXPLAIN;
 		SELECT * FROM i WHERE t.name @@ 'world';
 	";
-	let mut res = dbs.execute(&sql, &ses, None).await?;
+	let mut res = dbs.execute(sql, &ses, None).await?;
 
 	assert_eq!(res.len(), 8);
 	skip_ok(&mut res, 6)?;
@@ -2301,7 +2301,7 @@ async fn select_with_record_id_index() -> Result<(), Error> {
 		SELECT * FROM t WHERE a:2 IN links;
 		SELECT * FROM t WHERE a:2 IN links EXPLAIN;
 	";
-	let mut res = dbs.execute(&sql, &ses, None).await?;
+	let mut res = dbs.execute(sql, &ses, None).await?;
 
 	let expected = Value::parse(
 		r#"[
@@ -2447,7 +2447,7 @@ async fn select_with_exact_operator() -> Result<(), Error> {
 		SELECT * FROM t WHERE i == 2;
 		SELECT * FROM t WHERE i == 2 EXPLAIN;
 	";
-	let mut res = dbs.execute(&sql, &ses, None).await?;
+	let mut res = dbs.execute(sql, &ses, None).await?;
 	//
 	assert_eq!(res.len(), 8);
 	skip_ok(&mut res, 4)?;
@@ -2550,7 +2550,7 @@ async fn select_with_non_boolean_expression() -> Result<(), Error> {
 		SELECT * FROM t WHERE v > $p3 - ( math::max([0, $p1]) + $p1 );
 		SELECT * FROM t WHERE v > $p3 - ( math::max([0, $p1]) + $p1 ) EXPLAIN;
 	";
-	let mut res = dbs.execute(&sql, &ses, None).await?;
+	let mut res = dbs.execute(sql, &ses, None).await?;
 	//
 	assert_eq!(res.len(), 15);
 	skip_ok(&mut res, 5)?;
