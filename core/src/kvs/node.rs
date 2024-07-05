@@ -5,7 +5,25 @@ use crate::kvs::Datastore;
 use crate::kvs::LockType::*;
 use crate::kvs::TransactionType::*;
 use crate::sql::statements::LiveStatement;
+use derive::Store;
+use revision::revisioned;
+use serde::{Deserialize, Serialize};
 use std::time::Duration;
+
+const TARGET: &str = "surrealdb::core::kvs::node";
+
+#[revisioned(revision = 1)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
+#[non_exhaustive]
+pub struct Live {
+	/// The namespace in which this LIVE query exists
+	ns: String,
+	/// The database in which this LIVE query exists
+	db: String,
+	/// The table in which this LIVE query exists
+	tb: String,
+}
 
 impl Datastore {
 	/// Inserts a node for the first time into the cluster.
@@ -229,7 +247,7 @@ impl Datastore {
 						let res = txn.batch(rng, *NORMAL_FETCH_SIZE, false).await?;
 						next = res.next;
 						for (k, v) in res.values.iter() {
-							//
+							// Decode the LIVE query statement
 							let stm: LiveStatement = v.into();
 							// Get the key for this node live query
 							let tlq = crate::key::table::lq::Lq::decode(k)?;
@@ -238,7 +256,7 @@ impl Datastore {
 							// Check that the node for this query is archived
 							if expired.contains(&stm.node) {
 								// Get the key for this table live query
-								let nlq = crate::key::node::lq::new(nid, lid, &ns.name, &db.name);
+								let nlq = crate::key::node::lq::new(nid, lid);
 								// Delete the node live query
 								if let Err(e) = txn.del(nlq).await {
 									let _ = txn.cancel().await;
@@ -257,6 +275,45 @@ impl Datastore {
 				}
 			}
 		}
+		// All ok
+		Ok(())
+	}
+
+	/// Clean up the live queries for a disconnected connection.
+	///
+	/// This function should be run when a WebSocket disconnects.
+	///
+	/// This function clears up the live queries on the current node, which
+	/// are specified by uique live query UUIDs. This is necessary when a
+	/// WebSocket disconnects, and any associated live queries need to be
+	/// cleaned up and removed.
+	#[instrument(err, level = "debug", target = "surrealdb::core::kvs::node", skip(self))]
+	pub async fn delete_queries(&self, ids: Vec<uuid::Uuid>) -> Result<(), Error> {
+		// Log the node deletion
+		trace!(target: TARGET, "Deleting live queries for a connection");
+		// Fetch expired nodes
+		let txn = self.transaction(Write, Optimistic).await?;
+		// Loop over the live query unique ids
+		for id in ids.into_iter() {
+			// Get the key for this node live query
+			let nlq = crate::key::node::lq::new(self.id(), id);
+			// Fetch the LIVE meta data node entry
+			if let Some(val) = catch!(txn, txn.get(nlq)) {
+				// Decode the data for this live query
+				let lq: Live = val.into();
+				// Get the key for this node live query
+				let nlq = crate::key::node::lq::new(self.id(), id);
+				// Get the key for this table live query
+				let tlq = crate::key::table::lq::new(&lq.ns, &lq.db, &lq.tb, id);
+				// Delete the table live query
+				catch!(txn, txn.del(tlq));
+				// Delete the node live query
+				catch!(txn, txn.del(nlq));
+			}
+		}
+		// Commit the changes
+		txn.commit().await?;
+		// All ok
 		Ok(())
 	}
 }

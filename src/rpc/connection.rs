@@ -64,13 +64,13 @@ impl Connection {
 	pub async fn serve(rpc: Arc<RwLock<Connection>>, ws: WebSocket) {
 		// Get the WebSocket ID
 		let id = rpc.read().await.id;
+		// Log the succesful WebSocket connection
+		trace!("WebSocket {} connected", id);
 		// Split the socket into sending and receiving streams
 		let (sender, receiver) = ws.split();
 		// Create an internal channel for sending and receiving
 		let internal_sender = rpc.read().await.channels.0.clone();
 		let internal_receiver = rpc.read().await.channels.1.clone();
-
-		trace!("WebSocket {} connected", id);
 
 		if let Err(err) = telemetry::metrics::ws::on_connect() {
 			error!("Error running metrics::ws::on_connect hook: {}", err);
@@ -110,9 +110,8 @@ impl Connection {
 			true
 		});
 
-		// Garbage collect queries
-		if let Err(e) = DB.get().unwrap().garbage_collect_dead_session(gc.as_slice()).await {
-			error!("Failed to garbage collect dead sessions: {:?}", e);
+		if let Err(err) = DB.get().unwrap().delete_queries(gc).await {
+			error!("Error handling RPC connection: {}", err);
 		}
 
 		if let Err(err) = telemetry::metrics::ws::on_disconnect() {

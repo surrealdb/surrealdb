@@ -11,7 +11,7 @@ use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
-#[revisioned(revision = 2)]
+#[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
@@ -22,24 +22,18 @@ pub struct LiveStatement {
 	pub what: Value,
 	pub cond: Option<Cond>,
 	pub fetch: Option<Fetchs>,
-	// When a live query is marked for archiving, this will
-	// be set to the node ID that archived the query. This
-	// is an internal property, set by the database runtime.
-	// This is optional, and is only set when archived.
-	pub(crate) archived: Option<Uuid>,
-	// When a live query is created, we must also store the
-	// authenticated session of the user who made the query,
-	// so we can check it later when sending notifications.
-	// This is optional as it is only set by the database
-	// runtime when storing the live query to storage.
-	#[revision(start = 2)]
-	pub(crate) session: Option<Value>,
 	// When a live query is created, we must also store the
 	// authenticated session of the user who made the query,
 	// so we can check it later when sending notifications.
 	// This is optional as it is only set by the database
 	// runtime when storing the live query to storage.
 	pub(crate) auth: Option<Auth>,
+	// When a live query is created, we must also store the
+	// authenticated session of the user who made the query,
+	// so we can check it later when sending notifications.
+	// This is optional as it is only set by the database
+	// runtime when storing the live query to storage.
+	pub(crate) session: Option<Value>,
 }
 
 impl LiveStatement {
@@ -89,10 +83,10 @@ impl LiveStatement {
 		let mut stm = LiveStatement {
 			// Use the current session authentication
 			// for when we store the LIVE Statement
-			session: ctx.value("session").cloned(),
+			auth: Some(opt.auth.as_ref().clone()),
 			// Use the current session authentication
 			// for when we store the LIVE Statement
-			auth: Some(opt.auth.as_ref().clone()),
+			session: ctx.value("session").cloned(),
 			// Clone the rest of the original fields
 			// from the LIVE statement to the new one
 			..self.clone()
@@ -112,7 +106,7 @@ impl LiveStatement {
 				// Lock the transaction
 				let mut txn = txn.lock().await;
 				// Insert the node live query
-				let key = crate::key::node::lq::new(nid, id, ns, db);
+				let key = crate::key::node::lq::new(nid, id);
 				txn.put(key, tb.as_str()).await?;
 				// Insert the table live query
 				let key = crate::key::table::lq::new(ns, db, &tb, id);
