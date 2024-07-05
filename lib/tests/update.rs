@@ -1,6 +1,7 @@
 mod parse;
 use parse::Parse;
 mod helpers;
+use crate::helpers::Test;
 use helpers::new_ds;
 use surrealdb::dbs::Session;
 use surrealdb::err::Error;
@@ -94,6 +95,7 @@ async fn update_simple_with_input() -> Result<(), Error> {
 					$value
 				END
 		;
+		CREATE person:test;
 		UPDATE person:test CONTENT { name: 'Tobie' };
 		UPDATE person:test REPLACE { name: 'jaime' };
 		UPDATE person:test MERGE { name: 'Jaime' };
@@ -104,10 +106,20 @@ async fn update_simple_with_input() -> Result<(), Error> {
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
-	assert_eq!(res.len(), 7);
+	assert_eq!(res.len(), 8);
 	//
 	let tmp = res.remove(0).result;
 	assert!(tmp.is_ok());
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
+			{
+				id: person:test,
+			}
+		]",
+	);
+	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
 	let val = Value::parse(
@@ -175,34 +187,23 @@ async fn update_complex_with_input() -> Result<(), Error> {
 			TYPE array
 			ASSERT array::len($value) > 0
 		;
+		REMOVE FIELD images.* ON product;
 		DEFINE FIELD images.* ON product TYPE string
 			VALUE string::trim($input)
 			ASSERT $input AND string::len($value) > 0
 		;
 		CREATE product:test SET images = [' test.png '];
 	";
-	let dbs = new_ds().await?;
-	let ses = Session::owner().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(sql, &ses, None).await?;
-	assert_eq!(res.len(), 3);
-	//
-	let tmp = res.remove(0).result;
-	assert!(tmp.is_ok());
-	//
-	let tmp = res.remove(0).result;
-	assert!(tmp.is_ok());
-	//
-	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let mut t = Test::new(sql).await?;
+	t.skip_ok(3)?;
+	t.expect_val(
 		"[
 			{
 				id: product:test,
 				images: ['test.png'],
 			}
 		]",
-	);
-	assert_eq!(tmp, val);
-	//
+	)?;
 	Ok(())
 }
 
@@ -316,30 +317,6 @@ async fn common_permissions_checks(auth_enabled: bool) {
 	for ((level, role), (ns, db), should_succeed, msg) in tests.into_iter() {
 		let sess = Session::for_level(level, role).with_ns(ns).with_db(db);
 
-		// Test the statement when the table has to be created
-
-		{
-			let ds = new_ds().await.unwrap().with_auth_enabled(auth_enabled);
-
-			let mut resp = ds.execute(statement, &sess, None).await.unwrap();
-			let res = resp.remove(0).output();
-
-			if should_succeed {
-				assert!(res.is_ok() && res.unwrap() != Value::parse("[]"), "{}", msg);
-			} else if res.is_ok() {
-				assert!(res.unwrap() == Value::parse("[]"), "{}", msg);
-			} else {
-				// Not allowed to create a table
-				let err = res.unwrap_err().to_string();
-				assert!(
-					err.contains("Not enough permissions to perform this action"),
-					"{}: {}",
-					msg,
-					err
-				)
-			}
-		}
-
 		// Test the statement when the table already exists
 		{
 			let ds = new_ds().await.unwrap().with_auth_enabled(auth_enabled);
@@ -438,24 +415,6 @@ async fn check_permissions_auth_enabled() {
 
 	let statement = "UPDATE person:test CONTENT { name: 'Name' };";
 
-	// When the table doesn't exist
-	{
-		let ds = new_ds().await.unwrap().with_auth_enabled(auth_enabled);
-
-		let mut resp = ds
-			.execute(statement, &Session::default().with_ns("NS").with_db("DB"), None)
-			.await
-			.unwrap();
-		let res = resp.remove(0).output();
-
-		let err = res.unwrap_err().to_string();
-		assert!(
-			err.contains("Not enough permissions to perform this action"),
-			"anonymous user should not be able to create the table: {}",
-			err
-		);
-	}
-
 	// When the table grants no permissions
 	{
 		let ds = new_ds().await.unwrap().with_auth_enabled(auth_enabled);
@@ -510,7 +469,7 @@ async fn check_permissions_auth_enabled() {
 
 		let mut resp = ds
 			.execute(
-				"DEFINE TABLE person PERMISSIONS FULL; CREATE person;",
+				"DEFINE TABLE person PERMISSIONS FULL; CREATE person:test;",
 				&Session::owner().with_ns("NS").with_db("DB"),
 				None,
 			)
@@ -568,30 +527,13 @@ async fn check_permissions_auth_disabled() {
 
 	let statement = "UPDATE person:test CONTENT { name: 'Name' };";
 
-	// When the table doesn't exist
-	{
-		let ds = new_ds().await.unwrap().with_auth_enabled(auth_enabled);
-
-		let mut resp = ds
-			.execute(statement, &Session::default().with_ns("NS").with_db("DB"), None)
-			.await
-			.unwrap();
-		let res = resp.remove(0).output();
-
-		assert!(
-			res.unwrap() != Value::parse("[]"),
-			"{}",
-			"anonymous user should be able to create the table"
-		);
-	}
-
 	// When the table grants no permissions
 	{
 		let ds = new_ds().await.unwrap().with_auth_enabled(auth_enabled);
 
 		let mut resp = ds
 			.execute(
-				"DEFINE TABLE person PERMISSIONS NONE; CREATE person;",
+				"DEFINE TABLE person PERMISSIONS NONE; CREATE person:test;",
 				&Session::owner().with_ns("NS").with_db("DB"),
 				None,
 			)
@@ -639,7 +581,7 @@ async fn check_permissions_auth_disabled() {
 
 		let mut resp = ds
 			.execute(
-				"DEFINE TABLE person PERMISSIONS FULL; CREATE person;",
+				"DEFINE TABLE person PERMISSIONS FULL; CREATE person:test;",
 				&Session::owner().with_ns("NS").with_db("DB"),
 				None,
 			)

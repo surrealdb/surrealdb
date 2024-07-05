@@ -33,8 +33,12 @@ impl Default for ChangeFeed {
 		}
 	}
 }
+
 impl InfoStructure for ChangeFeed {
 	fn structure(self) -> Value {
-		self.to_string().into()
+		Value::from(map! {
+			"expiry".to_string() => Duration(self.expiry).structure(),
+			"original".to_string() => self.store_diff.into(),
+		})
 	}
 }

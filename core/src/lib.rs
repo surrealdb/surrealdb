@@ -5,7 +5,8 @@ extern crate tracing;
 mod mac;
 
 mod cf;
-mod ctx;
+#[doc(hidden)]
+pub mod ctx;
 mod doc;
 mod exe;
 mod fnc;

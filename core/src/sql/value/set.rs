@@ -1,5 +1,5 @@
 use crate::ctx::Context;
-use crate::dbs::{Options, Transaction};
+use crate::dbs::Options;
 use crate::err::Error;
 use crate::exe::try_join_all_buffered;
 use crate::sql::part::Next;
@@ -16,7 +16,6 @@ impl Value {
 		stk: &mut Stk,
 		ctx: &Context<'_>,
 		opt: &Options,
-		txn: &Transaction,
 		path: &[Part],
 		val: Value,
 	) -> Result<(), Error> {
@@ -27,54 +26,51 @@ impl Value {
 				Value::Object(v) => match p {
 					Part::Graph(g) => match v.get_mut(g.to_raw().as_str()) {
 						Some(v) if v.is_some() => {
-							stk.run(|stk| v.set(stk, ctx, opt, txn, path.next(), val)).await
+							stk.run(|stk| v.set(stk, ctx, opt, path.next(), val)).await
 						}
 						_ => {
 							let mut obj = Value::base();
-							stk.run(|stk| obj.set(stk, ctx, opt, txn, path.next(), val)).await?;
+							stk.run(|stk| obj.set(stk, ctx, opt, path.next(), val)).await?;
 							v.insert(g.to_raw(), obj);
 							Ok(())
 						}
 					},
 					Part::Field(f) => match v.get_mut(f.as_str()) {
 						Some(v) if v.is_some() => {
-							stk.run(|stk| v.set(stk, ctx, opt, txn, path.next(), val)).await
+							stk.run(|stk| v.set(stk, ctx, opt, path.next(), val)).await
 						}
 						_ => {
 							let mut obj = Value::base();
-							stk.run(|stk| obj.set(stk, ctx, opt, txn, path.next(), val)).await?;
+							stk.run(|stk| obj.set(stk, ctx, opt, path.next(), val)).await?;
 							v.insert(f.to_raw(), obj);
 							Ok(())
 						}
 					},
 					Part::Index(i) => match v.get_mut(&i.to_string()) {
 						Some(v) if v.is_some() => {
-							stk.run(|stk| v.set(stk, ctx, opt, txn, path.next(), val)).await
+							stk.run(|stk| v.set(stk, ctx, opt, path.next(), val)).await
 						}
 						_ => {
 							let mut obj = Value::base();
-							stk.run(|stk| obj.set(stk, ctx, opt, txn, path.next(), val)).await?;
+							stk.run(|stk| obj.set(stk, ctx, opt, path.next(), val)).await?;
 							v.insert(i.to_string(), obj);
 							Ok(())
 						}
 					},
-					Part::Value(x) => {
-						match stk.run(|stk| x.compute(stk, ctx, opt, txn, None)).await? {
-							Value::Strand(f) => match v.get_mut(f.as_str()) {
-								Some(v) if v.is_some() => {
-									stk.run(|stk| v.set(stk, ctx, opt, txn, path.next(), val)).await
-								}
-								_ => {
-									let mut obj = Value::base();
-									stk.run(|stk| obj.set(stk, ctx, opt, txn, path.next(), val))
-										.await?;
-									v.insert(f.to_string(), obj);
-									Ok(())
-								}
-							},
-							_ => Ok(()),
-						}
-					}
+					Part::Value(x) => match stk.run(|stk| x.compute(stk, ctx, opt, None)).await? {
+						Value::Strand(f) => match v.get_mut(f.as_str()) {
+							Some(v) if v.is_some() => {
+								stk.run(|stk| v.set(stk, ctx, opt, path.next(), val)).await
+							}
+							_ => {
+								let mut obj = Value::base();
+								stk.run(|stk| obj.set(stk, ctx, opt, path.next(), val)).await?;
+								v.insert(f.to_string(), obj);
+								Ok(())
+							}
+						},
+						_ => Ok(()),
+					},
 					_ => Ok(()),
 				},
 				// Current value at path is an array
@@ -83,24 +79,24 @@ impl Value {
 						let path = path.next();
 
 						stk.scope(|scope| {
-							let futs = v.iter_mut().map(|v| {
-								scope.run(|stk| v.set(stk, ctx, opt, txn, path, val.clone()))
-							});
+							let futs = v
+								.iter_mut()
+								.map(|v| scope.run(|stk| v.set(stk, ctx, opt, path, val.clone())));
 							try_join_all_buffered(futs)
 						})
 						.await?;
 						Ok(())
 					}
 					Part::First => match v.first_mut() {
-						Some(v) => stk.run(|stk| v.set(stk, ctx, opt, txn, path.next(), val)).await,
+						Some(v) => stk.run(|stk| v.set(stk, ctx, opt, path.next(), val)).await,
 						None => Ok(()),
 					},
 					Part::Last => match v.last_mut() {
-						Some(v) => stk.run(|stk| v.set(stk, ctx, opt, txn, path.next(), val)).await,
+						Some(v) => stk.run(|stk| v.set(stk, ctx, opt, path.next(), val)).await,
 						None => Ok(()),
 					},
 					Part::Index(i) => match v.get_mut(i.to_usize()) {
-						Some(v) => stk.run(|stk| v.set(stk, ctx, opt, txn, path.next(), val)).await,
+						Some(v) => stk.run(|stk| v.set(stk, ctx, opt, path.next(), val)).await,
 						None => Ok(()),
 					},
 					Part::Where(w) => match path.next().first() {
@@ -110,7 +106,7 @@ impl Value {
 							// Store the elements and positions to update
 							for (i, o) in v.iter_mut().enumerate() {
 								let cur = o.into();
-								if w.compute(stk, ctx, opt, txn, Some(&cur)).await?.is_truthy() {
+								if w.compute(stk, ctx, opt, Some(&cur)).await?.is_truthy() {
 									a.push(o.clone());
 									p.push(i);
 								}
@@ -118,8 +114,7 @@ impl Value {
 							// Convert the matched elements array to a value
 							let mut a = Value::from(a);
 							// Set the new value on the matches elements
-							stk.run(|stk| a.set(stk, ctx, opt, txn, path.next(), val.clone()))
-								.await?;
+							stk.run(|stk| a.set(stk, ctx, opt, path.next(), val.clone())).await?;
 							// Push the new values into the original array
 							for (i, p) in p.into_iter().enumerate() {
 								v[p] = a.pick(&[Part::Index(i.into())]);
@@ -130,28 +125,25 @@ impl Value {
 							let path = path.next();
 							for v in v.iter_mut() {
 								let cur = v.into();
-								if w.compute(stk, ctx, opt, txn, Some(&cur)).await?.is_truthy() {
-									stk.run(|stk| v.set(stk, ctx, opt, txn, path, val.clone()))
-										.await?;
+								if w.compute(stk, ctx, opt, Some(&cur)).await?.is_truthy() {
+									stk.run(|stk| v.set(stk, ctx, opt, path, val.clone())).await?;
 								}
 							}
 							Ok(())
 						}
 					},
-					Part::Value(x) => match x.compute(stk, ctx, opt, txn, None).await? {
+					Part::Value(x) => match x.compute(stk, ctx, opt, None).await? {
 						Value::Number(i) => match v.get_mut(i.to_usize()) {
-							Some(v) => {
-								stk.run(|stk| v.set(stk, ctx, opt, txn, path.next(), val)).await
-							}
+							Some(v) => stk.run(|stk| v.set(stk, ctx, opt, path.next(), val)).await,
 							None => Ok(()),
 						},
 						_ => Ok(()),
 					},
 					_ => {
 						stk.scope(|scope| {
-							let futs = v.iter_mut().map(|v| {
-								scope.run(|stk| v.set(stk, ctx, opt, txn, path, val.clone()))
-							});
+							let futs = v
+								.iter_mut()
+								.map(|v| scope.run(|stk| v.set(stk, ctx, opt, path, val.clone())));
 							try_join_all_buffered(futs)
 						})
 						.await?;
@@ -162,12 +154,12 @@ impl Value {
 				// Current value at path is empty
 				Value::Null => {
 					*self = Value::base();
-					stk.run(|stk| self.set(stk, ctx, opt, txn, path, val)).await
+					stk.run(|stk| self.set(stk, ctx, opt, path, val)).await
 				}
 				// Current value at path is empty
 				Value::None => {
 					*self = Value::base();
-					stk.run(|stk| self.set(stk, ctx, opt, txn, path, val)).await
+					stk.run(|stk| self.set(stk, ctx, opt, path, val)).await
 				}
 				// Ignore everything else
 				_ => Ok(()),
@@ -191,241 +183,177 @@ mod tests {
 
 	#[tokio::test]
 	async fn set_none() {
-		let (ctx, opt, txn) = mock().await;
+		let (ctx, opt) = mock().await;
 		let idi = Idiom::default();
 		let mut val = Value::parse("{ test: { other: null, something: 123 } }");
 		let res = Value::parse("999");
 		let mut stack = reblessive::TreeStack::new();
-		stack
-			.enter(|stk| val.set(stk, &ctx, &opt, &txn, &idi, Value::from(999)))
-			.finish()
-			.await
-			.unwrap();
+		stack.enter(|stk| val.set(stk, &ctx, &opt, &idi, Value::from(999))).finish().await.unwrap();
 		assert_eq!(res, val);
 	}
 
 	#[tokio::test]
 	async fn set_empty() {
-		let (ctx, opt, txn) = mock().await;
+		let (ctx, opt) = mock().await;
 		let idi = Idiom::parse("test");
 		let mut val = Value::None;
 		let res = Value::parse("{ test: 999 }");
 		let mut stack = reblessive::TreeStack::new();
-		stack
-			.enter(|stk| val.set(stk, &ctx, &opt, &txn, &idi, Value::from(999)))
-			.finish()
-			.await
-			.unwrap();
+		stack.enter(|stk| val.set(stk, &ctx, &opt, &idi, Value::from(999))).finish().await.unwrap();
 		assert_eq!(res, val);
 	}
 
 	#[tokio::test]
 	async fn set_blank() {
-		let (ctx, opt, txn) = mock().await;
+		let (ctx, opt) = mock().await;
 		let idi = Idiom::parse("test.something");
 		let mut val = Value::None;
 		let res = Value::parse("{ test: { something: 999 } }");
 		let mut stack = reblessive::TreeStack::new();
-		stack
-			.enter(|stk| val.set(stk, &ctx, &opt, &txn, &idi, Value::from(999)))
-			.finish()
-			.await
-			.unwrap();
+		stack.enter(|stk| val.set(stk, &ctx, &opt, &idi, Value::from(999))).finish().await.unwrap();
 		assert_eq!(res, val);
 	}
 
 	#[tokio::test]
 	async fn set_reset() {
-		let (ctx, opt, txn) = mock().await;
+		let (ctx, opt) = mock().await;
 		let idi = Idiom::parse("test");
 		let mut val = Value::parse("{ test: { other: null, something: 123 } }");
 		let res = Value::parse("{ test: 999 }");
 		let mut stack = reblessive::TreeStack::new();
-		stack
-			.enter(|stk| val.set(stk, &ctx, &opt, &txn, &idi, Value::from(999)))
-			.finish()
-			.await
-			.unwrap();
+		stack.enter(|stk| val.set(stk, &ctx, &opt, &idi, Value::from(999))).finish().await.unwrap();
 		assert_eq!(res, val);
 	}
 
 	#[tokio::test]
 	async fn set_basic() {
-		let (ctx, opt, txn) = mock().await;
+		let (ctx, opt) = mock().await;
 		let idi = Idiom::parse("test.something");
 		let mut val = Value::parse("{ test: { other: null, something: 123 } }");
 		let res = Value::parse("{ test: { other: null, something: 999 } }");
 		let mut stack = reblessive::TreeStack::new();
-		stack
-			.enter(|stk| val.set(stk, &ctx, &opt, &txn, &idi, Value::from(999)))
-			.finish()
-			.await
-			.unwrap();
+		stack.enter(|stk| val.set(stk, &ctx, &opt, &idi, Value::from(999))).finish().await.unwrap();
 		assert_eq!(res, val);
 	}
 
 	#[tokio::test]
 	async fn set_allow() {
-		let (ctx, opt, txn) = mock().await;
+		let (ctx, opt) = mock().await;
 		let idi = Idiom::parse("test.something.allow");
 		let mut val = Value::parse("{ test: { other: null } }");
 		let res = Value::parse("{ test: { other: null, something: { allow: 999 } } }");
 		let mut stack = reblessive::TreeStack::new();
-		stack
-			.enter(|stk| val.set(stk, &ctx, &opt, &txn, &idi, Value::from(999)))
-			.finish()
-			.await
-			.unwrap();
+		stack.enter(|stk| val.set(stk, &ctx, &opt, &idi, Value::from(999))).finish().await.unwrap();
 		assert_eq!(res, val);
 	}
 
 	#[tokio::test]
 	async fn set_wrong() {
-		let (ctx, opt, txn) = mock().await;
+		let (ctx, opt) = mock().await;
 		let idi = Idiom::parse("test.something.wrong");
 		let mut val = Value::parse("{ test: { other: null, something: 123 } }");
 		let res = Value::parse("{ test: { other: null, something: 123 } }");
 		let mut stack = reblessive::TreeStack::new();
-		stack
-			.enter(|stk| val.set(stk, &ctx, &opt, &txn, &idi, Value::from(999)))
-			.finish()
-			.await
-			.unwrap();
+		stack.enter(|stk| val.set(stk, &ctx, &opt, &idi, Value::from(999))).finish().await.unwrap();
 		assert_eq!(res, val);
 	}
 
 	#[tokio::test]
 	async fn set_other() {
-		let (ctx, opt, txn) = mock().await;
+		let (ctx, opt) = mock().await;
 		let idi = Idiom::parse("test.other.something");
 		let mut val = Value::parse("{ test: { other: null, something: 123 } }");
 		let res = Value::parse("{ test: { other: { something: 999 }, something: 123 } }");
 		let mut stack = reblessive::TreeStack::new();
-		stack
-			.enter(|stk| val.set(stk, &ctx, &opt, &txn, &idi, Value::from(999)))
-			.finish()
-			.await
-			.unwrap();
+		stack.enter(|stk| val.set(stk, &ctx, &opt, &idi, Value::from(999))).finish().await.unwrap();
 		assert_eq!(res, val);
 	}
 
 	#[tokio::test]
 	async fn set_array() {
-		let (ctx, opt, txn) = mock().await;
+		let (ctx, opt) = mock().await;
 		let idi = Idiom::parse("test.something[1]");
 		let mut val = Value::parse("{ test: { something: [123, 456, 789] } }");
 		let res = Value::parse("{ test: { something: [123, 999, 789] } }");
 		let mut stack = reblessive::TreeStack::new();
-		stack
-			.enter(|stk| val.set(stk, &ctx, &opt, &txn, &idi, Value::from(999)))
-			.finish()
-			.await
-			.unwrap();
+		stack.enter(|stk| val.set(stk, &ctx, &opt, &idi, Value::from(999))).finish().await.unwrap();
 		assert_eq!(res, val);
 	}
 
 	#[tokio::test]
 	async fn set_array_field() {
-		let (ctx, opt, txn) = mock().await;
+		let (ctx, opt) = mock().await;
 		let idi = Idiom::parse("test.something[1].age");
 		let mut val = Value::parse("{ test: { something: [{ age: 34 }, { age: 36 }] } }");
 		let res = Value::parse("{ test: { something: [{ age: 34 }, { age: 21 }] } }");
 		let mut stack = reblessive::TreeStack::new();
-		stack
-			.enter(|stk| val.set(stk, &ctx, &opt, &txn, &idi, Value::from(21)))
-			.finish()
-			.await
-			.unwrap();
+		stack.enter(|stk| val.set(stk, &ctx, &opt, &idi, Value::from(21))).finish().await.unwrap();
 		assert_eq!(res, val);
 	}
 
 	#[tokio::test]
 	async fn set_array_fields() {
-		let (ctx, opt, txn) = mock().await;
+		let (ctx, opt) = mock().await;
 		let idi = Idiom::parse("test.something[*].age");
 		let mut val = Value::parse("{ test: { something: [{ age: 34 }, { age: 36 }] } }");
 		let res = Value::parse("{ test: { something: [{ age: 21 }, { age: 21 }] } }");
 		let mut stack = reblessive::TreeStack::new();
-		stack
-			.enter(|stk| val.set(stk, &ctx, &opt, &txn, &idi, Value::from(21)))
-			.finish()
-			.await
-			.unwrap();
+		stack.enter(|stk| val.set(stk, &ctx, &opt, &idi, Value::from(21))).finish().await.unwrap();
 		assert_eq!(res, val);
 	}
 
 	#[tokio::test]
 	async fn set_array_fields_flat() {
-		let (ctx, opt, txn) = mock().await;
+		let (ctx, opt) = mock().await;
 		let idi = Idiom::parse("test.something.age");
 		let mut val = Value::parse("{ test: { something: [{ age: 34 }, { age: 36 }] } }");
 		let res = Value::parse("{ test: { something: [{ age: 21 }, { age: 21 }] } }");
 		let mut stack = reblessive::TreeStack::new();
-		stack
-			.enter(|stk| val.set(stk, &ctx, &opt, &txn, &idi, Value::from(21)))
-			.finish()
-			.await
-			.unwrap();
+		stack.enter(|stk| val.set(stk, &ctx, &opt, &idi, Value::from(21))).finish().await.unwrap();
 		assert_eq!(res, val);
 	}
 
 	#[tokio::test]
 	async fn set_array_where_field() {
-		let (ctx, opt, txn) = mock().await;
+		let (ctx, opt) = mock().await;
 		let idi = Idiom::parse("test.something[WHERE age > 35].age");
 		let mut val = Value::parse("{ test: { something: [{ age: 34 }, { age: 36 }] } }");
 		let res = Value::parse("{ test: { something: [{ age: 34 }, { age: 21 }] } }");
 		let mut stack = reblessive::TreeStack::new();
-		stack
-			.enter(|stk| val.set(stk, &ctx, &opt, &txn, &idi, Value::from(21)))
-			.finish()
-			.await
-			.unwrap();
+		stack.enter(|stk| val.set(stk, &ctx, &opt, &idi, Value::from(21))).finish().await.unwrap();
 		assert_eq!(res, val);
 	}
 
 	#[tokio::test]
 	async fn set_array_where_fields() {
-		let (ctx, opt, txn) = mock().await;
+		let (ctx, opt) = mock().await;
 		let idi = Idiom::parse("test.something[WHERE age > 35]");
 		let mut val = Value::parse("{ test: { something: [{ age: 34 }, { age: 36 }] } }");
 		let res = Value::parse("{ test: { something: [{ age: 34 }, 21] } }");
 		let mut stack = reblessive::TreeStack::new();
-		stack
-			.enter(|stk| val.set(stk, &ctx, &opt, &txn, &idi, Value::from(21)))
-			.finish()
-			.await
-			.unwrap();
+		stack.enter(|stk| val.set(stk, &ctx, &opt, &idi, Value::from(21))).finish().await.unwrap();
 		assert_eq!(res, val);
 	}
 
 	#[tokio::test]
 	async fn set_array_where_fields_array_index() {
-		let (ctx, opt, txn) = mock().await;
+		let (ctx, opt) = mock().await;
 		let idi = Idiom::parse("test.something[WHERE age > 30][0]");
 		let mut val = Value::parse("{ test: { something: [{ age: 34 }, { age: 36 }] } }");
 		let res = Value::parse("{ test: { something: [21, { age: 36 }] } }");
 		let mut stack = reblessive::TreeStack::new();
-		stack
-			.enter(|stk| val.set(stk, &ctx, &opt, &txn, &idi, Value::from(21)))
-			.finish()
-			.await
-			.unwrap();
+		stack.enter(|stk| val.set(stk, &ctx, &opt, &idi, Value::from(21))).finish().await.unwrap();
 		assert_eq!(res, val);
 	}
 
 	#[tokio::test]
 	async fn set_array_where_fields_array_index_field() {
-		let (ctx, opt, txn) = mock().await;
+		let (ctx, opt) = mock().await;
 		let idi = Idiom::parse("test.something[WHERE age > 30][0].age");
 		let mut val = Value::parse("{ test: { something: [{ age: 34 }, { age: 36 }] } }");
 		let res = Value::parse("{ test: { something: [{ age: 21 }, { age: 36 }] } }");
 		let mut stack = reblessive::TreeStack::new();
-		stack
-			.enter(|stk| val.set(stk, &ctx, &opt, &txn, &idi, Value::from(21)))
-			.finish()
-			.await
-			.unwrap();
+		stack.enter(|stk| val.set(stk, &ctx, &opt, &idi, Value::from(21))).finish().await.unwrap();
 		assert_eq!(res, val);
 	}
 }

@@ -1,12 +1,21 @@
 /// A macro for requiring a certain token to be next, returning an error otherwise..
 macro_rules! unexpected {
-	($parser:expr, $found:expr, $expected:expr) => {
+	(@ $span:expr, $parser:expr, $found:expr, $expected:expr $(=> $explain:expr)?) => {{
+		unexpected!(@@withSpan, $span, $parser,$found, $expected $(=> $explain)?)
+	}};
+
+	($parser:expr, $found:expr, $expected:expr $(=> $explain:expr)?) => {{
+		let span = $parser.recent_span();
+		unexpected!(@@withSpan, span, $parser,$found, $expected $(=> $explain)?)
+	}};
+
+	(@@withSpan, $span:expr, $parser:expr, $found:expr, $expected:expr) => {
 		match $found {
 			$crate::syn::token::TokenKind::Invalid => {
 				let error = $parser.lexer.error.take().unwrap();
 				return Err($crate::syn::parser::ParseError::new(
 					$crate::syn::parser::ParseErrorKind::InvalidToken(error),
-					$parser.recent_span(),
+					$span
 				));
 			}
 			$crate::syn::token::TokenKind::Eof => {
@@ -15,7 +24,7 @@ macro_rules! unexpected {
 					$crate::syn::parser::ParseErrorKind::UnexpectedEof {
 						expected,
 					},
-					$parser.recent_span(),
+					$span
 				));
 			}
 			x => {
@@ -25,7 +34,39 @@ macro_rules! unexpected {
 						found: x,
 						expected,
 					},
-					$parser.recent_span(),
+					$span
+				));
+			}
+		}
+	};
+
+	(@@withSpan, $span:expr, $parser:expr, $found:expr, $expected:expr => $explain:expr) => {
+		match $found {
+			$crate::syn::token::TokenKind::Invalid => {
+				let error = $parser.lexer.error.take().unwrap();
+				return Err($crate::syn::parser::ParseError::new(
+					$crate::syn::parser::ParseErrorKind::InvalidToken(error),
+					$span
+				));
+			}
+			$crate::syn::token::TokenKind::Eof => {
+				let expected = $expected;
+				return Err($crate::syn::parser::ParseError::new(
+					$crate::syn::parser::ParseErrorKind::UnexpectedEof {
+						expected,
+					},
+					$span
+				));
+			}
+			x => {
+				let expected = $expected;
+				return Err($crate::syn::parser::ParseError::new(
+					$crate::syn::parser::ParseErrorKind::UnexpectedExplain {
+						found: x,
+						expected,
+						explain: $explain,
+					},
+					$span
 				));
 			}
 		}
@@ -36,6 +77,38 @@ macro_rules! unexpected {
 macro_rules! expected {
 	($parser:expr, $($kind:tt)*) => {{
 		let token = $parser.next();
+		match token.kind {
+			$($kind)* => token,
+			$crate::syn::parser::TokenKind::Invalid => {
+				let error = $parser.lexer.error.take().unwrap();
+				return Err($crate::syn::parser::ParseError::new(
+					$crate::syn::parser::ParseErrorKind::InvalidToken(error),
+					$parser.recent_span(),
+				));
+			}
+			x => {
+				let expected = $($kind)*.as_str();
+				let kind = if let $crate::syn::token::TokenKind::Eof = x {
+					$crate::syn::parser::ParseErrorKind::UnexpectedEof {
+						expected,
+					}
+				} else {
+					$crate::syn::parser::ParseErrorKind::Unexpected {
+						found: x,
+						expected,
+					}
+				};
+
+				return Err($crate::syn::parser::ParseError::new(kind, $parser.last_span()));
+			}
+		}
+	}};
+}
+
+/// A macro for indicating that the parser encountered an token which it didn't expect.
+macro_rules! expected_whitespace {
+	($parser:expr, $($kind:tt)*) => {{
+		let token = $parser.next_whitespace();
 		match token.kind {
 			$($kind)* => token,
 			$crate::syn::parser::TokenKind::Invalid => {
@@ -149,40 +222,8 @@ macro_rules! enter_query_recursion {
 	}};
 }
 
-#[macro_export]
-macro_rules! enter_flexible_ident{
-	($name:ident = $this:expr => ($enabled:expr){ $($t:tt)* }) => {{
-		struct Dropper<'a, 'b>(&'a mut $crate::syn::parser::Parser<'b>,bool);
-		impl Drop for Dropper<'_, '_> {
-			fn drop(&mut self) {
-				self.0.lexer.flexible_ident = self.1;
-			}
-		}
-		impl<'a> ::std::ops::Deref for Dropper<'_,'a>{
-			type Target = $crate::syn::parser::Parser<'a>;
-
-			fn deref(&self) -> &Self::Target{
-				self.0
-			}
-		}
-
-		impl<'a> ::std::ops::DerefMut for Dropper<'_,'a>{
-			fn deref_mut(&mut self) -> &mut Self::Target{
-				self.0
-			}
-		}
-
-		let enabled = $this.lexer.flexible_ident;
-		$this.lexer.flexible_ident = $enabled;
-        #[allow(unused_mut)]
-		let mut $name = Dropper($this,enabled);
-		{
-			$($t)*
-		}
-	}};
-}
-
 pub(super) use expected;
+pub(super) use expected_whitespace;
 pub(super) use unexpected;
 
 #[cfg(test)]

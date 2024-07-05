@@ -77,7 +77,7 @@ impl<'a> BytesReader<'a> {
 		self.remaining().first().copied()
 	}
 	#[inline]
-	pub fn span(&self, span: Span) -> &[u8] {
+	pub fn span(&self, span: Span) -> &'a [u8] {
 		&self.data[(span.offset as usize)..(span.offset as usize + span.len as usize)]
 	}
 	#[inline]

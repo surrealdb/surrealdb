@@ -18,6 +18,7 @@ mod insert; // Processes a INSERT statement for this document
 mod relate; // Processes a RELATE statement for this document
 mod select; // Processes a SELECT statement for this document
 mod update; // Processes a UPDATE statement for this document
+mod upsert; // Processes a UPSERT statement for this document
 
 mod allow; // Checks whether the query can access this document
 mod alter; // Modifies and updates the fields in this document

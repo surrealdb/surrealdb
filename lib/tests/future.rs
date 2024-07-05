@@ -9,9 +9,9 @@ use surrealdb::sql::Value;
 #[tokio::test]
 async fn future_function_simple() -> Result<(), Error> {
 	let sql = "
-		UPDATE person:test SET can_drive = <future> { birthday && time::now() > birthday + 18y };
-		UPDATE person:test SET birthday = <datetime> '2007-06-22';
-		UPDATE person:test SET birthday = <datetime> '2001-06-22';
+		UPSERT person:test SET can_drive = <future> { birthday && time::now() > birthday + 18y };
+		UPSERT person:test SET birthday = <datetime> '2007-06-22';
+		UPSERT person:test SET birthday = <datetime> '2001-06-22';
 	";
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
@@ -38,7 +38,7 @@ async fn future_function_simple() -> Result<(), Error> {
 #[tokio::test]
 async fn future_function_arguments() -> Result<(), Error> {
 	let sql = "
-		UPDATE future:test SET
+		UPSERT future:test SET
 			a = 'test@surrealdb.com',
 			b = <future> { 'test@surrealdb.com' },
 			x = 'a-' + parse::email::user(a),

@@ -95,7 +95,8 @@ impl Debug for Regex {
 
 impl Display for Regex {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-		write!(f, "/{}/", &self.0)
+		let t = self.0.to_string().replace('/', "\\/");
+		write!(f, "/{}/", &t)
 	}
 }
 

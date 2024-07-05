@@ -1,5 +1,5 @@
 use crate::ctx::Context;
-use crate::dbs::{Options, Transaction};
+use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::iam::{Action, ResourceKind};
@@ -48,23 +48,20 @@ impl ShowStatement {
 	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
-		_ctx: &Context<'_>,
+		ctx: &Context<'_>,
 		opt: &Options,
-		txn: &Transaction,
 		_doc: Option<&CursorDoc<'_>>,
 	) -> Result<Value, Error> {
 		// Selected DB?
 		opt.is_allowed(Action::View, ResourceKind::Table, &Base::Db)?;
-		// Clone transaction
-		let txn = txn.clone();
 		// Claim transaction
-		let mut run = txn.lock().await;
+		let mut run = ctx.tx_lock().await;
 		// Process the show query
 		let tb = self.table.as_deref();
 		let r = crate::cf::read(
 			&mut run,
-			opt.ns(),
-			opt.db(),
+			opt.ns()?,
+			opt.db()?,
 			tb.map(|x| x.as_str()),
 			self.since.clone(),
 			self.limit,

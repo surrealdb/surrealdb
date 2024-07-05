@@ -492,7 +492,6 @@ where
 			})?;
 		Ok(method::QueryStream(Either::Left(Stream {
 			client: stream.client.clone(),
-			engine: stream.engine,
 			id: mem::take(&mut stream.id),
 			rx: stream.rx.take(),
 			response_type: PhantomData,
@@ -524,7 +523,6 @@ where
 			};
 			streams.push(Stream {
 				client: stream.client.clone(),
-				engine: stream.engine,
 				id: mem::take(&mut stream.id),
 				rx: stream.rx.take(),
 				response_type: PhantomData,

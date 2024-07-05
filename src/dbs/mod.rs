@@ -1,13 +1,6 @@
 use crate::cli::CF;
 use crate::err::Error;
 use clap::Args;
-#[cfg(any(
-	feature = "storage-surrealkv",
-	feature = "storage-rocksdb",
-	feature = "storage-fdb",
-	feature = "storage-tikv",
-	feature = "storage-speedb"
-))]
 use std::path::PathBuf;
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
@@ -30,28 +23,13 @@ pub struct StartCommandDbsOptions {
 	#[arg(env = "SURREAL_TRANSACTION_TIMEOUT", long)]
 	#[arg(value_parser = super::cli::validator::duration)]
 	transaction_timeout: Option<Duration>,
-	#[arg(help = "Whether to enable authentication", help_heading = "Authentication")]
-	#[arg(env = "SURREAL_AUTH", long = "auth")]
+	#[arg(help = "Whether to allow unauthenticated access", help_heading = "Authentication")]
+	#[arg(env = "SURREAL_UNAUTHENTICATED", long = "unauthenticated")]
 	#[arg(default_value_t = false)]
-	auth_enabled: bool,
-	// TODO(gguillemas): Remove this argument once the legacy authentication is deprecated in v2.0.0
-	#[arg(
-		help = "Whether to enable explicit authentication level selection",
-		help_heading = "Authentication"
-	)]
-	#[arg(env = "SURREAL_AUTH_LEVEL_ENABLED", long = "auth-level-enabled")]
-	#[arg(default_value_t = false)]
-	auth_level_enabled: bool,
+	unauthenticated: bool,
 	#[command(flatten)]
 	#[command(next_help_heading = "Capabilities")]
 	caps: DbsCapabilities,
-	#[cfg(any(
-		feature = "storage-surrealkv",
-		feature = "storage-speedb",
-		feature = "storage-rocksdb",
-		feature = "storage-fdb",
-		feature = "storage-tikv",
-	))]
 	#[arg(help = "Sets the directory for storing temporary database files")]
 	#[arg(env = "SURREAL_TEMPORARY_DIRECTORY", long = "temporary-directory")]
 	#[arg(value_parser = super::cli::validator::dir_exists)]
@@ -229,17 +207,8 @@ pub async fn init(
 		strict_mode,
 		query_timeout,
 		transaction_timeout,
-		auth_enabled,
-		// TODO(gguillemas): Remove this field once the legacy authentication is deprecated in v2.0.0
-		auth_level_enabled,
+		unauthenticated,
 		caps,
-		#[cfg(any(
-			feature = "storage-surrealkv",
-			feature = "storage-rocksdb",
-			feature = "storage-fdb",
-			feature = "storage-tikv",
-			feature = "storage-speedb"
-		))]
 		temporary_directory,
 	}: StartCommandDbsOptions,
 ) -> Result<(), Error> {
@@ -255,16 +224,9 @@ pub async fn init(
 	if let Some(v) = transaction_timeout {
 		debug!("Maximum transaction processing timeout is {v:?}");
 	}
-	// Log whether authentication is enabled
-	if auth_enabled {
-		info!("✅🔒 Authentication is enabled 🔒✅");
-	} else {
+	// Log whether authentication is disabled
+	if unauthenticated {
 		warn!("❌🔒 IMPORTANT: Authentication is disabled. This is not recommended for production use. 🔒❌");
-	}
-	// Log whether authentication levels are enabled
-	// TODO(gguillemas): Remove this condition once the legacy authentication is deprecated in v2.0.0
-	if auth_level_enabled {
-		info!("Authentication levels are enabled");
 	}
 
 	let caps = caps.into();
@@ -278,17 +240,14 @@ pub async fn init(
 		.with_strict_mode(strict_mode)
 		.with_query_timeout(query_timeout)
 		.with_transaction_timeout(transaction_timeout)
-		.with_auth_enabled(auth_enabled)
-		.with_auth_level_enabled(auth_level_enabled)
+		.with_auth_enabled(!unauthenticated)
 		.with_capabilities(caps);
-	#[cfg(any(
-		feature = "storage-surrealkv",
-		feature = "storage-rocksdb",
-		feature = "storage-fdb",
-		feature = "storage-tikv",
-		feature = "storage-speedb"
-	))]
-	let mut dbs = dbs.with_temporary_directory(temporary_directory);
+
+	let mut dbs = match temporary_directory {
+		Some(tmp_dir) => dbs.with_temporary_directory(tmp_dir),
+		_ => dbs,
+	};
+
 	if let Some(engine_options) = opt.engine {
 		dbs = dbs.with_engine_options(engine_options);
 	}

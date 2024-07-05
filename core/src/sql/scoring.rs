@@ -51,8 +51,8 @@ impl Hash for Scoring {
 	}
 }
 
-impl Scoring {
-	pub(crate) fn bm25() -> Self {
+impl Default for Scoring {
+	fn default() -> Self {
 		Self::Bm {
 			k1: 1.2,
 			b: 0.75,

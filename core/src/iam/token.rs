@@ -35,20 +35,13 @@ pub struct Claims {
 	#[serde(alias = "https://surrealdb.com/database")]
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub db: Option<String>,
-	#[serde(alias = "sc")]
-	#[serde(alias = "SC")]
-	#[serde(rename = "SC")]
-	#[serde(alias = "https://surrealdb.com/sc")]
-	#[serde(alias = "https://surrealdb.com/scope")]
+	#[serde(alias = "ac")]
+	#[serde(alias = "AC")]
+	#[serde(rename = "AC")]
+	#[serde(alias = "https://surrealdb.com/ac")]
+	#[serde(alias = "https://surrealdb.com/access")]
 	#[serde(skip_serializing_if = "Option::is_none")]
-	pub sc: Option<String>,
-	#[serde(alias = "tk")]
-	#[serde(alias = "TK")]
-	#[serde(rename = "TK")]
-	#[serde(alias = "https://surrealdb.com/tk")]
-	#[serde(alias = "https://surrealdb.com/token")]
-	#[serde(skip_serializing_if = "Option::is_none")]
-	pub tk: Option<String>,
+	pub ac: Option<String>,
 	#[serde(alias = "id")]
 	#[serde(alias = "ID")]
 	#[serde(rename = "ID")]
@@ -101,13 +94,9 @@ impl From<Claims> for Value {
 		if let Some(db) = v.db {
 			out.insert("DB".to_string(), db.into());
 		}
-		// Add SC field if set
-		if let Some(sc) = v.sc {
-			out.insert("SC".to_string(), sc.into());
-		}
-		// Add TK field if set
-		if let Some(tk) = v.tk {
-			out.insert("TK".to_string(), tk.into());
+		// Add AC field if set
+		if let Some(ac) = v.ac {
+			out.insert("AC".to_string(), ac.into());
 		}
 		// Add ID field if set
 		if let Some(id) = v.id {

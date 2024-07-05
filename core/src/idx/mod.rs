@@ -1,9 +1,8 @@
 pub mod docids;
 pub(crate) mod ft;
-pub(crate) mod planner;
+pub mod planner;
 pub mod trees;
 
-use crate::dbs::Options;
 use crate::err::Error;
 use crate::idx::docids::DocId;
 use crate::idx::ft::terms::TermId;
@@ -42,15 +41,15 @@ struct Inner {
 }
 
 impl IndexKeyBase {
-	pub(crate) fn new(opt: &Options, ix: &DefineIndexStatement) -> Self {
-		Self {
+	pub(crate) fn new(ns: &str, db: &str, ix: &DefineIndexStatement) -> Result<Self, Error> {
+		Ok(Self {
 			inner: Arc::new(Inner {
-				ns: opt.ns().to_string(),
-				db: opt.db().to_string(),
+				ns: ns.to_string(),
+				db: db.to_string(),
 				tb: ix.what.to_string(),
 				ix: ix.name.to_string(),
 			}),
-		}
+		})
 	}
 
 	fn new_bc_key(&self, term_id: TermId) -> Key {

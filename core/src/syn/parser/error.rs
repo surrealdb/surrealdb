@@ -7,6 +7,7 @@ use crate::syn::{
 use std::{
 	fmt::Write,
 	num::{ParseFloatError, ParseIntError},
+	ops::RangeInclusive,
 };
 
 #[derive(Debug)]
@@ -48,17 +49,12 @@ pub enum ParseErrorKind {
 		should_close: Span,
 	},
 	/// An error for parsing an integer
-	InvalidInteger {
-		error: ParseIntError,
-	},
+	InvalidInteger(ParseIntError),
 	/// An error for parsing an float
-	InvalidFloat {
-		error: ParseFloatError,
-	},
+	InvalidFloat(ParseFloatError),
 	/// An error for parsing an decimal.
-	InvalidDecimal {
-		error: rust_decimal::Error,
-	},
+	InvalidDecimal(rust_decimal::Error),
+	InvalidIdent,
 	DisallowedStatement {
 		found: TokenKind,
 		expected: TokenKind,
@@ -70,13 +66,27 @@ pub enum ParseErrorKind {
 	InvalidPath {
 		possibly: Option<&'static str>,
 	},
+	InvalidRegex(regex::Error),
 	MissingField {
 		field: Span,
 		idiom: String,
 		kind: MissingKind,
 	},
+	InvalidUuidPart {
+		len: usize,
+	},
+	InvalidDatetimePart {
+		len: usize,
+	},
+	OutrangeDatetimePart {
+		range: RangeInclusive<usize>,
+	},
+	TooManyNanosecondsDatetime,
+	InvalidDatetimeDate,
+	InvalidDatetimeTime,
 	ExceededObjectDepthLimit,
 	ExceededQueryDepthLimit,
+	DurationOverflow,
 	NoWhitespace,
 }
 
@@ -102,7 +112,7 @@ impl ParseError {
 
 	/// Create a rendered error from the string this error was generated from.
 	pub fn render_on_inner(source: &str, kind: &ParseErrorKind, at: Span) -> RenderedError {
-		match &kind {
+		match kind {
 			ParseErrorKind::Unexpected {
 				found,
 				expected,
@@ -208,9 +218,7 @@ impl ParseError {
 					snippets: vec![snippet],
 				}
 			}
-			ParseErrorKind::InvalidInteger {
-				ref error,
-			} => {
+			ParseErrorKind::InvalidInteger(ref error) => {
 				let text = format!("failed to parse integer, {error}");
 				let locations = Location::range_of_span(source, at);
 				let snippet = Snippet::from_source_location_range(source, locations, None);
@@ -219,9 +227,7 @@ impl ParseError {
 					snippets: vec![snippet],
 				}
 			}
-			ParseErrorKind::InvalidFloat {
-				ref error,
-			} => {
+			ParseErrorKind::InvalidFloat(ref error) => {
 				let text = format!("failed to parse floating point, {error}");
 				let locations = Location::range_of_span(source, at);
 				let snippet = Snippet::from_source_location_range(source, locations, None);
@@ -230,10 +236,17 @@ impl ParseError {
 					snippets: vec![snippet],
 				}
 			}
-			ParseErrorKind::InvalidDecimal {
-				ref error,
-			} => {
+			ParseErrorKind::InvalidDecimal(ref error) => {
 				let text = format!("failed to parse decimal number, {error}");
+				let locations = Location::range_of_span(source, at);
+				let snippet = Snippet::from_source_location_range(source, locations, None);
+				RenderedError {
+					text: text.to_string(),
+					snippets: vec![snippet],
+				}
+			}
+			ParseErrorKind::InvalidRegex(ref error) => {
+				let text = format!("failed to parse regex, {error}");
 				let locations = Location::range_of_span(source, at);
 				let snippet = Snippet::from_source_location_range(source, locations, None);
 				RenderedError {
@@ -295,6 +308,96 @@ impl ParseError {
 				RenderedError {
 					text: text.to_string(),
 					snippets: vec![snippet_error, snippet_hint],
+				}
+			}
+			ParseErrorKind::DurationOverflow => {
+				let text = "Duration specified exceeds maximum allowed value";
+				let locations = Location::range_of_span(source, at);
+				let snippet = Snippet::from_source_location_range(source, locations, None);
+				RenderedError {
+					text: text.to_string(),
+					snippets: vec![snippet],
+				}
+			}
+			ParseErrorKind::InvalidIdent => {
+				let text = "Duration specified exceeds maximum allowed value";
+				let locations = Location::range_of_span(source, at);
+				let snippet = Snippet::from_source_location_range(source, locations, None);
+				RenderedError {
+					text: text.to_string(),
+					snippets: vec![snippet],
+				}
+			}
+			ParseErrorKind::InvalidUuidPart {
+				len,
+			} => {
+				let text = format!(
+					"Uuid hex section not the correct length, needs to be {len} characters"
+				);
+				let locations = Location::range_of_span(source, at);
+				let snippet = Snippet::from_source_location_range(source, locations, None);
+				RenderedError {
+					text,
+					snippets: vec![snippet],
+				}
+			}
+			ParseErrorKind::InvalidDatetimePart {
+				len,
+			} => {
+				let text = format!(
+					"Datetime digits section not the correct length, needs to be {len} characters"
+				);
+				let locations = Location::range_of_span(source, at);
+				let snippet = Snippet::from_source_location_range(source, locations, None);
+				RenderedError {
+					text,
+					snippets: vec![snippet],
+				}
+			}
+			ParseErrorKind::OutrangeDatetimePart {
+				range,
+			} => {
+				let text = format!(
+					"Datetime digits not within valid range {}..={}",
+					range.start(),
+					range.end()
+				);
+				let locations = Location::range_of_span(source, at);
+				let snippet = Snippet::from_source_location_range(source, locations, None);
+				RenderedError {
+					text,
+					snippets: vec![snippet],
+				}
+			}
+			ParseErrorKind::TooManyNanosecondsDatetime => {
+				let text = "Too many digits in Datetime nanoseconds".to_owned();
+				let locations = Location::range_of_span(source, at);
+				let snippet = Snippet::from_source_location_range(
+					source,
+					locations,
+					Some("Nanoseconds can at most be 9 characters"),
+				);
+				RenderedError {
+					text,
+					snippets: vec![snippet],
+				}
+			}
+			ParseErrorKind::InvalidDatetimeDate => {
+				let text = "Invalid Datetime date".to_owned();
+				let locations = Location::range_of_span(source, at);
+				let snippet = Snippet::from_source_location_range(source, locations, None);
+				RenderedError {
+					text,
+					snippets: vec![snippet],
+				}
+			}
+			ParseErrorKind::InvalidDatetimeTime => {
+				let text = "Datetime time outside of valid time range".to_owned();
+				let locations = Location::range_of_span(source, at);
+				let snippet = Snippet::from_source_location_range(source, locations, None);
+				RenderedError {
+					text,
+					snippets: vec![snippet],
 				}
 			}
 		}

@@ -1,6 +1,6 @@
 use crate::ctx::Context;
+use crate::dbs::Options;
 use crate::dbs::Statement;
-use crate::dbs::{Options, Transaction};
 use crate::doc::Document;
 use crate::err::Error;
 use crate::key::key_req::KeyRequirements;
@@ -8,9 +8,8 @@ use crate::key::key_req::KeyRequirements;
 impl<'a> Document<'a> {
 	pub async fn store(
 		&self,
-		_ctx: &Context<'_>,
+		ctx: &Context<'_>,
 		opt: &Options,
-		txn: &Transaction,
 		stm: &Statement<'_>,
 	) -> Result<(), Error> {
 		// Check if changed
@@ -18,15 +17,15 @@ impl<'a> Document<'a> {
 			return Ok(());
 		}
 		// Check if the table is a view
-		if self.tb(opt, txn).await?.drop {
+		if self.tb(ctx, opt).await?.drop {
 			return Ok(());
 		}
 		// Claim transaction
-		let mut run = txn.lock().await;
+		let mut run = ctx.tx_lock().await;
 		// Get the record id
 		let rid = self.id.as_ref().unwrap();
 		// Store the record data
-		let key = crate::key::thing::new(opt.ns(), opt.db(), &rid.tb, &rid.id);
+		let key = crate::key::thing::new(opt.ns()?, opt.db()?, &rid.tb, &rid.id);
 		//
 		match stm {
 			// This is a CREATE statement so try to insert the key

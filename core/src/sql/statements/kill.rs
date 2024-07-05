@@ -6,7 +6,7 @@ use revision::revisioned;
 use serde::{Deserialize, Serialize};
 
 use crate::ctx::Context;
-use crate::dbs::{Options, Transaction};
+use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::fflags::FFLAGS;
@@ -31,7 +31,6 @@ impl KillStatement {
 		stk: &mut Stk,
 		ctx: &Context<'_>,
 		opt: &Options,
-		txn: &Transaction,
 		_doc: Option<&CursorDoc<'_>>,
 	) -> Result<Value, Error> {
 		// Is realtime enabled?
@@ -41,7 +40,7 @@ impl KillStatement {
 		// Resolve live query id
 		let live_query_id = match &self.id {
 			Value::Uuid(id) => *id,
-			Value::Param(param) => match param.compute(stk, ctx, opt, txn, None).await? {
+			Value::Param(param) => match param.compute(stk, ctx, opt, None).await? {
 				Value::Uuid(id) => id,
 				Value::Strand(id) => match uuid::Uuid::try_parse(&id) {
 					Ok(id) => Uuid(id),
@@ -75,16 +74,16 @@ impl KillStatement {
 			}
 		};
 		// Claim transaction
-		let mut run = txn.lock().await;
+		let mut run = ctx.tx_lock().await;
 		if FFLAGS.change_feed_live_queries.enabled() {
 			run.pre_commit_register_async_event(TrackedResult::KillQuery(KillEntry {
 				live_id: live_query_id,
-				ns: opt.ns().to_string(),
-				db: opt.db().to_string(),
+				ns: opt.ns()?.to_string(),
+				db: opt.db()?.to_string(),
 			}))?;
 		} else {
 			// Fetch the live query key
-			let key = crate::key::node::lq::new(opt.id()?, live_query_id.0, opt.ns(), opt.db());
+			let key = crate::key::node::lq::new(opt.id()?, live_query_id.0, opt.ns()?, opt.db()?);
 			// Fetch the live query key if it exists
 			match run.get(key).await? {
 				Some(val) => match std::str::from_utf8(&val) {
@@ -93,13 +92,13 @@ impl KillStatement {
 						let key = crate::key::node::lq::new(
 							opt.id()?,
 							live_query_id.0,
-							opt.ns(),
-							opt.db(),
+							opt.ns()?,
+							opt.db()?,
 						);
 						run.del(key).await?;
 						// Delete the table live query
 						let key =
-							crate::key::table::lq::new(opt.ns(), opt.db(), tb, live_query_id.0);
+							crate::key::table::lq::new(opt.ns()?, opt.db()?, tb, live_query_id.0);
 						run.del(key).await?;
 					}
 					_ => {
@@ -155,10 +154,11 @@ mod test {
 		let ds = Datastore::new("memory").await.unwrap();
 		let tx =
 			ds.transaction(TransactionType::Write, LockType::Optimistic).await.unwrap().enclose();
+		let ctx = ctx.set_transaction(tx.clone());
 
 		let mut stack = reblessive::tree::TreeStack::new();
 
-		stack.enter(|stk| res.compute(stk, &ctx, &opt, &tx, None)).finish().await.unwrap();
+		stack.enter(|stk| res.compute(stk, &ctx, &opt, None)).finish().await.unwrap();
 
 		let mut tx = tx.lock().await;
 		tx.commit().await.unwrap();

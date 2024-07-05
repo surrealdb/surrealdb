@@ -10,6 +10,7 @@ impl_module_def!(
 	"chebyshev" => run,
 	"euclidean" => run,
 	"hamming" => run,
+	"knn" => run,
 	"mahalanobis" => run,
 	"manhattan" => run,
 	"minkowski" => run

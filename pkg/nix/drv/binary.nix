@@ -25,5 +25,4 @@ in craneLib.buildPackage (buildSpec // {
   inherit cargoArtifacts;
   inherit (util) version SURREAL_BUILD_METADATA;
 
-  RUSTFLAGS = "--cfg surrealdb_unstable";
 })

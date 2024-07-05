@@ -14,7 +14,6 @@ DEV_FEATURES={ value = "storage-mem,scripting,http,ml,jwks", condition = { env_n
 SURREAL_LOG={ value = "trace", condition = { env_not_set = ["SURREAL_LOG"] } }
 SURREAL_USER={ value = "root", condition = { env_not_set = ["SURREAL_USER"] } }
 SURREAL_PASS={ value = "root", condition = { env_not_set = ["SURREAL_PASS"] } }
-SURREAL_AUTH={ value = "true", condition = { env_not_set = ["SURREAL_AUTH"] } }
 SURREAL_PATH={ value = "memory", condition = { env_not_set = ["SURREAL_PATH"] } }
 SURREAL_NAMESPACE={ value = "test", condition = { env_not_set = ["SURREAL_NAMESPACE"] } }
 SURREAL_DATABASE={ value = "test", condition = { env_not_set = ["SURREAL_DATABASE"] } }

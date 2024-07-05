@@ -1,9 +1,9 @@
 use crate::{
 	sql::{
 		statements::{
-			remove::RemoveAnalyzerStatement, RemoveDatabaseStatement, RemoveEventStatement,
-			RemoveFieldStatement, RemoveFunctionStatement, RemoveIndexStatement,
-			RemoveNamespaceStatement, RemoveParamStatement, RemoveScopeStatement, RemoveStatement,
+			remove::RemoveAnalyzerStatement, RemoveAccessStatement, RemoveDatabaseStatement,
+			RemoveEventStatement, RemoveFieldStatement, RemoveFunctionStatement,
+			RemoveIndexStatement, RemoveNamespaceStatement, RemoveParamStatement, RemoveStatement,
 			RemoveUserStatement,
 		},
 		Param,
@@ -20,7 +20,7 @@ use crate::{
 impl Parser<'_> {
 	pub fn parse_remove_stmt(&mut self) -> ParseResult<RemoveStatement> {
 		let res = match self.next().kind {
-			t!("NAMESPACE") => {
+			t!("NAMESPACE") | t!("ns") => {
 				let if_exists = if self.eat(t!("IF")) {
 					expected!(self, t!("EXISTS"));
 					true
@@ -66,7 +66,7 @@ impl Parser<'_> {
 					if_exists,
 				})
 			}
-			t!("TOKEN") => {
+			t!("ACCESS") => {
 				let if_exists = if self.eat(t!("IF")) {
 					expected!(self, t!("EXISTS"));
 					true
@@ -75,25 +75,11 @@ impl Parser<'_> {
 				};
 				let name = self.next_token_value()?;
 				expected!(self, t!("ON"));
-				let base = self.parse_base(true)?;
+				let base = self.parse_base(false)?;
 
-				RemoveStatement::Token(crate::sql::statements::RemoveTokenStatement {
+				RemoveStatement::Access(RemoveAccessStatement {
 					name,
 					base,
-					if_exists,
-				})
-			}
-			t!("SCOPE") => {
-				let if_exists = if self.eat(t!("IF")) {
-					expected!(self, t!("EXISTS"));
-					true
-				} else {
-					false
-				};
-				let name = self.next_token_value()?;
-
-				RemoveStatement::Scope(RemoveScopeStatement {
-					name,
 					if_exists,
 				})
 			}

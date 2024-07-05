@@ -60,7 +60,7 @@ impl_module_def!(
 fn run(js_ctx: js::Ctx<'_>, name: &str, args: Vec<Value>) -> Result<Value> {
 	let this = js_ctx.globals().get::<_, OwnedBorrow<QueryContext>>(QUERY_DATA_PROP_NAME)?;
 	// Process the called function
-	let res = fnc::synchronous(this.context, name, args);
+	let res = fnc::synchronous(this.context, this.doc, name, args);
 	// Convert any response error
 	res.map_err(|err| {
 		js::Exception::from_message(js_ctx, &err.to_string())
@@ -73,7 +73,7 @@ async fn fut(js_ctx: js::Ctx<'_>, name: &str, args: Vec<Value>) -> Result<Value>
 	let this = js_ctx.globals().get::<_, OwnedBorrow<QueryContext>>(QUERY_DATA_PROP_NAME)?;
 	// Process the called function
 	let res = Stk::enter_run(|stk| {
-		fnc::asynchronous(stk, this.context, Some(this.opt), Some(this.txn), this.doc, name, args)
+		fnc::asynchronous(stk, this.context, Some(this.opt), this.doc, name, args)
 	})
 	.await;
 	// Convert any response error

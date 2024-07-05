@@ -3,8 +3,11 @@ use reblessive::Stk;
 use crate::{
 	sql::{Function, Ident, Model},
 	syn::{
-		parser::mac::{expected, unexpected},
-		token::{t, NumberKind, TokenKind},
+		parser::{
+			mac::{expected, expected_whitespace, unexpected},
+			ParseError, ParseErrorKind,
+		},
+		token::{t, TokenKind},
 	},
 };
 
@@ -52,26 +55,38 @@ impl Parser<'_> {
 		}
 		let start = expected!(self, t!("<")).span;
 
-		let token = self.lexer.lex_only_integer();
-		let major = match token.kind {
-			TokenKind::Number(NumberKind::Integer) => self.token_value::<u64>(token)?,
-			x => unexpected!(self, x, "a integer"),
+		let token = self.next();
+		let major: u32 = match token.kind {
+			TokenKind::Digits => std::str::from_utf8(self.lexer.reader.span(token.span))
+				.unwrap()
+				.parse()
+				.map_err(ParseErrorKind::InvalidInteger)
+				.map_err(|e| ParseError::new(e, token.span))?,
+			x => unexpected!(self, x, "an integer"),
 		};
 
-		expected!(self, t!("."));
+		expected_whitespace!(self, t!("."));
 
-		let token = self.lexer.lex_only_integer();
-		let minor = match token.kind {
-			TokenKind::Number(NumberKind::Integer) => self.token_value::<u64>(token)?,
-			x => unexpected!(self, x, "a integer"),
+		let token = self.next_whitespace();
+		let minor: u32 = match token.kind {
+			TokenKind::Digits => std::str::from_utf8(self.lexer.reader.span(token.span))
+				.unwrap()
+				.parse()
+				.map_err(ParseErrorKind::InvalidInteger)
+				.map_err(|e| ParseError::new(e, token.span))?,
+			x => unexpected!(self, x, "an integer"),
 		};
 
-		expected!(self, t!("."));
+		expected_whitespace!(self, t!("."));
 
-		let token = self.lexer.lex_only_integer();
-		let patch = match token.kind {
-			TokenKind::Number(NumberKind::Integer) => self.token_value::<u64>(token)?,
-			x => unexpected!(self, x, "a integer"),
+		let token = self.next_whitespace();
+		let patch: u32 = match token.kind {
+			TokenKind::Digits => std::str::from_utf8(self.lexer.reader.span(token.span))
+				.unwrap()
+				.parse()
+				.map_err(ParseErrorKind::InvalidInteger)
+				.map_err(|e| ParseError::new(e, token.span))?,
+			x => unexpected!(self, x, "an integer"),
 		};
 
 		self.expect_closing_delimiter(t!(">"), start)?;

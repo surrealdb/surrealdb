@@ -18,7 +18,7 @@ pub enum ResourceKind {
 	Any,
 	Namespace,
 	Database,
-	Scope,
+	Record,
 	Table,
 	Document,
 	Option,
@@ -40,7 +40,7 @@ impl std::fmt::Display for ResourceKind {
 			ResourceKind::Any => write!(f, "Any"),
 			ResourceKind::Namespace => write!(f, "Namespace"),
 			ResourceKind::Database => write!(f, "Database"),
-			ResourceKind::Scope => write!(f, "Scope"),
+			ResourceKind::Record => write!(f, "Record"),
 			ResourceKind::Table => write!(f, "Table"),
 			ResourceKind::Document => write!(f, "Document"),
 			ResourceKind::Option => write!(f, "Option"),
@@ -74,8 +74,8 @@ impl ResourceKind {
 		self.on_level((ns, db).into())
 	}
 
-	pub fn on_scope(self, ns: &str, db: &str, scope: &str) -> Resource {
-		self.on_level((ns, db, scope).into())
+	pub fn on_record(self, ns: &str, db: &str, rid: &str) -> Resource {
+		self.on_level((ns, db, rid).into())
 	}
 }
 

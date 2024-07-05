@@ -55,8 +55,8 @@ mod ml_integration {
 		let body = Body::wrap_stream(generator);
 		// Prepare HTTP client
 		let mut headers = reqwest::header::HeaderMap::new();
-		headers.insert("NS", ns.parse()?);
-		headers.insert("DB", db.parse()?);
+		headers.insert("surreal-ns", ns.parse()?);
+		headers.insert("surreal-db", db.parse()?);
 		let client = reqwest::Client::builder()
 			.connect_timeout(Duration::from_secs(1))
 			.default_headers(headers)
@@ -93,8 +93,8 @@ mod ml_integration {
 		let body = Body::wrap_stream(generator);
 		// Prepare HTTP client
 		let mut headers = reqwest::header::HeaderMap::new();
-		headers.insert("NS", ns.parse()?);
-		headers.insert("DB", db.parse()?);
+		headers.insert("surreal-ns", ns.parse()?);
+		headers.insert("surreal-db", db.parse()?);
 		let client = reqwest::Client::builder()
 			.connect_timeout(Duration::from_secs(1))
 			.default_headers(headers)
@@ -128,8 +128,8 @@ mod ml_integration {
 		let body = Body::wrap_stream(generator);
 		// Prepare HTTP client
 		let mut headers = reqwest::header::HeaderMap::new();
-		headers.insert("NS", ns.parse()?);
-		headers.insert("DB", db.parse()?);
+		headers.insert("surreal-ns", ns.parse()?);
+		headers.insert("surreal-db", db.parse()?);
 		let client = reqwest::Client::builder()
 			.connect_timeout(Duration::from_secs(1))
 			.default_headers(headers)
@@ -160,8 +160,8 @@ mod ml_integration {
 		let body = Body::wrap_stream(generator);
 		// Prepare HTTP client
 		let mut headers = reqwest::header::HeaderMap::new();
-		headers.insert("NS", ns.parse()?);
-		headers.insert("DB", db.parse()?);
+		headers.insert("surreal-ns", ns.parse()?);
+		headers.insert("surreal-db", db.parse()?);
 		let client = reqwest::Client::builder()
 			.connect_timeout(Duration::from_secs(1))
 			.default_headers(headers)
@@ -193,8 +193,8 @@ mod ml_integration {
 		let body = Body::wrap_stream(generator);
 		// Prepare HTTP client
 		let mut headers = reqwest::header::HeaderMap::new();
-		headers.insert("NS", ns.parse()?);
-		headers.insert("DB", db.parse()?);
+		headers.insert("surreal-ns", ns.parse()?);
+		headers.insert("surreal-db", db.parse()?);
 		let client = reqwest::Client::builder()
 			.connect_timeout(Duration::from_secs(1))
 			.default_headers(headers)
@@ -227,8 +227,8 @@ mod ml_integration {
 
 		// Prepare HTTP client
 		let mut headers = reqwest::header::HeaderMap::new();
-		headers.insert("NS", ns.parse()?);
-		headers.insert("DB", db.parse()?);
+		headers.insert("surreal-ns", ns.parse()?);
+		headers.insert("surreal-db", db.parse()?);
 		headers.insert(header::ACCEPT, "application/json".parse()?);
 		let client = reqwest::Client::builder()
 			.connect_timeout(Duration::from_millis(10))
@@ -263,8 +263,8 @@ mod ml_integration {
 
 		// Prepare HTTP client
 		let mut headers = reqwest::header::HeaderMap::new();
-		headers.insert("NS", ns.parse()?);
-		headers.insert("DB", db.parse()?);
+		headers.insert("surreal-ns", ns.parse()?);
+		headers.insert("surreal-db", db.parse()?);
 		headers.insert(header::ACCEPT, "application/json".parse()?);
 		let client = reqwest::Client::builder()
 			.connect_timeout(Duration::from_millis(10))

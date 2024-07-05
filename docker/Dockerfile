@@ -82,4 +82,8 @@ FROM cgr.dev/chainguard/glibc-dynamic:latest as prod
 
 COPY --from=dev /surreal /surreal
 
+# Allow connectivity from the host with bridge networking
+# This still requires publishing the port when running the container
+ENV SURREAL_BIND="0.0.0.0:8000"
+
 ENTRYPOINT ["/surreal"]

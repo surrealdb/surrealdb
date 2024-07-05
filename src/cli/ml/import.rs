@@ -4,9 +4,8 @@ use crate::cli::abstraction::{
 };
 use crate::err::Error;
 use clap::Args;
-use surrealdb::dbs::Capabilities;
 use surrealdb::engine::any::{connect, IntoEndpoint};
-use surrealdb::opt::Config;
+use surrealdb::opt::{capabilities::Capabilities, Config};
 
 #[derive(Args, Debug)]
 pub struct ImportCommandArguments {

@@ -1,12 +1,12 @@
 use crate::ctx::Context;
-use crate::dbs::{Options, Transaction};
+use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::{Error, LiveQueryCause};
 use crate::fflags::FFLAGS;
 use crate::iam::Auth;
 use crate::kvs::lq_structs::{LqEntry, TrackedResult};
 use crate::sql::statements::info::InfoStructure;
-use crate::sql::{Cond, Fetchs, Fields, Object, Table, Uuid, Value};
+use crate::sql::{Cond, Fetchs, Fields, Table, Uuid, Value};
 use derive::Store;
 use futures::lock::MutexGuard;
 use reblessive::tree::Stk;
@@ -82,7 +82,6 @@ impl LiveStatement {
 		stk: &mut Stk,
 		ctx: &Context<'_>,
 		opt: &Options,
-		txn: &Transaction,
 		doc: Option<&CursorDoc<'_>>,
 	) -> Result<Value, Error> {
 		// Is realtime enabled?
@@ -106,15 +105,15 @@ impl LiveStatement {
 		let id = stm.id.0;
 		match FFLAGS.change_feed_live_queries.enabled() {
 			true => {
-				let mut run = txn.lock().await;
-				match stm.what.compute(stk, ctx, opt, txn, doc).await? {
+				let mut run = ctx.tx_lock().await;
+				match stm.what.compute(stk, ctx, opt, doc).await? {
 					Value::Table(tb) => {
 						// We modify the table as it can be a $PARAM and the compute evaluates that
 						let mut stm = stm;
 						stm.what = Value::Table(tb.clone());
 
-						let ns = opt.ns().to_string();
-						let db = opt.db().to_string();
+						let ns = opt.ns()?.to_string();
+						let db = opt.db()?.to_string();
 						self.validate_change_feed_valid(&mut run, &ns, &db, &tb).await?;
 						// Send the live query registration hook to the transaction pre-commit channel
 						run.pre_commit_register_async_event(TrackedResult::LiveQuery(LqEntry {
@@ -134,16 +133,16 @@ impl LiveStatement {
 			}
 			false => {
 				// Claim transaction
-				let mut run = txn.lock().await;
+				let mut run = ctx.tx_lock().await;
 				// Process the live query table
-				match stm.what.compute(stk, ctx, opt, txn, doc).await? {
+				match stm.what.compute(stk, ctx, opt, doc).await? {
 					Value::Table(tb) => {
 						// Store the current Node ID
 						stm.node = nid.into();
 						// Insert the node live query
-						run.putc_ndlq(nid, id, opt.ns(), opt.db(), tb.as_str(), None).await?;
+						run.putc_ndlq(nid, id, opt.ns()?, opt.db()?, tb.as_str(), None).await?;
 						// Insert the table live query
-						run.putc_tblq(opt.ns(), opt.db(), &tb, stm, None).await?;
+						run.putc_tblq(opt.ns()?, opt.db()?, &tb, stm, None).await?;
 					}
 					v => {
 						return Err(Error::LiveStatement {
@@ -203,27 +202,11 @@ impl fmt::Display for LiveStatement {
 
 impl InfoStructure for LiveStatement {
 	fn structure(self) -> Value {
-		let Self {
-			expr,
-			what,
-			cond,
-			fetch,
-			..
-		} = self;
-
-		let mut acc = Object::default();
-
-		acc.insert("expr".to_string(), expr.structure());
-
-		acc.insert("what".to_string(), what.structure());
-
-		if let Some(cond) = cond {
-			acc.insert("cond".to_string(), cond.structure());
-		}
-
-		if let Some(fetch) = fetch {
-			acc.insert("fetch".to_string(), fetch.structure());
-		}
-		Value::Object(acc)
+		Value::from(map! {
+			"expr".to_string() => self.expr.structure(),
+			"what".to_string() => self.what.structure(),
+			"cond".to_string(), if let Some(v) = self.cond => v.structure(),
+			"fetch".to_string(), if let Some(v) = self.fetch => v.structure(),
+		})
 	}
 }

@@ -1,6 +1,6 @@
 use crate::cnf::PROTECTED_PARAM_NAMES;
 use crate::ctx::Context;
-use crate::dbs::{Options, Transaction};
+use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::sql::Value;
@@ -30,13 +30,12 @@ impl SetStatement {
 		stk: &mut Stk,
 		ctx: &Context<'_>,
 		opt: &Options,
-		txn: &Transaction,
 		doc: Option<&CursorDoc<'_>>,
 	) -> Result<Value, Error> {
 		// Check if the variable is a protected variable
 		match PROTECTED_PARAM_NAMES.contains(&self.name.as_str()) {
 			// The variable isn't protected and can be stored
-			false => self.what.compute(stk, ctx, opt, txn, doc).await,
+			false => self.what.compute(stk, ctx, opt, doc).await,
 			// The user tried to set a protected variable
 			true => Err(Error::InvalidParam {
 				// Move the parameter name, as we no longer need it

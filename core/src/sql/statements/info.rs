@@ -1,5 +1,5 @@
 use crate::ctx::Context;
-use crate::dbs::{Options, Transaction};
+use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::iam::Action;
@@ -27,10 +27,6 @@ pub enum InfoStatement {
 	Db,
 	#[revision(start = 2)]
 	Db(bool),
-	#[revision(end = 2, convert_fn = "sc_migrate")]
-	Sc(Ident),
-	#[revision(start = 2)]
-	Sc(Ident, bool),
 	#[revision(end = 2, convert_fn = "tb_migrate")]
 	Tb(Ident),
 	#[revision(start = 2)]
@@ -54,10 +50,6 @@ impl InfoStatement {
 		Ok(Self::Db(false))
 	}
 
-	fn sc_migrate(_revision: u16, i: (Ident,)) -> Result<Self, revision::Error> {
-		Ok(Self::Sc(i.0, false))
-	}
-
 	fn tb_migrate(_revision: u16, n: (Ident,)) -> Result<Self, revision::Error> {
 		Ok(Self::Tb(n.0, false))
 	}
@@ -74,9 +66,8 @@ impl InfoStatement {
 	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
-		_ctx: &Context<'_>,
+		ctx: &Context<'_>,
 		opt: &Options,
-		txn: &Transaction,
 		_doc: Option<&CursorDoc<'_>>,
 	) -> Result<Value, Error> {
 		// Allowed to run?
@@ -85,7 +76,7 @@ impl InfoStatement {
 				// Allowed to run?
 				opt.is_allowed(Action::View, ResourceKind::Any, &Base::Root)?;
 				// Claim transaction
-				let mut run = txn.lock().await;
+				let mut run = ctx.tx_lock().await;
 				// Create the result set
 				let mut res = Object::default();
 				// Process the namespaces
@@ -107,27 +98,27 @@ impl InfoStatement {
 				// Allowed to run?
 				opt.is_allowed(Action::View, ResourceKind::Any, &Base::Ns)?;
 				// Claim transaction
-				let mut run = txn.lock().await;
+				let mut run = ctx.tx_lock().await;
 				// Create the result set
 				let mut res = Object::default();
 				// Process the databases
 				let mut tmp = Object::default();
-				for v in run.all_db(opt.ns()).await?.iter() {
+				for v in run.all_db(opt.ns()?).await?.iter() {
 					tmp.insert(v.name.to_string(), v.to_string().into());
 				}
 				res.insert("databases".to_owned(), tmp.into());
 				// Process the users
 				let mut tmp = Object::default();
-				for v in run.all_ns_users(opt.ns()).await?.iter() {
+				for v in run.all_ns_users(opt.ns()?).await?.iter() {
 					tmp.insert(v.name.to_string(), v.to_string().into());
 				}
 				res.insert("users".to_owned(), tmp.into());
-				// Process the tokens
+				// Process the accesses
 				let mut tmp = Object::default();
-				for v in run.all_ns_tokens(opt.ns()).await?.iter() {
+				for v in run.all_ns_accesses_redacted(opt.ns()?).await?.iter() {
 					tmp.insert(v.name.to_string(), v.to_string().into());
 				}
-				res.insert("tokens".to_owned(), tmp.into());
+				res.insert("accesses".to_owned(), tmp.into());
 				// Ok all good
 				Value::from(res).ok()
 			}
@@ -135,73 +126,51 @@ impl InfoStatement {
 				// Allowed to run?
 				opt.is_allowed(Action::View, ResourceKind::Any, &Base::Db)?;
 				// Claim transaction
-				let mut run = txn.lock().await;
+				let mut run = ctx.tx_lock().await;
 				// Create the result set
 				let mut res = Object::default();
 				// Process the users
 				let mut tmp = Object::default();
-				for v in run.all_db_users(opt.ns(), opt.db()).await?.iter() {
+				for v in run.all_db_users(opt.ns()?, opt.db()?).await?.iter() {
 					tmp.insert(v.name.to_string(), v.to_string().into());
 				}
 				res.insert("users".to_owned(), tmp.into());
-				// Process the tokens
-				let mut tmp = Object::default();
-				for v in run.all_db_tokens(opt.ns(), opt.db()).await?.iter() {
-					tmp.insert(v.name.to_string(), v.to_string().into());
-				}
-				res.insert("tokens".to_owned(), tmp.into());
 				// Process the functions
 				let mut tmp = Object::default();
-				for v in run.all_db_functions(opt.ns(), opt.db()).await?.iter() {
+				for v in run.all_db_functions(opt.ns()?, opt.db()?).await?.iter() {
 					tmp.insert(v.name.to_string(), v.to_string().into());
 				}
 				res.insert("functions".to_owned(), tmp.into());
 				// Process the models
 				let mut tmp = Object::default();
-				for v in run.all_db_models(opt.ns(), opt.db()).await?.iter() {
+				for v in run.all_db_models(opt.ns()?, opt.db()?).await?.iter() {
 					tmp.insert(format!("{}<{}>", v.name, v.version), v.to_string().into());
 				}
 				res.insert("models".to_owned(), tmp.into());
 				// Process the params
 				let mut tmp = Object::default();
-				for v in run.all_db_params(opt.ns(), opt.db()).await?.iter() {
+				for v in run.all_db_params(opt.ns()?, opt.db()?).await?.iter() {
 					tmp.insert(v.name.to_string(), v.to_string().into());
 				}
 				res.insert("params".to_owned(), tmp.into());
-				// Process the scopes
+				// Process the accesses
 				let mut tmp = Object::default();
-				for v in run.all_sc(opt.ns(), opt.db()).await?.iter() {
+				for v in run.all_db_accesses_redacted(opt.ns()?, opt.db()?).await?.iter() {
 					tmp.insert(v.name.to_string(), v.to_string().into());
 				}
-				res.insert("scopes".to_owned(), tmp.into());
+				res.insert("accesses".to_owned(), tmp.into());
 				// Process the tables
 				let mut tmp = Object::default();
-				for v in run.all_tb(opt.ns(), opt.db()).await?.iter() {
+				for v in run.all_tb(opt.ns()?, opt.db()?).await?.iter() {
 					tmp.insert(v.name.to_string(), v.to_string().into());
 				}
 				res.insert("tables".to_owned(), tmp.into());
 				// Process the analyzers
 				let mut tmp = Object::default();
-				for v in run.all_db_analyzers(opt.ns(), opt.db()).await?.iter() {
+				for v in run.all_db_analyzers(opt.ns()?, opt.db()?).await?.iter() {
 					tmp.insert(v.name.to_string(), v.to_string().into());
 				}
 				res.insert("analyzers".to_owned(), tmp.into());
-				// Ok all good
-				Value::from(res).ok()
-			}
-			InfoStatement::Sc(sc, false) => {
-				// Allowed to run?
-				opt.is_allowed(Action::View, ResourceKind::Any, &Base::Db)?;
-				// Claim transaction
-				let mut run = txn.lock().await;
-				// Create the result set
-				let mut res = Object::default();
-				// Process the tokens
-				let mut tmp = Object::default();
-				for v in run.all_sc_tokens(opt.ns(), opt.db(), sc).await?.iter() {
-					tmp.insert(v.name.to_string(), v.to_string().into());
-				}
-				res.insert("tokens".to_owned(), tmp.into());
 				// Ok all good
 				Value::from(res).ok()
 			}
@@ -209,36 +178,36 @@ impl InfoStatement {
 				// Allowed to run?
 				opt.is_allowed(Action::View, ResourceKind::Any, &Base::Db)?;
 				// Claim transaction
-				let mut run = txn.lock().await;
+				let mut run = ctx.tx_lock().await;
 				// Create the result set
 				let mut res = Object::default();
 				// Process the events
 				let mut tmp = Object::default();
-				for v in run.all_tb_events(opt.ns(), opt.db(), tb).await?.iter() {
+				for v in run.all_tb_events(opt.ns()?, opt.db()?, tb).await?.iter() {
 					tmp.insert(v.name.to_string(), v.to_string().into());
 				}
 				res.insert("events".to_owned(), tmp.into());
 				// Process the fields
 				let mut tmp = Object::default();
-				for v in run.all_tb_fields(opt.ns(), opt.db(), tb).await?.iter() {
+				for v in run.all_tb_fields(opt.ns()?, opt.db()?, tb).await?.iter() {
 					tmp.insert(v.name.to_string(), v.to_string().into());
 				}
 				res.insert("fields".to_owned(), tmp.into());
 				// Process the tables
 				let mut tmp = Object::default();
-				for v in run.all_tb_views(opt.ns(), opt.db(), tb).await?.iter() {
+				for v in run.all_tb_views(opt.ns()?, opt.db()?, tb).await?.iter() {
 					tmp.insert(v.name.to_string(), v.to_string().into());
 				}
 				res.insert("tables".to_owned(), tmp.into());
 				// Process the indexes
 				let mut tmp = Object::default();
-				for v in run.all_tb_indexes(opt.ns(), opt.db(), tb).await?.iter() {
+				for v in run.all_tb_indexes(opt.ns()?, opt.db()?, tb).await?.iter() {
 					tmp.insert(v.name.to_string(), v.to_string().into());
 				}
 				res.insert("indexes".to_owned(), tmp.into());
 				// Process the live queries
 				let mut tmp = Object::default();
-				for v in run.all_tb_lives(opt.ns(), opt.db(), tb).await?.iter() {
+				for v in run.all_tb_lives(opt.ns()?, opt.db()?, tb).await?.iter() {
 					tmp.insert(v.id.to_raw(), v.to_string().into());
 				}
 				res.insert("lives".to_owned(), tmp.into());
@@ -251,12 +220,12 @@ impl InfoStatement {
 				opt.is_allowed(Action::View, ResourceKind::Actor, &base)?;
 
 				// Claim transaction
-				let mut run = txn.lock().await;
+				let mut run = ctx.tx_lock().await;
 				// Process the user
 				let res = match base {
 					Base::Root => run.get_root_user(user).await?,
-					Base::Ns => run.get_ns_user(opt.ns(), user).await?,
-					Base::Db => run.get_db_user(opt.ns(), opt.db(), user).await?,
+					Base::Ns => run.get_ns_user(opt.ns()?, user).await?,
+					Base::Db => run.get_db_user(opt.ns()?, opt.db()?, user).await?,
 					_ => return Err(Error::InvalidLevel(base.to_string())),
 				};
 				// Ok all good
@@ -266,7 +235,7 @@ impl InfoStatement {
 				// Allowed to run?
 				opt.is_allowed(Action::View, ResourceKind::Any, &Base::Root)?;
 				// Claim transaction
-				let mut run = txn.lock().await;
+				let mut run = ctx.tx_lock().await;
 				// Create the result set
 				let mut res = Object::default();
 				// Process the namespaces
@@ -280,15 +249,18 @@ impl InfoStatement {
 				// Allowed to run?
 				opt.is_allowed(Action::View, ResourceKind::Any, &Base::Ns)?;
 				// Claim transaction
-				let mut run = txn.lock().await;
+				let mut run = ctx.tx_lock().await;
 				// Create the result set
 				let mut res = Object::default();
 				// Process the databases
-				res.insert("databases".to_owned(), process_arr(run.all_db(opt.ns()).await?));
+				res.insert("databases".to_owned(), process_arr(run.all_db(opt.ns()?).await?));
 				// Process the users
-				res.insert("users".to_owned(), process_arr(run.all_ns_users(opt.ns()).await?));
-				// Process the tokens
-				res.insert("tokens".to_owned(), process_arr(run.all_ns_tokens(opt.ns()).await?));
+				res.insert("users".to_owned(), process_arr(run.all_ns_users(opt.ns()?).await?));
+				// Process the accesses
+				res.insert(
+					"accesses".to_owned(),
+					process_arr(run.all_ns_accesses_redacted(opt.ns()?).await?),
+				);
 				// Ok all good
 				Value::from(res).ok()
 			}
@@ -296,67 +268,49 @@ impl InfoStatement {
 				// Allowed to run?
 				opt.is_allowed(Action::View, ResourceKind::Any, &Base::Db)?;
 				// Claim transaction
-				let mut run = txn.lock().await;
+				let mut run = ctx.tx_lock().await;
 				// Create the result set
 				let mut res = Object::default();
 				// Process the users
 				res.insert(
 					"users".to_owned(),
-					process_arr(run.all_db_users(opt.ns(), opt.db()).await?),
+					process_arr(run.all_db_users(opt.ns()?, opt.db()?).await?),
 				);
-				// Process the tokens
+				// Process the accesses
 				res.insert(
-					"tokens".to_owned(),
-					process_arr(run.all_db_tokens(opt.ns(), opt.db()).await?),
+					"accesses".to_owned(),
+					process_arr(run.all_db_accesses(opt.ns()?, opt.db()?).await?),
 				);
 				// Process the functions
 				res.insert(
 					"functions".to_owned(),
-					process_arr(run.all_db_functions(opt.ns(), opt.db()).await?),
+					process_arr(run.all_db_functions(opt.ns()?, opt.db()?).await?),
 				);
 				// Process the models
 				res.insert(
 					"models".to_owned(),
-					process_arr(run.all_db_models(opt.ns(), opt.db()).await?),
+					process_arr(run.all_db_models(opt.ns()?, opt.db()?).await?),
 				);
 				// Process the params
 				res.insert(
 					"params".to_owned(),
-					process_arr(run.all_db_params(opt.ns(), opt.db()).await?),
+					process_arr(run.all_db_params(opt.ns()?, opt.db()?).await?),
 				);
-				// Process the scopes
-				res.insert("scopes".to_owned(), process_arr(run.all_sc(opt.ns(), opt.db()).await?));
+				// Process the accesses
+				res.insert(
+					"accesses".to_owned(),
+					process_arr(run.all_db_accesses_redacted(opt.ns()?, opt.db()?).await?),
+				);
 				// Process the tables
-				res.insert("tables".to_owned(), process_arr(run.all_tb(opt.ns(), opt.db()).await?));
+				res.insert(
+					"tables".to_owned(),
+					process_arr(run.all_tb(opt.ns()?, opt.db()?).await?),
+				);
 				// Process the analyzers
 				res.insert(
 					"analyzers".to_owned(),
-					process_arr(run.all_db_analyzers(opt.ns(), opt.db()).await?),
+					process_arr(run.all_db_analyzers(opt.ns()?, opt.db()?).await?),
 				);
-				// Ok all good
-				Value::from(res).ok()
-			}
-			InfoStatement::Sc(sc, true) => {
-				// Allowed to run?
-				opt.is_allowed(Action::View, ResourceKind::Any, &Base::Db)?;
-				// Claim transaction
-				let mut run = txn.lock().await;
-				// Create the result set
-				let mut res = Object::default();
-				// Process the tokens
-				res.insert(
-					"tokens".to_owned(),
-					process_arr(run.all_sc_tokens(opt.ns(), opt.db(), sc).await?),
-				);
-
-				let def = run.get_sc(opt.ns(), opt.db(), sc).await?;
-				let Value::Object(o) = def.structure() else {
-					return Err(Error::Thrown(
-						"InfoStructure should return Value::Object".to_string(),
-					));
-				};
-				res.extend(o);
-
 				// Ok all good
 				Value::from(res).ok()
 			}
@@ -364,33 +318,33 @@ impl InfoStatement {
 				// Allowed to run?
 				opt.is_allowed(Action::View, ResourceKind::Any, &Base::Db)?;
 				// Claim transaction
-				let mut run = txn.lock().await;
+				let mut run = ctx.tx_lock().await;
 				// Create the result set
 				let mut res = Object::default();
 				// Process the events
 				res.insert(
 					"events".to_owned(),
-					process_arr(run.all_tb_events(opt.ns(), opt.db(), tb).await?),
+					process_arr(run.all_tb_events(opt.ns()?, opt.db()?, tb).await?),
 				);
 				// Process the fields
 				res.insert(
 					"fields".to_owned(),
-					process_arr(run.all_tb_fields(opt.ns(), opt.db(), tb).await?),
+					process_arr(run.all_tb_fields(opt.ns()?, opt.db()?, tb).await?),
 				);
 				// Process the tables
 				res.insert(
 					"tables".to_owned(),
-					process_arr(run.all_tb_views(opt.ns(), opt.db(), tb).await?),
+					process_arr(run.all_tb_views(opt.ns()?, opt.db()?, tb).await?),
 				);
 				// Process the indexes
 				res.insert(
 					"indexes".to_owned(),
-					process_arr(run.all_tb_indexes(opt.ns(), opt.db(), tb).await?),
+					process_arr(run.all_tb_indexes(opt.ns()?, opt.db()?, tb).await?),
 				);
 				// Process the live queries
 				res.insert(
 					"lives".to_owned(),
-					process_arr(run.all_tb_lives(opt.ns(), opt.db(), tb).await?),
+					process_arr(run.all_tb_lives(opt.ns()?, opt.db()?, tb).await?),
 				);
 				// Ok all good
 				Value::from(res).ok()
@@ -401,12 +355,12 @@ impl InfoStatement {
 				opt.is_allowed(Action::View, ResourceKind::Actor, &base)?;
 
 				// Claim transaction
-				let mut run = txn.lock().await;
+				let mut run = ctx.tx_lock().await;
 				// Process the user
 				let res = match base {
 					Base::Root => run.get_root_user(user).await?,
-					Base::Ns => run.get_ns_user(opt.ns(), user).await?,
-					Base::Db => run.get_db_user(opt.ns(), opt.db(), user).await?,
+					Base::Ns => run.get_ns_user(opt.ns()?, user).await?,
+					Base::Db => run.get_db_user(opt.ns()?, opt.db()?, user).await?,
 					_ => return Err(Error::InvalidLevel(base.to_string())),
 				};
 				// Ok all good
@@ -425,8 +379,6 @@ impl fmt::Display for InfoStatement {
 			Self::Ns(true) => f.write_str("INFO FOR NAMESPACE STRUCTURE"),
 			Self::Db(false) => f.write_str("INFO FOR DATABASE"),
 			Self::Db(true) => f.write_str("INFO FOR DATABASE STRUCTURE"),
-			Self::Sc(ref s, false) => write!(f, "INFO FOR SCOPE {s}"),
-			Self::Sc(ref s, true) => write!(f, "INFO FOR SCOPE {s} STRUCTURE"),
 			Self::Tb(ref t, false) => write!(f, "INFO FOR TABLE {t}"),
 			Self::Tb(ref t, true) => write!(f, "INFO FOR TABLE {t} STRUCTURE"),
 			Self::User(ref u, ref b, false) => match b {
@@ -453,7 +405,6 @@ impl InfoStatement {
 			InfoStatement::Root(_) => InfoStatement::Root(true),
 			InfoStatement::Ns(_) => InfoStatement::Ns(true),
 			InfoStatement::Db(_) => InfoStatement::Db(true),
-			InfoStatement::Sc(s, _) => InfoStatement::Sc(s, true),
 			InfoStatement::Tb(t, _) => InfoStatement::Tb(t, true),
 			InfoStatement::User(u, b, _) => InfoStatement::User(u, b, true),
 		}

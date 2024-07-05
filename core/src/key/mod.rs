@@ -11,27 +11,23 @@
 /// crate::key::node::lq                 /${nd}!lq{lq}{ns}{db}
 ///
 /// crate::key::namespace::all           /*{ns}
+/// crate::key::namespace::ac            /*{ns}!ac{ac}
 /// crate::key::namespace::db            /*{ns}!db{db}
 /// crate::key::namespace::di            /+{ns id}!di
 /// crate::key::namespace::lg            /*{ns}!lg{lg}
-/// crate::key::namespace::tk            /*{ns}!tk{tk}
 /// crate::key::namespace::us            /*{ns}!us{us}
 ///
 /// crate::key::database::all            /*{ns}*{db}
+/// crate::key::database::ac             /*{ns}*{db}!ac{ac}
 /// crate::key::database::az             /*{ns}*{db}!az{az}
 /// crate::key::database::fc             /*{ns}*{db}!fn{fc}
 /// crate::key::database::lg             /*{ns}*{db}!lg{lg}
 /// crate::key::database::pa             /*{ns}*{db}!pa{pa}
-/// crate::key::database::sc             /*{ns}*{db}!sc{sc}
 /// crate::key::database::tb             /*{ns}*{db}!tb{tb}
 /// crate::key::database::ti             /+{ns id}*{db id}!ti
-/// crate::key::database::tk             /*{ns}*{db}!tk{tk}
 /// crate::key::database::ts             /*{ns}*{db}!ts{ts}
 /// crate::key::database::us             /*{ns}*{db}!us{us}
 /// crate::key::database::vs             /*{ns}*{db}!vs
-///
-/// crate::key::scope::all               /*{ns}*{db}±{sc}
-/// crate::key::scope::tk                /*{ns}*{db}±{sc}!tk{tk}
 ///
 /// crate::key::table::all               /*{ns}*{db}*{tb}
 /// crate::key::table::ev                /*{ns}*{db}*{tb}!ev{ev}
@@ -70,6 +66,5 @@ pub(crate) mod key_req;
 pub mod namespace;
 pub mod node;
 pub mod root;
-pub mod scope;
 pub mod table;
 pub mod thing;

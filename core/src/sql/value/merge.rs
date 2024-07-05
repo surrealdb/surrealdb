@@ -30,6 +30,7 @@ mod tests {
 	async fn merge_none() {
 		let mut res = Value::parse(
 			"{
+				test: true,
 				name: {
 					first: 'Tobie',
 					last: 'Morgan Hitchcock',
@@ -47,9 +48,37 @@ mod tests {
 	}
 
 	#[tokio::test]
+	async fn merge_empty() {
+		let mut res = Value::parse(
+			"{
+				test: true,
+				name: {
+					first: 'Tobie',
+					last: 'Morgan Hitchcock',
+					initials: 'TMH',
+				},
+			}",
+		);
+		let val = Value::parse(
+			"{
+				test: true,
+				name: {
+					first: 'Tobie',
+					last: 'Morgan Hitchcock',
+					initials: 'TMH',
+				},
+			}",
+		);
+		let mrg = Value::Object(Default::default());
+		res.merge(mrg).unwrap();
+		assert_eq!(res, val);
+	}
+
+	#[tokio::test]
 	async fn merge_basic() {
 		let mut res = Value::parse(
 			"{
+				test: true,
 				name: {
 					first: 'Tobie',
 					last: 'Morgan Hitchcock',
@@ -68,6 +97,7 @@ mod tests {
 		);
 		let val = Value::parse(
 			"{
+				test: true,
 				name: {
 					title: 'Mr',
 					first: 'Tobie',

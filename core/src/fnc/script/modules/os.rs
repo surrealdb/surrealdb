@@ -18,13 +18,13 @@ pub fn platform() -> &'static str {
 pub struct Package;
 
 impl ModuleDef for Package {
-	fn declare(declare: &mut Declarations) -> Result<()> {
+	fn declare(declare: &Declarations) -> Result<()> {
 		declare.declare("arch")?;
 		declare.declare("platform")?;
 		Ok(())
 	}
 
-	fn evaluate<'js>(_ctx: &js::Ctx<'js>, exports: &mut Exports<'js>) -> Result<()> {
+	fn evaluate<'js>(_ctx: &js::Ctx<'js>, exports: &Exports<'js>) -> Result<()> {
 		exports.export("arch", js_arch)?;
 		exports.export("platform", js_platform)?;
 		Ok(())
