@@ -39,7 +39,7 @@ impl RemoveAccessStatement {
 					run.del(key).await?;
 					// Delete any associated data including access grants.
 					let key = crate::key::namespace::access::all::new(opt.ns()?, &ac.name);
-					run.del(key).await?;
+					run.delp(key, u32::MAX).await?;
 					// Ok all good
 					Ok(Value::None)
 				}
@@ -56,7 +56,7 @@ impl RemoveAccessStatement {
 					// Delete any associated data including access grants.
 					let key =
 						crate::key::database::access::all::new(opt.ns()?, opt.db()?, &ac.name);
-					run.del(key).await?;
+					run.delp(key, u32::MAX).await?;
 					// Ok all good
 					Ok(Value::None)
 				}
