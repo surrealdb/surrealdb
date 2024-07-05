@@ -34,18 +34,22 @@ pub enum KeyCategory {
 	DatabaseIdentifier,
 	/// crate::key::namespace::lg            /*{ns}!lg{lg}
 	DatabaseLogAlias,
-	/// crate::key::namespace::ac            /*{ns}!ac{ac}
+	/// crate::key::namespace::access::all   /*{ns}*{ac}
+	NamespaceAccessRoot,
+	/// crate::key::namespace::access::ac    /*{ns}!ac{ac}
 	NamespaceAccess,
-	/// crate::key::namespace::ac::gr        /*{ns}!ac{ac}±gr{gr}
+	/// crate::key::namespace::access::gr    /*{ns}*{ac}!gr{gr}
 	NamespaceAccessGrant,
 	/// crate::key::namespace::us            /*{ns}!us{us}
 	NamespaceUser,
 	///
 	/// crate::key::database::all            /*{ns}*{db}
 	DatabaseRoot,
-	/// crate::key::database::ac             /*{ns}*{db}!ac{ac}
+	/// crate::key::database::access::all    /*{ns}*{db}*{ac}
+	DatabaseAccessRoot,
+	/// crate::key::database::access::ac     /*{ns}*{db}!ac{ac}
 	DatabaseAccess,
-	/// crate::key::database::ac::gr         /*{ns}*{db}!ac{ac}±gr{gr}
+	/// crate::key::database::access::gr     /*{ns}*{db}*ac!gr{gr}
 	DatabaseAccessGrant,
 	/// crate::key::database::az             /*{ns}*{db}!az{az}
 	DatabaseAnalyzer,
@@ -135,10 +139,12 @@ impl Display for KeyCategory {
 			KeyCategory::DatabaseAlias => "DatabaseAlias",
 			KeyCategory::DatabaseIdentifier => "DatabaseIdentifier",
 			KeyCategory::DatabaseLogAlias => "DatabaseLogAlias",
+			KeyCategory::NamespaceAccessRoot => "NamespaceAccessRoot",
 			KeyCategory::NamespaceAccess => "NamespaceAccess",
 			KeyCategory::NamespaceAccessGrant => "NamespaceAccessGrant",
 			KeyCategory::NamespaceUser => "NamespaceUser",
 			KeyCategory::DatabaseRoot => "DatabaseRoot",
+			KeyCategory::DatabaseAccessRoot => "DatabaseAccessRoot",
 			KeyCategory::DatabaseAccess => "DatabaseAccess",
 			KeyCategory::DatabaseAccessGrant => "DatabaseAccessGrant",
 			KeyCategory::DatabaseAnalyzer => "DatabaseAnalyzer",

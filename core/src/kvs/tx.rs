@@ -1372,7 +1372,7 @@ impl Transaction {
 		&mut self,
 		ns: &str,
 	) -> Result<Arc<[DefineAccessStatement]>, Error> {
-		let key = crate::key::namespace::ac::prefix(ns);
+		let key = crate::key::namespace::access::ac::prefix(ns);
 		Ok(if let Some(e) = self.cache.get(&key) {
 			if let Entry::Nas(v) = e {
 				v
@@ -1380,8 +1380,8 @@ impl Transaction {
 				unreachable!();
 			}
 		} else {
-			let beg = crate::key::namespace::ac::prefix(ns);
-			let end = crate::key::namespace::ac::suffix(ns);
+			let beg = crate::key::namespace::access::ac::prefix(ns);
+			let end = crate::key::namespace::access::ac::suffix(ns);
 			let val = self.getr(beg..end, u32::MAX).await?;
 			let val = val.convert().into();
 			self.cache.set(key, Entry::Nas(Arc::clone(&val)));
@@ -1405,7 +1405,7 @@ impl Transaction {
 		ns: &str,
 		ac: &str,
 	) -> Result<Arc<[AccessGrant]>, Error> {
-		let key = crate::key::namespace::ac::gr::prefix(ns, ac);
+		let key = crate::key::namespace::access::gr::prefix(ns, ac);
 		Ok(if let Some(e) = self.cache.get(&key) {
 			if let Entry::Ags(v) = e {
 				v
@@ -1413,8 +1413,8 @@ impl Transaction {
 				unreachable!();
 			}
 		} else {
-			let beg = crate::key::namespace::ac::gr::prefix(ns, ac);
-			let end = crate::key::namespace::ac::gr::suffix(ns, ac);
+			let beg = crate::key::namespace::access::gr::prefix(ns, ac);
+			let end = crate::key::namespace::access::gr::suffix(ns, ac);
 			let val = self.getr(beg..end, u32::MAX).await?;
 			let val = val.convert().into();
 			self.cache.set(key, Entry::Ags(Arc::clone(&val)));
@@ -1481,7 +1481,7 @@ impl Transaction {
 		ns: &str,
 		db: &str,
 	) -> Result<Arc<[DefineAccessStatement]>, Error> {
-		let key = crate::key::database::ac::prefix(ns, db);
+		let key = crate::key::database::access::ac::prefix(ns, db);
 		Ok(if let Some(e) = self.cache.get(&key) {
 			if let Entry::Das(v) = e {
 				v
@@ -1489,8 +1489,8 @@ impl Transaction {
 				unreachable!();
 			}
 		} else {
-			let beg = crate::key::database::ac::prefix(ns, db);
-			let end = crate::key::database::ac::suffix(ns, db);
+			let beg = crate::key::database::access::ac::prefix(ns, db);
+			let end = crate::key::database::access::ac::suffix(ns, db);
 			let val = self.getr(beg..end, u32::MAX).await?;
 			let val = val.convert().into();
 			self.cache.set(key, Entry::Das(Arc::clone(&val)));
@@ -1516,7 +1516,7 @@ impl Transaction {
 		db: &str,
 		ac: &str,
 	) -> Result<Arc<[AccessGrant]>, Error> {
-		let key = crate::key::database::ac::gr::prefix(ns, db, ac);
+		let key = crate::key::database::access::gr::prefix(ns, db, ac);
 		Ok(if let Some(e) = self.cache.get(&key) {
 			if let Entry::Ags(v) = e {
 				v
@@ -1524,8 +1524,8 @@ impl Transaction {
 				unreachable!();
 			}
 		} else {
-			let beg = crate::key::database::ac::gr::prefix(ns, db, ac);
-			let end = crate::key::database::ac::gr::suffix(ns, db, ac);
+			let beg = crate::key::database::access::gr::prefix(ns, db, ac);
+			let end = crate::key::database::access::gr::suffix(ns, db, ac);
 			let val = self.getr(beg..end, u32::MAX).await?;
 			let val = val.convert().into();
 			self.cache.set(key, Entry::Ags(Arc::clone(&val)));
@@ -1841,7 +1841,7 @@ impl Transaction {
 		ns: &str,
 		ac: &str,
 	) -> Result<DefineAccessStatement, Error> {
-		let key = crate::key::namespace::ac::new(ns, ac);
+		let key = crate::key::namespace::access::ac::new(ns, ac);
 		let val = self.get(key).await?.ok_or(Error::NaNotFound {
 			value: ac.to_owned(),
 		})?;
@@ -1855,7 +1855,7 @@ impl Transaction {
 		ac: &str,
 		gr: &str,
 	) -> Result<AccessGrant, Error> {
-		let key = crate::key::namespace::ac::gr::new(ns, ac, gr);
+		let key = crate::key::namespace::access::gr::new(ns, ac, gr);
 		let val = self.get(key).await?.ok_or(Error::NgNotFound {
 			value: gr.to_owned(),
 		})?;
@@ -1909,7 +1909,7 @@ impl Transaction {
 		db: &str,
 		ac: &str,
 	) -> Result<DefineAccessStatement, Error> {
-		let key = crate::key::database::ac::new(ns, db, ac);
+		let key = crate::key::database::access::ac::new(ns, db, ac);
 		let val = self.get(key).await?.ok_or(Error::DgNotFound {
 			value: ac.to_owned(),
 		})?;
@@ -1924,7 +1924,7 @@ impl Transaction {
 		ac: &str,
 		gr: &str,
 	) -> Result<AccessGrant, Error> {
-		let key = crate::key::database::ac::gr::new(ns, db, ac, gr);
+		let key = crate::key::database::access::gr::new(ns, db, ac, gr);
 		let val = self.get(key).await?.ok_or(Error::DaNotFound {
 			value: gr.to_owned(),
 		})?;

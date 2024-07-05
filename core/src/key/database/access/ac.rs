@@ -1,5 +1,4 @@
-//! Stores a DEFINE ACCESS ON DATABASE configuration and grants
-pub mod gr;
+//! Stores a DEFINE ACCESS ON DATABASE configuration
 use crate::key::error::KeyCategory;
 use crate::key::key_req::KeyRequirements;
 use derive::Key;
@@ -24,13 +23,13 @@ pub fn new<'a>(ns: &'a str, db: &'a str, ac: &'a str) -> Ac<'a> {
 }
 
 pub fn prefix(ns: &str, db: &str) -> Vec<u8> {
-	let mut k = super::all::new(ns, db).encode().unwrap();
+	let mut k = crate::key::database::all::new(ns, db).encode().unwrap();
 	k.extend_from_slice(&[b'!', b'a', b'c', 0x00]);
 	k
 }
 
 pub fn suffix(ns: &str, db: &str) -> Vec<u8> {
-	let mut k = super::all::new(ns, db).encode().unwrap();
+	let mut k = crate::key::database::all::new(ns, db).encode().unwrap();
 	k.extend_from_slice(&[b'!', b'a', b'c', 0xff]);
 	k
 }
@@ -69,7 +68,7 @@ mod tests {
 			"testac",
 		);
 		let enc = Ac::encode(&val).unwrap();
-		assert_eq!(enc, b"/*testns\x00*testdb\x00!actestac\x00");
+		assert_eq!(enc, b"/*testns\0*testdb\0!actestac\0");
 
 		let dec = Ac::decode(&enc).unwrap();
 		assert_eq!(val, dec);

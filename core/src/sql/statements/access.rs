@@ -271,8 +271,11 @@ impl AccessStatement {
 								let ac_str = gr.ac.to_raw();
 								let gr_str = gr.id.to_raw();
 								// Process the statement
-								let key =
-									crate::key::namespace::ac::gr::new(opt.ns()?, &ac_str, &gr_str);
+								let key = crate::key::namespace::access::gr::new(
+									opt.ns()?,
+									&ac_str,
+									&gr_str,
+								);
 								run.add_ns(opt.ns()?, opt.strict).await?;
 								run.set(key, gr.to_owned()).await?;
 								Ok(Value::Object(gr.into()))
@@ -337,7 +340,7 @@ impl AccessStatement {
 								let ac_str = gr.ac.to_raw();
 								let gr_str = gr.id.to_raw();
 								// Process the statement
-								let key = crate::key::database::ac::gr::new(
+								let key = crate::key::database::access::gr::new(
 									opt.ns()?,
 									opt.db()?,
 									&ac_str,
@@ -415,11 +418,12 @@ impl AccessStatement {
 						let mut gr = run.get_ns_access_grant(opt.ns()?, &ac_str, &gr_str).await?;
 						if let Some(_) = gr.revocation {
 							// TODO(PR): Add new error.
-							return Err(Error::InvalidAuth)
+							return Err(Error::InvalidAuth);
 						}
 						gr.revocation = Some(Datetime::default());
 						// Process the statement
-						let key = crate::key::namespace::ac::gr::new(opt.ns()?, &ac_str, &gr_str);
+						let key =
+							crate::key::namespace::access::gr::new(opt.ns()?, &ac_str, &gr_str);
 						run.add_ns(opt.ns()?, opt.strict).await?;
 						run.set(key, gr.to_owned()).await?;
 						Ok(Value::Object(gr.redacted().into()))
@@ -436,11 +440,11 @@ impl AccessStatement {
 							run.get_db_access_grant(opt.ns()?, opt.db()?, &ac_str, &gr_str).await?;
 						if let Some(_) = gr.revocation {
 							// TODO(PR): Add new error.
-							return Err(Error::InvalidAuth)
+							return Err(Error::InvalidAuth);
 						}
 						gr.revocation = Some(Datetime::default());
 						// Process the statement
-						let key = crate::key::database::ac::gr::new(
+						let key = crate::key::database::access::gr::new(
 							opt.ns()?,
 							opt.db()?,
 							&ac_str,

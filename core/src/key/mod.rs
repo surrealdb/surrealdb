@@ -11,16 +11,18 @@
 /// crate::key::node::lq                 /${nd}!lq{lq}{ns}{db}
 ///
 /// crate::key::namespace::all           /*{ns}
-/// crate::key::namespace::ac            /*{ns}!ac{ac}
-/// crate::key::namespace::ac::gr        /*{ns}!ac{ac}>gr{gr}
+/// crate::key::namespace::access::all   /*{ns}*{ac}
+/// crate::key::namespace::access::ac    /*{ns}!ac{ac}
+/// crate::key::namespace::access::gr    /*{ns}*{ac}!gr{gr}
 /// crate::key::namespace::db            /*{ns}!db{db}
 /// crate::key::namespace::di            /+{ns id}!di
 /// crate::key::namespace::lg            /*{ns}!lg{lg}
 /// crate::key::namespace::us            /*{ns}!us{us}
 ///
 /// crate::key::database::all            /*{ns}*{db}
-/// crate::key::database::ac             /*{ns}*{db}!ac{ac}
-/// crate::key::database::ac::gr         /*{ns}*{db}!ac{ac}>gr{gr}
+/// crate::key::database::access::all    /*{ns}*{db}*{ac}
+/// crate::key::database::access::ac     /*{ns}*{db}!ac{ac}
+/// crate::key::database::access::gr     /*{ns}*{db}*{ac}!gr{gr}
 /// crate::key::database::az             /*{ns}*{db}!az{az}
 /// crate::key::database::fc             /*{ns}*{db}!fn{fc}
 /// crate::key::database::lg             /*{ns}*{db}!lg{lg}

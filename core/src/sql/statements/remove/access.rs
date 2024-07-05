@@ -35,7 +35,10 @@ impl RemoveAccessStatement {
 					// Get the definition
 					let ac = run.get_ns_access(opt.ns()?, &self.name).await?;
 					// Delete the definition
-					let key = crate::key::namespace::ac::new(opt.ns()?, &ac.name);
+					let key = crate::key::namespace::access::ac::new(opt.ns()?, &ac.name);
+					run.del(key).await?;
+					// Delete any associated data including access grants.
+					let key = crate::key::namespace::access::all::new(opt.ns()?, &ac.name);
 					run.del(key).await?;
 					// Ok all good
 					Ok(Value::None)
@@ -48,7 +51,11 @@ impl RemoveAccessStatement {
 					// Get the definition
 					let ac = run.get_db_access(opt.ns()?, opt.db()?, &self.name).await?;
 					// Delete the definition
-					let key = crate::key::database::ac::new(opt.ns()?, opt.db()?, &ac.name);
+					let key = crate::key::database::access::ac::new(opt.ns()?, opt.db()?, &ac.name);
+					run.del(key).await?;
+					// Delete any associated data including access grants.
+					let key =
+						crate::key::database::access::all::new(opt.ns()?, opt.db()?, &ac.name);
 					run.del(key).await?;
 					// Ok all good
 					Ok(Value::None)

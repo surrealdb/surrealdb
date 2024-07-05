@@ -80,7 +80,7 @@ impl DefineAccessStatement {
 					}
 				}
 				// Process the statement
-				let key = crate::key::namespace::ac::new(opt.ns()?, &self.name);
+				let key = crate::key::namespace::access::ac::new(opt.ns()?, &self.name);
 				run.add_ns(opt.ns()?, opt.strict).await?;
 				run.set(
 					key,
@@ -109,7 +109,7 @@ impl DefineAccessStatement {
 					}
 				}
 				// Process the statement
-				let key = crate::key::database::ac::new(opt.ns()?, opt.db()?, &self.name);
+				let key = crate::key::database::access::ac::new(opt.ns()?, opt.db()?, &self.name);
 				run.add_ns(opt.ns()?, opt.strict).await?;
 				run.add_db(opt.ns()?, opt.db()?, opt.strict).await?;
 				run.set(
