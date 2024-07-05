@@ -1,8 +1,13 @@
+use crate::ctx::Context;
+use crate::dbs::Options;
+use crate::err::Error;
 use crate::sql::fmt::Fmt;
 use crate::sql::statements::info::InfoStructure;
-use crate::sql::Value;
+use crate::sql::{Idiom, Value};
+use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
+use std::borrow::Cow;
 use std::fmt::{self, Display, Formatter};
 use std::ops::Deref;
 
@@ -45,6 +50,37 @@ impl InfoStructure for Fetchs {
 #[non_exhaustive]
 pub struct Fetch(pub Value);
 
+impl Fetch {
+	pub(crate) async fn compute(
+		&self,
+		stk: &mut Stk,
+		ctx: &Context<'_>,
+		opt: &Options,
+	) -> Result<Cow<Idiom>, Error> {
+		let i = match &self.0 {
+			Value::Idiom(idiom) => Cow::Borrowed(idiom),
+			Value::Param(param) => {
+				let p = param.compute(stk, ctx, opt, None).await?;
+				match p {
+					Value::Strand(s) => Cow::Owned(Idiom::from(s.0)),
+					Value::Idiom(i) => Cow::Owned(i),
+					Value::Table(t) => Cow::Owned(Idiom::from(t.0)),
+					v => {
+						return Err(Error::InvalidFetch {
+							value: v,
+						});
+					}
+				}
+			}
+			v => {
+				return Err(Error::InvalidFetch {
+					value: v.clone(),
+				});
+			}
+		};
+		Ok(i)
+	}
+}
 impl Deref for Fetch {
 	type Target = Value;
 	fn deref(&self) -> &Self::Target {

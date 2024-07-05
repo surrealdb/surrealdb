@@ -168,6 +168,12 @@ pub enum Error {
 		field: String,
 	},
 
+	/// The LIMIT clause must evaluate to a positive integer
+	#[error("Found {value} on FETCH CLAUSE, but FETCH is expected an idiom or a string")]
+	InvalidFetch {
+		value: Value,
+	},
+
 	#[error("Found '{field}' in SPLIT ON clause on line {line}, but field is not present in SELECT expression")]
 	InvalidSplit {
 		line: usize,
