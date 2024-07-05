@@ -94,7 +94,7 @@ impl AccessGrant {
 impl From<AccessGrant> for Object {
 	fn from(grant: AccessGrant) -> Self {
 		let mut res = Object::default();
-		res.insert("id".to_owned(), Value::from(grant.id.to_string()));
+		res.insert("id".to_owned(), Value::from(grant.id.to_raw()));
 		res.insert("ac".to_owned(), Value::from(grant.ac.to_string()));
 		res.insert("creation".to_owned(), Value::from(grant.creation));
 		res.insert("expiration".to_owned(), Value::from(grant.expiration));
@@ -124,7 +124,7 @@ impl From<AccessGrant> for Object {
 				}
 			}
 			Grant::Bearer(bg) => {
-				gr.insert("id".to_owned(), Value::from(bg.id.to_string()));
+				gr.insert("id".to_owned(), Value::from(bg.id.to_raw()));
 				gr.insert("key".to_owned(), Value::from(bg.key));
 			}
 		};
@@ -265,6 +265,7 @@ impl AccessStatement {
 									revocation: None,
 									// Subject associated with the grant.
 									subject: stmt.subject.to_owned(),
+									// The contents of the grant.
 									grant: Grant::Bearer(grant),
 								};
 								let ac_str = gr.ac.to_raw();
@@ -330,8 +331,8 @@ impl AccessStatement {
 									revocation: None,
 									// Subject associated with the grant.
 									subject: stmt.subject.clone(),
-									// Create a new bearer key.
-									grant: Grant::Bearer(GrantBearer::new()),
+									// The contents of the grant.
+									grant: Grant::Bearer(grant),
 								};
 								let ac_str = gr.ac.to_raw();
 								let gr_str = gr.id.to_raw();
@@ -412,6 +413,10 @@ impl AccessStatement {
 						let ac_str = stmt.ac.to_raw();
 						let gr_str = stmt.gr.to_raw();
 						let mut gr = run.get_ns_access_grant(opt.ns()?, &ac_str, &gr_str).await?;
+						if let Some(_) = gr.revocation {
+							// TODO(PR): Add new error.
+							return Err(Error::InvalidAuth)
+						}
 						gr.revocation = Some(Datetime::default());
 						// Process the statement
 						let key = crate::key::namespace::ac::gr::new(opt.ns()?, &ac_str, &gr_str);
@@ -429,6 +434,10 @@ impl AccessStatement {
 						let gr_str = stmt.gr.to_raw();
 						let mut gr =
 							run.get_db_access_grant(opt.ns()?, opt.db()?, &ac_str, &gr_str).await?;
+						if let Some(_) = gr.revocation {
+							// TODO(PR): Add new error.
+							return Err(Error::InvalidAuth)
+						}
 						gr.revocation = Some(Datetime::default());
 						// Process the statement
 						let key = crate::key::database::ac::gr::new(
@@ -461,11 +470,11 @@ impl AccessStatement {
 impl Display for AccessStatement {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
 		match self {
-			Self::Grant(grant) => write!(f, "ACCESS {} GRANT", grant.ac),
-			Self::List(list) => write!(f, "ACCESS {} LIST", list.ac),
-			Self::Revoke(revoke) => write!(f, "ACCESS {} REVOKE {}", revoke.ac, revoke.gr),
-			Self::Show(ac) => write!(f, "ACCESS {} SHOW", ac),
-			Self::Prune(ac) => write!(f, "ACCESS {} PRUNE", ac),
+			Self::Grant(stmt) => write!(f, "ACCESS {} GRANT", stmt.ac),
+			Self::List(stmt) => write!(f, "ACCESS {} LIST", stmt.ac),
+			Self::Revoke(stmt) => write!(f, "ACCESS {} REVOKE {}", stmt.ac, stmt.gr),
+			Self::Show(stmt) => write!(f, "ACCESS {} SHOW", stmt),
+			Self::Prune(stmt) => write!(f, "ACCESS {} PRUNE", stmt),
 		}
 	}
 }
