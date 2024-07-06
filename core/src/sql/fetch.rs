@@ -2,7 +2,6 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::err::Error;
 use crate::sql::fmt::Fmt;
-use crate::sql::index::{Distance, Distance1};
 use crate::sql::statements::info::InfoStructure;
 use crate::sql::{Idiom, Value};
 use reblessive::tree::Stk;
@@ -50,18 +49,15 @@ impl InfoStructure for Fetchs {
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub struct Fetch(
-	#[revision(end = 2, convert_fn = "convert_fetch_idiom")] pub Idiom,
-	#[revision(start = 2, default_fn = "default_value")] pub Value,
+	/* #[revision(end = 2, convert_fn = "convert_fetch_idiom")] */ pub Idiom,
+	#[revision(start = 2)] pub Value,
 );
 
 impl Fetch {
-	fn default_value(_revision: u16) -> Value {
-		Default::default()
-	}
-
-	fn convert_fetch_idiom(&mut self, _revision: u16, i: Idiom) -> Result<(), revision::Error> {
-		self.1 = Value::Idiom(i);
-		Ok(())
+	// TODO remove once the revision issue is fixed
+	#[warn(dead_code)]
+	fn convert_fetch_idiom(_revision: u16, n: (Idiom,)) -> Result<Self, revision::Error> {
+		Ok(Self(Default::default(), Value::Idiom(n.0)))
 	}
 
 	pub(crate) async fn compute(
@@ -92,6 +88,12 @@ impl Fetch {
 			}
 		};
 		Ok(i)
+	}
+}
+
+impl From<Value> for Fetch {
+	fn from(value: Value) -> Self {
+		Self(Idiom(vec![]), value)
 	}
 }
 

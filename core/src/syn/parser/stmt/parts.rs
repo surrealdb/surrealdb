@@ -6,8 +6,8 @@ use crate::{
 	sql::{
 		changefeed::ChangeFeed,
 		index::{Distance, VectorType},
-		Base, Cond, Data, Duration, Fetch, Fetchs, Field, Fields, Group, Groups, Ident, Idiom,
-		Output, Permission, Permissions, Tables, Timeout, Value, View,
+		Base, Cond, Data, Duration, Fetchs, Field, Fields, Group, Groups, Ident, Idiom, Output,
+		Permission, Permissions, Tables, Timeout, Value, View,
 	},
 	syn::{
 		parser::{
@@ -108,9 +108,9 @@ impl Parser<'_> {
 		if !self.eat(t!("FETCH")) {
 			return Ok(None);
 		}
-		let mut fetchs = vec![Fetch(self.try_parse_param_or_idiom(ctx).await?)];
+		let mut fetchs = vec![self.try_parse_param_or_idiom(ctx).await?.into()];
 		while self.eat(t!(",")) {
-			fetchs.push(Fetch(self.try_parse_param_or_idiom(ctx).await?));
+			fetchs.push(self.try_parse_param_or_idiom(ctx).await?.into());
 		}
 		Ok(Some(Fetchs(fetchs)))
 	}

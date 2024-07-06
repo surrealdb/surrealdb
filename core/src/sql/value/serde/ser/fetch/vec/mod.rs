@@ -52,7 +52,7 @@ impl serde::ser::SerializeSeq for SerializeFetchVec {
 	where
 		T: Serialize + ?Sized,
 	{
-		self.0.push(Fetch(value.serialize(ser::value::Serializer.wrap())?));
+		self.0.push(value.serialize(ser::value::Serializer.wrap())?.into());
 		Ok(())
 	}
 
