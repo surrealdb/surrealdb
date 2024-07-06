@@ -315,7 +315,7 @@ mod test_check_lqs_and_send_notifications {
 
 	#[test_log::test(tokio::test)]
 	async fn test_delete() {
-		if !FFLAGS.change_feed_live_queries.enabled_test {
+		if !FFLAGS.change_feed_live_queries.enabled() {
 			return;
 		}
 
