@@ -1,5 +1,6 @@
 use crate::cf;
 use crate::cf::ChangeSet;
+use crate::ctx::Context;
 use crate::dbs::{Options, Statement};
 use crate::err::Error;
 use crate::fflags::FFLAGS;
@@ -11,6 +12,7 @@ use crate::kvs::TransactionType::Read;
 use crate::kvs::{Datastore, Transaction};
 use crate::sql::statements::show::ShowSince;
 use crate::vs::conv;
+use futures::lock::Mutex;
 use reblessive::tree::Stk;
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -68,7 +70,13 @@ pub async fn process_lq_notifications(
 				.join("\n")
 		);
 		for change_set in change_sets {
-			process_change_set_for_notifications(ds, stk, opt, change_set, &lq_pairs).await?;
+			let tx = ds.transaction(Read, Optimistic).await?;
+			let txn: crate::dbs::Transaction = Arc::new(Mutex::new(tx));
+
+			let mut ctx = Context::background();
+			ctx.set_transaction_mut(txn);
+
+			process_change_set_for_notifications(ds, stk, &ctx, opt, change_set, &lq_pairs).await?;
 		}
 	}
 	trace!("Finished process lq successfully");
@@ -132,6 +140,7 @@ async fn populate_relevant_changesets(
 async fn process_change_set_for_notifications(
 	ds: &Datastore,
 	stk: &mut Stk,
+	ctx: &Context<'_>,
 	opt: &Options,
 	change_set: ChangeSet,
 	lq_pairs: &[(LqIndexKey, LqIndexValue)],
@@ -165,6 +174,7 @@ async fn process_change_set_for_notifications(
 							channel::bounded(notification_capacity);
 						doc.check_lqs_and_send_notifications(
 							stk,
+							ctx,
 							opt,
 							&Statement::Live(&lq_value.stm),
 							[&lq_value.stm].as_slice(),

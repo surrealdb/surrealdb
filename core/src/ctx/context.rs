@@ -157,6 +157,30 @@ impl<'a> Context<'a> {
 		}
 	}
 
+	pub fn background_with_transaction(parent: &'a Context) -> Self {
+		Self {
+			values: HashMap::default(),
+			parent: None,
+			deadline: None,
+			cancelled: Arc::new(AtomicBool::new(false)),
+			notifications: None,
+			query_planner: None,
+			query_executor: None,
+			iteration_stage: None,
+			capabilities: Arc::new(Capabilities::default()),
+			index_stores: IndexStores::default(),
+			#[cfg(any(
+				feature = "kv-mem",
+				feature = "kv-surrealkv",
+				feature = "kv-rocksdb",
+				feature = "kv-fdb",
+				feature = "kv-tikv",
+			))]
+			temporary_directory: None,
+			transaction: parent.transaction.clone(),
+		}
+	}
+
 	/// Create a new child from a frozen context.
 	pub fn new(parent: &'a Context) -> Self {
 		Context {

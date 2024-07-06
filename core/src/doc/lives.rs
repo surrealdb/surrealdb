@@ -42,7 +42,8 @@ impl<'a> Document<'a> {
 			// Loop through all index statements
 			let lq_stms = self.lv(ctx, opt).await?;
 			let borrows = lq_stms.iter().collect::<Vec<_>>();
-			self.check_lqs_and_send_notifications(stk, opt, stm, borrows.as_slice(), chn).await?;
+			self.check_lqs_and_send_notifications(stk, ctx, opt, stm, borrows.as_slice(), chn)
+				.await?;
 		}
 		// Carry on
 		Ok(())
@@ -104,6 +105,7 @@ impl<'a> Document<'a> {
 	pub(crate) async fn check_lqs_and_send_notifications(
 		&self,
 		stk: &mut Stk,
+		ctx: &Context<'_>,
 		opt: &Options,
 		stm: &Statement<'_>,
 		live_statements: &[&LiveStatement],
@@ -155,11 +157,12 @@ impl<'a> Document<'a> {
 			// use for processing this LIVE query statement.
 			// This ensures that we are using the session
 			// of the user who created the LIVE query.
-			let mut lqctx = Context::background();
+			let mut lqctx = Context::background_with_transaction(ctx);
 			lqctx.add_value("access", sess.pick(AC.as_ref()));
 			lqctx.add_value("auth", sess.pick(RD.as_ref()));
 			lqctx.add_value("token", sess.pick(TK.as_ref()));
 			lqctx.add_value("session", sess);
+
 			// We need to create a new options which we will
 			// use for processing this LIVE query statement.
 			// This ensures that we are using the auth data

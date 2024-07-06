@@ -199,17 +199,18 @@ mod test_check_lqs_and_send_notifications {
 
 	use channel::Sender;
 	use futures::executor::block_on;
+	use futures::lock::Mutex;
 	use once_cell::sync::Lazy;
 	use reblessive::TreeStack;
 
 	use crate::cf::TableMutation;
 	use crate::ctx::Context;
 	use crate::dbs::fuzzy_eq::FuzzyEq;
-	use crate::dbs::{Action, Notification, Options, Session, Statement};
+	use crate::dbs::{Action, Notification, Options, Session, Statement, Transaction};
 	use crate::fflags::FFLAGS;
 	use crate::iam::{Auth, Role};
 	use crate::kvs::lq_v2_doc::construct_document;
-	use crate::kvs::Datastore;
+	use crate::kvs::{Datastore, LockType, TransactionType};
 	use crate::sql::paths::{OBJ_PATH_ACCESS, OBJ_PATH_AUTH, OBJ_PATH_TOKEN};
 	use crate::sql::statements::{CreateStatement, DeleteStatement, LiveStatement};
 	use crate::sql::{Fields, Object, Strand, Table, Thing, Uuid, Value, Values};
@@ -220,6 +221,7 @@ mod test_check_lqs_and_send_notifications {
 		ns: String,
 		db: String,
 		tb: String,
+		txn: Transaction,
 	}
 
 	async fn setup_test_suite_init() -> TestSuite {
@@ -247,10 +249,14 @@ mod test_check_lqs_and_send_notifications {
 		.map(|r| r.result.unwrap())
 		.for_each(drop);
 
+		let tx = ds.transaction(TransactionType::Read, LockType::Optimistic).await.unwrap();
+		let txn: Transaction = Arc::new(Mutex::new(tx));
+
 		TestSuite {
 			ns: ns.to_string(),
 			db: db.to_string(),
 			tb: tb.to_string(),
+			txn,
 		}
 	}
 
@@ -263,6 +269,7 @@ mod test_check_lqs_and_send_notifications {
 		// Setup channels used for listening to LQs
 		let (sender, receiver) = channel::unbounded();
 		let opt = a_usable_options(&sender);
+		let ctx = a_context(&sender);
 
 		// WHEN:
 		// Construct document we are validating
@@ -280,6 +287,7 @@ mod test_check_lqs_and_send_notifications {
 			.enter(|stk| async {
 				doc.check_lqs_and_send_notifications(
 					stk,
+					&ctx,
 					&opt,
 					&Statement::Create(&executed_statement),
 					&[&live_statement],
@@ -314,6 +322,7 @@ mod test_check_lqs_and_send_notifications {
 		// Setup channels used for listening to LQs
 		let (sender, receiver) = channel::unbounded();
 		let opt = a_usable_options(&sender);
+		let ctx = a_context(&sender);
 
 		// WHEN:
 		// Construct document we are validating
@@ -331,6 +340,7 @@ mod test_check_lqs_and_send_notifications {
 			.enter(|stk| async {
 				doc.check_lqs_and_send_notifications(
 					stk,
+					&ctx,
 					&opt,
 					&Statement::Delete(&executed_statement),
 					&[&live_statement],
@@ -395,9 +405,14 @@ mod test_check_lqs_and_send_notifications {
 		}
 	}
 
-	fn a_usable_options(sender: &Sender<Notification>) -> Options {
+	fn a_context(sender: &Sender<Notification>) -> Context {
 		let mut ctx = Context::default();
 		ctx.add_notifications(Some(sender));
+		ctx.set_transaction_mut(SETUP.txn.clone());
+		ctx
+	}
+
+	fn a_usable_options(sender: &Sender<Notification>) -> Options {
 		Options::default()
 			.with_ns(Some(SETUP.ns.clone().into()))
 			.with_db(Some(SETUP.db.clone().into()))
