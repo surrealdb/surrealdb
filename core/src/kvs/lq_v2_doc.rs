@@ -256,7 +256,7 @@ mod test_check_lqs_and_send_notifications {
 
 	#[test_log::test(tokio::test)]
 	async fn test_create() {
-		if !FFLAGS.change_feed_live_queries.enabled_test {
+		if !FFLAGS.change_feed_live_queries.enabled() {
 			return;
 		}
 
@@ -276,17 +276,20 @@ mod test_check_lqs_and_send_notifications {
 		let live_statement = a_live_query_statement();
 		let executed_statement = a_create_statement();
 		let mut stack = TreeStack::new();
-		stack.enter(|stk| async {
-			doc.check_lqs_and_send_notifications(
-				stk,
-				&opt,
-				&Statement::Create(&executed_statement),
-				&[&live_statement],
-				&sender,
-			)
-			.await
-			.unwrap();
-		});
+		stack
+			.enter(|stk| async {
+				doc.check_lqs_and_send_notifications(
+					stk,
+					&opt,
+					&Statement::Create(&executed_statement),
+					&[&live_statement],
+					&sender,
+				)
+				.await
+				.unwrap();
+			})
+			.finish()
+			.await;
 
 		// THEN:
 		let notification = receiver.try_recv().expect("There should be a notification");
@@ -324,17 +327,20 @@ mod test_check_lqs_and_send_notifications {
 		let live_statement = a_live_query_statement();
 		let executed_statement = a_delete_statement();
 		let mut stack = TreeStack::new();
-		stack.enter(|stk| async {
-			doc.check_lqs_and_send_notifications(
-				stk,
-				&opt,
-				&Statement::Delete(&executed_statement),
-				&[&live_statement],
-				&sender,
-			)
-			.await
-			.unwrap();
-		});
+		stack
+			.enter(|stk| async {
+				doc.check_lqs_and_send_notifications(
+					stk,
+					&opt,
+					&Statement::Delete(&executed_statement),
+					&[&live_statement],
+					&sender,
+				)
+				.await
+				.unwrap();
+			})
+			.finish()
+			.await;
 
 		// THEN:
 		let notification = receiver.try_recv().expect("There should be a notification");
