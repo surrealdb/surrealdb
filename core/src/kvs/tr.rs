@@ -224,11 +224,10 @@ impl Transactor {
 	where
 		K: Into<Key> + Debug,
 	{
-		let beg: Key = key.into();
-		let end: Key = beg.clone().add(0xff);
+		let key: Key = key.into();
 		#[cfg(debug_assertions)]
-		trace!("getp {}..{}", sprint(&beg), sprint(&end));
-		expand_inner!(&mut self.inner, v => { v.getr(beg..end).await })
+		trace!("getp {}", sprint(&key));
+		expand_inner!(&mut self.inner, v => { v.getp(key).await })
 	}
 
 	/// Insert or update a key in the datastore.
@@ -316,11 +315,10 @@ impl Transactor {
 	where
 		K: Into<Key> + Debug,
 	{
-		let beg: Key = key.into();
-		let end: Key = beg.clone().add(0xff);
+		let key: Key = key.into();
 		#[cfg(debug_assertions)]
-		trace!("delp {}..{}", sprint(&beg), sprint(&end));
-		expand_inner!(&mut self.inner, v => { v.delr(beg..end).await })
+		trace!("delp {}", sprint(&key));
+		expand_inner!(&mut self.inner, v => { v.delp(key).await })
 	}
 
 	/// Retrieve a specific range of keys from the datastore.

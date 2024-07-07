@@ -112,7 +112,24 @@ pub trait Transaction {
 		Ok(out)
 	}
 
-	/// Retrieve a specific range of keys from the datastore.
+	/// Retrieve a range of prefixed keys from the datastore.
+	///
+	/// This function fetches all matching key-value pairs from the underlying datastore in grouped batches.
+	async fn getp<K>(&mut self, key: K) -> Result<Vec<(Key, Val)>, Error>
+	where
+		K: Into<Key> + Debug,
+	{
+		// Check to see if transaction is closed
+		if self.closed() {
+			return Err(Error::TxFinished);
+		}
+		// Continue with function logic
+		let beg: Key = key.into();
+		let end: Key = beg.clone().add(0xff);
+		self.getr(beg..end).await
+	}
+
+	/// Retrieve a range of keys from the datastore.
 	///
 	/// This function fetches all matching key-value pairs from the underlying datastore in grouped batches.
 	async fn getr<K>(&mut self, rng: Range<K>) -> Result<Vec<(Key, Val)>, Error>
@@ -136,6 +153,27 @@ pub trait Transaction {
 			}
 		}
 		Ok(out)
+	}
+
+	/// Delete a range of prefixed keys from the datastore.
+	///
+	/// This function deletes all matching key-value pairs from the underlying datastore in grouped batches.
+	async fn delp<K>(&mut self, key: K) -> Result<(), Error>
+	where
+		K: Into<Key> + Debug,
+	{
+		// Check to see if transaction is closed
+		if self.closed() {
+			return Err(Error::TxFinished);
+		}
+		// Check to see if transaction is writable
+		if !self.writeable() {
+			return Err(Error::TxReadonly);
+		}
+		// Continue with function logic
+		let beg: Key = key.into();
+		let end: Key = beg.clone().add(0xff);
+		self.delr(beg..end).await
 	}
 
 	/// Delete a range of keys from the datastore.
