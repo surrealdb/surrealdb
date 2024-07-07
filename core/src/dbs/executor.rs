@@ -108,7 +108,6 @@ impl<'a> Executor<'a> {
 		if local {
 			// Extract the transaction
 			if let Some(txn) = self.txn.take() {
-				let mut txn = txn.lock().await;
 				if txn.cancel().await.is_err() {
 					self.err = true;
 				}

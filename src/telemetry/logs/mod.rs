@@ -1,8 +1,7 @@
+use crate::cli::validator::parser::env_filter::CustomEnvFilter;
 use tracing::Subscriber;
 use tracing_subscriber::fmt::format::FmtSpan;
 use tracing_subscriber::Layer;
-
-use crate::cli::validator::parser::env_filter::CustomEnvFilter;
 
 pub fn new<S>(filter: CustomEnvFilter) -> Box<dyn Layer<S> + Send + Sync>
 where

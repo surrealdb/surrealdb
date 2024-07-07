@@ -214,7 +214,7 @@ pub async fn init(
 ) -> Result<(), Error> {
 	// Get local copy of options
 	let opt = CF.get().unwrap();
-	//
+	// Convert the capabilities
 	let capabilities = capabilities.into();
 	// Log specified strict mode
 	debug!("Database strict mode is {strict_mode}");

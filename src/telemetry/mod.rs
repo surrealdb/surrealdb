@@ -11,8 +11,9 @@ use opentelemetry::sdk::resource::{
 	EnvResourceDetector, SdkProvidedResourceDetector, TelemetryResourceDetector,
 };
 use opentelemetry::sdk::Resource;
-use opentelemetry::{Context as TelemetryContext, KeyValue};
+use opentelemetry::{Context, KeyValue};
 use tracing::{Level, Subscriber};
+use tracing_subscriber::filter::ParseError;
 use tracing_subscriber::prelude::*;
 use tracing_subscriber::util::SubscriberInitExt;
 use tracing_subscriber::EnvFilter;
@@ -90,15 +91,14 @@ impl Builder {
 }
 
 pub fn shutdown() -> Result<(), MetricsError> {
-	// Flush all telemetry data
+	// Flush all telemetry data and block until done
 	opentelemetry::global::shutdown_tracer_provider();
-	metrics::shutdown(&TelemetryContext::current())?;
-
-	Ok(())
+	// Shutdown the metrics provider fully
+	metrics::shutdown(&Context::current())
 }
 
 /// Create an EnvFilter from the given value. If the value is not a valid log level, it will be treated as EnvFilter directives.
-pub fn filter_from_value(v: &str) -> Result<EnvFilter, tracing_subscriber::filter::ParseError> {
+pub fn filter_from_value(v: &str) -> Result<EnvFilter, ParseError> {
 	match v {
 		// Don't show any logs at all
 		"none" => Ok(EnvFilter::default()),
