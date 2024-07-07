@@ -44,6 +44,8 @@ use uuid::Uuid;
 #[cfg(target_arch = "wasm32")]
 use wasmtimer::std::{SystemTime, UNIX_EPOCH};
 
+const TARGET: &str = "surrealdb::core::kvs::tr";
+
 // If there are an infinite number of heartbeats, then we want to go batch-by-batch spread over several checks
 const LQ_CHANNEL_SIZE: usize = 100;
 
@@ -179,10 +181,10 @@ impl Datastore {
 			"memory" => {
 				#[cfg(feature = "kv-mem")]
 				{
-					info!("Starting kvs store in {}", path);
+					info!(target: TARGET, "Starting kvs store in {}", path);
 					let v = super::mem::Datastore::new().await.map(Inner::Mem);
 					let c = clock.unwrap_or_else(|| Arc::new(SizedClock::system()));
-					info!("Started kvs store in {}", path);
+					info!(target: TARGET, "Started kvs store in {}", path);
 					Ok((v, c))
 				}
 				#[cfg(not(feature = "kv-mem"))]
@@ -192,12 +194,12 @@ impl Datastore {
 			s if s.starts_with("file:") => {
 				#[cfg(feature = "kv-rocksdb")]
 				{
-					info!("Starting kvs store at {}", path);
+					info!(target: TARGET, "Starting kvs store at {}", path);
 					let s = s.trim_start_matches("file://");
 					let s = s.trim_start_matches("file:");
 					let v = super::rocksdb::Datastore::new(s).await.map(Inner::RocksDB);
 					let c = clock.unwrap_or_else(|| Arc::new(SizedClock::system()));
-					info!("Started kvs store at {}", path);
+					info!(target: TARGET, "Started kvs store at {}", path);
 					Ok((v, c))
 				}
 				#[cfg(not(feature = "kv-rocksdb"))]
@@ -207,12 +209,12 @@ impl Datastore {
 			s if s.starts_with("rocksdb:") => {
 				#[cfg(feature = "kv-rocksdb")]
 				{
-					info!("Starting kvs store at {}", path);
+					info!(target: TARGET, "Starting kvs store at {}", path);
 					let s = s.trim_start_matches("rocksdb://");
 					let s = s.trim_start_matches("rocksdb:");
 					let v = super::rocksdb::Datastore::new(s).await.map(Inner::RocksDB);
 					let c = clock.unwrap_or_else(|| Arc::new(SizedClock::system()));
-					info!("Started kvs store at {}", path);
+					info!(target: TARGET, "Started kvs store at {}", path);
 					Ok((v, c))
 				}
 				#[cfg(not(feature = "kv-rocksdb"))]
@@ -222,12 +224,12 @@ impl Datastore {
 			s if s.starts_with("indxdb:") => {
 				#[cfg(feature = "kv-indxdb")]
 				{
-					info!("Starting kvs store at {}", path);
+					info!(target: TARGET, "Starting kvs store at {}", path);
 					let s = s.trim_start_matches("indxdb://");
 					let s = s.trim_start_matches("indxdb:");
 					let v = super::indxdb::Datastore::new(s).await.map(Inner::IndxDB);
 					let c = clock.unwrap_or_else(|| Arc::new(SizedClock::system()));
-					info!("Started kvs store at {}", path);
+					info!(target: TARGET, "Started kvs store at {}", path);
 					Ok((v, c))
 				}
 				#[cfg(not(feature = "kv-indxdb"))]
@@ -237,12 +239,12 @@ impl Datastore {
 			s if s.starts_with("tikv:") => {
 				#[cfg(feature = "kv-tikv")]
 				{
-					info!("Connecting to kvs store at {}", path);
+					info!(target: TARGET, "Connecting to kvs store at {}", path);
 					let s = s.trim_start_matches("tikv://");
 					let s = s.trim_start_matches("tikv:");
 					let v = super::tikv::Datastore::new(s).await.map(Inner::TiKV);
 					let c = clock.unwrap_or_else(|| Arc::new(SizedClock::system()));
-					info!("Connected to kvs store at {}", path);
+					info!(target: TARGET, "Connected to kvs store at {}", path);
 					Ok((v, c))
 				}
 				#[cfg(not(feature = "kv-tikv"))]
@@ -252,12 +254,12 @@ impl Datastore {
 			s if s.starts_with("fdb:") => {
 				#[cfg(feature = "kv-fdb")]
 				{
-					info!("Connecting to kvs store at {}", path);
+					info!(target: TARGET, "Connecting to kvs store at {}", path);
 					let s = s.trim_start_matches("fdb://");
 					let s = s.trim_start_matches("fdb:");
 					let v = super::fdb::Datastore::new(s).await.map(Inner::FoundationDB);
 					let c = clock.unwrap_or_else(|| Arc::new(SizedClock::system()));
-					info!("Connected to kvs store at {}", path);
+					info!(target: TARGET, "Connected to kvs store at {}", path);
 					Ok((v, c))
 				}
 				#[cfg(not(feature = "kv-fdb"))]
@@ -267,12 +269,12 @@ impl Datastore {
 			s if s.starts_with("surrealkv:") => {
 				#[cfg(feature = "kv-surrealkv")]
 				{
-					info!("Starting kvs store at {}", path);
+					info!(target: TARGET, "Starting kvs store at {}", path);
 					let s = s.trim_start_matches("surrealkv://");
 					let s = s.trim_start_matches("surrealkv:");
 					let v = super::surrealkv::Datastore::new(s).await.map(Inner::SurrealKV);
 					let c = clock.unwrap_or_else(|| Arc::new(SizedClock::system()));
-					info!("Started to kvs store at {}", path);
+					info!(target: TARGET, "Started to kvs store at {}", path);
 					Ok((v, c))
 				}
 				#[cfg(not(feature = "kv-surrealkv"))]
@@ -280,7 +282,7 @@ impl Datastore {
 			}
 			// The datastore path is not valid
 			_ => {
-				info!("Unable to load the specified datastore {}", path);
+				info!(target: TARGET, "Unable to load the specified datastore {}", path);
 				Err(Error::Ds("Unable to load the specified datastore".into()))
 			}
 		}?;
@@ -373,6 +375,10 @@ impl Datastore {
 		self.auth_enabled
 	}
 
+	pub fn id(&self) -> Uuid {
+		self.id
+	}
+
 	/// Does the datastore allow connections to a network target?
 	#[cfg(feature = "jwks")]
 	pub(crate) fn allows_network_target(&self, net_target: &NetTarget) -> bool {
@@ -385,6 +391,7 @@ impl Datastore {
 	}
 
 	// Initialise the cluster and run bootstrap utilities
+	#[instrument(err, level = "debug", target = "surrealdb::core::kvs::ds", skip_all)]
 	pub async fn bootstrap(&self) -> Result<(), Error> {
 		// Insert this node in the cluster
 		self.insert_node(self.id).await?;
@@ -395,6 +402,7 @@ impl Datastore {
 	}
 
 	/// Setup the initial cluster access credentials
+	#[instrument(err, level = "debug", target = "surrealdb::core::kvs::ds", skip_all)]
 	pub async fn setup_initial_creds(&self, user: &str, pass: &str) -> Result<(), Error> {
 		// Start a new writeable transaction
 		let txn = self.transaction(Write, Optimistic).await?.enclose();
@@ -403,7 +411,7 @@ impl Datastore {
 		// Process credentials, depending on existing users
 		if users.is_empty() {
 			// Display information in the logs
-			info!("Credentials were provided, and no root users were found. The root user '{user}' will be created");
+			info!(target: TARGET, "Credentials were provided, and no root users were found. The root user '{user}' will be created");
 			// Create and new root user definition
 			let stm = DefineUserStatement::from((Base::Root, user, pass, INITIAL_USER_ROLE));
 			let opt = Options::new().with_auth(Arc::new(Auth::for_root(Role::Owner)));
@@ -413,10 +421,8 @@ impl Datastore {
 			txn.commit().await
 		} else {
 			// Display information in the logs
-			warn!("Credentials were provided, but existing root users were found. The root user '{user}' will not be created");
-			warn!(
-				"Consider removing the --user and --pass arguments from the server start command"
-			);
+			warn!(target: TARGET, "Credentials were provided, but existing root users were found. The root user '{user}' will not be created");
+			warn!(target: TARGET, "Consider removing the --user and --pass arguments from the server start command");
 			// We didn't write anything, so just rollback
 			txn.cancel().await
 		}
@@ -424,6 +430,7 @@ impl Datastore {
 
 	// tick is called periodically to perform maintenance tasks.
 	// This is called every TICK_INTERVAL.
+	#[instrument(level = "debug", skip(self))]
 	pub async fn tick(&self) -> Result<(), Error> {
 		let now = SystemTime::now().duration_since(UNIX_EPOCH).map_err(|e| {
 			Error::Internal(format!("Clock may have gone backwards: {:?}", e.duration()))
@@ -436,8 +443,9 @@ impl Datastore {
 	// tick_at is the utility function that is called by tick.
 	// It is handy for testing, because it allows you to specify the timestamp,
 	// without depending on a system clock.
+	#[instrument(level = "debug", skip(self))]
 	pub async fn tick_at(&self, ts: u64) -> Result<(), Error> {
-		trace!("Ticking at timestamp {} ({:?})", ts, conv::u64_to_versionstamp(ts));
+		trace!(target: TARGET, "Ticking at timestamp {ts} ({:?})", conv::u64_to_versionstamp(ts));
 		let _vs = self.save_timestamp_for_versionstamp(ts).await?;
 		self.garbage_collect_stale_change_feeds(ts).await?;
 		// Update this node in the cluster
@@ -888,7 +896,7 @@ impl Datastore {
 	}
 
 	/// Performs a database import from SQL
-	#[instrument(level = "debug", skip(self, sess, sql))]
+	#[instrument(level = "debug", skip_all)]
 	pub async fn import(&self, sql: &str, sess: &Session) -> Result<Vec<Response>, Error> {
 		// Check if the session has expired
 		if sess.expired() {
@@ -899,7 +907,7 @@ impl Datastore {
 	}
 
 	/// Performs a full database export as SQL
-	#[instrument(level = "debug", skip(self, sess, chn))]
+	#[instrument(level = "debug", skip_all)]
 	pub async fn export(
 		&self,
 		sess: &Session,

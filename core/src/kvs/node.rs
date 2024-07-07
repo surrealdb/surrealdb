@@ -33,7 +33,11 @@ impl Datastore {
 	/// This function ensures that this node is entered into the clister
 	/// membership entries. This function must be run at server or database
 	/// startup, in order to write the initial entry and timestamp to storage.
+	#[instrument(err, level = "debug", target = "surrealdb::core::kvs::node", skip(self))]
 	pub async fn insert_node(&self, id: uuid::Uuid) -> Result<(), Error> {
+		// Log when this method is run
+		trace!(target: TARGET, "Inserting node in the cluster");
+		// Open transaction and set node data
 		let txn = self.transaction(Write, Optimistic).await?;
 		let key = crate::key::root::nd::Nd::new(id);
 		let now = self.clock.now().await;
@@ -53,7 +57,11 @@ impl Datastore {
 	/// This function updates the entry for this node with an up-to-date
 	/// timestamp. This ensures that the node is not marked as expired by any
 	/// garbage collection tasks, preventing any data cleanup for this node.
+	#[instrument(err, level = "debug", target = "surrealdb::core::kvs::node", skip(self))]
 	pub async fn update_node(&self, id: uuid::Uuid) -> Result<(), Error> {
+		// Log when this method is run
+		trace!(target: TARGET, "Updating node in the cluster");
+		// Open transaction and set node data
 		let txn = self.transaction(Write, Optimistic).await?;
 		let key = crate::key::root::nd::new(id);
 		let now = self.clock.now().await;
@@ -68,7 +76,11 @@ impl Datastore {
 	/// This function marks the node as archived, ready for garbage collection.
 	/// Later on when garbage collection is running the live queries assigned
 	/// to this node will be removed, along with the node itself.
+	#[instrument(err, level = "debug", target = "surrealdb::core::kvs::node", skip(self))]
 	pub async fn delete_node(&self, id: uuid::Uuid) -> Result<(), Error> {
+		// Log when this method is run
+		trace!(target: TARGET, "Archiving node in the cluster");
+		// Open transaction and set node data
 		let txn = self.transaction(Write, Optimistic).await?;
 		let key = crate::key::root::nd::new(id);
 		let val = txn.get_node(id).await?;
@@ -83,7 +95,11 @@ impl Datastore {
 	/// This function marks the node as archived, ready for garbage collection.
 	/// Later on when garbage collection is running the live queries assigned
 	/// to this node will be removed, along with the node itself.
+	#[instrument(err, level = "debug", target = "surrealdb::core::kvs::node", skip(self))]
 	pub async fn expire_nodes(&self) -> Result<(), Error> {
+		// Log when this method is run
+		trace!(target: TARGET, "Archiving expired nodes in the cluster");
+		// Open transaction and fetch nodes
 		let txn = self.transaction(Write, Optimistic).await?;
 		let now = self.clock.now().await;
 		let nds = catch!(txn, txn.all_nodes());
@@ -92,6 +108,8 @@ impl Datastore {
 			if nd.is_active() {
 				// Check if the node has expired
 				if nd.hb < now - Duration::from_secs(30) {
+					// Log the live query scanning
+					trace!(target: TARGET, id = %nd.id, "Archiving node in the cluster");
 					// Mark the node as archived
 					let val = nd.archive();
 					// Get the key for the node entry
@@ -112,7 +130,10 @@ impl Datastore {
 	/// This function clears up all nodes which have been marked as archived.
 	/// When a matching node is found, all node queries, and table queries are
 	/// garbage collected, before the node itself is completely deleted.
+	#[instrument(err, level = "debug", target = "surrealdb::core::kvs::node", skip(self))]
 	pub async fn cleanup_nodes(&self) -> Result<(), Error> {
+		// Log when this method is run
+		trace!(target: TARGET, "Cleaning up archived nodes in the cluster");
 		// Fetch all of the expired nodes
 		let expired = {
 			let txn = self.transaction(Read, Optimistic).await?;
@@ -123,6 +144,9 @@ impl Datastore {
 		// Delete the live queries
 		{
 			for id in expired.iter() {
+				// Log the live query scanning
+				trace!(target: TARGET, id = %id, "Deleting live queries for node");
+				// Scan the live queries for this node
 				let txn = self.transaction(Write, Optimistic).await?;
 				let beg = crate::key::node::lq::prefix(*id);
 				let end = crate::key::node::lq::suffix(*id);
@@ -155,6 +179,8 @@ impl Datastore {
 			let txn = self.transaction(Write, Optimistic).await?;
 			// Loop over the nodes and delete
 			for id in expired.iter() {
+				// Log the node deletion
+				trace!(target: TARGET, id = %id, "Deleting node from the cluster");
 				// Get the key for the node entry
 				let key = crate::key::root::nd::new(*id);
 				// Delete the cluster node entry
@@ -167,8 +193,20 @@ impl Datastore {
 		Ok(())
 	}
 
-	/// Clean up all other miscellaneous data
+	/// Clean up all other miscellaneous data.
+	///
+	/// This function should be run periodically at an interval.
+	///
+	/// This function clears up all data which might have been missed from
+	/// previous cleanup runs, or when previous runs failed. This function
+	/// currently deletes all live queries, for nodes which no longer exist
+	/// in the cluster, from all namespaces, databases, and tables. It uses
+	/// a number of transactions in order to prevent failure of large or
+	/// long-running transactions on distributed storage engines.
+	#[instrument(err, level = "debug", target = "surrealdb::core::kvs::node", skip(self))]
 	pub async fn garbage_collect(&self) -> Result<(), Error> {
+		// Log the node deletion
+		trace!(target: TARGET, "Garbage collecting all miscellaneous data");
 		// Fetch expired nodes
 		let expired = {
 			let txn = self.transaction(Read, Optimistic).await?;
@@ -183,6 +221,8 @@ impl Datastore {
 		};
 		// Loop over all namespaces
 		for ns in nss.iter() {
+			// Log the namespace
+			trace!(target: TARGET, "Garbage collecting data in namespace {}", ns.name);
 			// Fetch all databases
 			let dbs = {
 				let txn = self.transaction(Read, Optimistic).await?;
@@ -190,6 +230,8 @@ impl Datastore {
 			};
 			// Loop over all databases
 			for db in dbs.iter() {
+				// Log the namespace
+				trace!(target: TARGET, "Garbage collecting data in database {}/{}", ns.name, db.name);
 				// Fetch all tables
 				let tbs = {
 					let txn = self.transaction(Read, Optimistic).await?;
@@ -197,6 +239,9 @@ impl Datastore {
 				};
 				// Loop over all tables
 				for tb in tbs.iter() {
+					// Log the namespace
+					trace!(target: TARGET, "Garbage collecting data in table {}/{}/{}", ns.name, db.name, tb.name);
+					// Iterate over the table live queries
 					let txn = self.transaction(Write, Optimistic).await?;
 					let beg = crate::key::table::lq::prefix(&ns.name, &db.name, &tb.name);
 					let end = crate::key::table::lq::suffix(&ns.name, &db.name, &tb.name);

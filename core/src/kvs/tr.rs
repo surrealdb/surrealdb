@@ -1,5 +1,4 @@
 use super::api::Transaction;
-use super::kv::Add;
 use super::Key;
 use super::Val;
 use crate::cf;
@@ -21,6 +20,8 @@ use std::fmt;
 use std::fmt::Debug;
 use std::ops::Range;
 use std::sync::Arc;
+
+const TARGET: &str = "surrealdb::core::kvs::tr";
 
 /// Used to determine the behaviour when a transaction is not closed correctly
 #[derive(Default)]
@@ -145,7 +146,7 @@ impl Transactor {
 	/// in a [`Error::TxFinished`] error.
 	pub async fn closed(&self) -> bool {
 		#[cfg(debug_assertions)]
-		trace!("closed");
+		trace!(target: TARGET, "closed");
 		expand_inner!(&self.inner, v => { v.closed() })
 	}
 
@@ -154,7 +155,7 @@ impl Transactor {
 	/// This reverses all changes made within the transaction.
 	pub async fn cancel(&mut self) -> Result<(), Error> {
 		#[cfg(debug_assertions)]
-		trace!("cancel");
+		trace!(target: TARGET, "cancel");
 		expand_inner!(&mut self.inner, v => { v.cancel().await })
 	}
 
@@ -163,43 +164,40 @@ impl Transactor {
 	/// This attempts to commit all changes made within the transaction.
 	pub async fn commit(&mut self) -> Result<(), Error> {
 		#[cfg(debug_assertions)]
-		trace!("commit");
+		trace!(target: TARGET, "commit");
 		expand_inner!(&mut self.inner, v => { v.commit().await })
 	}
 
 	/// Check if a key exists in the datastore.
-	#[allow(unused_variables)]
 	pub async fn exists<K>(&mut self, key: K) -> Result<bool, Error>
 	where
 		K: Into<Key> + Debug,
 	{
 		let key = key.into();
 		#[cfg(debug_assertions)]
-		trace!("exists {}", sprint(&key));
+		trace!(target: TARGET, "exists {}", sprint(&key));
 		expand_inner!(&mut self.inner, v => { v.exists(key).await })
 	}
 
 	/// Fetch a key from the datastore.
-	#[allow(unused_variables)]
 	pub async fn get<K>(&mut self, key: K) -> Result<Option<Val>, Error>
 	where
 		K: Into<Key> + Debug,
 	{
 		let key = key.into();
 		#[cfg(debug_assertions)]
-		trace!("get {}", sprint(&key));
+		trace!(target: TARGET, "get {}", sprint(&key));
 		expand_inner!(&mut self.inner, v => { v.get(key).await })
 	}
 
 	/// Fetch many keys from the datastore.
-	#[allow(unused_variables)]
 	pub async fn getm<K>(&mut self, keys: Vec<K>) -> Result<Vec<Val>, Error>
 	where
 		K: Into<Key> + Debug,
 	{
 		let keys = keys.into_iter().map(Into::into).collect::<Vec<Key>>();
 		#[cfg(debug_assertions)]
-		trace!("getm {}", keys.iter().map(sprint).collect::<Vec<_>>().join(" + "));
+		trace!(target: TARGET, "getm {}", keys.iter().map(sprint).collect::<Vec<_>>().join(" + "));
 		expand_inner!(&mut self.inner, v => { v.getm(keys).await })
 	}
 
@@ -213,7 +211,7 @@ impl Transactor {
 		let beg: Key = rng.start.into();
 		let end: Key = rng.end.into();
 		#[cfg(debug_assertions)]
-		trace!("getr {}..{}", sprint(&beg), sprint(&end));
+		trace!(target: TARGET, "getr {}..{}", sprint(&beg), sprint(&end));
 		expand_inner!(&mut self.inner, v => { v.getr(beg..end).await })
 	}
 
@@ -226,12 +224,11 @@ impl Transactor {
 	{
 		let key: Key = key.into();
 		#[cfg(debug_assertions)]
-		trace!("getp {}", sprint(&key));
+		trace!(target: TARGET, "getp {}", sprint(&key));
 		expand_inner!(&mut self.inner, v => { v.getp(key).await })
 	}
 
 	/// Insert or update a key in the datastore.
-	#[allow(unused_variables)]
 	pub async fn set<K, V>(&mut self, key: K, val: V) -> Result<(), Error>
 	where
 		K: Into<Key> + Debug,
@@ -239,12 +236,11 @@ impl Transactor {
 	{
 		let key = key.into();
 		#[cfg(debug_assertions)]
-		trace!("set {} => {:?}", sprint(&key), val);
+		trace!(target: TARGET, "set {} => {:?}", sprint(&key), val);
 		expand_inner!(&mut self.inner, v => { v.set(key, val).await })
 	}
 
 	/// Insert a key if it doesn't exist in the datastore.
-	#[allow(unused_variables)]
 	pub async fn put<K, V>(&mut self, key: K, val: V) -> Result<(), Error>
 	where
 		K: Into<Key> + Debug,
@@ -252,12 +248,11 @@ impl Transactor {
 	{
 		let key = key.into();
 		#[cfg(debug_assertions)]
-		trace!("put {} => {:?}", sprint(&key), val);
+		trace!(target: TARGET, "put {} => {:?}", sprint(&key), val);
 		expand_inner!(&mut self.inner, v => { v.put(key, val).await })
 	}
 
 	/// Update a key in the datastore if the current value matches a condition.
-	#[allow(unused_variables)]
 	pub async fn putc<K, V>(&mut self, key: K, val: V, chk: Option<V>) -> Result<(), Error>
 	where
 		K: Into<Key> + Debug,
@@ -265,24 +260,22 @@ impl Transactor {
 	{
 		let key = key.into();
 		#[cfg(debug_assertions)]
-		trace!("putc {} if {:?} => {:?}", sprint(&key), chk, val);
+		trace!(target: TARGET, "putc {} if {:?} => {:?}", sprint(&key), chk, val);
 		expand_inner!(&mut self.inner, v => { v.putc(key, val, chk).await })
 	}
 
 	/// Delete a key from the datastore.
-	#[allow(unused_variables)]
 	pub async fn del<K>(&mut self, key: K) -> Result<(), Error>
 	where
 		K: Into<Key> + Debug,
 	{
 		let key = key.into();
 		#[cfg(debug_assertions)]
-		trace!("del {}", sprint(&key));
+		trace!(target: TARGET, "del {}", sprint(&key));
 		expand_inner!(&mut self.inner, v => { v.del(key).await })
 	}
 
 	/// Delete a key from the datastore if the current value matches a condition.
-	#[allow(unused_variables)]
 	pub async fn delc<K, V>(&mut self, key: K, chk: Option<V>) -> Result<(), Error>
 	where
 		K: Into<Key> + Debug,
@@ -290,7 +283,7 @@ impl Transactor {
 	{
 		let key = key.into();
 		#[cfg(debug_assertions)]
-		trace!("delc {} if {:?}", sprint(&key), chk);
+		trace!(target: TARGET, "delc {} if {:?}", sprint(&key), chk);
 		expand_inner!(&mut self.inner, v => { v.delc(key, chk).await })
 	}
 
@@ -304,7 +297,7 @@ impl Transactor {
 		let beg: Key = rng.start.into();
 		let end: Key = rng.end.into();
 		#[cfg(debug_assertions)]
-		trace!("delr {}..{}", sprint(&beg), sprint(&end));
+		trace!(target: TARGET, "delr {}..{}", sprint(&beg), sprint(&end));
 		expand_inner!(&mut self.inner, v => { v.delr(beg..end).await })
 	}
 
@@ -317,14 +310,13 @@ impl Transactor {
 	{
 		let key: Key = key.into();
 		#[cfg(debug_assertions)]
-		trace!("delp {}", sprint(&key));
+		trace!(target: TARGET, "delp {}", sprint(&key));
 		expand_inner!(&mut self.inner, v => { v.delp(key).await })
 	}
 
 	/// Retrieve a specific range of keys from the datastore.
 	///
 	/// This function fetches the full range of keys without values, in a single request to the underlying datastore.
-	#[allow(unused_variables)]
 	pub async fn keys<K>(&mut self, rng: Range<K>, limit: u32) -> Result<Vec<Key>, Error>
 	where
 		K: Into<Key> + Debug,
@@ -332,14 +324,13 @@ impl Transactor {
 		let beg: Key = rng.start.into();
 		let end: Key = rng.end.into();
 		#[cfg(debug_assertions)]
-		trace!("keys {}..{} (limit: {limit})", sprint(&beg), sprint(&end));
+		trace!(target: TARGET, "keys {}..{} (limit: {limit})", sprint(&beg), sprint(&end));
 		expand_inner!(&mut self.inner, v => { v.keys(beg..end, limit).await })
 	}
 
 	/// Retrieve a specific range of keys from the datastore.
 	///
 	/// This function fetches the full range of key-value pairs, in a single request to the underlying datastore.
-	#[allow(unused_variables)]
 	pub async fn scan<K>(&mut self, rng: Range<K>, limit: u32) -> Result<Vec<(Key, Val)>, Error>
 	where
 		K: Into<Key> + Debug,
@@ -347,7 +338,7 @@ impl Transactor {
 		let beg: Key = rng.start.into();
 		let end: Key = rng.end.into();
 		#[cfg(debug_assertions)]
-		trace!("scan {}..{} (limit: {limit})", sprint(&beg), sprint(&end));
+		trace!(target: TARGET, "scan {}..{} (limit: {limit})", sprint(&beg), sprint(&end));
 		expand_inner!(&mut self.inner, v => { v.scan(beg..end, limit).await })
 	}
 
@@ -366,7 +357,7 @@ impl Transactor {
 		let beg: Key = rng.start.into();
 		let end: Key = rng.end.into();
 		#[cfg(debug_assertions)]
-		trace!("batch {}..{} (batch: {batch})", sprint(&beg), sprint(&end));
+		trace!(target: TARGET, "batch {}..{} (batch: {batch})", sprint(&beg), sprint(&end));
 		expand_inner!(&mut self.inner, v => { v.batch(beg..end, batch, values).await })
 	}
 
@@ -383,7 +374,7 @@ impl Transactor {
 		// We convert to byte slice as its easier at this level
 		let key = key.into();
 		#[cfg(debug_assertions)]
-		trace!("get_timestamp {}", sprint(&key));
+		trace!(target: TARGET, "get_timestamp {}", sprint(&key));
 		expand_inner!(&mut self.inner, v => { v.get_timestamp(key).await })
 	}
 
@@ -405,6 +396,7 @@ impl Transactor {
 		let suffix = suffix.into();
 		#[cfg(debug_assertions)]
 		trace!(
+			target: TARGET,
 			"set_versionstamp ts={} prefix={} suffix={}",
 			sprint(&ts_key),
 			sprint(&prefix),

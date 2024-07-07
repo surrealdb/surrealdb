@@ -12,7 +12,7 @@ default_to_workspace = false
 [env]
 ALL_FEATURES={ value = "storage-mem,storage-surrealkv,storage-rocksdb,storage-tikv,storage-fdb,scripting,http,jwks,ml", condition = { env_not_set = ["ALL_FEATURES"] } }
 DEV_FEATURES={ value = "storage-mem,storage-surrealkv,scripting,http,jwks,ml", condition = { env_not_set = ["DEV_FEATURES"] } }
-SURREAL_LOG={ value = "trace", condition = { env_not_set = ["SURREAL_LOG"] } }
+SURREAL_LOG={ value = "full", condition = { env_not_set = ["SURREAL_LOG"] } }
 SURREAL_USER={ value = "root", condition = { env_not_set = ["SURREAL_USER"] } }
 SURREAL_PASS={ value = "root", condition = { env_not_set = ["SURREAL_PASS"] } }
 SURREAL_PATH={ value = "memory", condition = { env_not_set = ["SURREAL_PATH"] } }

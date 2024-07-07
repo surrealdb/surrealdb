@@ -33,6 +33,8 @@ use std::ops::Range;
 use std::sync::Arc;
 use uuid::Uuid;
 
+const TARGET: &str = "surrealdb::core::kvs::tx";
+
 #[non_exhaustive]
 pub struct Transaction {
 	/// The underlying transactor
@@ -249,6 +251,10 @@ impl Transaction {
 	// --------------------------------------------------
 
 	pub async fn all_nodes(&self) -> Result<Arc<[Node]>, Error> {
+		// Log this function call in development
+		#[cfg(debug_assertions)]
+		trace!(target: TARGET, "all_nodes");
+		// Continue with the function logic
 		let key = crate::key::root::nd::prefix();
 		let res = self.cache.get_value_or_guard_async(&key).await;
 		Ok(match res {
@@ -267,6 +273,10 @@ impl Transaction {
 
 	/// Retrieve all ROOT level users in a datastore.
 	pub async fn all_root_users(&self) -> Result<Arc<[DefineUserStatement]>, Error> {
+		// Log this function call in development
+		#[cfg(debug_assertions)]
+		trace!(target: TARGET, "all_root_users");
+		// Continue with the function logic
 		let key = crate::key::root::us::prefix();
 		let res = self.cache.get_value_or_guard_async(&key).await;
 		Ok(match res {
@@ -285,6 +295,10 @@ impl Transaction {
 
 	/// Retrieve all namespace definitions in a datastore.
 	pub async fn all_ns(&self) -> Result<Arc<[DefineNamespaceStatement]>, Error> {
+		// Log this function call in development
+		#[cfg(debug_assertions)]
+		trace!(target: TARGET, "all_ns");
+		// Continue with the function logic
 		let key = crate::key::root::ns::prefix();
 		let res = self.cache.get_value_or_guard_async(&key).await;
 		Ok(match res {
@@ -303,6 +317,10 @@ impl Transaction {
 
 	/// Retrieve all namespace user definitions for a specific namespace.
 	pub async fn all_ns_users(&self, ns: &str) -> Result<Arc<[DefineUserStatement]>, Error> {
+		// Log this function call in development
+		#[cfg(debug_assertions)]
+		trace!(target: TARGET, "all_ns_users {ns}");
+		// Continue with the function logic
 		let key = crate::key::namespace::us::prefix(ns);
 		let res = self.cache.get_value_or_guard_async(&key).await;
 		Ok(match res {
@@ -321,6 +339,10 @@ impl Transaction {
 
 	/// Retrieve all namespace access definitions for a specific namespace.
 	pub async fn all_ns_accesses(&self, ns: &str) -> Result<Arc<[DefineAccessStatement]>, Error> {
+		// Log this function call in development
+		#[cfg(debug_assertions)]
+		trace!(target: TARGET, "all_ns_accesses {ns}");
+		// Continue with the function logic
 		let key = crate::key::namespace::ac::prefix(ns);
 		let res = self.cache.get_value_or_guard_async(&key).await;
 		Ok(match res {
@@ -339,6 +361,10 @@ impl Transaction {
 
 	/// Retrieve all database definitions for a specific namespace.
 	pub async fn all_db(&self, ns: &str) -> Result<Arc<[DefineDatabaseStatement]>, Error> {
+		// Log this function call in development
+		#[cfg(debug_assertions)]
+		trace!(target: TARGET, "all_db {ns}");
+		// Continue with the function logic
 		let key = crate::key::namespace::db::prefix(ns);
 		let res = self.cache.get_value_or_guard_async(&key).await;
 		Ok(match res {
@@ -361,6 +387,10 @@ impl Transaction {
 		ns: &str,
 		db: &str,
 	) -> Result<Arc<[DefineUserStatement]>, Error> {
+		// Log this function call in development
+		#[cfg(debug_assertions)]
+		trace!(target: TARGET, "all_db_users {ns} {db}");
+		// Continue with the function logic
 		let key = crate::key::database::us::prefix(ns, db);
 		let res = self.cache.get_value_or_guard_async(&key).await;
 		Ok(match res {
@@ -383,6 +413,10 @@ impl Transaction {
 		ns: &str,
 		db: &str,
 	) -> Result<Arc<[DefineAccessStatement]>, Error> {
+		// Log this function call in development
+		#[cfg(debug_assertions)]
+		trace!(target: TARGET, "all_db_accesses {ns} {db}");
+		// Continue with the function logic
 		let key = crate::key::database::ac::prefix(ns, db);
 		let res = self.cache.get_value_or_guard_async(&key).await;
 		Ok(match res {
@@ -405,6 +439,10 @@ impl Transaction {
 		ns: &str,
 		db: &str,
 	) -> Result<Arc<[DefineAnalyzerStatement]>, Error> {
+		// Log this function call in development
+		#[cfg(debug_assertions)]
+		trace!(target: TARGET, "all_db_analyzers {ns} {db}");
+		// Continue with the function logic
 		let key = crate::key::database::az::prefix(ns, db);
 		let res = self.cache.get_value_or_guard_async(&key).await;
 		Ok(match res {
@@ -427,6 +465,10 @@ impl Transaction {
 		ns: &str,
 		db: &str,
 	) -> Result<Arc<[DefineFunctionStatement]>, Error> {
+		// Log this function call in development
+		#[cfg(debug_assertions)]
+		trace!(target: TARGET, "all_db_functions {ns} {db}");
+		// Continue with the function logic
 		let key = crate::key::database::fc::prefix(ns, db);
 		let res = self.cache.get_value_or_guard_async(&key).await;
 		Ok(match res {
@@ -449,6 +491,10 @@ impl Transaction {
 		ns: &str,
 		db: &str,
 	) -> Result<Arc<[DefineParamStatement]>, Error> {
+		// Log this function call in development
+		#[cfg(debug_assertions)]
+		trace!(target: TARGET, "all_db_params {ns} {db}");
+		// Continue with the function logic
 		let key = crate::key::database::pa::prefix(ns, db);
 		let res = self.cache.get_value_or_guard_async(&key).await;
 		Ok(match res {
@@ -471,6 +517,10 @@ impl Transaction {
 		ns: &str,
 		db: &str,
 	) -> Result<Arc<[DefineModelStatement]>, Error> {
+		// Log this function call in development
+		#[cfg(debug_assertions)]
+		trace!(target: TARGET, "all_db_models {ns} {db}");
+		// Continue with the function logic
 		let key = crate::key::database::ml::prefix(ns, db);
 		let res = self.cache.get_value_or_guard_async(&key).await;
 		Ok(match res {
@@ -489,6 +539,10 @@ impl Transaction {
 
 	/// Retrieve all table definitions for a specific database.
 	pub async fn all_tb(&self, ns: &str, db: &str) -> Result<Arc<[DefineTableStatement]>, Error> {
+		// Log this function call in development
+		#[cfg(debug_assertions)]
+		trace!(target: TARGET, "all_tb {ns} {db}");
+		// Continue with the function logic
 		let key = crate::key::database::tb::prefix(ns, db);
 		let res = self.cache.get_value_or_guard_async(&key).await;
 		Ok(match res {
@@ -512,6 +566,10 @@ impl Transaction {
 		db: &str,
 		tb: &str,
 	) -> Result<Arc<[DefineEventStatement]>, Error> {
+		// Log this function call in development
+		#[cfg(debug_assertions)]
+		trace!(target: TARGET, "all_tb_events {ns} {db} {tb}");
+		// Continue with the function logic
 		let key = crate::key::table::ev::prefix(ns, db, tb);
 		let res = self.cache.get_value_or_guard_async(&key).await;
 		Ok(match res {
@@ -535,6 +593,10 @@ impl Transaction {
 		db: &str,
 		tb: &str,
 	) -> Result<Arc<[DefineFieldStatement]>, Error> {
+		// Log this function call in development
+		#[cfg(debug_assertions)]
+		trace!(target: TARGET, "all_tb_fields {ns} {db} {tb}");
+		// Continue with the function logic
 		let key = crate::key::table::fd::prefix(ns, db, tb);
 		let res = self.cache.get_value_or_guard_async(&key).await;
 		Ok(match res {
@@ -558,6 +620,10 @@ impl Transaction {
 		db: &str,
 		tb: &str,
 	) -> Result<Arc<[DefineIndexStatement]>, Error> {
+		// Log this function call in development
+		#[cfg(debug_assertions)]
+		trace!(target: TARGET, "all_tb_indexes {ns} {db} {tb}");
+		// Continue with the function logic
 		let key = crate::key::table::ix::prefix(ns, db, tb);
 		let res = self.cache.get_value_or_guard_async(&key).await;
 		Ok(match res {
@@ -581,6 +647,10 @@ impl Transaction {
 		db: &str,
 		tb: &str,
 	) -> Result<Arc<[DefineTableStatement]>, Error> {
+		// Log this function call in development
+		#[cfg(debug_assertions)]
+		trace!(target: TARGET, "all_tb_views {ns} {db} {tb}");
+		// Continue with the function logic
 		let key = crate::key::table::ft::prefix(ns, db, tb);
 		let res = self.cache.get_value_or_guard_async(&key).await;
 		Ok(match res {
@@ -604,6 +674,10 @@ impl Transaction {
 		db: &str,
 		tb: &str,
 	) -> Result<Arc<[LiveStatement]>, Error> {
+		// Log this function call in development
+		#[cfg(debug_assertions)]
+		trace!(target: TARGET, "all_tb_lives {ns} {db} {tb}");
+		// Continue with the function logic
 		let key = crate::key::table::lq::prefix(ns, db, tb);
 		let res = self.cache.get_value_or_guard_async(&key).await;
 		Ok(match res {
@@ -622,6 +696,10 @@ impl Transaction {
 
 	/// Retrieve a specific namespace definition.
 	pub async fn get_node(&self, id: Uuid) -> Result<Arc<Node>, Error> {
+		// Log this function call in development
+		#[cfg(debug_assertions)]
+		trace!(target: TARGET, "get_node {id}");
+		// Continue with the function logic
 		let key = crate::key::root::nd::new(id).encode()?;
 		let res = self.cache.get_value_or_guard_async(&key).await;
 		Ok(match res {
@@ -641,6 +719,10 @@ impl Transaction {
 
 	/// Retrieve a specific namespace user definition.
 	pub async fn get_root_user(&self, user: &str) -> Result<Arc<DefineUserStatement>, Error> {
+		// Log this function call in development
+		#[cfg(debug_assertions)]
+		trace!(target: TARGET, "get_root_user {user}");
+		// Continue with the function logic
 		let key = crate::key::root::us::new(user).encode()?;
 		let res = self.cache.get_value_or_guard_async(&key).await;
 		Ok(match res {
@@ -660,6 +742,10 @@ impl Transaction {
 
 	/// Retrieve a specific namespace definition.
 	pub async fn get_ns(&self, ns: &str) -> Result<Arc<DefineNamespaceStatement>, Error> {
+		// Log this function call in development
+		#[cfg(debug_assertions)]
+		trace!(target: TARGET, "get_ns {ns}");
+		// Continue with the function logic
 		let key = crate::key::root::ns::new(ns).encode()?;
 		let res = self.cache.get_value_or_guard_async(&key).await;
 		Ok(match res {
@@ -683,6 +769,10 @@ impl Transaction {
 		ns: &str,
 		user: &str,
 	) -> Result<Arc<DefineUserStatement>, Error> {
+		// Log this function call in development
+		#[cfg(debug_assertions)]
+		trace!(target: TARGET, "get_ns_user {ns} {user}");
+		// Continue with the function logic
 		let key = crate::key::namespace::us::new(ns, user).encode()?;
 		let res = self.cache.get_value_or_guard_async(&key).await;
 		Ok(match res {
@@ -707,6 +797,10 @@ impl Transaction {
 		ns: &str,
 		na: &str,
 	) -> Result<Arc<DefineAccessStatement>, Error> {
+		// Log this function call in development
+		#[cfg(debug_assertions)]
+		trace!(target: TARGET, "get_ns_access {ns} {na}");
+		// Continue with the function logic
 		let key = crate::key::namespace::ac::new(ns, na).encode()?;
 		let res = self.cache.get_value_or_guard_async(&key).await;
 		Ok(match res {
@@ -726,6 +820,10 @@ impl Transaction {
 
 	/// Retrieve a specific database definition.
 	pub async fn get_db(&self, ns: &str, db: &str) -> Result<Arc<DefineDatabaseStatement>, Error> {
+		// Log this function call in development
+		#[cfg(debug_assertions)]
+		trace!(target: TARGET, "get_db {ns} {db}");
+		// Continue with the function logic
 		let key = crate::key::namespace::db::new(ns, db).encode()?;
 		let res = self.cache.get_value_or_guard_async(&key).await;
 		Ok(match res {
@@ -750,6 +848,10 @@ impl Transaction {
 		db: &str,
 		user: &str,
 	) -> Result<Arc<DefineUserStatement>, Error> {
+		// Log this function call in development
+		#[cfg(debug_assertions)]
+		trace!(target: TARGET, "get_db_user {ns} {db} {user}");
+		// Continue with the function logic
 		let key = crate::key::database::us::new(ns, db, user).encode()?;
 		let res = self.cache.get_value_or_guard_async(&key).await;
 		Ok(match res {
@@ -776,6 +878,10 @@ impl Transaction {
 		db: &str,
 		da: &str,
 	) -> Result<Arc<DefineAccessStatement>, Error> {
+		// Log this function call in development
+		#[cfg(debug_assertions)]
+		trace!(target: TARGET, "get_db_access {ns} {db} {da}");
+		// Continue with the function logic
 		let key = crate::key::database::ac::new(ns, db, da).encode()?;
 		let res = self.cache.get_value_or_guard_async(&key).await;
 		Ok(match res {
@@ -801,6 +907,10 @@ impl Transaction {
 		ml: &str,
 		vn: &str,
 	) -> Result<Arc<DefineModelStatement>, Error> {
+		// Log this function call in development
+		#[cfg(debug_assertions)]
+		trace!(target: TARGET, "get_db_model {ns} {db} {ml} {vn}");
+		// Continue with the function logic
 		let key = crate::key::database::ml::new(ns, db, ml, vn).encode()?;
 		let res = self.cache.get_value_or_guard_async(&key).await;
 		Ok(match res {
@@ -825,6 +935,10 @@ impl Transaction {
 		db: &str,
 		az: &str,
 	) -> Result<Arc<DefineAnalyzerStatement>, Error> {
+		// Log this function call in development
+		#[cfg(debug_assertions)]
+		trace!(target: TARGET, "get_db_analyzer {ns} {db} {az}");
+		// Continue with the function logic
 		let key = crate::key::database::az::new(ns, db, az).encode()?;
 		let res = self.cache.get_value_or_guard_async(&key).await;
 		Ok(match res {
@@ -849,6 +963,10 @@ impl Transaction {
 		db: &str,
 		fc: &str,
 	) -> Result<Arc<DefineFunctionStatement>, Error> {
+		// Log this function call in development
+		#[cfg(debug_assertions)]
+		trace!(target: TARGET, "get_db_function {ns} {db} {fc}");
+		// Continue with the function logic
 		let key = crate::key::database::fc::new(ns, db, fc).encode()?;
 		let res = self.cache.get_value_or_guard_async(&key).await;
 		Ok(match res {
@@ -873,6 +991,10 @@ impl Transaction {
 		db: &str,
 		pa: &str,
 	) -> Result<Arc<DefineParamStatement>, Error> {
+		// Log this function call in development
+		#[cfg(debug_assertions)]
+		trace!(target: TARGET, "get_db_param {ns} {db} {pa}");
+		// Continue with the function logic
 		let key = crate::key::database::pa::new(ns, db, pa).encode()?;
 		let res = self.cache.get_value_or_guard_async(&key).await;
 		Ok(match res {
@@ -897,6 +1019,10 @@ impl Transaction {
 		db: &str,
 		tb: &str,
 	) -> Result<Arc<DefineTableStatement>, Error> {
+		// Log this function call in development
+		#[cfg(debug_assertions)]
+		trace!(target: TARGET, "get_tb {ns} {db} {tb}");
+		// Continue with the function logic
 		let key = crate::key::database::tb::new(ns, db, tb).encode()?;
 		let res = self.cache.get_value_or_guard_async(&key).await;
 		Ok(match res {
@@ -922,6 +1048,10 @@ impl Transaction {
 		tb: &str,
 		ev: &str,
 	) -> Result<Arc<DefineEventStatement>, Error> {
+		// Log this function call in development
+		#[cfg(debug_assertions)]
+		trace!(target: TARGET, "get_tb_event {ns} {db} {tb} {ev}");
+		// Continue with the function logic
 		let key = crate::key::table::ev::new(ns, db, tb, ev).encode()?;
 		let res = self.cache.get_value_or_guard_async(&key).await;
 		Ok(match res {
@@ -947,6 +1077,10 @@ impl Transaction {
 		tb: &str,
 		fd: &str,
 	) -> Result<Arc<DefineFieldStatement>, Error> {
+		// Log this function call in development
+		#[cfg(debug_assertions)]
+		trace!(target: TARGET, "get_tb_field {ns} {db} {tb} {fd}");
+		// Continue with the function logic
 		let key = crate::key::table::fd::new(ns, db, tb, fd).encode()?;
 		let res = self.cache.get_value_or_guard_async(&key).await;
 		Ok(match res {
@@ -972,6 +1106,10 @@ impl Transaction {
 		tb: &str,
 		ix: &str,
 	) -> Result<Arc<DefineIndexStatement>, Error> {
+		// Log this function call in development
+		#[cfg(debug_assertions)]
+		trace!(target: TARGET, "get_tb_index {ns} {db} {tb} {ix}");
+		// Continue with the function logic
 		let key = crate::key::table::ix::new(ns, db, tb, ix).encode()?;
 		let res = self.cache.get_value_or_guard_async(&key).await;
 		Ok(match res {
@@ -997,6 +1135,10 @@ impl Transaction {
 		tb: &str,
 		id: &Id,
 	) -> Result<Arc<Value>, Error> {
+		// Log this function call in development
+		#[cfg(debug_assertions)]
+		trace!(target: TARGET, "get_record {ns} {db} {tb} {id}");
+		// Continue with the function logic
 		let key = crate::key::thing::new(ns, db, tb, id).encode()?;
 		let res = self.cache.get_value_or_guard_async(&key).await;
 		match res {
@@ -1024,6 +1166,10 @@ impl Transaction {
 		id: &Id,
 		val: Value,
 	) -> Result<(), Error> {
+		// Log this function call in development
+		#[cfg(debug_assertions)]
+		trace!(target: TARGET, "set_record {ns} {db} {tb} {id} {val}");
+		// Continue with the function logic
 		let key = crate::key::thing::new(ns, db, tb, id);
 		let enc = crate::key::thing::new(ns, db, tb, id).encode()?;
 		// Set the value in the datastore
@@ -1040,6 +1186,10 @@ impl Transaction {
 		ns: &str,
 		strict: bool,
 	) -> Result<Arc<DefineNamespaceStatement>, Error> {
+		// Log this function call in development
+		#[cfg(debug_assertions)]
+		trace!(target: TARGET, "get_or_add_ns {ns}");
+		// Continue with the function logic
 		self.get_or_add_ns_upwards(ns, strict, false).await
 	}
 
@@ -1050,6 +1200,10 @@ impl Transaction {
 		db: &str,
 		strict: bool,
 	) -> Result<Arc<DefineDatabaseStatement>, Error> {
+		// Log this function call in development
+		#[cfg(debug_assertions)]
+		trace!(target: TARGET, "get_or_add_db {ns} {db}");
+		// Continue with the function logic
 		self.get_or_add_db_upwards(ns, db, strict, false).await
 	}
 
@@ -1061,6 +1215,10 @@ impl Transaction {
 		tb: &str,
 		strict: bool,
 	) -> Result<Arc<DefineTableStatement>, Error> {
+		// Log this function call in development
+		#[cfg(debug_assertions)]
+		trace!(target: TARGET, "get_or_add_tb {ns} {db} {tb}");
+		// Continue with the function logic
 		self.get_or_add_tb_upwards(ns, db, tb, strict, false).await
 	}
 
@@ -1073,6 +1231,10 @@ impl Transaction {
 		tb: &str,
 		strict: bool,
 	) -> Result<Arc<DefineTableStatement>, Error> {
+		// Log this function call in development
+		#[cfg(debug_assertions)]
+		trace!(target: TARGET, "ensure_ns_db_tb {ns} {db} {tb}");
+		// Continue with the function logic
 		self.get_or_add_tb_upwards(ns, db, tb, strict, true).await
 	}
 
@@ -1085,6 +1247,10 @@ impl Transaction {
 		tb: &str,
 		strict: bool,
 	) -> Result<(), Error> {
+		// Log this function call in development
+		#[cfg(debug_assertions)]
+		trace!(target: TARGET, "check_ns_db_tb {ns} {db} {tb}");
+		// Continue with the function logic
 		match strict {
 			// Strict mode is disabled
 			false => Ok(()),
