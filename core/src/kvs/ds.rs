@@ -399,47 +399,26 @@ impl Datastore {
 		// Start a new writeable transaction
 		let txn = self.transaction(Write, Optimistic).await?.enclose();
 		// Fetch the root users from the storage
-		let users = txn.all_root_users().await;
+		let users = catch!(txn, txn.all_root_users());
 		// Process credentials, depending on existing users
-		match users {
-			Ok(v) if v.is_empty() => {
-				// Display information in the logs
-				info!("Credentials were provided, and no root users were found. The root user '{}' will be created", user);
-				// Create and new root user definition
-				let stm = DefineUserStatement::from((Base::Root, user, pass, INITIAL_USER_ROLE));
-				let opt = Options::new().with_auth(Arc::new(Auth::for_root(Role::Owner)));
-				let ctx = Context::default().with_transaction(txn.clone());
-				// Save the new root user definnition
-				match stm.compute(&ctx, &opt, None).await {
-					Ok(_) => {
-						// Commit the transaction if all went well
-						txn.commit().await?;
-					}
-					Err(e) => {
-						// Cancel the transaction if something failed
-						txn.cancel().await?;
-						// Return the original error
-						return Err(e);
-					}
-				}
-				// Everything ok
-				Ok(())
-			}
-			Ok(_) => {
-				// Display warnings in the logs
-				warn!("Credentials were provided, but existing root users were found. The root user '{}' will not be created", user);
-				warn!("Consider removing the --user and --pass arguments from the server start command");
-				// We didn't write anything, so just rollback
-				txn.cancel().await?;
-				// Everything ok
-				Ok(())
-			}
-			Err(e) => {
-				// There was an unexpected error, so rollback
-				txn.cancel().await?;
-				// Return any error
-				Err(e)
-			}
+		if users.is_empty() {
+			// Display information in the logs
+			info!("Credentials were provided, and no root users were found. The root user '{user}' will be created");
+			// Create and new root user definition
+			let stm = DefineUserStatement::from((Base::Root, user, pass, INITIAL_USER_ROLE));
+			let opt = Options::new().with_auth(Arc::new(Auth::for_root(Role::Owner)));
+			let ctx = Context::default().with_transaction(txn.clone());
+			catch!(txn, stm.compute(&ctx, &opt, None));
+			// We added a user, so commit the transaction
+			txn.commit().await
+		} else {
+			// Display information in the logs
+			warn!("Credentials were provided, but existing root users were found. The root user '{user}' will not be created");
+			warn!(
+				"Consider removing the --user and --pass arguments from the server start command"
+			);
+			// We didn't write anything, so just rollback
+			txn.cancel().await
 		}
 	}
 

@@ -1,6 +1,4 @@
 /// Converts some text into a new line byte string
-#[macro_export]
-#[doc(hidden)]
 macro_rules! bytes {
 	($expression:expr) => {
 		format!("{}\n", $expression).into_bytes()
@@ -8,8 +6,6 @@ macro_rules! bytes {
 }
 
 /// Creates a new b-tree map of key-value pairs
-#[macro_export]
-#[doc(hidden)]
 macro_rules! map {
     ($($k:expr $(, if let $grant:pat = $check:expr)? $(, if $guard:expr)? => $v:expr),* $(,)? $( => $x:expr )?) => {{
         let mut m = ::std::collections::BTreeMap::new();
@@ -28,12 +24,51 @@ macro_rules! mrg {
 }
 
 /// Matches on a specific config environment
-#[macro_export]
-#[doc(hidden)]
 macro_rules! get_cfg {
 	($i:ident : $($s:expr),+) => (
 		let $i = || { $( if cfg!($i=$s) { return $s; } );+ "unknown"};
 	)
+}
+
+/// Runs a method on a transaction, ensuring that the transaction
+/// is cancelled and rolled back if the initial function fails.
+/// This can be used to ensure that the use of the `?` operator to
+/// fail fast and return an error from a function does not leave
+/// a transaction in an uncommitted state without rolling back.
+macro_rules! catch {
+	($txn:ident, $default:expr) => {
+		match $default.await {
+			Err(e) => {
+				let _ = $txn.cancel().await;
+				return Err(e);
+			}
+			Ok(v) => v,
+		}
+	};
+}
+
+/// Runs a method on a transaction, ensuring that the transaction
+/// is cancelled and rolled back if the initial function fails, or
+/// committed successfully if the initial function succeeds. This
+/// can be used to ensure that the use of the `?` operator to fail
+/// fast and return an error from a function does not leave a
+/// transaction in an uncommitted state without rolling back.
+macro_rules! run {
+	($txn:ident, $default:expr) => {
+		match $default.await {
+			Err(e) => {
+				let _ = $txn.cancel().await;
+				Err(e)
+			}
+			Ok(v) => match $txn.commit().await {
+				Err(e) => {
+					let _ = $txn.cancel().await;
+					Err(e)
+				}
+				Ok(_) => Ok(v),
+			},
+		}
+	};
 }
 
 /// A macro that allows lazily parsing a value from the environment variable,
@@ -85,7 +120,6 @@ macro_rules! lazy_env_parse_or_else {
 }
 
 #[cfg(test)]
-#[macro_export]
 macro_rules! async_defer{
 	(let $bind:ident = ($capture:expr) defer { $($d:tt)* } after { $($t:tt)* }) => {
 		async {

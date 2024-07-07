@@ -792,7 +792,7 @@ async fn router(
 				[Value::Strand(key), value] => (mem::take(&mut key.0), mem::take(value)),
 				_ => unreachable!(),
 			};
-			let var = Some(crate::map! {
+			let var = Some(map! {
 				key.clone() => Value::None,
 				=> vars
 			});
