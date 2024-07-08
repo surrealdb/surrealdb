@@ -45,7 +45,7 @@ where
 	fn into_future(self) -> Self::IntoFuture {
 		Box::pin(async move {
 			let mut conn = Client::new(Method::Run);
-			conn.execute(
+			conn.execute_value(
 				self.client.router.extract()?,
 				Param::new(vec![self.fn_name.into(), self.fn_version.into(), self.params.into()]),
 			)
