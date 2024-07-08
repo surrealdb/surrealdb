@@ -26,6 +26,7 @@ body:
         Detail the steps taken to reproduce the behaviour.
         Remember to include any useful data, queries, screenshots or videos of the issue. 
         Feel free to use [Surrealist Embeds](https://surrealdb.com/docs/surrealist/embeds) and share a link!
+    validations:
       required: true
   - type: textarea
     id: expected
