@@ -9,44 +9,44 @@ impl Value {
 		match self {
 			// There is a floating point number for the id field
 			Value::Number(id) if id.is_float() => Ok(Thing {
-				tb: tb.to_string(),
+				tb: tb.0.to_string(),
 				id: id.as_int().into(),
 			}),
 			// There is an integer number for the id field
 			Value::Number(id) if id.is_int() => Ok(Thing {
-				tb: tb.to_string(),
+				tb: tb.0.to_string(),
 				id: id.as_int().into(),
 			}),
 			// There is a string for the id field
 			Value::Strand(id) if !id.is_empty() => Ok(Thing {
-				tb: tb.to_string(),
+				tb: tb.0.to_string(),
 				id: id.into(),
 			}),
 			// There is an object for the id field
 			Value::Object(id) => Ok(Thing {
-				tb: tb.to_string(),
+				tb: tb.0.to_string(),
 				id: id.into(),
 			}),
 			// There is an array for the id field
 			Value::Array(id) => Ok(Thing {
-				tb: tb.to_string(),
+				tb: tb.0.to_string(),
 				id: id.into(),
 			}),
 			// There is a UUID for the id field
 			Value::Uuid(id) => Ok(Thing {
-				tb: tb.to_string(),
+				tb: tb.0.to_string(),
 				id: id.into(),
 			}),
 			// There is no record id field
 			Value::None => Ok(Thing {
-				tb: tb.to_string(),
+				tb: tb.0.to_string(),
 				id: Id::rand(),
 			}),
 			// There is a record id defined
 			Value::Thing(id) => match retable {
 				// Let's re-table this record id
 				true => Ok(Thing {
-					tb: tb.to_string(),
+					tb: tb.0.to_string(),
 					id: id.id,
 				}),
 				// Let's use the specified record id
@@ -55,7 +55,7 @@ impl Value {
 					true => Ok(id),
 					// The record id is from another table
 					false => Ok(Thing {
-						tb: tb.to_string(),
+						tb: tb.0.to_string(),
 						id: id.id,
 					}),
 				},

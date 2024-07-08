@@ -1,5 +1,5 @@
 use crate::ctx::Context;
-use crate::dbs::{Iterator, Options, Statement, Transaction};
+use crate::dbs::{Iterator, Options, Statement};
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::sql::{Cond, Output, Timeout, Value, Values};
@@ -34,7 +34,6 @@ impl DeleteStatement {
 		stk: &mut Stk,
 		ctx: &Context<'_>,
 		opt: &Options,
-		txn: &Transaction,
 		doc: Option<&CursorDoc<'_>>,
 	) -> Result<Value, Error> {
 		// Valid options?
@@ -47,8 +46,8 @@ impl DeleteStatement {
 		let opt = &opt.new_with_futures(false).with_projections(false);
 		// Loop over the delete targets
 		for w in self.what.0.iter() {
-			let v = w.compute(stk, ctx, opt, txn, doc).await?;
-			i.prepare(stk, ctx, opt, txn, &stm, v).await.map_err(|e| match e {
+			let v = w.compute(stk, ctx, opt, doc).await?;
+			i.prepare(stk, ctx, opt, &stm, v).await.map_err(|e| match e {
 				Error::InvalidStatementTarget {
 					value: v,
 				} => Error::DeleteStatement {
@@ -58,7 +57,7 @@ impl DeleteStatement {
 			})?;
 		}
 		// Output the results
-		match i.output(stk, ctx, opt, txn, &stm).await? {
+		match i.output(stk, ctx, opt, &stm).await? {
 			// This is a single record result
 			Value::Array(mut a) if self.only => match a.len() {
 				// There was exactly one result

@@ -1,5 +1,5 @@
 use crate::ctx::Context;
-use crate::dbs::{Options, Transaction};
+use crate::dbs::Options;
 use crate::err::Error;
 use crate::sql::fmt::Fmt;
 use crate::sql::idiom::Idiom;
@@ -40,25 +40,27 @@ impl Data {
 		stk: &mut Stk,
 		ctx: &Context<'_>,
 		opt: &Options,
-		txn: &Transaction,
 	) -> Result<Option<Value>, Error> {
 		match self {
-			Self::MergeExpression(v) => {
-				// This MERGE expression has an 'id' field
-				Ok(v.compute(stk, ctx, opt, txn, None).await?.rid().some())
-			}
-			Self::ReplaceExpression(v) => {
-				// This REPLACE expression has an 'id' field
-				Ok(v.compute(stk, ctx, opt, txn, None).await?.rid().some())
-			}
-			Self::ContentExpression(v) => {
-				// This CONTENT expression has an 'id' field
-				Ok(v.compute(stk, ctx, opt, txn, None).await?.rid().some())
-			}
+			Self::MergeExpression(v) => match v {
+				Value::Param(v) => Ok(v.compute(stk, ctx, opt, None).await?.rid().some()),
+				Value::Object(_) => Ok(v.rid().some()),
+				_ => Ok(None),
+			},
+			Self::ReplaceExpression(v) => match v {
+				Value::Param(v) => Ok(v.compute(stk, ctx, opt, None).await?.rid().some()),
+				Value::Object(_) => Ok(v.rid().some()),
+				_ => Ok(None),
+			},
+			Self::ContentExpression(v) => match v {
+				Value::Param(v) => Ok(v.compute(stk, ctx, opt, None).await?.rid().some()),
+				Value::Object(_) => Ok(v.rid().some()),
+				_ => Ok(None),
+			},
 			Self::SetExpression(v) => match v.iter().find(|f| f.0.is_id()) {
 				Some((_, _, v)) => {
 					// This SET expression has an 'id' field
-					Ok(v.compute(stk, ctx, opt, txn, None).await?.some())
+					Ok(v.compute(stk, ctx, opt, None).await?.some())
 				}
 				// This SET expression had no 'id' field
 				_ => Ok(None),

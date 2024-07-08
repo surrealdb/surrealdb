@@ -78,7 +78,7 @@ For guidance on installation, development, deployment, and administration, see o
 SurrealDB is designed to be simple to install and simple to run - using just one command from your terminal. In addition to traditional installation, SurrealDB can be installed and run with HomeBrew, Docker, or using any other container orchestration tool such as Docker Compose, Docker Swarm, Rancher, or in Kubernetes.
 
 <h4>
-    <img width="20" src="https://github.com/surrealdb/surrealdb/blob/main/img/black/apple.svg?raw=true">
+    <img width="20" src="https://github.com/surrealdb/surrealdb/blob/main/img/apple.svg?raw=true">
     &nbsp; Install on macOS
 </h4>
 
@@ -89,7 +89,7 @@ brew install surrealdb/tap/surreal
 ```
 
 <h4>
-    <img width="20" src="https://github.com/surrealdb/surrealdb/blob/main/img/black/linux.svg?raw=true">
+    <img width="20" src="https://github.com/surrealdb/surrealdb/blob/main/img/linux.svg?raw=true">
     &nbsp; Install on Linux
 </h4>
 
@@ -100,7 +100,7 @@ curl -sSf https://install.surrealdb.com | sh
 ```
 
 <h4>
-    <img width="20" src="https://github.com/surrealdb/surrealdb/blob/main/img/black/windows.svg?raw=true">
+    <img width="20" src="https://github.com/surrealdb/surrealdb/blob/main/img/windows.svg?raw=true">
     &nbsp; Install on Windows
 </h4>
 
@@ -111,7 +111,7 @@ iwr https://install.surrealdb.com -useb | iex
 ```
 
 <h4>
-    <img width="20" src="https://github.com/surrealdb/surrealdb/blob/main/img/black/docker.svg?raw=true">
+    <img width="20" src="https://github.com/surrealdb/surrealdb/blob/main/img/docker.svg?raw=true">
     &nbsp; Run using Docker
 </h4>
 

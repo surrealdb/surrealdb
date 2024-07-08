@@ -7,20 +7,15 @@ use super::modules::resolver;
 use super::modules::surrealdb::query::QueryContext;
 use super::modules::surrealdb::query::QUERY_DATA_PROP_NAME;
 use crate::ctx::Context;
-use crate::dbs::{Options, Transaction};
+use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::sql::value::Value;
 use js::async_with;
 use js::object::Property;
-use js::prelude::Promise;
-use js::prelude::Rest;
-use js::prelude::This;
+use js::prelude::*;
 use js::CatchResultExt;
-use js::Class;
-use js::Ctx;
-use js::Function;
-use js::Module;
+use js::{Class, Ctx, Function, Module, Promise};
 
 /// Insert query data into the context,
 ///
@@ -29,7 +24,6 @@ use js::Module;
 pub unsafe fn create_query_data<'a>(
 	context: &'a Context<'a>,
 	opt: &'a Options,
-	txn: &'a Transaction,
 	doc: Option<&'a CursorDoc<'a>>,
 	ctx: &Ctx<'_>,
 ) -> Result<(), js::Error> {
@@ -41,7 +35,6 @@ pub unsafe fn create_query_data<'a>(
 		QueryContext {
 			context,
 			opt,
-			txn,
 			doc,
 		},
 	)?;
@@ -56,7 +49,6 @@ pub unsafe fn create_query_data<'a>(
 pub async fn run(
 	context: &Context<'_>,
 	opt: &Options,
-	txn: &Transaction,
 	doc: Option<&CursorDoc<'_>>,
 	src: &str,
 	arg: Vec<Value>,
@@ -93,12 +85,13 @@ pub async fn run(
 
 			// SAFETY: This is safe because the runtime only lives for the duration of this
 			// function. For the entire duration of which context, opt, txn and doc are valid.
-			unsafe{ create_query_data(context,opt,txn,doc,&ctx) }?;
+			unsafe{ create_query_data(context,opt,doc,&ctx) }?;
 			// Register the surrealdb module as a global object
+			let (module,promise) = Module::evaluate_def::<modules::surrealdb::Package, _>(ctx.clone(), "surrealdb")?;
+			promise.finish::<()>()?;
 			global.set(
 				"surrealdb",
-				Module::evaluate_def::<modules::surrealdb::Package, _>(ctx.clone(), "surrealdb")?
-					.get::<_, js::Value>("default")?,
+				module.get::<_, js::Value>("default")?,
 			)?;
 			fetch::register(&ctx)?;
 			let console = globals::console::console(&ctx)?;
@@ -106,14 +99,16 @@ pub async fn run(
 			global.set("console",console)?;
 			// Register the special SurrealDB types as classes
 			classes::init(&ctx)?;
-			// Attempt to compile the script
-			let res = ctx.clone().compile("script", src)?;
+
+			let (module,promise) = Module::declare(ctx.clone(),"script", src)?.eval()?;
+			promise.into_future::<()>().await?;
+
 			// Attempt to fetch the main export
-			let fnc = res.get::<_, Function>("default")?;
+			let fnc = module.get::<_, Function>("default")?;
 			// Extract the doc if any
 			let doc = doc.map(|v|v.doc.as_ref());
 			// Execute the main function
-			let promise: Promise<Value> = fnc.call((This(doc), Rest(arg)))?;
+			let promise = fnc.call::<_,Promise>((This(doc), Rest(arg)))?.into_future::<Value>();
 			promise.await
 		}.await;
 

@@ -47,11 +47,11 @@ jobs:
 
       - name: Checkout changes
         uses: actions/checkout@v4
-      
+
       - name: Run benchmark
         run: |
           cargo make ci-bench -- --save-baseline current
-      
+
       - name: Copy results from AWS S3 bucket
         run: |
           BRANCH_NAME=$(echo ${{ github.head_ref || github.ref_name }} | sed 's/[^a-zA-Z0-9]/-/g')
@@ -140,7 +140,7 @@ jobs:
 
       # Install FoundationDB if needed
       - name: Setup FoundationDB
-        uses: foundationdb-rs/foundationdb-actions-install@v2.1.0
+        uses: foundationdb-rs/foundationdb-actions-install@v.2.2.0
         if: ${{ matrix.target == 'lib-fdb' || matrix.target == 'sdk-fdb' }}
         with:
           version: "7.1.30"
@@ -150,7 +150,7 @@ jobs:
         if: ${{ matrix.target == 'sdk-ws' }}
         run: |
           cargo make build
-          
+
           # Kill any potential previous instance of the server. The runner may be reused.
           pkill -9 surreal || true
           ./target/release/surreal start 2>&1 >surrealdb.log &
@@ -179,7 +179,7 @@ jobs:
 
           # Kill surreal server if it's running
           pkill -9 surreal || true
-      
+
       - name: Copy results from AWS S3 bucket
         run: |
           BRANCH_NAME=$(echo ${{ github.head_ref || github.ref_name }} | sed 's/[^a-zA-Z0-9]/-/g')

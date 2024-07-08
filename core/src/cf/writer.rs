@@ -100,7 +100,15 @@ impl Writer {
 				},
 			);
 		} else {
-			self.buf.push(ns.to_string(), db.to_string(), tb.to_string(), TableMutation::Del(id));
+			self.buf.push(
+				ns.to_string(),
+				db.to_string(),
+				tb.to_string(),
+				match store_difference {
+					true => TableMutation::DelWithOriginal(id, previous.into_owned()),
+					false => TableMutation::Del(id),
+				},
+			);
 		}
 	}
 
@@ -140,7 +148,7 @@ impl Writer {
 #[cfg(test)]
 mod tests {
 	use std::borrow::Cow;
-	use std::time::{Duration, Instant};
+	use std::time::Duration;
 
 	use crate::cf::{ChangeSet, DatabaseMutation, TableMutation, TableMutations};
 	use crate::dbs::Session;

@@ -113,9 +113,9 @@ async fn subquery_ifelse_set() -> Result<(), Error> {
 		RETURN $record;
 		-- Update the record field if it exists
 		IF $record.count THEN
-			(UPDATE person:test SET sport +?= 'football' RETURN sport)
+			(UPSERT person:test SET sport +?= 'football' RETURN sport)
 		ELSE
-			(UPDATE person:test SET sport = ['basketball'] RETURN sport)
+			(UPSERT person:test SET sport = ['basketball'] RETURN sport)
 		END;
 		-- Check if the record exists
 		LET $record = SELECT *, count() AS count FROM person:test;
@@ -123,9 +123,9 @@ async fn subquery_ifelse_set() -> Result<(), Error> {
 		RETURN $record;
 		-- Update the record field if it exists
 		IF $record.count THEN
-			UPDATE person:test SET sport +?= 'football' RETURN sport
+			UPSERT person:test SET sport +?= 'football' RETURN sport
 		ELSE
-			UPDATE person:test SET sport = ['basketball'] RETURN sport
+			UPSERT person:test SET sport = ['basketball'] RETURN sport
 		END;
 		-- Check if the record exists
 		LET $record = SELECT *, count() AS count FROM person:test;
@@ -133,9 +133,9 @@ async fn subquery_ifelse_set() -> Result<(), Error> {
 		RETURN $record;
 		-- Update the record field if it exists
 		IF $record.count THEN
-			UPDATE person:test SET sport +?= 'football' RETURN sport;
+			UPSERT person:test SET sport +?= 'football' RETURN sport;
 		ELSE
-			UPDATE person:test SET sport = ['basketball'] RETURN sport;
+			UPSERT person:test SET sport = ['basketball'] RETURN sport;
 		END;
 	";
 	let dbs = new_ds().await?;
@@ -238,9 +238,9 @@ async fn subquery_ifelse_array() -> Result<(), Error> {
 		RETURN $record;
 		-- Update the record field if it exists
 		IF $record.count THEN
-			(UPDATE person:test SET sport += 'football' RETURN sport)
+			(UPSERT person:test SET sport += 'football' RETURN sport)
 		ELSE
-			(UPDATE person:test SET sport = ['basketball'] RETURN sport)
+			(UPSERT person:test SET sport = ['basketball'] RETURN sport)
 		END;
 		-- Check if the record exists
 		LET $record = SELECT *, count() AS count FROM person:test;
@@ -248,9 +248,9 @@ async fn subquery_ifelse_array() -> Result<(), Error> {
 		RETURN $record;
 		-- Update the record field if it exists
 		IF $record.count THEN
-			UPDATE person:test SET sport += 'football' RETURN sport
+			UPSERT person:test SET sport += 'football' RETURN sport
 		ELSE
-			UPDATE person:test SET sport = ['basketball'] RETURN sport
+			UPSERT person:test SET sport = ['basketball'] RETURN sport
 		END;
 		-- Check if the record exists
 		LET $record = SELECT *, count() AS count FROM person:test;
@@ -258,9 +258,9 @@ async fn subquery_ifelse_array() -> Result<(), Error> {
 		RETURN $record;
 		-- Update the record field if it exists
 		IF $record.count THEN
-			UPDATE person:test SET sport += 'football' RETURN sport;
+			UPSERT person:test SET sport += 'football' RETURN sport;
 		ELSE
-			UPDATE person:test SET sport = ['basketball'] RETURN sport;
+			UPSERT person:test SET sport = ['basketball'] RETURN sport;
 		END;
 	";
 	let dbs = new_ds().await?;

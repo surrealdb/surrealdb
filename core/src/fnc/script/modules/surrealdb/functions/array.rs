@@ -45,6 +45,7 @@ impl_module_def!(
 	"prepend" => run,
 	"remove" => run,
 	"reverse" => run,
+	"shuffle" => run,
 	"slice" => run,
 	"sort" => (sort::Package),
 	"transpose" => run,

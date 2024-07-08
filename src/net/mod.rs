@@ -24,7 +24,7 @@ use crate::cli::CF;
 use crate::cnf;
 use crate::err::Error;
 use crate::net::signals::graceful_shutdown;
-use crate::rpc::notifications;
+use crate::rpc::{notifications, RpcState};
 use crate::telemetry::metrics::HttpMetricsLayer;
 use axum::response::Redirect;
 use axum::routing::get;
@@ -35,7 +35,7 @@ use http::header;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
-use surrealdb::headers::{AUTH_DB, AUTH_NS, DB, DB_LEGACY, ID, ID_LEGACY, NS, NS_LEGACY};
+use surrealdb::headers::{AUTH_DB, AUTH_NS, DB, ID, NS};
 use tokio_util::sync::CancellationToken;
 use tower::ServiceBuilder;
 use tower_http::add_extension::AddExtensionLayer;
@@ -108,10 +108,6 @@ pub async fn init(ct: CancellationToken) -> Result<(), Error> {
 		ID.clone(),
 		AUTH_NS.clone(),
 		AUTH_DB.clone(),
-		// TODO(gguillemas): Remove these headers once the legacy authentication is deprecated in v2.0.0
-		NS_LEGACY.clone(),
-		DB_LEGACY.clone(),
-		ID_LEGACY.clone(),
 	];
 
 	#[cfg(not(feature = "http-compression"))]
@@ -125,10 +121,6 @@ pub async fn init(ct: CancellationToken) -> Result<(), Error> {
 		ID.clone(),
 		AUTH_NS.clone(),
 		AUTH_DB.clone(),
-		// TODO(gguillemas): Remove these headers once the legacy authentication is deprecated in v2.0.0
-		NS_LEGACY.clone(),
-		DB_LEGACY.clone(),
-		ID_LEGACY.clone(),
 	];
 
 	let service = service
@@ -145,8 +137,8 @@ pub async fn init(ct: CancellationToken) -> Result<(), Error> {
 		.layer(HttpMetricsLayer)
 		.layer(SetSensitiveResponseHeadersLayer::from_shared(headers))
 		.layer(AsyncRequireAuthorizationLayer::new(auth::SurrealAuth))
-		.layer(headers::add_server_header())
-		.layer(headers::add_version_header())
+		.layer(headers::add_server_header(!opt.no_identification_headers))
+		.layer(headers::add_version_header(!opt.no_identification_headers))
 		.layer(
 			CorsLayer::new()
 				.allow_methods([
@@ -163,7 +155,7 @@ pub async fn init(ct: CancellationToken) -> Result<(), Error> {
 				.max_age(Duration::from_secs(86400)),
 		);
 
-	let axum_app = Router::new()
+	let axum_app = Router::<Arc<RpcState>, _>::new()
 		// Redirect until we provide a UI
 		.route("/", get(|| async { Redirect::temporary(cnf::APP_ENDPOINT) }))
 		.route("/status", get(|| async {}))
@@ -185,10 +177,16 @@ pub async fn init(ct: CancellationToken) -> Result<(), Error> {
 
 	// Get a new server handler
 	let handle = Handle::new();
+
+	let rpc_state = Arc::new(RpcState::new());
+
 	// Setup the graceful shutdown handler
-	let shutdown_handler = graceful_shutdown(ct.clone(), handle.clone());
+	let shutdown_handler = graceful_shutdown(rpc_state.clone(), ct.clone(), handle.clone());
+
+	let axum_app = axum_app.with_state(rpc_state.clone());
+
 	// Spawn a task to handle notifications
-	tokio::spawn(async move { notifications(ct.clone()).await });
+	tokio::spawn(async move { notifications(rpc_state, ct.clone()).await });
 	// If a certificate and key are specified then setup TLS
 	if let (Some(cert), Some(key)) = (&opt.crt, &opt.key) {
 		// Configure certificate and private key used by https

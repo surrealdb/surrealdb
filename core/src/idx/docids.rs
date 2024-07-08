@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 
 pub type DocId = u64;
 
-pub(crate) struct DocIds {
+pub struct DocIds {
 	ixs: IndexStores,
 	state_key: Key,
 	index_key_base: IndexKeyBase,
@@ -21,7 +21,7 @@ pub(crate) struct DocIds {
 }
 
 impl DocIds {
-	pub(in crate::idx) async fn new(
+	pub async fn new(
 		ixs: &IndexStores,
 		tx: &mut Transaction,
 		tt: TransactionType,

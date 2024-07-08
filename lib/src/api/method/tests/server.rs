@@ -8,14 +8,14 @@ use crate::sql::Value;
 use flume::Receiver;
 use futures::StreamExt;
 
-pub(super) fn mock(route_rx: Receiver<Option<Route>>) {
+pub(super) fn mock(route_rx: Receiver<Route>) {
 	tokio::spawn(async move {
 		let mut stream = route_rx.into_stream();
 
-		while let Some(Some(Route {
+		while let Some(Route {
 			request,
 			response,
-		})) = stream.next().await
+		}) = stream.next().await
 		{
 			let (_, method, param) = request;
 			let mut params = param.other;
@@ -67,16 +67,18 @@ pub(super) fn mock(route_rx: Receiver<Option<Route>>) {
 					}
 					_ => unreachable!(),
 				},
-				Method::Update | Method::Merge | Method::Patch => match &params[..] {
-					[Value::Thing(..)] | [Value::Thing(..), _] => {
-						Ok(DbResponse::Other(to_value(User::default()).unwrap()))
+				Method::Upsert | Method::Update | Method::Merge | Method::Patch => {
+					match &params[..] {
+						[Value::Thing(..)] | [Value::Thing(..), _] => {
+							Ok(DbResponse::Other(to_value(User::default()).unwrap()))
+						}
+						[Value::Table(..) | Value::Array(..) | Value::Range(..)]
+						| [Value::Table(..) | Value::Array(..) | Value::Range(..), _] => {
+							Ok(DbResponse::Other(Value::Array(Default::default())))
+						}
+						_ => unreachable!(),
 					}
-					[Value::Table(..) | Value::Array(..) | Value::Range(..)]
-					| [Value::Table(..) | Value::Array(..) | Value::Range(..), _] => {
-						Ok(DbResponse::Other(Value::Array(Default::default())))
-					}
-					_ => unreachable!(),
-				},
+				}
 				Method::Insert => match &params[..] {
 					[Value::Table(..), Value::Array(..)] => {
 						Ok(DbResponse::Other(Value::Array(Default::default())))

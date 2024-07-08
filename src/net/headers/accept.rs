@@ -36,8 +36,10 @@ impl Header for Accept {
 		I: Iterator<Item = &'i HeaderValue>,
 	{
 		let value = values.next().ok_or_else(headers::Error::invalid)?;
+		let parts: Vec<&str> =
+			value.to_str().map_err(|_| headers::Error::invalid())?.split(';').collect();
 
-		match value.to_str().map_err(|_| headers::Error::invalid())? {
+		match parts[0] {
 			"text/plain" => Ok(Accept::TextPlain),
 			"application/json" => Ok(Accept::ApplicationJson),
 			"application/cbor" => Ok(Accept::ApplicationCbor),

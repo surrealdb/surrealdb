@@ -1,14 +1,13 @@
 use crate::ctx::Context;
-use crate::dbs::{Options, Transaction};
+use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::iam::{Action, ResourceKind};
+use crate::sql::fmt::{is_pretty, pretty_indent};
 use crate::sql::statements::info::InfoStructure;
 use crate::sql::statements::DefineTableStatement;
-use crate::sql::{
-	fmt::is_pretty, fmt::pretty_indent, Base, Ident, Idiom, Kind, Permissions, Strand, Value,
-};
-use crate::sql::{Object, Part};
+use crate::sql::Part;
+use crate::sql::{Base, Ident, Idiom, Kind, Permissions, Strand, Value};
 use crate::sql::{Relation, TableType};
 use derive::Store;
 use revision::revisioned;
@@ -39,31 +38,33 @@ impl DefineFieldStatement {
 	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
-		_ctx: &Context<'_>,
+		ctx: &Context<'_>,
 		opt: &Options,
-		txn: &Transaction,
 		_doc: Option<&CursorDoc<'_>>,
 	) -> Result<Value, Error> {
 		// Allowed to run?
 		opt.is_allowed(Action::Edit, ResourceKind::Field, &Base::Db)?;
 		// Claim transaction
-		let mut run = txn.lock().await;
+		let mut run = ctx.tx_lock().await;
 		// Clear the cache
 		run.clear_cache();
 		// Check if field already exists
 		let fd = self.name.to_string();
-		if self.if_not_exists && run.get_tb_field(opt.ns(), opt.db(), &self.what, &fd).await.is_ok()
-		{
-			return Err(Error::FdAlreadyExists {
-				value: fd,
-			});
+		if run.get_tb_field(opt.ns()?, opt.db()?, &self.what, &fd).await.is_ok() {
+			if self.if_not_exists {
+				return Ok(Value::None);
+			} else {
+				return Err(Error::FdAlreadyExists {
+					value: fd,
+				});
+			}
 		}
 		// Process the statement
-		run.add_ns(opt.ns(), opt.strict).await?;
-		run.add_db(opt.ns(), opt.db(), opt.strict).await?;
+		run.add_ns(opt.ns()?, opt.strict).await?;
+		run.add_db(opt.ns()?, opt.db()?, opt.strict).await?;
 
-		let tb = run.add_tb(opt.ns(), opt.db(), &self.what, opt.strict).await?;
-		let key = crate::key::table::fd::new(opt.ns(), opt.db(), &self.what, &fd);
+		let tb = run.add_tb(opt.ns()?, opt.db()?, &self.what, opt.strict).await?;
+		let key = crate::key::table::fd::new(opt.ns()?, opt.db()?, &self.what, &fd);
 		run.set(
 			key,
 			DefineFieldStatement {
@@ -74,7 +75,7 @@ impl DefineFieldStatement {
 		.await?;
 
 		// find existing field definitions.
-		let fields = run.all_tb_fields(opt.ns(), opt.db(), &self.what).await.ok();
+		let fields = run.all_tb_fields(opt.ns()?, opt.db()?, &self.what).await.ok();
 
 		// Process possible recursive_definitions.
 		if let Some(mut cur_kind) = self.kind.as_ref().and_then(|x| x.inner_kind()) {
@@ -84,9 +85,9 @@ impl DefineFieldStatement {
 				name.0.push(Part::All);
 
 				let fd = name.to_string();
-				let key = crate::key::table::fd::new(opt.ns(), opt.db(), &self.what, &fd);
-				run.add_ns(opt.ns(), opt.strict).await?;
-				run.add_db(opt.ns(), opt.db(), opt.strict).await?;
+				let key = crate::key::table::fd::new(opt.ns()?, opt.db()?, &self.what, &fd);
+				run.add_ns(opt.ns()?, opt.strict).await?;
+				run.add_db(opt.ns()?, opt.db()?, opt.strict).await?;
 
 				// merge the new definition with possible existing definitions.
 				let statement = if let Some(existing) =
@@ -153,14 +154,14 @@ impl DefineFieldStatement {
 			_ => None,
 		};
 		if let Some(tb) = new_tb {
-			let key = crate::key::database::tb::new(opt.ns(), opt.db(), &self.what);
+			let key = crate::key::database::tb::new(opt.ns()?, opt.db()?, &self.what);
 			run.set(key, &tb).await?;
-			let key = crate::key::table::ft::prefix(opt.ns(), opt.db(), &self.what);
+			let key = crate::key::table::ft::prefix(opt.ns()?, opt.db()?, &self.what);
 			run.clr(key).await?;
 		}
 
 		// Clear the cache
-		let key = crate::key::table::fd::prefix(opt.ns(), opt.db(), &self.what);
+		let key = crate::key::table::fd::prefix(opt.ns()?, opt.db()?, &self.what);
 		run.clr(key).await?;
 		// Ok all good
 		Ok(Value::None)
@@ -208,51 +209,17 @@ impl Display for DefineFieldStatement {
 
 impl InfoStructure for DefineFieldStatement {
 	fn structure(self) -> Value {
-		let Self {
-			name,
-			what,
-			flex,
-			kind,
-			readonly,
-			value,
-			assert,
-			default,
-			permissions,
-			comment,
-			..
-		} = self;
-		let mut acc = Object::default();
-
-		acc.insert("name".to_string(), name.structure());
-
-		acc.insert("what".to_string(), what.structure());
-
-		acc.insert("flex".to_string(), flex.into());
-
-		if let Some(kind) = kind {
-			acc.insert("kind".to_string(), kind.structure());
-		}
-
-		acc.insert("readonly".to_string(), readonly.into());
-
-		if let Some(value) = value {
-			acc.insert("value".to_string(), value.structure());
-		}
-
-		if let Some(assert) = assert {
-			acc.insert("assert".to_string(), assert.structure());
-		}
-
-		if let Some(default) = default {
-			acc.insert("default".to_string(), default.structure());
-		}
-
-		acc.insert("permissions".to_string(), permissions.structure());
-
-		if let Some(comment) = comment {
-			acc.insert("comment".to_string(), comment.into());
-		}
-
-		Value::Object(acc)
+		Value::from(map! {
+			"name".to_string() => self.name.structure(),
+			"what".to_string() => self.what.structure(),
+			"flex".to_string() => self.flex.into(),
+			"kind".to_string(), if let Some(v) = self.kind => v.structure(),
+			"value".to_string(), if let Some(v) = self.value => v.structure(),
+			"assert".to_string(), if let Some(v) = self.assert => v.structure(),
+			"default".to_string(), if let Some(v) = self.default => v.structure(),
+			"readonly".to_string() => self.readonly.into(),
+			"permissions".to_string() => self.permissions.structure(),
+			"comment".to_string(), if let Some(v) = self.comment => v.into(),
+		})
 	}
 }

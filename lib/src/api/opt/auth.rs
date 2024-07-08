@@ -63,24 +63,24 @@ pub struct Database<'a> {
 
 impl Credentials<Signin, Jwt> for Database<'_> {}
 
-/// Credentials for the scope user
+/// Credentials for the record user
 #[derive(Debug, Serialize)]
-pub struct Scope<'a, P> {
+pub struct Record<'a, P> {
 	/// The namespace the user has access to
 	#[serde(rename = "ns")]
 	pub namespace: &'a str,
 	/// The database the user has access to
 	#[serde(rename = "db")]
 	pub database: &'a str,
-	/// The scope to use for signin and signup
-	#[serde(rename = "sc")]
-	pub scope: &'a str,
+	/// The access method to use for signin and signup
+	#[serde(rename = "ac")]
+	pub access: &'a str,
 	/// The additional params to use
 	#[serde(flatten)]
 	pub params: P,
 }
 
-impl<T, P> Credentials<T, Jwt> for Scope<'_, P> where P: Serialize {}
+impl<T, P> Credentials<T, Jwt> for Record<'_, P> where P: Serialize {}
 
 /// A JSON Web Token for authenticating with the server.
 ///

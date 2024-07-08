@@ -46,7 +46,7 @@ macro_rules! impl_module_def {
 	};
 	($pkg: ident, $path: literal, $($name: literal => $action: tt $($wrapper: ident)?),*) => {
 		impl js::module::ModuleDef for Package {
-			fn declare(decls: &mut js::module::Declarations) -> js::Result<()> {
+			fn declare(decls: &js::module::Declarations) -> js::Result<()> {
 				decls.declare("default")?;
 				$(
 					decls.declare($name)?;
@@ -54,7 +54,7 @@ macro_rules! impl_module_def {
 				Ok(())
 			}
 
-			fn evaluate<'js>(ctx: &js::Ctx<'js>, exports: &mut js::module::Exports<'js>) -> js::Result<()> {
+			fn evaluate<'js>(ctx: &js::Ctx<'js>, exports: &js::module::Exports<'js>) -> js::Result<()> {
 				let default = js::Object::new(ctx.clone())?;
 				$(
 					let value = crate::fnc::script::modules::impl_module_def!(ctx, $path, $name, $action, $($wrapper)?);

@@ -25,6 +25,7 @@ async fn read_person(client: &Client, id: i32) -> Person {
 	let response = client.get(format!("/person/{}", id)).dispatch().await;
 	assert_eq!(response.status(), Status::Ok);
 	let body = response.into_string().await.unwrap();
+	println!("{body}");
 	serde_json::from_str(&body).unwrap()
 }
 

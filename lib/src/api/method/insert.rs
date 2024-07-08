@@ -137,10 +137,10 @@ where
 					}
 					false => {
 						let mut table = Table::default();
-						table.0 = record_id.tb.clone();
+						table.0.clone_from(&record_id.tb);
 						content.resource = Ok(table.into());
 						let mut ident = Ident::default();
-						ident.0 = "id".to_owned();
+						"id".clone_into(&mut ident.0);
 						let id = Part::Field(ident);
 						data.put(&[id], record_id.into());
 						content.content = data;

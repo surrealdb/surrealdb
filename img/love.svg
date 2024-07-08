@@ -1,17 +1,3 @@
-<?xml version="1.0" encoding="utf-8"?>
-<!-- Generator: Adobe Illustrator 25.4.1, SVG Export Plug-In . SVG Version: 6.00 Build 0)  -->
-<svg version="1.1" id="SurrealDB" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" x="0px" y="0px"
-	 viewBox="0 0 425 388.9" style="enable-background:new 0 0 425 388.9;" xml:space="preserve">
-<style type="text/css">
-	.st0{fill-rule:evenodd;clip-rule:evenodd;fill:#FFFFFF;}
-	.st1{fill-rule:evenodd;clip-rule:evenodd;fill:url(#SVGID_1_);}
-</style>
-<path class="st0" d="M308.1,0c-36.1,0-72.2,17-95.6,44.6C189.1,17,153,0,116.9,0C51,0,0,51,0,116.9c0,80.8,72.2,146.6,182.8,244.4
-	l29.8,27.6l29.8-27.6C350.6,261.4,425,195.5,425,116.9C425,51,374,0,308.1,0z"/>
-<linearGradient id="SVGID_1_" gradientUnits="userSpaceOnUse" x1="128.6721" y1="-25.5468" x2="329.079" y2="321.5681">
-	<stop  offset="0" style="stop-color:#FF00A0"/>
-	<stop  offset="1" style="stop-color:#9600FF"/>
-</linearGradient>
-<path class="st1" d="M308.1,0c-36.1,0-72.2,17-95.6,44.6C189.1,17,153,0,116.9,0C51,0,0,51,0,116.9c0,80.8,72.2,146.6,182.8,244.4
-	l29.8,27.6l29.8-27.6C350.6,261.4,425,195.5,425,116.9C425,51,374,0,308.1,0z"/>
+<svg width="840" height="840" viewBox="0 0 840 840" fill="none" xmlns="http://www.w3.org/2000/svg">
+<path fill-rule="evenodd" clip-rule="evenodd" d="M586.05 82.665C537.121 82.665 488.246 100.625 449.805 131.29C436.744 141.71 430.213 146.92 425.869 148.119C420.911 149.488 419.118 149.488 414.16 148.118C409.816 146.919 403.281 141.704 390.211 131.275C351.791 100.618 302.871 82.665 253.95 82.665C139.56 82.665 51 171.225 51 285.615C51 425.923 176.372 540.225 368.428 709.965L396.246 735.752C404.682 743.572 408.9 747.482 413.695 748.96C417.917 750.262 422.434 750.262 426.656 748.96C431.452 747.482 435.67 743.572 444.106 735.752L471.924 709.965C659.85 536.623 789 422.145 789 285.703C789 171.225 700.44 82.665 586.05 82.665Z" fill="#FF00A0"/>
 </svg>

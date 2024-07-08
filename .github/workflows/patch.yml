@@ -40,6 +40,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           ref: ${{ inputs.git-tag }}
+          token: ${{ secrets.RELEASE_PLZ_TOKEN }}
 
       - name: Install a TOML parser
         run: |

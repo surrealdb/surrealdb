@@ -65,10 +65,10 @@ async fn clear_transaction_cache_field() -> Result<(), Error> {
 	let sql = "
 		DEFINE FIELD test ON person TYPE option<string> VALUE 'test';
 		BEGIN;
-		UPDATE person:one CONTENT { x: 0 };
+		UPSERT person:one CONTENT { x: 0 };
 		SELECT * FROM person;
 		REMOVE FIELD test ON person;
-		UPDATE person:two CONTENT { x: 0 };
+		UPSERT person:two CONTENT { x: 0 };
 		SELECT * FROM person;
 		COMMIT;
 	";

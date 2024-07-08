@@ -1,5 +1,5 @@
 use crate::ctx::Context;
-use crate::dbs::{Options, Transaction};
+use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::sql::{Idiom, Kind, Value};
@@ -39,11 +39,10 @@ impl Cast {
 		stk: &mut Stk,
 		ctx: &Context<'_>,
 		opt: &Options,
-		txn: &Transaction,
 		doc: Option<&CursorDoc<'_>>,
 	) -> Result<Value, Error> {
 		// Compute the value to be cast and convert it
-		stk.run(|stk| self.1.compute(stk, ctx, opt, txn, doc)).await?.convert_to(&self.0)
+		stk.run(|stk| self.1.compute(stk, ctx, opt, doc)).await?.convert_to(&self.0)
 	}
 }
 

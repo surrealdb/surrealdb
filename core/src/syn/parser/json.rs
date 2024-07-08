@@ -6,34 +6,55 @@ use crate::{
 	sql::{Array, Ident, Object, Strand, Value},
 	syn::{
 		parser::mac::expected,
-		token::{t, Span, TokenKind},
+		token::{t, QouteKind, Span, TokenKind},
 	},
 };
 
-use super::{ParseResult, Parser};
+use super::{mac::unexpected, ParseResult, Parser};
 
 impl Parser<'_> {
 	pub async fn parse_json(&mut self, ctx: &mut Stk) -> ParseResult<Value> {
-		let token = self.next();
+		let token = self.peek();
 		match token.kind {
-			t!("NULL") => Ok(Value::Null),
-			t!("true") => Ok(Value::Bool(true)),
-			t!("false") => Ok(Value::Bool(false)),
-			t!("{") => self.parse_json_object(ctx, token.span).await.map(Value::Object),
-			t!("[") => self.parse_json_array(ctx, token.span).await.map(Value::Array),
-			TokenKind::Duration => self.token_value(token).map(Value::Duration),
-			TokenKind::DateTime => self.token_value(token).map(Value::Datetime),
-			TokenKind::Strand => {
+			t!("NULL") => {
+				self.pop_peek();
+				Ok(Value::Null)
+			}
+			t!("true") => {
+				self.pop_peek();
+				Ok(Value::Bool(true))
+			}
+			t!("false") => {
+				self.pop_peek();
+				Ok(Value::Bool(false))
+			}
+			t!("{") => {
+				self.pop_peek();
+				self.parse_json_object(ctx, token.span).await.map(Value::Object)
+			}
+			t!("[") => {
+				self.pop_peek();
+				self.parse_json_array(ctx, token.span).await.map(Value::Array)
+			}
+			TokenKind::Qoute(QouteKind::Plain | QouteKind::PlainDouble) => {
+				let strand: Strand = self.next_token_value()?;
 				if self.legacy_strands {
-					self.parse_legacy_strand(ctx).await
-				} else {
-					Ok(Value::Strand(Strand(self.lexer.string.take().unwrap())))
+					if let Some(x) = self.reparse_legacy_strand(ctx, &strand.0).await {
+						return Ok(x);
+					}
+				}
+				Ok(Value::Strand(strand))
+			}
+			TokenKind::Digits | TokenKind::Number(_) => {
+				let peek = self.glue()?;
+				match peek.kind {
+					TokenKind::Duration => Ok(Value::Duration(self.next_token_value()?)),
+					TokenKind::Number(_) => Ok(Value::Number(self.next_token_value()?)),
+					x => unexpected!(self, x, "a number"),
 				}
 			}
-			TokenKind::Number(_) => self.token_value(token).map(Value::Number),
-			TokenKind::Uuid => self.token_value(token).map(Value::Uuid),
 			_ => {
-				let ident = self.token_value::<Ident>(token)?.0;
+				let ident = self.next_token_value::<Ident>()?.0;
 				self.parse_thing_from_ident(ctx, ident).await.map(Value::Thing)
 			}
 		}

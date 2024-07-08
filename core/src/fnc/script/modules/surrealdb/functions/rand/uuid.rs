@@ -7,13 +7,13 @@ use crate::sql::value::Value;
 pub struct Package;
 
 impl js::module::ModuleDef for Package {
-	fn declare(decls: &mut js::module::Declarations) -> js::Result<()> {
+	fn declare(decls: &js::module::Declarations) -> js::Result<()> {
 		decls.declare("default")?;
 		decls.declare("v4")?;
 		decls.declare("v7")?;
 		Ok(())
 	}
-	fn evaluate<'js>(ctx: &js::Ctx<'js>, exports: &mut js::module::Exports<'js>) -> js::Result<()> {
+	fn evaluate<'js>(ctx: &js::Ctx<'js>, exports: &js::module::Exports<'js>) -> js::Result<()> {
 		let default = js::Function::new(ctx.clone(), |ctx: Ctx<'js>, args: Rest<Value>| {
 			run(ctx, "rand::uuid", args.0)
 		})?

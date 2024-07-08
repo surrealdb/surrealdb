@@ -31,7 +31,7 @@ pub(crate) struct Route {
 /// Message router
 #[derive(Debug)]
 pub struct Router {
-	pub(crate) sender: Sender<Option<Route>>,
+	pub(crate) sender: Sender<Route>,
 	pub(crate) last_id: AtomicI64,
 	pub(crate) features: HashSet<ExtraFeatures>,
 }
@@ -39,12 +39,6 @@ pub struct Router {
 impl Router {
 	pub(crate) fn next_id(&self) -> i64 {
 		self.last_id.fetch_add(1, Ordering::SeqCst)
-	}
-}
-
-impl Drop for Router {
-	fn drop(&mut self) {
-		let _res = self.sender.send(None);
 	}
 }
 
@@ -92,6 +86,8 @@ pub enum Method {
 	Unset,
 	/// Performs an update operation
 	Update,
+	/// Performs an upsert operation
+	Upsert,
 	/// Selects a namespace and database to use
 	Use,
 	/// Queries the version of the server

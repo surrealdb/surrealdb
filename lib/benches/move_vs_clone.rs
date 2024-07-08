@@ -3,14 +3,14 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
-const ITERATIONS: usize = 1_000_000;
+const ITERATIONS: u32 = 1_000_000;
 
 fn bench_move() {
 	let mut value = Arc::new(AtomicU32::new(0));
 	for _ in 0..ITERATIONS {
 		value = do_something_with_move(value);
 	}
-	assert_eq!(value.load(Ordering::Relaxed), ITERATIONS as u32);
+	assert_eq!(value.load(Ordering::Relaxed), ITERATIONS);
 }
 
 fn do_something_with_move(value: Arc<AtomicU32>) -> Arc<AtomicU32> {
@@ -23,7 +23,7 @@ fn bench_clone() {
 	for _ in 0..ITERATIONS {
 		do_something_with_clone(value.clone());
 	}
-	assert_eq!(value.load(Ordering::Relaxed), ITERATIONS as u32);
+	assert_eq!(value.load(Ordering::Relaxed), ITERATIONS);
 }
 
 fn do_something_with_clone(value: Arc<AtomicU32>) {
@@ -32,7 +32,7 @@ fn do_something_with_clone(value: Arc<AtomicU32>) {
 
 fn bench_move_vs_clone(c: &mut Criterion) {
 	let mut group = c.benchmark_group("move_vs_clone");
-	group.throughput(Throughput::Elements(1));
+	group.throughput(Throughput::Elements(ITERATIONS as u64));
 	group.sample_size(10);
 	group.measurement_time(Duration::from_secs(10));
 

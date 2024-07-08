@@ -66,6 +66,7 @@ pub struct SerializeSelectStatement {
 	timeout: Option<Timeout>,
 	parallel: Option<bool>,
 	explain: Option<Explain>,
+	tempfiles: Option<bool>,
 }
 
 impl serde::ser::SerializeStruct for SerializeSelectStatement {
@@ -122,6 +123,9 @@ impl serde::ser::SerializeStruct for SerializeSelectStatement {
 			"parallel" => {
 				self.parallel = Some(value.serialize(ser::primitive::bool::Serializer.wrap())?);
 			}
+			"tempfiles" => {
+				self.tempfiles = Some(value.serialize(ser::primitive::bool::Serializer.wrap())?);
+			}
 			"explain" => {
 				self.explain = value.serialize(ser::explain::opt::Serializer.wrap())?;
 			}
@@ -133,14 +137,15 @@ impl serde::ser::SerializeStruct for SerializeSelectStatement {
 	}
 
 	fn end(self) -> Result<Self::Ok, Error> {
-		match (self.expr, self.what, self.parallel) {
-			(Some(expr), Some(what), Some(parallel)) => Ok(SelectStatement {
+		match (self.expr, self.what, self.parallel, self.tempfiles) {
+			(Some(expr), Some(what), Some(parallel), Some(tempfiles)) => Ok(SelectStatement {
 				expr,
 				omit: self.omit,
 				only: self.only.is_some_and(|v| v),
 				what,
 				with: self.with,
 				parallel,
+				tempfiles,
 				explain: self.explain,
 				cond: self.cond,
 				split: self.split,

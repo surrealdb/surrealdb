@@ -1,5 +1,5 @@
 use crate::ctx::Context;
-use crate::dbs::{Options, Transaction};
+use crate::dbs::Options;
 use crate::err::Error;
 use crate::sql::number::Number;
 use crate::sql::part::Part;
@@ -13,22 +13,21 @@ impl Value {
 		stk: &mut Stk,
 		ctx: &Context<'_>,
 		opt: &Options,
-		txn: &Transaction,
 		path: &[Part],
 		val: Value,
 	) -> Result<(), Error> {
-		match self.get(stk, ctx, opt, txn, None, path).await? {
+		match self.get(stk, ctx, opt, None, path).await? {
 			Value::Number(v) => match val {
-				Value::Number(x) => self.set(stk, ctx, opt, txn, path, Value::from(v - x)).await,
+				Value::Number(x) => self.set(stk, ctx, opt, path, Value::from(v - x)).await,
 				_ => Ok(()),
 			},
 			Value::Array(v) => match val {
-				Value::Array(x) => self.set(stk, ctx, opt, txn, path, Value::from(v - x)).await,
-				x => self.set(stk, ctx, opt, txn, path, Value::from(v - x)).await,
+				Value::Array(x) => self.set(stk, ctx, opt, path, Value::from(v - x)).await,
+				x => self.set(stk, ctx, opt, path, Value::from(v - x)).await,
 			},
 			Value::None => match val {
 				Value::Number(x) => {
-					self.set(stk, ctx, opt, txn, path, Value::from(Number::from(0) - x)).await
+					self.set(stk, ctx, opt, path, Value::from(Number::from(0) - x)).await
 				}
 				_ => Ok(()),
 			},
@@ -47,13 +46,13 @@ mod tests {
 
 	#[tokio::test]
 	async fn decrement_none() {
-		let (ctx, opt, txn) = mock().await;
+		let (ctx, opt) = mock().await;
 		let idi = Idiom::parse("other");
 		let mut val = Value::parse("{ test: 100 }");
 		let res = Value::parse("{ test: 100, other: -10 }");
 		let mut stack = reblessive::TreeStack::new();
 		stack
-			.enter(|stk| val.decrement(stk, &ctx, &opt, &txn, &idi, Value::from(10)))
+			.enter(|stk| val.decrement(stk, &ctx, &opt, &idi, Value::from(10)))
 			.finish()
 			.await
 			.unwrap();
@@ -62,13 +61,13 @@ mod tests {
 
 	#[tokio::test]
 	async fn decrement_number() {
-		let (ctx, opt, txn) = mock().await;
+		let (ctx, opt) = mock().await;
 		let idi = Idiom::parse("test");
 		let mut val = Value::parse("{ test: 100 }");
 		let res = Value::parse("{ test: 90 }");
 		let mut stack = reblessive::TreeStack::new();
 		stack
-			.enter(|stk| val.decrement(stk, &ctx, &opt, &txn, &idi, Value::from(10)))
+			.enter(|stk| val.decrement(stk, &ctx, &opt, &idi, Value::from(10)))
 			.finish()
 			.await
 			.unwrap();
@@ -77,13 +76,13 @@ mod tests {
 
 	#[tokio::test]
 	async fn decrement_array_number() {
-		let (ctx, opt, txn) = mock().await;
+		let (ctx, opt) = mock().await;
 		let idi = Idiom::parse("test[1]");
 		let mut val = Value::parse("{ test: [100, 200, 300] }");
 		let res = Value::parse("{ test: [100, 190, 300] }");
 		let mut stack = reblessive::TreeStack::new();
 		stack
-			.enter(|stk| val.decrement(stk, &ctx, &opt, &txn, &idi, Value::from(10)))
+			.enter(|stk| val.decrement(stk, &ctx, &opt, &idi, Value::from(10)))
 			.finish()
 			.await
 			.unwrap();
@@ -92,13 +91,13 @@ mod tests {
 
 	#[tokio::test]
 	async fn decrement_array_value() {
-		let (ctx, opt, txn) = mock().await;
+		let (ctx, opt) = mock().await;
 		let idi = Idiom::parse("test");
 		let mut val = Value::parse("{ test: [100, 200, 300] }");
 		let res = Value::parse("{ test: [100, 300] }");
 		let mut stack = reblessive::TreeStack::new();
 		stack
-			.enter(|stk| val.decrement(stk, &ctx, &opt, &txn, &idi, Value::from(200)))
+			.enter(|stk| val.decrement(stk, &ctx, &opt, &idi, Value::from(200)))
 			.finish()
 			.await
 			.unwrap();
@@ -107,13 +106,13 @@ mod tests {
 
 	#[tokio::test]
 	async fn decrement_array_array() {
-		let (ctx, opt, txn) = mock().await;
+		let (ctx, opt) = mock().await;
 		let idi = Idiom::parse("test");
 		let mut val = Value::parse("{ test: [100, 200, 300] }");
 		let res = Value::parse("{ test: [200] }");
 		let mut stack = reblessive::TreeStack::new();
 		stack
-			.enter(|stk| val.decrement(stk, &ctx, &opt, &txn, &idi, Value::parse("[100,300]")))
+			.enter(|stk| val.decrement(stk, &ctx, &opt, &idi, Value::parse("[100,300]")))
 			.finish()
 			.await
 			.unwrap();

@@ -1,5 +1,5 @@
 use crate::ctx::Context;
-use crate::dbs::{Options, Transaction};
+use crate::dbs::Options;
 use crate::err::Error;
 use crate::iam::{Action, ResourceKind};
 use crate::sql::{Base, Ident, Value};
@@ -21,21 +21,17 @@ pub struct RemoveModelStatement {
 
 impl RemoveModelStatement {
 	/// Process this type returning a computed simple Value
-	pub(crate) async fn compute(
-		&self,
-		_ctx: &Context<'_>,
-		opt: &Options,
-		txn: &Transaction,
-	) -> Result<Value, Error> {
+	pub(crate) async fn compute(&self, ctx: &Context<'_>, opt: &Options) -> Result<Value, Error> {
 		let future = async {
 			// Allowed to run?
 			opt.is_allowed(Action::Edit, ResourceKind::Model, &Base::Db)?;
 			// Claim transaction
-			let mut run = txn.lock().await;
+			let mut run = ctx.tx_lock().await;
 			// Clear the cache
 			run.clear_cache();
 			// Delete the definition
-			let key = crate::key::database::ml::new(opt.ns(), opt.db(), &self.name, &self.version);
+			let key =
+				crate::key::database::ml::new(opt.ns()?, opt.db()?, &self.name, &self.version);
 			run.del(key).await?;
 			// Remove the model file
 			// TODO

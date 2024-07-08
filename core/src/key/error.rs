@@ -8,6 +8,8 @@ pub enum KeyCategory {
 	Unknown,
 	/// crate::key::root::all                /
 	Root,
+	/// crate::key::root::ac                 /!ac{ac}
+	Access,
 	/// crate::key::root::hb                 /!hb{ts}/{nd}
 	Heartbeat,
 	/// crate::key::root::nd                 /!nd{nd}
@@ -32,13 +34,15 @@ pub enum KeyCategory {
 	DatabaseIdentifier,
 	/// crate::key::namespace::lg            /*{ns}!lg{lg}
 	DatabaseLogAlias,
-	/// crate::key::namespace::tk            /*{ns}!tk{tk}
-	NamespaceToken,
+	/// crate::key::namespace::ac            /*{ns}!ac{ac}
+	NamespaceAccess,
 	/// crate::key::namespace::us            /*{ns}!us{us}
 	NamespaceUser,
 	///
 	/// crate::key::database::all            /*{ns}*{db}
 	DatabaseRoot,
+	/// crate::key::database::ac             /*{ns}*{db}!ac{ac}
+	DatabaseAccess,
 	/// crate::key::database::az             /*{ns}*{db}!az{az}
 	DatabaseAnalyzer,
 	/// crate::key::database::fc             /*{ns}*{db}!fn{fc}
@@ -49,25 +53,16 @@ pub enum KeyCategory {
 	DatabaseModel,
 	/// crate::key::database::pa             /*{ns}*{db}!pa{pa}
 	DatabaseParameter,
-	/// crate::key::database::sc             /*{ns}*{db}!sc{sc}
-	DatabaseScope,
 	/// crate::key::database::tb             /*{ns}*{db}!tb{tb}
 	DatabaseTable,
 	/// crate::key::database::ti             /+{ns id}*{db id}!ti
 	DatabaseTableIdentifier,
-	/// crate::key::database::tk             /*{ns}*{db}!tk{tk}
-	DatabaseToken,
 	/// crate::key::database::ts             /*{ns}*{db}!ts{ts}
 	DatabaseTimestamp,
 	/// crate::key::database::us             /*{ns}*{db}!us{us}
 	DatabaseUser,
 	/// crate::key::database::vs             /*{ns}*{db}!vs
 	DatabaseVersionstamp,
-	///
-	/// crate::key::scope::all               /*{ns}*{db}±{sc}
-	ScopeRoot,
-	/// crate::key::scope::tk                /*{ns}*{db}±{sc}!tk{tk}
-	ScopeToken,
 	///
 	/// crate::key::table::all               /*{ns}*{db}*{tb}
 	TableRoot,
@@ -124,6 +119,7 @@ impl Display for KeyCategory {
 		let name = match self {
 			KeyCategory::Unknown => "Unknown",
 			KeyCategory::Root => "Root",
+			KeyCategory::Access => "Access",
 			KeyCategory::Heartbeat => "Heartbeat",
 			KeyCategory::Node => "Node",
 			KeyCategory::NamespaceIdentifier => "NamespaceIdentifier",
@@ -135,23 +131,20 @@ impl Display for KeyCategory {
 			KeyCategory::DatabaseAlias => "DatabaseAlias",
 			KeyCategory::DatabaseIdentifier => "DatabaseIdentifier",
 			KeyCategory::DatabaseLogAlias => "DatabaseLogAlias",
-			KeyCategory::NamespaceToken => "NamespaceToken",
+			KeyCategory::NamespaceAccess => "NamespaceAccess",
 			KeyCategory::NamespaceUser => "NamespaceUser",
 			KeyCategory::DatabaseRoot => "DatabaseRoot",
+			KeyCategory::DatabaseAccess => "DatabaseAccess",
 			KeyCategory::DatabaseAnalyzer => "DatabaseAnalyzer",
 			KeyCategory::DatabaseFunction => "DatabaseFunction",
 			KeyCategory::DatabaseLog => "DatabaseLog",
 			KeyCategory::DatabaseModel => "DatabaseModel",
 			KeyCategory::DatabaseParameter => "DatabaseParameter",
-			KeyCategory::DatabaseScope => "DatabaseScope",
 			KeyCategory::DatabaseTable => "DatabaseTable",
 			KeyCategory::DatabaseTableIdentifier => "DatabaseTableIdentifier",
-			KeyCategory::DatabaseToken => "DatabaseToken",
 			KeyCategory::DatabaseTimestamp => "DatabaseTimestamp",
 			KeyCategory::DatabaseUser => "DatabaseUser",
 			KeyCategory::DatabaseVersionstamp => "DatabaseVersionstamp",
-			KeyCategory::ScopeRoot => "ScopeRoot",
-			KeyCategory::ScopeToken => "ScopeToken",
 			KeyCategory::TableRoot => "TableRoot",
 			KeyCategory::TableEvent => "TableEvent",
 			KeyCategory::TableField => "TableField",

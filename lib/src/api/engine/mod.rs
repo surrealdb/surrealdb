@@ -5,7 +5,6 @@ pub mod any;
 	feature = "kv-mem",
 	feature = "kv-tikv",
 	feature = "kv-rocksdb",
-	feature = "kv-speedb",
 	feature = "kv-fdb",
 	feature = "kv-indxdb",
 	feature = "kv-surrealkv",
@@ -21,6 +20,7 @@ use crate::sql::statements::DeleteStatement;
 use crate::sql::statements::InsertStatement;
 use crate::sql::statements::SelectStatement;
 use crate::sql::statements::UpdateStatement;
+use crate::sql::statements::UpsertStatement;
 use crate::sql::Data;
 use crate::sql::Field;
 use crate::sql::Output;
@@ -78,6 +78,20 @@ fn create_statement(params: &mut [Value]) -> CreateStatement {
 }
 
 #[allow(dead_code)] // used by the the embedded database and `http`
+fn upsert_statement(params: &mut [Value]) -> (bool, UpsertStatement) {
+	let (one, what, data) = split_params(params);
+	let data = match data {
+		Value::None | Value::Null => None,
+		value => Some(Data::ContentExpression(value)),
+	};
+	let mut stmt = UpsertStatement::default();
+	stmt.what = what;
+	stmt.data = data;
+	stmt.output = Some(Output::After);
+	(one, stmt)
+}
+
+#[allow(dead_code)] // used by the the embedded database and `http`
 fn update_statement(params: &mut [Value]) -> (bool, UpdateStatement) {
 	let (one, what, data) = split_params(params);
 	let data = match data {
@@ -99,7 +113,11 @@ fn insert_statement(params: &mut [Value]) -> (bool, InsertStatement) {
 	};
 	let one = !data.is_array();
 	let mut stmt = InsertStatement::default();
-	stmt.into = what;
+	stmt.into = match what {
+		Value::None => None,
+		Value::Null => None,
+		what => Some(what),
+	};
 	stmt.data = Data::SingleExpression(data);
 	stmt.output = Some(Output::After);
 	(one, stmt)

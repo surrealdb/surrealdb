@@ -4,8 +4,8 @@ use crate::idx::trees::store::{NodeId, StoreGeneration, StoredNode, TreeNode, Tr
 use crate::kvs::{Key, Transaction};
 use dashmap::mapref::entry::Entry;
 use dashmap::DashMap;
+use hashbrown::{HashMap, HashSet};
 use std::cmp::Ordering;
-use std::collections::{HashMap, HashSet};
 use std::fmt::{Debug, Display};
 use std::sync::Arc;
 

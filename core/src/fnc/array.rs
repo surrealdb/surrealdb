@@ -12,6 +12,8 @@ use crate::sql::array::Union;
 use crate::sql::array::Uniq;
 use crate::sql::value::Value;
 
+use rand::prelude::SliceRandom;
+
 pub fn add((mut array, value): (Array, Value)) -> Result<Value, Error> {
 	match value {
 		Value::Array(value) => {
@@ -97,7 +99,8 @@ pub fn boolean_xor((lh, rh): (Array, Array)) -> Result<Value, Error> {
 }
 
 pub fn clump((array, clump_size): (Array, i64)) -> Result<Value, Error> {
-	Ok(array.clump(clump_size as usize).into())
+	let clump_size = clump_size.max(0) as usize;
+	Ok(array.clump(clump_size)?.into())
 }
 
 pub fn combine((array, other): (Array, Array)) -> Result<Value, Error> {
@@ -328,6 +331,12 @@ pub fn remove((mut array, mut index): (Array, i64)) -> Result<Value, Error> {
 
 pub fn reverse((mut array,): (Array,)) -> Result<Value, Error> {
 	array.reverse();
+	Ok(array.into())
+}
+
+pub fn shuffle((mut array,): (Array,)) -> Result<Value, Error> {
+	let mut rng = rand::thread_rng();
+	array.0.shuffle(&mut rng);
 	Ok(array.into())
 }
 

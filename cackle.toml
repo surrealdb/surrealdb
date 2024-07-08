@@ -1309,3 +1309,47 @@ allow_apis = [
 
 [pkg.phf_macros]
 allow_proc_macro = true
+
+[pkg.rawpointer]
+allow_unsafe = true
+
+[pkg.matrixmultiply]
+allow_unsafe = true
+
+[pkg.approx]
+allow_unsafe = true
+
+[pkg.num-complex]
+allow_unsafe = true
+
+[pkg.ndarray]
+allow_unsafe = true
+
+[pkg.ndarray-stats]
+allow_unsafe = true
+
+[pkg.noisy_float]
+allow_unsafe = true
+
+[pkg.linfa-linalg]
+allow_unsafe = true
+
+[pkg.mac]
+allow_unsafe = true
+
+[pkg.html5ever]
+build.allow_apis = [
+    "fs",
+]
+
+[pkg.futf]
+allow_unsafe = true
+
+[pkg.markup5ever]
+build.allow_apis = [
+    "fs",
+]
+allow_unsafe = true
+
+[pkg.tendril]
+allow_unsafe = true

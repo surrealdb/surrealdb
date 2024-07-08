@@ -241,7 +241,7 @@ async fn select_expression_value() -> Result<(), Error> {
 async fn select_dynamic_array_keys_and_object_keys() -> Result<(), Error> {
 	let sql = "
 		LET $lang = 'en';
-		UPDATE documentation:test CONTENT {
+		UPSERT documentation:test CONTENT {
 			primarylang: 'en',
 			languages: {
 				'en': 'this is english',
@@ -259,11 +259,11 @@ async fn select_dynamic_array_keys_and_object_keys() -> Result<(), Error> {
 		-- Selecting an object value or array index using a string as a key
 		SELECT languages['en'] AS content FROM documentation:test;
 		-- Updating an object value or array index using a string as a key
-		UPDATE documentation:test SET languages['en'] = 'my primary text';
+		UPSERT documentation:test SET languages['en'] = 'my primary text';
 		-- Selecting an object value or array index using a parameter as a key
 		SELECT languages[$lang] AS content FROM documentation:test;
 		-- Updating an object value or array index using a parameter as a key
-		UPDATE documentation:test SET languages[$lang] = 'my secondary text';
+		UPSERT documentation:test SET languages[$lang] = 'my secondary text';
 		-- Selecting an object or array index value using the value of another document field as a key
 		SELECT languages[primarylang] AS content FROM documentation;
 	";
@@ -359,11 +359,11 @@ async fn select_dynamic_array_keys_and_object_keys() -> Result<(), Error> {
 #[tokio::test]
 async fn select_writeable_subqueries() -> Result<(), Error> {
 	let sql = "
-		LET $id = (UPDATE tester:test);
+		LET $id = (UPSERT tester:test);
 		RETURN $id;
-		LET $id = (UPDATE tester:test).id;
+		LET $id = (UPSERT tester:test).id;
 		RETURN $id;
-		LET $id = (SELECT VALUE id FROM (UPDATE tester:test))[0];
+		LET $id = (SELECT VALUE id FROM (UPSERT tester:test))[0];
 		RETURN $id;
 	";
 	let dbs = new_ds().await?;

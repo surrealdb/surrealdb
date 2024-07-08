@@ -61,7 +61,6 @@ impl ser::Serializer for Serializer {
 		_len: usize,
 	) -> Result<Self::SerializeTupleVariant, Self::Error> {
 		match variant {
-			"Sc" => Ok(SerializeInfoStatement::with(Which::Sc)),
 			"Tb" => Ok(SerializeInfoStatement::with(Which::Tb)),
 			"User" => Ok(SerializeInfoStatement::with(Which::User)),
 			variant => Err(Error::custom(format!("unexpected tuple variant `{name}::{variant}`"))),
@@ -71,7 +70,6 @@ impl ser::Serializer for Serializer {
 
 #[derive(Clone, Copy)]
 enum Which {
-	Sc,
 	Tb,
 	User,
 }
@@ -79,9 +77,6 @@ enum Which {
 impl Display for Which {
 	fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
 		match self {
-			Which::Sc => {
-				write!(f, "Sc")
-			}
 			Which::Tb => {
 				write!(f, "Tb")
 			}
@@ -121,7 +116,7 @@ impl serde::ser::SerializeTupleVariant for SerializeInfoStatement {
 			(_, 0) => {
 				self.tuple.0 = Some(Ident(value.serialize(ser::string::Serializer.wrap())?));
 			}
-			(Sc, 1) | (Tb, 1) => {
+			(Tb, 1) => {
 				self.tuple.2 = value.serialize(ser::primitive::bool::Serializer.wrap())?;
 			}
 			(User, 1) => {
@@ -144,8 +139,6 @@ impl serde::ser::SerializeTupleVariant for SerializeInfoStatement {
 	fn end(self) -> Result<Self::Ok, Self::Error> {
 		use Which::*;
 		match (self.which, self.tuple.0) {
-			(Sc, Some(ident)) => Ok(InfoStatement::Sc(ident, self.tuple.2)),
-			(Sc, None) => Err(Error::custom("`InfoStatement::Sc` missing required value(s)")),
 			(Tb, Some(ident)) => Ok(InfoStatement::Tb(ident, self.tuple.2)),
 			(Tb, None) => Err(Error::custom("`InfoStatement::Tb` missing required value(s)")),
 			(User, Some(ident)) => Ok(InfoStatement::User(ident, self.tuple.1, self.tuple.2)),
@@ -175,13 +168,6 @@ mod tests {
 	#[test]
 	fn db() {
 		let stmt = InfoStatement::Db(Default::default());
-		let serialized = stmt.serialize(Serializer.wrap()).unwrap();
-		assert_eq!(stmt, serialized);
-	}
-
-	#[test]
-	fn sc() {
-		let stmt = InfoStatement::Sc(Default::default(), Default::default());
 		let serialized = stmt.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(stmt, serialized);
 	}

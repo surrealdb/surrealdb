@@ -45,8 +45,9 @@ impl BM25Scorer {
 		term_doc_count: DocLength,
 		term_frequency: TermFrequency,
 	) -> Result<Score, Error> {
-		let doc_length =
-			self.doc_lengths.read().await.get_doc_length(tx, doc_id).await?.unwrap_or(0);
+		let dl = self.doc_lengths.read().await;
+		let doc_length = dl.get_doc_length(tx, doc_id).await?.unwrap_or(0);
+		drop(dl);
 		Ok(self.compute_bm25_score(term_frequency as f32, term_doc_count as f32, doc_length as f32))
 	}
 
@@ -56,15 +57,16 @@ impl BM25Scorer {
 		doc_id: DocId,
 	) -> Result<Option<Score>, Error> {
 		let mut sc = 0.0;
+		let p = self.postings.read().await;
 		for (term_id, docs) in self.terms_docs.iter().flatten() {
 			if docs.contains(doc_id) {
-				if let Some(term_freq) =
-					self.postings.read().await.get_term_frequency(tx, *term_id, doc_id).await?
-				{
+				let tf = p.get_term_frequency(tx, *term_id, doc_id).await?;
+				if let Some(term_freq) = tf {
 					sc += self.term_score(tx, doc_id, docs.len(), term_freq).await?;
 				}
 			}
 		}
+		drop(p);
 		Ok(Some(sc))
 	}
 

@@ -1,23 +1,3 @@
-<?xml version="1.0" encoding="utf-8"?>
-<!-- Generator: Adobe Illustrator 25.4.1, SVG Export Plug-In . SVG Version: 6.00 Build 0)  -->
-<svg version="1.1" id="SurrealDB" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" x="0px" y="0px"
-	 viewBox="0 0 840 979.9" style="enable-background:new 0 0 840 979.9;" xml:space="preserve">
-<style type="text/css">
-	.st0{fill-rule:evenodd;clip-rule:evenodd;fill:url(#Shape_00000152245537862431398460000007046895009603046020_);}
-</style>
-<g id="Page-1">
-	<g id="Core" transform="translate(-378.000000, -88.000000)">
-		<g id="cloud" transform="translate(378.000000, 88.000000)">
-			
-				<linearGradient id="Shape_00000124152936539864393180000013812753857728307599_" gradientUnits="userSpaceOnUse" x1="240.6383" y1="272.0151" x2="574.5428" y2="850.3545">
-				<stop  offset="0" style="stop-color:#FF00A0"/>
-				<stop  offset="1" style="stop-color:#9600FF"/>
-			</linearGradient>
-			
-				<path id="Shape" style="fill-rule:evenodd;clip-rule:evenodd;fill:url(#Shape_00000124152936539864393180000013812753857728307599_);" d="
-				M679.2,419.9C654.7,300.8,549.6,209.7,420,209.7c-101.6,0-189.2,56.1-231.2,140.1C80.2,363.8-0.4,451.4-0.4,560
-				c0,115.6,94.6,210.2,210.2,210.2h455.4c98.1,0,175.2-77.1,175.2-175.2C840.4,504,766.8,426.9,679.2,419.9L679.2,419.9z"/>
-		</g>
-	</g>
-</g>
+<svg width="840" height="840" viewBox="0 0 840 840" fill="none" xmlns="http://www.w3.org/2000/svg">
+<path d="M672.682 362.325C662.503 359.995 657.414 358.83 654.699 357.208C651.69 355.409 650.629 354.425 648.61 351.56C646.788 348.974 645.347 344.316 642.465 335C629.053 291.651 603.198 252.977 567.866 223.943C526.197 189.701 473.933 170.988 420 171C336.281 171 262.82 215.277 221.761 281.688C218.105 287.602 216.277 290.558 214.51 292.278C212.626 294.112 211.541 294.867 209.167 295.998C206.942 297.059 203.419 297.771 196.374 299.197C157.249 307.11 121.532 327.426 94.6659 357.355C63.9706 391.549 46.9947 435.883 47 481.833C47 584.718 130.614 668.333 233.5 668.333H637.583C723.373 668.333 793 598.705 793 512.917C793 439.254 741.651 378.113 672.682 362.325Z" fill="#FF00A0"/>
 </svg>

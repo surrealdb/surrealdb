@@ -37,6 +37,9 @@ Temporary Items
 /lib/cache/
 /lib/store/
 /lib/target/
+/tests/sdk/*/Cargo.lock
+/tests/sdk/*/target
+
 .idea/
 .vscode/
 /result

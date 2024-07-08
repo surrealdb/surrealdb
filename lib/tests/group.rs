@@ -415,10 +415,10 @@ async fn select_multi_aggregate() -> Result<(), Error> {
 								'math::mean'
 							],
 							one: [
-								'math::sun'
+								'math::sum'
 							],
 							two: [
-								'math::sun'
+								'math::sum'
 							]
 						},
 						type: 'Group'
@@ -567,10 +567,10 @@ async fn select_multi_aggregate_composed() -> Result<(), Error> {
 								'first'
 							],
 							one: [
-								'math::sun'
+								'math::sum'
 							],
 							two: [
-								'math::sun'
+								'math::sum'
 							]
 						},
 						type: 'Group'
@@ -595,10 +595,10 @@ async fn select_array_group_group_by() -> Result<(), Error> {
 	";
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
-	let mut res = &mut dbs.execute(sql, &ses, None).await?;
+	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 5);
 	//
-	skip_ok(&mut res, 4)?;
+	skip_ok(res, 4)?;
 	//
 	let tmp = res.remove(0).result?;
 	let val = Value::parse(
@@ -633,10 +633,10 @@ async fn select_array_count_subquery_group_by() -> Result<(), Error> {
 	"#;
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
-	let mut res = &mut dbs.execute(sql, &ses, None).await?;
+	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 5);
 	//
-	skip_ok(&mut res, 3)?;
+	skip_ok(res, 3)?;
 	//
 	let tmp = res.remove(0).result?;
 	let val = Value::parse(

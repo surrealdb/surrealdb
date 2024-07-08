@@ -75,61 +75,30 @@ impl Parser<'_> {
 			t!("STRING") => Ok(Kind::String),
 			t!("UUID") => Ok(Kind::Uuid),
 			t!("RECORD") => {
-				let tables = match self.peek_kind() {
-					t!("<") => {
-						let next = self.next();
-						let mut tables = vec![self.next_token_value()?];
-						while self.eat(t!("|")) {
-							tables.push(self.next_token_value()?);
-						}
-						self.expect_closing_delimiter(t!(">"), next.span)?;
-						tables
+				let span = self.peek().span;
+				if self.eat(t!("<")) {
+					let mut tables = vec![self.next_token_value()?];
+					while self.eat(t!("|")) {
+						tables.push(self.next_token_value()?);
 					}
-					t!("(") => {
-						let next = self.next();
-						let mut tables = vec![self.next_token_value()?];
-						while self.eat(t!(",")) {
-							tables.push(self.next_token_value()?);
-						}
-						self.expect_closing_delimiter(t!(")"), next.span)?;
-						tables
-					}
-					_ => Vec::new(),
-				};
-				Ok(Kind::Record(tables))
+					self.expect_closing_delimiter(t!(">"), span)?;
+					Ok(Kind::Record(tables))
+				} else {
+					Ok(Kind::Record(Vec::new()))
+				}
 			}
 			t!("GEOMETRY") => {
-				let kind = match self.peek_kind() {
-					t!("<") => {
-						let delim = self.pop_peek().span;
-						let mut kind = vec![self.parse_geometry_kind()?];
-						while self.eat(t!("|")) {
-							kind.push(self.parse_geometry_kind()?);
-						}
-						self.expect_closing_delimiter(t!(">"), delim)?;
-						kind
+				let span = self.peek().span;
+				if self.eat(t!("<")) {
+					let mut kind = vec![self.parse_geometry_kind()?];
+					while self.eat(t!("|")) {
+						kind.push(self.parse_geometry_kind()?);
 					}
-					// Legacy gemoetry kind syntax with parens instead of `<` `>`.
-					t!("(") => {
-						let delim = self.pop_peek().span;
-						let mut kind = vec![self.parse_geometry_kind()?];
-						loop {
-							if self.eat(t!(")")) {
-								break;
-							}
-
-							kind.push(self.parse_geometry_kind()?);
-
-							if !self.eat(t!(",")) {
-								self.expect_closing_delimiter(t!(")"), delim)?;
-								break;
-							}
-						}
-						kind
-					}
-					_ => Vec::new(),
-				};
-				Ok(Kind::Geometry(kind))
+					self.expect_closing_delimiter(t!(">"), span)?;
+					Ok(Kind::Geometry(kind))
+				} else {
+					Ok(Kind::Geometry(Vec::new()))
+				}
 			}
 			t!("ARRAY") => {
 				let span = self.peek().span;

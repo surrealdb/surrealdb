@@ -1,6 +1,6 @@
 use crate::ctx::Context;
+use crate::dbs::Options;
 use crate::dbs::Statement;
-use crate::dbs::{Options, Transaction};
 use crate::doc::Document;
 use crate::err::Error;
 use crate::sql::value::Value;
@@ -12,36 +12,37 @@ impl<'a> Document<'a> {
 		stk: &mut Stk,
 		ctx: &Context<'_>,
 		opt: &Options,
-		txn: &Transaction,
 		stm: &Statement<'_>,
 	) -> Result<Value, Error> {
+		// Check if record exists
+		self.empty(ctx, opt, stm).await?;
 		// Check where clause
-		self.check(stk, ctx, opt, txn, stm).await?;
+		self.check(stk, ctx, opt, stm).await?;
 		// Check if allowed
-		self.allow(stk, ctx, opt, txn, stm).await?;
+		self.allow(stk, ctx, opt, stm).await?;
 		// Alter record data
-		self.alter(stk, ctx, opt, txn, stm).await?;
+		self.alter(stk, ctx, opt, stm).await?;
 		// Merge fields data
-		self.field(stk, ctx, opt, txn, stm).await?;
+		self.field(stk, ctx, opt, stm).await?;
 		// Reset fields data
-		self.reset(ctx, opt, txn, stm).await?;
+		self.reset(ctx, opt, stm).await?;
 		// Clean fields data
-		self.clean(stk, ctx, opt, txn, stm).await?;
+		self.clean(stk, ctx, opt, stm).await?;
 		// Check if allowed
-		self.allow(stk, ctx, opt, txn, stm).await?;
+		self.allow(stk, ctx, opt, stm).await?;
 		// Store record data
-		self.store(ctx, opt, txn, stm).await?;
+		self.store(ctx, opt, stm).await?;
 		// Store index data
-		self.index(stk, ctx, opt, txn, stm).await?;
+		self.index(stk, ctx, opt, stm).await?;
 		// Run table queries
-		self.table(stk, ctx, opt, txn, stm).await?;
+		self.table(stk, ctx, opt, stm).await?;
 		// Run lives queries
-		self.lives(stk, ctx, opt, txn, stm).await?;
+		self.lives(stk, ctx, opt, stm).await?;
 		// Run change feeds queries
-		self.changefeeds(ctx, opt, txn, stm).await?;
+		self.changefeeds(ctx, opt, stm).await?;
 		// Run event queries
-		self.event(stk, ctx, opt, txn, stm).await?;
+		self.event(stk, ctx, opt, stm).await?;
 		// Yield document
-		self.pluck(stk, ctx, opt, txn, stm).await
+		self.pluck(stk, ctx, opt, stm).await
 	}
 }

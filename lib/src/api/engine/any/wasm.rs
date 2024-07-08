@@ -18,12 +18,12 @@ use crate::opt::WaitFor;
 use flume::Receiver;
 use std::collections::HashSet;
 use std::future::Future;
-use std::marker::PhantomData;
 use std::pin::Pin;
 use std::sync::atomic::AtomicI64;
 use std::sync::Arc;
 use std::sync::OnceLock;
 use tokio::sync::watch;
+use wasm_bindgen_futures::spawn_local;
 
 impl crate::api::Connection for Any {}
 
@@ -54,7 +54,7 @@ impl Connection for Any {
 					#[cfg(feature = "kv-fdb")]
 					{
 						features.insert(ExtraFeatures::LiveQueries);
-						engine::local::wasm::router(address, conn_tx, route_rx);
+						spawn_local(engine::local::wasm::run_router(address, conn_tx, route_rx));
 						conn_rx.into_recv_async().await??;
 					}
 
@@ -68,7 +68,7 @@ impl Connection for Any {
 					#[cfg(feature = "kv-indxdb")]
 					{
 						features.insert(ExtraFeatures::LiveQueries);
-						engine::local::wasm::router(address, conn_tx, route_rx);
+						spawn_local(engine::local::wasm::run_router(address, conn_tx, route_rx));
 						conn_rx.into_recv_async().await??;
 					}
 
@@ -82,7 +82,7 @@ impl Connection for Any {
 					#[cfg(feature = "kv-mem")]
 					{
 						features.insert(ExtraFeatures::LiveQueries);
-						engine::local::wasm::router(address, conn_tx, route_rx);
+						spawn_local(engine::local::wasm::run_router(address, conn_tx, route_rx));
 						conn_rx.into_recv_async().await??;
 					}
 
@@ -96,7 +96,7 @@ impl Connection for Any {
 					#[cfg(feature = "kv-rocksdb")]
 					{
 						features.insert(ExtraFeatures::LiveQueries);
-						engine::local::wasm::router(address, conn_tx, route_rx);
+						spawn_local(engine::local::wasm::run_router(address, conn_tx, route_rx));
 						conn_rx.into_recv_async().await??;
 					}
 
@@ -107,26 +107,11 @@ impl Connection for Any {
 					.into());
 				}
 
-				EndpointKind::SpeeDb => {
-					#[cfg(feature = "kv-speedb")]
-					{
-						features.insert(ExtraFeatures::LiveQueries);
-						engine::local::wasm::router(address, conn_tx, route_rx);
-						conn_rx.into_recv_async().await??;
-					}
-
-					#[cfg(not(feature = "kv-speedb"))]
-					return Err(DbError::Ds(
-						"Cannot connect to the `speedb` storage engine as it is not enabled in this build of SurrealDB".to_owned(),
-					)
-					.into());
-				}
-
 				EndpointKind::SurrealKV => {
 					#[cfg(feature = "kv-surrealkv")]
 					{
 						features.insert(ExtraFeatures::LiveQueries);
-						engine::local::wasm::router(address, conn_tx, route_rx);
+						spawn_local(engine::local::wasm::run_router(address, conn_tx, route_rx));
 						conn_rx.into_recv_async().await??;
 					}
 
@@ -141,7 +126,7 @@ impl Connection for Any {
 					#[cfg(feature = "kv-tikv")]
 					{
 						features.insert(ExtraFeatures::LiveQueries);
-						engine::local::wasm::router(address, conn_tx, route_rx);
+						spawn_local(engine::local::wasm::run_router(address, conn_tx, route_rx));
 						conn_rx.into_recv_async().await??;
 					}
 
@@ -154,7 +139,9 @@ impl Connection for Any {
 				EndpointKind::Http | EndpointKind::Https => {
 					#[cfg(feature = "protocol-http")]
 					{
-						engine::remote::http::wasm::router(address, conn_tx, route_rx);
+						spawn_local(engine::remote::http::wasm::run_router(
+							address, conn_tx, route_rx,
+						));
 					}
 
 					#[cfg(not(feature = "protocol-http"))]
@@ -170,7 +157,9 @@ impl Connection for Any {
 						features.insert(ExtraFeatures::LiveQueries);
 						let mut endpoint = address;
 						endpoint.url = endpoint.url.join(engine::remote::ws::PATH)?;
-						engine::remote::ws::wasm::router(endpoint, capacity, conn_tx, route_rx);
+						spawn_local(engine::remote::ws::wasm::run_router(
+							endpoint, capacity, conn_tx, route_rx,
+						));
 						conn_rx.into_recv_async().await??;
 					}
 
@@ -184,15 +173,14 @@ impl Connection for Any {
 				EndpointKind::Unsupported(v) => return Err(Error::Scheme(v).into()),
 			}
 
-			Ok(Surreal {
-				router: Arc::new(OnceLock::with_value(Router {
+			Ok(Surreal::new_from_router_waiter(
+				Arc::new(OnceLock::with_value(Router {
 					features,
 					sender: route_tx,
 					last_id: AtomicI64::new(0),
 				})),
-				waiter: Arc::new(watch::channel(Some(WaitFor::Connection))),
-				engine: PhantomData,
-			})
+				Arc::new(watch::channel(Some(WaitFor::Connection))),
+			))
 		})
 	}
 
@@ -208,7 +196,7 @@ impl Connection for Any {
 				request: (self.id, self.method, param),
 				response: sender,
 			};
-			router.sender.send_async(Some(route)).await?;
+			router.sender.send_async(route).await?;
 			Ok(receiver)
 		})
 	}
