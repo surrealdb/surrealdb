@@ -39,7 +39,7 @@ pub trait Transaction {
 	/// Check if a key exists in the datastore.
 	async fn exists<K>(&mut self, key: K) -> Result<bool, Error>
 	where
-		K: Into<Key>;
+		K: Into<Key> + Debug;
 
 	/// Fetch a key from the datastore.
 	async fn get<K>(&mut self, key: K) -> Result<Option<Val>, Error>
@@ -260,7 +260,7 @@ pub trait Transaction {
 	/// That is to keep other transactions commit delay(pessimistic) or conflict(optimistic) as less as possible.
 	async fn get_timestamp<K>(&mut self, key: K) -> Result<Versionstamp, Error>
 	where
-		K: Into<Key>,
+		K: Into<Key> + Debug,
 	{
 		// Check to see if transaction is closed
 		if self.closed() {

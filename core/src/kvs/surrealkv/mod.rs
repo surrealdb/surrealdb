@@ -4,6 +4,7 @@ use crate::err::Error;
 use crate::kvs::Check;
 use crate::kvs::Key;
 use crate::kvs::Val;
+use std::fmt::Debug;
 use std::ops::Range;
 use surrealkv::Options;
 use surrealkv::Store;
@@ -135,7 +136,7 @@ impl super::api::Transaction for Transaction {
 	/// Checks if a key exists in the database.
 	async fn exists<K>(&mut self, key: K) -> Result<bool, Error>
 	where
-		K: Into<Key>,
+		K: Into<Key> + Debug,
 	{
 		// Check to see if transaction is closed
 		if self.done {
@@ -150,7 +151,7 @@ impl super::api::Transaction for Transaction {
 	/// Fetch a key from the database
 	async fn get<K>(&mut self, key: K) -> Result<Option<Val>, Error>
 	where
-		K: Into<Key>,
+		K: Into<Key> + Debug,
 	{
 		// Check to see if transaction is closed
 		if self.done {
@@ -165,8 +166,8 @@ impl super::api::Transaction for Transaction {
 	/// Insert or update a key in the database
 	async fn set<K, V>(&mut self, key: K, val: V) -> Result<(), Error>
 	where
-		K: Into<Key>,
-		V: Into<Val>,
+		K: Into<Key> + Debug,
+		V: Into<Val> + Debug,
 	{
 		// Check to see if transaction is closed
 		if self.done {
@@ -185,8 +186,8 @@ impl super::api::Transaction for Transaction {
 	/// Insert a key if it doesn't exist in the database
 	async fn put<K, V>(&mut self, key: K, val: V) -> Result<(), Error>
 	where
-		K: Into<Key>,
-		V: Into<Val>,
+		K: Into<Key> + Debug,
+		V: Into<Val> + Debug,
 	{
 		// Check to see if transaction is closed
 		if self.done {
@@ -211,8 +212,8 @@ impl super::api::Transaction for Transaction {
 	/// Insert a key if the current value matches a condition
 	async fn putc<K, V>(&mut self, key: K, val: V, chk: Option<V>) -> Result<(), Error>
 	where
-		K: Into<Key>,
-		V: Into<Val>,
+		K: Into<Key> + Debug,
+		V: Into<Val> + Debug,
 	{
 		// Check to see if transaction is closed
 		if self.done {
@@ -239,7 +240,7 @@ impl super::api::Transaction for Transaction {
 	/// Deletes a key from the database.
 	async fn del<K>(&mut self, key: K) -> Result<(), Error>
 	where
-		K: Into<Key>,
+		K: Into<Key> + Debug,
 	{
 		// Check to see if transaction is closed
 		if self.done {
@@ -258,8 +259,8 @@ impl super::api::Transaction for Transaction {
 	/// Delete a key if the current value matches a condition
 	async fn delc<K, V>(&mut self, key: K, chk: Option<V>) -> Result<(), Error>
 	where
-		K: Into<Key>,
-		V: Into<Val>,
+		K: Into<Key> + Debug,
+		V: Into<Val> + Debug,
 	{
 		// Check to see if transaction is closed
 		if self.done {
@@ -285,7 +286,7 @@ impl super::api::Transaction for Transaction {
 	/// Retrieves a range of key-value pairs from the database.
 	async fn keys<K>(&mut self, rng: Range<K>, limit: u32) -> Result<Vec<Key>, Error>
 	where
-		K: Into<Key>,
+		K: Into<Key> + Debug,
 	{
 		// Check to see if transaction is closed
 		if self.done {
@@ -305,7 +306,7 @@ impl super::api::Transaction for Transaction {
 	/// Retrieves a range of key-value pairs from the database.
 	async fn scan<K>(&mut self, rng: Range<K>, limit: u32) -> Result<Vec<(Key, Val)>, Error>
 	where
-		K: Into<Key>,
+		K: Into<Key> + Debug,
 	{
 		// Check to see if transaction is closed
 		if self.done {
