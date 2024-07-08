@@ -14,6 +14,20 @@ use crate::sql::array::Windows;
 use crate::sql::value::Value;
 
 use rand::prelude::SliceRandom;
+use std::mem::size_of_val;
+
+/// Returns an error if an array of this length is too much to allocate.
+fn limit(name: &str, n: usize) -> Result<(), Error> {
+	const LIMIT: usize = 2usize.pow(20);
+	if n > LIMIT {
+		Err(Error::InvalidArguments {
+			name: name.to_owned(),
+			message: format!("Output must not exceed {LIMIT} bytes."),
+		})
+	} else {
+		Ok(())
+	}
+}
 
 pub fn add((mut array, value): (Array, Value)) -> Result<Value, Error> {
 	match value {
@@ -393,17 +407,9 @@ pub fn remove((mut array, mut index): (Array, i64)) -> Result<Value, Error> {
 	Ok(array.into())
 }
 
-pub fn repeat((value, count): (Value, i64)) -> Result<Value, Error> {
-	if count < 0 {
-		return Err(Error::InvalidArguments {
-			name: String::from("array::repeat"),
-			message: format!(
-				"Argument 2 was the wrong type. Expected a positive number but found {count}"
-			),
-		});
-	}
-
-	Ok(Array(std::iter::repeat(value).take(count as usize).collect()).into())
+pub fn repeat((value, count): (Value, usize)) -> Result<Value, Error> {
+	limit("array::repeat", size_of_val(&value).saturating_mul(count))?;
+	Ok(Array(std::iter::repeat(value).take(count).collect()).into())
 }
 
 pub fn reverse((mut array,): (Array,)) -> Result<Value, Error> {

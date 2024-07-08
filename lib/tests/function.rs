@@ -832,8 +832,8 @@ async fn function_array_repeat() -> Result<(), Error> {
 		.expect_val(r#"["hello","hello"]"#)?
 		.expect_val("[NONE,NONE,NONE]")?
 		.expect_val("[]")?
-		.expect_error("Incorrect arguments for function array::repeat(). Argument 2 was the wrong type. Expected a positive number but found -1")?
-		.expect_error("Incorrect arguments for function array::repeat(). Argument 2 was the wrong type. Expected a positive number but found -256")?;
+		.expect_error("Incorrect arguments for function array::repeat(). Output must not exceed 1048576 bytes.")?
+		.expect_error("Incorrect arguments for function array::repeat(). Output must not exceed 1048576 bytes.")?;
 	Ok(())
 }
 
