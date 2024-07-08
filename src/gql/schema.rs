@@ -143,8 +143,7 @@ pub async fn get_schema() -> Result<Schema, Box<dyn std::error::Error>> {
 									let desc = current.get("desc");
 									match (asc, desc) {
 										(Some(_), Some(_)) => {
-											// TODO: easy to do so needs good error handling
-											panic!("Found both asc and desc in order");
+											return Err("Found both asc and desc in order".into());
 										}
 										(Some(GqlValue::Enum(a)), None) => {
 											orders.push(order!(asc, a.as_str()))
@@ -170,11 +169,14 @@ pub async fn get_schema() -> Result<Schema, Box<dyn std::error::Error>> {
 
 						let cond = match filter {
 							Some(f) => {
-								let GqlValue::Object(o) = f else {
-									panic!(
-										"value doesn't fit schema, should be rejected by graphql"
-									)
+								let o = match f {
+									GqlValue::Object(o) => o,
+									f => {
+										error!("Found filter {f}, which should be object and should have been rejected by async graphql.");
+										return Err("Value in cond doesn't fit schema".into());
+									}
 								};
+
 								let cond = cond_from_filter(o)?;
 
 								Some(cond)
@@ -203,12 +205,20 @@ pub async fn get_schema() -> Result<Schema, Box<dyn std::error::Error>> {
 							kvs.process(query, &Default::default(), Default::default()).await?;
 						// ast is constructed such that there will only be two responses the first of which is NONE
 						let mut res_iter = res.into_iter();
+						// this is none so can be disregarded
 						let _ = res_iter.next();
 						let res = res_iter.next().unwrap();
 						let res = res.result?;
-						let SqlValue::Array(res_vec) = res.clone() else {
-							panic!("top level value in array should be an array: {:?}", res)
-						};
+
+						let res_vec =
+							match res {
+								SqlValue::Array(a) => a,
+								v => {
+									error!("Found top level value, in result which should be array: {v:?}");
+									return Err("Internal Error".into());
+								}
+							};
+
 						let out = res_vec
 							.0
 							.into_iter()
@@ -545,8 +555,8 @@ fn val_from_filter(filter: &IndexMap<Name, GqlValue>) -> Result<SqlValue, Error>
 	let (k, v) = filter.iter().next().unwrap();
 
 	let cond = match k.as_str().to_lowercase().as_str() {
-		"or" => aggregate(v, sql::Operator::Or),
-		"and" => aggregate(v, sql::Operator::And),
+		"or" => aggregate(v, AggregateOp::Or),
+		"and" => aggregate(v, AggregateOp::And),
 		"not" => negate(v),
 		_ => binop(k.as_str(), v),
 	};
@@ -573,11 +583,19 @@ fn negate(filter: &GqlValue) -> Result<SqlValue, Error> {
 	.into())
 }
 
-fn aggregate(filter: &GqlValue, op: sql::Operator) -> Result<SqlValue, Error> {
+enum AggregateOp {
+	And,
+	Or,
+}
+
+fn aggregate(filter: &GqlValue, op: AggregateOp) -> Result<SqlValue, Error> {
 	let op_str = match op {
-		sql::Operator::And => "AND",
-		sql::Operator::Or => "OR",
-		_ => panic!("aggregate can only take And or Or"),
+		AggregateOp::And => "AND",
+		AggregateOp::Or => "OR",
+	};
+	let op = match op {
+		AggregateOp::And => sql::Operator::And,
+		AggregateOp::Or => sql::Operator::Or,
 	};
 	let list =
 		filter.as_list().ok_or(Error::Thrown(format!("Value of {op_str} should be a list")))?;
