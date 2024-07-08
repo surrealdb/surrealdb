@@ -94,17 +94,18 @@ impl TableMutation {
 				h
 			}
 			TableMutation::SetWithDiff(_thing, current, operations) => {
-				h.insert("current".to_string(), current);
-				h.insert(
-					"update".to_string(),
-					Value::Array(Array(
+				// derive the original
+				let mut original = current.clone();
+				original
+					.patch(Value::Array(Array(
 						operations
 							.clone()
 							.into_iter()
 							.map(|x| Value::Object(Object::from(x)))
 							.collect(),
-					)),
-				);
+					)))
+					.unwrap();
+				h.insert("update".to_string(), current);
 				h
 			}
 			TableMutation::Del(t) => {
@@ -308,7 +309,7 @@ mod tests {
 		let s = serde_json::to_string(&v).unwrap();
 		assert_eq!(
 			s,
-			r#"{"changes":[{"current":{"id":"mytb:tobie","note":"surreal"},"update":[{"op":"add","path":"/`/note`","value":"surreal"}]},{"current":{"id":"mytb:tobie2","note":"surreal"},"update":[{"op":"remove","path":"/`/temp`"}]},{"delete":{"id":"mytb:tobie"}},{"delete":{"id":"mytb:tobie"}},{"define_table":{"name":"mytb"}}],"versionstamp":65536}"#
+			r#"{"changes":["update":[{"op":"add","path":"/`/note`","value":"surreal"}]},"update":[{"op":"remove","path":"/`/temp`"}]},{"delete":{"id":"mytb:tobie"}},{"delete":{"id":"mytb:tobie"}},{"define_table":{"name":"mytb"}}],"versionstamp":65536}"#
 		);
 	}
 }
