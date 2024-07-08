@@ -844,9 +844,9 @@ async fn router(
 					let mut tmp = Model::default();
 
 					tmp.name = fn_name.chars().skip(4).collect();
-					tmp.args = mem::take(_fn_params).0;
+					tmp.args = mem::take(fn_params).0;
 					tmp.version = mem::take(
-						fn_version
+						_fn_version
 							.ok_or(Error::Query("ML functions must have a version".to_string()))?,
 					)
 					.0;
