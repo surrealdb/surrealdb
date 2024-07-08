@@ -159,9 +159,9 @@ impl<'a> Document<'a> {
 			// of the user who created the LIVE query.
 			let lqctx = Context::background();
 			let mut lqctx =
-				lqctx.set_transaction(ctx.get_transaction().map(|tx| tx.clone()).unwrap_or_else(
-					|| unreachable!("Expected transaction to be available in parent context"),
-				));
+				lqctx.set_transaction(ctx.get_transaction().cloned().unwrap_or_else(|| {
+					unreachable!("Expected transaction to be available in parent context")
+				}));
 			lqctx.add_value("access", sess.pick(AC.as_ref()));
 			lqctx.add_value("auth", sess.pick(RD.as_ref()));
 			lqctx.add_value("token", sess.pick(TK.as_ref()));
