@@ -533,7 +533,7 @@ mod tests {
 			let r = stack
 				.enter(|ctx| async move { parser.parse_thing(ctx).await })
 				.finish()
-				.expect(&format!("failed on {}", ident))
+				.unwrap_or_else(|_| panic!("failed on {}", ident))
 				.id;
 			assert_eq!(r, Id::String(ident.to_string()),);
 
@@ -541,7 +541,7 @@ mod tests {
 			let r = stack
 				.enter(|ctx| async move { parser.parse_query(ctx).await })
 				.finish()
-				.expect(&format!("failed on {}", ident));
+				.unwrap_or_else(|_| panic!("failed on {}", ident));
 
 			assert_eq!(
 				r,

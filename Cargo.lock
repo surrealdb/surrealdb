@@ -2298,19 +2298,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "futures-concurrency"
-version = "7.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9b590a729e1cbaf9ae3ec294143ea034d93cbb1de01c884d04bcd0af8b613d02"
-dependencies = [
- "bitvec",
- "futures-core",
- "pin-project",
- "slab",
- "smallvec",
-]
-
-[[package]]
 name = "futures-core"
 version = "0.3.30"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6155,7 +6142,6 @@ dependencies = [
  "flate2",
  "flume",
  "futures",
- "futures-concurrency",
  "geo 0.27.0",
  "hashbrown 0.14.5",
  "indexmap 2.2.6",
@@ -6358,9 +6344,9 @@ dependencies = [
 
 [[package]]
 name = "surrealkv"
-version = "0.2.0"
+version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "563a2d39e9eea9bd25e9dd9e68c0dc8134653bdabf741fa604533dc1dda732c9"
+checksum = "cd7369cca0403d3c07aba318cedb69dfb787eafda44c7b0c54f05b1fd0438bfe"
 dependencies = [
  "async-channel 2.2.0",
  "bytes",
@@ -7302,9 +7288,9 @@ checksum = "830b7e5d4d90034032940e4ace0d9a9a057e7a45cd94e6c007832e39edb82f6d"
 
 [[package]]
 name = "vart"
-version = "0.3.0"
+version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b9f8fe507a1dd4f78b79e7c3b08232f4a826c6140252d1fc7a0aa4d8b9992211"
+checksum = "8e19cf5555815b1ebc839ceb17face450eb0346e09c0acc6ad0e3097ec49dcad"
 dependencies = [
  "hashbrown 0.14.5",
 ]

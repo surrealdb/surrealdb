@@ -18,7 +18,6 @@ use reqwest::header::HeaderMap;
 use reqwest::ClientBuilder;
 use std::collections::HashSet;
 use std::future::Future;
-use std::marker::PhantomData;
 use std::pin::Pin;
 use std::sync::atomic::AtomicI64;
 use std::sync::Arc;
@@ -48,7 +47,7 @@ impl Connection for Client {
 
 			let (conn_tx, conn_rx) = flume::bounded(1);
 
-			router(address, conn_tx, route_rx);
+			spawn_local(run_router(address, conn_tx, route_rx));
 
 			conn_rx.into_recv_async().await??;
 
@@ -75,7 +74,7 @@ impl Connection for Client {
 				request: (0, self.method, param),
 				response: sender,
 			};
-			router.sender.send_async(Some(route)).await?;
+			router.sender.send_async(route).await?;
 			Ok(receiver)
 		})
 	}
@@ -90,48 +89,39 @@ async fn client(base_url: &Url) -> Result<reqwest::Client> {
 	Ok(client)
 }
 
-pub(crate) fn router(
+pub(crate) async fn run_router(
 	address: Endpoint,
 	conn_tx: Sender<Result<()>>,
-	route_rx: Receiver<Option<Route>>,
+	route_rx: Receiver<Route>,
 ) {
-	spawn_local(async move {
-		let base_url = address.url;
+	let base_url = address.url;
 
-		let client = match client(&base_url).await {
-			Ok(client) => {
-				let _ = conn_tx.into_send_async(Ok(())).await;
-				client
+	let client = match client(&base_url).await {
+		Ok(client) => {
+			let _ = conn_tx.into_send_async(Ok(())).await;
+			client
+		}
+		Err(error) => {
+			let _ = conn_tx.into_send_async(Err(error)).await;
+			return;
+		}
+	};
+
+	let mut headers = HeaderMap::new();
+	let mut vars = IndexMap::new();
+	let mut auth = None;
+	let mut stream = route_rx.into_stream();
+
+	while let Some(route) = stream.next().await {
+		match super::router(route.request, &base_url, &client, &mut headers, &mut vars, &mut auth)
+			.await
+		{
+			Ok(value) => {
+				let _ = route.response.into_send_async(Ok(value)).await;
 			}
 			Err(error) => {
-				let _ = conn_tx.into_send_async(Err(error)).await;
-				return;
-			}
-		};
-
-		let mut headers = HeaderMap::new();
-		let mut vars = IndexMap::new();
-		let mut auth = None;
-		let mut stream = route_rx.into_stream();
-
-		while let Some(Some(route)) = stream.next().await {
-			match super::router(
-				route.request,
-				&base_url,
-				&client,
-				&mut headers,
-				&mut vars,
-				&mut auth,
-			)
-			.await
-			{
-				Ok(value) => {
-					let _ = route.response.into_send_async(Ok(value)).await;
-				}
-				Err(error) => {
-					let _ = route.response.into_send_async(Err(error)).await;
-				}
+				let _ = route.response.into_send_async(Err(error)).await;
 			}
 		}
-	});
+	}
 }

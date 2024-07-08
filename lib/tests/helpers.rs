@@ -272,6 +272,7 @@ impl Test {
 	/// This method will panic if the responses list is empty, indicating that there are no more responses to retrieve.
 	/// The panic message will include the last position in the responses list before it was emptied.
 	#[allow(dead_code)]
+	#[allow(clippy::should_implement_trait)]
 	pub fn next(&mut self) -> Result<Response, Error> {
 		assert!(!self.responses.is_empty(), "No response left - last position: {}", self.pos);
 		self.pos += 1;
