@@ -8,27 +8,8 @@ use crate::sql::array::Array;
 use crate::sql::object::Object;
 use crate::sql::value::serde::ser;
 use crate::sql::value::Value;
-use crate::sql::Block;
 use crate::sql::Bytes;
-use crate::sql::Datetime;
-use crate::sql::Duration;
-use crate::sql::Future;
-use crate::sql::Ident;
-use crate::sql::Idiom;
-use crate::sql::Param;
-use crate::sql::Query;
-use crate::sql::Statements;
-use crate::sql::Strand;
-use crate::sql::Table;
-use crate::sql::Uuid;
 use map::SerializeValueMap;
-use ser::cast::SerializeCast;
-use ser::edges::SerializeEdges;
-use ser::expression::SerializeExpression;
-use ser::function::SerializeFunction;
-use ser::mock::SerializeMock;
-use ser::range::SerializeRange;
-use ser::thing::SerializeThing;
 use ser::Serializer as _;
 use serde::ser::Error as _;
 use serde::ser::Serialize;
@@ -170,9 +151,6 @@ impl ser::Serializer for Serializer {
 		variant: &'static str,
 	) -> Result<Self::Ok, Error> {
 		match name {
-			sql::constant::TOKEN => ser::constant::Serializer
-				.serialize_unit_variant(name, variant_index, variant)
-				.map(Value::Constant),
 			sql::value::TOKEN => match variant {
 				"None" => Ok(Value::None),
 				"Null" => Ok(Value::Null),
@@ -188,42 +166,9 @@ impl ser::Serializer for Serializer {
 		T: ?Sized + Serialize,
 	{
 		match name {
-			sql::strand::TOKEN => {
-				Ok(Value::Strand(Strand(value.serialize(ser::string::Serializer.wrap())?)))
-			}
-			sql::block::TOKEN => Ok(Value::Block(Box::new(Block(
-				value.serialize(ser::block::entry::vec::Serializer.wrap())?,
-			)))),
-			sql::duration::TOKEN => {
-				Ok(Value::Duration(Duration(value.serialize(ser::duration::Serializer.wrap())?)))
-			}
-			sql::future::TOKEN => Ok(Value::Future(Box::new(Future(Block(
-				value.serialize(ser::block::entry::vec::Serializer.wrap())?,
-			))))),
-			sql::regex::TOKEN => {
-				Ok(Value::Regex(value.serialize(ser::string::Serializer.wrap())?.parse().unwrap()))
-			}
-			sql::table::TOKEN => {
-				Ok(Value::Table(Table(value.serialize(ser::string::Serializer.wrap())?)))
-			}
-			sql::idiom::TOKEN => {
-				Ok(Value::Idiom(Idiom(value.serialize(ser::part::vec::Serializer.wrap())?)))
-			}
-			sql::param::TOKEN => {
-				Ok(Value::Param(Param(Ident(value.serialize(ser::string::Serializer.wrap())?))))
-			}
-			sql::query::TOKEN => Ok(Value::Query(Query(Statements(
-				value.serialize(ser::statement::vec::Serializer.wrap())?,
-			)))),
 			sql::array::TOKEN => Ok(Value::Array(Array(value.serialize(vec::Serializer.wrap())?))),
 			sql::object::TOKEN => {
 				Ok(Value::Object(Object(value.serialize(map::Serializer.wrap())?)))
-			}
-			sql::uuid::TOKEN => {
-				Ok(Value::Uuid(Uuid(value.serialize(ser::uuid::Serializer.wrap())?)))
-			}
-			sql::datetime::TOKEN => {
-				Ok(Value::Datetime(Datetime(value.serialize(ser::datetime::Serializer.wrap())?)))
 			}
 			_ => value.serialize(self.wrap()),
 		}
@@ -240,30 +185,6 @@ impl ser::Serializer for Serializer {
 		T: ?Sized + Serialize,
 	{
 		match name {
-			sql::number::TOKEN => {
-				Ok(Value::Number(ser::number::Serializer.serialize_newtype_variant(
-					name,
-					variant_index,
-					variant,
-					value,
-				)?))
-			}
-			sql::subquery::TOKEN => {
-				Ok(Value::Subquery(Box::new(ser::subquery::Serializer.serialize_newtype_variant(
-					name,
-					variant_index,
-					variant,
-					value,
-				)?)))
-			}
-			sql::geometry::TOKEN => {
-				Ok(Value::Geometry(ser::geometry::Serializer.serialize_newtype_variant(
-					name,
-					variant_index,
-					variant,
-					value,
-				)?))
-			}
 			sql::value::TOKEN => value.serialize(Serializer.wrap()),
 			_ => Ok(map! {
 				String::from(variant) => value.serialize(Serializer.wrap())?,
@@ -300,7 +221,6 @@ impl ser::Serializer for Serializer {
 		_len: usize,
 	) -> Result<Self::SerializeTupleStruct, Error> {
 		match name {
-			sql::cast::TOKEN => Ok(SerializeTupleStruct::Cast(Default::default())),
 			_ => Ok(SerializeTupleStruct::Array(Default::default())),
 		}
 	}
@@ -313,17 +233,6 @@ impl ser::Serializer for Serializer {
 		len: usize,
 	) -> Result<Self::SerializeTupleVariant, Error> {
 		Ok(match name {
-			sql::mock::TOKEN => SerializeTupleVariant::Model(
-				ser::mock::Serializer.serialize_tuple_variant(name, variant_index, variant, len)?,
-			),
-			sql::function::TOKEN => {
-				SerializeTupleVariant::Function(ser::function::Serializer.serialize_tuple_variant(
-					name,
-					variant_index,
-					variant,
-					len,
-				)?)
-			}
 			_ => SerializeTupleVariant::Unknown {
 				variant,
 				fields: SerializeValueVec(Vec::with_capacity(len)),
@@ -341,9 +250,6 @@ impl ser::Serializer for Serializer {
 		_len: usize,
 	) -> Result<Self::SerializeStruct, Error> {
 		Ok(match name {
-			sql::thing::TOKEN => SerializeStruct::Thing(Default::default()),
-			sql::edges::TOKEN => SerializeStruct::Edges(Default::default()),
-			sql::range::TOKEN => SerializeStruct::Range(Default::default()),
 			_ => SerializeStruct::Unknown(Default::default()),
 		})
 	}
@@ -355,17 +261,9 @@ impl ser::Serializer for Serializer {
 		variant: &'static str,
 		_len: usize,
 	) -> Result<Self::SerializeStructVariant, Error> {
-		Ok(if name == sql::expression::TOKEN {
-			SerializeStructVariant::Expression(match variant {
-				"Unary" => SerializeExpression::Unary(Default::default()),
-				"Binary" => SerializeExpression::Binary(Default::default()),
-				_ => return Err(Error::custom(format!("unexpected `Expression::{name}`"))),
-			})
-		} else {
-			SerializeStructVariant::Object {
-				name: String::from(variant),
-				map: Object::default(),
-			}
+		Ok(SerializeStructVariant::Object {
+			name: String::from(variant),
+			map: Object::default(),
 		})
 	}
 }
@@ -447,8 +345,6 @@ impl serde::ser::SerializeMap for SerializeMap {
 }
 
 pub(super) enum SerializeTupleVariant {
-	Model(SerializeMock),
-	Function(SerializeFunction),
 	Unknown {
 		variant: &'static str,
 		fields: SerializeValueVec,
@@ -456,7 +352,6 @@ pub(super) enum SerializeTupleVariant {
 }
 
 pub(super) enum SerializeTupleStruct {
-	Cast(SerializeCast),
 	Array(SerializeArray),
 }
 
@@ -469,14 +364,12 @@ impl serde::ser::SerializeTupleStruct for SerializeTupleStruct {
 		T: ?Sized + Serialize,
 	{
 		match self {
-			Self::Cast(cast) => cast.serialize_field(value),
 			Self::Array(array) => array.serialize_field(value),
 		}
 	}
 
 	fn end(self) -> Result<Value, Error> {
 		match self {
-			Self::Cast(cast) => Ok(Value::Cast(Box::new(cast.end()?))),
 			Self::Array(array) => Ok(serde::ser::SerializeTupleStruct::end(array)?),
 		}
 	}
@@ -491,8 +384,6 @@ impl serde::ser::SerializeTupleVariant for SerializeTupleVariant {
 		T: ?Sized + Serialize,
 	{
 		match self {
-			Self::Model(model) => model.serialize_field(value),
-			Self::Function(function) => function.serialize_field(value),
 			Self::Unknown {
 				ref mut fields,
 				..
@@ -502,8 +393,6 @@ impl serde::ser::SerializeTupleVariant for SerializeTupleVariant {
 
 	fn end(self) -> Result<Value, Error> {
 		match self {
-			Self::Model(model) => Ok(Value::Mock(model.end()?)),
-			Self::Function(function) => Ok(Value::Function(Box::new(function.end()?))),
 			Self::Unknown {
 				variant,
 				fields,
@@ -516,9 +405,6 @@ impl serde::ser::SerializeTupleVariant for SerializeTupleVariant {
 }
 
 pub(super) enum SerializeStruct {
-	Thing(SerializeThing),
-	Edges(SerializeEdges),
-	Range(SerializeRange),
 	Unknown(SerializeValueMap),
 }
 
@@ -531,25 +417,18 @@ impl serde::ser::SerializeStruct for SerializeStruct {
 		T: ?Sized + Serialize,
 	{
 		match self {
-			Self::Thing(thing) => thing.serialize_field(key, value),
-			Self::Edges(edges) => edges.serialize_field(key, value),
-			Self::Range(range) => range.serialize_field(key, value),
 			Self::Unknown(map) => map.serialize_entry(key, value),
 		}
 	}
 
 	fn end(self) -> Result<Value, Error> {
 		match self {
-			Self::Thing(thing) => Ok(Value::Thing(thing.end()?)),
-			Self::Edges(edges) => Ok(Value::Edges(Box::new(edges.end()?))),
-			Self::Range(range) => Ok(Value::Range(Box::new(range.end()?))),
 			Self::Unknown(map) => Ok(Value::Object(Object(map.end()?))),
 		}
 	}
 }
 
 pub(super) enum SerializeStructVariant {
-	Expression(SerializeExpression),
 	Object {
 		name: String,
 		map: Object,
@@ -565,7 +444,6 @@ impl serde::ser::SerializeStructVariant for SerializeStructVariant {
 		T: ?Sized + Serialize,
 	{
 		match self {
-			Self::Expression(expression) => expression.serialize_field(key, value),
 			Self::Object {
 				map,
 				..
@@ -578,7 +456,6 @@ impl serde::ser::SerializeStructVariant for SerializeStructVariant {
 
 	fn end(self) -> Result<Value, Error> {
 		match self {
-			Self::Expression(expression) => Ok(Value::from(expression.end()?)),
 			Self::Object {
 				name,
 				map,
