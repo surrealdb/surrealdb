@@ -347,43 +347,6 @@ pub async fn get_schema() -> Result<Schema, Box<dyn std::error::Error>> {
 		types.push(Type::InputObject(table_filter));
 	}
 
-	//TODO: This is broken
-	query = query.field(
-		Field::new("_get_record", TypeRef::named("record"), |ctx| {
-			FieldFuture::new(async move {
-				let kvs = DB.get().unwrap();
-
-				let args = ctx.args.as_index_map();
-				// async-graphql should validate that this is present as it is non-null
-				let id = args.get("id").map(GqlValueUtils::as_string).flatten().unwrap();
-
-				let use_stmt = Statement::Use((DB_NAME, NS_NAME).intox());
-
-				let ast = Statement::Select({
-					let mut tmp = SelectStatement::default();
-					tmp.what = vec![SqlValue::Thing(id.try_into().unwrap())].into();
-					tmp.expr = Fields::all();
-					tmp.only = true;
-					tmp
-				});
-
-				let query = vec![use_stmt, ast].into();
-				trace!("generated query: {}", query);
-
-				let res = kvs.process(query, &Default::default(), Default::default()).await?;
-				// ast is constructed such that there will only be two responses the first of which is NONE
-				let mut res_iter = res.into_iter();
-				let _ = res_iter.next();
-				let res = res_iter.next().unwrap();
-				let res = res.result?;
-				let out =
-					sql_value_to_gql_value(res).map_err(|_| "SQL to GQL translation failed")?;
-
-				Ok(Some(out))
-			})
-		})
-		.argument(id_input!()),
-	);
 	trace!("current Query object for schema: {:?}", query);
 
 	let mut schema = Schema::build("Query", None, None).register(query);
