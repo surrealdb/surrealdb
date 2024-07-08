@@ -986,6 +986,9 @@ allow_unsafe = true
 [pkg.crossbeam-deque]
 allow_unsafe = true
 
+[pkg.crossbeam-queue]
+allow_unsafe = true
+
 [pkg.anstream]
 allow_unsafe = true
 
