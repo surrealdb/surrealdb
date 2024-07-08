@@ -172,8 +172,8 @@ pub async fn init(ct: CancellationToken) -> Result<(), Error> {
 		.merge(signup::router())
 		.merge(key::router());
 
-	if env::var("SUREALDB_GRAPHQL") == Ok("true".to_string()) {
-		info!("Starting GraphQL server");
+	if env::var("SURREALDB_ENABLE_GRAPHQL") == Ok("true".to_string()) {
+		warn!("IMPORTANT: GraphQL is a pre-release feature. This is not recommended for production use.");
 		axum_app = axum_app.merge(gql::router().await);
 	}
 
