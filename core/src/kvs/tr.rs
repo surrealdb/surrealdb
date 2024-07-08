@@ -598,7 +598,7 @@ impl Transactor {
 
 		// Ensure there are no keys after the ts_key
 		// Otherwise we can go back in time!
-		let ts_key = crate::key::database::ts::new(ns, db, ts);
+		let mut ts_key = crate::key::database::ts::new(ns, db, ts);
 		let begin = ts_key.encode()?;
 		let end = crate::key::database::ts::suffix(ns, db);
 		let ts_pairs: Vec<(Vec<u8>, Vec<u8>)> = self.getr(begin..end, None).await?;
@@ -615,9 +615,8 @@ impl Transactor {
 			let k = crate::key::database::ts::Ts::decode(k)?;
 			let latest_ts = k.ts;
 			if latest_ts >= ts {
-				return Err(Error::Internal(
-					"ts is less than or equal to the latest ts".to_string(),
-				));
+				warn!("ts {ts} is less than the latest ts {latest_ts}");
+				ts_key = crate::key::database::ts::new(ns, db, latest_ts + 1);
 			}
 		}
 		self.set(ts_key, vst, None).await?;
@@ -629,7 +628,6 @@ impl Transactor {
 		ts: u64,
 		ns: &str,
 		db: &str,
-		_lock: bool,
 	) -> Result<Option<Versionstamp>, Error> {
 		let start = crate::key::database::ts::prefix(ns, db);
 		let ts_key = crate::key::database::ts::new(ns, db, ts + 1);

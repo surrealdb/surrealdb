@@ -1,4 +1,5 @@
 use crate::dbs::node::Timestamp;
+use crate::dbs::Session;
 use crate::kvs::clock::{FakeClock, SizedClock};
 use crate::kvs::tests::{ClockType, Kvs};
 use crate::kvs::Datastore;
