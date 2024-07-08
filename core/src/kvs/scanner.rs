@@ -65,11 +65,11 @@ impl<'a> Stream for Scanner<'a> {
 						// Get the last element of the results
 						let last = v.last().unwrap();
 						// Start the next scan from the last result
-						self.range.start = last.0.clone();
+						self.range.start.clone_from(&last.0);
 						// Ensure we don't see the last result again
 						self.range.start.push(0xff);
 						// Store the fetched range results
-						self.results.extend(v.into_iter());
+						self.results.extend(v);
 						// Remove the first result to return
 						let item = self.results.pop_front().unwrap();
 						// Return the first result
