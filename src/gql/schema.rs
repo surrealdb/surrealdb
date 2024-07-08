@@ -74,7 +74,7 @@ pub async fn get_schema() -> Result<Schema, Box<dyn std::error::Error>> {
 	const NS_NAME: &str = "test";
 
 	for tb in tbs.iter() {
-		info!("Adding table: {}", tb.name);
+		trace!("Adding table: {}", tb.name);
 		let tb_name = tb.name.to_string();
 		let first_tb_name = tb_name.clone();
 		let second_tb_name = tb_name.clone();
@@ -95,7 +95,11 @@ pub async fn get_schema() -> Result<Schema, Box<dyn std::error::Error>> {
 
 		let table_filter_name = format!("_filter_{tb_name}");
 		let mut table_filter = InputObject::new(&table_filter_name);
-		table_filter = table_filter.field(InputValue::new("id", TypeRef::named("_filter_id")));
+		table_filter = table_filter
+			.field(InputValue::new("id", TypeRef::named("_filter_id")))
+			.field(InputValue::new("and", TypeRef::named_nn_list(&table_filter_name)))
+			.field(InputValue::new("or", TypeRef::named_nn_list(&table_filter_name)))
+			.field(InputValue::new("not", TypeRef::named(&table_filter_name)));
 		types.push(Type::InputObject(filter_id()));
 
 		query = query.field(
@@ -114,16 +118,17 @@ pub async fn get_schema() -> Result<Schema, Box<dyn std::error::Error>> {
 						// let map = args.as_index_map();
 						// dbg!(map);
 
-						let par_val = ctx.parent_value.as_value().unwrap().clone();
-						dbg!(par_val);
+						// let par_val = ctx.parent_value.as_value().unwrap().clone();
+						// dbg!(par_val);
 
-						let inner = ctx.ctx.clone();
-						let node = inner.path_node;
-						dbg!(node);
+						// let inner = ctx.ctx.clone();
+						// let node = inner.path_node;
+						// dbg!(node);
 						// ---------------
 
 						let args = ctx.args.as_index_map();
-						info!("args: {args:?}");
+						trace!("received request with args: {args:?}");
+
 						let start =
 							args.get("start").map(|v| v.as_i64()).flatten().map(|s| s.intox());
 
@@ -165,7 +170,7 @@ pub async fn get_schema() -> Result<Schema, Box<dyn std::error::Error>> {
 							}
 							_ => None,
 						};
-						info!("orders: {orders:?}");
+						trace!("parsed orders: {orders:?}");
 
 						let cond = match filter {
 							Some(f) => {
@@ -196,10 +201,10 @@ pub async fn get_schema() -> Result<Schema, Box<dyn std::error::Error>> {
 							tmp
 						});
 
-						info!("query ast: {ast:?}");
+						trace!("generated query ast: {ast:?}");
 
 						let query = vec![use_stmt, ast].into();
-						info!("query: {}", query);
+						trace!("generated query: {}", query);
 
 						let res =
 							kvs.process(query, &Default::default(), Default::default()).await?;
@@ -246,7 +251,13 @@ pub async fn get_schema() -> Result<Schema, Box<dyn std::error::Error>> {
 
 						let args = ctx.args.as_index_map();
 						// async-graphql should validate that this is present as it is non-null
-						let id = args.get("id").map(GqlValueUtils::as_string).flatten().unwrap();
+						let id = match args.get("id").map(GqlValueUtils::as_string).flatten() {
+							Some(i) => i,
+							None => {
+								error!("Schema validation failed: no id found in _get_ request");
+								return Err("No id found".into());
+							}
+						};
 						let thing = match id.clone().try_into() {
 							Ok(t) => t,
 							Err(_) => Thing::from((tb_name, id)),
@@ -265,7 +276,7 @@ pub async fn get_schema() -> Result<Schema, Box<dyn std::error::Error>> {
 						});
 
 						let query = vec![use_stmt, ast].into();
-						info!("query: {}", query);
+						trace!("generated query: {}", query);
 
 						let res =
 							kvs.process(query, &Default::default(), Default::default()).await?;
@@ -308,7 +319,7 @@ pub async fn get_schema() -> Result<Schema, Box<dyn std::error::Error>> {
 
 			let type_filter =
 				Type::InputObject(filter_from_type(fd.kind.clone(), type_filter_name.clone()));
-			println!("\n{type_filter:?}\n");
+			trace!("\n{type_filter:?}\n");
 			types.push(type_filter);
 
 			table_filter = table_filter
@@ -332,7 +343,7 @@ pub async fn get_schema() -> Result<Schema, Box<dyn std::error::Error>> {
 		types.push(Type::Object(table_ty_obj));
 		types.push(table_order.into());
 		types.push(Type::Enum(table_orderable));
-		println!("\n\n\n{table_filter:?}");
+		trace!("\n\n\n{table_filter:?}");
 		types.push(Type::InputObject(table_filter));
 	}
 
@@ -357,7 +368,7 @@ pub async fn get_schema() -> Result<Schema, Box<dyn std::error::Error>> {
 				});
 
 				let query = vec![use_stmt, ast].into();
-				info!("query: {}", query);
+				trace!("generated query: {}", query);
 
 				let res = kvs.process(query, &Default::default(), Default::default()).await?;
 				// ast is constructed such that there will only be two responses the first of which is NONE
@@ -373,11 +384,11 @@ pub async fn get_schema() -> Result<Schema, Box<dyn std::error::Error>> {
 		})
 		.argument(id_input!()),
 	);
-	info!("current Query: {:?}", query);
+	trace!("current Query object for schema: {:?}", query);
 
 	let mut schema = Schema::build("Query", None, None).register(query);
 	for ty in types {
-		println!("adding type: {ty:?}");
+		trace!("adding type: {ty:?}");
 		schema = schema.register(ty);
 	}
 
@@ -404,14 +415,16 @@ fn sql_value_to_gql_value(v: SqlValue) -> Result<GqlValue, ()> {
 		SqlValue::Number(n) => match n {
 			surrealdb::sql::Number::Int(i) => GqlValue::Number(i.into()),
 			surrealdb::sql::Number::Float(f) => GqlValue::Number(Number::from_f64(f).ok_or(())?),
-			surrealdb::sql::Number::Decimal(_) => todo!("surrealdb::sql::Number::Decimal(_) "),
+			surrealdb::sql::Number::Decimal(_) => todo!("surrealdb::sql::Number::Decimal(_)"),
 			_ => todo!(),
 		},
 		SqlValue::Strand(s) => GqlValue::String(s.0),
-		SqlValue::Duration(_) => todo!("SqlValue::Duration(_) "),
-		SqlValue::Datetime(_) => todo!("SqlValue::Datetime(_) "),
-		SqlValue::Uuid(_) => todo!("SqlValue::Uuid(_) "),
-		SqlValue::Array(_) => todo!("SqlValue::Array(_) "),
+		SqlValue::Duration(d) => GqlValue::String(d.to_string()),
+		SqlValue::Datetime(d) => GqlValue::String(d.to_string()),
+		SqlValue::Uuid(uuid) => GqlValue::String(uuid.to_string()),
+		SqlValue::Array(a) => {
+			GqlValue::List(a.into_iter().map(|v| sql_value_to_gql_value(v).unwrap()).collect())
+		}
 		SqlValue::Object(o) => GqlValue::Object(
 			o.0.into_iter()
 				.map(|(k, v)| (Name::new(k), sql_value_to_gql_value(v).unwrap()))
@@ -420,23 +433,7 @@ fn sql_value_to_gql_value(v: SqlValue) -> Result<GqlValue, ()> {
 		SqlValue::Geometry(_) => todo!("SqlValue::Geometry(_) "),
 		SqlValue::Bytes(_) => todo!("SqlValue::Bytes(_) "),
 		SqlValue::Thing(t) => GqlValue::String(t.to_string()),
-		SqlValue::Param(_) => todo!("SqlValue::Param(_) "),
-		SqlValue::Idiom(_) => todo!("SqlValue::Idiom(_) "),
-		SqlValue::Table(_) => todo!("SqlValue::Table(_) "),
-		SqlValue::Mock(_) => todo!("SqlValue::Mock(_) "),
-		SqlValue::Regex(_) => todo!("SqlValue::Regex(_) "),
-		SqlValue::Cast(_) => todo!("SqlValue::Cast(_) "),
-		SqlValue::Block(_) => todo!("SqlValue::Block(_) "),
-		SqlValue::Range(_) => todo!("SqlValue::Range(_) "),
-		SqlValue::Edges(_) => todo!("SqlValue::Edges(_) "),
-		SqlValue::Future(_) => todo!("SqlValue::Future(_) "),
-		SqlValue::Constant(_) => todo!("SqlValue::Constant(_) "),
-		SqlValue::Function(_) => todo!("SqlValue::Function(_) "),
-		SqlValue::Subquery(_) => todo!("SqlValue::Subquery(_) "),
-		SqlValue::Expression(_) => todo!("SqlValue::Expression(_) "),
-		SqlValue::Query(_) => todo!("SqlValue::Query(_) "),
-		SqlValue::Model(_) => todo!("SqlValue::Model(_) "),
-		_ => todo!(),
+		_ => unimplemented!("Other values should not be used in responses"),
 	};
 	Ok(out)
 }
@@ -539,15 +536,6 @@ fn cond_from_filter(filter: &IndexMap<Name, GqlValue>) -> Result<Cond, Error> {
 }
 
 fn val_from_filter(filter: &IndexMap<Name, GqlValue>) -> Result<SqlValue, Error> {
-	// for (op_name, val) in filter.iter() {
-	// 	let op = match op_name.as_str() {
-	// 		"eq" => sql::Operator::Equal,
-	// 		op => return Err(Error::Thrown(format!("Unsupported op: {op}"))),
-	// 	};
-
-	// 	let val =
-	// 	break;
-	// }
 	if filter.len() != 1 {
 		return Err(Error::Thrown(format!("Table Filter must have one item")));
 	}
@@ -620,7 +608,7 @@ fn aggregate(filter: &GqlValue, op: AggregateOp) -> Result<SqlValue, Error> {
 		.into();
 	}
 
-	todo!()
+	Ok(cond)
 }
 
 fn binop(field_name: &str, val: &GqlValue) -> Result<SqlValue, Error> {
