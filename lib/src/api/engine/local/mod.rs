@@ -91,6 +91,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 use surrealdb_core::sql::Function;
+#[cfg(feature = "ml")]
 use surrealdb_core::sql::Model;
 #[cfg(not(target_arch = "wasm32"))]
 use tokio::fs::OpenOptions;
@@ -828,7 +829,7 @@ async fn router(
 			Ok(DbResponse::Other(value))
 		}
 		Method::Run => {
-			let (fn_name, fn_version, fn_params) = match &mut params[..] {
+			let (fn_name, _fn_version, fn_params) = match &mut params[..] {
 				[Value::Strand(n), Value::Strand(v), Value::Array(p)] => (n, Some(v), p),
 				[Value::Strand(n), Value::None, Value::Array(p)] => (n, None, p),
 				_ => unreachable!(),
@@ -837,16 +838,13 @@ async fn router(
 				"fn::" => {
 					Function::Custom(fn_name.chars().skip(4).collect(), fn_params.0.clone()).into()
 				}
+				// should return error, but can't on wasm
+				#[cfg(feature = "ml")]
 				"ml::" => {
 					let mut tmp = Model::default();
 
-					// 	Model {
-					// 	name: fn_name.chars().skip(4).collect(),
-					// 	version: todo!(),
-					// 	args: fn_args,
-					// }
 					tmp.name = fn_name.chars().skip(4).collect();
-					tmp.args = mem::take(fn_params).0;
+					tmp.args = mem::take(_fn_params).0;
 					tmp.version = mem::take(
 						fn_version
 							.ok_or(Error::Query("ML functions must have a version".to_string()))?,
