@@ -3,7 +3,6 @@ pub mod opt;
 use crate::err::Error;
 use crate::sql::value::serde::ser;
 use crate::sql::Fetch;
-use crate::sql::Idiom;
 use ser::Serializer as _;
 use serde::ser::Impossible;
 use serde::ser::Serialize;
@@ -53,7 +52,7 @@ impl serde::ser::SerializeSeq for SerializeFetchVec {
 	where
 		T: Serialize + ?Sized,
 	{
-		self.0.push(Fetch(Idiom(value.serialize(ser::part::vec::Serializer.wrap())?)));
+		self.0.push(Fetch(value.serialize(ser::value::Serializer.wrap())?));
 		Ok(())
 	}
 

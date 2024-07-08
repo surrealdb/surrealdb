@@ -1725,6 +1725,7 @@ mod tests {
 		Ok(())
 	}
 
+	#[allow(clippy::too_many_arguments)]
 	async fn test_mtree_collection(
 		stk: &mut Stk,
 		capacities: &[u16],

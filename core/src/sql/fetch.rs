@@ -1,5 +1,4 @@
 use crate::sql::fmt::Fmt;
-use crate::sql::idiom::Idiom;
 use crate::sql::statements::info::InfoStructure;
 use crate::sql::Value;
 use revision::revisioned;
@@ -44,10 +43,10 @@ impl InfoStructure for Fetchs {
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
-pub struct Fetch(pub Idiom);
+pub struct Fetch(pub Value);
 
 impl Deref for Fetch {
-	type Target = Idiom;
+	type Target = Value;
 	fn deref(&self) -> &Self::Target {
 		&self.0
 	}

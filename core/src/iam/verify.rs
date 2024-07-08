@@ -1,3 +1,4 @@
+use crate::cnf::INSECURE_FORWARD_RECORD_ACCESS_ERRORS;
 use crate::dbs::Session;
 use crate::err::Error;
 #[cfg(feature = "jwks")]
@@ -137,7 +138,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 		}
 	}
 	// Check the token authentication claims
-	match token_data.claims {
+	match token_data.claims.clone() {
 		// Check if this is record access
 		Claims {
 			ns: Some(ns),
@@ -151,30 +152,60 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			// Create a new readonly transaction
 			let tx = kvs.transaction(Read, Optimistic).await?;
 			// Parse the record id
-			let id = syn::thing(&id)?;
+			let mut rid = syn::thing(&id)?;
 			// Get the database access method
 			let de = tx.get_db_access(&ns, &db, &ac).await?;
 			// Ensure that the transaction is cancelled
 			tx.cancel().await?;
 			// Obtain the configuration to verify the token based on the access method
-			let cf = match de.kind.clone() {
-				AccessType::Record(ac) => match ac.jwt.verify {
-					JwtAccessVerify::Key(key) => config(key.alg, key.key.as_bytes()),
-					#[cfg(feature = "jwks")]
-					JwtAccessVerify::Jwks(jwks) => {
-						if let Some(kid) = token_data.header.kid {
-							jwks::config(kvs, &kid, &jwks.url, token_data.header.alg).await
-						} else {
-							Err(Error::MissingTokenHeader("kid".to_string()))
+			let (au, cf) = match de.kind.clone() {
+				AccessType::Record(at) => {
+					let cf = match at.jwt.verify.clone() {
+						JwtAccessVerify::Key(key) => config(key.alg, key.key.as_bytes()),
+						#[cfg(feature = "jwks")]
+						JwtAccessVerify::Jwks(jwks) => {
+							if let Some(kid) = token_data.header.kid {
+								jwks::config(kvs, &kid, &jwks.url, token_data.header.alg).await
+							} else {
+								Err(Error::MissingTokenHeader("kid".to_string()))
+							}
 						}
-					}
-					#[cfg(not(feature = "jwks"))]
-					_ => return Err(Error::AccessMethodMismatch),
-				},
+						#[cfg(not(feature = "jwks"))]
+						_ => return Err(Error::AccessMethodMismatch),
+					}?;
+
+					(at.authenticate, cf)
+				}
 				_ => return Err(Error::AccessMethodMismatch),
-			}?;
+			};
 			// Verify the token
 			decode::<Claims>(token, &cf.0, &cf.1)?;
+			// AUTHENTICATE clause
+			if let Some(au) = au {
+				// Setup the system session for finding the signin record
+				let mut sess = Session::editor().with_ns(&ns).with_db(&db);
+				sess.rd = Some(rid.clone().into());
+				sess.tk = Some(token_data.claims.clone().into());
+				sess.ip.clone_from(&session.ip);
+				sess.or.clone_from(&session.or);
+				// Compute the value with the params
+				match kvs.evaluate(au, &sess, None).await {
+					Ok(val) => match val.record() {
+						Some(id) => {
+							// Update rid with result from AUTHENTICATE clause
+							rid = id;
+						}
+						_ => return Err(Error::InvalidAuth),
+					},
+					Err(e) => {
+						return match e {
+							Error::Thrown(_) => Err(e),
+							e if *INSECURE_FORWARD_RECORD_ACCESS_ERRORS => Err(e),
+							_ => Err(Error::InvalidAuth),
+						}
+					}
+				}
+			}
 			// Log the success
 			debug!("Authenticated with record access method `{}`", ac);
 			// Set the session
@@ -182,16 +213,17 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			session.ns = Some(ns.to_owned());
 			session.db = Some(db.to_owned());
 			session.ac = Some(ac.to_owned());
-			session.rd = Some(Value::from(id.to_owned()));
+			session.rd = Some(Value::from(rid.to_owned()));
 			session.exp = expiration(de.duration.session)?;
 			session.au = Arc::new(Auth::new(Actor::new(
-				id.to_string(),
+				rid.to_string(),
 				Default::default(),
-				Level::Record(ns, db, id.to_string()),
+				Level::Record(ns, db, rid.to_string()),
 			)));
 			Ok(())
 		}
 		// Check if this is database access
+		// This can also be record access with an authenticate clause
 		Claims {
 			ns: Some(ns),
 			db: Some(db),
@@ -207,49 +239,112 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			// Ensure that the transaction is cancelled
 			tx.cancel().await?;
 			// Obtain the configuration to verify the token based on the access method
-			let cf = match de.kind.clone() {
-				AccessType::Jwt(ac) => match ac.verify {
-					JwtAccessVerify::Key(key) => config(key.alg, key.key.as_bytes()),
-					#[cfg(feature = "jwks")]
-					JwtAccessVerify::Jwks(jwks) => {
-						if let Some(kid) = token_data.header.kid {
-							jwks::config(kvs, &kid, &jwks.url, token_data.header.alg).await
-						} else {
-							Err(Error::MissingTokenHeader("kid".to_string()))
+			match de.kind.clone() {
+				// If the access type is Jwt, this is database access
+				AccessType::Jwt(at) => {
+					let cf = match at.verify {
+						JwtAccessVerify::Key(key) => config(key.alg, key.key.as_bytes()),
+						#[cfg(feature = "jwks")]
+						JwtAccessVerify::Jwks(jwks) => {
+							if let Some(kid) = token_data.header.kid {
+								jwks::config(kvs, &kid, &jwks.url, token_data.header.alg).await
+							} else {
+								Err(Error::MissingTokenHeader("kid".to_string()))
+							}
 						}
+						#[cfg(not(feature = "jwks"))]
+						_ => return Err(Error::AccessMethodMismatch),
+					}?;
+
+					// Verify the token
+					decode::<Claims>(token, &cf.0, &cf.1)?;
+					// Parse the roles
+					let roles = match token_data.claims.roles {
+						// If no role is provided, grant the viewer role
+						None => vec![Role::Viewer],
+						// If roles are provided, parse them
+						Some(roles) => roles
+							.iter()
+							.map(|r| -> Result<Role, Error> {
+								Role::from_str(r.as_str()).map_err(Error::IamError)
+							})
+							.collect::<Result<Vec<_>, _>>()?,
+					};
+					// Log the success
+					debug!("Authenticated to database `{}` with access method `{}`", db, ac);
+					// Set the session
+					session.tk = Some(value);
+					session.ns = Some(ns.to_owned());
+					session.db = Some(db.to_owned());
+					session.ac = Some(ac.to_owned());
+					session.exp = expiration(de.duration.session)?;
+					session.au = Arc::new(Auth::new(Actor::new(
+						de.name.to_string(),
+						roles,
+						Level::Database(ns, db),
+					)));
+				}
+				// If the access type is Record, this is record access
+				// Record access without an "id" claim is only possible if there is an AUTHENTICATE clause
+				// The clause can make up for the missing "id" claim by resolving other claims to a specific record
+				AccessType::Record(at) => match at.authenticate {
+					Some(au) => {
+						trace!("Access method `{}` is record access with authenticate clause", ac);
+						let cf = match at.jwt.verify {
+							JwtAccessVerify::Key(key) => config(key.alg, key.key.as_bytes()),
+							#[cfg(feature = "jwks")]
+							JwtAccessVerify::Jwks(jwks) => {
+								if let Some(kid) = token_data.header.kid {
+									jwks::config(kvs, &kid, &jwks.url, token_data.header.alg).await
+								} else {
+									Err(Error::MissingTokenHeader("kid".to_string()))
+								}
+							}
+							#[cfg(not(feature = "jwks"))]
+							_ => return Err(Error::AccessMethodMismatch),
+						}?;
+
+						// Verify the token
+						decode::<Claims>(token, &cf.0, &cf.1)?;
+						// AUTHENTICATE clause
+						// Setup the system session for finding the signin record
+						let mut sess = Session::editor().with_ns(&ns).with_db(&db);
+						sess.tk = Some(token_data.claims.clone().into());
+						sess.ip.clone_from(&session.ip);
+						sess.or.clone_from(&session.or);
+						// Compute the value with the params
+						let rid = match kvs.evaluate(au, &sess, None).await {
+							Ok(val) => match val.record() {
+								// If found, return record identifier from AUTHENTICATE clause
+								Some(id) => id,
+								_ => return Err(Error::InvalidAuth),
+							},
+							Err(e) => {
+								return match e {
+									Error::Thrown(_) => Err(e),
+									e if *INSECURE_FORWARD_RECORD_ACCESS_ERRORS => Err(e),
+									_ => Err(Error::InvalidAuth),
+								}
+							}
+						};
+						// Log the success
+						debug!("Authenticated with record access method `{}`", ac);
+						// Set the session
+						session.tk = Some(value);
+						session.ns = Some(ns.to_owned());
+						session.db = Some(db.to_owned());
+						session.ac = Some(ac.to_owned());
+						session.rd = Some(Value::from(rid.to_owned()));
+						session.exp = expiration(de.duration.session)?;
+						session.au = Arc::new(Auth::new(Actor::new(
+							rid.to_string(),
+							Default::default(),
+							Level::Record(ns, db, rid.to_string()),
+						)));
 					}
-					#[cfg(not(feature = "jwks"))]
 					_ => return Err(Error::AccessMethodMismatch),
 				},
-				_ => return Err(Error::AccessMethodMismatch),
-			}?;
-			// Verify the token
-			decode::<Claims>(token, &cf.0, &cf.1)?;
-			// Parse the roles
-			let roles = match token_data.claims.roles {
-				// If no role is provided, grant the viewer role
-				None => vec![Role::Viewer],
-				// If roles are provided, parse them
-				Some(roles) => roles
-					.iter()
-					.map(|r| -> Result<Role, Error> {
-						Role::from_str(r.as_str()).map_err(Error::IamError)
-					})
-					.collect::<Result<Vec<_>, _>>()?,
 			};
-			// Log the success
-			debug!("Authenticated to database `{}` with access method `{}`", db, ac);
-			// Set the session
-			session.tk = Some(value);
-			session.ns = Some(ns.to_owned());
-			session.db = Some(db.to_owned());
-			session.ac = Some(ac.to_owned());
-			session.exp = expiration(de.duration.session)?;
-			session.au = Arc::new(Auth::new(Actor::new(
-				de.name.to_string(),
-				roles,
-				Level::Database(ns, db),
-			)));
 			Ok(())
 		}
 		// Check if this is database authentication with user credentials
@@ -1361,7 +1456,7 @@ mod tests {
 			// Create the token
 			let enc = match encode(&HEADER, &claims, &key) {
 				Ok(enc) => enc,
-				Err(err) => panic!("Failed to decode token: {:?}", err),
+				Err(err) => panic!("Failed to encode token: {:?}", err),
 			};
 			// Signin with the token
 			let mut sess = Session::default();
@@ -1666,5 +1761,277 @@ mod tests {
 		let res = token(&ds, &mut sess, &enc).await;
 
 		assert!(res.is_err(), "Unexpected success signing in with expired token: {:?}", res);
+	}
+
+	#[tokio::test]
+	async fn test_token_db_record_and_authenticate_clause() {
+		// Test with an "id" claim
+		{
+			let secret = "jwt_secret";
+			let key = EncodingKey::from_secret(secret.as_ref());
+			let claims = Claims {
+				iss: Some("surrealdb-test".to_string()),
+				iat: Some(Utc::now().timestamp()),
+				nbf: Some(Utc::now().timestamp()),
+				exp: Some((Utc::now() + Duration::hours(1)).timestamp()),
+				ns: Some("test".to_string()),
+				db: Some("test".to_string()),
+				ac: Some("user".to_string()),
+				id: Some("user:1".to_string()),
+				..Claims::default()
+			};
+
+			let ds = Datastore::new("memory").await.unwrap();
+			let sess = Session::owner().with_ns("test").with_db("test");
+			ds.execute(
+				format!(
+					r#"
+    				DEFINE ACCESS user ON DATABASE TYPE RECORD
+    					AUTHENTICATE (
+							-- Simple example increasing the record identifier by one
+							SELECT * FROM type::thing('user', meta::id($auth) + 1)
+    					)
+ 				        WITH JWT ALGORITHM HS512 KEY '{secret}'
+    					DURATION FOR SESSION 2h
+    				;
+
+    				CREATE user:1, user:2;
+				"#
+				)
+				.as_str(),
+				&sess,
+				None,
+			)
+			.await
+			.unwrap();
+
+			// Prepare the claims object
+			let mut claims = claims.clone();
+			claims.roles = None;
+			// Create the token
+			let enc = encode(&HEADER, &claims, &key).unwrap();
+			// Signin with the token
+			let mut sess = Session::default();
+			let res = token(&ds, &mut sess, &enc).await;
+
+			assert!(res.is_ok(), "Failed to signin with token: {:?}", res);
+			assert_eq!(sess.ns, Some("test".to_string()));
+			assert_eq!(sess.db, Some("test".to_string()));
+			assert_eq!(sess.ac, Some("user".to_string()));
+			assert_eq!(sess.au.id(), "user:2");
+			assert!(sess.au.is_record());
+			assert_eq!(sess.au.level().ns(), Some("test"));
+			assert_eq!(sess.au.level().db(), Some("test"));
+			assert_eq!(sess.au.level().id(), Some("user:2"));
+			// Record users should not have roles
+			assert!(!sess.au.has_role(&Role::Viewer), "Auth user expected to not have Viewer role");
+			assert!(!sess.au.has_role(&Role::Editor), "Auth user expected to not have Editor role");
+			assert!(!sess.au.has_role(&Role::Owner), "Auth user expected to not have Owner role");
+			// Expiration should match the defined duration
+			let exp = sess.exp.unwrap();
+			// Expiration should match the current time plus session duration with some margin
+			let min_exp = (Utc::now() + Duration::hours(2) - Duration::seconds(10)).timestamp();
+			let max_exp = (Utc::now() + Duration::hours(2) + Duration::seconds(10)).timestamp();
+			assert!(
+				exp > min_exp && exp < max_exp,
+				"Session expiration is expected to follow the defined duration"
+			);
+		}
+
+		// Test without an "id" claim
+		{
+			let secret = "jwt_secret";
+			let key = EncodingKey::from_secret(secret.as_ref());
+
+			let ds = Datastore::new("memory").await.unwrap();
+			let sess = Session::owner().with_ns("test").with_db("test");
+			ds.execute(
+				format!(
+					r#"
+				DEFINE ACCESS user ON DATABASE TYPE RECORD
+					SIGNIN (
+						SELECT * FROM type::thing('user', $id)
+					)
+					AUTHENTICATE (
+					    SELECT id FROM user WHERE email = $token.email
+					)
+					WITH JWT ALGORITHM HS512 KEY '{secret}'
+					DURATION FOR SESSION 2h
+				;
+
+				CREATE user:1 SET email = "info@surrealdb.com";
+				"#
+				)
+				.as_str(),
+				&sess,
+				None,
+			)
+			.await
+			.unwrap();
+
+			let now = Utc::now().timestamp();
+			let later = (Utc::now() + Duration::hours(1)).timestamp();
+			let claims_json = format!(
+				r#"
+				{{
+					"iss": "surrealdb-test",
+					"iat": {now},
+					"nbf": {now},
+					"exp": {later},
+					"ns": "test",
+					"db": "test",
+					"ac": "user",
+					"email": "info@surrealdb.com"
+				}}
+				"#
+			);
+			let claims = serde_json::from_str::<Claims>(&claims_json).unwrap();
+			// Create the token
+			let enc = match encode(&HEADER, &claims, &key) {
+				Ok(enc) => enc,
+				Err(err) => panic!("Failed to encode token: {:?}", err),
+			};
+			// Signin with the token
+			let mut sess = Session::default();
+			let res = token(&ds, &mut sess, &enc).await;
+
+			assert!(res.is_ok(), "Failed to signin with token: {:?}", res);
+			assert_eq!(sess.ns, Some("test".to_string()));
+			assert_eq!(sess.db, Some("test".to_string()));
+			assert_eq!(sess.ac, Some("user".to_string()));
+			assert_eq!(sess.au.id(), "user:1");
+			assert!(sess.au.is_record());
+			assert_eq!(sess.au.level().ns(), Some("test"));
+			assert_eq!(sess.au.level().db(), Some("test"));
+			assert_eq!(sess.au.level().id(), Some("user:1"));
+			// Record users should not have roles
+			assert!(!sess.au.has_role(&Role::Viewer), "Auth user expected to not have Viewer role");
+			assert!(!sess.au.has_role(&Role::Editor), "Auth user expected to not have Editor role");
+			assert!(!sess.au.has_role(&Role::Owner), "Auth user expected to not have Owner role");
+			// Expiration should match the defined duration
+			let exp = sess.exp.unwrap();
+			// Expiration should match the current time plus session duration with some margin
+			let min_exp = (Utc::now() + Duration::hours(2) - Duration::seconds(10)).timestamp();
+			let max_exp = (Utc::now() + Duration::hours(2) + Duration::seconds(10)).timestamp();
+			assert!(
+				exp > min_exp && exp < max_exp,
+				"Session expiration is expected to follow the defined duration"
+			);
+		}
+
+		// Test being able to fail authentication
+		{
+			let secret = "jwt_secret";
+			let key = EncodingKey::from_secret(secret.as_ref());
+			let claims = Claims {
+				iss: Some("surrealdb-test".to_string()),
+				iat: Some(Utc::now().timestamp()),
+				nbf: Some(Utc::now().timestamp()),
+				exp: Some((Utc::now() + Duration::hours(1)).timestamp()),
+				ns: Some("test".to_string()),
+				db: Some("test".to_string()),
+				ac: Some("user".to_string()),
+				id: Some("user:1".to_string()),
+				..Claims::default()
+			};
+
+			let ds = Datastore::new("memory").await.unwrap();
+			let sess = Session::owner().with_ns("test").with_db("test");
+			ds.execute(
+				format!(r#"
+    				DEFINE ACCESS user ON DATABASE TYPE RECORD
+    					AUTHENTICATE {{
+    					    -- Not just signin, this clause runs across signin, signup and authenticate, which makes it a nice place to centralize logic
+    					    IF !$auth.enabled {{
+    							THROW "This user is not enabled";
+    						}};
+
+    						-- Always need to return the user id back, otherwise auth generically fails
+    						RETURN $auth;
+    					}}
+                        WITH JWT ALGORITHM HS512 KEY '{secret}'
+    					DURATION FOR SESSION 2h
+    				;
+
+    				CREATE user:1 SET enabled = false;
+				"#).as_str(),
+				&sess,
+				None,
+			)
+			.await
+			.unwrap();
+
+			// Prepare the claims object
+			let mut claims = claims.clone();
+			claims.roles = None;
+			// Create the token
+			let enc = encode(&HEADER, &claims, &key).unwrap();
+			// Signin with the token
+			let mut sess = Session::default();
+			let res = token(&ds, &mut sess, &enc).await;
+
+			match res {
+				Err(Error::Thrown(e)) if e == "This user is not enabled" => {} // ok
+				res => panic!(
+				    "Expected authentication to failed due to user not being enabled, but instead received: {:?}",
+					res
+				),
+			}
+		}
+
+		// Test AUTHENTICATE clause not returning a value
+		{
+			let secret = "jwt_secret";
+			let key = EncodingKey::from_secret(secret.as_ref());
+			let claims = Claims {
+				iss: Some("surrealdb-test".to_string()),
+				iat: Some(Utc::now().timestamp()),
+				nbf: Some(Utc::now().timestamp()),
+				exp: Some((Utc::now() + Duration::hours(1)).timestamp()),
+				ns: Some("test".to_string()),
+				db: Some("test".to_string()),
+				ac: Some("user".to_string()),
+				id: Some("user:test".to_string()),
+				..Claims::default()
+			};
+
+			let ds = Datastore::new("memory").await.unwrap();
+			let sess = Session::owner().with_ns("test").with_db("test");
+			ds.execute(
+				format!(
+					r#"
+    				DEFINE ACCESS user ON DATABASE TYPE RECORD
+    					AUTHENTICATE {{}}
+    				    WITH JWT ALGORITHM HS512 KEY '{secret}'
+    					DURATION FOR SESSION 2h
+    				;
+
+    				CREATE user:1;
+				"#
+				)
+				.as_str(),
+				&sess,
+				None,
+			)
+			.await
+			.unwrap();
+
+			// Prepare the claims object
+			let mut claims = claims.clone();
+			claims.roles = None;
+			// Create the token
+			let enc = encode(&HEADER, &claims, &key).unwrap();
+			// Signin with the token
+			let mut sess = Session::default();
+			let res = token(&ds, &mut sess, &enc).await;
+
+			match res {
+				Err(Error::InvalidAuth) => {} // ok
+				res => panic!(
+					"Expected authentication to generally fail, but instead received: {:?}",
+					res
+				),
+			}
+		}
 	}
 }

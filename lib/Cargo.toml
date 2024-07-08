@@ -69,7 +69,6 @@ chrono = { version = "0.4.31", features = ["serde"] }
 dmp = "0.2.0"
 flume = "0.11.0"
 futures = "0.3.29"
-futures-concurrency = "7.4.3"
 geo = { version = "0.27.0", features = ["use-serde"] }
 indexmap = { version = "2.1.0", features = ["serde"] }
 native-tls = { version = "0.2.11", optional = true }

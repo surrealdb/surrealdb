@@ -196,7 +196,7 @@ async fn knn_lookup_object(mt: &MTreeIndex, ctx: &Context<'_>, object: Vec<Numbe
 	let mut stack = TreeStack::new();
 	stack
 		.enter(|stk| async {
-			let chk = MTreeConditionChecker::new(&ctx);
+			let chk = MTreeConditionChecker::new(ctx);
 			let r = mt.knn_search(stk, ctx, &object, knn, chk).await.unwrap();
 			assert_eq!(r.len(), knn);
 		})

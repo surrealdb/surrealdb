@@ -15,11 +15,7 @@ use jsonwebtoken::{encode, EncodingKey, Header};
 use std::sync::Arc;
 use uuid::Uuid;
 
-pub async fn signin(
-	kvs: &Datastore,
-	session: &mut Session,
-	vars: Object,
-) -> Result<Option<String>, Error> {
+pub async fn signin(kvs: &Datastore, session: &mut Session, vars: Object) -> Result<String, Error> {
 	// Parse the specified variables
 	let ns = vars.get("NS").or_else(|| vars.get("ns"));
 	let db = vars.get("DB").or_else(|| vars.get("db"));
@@ -103,7 +99,7 @@ pub async fn db_access(
 	db: String,
 	ac: String,
 	vars: Object,
-) -> Result<Option<String>, Error> {
+) -> Result<String, Error> {
 	// Create a new readonly transaction
 	let tx = kvs.transaction(Read, Optimistic).await?;
 	// Fetch the specified access method from storage
@@ -139,11 +135,11 @@ pub async fn db_access(
 								Ok(val) => {
 									match val.record() {
 										// There is a record returned
-										Some(rid) => {
+										Some(mut rid) => {
 											// Create the authentication key
 											let key = config(iss.alg, iss.key)?;
 											// Create the authentication claim
-											let val = Claims {
+											let claims = Claims {
 												iss: Some(SERVER_NAME.to_owned()),
 												iat: Some(Utc::now().timestamp()),
 												nbf: Some(Utc::now().timestamp()),
@@ -155,13 +151,40 @@ pub async fn db_access(
 												id: Some(rid.to_raw()),
 												..Claims::default()
 											};
+											// AUTHENTICATE clause
+											if let Some(au) = at.authenticate {
+												// Setup the system session for finding the signin record
+												let mut sess =
+													Session::editor().with_ns(&ns).with_db(&db);
+												sess.rd = Some(rid.clone().into());
+												sess.tk = Some(claims.clone().into());
+												sess.ip.clone_from(&session.ip);
+												sess.or.clone_from(&session.or);
+												// Compute the value with the params
+												match kvs.evaluate(au, &sess, None).await {
+    												Ok(val) => match val.record() {
+														Some(id) => {
+															// Update rid with result from AUTHENTICATE clause
+															rid = id;
+														}
+														_ => return Err(Error::InvalidAuth),
+													},
+													Err(e) => {
+														return match e {
+															Error::Thrown(_) => Err(e),
+															e if *INSECURE_FORWARD_RECORD_ACCESS_ERRORS => Err(e),
+															_ => Err(Error::InvalidAuth),
+														}
+													}
+												}
+											}
 											// Log the authenticated access method info
 											trace!("Signing in with access method `{}`", ac);
 											// Create the authentication token
 											let enc =
-												encode(&Header::new(iss.alg.into()), &val, &key);
+												encode(&Header::new(iss.alg.into()), &claims, &key);
 											// Set the authentication on the session
-											session.tk = Some(val.into());
+											session.tk = Some(claims.into());
 											session.ns = Some(ns.to_owned());
 											session.db = Some(db.to_owned());
 											session.ac = Some(ac.to_owned());
@@ -175,7 +198,7 @@ pub async fn db_access(
 											// Check the authentication token
 											match enc {
 												// The auth token was created successfully
-												Ok(tk) => Ok(Some(tk)),
+												Ok(tk) => Ok(tk),
 												_ => Err(Error::TokenMakingFailed),
 											}
 										}
@@ -206,7 +229,7 @@ pub async fn db_user(
 	db: String,
 	user: String,
 	pass: String,
-) -> Result<Option<String>, Error> {
+) -> Result<String, Error> {
 	match verify_db_creds(kvs, &ns, &db, &user, &pass).await {
 		Ok(u) => {
 			// Create the authentication key
@@ -236,7 +259,7 @@ pub async fn db_user(
 			// Check the authentication token
 			match enc {
 				// The auth token was created successfully
-				Ok(tk) => Ok(Some(tk)),
+				Ok(tk) => Ok(tk),
 				_ => Err(Error::TokenMakingFailed),
 			}
 		}
@@ -250,7 +273,7 @@ pub async fn ns_user(
 	ns: String,
 	user: String,
 	pass: String,
-) -> Result<Option<String>, Error> {
+) -> Result<String, Error> {
 	match verify_ns_creds(kvs, &ns, &user, &pass).await {
 		Ok(u) => {
 			// Create the authentication key
@@ -278,7 +301,7 @@ pub async fn ns_user(
 			// Check the authentication token
 			match enc {
 				// The auth token was created successfully
-				Ok(tk) => Ok(Some(tk)),
+				Ok(tk) => Ok(tk),
 				_ => Err(Error::TokenMakingFailed),
 			}
 		}
@@ -292,7 +315,7 @@ pub async fn root_user(
 	session: &mut Session,
 	user: String,
 	pass: String,
-) -> Result<Option<String>, Error> {
+) -> Result<String, Error> {
 	match verify_root_creds(kvs, &user, &pass).await {
 		Ok(u) => {
 			// Create the authentication key
@@ -318,7 +341,7 @@ pub async fn root_user(
 			// Check the authentication token
 			match enc {
 				// The auth token was created successfully
-				Ok(tk) => Ok(Some(tk)),
+				Ok(tk) => Ok(tk),
 				_ => Err(Error::TokenMakingFailed),
 			}
 		}
@@ -578,7 +601,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 			);
 
 			// Decode token and check that it has been issued as intended
-			if let Ok(Some(tk)) = res {
+			if let Ok(tk) = res {
 				// Check that token can be verified with the defined algorithm
 				let val = Validation::new(Algorithm::RS256);
 				// Check that token can be verified with the defined public key
@@ -696,7 +719,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 			assert!(!sess.au.has_role(&Role::Owner), "Auth user expected to not have Owner role");
 			assert_eq!(sess.exp, None, "Session expiration is expected to match defined duration");
 			// Decode token and check that it has been issued as intended
-			if let Ok(Some(tk)) = res {
+			if let Ok(tk) = res {
 				// Decode token without validation
 				let token_data = decode::<Claims>(&tk, &DecodingKey::from_secret(&[]), &{
 					let mut validation = Validation::new(jsonwebtoken::Algorithm::HS256);
@@ -775,7 +798,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				"Session expiration is expected to match the defined duration"
 			);
 			// Decode token and check that it has been issued as intended
-			if let Ok(Some(tk)) = res {
+			if let Ok(tk) = res {
 				// Decode token without validation
 				let token_data = decode::<Claims>(&tk, &DecodingKey::from_secret(&[]), &{
 					let mut validation = Validation::new(jsonwebtoken::Algorithm::HS256);
@@ -894,7 +917,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 			assert!(!sess.au.has_role(&Role::Owner), "Auth user expected to not have Owner role");
 			assert_eq!(sess.exp, None, "Session expiration is expected to match defined duration");
 			// Decode token and check that it has been issued as intended
-			if let Ok(Some(tk)) = res {
+			if let Ok(tk) = res {
 				// Decode token without validation
 				let token_data = decode::<Claims>(&tk, &DecodingKey::from_secret(&[]), &{
 					let mut validation = Validation::new(jsonwebtoken::Algorithm::HS256);
@@ -964,7 +987,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				"Session expiration is expected to match the defined duration"
 			);
 			// Decode token and check that it has been issued as intended
-			if let Ok(Some(tk)) = res {
+			if let Ok(tk) = res {
 				// Decode token without validation
 				let token_data = decode::<Claims>(&tk, &DecodingKey::from_secret(&[]), &{
 					let mut validation = Validation::new(jsonwebtoken::Algorithm::HS256);
@@ -1066,7 +1089,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 			assert!(!sess.au.has_role(&Role::Owner), "Auth user expected to not have Owner role");
 			assert_eq!(sess.exp, None, "Session expiration is expected to match defined duration");
 			// Decode token and check that it has been issued as intended
-			if let Ok(Some(tk)) = res {
+			if let Ok(tk) = res {
 				// Decode token without validation
 				let token_data = decode::<Claims>(&tk, &DecodingKey::from_secret(&[]), &{
 					let mut validation = Validation::new(jsonwebtoken::Algorithm::HS256);
@@ -1131,7 +1154,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				"Session expiration is expected to match the defined duration"
 			);
 			// Decode token and check that it has been issued as intended
-			if let Ok(Some(tk)) = res {
+			if let Ok(tk) = res {
 				// Decode token without validation
 				let token_data = decode::<Claims>(&tk, &DecodingKey::from_secret(&[]), &{
 					let mut validation = Validation::new(jsonwebtoken::Algorithm::HS256);
@@ -1176,6 +1199,277 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 			let res = root_user(&ds, &mut sess, "user".to_string(), "invalid".to_string()).await;
 
 			assert!(res.is_err(), "Unexpected successful signin: {:?}", res);
+		}
+	}
+
+	#[tokio::test]
+	async fn test_signin_record_and_authenticate_clause() {
+		// Test with correct credentials
+		{
+			let ds = Datastore::new("memory").await.unwrap();
+			let sess = Session::owner().with_ns("test").with_db("test");
+			ds.execute(
+				r#"
+				DEFINE ACCESS user ON DATABASE TYPE RECORD
+					SIGNIN (
+						SELECT * FROM type::thing('user', $id)
+					)
+					AUTHENTICATE (
+						-- Simple example increasing the record identifier by one
+					    SELECT * FROM type::thing('user', meta::id($auth) + 1)
+					)
+					DURATION FOR SESSION 2h
+				;
+
+				CREATE user:1, user:2;
+				"#,
+				&sess,
+				None,
+			)
+			.await
+			.unwrap();
+
+			// Signin with the user
+			let mut sess = Session {
+				ns: Some("test".to_string()),
+				db: Some("test".to_string()),
+				..Default::default()
+			};
+			let mut vars: HashMap<&str, Value> = HashMap::new();
+			vars.insert("id", 1.into());
+			let res = db_access(
+				&ds,
+				&mut sess,
+				"test".to_string(),
+				"test".to_string(),
+				"user".to_string(),
+				vars.into(),
+			)
+			.await;
+
+			assert!(res.is_ok(), "Failed to signin with credentials: {:?}", res);
+			assert_eq!(sess.ns, Some("test".to_string()));
+			assert_eq!(sess.db, Some("test".to_string()));
+			assert_eq!(sess.ac, Some("user".to_string()));
+			assert_eq!(sess.au.id(), "user:2");
+			assert!(sess.au.is_record());
+			assert_eq!(sess.au.level().ns(), Some("test"));
+			assert_eq!(sess.au.level().db(), Some("test"));
+			assert_eq!(sess.au.level().id(), Some("user:2"));
+			// Record users should not have roles
+			assert!(!sess.au.has_role(&Role::Viewer), "Auth user expected to not have Viewer role");
+			assert!(!sess.au.has_role(&Role::Editor), "Auth user expected to not have Editor role");
+			assert!(!sess.au.has_role(&Role::Owner), "Auth user expected to not have Owner role");
+			// Expiration should match the defined duration
+			let exp = sess.exp.unwrap();
+			// Expiration should match the current time plus session duration with some margin
+			let min_exp = (Utc::now() + Duration::hours(2) - Duration::seconds(10)).timestamp();
+			let max_exp = (Utc::now() + Duration::hours(2) + Duration::seconds(10)).timestamp();
+			assert!(
+				exp > min_exp && exp < max_exp,
+				"Session expiration is expected to follow the defined duration"
+			);
+		}
+
+		// Test with correct credentials and "realistic" scenario
+		{
+			let ds = Datastore::new("memory").await.unwrap();
+			let sess = Session::owner().with_ns("test").with_db("test");
+			ds.execute(
+				r#"
+				DEFINE ACCESS owner ON DATABASE TYPE RECORD
+					SIGNUP (
+						-- Allow anyone to sign up as a new company
+						-- This automatically creates an owner with the same credentials
+						CREATE company CONTENT {
+							email: $email,
+							pass: crypto::argon2::generate($pass),
+							owner: (CREATE employee CONTENT {
+								email: $email,
+								pass: $pass,
+							}),
+						}
+					)
+					SIGNIN (
+						-- Allow company owners to log in directly with the company account
+						SELECT * FROM company WHERE email = $email AND crypto::argon2::compare(pass, $pass)
+					)
+					AUTHENTICATE (
+						-- If logging in with a company account, the session will be authenticated as the first owner
+						IF meta::tb($auth) = "company" {
+							RETURN SELECT VALUE owner FROM company WHERE id = $auth
+						}
+					)
+					DURATION FOR SESSION 2h
+				;
+
+				CREATE company:1 CONTENT {
+					email: "info@example.com",
+					pass: crypto::argon2::generate("company-password"),
+					owner: employee:2,
+				};
+				CREATE employee:1 CONTENT {
+					email: "member@example.com",
+					pass: crypto::argon2::generate("member-password"),
+				};
+				CREATE employee:2 CONTENT {
+					email: "owner@example.com",
+					pass: crypto::argon2::generate("owner-password"),
+				};
+				"#,
+				&sess,
+				None,
+			)
+			.await
+			.unwrap();
+
+			// Signin with the user
+			let mut sess = Session {
+				ns: Some("test".to_string()),
+				db: Some("test".to_string()),
+				..Default::default()
+			};
+			let mut vars: HashMap<&str, Value> = HashMap::new();
+			vars.insert("email", "info@example.com".into());
+			vars.insert("pass", "company-password".into());
+			let res = db_access(
+				&ds,
+				&mut sess,
+				"test".to_string(),
+				"test".to_string(),
+				"owner".to_string(),
+				vars.into(),
+			)
+			.await;
+
+			assert!(res.is_ok(), "Failed to signin with credentials: {:?}", res);
+			assert_eq!(sess.ns, Some("test".to_string()));
+			assert_eq!(sess.db, Some("test".to_string()));
+			assert_eq!(sess.ac, Some("owner".to_string()));
+			assert_eq!(sess.au.id(), "employee:2");
+			assert!(sess.au.is_record());
+			assert_eq!(sess.au.level().ns(), Some("test"));
+			assert_eq!(sess.au.level().db(), Some("test"));
+			assert_eq!(sess.au.level().id(), Some("employee:2"));
+			// Record users should not have roles
+			assert!(!sess.au.has_role(&Role::Viewer), "Auth user expected to not have Viewer role");
+			assert!(!sess.au.has_role(&Role::Editor), "Auth user expected to not have Editor role");
+			assert!(!sess.au.has_role(&Role::Owner), "Auth user expected to not have Owner role");
+			// Expiration should match the defined duration
+			let exp = sess.exp.unwrap();
+			// Expiration should match the current time plus session duration with some margin
+			let min_exp = (Utc::now() + Duration::hours(2) - Duration::seconds(10)).timestamp();
+			let max_exp = (Utc::now() + Duration::hours(2) + Duration::seconds(10)).timestamp();
+			assert!(
+				exp > min_exp && exp < max_exp,
+				"Session expiration is expected to follow the defined duration"
+			);
+		}
+
+		// Test being able to fail authentication
+		{
+			let ds = Datastore::new("memory").await.unwrap();
+			let sess = Session::owner().with_ns("test").with_db("test");
+			ds.execute(
+				r#"
+				DEFINE ACCESS user ON DATABASE TYPE RECORD
+					SIGNIN (
+						SELECT * FROM type::thing('user', $id)
+					)
+					AUTHENTICATE {
+					    -- Not just signin, this clause runs across signin, signup and authenticate, which makes it a nice place to centralize logic
+					    IF !$auth.enabled {
+							THROW "This user is not enabled";
+						};
+
+						-- Always need to return the user id back, otherwise auth generically fails
+						RETURN $auth;
+					}
+					DURATION FOR SESSION 2h
+				;
+
+				CREATE user:1 SET enabled = false;
+				"#,
+				&sess,
+				None,
+			)
+			.await
+			.unwrap();
+
+			// Signin with the user
+			let mut sess = Session {
+				ns: Some("test".to_string()),
+				db: Some("test".to_string()),
+				..Default::default()
+			};
+			let mut vars: HashMap<&str, Value> = HashMap::new();
+			vars.insert("id", 1.into());
+			let res = db_access(
+				&ds,
+				&mut sess,
+				"test".to_string(),
+				"test".to_string(),
+				"user".to_string(),
+				vars.into(),
+			)
+			.await;
+
+			match res {
+				Err(Error::Thrown(e)) if e == "This user is not enabled" => {} // ok
+				res => panic!(
+				    "Expected authentication to failed due to user not being enabled, but instead received: {:?}",
+					res
+				),
+			}
+		}
+
+		// Test AUTHENTICATE clause not returning a value
+		{
+			let ds = Datastore::new("memory").await.unwrap();
+			let sess = Session::owner().with_ns("test").with_db("test");
+			ds.execute(
+				r#"
+				DEFINE ACCESS user ON DATABASE TYPE RECORD
+					SIGNIN (
+					   SELECT * FROM type::thing('user', $id)
+					)
+					AUTHENTICATE {}
+					DURATION FOR SESSION 2h
+				;
+
+				CREATE user:1;
+				"#,
+				&sess,
+				None,
+			)
+			.await
+			.unwrap();
+
+			// Signin with the user
+			let mut sess = Session {
+				ns: Some("test".to_string()),
+				db: Some("test".to_string()),
+				..Default::default()
+			};
+			let mut vars: HashMap<&str, Value> = HashMap::new();
+			vars.insert("id", 1.into());
+			let res = db_access(
+				&ds,
+				&mut sess,
+				"test".to_string(),
+				"test".to_string(),
+				"user".to_string(),
+				vars.into(),
+			)
+			.await;
+
+			match res {
+				Err(Error::InvalidAuth) => {} // ok
+				res => panic!(
+					"Expected authentication to generally fail, but instead received: {:?}",
+					res
+				),
+			}
 		}
 	}
 }
