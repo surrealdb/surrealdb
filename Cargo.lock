@@ -4788,10 +4788,21 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4df61cfb2522f24fd6aa90ce3489c2c8660a181075e7bac3ae7bdf22287d238f"
 dependencies = [
  "bincode",
+ "revision-derive 0.7.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "serde",
+ "thiserror",
+]
+
+[[package]]
+name = "revision"
+version = "0.7.1"
+source = "git+https://github.com/emmanuel-keller/revision?branch=check_tuple_2#e7f6fc585177b9824b4d9d38caedf27a9827505d"
+dependencies = [
+ "bincode",
  "chrono",
  "geo 0.26.0",
  "regex",
- "revision-derive",
+ "revision-derive 0.7.0 (git+https://github.com/emmanuel-keller/revision?branch=check_tuple_2)",
  "roaring",
  "rust_decimal",
  "serde",
@@ -4804,6 +4815,18 @@ name = "revision-derive"
 version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "854ff0b6794d4e0aab5e4486870941caefe9f258e63cad2f21b49a6302377c85"
+dependencies = [
+ "darling",
+ "proc-macro-error",
+ "proc-macro2",
+ "quote",
+ "syn 2.0.58",
+]
+
+[[package]]
+name = "revision-derive"
+version = "0.7.0"
+source = "git+https://github.com/emmanuel-keller/revision?branch=check_tuple_2#e7f6fc585177b9824b4d9d38caedf27a9827505d"
 dependencies = [
  "darling",
  "proc-macro-error",
@@ -5896,7 +5919,7 @@ dependencies = [
  "rand 0.8.5",
  "rcgen",
  "reqwest",
- "revision",
+ "revision 0.7.1 (git+https://github.com/emmanuel-keller/revision?branch=check_tuple_2)",
  "rmp-serde",
  "rmpv",
  "rustyline",
@@ -5952,7 +5975,7 @@ dependencies = [
  "reblessive",
  "regex",
  "reqwest",
- "revision",
+ "revision 0.7.1 (git+https://github.com/emmanuel-keller/revision?branch=check_tuple_2)",
  "ring 0.17.8",
  "rust_decimal",
  "rustls 0.21.11",
@@ -6041,7 +6064,7 @@ dependencies = [
  "regex",
  "regex-syntax 0.8.3",
  "reqwest",
- "revision",
+ "revision 0.7.1 (git+https://github.com/emmanuel-keller/revision?branch=check_tuple_2)",
  "ring 0.17.8",
  "rmpv",
  "roaring",
@@ -6156,7 +6179,7 @@ dependencies = [
  "lru",
  "parking_lot",
  "quick_cache",
- "revision",
+ "revision 0.7.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "sha2",
  "tokio",
  "vart",

@@ -49,17 +49,14 @@ impl InfoStructure for Fetchs {
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub struct Fetch(
-	// Uncomment once the revision issue is fixed: https://github.com/surrealdb/revision/pull/19
-	/* #[revision(end = 2, convert_fn = "convert_fetch_idiom")] */
-	pub Idiom,
+	#[revision(end = 2, convert_fn = "convert_fetch_idiom")] pub Idiom,
 	#[revision(start = 2)] pub Value,
 );
 
 impl Fetch {
-	// TODO remove once the revision issue is fixed
-	#[allow(dead_code)]
-	fn convert_fetch_idiom(_revision: u16, n: (Idiom,)) -> Result<Self, revision::Error> {
-		Ok(Self(Default::default(), Value::Idiom(n.0)))
+	fn convert_fetch_idiom(&mut self, _revision: u16, old: Idiom) -> Result<(), revision::Error> {
+		self.1 = Value::Idiom(old);
+		Ok(())
 	}
 
 	pub(crate) async fn compute(

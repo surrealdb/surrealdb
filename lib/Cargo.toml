@@ -89,7 +89,8 @@ reqwest = { version = "0.11.22", default-features = false, features = [
     "stream",
     "multipart",
 ], optional = true }
-revision = { version = "0.7.0", features = [
+# TODO replace with 0.7.1
+revision = { git = "https://github.com/emmanuel-keller/revision", branch = "check_tuple_2", features = [
     "chrono",
     "geo",
     "roaring",
