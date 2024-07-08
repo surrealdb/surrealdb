@@ -1253,7 +1253,7 @@ where
 	let res = val.walk(&part);
 	for (i, v) in res {
 		let mut idiom = Idiom::default();
-		idiom.0 = part.clone();
+		idiom.0.clone_from(&part);
 		assert_eq!(idiom, i);
 		check(v);
 	}
