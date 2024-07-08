@@ -48,11 +48,14 @@ async fn timestamp_to_versionstamp() {
 
 #[tokio::test]
 #[serial]
-async fn only_the_latest_ts_is_retained() {
+async fn writing_ts_again_results_in_following_ts() {
 	// Create a new datastore
 	let node_id = Uuid::parse_str("A905CA25-56ED-49FB-B759-696AEA87C342").unwrap();
 	let clock = Arc::new(SizedClock::Fake(FakeClock::new(Timestamp::default())));
 	let (ds, _) = new_ds(node_id, clock).await;
+
+	// Declare ns/db
+	ds.execute("USE NS myns; USE DB mydb; CREATE record", &Session::owner(), None).await.unwrap();
 
 	// Give the current versionstamp a timestamp of 0
 	let mut tx = ds.transaction(Write, Optimistic).await.unwrap();
@@ -78,7 +81,21 @@ async fn only_the_latest_ts_is_retained() {
 	let start = key::database::ts::new("myns", "mydb", 0);
 	let end = key::database::ts::new("myns", "mydb", u64::MAX);
 	let mut tx = ds.transaction(Write, Optimistic).await.unwrap();
+	let scanned = tx.scan(start.clone()..end.clone(), u32::MAX).await.unwrap();
+	tx.commit().await.unwrap();
+	assert_eq!(scanned.len(), 2);
+	assert_eq!(scanned[0].0, key::database::ts::new("myns", "mydb", 0).encode().unwrap());
+	assert_eq!(scanned[1].0, key::database::ts::new("myns", "mydb", 1).encode().unwrap());
+
+	// Repeating tick
+	ds.tick_at(1).await.unwrap();
+
+	// Validate
+	let mut tx = ds.transaction(Write, Optimistic).await.unwrap();
 	let scanned = tx.scan(start..end, u32::MAX).await.unwrap();
 	tx.commit().await.unwrap();
-	assert_eq!(scanned.len(), 1)
+	assert_eq!(scanned.len(), 3);
+	assert_eq!(scanned[0].0, key::database::ts::new("myns", "mydb", 0).encode().unwrap());
+	assert_eq!(scanned[1].0, key::database::ts::new("myns", "mydb", 1).encode().unwrap());
+	assert_eq!(scanned[2].0, key::database::ts::new("myns", "mydb", 2).encode().unwrap());
 }
