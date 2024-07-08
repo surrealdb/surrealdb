@@ -4,7 +4,7 @@ use crate::err::Error;
 use crate::kvs::Check;
 use crate::kvs::Key;
 use crate::kvs::Val;
-use crate::vs::{u64_to_versionstamp, Versionstamp};
+use crate::vs::Versionstamp;
 use std::ops::Range;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -339,10 +339,6 @@ impl super::api::Transaction for Transaction {
 		if self.done {
 			return Err(Error::TxFinished);
 		}
-		// Check to see if transaction is writable
-		if !self.write {
-			return Err(Error::TxReadonly);
-		}
 		// Convert the range to bytes
 		let rng: Range<Key> = Range {
 			start: rng.start.into(),
@@ -375,7 +371,6 @@ impl super::api::Transaction for Transaction {
 	}
 
 	/// Obtain a new change timestamp for a key
-	#[allow(unused)]
 	async fn get_timestamp<K>(&mut self, key: K) -> Result<Versionstamp, Error>
 	where
 		K: Into<Key>,
@@ -388,8 +383,6 @@ impl super::api::Transaction for Transaction {
 		let key = key.into();
 		// Get the transaction version
 		let ver = self.inner.current_timestamp().await?.version();
-		// Convert the value to a versionstamp
-		let verbytes = u64_to_versionstamp(ver);
 		// Calculate the previous version value
 		if let Some(prev) = self.get(key.as_slice()).await? {
 			let res: Result<[u8; 10], Error> = match prev.as_slice().try_into() {

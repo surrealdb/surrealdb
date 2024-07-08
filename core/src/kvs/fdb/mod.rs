@@ -6,7 +6,7 @@ use crate::err::Error;
 use crate::kvs::Check;
 use crate::kvs::Key;
 use crate::kvs::Val;
-use crate::vs::{u64_to_versionstamp, Versionstamp};
+use crate::vs::Versionstamp;
 use foundationdb::options::DatabaseOption;
 use foundationdb::options::MutationType;
 use foundationdb::Database;
@@ -459,7 +459,6 @@ impl super::api::Transaction for Transaction {
 	}
 
 	/// Obtain a new change timestamp for a key
-	#[allow(unused)]
 	async fn get_timestamp<K>(&mut self, _: K) -> Result<Versionstamp, Error> {
 		// Check to see if transaction is closed
 		if self.done {
@@ -468,7 +467,7 @@ impl super::api::Transaction for Transaction {
 		// Get the current read version
 		let res = self.inner.as_ref().unwrap().get_read_version().await?;
 		// Convert to a version stamp
-		let res = u64_to_versionstamp(res as u64);
+		let res = crate::vs::u64_to_versionstamp(res as u64);
 		// Return result
 		Ok(res)
 	}
