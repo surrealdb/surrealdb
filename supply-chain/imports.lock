@@ -114,6 +114,13 @@ user-id = 145457
 user-login = "tobiemh"
 user-name = "Tobie Morgan Hitchcock"
 
+[[publisher.revision]]
+version = "0.7.1"
+when = "2024-06-19"
+user-id = 145457
+user-login = "tobiemh"
+user-name = "Tobie Morgan Hitchcock"
+
 [[publisher.revision-derive]]
 version = "0.7.0"
 when = "2024-04-17"
@@ -163,6 +170,13 @@ user-id = 145457
 user-login = "tobiemh"
 user-name = "Tobie Morgan Hitchcock"
 
+[[publisher.surrealkv]]
+version = "0.3.0"
+when = "2024-07-04"
+user-id = 145457
+user-login = "tobiemh"
+user-name = "Tobie Morgan Hitchcock"
+
 [[publisher.surrealml-core]]
 version = "0.1.2"
 when = "2024-04-02"
@@ -201,6 +215,13 @@ user-name = "Manish Goregaokar"
 [[publisher.vart]]
 version = "0.2.1"
 when = "2024-04-24"
+user-id = 145457
+user-login = "tobiemh"
+user-name = "Tobie Morgan Hitchcock"
+
+[[publisher.vart]]
+version = "0.4.0"
+when = "2024-07-04"
 user-id = 145457
 user-login = "tobiemh"
 user-name = "Tobie Morgan Hitchcock"
@@ -968,6 +989,28 @@ Previously reviewed during security review and the audit is grandparented in.
 """
 aggregated-from = "https://chromium.googlesource.com/chromium/src/+/main/third_party/rust/chromium_crates_io/supply-chain/audits.toml?format=TEXT"
 
+[[audits.google.audits.strum]]
+who = "danakj@chromium.org"
+criteria = "safe-to-deploy"
+version = "0.25.0"
+notes = """
+Reviewed in https://crrev.com/c/5171063
+
+Previously reviewed during security review and the audit is grandparented in.
+"""
+aggregated-from = "https://chromium.googlesource.com/chromium/src/+/main/third_party/rust/chromium_crates_io/supply-chain/audits.toml?format=TEXT"
+
+[[audits.google.audits.strum_macros]]
+who = "danakj@chromium.org"
+criteria = "safe-to-deploy"
+version = "0.25.3"
+notes = """
+Reviewed in https://crrev.com/c/5171063
+
+Previously reviewed during security review and the audit is grandparented in.
+"""
+aggregated-from = "https://chromium.googlesource.com/chromium/src/+/main/third_party/rust/chromium_crates_io/supply-chain/audits.toml?format=TEXT"
+
 [[audits.google.audits.termcolor]]
 who = "danakj@chromium.org"
 criteria = "safe-to-run"
@@ -1651,6 +1694,24 @@ aggregated-from = "https://hg.mozilla.org/mozilla-central/raw-file/tip/supply-ch
 who = "Kershaw Chang <kershaw@mozilla.com>"
 criteria = "safe-to-deploy"
 delta = "0.1.0 -> 0.1.1"
+aggregated-from = "https://hg.mozilla.org/mozilla-central/raw-file/tip/supply-chain/audits.toml"
+
+[[audits.mozilla.audits.time-macros]]
+who = "Kershaw Chang <kershaw@mozilla.com>"
+criteria = "safe-to-deploy"
+version = "0.2.6"
+aggregated-from = "https://hg.mozilla.org/mozilla-central/raw-file/tip/supply-chain/audits.toml"
+
+[[audits.mozilla.audits.time-macros]]
+who = "Kershaw Chang <kershaw@mozilla.com>"
+criteria = "safe-to-deploy"
+delta = "0.2.6 -> 0.2.10"
+aggregated-from = "https://hg.mozilla.org/mozilla-central/raw-file/tip/supply-chain/audits.toml"
+
+[[audits.mozilla.audits.time-macros]]
+who = "Alex Franchuk <afranchuk@mozilla.com>"
+criteria = "safe-to-deploy"
+delta = "0.2.10 -> 0.2.18"
 aggregated-from = "https://hg.mozilla.org/mozilla-central/raw-file/tip/supply-chain/audits.toml"
 
 [[audits.mozilla.audits.unicode-bidi]]
