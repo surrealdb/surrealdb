@@ -435,6 +435,9 @@ allow_unsafe = true
 build.allow_apis = [
     "process",
 ]
+build.allow_build_instructions = [
+    "cargo:rustc-check-cfg=*",
+]
 allow_apis = [
     "fs",
 ]
@@ -1355,4 +1358,7 @@ build.allow_apis = [
 allow_unsafe = true
 
 [pkg.tendril]
+allow_unsafe = true
+
+[pkg.lru]
 allow_unsafe = true
