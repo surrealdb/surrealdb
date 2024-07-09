@@ -253,8 +253,15 @@ impl<'a> Context<'a> {
 		self
 	}
 
+	pub fn get_transaction(&self) -> Option<&Transaction> {
+		self.transaction.as_ref()
+	}
+
 	pub(crate) fn tx(&self) -> Arc<Transaction> {
-		self.transaction.as_ref().map(Arc::clone).unwrap_or_else(|| unreachable!())
+		self.transaction
+			.as_ref()
+			.map(Arc::clone)
+			.unwrap_or_else(|| unreachable!("The context was not associated with a transaction"))
 	}
 
 	/// Get the timeout for this operation, if any. This is useful for

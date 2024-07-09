@@ -68,22 +68,29 @@ impl<'a> Document<'a> {
 				// This ensures that we are using the session
 				// of the user who created the LIVE query.
 				let mut lqctx = Context::background();
+				// Set the current transaction on the new LIVE
+				// query context to prevent unreachable behaviour
+				// and ensure that queries can be executed.
+				lqctx.set_transaction(ctx.tx());
+				// Add the session params to this LIVE query, so
+				// that queries can use these within field
+				// projections and WHERE clauses.
 				lqctx.add_value("access", sess.pick(AC.as_ref()));
 				lqctx.add_value("auth", sess.pick(RD.as_ref()));
 				lqctx.add_value("token", sess.pick(TK.as_ref()));
 				lqctx.add_value("session", sess);
-				// We need to create a new options which we will
-				// use for processing this LIVE query statement.
-				// This ensures that we are using the auth data
-				// of the user who created the LIVE query.
-				let lqopt = opt.new_with_perms(true).with_auth(Arc::from(auth));
 				// Add $before, $after, $value, and $event params
-				// to this LIVE query so that user can use these
+				// to this LIVE query so the user can use these
 				// within field projections and WHERE clauses.
 				lqctx.add_value("event", met);
 				lqctx.add_value("value", self.current.doc.deref());
 				lqctx.add_value("after", self.current.doc.deref());
 				lqctx.add_value("before", self.initial.doc.deref());
+				// We need to create a new options which we will
+				// use for processing this LIVE query statement.
+				// This ensures that we are using the auth data
+				// of the user who created the LIVE query.
+				let lqopt = opt.new_with_perms(true).with_auth(Arc::from(auth));
 				// First of all, let's check to see if the WHERE
 				// clause of the LIVE query is matched by this
 				// document. If it is then we can continue.
