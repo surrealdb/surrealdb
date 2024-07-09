@@ -149,6 +149,23 @@ impl Array {
 		Ok(Value::Array(x))
 	}
 
+	pub(crate) async fn partially_compute(
+		&self,
+		stk: &mut Stk,
+		ctx: &Context<'_>,
+		opt: &Options,
+		doc: Option<&CursorDoc<'_>>,
+	) -> Result<Value, Error> {
+		let mut x = Self::with_capacity(self.len());
+		for v in self.iter() {
+			match v.partially_compute(stk, ctx, opt, doc).await {
+				Ok(v) => x.push(v),
+				Err(e) => return Err(e),
+			};
+		}
+		Ok(Value::Array(x))
+	}
+
 	pub(crate) fn is_all_none_or_null(&self) -> bool {
 		self.0.iter().all(|v| v.is_none_or_null())
 	}

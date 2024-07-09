@@ -171,3 +171,64 @@ async fn live_query_does_not_drop_notifications() -> Result<(), Error> {
 
 	Ok(())
 }
+
+#[test_log::test(tokio::test)]
+pub async fn live_query_evaluates_params() -> Result<(), Error> {
+	let table = "lq_params_tb";
+	let define_stm = match FFLAGS.change_feed_live_queries.enabled() {
+		true => format!("DEFINE TABLE {table} CHANGEFEED 10m INCLUDE ORIGINAL;"),
+		false => format!("DEFINE TABLE {table};"),
+	};
+	let sql = format!(
+		"
+		{define_stm}	
+		LET $array = [1, 2, 3];
+		LIVE SELECT * FROM {table} WHERE record_property IN $array;
+	"
+	);
+	let mut stack = reblessive::tree::TreeStack::new();
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test").with_rt(true);
+	let res = &mut dbs.execute(&sql, &ses, None).await?;
+	assert_eq!(res.len(), 3);
+
+	// Define table didnt fail
+	let tmp = res.remove(0).result;
+	assert!(tmp.is_ok());
+
+	// LET didnt fail
+	let tmp = res.remove(0).result;
+	assert!(tmp.is_ok());
+
+	// Live query returned a valid uuid
+	let actual = res.remove(0).result.unwrap();
+	let live_id = match actual {
+		Value::Uuid(live_id) => live_id,
+		_ => panic!("Expected a UUID"),
+	};
+	assert!(!live_id.is_nil());
+
+	// Create some data
+	let test_sql = format!("CREATE {table}:test_case SET record_property = 3;");
+	let res = &mut dbs.execute(&test_sql, &ses, None).await?;
+	assert_eq!(res.len(), 1);
+	assert!(res.remove(0).result.is_ok());
+
+	// Process the notifications
+	let ctx = Default::default();
+	let opt = Options::default();
+	stack.enter(|stk| dbs.process_lq_notifications(stk, &ctx, &opt)).finish().await?;
+
+	let notifications_chan = dbs.notifications().unwrap();
+	tokio::select! {
+		_ = tokio::time::sleep(tokio::time::Duration::from_millis(1000)) => {
+			panic!("Timeout - no notification received");
+		}
+		msg = notifications_chan.recv() => {
+			assert!(msg.is_ok(), "Message failed: {:?}", msg);
+		}
+	}
+	assert!(notifications_chan.try_recv().is_err());
+
+	Ok(())
+}

@@ -2671,6 +2671,53 @@ impl Value {
 		}
 	}
 
+	/// Partially process this type (just the params) returning an evaluated simple Value that still needs computing
+	///
+	/// Is used recursively.
+	pub(crate) async fn partially_compute_unbordered(
+		&self,
+		stk: &mut Stk,
+		ctx: &Context<'_>,
+		opt: &Options,
+		doc: Option<&CursorDoc<'_>>,
+	) -> Result<Value, Error> {
+		// Prevent infinite recursion due to casting, expressions, etc.
+		let opt = &opt.dive(1)?;
+
+		match self {
+			// We only want to process params
+			Value::Param(v) => stk.run(|stk| v.compute(stk, ctx, opt, doc)).await,
+			// Anything that contains params gets partially computed
+			Value::Array(v) => stk.run(|stk| v.partially_compute(stk, ctx, opt, doc)).await,
+			// If params cannot exist then it remains un-computed
+			Value::Expression(e) => stk.run(|stk| e.partially_compute(stk, ctx, opt, doc)).await,
+			Value::Idiom(i) => {
+				trace!("Partially compute idiom at {}", i.to_string());
+				Ok(self.to_owned())
+			}
+			_ => {
+				trace!("Partially compute terminated at {}", self.to_string());
+				Ok(self.to_owned())
+			}
+		}
+	}
+
+	/// Evaluate only the params in a Value, leaving the rest un-computed
+	pub(crate) async fn partially_compute(
+		&self,
+		stk: &mut Stk,
+		ctx: &Context<'_>,
+		opt: &Options,
+		doc: Option<&CursorDoc<'_>>,
+	) -> Result<Value, Error> {
+		match self.partially_compute_unbordered(stk, ctx, opt, doc).await {
+			Err(Error::Return {
+				value,
+			}) => Ok(value),
+			res => res,
+		}
+	}
+
 	pub(crate) async fn compute(
 		&self,
 		stk: &mut Stk,

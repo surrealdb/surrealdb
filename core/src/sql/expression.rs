@@ -96,6 +96,38 @@ impl Expression {
 		}
 	}
 
+	/// Partially compute the expression, evaluating parameters
+	pub(crate) async fn partially_compute(
+		&self,
+		stk: &mut Stk,
+		ctx: &Context<'_>,
+		opt: &Options,
+		doc: Option<&CursorDoc<'_>>,
+	) -> Result<Value, Error> {
+		match self {
+			Self::Unary {
+				o,
+				v,
+			} => {
+				Ok(Value::Expression(Box::new(Self::Unary {
+					o: o.to_owned(),
+					v: v.partially_compute(stk, ctx, opt, doc).await?,
+				})))
+			}
+			Self::Binary {
+				l,
+				o,
+				r,
+			} => {
+				Ok(Value::Expression(Box::new(Self::Binary {
+					l: l.partially_compute(stk, ctx, opt, doc).await?,
+					o: o.to_owned(),
+					r: r.partially_compute(stk, ctx, opt, doc).await?,
+				})))
+			}
+		}
+	}
+
 	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
