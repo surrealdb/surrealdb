@@ -1378,22 +1378,11 @@ async fn run() {
 	let tmp = db.run("fn::foo", ()).await.unwrap();
 	assert_eq!(tmp, Value::from(42));
 
-	let tmp = db.run("fn::foo", 7).await;
-	assert!(matches!(
-		tmp,
-		Err(Error::Db(surrealdb::err::Error::InvalidArguments {
-			name: _,
-			message: _
-		}))
-	));
+	let tmp = db.run("fn::foo", 7).await.unwrap_err();
+	assert!(tmp.to_string().contains("The function expects 0 arguments."));
 
-	let tmp = db.run("fn::idnotexist", ()).await;
-	assert!(matches!(
-		tmp,
-		Err(Error::Db(surrealdb::err::Error::FcNotFound {
-			value: _
-		}))
-	));
+	let tmp = db.run("fn::idnotexist", ()).await.unwrap_err();
+	assert!(tmp.to_string().contains("The function 'fn::idnotexist' does not exist"));
 
 	let tmp = db.run("count", Value::from(vec![1, 2, 3])).await.unwrap();
 	assert_eq!(tmp, Value::from(3));
