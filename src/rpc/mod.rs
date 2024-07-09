@@ -54,9 +54,18 @@ pub(crate) async fn notifications(state: Arc<RpcState>, canceller: CancellationT
 				// Receive a notification on the channel
 				Ok(notification) = channel.recv() => {
 					// Find which WebSocket the notification belongs to
-					if let Some(id) = state.live_queries.read().await.get(&notification.id) {
+					let found_ws = {
+						// We remove the lock asap
+						state.live_queries.read().await.get(&notification.id).cloned()
+					};
+					if let Some(id) = found_ws {
 						// Check to see if the WebSocket exists
-						if let Some(rpc) = state.web_sockets.read().await.get(id) {
+						let maybe_ws = {
+							// We remove the lock ASAP
+							// WS is an Arc anyway
+							state.web_sockets.read().await.get(&id).cloned()
+						};
+						if let Some(rpc) = maybe_ws {
 							// Serialize the message to send
 							let message = success(None, notification);
 							// Add metrics

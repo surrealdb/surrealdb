@@ -197,11 +197,6 @@ mod test_check_lqs_and_send_notifications {
 	use std::collections::BTreeMap;
 	use std::sync::Arc;
 
-	use channel::Sender;
-	use futures::executor::block_on;
-	use once_cell::sync::Lazy;
-	use reblessive::TreeStack;
-
 	use crate::cf::TableMutation;
 	use crate::ctx::Context;
 	use crate::dbs::fuzzy_eq::FuzzyEq;
@@ -209,10 +204,16 @@ mod test_check_lqs_and_send_notifications {
 	use crate::fflags::FFLAGS;
 	use crate::iam::{Auth, Role};
 	use crate::kvs::lq_v2_doc::construct_document;
-	use crate::kvs::Datastore;
+	use crate::kvs::LockType::Optimistic;
+	use crate::kvs::{Datastore, TransactionType};
 	use crate::sql::paths::{OBJ_PATH_ACCESS, OBJ_PATH_AUTH, OBJ_PATH_TOKEN};
 	use crate::sql::statements::{CreateStatement, DeleteStatement, LiveStatement};
 	use crate::sql::{Fields, Object, Strand, Table, Thing, Uuid, Value, Values};
+	use channel::Sender;
+	use futures::executor::block_on;
+	use once_cell::sync::Lazy;
+	use reblessive::TreeStack;
+	use TransactionType::Write;
 
 	static SETUP: Lazy<Arc<TestSuite>> = Lazy::new(|| Arc::new(block_on(setup_test_suite_init())));
 
@@ -275,10 +276,19 @@ mod test_check_lqs_and_send_notifications {
 		// Perform "live query" on the constructed doc that we are checking
 		let live_statement = a_live_query_statement();
 		let executed_statement = a_create_statement();
+		let mut tx = Datastore::new("memory")
+			.await
+			.unwrap()
+			.transaction(Write, Optimistic)
+			.await
+			.unwrap()
+			.enclose();
+		let ctx = Context::background().set_transaction(tx.clone());
 		let mut stack = TreeStack::new();
 		stack.enter(|stk| async {
 			doc.check_lqs_and_send_notifications(
 				stk,
+				&ctx,
 				&opt,
 				&Statement::Create(&executed_statement),
 				&[&live_statement],
@@ -287,6 +297,7 @@ mod test_check_lqs_and_send_notifications {
 			.await
 			.unwrap();
 		});
+		tx.lock().await.commit().await.unwrap();
 
 		// THEN:
 		let notification = receiver.try_recv().expect("There should be a notification");
@@ -323,10 +334,19 @@ mod test_check_lqs_and_send_notifications {
 		// Perform "live query" on the constructed doc that we are checking
 		let live_statement = a_live_query_statement();
 		let executed_statement = a_delete_statement();
+		let mut tx = Datastore::new("memory")
+			.await
+			.unwrap()
+			.transaction(Write, Optimistic)
+			.await
+			.unwrap()
+			.enclose();
+		let ctx = Context::background().set_transaction(tx.clone());
 		let mut stack = TreeStack::new();
 		stack.enter(|stk| async {
 			doc.check_lqs_and_send_notifications(
 				stk,
+				&ctx,
 				&opt,
 				&Statement::Delete(&executed_statement),
 				&[&live_statement],
@@ -335,6 +355,7 @@ mod test_check_lqs_and_send_notifications {
 			.await
 			.unwrap();
 		});
+		tx.lock().await.commit().await.unwrap();
 
 		// THEN:
 		let notification = receiver.try_recv().expect("There should be a notification");

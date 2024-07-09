@@ -6,6 +6,7 @@ use surrealdb::dbs::Session;
 use surrealdb::err::Error;
 use surrealdb::fflags::FFLAGS;
 use surrealdb::sql::Value;
+use surrealdb_core::dbs::Options;
 
 #[tokio::test]
 async fn live_query_fails_if_no_change_feed() -> Result<(), Error> {
@@ -87,8 +88,9 @@ async fn live_query_sends_registered_lq_details() -> Result<(), Error> {
 	let result = res.remove(0);
 	assert!(result.result.is_ok());
 
-	let def = Default::default();
-	stack.enter(|stk| dbs.process_lq_notifications(stk, &def)).finish().await?;
+	let ctx = Default::default();
+	let opt = Options::default();
+	stack.enter(|stk| dbs.process_lq_notifications(stk, &ctx, &opt)).finish().await?;
 
 	let notifications_chan = dbs.notifications().unwrap();
 
@@ -148,8 +150,9 @@ async fn live_query_does_not_drop_notifications() -> Result<(), Error> {
 			assert!(result.result.is_ok());
 		}
 		// Process the notifications
-		let def = Default::default();
-		stack.enter(|stk| dbs.process_lq_notifications(stk, &def)).finish().await?;
+		let ctx = Default::default();
+		let opt = Options::default();
+		stack.enter(|stk| dbs.process_lq_notifications(stk, &ctx, &opt)).finish().await?;
 
 		let notifications_chan = dbs.notifications().unwrap();
 
