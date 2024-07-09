@@ -78,6 +78,7 @@ pub use patch::Patch;
 pub use query::Query;
 pub use query::QueryStream;
 pub use select::Select;
+use serde_content::Serializer;
 pub use set::Set;
 pub use signin::Signin;
 pub use signup::Signup;
@@ -322,7 +323,7 @@ where
 	/// # Ok(())
 	/// # }
 	/// ```
-	pub fn set(&self, key: impl Into<String>, value: impl Serialize) -> Set<C> {
+	pub fn set(&self, key: impl Into<String>, value: impl Serialize + 'static) -> Set<C> {
 		Set {
 			client: Cow::Borrowed(self),
 			key: key.into(),
@@ -424,16 +425,7 @@ where
 	pub fn signup<R>(&self, credentials: impl Credentials<auth::Signup, R>) -> Signup<C, R> {
 		Signup {
 			client: Cow::Borrowed(self),
-			credentials: to_value(credentials).map_err(Into::into).and_then(|x| {
-				if let Value::Object(x) = x {
-					Ok(x)
-				} else {
-					Err(Error::InternalError(
-						"credentials did not serialize to an object".to_string(),
-					)
-					.into())
-				}
-			}),
+			credentials: Serializer::new().serialize(credentials),
 			response_type: PhantomData,
 		}
 	}
@@ -552,16 +544,7 @@ where
 	pub fn signin<R>(&self, credentials: impl Credentials<auth::Signin, R>) -> Signin<C, R> {
 		Signin {
 			client: Cow::Borrowed(self),
-			credentials: to_value(credentials).map_err(Into::into).and_then(|x| {
-				if let Value::Object(x) = x {
-					Ok(x)
-				} else {
-					Err(Error::InternalError(
-						"credentials did not serialize to an object".to_string(),
-					)
-					.into())
-				}
-			}),
+			credentials: Serializer::new().serialize(credentials),
 			response_type: PhantomData,
 		}
 	}

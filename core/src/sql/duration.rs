@@ -40,6 +40,12 @@ impl From<Duration> for time::Duration {
 	}
 }
 
+impl From<time::Duration> for Value {
+	fn from(value: time::Duration) -> Self {
+		Self::Duration(value.into())
+	}
+}
+
 impl FromStr for Duration {
 	type Err = ();
 	fn from_str(s: &str) -> Result<Self, Self::Err> {

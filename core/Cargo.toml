@@ -129,7 +129,7 @@ rust_decimal = { version = "1.33.1", features = ["maths", "serde-str"] }
 rust-stemmers = "1.2.0"
 scrypt = "0.11.0"
 semver = { version = "1.0.20", features = ["serde"] }
-serde = { version = "1.0.193", features = ["derive"] }
+serde = { version = "1.0.204", features = ["derive"] }
 serde_json = "1.0.108"
 sha1 = "0.10.6"
 sha2 = "0.10.8"
@@ -145,6 +145,8 @@ trice = "0.4.0"
 ulid = { version = "1.1.0", features = ["serde"] }
 unicase = "2.7.0"
 url = "2.5.0"
+castaway = "0.2.3"
+serde-content = "0.1.0"
 
 [dev-dependencies]
 criterion = { version = "0.5.1", features = ["async_tokio"] }
