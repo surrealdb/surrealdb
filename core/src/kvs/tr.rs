@@ -153,6 +153,7 @@ impl Transactor {
 	/// Cancel a transaction.
 	///
 	/// This reverses all changes made within the transaction.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
 	pub async fn cancel(&mut self) -> Result<(), Error> {
 		#[cfg(debug_assertions)]
 		trace!(target: TARGET, "cancel");
@@ -162,6 +163,7 @@ impl Transactor {
 	/// Commit a transaction.
 	///
 	/// This attempts to commit all changes made within the transaction.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
 	pub async fn commit(&mut self) -> Result<(), Error> {
 		#[cfg(debug_assertions)]
 		trace!(target: TARGET, "commit");
@@ -169,6 +171,7 @@ impl Transactor {
 	}
 
 	/// Check if a key exists in the datastore.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
 	pub async fn exists<K>(&mut self, key: K) -> Result<bool, Error>
 	where
 		K: Into<Key> + Debug,
@@ -180,6 +183,7 @@ impl Transactor {
 	}
 
 	/// Fetch a key from the datastore.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
 	pub async fn get<K>(&mut self, key: K) -> Result<Option<Val>, Error>
 	where
 		K: Into<Key> + Debug,
@@ -191,6 +195,7 @@ impl Transactor {
 	}
 
 	/// Fetch many keys from the datastore.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
 	pub async fn getm<K>(&mut self, keys: Vec<K>) -> Result<Vec<Val>, Error>
 	where
 		K: Into<Key> + Debug,
@@ -204,6 +209,7 @@ impl Transactor {
 	/// Retrieve a specific range of keys from the datastore.
 	///
 	/// This function fetches all matching key-value pairs from the underlying datastore in grouped batches.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
 	pub async fn getr<K>(&mut self, rng: Range<K>) -> Result<Vec<(Key, Val)>, Error>
 	where
 		K: Into<Key> + Debug,
@@ -218,6 +224,7 @@ impl Transactor {
 	/// Retrieve a specific prefixed range of keys from the datastore.
 	///
 	/// This function fetches all matching key-value pairs from the underlying datastore in grouped batches.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
 	pub async fn getp<K>(&mut self, key: K) -> Result<Vec<(Key, Val)>, Error>
 	where
 		K: Into<Key> + Debug,
@@ -229,6 +236,7 @@ impl Transactor {
 	}
 
 	/// Insert or update a key in the datastore.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
 	pub async fn set<K, V>(&mut self, key: K, val: V) -> Result<(), Error>
 	where
 		K: Into<Key> + Debug,
@@ -241,6 +249,7 @@ impl Transactor {
 	}
 
 	/// Insert a key if it doesn't exist in the datastore.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
 	pub async fn put<K, V>(&mut self, key: K, val: V) -> Result<(), Error>
 	where
 		K: Into<Key> + Debug,
@@ -253,6 +262,7 @@ impl Transactor {
 	}
 
 	/// Update a key in the datastore if the current value matches a condition.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
 	pub async fn putc<K, V>(&mut self, key: K, val: V, chk: Option<V>) -> Result<(), Error>
 	where
 		K: Into<Key> + Debug,
@@ -265,6 +275,7 @@ impl Transactor {
 	}
 
 	/// Delete a key from the datastore.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
 	pub async fn del<K>(&mut self, key: K) -> Result<(), Error>
 	where
 		K: Into<Key> + Debug,
@@ -276,6 +287,7 @@ impl Transactor {
 	}
 
 	/// Delete a key from the datastore if the current value matches a condition.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
 	pub async fn delc<K, V>(&mut self, key: K, chk: Option<V>) -> Result<(), Error>
 	where
 		K: Into<Key> + Debug,
@@ -290,6 +302,7 @@ impl Transactor {
 	/// Delete a range of keys from the datastore.
 	///
 	/// This function deletes all matching key-value pairs from the underlying datastore in grouped batches.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
 	pub async fn delr<K>(&mut self, rng: Range<K>) -> Result<(), Error>
 	where
 		K: Into<Key> + Debug,
@@ -304,6 +317,7 @@ impl Transactor {
 	/// Delete a prefixed range of keys from the datastore.
 	///
 	/// This function deletes all matching key-value pairs from the underlying datastore in grouped batches.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
 	pub async fn delp<K>(&mut self, key: K) -> Result<(), Error>
 	where
 		K: Into<Key> + Debug,
@@ -317,6 +331,7 @@ impl Transactor {
 	/// Retrieve a specific range of keys from the datastore.
 	///
 	/// This function fetches the full range of keys without values, in a single request to the underlying datastore.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
 	pub async fn keys<K>(&mut self, rng: Range<K>, limit: u32) -> Result<Vec<Key>, Error>
 	where
 		K: Into<Key> + Debug,
@@ -331,6 +346,7 @@ impl Transactor {
 	/// Retrieve a specific range of keys from the datastore.
 	///
 	/// This function fetches the full range of key-value pairs, in a single request to the underlying datastore.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
 	pub async fn scan<K>(&mut self, rng: Range<K>, limit: u32) -> Result<Vec<(Key, Val)>, Error>
 	where
 		K: Into<Key> + Debug,
@@ -345,6 +361,7 @@ impl Transactor {
 	/// Retrieve a batched scan over a specific range of keys in the datastore.
 	///
 	/// This function fetches keys or key-value pairs, in batches, with multiple requests to the underlying datastore.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
 	pub async fn batch<K>(
 		&mut self,
 		rng: Range<K>,
@@ -366,7 +383,6 @@ impl Transactor {
 	/// NOTE: This should be called when composing the change feed entries for this transaction,
 	/// which should be done immediately before the transaction commit.
 	/// That is to keep other transactions commit delay(pessimistic) or conflict(optimistic) as less as possible.
-	#[allow(unused)]
 	pub async fn get_timestamp<K>(&mut self, key: K) -> Result<Versionstamp, Error>
 	where
 		K: Into<Key> + Debug,
@@ -379,7 +395,6 @@ impl Transactor {
 	}
 
 	/// Insert or update a key in the datastore.
-	#[allow(unused_variables)]
 	pub async fn set_versionstamped<K, V>(
 		&mut self,
 		ts_key: K,

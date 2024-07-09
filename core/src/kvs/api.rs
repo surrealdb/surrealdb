@@ -92,6 +92,7 @@ pub trait Transaction {
 	/// Fetch many keys from the datastore.
 	///
 	/// This function fetches all matching keys pairs from the underlying datastore concurrently.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip_all)]
 	async fn getm<K>(&mut self, keys: Vec<K>) -> Result<Vec<Val>, Error>
 	where
 		K: Into<Key> + Debug,
@@ -115,6 +116,7 @@ pub trait Transaction {
 	/// Retrieve a range of prefixed keys from the datastore.
 	///
 	/// This function fetches all matching key-value pairs from the underlying datastore in grouped batches.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip_all)]
 	async fn getp<K>(&mut self, key: K) -> Result<Vec<(Key, Val)>, Error>
 	where
 		K: Into<Key> + Debug,
@@ -132,6 +134,7 @@ pub trait Transaction {
 	/// Retrieve a range of keys from the datastore.
 	///
 	/// This function fetches all matching key-value pairs from the underlying datastore in grouped batches.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip_all)]
 	async fn getr<K>(&mut self, rng: Range<K>) -> Result<Vec<(Key, Val)>, Error>
 	where
 		K: Into<Key> + Debug,
@@ -158,6 +161,7 @@ pub trait Transaction {
 	/// Delete a range of prefixed keys from the datastore.
 	///
 	/// This function deletes all matching key-value pairs from the underlying datastore in grouped batches.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip_all)]
 	async fn delp<K>(&mut self, key: K) -> Result<(), Error>
 	where
 		K: Into<Key> + Debug,
@@ -179,6 +183,7 @@ pub trait Transaction {
 	/// Delete a range of keys from the datastore.
 	///
 	/// This function deletes all matching key-value pairs from the underlying datastore in grouped batches.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip_all)]
 	async fn delr<K>(&mut self, rng: Range<K>) -> Result<(), Error>
 	where
 		K: Into<Key> + Debug,
@@ -208,6 +213,7 @@ pub trait Transaction {
 	/// Retrieve a batched scan over a specific range of keys in the datastore.
 	///
 	/// This function fetches keys or key-value pairs, in batches, with multiple requests to the underlying datastore.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip_all)]
 	async fn batch<K>(&mut self, rng: Range<K>, batch: u32, values: bool) -> Result<Batch, Error>
 	where
 		K: Into<Key> + Debug,
@@ -258,6 +264,7 @@ pub trait Transaction {
 	/// NOTE: This should be called when composing the change feed entries for this transaction,
 	/// which should be done immediately before the transaction commit.
 	/// That is to keep other transactions commit delay(pessimistic) or conflict(optimistic) as less as possible.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip_all)]
 	async fn get_timestamp<K>(&mut self, key: K) -> Result<Versionstamp, Error>
 	where
 		K: Into<Key> + Debug,
@@ -288,6 +295,7 @@ pub trait Transaction {
 	}
 
 	/// Insert the versionstamped key into the datastore.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip_all)]
 	async fn set_versionstamp<K, V>(
 		&mut self,
 		ts_key: K,
