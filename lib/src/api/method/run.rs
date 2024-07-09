@@ -174,19 +174,6 @@ into_impl!(f64);
 into_impl!(String);
 into_impl!(&str);
 
-// impl IntoParams for &[usize] {
-// 	fn into_params(self) -> Array {
-// 		let vec: Vec<Value> = self.iter().cloned().map(Into::into).collect();
-// 		Array::from(vec)
-// 	}
-// }
-// impl IntoParams for Vec<usize> {
-// 	fn into_params(self) -> Array {
-// 		let vec: Vec<Value> = self.into_iter().map(Into::into).collect();
-// 		Array::from(vec)
-// 	}
-// }
-
 pub trait IntoFn {
 	fn into_fn(self) -> (String, Option<String>);
 }

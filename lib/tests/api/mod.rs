@@ -1402,14 +1402,4 @@ async fn run() {
 
 	let tmp = db.run("fn::baz", ()).await.unwrap();
 	assert_eq!(tmp, Value::from(7));
-
-	let foo = db.run("fn::foo", ()); // fn::foo()
-								 // a single value will be turned into one arguement unless it is a tuple, vec, or slice
-	let bar = db.run("fn::bar", 42); // fn::bar(42)
-								 // to specify a single arguement, which is an array turn it into a value, or wrap in a singleton tuple
-	let count = db.run("count", Value::from(vec![1, 2, 3]));
-	let count = db.run("count", (vec![1, 2, 3],));
-	// specify multiple args with either a tuple, vec, or slice
-	let two = db.run("math::log", (100, 10)); // math::log(100, 10)
-	let two = db.run("math::log", [100, 10]); // math::log(100, 10)
 }
