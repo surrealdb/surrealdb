@@ -1,5 +1,5 @@
 use surrealdb::sql::{
-	self, statements::UseStatement, Cond, Ident, Idiom, Limit, Order, Orders, Part, Start, Table,
+	statements::UseStatement, Cond, Ident, Idiom, Limit, Order, Orders, Part, Start, Table,
 	Value,
 };
 
@@ -87,8 +87,8 @@ impl FromExt<(String, String)> for UseStatement {
 impl FromExt<(Option<String>, Option<String>)> for UseStatement {
 	fn from(value: (Option<String>, Option<String>)) -> Self {
 		let mut out = Self::default();
-		out.ns = value.0.into();
-		out.db = value.1.into();
+		out.ns = value.0;
+		out.db = value.1;
 		out
 	}
 }

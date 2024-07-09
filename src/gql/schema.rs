@@ -1,7 +1,4 @@
 use std::collections::BTreeMap;
-use std::collections::BTreeSet;
-use std::collections::HashSet;
-use std::fmt::format;
 
 use async_graphql::dynamic::TypeRef;
 use async_graphql::dynamic::{Enum, Type};
@@ -9,19 +6,16 @@ use async_graphql::dynamic::{Field, Interface};
 use async_graphql::dynamic::{FieldFuture, InterfaceField};
 use async_graphql::dynamic::{InputObject, Object};
 use async_graphql::dynamic::{InputValue, Schema};
-use async_graphql::indexmap::{IndexMap, IndexSet};
+use async_graphql::indexmap::{IndexMap};
 use async_graphql::Name;
 use async_graphql::Value as GqlValue;
 use serde_json::Number;
 use surrealdb::err::Error;
 use surrealdb::sql;
 use surrealdb::sql::statements::SelectStatement;
-use surrealdb::sql::statements::UseStatement;
 use surrealdb::sql::Expression;
-use surrealdb::sql::{Cond, Fields, Start, TableType};
-use surrealdb::sql::{Kind, Limit};
-use surrealdb::sql::{Order, Table};
-use surrealdb::sql::{Orders, Values};
+use surrealdb::sql::{Cond, Fields};
+use surrealdb::sql::{Kind};
 use surrealdb::sql::{Statement, Thing};
 
 use super::ext::IntoExt;
@@ -79,11 +73,7 @@ pub async fn get_schema() -> Result<Schema, Box<dyn std::error::Error>> {
 		let first_tb_name = tb_name.clone();
 		let second_tb_name = tb_name.clone();
 
-		let interface = match tb.kind {
-			// TODO: re-enable relation interface
-			// TableType::Relation(_) => "relation",
-			_ => "record",
-		};
+		let interface = "record";
 
 		let table_orderable_name = format!("_orderable_{tb_name}");
 		let mut table_orderable = Enum::new(&table_orderable_name).item("id");
@@ -130,10 +120,10 @@ pub async fn get_schema() -> Result<Schema, Box<dyn std::error::Error>> {
 						trace!("received request with args: {args:?}");
 
 						let start =
-							args.get("start").map(|v| v.as_i64()).flatten().map(|s| s.intox());
+							args.get("start").and_then(|v| v.as_i64()).map(|s| s.intox());
 
 						let limit =
-							args.get("limit").map(|v| v.as_i64()).flatten().map(|l| l.intox());
+							args.get("limit").and_then(|v| v.as_i64()).map(|l| l.intox());
 
 						let order = args.get("order");
 
@@ -251,7 +241,7 @@ pub async fn get_schema() -> Result<Schema, Box<dyn std::error::Error>> {
 
 						let args = ctx.args.as_index_map();
 						// async-graphql should validate that this is present as it is non-null
-						let id = match args.get("id").map(GqlValueUtils::as_string).flatten() {
+						let id = match args.get("id").and_then(GqlValueUtils::as_string) {
 							Some(i) => i,
 							None => {
 								error!("Schema validation failed: no id found in _get_ request");
@@ -500,7 +490,7 @@ fn cond_from_filter(filter: &IndexMap<Name, GqlValue>) -> Result<Cond, Error> {
 
 fn val_from_filter(filter: &IndexMap<Name, GqlValue>) -> Result<SqlValue, Error> {
 	if filter.len() != 1 {
-		return Err(Error::Thrown(format!("Table Filter must have one item")));
+		return Err(Error::Thrown("Table Filter must have one item".to_string()));
 	}
 
 	let (k, v) = filter.iter().next().unwrap();
@@ -519,7 +509,7 @@ fn parse_op(name: impl AsRef<str>) -> Result<sql::Operator, Error> {
 	match name.as_ref() {
 		"eq" => Ok(sql::Operator::Equal),
 		"ne" => Ok(sql::Operator::NotEqual),
-		op => return Err(Error::Thrown(format!("Unsupported op: {op}"))),
+		op => Err(Error::Thrown(format!("Unsupported op: {op}"))),
 	}
 }
 
@@ -578,7 +568,7 @@ fn binop(field_name: &str, val: &GqlValue) -> Result<SqlValue, Error> {
 	let obj = val.as_object().ok_or(Error::Thrown("Field filter should be object".to_string()))?;
 
 	if obj.len() != 1 {
-		return Err(Error::Thrown(format!("Field Filter must have one item")));
+		return Err(Error::Thrown("Field Filter must have one item".to_string()));
 	}
 
 	let lhs = sql::Value::Idiom(field_name.intox());
