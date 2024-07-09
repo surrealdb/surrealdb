@@ -1130,9 +1130,10 @@ fn remove_debug_info(output: String) -> String {
 	// Look... sometimes you just gotta copy paste
 	let output_warning = "\
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│                     !!! THIS IS A DEVELOPMENT BUILD !!!                     │
-│     Development builds are not intended for production use and include      │
-│    tooling and features that may affect the performance of the database.    |
+│                        !!! THIS IS A DEBUG BUILD !!!                        │
+│        Debug builds are not intended for production use and include         │
+│       tooling and features that we would not recommend people run on        │
+│                                  live data.                                 │
 └─────────────────────────────────────────────────────────────────────────────┘
 ";
 	// The last line in the above is important

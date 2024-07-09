@@ -244,7 +244,7 @@ pub async fn init(
 		.with_capabilities(capabilities);
 	// Setup initial server auth credentials
 	if let (Some(user), Some(pass)) = (opt.user.as_ref(), opt.pass.as_ref()) {
-		dbs.initialise_credentials(user, pass).await?;
+		dbs.setup_initial_creds(user, pass).await?;
 	}
 	// Bootstrap the datastore
 	dbs.bootstrap().await?;
@@ -280,7 +280,7 @@ mod tests {
 			ds.transaction(Read, Optimistic).await.unwrap().all_root_users().await.unwrap().len(),
 			0
 		);
-		ds.initialise_credentials(creds.username, creds.password).await.unwrap();
+		ds.setup_initial_creds(creds.username, creds.password).await.unwrap();
 		assert_eq!(
 			ds.transaction(Read, Optimistic).await.unwrap().all_root_users().await.unwrap().len(),
 			1
@@ -302,7 +302,7 @@ mod tests {
 			.hash
 			.clone();
 
-		ds.initialise_credentials(creds.username, creds.password).await.unwrap();
+		ds.setup_initial_creds(creds.username, creds.password).await.unwrap();
 		assert_eq!(
 			pass_hash,
 			ds.transaction(Read, Optimistic)

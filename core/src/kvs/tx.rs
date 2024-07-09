@@ -80,7 +80,6 @@ impl Transaction {
 	/// Cancel a transaction.
 	///
 	/// This reverses all changes made within the transaction.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
 	pub async fn cancel(&self) -> Result<(), Error> {
 		self.lock().await.cancel().await
 	}
@@ -88,13 +87,11 @@ impl Transaction {
 	/// Commit a transaction.
 	///
 	/// This attempts to commit all changes made within the transaction.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
 	pub async fn commit(&self) -> Result<(), Error> {
 		self.lock().await.commit().await
 	}
 
 	/// Check if a key exists in the datastore.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
 	pub async fn exists<K>(&self, key: K) -> Result<bool, Error>
 	where
 		K: Into<Key> + Debug,
@@ -103,7 +100,6 @@ impl Transaction {
 	}
 
 	/// Fetch a key from the datastore.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
 	pub async fn get<K>(&self, key: K) -> Result<Option<Val>, Error>
 	where
 		K: Into<Key> + Debug,
@@ -112,7 +108,6 @@ impl Transaction {
 	}
 
 	/// Retrieve a batch set of keys from the datastore.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
 	pub async fn getm<K>(&self, keys: Vec<K>) -> Result<Vec<Val>, Error>
 	where
 		K: Into<Key> + Debug,
@@ -123,7 +118,6 @@ impl Transaction {
 	/// Retrieve a specific prefix of keys from the datastore.
 	///
 	/// This function fetches key-value pairs from the underlying datastore in grouped batches.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
 	pub async fn getp<K>(&self, key: K) -> Result<Vec<(Key, Val)>, Error>
 	where
 		K: Into<Key> + Debug,
@@ -134,7 +128,6 @@ impl Transaction {
 	/// Retrieve a specific range of keys from the datastore.
 	///
 	/// This function fetches key-value pairs from the underlying datastore in grouped batches.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
 	pub async fn getr<K>(&self, rng: Range<K>) -> Result<Vec<(Key, Val)>, Error>
 	where
 		K: Into<Key> + Debug,
@@ -143,7 +136,6 @@ impl Transaction {
 	}
 
 	/// Delete a key from the datastore.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
 	pub async fn del<K>(&self, key: K) -> Result<(), Error>
 	where
 		K: Into<Key> + Debug,
@@ -152,7 +144,6 @@ impl Transaction {
 	}
 
 	/// Delete a key from the datastore if the current value matches a condition.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
 	pub async fn delc<K, V>(&self, key: K, chk: Option<V>) -> Result<(), Error>
 	where
 		K: Into<Key> + Debug,
@@ -164,7 +155,6 @@ impl Transaction {
 	/// Delete a range of keys from the datastore.
 	///
 	/// This function deletes entries from the underlying datastore in grouped batches.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
 	pub async fn delr<K>(&self, rng: Range<K>) -> Result<(), Error>
 	where
 		K: Into<Key> + Debug,
@@ -175,7 +165,6 @@ impl Transaction {
 	/// Delete a prefix of keys from the datastore.
 	///
 	/// This function deletes entries from the underlying datastore in grouped batches.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
 	pub async fn delp<K>(&self, key: K) -> Result<(), Error>
 	where
 		K: Into<Key> + Debug,
@@ -184,7 +173,6 @@ impl Transaction {
 	}
 
 	/// Insert or update a key in the datastore.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
 	pub async fn set<K, V>(&self, key: K, val: V) -> Result<(), Error>
 	where
 		K: Into<Key> + Debug,
@@ -194,7 +182,6 @@ impl Transaction {
 	}
 
 	/// Insert a key if it doesn't exist in the datastore.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
 	pub async fn put<K, V>(&self, key: K, val: V) -> Result<(), Error>
 	where
 		K: Into<Key> + Debug,
@@ -204,7 +191,6 @@ impl Transaction {
 	}
 
 	/// Update a key in the datastore if the current value matches a condition.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
 	pub async fn putc<K, V>(&self, key: K, val: V, chk: Option<V>) -> Result<(), Error>
 	where
 		K: Into<Key> + Debug,
@@ -216,7 +202,6 @@ impl Transaction {
 	/// Retrieve a specific range of keys from the datastore.
 	///
 	/// This function fetches the full range of keys, in a single request to the underlying datastore.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
 	pub async fn keys<K>(&self, rng: Range<K>, limit: u32) -> Result<Vec<Key>, Error>
 	where
 		K: Into<Key> + Debug,
@@ -227,7 +212,6 @@ impl Transaction {
 	/// Retrieve a specific range of keys from the datastore.
 	///
 	/// This function fetches the full range of key-value pairs, in a single request to the underlying datastore.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
 	pub async fn scan<K>(&self, rng: Range<K>, limit: u32) -> Result<Vec<(Key, Val)>, Error>
 	where
 		K: Into<Key> + Debug,
@@ -238,7 +222,6 @@ impl Transaction {
 	/// Retrieve a batched scan over a specific range of keys in the datastore.
 	///
 	/// This function fetches the key-value pairs in batches, with multiple requests to the underlying datastore.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
 	pub async fn batch<K>(&self, rng: Range<K>, batch: u32, values: bool) -> Result<Batch, Error>
 	where
 		K: Into<Key> + Debug,
@@ -249,7 +232,6 @@ impl Transaction {
 	/// Retrieve a stream over a specific range of keys in the datastore.
 	///
 	/// This function fetches the key-value pairs in batches, with multiple requests to the underlying datastore.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
 	pub fn stream<K>(&self, rng: Range<K>) -> impl Stream<Item = Result<(Key, Val), Error>> + '_
 	where
 		K: Into<Key> + Debug,
@@ -268,8 +250,6 @@ impl Transaction {
 	// Cache methods
 	// --------------------------------------------------
 
-	/// Retrieve all nodes belonging to this cluster.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
 	pub async fn all_nodes(&self) -> Result<Arc<[Node]>, Error> {
 		// Log this function call in development
 		#[cfg(debug_assertions)]
@@ -292,7 +272,6 @@ impl Transaction {
 	}
 
 	/// Retrieve all ROOT level users in a datastore.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
 	pub async fn all_root_users(&self) -> Result<Arc<[DefineUserStatement]>, Error> {
 		// Log this function call in development
 		#[cfg(debug_assertions)]
@@ -315,7 +294,6 @@ impl Transaction {
 	}
 
 	/// Retrieve all namespace definitions in a datastore.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
 	pub async fn all_ns(&self) -> Result<Arc<[DefineNamespaceStatement]>, Error> {
 		// Log this function call in development
 		#[cfg(debug_assertions)]
@@ -338,11 +316,10 @@ impl Transaction {
 	}
 
 	/// Retrieve all namespace user definitions for a specific namespace.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
 	pub async fn all_ns_users(&self, ns: &str) -> Result<Arc<[DefineUserStatement]>, Error> {
 		// Log this function call in development
 		#[cfg(debug_assertions)]
-		trace!(target: TARGET, "all_ns_users");
+		trace!(target: TARGET, "all_ns_users {ns}");
 		// Continue with the function logic
 		let key = crate::key::namespace::us::prefix(ns);
 		let res = self.cache.get_value_or_guard_async(&key).await;
@@ -361,11 +338,10 @@ impl Transaction {
 	}
 
 	/// Retrieve all namespace access definitions for a specific namespace.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
 	pub async fn all_ns_accesses(&self, ns: &str) -> Result<Arc<[DefineAccessStatement]>, Error> {
 		// Log this function call in development
 		#[cfg(debug_assertions)]
-		trace!(target: TARGET, "all_ns_accesses");
+		trace!(target: TARGET, "all_ns_accesses {ns}");
 		// Continue with the function logic
 		let key = crate::key::namespace::ac::prefix(ns);
 		let res = self.cache.get_value_or_guard_async(&key).await;
@@ -384,11 +360,10 @@ impl Transaction {
 	}
 
 	/// Retrieve all database definitions for a specific namespace.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
 	pub async fn all_db(&self, ns: &str) -> Result<Arc<[DefineDatabaseStatement]>, Error> {
 		// Log this function call in development
 		#[cfg(debug_assertions)]
-		trace!(target: TARGET, "all_db");
+		trace!(target: TARGET, "all_db {ns}");
 		// Continue with the function logic
 		let key = crate::key::namespace::db::prefix(ns);
 		let res = self.cache.get_value_or_guard_async(&key).await;
@@ -407,7 +382,6 @@ impl Transaction {
 	}
 
 	/// Retrieve all database user definitions for a specific database.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
 	pub async fn all_db_users(
 		&self,
 		ns: &str,
@@ -415,7 +389,7 @@ impl Transaction {
 	) -> Result<Arc<[DefineUserStatement]>, Error> {
 		// Log this function call in development
 		#[cfg(debug_assertions)]
-		trace!(target: TARGET, "all_db_users");
+		trace!(target: TARGET, "all_db_users {ns} {db}");
 		// Continue with the function logic
 		let key = crate::key::database::us::prefix(ns, db);
 		let res = self.cache.get_value_or_guard_async(&key).await;
@@ -434,7 +408,6 @@ impl Transaction {
 	}
 
 	/// Retrieve all database access definitions for a specific database.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
 	pub async fn all_db_accesses(
 		&self,
 		ns: &str,
@@ -442,7 +415,7 @@ impl Transaction {
 	) -> Result<Arc<[DefineAccessStatement]>, Error> {
 		// Log this function call in development
 		#[cfg(debug_assertions)]
-		trace!(target: TARGET, "all_db_accesses");
+		trace!(target: TARGET, "all_db_accesses {ns} {db}");
 		// Continue with the function logic
 		let key = crate::key::database::ac::prefix(ns, db);
 		let res = self.cache.get_value_or_guard_async(&key).await;
@@ -461,7 +434,6 @@ impl Transaction {
 	}
 
 	/// Retrieve all analyzer definitions for a specific database.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
 	pub async fn all_db_analyzers(
 		&self,
 		ns: &str,
@@ -469,7 +441,7 @@ impl Transaction {
 	) -> Result<Arc<[DefineAnalyzerStatement]>, Error> {
 		// Log this function call in development
 		#[cfg(debug_assertions)]
-		trace!(target: TARGET, "all_db_analyzers");
+		trace!(target: TARGET, "all_db_analyzers {ns} {db}");
 		// Continue with the function logic
 		let key = crate::key::database::az::prefix(ns, db);
 		let res = self.cache.get_value_or_guard_async(&key).await;
@@ -488,7 +460,6 @@ impl Transaction {
 	}
 
 	/// Retrieve all function definitions for a specific database.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
 	pub async fn all_db_functions(
 		&self,
 		ns: &str,
@@ -496,7 +467,7 @@ impl Transaction {
 	) -> Result<Arc<[DefineFunctionStatement]>, Error> {
 		// Log this function call in development
 		#[cfg(debug_assertions)]
-		trace!(target: TARGET, "all_db_functions");
+		trace!(target: TARGET, "all_db_functions {ns} {db}");
 		// Continue with the function logic
 		let key = crate::key::database::fc::prefix(ns, db);
 		let res = self.cache.get_value_or_guard_async(&key).await;
@@ -515,7 +486,6 @@ impl Transaction {
 	}
 
 	/// Retrieve all param definitions for a specific database.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
 	pub async fn all_db_params(
 		&self,
 		ns: &str,
@@ -523,7 +493,7 @@ impl Transaction {
 	) -> Result<Arc<[DefineParamStatement]>, Error> {
 		// Log this function call in development
 		#[cfg(debug_assertions)]
-		trace!(target: TARGET, "all_db_params");
+		trace!(target: TARGET, "all_db_params {ns} {db}");
 		// Continue with the function logic
 		let key = crate::key::database::pa::prefix(ns, db);
 		let res = self.cache.get_value_or_guard_async(&key).await;
@@ -542,7 +512,6 @@ impl Transaction {
 	}
 
 	/// Retrieve all model definitions for a specific database.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
 	pub async fn all_db_models(
 		&self,
 		ns: &str,
@@ -550,7 +519,7 @@ impl Transaction {
 	) -> Result<Arc<[DefineModelStatement]>, Error> {
 		// Log this function call in development
 		#[cfg(debug_assertions)]
-		trace!(target: TARGET, "all_db_models");
+		trace!(target: TARGET, "all_db_models {ns} {db}");
 		// Continue with the function logic
 		let key = crate::key::database::ml::prefix(ns, db);
 		let res = self.cache.get_value_or_guard_async(&key).await;
@@ -569,11 +538,10 @@ impl Transaction {
 	}
 
 	/// Retrieve all table definitions for a specific database.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
 	pub async fn all_tb(&self, ns: &str, db: &str) -> Result<Arc<[DefineTableStatement]>, Error> {
 		// Log this function call in development
 		#[cfg(debug_assertions)]
-		trace!(target: TARGET, "all_tb");
+		trace!(target: TARGET, "all_tb {ns} {db}");
 		// Continue with the function logic
 		let key = crate::key::database::tb::prefix(ns, db);
 		let res = self.cache.get_value_or_guard_async(&key).await;
@@ -592,7 +560,6 @@ impl Transaction {
 	}
 
 	/// Retrieve all event definitions for a specific table.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
 	pub async fn all_tb_events(
 		&self,
 		ns: &str,
@@ -601,7 +568,7 @@ impl Transaction {
 	) -> Result<Arc<[DefineEventStatement]>, Error> {
 		// Log this function call in development
 		#[cfg(debug_assertions)]
-		trace!(target: TARGET, "all_tb_events");
+		trace!(target: TARGET, "all_tb_events {ns} {db} {tb}");
 		// Continue with the function logic
 		let key = crate::key::table::ev::prefix(ns, db, tb);
 		let res = self.cache.get_value_or_guard_async(&key).await;
@@ -620,7 +587,6 @@ impl Transaction {
 	}
 
 	/// Retrieve all field definitions for a specific table.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
 	pub async fn all_tb_fields(
 		&self,
 		ns: &str,
@@ -629,7 +595,7 @@ impl Transaction {
 	) -> Result<Arc<[DefineFieldStatement]>, Error> {
 		// Log this function call in development
 		#[cfg(debug_assertions)]
-		trace!(target: TARGET, "all_tb_fields");
+		trace!(target: TARGET, "all_tb_fields {ns} {db} {tb}");
 		// Continue with the function logic
 		let key = crate::key::table::fd::prefix(ns, db, tb);
 		let res = self.cache.get_value_or_guard_async(&key).await;
@@ -648,7 +614,6 @@ impl Transaction {
 	}
 
 	/// Retrieve all index definitions for a specific table.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
 	pub async fn all_tb_indexes(
 		&self,
 		ns: &str,
@@ -657,7 +622,7 @@ impl Transaction {
 	) -> Result<Arc<[DefineIndexStatement]>, Error> {
 		// Log this function call in development
 		#[cfg(debug_assertions)]
-		trace!(target: TARGET, "all_tb_indexes");
+		trace!(target: TARGET, "all_tb_indexes {ns} {db} {tb}");
 		// Continue with the function logic
 		let key = crate::key::table::ix::prefix(ns, db, tb);
 		let res = self.cache.get_value_or_guard_async(&key).await;
@@ -676,7 +641,6 @@ impl Transaction {
 	}
 
 	/// Retrieve all view definitions for a specific table.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
 	pub async fn all_tb_views(
 		&self,
 		ns: &str,
@@ -685,7 +649,7 @@ impl Transaction {
 	) -> Result<Arc<[DefineTableStatement]>, Error> {
 		// Log this function call in development
 		#[cfg(debug_assertions)]
-		trace!(target: TARGET, "all_tb_views");
+		trace!(target: TARGET, "all_tb_views {ns} {db} {tb}");
 		// Continue with the function logic
 		let key = crate::key::table::ft::prefix(ns, db, tb);
 		let res = self.cache.get_value_or_guard_async(&key).await;
@@ -704,7 +668,6 @@ impl Transaction {
 	}
 
 	/// Retrieve all live definitions for a specific table.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
 	pub async fn all_tb_lives(
 		&self,
 		ns: &str,
@@ -713,7 +676,7 @@ impl Transaction {
 	) -> Result<Arc<[LiveStatement]>, Error> {
 		// Log this function call in development
 		#[cfg(debug_assertions)]
-		trace!(target: TARGET, "all_tb_lives");
+		trace!(target: TARGET, "all_tb_lives {ns} {db} {tb}");
 		// Continue with the function logic
 		let key = crate::key::table::lq::prefix(ns, db, tb);
 		let res = self.cache.get_value_or_guard_async(&key).await;
@@ -732,7 +695,6 @@ impl Transaction {
 	}
 
 	/// Retrieve a specific namespace definition.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
 	pub async fn get_node(&self, id: Uuid) -> Result<Arc<Node>, Error> {
 		// Log this function call in development
 		#[cfg(debug_assertions)]
@@ -756,19 +718,18 @@ impl Transaction {
 	}
 
 	/// Retrieve a specific namespace user definition.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
-	pub async fn get_root_user(&self, us: &str) -> Result<Arc<DefineUserStatement>, Error> {
+	pub async fn get_root_user(&self, user: &str) -> Result<Arc<DefineUserStatement>, Error> {
 		// Log this function call in development
 		#[cfg(debug_assertions)]
-		trace!(target: TARGET, "get_root_user");
+		trace!(target: TARGET, "get_root_user {user}");
 		// Continue with the function logic
-		let key = crate::key::root::us::new(us).encode()?;
+		let key = crate::key::root::us::new(user).encode()?;
 		let res = self.cache.get_value_or_guard_async(&key).await;
 		Ok(match res {
 			Ok(val) => val,
 			Err(cache) => {
 				let val = self.get(key).await?.ok_or(Error::UserRootNotFound {
-					value: us.to_owned(),
+					value: user.to_owned(),
 				})?;
 				let val: DefineUserStatement = val.into();
 				let val = Entry::Any(Arc::new(val));
@@ -780,11 +741,10 @@ impl Transaction {
 	}
 
 	/// Retrieve a specific namespace definition.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
 	pub async fn get_ns(&self, ns: &str) -> Result<Arc<DefineNamespaceStatement>, Error> {
 		// Log this function call in development
 		#[cfg(debug_assertions)]
-		trace!(target: TARGET, "get_ns");
+		trace!(target: TARGET, "get_ns {ns}");
 		// Continue with the function logic
 		let key = crate::key::root::ns::new(ns).encode()?;
 		let res = self.cache.get_value_or_guard_async(&key).await;
@@ -804,19 +764,22 @@ impl Transaction {
 	}
 
 	/// Retrieve a specific namespace user definition.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
-	pub async fn get_ns_user(&self, ns: &str, us: &str) -> Result<Arc<DefineUserStatement>, Error> {
+	pub async fn get_ns_user(
+		&self,
+		ns: &str,
+		user: &str,
+	) -> Result<Arc<DefineUserStatement>, Error> {
 		// Log this function call in development
 		#[cfg(debug_assertions)]
-		trace!(target: TARGET, "get_ns_user");
+		trace!(target: TARGET, "get_ns_user {ns} {user}");
 		// Continue with the function logic
-		let key = crate::key::namespace::us::new(ns, us).encode()?;
+		let key = crate::key::namespace::us::new(ns, user).encode()?;
 		let res = self.cache.get_value_or_guard_async(&key).await;
 		Ok(match res {
 			Ok(val) => val,
 			Err(cache) => {
 				let val = self.get(key).await?.ok_or(Error::UserNsNotFound {
-					value: us.to_owned(),
+					value: user.to_owned(),
 					ns: ns.to_owned(),
 				})?;
 				let val: DefineUserStatement = val.into();
@@ -829,7 +792,6 @@ impl Transaction {
 	}
 
 	/// Retrieve a specific namespace access definition.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
 	pub async fn get_ns_access(
 		&self,
 		ns: &str,
@@ -837,7 +799,7 @@ impl Transaction {
 	) -> Result<Arc<DefineAccessStatement>, Error> {
 		// Log this function call in development
 		#[cfg(debug_assertions)]
-		trace!(target: TARGET, "get_ns_access");
+		trace!(target: TARGET, "get_ns_access {ns} {na}");
 		// Continue with the function logic
 		let key = crate::key::namespace::ac::new(ns, na).encode()?;
 		let res = self.cache.get_value_or_guard_async(&key).await;
@@ -857,11 +819,10 @@ impl Transaction {
 	}
 
 	/// Retrieve a specific database definition.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
 	pub async fn get_db(&self, ns: &str, db: &str) -> Result<Arc<DefineDatabaseStatement>, Error> {
 		// Log this function call in development
 		#[cfg(debug_assertions)]
-		trace!(target: TARGET, "get_db");
+		trace!(target: TARGET, "get_db {ns} {db}");
 		// Continue with the function logic
 		let key = crate::key::namespace::db::new(ns, db).encode()?;
 		let res = self.cache.get_value_or_guard_async(&key).await;
@@ -881,24 +842,23 @@ impl Transaction {
 	}
 
 	/// Retrieve a specific user definition from a database.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
 	pub async fn get_db_user(
 		&self,
 		ns: &str,
 		db: &str,
-		us: &str,
+		user: &str,
 	) -> Result<Arc<DefineUserStatement>, Error> {
 		// Log this function call in development
 		#[cfg(debug_assertions)]
-		trace!(target: TARGET, "get_db_user");
+		trace!(target: TARGET, "get_db_user {ns} {db} {user}");
 		// Continue with the function logic
-		let key = crate::key::database::us::new(ns, db, us).encode()?;
+		let key = crate::key::database::us::new(ns, db, user).encode()?;
 		let res = self.cache.get_value_or_guard_async(&key).await;
 		Ok(match res {
 			Ok(val) => val,
 			Err(cache) => {
 				let val = self.get(key).await?.ok_or(Error::UserDbNotFound {
-					value: us.to_owned(),
+					value: user.to_owned(),
 					ns: ns.to_owned(),
 					db: db.to_owned(),
 				})?;
@@ -912,7 +872,6 @@ impl Transaction {
 	}
 
 	/// Retrieve a specific database access definition.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
 	pub async fn get_db_access(
 		&self,
 		ns: &str,
@@ -921,7 +880,7 @@ impl Transaction {
 	) -> Result<Arc<DefineAccessStatement>, Error> {
 		// Log this function call in development
 		#[cfg(debug_assertions)]
-		trace!(target: TARGET, "get_db_access");
+		trace!(target: TARGET, "get_db_access {ns} {db} {da}");
 		// Continue with the function logic
 		let key = crate::key::database::ac::new(ns, db, da).encode()?;
 		let res = self.cache.get_value_or_guard_async(&key).await;
@@ -941,7 +900,6 @@ impl Transaction {
 	}
 
 	/// Retrieve a specific model definition from a database.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
 	pub async fn get_db_model(
 		&self,
 		ns: &str,
@@ -951,7 +909,7 @@ impl Transaction {
 	) -> Result<Arc<DefineModelStatement>, Error> {
 		// Log this function call in development
 		#[cfg(debug_assertions)]
-		trace!(target: TARGET, "get_db_model");
+		trace!(target: TARGET, "get_db_model {ns} {db} {ml} {vn}");
 		// Continue with the function logic
 		let key = crate::key::database::ml::new(ns, db, ml, vn).encode()?;
 		let res = self.cache.get_value_or_guard_async(&key).await;
@@ -971,7 +929,6 @@ impl Transaction {
 	}
 
 	/// Retrieve a specific analyzer definition.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
 	pub async fn get_db_analyzer(
 		&self,
 		ns: &str,
@@ -980,7 +937,7 @@ impl Transaction {
 	) -> Result<Arc<DefineAnalyzerStatement>, Error> {
 		// Log this function call in development
 		#[cfg(debug_assertions)]
-		trace!(target: TARGET, "get_db_analyzer");
+		trace!(target: TARGET, "get_db_analyzer {ns} {db} {az}");
 		// Continue with the function logic
 		let key = crate::key::database::az::new(ns, db, az).encode()?;
 		let res = self.cache.get_value_or_guard_async(&key).await;
@@ -1000,7 +957,6 @@ impl Transaction {
 	}
 
 	/// Retrieve a specific function definition from a database.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
 	pub async fn get_db_function(
 		&self,
 		ns: &str,
@@ -1009,7 +965,7 @@ impl Transaction {
 	) -> Result<Arc<DefineFunctionStatement>, Error> {
 		// Log this function call in development
 		#[cfg(debug_assertions)]
-		trace!(target: TARGET, "get_db_function");
+		trace!(target: TARGET, "get_db_function {ns} {db} {fc}");
 		// Continue with the function logic
 		let key = crate::key::database::fc::new(ns, db, fc).encode()?;
 		let res = self.cache.get_value_or_guard_async(&key).await;
@@ -1029,7 +985,6 @@ impl Transaction {
 	}
 
 	/// Retrieve a specific function definition from a database.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
 	pub async fn get_db_param(
 		&self,
 		ns: &str,
@@ -1038,7 +993,7 @@ impl Transaction {
 	) -> Result<Arc<DefineParamStatement>, Error> {
 		// Log this function call in development
 		#[cfg(debug_assertions)]
-		trace!(target: TARGET, "get_db_param");
+		trace!(target: TARGET, "get_db_param {ns} {db} {pa}");
 		// Continue with the function logic
 		let key = crate::key::database::pa::new(ns, db, pa).encode()?;
 		let res = self.cache.get_value_or_guard_async(&key).await;
@@ -1058,7 +1013,6 @@ impl Transaction {
 	}
 
 	/// Retrieve a specific table definition.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
 	pub async fn get_tb(
 		&self,
 		ns: &str,
@@ -1067,7 +1021,7 @@ impl Transaction {
 	) -> Result<Arc<DefineTableStatement>, Error> {
 		// Log this function call in development
 		#[cfg(debug_assertions)]
-		trace!(target: TARGET, "get_tb");
+		trace!(target: TARGET, "get_tb {ns} {db} {tb}");
 		// Continue with the function logic
 		let key = crate::key::database::tb::new(ns, db, tb).encode()?;
 		let res = self.cache.get_value_or_guard_async(&key).await;
@@ -1087,7 +1041,6 @@ impl Transaction {
 	}
 
 	/// Retrieve an event for a table.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
 	pub async fn get_tb_event(
 		&self,
 		ns: &str,
@@ -1097,7 +1050,7 @@ impl Transaction {
 	) -> Result<Arc<DefineEventStatement>, Error> {
 		// Log this function call in development
 		#[cfg(debug_assertions)]
-		trace!(target: TARGET, "get_tb_event");
+		trace!(target: TARGET, "get_tb_event {ns} {db} {tb} {ev}");
 		// Continue with the function logic
 		let key = crate::key::table::ev::new(ns, db, tb, ev).encode()?;
 		let res = self.cache.get_value_or_guard_async(&key).await;
@@ -1117,7 +1070,6 @@ impl Transaction {
 	}
 
 	/// Retrieve a field for a table.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
 	pub async fn get_tb_field(
 		&self,
 		ns: &str,
@@ -1127,7 +1079,7 @@ impl Transaction {
 	) -> Result<Arc<DefineFieldStatement>, Error> {
 		// Log this function call in development
 		#[cfg(debug_assertions)]
-		trace!(target: TARGET, "get_tb_field");
+		trace!(target: TARGET, "get_tb_field {ns} {db} {tb} {fd}");
 		// Continue with the function logic
 		let key = crate::key::table::fd::new(ns, db, tb, fd).encode()?;
 		let res = self.cache.get_value_or_guard_async(&key).await;
@@ -1147,7 +1099,6 @@ impl Transaction {
 	}
 
 	/// Retrieve an index for a table.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
 	pub async fn get_tb_index(
 		&self,
 		ns: &str,
@@ -1157,7 +1108,7 @@ impl Transaction {
 	) -> Result<Arc<DefineIndexStatement>, Error> {
 		// Log this function call in development
 		#[cfg(debug_assertions)]
-		trace!(target: TARGET, "get_tb_index");
+		trace!(target: TARGET, "get_tb_index {ns} {db} {tb} {ix}");
 		// Continue with the function logic
 		let key = crate::key::table::ix::new(ns, db, tb, ix).encode()?;
 		let res = self.cache.get_value_or_guard_async(&key).await;
@@ -1177,7 +1128,6 @@ impl Transaction {
 	}
 
 	/// Fetch a specific record value.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
 	pub async fn get_record(
 		&self,
 		ns: &str,
@@ -1187,7 +1137,7 @@ impl Transaction {
 	) -> Result<Arc<Value>, Error> {
 		// Log this function call in development
 		#[cfg(debug_assertions)]
-		trace!(target: TARGET, "get_record");
+		trace!(target: TARGET, "get_record {ns} {db} {tb} {id}");
 		// Continue with the function logic
 		let key = crate::key::thing::new(ns, db, tb, id).encode()?;
 		let res = self.cache.get_value_or_guard_async(&key).await;
@@ -1208,7 +1158,6 @@ impl Transaction {
 		}
 	}
 
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
 	pub async fn set_record(
 		&self,
 		ns: &str,
@@ -1219,7 +1168,7 @@ impl Transaction {
 	) -> Result<(), Error> {
 		// Log this function call in development
 		#[cfg(debug_assertions)]
-		trace!(target: TARGET, "set_record");
+		trace!(target: TARGET, "set_record {ns} {db} {tb} {id} {val}");
 		// Continue with the function logic
 		let key = crate::key::thing::new(ns, db, tb, id);
 		let enc = crate::key::thing::new(ns, db, tb, id).encode()?;
@@ -1232,7 +1181,6 @@ impl Transaction {
 	}
 
 	/// Get or add a namespace with a default configuration, only if we are in dynamic mode.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
 	pub async fn get_or_add_ns(
 		&self,
 		ns: &str,
@@ -1240,13 +1188,12 @@ impl Transaction {
 	) -> Result<Arc<DefineNamespaceStatement>, Error> {
 		// Log this function call in development
 		#[cfg(debug_assertions)]
-		trace!(target: TARGET, "get_or_add_ns");
+		trace!(target: TARGET, "get_or_add_ns {ns}");
 		// Continue with the function logic
 		self.get_or_add_ns_upwards(ns, strict, false).await
 	}
 
 	/// Get or add a database with a default configuration, only if we are in dynamic mode.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
 	pub async fn get_or_add_db(
 		&self,
 		ns: &str,
@@ -1255,13 +1202,12 @@ impl Transaction {
 	) -> Result<Arc<DefineDatabaseStatement>, Error> {
 		// Log this function call in development
 		#[cfg(debug_assertions)]
-		trace!(target: TARGET, "get_or_add_db");
+		trace!(target: TARGET, "get_or_add_db {ns} {db}");
 		// Continue with the function logic
 		self.get_or_add_db_upwards(ns, db, strict, false).await
 	}
 
 	/// Get or add a table with a default configuration, only if we are in dynamic mode.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
 	pub async fn get_or_add_tb(
 		&self,
 		ns: &str,
@@ -1271,13 +1217,12 @@ impl Transaction {
 	) -> Result<Arc<DefineTableStatement>, Error> {
 		// Log this function call in development
 		#[cfg(debug_assertions)]
-		trace!(target: TARGET, "get_or_add_tb");
+		trace!(target: TARGET, "get_or_add_tb {ns} {db} {tb}");
 		// Continue with the function logic
 		self.get_or_add_tb_upwards(ns, db, tb, strict, false).await
 	}
 
 	/// Ensures that a table, database, and namespace are all fully defined.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
 	#[inline(always)]
 	pub async fn ensure_ns_db_tb(
 		&self,
@@ -1288,13 +1233,12 @@ impl Transaction {
 	) -> Result<Arc<DefineTableStatement>, Error> {
 		// Log this function call in development
 		#[cfg(debug_assertions)]
-		trace!(target: TARGET, "ensure_ns_db_tb");
+		trace!(target: TARGET, "ensure_ns_db_tb {ns} {db} {tb}");
 		// Continue with the function logic
 		self.get_or_add_tb_upwards(ns, db, tb, strict, true).await
 	}
 
 	/// Ensure a specific table (and database, and namespace) exist.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
 	#[inline(always)]
 	pub(crate) async fn check_ns_db_tb(
 		&self,
@@ -1305,7 +1249,7 @@ impl Transaction {
 	) -> Result<(), Error> {
 		// Log this function call in development
 		#[cfg(debug_assertions)]
-		trace!(target: TARGET, "check_ns_db_tb");
+		trace!(target: TARGET, "check_ns_db_tb {ns} {db} {tb}");
 		// Continue with the function logic
 		match strict {
 			// Strict mode is disabled
@@ -1321,7 +1265,6 @@ impl Transaction {
 	}
 
 	/// Clears all keys from the transaction cache.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
 	#[inline(always)]
 	pub fn clear(&self) {
 		self.cache.clear()
@@ -1332,7 +1275,6 @@ impl Transaction {
 	// --------------------------------------------------
 
 	/// Get or add a namespace with a default configuration, only if we are in dynamic mode.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
 	async fn get_or_add_ns_upwards(
 		&self,
 		ns: &str,
@@ -1384,7 +1326,6 @@ impl Transaction {
 	}
 
 	/// Get or add a database with a default configuration, only if we are in dynamic mode.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
 	async fn get_or_add_db_upwards(
 		&self,
 		ns: &str,
@@ -1442,7 +1383,6 @@ impl Transaction {
 	}
 
 	/// Get or add a table with a default configuration, only if we are in dynamic mode.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
 	async fn get_or_add_tb_upwards(
 		&self,
 		ns: &str,

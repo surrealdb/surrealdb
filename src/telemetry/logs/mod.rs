@@ -28,7 +28,7 @@ where
 			.with_line_number(true)
 			.with_thread_ids(false)
 			.with_thread_names(false)
-			.with_span_events(FmtSpan::NEW | FmtSpan::CLOSE)
+			.with_span_events(FmtSpan::NONE)
 			.with_writer(std::io::stderr)
 			.with_filter(filter.0)
 			.boxed()
