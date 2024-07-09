@@ -15,9 +15,7 @@ async fn table_definitions_can_be_scanned() {
 
 	// Create a table definition
 	let namespace = "test_namespace";
-	let database = "t
-use crate::sql::TableType;
-use crate::sql::TableType;est_database";
+	let database = "test_database";
 	let table = "test_table";
 	let key = Tb::new(namespace, database, table);
 	let value = DefineTableStatement {
