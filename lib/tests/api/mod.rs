@@ -1361,6 +1361,7 @@ async fn return_bool() {
 async fn run() {
 	let (permit, db) = new_db().await;
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
+	drop(permit);
 	let sql = "
 	DEFINE FUNCTION fn::foo() {
 	   RETURN 42;
