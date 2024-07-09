@@ -1081,6 +1081,19 @@ allow_unsafe = true
 [pkg.pprof]
 allow_unsafe = true
 
+[pkg.pest_derive]
+allow_proc_macro = true
+
+[pkg.pest]
+allow_unsafe = true
+allow_apis = ["fs"]
+
+[pkg.async-graphql-derive]
+allow_proc_macro = true
+
+[pkg.strum_macros]
+allow_proc_macro = true
+
 # examples
 [pkg.pear_codegen]
 allow_proc_macro = true
@@ -1136,15 +1149,3 @@ allow_unsafe = true
 
 [pkg.tendril]
 allow_unsafe = true
-
-[pkg.pest_derive]
-allow_proc_macro = true
-
-[pkg.pest]
-allow_unsafe = true
-
-[pkg.async-graphql-derive]
-allow_proc_macro = true
-
-[pkg.strum_macros]
-allow_proc_macro = true
