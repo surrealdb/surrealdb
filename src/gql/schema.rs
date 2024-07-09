@@ -6,7 +6,7 @@ use async_graphql::dynamic::{Field, Interface};
 use async_graphql::dynamic::{FieldFuture, InterfaceField};
 use async_graphql::dynamic::{InputObject, Object};
 use async_graphql::dynamic::{InputValue, Schema};
-use async_graphql::indexmap::{IndexMap};
+use async_graphql::indexmap::IndexMap;
 use async_graphql::Name;
 use async_graphql::Value as GqlValue;
 use serde_json::Number;
@@ -14,8 +14,8 @@ use surrealdb::err::Error;
 use surrealdb::sql;
 use surrealdb::sql::statements::SelectStatement;
 use surrealdb::sql::Expression;
+use surrealdb::sql::Kind;
 use surrealdb::sql::{Cond, Fields};
-use surrealdb::sql::{Kind};
 use surrealdb::sql::{Statement, Thing};
 
 use super::ext::IntoExt;
@@ -119,11 +119,9 @@ pub async fn get_schema() -> Result<Schema, Box<dyn std::error::Error>> {
 						let args = ctx.args.as_index_map();
 						trace!("received request with args: {args:?}");
 
-						let start =
-							args.get("start").and_then(|v| v.as_i64()).map(|s| s.intox());
+						let start = args.get("start").and_then(|v| v.as_i64()).map(|s| s.intox());
 
-						let limit =
-							args.get("limit").and_then(|v| v.as_i64()).map(|l| l.intox());
+						let limit = args.get("limit").and_then(|v| v.as_i64()).map(|l| l.intox());
 
 						let order = args.get("order");
 

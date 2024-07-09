@@ -1,6 +1,5 @@
 use surrealdb::sql::{
-	statements::UseStatement, Cond, Ident, Idiom, Limit, Order, Orders, Part, Start, Table,
-	Value,
+	statements::UseStatement, Cond, Ident, Idiom, Limit, Order, Orders, Part, Start, Table, Value,
 };
 
 pub trait IntoExt<T> {
