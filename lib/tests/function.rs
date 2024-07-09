@@ -4648,7 +4648,7 @@ async fn function_type_is_bytes() -> Result<(), Error> {
 async fn function_type_is_collection() -> Result<(), Error> {
 	let sql = r#"
 		LET $collection = <geometry<collection>> {
-			type: 'GeometryCollection', 
+			type: 'GeometryCollection',
 			geometries: [{ type: 'MultiPoint', coordinates: [[10, 11.2], [10.5, 11.9]] }]
 		};
 		RETURN type::is::collection($collection);
@@ -4902,7 +4902,7 @@ async fn function_type_is_multipoint() -> Result<(), Error> {
 async fn function_type_is_multipolygon() -> Result<(), Error> {
 	let sql = r#"
 		LET $multipolygon = <geometry<multipolygon>> {
-			type: 'MultiPolygon', 
+			type: 'MultiPolygon',
 			coordinates: [[[[10, 11.2], [10.5, 11.9], [10.8, 12], [10, 11.2]]], [[[9, 11.2], [10.5, 11.9], [10.3, 13], [9, 11.2]]]]
 		};
 		RETURN type::is::multipolygon($multipolygon);
@@ -5001,7 +5001,7 @@ async fn function_type_is_point() -> Result<(), Error> {
 async fn function_type_is_polygon() -> Result<(), Error> {
 	let sql = r#"
 		LET $polygon = <geometry<polygon>> {
-			type: 'Polygon', 
+			type: 'Polygon',
 			coordinates: [
 				[
 					[-0.38314819, 51.37692386],
@@ -5953,6 +5953,7 @@ pub async fn function_http_disabled() {
 	"#,
 	)
 	.await
+	.unwrap()
 	.expect_errors(&[
 		"Remote HTTP request functions are not enabled",
 		"Remote HTTP request functions are not enabled",
@@ -5960,7 +5961,8 @@ pub async fn function_http_disabled() {
 		"Remote HTTP request functions are not enabled",
 		"Remote HTTP request functions are not enabled",
 		"Remote HTTP request functions are not enabled",
-	]);
+	])
+	.unwrap();
 }
 
 // Tests for custom defined functions

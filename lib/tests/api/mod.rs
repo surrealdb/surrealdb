@@ -1356,3 +1356,22 @@ async fn return_bool() {
 	let value: Value = response.take(0).unwrap();
 	assert_eq!(value, Value::Bool(false));
 }
+
+#[test_log::test(tokio::test)]
+async fn run() {
+	let (permit, db) = new_db().await;
+	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
+	let sql = "
+	DEFINE FUNCTION fn::foo() {
+	   RETURN 42;
+	};
+	DEFINE FUNCTION fn::bar($val) {
+	   CREATE foo:1 set val = $val;
+	};
+	DEFINE FUNCTION fn::baz() {
+	   SELECT VALUE val FROM ONLY foo:1;
+	};
+	";
+	let tmp = db.query(sql);
+	panic!("test")
+}
