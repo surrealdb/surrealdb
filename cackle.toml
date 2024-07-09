@@ -1088,6 +1088,9 @@ allow_proc_macro = true
 allow_unsafe = true
 allow_apis = ["fs"]
 
+[pkg.pest_generator]
+allow_apis = ["fs"]
+
 [pkg.async-graphql-derive]
 allow_proc_macro = true
 
