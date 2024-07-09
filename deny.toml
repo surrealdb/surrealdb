@@ -89,6 +89,7 @@ allow = [
 	"MPL-2.0",
 	"Apache-2.0",
 	"BSD-3-Clause",
+	"BSD-2-Clause",
 	"Unlicense",
 ]
 # The confidence threshold for detecting a license from license text.
