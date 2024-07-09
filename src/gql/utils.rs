@@ -19,7 +19,7 @@ use async_graphql::{dynamic::indexmap::IndexMap, Name, Value as GqlValue};
 //     Object(IndexMap<Name, ConstValue>),
 // }
 pub(crate) trait GqlValueUtils {
-	fn as_u64(&self) -> Option<u64>;
+	// fn as_u64(&self) -> Option<u64>;
 	fn as_i64(&self) -> Option<i64>;
 	fn as_string(&self) -> Option<String>;
 	fn as_list(&self) -> Option<&Vec<GqlValue>>;
@@ -27,13 +27,13 @@ pub(crate) trait GqlValueUtils {
 }
 
 impl GqlValueUtils for GqlValue {
-	fn as_u64(&self) -> Option<u64> {
-		if let GqlValue::Number(n) = self {
-			n.as_u64()
-		} else {
-			None
-		}
-	}
+	// fn as_u64(&self) -> Option<u64> {
+	// 	if let GqlValue::Number(n) = self {
+	// 		n.as_u64()
+	// 	} else {
+	// 		None
+	// 	}
+	// }
 
 	fn as_i64(&self) -> Option<i64> {
 		if let GqlValue::Number(n) = self {
