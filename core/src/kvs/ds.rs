@@ -862,9 +862,10 @@ impl Datastore {
 	pub async fn process_lq_notifications(
 		&self,
 		stk: &mut Stk,
+		ctx: &Context<'_>,
 		opt: &Options,
 	) -> Result<(), Error> {
-		process_lq_notifications(self, stk, opt).await
+		process_lq_notifications(self, ctx, stk, opt).await
 	}
 
 	/// Add and kill live queries being track on the datastore
@@ -1227,6 +1228,8 @@ impl Datastore {
 		let ctx = vars.attach(ctx)?;
 		// Start a new transaction
 		let txn = self.transaction(val.writeable().into(), Optimistic).await?.enclose();
+		// Set the context transaction
+		let ctx = ctx.set_transaction(txn.clone());
 		// Compute the value
 		let res = stack.enter(|stk| val.compute(stk, &ctx, &opt, None)).finish().await;
 		// Store any data

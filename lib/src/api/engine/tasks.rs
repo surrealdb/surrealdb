@@ -16,6 +16,8 @@ use crate::options::EngineOptions;
 use crate::engine::IntervalStream;
 #[cfg(not(target_arch = "wasm32"))]
 use crate::Error as RootError;
+use surrealdb_core::ctx::Context;
+use surrealdb_core::kvs::{LockType, TransactionType};
 #[cfg(not(target_arch = "wasm32"))]
 use tokio::spawn as spawn_future;
 use tokio::sync::oneshot;
@@ -159,8 +161,10 @@ fn live_query_change_feed(
 					// ticker will never return None;
 					let i = v.unwrap();
 					trace!("Live query agent tick: {:?}", i);
+					let tx = dbs.transaction(TransactionType::Write, LockType::Optimistic).await.unwrap();
+					let ctx = Context::background().set_transaction(tx.enclose());
 					if let Err(e) =
-						stack.enter(|stk| dbs.process_lq_notifications(stk, &opt)).finish().await
+						stack.enter(|stk| dbs.process_lq_notifications(stk, &ctx, &opt)).finish().await
 					{
 						error!("Error running node agent tick: {}", e);
 						break;
