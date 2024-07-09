@@ -1097,6 +1097,9 @@ allow_proc_macro = true
 [pkg.strum_macros]
 allow_proc_macro = true
 
+[pkg.static_assertions]
+allow_unsafe = true
+
 # examples
 [pkg.pear_codegen]
 allow_proc_macro = true
