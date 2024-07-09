@@ -2,6 +2,7 @@ use crate::sql::statements::info::InfoStructure;
 use crate::sql::Value;
 use derive::Store;
 use revision::revisioned;
+use revision::Error;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display};
 use std::ops::{Add, Sub};
@@ -9,13 +10,19 @@ use std::time::Duration;
 use uuid::Uuid;
 
 #[revisioned(revision = 2)]
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash, Store)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash, Store)]
 #[non_exhaustive]
 pub struct Node {
+	#[revision(start = 2, default_fn = "default_id")]
 	pub id: Uuid,
+	#[revision(start = 2, default_fn = "default_hb")]
 	pub hb: Timestamp,
 	#[revision(start = 2, default_fn = "default_gc")]
 	pub gc: bool,
+	#[revision(end = 2, convert_fn = "convert_name")]
+	pub name: String,
+	#[revision(end = 2, convert_fn = "convert_heartbeat")]
+	pub heartbeat: Timestamp,
 }
 
 impl Node {
@@ -25,6 +32,7 @@ impl Node {
 			id,
 			hb,
 			gc,
+			..Default::default()
 		}
 	}
 	/// Mark this node as archived
@@ -54,8 +62,26 @@ impl Node {
 		}
 	}
 	// Sets the default gc value for old nodes
+	fn default_id(_revision: u16) -> Uuid {
+		Uuid::default()
+	}
+	// Sets the default gc value for old nodes
+	fn default_hb(_revision: u16) -> Timestamp {
+		Timestamp::default()
+	}
+	// Sets the default gc value for old nodes
 	fn default_gc(_revision: u16) -> bool {
 		true
+	}
+	// Sets the default gc value for old nodes
+	fn convert_name(&mut self, _revision: u16, value: String) -> Result<(), Error> {
+		self.id = Uuid::parse_str(&value).unwrap();
+		Ok(())
+	}
+	// Sets the default gc value for old nodes
+	fn convert_heartbeat(&mut self, _revision: u16, value: Timestamp) -> Result<(), Error> {
+		self.hb = value;
+		Ok(())
 	}
 }
 
