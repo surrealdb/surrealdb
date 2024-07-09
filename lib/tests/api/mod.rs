@@ -1365,13 +1365,51 @@ async fn run() {
 	DEFINE FUNCTION fn::foo() {
 	   RETURN 42;
 	};
-	DEFINE FUNCTION fn::bar($val) {
+	DEFINE FUNCTION fn::bar($val: any) {
 	   CREATE foo:1 set val = $val;
 	};
 	DEFINE FUNCTION fn::baz() {
-	   SELECT VALUE val FROM ONLY foo:1;
+	   RETURN SELECT VALUE val FROM ONLY foo:1;
 	};
 	";
-	let tmp = db.query(sql);
-	panic!("test")
+	let _ = db.query(sql).await;
+
+	let tmp = db.run("fn::foo", ()).await.unwrap();
+	assert_eq!(tmp, Value::from(42));
+
+	let tmp = db.run("fn::foo", 7).await;
+	assert!(matches!(
+		tmp,
+		Err(Error::Db(surrealdb::err::Error::InvalidArguments {
+			name: _,
+			message: _
+		}))
+	));
+
+	let tmp = db.run("fn::idnotexist", ()).await;
+	assert!(matches!(
+		tmp,
+		Err(Error::Db(surrealdb::err::Error::FcNotFound {
+			value: _
+		}))
+	));
+
+	let tmp = db.run("count", Value::from(vec![1, 2, 3])).await.unwrap();
+	assert_eq!(tmp, Value::from(3));
+
+	let tmp = db.run("fn::bar", 7).await.unwrap();
+	assert_eq!(tmp, Value::None);
+
+	let tmp = db.run("fn::baz", ()).await.unwrap();
+	assert_eq!(tmp, Value::from(7));
+
+	let foo = db.run("fn::foo", ()); // fn::foo()
+								 // a single value will be turned into one arguement unless it is a tuple, vec, or slice
+	let bar = db.run("fn::bar", 42); // fn::bar(42)
+								 // to specify a single arguement, which is an array turn it into a value, or wrap in a singleton tuple
+	let count = db.run("count", Value::from(vec![1, 2, 3]));
+	let count = db.run("count", (vec![1, 2, 3],));
+	// specify multiple args with either a tuple, vec, or slice
+	let two = db.run("math::log", (100, 10)); // math::log(100, 10)
+	let two = db.run("math::log", [100, 10]); // math::log(100, 10)
 }

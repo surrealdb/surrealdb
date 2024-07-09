@@ -62,12 +62,6 @@ impl IntoParams for Array {
 	}
 }
 
-impl IntoParams for Vec<Value> {
-	fn into_params(self) -> Array {
-		self.into()
-	}
-}
-
 impl IntoParams for Value {
 	fn into_params(self) -> Array {
 		let arr: Vec<Value> = vec![self];
@@ -75,6 +69,45 @@ impl IntoParams for Value {
 	}
 }
 
+impl<T> IntoParams for Vec<T>
+where
+	T: Into<Value>,
+{
+	fn into_params(self) -> Array {
+		let arr: Vec<Value> = self.into_iter().map(Into::into).collect();
+		Array::from(arr)
+	}
+}
+
+impl<T, const N: usize> IntoParams for [T; N]
+where
+	T: Into<Value>,
+{
+	fn into_params(self) -> Array {
+		let arr: Vec<Value> = self.into_iter().map(Into::into).collect();
+		Array::from(arr)
+	}
+}
+
+impl<T, const N: usize> IntoParams for &[T; N]
+where
+	T: Into<Value> + Clone,
+{
+	fn into_params(self) -> Array {
+		let arr: Vec<Value> = self.iter().cloned().map(Into::into).collect();
+		Array::from(arr)
+	}
+}
+
+impl<T> IntoParams for &[T]
+where
+	T: Into<Value> + Clone,
+{
+	fn into_params(self) -> Array {
+		let arr: Vec<Value> = self.iter().cloned().map(Into::into).collect();
+		Array::from(arr)
+	}
+}
 impl IntoParams for () {
 	fn into_params(self) -> Array {
 		Vec::<Value>::new().into()
@@ -113,6 +146,46 @@ where
 		Array::from(arr)
 	}
 }
+
+macro_rules! into_impl {
+	($type:ty) => {
+		impl IntoParams for $type {
+			fn into_params(self) -> Array {
+				let val: Value = self.into();
+				Array::from(val)
+			}
+		}
+	};
+}
+into_impl!(i8);
+into_impl!(i16);
+into_impl!(i32);
+into_impl!(i64);
+into_impl!(i128);
+into_impl!(u8);
+into_impl!(u16);
+into_impl!(u32);
+into_impl!(u64);
+into_impl!(u128);
+into_impl!(usize);
+into_impl!(isize);
+into_impl!(f32);
+into_impl!(f64);
+into_impl!(String);
+into_impl!(&str);
+
+// impl IntoParams for &[usize] {
+// 	fn into_params(self) -> Array {
+// 		let vec: Vec<Value> = self.iter().cloned().map(Into::into).collect();
+// 		Array::from(vec)
+// 	}
+// }
+// impl IntoParams for Vec<usize> {
+// 	fn into_params(self) -> Array {
+// 		let vec: Vec<Value> = self.into_iter().map(Into::into).collect();
+// 		Array::from(vec)
+// 	}
+// }
 
 pub trait IntoFn {
 	fn into_fn(self) -> (String, Option<String>);
