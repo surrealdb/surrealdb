@@ -22,7 +22,10 @@ body:
     attributes:
       label: Steps to reproduce
       description: What are the steps necessary to reproduce this bug?
-      placeholder: Detail the steps taken to reproduce the behaviour.
+      placeholder: |
+        Detail the steps taken to reproduce the behaviour.
+        Remember to include any useful data, queries, screenshots or videos of the issue. 
+        Feel free to use [Surrealist Embeds](https://surrealdb.com/docs/surrealist/embeds) and share a link!
     validations:
       required: true
   - type: textarea
