@@ -1140,6 +1140,9 @@ allow_unsafe = true
 [pkg.pest_derive]
 allow_proc_macro = true
 
+[pkg.pest]
+allow_unsafe = true
+
 [pkg.async-graphql-derive]
 allow_proc_macro = true
 
