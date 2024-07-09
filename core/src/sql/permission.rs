@@ -148,8 +148,8 @@ impl PermissionKind {
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub enum Permission {
-	#[default]
 	None,
+	#[default]
 	Full,
 	Specific(Value),
 }
