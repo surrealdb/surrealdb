@@ -125,8 +125,10 @@ impl Param {
 		doc: Option<&CursorDoc<'_>>,
 	) -> Result<Value, Error> {
 		// Check if the param is reserved
-		let normalised = self.as_str().to_lowercase().as_str();
-		if RESERVED.contains(&normalised) || PROTECTED_PARAM_NAMES.contains(&normalised) {
+		let normalised = self.as_str().to_lowercase();
+		if RESERVED.contains(&normalised.as_str())
+			|| PROTECTED_PARAM_NAMES.contains(&normalised.as_str())
+		{
 			// Return the param as a value
 			Ok(Value::Param(self.clone()))
 		} else {
