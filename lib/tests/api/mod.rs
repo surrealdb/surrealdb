@@ -1379,9 +1379,11 @@ async fn run() {
 	assert_eq!(tmp, Value::from(42));
 
 	let tmp = db.run("fn::foo", 7).await.unwrap_err();
+	println!("fn::foo res: {tmp}");
 	assert!(tmp.to_string().contains("The function expects 0 arguments."));
 
 	let tmp = db.run("fn::idnotexist", ()).await.unwrap_err();
+	println!("fn::idontexist res: {tmp}");
 	assert!(tmp.to_string().contains("The function 'fn::idnotexist' does not exist"));
 
 	let tmp = db.run("count", Value::from(vec![1, 2, 3])).await.unwrap();
