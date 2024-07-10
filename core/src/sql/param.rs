@@ -14,7 +14,7 @@ use std::{fmt, ops::Deref, str};
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Param";
 
 /// https://surrealdb.com/docs/surrealdb/surrealql/parameters#reserved-variable-names
-const RESERVED: [&'static str; 11] = [
+const RESERVED: [&str; 11] = [
 	"before", "after", "auth", "event", "input", "parent", "this", "scope", "session", "token",
 	"value",
 ];
