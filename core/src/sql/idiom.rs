@@ -215,7 +215,7 @@ impl Idiom {
 					limit: g.limit.clone(),
 					start: match g.clone().start {
 						None => None,
-						Some(s) => Start(s.0.partially_compute(stk, ctx, opt, doc).unwrap()),
+						Some(s) => Some(Start(s.0.partially_compute(stk, ctx, opt, doc).await?)),
 					},
 					alias: g.alias.clone(),
 				}),
