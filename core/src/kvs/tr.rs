@@ -138,6 +138,20 @@ impl Transactor {
 	// Integral methods
 	// --------------------------------------------------
 
+	/// Specify how we should handle unclosed transactions.
+	///
+	/// If a transaction is not cancelled or rolled back then
+	/// this can cause issues on some storage engine
+	/// implementations. In tests we can ignore unhandled
+	/// transactions, whilst in development we should panic
+	/// so that any unintended behaviour is detected, and in
+	/// production we should only log a warning.
+	pub(crate) fn check_level(&mut self, check: Check) {
+		#[cfg(debug_assertions)]
+		trace!(target: TARGET, "check_level");
+		expand_inner!(&mut self.inner, v => { v.check_level(check) })
+	}
+
 	/// Check if transaction is finished.
 	///
 	/// If the transaction has been cancelled or committed,

@@ -160,6 +160,11 @@ impl Transaction {
 }
 
 impl super::api::Transaction for Transaction {
+	/// Behaviour if unclosed
+	fn check_level(&mut self, check: Check) {
+		self.check = check;
+	}
+
 	/// Check if closed
 	fn closed(&self) -> bool {
 		self.done

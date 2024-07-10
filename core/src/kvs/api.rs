@@ -1,4 +1,5 @@
 use super::kv::Add;
+use super::tr::Check;
 use crate::cnf::NORMAL_FETCH_SIZE;
 use crate::err::Error;
 use crate::kvs::batch::Batch;
@@ -9,6 +10,16 @@ use std::fmt::Debug;
 use std::ops::Range;
 
 pub trait Transaction {
+	/// Specify how we should handle unclosed transactions.
+	///
+	/// If a transaction is not cancelled or rolled back then
+	/// this can cause issues on some storage engine
+	/// implementations. In tests we can ignore unhandled
+	/// transactions, whilst in development we should panic
+	/// so that any unintended behaviour is detected, and in
+	/// production we should only log a warning.
+	fn check_level(&mut self, check: Check);
+
 	/// Check if transaction is finished.
 	///
 	/// If the transaction has been cancelled or committed,

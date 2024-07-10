@@ -1,4 +1,5 @@
 use super::batch::Batch;
+use super::tr::Check;
 use super::Convert;
 use super::Key;
 use super::Val;
@@ -245,6 +246,28 @@ impl Transaction {
 				end: rng.end.into(),
 			},
 		)
+	}
+
+	// --------------------------------------------------
+	// Rollback methods
+	// --------------------------------------------------
+
+	/// Warn if this transaction is dropped without proper handling.
+	pub async fn rollback_with_warning(self) -> Self {
+		self.tx.lock().await.check_level(Check::Warn);
+		self
+	}
+
+	/// Panic if this transaction is dropped without proper handling.
+	pub async fn rollback_with_panic(self) -> Self {
+		self.tx.lock().await.check_level(Check::Panic);
+		self
+	}
+
+	/// Do nothing if this transaction is dropped without proper handling.
+	pub async fn rollback_and_ignore(self) -> Self {
+		self.tx.lock().await.check_level(Check::None);
+		self
 	}
 
 	// --------------------------------------------------
