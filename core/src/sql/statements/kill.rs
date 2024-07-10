@@ -2,6 +2,7 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
+use crate::kvs::Live;
 use crate::sql::Uuid;
 use crate::sql::Value;
 use derive::Store;
@@ -69,29 +70,38 @@ impl KillStatement {
 				});
 			}
 		};
+		// Get the Node ID
+		let nid = opt.id()?;
+		// Get the LIVE ID
+		let lid = lid.0;
 		// Get the transaction
 		let txn = ctx.tx();
 		// Lock the transaction
 		let mut txn = txn.lock().await;
 		// Fetch the live query key
-		let key = crate::key::node::lq::new(opt.id()?, lid.0);
+		let key = crate::key::node::lq::new(nid, lid);
 		// Fetch the live query key if it exists
 		match txn.get(key).await? {
-			Some(val) => match std::str::from_utf8(&val) {
-				Ok(tb) => {
+			Some(val) => {
+				// Get the NS and DB
+				let ns = opt.ns()?;
+				let db = opt.db()?;
+				// Decode the data for this live query
+				let val: Live = val.into();
+				// Check the NS and DB are correct
+				if ns == val.ns && db == val.db {
 					// Delete the node live query
-					let key = crate::key::node::lq::new(opt.id()?, lid.0);
+					let key = crate::key::node::lq::new(nid, lid);
 					txn.del(key).await?;
 					// Delete the table live query
-					let key = crate::key::table::lq::new(opt.ns()?, opt.db()?, tb, lid.0);
+					let key = crate::key::table::lq::new(&val.ns, &val.db, &val.tb, lid);
 					txn.del(key).await?;
-				}
-				_ => {
+				} else {
 					return Err(Error::KillStatement {
 						value: self.id.to_string(),
 					});
 				}
-			},
+			}
 			None => {
 				return Err(Error::KillStatement {
 					value: "KILL statement uuid did not exist".to_string(),
