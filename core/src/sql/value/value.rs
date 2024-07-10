@@ -2686,7 +2686,7 @@ impl Value {
 
 		match self {
 			// We only want to process params
-			Value::Param(v) => stk.run(|stk| v.compute(stk, ctx, opt, doc)).await,
+			Value::Param(v) => stk.run(|stk| v.partially_compute(stk, ctx, opt, doc)).await,
 			// Anything that contains params gets partially computed
 			Value::Array(v) => stk.run(|stk| v.partially_compute(stk, ctx, opt, doc)).await,
 			Value::Expression(e) => stk.run(|stk| e.partially_compute(stk, ctx, opt, doc)).await,
