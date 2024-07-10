@@ -3,6 +3,7 @@ use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::iam::Auth;
+use crate::kvs::Live;
 use crate::sql::statements::info::InfoStructure;
 use crate::sql::{Cond, Fetchs, Fields, Uuid, Value};
 use derive::Store;
@@ -101,13 +102,19 @@ impl LiveStatement {
 				// Get the NS and DB
 				let ns = opt.ns()?;
 				let db = opt.db()?;
+				// Store the live info
+				let lq = Live {
+					ns: ns.to_string(),
+					db: ns.to_string(),
+					tb: tb.to_string(),
+				};
 				// Get the transaction
 				let txn = ctx.tx();
 				// Lock the transaction
 				let mut txn = txn.lock().await;
 				// Insert the node live query
 				let key = crate::key::node::lq::new(nid, id);
-				txn.put(key, tb.as_str()).await?;
+				txn.put(key, lq).await?;
 				// Insert the table live query
 				let key = crate::key::table::lq::new(ns, db, &tb, id);
 				txn.put(key, stm).await?;

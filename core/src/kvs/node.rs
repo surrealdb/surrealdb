@@ -2,28 +2,13 @@ use crate::cnf::NORMAL_FETCH_SIZE;
 use crate::dbs::node::Node;
 use crate::err::Error;
 use crate::kvs::Datastore;
+use crate::kvs::Live;
 use crate::kvs::LockType::*;
 use crate::kvs::TransactionType::*;
 use crate::sql::statements::LiveStatement;
-use derive::Store;
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
 use std::time::Duration;
 
 const TARGET: &str = "surrealdb::core::kvs::node";
-
-#[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
-pub struct Live {
-	/// The namespace in which this LIVE query exists
-	ns: String,
-	/// The database in which this LIVE query exists
-	db: String,
-	/// The table in which this LIVE query exists
-	tb: String,
-}
 
 impl Datastore {
 	/// Inserts a node for the first time into the cluster.

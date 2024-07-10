@@ -18,6 +18,7 @@ mod cache;
 mod clock;
 mod ds;
 mod export;
+mod live;
 mod node;
 mod scanner;
 mod stash;
@@ -37,5 +38,6 @@ mod tests;
 
 pub use self::ds::*;
 pub use self::kv::*;
+pub use self::live::*;
 pub use self::tr::*;
 pub use self::tx::*;
