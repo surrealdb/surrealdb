@@ -79,7 +79,6 @@ pub async fn basic(
 ) -> Result<(), Error> {
 	// Log the authentication type
 	trace!("Attempting basic authentication");
-
 	// Check if the parameters exist
 	match (ns, db) {
 		// DB signin

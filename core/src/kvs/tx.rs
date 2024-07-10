@@ -23,6 +23,7 @@ use crate::sql::statements::DefineTableStatement;
 use crate::sql::statements::DefineUserStatement;
 use crate::sql::statements::LiveStatement;
 use crate::sql::Id;
+use crate::sql::Permissions;
 use crate::sql::Value;
 use futures::lock::Mutex;
 use futures::lock::MutexGuard;
@@ -1416,6 +1417,7 @@ impl Transaction {
 						// Next, dynamically define the table
 						let val = DefineTableStatement {
 							name: tb.to_owned().into(),
+							permissions: Permissions::none(),
 							..Default::default()
 						};
 						let val = {

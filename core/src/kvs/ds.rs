@@ -739,9 +739,6 @@ impl Datastore {
 		if sess.expired() {
 			return Err(Error::ExpiredSession);
 		}
-
-		let mut stack = TreeStack::new();
-
 		// Check if anonymous actors can compute values when auth is enabled
 		// TODO(sgirones): Check this as part of the authorisation layer
 		if sess.au.is_anon() && self.auth_enabled && !self.capabilities.allows_guest_access() {
@@ -752,6 +749,8 @@ impl Datastore {
 			}
 			.into());
 		}
+		// Create a new memory stack
+		let mut stack = TreeStack::new();
 		// Create a new query options
 		let opt = Options::default()
 			.with_id(self.id)
@@ -827,7 +826,7 @@ impl Datastore {
 		if sess.expired() {
 			return Err(Error::ExpiredSession);
 		}
-
+		// Create a new memory stack
 		let mut stack = TreeStack::new();
 		// Create a new query options
 		let opt = Options::default()
