@@ -234,6 +234,7 @@ async fn loose_mode_all_ok() -> Result<(), Error> {
 	let val = Value::parse(
 		"{
 			namespaces: { test: 'DEFINE NAMESPACE test' },
+			nodes: {},
 			users: {},
 		}",
 	);

@@ -582,8 +582,8 @@ async fn permissions_checks_remove_ns() {
 
 	// Define the expected results for the check statement when the test statement succeeded and when it failed
 	let check_results = [
-		vec!["{ namespaces: {  }, users: {  } }"],
-		vec!["{ namespaces: { NS: 'DEFINE NAMESPACE NS' }, users: {  } }"],
+		vec!["{ namespaces: {  }, nodes: {  }, users: {  } }"],
+		vec!["{ namespaces: { NS: 'DEFINE NAMESPACE NS' }, nodes: {  }, users: {  } }"],
 	];
 
 	let test_cases = [
@@ -834,8 +834,8 @@ async fn permissions_checks_remove_root_user() {
 
 	// Define the expected results for the check statement when the test statement succeeded and when it failed
 	let check_results = [
-		vec!["{ namespaces: {  }, users: {  } }"],
-        vec!["{ namespaces: {  }, users: { user: \"DEFINE USER user ON ROOT PASSHASH 'secret' ROLES VIEWER DURATION FOR TOKEN 1h, FOR SESSION NONE\" } }"],
+		vec!["{ namespaces: {  }, nodes: {  }, users: {  } }"],
+        vec!["{ namespaces: {  }, nodes: {  }, users: { user: \"DEFINE USER user ON ROOT PASSHASH 'secret' ROLES VIEWER DURATION FOR TOKEN 1h, FOR SESSION NONE\" } }"],
     ];
 
 	let test_cases = [

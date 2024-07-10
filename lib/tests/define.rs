@@ -30,6 +30,7 @@ async fn define_statement_namespace() -> Result<(), Error> {
 	let val = Value::parse(
 		"{
 			namespaces: { test: 'DEFINE NAMESPACE test' },
+			nodes: {},
 			users: {},
 		}",
 	);
@@ -1273,8 +1274,8 @@ async fn permissions_checks_define_ns() {
 
 	// Define the expected results for the check statement when the test statement succeeded and when it failed
 	let check_results = [
-		vec!["{ namespaces: { NS: 'DEFINE NAMESPACE NS' }, users: {  } }"],
-		vec!["{ namespaces: {  }, users: {  } }"],
+		vec!["{ namespaces: { NS: 'DEFINE NAMESPACE NS' }, nodes: {  }, users: {  } }"],
+		vec!["{ namespaces: {  }, nodes: {  }, users: {  } }"],
 	];
 
 	let test_cases = [
@@ -1522,8 +1523,8 @@ async fn permissions_checks_define_user_root() {
 
 	// Define the expected results for the check statement when the test statement succeeded and when it failed
 	let check_results = [
-        vec!["{ namespaces: {  }, users: { user: \"DEFINE USER user ON ROOT PASSHASH 'secret' ROLES VIEWER DURATION FOR TOKEN 15m, FOR SESSION 6h\" } }"],
-		vec!["{ namespaces: {  }, users: {  } }"]
+        vec!["{ namespaces: {  }, nodes: {  }, users: { user: \"DEFINE USER user ON ROOT PASSHASH 'secret' ROLES VIEWER DURATION FOR TOKEN 15m, FOR SESSION 6h\" } }"],
+		vec!["{ namespaces: {  }, nodes: {  }, users: {  } }"]
     ];
 
 	let test_cases = [
