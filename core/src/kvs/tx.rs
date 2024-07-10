@@ -2811,43 +2811,6 @@ impl Transaction {
 		Ok(None)
 	}
 
-	pub async fn define_in_out_fd_from_relation(
-		&mut self,
-		ns: &str,
-		db: &str,
-		tb: &str,
-		rel: &Relation,
-	) -> Result<(), Error> {
-		let in_kind = rel.from.clone().unwrap_or(Kind::Record(vec![]));
-		let out_kind = rel.to.clone().unwrap_or(Kind::Record(vec![]));
-
-		let in_key = crate::key::table::fd::new(ns, db, tb, "in");
-		let out_key = crate::key::table::fd::new(ns, db, tb, "out");
-
-		// TODO: fix permissions so they don't defalut to full
-		self.set(
-			in_key,
-			DefineFieldStatement {
-				name: Idiom(vec![Part::from("in")]),
-				what: tb.into(),
-				kind: Some(in_kind),
-				..Default::default()
-			},
-		)
-		.await?;
-		self.set(
-			out_key,
-			DefineFieldStatement {
-				name: Idiom(vec![Part::from("out")]),
-				what: tb.into(),
-				kind: Some(out_kind),
-				..Default::default()
-			},
-		)
-		.await?;
-		Ok(())
-	}
-
 	// --------------------------------------------------
 	// Private methods
 	// --------------------------------------------------

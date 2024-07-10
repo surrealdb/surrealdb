@@ -581,8 +581,6 @@ impl Parser<'_> {
 		let mut res = DefineTableStatement {
 			name,
 			permissions: Permissions::none(),
-			// Default to ANY if not specified in the DEFINE statement
-			kind: TableType::Any,
 			if_not_exists,
 			..Default::default()
 		};
