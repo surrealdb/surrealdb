@@ -522,7 +522,6 @@ mod test {
 	use crate::kvs::{Datastore, LockType, TransactionType};
 	use crate::sql::{Array, Param, Value};
 	use reblessive::TreeStack;
-	use std::sync::Arc;
 
 	#[tokio::test]
 	async fn array_partial_compute() {
