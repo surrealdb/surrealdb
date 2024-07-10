@@ -207,12 +207,11 @@ async fn invalidate() -> Result<(), Box<dyn std::error::Error>> {
 	// Send INVALIDATE command
 	socket.send_request("invalidate", json!([])).await?;
 	// Verify we have an invalidated session
-	let res = socket.send_message_query("DEFINE NAMESPACE test").await?;
-	assert_eq!(res[0]["status"], "ERR", "result: {:?}", res);
+	let res = socket.send_request("query", json!(["DEFINE NAMESPACE test"])).await?;
 	assert_eq!(
-		res[0]["result"], "IAM error: Not enough permissions to perform this action",
-		"result: {:?}",
-		res
+		res["error"]["message"],
+		"There was a problem with the database: IAM error: Not enough permissions to perform this action",
+		"result: {:?}", res
 	);
 	// Test passed
 	server.finish().unwrap();
@@ -244,7 +243,8 @@ async fn authenticate() -> Result<(), Box<dyn std::error::Error>> {
 #[test(tokio::test)]
 async fn letset() -> Result<(), Box<dyn std::error::Error>> {
 	// Setup database server
-	let (addr, mut server) = common::start_server_with_defaults().await.unwrap();
+	// TODO(gguillemas): We should review why this requires guest access
+	let (addr, mut server) = common::start_server_with_guests().await.unwrap();
 	// Connect to WebSocket
 	let mut socket = Socket::connect(&addr, SERVER, FORMAT).await?;
 	// Authenticate the connection
@@ -265,7 +265,8 @@ async fn letset() -> Result<(), Box<dyn std::error::Error>> {
 #[test(tokio::test)]
 async fn unset() -> Result<(), Box<dyn std::error::Error>> {
 	// Setup database server
-	let (addr, mut server) = common::start_server_with_defaults().await.unwrap();
+	// TODO(gguillemas): We should review why this requires guest access
+	let (addr, mut server) = common::start_server_with_guests().await.unwrap();
 	// Connect to WebSocket
 	let mut socket = Socket::connect(&addr, SERVER, FORMAT).await?;
 	// Authenticate the connection
@@ -1567,7 +1568,7 @@ async fn session_use_change_database() {
 #[test(tokio::test)]
 async fn run_functions() {
 	// Setup database server
-	let (addr, mut server) = common::start_server_with_defaults().await.unwrap();
+	let (addr, mut server) = common::start_server_with_functions().await.unwrap();
 	// Connect to WebSocket
 	let mut socket = Socket::connect(&addr, SERVER, FORMAT).await.unwrap();
 	// Authenticate the connection

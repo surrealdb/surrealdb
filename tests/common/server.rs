@@ -166,7 +166,7 @@ impl Default for StartServerArguments {
 			enable_auth_level: false,
 			tick_interval: time::Duration::new(1, 0),
 			temporary_directory: None,
-			args: "--allow-all".to_string(),
+			args: "".to_string(),
 		}
 	}
 }
@@ -182,6 +182,23 @@ pub async fn start_server_without_auth() -> Result<(String, Child), Box<dyn Erro
 pub async fn start_server_with_auth_level() -> Result<(String, Child), Box<dyn Error>> {
 	start_server(StartServerArguments {
 		enable_auth_level: true,
+		args: "--allow-guests".to_string(),
+		..Default::default()
+	})
+	.await
+}
+
+pub async fn start_server_with_functions() -> Result<(String, Child), Box<dyn Error>> {
+	start_server(StartServerArguments {
+		args: "--allow-funcs".to_string(),
+		..Default::default()
+	})
+	.await
+}
+
+pub async fn start_server_with_guests() -> Result<(String, Child), Box<dyn Error>> {
+	start_server(StartServerArguments {
+		args: "--allow-guests".to_string(),
 		..Default::default()
 	})
 	.await
