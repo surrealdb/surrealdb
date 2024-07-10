@@ -7,7 +7,7 @@ use crate::sql::{
 	fmt::{fmt_separated_by, Fmt},
 	part::Next,
 	paths::{ID, IN, META, OUT},
-	Part, Value,
+	Graph, Part, Start, Value,
 };
 use md5::{Digest, Md5};
 use reblessive::tree::Stk;
@@ -188,6 +188,47 @@ impl Idiom {
 				None => Ok(Value::None),
 			},
 		}
+	}
+
+	pub(crate) async fn partially_compute(
+		&self,
+		stk: &mut Stk,
+		ctx: &Context<'_>,
+		opt: &Options,
+		doc: Option<&CursorDoc<'_>>,
+	) -> Result<Value, Error> {
+		let mut parts: Vec<Part> = Vec::with_capacity(self.0.len());
+		for p in self.0.iter() {
+			parts.push(match p {
+				Part::Where(v) => {
+					Part::Where(v.clone().partially_compute(stk, ctx, opt, doc).await?)
+				}
+				Part::Graph(g) => Part::Graph(Graph {
+					// Not fully evaluated, a lot of these contain idioms
+					dir: g.dir.clone(),
+					expr: g.expr.clone(),
+					what: g.what.clone(),
+					cond: g.cond.clone(),
+					split: g.split.clone(),
+					group: g.group.clone(),
+					order: g.order.clone(),
+					limit: g.limit.clone(),
+					start: match g.clone().start {
+						None => None,
+						Some(s) => Start(s.0.partially_compute(stk, ctx, opt, doc).unwrap()),
+					},
+					alias: g.alias.clone(),
+				}),
+				Part::Value(v) => {
+					Part::Value(v.clone().partially_compute(stk, ctx, opt, doc).await?)
+				}
+				Part::Start(v) => {
+					Part::Start(v.clone().partially_compute(stk, ctx, opt, doc).await?)
+				}
+				_ => p.clone(),
+			})
+		}
+		Ok(Value::Idiom(Idiom(parts)))
 	}
 }
 
