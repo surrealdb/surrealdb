@@ -18,6 +18,14 @@ impl<'a> Document<'a> {
 		if self.id.is_some() {
 			// Should we run permissions checks?
 			if opt.check_perms(stm.into())? {
+				// Check that authentication level matches session
+				let (ns, db) = (opt.ns()?, opt.db()?);
+				if opt.auth.level().ns() != Some(ns) {
+					return Err(Error::NsNotAllowed { ns: ns.into() })
+				}
+				if opt.auth.level().db() != Some(db) {
+					return Err(Error::DbNotAllowed { db: db.into() })
+				}
 				// Get the table
 				let tb = self.tb(ctx, opt).await?;
 				// Get the permission clause
