@@ -514,3 +514,38 @@ impl Uniq<Array> for Array {
 		self
 	}
 }
+
+#[cfg(test)]
+#[cfg(feature = "kv-mem")]
+mod test {
+	use crate::dbs::Options;
+	use crate::kvs::{Datastore, LockType, TransactionType};
+	use crate::sql::{Array, Param, Value};
+	use reblessive::TreeStack;
+	use std::sync::Arc;
+
+	#[tokio::test]
+	async fn array_partial_compute() {
+		let db = Datastore::new("memory").await.unwrap();
+		let mut array = Array::with_capacity(2);
+		array.insert(0, Value::Param(Param::from("foo")));
+		array.insert(1, Value::Number(2.0.into()));
+
+		let mut stack = TreeStack::new();
+		let tx =
+			db.transaction(TransactionType::Write, LockType::Optimistic).await.unwrap().enclose();
+		let mut ctx = crate::ctx::Context::default().set_transaction(tx.clone());
+		ctx.add_value("foo", Value::Number(1.0.into()));
+		let opt = Options::default().with_ns(Some("test".into())).with_db(Some("test".into()));
+		let res = stack
+			.enter(|stk| async { array.partially_compute(stk, &ctx, &opt, None).await })
+			.finish()
+			.await
+			.unwrap();
+
+		array.remove(0);
+		array.insert(0, Value::Number(1.0.into()));
+		assert_eq!(res, Value::Array(array));
+		tx.lock().await.commit().await.unwrap();
+	}
+}

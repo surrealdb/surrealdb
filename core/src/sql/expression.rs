@@ -108,23 +108,19 @@ impl Expression {
 			Self::Unary {
 				o,
 				v,
-			} => {
-				Ok(Value::Expression(Box::new(Self::Unary {
-					o: o.to_owned(),
-					v: v.partially_compute(stk, ctx, opt, doc).await?,
-				})))
-			}
+			} => Ok(Value::Expression(Box::new(Self::Unary {
+				o: o.to_owned(),
+				v: v.partially_compute(stk, ctx, opt, doc).await?,
+			}))),
 			Self::Binary {
 				l,
 				o,
 				r,
-			} => {
-				Ok(Value::Expression(Box::new(Self::Binary {
-					l: l.partially_compute(stk, ctx, opt, doc).await?,
-					o: o.to_owned(),
-					r: r.partially_compute(stk, ctx, opt, doc).await?,
-				})))
-			}
+			} => Ok(Value::Expression(Box::new(Self::Binary {
+				l: l.partially_compute(stk, ctx, opt, doc).await?,
+				o: o.to_owned(),
+				r: r.partially_compute(stk, ctx, opt, doc).await?,
+			}))),
 		}
 	}
 
@@ -240,5 +236,40 @@ impl fmt::Display for Expression {
 				r,
 			} => write!(f, "{l} {o} {r}"),
 		}
+	}
+}
+
+#[cfg(test)]
+#[cfg(feature = "kv-mem")]
+mod test {
+	use crate::ctx::Context;
+	use crate::sql::{Expression, Operator, Value};
+	use reblessive::TreeStack;
+
+	#[tokio::test]
+	async fn param_evaluated_partial_compute() {
+		let expression = Expression::Binary {
+			l: Value::Param("foo".into()),
+			o: Operator::Equal,
+			r: Value::Param("bar".into()),
+		};
+		let mut ctx = Context::default();
+		ctx.add_value("foo", Value::Number(1.0.into()));
+		ctx.add_value("bar", Value::Number(2.0.into()));
+		let mut stack = TreeStack::new();
+		let expression = stack
+			.enter(|stk| async {
+				expression.partially_compute(stk, &ctx, &Default::default(), None).await.unwrap()
+			})
+			.finish()
+			.await;
+		assert_eq!(
+			expression,
+			Value::Expression(Box::new(Expression::Binary {
+				l: Value::Number(1.0.into()),
+				o: Operator::Equal,
+				r: Value::Number(2.0.into()),
+			}))
+		);
 	}
 }
