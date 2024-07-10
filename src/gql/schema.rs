@@ -1,11 +1,11 @@
 use std::collections::BTreeMap;
 
-use async_graphql::dynamic::TypeRef;
 use async_graphql::dynamic::{Enum, Type};
 use async_graphql::dynamic::{Field, Interface};
 use async_graphql::dynamic::{FieldFuture, InterfaceField};
 use async_graphql::dynamic::{InputObject, Object};
 use async_graphql::dynamic::{InputValue, Schema};
+use async_graphql::dynamic::{SchemaError, TypeRef};
 use async_graphql::indexmap::IndexMap;
 use async_graphql::Name;
 use async_graphql::Value as GqlValue;
@@ -355,7 +355,17 @@ pub async fn get_schema() -> Result<Schema, Box<dyn std::error::Error>> {
 		.implement("record");
 	schema = schema.register(relation_interface);
 
-	Ok(schema.finish().unwrap())
+	let res = schema.finish();
+	match res {
+		Ok(s) => Ok(s),
+		Err(_) => {
+			warn!("note: Query reloading is not yet implemented. This means that the schema is generated on startup, so if starting in memory the schema will always be empty");
+			res.unwrap();
+			unreachable!();
+		}
+	}
+
+	// Ok(schema.finish().unwrap())
 }
 
 fn sql_value_to_gql_value(v: SqlValue) -> Result<GqlValue, ()> {
