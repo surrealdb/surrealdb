@@ -1257,10 +1257,44 @@ impl Transaction {
 			false => Ok(()),
 			// Strict mode is enabled
 			true => {
-				// Check the table exists
-				self.get_tb(ns, db, tb).await?;
-				// Everything is ok
-				Ok(())
+				// Check that the table exists
+				match self.get_tb(ns, db, tb).await {
+					Err(Error::TbNotFound {
+						value: tb,
+					}) => {
+						// If not, check the database exists
+						match self.get_db(ns, db).await {
+							Err(Error::DbNotFound {
+								value: db,
+							}) => {
+								// If not, check the namespace exists
+								match self.get_ns(ns).await {
+									Err(Error::NsNotFound {
+										value: ns,
+									}) => Err(Error::NsNotFound {
+										value: ns,
+									}),
+									// Return any other errors
+									Err(err) => Err(err),
+									// Namespace does exist
+									Ok(_) => Err(Error::DbNotFound {
+										value: db,
+									}),
+								}
+							}
+							// Return any other errors
+							Err(err) => Err(err),
+							// Database does exist
+							Ok(_) => Err(Error::TbNotFound {
+								value: tb,
+							}),
+						}
+					}
+					// Return any other errors
+					Err(err) => Err(err),
+					// Table does exist
+					Ok(_) => Ok(()),
+				}
 			}
 		}
 	}
@@ -1368,6 +1402,15 @@ impl Transaction {
 						let _ = cache.insert(val.clone());
 						val
 					}
+					// Check to see that the hierarchy exists
+					Err(Error::TbNotFound {
+						value,
+					}) if strict => {
+						self.get_ns(ns).await?;
+						Err(Error::DbNotFound {
+							value,
+						})?
+					}
 					// Store the fetched value in the cache
 					Ok(val) => {
 						let val: DefineDatabaseStatement = val.into();
@@ -1426,6 +1469,16 @@ impl Transaction {
 						};
 						let _ = cache.insert(val.clone());
 						val
+					}
+					// Check to see that the hierarchy exists
+					Err(Error::TbNotFound {
+						value,
+					}) if strict => {
+						self.get_ns(ns).await?;
+						self.get_db(ns, db).await?;
+						Err(Error::TbNotFound {
+							value,
+						})?
 					}
 					// Store the fetched value in the cache
 					Ok(val) => {
