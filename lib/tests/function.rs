@@ -1881,7 +1881,12 @@ async fn function_math_deg2rad() -> Result<(), Error> {
 		RETURN math::deg2rad(math::rad2deg(0.7853981633974483));
 	"#;
 	Test::new(sql).await?.expect_floats(
-		&[0.7853981633974483, -1.5707963267948966, 6.283185307179586, 0.7853981633974483],
+		&[
+			std::f64::consts::FRAC_PI_4,
+			-std::f64::consts::FRAC_PI_2,
+			std::f64::consts::TAU,
+			std::f64::consts::FRAC_PI_4,
+		],
 		f64::EPSILON,
 	)?;
 	Ok(())
@@ -2032,7 +2037,7 @@ async fn function_math_log10() -> Result<(), Error> {
 	"#;
 	Test::new(sql)
 		.await?
-		.expect_floats(&[0.43429738512450866, 0.3010299956639812, 0.0], f64::EPSILON)?
+		.expect_floats(&[0.43429738512450866, std::f64::consts::LOG10_2, 0.0], f64::EPSILON)?
 		.expect_vals(&["Math::Neg_Inf", "NaN", "true"])?;
 	Ok(())
 }

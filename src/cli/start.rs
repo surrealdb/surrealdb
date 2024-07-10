@@ -196,7 +196,7 @@ pub async fn init(
 	net::init(ct.clone()).await?;
 	// Shutdown and stop closed tasks
 	task_chans.into_iter().for_each(|chan| {
-		if let Err(_empty_tuple) = chan.send(()) {
+		if chan.send(()).is_err() {
 			error!("Failed to send shutdown signal to task");
 		}
 	});

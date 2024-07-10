@@ -12,7 +12,7 @@ use crate::{
 impl Parser<'_> {
 	/// Parses a uuid strand.
 	pub fn parse_uuid(&mut self) -> ParseResult<Uuid> {
-		let quote_token = self.peek_whitespace();
+		let quote_token = self.peek();
 
 		let double = match quote_token.kind {
 			t!("u\"") => true,
