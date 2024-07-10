@@ -243,7 +243,7 @@ async fn common_permissions_checks(auth_enabled: bool) {
 				// Not allowed to create a table
 				let err = res.unwrap_err().to_string();
 				assert!(
-					err.contains("Not enough permissions to perform this action"),
+					err.contains("Not enough permissions to perform this action") || err.contains("You don't have permission to change to"),
 					"{}: {}",
 					msg,
 					err
@@ -297,7 +297,7 @@ async fn common_permissions_checks(auth_enabled: bool) {
 				// Not allowed to create a table
 				let err = res.unwrap_err().to_string();
 				assert!(
-					err.contains("Not enough permissions to perform this action"),
+					err.contains("Not enough permissions to perform this action") || err.contains("You don't have permission to change to"),
 					"{}: {}",
 					msg,
 					err
