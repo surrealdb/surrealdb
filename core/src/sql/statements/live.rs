@@ -144,6 +144,16 @@ impl LiveStatement {
 						// Insert the table live query
 						run.putc_tblq(opt.ns()?, opt.db()?, &tb, stm, None).await?;
 					}
+					Value::Edges(ed) => {
+						stm.node = nid.into();
+						run.putc_ndlq(nid, id, opt.ns()?, opt.db()?, ed.as_str(), None).await?;
+						run.putc_edlq(opt.ns()?, opt.db()?, &ed.from, stm, None).await?;
+						// Now add a reflection lq to the target
+						let tables = ed.what.0;
+						for tb in tables {
+							run.putc_edlq(opt.ns()?, opt.db()?, &tb, stm.clone(), None).await?;
+						}
+					}
 					v => {
 						return Err(Error::LiveStatement {
 							value: v.to_string(),

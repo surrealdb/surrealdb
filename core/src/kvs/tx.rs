@@ -1306,6 +1306,22 @@ impl Transaction {
 		self.putc(key_enc, live_stm, expected).await
 	}
 
+	/// Add live query to tables edges
+	pub async fn putc_edlq(
+		&mut self,
+		ns: &str,
+		db: &str,
+		tb: &str,
+		live_stm: LiveStatement,
+		expected: Option<LiveStatement>,
+	) -> Result<(), Error> {
+		let key = crate::key::table::eq::new(ns, db, tb, live_stm.id.0);
+		let key_enc = crate::key::table::eq::Eq::encode(&key)?;
+		#[cfg(debug_assertions)]
+		trace!("putc_tblq ({:?}): key={:?}", &live_stm.id, sprint_key(&key_enc));
+		self.putc(key_enc, live_stm, expected).await
+	}
+
 	pub async fn putc_ndlq(
 		&mut self,
 		nd: Uuid,
@@ -1316,6 +1332,7 @@ impl Transaction {
 		chk: Option<&str>,
 	) -> Result<(), Error> {
 		let key = crate::key::node::lq::new(nd, lq, ns, db);
+		// TODO(phughk): Needs to store edge references for gc
 		self.putc(key, tb, chk).await
 	}
 
