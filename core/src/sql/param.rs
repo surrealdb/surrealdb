@@ -1,3 +1,4 @@
+use crate::cnf::PROTECTED_PARAM_NAMES;
 use crate::{
 	ctx::Context,
 	dbs::Options,
@@ -14,10 +15,8 @@ use std::{fmt, ops::Deref, str};
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Param";
 
 /// https://surrealdb.com/docs/surrealdb/surrealql/parameters#reserved-variable-names
-const RESERVED: [&str; 11] = [
-	"before", "after", "auth", "event", "input", "parent", "this", "scope", "session", "token",
-	"value",
-];
+const RESERVED: [&str; 8] =
+	["before", "after", "event", "input", "parent", "this", "scope", "value"];
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
@@ -126,7 +125,8 @@ impl Param {
 		doc: Option<&CursorDoc<'_>>,
 	) -> Result<Value, Error> {
 		// Check if the param is reserved
-		if RESERVED.contains(&self.as_str().to_lowercase().as_str()) {
+		let normalised = self.as_str().to_lowercase().as_str();
+		if RESERVED.contains(&normalised) || PROTECTED_PARAM_NAMES.contains(&normalised) {
 			// Return the param as a value
 			Ok(Value::Param(self.clone()))
 		} else {
