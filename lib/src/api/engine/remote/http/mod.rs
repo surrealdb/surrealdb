@@ -654,9 +654,11 @@ async fn router(
 				Some(v) => format!("{fn_name}::<{v}>({arg_str})"),
 				None => format!("{fn_name}({arg_str})"),
 			};
+			println!("statement: {statement}");
 			let request =
 				client.post(path).headers(headers.clone()).auth(auth).query(&args).body(statement);
-			let value = take(true, request).await?;
+			// TODO: unwrap for debugging
+			let value = take(true, request).await.unwrap();
 			Ok(DbResponse::Other(value))
 		}
 	}
