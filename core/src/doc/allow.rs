@@ -3,7 +3,6 @@ use crate::dbs::Statement;
 use crate::dbs::{Options, Transaction};
 use crate::doc::Document;
 use crate::err::Error;
-use crate::iam::Level;
 use crate::sql::permission::Permission;
 
 impl<'a> Document<'a> {
