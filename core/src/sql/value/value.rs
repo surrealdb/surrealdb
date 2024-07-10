@@ -2689,14 +2689,9 @@ impl Value {
 			Value::Param(v) => stk.run(|stk| v.compute(stk, ctx, opt, doc)).await,
 			// Anything that contains params gets partially computed
 			Value::Array(v) => stk.run(|stk| v.partially_compute(stk, ctx, opt, doc)).await,
-			// If params cannot exist then it remains un-computed
 			Value::Expression(e) => stk.run(|stk| e.partially_compute(stk, ctx, opt, doc)).await,
-			Value::Idiom(i) => {
-				trace!("Partially compute idiom at {}", i.to_string());
-				Ok(self.to_owned())
-			}
+			// If params cannot exist then it remains un-computed
 			_ => {
-				trace!("Partially compute terminated at {}", self.to_string());
 				Ok(self.to_owned())
 			}
 		}
