@@ -17,19 +17,21 @@ impl<'a> Document<'a> {
 		if self.id.is_some() {
 			// Should we run permissions checks?
 			if opt.check_perms(stm.into()) {
-				// Check that authentication level matches session
-				opt.valid_for_ns()?;
-				opt.valid_for_db()?;
-				let (ns, db) = (opt.ns(), opt.db());
-				if opt.auth.level().ns() != Some(ns) {
-					return Err(Error::NsNotAllowed {
-						ns: ns.into(),
-					});
-				}
-				if opt.auth.level().db() != Some(db) {
-					return Err(Error::DbNotAllowed {
-						db: db.into(),
-					});
+				// Check that authentication matches session
+				if !opt.auth.is_anon() {
+					opt.valid_for_ns()?;
+					opt.valid_for_db()?;
+					let (ns, db) = (opt.ns(), opt.db());
+					if opt.auth.level().ns() != Some(ns) {
+						return Err(Error::NsNotAllowed {
+							ns: ns.into(),
+						});
+					}
+					if opt.auth.level().db() != Some(db) {
+						return Err(Error::DbNotAllowed {
+							db: db.into(),
+						});
+					}
 				}
 				// Get the table
 				let tb = self.tb(opt, txn).await?;
