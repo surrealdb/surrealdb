@@ -19,7 +19,6 @@ impl<'a> Document<'a> {
 			if opt.check_perms(stm.into()) {
 				// Check that authentication matches session
 				if !opt.auth.is_anon() {
-					opt.valid_for_ns()?;
 					opt.valid_for_db()?;
 					let (ns, db) = (opt.ns(), opt.db());
 					if opt.auth.level().ns() != Some(ns) {
