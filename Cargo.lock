@@ -5405,7 +5405,7 @@ checksum = "81cdd64d312baedb58e21336b31bc043b77e01cc99033ce76ef539f78e965ebc"
 
 [[package]]
 name = "surreal"
-version = "1.5.0"
+version = "1.5.1"
 dependencies = [
  "argon2",
  "assert_fs",
@@ -5468,7 +5468,7 @@ dependencies = [
 
 [[package]]
 name = "surrealdb"
-version = "1.5.0"
+version = "1.5.1"
 dependencies = [
  "async-channel 1.9.0",
  "bincode",
@@ -5520,7 +5520,7 @@ dependencies = [
 
 [[package]]
 name = "surrealdb-core"
-version = "1.5.0"
+version = "1.5.1"
 dependencies = [
  "addr",
  "any_ascii",
