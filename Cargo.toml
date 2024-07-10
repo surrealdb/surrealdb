@@ -2,7 +2,7 @@
 name = "surreal"
 publish = false
 edition = "2021"
-version = "1.5.3"
+version = "1.5.4"
 license-file = "LICENSE"
 authors = ["Tobie Morgan Hitchcock <tobie@surrealdb.com>"]
 
