@@ -31,12 +31,11 @@ members = [
 ]
 
 [profile.release]
-debug = true
-#lto = true
-#strip = true
-#opt-level = 3
+lto = true
+strip = true
+opt-level = 3
 panic = 'abort'
-#codegen-units = 1
+codegen-units = 1
 
 [profile.bench]
 strip = false
