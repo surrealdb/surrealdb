@@ -3,6 +3,7 @@ use crate::dbs::Statement;
 use crate::dbs::{Options, Transaction};
 use crate::doc::Document;
 use crate::err::Error;
+use crate::iam::Level;
 use crate::sql::permission::Permission;
 
 impl<'a> Document<'a> {
@@ -18,19 +19,29 @@ impl<'a> Document<'a> {
 			// Should we run permissions checks?
 			if opt.check_perms(stm.into()) {
 				// Check that authentication matches session
-				if !opt.auth.is_anon() {
-					opt.valid_for_db()?;
-					let (ns, db) = (opt.ns(), opt.db());
-					if opt.auth.level().ns() != Some(ns) {
-						return Err(Error::NsNotAllowed {
-							ns: ns.into(),
-						});
+				match opt.auth.level() {
+					Level::Namespace(ns) => {
+						opt.valid_for_ns()?;
+						if ns != opt.ns() {
+							return Err(Error::NsNotAllowed {
+								ns: opt.ns().into(),
+							});
+						}
 					}
-					if opt.auth.level().db() != Some(db) {
-						return Err(Error::DbNotAllowed {
-							db: db.into(),
-						});
+					Level::Database(ns, db) | Level::Scope(ns, db, _) => {
+						opt.valid_for_db()?;
+						if ns != opt.ns() {
+							return Err(Error::NsNotAllowed {
+								ns: opt.ns().into(),
+							});
+						}
+						if db != opt.db() {
+							return Err(Error::DbNotAllowed {
+								db: opt.db().into(),
+							});
+						}
 					}
+					_ => {}
 				}
 				// Get the table
 				let tb = self.tb(opt, txn).await?;
