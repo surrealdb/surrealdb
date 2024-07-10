@@ -253,10 +253,6 @@ impl<'a> Context<'a> {
 		self
 	}
 
-	pub fn get_transaction(&self) -> Option<&Transaction> {
-		self.transaction.as_ref()
-	}
-
 	pub(crate) fn tx(&self) -> Arc<Transaction> {
 		self.transaction
 			.as_ref()
