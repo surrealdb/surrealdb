@@ -930,20 +930,20 @@ pub enum Error {
 	Serialization(String),
 
 	/// The requested root access method already exists
-	#[error("The access method '{value}' already exists in root")]
+	#[error("The root access method '{value}' already exists")]
 	AccessRootAlreadyExists {
 		value: String,
 	},
 
 	/// The requested namespace access method already exists
-	#[error("The access method '{value}' already exists in namespace '{ns}'")]
+	#[error("The access method '{value}' already exists in the namespace '{ns}'")]
 	AccessNsAlreadyExists {
 		value: String,
 		ns: String,
 	},
 
 	/// The requested database access method already exists
-	#[error("The access method '{value}' already exists in database '{db}'")]
+	#[error("The access method '{value}' already exists in the database '{db}'")]
 	AccessDbAlreadyExists {
 		value: String,
 		ns: String,
@@ -951,20 +951,20 @@ pub enum Error {
 	},
 
 	/// The requested root access method does not exist
-	#[error("The access method '{value}' does not exist in root")]
+	#[error("The root access method '{value}' does not exist")]
 	AccessRootNotFound {
 		value: String,
 	},
 
 	/// The requested namespace access method does not exist
-	#[error("The access method '{value}' does not exist in namespace '{ns}'")]
+	#[error("The access method '{value}' does not exist in the namespace '{ns}'")]
 	AccessNsNotFound {
 		value: String,
 		ns: String,
 	},
 
 	/// The requested database access method does not exist
-	#[error("The access method '{value}' does not exist in database '{db}'")]
+	#[error("The access method '{value}' does not exist in the database '{db}'")]
 	AccessDbNotFound {
 		value: String,
 		ns: String,

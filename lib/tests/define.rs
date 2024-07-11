@@ -1274,8 +1274,8 @@ async fn permissions_checks_define_ns() {
 
 	// Define the expected results for the check statement when the test statement succeeded and when it failed
 	let check_results = [
-		vec!["{ namespaces: { NS: 'DEFINE NAMESPACE NS' }, users: {  } }"],
-		vec!["{ namespaces: {  }, users: {  } }"],
+		vec!["{ accesses: {  }, namespaces: { NS: 'DEFINE NAMESPACE NS' }, users: {  } }"],
+		vec!["{ accesses: {  }, namespaces: {  }, users: {  } }"],
 	];
 
 	let test_cases = [
@@ -2148,9 +2148,9 @@ async fn define_remove_access() -> Result<(), Error> {
 	let mut t = Test::new(sql).await?;
 	t.skip_ok(1)?;
 	t.expect_val("None")?;
-	t.expect_error("The database access method 'example' already exists")?;
+	t.expect_error("The access method 'example' already exists in the database 'test'")?;
 	t.skip_ok(1)?;
-	t.expect_error("The database access method 'example' does not exist")?;
+	t.expect_error("The access method 'example' does not exist in the database 'test'")?;
 	t.expect_val("None")?;
 	Ok(())
 }
