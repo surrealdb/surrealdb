@@ -12,6 +12,7 @@ async fn info_for_root() {
 	let sql = r#"
         DEFINE NAMESPACE NS;
         DEFINE USER user ON ROOT PASSWORD 'pass';
+        DEFINE ACCESS access ON ROOT TYPE JWT ALGORITHM HS512 KEY 'secret';
         INFO FOR ROOT
     "#;
 	let dbs = new_ds().await.unwrap();
@@ -23,8 +24,10 @@ async fn info_for_root() {
 	let out = res.pop().unwrap().output();
 	assert!(out.is_ok(), "Unexpected error: {:?}", out);
 
-	let output_regex =
-		Regex::new(r"\{ namespaces: \{ NS: .* \}, users: \{ user: .* \} \}").unwrap();
+	let output_regex = Regex::new(
+		r"\{ accesses: \{ access: .* \}, namespaces: \{ NS: .* \}, users: \{ user: .* \} \}",
+	)
+	.unwrap();
 	let out_str = out.unwrap().to_string();
 	assert!(
 		output_regex.is_match(&out_str),

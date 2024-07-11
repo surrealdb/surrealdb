@@ -1328,6 +1328,34 @@ impl Transaction {
 		Ok(val)
 	}
 
+	/// Retrieve all ROOT access method definitions.
+	pub async fn all_root_accesses(&mut self) -> Result<Arc<[DefineAccessStatement]>, Error> {
+		let key = crate::key::root::ac::prefix();
+		Ok(if let Some(e) = self.cache.get(&key) {
+			if let Entry::Acs(v) = e {
+				v
+			} else {
+				unreachable!();
+			}
+		} else {
+			let beg = crate::key::root::ac::prefix();
+			let end = crate::key::root::ac::suffix();
+			let val = self.getr(beg..end, u32::MAX).await?;
+			let val = val.convert().into();
+			self.cache.set(key, Entry::Acs(Arc::clone(&val)));
+			val
+		})
+	}
+
+	/// Retrieve all ROOT access method definitions in redacted form.
+	pub async fn all_root_accesses_redacted(
+		&mut self,
+	) -> Result<Arc<[DefineAccessStatement]>, Error> {
+		let accesses = self.all_root_accesses().await?;
+		let redacted: Vec<_> = accesses.iter().map(|statement| statement.redacted()).collect();
+		Ok(Arc::from(redacted))
+	}
+
 	/// Retrieve all namespace definitions in a datastore.
 	pub async fn all_ns(&mut self) -> Result<Arc<[DefineNamespaceStatement]>, Error> {
 		let key = crate::key::root::ns::prefix();
@@ -1741,6 +1769,15 @@ impl Transaction {
 		Ok(val.into())
 	}
 
+	/// Retrieve a specific root access method definition.
+	pub async fn get_root_access(&mut self, ac: &str) -> Result<DefineAccessStatement, Error> {
+		let key = crate::key::root::ac::new(ac);
+		let val = self.get(key).await?.ok_or(Error::AccessRootNotFound {
+			value: ac.to_owned(),
+		})?;
+		Ok(val.into())
+	}
+
 	/// Retrieve a specific namespace definition.
 	pub async fn get_ns(&mut self, ns: &str) -> Result<DefineNamespaceStatement, Error> {
 		let key = crate::key::root::ns::new(ns);
@@ -1771,8 +1808,9 @@ impl Transaction {
 		ac: &str,
 	) -> Result<DefineAccessStatement, Error> {
 		let key = crate::key::namespace::ac::new(ns, ac);
-		let val = self.get(key).await?.ok_or(Error::NaNotFound {
+		let val = self.get(key).await?.ok_or(Error::AccessNsNotFound {
 			value: ac.to_owned(),
+			ns: ns.to_owned(),
 		})?;
 		Ok(val.into())
 	}
@@ -1825,8 +1863,10 @@ impl Transaction {
 		ac: &str,
 	) -> Result<DefineAccessStatement, Error> {
 		let key = crate::key::database::ac::new(ns, db, ac);
-		let val = self.get(key).await?.ok_or(Error::DaNotFound {
+		let val = self.get(key).await?.ok_or(Error::AccessDbNotFound {
 			value: ac.to_owned(),
+			ns: ns.to_owned(),
+			db: db.to_owned(),
 		})?;
 		Ok(val.into())
 	}

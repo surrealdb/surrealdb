@@ -91,6 +91,12 @@ impl InfoStatement {
 					tmp.insert(v.name.to_string(), v.to_string().into());
 				}
 				res.insert("users".to_owned(), tmp.into());
+				// Process the accesses
+				let mut tmp = Object::default();
+				for v in run.all_root_accesses().await?.iter() {
+					tmp.insert(v.name.to_string(), v.to_string().into());
+				}
+				res.insert("accesses".to_owned(), tmp.into());
 				// Ok all good
 				Value::from(res).ok()
 			}

@@ -60,6 +60,34 @@ impl DefineAccessStatement {
 		opt.is_allowed(Action::Edit, ResourceKind::Actor, &self.base)?;
 
 		match &self.base {
+			Base::Root => {
+				// Claim transaction
+				let mut run = ctx.tx_lock().await;
+				// Clear the cache
+				run.clear_cache();
+				// Check if access method already exists
+				if run.get_root_access(&self.name).await.is_ok() {
+					if self.if_not_exists {
+						return Ok(Value::None);
+					} else {
+						return Err(Error::AccessRootAlreadyExists {
+							value: self.name.to_string(),
+						});
+					}
+				}
+				// Process the statement
+				let key = crate::key::root::ac::new(&self.name);
+				run.set(
+					key,
+					DefineAccessStatement {
+						if_not_exists: false,
+						..self.clone()
+					},
+				)
+				.await?;
+				// Ok all good
+				Ok(Value::None)
+			}
 			Base::Ns => {
 				// Claim transaction
 				let mut run = ctx.tx_lock().await;
@@ -72,6 +100,7 @@ impl DefineAccessStatement {
 					} else {
 						return Err(Error::AccessNsAlreadyExists {
 							value: self.name.to_string(),
+							ns: opt.ns()?.into(),
 						});
 					}
 				}
@@ -101,6 +130,8 @@ impl DefineAccessStatement {
 					} else {
 						return Err(Error::AccessDbAlreadyExists {
 							value: self.name.to_string(),
+							ns: opt.ns()?.into(),
+							db: opt.db()?.into(),
 						});
 					}
 				}

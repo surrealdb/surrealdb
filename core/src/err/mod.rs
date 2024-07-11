@@ -298,12 +298,6 @@ pub enum Error {
 		value: String,
 	},
 
-	/// The requested namespace access method does not exist
-	#[error("The namespace access method '{value}' does not exist")]
-	NaNotFound {
-		value: String,
-	},
-
 	/// The requested namespace login does not exist
 	#[error("The namespace login '{value}' does not exist")]
 	NlNotFound {
@@ -313,12 +307,6 @@ pub enum Error {
 	/// The requested database does not exist
 	#[error("The database '{value}' does not exist")]
 	DbNotFound {
-		value: String,
-	},
-
-	/// The requested database access method does not exist
-	#[error("The database access method '{value}' does not exist")]
-	DaNotFound {
 		value: String,
 	},
 
@@ -942,39 +930,45 @@ pub enum Error {
 	Serialization(String),
 
 	/// The requested root access method already exists
-	#[error("The root access method '{value}' already exists")]
+	#[error("The access method '{value}' already exists in root")]
 	AccessRootAlreadyExists {
 		value: String,
 	},
 
 	/// The requested namespace access method already exists
-	#[error("The namespace access method '{value}' already exists")]
+	#[error("The access method '{value}' already exists in namespace '{ns}'")]
 	AccessNsAlreadyExists {
 		value: String,
+		ns: String,
 	},
 
 	/// The requested database access method already exists
-	#[error("The database access method '{value}' already exists")]
+	#[error("The access method '{value}' already exists in database '{db}'")]
 	AccessDbAlreadyExists {
 		value: String,
+		ns: String,
+		db: String,
 	},
 
 	/// The requested root access method does not exist
-	#[error("The root access method '{value}' does not exist")]
+	#[error("The access method '{value}' does not exist in root")]
 	AccessRootNotFound {
 		value: String,
 	},
 
 	/// The requested namespace access method does not exist
-	#[error("The namespace access method '{value}' does not exist")]
+	#[error("The access method '{value}' does not exist in namespace '{ns}'")]
 	AccessNsNotFound {
 		value: String,
+		ns: String,
 	},
 
 	/// The requested database access method does not exist
-	#[error("The database access method '{value}' does not exist")]
+	#[error("The access method '{value}' does not exist in database '{db}'")]
 	AccessDbNotFound {
 		value: String,
+		ns: String,
+		db: String,
 	},
 
 	/// The access method cannot be defined on the requested level
