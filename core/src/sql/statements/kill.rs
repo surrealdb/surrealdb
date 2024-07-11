@@ -3,7 +3,6 @@ use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::kvs::Live;
-use crate::sql::Uuid;
 use crate::sql::Value;
 use derive::Store;
 use reblessive::tree::Stk;
@@ -35,40 +34,13 @@ impl KillStatement {
 		// Valid options?
 		opt.valid_for_db()?;
 		// Resolve live query id
-		let lid = match &self.id {
-			Value::Uuid(id) => *id,
-			Value::Param(param) => match param.compute(stk, ctx, opt, None).await? {
-				Value::Uuid(id) => id,
-				Value::Strand(id) => match uuid::Uuid::try_parse(&id) {
-					Ok(id) => Uuid(id),
-					_ => {
-						return Err(Error::KillStatement {
-							value:
-								"KILL received a parameter that could not be converted to a UUID"
-									.to_string(),
-						});
-					}
-				},
-				_ => {
-					return Err(Error::KillStatement {
-						value: "KILL received a parameter that was not expected".to_string(),
-					});
-				}
-			},
-			Value::Strand(maybe_id) => match uuid::Uuid::try_parse(maybe_id) {
-				Ok(id) => Uuid(id),
-				_ => {
-					return Err(Error::KillStatement {
-						value: "KILL received a Strand that could not be converted to a UUID"
-							.to_string(),
-					});
-				}
-			},
-			_ => {
+		let lid = match self.id.compute(stk, ctx, opt, None).await?.convert_to_uuid() {
+			Err(_) => {
 				return Err(Error::KillStatement {
-					value: "Unhandled type for KILL statement".to_string(),
-				});
+					value: self.id.to_string(),
+				})
 			}
+			Ok(id) => id,
 		};
 		// Get the Node ID
 		let nid = opt.id()?;
@@ -83,28 +55,18 @@ impl KillStatement {
 		// Fetch the live query key if it exists
 		match txn.get(key).await? {
 			Some(val) => {
-				// Get the NS and DB
-				let ns = opt.ns()?;
-				let db = opt.db()?;
 				// Decode the data for this live query
 				let val: Live = val.into();
-				// Check the NS and DB are correct
-				if ns == val.ns && db == val.db {
-					// Delete the node live query
-					let key = crate::key::node::lq::new(nid, lid);
-					txn.del(key).await?;
-					// Delete the table live query
-					let key = crate::key::table::lq::new(&val.ns, &val.db, &val.tb, lid);
-					txn.del(key).await?;
-				} else {
-					return Err(Error::KillStatement {
-						value: self.id.to_string(),
-					});
-				}
+				// Delete the node live query
+				let key = crate::key::node::lq::new(nid, lid);
+				txn.del(key).await?;
+				// Delete the table live query
+				let key = crate::key::table::lq::new(&val.ns, &val.db, &val.tb, lid);
+				txn.del(key).await?;
 			}
 			None => {
 				return Err(Error::KillStatement {
-					value: "KILL statement uuid did not exist".to_string(),
+					value: self.id.to_string(),
 				});
 			}
 		}

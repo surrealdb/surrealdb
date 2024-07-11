@@ -105,7 +105,7 @@ impl LiveStatement {
 				// Store the live info
 				let lq = Live {
 					ns: ns.to_string(),
-					db: ns.to_string(),
+					db: db.to_string(),
 					tb: tb.to_string(),
 				};
 				// Get the transaction
