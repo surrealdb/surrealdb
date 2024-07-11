@@ -54,12 +54,13 @@ impl<'a> Stream for Scanner<'a> {
 		if self.exhausted {
 			return Poll::Ready(None);
 		}
-		// Set the max number of results to fetch
-		let num = std::cmp::min(1000, self.batch);
-		// Clone the range to use when scanning
-		let range = self.range.clone();
-		// Prepare a future to scan for results
+		// Check if there is no pending future task
 		if self.future.is_none() {
+			// Set the max number of results to fetch
+			let num = std::cmp::min(1000, self.batch);
+			// Clone the range to use when scanning
+			let range = self.range.clone();
+			// Prepare a future to scan for results
 			self.future = Some(Box::pin(self.store.scan(range, num)));
 		}
 		// Try to resolve the future
