@@ -174,4 +174,3 @@ assets = [
 ]
 extended-description = "A scalable, distributed, collaborative, document-graph database, for the realtime web."
 license-file = ["LICENSE", "4"]
-# Dummy line, remove after testing

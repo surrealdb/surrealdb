@@ -33,8 +33,8 @@ defaults:
     shell: bash
 
 jobs:
-  check-dependencies:
-    name: Check dependencies
+  cargo-deny:
+    name: Check dependencies for known issues
     runs-on: ubuntu-latest
     steps:
       - name: Install stable toolchain
@@ -46,22 +46,55 @@ jobs:
       - name: Checkout sources
         uses: actions/checkout@v4
 
-      - name: Install cargo-deny
-        run: cargo install --debug --locked cargo-deny@0.14.11
+      - name: Check dependencies for known issues
+        run: cargo deny check
+
+      - name: Dependency check failure
+        if: failure()
+        run: |
+          echo "## :warning: Supply chain security check failed" >> $GITHUB_STEP_SUMMARY
+          echo "See instructions in the [supply chain security process](https://github.com/surrealdb/surrealdb/blob/main/supply-chain/README.md#Process)." >> $GITHUB_STEP_SUMMARY
+  cargo-vet:
+    name: Check dependencies for untrusted sources 
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+          components: rustfmt
+
+      - name: Checkout sources
+        uses: actions/checkout@v4
 
       - name: Install cargo-vet
         run: cargo install --debug --locked cargo-vet
+
+      - name: Check dependencies for untrusted sources
+        run: cargo vet
+
+      - name: Dependency check failure
+        if: failure()
+        run: |
+          echo "## :warning: Supply chain security check failed" >> $GITHUB_STEP_SUMMARY
+          echo "See instructions in the [supply chain security process](https://github.com/surrealdb/surrealdb/blob/main/supply-chain/README.md#Process)." >> $GITHUB_STEP_SUMMARY
+  cargo-acl:
+    name: Check dependencies for unauthorized access
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+          components: rustfmt
+
+      - name: Checkout sources
+        uses: actions/checkout@v4
 
       - name: Install cargo-acl
         run: |
           cargo install --debug --locked cargo-acl
           sudo apt-get install -y bubblewrap
-
-      - name: Check dependencies for known issues
-        run: cargo deny check
-
-      - name: Check dependencies for untrusted sources
-        run: cargo vet
 
       - name: Check dependencies for unauthorized access
         env:
@@ -71,5 +104,5 @@ jobs:
       - name: Dependency check failure
         if: failure()
         run: |
-          echo "## :warning: Dependency check failed" >> $GITHUB_STEP_SUMMARY
+          echo "## :warning: Supply chain security check failed" >> $GITHUB_STEP_SUMMARY
           echo "See instructions in the [supply chain security process](https://github.com/surrealdb/surrealdb/blob/main/supply-chain/README.md#Process)." >> $GITHUB_STEP_SUMMARY
