@@ -704,3 +704,57 @@ async fn select_where_matches_mixing_indexes() -> Result<(), Error> {
 	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
 	Ok(())
 }
+
+#[tokio::test]
+async fn select_where_not_matches() -> Result<(), Error> {
+	let sql = r"
+		DEFINE ANALYZER like TOKENIZERS class FILTERS lowercase,ascii;
+		DEFINE INDEX idxFood ON TABLE menu COLUMNS food SEARCH ANALYZER like BM25;
+		CREATE menu:1 SET food = 'pizza cheese';
+		CREATE menu:2 SET food = 'pizza rocket';
+		SELECT * FROM menu WHERE !food @@ 'cheese' EXPLAIN;
+		SELECT * FROM menu WHERE !food @@ 'cheese';
+	";
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 6);
+	//
+	skip_ok(res, 4)?;
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
+				{
+					detail: {
+						plan: {
+							index: 'idxFood',
+							operator: '!=',
+							value: 'cheese'
+						},
+						table: 'menu'
+					},
+					operation: 'Iterate Index'
+				},
+				{
+					detail: {
+						type: 'Memory'
+					},
+					operation: 'Collector'
+				}
+			]",
+	);
+	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
+				{
+					id: menu:2,
+					food: 'pizza rocket',
+				}
+			]",
+	);
+	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+	Ok(())
+}
