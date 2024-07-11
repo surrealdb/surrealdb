@@ -106,7 +106,7 @@ impl Param {
 							..
 						}) => Ok(Value::None),
 						// There was another request error
-						Err(_) => Ok(Value::None),
+						Err(e) => Err(e),
 					}
 				}
 			},
