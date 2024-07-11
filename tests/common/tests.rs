@@ -1473,6 +1473,200 @@ async fn session_reauthentication_expired() {
 }
 
 #[test(tokio::test)]
+async fn session_use_change_database() {
+	// Setup database server
+	let (addr, mut server) = common::start_server_with_defaults().await.unwrap();
+	// Connect to WebSocket
+	let mut socket = Socket::connect(&addr, SERVER, FORMAT).await.unwrap();
+	// Authenticate the connection as a root level system user
+	let _ = socket.send_message_signin(USER, PASS, None, None, None).await.unwrap();
+	// Check that we have root access
+	socket.send_message_query("INFO FOR ROOT").await.unwrap();
+	// Specify a namespace and database
+	socket.send_message_use(Some(NS), Some("original")).await.unwrap();
+	// Define a scope on the original database
+	socket
+		.send_message_query(
+			r#"
+                       DEFINE USER user ON DATABASE PASSWORD "secret" ROLES VIEWER
+                       ;"#,
+		)
+		.await
+		.unwrap();
+	// Create resource that requires an authenticated record user to query
+	socket
+		.send_message_query(
+			r#"
+                       DEFINE TABLE user SCHEMALESS
+                               PERMISSIONS FOR select, create, update, delete NONE
+                       ;"#,
+		)
+		.await
+		.unwrap();
+	socket
+               .send_message_query(
+                       r#"
+                       CREATE user:1 CONTENT { name: "original", pass: crypto::argon2::generate("original") }
+                       ;"#,
+               )
+               .await
+               .unwrap();
+	// Change to a different database
+	socket.send_message_use(Some(NS), Some("different")).await.unwrap();
+	// Create the same user table with a user record with the same identifier
+	socket
+		.send_message_query(
+			r#"
+                       DEFINE TABLE user SCHEMALESS
+                               PERMISSIONS FOR select, create, update, delete NONE
+                       ;"#,
+		)
+		.await
+		.unwrap();
+	socket
+               .send_message_query(
+                       r#"
+                       CREATE user:1 CONTENT { name: "different", pass: crypto::argon2::generate("different") }
+                       ;"#,
+               )
+               .await
+               .unwrap();
+	// Sign in to original database as user
+	let res = socket
+		.send_request(
+			"signin",
+			json!(
+					[{
+							"ns": NS,
+							"db": "original",
+							"user": "user",
+							"pass": "secret",
+					}]
+			),
+		)
+		.await;
+	assert!(res.is_ok(), "result: {:?}", res);
+	let res = res.unwrap();
+	assert!(res.is_object(), "result: {:?}", res);
+	let res = res.as_object().unwrap();
+	// Verify response contains no error
+	assert!(res.keys().all(|k| ["id", "result"].contains(&k.as_str())), "result: {:?}", res);
+	// Verify that the authenticated session corresponds with the original user
+	let res = socket.send_message_query("SELECT VALUE name FROM user:1").await.unwrap();
+	assert_eq!(res[0]["result"], json!(["original"]), "result: {:?}", res);
+	// Swtich to the different database without signing in again
+	socket.send_message_use(Some(NS), Some("different")).await.unwrap();
+	// Verify that the authenticated session is unable to query data
+	let res = socket.send_message_query("SELECT VALUE name FROM user:1").await.unwrap();
+	// The query succeeds but the results does not contain the value with permissions
+	assert_eq!(res[0]["status"], "OK", "result: {:?}", res);
+	assert_eq!(res[0]["result"], json!([]), "result: {:?}", res);
+	// Test passed
+	server.finish().unwrap();
+}
+
+#[test(tokio::test)]
+async fn session_use_change_database_scope() {
+	// Setup database server
+	let (addr, mut server) = common::start_server_with_defaults().await.unwrap();
+	// Connect to WebSocket
+	let mut socket = Socket::connect(&addr, SERVER, FORMAT).await.unwrap();
+	// Authenticate the connection as a root level system user
+	let _ = socket.send_message_signin(USER, PASS, None, None, None).await.unwrap();
+	// Check that we have root access
+	socket.send_message_query("INFO FOR ROOT").await.unwrap();
+	// Specify a namespace and database
+	socket.send_message_use(Some(NS), Some("original")).await.unwrap();
+	// Define a user record access method on the original database
+	socket
+		.send_message_query(
+			r#"
+			DEFINE ACCESS user ON DATABASE TYPE RECORD
+				SIGNIN ( SELECT * FROM user WHERE name = $name AND crypto::argon2::compare(pass, $pass) )
+				DURATION FOR SESSION 24h, FOR TOKEN 24h
+			;"#,
+		)
+		.await
+		.unwrap();
+	// Create resource that requires an authenticated record user to query
+	socket
+		.send_message_query(
+			r#"
+			DEFINE TABLE user SCHEMALESS
+				PERMISSIONS FOR select, create, update, delete WHERE id = $auth
+			;"#,
+		)
+		.await
+		.unwrap();
+	socket
+		.send_message_query(
+			r#"
+			CREATE user:1 CONTENT { name: "original", pass: crypto::argon2::generate("original") }
+			;"#,
+		)
+		.await
+		.unwrap();
+	// Change to a different database
+	socket.send_message_use(Some(NS), Some("different")).await.unwrap();
+	// Create the same user table with a user record with the same identifier
+	socket
+		.send_message_query(
+			r#"
+			DEFINE TABLE user SCHEMALESS
+				PERMISSIONS FOR select, create, update, delete WHERE id = $auth
+			;"#,
+		)
+		.await
+		.unwrap();
+	socket
+		.send_message_query(
+			r#"
+			CREATE user:1 CONTENT { name: "different", pass: crypto::argon2::generate("different") }
+			;"#,
+		)
+		.await
+		.unwrap();
+	// Sign in to original database as user
+	let res = socket
+		.send_request(
+			"signin",
+			json!(
+				[{
+					"ns": NS,
+					"db": "original",
+					"ac": "user",
+					"name": "original",
+					"pass": "original",
+				}]
+			),
+		)
+		.await;
+	assert!(res.is_ok(), "result: {:?}", res);
+	let res = res.unwrap();
+	assert!(res.is_object(), "result: {:?}", res);
+	let res = res.as_object().unwrap();
+	// Verify response contains no error
+	assert!(res.keys().all(|k| ["id", "result"].contains(&k.as_str())), "result: {:?}", res);
+	// Verify that the authenticated session corresponds with the original user
+	let res = socket.send_message_query("SELECT VALUE name FROM $auth").await.unwrap();
+	assert_eq!(res[0]["result"], json!(["original"]), "result: {:?}", res);
+	// Swtich to the different database without signing in again
+	socket.send_message_use(Some(NS), Some("different")).await.unwrap();
+	// Verify that the authenticated session is unable to query data
+	let res = socket.send_message_query("SELECT VALUE name FROM $auth").await.unwrap();
+	// The following statement would be true when the bug was present:
+	// assert_eq!(res[0]["result"], json!(["different"]), "result: {:?}", res);
+	assert_eq!(res[0]["status"], "ERR", "result: {:?}", res);
+	assert_eq!(
+		res[0]["result"], "You don't have permission to change to the different database",
+		"result: {:?}",
+		res
+	);
+	// Test passed
+	server.finish().unwrap();
+}
+
+#[test(tokio::test)]
 async fn run_functions() {
 	// Setup database server
 	let (addr, mut server) = common::start_server_with_functions().await.unwrap();
