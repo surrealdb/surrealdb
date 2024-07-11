@@ -444,6 +444,7 @@ impl Parser<'_> {
 					let span = start.span.covers(digits_token.span);
 					unexpected!(@span, self,digits_token.kind, "a floating point number")
 				}
+				self.pop_peek();
 			}
 			TokenKind::Digits => {
 				self.pop_peek();
