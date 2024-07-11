@@ -46,6 +46,9 @@ jobs:
       - name: Checkout sources
         uses: actions/checkout@v4
 
+      - name: Install cargo-deny
+        run: cargo install --debug --locked cargo-deny@0.14.11
+
       - name: Check dependencies for known issues
         run: cargo deny check
 
