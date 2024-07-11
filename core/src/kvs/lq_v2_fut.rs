@@ -1,5 +1,6 @@
 use crate::cf;
 use crate::cf::ChangeSet;
+use crate::ctx::Context;
 use crate::dbs::{Options, Statement};
 use crate::err::Error;
 use crate::fflags::FFLAGS;
@@ -19,6 +20,7 @@ use tokio::sync::RwLock;
 /// Poll change feeds for live query notifications
 pub async fn process_lq_notifications(
 	ds: &Datastore,
+	ctx: &Context<'_>,
 	stk: &mut Stk,
 	opt: &Options,
 ) -> Result<(), Error> {
@@ -68,7 +70,7 @@ pub async fn process_lq_notifications(
 				.join("\n")
 		);
 		for change_set in change_sets {
-			process_change_set_for_notifications(ds, stk, opt, change_set, &lq_pairs).await?;
+			process_change_set_for_notifications(ds, ctx, stk, opt, change_set, &lq_pairs).await?;
 		}
 	}
 	trace!("Finished process lq successfully");
@@ -131,6 +133,7 @@ async fn populate_relevant_changesets(
 
 async fn process_change_set_for_notifications(
 	ds: &Datastore,
+	ctx: &Context<'_>,
 	stk: &mut Stk,
 	opt: &Options,
 	change_set: ChangeSet,
@@ -165,6 +168,7 @@ async fn process_change_set_for_notifications(
 							channel::bounded(notification_capacity);
 						doc.check_lqs_and_send_notifications(
 							stk,
+							ctx,
 							opt,
 							&Statement::Live(&lq_value.stm),
 							[&lq_value.stm].as_slice(),
