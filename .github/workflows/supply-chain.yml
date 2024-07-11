@@ -1,0 +1,75 @@
+name: Supply chain security 
+
+run-name: "Supply chain security run '${{ github.head_ref || github.ref_name }}'"
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - Cargo.lock
+      - Cargo.toml
+      - core/Cargo.toml
+      - lib/Cargo.toml
+      - supply-chain/audits.toml
+      - supply-chain/config.toml
+      - supply-chain/imports.lock
+      - cackle.toml
+    branches:
+      - main
+  pull_request:
+    paths:
+      - Cargo.lock
+      - Cargo.toml
+      - core/Cargo.toml
+      - lib/Cargo.toml
+      - supply-chain/audits.toml
+      - supply-chain/config.toml
+      - supply-chain/imports.lock
+      - cackle.toml
+  merge_group:
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  check-dependencies:
+    name: Check dependencies
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+          components: rustfmt
+
+      - name: Checkout sources
+        uses: actions/checkout@v4
+
+      - name: Install cargo-deny
+        run: cargo install --debug --locked cargo-deny@0.14.11
+
+      - name: Install cargo-vet
+        run: cargo install --debug --locked cargo-vet
+
+      - name: Install cargo-acl
+        run: |
+          cargo install --debug --locked cargo-acl
+          sudo apt-get install -y bubblewrap
+
+      - name: Check dependencies for known issues
+        run: cargo deny check
+
+      - name: Check dependencies for untrusted sources
+        run: cargo vet
+
+      - name: Check dependencies for unauthorized access
+        env:
+          RUSTFLAGS: "--cfg surrealdb_unstable"
+        run: cargo acl -n
+
+      - name: Dependency check failure
+        if: failure()
+        run: |
+          echo "## :warning: Dependency check failed" >> $GITHUB_STEP_SUMMARY
+          echo "See instructions in the [supply chain security process](https://github.com/surrealdb/surrealdb/blob/main/supply-chain/README.md#Process)." >> $GITHUB_STEP_SUMMARY
