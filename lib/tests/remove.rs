@@ -758,7 +758,7 @@ async fn permissions_checks_remove_root_access() {
 	// Define the expected results for the check statement when the test statement succeeded and when it failed
 	let check_results = [
 		vec!["{ accesses: {  }, namespaces: {  }, users: {  } }"],
-        vec!["{ accesses: { access: \"DEFINE ACCESS access ON TYPE JWT ALGORITHM HS512 KEY '[REDACTED]' WITH ISSUER KEY '[REDACTED]' DURATION FOR TOKEN 1h, FOR SESSION NONE\" }, namespaces: {  }, users: {  } }"],
+        vec!["{ accesses: { access: \"DEFINE ACCESS access ON ROOT TYPE JWT ALGORITHM HS512 KEY '[REDACTED]' WITH ISSUER KEY '[REDACTED]' DURATION FOR TOKEN 1h, FOR SESSION NONE\" }, namespaces: {  }, users: {  } }"],
     ];
 
 	let test_cases = [
