@@ -54,7 +54,7 @@ struct Cli {
 	#[command(subcommand)]
 	command: Commands,
 	#[arg(help = "Whether to allow web check for client version upgrades at start")]
-	#[arg(env = "SURREAL_ONLINE_VERSION_CHECK", long)]
+	#[arg(env = "SURREAL_ONLINE_VERSION_CHECK", global = true, long, action = clap::ArgAction::Set)]
 	#[arg(default_value_t = true)]
 	online_version_check: bool,
 }
