@@ -628,7 +628,7 @@ async fn access_info_redacted_structure() {
 		assert!(out.is_ok(), "Unexpected error: {:?}", out);
 
 		let out_expected =
-			r#"{ accesses: [{ base: 'DATABASE', duration: { session: 6h, token: 15m }, kind: { jwt: { issuer: { alg: 'HS512', key: '[REDACTED]' }, verify: { alg: 'HS512', key: '[REDACTED]' } }, kind: 'RECORD' }, name: 'access' }], analyzers: {  }, functions: {  }, models: {  }, params: {  }, tables: {  }, users: {  } }"#.to_string();
+			r#"{ accesses: [{ base: 'DATABASE', duration: { session: 6h, token: 15m }, kind: { jwt: { issuer: { alg: 'HS512', key: '[REDACTED]' }, verify: { alg: 'HS512', key: '[REDACTED]' } }, kind: 'RECORD' }, name: 'access' }], analyzers: [], functions: [], models: [], params: [], tables: [], users: [] }"#.to_string();
 		let out_str = out.unwrap().to_string();
 		assert_eq!(
 			out_str, out_expected,
