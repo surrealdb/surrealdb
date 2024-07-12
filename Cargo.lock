@@ -4634,13 +4634,9 @@ dependencies = [
 
 [[package]]
 name = "reblessive"
-version = "0.3.5"
-
-[[package]]
-name = "reblessive"
-version = "0.3.5"
+version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4149deda5bd21e0f6ccaa2f907cd542541521dead5861bc51bebdf2af4acaf2a"
+checksum = "568fde39e6aec674be99c9dd38b4c79040faf31038bd5a41ab1908db00c2319b"
 
 [[package]]
 name = "redox_syscall"
@@ -5967,7 +5963,7 @@ dependencies = [
  "pprof",
  "radix_trie",
  "rand 0.8.5",
- "reblessive 0.3.5 (registry+https://github.com/rust-lang/crates.io-index)",
+ "reblessive",
  "regex",
  "reqwest",
  "revision",
@@ -6055,7 +6051,7 @@ dependencies = [
  "quick_cache",
  "radix_trie",
  "rand 0.8.5",
- "reblessive 0.3.5",
+ "reblessive",
  "regex",
  "regex-syntax 0.8.3",
  "reqwest",
