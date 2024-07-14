@@ -20,7 +20,6 @@ impl<'a> Document<'a> {
 		self.check(stk, ctx, opt, stm).await?;
 		// Check if allowed
 		self.allow(stk, ctx, opt, stm).await?;
-		// Yield document
-		self.pluck(stk, ctx, opt, stm).await
+		self.current.doc.compute(stk, ctx, opt, None).await
 	}
 }

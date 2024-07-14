@@ -44,7 +44,7 @@ impl Parser<'_> {
 		let cond = self.try_parse_condition(stk).await?;
 		let split = self.try_parse_split(&expr, fields_span)?;
 		let group = self.try_parse_group(&expr, fields_span)?;
-		let order = self.try_parse_orders(&expr, fields_span)?;
+		let order = self.try_parse_orders()?;
 		let (limit, start) = if let t!("START") = self.peek_kind() {
 			let start = self.try_parse_start(stk).await?;
 			let limit = self.try_parse_limit(stk).await?;
@@ -137,11 +137,7 @@ impl Parser<'_> {
 		Ok(Some(Splits(res)))
 	}
 
-	fn try_parse_orders(
-		&mut self,
-		fields: &Fields,
-		fields_span: Span,
-	) -> ParseResult<Option<Orders>> {
+	fn try_parse_orders(&mut self) -> ParseResult<Option<Orders>> {
 		if !self.eat(t!("ORDER")) {
 			return Ok(None);
 		}
@@ -161,23 +157,11 @@ impl Parser<'_> {
 			}])));
 		};
 
-		let has_all = fields.contains(&Field::All);
-
-		let before = self.recent_span();
 		let order = self.parse_order()?;
-		let order_span = before.covers(self.last_span());
-		if !has_all {
-			Self::check_idiom(MissingKind::Order, fields, fields_span, &order, order_span)?;
-		}
 
 		let mut orders = vec![order];
 		while self.eat(t!(",")) {
-			let before = self.recent_span();
 			let order = self.parse_order()?;
-			let order_span = before.covers(self.last_span());
-			if !has_all {
-				Self::check_idiom(MissingKind::Order, fields, fields_span, &order, order_span)?;
-			}
 			orders.push(order)
 		}
 
