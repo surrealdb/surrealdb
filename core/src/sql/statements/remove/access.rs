@@ -27,6 +27,19 @@ impl RemoveAccessStatement {
 			opt.is_allowed(Action::Edit, ResourceKind::Actor, &self.base)?;
 
 			match &self.base {
+				Base::Root => {
+					// Claim transaction
+					let mut run = ctx.tx_lock().await;
+					// Clear the cache
+					run.clear_cache();
+					// Get the definition
+					let ac = run.get_root_access(&self.name).await?;
+					// Delete the definition
+					let key = crate::key::root::ac::new(&ac.name);
+					run.del(key).await?;
+					// Ok all good
+					Ok(Value::None)
+				}
 				Base::Ns => {
 					// Claim transaction
 					let mut run = ctx.tx_lock().await;
@@ -59,10 +72,13 @@ impl RemoveAccessStatement {
 		.await;
 		match future {
 			Err(e) if self.if_exists => match e {
-				Error::NaNotFound {
+				Error::AccessRootNotFound {
 					..
 				} => Ok(Value::None),
-				Error::DaNotFound {
+				Error::AccessNsNotFound {
+					..
+				} => Ok(Value::None),
+				Error::AccessDbNotFound {
 					..
 				} => Ok(Value::None),
 				e => Err(e),

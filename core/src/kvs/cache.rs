@@ -28,6 +28,7 @@ pub enum Entry {
 	Pa(Arc<DefineParamStatement>),
 	Tb(Arc<DefineTableStatement>),
 	// Multi definitions
+	Acs(Arc<[DefineAccessStatement]>),
 	Azs(Arc<[DefineAnalyzerStatement]>),
 	Dbs(Arc<[DefineDatabaseStatement]>),
 	Das(Arc<[DefineAccessStatement]>),

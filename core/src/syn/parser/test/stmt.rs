@@ -756,6 +756,66 @@ fn parse_define_access_jwt_key() {
 			res
 		);
 	}
+	// With comment. Asymmetric verify only. On namespace level.
+	{
+		let res = test_parse!(
+			parse_stmt,
+			r#"DEFINE ACCESS a ON NAMESPACE TYPE JWT ALGORITHM EDDSA KEY "foo" COMMENT "bar""#
+		)
+		.unwrap();
+		assert_eq!(
+			res,
+			Statement::Define(DefineStatement::Access(DefineAccessStatement {
+				name: Ident("a".to_string()),
+				base: Base::Ns,
+				kind: AccessType::Jwt(JwtAccess {
+					verify: JwtAccessVerify::Key(JwtAccessVerifyKey {
+						alg: Algorithm::EdDSA,
+						key: "foo".to_string(),
+					}),
+					issue: None,
+				}),
+				// Default durations.
+				duration: AccessDuration {
+					grant: None,
+					token: Some(Duration::from_hours(1)),
+					session: None,
+				},
+				comment: Some(Strand("bar".to_string())),
+				if_not_exists: false,
+			})),
+		)
+	}
+	// With comment. Asymmetric verify only. On root level.
+	{
+		let res = test_parse!(
+			parse_stmt,
+			r#"DEFINE ACCESS a ON ROOT TYPE JWT ALGORITHM EDDSA KEY "foo" COMMENT "bar""#
+		)
+		.unwrap();
+		assert_eq!(
+			res,
+			Statement::Define(DefineStatement::Access(DefineAccessStatement {
+				name: Ident("a".to_string()),
+				base: Base::Root,
+				kind: AccessType::Jwt(JwtAccess {
+					verify: JwtAccessVerify::Key(JwtAccessVerifyKey {
+						alg: Algorithm::EdDSA,
+						key: "foo".to_string(),
+					}),
+					issue: None,
+				}),
+				// Default durations.
+				duration: AccessDuration {
+					grant: None,
+					token: Some(Duration::from_hours(1)),
+					session: None,
+				},
+				comment: Some(Strand("bar".to_string())),
+				if_not_exists: false,
+			})),
+		)
+	}
 }
 
 #[test]
@@ -1129,6 +1189,28 @@ fn parse_define_access_record() {
 		assert!(
 			res.is_err(),
 			"Unexpected successful parsing of record access with none token duration: {:?}",
+			res
+		);
+	}
+	// Attempt to define record access at the root level.
+	{
+		let res = test_parse!(
+			parse_stmt,
+			r#"DEFINE ACCESS a ON ROOT TYPE RECORD DURATION FOR TOKEN NONE"#
+		);
+		assert!(
+			res.is_err(),
+			"Unexpected successful parsing of record access at root level: {:?}",
+			res
+		);
+	}
+	// Attempt to define record access at the namespace level.
+	{
+		let res =
+			test_parse!(parse_stmt, r#"DEFINE ACCESS a ON NS TYPE RECORD DURATION FOR TOKEN NONE"#);
+		assert!(
+			res.is_err(),
+			"Unexpected successful parsing of record access at namespace level: {:?}",
 			res
 		);
 	}
