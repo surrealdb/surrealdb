@@ -572,8 +572,9 @@ mod cli_integration {
 			Err(err) => panic!("Failed to encode token: {:?}", err),
 		};
 		let record_user = "user:1";
-		let claims_record = format!(
-			r#"
+		let claims_record = serde_json::from_str::<Claims>(
+			format!(
+				r#"
 			{{
 				"iss": "surrealdb-test",
 				"exp": {exp},
@@ -583,9 +584,11 @@ mod cli_integration {
 				"id": "{record_user}"
 			}}
 			"#
-		);
-		let claims = serde_json::from_str::<Claims>(&claims_record).unwrap();
-		let token_record = match encode(&header, &claims, &key_enc) {
+			)
+			.as_ref(),
+		)
+		.unwrap();
+		let token_record = match encode(&header, &claims_record, &key_enc) {
 			Ok(enc) => enc,
 			Err(err) => panic!("Failed to encode token: {:?}", err),
 		};
@@ -768,7 +771,6 @@ mod cli_integration {
 				"database should be selected from token: {output}"
 			);
 		}
-		server.finish().unwrap();
 
 		info!("* Pass token at the same time as credentials");
 		{
