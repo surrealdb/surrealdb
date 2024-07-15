@@ -2,6 +2,7 @@ pub mod extract;
 
 use async_graphql_axum;
 use async_graphql_axum::*;
+use extract::rejection::GraphQLRejection;
 
 use std::{
 	convert::Infallible,
@@ -14,39 +15,39 @@ use async_graphql::{
 	Executor,
 };
 use axum::{
-	body::{Body, HttpBody},
+	body::{BoxBody, HttpBody, StreamBody},
 	extract::FromRequest,
 	http::{Request as HttpRequest, Response as HttpResponse},
 	response::IntoResponse,
-	BoxError,
+	BoxError, Extension,
 };
 use bytes::Bytes;
 use futures_util::{future::BoxFuture, StreamExt};
 use tower_service::Service;
 
+use surrealdb::dbs::Session;
+
+use super::schema::{Invalidator, SchemaCache};
+
 /// A GraphQL service.
 #[derive(Clone)]
-pub struct GraphQL<E> {
-	executor: E,
-}
+pub struct GraphQL<I: Invalidator>(SchemaCache<I>);
 
-impl<E> GraphQL<E> {
+impl<I: Invalidator> GraphQL<I> {
 	/// Create a GraphQL handler.
-	pub fn new(executor: E) -> Self {
-		Self {
-			executor,
-		}
+	pub fn new(invalidator: I) -> Self {
+		GraphQL(SchemaCache::new())
 	}
 }
 
-impl<B, E> Service<HttpRequest<B>> for GraphQL<E>
+impl<B, I> Service<HttpRequest<B>> for GraphQL<I>
 where
-	B: HttpBody<Data = Bytes> + Send + 'static,
+	B: HttpBody + Send + Sync + 'static,
 	B::Data: Into<Bytes>,
 	B::Error: Into<BoxError>,
-	E: Executor,
+	I: Invalidator,
 {
-	type Response = HttpResponse<Body>;
+	type Response = HttpResponse<BoxBody>;
 	type Error = Infallible;
 	type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
 
@@ -55,9 +56,11 @@ where
 	}
 
 	fn call(&mut self, req: HttpRequest<B>) -> Self::Future {
-		let executor = self.executor.clone();
-		let req = req.map(Body::new);
+		// let executor = self.executor.clone();
 		Box::pin(async move {
+			let session = req.extensions().get::<Session>().unwrap();
+			let executor = self.0.get_schema(&session.ns, &session.db).await.unwrap();
+
 			let is_accept_multipart_mixed = req
 				.headers()
 				.get("accept")
@@ -71,7 +74,7 @@ where
 					Err(err) => return Ok(err.into_response()),
 				};
 				let stream = executor.execute_stream(req.0, None);
-				let body = Body::from_stream(
+				let body = StreamBody::new(
 					create_multipart_mixed_stream(
 						stream,
 						tokio_stream::wrappers::IntervalStream::new(tokio::time::interval(
@@ -83,7 +86,7 @@ where
 				);
 				Ok(HttpResponse::builder()
 					.header("content-type", "multipart/mixed; boundary=graphql")
-					.body(body)
+					.body(body.boxed_unsync())
 					.expect("BUG: invalid response"))
 			} else {
 				let req =

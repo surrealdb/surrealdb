@@ -1,4 +1,5 @@
 use std::collections::BTreeMap;
+use std::marker::PhantomData;
 
 use async_graphql::dynamic::TypeRef;
 use async_graphql::dynamic::{Enum, Type};
@@ -57,15 +58,51 @@ macro_rules! order {
 	}};
 }
 
-pub async fn get_schema() -> Result<Schema, Box<dyn std::error::Error>> {
+pub trait Invalidator {
+	type MetaData: Clone;
+
+	fn is_valid(nsdb: (String, String), meta: Self::MetaData) -> bool;
+}
+
+pub struct Pessimistic;
+impl Invalidator for Pessimistic {
+	type MetaData = ();
+
+	fn is_valid(_: (String, String), _: Self::MetaData) -> bool {
+		false
+	}
+}
+
+#[derive(Debug, Clone)]
+pub struct SchemaCache<I: Invalidator> {
+	inner: BTreeMap<(String, String), (Schema, I::MetaData)>,
+	_invalidator: PhantomData<I>,
+}
+
+impl<I: Invalidator> SchemaCache<I> {
+	pub fn new() -> Self {
+		SchemaCache {
+			inner: BTreeMap::new(),
+			_invalidator: PhantomData,
+		}
+	}
+	pub fn get_schema(
+		&mut self,
+		ns: String,
+		db: String,
+	) -> Result<Schema, Box<dyn std::error::Error>> {
+		if let Some((schema, meta)) = self.inner.get_mut(&(ns, db)) {}
+
+		todo!()
+	}
+}
+
+pub async fn generate_schema(ns: &str, db: &str) -> Result<Schema, Box<dyn std::error::Error>> {
 	let kvs = DB.get().unwrap();
 	let mut tx = kvs.transaction(TransactionType::Read, LockType::Optimistic).await?;
 	let tbs = tx.all_tb("test", "test").await?;
 	let mut query = Object::new("Query");
 	let mut types: Vec<Type> = Vec::new();
-	// TODO: remove hardcoded db and ns
-	const DB_NAME: &str = "test";
-	const NS_NAME: &str = "test";
 
 	for tb in tbs.iter() {
 		trace!("Adding table: {}", tb.name);
@@ -92,6 +129,8 @@ pub async fn get_schema() -> Result<Schema, Box<dyn std::error::Error>> {
 			.field(InputValue::new("not", TypeRef::named(&table_filter_name)));
 		types.push(Type::InputObject(filter_id()));
 
+		let res_ns = ns.to_owned();
+		let res_db = db.to_owned();
 		query = query.field(
 			Field::new(
 				tb.name.to_string(),
@@ -101,7 +140,7 @@ pub async fn get_schema() -> Result<Schema, Box<dyn std::error::Error>> {
 					FieldFuture::new(async move {
 						let kvs = DB.get().unwrap();
 
-						let use_stmt = Statement::Use((NS_NAME, DB_NAME).intox());
+						let use_stmt = Statement::Use((res_ns.clone(), res_db.clone()).intox());
 
 						// -- debugging --
 						// let args = ctx.args;
@@ -251,9 +290,7 @@ pub async fn get_schema() -> Result<Schema, Box<dyn std::error::Error>> {
 							Err(_) => Thing::from((tb_name, id)),
 						};
 
-						let use_stmt = Statement::Use(
-							(Some(DB_NAME.to_string()), Some(NS_NAME.to_string())).intox(),
-						);
+						let use_stmt = Statement::Use((Some(ns), Some(db)).intox());
 
 						let ast = Statement::Select({
 							let mut tmp = SelectStatement::default();
@@ -283,7 +320,7 @@ pub async fn get_schema() -> Result<Schema, Box<dyn std::error::Error>> {
 			.argument(id_input!()),
 		);
 
-		let fds = tx.all_tb_fields(DB_NAME, NS_NAME, &tb.name.0).await?;
+		let fds = tx.all_tb_fields(&db, &ns, &tb.name.0).await?;
 
 		let mut table_ty_obj = Object::new(tb.name.to_string())
 			.field(Field::new("id", TypeRef::named_nn(TypeRef::ID), |ctx| {

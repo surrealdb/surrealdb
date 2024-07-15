@@ -44,6 +44,7 @@ strip = false
 argon2 = "0.5.2"
 async-graphql = { version = "6.0.11", features = ["dynamic-schema"] }
 async-graphql-axum = "6.0.11"
+async-trait = "0.1.81"
 axum = { version = "0.6.20", features = ["tracing", "ws", "headers"] }
 axum-extra = { version = "0.7.7", features = ["query", "typed-routing"] }
 axum-server = { version = "0.5.1", features = ["tls-rustls"] }
