@@ -233,6 +233,7 @@ async fn loose_mode_all_ok() -> Result<(), Error> {
 	let tmp = res.remove(0).result?;
 	let val = Value::parse(
 		"{
+			accesses: {},
 			namespaces: { test: 'DEFINE NAMESPACE test' },
 			users: {},
 		}",

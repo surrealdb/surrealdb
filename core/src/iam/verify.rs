@@ -474,6 +474,57 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			)));
 			Ok(())
 		}
+		// Check if this is root access
+		Claims {
+			ac: Some(ac),
+			..
+		} => {
+			// Log the decoded authentication claims
+			trace!("Authenticating to root with access method `{}`", ac);
+			// Create a new readonly transaction
+			let mut tx = kvs.transaction(Read, Optimistic).await?;
+			// Get the namespace access method
+			let de = tx.get_root_access(&ac).await?;
+			// Obtain the configuration to verify the token based on the access method
+			let cf = match de.kind {
+				AccessType::Jwt(ac) => match ac.verify {
+					JwtAccessVerify::Key(key) => config(key.alg, key.key),
+					#[cfg(feature = "jwks")]
+					JwtAccessVerify::Jwks(jwks) => {
+						if let Some(kid) = token_data.header.kid {
+							jwks::config(kvs, &kid, &jwks.url, token_data.header.alg).await
+						} else {
+							Err(Error::MissingTokenHeader("kid".to_string()))
+						}
+					}
+					#[cfg(not(feature = "jwks"))]
+					_ => return Err(Error::AccessMethodMismatch),
+				},
+				_ => return Err(Error::AccessMethodMismatch),
+			}?;
+			// Verify the token
+			decode::<Claims>(token, &cf.0, &cf.1)?;
+			// Parse the roles
+			let roles = match token_data.claims.roles {
+				// If no role is provided, grant the viewer role
+				None => vec![Role::Viewer],
+				// If roles are provided, parse them
+				Some(roles) => roles
+					.iter()
+					.map(|r| -> Result<Role, Error> {
+						Role::from_str(r.as_str()).map_err(Error::IamError)
+					})
+					.collect::<Result<Vec<_>, _>>()?,
+			};
+			// Log the success
+			trace!("Authenticated to root with access method `{}`", ac);
+			// Set the session
+			session.tk = Some(value);
+			session.ac = Some(ac.to_owned());
+			session.exp = expiration(de.duration.session)?;
+			session.au = Arc::new(Auth::new(Actor::new(de.name.to_string(), roles, Level::Root)));
+			Ok(())
+		}
 		// Check if this is root authentication with user credentials
 		Claims {
 			id: Some(id),
@@ -835,6 +886,110 @@ mod tests {
 			let res = basic(&ds, &mut sess, "user", "invalid", Some("test"), Some("test")).await;
 
 			assert!(res.is_err(), "Unexpected successful signin: {:?}", res);
+		}
+	}
+
+	#[tokio::test]
+	async fn test_token_root() {
+		let secret = "jwt_secret";
+		let key = EncodingKey::from_secret(secret.as_ref());
+		let claims = Claims {
+			iss: Some("surrealdb-test".to_string()),
+			iat: Some(Utc::now().timestamp()),
+			nbf: Some(Utc::now().timestamp()),
+			exp: Some((Utc::now() + Duration::hours(1)).timestamp()),
+			ac: Some("token".to_string()),
+			..Claims::default()
+		};
+
+		let ds = Datastore::new("memory").await.unwrap();
+		let sess = Session::owner().with_ns("test").with_db("test");
+		ds.execute(
+			format!("DEFINE ACCESS token ON ROOT TYPE JWT ALGORITHM HS512 KEY '{secret}' DURATION FOR SESSION 30d").as_str(),
+			&sess,
+			None,
+		)
+		.await
+		.unwrap();
+
+		//
+		// Test without roles defined
+		//
+		{
+			// Prepare the claims object
+			let mut claims = claims.clone();
+			claims.roles = None;
+			// Create the token
+			let enc = encode(&HEADER, &claims, &key).unwrap();
+			// Signin with the token
+			let mut sess = Session::default();
+			let res = token(&ds, &mut sess, &enc).await;
+
+			assert!(res.is_ok(), "Failed to signin with token: {:?}", res);
+			assert_eq!(sess.ns, None);
+			assert_eq!(sess.db, None);
+			assert_eq!(sess.au.id(), "token");
+			assert!(sess.au.is_root());
+			assert!(sess.au.has_role(&Role::Viewer), "Auth user expected to have Viewer role");
+			assert!(!sess.au.has_role(&Role::Editor), "Auth user expected to not have Editor role");
+			assert!(!sess.au.has_role(&Role::Owner), "Auth user expected to not have Owner role");
+			// Session expiration has been set explicitly
+			let exp = sess.exp.unwrap();
+			// Expiration should match the current time plus session duration with some margin
+			let min_exp = (Utc::now() + Duration::days(30) - Duration::seconds(10)).timestamp();
+			let max_exp = (Utc::now() + Duration::days(30) + Duration::seconds(10)).timestamp();
+			assert!(
+				exp > min_exp && exp < max_exp,
+				"Session expiration is expected to match the defined duration"
+			);
+		}
+
+		//
+		// Test with roles defined
+		//
+		{
+			// Prepare the claims object
+			let mut claims = claims.clone();
+			claims.roles = Some(vec!["editor".to_string(), "owner".to_string()]);
+			// Create the token
+			let enc = encode(&HEADER, &claims, &key).unwrap();
+			// Signin with the token
+			let mut sess = Session::default();
+			let res = token(&ds, &mut sess, &enc).await;
+
+			assert!(res.is_ok(), "Failed to signin with token: {:?}", res);
+			assert_eq!(sess.ns, None);
+			assert_eq!(sess.db, None);
+			assert_eq!(sess.au.id(), "token");
+			assert!(sess.au.is_root());
+			assert!(!sess.au.has_role(&Role::Viewer), "Auth user expected to not have Viewer role");
+			assert!(sess.au.has_role(&Role::Editor), "Auth user expected to have Editor role");
+			assert!(sess.au.has_role(&Role::Owner), "Auth user expected to have Owner role");
+			// Session expiration has been set explicitly
+			let exp = sess.exp.unwrap();
+			// Expiration should match the current time plus session duration with some margin
+			let min_exp = (Utc::now() + Duration::days(30) - Duration::seconds(10)).timestamp();
+			let max_exp = (Utc::now() + Duration::days(30) + Duration::seconds(10)).timestamp();
+			assert!(
+				exp > min_exp && exp < max_exp,
+				"Session expiration is expected to match the defined duration"
+			);
+		}
+
+		//
+		// Test with invalid signature
+		//
+		{
+			// Prepare the claims object
+			let claims = claims.clone();
+			// Create the token
+			let key = EncodingKey::from_secret("invalid".as_ref());
+			let enc = encode(&HEADER, &claims, &key).unwrap();
+			// Signin with the token
+			let mut sess = Session::default();
+			let res = token(&ds, &mut sess, &enc).await;
+
+			assert!(res.is_err(), "Unexpected success signing in with token: {:?}", res);
 		}
 	}
 
