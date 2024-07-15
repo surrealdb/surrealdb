@@ -6119,6 +6119,7 @@ dependencies = [
  "tonic 0.8.3",
  "tower",
  "tower-http",
+ "tower-service",
  "tracing",
  "tracing-opentelemetry",
  "tracing-subscriber",
