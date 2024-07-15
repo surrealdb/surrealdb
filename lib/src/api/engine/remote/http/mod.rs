@@ -5,21 +5,11 @@ pub(crate) mod native;
 #[cfg(target_arch = "wasm32")]
 pub(crate) mod wasm;
 
+use crate::api::conn::Command;
 use crate::api::conn::DbResponse;
 use crate::api::conn::Method;
-#[cfg(feature = "ml")]
-#[cfg(not(target_arch = "wasm32"))]
-use crate::api::conn::MlConfig;
-use crate::api::conn::Param;
-use crate::api::engine::create_statement;
-use crate::api::engine::delete_statement;
-use crate::api::engine::insert_statement;
-use crate::api::engine::merge_statement;
-use crate::api::engine::patch_statement;
+use crate::api::conn::RequestData;
 use crate::api::engine::remote::duration_from_str;
-use crate::api::engine::select_statement;
-use crate::api::engine::update_statement;
-use crate::api::engine::upsert_statement;
 use crate::api::err::Error;
 use crate::api::method::query::QueryResult;
 use crate::api::Connect;
@@ -47,10 +37,20 @@ use reqwest::header::CONTENT_TYPE;
 use reqwest::RequestBuilder;
 use serde::Deserialize;
 use serde::Serialize;
+use std::collections::HashMap;
 use std::marker::PhantomData;
 use std::mem;
 #[cfg(not(target_arch = "wasm32"))]
 use std::path::PathBuf;
+use surrealdb_core::sql::statements::CreateStatement;
+use surrealdb_core::sql::statements::DeleteStatement;
+use surrealdb_core::sql::statements::InsertStatement;
+use surrealdb_core::sql::statements::SelectStatement;
+use surrealdb_core::sql::statements::UpdateStatement;
+use surrealdb_core::sql::statements::UpsertStatement;
+use surrealdb_core::sql::Data;
+use surrealdb_core::sql::Field;
+use surrealdb_core::sql::Output;
 #[cfg(not(target_arch = "wasm32"))]
 use tokio::fs::OpenOptions;
 #[cfg(not(target_arch = "wasm32"))]
@@ -244,58 +244,47 @@ async fn take(one: bool, request: RequestBuilder) -> Result<Value> {
 type BackupSender = channel::Sender<Result<Vec<u8>>>;
 
 #[cfg(not(target_arch = "wasm32"))]
-async fn export(
-	request: RequestBuilder,
-	(file, sender): (Option<PathBuf>, Option<BackupSender>),
-) -> Result<Value> {
-	match (file, sender) {
-		(Some(path), None) => {
-			let mut response = request
-				.send()
-				.await?
-				.error_for_status()?
-				.bytes_stream()
-				.map_err(|e| futures::io::Error::new(futures::io::ErrorKind::Other, e))
-				.into_async_read()
-				.compat();
-			let mut file = match OpenOptions::new()
-				.write(true)
-				.create(true)
-				.truncate(true)
-				.open(&path)
-				.await
-			{
-				Ok(path) => path,
-				Err(error) => {
-					return Err(Error::FileOpen {
-						path,
-						error,
-					}
-					.into());
-				}
-			};
-			if let Err(error) = io::copy(&mut response, &mut file).await {
-				return Err(Error::FileRead {
+async fn export_file(request: RequestBuilder, path: PathBuf) -> Result<Value> {
+	let mut response = request
+		.send()
+		.await?
+		.error_for_status()?
+		.bytes_stream()
+		.map_err(|e| futures::io::Error::new(futures::io::ErrorKind::Other, e))
+		.into_async_read()
+		.compat();
+	let mut file =
+		match OpenOptions::new().write(true).create(true).truncate(true).open(&path).await {
+			Ok(path) => path,
+			Err(error) => {
+				return Err(Error::FileOpen {
 					path,
 					error,
 				}
 				.into());
 			}
+		};
+	if let Err(error) = io::copy(&mut response, &mut file).await {
+		return Err(Error::FileRead {
+			path,
+			error,
 		}
-		(None, Some(tx)) => {
-			let mut response = request.send().await?.error_for_status()?.bytes_stream();
-
-			tokio::spawn(async move {
-				while let Ok(Some(bytes)) = response.try_next().await {
-					if tx.send(Ok(bytes.to_vec())).await.is_err() {
-						break;
-					}
-				}
-			});
-		}
-		_ => unreachable!(),
+		.into());
 	}
 
+	Ok(Value::None)
+}
+
+async fn export_bytes(request: RequestBuilder, bytes: BackupSender) -> Result<Value> {
+	let mut response = request.send().await?.error_for_status()?.bytes_stream();
+
+	tokio::spawn(async move {
+		while let Ok(Some(b)) = response.try_next().await {
+			if bytes.send(Ok(b.to_vec())).await.is_err() {
+				break;
+			}
+		}
+	});
 	Ok(Value::None)
 }
 
@@ -345,28 +334,24 @@ pub(crate) async fn health(request: RequestBuilder) -> Result<Value> {
 }
 
 async fn router(
-	(_, method, param): (i64, Method, Param),
+	RequestData {
+		command,
+		..
+	}: RequestData,
 	base_url: &Url,
 	client: &reqwest::Client,
 	headers: &mut HeaderMap,
-	vars: &mut IndexMap<String, String>,
+	vars: &mut HashMap<String, String>,
 	auth: &mut Option<Auth>,
 ) -> Result<DbResponse> {
-	let mut params = param.other;
-
-	match method {
-		Method::Use => {
+	match command {
+		Command::Use {
+			namespace,
+			database,
+		} => {
 			let path = base_url.join(SQL_PATH)?;
 			let mut request = client.post(path).headers(headers.clone());
-			let (ns, db) = match &mut params[..] {
-				[Value::Strand(ns), Value::Strand(db)] => {
-					(Some(mem::take(&mut ns.0)), Some(mem::take(&mut db.0)))
-				}
-				[Value::Strand(ns), Value::None] => (Some(mem::take(&mut ns.0)), None),
-				[Value::None, Value::Strand(db)] => (None, Some(mem::take(&mut db.0))),
-				_ => unreachable!(),
-			};
-			let ns = match ns {
+			let ns = match namespace {
 				Some(ns) => match HeaderValue::try_from(&ns) {
 					Ok(ns) => {
 						request = request.header(&NS, &ns);
@@ -378,7 +363,7 @@ async fn router(
 				},
 				None => None,
 			};
-			let db = match db {
+			let db = match database {
 				Some(db) => match HeaderValue::try_from(&db) {
 					Ok(db) => {
 						request = request.header(&DB, &db);
@@ -400,52 +385,46 @@ async fn router(
 			}
 			Ok(DbResponse::Other(Value::None))
 		}
-		Method::Signin => {
+		Command::Signin {
+			credentials,
+		} => {
 			let path = base_url.join(Method::Signin.as_str())?;
-			let credentials = match &mut params[..] {
-				[credentials] => credentials.to_string(),
-				_ => unreachable!(),
-			};
-			let request = client.post(path).headers(headers.clone()).auth(auth).body(credentials);
+			let request =
+				client.post(path).headers(headers.clone()).auth(auth).body(credentials.to_string());
 			let value = submit_auth(request).await?;
-			if let [credentials] = &mut params[..] {
-				if let Ok(Credentials {
+			if let Ok(Credentials {
+				user,
+				pass,
+				ns,
+				db,
+			}) = from_value(credentials.into())
+			{
+				*auth = Some(Auth::Basic {
 					user,
 					pass,
 					ns,
 					db,
-				}) = from_value(mem::take(credentials))
-				{
-					*auth = Some(Auth::Basic {
-						user,
-						pass,
-						ns,
-						db,
-					});
-				} else {
-					*auth = Some(Auth::Bearer {
-						token: value.to_raw_string(),
-					});
-				}
+				});
+			} else {
+				*auth = Some(Auth::Bearer {
+					token: value.to_raw_string(),
+				});
 			}
 			Ok(DbResponse::Other(value))
 		}
-		Method::Signup => {
+		Command::Signup {
+			credentials,
+		} => {
 			let path = base_url.join(Method::Signup.as_str())?;
-			let credentials = match &mut params[..] {
-				[credentials] => credentials.to_string(),
-				_ => unreachable!(),
-			};
-			let request = client.post(path).headers(headers.clone()).auth(auth).body(credentials);
+			let request =
+				client.post(path).headers(headers.clone()).auth(auth).body(credentials.to_string());
 			let value = submit_auth(request).await?;
 			Ok(DbResponse::Other(value))
 		}
-		Method::Authenticate => {
+		Command::Authenticate {
+			token,
+		} => {
 			let path = base_url.join(SQL_PATH)?;
-			let token = match &mut params[..1] {
-				[Value::Strand(token)] => mem::take(&mut token.0),
-				_ => unreachable!(),
-			};
 			let request =
 				client.post(path).headers(headers.clone()).bearer_auth(&token).body("RETURN true");
 			take(true, request).await?;
@@ -454,142 +433,261 @@ async fn router(
 			});
 			Ok(DbResponse::Other(Value::None))
 		}
-		Method::Invalidate => {
+		Command::Invalidate => {
 			*auth = None;
 			Ok(DbResponse::Other(Value::None))
 		}
-		Method::Create => {
+		Command::Create {
+			what,
+			data,
+		} => {
 			let path = base_url.join(SQL_PATH)?;
-			let statement = create_statement(&mut params);
+			let statement = {
+				let mut stmt = CreateStatement::default();
+				stmt.what = what;
+				stmt.data = data.map(Data::ContentExpression);
+				stmt.output = Some(Output::After);
+				stmt
+			};
 			let request =
 				client.post(path).headers(headers.clone()).auth(auth).body(statement.to_string());
 			let value = take(true, request).await?;
 			Ok(DbResponse::Other(value))
 		}
-		Method::Upsert => {
+		Command::Upsert {
+			one,
+			what,
+			data,
+		} => {
 			let path = base_url.join(SQL_PATH)?;
-			let (one, statement) = upsert_statement(&mut params);
+			let statement = {
+				let mut stmt = UpsertStatement::default();
+				stmt.what = what;
+				stmt.data = data.map(Data::ContentExpression);
+				stmt.output = Some(Output::After);
+				stmt
+			};
 			let request =
 				client.post(path).headers(headers.clone()).auth(auth).body(statement.to_string());
 			let value = take(one, request).await?;
 			Ok(DbResponse::Other(value))
 		}
-		Method::Update => {
+		Command::Update {
+			one,
+			what,
+			data,
+		} => {
 			let path = base_url.join(SQL_PATH)?;
-			let (one, statement) = update_statement(&mut params);
+			let statement = {
+				let mut stmt = UpdateStatement::default();
+				stmt.what = what;
+				stmt.data = data.map(Data::ContentExpression);
+				stmt.output = Some(Output::After);
+				stmt
+			};
 			let request =
 				client.post(path).headers(headers.clone()).auth(auth).body(statement.to_string());
 			let value = take(one, request).await?;
 			Ok(DbResponse::Other(value))
 		}
-		Method::Insert => {
+		Command::Insert {
+			what,
+			data,
+		} => {
 			let path = base_url.join(SQL_PATH)?;
-			let (one, statement) = insert_statement(&mut params);
+			let one = !data.is_array();
+			let statement = {
+				let mut stmt = InsertStatement::default();
+				stmt.into = what;
+				stmt.data = Data::SingleExpression(data);
+				stmt.output = Some(Output::After);
+				stmt
+			};
 			let request =
 				client.post(path).headers(headers.clone()).auth(auth).body(statement.to_string());
 			let value = take(one, request).await?;
 			Ok(DbResponse::Other(value))
 		}
-		Method::Patch => {
+		Command::Patch {
+			one,
+			what,
+			data,
+		} => {
 			let path = base_url.join(SQL_PATH)?;
-			let (one, statement) = patch_statement(&mut params);
+			let statement = {
+				let mut stmt = UpdateStatement::default();
+				stmt.what = what;
+				stmt.data = data.map(Data::PatchExpression);
+				stmt.output = Some(Output::After);
+				stmt
+			};
 			let request =
 				client.post(path).headers(headers.clone()).auth(auth).body(statement.to_string());
 			let value = take(one, request).await?;
 			Ok(DbResponse::Other(value))
 		}
-		Method::Merge => {
+		Command::Merge {
+			one,
+			what,
+			data,
+		} => {
 			let path = base_url.join(SQL_PATH)?;
-			let (one, statement) = merge_statement(&mut params);
+			let statement = {
+				let mut stmt = UpdateStatement::default();
+				stmt.what = what;
+				stmt.data = data.map(Data::MergeExpression);
+				stmt.output = Some(Output::After);
+				stmt
+			};
 			let request =
 				client.post(path).headers(headers.clone()).auth(auth).body(statement.to_string());
 			let value = take(one, request).await?;
 			Ok(DbResponse::Other(value))
 		}
-		Method::Select => {
+		Command::Select {
+			what,
+			one,
+		} => {
 			let path = base_url.join(SQL_PATH)?;
-			let (one, statement) = select_statement(&mut params);
+			let statement = {
+				let mut stmt = SelectStatement::default();
+				stmt.what = what;
+				stmt.expr.0 = vec![Field::All];
+				stmt
+			};
 			let request =
 				client.post(path).headers(headers.clone()).auth(auth).body(statement.to_string());
 			let value = take(one, request).await?;
 			Ok(DbResponse::Other(value))
 		}
-		Method::Delete => {
+		Command::Delete {
+			what,
+			one,
+		} => {
 			let path = base_url.join(SQL_PATH)?;
-			let (one, statement) = delete_statement(&mut params);
+			let (one, statement) = {
+				let mut stmt = DeleteStatement::default();
+				stmt.what = what;
+				stmt.output = Some(Output::Before);
+				(one, stmt)
+			};
 			let request =
 				client.post(path).headers(headers.clone()).auth(auth).body(statement.to_string());
 			let value = take(one, request).await?;
 			Ok(DbResponse::Other(value))
 		}
-		Method::Query => {
+		Command::Query {
+			query: q,
+			variables,
+		} => {
 			let path = base_url.join(SQL_PATH)?;
 			let mut request = client.post(path).headers(headers.clone()).query(&vars).auth(auth);
-			match param.query {
-				Some((query, bindings)) => {
-					let bindings: Vec<_> =
-						bindings.iter().map(|(key, value)| (key, value.to_string())).collect();
-					request = request.query(&bindings).body(query.to_string());
-				}
-				None => unreachable!(),
-			}
+			let bindings: Vec<_> =
+				variables.iter().map(|(key, value)| (key, value.to_string())).collect();
+			request = request.query(&bindings).body(q.to_string());
 			let values = query(request).await?;
 			Ok(DbResponse::Query(values))
 		}
-		#[cfg(target_arch = "wasm32")]
-		Method::Export | Method::Import => unreachable!(),
 		#[cfg(not(target_arch = "wasm32"))]
-		Method::Export => {
-			let path = match param.ml_config {
-				#[cfg(feature = "ml")]
-				Some(MlConfig::Export {
-					name,
-					version,
-				}) => base_url.join(&format!("ml/export/{name}/{version}"))?,
-				_ => base_url.join(Method::Export.as_str())?,
-			};
+		Command::ExportFile {
+			path,
+		} => {
+			let req_path = base_url.join(Method::Export.as_str())?;
 			let request = client
-				.get(path)
+				.get(req_path)
 				.headers(headers.clone())
 				.auth(auth)
 				.header(ACCEPT, "application/octet-stream");
-			let value = export(request, (param.file, param.bytes_sender)).await?;
+			let value = export_file(request, path).await?;
 			Ok(DbResponse::Other(value))
 		}
 		#[cfg(not(target_arch = "wasm32"))]
-		Method::Import => {
-			let path = match param.ml_config {
-				#[cfg(feature = "ml")]
-				Some(MlConfig::Import) => base_url.join("ml/import")?,
-				_ => base_url.join(Method::Import.as_str())?,
-			};
-			let file = param.file.expect("file to import from");
+		Command::ExportBytes {
+			bytes,
+		} => {
+			let req_path = base_url.join(Method::Export.as_str())?;
 			let request = client
-				.post(path)
+				.get(req_path)
+				.headers(headers.clone())
+				.auth(auth)
+				.header(ACCEPT, "application/octet-stream");
+			let value = export_bytes(request, bytes).await?;
+			Ok(DbResponse::Other(value))
+		}
+		#[cfg(all(not(target_arch = "wasm32"), feature = "ml"))]
+		Command::ExportMl {
+			path,
+			config,
+		} => {
+			let req_path =
+				base_url.join("ml")?.join("export")?.join(&config.name)?.join(&config.version)?;
+			let request = client
+				.get(req_path)
+				.headers(headers.clone())
+				.auth(auth)
+				.header(ACCEPT, "application/octet-stream");
+			let value = export_file(request, path).await?;
+			Ok(DbResponse::Other(value))
+		}
+		#[cfg(all(not(target_arch = "wasm32"), feature = "ml"))]
+		Command::ExportBytesMl {
+			bytes,
+			config,
+		} => {
+			let req_path =
+				base_url.join("ml")?.join("export")?.join(&config.name)?.join(&config.version)?;
+			let request = client
+				.get(req_path)
+				.headers(headers.clone())
+				.auth(auth)
+				.header(ACCEPT, "application/octet-stream");
+			let value = export_bytes(request, bytes).await?;
+			Ok(DbResponse::Other(value))
+		}
+		#[cfg(not(target_arch = "wasm32"))]
+		Command::ImportFile {
+			path,
+		} => {
+			let req_path = base_url.join(Method::Import.as_str())?;
+			let request = client
+				.post(req_path)
 				.headers(headers.clone())
 				.auth(auth)
 				.header(CONTENT_TYPE, "application/octet-stream");
-			let value = import(request, file).await?;
+			let value = import(request, path).await?;
 			Ok(DbResponse::Other(value))
 		}
-		Method::Health => {
+		#[cfg(all(not(target_arch = "wasm32"), feature = "ml"))]
+		Command::ImportMl {
+			path,
+		} => {
+			let req_path = base_url.join("ml")?.join("import")?;
+			let request = client
+				.post(req_path)
+				.headers(headers.clone())
+				.auth(auth)
+				.header(CONTENT_TYPE, "application/octet-stream");
+			let value = import(request, path).await?;
+			Ok(DbResponse::Other(value))
+		}
+		Command::Health => {
 			let path = base_url.join(Method::Health.as_str())?;
 			let request = client.get(path);
 			let value = health(request).await?;
 			Ok(DbResponse::Other(value))
 		}
-		Method::Version => {
-			let path = base_url.join(method.as_str())?;
+		Command::Version => {
+			let path = base_url.join(Method::Version.as_str())?;
 			let request = client.get(path);
 			let value = version(request).await?;
 			Ok(DbResponse::Other(value))
 		}
-		Method::Set => {
+		Command::Set {
+			key,
+			value,
+		} => {
 			let path = base_url.join(SQL_PATH)?;
-			let (key, value) = match &mut params[..2] {
-				[Value::Strand(key), value] => (mem::take(&mut key.0), value.to_string()),
-				_ => unreachable!(),
-			};
+			let value = value.to_string();
 			let request = client
 				.post(path)
 				.headers(headers.clone())
@@ -600,18 +698,17 @@ async fn router(
 			vars.insert(key, value);
 			Ok(DbResponse::Other(Value::None))
 		}
-		Method::Unset => {
-			if let [Value::Strand(key)] = &params[..1] {
-				vars.swap_remove(&key.0);
-			}
+		Command::Unset {
+			key,
+		} => {
+			vars.remove(&key);
 			Ok(DbResponse::Other(Value::None))
 		}
-		Method::Live => {
+		Command::Live {
+			what: table,
+			..
+		} => {
 			let path = base_url.join(SQL_PATH)?;
-			let table = match &params[..] {
-				[table] => table.to_string(),
-				_ => unreachable!(),
-			};
 			let request = client
 				.post(path)
 				.headers(headers.clone())
@@ -621,17 +718,15 @@ async fn router(
 			let value = take(true, request).await?;
 			Ok(DbResponse::Other(value))
 		}
-		Method::Kill => {
+		Command::Kill {
+			uuid,
+		} => {
 			let path = base_url.join(SQL_PATH)?;
-			let id = match &params[..] {
-				[id] => id.to_string(),
-				_ => unreachable!(),
-			};
 			let request = client
 				.post(path)
 				.headers(headers.clone())
 				.auth(auth)
-				.query(&[("id", id)])
+				.query(&[("id", uuid)])
 				.body("KILL type::string($id)");
 			let value = take(true, request).await?;
 			Ok(DbResponse::Other(value))

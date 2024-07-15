@@ -53,6 +53,9 @@ macro_rules! into_future {
 					None => resource?.into(),
 				};
 				let mut conn = Client::new(Method::Delete);
+				let cmd = Command::Delete{
+					what: resource?
+				}
 				conn.$method(client.router.extract()?, Param::new(vec![param])).await
 			})
 		}

@@ -64,10 +64,7 @@ impl Connection for Client {
 		}
 	}
 
-	fn connect(
-		_address: Endpoint,
-		capacity: usize,
-	) -> Pin<Box<dyn Future<Output = Result<Surreal<Self>>> + Send + Sync + 'static>> {
+	fn connect(_address: Endpoint, capacity: usize) -> BoxFuture<'static, Result<Surreal<Self>>> {
 		Box::pin(async move {
 			let (route_tx, route_rx) = flume::bounded(capacity);
 			let mut features = HashSet::new();
@@ -89,7 +86,7 @@ impl Connection for Client {
 		&'r mut self,
 		router: &'r Router,
 		param: Param,
-	) -> Pin<Box<dyn Future<Output = Result<Receiver<Result<DbResponse>>>> + Send + Sync + 'r>> {
+	) -> BoxFuture<'r, Result<Receiver<Result<DbResponse>>>> {
 		Box::pin(async move {
 			let (sender, receiver) = flume::bounded(1);
 			let route = Route {

@@ -1,6 +1,6 @@
 use crate::api::conn::Connection;
 use crate::api::conn::Method;
-use crate::api::conn::Param;
+use crate::api::conn::RequestData;
 use crate::api::conn::Route;
 use crate::api::conn::Router;
 #[allow(unused_imports)] // used by the DB engines
@@ -23,11 +23,10 @@ use crate::api::Surreal;
 use crate::error::Db as DbError;
 use crate::opt::WaitFor;
 use flume::Receiver;
+use futures::future::BoxFuture;
 #[cfg(feature = "protocol-http")]
 use reqwest::ClientBuilder;
 use std::collections::HashSet;
-use std::future::Future;
-use std::pin::Pin;
 use std::sync::atomic::AtomicI64;
 use std::sync::Arc;
 use std::sync::OnceLock;
@@ -49,10 +48,7 @@ impl Connection for Any {
 	}
 
 	#[allow(unused_variables, unreachable_code, unused_mut)] // these are all used depending on feature
-	fn connect(
-		address: Endpoint,
-		capacity: usize,
-	) -> Pin<Box<dyn Future<Output = Result<Surreal<Self>>> + Send + Sync + 'static>> {
+	fn connect(address: Endpoint, capacity: usize) -> BoxFuture<'static, Result<Surreal<Self>>> {
 		Box::pin(async move {
 			let (route_tx, route_rx) = match capacity {
 				0 => flume::unbounded(),
@@ -230,13 +226,13 @@ impl Connection for Any {
 	fn send<'r>(
 		&'r mut self,
 		router: &'r Router,
-		param: Param,
-	) -> Pin<Box<dyn Future<Output = Result<Receiver<Result<DbResponse>>>> + Send + Sync + 'r>> {
+		request: RequestData,
+	) -> BoxFuture<'r, Result<Receiver<Result<DbResponse>>>> {
 		Box::pin(async move {
 			let (sender, receiver) = flume::bounded(1);
 			self.id = router.next_id();
 			let route = Route {
-				request: (self.id, self.method, param),
+				request,
 				response: sender,
 			};
 			router.sender.send_async(route).await?;

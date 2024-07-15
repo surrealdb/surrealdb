@@ -5,26 +5,30 @@ use crate::api::opt::Endpoint;
 use crate::api::ExtraFeatures;
 use crate::api::Result;
 use crate::api::Surreal;
-use crate::dbs::Notification;
-use crate::sql::from_value;
-use crate::sql::Query;
-use crate::sql::Value;
-use flume::Receiver;
-use flume::Sender;
+use flume::{Receiver, Sender};
+use futures::future::BoxFuture;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
-use std::collections::BTreeMap;
 use std::collections::HashSet;
-use std::future::Future;
-use std::path::PathBuf;
-use std::pin::Pin;
 use std::sync::atomic::AtomicI64;
 use std::sync::atomic::Ordering;
+use surrealdb_core::sql::{from_value, Value};
+
+mod cmd;
+
+pub use cmd::Command;
+
+#[derive(Debug)]
+#[allow(dead_code)] // used by the embedded and remote connections
+pub struct RequestData {
+	pub(crate) id: i64,
+	pub(crate) command: Command,
+}
 
 #[derive(Debug)]
 #[allow(dead_code)] // used by the embedded and remote connections
 pub(crate) struct Route {
-	pub(crate) request: (i64, Method, Param),
+	pub(crate) request: RequestData,
 	pub(crate) response: Sender<Result<DbResponse>>,
 }
 
@@ -103,63 +107,11 @@ pub enum DbResponse {
 	Other(Value),
 }
 
-#[derive(Debug)]
-#[allow(dead_code)] // used by ML model import and export functions
-pub(crate) enum MlConfig {
-	Import,
-	Export {
-		name: String,
-		version: String,
-	},
-}
-
-/// Holds the parameters given to the caller
-#[derive(Debug, Default)]
-#[allow(dead_code)] // used by the embedded and remote connections
-pub struct Param {
-	pub(crate) query: Option<(Query, BTreeMap<String, Value>)>,
-	pub(crate) other: Vec<Value>,
-	pub(crate) file: Option<PathBuf>,
-	pub(crate) bytes_sender: Option<channel::Sender<Result<Vec<u8>>>>,
-	pub(crate) notification_sender: Option<channel::Sender<Notification>>,
-	pub(crate) ml_config: Option<MlConfig>,
-}
-
-impl Param {
-	pub(crate) fn new(other: Vec<Value>) -> Self {
-		Self {
-			other,
-			..Default::default()
-		}
-	}
-
-	pub(crate) fn query(query: Query, bindings: BTreeMap<String, Value>) -> Self {
-		Self {
-			query: Some((query, bindings)),
-			..Default::default()
-		}
-	}
-
-	pub(crate) fn file(file: PathBuf) -> Self {
-		Self {
-			file: Some(file),
-			..Default::default()
-		}
-	}
-
-	pub(crate) fn bytes_sender(send: channel::Sender<Result<Vec<u8>>>) -> Self {
-		Self {
-			bytes_sender: Some(send),
-			..Default::default()
-		}
-	}
-
-	pub(crate) fn notification_sender(send: channel::Sender<Notification>) -> Self {
-		Self {
-			notification_sender: Some(send),
-			..Default::default()
-		}
-	}
+#[derive(Debug, Clone)]
+#[cfg(all(not(target_arch = "wasm32"), feature = "ml"))]
+pub(crate) struct MlExportConfig {
+	pub(crate) name: String,
+	pub(crate) version: String,
 }
 
 /// Connection trait implemented by supported protocols
@@ -168,10 +120,7 @@ pub trait Connection: Sized + Send + Sync + 'static {
 	fn new(method: Method) -> Self;
 
 	/// Connect to the server
-	fn connect(
-		address: Endpoint,
-		capacity: usize,
-	) -> Pin<Box<dyn Future<Output = Result<Surreal<Self>>> + Send + Sync + 'static>>
+	fn connect(address: Endpoint, capacity: usize) -> BoxFuture<'static, Result<Surreal<Self>>>
 	where
 		Self: api::Connection;
 
@@ -180,16 +129,13 @@ pub trait Connection: Sized + Send + Sync + 'static {
 	fn send<'r>(
 		&'r mut self,
 		router: &'r Router,
-		param: Param,
-	) -> Pin<Box<dyn Future<Output = Result<Receiver<Result<DbResponse>>>> + Send + Sync + 'r>>
+		command: Command,
+	) -> BoxFuture<'r, Result<Receiver<Result<DbResponse>>>>
 	where
 		Self: api::Connection;
 
 	/// Receive responses for all methods except `query`
-	fn recv(
-		&mut self,
-		receiver: Receiver<Result<DbResponse>>,
-	) -> Pin<Box<dyn Future<Output = Result<Value>> + Send + Sync + '_>> {
+	fn recv(&mut self, receiver: Receiver<Result<DbResponse>>) -> BoxFuture<'_, Result<Value>> {
 		Box::pin(async move {
 			let response = receiver.into_recv_async().await?;
 			match response? {
@@ -203,7 +149,7 @@ pub trait Connection: Sized + Send + Sync + 'static {
 	fn recv_query(
 		&mut self,
 		receiver: Receiver<Result<DbResponse>>,
-	) -> Pin<Box<dyn Future<Output = Result<Response>> + Send + Sync + '_>> {
+	) -> BoxFuture<'_, Result<Response>> {
 		Box::pin(async move {
 			let response = receiver.into_recv_async().await?;
 			match response? {
@@ -217,14 +163,14 @@ pub trait Connection: Sized + Send + Sync + 'static {
 	fn execute<'r, R>(
 		&'r mut self,
 		router: &'r Router,
-		param: Param,
-	) -> Pin<Box<dyn Future<Output = Result<R>> + Send + Sync + 'r>>
+		command: Command,
+	) -> BoxFuture<'r, Result<R>>
 	where
 		R: DeserializeOwned,
 		Self: api::Connection,
 	{
 		Box::pin(async move {
-			let rx = self.send(router, param).await?;
+			let rx = self.send(router, command).await?;
 			let value = self.recv(rx).await?;
 			from_value(value).map_err(Into::into)
 		})
@@ -234,14 +180,14 @@ pub trait Connection: Sized + Send + Sync + 'static {
 	fn execute_opt<'r, R>(
 		&'r mut self,
 		router: &'r Router,
-		param: Param,
-	) -> Pin<Box<dyn Future<Output = Result<Option<R>>> + Send + Sync + 'r>>
+		command: Command,
+	) -> BoxFuture<'r, Result<Option<R>>>
 	where
 		R: DeserializeOwned,
 		Self: api::Connection,
 	{
 		Box::pin(async move {
-			let rx = self.send(router, param).await?;
+			let rx = self.send(router, command).await?;
 			match self.recv(rx).await? {
 				Value::None | Value::Null => Ok(None),
 				value => from_value(value).map_err(Into::into),
@@ -253,14 +199,14 @@ pub trait Connection: Sized + Send + Sync + 'static {
 	fn execute_vec<'r, R>(
 		&'r mut self,
 		router: &'r Router,
-		param: Param,
-	) -> Pin<Box<dyn Future<Output = Result<Vec<R>>> + Send + Sync + 'r>>
+		command: Command,
+	) -> BoxFuture<'r, Result<Vec<R>>>
 	where
 		R: DeserializeOwned,
 		Self: api::Connection,
 	{
 		Box::pin(async move {
-			let rx = self.send(router, param).await?;
+			let rx = self.send(router, command).await?;
 			let value = match self.recv(rx).await? {
 				Value::None | Value::Null => Value::Array(Default::default()),
 				Value::Array(array) => Value::Array(array),
@@ -274,13 +220,13 @@ pub trait Connection: Sized + Send + Sync + 'static {
 	fn execute_unit<'r>(
 		&'r mut self,
 		router: &'r Router,
-		param: Param,
-	) -> Pin<Box<dyn Future<Output = Result<()>> + Send + Sync + 'r>>
+		command: Command,
+	) -> BoxFuture<'r, Result<()>>
 	where
 		Self: api::Connection,
 	{
 		Box::pin(async move {
-			let rx = self.send(router, param).await?;
+			let rx = self.send(router, command).await?;
 			match self.recv(rx).await? {
 				Value::None | Value::Null => Ok(()),
 				Value::Array(array) if array.is_empty() => Ok(()),
@@ -297,13 +243,13 @@ pub trait Connection: Sized + Send + Sync + 'static {
 	fn execute_value<'r>(
 		&'r mut self,
 		router: &'r Router,
-		param: Param,
-	) -> Pin<Box<dyn Future<Output = Result<Value>> + Send + Sync + 'r>>
+		command: Command,
+	) -> BoxFuture<'r, Result<Value>>
 	where
 		Self: api::Connection,
 	{
 		Box::pin(async move {
-			let rx = self.send(router, param).await?;
+			let rx = self.send(router, command).await?;
 			self.recv(rx).await
 		})
 	}
@@ -312,13 +258,13 @@ pub trait Connection: Sized + Send + Sync + 'static {
 	fn execute_query<'r>(
 		&'r mut self,
 		router: &'r Router,
-		param: Param,
-	) -> Pin<Box<dyn Future<Output = Result<Response>> + Send + Sync + 'r>>
+		command: Command,
+	) -> BoxFuture<'r, Result<Response>>
 	where
 		Self: api::Connection,
 	{
 		Box::pin(async move {
-			let rx = self.send(router, param).await?;
+			let rx = self.send(router, command).await?;
 			self.recv_query(rx).await
 		})
 	}
