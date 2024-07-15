@@ -732,6 +732,16 @@ mod cli_integration {
 			);
 		}
 
+		info!("* Pass database token without specifying namespace or database");
+		{
+			let args = format!("sql --conn http://{addr} --token {token_db}");
+			let output = common::run(&args).input("INFO FOR DB;\n").output().expect("success");
+			assert!(
+				output.contains("tables: {"),
+				"namespace and database to use should be selected from token: {output}"
+			);
+		}
+
 		info!("* Pass record user token and access database info");
 		{
 			let args =
@@ -795,7 +805,9 @@ mod cli_integration {
 			let args = format!(
 				"sql --conn http://{addr} --ns {ns} --token {token_db} --auth-level namespace"
 			);
-			let output = common::run(&args).input(format!("INFO FOR DB;\n").as_str()).output();
+			let output = common::run(&args)
+				.input(format!("USE NS `{ns}` DB `{db}`; INFO FOR DB;\n").as_str())
+				.output();
 			assert!(
 				output
 					.clone()
