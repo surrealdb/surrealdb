@@ -21,6 +21,7 @@ use std::fmt::Debug;
 use std::ops::Range;
 use std::sync::Arc;
 
+#[cfg(debug_assertions)]
 const TARGET: &str = "surrealdb::core::kvs::tr";
 
 /// Used to determine the behaviour when a transaction is not closed correctly

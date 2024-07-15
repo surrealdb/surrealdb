@@ -35,6 +35,7 @@ use std::ops::Range;
 use std::sync::Arc;
 use uuid::Uuid;
 
+#[cfg(debug_assertions)]
 const TARGET: &str = "surrealdb::core::kvs::tx";
 
 #[non_exhaustive]
