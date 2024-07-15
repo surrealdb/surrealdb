@@ -59,7 +59,7 @@ macro_rules! order {
 }
 
 pub trait Invalidator {
-	type MetaData: Clone;
+	type MetaData: Clone + Send + Sync;
 
 	fn is_valid(nsdb: (String, String), meta: Self::MetaData) -> bool;
 }
@@ -86,7 +86,7 @@ impl<I: Invalidator> SchemaCache<I> {
 			_invalidator: PhantomData,
 		}
 	}
-	pub fn get_schema(
+	pub async fn get_schema(
 		&mut self,
 		ns: String,
 		db: String,
@@ -98,6 +98,9 @@ impl<I: Invalidator> SchemaCache<I> {
 }
 
 pub async fn generate_schema(ns: &str, db: &str) -> Result<Schema, Box<dyn std::error::Error>> {
+	let ns = ns.to_owned();
+	let db = db.to_owned();
+
 	let kvs = DB.get().unwrap();
 	let mut tx = kvs.transaction(TransactionType::Read, LockType::Optimistic).await?;
 	let tbs = tx.all_tb("test", "test").await?;
@@ -129,13 +132,15 @@ pub async fn generate_schema(ns: &str, db: &str) -> Result<Schema, Box<dyn std::
 			.field(InputValue::new("not", TypeRef::named(&table_filter_name)));
 		types.push(Type::InputObject(filter_id()));
 
-		let res_ns = ns.to_owned();
-		let res_db = db.to_owned();
+		let res_ns1 = ns.to_owned();
+		let res_db1 = db.to_owned();
 		query = query.field(
 			Field::new(
 				tb.name.to_string(),
 				TypeRef::named_nn_list_nn(tb.name.to_string()),
 				move |ctx| {
+					let res_ns = res_ns1.to_owned();
+					let res_db = res_db1.to_owned();
 					let tb_name = first_tb_name.clone();
 					FieldFuture::new(async move {
 						let kvs = DB.get().unwrap();
@@ -274,6 +279,8 @@ pub async fn generate_schema(ns: &str, db: &str) -> Result<Schema, Box<dyn std::
 				move |ctx| {
 					let tb_name = second_tb_name.clone();
 					FieldFuture::new(async move {
+						let res_ns = ns.to_owned();
+						let res_db = db.to_owned();
 						let kvs = DB.get().unwrap();
 
 						let args = ctx.args.as_index_map();
@@ -290,7 +297,7 @@ pub async fn generate_schema(ns: &str, db: &str) -> Result<Schema, Box<dyn std::
 							Err(_) => Thing::from((tb_name, id)),
 						};
 
-						let use_stmt = Statement::Use((Some(ns), Some(db)).intox());
+						let use_stmt = Statement::Use((res_ns.clone(), res_db.clone()).intox());
 
 						let ast = Statement::Select({
 							let mut tmp = SelectStatement::default();

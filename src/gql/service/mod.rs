@@ -36,6 +36,7 @@ pub struct GraphQL<I: Invalidator>(SchemaCache<I>);
 impl<I: Invalidator> GraphQL<I> {
 	/// Create a GraphQL handler.
 	pub fn new(invalidator: I) -> Self {
+		let _ = invalidator;
 		GraphQL(SchemaCache::new())
 	}
 }
@@ -59,7 +60,11 @@ where
 		// let executor = self.executor.clone();
 		Box::pin(async move {
 			let session = req.extensions().get::<Session>().unwrap();
-			let executor = self.0.get_schema(&session.ns, &session.db).await.unwrap();
+			let executor = self
+				.0
+				.get_schema(session.ns.unwrap().to_owned(), session.db.unwrap().to_owned())
+				.await
+				.unwrap();
 
 			let is_accept_multipart_mixed = req
 				.headers()
@@ -73,7 +78,9 @@ where
 					Ok(req) => req,
 					Err(err) => return Ok(err.into_response()),
 				};
-				let stream = executor.execute_stream(req.0, None);
+				// let stream = executor.execute_stream(req.0, None);
+				let stream = Executor::execute_stream(&executor, req.0, None);
+				// let stream = executor.execute_stream(req.0);
 				let body = StreamBody::new(
 					create_multipart_mixed_stream(
 						stream,
