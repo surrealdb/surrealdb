@@ -2,12 +2,9 @@ use crate::cli::CF;
 use crate::err::Error;
 use clap::Args;
 use std::path::PathBuf;
-use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 use surrealdb::dbs::capabilities::{Capabilities, FuncTarget, NetTarget, Targets};
 use surrealdb::kvs::Datastore;
-
-pub static DB: OnceLock<Arc<Datastore>> = OnceLock::new();
 
 #[derive(Args, Debug)]
 pub struct StartCommandDbsOptions {
@@ -211,7 +208,7 @@ pub async fn init(
 		capabilities,
 		temporary_directory,
 	}: StartCommandDbsOptions,
-) -> Result<(), Error> {
+) -> Result<Datastore, Error> {
 	// Get local copy of options
 	let opt = CF.get().unwrap();
 	// Convert the capabilities
@@ -248,10 +245,8 @@ pub async fn init(
 	}
 	// Bootstrap the datastore
 	dbs.bootstrap().await?;
-	// Store database instance
-	let _ = DB.set(Arc::new(dbs));
 	// All ok
-	Ok(())
+	Ok(dbs)
 }
 
 #[cfg(test)]
