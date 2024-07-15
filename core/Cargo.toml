@@ -28,7 +28,7 @@ kv-mem = ["dep:echodb", "tokio/time", "dep:tempfile", "dep:ext-sort"]
 kv-indxdb = ["dep:indxdb"]
 kv-rocksdb = ["dep:rocksdb", "tokio/time", "dep:tempfile", "dep:ext-sort"]
 kv-tikv = ["dep:tikv", "tokio/time", "dep:tempfile", "dep:ext-sort"]
-kv-fdb = ["foundationdb/fdb-7_1", "tokio/time", "dep:tempfile", "dep:ext-sort"]
+kv-fdb = ["dep:foundationdb", "tokio/time", "dep:tempfile", "dep:ext-sort"]
 kv-surrealkv = ["dep:surrealkv", "tokio/time", "dep:tempfile", "dep:ext-sort"]
 scripting = ["dep:js"]
 http = ["dep:reqwest"]
@@ -41,6 +41,10 @@ arbitrary = [
     "geo-types/arbitrary",
     "uuid/arbitrary",
 ]
+
+# Special features
+kv-fdb-7_1 = ["foundationdb/fdb-7_1"]
+kv-fdb-7_3 = ["foundationdb/fdb-7_3"]
 
 [package.metadata.docs.rs]
 rustdoc-args = ["--cfg", "docsrs"]
@@ -70,7 +74,7 @@ dmp = "0.2.0"
 echodb = { version = "0.7.0", optional = true }
 executor = { version = "1.8.0", package = "async-executor" }
 ext-sort = { version = "^0.1.4", optional = true }
-foundationdb = { version = "0.8.0", default-features = false, features = [
+foundationdb = { version = "0.9.0", default-features = false, features = [
     "embedded-fdb-include",
 ], optional = true }
 fst = "0.4.7"
