@@ -142,7 +142,7 @@ impl fmt::Display for UpdateStatement {
 	}
 }
 
-fn gen_id(id: Value, tables: &Vec<Table>, selected: &Table) -> Result<Option<Thing>, Error> {
+fn gen_id(id: Value, tables: &[Table], selected: &Table) -> Result<Option<Thing>, Error> {
 	match id {
 		Value::Thing(v) => match v {
 			Thing {
@@ -172,7 +172,7 @@ fn gen_id(id: Value, tables: &Vec<Table>, selected: &Table) -> Result<Option<Thi
 	}
 }
 
-fn iterable(i: &mut Iterator, tables: &Vec<Table>, v: &Value) -> Result<(), Error> {
+fn iterable(i: &mut Iterator, tables: &[Table], v: &Value) -> Result<(), Error> {
 	let id = v.rid();
 	for table in tables.iter() {
 		let Some(id) = gen_id(id.clone(), tables, table)? else {
