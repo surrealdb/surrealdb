@@ -149,6 +149,23 @@ impl Array {
 		Ok(Value::Array(x))
 	}
 
+	pub(crate) async fn partially_compute(
+		&self,
+		stk: &mut Stk,
+		ctx: &Context<'_>,
+		opt: &Options,
+		doc: Option<&CursorDoc<'_>>,
+	) -> Result<Value, Error> {
+		let mut x = Self::with_capacity(self.len());
+		for v in self.iter() {
+			match v.partially_compute(stk, ctx, opt, doc).await {
+				Ok(v) => x.push(v),
+				Err(e) => return Err(e),
+			};
+		}
+		Ok(Value::Array(x))
+	}
+
 	pub(crate) fn is_all_none_or_null(&self) -> bool {
 		self.0.iter().all(|v| v.is_none_or_null())
 	}
@@ -495,5 +512,39 @@ impl Uniq<Array> for Array {
 			self.remove(*i);
 		}
 		self
+	}
+}
+
+#[cfg(test)]
+#[cfg(feature = "kv-mem")]
+mod test {
+	use crate::dbs::Options;
+	use crate::kvs::{Datastore, LockType, TransactionType};
+	use crate::sql::{Array, Param, Value};
+	use reblessive::TreeStack;
+
+	#[tokio::test]
+	async fn array_partial_compute() {
+		let db = Datastore::new("memory").await.unwrap();
+		let mut array = Array::with_capacity(2);
+		array.insert(0, Value::Param(Param::from("foo")));
+		array.insert(1, Value::Number(2.0.into()));
+
+		let mut stack = TreeStack::new();
+		let tx =
+			db.transaction(TransactionType::Write, LockType::Optimistic).await.unwrap().enclose();
+		let mut ctx = crate::ctx::Context::default().set_transaction(tx.clone());
+		ctx.add_value("foo", Value::Number(1.0.into()));
+		let opt = Options::default().with_ns(Some("test".into())).with_db(Some("test".into()));
+		let res = stack
+			.enter(|stk| async { array.partially_compute(stk, &ctx, &opt, None).await })
+			.finish()
+			.await
+			.unwrap();
+
+		array.remove(0);
+		array.insert(0, Value::Number(1.0.into()));
+		assert_eq!(res, Value::Array(array));
+		tx.lock().await.commit().await.unwrap();
 	}
 }

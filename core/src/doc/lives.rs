@@ -183,6 +183,9 @@ impl<'a> Document<'a> {
 			// document. If it is then we can continue.
 			match self.lq_check(stk, &lqctx, &lqopt, &lq, doc).await {
 				Err(Error::Ignore) => {
+					#[cfg(debug_assertions)]
+					trace!("live query {} did not match the where clause, skipping", lq);
+					#[cfg(not(debug_assertions))]
 					trace!("live query did not match the where clause, skipping");
 					continue;
 				}

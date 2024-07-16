@@ -134,6 +134,13 @@ impl LiveStatement {
 			false => {
 				// Claim transaction
 				let mut run = ctx.tx_lock().await;
+				// Process the condition params
+				let condition = match stm.cond.as_mut() {
+					None => None,
+					Some(cond) => Some(Cond(cond.partially_compute(stk, ctx, opt, doc).await?)),
+				};
+				// Overwrite the condition params
+				stm.cond = condition;
 				// Process the live query table
 				match stm.what.compute(stk, ctx, opt, doc).await? {
 					Value::Table(tb) => {
