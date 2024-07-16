@@ -1,8 +1,8 @@
 use crate::ctx::Context;
-use crate::dbs::{Iterator, Options, Statement};
+use crate::dbs::{Iterable, Iterator, Options, Statement};
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::sql::{Cond, Data, Output, Timeout, Value, Values};
+use crate::sql::{Cond, Data, Id, Output, Table, Thing, Timeout, Value, Values};
 use derive::Store;
 use reblessive::tree::Stk;
 use revision::revisioned;
@@ -41,21 +41,45 @@ impl UpdateStatement {
 		opt.valid_for_db()?;
 		// Create a new iterator
 		let mut i = Iterator::new();
-		// Assign the statement
-		let stm = Statement::from(self);
 		// Ensure futures are stored
 		let opt = &opt.new_with_futures(false).with_projections(false);
-		// Loop over the update targets
-		for w in self.what.0.iter() {
-			let v = w.compute(stk, ctx, opt, doc).await?;
-			i.prepare(stk, ctx, opt, &stm, v).await.map_err(|e| match e {
-				Error::InvalidStatementTarget {
-					value: v,
-				} => Error::UpdateStatement {
-					value: v,
-				},
-				e => e,
-			})?;
+
+		let mut is_bulk = false;
+		if let Some(Data::ContentExpression(v))
+		| Some(Data::MergeExpression(v))
+		| Some(Data::PatchExpression(v)) = &self.data
+		{
+			if let Ok(tables) = self.get_tables(stk, ctx, opt, doc).await {
+				match v.compute(stk, ctx, opt, doc).await? {
+					Value::Array(v) => {
+						for v in v {
+							iterable(&mut i, &tables, &v)?;
+						}
+						is_bulk = true;
+					}
+					Value::Object(_) if !matches!(v.rid(), Value::None) => {
+						iterable(&mut i, &tables, v)?;
+						is_bulk = true;
+					}
+					_ => {}
+				}
+			}
+		}
+		// Assign the statement
+		let stm = Statement::from(self);
+		if !is_bulk {
+			// Loop over the update targets
+			for w in self.what.0.iter() {
+				let v = w.compute(stk, ctx, opt, doc).await?;
+				i.prepare(stk, ctx, opt, &stm, v).await.map_err(|e| match e {
+					Error::InvalidStatementTarget {
+						value: v,
+					} => Error::UpdateStatement {
+						value: v,
+					},
+					e => e,
+				})?;
+			}
 		}
 		// Output the results
 		match i.output(stk, ctx, opt, &stm).await? {
@@ -69,6 +93,26 @@ impl UpdateStatement {
 			// This is standard query result
 			v => Ok(v),
 		}
+	}
+
+	async fn get_tables(
+		&self,
+		stk: &mut Stk,
+		ctx: &Context<'_>,
+		opt: &Options,
+		doc: Option<&CursorDoc<'_>>,
+	) -> Result<Vec<Table>, Error> {
+		let mut accum = vec![];
+		for w in self.what.0.iter() {
+			if let Value::Table(t) = w.compute(stk, ctx, opt, doc).await? {
+				accum.push(t);
+			} else {
+				return Err(Error::UpdateStatement {
+					value: "Targets contains Thing".to_string(),
+				});
+			}
+		}
+		Ok(accum)
 	}
 }
 
@@ -96,4 +140,45 @@ impl fmt::Display for UpdateStatement {
 		}
 		Ok(())
 	}
+}
+
+fn gen_id(id: Value, tables: &Vec<Table>, selected: &Table) -> Result<Option<Thing>, Error> {
+	match id {
+		Value::Thing(v) => match v {
+			Thing {
+				id: Id::Generate(_),
+				..
+			} => Err(Error::UpdateStatementId {
+				value: v.to_string(),
+			}),
+			Thing {
+				tb,
+				..
+			} if tb != selected.0 => {
+				if tables.iter().any(|x| x.0 == tb) {
+					Ok(None)
+				} else {
+					Err(Error::UpdateStatementId {
+						value: tb.to_string(),
+					})
+				}
+			}
+			v => Ok(Some(v)),
+		},
+		Value::None => Err(Error::UpdateStatementId {
+			value: "not specified".to_string(),
+		}),
+		v => v.generate(selected, false).map(Into::into),
+	}
+}
+
+fn iterable(i: &mut Iterator, tables: &Vec<Table>, v: &Value) -> Result<(), Error> {
+	let id = v.rid();
+	for table in tables.iter() {
+		let Some(id) = gen_id(id.clone(), tables, table)? else {
+			continue;
+		};
+		i.ingest(Iterable::Mergeable(id, v.clone()));
+	}
+	Ok(())
 }

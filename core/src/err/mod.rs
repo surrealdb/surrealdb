@@ -456,6 +456,12 @@ pub enum Error {
 		value: String,
 	},
 
+	/// Can not execute UPDATE statement using the specified value
+	#[error("Can not execute UPDATE statement where property 'id' is '{value}'")]
+	UpdateStatementId {
+		value: String,
+	},
+
 	/// Can not execute RELATE statement using the specified value
 	#[error("Can not execute RELATE statement using value '{value}'")]
 	RelateStatement {
