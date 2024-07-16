@@ -1,4 +1,5 @@
 use std::collections::BTreeMap;
+use std::hash::Hash;
 use std::marker::PhantomData;
 
 use async_graphql::dynamic::TypeRef;
@@ -19,6 +20,7 @@ use surrealdb::sql::Kind;
 use surrealdb::sql::{Cond, Fields};
 use surrealdb::sql::{Statement, Thing};
 
+use super::error::{resolver_error, schema_error, GqlError};
 use super::ext::IntoExt;
 use crate::dbs::DB;
 use crate::gql::utils::GqlValueUtils;
@@ -58,18 +60,28 @@ macro_rules! order {
 	}};
 }
 
-pub trait Invalidator {
-	type MetaData: Clone + Send + Sync;
+pub trait Invalidator: Clone + Send + Sync + 'static {
+	type MetaData: Clone + Send + Sync + Hash;
 
-	fn is_valid(nsdb: (String, String), meta: Self::MetaData) -> bool;
+	fn is_valid(nsdb: (String, String), meta: &Self::MetaData) -> bool;
+
+	fn generate(
+		ns: &str,
+		db: &str,
+	) -> impl std::future::Future<Output = Result<(Schema, Self::MetaData), GqlError>> + std::marker::Send;
 }
 
+#[derive(Debug, Clone, Copy)]
 pub struct Pessimistic;
 impl Invalidator for Pessimistic {
 	type MetaData = ();
 
-	fn is_valid(_: (String, String), _: Self::MetaData) -> bool {
+	fn is_valid(_: (String, String), _: &Self::MetaData) -> bool {
 		false
+	}
+	async fn generate(ns: &str, db: &str) -> Result<(Schema, Self::MetaData), GqlError> {
+		let schema = generate_schema(ns, db).await?;
+		Ok((schema, ()))
 	}
 }
 
@@ -86,21 +98,17 @@ impl<I: Invalidator> SchemaCache<I> {
 			_invalidator: PhantomData,
 		}
 	}
-	pub async fn get_schema(
-		&mut self,
-		ns: String,
-		db: String,
-	) -> Result<Schema, Box<dyn std::error::Error>> {
-		if let Some((schema, meta)) = self.inner.get_mut(&(ns, db)) {}
 
-		todo!()
+	pub fn get(&self, ns: String, db: String) -> Option<&(Schema, I::MetaData)> {
+		self.inner.get(&(ns, db))
+	}
+
+	pub fn insert(&mut self, ns: String, db: String, schema: Schema, meta: I::MetaData) {
+		self.inner.insert((ns, db), (schema, meta));
 	}
 }
 
-pub async fn generate_schema(ns: &str, db: &str) -> Result<Schema, Box<dyn std::error::Error>> {
-	let ns = ns.to_owned();
-	let db = db.to_owned();
-
+pub async fn generate_schema(ns: &str, db: &str) -> Result<Schema, GqlError> {
 	let kvs = DB.get().unwrap();
 	let mut tx = kvs.transaction(TransactionType::Read, LockType::Optimistic).await?;
 	let tbs = tx.all_tb("test", "test").await?;
@@ -272,55 +280,60 @@ pub async fn generate_schema(ns: &str, db: &str) -> Result<Schema, Box<dyn std::
 			.argument(InputValue::new("filter", TypeRef::named(&table_filter_name))),
 		);
 
+		let res_ns1 = ns.to_owned();
+		let res_db1 = db.to_owned();
 		query = query.field(
 			Field::new(
 				format!("_get_{}", tb.name),
 				TypeRef::named(tb.name.to_string()),
 				move |ctx| {
 					let tb_name = second_tb_name.clone();
-					FieldFuture::new(async move {
-						let res_ns = ns.to_owned();
-						let res_db = db.to_owned();
-						let kvs = DB.get().unwrap();
+					FieldFuture::new({
+						let value_ns = res_ns1.to_owned();
+						let value_db = res_db1.to_owned();
+						async move {
+							let kvs = DB.get().unwrap();
 
-						let args = ctx.args.as_index_map();
-						// async-graphql should validate that this is present as it is non-null
-						let id = match args.get("id").and_then(GqlValueUtils::as_string) {
-							Some(i) => i,
-							None => {
-								error!("Schema validation failed: no id found in _get_ request");
-								return Err("No id found".into());
-							}
-						};
-						let thing = match id.clone().try_into() {
-							Ok(t) => t,
-							Err(_) => Thing::from((tb_name, id)),
-						};
+							let args = ctx.args.as_index_map();
+							// async-graphql should validate that this is present as it is non-null
+							let id =
+								match args.get("id").and_then(GqlValueUtils::as_string) {
+									Some(i) => i,
+									None => {
+										error!("Schema validation failed: no id found in _get_ request");
+										return Err("No id found".into());
+									}
+								};
+							let thing = match id.clone().try_into() {
+								Ok(t) => t,
+								Err(_) => Thing::from((tb_name, id)),
+							};
 
-						let use_stmt = Statement::Use((res_ns.clone(), res_db.clone()).intox());
+							let use_stmt = Statement::Use((value_ns, value_db).intox());
 
-						let ast = Statement::Select({
-							let mut tmp = SelectStatement::default();
-							tmp.what = vec![SqlValue::Thing(thing)].into();
-							tmp.expr = Fields::all();
-							tmp.only = true;
-							tmp
-						});
+							let ast = Statement::Select({
+								let mut tmp = SelectStatement::default();
+								tmp.what = vec![SqlValue::Thing(thing)].into();
+								tmp.expr = Fields::all();
+								tmp.only = true;
+								tmp
+							});
 
-						let query = vec![use_stmt, ast].into();
-						trace!("generated query: {}", query);
+							let query = vec![use_stmt, ast].into();
+							trace!("generated query: {}", query);
 
-						let res =
-							kvs.process(query, &Default::default(), Default::default()).await?;
-						// ast is constructed such that there will only be two responses the first of which is NONE
-						let mut res_iter = res.into_iter();
-						let _ = res_iter.next();
-						let res = res_iter.next().unwrap();
-						let res = res.result?;
-						let out = sql_value_to_gql_value(res)
-							.map_err(|_| "SQL to GQL translation failed")?;
+							let res =
+								kvs.process(query, &Default::default(), Default::default()).await?;
+							// ast is constructed such that there will only be two responses the first of which is NONE
+							let mut res_iter = res.into_iter();
+							let _ = res_iter.next();
+							let res = res_iter.next().unwrap();
+							let res = res.result?;
+							let out = sql_value_to_gql_value(res)
+								.map_err(|_| "SQL to GQL translation failed")?;
 
-						Ok(Some(out))
+							Ok(Some(out))
+						}
 					})
 				},
 			)
@@ -536,13 +549,13 @@ fn unwrap_type(ty: TypeRef) -> TypeRef {
 	}
 }
 
-fn cond_from_filter(filter: &IndexMap<Name, GqlValue>) -> Result<Cond, Error> {
+fn cond_from_filter(filter: &IndexMap<Name, GqlValue>) -> Result<Cond, GqlError> {
 	val_from_filter(filter).map(IntoExt::intox)
 }
 
-fn val_from_filter(filter: &IndexMap<Name, GqlValue>) -> Result<SqlValue, Error> {
+fn val_from_filter(filter: &IndexMap<Name, GqlValue>) -> Result<SqlValue, GqlError> {
 	if filter.len() != 1 {
-		return Err(Error::Thrown("Table Filter must have one item".to_string()));
+		return Err(resolver_error("Table Filter must have one item"));
 	}
 
 	let (k, v) = filter.iter().next().unwrap();
@@ -557,15 +570,15 @@ fn val_from_filter(filter: &IndexMap<Name, GqlValue>) -> Result<SqlValue, Error>
 	cond
 }
 
-fn parse_op(name: impl AsRef<str>) -> Result<sql::Operator, Error> {
+fn parse_op(name: impl AsRef<str>) -> Result<sql::Operator, GqlError> {
 	match name.as_ref() {
 		"eq" => Ok(sql::Operator::Equal),
 		"ne" => Ok(sql::Operator::NotEqual),
-		op => Err(Error::Thrown(format!("Unsupported op: {op}"))),
+		op => Err(resolver_error(format!("Unsupported op: {op}"))),
 	}
 }
 
-fn negate(filter: &GqlValue) -> Result<SqlValue, Error> {
+fn negate(filter: &GqlValue) -> Result<SqlValue, GqlError> {
 	let obj = filter.as_object().ok_or(Error::Thrown("Value of NOT must be object".to_string()))?;
 	let inner_cond = val_from_filter(obj)?;
 
@@ -581,7 +594,7 @@ enum AggregateOp {
 	Or,
 }
 
-fn aggregate(filter: &GqlValue, op: AggregateOp) -> Result<SqlValue, Error> {
+fn aggregate(filter: &GqlValue, op: AggregateOp) -> Result<SqlValue, GqlError> {
 	let op_str = match op {
 		AggregateOp::And => "AND",
 		AggregateOp::Or => "OR",
@@ -591,18 +604,18 @@ fn aggregate(filter: &GqlValue, op: AggregateOp) -> Result<SqlValue, Error> {
 		AggregateOp::Or => sql::Operator::Or,
 	};
 	let list =
-		filter.as_list().ok_or(Error::Thrown(format!("Value of {op_str} should be a list")))?;
+		filter.as_list().ok_or(resolver_error(format!("Value of {op_str} should be a list")))?;
 	let filter_arr = list
 		.iter()
 		.map(|v| v.as_object().map(val_from_filter))
-		.collect::<Option<Result<Vec<SqlValue>, Error>>>()
-		.ok_or(Error::Thrown(format!("List of {op_str} should contain objects")))??;
+		.collect::<Option<Result<Vec<SqlValue>, GqlError>>>()
+		.ok_or(resolver_error(format!("List of {op_str} should contain objects")))??;
 
 	let mut iter = filter_arr.into_iter();
 
 	let mut cond = iter
 		.next()
-		.ok_or(Error::Thrown(format!("List of {op_str} should contain at least one object")))?;
+		.ok_or(resolver_error(format!("List of {op_str} should contain at least one object")))?;
 
 	for clause in iter {
 		cond = Expression::Binary {
@@ -616,11 +629,11 @@ fn aggregate(filter: &GqlValue, op: AggregateOp) -> Result<SqlValue, Error> {
 	Ok(cond)
 }
 
-fn binop(field_name: &str, val: &GqlValue) -> Result<SqlValue, Error> {
-	let obj = val.as_object().ok_or(Error::Thrown("Field filter should be object".to_string()))?;
+fn binop(field_name: &str, val: &GqlValue) -> Result<SqlValue, GqlError> {
+	let obj = val.as_object().ok_or(resolver_error("Field filter should be object"))?;
 
 	if obj.len() != 1 {
-		return Err(Error::Thrown("Field Filter must have one item".to_string()));
+		return Err(resolver_error("Field Filter must have one item"));
 	}
 
 	let lhs = sql::Value::Idiom(field_name.intox());

@@ -1,3 +1,4 @@
+pub mod error;
 mod ext;
 pub mod schema;
 pub mod service;

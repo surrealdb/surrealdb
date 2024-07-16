@@ -3,14 +3,17 @@ pub mod extract;
 use async_graphql_axum;
 use async_graphql_axum::*;
 use extract::rejection::GraphQLRejection;
+use tokio::sync::RwLock;
 
 use std::{
 	convert::Infallible,
+	sync::Arc,
 	task::{Context, Poll},
 	time::Duration,
 };
 
 use async_graphql::{
+	dynamic::Schema,
 	http::{create_multipart_mixed_stream, is_accept_multipart_mixed},
 	Executor,
 };
@@ -19,7 +22,7 @@ use axum::{
 	extract::FromRequest,
 	http::{Request as HttpRequest, Response as HttpResponse},
 	response::IntoResponse,
-	BoxError, Extension,
+	BoxError,
 };
 use bytes::Bytes;
 use futures_util::{future::BoxFuture, StreamExt};
@@ -27,17 +30,41 @@ use tower_service::Service;
 
 use surrealdb::dbs::Session;
 
-use super::schema::{Invalidator, SchemaCache};
+use super::{
+	error::{resolver_error, GqlError},
+	schema::{Invalidator, SchemaCache},
+};
 
 /// A GraphQL service.
 #[derive(Clone)]
-pub struct GraphQL<I: Invalidator>(SchemaCache<I>);
+pub struct GraphQL<I: Invalidator>(Arc<RwLock<SchemaCache<I>>>);
 
 impl<I: Invalidator> GraphQL<I> {
 	/// Create a GraphQL handler.
 	pub fn new(invalidator: I) -> Self {
 		let _ = invalidator;
-		GraphQL(SchemaCache::new())
+		let arc = Arc::new(RwLock::new(SchemaCache::new()));
+		GraphQL(arc)
+	}
+
+	async fn get_schema(&self, ns: &str, db: &str) -> Result<Schema, GqlError> {
+		{
+			let guard = self.0.read().await;
+			if let Some(cand) = guard.get(ns.to_owned(), db.to_owned()) {
+				if I::is_valid((ns.to_owned(), db.to_owned()), &cand.1) {
+					return Ok(cand.0.clone());
+				}
+			}
+		};
+
+		let (schema, meta) = I::generate(ns, db).await?;
+
+		{
+			let mut guard = self.0.write().await;
+			guard.insert(ns.to_owned(), db.to_owned(), schema.clone(), meta);
+		}
+
+		return Ok(schema);
 	}
 }
 
@@ -57,14 +84,16 @@ where
 	}
 
 	fn call(&mut self, req: HttpRequest<B>) -> Self::Future {
-		// let executor = self.executor.clone();
+		let cache = self.clone();
 		Box::pin(async move {
 			let session = req.extensions().get::<Session>().unwrap();
-			let executor = self
-				.0
-				.get_schema(session.ns.unwrap().to_owned(), session.db.unwrap().to_owned())
-				.await
-				.unwrap();
+			let Some(ns) = session.ns.as_ref() else {
+				return Ok(resolver_error("No namespace specified").into_response());
+			};
+			let Some(db) = session.db.as_ref() else {
+				return Ok(resolver_error("No database specified").into_response());
+			};
+			let executor = cache.get_schema(ns, db).await.unwrap();
 
 			let is_accept_multipart_mixed = req
 				.headers()
