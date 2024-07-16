@@ -133,7 +133,6 @@ mod native;
 #[cfg(target_arch = "wasm32")]
 mod wasm;
 
-use crate::api::conn::Method;
 use crate::api::err::Error;
 use crate::api::opt::Config;
 use crate::api::opt::Endpoint;
@@ -211,10 +210,7 @@ where
 
 /// A dynamic connection that supports any engine and allows you to pick at runtime
 #[derive(Debug, Clone)]
-pub struct Any {
-	id: i64,
-	method: Method,
-}
+pub struct Any(());
 
 impl Surreal<Any> {
 	/// Connects to a specific database endpoint, saving the connection on the static client

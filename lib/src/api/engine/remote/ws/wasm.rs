@@ -3,7 +3,6 @@ use super::{HandleResult, PATH};
 use crate::api::conn::Connection;
 use crate::api::conn::DbResponse;
 use crate::api::conn::Method;
-use crate::api::conn::Param;
 use crate::api::conn::Route;
 use crate::api::conn::Router;
 use crate::api::engine::remote::ws::Client;
@@ -22,6 +21,7 @@ use crate::opt::WaitFor;
 use crate::sql::Value;
 use flume::Receiver;
 use flume::Sender;
+use futures::future::BoxFuture;
 use futures::stream::{SplitSink, SplitStream};
 use futures::FutureExt;
 use futures::SinkExt;
@@ -35,9 +35,7 @@ use serde::Deserialize;
 use std::collections::hash_map::Entry;
 use std::collections::BTreeMap;
 use std::collections::HashSet;
-use std::future::Future;
 use std::mem;
-use std::pin::Pin;
 use std::sync::atomic::AtomicI64;
 use std::sync::Arc;
 use std::sync::OnceLock;
@@ -58,17 +56,10 @@ type RouterState = super::RouterState<MessageSink, MessageStream, Message>;
 impl crate::api::Connection for Client {}
 
 impl Connection for Client {
-	fn new(method: Method) -> Self {
-		Self {
-			id: 0,
-			method,
-		}
-	}
-
 	fn connect(
 		mut address: Endpoint,
 		capacity: usize,
-	) -> Pin<Box<dyn Future<Output = Result<Surreal<Self>>> + Send + Sync + 'static>> {
+	) -> BoxFuture<'static, Result<Surreal<Self>>> {
 		Box::pin(async move {
 			address.url = address.url.join(PATH)?;
 
@@ -94,23 +85,6 @@ impl Connection for Client {
 				})),
 				Arc::new(watch::channel(Some(WaitFor::Connection))),
 			))
-		})
-	}
-
-	fn send<'r>(
-		&'r mut self,
-		router: &'r Router,
-		param: Param,
-	) -> Pin<Box<dyn Future<Output = Result<Receiver<Result<DbResponse>>>> + Send + Sync + 'r>> {
-		Box::pin(async move {
-			self.id = router.next_id();
-			let (sender, receiver) = flume::bounded(1);
-			let route = Route {
-				request: (self.id, self.method, param),
-				response: sender,
-			};
-			router.sender.send_async(route).await?;
-			Ok(receiver)
 		})
 	}
 }

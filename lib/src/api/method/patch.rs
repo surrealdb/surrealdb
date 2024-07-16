@@ -9,12 +9,11 @@ use crate::method::OnceLockExt;
 use crate::sql::Id;
 use crate::sql::Value;
 use crate::Surreal;
+use futures::future::BoxFuture;
 use serde::de::DeserializeOwned;
 use std::borrow::Cow;
-use std::future::Future;
 use std::future::IntoFuture;
 use std::marker::PhantomData;
-use std::pin::Pin;
 use std::result::Result as StdResult;
 
 /// A patch future
@@ -61,8 +60,8 @@ macro_rules! into_future {
 					vec.push(result?);
 				}
 				let patches = vec.into();
-				let mut conn = Client::new(Method::Patch);
-				conn.$method(client.router.extract()?, Param::new(vec![param, patches])).await
+				let router = client.router.extract()?;
+				router.$method(Method::Patch, Param::new(vec![param, patches])).await
 			})
 		}
 	};
@@ -73,7 +72,7 @@ where
 	Client: Connection,
 {
 	type Output = Result<Value>;
-	type IntoFuture = Pin<Box<dyn Future<Output = Self::Output> + Send + Sync + 'r>>;
+	type IntoFuture = BoxFuture<'r, Self::Output>;
 
 	into_future! {execute_value}
 }
@@ -84,7 +83,7 @@ where
 	R: DeserializeOwned,
 {
 	type Output = Result<Option<R>>;
-	type IntoFuture = Pin<Box<dyn Future<Output = Self::Output> + Send + Sync + 'r>>;
+	type IntoFuture = BoxFuture<'r, Self::Output>;
 
 	into_future! {execute_opt}
 }
@@ -95,7 +94,7 @@ where
 	R: DeserializeOwned,
 {
 	type Output = Result<Vec<R>>;
-	type IntoFuture = Pin<Box<dyn Future<Output = Self::Output> + Send + Sync + 'r>>;
+	type IntoFuture = BoxFuture<'r, Self::Output>;
 
 	into_future! {execute_vec}
 }

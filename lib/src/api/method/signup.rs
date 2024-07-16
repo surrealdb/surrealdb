@@ -5,12 +5,11 @@ use crate::api::Result;
 use crate::method::OnceLockExt;
 use crate::sql::Value;
 use crate::Surreal;
+use futures::future::BoxFuture;
 use serde::de::DeserializeOwned;
 use std::borrow::Cow;
-use std::future::Future;
 use std::future::IntoFuture;
 use std::marker::PhantomData;
-use std::pin::Pin;
 
 /// A signup future
 #[derive(Debug)]
@@ -40,7 +39,7 @@ where
 	R: DeserializeOwned,
 {
 	type Output = Result<R>;
-	type IntoFuture = Pin<Box<dyn Future<Output = Self::Output> + Send + Sync + 'r>>;
+	type IntoFuture = BoxFuture<'r, Self::Output>;
 
 	fn into_future(self) -> Self::IntoFuture {
 		let Signup {
@@ -50,8 +49,7 @@ where
 		} = self;
 		Box::pin(async move {
 			let router = client.router.extract()?;
-			let mut conn = Client::new(Method::Signup);
-			conn.execute(router, Param::new(vec![credentials?])).await
+			router.execute(Method::Signup, Param::new(vec![credentials?])).await
 		})
 	}
 }

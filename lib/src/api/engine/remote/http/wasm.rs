@@ -12,14 +12,13 @@ use crate::api::Surreal;
 use crate::opt::WaitFor;
 use flume::Receiver;
 use flume::Sender;
+use futures::future::BoxFuture;
 use futures::StreamExt;
 use indexmap::IndexMap;
 use reqwest::header::HeaderMap;
 use reqwest::ClientBuilder;
 use std::collections::HashSet;
-use std::future::Future;
 use std::pin::Pin;
-use std::sync::atomic::AtomicI64;
 use std::sync::Arc;
 use std::sync::OnceLock;
 use tokio::sync::watch;
@@ -29,16 +28,7 @@ use wasm_bindgen_futures::spawn_local;
 impl crate::api::Connection for Client {}
 
 impl Connection for Client {
-	fn new(method: Method) -> Self {
-		Self {
-			method,
-		}
-	}
-
-	fn connect(
-		address: Endpoint,
-		capacity: usize,
-	) -> Pin<Box<dyn Future<Output = Result<Surreal<Self>>> + Send + Sync + 'static>> {
+	fn connect(address: Endpoint, capacity: usize) -> BoxFuture<'static, Result<Surreal<Self>>> {
 		Box::pin(async move {
 			let (route_tx, route_rx) = match capacity {
 				0 => flume::unbounded(),
@@ -59,23 +49,6 @@ impl Connection for Client {
 				})),
 				Arc::new(watch::channel(Some(WaitFor::Connection))),
 			))
-		})
-	}
-
-	fn send<'r>(
-		&'r mut self,
-		router: &'r Router,
-		param: Param,
-	) -> Pin<Box<dyn Future<Output = Result<Receiver<Result<DbResponse>>>> + Send + Sync + 'r>> {
-		Box::pin(async move {
-			let (sender, receiver) = flume::bounded(1);
-			trace!("{param:?}");
-			let route = Route {
-				request: (0, self.method, param),
-				response: sender,
-			};
-			router.sender.send_async(route).await?;
-			Ok(receiver)
 		})
 	}
 }

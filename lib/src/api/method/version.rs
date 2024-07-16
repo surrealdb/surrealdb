@@ -1,3 +1,5 @@
+use futures::future::BoxFuture;
+
 use crate::api::conn::Method;
 use crate::api::conn::Param;
 use crate::api::err::Error;
@@ -6,9 +8,7 @@ use crate::api::Result;
 use crate::method::OnceLockExt;
 use crate::Surreal;
 use std::borrow::Cow;
-use std::future::Future;
 use std::future::IntoFuture;
-use std::pin::Pin;
 
 /// A version future
 #[derive(Debug)]
@@ -34,13 +34,13 @@ where
 	Client: Connection,
 {
 	type Output = Result<semver::Version>;
-	type IntoFuture = Pin<Box<dyn Future<Output = Self::Output> + Send + Sync + 'r>>;
+	type IntoFuture = BoxFuture<'r, Self::Output>;
 
 	fn into_future(self) -> Self::IntoFuture {
 		Box::pin(async move {
-			let mut conn = Client::new(Method::Version);
-			let version = conn
-				.execute_value(self.client.router.extract()?, Param::new(Vec::new()))
+			let router = self.client.router.extract()?;
+			let version = router
+				.execute_value(Method::Version, Param::new(Vec::new()))
 				.await?
 				.convert_to_string()?;
 			let semantic = version.trim_start_matches("surrealdb-");
