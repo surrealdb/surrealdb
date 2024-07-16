@@ -1,6 +1,7 @@
 mod parse;
 use parse::Parse;
 mod helpers;
+use crate::helpers::skip_ok;
 use helpers::new_ds;
 use surrealdb::dbs::Session;
 use surrealdb::err::Error;
@@ -24,10 +25,10 @@ async fn create_relate_select() -> Result<(), Error> {
 		SELECT *, ->(bought AS purchases) FROM user FETCH purchases, purchases.out;
 		LET $param1 = 'purchases';
 		SELECT *, ->(bought AS purchases) FROM user FETCH $param1, purchases.out;
-		LET $param2 = purchases;
-		SELECT *, ->(bought AS purchases) FROM user FETCH $param2, purchases.out;
-		LET $param3 = 1.0f;
-		SELECT *, ->(bought AS purchases) FROM user FETCH $param3, purchases.out;
+		SELECT *, ->(bought AS purchases) FROM user FETCH type::field('purchases'), purchases.out;
+		SELECT *, ->(bought AS purchases) FROM user FETCH type::fields([$param1, 'purchases.out']);
+		LET $faultyparam = 1.0f;
+		SELECT *, ->(bought AS purchases) FROM user FETCH $faultyparam, purchases.out;
 	";
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
@@ -283,11 +284,11 @@ async fn create_relate_select() -> Result<(), Error> {
 		]",
 	);
 	assert_eq!(tmp, val);
+	// Skip the LET $param statements
+	skip_ok(res, 1)?;
 	//
-	for _ in 0..2 {
-		// Ignore LET statement result
-		res.remove(0);
-		let tmp = res.remove(0).result?;
+	for i in 0..3 {
+		let tmp = res.remove(0).result.unwrap_or_else(|e| panic!("{i} {e}"));
 		let val = Value::parse(
 			"[
 			{
@@ -331,7 +332,7 @@ async fn create_relate_select() -> Result<(), Error> {
 			}
 		]",
 		);
-		assert_eq!(tmp, val);
+		assert_eq!(tmp, val, "{i}");
 	}
 	// Ignore LET statement result
 	res.remove(0);

@@ -443,13 +443,16 @@ impl Iterator {
 		stm: &Statement<'_>,
 	) -> Result<(), Error> {
 		if let Some(fetchs) = stm.fetch() {
+			let mut idioms = Vec::with_capacity(fetchs.0.len());
 			for fetch in fetchs.iter() {
-				let i = fetch.compute(stk, ctx, opt).await?;
+				fetch.compute(stk, ctx, opt, &mut idioms).await?;
+			}
+			for i in &idioms {
 				let mut values = self.results.take()?;
 				// Loop over each result value
 				for obj in &mut values {
 					// Fetch the value at the path
-					stk.run(|stk| obj.fetch(stk, ctx, opt, i.as_ref())).await?;
+					stk.run(|stk| obj.fetch(stk, ctx, opt, i)).await?;
 				}
 				self.results = values.into();
 			}

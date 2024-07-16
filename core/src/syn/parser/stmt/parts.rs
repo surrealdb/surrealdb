@@ -2,6 +2,7 @@
 
 use reblessive::Stk;
 
+use crate::sql::Fetch;
 use crate::{
 	sql::{
 		changefeed::ChangeFeed,
@@ -108,18 +109,39 @@ impl Parser<'_> {
 		if !self.eat(t!("FETCH")) {
 			return Ok(None);
 		}
-		let mut fetchs = vec![self.try_parse_param_or_idiom(ctx).await?.into()];
+		let mut fetchs = self.try_parse_param_or_idiom_or_fields(ctx).await?;
 		while self.eat(t!(",")) {
-			fetchs.push(self.try_parse_param_or_idiom(ctx).await?.into());
+			fetchs.append(&mut self.try_parse_param_or_idiom_or_fields(ctx).await?);
 		}
 		Ok(Some(Fetchs(fetchs)))
 	}
 
-	pub async fn try_parse_param_or_idiom(&mut self, ctx: &mut Stk) -> ParseResult<Value> {
-		if self.peek().kind == t!("$param") {
-			Ok(Value::Param(self.next_token_value()?))
-		} else {
-			Ok(Value::Idiom(self.parse_plain_idiom(ctx).await?))
+	pub async fn try_parse_param_or_idiom_or_fields(
+		&mut self,
+		ctx: &mut Stk,
+	) -> ParseResult<Vec<Fetch>> {
+		match self.peek().kind {
+			t!("$param") => Ok(vec![Value::Param(self.next_token_value()?).into()]),
+			t!("TYPE") => {
+				let fields = self.parse_fields(ctx).await?;
+				let fetches = fields
+					.0
+					.into_iter()
+					.filter_map(|f| {
+						if let Field::Single {
+							expr,
+							..
+						} = f
+						{
+							Some(expr.into())
+						} else {
+							None
+						}
+					})
+					.collect();
+				Ok(fetches)
+			}
+			_ => Ok(vec![Value::Idiom(self.parse_plain_idiom(ctx).await?).into()]),
 		}
 	}
 

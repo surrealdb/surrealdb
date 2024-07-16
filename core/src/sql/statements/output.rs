@@ -38,9 +38,12 @@ impl OutputStatement {
 		let mut value = self.what.compute(stk, ctx, opt, doc).await?;
 		// Fetch any
 		if let Some(fetchs) = &self.fetch {
+			let mut idioms = Vec::with_capacity(fetchs.0.len());
 			for fetch in fetchs.iter() {
-				let i = fetch.compute(stk, ctx, opt).await?;
-				value.fetch(stk, ctx, opt, i.as_ref()).await?;
+				fetch.compute(stk, ctx, opt, &mut idioms).await?
+			}
+			for i in &idioms {
+				value.fetch(stk, ctx, opt, i).await?;
 			}
 		}
 		//

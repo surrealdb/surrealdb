@@ -168,8 +168,8 @@ pub enum Error {
 		field: String,
 	},
 
-	/// The FETCH clause accepts idioms or strings
-	#[error("Found {value} on FETCH CLAUSE, but FETCH expects an idiom or a string")]
+	/// The FETCH clause accepts idioms, strings and fields.
+	#[error("Found {value} on FETCH CLAUSE, but FETCH expects an idiom, a string or fields")]
 	InvalidFetch {
 		value: Value,
 	},

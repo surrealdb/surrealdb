@@ -4,10 +4,10 @@ use crate::err::Error;
 use crate::sql::fmt::Fmt;
 use crate::sql::statements::info::InfoStructure;
 use crate::sql::{Idiom, Value};
+use crate::syn;
 use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
-use std::borrow::Cow;
 use std::fmt::{self, Display, Formatter};
 use std::ops::Deref;
 
@@ -64,29 +64,68 @@ impl Fetch {
 		stk: &mut Stk,
 		ctx: &Context<'_>,
 		opt: &Options,
-	) -> Result<Cow<Idiom>, Error> {
-		let i = match &self.1 {
-			Value::Idiom(idiom) => Cow::Borrowed(idiom),
+		idioms: &mut Vec<Idiom>,
+	) -> Result<(), Error> {
+		let strand_or_idiom = |v: Value| match v {
+			Value::Strand(s) => Ok(Idiom::from(s.0)),
+			Value::Idiom(i) => Ok(i.to_owned()),
+			v => Err(Error::InvalidFetch {
+				value: v,
+			}),
+		};
+		match &self.1 {
+			Value::Idiom(idiom) => {
+				idioms.push(idiom.to_owned());
+				Ok(())
+			}
 			Value::Param(param) => {
-				let p = param.compute(stk, ctx, opt, None).await?;
-				match p {
-					Value::Strand(s) => Cow::Owned(Idiom::from(s.0)),
-					Value::Idiom(i) => Cow::Owned(i),
-					Value::Table(t) => Cow::Owned(Idiom::from(t.0)),
-					v => {
-						return Err(Error::InvalidFetch {
-							value: v,
-						});
+				let v = param.compute(stk, ctx, opt, None).await?;
+				idioms.push(strand_or_idiom(v)?);
+				Ok(())
+			}
+			Value::Function(f) => {
+				if f.name() == Some("type::field") {
+					let v = match f.args().first().unwrap() {
+						Value::Param(v) => v.compute(stk, ctx, opt, None).await?,
+						v => v.to_owned(),
+					};
+					idioms.push(strand_or_idiom(v)?);
+					Ok(())
+				} else if f.name() == Some("type::fields") {
+					// Get the first argument which is guaranteed to exist
+					let args = match f.args().first().unwrap() {
+						Value::Param(v) => v.compute(stk, ctx, opt, None).await?,
+						v => v.to_owned(),
+					};
+					// This value is always an array, so we can convert it
+					let args: Vec<Value> = args.try_into()?;
+					// This value is always an array, so we can convert it
+					for v in args.into_iter() {
+						let i = match v {
+							Value::Param(v) => {
+								strand_or_idiom(v.compute(stk, ctx, opt, None).await?)?
+							}
+							Value::Strand(s) => syn::idiom(s.as_str())?,
+							Value::Idiom(i) => i,
+							v => {
+								return Err(Error::InvalidFetch {
+									value: v,
+								})
+							}
+						};
+						idioms.push(i);
 					}
+					Ok(())
+				} else {
+					Err(Error::InvalidFetch {
+						value: Value::Function(f.clone()),
+					})
 				}
 			}
-			v => {
-				return Err(Error::InvalidFetch {
-					value: v.clone(),
-				});
-			}
-		};
-		Ok(i)
+			v => Err(Error::InvalidFetch {
+				value: v.clone(),
+			}),
+		}
 	}
 }
 
