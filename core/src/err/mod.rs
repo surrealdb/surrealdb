@@ -449,6 +449,12 @@ pub enum Error {
 	UpsertStatement {
 		value: String,
 	},
+	///
+	/// Can not execute UPSERT statement using the specified value
+	#[error("Can not execute UPSERT statement where property 'id' is '{value}'")]
+	UpsertStatementId {
+		value: String,
+	},
 
 	/// Can not execute UPDATE statement using the specified value
 	#[error("Can not execute UPDATE statement using value '{value}'")]
