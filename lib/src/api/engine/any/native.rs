@@ -1,5 +1,4 @@
 use crate::api::conn::Connection;
-use crate::api::conn::Method;
 use crate::api::conn::Router;
 #[allow(unused_imports)] // used by the DB engines
 use crate::api::engine;
@@ -144,7 +143,7 @@ impl Connection for Any {
 						let client = builder.build()?;
 						let base_url = address.url;
 						engine::remote::http::health(
-							client.get(base_url.join(Method::Health.as_str())?),
+							client.get(base_url.join(crate::api::conn::Method::Health.as_str())?),
 						)
 						.await?;
 						tokio::spawn(engine::remote::http::native::run_router(

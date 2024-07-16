@@ -1,7 +1,4 @@
 use crate::api::conn::Connection;
-use crate::api::conn::DbResponse;
-use crate::api::conn::Method;
-use crate::api::conn::Param;
 use crate::api::conn::Route;
 use crate::api::conn::Router;
 use crate::api::engine::local::Db;

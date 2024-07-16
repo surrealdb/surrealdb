@@ -373,9 +373,7 @@ pub struct SurrealKV;
 
 /// An embedded database
 #[derive(Debug, Clone)]
-pub struct Db {
-	pub(crate) method: crate::api::conn::Method,
-}
+pub struct Db(());
 
 impl Surreal<Db> {
 	/// Connects to a specific database endpoint, saving the connection on the static client
