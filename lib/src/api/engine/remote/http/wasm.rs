@@ -8,6 +8,7 @@ use crate::api::OnceLockExt;
 use crate::api::Result;
 use crate::api::Surreal;
 use crate::opt::WaitFor;
+use channel::{Receiver, Sender};
 use futures::future::BoxFuture;
 use futures::StreamExt;
 use indexmap::IndexMap;
@@ -35,7 +36,7 @@ impl Connection for Client {
 
 			spawn_local(run_router(address, conn_tx, route_rx));
 
-			conn_rx.into_recv_async().await??;
+			conn_rx.recv().await??;
 
 			Ok(Surreal::new_from_router_waiter(
 				Arc::new(OnceLock::with_value(Router {
@@ -67,11 +68,11 @@ pub(crate) async fn run_router(
 
 	let client = match client(&base_url).await {
 		Ok(client) => {
-			let _ = conn_tx.into_send_async(Ok(())).await;
+			let _ = conn_tx.send(Ok(())).await;
 			client
 		}
 		Err(error) => {
-			let _ = conn_tx.into_send_async(Err(error)).await;
+			let _ = conn_tx.send(Err(error)).await;
 			return;
 		}
 	};
@@ -86,10 +87,10 @@ pub(crate) async fn run_router(
 			.await
 		{
 			Ok(value) => {
-				let _ = route.response.into_send_async(Ok(value)).await;
+				let _ = route.response.send(Ok(value)).await;
 			}
 			Err(error) => {
-				let _ = route.response.into_send_async(Err(error)).await;
+				let _ = route.response.send(Err(error)).await;
 			}
 		}
 	}

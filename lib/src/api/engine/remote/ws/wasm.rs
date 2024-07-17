@@ -19,6 +19,7 @@ use crate::engine::remote::ws::{Data, RouterRequest};
 use crate::engine::IntervalStream;
 use crate::opt::WaitFor;
 use crate::sql::Value;
+use channel::{Receiver, Sender};
 use futures::future::BoxFuture;
 use futures::stream::{SplitSink, SplitStream};
 use futures::FutureExt;
@@ -70,7 +71,7 @@ impl Connection for Client {
 
 			spawn_local(run_router(address, capacity, conn_tx, route_rx));
 
-			conn_rx.into_recv_async().await??;
+			conn_rx.recv().await??;
 
 			let mut features = HashSet::new();
 			features.insert(ExtraFeatures::LiveQueries);
@@ -119,7 +120,7 @@ async fn router_handle_request(
 					state.live_queries.insert(id.0, sender);
 				}
 			}
-			if response.into_send_async(Ok(DbResponse::Other(Value::None))).await.is_err() {
+			if response.send(Ok(DbResponse::Other(Value::None))).await.is_err() {
 				trace!("Receiver dropped");
 			}
 			// There is nothing to send to the server here
@@ -163,7 +164,7 @@ async fn router_handle_request(
 				}
 				Entry::Occupied(..) => {
 					let error = Error::DuplicateRequestId(id);
-					if response.into_send_async(Err(error.into())).await.is_err() {
+					if response.send(Err(error.into())).await.is_err() {
 						trace!("Receiver dropped");
 					}
 				}
@@ -171,7 +172,7 @@ async fn router_handle_request(
 		}
 		Err(error) => {
 			let error = Error::Ws(error.to_string());
-			if response.into_send_async(Err(error.into())).await.is_err() {
+			if response.send(Err(error.into())).await.is_err() {
 				trace!("Receiver dropped");
 			}
 			return HandleResult::Disconnected;
@@ -211,7 +212,7 @@ async fn router_handle_response(
 										}
 									}
 								}
-								let _res = sender.into_send_async(DbResponse::from(response)).await;
+								let _res = sender.send(DbResponse::from(response)).await;
 							}
 						}
 					}
@@ -265,7 +266,7 @@ async fn router_handle_response(
 					// Return an error if an ID was returned
 					if let Some(Ok(id)) = id.map(Value::coerce_to_i64) {
 						if let Some((_method, sender)) = state.routes.remove(&id) {
-							let _res = sender.into_send_async(Err(error)).await;
+							let _res = sender.send(Err(error)).await;
 						}
 					}
 				} else {
@@ -354,7 +355,7 @@ pub(crate) async fn run_router(
 	let (mut ws, socket) = match connect {
 		Ok(pair) => pair,
 		Err(error) => {
-			let _ = conn_tx.into_send_async(Err(error.into())).await;
+			let _ = conn_tx.send(Err(error.into())).await;
 			return;
 		}
 	};
@@ -367,13 +368,13 @@ pub(crate) async fn run_router(
 		match result {
 			Ok(events) => events,
 			Err(error) => {
-				let _ = conn_tx.into_send_async(Err(error.into())).await;
+				let _ = conn_tx.send(Err(error.into())).await;
 				return;
 			}
 		}
 	};
 
-	let _ = conn_tx.into_send_async(Ok(())).await;
+	let _ = conn_tx.send(Ok(())).await;
 
 	let ping = {
 		let mut request = BTreeMap::new();

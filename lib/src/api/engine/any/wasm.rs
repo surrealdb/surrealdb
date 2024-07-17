@@ -39,7 +39,7 @@ impl Connection for Any {
 					{
 						features.insert(ExtraFeatures::LiveQueries);
 						spawn_local(engine::local::wasm::run_router(address, conn_tx, route_rx));
-						conn_rx.into_recv_async().await??;
+						conn_rx.recv().await??;
 					}
 
 					#[cfg(not(feature = "kv-fdb"))]
@@ -53,7 +53,7 @@ impl Connection for Any {
 					{
 						features.insert(ExtraFeatures::LiveQueries);
 						spawn_local(engine::local::wasm::run_router(address, conn_tx, route_rx));
-						conn_rx.into_recv_async().await??;
+						conn_rx.recv().await??;
 					}
 
 					#[cfg(not(feature = "kv-indxdb"))]
@@ -67,7 +67,7 @@ impl Connection for Any {
 					{
 						features.insert(ExtraFeatures::LiveQueries);
 						spawn_local(engine::local::wasm::run_router(address, conn_tx, route_rx));
-						conn_rx.into_recv_async().await??;
+						conn_rx.recv().await??;
 					}
 
 					#[cfg(not(feature = "kv-mem"))]
@@ -81,7 +81,7 @@ impl Connection for Any {
 					{
 						features.insert(ExtraFeatures::LiveQueries);
 						spawn_local(engine::local::wasm::run_router(address, conn_tx, route_rx));
-						conn_rx.into_recv_async().await??;
+						conn_rx.recv().await??;
 					}
 
 					#[cfg(not(feature = "kv-rocksdb"))]
@@ -96,7 +96,7 @@ impl Connection for Any {
 					{
 						features.insert(ExtraFeatures::LiveQueries);
 						spawn_local(engine::local::wasm::run_router(address, conn_tx, route_rx));
-						conn_rx.into_recv_async().await??;
+						conn_rx.recv().await??;
 					}
 
 					#[cfg(not(feature = "kv-surrealkv"))]
@@ -111,7 +111,7 @@ impl Connection for Any {
 					{
 						features.insert(ExtraFeatures::LiveQueries);
 						spawn_local(engine::local::wasm::run_router(address, conn_tx, route_rx));
-						conn_rx.into_recv_async().await??;
+						conn_rx.recv().await??;
 					}
 
 					#[cfg(not(feature = "kv-tikv"))]
@@ -144,7 +144,7 @@ impl Connection for Any {
 						spawn_local(engine::remote::ws::wasm::run_router(
 							endpoint, capacity, conn_tx, route_rx,
 						));
-						conn_rx.into_recv_async().await??;
+						conn_rx.recv().await??;
 					}
 
 					#[cfg(not(feature = "protocol-ws"))]

@@ -15,6 +15,7 @@ use crate::kvs::Datastore;
 use crate::opt::auth::Root;
 use crate::opt::WaitFor;
 use crate::options::EngineOptions;
+use channel::{Receiver, Sender};
 use futures::future::BoxFuture;
 use futures::stream::poll_fn;
 use futures::FutureExt;
@@ -43,7 +44,7 @@ impl Connection for Db {
 
 			spawn_local(run_router(address, conn_tx, route_rx));
 
-			conn_rx.into_recv_async().await.map_err(|_| crate::api::Error::RouterClosed)??;
+			conn_rx.recv().await.map_err(|_| crate::api::Error::RouterClosed)??;
 
 			let mut features = HashSet::new();
 			features.insert(ExtraFeatures::LiveQueries);
@@ -76,21 +77,21 @@ pub(crate) async fn run_router(
 	let kvs = match Datastore::new(&address.path).await {
 		Ok(kvs) => {
 			if let Err(error) = kvs.bootstrap().await {
-				let _ = conn_tx.into_send_async(Err(error.into())).await;
+				let _ = conn_tx.send(Err(error.into())).await;
 				return;
 			}
 			// If a root user is specified, setup the initial datastore credentials
 			if let Some(root) = configured_root {
 				if let Err(error) = kvs.setup_initial_creds(root.username, root.password).await {
-					let _ = conn_tx.into_send_async(Err(error.into())).await;
+					let _ = conn_tx.send(Err(error.into())).await;
 					return;
 				}
 			}
-			let _ = conn_tx.into_send_async(Ok(())).await;
+			let _ = conn_tx.send(Ok(())).await;
 			kvs.with_auth_enabled(configured_root.is_some())
 		}
 		Err(error) => {
-			let _ = conn_tx.into_send_async(Err(error.into())).await;
+			let _ = conn_tx.send(Err(error.into())).await;
 			return;
 		}
 	};
@@ -142,10 +143,10 @@ pub(crate) async fn run_router(
 				.await
 				{
 					Ok(value) => {
-						let _ = route.response.into_send_async(Ok(value)).await;
+						let _ = route.response.send(Ok(value)).await;
 					}
 					Err(error) => {
-						let _ = route.response.into_send_async(Err(error)).await;
+						let _ = route.response.send(Err(error)).await;
 					}
 				}
 			}
