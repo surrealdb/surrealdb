@@ -80,9 +80,8 @@ pub(crate) async fn run_router(
 	let mut headers = HeaderMap::new();
 	let mut vars = IndexMap::new();
 	let mut auth = None;
-	let mut stream = route_rx.into_stream();
 
-	while let Some(route) = stream.next().await {
+	while let Ok(route) = route_rx.recv().await {
 		match super::router(route.request, &base_url, &client, &mut headers, &mut vars, &mut auth)
 			.await
 		{

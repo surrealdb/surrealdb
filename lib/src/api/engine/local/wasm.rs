@@ -44,7 +44,7 @@ impl Connection for Db {
 
 			spawn_local(run_router(address, conn_tx, route_rx));
 
-			conn_rx.recv().await.map_err(|_| crate::api::Error::RouterClosed)??;
+			conn_rx.recv().await??;
 
 			let mut features = HashSet::new();
 			features.insert(ExtraFeatures::LiveQueries);
@@ -122,13 +122,11 @@ pub(crate) async fn run_router(
 		None => Poll::Pending,
 	});
 
-	let mut route_stream = route_rx.into_stream();
-
 	loop {
 		// use the less ergonomic futures::select as tokio::select is not available.
 		futures::select! {
-			route = route_stream.next().fuse() => {
-				let Some(route) = route else {
+			route = route_rx.recv().fuse() => {
+				let Ok(route) = route else {
 					// termination requested
 					break
 				};

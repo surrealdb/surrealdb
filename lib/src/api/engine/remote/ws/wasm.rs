@@ -388,8 +388,6 @@ pub(crate) async fn run_router(
 
 	let mut state = RouterState::new(socket_sink, socket_stream);
 
-	let mut route_stream = route_rx.into_stream();
-
 	'router: loop {
 		let mut interval = time::interval(PING_INTERVAL);
 		// don't bombard the server with pings if we miss some ticks
@@ -403,8 +401,8 @@ pub(crate) async fn run_router(
 
 		loop {
 			futures::select! {
-				route = route_stream.next() => {
-					let Some(route) = route else {
+				route = route_rx.recv().fuse() => {
+					let Ok(route) = route else {
 						match ws.close().await {
 							Ok(..) => trace!("Connection closed successfully"),
 							Err(error) => {
