@@ -4,6 +4,7 @@ use super::Convert;
 use super::Key;
 use super::Val;
 use crate::cnf::NORMAL_FETCH_SIZE;
+use crate::cnf::TRANSACTION_CACHE_SIZE;
 use crate::dbs::node::Node;
 use crate::err::Error;
 use crate::kvs::cache::Entry;
@@ -51,7 +52,7 @@ impl Transaction {
 	pub fn new(tx: Transactor) -> Transaction {
 		Transaction {
 			tx: Mutex::new(tx),
-			cache: Cache::with_weighter(10_000, 10_000, EntryWeighter),
+			cache: Cache::with_weighter(*TRANSACTION_CACHE_SIZE, 10_000, EntryWeighter),
 		}
 	}
 

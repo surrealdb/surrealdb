@@ -21,6 +21,10 @@ pub static MAX_CONCURRENT_TASKS: Lazy<usize> =
 pub static MAX_COMPUTATION_DEPTH: Lazy<u32> =
 	lazy_env_parse!("SURREAL_MAX_COMPUTATION_DEPTH", u32, 120);
 
+/// Specifies the number of items which can be cached within a single transaction.
+pub static TRANSACTION_CACHE_SIZE: Lazy<usize> =
+	lazy_env_parse!("SURREAL_TRANSACTION_CACHE_SIZE", usize, 10_000);
+
 /// The maximum number of keys that should be scanned at once in general queries.
 pub static NORMAL_FETCH_SIZE: Lazy<u32> = lazy_env_parse!("SURREAL_NORMAL_BATCH_SIZE", u32, 50);
 
