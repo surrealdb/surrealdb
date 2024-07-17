@@ -8,8 +8,6 @@ use crate::api::OnceLockExt;
 use crate::api::Result;
 use crate::api::Surreal;
 use crate::opt::WaitFor;
-use flume::Receiver;
-use flume::Sender;
 use futures::future::BoxFuture;
 use futures::StreamExt;
 use indexmap::IndexMap;
@@ -29,11 +27,11 @@ impl Connection for Client {
 	fn connect(address: Endpoint, capacity: usize) -> BoxFuture<'static, Result<Surreal<Self>>> {
 		Box::pin(async move {
 			let (route_tx, route_rx) = match capacity {
-				0 => flume::unbounded(),
-				capacity => flume::bounded(capacity),
+				0 => channel::unbounded(),
+				capacity => channel::bounded(capacity),
 			};
 
-			let (conn_tx, conn_rx) = flume::bounded(1);
+			let (conn_tx, conn_rx) = channel::bounded(1);
 
 			spawn_local(run_router(address, conn_tx, route_rx));
 

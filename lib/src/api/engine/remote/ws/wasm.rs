@@ -19,8 +19,6 @@ use crate::engine::remote::ws::{Data, RouterRequest};
 use crate::engine::IntervalStream;
 use crate::opt::WaitFor;
 use crate::sql::Value;
-use flume::Receiver;
-use flume::Sender;
 use futures::future::BoxFuture;
 use futures::stream::{SplitSink, SplitStream};
 use futures::FutureExt;
@@ -64,11 +62,11 @@ impl Connection for Client {
 			address.url = address.url.join(PATH)?;
 
 			let (route_tx, route_rx) = match capacity {
-				0 => flume::unbounded(),
-				capacity => flume::bounded(capacity),
+				0 => channel::unbounded(),
+				capacity => channel::bounded(capacity),
 			};
 
-			let (conn_tx, conn_rx) = flume::bounded(1);
+			let (conn_tx, conn_rx) = channel::bounded(1);
 
 			spawn_local(run_router(address, capacity, conn_tx, route_rx));
 

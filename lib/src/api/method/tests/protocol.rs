@@ -52,7 +52,7 @@ impl crate::api::Connection for Client {}
 impl Connection for Client {
 	fn connect(_address: Endpoint, capacity: usize) -> BoxFuture<'static, Result<Surreal<Self>>> {
 		Box::pin(async move {
-			let (route_tx, route_rx) = flume::bounded(capacity);
+			let (route_tx, route_rx) = channel::bounded(capacity);
 			let mut features = HashSet::new();
 			features.insert(ExtraFeatures::Backup);
 			let router = Router {

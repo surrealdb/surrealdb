@@ -33,14 +33,14 @@ pub fn new<'a>(ns: &'a str, db: &'a str, ts: u64, tb: &'a str) -> Cf<'a> {
 #[allow(unused)]
 pub fn versionstamped_key_prefix(ns: &str, db: &str) -> Vec<u8> {
 	let mut k = crate::key::database::all::new(ns, db).encode().unwrap();
-	k.extend_from_slice(&[b'#']);
+	k.extend_from_slice(b"#");
 	k
 }
 
 #[allow(unused)]
 pub fn versionstamped_key_suffix(tb: &str) -> Vec<u8> {
 	let mut k: Vec<u8> = vec![];
-	k.extend_from_slice(&[b'*']);
+	k.extend_from_slice(b"*");
 	k.extend_from_slice(tb.as_bytes());
 	// Without this, decoding fails with UnexpectedEOF errors
 	k.extend_from_slice(&[0x00]);
@@ -52,7 +52,7 @@ pub fn versionstamped_key_suffix(tb: &str) -> Vec<u8> {
 #[allow(unused)]
 pub fn prefix_ts(ns: &str, db: &str, vs: vs::Versionstamp) -> Vec<u8> {
 	let mut k = crate::key::database::all::new(ns, db).encode().unwrap();
-	k.extend_from_slice(&[b'#']);
+	k.extend_from_slice(b"#");
 	k.extend_from_slice(&vs);
 	k
 }
@@ -61,7 +61,7 @@ pub fn prefix_ts(ns: &str, db: &str, vs: vs::Versionstamp) -> Vec<u8> {
 #[allow(unused)]
 pub fn prefix(ns: &str, db: &str) -> Vec<u8> {
 	let mut k = crate::key::database::all::new(ns, db).encode().unwrap();
-	k.extend_from_slice(&[b'#']);
+	k.extend_from_slice(b"#");
 	k
 }
 

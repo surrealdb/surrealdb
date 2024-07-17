@@ -15,8 +15,6 @@ use crate::kvs::Datastore;
 use crate::opt::auth::Root;
 use crate::opt::WaitFor;
 use crate::options::EngineOptions;
-use flume::Receiver;
-use flume::Sender;
 use futures::future::BoxFuture;
 use futures::stream::poll_fn;
 use futures::FutureExt;
@@ -37,15 +35,15 @@ impl Connection for Db {
 	fn connect(address: Endpoint, capacity: usize) -> BoxFuture<'static, Result<Surreal<Self>>> {
 		Box::pin(async move {
 			let (route_tx, route_rx) = match capacity {
-				0 => flume::unbounded(),
-				capacity => flume::bounded(capacity),
+				0 => channel::unbounded(),
+				capacity => channel::bounded(capacity),
 			};
 
-			let (conn_tx, conn_rx) = flume::bounded(1);
+			let (conn_tx, conn_rx) = channel::bounded(1);
 
 			spawn_local(run_router(address, conn_tx, route_rx));
 
-			conn_rx.into_recv_async().await??;
+			conn_rx.into_recv_async().await.map_err(|_| crate::api::Error::RouterClosed)??;
 
 			let mut features = HashSet::new();
 			features.insert(ExtraFeatures::LiveQueries);
