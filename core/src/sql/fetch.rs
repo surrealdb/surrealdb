@@ -55,7 +55,11 @@ pub struct Fetch(
 
 impl Fetch {
 	fn convert_fetch_idiom(&mut self, _revision: u16, old: Idiom) -> Result<(), revision::Error> {
-		self.1 = Value::Idiom(old);
+		self.1 = if old.is_empty() {
+			Value::None
+		} else {
+			Value::Idiom(old)
+		};
 		Ok(())
 	}
 
