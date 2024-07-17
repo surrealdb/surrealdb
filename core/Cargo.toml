@@ -41,7 +41,6 @@ arbitrary = [
     "geo-types/arbitrary",
     "uuid/arbitrary",
 ]
-
 # Special features
 kv-fdb-7_1 = ["foundationdb/fdb-7_1"]
 kv-fdb-7_3 = ["foundationdb/fdb-7_3"]

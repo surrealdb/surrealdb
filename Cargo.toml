@@ -20,6 +20,9 @@ http-compression = []
 ml = ["surrealdb/ml"]
 jwks = ["surrealdb/jwks"]
 performance-profiler = ["dep:pprof"]
+# Special features
+storage-fdb-7_1 = ["surrealdb/kv-fdb-7_1"]
+storage-fdb-7_3 = ["surrealdb/kv-fdb-7_3"]
 
 [workspace]
 members = [

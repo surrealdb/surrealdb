@@ -10,7 +10,7 @@ reduce_output = true
 default_to_workspace = false
 
 [env]
-ALL_FEATURES={ value = "storage-mem,storage-surrealkv,storage-rocksdb,storage-tikv,storage-fdb,scripting,http,jwks,ml,surrealdb-core/kv-fdb-7_1", condition = { env_not_set = ["ALL_FEATURES"] } }
+ALL_FEATURES={ value = "storage-mem,storage-surrealkv,storage-rocksdb,storage-tikv,storage-fdb,scripting,http,jwks,ml,storage-fdb-7_1", condition = { env_not_set = ["ALL_FEATURES"] } }
 DEV_FEATURES={ value = "storage-mem,storage-surrealkv,scripting,http,jwks,ml", condition = { env_not_set = ["DEV_FEATURES"] } }
 SURREAL_LOG={ value = "full", condition = { env_not_set = ["SURREAL_LOG"] } }
 SURREAL_USER={ value = "root", condition = { env_not_set = ["SURREAL_USER"] } }
