@@ -59,12 +59,12 @@ macro_rules! into_future {
 					Some(range) => resource?.with_range(range)?.into(),
 					None => resource?.into(),
 				};
-				let mut conn = Client::new(method);
 				let params = match content? {
 					Value::None | Value::Null => vec![param],
 					content => vec![param, content],
 				};
-				conn.$method(client.router.extract()?, Param::new(params)).await
+				let router = client.router.extract()?;
+				router.$method(method, Param::new(params)).await
 			})
 		}
 	};

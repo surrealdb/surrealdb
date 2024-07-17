@@ -276,7 +276,7 @@ mod test_check_lqs_and_send_notifications {
 		// Perform "live query" on the constructed doc that we are checking
 		let live_statement = a_live_query_statement();
 		let executed_statement = a_create_statement();
-		let mut tx = Datastore::new("memory")
+		let tx = Datastore::new("memory")
 			.await
 			.unwrap()
 			.transaction(Write, Optimistic)
@@ -334,7 +334,7 @@ mod test_check_lqs_and_send_notifications {
 		// Perform "live query" on the constructed doc that we are checking
 		let live_statement = a_live_query_statement();
 		let executed_statement = a_delete_statement();
-		let mut tx = Datastore::new("memory")
+		let tx = Datastore::new("memory")
 			.await
 			.unwrap()
 			.transaction(Write, Optimistic)

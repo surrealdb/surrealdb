@@ -10,11 +10,11 @@ use crate::method::OnceLockExt;
 use crate::opt::ExportDestination;
 use crate::Surreal;
 use channel::Receiver;
+use futures::future::BoxFuture;
 use futures::Stream;
 use futures::StreamExt;
 use semver::Version;
 use std::borrow::Cow;
-use std::future::Future;
 use std::future::IntoFuture;
 use std::marker::PhantomData;
 use std::path::PathBuf;
@@ -70,7 +70,7 @@ where
 	Client: Connection,
 {
 	type Output = Result<()>;
-	type IntoFuture = Pin<Box<dyn Future<Output = Self::Output> + Send + Sync + 'r>>;
+	type IntoFuture = BoxFuture<'r, Self::Output>;
 
 	fn into_future(self) -> Self::IntoFuture {
 		Box::pin(async move {
@@ -78,13 +78,12 @@ where
 			if !router.features.contains(&ExtraFeatures::Backup) {
 				return Err(Error::BackupsNotSupported.into());
 			}
-			let mut conn = Client::new(Method::Export);
 			let mut param = match self.target {
 				ExportDestination::File(path) => Param::file(path),
 				ExportDestination::Memory => unreachable!(),
 			};
 			param.ml_config = self.ml_config;
-			conn.execute_unit(router, param).await
+			router.execute_unit(Method::Export, param).await
 		})
 	}
 }
@@ -94,7 +93,7 @@ where
 	Client: Connection,
 {
 	type Output = Result<Backup>;
-	type IntoFuture = Pin<Box<dyn Future<Output = Self::Output> + Send + Sync + 'r>>;
+	type IntoFuture = BoxFuture<'r, Self::Output>;
 
 	fn into_future(self) -> Self::IntoFuture {
 		Box::pin(async move {
@@ -103,13 +102,12 @@ where
 				return Err(Error::BackupsNotSupported.into());
 			}
 			let (tx, rx) = crate::channel::bounded(1);
-			let mut conn = Client::new(Method::Export);
 			let ExportDestination::Memory = self.target else {
 				unreachable!();
 			};
 			let mut param = Param::bytes_sender(tx);
 			param.ml_config = self.ml_config;
-			conn.execute_unit(router, param).await?;
+			router.execute_unit(Method::Export, param).await?;
 			Ok(Backup {
 				rx,
 			})

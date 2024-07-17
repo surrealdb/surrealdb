@@ -6,6 +6,7 @@ use crate::api::Connection;
 use crate::api::Result;
 use crate::Surreal;
 use futures::future::BoxFuture;
+use futures::future::BoxFuture;
 use std::borrow::Cow;
 use std::future::IntoFuture;
 
@@ -27,14 +28,11 @@ where
 	fn into_future(self) -> Self::IntoFuture {
 		Box::pin(async move {
 			let router = self.client.router.extract()?;
-			let mut conn = Client::new(Method::Authenticate);
-			conn.execute_unit(
-				router,
-				Command::Authenticate {
+			router
+				.execute_unit(Command::Authenticate {
 					token: self.token.0,
-				},
-			)
-			.await
+				})
+				.await
 		})
 	}
 }

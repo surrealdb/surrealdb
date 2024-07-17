@@ -11,13 +11,12 @@ use crate::sql::Part;
 use crate::sql::Table;
 use crate::sql::Value;
 use crate::Surreal;
+use futures::future::BoxFuture;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 use std::borrow::Cow;
-use std::future::Future;
 use std::future::IntoFuture;
 use std::marker::PhantomData;
-use std::pin::Pin;
 
 /// An insert future
 #[derive(Debug)]
@@ -64,9 +63,9 @@ macro_rules! into_future {
 					Resource::Array(arr) => return Err(Error::InsertOnArray(arr).into()),
 					Resource::Edges(edges) => return Err(Error::InsertOnEdges(edges).into()),
 				};
-				let mut conn = Client::new(Method::Insert);
 				let param = vec![table, data];
-				conn.$method(client.router.extract()?, Param::new(param)).await
+				let router = client.router.extract()?;
+				router.$method(Method::Insert, Param::new(param)).await
 			})
 		}
 	};
@@ -77,7 +76,7 @@ where
 	Client: Connection,
 {
 	type Output = Result<Value>;
-	type IntoFuture = Pin<Box<dyn Future<Output = Self::Output> + Send + Sync + 'r>>;
+	type IntoFuture = BoxFuture<'r, Self::Output>;
 
 	into_future! {execute_value}
 }
@@ -88,7 +87,7 @@ where
 	R: DeserializeOwned,
 {
 	type Output = Result<Option<R>>;
-	type IntoFuture = Pin<Box<dyn Future<Output = Self::Output> + Send + Sync + 'r>>;
+	type IntoFuture = BoxFuture<'r, Self::Output>;
 
 	into_future! {execute_opt}
 }
@@ -99,7 +98,7 @@ where
 	R: DeserializeOwned,
 {
 	type Output = Result<Vec<R>>;
-	type IntoFuture = Pin<Box<dyn Future<Output = Self::Output> + Send + Sync + 'r>>;
+	type IntoFuture = BoxFuture<'r, Self::Output>;
 
 	into_future! {execute_vec}
 }

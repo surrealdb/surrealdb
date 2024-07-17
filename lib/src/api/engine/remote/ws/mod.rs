@@ -21,7 +21,8 @@ use crate::dbs::Status;
 use crate::method::Stats;
 use crate::opt::IntoEndpoint;
 use crate::sql::Value;
-use flume::Sender;
+use bincode::Options as _;
+use channel::Sender;
 use indexmap::IndexMap;
 use revision::revisioned;
 use revision::Revisioned;
@@ -110,10 +111,7 @@ pub struct Wss;
 
 /// A WebSocket client for communicating with the server via WebSockets
 #[derive(Debug, Clone)]
-pub struct Client {
-	pub(crate) id: i64,
-	method: Method,
-}
+pub struct Client(());
 
 impl Surreal<Client> {
 	/// Connects to a specific database endpoint, saving the connection on the static client

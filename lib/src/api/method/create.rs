@@ -43,12 +43,12 @@ macro_rules! into_future {
 				..
 			} = self;
 			Box::pin(async move {
-				let mut conn = Client::new(Method::Create);
+				let router = client.router.extract()?;
 				let cmd = Command::Create {
 					what: resource?.into(),
 					data: None,
 				};
-				conn.$method(client.router.extract()?, cmd).await
+				router.$method(cmd).await
 			})
 		}
 	};

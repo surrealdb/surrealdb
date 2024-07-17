@@ -51,7 +51,7 @@ impl Hb {
 			value: ts.value + 1,
 		};
 		let mut k = crate::key::root::all::new().encode().unwrap();
-		k.extend_from_slice(&[b'!', b'h', b'b']);
+		k.extend_from_slice(b"!hb");
 		k.extend_from_slice(tskey.encode().unwrap().as_ref());
 		k
 	}
