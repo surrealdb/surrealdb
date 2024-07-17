@@ -15,7 +15,7 @@ args = ["check", "--locked", "--package", "surrealdb", "--features", "protocol-w
 [tasks.ci-clippy]
 category = "CI - CHECK"
 command = "cargo"
-args = ["clippy", "--all-targets", "--features", "storage-mem,storage-surrealkv,storage-rocksdb,storage-tikv,storage-fdb,scripting,http,jwks,ml", "--tests", "--benches", "--examples", "--bins", "--", "-D", "warnings"]
+args = ["clippy", "--all-targets", "--features", "storage-mem,storage-surrealkv,storage-rocksdb,storage-tikv,storage-fdb,scripting,http,jwks,ml,surrealdb-core/kv-fdb-7_1", "--tests", "--benches", "--examples", "--bins", "--", "-D", "warnings"]
 
 #
 # Integration Tests
@@ -163,12 +163,12 @@ run_task = { name = ["start-tikv", "test-kvs", "test-api-integration", "stop-tik
 
 [tasks.ci-api-integration-fdb-7_1]
 category = "CI - INTEGRATION TESTS"
-env = { _TEST_API_ENGINE = "fdb", _TEST_FEATURES = "kv-fdb,kv-fdb-7_1" }
+env = { _TEST_API_ENGINE = "fdb", _TEST_FEATURES = "kv-fdb,surrealdb-core/kv-fdb-7_1" }
 run_task = { name = ["test-kvs", "test-api-integration"], fork = true, parallel = false }
 
 [tasks.ci-api-integration-fdb-7_3]
 category = "CI - INTEGRATION TESTS"
-env = { _TEST_API_ENGINE = "fdb", _TEST_FEATURES = "kv-fdb,kv-fdb-7_3" }
+env = { _TEST_API_ENGINE = "fdb", _TEST_FEATURES = "kv-fdb,surrealdb-core/kv-fdb-7_3" }
 run_task = { name = ["test-kvs", "test-api-integration"], fork = true, parallel = false }
 
 
