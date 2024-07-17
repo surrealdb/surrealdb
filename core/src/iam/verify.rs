@@ -15,60 +15,47 @@ use once_cell::sync::Lazy;
 use std::str::{self, FromStr};
 use std::sync::Arc;
 
-fn config(alg: Algorithm, key: String) -> Result<(DecodingKey, Validation), Error> {
+fn config(alg: Algorithm, key: &[u8]) -> Result<(DecodingKey, Validation), Error> {
 	match alg {
-		Algorithm::Hs256 => Ok((
-			DecodingKey::from_secret(key.as_ref()),
-			Validation::new(jsonwebtoken::Algorithm::HS256),
-		)),
-		Algorithm::Hs384 => Ok((
-			DecodingKey::from_secret(key.as_ref()),
-			Validation::new(jsonwebtoken::Algorithm::HS384),
-		)),
-		Algorithm::Hs512 => Ok((
-			DecodingKey::from_secret(key.as_ref()),
-			Validation::new(jsonwebtoken::Algorithm::HS512),
-		)),
-		Algorithm::EdDSA => Ok((
-			DecodingKey::from_ed_pem(key.as_ref())?,
-			Validation::new(jsonwebtoken::Algorithm::EdDSA),
-		)),
-		Algorithm::Es256 => Ok((
-			DecodingKey::from_ec_pem(key.as_ref())?,
-			Validation::new(jsonwebtoken::Algorithm::ES256),
-		)),
-		Algorithm::Es384 => Ok((
-			DecodingKey::from_ec_pem(key.as_ref())?,
-			Validation::new(jsonwebtoken::Algorithm::ES384),
-		)),
-		Algorithm::Es512 => Ok((
-			DecodingKey::from_ec_pem(key.as_ref())?,
-			Validation::new(jsonwebtoken::Algorithm::ES384),
-		)),
-		Algorithm::Ps256 => Ok((
-			DecodingKey::from_rsa_pem(key.as_ref())?,
-			Validation::new(jsonwebtoken::Algorithm::PS256),
-		)),
-		Algorithm::Ps384 => Ok((
-			DecodingKey::from_rsa_pem(key.as_ref())?,
-			Validation::new(jsonwebtoken::Algorithm::PS384),
-		)),
-		Algorithm::Ps512 => Ok((
-			DecodingKey::from_rsa_pem(key.as_ref())?,
-			Validation::new(jsonwebtoken::Algorithm::PS512),
-		)),
-		Algorithm::Rs256 => Ok((
-			DecodingKey::from_rsa_pem(key.as_ref())?,
-			Validation::new(jsonwebtoken::Algorithm::RS256),
-		)),
-		Algorithm::Rs384 => Ok((
-			DecodingKey::from_rsa_pem(key.as_ref())?,
-			Validation::new(jsonwebtoken::Algorithm::RS384),
-		)),
-		Algorithm::Rs512 => Ok((
-			DecodingKey::from_rsa_pem(key.as_ref())?,
-			Validation::new(jsonwebtoken::Algorithm::RS512),
-		)),
+		Algorithm::Hs256 => {
+			Ok((DecodingKey::from_secret(key), Validation::new(jsonwebtoken::Algorithm::HS256)))
+		}
+		Algorithm::Hs384 => {
+			Ok((DecodingKey::from_secret(key), Validation::new(jsonwebtoken::Algorithm::HS384)))
+		}
+		Algorithm::Hs512 => {
+			Ok((DecodingKey::from_secret(key), Validation::new(jsonwebtoken::Algorithm::HS512)))
+		}
+		Algorithm::EdDSA => {
+			Ok((DecodingKey::from_ed_pem(key)?, Validation::new(jsonwebtoken::Algorithm::EdDSA)))
+		}
+		Algorithm::Es256 => {
+			Ok((DecodingKey::from_ec_pem(key)?, Validation::new(jsonwebtoken::Algorithm::ES256)))
+		}
+		Algorithm::Es384 => {
+			Ok((DecodingKey::from_ec_pem(key)?, Validation::new(jsonwebtoken::Algorithm::ES384)))
+		}
+		Algorithm::Es512 => {
+			Ok((DecodingKey::from_ec_pem(key)?, Validation::new(jsonwebtoken::Algorithm::ES384)))
+		}
+		Algorithm::Ps256 => {
+			Ok((DecodingKey::from_rsa_pem(key)?, Validation::new(jsonwebtoken::Algorithm::PS256)))
+		}
+		Algorithm::Ps384 => {
+			Ok((DecodingKey::from_rsa_pem(key)?, Validation::new(jsonwebtoken::Algorithm::PS384)))
+		}
+		Algorithm::Ps512 => {
+			Ok((DecodingKey::from_rsa_pem(key)?, Validation::new(jsonwebtoken::Algorithm::PS512)))
+		}
+		Algorithm::Rs256 => {
+			Ok((DecodingKey::from_rsa_pem(key)?, Validation::new(jsonwebtoken::Algorithm::RS256)))
+		}
+		Algorithm::Rs384 => {
+			Ok((DecodingKey::from_rsa_pem(key)?, Validation::new(jsonwebtoken::Algorithm::RS384)))
+		}
+		Algorithm::Rs512 => {
+			Ok((DecodingKey::from_rsa_pem(key)?, Validation::new(jsonwebtoken::Algorithm::RS512)))
+		}
 	}
 }
 
@@ -92,7 +79,6 @@ pub async fn basic(
 ) -> Result<(), Error> {
 	// Log the authentication type
 	trace!("Attempting basic authentication");
-
 	// Check if the parameters exist
 	match (ns, db) {
 		// DB signin
@@ -163,16 +149,18 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			// Log the decoded authentication claims
 			trace!("Authenticating with record access method `{}`", ac);
 			// Create a new readonly transaction
-			let mut tx = kvs.transaction(Read, Optimistic).await?;
+			let tx = kvs.transaction(Read, Optimistic).await?;
 			// Parse the record id
 			let mut rid = syn::thing(&id)?;
 			// Get the database access method
 			let de = tx.get_db_access(&ns, &db, &ac).await?;
+			// Ensure that the transaction is cancelled
+			tx.cancel().await?;
 			// Obtain the configuration to verify the token based on the access method
-			let (au, cf) = match de.kind {
+			let (au, cf) = match de.kind.clone() {
 				AccessType::Record(at) => {
 					let cf = match at.jwt.verify.clone() {
-						JwtAccessVerify::Key(key) => config(key.alg, key.key),
+						JwtAccessVerify::Key(key) => config(key.alg, key.key.as_bytes()),
 						#[cfg(feature = "jwks")]
 						JwtAccessVerify::Jwks(jwks) => {
 							if let Some(kid) = token_data.header.kid {
@@ -244,15 +232,17 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			// Log the decoded authentication claims
 			trace!("Authenticating to database `{}` with access method `{}`", db, ac);
 			// Create a new readonly transaction
-			let mut tx = kvs.transaction(Read, Optimistic).await?;
+			let tx = kvs.transaction(Read, Optimistic).await?;
 			// Get the database access method
 			let de = tx.get_db_access(&ns, &db, &ac).await?;
+			// Ensure that the transaction is cancelled
+			tx.cancel().await?;
 			// Obtain the configuration to verify the token based on the access method
-			match de.kind {
+			match de.kind.clone() {
 				// If the access type is Jwt, this is database access
 				AccessType::Jwt(at) => {
 					let cf = match at.verify {
-						JwtAccessVerify::Key(key) => config(key.alg, key.key),
+						JwtAccessVerify::Key(key) => config(key.alg, key.key.as_bytes()),
 						#[cfg(feature = "jwks")]
 						JwtAccessVerify::Jwks(jwks) => {
 							if let Some(kid) = token_data.header.kid {
@@ -300,7 +290,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 					Some(au) => {
 						trace!("Access method `{}` is record access with authenticate clause", ac);
 						let cf = match at.jwt.verify {
-							JwtAccessVerify::Key(key) => config(key.alg, key.key),
+							JwtAccessVerify::Key(key) => config(key.alg, key.key.as_bytes()),
 							#[cfg(feature = "jwks")]
 							JwtAccessVerify::Jwks(jwks) => {
 								if let Some(kid) = token_data.header.kid {
@@ -366,13 +356,16 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			// Log the decoded authentication claims
 			trace!("Authenticating to database `{}` with user `{}`", db, id);
 			// Create a new readonly transaction
-			let mut tx = kvs.transaction(Read, Optimistic).await?;
+			let tx = kvs.transaction(Read, Optimistic).await?;
 			// Get the database user
 			let de = tx.get_db_user(&ns, &db, &id).await.map_err(|e| {
 				trace!("Error while authenticating to database `{db}`: {e}");
 				Error::InvalidAuth
 			})?;
-			let cf = config(Algorithm::Hs512, de.code)?;
+			// Ensure that the transaction is cancelled
+			tx.cancel().await?;
+			// Check the algorithm
+			let cf = config(Algorithm::Hs512, de.code.as_bytes())?;
 			// Verify the token
 			decode::<Claims>(token, &cf.0, &cf.1)?;
 			// Log the success
@@ -398,13 +391,15 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			// Log the decoded authentication claims
 			trace!("Authenticating to namespace `{}` with access method `{}`", ns, ac);
 			// Create a new readonly transaction
-			let mut tx = kvs.transaction(Read, Optimistic).await?;
+			let tx = kvs.transaction(Read, Optimistic).await?;
 			// Get the namespace access method
 			let de = tx.get_ns_access(&ns, &ac).await?;
+			// Ensure that the transaction is cancelled
+			tx.cancel().await?;
 			// Obtain the configuration to verify the token based on the access method
-			let cf = match de.kind {
+			let cf = match de.kind.clone() {
 				AccessType::Jwt(ac) => match ac.verify {
-					JwtAccessVerify::Key(key) => config(key.alg, key.key),
+					JwtAccessVerify::Key(key) => config(key.alg, key.key.as_bytes()),
 					#[cfg(feature = "jwks")]
 					JwtAccessVerify::Jwks(jwks) => {
 						if let Some(kid) = token_data.header.kid {
@@ -452,13 +447,16 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			// Log the decoded authentication claims
 			trace!("Authenticating to namespace `{}` with user `{}`", ns, id);
 			// Create a new readonly transaction
-			let mut tx = kvs.transaction(Read, Optimistic).await?;
+			let tx = kvs.transaction(Read, Optimistic).await?;
 			// Get the namespace user
 			let de = tx.get_ns_user(&ns, &id).await.map_err(|e| {
 				trace!("Error while authenticating to namespace `{ns}`: {e}");
 				Error::InvalidAuth
 			})?;
-			let cf = config(Algorithm::Hs512, de.code)?;
+			// Ensure that the transaction is cancelled
+			tx.cancel().await?;
+			// Check the algorithm
+			let cf = config(Algorithm::Hs512, de.code.as_bytes())?;
 			// Verify the token
 			decode::<Claims>(token, &cf.0, &cf.1)?;
 			// Log the success
@@ -482,13 +480,15 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			// Log the decoded authentication claims
 			trace!("Authenticating to root with access method `{}`", ac);
 			// Create a new readonly transaction
-			let mut tx = kvs.transaction(Read, Optimistic).await?;
+			let tx = kvs.transaction(Read, Optimistic).await?;
 			// Get the namespace access method
 			let de = tx.get_root_access(&ac).await?;
+			// Ensure that the transaction is cancelled
+			tx.cancel().await?;
 			// Obtain the configuration to verify the token based on the access method
-			let cf = match de.kind {
+			let cf = match de.kind.clone() {
 				AccessType::Jwt(ac) => match ac.verify {
-					JwtAccessVerify::Key(key) => config(key.alg, key.key),
+					JwtAccessVerify::Key(key) => config(key.alg, key.key.as_bytes()),
 					#[cfg(feature = "jwks")]
 					JwtAccessVerify::Jwks(jwks) => {
 						if let Some(kid) = token_data.header.kid {
@@ -533,13 +533,16 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			// Log the decoded authentication claims
 			trace!("Authenticating to root level with user `{}`", id);
 			// Create a new readonly transaction
-			let mut tx = kvs.transaction(Read, Optimistic).await?;
+			let tx = kvs.transaction(Read, Optimistic).await?;
 			// Get the namespace user
 			let de = tx.get_root_user(&id).await.map_err(|e| {
 				trace!("Error while authenticating to root: {e}");
 				Error::InvalidAuth
 			})?;
-			let cf = config(Algorithm::Hs512, de.code)?;
+			// Ensure that the transaction is cancelled
+			tx.cancel().await?;
+			// Check the algorithm
+			let cf = config(Algorithm::Hs512, de.code.as_bytes())?;
 			// Verify the token
 			decode::<Claims>(token, &cf.0, &cf.1)?;
 			// Log the success
@@ -565,14 +568,18 @@ pub async fn verify_root_creds(
 	pass: &str,
 ) -> Result<DefineUserStatement, Error> {
 	// Create a new readonly transaction
-	let mut tx = ds.transaction(Read, Optimistic).await?;
+	let tx = ds.transaction(Read, Optimistic).await?;
 	// Fetch the specified user from storage
 	let user = tx.get_root_user(user).await.map_err(|e| {
 		trace!("Error while authenticating to root: {e}");
 		Error::InvalidAuth
 	})?;
+	// Ensure that the transaction is cancelled
+	tx.cancel().await?;
 	// Verify the specified password for the user
 	verify_pass(pass, user.hash.as_ref())?;
+	// Clone the cached user object
+	let user = (*user).clone();
 	// Return the verified user object
 	Ok(user)
 }
@@ -584,14 +591,18 @@ pub async fn verify_ns_creds(
 	pass: &str,
 ) -> Result<DefineUserStatement, Error> {
 	// Create a new readonly transaction
-	let mut tx = ds.transaction(Read, Optimistic).await?;
+	let tx = ds.transaction(Read, Optimistic).await?;
 	// Fetch the specified user from storage
 	let user = tx.get_ns_user(ns, user).await.map_err(|e| {
 		trace!("Error while authenticating to namespace `{ns}`: {e}");
 		Error::InvalidAuth
 	})?;
+	// Ensure that the transaction is cancelled
+	tx.cancel().await?;
 	// Verify the specified password for the user
 	verify_pass(pass, user.hash.as_ref())?;
+	// Clone the cached user object
+	let user = (*user).clone();
 	// Return the verified user object
 	Ok(user)
 }
@@ -604,14 +615,18 @@ pub async fn verify_db_creds(
 	pass: &str,
 ) -> Result<DefineUserStatement, Error> {
 	// Create a new readonly transaction
-	let mut tx = ds.transaction(Read, Optimistic).await?;
+	let tx = ds.transaction(Read, Optimistic).await?;
 	// Fetch the specified user from storage
 	let user = tx.get_db_user(ns, db, user).await.map_err(|e| {
 		trace!("Error while authenticating to database `{ns}/{db}`: {e}");
 		Error::InvalidAuth
 	})?;
+	// Ensure that the transaction is cancelled
+	tx.cancel().await?;
 	// Verify the specified password for the user
 	verify_pass(pass, user.hash.as_ref())?;
+	// Clone the cached user object
+	let user = (*user).clone();
 	// Return the verified user object
 	Ok(user)
 }
@@ -1685,7 +1700,7 @@ mod tests {
 				algorithm: jsonwebtoken::jwk::AlgorithmParameters::OctetKey(
 					jsonwebtoken::jwk::OctetKeyParameters {
 						key_type: jsonwebtoken::jwk::OctetKeyType::Octet,
-						value: STANDARD_NO_PAD.encode(&secret),
+						value: STANDARD_NO_PAD.encode(secret),
 					},
 				),
 			}],

@@ -66,14 +66,6 @@ mod cli_integration {
 		assert!(common::run("version --turbo").output().is_err());
 	}
 
-	fn debug_builds_contain_debug_message(addr: &str, creds: &str, ns: &Ulid, db: &Ulid) {
-		info!("* Debug builds contain debug message");
-		let args =
-			format!("sql --conn http://{addr} {creds} --ns {ns} --db {db} --multi --hide-welcome");
-		let res = common::run(&args).input("CREATE not_a_table:not_a_record;\n").output().unwrap();
-		assert!(res.contains("Debug builds are not intended for production use"));
-	}
-
 	#[test(tokio::test)]
 	async fn all_commands() {
 		// Commands without credentials when auth is disabled, should succeed
@@ -89,7 +81,14 @@ mod cli_integration {
 		let db = Ulid::new();
 
 		#[cfg(debug_assertions)]
-		debug_builds_contain_debug_message(&addr, creds, &ns, &db);
+		{
+			info!("* Debug builds contain debug message");
+			let args = format!(
+				"sql --conn http://{addr} {creds} --ns {ns} --db {db} --multi --hide-welcome"
+			);
+			let output = common::run(&args).input("CREATE any:any;\n").output().unwrap();
+			assert!(output.contains("Debug builds are not intended for production use"));
+		}
 
 		info!("* Create a record");
 		{

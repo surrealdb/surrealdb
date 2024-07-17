@@ -115,18 +115,18 @@ mod tests {
 	use crate::kvs::{Datastore, LockType::*, Transaction, TransactionType::*};
 
 	async fn get_ids(ds: &Datastore) -> (Transaction, U32) {
-		let mut tx = ds.transaction(Write, Optimistic).await.unwrap();
+		let txn = ds.transaction(Write, Optimistic).await.unwrap();
 		let key = "foo";
-		let v = tx.get(key).await.unwrap();
+		let v = txn.get(key).await.unwrap();
 		let d = U32::new(key.into(), v).await.unwrap();
-		(tx, d)
+		(txn, d)
 	}
 
-	async fn finish(mut tx: Transaction, mut d: U32) -> Result<(), Error> {
+	async fn finish(txn: Transaction, mut d: U32) -> Result<(), Error> {
 		if let Some((key, val)) = d.finish() {
-			tx.set(key, val).await?;
+			txn.set(key, val).await?;
 		}
-		tx.commit().await
+		txn.commit().await
 	}
 
 	#[tokio::test]

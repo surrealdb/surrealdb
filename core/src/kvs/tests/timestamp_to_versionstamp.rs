@@ -17,27 +17,27 @@ async fn timestamp_to_versionstamp() {
 	let clock = Arc::new(SizedClock::Fake(FakeClock::new(Timestamp::default())));
 	let (ds, _) = new_ds(node_id, clock).await;
 	// Give the current versionstamp a timestamp of 0
-	let mut tx = ds.transaction(Write, Optimistic).await.unwrap();
-	tx.set_timestamp_for_versionstamp(0, "myns", "mydb", true).await.unwrap();
+	let mut tx = ds.transaction(Write, Optimistic).await.unwrap().inner();
+	tx.set_timestamp_for_versionstamp(0, "myns", "mydb").await.unwrap();
 	tx.commit().await.unwrap();
 	// Get the versionstamp for timestamp 0
-	let mut tx = ds.transaction(Write, Optimistic).await.unwrap();
+	let mut tx = ds.transaction(Write, Optimistic).await.unwrap().inner();
 	let vs1 = tx.get_versionstamp_from_timestamp(0, "myns", "mydb", true).await.unwrap().unwrap();
 	tx.commit().await.unwrap();
 	// Give the current versionstamp a timestamp of 1
-	let mut tx = ds.transaction(Write, Optimistic).await.unwrap();
-	tx.set_timestamp_for_versionstamp(1, "myns", "mydb", true).await.unwrap();
+	let mut tx = ds.transaction(Write, Optimistic).await.unwrap().inner();
+	tx.set_timestamp_for_versionstamp(1, "myns", "mydb").await.unwrap();
 	tx.commit().await.unwrap();
 	// Get the versionstamp for timestamp 1
-	let mut tx = ds.transaction(Write, Optimistic).await.unwrap();
+	let mut tx = ds.transaction(Write, Optimistic).await.unwrap().inner();
 	let vs2 = tx.get_versionstamp_from_timestamp(1, "myns", "mydb", true).await.unwrap().unwrap();
 	tx.commit().await.unwrap();
 	// Give the current versionstamp a timestamp of 2
-	let mut tx = ds.transaction(Write, Optimistic).await.unwrap();
-	tx.set_timestamp_for_versionstamp(2, "myns", "mydb", true).await.unwrap();
+	let mut tx = ds.transaction(Write, Optimistic).await.unwrap().inner();
+	tx.set_timestamp_for_versionstamp(2, "myns", "mydb").await.unwrap();
 	tx.commit().await.unwrap();
 	// Get the versionstamp for timestamp 2
-	let mut tx = ds.transaction(Write, Optimistic).await.unwrap();
+	let mut tx = ds.transaction(Write, Optimistic).await.unwrap().inner();
 	let vs3 = tx.get_versionstamp_from_timestamp(2, "myns", "mydb", true).await.unwrap().unwrap();
 	tx.commit().await.unwrap();
 	assert!(vs1 < vs2);

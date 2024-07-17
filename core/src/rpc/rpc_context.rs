@@ -11,13 +11,6 @@ use crate::{
 
 use super::{method::Method, response::Data, rpc_error::RpcError};
 
-macro_rules! mrg {
-	($($m:expr, $x:expr)+) => {{
-		$($m.extend($x.iter().map(|(k, v)| (k.clone(), v.clone())));)+
-		$($m)+
-	}};
-}
-
 #[allow(async_fn_in_trait)]
 pub trait RpcContext {
 	fn kvs(&self) -> &Datastore;

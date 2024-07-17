@@ -25,44 +25,44 @@ impl RemoveAccessStatement {
 		let future = async {
 			// Allowed to run?
 			opt.is_allowed(Action::Edit, ResourceKind::Actor, &self.base)?;
-
+			// Check the statement type
 			match &self.base {
 				Base::Root => {
-					// Claim transaction
-					let mut run = ctx.tx_lock().await;
-					// Clear the cache
-					run.clear_cache();
+					// Get the transaction
+					let txn = ctx.tx();
 					// Get the definition
-					let ac = run.get_root_access(&self.name).await?;
+					let ac = txn.get_root_access(&self.name).await?;
 					// Delete the definition
 					let key = crate::key::root::ac::new(&ac.name);
-					run.del(key).await?;
+					txn.del(key).await?;
+					// Clear the cache
+					txn.clear();
 					// Ok all good
 					Ok(Value::None)
 				}
 				Base::Ns => {
-					// Claim transaction
-					let mut run = ctx.tx_lock().await;
-					// Clear the cache
-					run.clear_cache();
+					// Get the transaction
+					let txn = ctx.tx();
 					// Get the definition
-					let ac = run.get_ns_access(opt.ns()?, &self.name).await?;
+					let ac = txn.get_ns_access(opt.ns()?, &self.name).await?;
 					// Delete the definition
 					let key = crate::key::namespace::ac::new(opt.ns()?, &ac.name);
-					run.del(key).await?;
+					txn.del(key).await?;
+					// Clear the cache
+					txn.clear();
 					// Ok all good
 					Ok(Value::None)
 				}
 				Base::Db => {
-					// Claim transaction
-					let mut run = ctx.tx_lock().await;
-					// Clear the cache
-					run.clear_cache();
+					// Get the transaction
+					let txn = ctx.tx();
 					// Get the definition
-					let ac = run.get_db_access(opt.ns()?, opt.db()?, &self.name).await?;
+					let ac = txn.get_db_access(opt.ns()?, opt.db()?, &self.name).await?;
 					// Delete the definition
 					let key = crate::key::database::ac::new(opt.ns()?, opt.db()?, &ac.name);
-					run.del(key).await?;
+					txn.del(key).await?;
+					// Clear the cache
+					txn.clear();
 					// Ok all good
 					Ok(Value::None)
 				}

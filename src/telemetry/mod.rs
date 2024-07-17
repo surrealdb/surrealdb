@@ -2,8 +2,6 @@ mod logs;
 pub mod metrics;
 pub mod traces;
 
-use std::time::Duration;
-
 use crate::cli::validator::parser::env_filter::CustomEnvFilter;
 use once_cell::sync::Lazy;
 use opentelemetry::metrics::MetricsError;
@@ -11,8 +9,10 @@ use opentelemetry::sdk::resource::{
 	EnvResourceDetector, SdkProvidedResourceDetector, TelemetryResourceDetector,
 };
 use opentelemetry::sdk::Resource;
-use opentelemetry::{Context as TelemetryContext, KeyValue};
+use opentelemetry::{Context, KeyValue};
+use std::time::Duration;
 use tracing::{Level, Subscriber};
+use tracing_subscriber::filter::ParseError;
 use tracing_subscriber::prelude::*;
 use tracing_subscriber::util::SubscriberInitExt;
 use tracing_subscriber::EnvFilter;
@@ -72,14 +72,13 @@ impl Builder {
 
 	/// Build a tracing dispatcher with the fmt subscriber (logs) and the chosen tracer subscriber
 	pub fn build(self) -> Box<dyn Subscriber + Send + Sync + 'static> {
+		// Setup a registry for composing layers
 		let registry = tracing_subscriber::registry();
-
 		// Setup logging layer
 		let registry = registry.with(logs::new(self.filter.clone()));
-
 		// Setup tracing layer
 		let registry = registry.with(traces::new(self.filter));
-
+		// Return the registry
 		Box::new(registry)
 	}
 
@@ -90,25 +89,33 @@ impl Builder {
 }
 
 pub fn shutdown() -> Result<(), MetricsError> {
-	// Flush all telemetry data
+	// Flush all telemetry data and block until done
 	opentelemetry::global::shutdown_tracer_provider();
-	metrics::shutdown(&TelemetryContext::current())?;
-
-	Ok(())
+	// Shutdown the metrics provider fully
+	metrics::shutdown(&Context::current())
 }
 
 /// Create an EnvFilter from the given value. If the value is not a valid log level, it will be treated as EnvFilter directives.
-pub fn filter_from_value(v: &str) -> Result<EnvFilter, tracing_subscriber::filter::ParseError> {
+pub fn filter_from_value(v: &str) -> Result<EnvFilter, ParseError> {
 	match v {
 		// Don't show any logs at all
 		"none" => Ok(EnvFilter::default()),
-		// Check if we should show all log levels
-		"full" => Ok(EnvFilter::default().add_directive(Level::TRACE.into())),
-		// Otherwise, let's only show errors
+		// Otherwise, let's show only errors
 		"error" => Ok(EnvFilter::default().add_directive(Level::ERROR.into())),
+		// Otherwise, let's show warnings and above
+		"warn" => Ok(EnvFilter::default().add_directive(Level::WARN.into())),
+		// Otherwise, let's show info and above
+		"info" => Ok(EnvFilter::default().add_directive(Level::INFO.into())),
+		// Otherwise, let's show debugs and above
+		"debug" => EnvFilter::builder()
+			.parse("warn,surreal=debug,surrealdb=debug,surrealdb::core::kvs=info"),
 		// Specify the log level for each code area
-		"warn" | "info" | "debug" | "trace" => EnvFilter::builder()
-			.parse(format!("error,surreal={v},surrealdb={v},surrealdb::core::kvs::tx=error")),
+		"trace" => EnvFilter::builder()
+			.parse("warn,surreal=trace,surrealdb=trace,surrealdb::core::kvs=info"),
+		// Check if we should show all surreal logs
+		"full" => EnvFilter::builder().parse("debug,surreal=trace,surrealdb=trace"),
+		// Check if we should show all module logs
+		"all" => Ok(EnvFilter::default().add_directive(Level::TRACE.into())),
 		// Let's try to parse the custom log level
 		_ => EnvFilter::builder().parse(v),
 	}

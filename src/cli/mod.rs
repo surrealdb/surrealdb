@@ -15,7 +15,9 @@ mod version;
 mod version_client;
 
 use crate::cli::version_client::VersionClient;
-use crate::cnf::{DEBUG_BUILD_WARNING, LOGO, PKG_VERSION};
+#[cfg(debug_assertions)]
+use crate::cnf::DEBUG_BUILD_WARNING;
+use crate::cnf::{LOGO, PKG_VERSION};
 use crate::env::RELEASE;
 use clap::{Parser, Subcommand};
 pub use config::CF;
