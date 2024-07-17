@@ -92,10 +92,14 @@ pub trait RpcContext {
 	// ------------------------------
 
 	async fn yuse(&mut self, params: Array) -> Result<impl Into<Data>, RpcError> {
+		// For both ns+db, string = change, null = unset, none = do nothing
+		// We need to be able to adjust either ns or db without affecting the other
+		// To be able to select a namespace, and then list resources in that namespace, as an example
 		let (ns, db) = params.needs_two()?;
 		let unset_ns = matches!(ns, Value::Null);
 		let unset_db = matches!(db, Value::Null);
 
+		// If we unset the namespace, we must also unset the database
 		if unset_ns && !unset_db {
 			return Err(RpcError::InvalidParams);
 		}
