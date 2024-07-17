@@ -59,6 +59,7 @@ async fn define_statement_database() -> Result<(), Error> {
 		"{
 			accesses: {},
 			databases: { test: 'DEFINE DATABASE test' },
+			nodes: {},
 			users: {},
 		}",
 	);
@@ -1440,8 +1441,8 @@ async fn permissions_checks_define_access_root() {
 
 	// Define the expected results for the check statement when the test statement succeeded and when it failed
 	let check_results = [
-        vec!["{ accesses: { access: \"DEFINE ACCESS access ON ROOT TYPE JWT ALGORITHM HS512 KEY '[REDACTED]' WITH ISSUER KEY '[REDACTED]' DURATION FOR TOKEN 1h, FOR SESSION NONE\" }, namespaces: {  }, users: {  } }"],
-		vec!["{ accesses: {  }, namespaces: {  }, users: {  } }"]
+        vec!["{ accesses: { access: \"DEFINE ACCESS access ON ROOT TYPE JWT ALGORITHM HS512 KEY '[REDACTED]' WITH ISSUER KEY '[REDACTED]' DURATION FOR TOKEN 1h, FOR SESSION NONE\" }, namespaces: {  }, nodes: {  }, users: {  } }"],
+		vec!["{ accesses: {  }, namespaces: {  }, nodes: {  }, users: {  } }"]
     ];
 
 	let test_cases = [
