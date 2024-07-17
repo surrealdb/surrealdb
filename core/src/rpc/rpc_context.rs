@@ -92,13 +92,23 @@ pub trait RpcContext {
 	// ------------------------------
 
 	async fn yuse(&mut self, params: Array) -> Result<impl Into<Data>, RpcError> {
-		let (ns, db) = params.needs_two()?;
-		if let Value::Strand(ns) = ns {
+		let len = params.len();
+		let (ns, db) = params.needs_zero_one_or_two()?;
+
+		if len == 0 {
+			self.session_mut().ns = None;
+			self.session_mut().db = None;
+			return Ok(Value::None);
+		} else if let Value::Strand(ns) = ns {
 			self.session_mut().ns = Some(ns.0);
 		}
-		if let Value::Strand(db) = db {
+
+		if len == 1 {
+			self.session_mut().db = None;
+		} else if let Value::Strand(db) = db {
 			self.session_mut().db = Some(db.0);
 		}
+
 		Ok(Value::None)
 	}
 
