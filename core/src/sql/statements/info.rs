@@ -80,11 +80,19 @@ impl InfoStatement {
 				// Create the result set
 				Ok(match structured {
 					true => Value::from(map! {
+						"accesses".to_string() => process(txn.all_root_accesses().await?.iter().map(|v| v.redacted()).collect()),
 						"namespaces".to_string() => process(txn.all_ns().await?),
 						"nodes".to_string() => process(txn.all_nodes().await?),
 						"users".to_string() => process(txn.all_root_users().await?),
 					}),
 					false => Value::from(map! {
+						"accesses".to_string() => {
+							let mut out = Object::default();
+							for v in txn.all_root_accesses().await?.iter().map(|v| v.redacted()) {
+								out.insert(v.name.to_string(), v.to_string().into());
+							}
+							out.into()
+						},
 						"namespaces".to_string() => {
 							let mut out = Object::default();
 							for v in txn.all_ns().await?.iter() {

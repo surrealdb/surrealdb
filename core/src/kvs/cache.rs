@@ -51,6 +51,8 @@ pub(super) enum Entry {
 	Nds(Arc<[Node]>),
 	/// A slice of DefineUserStatement specified at the root.
 	Rus(Arc<[DefineUserStatement]>),
+	/// A slice of DefineAccessStatement specified at the root.
+	Ras(Arc<[DefineAccessStatement]>),
 	/// A slice of DefineNamespaceStatement specified on a namespace.
 	Nss(Arc<[DefineNamespaceStatement]>),
 	/// A slice of DefineUserStatement specified on a namespace.
@@ -107,6 +109,14 @@ impl Entry {
 	pub(super) fn into_rus(self) -> Arc<[DefineUserStatement]> {
 		match self {
 			Entry::Rus(v) => v,
+			_ => unreachable!(),
+		}
+	}
+	/// Converts this cache entry into a slice of [`DefineAccessStatement`].
+	/// This panics if called on a cache entry that is not an [`Entry::Ras`].
+	pub(super) fn into_ras(self) -> Arc<[DefineAccessStatement]> {
+		match self {
+			Entry::Ras(v) => v,
 			_ => unreachable!(),
 		}
 	}

@@ -318,6 +318,28 @@ impl Transaction {
 		.into_rus())
 	}
 
+	/// Retrieve all ROOT level accesses in a datastore.
+	pub async fn all_root_accesses(&self) -> Result<Arc<[DefineAccessStatement]>, Error> {
+		// Log this function call in development
+		#[cfg(debug_assertions)]
+		trace!(target: TARGET, "all_root_accesses");
+		// Continue with the function logic
+		let key = crate::key::root::ac::prefix();
+		let res = self.cache.get_value_or_guard_async(&key).await;
+		Ok(match res {
+			Ok(val) => val,
+			Err(cache) => {
+				let end = crate::key::root::ac::suffix();
+				let val = self.getr(key..end).await?;
+				let val = val.convert().into();
+				let val = Entry::Ras(Arc::clone(&val));
+				let _ = cache.insert(val.clone());
+				val
+			}
+		}
+		.into_ras())
+	}
+
 	/// Retrieve all namespace definitions in a datastore.
 	pub async fn all_ns(&self) -> Result<Arc<[DefineNamespaceStatement]>, Error> {
 		// Log this function call in development
@@ -765,6 +787,29 @@ impl Transaction {
 		.into_type())
 	}
 
+	/// Retrieve a specific namespace user definition.
+	pub async fn get_root_access(&self, user: &str) -> Result<Arc<DefineAccessStatement>, Error> {
+		// Log this function call in development
+		#[cfg(debug_assertions)]
+		trace!(target: TARGET, "get_root_access {user}");
+		// Continue with the function logic
+		let key = crate::key::root::ac::new(user).encode()?;
+		let res = self.cache.get_value_or_guard_async(&key).await;
+		Ok(match res {
+			Ok(val) => val,
+			Err(cache) => {
+				let val = self.get(key).await?.ok_or(Error::AccessRootNotFound {
+					value: user.to_owned(),
+				})?;
+				let val: DefineAccessStatement = val.into();
+				let val = Entry::Any(Arc::new(val));
+				let _ = cache.insert(val.clone());
+				val
+			}
+		}
+		.into_type())
+	}
+
 	/// Retrieve a specific namespace definition.
 	pub async fn get_ns(&self, ns: &str) -> Result<Arc<DefineNamespaceStatement>, Error> {
 		// Log this function call in development
@@ -831,8 +876,9 @@ impl Transaction {
 		Ok(match res {
 			Ok(val) => val,
 			Err(cache) => {
-				let val = self.get(key).await?.ok_or(Error::NaNotFound {
+				let val = self.get(key).await?.ok_or(Error::AccessNsNotFound {
 					value: na.to_owned(),
+					ns: ns.to_owned(),
 				})?;
 				let val: DefineAccessStatement = val.into();
 				let val = Entry::Any(Arc::new(val));
@@ -912,8 +958,10 @@ impl Transaction {
 		Ok(match res {
 			Ok(val) => val,
 			Err(cache) => {
-				let val = self.get(key).await?.ok_or(Error::DaNotFound {
+				let val = self.get(key).await?.ok_or(Error::AccessDbNotFound {
 					value: da.to_owned(),
+					ns: ns.to_owned(),
+					db: db.to_owned(),
 				})?;
 				let val: DefineAccessStatement = val.into();
 				let val = Entry::Any(Arc::new(val));
