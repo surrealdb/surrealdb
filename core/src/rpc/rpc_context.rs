@@ -93,8 +93,8 @@ pub trait RpcContext {
 
 	async fn yuse(&mut self, params: Array) -> Result<impl Into<Data>, RpcError> {
 		let (ns, db) = params.needs_two()?;
-		let unset_ns = matches!(ns, Value::Bool(false));
-		let unset_db = matches!(db, Value::Bool(false));
+		let unset_ns = matches!(ns, Value::Null);
+		let unset_db = matches!(db, Value::Null);
 
 		if unset_ns && !unset_db {
 			return Err(RpcError::InvalidParams);
