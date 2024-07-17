@@ -3,7 +3,7 @@
 
 [[unpublished.surrealdb]]
 version = "2.0.0"
-audited_as = "1.5.3"
+audited_as = "1.5.4"
 
 [[unpublished.surrealdb-core]]
 version = "2.0.0"
@@ -129,8 +129,8 @@ user-login = "tobiemh"
 user-name = "Tobie Morgan Hitchcock"
 
 [[publisher.surrealdb]]
-version = "1.5.3"
-when = "2024-06-14"
+version = "1.5.4"
+when = "2024-07-10"
 user-id = 145457
 user-login = "tobiemh"
 user-name = "Tobie Morgan Hitchcock"

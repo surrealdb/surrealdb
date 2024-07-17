@@ -616,19 +616,19 @@ version = "0.11.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.foundationdb]]
-version = "0.8.0"
+version = "0.9.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.foundationdb-gen]]
-version = "0.8.0"
+version = "0.9.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.foundationdb-macros]]
-version = "0.2.0"
+version = "0.3.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.foundationdb-sys]]
-version = "0.8.0"
+version = "0.9.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.fst]]
@@ -1596,7 +1596,7 @@ version = "0.6.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.serde_bytes]]
-version = "0.11.14"
+version = "0.11.15"
 criteria = "safe-to-deploy"
 
 [[exemptions.serde_html_form]]
