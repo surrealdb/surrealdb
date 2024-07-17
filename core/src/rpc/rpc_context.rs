@@ -92,24 +92,27 @@ pub trait RpcContext {
 	// ------------------------------
 
 	async fn yuse(&mut self, params: Array) -> Result<impl Into<Data>, RpcError> {
-		match params.needs_two()? {
-			(Value::Bool(false), Value::Strand(_)) => Err(RpcError::InvalidParams),
-			(ns, db) => {
-				if let Value::Strand(ns) = ns {
-					self.session_mut().ns = Some(ns.0);
-				} else if matches!(ns, Value::Bool(false)) {
-					self.session_mut().ns = None;
-				}
+		let (ns, db) = params.needs_two()?;
+		let unset_ns = matches!(ns, Value::Bool(false));
+		let unset_db = matches!(db, Value::Bool(false));
 
-				if let Value::Strand(db) = db {
-					self.session_mut().db = Some(db.0);
-				} else if matches!(db, Value::Bool(false)) {
-					self.session_mut().db = None;
-				}
-
-				Ok(Value::None)
-			}
+		if unset_ns && !unset_db {
+			return Err(RpcError::InvalidParams);
 		}
+
+		if unset_ns {
+			self.session_mut().ns = None;
+		} else if let Value::Strand(ns) = ns {
+			self.session_mut().ns = Some(ns.0);
+		}
+
+		if unset_db {
+			self.session_mut().db = None;
+		} else if let Value::Strand(db) = db {
+			self.session_mut().db = Some(db.0);
+		}
+
+		Ok(Value::None)
 	}
 
 	async fn signup(&mut self, params: Array) -> Result<impl Into<Data>, RpcError> {
