@@ -26,10 +26,14 @@ pub static TRANSACTION_CACHE_SIZE: Lazy<usize> =
 	lazy_env_parse!("SURREAL_TRANSACTION_CACHE_SIZE", usize, 10_000);
 
 /// The maximum number of keys that should be scanned at once in general queries.
-pub static NORMAL_FETCH_SIZE: Lazy<u32> = lazy_env_parse!("SURREAL_NORMAL_BATCH_SIZE", u32, 50);
+pub static NORMAL_FETCH_SIZE: Lazy<u32> = lazy_env_parse!("SURREAL_NORMAL_FETCH_SIZE", u32, 50);
 
 /// The maximum number of keys that should be scanned at once for export queries.
 pub static EXPORT_BATCH_SIZE: Lazy<u32> = lazy_env_parse!("SURREAL_EXPORT_BATCH_SIZE", u32, 1000);
+
+/// The maximum number of keys that should be fetched when streaming range scanns in a Scanner.
+pub static MAX_STREAM_BATCH_SIZE: Lazy<u32> =
+	lazy_env_parse!("SURREAL_MAX_STREAM_BATCH_SIZE", u32, 1000);
 
 /// Forward all signup/signin query errors to a client performing record access. Do not use in production.
 pub static INSECURE_FORWARD_RECORD_ACCESS_ERRORS: Lazy<bool> =
