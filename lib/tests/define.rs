@@ -59,7 +59,6 @@ async fn define_statement_database() -> Result<(), Error> {
 		"{
 			accesses: {},
 			databases: { test: 'DEFINE DATABASE test' },
-			nodes: {},
 			users: {},
 		}",
 	);
