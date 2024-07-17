@@ -1,7 +1,6 @@
 pub mod extract;
 
-use async_graphql_axum;
-use async_graphql_axum::*;
+use async_graphql_axum::{self, GraphQLBatchRequest, GraphQLRequest, GraphQLResponse};
 use extract::rejection::GraphQLRejection;
 use tokio::sync::RwLock;
 
@@ -47,7 +46,9 @@ impl<I: Invalidator> GraphQL<I> {
 		GraphQL(arc)
 	}
 
-	async fn get_schema(&self, ns: &str, db: &str) -> Result<Schema, GqlError> {
+	async fn get_schema(&self, session: &Session) -> Result<Schema, GqlError> {
+		let ns = session.ns.as_ref().expect("missing ns should have been caught");
+		let db = session.db.as_ref().expect("missing db should have been caught");
 		{
 			let guard = self.0.read().await;
 			if let Some(cand) = guard.get(ns.to_owned(), db.to_owned()) {
@@ -57,7 +58,7 @@ impl<I: Invalidator> GraphQL<I> {
 			}
 		};
 
-		let (schema, meta) = I::generate(ns, db).await?;
+		let (schema, meta) = I::generate(session).await?;
 
 		{
 			let mut guard = self.0.write().await;
@@ -86,14 +87,21 @@ where
 	fn call(&mut self, req: HttpRequest<B>) -> Self::Future {
 		let cache = self.clone();
 		Box::pin(async move {
-			let session = req.extensions().get::<Session>().unwrap();
-			let Some(ns) = session.ns.as_ref() else {
+			let session =
+				req.extensions().get::<Session>().expect("session extractor should always succeed");
+			let Some(_ns) = session.ns.as_ref() else {
 				return Ok(resolver_error("No namespace specified").into_response());
 			};
-			let Some(db) = session.db.as_ref() else {
+			let Some(_db) = session.db.as_ref() else {
 				return Ok(resolver_error("No database specified").into_response());
 			};
-			let executor = cache.get_schema(ns, db).await.unwrap();
+			let executor = match cache.get_schema(session).await {
+				Ok(e) => e,
+				Err(e) => {
+					info!("error generating schema: {e:?}");
+					return Ok(e.into_response());
+				}
+			};
 
 			let is_accept_multipart_mixed = req
 				.headers()

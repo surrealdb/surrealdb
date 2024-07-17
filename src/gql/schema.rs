@@ -12,7 +12,7 @@ use async_graphql::indexmap::IndexMap;
 use async_graphql::Name;
 use async_graphql::Value as GqlValue;
 use serde_json::Number;
-use surrealdb::err::Error;
+use surrealdb::dbs::Session;
 use surrealdb::sql;
 use surrealdb::sql::statements::SelectStatement;
 use surrealdb::sql::Expression;
@@ -20,9 +20,10 @@ use surrealdb::sql::Kind;
 use surrealdb::sql::{Cond, Fields};
 use surrealdb::sql::{Statement, Thing};
 
-use super::error::{resolver_error, schema_error, GqlError};
+use super::error::{resolver_error, GqlError};
 use super::ext::IntoExt;
 use crate::dbs::DB;
+use crate::gql::error::schema_error;
 use crate::gql::utils::GqlValueUtils;
 use surrealdb::kvs::LockType;
 use surrealdb::kvs::TransactionType;
@@ -66,8 +67,7 @@ pub trait Invalidator: Clone + Send + Sync + 'static {
 	fn is_valid(nsdb: (String, String), meta: &Self::MetaData) -> bool;
 
 	fn generate(
-		ns: &str,
-		db: &str,
+		session: &Session,
 	) -> impl std::future::Future<Output = Result<(Schema, Self::MetaData), GqlError>> + std::marker::Send;
 }
 
@@ -79,8 +79,8 @@ impl Invalidator for Pessimistic {
 	fn is_valid(_: (String, String), _: &Self::MetaData) -> bool {
 		false
 	}
-	async fn generate(ns: &str, db: &str) -> Result<(Schema, Self::MetaData), GqlError> {
-		let schema = generate_schema(ns, db).await?;
+	async fn generate(session: &Session) -> Result<(Schema, Self::MetaData), GqlError> {
+		let schema = generate_schema(session).await?;
 		Ok((schema, ()))
 	}
 }
@@ -108,12 +108,18 @@ impl<I: Invalidator> SchemaCache<I> {
 	}
 }
 
-pub async fn generate_schema(ns: &str, db: &str) -> Result<Schema, GqlError> {
+pub async fn generate_schema(session: &Session) -> Result<Schema, GqlError> {
 	let kvs = DB.get().unwrap();
 	let mut tx = kvs.transaction(TransactionType::Read, LockType::Optimistic).await?;
-	let tbs = tx.all_tb("test", "test").await?;
+	let ns = session.ns.as_ref().expect("missing ns should have been caught");
+	let db = session.db.as_ref().expect("missing db should have been caught");
+	let tbs = tx.all_tb(&ns, &db).await?;
 	let mut query = Object::new("Query");
 	let mut types: Vec<Type> = Vec::new();
+
+	if tbs.len() == 0 {
+		return Err(schema_error("no tables found in database"));
+	}
 
 	for tb in tbs.iter() {
 		trace!("Adding table: {}", tb.name);
@@ -140,33 +146,16 @@ pub async fn generate_schema(ns: &str, db: &str) -> Result<Schema, GqlError> {
 			.field(InputValue::new("not", TypeRef::named(&table_filter_name)));
 		types.push(Type::InputObject(filter_id()));
 
-		let res_ns1 = ns.to_owned();
-		let res_db1 = db.to_owned();
+		let sess1 = session.to_owned();
 		query = query.field(
 			Field::new(
 				tb.name.to_string(),
 				TypeRef::named_nn_list_nn(tb.name.to_string()),
 				move |ctx| {
-					let res_ns = res_ns1.to_owned();
-					let res_db = res_db1.to_owned();
 					let tb_name = first_tb_name.clone();
+					let sess1 = sess1.clone();
 					FieldFuture::new(async move {
 						let kvs = DB.get().unwrap();
-
-						let use_stmt = Statement::Use((res_ns.clone(), res_db.clone()).intox());
-
-						// -- debugging --
-						// let args = ctx.args;
-						// let map = args.as_index_map();
-						// dbg!(map);
-
-						// let par_val = ctx.parent_value.as_value().unwrap().clone();
-						// dbg!(par_val);
-
-						// let inner = ctx.ctx.clone();
-						// let node = inner.path_node;
-						// dbg!(node);
-						// ---------------
 
 						let args = ctx.args.as_index_map();
 						trace!("received request with args: {args:?}");
@@ -243,17 +232,16 @@ pub async fn generate_schema(ns: &str, db: &str) -> Result<Schema, GqlError> {
 
 						trace!("generated query ast: {ast:?}");
 
-						let query = vec![use_stmt, ast].into();
+						let query = ast.into();
 						trace!("generated query: {}", query);
 
-						let res =
-							kvs.process(query, &Default::default(), Default::default()).await?;
-						// ast is constructed such that there will only be two responses the first of which is NONE
-						let mut res_iter = res.into_iter();
-						// this is none so can be disregarded
-						let _ = res_iter.next();
-						let res = res_iter.next().unwrap();
-						let res = res.result?;
+						let res = kvs.process(query, &sess1, Default::default()).await?;
+						debug_assert_eq!(res.len(), 1);
+						let res = res
+							.into_iter()
+							.next()
+							.expect("response vector should have exactly one value")
+							.result?;
 
 						let res_vec =
 							match res {
@@ -280,8 +268,7 @@ pub async fn generate_schema(ns: &str, db: &str) -> Result<Schema, GqlError> {
 			.argument(InputValue::new("filter", TypeRef::named(&table_filter_name))),
 		);
 
-		let res_ns1 = ns.to_owned();
-		let res_db1 = db.to_owned();
+		let sess2 = session.to_owned();
 		query = query.field(
 			Field::new(
 				format!("_get_{}", tb.name),
@@ -289,8 +276,7 @@ pub async fn generate_schema(ns: &str, db: &str) -> Result<Schema, GqlError> {
 				move |ctx| {
 					let tb_name = second_tb_name.clone();
 					FieldFuture::new({
-						let value_ns = res_ns1.to_owned();
-						let value_db = res_db1.to_owned();
+						let sess2 = sess2.clone();
 						async move {
 							let kvs = DB.get().unwrap();
 
@@ -309,7 +295,7 @@ pub async fn generate_schema(ns: &str, db: &str) -> Result<Schema, GqlError> {
 								Err(_) => Thing::from((tb_name, id)),
 							};
 
-							let use_stmt = Statement::Use((value_ns, value_db).intox());
+							// let use_stmt = Statement::Use((value_ns, value_db).intox());
 
 							let ast = Statement::Select({
 								let mut tmp = SelectStatement::default();
@@ -319,16 +305,18 @@ pub async fn generate_schema(ns: &str, db: &str) -> Result<Schema, GqlError> {
 								tmp
 							});
 
-							let query = vec![use_stmt, ast].into();
+							// let query = vec![use_stmt, ast].into();
+							let query = ast.into();
 							trace!("generated query: {}", query);
 
-							let res =
-								kvs.process(query, &Default::default(), Default::default()).await?;
-							// ast is constructed such that there will only be two responses the first of which is NONE
-							let mut res_iter = res.into_iter();
-							let _ = res_iter.next();
-							let res = res_iter.next().unwrap();
-							let res = res.result?;
+							let res = kvs.process(query, &sess2, Default::default()).await?;
+							debug_assert_eq!(res.len(), 1);
+							let res = res
+								.into_iter()
+								.next()
+								.expect("response vector should have exactly one value")
+								.result?;
+
 							let out = sql_value_to_gql_value(res)
 								.map_err(|_| "SQL to GQL translation failed")?;
 
@@ -412,17 +400,9 @@ pub async fn generate_schema(ns: &str, db: &str) -> Result<Schema, GqlError> {
 		.implement("record");
 	schema = schema.register(relation_interface);
 
-	let res = schema.finish();
-	match res {
-		Ok(s) => Ok(s),
-		Err(_) => {
-			warn!("note: Query reloading is not yet implemented. This means that the schema is generated on startup, so if starting in memory the schema will always be empty");
-			res.unwrap();
-			unreachable!();
-		}
-	}
-
-	// Ok(schema.finish().unwrap())
+	schema
+		.finish()
+		.map_err(|e| schema_error(format!("there was an error generating schema: {e:?}")))
 }
 
 fn sql_value_to_gql_value(v: SqlValue) -> Result<GqlValue, ()> {
@@ -579,7 +559,7 @@ fn parse_op(name: impl AsRef<str>) -> Result<sql::Operator, GqlError> {
 }
 
 fn negate(filter: &GqlValue) -> Result<SqlValue, GqlError> {
-	let obj = filter.as_object().ok_or(Error::Thrown("Value of NOT must be object".to_string()))?;
+	let obj = filter.as_object().ok_or(resolver_error("Value of NOT must be object"))?;
 	let inner_cond = val_from_filter(obj)?;
 
 	Ok(Expression::Unary {
