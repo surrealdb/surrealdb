@@ -1,6 +1,7 @@
 use crate::api::conn::Method;
 use crate::api::conn::Param;
 use crate::api::err::Error;
+use crate::api::method::BoxFuture;
 use crate::api::method::Content;
 use crate::api::opt::Resource;
 use crate::api::Connection;
@@ -11,7 +12,6 @@ use crate::sql::Part;
 use crate::sql::Table;
 use crate::sql::Value;
 use crate::Surreal;
-use futures::future::BoxFuture;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 use std::borrow::Cow;
@@ -54,10 +54,7 @@ macro_rules! into_future {
 					Resource::RecordId(record_id) => {
 						let mut table = Table::default();
 						table.0 = record_id.tb.clone();
-						(
-							table.into(),
-							crate::map! { String::from("id") => record_id.into() }.into(),
-						)
+						(table.into(), map! { String::from("id") => record_id.into() }.into())
 					}
 					Resource::Object(obj) => return Err(Error::InsertOnObject(obj).into()),
 					Resource::Array(arr) => return Err(Error::InsertOnArray(arr).into()),

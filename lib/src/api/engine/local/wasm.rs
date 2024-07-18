@@ -3,6 +3,7 @@ use crate::api::conn::Route;
 use crate::api::conn::Router;
 use crate::api::engine::local::Db;
 use crate::api::engine::local::DEFAULT_TICK_INTERVAL;
+use crate::api::method::BoxFuture;
 use crate::api::opt::Endpoint;
 use crate::api::ExtraFeatures;
 use crate::api::OnceLockExt;

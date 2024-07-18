@@ -10,13 +10,13 @@ pub mod opt;
 mod conn;
 
 pub use method::query::Response;
+use method::BoxFuture;
 use semver::Version;
 use tokio::sync::watch;
 
 use crate::api::conn::Router;
 use crate::api::err::Error;
 use crate::api::opt::Endpoint;
-use futures::future::BoxFuture;
 use semver::BuildMetadata;
 use semver::VersionReq;
 use std::fmt;

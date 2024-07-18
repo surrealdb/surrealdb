@@ -1,6 +1,7 @@
 use crate::api;
 use crate::api::err::Error;
 use crate::api::method::query::Response;
+use crate::api::method::BoxFuture;
 use crate::api::opt::Endpoint;
 use crate::api::ExtraFeatures;
 use crate::api::Result;

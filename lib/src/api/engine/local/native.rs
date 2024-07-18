@@ -2,6 +2,7 @@ use crate::api::conn::Connection;
 use crate::api::conn::Route;
 use crate::api::conn::Router;
 use crate::api::engine::local::Db;
+use crate::api::method::BoxFuture;
 use crate::api::opt::{Endpoint, EndpointKind};
 use crate::api::ExtraFeatures;
 use crate::api::OnceLockExt;
@@ -118,10 +119,7 @@ pub(crate) async fn run_router(
 		feature = "kv-fdb",
 		feature = "kv-tikv",
 	))]
-	let kvs = match address.config.temporary_directory {
-		Some(tmp_dir) => kvs.with_temporary_directory(tmp_dir),
-		_ => kvs,
-	};
+	let kvs = kvs.with_temporary_directory(address.config.temporary_directory);
 
 	let kvs = Arc::new(kvs);
 	let mut vars = BTreeMap::new();

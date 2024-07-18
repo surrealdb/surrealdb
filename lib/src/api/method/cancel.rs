@@ -1,4 +1,4 @@
-use futures::future::BoxFuture;
+use crate::api::method::BoxFuture;
 
 use crate::api::Connection;
 use crate::api::Result;

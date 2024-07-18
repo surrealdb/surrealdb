@@ -571,16 +571,24 @@ jobs:
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
-      - name: Setup FoundationDB
-        uses: foundationdb-rs/foundationdb-actions-install@v.2.2.0
-        with:
-          version: "7.1.30"
-
       - name: Install cargo-make
         run: cargo install --debug --locked cargo-make
 
+      - name: Setup FoundationDB
+        uses: foundationdb-rs/foundationdb-actions-install@v.2.2.0
+        with:
+          version: "7.1.61"
+
       - name: Test fdb engine
-        run: cargo make ci-api-integration-fdb
+        run: cargo make ci-api-integration-fdb-7_1
+
+      - name: Setup FoundationDB
+        uses: foundationdb-rs/foundationdb-actions-install@v.2.2.0
+        with:
+          version: "7.3.47"
+
+      - name: Test fdb engine
+        run: cargo make ci-api-integration-fdb-7_3
 
       - name: Debug info
         if: always()

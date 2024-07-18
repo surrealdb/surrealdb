@@ -11,6 +11,7 @@ use crate::api::engine::remote::ws::Response;
 use crate::api::engine::remote::ws::PING_INTERVAL;
 use crate::api::engine::remote::ws::PING_METHOD;
 use crate::api::err::Error;
+use crate::api::method::BoxFuture;
 use crate::api::opt::Endpoint;
 #[cfg(any(feature = "native-tls", feature = "rustls"))]
 use crate::api::opt::Tls;
