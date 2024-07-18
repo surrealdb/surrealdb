@@ -21,16 +21,15 @@ fn initialize_store(env_var: &str, default_dir: &str) -> Arc<dyn ObjectStore> {
 	match std::env::var(env_var) {
 		Ok(url) => {
 			let url = Url::parse(&url).expect(&format!("Expected a valid url for {}", env_var));
-			let (store, _) = parse_url(&url).expect(&format!("Expected a valid url for {}", env_var));
+			let (store, _) =
+				parse_url(&url).expect(&format!("Expected a valid url for {}", env_var));
 			Arc::new(store)
 		}
 		Err(_) => {
 			let path = env::current_dir().unwrap().join(default_dir);
 			if !path.exists() || !path.is_dir() {
-				fs::create_dir_all(&path).expect(&format!(
-					"Unable to create directory structure for {}",
-					env_var
-				));
+				fs::create_dir_all(&path)
+					.expect(&format!("Unable to create directory structure for {}", env_var));
 			}
 			#[cfg(not(target_arch = "wasm32"))]
 			{
