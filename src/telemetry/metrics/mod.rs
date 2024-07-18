@@ -4,9 +4,10 @@ pub mod ws;
 use std::time::Duration;
 
 use once_cell::sync::Lazy;
+use opentelemetry::global::ObjectSafeMeterProvider;
 use opentelemetry::Context as TelemetryContext;
 use opentelemetry::{
-	metrics::{Meter, MetricsError},
+	metrics::{Meter, MeterProvider, MetricsError},
 	// sdk::{
 	// 	export::metrics::aggregation,
 	// 	metrics::{
@@ -17,8 +18,11 @@ use opentelemetry::{
 };
 use opentelemetry_otlp::MetricsExporterBuilder;
 use opentelemetry_sdk::metrics::data::Temporality;
+use opentelemetry_sdk::metrics::reader::{DefaultAggregationSelector, DefaultTemporalitySelector};
+use opentelemetry_sdk::metrics::{MeterProviderBuilder, SdkMeterProvider};
 // use opentelemetry_sdk::export;
 use opentelemetry_sdk::runtime;
+use opentelemetry_sdk::{export, metrics};
 
 pub use self::http::tower_layer::HttpMetricsLayer;
 use self::ws::observe_active_connection;
@@ -50,27 +54,33 @@ const HISTOGRAM_BUCKETS_BYTES: &[f64] = &[
 	100.0 * MB, // 100 MB
 ];
 
-fn build_controller(boundaries: &'static [f64]) -> BasicController {
+fn build_controller(boundaries: &'static [f64]) -> SdkMeterProvider {
 	let exporter = MetricsExporterBuilder::from(opentelemetry_otlp::new_exporter().tonic())
-		.build_metrics_exporter(Box::new(Temporality::Cumulative), todo!())
+		.build_metrics_exporter(
+			Box::new(DefaultTemporalitySelector::new()),
+			Box::new(DefaultAggregationSelector::new()),
+		)
 		.unwrap();
 
-	let builder = controllers::basic(processors::factory(
-		selectors::simple::histogram(boundaries),
-		aggregation::cumulative_temporality_selector(),
-	))
-	.with_push_timeout(Duration::from_secs(5))
-	.with_collect_period(Duration::from_secs(5))
-	.with_exporter(exporter)
-	.with_resource(OTEL_DEFAULT_RESOURCE.clone());
+	// let builder = controllers::basic(processors::factory(
+	// 	selectors::simple::histogram(boundaries),
+	// 	aggregation::cumulative_temporality_selector(),
+	// ))
+	// .with_push_timeout(Duration::from_secs(5))
+	// .with_collect_period(Duration::from_secs(5))
+	// .with_exporter(exporter)
+	// .with_resource(OTEL_DEFAULT_RESOURCE.clone());
+
+	// this is a guess
+	let builder = MeterProviderBuilder::default().with_reader(exporter);
 
 	builder.build()
 }
 
-static METER_PROVIDER_DURATION: Lazy<BasicController> =
+static METER_PROVIDER_DURATION: Lazy<SdkMeterProvider> =
 	Lazy::new(|| build_controller(HISTOGRAM_BUCKETS_MS));
 
-static METER_PROVIDER_SIZE: Lazy<BasicController> =
+static METER_PROVIDER_SIZE: Lazy<SdkMeterProvider> =
 	Lazy::new(|| build_controller(HISTOGRAM_BUCKETS_BYTES));
 
 static METER_DURATION: Lazy<Meter> = Lazy::new(|| METER_PROVIDER_DURATION.meter("duration"));

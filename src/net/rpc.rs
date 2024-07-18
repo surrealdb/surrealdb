@@ -13,12 +13,12 @@ use crate::rpc::RpcState;
 use axum::extract::State;
 use axum::routing::get;
 use axum::routing::post;
-use axum::TypedHeader;
 use axum::{
 	extract::ws::{WebSocket, WebSocketUpgrade},
 	response::IntoResponse,
 	Extension, Router,
 };
+use axum_extra::TypedHeader;
 use bytes::Bytes;
 use http::HeaderValue;
 use http_body::Body as HttpBody;

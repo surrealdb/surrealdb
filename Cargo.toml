@@ -68,8 +68,9 @@ http-body = "1.0.0"
 http-body-util = "0.1.1"
 hyper = "1.2.0"
 once_cell = "1.18.0"
-opentelemetry = { version = "0.19", features = ["rt-tokio"] }
-opentelemetry-otlp = { version = "0.12.0", features = ["metrics"] }
+opentelemetry = { version = "0.24" }
+opentelemetry_sdk = { version = "0.24", features = ["rt-tokio"] }
+opentelemetry-otlp = { version = "0.17.0", features = ["metrics"] }
 pin-project-lite = "0.2.13"
 pprof = { version = "0.13.0", features = [
     "flamegraph",
@@ -123,6 +124,7 @@ tracing-opentelemetry = "0.24.0"
 tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }
 urlencoding = "2.1.3"
 uuid = { version = "1.6.1", features = ["serde", "js", "v4", "v7"] }
+tokio-tungstenite = "0.23.0"
 
 [target.'cfg(unix)'.dependencies]
 nix = { version = "0.27.1", features = ["user"] }
@@ -139,7 +141,7 @@ jemallocator = "0.5.4"
 [dev-dependencies]
 assert_fs = "1.0.13"
 env_logger = "0.10.1"
-opentelemetry-proto = { version = "0.6.0", features = [
+opentelemetry-proto = { version = "0.7.0", features = [
     "gen-tonic",
     "metrics",
     "logs",
@@ -149,8 +151,8 @@ serial_test = "2.0.0"
 temp-env = { version = "0.3.6", features = ["async_closure"] }
 test-log = { version = "0.2.13", features = ["trace"] }
 tokio-stream = { version = "0.1", features = ["net"] }
-tokio-tungstenite = { version = "0.21.0" }
-tonic = "0.11.0"
+tokio-tungstenite = { version = "0.23.0" }
+tonic = "0.12.0"
 ulid = "1.1.0"
 wiremock = "0.6.0"
 
