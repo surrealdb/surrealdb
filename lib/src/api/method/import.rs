@@ -1,3 +1,5 @@
+use crate::api::method::BoxFuture;
+
 use crate::api::conn::Method;
 use crate::api::conn::MlConfig;
 use crate::api::conn::Param;
