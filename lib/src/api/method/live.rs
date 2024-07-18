@@ -2,6 +2,7 @@ use crate::api::conn::Method;
 use crate::api::conn::Param;
 use crate::api::conn::Router;
 use crate::api::err::Error;
+use crate::api::method::BoxFuture;
 use crate::api::Connection;
 use crate::api::ExtraFeatures;
 use crate::api::Result;
@@ -30,7 +31,6 @@ use crate::Surreal;
 use channel::Receiver;
 use futures::StreamExt;
 use serde::de::DeserializeOwned;
-use std::future::Future;
 use std::future::IntoFuture;
 use std::marker::PhantomData;
 use std::mem;
@@ -100,7 +100,7 @@ macro_rules! into_future {
 					false,
 				);
 				let id: Value = query.await?.take(0)?;
-				let rx = register::<Client>(router, id.clone()).await?;
+				let rx = register(router, id.clone()).await?;
 				Ok(Stream::new(
 					Surreal::new_from_router_waiter(client.router.clone(), client.waiter.clone()),
 					id,
@@ -111,18 +111,11 @@ macro_rules! into_future {
 	};
 }
 
-pub(crate) async fn register<Client>(
-	router: &Router,
-	id: Value,
-) -> Result<Receiver<dbs::Notification>>
-where
-	Client: Connection,
-{
-	let mut conn = Client::new(Method::Live);
+pub(crate) async fn register(router: &Router, id: Value) -> Result<Receiver<dbs::Notification>> {
 	let (tx, rx) = channel::unbounded();
 	let mut param = Param::notification_sender(tx);
 	param.other = vec![id];
-	conn.execute_unit(router, param).await?;
+	router.execute_unit(Method::Live, param).await?;
 	Ok(rx)
 }
 
@@ -131,7 +124,7 @@ where
 	Client: Connection,
 {
 	type Output = Result<Stream<Value>>;
-	type IntoFuture = Pin<Box<dyn Future<Output = Self::Output> + Send + Sync + 'r>>;
+	type IntoFuture = BoxFuture<'r, Self::Output>;
 
 	into_future! {}
 }
@@ -142,7 +135,7 @@ where
 	R: DeserializeOwned,
 {
 	type Output = Result<Stream<Option<R>>>;
-	type IntoFuture = Pin<Box<dyn Future<Output = Self::Output> + Send + Sync + 'r>>;
+	type IntoFuture = BoxFuture<'r, Self::Output>;
 
 	into_future! {}
 }
@@ -153,7 +146,7 @@ where
 	R: DeserializeOwned,
 {
 	type Output = Result<Stream<Vec<R>>>;
-	type IntoFuture = Pin<Box<dyn Future<Output = Self::Output> + Send + Sync + 'r>>;
+	type IntoFuture = BoxFuture<'r, Self::Output>;
 
 	into_future! {}
 }
@@ -261,8 +254,7 @@ where
 	let client = client.clone();
 	spawn(async move {
 		if let Ok(router) = client.router.extract() {
-			let mut conn = Client::new(Method::Kill);
-			conn.execute_unit(router, Param::new(vec![id.clone()])).await.ok();
+			router.execute_unit(Method::Kill, Param::new(vec![id.clone()])).await.ok();
 		}
 	});
 }

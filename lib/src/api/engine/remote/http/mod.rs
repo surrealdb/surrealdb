@@ -71,9 +71,7 @@ pub struct Https;
 
 /// An HTTP client for communicating with the server via HTTP
 #[derive(Debug, Clone)]
-pub struct Client {
-	method: Method,
-}
+pub struct Client(());
 
 impl Surreal<Client> {
 	/// Connects to a specific database endpoint, saving the connection on the static client
