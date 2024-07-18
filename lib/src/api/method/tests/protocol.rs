@@ -1,9 +1,9 @@
 use super::server;
 use crate::api::conn::Connection;
 use crate::api::conn::Router;
+use crate::api::method::BoxFuture;
 use crate::api::opt::Endpoint;
 use crate::api::opt::IntoEndpoint;
-use crate::api::method::BoxFuture;
 use crate::api::Connect;
 use crate::api::ExtraFeatures;
 use crate::api::OnceLockExt;

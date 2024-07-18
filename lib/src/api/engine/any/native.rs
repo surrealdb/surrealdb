@@ -6,11 +6,11 @@ use crate::api::engine::any::Any;
 #[cfg(feature = "protocol-http")]
 use crate::api::engine::remote::http;
 use crate::api::err::Error;
+use crate::api::method::BoxFuture;
 #[cfg(any(feature = "native-tls", feature = "rustls"))]
 #[cfg(feature = "protocol-http")]
 use crate::api::opt::Tls;
 use crate::api::opt::{Endpoint, EndpointKind};
-use crate::api::method::BoxFuture;
 #[allow(unused_imports)] // used by the DB engines
 use crate::api::ExtraFeatures;
 use crate::api::OnceLockExt;

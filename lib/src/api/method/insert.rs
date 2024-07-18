@@ -1,9 +1,9 @@
 use crate::api::conn::Method;
 use crate::api::conn::Param;
 use crate::api::err::Error;
+use crate::api::method::BoxFuture;
 use crate::api::method::Content;
 use crate::api::opt::Resource;
-use crate::api::method::BoxFuture;
 use crate::api::Connection;
 use crate::api::Result;
 use crate::method::OnceLockExt;
