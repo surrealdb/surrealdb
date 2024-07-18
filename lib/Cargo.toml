@@ -82,7 +82,7 @@ reqwest = { version = "0.11.22", default-features = false, features = [
     "stream",
     "multipart",
 ], optional = true }
-revision = { version = "0.7.0", features = [
+revision = { version = "0.8.0", features = [
     "chrono",
     "geo",
     "roaring",
