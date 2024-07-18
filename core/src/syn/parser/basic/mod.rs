@@ -162,7 +162,7 @@ mod test {
 			let r = stack
 				.enter(|ctx| async move { parser.parse_query(ctx).await })
 				.finish()
-				.expect(&format!("failed on {}", ident));
+				.unwrap_or_else(|_| panic!("failed on {}", ident));
 
 			assert_eq!(
 				r,

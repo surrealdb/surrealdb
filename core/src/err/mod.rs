@@ -1010,6 +1010,13 @@ pub enum Error {
 	TbInvalid {
 		value: String,
 	},
+
+	/// This error is used for breaking execution when a value is returned
+	#[doc(hidden)]
+	#[error("Return statement has been reached")]
+	Return {
+		value: Value,
+	},
 }
 
 impl From<Error> for String {

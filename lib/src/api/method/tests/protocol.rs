@@ -96,13 +96,7 @@ impl Connection for Client {
 				request: (0, self.method, param),
 				response: sender,
 			};
-			router
-				.sender
-				.send_async(Some(route))
-				.await
-				.as_ref()
-				.map_err(ToString::to_string)
-				.unwrap();
+			router.sender.send_async(route).await.as_ref().map_err(ToString::to_string).unwrap();
 			Ok(receiver)
 		})
 	}

@@ -1,5 +1,4 @@
 use crate::sql::fmt::Fmt;
-use crate::sql::idiom::Idiom;
 use crate::sql::statements::info::InfoStructure;
 use crate::sql::Value;
 use revision::revisioned;
@@ -36,7 +35,7 @@ impl fmt::Display for Fetchs {
 
 impl InfoStructure for Fetchs {
 	fn structure(self) -> Value {
-		Value::Array(self.0.into_iter().map(|f| f.0.structure()).collect())
+		self.into_iter().map(Fetch::structure).collect::<Vec<_>>().into()
 	}
 }
 
@@ -44,10 +43,10 @@ impl InfoStructure for Fetchs {
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
-pub struct Fetch(pub Idiom);
+pub struct Fetch(pub Value);
 
 impl Deref for Fetch {
-	type Target = Idiom;
+	type Target = Value;
 	fn deref(&self) -> &Self::Target {
 		&self.0
 	}
@@ -56,5 +55,11 @@ impl Deref for Fetch {
 impl Display for Fetch {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
 		Display::fmt(&self.0, f)
+	}
+}
+
+impl InfoStructure for Fetch {
+	fn structure(self) -> Value {
+		self.to_string().into()
 	}
 }

@@ -2,7 +2,7 @@ use crate::sql::fmt::is_pretty;
 use crate::sql::fmt::pretty_indent;
 use crate::sql::fmt::pretty_sequence_item;
 use crate::sql::statements::info::InfoStructure;
-use crate::sql::{Object, Value};
+use crate::sql::Value;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::Write;
@@ -113,6 +113,17 @@ impl Display for Permissions {
 	}
 }
 
+impl InfoStructure for Permissions {
+	fn structure(self) -> Value {
+		Value::from(map! {
+			"select".to_string() => self.select.structure(),
+			"create".to_string() => self.create.structure(),
+			"update".to_string() => self.update.structure(),
+			"delete".to_string() => self.delete.structure(),
+		})
+	}
+}
+
 #[derive(Clone, Copy, Eq, PartialEq, Debug)]
 pub(crate) enum PermissionKind {
 	Select,
@@ -173,26 +184,7 @@ impl InfoStructure for Permission {
 		match self {
 			Permission::None => Value::Bool(false),
 			Permission::Full => Value::Bool(true),
-			Permission::Specific(v) => Value::Strand(v.to_string().into()),
+			Permission::Specific(v) => v.to_string().into(),
 		}
-	}
-}
-
-impl InfoStructure for Permissions {
-	fn structure(self) -> Value {
-		let Self {
-			select,
-			create,
-			update,
-			delete,
-		} = self;
-		let mut acc = Object::default();
-
-		acc.insert("select".to_string(), select.structure());
-		acc.insert("create".to_string(), create.structure());
-		acc.insert("update".to_string(), update.structure());
-		acc.insert("delete".to_string(), delete.structure());
-
-		Value::Object(acc)
 	}
 }

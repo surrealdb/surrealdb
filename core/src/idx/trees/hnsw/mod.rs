@@ -315,7 +315,7 @@ mod tests {
 	) -> HashSet<SharedVector> {
 		let mut set = HashSet::new();
 		for (_, obj) in collection.to_vec_ref() {
-			let obj: SharedVector = obj.clone().into();
+			let obj: SharedVector = obj.clone();
 			h.insert(obj.clone());
 			set.insert(obj);
 			h.check_hnsw_properties(set.len());
@@ -367,7 +367,7 @@ mod tests {
 	fn test_hnsw_collection(p: &HnswParams, collection: &TestCollection) {
 		let mut h = HnswFlavor::new(p);
 		insert_collection_hnsw(&mut h, collection);
-		find_collection_hnsw(&h, &collection);
+		find_collection_hnsw(&h, collection);
 	}
 
 	fn new_params(
@@ -447,7 +447,7 @@ mod tests {
 	) -> HashMap<SharedVector, HashSet<DocId>> {
 		let mut map: HashMap<SharedVector, HashSet<DocId>> = HashMap::new();
 		for (doc_id, obj) in collection.to_vec_ref() {
-			let obj: SharedVector = obj.clone().into();
+			let obj: SharedVector = obj.clone();
 			h.insert(obj.clone(), *doc_id);
 			match map.entry(obj) {
 				Entry::Occupied(mut e) => {
@@ -506,7 +506,7 @@ mod tests {
 		mut map: HashMap<SharedVector, HashSet<DocId>>,
 	) {
 		for (doc_id, obj) in collection.to_vec_ref() {
-			let obj: SharedVector = obj.clone().into();
+			let obj: SharedVector = obj.clone();
 			h.remove(obj.clone(), *doc_id);
 			if let Entry::Occupied(mut e) = map.entry(obj.clone()) {
 				let set = e.get_mut();

@@ -1,5 +1,6 @@
 use std::collections::BTreeMap;
 use std::ops::Deref;
+use std::sync::Arc;
 
 use crate::cnf;
 use crate::dbs::DB;
@@ -8,18 +9,19 @@ use crate::rpc::connection::Connection;
 use crate::rpc::format::HttpFormat;
 use crate::rpc::post_context::PostRpcContext;
 use crate::rpc::response::IntoRpcResponse;
-use crate::rpc::WEBSOCKETS;
+use crate::rpc::RpcState;
+use axum::extract::State;
 use axum::routing::get;
 use axum::routing::post;
+use axum::TypedHeader;
 use axum::{
 	extract::ws::{WebSocket, WebSocketUpgrade},
 	response::IntoResponse,
 	Extension, Router,
 };
-use axum_extra::TypedHeader;
 use bytes::Bytes;
 use http::HeaderValue;
-
+use http_body::Body as HttpBody;
 use surrealdb::dbs::Session;
 use surrealdb::rpc::format::Format;
 use surrealdb::rpc::format::PROTOCOLS;
@@ -32,10 +34,7 @@ use super::headers::ContentType;
 
 use surrealdb::rpc::rpc_context::RpcContext;
 
-pub(super) fn router<S>() -> Router<S>
-where
-	S: Clone + Send + Sync + 'static,
-{
+pub(super) fn router() -> Router<Arc<RpcState>> {
 	Router::new().route("/rpc", get(get_handler)).route("/rpc", post(post_handler))
 }
 
@@ -43,6 +42,7 @@ async fn get_handler(
 	ws: WebSocketUpgrade,
 	Extension(id): Extension<RequestId>,
 	Extension(sess): Extension<Session>,
+	State(rpc_state): State<Arc<RpcState>>,
 ) -> Result<impl IntoResponse, impl IntoResponse> {
 	// Check if there is a request id header specified
 	let id = match id.header_value().is_empty() {
@@ -62,7 +62,7 @@ async fn get_handler(
 		},
 	};
 	// Check if a connection with this id already exists
-	if WEBSOCKETS.read().await.contains_key(&id) {
+	if rpc_state.web_sockets.read().await.contains_key(&id) {
 		return Err(Error::Request);
 	}
 	// Now let's upgrade the WebSocket connection
@@ -74,10 +74,10 @@ async fn get_handler(
 		// Set the maximum WebSocket message size
 		.max_message_size(*cnf::WEBSOCKET_MAX_MESSAGE_SIZE)
 		// Handle the WebSocket upgrade and process messages
-		.on_upgrade(move |socket| handle_socket(socket, sess, id)))
+		.on_upgrade(move |socket| handle_socket(rpc_state, socket, sess, id)))
 }
 
-async fn handle_socket(ws: WebSocket, sess: Session, id: Uuid) {
+async fn handle_socket(state: Arc<RpcState>, ws: WebSocket, sess: Session, id: Uuid) {
 	// Check if there is a WebSocket protocol specified
 	let format = match ws.protocol().map(HeaderValue::to_str) {
 		// Any selected protocol will always be a valie value
@@ -87,7 +87,7 @@ async fn handle_socket(ws: WebSocket, sess: Session, id: Uuid) {
 	};
 	// Format::Unsupported is not in the PROTOCOLS list so cannot be the value of format here
 	// Create a new connection instance
-	let rpc = Connection::new(id, sess, format);
+	let rpc = Connection::new(state, id, sess, format);
 	// Serve the socket connection requests
 	Connection::serve(rpc, ws).await;
 }

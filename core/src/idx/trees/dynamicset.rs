@@ -137,24 +137,24 @@ mod tests {
 			let v: HashSet<usize> = dyn_set.iter().cloned().collect();
 			assert_eq!(v, control, "{capacity} - {sample}");
 			// We should not have the element yet
-			assert_eq!(dyn_set.contains(&sample), false, "{capacity} - {sample}");
+			assert!(!dyn_set.contains(&sample), "{capacity} - {sample}");
 			// The first insertion returns true
-			assert_eq!(dyn_set.insert(sample), true);
-			assert_eq!(dyn_set.contains(&sample), true, "{capacity} - {sample}");
+			assert!(dyn_set.insert(sample));
+			assert!(dyn_set.contains(&sample), "{capacity} - {sample}");
 			// The second insertion returns false
-			assert_eq!(dyn_set.insert(sample), false);
-			assert_eq!(dyn_set.contains(&sample), true, "{capacity} - {sample}");
+			assert!(!dyn_set.insert(sample));
+			assert!(dyn_set.contains(&sample), "{capacity} - {sample}");
 			// We update the control structure
 			control.insert(sample);
 		}
 		// Test removals
 		for sample in 0..capacity {
 			// The first removal returns true
-			assert_eq!(dyn_set.remove(&sample), true);
-			assert_eq!(dyn_set.contains(&sample), false, "{capacity} - {sample}");
+			assert!(dyn_set.remove(&sample));
+			assert!(!dyn_set.contains(&sample), "{capacity} - {sample}");
 			// The second removal returns false
-			assert_eq!(dyn_set.remove(&sample), false);
-			assert_eq!(dyn_set.contains(&sample), false, "{capacity} - {sample}");
+			assert!(!dyn_set.remove(&sample));
+			assert!(!dyn_set.contains(&sample), "{capacity} - {sample}");
 			// We update the control structure
 			control.remove(&sample);
 			// The control structure and the dyn_set should be identical
