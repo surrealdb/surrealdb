@@ -9,7 +9,6 @@ use surrealdb::method::QueryStream;
 use surrealdb::Action;
 use surrealdb::Notification;
 use surrealdb_core::sql::Object;
-use tokio::sync::mpsc::{channel, Receiver, Sender};
 use tokio::sync::RwLock;
 use tracing::info;
 
@@ -429,17 +428,13 @@ async fn receive_all_pending_notifications<
 	stream: Arc<RwLock<S>>,
 	timeout: Duration,
 ) -> Vec<Notification<I>> {
-	let (send, mut recv) = channel::<Notification<I>>(MAX_NOTIFICATIONS);
-	let we_expect_timeout = tokio::time::timeout(timeout, async move {
+	let mut results = Vec::new();
+	let we_expect_timeout = tokio::time::timeout(timeout, async {
 		while let Some(notification) = stream.write().await.next().await {
-			send.send(notification.unwrap()).await.unwrap();
+			results.push(notification.unwrap())
 		}
 	})
 	.await;
 	assert!(we_expect_timeout.is_err());
-	let mut results = Vec::new();
-	while let Ok(notification) = recv.try_recv() {
-		results.push(notification);
-	}
 	results
 }
