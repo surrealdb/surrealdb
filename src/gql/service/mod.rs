@@ -95,6 +95,7 @@ where
 			let Some(_db) = session.db.as_ref() else {
 				return Ok(resolver_error("No database specified").into_response());
 			};
+
 			let executor = match cache.get_schema(session).await {
 				Ok(e) => e,
 				Err(e) => {

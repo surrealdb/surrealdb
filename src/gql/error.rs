@@ -1,3 +1,6 @@
+use std::fmt::Debug;
+
+use async_graphql::{InputType, InputValueError};
 use axum::{
 	body::{boxed, BoxBody},
 	response::IntoResponse,
@@ -26,6 +29,15 @@ pub fn resolver_error(msg: impl Into<String>) -> GqlError {
 impl From<surrealdb::err::Error> for GqlError {
 	fn from(value: surrealdb::err::Error) -> Self {
 		GqlError::DbError(value)
+	}
+}
+
+impl<T> From<InputValueError<T>> for GqlError
+where
+	T: InputType + Debug,
+{
+	fn from(value: InputValueError<T>) -> Self {
+		GqlError::ResolverError(format!("{value:?}"))
 	}
 }
 

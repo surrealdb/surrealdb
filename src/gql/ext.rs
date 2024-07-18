@@ -1,6 +1,12 @@
 use surrealdb::sql::{
 	statements::UseStatement, Cond, Ident, Idiom, Limit, Order, Orders, Part, Start, Table, Value,
 };
+use uuid::Uuid;
+
+use async_graphql::ScalarType;
+use async_graphql::Value as GqlValue;
+
+use super::error::GqlError;
 
 pub trait IntoExt<T> {
 	fn intox(self) -> T;
@@ -132,5 +138,21 @@ where
 		let part = value.into();
 		tmp.0 = vec![part];
 		tmp
+	}
+}
+
+trait TryConv<T> {
+	fn conv(self) -> Result<T, GqlError>;
+}
+
+impl TryConv<Uuid> for GqlValue {
+	fn conv(self) -> Result<Uuid, GqlError> {
+		ScalarType::parse(self).map_err(Into::into)
+	}
+}
+
+impl TryConv<Uuid> for GqlValue {
+	fn conv(self) -> Result<Uuid, GqlError> {
+		ScalarType::parse(self).map_err(Into::into)
 	}
 }

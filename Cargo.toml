@@ -42,7 +42,7 @@ strip = false
 
 [dependencies]
 argon2 = "0.5.2"
-async-graphql = { version = "6.0.11", features = ["dynamic-schema"] }
+async-graphql = { version = "6.0.11", features = ["chrono", "dynamic-schema", "uuid"] }
 async-graphql-axum = "6.0.11"
 async-trait = "0.1.81"
 axum = { version = "0.6.20", features = ["tracing", "ws", "headers"] }
