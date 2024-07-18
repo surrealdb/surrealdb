@@ -17,7 +17,6 @@ use crate::opt::auth::Root;
 use crate::opt::WaitFor;
 use crate::options::EngineOptions;
 use channel::{Receiver, Sender};
-use futures::future::BoxFuture;
 use futures::stream::poll_fn;
 use futures::FutureExt;
 use futures::StreamExt;

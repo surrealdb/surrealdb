@@ -24,7 +24,6 @@ use crate::engine::IntervalStream;
 use crate::opt::WaitFor;
 use crate::sql::Value;
 use channel::Receiver;
-use futures::future::BoxFuture;
 use futures::stream::{SplitSink, SplitStream};
 use futures::SinkExt;
 use futures::StreamExt;

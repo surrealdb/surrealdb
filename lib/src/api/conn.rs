@@ -12,7 +12,6 @@ use crate::sql::Query;
 use crate::sql::Value;
 use channel::Receiver;
 use channel::Sender;
-use futures::future::BoxFuture;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 use std::collections::BTreeMap;

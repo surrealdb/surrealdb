@@ -13,7 +13,6 @@ use crate::api::Result;
 use crate::api::Surreal;
 use crate::opt::WaitFor;
 use channel::Receiver;
-use futures::future::BoxFuture;
 use indexmap::IndexMap;
 use reqwest::header::HeaderMap;
 use reqwest::ClientBuilder;

@@ -1,8 +1,7 @@
-use crate::api::method::BoxFuture;
-
 use crate::api::conn::Method;
 use crate::api::conn::MlConfig;
 use crate::api::conn::Param;
+use crate::api::method::BoxFuture;
 use crate::api::Connection;
 use crate::api::Error;
 use crate::api::ExtraFeatures;

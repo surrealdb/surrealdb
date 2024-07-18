@@ -17,7 +17,6 @@ use crate::opt::WaitFor;
 use crate::options::EngineOptions;
 use channel::Receiver;
 use channel::Sender;
-use futures::future::BoxFuture;
 use futures::stream::poll_fn;
 use futures::StreamExt;
 use std::collections::BTreeMap;
