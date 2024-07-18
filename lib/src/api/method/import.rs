@@ -1,3 +1,5 @@
+use crate::api::method::BoxFuture;
+
 use crate::api::conn::Method;
 use crate::api::conn::MlConfig;
 use crate::api::conn::Param;
@@ -9,11 +11,9 @@ use crate::method::Model;
 use crate::method::OnceLockExt;
 use crate::Surreal;
 use std::borrow::Cow;
-use std::future::Future;
 use std::future::IntoFuture;
 use std::marker::PhantomData;
 use std::path::PathBuf;
-use std::pin::Pin;
 
 /// An database import future
 #[derive(Debug)]
@@ -58,7 +58,7 @@ where
 	Client: Connection,
 {
 	type Output = Result<()>;
-	type IntoFuture = Pin<Box<dyn Future<Output = Self::Output> + Send + Sync + 'r>>;
+	type IntoFuture = BoxFuture<'r, Self::Output>;
 
 	fn into_future(self) -> Self::IntoFuture {
 		Box::pin(async move {
@@ -66,10 +66,9 @@ where
 			if !router.features.contains(&ExtraFeatures::Backup) {
 				return Err(Error::BackupsNotSupported.into());
 			}
-			let mut conn = Client::new(Method::Import);
 			let mut param = Param::file(self.file);
 			param.ml_config = self.ml_config;
-			conn.execute_unit(router, param).await
+			router.execute_unit(Method::Import, param).await
 		})
 	}
 }

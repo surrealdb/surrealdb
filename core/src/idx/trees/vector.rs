@@ -545,11 +545,10 @@ mod tests {
 		assert_eq!(dist.compute(&v1, &v2).unwrap(), res.into());
 
 		// Check the "Vector" optimised implementations
-		for t in [VectorType::F64] {
-			let v1: SharedVector = Vector::try_from_vector(t, &v1).unwrap().into();
-			let v2: SharedVector = Vector::try_from_vector(t, &v2).unwrap().into();
-			assert_eq!(dist.calculate(&v1, &v2), res);
-		}
+		let t = VectorType::F64;
+		let v1: SharedVector = Vector::try_from_vector(t, &v1).unwrap().into();
+		let v2: SharedVector = Vector::try_from_vector(t, &v2).unwrap().into();
+		assert_eq!(dist.calculate(&v1, &v2), res);
 	}
 
 	fn test_distance_collection(dist: Distance, size: usize, dim: usize) {

@@ -57,16 +57,6 @@ pub enum Force {
 	Index(Arc<[DefineIndexStatement]>),
 }
 
-impl Force {
-	pub fn is_none(&self) -> bool {
-		matches!(self, Force::None)
-	}
-
-	pub fn is_forced(&self) -> bool {
-		!matches!(self, Force::None)
-	}
-}
-
 impl Default for Options {
 	fn default() -> Self {
 		Options::new()
@@ -111,8 +101,9 @@ impl Options {
 	// --------------------------------------------------
 
 	/// Set all the required options from a single point.
-	/// The system expects these values to always be set, so this should be called for all
-	/// instances when there is doubt.
+	/// The system expects these values to always be set,
+	/// so this should be called for all instances when
+	/// there is doubt.
 	pub fn with_required(
 		mut self,
 		node_id: Uuid,
@@ -334,21 +325,25 @@ impl Options {
 	// --------------------------------------------------
 
 	/// Get current Node ID
+	#[inline(always)]
 	pub fn id(&self) -> Result<Uuid, Error> {
-		self.id.ok_or(Error::Unreachable("Options::id"))
+		self.id.ok_or(Error::Unreachable("No Node ID is specified"))
 	}
 
 	/// Get currently selected NS
+	#[inline(always)]
 	pub fn ns(&self) -> Result<&str, Error> {
 		self.ns.as_ref().map(AsRef::as_ref).ok_or(Error::NsEmpty)
 	}
 
 	/// Get currently selected DB
+	#[inline(always)]
 	pub fn db(&self) -> Result<&str, Error> {
 		self.db.as_ref().map(AsRef::as_ref).ok_or(Error::DbEmpty)
 	}
 
 	/// Check whether this request supports realtime queries
+	#[inline(always)]
 	pub fn realtime(&self) -> Result<(), Error> {
 		if !self.live {
 			return Err(Error::RealtimeDisabled);
@@ -357,6 +352,7 @@ impl Options {
 	}
 
 	// Validate Options for Namespace
+	#[inline(always)]
 	pub fn valid_for_ns(&self) -> Result<(), Error> {
 		if self.ns.is_none() {
 			return Err(Error::NsEmpty);
@@ -365,9 +361,11 @@ impl Options {
 	}
 
 	// Validate Options for Database
+	#[inline(always)]
 	pub fn valid_for_db(&self) -> Result<(), Error> {
-		self.valid_for_ns()?;
-
+		if self.ns.is_none() {
+			return Err(Error::NsEmpty);
+		}
 		if self.db.is_none() {
 			return Err(Error::DbEmpty);
 		}

@@ -64,7 +64,7 @@ where
 	BK: BKeys + Clone + Default + Debug,
 {
 	let ds = Datastore::new("memory").await.unwrap();
-	let mut tx = ds.transaction(Write, Optimistic).await.unwrap();
+	let tx = ds.transaction(Write, Optimistic).await.unwrap();
 	let mut t = BTree::<BK>::new(BState::new(100));
 	let np = TreeNodeProvider::Debug;
 	let c = TreeCache::new(0, np.get_key(0), np.clone(), cache_size);
@@ -72,11 +72,11 @@ where
 	for i in 0..samples_size {
 		let (key, payload) = sample_provider(i);
 		// Insert the sample
-		t.insert(&mut tx, &mut s, key.clone(), payload).await.unwrap();
+		t.insert(&tx, &mut s, key.clone(), payload).await.unwrap();
 		// Search for it
-		black_box(t.search_mut(&mut tx, &mut s, &key).await.unwrap());
+		black_box(t.search_mut(&tx, &mut s, &key).await.unwrap());
 	}
-	s.finish(&mut tx).await.unwrap();
+	s.finish(&tx).await.unwrap();
 	tx.commit().await.unwrap();
 }
 

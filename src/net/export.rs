@@ -1,4 +1,4 @@
-use crate::dbs::DB;
+use super::AppState;
 use crate::err::Error;
 use axum::body::Body;
 use axum::response::IntoResponse;
@@ -19,9 +19,12 @@ where
 	Router::new().route("/export", get(handler))
 }
 
-async fn handler(Extension(session): Extension<Session>) -> Result<impl IntoResponse, Error> {
+async fn handler(
+	Extension(state): Extension<AppState>,
+	Extension(session): Extension<Session>,
+) -> Result<impl IntoResponse, Error> {
 	// Get the datastore reference
-	let db = DB.get().unwrap();
+	let db = &state.datastore;
 	// Create a chunked response
 	let (chn, body_stream) = surrealdb::channel::bounded::<Result<Bytes, Error>>(1);
 	let body = Body::from_stream(body_stream);

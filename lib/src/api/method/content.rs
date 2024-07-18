@@ -1,5 +1,6 @@
 use crate::api::conn::Method;
 use crate::api::conn::Param;
+use crate::api::method::BoxFuture;
 use crate::api::opt::Range;
 use crate::api::opt::Resource;
 use crate::api::Connection;
@@ -12,10 +13,8 @@ use crate::Surreal;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 use std::borrow::Cow;
-use std::future::Future;
 use std::future::IntoFuture;
 use std::marker::PhantomData;
-use std::pin::Pin;
 
 /// A content future
 ///
@@ -61,12 +60,12 @@ macro_rules! into_future {
 					Some(range) => resource?.with_range(range)?.into(),
 					None => resource?.into(),
 				};
-				let mut conn = Client::new(method);
 				let params = match content? {
 					Value::None | Value::Null => vec![param],
 					content => vec![param, content],
 				};
-				conn.$method(client.router.extract()?, Param::new(params)).await
+				let router = client.router.extract()?;
+				router.$method(method, Param::new(params)).await
 			})
 		}
 	};
@@ -78,7 +77,7 @@ where
 	D: Serialize,
 {
 	type Output = Result<Value>;
-	type IntoFuture = Pin<Box<dyn Future<Output = Self::Output> + Send + Sync + 'r>>;
+	type IntoFuture = BoxFuture<'r, Self::Output>;
 
 	into_future! {execute_value}
 }
@@ -90,7 +89,7 @@ where
 	R: DeserializeOwned,
 {
 	type Output = Result<Option<R>>;
-	type IntoFuture = Pin<Box<dyn Future<Output = Self::Output> + Send + Sync + 'r>>;
+	type IntoFuture = BoxFuture<'r, Self::Output>;
 
 	into_future! {execute_opt}
 }
@@ -102,7 +101,7 @@ where
 	R: DeserializeOwned,
 {
 	type Output = Result<Vec<R>>;
-	type IntoFuture = Pin<Box<dyn Future<Output = Self::Output> + Send + Sync + 'r>>;
+	type IntoFuture = BoxFuture<'r, Self::Output>;
 
 	into_future! {execute_vec}
 }

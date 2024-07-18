@@ -1,5 +1,5 @@
 use super::headers::Accept;
-use crate::dbs::DB;
+use super::AppState;
 use crate::err::Error;
 use crate::net::input::bytes_to_utf8;
 use crate::net::output;
@@ -29,12 +29,13 @@ where
 }
 
 async fn handler(
+	Extension(state): Extension<AppState>,
 	Extension(session): Extension<Session>,
 	accept: Option<TypedHeader<Accept>>,
 	sql: Bytes,
 ) -> Result<impl IntoResponse, impl IntoResponse> {
 	// Get the datastore reference
-	let db = DB.get().unwrap();
+	let db = &state.datastore;
 	// Convert the body to a byte slice
 	let sql = bytes_to_utf8(&sql)?;
 	// Check the permissions level

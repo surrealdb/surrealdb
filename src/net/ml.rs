@@ -1,5 +1,5 @@
 //! This file defines the endpoints for the ML API for importing and exporting SurrealML models.
-use crate::dbs::DB;
+use super::AppState;
 use crate::err::Error;
 use crate::net::output;
 use axum::extract::{DefaultBodyLimit, Path};
@@ -38,11 +38,12 @@ where
 
 /// This endpoint allows the user to import a model into the database.
 async fn import(
+	Extension(state): Extension<AppState>,
 	Extension(session): Extension<Session>,
 	mut stream: BodyStream,
 ) -> Result<impl IntoResponse, impl IntoResponse> {
 	// Get the datastore reference
-	let db = DB.get().unwrap();
+	let db = &state.datastore;
 	// Ensure a NS and DB are set
 	let (nsv, dbv) = check_ns_db(&session)?;
 	// Check the permissions level
@@ -89,17 +90,18 @@ async fn import(
 
 /// This endpoint allows the user to export a model from the database.
 async fn export(
+	Extension(state): Extension<AppState>,
 	Extension(session): Extension<Session>,
 	Path((name, version)): Path<(String, String)>,
 ) -> Result<impl IntoResponse, Error> {
 	// Get the datastore reference
-	let db = DB.get().unwrap();
+	let db = &state.datastore;
 	// Ensure a NS and DB are set
 	let (nsv, dbv) = check_ns_db(&session)?;
 	// Check the permissions level
 	db.check(&session, View, Model.on_db(&nsv, &dbv))?;
 	// Start a new readonly transaction
-	let mut tx = db.transaction(Read, Optimistic).await?;
+	let tx = db.transaction(Read, Optimistic).await?;
 	// Attempt to get the model definition
 	let info = tx.get_db_model(&nsv, &dbv, &name, &version).await?;
 	// Calculate the path of the model file

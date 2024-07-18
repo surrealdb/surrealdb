@@ -14,7 +14,7 @@ use surrealdb::{
 };
 use tower_http::auth::AsyncAuthorizeRequest;
 
-use crate::{dbs::DB, err::Error};
+use crate::err::Error;
 
 use super::{
 	client_ip::ExtractClientIP,
@@ -71,8 +71,6 @@ impl AsyncAuthorizeRequest<Body> for SurrealAuth {
 }
 
 async fn check_auth(parts: &mut Parts) -> Result<Session, Error> {
-	let kvs = DB.get().unwrap();
-
 	let or = if let Ok(or) = parts.extract::<TypedHeader<Origin>>().await {
 		if !or.is_null() {
 			Some(or.to_string())
@@ -108,6 +106,8 @@ async fn check_auth(parts: &mut Parts) -> Result<Session, Error> {
 		tracing::error!("Error extracting the app state: {:?}", err);
 		Error::InvalidAuth
 	})?;
+
+	let kvs = &state.datastore;
 
 	let ExtractClientIP(ip) =
 		parts.extract_with_state(&state).await.unwrap_or(ExtractClientIP(None));

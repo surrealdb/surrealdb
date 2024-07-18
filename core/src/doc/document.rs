@@ -93,25 +93,6 @@ impl<'a> Document<'a> {
 		}
 	}
 
-	/// Create a new document that is not going through the standard lifecycle of documents
-	///
-	/// This allows for it to be crafted without needing statements to operate on it
-	#[doc(hidden)]
-	pub fn new_artificial(
-		id: Option<&'a Thing>,
-		ir: Option<&'a IteratorRecord>,
-		val: Cow<'a, Value>,
-		initial: Cow<'a, Value>,
-		extras: Workable,
-	) -> Self {
-		Document {
-			id,
-			extras,
-			current: CursorDoc::new(id, ir, val),
-			initial: CursorDoc::new(id, ir, initial),
-		}
-	}
-
 	/// Get the current document, as it is being modified
 	#[allow(unused)]
 	pub(crate) fn current_doc(&self) -> &Value {
@@ -136,23 +117,18 @@ impl<'a> Document<'a> {
 		self.initial.doc.is_none() && self.current.doc.is_some()
 	}
 
-	/// Check if document is being deleted
-	pub fn is_delete(&self) -> bool {
-		self.current.doc.is_none()
-	}
-
 	/// Get the table for this document
 	pub async fn tb(
 		&self,
 		ctx: &Context<'a>,
 		opt: &Options,
 	) -> Result<Arc<DefineTableStatement>, Error> {
-		// Claim transaction
-		let mut run = ctx.tx_lock().await;
+		// Get transaction
+		let txn = ctx.tx();
 		// Get the record id
 		let rid = self.id.as_ref().unwrap();
 		// Get the table definition
-		let tb = run.get_and_cache_tb(opt.ns()?, opt.db()?, &rid.tb).await;
+		let tb = txn.get_tb(opt.ns()?, opt.db()?, &rid.tb).await;
 		// Return the table or attempt to define it
 		match tb {
 			// The table doesn't exist
@@ -162,9 +138,7 @@ impl<'a> Document<'a> {
 				// Allowed to run?
 				opt.is_allowed(Action::Edit, ResourceKind::Table, &Base::Db)?;
 				// We can create the table automatically
-				run.add_and_cache_ns(opt.ns()?, opt.strict).await?;
-				run.add_and_cache_db(opt.ns()?, opt.db()?, opt.strict).await?;
-				run.add_and_cache_tb(opt.ns()?, opt.db()?, &rid.tb, opt.strict).await
+				txn.ensure_ns_db_tb(opt.ns()?, opt.db()?, &rid.tb, opt.strict).await
 			}
 			// There was an error
 			Err(err) => Err(err),
@@ -181,7 +155,7 @@ impl<'a> Document<'a> {
 		// Get the record id
 		let id = self.id.as_ref().unwrap();
 		// Get the table definitions
-		ctx.tx_lock().await.all_tb_views(opt.ns()?, opt.db()?, &id.tb).await
+		ctx.tx().all_tb_views(opt.ns()?, opt.db()?, &id.tb).await
 	}
 	/// Get the events for this document
 	pub async fn ev(
@@ -192,7 +166,7 @@ impl<'a> Document<'a> {
 		// Get the record id
 		let id = self.id.as_ref().unwrap();
 		// Get the event definitions
-		ctx.tx_lock().await.all_tb_events(opt.ns()?, opt.db()?, &id.tb).await
+		ctx.tx().all_tb_events(opt.ns()?, opt.db()?, &id.tb).await
 	}
 	/// Get the fields for this document
 	pub async fn fd(
@@ -203,7 +177,7 @@ impl<'a> Document<'a> {
 		// Get the record id
 		let id = self.id.as_ref().unwrap();
 		// Get the field definitions
-		ctx.tx_lock().await.all_tb_fields(opt.ns()?, opt.db()?, &id.tb).await
+		ctx.tx().all_tb_fields(opt.ns()?, opt.db()?, &id.tb).await
 	}
 	/// Get the indexes for this document
 	pub async fn ix(
@@ -214,7 +188,7 @@ impl<'a> Document<'a> {
 		// Get the record id
 		let id = self.id.as_ref().unwrap();
 		// Get the index definitions
-		ctx.tx_lock().await.all_tb_indexes(opt.ns()?, opt.db()?, &id.tb).await
+		ctx.tx().all_tb_indexes(opt.ns()?, opt.db()?, &id.tb).await
 	}
 	// Get the lives for this document
 	pub async fn lv(
@@ -225,6 +199,6 @@ impl<'a> Document<'a> {
 		// Get the record id
 		let id = self.id.as_ref().unwrap();
 		// Get the table definition
-		ctx.tx_lock().await.all_tb_lives(opt.ns()?, opt.db()?, &id.tb).await
+		ctx.tx().all_tb_lives(opt.ns()?, opt.db()?, &id.tb).await
 	}
 }
