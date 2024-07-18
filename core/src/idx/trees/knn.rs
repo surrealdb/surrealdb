@@ -732,7 +732,7 @@ pub(super) mod tests {
 			distance: &Distance,
 		) -> Self {
 			let mut rng = get_seed_rnd();
-			let gen = RandomItemGenerator::new(&distance, dimension);
+			let gen = RandomItemGenerator::new(distance, dimension);
 			if unique {
 				TestCollection::new_unique(collection_size, vt, dimension, &gen, &mut rng)
 			} else {
@@ -766,7 +766,7 @@ pub(super) mod tests {
 			}
 			let mut coll = TestCollection::Unique(Vec::with_capacity(vector_set.len()));
 			for (i, v) in vector_set.into_iter().enumerate() {
-				coll.add(i as DocId, v.into());
+				coll.add(i as DocId, v);
 			}
 			coll
 		}
@@ -781,7 +781,7 @@ pub(super) mod tests {
 			let mut coll = TestCollection::NonUnique(Vec::with_capacity(collection_size));
 			// Prepare data set
 			for doc_id in 0..collection_size {
-				coll.add(doc_id as DocId, new_random_vec(rng, vector_type, dimension, gen).into());
+				coll.add(doc_id as DocId, new_random_vec(rng, vector_type, dimension, gen));
 			}
 			coll
 		}

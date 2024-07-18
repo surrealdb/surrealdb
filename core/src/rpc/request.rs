@@ -9,6 +9,7 @@ pub static ID: Lazy<[Part; 1]> = Lazy::new(|| [Part::from("id")]);
 pub static METHOD: Lazy<[Part; 1]> = Lazy::new(|| [Part::from("method")]);
 pub static PARAMS: Lazy<[Part; 1]> = Lazy::new(|| [Part::from("params")]);
 
+#[derive(Debug)]
 pub struct Request {
 	pub id: Option<Value>,
 	pub method: String,

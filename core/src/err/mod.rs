@@ -1,7 +1,6 @@
 use crate::iam::Error as IamError;
 use crate::idx::ft::MatchRef;
 use crate::idx::trees::vector::SharedVector;
-use crate::key::error::KeyCategory;
 use crate::sql::idiom::Idiom;
 use crate::sql::index::Distance;
 use crate::sql::thing::Thing;
@@ -92,7 +91,6 @@ pub enum Error {
 
 	/// The key being inserted in the transaction already exists
 	#[error("The key being inserted already exists")]
-	#[deprecated(note = "Use TxKeyAlreadyExistsCategory")]
 	TxKeyAlreadyExists,
 
 	/// The key exceeds a limit set by the KV store
@@ -298,12 +296,6 @@ pub enum Error {
 		value: String,
 	},
 
-	/// The requested namespace access method does not exist
-	#[error("The namespace access method '{value}' does not exist")]
-	NaNotFound {
-		value: String,
-	},
-
 	/// The requested namespace login does not exist
 	#[error("The namespace login '{value}' does not exist")]
 	NlNotFound {
@@ -313,12 +305,6 @@ pub enum Error {
 	/// The requested database does not exist
 	#[error("The database '{value}' does not exist")]
 	DbNotFound {
-		value: String,
-	},
-
-	/// The requested database access method does not exist
-	#[error("The database access method '{value}' does not exist")]
-	DaNotFound {
 		value: String,
 	},
 
@@ -397,6 +383,12 @@ pub enum Error {
 	/// The requested analyzer does not exist
 	#[error("The index '{value}' does not exist")]
 	IxNotFound {
+		value: String,
+	},
+
+	/// The requested record does not exist
+	#[error("The record '{value}' does not exist")]
+	IdNotFound {
 		value: String,
 	},
 
@@ -822,10 +814,6 @@ pub enum Error {
 	#[error("Auth token is missing the '{0}' claim")]
 	MissingTokenClaim(String),
 
-	/// The key being inserted in the transaction already exists
-	#[error("The key being inserted already exists: {0}")]
-	TxKeyAlreadyExistsCategory(KeyCategory),
-
 	/// The db is running without an available storage engine
 	#[error("The db is running without an available storage engine")]
 	MissingStorageEngine,
@@ -933,10 +921,6 @@ pub enum Error {
 	#[error("A node task has failed: {0}")]
 	NodeAgent(&'static str),
 
-	/// An error related to live query occurred
-	#[error("Failed to process Live Query: {0}")]
-	LiveQueryError(LiveQueryCause),
-
 	/// The supplied type could not be serialiazed into `sql::Value`
 	#[error("Serialization error: {0}")]
 	Serialization(String),
@@ -948,15 +932,18 @@ pub enum Error {
 	},
 
 	/// The requested namespace access method already exists
-	#[error("The namespace access method '{value}' already exists")]
+	#[error("The access method '{value}' already exists in the namespace '{ns}'")]
 	AccessNsAlreadyExists {
 		value: String,
+		ns: String,
 	},
 
 	/// The requested database access method already exists
-	#[error("The database access method '{value}' already exists")]
+	#[error("The access method '{value}' already exists in the database '{db}'")]
 	AccessDbAlreadyExists {
 		value: String,
+		ns: String,
+		db: String,
 	},
 
 	/// The requested root access method does not exist
@@ -966,15 +953,18 @@ pub enum Error {
 	},
 
 	/// The requested namespace access method does not exist
-	#[error("The namespace access method '{value}' does not exist")]
+	#[error("The access method '{value}' does not exist in the namespace '{ns}'")]
 	AccessNsNotFound {
 		value: String,
+		ns: String,
 	},
 
 	/// The requested database access method does not exist
-	#[error("The database access method '{value}' does not exist")]
+	#[error("The access method '{value}' does not exist in the database '{db}'")]
 	AccessDbNotFound {
 		value: String,
+		ns: String,
+		db: String,
 	},
 
 	/// The access method cannot be defined on the requested level
@@ -1010,6 +1000,13 @@ pub enum Error {
 	TbInvalid {
 		value: String,
 	},
+
+	/// This error is used for breaking execution when a value is returned
+	#[doc(hidden)]
+	#[error("Return statement has been reached")]
+	Return {
+		value: Value,
+	},
 }
 
 impl From<Error> for String {
@@ -1040,9 +1037,7 @@ impl From<regex::Error> for Error {
 impl From<echodb::err::Error> for Error {
 	fn from(e: echodb::err::Error) -> Error {
 		match e {
-			echodb::err::Error::KeyAlreadyExists => {
-				Error::TxKeyAlreadyExistsCategory(crate::key::error::KeyCategory::Unknown)
-			}
+			echodb::err::Error::KeyAlreadyExists => Error::TxKeyAlreadyExists,
 			echodb::err::Error::ValNotExpectedValue => Error::TxConditionNotMet,
 			_ => Error::Tx(e.to_string()),
 		}
@@ -1053,9 +1048,7 @@ impl From<echodb::err::Error> for Error {
 impl From<indxdb::err::Error> for Error {
 	fn from(e: indxdb::err::Error) -> Error {
 		match e {
-			indxdb::err::Error::KeyAlreadyExists => {
-				Error::TxKeyAlreadyExistsCategory(crate::key::error::KeyCategory::Unknown)
-			}
+			indxdb::err::Error::KeyAlreadyExists => Error::TxKeyAlreadyExists,
 			indxdb::err::Error::ValNotExpectedValue => Error::TxConditionNotMet,
 			_ => Error::Tx(e.to_string()),
 		}
@@ -1066,9 +1059,7 @@ impl From<indxdb::err::Error> for Error {
 impl From<tikv::Error> for Error {
 	fn from(e: tikv::Error) -> Error {
 		match e {
-			tikv::Error::DuplicateKeyInsertion => {
-				Error::TxKeyAlreadyExistsCategory(crate::key::error::KeyCategory::Unknown)
-			}
+			tikv::Error::DuplicateKeyInsertion => Error::TxKeyAlreadyExists,
 			tikv::Error::KeyError(ke) if ke.abort.contains("KeyTooLarge") => Error::TxKeyTooLarge,
 			tikv::Error::RegionError(re) if re.raft_entry_too_large.is_some() => Error::TxTooLarge,
 			_ => Error::Tx(e.to_string()),
@@ -1086,6 +1077,20 @@ impl From<rocksdb::Error> for Error {
 #[cfg(feature = "kv-surrealkv")]
 impl From<surrealkv::Error> for Error {
 	fn from(e: surrealkv::Error) -> Error {
+		Error::Tx(e.to_string())
+	}
+}
+
+#[cfg(feature = "kv-fdb")]
+impl From<foundationdb::FdbError> for Error {
+	fn from(e: foundationdb::FdbError) -> Error {
+		Error::Ds(e.to_string())
+	}
+}
+
+#[cfg(feature = "kv-fdb")]
+impl From<foundationdb::TransactionCommitError> for Error {
+	fn from(e: foundationdb::TransactionCommitError) -> Error {
 		Error::Tx(e.to_string())
 	}
 }
@@ -1134,15 +1139,4 @@ impl Serialize for Error {
 	{
 		serializer.serialize_str(self.to_string().as_str())
 	}
-}
-
-#[derive(Error, Debug)]
-#[non_exhaustive]
-pub enum LiveQueryCause {
-	#[doc(hidden)]
-	#[error("The Live Query must have a change feed for it it work")]
-	MissingChangeFeed,
-	#[doc(hidden)]
-	#[error("The Live Query must have a change feed that includes relative changes")]
-	ChangeFeedNoOriginal,
 }
