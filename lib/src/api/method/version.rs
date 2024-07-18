@@ -1,5 +1,3 @@
-use crate::api::method::BoxFuture;
-
 use crate::api::conn::Method;
 use crate::api::conn::Param;
 use crate::api::err::Error;
