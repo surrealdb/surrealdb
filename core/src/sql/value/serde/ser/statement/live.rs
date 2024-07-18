@@ -48,7 +48,6 @@ pub struct SerializeLiveStatement {
 	what: Value,
 	cond: Option<Cond>,
 	fetch: Option<Fetchs>,
-	archived: Option<Uuid>,
 	session: Option<Value>,
 	auth: Option<Auth>,
 }
@@ -80,9 +79,6 @@ impl serde::ser::SerializeStruct for SerializeLiveStatement {
 			"fetch" => {
 				self.fetch = value.serialize(ser::fetchs::opt::Serializer.wrap())?;
 			}
-			"archived" => {
-				self.archived = value.serialize(ser::uuid::opt::Serializer.wrap())?.map(Uuid);
-			}
 			"session" => {
 				self.session = None;
 			}
@@ -104,7 +100,6 @@ impl serde::ser::SerializeStruct for SerializeLiveStatement {
 			what: self.what,
 			cond: self.cond,
 			fetch: self.fetch,
-			archived: self.archived,
 			session: None,
 			auth: None,
 		})

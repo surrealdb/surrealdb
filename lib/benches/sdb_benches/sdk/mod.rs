@@ -31,11 +31,17 @@ pub(super) async fn init(target: &str) {
 			println!("\n### Using path: {} ###\n", path);
 			DB.connect(&path).await.unwrap();
 		}
-		#[cfg(feature = "kv-fdb")]
-		"sdk-fdb" => {
-			DB.connect("fdb:///etc/foundationdb/fdb.cluster").await.unwrap();
-			// Verify it can connect to the FDB cluster
-			DB.health().await.expect("fdb cluster is unavailable");
+		#[cfg(feature = "kv-surrealkv")]
+		"sdk-surrealkv" => {
+			let path = format!(
+				"surrealkv://sdk-surrealkv-{}.db",
+				std::time::SystemTime::now()
+					.duration_since(std::time::UNIX_EPOCH)
+					.unwrap()
+					.as_millis()
+			);
+			println!("\n### Using path: {} ###\n", path);
+			DB.connect(&path).await.unwrap();
 		}
 		#[cfg(feature = "protocol-ws")]
 		"sdk-ws" => {
