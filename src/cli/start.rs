@@ -4,7 +4,7 @@ use crate::cli::validator::parser::env_filter::CustomEnvFilter;
 use crate::cli::validator::parser::env_filter::CustomEnvFilterParser;
 use crate::cnf::LOGO;
 use crate::dbs;
-use crate::dbs::{StartCommandDbsOptions, DB};
+use crate::dbs::StartCommandDbsOptions;
 use crate::env;
 use crate::err::Error;
 use crate::net::{self, client_ip::ClientIp};
@@ -12,6 +12,7 @@ use clap::Args;
 use opentelemetry::Context;
 use std::net::SocketAddr;
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::time::Duration;
 use surrealdb::engine::any::IntoEndpoint;
 use surrealdb::engine::tasks::start_tasks;
@@ -189,15 +190,13 @@ pub async fn init(
 	let ct = CancellationToken::new();
 	// Initiate environment
 	env::init().await?;
-	// Start the kvs server
-	dbs::init(dbs).await?;
+	// Start the datastore
+	let ds = Arc::new(dbs::init(dbs).await?);
 	// Start the node agent
-	let (tasks, task_chans) = start_tasks(
-		&config::CF.get().unwrap().engine.unwrap_or_default(),
-		DB.get().unwrap().clone(),
-	);
+	let (tasks, task_chans) =
+		start_tasks(&config::CF.get().unwrap().engine.unwrap_or_default(), ds.clone());
 	// Start the web server
-	net::init(ct.clone()).await?;
+	net::init(ds, ct.clone()).await?;
 	// Shutdown and stop closed tasks
 	task_chans.into_iter().for_each(|chan| {
 		if chan.send(()).is_err() {

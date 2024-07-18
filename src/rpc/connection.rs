@@ -1,7 +1,6 @@
 use crate::cnf::{
 	PKG_NAME, PKG_VERSION, WEBSOCKET_MAX_CONCURRENT_REQUESTS, WEBSOCKET_PING_FREQUENCY,
 };
-use crate::dbs::DB;
 use crate::rpc::failure::Failure;
 use crate::rpc::format::WsFormat;
 use crate::rpc::response::{failure, IntoRpcResponse};
@@ -44,11 +43,13 @@ pub struct Connection {
 	pub(crate) canceller: CancellationToken,
 	pub(crate) channels: (Sender<Message>, Receiver<Message>),
 	pub(crate) state: Arc<RpcState>,
+	pub(crate) datastore: Arc<Datastore>,
 }
 
 impl Connection {
 	/// Instantiate a new RPC
 	pub fn new(
+		datastore: Arc<Datastore>,
 		state: Arc<RpcState>,
 		id: Uuid,
 		mut session: Session,
@@ -66,6 +67,7 @@ impl Connection {
 			canceller: CancellationToken::new(),
 			channels: channel::bounded(*WEBSOCKET_MAX_CONCURRENT_REQUESTS),
 			state,
+			datastore,
 		}))
 	}
 
@@ -77,6 +79,8 @@ impl Connection {
 		let id = rpc_lock.id;
 		// Get the WebSocket state
 		let state = rpc_lock.state.clone();
+		// Get the Datastore
+		let ds = rpc_lock.datastore.clone();
 		// Log the succesful WebSocket connection
 		trace!("WebSocket {} connected", id);
 		// Split the socket into sending and receiving streams
@@ -125,7 +129,7 @@ impl Connection {
 			true
 		});
 
-		if let Err(err) = DB.get().unwrap().delete_queries(gc).await {
+		if let Err(err) = ds.delete_queries(gc).await {
 			error!("Error handling RPC connection: {}", err);
 		}
 
@@ -367,7 +371,7 @@ impl Connection {
 
 impl RpcContext for Connection {
 	fn kvs(&self) -> &Datastore {
-		DB.get().unwrap()
+		&self.datastore
 	}
 
 	fn session(&self) -> &Session {
@@ -410,7 +414,7 @@ impl RpcContext for Connection {
 			return Err(RpcError::InvalidParams);
 		};
 		let out: Result<Value, RpcError> =
-			surrealdb::iam::signup::signup(DB.get().unwrap(), &mut self.session, v)
+			surrealdb::iam::signup::signup(&self.datastore, &mut self.session, v)
 				.await
 				.map(Into::into)
 				.map_err(Into::into);
@@ -423,7 +427,7 @@ impl RpcContext for Connection {
 			return Err(RpcError::InvalidParams);
 		};
 		let out: Result<Value, RpcError> =
-			surrealdb::iam::signin::signin(DB.get().unwrap(), &mut self.session, v)
+			surrealdb::iam::signin::signin(&self.datastore, &mut self.session, v)
 				.await
 				.map(Into::into)
 				.map_err(Into::into);
@@ -434,7 +438,7 @@ impl RpcContext for Connection {
 		let Ok(Value::Strand(token)) = params.needs_one() else {
 			return Err(RpcError::InvalidParams);
 		};
-		surrealdb::iam::verify::token(DB.get().unwrap(), &mut self.session, &token.0).await?;
+		surrealdb::iam::verify::token(&self.datastore, &mut self.session, &token.0).await?;
 		Ok(Value::None)
 	}
 }
