@@ -41,7 +41,7 @@ where
 
 	pub(super) async fn get_node_mut(
 		&mut self,
-		tx: &mut Transaction,
+		tx: &Transaction,
 		node_id: NodeId,
 	) -> Result<StoredNode<N>, Error> {
 		#[cfg(debug_assertions)]
@@ -95,10 +95,7 @@ where
 		Ok(())
 	}
 
-	pub(super) async fn finish(
-		&mut self,
-		tx: &mut Transaction,
-	) -> Result<Option<TreeCache<N>>, Error> {
+	pub(super) async fn finish(&mut self, tx: &Transaction) -> Result<Option<TreeCache<N>>, Error> {
 		#[cfg(debug_assertions)]
 		{
 			if !self.out.is_empty() {
@@ -167,7 +164,7 @@ where
 
 	pub(super) async fn get_node(
 		&self,
-		tx: &mut Transaction,
+		tx: &Transaction,
 		node_id: NodeId,
 	) -> Result<Arc<StoredNode<N>>, Error> {
 		let r = self.cache.get_node(tx, node_id).await?;

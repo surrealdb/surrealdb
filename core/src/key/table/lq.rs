@@ -1,6 +1,6 @@
 //! Stores a LIVE SELECT query definition on the table
-use crate::key::error::KeyCategory;
-use crate::key::key_req::KeyRequirements;
+use crate::key::category::Categorise;
+use crate::key::category::Category;
 use derive::Key;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -38,18 +38,13 @@ pub fn prefix(ns: &str, db: &str, tb: &str) -> Vec<u8> {
 
 pub fn suffix(ns: &str, db: &str, tb: &str) -> Vec<u8> {
 	let mut k = super::all::new(ns, db, tb).encode().unwrap();
-	k.extend_from_slice(&[b'!', b'l', b'q']);
-	k.extend_from_slice(Uuid::max().as_ref());
-	// We need the extra byte here because `getr()` only supports half-open ranges
-	// so it wouldn't match max UUIDs because it doesn't check for equal matches
-	// on the upper bound. Adding an extra byte to bring max into range as well.
-	k.push(0x00);
+	k.extend_from_slice(&[b'!', b'l', b'q', 0xff]);
 	k
 }
 
-impl KeyRequirements for Lq<'_> {
-	fn key_category(&self) -> KeyCategory {
-		KeyCategory::TableLiveQuery
+impl Categorise for Lq<'_> {
+	fn categorise(&self) -> Category {
+		Category::TableLiveQuery
 	}
 }
 
@@ -73,8 +68,6 @@ impl<'a> Lq<'a> {
 
 #[cfg(test)]
 mod tests {
-	use crate::key::debug;
-
 	#[test]
 	fn key() {
 		use super::*;
@@ -82,7 +75,6 @@ mod tests {
 		let live_query_id = Uuid::from_bytes([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]);
 		let val = Lq::new("testns", "testdb", "testtb", live_query_id);
 		let enc = Lq::encode(&val).unwrap();
-		println!("{:?}", debug::sprint_key(&enc));
 		assert_eq!(
 			enc,
 			b"/*testns\x00*testdb\x00*testtb\x00!lq\x01\x02\x03\x04\x05\x06\x07\x08\x09\x0a\x0b\x0c\x0d\x0e\x0f\x10"
@@ -101,6 +93,6 @@ mod tests {
 	#[test]
 	fn suffix() {
 		let val = super::suffix("testns", "testdb", "testtb");
-		assert_eq!(val, b"/*testns\x00*testdb\x00*testtb\x00!lq\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\x00")
+		assert_eq!(val, b"/*testns\x00*testdb\x00*testtb\x00!lq\xff")
 	}
 }

@@ -29,7 +29,7 @@ pub struct StartCommandDbsOptions {
 	unauthenticated: bool,
 	#[command(flatten)]
 	#[command(next_help_heading = "Capabilities")]
-	caps: DbsCapabilities,
+	capabilities: DbsCapabilities,
 	#[arg(help = "Sets the directory for storing temporary database files")]
 	#[arg(env = "SURREAL_TEMPORARY_DIRECTORY", long = "temporary-directory")]
 	#[arg(value_parser = super::cli::validator::dir_exists)]
@@ -208,12 +208,14 @@ pub async fn init(
 		query_timeout,
 		transaction_timeout,
 		unauthenticated,
-		caps,
+		capabilities,
 		temporary_directory,
 	}: StartCommandDbsOptions,
 ) -> Result<(), Error> {
 	// Get local copy of options
 	let opt = CF.get().unwrap();
+	// Convert the capabilities
+	let capabilities = capabilities.into();
 	// Log specified strict mode
 	debug!("Database strict mode is {strict_mode}");
 	// Log specified query timeout
@@ -228,41 +230,26 @@ pub async fn init(
 	if unauthenticated {
 		warn!("❌🔒 IMPORTANT: Authentication is disabled. This is not recommended for production use. 🔒❌");
 	}
-
-	let caps = caps.into();
-	debug!("Server capabilities: {caps}");
-
-	#[allow(unused_mut)]
+	// Log the specified server capabilities
+	debug!("Server capabilities: {capabilities}");
 	// Parse and setup the desired kv datastore
-	let mut dbs = Datastore::new(&opt.path)
+	let dbs = Datastore::new(&opt.path)
 		.await?
 		.with_notifications()
 		.with_strict_mode(strict_mode)
 		.with_query_timeout(query_timeout)
 		.with_transaction_timeout(transaction_timeout)
 		.with_auth_enabled(!unauthenticated)
-		.with_capabilities(caps);
-
-	let mut dbs = match temporary_directory {
-		Some(tmp_dir) => dbs.with_temporary_directory(tmp_dir),
-		_ => dbs,
-	};
-
-	if let Some(engine_options) = opt.engine {
-		dbs = dbs.with_engine_options(engine_options);
+		.with_temporary_directory(temporary_directory)
+		.with_capabilities(capabilities);
+	// Setup initial server auth credentials
+	if let (Some(user), Some(pass)) = (opt.user.as_ref(), opt.pass.as_ref()) {
+		dbs.setup_initial_creds(user, pass).await?;
 	}
-	// Make immutable
-	let dbs = dbs;
-
+	// Bootstrap the datastore
 	dbs.bootstrap().await?;
-
-	if let Some(user) = opt.user.as_ref() {
-		dbs.setup_initial_creds(user, opt.pass.as_ref().unwrap()).await?;
-	}
-
 	// Store database instance
 	let _ = DB.set(Arc::new(dbs));
-
 	// All ok
 	Ok(())
 }
@@ -312,7 +299,8 @@ mod tests {
 			.get_root_user(creds.username)
 			.await
 			.unwrap()
-			.hash;
+			.hash
+			.clone();
 
 		ds.setup_initial_creds(creds.username, creds.password).await.unwrap();
 		assert_eq!(
@@ -324,6 +312,7 @@ mod tests {
 				.await
 				.unwrap()
 				.hash
+				.clone()
 		)
 	}
 

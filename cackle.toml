@@ -20,6 +20,10 @@ include = [
     "rustix::fs",
     "tokio::fs",
 ]
+exclude = [
+    "std::path::Path",
+    "std::path::PathBuf",
+]
 
 [api.net]
 include = [
@@ -30,9 +34,13 @@ include = [
     "surreal::net",
     "surrealdb",
     "surrealdb_core",
+    "surrealkv",
     "tokio::net",
     "tracing",
     "tracing_core",
+]
+exclude = [
+    "hashbrown::map",
 ]
 
 #
@@ -308,10 +316,12 @@ build.allow_apis = [
     "process",
 ]
 allow_unsafe = true
+allow_apis = [
+    "fs",
+]
 
 [pkg.proc-macro2]
 build.allow_apis = [
-    "fs",
     "process",
 ]
 allow_unsafe = true
@@ -434,6 +444,9 @@ allow_unsafe = true
 [pkg.thiserror]
 build.allow_apis = [
     "process",
+]
+build.allow_build_instructions = [
+    "cargo:rustc-check-cfg=*",
 ]
 allow_apis = [
     "fs",
@@ -617,9 +630,6 @@ build.allow_build_instructions = [
 
 [pkg.dirs-sys-next]
 allow_unsafe = true
-from.build.allow_apis = [
-    "fs",
-]
 
 [pkg.crunchy]
 build.allow_apis = [
@@ -637,7 +647,6 @@ allow_unsafe = true
 
 [pkg.anyhow]
 build.allow_apis = [
-    "fs",
     "process",
 ]
 allow_unsafe = true
@@ -742,9 +751,6 @@ allow_unsafe = true
 
 [pkg.dashmap]
 allow_unsafe = true
-allow_apis = [
-    "net",
-]
 
 [pkg.tokio-stream]
 allow_unsafe = true
@@ -761,9 +767,6 @@ allow_unsafe = true
 allow_apis = [
     "fs",
 ]
-
-[pkg.atomic-waker]
-allow_unsafe = true
 
 [pkg.doc-comment]
 build.allow_apis = [
@@ -986,6 +989,9 @@ allow_unsafe = true
 [pkg.crossbeam-deque]
 allow_unsafe = true
 
+[pkg.crossbeam-queue]
+allow_unsafe = true
+
 [pkg.anstream]
 allow_unsafe = true
 
@@ -1054,9 +1060,6 @@ allow_unsafe = true
 allow_unsafe = true
 
 [pkg.argon2]
-allow_unsafe = true
-
-[pkg.futures-concurrency]
 allow_unsafe = true
 
 [pkg.quick_cache]
@@ -1211,6 +1214,7 @@ allow_apis = [
 
 [pkg.axum-server]
 allow_apis = [
+    "fs",
     "net",
 ]
 
@@ -1353,3 +1357,11 @@ allow_unsafe = true
 
 [pkg.tendril]
 allow_unsafe = true
+
+[pkg.lru]
+allow_unsafe = true
+
+[pkg.surrealkv]
+allow_apis = [
+    "fs",
+]

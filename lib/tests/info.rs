@@ -24,10 +24,9 @@ async fn info_for_root() {
 	let out = res.pop().unwrap().output();
 	assert!(out.is_ok(), "Unexpected error: {:?}", out);
 
-	let output_regex = Regex::new(
-		r"\{ accesses: \{ access: .* \}, namespaces: \{ NS: .* \}, users: \{ user: .* \} \}",
-	)
-	.unwrap();
+	let output_regex =
+		Regex::new(r"\{ accesses: \{ access: .* \}, namespaces: \{ NS: .* \}, nodes: \{ .* \}, users: \{ user: .* \} \}")
+			.unwrap();
 	let out_str = out.unwrap().to_string();
 	assert!(
 		output_regex.is_match(&out_str),
@@ -213,8 +212,8 @@ async fn permissions_checks_info_root() {
 
 	// Define the expected results for the check statement when the test statement succeeded and when it failed
 	let check_results = [
-		vec!["{ accesses: {  }, namespaces: {  }, users: {  } }"],
-		vec!["{ accesses: {  }, namespaces: {  }, users: {  } }"],
+		vec!["{ accesses: {  }, namespaces: {  }, nodes: {  }, users: {  } }"],
+		vec!["{ accesses: {  }, namespaces: {  }, nodes: {  }, users: {  } }"],
 	];
 
 	let test_cases = [

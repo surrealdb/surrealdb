@@ -71,22 +71,21 @@ impl Connection {
 
 	/// Serve the RPC endpoint
 	pub async fn serve(rpc: Arc<RwLock<Connection>>, ws: WebSocket) {
-		// Get the WebSocket ID
+		// Get the RPC lock
 		let rpc_lock = rpc.read().await;
-		// Get the WebSocket ID
+		// Get the WebSocket id
 		let id = rpc_lock.id;
+		// Get the WebSocket state
 		let state = rpc_lock.state.clone();
-
+		// Log the succesful WebSocket connection
+		trace!("WebSocket {} connected", id);
 		// Split the socket into sending and receiving streams
 		let (sender, receiver) = ws.split();
 		// Create an internal channel for sending and receiving
 		let internal_sender = rpc_lock.channels.0.clone();
 		let internal_receiver = rpc_lock.channels.1.clone();
-
-		// drop the lock early so rpc is free to be written to.
+		// Drop the lock early so rpc is free to be written to.
 		std::mem::drop(rpc_lock);
-
-		trace!("WebSocket {} connected", id);
 
 		if let Err(err) = telemetry::metrics::ws::on_connect() {
 			error!("Error running metrics::ws::on_connect hook: {}", err);
@@ -126,9 +125,8 @@ impl Connection {
 			true
 		});
 
-		// Garbage collect queries
-		if let Err(e) = DB.get().unwrap().garbage_collect_dead_session(gc.as_slice()).await {
-			error!("Failed to garbage collect dead sessions: {:?}", e);
+		if let Err(err) = DB.get().unwrap().delete_queries(gc).await {
+			error!("Error handling RPC connection: {}", err);
 		}
 
 		if let Err(err) = telemetry::metrics::ws::on_disconnect() {

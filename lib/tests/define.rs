@@ -31,6 +31,7 @@ async fn define_statement_namespace() -> Result<(), Error> {
 		"{
 			accesses: {},
 			namespaces: { test: 'DEFINE NAMESPACE test' },
+			nodes: {},
 			users: {},
 		}",
 	);
@@ -1254,7 +1255,7 @@ where
 	let res = val.walk(&part);
 	for (i, v) in res {
 		let mut idiom = Idiom::default();
-		idiom.0 = part.clone();
+		idiom.0.clone_from(&part);
 		assert_eq!(idiom, i);
 		check(v);
 	}
@@ -1274,8 +1275,8 @@ async fn permissions_checks_define_ns() {
 
 	// Define the expected results for the check statement when the test statement succeeded and when it failed
 	let check_results = [
-		vec!["{ accesses: {  }, namespaces: { NS: 'DEFINE NAMESPACE NS' }, users: {  } }"],
-		vec!["{ accesses: {  }, namespaces: {  }, users: {  } }"],
+		vec!["{ accesses: {  }, namespaces: { NS: 'DEFINE NAMESPACE NS' }, nodes: {  }, users: {  } }"],
+		vec!["{ accesses: {  }, namespaces: {  }, nodes: {  }, users: {  } }"],
 	];
 
 	let test_cases = [
@@ -1439,8 +1440,8 @@ async fn permissions_checks_define_access_root() {
 
 	// Define the expected results for the check statement when the test statement succeeded and when it failed
 	let check_results = [
-        vec!["{ accesses: { access: \"DEFINE ACCESS access ON ROOT TYPE JWT ALGORITHM HS512 KEY '[REDACTED]' WITH ISSUER KEY '[REDACTED]' DURATION FOR TOKEN 1h, FOR SESSION NONE\" }, namespaces: {  }, users: {  } }"],
-		vec!["{ accesses: {  }, namespaces: {  }, users: {  } }"]
+        vec!["{ accesses: { access: \"DEFINE ACCESS access ON ROOT TYPE JWT ALGORITHM HS512 KEY '[REDACTED]' WITH ISSUER KEY '[REDACTED]' DURATION FOR TOKEN 1h, FOR SESSION NONE\" }, namespaces: {  }, nodes: {  }, users: {  } }"],
+		vec!["{ accesses: {  }, namespaces: {  }, nodes: {  }, users: {  } }"]
     ];
 
 	let test_cases = [
@@ -1565,8 +1566,8 @@ async fn permissions_checks_define_user_root() {
 
 	// Define the expected results for the check statement when the test statement succeeded and when it failed
 	let check_results = [
-        vec!["{ accesses: {  }, namespaces: {  }, users: { user: \"DEFINE USER user ON ROOT PASSHASH 'secret' ROLES VIEWER DURATION FOR TOKEN 15m, FOR SESSION 6h\" } }"],
-		vec!["{ accesses: {  }, namespaces: {  }, users: {  } }"]
+        vec!["{ accesses: {  }, namespaces: {  }, nodes: {  }, users: { user: \"DEFINE USER user ON ROOT PASSHASH 'secret' ROLES VIEWER DURATION FOR TOKEN 15m, FOR SESSION 6h\" } }"],
+		vec!["{ accesses: {  }, namespaces: {  }, nodes: {  }, users: {  } }"]
     ];
 
 	let test_cases = [

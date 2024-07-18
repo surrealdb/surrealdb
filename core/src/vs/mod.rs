@@ -17,10 +17,8 @@
 pub type Versionstamp = [u8; 10];
 
 pub(crate) mod conv;
-pub(crate) mod oracle;
 
 pub use self::conv::*;
-pub use self::oracle::*;
 
 /// Generate S-tuples of valid, sequenced versionstamps within range.
 /// The limit is used, because these are combinatorics - without an upper bound, combinations aren't possible.

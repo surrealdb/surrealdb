@@ -235,6 +235,7 @@ async fn loose_mode_all_ok() -> Result<(), Error> {
 		"{
 			accesses: {},
 			namespaces: { test: 'DEFINE NAMESPACE test' },
+			nodes: {},
 			users: {},
 		}",
 	);

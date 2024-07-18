@@ -11,13 +11,6 @@ use crate::{
 
 use super::{method::Method, response::Data, rpc_error::RpcError};
 
-macro_rules! mrg {
-	($($m:expr, $x:expr)+) => {{
-		$($m.extend($x.iter().map(|(k, v)| (k.clone(), v.clone())));)+
-		$($m)+
-	}};
-}
-
 #[allow(async_fn_in_trait)]
 pub trait RpcContext {
 	fn kvs(&self) -> &Datastore;
@@ -92,13 +85,30 @@ pub trait RpcContext {
 	// ------------------------------
 
 	async fn yuse(&mut self, params: Array) -> Result<impl Into<Data>, RpcError> {
+		// For both ns+db, string = change, null = unset, none = do nothing
+		// We need to be able to adjust either ns or db without affecting the other
+		// To be able to select a namespace, and then list resources in that namespace, as an example
 		let (ns, db) = params.needs_two()?;
-		if let Value::Strand(ns) = ns {
+		let unset_ns = matches!(ns, Value::Null);
+		let unset_db = matches!(db, Value::Null);
+
+		// If we unset the namespace, we must also unset the database
+		if unset_ns && !unset_db {
+			return Err(RpcError::InvalidParams);
+		}
+
+		if unset_ns {
+			self.session_mut().ns = None;
+		} else if let Value::Strand(ns) = ns {
 			self.session_mut().ns = Some(ns.0);
 		}
-		if let Value::Strand(db) = db {
+
+		if unset_db {
+			self.session_mut().db = None;
+		} else if let Value::Strand(db) = db {
 			self.session_mut().db = Some(db.0);
 		}
+
 		Ok(Value::None)
 	}
 

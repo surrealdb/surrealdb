@@ -55,10 +55,7 @@ macro_rules! into_future {
 					Resource::RecordId(record_id) => {
 						let mut table = Table::default();
 						table.0 = record_id.tb.clone();
-						(
-							table.into(),
-							crate::map! { String::from("id") => record_id.into() }.into(),
-						)
+						(table.into(), map! { String::from("id") => record_id.into() }.into())
 					}
 					Resource::Object(obj) => return Err(Error::InsertOnObject(obj).into()),
 					Resource::Array(arr) => return Err(Error::InsertOnArray(arr).into()),

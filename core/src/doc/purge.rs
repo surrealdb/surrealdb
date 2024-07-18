@@ -25,13 +25,15 @@ impl<'a> Document<'a> {
 		if !self.changed() {
 			return Ok(());
 		}
-		// Claim transaction
-		let mut run = ctx.tx_lock().await;
+		// Get the transaction
+		let txn = ctx.tx();
+		// Lock the transaction
+		let mut txn = txn.lock().await;
 		// Get the record id
 		if let Some(rid) = self.id {
 			// Purge the record data
 			let key = crate::key::thing::new(opt.ns()?, opt.db()?, &rid.tb, &rid.id);
-			run.del(key).await?;
+			txn.del(key).await?;
 			// Purge the record edges
 			match (
 				self.initial.doc.pick(&*EDGE),
@@ -43,20 +45,20 @@ impl<'a> Document<'a> {
 					let (ref o, ref i) = (Dir::Out, Dir::In);
 					// Purge the left pointer edge
 					let key = crate::key::graph::new(opt.ns()?, opt.db()?, &l.tb, &l.id, o, rid);
-					run.del(key).await?;
+					txn.del(key).await?;
 					// Purge the left inner edge
 					let key = crate::key::graph::new(opt.ns()?, opt.db()?, &rid.tb, &rid.id, i, l);
-					run.del(key).await?;
+					txn.del(key).await?;
 					// Purge the right inner edge
 					let key = crate::key::graph::new(opt.ns()?, opt.db()?, &rid.tb, &rid.id, o, r);
-					run.del(key).await?;
+					txn.del(key).await?;
 					// Purge the right pointer edge
 					let key = crate::key::graph::new(opt.ns()?, opt.db()?, &r.tb, &r.id, i, rid);
-					run.del(key).await?;
+					txn.del(key).await?;
 				}
 				_ => {
 					// Release the transaction
-					drop(run);
+					drop(txn);
 					// Setup the delete statement
 					let stm = DeleteStatement {
 						what: Values(vec![Value::from(Edges {
