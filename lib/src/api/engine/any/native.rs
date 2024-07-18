@@ -10,6 +10,7 @@ use crate::api::err::Error;
 #[cfg(feature = "protocol-http")]
 use crate::api::opt::Tls;
 use crate::api::opt::{Endpoint, EndpointKind};
+use crate::api::method::BoxFuture;
 #[allow(unused_imports)] // used by the DB engines
 use crate::api::ExtraFeatures;
 use crate::api::OnceLockExt;
@@ -18,7 +19,6 @@ use crate::api::Surreal;
 #[allow(unused_imports)]
 use crate::error::Db as DbError;
 use crate::opt::WaitFor;
-use futures::future::BoxFuture;
 #[cfg(feature = "protocol-http")]
 use reqwest::ClientBuilder;
 use std::collections::HashSet;

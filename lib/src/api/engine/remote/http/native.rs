@@ -6,13 +6,13 @@ use crate::api::conn::Router;
 use crate::api::opt::Endpoint;
 #[cfg(any(feature = "native-tls", feature = "rustls"))]
 use crate::api::opt::Tls;
+use crate::api::method::BoxFuture;
 use crate::api::ExtraFeatures;
 use crate::api::OnceLockExt;
 use crate::api::Result;
 use crate::api::Surreal;
 use crate::opt::WaitFor;
 use flume::Receiver;
-use futures::future::BoxFuture;
 use futures::StreamExt;
 use indexmap::IndexMap;
 use reqwest::header::HeaderMap;

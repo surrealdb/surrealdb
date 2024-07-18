@@ -14,6 +14,7 @@ use crate::api::err::Error;
 use crate::api::opt::Endpoint;
 #[cfg(any(feature = "native-tls", feature = "rustls"))]
 use crate::api::opt::Tls;
+use crate::api::method::BoxFuture;
 use crate::api::ExtraFeatures;
 use crate::api::OnceLockExt;
 use crate::api::Result;
@@ -23,7 +24,6 @@ use crate::engine::IntervalStream;
 use crate::opt::WaitFor;
 use crate::sql::Value;
 use flume::Receiver;
-use futures::future::BoxFuture;
 use futures::stream::{SplitSink, SplitStream};
 use futures::SinkExt;
 use futures::StreamExt;
