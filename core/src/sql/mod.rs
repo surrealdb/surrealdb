@@ -84,6 +84,7 @@ pub use self::algorithm::Algorithm;
 pub use self::array::Array;
 pub use self::base::Base;
 pub use self::block::Block;
+pub use self::block::Entry;
 pub use self::bytes::Bytes;
 pub use self::cast::Cast;
 pub use self::changefeed::ChangeFeed;
