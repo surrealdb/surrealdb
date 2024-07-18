@@ -287,6 +287,14 @@ impl Parser<'_> {
 						}
 						t!("RECORD") => {
 							self.pop_peek();
+							// The record access type can only be defined at the database level
+							if !matches!(res.base, Base::Db) {
+								unexpected!(
+									self,
+									t!("RECORD"),
+									"a valid access type at this level"
+								);
+							}
 							let mut ac = access_type::RecordAccess {
 								..Default::default()
 							};
@@ -300,6 +308,11 @@ impl Parser<'_> {
 									t!("SIGNIN") => {
 										self.pop_peek();
 										ac.signin =
+											Some(stk.run(|stk| self.parse_value(stk)).await?);
+									}
+									t!("AUTHENTICATE") => {
+										self.pop_peek();
+										ac.authenticate =
 											Some(stk.run(|stk| self.parse_value(stk)).await?);
 									}
 									_ => break,
@@ -514,6 +527,10 @@ impl Parser<'_> {
 				t!("SIGNIN") => {
 					self.pop_peek();
 					ac.signin = Some(stk.run(|stk| self.parse_value(stk)).await?);
+				}
+				t!("AUTHENTICATE") => {
+					self.pop_peek();
+					ac.authenticate = Some(stk.run(|stk| self.parse_value(stk)).await?);
 				}
 				_ => break,
 			}

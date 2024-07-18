@@ -1,11 +1,9 @@
-/// Stores change feeds
+//! Stores change feeds
+use crate::key::category::Categorise;
+use crate::key::category::Category;
+use crate::vs;
 use derive::Key;
 use serde::{Deserialize, Serialize};
-
-use crate::vs;
-
-use crate::key::error::KeyCategory;
-use crate::key::key_req::KeyRequirements;
 use std::str;
 
 // Cf stands for change feeds
@@ -73,9 +71,9 @@ pub fn suffix(ns: &str, db: &str) -> Vec<u8> {
 	k
 }
 
-impl KeyRequirements for Cf<'_> {
-	fn key_category(&self) -> KeyCategory {
-		KeyCategory::ChangeFeed
+impl Categorise for Cf<'_> {
+	fn categorise(&self) -> Category {
+		Category::ChangeFeed
 	}
 }
 

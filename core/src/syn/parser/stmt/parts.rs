@@ -4,9 +4,10 @@ use reblessive::Stk;
 
 use crate::{
 	sql::{
-		changefeed::ChangeFeed, index::Distance, index::VectorType, Base, Cond, Data, Duration,
-		Fetch, Fetchs, Field, Fields, Group, Groups, Ident, Idiom, Output, Permission, Permissions,
-		Tables, Timeout, Value, View,
+		changefeed::ChangeFeed,
+		index::{Distance, VectorType},
+		Base, Cond, Data, Duration, Fetch, Fetchs, Field, Fields, Group, Groups, Ident, Idiom,
+		Output, Permission, Permissions, Tables, Timeout, Value, View,
 	},
 	syn::{
 		parser::{
@@ -107,8 +108,19 @@ impl Parser<'_> {
 		if !self.eat(t!("FETCH")) {
 			return Ok(None);
 		}
-		let v = self.parse_idiom_list(ctx).await?.into_iter().map(Fetch).collect();
-		Ok(Some(Fetchs(v)))
+		let mut fetchs = vec![Fetch(self.try_parse_param_or_idiom(ctx).await?)];
+		while self.eat(t!(",")) {
+			fetchs.push(Fetch(self.try_parse_param_or_idiom(ctx).await?));
+		}
+		Ok(Some(Fetchs(fetchs)))
+	}
+
+	pub async fn try_parse_param_or_idiom(&mut self, ctx: &mut Stk) -> ParseResult<Value> {
+		if self.peek().kind == t!("$param") {
+			Ok(Value::Param(self.next_token_value()?))
+		} else {
+			Ok(Value::Idiom(self.parse_plain_idiom(ctx).await?))
+		}
 	}
 
 	pub async fn try_parse_condition(&mut self, ctx: &mut Stk) -> ParseResult<Option<Cond>> {

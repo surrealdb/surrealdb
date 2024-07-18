@@ -40,6 +40,9 @@ impl Display for AccessType {
 				if let Some(ref v) = ac.signin {
 					write!(f, " SIGNIN {v}")?
 				}
+				if let Some(ref v) = ac.authenticate {
+					write!(f, " AUTHENTICATE {v}")?
+				}
 				write!(f, " WITH JWT {}", ac.jwt)?;
 			}
 		}
@@ -59,6 +62,7 @@ impl InfoStructure for AccessType {
 				"jwt".to_string() => v.jwt.structure(),
 				"signup".to_string(), if let Some(v) = v.signup => v.structure(),
 				"signin".to_string(), if let Some(v) = v.signin => v.structure(),
+				"authenticate".to_string(), if let Some(v) = v.authenticate => v.structure(),
 			}),
 		}
 	}
@@ -256,13 +260,15 @@ pub struct JwtAccessVerifyJwks {
 	pub url: String,
 }
 
-#[revisioned(revision = 1)]
+#[revisioned(revision = 2)]
 #[derive(Debug, Serialize, Deserialize, Hash, Clone, Eq, PartialEq, PartialOrd)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct RecordAccess {
 	pub signup: Option<Value>,
 	pub signin: Option<Value>,
 	pub jwt: JwtAccess,
+	#[revision(start = 2)]
+	pub authenticate: Option<Value>,
 }
 
 impl Default for RecordAccess {
@@ -270,6 +276,7 @@ impl Default for RecordAccess {
 		Self {
 			signup: None,
 			signin: None,
+			authenticate: None,
 			jwt: JwtAccess {
 				..Default::default()
 			},

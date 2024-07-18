@@ -1,11 +1,6 @@
-/// Debug purposes only. It may be used in logs. Not for key handling in implementation code.
-
-/// Helpers for debugging keys
-
-/// sprint_key converts a key to an escaped string.
-/// This is used for logging and debugging tests and should not be used in implementation code.
-#[doc(hidden)]
-pub fn sprint_key<T>(key: &T) -> String
+/// Displays a key in a human-readable format.
+#[cfg(debug_assertions)]
+pub fn sprint<T>(key: &T) -> String
 where
 	T: AsRef<[u8]>,
 {

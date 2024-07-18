@@ -1,7 +1,7 @@
 use crate::err::Error;
 use crate::key::change;
 #[cfg(debug_assertions)]
-use crate::key::debug::sprint_key;
+use crate::key::debug::sprint;
 use crate::kvs::Transaction;
 use crate::vs;
 use crate::vs::Versionstamp;
@@ -9,42 +9,36 @@ use std::str;
 
 // gc_all_at deletes all change feed entries that become stale at the given timestamp.
 #[allow(unused)]
-pub async fn gc_all_at(tx: &mut Transaction, ts: u64, limit: Option<u32>) -> Result<(), Error> {
-	let nses = tx.all_ns().await?;
-	let nses = nses.as_ref();
-	for ns in nses {
-		gc_ns(tx, ns.name.as_str(), limit, ts).await?;
+pub async fn gc_all_at(tx: &Transaction, ts: u64) -> Result<(), Error> {
+	// Fetch all namespaces
+	let nss = tx.all_ns().await?;
+	// Loop over each namespace
+	for ns in nss.as_ref() {
+		// Trace for debugging
+		#[cfg(debug_assertions)]
+		trace!("Performing garbage collection on {ns} for timestamp {ts}");
+		// Process the namespace
+		gc_ns(tx, ts, ns.name.as_str()).await?;
 	}
 	Ok(())
 }
 
 // gc_ns deletes all change feed entries in the given namespace that are older than the given watermark.
 #[allow(unused)]
-pub async fn gc_ns(
-	tx: &mut Transaction,
-	ns: &str,
-	limit: Option<u32>,
-	ts: u64,
-) -> Result<(), Error> {
+pub async fn gc_ns(tx: &Transaction, ts: u64, ns: &str) -> Result<(), Error> {
+	// Fetch all databases
 	let dbs = tx.all_db(ns).await?;
-	let dbs = dbs.as_ref();
-	for db in dbs {
-		// We get the expiration of the change feed defined on the database
-		let db_cf_expiry = match &db.changefeed {
-			None => 0,
-			Some(cf) => cf.expiry.as_secs(),
-		};
+	// Loop over each database
+	for db in dbs.as_ref() {
+		// Trace for debugging
 		#[cfg(debug_assertions)]
-		trace!(
-			"Performing garbage collection on ns {} db {} for ts {}. The cf expiration is {}",
-			ns,
-			db.name,
-			ts,
-			db_cf_expiry
-		);
-		let tbs = tx.all_tb(ns, db.name.as_str()).await?;
-		let tbs = tbs.as_ref();
-		let max_tb_cf_expiry = tbs.iter().fold(0, |acc, tb| match &tb.changefeed {
+		trace!("Performing garbage collection on {ns}:{db} for timestamp {ts}");
+		// Fetch all tables
+		let tbs = tx.all_tb(ns, &db.name).await?;
+		// Get the database changefeed expiration
+		let db_cf_expiry = db.changefeed.map(|v| v.expiry.as_secs()).unwrap_or_default();
+		// Get the maximum table changefeed expiration
+		let tb_cf_expiry = tbs.as_ref().iter().fold(0, |acc, tb| match &tb.changefeed {
 			None => acc,
 			Some(cf) => {
 				if cf.expiry.is_zero() {
@@ -54,46 +48,47 @@ pub async fn gc_ns(
 				}
 			}
 		});
-		let cf_expiry = db_cf_expiry.max(max_tb_cf_expiry);
+		// Calculate the maximum changefeed expiration
+		let cf_expiry = db_cf_expiry.max(tb_cf_expiry);
+		// Ignore this database if the expiry is greater
 		if ts < cf_expiry {
 			continue;
 		}
-		// We only want to retain the expiry window, so we are going to delete everything before
+		// Calculate the watermark expiry window
 		let watermark_ts = ts - cf_expiry;
-		#[cfg(debug_assertions)]
-		trace!("The watermark is {} after removing {cf_expiry} from {ts}", watermark_ts);
-		let watermark_vs =
-			tx.get_versionstamp_from_timestamp(watermark_ts, ns, db.name.as_str(), true).await?;
+		// Calculate the watermark versionstamp
+		let watermark_vs = tx
+			.lock()
+			.await
+			.get_versionstamp_from_timestamp(watermark_ts, ns, &db.name, true)
+			.await?;
+		// If a versionstamp exists, then garbage collect
 		if let Some(watermark_vs) = watermark_vs {
-			gc_db(tx, ns, db.name.as_str(), watermark_vs, limit).await?;
+			gc_range(tx, ns, &db.name, watermark_vs).await?;
 		}
 	}
 	Ok(())
 }
 
 // gc_db deletes all change feed entries in the given database that are older than the given watermark.
-pub async fn gc_db(
-	tx: &mut Transaction,
+pub async fn gc_range(
+	tx: &Transaction,
 	ns: &str,
 	db: &str,
 	watermark: Versionstamp,
-	limit: Option<u32>,
 ) -> Result<(), Error> {
-	let beg: Vec<u8> = change::prefix_ts(ns, db, vs::u64_to_versionstamp(0));
+	// Calculate the range
+	let beg = change::prefix_ts(ns, db, vs::u64_to_versionstamp(0));
 	let end = change::prefix_ts(ns, db, watermark);
+	// Trace for debugging
 	#[cfg(debug_assertions)]
 	trace!(
-		"DB GC: ns: {}, db: {}, watermark: {:?}, prefix: {}, end: {}",
-		ns,
-		db,
-		watermark,
-		sprint_key(&beg),
-		sprint_key(&end)
+		"Performing garbage collection on {ns}:{db} for watermark {watermark:?}, between {} and {}",
+		sprint(&beg),
+		sprint(&end)
 	);
-
-	let limit = limit.unwrap_or(100);
-
-	tx.delr(beg..end, limit).await?;
-
+	// Delete the entire range in grouped batches
+	tx.delr(beg..end).await?;
+	// Ok all good
 	Ok(())
 }

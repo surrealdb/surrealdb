@@ -218,7 +218,7 @@ fn hnsw() -> HnswIndex {
 fn insert_objects(samples: &[(Thing, Vec<Value>)]) -> HnswIndex {
 	let mut h = hnsw();
 	for (id, content) in samples {
-		h.index_document(&id, content).unwrap();
+		h.index_document(id, content).unwrap();
 	}
 	h
 }
@@ -226,7 +226,7 @@ fn insert_objects(samples: &[(Thing, Vec<Value>)]) -> HnswIndex {
 async fn insert_objects_db(session: &Session, create_index: bool, inserts: &[String]) -> Datastore {
 	let ds = init_datastore(session, create_index).await;
 	for sql in inserts {
-		ds.execute(sql, session, None).await.expect(&sql);
+		ds.execute(sql, session, None).await.expect(sql);
 	}
 	ds
 }
@@ -249,8 +249,8 @@ async fn knn_lookup_objects(h: &HnswIndex, samples: &[Vec<Number>]) {
 
 async fn knn_lookup_objects_db(ds: &Datastore, session: &Session, selects: &[String]) {
 	for sql in selects {
-		let mut res = ds.execute(sql, session, None).await.expect(&sql);
-		let res = res.remove(0).result.expect(&sql);
+		let mut res = ds.execute(sql, session, None).await.expect(sql);
+		let res = res.remove(0).result.expect(sql);
 		if let Value::Array(a) = &res {
 			assert_eq!(a.len(), NN);
 		} else {

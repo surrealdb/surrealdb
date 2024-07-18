@@ -16,7 +16,12 @@ use crate::sql::range::Range;
 use crate::sql::table::Table;
 use crate::sql::thing::Thing;
 use crate::sql::value::Value;
-use reblessive::{tree::Stk, TreeStack};
+use crate::sql::Ident;
+use crate::sql::Idiom;
+use crate::sql::Part;
+use reblessive::tree::Stk;
+#[cfg(not(target_arch = "wasm32"))]
+use reblessive::TreeStack;
 use std::mem;
 
 #[derive(Clone)]
@@ -442,11 +447,27 @@ impl Iterator {
 	) -> Result<(), Error> {
 		if let Some(fetchs) = stm.fetch() {
 			for fetch in fetchs.iter() {
+				let i: &Idiom;
+				let new_idiom: Idiom;
+				if let Value::Idiom(idiom) = &fetch.0 {
+					i = idiom;
+				} else if let Value::Param(param) = &fetch.0 {
+					let p = param.compute(stk, ctx, opt, None).await?;
+					if let Value::Strand(s) = p {
+						let p: Part = Part::Field(Ident(s.0));
+						new_idiom = Idiom(vec![p]);
+						i = &new_idiom;
+					} else {
+						return Err(Error::Thrown("Parameter should be a string".to_string()));
+					}
+				} else {
+					return Err(Error::Thrown("Invalid field".to_string()));
+				}
 				let mut values = self.results.take()?;
 				// Loop over each result value
 				for obj in &mut values {
 					// Fetch the value at the path
-					stk.run(|stk| obj.fetch(stk, ctx, opt, fetch)).await?;
+					stk.run(|stk| obj.fetch(stk, ctx, opt, i)).await?;
 				}
 				self.results = values.into();
 			}
@@ -508,7 +529,7 @@ impl Iterator {
 				// Create a channel to shutdown
 				let (end, exit) = channel::bounded::<()>(1);
 				// Create an unbounded channel
-				let (chn, docs) = channel::bounded(crate::cnf::MAX_CONCURRENT_TASKS);
+				let (chn, docs) = channel::bounded(*crate::cnf::MAX_CONCURRENT_TASKS);
 				// Create an async closure for prepared values
 				let adocs = async {
 					// Process all prepared values
@@ -532,7 +553,7 @@ impl Iterator {
 					drop(chn);
 				};
 				// Create an unbounded channel
-				let (chn, vals) = channel::bounded(crate::cnf::MAX_CONCURRENT_TASKS);
+				let (chn, vals) = channel::bounded(*crate::cnf::MAX_CONCURRENT_TASKS);
 				// Create an async closure for received values
 				let avals = async {
 					// Process all received values

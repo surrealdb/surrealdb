@@ -27,9 +27,9 @@ struct Success {
 }
 
 impl Success {
-	fn new(token: Option<String>) -> Success {
+	fn new(token: String) -> Success {
 		Success {
-			token,
+			token: Some(token),
 			code: 200,
 			details: String::from("Authentication succeeded"),
 		}
@@ -71,7 +71,7 @@ async fn handler(
 					Some(Accept::ApplicationCbor) => Ok(output::cbor(&Success::new(v))),
 					Some(Accept::ApplicationPack) => Ok(output::pack(&Success::new(v))),
 					// Text serialization
-					Some(Accept::TextPlain) => Ok(output::text(v.unwrap_or_default())),
+					Some(Accept::TextPlain) => Ok(output::text(v)),
 					// Internal serialization
 					Some(Accept::Surrealdb) => Ok(output::full(&Success::new(v))),
 					// Return nothing

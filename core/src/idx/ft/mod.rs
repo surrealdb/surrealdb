@@ -22,7 +22,7 @@ use crate::idx::ft::terms::{TermId, TermLen, Terms};
 use crate::idx::trees::btree::BStatistics;
 use crate::idx::trees::store::IndexStores;
 use crate::idx::{IndexKeyBase, VersionedSerdeState};
-use crate::kvs;
+use crate::kvs::Transaction;
 use crate::kvs::{Key, TransactionType};
 use crate::sql::index::SearchParams;
 use crate::sql::scoring::Scoring;
@@ -105,35 +105,33 @@ impl FtIndex {
 		p: &SearchParams,
 		tt: TransactionType,
 	) -> Result<Self, Error> {
-		let mut tx = ctx.tx_lock().await;
-		let az = tx.get_db_analyzer(opt.ns()?, opt.db()?, az).await?;
-		let res =
-			Self::with_analyzer(ctx.get_index_stores(), &mut tx, az, index_key_base, p, tt).await;
-		drop(tx);
-		res
+		let tx = ctx.tx();
+		// TODO: @emmanuel-keller we probably don't need to clone the value here
+		let az = tx.get_db_analyzer(opt.ns()?, opt.db()?, az).await?.as_ref().to_owned();
+		Self::with_analyzer(ctx.get_index_stores(), &tx, az, index_key_base, p, tt).await
 	}
 	async fn with_analyzer(
 		ixs: &IndexStores,
-		run: &mut kvs::Transaction,
+		txn: &Transaction,
 		az: DefineAnalyzerStatement,
 		index_key_base: IndexKeyBase,
 		p: &SearchParams,
 		tt: TransactionType,
 	) -> Result<Self, Error> {
 		let state_key: Key = index_key_base.new_bs_key();
-		let state: State = if let Some(val) = run.get(state_key.clone()).await? {
+		let state: State = if let Some(val) = txn.get(state_key.clone()).await? {
 			State::try_from_val(val)?
 		} else {
 			State::default()
 		};
 		let doc_ids = Arc::new(RwLock::new(
-			DocIds::new(ixs, run, tt, index_key_base.clone(), p.doc_ids_order, p.doc_ids_cache)
+			DocIds::new(ixs, txn, tt, index_key_base.clone(), p.doc_ids_order, p.doc_ids_cache)
 				.await?,
 		));
 		let doc_lengths = Arc::new(RwLock::new(
 			DocLengths::new(
 				ixs,
-				run,
+				txn,
 				index_key_base.clone(),
 				p.doc_lengths_order,
 				tt,
@@ -142,11 +140,11 @@ impl FtIndex {
 			.await?,
 		));
 		let postings = Arc::new(RwLock::new(
-			Postings::new(ixs, run, index_key_base.clone(), p.postings_order, tt, p.postings_cache)
+			Postings::new(ixs, txn, index_key_base.clone(), p.postings_order, tt, p.postings_cache)
 				.await?,
 		));
 		let terms = Arc::new(RwLock::new(
-			Terms::new(ixs, run, index_key_base.clone(), p.terms_order, tt, p.terms_cache).await?,
+			Terms::new(ixs, txn, index_key_base.clone(), p.terms_order, tt, p.terms_cache).await?,
 		));
 		let termdocs = TermDocs::new(index_key_base.clone());
 		let offsets = Offsets::new(index_key_base.clone());
@@ -194,17 +192,17 @@ impl FtIndex {
 		ctx: &Context<'_>,
 		rid: &Thing,
 	) -> Result<(), Error> {
-		let mut tx = ctx.tx_lock().await;
+		let tx = ctx.tx();
 		// Extract and remove the doc_id (if any)
 		let mut doc_ids = self.doc_ids.write().await;
-		let doc_id = doc_ids.remove_doc(&mut tx, rid.into()).await?;
+		let doc_id = doc_ids.remove_doc(&tx, rid.into()).await?;
 		drop(doc_ids);
 		if let Some(doc_id) = doc_id {
 			self.state.doc_count -= 1;
 
 			// Remove the doc length
 			let mut doc_lengths = self.doc_lengths.write().await;
-			let dl = doc_lengths.remove_doc_length(&mut tx, doc_id).await?;
+			let dl = doc_lengths.remove_doc_length(&tx, doc_id).await?;
 			drop(doc_lengths);
 			if let Some(doc_lengths) = dl {
 				self.state.total_docs_lengths -= doc_lengths as u128;
@@ -217,11 +215,11 @@ impl FtIndex {
 				let mut p = self.postings.write().await;
 				let mut t = self.terms.write().await;
 				for term_id in &term_list {
-					p.remove_posting(&mut tx, term_id, doc_id).await?;
+					p.remove_posting(&tx, term_id, doc_id).await?;
 					// if the term is not present in any document in the index, we can remove it
-					let doc_count = self.term_docs.remove_doc(&mut tx, term_id, doc_id).await?;
+					let doc_count = self.term_docs.remove_doc(&tx, term_id, doc_id).await?;
 					if doc_count == 0 {
-						t.remove_term_id(&mut tx, term_id).await?;
+						t.remove_term_id(&tx, term_id).await?;
 					}
 				}
 				drop(p);
@@ -230,7 +228,7 @@ impl FtIndex {
 				if self.highlighting {
 					for term_id in term_list {
 						// TODO?: Removal can be done with a prefix on doc_id
-						self.offsets.remove_offsets(&mut tx, doc_id, term_id).await?;
+						self.offsets.remove_offsets(&tx, doc_id, term_id).await?;
 					}
 				}
 			}
@@ -248,11 +246,10 @@ impl FtIndex {
 		content: Vec<Value>,
 	) -> Result<(), Error> {
 		// Resolve the doc_id
-		let mut tx = ctx.tx_lock().await;
+		let tx = ctx.tx();
 		let mut doc_ids = self.doc_ids.write().await;
-		let resolved = doc_ids.resolve_doc_id(&mut tx, rid.into()).await?;
+		let resolved = doc_ids.resolve_doc_id(&tx, rid.into()).await?;
 		drop(doc_ids);
-		drop(tx);
 		let doc_id = *resolved.doc_id();
 
 		// Extract the doc_lengths, terms en frequencies (and offset)
@@ -272,14 +269,14 @@ impl FtIndex {
 		};
 
 		// Set the doc length
-		let mut tx = ctx.tx_lock().await;
+		let tx = ctx.tx();
 		let mut dl = self.doc_lengths.write().await;
 		if resolved.was_existing() {
-			if let Some(old_doc_length) = dl.get_doc_length_mut(&mut tx, doc_id).await? {
+			if let Some(old_doc_length) = dl.get_doc_length_mut(&tx, doc_id).await? {
 				self.state.total_docs_lengths -= old_doc_length as u128;
 			}
 		}
-		dl.set_doc_length(&mut tx, doc_id, doc_length).await?;
+		dl.set_doc_length(&tx, doc_id, doc_length).await?;
 		drop(dl);
 
 		// Retrieve the existing terms for this document (if any)
@@ -294,22 +291,22 @@ impl FtIndex {
 		let mut terms_ids = RoaringTreemap::default();
 		let mut p = self.postings.write().await;
 		for (term_id, term_freq) in terms_and_frequencies {
-			p.update_posting(&mut tx, term_id, doc_id, term_freq).await?;
+			p.update_posting(&tx, term_id, doc_id, term_freq).await?;
 			if let Some(old_term_ids) = &mut old_term_ids {
 				old_term_ids.remove(term_id);
 			}
-			self.term_docs.set_doc(&mut tx, term_id, doc_id).await?;
+			self.term_docs.set_doc(&tx, term_id, doc_id).await?;
 			terms_ids.insert(term_id);
 		}
 
 		// Remove any remaining postings
 		if let Some(old_term_ids) = &old_term_ids {
 			for old_term_id in old_term_ids {
-				p.remove_posting(&mut tx, old_term_id, doc_id).await?;
-				let doc_count = self.term_docs.remove_doc(&mut tx, old_term_id, doc_id).await?;
+				p.remove_posting(&tx, old_term_id, doc_id).await?;
+				let doc_count = self.term_docs.remove_doc(&tx, old_term_id, doc_id).await?;
 				// if the term does not have anymore postings, we can remove the term
 				if doc_count == 0 {
-					t.remove_term_id(&mut tx, old_term_id).await?;
+					t.remove_term_id(&tx, old_term_id).await?;
 				}
 			}
 		}
@@ -321,14 +318,14 @@ impl FtIndex {
 			if let Some(ofs) = offsets {
 				if !ofs.is_empty() {
 					for (tid, or) in ofs {
-						self.offsets.set_offsets(&mut tx, doc_id, tid, or).await?;
+						self.offsets.set_offsets(&tx, doc_id, tid, or).await?;
 					}
 				}
 			}
 			// In case of an update, w remove the offset for the terms that does not exist anymore
 			if let Some(old_term_ids) = old_term_ids {
 				for old_term_id in old_term_ids {
-					self.offsets.remove_offsets(&mut tx, doc_id, old_term_id).await?;
+					self.offsets.remove_offsets(&tx, doc_id, old_term_id).await?;
 				}
 			}
 		}
@@ -365,7 +362,7 @@ impl FtIndex {
 
 	pub(super) async fn get_terms_docs(
 		&self,
-		tx: &mut kvs::Transaction,
+		tx: &Transaction,
 		terms: &TermsList,
 	) -> Result<Vec<Option<(TermId, RoaringTreemap)>>, Error> {
 		let mut terms_docs = Vec::with_capacity(terms.len());
@@ -424,7 +421,7 @@ impl FtIndex {
 
 	pub(super) async fn highlight(
 		&self,
-		tx: &mut kvs::Transaction,
+		tx: &Transaction,
 		thg: &Thing,
 		terms: &[Option<(TermId, TermLen)>],
 		hlp: HighlightParams,
@@ -450,7 +447,7 @@ impl FtIndex {
 
 	pub(super) async fn extract_offsets(
 		&self,
-		tx: &mut kvs::Transaction,
+		tx: &Transaction,
 		thg: &Thing,
 		terms: &[Option<(TermId, u32)>],
 		partial: bool,
@@ -473,25 +470,22 @@ impl FtIndex {
 	}
 
 	pub(crate) async fn statistics(&self, ctx: &Context<'_>) -> Result<FtStatistics, Error> {
-		// TODO do parallel execution
-		let mut run = ctx.tx_lock().await;
+		let txn = ctx.tx();
 		let res = FtStatistics {
-			doc_ids: self.doc_ids.read().await.statistics(&mut run).await?,
-			terms: self.terms.read().await.statistics(&mut run).await?,
-			doc_lengths: self.doc_lengths.read().await.statistics(&mut run).await?,
-			postings: self.postings.read().await.statistics(&mut run).await?,
+			doc_ids: self.doc_ids.read().await.statistics(&txn).await?,
+			terms: self.terms.read().await.statistics(&txn).await?,
+			doc_lengths: self.doc_lengths.read().await.statistics(&txn).await?,
+			postings: self.postings.read().await.statistics(&txn).await?,
 		};
-		drop(run);
 		Ok(res)
 	}
 
 	pub(crate) async fn finish(&self, ctx: &Context<'_>) -> Result<(), Error> {
-		let mut run = ctx.tx_lock().await;
-		self.doc_ids.write().await.finish(&mut run).await?;
-		self.doc_lengths.write().await.finish(&mut run).await?;
-		self.postings.write().await.finish(&mut run).await?;
-		self.terms.write().await.finish(&mut run).await?;
-		drop(run);
+		let txn = ctx.tx();
+		self.doc_ids.write().await.finish(&txn).await?;
+		self.doc_lengths.write().await.finish(&txn).await?;
+		self.postings.write().await.finish(&txn).await?;
+		self.terms.write().await.finish(&txn).await?;
 		Ok(())
 	}
 }
@@ -518,10 +512,7 @@ impl HitsIterator {
 		self.iter.size_hint().0
 	}
 
-	pub(crate) async fn next(
-		&mut self,
-		tx: &mut kvs::Transaction,
-	) -> Result<Option<(Thing, DocId)>, Error> {
+	pub(crate) async fn next(&mut self, tx: &Transaction) -> Result<Option<(Thing, DocId)>, Error> {
 		let di = self.doc_ids.read().await;
 		for doc_id in self.iter.by_ref() {
 			if let Some(doc_key) = di.get_doc_key(tx, doc_id).await? {
@@ -546,7 +537,6 @@ mod tests {
 	use crate::sql::statements::{DefineAnalyzerStatement, DefineStatement};
 	use crate::sql::{Array, Statement, Thing, Value};
 	use crate::syn;
-	use futures::lock::Mutex;
 	use reblessive::tree::Stk;
 	use std::collections::HashMap;
 	use std::sync::Arc;
@@ -558,11 +548,11 @@ mod tests {
 		scr: BM25Scorer,
 		e: Vec<(&Thing, Option<Score>)>,
 	) {
-		let mut tx = ctx.tx_lock().await;
+		let tx = ctx.tx();
 		if let Some(mut hits) = hits {
 			let mut map = HashMap::new();
-			while let Some((k, d)) = hits.next(&mut tx).await.unwrap() {
-				let s = scr.score(&mut tx, d).await.unwrap();
+			while let Some((k, d)) = hits.next(&tx).await.unwrap() {
+				let s = scr.score(&tx, d).await.unwrap();
 				map.insert(k, s);
 			}
 			assert_eq!(map.len(), e.len());
@@ -572,7 +562,6 @@ mod tests {
 		} else {
 			panic!("hits is none");
 		}
-		drop(tx);
 	}
 
 	async fn search(
@@ -584,9 +573,8 @@ mod tests {
 	) -> (Option<HitsIterator>, BM25Scorer) {
 		let (term_list, _) =
 			fti.extract_querying_terms(stk, ctx, opt, qs.to_string()).await.unwrap();
-		let mut tx = ctx.tx_lock().await;
-		let td = Arc::new(fti.get_terms_docs(&mut tx, &term_list).await.unwrap());
-		drop(tx);
+		let tx = ctx.tx();
+		let td = Arc::new(fti.get_terms_docs(&tx, &term_list).await.unwrap());
 		let scr = fti.new_scorer(td.clone()).unwrap().unwrap();
 		let hits = fti.new_hits_iterator(td).unwrap();
 		(hits, scr)
@@ -600,10 +588,10 @@ mod tests {
 		hl: bool,
 	) -> (Context<'a>, Options, FtIndex) {
 		let mut ctx = Context::default();
-		let mut tx = ds.transaction(tt, Optimistic).await.unwrap();
+		let tx = ds.transaction(tt, Optimistic).await.unwrap();
 		let fti = FtIndex::with_analyzer(
 			ctx.get_index_stores(),
-			&mut tx,
+			&tx,
 			az.clone(),
 			IndexKeyBase::default(),
 			&SearchParams {
@@ -623,14 +611,14 @@ mod tests {
 		)
 		.await
 		.unwrap();
-		let txn = Arc::new(Mutex::new(tx));
-		ctx.set_transaction_mut(txn);
+		let txn = Arc::new(tx);
+		ctx.set_transaction(txn);
 		(ctx, Options::default(), fti)
 	}
 
 	pub(super) async fn finish(ctx: &Context<'_>, fti: FtIndex) {
 		fti.finish(ctx).await.unwrap();
-		let mut tx = ctx.tx_lock().await;
+		let tx = ctx.tx();
 		tx.commit().await.unwrap();
 	}
 

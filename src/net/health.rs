@@ -22,12 +22,24 @@ async fn handler() -> impl IntoResponse {
 		// The transaction failed to start
 		Err(_) => Err(Error::InvalidStorage),
 		// The transaction was successful
-		Ok(mut tx) => {
+		Ok(tx) => {
 			// Cancel the transaction
 			trace!("Health endpoint cancelling transaction");
-			let _ = tx.cancel().await;
-			// Return the response
-			Ok(())
+			// Attempt to fetch data
+			match tx.get(vec![0x00]).await {
+				Err(_) => {
+					// Ensure the transaction is cancelled
+					let _ = tx.cancel().await;
+					// Return an error for this endpoint
+					Err(Error::InvalidStorage)
+				}
+				Ok(_) => {
+					// Ensure the transaction is cancelled
+					let _ = tx.cancel().await;
+					// Return success for this endpoint
+					Ok(())
+				}
+			}
 		}
 	}
 }
