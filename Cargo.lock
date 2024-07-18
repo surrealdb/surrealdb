@@ -4879,9 +4879,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4df61cfb2522f24fd6aa90ce3489c2c8660a181075e7bac3ae7bdf22287d238f"
 dependencies = [
  "bincode",
+ "chrono",
+ "geo 0.26.0",
+ "regex",
  "revision-derive 0.7.0",
+ "roaring",
+ "rust_decimal",
  "serde",
  "thiserror",
+ "uuid",
 ]
 
 [[package]]
@@ -6005,7 +6011,6 @@ dependencies = [
  "axum-server",
  "base64 0.21.7",
  "bytes",
- "chrono",
  "ciborium",
  "clap",
  "env_logger 0.10.2",
@@ -6031,7 +6036,7 @@ dependencies = [
  "rand 0.8.5",
  "rcgen",
  "reqwest",
- "revision 0.8.0",
+ "revision 0.7.1",
  "rmp-serde",
  "rmpv",
  "rustyline",
@@ -6040,7 +6045,6 @@ dependencies = [
  "serde_json",
  "serial_test",
  "surrealdb",
- "surrealdb-jsonwebtoken",
  "temp-env",
  "tempfile",
  "test-log",
@@ -6385,12 +6389,6 @@ name = "sync_wrapper"
 version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "384595c11a4e2969895cad5a8c4029115f5ab956a9e5ef4de79d11a426e5f20c"
-
-[[package]]
-name = "take_mut"
-version = "0.2.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f764005d11ee5f36500a149ace24e00e3da98b0158b3e2d53a7495660d3f4d60"
 
 [[package]]
 name = "take_mut"
