@@ -431,6 +431,9 @@ async fn receive_all_pending_notifications<
 	let mut results = Vec::new();
 	let we_expect_timeout = tokio::time::timeout(timeout, async {
 		while let Some(notification) = stream.write().await.next().await {
+			if results.len() >= MAX_NOTIFICATIONS {
+				panic!("too many notification!")
+			}
 			results.push(notification.unwrap())
 		}
 	})
