@@ -10,10 +10,10 @@ pub mod opt;
 mod conn;
 
 pub use method::query::Response;
+use method::BoxFuture;
 use semver::Version;
 use tokio::sync::watch;
 
-use crate::api::conn::DbResponse;
 use crate::api::conn::Router;
 use crate::api::err::Error;
 use crate::api::opt::Endpoint;
@@ -21,10 +21,8 @@ use semver::BuildMetadata;
 use semver::VersionReq;
 use std::fmt;
 use std::fmt::Debug;
-use std::future::Future;
 use std::future::IntoFuture;
 use std::marker::PhantomData;
-use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::OnceLock;
 
@@ -96,7 +94,7 @@ where
 	Client: Connection,
 {
 	type Output = Result<Surreal<Client>>;
-	type IntoFuture = Pin<Box<dyn Future<Output = Self::Output> + Send + Sync>>;
+	type IntoFuture = BoxFuture<'static, Self::Output>;
 
 	fn into_future(self) -> Self::IntoFuture {
 		Box::pin(async move {
@@ -126,7 +124,7 @@ where
 	Client: Connection,
 {
 	type Output = Result<()>;
-	type IntoFuture = Pin<Box<dyn Future<Output = Self::Output> + Send + Sync>>;
+	type IntoFuture = BoxFuture<'static, Self::Output>;
 
 	fn into_future(self) -> Self::IntoFuture {
 		Box::pin(async move {
