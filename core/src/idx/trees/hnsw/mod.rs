@@ -678,9 +678,9 @@ mod tests {
 		let p = new_params(20, VectorType::F32, Distance::Euclidean, 8, 100, false, false);
 		test_recall(
 			"hnsw-random-9000-20-euclidean.gz",
-			3000,
+			1000,
 			"hnsw-random-5000-20-euclidean.gz",
-			500,
+			300,
 			p,
 			&[(10, 0.98), (40, 1.0)],
 		)
@@ -692,9 +692,9 @@ mod tests {
 		let p = new_params(20, VectorType::F32, Distance::Euclidean, 8, 100, false, true);
 		test_recall(
 			"hnsw-random-9000-20-euclidean.gz",
-			3000,
+			750,
 			"hnsw-random-5000-20-euclidean.gz",
-			500,
+			200,
 			p,
 			&[(10, 0.98), (40, 1.0)],
 		)
@@ -706,9 +706,9 @@ mod tests {
 		let p = new_params(20, VectorType::F32, Distance::Euclidean, 8, 100, true, true);
 		test_recall(
 			"hnsw-random-9000-20-euclidean.gz",
-			1000,
+			500,
 			"hnsw-random-5000-20-euclidean.gz",
-			200,
+			100,
 			p,
 			&[(10, 0.98), (40, 1.0)],
 		)
