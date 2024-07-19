@@ -2957,11 +2957,11 @@ async fn function_rand_ulid() -> Result<(), Error> {
 async fn function_rand_ulid_from_datetime() -> Result<(), Error> {
 	let sql = r#"
         CREATE ONLY test:[rand::ulid()] SET created = time::now(), num = 1;
-        SLEEP 1ms;
+        SLEEP 100ms;
         LET $rec = CREATE ONLY test:[rand::ulid()] SET created = time::now(), num = 2;
-        SLEEP 1ms;
+        SLEEP 100ms;
         CREATE ONLY test:[rand::ulid()] SET created = time::now(), num = 3;
-		SELECT VALUE num FROM test:[rand::ulid($rec.created - 1ms)]..;
+		SELECT VALUE num FROM test:[rand::ulid($rec.created - 50ms)]..;
 	"#;
 	let mut test = Test::new(sql).await?;
 	//
@@ -3003,11 +3003,11 @@ async fn function_rand_uuid() -> Result<(), Error> {
 async fn function_rand_uuid_from_datetime() -> Result<(), Error> {
 	let sql = r#"
         CREATE ONLY test:[rand::uuid()] SET created = time::now(), num = 1;
-        SLEEP 1ms;
+        SLEEP 100ms;
         LET $rec = CREATE ONLY test:[rand::uuid()] SET created = time::now(), num = 2;
-        SLEEP 1ms;
+        SLEEP 100ms;
         CREATE ONLY test:[rand::uuid()] SET created = time::now(), num = 3;
-		SELECT VALUE num FROM test:[rand::uuid($rec.created - 1ms)]..;
+		SELECT VALUE num FROM test:[rand::uuid($rec.created - 50ms)]..;
 	"#;
 	let mut test = Test::new(sql).await?;
 	//
@@ -3062,11 +3062,11 @@ async fn function_rand_uuid_v7() -> Result<(), Error> {
 async fn function_rand_uuid_v7_from_datetime() -> Result<(), Error> {
 	let sql = r#"
         CREATE ONLY test:[rand::uuid::v7()] SET created = time::now(), num = 1;
-        SLEEP 1ms;
+        SLEEP 100ms;
         LET $rec = CREATE ONLY test:[rand::uuid::v7()] SET created = time::now(), num = 2;
-        SLEEP 1ms;
+        SLEEP 100ms;
         CREATE ONLY test:[rand::uuid::v7()] SET created = time::now(), num = 3;
-		SELECT VALUE num FROM test:[rand::uuid::v7($rec.created - 1ms)]..;
+		SELECT VALUE num FROM test:[rand::uuid::v7($rec.created - 50ms)]..;
 	"#;
 	let mut test = Test::new(sql).await?;
 	//
