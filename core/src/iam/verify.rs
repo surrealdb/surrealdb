@@ -639,19 +639,17 @@ async fn authenticate_record(
 	session: &Session,
 	authenticate: Value,
 ) -> Result<Thing, Error> {
-	match kvs.evaluate(authenticate, &session, None).await {
+	match kvs.evaluate(authenticate, session, None).await {
 		Ok(val) => match val.record() {
 			// If found, return record identifier from AUTHENTICATE clause
 			Some(id) => Ok(id),
-			_ => return Err(Error::InvalidAuth),
+			_ => Err(Error::InvalidAuth),
 		},
-		Err(e) => {
-			return match e {
-				Error::Thrown(_) => Err(e),
-				e if *INSECURE_FORWARD_RECORD_ACCESS_ERRORS => Err(e),
-				_ => Err(Error::InvalidAuth),
-			}
-		}
+		Err(e) => match e {
+			Error::Thrown(_) => Err(e),
+			e if *INSECURE_FORWARD_RECORD_ACCESS_ERRORS => Err(e),
+			_ => Err(Error::InvalidAuth),
+		},
 	}
 }
 
@@ -661,22 +659,19 @@ async fn authenticate_jwt(
 	session: &Session,
 	authenticate: Value,
 ) -> Result<(), Error> {
-	match kvs.evaluate(authenticate, &session, None).await {
+	match kvs.evaluate(authenticate, session, None).await {
 		Ok(val) => {
 			// Fail authentication unless the AUTHENTICATE clause returns a truthy value
 			if val.is_truthy() {
 				Ok(())
 			} else {
-				return Err(Error::InvalidAuth);
+				Err(Error::InvalidAuth)
 			}
 		}
-		Err(e) => {
-			return match e {
-				Error::Thrown(_) => Err(e),
-				e if *INSECURE_FORWARD_RECORD_ACCESS_ERRORS => Err(e),
-				_ => Err(Error::InvalidAuth),
-			}
-		}
+		Err(e) => match e {
+			Error::Thrown(_) => Err(e),
+			_ => Err(Error::InvalidAuth),
+		},
 	}
 }
 

@@ -1054,7 +1054,7 @@ fn parse_define_access_record() {
 
 		assert_eq!(stmt.name, Ident("a".to_string()));
 		assert_eq!(stmt.base, Base::Db);
-		assert_eq!(stmt.authenticate, None);
+		assert_eq!(stmt.authenticate, Some(Value::Bool(true)));
 		assert_eq!(
 			stmt.duration,
 			AccessDuration {
