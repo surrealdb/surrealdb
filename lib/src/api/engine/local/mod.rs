@@ -925,7 +925,7 @@ async fn router(
 			key,
 			value,
 		} => {
-			let var = Some(crate::map! {
+			let var = Some(map! {
 				key.clone() => Value::None,
 				=> vars
 			});

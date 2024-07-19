@@ -1,4 +1,5 @@
 use crate::api::conn::Method;
+use crate::api::method::BoxFuture;
 use crate::api::opt::Range;
 use crate::api::opt::Resource;
 use crate::api::Connection;
@@ -8,7 +9,6 @@ use crate::sql::to_value;
 use crate::sql::Id;
 use crate::sql::Value;
 use crate::Surreal;
-use futures::future::BoxFuture;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 use std::borrow::Cow;

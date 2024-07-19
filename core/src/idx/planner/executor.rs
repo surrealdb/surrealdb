@@ -175,10 +175,10 @@ impl InnerQueryExecutor {
 								}
 								Entry::Vacant(e) => {
 									let ikb = IndexKeyBase::new(opt.ns()?, opt.db()?, idx_def)?;
-									let mut tx = ctx.tx_lock().await;
+									let tx = ctx.tx();
 									let mt = MTreeIndex::new(
 										ctx.get_index_stores(),
-										&mut tx,
+										&tx,
 										ikb,
 										p,
 										TransactionType::Read,
@@ -563,11 +563,10 @@ impl QueryExecutor {
 		ft: &FtEntry,
 	) -> Result<bool, Error> {
 		let doc_key: Key = thg.into();
-		let mut run = ctx.tx_lock().await;
+		let tx = ctx.tx();
 		let di = ft.0.doc_ids.read().await;
-		let doc_id = di.get_doc_id(&mut run, doc_key).await?;
+		let doc_id = di.get_doc_id(&tx, doc_key).await?;
 		drop(di);
-		drop(run);
 		if let Some(doc_id) = doc_id {
 			let term_goals = ft.0.terms_docs.len();
 			// If there is no terms, it can't be a match
@@ -640,18 +639,10 @@ impl QueryExecutor {
 		doc: &Value,
 	) -> Result<Value, Error> {
 		if let Some((e, ft)) = self.get_ft_entry_and_index(hlp.match_ref()) {
-			let mut run = ctx.tx_lock().await;
+			let tx = ctx.tx();
 			let res = ft
-				.highlight(
-					&mut run,
-					thg,
-					&e.0.query_terms_list,
-					hlp,
-					e.0.index_option.id_ref(),
-					doc,
-				)
+				.highlight(&tx, thg, &e.0.query_terms_list, hlp, e.0.index_option.id_ref(), doc)
 				.await;
-			drop(run);
 			return res;
 		}
 		Ok(Value::None)
@@ -665,9 +656,8 @@ impl QueryExecutor {
 		partial: bool,
 	) -> Result<Value, Error> {
 		if let Some((e, ft)) = self.get_ft_entry_and_index(&match_ref) {
-			let mut run = ctx.tx_lock().await;
-			let res = ft.extract_offsets(&mut run, thg, &e.0.query_terms_list, partial).await;
-			drop(run);
+			let tx = ctx.tx();
+			let res = ft.extract_offsets(&tx, thg, &e.0.query_terms_list, partial).await;
 			return res;
 		}
 		Ok(Value::None)
@@ -682,7 +672,7 @@ impl QueryExecutor {
 	) -> Result<Value, Error> {
 		if let Some(e) = self.get_ft_entry(match_ref) {
 			if let Some(scorer) = &e.0.scorer {
-				let mut run = ctx.tx_lock().await;
+				let tx = ctx.tx();
 				let mut doc_id = if let Some(ir) = ir {
 					ir.doc_id()
 				} else {
@@ -691,17 +681,15 @@ impl QueryExecutor {
 				if doc_id.is_none() {
 					let key: Key = rid.into();
 					let di = e.0.doc_ids.read().await;
-					doc_id = di.get_doc_id(&mut run, key).await?;
+					doc_id = di.get_doc_id(&tx, key).await?;
 					drop(di);
 				}
 				if let Some(doc_id) = doc_id {
-					let score = scorer.score(&mut run, doc_id).await?;
+					let score = scorer.score(&tx, doc_id).await?;
 					if let Some(score) = score {
-						drop(run);
 						return Ok(Value::from(score));
 					}
 				}
-				drop(run);
 			}
 		}
 		Ok(Value::None)
@@ -733,8 +721,8 @@ impl FtEntry {
 		if let Matches(qs, _) = io.op() {
 			let (terms_list, terms_set) =
 				ft.extract_querying_terms(stk, ctx, opt, qs.to_owned()).await?;
-			let mut tx = ctx.tx_lock().await;
-			let terms_docs = Arc::new(ft.get_terms_docs(&mut tx, &terms_list).await?);
+			let tx = ctx.tx();
+			let terms_docs = Arc::new(ft.get_terms_docs(&tx, &terms_list).await?);
 			drop(tx);
 			Ok(Some(Self(Arc::new(Inner {
 				index_option: io,

@@ -179,8 +179,7 @@ async fn database_change_feeds() -> Result<(), Error> {
 	// This is neccessary to mark a point in time that can be GC'd
 	current_time += 1;
 	dbs.tick_at(current_time).await?;
-	let mut tx = dbs.transaction(Write, Optimistic).await?;
-	tx.print_all().await;
+	let tx = dbs.transaction(Write, Optimistic).await?;
 	tx.cancel().await?;
 
 	let res = &mut dbs.execute(sql, &ses, None).await?;

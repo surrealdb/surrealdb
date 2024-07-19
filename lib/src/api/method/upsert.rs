@@ -1,5 +1,6 @@
 use crate::api::conn::Method;
 use crate::api::conn::Param;
+use crate::api::method::BoxFuture;
 use crate::api::method::Content;
 use crate::api::method::Merge;
 use crate::api::method::Patch;
@@ -12,7 +13,6 @@ use crate::method::OnceLockExt;
 use crate::sql::Id;
 use crate::sql::Value;
 use crate::Surreal;
-use futures::future::BoxFuture;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 use std::borrow::Cow;

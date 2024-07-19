@@ -6,6 +6,7 @@ use crate::api::engine::any::Any;
 #[cfg(feature = "protocol-http")]
 use crate::api::engine::remote::http;
 use crate::api::err::Error;
+use crate::api::method::BoxFuture;
 #[cfg(any(feature = "native-tls", feature = "rustls"))]
 #[cfg(feature = "protocol-http")]
 use crate::api::opt::Tls;
@@ -18,7 +19,6 @@ use crate::api::Surreal;
 #[allow(unused_imports)]
 use crate::error::Db as DbError;
 use crate::opt::WaitFor;
-use futures::future::BoxFuture;
 #[cfg(feature = "protocol-http")]
 use reqwest::ClientBuilder;
 use std::collections::HashSet;

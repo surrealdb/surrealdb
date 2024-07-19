@@ -1,6 +1,7 @@
 use crate::api;
 use crate::api::err::Error;
 use crate::api::method::query::Response;
+use crate::api::method::BoxFuture;
 use crate::api::opt::Endpoint;
 use crate::api::ExtraFeatures;
 use crate::api::Result;
@@ -11,7 +12,6 @@ use crate::sql::Query;
 use crate::sql::Value;
 use channel::Receiver;
 use channel::Sender;
-use futures::future::BoxFuture;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 use std::collections::HashSet;

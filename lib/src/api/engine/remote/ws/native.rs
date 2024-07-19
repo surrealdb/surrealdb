@@ -10,6 +10,7 @@ use crate::api::engine::remote::ws::Client;
 use crate::api::engine::remote::ws::Response;
 use crate::api::engine::remote::ws::PING_INTERVAL;
 use crate::api::err::Error;
+use crate::api::method::BoxFuture;
 use crate::api::opt::Endpoint;
 #[cfg(any(feature = "native-tls", feature = "rustls"))]
 use crate::api::opt::Tls;
@@ -22,7 +23,6 @@ use crate::engine::IntervalStream;
 use crate::opt::WaitFor;
 use crate::sql::Value;
 use channel::Receiver;
-use futures::future::BoxFuture;
 use futures::stream::{SplitSink, SplitStream};
 use futures::SinkExt;
 use futures::StreamExt;

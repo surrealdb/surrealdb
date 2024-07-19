@@ -53,7 +53,7 @@ impl Parser<'_> {
 		}
 	}
 
-	/// Parses a list of idioms seperated by a `,`
+	/// Parses a list of idioms separated by a `,`
 	pub async fn parse_idiom_list(&mut self, ctx: &mut Stk) -> ParseResult<Vec<Idiom>> {
 		let mut res = vec![self.parse_plain_idiom(ctx).await?];
 		while self.eat(t!(",")) {
