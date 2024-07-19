@@ -83,7 +83,6 @@ impl ser::Serializer for SerializerRecord {
 pub struct SerializeRecord {
 	pub signup: Option<Value>,
 	pub signin: Option<Value>,
-	pub authenticate: Option<Value>,
 	pub jwt: JwtAccess,
 }
 
@@ -102,9 +101,6 @@ impl serde::ser::SerializeStruct for SerializeRecord {
 			"signin" => {
 				self.signin = value.serialize(ser::value::opt::Serializer.wrap())?;
 			}
-			"authenticate" => {
-				self.authenticate = value.serialize(ser::value::opt::Serializer.wrap())?;
-			}
 			"jwt" => {
 				self.jwt = value.serialize(SerializerJwt.wrap())?;
 			}
@@ -119,7 +115,6 @@ impl serde::ser::SerializeStruct for SerializeRecord {
 		Ok(RecordAccess {
 			signup: self.signup,
 			signin: self.signin,
-			authenticate: self.authenticate,
 			jwt: self.jwt,
 		})
 	}

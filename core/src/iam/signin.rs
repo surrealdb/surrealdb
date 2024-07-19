@@ -152,7 +152,7 @@ pub async fn db_access(
 												..Claims::default()
 											};
 											// AUTHENTICATE clause
-											if let Some(au) = at.authenticate {
+											if let Some(au) = av.authenticate.clone() {
 												// Setup the system session for finding the signin record
 												let mut sess =
 													Session::editor().with_ns(&ns).with_db(&db);

@@ -157,30 +157,26 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			// Ensure that the transaction is cancelled
 			tx.cancel().await?;
 			// Obtain the configuration to verify the token based on the access method
-			let (au, cf) = match de.kind.clone() {
-				AccessType::Record(at) => {
-					let cf = match at.jwt.verify.clone() {
-						JwtAccessVerify::Key(key) => config(key.alg, key.key.as_bytes()),
-						#[cfg(feature = "jwks")]
-						JwtAccessVerify::Jwks(jwks) => {
-							if let Some(kid) = token_data.header.kid {
-								jwks::config(kvs, &kid, &jwks.url, token_data.header.alg).await
-							} else {
-								Err(Error::MissingTokenHeader("kid".to_string()))
-							}
+			let cf = match de.kind.clone() {
+				AccessType::Record(at) => match at.jwt.verify.clone() {
+					JwtAccessVerify::Key(key) => config(key.alg, key.key.as_bytes()),
+					#[cfg(feature = "jwks")]
+					JwtAccessVerify::Jwks(jwks) => {
+						if let Some(kid) = token_data.header.kid {
+							jwks::config(kvs, &kid, &jwks.url, token_data.header.alg).await
+						} else {
+							Err(Error::MissingTokenHeader("kid".to_string()))
 						}
-						#[cfg(not(feature = "jwks"))]
-						_ => return Err(Error::AccessMethodMismatch),
-					}?;
-
-					(at.authenticate, cf)
-				}
+					}
+					#[cfg(not(feature = "jwks"))]
+					_ => return Err(Error::AccessMethodMismatch),
+				}?,
 				_ => return Err(Error::AccessMethodMismatch),
 			};
 			// Verify the token
 			decode::<Claims>(token, &cf.0, &cf.1)?;
 			// AUTHENTICATE clause
-			if let Some(au) = au {
+			if let Some(au) = de.authenticate.clone() {
 				// Setup the system session for finding the signin record
 				let mut sess = Session::editor().with_ns(&ns).with_db(&db);
 				sess.rd = Some(rid.clone().into());
@@ -254,7 +250,6 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 						#[cfg(not(feature = "jwks"))]
 						_ => return Err(Error::AccessMethodMismatch),
 					}?;
-
 					// Verify the token
 					decode::<Claims>(token, &cf.0, &cf.1)?;
 					// Parse the roles
@@ -286,7 +281,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 				// If the access type is Record, this is record access
 				// Record access without an "id" claim is only possible if there is an AUTHENTICATE clause
 				// The clause can make up for the missing "id" claim by resolving other claims to a specific record
-				AccessType::Record(at) => match at.authenticate {
+				AccessType::Record(at) => match de.authenticate.clone() {
 					Some(au) => {
 						trace!("Access method `{}` is record access with authenticate clause", ac);
 						let cf = match at.jwt.verify {
@@ -1943,11 +1938,11 @@ mod tests {
 				format!(
 					r#"
     				DEFINE ACCESS user ON DATABASE TYPE RECORD
+ 				        WITH JWT ALGORITHM HS512 KEY '{secret}'
     					AUTHENTICATE (
 							-- Simple example increasing the record identifier by one
 							SELECT * FROM type::thing('user', meta::id($auth) + 1)
     					)
- 				        WITH JWT ALGORITHM HS512 KEY '{secret}'
     					DURATION FOR SESSION 2h
     				;
 
@@ -2008,10 +2003,10 @@ mod tests {
 					SIGNIN (
 						SELECT * FROM type::thing('user', $id)
 					)
+					WITH JWT ALGORITHM HS512 KEY '{secret}'
 					AUTHENTICATE (
 					    SELECT id FROM user WHERE email = $token.email
 					)
-					WITH JWT ALGORITHM HS512 KEY '{secret}'
 					DURATION FOR SESSION 2h
 				;
 
@@ -2096,6 +2091,7 @@ mod tests {
 			ds.execute(
 				format!(r#"
     				DEFINE ACCESS user ON DATABASE TYPE RECORD
+                        WITH JWT ALGORITHM HS512 KEY '{secret}'
     					AUTHENTICATE {{
     					    -- Not just signin, this clause runs across signin, signup and authenticate, which makes it a nice place to centralize logic
     					    IF !$auth.enabled {{
@@ -2105,7 +2101,6 @@ mod tests {
     						-- Always need to return the user id back, otherwise auth generically fails
     						RETURN $auth;
     					}}
-                        WITH JWT ALGORITHM HS512 KEY '{secret}'
     					DURATION FOR SESSION 2h
     				;
 
@@ -2157,8 +2152,8 @@ mod tests {
 				format!(
 					r#"
     				DEFINE ACCESS user ON DATABASE TYPE RECORD
-    					AUTHENTICATE {{}}
     				    WITH JWT ALGORITHM HS512 KEY '{secret}'
+    					AUTHENTICATE {{}}
     					DURATION FOR SESSION 2h
     				;
 
