@@ -87,7 +87,7 @@ impl Uuid {
 		let ts = uuid::Timestamp::from_unix(
 			uuid::NoContext,
 			timestamp.0.timestamp() as u64,
-			timestamp.0.timestamp_subsec_nanos() as u32,
+			timestamp.0.timestamp_subsec_nanos(),
 		);
 		Self(uuid::Uuid::new_v7(ts))
 	}
