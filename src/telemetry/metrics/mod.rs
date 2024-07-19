@@ -19,7 +19,7 @@ use opentelemetry::{
 use opentelemetry_otlp::MetricsExporterBuilder;
 use opentelemetry_sdk::metrics::data::Temporality;
 use opentelemetry_sdk::metrics::reader::{DefaultAggregationSelector, DefaultTemporalitySelector};
-use opentelemetry_sdk::metrics::{MeterProviderBuilder, SdkMeterProvider};
+use opentelemetry_sdk::metrics::{MeterProviderBuilder, PeriodicReaderBuilder, SdkMeterProvider};
 // use opentelemetry_sdk::export;
 use opentelemetry_sdk::runtime;
 use opentelemetry_sdk::{export, metrics};
@@ -72,7 +72,8 @@ fn build_controller(boundaries: &'static [f64]) -> SdkMeterProvider {
 	// .with_resource(OTEL_DEFAULT_RESOURCE.clone());
 
 	// this is a guess
-	let builder = MeterProviderBuilder::default().with_reader(exporter);
+	// let builder = MeterProviderBuilder::default().with_reader(exporter);
+	let builder = PeriodicReader::builder();
 
 	builder.build()
 }
