@@ -1,7 +1,4 @@
 use crate::api::conn::Connection;
-use crate::api::conn::Method;
-use crate::api::conn::Param;
-use crate::api::conn::Route;
 use crate::api::conn::Router;
 #[allow(unused_imports)] // used by the DB engines
 use crate::api::engine;
@@ -9,11 +6,11 @@ use crate::api::engine::any::Any;
 #[cfg(feature = "protocol-http")]
 use crate::api::engine::remote::http;
 use crate::api::err::Error;
+use crate::api::method::BoxFuture;
 #[cfg(any(feature = "native-tls", feature = "rustls"))]
 #[cfg(feature = "protocol-http")]
 use crate::api::opt::Tls;
 use crate::api::opt::{Endpoint, EndpointKind};
-use crate::api::DbResponse;
 #[allow(unused_imports)] // used by the DB engines
 use crate::api::ExtraFeatures;
 use crate::api::OnceLockExt;
@@ -22,12 +19,9 @@ use crate::api::Surreal;
 #[allow(unused_imports)]
 use crate::error::Db as DbError;
 use crate::opt::WaitFor;
-use flume::Receiver;
 #[cfg(feature = "protocol-http")]
 use reqwest::ClientBuilder;
 use std::collections::HashSet;
-use std::future::Future;
-use std::pin::Pin;
 use std::sync::atomic::AtomicI64;
 use std::sync::Arc;
 use std::sync::OnceLock;
@@ -41,25 +35,15 @@ use tokio_tungstenite::Connector;
 impl crate::api::Connection for Any {}
 
 impl Connection for Any {
-	fn new(method: Method) -> Self {
-		Self {
-			method,
-			id: 0,
-		}
-	}
-
 	#[allow(unused_variables, unreachable_code, unused_mut)] // these are all used depending on feature
-	fn connect(
-		address: Endpoint,
-		capacity: usize,
-	) -> Pin<Box<dyn Future<Output = Result<Surreal<Self>>> + Send + Sync + 'static>> {
+	fn connect(address: Endpoint, capacity: usize) -> BoxFuture<'static, Result<Surreal<Self>>> {
 		Box::pin(async move {
 			let (route_tx, route_rx) = match capacity {
-				0 => flume::unbounded(),
-				capacity => flume::bounded(capacity),
+				0 => channel::unbounded(),
+				capacity => channel::bounded(capacity),
 			};
 
-			let (conn_tx, conn_rx) = flume::bounded::<Result<()>>(1);
+			let (conn_tx, conn_rx) = channel::bounded::<Result<()>>(1);
 			let mut features = HashSet::new();
 
 			match EndpointKind::from(address.url.scheme()) {
@@ -69,7 +53,7 @@ impl Connection for Any {
 						features.insert(ExtraFeatures::Backup);
 						features.insert(ExtraFeatures::LiveQueries);
 						tokio::spawn(engine::local::native::run_router(address, conn_tx, route_rx));
-						conn_rx.into_recv_async().await??
+						conn_rx.recv().await??
 					}
 
 					#[cfg(not(feature = "kv-fdb"))]
@@ -84,7 +68,7 @@ impl Connection for Any {
 						features.insert(ExtraFeatures::Backup);
 						features.insert(ExtraFeatures::LiveQueries);
 						tokio::spawn(engine::local::native::run_router(address, conn_tx, route_rx));
-						conn_rx.into_recv_async().await??
+						conn_rx.recv().await??
 					}
 
 					#[cfg(not(feature = "kv-mem"))]
@@ -99,7 +83,7 @@ impl Connection for Any {
 						features.insert(ExtraFeatures::Backup);
 						features.insert(ExtraFeatures::LiveQueries);
 						tokio::spawn(engine::local::native::run_router(address, conn_tx, route_rx));
-						conn_rx.into_recv_async().await??
+						conn_rx.recv().await??
 					}
 
 					#[cfg(not(feature = "kv-rocksdb"))]
@@ -115,7 +99,7 @@ impl Connection for Any {
 						features.insert(ExtraFeatures::Backup);
 						features.insert(ExtraFeatures::LiveQueries);
 						tokio::spawn(engine::local::native::run_router(address, conn_tx, route_rx));
-						conn_rx.into_recv_async().await??
+						conn_rx.recv().await??
 					}
 
 					#[cfg(not(feature = "kv-tikv"))]
@@ -130,7 +114,7 @@ impl Connection for Any {
 						features.insert(ExtraFeatures::Backup);
 						features.insert(ExtraFeatures::LiveQueries);
 						tokio::spawn(engine::local::native::run_router(address, conn_tx, route_rx));
-						conn_rx.into_recv_async().await??
+						conn_rx.recv().await??
 					}
 
 					#[cfg(not(feature = "kv-surrealkv"))]
@@ -159,7 +143,7 @@ impl Connection for Any {
 						let client = builder.build()?;
 						let base_url = address.url;
 						engine::remote::http::health(
-							client.get(base_url.join(Method::Health.as_str())?),
+							client.get(base_url.join(crate::api::conn::Method::Health.as_str())?),
 						)
 						.await?;
 						tokio::spawn(engine::remote::http::native::run_router(
@@ -224,23 +208,6 @@ impl Connection for Any {
 				})),
 				Arc::new(watch::channel(Some(WaitFor::Connection))),
 			))
-		})
-	}
-
-	fn send<'r>(
-		&'r mut self,
-		router: &'r Router,
-		param: Param,
-	) -> Pin<Box<dyn Future<Output = Result<Receiver<Result<DbResponse>>>> + Send + Sync + 'r>> {
-		Box::pin(async move {
-			let (sender, receiver) = flume::bounded(1);
-			self.id = router.next_id();
-			let route = Route {
-				request: (self.id, self.method, param),
-				response: sender,
-			};
-			router.sender.send_async(route).await?;
-			Ok(receiver)
 		})
 	}
 }

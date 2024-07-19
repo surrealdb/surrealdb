@@ -144,13 +144,12 @@ impl<'a> MTreeChecker<'a> {
 			return Ok(VecDeque::from([]));
 		}
 		let mut result = VecDeque::with_capacity(res.len());
-		let mut tx = self.ctx.tx_lock().await;
+		let txn = self.ctx.tx();
 		for (doc_id, dist) in res {
-			if let Some(key) = doc_ids.get_doc_key(&mut tx, doc_id).await? {
+			if let Some(key) = doc_ids.get_doc_key(&txn, doc_id).await? {
 				result.push_back((key.into(), dist, None));
 			}
 		}
-		drop(tx);
 		Ok(result)
 	}
 }
@@ -186,9 +185,8 @@ impl CheckerCacheEntry {
 		cond: &Cond,
 	) -> Result<Self, Error> {
 		if let Some(rid) = rid {
-			let mut tx = ctx.tx_lock().await;
-			let val = Iterable::fetch_thing(&mut tx, opt, &rid).await?;
-			drop(tx);
+			let txn = ctx.tx();
+			let val = Iterable::fetch_thing(&txn, opt, &rid).await?;
 			if !val.is_none_or_null() {
 				let (value, truthy) = {
 					let cursor_doc = CursorDoc {
@@ -229,9 +227,8 @@ impl<'a> MTreeCondChecker<'a> {
 		match self.cache.entry(doc_id) {
 			Entry::Occupied(e) => Ok(e.get().truthy),
 			Entry::Vacant(e) => {
-				let mut tx = self.ctx.tx_lock().await;
-				let rid = doc_ids.get_doc_key(&mut tx, doc_id).await?.map(|k| k.into());
-				drop(tx);
+				let txn = self.ctx.tx();
+				let rid = doc_ids.get_doc_key(&txn, doc_id).await?.map(|k| k.into());
 				let ent =
 					CheckerCacheEntry::build(stk, self.ctx, self.opt, rid, self.cond.as_ref())
 						.await?;
