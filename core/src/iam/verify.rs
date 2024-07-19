@@ -641,11 +641,13 @@ async fn authenticate_record(
 ) -> Result<Thing, Error> {
 	match kvs.evaluate(authenticate, session, None).await {
 		Ok(val) => match val.record() {
-			// If found, return record identifier from AUTHENTICATE clause
+			// If the AUTHENTICATE clause returns a record, authentication continues with that record
 			Some(id) => Ok(id),
+			// If the AUTHENTICATE clause returns anything else, authentication fails generically
 			_ => Err(Error::InvalidAuth),
 		},
 		Err(e) => match e {
+			// If the AUTHENTICATE clause throws a specific error, authentication fails with that error
 			Error::Thrown(_) => Err(e),
 			e if *INSECURE_FORWARD_RECORD_ACCESS_ERRORS => Err(e),
 			_ => Err(Error::InvalidAuth),
@@ -661,14 +663,15 @@ async fn authenticate_jwt(
 ) -> Result<(), Error> {
 	match kvs.evaluate(authenticate, session, None).await {
 		Ok(val) => {
-			// Fail authentication unless the AUTHENTICATE clause returns a truthy value
-			if val.is_truthy() {
-				Ok(())
-			} else {
-				Err(Error::InvalidAuth)
+			match val {
+				// If the AUTHENTICATE clause returns nothing, authentication continues
+				Value::None => Ok(()),
+				// If the AUTHENTICATE clause returns anything else, authentication fails generically
+				_ => Err(Error::InvalidAuth),
 			}
 		}
 		Err(e) => match e {
+			// If the AUTHENTICATE clause throws a specific error, authentication fails with that error
 			Error::Thrown(_) => Err(e),
 			_ => Err(Error::InvalidAuth),
 		},
@@ -2219,6 +2222,549 @@ mod tests {
 				Err(Error::InvalidAuth) => {} // ok
 				res => panic!(
 					"Expected authentication to generally fail, but instead received: {:?}",
+					res
+				),
+			}
+		}
+	}
+
+	#[tokio::test]
+	async fn test_token_db_authenticate_clause() {
+		// Test with correct "iss" and "aud" claims
+		{
+			let secret = "jwt_secret";
+			let key = EncodingKey::from_secret(secret.as_ref());
+			let claims = Claims {
+				iss: Some("surrealdb-test".to_string()),
+				aud: Some("surrealdb-test".to_string()),
+				iat: Some(Utc::now().timestamp()),
+				nbf: Some(Utc::now().timestamp()),
+				exp: Some((Utc::now() + Duration::hours(1)).timestamp()),
+				ns: Some("test".to_string()),
+				db: Some("test".to_string()),
+				ac: Some("user".to_string()),
+				..Claims::default()
+			};
+
+			let ds = Datastore::new("memory").await.unwrap();
+			let sess = Session::owner().with_ns("test").with_db("test");
+			ds.execute(
+				format!(
+					r#"
+    				DEFINE ACCESS user ON DATABASE TYPE JWT
+ 				        ALGORITHM HS512 KEY '{secret}'
+    					AUTHENTICATE {{
+							IF $token.iss != "surrealdb-test" {{ THROW "Invalid token issuer" }};
+							IF $token.aud != "surrealdb-test" {{ THROW "Invalid token audience" }};
+						}}
+    					DURATION FOR SESSION 2h
+    				;
+				"#
+				)
+				.as_str(),
+				&sess,
+				None,
+			)
+			.await
+			.unwrap();
+
+			// Prepare the claims object
+			let mut claims = claims.clone();
+			claims.roles = None;
+			// Create the token
+			let enc = encode(&HEADER, &claims, &key).unwrap();
+			// Signin with the token
+			let mut sess = Session::default();
+			let res = token(&ds, &mut sess, &enc).await;
+
+			assert!(res.is_ok(), "Failed to signin with token: {:?}", res);
+			assert_eq!(sess.ns, Some("test".to_string()));
+			assert_eq!(sess.db, Some("test".to_string()));
+			assert_eq!(sess.ac, Some("user".to_string()));
+			assert!(sess.au.is_db());
+			assert_eq!(sess.au.level().ns(), Some("test"));
+			assert_eq!(sess.au.level().db(), Some("test"));
+			// Record users should not have roles
+			assert!(sess.au.has_role(&Role::Viewer), "Auth user expected to have Viewer role");
+			assert!(!sess.au.has_role(&Role::Editor), "Auth user expected to not have Editor role");
+			assert!(!sess.au.has_role(&Role::Owner), "Auth user expected to not have Owner role");
+			// Expiration should match the defined duration
+			let exp = sess.exp.unwrap();
+			// Expiration should match the current time plus session duration with some margin
+			let min_exp = (Utc::now() + Duration::hours(2) - Duration::seconds(10)).timestamp();
+			let max_exp = (Utc::now() + Duration::hours(2) + Duration::seconds(10)).timestamp();
+			assert!(
+				exp > min_exp && exp < max_exp,
+				"Session expiration is expected to follow the defined duration"
+			);
+		}
+
+		// Test with correct "iss" claim but incorrect "aud" claim
+		{
+			let secret = "jwt_secret";
+			let key = EncodingKey::from_secret(secret.as_ref());
+			let claims = Claims {
+				iss: Some("surrealdb-test".to_string()),
+				aud: Some("invalid".to_string()),
+				iat: Some(Utc::now().timestamp()),
+				nbf: Some(Utc::now().timestamp()),
+				exp: Some((Utc::now() + Duration::hours(1)).timestamp()),
+				ns: Some("test".to_string()),
+				db: Some("test".to_string()),
+				ac: Some("user".to_string()),
+				..Claims::default()
+			};
+
+			let ds = Datastore::new("memory").await.unwrap();
+			let sess = Session::owner().with_ns("test").with_db("test");
+			ds.execute(
+				format!(
+					r#"
+    				DEFINE ACCESS user ON DATABASE TYPE JWT
+ 				        ALGORITHM HS512 KEY '{secret}'
+    					AUTHENTICATE {{
+							IF $token.iss != "surrealdb-test" {{ THROW "Invalid token issuer" }};
+							IF $token.aud != "surrealdb-test" {{ THROW "Invalid token audience" }};
+						}}
+    					DURATION FOR SESSION 2h
+    				;
+				"#
+				)
+				.as_str(),
+				&sess,
+				None,
+			)
+			.await
+			.unwrap();
+
+			// Prepare the claims object
+			let mut claims = claims.clone();
+			claims.roles = None;
+			// Create the token
+			let enc = encode(&HEADER, &claims, &key).unwrap();
+			// Signin with the token
+			let mut sess = Session::default();
+			let res = token(&ds, &mut sess, &enc).await;
+
+			match res {
+				Err(Error::Thrown(e)) if e == "Invalid token audience" => {} // ok
+				res => panic!(
+				    "Expected authentication to failed due to invalid token audience, but instead received: {:?}",
+					res
+				),
+			}
+		}
+
+		// Test with correct "iss" claim but incorrect "aud" claim
+		// In this case, something is returned by the clause, which returns a generic error
+		{
+			let secret = "jwt_secret";
+			let key = EncodingKey::from_secret(secret.as_ref());
+			let claims = Claims {
+				iss: Some("surrealdb-test".to_string()),
+				aud: Some("invalid".to_string()),
+				iat: Some(Utc::now().timestamp()),
+				nbf: Some(Utc::now().timestamp()),
+				exp: Some((Utc::now() + Duration::hours(1)).timestamp()),
+				ns: Some("test".to_string()),
+				db: Some("test".to_string()),
+				ac: Some("user".to_string()),
+				..Claims::default()
+			};
+
+			let ds = Datastore::new("memory").await.unwrap();
+			let sess = Session::owner().with_ns("test").with_db("test");
+			ds.execute(
+				format!(
+					r#"
+    				DEFINE ACCESS user ON DATABASE TYPE JWT
+ 				        ALGORITHM HS512 KEY '{secret}'
+    					AUTHENTICATE {{
+							IF $token.iss != "surrealdb-test" {{ RETURN "FAIL" }};
+							IF $token.aud != "surrealdb-test" {{ RETURN "FAIL" }};
+						}}
+    					DURATION FOR SESSION 2h
+    				;
+				"#
+				)
+				.as_str(),
+				&sess,
+				None,
+			)
+			.await
+			.unwrap();
+
+			// Prepare the claims object
+			let mut claims = claims.clone();
+			claims.roles = None;
+			// Create the token
+			let enc = encode(&HEADER, &claims, &key).unwrap();
+			// Signin with the token
+			let mut sess = Session::default();
+			let res = token(&ds, &mut sess, &enc).await;
+
+			match res {
+				Err(Error::InvalidAuth) => {} // ok
+				res => panic!(
+					"Expected a generic authentication error, but instead received: {:?}",
+					res
+				),
+			}
+		}
+	}
+
+	#[tokio::test]
+	async fn test_token_ns_authenticate_clause() {
+		// Test with correct "iss" and "aud" claims
+		{
+			let secret = "jwt_secret";
+			let key = EncodingKey::from_secret(secret.as_ref());
+			let claims = Claims {
+				iss: Some("surrealdb-test".to_string()),
+				aud: Some("surrealdb-test".to_string()),
+				iat: Some(Utc::now().timestamp()),
+				nbf: Some(Utc::now().timestamp()),
+				exp: Some((Utc::now() + Duration::hours(1)).timestamp()),
+				ns: Some("test".to_string()),
+				ac: Some("user".to_string()),
+				..Claims::default()
+			};
+
+			let ds = Datastore::new("memory").await.unwrap();
+			let sess = Session::owner().with_ns("test").with_db("test");
+			ds.execute(
+				format!(
+					r#"
+    				DEFINE ACCESS user ON NAMESPACE TYPE JWT
+ 				        ALGORITHM HS512 KEY '{secret}'
+    					AUTHENTICATE {{
+							IF $token.iss != "surrealdb-test" {{ THROW "Invalid token issuer" }};
+							IF $token.aud != "surrealdb-test" {{ THROW "Invalid token audience" }};
+						}}
+    					DURATION FOR SESSION 2h
+    				;
+				"#
+				)
+				.as_str(),
+				&sess,
+				None,
+			)
+			.await
+			.unwrap();
+
+			// Prepare the claims object
+			let mut claims = claims.clone();
+			claims.roles = None;
+			// Create the token
+			let enc = encode(&HEADER, &claims, &key).unwrap();
+			// Signin with the token
+			let mut sess = Session::default();
+			let res = token(&ds, &mut sess, &enc).await;
+
+			assert!(res.is_ok(), "Failed to signin with token: {:?}", res);
+			assert_eq!(sess.ns, Some("test".to_string()));
+			assert_eq!(sess.ac, Some("user".to_string()));
+			assert!(sess.au.is_ns());
+			assert_eq!(sess.au.level().ns(), Some("test"));
+			assert_eq!(sess.au.level().db(), None);
+			// Record users should not have roles
+			assert!(sess.au.has_role(&Role::Viewer), "Auth user expected to have Viewer role");
+			assert!(!sess.au.has_role(&Role::Editor), "Auth user expected to not have Editor role");
+			assert!(!sess.au.has_role(&Role::Owner), "Auth user expected to not have Owner role");
+			// Expiration should match the defined duration
+			let exp = sess.exp.unwrap();
+			// Expiration should match the current time plus session duration with some margin
+			let min_exp = (Utc::now() + Duration::hours(2) - Duration::seconds(10)).timestamp();
+			let max_exp = (Utc::now() + Duration::hours(2) + Duration::seconds(10)).timestamp();
+			assert!(
+				exp > min_exp && exp < max_exp,
+				"Session expiration is expected to follow the defined duration"
+			);
+		}
+
+		// Test with correct "iss" claim but incorrect "aud" claim
+		{
+			let secret = "jwt_secret";
+			let key = EncodingKey::from_secret(secret.as_ref());
+			let claims = Claims {
+				iss: Some("surrealdb-test".to_string()),
+				aud: Some("invalid".to_string()),
+				iat: Some(Utc::now().timestamp()),
+				nbf: Some(Utc::now().timestamp()),
+				exp: Some((Utc::now() + Duration::hours(1)).timestamp()),
+				ns: Some("test".to_string()),
+				ac: Some("user".to_string()),
+				..Claims::default()
+			};
+
+			let ds = Datastore::new("memory").await.unwrap();
+			let sess = Session::owner().with_ns("test").with_db("test");
+			ds.execute(
+				format!(
+					r#"
+    				DEFINE ACCESS user ON NAMESPACE TYPE JWT
+ 				        ALGORITHM HS512 KEY '{secret}'
+    					AUTHENTICATE {{
+							IF $token.iss != "surrealdb-test" {{ THROW "Invalid token issuer" }};
+							IF $token.aud != "surrealdb-test" {{ THROW "Invalid token audience" }};
+						}}
+    					DURATION FOR SESSION 2h
+    				;
+				"#
+				)
+				.as_str(),
+				&sess,
+				None,
+			)
+			.await
+			.unwrap();
+
+			// Prepare the claims object
+			let mut claims = claims.clone();
+			claims.roles = None;
+			// Create the token
+			let enc = encode(&HEADER, &claims, &key).unwrap();
+			// Signin with the token
+			let mut sess = Session::default();
+			let res = token(&ds, &mut sess, &enc).await;
+
+			match res {
+				Err(Error::Thrown(e)) if e == "Invalid token audience" => {} // ok
+				res => panic!(
+				    "Expected authentication to failed due to invalid token audience, but instead received: {:?}",
+					res
+				),
+			}
+		}
+
+		// Test with correct "iss" claim but incorrect "aud" claim
+		// In this case, something is returned by the clause, which returns a generic error
+		{
+			let secret = "jwt_secret";
+			let key = EncodingKey::from_secret(secret.as_ref());
+			let claims = Claims {
+				iss: Some("surrealdb-test".to_string()),
+				aud: Some("invalid".to_string()),
+				iat: Some(Utc::now().timestamp()),
+				nbf: Some(Utc::now().timestamp()),
+				exp: Some((Utc::now() + Duration::hours(1)).timestamp()),
+				ns: Some("test".to_string()),
+				ac: Some("user".to_string()),
+				..Claims::default()
+			};
+
+			let ds = Datastore::new("memory").await.unwrap();
+			let sess = Session::owner().with_ns("test").with_db("test");
+			ds.execute(
+				format!(
+					r#"
+    				DEFINE ACCESS user ON NAMESPACE TYPE JWT
+ 				        ALGORITHM HS512 KEY '{secret}'
+    					AUTHENTICATE {{
+							IF $token.iss != "surrealdb-test" {{ RETURN "FAIL" }};
+							IF $token.aud != "surrealdb-test" {{ RETURN "FAIL" }};
+						}}
+    					DURATION FOR SESSION 2h
+    				;
+				"#
+				)
+				.as_str(),
+				&sess,
+				None,
+			)
+			.await
+			.unwrap();
+
+			// Prepare the claims object
+			let mut claims = claims.clone();
+			claims.roles = None;
+			// Create the token
+			let enc = encode(&HEADER, &claims, &key).unwrap();
+			// Signin with the token
+			let mut sess = Session::default();
+			let res = token(&ds, &mut sess, &enc).await;
+
+			match res {
+				Err(Error::InvalidAuth) => {} // ok
+				res => panic!(
+					"Expected a generic authentication error, but instead received: {:?}",
+					res
+				),
+			}
+		}
+	}
+
+	#[tokio::test]
+	async fn test_token_root_authenticate_clause() {
+		// Test with correct "iss" and "aud" claims
+		{
+			let secret = "jwt_secret";
+			let key = EncodingKey::from_secret(secret.as_ref());
+			let claims = Claims {
+				iss: Some("surrealdb-test".to_string()),
+				aud: Some("surrealdb-test".to_string()),
+				iat: Some(Utc::now().timestamp()),
+				nbf: Some(Utc::now().timestamp()),
+				exp: Some((Utc::now() + Duration::hours(1)).timestamp()),
+				ac: Some("user".to_string()),
+				..Claims::default()
+			};
+
+			let ds = Datastore::new("memory").await.unwrap();
+			let sess = Session::owner().with_ns("test").with_db("test");
+			ds.execute(
+				format!(
+					r#"
+    				DEFINE ACCESS user ON ROOT TYPE JWT
+ 				        ALGORITHM HS512 KEY '{secret}'
+    					AUTHENTICATE {{
+							IF $token.iss != "surrealdb-test" {{ THROW "Invalid token issuer" }};
+							IF $token.aud != "surrealdb-test" {{ THROW "Invalid token audience" }};
+						}}
+    					DURATION FOR SESSION 2h
+    				;
+				"#
+				)
+				.as_str(),
+				&sess,
+				None,
+			)
+			.await
+			.unwrap();
+
+			// Prepare the claims object
+			let mut claims = claims.clone();
+			claims.roles = None;
+			// Create the token
+			let enc = encode(&HEADER, &claims, &key).unwrap();
+			// Signin with the token
+			let mut sess = Session::default();
+			let res = token(&ds, &mut sess, &enc).await;
+
+			assert!(res.is_ok(), "Failed to signin with token: {:?}", res);
+			assert_eq!(sess.ac, Some("user".to_string()));
+			assert!(sess.au.is_root());
+			assert_eq!(sess.au.level().ns(), None);
+			assert_eq!(sess.au.level().db(), None);
+			// Record users should not have roles
+			assert!(sess.au.has_role(&Role::Viewer), "Auth user expected to have Viewer role");
+			assert!(!sess.au.has_role(&Role::Editor), "Auth user expected to not have Editor role");
+			assert!(!sess.au.has_role(&Role::Owner), "Auth user expected to not have Owner role");
+			// Expiration should match the defined duration
+			let exp = sess.exp.unwrap();
+			// Expiration should match the current time plus session duration with some margin
+			let min_exp = (Utc::now() + Duration::hours(2) - Duration::seconds(10)).timestamp();
+			let max_exp = (Utc::now() + Duration::hours(2) + Duration::seconds(10)).timestamp();
+			assert!(
+				exp > min_exp && exp < max_exp,
+				"Session expiration is expected to follow the defined duration"
+			);
+		}
+
+		// Test with correct "iss" claim but incorrect "aud" claim
+		{
+			let secret = "jwt_secret";
+			let key = EncodingKey::from_secret(secret.as_ref());
+			let claims = Claims {
+				iss: Some("surrealdb-test".to_string()),
+				aud: Some("invalid".to_string()),
+				iat: Some(Utc::now().timestamp()),
+				nbf: Some(Utc::now().timestamp()),
+				exp: Some((Utc::now() + Duration::hours(1)).timestamp()),
+				ac: Some("user".to_string()),
+				..Claims::default()
+			};
+
+			let ds = Datastore::new("memory").await.unwrap();
+			let sess = Session::owner().with_ns("test").with_db("test");
+			ds.execute(
+				format!(
+					r#"
+    				DEFINE ACCESS user ON ROOT TYPE JWT
+ 				        ALGORITHM HS512 KEY '{secret}'
+    					AUTHENTICATE {{
+							IF $token.iss != "surrealdb-test" {{ THROW "Invalid token issuer" }};
+							IF $token.aud != "surrealdb-test" {{ THROW "Invalid token audience" }};
+						}}
+    					DURATION FOR SESSION 2h
+    				;
+				"#
+				)
+				.as_str(),
+				&sess,
+				None,
+			)
+			.await
+			.unwrap();
+
+			// Prepare the claims object
+			let mut claims = claims.clone();
+			claims.roles = None;
+			// Create the token
+			let enc = encode(&HEADER, &claims, &key).unwrap();
+			// Signin with the token
+			let mut sess = Session::default();
+			let res = token(&ds, &mut sess, &enc).await;
+
+			match res {
+				Err(Error::Thrown(e)) if e == "Invalid token audience" => {} // ok
+				res => panic!(
+				    "Expected authentication to failed due to invalid token audience, but instead received: {:?}",
+					res
+				),
+			}
+		}
+
+		// Test with correct "iss" claim but incorrect "aud" claim
+		// In this case, something is returned by the clause, which returns a generic error
+		{
+			let secret = "jwt_secret";
+			let key = EncodingKey::from_secret(secret.as_ref());
+			let claims = Claims {
+				iss: Some("surrealdb-test".to_string()),
+				aud: Some("invalid".to_string()),
+				iat: Some(Utc::now().timestamp()),
+				nbf: Some(Utc::now().timestamp()),
+				exp: Some((Utc::now() + Duration::hours(1)).timestamp()),
+				ac: Some("user".to_string()),
+				..Claims::default()
+			};
+
+			let ds = Datastore::new("memory").await.unwrap();
+			let sess = Session::owner().with_ns("test").with_db("test");
+			ds.execute(
+				format!(
+					r#"
+    				DEFINE ACCESS user ON ROOT TYPE JWT
+ 				        ALGORITHM HS512 KEY '{secret}'
+    					AUTHENTICATE {{
+							IF $token.iss != "surrealdb-test" {{ RETURN "FAIL" }};
+							IF $token.aud != "surrealdb-test" {{ RETURN "FAIL" }};
+						}}
+    					DURATION FOR SESSION 2h
+    				;
+				"#
+				)
+				.as_str(),
+				&sess,
+				None,
+			)
+			.await
+			.unwrap();
+
+			// Prepare the claims object
+			let mut claims = claims.clone();
+			claims.roles = None;
+			// Create the token
+			let enc = encode(&HEADER, &claims, &key).unwrap();
+			// Signin with the token
+			let mut sess = Session::default();
+			let res = token(&ds, &mut sess, &enc).await;
+
+			match res {
+				Err(Error::InvalidAuth) => {} // ok
+				res => panic!(
+					"Expected a generic authentication error, but instead received: {:?}",
 					res
 				),
 			}
