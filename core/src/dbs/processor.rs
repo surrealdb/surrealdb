@@ -456,7 +456,7 @@ impl<'a> Processor<'a> {
 				Dir::In => e
 					.what
 					.iter()
-					.map(|v| v.to_string())
+					.map(|v| v.0.to_owned())
 					.map(|v| {
 						(
 							graph::ftprefix(ns, db, tb, id, &e.dir, &v),
@@ -468,7 +468,7 @@ impl<'a> Processor<'a> {
 				Dir::Out => e
 					.what
 					.iter()
-					.map(|v| v.to_string())
+					.map(|v| v.0.to_owned())
 					.map(|v| {
 						(
 							graph::ftprefix(ns, db, tb, id, &e.dir, &v),
@@ -480,7 +480,7 @@ impl<'a> Processor<'a> {
 				Dir::Both => e
 					.what
 					.iter()
-					.map(|v| v.to_string())
+					.map(|v| v.0.to_owned())
 					.flat_map(|v| {
 						vec![
 							(
