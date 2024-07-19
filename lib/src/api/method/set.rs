@@ -1,7 +1,6 @@
-use crate::api::method::BoxFuture;
-
 use crate::api::conn::Method;
 use crate::api::conn::Param;
+use crate::api::method::BoxFuture;
 use crate::api::Connection;
 use crate::api::Result;
 use crate::method::OnceLockExt;

@@ -10,8 +10,8 @@ use crate::dbs::Notification;
 use crate::sql::from_value;
 use crate::sql::Query;
 use crate::sql::Value;
-use flume::Receiver;
-use flume::Sender;
+use channel::Receiver;
+use channel::Sender;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 use std::collections::BTreeMap;
@@ -47,12 +47,12 @@ impl Router {
 	) -> BoxFuture<'_, Result<Receiver<Result<DbResponse>>>> {
 		Box::pin(async move {
 			let id = self.next_id();
-			let (sender, receiver) = flume::bounded(1);
+			let (sender, receiver) = channel::bounded(1);
 			let route = Route {
 				request: (id, method, param),
 				response: sender,
 			};
-			self.sender.send_async(route).await?;
+			self.sender.send(route).await?;
 			Ok(receiver)
 		})
 	}
@@ -63,7 +63,7 @@ impl Router {
 		receiver: Receiver<Result<DbResponse>>,
 	) -> BoxFuture<'_, Result<Value>> {
 		Box::pin(async move {
-			let response = receiver.into_recv_async().await?;
+			let response = receiver.recv().await?;
 			match response? {
 				DbResponse::Other(value) => Ok(value),
 				DbResponse::Query(..) => unreachable!(),
@@ -77,7 +77,7 @@ impl Router {
 		receiver: Receiver<Result<DbResponse>>,
 	) -> BoxFuture<'_, Result<Response>> {
 		Box::pin(async move {
-			let response = receiver.into_recv_async().await?;
+			let response = receiver.recv().await?;
 			match response? {
 				DbResponse::Query(results) => Ok(results),
 				DbResponse::Other(..) => unreachable!(),
