@@ -151,8 +151,8 @@ impl TryConv<Uuid> for GqlValue {
 	}
 }
 
-impl TryConv<Uuid> for GqlValue {
-	fn conv(self) -> Result<Uuid, GqlError> {
-		ScalarType::parse(self).map_err(Into::into)
-	}
-}
+// impl TryConv<Uuid> for GqlValue {
+// 	fn conv(self) -> Result<Uuid, GqlError> {
+// 		ScalarType::parse(self).map_err(Into::into)
+// 	}
+// }

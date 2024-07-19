@@ -655,13 +655,20 @@ fn binop(
 	Ok(expr.into())
 }
 
-fn gql_to_sql_kind(val: &GqlValue, kind: Kind) -> Result<SqlValue, GqlError> {
-	match (val, kind) {
-		(GqlValue::Null, Kind::Any | Kind::Null) => Ok(SqlValue::Null),
-		_ => todo!(),
-	}
-	todo!()
-}
+// fn gql_to_sql_kind(val: &GqlValue, kind: Kind) -> Result<SqlValue, GqlError> {
+// 	match (val, kind) {
+// 		(GqlValue::Null, Kind::Any | Kind::Null) => Ok(SqlValue::Null),
+// 		(GqlValue::String(s), Kind::String) => Ok(),
+// 		_ => todo!(),
+// 	}
+// }
+
+// fn includes_kind(main: Kind, target: Kind) -> bool {
+// 	if main == target {
+// 		return true;
+// 	}
+// 	if let
+// }
 
 // fn gql_value_to_sql_value(val: &GqlValue) -> SqlValue {
 // 	match val {
