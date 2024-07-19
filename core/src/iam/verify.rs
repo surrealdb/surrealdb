@@ -6,7 +6,7 @@ use crate::iam::jwks;
 use crate::iam::{issue::expiration, token::Claims, Actor, Auth, Level, Role};
 use crate::kvs::{Datastore, LockType::*, TransactionType::*};
 use crate::sql::access_type::{AccessType, JwtAccessVerify};
-use crate::sql::{statements::DefineUserStatement, Algorithm, Value};
+use crate::sql::{statements::DefineUserStatement, Algorithm, Thing, Value};
 use crate::syn;
 use argon2::{Argon2, PasswordHash, PasswordVerifier};
 use chrono::Utc;
@@ -183,23 +183,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 				sess.tk = Some(token_data.claims.clone().into());
 				sess.ip.clone_from(&session.ip);
 				sess.or.clone_from(&session.or);
-				// Compute the value with the params
-				match kvs.evaluate(au, &sess, None).await {
-					Ok(val) => match val.record() {
-						Some(id) => {
-							// Update rid with result from AUTHENTICATE clause
-							rid = id;
-						}
-						_ => return Err(Error::InvalidAuth),
-					},
-					Err(e) => {
-						return match e {
-							Error::Thrown(_) => Err(e),
-							e if *INSECURE_FORWARD_RECORD_ACCESS_ERRORS => Err(e),
-							_ => Err(Error::InvalidAuth),
-						}
-					}
-				}
+				rid = authenticate_record(kvs, &sess, au).await?;
 			}
 			// Log the success
 			debug!("Authenticated with record access method `{}`", ac);
@@ -252,6 +236,15 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 					}?;
 					// Verify the token
 					decode::<Claims>(token, &cf.0, &cf.1)?;
+					// AUTHENTICATE clause
+					if let Some(au) = de.authenticate.clone() {
+						// Setup the system session for finding the signin record
+						let mut sess = Session::editor().with_ns(&ns).with_db(&db);
+						sess.tk = Some(token_data.claims.clone().into());
+						sess.ip.clone_from(&session.ip);
+						sess.or.clone_from(&session.or);
+						authenticate_jwt(kvs, &sess, au).await?;
+					}
 					// Parse the roles
 					let roles = match token_data.claims.roles {
 						// If no role is provided, grant the viewer role
@@ -306,21 +299,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 						sess.tk = Some(token_data.claims.clone().into());
 						sess.ip.clone_from(&session.ip);
 						sess.or.clone_from(&session.or);
-						// Compute the value with the params
-						let rid = match kvs.evaluate(au, &sess, None).await {
-							Ok(val) => match val.record() {
-								// If found, return record identifier from AUTHENTICATE clause
-								Some(id) => id,
-								_ => return Err(Error::InvalidAuth),
-							},
-							Err(e) => {
-								return match e {
-									Error::Thrown(_) => Err(e),
-									e if *INSECURE_FORWARD_RECORD_ACCESS_ERRORS => Err(e),
-									_ => Err(Error::InvalidAuth),
-								}
-							}
-						};
+						let rid = authenticate_record(kvs, &sess, au).await?;
 						// Log the success
 						debug!("Authenticated with record access method `{}`", ac);
 						// Set the session
@@ -410,6 +389,15 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			}?;
 			// Verify the token
 			decode::<Claims>(token, &cf.0, &cf.1)?;
+			// AUTHENTICATE clause
+			if let Some(au) = de.authenticate.clone() {
+				// Setup the system session for finding the signin record
+				let mut sess = Session::editor().with_ns(&ns);
+				sess.tk = Some(token_data.claims.clone().into());
+				sess.ip.clone_from(&session.ip);
+				sess.or.clone_from(&session.or);
+				authenticate_jwt(kvs, &sess, au).await?;
+			}
 			// Parse the roles
 			let roles = match token_data.claims.roles {
 				// If no role is provided, grant the viewer role
@@ -499,6 +487,15 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			}?;
 			// Verify the token
 			decode::<Claims>(token, &cf.0, &cf.1)?;
+			// AUTHENTICATE clause
+			if let Some(au) = de.authenticate.clone() {
+				// Setup the system session for finding the signin record
+				let mut sess = Session::editor();
+				sess.tk = Some(token_data.claims.clone().into());
+				sess.ip.clone_from(&session.ip);
+				sess.or.clone_from(&session.or);
+				authenticate_jwt(kvs, &sess, au).await?;
+			}
 			// Parse the roles
 			let roles = match token_data.claims.roles {
 				// If no role is provided, grant the viewer role
@@ -633,6 +630,53 @@ fn verify_pass(pass: &str, hash: &str) -> Result<(), Error> {
 	match Argon2::default().verify_password(pass.as_ref(), &hash) {
 		Ok(_) => Ok(()),
 		_ => Err(Error::InvalidPass),
+	}
+}
+
+// Execute the AUTHENTICATE clause for a record access method
+async fn authenticate_record(
+	kvs: &Datastore,
+	session: &Session,
+	authenticate: Value,
+) -> Result<Thing, Error> {
+	match kvs.evaluate(authenticate, &session, None).await {
+		Ok(val) => match val.record() {
+			// If found, return record identifier from AUTHENTICATE clause
+			Some(id) => Ok(id),
+			_ => return Err(Error::InvalidAuth),
+		},
+		Err(e) => {
+			return match e {
+				Error::Thrown(_) => Err(e),
+				e if *INSECURE_FORWARD_RECORD_ACCESS_ERRORS => Err(e),
+				_ => Err(Error::InvalidAuth),
+			}
+		}
+	}
+}
+
+// Execute the AUTHENTICATE clause for a JWT access method
+async fn authenticate_jwt(
+	kvs: &Datastore,
+	session: &Session,
+	authenticate: Value,
+) -> Result<(), Error> {
+	match kvs.evaluate(authenticate, &session, None).await {
+		Ok(val) => {
+			// Fail authentication unless the AUTHENTICATE clause returns a truthy value
+			if val.is_truthy() {
+				Ok(())
+			} else {
+				return Err(Error::InvalidAuth);
+			}
+		}
+		Err(e) => {
+			return match e {
+				Error::Thrown(_) => Err(e),
+				e if *INSECURE_FORWARD_RECORD_ACCESS_ERRORS => Err(e),
+				_ => Err(Error::InvalidAuth),
+			}
+		}
 	}
 }
 
