@@ -1,7 +1,6 @@
-use crate::api::method::BoxFuture;
-
 use crate::api::conn::Method;
 use crate::api::conn::Param;
+use crate::api::method::BoxFuture;
 use crate::api::method::OnceLockExt;
 use crate::api::opt::auth::Jwt;
 use crate::api::Connection;
