@@ -2037,18 +2037,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8bf7cc16383c4b8d58b9905a8509f02926ce3058053c056376248d958c9df1e8"
 
 [[package]]
-name = "flume"
-version = "0.11.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "55ac459de2512911e4b674ce33cf20befaba382d05b62b008afc1c8b57cbf181"
-dependencies = [
- "futures-core",
- "futures-sink",
- "nanorand",
- "spin 0.9.8",
-]
-
-[[package]]
 name = "fnv"
 version = "1.0.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3461,15 +3449,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "nanorand"
-version = "0.7.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6a51313c5820b0b02bd422f4b44776fbf47961755c74ce64afc73bfad10226c3"
-dependencies = [
- "getrandom 0.2.12",
-]
-
-[[package]]
 name = "native-tls"
 version = "0.2.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4787,10 +4766,22 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4df61cfb2522f24fd6aa90ce3489c2c8660a181075e7bac3ae7bdf22287d238f"
 dependencies = [
  "bincode",
+ "revision-derive 0.7.0",
+ "serde",
+ "thiserror",
+]
+
+[[package]]
+name = "revision"
+version = "0.8.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b98b99dba8f2787c9af2e46b17ff38437d213d46c8970b550e6b79b862bf7629"
+dependencies = [
+ "bincode",
  "chrono",
  "geo 0.26.0",
  "regex",
- "revision-derive",
+ "revision-derive 0.8.0",
  "roaring",
  "rust_decimal",
  "serde",
@@ -4803,6 +4794,19 @@ name = "revision-derive"
 version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "854ff0b6794d4e0aab5e4486870941caefe9f258e63cad2f21b49a6302377c85"
+dependencies = [
+ "darling",
+ "proc-macro-error",
+ "proc-macro2",
+ "quote",
+ "syn 2.0.58",
+]
+
+[[package]]
+name = "revision-derive"
+version = "0.8.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3721b4a8e52f9e52c54f74f482a4f550601f5c44cb7876606a2ab79cb09469c1"
 dependencies = [
  "darling",
  "proc-macro-error",
@@ -5896,7 +5900,7 @@ dependencies = [
  "rand 0.8.5",
  "rcgen",
  "reqwest",
- "revision",
+ "revision 0.8.0",
  "rmp-serde",
  "rmpv",
  "rustyline",
@@ -5938,7 +5942,6 @@ dependencies = [
  "dmp",
  "env_logger 0.10.2",
  "flate2",
- "flume",
  "futures",
  "geo 0.27.0",
  "hashbrown 0.14.5",
@@ -5953,7 +5956,7 @@ dependencies = [
  "reblessive",
  "regex",
  "reqwest",
- "revision",
+ "revision 0.8.0",
  "ring 0.17.8",
  "rust_decimal",
  "rustls 0.21.11",
@@ -6042,7 +6045,7 @@ dependencies = [
  "regex",
  "regex-syntax 0.8.3",
  "reqwest",
- "revision",
+ "revision 0.8.0",
  "ring 0.17.8",
  "rmpv",
  "roaring",
@@ -6159,7 +6162,7 @@ dependencies = [
  "lru",
  "parking_lot",
  "quick_cache",
- "revision",
+ "revision 0.7.1",
  "sha2",
  "tokio",
  "vart",

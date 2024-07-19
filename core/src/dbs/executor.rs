@@ -422,16 +422,13 @@ impl<'a> Executor<'a> {
 					}
 				},
 			};
+
+			self.err = res.is_err();
 			// Produce the response
 			let res = Response {
 				// Get the statement end time
 				time: now.elapsed(),
-				// TODO: Replace with `inspect_err` once stable.
-				result: res.map_err(|e| {
-					// Mark the error.
-					self.err = true;
-					e
-				}),
+				result: res,
 				query_type: match (is_stm_live, is_stm_kill) {
 					(true, _) => QueryType::Live,
 					(_, true) => QueryType::Kill,

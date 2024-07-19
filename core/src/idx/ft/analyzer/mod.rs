@@ -8,7 +8,6 @@ use crate::idx::ft::offsets::{Offset, OffsetRecords};
 use crate::idx::ft::postings::TermFrequency;
 use crate::idx::ft::terms::{TermId, TermLen, Terms};
 use crate::sql::statements::DefineAnalyzerStatement;
-use crate::sql::tokenizer::Tokenizer as SqlTokenizer;
 use crate::sql::Value;
 use crate::sql::{Function, Strand};
 use filter::Filter;
@@ -16,34 +15,14 @@ use reblessive::tree::Stk;
 use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
+
 mod filter;
 mod tokenizer;
 
+#[derive(Clone)]
 pub(crate) struct Analyzer {
-	function: Option<String>,
-	tokenizers: Option<Vec<SqlTokenizer>>,
-	filters: Option<Vec<Filter>>,
-}
-
-impl From<DefineAnalyzerStatement> for Analyzer {
-	fn from(az: DefineAnalyzerStatement) -> Self {
-		Self {
-			function: az.function.map(|i| i.0),
-			tokenizers: az.tokenizers,
-			filters: Filter::from(az.filters),
-		}
-	}
-}
-
-// TODO: @emmanuel-keller we probably don't need to clone the value here
-impl From<Arc<DefineAnalyzerStatement>> for Analyzer {
-	fn from(az: Arc<DefineAnalyzerStatement>) -> Self {
-		Self {
-			function: az.function.clone().map(|i| i.0),
-			tokenizers: az.tokenizers.clone(),
-			filters: Filter::from(az.filters.clone()),
-		}
-	}
+	az: Arc<DefineAnalyzerStatement>,
+	filters: Arc<Option<Vec<Filter>>>,
 }
 
 pub(in crate::idx) type TermsList = Vec<Option<(TermId, TermLen)>>;
@@ -70,6 +49,13 @@ impl TermsSet {
 }
 
 impl Analyzer {
+	pub(crate) fn new(az: Arc<DefineAnalyzerStatement>) -> Self {
+		Self {
+			filters: Arc::new(Filter::from(&az.filters)),
+			az,
+		}
+	}
+
 	pub(super) async fn extract_querying_terms(
 		&self,
 		stk: &mut Stk,
@@ -280,7 +266,7 @@ impl Analyzer {
 		stage: FilteringStage,
 		mut input: String,
 	) -> Result<Tokens, Error> {
-		if let Some(function_name) = self.function.clone() {
+		if let Some(function_name) = self.az.function.as_ref().map(|i| i.0.clone()) {
 			let fns = Function::Custom(function_name.clone(), vec![Value::Strand(Strand(input))]);
 			let val = fns.compute(stk, ctx, opt, None).await?;
 			if let Value::Strand(val) = val {
@@ -292,7 +278,7 @@ impl Analyzer {
 				});
 			}
 		}
-		if let Some(t) = &self.tokenizers {
+		if let Some(t) = &self.az.tokenizers {
 			if !input.is_empty() {
 				let t = Tokenizer::tokenize(t, input);
 				return Filter::apply_filters(t, &self.filters, stage);
@@ -336,7 +322,7 @@ mod tests {
 		let Some(Statement::Define(DefineStatement::Analyzer(az))) = stmt.0 .0.pop() else {
 			panic!()
 		};
-		let a: Analyzer = az.into();
+		let a = Analyzer::new(Arc::new(az));
 
 		let mut stack = reblessive::TreeStack::new();
 

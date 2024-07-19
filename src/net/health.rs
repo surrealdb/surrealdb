@@ -1,7 +1,8 @@
-use crate::dbs::DB;
+use super::AppState;
 use crate::err::Error;
 use axum::response::IntoResponse;
 use axum::routing::get;
+use axum::Extension;
 use axum::Router;
 use http_body::Body as HttpBody;
 use surrealdb::kvs::{LockType::*, TransactionType::*};
@@ -14,9 +15,9 @@ where
 	Router::new().route("/health", get(handler))
 }
 
-async fn handler() -> impl IntoResponse {
+async fn handler(Extension(state): Extension<AppState>) -> impl IntoResponse {
 	// Get the datastore reference
-	let db = DB.get().unwrap();
+	let db = &state.datastore;
 	// Attempt to open a transaction
 	match db.transaction(Read, Optimistic).await {
 		// The transaction failed to start

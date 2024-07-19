@@ -81,7 +81,7 @@ reqwest = { version = "0.11.22", default-features = false, features = [
     "blocking",
     "gzip",
 ] }
-revision = { version = "0.7.0", features = [
+revision = { version = "0.8.0", features = [
     "chrono",
     "geo",
     "roaring",
@@ -96,9 +96,9 @@ serde = { version = "1.0.193", features = ["derive"] }
 serde_json = "1.0.108"
 serde_pack = { version = "1.1.2", package = "rmp-serde" }
 surrealdb = { version = "2", path = "lib", features = [
-	"protocol-http",
-	"protocol-ws",
-	"rustls",
+    "protocol-http",
+    "protocol-ws",
+    "rustls",
 ] }
 tempfile = "3.8.1"
 thiserror = "1.0.50"

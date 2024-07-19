@@ -16,9 +16,6 @@ use crate::sql::range::Range;
 use crate::sql::table::Table;
 use crate::sql::thing::Thing;
 use crate::sql::value::Value;
-use crate::sql::Ident;
-use crate::sql::Idiom;
-use crate::sql::Part;
 use reblessive::tree::Stk;
 #[cfg(not(target_arch = "wasm32"))]
 use reblessive::TreeStack;
@@ -446,23 +443,11 @@ impl Iterator {
 		stm: &Statement<'_>,
 	) -> Result<(), Error> {
 		if let Some(fetchs) = stm.fetch() {
+			let mut idioms = Vec::with_capacity(fetchs.0.len());
 			for fetch in fetchs.iter() {
-				let i: &Idiom;
-				let new_idiom: Idiom;
-				if let Value::Idiom(idiom) = &fetch.0 {
-					i = idiom;
-				} else if let Value::Param(param) = &fetch.0 {
-					let p = param.compute(stk, ctx, opt, None).await?;
-					if let Value::Strand(s) = p {
-						let p: Part = Part::Field(Ident(s.0));
-						new_idiom = Idiom(vec![p]);
-						i = &new_idiom;
-					} else {
-						return Err(Error::Thrown("Parameter should be a string".to_string()));
-					}
-				} else {
-					return Err(Error::Thrown("Invalid field".to_string()));
-				}
+				fetch.compute(stk, ctx, opt, &mut idioms).await?;
+			}
+			for i in &idioms {
 				let mut values = self.results.take()?;
 				// Loop over each result value
 				for obj in &mut values {

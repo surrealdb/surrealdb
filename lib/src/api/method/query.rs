@@ -4,6 +4,7 @@ use super::Stream;
 use crate::api::conn::Method;
 use crate::api::conn::Param;
 use crate::api::err::Error;
+use crate::api::method::BoxFuture;
 use crate::api::opt;
 use crate::api::Connection;
 use crate::api::ExtraFeatures;
@@ -27,7 +28,6 @@ use serde::Serialize;
 use std::borrow::Cow;
 use std::collections::BTreeMap;
 use std::collections::HashMap;
-use std::future::Future;
 use std::future::IntoFuture;
 use std::mem;
 use std::pin::Pin;
@@ -111,7 +111,7 @@ where
 	Client: Connection,
 {
 	type Output = Result<Response>;
-	type IntoFuture = Pin<Box<dyn Future<Output = Self::Output> + Send + Sync + 'r>>;
+	type IntoFuture = BoxFuture<'r, Self::Output>;
 
 	fn into_future(self) -> Self::IntoFuture {
 		let ValidQuery {
@@ -159,8 +159,7 @@ where
 			query.0 .0 = query_statements;
 
 			let param = Param::query(query, bindings);
-			let mut conn = Client::new(Method::Query);
-			let mut response = conn.execute_query(router, param).await?;
+			let mut response = router.execute_query(Method::Query, param).await?;
 
 			for idx in query_indicies {
 				let Some((_, result)) = response.results.get(&idx) else {
@@ -170,7 +169,7 @@ where
 				// This is a live query. We are using this as a workaround to avoid
 				// creating another public error variant for this internal error.
 				let res = match result {
-					Ok(id) => live::register::<Client>(router, id.clone()).await.map(|rx| {
+					Ok(id) => live::register(router, id.clone()).await.map(|rx| {
 						Stream::new(
 							Surreal::new_from_router_waiter(
 								client.router.clone(),
@@ -197,7 +196,7 @@ where
 	Client: Connection,
 {
 	type Output = Result<WithStats<Response>>;
-	type IntoFuture = Pin<Box<dyn Future<Output = Self::Output> + Send + Sync + 'r>>;
+	type IntoFuture = BoxFuture<'r, Self::Output>;
 
 	fn into_future(self) -> Self::IntoFuture {
 		Box::pin(async move {

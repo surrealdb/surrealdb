@@ -468,8 +468,7 @@ mod cli_integration {
 					.clone()
 					.unwrap_err()
 					.contains("Namespace is needed for authentication but it was not provided"),
-				"auth level namespace requires providing a namespace: {:?}",
-				output
+				"auth level namespace requires providing a namespace: {output:?}"
 			);
 		}
 
@@ -484,8 +483,7 @@ mod cli_integration {
 					.clone()
 					.unwrap_err()
 					.contains("Database is needed for authentication but it was not provided"),
-				"auth level database requires providing a namespace and database: {:?}",
-				output
+				"auth level database requires providing a namespace and database: {output:?}"
 			);
 		}
 		server.finish().unwrap();
@@ -832,7 +830,7 @@ mod cli_integration {
 			let args = format!("{sql_args} {creds}");
 			let input = "";
 			let output = common::run(&args).input(input).output();
-			assert!(output.is_ok(), "anonymous user should be able to query: {:?}", output);
+			assert!(output.is_ok(), "anonymous user should be able to query: {output:?}");
 		}
 
 		info!("* Query over WS");
@@ -840,7 +838,7 @@ mod cli_integration {
 			let args = format!("sql --conn ws://{addr} --multi --pretty {creds}");
 			let input = "";
 			let output = common::run(&args).input(input).output();
-			assert!(output.is_ok(), "anonymous user should be able to query: {:?}", output);
+			assert!(output.is_ok(), "anonymous user should be able to query: {output:?}");
 		}
 
 		info!("* Can't do exports");
@@ -852,8 +850,7 @@ mod cli_integration {
 			let output = common::run(&args).output();
 			assert!(
 				output.clone().unwrap_err().contains("Forbidden"),
-				"anonymous user shouldn't be able to export: {:?}",
-				output
+				"anonymous user shouldn't be able to export: {output:?}"
 			);
 		}
 
@@ -868,8 +865,7 @@ mod cli_integration {
 			let output = common::run(&args).output();
 			assert!(
 				output.clone().unwrap_err().contains("Forbidden"),
-				"anonymous user shouldn't be able to import: {:?}",
-				output
+				"anonymous user shouldn't be able to import: {output:?}"
 			);
 		}
 		server.finish().unwrap();
@@ -1028,7 +1024,7 @@ mod cli_integration {
 
 		const WRONG_GLOB_PATTERN: &str = "**/*{.txt";
 
-		let args = format!("validate \"{}\"", WRONG_GLOB_PATTERN);
+		let args = format!("validate \"{WRONG_GLOB_PATTERN}\"");
 
 		assert!(common::run_in_dir(&args, &temp_dir).output().is_err());
 	}
@@ -1104,10 +1100,7 @@ mod cli_integration {
 			tokio::time::timeout(time::Duration::from_secs(10), async {
 				loop {
 					if let Ok(Some(exit)) = server.status() {
-						panic!(
-							"Server unexpectedly exited after receiving first SIGINT: {:?}",
-							exit
-						);
+						panic!("Server unexpectedly exited after receiving first SIGINT: {exit:?}");
 					}
 					tokio::time::sleep(time::Duration::from_millis(100)).await;
 				}
@@ -1190,7 +1183,7 @@ mod cli_integration {
 				throwaway = Ulid::new()
 			);
 
-			let query = format!("RETURN http::get('http://{}/version');\n\n", addr);
+			let query = format!("RETURN http::get('http://{addr}/version');\n\n");
 			let output = common::run(&cmd).input(&query).output().unwrap();
 			assert!(
 				output.contains("Function 'http::get' is not allowed"),
@@ -1222,7 +1215,7 @@ mod cli_integration {
 				throwaway = Ulid::new()
 			);
 
-			let query = format!("RETURN http::get('http://{}/version');\n\n", addr);
+			let query = format!("RETURN http::get('http://{addr}/version');\n\n");
 			let output = common::run(&cmd).input(&query).output().unwrap();
 			assert!(output.contains("['surrealdb-"), "unexpected output: {output:?}");
 
@@ -1271,7 +1264,7 @@ mod cli_integration {
 				throwaway = Ulid::new()
 			);
 
-			let query = format!("RETURN http::get('http://{}/version');\n\n", addr);
+			let query = format!("RETURN http::get('http://{addr}/version');\n\n");
 			let output = common::run(&cmd).input(&query).output().unwrap();
 			assert!(
 				output.contains(
@@ -1298,7 +1291,7 @@ mod cli_integration {
 				throwaway = Ulid::new()
 			);
 
-			let query = format!("RETURN http::get('http://{}/version');\n\n", addr);
+			let query = format!("RETURN http::get('http://{addr}/version');\n\n");
 			let output = common::run(&cmd).input(&query).output().unwrap();
 			assert!(output.contains("['surrealdb-"), "unexpected output: {output:?}");
 			server.finish().unwrap();
@@ -1412,7 +1405,7 @@ mod cli_integration {
 					panic!("Should not be ok!");
 				}
 				Err(e) => {
-					assert_eq!(e.to_string(), "server failed to start", "{:?}", e);
+					assert_eq!(e.to_string(), "server failed to start", "{e:?}");
 				}
 			}
 		}
@@ -1434,7 +1427,7 @@ mod cli_integration {
 					panic!("Should not be ok!");
 				}
 				Err(e) => {
-					assert_eq!(e.to_string(), "server failed to start", "{:?}", e);
+					assert_eq!(e.to_string(), "server failed to start", "{e:?}");
 				}
 			}
 			temp_file.close().unwrap();

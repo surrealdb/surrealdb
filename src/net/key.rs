@@ -1,4 +1,3 @@
-use crate::dbs::DB;
 use crate::err::Error;
 use crate::net::input::bytes_to_utf8;
 use crate::net::output;
@@ -18,6 +17,7 @@ use surrealdb::sql::Value;
 use tower_http::limit::RequestBodyLimitLayer;
 
 use super::headers::Accept;
+use super::AppState;
 
 const MAX: usize = 1024 * 16; // 16 KiB
 
@@ -68,13 +68,14 @@ where
 // ------------------------------
 
 async fn select_all(
+	Extension(state): Extension<AppState>,
 	Extension(session): Extension<Session>,
 	accept: Option<TypedHeader<Accept>>,
 	Path(table): Path<String>,
 	Query(query): Query<QueryOptions>,
 ) -> Result<impl IntoResponse, impl IntoResponse> {
 	// Get the datastore reference
-	let db = DB.get().unwrap();
+	let db = &state.datastore;
 	// Ensure a NS and DB are set
 	let _ = check_ns_db(&session)?;
 	// Specify the request statement
@@ -108,6 +109,7 @@ async fn select_all(
 }
 
 async fn create_all(
+	Extension(state): Extension<AppState>,
 	Extension(session): Extension<Session>,
 	accept: Option<TypedHeader<Accept>>,
 	Path(table): Path<String>,
@@ -115,7 +117,7 @@ async fn create_all(
 	body: Bytes,
 ) -> Result<impl IntoResponse, impl IntoResponse> {
 	// Get the datastore reference
-	let db = DB.get().unwrap();
+	let db = &state.datastore;
 	// Ensure a NS and DB are set
 	let _ = check_ns_db(&session)?;
 	// Convert the HTTP request body
@@ -152,6 +154,7 @@ async fn create_all(
 }
 
 async fn update_all(
+	Extension(state): Extension<AppState>,
 	Extension(session): Extension<Session>,
 	accept: Option<TypedHeader<Accept>>,
 	Path(table): Path<String>,
@@ -159,7 +162,7 @@ async fn update_all(
 	body: Bytes,
 ) -> Result<impl IntoResponse, impl IntoResponse> {
 	// Get the datastore reference
-	let db = DB.get().unwrap();
+	let db = &state.datastore;
 	// Ensure a NS and DB are set
 	let _ = check_ns_db(&session)?;
 	// Convert the HTTP request body
@@ -196,6 +199,7 @@ async fn update_all(
 }
 
 async fn modify_all(
+	Extension(state): Extension<AppState>,
 	Extension(session): Extension<Session>,
 	accept: Option<TypedHeader<Accept>>,
 	Path(table): Path<String>,
@@ -203,7 +207,7 @@ async fn modify_all(
 	body: Bytes,
 ) -> Result<impl IntoResponse, impl IntoResponse> {
 	// Get the datastore reference
-	let db = DB.get().unwrap();
+	let db = &state.datastore;
 	// Ensure a NS and DB are set
 	let _ = check_ns_db(&session)?;
 	// Convert the HTTP request body
@@ -240,13 +244,14 @@ async fn modify_all(
 }
 
 async fn delete_all(
+	Extension(state): Extension<AppState>,
 	Extension(session): Extension<Session>,
 	accept: Option<TypedHeader<Accept>>,
 	Path(table): Path<String>,
 	Query(params): Query<Params>,
 ) -> Result<impl IntoResponse, impl IntoResponse> {
 	// Get the datastore reference
-	let db = DB.get().unwrap();
+	let db = &state.datastore;
 	// Ensure a NS and DB are set
 	let _ = check_ns_db(&session)?;
 	// Specify the request statement
@@ -278,13 +283,14 @@ async fn delete_all(
 // ------------------------------
 
 async fn select_one(
+	Extension(state): Extension<AppState>,
 	Extension(session): Extension<Session>,
 	accept: Option<TypedHeader<Accept>>,
 	Path((table, id)): Path<(String, String)>,
 	Query(query): Query<QueryOptions>,
 ) -> Result<impl IntoResponse, impl IntoResponse> {
 	// Get the datastore reference
-	let db = DB.get().unwrap();
+	let db = &state.datastore;
 	// Ensure a NS and DB are set
 	let _ = check_ns_db(&session)?;
 	// Specify the request statement
@@ -321,6 +327,7 @@ async fn select_one(
 }
 
 async fn create_one(
+	Extension(state): Extension<AppState>,
 	Extension(session): Extension<Session>,
 	accept: Option<TypedHeader<Accept>>,
 	Query(params): Query<Params>,
@@ -328,7 +335,7 @@ async fn create_one(
 	body: Bytes,
 ) -> Result<impl IntoResponse, impl IntoResponse> {
 	// Get the datastore reference
-	let db = DB.get().unwrap();
+	let db = &state.datastore;
 	// Ensure a NS and DB are set
 	let _ = check_ns_db(&session)?;
 	// Convert the HTTP request body
@@ -371,6 +378,7 @@ async fn create_one(
 }
 
 async fn update_one(
+	Extension(state): Extension<AppState>,
 	Extension(session): Extension<Session>,
 	accept: Option<TypedHeader<Accept>>,
 	Query(params): Query<Params>,
@@ -378,7 +386,7 @@ async fn update_one(
 	body: Bytes,
 ) -> Result<impl IntoResponse, impl IntoResponse> {
 	// Get the datastore reference
-	let db = DB.get().unwrap();
+	let db = &state.datastore;
 	// Ensure a NS and DB are set
 	let _ = check_ns_db(&session)?;
 	// Convert the HTTP request body
@@ -421,6 +429,7 @@ async fn update_one(
 }
 
 async fn modify_one(
+	Extension(state): Extension<AppState>,
 	Extension(session): Extension<Session>,
 	accept: Option<TypedHeader<Accept>>,
 	Query(params): Query<Params>,
@@ -428,7 +437,7 @@ async fn modify_one(
 	body: Bytes,
 ) -> Result<impl IntoResponse, impl IntoResponse> {
 	// Get the datastore reference
-	let db = DB.get().unwrap();
+	let db = &state.datastore;
 	// Ensure a NS and DB are set
 	let _ = check_ns_db(&session)?;
 	// Convert the HTTP request body
@@ -471,12 +480,13 @@ async fn modify_one(
 }
 
 async fn delete_one(
+	Extension(state): Extension<AppState>,
 	Extension(session): Extension<Session>,
 	accept: Option<TypedHeader<Accept>>,
 	Path((table, id)): Path<(String, String)>,
 ) -> Result<impl IntoResponse, impl IntoResponse> {
 	// Get the datastore reference
-	let db = DB.get().unwrap();
+	let db = &state.datastore;
 	// Ensure a NS and DB are set
 	let _ = check_ns_db(&session)?;
 	// Specify the request statement
