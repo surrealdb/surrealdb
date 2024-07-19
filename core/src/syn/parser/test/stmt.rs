@@ -614,6 +614,40 @@ fn parse_define_access_jwt_key() {
 			})),
 		)
 	}
+	// Asymmetric verify and issue with authenticate clause.
+	{
+		let res = test_parse!(
+			parse_stmt,
+			r#"DEFINE ACCESS a ON DATABASE TYPE JWT ALGORITHM EDDSA KEY "foo" WITH ISSUER KEY "bar" AUTHENTICATE true"#
+		)
+		.unwrap();
+		assert_eq!(
+			res,
+			Statement::Define(DefineStatement::Access(DefineAccessStatement {
+				name: Ident("a".to_string()),
+				base: Base::Db,
+				kind: AccessType::Jwt(JwtAccess {
+					verify: JwtAccessVerify::Key(JwtAccessVerifyKey {
+						alg: Algorithm::EdDSA,
+						key: "foo".to_string(),
+					}),
+					issue: Some(JwtAccessIssue {
+						alg: Algorithm::EdDSA,
+						key: "bar".to_string(),
+					}),
+				}),
+				authenticate: Some(Value::Bool(true)),
+				// Default durations.
+				duration: AccessDuration {
+					grant: None,
+					token: Some(Duration::from_hours(1)),
+					session: None,
+				},
+				comment: None,
+				if_not_exists: false,
+			})),
+		)
+	}
 	// Symmetric verify and implicit issue.
 	{
 		let res = test_parse!(
@@ -1038,7 +1072,7 @@ fn parse_define_access_record() {
 			_ => panic!(),
 		}
 	}
-	// Session duration, signing and authentication queries are explicitly defined.
+	// Session duration, signing and authenticate clauses are explicitly defined.
 	{
 		let res = test_parse!(
 			parse_stmt,
