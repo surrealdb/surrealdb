@@ -1,4 +1,3 @@
-use base64::{engine::general_purpose::STANDARD_NO_PAD, Engine};
 use revision::revisioned;
 use serde::{
 	de::{self, Visitor},
@@ -35,7 +34,15 @@ impl Deref for Bytes {
 
 impl Display for Bytes {
 	fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-		write!(f, "encoding::base64::decode(\"{}\")", STANDARD_NO_PAD.encode(&self.0))
+		writeln!(f, "")?;
+		let len = self.0.len();
+		if len > 0 {
+			for byte in &self.0[..len - 1] {
+				writeln!(f, "    {},", byte)?;
+			}
+			writeln!(f, "    {}", self.0[len - 1])?;
+		}
+		Ok(())
 	}
 }
 
