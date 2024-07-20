@@ -255,8 +255,7 @@ impl<'a> Context<'a> {
 
 	pub(crate) fn tx(&self) -> Arc<Transaction> {
 		self.transaction
-			.as_ref()
-			.map(Arc::clone)
+			.clone()
 			.unwrap_or_else(|| unreachable!("The context was not associated with a transaction"))
 	}
 
