@@ -30,6 +30,8 @@ use wasmtimer::std::Instant;
 #[cfg(target_arch = "wasm32")]
 use wasmtimer::tokio::Interval;
 
+// used in http and all local engines.
+#[allow(dead_code)]
 fn value_to_values(v: Value) -> Values {
 	match v {
 		Value::Array(x) => {

@@ -55,7 +55,6 @@ macro_rules! into_future {
 				let router = client.router.extract()?;
 				router
 					.$method(Command::Select {
-						one: param.is_thing(),
 						what: param,
 					})
 					.await

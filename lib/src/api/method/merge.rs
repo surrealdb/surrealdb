@@ -63,7 +63,6 @@ macro_rules! into_future {
 
 				let router = client.router.extract()?;
 				let cmd = Command::Merge {
-					one: param.is_thing(),
 					what: param,
 					data: content,
 				};

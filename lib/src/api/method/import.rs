@@ -15,11 +15,9 @@ use std::path::PathBuf;
 /// An database import future
 #[derive(Debug)]
 #[must_use = "futures do nothing unless you `.await` or poll them"]
-#[cfg_attr(docsrs, doc(cfg(not(target_arch = "wasm32"))))]
 pub struct Import<'r, C: Connection, T = ()> {
 	pub(super) client: Cow<'r, Surreal<C>>,
 	pub(super) file: PathBuf,
-	#[cfg(feature = "ml")]
 	pub(super) is_ml: bool,
 	pub(super) import_type: PhantomData<T>,
 }
@@ -29,8 +27,6 @@ where
 	C: Connection,
 {
 	/// Import machine learning model
-	#[cfg(feature = "ml")]
-	#[cfg_attr(docsrs, doc(cfg(all(not(target_arch = "wasm32"), feature = "ml"))))]
 	pub fn ml(self) -> Import<'r, C, Model> {
 		Import {
 			client: self.client,
@@ -68,7 +64,6 @@ where
 				return Err(Error::BackupsNotSupported.into());
 			}
 
-			#[cfg(feature = "ml")]
 			if self.is_ml {
 				return router
 					.execute_unit(Command::ImportMl {

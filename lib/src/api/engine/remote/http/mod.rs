@@ -453,11 +453,11 @@ async fn router(
 			Ok(DbResponse::Other(value))
 		}
 		Command::Upsert {
-			one,
 			what,
 			data,
 		} => {
 			let path = base_url.join(SQL_PATH)?;
+			let one = what.is_thing();
 			let statement = {
 				let mut stmt = UpsertStatement::default();
 				stmt.what = value_to_values(what);
@@ -471,11 +471,11 @@ async fn router(
 			Ok(DbResponse::Other(value))
 		}
 		Command::Update {
-			one,
 			what,
 			data,
 		} => {
 			let path = base_url.join(SQL_PATH)?;
+			let one = what.is_thing();
 			let statement = {
 				let mut stmt = UpdateStatement::default();
 				stmt.what = value_to_values(what);
@@ -507,11 +507,11 @@ async fn router(
 			Ok(DbResponse::Other(value))
 		}
 		Command::Patch {
-			one,
 			what,
 			data,
 		} => {
 			let path = base_url.join(SQL_PATH)?;
+			let one = what.is_thing();
 			let statement = {
 				let mut stmt = UpdateStatement::default();
 				stmt.what = value_to_values(what);
@@ -525,11 +525,11 @@ async fn router(
 			Ok(DbResponse::Other(value))
 		}
 		Command::Merge {
-			one,
 			what,
 			data,
 		} => {
 			let path = base_url.join(SQL_PATH)?;
+			let one = what.is_thing();
 			let statement = {
 				let mut stmt = UpdateStatement::default();
 				stmt.what = value_to_values(what);
@@ -544,9 +544,9 @@ async fn router(
 		}
 		Command::Select {
 			what,
-			one,
 		} => {
 			let path = base_url.join(SQL_PATH)?;
+			let one = what.is_thing();
 			let statement = {
 				let mut stmt = SelectStatement::default();
 				stmt.what = value_to_values(what);
@@ -560,8 +560,8 @@ async fn router(
 		}
 		Command::Delete {
 			what,
-			one,
 		} => {
+			let one = what.is_thing();
 			let path = base_url.join(SQL_PATH)?;
 			let (one, statement) = {
 				let mut stmt = DeleteStatement::default();
@@ -586,7 +586,6 @@ async fn router(
 			let values = query(request).await?;
 			Ok(DbResponse::Query(values))
 		}
-		#[cfg(not(target_arch = "wasm32"))]
 		Command::ExportFile {
 			path,
 		} => {
@@ -599,7 +598,6 @@ async fn router(
 			let value = export_file(request, path).await?;
 			Ok(DbResponse::Other(value))
 		}
-		#[cfg(not(target_arch = "wasm32"))]
 		Command::ExportBytes {
 			bytes,
 		} => {
@@ -612,7 +610,6 @@ async fn router(
 			let value = export_bytes(request, bytes).await?;
 			Ok(DbResponse::Other(value))
 		}
-		#[cfg(all(not(target_arch = "wasm32"), feature = "ml"))]
 		Command::ExportMl {
 			path,
 			config,
@@ -627,7 +624,6 @@ async fn router(
 			let value = export_file(request, path).await?;
 			Ok(DbResponse::Other(value))
 		}
-		#[cfg(all(not(target_arch = "wasm32"), feature = "ml"))]
 		Command::ExportBytesMl {
 			bytes,
 			config,
@@ -642,7 +638,6 @@ async fn router(
 			let value = export_bytes(request, bytes).await?;
 			Ok(DbResponse::Other(value))
 		}
-		#[cfg(not(target_arch = "wasm32"))]
 		Command::ImportFile {
 			path,
 		} => {
@@ -655,7 +650,6 @@ async fn router(
 			let value = import(request, path).await?;
 			Ok(DbResponse::Other(value))
 		}
-		#[cfg(all(not(target_arch = "wasm32"), feature = "ml"))]
 		Command::ImportMl {
 			path,
 		} => {

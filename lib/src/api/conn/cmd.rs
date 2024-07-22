@@ -1,18 +1,19 @@
+use super::MlExportConfig;
 use crate::Result;
 use bincode::Options;
 use channel::Sender;
 use revision::Revisioned;
 use serde::{ser::SerializeMap as _, Serialize};
-use std::{collections::BTreeMap, io::Read, path::PathBuf};
+use std::path::PathBuf;
+use std::{collections::BTreeMap, io::Read};
 use surrealdb_core::{
 	dbs::Notification,
 	sql::{Object, Query, Value},
 };
 use uuid::Uuid;
 
-use super::MlExportConfig;
-
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub(crate) enum Command {
 	Use {
 		namespace: Option<String>,
@@ -33,12 +34,10 @@ pub(crate) enum Command {
 		data: Option<Value>,
 	},
 	Upsert {
-		one: bool,
 		what: Value,
 		data: Option<Value>,
 	},
 	Update {
-		one: bool,
 		what: Value,
 		data: Option<Value>,
 	},
@@ -47,50 +46,40 @@ pub(crate) enum Command {
 		data: Value,
 	},
 	Patch {
-		one: bool,
 		what: Value,
 		data: Option<Value>,
 	},
 	Merge {
-		one: bool,
 		what: Value,
 		data: Option<Value>,
 	},
 	Select {
-		one: bool,
 		what: Value,
 	},
 	Delete {
-		one: bool,
 		what: Value,
 	},
 	Query {
 		query: Query,
 		variables: BTreeMap<String, Value>,
 	},
-	#[cfg(not(target_arch = "wasm32"))]
 	ExportFile {
 		path: PathBuf,
 	},
-	#[cfg(all(not(target_arch = "wasm32"), feature = "ml"))]
 	ExportMl {
 		path: PathBuf,
 		config: MlExportConfig,
 	},
-	#[cfg(not(target_arch = "wasm32"))]
 	ExportBytes {
 		bytes: Sender<Result<Vec<u8>>>,
 	},
-	#[cfg(all(not(target_arch = "wasm32"), feature = "ml"))]
 	ExportBytesMl {
 		bytes: Sender<Result<Vec<u8>>>,
 		config: MlExportConfig,
 	},
-	#[cfg(not(target_arch = "wasm32"))]
 	ImportFile {
 		path: PathBuf,
 	},
-	#[cfg(all(not(target_arch = "wasm32"), feature = "ml"))]
 	ImportMl {
 		path: PathBuf,
 	},
@@ -275,21 +264,19 @@ impl Command {
 					params: Some(params.into()),
 				}
 			}
-			#[cfg(not(target_arch = "wasm32"))]
 			Command::ExportFile {
 				..
 			}
 			| Command::ExportBytes {
 				..
 			}
+			| Command::ImportFile {
+				..
+			}
 			| Command::ExportBytesMl {
 				..
 			}
-			| Command::ImportFile {
-				..
-			} => return None,
-			#[cfg(all(not(target_arch = "wasm32"), feature = "ml"))]
-			Command::ExportMl {
+			| Command::ExportMl {
 				..
 			}
 			| Command::ImportMl {

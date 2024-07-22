@@ -177,9 +177,11 @@ pub enum DbResponse {
 }
 
 #[derive(Debug, Clone)]
-#[cfg(all(not(target_arch = "wasm32"), feature = "ml"))]
 pub(crate) struct MlExportConfig {
+	// fields are used in http and local non-wasm with ml features
+	#[allow(dead_code)]
 	pub(crate) name: String,
+	#[allow(dead_code)]
 	pub(crate) version: String,
 }
 

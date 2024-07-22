@@ -1,4 +1,5 @@
 //! Methods to use when interacting with a SurrealDB instance
+use self::query::ValidQuery;
 use crate::api::err::Error;
 use crate::api::opt;
 use crate::api::opt::auth;
@@ -32,7 +33,9 @@ mod commit;
 mod content;
 mod create;
 mod delete;
+mod export;
 mod health;
+mod import;
 mod insert;
 mod invalidate;
 mod merge;
@@ -63,9 +66,10 @@ pub use commit::Commit;
 pub use content::Content;
 pub use create::Create;
 pub use delete::Delete;
-pub use export::Backup;
+pub use export::{Backup, Export};
 use futures::Future;
 pub use health::Health;
+pub use import::Import;
 pub use insert::Insert;
 pub use invalidate::Invalidate;
 pub use live::Stream;
@@ -84,18 +88,6 @@ pub use upsert::Upsert;
 pub use use_db::UseDb;
 pub use use_ns::UseNs;
 pub use version::Version;
-
-#[cfg(not(target_arch = "wasm32"))]
-mod export;
-#[cfg(not(target_arch = "wasm32"))]
-pub use export::Export;
-
-#[cfg(not(target_arch = "wasm32"))]
-mod import;
-#[cfg(not(target_arch = "wasm32"))]
-pub use import::Import;
-
-use self::query::ValidQuery;
 
 /// A alias for an often used type of future returned by async methods in this library.
 pub(crate) type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + Sync + 'a>>;
@@ -1316,13 +1308,10 @@ where
 	/// # Ok(())
 	/// # }
 	/// ```
-	#[cfg(not(target_arch = "wasm32"))]
-	#[cfg_attr(docsrs, doc(cfg(not(target_arch = "wasm32"))))]
 	pub fn export<R>(&self, target: impl IntoExportDestination<R>) -> Export<C, R> {
 		Export {
 			client: Cow::Borrowed(self),
 			target: target.into_export_destination(),
-			#[cfg(feature = "ml")]
 			ml_config: None,
 			response: PhantomData,
 			export_type: PhantomData,
@@ -1348,8 +1337,6 @@ where
 	/// # Ok(())
 	/// # }
 	/// ```
-	#[cfg(not(target_arch = "wasm32"))]
-	#[cfg_attr(docsrs, doc(cfg(not(target_arch = "wasm32"))))]
 	pub fn import<P>(&self, file: P) -> Import<C>
 	where
 		P: AsRef<Path>,
@@ -1357,7 +1344,6 @@ where
 		Import {
 			client: Cow::Borrowed(self),
 			file: file.as_ref().to_owned(),
-			#[cfg(feature = "ml")]
 			is_ml: false,
 			import_type: PhantomData,
 		}

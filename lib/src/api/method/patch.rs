@@ -61,7 +61,6 @@ macro_rules! into_future {
 				let patches = Value::from(vec);
 				let router = client.router.extract()?;
 				let cmd = Command::Patch {
-					one: param.is_thing(),
 					what: param,
 					data: Some(patches),
 				};

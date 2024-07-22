@@ -545,11 +545,11 @@ async fn router(
 			Ok(DbResponse::Other(value))
 		}
 		Command::Upsert {
-			one,
 			what,
 			data,
 		} => {
 			let mut query = Query::default();
+			let one = what.is_thing();
 			let statement = {
 				let mut stmt = UpsertStatement::default();
 				stmt.what = value_to_values(what);
@@ -563,11 +563,11 @@ async fn router(
 			Ok(DbResponse::Other(value))
 		}
 		Command::Update {
-			one,
 			what,
 			data,
 		} => {
 			let mut query = Query::default();
+			let one = what.is_thing();
 			let statement = {
 				let mut stmt = UpdateStatement::default();
 				stmt.what = value_to_values(what);
@@ -599,11 +599,11 @@ async fn router(
 			Ok(DbResponse::Other(value))
 		}
 		Command::Patch {
-			one,
 			what,
 			data,
 		} => {
 			let mut query = Query::default();
+			let one = what.is_thing();
 			let statement = {
 				let mut stmt = UpdateStatement::default();
 				stmt.what = value_to_values(what);
@@ -617,11 +617,11 @@ async fn router(
 			Ok(DbResponse::Other(value))
 		}
 		Command::Merge {
-			one,
 			what,
 			data,
 		} => {
 			let mut query = Query::default();
+			let one = what.is_thing();
 			let statement = {
 				let mut stmt = UpdateStatement::default();
 				stmt.what = value_to_values(what);
@@ -635,10 +635,10 @@ async fn router(
 			Ok(DbResponse::Other(value))
 		}
 		Command::Select {
-			one,
 			what,
 		} => {
 			let mut query = Query::default();
+			let one = what.is_thing();
 			let statement = {
 				let mut stmt = SelectStatement::default();
 				stmt.what = value_to_values(what);
@@ -651,15 +651,15 @@ async fn router(
 			Ok(DbResponse::Other(value))
 		}
 		Command::Delete {
-			one,
 			what,
 		} => {
 			let mut query = Query::default();
-			let (one, statement) = {
+			let one = what.is_thing();
+			let statement = {
 				let mut stmt = DeleteStatement::default();
 				stmt.what = value_to_values(what);
 				stmt.output = Some(Output::Before);
-				(one, stmt)
+				stmt
 			};
 			query.0 .0 = vec![Statement::Delete(statement)];
 			let response = kvs.process(query, &*session, Some(vars.clone())).await?;
@@ -676,6 +676,29 @@ async fn router(
 			let response = process(response);
 			Ok(DbResponse::Query(response))
 		}
+
+		#[cfg(target_arch = "wasm32")]
+		Command::ExportFile {
+			..
+		}
+		| Command::ExportBytes {
+			..
+		}
+		| Command::ImportFile {
+			..
+		} => Err(crate::api::Error::BackupsNotSupported.into()),
+
+		#[cfg(any(target_arch = "wasm32", not(feature = "ml")))]
+		Command::ExportMl {
+			..
+		}
+		| Command::ExportBytesMl {
+			..
+		}
+		| Command::ImportMl {
+			..
+		} => Err(crate::api::Error::BackupsNotSupported.into()),
+
 		#[cfg(not(target_arch = "wasm32"))]
 		Command::ExportFile {
 			path: file,

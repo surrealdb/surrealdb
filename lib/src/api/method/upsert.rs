@@ -59,7 +59,6 @@ macro_rules! into_future {
 				let router = client.router.extract()?;
 				router
 					.$method(Command::Upsert {
-						one: param.is_thing(),
 						what: param,
 						data: None,
 					})
@@ -147,7 +146,6 @@ where
 			};
 
 			Ok(Command::Upsert {
-				one: what.is_thing(),
 				what,
 				data,
 			})
