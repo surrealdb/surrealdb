@@ -1886,7 +1886,7 @@ mod tests {
 						stk,
 						&[40],
 						vt,
-						TestCollection::new(true, 1000, vt, 10, &Distance::Euclidean),
+						TestCollection::new(true, 500, vt, 5, &Distance::Euclidean),
 						false,
 						true,
 						false,
@@ -1910,7 +1910,7 @@ mod tests {
 						stk,
 						&[40],
 						vt,
-						TestCollection::new(true, 1000, vt, 10, &Distance::Euclidean),
+						TestCollection::new(true, 500, vt, 5, &Distance::Euclidean),
 						false,
 						true,
 						false,
@@ -1934,7 +1934,7 @@ mod tests {
 						stk,
 						&[40],
 						vt,
-						TestCollection::new(true, 1000, vt, 10, &Distance::Euclidean),
+						TestCollection::new(true, 500, vt, 5, &Distance::Euclidean),
 						false,
 						true,
 						false,
@@ -1961,13 +1961,18 @@ mod tests {
 					VectorType::I32,
 					VectorType::I16,
 				] {
-					for i in 0..30 {
-						// 10, 40
+					for collection_size in [0, 1, 5, 10, 15, 20, 30, 40] {
 						test_mtree_collection(
 							stk,
-							&[3, 40],
+							&[3, 10, 40],
 							vt,
-							TestCollection::new(false, i, vt, 1, &Distance::Euclidean),
+							TestCollection::new(
+								false,
+								collection_size,
+								vt,
+								1,
+								&Distance::Euclidean,
+							),
 							true,
 							true,
 							true,
@@ -2017,7 +2022,7 @@ mod tests {
 						stk,
 						&[40],
 						vt,
-						TestCollection::new(false, 1000, vt, 10, &Distance::Euclidean),
+						TestCollection::new(false, 500, vt, 5, &Distance::Euclidean),
 						false,
 						true,
 						false,

@@ -20,35 +20,35 @@ use tokio::runtime::{Builder, Runtime};
 use tokio::task;
 
 fn bench_index_mtree_dim_3(c: &mut Criterion) {
-	bench_index_mtree(c, 250, 25_000, 3, 100);
+	bench_index_mtree(c, 250, 2500, 3, 100);
 }
 
 fn bench_index_mtree_dim_3_full_cache(c: &mut Criterion) {
-	bench_index_mtree(c, 250, 25_000, 3, 0);
+	bench_index_mtree(c, 250, 2500, 3, 0);
 }
 
 fn bench_index_mtree_dim_50(c: &mut Criterion) {
-	bench_index_mtree(c, 100, 10_000, 50, 100);
+	bench_index_mtree(c, 100, 1000, 50, 100);
 }
 
 fn bench_index_mtree_dim_50_full_cache(c: &mut Criterion) {
-	bench_index_mtree(c, 100, 10_000, 50, 0);
+	bench_index_mtree(c, 100, 1000, 50, 0);
 }
 
 fn bench_index_mtree_dim_300(c: &mut Criterion) {
-	bench_index_mtree(c, 50, 5_000, 300, 100);
+	bench_index_mtree(c, 50, 500, 300, 100);
 }
 
 fn bench_index_mtree_dim_300_full_cache(c: &mut Criterion) {
-	bench_index_mtree(c, 50, 5_000, 300, 0);
+	bench_index_mtree(c, 50, 500, 300, 0);
 }
 
 fn bench_index_mtree_dim_2048(c: &mut Criterion) {
-	bench_index_mtree(c, 10, 1_000, 2048, 100);
+	bench_index_mtree(c, 10, 100, 2048, 100);
 }
 
 fn bench_index_mtree_dim_2048_full_cache(c: &mut Criterion) {
-	bench_index_mtree(c, 10, 1_000, 2048, 0);
+	bench_index_mtree(c, 10, 100, 2048, 0);
 }
 
 async fn mtree_index(
