@@ -295,12 +295,12 @@ impl<'a> Context<'a> {
 				return Some(Reason::Timedout);
 			}
 		}
-	
+
 		// Check if the operation has been cancelled
 		if self.cancelled.load(Ordering::Relaxed) {
 			return Some(Reason::Canceled);
 		}
-	
+
 		// Check the parent context, if any exists.
 		if let Some(ref ctx) = self.parent {
 			return ctx.done();
