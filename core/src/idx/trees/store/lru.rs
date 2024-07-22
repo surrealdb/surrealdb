@@ -27,7 +27,8 @@ where
 	V: Clone,
 {
 	pub(super) fn with_capacity(capacity: usize) -> Self {
-		let shards_count = (num_cpus::get() * 3 / 4).min(capacity);
+		// slightly more than the number of CPU cores
+		let shards_count = (num_cpus::get() * 4 / 3).min(capacity);
 		let mut shards = Vec::with_capacity(shards_count);
 		let mut lengths = Vec::with_capacity(shards_count);
 		for _ in 0..shards_count {
