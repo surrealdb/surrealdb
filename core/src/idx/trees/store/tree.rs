@@ -2,7 +2,7 @@ use crate::err::Error;
 use crate::idx::trees::store::cache::TreeCache;
 use crate::idx::trees::store::{NodeId, StoredNode, TreeNode, TreeNodeProvider};
 use crate::kvs::{Key, Transaction};
-use hashbrown::{HashMap, HashSet};
+use ahash::{HashMap, HashSet};
 use std::fmt::{Debug, Display};
 use std::mem;
 use std::sync::Arc;
@@ -30,12 +30,12 @@ where
 		Self {
 			np,
 			cache,
-			cached: HashSet::new(),
-			nodes: HashMap::new(),
-			updated: HashSet::new(),
-			removed: HashMap::new(),
+			cached: Default::default(),
+			nodes: Default::default(),
+			updated: Default::default(),
+			removed: Default::default(),
 			#[cfg(debug_assertions)]
-			out: HashSet::new(),
+			out: Default::default(),
 		}
 	}
 
