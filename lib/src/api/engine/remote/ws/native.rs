@@ -4,7 +4,6 @@ use super::{HandleResult, RouterRequest};
 use crate::api::conn::Connection;
 use crate::api::conn::DbResponse;
 use crate::api::conn::Method;
-use crate::api::conn::Param;
 use crate::api::conn::Route;
 use crate::api::conn::Router;
 use crate::api::engine::remote::ws::Client;
@@ -12,6 +11,7 @@ use crate::api::engine::remote::ws::Response;
 use crate::api::engine::remote::ws::PING_INTERVAL;
 use crate::api::engine::remote::ws::PING_METHOD;
 use crate::api::err::Error;
+use crate::api::method::BoxFuture;
 use crate::api::opt::Endpoint;
 #[cfg(any(feature = "native-tls", feature = "rustls"))]
 use crate::api::opt::Tls;
@@ -23,7 +23,7 @@ use crate::engine::remote::ws::Data;
 use crate::engine::IntervalStream;
 use crate::opt::WaitFor;
 use crate::sql::Value;
-use flume::Receiver;
+use channel::Receiver;
 use futures::stream::{SplitSink, SplitStream};
 use futures::SinkExt;
 use futures::StreamExt;
@@ -31,9 +31,7 @@ use revision::revisioned;
 use serde::Deserialize;
 use std::collections::hash_map::Entry;
 use std::collections::HashSet;
-use std::future::Future;
 use std::mem;
-use std::pin::Pin;
 use std::sync::atomic::AtomicI64;
 use std::sync::Arc;
 use std::sync::OnceLock;
@@ -105,17 +103,10 @@ pub(crate) async fn connect(
 impl crate::api::Connection for Client {}
 
 impl Connection for Client {
-	fn new(method: Method) -> Self {
-		Self {
-			id: 0,
-			method,
-		}
-	}
-
 	fn connect(
 		mut address: Endpoint,
 		capacity: usize,
-	) -> Pin<Box<dyn Future<Output = Result<Surreal<Self>>> + Send + Sync + 'static>> {
+	) -> BoxFuture<'static, Result<Surreal<Self>>> {
 		Box::pin(async move {
 			address.url = address.url.join(PATH)?;
 			#[cfg(any(feature = "native-tls", feature = "rustls"))]
@@ -133,8 +124,8 @@ impl Connection for Client {
 			let socket = connect(&address, Some(config), maybe_connector.clone()).await?;
 
 			let (route_tx, route_rx) = match capacity {
-				0 => flume::unbounded(),
-				capacity => flume::bounded(capacity),
+				0 => channel::unbounded(),
+				capacity => channel::bounded(capacity),
 			};
 
 			tokio::spawn(run_router(address, maybe_connector, capacity, config, socket, route_rx));
@@ -150,23 +141,6 @@ impl Connection for Client {
 				})),
 				Arc::new(watch::channel(Some(WaitFor::Connection))),
 			))
-		})
-	}
-
-	fn send<'r>(
-		&'r mut self,
-		router: &'r Router,
-		param: Param,
-	) -> Pin<Box<dyn Future<Output = Result<Receiver<Result<DbResponse>>>> + Send + Sync + 'r>> {
-		Box::pin(async move {
-			self.id = router.next_id();
-			let (sender, receiver) = flume::bounded(1);
-			let route = Route {
-				request: (self.id, self.method, param),
-				response: sender,
-			};
-			router.sender.send_async(route).await?;
-			Ok(receiver)
 		})
 	}
 }
@@ -203,7 +177,7 @@ async fn router_handle_route(
 					state.live_queries.insert(id.0, sender);
 				}
 			}
-			if response.clone().into_send_async(Ok(DbResponse::Other(Value::None))).await.is_err() {
+			if response.clone().send(Ok(DbResponse::Other(Value::None))).await.is_err() {
 				trace!("Receiver dropped");
 			}
 			// There is nothing to send to the server here
@@ -248,7 +222,7 @@ async fn router_handle_route(
 				}
 				Entry::Occupied(..) => {
 					let error = Error::DuplicateRequestId(id);
-					if response.into_send_async(Err(error.into())).await.is_err() {
+					if response.send(Err(error.into())).await.is_err() {
 						trace!("Receiver dropped");
 					}
 				}
@@ -256,7 +230,7 @@ async fn router_handle_route(
 		}
 		Err(error) => {
 			let error = Error::Ws(error.to_string());
-			if response.into_send_async(Err(error.into())).await.is_err() {
+			if response.send(Err(error.into())).await.is_err() {
 				trace!("Receiver dropped");
 			}
 			return HandleResult::Disconnected;
@@ -296,7 +270,7 @@ async fn router_handle_response(
 										}
 									}
 								}
-								let _res = sender.into_send_async(DbResponse::from(response)).await;
+								let _res = sender.send(DbResponse::from(response)).await;
 							}
 						}
 					}
@@ -353,7 +327,7 @@ async fn router_handle_response(
 					// Return an error if an ID was returned
 					if let Some(Ok(id)) = id.map(Value::coerce_to_i64) {
 						if let Some((_method, sender)) = state.routes.remove(&id) {
-							let _res = sender.into_send_async(Err(error)).await;
+							let _res = sender.send(Err(error)).await;
 						}
 					}
 				} else {
@@ -431,7 +405,6 @@ pub(crate) async fn run_router(
 
 	let (socket_sink, socket_stream) = socket.split();
 	let mut state = RouterState::new(socket_sink, socket_stream);
-	let mut route_stream = route_rx.into_stream();
 
 	'router: loop {
 		let mut interval = time::interval(PING_INTERVAL);
@@ -449,11 +422,11 @@ pub(crate) async fn run_router(
 
 		loop {
 			tokio::select! {
-				route = route_stream.next() => {
+				route = route_rx.recv() => {
 					// handle incoming route
 
-					let Some(response) = route else {
-						// route returned none, frontend dropped the channel, meaning the router
+					let Ok(response) = route else {
+						// route returned Err, frontend dropped the channel, meaning the router
 						// should quit.
 						match state.sink.send(Message::Close(None)).await {
 							Ok(..) => trace!("Connection closed successfully"),

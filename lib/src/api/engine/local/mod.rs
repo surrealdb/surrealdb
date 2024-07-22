@@ -373,9 +373,7 @@ pub struct SurrealKV;
 
 /// An embedded database
 #[derive(Debug, Clone)]
-pub struct Db {
-	pub(crate) method: crate::api::conn::Method,
-}
+pub struct Db(());
 
 impl Surreal<Db> {
 	/// Connects to a specific database endpoint, saving the connection on the static client
@@ -448,7 +446,7 @@ async fn export(
 			// Check the permissions level
 			kvs.check(sess, Action::View, ResourceKind::Model.on_db(&nsv, &dbv))?;
 			// Start a new readonly transaction
-			let mut tx = kvs.transaction(TransactionType::Read, LockType::Optimistic).await?;
+			let tx = kvs.transaction(TransactionType::Read, LockType::Optimistic).await?;
 			// Attempt to get the model definition
 			let info = tx.get_db_model(&nsv, &dbv, &name, &version).await?;
 			// Export the file data in to the store
@@ -792,7 +790,7 @@ async fn router(
 				[Value::Strand(key), value] => (mem::take(&mut key.0), mem::take(value)),
 				_ => unreachable!(),
 			};
-			let var = Some(crate::map! {
+			let var = Some(map! {
 				key.clone() => Value::None,
 				=> vars
 			});

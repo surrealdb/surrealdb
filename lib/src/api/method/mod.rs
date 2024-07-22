@@ -45,6 +45,7 @@ pub use create::Create;
 pub use delete::Delete;
 pub use export::Backup;
 pub use export::Export;
+use futures::Future;
 pub use health::Health;
 pub use import::Import;
 pub use insert::Insert;
@@ -84,11 +85,15 @@ use serde::Serialize;
 use std::borrow::Cow;
 use std::marker::PhantomData;
 use std::path::Path;
+use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::OnceLock;
 use std::time::Duration;
 
 use self::query::ValidQuery;
+
+/// A alias for an often used type of future returned by async methods in this library.
+pub(crate) type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + Sync + 'a>>;
 
 /// Query statistics
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]

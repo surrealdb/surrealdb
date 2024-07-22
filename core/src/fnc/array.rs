@@ -431,14 +431,14 @@ mod tests {
 			assert_eq!(slice((initial_values, beg, lim)).unwrap(), expected_values.into());
 		}
 
-		let array = &[b'a', b'b', b'c', b'd', b'e', b'f', b'g'];
+		let array = b"abcdefg";
 		test(array, None, None, array);
 		test(array, Some(2), None, &array[2..]);
 		test(array, Some(2), Some(3), &array[2..5]);
-		test(array, Some(2), Some(-1), &[b'c', b'd', b'e', b'f']);
-		test(array, Some(-2), None, &[b'f', b'g']);
-		test(array, Some(-4), Some(2), &[b'd', b'e']);
-		test(array, Some(-4), Some(-1), &[b'd', b'e', b'f']);
+		test(array, Some(2), Some(-1), b"cdef");
+		test(array, Some(-2), None, b"fg");
+		test(array, Some(-4), Some(2), b"de");
+		test(array, Some(-4), Some(-1), b"def");
 	}
 
 	#[test]
