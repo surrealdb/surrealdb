@@ -132,7 +132,7 @@ impl Command {
 				token,
 			} => RouterRequest {
 				id,
-				method: "signin".into(),
+				method: "authenticate".into(),
 				params: Some(vec![Value::from(token)].into()),
 			},
 			Command::Invalidate => RouterRequest {
