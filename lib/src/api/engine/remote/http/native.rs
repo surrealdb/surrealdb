@@ -12,9 +12,9 @@ use crate::api::Result;
 use crate::api::Surreal;
 use crate::opt::WaitFor;
 use channel::Receiver;
+use indexmap::IndexMap;
 use reqwest::header::HeaderMap;
 use reqwest::ClientBuilder;
-use std::collections::HashMap;
 use std::collections::HashSet;
 use std::sync::atomic::AtomicI64;
 use std::sync::Arc;
@@ -72,7 +72,7 @@ impl Connection for Client {
 
 pub(crate) async fn run_router(base_url: Url, client: reqwest::Client, route_rx: Receiver<Route>) {
 	let mut headers = HeaderMap::new();
-	let mut vars = HashMap::new();
+	let mut vars = IndexMap::new();
 	let mut auth = None;
 
 	while let Ok(route) = route_rx.recv().await {
