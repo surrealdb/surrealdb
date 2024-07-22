@@ -1,6 +1,5 @@
 use super::Client;
 use crate::api::conn::Connection;
-use crate::api::conn::Method;
 use crate::api::conn::Route;
 use crate::api::conn::Router;
 use crate::api::method::BoxFuture;

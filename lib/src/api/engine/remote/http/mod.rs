@@ -26,22 +26,16 @@ use crate::opt::IntoEndpoint;
 use crate::sql::from_value;
 use crate::sql::serde::deserialize;
 use crate::sql::Value;
-#[cfg(not(target_arch = "wasm32"))]
 use futures::TryStreamExt;
 use indexmap::IndexMap;
 use reqwest::header::HeaderMap;
 use reqwest::header::HeaderValue;
 use reqwest::header::ACCEPT;
-#[cfg(not(target_arch = "wasm32"))]
-use reqwest::header::CONTENT_TYPE;
 use reqwest::RequestBuilder;
 use serde::Deserialize;
 use serde::Serialize;
-use std::collections::HashMap;
 use std::marker::PhantomData;
 use std::mem;
-#[cfg(not(target_arch = "wasm32"))]
-use std::path::PathBuf;
 use surrealdb_core::sql::statements::CreateStatement;
 use surrealdb_core::sql::statements::DeleteStatement;
 use surrealdb_core::sql::statements::InsertStatement;
@@ -51,13 +45,20 @@ use surrealdb_core::sql::statements::UpsertStatement;
 use surrealdb_core::sql::Data;
 use surrealdb_core::sql::Field;
 use surrealdb_core::sql::Output;
+use url::Url;
+
+#[cfg(not(target_arch = "wasm32"))]
+use reqwest::header::CONTENT_TYPE;
+#[cfg(not(target_arch = "wasm32"))]
+use std::path::PathBuf;
 #[cfg(not(target_arch = "wasm32"))]
 use tokio::fs::OpenOptions;
 #[cfg(not(target_arch = "wasm32"))]
 use tokio::io;
 #[cfg(not(target_arch = "wasm32"))]
 use tokio_util::compat::FuturesAsyncReadCompatExt;
-use url::Url;
+#[cfg(target_arch = "wasm32")]
+use wasm_bindgen_futures::spawn_local;
 
 const SQL_PATH: &str = "sql";
 
@@ -238,7 +239,6 @@ async fn take(one: bool, request: RequestBuilder) -> Result<Value> {
 	}
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 type BackupSender = channel::Sender<Result<Vec<u8>>>;
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -274,15 +274,23 @@ async fn export_file(request: RequestBuilder, path: PathBuf) -> Result<Value> {
 }
 
 async fn export_bytes(request: RequestBuilder, bytes: BackupSender) -> Result<Value> {
-	let mut response = request.send().await?.error_for_status()?.bytes_stream();
+	let response = request.send().await?.error_for_status()?;
 
-	tokio::spawn(async move {
+	let future = async move {
+		let mut response = response.bytes_stream();
 		while let Ok(Some(b)) = response.try_next().await {
 			if bytes.send(Ok(b.to_vec())).await.is_err() {
 				break;
 			}
 		}
-	});
+	};
+
+	#[cfg(not(target_arch = "wasm32"))]
+	tokio::spawn(future);
+
+	#[cfg(target_arch = "wasm32")]
+	spawn_local(future);
+
 	Ok(Value::None)
 }
 
@@ -339,7 +347,7 @@ async fn router(
 	base_url: &Url,
 	client: &reqwest::Client,
 	headers: &mut HeaderMap,
-	vars: &mut HashMap<String, String>,
+	vars: &mut IndexMap<String, String>,
 	auth: &mut Option<Auth>,
 ) -> Result<DbResponse> {
 	match command {
@@ -586,6 +594,24 @@ async fn router(
 			let values = query(request).await?;
 			Ok(DbResponse::Query(values))
 		}
+		#[cfg(target_arch = "wasm32")]
+		Command::ExportFile {
+			..
+		}
+		| Command::ExportMl {
+			..
+		}
+		| Command::ImportFile {
+			..
+		}
+		| Command::ImportMl {
+			..
+		} => {
+			// TODO: Better error message here, some backups are supported
+			Err(Error::BackupsNotSupported.into())
+		}
+
+		#[cfg(not(target_arch = "wasm32"))]
 		Command::ExportFile {
 			path,
 		} => {
@@ -610,6 +636,7 @@ async fn router(
 			let value = export_bytes(request, bytes).await?;
 			Ok(DbResponse::Other(value))
 		}
+		#[cfg(not(target_arch = "wasm32"))]
 		Command::ExportMl {
 			path,
 			config,
@@ -638,6 +665,7 @@ async fn router(
 			let value = export_bytes(request, bytes).await?;
 			Ok(DbResponse::Other(value))
 		}
+		#[cfg(not(target_arch = "wasm32"))]
 		Command::ImportFile {
 			path,
 		} => {
@@ -650,6 +678,7 @@ async fn router(
 			let value = import(request, path).await?;
 			Ok(DbResponse::Other(value))
 		}
+		#[cfg(not(target_arch = "wasm32"))]
 		Command::ImportMl {
 			path,
 		} => {
@@ -693,7 +722,7 @@ async fn router(
 		Command::Unset {
 			key,
 		} => {
-			vars.remove(&key);
+			vars.shift_remove(&key);
 			Ok(DbResponse::Other(Value::None))
 		}
 		Command::SubscribeLive {
