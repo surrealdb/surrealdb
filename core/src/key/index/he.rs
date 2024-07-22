@@ -1,7 +1,5 @@
 //! Stores Vector of an HNSW index
 use crate::idx::trees::hnsw::ElementId;
-use crate::key::error::KeyCategory;
-use crate::key::key_req::KeyRequirements;
 use derive::Key;
 use serde::{Deserialize, Serialize};
 
@@ -21,12 +19,6 @@ pub struct He<'a> {
 	_f: u8,
 	_g: u8,
 	pub element_id: ElementId,
-}
-
-impl KeyRequirements for He<'_> {
-	fn key_category(&self) -> KeyCategory {
-		KeyCategory::IndexHnswElements
-	}
 }
 
 impl<'a> He<'a> {

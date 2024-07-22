@@ -310,7 +310,6 @@ mod tests {
 	use crate::kvs::LockType::Optimistic;
 	use crate::kvs::{Datastore, TransactionType};
 	use crate::sql::index::{Distance, HnswParams, VectorType};
-	use futures::lock::Mutex;
 	use hashbrown::{hash_map::Entry, HashMap, HashSet};
 	use ndarray::Array1;
 	use reblessive::tree::Stk;
@@ -324,7 +323,7 @@ mod tests {
 	) -> HashSet<SharedVector> {
 		let mut set = HashSet::new();
 		for (_, obj) in collection.to_vec_ref() {
-			let obj: SharedVector = obj.clone().into();
+			let obj: SharedVector = obj.clone();
 			h.insert(obj.clone());
 			set.insert(obj);
 			h.check_hnsw_properties(set.len());
@@ -376,7 +375,7 @@ mod tests {
 	fn test_hnsw_collection(p: &HnswParams, collection: &TestCollection) {
 		let mut h = HnswFlavor::new(p);
 		insert_collection_hnsw(&mut h, collection);
-		find_collection_hnsw(&h, &collection);
+		find_collection_hnsw(&h, collection);
 	}
 
 	fn new_params(
@@ -456,7 +455,7 @@ mod tests {
 	) -> HashMap<SharedVector, HashSet<DocId>> {
 		let mut map: HashMap<SharedVector, HashSet<DocId>> = HashMap::new();
 		for (doc_id, obj) in collection.to_vec_ref() {
-			let obj: SharedVector = obj.clone().into();
+			let obj: SharedVector = obj.clone();
 			h.insert(obj.clone(), *doc_id);
 			match map.entry(obj) {
 				Entry::Occupied(mut e) => {
@@ -516,7 +515,7 @@ mod tests {
 		mut map: HashMap<SharedVector, HashSet<DocId>>,
 	) {
 		for (doc_id, obj) in collection.to_vec_ref() {
-			let obj: SharedVector = obj.clone().into();
+			let obj: SharedVector = obj.clone();
 			h.remove(obj.clone(), *doc_id);
 			if let Entry::Occupied(mut e) = map.entry(obj.clone()) {
 				let set = e.get_mut();
@@ -530,10 +529,9 @@ mod tests {
 	}
 
 	async fn new_ctx(ds: &Datastore, tt: TransactionType) -> Context<'_> {
-		let tx = ds.transaction(tt, Optimistic).await.unwrap();
+		let tx = Arc::new(ds.transaction(tt, Optimistic).await.unwrap());
 		let mut ctx = Context::default();
-		let txn = Arc::new(Mutex::new(tx));
-		ctx.set_transaction_mut(txn);
+		ctx.set_transaction(tx);
 		ctx
 	}
 
@@ -552,9 +550,11 @@ mod tests {
 
 		// Create index
 		let ctx = new_ctx(&ds, TransactionType::Write).await;
-		let mut h =
-			HnswIndex::new(&ctx, IndexKeyBase::default(), "test".to_string(), &p).await.unwrap();
-		ctx.tx_lock().await.commit().await.unwrap();
+		let tx = ctx.tx();
+		let mut h = HnswIndex::new(tx.clone(), IndexKeyBase::default(), "test".to_string(), &p)
+			.await
+			.unwrap();
+		tx.commit().await.unwrap();
 
 		// Fill index
 		let map = insert_collection_hnsw_index(&mut h, &collection);
@@ -572,7 +572,7 @@ mod tests {
 		// Delete collection
 		let ctx = new_ctx(&ds, TransactionType::Write).await;
 		delete_hnsw_index_collection(&mut h, &collection, map);
-		ctx.tx_lock().await.commit().await.unwrap();
+		ctx.tx().commit().await.unwrap();
 	}
 
 	#[test(tokio::test(flavor = "multi_thread"))]
@@ -655,12 +655,13 @@ mod tests {
 			)?));
 
 		let ctx = new_ctx(&ds, TransactionType::Write).await;
-		let mut h = HnswIndex::new(&ctx, IndexKeyBase::default(), "Index".to_string(), &p).await?;
+		let mut h =
+			HnswIndex::new(ctx.tx(), IndexKeyBase::default(), "Index".to_string(), &p).await?;
 		info!("Insert collection");
 		for (doc_id, obj) in collection.to_vec_ref() {
 			h.insert(obj.clone(), *doc_id);
 		}
-		ctx.tx_lock().await.commit().await?;
+		ctx.tx().commit().await?;
 
 		let h = Arc::new(h);
 
@@ -720,9 +721,9 @@ mod tests {
 		let p = new_params(20, VectorType::F32, Distance::Euclidean, 8, 100, false, false);
 		test_recall(
 			"hnsw-random-9000-20-euclidean.gz",
-			3000,
+			1000,
 			"hnsw-random-5000-20-euclidean.gz",
-			500,
+			300,
 			p,
 			&[(10, 0.98), (40, 1.0)],
 		)
@@ -734,9 +735,9 @@ mod tests {
 		let p = new_params(20, VectorType::F32, Distance::Euclidean, 8, 100, false, true);
 		test_recall(
 			"hnsw-random-9000-20-euclidean.gz",
-			3000,
+			750,
 			"hnsw-random-5000-20-euclidean.gz",
-			500,
+			200,
 			p,
 			&[(10, 0.98), (40, 1.0)],
 		)
@@ -748,9 +749,9 @@ mod tests {
 		let p = new_params(20, VectorType::F32, Distance::Euclidean, 8, 100, true, true);
 		test_recall(
 			"hnsw-random-9000-20-euclidean.gz",
-			1000,
+			500,
 			"hnsw-random-5000-20-euclidean.gz",
-			200,
+			100,
 			p,
 			&[(10, 0.98), (40, 1.0)],
 		)

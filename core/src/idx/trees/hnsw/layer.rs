@@ -211,7 +211,7 @@ where
 		chk: &mut HnswConditionChecker<'_>,
 	) -> Result<bool, Error> {
 		if let Some(docs) = search.vec_docs().get_docs(e_pt) {
-			if chk.check_truthy(ctx, stk, search.docs(), docs).await? {
+			if chk.check_truthy(ctx.tx(), stk, search.docs(), docs).await? {
 				w.push(e_dist, e_id);
 				if w.len() > search.ef() {
 					if let Some((_, id)) = w.pop_last() {

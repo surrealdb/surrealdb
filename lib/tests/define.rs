@@ -29,7 +29,9 @@ async fn define_statement_namespace() -> Result<(), Error> {
 	let tmp = res.remove(0).result?;
 	let val = Value::parse(
 		"{
+			accesses: {},
 			namespaces: { test: 'DEFINE NAMESPACE test' },
+			nodes: {},
 			users: {},
 		}",
 	);
@@ -974,10 +976,10 @@ async fn define_statement_index_on_schemafull_without_permission() -> Result<(),
 	";
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
-	let mut res = &mut dbs.execute(sql, &ses, None).await?;
+	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 2);
 	//
-	skip_ok(&mut res, 1)?;
+	skip_ok(res, 1)?;
 	//
 	let tmp = res.remove(0).result;
 	let s = format!("{:?}", tmp);
@@ -1253,7 +1255,7 @@ where
 	let res = val.walk(&part);
 	for (i, v) in res {
 		let mut idiom = Idiom::default();
-		idiom.0 = part.clone();
+		idiom.0.clone_from(&part);
 		assert_eq!(idiom, i);
 		check(v);
 	}
@@ -1273,8 +1275,8 @@ async fn permissions_checks_define_ns() {
 
 	// Define the expected results for the check statement when the test statement succeeded and when it failed
 	let check_results = [
-		vec!["{ namespaces: { NS: 'DEFINE NAMESPACE NS' }, users: {  } }"],
-		vec!["{ namespaces: {  }, users: {  } }"],
+		vec!["{ accesses: {  }, namespaces: { NS: 'DEFINE NAMESPACE NS' }, nodes: {  }, users: {  } }"],
+		vec!["{ accesses: {  }, namespaces: {  }, nodes: {  }, users: {  } }"],
 	];
 
 	let test_cases = [
@@ -1429,6 +1431,48 @@ async fn permissions_checks_define_analyzer() {
 }
 
 #[tokio::test]
+async fn permissions_checks_define_access_root() {
+	let scenario = HashMap::from([
+		("prepare", ""),
+		("test", "DEFINE ACCESS access ON ROOT TYPE JWT ALGORITHM HS512 KEY 'secret'"),
+		("check", "INFO FOR ROOT"),
+	]);
+
+	// Define the expected results for the check statement when the test statement succeeded and when it failed
+	let check_results = [
+        vec!["{ accesses: { access: \"DEFINE ACCESS access ON ROOT TYPE JWT ALGORITHM HS512 KEY '[REDACTED]' WITH ISSUER KEY '[REDACTED]' DURATION FOR TOKEN 1h, FOR SESSION NONE\" }, namespaces: {  }, nodes: {  }, users: {  } }"],
+		vec!["{ accesses: {  }, namespaces: {  }, nodes: {  }, users: {  } }"]
+    ];
+
+	let test_cases = [
+		// Root level
+		((().into(), Role::Owner), ("NS", "DB"), true),
+		((().into(), Role::Editor), ("NS", "DB"), false),
+		((().into(), Role::Viewer), ("NS", "DB"), false),
+		// Namespace level
+		((("NS",).into(), Role::Owner), ("NS", "DB"), false),
+		((("NS",).into(), Role::Owner), ("OTHER_NS", "DB"), false),
+		((("NS",).into(), Role::Editor), ("NS", "DB"), false),
+		((("NS",).into(), Role::Editor), ("OTHER_NS", "DB"), false),
+		((("NS",).into(), Role::Viewer), ("NS", "DB"), false),
+		((("NS",).into(), Role::Viewer), ("OTHER_NS", "DB"), false),
+		// Database level
+		((("NS", "DB").into(), Role::Owner), ("NS", "DB"), false),
+		((("NS", "DB").into(), Role::Owner), ("NS", "OTHER_DB"), false),
+		((("NS", "DB").into(), Role::Owner), ("OTHER_NS", "DB"), false),
+		((("NS", "DB").into(), Role::Editor), ("NS", "DB"), false),
+		((("NS", "DB").into(), Role::Editor), ("NS", "OTHER_DB"), false),
+		((("NS", "DB").into(), Role::Editor), ("OTHER_NS", "DB"), false),
+		((("NS", "DB").into(), Role::Viewer), ("NS", "DB"), false),
+		((("NS", "DB").into(), Role::Viewer), ("NS", "OTHER_DB"), false),
+		((("NS", "DB").into(), Role::Viewer), ("OTHER_NS", "DB"), false),
+	];
+
+	let res = iam_check_cases(test_cases.iter(), &scenario, check_results).await;
+	assert!(res.is_ok(), "{}", res.unwrap_err());
+}
+
+#[tokio::test]
 async fn permissions_checks_define_access_ns() {
 	let scenario = HashMap::from([
 		("prepare", ""),
@@ -1522,8 +1566,8 @@ async fn permissions_checks_define_user_root() {
 
 	// Define the expected results for the check statement when the test statement succeeded and when it failed
 	let check_results = [
-        vec!["{ namespaces: {  }, users: { user: \"DEFINE USER user ON ROOT PASSHASH 'secret' ROLES VIEWER DURATION FOR TOKEN 15m, FOR SESSION 6h\" } }"],
-		vec!["{ namespaces: {  }, users: {  } }"]
+        vec!["{ accesses: {  }, namespaces: {  }, nodes: {  }, users: { user: \"DEFINE USER user ON ROOT PASSHASH 'secret' ROLES VIEWER DURATION FOR TOKEN 15m, FOR SESSION 6h\" } }"],
+		vec!["{ accesses: {  }, namespaces: {  }, nodes: {  }, users: {  } }"]
     ];
 
 	let test_cases = [
@@ -2105,9 +2149,9 @@ async fn define_remove_access() -> Result<(), Error> {
 	let mut t = Test::new(sql).await?;
 	t.skip_ok(1)?;
 	t.expect_val("None")?;
-	t.expect_error("The database access method 'example' already exists")?;
+	t.expect_error("The access method 'example' already exists in the database 'test'")?;
 	t.skip_ok(1)?;
-	t.expect_error("The database access method 'example' does not exist")?;
+	t.expect_error("The access method 'example' does not exist in the database 'test'")?;
 	t.expect_val("None")?;
 	Ok(())
 }

@@ -1,7 +1,5 @@
 //! Stores Things of an HNSW index
 use crate::idx::trees::vector::SerializedVector;
-use crate::key::error::KeyCategory;
-use crate::key::key_req::KeyRequirements;
 use derive::Key;
 use serde::{Deserialize, Serialize};
 use std::fmt::Debug;
@@ -25,11 +23,6 @@ pub struct Hv<'a> {
 	pub vec: Arc<SerializedVector>,
 }
 
-impl<'a> KeyRequirements for Hv<'a> {
-	fn key_category(&self) -> KeyCategory {
-		KeyCategory::IndexHnswVec
-	}
-}
 impl<'a> Hv<'a> {
 	pub fn new(
 		ns: &'a str,

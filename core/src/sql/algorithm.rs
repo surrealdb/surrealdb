@@ -76,6 +76,7 @@ impl fmt::Display for Algorithm {
 		})
 	}
 }
+
 impl InfoStructure for Algorithm {
 	fn structure(self) -> Value {
 		self.to_string().into()

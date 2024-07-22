@@ -6,6 +6,7 @@ use crate::idx::docids::{DocId, DocIds};
 use crate::idx::planner::iterators::KnnIteratorResult;
 use crate::idx::trees::hnsw::docs::HnswDocs;
 use crate::idx::trees::knn::Ids64;
+use crate::kvs::Transaction;
 use crate::sql::{Cond, Thing, Value};
 use hashbrown::hash_map::Entry;
 use hashbrown::HashMap;
@@ -44,13 +45,13 @@ impl<'a> HnswConditionChecker<'a> {
 
 	pub(in crate::idx) async fn check_truthy(
 		&mut self,
-		ctx: &Context<'_>,
+		tx: Arc<Transaction>,
 		stk: &mut Stk,
 		docs: &HnswDocs,
 		doc_ids: &Ids64,
 	) -> Result<bool, Error> {
 		match self {
-			Self::HnswCondition(c) => c.check_any_truthy(ctx, stk, docs, doc_ids).await,
+			Self::HnswCondition(c) => c.check_any_truthy(tx, stk, docs, doc_ids).await,
 			Self::Hnsw(_) => Ok(true),
 		}
 	}
@@ -69,12 +70,12 @@ impl<'a> HnswConditionChecker<'a> {
 
 	pub(in crate::idx) async fn convert_result(
 		&mut self,
-		ctx: &Context<'_>,
+		tx: &Transaction,
 		docs: &HnswDocs,
 		res: VecDeque<(DocId, f64)>,
 	) -> Result<VecDeque<KnnIteratorResult>, Error> {
 		match self {
-			Self::Hnsw(c) => c.convert_result(ctx, docs, res).await,
+			Self::Hnsw(c) => c.convert_result(tx, docs, res).await,
 			Self::HnswCondition(c) => Ok(c.convert_result(res)),
 		}
 	}
@@ -144,13 +145,12 @@ impl<'a> MTreeChecker<'a> {
 			return Ok(VecDeque::from([]));
 		}
 		let mut result = VecDeque::with_capacity(res.len());
-		let mut tx = self.ctx.tx_lock().await;
+		let txn = self.ctx.tx();
 		for (doc_id, dist) in res {
-			if let Some(key) = doc_ids.get_doc_key(&mut tx, doc_id).await? {
+			if let Some(key) = doc_ids.get_doc_key(&txn, doc_id).await? {
 				result.push_back((key.into(), dist, None));
 			}
 		}
-		drop(tx);
 		Ok(result)
 	}
 }
@@ -186,9 +186,8 @@ impl CheckerCacheEntry {
 		cond: &Cond,
 	) -> Result<Self, Error> {
 		if let Some(rid) = rid {
-			let mut tx = ctx.tx_lock().await;
-			let val = Iterable::fetch_thing(&mut tx, opt, &rid).await?;
-			drop(tx);
+			let txn = ctx.tx();
+			let val = Iterable::fetch_thing(&txn, opt, &rid).await?;
 			if !val.is_none_or_null() {
 				let (value, truthy) = {
 					let cursor_doc = CursorDoc {
@@ -229,9 +228,8 @@ impl<'a> MTreeCondChecker<'a> {
 		match self.cache.entry(doc_id) {
 			Entry::Occupied(e) => Ok(e.get().truthy),
 			Entry::Vacant(e) => {
-				let mut tx = self.ctx.tx_lock().await;
-				let rid = doc_ids.get_doc_key(&mut tx, doc_id).await?.map(|k| k.into());
-				drop(tx);
+				let txn = self.ctx.tx();
+				let rid = doc_ids.get_doc_key(&txn, doc_id).await?.map(|k| k.into());
 				let ent =
 					CheckerCacheEntry::build(stk, self.ctx, self.opt, rid, self.cond.as_ref())
 						.await?;
@@ -262,7 +260,7 @@ pub struct HnswChecker {}
 impl HnswChecker {
 	async fn convert_result(
 		&self,
-		ctx: &Context<'_>,
+		tx: &Transaction,
 		docs: &HnswDocs,
 		res: VecDeque<(DocId, f64)>,
 	) -> Result<VecDeque<KnnIteratorResult>, Error> {
@@ -271,7 +269,7 @@ impl HnswChecker {
 		}
 		let mut result = VecDeque::with_capacity(res.len());
 		for (doc_id, dist) in res {
-			if let Some(rid) = docs.get_thing(ctx, doc_id).await? {
+			if let Some(rid) = docs.get_thing(tx, doc_id).await? {
 				result.push_back((rid, dist, None));
 			}
 		}
@@ -293,7 +291,7 @@ impl<'a> HnswCondChecker<'a> {
 
 	async fn check_any_truthy(
 		&mut self,
-		ctx: &Context<'_>,
+		tx: Arc<Transaction>,
 		stk: &mut Stk,
 		docs: &HnswDocs,
 		doc_ids: &Ids64,
@@ -303,7 +301,7 @@ impl<'a> HnswCondChecker<'a> {
 			if match self.cache.entry(doc_id) {
 				Entry::Occupied(e) => e.get().truthy,
 				Entry::Vacant(e) => {
-					let rid = docs.get_thing(ctx, doc_id).await?;
+					let rid = docs.get_thing(tx.as_ref(), doc_id).await?;
 					let ent =
 						CheckerCacheEntry::build(stk, self.ctx, self.opt, rid, self.cond.as_ref())
 							.await?;

@@ -1,4 +1,3 @@
-use crate::ctx::Context;
 use crate::err::Error;
 use crate::idx::docids::DocId;
 use crate::idx::trees::hnsw::flavor::HnswFlavor;
@@ -14,6 +13,7 @@ use hashbrown::HashMap;
 use revision::revisioned;
 use roaring::RoaringTreemap;
 use serde::{Deserialize, Serialize};
+use std::sync::Arc;
 
 pub(in crate::idx) struct HnswDocs {
 	tb: String,
@@ -36,7 +36,7 @@ impl VersionedStore for State {}
 
 impl HnswDocs {
 	pub(in crate::idx) async fn new(
-		tx: &mut Transaction,
+		tx: Arc<Transaction>,
 		tb: String,
 		ikb: IndexKeyBase,
 	) -> Result<Self, Error> {
@@ -55,7 +55,7 @@ impl HnswDocs {
 		})
 	}
 
-	pub(super) async fn resolve(&mut self, tx: &mut Transaction, id: Id) -> Result<DocId, Error> {
+	pub(super) async fn resolve(&mut self, tx: &Transaction, id: Id) -> Result<DocId, Error> {
 		let id_key = self.ikb.new_hi_key(id.clone());
 		if let Some(v) = tx.get(id_key.clone()).await? {
 			let doc_id = u64::from_be_bytes(v.try_into().unwrap());
@@ -83,11 +83,11 @@ impl HnswDocs {
 
 	pub(in crate::idx) async fn get_thing(
 		&self,
-		ctx: &Context<'_>,
+		tx: &Transaction,
 		doc_id: DocId,
 	) -> Result<Option<Thing>, Error> {
 		let doc_key = self.ikb.new_hd_key(Some(doc_id));
-		if let Some(val) = ctx.tx_lock().await.get(doc_key).await? {
+		if let Some(val) = tx.get(doc_key).await? {
 			let id: Id = val.into();
 			Ok(Some(Thing::from((self.tb.to_owned(), id))))
 		} else {
@@ -97,7 +97,7 @@ impl HnswDocs {
 
 	pub(super) async fn remove(
 		&mut self,
-		tx: &mut Transaction,
+		tx: &Transaction,
 		id: Id,
 	) -> Result<Option<DocId>, Error> {
 		let id_key = self.ikb.new_hi_key(id);

@@ -1,8 +1,7 @@
-use crate::ctx::Context;
 use crate::err::Error;
 use crate::idx::trees::hnsw::index::HnswIndex;
 use crate::idx::IndexKeyBase;
-use crate::kvs::Key;
+use crate::kvs::{Key, Transaction};
 use crate::sql::index::HnswParams;
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
@@ -22,7 +21,7 @@ impl Default for HnswIndexes {
 impl HnswIndexes {
 	pub(super) async fn get(
 		&self,
-		ctx: &Context<'_>,
+		tx: Arc<Transaction>,
 		tb: &str,
 		ikb: &IndexKeyBase,
 		p: &HnswParams,
@@ -39,7 +38,7 @@ impl HnswIndexes {
 			Entry::Occupied(e) => e.get().clone(),
 			Entry::Vacant(e) => {
 				let h = Arc::new(RwLock::new(
-					HnswIndex::new(ctx, ikb.clone(), tb.to_string(), p).await?,
+					HnswIndex::new(tx, ikb.clone(), tb.to_string(), p).await?,
 				));
 				e.insert(h.clone());
 				h

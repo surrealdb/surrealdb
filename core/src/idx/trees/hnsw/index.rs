@@ -16,6 +16,7 @@ use crate::sql::{Id, Number, Value};
 use hashbrown::HashMap;
 use reblessive::tree::Stk;
 use std::collections::VecDeque;
+use std::sync::Arc;
 
 pub struct HnswIndex {
 	dim: usize,
@@ -73,24 +74,23 @@ impl<'a> HnswCheckedSearchContext<'a> {
 
 impl HnswIndex {
 	pub async fn new(
-		ctx: &Context<'_>,
+		tx: Arc<Transaction>,
 		ikb: IndexKeyBase,
 		tb: String,
 		p: &HnswParams,
 	) -> Result<Self, Error> {
-		let mut tx = ctx.tx_lock().await;
 		Ok(Self {
 			dim: p.dimension as usize,
 			vector_type: p.vector_type,
 			hnsw: HnswFlavor::new(p),
-			docs: HnswDocs::new(&mut tx, tb, ikb.clone()).await?,
+			docs: HnswDocs::new(tx, tb, ikb.clone()).await?,
 			vec_docs: VecDocs::new(ikb),
 		})
 	}
 
 	pub async fn index_document(
 		&mut self,
-		tx: &mut Transaction,
+		tx: &Transaction,
 		id: Id,
 		content: &Vec<Value>,
 	) -> Result<(), Error> {
@@ -116,7 +116,7 @@ impl HnswIndex {
 
 	pub(crate) async fn remove_document(
 		&mut self,
-		tx: &mut Transaction,
+		tx: &Transaction,
 		id: Id,
 		content: &Vec<Value>,
 	) -> Result<(), Error> {
@@ -147,7 +147,7 @@ impl HnswIndex {
 		let search = HnswSearch::new(vector, k, ef);
 		// Do the search
 		let result = self.search(ctx, stk, &search, &mut chk).await?;
-		let res = chk.convert_result(ctx, &self.docs, result.docs).await?;
+		let res = chk.convert_result(&ctx.tx(), &self.docs, result.docs).await?;
 		Ok(res)
 	}
 

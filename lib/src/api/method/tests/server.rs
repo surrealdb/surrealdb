@@ -1,3 +1,5 @@
+use channel::Receiver;
+
 use super::types::User;
 use crate::api::conn::DbResponse;
 use crate::api::conn::Method;
@@ -5,17 +7,13 @@ use crate::api::conn::Route;
 use crate::api::Response as QueryResponse;
 use crate::sql::to_value;
 use crate::sql::Value;
-use flume::Receiver;
-use futures::StreamExt;
 
-pub(super) fn mock(route_rx: Receiver<Option<Route>>) {
+pub(super) fn mock(route_rx: Receiver<Route>) {
 	tokio::spawn(async move {
-		let mut stream = route_rx.into_stream();
-
-		while let Some(Some(Route {
+		while let Ok(Route {
 			request,
 			response,
-		})) = stream.next().await
+		}) = route_rx.recv().await
 		{
 			let (_, method, param) = request;
 			let mut params = param.other;
@@ -94,7 +92,7 @@ pub(super) fn mock(route_rx: Receiver<Option<Route>>) {
 				},
 			};
 
-			if let Err(message) = response.into_send_async(result).await {
+			if let Err(message) = response.send(result).await {
 				panic!("message dropped; {message:?}");
 			}
 		}

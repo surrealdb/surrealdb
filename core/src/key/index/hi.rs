@@ -1,6 +1,4 @@
 //! Stores Things of an HNSW index
-use crate::key::error::KeyCategory;
-use crate::key::key_req::KeyRequirements;
 use crate::sql::Id;
 use derive::Key;
 use serde::{Deserialize, Serialize};
@@ -21,12 +19,6 @@ pub struct Hi<'a> {
 	_f: u8,
 	_g: u8,
 	pub id: Id,
-}
-
-impl KeyRequirements for Hi<'_> {
-	fn key_category(&self) -> KeyCategory {
-		KeyCategory::IndexHnswThings
-	}
 }
 
 impl<'a> Hi<'a> {

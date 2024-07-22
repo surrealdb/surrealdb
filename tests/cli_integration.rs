@@ -4,8 +4,12 @@ mod common;
 mod cli_integration {
 	use crate::remove_debug_info;
 	use assert_fs::prelude::{FileTouch, FileWriteStr, PathChild};
+	use chrono::Duration as ChronoDuration;
+	use chrono::Utc;
 	use common::Format;
 	use common::Socket;
+	use jsonwebtoken::{encode, Algorithm, EncodingKey, Header};
+	use serde::{Deserialize, Serialize};
 	use serde_json::json;
 	use std::fs::File;
 	use std::time;
@@ -62,14 +66,6 @@ mod cli_integration {
 		assert!(common::run("version --turbo").output().is_err());
 	}
 
-	fn debug_builds_contain_debug_message(addr: &str, creds: &str, ns: &Ulid, db: &Ulid) {
-		info!("* Debug builds contain debug message");
-		let args =
-			format!("sql --conn http://{addr} {creds} --ns {ns} --db {db} --multi --hide-welcome");
-		let res = common::run(&args).input("CREATE not_a_table:not_a_record;\n").output().unwrap();
-		assert!(res.contains("Debug builds are not intended for production use"));
-	}
-
 	#[test(tokio::test)]
 	async fn all_commands() {
 		// Commands without credentials when auth is disabled, should succeed
@@ -85,7 +81,14 @@ mod cli_integration {
 		let db = Ulid::new();
 
 		#[cfg(debug_assertions)]
-		debug_builds_contain_debug_message(&addr, creds, &ns, &db);
+		{
+			info!("* Debug builds contain debug message");
+			let args = format!(
+				"sql --conn http://{addr} {creds} --ns {ns} --db {db} --multi --hide-welcome"
+			);
+			let output = common::run(&args).input("CREATE any:any;\n").output().unwrap();
+			assert!(output.contains("Debug builds are not intended for production use"));
+		}
 
 		info!("* Create a record");
 		{
@@ -465,8 +468,7 @@ mod cli_integration {
 					.clone()
 					.unwrap_err()
 					.contains("Namespace is needed for authentication but it was not provided"),
-				"auth level namespace requires providing a namespace: {:?}",
-				output
+				"auth level namespace requires providing a namespace: {output:?}"
 			);
 		}
 
@@ -481,10 +483,338 @@ mod cli_integration {
 					.clone()
 					.unwrap_err()
 					.contains("Database is needed for authentication but it was not provided"),
-				"auth level database requires providing a namespace and database: {:?}",
+				"auth level database requires providing a namespace and database: {output:?}"
+			);
+		}
+		server.finish().unwrap();
+	}
+
+	#[test(tokio::test)]
+	async fn with_auth_level_token() {
+		// Commands with token for different auth levels
+		let (addr, mut server) = common::start_server_with_defaults().await.unwrap();
+		let ac = "test";
+		let ns = Ulid::new();
+		let db = Ulid::new();
+		let exp = (Utc::now() + ChronoDuration::days(1)).timestamp();
+		let key = "secret";
+		let header = Header::new(Algorithm::HS512);
+		let key_enc = EncodingKey::from_secret(key.as_ref());
+		#[derive(Debug, Serialize, Deserialize)]
+		struct Claims {
+			exp: Option<i64>,
+			iss: Option<String>,
+			#[serde(skip_serializing_if = "Option::is_none")]
+			ns: Option<String>,
+			#[serde(skip_serializing_if = "Option::is_none")]
+			db: Option<String>,
+			ac: Option<String>,
+			rl: Option<Vec<String>>,
+		}
+		let claims_root = serde_json::from_str::<Claims>(
+			format!(
+				r#"
+			{{
+				"iss": "surrealdb-test",
+				"exp": {exp},
+				"ac": "{ac}",
+				"rl": ["Owner"]
+			}}
+			"#
+			)
+			.as_ref(),
+		)
+		.unwrap();
+		let token_root = match encode(&header, &claims_root, &key_enc) {
+			Ok(enc) => enc,
+			Err(err) => panic!("Failed to encode token: {:?}", err),
+		};
+		let claims_ns = serde_json::from_str::<Claims>(
+			format!(
+				r#"
+			{{
+				"iss": "surrealdb-test",
+				"exp": {exp},
+				"ac": "{ac}",
+				"ns": "{ns}",
+				"rl": ["Owner"]
+			}}
+			"#
+			)
+			.as_ref(),
+		)
+		.unwrap();
+		let token_ns = match encode(&header, &claims_ns, &key_enc) {
+			Ok(enc) => enc,
+			Err(err) => panic!("Failed to encode token: {:?}", err),
+		};
+		let claims_db = serde_json::from_str::<Claims>(
+			format!(
+				r#"
+			{{
+				"iss": "surrealdb-test",
+				"exp": {exp},
+				"ac": "{ac}",
+				"ns": "{ns}",
+				"db": "{db}",
+				"rl": ["Owner"]
+			}}
+			"#
+			)
+			.as_ref(),
+		)
+		.unwrap();
+		let token_db = match encode(&header, &claims_db, &key_enc) {
+			Ok(enc) => enc,
+			Err(err) => panic!("Failed to encode token: {:?}", err),
+		};
+		let record_user = "user:1";
+		let claims_record = serde_json::from_str::<Claims>(
+			format!(
+				r#"
+			{{
+				"iss": "surrealdb-test",
+				"exp": {exp},
+				"ac": "{ac}",
+				"ns": "{ns}",
+				"db": "{db}",
+				"id": "{record_user}"
+			}}
+			"#
+			)
+			.as_ref(),
+		)
+		.unwrap();
+		let token_record = match encode(&header, &claims_record, &key_enc) {
+			Ok(enc) => enc,
+			Err(err) => panic!("Failed to encode token: {:?}", err),
+		};
+
+		info!("* Create access methods with identical names at ROOT, NS and DB levels");
+		{
+			let args =
+				format!("sql --conn http://{addr} --db {db} --ns {ns} --user {USER} --pass {PASS}");
+			let _ = common::run(&args)
+				.input(format!("DEFINE ACCESS {ac} ON ROOT TYPE JWT ALGORITHM HS512 KEY '{key}';
+                                                DEFINE ACCESS {ac} ON NAMESPACE TYPE JWT ALGORITHM HS512 KEY '{key}';
+                                                DEFINE ACCESS {ac} ON DATABASE TYPE JWT ALGORITHM HS512 KEY '{key}';\n").as_str())
+				.output()
+				.expect("success");
+		}
+
+		info!("* Create record that will be used as record user for authentication");
+		{
+			let args =
+				format!("sql --conn http://{addr} --db {db} --ns {ns} --user {USER} --pass {PASS}");
+			let _ = common::run(&args)
+				.input(format!("CREATE {record_user};").as_str())
+				.output()
+				.expect("success");
+		}
+
+		info!("* Pass root token and access root info");
+		{
+			let args = format!("sql --conn http://{addr} --db {db} --ns {ns} --token {token_root}");
+			let output = common::run(&args)
+				.input(format!("USE NS `{ns}` DB `{db}`; INFO FOR ROOT;\n").as_str())
+				.output()
+				.expect("success");
+			assert!(
+				output.contains("namespaces: {"),
+				"root token should be able to access root info: {output}"
+			);
+		}
+
+		info!("* Pass root token and access namespace info");
+		{
+			let args = format!("sql --conn http://{addr} --db {db} --ns {ns} --token {token_root}");
+			let output = common::run(&args)
+				.input(format!("USE NS `{ns}` DB `{db}`; INFO FOR NS;\n").as_str())
+				.output()
+				.expect("success");
+			assert!(
+				output.contains("databases: {"),
+				"root token should be able to access namespace info: {output}"
+			);
+		}
+
+		info!("* Pass root auth level and access database info");
+		{
+			let args = format!("sql --conn http://{addr} --db {db} --ns {ns} --token {token_root}");
+			let output = common::run(&args)
+				.input(format!("USE NS `{ns}` DB `{db}`; INFO FOR DB;\n").as_str())
+				.output()
+				.expect("success");
+			assert!(
+				output.contains("tables: {"),
+				"root token should be able to access database info: {output}"
+			);
+		}
+
+		info!("* Pass namespace token and access root info");
+		{
+			let args = format!("sql --conn http://{addr} --db {db} --ns {ns} --token {token_ns}");
+			let output = common::run(&args)
+				.input(format!("USE NS `{ns}` DB `{db}`; INFO FOR ROOT;\n").as_str())
+				.output()
+				.expect("success");
+			assert!(
+				output.contains("IAM error: Not enough permissions to perform this action"),
+				"namespace token should not be able to access root info: {output}"
+			);
+		}
+
+		info!("* Pass namespace token and access namespace info");
+		{
+			let args = format!("sql --conn http://{addr} --db {db} --ns {ns} --token {token_ns}");
+			let output = common::run(&args)
+				.input(format!("USE NS `{ns}` DB `{db}`; INFO FOR NS;\n").as_str())
+				.output()
+				.expect("success");
+			assert!(
+				output.contains("databases: {"),
+				"namespace token should be able to access namespace info: {output}"
+			);
+		}
+
+		info!("* Pass namespace token and access database info");
+		{
+			let args = format!("sql --conn http://{addr} --db {db} --ns {ns} --token {token_ns}");
+			let output = common::run(&args)
+				.input(format!("USE NS `{ns}` DB `{db}`; INFO FOR DB;\n").as_str())
+				.output()
+				.expect("success");
+			assert!(
+				output.contains("tables: {"),
+				"namespace token should be able to access database info: {output}"
+			);
+		}
+
+		info!("* Pass database token and access root info");
+		{
+			let args = format!("sql --conn http://{addr} --db {db} --ns {ns} --token {token_db}");
+			let output = common::run(&args)
+				.input(format!("USE NS `{ns}` DB `{db}`; INFO FOR ROOT;\n").as_str())
+				.output()
+				.expect("success");
+			assert!(
+				output.contains("IAM error: Not enough permissions to perform this action"),
+				"database token should not be able to access root info: {output}",
+			);
+		}
+
+		info!("* Pass database token and access namespace info");
+		{
+			let args = format!("sql --conn http://{addr} --db {db} --ns {ns} --token {token_db}");
+			let output = common::run(&args)
+				.input(format!("USE NS `{ns}` DB `{db}`; INFO FOR NS;\n").as_str())
+				.output()
+				.expect("success");
+			assert!(
+				output.contains("IAM error: Not enough permissions to perform this action"),
+				"database token should not be able to access namespace info: {output}",
+			);
+		}
+
+		info!("* Pass database token and access database info");
+		{
+			let args = format!("sql --conn http://{addr} --db {db} --ns {ns} --token {token_db}");
+			let output = common::run(&args)
+				.input(format!("USE NS `{ns}` DB `{db}`; INFO FOR DB;\n").as_str())
+				.output()
+				.expect("success");
+			assert!(
+				output.contains("tables: {"),
+				"database token should be able to access database info: {output}"
+			);
+		}
+
+		info!("* Pass database token without specifying namespace or database");
+		{
+			let args = format!("sql --conn http://{addr} --token {token_db}");
+			let output = common::run(&args).input("INFO FOR DB;\n").output().expect("success");
+			assert!(
+				output.contains("tables: {"),
+				"namespace and database to use should be selected from token: {output}"
+			);
+		}
+
+		info!("* Pass record user token and access database info");
+		{
+			let args =
+				format!("sql --conn http://{addr} --db {db} --ns {ns} --token {token_record}");
+			let output = common::run(&args)
+				.input(format!("USE NS `{ns}` DB `{db}`; INFO FOR DB;\n").as_str())
+				.output()
+				.expect("success");
+			assert!(
+				output.contains("tables: {"),
+				"database token should be able to access database info: {output}"
+			);
+		}
+
+		info!("* Pass namespace token without specifying namespace");
+		{
+			let args = format!("sql --conn http://{addr} --token {token_ns}");
+			let output = common::run(&args)
+				.input(format!("USE NS `{ns}` DB `{db}`; INFO FOR NS;\n").as_str())
+				.output()
+				.expect("success");
+			assert!(
+				output.contains("databases: {"),
+				"namespace should be selected from token: {output}"
+			);
+		}
+
+		info!("* Pass database token without specifying database");
+		{
+			let args = format!("sql --conn http://{addr} --ns {ns} --token {token_db}");
+			let output = common::run(&args)
+				.input(format!("USE NS `{ns}` DB `{db}`; INFO FOR DB;\n").as_str())
+				.output()
+				.expect("success");
+			assert!(
+				output.contains("tables: {"),
+				"database should be selected from token: {output}"
+			);
+		}
+
+		info!("* Pass token at the same time as credentials");
+		{
+			let args = format!(
+				"sql --conn http://{addr} --ns {ns} --token {token_db} -u {USER} -p {PASS}"
+			);
+			let output = common::run(&args)
+				.input(format!("USE NS `{ns}` DB `{db}`; INFO FOR DB;\n").as_str())
+				.output();
+			assert!(
+				output
+					.clone()
+					.unwrap_err()
+					.contains("error: the argument '--token <TOKEN>' cannot be used with"),
+				"the token argument should not be compatible with credentials: {:?}",
 				output
 			);
 		}
+
+		info!("* Pass token at the same time as different auth level");
+		{
+			let args = format!(
+				"sql --conn http://{addr} --ns {ns} --token {token_db} --auth-level namespace"
+			);
+			let output = common::run(&args)
+				.input(format!("USE NS `{ns}` DB `{db}`; INFO FOR DB;\n").as_str())
+				.output();
+			assert!(
+				output
+					.clone()
+					.unwrap_err()
+					.contains("error: the argument '--token <TOKEN>' cannot be used with"),
+				"the token argument should not be compatible with authentication level: {:?}",
+				output
+			);
+		}
+
 		server.finish().unwrap();
 	}
 
@@ -500,7 +830,7 @@ mod cli_integration {
 			let args = format!("{sql_args} {creds}");
 			let input = "";
 			let output = common::run(&args).input(input).output();
-			assert!(output.is_ok(), "anonymous user should be able to query: {:?}", output);
+			assert!(output.is_ok(), "anonymous user should be able to query: {output:?}");
 		}
 
 		info!("* Query over WS");
@@ -508,7 +838,7 @@ mod cli_integration {
 			let args = format!("sql --conn ws://{addr} --multi --pretty {creds}");
 			let input = "";
 			let output = common::run(&args).input(input).output();
-			assert!(output.is_ok(), "anonymous user should be able to query: {:?}", output);
+			assert!(output.is_ok(), "anonymous user should be able to query: {output:?}");
 		}
 
 		info!("* Can't do exports");
@@ -520,8 +850,7 @@ mod cli_integration {
 			let output = common::run(&args).output();
 			assert!(
 				output.clone().unwrap_err().contains("Forbidden"),
-				"anonymous user shouldn't be able to export: {:?}",
-				output
+				"anonymous user shouldn't be able to export: {output:?}"
 			);
 		}
 
@@ -536,8 +865,7 @@ mod cli_integration {
 			let output = common::run(&args).output();
 			assert!(
 				output.clone().unwrap_err().contains("Forbidden"),
-				"anonymous user shouldn't be able to import: {:?}",
-				output
+				"anonymous user shouldn't be able to import: {output:?}"
 			);
 		}
 		server.finish().unwrap();
@@ -696,7 +1024,7 @@ mod cli_integration {
 
 		const WRONG_GLOB_PATTERN: &str = "**/*{.txt";
 
-		let args = format!("validate \"{}\"", WRONG_GLOB_PATTERN);
+		let args = format!("validate \"{WRONG_GLOB_PATTERN}\"");
 
 		assert!(common::run_in_dir(&args, &temp_dir).output().is_err());
 	}
@@ -772,10 +1100,7 @@ mod cli_integration {
 			tokio::time::timeout(time::Duration::from_secs(10), async {
 				loop {
 					if let Ok(Some(exit)) = server.status() {
-						panic!(
-							"Server unexpectedly exited after receiving first SIGINT: {:?}",
-							exit
-						);
+						panic!("Server unexpectedly exited after receiving first SIGINT: {exit:?}");
 					}
 					tokio::time::sleep(time::Duration::from_millis(100)).await;
 				}
@@ -858,7 +1183,7 @@ mod cli_integration {
 				throwaway = Ulid::new()
 			);
 
-			let query = format!("RETURN http::get('http://{}/version');\n\n", addr);
+			let query = format!("RETURN http::get('http://{addr}/version');\n\n");
 			let output = common::run(&cmd).input(&query).output().unwrap();
 			assert!(
 				output.contains("Function 'http::get' is not allowed"),
@@ -890,7 +1215,7 @@ mod cli_integration {
 				throwaway = Ulid::new()
 			);
 
-			let query = format!("RETURN http::get('http://{}/version');\n\n", addr);
+			let query = format!("RETURN http::get('http://{addr}/version');\n\n");
 			let output = common::run(&cmd).input(&query).output().unwrap();
 			assert!(output.contains("['surrealdb-"), "unexpected output: {output:?}");
 
@@ -939,7 +1264,7 @@ mod cli_integration {
 				throwaway = Ulid::new()
 			);
 
-			let query = format!("RETURN http::get('http://{}/version');\n\n", addr);
+			let query = format!("RETURN http::get('http://{addr}/version');\n\n");
 			let output = common::run(&cmd).input(&query).output().unwrap();
 			assert!(
 				output.contains(
@@ -966,7 +1291,7 @@ mod cli_integration {
 				throwaway = Ulid::new()
 			);
 
-			let query = format!("RETURN http::get('http://{}/version');\n\n", addr);
+			let query = format!("RETURN http::get('http://{addr}/version');\n\n");
 			let output = common::run(&cmd).input(&query).output().unwrap();
 			assert!(output.contains("['surrealdb-"), "unexpected output: {output:?}");
 			server.finish().unwrap();
@@ -1080,7 +1405,7 @@ mod cli_integration {
 					panic!("Should not be ok!");
 				}
 				Err(e) => {
-					assert_eq!(e.to_string(), "server failed to start", "{:?}", e);
+					assert_eq!(e.to_string(), "server failed to start", "{e:?}");
 				}
 			}
 		}
@@ -1102,13 +1427,14 @@ mod cli_integration {
 					panic!("Should not be ok!");
 				}
 				Err(e) => {
-					assert_eq!(e.to_string(), "server failed to start", "{:?}", e);
+					assert_eq!(e.to_string(), "server failed to start", "{e:?}");
 				}
 			}
 			temp_file.close().unwrap();
 		}
 
 		info!("* The path is a valid directory");
+		#[cfg(feature = "storage-surrealkv")]
 		{
 			let path = format!("surrealkv:{}", tempfile::tempdir().unwrap().path().display());
 			let temp_dir = tempfile::tempdir().unwrap();

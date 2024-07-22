@@ -5,7 +5,7 @@ use crate::err::Error;
 use crate::iam::{Action, ResourceKind};
 use crate::sql::statements::info::InfoStructure;
 use crate::sql::{
-	escape::quote_str, fmt::Fmt, user::UserDuration, Base, Duration, Ident, Object, Strand, Value,
+	escape::quote_str, fmt::Fmt, user::UserDuration, Base, Duration, Ident, Strand, Value,
 };
 use argon2::{
 	password_hash::{PasswordHasher, SaltString},
@@ -105,15 +105,13 @@ impl DefineUserStatement {
 	) -> Result<Value, Error> {
 		// Allowed to run?
 		opt.is_allowed(Action::Edit, ResourceKind::Actor, &self.base)?;
-
+		// Check the statement type
 		match self.base {
 			Base::Root => {
-				// Claim transaction
-				let mut run = ctx.tx_lock().await;
-				// Clear the cache
-				run.clear_cache();
-				// Check if user already exists
-				if run.get_root_user(&self.name).await.is_ok() {
+				// Fetch the transaction
+				let txn = ctx.tx();
+				// Check if the definition exists
+				if txn.get_root_user(&self.name).await.is_ok() {
 					if self.if_not_exists {
 						return Ok(Value::None);
 					} else {
@@ -124,25 +122,25 @@ impl DefineUserStatement {
 				}
 				// Process the statement
 				let key = crate::key::root::us::new(&self.name);
-				run.set(
+				txn.set(
 					key,
 					DefineUserStatement {
-						// Don't persist the "IF NOT EXISTS" clause to schema
+						// Don't persist the `IF NOT EXISTS` clause to schema
 						if_not_exists: false,
 						..self.clone()
 					},
 				)
 				.await?;
+				// Clear the cache
+				txn.clear();
 				// Ok all good
 				Ok(Value::None)
 			}
 			Base::Ns => {
-				// Claim transaction
-				let mut run = ctx.tx_lock().await;
-				// Clear the cache
-				run.clear_cache();
-				// Check if user already exists
-				if run.get_ns_user(opt.ns()?, &self.name).await.is_ok() {
+				// Fetch the transaction
+				let txn = ctx.tx();
+				// Check if the definition exists
+				if txn.get_ns_user(opt.ns()?, &self.name).await.is_ok() {
 					if self.if_not_exists {
 						return Ok(Value::None);
 					} else {
@@ -154,26 +152,26 @@ impl DefineUserStatement {
 				}
 				// Process the statement
 				let key = crate::key::namespace::us::new(opt.ns()?, &self.name);
-				run.add_ns(opt.ns()?, opt.strict).await?;
-				run.set(
+				txn.get_or_add_ns(opt.ns()?, opt.strict).await?;
+				txn.set(
 					key,
 					DefineUserStatement {
-						// Don't persist the "IF NOT EXISTS" clause to schema
+						// Don't persist the `IF NOT EXISTS` clause to schema
 						if_not_exists: false,
 						..self.clone()
 					},
 				)
 				.await?;
+				// Clear the cache
+				txn.clear();
 				// Ok all good
 				Ok(Value::None)
 			}
 			Base::Db => {
-				// Claim transaction
-				let mut run = ctx.tx_lock().await;
-				// Clear the cache
-				run.clear_cache();
-				// Check if user already exists
-				if run.get_db_user(opt.ns()?, opt.db()?, &self.name).await.is_ok() {
+				// Fetch the transaction
+				let txn = ctx.tx();
+				// Check if the definition exists
+				if txn.get_db_user(opt.ns()?, opt.db()?, &self.name).await.is_ok() {
 					if self.if_not_exists {
 						return Ok(Value::None);
 					} else {
@@ -186,17 +184,19 @@ impl DefineUserStatement {
 				}
 				// Process the statement
 				let key = crate::key::database::us::new(opt.ns()?, opt.db()?, &self.name);
-				run.add_ns(opt.ns()?, opt.strict).await?;
-				run.add_db(opt.ns()?, opt.db()?, opt.strict).await?;
-				run.set(
+				txn.get_or_add_ns(opt.ns()?, opt.strict).await?;
+				txn.get_or_add_db(opt.ns()?, opt.db()?, opt.strict).await?;
+				txn.set(
 					key,
 					DefineUserStatement {
-						// Don't persist the "IF NOT EXISTS" clause to schema
+						// Don't persist the `IF NOT EXISTS` clause to schema
 						if_not_exists: false,
 						..self.clone()
 					},
 				)
 				.await?;
+				// Clear the cache
+				txn.clear();
 				// Ok all good
 				Ok(Value::None)
 			}
@@ -251,37 +251,16 @@ impl Display for DefineUserStatement {
 
 impl InfoStructure for DefineUserStatement {
 	fn structure(self) -> Value {
-		let Self {
-			name,
-			base,
-			hash,
-			roles,
-			duration,
-			comment,
-			..
-		} = self;
-		let mut acc = Object::default();
-
-		acc.insert("name".to_string(), name.structure());
-
-		acc.insert("base".to_string(), base.structure());
-
-		acc.insert("passhash".to_string(), hash.into());
-
-		acc.insert(
-			"roles".to_string(),
-			Value::Array(roles.into_iter().map(|r| r.structure()).collect()),
-		);
-
-		let mut dur = Object::default();
-		dur.insert("token".to_string(), duration.token.into());
-		dur.insert("session".to_string(), duration.session.into());
-		acc.insert("duration".to_string(), dur.to_string().into());
-
-		if let Some(comment) = comment {
-			acc.insert("comment".to_string(), comment.into());
-		}
-
-		Value::Object(acc)
+		Value::from(map! {
+			"name".to_string() => self.name.structure(),
+			"base".to_string() => self.base.structure(),
+			"hash".to_string() => self.hash.into(),
+			"roles".to_string() => self.roles.into_iter().map(Ident::structure).collect(),
+			"duration".to_string() => Value::from(map! {
+				"token".to_string() => self.duration.token.into(),
+				"session".to_string() => self.duration.session.into(),
+			}),
+			"comment".to_string(), if let Some(v) = self.comment => v.into(),
+		})
 	}
 }

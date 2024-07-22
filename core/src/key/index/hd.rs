@@ -1,7 +1,5 @@
 //! Stores the DocIds -> Thing of an HNSW index
 use crate::idx::docids::DocId;
-use crate::key::error::KeyCategory;
-use crate::key::key_req::KeyRequirements;
 use derive::Key;
 use serde::{Deserialize, Serialize};
 
@@ -21,12 +19,6 @@ pub struct Hd<'a> {
 	_f: u8,
 	_g: u8,
 	pub doc_id: Option<DocId>,
-}
-
-impl KeyRequirements for Hd<'_> {
-	fn key_category(&self) -> KeyCategory {
-		KeyCategory::IndexHnswElements
-	}
 }
 
 impl<'a> Hd<'a> {

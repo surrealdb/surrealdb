@@ -405,7 +405,7 @@ fn parse_define_token_on_scope() {
 		}
 	);
 	assert_eq!(stmt.comment, Some(Strand("bar".to_string())));
-	assert_eq!(stmt.if_not_exists, false);
+	assert!(!stmt.if_not_exists);
 	match stmt.kind {
 		AccessType::Record(ac) => {
 			assert_eq!(ac.signup, None);
@@ -480,7 +480,7 @@ fn parse_define_token_jwks_on_scope() {
 		}
 	);
 	assert_eq!(stmt.comment, Some(Strand("bar".to_string())));
-	assert_eq!(stmt.if_not_exists, false);
+	assert!(!stmt.if_not_exists);
 	match stmt.kind {
 		AccessType::Record(ac) => {
 			assert_eq!(ac.signup, None);
@@ -523,7 +523,7 @@ fn parse_define_scope() {
 			session: Some(Duration::from_secs(1)),
 		}
 	);
-	assert_eq!(stmt.if_not_exists, false);
+	assert!(!stmt.if_not_exists);
 	match stmt.kind {
 		AccessType::Record(ac) => {
 			assert_eq!(ac.signup, Some(Value::Bool(true)));
@@ -756,6 +756,66 @@ fn parse_define_access_jwt_key() {
 			res
 		);
 	}
+	// With comment. Asymmetric verify only. On namespace level.
+	{
+		let res = test_parse!(
+			parse_stmt,
+			r#"DEFINE ACCESS a ON NAMESPACE TYPE JWT ALGORITHM EDDSA KEY "foo" COMMENT "bar""#
+		)
+		.unwrap();
+		assert_eq!(
+			res,
+			Statement::Define(DefineStatement::Access(DefineAccessStatement {
+				name: Ident("a".to_string()),
+				base: Base::Ns,
+				kind: AccessType::Jwt(JwtAccess {
+					verify: JwtAccessVerify::Key(JwtAccessVerifyKey {
+						alg: Algorithm::EdDSA,
+						key: "foo".to_string(),
+					}),
+					issue: None,
+				}),
+				// Default durations.
+				duration: AccessDuration {
+					grant: None,
+					token: Some(Duration::from_hours(1)),
+					session: None,
+				},
+				comment: Some(Strand("bar".to_string())),
+				if_not_exists: false,
+			})),
+		)
+	}
+	// With comment. Asymmetric verify only. On root level.
+	{
+		let res = test_parse!(
+			parse_stmt,
+			r#"DEFINE ACCESS a ON ROOT TYPE JWT ALGORITHM EDDSA KEY "foo" COMMENT "bar""#
+		)
+		.unwrap();
+		assert_eq!(
+			res,
+			Statement::Define(DefineStatement::Access(DefineAccessStatement {
+				name: Ident("a".to_string()),
+				base: Base::Root,
+				kind: AccessType::Jwt(JwtAccess {
+					verify: JwtAccessVerify::Key(JwtAccessVerifyKey {
+						alg: Algorithm::EdDSA,
+						key: "foo".to_string(),
+					}),
+					issue: None,
+				}),
+				// Default durations.
+				duration: AccessDuration {
+					grant: None,
+					token: Some(Duration::from_hours(1)),
+					session: None,
+				},
+				comment: Some(Strand("bar".to_string())),
+				if_not_exists: false,
+			})),
+		)
+	}
 }
 
 #[test]
@@ -942,7 +1002,7 @@ fn parse_define_access_record() {
 			}
 		);
 		assert_eq!(stmt.comment, Some(Strand("bar".to_string())));
-		assert_eq!(stmt.if_not_exists, false);
+		assert!(!stmt.if_not_exists);
 		match stmt.kind {
 			AccessType::Record(ac) => {
 				assert_eq!(ac.signup, None);
@@ -963,11 +1023,11 @@ fn parse_define_access_record() {
 			_ => panic!(),
 		}
 	}
-	// Session duration and signing queries are explicitly defined.
+	// Session duration, signing and authentication queries are explicitly defined.
 	{
 		let res = test_parse!(
 			parse_stmt,
-			r#"DEFINE ACCESS a ON DB TYPE RECORD SIGNUP true SIGNIN false DURATION FOR SESSION 7d"#
+			r#"DEFINE ACCESS a ON DB TYPE RECORD SIGNUP true SIGNIN false AUTHENTICATE true DURATION FOR SESSION 7d"#
 		)
 		.unwrap();
 
@@ -988,11 +1048,12 @@ fn parse_define_access_record() {
 			}
 		);
 		assert_eq!(stmt.comment, None);
-		assert_eq!(stmt.if_not_exists, false);
+		assert!(!stmt.if_not_exists);
 		match stmt.kind {
 			AccessType::Record(ac) => {
 				assert_eq!(ac.signup, Some(Value::Bool(true)));
 				assert_eq!(ac.signin, Some(Value::Bool(false)));
+				assert_eq!(ac.authenticate, Some(Value::Bool(true)));
 				match ac.jwt.verify {
 					JwtAccessVerify::Key(key) => {
 						assert_eq!(key.alg, Algorithm::Hs512);
@@ -1024,6 +1085,7 @@ fn parse_define_access_record() {
 				kind: AccessType::Record(RecordAccess {
 					signup: None,
 					signin: None,
+					authenticate: None,
 					jwt: JwtAccess {
 						verify: JwtAccessVerify::Key(JwtAccessVerifyKey {
 							alg: Algorithm::Hs384,
@@ -1061,6 +1123,7 @@ fn parse_define_access_record() {
 				kind: AccessType::Record(RecordAccess {
 					signup: None,
 					signin: None,
+					authenticate: None,
 					jwt: JwtAccess {
 						verify: JwtAccessVerify::Key(JwtAccessVerifyKey {
 							alg: Algorithm::Ps512,
@@ -1097,6 +1160,7 @@ fn parse_define_access_record() {
 				kind: AccessType::Record(RecordAccess {
 					signup: None,
 					signin: None,
+					authenticate: None,
 					jwt: JwtAccess {
 						verify: JwtAccessVerify::Key(JwtAccessVerifyKey {
 							alg: Algorithm::Rs256,
@@ -1128,6 +1192,28 @@ fn parse_define_access_record() {
 			res
 		);
 	}
+	// Attempt to define record access at the root level.
+	{
+		let res = test_parse!(
+			parse_stmt,
+			r#"DEFINE ACCESS a ON ROOT TYPE RECORD DURATION FOR TOKEN NONE"#
+		);
+		assert!(
+			res.is_err(),
+			"Unexpected successful parsing of record access at root level: {:?}",
+			res
+		);
+	}
+	// Attempt to define record access at the namespace level.
+	{
+		let res =
+			test_parse!(parse_stmt, r#"DEFINE ACCESS a ON NS TYPE RECORD DURATION FOR TOKEN NONE"#);
+		assert!(
+			res.is_err(),
+			"Unexpected successful parsing of record access at namespace level: {:?}",
+			res
+		);
+	}
 }
 
 #[test]
@@ -1145,6 +1231,7 @@ fn parse_define_access_record_with_jwt() {
 			kind: AccessType::Record(RecordAccess {
 				signup: None,
 				signin: None,
+				authenticate: None,
 				jwt: JwtAccess {
 					verify: JwtAccessVerify::Key(JwtAccessVerifyKey {
 						alg: Algorithm::EdDSA,
@@ -1684,7 +1771,10 @@ SELECT bar as foo,[1,2],bar OMIT bar FROM ONLY a,1
 			start: Some(Start(Value::Object(Object(
 				[("a".to_owned(), Value::Bool(true))].into_iter().collect()
 			)))),
-			fetch: Some(Fetchs(vec![Fetch(Idiom(vec![Part::Field(Ident("foo".to_owned()))]))])),
+			fetch: Some(Fetchs(vec![Fetch(
+				Idiom(vec![]),
+				Value::Idiom(Idiom(vec![Part::Field(Ident("foo".to_owned()))]))
+			)])),
 			version: Some(Version(Datetime(expected_datetime))),
 			timeout: None,
 			parallel: false,
@@ -1946,11 +2036,14 @@ fn parse_live() {
 	assert_eq!(
 		stmt.fetch,
 		Some(Fetchs(vec![
-			Fetch(Idiom(vec![
-				Part::Field(Ident("a".to_owned())),
-				Part::Where(Value::Idiom(Idiom(vec![Part::Field(Ident("foo".to_owned()))]))),
-			])),
-			Fetch(Idiom(vec![Part::Field(Ident("b".to_owned()))])),
+			Fetch(
+				Idiom(vec![]),
+				Value::Idiom(Idiom(vec![
+					Part::Field(Ident("a".to_owned())),
+					Part::Where(Value::Idiom(Idiom(vec![Part::Field(Ident("foo".to_owned()))]))),
+				]))
+			),
+			Fetch(Idiom(vec![]), Value::Idiom(Idiom(vec![Part::Field(Ident("b".to_owned()))]))),
 		])),
 	)
 }
@@ -1974,9 +2067,10 @@ fn parse_return() {
 		res,
 		Statement::Output(OutputStatement {
 			what: Value::Idiom(Idiom(vec![Part::Field(Ident("RETRUN".to_owned()))])),
-			fetch: Some(Fetchs(vec![Fetch(Idiom(vec![Part::Field(
-				Ident("RETURN".to_owned()).to_owned()
-			)]))])),
+			fetch: Some(Fetchs(vec![Fetch(
+				Idiom(vec![]),
+				Value::Idiom(Idiom(vec![Part::Field(Ident("RETURN".to_owned()).to_owned())]))
+			)])),
 		}),
 	)
 }
