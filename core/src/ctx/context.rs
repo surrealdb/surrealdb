@@ -302,7 +302,7 @@ impl<'a> Context<'a> {
 		}
 
 		// Check the parent context, if any exists.
-		if let Some(ref ctx) = self.parent {
+		if let Some(ctx) = self.parent {
 			return ctx.done();
 		}
 
