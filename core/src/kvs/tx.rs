@@ -49,7 +49,11 @@ impl Transaction {
 	pub fn new(tx: Transactor) -> Transaction {
 		Transaction {
 			tx: Mutex::new(tx),
-			cache: Cache::with_weighter(*TRANSACTION_CACHE_SIZE, 10_000, EntryWeighter),
+			cache: Cache::with_weighter(
+				*TRANSACTION_CACHE_SIZE,
+				*TRANSACTION_CACHE_SIZE as u64,
+				EntryWeighter,
+			),
 		}
 	}
 
