@@ -23,9 +23,11 @@ use std::task::Poll;
 /// A database export future
 #[derive(Debug)]
 #[must_use = "futures do nothing unless you `.await` or poll them"]
+#[cfg_attr(docsrs, doc(cfg(not(target_arch = "wasm32"))))]
 pub struct Export<'r, C: Connection, R, T = ()> {
 	pub(super) client: Cow<'r, Surreal<C>>,
 	pub(super) target: R,
+	#[cfg(feature = "ml")]
 	pub(super) ml_config: Option<MlExportConfig>,
 	pub(super) response: PhantomData<R>,
 	pub(super) export_type: PhantomData<T>,
@@ -36,6 +38,8 @@ where
 	C: Connection,
 {
 	/// Export machine learning model
+	#[cfg(feature = "ml")]
+	#[cfg_attr(docsrs, doc(cfg(all(not(target_arch = "wasm32"), feature = "ml"))))]
 	pub fn ml(self, name: &str, version: Version) -> Export<'r, C, R, Model> {
 		Export {
 			client: self.client,
@@ -77,18 +81,21 @@ where
 				return Err(Error::BackupsNotSupported.into());
 			}
 
-			let cmd = if let Some(config) = self.ml_config {
-				Command::ExportMl {
-					path: self.target,
-					config,
-				}
-			} else {
-				Command::ExportFile {
-					path: self.target,
-				}
-			};
+			#[cfg(feature = "ml")]
+			if let Some(config) = self.ml_config {
+				return router
+					.execute_unit(Command::ExportMl {
+						path: self.target,
+						config,
+					})
+					.await;
+			}
 
-			router.execute_unit(cmd).await
+			router
+				.execute_unit(Command::ExportFile {
+					path: self.target,
+				})
+				.await
 		})
 	}
 }
@@ -108,18 +115,25 @@ where
 			}
 			let (tx, rx) = crate::channel::bounded(1);
 
-			let cmd = if let Some(config) = self.ml_config {
-				Command::ExportBytesMl {
-					bytes: tx,
-					config,
-				}
-			} else {
-				Command::ExportBytes {
-					bytes: tx,
-				}
-			};
+			#[cfg(feature = "ml")]
+			if let Some(config) = self.ml_config {
+				router
+					.execute_unit(Command::ExportBytesMl {
+						bytes: tx,
+						config,
+					})
+					.await?;
+				return Ok(Backup {
+					rx,
+				});
+			}
 
-			router.execute_unit(cmd).await?;
+			router
+				.execute_unit(Command::ExportBytes {
+					bytes: tx,
+				})
+				.await?;
+
 			Ok(Backup {
 				rx,
 			})

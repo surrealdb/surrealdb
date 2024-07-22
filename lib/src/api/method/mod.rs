@@ -1,4 +1,26 @@
 //! Methods to use when interacting with a SurrealDB instance
+use crate::api::err::Error;
+use crate::api::opt;
+use crate::api::opt::auth;
+use crate::api::opt::auth::Credentials;
+use crate::api::opt::auth::Jwt;
+use crate::api::opt::IntoEndpoint;
+use crate::api::Connect;
+use crate::api::Connection;
+use crate::api::OnceLockExt;
+use crate::api::Surreal;
+use crate::opt::IntoExportDestination;
+use crate::opt::WaitFor;
+use crate::sql::to_value;
+use crate::sql::Value;
+use serde::Serialize;
+use std::borrow::Cow;
+use std::marker::PhantomData;
+use std::path::Path;
+use std::pin::Pin;
+use std::sync::Arc;
+use std::sync::OnceLock;
+use std::time::Duration;
 
 pub(crate) mod live;
 pub(crate) mod query;
@@ -10,9 +32,7 @@ mod commit;
 mod content;
 mod create;
 mod delete;
-mod export;
 mod health;
-mod import;
 mod insert;
 mod invalidate;
 mod merge;
@@ -44,10 +64,8 @@ pub use content::Content;
 pub use create::Create;
 pub use delete::Delete;
 pub use export::Backup;
-pub use export::Export;
 use futures::Future;
 pub use health::Health;
-pub use import::Import;
 pub use insert::Insert;
 pub use invalidate::Invalidate;
 pub use live::Stream;
@@ -67,28 +85,15 @@ pub use use_db::UseDb;
 pub use use_ns::UseNs;
 pub use version::Version;
 
-use crate::api::err::Error;
-use crate::api::opt;
-use crate::api::opt::auth;
-use crate::api::opt::auth::Credentials;
-use crate::api::opt::auth::Jwt;
-use crate::api::opt::IntoEndpoint;
-use crate::api::Connect;
-use crate::api::Connection;
-use crate::api::OnceLockExt;
-use crate::api::Surreal;
-use crate::opt::IntoExportDestination;
-use crate::opt::WaitFor;
-use crate::sql::to_value;
-use crate::sql::Value;
-use serde::Serialize;
-use std::borrow::Cow;
-use std::marker::PhantomData;
-use std::path::Path;
-use std::pin::Pin;
-use std::sync::Arc;
-use std::sync::OnceLock;
-use std::time::Duration;
+#[cfg(not(target_arch = "wasm32"))]
+mod export;
+#[cfg(not(target_arch = "wasm32"))]
+pub use export::Export;
+
+#[cfg(not(target_arch = "wasm32"))]
+mod import;
+#[cfg(not(target_arch = "wasm32"))]
+pub use import::Import;
 
 use self::query::ValidQuery;
 
@@ -1311,10 +1316,13 @@ where
 	/// # Ok(())
 	/// # }
 	/// ```
+	#[cfg(not(target_arch = "wasm32"))]
+	#[cfg_attr(docsrs, doc(cfg(not(target_arch = "wasm32"))))]
 	pub fn export<R>(&self, target: impl IntoExportDestination<R>) -> Export<C, R> {
 		Export {
 			client: Cow::Borrowed(self),
 			target: target.into_export_destination(),
+			#[cfg(feature = "ml")]
 			ml_config: None,
 			response: PhantomData,
 			export_type: PhantomData,
@@ -1340,6 +1348,8 @@ where
 	/// # Ok(())
 	/// # }
 	/// ```
+	#[cfg(not(target_arch = "wasm32"))]
+	#[cfg_attr(docsrs, doc(cfg(not(target_arch = "wasm32"))))]
 	pub fn import<P>(&self, file: P) -> Import<C>
 	where
 		P: AsRef<Path>,
@@ -1347,6 +1357,7 @@ where
 		Import {
 			client: Cow::Borrowed(self),
 			file: file.as_ref().to_owned(),
+			#[cfg(feature = "ml")]
 			is_ml: false,
 			import_type: PhantomData,
 		}
