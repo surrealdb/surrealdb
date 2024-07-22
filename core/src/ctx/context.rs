@@ -310,7 +310,7 @@ impl<'a> Context<'a> {
 	}
 
 	/// Check if the context is ok to continue.
-	pub fn is_ok(&self) -> bool {
+	pub fn is_not_done(&self) -> bool {
 		self.done().is_none()
 	}
 
