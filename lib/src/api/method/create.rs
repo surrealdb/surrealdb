@@ -1,4 +1,4 @@
-use crate::api::conn::{Command, Method};
+use crate::api::conn::Command;
 use crate::api::method::BoxFuture;
 use crate::api::opt::Resource;
 use crate::api::Connection;
@@ -11,6 +11,9 @@ use serde::Serialize;
 use std::borrow::Cow;
 use std::future::IntoFuture;
 use std::marker::PhantomData;
+use surrealdb_core::sql::to_value;
+
+use super::Content;
 
 /// A record create future
 #[derive(Debug)]
@@ -91,17 +94,22 @@ where
 	C: Connection,
 {
 	/// Sets content of a record
-	pub fn content<D>(self, data: D) -> Content<'r, C, D, R>
+	pub fn content<D>(self, data: D) -> Content<'r, C, R>
 	where
 		D: Serialize,
 	{
-		Content {
-			client: self.client,
-			method: Method::Create,
-			resource: self.resource,
-			range: None,
-			content: data,
-			response_type: PhantomData,
-		}
+		Content::from_closure(self.client, || {
+			let content = to_value(data)?;
+
+			let data = match content {
+				Value::None | Value::Null => None,
+				content => Some(content),
+			};
+
+			Ok(Command::Create {
+				what: self.resource?.into(),
+				data,
+			})
+		})
 	}
 }

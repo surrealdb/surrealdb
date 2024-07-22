@@ -1,7 +1,6 @@
-use super::HandleResult;
-use super::{deserialize, serialize, PendingRequest};
-use super::{RequestEffect, PATH};
-use crate::api::conn::Method;
+use super::{
+	deserialize, serialize, HandleResult, PendingRequest, ReplayMethod, RequestEffect, PATH,
+};
 use crate::api::conn::Route;
 use crate::api::conn::Router;
 use crate::api::conn::{Command, DbResponse};
@@ -160,7 +159,7 @@ async fn router_handle_route(
 	let entry = state.pending_requests.entry(id);
 	let Entry::Vacant(entry) = entry else {
 		let error = Error::DuplicateRequestId(id);
-		if response.into_send_async(Err(error.into())).await.is_err() {
+		if response.send(Err(error.into())).await.is_err() {
 			trace!("Receiver dropped");
 		}
 		return HandleResult::Ok;
@@ -185,13 +184,17 @@ async fn router_handle_route(
 				key: key.clone(),
 			};
 		}
-		Command::Live {
-			ref uuid,
-			ref notification_sender,
+		Command::Insert {
 			..
 		} => {
+			effect = RequestEffect::Insert;
+		}
+		Command::SubscribeLive {
+			ref uuid,
+			ref notification_sender,
+		} => {
 			state.live_queries.insert(*uuid, notification_sender.clone());
-			if response.clone().into_send_async(Ok(DbResponse::Other(Value::None))).await.is_err() {
+			if response.clone().send(Ok(DbResponse::Other(Value::None))).await.is_err() {
 				trace!("Receiver dropped");
 			}
 			// There is nothing to send to the server here
@@ -205,34 +208,34 @@ async fn router_handle_route(
 		Command::Use {
 			..
 		} => {
-			state.replay.insert(Method::Use, command.clone());
+			state.replay.insert(ReplayMethod::Use, command.clone());
 		}
 		Command::Signup {
 			..
 		} => {
-			state.replay.insert(Method::Signup, command.clone());
+			state.replay.insert(ReplayMethod::Signup, command.clone());
 		}
 		Command::Signin {
 			..
 		} => {
-			state.replay.insert(Method::Signin, command.clone());
+			state.replay.insert(ReplayMethod::Signin, command.clone());
 		}
 		Command::Invalidate {
 			..
 		} => {
-			state.replay.insert(Method::Invalidate, command.clone());
+			state.replay.insert(ReplayMethod::Invalidate, command.clone());
 		}
 		Command::Authenticate {
 			..
 		} => {
-			state.replay.insert(Method::Authenticate, command.clone());
+			state.replay.insert(ReplayMethod::Authenticate, command.clone());
 		}
 		_ => {}
 	}
 
 	let message = {
 		let Some(request) = command.into_router_request(Some(id)) else {
-			let _ = response.into_send_async(Err(Error::BackupsNotSupported.into())).await;
+			let _ = response.send(Err(Error::BackupsNotSupported.into())).await;
 			return HandleResult::Ok;
 		};
 		trace!("Request {:?}", request);
@@ -280,17 +283,24 @@ async fn router_handle_response(
 									RequestEffect::Insert => {
 										// For insert, we need to flatten single responses in an array
 										if let Ok(Data::Other(Value::Array(value))) =
-											&mut response.result
+											response.result
 										{
 											if value.len() == 1 {
 												let _ = pending
 													.response_channel
-													.into_send_async(DbResponse::from(Ok(
-														Data::Other(value[0]),
-													)))
+													.send(DbResponse::from(Ok(Data::Other(
+														value.into_iter().next().unwrap(),
+													))))
 													.await;
-												return HandleResult::Ok;
+											} else {
+												let _ = pending
+													.response_channel
+													.send(DbResponse::from(Ok(Data::Other(
+														Value::Array(value),
+													))))
+													.await;
 											}
+											return HandleResult::Ok;
 										}
 									}
 									RequestEffect::Set {
@@ -302,12 +312,12 @@ async fn router_handle_response(
 									RequestEffect::Clear {
 										key,
 									} => {
-										state.vars.remove(&key);
+										state.vars.shift_remove(&key);
 									}
 								}
 								let _res = pending
 									.response_channel
-									.into_send_async(DbResponse::from(response.result))
+									.send(DbResponse::from(response.result))
 									.await;
 							} else {
 								warn!("got response for request with id '{id}', which was not in pending requests")
@@ -365,7 +375,7 @@ async fn router_handle_response(
 					// Return an error if an ID was returned
 					if let Some(Ok(id)) = id.map(Value::coerce_to_i64) {
 						if let Some(pending) = state.pending_requests.remove(&id) {
-							let _res = sender.send(Err(error)).await;
+							let _res = pending.response_channel.send(Err(error)).await;
 						} else {
 							warn!("got response for request with id '{id}', which was not in pending requests")
 						}
@@ -393,8 +403,15 @@ async fn router_reconnect(
 				let (new_sink, new_stream) = s.split();
 				state.sink = new_sink;
 				state.stream = new_stream;
-				for (_, message) in &state.replay {
-					if let Err(error) = state.sink.send(message.clone()).await {
+				for commands in state.replay.values() {
+					let request = commands
+						.clone()
+						.into_router_request(None)
+						.expect("replay commands should always convert to route requests");
+
+					let message = serialize(&request, endpoint.supports_revision).unwrap();
+
+					if let Err(error) = state.sink.send(Message::Binary(message)).await {
 						trace!("{error}");
 						time::sleep(time::Duration::from_secs(1)).await;
 						continue;

@@ -1,5 +1,4 @@
 use crate::api::conn::Command;
-use crate::api::conn::Method;
 use crate::api::method::BoxFuture;
 use crate::api::opt::Range;
 use crate::api::opt::Resource;
@@ -47,13 +46,14 @@ macro_rules! into_future {
 				..
 			} = self;
 			Box::pin(async move {
-				let param = match range {
+				let param: Value = match range {
 					Some(range) => resource?.with_range(range)?.into(),
 					None => resource?.into(),
 				};
+				let router = client.router.extract()?;
 				router
 					.$method(Command::Delete {
-						one: param.is_record_id(),
+						one: param.is_thing(),
 						what: param,
 					})
 					.await

@@ -1,6 +1,4 @@
-use crate::api::conn::Method;
-use crate::api::conn::MlConfig;
-use crate::api::conn::Param;
+use crate::api::conn::Command;
 use crate::api::method::BoxFuture;
 use crate::api::Connection;
 use crate::api::Error;
@@ -20,7 +18,7 @@ use std::path::PathBuf;
 pub struct Import<'r, C: Connection, T = ()> {
 	pub(super) client: Cow<'r, Surreal<C>>,
 	pub(super) file: PathBuf,
-	pub(super) ml_config: Option<MlConfig>,
+	pub(super) is_ml: bool,
 	pub(super) import_type: PhantomData<T>,
 }
 
@@ -33,7 +31,7 @@ where
 		Import {
 			client: self.client,
 			file: self.file,
-			ml_config: Some(MlConfig::Import),
+			is_ml: true,
 			import_type: PhantomData,
 		}
 	}
@@ -65,9 +63,17 @@ where
 			if !router.features.contains(&ExtraFeatures::Backup) {
 				return Err(Error::BackupsNotSupported.into());
 			}
-			let mut param = Param::file(self.file);
-			param.ml_config = self.ml_config;
-			router.execute_unit(Method::Import, param).await
+			let cmd = if self.is_ml {
+				Command::ImportMl {
+					path: self.file,
+				}
+			} else {
+				Command::ImportFile {
+					path: self.file,
+				}
+			};
+
+			router.execute_unit(cmd).await
 		})
 	}
 }

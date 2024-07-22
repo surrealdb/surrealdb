@@ -1,6 +1,5 @@
-use crate::api::conn::Method;
-use crate::api::conn::MlConfig;
-use crate::api::conn::Param;
+use crate::api::conn::Command;
+use crate::api::conn::MlExportConfig;
 use crate::api::method::BoxFuture;
 use crate::api::Connection;
 use crate::api::Error;
@@ -8,7 +7,6 @@ use crate::api::ExtraFeatures;
 use crate::api::Result;
 use crate::method::Model;
 use crate::method::OnceLockExt;
-use crate::opt::ExportDestination;
 use crate::Surreal;
 use channel::Receiver;
 use futures::Stream;
@@ -27,8 +25,8 @@ use std::task::Poll;
 #[must_use = "futures do nothing unless you `.await` or poll them"]
 pub struct Export<'r, C: Connection, R, T = ()> {
 	pub(super) client: Cow<'r, Surreal<C>>,
-	pub(super) target: ExportDestination,
-	pub(super) ml_config: Option<MlConfig>,
+	pub(super) target: R,
+	pub(super) ml_config: Option<MlExportConfig>,
 	pub(super) response: PhantomData<R>,
 	pub(super) export_type: PhantomData<T>,
 }
@@ -42,7 +40,7 @@ where
 		Export {
 			client: self.client,
 			target: self.target,
-			ml_config: Some(MlConfig::Export {
+			ml_config: Some(MlExportConfig {
 				name: name.to_owned(),
 				version: version.to_string(),
 			}),
@@ -78,12 +76,19 @@ where
 			if !router.features.contains(&ExtraFeatures::Backup) {
 				return Err(Error::BackupsNotSupported.into());
 			}
-			let mut param = match self.target {
-				ExportDestination::File(path) => Param::file(path),
-				ExportDestination::Memory => unreachable!(),
+
+			let cmd = if let Some(config) = self.ml_config {
+				Command::ExportMl {
+					path: self.target,
+					config,
+				}
+			} else {
+				Command::ExportFile {
+					path: self.target,
+				}
 			};
-			param.ml_config = self.ml_config;
-			router.execute_unit(Method::Export, param).await
+
+			router.execute_unit(cmd).await
 		})
 	}
 }
@@ -102,12 +107,19 @@ where
 				return Err(Error::BackupsNotSupported.into());
 			}
 			let (tx, rx) = crate::channel::bounded(1);
-			let ExportDestination::Memory = self.target else {
-				unreachable!();
+
+			let cmd = if let Some(config) = self.ml_config {
+				Command::ExportBytesMl {
+					bytes: tx,
+					config,
+				}
+			} else {
+				Command::ExportBytes {
+					bytes: tx,
+				}
 			};
-			let mut param = Param::bytes_sender(tx);
-			param.ml_config = self.ml_config;
-			router.execute_unit(Method::Export, param).await?;
+
+			router.execute_unit(cmd).await?;
 			Ok(Backup {
 				rx,
 			})

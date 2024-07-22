@@ -77,6 +77,8 @@ use surrealdb_core::{
 	sql::statements::{DefineModelStatement, DefineStatement},
 };
 
+use super::value_to_values;
+
 const DEFAULT_TICK_INTERVAL: Duration = Duration::from_secs(10);
 
 /// In-memory database
@@ -434,7 +436,7 @@ async fn export_ml(
 	// Check the permissions level
 	kvs.check(sess, Action::View, ResourceKind::Model.on_db(&nsv, &dbv))?;
 	// Start a new readonly transaction
-	let mut tx = kvs.transaction(TransactionType::Read, LockType::Optimistic).await?;
+	let tx = kvs.transaction(TransactionType::Read, LockType::Optimistic).await?;
 	// Attempt to get the model definition
 	let info = tx.get_db_model(&nsv, &dbv, &name, &version).await?;
 	// Export the file data in to the store
@@ -532,7 +534,7 @@ async fn router(
 			let mut query = Query::default();
 			let statement = {
 				let mut stmt = CreateStatement::default();
-				stmt.what = what;
+				stmt.what = value_to_values(what);
 				stmt.data = data.map(Data::ContentExpression);
 				stmt.output = Some(Output::After);
 				stmt
@@ -550,7 +552,7 @@ async fn router(
 			let mut query = Query::default();
 			let statement = {
 				let mut stmt = UpsertStatement::default();
-				stmt.what = what;
+				stmt.what = value_to_values(what);
 				stmt.data = data.map(Data::ContentExpression);
 				stmt.output = Some(Output::After);
 				stmt
@@ -568,7 +570,7 @@ async fn router(
 			let mut query = Query::default();
 			let statement = {
 				let mut stmt = UpdateStatement::default();
-				stmt.what = what;
+				stmt.what = value_to_values(what);
 				stmt.data = data.map(Data::ContentExpression);
 				stmt.output = Some(Output::After);
 				stmt
@@ -604,7 +606,7 @@ async fn router(
 			let mut query = Query::default();
 			let statement = {
 				let mut stmt = UpdateStatement::default();
-				stmt.what = what;
+				stmt.what = value_to_values(what);
 				stmt.data = data.map(Data::PatchExpression);
 				stmt.output = Some(Output::After);
 				stmt
@@ -622,7 +624,7 @@ async fn router(
 			let mut query = Query::default();
 			let statement = {
 				let mut stmt = UpdateStatement::default();
-				stmt.what = what;
+				stmt.what = value_to_values(what);
 				stmt.data = data.map(Data::MergeExpression);
 				stmt.output = Some(Output::After);
 				stmt
@@ -639,7 +641,7 @@ async fn router(
 			let mut query = Query::default();
 			let statement = {
 				let mut stmt = SelectStatement::default();
-				stmt.what = what;
+				stmt.what = value_to_values(what);
 				stmt.expr.0 = vec![Field::All];
 				stmt
 			};
@@ -655,7 +657,7 @@ async fn router(
 			let mut query = Query::default();
 			let (one, statement) = {
 				let mut stmt = DeleteStatement::default();
-				stmt.what = what;
+				stmt.what = value_to_values(what);
 				stmt.output = Some(Output::Before);
 				(one, stmt)
 			};
@@ -722,7 +724,7 @@ async fn router(
 
 		#[cfg(all(not(target_arch = "wasm32"), feature = "ml"))]
 		Command::ExportMl {
-			path: file,
+			path,
 			config,
 		} => {
 			let (tx, rx) = crate::channel::bounded(1);
@@ -761,7 +763,7 @@ async fn router(
 			};
 
 			// Copy from pipe to output.
-			let copy = copy(file, &mut reader, &mut output);
+			let copy = copy(path, &mut reader, &mut output);
 
 			tokio::try_join!(export, bridge, copy)?;
 			Ok(DbResponse::Other(Value::None))
@@ -941,10 +943,9 @@ async fn router(
 			vars.remove(&key);
 			Ok(DbResponse::Other(Value::None))
 		}
-		Command::Live {
+		Command::SubscribeLive {
 			uuid,
 			notification_sender,
-			..
 		} => {
 			live_queries.insert(uuid.into(), notification_sender);
 			Ok(DbResponse::Other(Value::None))

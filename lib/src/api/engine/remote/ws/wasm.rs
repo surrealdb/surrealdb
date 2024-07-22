@@ -1,7 +1,7 @@
-use super::{deserialize, serialize, PendingRequest, RequestEffect};
-use super::{HandleResult, PATH};
+use super::{
+	deserialize, serialize, HandleResult, PendingRequest, ReplayMethod, RequestEffect, PATH,
+};
 use crate::api::conn::DbResponse;
-use crate::api::conn::Method;
 use crate::api::conn::Route;
 use crate::api::conn::Router;
 use crate::api::conn::{Command, Connection, RequestData};
@@ -130,6 +130,11 @@ async fn router_handle_request(
 				key: key.clone(),
 			};
 		}
+		Command::Insert {
+			..
+		} => {
+			effect = RequestEffect::Insert;
+		}
 		Command::Live {
 			ref uuid,
 			ref notification_sender,
@@ -149,19 +154,19 @@ async fn router_handle_request(
 		}
 		x @ Command::Use {
 			..
-		} => state.replay.insert(Method::Use, x.clone()),
+		} => state.replay.insert(ReplayMethod::Use, x.clone()),
 		x @ Command::Signup {
 			..
-		} => state.replay.insert(Method::Signup, x.clone()),
+		} => state.replay.insert(ReplayMethod::Signup, x.clone()),
 		x @ Command::Signin {
 			..
-		} => state.replay.insert(Method::Signin, x.clone()),
+		} => state.replay.insert(ReplayMethod::Signin, x.clone()),
 		x @ Command::Invalidate {
 			..
-		} => state.replay.insert(Method::Invalidate, x.clone()),
+		} => state.replay.insert(ReplayMethod::Invalidate, x.clone()),
 		x @ Command::Authenticate {
 			..
-		} => state.replay.insert(Method::Authenticate, x.clone()),
+		} => state.replay.insert(ReplayMethod::Authenticate, x.clone()),
 		_ => {}
 	}
 
@@ -249,7 +254,7 @@ async fn router_handle_response(
 									let kill = {
 										let request = RouterRequest {
 											id: None,
-											method: Method::Kill.as_str().into(),
+											method: "kill".into(),
 											params: Some(vec![Value::from(live_query_id)].into()),
 										};
 										let value = serialize(&request, endpoint.supports_revision)
@@ -343,7 +348,7 @@ async fn router_reconnect(
 				for (key, value) in &state.vars {
 					let request = RouterRequest {
 						id: None,
-						method: Method::Set.as_str().into(),
+						method: "set".into(),
 						params: Some(vec![key.as_str().into(), value.clone()].into()),
 					};
 					trace!("Request {:?}", request);

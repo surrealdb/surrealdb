@@ -1,6 +1,5 @@
 use super::Client;
 use crate::api::conn::Connection;
-use crate::api::conn::Method;
 use crate::api::conn::Route;
 use crate::api::conn::Router;
 use crate::api::method::BoxFuture;
@@ -47,7 +46,7 @@ impl Connection for Client {
 
 			let base_url = address.url;
 
-			super::health(client.get(base_url.join(Method::Health.as_str())?)).await?;
+			super::health(client.get(base_url.join("health")?)).await?;
 
 			let (route_tx, route_rx) = match capacity {
 				0 => channel::unbounded(),

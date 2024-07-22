@@ -67,7 +67,7 @@ pub use use_db::UseDb;
 pub use use_ns::UseNs;
 pub use version::Version;
 
-use crate::api::conn::Method;
+use crate::api::err::Error;
 use crate::api::opt;
 use crate::api::opt::auth;
 use crate::api::opt::auth::Credentials;
@@ -112,36 +112,6 @@ pub struct Live;
 /// Responses returned with statistics
 #[derive(Debug)]
 pub struct WithStats<T>(T);
-
-impl Method {
-	#[allow(dead_code)] // used by `ws` and `http`
-	pub(crate) fn as_str(&self) -> &str {
-		match self {
-			Method::Authenticate => "authenticate",
-			Method::Create => "create",
-			Method::Delete => "delete",
-			Method::Export => "export",
-			Method::Health => "health",
-			Method::Import => "import",
-			Method::Invalidate => "invalidate",
-			Method::Insert => "insert",
-			Method::Kill => "kill",
-			Method::Live => "live",
-			Method::Merge => "merge",
-			Method::Patch => "patch",
-			Method::Query => "query",
-			Method::Select => "select",
-			Method::Set => "set",
-			Method::Signin => "signin",
-			Method::Signup => "signup",
-			Method::Unset => "unset",
-			Method::Update => "update",
-			Method::Upsert => "upsert",
-			Method::Use => "use",
-			Method::Version => "version",
-		}
-	}
-}
 
 impl<C> Surreal<C>
 where
@@ -318,7 +288,7 @@ where
 	pub fn use_db(&self, db: impl Into<String>) -> UseDb<C> {
 		UseDb {
 			client: Cow::Borrowed(self),
-			ns: Value::None,
+			ns: None,
 			db: db.into(),
 		}
 	}
@@ -457,7 +427,16 @@ where
 	pub fn signup<R>(&self, credentials: impl Credentials<auth::Signup, R>) -> Signup<C, R> {
 		Signup {
 			client: Cow::Borrowed(self),
-			credentials: to_value(credentials).map_err(Into::into),
+			credentials: to_value(credentials).map_err(Into::into).and_then(|x| {
+				if let Value::Object(x) = x {
+					Ok(x)
+				} else {
+					Err(Error::InternalError(
+						"credentials did not serialize to an object".to_string(),
+					)
+					.into())
+				}
+			}),
 			response_type: PhantomData,
 		}
 	}
@@ -576,7 +555,16 @@ where
 	pub fn signin<R>(&self, credentials: impl Credentials<auth::Signin, R>) -> Signin<C, R> {
 		Signin {
 			client: Cow::Borrowed(self),
-			credentials: to_value(credentials).map_err(Into::into),
+			credentials: to_value(credentials).map_err(Into::into).and_then(|x| {
+				if let Value::Object(x) = x {
+					Ok(x)
+				} else {
+					Err(Error::InternalError(
+						"credentials did not serialize to an object".to_string(),
+					)
+					.into())
+				}
+			}),
 			response_type: PhantomData,
 		}
 	}
@@ -1359,7 +1347,7 @@ where
 		Import {
 			client: Cow::Borrowed(self),
 			file: file.as_ref().to_owned(),
-			ml_config: None,
+			is_ml: false,
 			import_type: PhantomData,
 		}
 	}

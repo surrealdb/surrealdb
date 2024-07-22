@@ -7,7 +7,6 @@ pub(crate) mod wasm;
 
 use crate::api::conn::Command;
 use crate::api::conn::DbResponse;
-use crate::api::conn::Method;
 use crate::api::conn::RequestData;
 use crate::api::engine::remote::duration_from_str;
 use crate::api::err::Error;
@@ -17,6 +16,7 @@ use crate::api::Response as QueryResponse;
 use crate::api::Result;
 use crate::api::Surreal;
 use crate::dbs::Status;
+use crate::engine::value_to_values;
 use crate::headers::AUTH_DB;
 use crate::headers::AUTH_NS;
 use crate::headers::DB;
@@ -386,7 +386,7 @@ async fn router(
 		Command::Signin {
 			credentials,
 		} => {
-			let path = base_url.join(Method::Signin.as_str())?;
+			let path = base_url.join("signin")?;
 			let request =
 				client.post(path).headers(headers.clone()).auth(auth).body(credentials.to_string());
 			let value = submit_auth(request).await?;
@@ -413,7 +413,7 @@ async fn router(
 		Command::Signup {
 			credentials,
 		} => {
-			let path = base_url.join(Method::Signup.as_str())?;
+			let path = base_url.join("signup")?;
 			let request =
 				client.post(path).headers(headers.clone()).auth(auth).body(credentials.to_string());
 			let value = submit_auth(request).await?;
@@ -442,7 +442,7 @@ async fn router(
 			let path = base_url.join(SQL_PATH)?;
 			let statement = {
 				let mut stmt = CreateStatement::default();
-				stmt.what = what;
+				stmt.what = value_to_values(what);
 				stmt.data = data.map(Data::ContentExpression);
 				stmt.output = Some(Output::After);
 				stmt
@@ -460,7 +460,7 @@ async fn router(
 			let path = base_url.join(SQL_PATH)?;
 			let statement = {
 				let mut stmt = UpsertStatement::default();
-				stmt.what = what;
+				stmt.what = value_to_values(what);
 				stmt.data = data.map(Data::ContentExpression);
 				stmt.output = Some(Output::After);
 				stmt
@@ -478,7 +478,7 @@ async fn router(
 			let path = base_url.join(SQL_PATH)?;
 			let statement = {
 				let mut stmt = UpdateStatement::default();
-				stmt.what = what;
+				stmt.what = value_to_values(what);
 				stmt.data = data.map(Data::ContentExpression);
 				stmt.output = Some(Output::After);
 				stmt
@@ -514,7 +514,7 @@ async fn router(
 			let path = base_url.join(SQL_PATH)?;
 			let statement = {
 				let mut stmt = UpdateStatement::default();
-				stmt.what = what;
+				stmt.what = value_to_values(what);
 				stmt.data = data.map(Data::PatchExpression);
 				stmt.output = Some(Output::After);
 				stmt
@@ -532,7 +532,7 @@ async fn router(
 			let path = base_url.join(SQL_PATH)?;
 			let statement = {
 				let mut stmt = UpdateStatement::default();
-				stmt.what = what;
+				stmt.what = value_to_values(what);
 				stmt.data = data.map(Data::MergeExpression);
 				stmt.output = Some(Output::After);
 				stmt
@@ -549,7 +549,7 @@ async fn router(
 			let path = base_url.join(SQL_PATH)?;
 			let statement = {
 				let mut stmt = SelectStatement::default();
-				stmt.what = what;
+				stmt.what = value_to_values(what);
 				stmt.expr.0 = vec![Field::All];
 				stmt
 			};
@@ -565,7 +565,7 @@ async fn router(
 			let path = base_url.join(SQL_PATH)?;
 			let (one, statement) = {
 				let mut stmt = DeleteStatement::default();
-				stmt.what = what;
+				stmt.what = value_to_values(what);
 				stmt.output = Some(Output::Before);
 				(one, stmt)
 			};
@@ -590,7 +590,7 @@ async fn router(
 		Command::ExportFile {
 			path,
 		} => {
-			let req_path = base_url.join(Method::Export.as_str())?;
+			let req_path = base_url.join("export")?;
 			let request = client
 				.get(req_path)
 				.headers(headers.clone())
@@ -603,7 +603,7 @@ async fn router(
 		Command::ExportBytes {
 			bytes,
 		} => {
-			let req_path = base_url.join(Method::Export.as_str())?;
+			let req_path = base_url.join("export")?;
 			let request = client
 				.get(req_path)
 				.headers(headers.clone())
@@ -646,7 +646,7 @@ async fn router(
 		Command::ImportFile {
 			path,
 		} => {
-			let req_path = base_url.join(Method::Import.as_str())?;
+			let req_path = base_url.join("import")?;
 			let request = client
 				.post(req_path)
 				.headers(headers.clone())
@@ -669,13 +669,13 @@ async fn router(
 			Ok(DbResponse::Other(value))
 		}
 		Command::Health => {
-			let path = base_url.join(Method::Health.as_str())?;
+			let path = base_url.join("health")?;
 			let request = client.get(path);
 			let value = health(request).await?;
 			Ok(DbResponse::Other(value))
 		}
 		Command::Version => {
-			let path = base_url.join(Method::Version.as_str())?;
+			let path = base_url.join("version")?;
 			let request = client.get(path);
 			let value = version(request).await?;
 			Ok(DbResponse::Other(value))
@@ -702,20 +702,9 @@ async fn router(
 			vars.remove(&key);
 			Ok(DbResponse::Other(Value::None))
 		}
-		Command::Live {
-			what: table,
+		Command::SubscribeLive {
 			..
-		} => {
-			let path = base_url.join(SQL_PATH)?;
-			let request = client
-				.post(path)
-				.headers(headers.clone())
-				.auth(auth)
-				.query(&[("table", table)])
-				.body("LIVE SELECT * FROM type::table($table)");
-			let value = take(true, request).await?;
-			Ok(DbResponse::Other(value))
-		}
+		} => Err(Error::LiveQueriesNotSupported.into()),
 		Command::Kill {
 			uuid,
 		} => {

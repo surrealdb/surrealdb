@@ -8,7 +8,6 @@ pub(crate) mod wasm;
 use crate::api;
 use crate::api::conn::Command;
 use crate::api::conn::DbResponse;
-use crate::api::conn::Method;
 use crate::api::engine::remote::duration_from_str;
 use crate::api::err::Error;
 use crate::api::method::query::QueryResult;
@@ -21,7 +20,6 @@ use crate::dbs::Status;
 use crate::method::Stats;
 use crate::opt::IntoEndpoint;
 use crate::sql::Value;
-use bincode::Options as _;
 use channel::Sender;
 use indexmap::IndexMap;
 use revision::revisioned;
@@ -56,6 +54,15 @@ enum RequestEffect {
 	None,
 }
 
+#[derive(Clone, Copy, Eq, PartialEq, Hash)]
+enum ReplayMethod {
+	Use,
+	Signup,
+	Signin,
+	Invalidate,
+	Authenticate,
+}
+
 struct PendingRequest {
 	// Does resolving this request has some effects.
 	effect: RequestEffect,
@@ -65,9 +72,9 @@ struct PendingRequest {
 
 struct RouterState<Sink, Stream> {
 	/// Vars currently set by the set method,
-	vars: HashMap<String, Value>,
+	vars: IndexMap<String, Value>,
 	/// Messages which aught to be replayed on a reconnect.
-	replay: IndexMap<Method, Command>,
+	replay: IndexMap<ReplayMethod, Command>,
 	/// Pending live queries
 	live_queries: HashMap<Uuid, channel::Sender<CoreNotification>>,
 	/// Send requests which are still awaiting an awnser.
@@ -243,68 +250,4 @@ where
 	let mut buf = Vec::new();
 	bytes.read_to_end(&mut buf).map_err(crate::err::Error::Io)?;
 	crate::sql::serde::deserialize(&buf).map_err(|error| crate::Error::Db(error.into()))
-}
-
-#[cfg(test)]
-mod test {
-	use std::io::Cursor;
-
-	use revision::Revisioned;
-	use surrealdb_core::sql::Value;
-
-	use super::RouterRequest;
-
-	fn assert_converts<S, D, I>(req: &RouterRequest, s: S, d: D)
-	where
-		S: FnOnce(&RouterRequest) -> I,
-		D: FnOnce(I) -> Value,
-	{
-		let ser = s(req);
-		let val = d(ser);
-		let Value::Object(obj) = val else {
-			panic!("not an object");
-		};
-		assert_eq!(obj.get("id").cloned(), req.id);
-		assert_eq!(obj.get("method").unwrap().clone(), req.method);
-		assert_eq!(obj.get("params").cloned(), req.params);
-	}
-
-	#[test]
-	fn router_request_value_conversion() {
-		let request = RouterRequest {
-			id: Some(Value::from(1234i64)),
-			method: Value::from("request"),
-			params: Some(vec![Value::from(1234i64), Value::from("request")].into()),
-		};
-
-		println!("test convert bincode");
-
-		assert_converts(
-			&request,
-			|i| bincode::serialize(i).unwrap(),
-			|b| bincode::deserialize(&b).unwrap(),
-		);
-
-		println!("test convert json");
-
-		assert_converts(
-			&request,
-			|i| serde_json::to_string(i).unwrap(),
-			|b| serde_json::from_str(&b).unwrap(),
-		);
-
-		println!("test convert revisioned");
-
-		assert_converts(
-			&request,
-			|i| {
-				let mut buf = Vec::new();
-				i.serialize_revisioned(&mut Cursor::new(&mut buf)).unwrap();
-				buf
-			},
-			|b| Value::deserialize_revisioned(&mut Cursor::new(b)).unwrap(),
-		);
-
-		println!("done");
-	}
 }

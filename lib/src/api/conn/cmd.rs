@@ -13,7 +13,7 @@ use uuid::Uuid;
 use super::MlExportConfig;
 
 #[derive(Debug, Clone)]
-pub enum Command {
+pub(crate) enum Command {
 	Use {
 		namespace: Option<String>,
 		database: Option<String>,
@@ -103,8 +103,7 @@ pub enum Command {
 	Unset {
 		key: String,
 	},
-	Live {
-		what: Value,
+	SubscribeLive {
 		uuid: Uuid,
 		notification_sender: Sender<Notification>,
 	},
@@ -114,7 +113,7 @@ pub enum Command {
 }
 
 impl Command {
-	pub fn into_router_request(self, id: Option<i64>) -> Option<RouterRequest> {
+	pub(crate) fn into_router_request(self, id: Option<i64>) -> Option<RouterRequest> {
 		let id = id.map(Value::from);
 		let res = match self {
 			Command::Use {
@@ -155,7 +154,7 @@ impl Command {
 				what,
 				data,
 			} => {
-				let mut params = vec![what.into()];
+				let mut params = vec![what];
 				if let Some(data) = data {
 					params.push(data);
 				}
@@ -312,7 +311,7 @@ impl Command {
 			} => RouterRequest {
 				id,
 				method: "let".into(),
-				params: Some(vec![Value::from(key), Value::from(value)].into()),
+				params: Some(vec![Value::from(key), value].into()),
 			},
 			Command::Unset {
 				key,
@@ -321,14 +320,9 @@ impl Command {
 				method: "unset".into(),
 				params: Some(vec![Value::from(key)].into()),
 			},
-			Command::Live {
-				what,
+			Command::SubscribeLive {
 				..
-			} => RouterRequest {
-				id,
-				method: "live".into(),
-				params: Some(Value::from(vec![what])),
-			},
+			} => return None,
 			Command::Kill {
 				uuid,
 			} => RouterRequest {
@@ -345,7 +339,7 @@ impl Command {
 ///
 /// This struct serializes as if it is a surrealdb_core::sql::Value::Object.
 #[derive(Debug)]
-struct RouterRequest {
+pub(crate) struct RouterRequest {
 	id: Option<Value>,
 	method: Value,
 	params: Option<Value>,
@@ -431,5 +425,69 @@ impl Revisioned for RouterRequest {
 		Self: Sized,
 	{
 		panic!("deliberately unimplemented");
+	}
+}
+
+#[cfg(test)]
+mod test {
+	use std::io::Cursor;
+
+	use revision::Revisioned;
+	use surrealdb_core::sql::Value;
+
+	use super::RouterRequest;
+
+	fn assert_converts<S, D, I>(req: &RouterRequest, s: S, d: D)
+	where
+		S: FnOnce(&RouterRequest) -> I,
+		D: FnOnce(I) -> Value,
+	{
+		let ser = s(req);
+		let val = d(ser);
+		let Value::Object(obj) = val else {
+			panic!("not an object");
+		};
+		assert_eq!(obj.get("id").cloned(), req.id);
+		assert_eq!(obj.get("method").unwrap().clone(), req.method);
+		assert_eq!(obj.get("params").cloned(), req.params);
+	}
+
+	#[test]
+	fn router_request_value_conversion() {
+		let request = RouterRequest {
+			id: Some(Value::from(1234i64)),
+			method: Value::from("request"),
+			params: Some(vec![Value::from(1234i64), Value::from("request")].into()),
+		};
+
+		println!("test convert bincode");
+
+		assert_converts(
+			&request,
+			|i| bincode::serialize(i).unwrap(),
+			|b| bincode::deserialize(&b).unwrap(),
+		);
+
+		println!("test convert json");
+
+		assert_converts(
+			&request,
+			|i| serde_json::to_string(i).unwrap(),
+			|b| serde_json::from_str(&b).unwrap(),
+		);
+
+		println!("test convert revisioned");
+
+		assert_converts(
+			&request,
+			|i| {
+				let mut buf = Vec::new();
+				i.serialize_revisioned(&mut Cursor::new(&mut buf)).unwrap();
+				buf
+			},
+			|b| Value::deserialize_revisioned(&mut Cursor::new(b)).unwrap(),
+		);
+
+		println!("done");
 	}
 }

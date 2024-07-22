@@ -53,7 +53,7 @@ async fn client(base_url: &Url) -> Result<reqwest::Client> {
 	let headers = super::default_headers();
 	let builder = ClientBuilder::new().default_headers(headers);
 	let client = builder.build()?;
-	let health = base_url.join(Method::Health.as_str())?;
+	let health = base_url.join("health")?;
 	super::health(client.get(health)).await?;
 	Ok(client)
 }

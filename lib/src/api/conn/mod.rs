@@ -6,14 +6,9 @@ use crate::api::opt::Endpoint;
 use crate::api::ExtraFeatures;
 use crate::api::Result;
 use crate::api::Surreal;
-use crate::dbs::Notification;
-use crate::sql::from_value;
-use crate::sql::Query;
-use crate::sql::Value;
 use channel::Receiver;
 use channel::Sender;
 use serde::de::DeserializeOwned;
-use serde::Serialize;
 use std::collections::HashSet;
 use std::sync::atomic::AtomicI64;
 use std::sync::atomic::Ordering;
@@ -21,7 +16,7 @@ use surrealdb_core::sql::{from_value, Value};
 
 mod cmd;
 
-pub use cmd::Command;
+pub(crate) use cmd::Command;
 
 #[derive(Debug)]
 #[allow(dead_code)] // used by the embedded and remote connections
@@ -170,58 +165,6 @@ impl Router {
 			self.recv_query(rx).await
 		})
 	}
-}
-
-/// The query method
-#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq, Hash)]
-#[serde(rename_all = "lowercase")]
-pub enum Method {
-	/// Sends an authentication token to the server
-	Authenticate,
-	/// Performs a merge update operation
-	Merge,
-	/// Creates a record in a table
-	Create,
-	/// Deletes a record from a table
-	Delete,
-	/// Exports a database
-	Export,
-	/// Checks the health of the server
-	Health,
-	/// Imports a database
-	Import,
-	/// Invalidates a session
-	Invalidate,
-	/// Inserts a record or records into a table
-	Insert,
-	/// Kills a live query
-	#[doc(hidden)] // Not supported yet
-	Kill,
-	/// Starts a live query
-	#[doc(hidden)] // Not supported yet
-	Live,
-	/// Performs a patch update operation
-	Patch,
-	/// Sends a raw query to the database
-	Query,
-	/// Selects a record or records from a table
-	Select,
-	/// Sets a parameter on the connection
-	Set,
-	/// Signs into the server
-	Signin,
-	/// Signs up on the server
-	Signup,
-	/// Removes a parameter from a connection
-	Unset,
-	/// Performs an update operation
-	Update,
-	/// Performs an upsert operation
-	Upsert,
-	/// Selects a namespace and database to use
-	Use,
-	/// Queries the version of the server
-	Version,
 }
 
 /// The database response sent from the router to the caller
