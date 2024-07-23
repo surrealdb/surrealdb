@@ -1,12 +1,11 @@
-use channel::Receiver;
-
 use super::types::User;
+use crate::api::conn::Command;
 use crate::api::conn::DbResponse;
-use crate::api::conn::Method;
 use crate::api::conn::Route;
 use crate::api::Response as QueryResponse;
 use crate::sql::to_value;
 use crate::sql::Value;
+use channel::Receiver;
 
 pub(super) fn mock(route_rx: Receiver<Route>) {
 	tokio::spawn(async move {
@@ -15,81 +14,111 @@ pub(super) fn mock(route_rx: Receiver<Route>) {
 			response,
 		}) = route_rx.recv().await
 		{
-			let (_, method, param) = request;
-			let mut params = param.other;
+			let cmd = request.command;
 
-			let result = match method {
-				Method::Invalidate | Method::Health => match &params[..] {
-					[] => Ok(DbResponse::Other(Value::None)),
-					_ => unreachable!(),
-				},
-				Method::Authenticate | Method::Kill | Method::Unset => match &params[..] {
-					[_] => Ok(DbResponse::Other(Value::None)),
-					_ => unreachable!(),
-				},
-				Method::Live => match &params[..] {
-					[_] => Ok(DbResponse::Other(
-						"c6c0e36c-e2cf-42cb-b2d5-75415249b261".to_owned().into(),
-					)),
-					_ => unreachable!(),
-				},
-				Method::Version => match &params[..] {
-					[] => Ok(DbResponse::Other("1.0.0".into())),
-					_ => unreachable!(),
-				},
-				Method::Use => match &params[..] {
-					[_] | [_, _] => Ok(DbResponse::Other(Value::None)),
-					_ => unreachable!(),
-				},
-				Method::Signup | Method::Signin => match &mut params[..] {
-					[_] => Ok(DbResponse::Other("jwt".to_owned().into())),
-					_ => unreachable!(),
-				},
-				Method::Set => match &params[..] {
-					[_, _] => Ok(DbResponse::Other(Value::None)),
-					_ => unreachable!(),
-				},
-				Method::Query => match param.query {
-					Some(_) => Ok(DbResponse::Query(QueryResponse::new())),
-					_ => unreachable!(),
-				},
-				Method::Create => match &params[..] {
-					[_] => Ok(DbResponse::Other(to_value(User::default()).unwrap())),
-					[_, user] => Ok(DbResponse::Other(user.clone())),
-					_ => unreachable!(),
-				},
-				Method::Select | Method::Delete => match &params[..] {
-					[Value::Thing(..)] => Ok(DbResponse::Other(to_value(User::default()).unwrap())),
-					[Value::Table(..) | Value::Array(..) | Value::Range(..)] => {
-						Ok(DbResponse::Other(Value::Array(Default::default())))
-					}
-					_ => unreachable!(),
-				},
-				Method::Upsert | Method::Update | Method::Merge | Method::Patch => {
-					match &params[..] {
-						[Value::Thing(..)] | [Value::Thing(..), _] => {
-							Ok(DbResponse::Other(to_value(User::default()).unwrap()))
-						}
-						[Value::Table(..) | Value::Array(..) | Value::Range(..)]
-						| [Value::Table(..) | Value::Array(..) | Value::Range(..), _] => {
-							Ok(DbResponse::Other(Value::Array(Default::default())))
-						}
-						_ => unreachable!(),
-					}
+			let result = match cmd {
+				Command::Invalidate | Command::Health => Ok(DbResponse::Other(Value::None)),
+				Command::Authenticate {
+					..
 				}
-				Method::Insert => match &params[..] {
-					[Value::Table(..), Value::Array(..)] => {
+				| Command::Kill {
+					..
+				}
+				| Command::Unset {
+					..
+				} => Ok(DbResponse::Other(Value::None)),
+				Command::SubscribeLive {
+					..
+				} => Ok(DbResponse::Other("c6c0e36c-e2cf-42cb-b2d5-75415249b261".to_owned().into())),
+				Command::Version => Ok(DbResponse::Other("1.0.0".into())),
+				Command::Use {
+					..
+				} => Ok(DbResponse::Other(Value::None)),
+				Command::Signup {
+					..
+				}
+				| Command::Signin {
+					..
+				} => Ok(DbResponse::Other("jwt".to_owned().into())),
+				Command::Set {
+					..
+				} => Ok(DbResponse::Other(Value::None)),
+				Command::Query {
+					..
+				} => Ok(DbResponse::Query(QueryResponse::new())),
+				Command::Create {
+					data,
+					..
+				} => match data {
+					None => Ok(DbResponse::Other(to_value(User::default()).unwrap())),
+					Some(user) => Ok(DbResponse::Other(user.clone())),
+				},
+				Command::Select {
+					what,
+					..
+				}
+				| Command::Delete {
+					what,
+					..
+				} => match what {
+					Value::Thing(..) => Ok(DbResponse::Other(to_value(User::default()).unwrap())),
+					Value::Table(..) | Value::Array(..) | Value::Range(..) => {
 						Ok(DbResponse::Other(Value::Array(Default::default())))
 					}
-					[Value::Table(..), _] => {
+					_ => unreachable!(),
+				},
+				Command::Upsert {
+					what,
+					..
+				}
+				| Command::Update {
+					what,
+					..
+				}
+				| Command::Merge {
+					what,
+					..
+				}
+				| Command::Patch {
+					what,
+					..
+				} => match what {
+					Value::Thing(..) => Ok(DbResponse::Other(to_value(User::default()).unwrap())),
+					Value::Table(..) | Value::Array(..) | Value::Range(..) => {
+						Ok(DbResponse::Other(Value::Array(Default::default())))
+					}
+					_ => unreachable!(),
+				},
+				Command::Insert {
+					what,
+					data,
+				} => match (what, data) {
+					(Some(Value::Table(..)), Value::Array(..)) => {
+						Ok(DbResponse::Other(Value::Array(Default::default())))
+					}
+					(Some(Value::Table(..)), _) => {
 						Ok(DbResponse::Other(to_value(User::default()).unwrap()))
 					}
 					_ => unreachable!(),
 				},
-				Method::Export | Method::Import => match param.file {
-					Some(_) => Ok(DbResponse::Other(Value::None)),
-					_ => unreachable!(),
-				},
+				Command::ExportMl {
+					..
+				}
+				| Command::ExportBytesMl {
+					..
+				}
+				| Command::ExportFile {
+					..
+				}
+				| Command::ExportBytes {
+					..
+				}
+				| Command::ImportMl {
+					..
+				}
+				| Command::ImportFile {
+					..
+				} => Ok(DbResponse::Other(Value::None)),
 			};
 
 			if let Err(message) = response.send(result).await {

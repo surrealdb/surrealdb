@@ -1,11 +1,9 @@
-use crate::api::conn::Method;
-use crate::api::conn::Param;
+use crate::api::conn::Command;
 use crate::api::method::BoxFuture;
 use crate::api::method::UseDb;
 use crate::api::Connection;
 use crate::api::Result;
 use crate::method::OnceLockExt;
-use crate::sql::Value;
 use crate::Surreal;
 use std::borrow::Cow;
 use std::future::IntoFuture;
@@ -55,7 +53,12 @@ where
 	fn into_future(self) -> Self::IntoFuture {
 		Box::pin(async move {
 			let router = self.client.router.extract()?;
-			router.execute_unit(Method::Use, Param::new(vec![self.ns.into(), Value::None])).await
+			router
+				.execute_unit(Command::Use {
+					namespace: Some(self.ns),
+					database: None,
+				})
+				.await
 		})
 	}
 }
