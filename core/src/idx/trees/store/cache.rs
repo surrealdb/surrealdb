@@ -131,7 +131,7 @@ where
 
 	pub(super) async fn get_node(
 		&self,
-		tx: &mut Transaction,
+		tx: &Transaction,
 		node_id: NodeId,
 	) -> Result<Arc<StoredNode<N>>, Error> {
 		match self {
@@ -208,7 +208,7 @@ where
 
 	async fn get_node(
 		&self,
-		tx: &mut Transaction,
+		tx: &Transaction,
 		node_id: NodeId,
 	) -> Result<Arc<StoredNode<N>>, Error> {
 		if let Some(n) = self.lru.get(node_id).await {
@@ -260,7 +260,7 @@ where
 
 	pub(super) async fn get_node(
 		&self,
-		tx: &mut Transaction,
+		tx: &Transaction,
 		node_id: NodeId,
 	) -> Result<Arc<StoredNode<N>>, Error> {
 		match self.cache.entry(node_id) {

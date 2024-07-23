@@ -1,6 +1,6 @@
 [tasks.ci-format]
 category = "CI - CHECK"
-dependencies = ["cargo-fmt", "cargo-fmt-unlinked"]
+dependencies = ["cargo-fmt"]
 
 [tasks.ci-check]
 category = "CI - CHECK"
@@ -15,7 +15,7 @@ args = ["check", "--locked", "--package", "surrealdb", "--features", "protocol-w
 [tasks.ci-clippy]
 category = "CI - CHECK"
 command = "cargo"
-args = ["clippy", "--all-targets", "--features", "storage-mem,storage-rocksdb,storage-tikv,storage-fdb,scripting,http,jwks", "--tests", "--benches", "--examples", "--bins", "--", "-D", "warnings"]
+args = ["clippy", "--all-targets", "--features", "storage-mem,storage-surrealkv,storage-rocksdb,storage-tikv,storage-fdb,scripting,http,jwks,ml,storage-fdb-7_1", "--tests", "--benches", "--examples", "--bins", "--", "-D", "warnings"]
 
 #
 # Integration Tests
@@ -110,7 +110,7 @@ run_task = { name = ["start-surrealdb", "test-api-integration", "stop-surrealdb"
 [tasks.test-database-upgrade]
 private = true
 command = "cargo"
-env = { RUST_BACKTRACE = 1, RUST_LOG = "info" }
+env = { RUST_BACKTRACE = 1, RUST_LOG = "info", RUSTFLAGS = "--cfg docker" }
 args = ["test", "--locked", "--no-default-features", "--features", "${_TEST_FEATURES}", "--workspace", "--test", "database_upgrade", "--", "database_upgrade", "--show-output"]
 
 
@@ -151,11 +151,6 @@ category = "CI - INTEGRATION TESTS"
 env = { _TEST_API_ENGINE = "rocksdb", _TEST_FEATURES = "kv-rocksdb" }
 run_task = { name = ["test-kvs", "test-api-integration"], fork = true, parallel = true }
 
-[tasks.ci-api-integration-fdb]
-category = "CI - INTEGRATION TESTS"
-env = { _TEST_API_ENGINE = "fdb", _TEST_FEATURES = "kv-fdb-7_1" }
-run_task = { name = ["test-kvs", "test-api-integration"], fork = true, parallel = false }
-
 [tasks.ci-api-integration-surrealkv]
 category = "CI - INTEGRATION TESTS"
 env = { _TEST_API_ENGINE = "surrealkv", _TEST_FEATURES = "kv-surrealkv" }
@@ -165,6 +160,16 @@ run_task = { name = ["test-kvs", "test-api-integration"], fork = true, parallel 
 category = "CI - INTEGRATION TESTS"
 env = { _TEST_API_ENGINE = "tikv", _TEST_FEATURES = "kv-tikv" }
 run_task = { name = ["start-tikv", "test-kvs", "test-api-integration", "stop-tikv"], fork = true, parallel = false }
+
+[tasks.ci-api-integration-fdb-7_1]
+category = "CI - INTEGRATION TESTS"
+env = { _TEST_API_ENGINE = "fdb", _TEST_FEATURES = "kv-fdb,kv-fdb-7_1" }
+run_task = { name = ["test-kvs", "test-api-integration"], fork = true, parallel = false }
+
+[tasks.ci-api-integration-fdb-7_3]
+category = "CI - INTEGRATION TESTS"
+env = { _TEST_API_ENGINE = "fdb", _TEST_FEATURES = "kv-fdb,kv-fdb-7_3" }
+run_task = { name = ["test-kvs", "test-api-integration"], fork = true, parallel = false }
 
 
 #
@@ -283,7 +288,7 @@ BENCH_WORKER_THREADS = { value = "1", condition = { env_not_set = ["BENCH_WORKER
 BENCH_NUM_OPS = { value = "1000", condition = { env_not_set = ["BENCH_NUM_OPS"] } }
 BENCH_DURATION = { value = "30", condition = { env_not_set = ["BENCH_DURATION"] } }
 BENCH_SAMPLE_SIZE = { value = "10", condition = { env_not_set = ["BENCH_SAMPLE_SIZE"] } }
-BENCH_FEATURES = { value = "protocol-ws,kv-mem,kv-rocksdb,kv-fdb-7_1,kv-surrealkv", condition = { env_not_set = ["BENCH_FEATURES"] } }
+BENCH_FEATURES = { value = "protocol-ws,kv-mem,kv-rocksdb,kv-surrealkv", condition = { env_not_set = ["BENCH_FEATURES"] } }
 
 [tasks.bench-target]
 private = true
@@ -301,11 +306,6 @@ category = "CI - BENCHMARK - SurrealDB Target"
 env = { BENCH_DATASTORE_TARGET = "lib-rocksdb" }
 run_task = { name = ["bench-target"] }
 
-[tasks.bench-lib-fdb]
-category = "CI - BENCHMARK - SurrealDB Target"
-env = { BENCH_DATASTORE_TARGET = "lib-fdb" }
-run_task = { name = ["bench-target"] }
-
 [tasks.bench-sdk-mem]
 category = "CI - BENCHMARK - SurrealDB Target"
 env = { BENCH_DATASTORE_TARGET = "sdk-mem" }
@@ -316,17 +316,12 @@ category = "CI - BENCHMARK - SurrealDB Target"
 env = { BENCH_DATASTORE_TARGET = "sdk-rocksdb" }
 run_task = { name = ["bench-target"] }
 
-[tasks.bench-sdk-fdb]
+[tasks.bench-lib-surrealkv]
 category = "CI - BENCHMARK - SurrealDB Target"
-env = { BENCH_DATASTORE_TARGET = "sdk-fdb" }
+env = { BENCH_DATASTORE_TARGET = "lib-surrealkv" }
 run_task = { name = ["bench-target"] }
 
 [tasks.bench-sdk-ws]
 category = "CI - BENCHMARK - SurrealDB Target"
 env = { BENCH_DATASTORE_TARGET = "sdk-ws" }
-run_task = { name = ["bench-target"] }
-
-[tasks.bench-lib-surrealkv]
-category = "CI - BENCHMARK - SurrealDB Target"
-env = { BENCH_DATASTORE_TARGET = "lib-surrealkv" }
 run_task = { name = ["bench-target"] }

@@ -26,7 +26,7 @@ where
 			Some(otlp::new(filter))
 		}
 		tracer => {
-			panic!("unsupported tracer {}", tracer);
+			panic!("unsupported tracer {tracer}");
 		}
 	}
 }

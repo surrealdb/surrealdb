@@ -1,15 +1,12 @@
-use crate::api::conn::Method;
-use crate::api::conn::Param;
+use crate::api::conn::Command;
+use crate::api::method::BoxFuture;
 use crate::api::method::UseDb;
 use crate::api::Connection;
 use crate::api::Result;
 use crate::method::OnceLockExt;
-use crate::Value;
 use crate::Surreal;
 use std::borrow::Cow;
-use std::future::Future;
 use std::future::IntoFuture;
-use std::pin::Pin;
 
 /// Stores the namespace to use
 #[derive(Debug)]
@@ -51,16 +48,17 @@ where
 	Client: Connection,
 {
 	type Output = Result<()>;
-	type IntoFuture = Pin<Box<dyn Future<Output = Self::Output> + Send + Sync + 'r>>;
+	type IntoFuture = BoxFuture<'r, Self::Output>;
 
 	fn into_future(self) -> Self::IntoFuture {
 		Box::pin(async move {
-			let mut conn = Client::new(Method::Use);
-			conn.execute_unit(
-				self.client.router.extract()?,
-				Param::new(vec![self.ns.into(), Value::None]),
-			)
-			.await
+			let router = self.client.router.extract()?;
+			router
+				.execute_unit(Command::Use {
+					namespace: Some(self.ns),
+					database: None,
+				})
+				.await
 		})
 	}
 }

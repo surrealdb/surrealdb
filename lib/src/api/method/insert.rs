@@ -1,6 +1,6 @@
-use crate::api::conn::Method;
-use crate::api::conn::Param;
+use crate::api::conn::Command;
 use crate::api::err::Error;
+use crate::api::method::BoxFuture;
 use crate::api::method::Content;
 use crate::api::opt::Resource;
 use crate::api::Connection;
@@ -14,10 +14,8 @@ use crate::Surreal;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 use std::borrow::Cow;
-use std::future::Future;
 use std::future::IntoFuture;
 use std::marker::PhantomData;
-use std::pin::Pin;
 
 /// An insert future
 #[derive(Debug)]
@@ -55,18 +53,19 @@ macro_rules! into_future {
 					Resource::RecordId(record_id) => {
 						let mut table = Table::default();
 						table.0 = record_id.tb.clone();
-						(
-							table.into(),
-							crate::map! { String::from("id") => record_id.into() }.into(),
-						)
+						(table.into(), map! { String::from("id") => record_id.into() }.into())
 					}
 					Resource::Object(obj) => return Err(Error::InsertOnObject(obj).into()),
 					Resource::Array(arr) => return Err(Error::InsertOnArray(arr).into()),
 					Resource::Edges(edges) => return Err(Error::InsertOnEdges(edges).into()),
 				};
-				let mut conn = Client::new(Method::Insert);
-				let param = vec![table, data];
-				conn.$method(client.router.extract()?, Param::new(param)).await
+				let cmd = Command::Insert {
+					what: Some(table),
+					data,
+				};
+
+				let router = client.router.extract()?;
+				router.$method(cmd).await
 			})
 		}
 	};
@@ -77,7 +76,7 @@ where
 	Client: Connection,
 {
 	type Output = Result<Value>;
-	type IntoFuture = Pin<Box<dyn Future<Output = Self::Output> + Send + Sync + 'r>>;
+	type IntoFuture = BoxFuture<'r, Self::Output>;
 
 	into_future! {execute_value}
 }
@@ -88,7 +87,7 @@ where
 	R: DeserializeOwned,
 {
 	type Output = Result<Option<R>>;
-	type IntoFuture = Pin<Box<dyn Future<Output = Self::Output> + Send + Sync + 'r>>;
+	type IntoFuture = BoxFuture<'r, Self::Output>;
 
 	into_future! {execute_opt}
 }
@@ -99,7 +98,7 @@ where
 	R: DeserializeOwned,
 {
 	type Output = Result<Vec<R>>;
-	type IntoFuture = Pin<Box<dyn Future<Output = Self::Output> + Send + Sync + 'r>>;
+	type IntoFuture = BoxFuture<'r, Self::Output>;
 
 	into_future! {execute_vec}
 }
@@ -110,59 +109,41 @@ where
 	R: DeserializeOwned,
 {
 	/// Specifies the data to insert into the table
-	pub fn content<D>(self, data: D) -> Content<'r, C, Value, R>
+	pub fn content<D>(self, data: D) -> Content<'r, C, R>
 	where
 		D: Serialize,
 	{
-		let mut content = Content {
-			client: self.client,
-			method: Method::Insert,
-			resource: self.resource,
-			range: None,
-			content: Value::None,
-			response_type: PhantomData,
-		};
-		match crate::sql::to_value(data) {
-			Ok(mut data) => match content.resource {
-				Ok(Resource::Table(table)) => {
-					content.resource = Ok(table.into());
-					content.content = data;
-				}
-				Ok(Resource::RecordId(record_id)) => match data.is_array() {
-					true => {
-						content.resource = Err(Error::InvalidParams(
+		Content::from_closure(self.client, || {
+			let mut data = crate::sql::to_value(data)?;
+			match self.resource? {
+				Resource::Table(table) => Ok(Command::Insert {
+					what: Some(table.into()),
+					data,
+				}),
+				Resource::RecordId(thing) => {
+					if data.is_array() {
+						Err(Error::InvalidParams(
 							"Tried to insert multiple records on a record ID".to_owned(),
 						)
-						.into());
-					}
-					false => {
+						.into())
+					} else {
 						let mut table = Table::default();
-						table.0.clone_from(&record_id.tb);
-						content.resource = Ok(table.into());
+						table.0.clone_from(&thing.tb);
+						let what = Value::Table(table);
 						let mut ident = Ident::default();
 						"id".clone_into(&mut ident.0);
 						let id = Part::Field(ident);
-						data.put(&[id], record_id.into());
-						content.content = data;
+						data.put(&[id], thing.into());
+						Ok(Command::Insert {
+							what: Some(what),
+							data,
+						})
 					}
-				},
-				Ok(Resource::Object(obj)) => {
-					content.resource = Err(Error::InsertOnObject(obj).into());
 				}
-				Ok(Resource::Array(arr)) => {
-					content.resource = Err(Error::InsertOnArray(arr).into());
-				}
-				Ok(Resource::Edges(edges)) => {
-					content.resource = Err(Error::InsertOnEdges(edges).into());
-				}
-				Err(error) => {
-					content.resource = Err(error);
-				}
-			},
-			Err(error) => {
-				content.resource = Err(error.into());
+				Resource::Object(obj) => Err(Error::InsertOnObject(obj).into()),
+				Resource::Array(arr) => Err(Error::InsertOnArray(arr).into()),
+				Resource::Edges(edges) => Err(Error::InsertOnEdges(edges).into()),
 			}
-		};
-		content
+		})
 	}
 }

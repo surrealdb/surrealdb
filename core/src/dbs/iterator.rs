@@ -443,12 +443,16 @@ impl Iterator {
 		stm: &Statement<'_>,
 	) -> Result<(), Error> {
 		if let Some(fetchs) = stm.fetch() {
+			let mut idioms = Vec::with_capacity(fetchs.0.len());
 			for fetch in fetchs.iter() {
+				fetch.compute(stk, ctx, opt, &mut idioms).await?;
+			}
+			for i in &idioms {
 				let mut values = self.results.take()?;
 				// Loop over each result value
 				for obj in &mut values {
 					// Fetch the value at the path
-					stk.run(|stk| obj.fetch(stk, ctx, opt, fetch)).await?;
+					stk.run(|stk| obj.fetch(stk, ctx, opt, i)).await?;
 				}
 				self.results = values.into();
 			}
@@ -510,7 +514,7 @@ impl Iterator {
 				// Create a channel to shutdown
 				let (end, exit) = channel::bounded::<()>(1);
 				// Create an unbounded channel
-				let (chn, docs) = channel::bounded(crate::cnf::MAX_CONCURRENT_TASKS);
+				let (chn, docs) = channel::bounded(*crate::cnf::MAX_CONCURRENT_TASKS);
 				// Create an async closure for prepared values
 				let adocs = async {
 					// Process all prepared values
@@ -534,7 +538,7 @@ impl Iterator {
 					drop(chn);
 				};
 				// Create an unbounded channel
-				let (chn, vals) = channel::bounded(crate::cnf::MAX_CONCURRENT_TASKS);
+				let (chn, vals) = channel::bounded(*crate::cnf::MAX_CONCURRENT_TASKS);
 				// Create an async closure for received values
 				let avals = async {
 					// Process all received values

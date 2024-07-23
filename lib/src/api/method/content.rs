@@ -1,42 +1,42 @@
-use crate::api::conn::Method;
-use crate::api::conn::Param;
-use crate::api::opt::Range;
-use crate::api::opt::Resource;
+use crate::api::conn::Command;
+use crate::api::method::BoxFuture;
 use crate::api::Connection;
 use crate::api::Result;
 use crate::method::OnceLockExt;
-use crate::sql::to_value;
-use crate::sql::Id;
-use crate::Value;
 use crate::Surreal;
 use serde::de::DeserializeOwned;
-use serde::Serialize;
 use std::borrow::Cow;
-use std::future::Future;
 use std::future::IntoFuture;
 use std::marker::PhantomData;
-use std::pin::Pin;
 
 /// A content future
 ///
 /// Content inserts or replaces the contents of a record entirely
 #[derive(Debug)]
 #[must_use = "futures do nothing unless you `.await` or poll them"]
-pub struct Content<'r, C: Connection, D, R> {
+pub struct Content<'r, C: Connection, R> {
 	pub(super) client: Cow<'r, Surreal<C>>,
-	pub(super) method: Method,
-	pub(super) resource: Result<Resource>,
-	pub(super) range: Option<Range<Id>>,
-	pub(super) content: D,
+	pub(super) command: Result<Command>,
 	pub(super) response_type: PhantomData<R>,
 }
 
-impl<C, D, R> Content<'_, C, D, R>
+impl<'r, C, R> Content<'r, C, R>
 where
 	C: Connection,
 {
+	pub(crate) fn from_closure<F>(client: Cow<'r, Surreal<C>>, f: F) -> Self
+	where
+		F: FnOnce() -> Result<Command>,
+	{
+		Content {
+			client,
+			command: f(),
+			response_type: PhantomData,
+		}
+	}
+
 	/// Converts to an owned type which can easily be moved to a different thread
-	pub fn into_owned(self) -> Content<'static, C, D, R> {
+	pub fn into_owned(self) -> Content<'static, C, R> {
 		Content {
 			client: Cow::Owned(self.client.into_owned()),
 			..self
@@ -49,60 +49,45 @@ macro_rules! into_future {
 		fn into_future(self) -> Self::IntoFuture {
 			let Content {
 				client,
-				method,
-				resource,
-				range,
-				content,
+				command,
 				..
 			} = self;
-			let content = to_value(content);
 			Box::pin(async move {
-				let param = match range {
-					Some(range) => resource?.with_range(range)?.into(),
-					None => resource?.into(),
-				};
-				let mut conn = Client::new(method);
-				let params = match content? {
-					Value::None | Value::Null => vec![param],
-					content => vec![param, content],
-				};
-				conn.$method(client.router.extract()?, Param::new(params)).await
+				let router = client.router.extract()?;
+				router.$method(command?).await
 			})
 		}
 	};
 }
 
-impl<'r, Client, D> IntoFuture for Content<'r, Client, D, Value>
+impl<'r, Client> IntoFuture for Content<'r, Client, Value>
 where
 	Client: Connection,
-	D: Serialize,
 {
 	type Output = Result<Value>;
-	type IntoFuture = Pin<Box<dyn Future<Output = Self::Output> + Send + Sync + 'r>>;
+	type IntoFuture = BoxFuture<'r, Self::Output>;
 
 	into_future! {execute_value}
 }
 
-impl<'r, Client, D, R> IntoFuture for Content<'r, Client, D, Option<R>>
+impl<'r, Client, R> IntoFuture for Content<'r, Client, Option<R>>
 where
 	Client: Connection,
-	D: Serialize,
 	R: DeserializeOwned,
 {
 	type Output = Result<Option<R>>;
-	type IntoFuture = Pin<Box<dyn Future<Output = Self::Output> + Send + Sync + 'r>>;
+	type IntoFuture = BoxFuture<'r, Self::Output>;
 
 	into_future! {execute_opt}
 }
 
-impl<'r, Client, D, R> IntoFuture for Content<'r, Client, D, Vec<R>>
+impl<'r, Client, R> IntoFuture for Content<'r, Client, Vec<R>>
 where
 	Client: Connection,
-	D: Serialize,
 	R: DeserializeOwned,
 {
 	type Output = Result<Vec<R>>;
-	type IntoFuture = Pin<Box<dyn Future<Output = Self::Output> + Send + Sync + 'r>>;
+	type IntoFuture = BoxFuture<'r, Self::Output>;
 
 	into_future! {execute_vec}
 }

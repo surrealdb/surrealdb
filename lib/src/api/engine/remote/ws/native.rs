@@ -1,17 +1,15 @@
-use super::PATH;
-use super::{deserialize, serialize};
-use super::{HandleResult, RouterRequest};
-use crate::api::conn::Connection;
-use crate::api::conn::DbResponse;
-use crate::api::conn::Method;
-use crate::api::conn::Param;
+use super::{
+	deserialize, serialize, HandleResult, PendingRequest, ReplayMethod, RequestEffect, PATH,
+};
 use crate::api::conn::Route;
 use crate::api::conn::Router;
+use crate::api::conn::{Command, DbResponse};
+use crate::api::conn::{Connection, RequestData};
 use crate::api::engine::remote::ws::Client;
 use crate::api::engine::remote::ws::Response;
 use crate::api::engine::remote::ws::PING_INTERVAL;
-use crate::api::engine::remote::ws::PING_METHOD;
 use crate::api::err::Error;
+use crate::api::method::BoxFuture;
 use crate::api::opt::Endpoint;
 #[cfg(any(feature = "native-tls", feature = "rustls"))]
 use crate::api::opt::Tls;
@@ -22,8 +20,6 @@ use crate::api::Surreal;
 use crate::engine::remote::ws::Data;
 use crate::engine::IntervalStream;
 use crate::opt::WaitFor;
-use crate::{Object, Value};
-use flume::Receiver;
 use futures::stream::{SplitSink, SplitStream};
 use futures::SinkExt;
 use futures::StreamExt;
@@ -31,9 +27,6 @@ use revision::revisioned;
 use serde::Deserialize;
 use std::collections::hash_map::Entry;
 use std::collections::HashSet;
-use std::future::Future;
-use std::mem;
-use std::pin::Pin;
 use std::sync::atomic::AtomicI64;
 use std::sync::Arc;
 use std::sync::OnceLock;
@@ -60,7 +53,7 @@ pub(crate) const NAGLE_ALG: bool = false;
 
 type MessageSink = SplitSink<WebSocketStream<MaybeTlsStream<TcpStream>>, Message>;
 type MessageStream = SplitStream<WebSocketStream<MaybeTlsStream<TcpStream>>>;
-type RouterState = super::RouterState<MessageSink, MessageStream, Message>;
+type RouterState = super::RouterState<MessageSink, MessageStream>;
 
 #[cfg(any(feature = "native-tls", feature = "rustls"))]
 impl From<Tls> for Connector {
@@ -105,17 +98,10 @@ pub(crate) async fn connect(
 impl crate::api::Connection for Client {}
 
 impl Connection for Client {
-	fn new(method: Method) -> Self {
-		Self {
-			id: 0,
-			method,
-		}
-	}
-
 	fn connect(
 		mut address: Endpoint,
 		capacity: usize,
-	) -> Pin<Box<dyn Future<Output = Result<Surreal<Self>>> + Send + Sync + 'static>> {
+	) -> BoxFuture<'static, Result<Surreal<Self>>> {
 		Box::pin(async move {
 			address.url = address.url.join(PATH)?;
 			#[cfg(any(feature = "native-tls", feature = "rustls"))]
@@ -133,8 +119,8 @@ impl Connection for Client {
 			let socket = connect(&address, Some(config), maybe_connector.clone()).await?;
 
 			let (route_tx, route_rx) = match capacity {
-				0 => flume::unbounded(),
-				capacity => flume::bounded(capacity),
+				0 => channel::unbounded(),
+				capacity => channel::bounded(capacity),
 			};
 
 			tokio::spawn(run_router(address, maybe_connector, capacity, config, socket, route_rx));
@@ -152,23 +138,6 @@ impl Connection for Client {
 			))
 		})
 	}
-
-	fn send<'r>(
-		&'r mut self,
-		router: &'r Router,
-		param: Param,
-	) -> Pin<Box<dyn Future<Output = Result<Receiver<Result<DbResponse>>>> + Send + Sync + 'r>> {
-		Box::pin(async move {
-			self.id = router.next_id();
-			let (sender, receiver) = flume::bounded(1);
-			let route = Route {
-				request: (self.id, self.method, param),
-				response: sender,
-			};
-			router.sender.send_async(route).await?;
-			Ok(receiver)
-		})
-	}
 }
 
 async fn router_handle_route(
@@ -179,84 +148,110 @@ async fn router_handle_route(
 	state: &mut RouterState,
 	endpoint: &Endpoint,
 ) -> HandleResult {
-	let (id, method, param) = request;
-	let params = match param.query {
-		Some((query, bindings)) => {
-			vec![query.into(), bindings.into()]
+	let RequestData {
+		id,
+		command,
+	} = request;
+
+	// We probably shouldn't be sending duplicate id requests.
+	let entry = state.pending_requests.entry(id);
+	let Entry::Vacant(entry) = entry else {
+		let error = Error::DuplicateRequestId(id);
+		if response.send(Err(error.into())).await.is_err() {
+			trace!("Receiver dropped");
 		}
-		None => param.other,
+		return HandleResult::Ok;
 	};
-	match method {
-		Method::Set => {
-			if let [Value::String(key), value] = &params[..2] {
-				state.var_stash.insert(id, (key.0.clone(), value.clone()));
-			}
+
+	let mut effect = RequestEffect::None;
+
+	match command {
+		Command::Set {
+			ref key,
+			ref value,
+		} => {
+			effect = RequestEffect::Set {
+				key: key.clone(),
+				value: value.clone(),
+			};
 		}
-		Method::Unset => {
-			if let [Value::String(key)] = &params[..1] {
-				state.vars.swap_remove(&key.0);
-			}
+		Command::Unset {
+			ref key,
+		} => {
+			effect = RequestEffect::Clear {
+				key: key.clone(),
+			};
 		}
-		Method::Live => {
-			if let Some(sender) = param.notification_sender {
-				if let [Value::Uuid(id)] = &params[..1] {
-					state.live_queries.insert(id, sender);
-				}
-			}
-			if response.clone().into_send_async(Ok(DbResponse::Other(Value::None))).await.is_err() {
+		Command::Insert {
+			..
+		} => {
+			effect = RequestEffect::Insert;
+		}
+		Command::SubscribeLive {
+			ref uuid,
+			ref notification_sender,
+		} => {
+			state.live_queries.insert(*uuid, notification_sender.clone());
+			if response.clone().send(Ok(DbResponse::Other(Value::None))).await.is_err() {
 				trace!("Receiver dropped");
 			}
 			// There is nothing to send to the server here
+			return HandleResult::Ok;
 		}
-		Method::Kill => {
-			if let [Value::Uuid(id)] = &params[..1] {
-				state.live_queries.remove(id);
-			}
+		Command::Kill {
+			ref uuid,
+		} => {
+			state.live_queries.remove(uuid);
+		}
+		Command::Use {
+			..
+		} => {
+			state.replay.insert(ReplayMethod::Use, command.clone());
+		}
+		Command::Signup {
+			..
+		} => {
+			state.replay.insert(ReplayMethod::Signup, command.clone());
+		}
+		Command::Signin {
+			..
+		} => {
+			state.replay.insert(ReplayMethod::Signin, command.clone());
+		}
+		Command::Invalidate {
+			..
+		} => {
+			state.replay.insert(ReplayMethod::Invalidate, command.clone());
+		}
+		Command::Authenticate {
+			..
+		} => {
+			state.replay.insert(ReplayMethod::Authenticate, command.clone());
 		}
 		_ => {}
 	}
-	let method_str = match method {
-		Method::Health => PING_METHOD,
-		_ => method.as_str(),
-	};
-	let message = {
-		let request = RouterRequest {
-			id: Some(Value::from(id)),
-			method: method_str.into(),
-			params: (!params.is_empty()).then(|| params.into()),
-		};
 
+	let message = {
+		let Some(request) = command.into_router_request(Some(id)) else {
+			let _ = response.send(Err(Error::BackupsNotSupported.into())).await;
+			return HandleResult::Ok;
+		};
 		trace!("Request {:?}", request);
 		let payload = serialize(&request, endpoint.supports_revision).unwrap();
 		Message::Binary(payload)
 	};
-	if let Method::Authenticate
-	| Method::Invalidate
-	| Method::Signin
-	| Method::Signup
-	| Method::Use = method
-	{
-		state.replay.insert(method, message.clone());
-	}
+
 	match state.sink.send(message).await {
 		Ok(_) => {
 			state.last_activity = Instant::now();
-			match state.routes.entry(id) {
-				Entry::Vacant(entry) => {
-					// Register query route
-					entry.insert((method, response));
-				}
-				Entry::Occupied(..) => {
-					let error = Error::DuplicateRequestId(id);
-					if response.into_send_async(Err(error.into())).await.is_err() {
-						trace!("Receiver dropped");
-					}
-				}
-			}
+			entry.insert(PendingRequest {
+				effect,
+				response_channel: response,
+			});
 		}
 		Err(error) => {
 			let error = Error::Ws(error.to_string());
-			if response.into_send_async(Err(error.into())).await.is_err() {
+			if response.send(Err(error.into())).await.is_err() {
 				trace!("Receiver dropped");
 			}
 			return HandleResult::Disconnected;
@@ -280,23 +275,50 @@ async fn router_handle_response(
 					Some(id) => {
 						if let Ok(id) = id.coerce_to_i64() {
 							// We can only route responses with IDs
-							if let Some((method, sender)) = state.routes.remove(&id) {
-								if matches!(method, Method::Set) {
-									if let Some((key, value)) = state.var_stash.swap_remove(&id) {
-										state.vars.insert(key, value);
-									}
-								}
-								// Send the response back to the caller
-								let mut response = response.result;
-								if matches!(method, Method::Insert) {
-									// For insert, we need to flatten single responses in an array
-									if let Ok(Data::Other(Value::Array(value))) = &mut response {
-										if let [value] = &mut value.0[..] {
-											response = Ok(Data::Other(mem::take(value)));
+							if let Some(pending) = state.pending_requests.remove(&id) {
+								match pending.effect {
+									RequestEffect::None => {}
+									RequestEffect::Insert => {
+										// For insert, we need to flatten single responses in an array
+										if let Ok(Data::Other(Value::Array(value))) =
+											response.result
+										{
+											if value.len() == 1 {
+												let _ = pending
+													.response_channel
+													.send(DbResponse::from(Ok(Data::Other(
+														value.into_iter().next().unwrap(),
+													))))
+													.await;
+											} else {
+												let _ = pending
+													.response_channel
+													.send(DbResponse::from(Ok(Data::Other(
+														Value::Array(value),
+													))))
+													.await;
+											}
+											return HandleResult::Ok;
 										}
 									}
+									RequestEffect::Set {
+										key,
+										value,
+									} => {
+										state.vars.insert(key, value);
+									}
+									RequestEffect::Clear {
+										key,
+									} => {
+										state.vars.shift_remove(&key);
+									}
 								}
-								let _res = sender.into_send_async(DbResponse::from(response)).await;
+								let _res = pending
+									.response_channel
+									.send(DbResponse::from(response.result))
+									.await;
+							} else {
+								warn!("got response for request with id '{id}', which was not in pending requests")
 							}
 						}
 					}
@@ -311,13 +333,11 @@ async fn router_handle_response(
 									if sender.send(notification).await.is_err() {
 										state.live_queries.remove(&live_query_id);
 										let kill = {
-											let request = RouterRequest {
-												id: None,
-												method: Method::Kill.as_str().into(),
-												params: Some(
-													vec![Value::from(live_query_id)].into(),
-												),
-											};
+											let request = Command::Kill {
+												uuid: *live_query_id,
+											}
+											.into_router_request(None)
+											.unwrap();
 											let value =
 												serialize(&request, endpoint.supports_revision)
 													.unwrap();
@@ -352,8 +372,10 @@ async fn router_handle_response(
 				{
 					// Return an error if an ID was returned
 					if let Some(Ok(id)) = id.map(Value::coerce_to_i64) {
-						if let Some((_method, sender)) = state.routes.remove(&id) {
-							let _res = sender.into_send_async(Err(error)).await;
+						if let Some(pending) = state.pending_requests.remove(&id) {
+							let _res = pending.response_channel.send(Err(error)).await;
+						} else {
+							warn!("got response for request with id '{id}', which was not in pending requests")
 						}
 					}
 				} else {
@@ -379,19 +401,27 @@ async fn router_reconnect(
 				let (new_sink, new_stream) = s.split();
 				state.sink = new_sink;
 				state.stream = new_stream;
-				for (_, message) in &state.replay {
-					if let Err(error) = state.sink.send(message.clone()).await {
+				for commands in state.replay.values() {
+					let request = commands
+						.clone()
+						.into_router_request(None)
+						.expect("replay commands should always convert to route requests");
+
+					let message = serialize(&request, endpoint.supports_revision).unwrap();
+
+					if let Err(error) = state.sink.send(Message::Binary(message)).await {
 						trace!("{error}");
 						time::sleep(time::Duration::from_secs(1)).await;
 						continue;
 					}
 				}
 				for (key, value) in &state.vars {
-					let request = RouterRequest {
-						id: None,
-						method: Method::Set.as_str().into(),
-						params: Some(vec![key.as_str().into(), value.clone()].into()),
-					};
+					let request = Command::Set {
+						key: key.as_str().into(),
+						value: value.clone(),
+					}
+					.into_router_request(None)
+					.unwrap();
 					trace!("Request {:?}", request);
 					let payload = serialize(&request, endpoint.supports_revision).unwrap();
 					if let Err(error) = state.sink.send(Message::Binary(payload)).await {
@@ -420,18 +450,13 @@ pub(crate) async fn run_router(
 	route_rx: Receiver<Route>,
 ) {
 	let ping = {
-		let request = RouterRequest {
-			id: None,
-			method: PING_METHOD.into(),
-			params: None,
-		};
+		let request = Command::Health.into_router_request(None).unwrap();
 		let value = serialize(&request, endpoint.supports_revision).unwrap();
 		Message::Binary(value)
 	};
 
 	let (socket_sink, socket_stream) = socket.split();
 	let mut state = RouterState::new(socket_sink, socket_stream);
-	let mut route_stream = route_rx.into_stream();
 
 	'router: loop {
 		let mut interval = time::interval(PING_INTERVAL);
@@ -445,15 +470,15 @@ pub(crate) async fn run_router(
 
 		state.last_activity = Instant::now();
 		state.live_queries.clear();
-		state.routes.clear();
+		state.pending_requests.clear();
 
 		loop {
 			tokio::select! {
-				route = route_stream.next() => {
+				route = route_rx.recv() => {
 					// handle incoming route
 
-					let Some(response) = route else {
-						// route returned none, frontend dropped the channel, meaning the router
+					let Ok(response) = route else {
+						// route returned Err, frontend dropped the channel, meaning the router
 						// should quit.
 						match state.sink.send(Message::Close(None)).await {
 							Ok(..) => trace!("Connection closed successfully"),
