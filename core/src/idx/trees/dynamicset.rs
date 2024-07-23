@@ -1,4 +1,4 @@
-use hashbrown::HashSet;
+use ahash::{HashSet, HashSetExt};
 use std::fmt::Debug;
 use std::hash::Hash;
 
@@ -126,11 +126,11 @@ where
 #[cfg(test)]
 mod tests {
 	use crate::idx::trees::dynamicset::{ArraySet, DynamicSet, HashBrownSet};
-	use hashbrown::HashSet;
+	use ahash::HashSet;
 
 	fn test_dynamic_set<S: DynamicSet<usize>>(capacity: usize) {
 		let mut dyn_set = S::with_capacity(capacity);
-		let mut control = HashSet::new();
+		let mut control = HashSet::default();
 		// Test insertions
 		for sample in 0..capacity {
 			assert_eq!(dyn_set.len(), control.len(), "{capacity} - {sample}");

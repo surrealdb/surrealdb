@@ -8,10 +8,10 @@ use crate::idx::trees::hnsw::docs::HnswDocs;
 use crate::idx::trees::knn::Ids64;
 use crate::kvs::Transaction;
 use crate::sql::{Cond, Thing, Value};
-use hashbrown::hash_map::Entry;
-use hashbrown::HashMap;
+use ahash::HashMap;
 use reblessive::tree::Stk;
 use std::borrow::Cow;
+use std::collections::hash_map::Entry;
 use std::collections::VecDeque;
 use std::sync::Arc;
 

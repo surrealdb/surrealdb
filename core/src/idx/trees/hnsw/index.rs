@@ -13,7 +13,7 @@ use crate::idx::IndexKeyBase;
 use crate::kvs::Transaction;
 use crate::sql::index::{HnswParams, VectorType};
 use crate::sql::{Id, Number, Value};
-use hashbrown::HashMap;
+use ahash::HashMap;
 use reblessive::tree::Stk;
 use std::collections::VecDeque;
 use std::sync::Arc;
@@ -189,7 +189,7 @@ impl HnswIndex {
 		}
 		builder.build(
 			#[cfg(debug_assertions)]
-			HashMap::new(),
+			HashMap::default(),
 		)
 	}
 

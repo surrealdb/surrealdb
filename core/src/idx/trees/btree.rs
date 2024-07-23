@@ -5,7 +5,7 @@ use crate::idx::VersionedStore;
 use crate::kvs::{Key, Transaction, Val};
 use crate::sql::{Object, Value};
 #[cfg(debug_assertions)]
-use hashbrown::HashSet;
+use ahash::HashSet;
 use revision::{revisioned, Revisioned};
 use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
@@ -954,7 +954,7 @@ where
 	) -> Result<BStatistics, Error> {
 		let mut stats = BStatistics::default();
 		#[cfg(debug_assertions)]
-		let mut keys = HashSet::new();
+		let mut keys = HashSet::default();
 		let mut node_queue = VecDeque::new();
 		if let Some(node_id) = self.state.root {
 			node_queue.push_front((node_id, 1));

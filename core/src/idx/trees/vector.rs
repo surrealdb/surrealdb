@@ -3,7 +3,7 @@ use crate::fnc::util::math::ToFloat;
 use crate::sql::index::{Distance, VectorType};
 use crate::sql::{Number, Value};
 use ahash::AHasher;
-use hashbrown::HashSet;
+use ahash::HashSet;
 use linfa_linalg::norm::Norm;
 use ndarray::{Array1, LinalgScalar, Zip};
 use ndarray_stats::DeviationExt;

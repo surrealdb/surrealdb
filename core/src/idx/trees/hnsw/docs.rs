@@ -7,12 +7,12 @@ use crate::idx::trees::vector::SharedVector;
 use crate::idx::{IndexKeyBase, VersionedStore};
 use crate::kvs::{Key, Transaction};
 use crate::sql::{Id, Thing};
+use ahash::HashMap;
 use derive::Store;
-use hashbrown::hash_map::Entry;
-use hashbrown::HashMap;
 use revision::revisioned;
 use roaring::RoaringTreemap;
 use serde::{Deserialize, Serialize};
+use std::collections::hash_map::Entry;
 use std::sync::Arc;
 
 pub(in crate::idx) struct HnswDocs {
