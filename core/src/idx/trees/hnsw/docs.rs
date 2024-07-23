@@ -13,12 +13,10 @@ use revision::revisioned;
 use roaring::RoaringTreemap;
 use serde::{Deserialize, Serialize};
 use std::collections::hash_map::Entry;
-use std::sync::Arc;
 
 pub(in crate::idx) struct HnswDocs {
 	tb: String,
 	ikb: IndexKeyBase,
-	#[allow(unused)]
 	state_key: Key,
 	state_updated: bool,
 	state: State,
@@ -36,7 +34,7 @@ impl VersionedStore for State {}
 
 impl HnswDocs {
 	pub(in crate::idx) async fn new(
-		tx: Arc<Transaction>,
+		tx: &Transaction,
 		tb: String,
 		ikb: IndexKeyBase,
 	) -> Result<Self, Error> {
@@ -111,6 +109,14 @@ impl HnswDocs {
 		} else {
 			Ok(None)
 		}
+	}
+
+	pub(in crate::idx) async fn finish(&mut self, tx: &Transaction) -> Result<(), Error> {
+		if self.state_updated {
+			tx.set(self.state_key.clone(), VersionedStore::try_into(&self.state)?).await?;
+			self.state_updated = true;
+		}
+		Ok(())
 	}
 }
 

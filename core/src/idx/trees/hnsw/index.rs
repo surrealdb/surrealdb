@@ -16,7 +16,6 @@ use crate::sql::{Id, Number, Value};
 use ahash::HashMap;
 use reblessive::tree::Stk;
 use std::collections::VecDeque;
-use std::sync::Arc;
 
 pub struct HnswIndex {
 	dim: usize,
@@ -74,7 +73,7 @@ impl<'a> HnswCheckedSearchContext<'a> {
 
 impl HnswIndex {
 	pub async fn new(
-		tx: Arc<Transaction>,
+		tx: &Transaction,
 		ikb: IndexKeyBase,
 		tb: String,
 		p: &HnswParams,
@@ -103,6 +102,7 @@ impl HnswIndex {
 			vector.check_dimension(self.dim)?;
 			self.insert(vector.into(), doc_id);
 		}
+		self.docs.finish(tx).await?;
 		Ok(())
 	}
 
@@ -128,6 +128,7 @@ impl HnswIndex {
 				// Remove the vector
 				self.remove(vector.into(), doc_id);
 			}
+			self.docs.finish(tx).await?;
 		}
 		Ok(())
 	}
