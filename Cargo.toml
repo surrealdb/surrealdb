@@ -8,11 +8,17 @@ authors = ["Tobie Morgan Hitchcock <tobie@surrealdb.com>"]
 
 [features]
 # Public features
-default = ["storage-mem", "storage-rocksdb", "scripting", "http"]
+default = [
+    "storage-mem",
+    "storage-surrealkv",
+    "storage-rocksdb",
+    "scripting",
+    "http",
+]
 storage-mem = ["surrealdb/kv-mem"]
 storage-rocksdb = ["surrealdb/kv-rocksdb"]
 storage-tikv = ["surrealdb/kv-tikv"]
-storage-fdb = ["surrealdb/kv-fdb-7_1"]
+storage-fdb = ["surrealdb/kv-fdb"]
 storage-surrealkv = ["surrealdb/kv-surrealkv"]
 scripting = ["surrealdb/scripting"]
 http = ["surrealdb/http"]
@@ -20,6 +26,9 @@ http-compression = []
 ml = ["surrealdb/ml"]
 jwks = ["surrealdb/jwks"]
 performance-profiler = ["dep:pprof"]
+# Special features
+storage-fdb-7_1 = ["surrealdb/kv-fdb-7_1"]
+storage-fdb-7_3 = ["surrealdb/kv-fdb-7_3"]
 
 [workspace]
 members = [
