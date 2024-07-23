@@ -81,7 +81,6 @@ futures = "0.3.29"
 fuzzy-matcher = "0.3.7"
 geo = { version = "0.27.0", features = ["use-serde"] }
 geo-types = { version = "0.7.12", features = ["arbitrary"] }
-hashbrown = { version = "0.14.5", features = ["serde"] }
 hex = { version = "0.4.3" }
 indxdb = { version = "0.5.0", optional = true }
 ipnet = "2.9.0"
