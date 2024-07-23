@@ -520,3 +520,37 @@ async fn select_bruteforce_knn_with_condition() -> Result<(), Error> {
 	//
 	Ok(())
 }
+
+#[tokio::test]
+async fn check_hnsw_persistence() -> Result<(), Error> {
+	let sql = r"
+		CREATE pts:1 SET point = [1,2,3,4];
+		CREATE pts:2 SET point = [4,5,6,7];
+		CREATE pts:3 SET point = [8,9,10,11];
+		DEFINE INDEX hnsw_pts ON pts FIELDS point HNSW DIMENSION 4 DIST EUCLIDEAN TYPE F32 EFC 500 M 12;
+	";
+
+	// Ingest the data in the datastore.
+	let mut t = Test::new(sql).await?;
+	t.skip_ok(4)?;
+
+	// Restart the datastore
+	let sql =
+		"SELECT id, vector::distance::knn() AS dist FROM pts WHERE point <|2,100|> [2,3,4,5];";
+	let mut t = t.restart(sql).await?;
+
+	// We should find results
+	t.expect_val(
+		"[
+			{
+				id: pts:1,
+				dist: 2f
+			},
+			{
+				id: pts:2,
+				dist: 4f
+			}
+		]",
+	)?;
+	Ok(())
+}
