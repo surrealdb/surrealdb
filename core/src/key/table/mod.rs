@@ -1,4 +1,5 @@
 pub mod all;
+pub(crate) mod eq;
 pub mod ev;
 pub mod fd;
 pub mod ft;
