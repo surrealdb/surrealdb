@@ -1,5 +1,4 @@
-use crate::api::conn::Method;
-use crate::api::conn::Param;
+use crate::api::conn::Command;
 use crate::api::method::BoxFuture;
 use crate::api::method::Content;
 use crate::api::method::Merge;
@@ -18,6 +17,7 @@ use serde::Serialize;
 use std::borrow::Cow;
 use std::future::IntoFuture;
 use std::marker::PhantomData;
+use surrealdb_core::sql::to_value;
 
 /// An update future
 #[derive(Debug)]
@@ -52,12 +52,17 @@ macro_rules! into_future {
 				..
 			} = self;
 			Box::pin(async move {
-				let param = match range {
+				let param: Value = match range {
 					Some(range) => resource?.with_range(range)?.into(),
 					None => resource?.into(),
 				};
 				let router = client.router.extract()?;
-				router.$method(Method::Upsert, Param::new(vec![param])).await
+				router
+					.$method(Command::Update {
+						what: param,
+						data: None,
+					})
+					.await
 			})
 		}
 	};
@@ -123,18 +128,28 @@ where
 	R: DeserializeOwned,
 {
 	/// Replaces the current document / record data with the specified data
-	pub fn content<D>(self, data: D) -> Content<'r, C, D, R>
+	pub fn content<D>(self, data: D) -> Content<'r, C, R>
 	where
 		D: Serialize,
 	{
-		Content {
-			client: self.client,
-			method: Method::Update,
-			resource: self.resource,
-			range: self.range,
-			content: data,
-			response_type: PhantomData,
-		}
+		Content::from_closure(self.client, || {
+			let data = to_value(data)?;
+
+			let what: Value = match self.range {
+				Some(range) => self.resource?.with_range(range)?.into(),
+				None => self.resource?.into(),
+			};
+
+			let data = match data {
+				Value::None | Value::Null => None,
+				content => Some(content),
+			};
+
+			Ok(Command::Update {
+				what,
+				data,
+			})
+		})
 	}
 
 	/// Merges the current document / record data with the specified data
