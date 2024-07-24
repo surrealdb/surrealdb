@@ -7,12 +7,12 @@ use crate::idx::trees::vector::SharedVector;
 use crate::idx::{IndexKeyBase, VersionedStore};
 use crate::kvs::{Key, Transaction};
 use crate::sql::{Id, Thing};
-use ahash::HashMap;
 use derive::Store;
-use revision::revisioned;
+use revision::{revisioned, Revisioned};
 use roaring::RoaringTreemap;
 use serde::{Deserialize, Serialize};
-use std::collections::hash_map::Entry;
+use std::ops::Deref;
+use std::sync::Arc;
 
 pub(in crate::idx) struct HnswDocs {
 	tb: String,
@@ -120,52 +120,91 @@ impl HnswDocs {
 	}
 }
 
+#[revisioned(revision = 1)]
+struct ElementDocs {
+	e_id: ElementId,
+	docs: Ids64,
+}
+
 pub(in crate::idx) struct VecDocs {
 	ikb: IndexKeyBase,
-	map: HashMap<SharedVector, (Ids64, ElementId)>,
 }
 
 impl VecDocs {
 	pub(super) fn new(ikb: IndexKeyBase) -> Self {
 		Self {
 			ikb,
-			map: HashMap::default(),
 		}
 	}
 
-	pub(super) fn get_docs(&self, pt: &SharedVector) -> Option<&Ids64> {
-		self.map.get(pt).map(|(doc_ids, _)| doc_ids)
+	pub(super) async fn get_docs(
+		&self,
+		tx: &Transaction,
+		pt: &SharedVector,
+	) -> Result<Option<Ids64>, Error> {
+		let key = self.ikb.new_hv_key(Arc::new(pt.deref().into()));
+		if let Some(val) = tx.get(key).await? {
+			let ed = ElementDocs::deserialize_revisioned(&mut val.as_slice())?;
+			Ok(Some(ed.docs))
+		} else {
+			Ok(None)
+		}
 	}
 
-	pub(super) fn insert(&mut self, o: SharedVector, d: DocId, h: &mut HnswFlavor) {
-		match self.map.entry(o) {
-			Entry::Occupied(mut e) => {
-				let (docs, element_id) = e.get_mut();
-				if let Some(new_docs) = docs.insert(d) {
-					let element_id = *element_id;
-					e.insert((new_docs, element_id));
-				}
+	pub(super) async fn insert(
+		&self,
+		tx: &Transaction,
+		o: SharedVector,
+		d: DocId,
+		h: &mut HnswFlavor,
+	) -> Result<(), Error> {
+		let key = self.ikb.new_hv_key(Arc::new(o.deref().into()));
+		if let Some(ed) = match tx.get(key.clone()).await? {
+			Some(val) => {
+				let mut ed = ElementDocs::deserialize_revisioned(&mut val.as_slice())?;
+				ed.docs.insert(d).map(|new_docs| {
+					ed.docs = new_docs;
+					ed
+				})
 			}
-			Entry::Vacant(e) => {
-				let o = e.key().clone();
+			None => {
 				let element_id = h.insert(o);
-				e.insert((Ids64::One(d), element_id));
+				let ed = ElementDocs {
+					e_id: element_id,
+					docs: Ids64::One(d),
+				};
+				Some(ed)
 			}
+		} {
+			let mut val = Vec::new();
+			ed.serialize_revisioned(&mut val)?;
+			tx.set(key, val).await?;
 		}
+		Ok(())
 	}
 
-	pub(super) fn remove(&mut self, o: SharedVector, d: DocId, h: &mut HnswFlavor) {
-		if let Entry::Occupied(mut e) = self.map.entry(o) {
-			let (docs, e_id) = e.get_mut();
-			if let Some(new_docs) = docs.remove(d) {
-				let e_id = *e_id;
+	pub(super) async fn remove(
+		&self,
+		tx: &Transaction,
+		o: SharedVector,
+		d: DocId,
+		h: &mut HnswFlavor,
+	) -> Result<(), Error> {
+		let key = self.ikb.new_hv_key(Arc::new(o.deref().into()));
+		if let Some(val) = tx.get(key.clone()).await? {
+			let mut ed = ElementDocs::deserialize_revisioned(&mut val.as_slice())?;
+			if let Some(new_docs) = ed.docs.remove(d) {
 				if new_docs.is_empty() {
-					e.remove();
-					h.remove(e_id);
+					tx.del(key).await?;
+					h.remove(ed.e_id);
 				} else {
-					e.insert((new_docs, e_id));
+					ed.docs = new_docs;
+					let mut val = Vec::new();
+					ed.serialize_revisioned(&mut val)?;
+					tx.set(key, val).await?;
 				}
 			}
-		}
+		};
+		Ok(())
 	}
 }

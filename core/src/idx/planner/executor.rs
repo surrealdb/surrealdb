@@ -790,8 +790,7 @@ impl HnswEntry {
 		} else {
 			HnswConditionChecker::new()
 		};
-		let res = h.knn_search(ctx, stk, v, n as usize, ef as usize, cond_checker).await?;
-		drop(h);
+		let res = h.knn_search(&ctx.tx(), stk, v, n as usize, ef as usize, cond_checker).await?;
 		Ok(Self {
 			res,
 		})

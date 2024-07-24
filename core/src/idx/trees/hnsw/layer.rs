@@ -1,4 +1,3 @@
-use crate::ctx::Context;
 use crate::err::Error;
 use crate::idx::planner::checker::HnswConditionChecker;
 use crate::idx::trees::dynamicset::DynamicSet;
@@ -8,6 +7,7 @@ use crate::idx::trees::hnsw::index::HnswCheckedSearchContext;
 use crate::idx::trees::hnsw::{ElementId, HnswElements};
 use crate::idx::trees::knn::DoublePriorityQueue;
 use crate::idx::trees::vector::SharedVector;
+use crate::kvs::Transaction;
 use ahash::HashSet;
 use reblessive::tree::Stk;
 
@@ -59,7 +59,7 @@ where
 	#[allow(clippy::too_many_arguments)]
 	pub(super) async fn search_single_checked(
 		&self,
-		ctx: &Context<'_>,
+		tx: &Transaction,
 		stk: &mut Stk,
 		search: &HnswCheckedSearchContext<'_>,
 		ep_pt: &SharedVector,
@@ -70,8 +70,8 @@ where
 		let visited = HashSet::from_iter([ep_id]);
 		let candidates = DoublePriorityQueue::from(ep_dist, ep_id);
 		let mut w = DoublePriorityQueue::default();
-		Self::add_if_truthy(ctx, stk, search, &mut w, ep_pt, ep_dist, ep_id, chk).await?;
-		self.search_checked(ctx, stk, search, candidates, visited, w, chk).await
+		Self::add_if_truthy(tx, stk, search, &mut w, ep_pt, ep_dist, ep_id, chk).await?;
+		self.search_checked(tx, stk, search, candidates, visited, w, chk).await
 	}
 
 	pub(super) fn search_multi(
@@ -156,7 +156,7 @@ where
 	#[allow(clippy::too_many_arguments)]
 	pub(super) async fn search_checked(
 		&self,
-		ctx: &Context<'_>,
+		tx: &Transaction,
 		stk: &mut Stk,
 		search: &HnswCheckedSearchContext<'_>,
 		mut candidates: DoublePriorityQueue,
@@ -184,10 +184,8 @@ where
 						let e_dist = elements.distance(e_pt, pt);
 						if e_dist < f_dist || w.len() < ef {
 							candidates.push(e_dist, e_id);
-							if Self::add_if_truthy(
-								ctx, stk, search, &mut w, e_pt, e_dist, e_id, chk,
-							)
-							.await?
+							if Self::add_if_truthy(tx, stk, search, &mut w, e_pt, e_dist, e_id, chk)
+								.await?
 							{
 								f_dist = w.peek_last_dist().unwrap(); // w can't be empty
 							}
@@ -201,7 +199,7 @@ where
 
 	#[allow(clippy::too_many_arguments)]
 	pub(super) async fn add_if_truthy(
-		ctx: &Context<'_>,
+		tx: &Transaction,
 		stk: &mut Stk,
 		search: &HnswCheckedSearchContext<'_>,
 		w: &mut DoublePriorityQueue,
@@ -210,8 +208,8 @@ where
 		e_id: ElementId,
 		chk: &mut HnswConditionChecker<'_>,
 	) -> Result<bool, Error> {
-		if let Some(docs) = search.vec_docs().get_docs(e_pt) {
-			if chk.check_truthy(ctx.tx(), stk, search.docs(), docs).await? {
+		if let Some(docs) = search.vec_docs().get_docs(tx, e_pt).await? {
+			if chk.check_truthy(tx, stk, search.docs(), docs).await? {
 				w.push(e_dist, e_id);
 				if w.len() > search.ef() {
 					if let Some((_, id)) = w.pop_last() {

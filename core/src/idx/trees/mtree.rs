@@ -246,7 +246,7 @@ impl MTree {
 								}
 							}
 							if !docs.is_empty() {
-								let evicted_docs = res.add(d, &docs);
+								let evicted_docs = res.add(d, docs);
 								chk.expires(evicted_docs);
 							}
 						}

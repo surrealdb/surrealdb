@@ -45,10 +45,10 @@ impl<'a> HnswConditionChecker<'a> {
 
 	pub(in crate::idx) async fn check_truthy(
 		&mut self,
-		tx: Arc<Transaction>,
+		tx: &Transaction,
 		stk: &mut Stk,
 		docs: &HnswDocs,
-		doc_ids: &Ids64,
+		doc_ids: Ids64,
 	) -> Result<bool, Error> {
 		match self {
 			Self::HnswCondition(c) => c.check_any_truthy(tx, stk, docs, doc_ids).await,
@@ -291,17 +291,17 @@ impl<'a> HnswCondChecker<'a> {
 
 	async fn check_any_truthy(
 		&mut self,
-		tx: Arc<Transaction>,
+		tx: &Transaction,
 		stk: &mut Stk,
 		docs: &HnswDocs,
-		doc_ids: &Ids64,
+		doc_ids: Ids64,
 	) -> Result<bool, Error> {
 		let mut res = false;
 		for doc_id in doc_ids.iter() {
 			if match self.cache.entry(doc_id) {
 				Entry::Occupied(e) => e.get().truthy,
 				Entry::Vacant(e) => {
-					let rid = docs.get_thing(tx.as_ref(), doc_id).await?;
+					let rid = docs.get_thing(tx, doc_id).await?;
 					let ent =
 						CheckerCacheEntry::build(stk, self.ctx, self.opt, rid, self.cond.as_ref())
 							.await?;

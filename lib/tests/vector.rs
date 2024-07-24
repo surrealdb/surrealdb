@@ -526,17 +526,19 @@ async fn check_hnsw_persistence() -> Result<(), Error> {
 	let sql = r"
 		CREATE pts:1 SET point = [1,2,3,4];
 		CREATE pts:2 SET point = [4,5,6,7];
-		CREATE pts:3 SET point = [8,9,10,11];
+		CREATE pts:4 SET point = [12,13,14,15];
 		DEFINE INDEX hnsw_pts ON pts FIELDS point HNSW DIMENSION 4 DIST EUCLIDEAN TYPE F32 EFC 500 M 12;
+		CREATE pts:3 SET point = [8,9,10,11];
+		DELETE pts:4;
 	";
 
 	// Ingest the data in the datastore.
 	let mut t = Test::new(sql).await?;
-	t.skip_ok(4)?;
+	t.skip_ok(6)?;
 
-	// Restart the datastore
 	let sql =
 		"SELECT id, vector::distance::knn() AS dist FROM pts WHERE point <|2,100|> [2,3,4,5];";
+	// Restart the datastore
 	let mut t = t.restart(sql).await?;
 
 	// We should find results

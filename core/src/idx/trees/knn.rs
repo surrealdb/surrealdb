@@ -5,6 +5,7 @@ use crate::idx::trees::store::NodeId;
 #[cfg(debug_assertions)]
 use ahash::HashMap;
 use ahash::{HashSet, HashSetExt};
+use revision::revisioned;
 use roaring::RoaringTreemap;
 use std::cmp::{Ordering, Reverse};
 use std::collections::btree_map::Entry;
@@ -175,6 +176,8 @@ impl Ord for FloatKey {
 /// When identifiers are added or removed, the method returned the most appropriate
 /// variant (if required).
 #[derive(Debug, Clone, PartialEq)]
+#[revisioned(revision = 1)]
+#[non_exhaustive]
 pub(in crate::idx) enum Ids64 {
 	Empty,
 	One(u64),
@@ -539,7 +542,7 @@ impl KnnResultBuilder {
 		true
 	}
 
-	pub(super) fn add(&mut self, dist: f64, docs: &Ids64) -> Ids64 {
+	pub(super) fn add(&mut self, dist: f64, docs: Ids64) -> Ids64 {
 		let pr = FloatKey(dist);
 		docs.append_to(&mut self.docs);
 		match self.priority_list.entry(pr) {
@@ -548,7 +551,7 @@ impl KnnResultBuilder {
 			}
 			Entry::Occupied(mut e) => {
 				let d = e.get_mut();
-				if let Some(n) = d.append_from(docs) {
+				if let Some(n) = d.append_from(&docs) {
 					e.insert(n);
 				}
 			}
@@ -813,10 +816,10 @@ pub(super) mod tests {
 	#[test]
 	fn knn_result_builder_test() {
 		let mut b = KnnResultBuilder::new(7);
-		b.add(0.0, &Ids64::One(5));
-		b.add(0.2, &Ids64::Vec3([0, 1, 2]));
-		b.add(0.2, &Ids64::One(3));
-		b.add(0.2, &Ids64::Vec2([6, 8]));
+		b.add(0.0, Ids64::One(5));
+		b.add(0.2, Ids64::Vec3([0, 1, 2]));
+		b.add(0.2, Ids64::One(3));
+		b.add(0.2, Ids64::Vec2([6, 8]));
 		let res = b.build(
 			#[cfg(debug_assertions)]
 			HashMap::default(),

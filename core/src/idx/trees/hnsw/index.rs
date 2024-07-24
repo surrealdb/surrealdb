@@ -1,4 +1,3 @@
-use crate::ctx::Context;
 use crate::err::Error;
 use crate::idx::docids::DocId;
 use crate::idx::planner::checker::HnswConditionChecker;
@@ -13,6 +12,7 @@ use crate::idx::IndexKeyBase;
 use crate::kvs::Transaction;
 use crate::sql::index::{HnswParams, VectorType};
 use crate::sql::{Id, Number, Value};
+#[cfg(debug_assertions)]
 use ahash::HashMap;
 use reblessive::tree::Stk;
 use std::collections::VecDeque;
@@ -100,18 +100,28 @@ impl HnswIndex {
 			// Extract the vector
 			let vector = Vector::try_from_value(self.vector_type, self.dim, value)?;
 			vector.check_dimension(self.dim)?;
-			self.insert(vector.into(), doc_id);
+			self.insert(tx, vector.into(), doc_id).await?;
 		}
 		self.docs.finish(tx).await?;
 		Ok(())
 	}
 
-	pub(super) fn insert(&mut self, o: SharedVector, d: DocId) {
-		self.vec_docs.insert(o, d, &mut self.hnsw);
+	pub(super) async fn insert(
+		&mut self,
+		tx: &Transaction,
+		o: SharedVector,
+		d: DocId,
+	) -> Result<(), Error> {
+		self.vec_docs.insert(tx, o, d, &mut self.hnsw).await
 	}
 
-	pub(super) fn remove(&mut self, o: SharedVector, d: DocId) {
-		self.vec_docs.remove(o, d, &mut self.hnsw);
+	pub(super) async fn remove(
+		&mut self,
+		tx: &Transaction,
+		o: SharedVector,
+		d: DocId,
+	) -> Result<(), Error> {
+		self.vec_docs.remove(tx, o, d, &mut self.hnsw).await
 	}
 
 	pub(crate) async fn remove_document(
@@ -126,7 +136,7 @@ impl HnswIndex {
 				let vector = Vector::try_from_value(self.vector_type, self.dim, v)?;
 				vector.check_dimension(self.dim)?;
 				// Remove the vector
-				self.remove(vector.into(), doc_id);
+				self.remove(tx, vector.into(), doc_id).await?;
 			}
 			self.docs.finish(tx).await?;
 		}
@@ -135,7 +145,7 @@ impl HnswIndex {
 
 	pub async fn knn_search(
 		&self,
-		ctx: &Context<'_>,
+		tx: &Transaction,
 		stk: &mut Stk,
 		pt: &[Number],
 		k: usize,
@@ -147,14 +157,14 @@ impl HnswIndex {
 		vector.check_dimension(self.dim)?;
 		let search = HnswSearch::new(vector, k, ef);
 		// Do the search
-		let result = self.search(ctx, stk, &search, &mut chk).await?;
-		let res = chk.convert_result(&ctx.tx(), &self.docs, result.docs).await?;
+		let result = self.search(tx, stk, &search, &mut chk).await?;
+		let res = chk.convert_result(tx, &self.docs, result.docs).await?;
 		Ok(res)
 	}
 
 	pub(super) async fn search(
 		&self,
-		ctx: &Context<'_>,
+		tx: &Transaction,
 		stk: &mut Stk,
 		search: &HnswSearch,
 		chk: &mut HnswConditionChecker<'_>,
@@ -164,34 +174,35 @@ impl HnswIndex {
 			HnswConditionChecker::Hnsw(_) => self.hnsw.knn_search(search),
 			HnswConditionChecker::HnswCondition(_) => {
 				self.hnsw
-					.knn_search_checked(ctx, stk, search, &self.docs, &self.vec_docs, chk)
+					.knn_search_checked(tx, stk, search, &self.docs, &self.vec_docs, chk)
 					.await?
 			}
 		};
-		Ok(self.build_result(neighbors, search.k, chk))
+		self.build_result(tx, neighbors, search.k, chk).await
 	}
 
-	fn build_result(
+	async fn build_result(
 		&self,
+		tx: &Transaction,
 		neighbors: Vec<(f64, ElementId)>,
 		n: usize,
 		chk: &mut HnswConditionChecker<'_>,
-	) -> KnnResult {
+	) -> Result<KnnResult, Error> {
 		let mut builder = KnnResultBuilder::new(n);
 		for (e_dist, e_id) in neighbors {
 			if builder.check_add(e_dist) {
 				if let Some(v) = self.hnsw.get_vector(&e_id) {
-					if let Some(docs) = self.vec_docs.get_docs(v) {
+					if let Some(docs) = self.vec_docs.get_docs(tx, v).await? {
 						let evicted_docs = builder.add(e_dist, docs);
 						chk.expires(evicted_docs);
 					}
 				}
 			}
 		}
-		builder.build(
+		Ok(builder.build(
 			#[cfg(debug_assertions)]
 			HashMap::default(),
-		)
+		))
 	}
 
 	#[cfg(test)]

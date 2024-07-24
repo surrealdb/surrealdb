@@ -5,7 +5,6 @@ mod heuristic;
 pub mod index;
 mod layer;
 
-use crate::ctx::Context;
 use crate::err::Error;
 use crate::idx::planner::checker::HnswConditionChecker;
 use crate::idx::trees::dynamicset::DynamicSet;
@@ -18,6 +17,7 @@ use crate::idx::trees::hnsw::index::HnswCheckedSearchContext;
 use crate::idx::trees::hnsw::layer::HnswLayer;
 use crate::idx::trees::knn::DoublePriorityQueue;
 use crate::idx::trees::vector::SharedVector;
+use crate::kvs::Transaction;
 use crate::sql::index::HnswParams;
 use rand::prelude::SmallRng;
 use rand::{Rng, SeedableRng};
@@ -225,7 +225,7 @@ where
 
 	async fn knn_search_checked(
 		&self,
-		ctx: &Context<'_>,
+		tx: &Transaction,
 		stk: &mut Stk,
 		search: &HnswSearch,
 		hnsw_docs: &HnswDocs,
@@ -243,7 +243,7 @@ where
 				);
 				let w = self
 					.layer0
-					.search_single_checked(ctx, stk, &search_ctx, ep_pt, ep_dist, ep_id, chk)
+					.search_single_checked(tx, stk, &search_ctx, ep_pt, ep_dist, ep_id, chk)
 					.await?;
 				return Ok(w.to_vec_limit(search.k));
 			}
@@ -308,7 +308,7 @@ mod tests {
 	use crate::idx::trees::vector::{SharedVector, Vector};
 	use crate::idx::IndexKeyBase;
 	use crate::kvs::LockType::Optimistic;
-	use crate::kvs::{Datastore, TransactionType};
+	use crate::kvs::{Datastore, Transaction, TransactionType};
 	use crate::sql::index::{Distance, HnswParams, VectorType};
 	use ahash::{HashMap, HashSet};
 	use ndarray::Array1;
@@ -450,14 +450,15 @@ mod tests {
 		Ok(())
 	}
 
-	fn insert_collection_hnsw_index(
+	async fn insert_collection_hnsw_index(
+		tx: &Transaction,
 		h: &mut HnswIndex,
 		collection: &TestCollection,
-	) -> HashMap<SharedVector, HashSet<DocId>> {
+	) -> Result<HashMap<SharedVector, HashSet<DocId>>, Error> {
 		let mut map: HashMap<SharedVector, HashSet<DocId>> = HashMap::default();
 		for (doc_id, obj) in collection.to_vec_ref() {
 			let obj: SharedVector = obj.clone();
-			h.insert(obj.clone(), *doc_id);
+			h.insert(tx, obj.clone(), *doc_id).await?;
 			match map.entry(obj) {
 				Entry::Occupied(mut e) => {
 					e.get_mut().insert(*doc_id);
@@ -468,11 +469,11 @@ mod tests {
 			}
 			h.check_hnsw_properties(map.len());
 		}
-		map
+		Ok(map)
 	}
 
 	async fn find_collection_hnsw_index(
-		ctx: &Context<'_>,
+		tx: &Transaction,
 		stk: &mut Stk,
 		h: &mut HnswIndex,
 		collection: &TestCollection,
@@ -482,7 +483,7 @@ mod tests {
 			for knn in 1..max_knn {
 				let mut chk = HnswConditionChecker::new();
 				let search = HnswSearch::new(obj.clone(), knn, 500);
-				let res = h.search(ctx, stk, &search, &mut chk).await.unwrap();
+				let res = h.search(tx, stk, &search, &mut chk).await.unwrap();
 				if knn == 1 && res.docs.len() == 1 && res.docs[0].1 > 0.0 {
 					let docs: Vec<DocId> = res.docs.iter().map(|(d, _)| *d).collect();
 					if collection.is_unique() {
@@ -510,14 +511,15 @@ mod tests {
 		}
 	}
 
-	fn delete_hnsw_index_collection(
+	async fn delete_hnsw_index_collection(
+		tx: &Transaction,
 		h: &mut HnswIndex,
 		collection: &TestCollection,
 		mut map: HashMap<SharedVector, HashSet<DocId>>,
-	) {
+	) -> Result<(), Error> {
 		for (doc_id, obj) in collection.to_vec_ref() {
 			let obj: SharedVector = obj.clone();
-			h.remove(obj.clone(), *doc_id);
+			h.remove(tx, obj.clone(), *doc_id).await?;
 			if let Entry::Occupied(mut e) = map.entry(obj.clone()) {
 				let set = e.get_mut();
 				set.remove(doc_id);
@@ -525,8 +527,10 @@ mod tests {
 					e.remove();
 				}
 			}
+			// Check properties
 			h.check_hnsw_properties(map.len());
 		}
+		Ok(())
 	}
 
 	async fn new_ctx(ds: &Datastore, tt: TransactionType) -> Context<'_> {
@@ -552,28 +556,28 @@ mod tests {
 		// Create index
 		let ctx = new_ctx(&ds, TransactionType::Write).await;
 		let tx = ctx.tx();
-		let mut h = HnswIndex::new(tx.clone(), IndexKeyBase::default(), "test".to_string(), &p)
-			.await
-			.unwrap();
-		tx.commit().await.unwrap();
-
+		let mut h =
+			HnswIndex::new(&tx, IndexKeyBase::default(), "test".to_string(), &p).await.unwrap();
 		// Fill index
-		let map = insert_collection_hnsw_index(&mut h, &collection);
+		let map = insert_collection_hnsw_index(&tx, &mut h, &collection).await.unwrap();
+		tx.commit().await.unwrap();
 
 		// Search index
 		let mut stack = reblessive::tree::TreeStack::new();
 		let ctx = new_ctx(&ds, TransactionType::Read).await;
+		let tx = ctx.tx();
 		stack
 			.enter(|stk| async {
-				find_collection_hnsw_index(&ctx, stk, &mut h, &collection).await;
+				find_collection_hnsw_index(&tx, stk, &mut h, &collection).await;
 			})
 			.finish()
 			.await;
 
 		// Delete collection
 		let ctx = new_ctx(&ds, TransactionType::Write).await;
-		delete_hnsw_index_collection(&mut h, &collection, map);
-		ctx.tx().commit().await.unwrap();
+		let tx = ctx.tx();
+		delete_hnsw_index_collection(&tx, &mut h, &collection, map).await.unwrap();
+		tx.commit().await.unwrap();
 	}
 
 	#[test(tokio::test(flavor = "multi_thread"))]
@@ -656,13 +660,13 @@ mod tests {
 			)?));
 
 		let ctx = new_ctx(&ds, TransactionType::Write).await;
-		let mut h =
-			HnswIndex::new(ctx.tx(), IndexKeyBase::default(), "Index".to_string(), &p).await?;
+		let tx = ctx.tx();
+		let mut h = HnswIndex::new(&tx, IndexKeyBase::default(), "Index".to_string(), &p).await?;
 		info!("Insert collection");
 		for (doc_id, obj) in collection.to_vec_ref() {
-			h.insert(obj.clone(), *doc_id);
+			h.insert(&tx, obj.clone(), *doc_id).await?;
 		}
-		ctx.tx().commit().await?;
+		tx.commit().await?;
 
 		let h = Arc::new(h);
 
@@ -690,7 +694,8 @@ mod tests {
 							let mut chk = HnswConditionChecker::new();
 							let search = HnswSearch::new(pt.clone(), knn, efs);
 							let ctx = new_ctx(&ds, TransactionType::Read).await;
-							let hnsw_res = h.search(&ctx, stk, &search, &mut chk).await.unwrap();
+							let tx = ctx.tx();
+							let hnsw_res = h.search(&tx, stk, &search, &mut chk).await.unwrap();
 							assert_eq!(hnsw_res.docs.len(), knn, "Different size - knn: {knn}",);
 							let brute_force_res = collection.knn(pt, Distance::Euclidean, knn);
 							let rec = brute_force_res.recall(&hnsw_res);
@@ -765,7 +770,7 @@ mod tests {
 			for (doc_id, doc_pt) in self.to_vec_ref() {
 				let d = dist.calculate(doc_pt, pt);
 				if b.check_add(d) {
-					b.add(d, &Ids64::One(*doc_id));
+					b.add(d, Ids64::One(*doc_id));
 				}
 			}
 			b.build(
