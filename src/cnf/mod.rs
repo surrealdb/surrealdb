@@ -14,6 +14,7 @@ Y88b  d88P Y88b 888 888     888     Y8b.     888  888 888 888  .d88P 888   d88P
 
 ";
 
+#[cfg(debug_assertions)]
 pub const DEBUG_BUILD_WARNING: &str = "\
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │                        !!! THIS IS A DEBUG BUILD !!!                        │

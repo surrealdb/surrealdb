@@ -1881,7 +1881,12 @@ async fn function_math_deg2rad() -> Result<(), Error> {
 		RETURN math::deg2rad(math::rad2deg(0.7853981633974483));
 	"#;
 	Test::new(sql).await?.expect_floats(
-		&[0.7853981633974483, -1.5707963267948966, 6.283185307179586, 0.7853981633974483],
+		&[
+			std::f64::consts::FRAC_PI_4,
+			-std::f64::consts::FRAC_PI_2,
+			std::f64::consts::TAU,
+			std::f64::consts::FRAC_PI_4,
+		],
 		f64::EPSILON,
 	)?;
 	Ok(())
@@ -2032,7 +2037,7 @@ async fn function_math_log10() -> Result<(), Error> {
 	"#;
 	Test::new(sql)
 		.await?
-		.expect_floats(&[0.43429738512450866, 0.3010299956639812, 0.0], f64::EPSILON)?
+		.expect_floats(&[0.43429738512450866, std::f64::consts::LOG10_2, 0.0], f64::EPSILON)?
 		.expect_vals(&["Math::Neg_Inf", "NaN", "true"])?;
 	Ok(())
 }
@@ -2949,6 +2954,39 @@ async fn function_rand_ulid() -> Result<(), Error> {
 }
 
 #[tokio::test]
+async fn function_rand_ulid_from_datetime() -> Result<(), Error> {
+	let sql = r#"
+        CREATE ONLY test:[rand::ulid()] SET created = time::now(), num = 1;
+        SLEEP 100ms;
+        LET $rec = CREATE ONLY test:[rand::ulid()] SET created = time::now(), num = 2;
+        SLEEP 100ms;
+        CREATE ONLY test:[rand::ulid()] SET created = time::now(), num = 3;
+		SELECT VALUE num FROM test:[rand::ulid($rec.created - 50ms)]..;
+	"#;
+	let mut test = Test::new(sql).await?;
+	//
+	let tmp = test.next()?.result?;
+	assert!(tmp.is_object());
+	//
+	let tmp = test.next()?.result?;
+	assert!(tmp.is_none());
+	//
+	let tmp = test.next()?.result?;
+	assert!(tmp.is_none());
+	//
+	let tmp = test.next()?.result?;
+	assert!(tmp.is_none());
+	//
+	let tmp = test.next()?.result?;
+	assert!(tmp.is_object());
+	//
+	let tmp = test.next()?.result?;
+	assert_eq!(tmp, Value::parse("[2, 3]"));
+	//
+	Ok(())
+}
+
+#[tokio::test]
 async fn function_rand_uuid() -> Result<(), Error> {
 	let sql = r#"
 		RETURN rand::uuid();
@@ -2957,6 +2995,39 @@ async fn function_rand_uuid() -> Result<(), Error> {
 	//
 	let tmp = test.next()?.result?;
 	assert!(tmp.is_uuid());
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn function_rand_uuid_from_datetime() -> Result<(), Error> {
+	let sql = r#"
+        CREATE ONLY test:[rand::uuid()] SET created = time::now(), num = 1;
+        SLEEP 100ms;
+        LET $rec = CREATE ONLY test:[rand::uuid()] SET created = time::now(), num = 2;
+        SLEEP 100ms;
+        CREATE ONLY test:[rand::uuid()] SET created = time::now(), num = 3;
+		SELECT VALUE num FROM test:[rand::uuid($rec.created - 50ms)]..;
+	"#;
+	let mut test = Test::new(sql).await?;
+	//
+	let tmp = test.next()?.result?;
+	assert!(tmp.is_object());
+	//
+	let tmp = test.next()?.result?;
+	assert!(tmp.is_none());
+	//
+	let tmp = test.next()?.result?;
+	assert!(tmp.is_none());
+	//
+	let tmp = test.next()?.result?;
+	assert!(tmp.is_none());
+	//
+	let tmp = test.next()?.result?;
+	assert!(tmp.is_object());
+	//
+	let tmp = test.next()?.result?;
+	assert_eq!(tmp, Value::parse("[2, 3]"));
 	//
 	Ok(())
 }
@@ -2983,6 +3054,39 @@ async fn function_rand_uuid_v7() -> Result<(), Error> {
 	//
 	let tmp = test.next()?.result?;
 	assert!(tmp.is_uuid());
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn function_rand_uuid_v7_from_datetime() -> Result<(), Error> {
+	let sql = r#"
+        CREATE ONLY test:[rand::uuid::v7()] SET created = time::now(), num = 1;
+        SLEEP 100ms;
+        LET $rec = CREATE ONLY test:[rand::uuid::v7()] SET created = time::now(), num = 2;
+        SLEEP 100ms;
+        CREATE ONLY test:[rand::uuid::v7()] SET created = time::now(), num = 3;
+		SELECT VALUE num FROM test:[rand::uuid::v7($rec.created - 50ms)]..;
+	"#;
+	let mut test = Test::new(sql).await?;
+	//
+	let tmp = test.next()?.result?;
+	assert!(tmp.is_object());
+	//
+	let tmp = test.next()?.result?;
+	assert!(tmp.is_none());
+	//
+	let tmp = test.next()?.result?;
+	assert!(tmp.is_none());
+	//
+	let tmp = test.next()?.result?;
+	assert!(tmp.is_none());
+	//
+	let tmp = test.next()?.result?;
+	assert!(tmp.is_object());
+	//
+	let tmp = test.next()?.result?;
+	assert_eq!(tmp, Value::parse("[2, 3]"));
 	//
 	Ok(())
 }
@@ -4648,7 +4752,7 @@ async fn function_type_is_bytes() -> Result<(), Error> {
 async fn function_type_is_collection() -> Result<(), Error> {
 	let sql = r#"
 		LET $collection = <geometry<collection>> {
-			type: 'GeometryCollection', 
+			type: 'GeometryCollection',
 			geometries: [{ type: 'MultiPoint', coordinates: [[10, 11.2], [10.5, 11.9]] }]
 		};
 		RETURN type::is::collection($collection);
@@ -4902,7 +5006,7 @@ async fn function_type_is_multipoint() -> Result<(), Error> {
 async fn function_type_is_multipolygon() -> Result<(), Error> {
 	let sql = r#"
 		LET $multipolygon = <geometry<multipolygon>> {
-			type: 'MultiPolygon', 
+			type: 'MultiPolygon',
 			coordinates: [[[[10, 11.2], [10.5, 11.9], [10.8, 12], [10, 11.2]]], [[[9, 11.2], [10.5, 11.9], [10.3, 13], [9, 11.2]]]]
 		};
 		RETURN type::is::multipolygon($multipolygon);
@@ -5001,7 +5105,7 @@ async fn function_type_is_point() -> Result<(), Error> {
 async fn function_type_is_polygon() -> Result<(), Error> {
 	let sql = r#"
 		LET $polygon = <geometry<polygon>> {
-			type: 'Polygon', 
+			type: 'Polygon',
 			coordinates: [
 				[
 					[-0.38314819, 51.37692386],
@@ -5953,6 +6057,7 @@ pub async fn function_http_disabled() {
 	"#,
 	)
 	.await
+	.unwrap()
 	.expect_errors(&[
 		"Remote HTTP request functions are not enabled",
 		"Remote HTTP request functions are not enabled",
@@ -5960,7 +6065,8 @@ pub async fn function_http_disabled() {
 		"Remote HTTP request functions are not enabled",
 		"Remote HTTP request functions are not enabled",
 		"Remote HTTP request functions are not enabled",
-	]);
+	])
+	.unwrap();
 }
 
 // Tests for custom defined functions

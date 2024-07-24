@@ -1,4 +1,4 @@
-use hashbrown::HashSet;
+use ahash::{HashSet, HashSetExt};
 use std::fmt::Debug;
 use std::hash::Hash;
 
@@ -126,35 +126,35 @@ where
 #[cfg(test)]
 mod tests {
 	use crate::idx::trees::dynamicset::{ArraySet, DynamicSet, HashBrownSet};
-	use hashbrown::HashSet;
+	use ahash::HashSet;
 
 	fn test_dynamic_set<S: DynamicSet<usize>>(capacity: usize) {
 		let mut dyn_set = S::with_capacity(capacity);
-		let mut control = HashSet::new();
+		let mut control = HashSet::default();
 		// Test insertions
 		for sample in 0..capacity {
 			assert_eq!(dyn_set.len(), control.len(), "{capacity} - {sample}");
 			let v: HashSet<usize> = dyn_set.iter().cloned().collect();
 			assert_eq!(v, control, "{capacity} - {sample}");
 			// We should not have the element yet
-			assert_eq!(dyn_set.contains(&sample), false, "{capacity} - {sample}");
+			assert!(!dyn_set.contains(&sample), "{capacity} - {sample}");
 			// The first insertion returns true
-			assert_eq!(dyn_set.insert(sample), true);
-			assert_eq!(dyn_set.contains(&sample), true, "{capacity} - {sample}");
+			assert!(dyn_set.insert(sample));
+			assert!(dyn_set.contains(&sample), "{capacity} - {sample}");
 			// The second insertion returns false
-			assert_eq!(dyn_set.insert(sample), false);
-			assert_eq!(dyn_set.contains(&sample), true, "{capacity} - {sample}");
+			assert!(!dyn_set.insert(sample));
+			assert!(dyn_set.contains(&sample), "{capacity} - {sample}");
 			// We update the control structure
 			control.insert(sample);
 		}
 		// Test removals
 		for sample in 0..capacity {
 			// The first removal returns true
-			assert_eq!(dyn_set.remove(&sample), true);
-			assert_eq!(dyn_set.contains(&sample), false, "{capacity} - {sample}");
+			assert!(dyn_set.remove(&sample));
+			assert!(!dyn_set.contains(&sample), "{capacity} - {sample}");
 			// The second removal returns false
-			assert_eq!(dyn_set.remove(&sample), false);
-			assert_eq!(dyn_set.contains(&sample), false, "{capacity} - {sample}");
+			assert!(!dyn_set.remove(&sample));
+			assert!(!dyn_set.contains(&sample), "{capacity} - {sample}");
 			// We update the control structure
 			control.remove(&sample);
 			// The control structure and the dyn_set should be identical

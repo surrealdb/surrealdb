@@ -1,27 +1,13 @@
-use std::sync::Arc;
-
-use channel::Receiver;
-use futures::lock::Mutex;
-use futures::StreamExt;
-use reblessive::TreeStack;
-#[cfg(not(target_arch = "wasm32"))]
-use tokio::spawn;
-use tracing::instrument;
-use trice::Instant;
-#[cfg(target_arch = "wasm32")]
-use wasm_bindgen_futures::spawn_local as spawn;
-
 use crate::ctx::Context;
 use crate::dbs::response::Response;
 use crate::dbs::Force;
 use crate::dbs::Notification;
 use crate::dbs::Options;
 use crate::dbs::QueryType;
-use crate::dbs::Transaction;
 use crate::err::Error;
 use crate::iam::Action;
 use crate::iam::ResourceKind;
-use crate::kvs::lq_structs::TrackedResult;
+use crate::kvs::Transaction;
 use crate::kvs::TransactionType;
 use crate::kvs::{Datastore, LockType::*, TransactionType::*};
 use crate::sql::paths::DB;
@@ -30,11 +16,21 @@ use crate::sql::query::Query;
 use crate::sql::statement::Statement;
 use crate::sql::value::Value;
 use crate::sql::Base;
+use channel::Receiver;
+use futures::StreamExt;
+use reblessive::TreeStack;
+use std::sync::Arc;
+#[cfg(not(target_arch = "wasm32"))]
+use tokio::spawn;
+use tracing::instrument;
+use trice::Instant;
+#[cfg(target_arch = "wasm32")]
+use wasm_bindgen_futures::spawn_local as spawn;
 
 pub(crate) struct Executor<'a> {
 	err: bool,
 	kvs: &'a Datastore,
-	txn: Option<Transaction>,
+	txn: Option<Arc<Transaction>>,
 }
 
 impl<'a> Executor<'a> {
@@ -46,7 +42,7 @@ impl<'a> Executor<'a> {
 		}
 	}
 
-	fn txn(&self) -> Transaction {
+	fn txn(&self) -> Arc<Transaction> {
 		self.txn.clone().expect("unreachable: txn was None after successful begin")
 	}
 
@@ -60,7 +56,7 @@ impl<'a> Executor<'a> {
 			Some(_) => false,
 			None => match self.kvs.transaction(write, Optimistic).await {
 				Ok(v) => {
-					self.txn = Some(Arc::new(Mutex::new(v)));
+					self.txn = Some(Arc::new(v));
 					true
 				}
 				Err(_) => {
@@ -81,37 +77,27 @@ impl<'a> Executor<'a> {
 		if local {
 			// Extract the transaction
 			if let Some(txn) = self.txn.take() {
+				// Lock the transaction
 				let mut txn = txn.lock().await;
+				// Check for any errors
 				if self.err {
-					// Cancel and ignore any error because the error flag was
-					// already set
 					let _ = txn.cancel().await;
 				} else {
-					let r = match txn.complete_changes(false).await {
-						Ok(_) => {
-							match txn.commit().await {
-								Ok(()) => {
-									// Commit succeeded, do post commit operations that do not matter to the tx
-									let lqs: Vec<TrackedResult> =
-										txn.consume_pending_live_queries();
-									// Track the live queries in the data store
-									self.kvs.handle_postprocessing_of_statements(&lqs).await?;
-									Ok(())
-								}
-								Err(e) => Err(e),
-							}
-						}
-						r => r,
-					};
-					if let Err(e) = r {
-						// Transaction failed to commit
-						//
-						// TODO: Not all commit errors definitively mean
-						// the transaction didn't commit. Detect that and tell
-						// the user.
+					//
+					if let Err(e) = txn.complete_changes(false).await {
+						// Rollback the transaction
+						let _ = txn.cancel().await;
+						// Return the error message
 						self.err = true;
 						return Err(e);
 					}
+					if let Err(e) = txn.commit().await {
+						// Rollback the transaction
+						let _ = txn.cancel().await;
+						// Return the error message
+						self.err = true;
+						return Err(e);
+					};
 				}
 			}
 		}
@@ -122,7 +108,6 @@ impl<'a> Executor<'a> {
 		if local {
 			// Extract the transaction
 			if let Some(txn) = self.txn.take() {
-				let mut txn = txn.lock().await;
 				if txn.cancel().await.is_err() {
 					self.err = true;
 				}
@@ -168,7 +153,6 @@ impl<'a> Executor<'a> {
 
 	/// Flush notifications from a buffer channel (live queries) to the committed notification channel.
 	/// This is because we don't want to broadcast notifications to the user for failed transactions.
-	/// TODO we can delete this once we migrate to lq v2
 	async fn flush(&self, ctx: &Context<'_>, mut rcv: Receiver<Notification>) {
 		let sender = ctx.notifications();
 		spawn(async move {
@@ -180,17 +164,6 @@ impl<'a> Executor<'a> {
 				}
 			}
 		});
-	}
-
-	/// A transaction collects created live queries which can then be consumed when a transaction is committed
-	/// We use this function to get these transactions and send them to the invoker without channels
-	async fn consume_committed_live_query_registrations(&self) -> Option<Vec<TrackedResult>> {
-		if let Some(txn) = self.txn.as_ref() {
-			let txn = txn.lock().await;
-			Some(txn.consume_pending_live_queries())
-		} else {
-			None
-		}
 	}
 
 	async fn set_ns(&self, ctx: &mut Context<'_>, opt: &mut Options, ns: &str) {
@@ -213,10 +186,9 @@ impl<'a> Executor<'a> {
 		mut ctx: Context<'_>,
 		opt: Options,
 		qry: Query,
-	) -> Result<(Vec<Response>, Vec<TrackedResult>), Error> {
+	) -> Result<Vec<Response>, Error> {
 		// The stack to run the executor in.
 		let mut stack = TreeStack::new();
-
 		// Create a notification channel
 		let (send, recv) = channel::unbounded();
 		// Set the notification channel
@@ -225,7 +197,9 @@ impl<'a> Executor<'a> {
 		let mut buf: Vec<Response> = vec![];
 		// Initialise array of responses
 		let mut out: Vec<Response> = vec![];
-		let mut live_queries: Vec<TrackedResult> = vec![];
+		// Do we fast-forward a transaction?
+		// Set to true when we encounter a return statement in a transaction
+		let mut ff_txn = false;
 		// Process all statements in query
 		for stm in qry.into_iter() {
 			// Log the statement
@@ -242,6 +216,13 @@ impl<'a> Executor<'a> {
 			let is_stm_kill = matches!(stm, Statement::Kill(_));
 			// Check if this is a RETURN statement
 			let is_stm_output = matches!(stm, Statement::Output(_));
+			// Has this statement returned a value
+			let mut has_returned = false;
+			// Do we skip this statement?
+			if ff_txn && !matches!(stm, Statement::Commit(_) | Statement::Cancel(_)) {
+				debug!("Skipping statement due to fast forwarded transaction");
+				continue;
+			}
 			// Process a single statement
 			let res = match stm {
 				// Specify runtime options
@@ -283,12 +264,10 @@ impl<'a> Executor<'a> {
 					let commit_error = self.commit(true).await.err();
 					buf = buf.into_iter().map(|v| self.buf_commit(v, &commit_error)).collect();
 					self.flush(&ctx, recv.clone()).await;
-					if let Some(lqs) = self.consume_committed_live_query_registrations().await {
-						live_queries.extend(lqs);
-					}
 					out.append(&mut buf);
 					debug_assert!(self.txn.is_none(), "commit(true) should have unset txn");
 					self.txn = None;
+					ff_txn = false;
 					continue;
 				}
 				// Switch to a different NS or DB
@@ -311,7 +290,8 @@ impl<'a> Executor<'a> {
 						true => Err(Error::TxFailure),
 						// The transaction began successfully
 						false => {
-							ctx.set_transaction_mut(self.txn());
+							// ctx.set_transaction(txn)
+							ctx.set_transaction(self.txn());
 							// Check the statement
 							match stack
 								.enter(|stk| stm.compute(stk, &ctx, &opt, None))
@@ -336,12 +316,6 @@ impl<'a> Executor<'a> {
 											Ok(_) => {
 												// Flush live query notifications
 												self.flush(&ctx, recv.clone()).await;
-												if let Some(lqs) = self
-													.consume_committed_live_query_registrations()
-													.await
-												{
-													live_queries.extend(lqs);
-												}
 												Ok(Value::None)
 											}
 										}
@@ -384,7 +358,7 @@ impl<'a> Executor<'a> {
 										if let Err(err) = ctx.add_timeout(timeout) {
 											Err(err)
 										} else {
-											ctx.set_transaction_mut(self.txn());
+											ctx.set_transaction(self.txn());
 											// Process the statement
 											let res = stack
 												.enter(|stk| stm.compute(stk, &ctx, &opt, None))
@@ -399,17 +373,28 @@ impl<'a> Executor<'a> {
 									}
 									// There is no timeout clause
 									None => {
-										ctx.set_transaction_mut(self.txn());
+										ctx.set_transaction(self.txn());
 										stack
 											.enter(|stk| stm.compute(stk, &ctx, &opt, None))
 											.finish()
 											.await
 									}
 								};
+								// Check if this is a RETURN statement
+								let can_return =
+									matches!(stm, Statement::Output(_) | Statement::Value(_));
 								// Catch global timeout
 								let res = match ctx.is_timedout() {
 									true => Err(Error::QueryTimedout),
-									false => res,
+									false => match res {
+										Err(Error::Return {
+											value,
+										}) if can_return => {
+											has_returned = true;
+											Ok(value)
+										}
+										res => res,
+									},
 								};
 								// Finalise transaction and return the result.
 								if res.is_ok() && stm.writeable() {
@@ -423,11 +408,6 @@ impl<'a> Executor<'a> {
 									} else {
 										// Flush the live query change notifications
 										self.flush(&ctx, recv.clone()).await;
-										if let Some(lqs) =
-											self.consume_committed_live_query_registrations().await
-										{
-											live_queries.extend(lqs);
-										}
 										res
 									}
 								} else {
@@ -442,36 +422,24 @@ impl<'a> Executor<'a> {
 					}
 				},
 			};
+
+			self.err = res.is_err();
 			// Produce the response
 			let res = Response {
 				// Get the statement end time
 				time: now.elapsed(),
-				// TODO: Replace with `inspect_err` once stable.
-				result: res.map_err(|e| {
-					// Mark the error.
-					self.err = true;
-					e
-				}),
+				result: res,
 				query_type: match (is_stm_live, is_stm_kill) {
-					(true, _) => {
-						if let Some(lqs) = self.consume_committed_live_query_registrations().await {
-							live_queries.extend(lqs);
-						}
-						QueryType::Live
-					}
-					(_, true) => {
-						if let Some(lqs) = self.consume_committed_live_query_registrations().await {
-							live_queries.extend(lqs);
-						}
-						QueryType::Kill
-					}
+					(true, _) => QueryType::Live,
+					(_, true) => QueryType::Kill,
 					_ => QueryType::Other,
 				},
 			};
 			// Output the response
 			if self.txn.is_some() {
-				if is_stm_output {
+				if is_stm_output || has_returned {
 					buf.clear();
+					ff_txn = true;
 				}
 				buf.push(res);
 			} else {
@@ -479,7 +447,7 @@ impl<'a> Executor<'a> {
 			}
 		}
 		// Return responses
-		Ok((out, live_queries))
+		Ok(out)
 	}
 }
 

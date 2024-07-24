@@ -31,7 +31,9 @@ use crate::{
 impl Parser<'_> {
 	pub async fn parse_define_stmt(&mut self, ctx: &mut Stk) -> ParseResult<DefineStatement> {
 		match self.next().kind {
-			t!("NAMESPACE") => self.parse_define_namespace().map(DefineStatement::Namespace),
+			t!("NAMESPACE") | t!("ns") => {
+				self.parse_define_namespace().map(DefineStatement::Namespace)
+			}
 			t!("DATABASE") => self.parse_define_database().map(DefineStatement::Database),
 			t!("FUNCTION") => self.parse_define_function(ctx).await.map(DefineStatement::Function),
 			t!("USER") => self.parse_define_user().map(DefineStatement::User),
@@ -285,6 +287,14 @@ impl Parser<'_> {
 						}
 						t!("RECORD") => {
 							self.pop_peek();
+							// The record access type can only be defined at the database level
+							if !matches!(res.base, Base::Db) {
+								unexpected!(
+									self,
+									t!("RECORD"),
+									"a valid access type at this level"
+								);
+							}
 							let mut ac = access_type::RecordAccess {
 								..Default::default()
 							};
@@ -298,6 +308,11 @@ impl Parser<'_> {
 									t!("SIGNIN") => {
 										self.pop_peek();
 										ac.signin =
+											Some(stk.run(|stk| self.parse_value(stk)).await?);
+									}
+									t!("AUTHENTICATE") => {
+										self.pop_peek();
+										ac.authenticate =
 											Some(stk.run(|stk| self.parse_value(stk)).await?);
 									}
 									_ => break,
@@ -512,6 +527,10 @@ impl Parser<'_> {
 				t!("SIGNIN") => {
 					self.pop_peek();
 					ac.signin = Some(stk.run(|stk| self.parse_value(stk)).await?);
+				}
+				t!("AUTHENTICATE") => {
+					self.pop_peek();
+					ac.authenticate = Some(stk.run(|stk| self.parse_value(stk)).await?);
 				}
 				_ => break,
 			}

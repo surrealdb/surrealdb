@@ -4,7 +4,7 @@ use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::iam::{Action, ResourceKind};
 use crate::sql::statements::info::InfoStructure;
-use crate::sql::{Base, Ident, Object, Strand, Value};
+use crate::sql::{Base, Ident, Strand, Value};
 use derive::Store;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -32,14 +32,10 @@ impl DefineNamespaceStatement {
 	) -> Result<Value, Error> {
 		// Allowed to run?
 		opt.is_allowed(Action::Edit, ResourceKind::Namespace, &Base::Root)?;
-		// Process the statement
-		let key = crate::key::root::ns::new(&self.name);
-		// Claim transaction
-		let mut run = ctx.tx_lock().await;
-		// Clear the cache
-		run.clear_cache();
-		// Check if namespace already exists
-		if run.get_ns(&self.name).await.is_ok() {
+		// Fetch the transaction
+		let txn = ctx.tx();
+		// Check if the definition exists
+		if txn.get_ns(&self.name).await.is_ok() {
 			if self.if_not_exists {
 				return Ok(Value::None);
 			} else {
@@ -48,24 +44,24 @@ impl DefineNamespaceStatement {
 				});
 			}
 		}
-		if self.id.is_none() {
-			// Set the id
-			let ns = DefineNamespaceStatement {
-				id: Some(run.get_next_ns_id().await?),
+		// Process the statement
+		let key = crate::key::root::ns::new(&self.name);
+		txn.set(
+			key,
+			DefineNamespaceStatement {
+				id: if self.id.is_none() {
+					Some(txn.lock().await.get_next_ns_id().await?)
+				} else {
+					None
+				},
+				// Don't persist the `IF NOT EXISTS` clause to schema
 				if_not_exists: false,
 				..self.clone()
-			};
-			run.set(key, ns).await?;
-		} else {
-			run.set(
-				key,
-				DefineNamespaceStatement {
-					if_not_exists: false,
-					..self.clone()
-				},
-			)
-			.await?;
-		}
+			},
+		)
+		.await?;
+		// Clear the cache
+		txn.clear();
 		// Ok all good
 		Ok(Value::None)
 	}
@@ -87,19 +83,9 @@ impl Display for DefineNamespaceStatement {
 
 impl InfoStructure for DefineNamespaceStatement {
 	fn structure(self) -> Value {
-		let Self {
-			name,
-			comment,
-			..
-		} = self;
-		let mut acc = Object::default();
-
-		acc.insert("name".to_string(), name.structure());
-
-		if let Some(comment) = comment {
-			acc.insert("comment".to_string(), comment.into());
-		}
-
-		Value::Object(acc)
+		Value::from(map! {
+			"name".to_string() => self.name.structure(),
+			"comment".to_string(), if let Some(v) = self.comment => v.into(),
+		})
 	}
 }

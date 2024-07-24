@@ -24,7 +24,7 @@ use crate::cli::CF;
 use crate::cnf;
 use crate::err::Error;
 use crate::net::signals::graceful_shutdown;
-use crate::rpc::notifications;
+use crate::rpc::{notifications, RpcState};
 use crate::telemetry::metrics::HttpMetricsLayer;
 use axum::response::Redirect;
 use axum::routing::get;
@@ -36,6 +36,7 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
 use surrealdb::headers::{AUTH_DB, AUTH_NS, DB, ID, NS};
+use surrealdb::kvs::Datastore;
 use tokio_util::sync::CancellationToken;
 use tower::ServiceBuilder;
 use tower_http::add_extension::AddExtensionLayer;
@@ -60,14 +61,16 @@ const LOG: &str = "surrealdb::net";
 #[derive(Clone)]
 struct AppState {
 	client_ip: client_ip::ClientIp,
+	datastore: Arc<Datastore>,
 }
 
-pub async fn init(ct: CancellationToken) -> Result<(), Error> {
+pub async fn init(ds: Arc<Datastore>, ct: CancellationToken) -> Result<(), Error> {
 	// Get local copy of options
 	let opt = CF.get().unwrap();
 
 	let app_state = AppState {
 		client_ip: opt.client_ip,
+		datastore: ds.clone(),
 	};
 
 	// Specify headers to be obfuscated from all requests/responses
@@ -155,7 +158,7 @@ pub async fn init(ct: CancellationToken) -> Result<(), Error> {
 				.max_age(Duration::from_secs(86400)),
 		);
 
-	let axum_app = Router::new()
+	let axum_app = Router::<Arc<RpcState>, _>::new()
 		// Redirect until we provide a UI
 		.route("/", get(|| async { Redirect::temporary(cnf::APP_ENDPOINT) }))
 		.route("/status", get(|| async {}))
@@ -177,10 +180,16 @@ pub async fn init(ct: CancellationToken) -> Result<(), Error> {
 
 	// Get a new server handler
 	let handle = Handle::new();
+
+	let rpc_state = Arc::new(RpcState::new());
+
 	// Setup the graceful shutdown handler
-	let shutdown_handler = graceful_shutdown(ct.clone(), handle.clone());
+	let shutdown_handler = graceful_shutdown(rpc_state.clone(), ct.clone(), handle.clone());
+
+	let axum_app = axum_app.with_state(rpc_state.clone());
+
 	// Spawn a task to handle notifications
-	tokio::spawn(async move { notifications(ct.clone()).await });
+	tokio::spawn(async move { notifications(ds, rpc_state, ct.clone()).await });
 	// If a certificate and key are specified then setup TLS
 	if let (Some(cert), Some(key)) = (&opt.crt, &opt.key) {
 		// Configure certificate and private key used by https
