@@ -1307,18 +1307,19 @@ impl Transaction {
 	}
 
 	/// Add live query to tables edges
-	pub async fn putc_edlq(
+	pub async fn putc_eglq(
 		&mut self,
 		ns: &str,
 		db: &str,
 		tb: &str,
+		eg: &str,
 		live_stm: LiveStatement,
 		expected: Option<LiveStatement>,
 	) -> Result<(), Error> {
-		let key = crate::key::table::eq::new(ns, db, tb, live_stm.id.0);
+		let key = crate::key::table::eq::new(ns, db, tb, eg, live_stm.id.0);
 		let key_enc = crate::key::table::eq::Eq::encode(&key)?;
 		#[cfg(debug_assertions)]
-		trace!("putc_tblq ({:?}): key={:?}", &live_stm.id, sprint_key(&key_enc));
+		trace!("putc_eglq ({:?}): key={:?}", &live_stm.id, sprint_key(&key_enc));
 		self.putc(key_enc, live_stm, expected).await
 	}
 
@@ -1329,11 +1330,11 @@ impl Transaction {
 		ns: &str,
 		db: &str,
 		tb: &str,
-		chk: Option<&str>,
+		chk: Option<Value>,
 	) -> Result<(), Error> {
 		let key = crate::key::node::lq::new(nd, lq, ns, db);
 		// TODO(phughk): Needs to store edge references for gc
-		self.putc(key, tb, chk).await
+		self.putc(key, tb, chk.map(|v| v.to_string().as_str())).await
 	}
 
 	/// Retrieve all ROOT users.
