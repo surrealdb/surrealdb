@@ -6,14 +6,14 @@ use crate::api::opt::Resource;
 use crate::api::Connection;
 use crate::api::Result;
 use crate::method::OnceLockExt;
-use crate::sql::Id;
-use crate::Value;
 use crate::Surreal;
+use crate::Value;
 use serde::de::DeserializeOwned;
 use std::borrow::Cow;
 use std::future::IntoFuture;
 use std::marker::PhantomData;
 use std::result::Result as StdResult;
+use surrealdb_core::sql::Id;
 
 /// A patch future
 #[derive(Debug)]
@@ -22,7 +22,7 @@ pub struct Patch<'r, C: Connection, R> {
 	pub(super) client: Cow<'r, Surreal<C>>,
 	pub(super) resource: Result<Resource>,
 	pub(super) range: Option<Range<Id>>,
-	pub(super) patches: Vec<StdResult<Value, crate::err::Error>>,
+	pub(super) patches: Vec<StdResult<Value, surrealdb_core::err::Error>>,
 	pub(super) response_type: PhantomData<R>,
 }
 

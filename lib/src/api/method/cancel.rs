@@ -2,8 +2,8 @@ use crate::api::method::BoxFuture;
 use crate::api::Connection;
 use crate::api::Result;
 use crate::api::Surreal;
-use crate::sql::statements::CancelStatement;
 use std::future::IntoFuture;
+use surrealdb_core::sql::statements::CancelStatement;
 
 /// A transaction cancellation future
 #[derive(Debug)]

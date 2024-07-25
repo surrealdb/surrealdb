@@ -27,27 +27,25 @@ use crate::{
 	},
 	method::Stats,
 	opt::IntoEndpoint,
+	value::{ToCore, Value},
+	Notification, Object,
 };
 use channel::Sender;
 use indexmap::IndexMap;
-use std::{
-	collections::{BTreeMap, HashMap},
-	marker::PhantomData,
-	mem,
-	sync::Arc,
-	time::Duration,
-};
+use std::{collections::HashMap, marker::PhantomData, mem, sync::Arc, time::Duration};
 use surrealdb_core::{
-	dbs::{Notification, Response, Session},
+	dbs::{Response, Session},
+	iam,
 	kvs::Datastore,
 	sql::{
 		statements::{
 			CreateStatement, DeleteStatement, InsertStatement, KillStatement, SelectStatement,
 			UpdateStatement, UpsertStatement,
 		},
-		Data, Field, Output, Query, Statement, Uuid, Value,
+		Data, Field, Output, Query, Statement,
 	},
 };
+use uuid::Uuid;
 
 #[cfg(not(target_arch = "wasm32"))]
 use crate::api::err::Error;
@@ -72,6 +70,11 @@ use surrealdb_core::{
 };
 
 use super::value_to_values;
+
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) mod native;
+#[cfg(target_arch = "wasm32")]
+pub(crate) mod wasm;
 
 const DEFAULT_TICK_INTERVAL: Duration = Duration::from_secs(10);
 
@@ -371,9 +374,8 @@ fn process(responses: Vec<Response>) -> QueryResponse {
 		};
 		match response.result {
 			Ok(value) => {
-				let v: CoreValue = value;
 				// Deserializing from a core value should always work.
-				let v = Value::from_core(v)
+				let v = Value::from_core(value)
 					.ok_or(crate::Error::Api(crate::api::Error::RecievedInvalidValue));
 				map.insert(index, (stats, v));
 			}
@@ -474,14 +476,14 @@ async fn kill_live_query(
 	kvs: &Datastore,
 	id: Uuid,
 	session: &Session,
-	vars: BTreeMap<String, Value>,
+	vars: Object,
 ) -> Result<Value> {
 	let mut query = Query::default();
 	let mut kill = KillStatement::default();
 	kill.id = id.into();
 	query.0 .0 = vec![Statement::Kill(kill)];
-	let vars = vars.into_iter().map(|(k, v)| (k, v.to_core())).collect();
-	let response = kvs.process(query, session, Some(vars)).await?;
+	let vars = vars.to_core();
+	let response = kvs.process(query, session, Some(vars.0)).await?;
 	take(true, response).await
 }
 
@@ -492,8 +494,8 @@ async fn router(
 	}: RequestData,
 	kvs: &Arc<Datastore>,
 	session: &mut Session,
-	vars: &mut BTreeMap<String, Value>,
-	live_queries: &mut HashMap<Uuid, Sender<Notification>>,
+	vars: &mut Object,
+	live_queries: &mut HashMap<Uuid, Sender<Notification<Value>>>,
 ) -> Result<DbResponse> {
 	match command {
 		Command::Use {
@@ -511,23 +513,23 @@ async fn router(
 		Command::Signup {
 			credentials,
 		} => {
-			let response = crate::iam::signup::signup(kvs, session, credentials).await?;
+			let response = iam::signup::signup(kvs, session, credentials.to_core()).await?;
 			Ok(DbResponse::Other(response.into()))
 		}
 		Command::Signin {
 			credentials,
 		} => {
-			let response = crate::iam::signin::signin(kvs, session, credentials).await?;
+			let response = iam::signin::signin(kvs, session, credentials.to_core()).await?;
 			Ok(DbResponse::Other(response.into()))
 		}
 		Command::Authenticate {
 			token,
 		} => {
-			crate::iam::verify::token(kvs, session, &token).await?;
+			iam::verify::token(kvs, session, &token).await?;
 			Ok(DbResponse::Other(Value::None))
 		}
 		Command::Invalidate => {
-			crate::iam::clear::clear(session)?;
+			iam::clear::clear(session)?;
 			Ok(DbResponse::Other(Value::None))
 		}
 		Command::Create {
@@ -538,7 +540,7 @@ async fn router(
 			let statement = {
 				let mut stmt = CreateStatement::default();
 				stmt.what = value_to_values(what);
-				stmt.data = data.map(Data::ContentExpression);
+				stmt.data = data.map(ToCore::to_core).map(Data::ContentExpression);
 				stmt.output = Some(Output::After);
 				stmt
 			};
@@ -553,11 +555,11 @@ async fn router(
 			data,
 		} => {
 			let mut query = Query::default();
-			let one = what.is_thing();
+			let one = what.is_record_id();
 			let statement = {
 				let mut stmt = UpsertStatement::default();
 				stmt.what = value_to_values(what);
-				stmt.data = data.map(Data::ContentExpression);
+				stmt.data = data.map(ToCore::to_core).map(Data::ContentExpression);
 				stmt.output = Some(Output::After);
 				stmt
 			};
@@ -572,11 +574,11 @@ async fn router(
 			data,
 		} => {
 			let mut query = Query::default();
-			let one = what.is_thing();
+			let one = what.is_record_id();
 			let statement = {
 				let mut stmt = UpdateStatement::default();
 				stmt.what = value_to_values(what);
-				stmt.data = data.map(Data::ContentExpression);
+				stmt.data = data.map(ToCore::to_core).map(Data::ContentExpression);
 				stmt.output = Some(Output::After);
 				stmt
 			};
@@ -591,11 +593,11 @@ async fn router(
 			data,
 		} => {
 			let mut query = Query::default();
-			let one = !data.is_array();
+			let one = !data.is_record_id();
 			let statement = {
 				let mut stmt = InsertStatement::default();
-				stmt.into = what;
-				stmt.data = Data::SingleExpression(data);
+				stmt.into = what.map(ToCore::to_core);
+				stmt.data = Data::SingleExpression(data.to_core());
 				stmt.output = Some(Output::After);
 				stmt
 			};
@@ -610,11 +612,11 @@ async fn router(
 			data,
 		} => {
 			let mut query = Query::default();
-			let one = what.is_thing();
+			let one = what.is_record_id();
 			let statement = {
 				let mut stmt = UpdateStatement::default();
 				stmt.what = value_to_values(what);
-				stmt.data = data.map(Data::PatchExpression);
+				stmt.data = data.map(ToCore::to_core).map(Data::PatchExpression);
 				stmt.output = Some(Output::After);
 				stmt
 			};
@@ -629,11 +631,11 @@ async fn router(
 			data,
 		} => {
 			let mut query = Query::default();
-			let one = what.is_thing();
+			let one = what.is_record_id();
 			let statement = {
 				let mut stmt = UpdateStatement::default();
 				stmt.what = value_to_values(what);
-				stmt.data = data.map(Data::MergeExpression);
+				stmt.data = data.map(ToCore::to_core).map(Data::MergeExpression);
 				stmt.output = Some(Output::After);
 				stmt
 			};
@@ -647,7 +649,7 @@ async fn router(
 			what,
 		} => {
 			let mut query = Query::default();
-			let one = what.is_thing();
+			let one = what.is_record_id();
 			let statement = {
 				let mut stmt = SelectStatement::default();
 				stmt.what = value_to_values(what);
@@ -664,7 +666,7 @@ async fn router(
 			what,
 		} => {
 			let mut query = Query::default();
-			let one = what.is_thing();
+			let one = what.is_record_id();
 			let statement = {
 				let mut stmt = DeleteStatement::default();
 				stmt.what = value_to_values(what);
@@ -682,8 +684,8 @@ async fn router(
 			mut variables,
 		} => {
 			let mut vars = vars.clone();
-			vars.append(&mut variables);
-			let response = kvs.process(query, &*session, Some(vars)).await?;
+			vars.0.append(&mut variables.0);
+			let response = kvs.process(query, &*session, Some(vars.to_core().0)).await?;
 			let response = process(response);
 			Ok(DbResponse::Query(response))
 		}
@@ -883,7 +885,7 @@ async fn router(
 				.into());
 			}
 
-			let responses = kvs.execute(&statements, &*session, Some(vars.clone())).await?;
+			let responses = kvs.execute(&statements, &*session, Some(vars.as_core().0)).await?;
 
 			for response in responses {
 				response.result?;
@@ -947,7 +949,7 @@ async fn router(
 			model.comment = Some(file.header.description.to_string().into());
 			model.hash = hash;
 			let query = DefineStatement::Model(model).into();
-			let responses = kvs.process(query, session, Some(vars.clone())).await?;
+			let responses = kvs.process(query, session, Some(vars.as_core().0)).await?;
 
 			for response in responses {
 				response.result?;
@@ -956,19 +958,15 @@ async fn router(
 			Ok(DbResponse::Other(Value::None))
 		}
 		Command::Health => Ok(DbResponse::Other(Value::None)),
-		Command::Version => Ok(DbResponse::Other(crate::env::VERSION.into())),
+		Command::Version => {
+			Ok(DbResponse::Other(Value::from(surrealdb_core::env::VERSION.to_string())))
+		}
 		Command::Set {
 			key,
 			value,
 		} => {
-			let var = Some(map! {
-				key.clone() => Value::None,
-				=> vars
-			});
-			match kvs.compute(value, &*session, var).await? {
-				Value::None => vars.remove(&key),
-				v => vars.insert(key, v),
-			};
+			// No longer need to compute this value as it can't be a non-primitive value.
+			vars.insert(key, value);
 			Ok(DbResponse::Other(Value::None))
 		}
 		Command::Unset {

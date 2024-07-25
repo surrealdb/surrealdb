@@ -4,6 +4,7 @@ use crate::api::Connection;
 use crate::api::Result;
 use crate::method::OnceLockExt;
 use crate::Surreal;
+use crate::Value;
 use serde::de::DeserializeOwned;
 use std::borrow::Cow;
 use std::future::IntoFuture;

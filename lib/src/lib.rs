@@ -116,26 +116,12 @@ compile_error!("The `ml` feature is not supported on the `wasm32` architecture."
 #[macro_use]
 extern crate tracing;
 
+use serde::{Deserialize, Serialize};
+use uuid::Uuid;
+
 #[macro_use]
 mod mac;
-
 mod api;
-
-#[cfg(feature = "protocol-http")]
-#[doc(hidden)]
-pub use api::headers;
-
-#[doc(inline)]
-pub use api::{
-	engine, method, opt,
-	value::{self, Bytes, Datetime, Number, Object, RecordId, RecordIdKey, Value},
-	Connect, Connection, Response, Result, Surreal,
-};
-
-#[doc(inline)]
-pub use surrealdb_core::*;
-
-use uuid::Uuid;
 
 #[doc(hidden)]
 /// Channels for receiving a SurrealQL database export
@@ -149,13 +135,24 @@ pub mod channel {
 /// Different error types for embedded and remote databases
 pub mod error {
 	pub use crate::api::err::Error as Api;
-	pub use crate::err::Error as Db;
+	pub use surrealdb_core::err::Error as Db;
 }
+
+#[cfg(feature = "protocol-http")]
+#[doc(hidden)]
+pub use api::headers;
+
+#[doc(inline)]
+pub use api::{
+	engine, method, opt,
+	value::{self, Bytes, Datetime, Number, Object, RecordId, RecordIdKey, Value},
+	Connect, Connection, Response, Result, Surreal,
+};
 
 /// The action performed on a record
 ///
 /// This is used in live query notifications.
-#[derive(Debug, Clone, Copy, Eq, PartialEq, Ord, PartialOrd, Hash)]
+#[derive(Debug, Clone, Copy, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 #[non_exhaustive]
 pub enum Action {
 	Create,
@@ -163,12 +160,12 @@ pub enum Action {
 	Delete,
 }
 
-impl From<dbs::Action> for Action {
-	fn from(action: dbs::Action) -> Self {
+impl From<surrealdb_core::dbs::Action> for Action {
+	fn from(action: surrealdb_core::dbs::Action) -> Self {
 		match action {
-			dbs::Action::Create => Self::Create,
-			dbs::Action::Update => Self::Update,
-			dbs::Action::Delete => Self::Delete,
+			surrealdb_core::dbs::Action::Create => Self::Create,
+			surrealdb_core::dbs::Action::Update => Self::Update,
+			surrealdb_core::dbs::Action::Delete => Self::Delete,
 			_ => unreachable!(),
 		}
 	}

@@ -6,16 +6,14 @@ use crate::api::opt::Resource;
 use crate::api::Connection;
 use crate::api::Result;
 use crate::method::OnceLockExt;
-use crate::sql::Ident;
-use crate::sql::Part;
-use crate::sql::Table;
-use crate::Value;
 use crate::Surreal;
+use crate::Value;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 use std::borrow::Cow;
 use std::future::IntoFuture;
 use std::marker::PhantomData;
+use surrealdb_core::sql::{Ident, Part, Table};
 
 /// An insert future
 #[derive(Debug)]
@@ -51,16 +49,16 @@ macro_rules! into_future {
 				let (table, data) = match resource? {
 					Resource::Table(table) => (table.into(), Value::Object(Default::default())),
 					Resource::RecordId(record_id) => {
-						let mut table = Table::default();
-						table.0 = record_id.tb.clone();
-						(table.into(), map! { String::from("id") => record_id.into() }.into())
+						(record_id.table, map! { String::from("id") => record_id.into() }.into())
 					}
-					Resource::Object(obj) => return Err(Error::InsertOnObject(obj).into()),
-					Resource::Array(arr) => return Err(Error::InsertOnArray(arr).into()),
-					Resource::Edges(edges) => return Err(Error::InsertOnEdges(edges).into()),
+					Resource::Object(obj) => return Err(Error::InsertOnObject.into()),
+					Resource::Array(arr) => return Err(Error::InsertOnArray.into()),
+					Resource::Edges {
+						..
+					} => return Err(Error::InsertOnEdges.into()),
 				};
 				let cmd = Command::Insert {
-					what: Some(table),
+					what: table.to_string(),
 					data,
 				};
 
@@ -114,7 +112,7 @@ where
 		D: Serialize,
 	{
 		Content::from_closure(self.client, || {
-			let mut data = crate::sql::to_value(data)?;
+			let mut data = surrealdb_core::sql::to_value(data)?;
 			match self.resource? {
 				Resource::Table(table) => Ok(Command::Insert {
 					what: Some(table.into()),
@@ -140,9 +138,9 @@ where
 						})
 					}
 				}
-				Resource::Object(obj) => Err(Error::InsertOnObject(obj).into()),
-				Resource::Array(arr) => Err(Error::InsertOnArray(arr).into()),
-				Resource::Edges(edges) => Err(Error::InsertOnEdges(edges).into()),
+				Resource::Object(obj) => Err(Error::InsertOnObject.into()),
+				Resource::Array(arr) => Err(Error::InsertOnArray.into()),
+				Resource::Edges(edges) => Err(Error::InsertOnEdges.into()),
 			}
 		})
 	}

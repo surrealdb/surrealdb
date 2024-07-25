@@ -3,14 +3,13 @@ use crate::{
 	method::{self, Stats, Stream},
 	Notification, Value,
 };
-use chrono::naive::serde::ts_microseconds::deserialize;
 use futures::future::Either;
 use futures::stream::select_all;
 use serde::{de::DeserializeOwned, Deserialize};
 use std::marker::PhantomData;
 use std::mem;
 use surrealdb_core::{
-	sql::{self, from_value, statements::*, Statement, Statements, Value as CoreValue},
+	sql::{self, statements::*, Statement, Statements},
 	syn,
 };
 
@@ -226,7 +225,7 @@ where
 				[] => Ok(None),
 				[value] => {
 					let value = mem::take(value);
-					from_value(value).map_err(Into::into)
+					Deserialize::deserialize(value).map_err(Into::into)
 				}
 				_ => Err(Error::LossyTake(QueryResponse {
 					results: mem::take(&mut response.results),
@@ -237,7 +236,7 @@ where
 			},
 			_ => {
 				let value = mem::take(value);
-				from_value(value).map_err(Into::into)
+				Deserialize::deserialize(value).map_err(Into::into)
 			}
 		};
 		response.results.swap_remove(&self);

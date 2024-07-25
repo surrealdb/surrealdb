@@ -1,9 +1,9 @@
 //! The different options and types for use in API functions
-use crate::sql::to_value;
-use crate::sql::Thing;
-use crate::sql::Value;
 use dmp::Diff;
 use serde::Serialize;
+use surrealdb_core::sql::to_value;
+use surrealdb_core::sql::Thing;
+use surrealdb_core::sql::Value;
 
 pub mod auth;
 pub mod capabilities;
@@ -58,7 +58,7 @@ enum InnerOp<'a, T> {
 /// [JSON Patch]: https://jsonpatch.com/
 #[derive(Debug)]
 #[must_use]
-pub struct PatchOp(pub(crate) Result<Value, crate::err::Error>);
+pub struct PatchOp(pub(crate) Result<Value, surrealdb_core::err::Error>);
 
 impl PatchOp {
 	/// Adds a value to an object or inserts it into an array.

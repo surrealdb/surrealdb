@@ -39,6 +39,35 @@ impl<'de> Deserializer<'de> for Number {
 	}
 }
 
+impl<'de> Deserializer<'de> for &'de Number {
+	type Error = crate::error::Api;
+
+	fn deserialize_any<V>(self, visitor: V) -> Result<V::Value, Self::Error>
+	where
+		V: serde::de::Visitor<'de>,
+	{
+		match self {
+			Number::Integer(x) => visitor.visit_i64(*x),
+			Number::Float(x) => visitor.visit_f64(*x),
+			Number::Decimal(d) => {
+				if let Ok(x) = i64::try_from(d.clone()) {
+					visitor.visit_i64(x)
+				} else if let Ok(x) = f64::try_from(d.clone()) {
+					visitor.visit_f64(x)
+				} else {
+					visitor.visit_string(d.to_string())
+				}
+			}
+		}
+	}
+
+	forward_to_deserialize_any! {
+		bool char str string bytes byte_buf option unit unit_struct
+		newtype_struct seq tuple tuple_struct map struct enum identifier
+		ignored_any i8 i16 i32 i64 i128 u8 u16 u32 u64 u128 f32 f64
+	}
+}
+
 // Implementation below largely based from serde_json Value deserializer implementation
 
 fn visit_array<'de, V>(array: Vec<Value>, visitor: V) -> Result<V::Value, Error>
@@ -573,7 +602,7 @@ impl<'de> serde::Deserializer<'de> for &'de Value {
 		V: Visitor<'de>,
 	{
 		match *self {
-			Value::Null => visitor.visit_none(),
+			Value::None => visitor.visit_none(),
 			_ => visitor.visit_some(self),
 		}
 	}
@@ -944,30 +973,24 @@ struct MapKeyDeserializer<'de> {
 	key: Cow<'de, str>,
 }
 
-macro_rules! deserialize_numeric_key {
-	($method:ident) => {
-		deserialize_numeric_key!($method, deserialize_number);
-	};
+impl<'de> MapKeyDeserializer<'de> {
+	fn from_str(str: &'de str) -> Self {
+		MapKeyDeserializer {
+			key: Cow::from(str),
+		}
+	}
+}
 
-	($method:ident, $using:ident) => {
+macro_rules! deserialize_simple_numeric_key {
+	($method:ident, $kind:ident) => {
 		fn $method<V>(self, visitor: V) -> Result<V::Value, Error>
 		where
 			V: Visitor<'de>,
 		{
-			let mut de = Deserializer::from_str(&self.key);
-
-			match de.peek()? {
-				Some(b'0'..=b'9' | b'-') => {}
+			match self.key.parse() {
+				Ok(x) => visitor.$kind(x),
 				_ => return Err(Error::Deserializer("expected numeric key".to_owned())),
 			}
-
-			let number = de.$using(visitor)?;
-
-			if de.peek()?.is_some() {
-				return Err(Error::Deserializer("expected numeric key".to_owned()));
-			}
-
-			Ok(number)
 		}
 	};
 }
@@ -982,19 +1005,18 @@ impl<'de> serde::Deserializer<'de> for MapKeyDeserializer<'de> {
 		BorrowedCowStrDeserializer::new(self.key).deserialize_any(visitor)
 	}
 
-	deserialize_numeric_key!(deserialize_i8);
-	deserialize_numeric_key!(deserialize_i16);
-	deserialize_numeric_key!(deserialize_i32);
-	deserialize_numeric_key!(deserialize_i64);
-	deserialize_numeric_key!(deserialize_u8);
-	deserialize_numeric_key!(deserialize_u16);
-	deserialize_numeric_key!(deserialize_u32);
-	deserialize_numeric_key!(deserialize_u64);
-	deserialize_numeric_key!(deserialize_f32);
-	deserialize_numeric_key!(deserialize_f64);
-
-	deserialize_numeric_key!(deserialize_i128, do_deserialize_i128);
-	deserialize_numeric_key!(deserialize_u128, do_deserialize_u128);
+	deserialize_simple_numeric_key!(deserialize_i8, visit_i8);
+	deserialize_simple_numeric_key!(deserialize_i16, visit_i16);
+	deserialize_simple_numeric_key!(deserialize_i32, visit_i32);
+	deserialize_simple_numeric_key!(deserialize_i64, visit_i64);
+	deserialize_simple_numeric_key!(deserialize_u8, visit_u8);
+	deserialize_simple_numeric_key!(deserialize_u16, visit_u16);
+	deserialize_simple_numeric_key!(deserialize_u32, visit_u32);
+	deserialize_simple_numeric_key!(deserialize_u64, visit_u64);
+	deserialize_simple_numeric_key!(deserialize_f32, visit_f32);
+	deserialize_simple_numeric_key!(deserialize_f64, visit_f64);
+	deserialize_simple_numeric_key!(deserialize_i128, visit_i128);
+	deserialize_simple_numeric_key!(deserialize_u128, visit_u128);
 
 	fn deserialize_bool<V>(self, visitor: V) -> Result<V::Value, Error>
 	where
@@ -1114,12 +1136,27 @@ impl Value {
 	#[cold]
 	fn unexpected(&self) -> Unexpected {
 		match self {
-			Value::Null => Unexpected::Unit,
+			Value::None => Unexpected::Unit,
 			Value::Bool(b) => Unexpected::Bool(*b),
 			Value::Number(n) => n.unexpected(),
 			Value::String(s) => Unexpected::Str(s),
 			Value::Array(_) => Unexpected::Seq,
 			Value::Object(_) => Unexpected::Map,
+			Value::Uuid(_) => Unexpected::Other("uuid"),
+			Value::RecordId(_) => Unexpected::Other("record-id"),
+			Value::Datetime(_) => Unexpected::Other("datetime"),
+			Value::Duration(_) => Unexpected::Other("duration"),
+			Value::Bytes(x) => Unexpected::Bytes(x),
+		}
+	}
+}
+
+impl Number {
+	fn unexpected(&self) -> Unexpected {
+		match self {
+			Number::Float(x) => Unexpected::Float(*x),
+			Number::Integer(i) => Unexpected::Signed(*i),
+			Number::Decimal(_) => Unexpected::Other("decimal"),
 		}
 	}
 }

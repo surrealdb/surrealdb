@@ -6,6 +6,8 @@ use serde::{
 
 use crate::{api::Error, Number, Object, Value};
 
+use super::Bytes;
+
 pub struct Serializer;
 
 impl serde::Serializer for Serializer {
@@ -61,7 +63,7 @@ impl serde::Serializer for Serializer {
 
 	fn serialize_u64(self, v: u64) -> Result<Self::Ok, Self::Error> {
 		if v < i64::MAX as u64 {
-			Ok(Value::Number(Number::Integer(v as i64)))
+			return Ok(Value::from(v as i64));
 		}
 
 		Ok(Value::Number(Number::Decimal(Decimal::from(v))))
@@ -84,14 +86,14 @@ impl serde::Serializer for Serializer {
 	}
 
 	fn serialize_bytes(self, v: &[u8]) -> Result<Self::Ok, Self::Error> {
-		Ok(Value::Bytes(v.to_vec()))
+		Ok(Value::Bytes(Bytes(v.to_vec())))
 	}
 
 	fn serialize_some<T>(self, value: &T) -> Result<Self::Ok, Self::Error>
 	where
 		T: ?Sized + serde::Serialize,
 	{
-		todo!()
+		value.serialize(self)
 	}
 
 	fn serialize_unit(self) -> Result<Self::Ok, Self::Error> {
@@ -102,7 +104,7 @@ impl serde::Serializer for Serializer {
 		self.serialize_unit()
 	}
 
-	fn serialize_unit_struct(self, name: &'static str) -> Result<Self::Ok, Self::Error> {
+	fn serialize_unit_struct(self, _name: &'static str) -> Result<Self::Ok, Self::Error> {
 		self.serialize_unit()
 	}
 
@@ -128,15 +130,15 @@ impl serde::Serializer for Serializer {
 
 	fn serialize_newtype_variant<T>(
 		self,
-		name: &'static str,
-		variant_index: u32,
+		_name: &'static str,
+		_variant_index: u32,
 		variant: &'static str,
 		value: &T,
 	) -> Result<Self::Ok, Self::Error>
 	where
 		T: ?Sized + serde::Serialize,
 	{
-		let v = value.serialize(value);
+		let v = value.serialize(self)?;
 		let mut values = Object::new();
 		values.insert(variant.to_owned(), v);
 		Ok(Value::Object(values))
@@ -162,21 +164,27 @@ impl serde::Serializer for Serializer {
 
 	fn serialize_tuple_variant(
 		self,
-		name: &'static str,
-		variant_index: u32,
+		_name: &'static str,
+		_variant_index: u32,
 		variant: &'static str,
 		len: usize,
 	) -> Result<Self::SerializeTupleVariant, Self::Error> {
-		todo!()
+		Ok(SerializeTupleVariant {
+			name: String::from(variant),
+			vec: Vec::with_capacity(len),
+		})
 	}
 
-	fn serialize_map(self, len: Option<usize>) -> Result<Self::SerializeMap, Self::Error> {
-		todo!()
+	fn serialize_map(self, _len: Option<usize>) -> Result<Self::SerializeMap, Self::Error> {
+		Ok(SerializeMap {
+			map: Object::new(),
+			next_key: None,
+		})
 	}
 
 	fn serialize_struct(
 		self,
-		name: &'static str,
+		_name: &'static str,
 		len: usize,
 	) -> Result<Self::SerializeStruct, Self::Error> {
 		self.serialize_map(Some(len))
@@ -184,12 +192,15 @@ impl serde::Serializer for Serializer {
 
 	fn serialize_struct_variant(
 		self,
-		name: &'static str,
-		variant_index: u32,
+		_name: &'static str,
+		_variant_index: u32,
 		variant: &'static str,
-		len: usize,
+		_len: usize,
 	) -> Result<Self::SerializeStructVariant, Self::Error> {
-		todo!()
+		Ok(SerializeStructVariant {
+			name: String::from(variant),
+			map: Object::new(),
+		})
 	}
 
 	fn collect_str<T>(self, value: &T) -> Result<Self::Ok, Self::Error>
@@ -356,7 +367,7 @@ impl serde::ser::SerializeStructVariant for SerializeStructVariant {
 
 	fn end(self) -> Result<Self::Ok, Self::Error> {
 		let mut object = Object::new();
-		object.insert(self.name, self.map.into());
+		object.insert(self.name, Value::Object(self.map));
 		Ok(Value::Object(object))
 	}
 }

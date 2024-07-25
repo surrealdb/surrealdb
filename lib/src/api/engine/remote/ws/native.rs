@@ -1,10 +1,12 @@
 use super::{
 	deserialize, serialize, HandleResult, PendingRequest, ReplayMethod, RequestEffect, PATH,
 };
+use crate::api::conn::Command;
+use crate::api::conn::Connection;
+use crate::api::conn::DbResponse;
+use crate::api::conn::RequestData;
 use crate::api::conn::Route;
 use crate::api::conn::Router;
-use crate::api::conn::{Command, DbResponse};
-use crate::api::conn::{Connection, RequestData};
 use crate::api::engine::remote::ws::Client;
 use crate::api::engine::remote::ws::Response;
 use crate::api::engine::remote::ws::PING_INTERVAL;
@@ -17,9 +19,13 @@ use crate::api::ExtraFeatures;
 use crate::api::OnceLockExt;
 use crate::api::Result;
 use crate::api::Surreal;
-use crate::engine::remote::ws::Data;
+use crate::engine::proto::Data;
 use crate::engine::IntervalStream;
 use crate::opt::WaitFor;
+use crate::Notification;
+use crate::Number;
+use crate::Value;
+use channel::Receiver;
 use futures::stream::{SplitSink, SplitStream};
 use futures::SinkExt;
 use futures::StreamExt;
@@ -273,21 +279,21 @@ async fn router_handle_response(
 				match response.id {
 					// If `id` is set this is a normal response
 					Some(id) => {
-						if let Ok(id) = id.coerce_to_i64() {
+						if let Some(id) = id.into_number().and_then(|x| x.cource_into_i64()) {
 							// We can only route responses with IDs
 							if let Some(pending) = state.pending_requests.remove(&id) {
 								match pending.effect {
 									RequestEffect::None => {}
 									RequestEffect::Insert => {
 										// For insert, we need to flatten single responses in an array
-										if let Ok(Data::Other(Value::Array(value))) =
+										if let Ok(Data::Other(Value::Array(array))) =
 											response.result
 										{
-											if value.len() == 1 {
+											if array.len() == 1 {
 												let _ = pending
 													.response_channel
 													.send(DbResponse::from(Ok(Data::Other(
-														value.into_iter().next().unwrap(),
+														array.into_iter().next().unwrap(),
 													))))
 													.await;
 											} else {
@@ -330,6 +336,13 @@ async fn router_handle_response(
 								// Check if this live query is registered
 								if let Some(sender) = state.live_queries.get(&live_query_id) {
 									// Send the notification back to the caller or kill live query if the receiver is already dropped
+
+									let notification = Notification {
+										query_id: notification.query_id,
+										action: notification.action,
+										data: notification.result,
+									};
+
 									if sender.send(notification).await.is_err() {
 										state.live_queries.remove(&live_query_id);
 										let kill = {
@@ -371,7 +384,9 @@ async fn router_handle_response(
 				}) = deserialize(&mut &binary[..], endpoint.supports_revision)
 				{
 					// Return an error if an ID was returned
-					if let Some(Ok(id)) = id.map(Value::coerce_to_i64) {
+					if let Some(id) =
+						id.and_then(Value::into_number).and_then(Number::cource_into_i64)
+					{
 						if let Some(pending) = state.pending_requests.remove(&id) {
 							let _res = pending.response_channel.send(Err(error)).await;
 						} else {

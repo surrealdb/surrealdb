@@ -19,9 +19,9 @@ mod de;
 mod deserializer;
 mod ser;
 mod serializer;
-mod sql;
 
 pub(crate) use core::ToCore;
+
 pub use serializer::Serializer;
 
 // Keeping bytes implementation minimal since it might be a good idea to use bytes crate here
@@ -77,7 +77,7 @@ impl From<Vec<u8>> for Bytes {
 pub struct Datetime(DateTime<Utc>);
 
 /// The key of a [`RecordId`].
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, PartialOrd)]
 #[non_exhaustive]
 pub enum RecordIdKey {
 	/// A string record id, like in `user:tkwse1j5o0anqjxonvzx`.
@@ -159,6 +159,17 @@ pub enum Number {
 	Float(f64),
 	Integer(i64),
 	Decimal(Decimal),
+}
+
+impl Number {
+	pub fn cource_into_i64(self) -> Option<i64> {
+		match self {
+			Self::Integer(x) => Some(x),
+			Self::Float(x) if x.fract() == x => Some(x as i64),
+			Self::Decimal(x) => x.try_into().ok(),
+			_ => None,
+		}
+	}
 }
 
 #[derive(Debug)]
@@ -393,6 +404,30 @@ impl Value {
 
 	pub fn decimal(v: Decimal) -> Self {
 		Value::Number(Number::Decimal(v))
+	}
+}
+
+impl From<i64> for Value {
+	fn from(value: i64) -> Self {
+		Value::int(value)
+	}
+}
+
+impl From<f64> for Value {
+	fn from(value: f64) -> Self {
+		Value::float(value)
+	}
+}
+
+impl From<Decimal> for Value {
+	fn from(value: Decimal) -> Self {
+		Value::decimal(value)
+	}
+}
+
+impl From<&str> for Value {
+	fn from(value: &str) -> Self {
+		Value::from(value.to_string())
 	}
 }
 

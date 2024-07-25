@@ -1,9 +1,4 @@
-use super::live;
-use super::Stream;
-use crate::value;
-use crate::Object;
-use crate::Value;
-
+use super::{live, Stream};
 use crate::api::conn::Command;
 use crate::api::err::Error;
 use crate::api::method::BoxFuture;
@@ -15,10 +10,9 @@ use crate::engine::any::Any;
 use crate::method::OnceLockExt;
 use crate::method::Stats;
 use crate::method::WithStats;
-use crate::sql;
-use crate::sql::Statement;
 use crate::Notification;
 use crate::Surreal;
+use crate::{value, Object, Value};
 use futures::future::Either;
 use futures::stream::SelectAll;
 use futures::StreamExt;
@@ -33,6 +27,7 @@ use std::mem;
 use std::pin::Pin;
 use std::task::Context;
 use std::task::Poll;
+use surrealdb_core::sql::{self, Statement};
 
 /// A query future
 #[derive(Debug)]

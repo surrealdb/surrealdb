@@ -14,11 +14,12 @@ use crate::api::method::query::QueryResult;
 use crate::api::Connect;
 use crate::api::Result;
 use crate::api::Surreal;
-use crate::dbs::Notification;
-use crate::dbs::QueryMethodResponse;
-use crate::dbs::Status;
 use crate::method::Stats;
 use crate::opt::IntoEndpoint;
+use crate::value::ToCore;
+use crate::Notification;
+use crate::Value;
+use channel::Sender;
 use indexmap::IndexMap;
 use revision::revisioned;
 use revision::Revisioned;
@@ -28,7 +29,7 @@ use std::collections::HashMap;
 use std::io::Read;
 use std::marker::PhantomData;
 use std::time::Duration;
-use surrealdb_core::dbs::Notification as CoreNotification;
+use surrealdb_core::dbs::{QueryMethodResponse, Status};
 use trice::Instant;
 use uuid::Uuid;
 
@@ -74,7 +75,7 @@ struct RouterState<Sink, Stream> {
 	/// Messages which aught to be replayed on a reconnect.
 	replay: IndexMap<ReplayMethod, Command>,
 	/// Pending live queries
-	live_queries: HashMap<Uuid, channel::Sender<CoreNotification>>,
+	live_queries: HashMap<Uuid, channel::Sender<Notification<Value>>>,
 	/// Send requests which are still awaiting an awnser.
 	pending_requests: HashMap<i64, PendingRequest>,
 	/// The last time a message was recieved from the server.
@@ -160,11 +161,29 @@ pub(crate) struct Failure {
 }
 
 #[revisioned(revision = 1)]
+#[derive(Clone, Debug, PartialEq, Deserialize)]
+#[serde(rename_all = "UPPERCASE")]
+#[non_exhaustive]
+pub enum ResponseAction {
+	Create,
+	Update,
+	Delete,
+}
+
+#[revisioned(revision = 1)]
+#[derive(Clone, Debug, PartialEq, Deserialize)]
+pub struct ResponseNotification {
+	id: Uuid,
+	action: ResponseAction,
+	result: Value,
+}
+
+#[revisioned(revision = 1)]
 #[derive(Debug, Deserialize)]
 pub(crate) enum Data {
 	Other(Value),
 	Query(Vec<QueryMethodResponse>),
-	Live(Notification),
+	Live(ResponseNotification),
 }
 
 type ServerResult = std::result::Result<Data, Failure>;
@@ -195,7 +214,10 @@ impl DbResponse {
 					};
 					match response.status {
 						Status::Ok => {
-							map.insert(index, (stats, Ok(response.result)));
+							let result = Value::from_core(response.result)
+								.ok_or(Error::RecievedInvalidValue.into());
+
+							map.insert(index, (stats, result));
 						}
 						Status::Err => {
 							map.insert(
@@ -234,7 +256,7 @@ where
 		value.serialize_revisioned(&mut buf).map_err(|error| crate::Error::Db(error.into()))?;
 		return Ok(buf);
 	}
-	crate::sql::serde::serialize(value).map_err(|error| crate::Error::Db(error.into()))
+	surrealdb_core::sql::serde::serialize(value).map_err(|error| crate::Error::Db(error.into()))
 }
 
 fn deserialize<A, T>(bytes: &mut A, revisioned: bool) -> Result<T>
@@ -246,6 +268,6 @@ where
 		return T::deserialize_revisioned(bytes).map_err(|x| crate::Error::Db(x.into()));
 	}
 	let mut buf = Vec::new();
-	bytes.read_to_end(&mut buf).map_err(crate::err::Error::Io)?;
-	crate::sql::serde::deserialize(&buf).map_err(|error| crate::Error::Db(error.into()))
+	bytes.read_to_end(&mut buf).map_err(surrealdb_core::err::Error::Io)?;
+	surrealdb_core::sql::serde::deserialize(&buf).map_err(|error| crate::Error::Db(error.into()))
 }

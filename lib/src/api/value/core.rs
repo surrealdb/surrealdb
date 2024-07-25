@@ -12,6 +12,8 @@ pub(crate) trait ToCore: Sized {
 
 	fn to_core(self) -> Self::Core;
 
+	fn as_core(&self) -> Self::Core;
+
 	/// Create a lib value from it's core counterpart.
 	/// Can return none if the core value cannot be turned into the core value.
 	/// This can be the case with forexample value, where it's AST like values are not present on
@@ -26,6 +28,10 @@ impl ToCore for Bytes {
 		CoreBytes::from(self.0)
 	}
 
+	fn as_core(&self) -> Self::Core {
+		self.clone().to_core()
+	}
+
 	fn from_core(this: Self::Core) -> Option<Self> {
 		Some(Self(this.into_inner()))
 	}
@@ -36,6 +42,10 @@ impl ToCore for Datetime {
 
 	fn to_core(self) -> Self::Core {
 		CoreDatetime::from(self.0)
+	}
+
+	fn as_core(&self) -> Self::Core {
+		self.clone().to_core()
 	}
 
 	fn from_core(this: Self::Core) -> Option<Self> {
@@ -55,6 +65,13 @@ impl ToCore for Object {
 		)
 	}
 
+	fn as_core(&self) -> Self::Core {
+		let map: BTreeMap<String, CoreValue> =
+			self.0.iter().map(|(k, v)| (k.clone(), v.as_core())).collect();
+
+		CoreObject::from(map)
+	}
+
 	fn from_core(this: Self::Core) -> Option<Self> {
 		let mut new = BTreeMap::new();
 		for (k, v) in this.0.into_iter() {
@@ -71,8 +88,13 @@ impl ToCore for Vec<Value> {
 		CoreArray::from(self.into_iter().map(ToCore::to_core).collect::<Vec<CoreValue>>())
 	}
 
+	fn as_core(&self) -> Self::Core {
+		CoreArray::from(self.iter().map(ToCore::as_core).collect::<Vec<CoreValue>>())
+	}
+
 	fn from_core(this: Self::Core) -> Option<Self> {
-		this.0.into_iter().try_fold(Vec::<Value>::with_capacity(this.len()), |mut acc, r| {
+		let len = this.0.len();
+		this.0.into_iter().try_fold(Vec::<Value>::with_capacity(len), |mut acc, r| {
 			acc.push(Value::from_core(r)?);
 			Some(acc)
 		})
@@ -88,6 +110,10 @@ impl ToCore for Number {
 			Number::Integer(x) => CoreNumber::Int(x),
 			Number::Decimal(x) => CoreNumber::Decimal(x),
 		}
+	}
+
+	fn as_core(&self) -> Self::Core {
+		self.clone().to_core()
 	}
 
 	fn from_core(this: Self::Core) -> Option<Self> {
@@ -108,6 +134,10 @@ impl ToCore for Uuid {
 		CoreUuid::from(self)
 	}
 
+	fn as_core(&self) -> Self::Core {
+		self.clone().to_core()
+	}
+
 	fn from_core(this: Self::Core) -> Option<Self> {
 		Some(this.0)
 	}
@@ -118,6 +148,10 @@ impl ToCore for String {
 
 	fn to_core(self) -> Self::Core {
 		Strand::from(self)
+	}
+
+	fn as_core(&self) -> Self::Core {
+		Strand::from(self.as_str())
 	}
 
 	fn from_core(this: Self::Core) -> Option<Self> {
@@ -132,6 +166,10 @@ impl ToCore for Duration {
 		CoreDuration::from(self)
 	}
 
+	fn as_core(&self) -> Self::Core {
+		CoreDuration::from(*self)
+	}
+
 	fn from_core(this: Self::Core) -> Option<Self> {
 		Some(this.0)
 	}
@@ -142,6 +180,10 @@ impl ToCore for RecordId {
 
 	fn to_core(self) -> Self::Core {
 		Thing::from((self.table, self.key.to_core()))
+	}
+
+	fn as_core(&self) -> Self::Core {
+		Thing::from((self.table.clone(), self.key.as_core()))
 	}
 
 	fn from_core(this: Self::Core) -> Option<Self> {
@@ -161,6 +203,15 @@ impl ToCore for RecordIdKey {
 			RecordIdKey::Integer(x) => Id::Number(x),
 			RecordIdKey::Object(x) => Id::Object(x.to_core()),
 			RecordIdKey::Array(x) => Id::Array(x.to_core()),
+		}
+	}
+
+	fn as_core(&self) -> Self::Core {
+		match self {
+			RecordIdKey::String(x) => Id::String(x.clone()),
+			RecordIdKey::Integer(x) => Id::Number(x.clone()),
+			RecordIdKey::Object(x) => Id::Object(x.as_core()),
+			RecordIdKey::Array(x) => Id::Array(x.as_core()),
 		}
 	}
 
@@ -192,6 +243,22 @@ impl ToCore for Value {
 			Value::Duration(x) => CoreValue::Duration(x.to_core()),
 			Value::Bytes(x) => CoreValue::Bytes(x.to_core()),
 			Value::RecordId(x) => CoreValue::Thing(x.to_core()),
+		}
+	}
+
+	fn as_core(&self) -> Self::Core {
+		match self {
+			Value::None => CoreValue::None,
+			Value::Bool(x) => CoreValue::Bool(*x),
+			Value::Number(x) => CoreValue::Number(x.as_core()),
+			Value::Object(x) => CoreValue::Object(x.as_core()),
+			Value::String(x) => CoreValue::Strand(Strand::from(x.as_str())),
+			Value::Array(x) => CoreValue::Array(x.as_core()),
+			Value::Uuid(x) => CoreValue::Uuid(x.as_core()),
+			Value::Datetime(x) => CoreValue::Datetime(x.as_core()),
+			Value::Duration(x) => CoreValue::Duration(x.as_core()),
+			Value::Bytes(x) => CoreValue::Bytes(x.as_core()),
+			Value::RecordId(x) => CoreValue::Thing(x.as_core()),
 		}
 	}
 
