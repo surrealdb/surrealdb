@@ -5,6 +5,7 @@ use crate::key::debug::Sprintable;
 use crate::kvs::Check;
 use crate::kvs::Key;
 use crate::kvs::Val;
+use std::fmt::Debug;
 use std::ops::Range;
 
 #[non_exhaustive]
@@ -171,7 +172,7 @@ impl super::api::Transaction for Transaction {
 	async fn set<K, V>(&mut self, key: K, val: V) -> Result<(), Error>
 	where
 		K: Into<Key> + Sprintable + Debug,
-		V: Into<Val>,
+		V: Into<Val> + Debug,
 	{
 		// Check to see if transaction is closed
 		if self.done {
@@ -192,7 +193,7 @@ impl super::api::Transaction for Transaction {
 	async fn put<K, V>(&mut self, key: K, val: V) -> Result<(), Error>
 	where
 		K: Into<Key> + Sprintable + Debug,
-		V: Into<Val>,
+		V: Into<Val> + Debug,
 	{
 		// Check to see if transaction is closed
 		if self.done {
@@ -213,7 +214,7 @@ impl super::api::Transaction for Transaction {
 	async fn putc<K, V>(&mut self, key: K, val: V, chk: Option<V>) -> Result<(), Error>
 	where
 		K: Into<Key> + Sprintable + Debug,
-		V: Into<Val>,
+		V: Into<Val> + Debug,
 	{
 		// Check to see if transaction is closed
 		if self.done {
@@ -254,7 +255,7 @@ impl super::api::Transaction for Transaction {
 	async fn delc<K, V>(&mut self, key: K, chk: Option<V>) -> Result<(), Error>
 	where
 		K: Into<Key> + Sprintable + Debug,
-		V: Into<Val>,
+		V: Into<Val> + Debug,
 	{
 		// Check to see if transaction is closed
 		if self.done {
