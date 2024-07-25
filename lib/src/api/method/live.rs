@@ -101,7 +101,7 @@ macro_rules! into_future {
 				let rx = register(router, id).await?;
 				Ok(Stream::new(
 					Surreal::new_from_router_waiter(client.router.clone(), client.waiter.clone()),
-					id,
+					id.0,
 					Some(rx),
 				))
 			})

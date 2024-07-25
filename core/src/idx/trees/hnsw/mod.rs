@@ -302,10 +302,11 @@ mod tests {
 	use crate::idx::trees::knn::{Ids64, KnnResult, KnnResultBuilder};
 	use crate::idx::trees::vector::{SharedVector, Vector};
 	use crate::sql::index::{Distance, HnswParams, VectorType};
-	use hashbrown::{hash_map::Entry, HashMap, HashSet};
+	use ahash::{HashMap, HashSet};
 	use ndarray::Array1;
 	use reblessive::tree::Stk;
 	use roaring::RoaringTreemap;
+	use std::collections::hash_map::Entry;
 	use std::sync::Arc;
 	use test_log::test;
 
@@ -313,7 +314,7 @@ mod tests {
 		h: &mut HnswFlavor,
 		collection: &TestCollection,
 	) -> HashSet<SharedVector> {
-		let mut set = HashSet::new();
+		let mut set = HashSet::default();
 		for (_, obj) in collection.to_vec_ref() {
 			let obj: SharedVector = obj.clone();
 			h.insert(obj.clone());
@@ -445,7 +446,7 @@ mod tests {
 		h: &mut HnswIndex,
 		collection: &TestCollection,
 	) -> HashMap<SharedVector, HashSet<DocId>> {
-		let mut map: HashMap<SharedVector, HashSet<DocId>> = HashMap::new();
+		let mut map: HashMap<SharedVector, HashSet<DocId>> = HashMap::default();
 		for (doc_id, obj) in collection.to_vec_ref() {
 			let obj: SharedVector = obj.clone();
 			h.insert(obj.clone(), *doc_id);
@@ -454,7 +455,7 @@ mod tests {
 					e.get_mut().insert(*doc_id);
 				}
 				Entry::Vacant(e) => {
-					e.insert(HashSet::from([*doc_id]));
+					e.insert(HashSet::from_iter([*doc_id]));
 				}
 			}
 			h.check_hnsw_properties(map.len());
@@ -726,7 +727,7 @@ mod tests {
 			}
 			b.build(
 				#[cfg(debug_assertions)]
-				HashMap::new(),
+				HashMap::default(),
 			)
 		}
 	}

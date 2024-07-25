@@ -105,7 +105,6 @@ impl Command {
 	#[cfg(feature = "protocol-ws")]
 	pub(crate) fn into_router_request(self, id: Option<i64>) -> Option<RouterRequest> {
 		use crate::value::ToCore;
-
 		let res = match self {
 			Command::Use {
 				namespace,
@@ -135,7 +134,7 @@ impl Command {
 				token,
 			} => RouterRequest {
 				id,
-				method: "authenticate",
+<<<<<<< HEAD
 				params: Some(Value::Array(vec![Value::from(token)]).to_core()),
 			},
 			Command::Invalidate => RouterRequest {
@@ -469,7 +468,6 @@ impl Revisioned for RouterRequest {
 			.with_varint_encoding()
 			.reject_trailing_bytes()
 			.serialize_into(&mut *w, self.method)
-			.map_err(|ref err| revision::Error::Deserialize(format!("{:?}", err)))?;
 
 		if let Some(x) = self.params.as_ref() {
 			serializer

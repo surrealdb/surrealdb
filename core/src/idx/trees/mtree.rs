@@ -1,10 +1,10 @@
 use crate::ctx::Context;
-use hashbrown::hash_map::Entry;
-use hashbrown::{HashMap, HashSet};
+use ahash::{HashMap, HashMapExt, HashSet};
 use reblessive::tree::Stk;
 use revision::revisioned;
 use roaring::RoaringTreemap;
 use serde::{Deserialize, Serialize};
+use std::collections::hash_map::Entry;
 use std::collections::{BinaryHeap, VecDeque};
 use std::fmt::{Debug, Display, Formatter};
 use std::io::Cursor;
@@ -217,7 +217,7 @@ impl MTree {
 			queue.push(PriorityNode::new(0.0, root_id));
 		}
 		#[cfg(debug_assertions)]
-		let mut visited_nodes = HashMap::new();
+		let mut visited_nodes = HashMap::default();
 		while let Some(e) = queue.pop() {
 			let id = e.id();
 			let node = search.store.get_node_txn(search.ctx, id).await?;
@@ -330,7 +330,7 @@ impl MTree {
 	) -> Result<(), Error> {
 		let new_root_id = self.new_node_id();
 		let p = ObjectProperties::new_root(id);
-		let mut objects = LeafMap::new();
+		let mut objects = LeafMap::with_capacity(1);
 		objects.insert(obj, p);
 		let new_root_node = store.new_node(new_root_id, MTreeNode::Leaf(objects))?;
 		store.set_node(new_root_node, true).await?;
@@ -1486,7 +1486,7 @@ mod tests {
 	use crate::kvs::Transaction;
 	use crate::kvs::{Datastore, TransactionType};
 	use crate::sql::index::{Distance, VectorType};
-	use hashbrown::{HashMap, HashSet};
+	use ahash::{HashMap, HashMapExt, HashSet};
 	use reblessive::tree::Stk;
 	use std::collections::VecDeque;
 	use test_log::test;
@@ -2080,13 +2080,13 @@ mod tests {
 		t: &MTree,
 	) -> Result<CheckedProperties, Error> {
 		debug!("CheckTreeProperties");
-		let mut node_ids = HashSet::new();
+		let mut node_ids = HashSet::default();
 		let mut checks = CheckedProperties::default();
 		let mut nodes: VecDeque<(NodeId, f64, Option<SharedVector>, usize)> = VecDeque::new();
 		if let Some(root_id) = t.state.root {
 			nodes.push_back((root_id, 0.0, None, 1));
 		}
-		let mut leaf_objects = HashSet::new();
+		let mut leaf_objects = HashSet::default();
 		while let Some((node_id, radius, center, depth)) = nodes.pop_front() {
 			assert!(node_ids.insert(node_id), "Node already exist: {}", node_id);
 			checks.node_count += 1;

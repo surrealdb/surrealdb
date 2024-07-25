@@ -12,6 +12,9 @@ use serde::Serialize;
 use std::borrow::Cow;
 use std::future::IntoFuture;
 use std::marker::PhantomData;
+use surrealdb_core::sql::to_value;
+
+use super::Content;
 
 use super::Content;
 
