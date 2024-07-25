@@ -45,10 +45,7 @@ impl UpdateStatement {
 		let opt = &opt.new_with_futures(false).with_projections(false);
 
 		let mut is_bulk = false;
-		if let Some(Data::ContentExpression(v))
-		| Some(Data::MergeExpression(v))
-		| Some(Data::PatchExpression(v)) = &self.data
-		{
+		if let Some(Data::ContentExpression(v)) | Some(Data::MergeExpression(v)) = &self.data {
 			if let Ok(tables) = self.get_tables(stk, ctx, opt, doc).await {
 				match v.compute(stk, ctx, opt, doc).await? {
 					Value::Array(v) => {
@@ -80,7 +77,30 @@ impl UpdateStatement {
 					e => e,
 				})?;
 			}
+			//Check for update data
+			if let Some(v) = &self.data {
+				match v {
+					Data::ContentExpression(v) => {
+						let v = v.compute(stk, ctx, opt, doc).await?;
+						if !matches!(v, Value::Object(_)) {
+							return Err(Error::InvalidContent {
+								value: v,
+							});
+						}
+					}
+					Data::MergeExpression(v) => {
+						let v = v.compute(stk, ctx, opt, doc).await?;
+						if !matches!(v, Value::Object(_)) {
+							return Err(Error::InvalidMerge {
+								value: v,
+							});
+						}
+					}
+					_ => {}
+				};
+			};
 		}
+		debug!("update stm is_bulk={:?}", is_bulk);
 		// Output the results
 		match i.output(stk, ctx, opt, &stm).await? {
 			// This is a single record result

@@ -1,4 +1,6 @@
 mod parse;
+use core::panic;
+
 use parse::Parse;
 mod helpers;
 use crate::helpers::Test;
@@ -7,6 +9,79 @@ use surrealdb::dbs::Session;
 use surrealdb::err::Error;
 use surrealdb::iam::Role;
 use surrealdb::sql::Value;
+
+#[tokio::test]
+async fn upsert_bulk_merge_and_content() -> Result<(), Error> {
+	let sql = "
+		UPSERT person CONTENT { id: 1, name: 'Jamie' };
+		UPSERT person CONTENT [{ id: 2, name: 'some name'}, { id: 3, name: 'Tobie'}];
+		UPSERT person:test CONTENT [{ id: 'test', name: 'some content'}];
+		UPSERT person MERGE { id: 1, age: 50 };
+		UPSERT person:test MERGE [{ id: 'test', name: 'some content'}];
+		UPSERT person:test MERGE [{ id: 'test', name: 'some content'}] where id = person:invalid;
+	";
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 6);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
+			{
+				id: person:1,
+				name: 'Jamie',
+			}
+		]",
+	);
+	assert_eq!(tmp, val);
+
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
+			{
+				id: person:2,
+				name: 'some name',
+			},
+			{
+				id: person:3,
+				name: 'Tobie',
+			}
+		]",
+	);
+	assert_eq!(tmp, val);
+
+	let tmp = res.remove(0).result;
+	assert!(matches!(
+		tmp.err(),
+		Some(e) if e.to_string() == r#"Can not use [{ id: 'test', name: 'some content' }] in a CONTENT clause"#
+	));
+
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
+			{
+				id: person:1,
+				name: 'Jamie',
+				age: 50
+			}
+		]",
+	);
+	assert_eq!(tmp, val);
+
+	let tmp = res.remove(0).result;
+	assert!(matches!(
+		tmp.err(),
+		Some(e) if e.to_string() == r#"Can not use [{ id: 'test', name: 'some content' }] in a MERGE clause"#
+	));
+
+	let tmp = res.remove(0).result;
+	assert!(matches!(
+		tmp.err(),
+		Some(e) if e.to_string() == r#"Can not use [{ id: 'test', name: 'some content' }] in a MERGE clause"#
+	));
+	Ok(())
+}
 
 #[tokio::test]
 async fn upsert_merge_and_content() -> Result<(), Error> {
