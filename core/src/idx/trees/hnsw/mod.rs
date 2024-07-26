@@ -14,7 +14,7 @@ use crate::idx::trees::hnsw::elements::HnswElements;
 use crate::idx::trees::hnsw::heuristic::Heuristic;
 use crate::idx::trees::hnsw::index::HnswCheckedSearchContext;
 
-use crate::idx::trees::hnsw::layer::HnswLayer;
+use crate::idx::trees::hnsw::layer::{HnswLayer, LayerState};
 use crate::idx::trees::knn::DoublePriorityQueue;
 use crate::idx::trees::vector::SharedVector;
 use crate::idx::{IndexKeyBase, VersionedStore};
@@ -46,16 +46,16 @@ impl HnswSearch {
 #[derive(Serialize, Deserialize)]
 pub(super) struct HnswState {
 	enter_point: Option<ElementId>,
-	layer0_version: u64,
-	layers_versions: Vec<u64>,
+	layer0: LayerState,
+	layers: Vec<LayerState>,
 }
 
 impl Default for HnswState {
 	fn default() -> Self {
 		Self {
 			enter_point: None,
-			layer0_version: 0,
-			layers_versions: vec![],
+			layer0: Default::default(),
+			layers: vec![],
 		}
 	}
 }
@@ -63,8 +63,8 @@ impl VersionedStore for HnswState {}
 
 struct Hnsw<L0, L>
 where
-	L0: DynamicSet<ElementId>,
-	L: DynamicSet<ElementId>,
+	L0: DynamicSet,
+	L: DynamicSet,
 {
 	ikb: IndexKeyBase,
 	state_key: Key,
@@ -83,24 +83,24 @@ pub(crate) type ElementId = u64;
 
 impl<L0, L> Hnsw<L0, L>
 where
-	L0: DynamicSet<ElementId>,
-	L: DynamicSet<ElementId>,
+	L0: DynamicSet,
+	L: DynamicSet,
 {
 	fn new(ikb: IndexKeyBase, p: &HnswParams) -> Self {
 		let m0 = p.m0 as usize;
 		let state_key = ikb.new_hs_key();
 		Self {
-			ikb,
 			state_key,
 			m: p.m as usize,
 			efc: p.ef_construction as usize,
 			ml: p.ml.to_float(),
 			enter_point: None,
-			layer0: HnswLayer::new(m0),
+			layer0: HnswLayer::new(ikb.clone(), 0, m0),
 			layers: Vec::default(),
 			elements: HnswElements::new(p.distance.clone()),
 			rng: SmallRng::from_entropy(),
 			heuristic: p.into(),
+			ikb,
 		}
 	}
 
@@ -112,22 +112,22 @@ where
 			Default::default()
 		};
 		// Compare versions
-		if st.layer0_version != self.layer0.version() {
-			self.layer0.load(tx, &self.ikb, 0, st.layer0_version).await?;
+		if st.layer0.version != self.layer0.version() {
+			self.layer0.load(tx, &self.ikb, &st.layer0).await?;
 		}
-		for (i, (v, l)) in st.layers_versions.iter().zip(self.layers.iter_mut()).enumerate() {
-			if *v != l.version() {
-				l.load(tx, &self.ikb, i + 1, *v).await?;
+		for (s, l) in st.layers.iter().zip(self.layers.iter_mut()) {
+			if s.version != l.version() {
+				l.load(tx, &self.ikb, s).await?;
 			}
 		}
 		// Retrieve missing layers
-		for i in self.layers.len()..st.layers_versions.len() {
-			let mut l = HnswLayer::new(self.m);
-			l.load(tx, &self.ikb, i + 1, st.layers_versions[i]).await?;
+		for i in self.layers.len()..st.layers.len() {
+			let mut l = HnswLayer::new(self.ikb.clone(), i + 1, self.m);
+			l.load(tx, &self.ikb, &st.layers[i]).await?;
 			self.layers.push(l);
 		}
 		// Remove non-existing layers
-		for _ in self.layers.len()..st.layers_versions.len() {
+		for _ in self.layers.len()..st.layers.len() {
 			self.layers.pop();
 		}
 		// Set the enter_point
@@ -135,14 +135,19 @@ where
 		Ok(())
 	}
 
-	fn insert_level(&mut self, q_pt: SharedVector, q_level: usize) -> ElementId {
+	async fn insert_level(
+		&mut self,
+		tx: &Transaction,
+		q_pt: SharedVector,
+		q_level: usize,
+	) -> Result<ElementId, Error> {
 		// Attributes an ID to the vector
 		let q_id = self.elements.next_element_id();
 		let top_up_layers = self.layers.len();
 
 		// Be sure we have existing (up) layers if required
-		for _ in top_up_layers..q_level {
-			self.layers.push(HnswLayer::new(self.m));
+		for i in top_up_layers..q_level {
+			self.layers.push(HnswLayer::new(self.ikb.clone(), i + 1, self.m));
 		}
 
 		// Store the vector
@@ -150,14 +155,14 @@ where
 
 		if let Some(ep_id) = self.enter_point {
 			// We already have an enter_point, let's insert the element in the layers
-			self.insert_element(q_id, &q_pt, q_level, ep_id, top_up_layers);
+			self.insert_element(tx, q_id, &q_pt, q_level, ep_id, top_up_layers).await?;
 		} else {
 			// Otherwise is the first element
-			self.insert_first_element(q_id, q_level);
+			self.insert_first_element(tx, q_id, q_level).await?;
 		}
 
 		self.elements.inc_next_element_id();
-		q_id
+		Ok(q_id)
 	}
 
 	fn get_random_level(&mut self) -> usize {
@@ -165,27 +170,35 @@ where
 		(-unif.ln() * self.ml).floor() as usize // calculate the layer
 	}
 
-	fn insert_first_element(&mut self, id: ElementId, level: usize) {
+	async fn insert_first_element(
+		&mut self,
+		tx: &Transaction,
+		id: ElementId,
+		level: usize,
+	) -> Result<(), Error> {
 		if level > 0 {
 			// Insert in up levels
 			for layer in self.layers.iter_mut().take(level) {
-				layer.add_empty_node(id);
+				layer.add_empty_node(tx, id).await?;
 			}
 		}
 		// Insert in layer 0
-		self.layer0.add_empty_node(id);
+		self.layer0.add_empty_node(tx, id).await?;
 		// Update the enter point
 		self.enter_point = Some(id);
+		//
+		Ok(())
 	}
 
-	fn insert_element(
+	async fn insert_element(
 		&mut self,
+		tx: &Transaction,
 		q_id: ElementId,
 		q_pt: &SharedVector,
 		q_level: usize,
 		mut ep_id: ElementId,
 		top_up_layers: usize,
-	) {
+	) -> Result<(), Error> {
 		if let Some(mut ep_dist) = self.elements.get_distance(q_pt, &ep_id) {
 			if q_level < top_up_layers {
 				for layer in self.layers[q_level..top_up_layers].iter_mut().rev() {
@@ -205,15 +218,19 @@ where
 			let insert_to_up_layers = q_level.min(top_up_layers);
 			if insert_to_up_layers > 0 {
 				for layer in self.layers.iter_mut().take(insert_to_up_layers).rev() {
-					eps = layer.insert(&self.elements, &self.heuristic, self.efc, q_id, q_pt, eps);
+					eps = layer
+						.insert(tx, &self.elements, &self.heuristic, self.efc, q_id, q_pt, eps)
+						.await?;
 				}
 			}
 
-			self.layer0.insert(&self.elements, &self.heuristic, self.efc, q_id, q_pt, eps);
+			self.layer0
+				.insert(tx, &self.elements, &self.heuristic, self.efc, q_id, q_pt, eps)
+				.await?;
 
 			if top_up_layers < q_level {
 				for layer in self.layers[top_up_layers..q_level].iter_mut() {
-					if !layer.add_empty_node(q_id) {
+					if !layer.add_empty_node(tx, q_id).await? {
 						#[cfg(debug_assertions)]
 						unreachable!("Already there {}", q_id);
 					}
@@ -227,14 +244,15 @@ where
 			#[cfg(debug_assertions)]
 			unreachable!()
 		}
+		Ok(())
 	}
 
-	fn insert(&mut self, q_pt: SharedVector) -> ElementId {
+	async fn insert(&mut self, tx: &Transaction, q_pt: SharedVector) -> Result<ElementId, Error> {
 		let q_level = self.get_random_level();
-		self.insert_level(q_pt, q_level)
+		self.insert_level(tx, q_pt, q_level).await
 	}
 
-	fn remove(&mut self, e_id: ElementId) -> bool {
+	async fn remove(&mut self, tx: &Transaction, e_id: ElementId) -> Result<bool, Error> {
 		let mut removed = false;
 
 		let e_pt = self.elements.get_vector(&e_id).cloned();
@@ -257,13 +275,13 @@ where
 
 			// Remove from the up layers
 			for layer in self.layers.iter_mut() {
-				if layer.remove(&self.elements, &self.heuristic, e_id, self.efc) {
+				if layer.remove(tx, &self.elements, &self.heuristic, e_id, self.efc).await? {
 					removed = true;
 				}
 			}
 
 			// Remove from layer 0
-			if self.layer0.remove(&self.elements, &self.heuristic, e_id, self.efc) {
+			if self.layer0.remove(tx, &self.elements, &self.heuristic, e_id, self.efc).await? {
 				removed = true;
 			}
 
@@ -272,7 +290,7 @@ where
 				self.enter_point = new_enter_point.map(|(_, e_id)| e_id);
 			}
 		}
-		removed
+		Ok(removed)
 	}
 
 	fn knn_search(&self, search: &HnswSearch) -> Vec<(f64, ElementId)> {
@@ -347,8 +365,8 @@ where
 #[cfg(test)]
 fn check_hnsw_props<L0, L>(h: &Hnsw<L0, L>, expected_count: usize)
 where
-	L0: DynamicSet<ElementId>,
-	L: DynamicSet<ElementId>,
+	L0: DynamicSet,
+	L: DynamicSet,
 {
 	assert_eq!(h.elements.len(), expected_count);
 	for layer in h.layers.iter() {
@@ -380,14 +398,15 @@ mod tests {
 	use std::sync::Arc;
 	use test_log::test;
 
-	fn insert_collection_hnsw(
+	async fn insert_collection_hnsw(
+		tx: &Transaction,
 		h: &mut HnswFlavor,
 		collection: &TestCollection,
 	) -> HashSet<SharedVector> {
 		let mut set = HashSet::default();
 		for (_, obj) in collection.to_vec_ref() {
 			let obj: SharedVector = obj.clone();
-			h.insert(obj.clone());
+			h.insert(tx, obj.clone()).await.unwrap();
 			set.insert(obj);
 			h.check_hnsw_properties(set.len());
 		}
@@ -435,8 +454,8 @@ mod tests {
 		}
 	}
 
-	fn test_hnsw_collection(p: &HnswParams, collection: &TestCollection) {
-		let mut h = HnswFlavor::new(p);
+	async fn test_hnsw_collection(p: &HnswParams, collection: &TestCollection) {
+		let mut h = HnswFlavor::new(IndexKeyBase::default(), p);
 		insert_collection_hnsw(&mut h, collection);
 		find_collection_hnsw(&h, collection);
 	}

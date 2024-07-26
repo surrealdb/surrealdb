@@ -174,7 +174,7 @@ impl VecDocs {
 			}
 			None => {
 				//  We don't have the vector, we insert it in the graph
-				let element_id = h.insert(o);
+				let element_id = h.insert(tx, o).await?;
 				let ed = ElementDocs {
 					e_id: element_id,
 					docs: Ids64::One(d),
@@ -201,7 +201,7 @@ impl VecDocs {
 			if let Some(new_docs) = ed.docs.remove(d) {
 				if new_docs.is_empty() {
 					tx.del(key).await?;
-					h.remove(ed.e_id);
+					h.remove(tx, ed.e_id).await?;
 				} else {
 					ed.docs = new_docs;
 					let mut val = Vec::new();

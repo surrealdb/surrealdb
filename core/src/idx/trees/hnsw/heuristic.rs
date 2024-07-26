@@ -39,7 +39,7 @@ impl Heuristic {
 		c: DoublePriorityQueue,
 		res: &mut S,
 	) where
-		S: DynamicSet<ElementId>,
+		S: DynamicSet,
 	{
 		match self {
 			Self::Standard => Self::heuristic(elements, layer, c, res),
@@ -55,7 +55,7 @@ impl Heuristic {
 		mut c: DoublePriorityQueue,
 		res: &mut S,
 	) where
-		S: DynamicSet<ElementId>,
+		S: DynamicSet,
 	{
 		let m_max = layer.m_max();
 		if c.len() <= m_max {
@@ -75,7 +75,7 @@ impl Heuristic {
 		mut c: DoublePriorityQueue,
 		res: &mut S,
 	) where
-		S: DynamicSet<ElementId>,
+		S: DynamicSet,
 	{
 		let m_max = layer.m_max();
 		if c.len() <= m_max {
@@ -107,7 +107,7 @@ impl Heuristic {
 		q_pt: &SharedVector,
 		c: &mut DoublePriorityQueue,
 	) where
-		S: DynamicSet<ElementId>,
+		S: DynamicSet,
 	{
 		let m_max = layer.m_max();
 		let mut ex = c.to_set();
@@ -139,7 +139,7 @@ impl Heuristic {
 		mut c: DoublePriorityQueue,
 		res: &mut S,
 	) where
-		S: DynamicSet<ElementId>,
+		S: DynamicSet,
 	{
 		Self::extend_candidates(elements, layer, q_id, q_pt, &mut c);
 		Self::heuristic(elements, layer, c, res)
@@ -153,7 +153,7 @@ impl Heuristic {
 		mut c: DoublePriorityQueue,
 		res: &mut S,
 	) where
-		S: DynamicSet<ElementId>,
+		S: DynamicSet,
 	{
 		Self::extend_candidates(elements, layer, q_id, q_pt, &mut c);
 		Self::heuristic_keep(elements, layer, c, res)
@@ -161,7 +161,7 @@ impl Heuristic {
 
 	fn is_closer<S>(elements: &HnswElements, e_dist: f64, e_id: ElementId, r: &mut S) -> bool
 	where
-		S: DynamicSet<ElementId>,
+		S: DynamicSet,
 	{
 		if let Some(current_vec) = elements.get_vector(&e_id) {
 			for r_id in r.iter() {

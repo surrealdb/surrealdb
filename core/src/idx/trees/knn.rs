@@ -126,7 +126,7 @@ impl DoublePriorityQueue {
 		s
 	}
 
-	pub(super) fn to_dynamic_set<S: DynamicSet<ElementId>>(&self, set: &mut S) {
+	pub(super) fn to_dynamic_set<S: DynamicSet>(&self, set: &mut S) {
 		for q in self.0.values() {
 			for v in q {
 				set.insert(*v);

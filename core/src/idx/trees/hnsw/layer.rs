@@ -11,41 +11,39 @@ use crate::idx::IndexKeyBase;
 use crate::kvs::Transaction;
 use ahash::HashSet;
 use reblessive::tree::Stk;
+use revision::revisioned;
+use serde::{Deserialize, Serialize};
+use std::mem;
+
+#[revisioned(revision = 1)]
+#[derive(Default, Debug, Serialize, Deserialize)]
+pub(super) struct LayerState {
+	pub(super) version: u64,
+	chunks: u32,
+}
 
 #[derive(Debug)]
 pub(super) struct HnswLayer<S>
 where
-	S: DynamicSet<ElementId>,
+	S: DynamicSet,
 {
-	version: u64,
-	graph: UndirectedGraph<ElementId, S>,
+	ikb: IndexKeyBase,
+	level: u16,
+	graph: UndirectedGraph<S>,
 	m_max: usize,
 }
 
 impl<S> HnswLayer<S>
 where
-	S: DynamicSet<ElementId>,
+	S: DynamicSet,
 {
-	pub(super) fn new(m_max: usize) -> Self {
+	pub(super) fn new(ikb: IndexKeyBase, level: usize, m_max: usize) -> Self {
 		Self {
-			version: 0,
+			ikb,
+			level: level as u16,
 			graph: UndirectedGraph::new(m_max + 1),
 			m_max,
 		}
-	}
-
-	pub(super) async fn load(
-		&mut self,
-		tx: &Transaction,
-		ikb: &IndexKeyBase,
-		level: usize,
-		version: u64,
-	) -> Result<(), Error> {
-		todo!()
-	}
-
-	pub(super) fn version(&self) -> u64 {
-		self.version
 	}
 
 	pub(super) fn m_max(&self) -> usize {
@@ -56,9 +54,17 @@ where
 		self.graph.get_edges(e_id)
 	}
 
-	pub(super) fn add_empty_node(&mut self, node: ElementId) -> bool {
-		self.version += 1;
-		self.graph.add_empty_node(node)
+	pub(super) async fn add_empty_node(
+		&mut self,
+		tx: &Transaction,
+		node: ElementId,
+		st: &mut LayerState,
+	) -> Result<bool, Error> {
+		if !self.graph.add_empty_node(node) {
+			return Ok(false);
+		}
+		self.save(tx, st).await?;
+		Ok(true)
 	}
 	pub(super) fn search_single(
 		&self,
@@ -240,15 +246,15 @@ where
 		Ok(false)
 	}
 
-	pub(super) fn insert(
+	pub(super) async fn insert(
 		&mut self,
+		(tx, st): (&Transaction, &mut LayerState),
 		elements: &HnswElements,
 		heuristic: &Heuristic,
 		efc: usize,
-		q_id: ElementId,
-		q_pt: &SharedVector,
+		(q_id, q_pt): (ElementId, &SharedVector),
 		mut eps: DoublePriorityQueue,
-	) -> DoublePriorityQueue {
+	) -> Result<DoublePriorityQueue, Error> {
 		let w;
 		let mut neighbors = self.graph.new_edges();
 		{
@@ -276,8 +282,8 @@ where
 				unreachable!("Element: {}", e_id);
 			}
 		}
-		self.version += 1;
-		eps
+		self.save(tx, st).await?;
+		Ok(eps)
 	}
 
 	fn build_priority_list(
@@ -298,13 +304,15 @@ where
 		w
 	}
 
-	pub(super) fn remove(
+	pub(super) async fn remove(
 		&mut self,
+		tx: &Transaction,
+		st: &mut LayerState,
 		elements: &HnswElements,
 		heuristic: &Heuristic,
 		e_id: ElementId,
 		efc: usize,
-	) -> bool {
+	) -> Result<bool, Error> {
 		if let Some(f_ids) = self.graph.remove_node_and_bidirectional_edges(&e_id) {
 			for &q_id in f_ids.iter() {
 				if let Some(q_pt) = elements.get_vector(&q_id) {
@@ -326,18 +334,49 @@ where
 					self.graph.set_node(q_id, neighbors);
 				}
 			}
-			self.version += 1;
-			true
+			self.save(tx, st).await?;
+			Ok(true)
 		} else {
-			false
+			Ok(false)
 		}
+	}
+
+	const CHUNK_SIZE: usize = 100_000;
+	async fn save(&mut self, tx: &Transaction, st: &mut LayerState) -> Result<(), Error> {
+		// Serialise the graph
+		let val = self.graph.to_val()?;
+		// Split it into chunks
+		let chunks = val.chunks(Self::CHUNK_SIZE);
+		let old_chunks_len = mem::replace(&mut st.chunks, chunks.len() as u32);
+		for (i, chunk) in chunks.enumerate() {
+			let key = self.ikb.new_hl_key(self.level, i as u32);
+			tx.set(key, chunk).await?;
+		}
+		// Delete larger chunks if they exists
+		for i in st.chunks..old_chunks_len {
+			let key = self.ikb.new_hl_key(self.level, i);
+			tx.del(key).await?;
+		}
+		// Increase the version
+		st.version += 1;
+		Ok(())
+	}
+
+	pub(super) async fn load(
+		&mut self,
+		_tx: &Transaction,
+		_ikb: &IndexKeyBase,
+		st: &LayerState,
+	) -> Result<(), Error> {
+		println!("LOAD {} {} {}", self.level, st.version, st.chunks);
+		todo!()
 	}
 }
 
 #[cfg(test)]
 impl<S> HnswLayer<S>
 where
-	S: DynamicSet<ElementId>,
+	S: DynamicSet,
 {
 	pub(in crate::idx::trees::hnsw) fn check_props(&self, elements: &HnswElements) {
 		assert!(self.graph.len() <= elements.len(), "{} - {}", self.graph.len(), elements.len());

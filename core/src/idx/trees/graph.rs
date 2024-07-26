@@ -1,25 +1,25 @@
+use crate::err::Error;
 use crate::idx::trees::dynamicset::DynamicSet;
+use crate::idx::trees::hnsw::ElementId;
 use ahash::HashMap;
 #[cfg(test)]
 use ahash::HashSet;
+use bytes::{BufMut, BytesMut};
 use std::collections::hash_map::Entry;
 use std::fmt::Debug;
-use std::hash::Hash;
 
 #[derive(Debug)]
-pub(super) struct UndirectedGraph<T, S>
+pub(super) struct UndirectedGraph<S>
 where
-	T: Eq + Hash + Clone + Copy + Default + 'static + Send + Sync,
-	S: DynamicSet<T>,
+	S: DynamicSet,
 {
 	capacity: usize,
-	nodes: HashMap<T, S>,
+	nodes: HashMap<ElementId, S>,
 }
 
-impl<T, S> UndirectedGraph<T, S>
+impl<S> UndirectedGraph<S>
 where
-	T: Eq + Hash + Clone + Copy + Default + 'static + Send + Sync,
-	S: DynamicSet<T>,
+	S: DynamicSet,
 {
 	pub(super) fn new(capacity: usize) -> Self {
 		Self {
@@ -34,11 +34,11 @@ where
 	}
 
 	#[inline]
-	pub(super) fn get_edges(&self, node: &T) -> Option<&S> {
+	pub(super) fn get_edges(&self, node: &ElementId) -> Option<&S> {
 		self.nodes.get(node)
 	}
 
-	pub(super) fn add_empty_node(&mut self, node: T) -> bool {
+	pub(super) fn add_empty_node(&mut self, node: ElementId) -> bool {
 		if let Entry::Vacant(e) = self.nodes.entry(node) {
 			e.insert(S::with_capacity(self.capacity));
 			true
@@ -47,7 +47,11 @@ where
 		}
 	}
 
-	pub(super) fn add_node_and_bidirectional_edges(&mut self, node: T, edges: S) -> Vec<T> {
+	pub(super) fn add_node_and_bidirectional_edges(
+		&mut self,
+		node: ElementId,
+		edges: S,
+	) -> Vec<ElementId> {
 		let mut r = Vec::with_capacity(edges.len());
 		for &e in edges.iter() {
 			self.nodes.entry(e).or_insert_with(|| S::with_capacity(self.capacity)).insert(node);
@@ -57,11 +61,11 @@ where
 		r
 	}
 	#[inline]
-	pub(super) fn set_node(&mut self, node: T, new_edges: S) {
+	pub(super) fn set_node(&mut self, node: ElementId, new_edges: S) {
 		self.nodes.insert(node, new_edges);
 	}
 
-	pub(super) fn remove_node_and_bidirectional_edges(&mut self, node: &T) -> Option<S> {
+	pub(super) fn remove_node_and_bidirectional_edges(&mut self, node: &ElementId) -> Option<S> {
 		if let Some(edges) = self.nodes.remove(node) {
 			for edge in edges.iter() {
 				if let Some(edges_to_node) = self.nodes.get_mut(edge) {
@@ -73,25 +77,37 @@ where
 			None
 		}
 	}
+
+	pub(super) fn to_val(&self) -> Result<BytesMut, Error> {
+		let mut buf = BytesMut::new();
+		buf.put_u32(self.nodes.len() as u32);
+		for (&e, s) in &self.nodes {
+			buf.put_u64(e);
+			buf.put_u16(s.len() as u16);
+			for &i in s.iter() {
+				buf.put_u64(i);
+			}
+		}
+		Ok(buf)
+	}
 }
 
 #[cfg(test)]
-impl<T, S> UndirectedGraph<T, S>
+impl<S> UndirectedGraph<S>
 where
-	T: Eq + Hash + Clone + Copy + Default + 'static + Debug + Send + Sync,
-	S: DynamicSet<T>,
+	S: DynamicSet,
 {
 	pub(in crate::idx::trees) fn len(&self) -> usize {
 		self.nodes.len()
 	}
 
-	pub(in crate::idx::trees) fn nodes(&self) -> &HashMap<T, S> {
+	pub(in crate::idx::trees) fn nodes(&self) -> &HashMap<ElementId, S> {
 		&self.nodes
 	}
-	pub(in crate::idx::trees) fn check(&self, g: Vec<(T, Vec<T>)>) {
+	pub(in crate::idx::trees) fn check(&self, g: Vec<(ElementId, Vec<ElementId>)>) {
 		for (n, e) in g {
-			let edges: HashSet<T> = e.into_iter().collect();
-			let n_edges: Option<HashSet<T>> =
+			let edges: HashSet<ElementId> = e.into_iter().collect();
+			let n_edges: Option<HashSet<ElementId>> =
 				self.get_edges(&n).map(|e| e.iter().cloned().collect());
 			assert_eq!(n_edges, Some(edges), "{n:?}");
 		}
@@ -102,10 +118,11 @@ where
 mod tests {
 	use crate::idx::trees::dynamicset::{AHashSet, ArraySet, DynamicSet};
 	use crate::idx::trees::graph::UndirectedGraph;
+	use crate::idx::trees::hnsw::ElementId;
 
-	fn test_undirected_graph<S: DynamicSet<i32>>(m_max: usize) {
+	fn test_undirected_graph<S: DynamicSet>(m_max: usize) {
 		// Graph creation
-		let mut g = UndirectedGraph::<i32, S>::new(m_max);
+		let mut g = UndirectedGraph::<S>::new(m_max);
 		assert_eq!(g.capacity, 10);
 
 		// Adding an empty node
@@ -153,7 +170,7 @@ mod tests {
 		let res = g.remove_node_and_bidirectional_edges(&2);
 		assert_eq!(
 			res.map(|v| {
-				let mut v: Vec<i32> = v.iter().cloned().collect();
+				let mut v: Vec<ElementId> = v.iter().cloned().collect();
 				v.sort();
 				v
 			}),
@@ -174,11 +191,11 @@ mod tests {
 
 	#[test]
 	fn test_undirected_graph_array() {
-		test_undirected_graph::<ArraySet<i32, 10>>(10);
+		test_undirected_graph::<ArraySet<10>>(10);
 	}
 
 	#[test]
 	fn test_undirected_graph_hash() {
-		test_undirected_graph::<AHashSet<i32>>(10);
+		test_undirected_graph::<AHashSet>(10);
 	}
 }

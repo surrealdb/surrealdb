@@ -23,6 +23,7 @@ use crate::key::index::bu::Bu;
 use crate::key::index::hd::Hd;
 use crate::key::index::he::He;
 use crate::key::index::hi::Hi;
+use crate::key::index::hl::Hl;
 use crate::key::index::hs::Hs;
 use crate::key::index::hv::Hv;
 use crate::key::index::vm::Vm;
@@ -211,6 +212,18 @@ impl IndexKeyBase {
 			self.inner.tb.as_str(),
 			self.inner.ix.as_str(),
 			id,
+		)
+		.into()
+	}
+
+	fn new_hl_key(&self, layer: u16, chunk: u32) -> Key {
+		Hl::new(
+			self.inner.ns.as_str(),
+			self.inner.db.as_str(),
+			self.inner.tb.as_str(),
+			self.inner.ix.as_str(),
+			layer,
+			chunk,
 		)
 		.into()
 	}
