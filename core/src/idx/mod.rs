@@ -23,6 +23,7 @@ use crate::key::index::bu::Bu;
 use crate::key::index::hd::Hd;
 use crate::key::index::he::He;
 use crate::key::index::hi::Hi;
+use crate::key::index::hs::Hs;
 use crate::key::index::hv::Hv;
 use crate::key::index::vm::Vm;
 use crate::kvs::{Key, Val};
@@ -192,7 +193,6 @@ impl IndexKeyBase {
 		.into()
 	}
 
-	#[allow(unused)]
 	fn new_he_key(&self, element_id: ElementId) -> Key {
 		He::new(
 			self.inner.ns.as_str(),
@@ -222,6 +222,16 @@ impl IndexKeyBase {
 			self.inner.tb.as_str(),
 			self.inner.ix.as_str(),
 			vec,
+		)
+		.into()
+	}
+
+	fn new_hs_key(&self) -> Key {
+		Hs::new(
+			self.inner.ns.as_str(),
+			self.inner.db.as_str(),
+			self.inner.tb.as_str(),
+			self.inner.ix.as_str(),
 		)
 		.into()
 	}

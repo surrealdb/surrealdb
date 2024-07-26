@@ -17,11 +17,14 @@ use crate::idx::trees::hnsw::index::HnswCheckedSearchContext;
 use crate::idx::trees::hnsw::layer::HnswLayer;
 use crate::idx::trees::knn::DoublePriorityQueue;
 use crate::idx::trees::vector::SharedVector;
-use crate::kvs::Transaction;
+use crate::idx::{IndexKeyBase, VersionedStore};
+use crate::kvs::{Key, Transaction};
 use crate::sql::index::HnswParams;
 use rand::prelude::SmallRng;
 use rand::{Rng, SeedableRng};
 use reblessive::tree::Stk;
+use revision::revisioned;
+use serde::{Deserialize, Serialize};
 
 struct HnswSearch {
 	pt: SharedVector,
@@ -38,11 +41,33 @@ impl HnswSearch {
 		}
 	}
 }
+
+#[revisioned(revision = 1)]
+#[derive(Serialize, Deserialize)]
+pub(super) struct HnswState {
+	enter_point: Option<ElementId>,
+	layer0_version: u64,
+	layers_versions: Vec<u64>,
+}
+
+impl Default for HnswState {
+	fn default() -> Self {
+		Self {
+			enter_point: None,
+			layer0_version: 0,
+			layers_versions: vec![],
+		}
+	}
+}
+impl VersionedStore for HnswState {}
+
 struct Hnsw<L0, L>
 where
 	L0: DynamicSet<ElementId>,
 	L: DynamicSet<ElementId>,
 {
+	ikb: IndexKeyBase,
+	state_key: Key,
 	m: usize,
 	efc: usize,
 	ml: f64,
@@ -61,9 +86,12 @@ where
 	L0: DynamicSet<ElementId>,
 	L: DynamicSet<ElementId>,
 {
-	fn new(p: &HnswParams) -> Self {
+	fn new(ikb: IndexKeyBase, p: &HnswParams) -> Self {
 		let m0 = p.m0 as usize;
+		let state_key = ikb.new_hs_key();
 		Self {
+			ikb,
+			state_key,
 			m: p.m as usize,
 			efc: p.ef_construction as usize,
 			ml: p.ml.to_float(),
@@ -76,8 +104,39 @@ where
 		}
 	}
 
+	async fn check_state(&mut self, tx: &Transaction) -> Result<(), Error> {
+		// Read the state
+		let st: HnswState = if let Some(val) = tx.get(self.state_key.clone()).await? {
+			VersionedStore::try_from(val)?
+		} else {
+			Default::default()
+		};
+		// Compare versions
+		if st.layer0_version != self.layer0.version() {
+			self.layer0.load(tx, &self.ikb, 0, st.layer0_version).await?;
+		}
+		for (i, (v, l)) in st.layers_versions.iter().zip(self.layers.iter_mut()).enumerate() {
+			if *v != l.version() {
+				l.load(tx, &self.ikb, i + 1, *v).await?;
+			}
+		}
+		// Retrieve missing layers
+		for i in self.layers.len()..st.layers_versions.len() {
+			let mut l = HnswLayer::new(self.m);
+			l.load(tx, &self.ikb, i + 1, st.layers_versions[i]).await?;
+			self.layers.push(l);
+		}
+		// Remove non-existing layers
+		for _ in self.layers.len()..st.layers_versions.len() {
+			self.layers.pop();
+		}
+		// Set the enter_point
+		self.enter_point = st.enter_point;
+		Ok(())
+	}
+
 	fn insert_level(&mut self, q_pt: SharedVector, q_level: usize) -> ElementId {
-		// Attribute an ID to the vector
+		// Attributes an ID to the vector
 		let q_id = self.elements.next_element_id();
 		let top_up_layers = self.layers.len();
 
@@ -108,11 +167,14 @@ where
 
 	fn insert_first_element(&mut self, id: ElementId, level: usize) {
 		if level > 0 {
+			// Insert in up levels
 			for layer in self.layers.iter_mut().take(level) {
 				layer.add_empty_node(id);
 			}
 		}
+		// Insert in layer 0
 		self.layer0.add_empty_node(id);
+		// Update the enter point
 		self.enter_point = Some(id);
 	}
 
@@ -194,7 +256,7 @@ where
 			self.elements.remove(&e_id);
 
 			// Remove from the up layers
-			for layer in self.layers.iter_mut().rev() {
+			for layer in self.layers.iter_mut() {
 				if layer.remove(&self.elements, &self.heuristic, e_id, self.efc) {
 					removed = true;
 				}

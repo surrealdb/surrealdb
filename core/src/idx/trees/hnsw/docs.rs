@@ -5,7 +5,7 @@ use crate::idx::trees::hnsw::ElementId;
 use crate::idx::trees::knn::Ids64;
 use crate::idx::trees::vector::SharedVector;
 use crate::idx::{IndexKeyBase, VersionedStore};
-use crate::kvs::{Key, Transaction};
+use crate::kvs::{Key, Transaction, Val};
 use crate::sql::{Id, Thing};
 use derive::Store;
 use revision::{revisioned, Revisioned};
@@ -121,10 +121,14 @@ impl HnswDocs {
 }
 
 #[revisioned(revision = 1)]
+#[derive(Serialize, Deserialize)]
+#[non_exhaustive]
 struct ElementDocs {
 	e_id: ElementId,
 	docs: Ids64,
 }
+
+impl VersionedStore for ElementDocs {}
 
 pub(in crate::idx) struct VecDocs {
 	ikb: IndexKeyBase,
@@ -144,7 +148,7 @@ impl VecDocs {
 	) -> Result<Option<Ids64>, Error> {
 		let key = self.ikb.new_hv_key(Arc::new(pt.deref().into()));
 		if let Some(val) = tx.get(key).await? {
-			let ed = ElementDocs::deserialize_revisioned(&mut val.as_slice())?;
+			let ed: ElementDocs = VersionedStore::try_from(val)?;
 			Ok(Some(ed.docs))
 		} else {
 			Ok(None)
@@ -161,13 +165,15 @@ impl VecDocs {
 		let key = self.ikb.new_hv_key(Arc::new(o.deref().into()));
 		if let Some(ed) = match tx.get(key.clone()).await? {
 			Some(val) => {
-				let mut ed = ElementDocs::deserialize_revisioned(&mut val.as_slice())?;
+				// We already have the vector
+				let mut ed: ElementDocs = VersionedStore::try_from(val)?;
 				ed.docs.insert(d).map(|new_docs| {
 					ed.docs = new_docs;
 					ed
 				})
 			}
 			None => {
+				//  We don't have the vector, we insert it in the graph
 				let element_id = h.insert(o);
 				let ed = ElementDocs {
 					e_id: element_id,
@@ -176,8 +182,7 @@ impl VecDocs {
 				Some(ed)
 			}
 		} {
-			let mut val = Vec::new();
-			ed.serialize_revisioned(&mut val)?;
+			let val: Val = VersionedStore::try_into(&ed)?;
 			tx.set(key, val).await?;
 		}
 		Ok(())

@@ -16,9 +16,9 @@ where
 }
 
 #[derive(Debug)]
-pub struct HashBrownSet<T>(HashSet<T>);
+pub struct AHashSet<T>(HashSet<T>);
 
-impl<T> DynamicSet<T> for HashBrownSet<T>
+impl<T> DynamicSet<T> for AHashSet<T>
 where
 	T: Eq + Hash + Clone + Default + Debug + 'static + Send + Sync,
 {
@@ -125,7 +125,7 @@ where
 
 #[cfg(test)]
 mod tests {
-	use crate::idx::trees::dynamicset::{ArraySet, DynamicSet, HashBrownSet};
+	use crate::idx::trees::dynamicset::{AHashSet, ArraySet, DynamicSet};
 	use ahash::HashSet;
 
 	fn test_dynamic_set<S: DynamicSet<usize>>(capacity: usize) {
@@ -167,7 +167,7 @@ mod tests {
 	#[test]
 	fn test_dynamic_set_hash() {
 		for capacity in 1..50 {
-			test_dynamic_set::<HashBrownSet<usize>>(capacity);
+			test_dynamic_set::<AHashSet<usize>>(capacity);
 		}
 	}
 

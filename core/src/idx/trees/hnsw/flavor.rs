@@ -1,16 +1,17 @@
 use crate::err::Error;
 use crate::idx::planner::checker::HnswConditionChecker;
-use crate::idx::trees::dynamicset::{ArraySet, HashBrownSet};
+use crate::idx::trees::dynamicset::{AHashSet, ArraySet};
 use crate::idx::trees::hnsw::docs::HnswDocs;
 use crate::idx::trees::hnsw::docs::VecDocs;
 use crate::idx::trees::hnsw::{ElementId, Hnsw, HnswSearch};
 use crate::idx::trees::vector::SharedVector;
+use crate::idx::IndexKeyBase;
 use crate::kvs::Transaction;
 use crate::sql::index::HnswParams;
 use reblessive::tree::Stk;
 
 pub(super) type ASet<const N: usize> = ArraySet<ElementId, N>;
-pub(super) type HSet = HashBrownSet<ElementId>;
+pub(super) type HSet = AHashSet<ElementId>;
 
 pub(super) enum HnswFlavor {
 	H5_9(Hnsw<ASet<9>, ASet<5>>),
@@ -30,28 +31,47 @@ pub(super) enum HnswFlavor {
 }
 
 impl HnswFlavor {
-	pub(super) fn new(p: &HnswParams) -> Self {
+	pub(super) fn new(ibk: IndexKeyBase, p: &HnswParams) -> Self {
 		match p.m {
 			1..=4 => match p.m0 {
-				1..=8 => Self::H5_9(Hnsw::<ASet<9>, ASet<5>>::new(p)),
-				9..=16 => Self::H5_17(Hnsw::<ASet<17>, ASet<5>>::new(p)),
-				17..=24 => Self::H5_25(Hnsw::<ASet<25>, ASet<5>>::new(p)),
-				_ => Self::H5set(Hnsw::<HSet, ASet<5>>::new(p)),
+				1..=8 => Self::H5_9(Hnsw::<ASet<9>, ASet<5>>::new(ibk, p)),
+				9..=16 => Self::H5_17(Hnsw::<ASet<17>, ASet<5>>::new(ibk, p)),
+				17..=24 => Self::H5_25(Hnsw::<ASet<25>, ASet<5>>::new(ibk, p)),
+				_ => Self::H5set(Hnsw::<HSet, ASet<5>>::new(ibk, p)),
 			},
 			5..=8 => match p.m0 {
-				1..=16 => Self::H9_17(Hnsw::<ASet<17>, ASet<9>>::new(p)),
-				17..=24 => Self::H9_25(Hnsw::<ASet<25>, ASet<9>>::new(p)),
-				_ => Self::H9set(Hnsw::<HSet, ASet<9>>::new(p)),
+				1..=16 => Self::H9_17(Hnsw::<ASet<17>, ASet<9>>::new(ibk, p)),
+				17..=24 => Self::H9_25(Hnsw::<ASet<25>, ASet<9>>::new(ibk, p)),
+				_ => Self::H9set(Hnsw::<HSet, ASet<9>>::new(ibk, p)),
 			},
 			9..=12 => match p.m0 {
-				17..=24 => Self::H13_25(Hnsw::<ASet<25>, ASet<13>>::new(p)),
-				_ => Self::H13set(Hnsw::<HSet, ASet<13>>::new(p)),
+				17..=24 => Self::H13_25(Hnsw::<ASet<25>, ASet<13>>::new(ibk, p)),
+				_ => Self::H13set(Hnsw::<HSet, ASet<13>>::new(ibk, p)),
 			},
-			13..=16 => Self::H17set(Hnsw::<HSet, ASet<17>>::new(p)),
-			17..=20 => Self::H21set(Hnsw::<HSet, ASet<21>>::new(p)),
-			21..=24 => Self::H25set(Hnsw::<HSet, ASet<25>>::new(p)),
-			25..=28 => Self::H29set(Hnsw::<HSet, ASet<29>>::new(p)),
-			_ => Self::Hset(Hnsw::<HSet, HSet>::new(p)),
+			13..=16 => Self::H17set(Hnsw::<HSet, ASet<17>>::new(ibk, p)),
+			17..=20 => Self::H21set(Hnsw::<HSet, ASet<21>>::new(ibk, p)),
+			21..=24 => Self::H25set(Hnsw::<HSet, ASet<25>>::new(ibk, p)),
+			25..=28 => Self::H29set(Hnsw::<HSet, ASet<29>>::new(ibk, p)),
+			_ => Self::Hset(Hnsw::<HSet, HSet>::new(ibk, p)),
+		}
+	}
+
+	pub(super) async fn check_state(&mut self, tx: &Transaction) -> Result<(), Error> {
+		match self {
+			HnswFlavor::H5_9(h) => h.check_state(tx).await,
+			HnswFlavor::H5_17(h) => h.check_state(tx).await,
+			HnswFlavor::H5_25(h) => h.check_state(tx).await,
+			HnswFlavor::H5set(h) => h.check_state(tx).await,
+			HnswFlavor::H9_17(h) => h.check_state(tx).await,
+			HnswFlavor::H9_25(h) => h.check_state(tx).await,
+			HnswFlavor::H9set(h) => h.check_state(tx).await,
+			HnswFlavor::H13_25(h) => h.check_state(tx).await,
+			HnswFlavor::H13set(h) => h.check_state(tx).await,
+			HnswFlavor::H17set(h) => h.check_state(tx).await,
+			HnswFlavor::H21set(h) => h.check_state(tx).await,
+			HnswFlavor::H25set(h) => h.check_state(tx).await,
+			HnswFlavor::H29set(h) => h.check_state(tx).await,
+			HnswFlavor::Hset(h) => h.check_state(tx).await,
 		}
 	}
 

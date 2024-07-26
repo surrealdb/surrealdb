@@ -81,7 +81,7 @@ impl HnswIndex {
 		Ok(Self {
 			dim: p.dimension as usize,
 			vector_type: p.vector_type,
-			hnsw: HnswFlavor::new(p),
+			hnsw: HnswFlavor::new(ikb.clone(), p),
 			docs: HnswDocs::new(tx, tb, ikb.clone()).await?,
 			vec_docs: VecDocs::new(ikb),
 		})
@@ -93,6 +93,8 @@ impl HnswIndex {
 		id: Id,
 		content: &Vec<Value>,
 	) -> Result<(), Error> {
+		// Ensure the layers are up-to-date
+		self.hnsw.check_state(tx).await?;
 		// Resolve the doc_id
 		let doc_id = self.docs.resolve(tx, id).await?;
 		// Index the values
@@ -131,6 +133,8 @@ impl HnswIndex {
 		content: &Vec<Value>,
 	) -> Result<(), Error> {
 		if let Some(doc_id) = self.docs.remove(tx, id).await? {
+			// Ensure the layers are up-to-date
+			self.hnsw.check_state(tx).await?;
 			for v in content {
 				// Extract the vector
 				let vector = Vector::try_from_value(self.vector_type, self.dim, v)?;

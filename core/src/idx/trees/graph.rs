@@ -100,7 +100,7 @@ where
 
 #[cfg(test)]
 mod tests {
-	use crate::idx::trees::dynamicset::{ArraySet, DynamicSet, HashBrownSet};
+	use crate::idx::trees::dynamicset::{AHashSet, ArraySet, DynamicSet};
 	use crate::idx::trees::graph::UndirectedGraph;
 
 	fn test_undirected_graph<S: DynamicSet<i32>>(m_max: usize) {
@@ -179,6 +179,6 @@ mod tests {
 
 	#[test]
 	fn test_undirected_graph_hash() {
-		test_undirected_graph::<HashBrownSet<i32>>(10);
+		test_undirected_graph::<AHashSet<i32>>(10);
 	}
 }

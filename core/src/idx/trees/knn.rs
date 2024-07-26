@@ -7,6 +7,7 @@ use ahash::HashMap;
 use ahash::{HashSet, HashSetExt};
 use revision::revisioned;
 use roaring::RoaringTreemap;
+use serde::{Deserialize, Serialize};
 use std::cmp::{Ordering, Reverse};
 use std::collections::btree_map::Entry;
 use std::collections::{BTreeMap, VecDeque};
@@ -177,6 +178,7 @@ impl Ord for FloatKey {
 /// variant (if required).
 #[derive(Debug, Clone, PartialEq)]
 #[revisioned(revision = 1)]
+#[derive(Serialize, Deserialize)]
 #[non_exhaustive]
 pub(in crate::idx) enum Ids64 {
 	Empty,

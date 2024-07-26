@@ -7,6 +7,7 @@ use crate::idx::trees::hnsw::index::HnswCheckedSearchContext;
 use crate::idx::trees::hnsw::{ElementId, HnswElements};
 use crate::idx::trees::knn::DoublePriorityQueue;
 use crate::idx::trees::vector::SharedVector;
+use crate::idx::IndexKeyBase;
 use crate::kvs::Transaction;
 use ahash::HashSet;
 use reblessive::tree::Stk;
@@ -16,6 +17,7 @@ pub(super) struct HnswLayer<S>
 where
 	S: DynamicSet<ElementId>,
 {
+	version: u64,
 	graph: UndirectedGraph<ElementId, S>,
 	m_max: usize,
 }
@@ -26,9 +28,24 @@ where
 {
 	pub(super) fn new(m_max: usize) -> Self {
 		Self {
+			version: 0,
 			graph: UndirectedGraph::new(m_max + 1),
 			m_max,
 		}
+	}
+
+	pub(super) async fn load(
+		&mut self,
+		tx: &Transaction,
+		ikb: &IndexKeyBase,
+		level: usize,
+		version: u64,
+	) -> Result<(), Error> {
+		todo!()
+	}
+
+	pub(super) fn version(&self) -> u64 {
+		self.version
 	}
 
 	pub(super) fn m_max(&self) -> usize {
@@ -40,6 +57,7 @@ where
 	}
 
 	pub(super) fn add_empty_node(&mut self, node: ElementId) -> bool {
+		self.version += 1;
 		self.graph.add_empty_node(node)
 	}
 	pub(super) fn search_single(
@@ -258,6 +276,7 @@ where
 				unreachable!("Element: {}", e_id);
 			}
 		}
+		self.version += 1;
 		eps
 	}
 
@@ -307,6 +326,7 @@ where
 					self.graph.set_node(q_id, neighbors);
 				}
 			}
+			self.version += 1;
 			true
 		} else {
 			false

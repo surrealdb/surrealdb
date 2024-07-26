@@ -55,7 +55,6 @@ Write(n, c, newIndex) ==
   /\ clientOps[c] < MaxWrites
   /\ remoteVersion < MaxVersion  (* Ensure the remote version does not exceed the maximum allowed version *)
   /\ (localVersion[n] < remoteVersion => UpdateToLatest(n))  (* Update if the local version is outdated *)
-  /\ localVersion[n] = remoteVersion  (* Ensure the local version is up-to-date *)
   /\ localIndex' = [localIndex EXCEPT ![n] = newIndex]  (* Update the local index with the new index *)
   /\ localVersion' = [localVersion EXCEPT ![n] = localVersion[n] + 1]  (* Increment the local version *)
   /\ remoteIndex' = newIndex  (* Update the remote index with the new index *)

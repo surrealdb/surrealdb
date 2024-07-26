@@ -42,7 +42,7 @@ fn bench_hnsw_no_db(c: &mut Criterion) {
 		let mut group = get_group(c, GROUP_NAME, samples.len(), 10);
 		let id = format!("insert len: {}", samples.len());
 		group.bench_function(id, |b| {
-			b.iter(|| insert_objects(&samples));
+			b.to_async(Runtime::new().unwrap()).iter(|| insert_objects(&samples));
 		});
 		group.finish();
 	}
@@ -78,7 +78,6 @@ fn bench_hnsw_with_db(c: &mut Criterion) {
 	{
 		let mut group = get_group(c, GROUP_NAME, samples.len(), 10);
 		let id = format!("insert len: {}", samples.len());
-
 		group.bench_function(id, |b| {
 			b.to_async(Runtime::new().unwrap()).iter(|| insert_objects_db(session, true, &samples));
 		});
