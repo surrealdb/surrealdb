@@ -136,7 +136,17 @@ impl From<Claims> for Value {
 						continue;
 					}
 				};
-				out.insert(claim, claim_value);
+				// Strip namespace prefix to store only canonical claim names
+				if let Some(canonical_claim) = claim.strip_prefix("https://surrealdb.com/") {
+					// TODO(gguillemas): Kept for backward compatibility. Remove in 2.0.0.
+					out.insert(claim.to_owned(), claim_value.clone());
+					// Avoid replacing a public claim with a private one
+					if !out.contains_key(canonical_claim) {
+						out.insert(canonical_claim.to_owned(), claim_value);
+					}
+				} else {
+					out.insert(claim.to_owned(), claim_value);
+				}
 			}
 		}
 		// Return value
