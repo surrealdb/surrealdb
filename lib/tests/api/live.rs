@@ -482,17 +482,18 @@ async fn live_select_query_with_filter() {
 
 		// Test cases
 		let test_cases = vec![
-			("value > 25", vec![2, 3, 4]),
-			("value >= 51", vec![]),
-			("value < 30", vec![0, 1]),
-			("value <= 30", vec![0, 1, 2]),
-			("value = 20", vec![1]),
-			("value != 30", vec![0, 1, 3, 4]),
-			("name = 'A'", vec![0]),
-			("name != 'B'", vec![0, 2, 3, 4]),
+			("value", ">", "25", vec![2, 3, 4]),
+			("value", ">=", "51", vec![]),
+			("value", "<", "30", vec![0, 1]),
+			("value", "<=", "30", vec![0, 1, 2]),
+			("value", "=", "20", vec![1]),
+			("value", "!=", "30", vec![0, 1, 3, 4]),
+			("name", "=", "'A'", vec![0]),
+			("name", "!=", "'B'", vec![0, 2, 3, 4]),
 		];
 
-		for (where_clause, expected_indices) in test_cases {
+		for (col, operator, value, expected_indices) in test_cases.clone() {
+			let where_clause = format!("{} {} {}", col, operator, value);
 			let query = format!("LIVE SELECT * FROM {table} WHERE {where_clause}");
 			info!("Starting live query: {}", query);
 
@@ -513,7 +514,32 @@ async fn live_select_query_with_filter() {
 			let received_ids: Vec<_> = notifications.iter().map(|n| n.data.clone()).collect();
 			let expected_ids: Vec<_> =
 				expected_indices.iter().map(|&i| records[i].clone()).collect();
-			assert_indices(received_ids, expected_ids, where_clause);
+			assert_indices(received_ids, expected_ids, &where_clause);
+		}
+
+		for (col, operator, value, expected_indices) in test_cases {
+			let where_clause = format!("{} {} {}", col, operator, value);
+			let query = format!("LET $var = {}; LIVE SELECT * FROM {table} WHERE {} {} $var", value, col, operator);
+			info!("Starting live query: {}", query);
+
+			let users: QueryStream<Notification<RecordId>> =
+				db.query(query).await.unwrap().stream::<Notification<_>>(0).unwrap();
+			let users = Arc::new(RwLock::new(users));
+
+			// Create multiple records
+			let mut records: Vec<RecordId> = Vec::new();
+			for obj in &record_objects {
+				records.push(create_record(&table, obj.clone()).await);
+			}
+
+			// Wait for initial notifications
+			let notifications = receive_all_pending_notifications(users.clone(), LQ_TIMEOUT).await;
+
+			// Check if the correct records are returned
+			let received_ids: Vec<_> = notifications.iter().map(|n| n.data.clone()).collect();
+			let expected_ids: Vec<_> =
+				expected_indices.iter().map(|&i| records[i].clone()).collect();
+			assert_indices(received_ids, expected_ids, &where_clause);
 		}
 	}
 
