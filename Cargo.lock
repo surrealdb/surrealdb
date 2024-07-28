@@ -6105,6 +6105,7 @@ dependencies = [
  "revision",
  "rmp-serde",
  "rmpv",
+ "rust_decimal",
  "rustyline",
  "semver",
  "serde",

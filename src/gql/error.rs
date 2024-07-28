@@ -7,6 +7,7 @@ use axum::{
 };
 use http::StatusCode;
 use hyper::Body;
+use surrealdb::sql::Kind;
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -17,13 +18,26 @@ pub enum GqlError {
 	SchemaError(String),
 	#[error("Error resolving request: {0}")]
 	ResolverError(String),
+	#[error("Error converting value: {val} to type: {target}")]
+	TypeError {
+		target: Kind,
+		val: async_graphql::Value,
+	},
 }
 
 pub fn schema_error(msg: impl Into<String>) -> GqlError {
 	GqlError::SchemaError(msg.into())
 }
+
 pub fn resolver_error(msg: impl Into<String>) -> GqlError {
 	GqlError::ResolverError(msg.into())
+}
+
+pub fn type_error(kind: Kind, val: &async_graphql::Value) -> GqlError {
+	GqlError::TypeError {
+		target: kind,
+		val: val.to_owned(),
+	}
 }
 
 impl From<surrealdb::err::Error> for GqlError {

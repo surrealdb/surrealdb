@@ -11,10 +11,12 @@ use async_graphql::dynamic::{InputValue, Schema};
 use async_graphql::indexmap::IndexMap;
 use async_graphql::Name;
 use async_graphql::Value as GqlValue;
+use rust_decimal::prelude::FromPrimitive;
+use rust_decimal::Decimal;
 use serde_json::Number;
 use surrealdb::dbs::Session;
 use surrealdb::sql;
-use surrealdb::sql::statements::{DefineTableStatement, SelectStatement};
+use surrealdb::sql::statements::{DefineFieldStatement, DefineTableStatement, SelectStatement};
 use surrealdb::sql::Expression;
 use surrealdb::sql::Kind;
 use surrealdb::sql::{Cond, Fields};
@@ -23,7 +25,7 @@ use surrealdb::sql::{Statement, Thing};
 use super::error::{resolver_error, GqlError};
 use super::ext::IntoExt;
 use crate::dbs::DB;
-use crate::gql::error::schema_error;
+use crate::gql::error::{schema_error, type_error};
 use crate::gql::utils::GqlValueUtils;
 use surrealdb::kvs::LockType;
 use surrealdb::kvs::TransactionType;
@@ -147,7 +149,11 @@ pub async fn generate_schema(session: &Session) -> Result<Schema, GqlError> {
 		types.push(Type::InputObject(filter_id()));
 
 		let sess1 = session.to_owned();
-		let tb1 = tb.to_owned();
+
+		let fds = tx.all_tb_fields(&db, &ns, &tb.name.0).await?;
+
+		let fds1 = fds.clone();
+
 		query = query.field(
 			Field::new(
 				tb.name.to_string(),
@@ -155,7 +161,7 @@ pub async fn generate_schema(session: &Session) -> Result<Schema, GqlError> {
 				move |ctx| {
 					let tb_name = first_tb_name.clone();
 					let sess1 = sess1.clone();
-					let tb1 = tb1.clone();
+					let fds1 = fds1.clone();
 					FieldFuture::new(async move {
 						let kvs = DB.get().unwrap();
 
@@ -213,7 +219,7 @@ pub async fn generate_schema(session: &Session) -> Result<Schema, GqlError> {
 									}
 								};
 
-								let cond = cond_from_filter(o, &tb1)?;
+								let cond = cond_from_filter(o, &fds1)?;
 
 								Some(cond)
 							}
@@ -331,8 +337,6 @@ pub async fn generate_schema(session: &Session) -> Result<Schema, GqlError> {
 			)
 			.argument(id_input!()),
 		);
-
-		let fds = tx.all_tb_fields(&db, &ns, &tb.name.0).await?;
 
 		let mut table_ty_obj = Object::new(tb.name.to_string())
 			.field(Field::new("id", TypeRef::named_nn(TypeRef::ID), |ctx| {
@@ -540,14 +544,14 @@ fn unwrap_type(ty: TypeRef) -> TypeRef {
 
 fn cond_from_filter(
 	filter: &IndexMap<Name, GqlValue>,
-	tb: &DefineTableStatement,
+	fds: &[DefineFieldStatement],
 ) -> Result<Cond, GqlError> {
-	val_from_filter(filter, tb).map(IntoExt::intox)
+	val_from_filter(filter, fds).map(IntoExt::intox)
 }
 
 fn val_from_filter(
 	filter: &IndexMap<Name, GqlValue>,
-	tb: &DefineTableStatement,
+	fds: &[DefineFieldStatement],
 ) -> Result<SqlValue, GqlError> {
 	if filter.len() != 1 {
 		return Err(resolver_error("Table Filter must have one item"));
@@ -556,10 +560,10 @@ fn val_from_filter(
 	let (k, v) = filter.iter().next().unwrap();
 
 	let cond = match k.as_str().to_lowercase().as_str() {
-		"or" => aggregate(v, AggregateOp::Or, tb),
-		"and" => aggregate(v, AggregateOp::And, tb),
-		"not" => negate(v, tb),
-		_ => binop(k.as_str(), v, tb),
+		"or" => aggregate(v, AggregateOp::Or, fds),
+		"and" => aggregate(v, AggregateOp::And, fds),
+		"not" => negate(v, fds),
+		_ => binop(k.as_str(), v, fds),
 	};
 
 	cond
@@ -573,9 +577,9 @@ fn parse_op(name: impl AsRef<str>) -> Result<sql::Operator, GqlError> {
 	}
 }
 
-fn negate(filter: &GqlValue, tb: &DefineTableStatement) -> Result<SqlValue, GqlError> {
+fn negate(filter: &GqlValue, fds: &[DefineFieldStatement]) -> Result<SqlValue, GqlError> {
 	let obj = filter.as_object().ok_or(resolver_error("Value of NOT must be object"))?;
-	let inner_cond = val_from_filter(obj, tb)?;
+	let inner_cond = val_from_filter(obj, fds)?;
 
 	Ok(Expression::Unary {
 		o: sql::Operator::Not,
@@ -592,7 +596,7 @@ enum AggregateOp {
 fn aggregate(
 	filter: &GqlValue,
 	op: AggregateOp,
-	tb: &DefineTableStatement,
+	fds: &[DefineFieldStatement],
 ) -> Result<SqlValue, GqlError> {
 	let op_str = match op {
 		AggregateOp::And => "AND",
@@ -606,7 +610,7 @@ fn aggregate(
 		filter.as_list().ok_or(resolver_error(format!("Value of {op_str} should be a list")))?;
 	let filter_arr = list
 		.iter()
-		.map(|v| v.as_object().map(|o| val_from_filter(o, tb)))
+		.map(|v| v.as_object().map(|o| val_from_filter(o, fds)))
 		.collect::<Option<Result<Vec<SqlValue>, GqlError>>>()
 		.ok_or(resolver_error(format!("List of {op_str} should contain objects")))??;
 
@@ -631,9 +635,13 @@ fn aggregate(
 fn binop(
 	field_name: &str,
 	val: &GqlValue,
-	tb: &DefineTableStatement,
+	fds: &[DefineFieldStatement],
 ) -> Result<SqlValue, GqlError> {
 	let obj = val.as_object().ok_or(resolver_error("Field filter should be object"))?;
+
+	let Some(fd) = fds.iter().find(|fd| fd.name.to_string() == field_name) else {
+		return Err(resolver_error(format!("Field `{field_name}` not found")));
+	};
 
 	if obj.len() != 1 {
 		return Err(resolver_error("Field Filter must have one item"));
@@ -644,7 +652,7 @@ fn binop(
 	let (k, v) = obj.iter().next().unwrap();
 	let op = parse_op(k)?;
 
-	let rhs = gql_value_to_sql_value(v);
+	let rhs = gql_to_sql_kind(v, fd.kind.clone().unwrap_or_default())?;
 
 	let expr = sql::Expression::Binary {
 		l: lhs,
@@ -655,13 +663,230 @@ fn binop(
 	Ok(expr.into())
 }
 
-// fn gql_to_sql_kind(val: &GqlValue, kind: Kind) -> Result<SqlValue, GqlError> {
-// 	match (val, kind) {
-// 		(GqlValue::Null, Kind::Any | Kind::Null) => Ok(SqlValue::Null),
-// 		(GqlValue::String(s), Kind::String) => Ok(),
-// 		_ => todo!(),
-// 	}
-// }
+fn gql_to_sql_kind(val: &GqlValue, kind: Kind) -> Result<SqlValue, GqlError> {
+	use surrealdb::syn;
+	// match val {
+	// 	GqlValue::Null => todo!(),
+	// 	GqlValue::Number(_) => todo!(),
+	// 	GqlValue::String(_) => todo!(),
+	// 	GqlValue::Boolean(_) => todo!(),
+	// 	GqlValue::Binary(_) => todo!(),
+	// 	GqlValue::Enum(_) => todo!(),
+	// 	GqlValue::List(_) => todo!(),
+	// 	GqlValue::Object(_) => todo!(),
+	// }
+
+	match kind {
+		Kind::Any => todo!(),
+		Kind::Null => match val {
+			GqlValue::Null => Ok(SqlValue::Null),
+			_ => Err(type_error(kind, val)),
+		},
+		Kind::Bool => match val {
+			GqlValue::Boolean(b) => Ok(SqlValue::Bool(*b)),
+			_ => Err(type_error(kind, val)),
+		},
+		Kind::Bytes => match val {
+			GqlValue::Binary(b) => Ok(SqlValue::Bytes(b.to_owned().to_vec().into())),
+			_ => Err(type_error(kind, val)),
+		},
+		Kind::Datetime => match val {
+			GqlValue::String(s) => match syn::datetime_raw(s) {
+				Ok(dt) => Ok(dt.into()),
+				Err(_) => Err(type_error(kind, val)),
+			},
+			_ => Err(type_error(kind, val)),
+		},
+		Kind::Decimal => match val {
+			GqlValue::Number(n) => {
+				if let Some(int) = n.as_i64() {
+					Ok(SqlValue::Number(sql::Number::Decimal(int.into())))
+				} else if let Some(d) = n.as_f64().map(Decimal::from_f64).flatten() {
+					Ok(SqlValue::Number(sql::Number::Decimal(d)))
+				} else if let Some(uint) = n.as_u64() {
+					Ok(SqlValue::Number(sql::Number::Decimal(uint.into())))
+				} else {
+					Err(type_error(kind, val))
+				}
+			}
+			GqlValue::String(s) => match syn::value(s) {
+				Ok(SqlValue::Number(n)) => match n {
+					sql::Number::Int(i) => Ok(SqlValue::Number(sql::Number::Decimal(i.into()))),
+					sql::Number::Float(f) => match Decimal::from_f64(f) {
+						Some(d) => Ok(SqlValue::Number(sql::Number::Decimal(d))),
+						None => Err(type_error(kind, val)),
+					},
+					sql::Number::Decimal(d) => Ok(SqlValue::Number(sql::Number::Decimal(d))),
+					_ => Err(type_error(kind, val)),
+				},
+				_ => Err(type_error(kind, val)),
+			},
+			_ => Err(type_error(kind, val)),
+		},
+		Kind::Duration => todo!(),
+		Kind::Float => match val {
+			GqlValue::Number(n) => {
+				if let Some(i) = n.as_i64() {
+					Ok(SqlValue::Number(sql::Number::Float(i as f64)))
+				} else if let Some(f) = n.as_f64() {
+					Ok(SqlValue::Number(sql::Number::Float(f)))
+				} else if let Some(uint) = n.as_u64() {
+					Ok(SqlValue::Number(sql::Number::Float(uint as f64)))
+				} else {
+					unreachable!("serde_json::Number must be either i64, u64 or f64")
+				}
+			}
+			GqlValue::String(s) => match syn::value(s) {
+				Ok(SqlValue::Number(n)) => match n {
+					sql::Number::Int(int) => Ok(SqlValue::Number(sql::Number::Float(int as f64))),
+					sql::Number::Float(float) => Ok(SqlValue::Number(sql::Number::Float(float))),
+					sql::Number::Decimal(d) => match d.try_into() {
+						Ok(f) => Ok(SqlValue::Number(sql::Number::Float(f))),
+						_ => Err(type_error(kind, val)),
+					},
+					_ => Err(type_error(kind, val)),
+				},
+				_ => Err(type_error(kind, val)),
+			},
+			_ => Err(type_error(kind, val)),
+		},
+		Kind::Int => match val {
+			GqlValue::Number(n) => {
+				if let Some(i) = n.as_i64() {
+					Ok(SqlValue::Number(sql::Number::Int(i)))
+				} else {
+					Err(type_error(kind, val))
+				}
+			}
+			GqlValue::String(s) => match syn::value(s) {
+				Ok(SqlValue::Number(n)) => match n {
+					sql::Number::Int(int) => Ok(SqlValue::Number(sql::Number::Int(int))),
+					sql::Number::Float(float) => {
+						if float.fract() == 0.0 {
+							Ok(SqlValue::Number(sql::Number::Int(float as i64)))
+						} else {
+							Err(type_error(kind, val))
+						}
+					}
+					sql::Number::Decimal(d) => match d.try_into() {
+						Ok(i) => Ok(SqlValue::Number(sql::Number::Int(i))),
+						_ => Err(type_error(kind, val)),
+					},
+					_ => Err(type_error(kind, val)),
+				},
+				_ => Err(type_error(kind, val)),
+			},
+			_ => Err(type_error(kind, val)),
+		},
+		Kind::Number => match val {
+			GqlValue::Number(n) => {
+				if let Some(i) = n.as_i64() {
+					Ok(SqlValue::Number(sql::Number::Int(i)))
+				} else if let Some(f) = n.as_f64() {
+					Ok(SqlValue::Number(sql::Number::Float(f)))
+				} else if let Some(uint) = n.as_u64() {
+					Ok(SqlValue::Number(sql::Number::Decimal(uint.into())))
+				} else {
+					unreachable!("serde_json::Number must be either i64, u64 or f64")
+				}
+			}
+			GqlValue::String(s) => match syn::value(s) {
+				Ok(SqlValue::Number(n)) => Ok(SqlValue::Number(n.clone())),
+				_ => Err(type_error(kind, val)),
+			},
+			_ => Err(type_error(kind, val)),
+		},
+		Kind::Object => match val {
+			GqlValue::Object(o) => {
+				let out: Result<BTreeMap<String, SqlValue>, GqlError> = o
+					.iter()
+					.map(|(k, v)| gql_to_sql_kind(v, Kind::Any).map(|sqlv| (k.to_string(), sqlv)))
+					.collect();
+				let out = out?;
+
+				Ok(SqlValue::Object(out.into()))
+			}
+			_ => Err(type_error(kind, val)),
+		},
+		Kind::Point => todo!(),
+		Kind::String => match val {
+			GqlValue::String(s) => Ok(SqlValue::Strand(s.to_owned().into())),
+			_ => Err(type_error(kind, val)),
+		},
+		Kind::Uuid => match val {
+			GqlValue::String(s) => match s.parse::<uuid::Uuid>() {
+				Ok(u) => Ok(SqlValue::Uuid(u.into())),
+				Err(_) => Err(type_error(kind, val)),
+			},
+			_ => Err(type_error(kind, val)),
+		},
+		Kind::Record(_) => todo!(),
+		Kind::Geometry(_) => todo!(),
+		Kind::Option(_) => todo!(),
+		Kind::Either(_) => todo!(),
+		Kind::Set(_, _) => todo!(),
+		Kind::Array(_, _) => todo!(),
+		_ => todo!(),
+	}
+
+	// match val {
+	// 	GqlValue::Null => match kind {
+	// 		Kind::Null => Ok(SqlValue::Null),
+	// 		Kind::Any | Kind::Option(_) => Ok(SqlValue::None),
+	// 		_ => todo!(),
+	// 	},
+	// 	GqlValue::Number(n) => match kind {
+	// 		Kind::Any | Kind::Number => {
+	// 			if let Some(int) = n.as_i64() {
+	// 				Ok(SqlValue::Number(sql::Number::Int(int)))
+	// 			} else if let Some(float) = n.as_f64() {
+	// 				Ok(SqlValue::Number(sql::Number::Float(float)))
+	// 			} else if let Some(uint) = n.as_u64() {
+	// 				Ok(SqlValue::Number(sql::Number::Decimal(uint.into())))
+	// 			} else {
+	// 				Err(todo!())
+	// 			}
+	// 		}
+	// 		Kind::Int => {
+	// 			if let Some(int) = n.as_i64() {
+	// 				Ok(SqlValue::Number(sql::Number::Int(int)))
+	// 			} else {
+	// 				Err(todo!())
+	// 			}
+	// 		}
+	// 		Kind::Float => {
+	// 			if let Some(float) = n.as_f64() {
+	// 				Ok(SqlValue::Number(sql::Number::Float(float)))
+	// 			} else {
+	// 				Err(todo!())
+	// 			}
+	// 		}
+	// 		Kind::Decimal => {
+	// 			if let Some(uint) = n.as_u64() {
+	// 				Ok(SqlValue::Number(sql::Number::Decimal(uint.into())))
+	// 			} else {
+	// 				Err(todo!())
+	// 			}
+	// 		}
+	// 		_ => todo!(),
+	// 	},
+
+	//  {
+	// 	let json_val = serde_json::Value::Number(n.clone());
+	// 	let sql_num =
+	// 		SqlValue::deserialize(json_val).expect("number conversion should always succeed");
+
+	// 	todo!();
+	// }
+	// 	GqlValue::String(s) => match kind {
+	// 		Kind::String => Ok(SqlValue::Strand(s.to_string().into())),
+	// 		// todo parse others
+	// 		_ => todo!(),
+	// 	},
+	// 	// (GqlValue::)
+	// 	_ => todo!(),
+	// }
+}
 
 // fn includes_kind(main: Kind, target: Kind) -> bool {
 // 	if main == target {
