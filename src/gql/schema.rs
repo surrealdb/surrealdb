@@ -665,17 +665,6 @@ fn binop(
 
 fn gql_to_sql_kind(val: &GqlValue, kind: Kind) -> Result<SqlValue, GqlError> {
 	use surrealdb::syn;
-	// match val {
-	// 	GqlValue::Null => todo!(),
-	// 	GqlValue::Number(_) => todo!(),
-	// 	GqlValue::String(_) => todo!(),
-	// 	GqlValue::Boolean(_) => todo!(),
-	// 	GqlValue::Binary(_) => todo!(),
-	// 	GqlValue::Enum(_) => todo!(),
-	// 	GqlValue::List(_) => todo!(),
-	// 	GqlValue::Object(_) => todo!(),
-	// }
-
 	match kind {
 		Kind::Any => todo!(),
 		Kind::Null => match val {
@@ -828,99 +817,4 @@ fn gql_to_sql_kind(val: &GqlValue, kind: Kind) -> Result<SqlValue, GqlError> {
 		Kind::Array(_, _) => todo!(),
 		_ => todo!(),
 	}
-
-	// match val {
-	// 	GqlValue::Null => match kind {
-	// 		Kind::Null => Ok(SqlValue::Null),
-	// 		Kind::Any | Kind::Option(_) => Ok(SqlValue::None),
-	// 		_ => todo!(),
-	// 	},
-	// 	GqlValue::Number(n) => match kind {
-	// 		Kind::Any | Kind::Number => {
-	// 			if let Some(int) = n.as_i64() {
-	// 				Ok(SqlValue::Number(sql::Number::Int(int)))
-	// 			} else if let Some(float) = n.as_f64() {
-	// 				Ok(SqlValue::Number(sql::Number::Float(float)))
-	// 			} else if let Some(uint) = n.as_u64() {
-	// 				Ok(SqlValue::Number(sql::Number::Decimal(uint.into())))
-	// 			} else {
-	// 				Err(todo!())
-	// 			}
-	// 		}
-	// 		Kind::Int => {
-	// 			if let Some(int) = n.as_i64() {
-	// 				Ok(SqlValue::Number(sql::Number::Int(int)))
-	// 			} else {
-	// 				Err(todo!())
-	// 			}
-	// 		}
-	// 		Kind::Float => {
-	// 			if let Some(float) = n.as_f64() {
-	// 				Ok(SqlValue::Number(sql::Number::Float(float)))
-	// 			} else {
-	// 				Err(todo!())
-	// 			}
-	// 		}
-	// 		Kind::Decimal => {
-	// 			if let Some(uint) = n.as_u64() {
-	// 				Ok(SqlValue::Number(sql::Number::Decimal(uint.into())))
-	// 			} else {
-	// 				Err(todo!())
-	// 			}
-	// 		}
-	// 		_ => todo!(),
-	// 	},
-
-	//  {
-	// 	let json_val = serde_json::Value::Number(n.clone());
-	// 	let sql_num =
-	// 		SqlValue::deserialize(json_val).expect("number conversion should always succeed");
-
-	// 	todo!();
-	// }
-	// 	GqlValue::String(s) => match kind {
-	// 		Kind::String => Ok(SqlValue::Strand(s.to_string().into())),
-	// 		// todo parse others
-	// 		_ => todo!(),
-	// 	},
-	// 	// (GqlValue::)
-	// 	_ => todo!(),
-	// }
 }
-
-// fn includes_kind(main: Kind, target: Kind) -> bool {
-// 	if main == target {
-// 		return true;
-// 	}
-// 	if let
-// }
-
-// fn gql_value_to_sql_value(val: &GqlValue) -> SqlValue {
-// 	match val {
-// 		GqlValue::Null => SqlValue::Null,
-// 		GqlValue::Number(n) => {
-// 			if let Some(i) = n.as_i64() {
-// 				SqlValue::from(i)
-// 			} else if let Some(f) = n.as_f64() {
-// 				SqlValue::from(f)
-// 			} else if let Some(u) = n.as_u64() {
-// 				SqlValue::from(u)
-// 			} else {
-// 				unreachable!("a Number can only be i64, u64 or f64");
-// 			}
-// 		}
-// 		GqlValue::String(s) => SqlValue::from(s.as_str()),
-// 		GqlValue::Boolean(b) => SqlValue::Bool(*b),
-// 		GqlValue::Binary(b) => SqlValue::Bytes(b.to_vec().into()),
-// 		GqlValue::Enum(n) => SqlValue::Strand(n.as_str().into()),
-// 		GqlValue::List(a) => {
-// 			SqlValue::Array(a.iter().map(gql_value_to_sql_value).collect::<Vec<SqlValue>>().into())
-// 		}
-// 		GqlValue::Object(o) => SqlValue::Object(
-// 			o.iter()
-// 				.map(|(k, v)| (k.to_string(), gql_value_to_sql_value(v)))
-// 				.collect::<BTreeMap<String, SqlValue>>()
-// 				.into(),
-// 		),
-// 	}
-// }
