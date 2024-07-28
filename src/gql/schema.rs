@@ -826,8 +826,28 @@ fn gql_to_sql_kind(val: &GqlValue, kind: Kind) -> Result<SqlValue, GqlError> {
 			_ => Err(type_error(kind, val)),
 		},
 		Kind::Geometry(_) => todo!(),
-		Kind::Option(_) => todo!(),
-		Kind::Either(_) => todo!(),
+		Kind::Option(k) => match val {
+			GqlValue::Null => Ok(SqlValue::None),
+			v => gql_to_sql_kind(v, *k),
+		},
+		Kind::Either(ref ks) => match val {
+			GqlValue::Null => {
+				if ks.iter().find(|k| matches!(k, Kind::Option(_))).is_some() {
+					Ok(SqlValue::None)
+				} else if ks.contains(&Kind::Null) {
+					Ok(SqlValue::Null)
+				} else {
+					Err(type_error(kind, val))
+				}
+			}
+			GqlValue::Number(_) => todo!(),
+			GqlValue::String(_) => todo!(),
+			GqlValue::Boolean(_) => todo!(),
+			GqlValue::Binary(_) => todo!(),
+			GqlValue::Enum(_) => todo!(),
+			GqlValue::List(_) => todo!(),
+			GqlValue::Object(_) => todo!(),
+		},
 		Kind::Set(_, _) => todo!(),
 		Kind::Array(_, _) => todo!(),
 		_ => todo!(),
