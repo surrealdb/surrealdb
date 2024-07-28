@@ -712,7 +712,13 @@ fn gql_to_sql_kind(val: &GqlValue, kind: Kind) -> Result<SqlValue, GqlError> {
 			},
 			_ => Err(type_error(kind, val)),
 		},
-		Kind::Duration => todo!(),
+		Kind::Duration => match val {
+			GqlValue::String(s) => match syn::duration(s) {
+				Ok(d) => Ok(d.into()),
+				Err(_) => Err(type_error(kind, val)),
+			},
+			_ => Err(type_error(kind, val)),
+		},
 		Kind::Float => match val {
 			GqlValue::Number(n) => {
 				if let Some(i) = n.as_i64() {
@@ -809,7 +815,16 @@ fn gql_to_sql_kind(val: &GqlValue, kind: Kind) -> Result<SqlValue, GqlError> {
 			},
 			_ => Err(type_error(kind, val)),
 		},
-		Kind::Record(_) => todo!(),
+		Kind::Record(ref ts) => match val {
+			GqlValue::String(s) => match syn::thing(s) {
+				Ok(t) => match ts.contains(&t.tb.as_str().into()) {
+					true => Ok(SqlValue::Thing(t)),
+					false => Err(type_error(kind, val)),
+				},
+				Err(_) => Err(type_error(kind, val)),
+			},
+			_ => Err(type_error(kind, val)),
+		},
 		Kind::Geometry(_) => todo!(),
 		Kind::Option(_) => todo!(),
 		Kind::Either(_) => todo!(),
