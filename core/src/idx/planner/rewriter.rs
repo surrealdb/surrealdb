@@ -10,6 +10,7 @@ pub(super) struct KnnConditionRewriter<'a>(&'a KnnExpressions);
 
 impl<'a> KnnConditionRewriter<'a> {
 	// This function rebuild the same condition, but replaces any KnnExpression by a `true` value
+	#[allow(clippy::mutable_key_type)]
 	pub(super) fn build(expressions: &'a KnnExpressions, cond: &Cond) -> Option<Cond> {
 		let b = Self(expressions);
 		b.eval_value(&cond.0).map(Cond)
