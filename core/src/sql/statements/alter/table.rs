@@ -1,23 +1,17 @@
-use super::super::define::DefineFieldStatement;
 use crate::ctx::Context;
-use crate::dbs::{Force, Options};
+use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::iam::{Action, ResourceKind};
 use crate::sql::fmt::{is_pretty, pretty_indent};
-use crate::sql::paths::{IN, OUT};
-use crate::sql::{
-	changefeed::ChangeFeed, statements::UpdateStatement, Base, Ident, Output, Permissions, Strand,
-	Value, Values,
-};
-use crate::sql::{Idiom, Kind, TableType};
+use crate::sql::{changefeed::ChangeFeed, Base, Ident, Permissions, Strand, Value};
+use crate::sql::{Kind, TableType};
 use derive::Store;
 use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Write};
 use std::ops::Deref;
-use std::sync::Arc;
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
