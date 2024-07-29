@@ -37,10 +37,10 @@ pub struct AlterTableStatement {
 impl AlterTableStatement {
 	pub(crate) async fn compute(
 		&self,
-		stk: &mut Stk,
+		_stk: &mut Stk,
 		ctx: &Context<'_>,
 		opt: &Options,
-		doc: Option<&CursorDoc<'_>>,
+		_doc: Option<&CursorDoc<'_>>,
 	) -> Result<Value, Error> {
 		// Allowed to run?
 		opt.is_allowed(Action::Edit, ResourceKind::Table, &Base::Db)?;
@@ -77,70 +77,17 @@ impl AlterTableStatement {
 
 		txn.set(key, &dt).await?;
 		// Add table relational fields
-		if let TableType::Relation(rel) = &dt.kind {
-			// Set the `in` field as a DEFINE FIELD definition
-			{
-				let key = crate::key::table::fd::new(opt.ns()?, opt.db()?, &self.name, "in");
-				let val = rel.from.clone().unwrap_or(Kind::Record(vec![]));
-				txn.set(
-					key,
-					DefineFieldStatement {
-						name: Idiom::from(IN.to_vec()),
-						what: self.name.to_owned(),
-						kind: Some(val),
-						..Default::default()
-					},
-				)
-				.await?;
-			}
-			// Set the `out` field as a DEFINE FIELD definition
-			{
-				let key = crate::key::table::fd::new(opt.ns()?, opt.db()?, &self.name, "out");
-				let val = rel.to.clone().unwrap_or(Kind::Record(vec![]));
-				txn.set(
-					key,
-					DefineFieldStatement {
-						name: Idiom::from(OUT.to_vec()),
-						what: self.name.to_owned(),
-						kind: Some(val),
-						..Default::default()
-					},
-				)
-				.await?;
-			}
+		if matches!(self.kind, Some(TableType::Relation(_))) {
+			dt.add_relational_fields(&txn, opt).await?;
 		}
 		// Clear the cache
 		txn.clear();
 		// Record definition change
-		if dt.changefeed.is_some() {
+		if self.changefeed.is_some() && dt.changefeed.is_some() {
 			txn.lock().await.record_table_change(opt.ns()?, opt.db()?, &self.name, &dt);
+			// Clear the cache
+			txn.clear();
 		}
-		// Check if table is a view
-		if let Some(view) = &dt.view {
-			// Remove the table data
-			let key = crate::key::table::all::new(opt.ns()?, opt.db()?, &self.name);
-			txn.delp(key).await?;
-			// Process each foreign table
-			for v in view.what.0.iter() {
-				// Save the view config
-				let key = crate::key::table::ft::new(opt.ns()?, opt.db()?, v, &self.name);
-				txn.set(key, self).await?;
-			}
-			// Force queries to run
-			let opt = &opt.new_with_force(Force::Table(Arc::new([dt.clone()])));
-			// Process each foreign table
-			for v in view.what.0.iter() {
-				// Process the view data
-				let stm = UpdateStatement {
-					what: Values(vec![Value::Table(v.clone())]),
-					output: Some(Output::None),
-					..UpdateStatement::default()
-				};
-				stm.compute(stk, ctx, opt, doc).await?;
-			}
-		}
-		// Clear the cache
-		txn.clear();
 		// Ok all good
 		Ok(Value::None)
 	}

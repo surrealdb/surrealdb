@@ -4,6 +4,7 @@ use crate::dbs::{Force, Options};
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::iam::{Action, ResourceKind};
+use crate::kvs::Transaction;
 use crate::sql::fmt::{is_pretty, pretty_indent};
 use crate::sql::paths::{IN, OUT};
 use crate::sql::statements::info::InfoStructure;
@@ -76,38 +77,7 @@ impl DefineTableStatement {
 		};
 		txn.set(key, &dt).await?;
 		// Add table relational fields
-		if let TableType::Relation(rel) = &self.kind {
-			// Set the `in` field as a DEFINE FIELD definition
-			{
-				let key = crate::key::table::fd::new(opt.ns()?, opt.db()?, &self.name, "in");
-				let val = rel.from.clone().unwrap_or(Kind::Record(vec![]));
-				txn.set(
-					key,
-					DefineFieldStatement {
-						name: Idiom::from(IN.to_vec()),
-						what: self.name.to_owned(),
-						kind: Some(val),
-						..Default::default()
-					},
-				)
-				.await?;
-			}
-			// Set the `out` field as a DEFINE FIELD definition
-			{
-				let key = crate::key::table::fd::new(opt.ns()?, opt.db()?, &self.name, "out");
-				let val = rel.to.clone().unwrap_or(Kind::Record(vec![]));
-				txn.set(
-					key,
-					DefineFieldStatement {
-						name: Idiom::from(OUT.to_vec()),
-						what: self.name.to_owned(),
-						kind: Some(val),
-						..Default::default()
-					},
-				)
-				.await?;
-			}
-		}
+		self.add_relational_fields(&txn, opt).await?;
 		// Clear the cache
 		txn.clear();
 		// Record definition change
@@ -157,6 +127,47 @@ impl DefineTableStatement {
 	/// Checks if this table allows normal records / documents
 	pub fn allows_normal(&self) -> bool {
 		matches!(self.kind, TableType::Normal | TableType::Any)
+	}
+	/// Used to add relational fields to existing table records
+	pub async fn add_relational_fields(
+		&self,
+		txn: &Transaction,
+		opt: &Options,
+	) -> Result<(), Error> {
+		// Add table relational fields
+		if let TableType::Relation(rel) = &self.kind {
+			// Set the `in` field as a DEFINE FIELD definition
+			{
+				let key = crate::key::table::fd::new(opt.ns()?, opt.db()?, &self.name, "in");
+				let val = rel.from.clone().unwrap_or(Kind::Record(vec![]));
+				txn.set(
+					key,
+					DefineFieldStatement {
+						name: Idiom::from(IN.to_vec()),
+						what: self.name.to_owned(),
+						kind: Some(val),
+						..Default::default()
+					},
+				)
+				.await?;
+			}
+			// Set the `out` field as a DEFINE FIELD definition
+			{
+				let key = crate::key::table::fd::new(opt.ns()?, opt.db()?, &self.name, "out");
+				let val = rel.to.clone().unwrap_or(Kind::Record(vec![]));
+				txn.set(
+					key,
+					DefineFieldStatement {
+						name: Idiom::from(OUT.to_vec()),
+						what: self.name.to_owned(),
+						kind: Some(val),
+						..Default::default()
+					},
+				)
+				.await?;
+			}
+		}
+		Ok(())
 	}
 }
 
