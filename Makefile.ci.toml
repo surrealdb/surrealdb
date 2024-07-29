@@ -111,7 +111,7 @@ run_task = { name = ["start-surrealdb", "test-api-integration", "stop-surrealdb"
 private = true
 command = "cargo"
 env = { RUST_BACKTRACE = 1, RUST_LOG = "info" }
-args = ["test", "--locked", "--no-default-features", "--features", "database-upgrade-test,${_TEST_FEATURES}", "--workspace", "--test", "database_upgrade", "--", "database_upgrade", "--show-output"]
+args = ["test", "--locked", "--no-default-features", "--features", "database-upgrade-tests,${_TEST_FEATURES}", "--workspace", "--test", "database_upgrade", "--", "database_upgrade", "--show-output"]
 
 
 #
