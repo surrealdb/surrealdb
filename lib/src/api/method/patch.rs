@@ -1,5 +1,4 @@
-use crate::api::conn::Method;
-use crate::api::conn::Param;
+use crate::api::conn::Command;
 use crate::api::method::BoxFuture;
 use crate::api::opt::PatchOp;
 use crate::api::opt::Range;
@@ -51,7 +50,7 @@ macro_rules! into_future {
 				..
 			} = self;
 			Box::pin(async move {
-				let param = match range {
+				let param: Value = match range {
 					Some(range) => resource?.with_range(range)?.into(),
 					None => resource?.into(),
 				};
@@ -59,9 +58,14 @@ macro_rules! into_future {
 				for result in patches {
 					vec.push(result?);
 				}
-				let patches = vec.into();
+				let patches = Value::from(vec);
 				let router = client.router.extract()?;
-				router.$method(Method::Patch, Param::new(vec![param, patches])).await
+				let cmd = Command::Patch {
+					what: param,
+					data: Some(patches),
+				};
+
+				router.$method(cmd).await
 			})
 		}
 	};

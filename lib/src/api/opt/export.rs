@@ -3,28 +3,28 @@ use std::path::PathBuf;
 
 #[derive(Debug)]
 #[non_exhaustive]
+#[cfg_attr(docsrs, doc(cfg(not(target_arch = "wasm32"))))]
 pub enum ExportDestination {
 	File(PathBuf),
 	Memory,
 }
 
 /// A trait for converting inputs into database export locations
+#[cfg_attr(docsrs, doc(cfg(not(target_arch = "wasm32"))))]
 pub trait IntoExportDestination<R> {
 	/// Converts an input into a database export location
-	fn into_export_destination(self) -> ExportDestination;
+	fn into_export_destination(self) -> R;
 }
 
 impl<T> IntoExportDestination<PathBuf> for T
 where
 	T: AsRef<Path>,
 {
-	fn into_export_destination(self) -> ExportDestination {
-		ExportDestination::File(self.as_ref().to_path_buf())
+	fn into_export_destination(self) -> PathBuf {
+		self.as_ref().to_path_buf()
 	}
 }
 
 impl IntoExportDestination<()> for () {
-	fn into_export_destination(self) -> ExportDestination {
-		ExportDestination::Memory
-	}
+	fn into_export_destination(self) {}
 }

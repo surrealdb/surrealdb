@@ -4,7 +4,6 @@ use radix_trie::{Trie, TrieCommon, TrieKey};
 use std::collections::{BTreeMap, HashMap};
 use std::hash::Hash;
 use std::time::Duration;
-// use surrealdb::key::table::ix;
 use surrealdb::sql::{value, Array, Id, Thing};
 
 // Common use case: VectorSearch
@@ -23,13 +22,13 @@ fn bench_hash_trie_btree_large_vector(c: &mut Criterion) {
 	g.finish();
 }
 
-// TODO: @emmanuel-keller this is disabled because `ix` is now private
-/*fn bench_hash_trie_btree_ix_key(c: &mut Criterion) {
+fn bench_hash_trie_btree_ix_key(c: &mut Criterion) {
 	const N: usize = 100_000;
 	let mut samples = Vec::with_capacity(N);
 	for i in 0..N {
-		let key = ix::new("test", "test", "test", &format!("test{i}")).encode().unwrap();
-		samples.push((key, i));
+		let mut key = b"/*test\0*test\0*test\0!ixtest".to_vec();
+		key.append(&mut i.to_be_bytes().to_vec());
+		samples.push((key.to_vec(), i));
 	}
 
 	let mut g = new_group(c, "bench_hash_trie_btree_ix_key", N);
@@ -37,7 +36,7 @@ fn bench_hash_trie_btree_large_vector(c: &mut Criterion) {
 	bench_trie(&mut g, &samples);
 	bench_btree(&mut g, &samples);
 	g.finish();
-}*/
+}
 
 fn bench_hash_trie_btree_small_string(c: &mut Criterion) {
 	const N: usize = 100_000;
@@ -193,7 +192,7 @@ fn bench_btree_get<K: Ord, V>(samples: &[(K, V)], map: &BTreeMap<K, V>) {
 criterion_group!(
 	benches,
 	bench_hash_trie_btree_large_vector,
-	// bench_hash_trie_btree_ix_key,
+	bench_hash_trie_btree_ix_key,
 	bench_hash_trie_btree_small_string,
 	bench_hash_trie_btree_thing,
 	bench_hash_trie_btree_value

@@ -702,7 +702,7 @@ struct FtEntry(Arc<Inner>);
 struct Inner {
 	index_option: IndexOption,
 	doc_ids: Arc<RwLock<DocIds>>,
-	analyzer: Arc<Analyzer>,
+	analyzer: Analyzer,
 	query_terms_set: TermsSet,
 	query_terms_list: TermsList,
 	terms: Arc<RwLock<Terms>>,

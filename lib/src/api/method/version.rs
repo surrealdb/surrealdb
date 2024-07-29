@@ -1,8 +1,6 @@
-use crate::api::method::BoxFuture;
-
-use crate::api::conn::Method;
-use crate::api::conn::Param;
+use crate::api::conn::Command;
 use crate::api::err::Error;
+use crate::api::method::BoxFuture;
 use crate::api::Connection;
 use crate::api::Result;
 use crate::method::OnceLockExt;
@@ -39,10 +37,7 @@ where
 	fn into_future(self) -> Self::IntoFuture {
 		Box::pin(async move {
 			let router = self.client.router.extract()?;
-			let version = router
-				.execute_value(Method::Version, Param::new(Vec::new()))
-				.await?
-				.convert_to_string()?;
+			let version = router.execute_value(Command::Version).await?.convert_to_string()?;
 			let semantic = version.trim_start_matches("surrealdb-");
 			semantic.parse().map_err(|_| Error::InvalidSemanticVersion(semantic.to_string()).into())
 		})
