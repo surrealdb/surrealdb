@@ -55,7 +55,7 @@ mod tests {
 	use crate::sql::Ident;
 
 	#[test]
-	fn check_define_serialize() {
+	fn check_alter_serialize() {
 		let stm = AlterStatement::Table(AlterTableStatement {
 			name: Ident::from("test"),
 			..Default::default()
