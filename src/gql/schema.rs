@@ -803,7 +803,8 @@ fn gql_to_sql_kind(val: &GqlValue, kind: Kind) -> Result<SqlValue, GqlError> {
 			}
 			_ => Err(type_error(kind, val)),
 		},
-		Kind::Point => todo!(),
+		// TODO: add geometry
+		Kind::Point => Err(resolver_error("Geometry is not yet supported")),
 		Kind::String => match val {
 			GqlValue::String(s) => Ok(SqlValue::Strand(s.to_owned().into())),
 			_ => Err(type_error(kind, val)),
@@ -825,7 +826,8 @@ fn gql_to_sql_kind(val: &GqlValue, kind: Kind) -> Result<SqlValue, GqlError> {
 			},
 			_ => Err(type_error(kind, val)),
 		},
-		Kind::Geometry(_) => todo!(),
+		// TODO: add geometry
+		Kind::Geometry(_) => Err(resolver_error("Geometry is not yet supported")),
 		Kind::Option(k) => match val {
 			GqlValue::Null => Ok(SqlValue::None),
 			v => gql_to_sql_kind(v, *k),
@@ -848,8 +850,27 @@ fn gql_to_sql_kind(val: &GqlValue, kind: Kind) -> Result<SqlValue, GqlError> {
 			GqlValue::List(_) => todo!(),
 			GqlValue::Object(_) => todo!(),
 		},
-		Kind::Set(_, _) => todo!(),
-		Kind::Array(_, _) => todo!(),
-		_ => todo!(),
+		// TODO: figure out how to support sets
+		Kind::Set(_k, _n) => Err(resolver_error("Sets are not yet supported")),
+		Kind::Array(ref k, n) => match val {
+			GqlValue::List(l) => {
+				let list_iter = l.iter().map(|v| gql_to_sql_kind(v, *k.to_owned()));
+				let list: Result<Vec<SqlValue>, GqlError> = list_iter.collect();
+
+				match (list, n) {
+					(Ok(l), Some(n)) => {
+						if l.len() as u64 == n {
+							Ok(l.into())
+						} else {
+							Err(type_error(kind, val))
+						}
+					}
+					(Ok(l), None) => Ok(l.into()),
+					(Err(e), _) => Err(e),
+				}
+			}
+			_ => Err(type_error(kind, val)),
+		},
+		k => Err(resolver_error(format!("unknown kind: {k:?}"))),
 	}
 }
