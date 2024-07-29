@@ -1,4 +1,4 @@
-name: Supply chain security 
+name: Supply chain security
 
 run-name: "Supply chain security run '${{ github.head_ref || github.ref_name }}'"
 
@@ -60,7 +60,7 @@ jobs:
           echo "## :warning: Supply chain security check failed" >> $GITHUB_STEP_SUMMARY
           echo "See instructions in the [supply chain security process](https://github.com/surrealdb/surrealdb/blob/main/supply-chain/README.md#Process)." >> $GITHUB_STEP_SUMMARY
   cargo-vet:
-    name: Check dependencies for untrusted sources 
+    name: Check dependencies for untrusted sources
     runs-on: ubuntu-latest
     steps:
       - name: Install stable toolchain
