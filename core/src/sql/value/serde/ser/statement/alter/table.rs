@@ -81,7 +81,7 @@ impl serde::ser::SerializeStruct for SerializeAlterTableStatement {
 			"kind" => {
 				self.kind = value.serialize(ser::table_type::opt::Serializer.wrap())?;
 			}
-			"if_not_exists" => {
+			"if_exists" => {
 				self.if_exists = value.serialize(ser::primitive::bool::Serializer.wrap())?
 			}
 			key => {
