@@ -157,8 +157,8 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			// Ensure that the transaction is cancelled
 			tx.cancel().await?;
 			// Obtain the configuration to verify the token based on the access method
-			let cf = match de.kind.clone() {
-				AccessType::Record(at) => match at.jwt.verify.clone() {
+			let cf = match &de.kind {
+				AccessType::Record(at) => match &at.jwt.verify {
 					JwtAccessVerify::Key(key) => config(key.alg, key.key.as_bytes()),
 					#[cfg(feature = "jwks")]
 					JwtAccessVerify::Jwks(jwks) => {
@@ -176,14 +176,14 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			// Verify the token
 			decode::<Claims>(token, &cf.0, &cf.1)?;
 			// AUTHENTICATE clause
-			if let Some(au) = de.authenticate.clone() {
+			if let Some(au) = &de.authenticate {
 				// Setup the system session for finding the signin record
 				let mut sess = Session::editor().with_ns(&ns).with_db(&db);
 				sess.rd = Some(rid.clone().into());
 				sess.tk = Some(token_data.claims.clone().into());
 				sess.ip.clone_from(&session.ip);
 				sess.or.clone_from(&session.or);
-				rid = authenticate_record(kvs, &sess, au).await?;
+				rid = authenticate_record(kvs, &sess, au.clone()).await?;
 			}
 			// Log the success
 			debug!("Authenticated with record access method `{}`", ac);
@@ -218,10 +218,10 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			// Ensure that the transaction is cancelled
 			tx.cancel().await?;
 			// Obtain the configuration to verify the token based on the access method
-			match de.kind.clone() {
+			match &de.kind {
 				// If the access type is Jwt, this is database access
 				AccessType::Jwt(at) => {
-					let cf = match at.verify {
+					let cf = match &at.verify {
 						JwtAccessVerify::Key(key) => config(key.alg, key.key.as_bytes()),
 						#[cfg(feature = "jwks")]
 						JwtAccessVerify::Jwks(jwks) => {
@@ -237,13 +237,13 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 					// Verify the token
 					decode::<Claims>(token, &cf.0, &cf.1)?;
 					// AUTHENTICATE clause
-					if let Some(au) = de.authenticate.clone() {
+					if let Some(au) = &de.authenticate {
 						// Setup the system session for finding the signin record
 						let mut sess = Session::editor().with_ns(&ns).with_db(&db);
 						sess.tk = Some(token_data.claims.clone().into());
 						sess.ip.clone_from(&session.ip);
 						sess.or.clone_from(&session.or);
-						authenticate_jwt(kvs, &sess, au).await?;
+						authenticate_jwt(kvs, &sess, au.clone()).await?;
 					}
 					// Parse the roles
 					let roles = match token_data.claims.roles {
@@ -274,10 +274,10 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 				// If the access type is Record, this is record access
 				// Record access without an "id" claim is only possible if there is an AUTHENTICATE clause
 				// The clause can make up for the missing "id" claim by resolving other claims to a specific record
-				AccessType::Record(at) => match de.authenticate.clone() {
+				AccessType::Record(at) => match &de.authenticate {
 					Some(au) => {
 						trace!("Access method `{}` is record access with authenticate clause", ac);
-						let cf = match at.jwt.verify {
+						let cf = match &at.jwt.verify {
 							JwtAccessVerify::Key(key) => config(key.alg, key.key.as_bytes()),
 							#[cfg(feature = "jwks")]
 							JwtAccessVerify::Jwks(jwks) => {
@@ -299,7 +299,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 						sess.tk = Some(token_data.claims.clone().into());
 						sess.ip.clone_from(&session.ip);
 						sess.or.clone_from(&session.or);
-						let rid = authenticate_record(kvs, &sess, au).await?;
+						let rid = authenticate_record(kvs, &sess, au.clone()).await?;
 						// Log the success
 						debug!("Authenticated with record access method `{}`", ac);
 						// Set the session
@@ -371,8 +371,8 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			// Ensure that the transaction is cancelled
 			tx.cancel().await?;
 			// Obtain the configuration to verify the token based on the access method
-			let cf = match de.kind.clone() {
-				AccessType::Jwt(ac) => match ac.verify {
+			let cf = match &de.kind {
+				AccessType::Jwt(ac) => match &ac.verify {
 					JwtAccessVerify::Key(key) => config(key.alg, key.key.as_bytes()),
 					#[cfg(feature = "jwks")]
 					JwtAccessVerify::Jwks(jwks) => {
@@ -390,13 +390,13 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			// Verify the token
 			decode::<Claims>(token, &cf.0, &cf.1)?;
 			// AUTHENTICATE clause
-			if let Some(au) = de.authenticate.clone() {
+			if let Some(au) = &de.authenticate {
 				// Setup the system session for finding the signin record
 				let mut sess = Session::editor().with_ns(&ns);
 				sess.tk = Some(token_data.claims.clone().into());
 				sess.ip.clone_from(&session.ip);
 				sess.or.clone_from(&session.or);
-				authenticate_jwt(kvs, &sess, au).await?;
+				authenticate_jwt(kvs, &sess, au.clone()).await?;
 			}
 			// Parse the roles
 			let roles = match token_data.claims.roles {
@@ -469,8 +469,8 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			// Ensure that the transaction is cancelled
 			tx.cancel().await?;
 			// Obtain the configuration to verify the token based on the access method
-			let cf = match de.kind.clone() {
-				AccessType::Jwt(ac) => match ac.verify {
+			let cf = match &de.kind {
+				AccessType::Jwt(ac) => match &ac.verify {
 					JwtAccessVerify::Key(key) => config(key.alg, key.key.as_bytes()),
 					#[cfg(feature = "jwks")]
 					JwtAccessVerify::Jwks(jwks) => {
@@ -488,13 +488,13 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			// Verify the token
 			decode::<Claims>(token, &cf.0, &cf.1)?;
 			// AUTHENTICATE clause
-			if let Some(au) = de.authenticate.clone() {
+			if let Some(au) = &de.authenticate {
 				// Setup the system session for finding the signin record
 				let mut sess = Session::editor();
 				sess.tk = Some(token_data.claims.clone().into());
 				sess.ip.clone_from(&session.ip);
 				sess.or.clone_from(&session.or);
-				authenticate_jwt(kvs, &sess, au).await?;
+				authenticate_jwt(kvs, &sess, au.clone()).await?;
 			}
 			// Parse the roles
 			let roles = match token_data.claims.roles {
