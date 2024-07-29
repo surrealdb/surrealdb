@@ -484,6 +484,7 @@ pub(crate) trait Uniq<T> {
 
 impl Uniq<Array> for Array {
 	fn uniq(mut self) -> Array {
+		#[allow(clippy::mutable_key_type)]
 		let mut set: HashSet<&Value> = HashSet::new();
 		let mut to_remove: Vec<usize> = Vec::new();
 		for (i, item) in self.iter().enumerate() {

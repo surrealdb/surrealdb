@@ -23,6 +23,8 @@ performance-profiler = ["dep:pprof"]
 # Special features
 storage-fdb-7_1 = ["surrealdb/kv-fdb-7_1"]
 storage-fdb-7_3 = ["surrealdb/kv-fdb-7_3"]
+# Trigger database upgrade tests
+database-upgrade-tests = []
 
 [workspace]
 members = [
