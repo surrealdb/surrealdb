@@ -28,7 +28,7 @@ impl<'a> Document<'a> {
 				opt.ns()?,
 				opt.db()?,
 				tb.name.as_str(),
-				self.id.unwrap(),
+				self.id.as_ref().unwrap(),
 				self.initial.doc.clone(),
 				self.current.doc.clone(),
 				cf.store_diff,

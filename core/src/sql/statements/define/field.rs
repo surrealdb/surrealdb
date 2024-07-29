@@ -6,10 +6,11 @@ use crate::iam::{Action, ResourceKind};
 use crate::sql::fmt::{is_pretty, pretty_indent};
 use crate::sql::statements::info::InfoStructure;
 use crate::sql::statements::DefineTableStatement;
-use crate::sql::Part;
 use crate::sql::{Base, Ident, Idiom, Kind, Permissions, Strand, Value};
+use crate::sql::{Part, Thing};
 use crate::sql::{Relation, TableType};
 use derive::Store;
+use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Write};
@@ -180,6 +181,114 @@ impl DefineFieldStatement {
 		txn.clear();
 		// Ok all good
 		Ok(Value::None)
+	}
+}
+
+impl<'a> DefineFieldStatement {
+	pub async fn compute_default(
+		&self,
+		stk: &mut Stk,
+		ctx: &Context<'_>,
+		opt: &Options,
+		doc: Option<&'a CursorDoc<'a>>,
+		inp: &Value,
+		val: Value,
+		old: &Value,
+	) -> Result<Value, Error> {
+		// Get the default value
+		let def = match &self.default {
+			Some(v) => Some(v),
+			_ => match &self.value {
+				Some(v) if v.is_static() => Some(v),
+				_ => None,
+			},
+		};
+		// Check for a DEFAULT clause
+		if let Some(expr) = def {
+			let mut ctx = Context::new(ctx);
+			ctx.add_value("input", inp);
+			ctx.add_value("value", &val);
+			ctx.add_value("after", &val);
+			ctx.add_value("before", old);
+			Ok(expr.compute(stk, &ctx, opt, doc).await?)
+		} else {
+			Ok(val)
+		}
+	}
+
+	pub fn compute_type(&self, rid: &Thing, val: Value) -> Result<Value, Error> {
+		if let Some(kind) = &self.kind {
+			Ok(val.coerce_to(kind).map_err(|e| match e {
+				// There was a conversion error
+				Error::CoerceTo {
+					from,
+					..
+				} => Error::FieldCheck {
+					thing: rid.to_string(),
+					field: self.name.clone(),
+					value: from.to_string(),
+					check: kind.to_string(),
+				},
+				// There was a different error
+				e => e,
+			})?)
+		} else {
+			Ok(val)
+		}
+	}
+
+	pub async fn compute_value(
+		&self,
+		stk: &mut Stk,
+		ctx: &Context<'_>,
+		opt: &Options,
+		doc: Option<&'a CursorDoc<'a>>,
+		inp: &Value,
+		val: Value,
+		old: &Value,
+	) -> Result<Value, Error> {
+		// Check for a VALUE clause
+		if let Some(expr) = &self.value {
+			let mut ctx = Context::new(ctx);
+			ctx.add_value("input", inp);
+			ctx.add_value("value", &val);
+			ctx.add_value("after", &val);
+			ctx.add_value("before", old);
+			Ok(expr.compute(stk, &ctx, opt, doc).await?)
+		} else {
+			Ok(val)
+		}
+	}
+
+	pub async fn compute_assert(
+		&self,
+		stk: &mut Stk,
+		ctx: &Context<'_>,
+		opt: &Options,
+		doc: Option<&'a CursorDoc<'a>>,
+		rid: &Thing,
+		inp: &Value,
+		val: &Value,
+		old: &Value,
+	) -> Result<(), Error> {
+		// Check for a VALUE clause
+		if let Some(expr) = &self.assert {
+			let mut ctx = Context::new(ctx);
+			ctx.add_value("input", inp);
+			ctx.add_value("value", val);
+			ctx.add_value("after", val);
+			ctx.add_value("before", old);
+			if !expr.compute(stk, &ctx, opt, doc).await?.is_truthy() {
+				return Err(Error::FieldValue {
+					thing: rid.to_string(),
+					field: self.name.clone(),
+					value: val.to_string(),
+					check: expr.to_string(),
+				});
+			}
+		}
+
+		Ok(())
 	}
 }
 

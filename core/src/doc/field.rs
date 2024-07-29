@@ -26,6 +26,10 @@ impl<'a> Document<'a> {
 		let inp = self.initial.doc.changed(self.current.doc.as_ref());
 		// Loop through all field statements
 		for fd in self.fd(ctx, opt).await?.iter() {
+			// ID field is handled separately
+			if fd.name == "id".into() {
+				continue;
+			}
 			// Loop over each field in document
 			for (k, mut val) in self.current.doc.walk(&fd.name).into_iter() {
 				// Get the initial value
@@ -39,93 +43,25 @@ impl<'a> Document<'a> {
 						thing: rid.to_string(),
 					});
 				}
-				// Get the default value
-				let def = match &fd.default {
-					Some(v) => Some(v),
-					_ => match &fd.value {
-						Some(v) if v.is_static() => Some(v),
-						_ => None,
-					},
-				};
 				// Check for a DEFAULT clause
-				if let Some(expr) = def {
-					if self.is_new() && val.is_none() {
-						// Configure the context
-						let mut ctx = Context::new(ctx);
-						ctx.add_value("input", &inp);
-						ctx.add_value("value", &val);
-						ctx.add_value("after", &val);
-						ctx.add_value("before", &old);
-						// Process the VALUE clause
-						val = expr.compute(stk, &ctx, opt, Some(&self.current)).await?;
-					}
+				if self.is_new() && val.is_none() {
+					val = (&fd)
+						.compute_default(stk, ctx, opt, Some(&self.current), &inp, val, &old)
+						.await?;
 				}
 				// Check for a TYPE clause
-				if let Some(kind) = &fd.kind {
-					val = val.coerce_to(kind).map_err(|e| match e {
-						// There was a conversion error
-						Error::CoerceTo {
-							from,
-							..
-						} => Error::FieldCheck {
-							thing: rid.to_string(),
-							field: fd.name.clone(),
-							value: from.to_string(),
-							check: kind.to_string(),
-						},
-						// There was a different error
-						e => e,
-					})?;
-				}
+				val = fd.compute_type(&rid, val)?;
 				// Check for a VALUE clause
-				if let Some(expr) = &fd.value {
-					// Only run value clause for mutable and new fields
-					if !fd.readonly || self.is_new() {
-						// Configure the context
-						let mut ctx = Context::new(ctx);
-						ctx.add_value("input", &inp);
-						ctx.add_value("value", &val);
-						ctx.add_value("after", &val);
-						ctx.add_value("before", &old);
-						// Process the VALUE clause
-						val = expr.compute(stk, &ctx, opt, Some(&self.current)).await?;
-					}
+				if !fd.readonly || self.is_new() {
+					val = (&fd)
+						.compute_value(stk, ctx, opt, Some(&self.current), &inp, val, &old)
+						.await?;
 				}
 				// Check for a TYPE clause
-				if let Some(kind) = &fd.kind {
-					val = val.coerce_to(kind).map_err(|e| match e {
-						// There was a conversion error
-						Error::CoerceTo {
-							from,
-							..
-						} => Error::FieldCheck {
-							thing: rid.to_string(),
-							field: fd.name.clone(),
-							value: from.to_string(),
-							check: kind.to_string(),
-						},
-						// There was a different error
-						e => e,
-					})?;
-				}
+				val = fd.compute_type(&rid, val)?;
 				// Check for a ASSERT clause
-				if let Some(expr) = &fd.assert {
-					// Configure the context
-					let mut ctx = Context::new(ctx);
-					ctx.add_value("input", &inp);
-					ctx.add_value("value", &val);
-					ctx.add_value("after", &val);
-					ctx.add_value("before", &old);
-					// Process the ASSERT clause
-					if !expr.compute(stk, &ctx, opt, Some(&self.current)).await?.is_truthy() {
-						return Err(Error::FieldValue {
-							thing: rid.to_string(),
-							field: fd.name.clone(),
-							value: val.to_string(),
-							check: expr.to_string(),
-						});
-					}
-				}
+				fd.compute_assert(stk, ctx, opt, Some(&self.current), &rid, &inp, &val, &old)
+					.await?;
 				// Check for a PERMISSIONS clause
 				if opt.check_perms(Action::Edit)? {
 					// Get the permission clause

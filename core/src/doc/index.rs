@@ -27,7 +27,9 @@ impl<'a> Document<'a> {
 		// Collect indexes or skip
 		let ixs = match &opt.force {
 			Force::Index(ix)
-				if ix.first().is_some_and(|ix| self.id.is_some_and(|id| ix.what.0 == id.tb)) =>
+				if ix
+					.first()
+					.is_some_and(|ix| self.id.as_ref().is_some_and(|id| ix.what.0 == id.tb)) =>
 			{
 				ix.clone()
 			}

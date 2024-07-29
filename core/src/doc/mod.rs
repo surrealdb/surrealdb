@@ -30,6 +30,7 @@ mod empty; // Checks whether the specified document actually exists
 mod erase; // Removes all content and field data for this document
 mod event; // Processes any table events relevant for this document
 mod field; // Processes any schema-defined fields for this document
+mod id; // Adjusts the ID of the document according to the table schema
 mod index; // Attempts to store the index data for this document
 mod lives; // Processes any live queries relevant for this document
 mod merge; // Merges any field changes for an INSERT statement

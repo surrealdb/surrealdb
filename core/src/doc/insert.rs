@@ -54,6 +54,8 @@ impl<'a> Document<'a> {
 	) -> Result<Value, Error> {
 		// Check if table has correct relation status
 		self.relation(ctx, opt, stm).await?;
+		// Process the record id
+		self.id(stk, ctx, opt, stm).await?;
 		// Merge record data
 		self.merge(stk, ctx, opt, stm).await?;
 		// Store record edges

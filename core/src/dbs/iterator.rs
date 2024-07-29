@@ -111,7 +111,19 @@ impl Iterator {
 							// Generate a new id from the id field
 							Some(id) => id.generate(&v, false)?,
 							// Generate a new random table id
-							None => v.generate(),
+							None => {
+								match ctx.tx().get_tb_field(opt.ns()?, opt.db()?, &v, "id").await {
+									Ok(fd) => {
+										if let Some(def) = &fd.default {
+											let id = def.compute(stk, ctx, opt, None).await?;
+											id.generate(&v, false)?
+										} else {
+											v.generate()
+										}
+									}
+									_ => v.generate(),
+								}
+							}
 						};
 						self.ingest(Iterable::Thing(id))
 					}
@@ -123,8 +135,19 @@ impl Iterator {
 				// There is no data clause so create a record id
 				None => match stm {
 					Statement::Create(_) => {
+						let id = match ctx.tx().get_tb_field(opt.ns()?, opt.db()?, &v, "id").await {
+							Ok(fd) => {
+								if let Some(def) = &fd.default {
+									let id = def.compute(stk, ctx, opt, None).await?;
+									id.generate(&v, false)?
+								} else {
+									v.generate()
+								}
+							}
+							_ => v.generate(),
+						};
 						// Generate a new random table id
-						self.ingest(Iterable::Thing(v.generate()))
+						self.ingest(Iterable::Thing(id))
 					}
 					_ => {
 						// Ingest the table for scanning

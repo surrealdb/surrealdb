@@ -37,6 +37,8 @@ impl<'a> Document<'a> {
 		opt: &Options,
 		stm: &Statement<'_>,
 	) -> Result<Value, Error> {
+		// Process the record id
+		self.id(stk, ctx, opt, stm).await?;
 		// Store record edges
 		self.edges(ctx, opt, stm).await?;
 		// Alter record data

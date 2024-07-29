@@ -30,7 +30,7 @@ impl<'a> Document<'a> {
 		// Lock the transaction
 		let mut txn = txn.lock().await;
 		// Get the record id
-		if let Some(rid) = self.id {
+		if let Some(rid) = &self.id {
 			// Purge the record data
 			let key = crate::key::thing::new(opt.ns()?, opt.db()?, &rid.tb, &rid.id);
 			txn.del(key).await?;
@@ -44,7 +44,7 @@ impl<'a> Document<'a> {
 					// Get temporary edge references
 					let (ref o, ref i) = (Dir::Out, Dir::In);
 					// Purge the left pointer edge
-					let key = crate::key::graph::new(opt.ns()?, opt.db()?, &l.tb, &l.id, o, rid);
+					let key = crate::key::graph::new(opt.ns()?, opt.db()?, &l.tb, &l.id, o, &*rid);
 					txn.del(key).await?;
 					// Purge the left inner edge
 					let key = crate::key::graph::new(opt.ns()?, opt.db()?, &rid.tb, &rid.id, i, l);
@@ -53,7 +53,7 @@ impl<'a> Document<'a> {
 					let key = crate::key::graph::new(opt.ns()?, opt.db()?, &rid.tb, &rid.id, o, r);
 					txn.del(key).await?;
 					// Purge the right pointer edge
-					let key = crate::key::graph::new(opt.ns()?, opt.db()?, &r.tb, &r.id, i, rid);
+					let key = crate::key::graph::new(opt.ns()?, opt.db()?, &r.tb, &r.id, i, &*rid);
 					txn.del(key).await?;
 				}
 				_ => {
@@ -63,7 +63,7 @@ impl<'a> Document<'a> {
 					let stm = DeleteStatement {
 						what: Values(vec![Value::from(Edges {
 							dir: Dir::Both,
-							from: rid.clone(),
+							from: rid.as_ref().clone(),
 							what: Tables::default(),
 						})]),
 						..DeleteStatement::default()

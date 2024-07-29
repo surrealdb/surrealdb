@@ -65,7 +65,7 @@ impl<'a> Document<'a> {
 			Force::Table(tb)
 				if tb.first().is_some_and(|tb| {
 					tb.view.as_ref().is_some_and(|v| {
-						self.id.is_some_and(|id| v.what.iter().any(|p| p.0 == id.tb))
+						self.id.as_ref().is_some_and(|id| v.what.iter().any(|p| p.0 == id.tb))
 					})
 				}) =>
 			{

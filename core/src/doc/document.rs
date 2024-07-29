@@ -18,7 +18,7 @@ use std::fmt::{Debug, Formatter};
 use std::sync::Arc;
 
 pub(crate) struct Document<'a> {
-	pub(super) id: Option<&'a Thing>,
+	pub(super) id: Option<Box<Thing>>,
 	pub(super) extras: Workable,
 	pub(super) initial: CursorDoc<'a>,
 	pub(super) current: CursorDoc<'a>,
@@ -86,7 +86,10 @@ impl<'a> Document<'a> {
 		extras: Workable,
 	) -> Self {
 		Document {
-			id,
+			id: match id {
+				Some(id) => Some(Box::new(id.clone())),
+				None => None,
+			},
 			extras,
 			current: CursorDoc::new(id, ir, Cow::Borrowed(val)),
 			initial: CursorDoc::new(id, ir, Cow::Borrowed(val)),

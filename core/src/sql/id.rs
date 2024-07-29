@@ -134,6 +134,22 @@ impl From<Thing> for Id {
 	}
 }
 
+impl TryFrom<Value> for Id {
+	type Error = Error;
+	fn try_from(v: Value) -> Result<Self, Self::Error> {
+		match v {
+			Value::Number(v) => Ok(v.into()),
+			Value::Strand(v) => Ok(v.into()),
+			Value::Array(v) => Ok(v.into()),
+			Value::Object(v) => Ok(v.into()),
+			Value::Uuid(v) => Ok(v.into()),
+			value => Err(Error::IdInvalid {
+				value: value.to_string(),
+			}),
+		}
+	}
+}
+
 impl Id {
 	/// Generate a new random ID
 	pub fn rand() -> Self {
