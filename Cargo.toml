@@ -8,7 +8,13 @@ authors = ["Tobie Morgan Hitchcock <tobie@surrealdb.com>"]
 
 [features]
 # Public features
-default = ["storage-mem", "storage-surrealkv", "storage-rocksdb", "scripting", "http"]
+default = [
+	"storage-mem",
+	"storage-surrealkv",
+	"storage-rocksdb",
+	"scripting",
+	"http",
+]
 storage-mem = ["surrealdb/kv-mem"]
 storage-rocksdb = ["surrealdb/kv-rocksdb"]
 storage-tikv = ["surrealdb/kv-tikv"]
@@ -26,11 +32,11 @@ storage-fdb-7_3 = ["surrealdb/kv-fdb-7_3"]
 
 [workspace]
 members = [
-    "core",
-    "lib",
-    "lib/examples/actix",
-    "lib/examples/axum",
-    "lib/examples/rocket",
+	"core",
+	"lib",
+	"lib/examples/actix",
+	"lib/examples/axum",
+	"lib/examples/rocket",
 ]
 
 [profile.make]
@@ -55,10 +61,10 @@ base64 = "0.21.5"
 bytes = "1.5.0"
 ciborium = "0.2.1"
 clap = { version = "4.4.11", features = [
-    "env",
-    "derive",
-    "wrap_help",
-    "unicode",
+	"env",
+	"derive",
+	"wrap_help",
+	"unicode",
 ] }
 futures = "0.3.29"
 futures-util = "0.3.29"
@@ -73,21 +79,21 @@ opentelemetry = { version = "0.19", features = ["rt-tokio"] }
 opentelemetry-otlp = { version = "0.12.0", features = ["metrics"] }
 pin-project-lite = "0.2.13"
 pprof = { version = "0.13.0", features = [
-    "flamegraph",
-    "prost-codec",
+	"flamegraph",
+	"prost-codec",
 ], optional = true }
 rand = "0.8.5"
 reqwest = { version = "0.11.22", default-features = false, features = [
-    "blocking",
-    "gzip",
+	"blocking",
+	"gzip",
 ] }
 revision = { version = "0.8.0", features = [
-    "chrono",
-    "geo",
-    "roaring",
-    "regex",
-    "rust_decimal",
-    "uuid",
+	"chrono",
+	"geo",
+	"roaring",
+	"regex",
+	"rust_decimal",
+	"uuid",
 ] }
 rmpv = "1.0.1"
 rustyline = { version = "12.0.0", features = ["derive"] }
@@ -96,9 +102,9 @@ serde = { version = "1.0.193", features = ["derive"] }
 serde_json = "1.0.108"
 serde_pack = { version = "1.1.2", package = "rmp-serde" }
 surrealdb = { version = "2", path = "lib", features = [
-    "protocol-http",
-    "protocol-ws",
-    "rustls",
+	"protocol-http",
+	"protocol-ws",
+	"rustls",
 ] }
 tempfile = "3.8.1"
 thiserror = "1.0.50"
@@ -106,17 +112,17 @@ tokio = { version = "1.34.0", features = ["macros", "signal"] }
 tokio-util = { version = "0.7.10", features = ["io"] }
 tower = "0.4.13"
 tower-http = { version = "0.4.4", features = [
-    "trace",
-    "sensitive-headers",
-    "auth",
-    "request-id",
-    "util",
-    "catch-panic",
-    "cors",
-    "set-header",
-    "limit",
-    "add-extension",
-    "compression-full",
+	"trace",
+	"sensitive-headers",
+	"auth",
+	"request-id",
+	"util",
+	"catch-panic",
+	"cors",
+	"set-header",
+	"limit",
+	"add-extension",
+	"compression-full",
 ] }
 tracing = "0.1"
 tracing-opentelemetry = "0.19.0"
@@ -142,10 +148,10 @@ chrono = { version = "0.4.31", features = ["serde"] }
 env_logger = "0.10.1"
 jsonwebtoken = { version = "8.3.0-surreal.1", package = "surrealdb-jsonwebtoken" }
 opentelemetry-proto = { version = "0.2.0", features = [
-    "gen-tonic",
-    "traces",
-    "metrics",
-    "logs",
+	"gen-tonic",
+	"traces",
+	"metrics",
+	"logs",
 ] }
 rcgen = "0.11.3"
 serial_test = "2.0.0"
@@ -169,16 +175,16 @@ depends = "$auto"
 section = "utility"
 priority = "optional"
 assets = [
-    [
-        "target/release/surreal",
-        "usr/share/surrealdb/surreal",
-        "755",
-    ],
-    [
-        "pkg/deb/README",
-        "usr/share/surrealdb/README",
-        "644",
-    ],
+	[
+		"target/release/surreal",
+		"usr/share/surrealdb/surreal",
+		"755",
+	],
+	[
+		"pkg/deb/README",
+		"usr/share/surrealdb/README",
+		"644",
+	],
 ]
 extended-description = "A scalable, distributed, collaborative, document-graph database, for the realtime web."
 license-file = ["LICENSE", "4"]

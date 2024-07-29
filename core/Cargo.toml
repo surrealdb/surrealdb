@@ -11,11 +11,11 @@ repository = "https://github.com/surrealdb/surrealdb"
 homepage = "https://github.com/surrealdb/surrealdb"
 documentation = "https://docs.rs/surrealdb-core/"
 keywords = [
-    "database",
-    "embedded-database",
-    "key-value",
-    "key-value-store",
-    "kv-store",
+	"database",
+	"embedded-database",
+	"key-value",
+	"key-value-store",
+	"kv-store",
 ]
 categories = ["database-implementations", "data-structures", "embedded"]
 license-file = "../LICENSE"
@@ -35,11 +35,11 @@ http = ["dep:reqwest"]
 ml = ["dep:surrealml"]
 jwks = ["dep:reqwest"]
 arbitrary = [
-    "dep:arbitrary",
-    "dep:regex-syntax",
-    "rust_decimal/rust-fuzz",
-    "geo-types/arbitrary",
-    "uuid/arbitrary",
+	"dep:arbitrary",
+	"dep:regex-syntax",
+	"rust_decimal/rust-fuzz",
+	"geo-types/arbitrary",
+	"uuid/arbitrary",
 ]
 # Special features
 kv-fdb-7_1 = ["foundationdb/fdb-7_1"]
@@ -60,6 +60,7 @@ ascii = { version = "0.3.2", package = "any_ascii" }
 async-recursion = "1.0.5"
 base64 = "0.21.5"
 bcrypt = "0.15.0"
+blake3 = { version = "1.5.3" }
 bincode = "1.3.3"
 bytes = "1.5.0"
 ciborium = "0.2.1"
@@ -74,7 +75,7 @@ echodb = { version = "0.7.0", optional = true }
 executor = { version = "1.8.0", package = "async-executor" }
 ext-sort = { version = "^0.1.4", optional = true }
 foundationdb = { version = "0.9.0", default-features = false, features = [
-    "embedded-fdb-include",
+	"embedded-fdb-include",
 ], optional = true }
 fst = "0.4.7"
 futures = "0.3.29"
@@ -85,15 +86,15 @@ hex = { version = "0.4.3" }
 indxdb = { version = "0.5.0", optional = true }
 ipnet = "2.9.0"
 js = { version = "0.6.2", package = "rquickjs", features = [
-    "array-buffer",
-    "bindgen",
-    "classes",
-    "futures",
-    "loader",
-    "macro",
-    "parallel",
-    "properties",
-    "rust-alloc",
+	"array-buffer",
+	"bindgen",
+	"classes",
+	"futures",
+	"loader",
+	"macro",
+	"parallel",
+	"properties",
+	"rust-alloc",
 ], optional = true }
 jsonwebtoken = { version = "8.3.0-surreal.1", package = "surrealdb-jsonwebtoken" }
 lexicmp = "0.1.0"
@@ -117,11 +118,18 @@ reblessive = { version = "0.4.0", features = ["tree"] }
 regex = "1.10.2"
 regex-syntax = { version = "0.8.2", optional = true, features = ["arbitrary"] }
 reqwest = { version = "0.11.22", default-features = false, features = [
-    "json",
-    "stream",
-    "multipart",
+	"json",
+	"stream",
+	"multipart",
 ], optional = true }
-revision = { version = "0.8.0", features = ["chrono", "geo", "roaring", "regex", "rust_decimal", "uuid"] }
+revision = { version = "0.8.0", features = [
+	"chrono",
+	"geo",
+	"roaring",
+	"regex",
+	"rust_decimal",
+	"uuid",
+] }
 rmpv = "1.0.1"
 roaring = { version = "0.10.2", features = ["serde"] }
 rocksdb = { version = "0.21.0", features = ["lz4", "snappy"], optional = true }
@@ -163,25 +171,25 @@ wiremock = "0.5.22"
 pharos = "0.5.3"
 ring = { version = "0.17.7", features = ["wasm32_unknown_unknown_js"] }
 tokio = { version = "1.34.0", default-features = false, features = [
-    "rt",
-    "sync",
+	"rt",
+	"sync",
 ] }
 uuid = { version = "1.6.1", features = ["serde", "js", "v4", "v7"] }
 wasm-bindgen-futures = "0.4.39"
 wasmtimer = { version = "0.2.0", default-features = false, features = [
-    "tokio",
+	"tokio",
 ] }
 ws_stream_wasm = "0.7.4"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 tokio = { version = "1.34.0", default-features = false, features = [
-    "macros",
-    "io-util",
-    "io-std",
-    "fs",
-    "rt-multi-thread",
-    "time",
-    "sync",
+	"macros",
+	"io-util",
+	"io-std",
+	"fs",
+	"rt-multi-thread",
+	"time",
+	"sync",
 ] }
 tokio-tungstenite = { version = "0.20.1", optional = true }
 uuid = { version = "1.6.1", features = ["serde", "v4", "v7"] }

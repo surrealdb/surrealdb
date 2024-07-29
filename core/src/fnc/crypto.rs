@@ -141,6 +141,32 @@ pub mod bcrypt {
 	}
 }
 
+pub mod blake3 {
+	use crate::err::Error;
+	use crate::sql::value::Value;
+	use blake3::{self, Hash};
+	use std::str::FromStr;
+
+	pub fn cmp((hash, pass): (String, String)) -> Result<Value, Error> {
+		Ok(Hash::from_str(hash.as_str())
+			.ok()
+			.filter(|test| {
+				if test == &blake3::hash(pass.as_bytes()) {
+					true
+				} else {
+					false
+				}
+			})
+			.is_some()
+			.into())
+	}
+
+	pub fn gen((pass,): (String,)) -> Result<Value, Error> {
+		let hash = blake3::hash(pass.as_bytes()).to_string();
+		Ok(hash.into())
+	}
+}
+
 pub mod pbkdf2 {
 
 	use super::COST_ALLOWANCE;
