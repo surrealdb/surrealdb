@@ -8,11 +8,11 @@ authors = ["Tobie Morgan Hitchcock <tobie@surrealdb.com>"]
 
 [features]
 # Public features
-default = ["storage-mem", "storage-rocksdb", "scripting", "http"]
+default = ["storage-mem", "storage-surrealkv", "storage-rocksdb", "scripting", "http"]
 storage-mem = ["surrealdb/kv-mem"]
 storage-rocksdb = ["surrealdb/kv-rocksdb"]
 storage-tikv = ["surrealdb/kv-tikv"]
-storage-fdb = ["surrealdb/kv-fdb-7_1"]
+storage-fdb = ["surrealdb/kv-fdb"]
 storage-surrealkv = ["surrealdb/kv-surrealkv"]
 scripting = ["surrealdb/scripting"]
 http = ["surrealdb/http"]
@@ -20,6 +20,9 @@ http-compression = []
 ml = ["surrealdb/ml"]
 jwks = ["surrealdb/jwks"]
 performance-profiler = ["dep:pprof"]
+# Special features
+storage-fdb-7_1 = ["surrealdb/kv-fdb-7_1"]
+storage-fdb-7_3 = ["surrealdb/kv-fdb-7_3"]
 
 [workspace]
 members = [
@@ -29,6 +32,9 @@ members = [
     "lib/examples/axum",
     "lib/examples/rocket",
 ]
+
+[profile.make]
+inherits = "dev"
 
 [profile.release]
 lto = true
@@ -78,7 +84,7 @@ reqwest = { version = "0.11.22", default-features = false, features = [
     "blocking",
     "gzip",
 ] }
-revision = { version = "0.7.0", features = [
+revision = { version = "0.8.0", features = [
     "chrono",
     "geo",
     "roaring",
@@ -138,7 +144,9 @@ jemallocator = "0.5.4"
 
 [dev-dependencies]
 assert_fs = "1.0.13"
+chrono = { version = "0.4.31", features = ["serde"] }
 env_logger = "0.10.1"
+jsonwebtoken = { version = "8.3.0-surreal.1", package = "surrealdb-jsonwebtoken" }
 opentelemetry-proto = { version = "0.2.0", features = [
     "gen-tonic",
     "traces",

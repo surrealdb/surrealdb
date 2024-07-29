@@ -2954,6 +2954,39 @@ async fn function_rand_ulid() -> Result<(), Error> {
 }
 
 #[tokio::test]
+async fn function_rand_ulid_from_datetime() -> Result<(), Error> {
+	let sql = r#"
+        CREATE ONLY test:[rand::ulid()] SET created = time::now(), num = 1;
+        SLEEP 100ms;
+        LET $rec = CREATE ONLY test:[rand::ulid()] SET created = time::now(), num = 2;
+        SLEEP 100ms;
+        CREATE ONLY test:[rand::ulid()] SET created = time::now(), num = 3;
+		SELECT VALUE num FROM test:[rand::ulid($rec.created - 50ms)]..;
+	"#;
+	let mut test = Test::new(sql).await?;
+	//
+	let tmp = test.next()?.result?;
+	assert!(tmp.is_object());
+	//
+	let tmp = test.next()?.result?;
+	assert!(tmp.is_none());
+	//
+	let tmp = test.next()?.result?;
+	assert!(tmp.is_none());
+	//
+	let tmp = test.next()?.result?;
+	assert!(tmp.is_none());
+	//
+	let tmp = test.next()?.result?;
+	assert!(tmp.is_object());
+	//
+	let tmp = test.next()?.result?;
+	assert_eq!(tmp, Value::parse("[2, 3]"));
+	//
+	Ok(())
+}
+
+#[tokio::test]
 async fn function_rand_uuid() -> Result<(), Error> {
 	let sql = r#"
 		RETURN rand::uuid();
@@ -2962,6 +2995,39 @@ async fn function_rand_uuid() -> Result<(), Error> {
 	//
 	let tmp = test.next()?.result?;
 	assert!(tmp.is_uuid());
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn function_rand_uuid_from_datetime() -> Result<(), Error> {
+	let sql = r#"
+        CREATE ONLY test:[rand::uuid()] SET created = time::now(), num = 1;
+        SLEEP 100ms;
+        LET $rec = CREATE ONLY test:[rand::uuid()] SET created = time::now(), num = 2;
+        SLEEP 100ms;
+        CREATE ONLY test:[rand::uuid()] SET created = time::now(), num = 3;
+		SELECT VALUE num FROM test:[rand::uuid($rec.created - 50ms)]..;
+	"#;
+	let mut test = Test::new(sql).await?;
+	//
+	let tmp = test.next()?.result?;
+	assert!(tmp.is_object());
+	//
+	let tmp = test.next()?.result?;
+	assert!(tmp.is_none());
+	//
+	let tmp = test.next()?.result?;
+	assert!(tmp.is_none());
+	//
+	let tmp = test.next()?.result?;
+	assert!(tmp.is_none());
+	//
+	let tmp = test.next()?.result?;
+	assert!(tmp.is_object());
+	//
+	let tmp = test.next()?.result?;
+	assert_eq!(tmp, Value::parse("[2, 3]"));
 	//
 	Ok(())
 }
@@ -2988,6 +3054,39 @@ async fn function_rand_uuid_v7() -> Result<(), Error> {
 	//
 	let tmp = test.next()?.result?;
 	assert!(tmp.is_uuid());
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn function_rand_uuid_v7_from_datetime() -> Result<(), Error> {
+	let sql = r#"
+        CREATE ONLY test:[rand::uuid::v7()] SET created = time::now(), num = 1;
+        SLEEP 100ms;
+        LET $rec = CREATE ONLY test:[rand::uuid::v7()] SET created = time::now(), num = 2;
+        SLEEP 100ms;
+        CREATE ONLY test:[rand::uuid::v7()] SET created = time::now(), num = 3;
+		SELECT VALUE num FROM test:[rand::uuid::v7($rec.created - 50ms)]..;
+	"#;
+	let mut test = Test::new(sql).await?;
+	//
+	let tmp = test.next()?.result?;
+	assert!(tmp.is_object());
+	//
+	let tmp = test.next()?.result?;
+	assert!(tmp.is_none());
+	//
+	let tmp = test.next()?.result?;
+	assert!(tmp.is_none());
+	//
+	let tmp = test.next()?.result?;
+	assert!(tmp.is_none());
+	//
+	let tmp = test.next()?.result?;
+	assert!(tmp.is_object());
+	//
+	let tmp = test.next()?.result?;
+	assert_eq!(tmp, Value::parse("[2, 3]"));
 	//
 	Ok(())
 }

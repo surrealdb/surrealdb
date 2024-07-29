@@ -1,6 +1,6 @@
-use crate::key::error::KeyCategory;
-use crate::key::key_req::KeyRequirements;
-/// Stores a DEFINE FUNCTION config definition
+//! Stores a DEFINE FUNCTION config definition
+use crate::key::category::Categorise;
+use crate::key::category::Category;
 use derive::Key;
 use serde::{Deserialize, Serialize};
 
@@ -34,9 +34,9 @@ pub fn suffix(ns: &str, db: &str) -> Vec<u8> {
 	k
 }
 
-impl KeyRequirements for Fc<'_> {
-	fn key_category(&self) -> KeyCategory {
-		KeyCategory::DatabaseFunction
+impl Categorise for Fc<'_> {
+	fn categorise(&self) -> Category {
+		Category::DatabaseFunction
 	}
 }
 

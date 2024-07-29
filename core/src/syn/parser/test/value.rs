@@ -10,6 +10,11 @@ use crate::{
 };
 
 #[test]
+fn parse_coordinate() {
+	test_parse!(parse_value, "(1.88, -18.0)").unwrap();
+}
+
+#[test]
 fn parse_large_depth_object() {
 	let mut text = String::new();
 	let start = r#" { foo: "#;

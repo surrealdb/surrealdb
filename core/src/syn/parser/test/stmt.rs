@@ -756,6 +756,66 @@ fn parse_define_access_jwt_key() {
 			res
 		);
 	}
+	// With comment. Asymmetric verify only. On namespace level.
+	{
+		let res = test_parse!(
+			parse_stmt,
+			r#"DEFINE ACCESS a ON NAMESPACE TYPE JWT ALGORITHM EDDSA KEY "foo" COMMENT "bar""#
+		)
+		.unwrap();
+		assert_eq!(
+			res,
+			Statement::Define(DefineStatement::Access(DefineAccessStatement {
+				name: Ident("a".to_string()),
+				base: Base::Ns,
+				kind: AccessType::Jwt(JwtAccess {
+					verify: JwtAccessVerify::Key(JwtAccessVerifyKey {
+						alg: Algorithm::EdDSA,
+						key: "foo".to_string(),
+					}),
+					issue: None,
+				}),
+				// Default durations.
+				duration: AccessDuration {
+					grant: None,
+					token: Some(Duration::from_hours(1)),
+					session: None,
+				},
+				comment: Some(Strand("bar".to_string())),
+				if_not_exists: false,
+			})),
+		)
+	}
+	// With comment. Asymmetric verify only. On root level.
+	{
+		let res = test_parse!(
+			parse_stmt,
+			r#"DEFINE ACCESS a ON ROOT TYPE JWT ALGORITHM EDDSA KEY "foo" COMMENT "bar""#
+		)
+		.unwrap();
+		assert_eq!(
+			res,
+			Statement::Define(DefineStatement::Access(DefineAccessStatement {
+				name: Ident("a".to_string()),
+				base: Base::Root,
+				kind: AccessType::Jwt(JwtAccess {
+					verify: JwtAccessVerify::Key(JwtAccessVerifyKey {
+						alg: Algorithm::EdDSA,
+						key: "foo".to_string(),
+					}),
+					issue: None,
+				}),
+				// Default durations.
+				duration: AccessDuration {
+					grant: None,
+					token: Some(Duration::from_hours(1)),
+					session: None,
+				},
+				comment: Some(Strand("bar".to_string())),
+				if_not_exists: false,
+			})),
+		)
+	}
 }
 
 #[test]
@@ -1129,6 +1189,28 @@ fn parse_define_access_record() {
 		assert!(
 			res.is_err(),
 			"Unexpected successful parsing of record access with none token duration: {:?}",
+			res
+		);
+	}
+	// Attempt to define record access at the root level.
+	{
+		let res = test_parse!(
+			parse_stmt,
+			r#"DEFINE ACCESS a ON ROOT TYPE RECORD DURATION FOR TOKEN NONE"#
+		);
+		assert!(
+			res.is_err(),
+			"Unexpected successful parsing of record access at root level: {:?}",
+			res
+		);
+	}
+	// Attempt to define record access at the namespace level.
+	{
+		let res =
+			test_parse!(parse_stmt, r#"DEFINE ACCESS a ON NS TYPE RECORD DURATION FOR TOKEN NONE"#);
+		assert!(
+			res.is_err(),
+			"Unexpected successful parsing of record access at namespace level: {:?}",
 			res
 		);
 	}
@@ -1689,9 +1771,10 @@ SELECT bar as foo,[1,2],bar OMIT bar FROM ONLY a,1
 			start: Some(Start(Value::Object(Object(
 				[("a".to_owned(), Value::Bool(true))].into_iter().collect()
 			)))),
-			fetch: Some(Fetchs(vec![Fetch(Value::Idiom(Idiom(vec![Part::Field(Ident(
-				"foo".to_owned()
-			))])))])),
+			fetch: Some(Fetchs(vec![Fetch(
+				Idiom(vec![]),
+				Value::Idiom(Idiom(vec![Part::Field(Ident("foo".to_owned()))]))
+			)])),
 			version: Some(Version(Datetime(expected_datetime))),
 			timeout: None,
 			parallel: false,
@@ -1953,11 +2036,14 @@ fn parse_live() {
 	assert_eq!(
 		stmt.fetch,
 		Some(Fetchs(vec![
-			Fetch(Value::Idiom(Idiom(vec![
-				Part::Field(Ident("a".to_owned())),
-				Part::Where(Value::Idiom(Idiom(vec![Part::Field(Ident("foo".to_owned()))]))),
-			]))),
-			Fetch(Value::Idiom(Idiom(vec![Part::Field(Ident("b".to_owned()))]))),
+			Fetch(
+				Idiom(vec![]),
+				Value::Idiom(Idiom(vec![
+					Part::Field(Ident("a".to_owned())),
+					Part::Where(Value::Idiom(Idiom(vec![Part::Field(Ident("foo".to_owned()))]))),
+				]))
+			),
+			Fetch(Idiom(vec![]), Value::Idiom(Idiom(vec![Part::Field(Ident("b".to_owned()))]))),
 		])),
 	)
 }
@@ -1981,9 +2067,10 @@ fn parse_return() {
 		res,
 		Statement::Output(OutputStatement {
 			what: Value::Idiom(Idiom(vec![Part::Field(Ident("RETRUN".to_owned()))])),
-			fetch: Some(Fetchs(vec![Fetch(Value::Idiom(Idiom(vec![Part::Field(
-				Ident("RETURN".to_owned()).to_owned()
-			)])))])),
+			fetch: Some(Fetchs(vec![Fetch(
+				Idiom(vec![]),
+				Value::Idiom(Idiom(vec![Part::Field(Ident("RETURN".to_owned()).to_owned())]))
+			)])),
 		}),
 	)
 }
