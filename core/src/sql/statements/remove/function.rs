@@ -24,15 +24,15 @@ impl RemoveFunctionStatement {
 		let future = async {
 			// Allowed to run?
 			opt.is_allowed(Action::Edit, ResourceKind::Function, &Base::Db)?;
-			// Claim transaction
-			let mut run = ctx.tx_lock().await;
-			// Clear the cache
-			run.clear_cache();
+			// Get the transaction
+			let txn = ctx.tx();
 			// Get the definition
-			let fc = run.get_db_function(opt.ns()?, opt.db()?, &self.name).await?;
+			let fc = txn.get_db_function(opt.ns()?, opt.db()?, &self.name).await?;
 			// Delete the definition
 			let key = crate::key::database::fc::new(opt.ns()?, opt.db()?, &fc.name);
-			run.del(key).await?;
+			txn.del(key).await?;
+			// Clear the cache
+			txn.clear();
 			// Ok all good
 			Ok(Value::None)
 		}

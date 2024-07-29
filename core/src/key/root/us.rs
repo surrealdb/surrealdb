@@ -1,5 +1,6 @@
-use crate::key::error::KeyCategory;
-use crate::key::key_req::KeyRequirements;
+//! Stores a DEFINE USER ON ROOT config definition
+use crate::key::category::Categorise;
+use crate::key::category::Category;
 use derive::Key;
 use serde::{Deserialize, Serialize};
 
@@ -29,9 +30,9 @@ pub fn suffix() -> Vec<u8> {
 	k
 }
 
-impl KeyRequirements for Us<'_> {
-	fn key_category(&self) -> KeyCategory {
-		KeyCategory::User
+impl Categorise for Us<'_> {
+	fn categorise(&self) -> Category {
+		Category::User
 	}
 }
 

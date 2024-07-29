@@ -1,20 +1,18 @@
-use crate::api::conn::Method;
-use crate::api::conn::MlConfig;
-use crate::api::conn::Param;
+use crate::api::conn::Command;
+use crate::api::conn::MlExportConfig;
+use crate::api::method::BoxFuture;
 use crate::api::Connection;
 use crate::api::Error;
 use crate::api::ExtraFeatures;
 use crate::api::Result;
 use crate::method::Model;
 use crate::method::OnceLockExt;
-use crate::opt::ExportDestination;
 use crate::Surreal;
 use channel::Receiver;
 use futures::Stream;
 use futures::StreamExt;
 use semver::Version;
 use std::borrow::Cow;
-use std::future::Future;
 use std::future::IntoFuture;
 use std::marker::PhantomData;
 use std::path::PathBuf;
@@ -27,8 +25,8 @@ use std::task::Poll;
 #[must_use = "futures do nothing unless you `.await` or poll them"]
 pub struct Export<'r, C: Connection, R, T = ()> {
 	pub(super) client: Cow<'r, Surreal<C>>,
-	pub(super) target: ExportDestination,
-	pub(super) ml_config: Option<MlConfig>,
+	pub(super) target: R,
+	pub(super) ml_config: Option<MlExportConfig>,
 	pub(super) response: PhantomData<R>,
 	pub(super) export_type: PhantomData<T>,
 }
@@ -42,7 +40,7 @@ where
 		Export {
 			client: self.client,
 			target: self.target,
-			ml_config: Some(MlConfig::Export {
+			ml_config: Some(MlExportConfig {
 				name: name.to_owned(),
 				version: version.to_string(),
 			}),
@@ -70,7 +68,7 @@ where
 	Client: Connection,
 {
 	type Output = Result<()>;
-	type IntoFuture = Pin<Box<dyn Future<Output = Self::Output> + Send + Sync + 'r>>;
+	type IntoFuture = BoxFuture<'r, Self::Output>;
 
 	fn into_future(self) -> Self::IntoFuture {
 		Box::pin(async move {
@@ -78,13 +76,21 @@ where
 			if !router.features.contains(&ExtraFeatures::Backup) {
 				return Err(Error::BackupsNotSupported.into());
 			}
-			let mut conn = Client::new(Method::Export);
-			let mut param = match self.target {
-				ExportDestination::File(path) => Param::file(path),
-				ExportDestination::Memory => unreachable!(),
-			};
-			param.ml_config = self.ml_config;
-			conn.execute_unit(router, param).await
+
+			if let Some(config) = self.ml_config {
+				return router
+					.execute_unit(Command::ExportMl {
+						path: self.target,
+						config,
+					})
+					.await;
+			}
+
+			router
+				.execute_unit(Command::ExportFile {
+					path: self.target,
+				})
+				.await
 		})
 	}
 }
@@ -94,7 +100,7 @@ where
 	Client: Connection,
 {
 	type Output = Result<Backup>;
-	type IntoFuture = Pin<Box<dyn Future<Output = Self::Output> + Send + Sync + 'r>>;
+	type IntoFuture = BoxFuture<'r, Self::Output>;
 
 	fn into_future(self) -> Self::IntoFuture {
 		Box::pin(async move {
@@ -103,13 +109,25 @@ where
 				return Err(Error::BackupsNotSupported.into());
 			}
 			let (tx, rx) = crate::channel::bounded(1);
-			let mut conn = Client::new(Method::Export);
-			let ExportDestination::Memory = self.target else {
-				unreachable!();
-			};
-			let mut param = Param::bytes_sender(tx);
-			param.ml_config = self.ml_config;
-			conn.execute_unit(router, param).await?;
+
+			if let Some(config) = self.ml_config {
+				router
+					.execute_unit(Command::ExportBytesMl {
+						bytes: tx,
+						config,
+					})
+					.await?;
+				return Ok(Backup {
+					rx,
+				});
+			}
+
+			router
+				.execute_unit(Command::ExportBytes {
+					bytes: tx,
+				})
+				.await?;
+
 			Ok(Backup {
 				rx,
 			})

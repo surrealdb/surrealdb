@@ -170,11 +170,11 @@ async fn api() {
 	let _: Version = DB.version().await.unwrap();
 }
 
-fn send_and_sync(_: impl Send + Sync) {}
+fn assert_send_sync(_: impl Send + Sync) {}
 
 #[test]
-fn futures_are_send_and_sync() {
-	send_and_sync(async {
+fn futures_are_send_sync() {
+	assert_send_sync(async {
 		let db = Surreal::new::<Test>(()).await.unwrap();
 		db.signin(Root {
 			username: "root",
