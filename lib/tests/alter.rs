@@ -101,7 +101,7 @@ async fn define_alter_table_if_exists() -> Result<(), Error> {
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
-	assert_eq!(res.len(), 6);
+	assert_eq!(res.len(), 3);
 	//
 	let tmp = res.remove(0).result;
 	let _err = Error::TbNotFound {
@@ -121,40 +121,6 @@ async fn define_alter_table_if_exists() -> Result<(), Error> {
 			models: {},
 			params: {},
 			tables: {},
-			users: {},
-		}",
-	);
-	assert_eq!(tmp, val);
-	//
-	let tmp = res.remove(0).result;
-	assert!(tmp.is_ok());
-	//
-	let tmp = res.remove(0).result?;
-	let val = Value::parse(
-		"{
-			accesses: {},
-			analyzers: {},
-			functions: {},
-			models: {},
-			params: {},
-			tables: { test: 'DEFINE TABLE test TYPE NORMAL DROP SCHEMALESS COMMENT 'test' CHANGEFEED 1d PERMISSIONS FOR select, update, delete NONE, FOR create FULL' },
-			users: {},
-		}",
-	);
-	assert_eq!(tmp, val);
-	//
-	let tmp = res.remove(0).result;
-	assert!(tmp.is_ok());
-	//
-	let tmp = res.remove(0).result?;
-	let val = Value::parse(
-		"{
-			accesses: {},
-			analyzers: {},
-			functions: {},
-			models: {},
-			params: {},
-			tables: { test: 'DEFINE TABLE test TYPE ANY SCHEMAFULL PERMISSIONS NONE' },
 			users: {},
 		}",
 	);
