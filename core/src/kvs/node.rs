@@ -232,7 +232,7 @@ impl Datastore {
 					let end = crate::key::table::lq::suffix(&ns.name, &db.name, &tb.name);
 					let mut next = Some(beg..end);
 					while let Some(rng) = next {
-						let res = catch!(txn, txn.batch(rng, *NORMAL_FETCH_SIZE, false));
+						let res = catch!(txn, txn.batch(rng, *NORMAL_FETCH_SIZE, true));
 						next = res.next;
 						for (k, v) in res.values.iter() {
 							// Decode the LIVE query statement
