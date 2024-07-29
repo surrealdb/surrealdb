@@ -611,10 +611,6 @@ criteria = "safe-to-deploy"
 version = "1.0.0"
 criteria = "safe-to-deploy"
 
-[[exemptions.flume]]
-version = "0.11.0"
-criteria = "safe-to-deploy"
-
 [[exemptions.foundationdb]]
 version = "0.9.0"
 criteria = "safe-to-deploy"
@@ -641,18 +637,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.futf]]
 version = "0.1.5"
-criteria = "safe-to-deploy"
-
-[[exemptions.futures]]
-version = "0.3.30"
-criteria = "safe-to-deploy"
-
-[[exemptions.futures-executor]]
-version = "0.3.30"
-criteria = "safe-to-deploy"
-
-[[exemptions.futures-io]]
-version = "0.3.30"
 criteria = "safe-to-deploy"
 
 [[exemptions.futures-lite]]
@@ -879,6 +863,10 @@ criteria = "safe-to-deploy"
 version = "0.11.0"
 criteria = "safe-to-deploy"
 
+[[exemptions.itertools]]
+version = "0.13.0"
+criteria = "safe-to-deploy"
+
 [[exemptions.jemalloc-sys]]
 version = "0.5.4+5.3.0-patched"
 criteria = "safe-to-deploy"
@@ -1043,10 +1031,6 @@ criteria = "safe-to-deploy"
 version = "0.4.0"
 criteria = "safe-to-deploy"
 
-[[exemptions.nanorand]]
-version = "0.7.0"
-criteria = "safe-to-deploy"
-
 [[exemptions.ndarray]]
 version = "0.15.6"
 criteria = "safe-to-deploy"
@@ -1096,7 +1080,7 @@ version = "0.32.2"
 criteria = "safe-to-deploy"
 
 [[exemptions.object_store]]
-version = "0.8.0"
+version = "0.10.2"
 criteria = "safe-to-deploy"
 
 [[exemptions.once_cell]]
@@ -1806,14 +1790,6 @@ criteria = "safe-to-run"
 [[exemptions.test-log-macros]]
 version = "0.2.15"
 criteria = "safe-to-run"
-
-[[exemptions.thiserror]]
-version = "1.0.61"
-criteria = "safe-to-deploy"
-
-[[exemptions.thiserror-impl]]
-version = "1.0.61"
-criteria = "safe-to-deploy"
 
 [[exemptions.time]]
 version = "0.3.36"

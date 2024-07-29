@@ -102,6 +102,7 @@ impl IteratorEntry {
 }
 impl InnerQueryExecutor {
 	#[allow(clippy::too_many_arguments)]
+	#[allow(clippy::mutable_key_type)]
 	pub(super) async fn new(
 		stk: &mut Stk,
 		ctx: &Context<'_>,

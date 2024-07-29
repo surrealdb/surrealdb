@@ -30,7 +30,7 @@ args = ["test", "--locked", "--no-default-features", "--features", "storage-mem,
 [tasks.ci-http-integration]
 category = "CI - INTEGRATION TESTS"
 command = "cargo"
-env = { RUST_BACKTRACE = 1,  RUST_LOG = { value = "http_integration=debug", condition = { env_not_set = ["RUST_LOG"] } } }
+env = { RUST_BACKTRACE = 1, RUST_LOG = { value = "http_integration=debug", condition = { env_not_set = ["RUST_LOG"] } } }
 args = ["test", "--locked", "--no-default-features", "--features", "storage-mem,http-compression,jwks", "--workspace", "--test", "http_integration", "--", "http_integration"]
 
 [tasks.ci-ws-integration]
@@ -110,8 +110,8 @@ run_task = { name = ["start-surrealdb", "test-api-integration", "stop-surrealdb"
 [tasks.test-database-upgrade]
 private = true
 command = "cargo"
-env = { RUST_BACKTRACE = 1, RUST_LOG = "info", RUSTFLAGS = "--cfg docker" }
-args = ["test", "--locked", "--no-default-features", "--features", "${_TEST_FEATURES}", "--workspace", "--test", "database_upgrade", "--", "database_upgrade", "--show-output"]
+env = { RUST_BACKTRACE = 1, RUST_LOG = "info" }
+args = ["test", "--locked", "--no-default-features", "--features", "database-upgrade-tests,${_TEST_FEATURES}", "--workspace", "--test", "database_upgrade", "--", "database_upgrade", "--show-output"]
 
 
 #
