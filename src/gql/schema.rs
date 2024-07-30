@@ -1,13 +1,12 @@
 use std::collections::BTreeMap;
-use std::hash::Hash;
-use std::marker::PhantomData;
+use std::sync::Arc;
 
-use async_graphql::dynamic::TypeRef;
 use async_graphql::dynamic::{Enum, Type};
 use async_graphql::dynamic::{Field, Interface};
 use async_graphql::dynamic::{FieldFuture, InterfaceField};
 use async_graphql::dynamic::{InputObject, Object};
 use async_graphql::dynamic::{InputValue, Schema};
+use async_graphql::dynamic::{Scalar, TypeRef};
 use async_graphql::indexmap::IndexMap;
 use async_graphql::Name;
 use async_graphql::Value as GqlValue;
@@ -15,8 +14,9 @@ use rust_decimal::prelude::FromPrimitive;
 use rust_decimal::Decimal;
 use serde_json::Number;
 use surrealdb::dbs::Session;
+use surrealdb::kvs::Datastore;
 use surrealdb::sql;
-use surrealdb::sql::statements::{DefineFieldStatement, DefineTableStatement, SelectStatement};
+use surrealdb::sql::statements::{DefineFieldStatement, SelectStatement};
 use surrealdb::sql::Expression;
 use surrealdb::sql::Kind;
 use surrealdb::sql::{Cond, Fields};
@@ -24,7 +24,6 @@ use surrealdb::sql::{Statement, Thing};
 
 use super::error::{resolver_error, GqlError};
 use super::ext::IntoExt;
-use crate::dbs::DB;
 use crate::gql::error::{schema_error, type_error};
 use crate::gql::utils::GqlValueUtils;
 use surrealdb::kvs::LockType;
@@ -63,56 +62,12 @@ macro_rules! order {
 	}};
 }
 
-pub trait Invalidator: Clone + Send + Sync + 'static {
-	type MetaData: Clone + Send + Sync + Hash;
-
-	fn is_valid(nsdb: (String, String), meta: &Self::MetaData) -> bool;
-
-	fn generate(
-		session: &Session,
-	) -> impl std::future::Future<Output = Result<(Schema, Self::MetaData), GqlError>> + std::marker::Send;
-}
-
-#[derive(Debug, Clone, Copy)]
-pub struct Pessimistic;
-impl Invalidator for Pessimistic {
-	type MetaData = ();
-
-	fn is_valid(_: (String, String), _: &Self::MetaData) -> bool {
-		false
-	}
-	async fn generate(session: &Session) -> Result<(Schema, Self::MetaData), GqlError> {
-		let schema = generate_schema(session).await?;
-		Ok((schema, ()))
-	}
-}
-
-#[derive(Debug, Clone)]
-pub struct SchemaCache<I: Invalidator> {
-	inner: BTreeMap<(String, String), (Schema, I::MetaData)>,
-	_invalidator: PhantomData<I>,
-}
-
-impl<I: Invalidator> SchemaCache<I> {
-	pub fn new() -> Self {
-		SchemaCache {
-			inner: BTreeMap::new(),
-			_invalidator: PhantomData,
-		}
-	}
-
-	pub fn get(&self, ns: String, db: String) -> Option<&(Schema, I::MetaData)> {
-		self.inner.get(&(ns, db))
-	}
-
-	pub fn insert(&mut self, ns: String, db: String, schema: Schema, meta: I::MetaData) {
-		self.inner.insert((ns, db), (schema, meta));
-	}
-}
-
-pub async fn generate_schema(session: &Session) -> Result<Schema, GqlError> {
-	let kvs = DB.get().unwrap();
-	let mut tx = kvs.transaction(TransactionType::Read, LockType::Optimistic).await?;
+pub async fn generate_schema(
+	datastore: &Arc<Datastore>,
+	session: &Session,
+) -> Result<Schema, GqlError> {
+	let kvs = datastore.as_ref();
+	let tx = kvs.transaction(TransactionType::Read, LockType::Optimistic).await?;
 	let ns = session.ns.as_ref().expect("missing ns should have been caught");
 	let db = session.db.as_ref().expect("missing db should have been caught");
 	let tbs = tx.all_tb(&ns, &db).await?;
@@ -149,10 +104,9 @@ pub async fn generate_schema(session: &Session) -> Result<Schema, GqlError> {
 		types.push(Type::InputObject(filter_id()));
 
 		let sess1 = session.to_owned();
-
 		let fds = tx.all_tb_fields(&db, &ns, &tb.name.0).await?;
-
 		let fds1 = fds.clone();
+		let kvs1 = datastore.clone();
 
 		query = query.field(
 			Field::new(
@@ -162,8 +116,9 @@ pub async fn generate_schema(session: &Session) -> Result<Schema, GqlError> {
 					let tb_name = first_tb_name.clone();
 					let sess1 = sess1.clone();
 					let fds1 = fds1.clone();
+					let kvs1 = kvs1.clone();
 					FieldFuture::new(async move {
-						let kvs = DB.get().unwrap();
+						let kvs = kvs1.as_ref();
 
 						let args = ctx.args.as_index_map();
 						trace!("received request with args: {args:?}");
@@ -279,16 +234,18 @@ pub async fn generate_schema(session: &Session) -> Result<Schema, GqlError> {
 		);
 
 		let sess2 = session.to_owned();
+		let kvs2 = datastore.to_owned();
 		query = query.field(
 			Field::new(
 				format!("_get_{}", tb.name),
 				TypeRef::named(tb.name.to_string()),
 				move |ctx| {
 					let tb_name = second_tb_name.clone();
+					let kvs2 = kvs2.clone();
 					FieldFuture::new({
 						let sess2 = sess2.clone();
 						async move {
-							let kvs = DB.get().unwrap();
+							let kvs = kvs2.as_ref();
 
 							let args = ctx.args.as_index_map();
 							// async-graphql should validate that this is present as it is non-null
@@ -401,6 +358,25 @@ pub async fn generate_schema(session: &Session) -> Result<Schema, GqlError> {
 		schema = schema.register(ty);
 	}
 
+	let geometry_type = {
+		let mut tmp = Scalar::new("Geometry")
+			// #[cfg(debug_assertions)]
+			.description("A GeoJson type")
+			.specified_by_url("https://datatracker.ietf.org/doc/html/rfc7946");
+		#[cfg(debug_assertions)]
+		{
+			tmp = tmp.validator(|v| {
+				if let GqlValue::String(s) = v {
+				} else {
+					false
+				}
+			});
+		}
+
+		tmp
+	};
+	schema = schema.register(geometry_type);
+
 	let id_interface =
 		Interface::new("record").field(InterfaceField::new("id", TypeRef::named_nn(TypeRef::ID)));
 	schema = schema.register(id_interface);
@@ -426,11 +402,13 @@ fn sql_value_to_gql_value(v: SqlValue) -> Result<GqlValue, ()> {
 		SqlValue::Number(n) => match n {
 			surrealdb::sql::Number::Int(i) => GqlValue::Number(i.into()),
 			surrealdb::sql::Number::Float(f) => GqlValue::Number(Number::from_f64(f).ok_or(())?),
-			surrealdb::sql::Number::Decimal(_) => todo!("surrealdb::sql::Number::Decimal(_)"),
-			_ => todo!(),
+			num @ surrealdb::sql::Number::Decimal(_) => GqlValue::String(num.to_string()),
+			n => {
+				todo!()
+			}
 		},
 		SqlValue::Strand(s) => GqlValue::String(s.0),
-		SqlValue::Duration(d) => GqlValue::String(d.to_string()),
+		d @ SqlValue::Duration(_) => GqlValue::String(d.to_string()),
 		SqlValue::Datetime(d) => GqlValue::String(d.to_rfc3339()),
 		SqlValue::Uuid(uuid) => GqlValue::String(uuid.to_string()),
 		SqlValue::Array(a) => {
@@ -442,7 +420,7 @@ fn sql_value_to_gql_value(v: SqlValue) -> Result<GqlValue, ()> {
 				.collect(),
 		),
 		SqlValue::Geometry(_) => todo!("SqlValue::Geometry(_) "),
-		SqlValue::Bytes(_) => todo!("SqlValue::Bytes(_) "),
+		SqlValue::Bytes(b) => GqlValue::Binary(b.into_inner().into()),
 		SqlValue::Thing(t) => GqlValue::String(t.to_string()),
 		_ => unimplemented!("Other values should not be used in responses"),
 	};

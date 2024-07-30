@@ -1,4 +1,4 @@
-use std::env;
+use std::{env, sync::Arc};
 
 use axum::response;
 use axum::response::IntoResponse;
@@ -8,9 +8,11 @@ use http_body::Body as HttpBody;
 use async_graphql::http::GraphiQLSource;
 use axum::routing::{get, post_service};
 
-use crate::gql::{schema::Pessimistic, service::GraphQL};
+use crate::gql::service::{GraphQL, Pessimistic};
 
-pub(super) async fn router<S, B>() -> Router<S, B>
+use surrealdb::kvs::Datastore;
+
+pub(super) async fn router<S, B>(ds: Arc<Datastore>) -> Router<S, B>
 where
 	B: HttpBody + Send + Sync + 'static,
 	B::Data: Send + Sync,
@@ -18,7 +20,7 @@ where
 	S: Clone + Send + Sync + 'static,
 	bytes::Bytes: From<<B as HttpBody>::Data>,
 {
-	let service = GraphQL::new(Pessimistic);
+	let service = GraphQL::new(Pessimistic, ds);
 	let var = env::var("SURREALDB_ENABLE_GRAPHQL_DASHBOARD");
 	match var.as_ref().map(|s| s.as_str()) {
 		Ok("true") => {

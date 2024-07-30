@@ -5,7 +5,11 @@ use extract::rejection::GraphQLRejection;
 use tokio::sync::RwLock;
 
 use std::{
+	collections::BTreeMap,
 	convert::Infallible,
+	fmt::Debug,
+	hash::Hash,
+	marker::PhantomData,
 	sync::Arc,
 	task::{Context, Poll},
 	time::Duration,
@@ -28,40 +32,49 @@ use futures_util::{future::BoxFuture, StreamExt};
 use tower_service::Service;
 
 use surrealdb::dbs::Session;
+use surrealdb::kvs::Datastore;
+
+use crate::net::AppState;
 
 use super::{
 	error::{resolver_error, GqlError},
-	schema::{Invalidator, SchemaCache},
+	schema::generate_schema,
 };
 
 /// A GraphQL service.
 #[derive(Clone)]
-pub struct GraphQL<I: Invalidator>(Arc<RwLock<SchemaCache<I>>>);
+pub struct GraphQL<I: Invalidator> {
+	cache: Arc<RwLock<SchemaCache<I>>>,
+	datastore: Arc<Datastore>,
+}
 
 impl<I: Invalidator> GraphQL<I> {
 	/// Create a GraphQL handler.
-	pub fn new(invalidator: I) -> Self {
+	pub fn new(invalidator: I, datastore: Arc<Datastore>) -> Self {
 		let _ = invalidator;
 		let arc = Arc::new(RwLock::new(SchemaCache::new()));
-		GraphQL(arc)
+		GraphQL {
+			cache: arc,
+			datastore,
+		}
 	}
 
 	async fn get_schema(&self, session: &Session) -> Result<Schema, GqlError> {
 		let ns = session.ns.as_ref().expect("missing ns should have been caught");
 		let db = session.db.as_ref().expect("missing db should have been caught");
 		{
-			let guard = self.0.read().await;
+			let guard = self.cache.read().await;
 			if let Some(cand) = guard.get(ns.to_owned(), db.to_owned()) {
-				if I::is_valid((ns.to_owned(), db.to_owned()), &cand.1) {
+				if I::is_valid(&self.datastore, session, &cand.1) {
 					return Ok(cand.0.clone());
 				}
 			}
 		};
 
-		let (schema, meta) = I::generate(session).await?;
+		let (schema, meta) = I::generate(&self.datastore, session).await?;
 
 		{
-			let mut guard = self.0.write().await;
+			let mut guard = self.cache.write().await;
 			guard.insert(ns.to_owned(), db.to_owned(), schema.clone(), meta);
 		}
 
@@ -89,6 +102,11 @@ where
 		Box::pin(async move {
 			let session =
 				req.extensions().get::<Session>().expect("session extractor should always succeed");
+
+			#[cfg(debug_assertions)]
+			let state = req.extensions().get::<AppState>().expect("state extractor should always succeed");
+			debug_assert!(Arc::ptr_eq(&state.datastore, &cache.datastore));
+
 			let Some(_ns) = session.ns.as_ref() else {
 				return Ok(resolver_error("No namespace specified").into_response());
 			};
@@ -142,5 +160,66 @@ where
 				Ok(GraphQLResponse(executor.execute_batch(req.0).await).into_response())
 			}
 		})
+	}
+}
+
+pub trait Invalidator: Debug + Clone + Send + Sync + 'static {
+	type MetaData: Debug + Clone + Send + Sync + Hash;
+
+	fn is_valid(datastore: &Datastore, session: &Session, meta: &Self::MetaData) -> bool;
+
+	fn generate(
+		datastore: &Arc<Datastore>,
+		session: &Session,
+	) -> impl std::future::Future<Output = Result<(Schema, Self::MetaData), GqlError>> + std::marker::Send;
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct Pessimistic;
+impl Invalidator for Pessimistic {
+	type MetaData = ();
+
+	fn is_valid(_datastore: &Datastore, _session: &Session, _meta: &Self::MetaData) -> bool {
+		false
+	}
+
+	async fn generate(
+		datastore: &Arc<Datastore>,
+		session: &Session,
+	) -> Result<(Schema, Self::MetaData), GqlError> {
+		let schema = generate_schema(datastore, session).await?;
+		Ok((schema, ()))
+	}
+}
+
+#[derive(Clone)]
+pub struct SchemaCache<I: Invalidator> {
+	inner: BTreeMap<(String, String), (Schema, I::MetaData)>,
+	_invalidator: PhantomData<I>,
+}
+
+impl<I: Invalidator + Debug> Debug for SchemaCache<I> {
+	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		f.debug_struct("SchemaCache")
+			.field("inner", &self.inner)
+			.field("_invalidator", &self._invalidator)
+			.finish()
+	}
+}
+
+impl<I: Invalidator> SchemaCache<I> {
+	pub fn new() -> Self {
+		SchemaCache {
+			inner: BTreeMap::new(),
+			_invalidator: PhantomData,
+		}
+	}
+
+	fn get(&self, ns: String, db: String) -> Option<&(Schema, I::MetaData)> {
+		self.inner.get(&(ns, db))
+	}
+
+	fn insert(&mut self, ns: String, db: String, schema: Schema, meta: I::MetaData) {
+		self.inner.insert((ns, db), (schema, meta));
 	}
 }

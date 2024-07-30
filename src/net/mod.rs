@@ -61,9 +61,9 @@ const LOG: &str = "surrealdb::net";
 /// AppState is used to share data between routes.
 ///
 #[derive(Clone)]
-struct AppState {
-	client_ip: client_ip::ClientIp,
-	datastore: Arc<Datastore>,
+pub struct AppState {
+	pub client_ip: client_ip::ClientIp,
+	pub datastore: Arc<Datastore>,
 }
 
 pub async fn init(ds: Arc<Datastore>, ct: CancellationToken) -> Result<(), Error> {
@@ -177,7 +177,7 @@ pub async fn init(ds: Arc<Datastore>, ct: CancellationToken) -> Result<(), Error
 
 	if env::var("SURREALDB_ENABLE_GRAPHQL") == Ok("true".to_string()) {
 		warn!("IMPORTANT: GraphQL is a pre-release feature. This is not recommended for production use.");
-		axum_app = axum_app.merge(gql::router().await);
+		axum_app = axum_app.merge(gql::router(ds.clone()).await);
 	}
 
 	#[cfg(feature = "ml")]
