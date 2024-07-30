@@ -287,6 +287,14 @@ impl Parser<'_> {
 						}
 						t!("RECORD") => {
 							self.pop_peek();
+							// The record access type can only be defined at the database level
+							if !matches!(res.base, Base::Db) {
+								unexpected!(
+									self,
+									t!("RECORD"),
+									"a valid access type at this level"
+								);
+							}
 							let mut ac = access_type::RecordAccess {
 								..Default::default()
 							};

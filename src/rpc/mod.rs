@@ -4,7 +4,6 @@ pub mod format;
 pub mod post_context;
 pub mod response;
 
-use crate::dbs::DB;
 use crate::rpc::connection::Connection;
 use crate::rpc::response::success;
 use crate::telemetry::metrics::ws::NotificationContext;
@@ -12,6 +11,7 @@ use opentelemetry::Context as TelemetryContext;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
+use surrealdb::kvs::Datastore;
 use tokio::sync::RwLock;
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
@@ -41,9 +41,13 @@ impl RpcState {
 }
 
 /// Performs notification delivery to the WebSockets
-pub(crate) async fn notifications(state: Arc<RpcState>, canceller: CancellationToken) {
+pub(crate) async fn notifications(
+	ds: Arc<Datastore>,
+	state: Arc<RpcState>,
+	canceller: CancellationToken,
+) {
 	// Listen to the notifications channel
-	if let Some(channel) = DB.get().unwrap().notifications() {
+	if let Some(channel) = ds.notifications() {
 		// Loop continuously
 		loop {
 			tokio::select! {
@@ -54,9 +58,18 @@ pub(crate) async fn notifications(state: Arc<RpcState>, canceller: CancellationT
 				// Receive a notification on the channel
 				Ok(notification) = channel.recv() => {
 					// Find which WebSocket the notification belongs to
-					if let Some(id) = state.live_queries.read().await.get(&notification.id) {
+					let found_ws = {
+						// We remove the lock asap
+						state.live_queries.read().await.get(&notification.id).cloned()
+					};
+					if let Some(id) = found_ws {
 						// Check to see if the WebSocket exists
-						if let Some(rpc) = state.web_sockets.read().await.get(id) {
+						let maybe_ws = {
+							// We remove the lock ASAP
+							// WS is an Arc anyway
+							state.web_sockets.read().await.get(&id).cloned()
+						};
+						if let Some(rpc) = maybe_ws {
 							// Serialize the message to send
 							let message = success(None, notification);
 							// Add metrics

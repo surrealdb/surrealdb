@@ -231,7 +231,7 @@ impl Drop for HttpCallMetricTracker {
 			}
 			ResultState::Result(s, v, size) => {
 				self.status_code = Some(s);
-				self.version = format!("{:?}", v);
+				self.version = format!("{v:?}");
 				self.response_size = size;
 			}
 		};

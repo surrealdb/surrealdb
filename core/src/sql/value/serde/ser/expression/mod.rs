@@ -5,41 +5,7 @@ use crate::sql::Operator;
 use crate::sql::Value;
 use ser::Serializer as _;
 use serde::ser::Error as _;
-use serde::ser::Impossible;
 use serde::ser::Serialize;
-
-pub(super) struct Serializer;
-
-impl ser::Serializer for Serializer {
-	type Ok = Expression;
-	type Error = Error;
-
-	type SerializeSeq = Impossible<Expression, Error>;
-	type SerializeTuple = Impossible<Expression, Error>;
-	type SerializeTupleStruct = Impossible<Expression, Error>;
-	type SerializeTupleVariant = Impossible<Expression, Error>;
-	type SerializeMap = Impossible<Expression, Error>;
-	type SerializeStruct = Impossible<Expression, Error>;
-	type SerializeStructVariant = SerializeExpression;
-
-	const EXPECTED: &'static str = "an enum `Expression`";
-
-	#[inline]
-	fn serialize_struct_variant(
-		self,
-		name: &'static str,
-		_variant_index: u32,
-		variant: &'static str,
-		_len: usize,
-	) -> Result<Self::SerializeStructVariant, Self::Error> {
-		debug_assert_eq!(name, crate::sql::expression::TOKEN);
-		match variant {
-			"Unary" => Ok(SerializeExpression::Unary(Default::default())),
-			"Binary" => Ok(SerializeExpression::Binary(Default::default())),
-			_ => Err(Error::custom(format!("unexpected `Expression::{name}`"))),
-		}
-	}
-}
 
 pub(super) enum SerializeExpression {
 	Unary(SerializeUnary),
@@ -158,7 +124,41 @@ impl serde::ser::SerializeStructVariant for SerializeBinary {
 #[cfg(test)]
 mod tests {
 	use super::*;
+	use serde::ser::Impossible;
 	use serde::Serialize;
+
+	pub(super) struct Serializer;
+
+	impl ser::Serializer for Serializer {
+		type Ok = Expression;
+		type Error = Error;
+
+		type SerializeSeq = Impossible<Expression, Error>;
+		type SerializeTuple = Impossible<Expression, Error>;
+		type SerializeTupleStruct = Impossible<Expression, Error>;
+		type SerializeTupleVariant = Impossible<Expression, Error>;
+		type SerializeMap = Impossible<Expression, Error>;
+		type SerializeStruct = Impossible<Expression, Error>;
+		type SerializeStructVariant = SerializeExpression;
+
+		const EXPECTED: &'static str = "an enum `Expression`";
+
+		#[inline]
+		fn serialize_struct_variant(
+			self,
+			name: &'static str,
+			_variant_index: u32,
+			variant: &'static str,
+			_len: usize,
+		) -> Result<Self::SerializeStructVariant, Self::Error> {
+			debug_assert_eq!(name, crate::sql::expression::TOKEN);
+			match variant {
+				"Unary" => Ok(SerializeExpression::Unary(Default::default())),
+				"Binary" => Ok(SerializeExpression::Binary(Default::default())),
+				_ => Err(Error::custom(format!("unexpected `Expression::{name}`"))),
+			}
+		}
+	}
 
 	#[test]
 	fn default() {

@@ -25,38 +25,51 @@ impl RemoveAccessStatement {
 		let future = async {
 			// Allowed to run?
 			opt.is_allowed(Action::Edit, ResourceKind::Actor, &self.base)?;
-
+			// Check the statement type
 			match &self.base {
-				Base::Ns => {
-					// Claim transaction
-					let mut run = ctx.tx_lock().await;
-					// Clear the cache
-					run.clear_cache();
+				Base::Root => {
+					// Get the transaction
+					let txn = ctx.tx();
 					// Get the definition
-					let ac = run.get_ns_access(opt.ns()?, &self.name).await?;
+					let ac = txn.get_root_access(&self.name).await?;
 					// Delete the definition
-					let key = crate::key::namespace::access::ac::new(opt.ns()?, &ac.name);
-					run.del(key).await?;
+					let key = crate::key::root::ac::new(&ac.name);
+					txn.del(key).await?;
+					// Clear the cache
+					txn.clear();
+					// Ok all good
+					Ok(Value::None)
+				}
+				Base::Ns => {
+					// Get the transaction
+					let txn = ctx.tx();
+					// Get the definition
+					let ac = txn.get_ns_access(opt.ns()?, &self.name).await?;
+					// Delete the definition
+					let key = crate::key::namespace::ac::new(opt.ns()?, &ac.name);
+					txn.del(key).await?;
 					// Delete any associated data including access grants.
 					let key = crate::key::namespace::access::all::new(opt.ns()?, &ac.name);
-					run.delp(key, u32::MAX).await?;
+					txn.delp(key).await?;
+					// Clear the cache
+					txn.clear();
 					// Ok all good
 					Ok(Value::None)
 				}
 				Base::Db => {
-					// Claim transaction
-					let mut run = ctx.tx_lock().await;
-					// Clear the cache
-					run.clear_cache();
+					// Get the transaction
+					let txn = ctx.tx();
 					// Get the definition
-					let ac = run.get_db_access(opt.ns()?, opt.db()?, &self.name).await?;
+					let ac = txn.get_db_access(opt.ns()?, opt.db()?, &self.name).await?;
 					// Delete the definition
-					let key = crate::key::database::access::ac::new(opt.ns()?, opt.db()?, &ac.name);
-					run.del(key).await?;
+					let key = crate::key::database::ac::new(opt.ns()?, opt.db()?, &ac.name);
+					txn.del(key).await?;
 					// Delete any associated data including access grants.
 					let key =
 						crate::key::database::access::all::new(opt.ns()?, opt.db()?, &ac.name);
-					run.delp(key, u32::MAX).await?;
+					txn.delp(key).await?;
+					// Clear the cache
+					txn.clear();
 					// Ok all good
 					Ok(Value::None)
 				}
@@ -66,10 +79,13 @@ impl RemoveAccessStatement {
 		.await;
 		match future {
 			Err(e) if self.if_exists => match e {
-				Error::NaNotFound {
+				Error::AccessRootNotFound {
 					..
 				} => Ok(Value::None),
-				Error::DaNotFound {
+				Error::AccessNsNotFound {
+					..
+				} => Ok(Value::None),
+				Error::AccessDbNotFound {
 					..
 				} => Ok(Value::None),
 				e => Err(e),

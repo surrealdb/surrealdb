@@ -11,9 +11,20 @@
 //! - `rocksdb`: [RocksDB](https://github.com/facebook/rocksdb) an embeddable persistent key-value store for fast storage
 //! - `tikv`: [TiKV](https://github.com/tikv/tikv) a distributed, and transactional key-value database
 //! - `mem`: in-memory database
+
+mod api;
+mod batch;
 mod cache;
 mod clock;
 mod ds;
+mod export;
+mod live;
+mod node;
+mod scanner;
+mod stash;
+mod tr;
+mod tx;
+
 mod fdb;
 mod indxdb;
 mod kv;
@@ -21,16 +32,12 @@ mod mem;
 mod rocksdb;
 mod surrealkv;
 mod tikv;
-mod tx;
 
-pub(crate) mod lq_structs;
-
-mod lq_cf;
-mod lq_v2_doc;
-mod lq_v2_fut;
 #[cfg(test)]
 mod tests;
 
 pub use self::ds::*;
 pub use self::kv::*;
+pub use self::live::*;
+pub use self::tr::*;
 pub use self::tx::*;

@@ -180,3 +180,30 @@ async fn relate_with_param_or_subquery() -> Result<(), Error> {
 	assert_eq!(tmp, val);
 	Ok(())
 }
+
+#[tokio::test]
+async fn relate_with_complex_table() -> Result<(), Error> {
+	let sql = "
+		CREATE a:1, a:2;
+		RELATE a:1->`-`:`-`->a:2;
+		select ->`-` as rel from a:1;
+	";
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 3);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse("[{ id: a:1 }, { id: a:2 }]");
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse("[{ id: `-`:`-`, in: a:1, out: a:2 }]");
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse("[{ rel: [`-`:`-`] }]");
+	assert_eq!(tmp, val);
+	//
+	Ok(())
+}

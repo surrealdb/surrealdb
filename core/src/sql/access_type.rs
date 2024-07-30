@@ -274,14 +274,15 @@ pub struct JwtAccessVerifyJwks {
 	pub url: String,
 }
 
-#[revisioned(revision = 1)]
+#[revisioned(revision = 2)]
 #[derive(Debug, Serialize, Deserialize, Hash, Clone, Eq, PartialEq, PartialOrd)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct RecordAccess {
 	pub signup: Option<Value>,
 	pub signin: Option<Value>,
-	pub authenticate: Option<Value>,
 	pub jwt: JwtAccess,
+	#[revision(start = 2)]
+	pub authenticate: Option<Value>,
 }
 
 impl Default for RecordAccess {
