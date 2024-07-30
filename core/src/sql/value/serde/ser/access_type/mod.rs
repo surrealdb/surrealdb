@@ -84,6 +84,9 @@ pub struct SerializeRecord {
 	pub signup: Option<Value>,
 	pub signin: Option<Value>,
 	pub jwt: JwtAccess,
+	// TODO(gguillemas): Field kept to gracefully handle breaking change.
+	// Remove when "revision" crate allows doing so.
+	pub authenticate: Option<Value>,
 }
 
 impl serde::ser::SerializeStruct for SerializeRecord {
@@ -104,6 +107,11 @@ impl serde::ser::SerializeStruct for SerializeRecord {
 			"jwt" => {
 				self.jwt = value.serialize(SerializerJwt.wrap())?;
 			}
+			// TODO(gguillemas): Field kept to gracefully handle breaking change.
+			// Remove when "revision" crate allows doing so.
+			"authenticate" => {
+				self.authenticate = value.serialize(ser::value::opt::Serializer.wrap())?;
+			}
 			key => {
 				return Err(Error::custom(format!("unexpected field `RecordAccess::{key}`")));
 			}
@@ -116,8 +124,8 @@ impl serde::ser::SerializeStruct for SerializeRecord {
 			signup: self.signup,
 			signin: self.signin,
 			jwt: self.jwt,
-			// TODO(gguillemas): Field kept with backward compatibility.
-			// Drop this field once we are ready to break compatibility with 2.0.0-alpha.
+			// TODO(gguillemas): Field kept to gracefully handle breaking change.
+			// Remove when "revision" crate allows doing so.
 			authenticate: None,
 		})
 	}

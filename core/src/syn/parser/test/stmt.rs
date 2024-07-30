@@ -1145,8 +1145,8 @@ fn parse_define_access_record() {
 							key: "foo".to_string(),
 						}),
 					},
-					// TODO(gguillemas): Field kept with backward compatibility.
-					// Drop this field once we are ready to break compatibility with 2.0.0-alpha.
+					// TODO(gguillemas): Field kept to gracefully handle breaking change.
+					// Remove when "revision" crate allows doing so.
 					authenticate: None
 				}),
 				authenticate: None,
@@ -1185,8 +1185,8 @@ fn parse_define_access_record() {
 							key: "bar".to_string(),
 						}),
 					},
-					// TODO(gguillemas): Field kept with backward compatibility.
-					// Drop this field once we are ready to break compatibility with 2.0.0-alpha.
+					// TODO(gguillemas): Field kept to gracefully handle breaking change.
+					// Remove when "revision" crate allows doing so.
 					authenticate: None
 				}),
 				authenticate: None,
@@ -1225,8 +1225,8 @@ fn parse_define_access_record() {
 							key: "bar".to_string(),
 						}),
 					},
-					// TODO(gguillemas): Field kept with backward compatibility.
-					// Drop this field once we are ready to break compatibility with 2.0.0-alpha.
+					// TODO(gguillemas): Field kept to gracefully handle breaking change.
+					// Remove when "revision" crate allows doing so.
 					authenticate: None
 				}),
 				authenticate: None,
@@ -1296,8 +1296,8 @@ fn parse_define_access_record_with_jwt() {
 					}),
 					issue: None,
 				},
-				// TODO(gguillemas): Field kept with backward compatibility.
-				// Drop this field once we are ready to break compatibility with 2.0.0-alpha.
+				// TODO(gguillemas): Field kept to gracefully handle breaking change.
+				// Remove when "revision" crate allows doing so.
 				authenticate: None
 			}),
 			authenticate: None,

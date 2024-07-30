@@ -207,8 +207,8 @@ fn statements() -> Vec<Statement> {
 					}),
 					issue: None,
 				},
-				// TODO(gguillemas): Field kept with backward compatibility.
-				// Drop this field once we are ready to break compatibility with 2.0.0-alpha.
+				// TODO(gguillemas): Field kept to gracefully handle breaking change.
+				// Remove when "revision" crate allows doing so.
 				authenticate: None,
 			}),
 			authenticate: None,
