@@ -116,6 +116,9 @@ impl serde::ser::SerializeStruct for SerializeRecord {
 			signup: self.signup,
 			signin: self.signin,
 			jwt: self.jwt,
+			// TODO(gguillemas): Field kept with backward compatibility.
+			// Drop this field once we are ready to break compatibility with 2.0.0-alpha.
+			authenticate: None,
 		})
 	}
 }

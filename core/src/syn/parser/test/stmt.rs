@@ -1144,7 +1144,10 @@ fn parse_define_access_record() {
 							// Issuer key matches verification key by default in symmetric algorithms.
 							key: "foo".to_string(),
 						}),
-					}
+					},
+					// TODO(gguillemas): Field kept with backward compatibility.
+					// Drop this field once we are ready to break compatibility with 2.0.0-alpha.
+					authenticate: None
 				}),
 				authenticate: None,
 				duration: AccessDuration {
@@ -1181,7 +1184,10 @@ fn parse_define_access_record() {
 							alg: Algorithm::Ps512,
 							key: "bar".to_string(),
 						}),
-					}
+					},
+					// TODO(gguillemas): Field kept with backward compatibility.
+					// Drop this field once we are ready to break compatibility with 2.0.0-alpha.
+					authenticate: None
 				}),
 				authenticate: None,
 				duration: AccessDuration {
@@ -1218,7 +1224,10 @@ fn parse_define_access_record() {
 							alg: Algorithm::Rs256,
 							key: "bar".to_string(),
 						}),
-					}
+					},
+					// TODO(gguillemas): Field kept with backward compatibility.
+					// Drop this field once we are ready to break compatibility with 2.0.0-alpha.
+					authenticate: None
 				}),
 				authenticate: None,
 				duration: AccessDuration {
@@ -1286,7 +1295,10 @@ fn parse_define_access_record_with_jwt() {
 						key: "foo".to_string(),
 					}),
 					issue: None,
-				}
+				},
+				// TODO(gguillemas): Field kept with backward compatibility.
+				// Drop this field once we are ready to break compatibility with 2.0.0-alpha.
+				authenticate: None
 			}),
 			authenticate: None,
 			// Default durations.
