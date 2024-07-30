@@ -16,8 +16,8 @@ use crate::api::Result;
 use crate::api::Surreal;
 use crate::method::Stats;
 use crate::opt::IntoEndpoint;
+use crate::value::Notification;
 use crate::value::ToCore;
-use crate::Notification;
 use crate::Value;
 use channel::Sender;
 use indexmap::IndexMap;
@@ -29,7 +29,10 @@ use std::collections::HashMap;
 use std::io::Read;
 use std::marker::PhantomData;
 use std::time::Duration;
-use surrealdb_core::dbs::{QueryMethodResponse, Status};
+use surrealdb_core::{
+	dbs::{self, Status},
+	sql::Value as CoreValue,
+};
 use trice::Instant;
 use uuid::Uuid;
 
@@ -154,13 +157,6 @@ impl Surreal<Client> {
 }
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Deserialize)]
-pub(crate) struct Failure {
-	pub(crate) code: i64,
-	pub(crate) message: String,
-}
-
-#[revisioned(revision = 1)]
 #[derive(Clone, Debug, PartialEq, Deserialize)]
 #[serde(rename_all = "UPPERCASE")]
 #[non_exhaustive]
@@ -179,11 +175,18 @@ pub struct ResponseNotification {
 }
 
 #[revisioned(revision = 1)]
+#[derive(Clone, Debug, Deserialize)]
+pub(crate) struct Failure {
+	pub(crate) code: i64,
+	pub(crate) message: String,
+}
+
+#[revisioned(revision = 1)]
 #[derive(Debug, Deserialize)]
 pub(crate) enum Data {
-	Other(Value),
-	Query(Vec<QueryMethodResponse>),
-	Live(ResponseNotification),
+	Other(CoreValue),
+	Query(Vec<dbs::QueryMethodResponse>),
+	Live(dbs::Notification),
 }
 
 type ServerResult = std::result::Result<Data, Failure>;
@@ -201,9 +204,12 @@ impl From<Failure> for Error {
 }
 
 impl DbResponse {
-	fn from(result: ServerResult) -> Result<Self> {
+	fn from_server_result(result: ServerResult) -> Result<Self> {
 		match result.map_err(Error::from)? {
-			Data::Other(value) => Ok(DbResponse::Other(value)),
+			Data::Other(value) => {
+				let value = Value::from_core(value).ok_or(Error::RecievedInvalidValue)?;
+				Ok(DbResponse::Other(value))
+			}
 			Data::Query(responses) => {
 				let mut map =
 					IndexMap::<usize, (Stats, QueryResult)>::with_capacity(responses.len());

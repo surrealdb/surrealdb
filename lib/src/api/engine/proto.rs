@@ -1,6 +1,5 @@
 use revision::revisioned;
 use serde::Deserialize;
-use uuid::Uuid;
 
 use crate::Value;
 
@@ -22,14 +21,6 @@ pub enum ResponseAction {
 }
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, PartialEq, Deserialize)]
-pub struct ResponseNotification {
-	pub id: Uuid,
-	pub action: ResponseAction,
-	pub result: Value,
-}
-
-#[revisioned(revision = 1)]
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "UPPERCASE")]
 #[doc(hidden)]
@@ -47,12 +38,4 @@ pub struct QueryMethodResponse {
 	pub time: String,
 	pub status: Status,
 	pub result: Value,
-}
-
-#[revisioned(revision = 1)]
-#[derive(Debug, Deserialize)]
-pub(crate) enum Data {
-	Other(Value),
-	Query(Vec<QueryMethodResponse>),
-	Live(ResponseNotification),
 }

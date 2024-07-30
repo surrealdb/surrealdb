@@ -7,6 +7,17 @@ use crate::{RecordId, RecordIdKey};
 
 use super::{Number, Value};
 
+pub(crate) struct ArraySerializer<'a>(pub &'a Vec<Value>);
+
+impl<'a> Serialize for ArraySerializer<'a> {
+	fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+	where
+		S: serde::Serializer,
+	{
+		serializer.serialize_newtype_struct("$surrealdb::private::sql::Array", self.0)
+	}
+}
+
 // Manually implemented serialize so we can align the serialization with surrealdb_core::Value
 impl Serialize for Value {
 	fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
@@ -25,7 +36,9 @@ impl Serialize for Value {
 			Value::Duration(d) => serializer.serialize_newtype_variant(NAME, 5u32, "Duration", d),
 			Value::Datetime(d) => serializer.serialize_newtype_variant(NAME, 6u32, "Datetime", d),
 			Value::Uuid(u) => serializer.serialize_newtype_variant(NAME, 7u32, "Uuid", u),
-			Value::Array(a) => serializer.serialize_newtype_variant(NAME, 8u32, "Array", a),
+			Value::Array(a) => {
+				serializer.serialize_newtype_variant(NAME, 8u32, "Array", &ArraySerializer(a))
+			}
 			Value::Object(o) => serializer.serialize_newtype_variant(NAME, 9u32, "Object", o),
 			// TODO: Geometry
 			Value::Bytes(b) => serializer.serialize_newtype_variant(NAME, 11u32, "Bytes", b),
@@ -97,6 +110,18 @@ impl Revisioned for Number {
 				)))
 			}
 		}
+	}
+}
+
+// extra serializer to be compatibile with core
+pub(crate) struct TableSerializer<'a>(pub &'a String);
+
+impl<'a> Serialize for TableSerializer<'a> {
+	fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+	where
+		S: serde::Serializer,
+	{
+		serializer.serialize_newtype_struct("$surrealdb::private::sql::Table", self.0)
 	}
 }
 

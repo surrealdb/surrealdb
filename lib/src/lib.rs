@@ -116,7 +116,6 @@ compile_error!("The `ml` feature is not supported on the `wasm32` architecture."
 #[macro_use]
 extern crate tracing;
 
-use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 #[macro_use]
@@ -148,41 +147,6 @@ pub use api::{
 	value::{self, Bytes, Datetime, Number, Object, RecordId, RecordIdKey, Value},
 	Connect, Connection, Response, Result, Surreal,
 };
-
-/// The action performed on a record
-///
-/// This is used in live query notifications.
-#[derive(Debug, Clone, Copy, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-#[non_exhaustive]
-pub enum Action {
-	Create,
-	Update,
-	Delete,
-}
-
-impl From<surrealdb_core::dbs::Action> for Action {
-	fn from(action: surrealdb_core::dbs::Action) -> Self {
-		match action {
-			surrealdb_core::dbs::Action::Create => Self::Create,
-			surrealdb_core::dbs::Action::Update => Self::Update,
-			surrealdb_core::dbs::Action::Delete => Self::Delete,
-			_ => unreachable!(),
-		}
-	}
-}
-
-/// A live query notification
-///
-/// Live queries return a stream of notifications. The notification contains an `action` that triggered the change in the database record and `data` itself.
-/// For deletions the data is the record before it was deleted. For everything else, it's the newly created record or updated record depending on whether
-/// the action is create or update.
-#[derive(Debug, Clone, Copy, Eq, PartialEq, Ord, PartialOrd, Hash)]
-#[non_exhaustive]
-pub struct Notification<R> {
-	pub query_id: Uuid,
-	pub action: Action,
-	pub data: R,
-}
 
 /// An error originating from the SurrealDB client library
 #[derive(Debug, thiserror::Error, serde::Serialize)]

@@ -12,6 +12,7 @@ use crate::api::OnceLockExt;
 use crate::api::Surreal;
 use crate::opt::IntoExportDestination;
 use crate::opt::WaitFor;
+use crate::Value;
 use serde::Serialize;
 use std::borrow::Cow;
 use std::marker::PhantomData;
@@ -20,8 +21,6 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::OnceLock;
 use std::time::Duration;
-use surrealdb_core::sql::to_value;
-use surrealdb_core::sql::Value;
 
 pub(crate) mod live;
 pub(crate) mod query;
@@ -88,6 +87,9 @@ pub use upsert::Upsert;
 pub use use_db::UseDb;
 pub use use_ns::UseNs;
 pub use version::Version;
+
+use super::opt::Resource;
+use super::value::Serializer;
 
 /// A alias for an often used type of future returned by async methods in this library.
 pub(crate) type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + Sync + 'a>>;
@@ -326,7 +328,7 @@ where
 		Set {
 			client: Cow::Borrowed(self),
 			key: key.into(),
-			value: to_value(value).map_err(Into::into),
+			value: value.serialize(Serializer).map_err(Into::into),
 		}
 	}
 
@@ -424,7 +426,7 @@ where
 	pub fn signup<R>(&self, credentials: impl Credentials<auth::Signup, R>) -> Signup<C, R> {
 		Signup {
 			client: Cow::Borrowed(self),
-			credentials: to_value(credentials).map_err(Into::into).and_then(|x| {
+			credentials: credentials.serialize(Serializer).map_err(Into::into).and_then(|x| {
 				if let Value::Object(x) = x {
 					Ok(x)
 				} else {
@@ -552,7 +554,7 @@ where
 	pub fn signin<R>(&self, credentials: impl Credentials<auth::Signin, R>) -> Signin<C, R> {
 		Signin {
 			client: Cow::Borrowed(self),
-			credentials: to_value(credentials).map_err(Into::into).and_then(|x| {
+			credentials: credentials.serialize(Serializer).map_err(Into::into).and_then(|x| {
 				if let Value::Object(x) = x {
 					Ok(x)
 				} else {
@@ -707,11 +709,13 @@ where
 	/// # Ok(())
 	/// # }
 	/// ```
-	pub fn select<R>(&self, resource: impl opt::IntoResource<R>) -> Select<C, R> {
+	pub fn select<R, O>(&self, resource: R) -> Select<C, O>
+	where
+		Resource: From<R>,
+	{
 		Select {
 			client: Cow::Borrowed(self),
-			resource: resource.into_resource(),
-			range: None,
+			resource: Ok(resource.into()),
 			response_type: PhantomData,
 			query_type: PhantomData,
 		}
@@ -763,10 +767,13 @@ where
 	/// # Ok(())
 	/// # }
 	/// ```
-	pub fn create<R>(&self, resource: impl opt::IntoResource<R>) -> Create<C, R> {
+	pub fn create<R>(&self, resource: R) -> Create<C, R>
+	where
+		Resource: From<R>,
+	{
 		Create {
 			client: Cow::Borrowed(self),
-			resource: resource.into_resource(),
+			resource: resource.into(),
 			response_type: PhantomData,
 		}
 	}
@@ -864,10 +871,13 @@ where
 	/// # Ok(())
 	/// # }
 	/// ```
-	pub fn insert<R>(&self, resource: impl opt::IntoResource<R>) -> Insert<C, R> {
+	pub fn insert<R, O>(&self, resource: R) -> Insert<C, O>
+	where
+		Resource: From<R>,
+	{
 		Insert {
 			client: Cow::Borrowed(self),
-			resource: resource.into_resource(),
+			resource: Ok(resource.into()),
 			response_type: PhantomData,
 		}
 	}
@@ -1022,11 +1032,13 @@ where
 	/// # Ok(())
 	/// # }
 	/// ```
-	pub fn upsert<R>(&self, resource: impl opt::IntoResource<R>) -> Upsert<C, R> {
+	pub fn upsert<R, O>(&self, resource: R) -> Upsert<C, R>
+	where
+		Resource: From<R>,
+	{
 		Upsert {
 			client: Cow::Borrowed(self),
-			resource: resource.into_resource(),
-			range: None,
+			resource: Ok(resource.into()),
 			response_type: PhantomData,
 		}
 	}
@@ -1181,11 +1193,13 @@ where
 	/// # Ok(())
 	/// # }
 	/// ```
-	pub fn update<R>(&self, resource: impl opt::IntoResource<R>) -> Update<C, R> {
+	pub fn update<R, O>(&self, resource: R) -> Update<C, O>
+	where
+		Resource: From<R>,
+	{
 		Update {
 			client: Cow::Borrowed(self),
-			resource: resource.into_resource(),
-			range: None,
+			resource: Ok(resource.into()),
 			response_type: PhantomData,
 		}
 	}
@@ -1214,11 +1228,13 @@ where
 	/// # Ok(())
 	/// # }
 	/// ```
-	pub fn delete<R>(&self, resource: impl opt::IntoResource<R>) -> Delete<C, R> {
+	pub fn delete<R, O>(&self, resource: R) -> Delete<C, O>
+	where
+		Resource: From<R>,
+	{
 		Delete {
 			client: Cow::Borrowed(self),
-			resource: resource.into_resource(),
-			range: None,
+			resource: Ok(resource.into()),
 			response_type: PhantomData,
 		}
 	}

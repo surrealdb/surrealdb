@@ -1,7 +1,8 @@
 use crate::{
 	api::{err::Error, Response as QueryResponse, Result},
 	method::{self, Stats, Stream},
-	Notification, Value,
+	value::Notification,
+	Value,
 };
 use futures::future::Either;
 use futures::stream::select_all;

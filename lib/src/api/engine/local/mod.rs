@@ -26,9 +26,9 @@ use crate::{
 		Connect, Response as QueryResponse, Result, Surreal,
 	},
 	method::Stats,
-	opt::IntoEndpoint,
-	value::{ToCore, Value},
-	Notification, Object,
+	opt::{IntoEndpoint, Resource, Table},
+	value::{Notification, ToCore, Value},
+	Object,
 };
 use channel::Sender;
 use indexmap::IndexMap;
@@ -69,7 +69,7 @@ use surrealdb_core::{
 	sql::statements::{DefineModelStatement, DefineStatement},
 };
 
-use super::value_to_values;
+use super::resource_to_values;
 
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) mod native;
@@ -539,7 +539,7 @@ async fn router(
 			let mut query = Query::default();
 			let statement = {
 				let mut stmt = CreateStatement::default();
-				stmt.what = value_to_values(what);
+				stmt.what = resource_to_values(what);
 				stmt.data = data.map(ToCore::to_core).map(Data::ContentExpression);
 				stmt.output = Some(Output::After);
 				stmt
@@ -555,10 +555,10 @@ async fn router(
 			data,
 		} => {
 			let mut query = Query::default();
-			let one = what.is_record_id();
+			let one = matches!(what, Resource::RecordId(_));
 			let statement = {
 				let mut stmt = UpsertStatement::default();
-				stmt.what = value_to_values(what);
+				stmt.what = resource_to_values(what);
 				stmt.data = data.map(ToCore::to_core).map(Data::ContentExpression);
 				stmt.output = Some(Output::After);
 				stmt
@@ -574,10 +574,10 @@ async fn router(
 			data,
 		} => {
 			let mut query = Query::default();
-			let one = what.is_record_id();
+			let one = matches!(what, Resource::RecordId(_));
 			let statement = {
 				let mut stmt = UpdateStatement::default();
-				stmt.what = value_to_values(what);
+				stmt.what = resource_to_values(what);
 				stmt.data = data.map(ToCore::to_core).map(Data::ContentExpression);
 				stmt.output = Some(Output::After);
 				stmt
@@ -593,10 +593,10 @@ async fn router(
 			data,
 		} => {
 			let mut query = Query::default();
-			let one = !data.is_record_id();
+			let one = !data.is_array();
 			let statement = {
 				let mut stmt = InsertStatement::default();
-				stmt.into = what.map(ToCore::to_core);
+				stmt.into = Some(Table(what).to_core().into());
 				stmt.data = Data::SingleExpression(data.to_core());
 				stmt.output = Some(Output::After);
 				stmt
@@ -612,10 +612,10 @@ async fn router(
 			data,
 		} => {
 			let mut query = Query::default();
-			let one = what.is_record_id();
+			let one = matches!(what, Resource::RecordId(_));
 			let statement = {
 				let mut stmt = UpdateStatement::default();
-				stmt.what = value_to_values(what);
+				stmt.what = resource_to_values(what);
 				stmt.data = data.map(ToCore::to_core).map(Data::PatchExpression);
 				stmt.output = Some(Output::After);
 				stmt
@@ -631,10 +631,10 @@ async fn router(
 			data,
 		} => {
 			let mut query = Query::default();
-			let one = what.is_record_id();
+			let one = matches!(what, Resource::RecordId(_));
 			let statement = {
 				let mut stmt = UpdateStatement::default();
-				stmt.what = value_to_values(what);
+				stmt.what = resource_to_values(what);
 				stmt.data = data.map(ToCore::to_core).map(Data::MergeExpression);
 				stmt.output = Some(Output::After);
 				stmt
@@ -649,10 +649,10 @@ async fn router(
 			what,
 		} => {
 			let mut query = Query::default();
-			let one = what.is_record_id();
+			let one = matches!(what, Resource::RecordId(_));
 			let statement = {
 				let mut stmt = SelectStatement::default();
-				stmt.what = value_to_values(what);
+				stmt.what = resource_to_values(what);
 				stmt.expr.0 = vec![Field::All];
 				stmt
 			};
@@ -666,10 +666,10 @@ async fn router(
 			what,
 		} => {
 			let mut query = Query::default();
-			let one = what.is_record_id();
+			let one = matches!(what, Resource::RecordId(_));
 			let statement = {
 				let mut stmt = DeleteStatement::default();
-				stmt.what = value_to_values(what);
+				stmt.what = resource_to_values(what);
 				stmt.output = Some(Output::Before);
 				stmt
 			};

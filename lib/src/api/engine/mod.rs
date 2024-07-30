@@ -30,25 +30,25 @@ use wasmtimer::std::Instant;
 #[cfg(target_arch = "wasm32")]
 use wasmtimer::tokio::Interval;
 
-use crate::value::ToCore as _;
-use crate::Value;
+use super::opt::Resource;
+use super::opt::Table;
+use super::value::ToCore;
 
 // used in http and all local engines.
 #[allow(dead_code)]
-fn value_to_values(v: Value) -> CoreValues {
-	match v {
-		Value::Array(x) => {
-			let mut values = CoreValues::default();
-			let x = x.to_core();
-			values.0 = x.0;
-			values
+fn resource_to_values(r: Resource) -> CoreValues {
+	let mut res = CoreValues::default();
+	match r {
+		Resource::Table(x) => {
+			res.0 = vec![Table(x).to_core().into()];
 		}
-		x => {
-			let mut values = CoreValues::default();
-			values.0 = vec![x.to_core()];
-			values
-		}
+		Resource::RecordId(x) => res.0 = vec![x.to_core().into()],
+		Resource::Object(x) => res.0 = vec![x.to_core().into()],
+		Resource::Array(x) => res.0 = x.to_core().0,
+		Resource::Edge(x) => res.0 = vec![x.to_core().into()],
+		Resource::Range(x) => res.0 = vec![x.to_core().into()],
 	}
+	res
 }
 
 struct IntervalStream {

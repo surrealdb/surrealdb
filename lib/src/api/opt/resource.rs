@@ -5,31 +5,44 @@ use crate::{
 };
 use std::ops::{self, Bound};
 use surrealdb_core::{
-	sql::{Dir, Edges},
+	sql::{Dir, Table as CoreTable, Value as CoreValue},
 	syn,
 };
 
 #[derive(Debug)]
-pub struct Table(pub String);
+pub struct Table<T>(pub T);
 
-/// A table range.
-#[derive(Debug)]
-pub struct Range {
-	/// The table name,
-	pub table: String,
-	pub from: Bound<RecordIdKey>,
-	pub to: Bound<RecordIdKey>,
+impl<T> Table<T>
+where
+	T: Into<String>,
+{
+	pub(crate) fn to_core(self) -> CoreTable {
+		let mut t = CoreTable::default();
+		t.0 = self.0.into();
+		t
+	}
 }
 
-#[derive(Debug)]
+/// A table range.
+#[derive(Debug, Clone, PartialEq)]
+pub struct QueryRange {
+	/// The table name,
+	pub(crate) table: String,
+	pub(crate) range: KeyRange,
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub struct Edge {
-	pub from: RecordId,
-	pub dir: Dir,
-	pub table: String,
+	pub(crate) from: RecordId,
+	pub(crate) dir: Dir,
+	pub(crate) tables: Vec<String>,
 }
 
 /// A database resource
-#[derive(Debug)]
+///
+/// A resource is a location, or a range of locations, from which data can be fetched.
+#[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
 pub enum Resource {
 	/// Table name
 	Table(String),
@@ -42,27 +55,43 @@ pub enum Resource {
 	/// Edges
 	Edge(Edge),
 	/// A range of id's on a table.
-	Range(Range),
+	Range(QueryRange),
 }
 
 impl Resource {
-	pub(crate) fn with_range(self, range: Range<RecordIdKey>) -> Result<Resource> {
+	/// Add a range to the resource, this only works if the resource is a table.
+	pub fn with_range(self, range: KeyRange) -> Result<Self> {
 		match self {
-			Resource::Table(table) => Ok(Resource::Range {
+			Resource::Table(table) => Ok(Resource::Range(QueryRange {
 				table,
-				from: range.start,
-				to: range.end,
-			}),
+				range,
+			})),
 			Resource::RecordId(_) => Err(Error::RangeOnRecordId.into()),
 			Resource::Object(_) => Err(Error::RangeOnObject.into()),
 			Resource::Array(_) => Err(Error::RangeOnArray.into()),
-			Resource::Edges {
-				..
-			} => Err(Error::RangeOnEdges.into()),
-			Resource::Range {
-				..
-			} => Err(Error::RangeOnRange.into()),
+			Resource::Edge(_) => Err(Error::RangeOnEdges.into()),
+			Resource::Range(_) => Err(Error::RangeOnRange.into()),
 		}
+	}
+
+	pub(crate) fn into_core_value(self) -> CoreValue {
+		match self {
+			Resource::Table(x) => Table(x).to_core().into(),
+			Resource::RecordId(x) => x.to_core().into(),
+			Resource::Object(x) => x.to_core().into(),
+			Resource::Array(x) => x.to_core().into(),
+			Resource::Edge(x) => x.to_core().into(),
+			Resource::Range(x) => x.to_core().into(),
+		}
+	}
+}
+
+impl<T> From<Table<T>> for Resource
+where
+	T: Into<String>,
+{
+	fn from(table: Table<T>) -> Self {
+		Self::Table(table.0.into())
 	}
 }
 
@@ -121,7 +150,7 @@ impl From<String> for Resource {
 	fn from(s: String) -> Self {
 		match syn::thing(s.as_str()) {
 			Ok(thing) => Self::RecordId(ToCore::from_core(thing).unwrap()),
-			Err(_) => Self::Table(s.into()),
+			Err(_) => Self::Table(s),
 		}
 	}
 }
@@ -132,119 +161,26 @@ where
 	I: Into<RecordIdKey>,
 {
 	fn from((table, id): (T, I)) -> Self {
-		let record_id = (table.into(), id.into());
-		Self::RecordId(record_id.into())
+		let record_id = RecordId::from_table_key(table, id);
+		Self::RecordId(record_id)
 	}
 }
 
-/// A trait for converting inputs into database resources
-pub trait IntoResource<Response>: Sized {
-	/// Converts an input into a database resource
-	fn into_resource(self) -> Result<Resource>;
-}
-
-impl IntoResource<Value> for Resource {
-	fn into_resource(self) -> Result<Resource> {
-		Ok(self)
-	}
-}
-
-impl<R> IntoResource<Option<R>> for Object {
-	fn into_resource(self) -> Result<Resource> {
-		Ok(Resource::Object(self))
-	}
-}
-
-impl<R> IntoResource<Option<R>> for Table {
-	fn into_resource(self) -> Result<Resource> {
-		Ok(Resource::RecordId(self))
-	}
-}
-
-impl<R> IntoResource<Option<R>> for &Table {
-	fn into_resource(self) -> Result<Resource> {
-		Ok(Resource::RecordId(self.clone()))
-	}
-}
-
-impl<R, T, I> IntoResource<Option<R>> for (T, I)
-where
-	T: Into<String>,
-	I: Into<RecordIdKey>,
-{
-	fn into_resource(self) -> Result<Resource> {
-		let (table, id) = self;
-		let record_id = (table.into(), id.into());
-		Ok(Resource::RecordId(record_id.into()))
-	}
-}
-
-impl<R> IntoResource<Vec<R>> for Vec<Value> {
-	fn into_resource(self) -> Result<Resource> {
-		Ok(Resource::Array(self))
-	}
-}
-
-impl<R> IntoResource<Vec<R>> for Edges {
-	fn into_resource(self) -> Result<Resource> {
-		Ok(Resource::Edges(self))
-	}
-}
-
-impl<R> IntoResource<Vec<R>> for Table {
-	fn into_resource(self) -> Result<Resource> {
-		Ok(Resource::Table(self))
-	}
-}
-
-fn blacklist_colon(input: &str) -> Result<()> {
-	match input.contains(':') {
-		true => {
-			// We already know this string contains a colon
-			let (table, id) = input.split_once(':').unwrap();
-			Err(Error::TableColonId {
-				table: table.to_owned(),
-				id: id.to_owned(),
-			}
-			.into())
-		}
-		false => Ok(()),
-	}
-}
-
-impl<R> IntoResource<Vec<R>> for &str {
-	fn into_resource(self) -> Result<Resource> {
-		blacklist_colon(self)?;
-		let mut table = Table::default();
-		self.clone_into(&mut table.0);
-		Ok(Resource::Table(table))
-	}
-}
-
-impl<R> IntoResource<Vec<R>> for &String {
-	fn into_resource(self) -> Result<Resource> {
-		blacklist_colon(self)?;
-		IntoResource::<Vec<R>>::into_resource(self.as_str())
-	}
-}
-
-impl<R> IntoResource<Vec<R>> for String {
-	fn into_resource(self) -> Result<Resource> {
-		blacklist_colon(&self)?;
-		let mut table = Table::default();
-		table.0 = self;
-		Ok(Resource::Table(table))
-	}
+/// A database resource into which can be inserted.
+#[derive(Debug)]
+pub enum InsertResource {
+	RecordId(RecordId),
+	Table(String),
 }
 
 /// Holds the `start` and `end` bounds of a range query
-#[derive(Debug)]
-pub struct IdRange<T> {
-	pub(crate) start: Bound<T>,
-	pub(crate) end: Bound<T>,
+#[derive(Debug, PartialEq, Clone)]
+pub struct KeyRange {
+	pub(crate) start: Bound<RecordIdKey>,
+	pub(crate) end: Bound<RecordIdKey>,
 }
 
-impl<T> From<(Bound<T>, Bound<T>)> for IdRange<Id>
+impl<T> From<(Bound<T>, Bound<T>)> for KeyRange
 where
 	T: Into<RecordIdKey>,
 {
@@ -264,7 +200,7 @@ where
 	}
 }
 
-impl<T> From<ops::Range<T>> for IdRange<RecordIdKey>
+impl<T> From<ops::Range<T>> for KeyRange
 where
 	T: Into<RecordIdKey>,
 {
@@ -281,7 +217,7 @@ where
 	}
 }
 
-impl<T> From<ops::RangeInclusive<T>> for IdRange<RecordIdKey>
+impl<T> From<ops::RangeInclusive<T>> for KeyRange
 where
 	T: Into<RecordIdKey>,
 {
@@ -294,7 +230,7 @@ where
 	}
 }
 
-impl<T> From<ops::RangeFrom<T>> for IdRange<RecordIdKey>
+impl<T> From<ops::RangeFrom<T>> for KeyRange
 where
 	T: Into<RecordIdKey>,
 {
@@ -310,7 +246,7 @@ where
 	}
 }
 
-impl<T> From<ops::RangeTo<T>> for IdRange<RecordIdKey>
+impl<T> From<ops::RangeTo<T>> for KeyRange
 where
 	T: Into<RecordIdKey>,
 {
@@ -326,7 +262,7 @@ where
 	}
 }
 
-impl<T> From<ops::RangeToInclusive<T>> for IdRange<RecordIdKey>
+impl<T> From<ops::RangeToInclusive<T>> for KeyRange
 where
 	T: Into<RecordIdKey>,
 {
@@ -342,7 +278,7 @@ where
 	}
 }
 
-impl From<ops::RangeFull> for IdRange<RecordIdKey> {
+impl From<ops::RangeFull> for KeyRange {
 	fn from(_: ops::RangeFull) -> Self {
 		Self {
 			start: Bound::Unbounded,

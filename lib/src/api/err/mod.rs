@@ -1,10 +1,10 @@
 use crate::{api::Response, Value};
 use serde::Serialize;
-use std::io;
 use std::path::PathBuf;
+use std::{convert::Infallible, io};
 use surrealdb_core::{
 	dbs::capabilities::{ParseFuncTargetError, ParseNetTargetError},
-	sql::{Array, Edges, FromValueError, Object, Thing},
+	sql::FromValueError,
 };
 use thiserror::Error;
 
@@ -200,16 +200,20 @@ pub enum Error {
 	ResponseAlreadyTaken,
 
 	/// Tried to insert on an object
-	#[error("Insert queries on objects not supported")]
+	#[error("Insert queries on objects are not supported")]
 	InsertOnObject,
 
 	/// Tried to insert on an array
-	#[error("Insert queries on arrays not supported")]
+	#[error("Insert queries on arrays are not supported")]
 	InsertOnArray,
 
 	/// Tried to insert on an edge or edges
-	#[error("Insert queries on edges not supported")]
+	#[error("Insert queries on edges are not supported")]
 	InsertOnEdges,
+
+	/// Tried to insert on an edge or edges
+	#[error("Insert queries on ranges are not supported")]
+	InsertOnRange,
 
 	#[error("{0}")]
 	InvalidNetTarget(#[from] ParseNetTargetError),
@@ -226,7 +230,9 @@ pub enum Error {
 	Serializer(String),
 	#[error("failed to deserialize from a Value: {0}")]
 	Deserializer(String),
-	#[error("recieved an non-primitive value")]
+
+	/// Tried to convert an value which contained something like for example a query or future.
+	#[error("tried to convert from a value which contained non-primitive values to a value which only allows primitive values.")]
 	RecievedInvalidValue,
 }
 
@@ -245,6 +251,12 @@ impl serde::de::Error for Error {
 		T: std::fmt::Display,
 	{
 		Error::DeSerializeValue(msg.to_string())
+	}
+}
+
+impl From<Infallible> for crate::Error {
+	fn from(_: Infallible) -> Self {
+		unreachable!()
 	}
 }
 

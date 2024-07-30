@@ -1,11 +1,20 @@
-use crate::{Bytes, Datetime, Number, Object, RecordId, RecordIdKey, Uuid, Value};
-use std::collections::BTreeMap;
-use surrealdb_core::sql::{
-	Array as CoreArray, Bytes as CoreBytes, Datetime as CoreDatetime, Duration as CoreDuration, Id,
-	Number as CoreNumber, Object as CoreObject, Strand, Thing, Uuid as CoreUuid,
-	Value as CoreValue,
+use crate::{
+	opt::{Edge, KeyRange, QueryRange},
+	Bytes, Datetime, Number, Object, RecordId, RecordIdKey, Uuid, Value,
+};
+use std::{collections::BTreeMap, ops::Bound};
+use surrealdb_core::{
+	dbs::{Action as CoreAction, Notification as CoreNotification},
+	sql::{
+		Array as CoreArray, Bytes as CoreBytes, Datetime as CoreDatetime, Duration as CoreDuration,
+		Edges as CoreEdges, Id, Number as CoreNumber, Object as CoreObject, Range as CoreRange,
+		Strand, Table as CoreTable, Tables as CoreTables, Thing, Uuid as CoreUuid,
+		Value as CoreValue,
+	},
 };
 use trice::Duration;
+
+use super::{Action, Notification};
 
 pub(crate) trait ToCore: Sized {
 	type Core;
@@ -224,6 +233,135 @@ impl ToCore for RecordIdKey {
 			_ => return None,
 		};
 		Some(v)
+	}
+}
+
+impl ToCore for Edge {
+	type Core = CoreEdges;
+
+	fn to_core(self) -> Self::Core {
+		let from = self.from.to_core();
+		let mut what = CoreTables::default();
+		what.0 = self
+			.tables
+			.into_iter()
+			.map(|x| {
+				let mut t = CoreTable::default();
+				t.0 = x;
+				t
+			})
+			.collect();
+		CoreEdges::new(self.dir, from, what)
+	}
+
+	fn as_core(&self) -> Self::Core {
+		let from = self.from.as_core();
+		let mut what = CoreTables::default();
+		what.0 = self
+			.tables
+			.iter()
+			.map(|x| {
+				let mut t = CoreTable::default();
+				t.0 = x.clone();
+				t
+			})
+			.collect();
+		CoreEdges::new(self.dir.clone(), from, what)
+	}
+
+	fn from_core(this: Self::Core) -> Option<Self> {
+		Some(Edge {
+			dir: this.dir,
+			from: RecordId::from_core(this.from)?,
+			tables: this.what.0.into_iter().map(|x| x.0).collect(),
+		})
+	}
+}
+
+impl ToCore for Notification<Value> {
+	type Core = CoreNotification;
+
+	fn to_core(self) -> Self::Core {
+		CoreNotification::new(self.query_id.into(), self.action.to_core(), self.data.to_core())
+	}
+
+	fn as_core(&self) -> Self::Core {
+		CoreNotification::new(self.query_id.into(), self.action.as_core(), self.data.as_core())
+	}
+
+	fn from_core(this: Self::Core) -> Option<Self> {
+		Some(Notification {
+			query_id: this.id.0,
+			action: Action::from_core(this.action)?,
+			data: Value::from_core(this.result)?,
+		})
+	}
+}
+
+impl ToCore for QueryRange {
+	type Core = CoreRange;
+
+	fn to_core(self) -> Self::Core {
+		CoreRange::new(
+			self.table,
+			self.range.start.map(|x| x.to_core()),
+			self.range.end.map(|x| x.to_core()),
+		)
+	}
+
+	fn as_core(&self) -> Self::Core {
+		self.clone().to_core()
+	}
+
+	fn from_core(this: Self::Core) -> Option<Self> {
+		let start = match this.beg {
+			Bound::Included(x) => Bound::Included(RecordIdKey::from_core(x)?),
+			Bound::Excluded(x) => Bound::Excluded(RecordIdKey::from_core(x)?),
+			Bound::Unbounded => Bound::Unbounded,
+		};
+
+		let end = match this.end {
+			Bound::Included(x) => Bound::Included(RecordIdKey::from_core(x)?),
+			Bound::Excluded(x) => Bound::Excluded(RecordIdKey::from_core(x)?),
+			Bound::Unbounded => Bound::Unbounded,
+		};
+
+		Some(QueryRange {
+			table: this.tb,
+			range: KeyRange {
+				start,
+				end,
+			},
+		})
+	}
+}
+
+impl ToCore for Action {
+	type Core = CoreAction;
+
+	fn to_core(self) -> Self::Core {
+		match self {
+			Action::Create => CoreAction::Create,
+			Action::Update => CoreAction::Update,
+			Action::Delete => CoreAction::Delete,
+		}
+	}
+
+	fn as_core(&self) -> Self::Core {
+		match self {
+			Action::Create => CoreAction::Create,
+			Action::Update => CoreAction::Update,
+			Action::Delete => CoreAction::Delete,
+		}
+	}
+
+	fn from_core(this: Self::Core) -> Option<Self> {
+		match this {
+			CoreAction::Create => Some(Action::Create),
+			CoreAction::Update => Some(Action::Update),
+			CoreAction::Delete => Some(Action::Delete),
+			_ => None,
+		}
 	}
 }
 

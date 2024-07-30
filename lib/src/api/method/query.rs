@@ -10,7 +10,7 @@ use crate::engine::any::Any;
 use crate::method::OnceLockExt;
 use crate::method::Stats;
 use crate::method::WithStats;
-use crate::Notification;
+use crate::value::Notification;
 use crate::Surreal;
 use crate::{value, Object, Value};
 use futures::future::Either;
@@ -20,10 +20,8 @@ use indexmap::IndexMap;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 use std::borrow::Cow;
-use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::future::IntoFuture;
-use std::mem;
 use std::pin::Pin;
 use std::task::Context;
 use std::task::Poll;
@@ -40,7 +38,7 @@ pub struct Query<'r, C: Connection> {
 pub(crate) struct ValidQuery<'r, C: Connection> {
 	pub client: Cow<'r, Surreal<C>>,
 	pub query: Vec<Statement>,
-	pub bindings: BTreeMap<String, Value>,
+	pub bindings: Object,
 	pub register_live_queries: bool,
 }
 
@@ -51,7 +49,7 @@ where
 	pub(crate) fn new(
 		client: Cow<'r, Surreal<C>>,
 		query: Vec<Statement>,
-		bindings: BTreeMap<String, Value>,
+		bindings: Object,
 		register_live_queries: bool,
 	) -> Self {
 		Query {
@@ -175,13 +173,13 @@ where
 							)
 							.into());
 						};
-						live::register(router, uuid.0).await.map(|rx| {
+						live::register(router, *uuid).await.map(|rx| {
 							Stream::new(
 								Surreal::new_from_router_waiter(
 									client.router.clone(),
 									client.waiter.clone(),
 								),
-								uuid.0,
+								*uuid,
 								Some(rx),
 							)
 						})
@@ -274,16 +272,24 @@ where
 	/// ```
 	pub fn bind(self, bindings: impl Serialize) -> Self {
 		self.map_valid(move |mut valid| {
-			let mut bindings = bindings.serialize(value::Serializer)?;
-			if let Value::Array(array) = &mut bindings {
-				if let [Value::String(key), value] = &mut array.0[..] {
-					let mut map = BTreeMap::new();
-					map.insert(mem::take(&mut key), mem::take(value));
-					bindings = Object(map).into();
+			let bindings = bindings.serialize(value::Serializer)?;
+			match bindings {
+				Value::Object(mut map) => valid.bindings.0.append(&mut map.0),
+				Value::Array(array) => {
+					if array.len() != 2 || !array[0].is_string() {
+						return Err(Error::InvalidBindings(Value::Array(array)).into());
+					}
+
+					let mut iter = array.into_iter();
+					let Some(Value::String(key)) = iter.next() else {
+						unreachable!()
+					};
+					let Some(value) = iter.next() else {
+						unreachable!()
+					};
+
+					valid.bindings.0.insert(key, value);
 				}
-			}
-			match &mut bindings {
-				Value::Object(map) => valid.bindings.append(&mut map.0),
 				_ => {
 					return Err(Error::InvalidBindings(bindings).into());
 				}

@@ -1,9 +1,6 @@
 //! The different options and types for use in API functions
 use dmp::Diff;
 use serde::Serialize;
-use surrealdb_core::sql::to_value;
-use surrealdb_core::sql::Thing;
-use surrealdb_core::sql::Value;
 
 pub mod auth;
 pub mod capabilities;
@@ -23,8 +20,9 @@ pub use resource::*;
 #[cfg(any(feature = "native-tls", feature = "rustls"))]
 pub use tls::*;
 
-/// Record ID
-pub type RecordId = Thing;
+use crate::Value;
+
+use super::value::Serializer;
 
 type UnitOp<'a> = InnerOp<'a, ()>;
 
@@ -58,7 +56,7 @@ enum InnerOp<'a, T> {
 /// [JSON Patch]: https://jsonpatch.com/
 #[derive(Debug)]
 #[must_use]
-pub struct PatchOp(pub(crate) Result<Value, surrealdb_core::err::Error>);
+pub struct PatchOp(pub(crate) Result<Value, crate::api::Error>);
 
 impl PatchOp {
 	/// Adds a value to an object or inserts it into an array.
@@ -78,10 +76,13 @@ impl PatchOp {
 	where
 		T: Serialize,
 	{
-		Self(to_value(InnerOp::Add {
-			path,
-			value,
-		}))
+		Self(
+			InnerOp::Add {
+				path,
+				value,
+			}
+			.serialize(Serializer),
+		)
 	}
 
 	/// Removes a value from an object or array.
@@ -103,9 +104,12 @@ impl PatchOp {
 	/// # ;
 	/// ```
 	pub fn remove(path: &str) -> Self {
-		Self(to_value(UnitOp::Remove {
-			path,
-		}))
+		Self(
+			UnitOp::Remove {
+				path,
+			}
+			.serialize(Serializer),
+		)
 	}
 
 	/// Replaces a value.
@@ -123,18 +127,24 @@ impl PatchOp {
 	where
 		T: Serialize,
 	{
-		Self(to_value(InnerOp::Replace {
-			path,
-			value,
-		}))
+		Self(
+			InnerOp::Replace {
+				path,
+				value,
+			}
+			.serialize(Serializer),
+		)
 	}
 
 	/// Changes a value
 	pub fn change(path: &str, diff: Diff) -> Self {
-		Self(to_value(UnitOp::Change {
-			path,
-			value: diff.text,
-		}))
+		Self(
+			UnitOp::Change {
+				path,
+				value: diff.text,
+			}
+			.serialize(Serializer),
+		)
 	}
 }
 

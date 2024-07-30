@@ -1,13 +1,7 @@
 use super::{
 	deserialize, serialize, HandleResult, PendingRequest, ReplayMethod, RequestEffect, PATH,
 };
-use crate::api::conn::Command;
-use crate::api::conn::Connection;
-use crate::api::conn::DbResponse;
-use crate::api::conn::RequestData;
-use crate::api::conn::Route;
-use crate::api::conn::Router;
-use crate::api::conn::{Command, DbResponse};
+use crate::api::conn::{Command, DbResponse, Route, Router};
 use crate::api::conn::{Connection, RequestData};
 use crate::api::engine::remote::ws::Client;
 use crate::api::engine::remote::ws::Response;
@@ -21,10 +15,10 @@ use crate::api::ExtraFeatures;
 use crate::api::OnceLockExt;
 use crate::api::Result;
 use crate::api::Surreal;
-use crate::engine::proto::Data;
+use crate::engine::remote::ws::Data;
 use crate::engine::IntervalStream;
 use crate::opt::WaitFor;
-use crate::Notification;
+use crate::value::ToCore;
 use crate::Number;
 use crate::Value;
 use channel::Receiver;
@@ -282,27 +276,32 @@ async fn router_handle_response(
 					// If `id` is set this is a normal response
 					Some(id) => {
 						if let Some(id) = id.into_number().and_then(|x| x.cource_into_i64()) {
-							// We can only route responses with IDs
 							if let Some(pending) = state.pending_requests.remove(&id) {
+								let resp = match DbResponse::from_server_result(response.result) {
+									Ok(x) => x,
+									Err(e) => {
+										let _ = pending.response_channel.send(Err(e));
+										return HandleResult::Ok;
+									}
+								};
+								// We can only route responses with IDs
 								match pending.effect {
 									RequestEffect::None => {}
 									RequestEffect::Insert => {
 										// For insert, we need to flatten single responses in an array
-										if let Ok(Data::Other(Value::Array(array))) =
-											response.result
-										{
+										if let DbResponse::Other(Value::Array(array)) = resp {
 											if array.len() == 1 {
 												let _ = pending
 													.response_channel
-													.send(DbResponse::from(Ok(Data::Other(
+													.send(Ok(DbResponse::Other(
 														array.into_iter().next().unwrap(),
-													))))
+													)))
 													.await;
 											} else {
 												let _ = pending
 													.response_channel
-													.send(DbResponse::from(Ok(Data::Other(
-														Value::Array(value),
+													.send(Ok(DbResponse::Other(Value::Array(
+														array,
 													))))
 													.await;
 											}
@@ -321,10 +320,7 @@ async fn router_handle_response(
 										state.vars.shift_remove(&key);
 									}
 								}
-								let _res = pending
-									.response_channel
-									.send(DbResponse::from(response.result))
-									.await;
+								let _res = pending.response_channel.send(Ok(resp)).await;
 							} else {
 								warn!("got response for request with id '{id}', which was not in pending requests")
 							}
@@ -339,17 +335,17 @@ async fn router_handle_response(
 								if let Some(sender) = state.live_queries.get(&live_query_id) {
 									// Send the notification back to the caller or kill live query if the receiver is already dropped
 
-									let notification = Notification {
-										query_id: notification.query_id,
-										action: notification.action,
-										data: notification.result,
+									let Some(notification) = ToCore::from_core(notification) else {
+										warn!(
+											"recieved an invalid value with non-primitive values"
+										);
+										return HandleResult::Ok;
 									};
-
 									if sender.send(notification).await.is_err() {
 										state.live_queries.remove(&live_query_id);
 										let kill = {
 											let request = Command::Kill {
-												uuid: *live_query_id,
+												uuid: live_query_id.0,
 											}
 											.into_router_request(None)
 											.unwrap();

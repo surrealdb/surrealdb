@@ -1,3 +1,11 @@
+use chrono::{DateTime, Utc};
+use revision::revisioned;
+use rust_decimal::Decimal;
+use serde::{
+	de::{DeserializeOwned, Visitor},
+	ser::Serializer as SerdeSerializer,
+	Deserialize, Deserializer, Serialize,
+};
 use std::{
 	borrow::Borrow,
 	cmp::{Ordering, PartialEq, PartialOrd},
@@ -5,13 +13,10 @@ use std::{
 	fmt,
 	iter::FusedIterator,
 	ops::Deref,
+	str::FromStr,
 	time::Duration,
 };
-
-use chrono::{DateTime, Utc};
-use revision::revisioned;
-use rust_decimal::Decimal;
-use serde::{Deserialize, Serialize};
+use surrealdb_core::syn;
 use uuid::Uuid;
 
 mod core;
@@ -23,6 +28,8 @@ mod serializer;
 pub(crate) use core::ToCore;
 
 pub use serializer::Serializer;
+
+use crate::Error;
 
 // Keeping bytes implementation minimal since it might be a good idea to use bytes crate here
 // instead of a plain Vec<u8>.
@@ -77,17 +84,68 @@ impl From<Vec<u8>> for Bytes {
 pub struct Datetime(DateTime<Utc>);
 
 /// The key of a [`RecordId`].
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, PartialOrd)]
+#[derive(Debug, Clone, PartialEq, PartialOrd, Serialize, Deserialize)]
 #[non_exhaustive]
 pub enum RecordIdKey {
+	/// A integer record id like in `temperature:17493`
+	#[serde(rename = "Number")]
+	Integer(i64),
 	/// A string record id, like in `user:tkwse1j5o0anqjxonvzx`.
 	String(String),
-	/// A integer record id like in `temperature:17493`
-	Integer(i64),
+	/// An array record id like in `temperature:['London', d'2022-08-29T08:03:39']`.
+	#[serde(serialize_with = "serialize_array", deserialize_with = "deserialize_array")]
+	Array(Vec<Value>),
 	/// An object record id like in `weather:{ location: 'London', date: d'2022-08-29T08:03:39' }`.
 	Object(Object),
-	/// An array record id like in `temperature:['London', d'2022-08-29T08:03:39']`.
-	Array(Vec<Value>),
+}
+
+fn serialize_array<S>(v: &Vec<Value>, s: S) -> Result<S::Ok, S::Error>
+where
+	S: SerdeSerializer,
+{
+	ser::ArraySerializer(v).serialize(s)
+}
+
+fn deserialize_array<'de, D>(d: D) -> Result<Vec<Value>, D::Error>
+where
+	D: Deserializer<'de>,
+{
+	struct _Visitor;
+
+	impl<'de> Visitor<'de> for _Visitor {
+		type Value = Vec<Value>;
+
+		fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+			write!(formatter, "tuple struct Array")
+		}
+
+		fn visit_newtype_struct<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
+		where
+			D: Deserializer<'de>,
+		{
+			let f = Vec::<Value>::deserialize(deserializer)?;
+			Ok(f)
+		}
+
+		fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
+		where
+			A: serde::de::SeqAccess<'de>,
+		{
+			let f = match seq.next_element()? {
+				Some(x) => x,
+				None => {
+					return Err(<A::Error as serde::de::Error>::invalid_length(
+						0,
+						&"tuple struct Array with 1 element",
+					))
+				}
+			};
+
+			Ok(f)
+		}
+	}
+
+	d.deserialize_newtype_struct("$surrealdb::private::sql::Array", _Visitor)
 }
 
 impl From<Object> for RecordIdKey {
@@ -120,16 +178,50 @@ impl From<Vec<Value>> for RecordIdKey {
 	}
 }
 
+impl From<RecordIdKey> for Value {
+	fn from(key: RecordIdKey) -> Self {
+		match key {
+			RecordIdKey::String(x) => Value::String(x),
+			RecordIdKey::Integer(x) => Value::Number(Number::Integer(x)),
+			RecordIdKey::Object(x) => Value::Object(x),
+			RecordIdKey::Array(x) => Value::Array(x),
+		}
+	}
+}
+
+#[derive(Debug)]
+pub struct RecordIdKeyFromValueError(());
+
+impl fmt::Display for RecordIdKeyFromValueError {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		writeln!(f,"tried to convert a value to a record id key with a value type that is not allowed in a record id key")
+	}
+}
+
+impl TryFrom<Value> for RecordIdKey {
+	type Error = RecordIdKeyFromValueError;
+
+	fn try_from(key: Value) -> Result<Self, Self::Error> {
+		match key {
+			Value::String(x) => Ok(RecordIdKey::String(x)),
+			Value::Number(Number::Integer(x)) => Ok(RecordIdKey::Integer(x)),
+			Value::Object(x) => Ok(RecordIdKey::Object(x)),
+			Value::Array(x) => Ok(RecordIdKey::Array(x)),
+			_ => Err(RecordIdKeyFromValueError(())),
+		}
+	}
+}
+
 /// Struct representing a record id.
 ///
 /// Record id's consist of a table name and a key.
 /// For example the record id `user:tkwse1j5o0anqjxonvzx` has the table `user` and the key `tkwse1j5o0anqjxonvzx`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, PartialOrd)]
+#[derive(Debug, Clone, PartialEq, PartialOrd, Serialize, Deserialize)]
 pub struct RecordId {
 	#[serde(rename = "tb")]
-	table: String,
+	pub(crate) table: String,
 	#[serde(rename = "id")]
-	key: RecordIdKey,
+	pub(crate) key: RecordIdKey,
 }
 
 impl RecordId {
@@ -150,6 +242,16 @@ impl RecordId {
 
 	pub fn key(&self) -> &RecordIdKey {
 		&self.key
+	}
+}
+
+impl FromStr for RecordId {
+	type Err = Error;
+
+	fn from_str(s: &str) -> Result<Self, Self::Err> {
+		syn::thing(s).map_err(crate::Error::Db).and_then(|x| {
+			RecordId::from_core(x).ok_or(crate::api::Error::RecievedInvalidValue.into())
+		})
 	}
 }
 
@@ -198,6 +300,7 @@ impl<'a> ExactSizeIterator for IterMut<'a> {
 }
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq, PartialOrd)]
+#[serde(rename = "$surrealdb::private::sql::Thing")]
 #[revisioned(revision = 1)]
 pub struct Object(pub(crate) BTreeMap<String, Value>);
 
@@ -278,7 +381,7 @@ impl Object {
 	}
 }
 
-struct IntoIter {
+pub struct IntoIter {
 	iter: <BTreeMap<String, Value> as IntoIterator>::IntoIter,
 }
 
@@ -309,7 +412,7 @@ impl ExactSizeIterator for IntoIter {
 impl FusedIterator for IntoIter {}
 
 impl IntoIterator for Object {
-	type Item = <IntoIter as Iterator>::Item;
+	type Item = (String, Value);
 
 	type IntoIter = IntoIter;
 
@@ -321,7 +424,7 @@ impl IntoIterator for Object {
 }
 
 #[derive(Clone)]
-struct Iter<'a> {
+pub struct Iter<'a> {
 	iter: <&'a BTreeMap<String, Value> as IntoIterator>::IntoIter,
 }
 
@@ -404,6 +507,10 @@ impl Value {
 
 	pub fn decimal(v: Decimal) -> Self {
 		Value::Number(Number::Decimal(v))
+	}
+
+	pub fn is_none(&self) -> bool {
+		matches!(self, Value::None)
 	}
 }
 
@@ -501,6 +608,17 @@ macro_rules! impl_convert(
 	};
 );
 
+/// The action performed on a record
+///
+/// This is used in live query notifications.
+#[derive(Debug, Clone, Copy, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[non_exhaustive]
+pub enum Action {
+	Create,
+	Update,
+	Delete,
+}
+
 impl_convert!(
 	(Bool(bool), is_bool, as_bool, as_bool_mut, into_bool),
 	(Number(Number), is_number, as_number, as_number_mut, into_number),
@@ -526,5 +644,32 @@ impl fmt::Display for ConversionError {
 			"failed to convert into `{}` from value with type `{:?}`",
 			self.expected, self.from
 		)
+	}
+}
+
+/// A live query notification
+///
+/// Live queries return a stream of notifications. The notification contains an `action` that triggered the change in the database record and `data` itself.
+/// For deletions the data is the record before it was deleted. For everything else, it's the newly created record or updated record depending on whether
+/// the action is create or update.
+#[derive(Debug, Clone, Copy, Eq, PartialEq, Ord, PartialOrd, Hash)]
+#[non_exhaustive]
+pub struct Notification<R> {
+	pub query_id: Uuid,
+	pub action: Action,
+	pub data: R,
+}
+
+impl Notification<Value> {
+	pub fn map_deserialize<R>(self) -> Result<Notification<R>, crate::api::Error>
+	where
+		R: DeserializeOwned,
+	{
+		let data = R::deserialize(self.data)?;
+		Ok(Notification {
+			query_id: self.query_id,
+			action: self.action,
+			data,
+		})
 	}
 }

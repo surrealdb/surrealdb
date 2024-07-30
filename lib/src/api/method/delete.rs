@@ -1,17 +1,16 @@
 use crate::api::conn::Command;
 use crate::api::method::BoxFuture;
-use crate::api::opt::Range;
 use crate::api::opt::Resource;
 use crate::api::Connection;
 use crate::api::Result;
 use crate::method::OnceLockExt;
+use crate::opt::KeyRange;
 use crate::Surreal;
 use crate::Value;
 use serde::de::DeserializeOwned;
 use std::borrow::Cow;
 use std::future::IntoFuture;
 use std::marker::PhantomData;
-use surrealdb_core::sql::Id;
 
 /// A record delete future
 #[derive(Debug)]
@@ -19,7 +18,6 @@ use surrealdb_core::sql::Id;
 pub struct Delete<'r, C: Connection, R> {
 	pub(super) client: Cow<'r, Surreal<C>>,
 	pub(super) resource: Result<Resource>,
-	pub(super) range: Option<Range<Id>>,
 	pub(super) response_type: PhantomData<R>,
 }
 
@@ -42,18 +40,13 @@ macro_rules! into_future {
 			let Delete {
 				client,
 				resource,
-				range,
 				..
 			} = self;
 			Box::pin(async move {
-				let param: Value = match range {
-					Some(range) => resource?.with_range(range)?.into(),
-					None => resource?.into(),
-				};
 				let router = client.router.extract()?;
 				router
 					.$method(Command::Delete {
-						what: param,
+						what: resource?,
 					})
 					.await
 			})
@@ -98,8 +91,8 @@ where
 	C: Connection,
 {
 	/// Restricts a range of records to delete
-	pub fn range(mut self, bounds: impl Into<Range<Id>>) -> Self {
-		self.range = Some(bounds.into());
+	pub fn range(mut self, range: impl Into<KeyRange>) -> Self {
+		self.resource = self.resource.and_then(|x| x.with_range(range.into()));
 		self
 	}
 }
@@ -109,8 +102,8 @@ where
 	C: Connection,
 {
 	/// Restricts a range of records to delete
-	pub fn range(mut self, bounds: impl Into<Range<Id>>) -> Self {
-		self.range = Some(bounds.into());
+	pub fn range(mut self, range: impl Into<KeyRange>) -> Self {
+		self.resource = self.resource.and_then(|x| x.with_range(range.into()));
 		self
 	}
 }

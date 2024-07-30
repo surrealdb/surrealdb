@@ -12,9 +12,6 @@ use serde::Serialize;
 use std::borrow::Cow;
 use std::future::IntoFuture;
 use std::marker::PhantomData;
-use surrealdb_core::sql::to_value;
-
-use super::Content;
 
 use super::Content;
 
@@ -23,7 +20,7 @@ use super::Content;
 #[must_use = "futures do nothing unless you `.await` or poll them"]
 pub struct Create<'r, C: Connection, R> {
 	pub(super) client: Cow<'r, Surreal<C>>,
-	pub(super) resource: Result<Resource>,
+	pub(super) resource: Resource,
 	pub(super) response_type: PhantomData<R>,
 }
 
@@ -51,7 +48,7 @@ macro_rules! into_future {
 			Box::pin(async move {
 				let router = client.router.extract()?;
 				let cmd = Command::Create {
-					what: resource?.into(),
+					what: resource,
 					data: None,
 				};
 				router.$method(cmd).await
@@ -110,7 +107,7 @@ where
 			};
 
 			Ok(Command::Create {
-				what: self.resource?.into(),
+				what: self.resource.into(),
 				data,
 			})
 		})

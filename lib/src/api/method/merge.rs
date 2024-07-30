@@ -1,19 +1,16 @@
 use crate::api::conn::Command;
 use crate::api::method::BoxFuture;
-use crate::api::opt::Range;
 use crate::api::opt::Resource;
 use crate::api::Connection;
 use crate::api::Result;
 use crate::method::OnceLockExt;
+use crate::value::{Serializer, Value};
 use crate::Surreal;
-use crate::Value;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 use std::borrow::Cow;
 use std::future::IntoFuture;
 use std::marker::PhantomData;
-use surrealdb_core::sql::to_value;
-use surrealdb_core::sql::Id;
 
 /// A merge future
 #[derive(Debug)]
@@ -21,7 +18,6 @@ use surrealdb_core::sql::Id;
 pub struct Merge<'r, C: Connection, D, R> {
 	pub(super) client: Cow<'r, Surreal<C>>,
 	pub(super) resource: Result<Resource>,
-	pub(super) range: Option<Range<Id>>,
 	pub(super) content: D,
 	pub(super) response_type: PhantomData<R>,
 }
@@ -45,25 +41,19 @@ macro_rules! into_future {
 			let Merge {
 				client,
 				resource,
-				range,
 				content,
 				..
 			} = self;
-			let content = to_value(content);
+			let content = content.serialize(Serializer);
 			Box::pin(async move {
-				let param: Value = match range {
-					Some(range) => resource?.with_range(range)?.into(),
-					None => resource?.into(),
-				};
-
 				let content = match content? {
-					Value::None | Value::Null => None,
+					Value::None => None,
 					x => Some(x),
 				};
 
 				let router = client.router.extract()?;
 				let cmd = Command::Merge {
-					what: param,
+					what: resource?,
 					data: content,
 				};
 				router.$method(cmd).await

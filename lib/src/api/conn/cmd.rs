@@ -1,7 +1,8 @@
 use super::MlExportConfig;
 use crate::{
-	value::{Object, Value},
-	Notification, Result,
+	opt::Resource,
+	value::{Notification, Object, Value},
+	Result,
 };
 use bincode::Options;
 use channel::Sender;
@@ -30,34 +31,35 @@ pub(crate) enum Command {
 	},
 	Invalidate,
 	Create {
-		what: Value,
+		what: Resource,
 		data: Option<Value>,
 	},
 	Upsert {
-		what: Value,
+		what: Resource,
 		data: Option<Value>,
 	},
 	Update {
-		what: Value,
+		what: Resource,
 		data: Option<Value>,
 	},
 	Insert {
+		// inserts can only be on a table.
 		what: String,
 		data: Value,
 	},
 	Patch {
-		what: Value,
+		what: Resource,
 		data: Option<Value>,
 	},
 	Merge {
-		what: Value,
+		what: Resource,
 		data: Option<Value>,
 	},
 	Select {
-		what: Value,
+		what: Resource,
 	},
 	Delete {
-		what: Value,
+		what: Resource,
 	},
 	Query {
 		query: Query,
@@ -104,7 +106,7 @@ pub(crate) enum Command {
 impl Command {
 	#[cfg(feature = "protocol-ws")]
 	pub(crate) fn into_router_request(self, id: Option<i64>) -> Option<RouterRequest> {
-		use crate::value::ToCore;
+		use crate::{opt::Table, value::ToCore};
 		let res = match self {
 			Command::Use {
 				namespace,
@@ -134,7 +136,7 @@ impl Command {
 				token,
 			} => RouterRequest {
 				id,
-<<<<<<< HEAD
+				method: "authenticate",
 				params: Some(Value::Array(vec![Value::from(token)]).to_core()),
 			},
 			Command::Invalidate => RouterRequest {
@@ -146,15 +148,15 @@ impl Command {
 				what,
 				data,
 			} => {
-				let mut params = vec![what];
+				let mut params = vec![what.into_core_value()];
 				if let Some(data) = data {
-					params.push(data);
+					params.push(data.to_core());
 				}
 
 				RouterRequest {
 					id,
 					method: "create",
-					params: Some(Value::Array(params.into()).to_core()),
+					params: Some(CoreValue::Array(params.into())),
 				}
 			}
 			Command::Upsert {
@@ -162,15 +164,15 @@ impl Command {
 				data,
 				..
 			} => {
-				let mut params = vec![what];
+				let mut params = vec![what.into_core_value()];
 				if let Some(data) = data {
-					params.push(data);
+					params.push(data.to_core());
 				}
 
 				RouterRequest {
 					id,
 					method: "upsert".into(),
-					params: Some(Value::Array(params.into()).to_core()),
+					params: Some(CoreValue::Array(params.into())),
 				}
 			}
 			Command::Update {
@@ -178,34 +180,29 @@ impl Command {
 				data,
 				..
 			} => {
-				let mut params = vec![what];
+				let mut params = vec![what.into_core_value()];
 
 				if let Some(data) = data {
-					params.push(data);
+					params.push(data.to_core());
 				}
 
 				RouterRequest {
 					id,
 					method: "update",
-					params: Some(Value::Array(params.into()).to_core()),
+					params: Some(CoreValue::Array(params.into())),
 				}
 			}
 			Command::Insert {
 				what,
 				data,
 			} => {
-				let mut params = if let Some(w) = what {
-					vec![w]
-				} else {
-					vec![Value::None]
-				};
-
-				params.push(data);
+				let mut params = vec![Table(what).to_core().into()];
+				params.push(data.to_core());
 
 				RouterRequest {
 					id,
 					method: "insert",
-					params: Some(Value::Array(params.into()).to_core()),
+					params: Some(CoreValue::Array(params.into())),
 				}
 			}
 			Command::Patch {
@@ -213,15 +210,16 @@ impl Command {
 				data,
 				..
 			} => {
-				let mut params = vec![what];
+				let mut params = vec![what.into_core_value()];
+
 				if let Some(data) = data {
-					params.push(data);
+					params.push(data.to_core());
 				}
 
 				RouterRequest {
 					id,
 					method: "patch",
-					params: Some(Value::Array(params.into()).to_core()),
+					params: Some(CoreValue::Array(params.into())),
 				}
 			}
 			Command::Merge {
@@ -229,15 +227,15 @@ impl Command {
 				data,
 				..
 			} => {
-				let mut params = vec![what];
+				let mut params = vec![what.into_core_value()];
 				if let Some(data) = data {
-					params.push(data);
+					params.push(data.to_core());
 				}
 
 				RouterRequest {
 					id,
 					method: "merge",
-					params: Some(Value::Array(params.into()).to_core()),
+					params: Some(CoreValue::Array(params.into())),
 				}
 			}
 			Command::Select {
@@ -246,7 +244,7 @@ impl Command {
 			} => RouterRequest {
 				id,
 				method: "select",
-				params: Some(Value::Array(vec![what]).to_core()),
+				params: Some(CoreValue::Array(vec![what.into_core_value()].into())),
 			},
 			Command::Delete {
 				what,
@@ -254,7 +252,7 @@ impl Command {
 			} => RouterRequest {
 				id,
 				method: "delete",
-				params: Some(Value::Array(vec![what].into()).to_core()),
+				params: Some(CoreValue::Array(vec![what.into_core_value()].into())),
 			},
 			Command::Query {
 				query,
@@ -467,7 +465,7 @@ impl Revisioned for RouterRequest {
 			.with_little_endian()
 			.with_varint_encoding()
 			.reject_trailing_bytes()
-			.serialize_into(&mut *w, self.method)
+			.serialize_into(&mut *w, self.method);
 
 		if let Some(x) = self.params.as_ref() {
 			serializer

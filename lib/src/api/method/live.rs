@@ -11,7 +11,8 @@ use crate::method::OnceLockExt;
 use crate::method::Query;
 use crate::method::Select;
 use crate::opt::Resource;
-use crate::Notification;
+use crate::value::Notification;
+use crate::value::ToCore;
 use crate::Surreal;
 use crate::Value;
 use channel::Receiver;
@@ -22,12 +23,9 @@ use std::marker::PhantomData;
 use std::pin::Pin;
 use std::task::Context;
 use std::task::Poll;
-use surrealdb_core::{
-	dbs,
-	sql::{
-		from_value, statements::LiveStatement, Cond, Expression, Field, Fields, Ident, Idiom,
-		Operator, Part, Statement, Table,
-	},
+use surrealdb_core::sql::{
+	statements::LiveStatement, Cond, Expression, Field, Fields, Ident, Idiom, Operator, Part,
+	Statement, Table,
 };
 use uuid::Uuid;
 
@@ -45,7 +43,6 @@ macro_rules! into_future {
 			let Select {
 				client,
 				resource,
-				range,
 				..
 			} = self;
 			Box::pin(async move {
@@ -57,34 +54,33 @@ macro_rules! into_future {
 				fields.0 = vec![Field::All];
 				let mut stmt = LiveStatement::new(fields);
 				let mut table = Table::default();
-				match range {
-					Some(range) => {
-						let range = resource?.with_range(range)?;
-						table.0 = range.tb.clone();
+				match resource? {
+					Resource::Table(table) => {
 						stmt.what = table.into();
-						stmt.cond = range.to_cond();
 					}
-					None => match resource? {
-						Resource::Table(table) => {
-							stmt.what = table.into();
-						}
-						Resource::RecordId(record) => {
-							table.0 = record.tb.clone();
-							stmt.what = table.into();
-							let mut ident = Ident::default();
-							ident.0 = ID.to_owned();
-							let mut idiom = Idiom::default();
-							idiom.0 = vec![Part::from(ident)];
-							let mut cond = Cond::default();
-							cond.0 = surrealdb_core::sql::Value::Expression(Box::new(
-								Expression::new(idiom.into(), Operator::Equal, record.into()),
-							));
-							stmt.cond = Some(cond);
-						}
-						Resource::Object(object) => return Err(Error::LiveOnObject(object).into()),
-						Resource::Array(array) => return Err(Error::LiveOnArray(array).into()),
-						Resource::Edges(edges) => return Err(Error::LiveOnEdges(edges).into()),
-					},
+					Resource::RecordId(record) => {
+						table.0 = record.table;
+						stmt.what = table.into();
+						let mut ident = Ident::default();
+						ident.0 = ID.to_owned();
+						let mut idiom = Idiom::default();
+						idiom.0 = vec![Part::from(ident)];
+						let mut cond = Cond::default();
+						cond.0 = surrealdb_core::sql::Value::Expression(Box::new(Expression::new(
+							idiom.into(),
+							Operator::Equal,
+							record.key.to_core().into(),
+						)));
+						stmt.cond = Some(cond);
+					}
+					Resource::Object(_) => return Err(Error::LiveOnObject.into()),
+					Resource::Array(_) => return Err(Error::LiveOnArray.into()),
+					Resource::Edge(_) => return Err(Error::LiveOnEdges.into()),
+					Resource::Range(range) => {
+						table.0 = range.table.clone();
+						stmt.what = table.into();
+						stmt.cond = range.to_core().to_cond();
+					}
 				}
 				let query = Query::new(
 					client.clone(),
@@ -101,7 +97,7 @@ macro_rules! into_future {
 				let rx = register(router, id).await?;
 				Ok(Stream::new(
 					Surreal::new_from_router_waiter(client.router.clone(), client.waiter.clone()),
-					id.0,
+					id,
 					Some(rx),
 				))
 			})
@@ -198,18 +194,14 @@ impl futures::Stream for Stream<Value> {
 	type Item = Notification<Value>;
 
 	poll_next! {
-		notification => Poll::Ready(Some(Notification {
-			query_id: notification.id.0,
-			action: notification.action.into(),
-			data: notification.result,
-		}))
+		notification => Poll::Ready(Some(notification))
 	}
 }
 
 macro_rules! poll_next_and_convert {
 	() => {
 		poll_next! {
-			notification => match from_value(notification.result) {
+			notification => match notification.map_deserialize(){
 				Ok(data) => Poll::Ready(Some(Ok(data))),
 				Err(error) => Poll::Ready(Some(Err(error.into()))),
 			}
