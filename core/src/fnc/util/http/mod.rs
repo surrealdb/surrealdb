@@ -53,6 +53,10 @@ pub async fn head(ctx: &Context<'_>, uri: Strand, opts: impl Into<Object>) -> Re
 	let cli = Client::builder().build()?;
 	// Start a new HEAD request
 	let mut req = cli.head(url);
+	// Disable CORS
+	if ctx.get_capabilities().allows_no_cors() {
+		req = req.fetch_mode_no_cors();
+	}
 	// Add the User-Agent header
 	if cfg!(not(target_arch = "wasm32")) {
 		req = req.header("User-Agent", "SurrealDB");
@@ -82,6 +86,10 @@ pub async fn get(ctx: &Context<'_>, uri: Strand, opts: impl Into<Object>) -> Res
 	let cli = Client::builder().build()?;
 	// Start a new GET request
 	let mut req = cli.get(url);
+	// Disable CORS
+	if ctx.get_capabilities().allows_no_cors() {
+		req = req.fetch_mode_no_cors();
+	}
 	// Add the User-Agent header
 	if cfg!(not(target_arch = "wasm32")) {
 		req = req.header("User-Agent", "SurrealDB");
@@ -113,6 +121,10 @@ pub async fn put(
 	let cli = Client::builder().build()?;
 	// Start a new GET request
 	let mut req = cli.put(url);
+	// Disable CORS
+	if ctx.get_capabilities().allows_no_cors() {
+		req = req.fetch_mode_no_cors();
+	}
 	// Add the User-Agent header
 	if cfg!(not(target_arch = "wasm32")) {
 		req = req.header("User-Agent", "SurrealDB");
@@ -146,6 +158,10 @@ pub async fn post(
 	let cli = Client::builder().build()?;
 	// Start a new GET request
 	let mut req = cli.post(url);
+	// Disable CORS
+	if ctx.get_capabilities().allows_no_cors() {
+		req = req.fetch_mode_no_cors();
+	}
 	// Add the User-Agent header
 	if cfg!(not(target_arch = "wasm32")) {
 		req = req.header("User-Agent", "SurrealDB");
@@ -179,6 +195,10 @@ pub async fn patch(
 	let cli = Client::builder().build()?;
 	// Start a new GET request
 	let mut req = cli.patch(url);
+	// Disable CORS
+	if ctx.get_capabilities().allows_no_cors() {
+		req = req.fetch_mode_no_cors();
+	}
 	// Add the User-Agent header
 	if cfg!(not(target_arch = "wasm32")) {
 		req = req.header("User-Agent", "SurrealDB");
@@ -211,6 +231,10 @@ pub async fn delete(
 	let cli = Client::builder().build()?;
 	// Start a new GET request
 	let mut req = cli.delete(url);
+	// Disable CORS
+	if ctx.get_capabilities().allows_no_cors() {
+		req = req.fetch_mode_no_cors();
+	}
 	// Add the User-Agent header
 	if cfg!(not(target_arch = "wasm32")) {
 		req = req.header("User-Agent", "SurrealDB");

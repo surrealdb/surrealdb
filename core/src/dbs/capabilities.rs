@@ -232,6 +232,7 @@ pub struct Capabilities {
 	scripting: bool,
 	guest_access: bool,
 	live_query_notifications: bool,
+	no_cors: bool,
 
 	allow_funcs: Arc<Targets<FuncTarget>>,
 	deny_funcs: Arc<Targets<FuncTarget>>,
@@ -243,8 +244,8 @@ impl fmt::Display for Capabilities {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		write!(
             f,
-            "scripting={}, guest_access={}, live_query_notifications={}, allow_funcs={}, deny_funcs={}, allow_net={}, deny_net={}",
-            self.scripting, self.guest_access, self.live_query_notifications, self.allow_funcs, self.deny_funcs, self.allow_net, self.deny_net
+            "scripting={}, guest_access={}, live_query_notifications={}, no_cors={}, allow_funcs={}, deny_funcs={}, allow_net={}, deny_net={}",
+            self.scripting, self.guest_access, self.live_query_notifications, self.no_cors, self.allow_funcs, self.deny_funcs, self.allow_net, self.deny_net
         )
 	}
 }
@@ -255,6 +256,7 @@ impl Default for Capabilities {
 			scripting: false,
 			guest_access: false,
 			live_query_notifications: true,
+			no_cors: false,
 
 			allow_funcs: Arc::new(Targets::All),
 			deny_funcs: Arc::new(Targets::None),
@@ -270,6 +272,7 @@ impl Capabilities {
 			scripting: true,
 			guest_access: true,
 			live_query_notifications: true,
+			no_cors: true,
 
 			allow_funcs: Arc::new(Targets::All),
 			deny_funcs: Arc::new(Targets::None),
@@ -283,6 +286,7 @@ impl Capabilities {
 			scripting: false,
 			guest_access: false,
 			live_query_notifications: false,
+			no_cors: false,
 
 			allow_funcs: Arc::new(Targets::None),
 			deny_funcs: Arc::new(Targets::None),
@@ -303,6 +307,11 @@ impl Capabilities {
 
 	pub fn with_live_query_notifications(mut self, live_query_notifications: bool) -> Self {
 		self.live_query_notifications = live_query_notifications;
+		self
+	}
+
+	pub fn with_no_cors(mut self, no_cors: bool) -> Self {
+		self.no_cors = no_cors;
 		self
 	}
 
@@ -336,6 +345,10 @@ impl Capabilities {
 
 	pub fn allows_live_query_notifications(&self) -> bool {
 		self.live_query_notifications
+	}
+
+	pub fn allows_no_cors(&self) -> bool {
+		self.no_cors
 	}
 
 	// function is public API so we can't remove it, but you should prefer allows_function_name
