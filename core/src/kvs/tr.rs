@@ -5,8 +5,7 @@ use crate::cf;
 use crate::dbs::node::Timestamp;
 use crate::err::Error;
 use crate::idg::u32::U32;
-#[cfg(debug_assertions)]
-use crate::key::debug::sprint;
+use crate::key::debug::Sprintable;
 use crate::kvs::batch::Batch;
 use crate::kvs::clock::SizedClock;
 use crate::kvs::stash::Stash;
@@ -21,11 +20,8 @@ use std::fmt::Debug;
 use std::ops::Range;
 use std::sync::Arc;
 
-#[cfg(debug_assertions)]
-const TARGET: &str = "surrealdb::core::kvs::tr";
-
 /// Used to determine the behaviour when a transaction is not closed correctly
-#[derive(Default)]
+#[derive(Debug, Default)]
 pub enum Check {
 	#[default]
 	None,
@@ -147,9 +143,8 @@ impl Transactor {
 	/// transactions, whilst in development we should panic
 	/// so that any unintended behaviour is detected, and in
 	/// production we should only log a warning.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
 	pub(crate) fn check_level(&mut self, check: Check) {
-		#[cfg(debug_assertions)]
-		trace!(target: TARGET, "check_level");
 		expand_inner!(&mut self.inner, v => { v.check_level(check) })
 	}
 
@@ -159,207 +154,191 @@ impl Transactor {
 	/// then this function will return [`true`], and any further
 	/// calls to functions on this transaction will result
 	/// in a [`Error::TxFinished`] error.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
 	pub async fn closed(&self) -> bool {
-		#[cfg(debug_assertions)]
-		trace!(target: TARGET, "closed");
 		expand_inner!(&self.inner, v => { v.closed() })
 	}
 
 	/// Cancel a transaction.
 	///
 	/// This reverses all changes made within the transaction.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
 	pub async fn cancel(&mut self) -> Result<(), Error> {
-		#[cfg(debug_assertions)]
-		trace!(target: TARGET, "cancel");
 		expand_inner!(&mut self.inner, v => { v.cancel().await })
 	}
 
 	/// Commit a transaction.
 	///
 	/// This attempts to commit all changes made within the transaction.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
 	pub async fn commit(&mut self) -> Result<(), Error> {
-		#[cfg(debug_assertions)]
-		trace!(target: TARGET, "commit");
 		expand_inner!(&mut self.inner, v => { v.commit().await })
 	}
 
 	/// Check if a key exists in the datastore.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
 	pub async fn exists<K>(&mut self, key: K) -> Result<bool, Error>
 	where
 		K: Into<Key> + Debug,
 	{
 		let key = key.into();
-		#[cfg(debug_assertions)]
-		trace!(target: TARGET, "exists {}", sprint(&key));
 		expand_inner!(&mut self.inner, v => { v.exists(key).await })
 	}
 
 	/// Fetch a key from the datastore.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
 	pub async fn get<K>(&mut self, key: K) -> Result<Option<Val>, Error>
 	where
 		K: Into<Key> + Debug,
 	{
 		let key = key.into();
-		#[cfg(debug_assertions)]
-		trace!(target: TARGET, "get {}", sprint(&key));
 		expand_inner!(&mut self.inner, v => { v.get(key).await })
 	}
 
 	/// Fetch many keys from the datastore.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
 	pub async fn getm<K>(&mut self, keys: Vec<K>) -> Result<Vec<Val>, Error>
 	where
 		K: Into<Key> + Debug,
 	{
 		let keys = keys.into_iter().map(Into::into).collect::<Vec<Key>>();
-		#[cfg(debug_assertions)]
-		trace!(target: TARGET, "getm {}", keys.iter().map(sprint).collect::<Vec<_>>().join(" + "));
 		expand_inner!(&mut self.inner, v => { v.getm(keys).await })
 	}
 
 	/// Retrieve a specific range of keys from the datastore.
 	///
 	/// This function fetches all matching key-value pairs from the underlying datastore in grouped batches.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
 	pub async fn getr<K>(&mut self, rng: Range<K>) -> Result<Vec<(Key, Val)>, Error>
 	where
 		K: Into<Key> + Debug,
 	{
 		let beg: Key = rng.start.into();
 		let end: Key = rng.end.into();
-		#[cfg(debug_assertions)]
-		trace!(target: TARGET, "getr {}..{}", sprint(&beg), sprint(&end));
 		expand_inner!(&mut self.inner, v => { v.getr(beg..end).await })
 	}
 
 	/// Retrieve a specific prefixed range of keys from the datastore.
 	///
 	/// This function fetches all matching key-value pairs from the underlying datastore in grouped batches.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
 	pub async fn getp<K>(&mut self, key: K) -> Result<Vec<(Key, Val)>, Error>
 	where
 		K: Into<Key> + Debug,
 	{
 		let key: Key = key.into();
-		#[cfg(debug_assertions)]
-		trace!(target: TARGET, "getp {}", sprint(&key));
 		expand_inner!(&mut self.inner, v => { v.getp(key).await })
 	}
 
 	/// Insert or update a key in the datastore.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
 	pub async fn set<K, V>(&mut self, key: K, val: V) -> Result<(), Error>
 	where
 		K: Into<Key> + Debug,
 		V: Into<Val> + Debug,
 	{
 		let key = key.into();
-		#[cfg(debug_assertions)]
-		trace!(target: TARGET, "set {} => {:?}", sprint(&key), val);
 		expand_inner!(&mut self.inner, v => { v.set(key, val).await })
 	}
 
 	/// Insert a key if it doesn't exist in the datastore.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
 	pub async fn put<K, V>(&mut self, key: K, val: V) -> Result<(), Error>
 	where
 		K: Into<Key> + Debug,
 		V: Into<Val> + Debug,
 	{
 		let key = key.into();
-		#[cfg(debug_assertions)]
-		trace!(target: TARGET, "put {} => {:?}", sprint(&key), val);
 		expand_inner!(&mut self.inner, v => { v.put(key, val).await })
 	}
 
 	/// Update a key in the datastore if the current value matches a condition.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
 	pub async fn putc<K, V>(&mut self, key: K, val: V, chk: Option<V>) -> Result<(), Error>
 	where
 		K: Into<Key> + Debug,
 		V: Into<Val> + Debug,
 	{
 		let key = key.into();
-		#[cfg(debug_assertions)]
-		trace!(target: TARGET, "putc {} if {:?} => {:?}", sprint(&key), chk, val);
 		expand_inner!(&mut self.inner, v => { v.putc(key, val, chk).await })
 	}
 
 	/// Delete a key from the datastore.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
 	pub async fn del<K>(&mut self, key: K) -> Result<(), Error>
 	where
 		K: Into<Key> + Debug,
 	{
 		let key = key.into();
-		#[cfg(debug_assertions)]
-		trace!(target: TARGET, "del {}", sprint(&key));
 		expand_inner!(&mut self.inner, v => { v.del(key).await })
 	}
 
 	/// Delete a key from the datastore if the current value matches a condition.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
 	pub async fn delc<K, V>(&mut self, key: K, chk: Option<V>) -> Result<(), Error>
 	where
 		K: Into<Key> + Debug,
 		V: Into<Val> + Debug,
 	{
 		let key = key.into();
-		#[cfg(debug_assertions)]
-		trace!(target: TARGET, "delc {} if {:?}", sprint(&key), chk);
 		expand_inner!(&mut self.inner, v => { v.delc(key, chk).await })
 	}
 
 	/// Delete a range of keys from the datastore.
 	///
 	/// This function deletes all matching key-value pairs from the underlying datastore in grouped batches.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
 	pub async fn delr<K>(&mut self, rng: Range<K>) -> Result<(), Error>
 	where
 		K: Into<Key> + Debug,
 	{
 		let beg: Key = rng.start.into();
 		let end: Key = rng.end.into();
-		#[cfg(debug_assertions)]
-		trace!(target: TARGET, "delr {}..{}", sprint(&beg), sprint(&end));
 		expand_inner!(&mut self.inner, v => { v.delr(beg..end).await })
 	}
 
 	/// Delete a prefixed range of keys from the datastore.
 	///
 	/// This function deletes all matching key-value pairs from the underlying datastore in grouped batches.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
 	pub async fn delp<K>(&mut self, key: K) -> Result<(), Error>
 	where
 		K: Into<Key> + Debug,
 	{
 		let key: Key = key.into();
-		#[cfg(debug_assertions)]
-		trace!(target: TARGET, "delp {}", sprint(&key));
 		expand_inner!(&mut self.inner, v => { v.delp(key).await })
 	}
 
 	/// Retrieve a specific range of keys from the datastore.
 	///
 	/// This function fetches the full range of keys without values, in a single request to the underlying datastore.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
 	pub async fn keys<K>(&mut self, rng: Range<K>, limit: u32) -> Result<Vec<Key>, Error>
 	where
 		K: Into<Key> + Debug,
 	{
 		let beg: Key = rng.start.into();
 		let end: Key = rng.end.into();
-		#[cfg(debug_assertions)]
-		trace!(target: TARGET, "keys {}..{} (limit: {limit})", sprint(&beg), sprint(&end));
 		expand_inner!(&mut self.inner, v => { v.keys(beg..end, limit).await })
 	}
 
 	/// Retrieve a specific range of keys from the datastore.
 	///
 	/// This function fetches the full range of key-value pairs, in a single request to the underlying datastore.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
 	pub async fn scan<K>(&mut self, rng: Range<K>, limit: u32) -> Result<Vec<(Key, Val)>, Error>
 	where
 		K: Into<Key> + Debug,
 	{
 		let beg: Key = rng.start.into();
 		let end: Key = rng.end.into();
-		#[cfg(debug_assertions)]
-		trace!(target: TARGET, "scan {}..{} (limit: {limit})", sprint(&beg), sprint(&end));
 		expand_inner!(&mut self.inner, v => { v.scan(beg..end, limit).await })
 	}
 
 	/// Retrieve a batched scan over a specific range of keys in the datastore.
 	///
 	/// This function fetches keys or key-value pairs, in batches, with multiple requests to the underlying datastore.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
 	pub async fn batch<K>(
 		&mut self,
 		rng: Range<K>,
@@ -371,8 +350,6 @@ impl Transactor {
 	{
 		let beg: Key = rng.start.into();
 		let end: Key = rng.end.into();
-		#[cfg(debug_assertions)]
-		trace!(target: TARGET, "batch {}..{} (batch: {batch})", sprint(&beg), sprint(&end));
 		expand_inner!(&mut self.inner, v => { v.batch(beg..end, batch, values).await })
 	}
 
@@ -381,20 +358,15 @@ impl Transactor {
 	/// NOTE: This should be called when composing the change feed entries for this transaction,
 	/// which should be done immediately before the transaction commit.
 	/// That is to keep other transactions commit delay(pessimistic) or conflict(optimistic) as less as possible.
-	#[allow(unused)]
 	pub async fn get_timestamp<K>(&mut self, key: K) -> Result<Versionstamp, Error>
 	where
 		K: Into<Key> + Debug,
 	{
-		// We convert to byte slice as its easier at this level
 		let key = key.into();
-		#[cfg(debug_assertions)]
-		trace!(target: TARGET, "get_timestamp {}", sprint(&key));
 		expand_inner!(&mut self.inner, v => { v.get_timestamp(key).await })
 	}
 
 	/// Insert or update a key in the datastore.
-	#[allow(unused_variables)]
 	pub async fn set_versionstamped<K, V>(
 		&mut self,
 		ts_key: K,
@@ -409,14 +381,6 @@ impl Transactor {
 		let ts_key = ts_key.into();
 		let prefix = prefix.into();
 		let suffix = suffix.into();
-		#[cfg(debug_assertions)]
-		trace!(
-			target: TARGET,
-			"set_versionstamp ts={} prefix={} suffix={}",
-			sprint(&ts_key),
-			sprint(&prefix),
-			sprint(&suffix)
-		);
 		expand_inner!(&mut self.inner, v => { v.set_versionstamp(ts_key, prefix, suffix, val).await })
 	}
 
@@ -605,7 +569,7 @@ impl Transactor {
 				ts,
 				ns,
 				db,
-				sprint(k)
+				k.sprint()
 			);
 			let k = crate::key::database::ts::Ts::decode(k)?;
 			let latest_ts = k.ts;
