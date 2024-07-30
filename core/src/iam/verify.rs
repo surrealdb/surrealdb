@@ -1,4 +1,4 @@
-use crate::cnf::INSECURE_FORWARD_RECORD_ACCESS_ERRORS;
+use crate::cnf::INSECURE_FORWARD_ACCESS_ERRORS;
 use crate::dbs::Session;
 use crate::err::Error;
 #[cfg(feature = "jwks")]
@@ -649,7 +649,7 @@ async fn authenticate_record(
 		Err(e) => match e {
 			// If the AUTHENTICATE clause throws a specific error, authentication fails with that error
 			Error::Thrown(_) => Err(e),
-			e if *INSECURE_FORWARD_RECORD_ACCESS_ERRORS => Err(e),
+			e if *INSECURE_FORWARD_ACCESS_ERRORS => Err(e),
 			_ => Err(Error::InvalidAuth),
 		},
 	}
@@ -673,6 +673,7 @@ async fn authenticate_jwt(
 		Err(e) => match e {
 			// If the AUTHENTICATE clause throws a specific error, authentication fails with that error
 			Error::Thrown(_) => Err(e),
+			e if *INSECURE_FORWARD_ACCESS_ERRORS => Err(e),
 			_ => Err(Error::InvalidAuth),
 		},
 	}

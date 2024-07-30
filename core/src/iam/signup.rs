@@ -1,4 +1,4 @@
-use crate::cnf::{INSECURE_FORWARD_RECORD_ACCESS_ERRORS, SERVER_NAME};
+use crate::cnf::{INSECURE_FORWARD_ACCESS_ERRORS, SERVER_NAME};
 use crate::dbs::Session;
 use crate::err::Error;
 use crate::iam::issue::{config, expiration};
@@ -106,20 +106,20 @@ pub async fn db_access(
 												sess.or.clone_from(&session.or);
 												// Compute the value with the params
 												match kvs.evaluate(au.clone(), &sess, None).await {
-    												Ok(val) => match val.record() {
+													Ok(val) => match val.record() {
 														Some(id) => {
 															// Update rid with result from AUTHENTICATE clause
 															rid = id;
 														}
 														_ => return Err(Error::InvalidAuth),
 													},
-													Err(e) => {
-														return match e {
-															Error::Thrown(_) => Err(e),
-															e if *INSECURE_FORWARD_RECORD_ACCESS_ERRORS => Err(e),
-															_ => Err(Error::InvalidAuth),
+													Err(e) => return match e {
+														Error::Thrown(_) => Err(e),
+														e if *INSECURE_FORWARD_ACCESS_ERRORS => {
+															Err(e)
 														}
-													}
+														_ => Err(Error::InvalidAuth),
+													},
 												}
 											}
 											// Log the authenticated access method info
@@ -151,7 +151,7 @@ pub async fn db_access(
 								}
 								Err(e) => match e {
 									Error::Thrown(_) => Err(e),
-									e if *INSECURE_FORWARD_RECORD_ACCESS_ERRORS => Err(e),
+									e if *INSECURE_FORWARD_ACCESS_ERRORS => Err(e),
 									_ => Err(Error::AccessRecordSignupQueryFailed),
 								},
 							}
