@@ -3,7 +3,7 @@ pub mod ws;
 
 use std::time::Duration;
 
-use once_cell::sync::Lazy;
+use std::sync::LazyLock;
 use opentelemetry::Context as TelemetryContext;
 use opentelemetry::{
 	metrics::{Meter, MeterProvider, MetricsError},
@@ -65,14 +65,14 @@ fn build_controller(boundaries: &'static [f64]) -> BasicController {
 	builder.build()
 }
 
-static METER_PROVIDER_DURATION: Lazy<BasicController> =
-	Lazy::new(|| build_controller(HISTOGRAM_BUCKETS_MS));
+static METER_PROVIDER_DURATION: LazyLock<BasicController> =
+	LazyLock::new(|| build_controller(HISTOGRAM_BUCKETS_MS));
 
-static METER_PROVIDER_SIZE: Lazy<BasicController> =
-	Lazy::new(|| build_controller(HISTOGRAM_BUCKETS_BYTES));
+static METER_PROVIDER_SIZE: LazyLock<BasicController> =
+	LazyLock::new(|| build_controller(HISTOGRAM_BUCKETS_BYTES));
 
-static METER_DURATION: Lazy<Meter> = Lazy::new(|| METER_PROVIDER_DURATION.meter("duration"));
-static METER_SIZE: Lazy<Meter> = Lazy::new(|| METER_PROVIDER_SIZE.meter("size"));
+static METER_DURATION: LazyLock<Meter> = LazyLock::new(|| METER_PROVIDER_DURATION.meter("duration"));
+static METER_SIZE: LazyLock<Meter> = LazyLock::new(|| METER_PROVIDER_SIZE.meter("size"));
 
 /// Initialize the metrics subsystem
 pub fn init(cx: &TelemetryContext) -> Result<(), MetricsError> {

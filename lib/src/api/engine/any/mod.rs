@@ -218,11 +218,11 @@ impl Surreal<Any> {
 	/// # Examples
 	///
 	/// ```no_run
-	/// use once_cell::sync::Lazy;
+	/// use std::sync::LazyLock;
 	/// use surrealdb::Surreal;
 	/// use surrealdb::engine::any::Any;
 	///
-	/// static DB: Lazy<Surreal<Any>> = Lazy::new(Surreal::init);
+	/// static DB: LazyLock<Surreal<Any>> = LazyLock::new(Surreal::init);
 	///
 	/// # #[tokio::main]
 	/// # async fn main() -> surrealdb::Result<()> {

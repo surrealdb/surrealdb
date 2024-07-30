@@ -16,7 +16,7 @@ use crate::api::Response as QueryResponse;
 use crate::api::Surreal;
 use crate::sql::statements::BeginStatement;
 use crate::sql::statements::CommitStatement;
-use once_cell::sync::Lazy;
+use std::sync::LazyLock;
 use protocol::Client;
 use protocol::Test;
 use semver::Version;
@@ -24,7 +24,7 @@ use std::ops::Bound;
 use types::User;
 use types::USER;
 
-static DB: Lazy<Surreal<Client>> = Lazy::new(Surreal::init);
+static DB: LazyLock<Surreal<Client>> = LazyLock::new(Surreal::init);
 
 #[tokio::test]
 async fn api() {

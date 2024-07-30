@@ -1,6 +1,6 @@
 pub(super) mod tower_layer;
 
-use once_cell::sync::Lazy;
+use std::sync::LazyLock;
 use opentelemetry::metrics::{Histogram, MetricsError, Unit, UpDownCounter};
 use opentelemetry::Context as TelemetryContext;
 
@@ -8,7 +8,7 @@ use self::tower_layer::HttpCallMetricTracker;
 
 use super::{METER_DURATION, METER_SIZE};
 
-pub static HTTP_SERVER_DURATION: Lazy<Histogram<u64>> = Lazy::new(|| {
+pub static HTTP_SERVER_DURATION: LazyLock<Histogram<u64>> = LazyLock::new(|| {
 	METER_DURATION
 		.u64_histogram("http.server.duration")
 		.with_description("The HTTP server duration in milliseconds.")
@@ -16,14 +16,14 @@ pub static HTTP_SERVER_DURATION: Lazy<Histogram<u64>> = Lazy::new(|| {
 		.init()
 });
 
-pub static HTTP_SERVER_ACTIVE_REQUESTS: Lazy<UpDownCounter<i64>> = Lazy::new(|| {
+pub static HTTP_SERVER_ACTIVE_REQUESTS: LazyLock<UpDownCounter<i64>> = LazyLock::new(|| {
 	METER_DURATION
 		.i64_up_down_counter("http.server.active_requests")
 		.with_description("The number of active HTTP requests.")
 		.init()
 });
 
-pub static HTTP_SERVER_REQUEST_SIZE: Lazy<Histogram<u64>> = Lazy::new(|| {
+pub static HTTP_SERVER_REQUEST_SIZE: LazyLock<Histogram<u64>> = LazyLock::new(|| {
 	METER_SIZE
 		.u64_histogram("http.server.request.size")
 		.with_description("Measures the size of HTTP request messages.")
@@ -31,7 +31,7 @@ pub static HTTP_SERVER_REQUEST_SIZE: Lazy<Histogram<u64>> = Lazy::new(|| {
 		.init()
 });
 
-pub static HTTP_SERVER_RESPONSE_SIZE: Lazy<Histogram<u64>> = Lazy::new(|| {
+pub static HTTP_SERVER_RESPONSE_SIZE: LazyLock<Histogram<u64>> = LazyLock::new(|| {
 	METER_SIZE
 		.u64_histogram("http.server.response.size")
 		.with_description("Measures the size of HTTP response messages.")

@@ -184,7 +184,7 @@ pub mod is {
 	use crate::err::Error;
 	use crate::sql::value::Value;
 	use chrono::NaiveDateTime;
-	use once_cell::sync::Lazy;
+	use std::sync::LazyLock;
 	use regex::Regex;
 	use semver::Version;
 	use std::char;
@@ -192,8 +192,8 @@ pub mod is {
 	use url::Url;
 	use uuid::Uuid;
 
-	#[rustfmt::skip] static LATITUDE_RE: Lazy<Regex> = Lazy::new(|| Regex::new("^[-+]?([1-8]?\\d(\\.\\d+)?|90(\\.0+)?)$").unwrap());
-	#[rustfmt::skip] static LONGITUDE_RE: Lazy<Regex> = Lazy::new(|| Regex::new("^[-+]?(180(\\.0+)?|((1[0-7]\\d)|([1-9]?\\d))(\\.\\d+)?)$").unwrap());
+	#[rustfmt::skip] static LATITUDE_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new("^[-+]?([1-8]?\\d(\\.\\d+)?|90(\\.0+)?)$").unwrap());
+	#[rustfmt::skip] static LONGITUDE_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new("^[-+]?(180(\\.0+)?|((1[0-7]\\d)|([1-9]?\\d))(\\.\\d+)?)$").unwrap());
 
 	pub fn alphanum((arg,): (String,)) -> Result<Value, Error> {
 		Ok(arg.chars().all(char::is_alphanumeric).into())

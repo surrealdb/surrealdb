@@ -24,7 +24,6 @@ name = "actix-example"
 version = "0.1.0"
 dependencies = [
  "actix-web",
- "once_cell",
  "serde",
  "surrealdb",
  "thiserror",
@@ -5899,7 +5898,6 @@ dependencies = [
  "jemallocator",
  "mimalloc",
  "nix 0.27.1",
- "once_cell",
  "opentelemetry",
  "opentelemetry-otlp",
  "opentelemetry-proto",
@@ -5955,7 +5953,6 @@ dependencies = [
  "hashbrown 0.14.5",
  "indexmap 2.2.6",
  "native-tls",
- "once_cell",
  "path-clean",
  "pharos",
  "pprof",
@@ -6039,7 +6036,6 @@ dependencies = [
  "num-traits",
  "num_cpus",
  "object_store",
- "once_cell",
  "pbkdf2",
  "pharos",
  "phf",

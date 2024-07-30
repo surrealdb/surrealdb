@@ -1,4 +1,4 @@
-use once_cell::sync::Lazy;
+use std::sync::LazyLock;
 use quick_cache::sync::{Cache, GuardResult};
 use revision::revisioned;
 use serde::{
@@ -27,7 +27,7 @@ impl Regex {
 }
 
 fn regex_new(str: &str) -> Result<regex::Regex, regex::Error> {
-	static REGEX_CACHE: Lazy<Cache<String, regex::Regex>> = Lazy::new(|| {
+	static REGEX_CACHE: LazyLock<Cache<String, regex::Regex>> = LazyLock::new(|| {
 		let cache_size: usize = env::var("SURREAL_REGEX_CACHE_SIZE")
 			.map_or(1000, |v| v.parse().unwrap_or(1000))
 			.max(10); // The minimum cache size is 10

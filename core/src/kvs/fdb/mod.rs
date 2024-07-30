@@ -14,7 +14,7 @@ use foundationdb::Database;
 use foundationdb::RangeOption;
 use foundationdb::Transaction as Tx;
 use futures::StreamExt;
-use once_cell::sync::Lazy;
+use std::sync::LazyLock;
 use std::fmt::Debug;
 use std::ops::Range;
 use std::sync::Arc;
@@ -91,8 +91,8 @@ impl Datastore {
 	/// for more information on cluster connection files.
 	pub(crate) async fn new(path: &str) -> Result<Datastore, Error> {
 		// Initialize the FoundationDB Client API
-		static FDBNET: Lazy<Arc<foundationdb::api::NetworkAutoStop>> =
-			Lazy::new(|| Arc::new(unsafe { foundationdb::boot() }));
+		static FDBNET: LazyLock<Arc<foundationdb::api::NetworkAutoStop>> =
+			LazyLock::new(|| Arc::new(unsafe { foundationdb::boot() }));
 		// Store the network cancellation handle
 		let _fdbnet = (*FDBNET).clone();
 		// Configure and setup the database
