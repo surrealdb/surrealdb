@@ -74,14 +74,12 @@ impl AlterTableStatement {
 		if matches!(self.kind, Some(TableType::Relation(_))) {
 			dt.add_in_out_fields(&txn, opt).await?;
 		}
-		// Clear the cache
-		txn.clear();
 		// Record definition change
 		if self.changefeed.is_some() && dt.changefeed.is_some() {
 			txn.lock().await.record_table_change(opt.ns()?, opt.db()?, &self.name, &dt);
-			// Clear the cache
-			txn.clear();
 		}
+		// Clear the cache
+		txn.clear();
 		// Ok all good
 		Ok(Value::None)
 	}
