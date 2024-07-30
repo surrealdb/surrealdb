@@ -65,7 +65,7 @@ async fn define_alter_table() -> Result<(), Error> {
 			functions: {},
 			models: {},
 			params: {},
-			tables: { test: 'DEFINE TABLE test TYPE NORMAL DROP SCHEMALESS COMMENT \'test\' CHANGEFEED 1d PERMISSIONS FOR select, update, delete NONE, FOR create FULL' },
+			tables: { test: 'DEFINE TABLE test TYPE NORMAL DROP SCHEMALESS COMMENT \\'test\\' CHANGEFEED 1d PERMISSIONS FOR select, update, delete NONE, FOR create FULL' },
 			users: {},
 		}",
 	);
