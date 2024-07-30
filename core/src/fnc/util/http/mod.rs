@@ -54,6 +54,7 @@ pub async fn head(ctx: &Context<'_>, uri: Strand, opts: impl Into<Object>) -> Re
 	// Start a new HEAD request
 	let mut req = cli.head(url);
 	// Disable CORS
+	#[cfg(target_arch = "wasm32")]
 	if ctx.get_capabilities().allows_no_cors() {
 		req = req.fetch_mode_no_cors();
 	}
@@ -87,6 +88,7 @@ pub async fn get(ctx: &Context<'_>, uri: Strand, opts: impl Into<Object>) -> Res
 	// Start a new GET request
 	let mut req = cli.get(url);
 	// Disable CORS
+	#[cfg(target_arch = "wasm32")]
 	if ctx.get_capabilities().allows_no_cors() {
 		req = req.fetch_mode_no_cors();
 	}
@@ -122,6 +124,7 @@ pub async fn put(
 	// Start a new GET request
 	let mut req = cli.put(url);
 	// Disable CORS
+	#[cfg(target_arch = "wasm32")]
 	if ctx.get_capabilities().allows_no_cors() {
 		req = req.fetch_mode_no_cors();
 	}
@@ -159,6 +162,7 @@ pub async fn post(
 	// Start a new GET request
 	let mut req = cli.post(url);
 	// Disable CORS
+	#[cfg(target_arch = "wasm32")]
 	if ctx.get_capabilities().allows_no_cors() {
 		req = req.fetch_mode_no_cors();
 	}
@@ -196,6 +200,7 @@ pub async fn patch(
 	// Start a new GET request
 	let mut req = cli.patch(url);
 	// Disable CORS
+	#[cfg(target_arch = "wasm32")]
 	if ctx.get_capabilities().allows_no_cors() {
 		req = req.fetch_mode_no_cors();
 	}
@@ -232,6 +237,7 @@ pub async fn delete(
 	// Start a new GET request
 	let mut req = cli.delete(url);
 	// Disable CORS
+	#[cfg(target_arch = "wasm32")]
 	if ctx.get_capabilities().allows_no_cors() {
 		req = req.fetch_mode_no_cors();
 	}

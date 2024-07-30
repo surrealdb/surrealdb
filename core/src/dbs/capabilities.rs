@@ -232,6 +232,7 @@ pub struct Capabilities {
 	scripting: bool,
 	guest_access: bool,
 	live_query_notifications: bool,
+	#[cfg(target_arch = "wasm32")]
 	no_cors: bool,
 
 	allow_funcs: Arc<Targets<FuncTarget>>,
@@ -243,10 +244,17 @@ pub struct Capabilities {
 impl fmt::Display for Capabilities {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		write!(
-            f,
-            "scripting={}, guest_access={}, live_query_notifications={}, no_cors={}, allow_funcs={}, deny_funcs={}, allow_net={}, deny_net={}",
-            self.scripting, self.guest_access, self.live_query_notifications, self.no_cors, self.allow_funcs, self.deny_funcs, self.allow_net, self.deny_net
-        )
+			f,
+			"scripting={}, guest_access={}, live_query_notifications={}",
+			self.scripting, self.guest_access, self.live_query_notifications
+		)?;
+		#[cfg(target_arch = "wasm32")]
+		write!(f, ", no_cors={}", self.no_cors)?;
+		write!(
+			f,
+			", allow_funcs={}, deny_funcs={}, allow_net={}, deny_net={}",
+			self.allow_funcs, self.deny_funcs, self.allow_net, self.deny_net
+		)
 	}
 }
 
@@ -256,6 +264,7 @@ impl Default for Capabilities {
 			scripting: false,
 			guest_access: false,
 			live_query_notifications: true,
+			#[cfg(target_arch = "wasm32")]
 			no_cors: false,
 
 			allow_funcs: Arc::new(Targets::All),
@@ -272,6 +281,7 @@ impl Capabilities {
 			scripting: true,
 			guest_access: true,
 			live_query_notifications: true,
+			#[cfg(target_arch = "wasm32")]
 			no_cors: true,
 
 			allow_funcs: Arc::new(Targets::All),
@@ -286,6 +296,7 @@ impl Capabilities {
 			scripting: false,
 			guest_access: false,
 			live_query_notifications: false,
+			#[cfg(target_arch = "wasm32")]
 			no_cors: false,
 
 			allow_funcs: Arc::new(Targets::None),
@@ -310,6 +321,7 @@ impl Capabilities {
 		self
 	}
 
+	#[cfg(target_arch = "wasm32")]
 	pub fn with_no_cors(mut self, no_cors: bool) -> Self {
 		self.no_cors = no_cors;
 		self
@@ -347,6 +359,7 @@ impl Capabilities {
 		self.live_query_notifications
 	}
 
+	#[cfg(target_arch = "wasm32")]
 	pub fn allows_no_cors(&self) -> bool {
 		self.no_cors
 	}
