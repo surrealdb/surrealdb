@@ -35,9 +35,9 @@ pub static EXPORT_BATCH_SIZE: Lazy<u32> = lazy_env_parse!("SURREAL_EXPORT_BATCH_
 pub static MAX_STREAM_BATCH_SIZE: Lazy<u32> =
 	lazy_env_parse!("SURREAL_MAX_STREAM_BATCH_SIZE", u32, 1000);
 
-/// Forward all signup/signin query errors to a client performing record access. Do not use in production.
-pub static INSECURE_FORWARD_RECORD_ACCESS_ERRORS: Lazy<bool> =
-	lazy_env_parse!("SURREAL_INSECURE_FORWARD_RECORD_ACCESS_ERRORS", bool, false);
+/// Forward all signup/signin/authenticate query errors to a client performing authentication. Do not use in production.
+pub static INSECURE_FORWARD_ACCESS_ERRORS: Lazy<bool> =
+	lazy_env_parse!("SURREAL_INSECURE_FORWARD_ACCESS_ERRORS", bool, false);
 
 #[cfg(any(
 	feature = "kv-mem",
