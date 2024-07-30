@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::str;
 
-#[revisioned(revision = 1)]
+#[revisioned(revision = 2)]
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
@@ -20,6 +20,8 @@ pub enum Part {
 	Value(Value),
 	Start(Value),
 	Method(#[serde(with = "no_nul_bytes")] String, Vec<Value>),
+	#[revision(start = 2)]
+	Destructure(Vec<DestructurePart>),
 }
 
 impl From<i32> for Part {
@@ -107,6 +109,7 @@ impl fmt::Display for Part {
 			Part::Graph(v) => write!(f, "{v}"),
 			Part::Value(v) => write!(f, "[{v}]"),
 			Part::Method(v, a) => write!(f, ".{v}({})", Fmt::comma_separated(a)),
+			Part::Destructure(v) => write!(f, ".{{{}}}", Fmt::comma_separated(v)),
 		}
 	}
 }
@@ -123,5 +126,27 @@ impl<'a> Next<'a> for &'a [Part] {
 			0 => &[],
 			_ => &self[1..],
 		}
+	}
+}
+
+// ------------------------------
+
+#[revisioned(revision = 1)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
+#[non_exhaustive]
+pub struct DestructurePart {
+	pub aliased: Option<Idiom>,
+	pub field: Ident,
+}
+
+impl fmt::Display for DestructurePart {
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		write!(f, "{}", self.field)?;
+		if let Some(aliased) = &self.aliased {
+			write!(f, ": {aliased}")?;
+		}
+
+		Ok(())
 	}
 }

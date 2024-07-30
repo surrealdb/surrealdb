@@ -1,7 +1,10 @@
 use reblessive::Stk;
 
 use crate::{
-	sql::{Dir, Edges, Field, Fields, Graph, Ident, Idiom, Part, Table, Tables, Value},
+	sql::{
+		part::DestructurePart, Dir, Edges, Field, Fields, Graph, Ident, Idiom, Part, Table, Tables,
+		Value,
+	},
 	syn::token::{t, Span, TokenKind},
 };
 
@@ -252,9 +255,41 @@ impl Parser<'_> {
 				self.pop_peek();
 				Part::All
 			}
+			t!("{") => {
+				self.pop_peek();
+				self.parse_destructure_part()?
+			}
 			_ => Part::Field(self.next_token_value()?),
 		};
 		Ok(res)
+	}
+	/// Parse the part after the `.{` in an idiom
+	pub fn parse_destructure_part(&mut self) -> ParseResult<Part> {
+		let mut destructured: Vec<DestructurePart> = Vec::new();
+		loop {
+			match self.peek_kind() {
+				t!("}") => {
+					self.pop_peek();
+					break;
+				}
+				_ => {
+					let mut part = DestructurePart {
+						field: self.next_token_value()?,
+						aliased: None,
+					};
+
+					if matches!(self.peek_kind(), t!(":")) {
+						self.pop_peek();
+						part.aliased = Some(self.parse_local_idiom()?);
+					}
+
+					self.eat(t!(","));
+					destructured.push(part);
+				}
+			}
+		}
+
+		Ok(Part::Destructure(destructured))
 	}
 	/// Parse the part after the `[` in a idiom
 	pub async fn parse_bracket_part(&mut self, ctx: &mut Stk, start: Span) -> ParseResult<Part> {
