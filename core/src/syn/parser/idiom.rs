@@ -281,6 +281,12 @@ impl Parser<'_> {
 					if matches!(self.peek_kind(), t!(":")) {
 						self.pop_peek();
 						part.aliased = Some(self.parse_local_idiom()?);
+					} else if matches!(self.peek_kind(), t!(".")) {
+						self.pop_peek();
+						part.aliased = Some(Idiom(vec![
+							Part::Field(part.field.clone()),
+							self.parse_dot_part()?,
+						]));
 					}
 
 					self.eat(t!(","));

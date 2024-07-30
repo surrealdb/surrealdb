@@ -40,6 +40,18 @@ impl Value {
 						None => Ok(()),
 					},
 					Part::All => stk.run(|stk| self.fetch(stk, ctx, opt, path.next())).await,
+					Part::Destructure(p) => {
+						for p in p.iter() {
+							let path = match &p.aliased {
+								Some(i) => [&i.0.as_slice(), path].concat(),
+								None => [&[Part::Field(p.field.clone())], path].concat(),
+							};
+
+							stk.run(|stk| self.fetch(stk, ctx, opt, &path)).await?;
+						}
+
+						Ok(())
+					}
 					_ => Ok(()),
 				},
 				// Current path part is an array
