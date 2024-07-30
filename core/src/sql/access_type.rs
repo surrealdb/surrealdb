@@ -3,6 +3,7 @@ use crate::sql::statements::info::InfoStructure;
 use crate::sql::statements::DefineAccessStatement;
 use crate::sql::{escape::quote_str, Algorithm};
 use revision::revisioned;
+use revision::Error as RevisionError;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::fmt::Display;
@@ -256,13 +257,27 @@ pub struct JwtAccessVerifyJwks {
 	pub url: String,
 }
 
-#[revisioned(revision = 1)]
+#[revisioned(revision = 3)]
 #[derive(Debug, Serialize, Deserialize, Hash, Clone, Eq, PartialEq, PartialOrd)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct RecordAccess {
 	pub signup: Option<Value>,
 	pub signin: Option<Value>,
 	pub jwt: JwtAccess,
+	#[revision(start = 2, end = 3, convert_fn = "authenticate_revision")]
+	pub authenticate: Option<Value>,
+}
+
+impl RecordAccess {
+	fn authenticate_revision(
+		&self,
+		_revision: u16,
+		_value: Option<Value>,
+	) -> Result<(), RevisionError> {
+		Err(RevisionError::Conversion(
+			"The \"AUTHENTICATE\" clause has been moved to \"DEFINE ACCESS\"".to_string(),
+		))
+	}
 }
 
 impl Default for RecordAccess {
@@ -273,6 +288,7 @@ impl Default for RecordAccess {
 			jwt: JwtAccess {
 				..Default::default()
 			},
+			authenticate: None,
 		}
 	}
 }
