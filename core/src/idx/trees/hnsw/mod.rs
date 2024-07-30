@@ -18,7 +18,7 @@ use crate::idx::trees::hnsw::layer::{HnswLayer, LayerState};
 use crate::idx::trees::knn::DoublePriorityQueue;
 use crate::idx::trees::vector::SharedVector;
 use crate::idx::{IndexKeyBase, VersionedStore};
-use crate::kvs::{Key, Transaction};
+use crate::kvs::{Key, Transaction, Val};
 use crate::sql::index::HnswParams;
 use rand::prelude::SmallRng;
 use rand::{Rng, SeedableRng};
@@ -68,6 +68,7 @@ where
 {
 	ikb: IndexKeyBase,
 	state_key: Key,
+	state: HnswState,
 	m: usize,
 	efc: usize,
 	ml: f64,
@@ -91,6 +92,7 @@ where
 		let state_key = ikb.new_hs_key();
 		Self {
 			state_key,
+			state: Default::default(),
 			m: p.m as usize,
 			efc: p.ef_construction as usize,
 			ml: p.ml.to_float(),
@@ -112,12 +114,14 @@ where
 			Default::default()
 		};
 		// Compare versions
-		if st.layer0.version != self.layer0.version() {
+		if st.layer0.version != self.state.layer0.version {
 			self.layer0.load(tx, &self.ikb, &st.layer0).await?;
 		}
-		for (s, l) in st.layers.iter().zip(self.layers.iter_mut()) {
-			if s.version != l.version() {
-				l.load(tx, &self.ikb, s).await?;
+		for ((new_stl, stl), layer) in
+			st.layers.iter().zip(self.state.layers.iter_mut()).zip(self.layers.iter_mut())
+		{
+			if new_stl.version != stl.version {
+				layer.load(tx, &self.ikb, new_stl).await?;
 			}
 		}
 		// Retrieve missing layers
@@ -132,6 +136,7 @@ where
 		}
 		// Set the enter_point
 		self.enter_point = st.enter_point;
+		self.state = st;
 		Ok(())
 	}
 
@@ -148,6 +153,7 @@ where
 		// Be sure we have existing (up) layers if required
 		for i in top_up_layers..q_level {
 			self.layers.push(HnswLayer::new(self.ikb.clone(), i + 1, self.m));
+			self.state.layers.push(LayerState::default());
 		}
 
 		// Store the vector
@@ -178,12 +184,14 @@ where
 	) -> Result<(), Error> {
 		if level > 0 {
 			// Insert in up levels
-			for layer in self.layers.iter_mut().take(level) {
-				layer.add_empty_node(tx, id).await?;
+			for (layer, state) in
+				self.layers.iter_mut().zip(self.state.layers.iter_mut()).take(level)
+			{
+				layer.add_empty_node(tx, id, state).await?;
 			}
 		}
 		// Insert in layer 0
-		self.layer0.add_empty_node(tx, id).await?;
+		self.layer0.add_empty_node(tx, id, &mut self.state.layer0).await?;
 		// Update the enter point
 		self.enter_point = Some(id);
 		//
@@ -217,20 +225,43 @@ where
 
 			let insert_to_up_layers = q_level.min(top_up_layers);
 			if insert_to_up_layers > 0 {
-				for layer in self.layers.iter_mut().take(insert_to_up_layers).rev() {
+				for (layer, st) in self
+					.layers
+					.iter_mut()
+					.zip(self.state.layers.iter_mut())
+					.take(insert_to_up_layers)
+					.rev()
+				{
 					eps = layer
-						.insert(tx, &self.elements, &self.heuristic, self.efc, q_id, q_pt, eps)
+						.insert(
+							(tx, st),
+							&self.elements,
+							&self.heuristic,
+							self.efc,
+							(q_id, q_pt),
+							eps,
+						)
 						.await?;
 				}
 			}
 
 			self.layer0
-				.insert(tx, &self.elements, &self.heuristic, self.efc, q_id, q_pt, eps)
+				.insert(
+					(tx, &mut self.state.layer0),
+					&self.elements,
+					&self.heuristic,
+					self.efc,
+					(q_id, q_pt),
+					eps,
+				)
 				.await?;
 
 			if top_up_layers < q_level {
-				for layer in self.layers[top_up_layers..q_level].iter_mut() {
-					if !layer.add_empty_node(tx, q_id).await? {
+				for (layer, st) in self.layers[top_up_layers..q_level]
+					.iter_mut()
+					.zip(self.state.layers[top_up_layers..q_level].iter_mut())
+				{
+					if !layer.add_empty_node(tx, q_id, st).await? {
 						#[cfg(debug_assertions)]
 						unreachable!("Already there {}", q_id);
 					}
@@ -247,9 +278,17 @@ where
 		Ok(())
 	}
 
+	async fn save_state(&self, tx: &Transaction) -> Result<(), Error> {
+		let val: Val = VersionedStore::try_into(&self.state)?;
+		tx.set(self.state_key.clone(), val).await?;
+		Ok(())
+	}
+
 	async fn insert(&mut self, tx: &Transaction, q_pt: SharedVector) -> Result<ElementId, Error> {
 		let q_level = self.get_random_level();
-		self.insert_level(tx, q_pt, q_level).await
+		let res = self.insert_level(tx, q_pt, q_level).await?;
+		self.save_state(tx).await?;
+		Ok(res)
 	}
 
 	async fn remove(&mut self, tx: &Transaction, e_id: ElementId) -> Result<bool, Error> {
@@ -274,14 +313,18 @@ where
 			self.elements.remove(&e_id);
 
 			// Remove from the up layers
-			for layer in self.layers.iter_mut() {
-				if layer.remove(tx, &self.elements, &self.heuristic, e_id, self.efc).await? {
+			for (layer, st) in self.layers.iter_mut().zip(self.state.layers.iter_mut()) {
+				if layer.remove(tx, st, &self.elements, &self.heuristic, e_id, self.efc).await? {
 					removed = true;
 				}
 			}
 
 			// Remove from layer 0
-			if self.layer0.remove(tx, &self.elements, &self.heuristic, e_id, self.efc).await? {
+			if self
+				.layer0
+				.remove(tx, &mut self.state.layer0, &self.elements, &self.heuristic, e_id, self.efc)
+				.await?
+			{
 				removed = true;
 			}
 
@@ -290,6 +333,7 @@ where
 				self.enter_point = new_enter_point.map(|(_, e_id)| e_id);
 			}
 		}
+		self.save_state(tx).await?;
 		Ok(removed)
 	}
 
@@ -455,8 +499,11 @@ mod tests {
 	}
 
 	async fn test_hnsw_collection(p: &HnswParams, collection: &TestCollection) {
+		let ds = Datastore::new("memory").await.unwrap();
 		let mut h = HnswFlavor::new(IndexKeyBase::default(), p);
-		insert_collection_hnsw(&mut h, collection);
+		let tx = ds.transaction(TransactionType::Write, Optimistic).await.unwrap();
+		insert_collection_hnsw(&tx, &mut h, collection).await;
+		tx.commit().await.unwrap();
 		find_collection_hnsw(&h, collection);
 	}
 
@@ -484,7 +531,7 @@ mod tests {
 		)
 	}
 
-	fn test_hnsw(collection_size: usize, p: HnswParams) {
+	async fn test_hnsw(collection_size: usize, p: HnswParams) {
 		info!("Collection size: {collection_size} - Params: {p:?}");
 		let collection = TestCollection::new(
 			true,
@@ -493,7 +540,7 @@ mod tests {
 			p.dimension as usize,
 			&p.distance,
 		);
-		test_hnsw_collection(&p, &collection);
+		test_hnsw_collection(&p, &collection).await;
 	}
 
 	#[test(tokio::test(flavor = "multi_thread"))]
@@ -519,7 +566,7 @@ mod tests {
 				for (extend, keep) in [(false, false), (true, false), (false, true), (true, true)] {
 					let p = new_params(dim, vt, dist.clone(), 24, 500, extend, keep);
 					let f = tokio::spawn(async move {
-						test_hnsw(30, p);
+						test_hnsw(30, p).await;
 					});
 					futures.push(f);
 				}
@@ -698,8 +745,8 @@ mod tests {
 		Ok(())
 	}
 
-	#[test]
-	fn test_simple_hnsw() {
+	#[test(tokio::test(flavor = "multi_thread"))]
+	async fn test_simple_hnsw() {
 		let collection = TestCollection::Unique(vec![
 			(0, new_i16_vec(-2, -3)),
 			(1, new_i16_vec(-2, 1)),
@@ -713,9 +760,13 @@ mod tests {
 			(9, new_i16_vec(-4, -2)),
 			(10, new_i16_vec(0, 3)),
 		]);
+		let ikb = IndexKeyBase::default();
 		let p = new_params(2, VectorType::I16, Distance::Euclidean, 3, 500, true, true);
-		let mut h = HnswFlavor::new(&p);
-		insert_collection_hnsw(&mut h, &collection);
+		let mut h = HnswFlavor::new(ikb, &p);
+		let ds = Arc::new(Datastore::new("memory").await.unwrap());
+		let tx = ds.transaction(TransactionType::Write, Optimistic).await.unwrap();
+		insert_collection_hnsw(&tx, &mut h, &collection).await;
+		tx.commit().await.unwrap();
 		let search = HnswSearch::new(new_i16_vec(-2, -3), 10, 501);
 		let res = h.knn_search(&search);
 		assert_eq!(res.len(), 10);

@@ -19,7 +19,7 @@ use std::mem;
 #[derive(Default, Debug, Serialize, Deserialize)]
 pub(super) struct LayerState {
 	pub(super) version: u64,
-	chunks: u32,
+	pub(super) chunks: u32,
 }
 
 #[derive(Debug)]
@@ -341,6 +341,8 @@ where
 		}
 	}
 
+	// Base on FoundationDB max value size (100K)
+	// https://apple.github.io/foundationdb/known-limitations.html#large-keys-and-values
 	const CHUNK_SIZE: usize = 100_000;
 	async fn save(&mut self, tx: &Transaction, st: &mut LayerState) -> Result<(), Error> {
 		// Serialise the graph
