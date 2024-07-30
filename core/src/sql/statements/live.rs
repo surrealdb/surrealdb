@@ -111,8 +111,7 @@ impl LiveStatement {
 				// Get the transaction
 				let txn = ctx.tx();
 				// Ensure that the table definition exists
-				let tb_name = &tb.0;
-				txn.ensure_ns_db_tb(opt.ns()?, opt.db()?, tb_name, opt.strict).await?;
+				txn.ensure_ns_db_tb(ns, db, &tb, opt.strict).await?;
 				// Lock the transaction
 				let mut txn = txn.lock().await;
 				// Insert the node live query
