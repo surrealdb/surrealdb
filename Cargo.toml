@@ -23,8 +23,6 @@ performance-profiler = ["dep:pprof"]
 # Special features
 storage-fdb-7_1 = ["surrealdb/kv-fdb-7_1"]
 storage-fdb-7_3 = ["surrealdb/kv-fdb-7_3"]
-# Trigger database upgrade tests
-database-upgrade-tests = []
 
 [workspace]
 members = [
@@ -184,3 +182,6 @@ assets = [
 ]
 extended-description = "A scalable, distributed, collaborative, document-graph database, for the realtime web."
 license-file = ["LICENSE", "4"]
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(docker)'] }

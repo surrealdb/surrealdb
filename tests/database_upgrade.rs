@@ -3,7 +3,7 @@
 
 mod common;
 
-#[cfg(feature = "database-upgrade-tests")]
+#[cfg(docker)]
 mod database_upgrade {
 	use super::common::docker::DockerContainer;
 	use super::common::expected::Expected;
