@@ -61,6 +61,6 @@ mod tests {
 			..Default::default()
 		});
 		let enc: Vec<u8> = stm.into();
-		assert_eq!(12, enc.len());
+		assert_eq!(16, enc.len());
 	}
 }
