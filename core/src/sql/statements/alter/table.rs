@@ -72,7 +72,7 @@ impl AlterTableStatement {
 		txn.set(key, &dt).await?;
 		// Add table relational fields
 		if matches!(self.kind, Some(TableType::Relation(_))) {
-			dt.add_relational_fields(&txn, opt).await?;
+			dt.add_in_out_fields(&txn, opt).await?;
 		}
 		// Clear the cache
 		txn.clear();

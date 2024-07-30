@@ -77,7 +77,7 @@ impl DefineTableStatement {
 		};
 		txn.set(key, &dt).await?;
 		// Add table relational fields
-		self.add_relational_fields(&txn, opt).await?;
+		self.add_in_out_fields(&txn, opt).await?;
 		// Clear the cache
 		txn.clear();
 		// Record definition change
@@ -129,11 +129,7 @@ impl DefineTableStatement {
 		matches!(self.kind, TableType::Normal | TableType::Any)
 	}
 	/// Used to add relational fields to existing table records
-	pub async fn add_relational_fields(
-		&self,
-		txn: &Transaction,
-		opt: &Options,
-	) -> Result<(), Error> {
+	pub async fn add_in_out_fields(&self, txn: &Transaction, opt: &Options) -> Result<(), Error> {
 		// Add table relational fields
 		if let TableType::Relation(rel) = &self.kind {
 			// Set the `in` field as a DEFINE FIELD definition
