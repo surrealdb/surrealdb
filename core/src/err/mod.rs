@@ -302,18 +302,6 @@ pub enum Error {
 		value: String,
 	},
 
-	/// The requested namespace access method does not exist
-	#[error("The namespace access method '{value}' does not exist")]
-	NaNotFound {
-		value: String,
-	},
-
-	/// The requested namespace access grant does not exist
-	#[error("The namespace access grant '{value}' does not exist")]
-	NgNotFound {
-		value: String,
-	},
-
 	/// The requested namespace login does not exist
 	#[error("The namespace login '{value}' does not exist")]
 	NlNotFound {
@@ -323,18 +311,6 @@ pub enum Error {
 	/// The requested database does not exist
 	#[error("The database '{value}' does not exist")]
 	DbNotFound {
-		value: String,
-	},
-
-	/// The requested database access method does not exist
-	#[error("The database access method '{value}' does not exist")]
-	DaNotFound {
-		value: String,
-	},
-
-	/// The requested database access grant does not exist
-	#[error("The database access grant '{value}' does not exist")]
-	DgNotFound {
 		value: String,
 	},
 
@@ -956,43 +932,64 @@ pub enum Error {
 	Serialization(String),
 
 	/// The requested root access method already exists
-	#[error("The root access method '{value}' already exists")]
+	#[error("The root access method '{ac}' already exists")]
 	AccessRootAlreadyExists {
-		value: String,
+		ac: String,
 	},
 
 	/// The requested namespace access method already exists
-	#[error("The access method '{value}' already exists in the namespace '{ns}'")]
+	#[error("The access method '{ac}' already exists in the namespace '{ns}'")]
 	AccessNsAlreadyExists {
-		value: String,
+		ac: String,
 		ns: String,
 	},
 
 	/// The requested database access method already exists
-	#[error("The access method '{value}' already exists in the database '{db}'")]
+	#[error("The access method '{ac}' already exists in the database '{db}' in namespace '{ns}'")]
 	AccessDbAlreadyExists {
-		value: String,
+		ac: String,
 		ns: String,
 		db: String,
 	},
 
 	/// The requested root access method does not exist
-	#[error("The root access method '{value}' does not exist")]
+	#[error("The root access method '{ac}' does not exist")]
 	AccessRootNotFound {
-		value: String,
+		ac: String,
+	},
+
+	/// The requested root access grant does not exist
+	#[error("The root access grant '{gr}' does not exist")]
+	AccessGrantRootNotFound {
+		gr: String,
 	},
 
 	/// The requested namespace access method does not exist
-	#[error("The access method '{value}' does not exist in the namespace '{ns}'")]
+	#[error("The access method '{ac}' does not exist in the namespace '{ns}'")]
 	AccessNsNotFound {
-		value: String,
+		ac: String,
+		ns: String,
+	},
+
+	/// The requested namespace access grant does not exist
+	#[error("The access grant '{gr}' does not exist in the namespace '{ns}'")]
+	AccessGrantNsNotFound {
+		gr: String,
 		ns: String,
 	},
 
 	/// The requested database access method does not exist
-	#[error("The access method '{value}' does not exist in the database '{db}'")]
+	#[error("The access method '{ac}' does not exist in the database '{db}' in namespace '{ns}'")]
 	AccessDbNotFound {
-		value: String,
+		ac: String,
+		ns: String,
+		db: String,
+	},
+
+	/// The requested database access grant does not exist
+	#[error("The access grant '{gr}' does not exist in the database '{db}' in namespace '{ns}'")]
+	AccessGrantDbNotFound {
+		gr: String,
 		ns: String,
 		db: String,
 	},

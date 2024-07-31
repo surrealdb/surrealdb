@@ -228,14 +228,14 @@ impl AccessStatement {
 				opt.is_allowed(Action::Edit, ResourceKind::Access, &base)?;
 				match base {
 					Base::Ns => {
-						// Claim transaction
-						let mut run = ctx.tx_lock().await;
+						// Get the transaction
+						let txn = ctx.tx();
 						// Clear the cache
-						run.clear_cache();
+						txn.clear();
 						// Read the access definition
-						let ac = run.get_ns_access(opt.ns()?, &stmt.ac.to_raw()).await?;
+						let ac = txn.get_ns_access(opt.ns()?, &stmt.ac.to_raw()).await?;
 						// Verify the access type
-						match ac.kind {
+						match &ac.kind {
 							AccessType::Jwt(_) => Err(Error::FeatureNotYetImplemented {
 								feature: "Grants for JWT on namespace".to_string(),
 							}),
@@ -248,7 +248,7 @@ impl AccessStatement {
 											return Err(Error::InvalidAuth);
 										}
 										// If the grant is being created for a user, the user must exist.
-										run.get_ns_user(opt.ns()?, user).await?;
+										txn.get_ns_user(opt.ns()?, user).await?;
 									}
 									Some(Subject::Record(_)) => {
 										// If the grant is being created for a record, a database must be selected.
@@ -261,7 +261,7 @@ impl AccessStatement {
 								// Create a new bearer key.
 								let grant = GrantBearer::new();
 								let gr = AccessGrant {
-									ac: ac.name,
+									ac: ac.name.clone(),
 									// Unique grant identifier.
 									// In the case of bearer grants, the key identifier.
 									id: grant.id.clone(),
@@ -284,22 +284,22 @@ impl AccessStatement {
 									&ac_str,
 									&gr_str,
 								);
-								run.add_ns(opt.ns()?, opt.strict).await?;
-								run.set(key, gr.to_owned()).await?;
+								txn.get_or_add_ns(opt.ns()?, opt.strict).await?;
+								txn.set(key, gr.to_owned()).await?;
 								Ok(Value::Object(gr.into()))
 							}
 							_ => Err(Error::AccessMethodMismatch),
 						}
 					}
 					Base::Db => {
-						// Claim transaction
-						let mut run = ctx.tx_lock().await;
+						// Get the transaction
+						let txn = ctx.tx();
 						// Clear the cache
-						run.clear_cache();
+						txn.clear();
 						// Read the access definition
-						let ac = run.get_db_access(opt.ns()?, opt.db()?, &stmt.ac.to_raw()).await?;
+						let ac = txn.get_db_access(opt.ns()?, opt.db()?, &stmt.ac.to_raw()).await?;
 						// Verify the access type
-						match ac.kind {
+						match &ac.kind {
 							AccessType::Jwt(_) => Err(Error::FeatureNotYetImplemented {
 								feature: "Grants for JWT on database".to_string(),
 							}),
@@ -315,7 +315,7 @@ impl AccessStatement {
 											return Err(Error::InvalidAuth);
 										}
 										// If the grant is being created for a user, the user must exist.
-										run.get_db_user(opt.ns()?, opt.db()?, user).await?;
+										txn.get_db_user(opt.ns()?, opt.db()?, user).await?;
 									}
 									Some(Subject::Record(_)) => {
 										// Grant subject must match access method level.
@@ -330,7 +330,7 @@ impl AccessStatement {
 								// Create a new bearer key.
 								let grant = GrantBearer::new();
 								let gr = AccessGrant {
-									ac: ac.name,
+									ac: ac.name.clone(),
 									// Unique grant identifier.
 									// In the case of bearer grants, the key identifier.
 									id: grant.id.clone(),
@@ -354,9 +354,9 @@ impl AccessStatement {
 									&ac_str,
 									&gr_str,
 								);
-								run.add_ns(opt.ns()?, opt.strict).await?;
-								run.add_db(opt.ns()?, opt.db()?, opt.strict).await?;
-								run.set(key, gr.to_owned()).await?;
+								txn.get_or_add_ns(opt.ns()?, opt.strict).await?;
+								txn.get_or_add_db(opt.ns()?, opt.db()?, opt.strict).await?;
+								txn.set(key, gr.to_owned()).await?;
 								Ok(Value::Object(gr.into()))
 							}
 						}
@@ -373,29 +373,29 @@ impl AccessStatement {
 				opt.is_allowed(Action::View, ResourceKind::Access, &base)?;
 				match base {
 					Base::Ns => {
-						// Claim transaction
-						let mut run = ctx.tx_lock().await;
+						// Get the transaction
+						let txn = ctx.tx();
 						// Clear the cache
-						run.clear_cache();
+						txn.clear();
 						// Get the grants for the access method
 						let mut grants = Array::default();
 						// TODO(PR): This should not return all data, only basic identifiers.
 						for v in
-							run.all_ns_access_grants_redacted(opt.ns()?, &stmt.ac).await?.iter()
+							txn.all_ns_access_grants_redacted(opt.ns()?, &stmt.ac).await?.iter()
 						{
 							grants = grants + Value::Object(v.to_owned().into());
 						}
 						Ok(Value::Array(grants))
 					}
 					Base::Db => {
-						// Claim transaction
-						let mut run = ctx.tx_lock().await;
+						// Get the transaction
+						let txn = ctx.tx();
 						// Clear the cache
-						run.clear_cache();
+						txn.clear();
 						// Get the grants for the access method
 						let mut grants = Array::default();
 						// TODO(PR): This should not return all data, only basic identifiers.
-						for v in run
+						for v in txn
 							.all_db_access_grants_redacted(opt.ns()?, opt.db()?, &stmt.ac)
 							.await?
 							.iter()
@@ -416,14 +416,14 @@ impl AccessStatement {
 				opt.is_allowed(Action::Edit, ResourceKind::Access, &base)?;
 				match base {
 					Base::Ns => {
-						// Claim transaction
-						let mut run = ctx.tx_lock().await;
+						// Get the transaction
+						let txn = ctx.tx();
 						// Clear the cache
-						run.clear_cache();
+						txn.clear();
 						// Get the grants to revoke
 						let ac_str = stmt.ac.to_raw();
 						let gr_str = stmt.gr.to_raw();
-						let mut gr = run.get_ns_access_grant(opt.ns()?, &ac_str, &gr_str).await?;
+						let mut gr = txn.get_ns_access_grant(opt.ns()?, &ac_str, &gr_str).await?;
 						if gr.revocation.is_some() {
 							// TODO(PR): Add new error.
 							return Err(Error::InvalidAuth);
@@ -432,20 +432,20 @@ impl AccessStatement {
 						// Process the statement
 						let key =
 							crate::key::namespace::access::gr::new(opt.ns()?, &ac_str, &gr_str);
-						run.add_ns(opt.ns()?, opt.strict).await?;
-						run.set(key, gr.to_owned()).await?;
+						txn.get_or_add_ns(opt.ns()?, opt.strict).await?;
+						txn.set(key, gr.to_owned()).await?;
 						Ok(Value::Object(gr.redacted().into()))
 					}
 					Base::Db => {
-						// Claim transaction
-						let mut run = ctx.tx_lock().await;
+						// Get the transaction
+						let txn = ctx.tx();
 						// Clear the cache
-						run.clear_cache();
+						txn.clear();
 						// Get the grants to revoke
 						let ac_str = stmt.ac.to_raw();
 						let gr_str = stmt.gr.to_raw();
 						let mut gr =
-							run.get_db_access_grant(opt.ns()?, opt.db()?, &ac_str, &gr_str).await?;
+							txn.get_db_access_grant(opt.ns()?, opt.db()?, &ac_str, &gr_str).await?;
 						if gr.revocation.is_some() {
 							// TODO(PR): Add new error.
 							return Err(Error::InvalidAuth);
@@ -458,9 +458,9 @@ impl AccessStatement {
 							&ac_str,
 							&gr_str,
 						);
-						run.add_ns(opt.ns()?, opt.strict).await?;
-						run.add_db(opt.ns()?, opt.db()?, opt.strict).await?;
-						run.set(key, gr.to_owned()).await?;
+						txn.get_or_add_ns(opt.ns()?, opt.strict).await?;
+						txn.get_or_add_db(opt.ns()?, opt.db()?, opt.strict).await?;
+						txn.set(key, gr.to_owned()).await?;
 						Ok(Value::Object(gr.redacted().into()))
 					}
 					_ => Err(Error::FeatureNotYetImplemented {

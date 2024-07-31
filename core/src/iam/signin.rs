@@ -384,7 +384,7 @@ pub async fn ns_access(
 	vars: Object,
 ) -> Result<String, Error> {
 	// Create a new readonly transaction
-	let mut tx = kvs.transaction(Read, Optimistic).await?;
+	let tx = kvs.transaction(Read, Optimistic).await?;
 	// Fetch the specified access method from storage
 	let access = tx.get_ns_access(&ns, &ac).await;
 	// Ensure that the transaction is cancelled
@@ -393,11 +393,11 @@ pub async fn ns_access(
 	match access {
 		Ok(av) => {
 			// Check the access method type
-			match av.kind {
+			match &av.kind {
 				AccessType::Bearer(at) => {
 					// Check if the bearer access method supports issuing tokens
-					let iss = match at.jwt.issue {
-						Some(iss) => iss,
+					let iss = match &at.jwt.issue {
+						Some(iss) => iss.clone(),
 						_ => return Err(Error::AccessMethodMismatch),
 					};
 					// Process the provided key

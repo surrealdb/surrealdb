@@ -74,12 +74,12 @@ impl DefineAccessStatement {
 						return Ok(Value::None);
 					} else {
 						return Err(Error::AccessRootAlreadyExists {
-							value: self.name.to_string(),
+							ac: self.name.to_string(),
 						});
 					}
 				}
 				// Process the statement
-				let key = crate::key::root::ac::new(&self.name);
+				let key = crate::key::root::access::ac::new(&self.name);
 				txn.set(
 					key,
 					DefineAccessStatement {
@@ -103,13 +103,13 @@ impl DefineAccessStatement {
 						return Ok(Value::None);
 					} else {
 						return Err(Error::AccessNsAlreadyExists {
-							value: self.name.to_string(),
+							ac: self.name.to_string(),
 							ns: opt.ns()?.into(),
 						});
 					}
 				}
 				// Process the statement
-				let key = crate::key::namespace::ac::new(opt.ns()?, &self.name);
+				let key = crate::key::namespace::access::ac::new(opt.ns()?, &self.name);
 				txn.get_or_add_ns(opt.ns()?, opt.strict).await?;
 				txn.set(
 					key,
@@ -134,14 +134,14 @@ impl DefineAccessStatement {
 						return Ok(Value::None);
 					} else {
 						return Err(Error::AccessDbAlreadyExists {
-							value: self.name.to_string(),
+							ac: self.name.to_string(),
 							ns: opt.ns()?.into(),
 							db: opt.db()?.into(),
 						});
 					}
 				}
 				// Process the statement
-				let key = crate::key::database::ac::new(opt.ns()?, opt.db()?, &self.name);
+				let key = crate::key::database::access::ac::new(opt.ns()?, opt.db()?, &self.name);
 				txn.get_or_add_ns(opt.ns()?, opt.strict).await?;
 				txn.get_or_add_db(opt.ns()?, opt.db()?, opt.strict).await?;
 				txn.set(

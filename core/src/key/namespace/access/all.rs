@@ -1,6 +1,6 @@
 //! Stores the key prefix for all keys under a namespace access method
-use crate::key::error::KeyCategory;
-use crate::key::key_req::KeyRequirements;
+use crate::key::category::Categorise;
+use crate::key::category::Category;
 use derive::Key;
 use serde::{Deserialize, Serialize};
 
@@ -18,9 +18,9 @@ pub fn new<'a>(ns: &'a str, ac: &'a str) -> Access<'a> {
 	Access::new(ns, ac)
 }
 
-impl KeyRequirements for Access<'_> {
-	fn key_category(&self) -> KeyCategory {
-		KeyCategory::NamespaceAccessRoot
+impl Categorise for Access<'_> {
+	fn categorise(&self) -> Category {
+		Category::NamespaceAccessRoot
 	}
 }
 

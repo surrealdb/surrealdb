@@ -55,19 +55,23 @@ pub(super) enum Entry {
 	/// A slice of DefineAccessStatement specified at the root.
 	Ras(Arc<[DefineAccessStatement]>),
 	/// A slice of AccessGrant specified at the root.
-	Rag(Arc<[DefineAccessStatement]>),
+	Rag(Arc<[AccessGrant]>),
 	/// A slice of DefineNamespaceStatement specified on a namespace.
 	Nss(Arc<[DefineNamespaceStatement]>),
 	/// A slice of DefineUserStatement specified on a namespace.
 	Nus(Arc<[DefineUserStatement]>),
 	/// A slice of DefineAccessStatement specified on a namespace.
 	Nas(Arc<[DefineAccessStatement]>),
+	/// A slice of AccessGrant specified at on a namespace.
+	Nag(Arc<[AccessGrant]>),
 	/// A slice of DefineDatabaseStatement specified on a namespace.
 	Dbs(Arc<[DefineDatabaseStatement]>),
 	/// A slice of DefineAnalyzerStatement specified on a namespace.
 	Azs(Arc<[DefineAnalyzerStatement]>),
 	/// A slice of DefineAccessStatement specified on a database.
 	Das(Arc<[DefineAccessStatement]>),
+	/// A slice of AccessGrant specified at on a database.
+	Dag(Arc<[AccessGrant]>),
 	/// A slice of DefineUserStatement specified on a database.
 	Dus(Arc<[DefineUserStatement]>),
 	/// A slice of DefineFunctionStatement specified on a database.
@@ -123,6 +127,14 @@ impl Entry {
 			_ => unreachable!(),
 		}
 	}
+	/// Converts this cache entry into a slice of [`AccessGrant`].
+	/// This panics if called on a cache entry that is not an [`Entry::Rag`].
+	pub(super) fn into_rag(self) -> Arc<[AccessGrant]> {
+		match self {
+			Entry::Rag(v) => v,
+			_ => unreachable!(),
+		}
+	}
 	/// Converts this cache entry into a slice of [`DefineNamespaceStatement`].
 	/// This panics if called on a cache entry that is not an [`Entry::Nss`].
 	pub(super) fn into_nss(self) -> Arc<[DefineNamespaceStatement]> {
@@ -136,6 +148,14 @@ impl Entry {
 	pub(super) fn into_nas(self) -> Arc<[DefineAccessStatement]> {
 		match self {
 			Entry::Nas(v) => v,
+			_ => unreachable!(),
+		}
+	}
+	/// Converts this cache entry into a slice of [`AccessGrant`].
+	/// This panics if called on a cache entry that is not an [`Entry::Nag`].
+	pub(super) fn into_nag(self) -> Arc<[AccessGrant]> {
+		match self {
+			Entry::Nag(v) => v,
 			_ => unreachable!(),
 		}
 	}
@@ -160,6 +180,14 @@ impl Entry {
 	pub(super) fn into_das(self) -> Arc<[DefineAccessStatement]> {
 		match self {
 			Entry::Das(v) => v,
+			_ => unreachable!(),
+		}
+	}
+	/// Converts this cache entry into a slice of [`AccessGrant`].
+	/// This panics if called on a cache entry that is not an [`Entry::Dag`].
+	pub(super) fn into_dag(self) -> Arc<[AccessGrant]> {
+		match self {
+			Entry::Dag(v) => v,
 			_ => unreachable!(),
 		}
 	}

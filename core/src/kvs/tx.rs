@@ -11,6 +11,7 @@ use crate::kvs::cache::Entry;
 use crate::kvs::cache::EntryWeighter;
 use crate::kvs::scanner::Scanner;
 use crate::kvs::Transactor;
+use crate::sql::statements::AccessGrant;
 use crate::sql::statements::DefineAccessStatement;
 use crate::sql::statements::DefineAnalyzerStatement;
 use crate::sql::statements::DefineDatabaseStatement;
@@ -325,12 +326,12 @@ impl Transaction {
 		#[cfg(debug_assertions)]
 		trace!(target: TARGET, "all_root_accesses");
 		// Continue with the function logic
-		let key = crate::key::root::ac::prefix();
+		let key = crate::key::root::access::ac::prefix();
 		let res = self.cache.get_value_or_guard_async(&key).await;
 		Ok(match res {
 			Ok(val) => val,
 			Err(cache) => {
-				let end = crate::key::root::ac::suffix();
+				let end = crate::key::root::access::ac::suffix();
 				let val = self.getr(key..end).await?;
 				let val = val.convert().into();
 				let val = Entry::Ras(Arc::clone(&val));
@@ -339,6 +340,47 @@ impl Transaction {
 			}
 		}
 		.into_ras())
+	}
+
+	/// Retrieve all root access method definitions in redacted form.
+	pub async fn all_root_accesses_redacted(
+		&mut self,
+	) -> Result<Arc<[DefineAccessStatement]>, Error> {
+		let accesses = self.all_root_accesses().await?;
+		let redacted: Vec<_> = accesses.iter().map(|statement| statement.redacted()).collect();
+		Ok(Arc::from(redacted))
+	}
+
+	/// Retrieve all root access grants in a datastore.
+	pub async fn all_root_access_grants(&self, ra: &str) -> Result<Arc<[AccessGrant]>, Error> {
+		// Log this function call in development
+		#[cfg(debug_assertions)]
+		trace!(target: TARGET, "all_root_access_grants {ra}");
+		// Continue with the function logic
+		let key = crate::key::root::access::gr::prefix(ra);
+		let res = self.cache.get_value_or_guard_async(&key).await;
+		Ok(match res {
+			Ok(val) => val,
+			Err(cache) => {
+				let end = crate::key::root::access::gr::suffix(ra);
+				let val = self.getr(key..end).await?;
+				let val = val.convert().into();
+				let val = Entry::Rag(Arc::clone(&val));
+				let _ = cache.insert(val.clone());
+				val
+			}
+		}
+		.into_rag())
+	}
+
+	/// Retrieve all root access grants in redacted form.
+	pub async fn all_root_access_grants_redacted(
+		&self,
+		ra: &str,
+	) -> Result<Arc<[AccessGrant]>, Error> {
+		let accesses = self.all_root_access_grants(ra).await?;
+		let redacted: Vec<_> = accesses.iter().map(|statement| statement.redacted()).collect();
+		Ok(Arc::from(redacted))
 	}
 
 	/// Retrieve all namespace definitions in a datastore.
@@ -391,12 +433,12 @@ impl Transaction {
 		#[cfg(debug_assertions)]
 		trace!(target: TARGET, "all_ns_accesses {ns}");
 		// Continue with the function logic
-		let key = crate::key::namespace::ac::prefix(ns);
+		let key = crate::key::namespace::access::ac::prefix(ns);
 		let res = self.cache.get_value_or_guard_async(&key).await;
 		Ok(match res {
 			Ok(val) => val,
 			Err(cache) => {
-				let end = crate::key::namespace::ac::suffix(ns);
+				let end = crate::key::namespace::access::ac::suffix(ns);
 				let val = self.getr(key..end).await?;
 				let val = val.convert().into();
 				let val = Entry::Nas(Arc::clone(&val));
@@ -435,17 +477,17 @@ impl Transaction {
 				let end = crate::key::namespace::access::gr::suffix(ns, na);
 				let val = self.getr(key..end).await?;
 				let val = val.convert().into();
-				let val = Entry::Ags(Arc::clone(&val));
+				let val = Entry::Nag(Arc::clone(&val));
 				let _ = cache.insert(val.clone());
 				val
 			}
 		}
-		.into_nas())
+		.into_nag())
 	}
 
 	/// Retrieve all namespace access grants in redacted form.
 	pub async fn all_ns_access_grants_redacted(
-		&mut self,
+		&self,
 		ns: &str,
 		na: &str,
 	) -> Result<Arc<[AccessGrant]>, Error> {
@@ -512,12 +554,12 @@ impl Transaction {
 		#[cfg(debug_assertions)]
 		trace!(target: TARGET, "all_db_accesses {ns} {db}");
 		// Continue with the function logic
-		let key = crate::key::database::ac::prefix(ns, db);
+		let key = crate::key::database::access::ac::prefix(ns, db);
 		let res = self.cache.get_value_or_guard_async(&key).await;
 		Ok(match res {
 			Ok(val) => val,
 			Err(cache) => {
-				let end = crate::key::database::ac::suffix(ns, db);
+				let end = crate::key::database::access::ac::suffix(ns, db);
 				let val = self.getr(key..end).await?;
 				let val = val.convert().into();
 				let val = Entry::Das(Arc::clone(&val));
@@ -548,7 +590,7 @@ impl Transaction {
 	) -> Result<Arc<[AccessGrant]>, Error> {
 		// Log this function call in development
 		#[cfg(debug_assertions)]
-		trace!(target: TARGET, "all_db_access_grants {ns} {db} {na}");
+		trace!(target: TARGET, "all_db_access_grants {ns} {db} {da}");
 		// Continue with the function logic
 		let key = crate::key::database::access::gr::prefix(ns, db, da);
 		let res = self.cache.get_value_or_guard_async(&key).await;
@@ -558,17 +600,17 @@ impl Transaction {
 				let end = crate::key::database::access::gr::suffix(ns, db, da);
 				let val = self.getr(key..end).await?;
 				let val = val.convert().into();
-				let val = Entry::Ags(Arc::clone(&val));
+				let val = Entry::Dag(Arc::clone(&val));
 				let _ = cache.insert(val.clone());
 				val
 			}
 		}
-		.into_nas())
+		.into_dag())
 	}
 
 	/// Retrieve all database access grants in redacted form.
 	pub async fn all_db_access_grants_redacted(
-		&mut self,
+		&self,
 		ns: &str,
 		db: &str,
 		da: &str,
@@ -839,7 +881,7 @@ impl Transaction {
 		.into_lvs())
 	}
 
-	/// Retrieve a specific namespace definition.
+	/// Retrieve a specific node definition.
 	pub async fn get_node(&self, id: Uuid) -> Result<Arc<Node>, Error> {
 		// Log this function call in development
 		#[cfg(debug_assertions)]
@@ -862,7 +904,7 @@ impl Transaction {
 		.into_type())
 	}
 
-	/// Retrieve a specific namespace user definition.
+	/// Retrieve a specific root user definition.
 	pub async fn get_root_user(&self, user: &str) -> Result<Arc<DefineUserStatement>, Error> {
 		// Log this function call in development
 		#[cfg(debug_assertions)]
@@ -885,19 +927,19 @@ impl Transaction {
 		.into_type())
 	}
 
-	/// Retrieve a specific namespace user definition.
-	pub async fn get_root_access(&self, user: &str) -> Result<Arc<DefineAccessStatement>, Error> {
+	/// Retrieve a specific root access definition.
+	pub async fn get_root_access(&self, ra: &str) -> Result<Arc<DefineAccessStatement>, Error> {
 		// Log this function call in development
 		#[cfg(debug_assertions)]
-		trace!(target: TARGET, "get_root_access {user}");
+		trace!(target: TARGET, "get_root_access {ra}");
 		// Continue with the function logic
-		let key = crate::key::root::ac::new(user).encode()?;
+		let key = crate::key::root::access::ac::new(ra).encode()?;
 		let res = self.cache.get_value_or_guard_async(&key).await;
 		Ok(match res {
 			Ok(val) => val,
 			Err(cache) => {
 				let val = self.get(key).await?.ok_or(Error::AccessRootNotFound {
-					value: user.to_owned(),
+					ac: ra.to_owned(),
 				})?;
 				let val: DefineAccessStatement = val.into();
 				let val = Entry::Any(Arc::new(val));
@@ -906,6 +948,15 @@ impl Transaction {
 			}
 		}
 		.into_type())
+	}
+
+	/// Retrieve a specific root access grant.
+	pub async fn get_root_access_grant(&self, ac: &str, gr: &str) -> Result<AccessGrant, Error> {
+		let key = crate::key::root::access::gr::new(ac, gr);
+		let val = self.get(key).await?.ok_or(Error::AccessGrantRootNotFound {
+			gr: gr.to_owned(),
+		})?;
+		Ok(val.into())
 	}
 
 	/// Retrieve a specific namespace definition.
@@ -969,13 +1020,13 @@ impl Transaction {
 		#[cfg(debug_assertions)]
 		trace!(target: TARGET, "get_ns_access {ns} {na}");
 		// Continue with the function logic
-		let key = crate::key::namespace::ac::new(ns, na).encode()?;
+		let key = crate::key::namespace::access::ac::new(ns, na).encode()?;
 		let res = self.cache.get_value_or_guard_async(&key).await;
 		Ok(match res {
 			Ok(val) => val,
 			Err(cache) => {
 				let val = self.get(key).await?.ok_or(Error::AccessNsNotFound {
-					value: na.to_owned(),
+					ac: na.to_owned(),
 					ns: ns.to_owned(),
 				})?;
 				let val: DefineAccessStatement = val.into();
@@ -989,14 +1040,15 @@ impl Transaction {
 
 	/// Retrieve a specific namespace access grant.
 	pub async fn get_ns_access_grant(
-		&mut self,
+		&self,
 		ns: &str,
 		ac: &str,
 		gr: &str,
 	) -> Result<AccessGrant, Error> {
 		let key = crate::key::namespace::access::gr::new(ns, ac, gr);
-		let val = self.get(key).await?.ok_or(Error::NgNotFound {
-			value: gr.to_owned(),
+		let val = self.get(key).await?.ok_or(Error::AccessGrantNsNotFound {
+			gr: gr.to_owned(),
+			ns: ns.to_owned(),
 		})?;
 		Ok(val.into())
 	}
@@ -1065,13 +1117,13 @@ impl Transaction {
 		#[cfg(debug_assertions)]
 		trace!(target: TARGET, "get_db_access {ns} {db} {da}");
 		// Continue with the function logic
-		let key = crate::key::database::ac::new(ns, db, da).encode()?;
+		let key = crate::key::database::access::ac::new(ns, db, da).encode()?;
 		let res = self.cache.get_value_or_guard_async(&key).await;
 		Ok(match res {
 			Ok(val) => val,
 			Err(cache) => {
 				let val = self.get(key).await?.ok_or(Error::AccessDbNotFound {
-					value: da.to_owned(),
+					ac: da.to_owned(),
 					ns: ns.to_owned(),
 					db: db.to_owned(),
 				})?;
@@ -1082,6 +1134,23 @@ impl Transaction {
 			}
 		}
 		.into_type())
+	}
+
+	/// Retrieve a specific database access grant.
+	pub async fn get_db_access_grant(
+		&self,
+		ns: &str,
+		db: &str,
+		ac: &str,
+		gr: &str,
+	) -> Result<AccessGrant, Error> {
+		let key = crate::key::database::access::gr::new(ns, db, ac, gr);
+		let val = self.get(key).await?.ok_or(Error::AccessGrantDbNotFound {
+			gr: gr.to_owned(),
+			ns: ns.to_owned(),
+			db: db.to_owned(),
+		})?;
+		Ok(val.into())
 	}
 
 	/// Retrieve a specific model definition from a database.
