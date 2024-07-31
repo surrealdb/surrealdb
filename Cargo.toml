@@ -189,3 +189,6 @@ assets = [
 ]
 extended-description = "A scalable, distributed, collaborative, document-graph database, for the realtime web."
 license-file = ["LICENSE", "4"]
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(docker)'] }
