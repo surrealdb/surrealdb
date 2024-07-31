@@ -2149,9 +2149,9 @@ async fn define_remove_access() -> Result<(), Error> {
 	let mut t = Test::new(sql).await?;
 	t.skip_ok(1)?;
 	t.expect_val("None")?;
-	t.expect_error("The access method 'example' already exists in the database 'test'")?;
+	t.expect_error("The access method 'example' already exists in the database 'test' in namespace 'test'")?;
 	t.skip_ok(1)?;
-	t.expect_error("The access method 'example' does not exist in the database 'test'")?;
+	t.expect_error("The access method 'example' does not exist in the database 'test' in namespace 'test'")?;
 	t.expect_val("None")?;
 	Ok(())
 }
