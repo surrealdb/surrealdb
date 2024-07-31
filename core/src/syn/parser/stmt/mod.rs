@@ -1,5 +1,6 @@
 use reblessive::Stk;
 
+use crate::cnf::EXPERIMENTAL_BEARER_ACCESS;
 use crate::enter_query_recursion;
 use crate::sql::block::Entry;
 use crate::sql::statements::rebuild::{RebuildIndexStatement, RebuildStatement};
@@ -111,6 +112,14 @@ impl Parser<'_> {
 		let token = self.peek();
 		match token.kind {
 			t!("ACCESS") => {
+				// TODO(gguillemas): Remove this once bearer access is no longer experimental.
+				if !*EXPERIMENTAL_BEARER_ACCESS {
+					unexpected!(
+						self,
+						t!("ACCESS"),
+						"the experimental bearer access feature to be enabled"
+					);
+				}
 				self.pop_peek();
 				self.parse_access().map(Statement::Access)
 			}

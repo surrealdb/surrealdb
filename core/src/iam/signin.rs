@@ -1,6 +1,6 @@
 use super::verify::{verify_db_creds, verify_ns_creds, verify_root_creds};
 use super::{Actor, Level};
-use crate::cnf::{INSECURE_FORWARD_ACCESS_ERRORS, SERVER_NAME};
+use crate::cnf::{EXPERIMENTAL_BEARER_ACCESS, INSECURE_FORWARD_ACCESS_ERRORS, SERVER_NAME};
 use crate::dbs::Session;
 use crate::err::Error;
 use crate::iam::issue::{config, expiration};
@@ -189,7 +189,10 @@ pub async fn db_access(
 												}
 											}
 											// Log the authenticated access method info
-											trace!("Signing in with access method `{}`", ac);
+											trace!(
+												"Signing in to database with access method `{}`",
+												ac
+											);
 											// Create the authentication token
 											let enc =
 												encode(&Header::new(iss.alg.into()), &claims, &key);
@@ -226,6 +229,10 @@ pub async fn db_access(
 					}
 				}
 				AccessType::Bearer(at) => {
+					// TODO(gguillemas): Remove this once bearer access is no longer experimental.
+					if !*EXPERIMENTAL_BEARER_ACCESS {
+						return Err(Error::InvalidAuth);
+					}
 					// Check if the bearer access method supports issuing tokens
 					let iss = match at.jwt.issue {
 						Some(iss) => iss,
@@ -290,7 +297,7 @@ pub async fn db_access(
 						..Claims::default()
 					};
 					// Log the authenticated access method info
-					trace!("Signing in with access method `{}`", ac);
+					trace!("Signing in to database with access method `{}`", ac);
 					// Create the authentication token
 					let enc = encode(&Header::new(iss.alg.into()), &claims, &key);
 					// Set the authentication on the session
@@ -395,6 +402,10 @@ pub async fn ns_access(
 			// Check the access method type
 			match &av.kind {
 				AccessType::Bearer(at) => {
+					// TODO(gguillemas): Remove this once bearer access is no longer experimental.
+					if !*EXPERIMENTAL_BEARER_ACCESS {
+						return Err(Error::InvalidAuth);
+					}
 					// Check if the bearer access method supports issuing tokens
 					let iss = match &at.jwt.issue {
 						Some(iss) => iss.clone(),
@@ -457,7 +468,7 @@ pub async fn ns_access(
 						..Claims::default()
 					};
 					// Log the authenticated access method info
-					trace!("Signing in with access method `{}`", ac);
+					trace!("Signing in to namespace with access method `{}`", ac);
 					// Create the authentication token
 					let enc = encode(&Header::new(iss.alg.into()), &claims, &key);
 					// Set the authentication on the session
@@ -569,6 +580,120 @@ pub async fn root_user(
 		}
 		// The password did not verify
 		_ => Err(Error::InvalidAuth),
+	}
+}
+
+pub async fn root_access(
+	kvs: &Datastore,
+	session: &mut Session,
+	ac: String,
+	vars: Object,
+) -> Result<String, Error> {
+	// Create a new readonly transaction
+	let tx = kvs.transaction(Read, Optimistic).await?;
+	// Fetch the specified access method from storage
+	let access = tx.get_root_access(&ac).await;
+	// Ensure that the transaction is cancelled
+	tx.cancel().await?;
+	// Check the provided access method exists
+	match access {
+		Ok(av) => {
+			// Check the access method type
+			match &av.kind {
+				AccessType::Bearer(at) => {
+					// TODO(gguillemas): Remove this once bearer access is no longer experimental.
+					if !*EXPERIMENTAL_BEARER_ACCESS {
+						return Err(Error::InvalidAuth);
+					}
+					// Check if the bearer access method supports issuing tokens
+					let iss = match &at.jwt.issue {
+						Some(iss) => iss.clone(),
+						_ => return Err(Error::AccessMethodMismatch),
+					};
+					// Process the provided key
+					let key = match vars.get("key") {
+						Some(key) => &key.to_raw_string(),
+						// TODO(PR): Add new error.
+						None => return Err(Error::InvalidAuth),
+					};
+					if key.len() != access::GRANT_BEARER_KEY_LENGTH {
+						return Err(Error::InvalidAuth);
+					}
+					// Retrieve the key identifier from the provided key
+					let kid: String = key.chars().take(20).collect();
+					if kid.len() != access::GRANT_BEARER_ID_LENGTH {
+						return Err(Error::InvalidAuth);
+					}
+					// Check if the identifier corresponds to an existing grant
+					let gr = match tx.get_root_access_grant(&ac, &kid).await {
+						Ok(gr) => gr,
+						Err(_) => return Err(Error::InvalidAuth),
+					};
+					// Check if the grant is revoked or expired
+					match (gr.expiration, gr.revocation) {
+						(None, None) => {}
+						(Some(exp), None) => {
+							if exp < Datetime::default() {
+								return Err(Error::InvalidAuth);
+							}
+						}
+						_ => return Err(Error::InvalidAuth),
+					}
+					// Check if the provided key matches the bearer key in the grant
+					// We use time-constant comparison to prevent timing attacks
+					if let access::Grant::Bearer(grant) = gr.grant {
+						let grant_key_bytes: &[u8] = grant.key.as_bytes();
+						let signin_key_bytes: &[u8] = key.as_bytes();
+						let ok: bool = grant_key_bytes.ct_eq(signin_key_bytes).into();
+						if !ok {
+							return Err(Error::InvalidAuth);
+						}
+					};
+					// Create the authentication key
+					let key = config(iss.alg, iss.key)?;
+					// Create the authentication claim
+					let claims = Claims {
+						iss: Some(SERVER_NAME.to_owned()),
+						iat: Some(Utc::now().timestamp()),
+						nbf: Some(Utc::now().timestamp()),
+						exp: expiration(av.duration.token)?,
+						jti: Some(Uuid::new_v4().to_string()),
+						ac: Some(ac.to_owned()),
+						id: match &gr.subject {
+							Some(access::Subject::User(user)) => Some(user.to_raw()),
+							_ => return Err(Error::InvalidAuth),
+						},
+						..Claims::default()
+					};
+					// Log the authenticated access method info
+					trace!("Signing in to root with access method `{}`", ac);
+					// Create the authentication token
+					let enc = encode(&Header::new(iss.alg.into()), &claims, &key);
+					// Set the authentication on the session
+					session.tk = Some(claims.into());
+					session.ac = Some(ac.to_owned());
+					session.exp = expiration(av.duration.session)?;
+					match &gr.subject {
+						Some(access::Subject::User(user)) => {
+							session.au = Arc::new(Auth::new(Actor::new(
+								user.to_string(),
+								Default::default(),
+								Level::Root,
+							)));
+						}
+						_ => return Err(Error::InvalidAuth),
+					};
+					// Check the authentication token
+					match enc {
+						// The auth token was created successfully
+						Ok(tk) => Ok(tk),
+						_ => Err(Error::TokenMakingFailed),
+					}
+				}
+				_ => Err(Error::AccessMethodMismatch),
+			}
+		}
+		_ => Err(Error::AccessNotFound),
 	}
 }
 
