@@ -1,7 +1,6 @@
 use crate::err::Error;
 use crate::key::change;
-#[cfg(debug_assertions)]
-use crate::key::debug::sprint;
+use crate::key::debug::Sprintable;
 use crate::kvs::Transaction;
 use crate::vs;
 use crate::vs::Versionstamp;
@@ -84,8 +83,8 @@ pub async fn gc_range(
 	#[cfg(debug_assertions)]
 	trace!(
 		"Performing garbage collection on {ns}:{db} for watermark {watermark:?}, between {} and {}",
-		sprint(&beg),
-		sprint(&end)
+		beg.sprint(),
+		end.sprint()
 	);
 	// Delete the entire range in grouped batches
 	tx.delr(beg..end).await?;

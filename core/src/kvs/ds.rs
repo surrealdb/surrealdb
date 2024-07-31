@@ -418,7 +418,7 @@ impl Datastore {
 	}
 
 	// Initialise the cluster and run bootstrap utilities
-	#[instrument(err, level = "debug", target = "surrealdb::core::kvs::ds", skip_all)]
+	#[instrument(err, level = "trace", target = "surrealdb::core::kvs::ds", skip_all)]
 	pub async fn bootstrap(&self) -> Result<(), Error> {
 		// Insert this node in the cluster
 		self.insert_node(self.id).await?;
@@ -429,8 +429,8 @@ impl Datastore {
 	}
 
 	/// Setup the initial cluster access credentials
-	#[instrument(err, level = "debug", target = "surrealdb::core::kvs::ds", skip_all)]
-	pub async fn setup_initial_creds(&self, user: &str, pass: &str) -> Result<(), Error> {
+	#[instrument(err, level = "trace", target = "surrealdb::core::kvs::ds", skip_all)]
+	pub async fn initialise_credentials(&self, user: &str, pass: &str) -> Result<(), Error> {
 		// Start a new writeable transaction
 		let txn = self.transaction(Write, Optimistic).await?.enclose();
 		// Fetch the root users from the storage
@@ -457,7 +457,7 @@ impl Datastore {
 
 	// tick is called periodically to perform maintenance tasks.
 	// This is called every TICK_INTERVAL.
-	#[instrument(level = "debug", skip(self))]
+	#[instrument(err, level = "trace", target = "surrealdb::core::kvs::ds", skip(self))]
 	pub async fn tick(&self) -> Result<(), Error> {
 		let now = SystemTime::now().duration_since(UNIX_EPOCH).map_err(|e| {
 			Error::Internal(format!("Clock may have gone backwards: {:?}", e.duration()))
@@ -470,7 +470,7 @@ impl Datastore {
 	// tick_at is the utility function that is called by tick.
 	// It is handy for testing, because it allows you to specify the timestamp,
 	// without depending on a system clock.
-	#[instrument(level = "debug", skip(self))]
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::ds", skip(self))]
 	pub async fn tick_at(&self, ts: u64) -> Result<(), Error> {
 		trace!(target: TARGET, "Ticking at timestamp {ts} ({:?})", conv::u64_to_versionstamp(ts));
 		let _vs = self.save_timestamp_for_versionstamp(ts).await?;
@@ -649,7 +649,7 @@ impl Datastore {
 	///     Ok(())
 	/// }
 	/// ```
-	#[instrument(level = "debug", skip_all)]
+	#[instrument(level = "debug", target = "surrealdb::core::kvs::ds", skip_all)]
 	pub async fn execute(
 		&self,
 		txt: &str,
@@ -679,7 +679,7 @@ impl Datastore {
 	///     Ok(())
 	/// }
 	/// ```
-	#[instrument(level = "debug", skip_all)]
+	#[instrument(level = "debug", target = "surrealdb::core::kvs::ds", skip_all)]
 	pub async fn process(
 		&self,
 		ast: Query,
@@ -755,7 +755,7 @@ impl Datastore {
 	///     Ok(())
 	/// }
 	/// ```
-	#[instrument(level = "debug", skip_all)]
+	#[instrument(level = "debug", target = "surrealdb::core::kvs::ds", skip_all)]
 	pub async fn compute(
 		&self,
 		val: Value,
@@ -842,7 +842,7 @@ impl Datastore {
 	///     Ok(())
 	/// }
 	/// ```
-	#[instrument(level = "debug", skip_all)]
+	#[instrument(level = "debug", target = "surrealdb::core::kvs::ds", skip_all)]
 	pub async fn evaluate(
 		&self,
 		val: Value,
@@ -916,13 +916,13 @@ impl Datastore {
 	///     Ok(())
 	/// }
 	/// ```
-	#[instrument(level = "debug", skip_all)]
+	#[instrument(level = "debug", target = "surrealdb::core::kvs::ds", skip_all)]
 	pub fn notifications(&self) -> Option<Receiver<Notification>> {
 		self.notification_channel.as_ref().map(|v| v.1.clone())
 	}
 
 	/// Performs a database import from SQL
-	#[instrument(level = "debug", skip_all)]
+	#[instrument(level = "debug", target = "surrealdb::core::kvs::ds", skip_all)]
 	pub async fn import(&self, sql: &str, sess: &Session) -> Result<Vec<Response>, Error> {
 		// Check if the session has expired
 		if sess.expired() {
@@ -933,7 +933,7 @@ impl Datastore {
 	}
 
 	/// Performs a full database export as SQL
-	#[instrument(level = "debug", skip_all)]
+	#[instrument(level = "debug", target = "surrealdb::core::kvs::ds", skip_all)]
 	pub async fn export(
 		&self,
 		sess: &Session,
@@ -957,7 +957,7 @@ impl Datastore {
 	}
 
 	/// Checks the required permissions level for this session
-	#[instrument(level = "debug", skip(self, sess))]
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::ds", skip(self, sess))]
 	pub fn check(&self, sess: &Session, action: Action, resource: Resource) -> Result<(), Error> {
 		// Check if the session has expired
 		if sess.expired() {
