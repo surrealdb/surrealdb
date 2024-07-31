@@ -265,43 +265,41 @@ impl Parser<'_> {
 	}
 	/// Parse the part after the `.{` in an idiom
 	pub fn parse_destructure_part(&mut self) -> ParseResult<Part> {
+		let start = self.last_span();
 		let mut destructured: Vec<DestructurePart> = Vec::new();
 		loop {
-			match self.peek_kind() {
-				t!("}") => {
+			let field: Ident = self.next_token_value()?;
+			let part = match self.peek_kind() {
+				t!(":") => {
 					self.pop_peek();
-					break;
+					DestructurePart::Aliased(field, self.parse_local_idiom()?)
 				}
-				_ => {
-					let field: Ident = self.next_token_value()?;
-					let part = match self.peek_kind() {
-						t!(":") => {
-							self.pop_peek();
-							DestructurePart::Aliased(field, self.parse_local_idiom()?)
+				t!(".") => {
+					self.pop_peek();
+					let found = self.peek_kind();
+					match self.parse_dot_part()? {
+						Part::All => DestructurePart::All(field),
+						Part::Destructure(v) => DestructurePart::Destructure(field, v),
+						_ => {
+							return Err(ParseError::new(
+								ParseErrorKind::Unexpected {
+									found,
+									expected: "a star or a destructuring",
+								},
+								self.last_span(),
+							))
 						}
-						t!(".") => {
-							self.pop_peek();
-							let found = self.peek_kind();
-							match self.parse_dot_part()? {
-								Part::All => DestructurePart::All(field),
-								Part::Destructure(v) => DestructurePart::Destructure(field, v),
-								_ => {
-									return Err(ParseError::new(
-										ParseErrorKind::Unexpected {
-											found,
-											expected: "a star or a destructuring",
-										},
-										self.last_span(),
-									))
-								}
-							}
-						}
-						_ => DestructurePart::Field(field),
-					};
+					}
+				}
+				_ => DestructurePart::Field(field),
+			};
 
-					self.eat(t!(","));
-					destructured.push(part);
-				}
+			destructured.push(part);
+
+			if !self.eat(t!(",")) {
+				// We've reached the end of the destructure
+				self.expect_closing_delimiter(t!("}"), start)?;
+				break;
 			}
 		}
 
