@@ -273,21 +273,31 @@ impl Parser<'_> {
 					break;
 				}
 				_ => {
-					let mut part = DestructurePart {
-						field: self.next_token_value()?,
-						aliased: None,
+					let field: Ident = self.next_token_value()?;
+					let part = match self.peek_kind() {
+						t!(":") => {
+							self.pop_peek();
+							DestructurePart::Aliased(field, self.parse_local_idiom()?)
+						}
+						t!(".") => {
+							self.pop_peek();
+							let found = self.peek_kind();
+							match self.parse_dot_part()? {
+								Part::All => DestructurePart::All(field),
+								Part::Destructure(v) => DestructurePart::Destructure(field, v),
+								_ => {
+									return Err(ParseError::new(
+										ParseErrorKind::Unexpected {
+											found,
+											expected: "a star or a destructuring",
+										},
+										self.last_span(),
+									))
+								}
+							}
+						}
+						_ => DestructurePart::Field(field),
 					};
-
-					if matches!(self.peek_kind(), t!(":")) {
-						self.pop_peek();
-						part.aliased = Some(self.parse_local_idiom()?);
-					} else if matches!(self.peek_kind(), t!(".")) {
-						self.pop_peek();
-						part.aliased = Some(Idiom(vec![
-							Part::Field(part.field.clone()),
-							self.parse_dot_part()?,
-						]));
-					}
 
 					self.eat(t!(","));
 					destructured.push(part);

@@ -124,18 +124,11 @@ impl Value {
 					Part::Destructure(p) => {
 						let mut obj = BTreeMap::<String, Value>::new();
 						for p in p.iter() {
-							let v = match &p.aliased {
-								Some(i) => {
-									stk.run(|stk| self.get(stk, ctx, opt, doc, &i.0.as_slice()))
-										.await?
-								}
-								None => {
-									let path = [Part::Field(p.field.clone())];
-									stk.run(|stk| self.get(stk, ctx, opt, doc, &path)).await?
-								}
-							};
-
-							obj.insert(p.field.to_raw(), v);
+							let path = p.path();
+							let v = stk
+								.run(|stk| self.get(stk, ctx, opt, doc, path.as_slice()))
+								.await?;
+							obj.insert(p.field().to_raw(), v);
 						}
 
 						let obj = Value::from(obj);

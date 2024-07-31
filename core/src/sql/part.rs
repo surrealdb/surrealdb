@@ -2,7 +2,10 @@ use crate::sql::{fmt::Fmt, strand::no_nul_bytes, Graph, Ident, Idiom, Number, Va
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
+use std::fmt::Write;
 use std::str;
+
+use super::fmt::{is_pretty, pretty_indent};
 
 #[revisioned(revision = 2)]
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
@@ -109,7 +112,22 @@ impl fmt::Display for Part {
 			Part::Graph(v) => write!(f, "{v}"),
 			Part::Value(v) => write!(f, "[{v}]"),
 			Part::Method(v, a) => write!(f, ".{v}({})", Fmt::comma_separated(a)),
-			Part::Destructure(v) => write!(f, ".{{{}}}", Fmt::comma_separated(v)),
+			Part::Destructure(v) => {
+				f.write_str(".{")?;
+				if !is_pretty() {
+					f.write_char(' ')?;
+				}
+				if !v.is_empty() {
+					let indent = pretty_indent();
+					write!(f, "{}", Fmt::pretty_comma_separated(v))?;
+					drop(indent);
+				}
+				if is_pretty() {
+					f.write_char('}')
+				} else {
+					f.write_str(" }")
+				}
+			}
 		}
 	}
 }
@@ -135,18 +153,44 @@ impl<'a> Next<'a> for &'a [Part] {
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
-pub struct DestructurePart {
-	pub aliased: Option<Idiom>,
-	pub field: Ident,
+pub enum DestructurePart {
+	All(Ident),
+	Field(Ident),
+	Aliased(Ident, Idiom),
+	Destructure(Ident, Vec<DestructurePart>),
+}
+
+impl DestructurePart {
+	pub fn field(&self) -> &Ident {
+		match self {
+			DestructurePart::All(v) => &v,
+			DestructurePart::Field(v) => &v,
+			DestructurePart::Aliased(v, _) => &v,
+			DestructurePart::Destructure(v, _) => &v,
+		}
+	}
+
+	pub fn path(&self) -> Vec<Part> {
+		match self {
+			DestructurePart::All(v) => vec![Part::Field(v.clone()), Part::All],
+			DestructurePart::Field(v) => vec![Part::Field(v.clone())],
+			DestructurePart::Aliased(_, v) => v.0.clone().into(),
+			DestructurePart::Destructure(f, d) => {
+				vec![Part::Field(f.clone()), Part::Destructure(d.clone())]
+			}
+		}
+	}
 }
 
 impl fmt::Display for DestructurePart {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "{}", self.field)?;
-		if let Some(aliased) = &self.aliased {
-			write!(f, ": {aliased}")?;
+		match self {
+			DestructurePart::All(fd) => write!(f, "{fd}.*"),
+			DestructurePart::Field(fd) => write!(f, "{fd}"),
+			DestructurePart::Aliased(fd, v) => write!(f, "{fd}: {v}"),
+			DestructurePart::Destructure(fd, d) => {
+				write!(f, "{fd}{}", Part::Destructure(d.clone()))
+			}
 		}
-
-		Ok(())
 	}
 }

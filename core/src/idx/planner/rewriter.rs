@@ -71,17 +71,16 @@ impl<'a> KnnConditionRewriter<'a> {
 	}
 
 	fn eval_destructure_part(&self, part: &DestructurePart) -> Option<DestructurePart> {
-		if let Some(aliased) = &part.aliased {
-			if let Some(aliased) = self.eval_idiom(aliased) {
-				Some(DestructurePart {
-					aliased: Some(aliased),
-					..part.clone()
-				})
-			} else {
-				None
-			}
-		} else {
-			Some(part.clone())
+		match part {
+			DestructurePart::Aliased(f, v) => match self.eval_idiom(v) {
+				Some(v) => Some(DestructurePart::Aliased(f.clone(), v)),
+				None => None,
+			},
+			DestructurePart::Destructure(f, v) => match self.eval_destructure_parts(v) {
+				Some(v) => Some(DestructurePart::Destructure(f.clone(), v)),
+				None => None,
+			},
+			p => Some(p.clone()),
 		}
 	}
 
