@@ -1043,6 +1043,7 @@ async fn function_array_windows() -> Result<(), Error> {
 		RETURN array::windows([0, 1, 2], 2);
 		RETURN array::windows([0, 1, 2], 3);
 		RETURN array::windows([0, 1, 2, 3, 4, 5], 3);
+		RETURN array::windows([0, 1, 2], 4);
 		RETURN array::windows([0, 1, 2], 0);
 	"#;
 	let error = "Incorrect arguments for function array::windows(). The second argument must be an integer greater than 0";
@@ -1052,6 +1053,7 @@ async fn function_array_windows() -> Result<(), Error> {
 		.expect_val("[[0, 1], [1, 2]]")?
 		.expect_val("[[0, 1, 2]]")?
 		.expect_val("[[0, 1, 2], [1, 2, 3], [2, 3, 4], [3, 4, 5]]")?
+		.expect_val("[]")?
 		.expect_error(error)?;
 	Ok(())
 }
