@@ -72,14 +72,12 @@ impl<'a> KnnConditionRewriter<'a> {
 
 	fn eval_destructure_part(&self, part: &DestructurePart) -> Option<DestructurePart> {
 		match part {
-			DestructurePart::Aliased(f, v) => match self.eval_idiom(v) {
-				Some(v) => Some(DestructurePart::Aliased(f.clone(), v)),
-				None => None,
-			},
-			DestructurePart::Destructure(f, v) => match self.eval_destructure_parts(v) {
-				Some(v) => Some(DestructurePart::Destructure(f.clone(), v)),
-				None => None,
-			},
+			DestructurePart::Aliased(f, v) => {
+				self.eval_idiom(v).map(|v| DestructurePart::Aliased(f.clone(), v))
+			}
+			DestructurePart::Destructure(f, v) => {
+				self.eval_destructure_parts(v).map(|v| DestructurePart::Destructure(f.clone(), v))
+			}
 			p => Some(p.clone()),
 		}
 	}
@@ -87,7 +85,7 @@ impl<'a> KnnConditionRewriter<'a> {
 	fn eval_destructure_parts(&self, parts: &[DestructurePart]) -> Option<Vec<DestructurePart>> {
 		let mut new_vec = Vec::with_capacity(parts.len());
 		for part in parts {
-			if let Some(part) = self.eval_destructure_part(&part) {
+			if let Some(part) = self.eval_destructure_part(part) {
 				new_vec.push(part);
 			} else {
 				return None;
