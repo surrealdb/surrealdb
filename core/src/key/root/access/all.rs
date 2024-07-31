@@ -12,7 +12,7 @@ pub struct Access<'a> {
 	pub ac: &'a str,
 }
 
-pub fn new<'a>(ac: &'a str) -> Access<'a> {
+pub fn new(ac: &str) -> Access {
 	Access::new(ac)
 }
 
