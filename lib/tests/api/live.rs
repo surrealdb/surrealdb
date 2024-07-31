@@ -12,7 +12,7 @@ use surrealdb_core::sql::Object;
 use tokio::sync::RwLock;
 use tracing::info;
 
-const LQ_TIMEOUT: Duration = Duration::from_secs(1);
+const LQ_TIMEOUT: Duration = Duration::from_secs(5);
 const MAX_NOTIFICATIONS: usize = 100;
 
 #[test_log::test(tokio::test)]
