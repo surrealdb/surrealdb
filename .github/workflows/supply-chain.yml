@@ -85,7 +85,7 @@ jobs:
           echo "See instructions in the [supply chain security process](https://github.com/surrealdb/surrealdb/blob/main/supply-chain/README.md#Process)." >> $GITHUB_STEP_SUMMARY
   cargo-acl:
     name: Check dependencies for unauthorized access
-    runs-on: [ "self-hosted", "arm64", "builder" ]
+    runs-on: ubuntu-latest
     steps:
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
