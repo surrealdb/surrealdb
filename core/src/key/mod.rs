@@ -1,7 +1,9 @@
 //! How the keys are structured in the key value store
 ///
 /// crate::key::root::all                /
-/// crate::key::root::ac                 /!ac{ac}
+/// crate::key::root::access::all        /*{ac}
+/// crate::key::root::access::ac         /!ac{ac}
+/// crate::key::root::access::gr         /*{ac}!gr{gr}
 /// crate::key::root::hb                 /!hb{ts}/{nd}
 /// crate::key::root::nd                 /!nd{nd}
 /// crate::key::root::ni                 /!ni

@@ -12,7 +12,7 @@ pub(crate) trait Categorise {
 pub enum Category {
 	/// crate::key::root::all                /
 	Root,
-	/// crate::key::root::ac                 /!ac{ac}
+	/// crate::key::root::access::ac         /!ac{ac}
 	Access,
 	/// crate::key::root::access::all        /*{ac}
 	AccessRoot,
@@ -47,7 +47,7 @@ pub enum Category {
 	NamespaceRoot,
 	/// crate::key::namespace::db            /*{ns}!db{db}
 	DatabaseAlias,
-	/// crate::key::namespace::ac            /*{ns}!ac{ac}
+	/// crate::key::namespace::access::ac    /*{ns}!ac{ac}
 	NamespaceAccess,
 	/// crate::key::namespace::access::all   /*{ns}*{ac}
 	NamespaceAccessRoot,
