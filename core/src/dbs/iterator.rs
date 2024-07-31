@@ -7,6 +7,7 @@ use crate::dbs::plan::Plan;
 use crate::dbs::result::Results;
 use crate::dbs::Options;
 use crate::dbs::Statement;
+use crate::doc::CursorDoc;
 use crate::doc::Document;
 use crate::err::Error;
 use crate::idx::planner::iterators::{IteratorRecord, IteratorRef};
@@ -334,6 +335,17 @@ impl Iterator {
 			// Process any ORDER clause
 			if let Some(orders) = stm.order() {
 				self.results.sort(orders);
+			}
+
+			// Pluck selected attributes
+			if let Some(stm_expr) = stm.expr() {
+				let values = self.results.take()?;
+				for value in values.iter() {
+					let doc = CursorDoc::from(value);
+					let val =
+						stm_expr.compute(stk, ctx, opt, Some(&doc), stm.group().is_some()).await?;
+					self.results.push(stk, ctx, opt, stm, val).await?;
+				}
 			}
 
 			// Process any START & LIMIT clause
