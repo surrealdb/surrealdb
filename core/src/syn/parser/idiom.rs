@@ -301,6 +301,12 @@ impl Parser<'_> {
 				self.expect_closing_delimiter(t!("}"), start)?;
 				break;
 			}
+
+			// destructuring supports leftover comma's
+			if self.eat(t!("}")) {
+				// We've reached the end of the destructure
+				break;
+			}
 		}
 
 		Ok(Part::Destructure(destructured))
