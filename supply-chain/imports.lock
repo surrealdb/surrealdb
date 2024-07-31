@@ -115,13 +115,6 @@ user-login = "tobiemh"
 user-name = "Tobie Morgan Hitchcock"
 
 [[publisher.revision]]
-version = "0.7.1"
-when = "2024-06-19"
-user-id = 145457
-user-login = "tobiemh"
-user-name = "Tobie Morgan Hitchcock"
-
-[[publisher.revision]]
 version = "0.8.0"
 when = "2024-07-09"
 user-id = 145457
