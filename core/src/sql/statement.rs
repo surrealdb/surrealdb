@@ -6,7 +6,7 @@ use crate::sql::statements::rebuild::RebuildStatement;
 use crate::sql::{
 	fmt::{Fmt, Pretty},
 	statements::{
-		AccessStatement, AnalyzeStatement, BeginStatement, BreakStatement, CancelStatement,
+		AccessStatement, AlterStatement, AnalyzeStatement, BeginStatement, BreakStatement, CancelStatement,
 		CommitStatement, ContinueStatement, CreateStatement, DefineStatement, DeleteStatement,
 		ForeachStatement, IfelseStatement, InfoStatement, InsertStatement, KillStatement,
 		LiveStatement, OptionStatement, OutputStatement, RelateStatement, RemoveStatement,
@@ -92,6 +92,8 @@ pub enum Statement {
 	#[revision(start = 3)]
 	Upsert(UpsertStatement),
 	#[revision(start = 4)]
+	Alter(AlterStatement),
+  #[revision(start = 5)]
 	Access(AccessStatement),
 }
 
@@ -114,6 +116,7 @@ impl Statement {
 		match self {
 			Self::Value(v) => v.writeable(),
 			Self::Access(_) => true,
+			Self::Alter(_) => true,
 			Self::Analyze(_) => false,
 			Self::Break(_) => false,
 			Self::Continue(_) => false,
@@ -152,6 +155,7 @@ impl Statement {
 	) -> Result<Value, Error> {
 		match self {
 			Self::Access(v) => v.compute(ctx, opt, doc).await,
+			Self::Alter(v) => v.compute(stk, ctx, opt, doc).await,
 			Self::Analyze(v) => v.compute(ctx, opt, doc).await,
 			Self::Break(v) => v.compute(ctx, opt, doc).await,
 			Self::Continue(v) => v.compute(ctx, opt, doc).await,
@@ -191,6 +195,7 @@ impl Display for Statement {
 		match self {
 			Self::Value(v) => write!(Pretty::from(f), "{v}"),
 			Self::Access(v) => write!(Pretty::from(f), "{v}"),
+			Self::Alter(v) => write!(Pretty::from(f), "{v}"),
 			Self::Analyze(v) => write!(Pretty::from(f), "{v}"),
 			Self::Begin(v) => write!(Pretty::from(f), "{v}"),
 			Self::Break(v) => write!(Pretty::from(f), "{v}"),

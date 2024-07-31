@@ -26,6 +26,7 @@ use crate::{
 
 use super::{mac::expected, ParseResult, Parser};
 
+mod alter;
 mod create;
 mod define;
 mod delete;
@@ -81,7 +82,7 @@ impl Parser<'_> {
 	fn token_kind_starts_statement(kind: TokenKind) -> bool {
 		matches!(
 			kind,
-			t!("ACCESS")
+			t!("ACCESS") | t!("ALTER")
 				| t!("ANALYZE") | t!("BEGIN")
 				| t!("BREAK") | t!("CANCEL")
 				| t!("COMMIT") | t!("CONTINUE")
@@ -111,6 +112,10 @@ impl Parser<'_> {
 			t!("ACCESS") => {
 				self.pop_peek();
 				self.parse_access().map(Statement::Access)
+			}
+			t!("ALTER") => {
+				self.pop_peek();
+				ctx.run(|ctx| self.parse_alter_stmt(ctx)).await.map(Statement::Alter)
 			}
 			t!("ANALYZE") => {
 				self.pop_peek();
@@ -241,6 +246,10 @@ impl Parser<'_> {
 	async fn parse_entry_inner(&mut self, ctx: &mut Stk) -> ParseResult<Entry> {
 		let token = self.peek();
 		match token.kind {
+			t!("ALTER") => {
+				self.pop_peek();
+				self.parse_alter_stmt(ctx).await.map(Entry::Alter)
+			}
 			t!("BREAK") => {
 				self.pop_peek();
 				Ok(Entry::Break(BreakStatement))

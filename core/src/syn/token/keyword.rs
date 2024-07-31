@@ -28,6 +28,7 @@ keyword! {
 	After => "AFTER",
 	Algorithm => "ALGORITHM",
 	All => "ALL",
+	Alter => "ALTER",
 	Analyze => "ANALYZE",
 	Analyzer => "ANALYZER",
 	As => "AS",
