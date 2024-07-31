@@ -18,6 +18,8 @@ pub enum GqlError {
 	SchemaError(String),
 	#[error("Error resolving request: {0}")]
 	ResolverError(String),
+	#[error("Internal Error: {0}")]
+	InternalError(String),
 	#[error("Error converting value: {val} to type: {target}")]
 	TypeError {
 		target: Kind,
@@ -31,6 +33,11 @@ pub fn schema_error(msg: impl Into<String>) -> GqlError {
 
 pub fn resolver_error(msg: impl Into<String>) -> GqlError {
 	GqlError::ResolverError(msg.into())
+}
+pub fn internal_error(msg: impl Into<String>) -> GqlError {
+	let msg = msg.into();
+	error!("{}", msg);
+	GqlError::InternalError(msg.into())
 }
 
 pub fn type_error(kind: Kind, val: &async_graphql::Value) -> GqlError {

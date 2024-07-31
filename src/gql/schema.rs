@@ -1,13 +1,15 @@
+use std::any::type_name;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use async_graphql::dynamic::{Enum, Type};
+use async_graphql::dynamic::{Enum, Type, Union};
 use async_graphql::dynamic::{Field, Interface};
 use async_graphql::dynamic::{FieldFuture, InterfaceField};
 use async_graphql::dynamic::{InputObject, Object};
 use async_graphql::dynamic::{InputValue, Schema};
 use async_graphql::dynamic::{Scalar, TypeRef};
 use async_graphql::indexmap::IndexMap;
+use async_graphql::parser::types;
 use async_graphql::Name;
 use async_graphql::Value as GqlValue;
 use rust_decimal::prelude::FromPrimitive;
@@ -24,7 +26,7 @@ use surrealdb::sql::{Statement, Thing};
 
 use super::error::{resolver_error, GqlError};
 use super::ext::IntoExt;
-use crate::gql::error::{schema_error, type_error};
+use crate::gql::error::{internal_error, schema_error, type_error};
 use crate::gql::utils::GqlValueUtils;
 use surrealdb::kvs::LockType;
 use surrealdb::kvs::TransactionType;
@@ -314,7 +316,7 @@ pub async fn generate_schema(
 				continue;
 			};
 			let fd_name = Name::new(fd.name.to_string());
-			let fd_type = kind_to_type(kind.clone(), &mut types);
+			let fd_type = kind_to_type(kind.clone(), &mut types)?;
 			table_orderable = table_orderable.item(fd_name.to_string());
 			let type_filter_name = format!("_filter_{}", unwrap_type(fd_type.clone()));
 
@@ -322,7 +324,7 @@ pub async fn generate_schema(
 				kind.clone(),
 				type_filter_name.clone(),
 				&mut types,
-			));
+			)?);
 			trace!("\n{type_filter:?}\n");
 			types.push(type_filter);
 
@@ -335,7 +337,10 @@ pub async fn generate_schema(
 					FieldFuture::new(async move {
 						let record = ctx.parent_value.as_value().unwrap();
 						let GqlValue::Object(record_map) = record else {
-							todo!("got unexpected: {record:?}, processing field {fd_name}")
+							return Err(internal_error(format!(
+								"record should be an object, but found: {record:?}"
+							))
+							.into());
 						};
 						let val = record_map.get(&fd_name).unwrap();
 
@@ -358,23 +363,12 @@ pub async fn generate_schema(
 		schema = schema.register(ty);
 	}
 
-	let geometry_type = {
-		let mut tmp = Scalar::new("Geometry")
+	let geometry_type = Type::Scalar(
+		Scalar::new("Geometry")
 			// #[cfg(debug_assertions)]
 			.description("A GeoJson type")
-			.specified_by_url("https://datatracker.ietf.org/doc/html/rfc7946");
-		#[cfg(debug_assertions)]
-		{
-			tmp = tmp.validator(|v| {
-				if let GqlValue::String(s) = v {
-				} else {
-					false
-				}
-			});
-		}
-
-		tmp
-	};
+			.specified_by_url("https://datatracker.ietf.org/doc/html/rfc7946"),
+	);
 	schema = schema.register(geometry_type);
 
 	let id_interface =
@@ -394,17 +388,20 @@ pub async fn generate_schema(
 		.map_err(|e| schema_error(format!("there was an error generating schema: {e:?}")))
 }
 
-fn sql_value_to_gql_value(v: SqlValue) -> Result<GqlValue, ()> {
+fn sql_value_to_gql_value(v: SqlValue) -> Result<GqlValue, GqlError> {
 	let out = match v {
 		SqlValue::None => GqlValue::Null,
 		SqlValue::Null => GqlValue::Null,
 		SqlValue::Bool(b) => GqlValue::Boolean(b),
 		SqlValue::Number(n) => match n {
 			surrealdb::sql::Number::Int(i) => GqlValue::Number(i.into()),
-			surrealdb::sql::Number::Float(f) => GqlValue::Number(Number::from_f64(f).ok_or(())?),
+			surrealdb::sql::Number::Float(f) => GqlValue::Number(
+				Number::from_f64(f)
+					.ok_or(resolver_error("unimplemented: graceful NaN and Inf handling"))?,
+			),
 			num @ surrealdb::sql::Number::Decimal(_) => GqlValue::String(num.to_string()),
 			n => {
-				todo!()
+				return Err(resolver_error(format!("found unsupported number type: {n:?}")));
 			}
 		},
 		SqlValue::Strand(s) => GqlValue::String(s.0),
@@ -419,15 +416,15 @@ fn sql_value_to_gql_value(v: SqlValue) -> Result<GqlValue, ()> {
 				.map(|(k, v)| (Name::new(k), sql_value_to_gql_value(v).unwrap()))
 				.collect(),
 		),
-		SqlValue::Geometry(_) => todo!("SqlValue::Geometry(_) "),
+		SqlValue::Geometry(_) => return Err(resolver_error("unimplemented: Geometry types")),
 		SqlValue::Bytes(b) => GqlValue::Binary(b.into_inner().into()),
 		SqlValue::Thing(t) => GqlValue::String(t.to_string()),
-		_ => unimplemented!("Other values should not be used in responses"),
+		v => return Err(resolver_error(format!("found unsupported value variant: {v:?}"))),
 	};
 	Ok(out)
 }
 
-fn kind_to_type(kind: Kind, types: &mut Vec<Type>) -> TypeRef {
+fn kind_to_type(kind: Kind, types: &mut Vec<Type>) -> Result<TypeRef, GqlError> {
 	let (optional, match_kind) = match kind {
 		Kind::Option(op_ty) => (true, *op_ty),
 		_ => (false, kind),
@@ -450,20 +447,52 @@ fn kind_to_type(kind: Kind, types: &mut Vec<Type>) -> TypeRef {
 		Kind::Record(mut r) => match r.len() {
 			// Table types should be added elsewhere
 			1 => TypeRef::named(r.pop().unwrap().0),
-			_ => todo!("dynamic unions for multiple records"),
+			_ => {
+				let names: Vec<String> = r.into_iter().map(|t| t.0).collect();
+				let ty_name = names.join("_or_");
+
+				let mut tmp_union = Union::new(ty_name.clone())
+					.description(format!("A record which is one of: {}", names.join(", ")));
+				for n in names {
+					tmp_union = tmp_union.possible_type(n);
+				}
+
+				types.push(Type::Union(tmp_union));
+				TypeRef::named(ty_name)
+			}
 		},
-		Kind::Geometry(_) => todo!("Kind::Geometry(_) "),
-		Kind::Option(_) => todo!("Kind::Option(_) "),
-		Kind::Either(_) => todo!("Kind::Either(_) "),
-		Kind::Set(_, _) => todo!("Kind::Set(_, _) "),
-		Kind::Array(k, _) => TypeRef::List(Box::new(kind_to_type(*k, types))),
-		_ => todo!(),
+		Kind::Geometry(_) => return Err(resolver_error("Kind::Set is not yet supported")),
+		Kind::Option(t) => {
+			let mut non_op_ty = *t;
+			while let Kind::Option(inner) = non_op_ty {
+				non_op_ty = *inner;
+			}
+			kind_to_type(non_op_ty, types)?
+		}
+		Kind::Either(ts) => {
+			let pos_names: Result<Vec<TypeRef>, GqlError> =
+				ts.into_iter().map(|k| kind_to_type(k, types)).collect();
+			let pos_names: Vec<String> = pos_names?.into_iter().map(|tr| tr.to_string()).collect();
+			let ty_name = pos_names.join("_or_");
+
+			let mut tmp_union = Union::new(ty_name.clone());
+			for n in pos_names {
+				tmp_union = tmp_union.possible_type(n);
+			}
+
+			types.push(Type::Union(tmp_union));
+			TypeRef::named(ty_name)
+		}
+		Kind::Set(_, _) => return Err(resolver_error("Kind::Set is not yet supported")),
+		Kind::Array(k, _) => TypeRef::List(Box::new(kind_to_type(*k, types)?)),
+		k => return Err(internal_error(format!("found unkown kind: {k:?}"))),
 	};
 
-	match optional {
+	let out = match optional {
 		true => out_ty,
 		false => TypeRef::NonNull(Box::new(out_ty)),
-	}
+	};
+	Ok(out)
 }
 
 macro_rules! filter_impl {
@@ -479,8 +508,12 @@ fn filter_id() -> InputObject {
 	filter_impl!(filter, ty, "ne");
 	filter
 }
-fn filter_from_type(kind: Kind, filter_name: String, types: &mut Vec<Type>) -> InputObject {
-	let ty = kind_to_type(kind.clone(), types);
+fn filter_from_type(
+	kind: Kind,
+	filter_name: String,
+	types: &mut Vec<Type>,
+) -> Result<InputObject, GqlError> {
+	let ty = kind_to_type(kind.clone(), types)?;
 	let ty = unwrap_type(ty);
 
 	let mut filter = InputObject::new(filter_name);
@@ -510,7 +543,7 @@ fn filter_from_type(kind: Kind, filter_name: String, types: &mut Vec<Type>) -> I
 		Kind::Array(_, _) => {}
 		_ => {}
 	};
-	filter
+	Ok(filter)
 }
 
 fn unwrap_type(ty: TypeRef) -> TypeRef {
@@ -849,6 +882,6 @@ fn gql_to_sql_kind(val: &GqlValue, kind: Kind) -> Result<SqlValue, GqlError> {
 			}
 			_ => Err(type_error(kind, val)),
 		},
-		k => Err(resolver_error(format!("unknown kind: {k:?}"))),
+		k => Err(internal_error(format!("unknown kind: {k:?}"))),
 	}
 }
