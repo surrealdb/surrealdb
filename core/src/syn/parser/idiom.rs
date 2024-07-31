@@ -268,6 +268,11 @@ impl Parser<'_> {
 		let start = self.last_span();
 		let mut destructured: Vec<DestructurePart> = Vec::new();
 		loop {
+			if self.eat(t!("}")) {
+				// We've reached the end of the destructure
+				break;
+			}
+
 			let field: Ident = self.next_token_value()?;
 			let part = match self.peek_kind() {
 				t!(":") => {
@@ -299,12 +304,6 @@ impl Parser<'_> {
 			if !self.eat(t!(",")) {
 				// We've reached the end of the destructure
 				self.expect_closing_delimiter(t!("}"), start)?;
-				break;
-			}
-
-			// destructuring supports leftover comma's
-			if self.eat(t!("}")) {
-				// We've reached the end of the destructure
 				break;
 			}
 		}
