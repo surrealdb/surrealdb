@@ -401,13 +401,13 @@ pub async fn generate_schema(
 	});
 	schema = schema.register(decimal_type);
 
-	let number_type = Type::Union(
-		Union::new("number")
-			.possible_type(TypeRef::INT)
-			.possible_type(TypeRef::FLOAT)
-			.possible_type("decimal"),
-	);
-	schema = schema.register(number_type);
+	// let number_type = Type::Union(
+	// 	Union::new("number")
+	// 		.possible_type(TypeRef::INT)
+	// 		.possible_type(TypeRef::FLOAT)
+	// 		.possible_type("decimal"),
+	// );
+	// schema = schema.register(number_type);
 
 	let null_type = Type::Scalar({
 		let mut tmp = Scalar::new("null");
@@ -782,6 +782,11 @@ fn binop(
 }
 
 macro_rules! try_kind {
+	($ks:ident, $val:expr, Kind::Array) => {
+		for arr_kind in $ks.iter().filter(|k| matches!(k, Kind::Array(_, _))).cloned() {
+			try_kind!($ks, $val, arr_kind);
+		}
+	};
 	($ks:ident, $val:expr, $kind:expr) => {
 		if $ks.contains(&$kind) {
 			if let Ok(out) = gql_to_sql_kind($val, $kind) {
@@ -986,14 +991,28 @@ fn gql_to_sql_kind(val: &GqlValue, kind: Kind) -> Result<SqlValue, GqlError> {
 				try_kind!(ks, num, Kind::Number);
 				Err(type_error(kind, val))
 			}
-			GqlValue::String(_) => todo!(),
+			string @ GqlValue::String(_) => {
+				try_kind!(ks, string, Kind::Int);
+				try_kind!(ks, string, Kind::Float);
+				try_kind!(ks, string, Kind::Decimal);
+				try_kind!(ks, string, Kind::Number);
+				try_kind!(ks, string, Kind::Object);
+				try_kind!(ks, string, Kind::Array);
+				Err(type_error(kind, val))
+			}
 			bool @ GqlValue::Boolean(_) => {
 				try_kind!(ks, bool, Kind::Bool);
 				Err(type_error(kind, val))
 			}
 			GqlValue::Binary(_) => todo!(),
-			GqlValue::Enum(_) => todo!(),
-			GqlValue::List(_) => todo!(),
+			GqlValue::Enum(n) => {
+				try_kind!(ks, &GqlValue::String(n.to_string()), Kind::String);
+				Err(type_error(kind, val))
+			}
+			list @ GqlValue::List(_) => {
+				try_kind!(ks, list, Kind::Array);
+				Err(type_error(kind, val))
+			}
 			GqlValue::Object(_) => todo!(),
 		},
 		// TODO: figure out how to support sets

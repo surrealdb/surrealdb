@@ -64,9 +64,10 @@ where
 
 impl IntoResponse for GqlError {
 	fn into_response(self) -> http::Response<BoxBody> {
+		info!("sending error {self:?}");
 		http::Response::builder()
 			.status(StatusCode::BAD_REQUEST)
-			.body(boxed(Body::from(format!("{:?}", self))))
+			.body(boxed(Body::from(format!("{}", self))))
 			.unwrap()
 	}
 }
