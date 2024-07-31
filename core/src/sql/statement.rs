@@ -6,12 +6,12 @@ use crate::sql::statements::rebuild::RebuildStatement;
 use crate::sql::{
 	fmt::{Fmt, Pretty},
 	statements::{
-		AccessStatement, AlterStatement, AnalyzeStatement, BeginStatement, BreakStatement, CancelStatement,
-		CommitStatement, ContinueStatement, CreateStatement, DefineStatement, DeleteStatement,
-		ForeachStatement, IfelseStatement, InfoStatement, InsertStatement, KillStatement,
-		LiveStatement, OptionStatement, OutputStatement, RelateStatement, RemoveStatement,
-		SelectStatement, SetStatement, ShowStatement, SleepStatement, ThrowStatement,
-		UpdateStatement, UpsertStatement, UseStatement,
+		AccessStatement, AlterStatement, AnalyzeStatement, BeginStatement, BreakStatement,
+		CancelStatement, CommitStatement, ContinueStatement, CreateStatement, DefineStatement,
+		DeleteStatement, ForeachStatement, IfelseStatement, InfoStatement, InsertStatement,
+		KillStatement, LiveStatement, OptionStatement, OutputStatement, RelateStatement,
+		RemoveStatement, SelectStatement, SetStatement, ShowStatement, SleepStatement,
+		ThrowStatement, UpdateStatement, UpsertStatement, UseStatement,
 	},
 	value::Value,
 };
@@ -55,7 +55,7 @@ impl Display for Statements {
 	}
 }
 
-#[revisioned(revision = 4)]
+#[revisioned(revision = 5)]
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
@@ -93,7 +93,7 @@ pub enum Statement {
 	Upsert(UpsertStatement),
 	#[revision(start = 4)]
 	Alter(AlterStatement),
-  #[revision(start = 5)]
+	#[revision(start = 5)]
 	Access(AccessStatement),
 }
 

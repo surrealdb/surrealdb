@@ -853,7 +853,7 @@ impl Transaction {
 			}
 		}
 		.into_lvs())
-  }
+	}
 
 	/// Retrieve a specific namespace definition.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
