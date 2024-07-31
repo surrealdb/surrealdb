@@ -29,6 +29,7 @@ use super::ext::IntoExt;
 use super::ext::ValidatorExt;
 use crate::gql::error::{internal_error, schema_error, type_error};
 use crate::gql::utils::GqlValueUtils;
+use crate::mac;
 use surrealdb::kvs::LockType;
 use surrealdb::kvs::TransactionType;
 use surrealdb::sql::Value as SqlValue;
@@ -524,7 +525,7 @@ fn sql_value_to_gql_value(v: SqlValue) -> Result<GqlValue, GqlError> {
 		SqlValue::Geometry(_) => return Err(resolver_error("unimplemented: Geometry types")),
 		SqlValue::Bytes(b) => GqlValue::Binary(b.into_inner().into()),
 		SqlValue::Thing(t) => GqlValue::String(t.to_string()),
-		v => return Err(resolver_error(format!("found unsupported value variant: {v:?}"))),
+		v => return Err(internal_error(format!("found unsupported value variant: {v:?}"))),
 	};
 	Ok(out)
 }
@@ -780,11 +781,23 @@ fn binop(
 	Ok(expr.into())
 }
 
+macro_rules! try_kind {
+	($ks:ident, $val:expr, $kind:expr) => {
+		if $ks.contains(&$kind) {
+			if let Ok(out) = gql_to_sql_kind($val, $kind) {
+				return Ok(out);
+			}
+		}
+	};
+}
+
 fn gql_to_sql_kind(val: &GqlValue, kind: Kind) -> Result<SqlValue, GqlError> {
 	use surrealdb::syn;
 	match kind {
 		Kind::Any => match val {
-			GqlValue::String(s) => syn::value(s.as_str()).map_err(|_| type_error(kind, val)),
+			GqlValue::String(s) => {
+				syn::value_legacy_strand(s.as_str()).map_err(|_| type_error(kind, val))
+			}
 			_ => Err(type_error(kind, val)),
 		},
 		Kind::Null => match val {
@@ -912,15 +925,19 @@ fn gql_to_sql_kind(val: &GqlValue, kind: Kind) -> Result<SqlValue, GqlError> {
 			_ => Err(type_error(kind, val)),
 		},
 		Kind::Object => match val {
-			GqlValue::Object(o) => {
-				let out: Result<BTreeMap<String, SqlValue>, GqlError> = o
-					.iter()
-					.map(|(k, v)| gql_to_sql_kind(v, Kind::Any).map(|sqlv| (k.to_string(), sqlv)))
-					.collect();
-				let out = out?;
+			// GqlValue::Object(o) => {
+			// 	let out: Result<BTreeMap<String, SqlValue>, GqlError> = o
+			// 		.iter()
+			// 		.map(|(k, v)| gql_to_sql_kind(v, Kind::Any).map(|sqlv| (k.to_string(), sqlv)))
+			// 		.collect();
+			// 	let out = out?;
 
-				Ok(SqlValue::Object(out.into()))
-			}
+			// 	Ok(SqlValue::Object(out.into()))
+			// }
+			GqlValue::String(s) => match syn::value_legacy_strand(s.as_str()) {
+				Ok(obj @ SqlValue::Object(_)) => Ok(obj),
+				_ => Err(type_error(kind, val)),
+			},
 			_ => Err(type_error(kind, val)),
 		},
 		// TODO: add geometry
@@ -962,9 +979,18 @@ fn gql_to_sql_kind(val: &GqlValue, kind: Kind) -> Result<SqlValue, GqlError> {
 					Err(type_error(kind, val))
 				}
 			}
-			GqlValue::Number(_) => todo!(),
+			num @ GqlValue::Number(_) => {
+				try_kind!(ks, num, Kind::Int);
+				try_kind!(ks, num, Kind::Float);
+				try_kind!(ks, num, Kind::Decimal);
+				try_kind!(ks, num, Kind::Number);
+				Err(type_error(kind, val))
+			}
 			GqlValue::String(_) => todo!(),
-			GqlValue::Boolean(_) => todo!(),
+			bool @ GqlValue::Boolean(_) => {
+				try_kind!(ks, bool, Kind::Bool);
+				Err(type_error(kind, val))
+			}
 			GqlValue::Binary(_) => todo!(),
 			GqlValue::Enum(_) => todo!(),
 			GqlValue::List(_) => todo!(),
