@@ -53,5 +53,9 @@ pub static EXTERNAL_SORTING_BUFFER_LIMIT: Lazy<usize> =
 
 /// Enable experimental bearer access and stateful access grant management. Still under active development.
 /// Using this experimental feature may introduce risks related to breaking changes and security issues.
+#[cfg(not(test))]
 pub static EXPERIMENTAL_BEARER_ACCESS: Lazy<bool> =
 	lazy_env_parse!("SURREAL_EXPERIMENTAL_BEARER_ACCESS", bool, false);
+// Run tests with the bearer access enabled as it only introduces new functionality that needs to be tested.
+#[cfg(test)]
+pub static EXPERIMENTAL_BEARER_ACCESS: Lazy<bool> = Lazy::new(|| true);
