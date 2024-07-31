@@ -1,4 +1,3 @@
-use std::any::type_name;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
@@ -9,9 +8,9 @@ use async_graphql::dynamic::{InputObject, Object};
 use async_graphql::dynamic::{InputValue, Schema};
 use async_graphql::dynamic::{Scalar, TypeRef};
 use async_graphql::indexmap::IndexMap;
-use async_graphql::parser::types;
 use async_graphql::Name;
 use async_graphql::Value as GqlValue;
+use chrono::DateTime;
 use rust_decimal::prelude::FromPrimitive;
 use rust_decimal::Decimal;
 use serde_json::Number;
@@ -23,9 +22,11 @@ use surrealdb::sql::Expression;
 use surrealdb::sql::Kind;
 use surrealdb::sql::{Cond, Fields};
 use surrealdb::sql::{Statement, Thing};
+use surrealdb::syn;
 
 use super::error::{resolver_error, GqlError};
 use super::ext::IntoExt;
+use super::ext::ValidatorExt;
 use crate::gql::error::{internal_error, schema_error, type_error};
 use crate::gql::utils::GqlValueUtils;
 use surrealdb::kvs::LockType;
@@ -302,7 +303,10 @@ pub async fn generate_schema(
 				FieldFuture::new(async move {
 					let record = ctx.parent_value.as_value().unwrap();
 					let GqlValue::Object(record_map) = record else {
-						todo!()
+						return Err(internal_error(format!(
+							"record should be object, but found: {record:?}"
+						))
+						.into());
 					};
 					let id = record_map.get("id").unwrap();
 
@@ -363,13 +367,114 @@ pub async fn generate_schema(
 		schema = schema.register(ty);
 	}
 
-	let geometry_type = Type::Scalar(
-		Scalar::new("Geometry")
-			// #[cfg(debug_assertions)]
-			.description("A GeoJson type")
-			.specified_by_url("https://datatracker.ietf.org/doc/html/rfc7946"),
+	// TODO: implement geometry
+	// let geometry_type = Type::Scalar(
+	// 	Scalar::new("Geometry")
+	// 		// #[cfg(debug_assertions)]
+	// 		.description("A GeoJson type")
+	// 		.specified_by_url("https://datatracker.ietf.org/doc/html/rfc7946"),
+	// );
+	// schema = schema.register(geometry_type);
+
+	let uuid_type = Type::Scalar({
+		let mut tmp = Scalar::new("uuid")
+			.description("description")
+			.specified_by_url("https://datatracker.ietf.org/doc/html/rfc4122");
+		#[cfg(debug_assertions)]
+		tmp.add_validator(|s| match s {
+			GqlValue::String(s) => uuid::Uuid::parse_str(s).is_ok(),
+			_ => false,
+		});
+		tmp
+	});
+	schema = schema.register(uuid_type);
+
+	let decimal_type = Type::Scalar({
+		let mut tmp = Scalar::new("decimal");
+		#[cfg(debug_assertions)]
+		tmp.add_validator(|v| match v {
+			GqlValue::String(s) => Decimal::try_from(s.as_str()).is_ok(),
+			_ => false,
+		});
+		tmp
+	});
+	schema = schema.register(decimal_type);
+
+	let number_type = Type::Union(
+		Union::new("number")
+			.possible_type(TypeRef::INT)
+			.possible_type(TypeRef::FLOAT)
+			.possible_type("decimal"),
 	);
-	schema = schema.register(geometry_type);
+	schema = schema.register(number_type);
+
+	let null_type = Type::Scalar({
+		let mut tmp = Scalar::new("null");
+		#[cfg(debug_assertions)]
+		tmp.add_validator(|v| match v {
+			GqlValue::Null => true,
+			_ => false,
+		});
+		tmp
+	});
+	schema = schema.register(null_type);
+
+	let datetime_type = Type::Scalar({
+		let mut tmp = Scalar::new("datetime").description("An rfc 3339 encoded datetime");
+		#[cfg(debug_assertions)]
+		tmp.add_validator(|v| match v {
+			GqlValue::String(s) => DateTime::parse_from_rfc3339(s.as_str()).is_ok(),
+			_ => false,
+		});
+		tmp
+	});
+	schema = schema.register(datetime_type);
+
+	let duration_type = Type::Scalar({
+		let mut tmp = Scalar::new("duration").description("");
+		#[cfg(debug_assertions)]
+		tmp.add_validator(|v| match v {
+			GqlValue::String(s) => syn::duration(s.as_str()).is_ok(),
+			_ => false,
+		});
+		tmp
+	});
+	schema = schema.register(duration_type);
+
+	let object_type = Type::Scalar({
+		let mut tmp = Scalar::new("object").description("");
+		#[cfg(debug_assertions)]
+		tmp.add_validator(|v| match v {
+			GqlValue::String(s) => match syn::value(s) {
+				Ok(SqlValue::Object(_)) => true,
+				_ => false,
+			},
+			_ => false,
+		});
+		tmp
+	});
+	schema = schema.register(object_type);
+
+	// let any_type = Type::Union(
+	// 	Union::new("any")
+	// 		.description("")
+	// 		.possible_type("object")
+	// 		.possible_type("number")
+	// 		.possible_type(TypeRef::STRING)
+	// 		.possible_type(TypeRef::ID)
+	// 		.possible_type("duration")
+	// 		.possible_type("datetime"),
+	// );
+	let any_type = Type::Scalar({
+		let mut tmp = Scalar::new("any").description("");
+		#[cfg(debug_assertions)]
+		tmp.add_validator(|v| match v {
+			GqlValue::String(s) => syn::value(s).is_ok(),
+			_ => false,
+		});
+		tmp
+	});
+	schema = schema.register(any_type);
 
 	let id_interface =
 		Interface::new("record").field(InterfaceField::new("id", TypeRef::named_nn(TypeRef::ID)));
@@ -401,7 +506,7 @@ fn sql_value_to_gql_value(v: SqlValue) -> Result<GqlValue, GqlError> {
 			),
 			num @ surrealdb::sql::Number::Decimal(_) => GqlValue::String(num.to_string()),
 			n => {
-				return Err(resolver_error(format!("found unsupported number type: {n:?}")));
+				return Err(internal_error(format!("found unsupported number type: {n:?}")));
 			}
 		},
 		SqlValue::Strand(s) => GqlValue::String(s.0),
@@ -430,20 +535,21 @@ fn kind_to_type(kind: Kind, types: &mut Vec<Type>) -> Result<TypeRef, GqlError> 
 		_ => (false, kind),
 	};
 	let out_ty = match match_kind {
-		Kind::Any => todo!("Kind::Any "),
-		Kind::Null => todo!("Kind::Null "),
+		Kind::Any => TypeRef::named("any"),
+		Kind::Null => TypeRef::named("null"),
 		Kind::Bool => TypeRef::named(TypeRef::BOOLEAN),
-		Kind::Bytes => todo!("Kind::Bytes "),
-		Kind::Datetime => todo!("Kind::Datetime "),
-		Kind::Decimal => todo!("Kind::Decimal "),
-		Kind::Duration => todo!("Kind::Duration "),
-		Kind::Float => todo!("Kind::Float "),
+		Kind::Bytes => TypeRef::named("bytes"),
+		Kind::Datetime => TypeRef::named("datetime"),
+		Kind::Decimal => TypeRef::named("decimal"),
+		Kind::Duration => TypeRef::named("duration"),
+		Kind::Float => TypeRef::named(TypeRef::FLOAT),
 		Kind::Int => TypeRef::named(TypeRef::INT),
-		Kind::Number => todo!("Kind::Number "),
-		Kind::Object => todo!("Kind::Object "),
-		Kind::Point => todo!("Kind::Point "),
+		Kind::Number => TypeRef::named("number"),
+		Kind::Object => TypeRef::named("object"),
+		Kind::Point => return Err(schema_error("Kind::Point is not yet supported")),
 		Kind::String => TypeRef::named(TypeRef::STRING),
-		Kind::Uuid => todo!("Kind::Uuid "),
+		// uuid type is always added
+		Kind::Uuid => TypeRef::named("uuid"),
 		Kind::Record(mut r) => match r.len() {
 			// Table types should be added elsewhere
 			1 => TypeRef::named(r.pop().unwrap().0),
@@ -461,7 +567,7 @@ fn kind_to_type(kind: Kind, types: &mut Vec<Type>) -> Result<TypeRef, GqlError> 
 				TypeRef::named(ty_name)
 			}
 		},
-		Kind::Geometry(_) => return Err(resolver_error("Kind::Set is not yet supported")),
+		Kind::Geometry(_) => return Err(schema_error("Kind::Geometry is not yet supported")),
 		Kind::Option(t) => {
 			let mut non_op_ty = *t;
 			while let Kind::Option(inner) = non_op_ty {
@@ -483,7 +589,7 @@ fn kind_to_type(kind: Kind, types: &mut Vec<Type>) -> Result<TypeRef, GqlError> 
 			types.push(Type::Union(tmp_union));
 			TypeRef::named(ty_name)
 		}
-		Kind::Set(_, _) => return Err(resolver_error("Kind::Set is not yet supported")),
+		Kind::Set(_, _) => return Err(schema_error("Kind::Set is not yet supported")),
 		Kind::Array(k, _) => TypeRef::List(Box::new(kind_to_type(*k, types)?)),
 		k => return Err(internal_error(format!("found unkown kind: {k:?}"))),
 	};
@@ -677,7 +783,10 @@ fn binop(
 fn gql_to_sql_kind(val: &GqlValue, kind: Kind) -> Result<SqlValue, GqlError> {
 	use surrealdb::syn;
 	match kind {
-		Kind::Any => todo!(),
+		Kind::Any => match val {
+			GqlValue::String(s) => syn::value(s.as_str()).map_err(|_| type_error(kind, val)),
+			_ => Err(type_error(kind, val)),
+		},
 		Kind::Null => match val {
 			GqlValue::Null => Ok(SqlValue::Null),
 			_ => Err(type_error(kind, val)),

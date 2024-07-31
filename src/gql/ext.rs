@@ -1,3 +1,6 @@
+use std::mem;
+
+use async_graphql::dynamic::Scalar;
 use surrealdb::sql::{
 	statements::UseStatement, Cond, Ident, Idiom, Limit, Order, Orders, Part, Start, Table, Value,
 };
@@ -141,18 +144,21 @@ where
 	}
 }
 
-// trait TryConv<T> {
-// 	fn conv(self) -> Result<T, GqlError>;
-// }
+pub trait ValidatorExt {
+	fn add_validator(
+		&mut self,
+		validator: impl Fn(&async_graphql::Value) -> bool + Send + Sync + 'static,
+	) -> &mut Self;
+}
 
-// impl TryConv<Uuid> for GqlValue {
-// 	fn conv(self) -> Result<Uuid, GqlError> {
-// 		ScalarType::parse(self).map_err(Into::into)
-// 	}
-// }
-
-// impl TryConv<Uuid> for GqlValue {
-// 	fn conv(self) -> Result<Uuid, GqlError> {
-// 		ScalarType::parse(self).map_err(Into::into)
-// 	}
-// }
+impl ValidatorExt for Scalar {
+	fn add_validator(
+		&mut self,
+		validator: impl Fn(&async_graphql::Value) -> bool + Send + Sync + 'static,
+	) -> &mut Self {
+		let mut tmp = Scalar::new("");
+		mem::swap(self, &mut tmp);
+		*self = tmp.validator(validator);
+		self
+	}
+}
