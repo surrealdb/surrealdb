@@ -12,9 +12,15 @@ use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::fmt::{Display, Formatter};
 
-pub static GRANT_BEARER_ID_PREFIX_LEGNTH: usize = 4;
-pub static GRANT_BEARER_ID_LENGTH: usize = 20;
-pub static GRANT_BEARER_KEY_LENGTH: usize = 40;
+pub static GRANT_BEARER_PREFIX: &str = "surreal-bearer";
+// Keys and their identifiers are generated randomly from a 62-character pool.
+pub static GRANT_BEARER_CHARACTER_POOL: &[u8] = b"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+// The key identifier should not have collisions to prevent confusion.
+// However, collisions should be handled gracefully when issuing grants.
+// With 12 characters from the pool, the key identifier has ~70 bits of entropy.
+pub static GRANT_BEARER_ID_LENGTH: usize = 12;
+// With 24 characters from the pool, the key has ~140 bits of entropy.
+pub static GRANT_BEARER_KEY_LENGTH: usize = 24;
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
@@ -188,26 +194,21 @@ pub struct GrantBearer {
 impl GrantBearer {
 	#[doc(hidden)]
 	pub fn new() -> Self {
-		// The "SABK" prefix indicates Surreal Access Bearer Key.
-		let id = format!(
-			"SABK{}",
-			random_string(GRANT_BEARER_ID_LENGTH - GRANT_BEARER_ID_PREFIX_LEGNTH)
-		);
+		let id = random_string(GRANT_BEARER_ID_LENGTH);
 		let secret = random_string(GRANT_BEARER_KEY_LENGTH);
 		Self {
 			id: id.clone().into(),
-			key: format!("{id}-{secret}").into(),
+			key: format!("{GRANT_BEARER_PREFIX}-{id}-{secret}").into(),
 		}
 	}
 }
 
 fn random_string(length: usize) -> String {
-	let charset: &[u8] = b"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
 	let mut rng = rand::thread_rng();
 	let string: String = (0..length)
 		.map(|_| {
-			let i = rng.gen_range(0..charset.len());
-			charset[i] as char
+			let i = rng.gen_range(0..GRANT_BEARER_CHARACTER_POOL.len());
+			GRANT_BEARER_CHARACTER_POOL[i] as char
 		})
 		.collect();
 	string
