@@ -380,10 +380,9 @@ impl AccessStatement {
 						// Get the grants for the access method
 						let mut grants = Array::default();
 						// TODO(PR): This should not return all data, only basic identifiers.
-						for v in
-							txn.all_ns_access_grants_redacted(opt.ns()?, &stmt.ac).await?.iter()
-						{
-							grants = grants + Value::Object(v.to_owned().into());
+						// Show redacted version of the access grants.
+						for v in txn.all_ns_access_grants(opt.ns()?, &stmt.ac).await?.iter() {
+							grants = grants + Value::Object(v.redacted().to_owned().into());
 						}
 						Ok(Value::Array(grants))
 					}
@@ -395,12 +394,11 @@ impl AccessStatement {
 						// Get the grants for the access method
 						let mut grants = Array::default();
 						// TODO(PR): This should not return all data, only basic identifiers.
-						for v in txn
-							.all_db_access_grants_redacted(opt.ns()?, opt.db()?, &stmt.ac)
-							.await?
-							.iter()
+						// Show redacted version of the access grants.
+						for v in
+							txn.all_db_access_grants(opt.ns()?, opt.db()?, &stmt.ac).await?.iter()
 						{
-							grants = grants + Value::Object(v.to_owned().into());
+							grants = grants + Value::Object(v.redacted().to_owned().into());
 						}
 						Ok(Value::Array(grants))
 					}

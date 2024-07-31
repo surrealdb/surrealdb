@@ -335,11 +335,8 @@ impl Transaction {
 	}
 
 	/// Retrieve all ROOT level accesses in a datastore.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
 	pub async fn all_root_accesses(&self) -> Result<Arc<[DefineAccessStatement]>, Error> {
-		// Log this function call in development
-		#[cfg(debug_assertions)]
-		trace!(target: TARGET, "all_root_accesses");
-		// Continue with the function logic
 		let key = crate::key::root::access::ac::prefix();
 		let res = self.cache.get_value_or_guard_async(&key).await;
 		Ok(match res {
@@ -356,21 +353,9 @@ impl Transaction {
 		.into_ras())
 	}
 
-	/// Retrieve all root access method definitions in redacted form.
-	pub async fn all_root_accesses_redacted(
-		&mut self,
-	) -> Result<Arc<[DefineAccessStatement]>, Error> {
-		let accesses = self.all_root_accesses().await?;
-		let redacted: Vec<_> = accesses.iter().map(|statement| statement.redacted()).collect();
-		Ok(Arc::from(redacted))
-	}
-
 	/// Retrieve all root access grants in a datastore.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
 	pub async fn all_root_access_grants(&self, ra: &str) -> Result<Arc<[AccessGrant]>, Error> {
-		// Log this function call in development
-		#[cfg(debug_assertions)]
-		trace!(target: TARGET, "all_root_access_grants {ra}");
-		// Continue with the function logic
 		let key = crate::key::root::access::gr::prefix(ra);
 		let res = self.cache.get_value_or_guard_async(&key).await;
 		Ok(match res {
@@ -385,16 +370,6 @@ impl Transaction {
 			}
 		}
 		.into_rag())
-	}
-
-	/// Retrieve all root access grants in redacted form.
-	pub async fn all_root_access_grants_redacted(
-		&self,
-		ra: &str,
-	) -> Result<Arc<[AccessGrant]>, Error> {
-		let accesses = self.all_root_access_grants(ra).await?;
-		let redacted: Vec<_> = accesses.iter().map(|statement| statement.redacted()).collect();
-		Ok(Arc::from(redacted))
 	}
 
 	/// Retrieve all namespace definitions in a datastore.
@@ -438,10 +413,6 @@ impl Transaction {
 	/// Retrieve all namespace access definitions for a specific namespace.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
 	pub async fn all_ns_accesses(&self, ns: &str) -> Result<Arc<[DefineAccessStatement]>, Error> {
-		// Log this function call in development
-		#[cfg(debug_assertions)]
-		trace!(target: TARGET, "all_ns_accesses {ns}");
-		// Continue with the function logic
 		let key = crate::key::namespace::access::ac::prefix(ns);
 		let res = self.cache.get_value_or_guard_async(&key).await;
 		Ok(match res {
@@ -458,26 +429,13 @@ impl Transaction {
 		.into_nas())
 	}
 
-	/// Retrieve all database access method definitions in redacted form.
-	pub async fn all_ns_accesses_redacted(
-		&mut self,
-		ns: &str,
-	) -> Result<Arc<[DefineAccessStatement]>, Error> {
-		let accesses = self.all_ns_accesses(ns).await?;
-		let redacted: Vec<_> = accesses.iter().map(|statement| statement.redacted()).collect();
-		Ok(Arc::from(redacted))
-	}
-
 	/// Retrieve all namespace access grants for a specific namespace.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
 	pub async fn all_ns_access_grants(
 		&self,
 		ns: &str,
 		na: &str,
 	) -> Result<Arc<[AccessGrant]>, Error> {
-		// Log this function call in development
-		#[cfg(debug_assertions)]
-		trace!(target: TARGET, "all_ns_access_grants {ns} {na}");
-		// Continue with the function logic
 		let key = crate::key::namespace::access::gr::prefix(ns, na);
 		let res = self.cache.get_value_or_guard_async(&key).await;
 		Ok(match res {
@@ -492,17 +450,6 @@ impl Transaction {
 			}
 		}
 		.into_nag())
-	}
-
-	/// Retrieve all namespace access grants in redacted form.
-	pub async fn all_ns_access_grants_redacted(
-		&self,
-		ns: &str,
-		na: &str,
-	) -> Result<Arc<[AccessGrant]>, Error> {
-		let accesses = self.all_ns_access_grants(ns, na).await?;
-		let redacted: Vec<_> = accesses.iter().map(|statement| statement.redacted()).collect();
-		Ok(Arc::from(redacted))
 	}
 
 	/// Retrieve all database definitions for a specific namespace.
@@ -554,10 +501,6 @@ impl Transaction {
 		ns: &str,
 		db: &str,
 	) -> Result<Arc<[DefineAccessStatement]>, Error> {
-		// Log this function call in development
-		#[cfg(debug_assertions)]
-		trace!(target: TARGET, "all_db_accesses {ns} {db}");
-		// Continue with the function logic
 		let key = crate::key::database::access::ac::prefix(ns, db);
 		let res = self.cache.get_value_or_guard_async(&key).await;
 		Ok(match res {
@@ -574,28 +517,14 @@ impl Transaction {
 		.into_das())
 	}
 
-	/// Retrieve all database access method definitions in redacted form.
-	pub async fn all_db_accesses_redacted(
-		&mut self,
-		ns: &str,
-		db: &str,
-	) -> Result<Arc<[DefineAccessStatement]>, Error> {
-		let accesses = self.all_db_accesses(ns, db).await?;
-		let redacted: Vec<_> = accesses.iter().map(|statement| statement.redacted()).collect();
-		Ok(Arc::from(redacted))
-	}
-
 	/// Retrieve all database access grants for a specific database.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
 	pub async fn all_db_access_grants(
 		&self,
 		ns: &str,
 		db: &str,
 		da: &str,
 	) -> Result<Arc<[AccessGrant]>, Error> {
-		// Log this function call in development
-		#[cfg(debug_assertions)]
-		trace!(target: TARGET, "all_db_access_grants {ns} {db} {da}");
-		// Continue with the function logic
 		let key = crate::key::database::access::gr::prefix(ns, db, da);
 		let res = self.cache.get_value_or_guard_async(&key).await;
 		Ok(match res {
@@ -610,18 +539,6 @@ impl Transaction {
 			}
 		}
 		.into_dag())
-	}
-
-	/// Retrieve all database access grants in redacted form.
-	pub async fn all_db_access_grants_redacted(
-		&self,
-		ns: &str,
-		db: &str,
-		da: &str,
-	) -> Result<Arc<[AccessGrant]>, Error> {
-		let grants = self.all_db_access_grants(ns, db, da).await?;
-		let redacted: Vec<_> = grants.iter().map(|statement| statement.redacted()).collect();
-		Ok(Arc::from(redacted))
 	}
 
 	/// Retrieve all analyzer definitions for a specific database.
@@ -896,11 +813,8 @@ impl Transaction {
 	}
 
 	/// Retrieve a specific root access definition.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
 	pub async fn get_root_access(&self, ra: &str) -> Result<Arc<DefineAccessStatement>, Error> {
-		// Log this function call in development
-		#[cfg(debug_assertions)]
-		trace!(target: TARGET, "get_root_access {ra}");
-		// Continue with the function logic
 		let key = crate::key::root::access::ac::new(ra).encode()?;
 		let res = self.cache.get_value_or_guard_async(&key).await;
 		Ok(match res {
@@ -975,10 +889,6 @@ impl Transaction {
 		ns: &str,
 		na: &str,
 	) -> Result<Arc<DefineAccessStatement>, Error> {
-		// Log this function call in development
-		#[cfg(debug_assertions)]
-		trace!(target: TARGET, "get_ns_access {ns} {na}");
-		// Continue with the function logic
 		let key = crate::key::namespace::access::ac::new(ns, na).encode()?;
 		let res = self.cache.get_value_or_guard_async(&key).await;
 		Ok(match res {
@@ -1067,10 +977,6 @@ impl Transaction {
 		db: &str,
 		da: &str,
 	) -> Result<Arc<DefineAccessStatement>, Error> {
-		// Log this function call in development
-		#[cfg(debug_assertions)]
-		trace!(target: TARGET, "get_db_access {ns} {db} {da}");
-		// Continue with the function logic
 		let key = crate::key::database::access::ac::new(ns, db, da).encode()?;
 		let res = self.cache.get_value_or_guard_async(&key).await;
 		Ok(match res {
