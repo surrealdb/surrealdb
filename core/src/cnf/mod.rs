@@ -50,3 +50,8 @@ pub static INSECURE_FORWARD_ACCESS_ERRORS: Lazy<bool> =
 /// If the environment variable is not present or cannot be parsed, a default value of 50,000 is used.
 pub static EXTERNAL_SORTING_BUFFER_LIMIT: Lazy<usize> =
 	lazy_env_parse!("SURREAL_EXTERNAL_SORTING_BUFFER_LIMIT", usize, 50_000);
+
+/// Enable experimental bearer access and stateful access grant management. Still under active development.
+/// Using this experimental feature may introduce risks related to breaking changes and security issues.
+pub static EXPERIMENTAL_BEARER_ACCESS: Lazy<bool> =
+	lazy_env_parse!("SURREAL_EXPERIMENTAL_BEARER_ACCESS", bool, false);
