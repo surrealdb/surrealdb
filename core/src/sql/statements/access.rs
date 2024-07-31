@@ -14,7 +14,8 @@ use std::fmt::{Display, Formatter};
 
 pub static GRANT_BEARER_PREFIX: &str = "surreal-bearer";
 // Keys and their identifiers are generated randomly from a 62-character pool.
-pub static GRANT_BEARER_CHARACTER_POOL: &[u8] = b"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+pub static GRANT_BEARER_CHARACTER_POOL: &[u8] =
+	b"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
 // The key identifier should not have collisions to prevent confusion.
 // However, collisions should be handled gracefully when issuing grants.
 // With 12 characters from the pool, the key identifier has ~70 bits of entropy.
