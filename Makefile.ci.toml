@@ -316,9 +316,9 @@ category = "CI - BENCHMARK - SurrealDB Target"
 env = { BENCH_DATASTORE_TARGET = "sdk-rocksdb" }
 run_task = { name = ["bench-target"] }
 
-[tasks.bench-lib-surrealkv]
+[tasks.bench-sdk-surrealkv]
 category = "CI - BENCHMARK - SurrealDB Target"
-env = { BENCH_DATASTORE_TARGET = "lib-surrealkv" }
+env = { BENCH_DATASTORE_TARGET = "sdk-surrealkv" }
 run_task = { name = ["bench-target"] }
 
 [tasks.bench-sdk-ws]

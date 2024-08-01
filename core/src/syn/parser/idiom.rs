@@ -1,7 +1,10 @@
 use reblessive::Stk;
 
 use crate::{
-	sql::{Dir, Edges, Field, Fields, Graph, Ident, Idiom, Part, Table, Tables, Value},
+	sql::{
+		part::DestructurePart, Dir, Edges, Field, Fields, Graph, Ident, Idiom, Part, Table, Tables,
+		Value,
+	},
 	syn::token::{t, Span, TokenKind},
 };
 
@@ -252,9 +255,60 @@ impl Parser<'_> {
 				self.pop_peek();
 				Part::All
 			}
+			t!("{") => {
+				self.pop_peek();
+				self.parse_destructure_part()?
+			}
 			_ => Part::Field(self.next_token_value()?),
 		};
 		Ok(res)
+	}
+	/// Parse the part after the `.{` in an idiom
+	pub fn parse_destructure_part(&mut self) -> ParseResult<Part> {
+		let start = self.last_span();
+		let mut destructured: Vec<DestructurePart> = Vec::new();
+		loop {
+			if self.eat(t!("}")) {
+				// We've reached the end of the destructure
+				break;
+			}
+
+			let field: Ident = self.next_token_value()?;
+			let part = match self.peek_kind() {
+				t!(":") => {
+					self.pop_peek();
+					DestructurePart::Aliased(field, self.parse_local_idiom()?)
+				}
+				t!(".") => {
+					self.pop_peek();
+					let found = self.peek_kind();
+					match self.parse_dot_part()? {
+						Part::All => DestructurePart::All(field),
+						Part::Destructure(v) => DestructurePart::Destructure(field, v),
+						_ => {
+							return Err(ParseError::new(
+								ParseErrorKind::Unexpected {
+									found,
+									expected: "a star or a destructuring",
+								},
+								self.last_span(),
+							))
+						}
+					}
+				}
+				_ => DestructurePart::Field(field),
+			};
+
+			destructured.push(part);
+
+			if !self.eat(t!(",")) {
+				// We've reached the end of the destructure
+				self.expect_closing_delimiter(t!("}"), start)?;
+				break;
+			}
+		}
+
+		Ok(Part::Destructure(destructured))
 	}
 	/// Parse the part after the `[` in a idiom
 	pub async fn parse_bracket_part(&mut self, ctx: &mut Stk, start: Span) -> ParseResult<Part> {

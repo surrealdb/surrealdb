@@ -1,4 +1,5 @@
 use crate::idx::planner::executor::KnnExpressions;
+use crate::sql::part::DestructurePart;
 use crate::sql::{
 	Array, Cast, Cond, Expression, Function, Id, Idiom, Model, Object, Part, Range, Thing, Value,
 };
@@ -70,6 +71,30 @@ impl<'a> KnnConditionRewriter<'a> {
 		Some(new_vec)
 	}
 
+	fn eval_destructure_part(&self, part: &DestructurePart) -> Option<DestructurePart> {
+		match part {
+			DestructurePart::Aliased(f, v) => {
+				self.eval_idiom(v).map(|v| DestructurePart::Aliased(f.clone(), v))
+			}
+			DestructurePart::Destructure(f, v) => {
+				self.eval_destructure_parts(v).map(|v| DestructurePart::Destructure(f.clone(), v))
+			}
+			p => Some(p.clone()),
+		}
+	}
+
+	fn eval_destructure_parts(&self, parts: &[DestructurePart]) -> Option<Vec<DestructurePart>> {
+		let mut new_vec = Vec::with_capacity(parts.len());
+		for part in parts {
+			if let Some(part) = self.eval_destructure_part(part) {
+				new_vec.push(part);
+			} else {
+				return None;
+			}
+		}
+		Some(new_vec)
+	}
+
 	fn eval_value_object(&self, o: &Object) -> Option<Value> {
 		self.eval_object(o).map(|o| o.into())
 	}
@@ -132,6 +157,7 @@ impl<'a> KnnConditionRewriter<'a> {
 			Part::Value(v) => self.eval_value(v).map(Part::Value),
 			Part::Start(v) => self.eval_value(v).map(Part::Start),
 			Part::Method(n, p) => self.eval_values(p).map(|v| Part::Method(n.clone(), v)),
+			Part::Destructure(p) => self.eval_destructure_parts(p).map(Part::Destructure),
 		}
 	}
 
