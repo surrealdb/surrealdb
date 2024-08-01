@@ -231,6 +231,7 @@ pub async fn db_access(
 				AccessType::Bearer(at) => {
 					// TODO(gguillemas): Remove this once bearer access is no longer experimental.
 					if !*EXPERIMENTAL_BEARER_ACCESS {
+						// Return opaque error to avoid leaking the existence of the feature.
 						return Err(Error::InvalidAuth);
 					}
 					// Check if the bearer access method supports issuing tokens
@@ -241,19 +242,16 @@ pub async fn db_access(
 					// Process the provided key
 					let key = match vars.get("key") {
 						Some(key) => &key.to_raw_string(),
-						// TODO(PR): Add new error.
-						None => return Err(Error::InvalidAuth),
+						None => return Err(Error::AccessBearerMissingKey),
 					};
 					if key.len() != access::GRANT_BEARER_LENGTH {
-						// TODO(PR): Add new error.
-						return Err(Error::InvalidAuth);
+						return Err(Error::AccessGrantBearerInvalid);
 					}
 					// Retrieve the prefix from the provided key
 					let prefix: String =
 						key.chars().take(access::GRANT_BEARER_PREFIX.len()).collect();
 					if prefix != access::GRANT_BEARER_PREFIX {
-						// TODO(PR): Add new error.
-						return Err(Error::InvalidAuth);
+						return Err(Error::AccessGrantBearerInvalid);
 					}
 					// Retrieve the key identifier from the provided key
 					let kid: String = key
@@ -262,7 +260,7 @@ pub async fn db_access(
 						.take(access::GRANT_BEARER_ID_LENGTH)
 						.collect();
 					if kid.len() != access::GRANT_BEARER_ID_LENGTH {
-						return Err(Error::InvalidAuth);
+						return Err(Error::AccessGrantBearerInvalid);
 					}
 
 					// Create a new readonly transaction
@@ -270,6 +268,7 @@ pub async fn db_access(
 					// Fetch the specified access grant from storage
 					let gr = match tx.get_db_access_grant(&ns, &db, &ac, &kid).await {
 						Ok(gr) => gr,
+						// Return opaque error to avoid leaking existence of the grant.
 						_ => return Err(Error::InvalidAuth),
 					};
 					// Ensure that the transaction is cancelled
@@ -280,6 +279,7 @@ pub async fn db_access(
 						(None, None) => {}
 						(Some(exp), None) => {
 							if exp < Datetime::default() {
+								// Return opaque error to avoid leaking revocation status.
 								return Err(Error::InvalidAuth);
 							}
 						}
@@ -302,6 +302,7 @@ pub async fn db_access(
 						// Fetch the specified user from storage
 						let user = tx.get_db_user(&ns, &db, user).await.map_err(|e| {
 							trace!("Error while authenticating to database `{ns}/{db}`: {e}");
+							// Return opaque error to avoid leaking grant subject existence.
 							Error::InvalidAuth
 						})?;
 						// Ensure that the transaction is cancelled
@@ -325,6 +326,7 @@ pub async fn db_access(
 						id: match &gr.subject {
 							Some(access::Subject::User(user)) => Some(user.to_raw()),
 							Some(access::Subject::Record(rid)) => Some(rid.to_raw()),
+							// Return opaque error as this code should not be reachable.
 							None => return Err(Error::InvalidAuth),
 						},
 						roles: match &gr.subject {
@@ -332,6 +334,7 @@ pub async fn db_access(
 								Some(roles.iter().map(|v| v.to_string()).collect())
 							}
 							Some(access::Subject::Record(_)) => Default::default(),
+							// Return opaque error as this code should not be reachable.
 							None => return Err(Error::InvalidAuth),
 						},
 						..Claims::default()
@@ -362,6 +365,7 @@ pub async fn db_access(
 							)));
 							session.rd = Some(Value::from(rid.to_owned()));
 						}
+						// Return opaque error as this code should not be reachable.
 						None => return Err(Error::InvalidAuth),
 					};
 					// Check the authentication token
@@ -2073,6 +2077,69 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 			}
 		}
 
+		// Test with missing key
+		{
+			let ds = Datastore::new("memory").await.unwrap();
+			let sess = Session::owner().with_ns("test").with_db("test");
+			let res = ds
+				.execute(
+					r#"
+				DEFINE ACCESS api ON DATABASE TYPE BEARER DURATION FOR SESSION 2h;
+				DEFINE USER tobie ON DATABASE ROLES EDITOR;
+				ACCESS api GRANT FOR USER tobie;
+				"#,
+					&sess,
+					None,
+				)
+				.await
+				.unwrap();
+
+			// Get the bearer key from grant.
+			let result = if let Ok(res) = &res.last().unwrap().result {
+				res.clone()
+			} else {
+				panic!("Unable to retrieve bearer key grant");
+			};
+			let grant = result
+				.coerce_to_object()
+				.unwrap()
+				.get("grant")
+				.unwrap()
+				.clone()
+				.coerce_to_object()
+				.unwrap();
+			let _key = grant.get("key").unwrap().clone().as_string();
+
+			// Signin with the bearer key
+			let mut sess = Session {
+				ns: Some("test".to_string()),
+				db: Some("test".to_string()),
+				..Default::default()
+			};
+
+			// The key parameter is not inserted:
+			let vars: HashMap<&str, Value> = HashMap::new();
+			// vars.insert("key", key.into());
+
+			let res = db_access(
+				&ds,
+				&mut sess,
+				"test".to_string(),
+				"test".to_string(),
+				"api".to_string(),
+				vars.into(),
+			)
+			.await;
+
+			match res {
+				Err(Error::AccessBearerMissingKey) => {} // ok
+				res => panic!(
+					"Expected a missing key authentication error, but instead received: {:?}",
+					res
+				),
+			}
+		}
+
 		// Test with incorrect bearer key prefix part
 		{
 			let ds = Datastore::new("memory").await.unwrap();
@@ -2130,9 +2197,74 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 			.await;
 
 			match res {
-				Err(Error::InvalidAuth) => {} // ok
+				Err(Error::AccessGrantBearerInvalid) => {} // ok
 				res => panic!(
-					"Expected a generic authentication error, but instead received: {:?}",
+					"Expected an invalid key authentication error, but instead received: {:?}",
+					res
+				),
+			}
+		}
+
+		// Test with incorrect bearer key length
+		{
+			let ds = Datastore::new("memory").await.unwrap();
+			let sess = Session::owner().with_ns("test").with_db("test");
+			let res = ds
+				.execute(
+					r#"
+				DEFINE ACCESS api ON DATABASE TYPE BEARER DURATION FOR SESSION 2h;
+				DEFINE USER tobie ON DATABASE ROLES EDITOR;
+				ACCESS api GRANT FOR USER tobie;
+				"#,
+					&sess,
+					None,
+				)
+				.await
+				.unwrap();
+
+			// Get the bearer key from grant.
+			let result = if let Ok(res) = &res.last().unwrap().result {
+				res.clone()
+			} else {
+				panic!("Unable to retrieve bearer key grant");
+			};
+			let grant = result
+				.coerce_to_object()
+				.unwrap()
+				.get("grant")
+				.unwrap()
+				.clone()
+				.coerce_to_object()
+				.unwrap();
+			let valid_key = grant.get("key").unwrap().clone().as_string();
+
+			// Remove a character from the bearer key
+			let mut invalid_key: Vec<char> = valid_key.chars().collect();
+			invalid_key.truncate(access::GRANT_BEARER_LENGTH - 1);
+			let key: String = invalid_key.into_iter().collect();
+
+			// Signin with the bearer key
+			let mut sess = Session {
+				ns: Some("test".to_string()),
+				db: Some("test".to_string()),
+				..Default::default()
+			};
+			let mut vars: HashMap<&str, Value> = HashMap::new();
+			vars.insert("key", key.into());
+			let res = db_access(
+				&ds,
+				&mut sess,
+				"test".to_string(),
+				"test".to_string(),
+				"api".to_string(),
+				vars.into(),
+			)
+			.await;
+
+			match res {
+				Err(Error::AccessGrantBearerInvalid) => {} // ok
+				res => panic!(
+					"Expected an invalid key authentication error, but instead received: {:?}",
 					res
 				),
 			}

@@ -1022,6 +1022,18 @@ pub enum Error {
 	#[error("This record access method does not allow signin")]
 	AccessRecordNoSignin,
 
+	#[error("This bearer access method requires a key to be provided")]
+	AccessBearerMissingKey,
+
+	#[error("This bearer access grant has an invalid format")]
+	AccessGrantBearerInvalid,
+
+	#[error("This access grant has an invalid subject")]
+	AccessGrantInvalidSubject,
+
+	#[error("This access grant has been revoked")]
+	AccessGrantRevoked,
+
 	/// Found a table name for the record but this is not a valid table
 	#[error("Found {value} for the Record ID but this is not a valid table name")]
 	TbInvalid {

@@ -249,19 +249,16 @@ impl AccessStatement {
 									Some(Subject::User(user)) => {
 										// Grant subject must match access method level.
 										if !matches!(&at.level, BearerAccessLevel::User) {
-											// TODO(PR): Add new error.
-											return Err(Error::InvalidAuth);
+											return Err(Error::AccessGrantInvalidSubject);
 										}
 										// If the grant is being created for a user, the user must exist.
 										txn.get_root_user(user).await?;
 									}
 									Some(Subject::Record(_)) => {
 										// If the grant is being created for a record, a database must be selected.
-										// TODO(PR): Add new error.
 										return Err(Error::DbEmpty);
 									}
-									// TODO(PR): Add new error.
-									None => return Err(Error::InvalidAuth),
+									None => return Err(Error::AccessGrantInvalidSubject),
 								}
 								// Create a new bearer key.
 								let grant = GrantBearer::new();
@@ -308,19 +305,16 @@ impl AccessStatement {
 									Some(Subject::User(user)) => {
 										// Grant subject must match access method level.
 										if !matches!(&at.level, BearerAccessLevel::User) {
-											// TODO(PR): Add new error.
-											return Err(Error::InvalidAuth);
+											return Err(Error::AccessGrantInvalidSubject);
 										}
 										// If the grant is being created for a user, the user must exist.
 										txn.get_ns_user(opt.ns()?, user).await?;
 									}
 									Some(Subject::Record(_)) => {
 										// If the grant is being created for a record, a database must be selected.
-										// TODO(PR): Add new error.
 										return Err(Error::DbEmpty);
 									}
-									// TODO(PR): Add new error.
-									None => return Err(Error::InvalidAuth),
+									None => return Err(Error::AccessGrantInvalidSubject),
 								}
 								// Create a new bearer key.
 								let grant = GrantBearer::new();
@@ -375,8 +369,7 @@ impl AccessStatement {
 									Some(Subject::User(user)) => {
 										// Grant subject must match access method level.
 										if !matches!(&at.level, BearerAccessLevel::User) {
-											// TODO(PR): Add new error.
-											return Err(Error::InvalidAuth);
+											return Err(Error::AccessGrantInvalidSubject);
 										}
 										// If the grant is being created for a user, the user must exist.
 										txn.get_db_user(opt.ns()?, opt.db()?, user).await?;
@@ -384,12 +377,10 @@ impl AccessStatement {
 									Some(Subject::Record(_)) => {
 										// Grant subject must match access method level.
 										if !matches!(&at.level, BearerAccessLevel::Record) {
-											// TODO(PR): Add new error.
-											return Err(Error::InvalidAuth);
+											return Err(Error::AccessGrantInvalidSubject);
 										}
 									}
-									// TODO(PR): Add new error.
-									None => return Err(Error::InvalidAuth),
+									None => return Err(Error::AccessGrantInvalidSubject),
 								}
 								// Create a new bearer key.
 								let grant = GrantBearer::new();
@@ -501,8 +492,7 @@ impl AccessStatement {
 						let gr_str = stmt.gr.to_raw();
 						let mut gr = (*txn.get_root_access_grant(&ac_str, &gr_str).await?).clone();
 						if gr.revocation.is_some() {
-							// TODO(PR): Add new error.
-							return Err(Error::InvalidAuth);
+							return Err(Error::AccessGrantRevoked);
 						}
 						gr.revocation = Some(Datetime::default());
 						// Process the statement
@@ -521,8 +511,7 @@ impl AccessStatement {
 						let mut gr =
 							(*txn.get_ns_access_grant(opt.ns()?, &ac_str, &gr_str).await?).clone();
 						if gr.revocation.is_some() {
-							// TODO(PR): Add new error.
-							return Err(Error::InvalidAuth);
+							return Err(Error::AccessGrantRevoked);
 						}
 						gr.revocation = Some(Datetime::default());
 						// Process the statement
@@ -545,8 +534,7 @@ impl AccessStatement {
 							.await?)
 							.clone();
 						if gr.revocation.is_some() {
-							// TODO(PR): Add new error.
-							return Err(Error::InvalidAuth);
+							return Err(Error::AccessGrantRevoked);
 						}
 						gr.revocation = Some(Datetime::default());
 						// Process the statement
