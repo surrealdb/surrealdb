@@ -379,11 +379,11 @@ impl Parser<'_> {
 
 	/// Parsers an access statement.
 	fn parse_access(&mut self) -> ParseResult<AccessStatement> {
+		let ac = self.next_token_value()?;
 		match self.peek_kind() {
 			t!("GRANT") => {
 				self.pop_peek();
 				// TODO(PR): Implement rest of the syntax.
-				let ac = self.next_token_value()?;
 				expected!(self, t!("FOR"));
 				expected!(self, t!("USER"));
 				let user = self.next_token_value()?;
@@ -395,15 +395,12 @@ impl Parser<'_> {
 			t!("LIST") => {
 				self.pop_peek();
 				// TODO(PR): Implement rest of the syntax.
-				let ac = self.next_token_value()?;
 				Ok(AccessStatement::List(AccessStatementList {
 					ac,
 				}))
 			}
 			t!("REVOKE") => {
 				self.pop_peek();
-				let ac = self.next_token_value()?;
-				expected!(self, t!("GRANT"));
 				let gr = self.next_token_value()?;
 				Ok(AccessStatement::Revoke(AccessStatementRevoke {
 					ac,
