@@ -1,5 +1,4 @@
 mod parse;
-use core::panic;
 
 use parse::Parse;
 mod helpers;
