@@ -66,18 +66,19 @@ where
 		self.save(tx, st).await?;
 		Ok(true)
 	}
-	pub(super) fn search_single(
+	pub(super) async fn search_single(
 		&self,
+		tx: &Transaction,
 		elements: &HnswElements,
 		pt: &SharedVector,
 		ep_dist: f64,
 		ep_id: ElementId,
 		ef: usize,
-	) -> DoublePriorityQueue {
+	) -> Result<DoublePriorityQueue, Error> {
 		let visited = HashSet::from_iter([ep_id]);
 		let candidates = DoublePriorityQueue::from(ep_dist, ep_id);
 		let w = candidates.clone();
-		self.search(elements, pt, candidates, visited, w, ef)
+		self.search(tx, elements, pt, candidates, visited, w, ef).await
 	}
 
 	#[allow(clippy::too_many_arguments)]
@@ -98,57 +99,61 @@ where
 		self.search_checked(tx, stk, search, candidates, visited, w, chk).await
 	}
 
-	pub(super) fn search_multi(
+	pub(super) async fn search_multi(
 		&self,
+		tx: &Transaction,
 		elements: &HnswElements,
 		pt: &SharedVector,
 		candidates: DoublePriorityQueue,
 		ef: usize,
-	) -> DoublePriorityQueue {
+	) -> Result<DoublePriorityQueue, Error> {
 		let w = candidates.clone();
 		let visited = w.to_set();
-		self.search(elements, pt, candidates, visited, w, ef)
+		self.search(tx, elements, pt, candidates, visited, w, ef).await
 	}
 
-	pub(super) fn search_single_ignore_ep(
+	pub(super) async fn search_single_ignore_ep(
 		&self,
+		tx: &Transaction,
 		elements: &HnswElements,
 		pt: &SharedVector,
 		ep_id: ElementId,
-	) -> Option<(f64, ElementId)> {
+	) -> Result<Option<(f64, ElementId)>, Error> {
 		let visited = HashSet::from_iter([ep_id]);
 		let candidates = DoublePriorityQueue::from(0.0, ep_id);
 		let w = candidates.clone();
-		let q = self.search(elements, pt, candidates, visited, w, 1);
-		q.peek_first()
+		let q = self.search(tx, elements, pt, candidates, visited, w, 1).await?;
+		Ok(q.peek_first())
 	}
 
-	pub(super) fn search_multi_ignore_ep(
+	pub(super) async fn search_multi_ignore_ep(
 		&self,
+		tx: &Transaction,
 		elements: &HnswElements,
 		pt: &SharedVector,
 		ep_id: ElementId,
 		efc: usize,
-	) -> DoublePriorityQueue {
+	) -> Result<DoublePriorityQueue, Error> {
 		let visited = HashSet::from_iter([ep_id]);
 		let candidates = DoublePriorityQueue::from(0.0, ep_id);
 		let w = DoublePriorityQueue::default();
-		self.search(elements, pt, candidates, visited, w, efc)
+		self.search(tx, elements, pt, candidates, visited, w, efc).await
 	}
 
-	pub(super) fn search(
+	pub(super) async fn search(
 		&self,
+		tx: &Transaction,
 		elements: &HnswElements,
 		pt: &SharedVector,
 		mut candidates: DoublePriorityQueue,
 		mut visited: HashSet<ElementId>,
 		mut w: DoublePriorityQueue,
 		ef: usize,
-	) -> DoublePriorityQueue {
+	) -> Result<DoublePriorityQueue, Error> {
 		let mut f_dist = if let Some(d) = w.peek_last_dist() {
 			d
 		} else {
-			return w;
+			return Ok(w);
 		};
 		while let Some((dist, doc)) = candidates.pop_first() {
 			if dist > f_dist {
@@ -160,8 +165,8 @@ where
 					if !visited.insert(e_id) {
 						continue;
 					}
-					if let Some(e_pt) = elements.get_vector(&e_id) {
-						let e_dist = elements.distance(e_pt, pt);
+					if let Some(e_pt) = elements.get_vector(tx, &e_id).await? {
+						let e_dist = elements.distance(&e_pt, pt);
 						if e_dist < f_dist || w.len() < ef {
 							candidates.push(e_dist, e_id);
 							w.push(e_dist, e_id);
@@ -174,7 +179,7 @@ where
 				}
 			}
 		}
-		w
+		Ok(w)
 	}
 
 	#[allow(clippy::too_many_arguments)]
@@ -204,12 +209,14 @@ where
 					if !visited.insert(e_id) {
 						continue;
 					}
-					if let Some(e_pt) = elements.get_vector(&e_id) {
-						let e_dist = elements.distance(e_pt, pt);
+					if let Some(e_pt) = elements.get_vector(tx, &e_id).await? {
+						let e_dist = elements.distance(&e_pt, pt);
 						if e_dist < f_dist || w.len() < ef {
 							candidates.push(e_dist, e_id);
-							if Self::add_if_truthy(tx, stk, search, &mut w, e_pt, e_dist, e_id, chk)
-								.await?
+							if Self::add_if_truthy(
+								tx, stk, search, &mut w, &e_pt, e_dist, e_id, chk,
+							)
+							.await?
 							{
 								f_dist = w.peek_last_dist().unwrap(); // w can't be empty
 							}
@@ -258,9 +265,9 @@ where
 		let w;
 		let mut neighbors = self.graph.new_edges();
 		{
-			w = self.search_multi(elements, q_pt, eps, efc);
+			w = self.search_multi(tx, elements, q_pt, eps, efc).await?;
 			eps = w.clone();
-			heuristic.select(elements, self, q_id, q_pt, w, &mut neighbors);
+			heuristic.select(tx, elements, self, q_id, q_pt, w, &mut neighbors).await?;
 		};
 
 		let neighbors = self.graph.add_node_and_bidirectional_edges(q_id, neighbors);
@@ -268,10 +275,12 @@ where
 		for e_id in neighbors {
 			if let Some(e_conn) = self.graph.get_edges(&e_id) {
 				if e_conn.len() > self.m_max {
-					if let Some(e_pt) = elements.get_vector(&e_id) {
-						let e_c = self.build_priority_list(elements, e_id, e_conn);
+					if let Some(e_pt) = elements.get_vector(tx, &e_id).await? {
+						let e_c = self.build_priority_list(tx, elements, e_id, e_conn).await?;
 						let mut e_new_conn = self.graph.new_edges();
-						heuristic.select(elements, self, e_id, e_pt, e_c, &mut e_new_conn);
+						heuristic
+							.select(tx, elements, self, e_id, &e_pt, e_c, &mut e_new_conn)
+							.await?;
 						#[cfg(debug_assertions)]
 						assert!(!e_new_conn.contains(&e_id));
 						self.graph.set_node(e_id, e_new_conn);
@@ -286,22 +295,23 @@ where
 		Ok(eps)
 	}
 
-	fn build_priority_list(
+	async fn build_priority_list(
 		&self,
+		tx: &Transaction,
 		elements: &HnswElements,
 		e_id: ElementId,
 		neighbors: &S,
-	) -> DoublePriorityQueue {
+	) -> Result<DoublePriorityQueue, Error> {
 		let mut w = DoublePriorityQueue::default();
-		if let Some(e_pt) = elements.get_vector(&e_id) {
+		if let Some(e_pt) = elements.get_vector(tx, &e_id).await? {
 			for n_id in neighbors.iter() {
-				if let Some(n_pt) = elements.get_vector(n_id) {
-					let dist = elements.distance(e_pt, n_pt);
+				if let Some(n_pt) = elements.get_vector(tx, n_id).await? {
+					let dist = elements.distance(&e_pt, &n_pt);
 					w.push(dist, *n_id);
 				}
 			}
 		}
-		w
+		Ok(w)
 	}
 
 	pub(super) async fn remove(
@@ -315,10 +325,10 @@ where
 	) -> Result<bool, Error> {
 		if let Some(f_ids) = self.graph.remove_node_and_bidirectional_edges(&e_id) {
 			for &q_id in f_ids.iter() {
-				if let Some(q_pt) = elements.get_vector(&q_id) {
-					let c = self.search_multi_ignore_ep(elements, q_pt, q_id, efc);
+				if let Some(q_pt) = elements.get_vector(tx, &q_id).await? {
+					let c = self.search_multi_ignore_ep(tx, elements, &q_pt, q_id, efc).await?;
 					let mut neighbors = self.graph.new_edges();
-					heuristic.select(elements, self, q_id, q_pt, c, &mut neighbors);
+					heuristic.select(tx, elements, self, q_id, &q_pt, c, &mut neighbors).await?;
 					#[cfg(debug_assertions)]
 					{
 						assert!(
@@ -364,14 +374,16 @@ where
 		Ok(())
 	}
 
-	pub(super) async fn load(
-		&mut self,
-		_tx: &Transaction,
-		_ikb: &IndexKeyBase,
-		st: &LayerState,
-	) -> Result<(), Error> {
-		println!("LOAD {} {} {}", self.level, st.version, st.chunks);
-		todo!()
+	pub(super) async fn load(&mut self, tx: &Transaction, st: &LayerState) -> Result<(), Error> {
+		let mut val = Vec::new();
+		// Load the chunks
+		for i in 0..st.chunks {
+			let key = self.ikb.new_hl_key(self.level, i);
+			let chunk = tx.get(key).await?.ok_or_else(|| Error::Unreachable("Missing chunk"))?;
+			val.extend(chunk);
+		}
+		// Rebuild the graph
+		self.graph.reload(&val)
 	}
 }
 

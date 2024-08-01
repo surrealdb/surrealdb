@@ -4,7 +4,7 @@ use crate::idx::trees::dynamicset::{AHashSet, ArraySet};
 use crate::idx::trees::hnsw::docs::HnswDocs;
 use crate::idx::trees::hnsw::docs::VecDocs;
 use crate::idx::trees::hnsw::{ElementId, Hnsw, HnswSearch};
-use crate::idx::trees::vector::SharedVector;
+use crate::idx::trees::vector::{SharedVector, Vector};
 use crate::idx::IndexKeyBase;
 use crate::kvs::Transaction;
 use crate::sql::index::HnswParams;
@@ -75,7 +75,7 @@ impl HnswFlavor {
 	pub(super) async fn insert(
 		&mut self,
 		tx: &Transaction,
-		q_pt: SharedVector,
+		q_pt: Vector,
 	) -> Result<ElementId, Error> {
 		match self {
 			HnswFlavor::H5_9(h) => h.insert(tx, q_pt).await,
@@ -116,22 +116,26 @@ impl HnswFlavor {
 			HnswFlavor::Hset(h) => h.remove(tx, e_id).await,
 		}
 	}
-	pub(super) fn knn_search(&self, search: &HnswSearch) -> Vec<(f64, ElementId)> {
+	pub(super) async fn knn_search(
+		&self,
+		tx: &Transaction,
+		search: &HnswSearch,
+	) -> Result<Vec<(f64, ElementId)>, Error> {
 		match self {
-			HnswFlavor::H5_9(h) => h.knn_search(search),
-			HnswFlavor::H5_17(h) => h.knn_search(search),
-			HnswFlavor::H5_25(h) => h.knn_search(search),
-			HnswFlavor::H5set(h) => h.knn_search(search),
-			HnswFlavor::H9_17(h) => h.knn_search(search),
-			HnswFlavor::H9_25(h) => h.knn_search(search),
-			HnswFlavor::H9set(h) => h.knn_search(search),
-			HnswFlavor::H13_25(h) => h.knn_search(search),
-			HnswFlavor::H13set(h) => h.knn_search(search),
-			HnswFlavor::H17set(h) => h.knn_search(search),
-			HnswFlavor::H21set(h) => h.knn_search(search),
-			HnswFlavor::H25set(h) => h.knn_search(search),
-			HnswFlavor::H29set(h) => h.knn_search(search),
-			HnswFlavor::Hset(h) => h.knn_search(search),
+			HnswFlavor::H5_9(h) => h.knn_search(tx, search).await,
+			HnswFlavor::H5_17(h) => h.knn_search(tx, search).await,
+			HnswFlavor::H5_25(h) => h.knn_search(tx, search).await,
+			HnswFlavor::H5set(h) => h.knn_search(tx, search).await,
+			HnswFlavor::H9_17(h) => h.knn_search(tx, search).await,
+			HnswFlavor::H9_25(h) => h.knn_search(tx, search).await,
+			HnswFlavor::H9set(h) => h.knn_search(tx, search).await,
+			HnswFlavor::H13_25(h) => h.knn_search(tx, search).await,
+			HnswFlavor::H13set(h) => h.knn_search(tx, search).await,
+			HnswFlavor::H17set(h) => h.knn_search(tx, search).await,
+			HnswFlavor::H21set(h) => h.knn_search(tx, search).await,
+			HnswFlavor::H25set(h) => h.knn_search(tx, search).await,
+			HnswFlavor::H29set(h) => h.knn_search(tx, search).await,
+			HnswFlavor::Hset(h) => h.knn_search(tx, search).await,
 		}
 	}
 	pub(super) async fn knn_search_checked(
@@ -188,22 +192,26 @@ impl HnswFlavor {
 			}
 		}
 	}
-	pub(super) fn get_vector(&self, e_id: &ElementId) -> Option<&SharedVector> {
+	pub(super) async fn get_vector(
+		&self,
+		tx: &Transaction,
+		e_id: &ElementId,
+	) -> Result<Option<SharedVector>, Error> {
 		match self {
-			HnswFlavor::H5_9(h) => h.get_vector(e_id),
-			HnswFlavor::H5_17(h) => h.get_vector(e_id),
-			HnswFlavor::H5_25(h) => h.get_vector(e_id),
-			HnswFlavor::H5set(h) => h.get_vector(e_id),
-			HnswFlavor::H9_17(h) => h.get_vector(e_id),
-			HnswFlavor::H9_25(h) => h.get_vector(e_id),
-			HnswFlavor::H9set(h) => h.get_vector(e_id),
-			HnswFlavor::H13_25(h) => h.get_vector(e_id),
-			HnswFlavor::H13set(h) => h.get_vector(e_id),
-			HnswFlavor::H17set(h) => h.get_vector(e_id),
-			HnswFlavor::H21set(h) => h.get_vector(e_id),
-			HnswFlavor::H25set(h) => h.get_vector(e_id),
-			HnswFlavor::H29set(h) => h.get_vector(e_id),
-			HnswFlavor::Hset(h) => h.get_vector(e_id),
+			HnswFlavor::H5_9(h) => h.get_vector(tx, e_id).await,
+			HnswFlavor::H5_17(h) => h.get_vector(tx, e_id).await,
+			HnswFlavor::H5_25(h) => h.get_vector(tx, e_id).await,
+			HnswFlavor::H5set(h) => h.get_vector(tx, e_id).await,
+			HnswFlavor::H9_17(h) => h.get_vector(tx, e_id).await,
+			HnswFlavor::H9_25(h) => h.get_vector(tx, e_id).await,
+			HnswFlavor::H9set(h) => h.get_vector(tx, e_id).await,
+			HnswFlavor::H13_25(h) => h.get_vector(tx, e_id).await,
+			HnswFlavor::H13set(h) => h.get_vector(tx, e_id).await,
+			HnswFlavor::H17set(h) => h.get_vector(tx, e_id).await,
+			HnswFlavor::H21set(h) => h.get_vector(tx, e_id).await,
+			HnswFlavor::H25set(h) => h.get_vector(tx, e_id).await,
+			HnswFlavor::H29set(h) => h.get_vector(tx, e_id).await,
+			HnswFlavor::Hset(h) => h.get_vector(tx, e_id).await,
 		}
 	}
 	#[cfg(test)]

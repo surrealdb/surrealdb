@@ -16,7 +16,7 @@ use crate::idx::trees::hnsw::index::HnswCheckedSearchContext;
 
 use crate::idx::trees::hnsw::layer::{HnswLayer, LayerState};
 use crate::idx::trees::knn::DoublePriorityQueue;
-use crate::idx::trees::vector::SharedVector;
+use crate::idx::trees::vector::{SerializedVector, SharedVector, Vector};
 use crate::idx::{IndexKeyBase, VersionedStore};
 use crate::kvs::{Key, Transaction, Val};
 use crate::sql::index::HnswParams;
@@ -99,7 +99,7 @@ where
 			enter_point: None,
 			layer0: HnswLayer::new(ikb.clone(), 0, m0),
 			layers: Vec::default(),
-			elements: HnswElements::new(p.distance.clone()),
+			elements: HnswElements::new(ikb.clone(), p.distance.clone()),
 			rng: SmallRng::from_entropy(),
 			heuristic: p.into(),
 			ikb,
@@ -115,19 +115,19 @@ where
 		};
 		// Compare versions
 		if st.layer0.version != self.state.layer0.version {
-			self.layer0.load(tx, &self.ikb, &st.layer0).await?;
+			self.layer0.load(tx, &st.layer0).await?;
 		}
 		for ((new_stl, stl), layer) in
 			st.layers.iter().zip(self.state.layers.iter_mut()).zip(self.layers.iter_mut())
 		{
 			if new_stl.version != stl.version {
-				layer.load(tx, &self.ikb, new_stl).await?;
+				layer.load(tx, new_stl).await?;
 			}
 		}
 		// Retrieve missing layers
 		for i in self.layers.len()..st.layers.len() {
 			let mut l = HnswLayer::new(self.ikb.clone(), i + 1, self.m);
-			l.load(tx, &self.ikb, &st.layers[i]).await?;
+			l.load(tx, &st.layers[i]).await?;
 			self.layers.push(l);
 		}
 		// Remove non-existing layers
@@ -143,7 +143,7 @@ where
 	async fn insert_level(
 		&mut self,
 		tx: &Transaction,
-		q_pt: SharedVector,
+		q_pt: Vector,
 		q_level: usize,
 	) -> Result<ElementId, Error> {
 		// Attributes an ID to the vector
@@ -157,7 +157,8 @@ where
 		}
 
 		// Store the vector
-		self.elements.insert(q_id, q_pt.clone());
+		let pt_ser = SerializedVector::from(&q_pt);
+		let q_pt = self.elements.insert(tx, q_id, q_pt, &pt_ser).await?;
 
 		if let Some(ep_id) = self.enter_point {
 			// We already have an enter_point, let's insert the element in the layers
@@ -210,8 +211,10 @@ where
 		if let Some(mut ep_dist) = self.elements.get_distance(q_pt, &ep_id) {
 			if q_level < top_up_layers {
 				for layer in self.layers[q_level..top_up_layers].iter_mut().rev() {
-					if let Some(ep_dist_id) =
-						layer.search_single(&self.elements, q_pt, ep_dist, ep_id, 1).peek_first()
+					if let Some(ep_dist_id) = layer
+						.search_single(tx, &self.elements, q_pt, ep_dist, ep_id, 1)
+						.await?
+						.peek_first()
 					{
 						(ep_dist, ep_id) = ep_dist_id;
 					} else {
@@ -284,7 +287,7 @@ where
 		Ok(())
 	}
 
-	async fn insert(&mut self, tx: &Transaction, q_pt: SharedVector) -> Result<ElementId, Error> {
+	async fn insert(&mut self, tx: &Transaction, q_pt: Vector) -> Result<ElementId, Error> {
 		let q_level = self.get_random_level();
 		let res = self.insert_level(tx, q_pt, q_level).await?;
 		self.save_state(tx).await?;
@@ -294,7 +297,7 @@ where
 	async fn remove(&mut self, tx: &Transaction, e_id: ElementId) -> Result<bool, Error> {
 		let mut removed = false;
 
-		let e_pt = self.elements.get_vector(&e_id).cloned();
+		let e_pt = self.elements.get_vector(tx, &e_id).await?;
 		// Do we have the vector?
 		if let Some(e_pt) = e_pt {
 			let layers = self.layers.len();
@@ -304,9 +307,11 @@ where
 			if Some(e_id) == self.enter_point {
 				// Let's find a new enter point
 				new_enter_point = if layers == 0 {
-					self.layer0.search_single_ignore_ep(&self.elements, &e_pt, e_id)
+					self.layer0.search_single_ignore_ep(tx, &self.elements, &e_pt, e_id).await?
 				} else {
-					self.layers[layers - 1].search_single_ignore_ep(&self.elements, &e_pt, e_id)
+					self.layers[layers - 1]
+						.search_single_ignore_ep(tx, &self.elements, &e_pt, e_id)
+						.await?
 				};
 			}
 
@@ -337,13 +342,19 @@ where
 		Ok(removed)
 	}
 
-	fn knn_search(&self, search: &HnswSearch) -> Vec<(f64, ElementId)> {
-		if let Some((ep_dist, ep_id)) = self.search_ep(&search.pt) {
-			let w =
-				self.layer0.search_single(&self.elements, &search.pt, ep_dist, ep_id, search.ef);
-			w.to_vec_limit(search.k)
+	async fn knn_search(
+		&self,
+		tx: &Transaction,
+		search: &HnswSearch,
+	) -> Result<Vec<(f64, ElementId)>, Error> {
+		if let Some((ep_dist, ep_id)) = self.search_ep(tx, &search.pt).await? {
+			let w = self
+				.layer0
+				.search_single(tx, &self.elements, &search.pt, ep_dist, ep_id, search.ef)
+				.await?;
+			Ok(w.to_vec_limit(search.k))
 		} else {
-			vec![]
+			Ok(vec![])
 		}
 	}
 
@@ -356,8 +367,8 @@ where
 		vec_docs: &VecDocs,
 		chk: &mut HnswConditionChecker<'_>,
 	) -> Result<Vec<(f64, ElementId)>, Error> {
-		if let Some((ep_dist, ep_id)) = self.search_ep(&search.pt) {
-			if let Some(ep_pt) = self.elements.get_vector(&ep_id) {
+		if let Some((ep_dist, ep_id)) = self.search_ep(tx, &search.pt).await? {
+			if let Some(ep_pt) = self.elements.get_vector(tx, &ep_id).await? {
 				let search_ctx = HnswCheckedSearchContext::new(
 					&self.elements,
 					hnsw_docs,
@@ -367,7 +378,7 @@ where
 				);
 				let w = self
 					.layer0
-					.search_single_checked(tx, stk, &search_ctx, ep_pt, ep_dist, ep_id, chk)
+					.search_single_checked(tx, stk, &search_ctx, &ep_pt, ep_dist, ep_id, chk)
 					.await?;
 				return Ok(w.to_vec_limit(search.k));
 			}
@@ -375,12 +386,18 @@ where
 		Ok(vec![])
 	}
 
-	fn search_ep(&self, pt: &SharedVector) -> Option<(f64, ElementId)> {
+	async fn search_ep(
+		&self,
+		tx: &Transaction,
+		pt: &SharedVector,
+	) -> Result<Option<(f64, ElementId)>, Error> {
 		if let Some(mut ep_id) = self.enter_point {
 			if let Some(mut ep_dist) = self.elements.get_distance(pt, &ep_id) {
 				for layer in self.layers.iter().rev() {
-					if let Some(ep_dist_id) =
-						layer.search_single(&self.elements, pt, ep_dist, ep_id, 1).peek_first()
+					if let Some(ep_dist_id) = layer
+						.search_single(tx, &self.elements, pt, ep_dist, ep_id, 1)
+						.await?
+						.peek_first()
 					{
 						(ep_dist, ep_id) = ep_dist_id;
 					} else {
@@ -388,17 +405,21 @@ where
 						unreachable!()
 					}
 				}
-				return Some((ep_dist, ep_id));
+				return Ok(Some((ep_dist, ep_id)));
 			} else {
 				#[cfg(debug_assertions)]
 				unreachable!()
 			}
 		}
-		None
+		Ok(None)
 	}
 
-	fn get_vector(&self, e_id: &ElementId) -> Option<&SharedVector> {
-		self.elements.get_vector(e_id)
+	async fn get_vector(
+		&self,
+		tx: &Transaction,
+		e_id: &ElementId,
+	) -> Result<Option<SharedVector>, Error> {
+		self.elements.get_vector(tx, e_id).await
 	}
 	#[cfg(test)]
 	fn check_hnsw_properties(&self, expected_count: usize) {

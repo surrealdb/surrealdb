@@ -1,5 +1,6 @@
 use crate::err::Error;
 use crate::fnc::util::math::ToFloat;
+use crate::idx::VersionedStore;
 use crate::sql::index::{Distance, VectorType};
 use crate::sql::{Number, Value};
 use ahash::AHasher;
@@ -37,6 +38,8 @@ pub enum SerializedVector {
 	I32(Vec<i32>),
 	I16(Vec<i16>),
 }
+
+impl VersionedStore for SerializedVector {}
 
 impl From<&Vector> for SerializedVector {
 	fn from(value: &Vector) -> Self {

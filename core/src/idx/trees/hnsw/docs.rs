@@ -3,7 +3,7 @@ use crate::idx::docids::DocId;
 use crate::idx::trees::hnsw::flavor::HnswFlavor;
 use crate::idx::trees::hnsw::ElementId;
 use crate::idx::trees::knn::Ids64;
-use crate::idx::trees::vector::SharedVector;
+use crate::idx::trees::vector::{SerializedVector, SharedVector, Vector};
 use crate::idx::{IndexKeyBase, VersionedStore};
 use crate::kvs::{Key, Transaction, Val};
 use crate::sql::{Id, Thing};
@@ -158,11 +158,12 @@ impl VecDocs {
 	pub(super) async fn insert(
 		&self,
 		tx: &Transaction,
-		o: SharedVector,
+		o: Vector,
 		d: DocId,
 		h: &mut HnswFlavor,
 	) -> Result<(), Error> {
-		let key = self.ikb.new_hv_key(Arc::new(o.deref().into()));
+		let ser_vec = Arc::new(SerializedVector::from(&o));
+		let key = self.ikb.new_hv_key(ser_vec);
 		if let Some(ed) = match tx.get(key.clone()).await? {
 			Some(val) => {
 				// We already have the vector

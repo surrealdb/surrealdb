@@ -1,8 +1,10 @@
+use crate::err::Error;
 use crate::idx::trees::dynamicset::DynamicSet;
 use crate::idx::trees::hnsw::layer::HnswLayer;
 use crate::idx::trees::hnsw::{ElementId, HnswElements};
 use crate::idx::trees::knn::DoublePriorityQueue;
 use crate::idx::trees::vector::SharedVector;
+use crate::kvs::Transaction;
 use crate::sql::index::HnswParams;
 
 #[derive(Debug)]
@@ -30,31 +32,37 @@ impl From<&HnswParams> for Heuristic {
 }
 
 impl Heuristic {
-	pub(super) fn select<S>(
+	pub(super) async fn select<S>(
 		&self,
+		tx: &Transaction,
 		elements: &HnswElements,
 		layer: &HnswLayer<S>,
 		q_id: ElementId,
 		q_pt: &SharedVector,
 		c: DoublePriorityQueue,
 		res: &mut S,
-	) where
+	) -> Result<(), Error>
+	where
 		S: DynamicSet,
 	{
 		match self {
-			Self::Standard => Self::heuristic(elements, layer, c, res),
-			Self::Ext => Self::heuristic_ext(elements, layer, q_id, q_pt, c, res),
-			Self::Keep => Self::heuristic_keep(elements, layer, c, res),
-			Self::ExtAndKeep => Self::heuristic_ext_keep(elements, layer, q_id, q_pt, c, res),
+			Self::Standard => Self::heuristic(tx, elements, layer, c, res).await,
+			Self::Ext => Self::heuristic_ext(tx, elements, layer, q_id, q_pt, c, res).await,
+			Self::Keep => Self::heuristic_keep(tx, elements, layer, c, res).await,
+			Self::ExtAndKeep => {
+				Self::heuristic_ext_keep(tx, elements, layer, q_id, q_pt, c, res).await
+			}
 		}
 	}
 
-	fn heuristic<S>(
+	async fn heuristic<S>(
+		tx: &Transaction,
 		elements: &HnswElements,
 		layer: &HnswLayer<S>,
 		mut c: DoublePriorityQueue,
 		res: &mut S,
-	) where
+	) -> Result<(), Error>
+	where
 		S: DynamicSet,
 	{
 		let m_max = layer.m_max();
@@ -62,29 +70,32 @@ impl Heuristic {
 			c.to_dynamic_set(res);
 		} else {
 			while let Some((e_dist, e_id)) = c.pop_first() {
-				if Self::is_closer(elements, e_dist, e_id, res) && res.len() == m_max {
+				if Self::is_closer(tx, elements, e_dist, e_id, res).await? && res.len() == m_max {
 					break;
 				}
 			}
 		}
+		Ok(())
 	}
 
-	fn heuristic_keep<S>(
+	async fn heuristic_keep<S>(
+		tx: &Transaction,
 		elements: &HnswElements,
 		layer: &HnswLayer<S>,
 		mut c: DoublePriorityQueue,
 		res: &mut S,
-	) where
+	) -> Result<(), Error>
+	where
 		S: DynamicSet,
 	{
 		let m_max = layer.m_max();
 		if c.len() <= m_max {
 			c.to_dynamic_set(res);
-			return;
+			return Ok(());
 		}
 		let mut pruned = Vec::new();
 		while let Some((e_dist, e_id)) = c.pop_first() {
-			if Self::is_closer(elements, e_dist, e_id, res) {
+			if Self::is_closer(tx, elements, e_dist, e_id, res).await? {
 				if res.len() == m_max {
 					break;
 				}
@@ -98,6 +109,7 @@ impl Heuristic {
 				res.insert(e_id);
 			}
 		}
+		Ok(())
 	}
 
 	fn extend_candidates<S>(
@@ -131,50 +143,60 @@ impl Heuristic {
 		}
 	}
 
-	fn heuristic_ext<S>(
+	async fn heuristic_ext<S>(
+		tx: &Transaction,
 		elements: &HnswElements,
 		layer: &HnswLayer<S>,
 		q_id: ElementId,
 		q_pt: &SharedVector,
 		mut c: DoublePriorityQueue,
 		res: &mut S,
-	) where
-		S: DynamicSet,
-	{
-		Self::extend_candidates(elements, layer, q_id, q_pt, &mut c);
-		Self::heuristic(elements, layer, c, res)
-	}
-
-	fn heuristic_ext_keep<S>(
-		elements: &HnswElements,
-		layer: &HnswLayer<S>,
-		q_id: ElementId,
-		q_pt: &SharedVector,
-		mut c: DoublePriorityQueue,
-		res: &mut S,
-	) where
-		S: DynamicSet,
-	{
-		Self::extend_candidates(elements, layer, q_id, q_pt, &mut c);
-		Self::heuristic_keep(elements, layer, c, res)
-	}
-
-	fn is_closer<S>(elements: &HnswElements, e_dist: f64, e_id: ElementId, r: &mut S) -> bool
+	) -> Result<(), Error>
 	where
 		S: DynamicSet,
 	{
-		if let Some(current_vec) = elements.get_vector(&e_id) {
+		Self::extend_candidates(elements, layer, q_id, q_pt, &mut c);
+		Self::heuristic(tx, elements, layer, c, res).await
+	}
+
+	async fn heuristic_ext_keep<S>(
+		tx: &Transaction,
+		elements: &HnswElements,
+		layer: &HnswLayer<S>,
+		q_id: ElementId,
+		q_pt: &SharedVector,
+		mut c: DoublePriorityQueue,
+		res: &mut S,
+	) -> Result<(), Error>
+	where
+		S: DynamicSet,
+	{
+		Self::extend_candidates(elements, layer, q_id, q_pt, &mut c);
+		Self::heuristic_keep(tx, elements, layer, c, res).await
+	}
+
+	async fn is_closer<S>(
+		tx: &Transaction,
+		elements: &HnswElements,
+		e_dist: f64,
+		e_id: ElementId,
+		r: &mut S,
+	) -> Result<bool, Error>
+	where
+		S: DynamicSet,
+	{
+		if let Some(current_vec) = elements.get_vector(tx, &e_id).await? {
 			for r_id in r.iter() {
-				if let Some(r_dist) = elements.get_distance(current_vec, r_id) {
+				if let Some(r_dist) = elements.get_distance(&current_vec, r_id) {
 					if e_dist > r_dist {
-						return false;
+						return Ok(false);
 					}
 				}
 			}
 			r.insert(e_id);
-			true
+			Ok(true)
 		} else {
-			false
+			Ok(false)
 		}
 	}
 }

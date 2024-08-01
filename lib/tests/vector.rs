@@ -536,9 +536,9 @@ async fn check_hnsw_persistence() -> Result<(), Error> {
 	let mut t = Test::new(sql).await?;
 	t.skip_ok(6)?;
 
+	// Restart the datastore and execute the SELECT query
 	let sql =
 		"SELECT id, vector::distance::knn() AS dist FROM pts WHERE point <|2,100|> [2,3,4,5];";
-	// Restart the datastore
 	let mut t = t.restart(sql).await?;
 
 	// We should find results

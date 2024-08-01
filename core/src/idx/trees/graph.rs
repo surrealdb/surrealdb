@@ -4,7 +4,7 @@ use crate::idx::trees::hnsw::ElementId;
 use ahash::HashMap;
 #[cfg(test)]
 use ahash::HashSet;
-use bytes::{BufMut, BytesMut};
+use bytes::{Buf, BufMut, BytesMut};
 use std::collections::hash_map::Entry;
 use std::fmt::Debug;
 
@@ -89,6 +89,22 @@ where
 			}
 		}
 		Ok(buf)
+	}
+
+	pub(super) fn reload(&mut self, val: &[u8]) -> Result<(), Error> {
+		let mut buf = BytesMut::from(val);
+		self.nodes.clear();
+		let len = buf.get_u32() as usize;
+		for _ in 0..len {
+			let e = buf.get_u64();
+			let s_len = buf.get_u16() as usize;
+			let mut s = S::with_capacity(s_len);
+			for _ in 0..s_len {
+				s.insert(buf.get_u64() as ElementId);
+			}
+			self.nodes.insert(e, s);
+		}
+		Ok(())
 	}
 }
 

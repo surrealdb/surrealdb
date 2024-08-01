@@ -111,7 +111,7 @@ impl HnswIndex {
 	pub(super) async fn insert(
 		&mut self,
 		tx: &Transaction,
-		o: SharedVector,
+		o: Vector,
 		d: DocId,
 	) -> Result<(), Error> {
 		self.vec_docs.insert(tx, o, d, &mut self.hnsw).await
@@ -147,6 +147,11 @@ impl HnswIndex {
 		Ok(())
 	}
 
+	// Ensure the layers are up-to-date
+	pub async fn check_state(&mut self, tx: &Transaction) -> Result<(), Error> {
+		self.hnsw.check_state(tx).await
+	}
+
 	pub async fn knn_search(
 		&self,
 		tx: &Transaction,
@@ -175,7 +180,7 @@ impl HnswIndex {
 	) -> Result<KnnResult, Error> {
 		// Do the search
 		let neighbors = match chk {
-			HnswConditionChecker::Hnsw(_) => self.hnsw.knn_search(search),
+			HnswConditionChecker::Hnsw(_) => self.hnsw.knn_search(tx, search).await?,
 			HnswConditionChecker::HnswCondition(_) => {
 				self.hnsw
 					.knn_search_checked(tx, stk, search, &self.docs, &self.vec_docs, chk)
@@ -195,8 +200,8 @@ impl HnswIndex {
 		let mut builder = KnnResultBuilder::new(n);
 		for (e_dist, e_id) in neighbors {
 			if builder.check_add(e_dist) {
-				if let Some(v) = self.hnsw.get_vector(&e_id) {
-					if let Some(docs) = self.vec_docs.get_docs(tx, v).await? {
+				if let Some(v) = self.hnsw.get_vector(tx, &e_id).await? {
+					if let Some(docs) = self.vec_docs.get_docs(tx, &v).await? {
 						let evicted_docs = builder.add(e_dist, docs);
 						chk.expires(evicted_docs);
 					}
