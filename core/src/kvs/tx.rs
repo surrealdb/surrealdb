@@ -833,12 +833,27 @@ impl Transaction {
 	}
 
 	/// Retrieve a specific root access grant.
-	pub async fn get_root_access_grant(&self, ac: &str, gr: &str) -> Result<AccessGrant, Error> {
-		let key = crate::key::root::access::gr::new(ac, gr);
-		let val = self.get(key).await?.ok_or(Error::AccessGrantRootNotFound {
-			gr: gr.to_owned(),
-		})?;
-		Ok(val.into())
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
+	pub async fn get_root_access_grant(
+		&self,
+		ac: &str,
+		gr: &str,
+	) -> Result<Arc<AccessGrant>, Error> {
+		let key = crate::key::root::access::gr::new(ac, gr).encode()?;
+		let res = self.cache.get_value_or_guard_async(&key).await;
+		Ok(match res {
+			Ok(val) => val,
+			Err(cache) => {
+				let val = self.get(key).await?.ok_or(Error::AccessGrantRootNotFound {
+					gr: gr.to_owned(),
+				})?;
+				let val: AccessGrant = val.into();
+				let val = Entry::Any(Arc::new(val));
+				let _ = cache.insert(val.clone());
+				val
+			}
+		}
+		.into_type())
 	}
 
 	/// Retrieve a specific namespace definition.
@@ -908,18 +923,29 @@ impl Transaction {
 	}
 
 	/// Retrieve a specific namespace access grant.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
 	pub async fn get_ns_access_grant(
 		&self,
 		ns: &str,
 		ac: &str,
 		gr: &str,
-	) -> Result<AccessGrant, Error> {
-		let key = crate::key::namespace::access::gr::new(ns, ac, gr);
-		let val = self.get(key).await?.ok_or(Error::AccessGrantNsNotFound {
-			gr: gr.to_owned(),
-			ns: ns.to_owned(),
-		})?;
-		Ok(val.into())
+	) -> Result<Arc<AccessGrant>, Error> {
+		let key = crate::key::namespace::access::gr::new(ns, ac, gr).encode()?;
+		let res = self.cache.get_value_or_guard_async(&key).await;
+		Ok(match res {
+			Ok(val) => val,
+			Err(cache) => {
+				let val = self.get(key).await?.ok_or(Error::AccessGrantNsNotFound {
+					gr: gr.to_owned(),
+					ns: ns.to_owned(),
+				})?;
+				let val: AccessGrant = val.into();
+				let val = Entry::Any(Arc::new(val));
+				let _ = cache.insert(val.clone());
+				val
+			}
+		}
+		.into_type())
 	}
 
 	/// Retrieve a specific database definition.
@@ -997,20 +1023,31 @@ impl Transaction {
 	}
 
 	/// Retrieve a specific database access grant.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
 	pub async fn get_db_access_grant(
 		&self,
 		ns: &str,
 		db: &str,
 		ac: &str,
 		gr: &str,
-	) -> Result<AccessGrant, Error> {
-		let key = crate::key::database::access::gr::new(ns, db, ac, gr);
-		let val = self.get(key).await?.ok_or(Error::AccessGrantDbNotFound {
-			gr: gr.to_owned(),
-			ns: ns.to_owned(),
-			db: db.to_owned(),
-		})?;
-		Ok(val.into())
+	) -> Result<Arc<AccessGrant>, Error> {
+		let key = crate::key::database::access::gr::new(ns, db, ac, gr).encode()?;
+		let res = self.cache.get_value_or_guard_async(&key).await;
+		Ok(match res {
+			Ok(val) => val,
+			Err(cache) => {
+				let val = self.get(key).await?.ok_or(Error::AccessGrantDbNotFound {
+					gr: gr.to_owned(),
+					ns: ns.to_owned(),
+					db: db.to_owned(),
+				})?;
+				let val: AccessGrant = val.into();
+				let val = Entry::Any(Arc::new(val));
+				let _ = cache.insert(val.clone());
+				val
+			}
+		}
+		.into_type())
 	}
 
 	/// Retrieve a specific model definition from a database.

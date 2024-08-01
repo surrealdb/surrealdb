@@ -18,10 +18,13 @@ pub static GRANT_BEARER_CHARACTER_POOL: &[u8] =
 	b"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
 // The key identifier should not have collisions to prevent confusion.
 // However, collisions should be handled gracefully when issuing grants.
-// With 12 characters from the pool, the key identifier has ~70 bits of entropy.
+// With 12 characters from the pool, the key identifier part has ~70 bits of entropy.
 pub static GRANT_BEARER_ID_LENGTH: usize = 12;
-// With 24 characters from the pool, the key has ~140 bits of entropy.
+// With 24 characters from the pool, the key part has ~140 bits of entropy.
 pub static GRANT_BEARER_KEY_LENGTH: usize = 24;
+// Total bearer key length.
+pub static GRANT_BEARER_LENGTH: usize =
+	GRANT_BEARER_PREFIX.len() + 1 + GRANT_BEARER_ID_LENGTH + 1 + GRANT_BEARER_KEY_LENGTH;
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
@@ -287,7 +290,7 @@ impl AccessStatement {
 									&gr_str,
 								);
 								txn.get_or_add_ns(opt.ns()?, opt.strict).await?;
-								txn.set(key, gr.to_owned()).await?;
+								txn.set(key, &gr).await?;
 								Ok(Value::Object(gr.into()))
 							}
 							_ => Err(Error::AccessMethodMismatch),
@@ -358,7 +361,7 @@ impl AccessStatement {
 								);
 								txn.get_or_add_ns(opt.ns()?, opt.strict).await?;
 								txn.get_or_add_db(opt.ns()?, opt.db()?, opt.strict).await?;
-								txn.set(key, gr.to_owned()).await?;
+								txn.set(key, &gr).await?;
 								Ok(Value::Object(gr.into()))
 							}
 						}
@@ -423,7 +426,8 @@ impl AccessStatement {
 						// Get the grants to revoke
 						let ac_str = stmt.ac.to_raw();
 						let gr_str = stmt.gr.to_raw();
-						let mut gr = txn.get_ns_access_grant(opt.ns()?, &ac_str, &gr_str).await?;
+						let mut gr =
+							(*txn.get_ns_access_grant(opt.ns()?, &ac_str, &gr_str).await?).clone();
 						if gr.revocation.is_some() {
 							// TODO(PR): Add new error.
 							return Err(Error::InvalidAuth);
@@ -433,7 +437,7 @@ impl AccessStatement {
 						let key =
 							crate::key::namespace::access::gr::new(opt.ns()?, &ac_str, &gr_str);
 						txn.get_or_add_ns(opt.ns()?, opt.strict).await?;
-						txn.set(key, gr.to_owned()).await?;
+						txn.set(key, &gr).await?;
 						Ok(Value::Object(gr.redacted().into()))
 					}
 					Base::Db => {
@@ -444,8 +448,10 @@ impl AccessStatement {
 						// Get the grants to revoke
 						let ac_str = stmt.ac.to_raw();
 						let gr_str = stmt.gr.to_raw();
-						let mut gr =
-							txn.get_db_access_grant(opt.ns()?, opt.db()?, &ac_str, &gr_str).await?;
+						let mut gr = (*txn
+							.get_db_access_grant(opt.ns()?, opt.db()?, &ac_str, &gr_str)
+							.await?)
+							.clone();
 						if gr.revocation.is_some() {
 							// TODO(PR): Add new error.
 							return Err(Error::InvalidAuth);
@@ -460,7 +466,7 @@ impl AccessStatement {
 						);
 						txn.get_or_add_ns(opt.ns()?, opt.strict).await?;
 						txn.get_or_add_db(opt.ns()?, opt.db()?, opt.strict).await?;
-						txn.set(key, gr.to_owned()).await?;
+						txn.set(key, &gr).await?;
 						Ok(Value::Object(gr.redacted().into()))
 					}
 					_ => Err(Error::FeatureNotYetImplemented {
