@@ -5,6 +5,8 @@ use serde::ser::Error as _;
 use serde::ser::Impossible;
 use serde::ser::Serialize;
 
+pub mod opt;
+
 pub(super) struct Serializer;
 
 impl ser::Serializer for Serializer {

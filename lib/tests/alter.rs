@@ -251,3 +251,124 @@ async fn define_alter_field_if_exists() -> Result<(), Error> {
 	//
 	Ok(())
 }
+
+#[tokio::test]
+async fn define_alter_param() -> Result<(), Error> {
+	let sql = "
+		DEFINE PARAM $test VALUE 123;
+		INFO FOR DB;
+
+		ALTER PARAM $test
+		    VALUE 456
+			PERMISSIONS NONE
+			COMMENT 'bla';
+		INFO FOR DB;
+
+		ALTER PARAM $test
+		    VALUE 123
+			PERMISSIONS FULL
+			COMMENT UNSET;
+		INFO FOR DB;
+	";
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 6);
+	//
+	let tmp = res.remove(0).result;
+	assert!(tmp.is_ok());
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"{
+            accesses: {},
+            analyzers: {},
+            functions: {},
+            models: {},
+            params: {
+                test: 'DEFINE PARAM $test VALUE 123 PERMISSIONS FULL'
+            },
+            tables: {},
+            users: {}
+        }",
+	);
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result;
+	assert!(tmp.is_ok());
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"{
+            accesses: {},
+            analyzers: {},
+            functions: {},
+            models: {},
+            params: {
+                test: \"DEFINE PARAM $test VALUE 456 COMMENT 'bla' PERMISSIONS NONE\"
+            },
+            tables: {},
+            users: {}
+        }",
+	);
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result;
+	assert!(tmp.is_ok());
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"{
+            accesses: {},
+            analyzers: {},
+            functions: {},
+            models: {},
+            params: {
+                test: 'DEFINE PARAM $test VALUE 123 PERMISSIONS FULL'
+            },
+            tables: {},
+            users: {}
+        }",
+	);
+	assert_eq!(tmp, val);
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn define_alter_param_if_exists() -> Result<(), Error> {
+	let sql = "
+		ALTER PARAM $test COMMENT 'bla';
+		ALTER PARAM IF EXISTS $test COMMENT 'bla';
+		INFO FOR DB;
+	";
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 3);
+	//
+	let tmp = res.remove(0).result;
+	let _err = Error::PaNotFound {
+		value: "test".to_string(),
+	};
+	assert!(matches!(tmp, Err(_err)));
+	//
+	let tmp = res.remove(0).result;
+	assert!(tmp.is_ok());
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"{
+            accesses: {},
+            analyzers: {},
+            functions: {},
+            models: {},
+            params: {},
+            tables: {},
+            users: {}
+        }",
+	);
+	assert_eq!(tmp, val);
+	//
+	Ok(())
+}

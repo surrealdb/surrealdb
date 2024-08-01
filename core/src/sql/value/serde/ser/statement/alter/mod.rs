@@ -1,4 +1,5 @@
 mod field;
+mod param;
 mod table;
 
 use crate::err::Error;
@@ -38,6 +39,7 @@ impl ser::Serializer for Serializer {
 	{
 		match variant {
 			"Field" => Ok(AlterStatement::Field(value.serialize(field::Serializer.wrap())?)),
+			"Param" => Ok(AlterStatement::Param(value.serialize(param::Serializer.wrap())?)),
 			"Table" => Ok(AlterStatement::Table(value.serialize(table::Serializer.wrap())?)),
 			variant => {
 				Err(Error::custom(format!("unexpected newtype variant `{name}::{variant}`")))
@@ -54,6 +56,13 @@ mod tests {
 	#[test]
 	fn field() {
 		let stmt = AlterStatement::Field(Default::default());
+		let serialized = stmt.serialize(Serializer.wrap()).unwrap();
+		assert_eq!(stmt, serialized);
+	}
+
+	#[test]
+	fn param() {
+		let stmt = AlterStatement::Param(Default::default());
 		let serialized = stmt.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(stmt, serialized);
 	}

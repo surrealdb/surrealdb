@@ -2,8 +2,10 @@ use reblessive::Stk;
 
 use crate::{
 	sql::{
-		statements::{AlterFieldStatement, AlterStatement, AlterTableStatement},
-		TableType,
+		statements::{
+			AlterFieldStatement, AlterParamStatement, AlterStatement, AlterTableStatement,
+		},
+		Param, TableType,
 	},
 	syn::{
 		parser::{
@@ -17,8 +19,9 @@ use crate::{
 impl Parser<'_> {
 	pub async fn parse_alter_stmt(&mut self, ctx: &mut Stk) -> ParseResult<AlterStatement> {
 		match self.next().kind {
-			t!("TABLE") => self.parse_alter_table(ctx).await.map(AlterStatement::Table),
 			t!("FIELD") => self.parse_alter_field(ctx).await.map(AlterStatement::Field),
+			t!("PARAM") => self.parse_alter_param(ctx).await.map(AlterStatement::Param),
+			t!("TABLE") => self.parse_alter_table(ctx).await.map(AlterStatement::Table),
 			x => unexpected!(self, x, "a alter statement keyword"),
 		}
 	}
@@ -175,6 +178,46 @@ impl Parser<'_> {
 				t!("PERMISSIONS") => {
 					self.pop_peek();
 					res.permissions = Some(ctx.run(|ctx| self.parse_permission(ctx, false)).await?);
+				}
+				t!("COMMENT") => {
+					self.pop_peek();
+					if self.eat(t!("UNSET")) {
+						res.comment = Some(None);
+					} else {
+						res.comment = Some(Some(self.next_token_value()?));
+					}
+				}
+				_ => break,
+			}
+		}
+
+		Ok(res)
+	}
+
+	pub async fn parse_alter_param(&mut self, ctx: &mut Stk) -> ParseResult<AlterParamStatement> {
+		let if_exists = if self.eat(t!("IF")) {
+			expected!(self, t!("EXISTS"));
+			true
+		} else {
+			false
+		};
+		let name = self.next_token_value::<Param>()?.0;
+
+		let mut res = AlterParamStatement {
+			name,
+			if_exists,
+			..Default::default()
+		};
+
+		loop {
+			match self.peek_kind() {
+				t!("VALUE") => {
+					self.pop_peek();
+					res.value = Some(ctx.run(|ctx| self.parse_value(ctx)).await?);
+				}
+				t!("PERMISSIONS") => {
+					self.pop_peek();
+					res.permissions = Some(ctx.run(|ctx| self.parse_permission_value(ctx)).await?);
 				}
 				t!("COMMENT") => {
 					self.pop_peek();

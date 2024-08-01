@@ -49,7 +49,7 @@ impl AlterFieldStatement {
 		let fd = self.name.to_string();
 		// Get the table definition
 		let mut df = match txn.get_tb_field(opt.ns()?, opt.db()?, &self.what, &fd).await {
-			Ok(tb) => tb.deref().clone(),
+			Ok(df) => df.deref().clone(),
 			Err(Error::FdNotFound {
 				..
 			}) if self.if_exists => return Ok(Value::None),
