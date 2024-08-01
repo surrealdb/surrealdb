@@ -232,6 +232,65 @@ impl AccessStatement {
 				// Allowed to run?
 				opt.is_allowed(Action::Edit, ResourceKind::Access, &base)?;
 				match base {
+					Base::Root => {
+						// Get the transaction
+						let txn = ctx.tx();
+						// Clear the cache
+						txn.clear();
+						// Read the access definition
+						let ac = txn.get_root_access(&stmt.ac.to_raw()).await?;
+						// Verify the access type
+						match &ac.kind {
+							AccessType::Jwt(_) => Err(Error::FeatureNotYetImplemented {
+								feature: "Grants for JWT on namespace".to_string(),
+							}),
+							AccessType::Bearer(at) => {
+								match &stmt.subject {
+									Some(Subject::User(user)) => {
+										// Grant subject must match access method level.
+										if !matches!(&at.level, BearerAccessLevel::User) {
+											// TODO(PR): Add new error.
+											return Err(Error::InvalidAuth);
+										}
+										// If the grant is being created for a user, the user must exist.
+										txn.get_root_user(user).await?;
+									}
+									Some(Subject::Record(_)) => {
+										// If the grant is being created for a record, a database must be selected.
+										// TODO(PR): Add new error.
+										return Err(Error::DbEmpty);
+									}
+									// TODO(PR): Add new error.
+									None => return Err(Error::InvalidAuth),
+								}
+								// Create a new bearer key.
+								let grant = GrantBearer::new();
+								let gr = AccessGrant {
+									ac: ac.name.clone(),
+									// Unique grant identifier.
+									// In the case of bearer grants, the key identifier.
+									id: grant.id.clone(),
+									// Current time.
+									creation: Datetime::default(),
+									// Current time plus grant duration. Only if set.
+									expiration: ac.duration.grant.map(|d| d + Datetime::default()),
+									// The grant is initially not revoked.
+									revocation: None,
+									// Subject associated with the grant.
+									subject: stmt.subject.to_owned(),
+									// The contents of the grant.
+									grant: Grant::Bearer(grant),
+								};
+								let ac_str = gr.ac.to_raw();
+								let gr_str = gr.id.to_raw();
+								// Process the statement
+								let key = crate::key::root::access::gr::new(&ac_str, &gr_str);
+								txn.set(key, &gr).await?;
+								Ok(Value::Object(gr.into()))
+							}
+							_ => Err(Error::AccessMethodMismatch),
+						}
+					}
 					Base::Ns => {
 						// Get the transaction
 						let txn = ctx.tx();
@@ -366,10 +425,10 @@ impl AccessStatement {
 							}
 						}
 					}
-					_ => Err(Error::FeatureNotYetImplemented {
-						feature: "Managing access methods outside of a namespace or database"
+					_ => Err(Error::Unimplemented(
+						"Managing access methods outside of root, namespace and database levels"
 							.to_string(),
-					}),
+					)),
 				}
 			}
 			AccessStatement::List(stmt) => {
@@ -377,6 +436,20 @@ impl AccessStatement {
 				// Allowed to run?
 				opt.is_allowed(Action::View, ResourceKind::Access, &base)?;
 				match base {
+					Base::Root => {
+						// Get the transaction
+						let txn = ctx.tx();
+						// Clear the cache
+						txn.clear();
+						// Get the grants for the access method
+						let mut grants = Array::default();
+						// TODO(PR): This should not return all data, only basic identifiers.
+						// Show redacted version of the access grants.
+						for v in txn.all_root_access_grants(&stmt.ac).await?.iter() {
+							grants = grants + Value::Object(v.redacted().to_owned().into());
+						}
+						Ok(Value::Array(grants))
+					}
 					Base::Ns => {
 						// Get the transaction
 						let txn = ctx.tx();
@@ -407,10 +480,10 @@ impl AccessStatement {
 						}
 						Ok(Value::Array(grants))
 					}
-					_ => Err(Error::FeatureNotYetImplemented {
-						feature: "Managing access methods outside of a namespace or database"
+					_ => Err(Error::Unimplemented(
+						"Managing access methods outside of root, namespace and database levels"
 							.to_string(),
-					}),
+					)),
 				}
 			}
 			AccessStatement::Revoke(stmt) => {
@@ -418,6 +491,25 @@ impl AccessStatement {
 				// Allowed to run?
 				opt.is_allowed(Action::Edit, ResourceKind::Access, &base)?;
 				match base {
+					Base::Root => {
+						// Get the transaction
+						let txn = ctx.tx();
+						// Clear the cache
+						txn.clear();
+						// Get the grants to revoke
+						let ac_str = stmt.ac.to_raw();
+						let gr_str = stmt.gr.to_raw();
+						let mut gr = (*txn.get_root_access_grant(&ac_str, &gr_str).await?).clone();
+						if gr.revocation.is_some() {
+							// TODO(PR): Add new error.
+							return Err(Error::InvalidAuth);
+						}
+						gr.revocation = Some(Datetime::default());
+						// Process the statement
+						let key = crate::key::root::access::gr::new(&ac_str, &gr_str);
+						txn.set(key, &gr).await?;
+						Ok(Value::Object(gr.redacted().into()))
+					}
 					Base::Ns => {
 						// Get the transaction
 						let txn = ctx.tx();
@@ -469,10 +561,10 @@ impl AccessStatement {
 						txn.set(key, &gr).await?;
 						Ok(Value::Object(gr.redacted().into()))
 					}
-					_ => Err(Error::FeatureNotYetImplemented {
-						feature: "Managing access methods outside of a namespace or database"
+					_ => Err(Error::Unimplemented(
+						"Managing access methods outside of root, namespace and database levels"
 							.to_string(),
-					}),
+					)),
 				}
 			}
 			AccessStatement::Show(_) => Err(Error::FeatureNotYetImplemented {
