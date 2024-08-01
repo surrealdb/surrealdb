@@ -383,7 +383,7 @@ impl Parser<'_> {
 		match self.peek_kind() {
 			t!("GRANT") => {
 				self.pop_peek();
-				// TODO(PR): Implement rest of the syntax.
+				// TODO(gguillemas): Implement rest of the syntax.
 				expected!(self, t!("FOR"));
 				expected!(self, t!("USER"));
 				let user = self.next_token_value()?;
@@ -394,7 +394,7 @@ impl Parser<'_> {
 			}
 			t!("LIST") => {
 				self.pop_peek();
-				// TODO(PR): Implement rest of the syntax.
+				// TODO(gguillemas): Implement rest of the syntax.
 				Ok(AccessStatement::List(AccessStatementList {
 					ac,
 				}))
@@ -407,7 +407,7 @@ impl Parser<'_> {
 					gr,
 				}))
 			}
-			// TODO(PR): Implement rest of the statements.
+			// TODO(gguillemas): Implement rest of the statements.
 			x => unexpected!(self, x, "an implemented statement"),
 		}
 	}

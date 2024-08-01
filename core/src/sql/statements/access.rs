@@ -34,7 +34,6 @@ pub enum AccessStatement {
 	Grant(AccessStatementGrant),   // Create access grant.
 	List(AccessStatementList),     // List access grants.
 	Revoke(AccessStatementRevoke), // Revoke access grant.
-	Show(Ident),                   // Show access grant.
 	Prune(Ident),                  // Prune access grants.
 }
 
@@ -434,7 +433,6 @@ impl AccessStatement {
 						txn.clear();
 						// Get the grants for the access method
 						let mut grants = Array::default();
-						// TODO(PR): This should not return all data, only basic identifiers.
 						// Show redacted version of the access grants.
 						for v in txn.all_root_access_grants(&stmt.ac).await?.iter() {
 							grants = grants + Value::Object(v.redacted().to_owned().into());
@@ -448,7 +446,6 @@ impl AccessStatement {
 						txn.clear();
 						// Get the grants for the access method
 						let mut grants = Array::default();
-						// TODO(PR): This should not return all data, only basic identifiers.
 						// Show redacted version of the access grants.
 						for v in txn.all_ns_access_grants(opt.ns()?, &stmt.ac).await?.iter() {
 							grants = grants + Value::Object(v.redacted().to_owned().into());
@@ -462,7 +459,6 @@ impl AccessStatement {
 						txn.clear();
 						// Get the grants for the access method
 						let mut grants = Array::default();
-						// TODO(PR): This should not return all data, only basic identifiers.
 						// Show redacted version of the access grants.
 						for v in
 							txn.all_db_access_grants(opt.ns()?, opt.db()?, &stmt.ac).await?.iter()
@@ -555,9 +551,6 @@ impl AccessStatement {
 					)),
 				}
 			}
-			AccessStatement::Show(_) => Err(Error::FeatureNotYetImplemented {
-				feature: "Showing an access grant".to_string(),
-			}),
 			AccessStatement::Prune(_) => Err(Error::FeatureNotYetImplemented {
 				feature: "Pruning disabled grants".to_string(),
 			}),
@@ -571,7 +564,6 @@ impl Display for AccessStatement {
 			Self::Grant(stmt) => write!(f, "ACCESS {} GRANT", stmt.ac),
 			Self::List(stmt) => write!(f, "ACCESS {} LIST", stmt.ac),
 			Self::Revoke(stmt) => write!(f, "ACCESS {} REVOKE {}", stmt.ac, stmt.gr),
-			Self::Show(stmt) => write!(f, "ACCESS {} SHOW", stmt),
 			Self::Prune(stmt) => write!(f, "ACCESS {} PRUNE", stmt),
 		}
 	}
