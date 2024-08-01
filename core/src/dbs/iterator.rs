@@ -302,7 +302,7 @@ impl Iterator {
 				feature = "kv-rocksdb",
 				feature = "kv-fdb",
 				feature = "kv-tikv",
-				feature = "kv-surrealcs"
+				feature = "kv-surrealcs",
 			))]
 			ctx,
 			stm,

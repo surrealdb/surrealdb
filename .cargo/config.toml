@@ -22,6 +22,3 @@ rustflags = [
 	"-C", "link-arg=/DEFAULTLIB:libcmt.lib",
 	"-C", "link-arg=/DEFAULTLIB:ucrt.lib"
 ]
-
-[net]
-git-fetch-with-cli = true

@@ -45,7 +45,7 @@ pub static INSECURE_FORWARD_RECORD_ACCESS_ERRORS: Lazy<bool> =
 	feature = "kv-rocksdb",
 	feature = "kv-fdb",
 	feature = "kv-tikv",
-	feature = "kv-surrealcs"
+	feature = "kv-surrealcs",
 ))]
 /// Specifies the buffer limit for external sorting.
 /// If the environment variable is not present or cannot be parsed, a default value of 50,000 is used.

@@ -241,7 +241,7 @@ impl<'a> Statement<'a> {
 		feature = "kv-rocksdb",
 		feature = "kv-fdb",
 		feature = "kv-tikv",
-		feature = "kv-surrealcs"
+		feature = "kv-surrealcs",
 	))]
 	pub fn tempfiles(&self) -> bool {
 		match self {

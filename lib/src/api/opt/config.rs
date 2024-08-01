@@ -5,7 +5,7 @@ use crate::opt::capabilities::Capabilities;
 	feature = "kv-rocksdb",
 	feature = "kv-fdb",
 	feature = "kv-tikv",
-	feature = "kv-surrealcs"
+	feature = "kv-surrealcs",
 ))]
 use std::path::PathBuf;
 use std::time::Duration;
@@ -33,7 +33,7 @@ pub struct Config {
 		feature = "kv-rocksdb",
 		feature = "kv-fdb",
 		feature = "kv-tikv",
-		feature = "kv-surrealcs"
+		feature = "kv-surrealcs",
 	))]
 	pub(crate) temporary_directory: Option<PathBuf>,
 }
@@ -130,7 +130,7 @@ impl Config {
 		feature = "kv-rocksdb",
 		feature = "kv-fdb",
 		feature = "kv-tikv",
-		feature = "kv-surrealcs"
+		feature = "kv-surrealcs",
 	))]
 	pub fn temporary_directory(mut self, path: Option<PathBuf>) -> Self {
 		self.temporary_directory = path;

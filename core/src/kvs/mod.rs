@@ -30,8 +30,8 @@ mod indxdb;
 mod kv;
 mod mem;
 mod rocksdb;
-mod surrealkv;
 mod surrealcs;
+mod surrealkv;
 mod tikv;
 
 #[cfg(test)]

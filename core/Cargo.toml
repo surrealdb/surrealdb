@@ -30,7 +30,7 @@ kv-rocksdb = ["dep:rocksdb", "tokio/time", "dep:tempfile", "dep:ext-sort"]
 kv-tikv = ["dep:tikv", "tokio/time", "dep:tempfile", "dep:ext-sort"]
 kv-fdb = ["dep:foundationdb", "tokio/time", "dep:tempfile", "dep:ext-sort"]
 kv-surrealkv = ["dep:surrealkv", "tokio/time", "dep:tempfile", "dep:ext-sort"]
-kv-surrealcs = ["dep:surrealcs-client", "dep:surrealcs-kernel"]
+kv-surrealcs = ["dep:surrealcs", "tokio/time", "dep:tempfile", "dep:ext-sort"]
 scripting = ["dep:js"]
 http = ["dep:reqwest"]
 ml = ["dep:surrealml"]
@@ -125,12 +125,7 @@ reqwest = { version = "0.11.22", default-features = false, features = [
 revision = { version = "0.8.0", features = ["chrono", "geo", "roaring", "regex", "rust_decimal", "uuid"] }
 rmpv = "1.0.1"
 roaring = { version = "0.10.2", features = ["serde"] }
-
 rocksdb = { version = "0.21.0", features = ["lz4", "snappy"], optional = true }
-
-surrealcs-client = { git = "https://github.com/surrealdb/surrealcs", optional = true}
-surrealcs-kernel = { git = "https://github.com/surrealdb/surrealcs", optional = true}
-
 rust_decimal = { version = "1.33.1", features = ["maths", "serde-str"] }
 rust-stemmers = "1.2.0"
 scrypt = "0.11.0"
@@ -141,6 +136,7 @@ sha1 = "0.10.6"
 sha2 = "0.10.8"
 snap = "1.1.0"
 storekey = "0.5.0"
+surrealcs = { version = "0.1.0", optional = true }
 surrealkv = { version = "0.3.0", optional = true }
 surrealml = { version = "0.1.1", optional = true, package = "surrealml-core" }
 tempfile = { version = "3.10.1", optional = true }

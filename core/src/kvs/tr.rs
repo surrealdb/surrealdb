@@ -81,8 +81,6 @@ pub(super) enum Inner {
 	Mem(super::mem::Transaction),
 	#[cfg(feature = "kv-rocksdb")]
 	RocksDB(super::rocksdb::Transaction),
-	#[cfg(feature = "kv-surrealcs")]
-	SurrealCS(super::surrealcs::Transaction),
 	#[cfg(feature = "kv-indxdb")]
 	IndxDB(super::indxdb::Transaction),
 	#[cfg(feature = "kv-tikv")]
@@ -91,6 +89,8 @@ pub(super) enum Inner {
 	FoundationDB(super::fdb::Transaction),
 	#[cfg(feature = "kv-surrealkv")]
 	SurrealKV(super::surrealkv::Transaction),
+	#[cfg(feature = "kv-surrealcs")]
+	SurrealCS(super::surrealcs::Transaction),
 }
 
 impl fmt::Display for Transactor {
