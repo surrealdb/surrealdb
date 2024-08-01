@@ -1,3 +1,4 @@
+mod event;
 mod field;
 mod param;
 mod table;
@@ -38,6 +39,7 @@ impl ser::Serializer for Serializer {
 		T: ?Sized + Serialize,
 	{
 		match variant {
+			"Event" => Ok(AlterStatement::Event(value.serialize(event::Serializer.wrap())?)),
 			"Field" => Ok(AlterStatement::Field(value.serialize(field::Serializer.wrap())?)),
 			"Param" => Ok(AlterStatement::Param(value.serialize(param::Serializer.wrap())?)),
 			"Table" => Ok(AlterStatement::Table(value.serialize(table::Serializer.wrap())?)),
@@ -52,6 +54,13 @@ impl ser::Serializer for Serializer {
 mod tests {
 	use super::*;
 	use ser::Serializer as _;
+
+	#[test]
+	fn event() {
+		let stmt = AlterStatement::Event(Default::default());
+		let serialized = stmt.serialize(Serializer.wrap()).unwrap();
+		assert_eq!(stmt, serialized);
+	}
 
 	#[test]
 	fn field() {

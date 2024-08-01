@@ -88,7 +88,7 @@ impl serde::ser::SerializeStruct for SerializeSelectStatement {
 				self.only = Some(value.serialize(ser::primitive::bool::Serializer.wrap())?);
 			}
 			"what" => {
-				self.what = Some(Values(value.serialize(ser::value::vec::Serializer.wrap())?));
+				self.what = Some(value.serialize(ser::values::Serializer.wrap())?);
 			}
 			"with" => {
 				self.with = value.serialize(ser::with::opt::Serializer.wrap())?;

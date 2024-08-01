@@ -3,9 +3,10 @@ use reblessive::Stk;
 use crate::{
 	sql::{
 		statements::{
-			AlterFieldStatement, AlterParamStatement, AlterStatement, AlterTableStatement,
+			AlterEventStatement, AlterFieldStatement, AlterParamStatement, AlterStatement,
+			AlterTableStatement,
 		},
-		Param, TableType,
+		Param, TableType, Values,
 	},
 	syn::{
 		parser::{
@@ -19,6 +20,7 @@ use crate::{
 impl Parser<'_> {
 	pub async fn parse_alter_stmt(&mut self, ctx: &mut Stk) -> ParseResult<AlterStatement> {
 		match self.next().kind {
+			t!("EVENT") => self.parse_alter_event(ctx).await.map(AlterStatement::Event),
 			t!("FIELD") => self.parse_alter_field(ctx).await.map(AlterStatement::Field),
 			t!("PARAM") => self.parse_alter_param(ctx).await.map(AlterStatement::Param),
 			t!("TABLE") => self.parse_alter_table(ctx).await.map(AlterStatement::Table),
@@ -218,6 +220,55 @@ impl Parser<'_> {
 				t!("PERMISSIONS") => {
 					self.pop_peek();
 					res.permissions = Some(ctx.run(|ctx| self.parse_permission_value(ctx)).await?);
+				}
+				t!("COMMENT") => {
+					self.pop_peek();
+					if self.eat(t!("UNSET")) {
+						res.comment = Some(None);
+					} else {
+						res.comment = Some(Some(self.next_token_value()?));
+					}
+				}
+				_ => break,
+			}
+		}
+
+		Ok(res)
+	}
+
+	pub async fn parse_alter_event(&mut self, ctx: &mut Stk) -> ParseResult<AlterEventStatement> {
+		let if_exists = if self.eat(t!("IF")) {
+			expected!(self, t!("EXISTS"));
+			true
+		} else {
+			false
+		};
+		let name = self.next_token_value()?;
+		expected!(self, t!("ON"));
+		self.eat(t!("TABLE"));
+		let what = self.next_token_value()?;
+
+		let mut res = AlterEventStatement {
+			name,
+			what,
+			if_exists,
+			..Default::default()
+		};
+
+		loop {
+			match self.peek_kind() {
+				t!("WHEN") => {
+					self.pop_peek();
+					res.when = Some(ctx.run(|ctx| self.parse_value(ctx)).await?);
+				}
+				t!("THEN") => {
+					self.pop_peek();
+					let mut values = Values(vec![ctx.run(|ctx| self.parse_value(ctx)).await?]);
+					while self.eat(t!(",")) {
+						values.0.push(ctx.run(|ctx| self.parse_value(ctx)).await?)
+					}
+
+					res.then = Some(values);
 				}
 				t!("COMMENT") => {
 					self.pop_peek();

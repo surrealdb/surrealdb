@@ -55,7 +55,8 @@ pub use self::update::UpdateStatement;
 pub use self::upsert::UpsertStatement;
 
 pub use self::alter::{
-	AlterFieldStatement, AlterParamStatement, AlterStatement, AlterTableStatement,
+	AlterEventStatement, AlterFieldStatement, AlterParamStatement, AlterStatement,
+	AlterTableStatement,
 };
 
 pub use self::define::{

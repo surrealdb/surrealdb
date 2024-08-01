@@ -19,7 +19,7 @@ impl ser::Serializer for Serializer {
 	type SerializeStruct = Impossible<Option<Option<Strand>>, Error>;
 	type SerializeStructVariant = Impossible<Option<Option<Strand>>, Error>;
 
-	const EXPECTED: &'static str = "an `Option<Strand>`";
+	const EXPECTED: &'static str = "an `Option<Option<Strand>>`";
 
 	#[inline]
 	fn serialize_none(self) -> Result<Self::Ok, Self::Error> {

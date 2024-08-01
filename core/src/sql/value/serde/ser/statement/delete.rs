@@ -61,7 +61,7 @@ impl serde::ser::SerializeStruct for SerializeDeleteStatement {
 				self.only = Some(value.serialize(ser::primitive::bool::Serializer.wrap())?);
 			}
 			"what" => {
-				self.what = Some(Values(value.serialize(ser::value::vec::Serializer.wrap())?));
+				self.what = Some(value.serialize(ser::values::Serializer.wrap())?);
 			}
 			"cond" => {
 				self.cond = value.serialize(ser::cond::opt::Serializer.wrap())?;

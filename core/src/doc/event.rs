@@ -47,9 +47,15 @@ impl<'a> Document<'a> {
 			ctx.add_value("after", self.current.doc.deref());
 			ctx.add_value("before", self.initial.doc.deref());
 			// Process conditional clause
-			let val = ev.when.compute(stk, &ctx, opt, Some(doc)).await?;
+			let execute = match ev.when.compute(stk, &ctx, opt, Some(doc)).await? {
+				// The when clause in the DefineEventStatement struct is not optional
+				// When the statement is defined without a WHEN clause, the value will be `Value::None`
+				// But without a `WHEN` clause, the user expects the event to be executed
+				Value::None => true,
+				v => v.is_truthy(),
+			};
 			// Execute event if value is truthy
-			if val.is_truthy() {
+			if execute {
 				for v in ev.then.iter() {
 					v.compute(stk, &ctx, opt, Some(doc)).await?;
 				}

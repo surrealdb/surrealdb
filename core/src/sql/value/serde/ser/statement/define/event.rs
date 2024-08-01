@@ -67,7 +67,7 @@ impl serde::ser::SerializeStruct for SerializeDefineEventStatement {
 				self.when = value.serialize(ser::value::Serializer.wrap())?;
 			}
 			"then" => {
-				self.then = Values(value.serialize(ser::value::vec::Serializer.wrap())?);
+				self.then = value.serialize(ser::values::Serializer.wrap())?;
 			}
 			"comment" => {
 				self.comment = value.serialize(ser::strand::opt::Serializer.wrap())?;

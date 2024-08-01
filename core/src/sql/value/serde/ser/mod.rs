@@ -56,6 +56,7 @@ mod timeout;
 mod tokenizer;
 mod uuid;
 mod value;
+mod values;
 mod vectortype;
 mod version;
 mod view;

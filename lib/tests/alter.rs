@@ -372,3 +372,116 @@ async fn define_alter_param_if_exists() -> Result<(), Error> {
 	//
 	Ok(())
 }
+
+#[tokio::test]
+async fn define_alter_event() -> Result<(), Error> {
+	let sql = "
+		DEFINE EVENT test ON test THEN {};
+		INFO FOR TB test;
+
+		ALTER EVENT test ON test
+		    WHEN true
+			THEN {}, {}
+			COMMENT 'bla';
+		INFO FOR TB test;
+
+		ALTER EVENT test ON test
+		    WHEN NONE
+			THEN {}
+			COMMENT UNSET;
+		INFO FOR TB test;
+	";
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 6);
+	//
+	let tmp = res.remove(0).result;
+	assert!(tmp.is_ok());
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"{
+            events: {
+                test: 'DEFINE EVENT test ON test WHEN NONE THEN {  }'
+            },
+            fields: {},
+            indexes: {},
+            lives: {},
+            tables: {}
+        }",
+	);
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result;
+	assert!(tmp.is_ok());
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"{
+            events: {
+                test: \"DEFINE EVENT test ON test WHEN true THEN {  }, {  } COMMENT 'bla'\"
+            },
+            fields: {},
+            indexes: {},
+            lives: {},
+            tables: {}
+        }",
+	);
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result;
+	assert!(tmp.is_ok());
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"{
+            events: {
+                test: 'DEFINE EVENT test ON test WHEN NONE THEN {  }'
+            },
+            fields: {},
+            indexes: {},
+            lives: {},
+            tables: {}
+        }",
+	);
+	assert_eq!(tmp, val);
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn define_alter_event_if_exists() -> Result<(), Error> {
+	let sql = "
+		ALTER EVENT test ON test COMMENT 'bla';
+		ALTER EVENT IF EXISTS test ON test COMMENT 'bla';
+		INFO FOR TB test;
+	";
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 3);
+	//
+	let tmp = res.remove(0).result;
+	let _err = Error::PaNotFound {
+		value: "test".to_string(),
+	};
+	assert!(matches!(tmp, Err(_err)));
+	//
+	let tmp = res.remove(0).result;
+	assert!(tmp.is_ok());
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"{
+            events: {},
+            fields: {},
+            indexes: {},
+            lives: {},
+            tables: {}
+        }",
+	);
+	assert_eq!(tmp, val);
+	//
+	Ok(())
+}

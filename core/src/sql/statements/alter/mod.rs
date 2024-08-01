@@ -1,7 +1,9 @@
+mod event;
 mod field;
 mod param;
 mod table;
 
+pub use event::AlterEventStatement;
 pub use field::AlterFieldStatement;
 pub use param::AlterParamStatement;
 pub use table::AlterTableStatement;
@@ -24,6 +26,8 @@ use std::fmt::{self, Display};
 pub enum AlterStatement {
 	Table(AlterTableStatement),
 	#[revision(start = 2)]
+	Event(AlterEventStatement),
+	#[revision(start = 2)]
 	Field(AlterFieldStatement),
 	#[revision(start = 2)]
 	Param(AlterParamStatement),
@@ -43,6 +47,7 @@ impl AlterStatement {
 		doc: Option<&CursorDoc<'_>>,
 	) -> Result<Value, Error> {
 		match self {
+			Self::Event(ref v) => v.compute(stk, ctx, opt, doc).await,
 			Self::Field(ref v) => v.compute(stk, ctx, opt, doc).await,
 			Self::Param(ref v) => v.compute(stk, ctx, opt, doc).await,
 			Self::Table(ref v) => v.compute(stk, ctx, opt, doc).await,
@@ -53,6 +58,7 @@ impl AlterStatement {
 impl Display for AlterStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		match self {
+			Self::Event(v) => Display::fmt(v, f),
 			Self::Field(v) => Display::fmt(v, f),
 			Self::Param(v) => Display::fmt(v, f),
 			Self::Table(v) => Display::fmt(v, f),

@@ -1,6 +1,6 @@
 use crate::err::Error;
-use crate::sql::kind::Kind;
 use crate::sql::value::serde::ser;
+use crate::sql::value::Values;
 use serde::ser::Impossible;
 use serde::ser::Serialize;
 
@@ -8,18 +8,18 @@ use serde::ser::Serialize;
 pub struct Serializer;
 
 impl ser::Serializer for Serializer {
-	type Ok = Option<Option<Kind>>;
+	type Ok = Option<Values>;
 	type Error = Error;
 
-	type SerializeSeq = Impossible<Option<Option<Kind>>, Error>;
-	type SerializeTuple = Impossible<Option<Option<Kind>>, Error>;
-	type SerializeTupleStruct = Impossible<Option<Option<Kind>>, Error>;
-	type SerializeTupleVariant = Impossible<Option<Option<Kind>>, Error>;
-	type SerializeMap = Impossible<Option<Option<Kind>>, Error>;
-	type SerializeStruct = Impossible<Option<Option<Kind>>, Error>;
-	type SerializeStructVariant = Impossible<Option<Option<Kind>>, Error>;
+	type SerializeSeq = Impossible<Option<Values>, Error>;
+	type SerializeTuple = Impossible<Option<Values>, Error>;
+	type SerializeTupleStruct = Impossible<Option<Values>, Error>;
+	type SerializeTupleVariant = Impossible<Option<Values>, Error>;
+	type SerializeMap = Impossible<Option<Values>, Error>;
+	type SerializeStruct = Impossible<Option<Values>, Error>;
+	type SerializeStructVariant = Impossible<Option<Values>, Error>;
 
-	const EXPECTED: &'static str = "an `Option<Option<Kind>>`";
+	const EXPECTED: &'static str = "an `Option<Values>`";
 
 	#[inline]
 	fn serialize_none(self) -> Result<Self::Ok, Self::Error> {
@@ -42,14 +42,14 @@ mod tests {
 
 	#[test]
 	fn none() {
-		let option: Option<Option<Kind>> = None;
+		let option: Option<Values> = None;
 		let serialized = option.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(option, serialized);
 	}
 
 	#[test]
 	fn some() {
-		let option = Some(Some(Kind::default()));
+		let option = Some(Values::default());
 		let serialized = option.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(option, serialized);
 	}
