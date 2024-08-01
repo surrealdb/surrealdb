@@ -7,7 +7,7 @@ use crate::iam::issue::{config, expiration};
 use crate::iam::token::{Claims, HEADER};
 use crate::iam::Auth;
 use crate::kvs::{Datastore, LockType::*, TransactionType::*};
-use crate::sql::statements::access;
+use crate::sql::statements::{access, AccessGrant};
 use crate::sql::Object;
 use crate::sql::Value;
 use crate::sql::{AccessType, Datetime};
@@ -123,14 +123,14 @@ pub async fn db_access(
 			// All access method types are supported except for JWT
 			// The JWT access method is the one that is internal to SurrealDB
 			// The equivalent of signing in with JWT is to authenticate it
-			match av.kind.clone() {
+			match &av.kind {
 				AccessType::Record(at) => {
 					// Check if the record access method supports issuing tokens
-					let iss = match at.jwt.issue {
-						Some(iss) => iss,
+					let iss = match &at.jwt.issue {
+						Some(iss) => iss.clone(),
 						_ => return Err(Error::AccessMethodMismatch),
 					};
-					match at.signin {
+					match &at.signin {
 						// This record access allows signin
 						Some(val) => {
 							// Setup the query params
@@ -140,7 +140,7 @@ pub async fn db_access(
 							sess.ip.clone_from(&session.ip);
 							sess.or.clone_from(&session.or);
 							// Compute the value with the params
-							match kvs.evaluate(val, &sess, vars).await {
+							match kvs.evaluate(val.clone(), &sess, vars).await {
 								// The signin value succeeded
 								Ok(val) => {
 									match val.record() {
@@ -234,35 +234,13 @@ pub async fn db_access(
 						// Return opaque error to avoid leaking the existence of the feature.
 						return Err(Error::InvalidAuth);
 					}
-					// Check if the bearer access method supports issuing tokens
-					let iss = match at.jwt.issue {
-						Some(iss) => iss,
+					// Check if the bearer access method supports issuing tokens.
+					let iss = match &at.jwt.issue {
+						Some(iss) => iss.clone(),
 						_ => return Err(Error::AccessMethodMismatch),
 					};
-					// Process the provided key
-					let key = match vars.get("key") {
-						Some(key) => &key.to_raw_string(),
-						None => return Err(Error::AccessBearerMissingKey),
-					};
-					if key.len() != access::GRANT_BEARER_LENGTH {
-						return Err(Error::AccessGrantBearerInvalid);
-					}
-					// Retrieve the prefix from the provided key
-					let prefix: String =
-						key.chars().take(access::GRANT_BEARER_PREFIX.len()).collect();
-					if prefix != access::GRANT_BEARER_PREFIX {
-						return Err(Error::AccessGrantBearerInvalid);
-					}
-					// Retrieve the key identifier from the provided key
-					let kid: String = key
-						.chars()
-						.skip(access::GRANT_BEARER_PREFIX.len() + 1)
-						.take(access::GRANT_BEARER_ID_LENGTH)
-						.collect();
-					if kid.len() != access::GRANT_BEARER_ID_LENGTH {
-						return Err(Error::AccessGrantBearerInvalid);
-					}
-
+					// Extract key identifier and key from the provided variables.
+					let (kid, key) = validate_grant_bearer(vars)?;
 					// Create a new readonly transaction
 					let tx = kvs.transaction(Read, Optimistic).await?;
 					// Fetch the specified access grant from storage
@@ -271,49 +249,29 @@ pub async fn db_access(
 						// Return opaque error to avoid leaking existence of the grant.
 						_ => return Err(Error::InvalidAuth),
 					};
-					// Ensure that the transaction is cancelled
+					// Ensure that the transaction is cancelled.
 					tx.cancel().await?;
-
-					// Check if the grant is revoked or expired
-					match (gr.expiration.clone(), gr.revocation.clone()) {
-						(None, None) => {}
-						(Some(exp), None) => {
-							if exp < Datetime::default() {
-								// Return opaque error to avoid leaking revocation status.
-								return Err(Error::InvalidAuth);
-							}
-						}
-						_ => return Err(Error::InvalidAuth),
-					}
-					// Check if the provided key matches the bearer key in the grant
-					// We use time-constant comparison to prevent timing attacks
-					if let access::Grant::Bearer(grant) = gr.grant.clone() {
-						let grant_key_bytes: &[u8] = grant.key.as_bytes();
-						let signin_key_bytes: &[u8] = key.as_bytes();
-						let ok: bool = grant_key_bytes.ct_eq(signin_key_bytes).into();
-						if !ok {
-							return Err(Error::InvalidAuth);
-						}
-					};
-					// If the subject of the grant is a system user, get their roles
+					// Authenticate bearer key against stored grant.
+					verify_grant_bearer(&gr, key)?;
+					// If the subject of the grant is a system user, get their roles.
 					let roles = if let Some(access::Subject::User(user)) = &gr.subject {
-						// Create a new readonly transaction
+						// Create a new readonly transaction.
 						let tx = kvs.transaction(Read, Optimistic).await?;
-						// Fetch the specified user from storage
+						// Fetch the specified user from storage.
 						let user = tx.get_db_user(&ns, &db, user).await.map_err(|e| {
 							trace!("Error while authenticating to database `{ns}/{db}`: {e}");
 							// Return opaque error to avoid leaking grant subject existence.
 							Error::InvalidAuth
 						})?;
-						// Ensure that the transaction is cancelled
+						// Ensure that the transaction is cancelled.
 						tx.cancel().await?;
 						user.roles.clone()
 					} else {
 						vec![]
 					};
-					// Create the authentication key
+					// Create the authentication key.
 					let key = config(iss.alg, iss.key)?;
-					// Create the authentication claim
+					// Create the authentication claim.
 					let claims = Claims {
 						iss: Some(SERVER_NAME.to_owned()),
 						iat: Some(Utc::now().timestamp()),
@@ -339,11 +297,11 @@ pub async fn db_access(
 						},
 						..Claims::default()
 					};
-					// Log the authenticated access method info
-					trace!("Signing in to database with access method `{}`", ac);
-					// Create the authentication token
+					// Log the authenticated access method information.
+					trace!("Signing in to database with bearer access method `{}`", ac);
+					// Create the authentication token.
 					let enc = encode(&Header::new(iss.alg.into()), &claims, &key);
-					// Set the authentication on the session
+					// Set the authentication on the session.
 					session.tk = Some(claims.into());
 					session.ns = Some(ns.to_owned());
 					session.db = Some(db.to_owned());
@@ -368,9 +326,9 @@ pub async fn db_access(
 						// Return opaque error as this code should not be reachable.
 						None => return Err(Error::InvalidAuth),
 					};
-					// Check the authentication token
+					// Check the authentication token.
 					match enc {
-						// The auth token was created successfully
+						// The authentication token was created successfully.
 						Ok(tk) => Ok(tk),
 						_ => Err(Error::TokenMakingFailed),
 					}
@@ -448,55 +406,47 @@ pub async fn ns_access(
 				AccessType::Bearer(at) => {
 					// TODO(gguillemas): Remove this once bearer access is no longer experimental.
 					if !*EXPERIMENTAL_BEARER_ACCESS {
+						// Return opaque error to avoid leaking the existence of the feature.
 						return Err(Error::InvalidAuth);
 					}
-					// Check if the bearer access method supports issuing tokens
+					// Check if the bearer access method supports issuing tokens.
 					let iss = match &at.jwt.issue {
 						Some(iss) => iss.clone(),
 						_ => return Err(Error::AccessMethodMismatch),
 					};
-					// Process the provided key
-					let key = match vars.get("key") {
-						Some(key) => &key.to_raw_string(),
-						// TODO(PR): Add new error.
-						None => return Err(Error::InvalidAuth),
-					};
-					if key.len() != access::GRANT_BEARER_KEY_LENGTH {
-						return Err(Error::InvalidAuth);
-					}
-					// Retrieve the key identifier from the provided key
-					let kid: String = key.chars().take(20).collect();
-					if kid.len() != access::GRANT_BEARER_ID_LENGTH {
-						return Err(Error::InvalidAuth);
-					}
-					// Check if the identifier corresponds to an existing grant
+					// Extract key identifier and key from the provided variables.
+					let (kid, key) = validate_grant_bearer(vars)?;
+					// Create a new readonly transaction
+					let tx = kvs.transaction(Read, Optimistic).await?;
+					// Fetch the specified access grant from storage
 					let gr = match tx.get_ns_access_grant(&ns, &ac, &kid).await {
 						Ok(gr) => gr,
-						Err(_) => return Err(Error::InvalidAuth),
-					};
-					// Check if the grant is revoked or expired
-					match (gr.expiration.clone(), gr.revocation.clone()) {
-						(None, None) => {}
-						(Some(exp), None) => {
-							if exp < Datetime::default() {
-								return Err(Error::InvalidAuth);
-							}
-						}
+						// Return opaque error to avoid leaking existence of the grant.
 						_ => return Err(Error::InvalidAuth),
-					}
-					// Check if the provided key matches the bearer key in the grant
-					// We use time-constant comparison to prevent timing attacks
-					if let access::Grant::Bearer(grant) = gr.grant.clone() {
-						let grant_key_bytes: &[u8] = grant.key.as_bytes();
-						let signin_key_bytes: &[u8] = key.as_bytes();
-						let ok: bool = grant_key_bytes.ct_eq(signin_key_bytes).into();
-						if !ok {
-							return Err(Error::InvalidAuth);
-						}
 					};
-					// Create the authentication key
+					// Ensure that the transaction is cancelled.
+					tx.cancel().await?;
+					// Authenticate bearer key against stored grant.
+					verify_grant_bearer(&gr, key)?;
+					// If the subject of the grant is a system user, get their roles.
+					let roles = if let Some(access::Subject::User(user)) = &gr.subject {
+						// Create a new readonly transaction.
+						let tx = kvs.transaction(Read, Optimistic).await?;
+						// Fetch the specified user from storage.
+						let user = tx.get_ns_user(&ns, user).await.map_err(|e| {
+							trace!("Error while authenticating to namespace `{ns}`: {e}");
+							// Return opaque error to avoid leaking grant subject existence.
+							Error::InvalidAuth
+						})?;
+						// Ensure that the transaction is cancelled.
+						tx.cancel().await?;
+						user.roles.clone()
+					} else {
+						vec![]
+					};
+					// Create the authentication key.
 					let key = config(iss.alg, iss.key)?;
-					// Create the authentication claim
+					// Create the authentication claim.
 					let claims = Claims {
 						iss: Some(SERVER_NAME.to_owned()),
 						iat: Some(Utc::now().timestamp()),
@@ -507,15 +457,23 @@ pub async fn ns_access(
 						ac: Some(ac.to_owned()),
 						id: match &gr.subject {
 							Some(access::Subject::User(user)) => Some(user.to_raw()),
+							// Return opaque error as this code should not be reachable.
+							_ => return Err(Error::InvalidAuth),
+						},
+						roles: match &gr.subject {
+							Some(access::Subject::User(_)) => {
+								Some(roles.iter().map(|v| v.to_string()).collect())
+							}
+							// Return opaque error as this code should not be reachable.
 							_ => return Err(Error::InvalidAuth),
 						},
 						..Claims::default()
 					};
-					// Log the authenticated access method info
-					trace!("Signing in to namespace with access method `{}`", ac);
-					// Create the authentication token
+					// Log the authenticated access method information.
+					trace!("Signing in to database with bearer access method `{}`", ac);
+					// Create the authentication token.
 					let enc = encode(&Header::new(iss.alg.into()), &claims, &key);
-					// Set the authentication on the session
+					// Set the authentication on the session.
 					session.tk = Some(claims.into());
 					session.ns = Some(ns.to_owned());
 					session.ac = Some(ac.to_owned());
@@ -524,15 +482,16 @@ pub async fn ns_access(
 						Some(access::Subject::User(user)) => {
 							session.au = Arc::new(Auth::new(Actor::new(
 								user.to_string(),
-								Default::default(),
+								roles.iter().map(Role::from).collect(),
 								Level::Namespace(ns),
 							)));
 						}
+						// Return opaque error as this code should not be reachable.
 						_ => return Err(Error::InvalidAuth),
 					};
-					// Check the authentication token
+					// Check the authentication token.
 					match enc {
-						// The auth token was created successfully
+						// The authentication token was created successfully.
 						Ok(tk) => Ok(tk),
 						_ => Err(Error::TokenMakingFailed),
 					}
@@ -647,55 +606,47 @@ pub async fn root_access(
 				AccessType::Bearer(at) => {
 					// TODO(gguillemas): Remove this once bearer access is no longer experimental.
 					if !*EXPERIMENTAL_BEARER_ACCESS {
+						// Return opaque error to avoid leaking the existence of the feature.
 						return Err(Error::InvalidAuth);
 					}
-					// Check if the bearer access method supports issuing tokens
+					// Check if the bearer access method supports issuing tokens.
 					let iss = match &at.jwt.issue {
 						Some(iss) => iss.clone(),
 						_ => return Err(Error::AccessMethodMismatch),
 					};
-					// Process the provided key
-					let key = match vars.get("key") {
-						Some(key) => &key.to_raw_string(),
-						// TODO(PR): Add new error.
-						None => return Err(Error::InvalidAuth),
-					};
-					if key.len() != access::GRANT_BEARER_KEY_LENGTH {
-						return Err(Error::InvalidAuth);
-					}
-					// Retrieve the key identifier from the provided key
-					let kid: String = key.chars().take(20).collect();
-					if kid.len() != access::GRANT_BEARER_ID_LENGTH {
-						return Err(Error::InvalidAuth);
-					}
-					// Check if the identifier corresponds to an existing grant
+					// Extract key identifier and key from the provided variables.
+					let (kid, key) = validate_grant_bearer(vars)?;
+					// Create a new readonly transaction
+					let tx = kvs.transaction(Read, Optimistic).await?;
+					// Fetch the specified access grant from storage
 					let gr = match tx.get_root_access_grant(&ac, &kid).await {
 						Ok(gr) => gr,
-						Err(_) => return Err(Error::InvalidAuth),
-					};
-					// Check if the grant is revoked or expired
-					match (gr.expiration.clone(), gr.revocation.clone()) {
-						(None, None) => {}
-						(Some(exp), None) => {
-							if exp < Datetime::default() {
-								return Err(Error::InvalidAuth);
-							}
-						}
+						// Return opaque error to avoid leaking existence of the grant.
 						_ => return Err(Error::InvalidAuth),
-					}
-					// Check if the provided key matches the bearer key in the grant
-					// We use time-constant comparison to prevent timing attacks
-					if let access::Grant::Bearer(grant) = gr.grant.clone() {
-						let grant_key_bytes: &[u8] = grant.key.as_bytes();
-						let signin_key_bytes: &[u8] = key.as_bytes();
-						let ok: bool = grant_key_bytes.ct_eq(signin_key_bytes).into();
-						if !ok {
-							return Err(Error::InvalidAuth);
-						}
 					};
-					// Create the authentication key
+					// Ensure that the transaction is cancelled.
+					tx.cancel().await?;
+					// Authenticate bearer key against stored grant.
+					verify_grant_bearer(&gr, key)?;
+					// If the subject of the grant is a system user, get their roles.
+					let roles = if let Some(access::Subject::User(user)) = &gr.subject {
+						// Create a new readonly transaction.
+						let tx = kvs.transaction(Read, Optimistic).await?;
+						// Fetch the specified user from storage.
+						let user = tx.get_root_user(user).await.map_err(|e| {
+							trace!("Error while authenticating to root: {e}");
+							// Return opaque error to avoid leaking grant subject existence.
+							Error::InvalidAuth
+						})?;
+						// Ensure that the transaction is cancelled.
+						tx.cancel().await?;
+						user.roles.clone()
+					} else {
+						vec![]
+					};
+					// Create the authentication key.
 					let key = config(iss.alg, iss.key)?;
-					// Create the authentication claim
+					// Create the authentication claim.
 					let claims = Claims {
 						iss: Some(SERVER_NAME.to_owned()),
 						iat: Some(Utc::now().timestamp()),
@@ -705,15 +656,23 @@ pub async fn root_access(
 						ac: Some(ac.to_owned()),
 						id: match &gr.subject {
 							Some(access::Subject::User(user)) => Some(user.to_raw()),
+							// Return opaque error as this code should not be reachable.
+							_ => return Err(Error::InvalidAuth),
+						},
+						roles: match &gr.subject {
+							Some(access::Subject::User(_)) => {
+								Some(roles.iter().map(|v| v.to_string()).collect())
+							}
+							// Return opaque error as this code should not be reachable.
 							_ => return Err(Error::InvalidAuth),
 						},
 						..Claims::default()
 					};
-					// Log the authenticated access method info
-					trace!("Signing in to root with access method `{}`", ac);
-					// Create the authentication token
+					// Log the authenticated access method information.
+					trace!("Signing in to database with bearer access method `{}`", ac);
+					// Create the authentication token.
 					let enc = encode(&Header::new(iss.alg.into()), &claims, &key);
-					// Set the authentication on the session
+					// Set the authentication on the session.
 					session.tk = Some(claims.into());
 					session.ac = Some(ac.to_owned());
 					session.exp = expiration(av.duration.session)?;
@@ -721,15 +680,16 @@ pub async fn root_access(
 						Some(access::Subject::User(user)) => {
 							session.au = Arc::new(Auth::new(Actor::new(
 								user.to_string(),
-								Default::default(),
+								roles.iter().map(Role::from).collect(),
 								Level::Root,
 							)));
 						}
+						// Return opaque error as this code should not be reachable.
 						_ => return Err(Error::InvalidAuth),
 					};
-					// Check the authentication token
+					// Check the authentication token.
 					match enc {
-						// The auth token was created successfully
+						// The authentication token was created successfully.
 						Ok(tk) => Ok(tk),
 						_ => Err(Error::TokenMakingFailed),
 					}
@@ -739,6 +699,61 @@ pub async fn root_access(
 		}
 		_ => Err(Error::AccessNotFound),
 	}
+}
+
+pub fn validate_grant_bearer(vars: Object) -> Result<(String, String), Error> {
+	// Extract the provided key.
+	let key = match vars.get("key") {
+		Some(key) => key.to_raw_string(),
+		None => return Err(Error::AccessBearerMissingKey),
+	};
+	if key.len() != access::GRANT_BEARER_LENGTH {
+		return Err(Error::AccessGrantBearerInvalid);
+	}
+	// Retrieve the prefix from the provided key.
+	let prefix: String = key.chars().take(access::GRANT_BEARER_PREFIX.len()).collect();
+	// Check the length of the key prefix.
+	if prefix != access::GRANT_BEARER_PREFIX {
+		return Err(Error::AccessGrantBearerInvalid);
+	}
+	// Retrieve the key identifier from the provided key.
+	let kid: String = key
+		.chars()
+		.skip(access::GRANT_BEARER_PREFIX.len() + 1)
+		.take(access::GRANT_BEARER_ID_LENGTH)
+		.collect();
+	// Check the length of the key identifier.
+	if kid.len() != access::GRANT_BEARER_ID_LENGTH {
+		return Err(Error::AccessGrantBearerInvalid);
+	};
+
+	Ok((kid, key))
+}
+
+pub fn verify_grant_bearer(gr: &Arc<AccessGrant>, key: String) -> Result<(), Error> {
+	// Check if the grant is revoked or expired.
+	match (gr.expiration.clone(), gr.revocation.clone()) {
+		(None, None) => {}
+		(Some(exp), None) => {
+			if exp < Datetime::default() {
+				// Return opaque error to avoid leaking revocation status.
+				return Err(Error::InvalidAuth);
+			}
+		}
+		_ => return Err(Error::InvalidAuth),
+	}
+	// Check if the provided key matches the bearer key in the grant.
+	// We use time-constant comparison to prevent timing attacks.
+	if let access::Grant::Bearer(grant) = gr.grant.clone() {
+		let grant_key_bytes: &[u8] = grant.key.as_bytes();
+		let signin_key_bytes: &[u8] = key.as_bytes();
+		let ok: bool = grant_key_bytes.ct_eq(signin_key_bytes).into();
+		if !ok {
+			return Err(Error::InvalidAuth);
+		}
+	};
+
+	Ok(())
 }
 
 #[cfg(test)]
