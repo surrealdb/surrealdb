@@ -1,7 +1,7 @@
 use criterion::{Criterion, Throughput};
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
-#[cfg(any(feature = "kv-rocksdb", feature = "kv-fdb", feature = "kv-surrealkv"))]
+#[cfg(any(feature = "kv-rocksdb", feature = "kv-fdb", feature = "kv-surrealkv", feature = "kv-surrealcs"))]
 use surrealdb::dbs::Session;
 use surrealdb::kvs::Datastore;
 

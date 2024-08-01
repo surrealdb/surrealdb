@@ -29,6 +29,7 @@ protocol-ws = ["dep:tokio-tungstenite", "dep:trice", "tokio/time"]
 kv-mem = ["surrealdb-core/kv-mem", "tokio/time"]
 kv-indxdb = ["surrealdb-core/kv-indxdb"]
 kv-rocksdb = ["surrealdb-core/kv-rocksdb", "tokio/time"]
+kv-surrealcs = ["surrealdb-core/kv-surrealcs", "surrealcs-client"]
 kv-tikv = ["surrealdb-core/kv-tikv", "tokio/time"]
 kv-fdb = ["surrealdb-core/kv-fdb", "tokio/time"]
 kv-surrealkv = ["surrealdb-core/kv-surrealkv", "tokio/time"]
@@ -101,6 +102,7 @@ tracing = "0.1.40"
 trice = { version = "0.4.0", optional = true }
 url = "2.5.0"
 reblessive = { version = "0.4.0", features = ["tree"] }
+surrealcs-client = { git = "https://github.com/surrealdb/surrealcs", optional = true }
 
 [dev-dependencies]
 ciborium = "0.2.1"

@@ -81,6 +81,8 @@ pub(super) enum Inner {
 	Mem(super::mem::Transaction),
 	#[cfg(feature = "kv-rocksdb")]
 	RocksDB(super::rocksdb::Transaction),
+	#[cfg(feature = "kv-surrealcs")]
+	SurrealCS(super::surrealcs::Transaction),
 	#[cfg(feature = "kv-indxdb")]
 	IndxDB(super::indxdb::Transaction),
 	#[cfg(feature = "kv-tikv")]
@@ -107,6 +109,8 @@ impl fmt::Display for Transactor {
 			Inner::FoundationDB(_) => write!(f, "fdb"),
 			#[cfg(feature = "kv-surrealkv")]
 			Inner::SurrealKV(_) => write!(f, "surrealkv"),
+			#[cfg(feature = "kv-surrealcs")]
+			Inner::SurrealCS(_) => write!(f, "surrealcs"),
 			#[allow(unreachable_patterns)]
 			_ => unreachable!(),
 		}
@@ -128,6 +132,8 @@ macro_rules! expand_inner {
 			Inner::FoundationDB($arm) => $b,
 			#[cfg(feature = "kv-surrealkv")]
 			Inner::SurrealKV($arm) => $b,
+			#[cfg(feature = "kv-surrealcs")]
+			Inner::SurrealCS($arm) => $b,
 			#[allow(unreachable_patterns)]
 			_ => unreachable!(),
 		}

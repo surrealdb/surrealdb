@@ -16,6 +16,7 @@ use bincode::Error as BincodeError;
 	feature = "kv-rocksdb",
 	feature = "kv-fdb",
 	feature = "kv-tikv",
+	feature = "kv-surrealcs"
 ))]
 use ext_sort::SortError;
 use fst::Error as FstError;
@@ -1126,6 +1127,7 @@ impl From<reqwest::Error> for Error {
 	feature = "kv-rocksdb",
 	feature = "kv-fdb",
 	feature = "kv-tikv",
+	feature = "kv-surrealcs"
 ))]
 impl<S, D, I> From<SortError<S, D, I>> for Error
 where

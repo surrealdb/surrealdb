@@ -35,6 +35,9 @@ use upgrade::UpgradeCommandArguments;
 use validate::ValidateCommandArguments;
 use version::VersionCommandArguments;
 
+#[cfg(feature = "storage-surrealcs")]
+use surrealcs_client::router::create_connection;
+
 const INFO: &str = "
 To get started using SurrealDB, and for guides on connecting to and building applications
 on top of SurrealDB, check out the SurrealDB documentation (https://surrealdb.com/docs).
@@ -101,6 +104,13 @@ pub async fn init() -> ExitCode {
 		.unwrap();
 	// Parse the CLI arguments
 	let args = Cli::parse();
+
+	#[cfg(feature = "storage-surrealcs")]
+	{
+		let one = create_connection("127.0.0.1:8080").await.unwrap();
+		let two = create_connection("127.0.0.1:8080").await.unwrap();
+		let three = create_connection("127.0.0.1:8080").await.unwrap();
+	}
 
 	#[cfg(debug_assertions)]
 	println!("{DEBUG_BUILD_WARNING}");

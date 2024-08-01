@@ -4,7 +4,8 @@
 	feature = "kv-indxdb",
 	feature = "kv-tikv",
 	feature = "kv-fdb",
-	feature = "kv-surrealkv"
+	feature = "kv-surrealkv",
+	feature = "kv-surrealcs"
 ))]
 
 use crate::kvs::clock::SizedClock;

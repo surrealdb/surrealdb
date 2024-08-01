@@ -31,6 +31,7 @@ mod kv;
 mod mem;
 mod rocksdb;
 mod surrealkv;
+mod surrealcs;
 mod tikv;
 
 #[cfg(test)]

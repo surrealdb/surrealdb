@@ -30,6 +30,7 @@ use std::fmt;
 	feature = "kv-rocksdb",
 	feature = "kv-fdb",
 	feature = "kv-tikv",
+	feature = "kv-surrealcs"
 ))]
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -85,6 +86,7 @@ pub struct Datastore {
 		feature = "kv-rocksdb",
 		feature = "kv-fdb",
 		feature = "kv-tikv",
+		feature = "kv-surrealcs"
 	))]
 	// The temporary directory
 	temporary_directory: Option<Arc<PathBuf>>,
@@ -104,6 +106,8 @@ pub(super) enum Inner {
 	FoundationDB(super::fdb::Datastore),
 	#[cfg(feature = "kv-surrealkv")]
 	SurrealKV(super::surrealkv::Datastore),
+	#[cfg(feature = "kv-surrealcs")]
+	SurrealCS(super::surrealcs::Datastore)
 }
 
 impl fmt::Display for Datastore {
@@ -122,6 +126,8 @@ impl fmt::Display for Datastore {
 			Inner::FoundationDB(_) => write!(f, "fdb"),
 			#[cfg(feature = "kv-surrealkv")]
 			Inner::SurrealKV(_) => write!(f, "surrealkv"),
+			#[cfg(feature = "kv-surrealcs")]
+			Inner::SurrealCS(_) => write!(f, "surrealcs"),
 			#[allow(unreachable_patterns)]
 			_ => unreachable!(),
 		}
@@ -250,6 +256,20 @@ impl Datastore {
 				#[cfg(not(feature = "kv-tikv"))]
                 return Err(Error::Ds("Cannot connect to the `tikv` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
 			}
+			s if s.starts_with("surrealcs:") => {
+				#[cfg(feature = "kv-surrealcs")]
+				{
+					info!("Starting kvs store at {}", path);
+					let s = s.trim_start_matches("surrealcs://");
+					let s = s.trim_start_matches("surrealcs:");
+					let v = super::surrealcs::Datastore::new().await.map(Inner::SurrealCS);
+					let c = clock.unwrap_or_else(|| Arc::new(SizedClock::system()));
+					info!("Started kvs store at {}", path);
+					Ok((v, c))
+				}
+				#[cfg(not(feature = "kv-surrealcs"))]
+				return Err(Error::Ds("Cannot connect to the `surrealcs` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
+			}
 			// Parse and initiate a FoundationDB datastore
 			s if s.starts_with("fdb:") => {
 				#[cfg(feature = "kv-fdb")]
@@ -306,6 +326,7 @@ impl Datastore {
 				feature = "kv-rocksdb",
 				feature = "kv-fdb",
 				feature = "kv-tikv",
+				feature = "kv-surrealcs"
 			))]
 			temporary_directory: None,
 		})
@@ -359,6 +380,7 @@ impl Datastore {
 		feature = "kv-rocksdb",
 		feature = "kv-fdb",
 		feature = "kv-tikv",
+		feature = "kv-surrealcs"
 	))]
 	/// Set a temporary directory for ordering of large result sets
 	pub fn with_temporary_directory(mut self, path: Option<PathBuf>) -> Self {
@@ -585,6 +607,11 @@ impl Datastore {
 				let tx = v.transaction(write, lock).await?;
 				super::tr::Inner::TiKV(tx)
 			}
+			#[cfg(feature = "kv-surrealcs")]
+			Inner::SurrealCS(v) => {
+				let tx = v.transaction(write, lock).await?;
+				super::tr::Inner::SurrealCS(tx)
+			}
 			#[cfg(feature = "kv-fdb")]
 			Inner::FoundationDB(v) => {
 				let tx = v.transaction(write, lock).await?;
@@ -695,6 +722,7 @@ impl Datastore {
 				feature = "kv-rocksdb",
 				feature = "kv-fdb",
 				feature = "kv-tikv",
+				feature = "kv-surrealcs"
 			))]
 			self.temporary_directory.clone(),
 		)?;
