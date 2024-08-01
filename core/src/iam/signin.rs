@@ -306,7 +306,7 @@ pub async fn db_access(
 						})?;
 						// Ensure that the transaction is cancelled
 						tx.cancel().await?;
-						(*user).roles.clone()
+						user.roles.clone()
 					} else {
 						vec![]
 					};
@@ -350,7 +350,7 @@ pub async fn db_access(
 						Some(access::Subject::User(user)) => {
 							session.au = Arc::new(Auth::new(Actor::new(
 								user.to_string(),
-								roles.iter().map(|v| Role::from(v)).collect(),
+								roles.iter().map(Role::from).collect(),
 								Level::Database(ns, db),
 							)));
 						}
