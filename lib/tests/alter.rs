@@ -27,8 +27,8 @@ async fn define_alter_table() -> Result<(), Error> {
 		    DROP false
 		    SCHEMAFULL
 			PERMISSIONS NONE
-			CHANGEFEED NONE
-			COMMENT NONE
+			CHANGEFEED UNSET
+			COMMENT UNSET
 			TYPE ANY;
 		INFO FOR DB;
 	";
@@ -122,6 +122,129 @@ async fn define_alter_table_if_exists() -> Result<(), Error> {
 			params: {},
 			tables: {},
 			users: {},
+		}",
+	);
+	assert_eq!(tmp, val);
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn define_alter_field() -> Result<(), Error> {
+	let sql = "
+		DEFINE FIELD test ON test;
+		INFO FOR TB test;
+
+		ALTER FIELD test ON test
+		    FLEXIBLE
+			TYPE string
+			DEFAULT 'test'
+			READONLY true
+			VALUE 'bla'
+			ASSERT string::len($value) > 0
+			PERMISSIONS NONE
+			COMMENT 'bla';
+		INFO FOR TB test;
+
+		ALTER FIELD test ON test
+		    FLEXIBLE false
+			TYPE UNSET
+			DEFAULT UNSET
+			READONLY false
+			VALUE UNSET
+			ASSERT UNSET
+			PERMISSIONS FULL
+			COMMENT UNSET;
+		INFO FOR TB test;
+	";
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 6);
+	//
+	let tmp = res.remove(0).result;
+	assert!(tmp.is_ok());
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"{
+            events: {},
+            fields: {
+                test: 'DEFINE FIELD test ON test PERMISSIONS FULL'
+            },
+            indexes: {},
+            lives: {},
+            tables: {}
+        }",
+	);
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result;
+	assert!(tmp.is_ok());
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"{
+            events: {},
+            fields: {
+                test: \"DEFINE FIELD test ON test FLEXIBLE TYPE string DEFAULT 'test' READONLY VALUE 'bla' ASSERT string::len($value) > 0 COMMENT 'bla' PERMISSIONS NONE\"
+            },
+            indexes: {},
+            lives: {},
+            tables: {}
+        }",
+	);
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result;
+	assert!(tmp.is_ok());
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"{
+            events: {},
+            fields: {
+                test: 'DEFINE FIELD test ON test PERMISSIONS FULL'
+            },
+            indexes: {},
+            lives: {},
+            tables: {}
+        }",
+	);
+	assert_eq!(tmp, val);
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn define_alter_field_if_exists() -> Result<(), Error> {
+	let sql = "
+		ALTER FIELD test ON test COMMENT 'bla';
+		ALTER FIELD IF EXISTS test ON test COMMENT 'bla';
+		INFO FOR TB test;
+	";
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 3);
+	//
+	let tmp = res.remove(0).result;
+	let _err = Error::FdNotFound {
+		value: "test".to_string(),
+	};
+	assert!(matches!(tmp, Err(_err)));
+	//
+	let tmp = res.remove(0).result;
+	assert!(tmp.is_ok());
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"{
+		    events: {},
+            fields: {},
+            indexes: {},
+            lives: {},
+            tables: {}
 		}",
 	);
 	assert_eq!(tmp, val);

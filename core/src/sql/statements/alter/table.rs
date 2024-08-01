@@ -131,10 +131,10 @@ impl Display for AlterTableStatement {
 			})?;
 		}
 		if let Some(comment) = &self.comment {
-			write!(f, " COMMENT {}", comment.clone().unwrap_or("NONE".into()))?
+			write!(f, " COMMENT {}", comment.clone().unwrap_or("UNSET".into()))?
 		}
 		if let Some(changefeed) = &self.changefeed {
-			write!(f, " CHANGEFEED {}", changefeed.map_or("NONE".into(), |v| v.to_string()))?
+			write!(f, " CHANGEFEED {}", changefeed.map_or("UNSET".into(), |v| v.to_string()))?
 		}
 		let _indent = if is_pretty() {
 			Some(pretty_indent())

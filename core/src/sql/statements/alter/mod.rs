@@ -1,5 +1,7 @@
+mod field;
 mod table;
 
+pub use field::AlterFieldStatement;
 pub use table::AlterTableStatement;
 
 use crate::ctx::Context;
@@ -13,12 +15,14 @@ use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display};
 
-#[revisioned(revision = 1)]
+#[revisioned(revision = 2)]
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub enum AlterStatement {
 	Table(AlterTableStatement),
+	#[revision(start = 2)]
+	Field(AlterFieldStatement),
 }
 
 impl AlterStatement {
@@ -36,6 +40,7 @@ impl AlterStatement {
 	) -> Result<Value, Error> {
 		match self {
 			Self::Table(ref v) => v.compute(stk, ctx, opt, doc).await,
+			Self::Field(ref v) => v.compute(stk, ctx, opt, doc).await,
 		}
 	}
 }
@@ -44,6 +49,7 @@ impl Display for AlterStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		match self {
 			Self::Table(v) => Display::fmt(v, f),
+			Self::Field(v) => Display::fmt(v, f),
 		}
 	}
 }

@@ -76,6 +76,27 @@ impl DefineFieldStatement {
 		)
 		.await?;
 
+		// Process nested field definitions
+		self.process_nested_fields(ctx, opt).await?;
+		// Process in and out fields
+		self.process_in_out_fields(ctx, opt).await?;
+		// Clear the cache
+		txn.clear();
+		// Ok all good
+		Ok(Value::None)
+	}
+
+	/// Process nested fields after the current field has been defined.
+	pub async fn process_nested_fields(
+		&self,
+		ctx: &Context<'_>,
+		opt: &Options,
+	) -> Result<(), Error> {
+		// Get the NS and DB
+		let ns = opt.ns()?;
+		let db = opt.db()?;
+		// Fetch the transaction
+		let txn = ctx.tx();
 		// find existing field definitions.
 		let fields = txn.all_tb_fields(ns, db, &self.what).await.ok();
 
@@ -118,6 +139,24 @@ impl DefineFieldStatement {
 				}
 			}
 		}
+
+		Ok(())
+	}
+
+	/// Used to ensure valid relations when the this is an `in` or `out` field.
+	pub async fn process_in_out_fields(
+		&self,
+		ctx: &Context<'_>,
+		opt: &Options,
+	) -> Result<(), Error> {
+		// Get the NS and DB
+		let ns = opt.ns()?;
+		let db = opt.db()?;
+		// Fetch the transaction
+		let txn = ctx.tx();
+		// Get the name of the field
+		let fd = self.name.to_string();
+
 		// If this is an `in` field then check relation definitions
 		if fd.as_str() == "in" {
 			// Get the table definition that this field belongs to
@@ -176,10 +215,8 @@ impl DefineFieldStatement {
 				}
 			}
 		}
-		// Clear the cache
-		txn.clear();
-		// Ok all good
-		Ok(Value::None)
+
+		Ok(())
 	}
 }
 

@@ -54,7 +54,7 @@ pub use self::throw::ThrowStatement;
 pub use self::update::UpdateStatement;
 pub use self::upsert::UpsertStatement;
 
-pub use self::alter::{AlterStatement, AlterTableStatement};
+pub use self::alter::{AlterFieldStatement, AlterStatement, AlterTableStatement};
 
 pub use self::define::{
 	DefineAccessStatement, DefineAnalyzerStatement, DefineDatabaseStatement, DefineEventStatement,
