@@ -37,10 +37,10 @@ impl<'a> Document<'a> {
 		opt: &Options,
 		stm: &Statement<'_>,
 	) -> Result<Value, Error> {
-		// Store record edges
-		self.edges(ctx, opt, stm).await?;
 		// Alter record data
 		self.alter(stk, ctx, opt, stm).await?;
+		// Store record edges
+		self.edges(ctx, opt, stm).await?;
 		// Merge fields data
 		self.field(stk, ctx, opt, stm).await?;
 		// Reset fields data
