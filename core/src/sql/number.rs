@@ -1,4 +1,4 @@
-use super::value::{TryAdd, TryDiv, TryMul, TryNeg, TryPow, TryRem, TrySub};
+use super::value::{TryAdd, TryDiv, TryFloatDiv, TryMul, TryNeg, TryPow, TryRem, TrySub};
 use crate::err::Error;
 use crate::fnc::util::math::ToFloat;
 use crate::sql::strand::Strand;
@@ -725,6 +725,34 @@ impl TryNeg for Number {
 			}
 			Self::Float(n) => Number::Float(-n),
 			Self::Decimal(n) => Number::Decimal(-n),
+		})
+	}
+}
+
+impl TryFloatDiv for Number {
+	type Output = Self;
+	fn try_float_div(self, other: Self) -> Result<Self, Error> {
+		Ok(match (self, other) {
+			(Number::Int(v), Number::Int(w)) => {
+				let quotient = (v as f64).div(w as f64);
+				if quotient.fract() != 0.0 {
+					return Ok(Number::Float(quotient));
+				}
+				Number::Int(
+					v.checked_div(w).ok_or_else(|| Error::TryDiv(v.to_string(), w.to_string()))?,
+				)
+			}
+			(Number::Float(v), Number::Float(w)) => Number::Float(v.div(w)),
+			(Number::Decimal(v), Number::Decimal(w)) => Number::Decimal(
+				v.checked_div(w).ok_or_else(|| Error::TryDiv(v.to_string(), w.to_string()))?,
+			),
+			(Number::Int(v), Number::Float(w)) => Number::Float((v as f64).div(w)),
+			(Number::Float(v), Number::Int(w)) => Number::Float(v.div(w as f64)),
+			(v, w) => Number::Decimal(
+				v.to_decimal()
+					.checked_div(w.to_decimal())
+					.ok_or_else(|| Error::TryDiv(v.to_string(), w.to_string()))?,
+			),
 		})
 	}
 }
