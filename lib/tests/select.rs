@@ -1155,3 +1155,72 @@ async fn select_issue_3510() -> Result<(), Error> {
 	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
 	Ok(())
 }
+
+#[tokio::test]
+async fn select_destructure() -> Result<(), Error> {
+	let sql = "
+		CREATE person:1 SET name = 'John', age = 21, obj = { a: 1, b: 2, c: { d: 3, e: 4, f: 5 } };
+		SELECT obj.{ a, c.{ e, f } } FROM person;
+		SELECT * OMIT obj.c.{ d, f } FROM person;
+	";
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 3);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
+			{
+				id: person:1,
+				name: 'John',
+				age: 21,
+				obj: {
+                    a: 1,
+                    b: 2,
+                    c: {
+                        d: 3,
+                        e: 4,
+                        f: 5
+                    }
+                }
+			}
+		]",
+	);
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
+			{
+				obj: {
+                    a: 1,
+                    c: {
+                        e: 4,
+                        f: 5
+                    }
+                }
+			}
+		]",
+	);
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
+			{
+				id: person:1,
+				name: 'John',
+				age: 21,
+				obj: {
+                    a: 1,
+                    b: 2,
+                    c: { e: 4 }
+                }
+			}
+		]",
+	);
+	assert_eq!(tmp, val);
+	//
+	Ok(())
+}

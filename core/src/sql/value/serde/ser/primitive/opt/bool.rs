@@ -1,6 +1,5 @@
 use crate::err::Error;
 use crate::sql::value::serde::ser;
-use crate::sql::Strand;
 use serde::ser::Impossible;
 use serde::ser::Serialize;
 
@@ -8,18 +7,18 @@ use serde::ser::Serialize;
 pub struct Serializer;
 
 impl ser::Serializer for Serializer {
-	type Ok = Option<Strand>;
+	type Ok = Option<bool>;
 	type Error = Error;
 
-	type SerializeSeq = Impossible<Option<Strand>, Error>;
-	type SerializeTuple = Impossible<Option<Strand>, Error>;
-	type SerializeTupleStruct = Impossible<Option<Strand>, Error>;
-	type SerializeTupleVariant = Impossible<Option<Strand>, Error>;
-	type SerializeMap = Impossible<Option<Strand>, Error>;
-	type SerializeStruct = Impossible<Option<Strand>, Error>;
-	type SerializeStructVariant = Impossible<Option<Strand>, Error>;
+	type SerializeSeq = Impossible<Option<bool>, Error>;
+	type SerializeTuple = Impossible<Option<bool>, Error>;
+	type SerializeTupleStruct = Impossible<Option<bool>, Error>;
+	type SerializeTupleVariant = Impossible<Option<bool>, Error>;
+	type SerializeMap = Impossible<Option<bool>, Error>;
+	type SerializeStruct = Impossible<Option<bool>, Error>;
+	type SerializeStructVariant = Impossible<Option<bool>, Error>;
 
-	const EXPECTED: &'static str = "an `Option<Strand>`";
+	const EXPECTED: &'static str = "an `Option<bool>`";
 
 	#[inline]
 	fn serialize_none(self) -> Result<Self::Ok, Self::Error> {
@@ -31,7 +30,7 @@ impl ser::Serializer for Serializer {
 	where
 		T: ?Sized + Serialize,
 	{
-		Ok(Some(Strand(value.serialize(ser::string::Serializer.wrap())?)))
+		Ok(Some(value.serialize(ser::primitive::bool::Serializer.wrap())?))
 	}
 }
 
@@ -42,14 +41,14 @@ mod tests {
 
 	#[test]
 	fn none() {
-		let option: Option<Strand> = None;
+		let option: Option<bool> = None;
 		let serialized = option.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(option, serialized);
 	}
 
 	#[test]
 	fn some() {
-		let option = Some(Strand::default());
+		let option = Some(bool::default());
 		let serialized = option.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(option, serialized);
 	}
