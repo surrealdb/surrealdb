@@ -27,7 +27,7 @@ impl super::Routine for Read {
 
 				tasks.spawn(async move {
 					let _: Option<Record> = client
-						.create((table_name, task_id as u64))
+						.create((table_name, task_id as i64))
 						.content(Record {
 							field: Id::rand(),
 						})

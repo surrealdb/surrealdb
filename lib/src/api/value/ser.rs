@@ -113,18 +113,6 @@ impl Revisioned for Number {
 	}
 }
 
-// extra serializer to be compatibile with core
-pub(crate) struct TableSerializer<'a>(pub &'a String);
-
-impl<'a> Serialize for TableSerializer<'a> {
-	fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-	where
-		S: serde::Serializer,
-	{
-		serializer.serialize_newtype_struct("$surrealdb::private::sql::Table", self.0)
-	}
-}
-
 impl Revisioned for RecordIdKey {
 	fn revision() -> u16 {
 		1

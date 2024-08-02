@@ -31,6 +31,14 @@ pub use serializer::Serializer;
 
 use crate::Error;
 
+pub fn from_value<T: DeserializeOwned>(value: Value) -> Result<T, Error> {
+	T::deserialize(value).map_err(|x| x.into())
+}
+
+pub fn to_value<T: Serialize>(value: &T) -> Result<Value, Error> {
+	value.serialize(Serializer).map_err(|x| x.into())
+}
+
 // Keeping bytes implementation minimal since it might be a good idea to use bytes crate here
 // instead of a plain Vec<u8>.
 #[derive(Debug, Clone, Eq, PartialEq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -157,6 +165,12 @@ impl From<Object> for RecordIdKey {
 impl From<String> for RecordIdKey {
 	fn from(value: String) -> Self {
 		RecordIdKey::String(value)
+	}
+}
+
+impl From<&String> for RecordIdKey {
+	fn from(value: &String) -> Self {
+		RecordIdKey::String(value.clone())
 	}
 }
 
@@ -512,6 +526,35 @@ impl Value {
 	pub fn is_none(&self) -> bool {
 		matches!(self, Value::None)
 	}
+
+	#[doc = concat!("Return whether the value contains a ",stringify!(Vec<Value>),".")]
+	pub fn is_array(&self) -> bool {
+		matches!(&self, Value::Array(_))
+	}
+	#[doc = concat!("Get a reference to the internal ",stringify!(Vec<Value>)," if the value is of that type")]
+	pub fn as_array(&self) -> Option<&Vec<Value>> {
+		if let Value::Array(ref x) = self {
+			Some(x)
+		} else {
+			None
+		}
+	}
+	#[doc = concat!("Get a reference to the internal ",stringify!(Vec<Value>)," if the value is of that type")]
+	pub fn as_array_mut(&mut self) -> Option<&mut Vec<Value>> {
+		if let Value::Array(ref mut x) = self {
+			Some(x)
+		} else {
+			None
+		}
+	}
+	#[doc = concat!("Convert the value to ",stringify!(Vec<Value>)," if the value is of that type")]
+	pub fn into_array(self) -> Option<Vec<Value>> {
+		if let Value::Array(x) = self {
+			Some(x)
+		} else {
+			None
+		}
+	}
 }
 
 impl From<i64> for Value {
@@ -535,6 +578,15 @@ impl From<Decimal> for Value {
 impl From<&str> for Value {
 	fn from(value: &str) -> Self {
 		Value::from(value.to_string())
+	}
+}
+
+impl<T> From<Vec<T>> for Value
+where
+	Value: From<T>,
+{
+	fn from(value: Vec<T>) -> Self {
+		Value::Array(value.into_iter().map(From::from).collect())
 	}
 }
 
@@ -629,7 +681,6 @@ impl_convert!(
 	(String(String), is_string, as_string, as_string_mut, into_string),
 	(RecordId(RecordId), is_record_id, as_record_id, as_record_id_mut, into_record_id),
 	(Object(Object), is_object, as_object, as_object_mut, into_object),
-	(Array(Vec<Value>), is_array, as_array, as_array_mut, into_array),
 );
 
 pub struct ConversionError {

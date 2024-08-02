@@ -797,7 +797,7 @@ mod tests {
 			results: to_map(vec![Ok(scalar.into())]),
 			..Response::new()
 		};
-		let vec: Vec<usize> = response.take(0).unwrap();
+		let vec: Vec<i64> = response.take(0).unwrap();
 		assert_eq!(vec, vec![scalar]);
 
 		let scalar = true;

@@ -1,9 +1,9 @@
 use super::types::User;
-use crate::api::conn::{Command, Route};
+use crate::api::conn::{Command, DbResponse, Route};
 use crate::api::Response as QueryResponse;
+use crate::opt::Resource;
+use crate::{value, Value};
 use channel::Receiver;
-use surrealdb_core::sql::to_value;
-use surrealdb_core::sql::Value;
 
 pub(super) fn mock(route_rx: Receiver<Route>) {
 	tokio::spawn(async move {
@@ -48,7 +48,7 @@ pub(super) fn mock(route_rx: Receiver<Route>) {
 					data,
 					..
 				} => match data {
-					None => Ok(DbResponse::Other(to_value(User::default()).unwrap())),
+					None => Ok(DbResponse::Other(value::to_value(&User::default()).unwrap())),
 					Some(user) => Ok(DbResponse::Other(user.clone())),
 				},
 				Command::Select {
@@ -59,8 +59,10 @@ pub(super) fn mock(route_rx: Receiver<Route>) {
 					what,
 					..
 				} => match what {
-					Value::Thing(..) => Ok(DbResponse::Other(to_value(User::default()).unwrap())),
-					Value::Table(..) | Value::Array(..) | Value::Range(..) => {
+					Resource::RecordId(..) => {
+						Ok(DbResponse::Other(value::to_value(&User::default()).unwrap()))
+					}
+					Resource::Table(..) | Resource::Array(..) | Resource::Range(..) => {
 						Ok(DbResponse::Other(Value::Array(Default::default())))
 					}
 					_ => unreachable!(),
@@ -81,23 +83,20 @@ pub(super) fn mock(route_rx: Receiver<Route>) {
 					what,
 					..
 				} => match what {
-					Value::Thing(..) => Ok(DbResponse::Other(to_value(User::default()).unwrap())),
-					Value::Table(..) | Value::Array(..) | Value::Range(..) => {
+					Resource::RecordId(..) => {
+						Ok(DbResponse::Other(value::to_value(&User::default()).unwrap()))
+					}
+					Resource::Table(..) | Resource::Array(..) | Resource::Range(..) => {
 						Ok(DbResponse::Other(Value::Array(Default::default())))
 					}
 					_ => unreachable!(),
 				},
 				Command::Insert {
-					what,
 					data,
-				} => match (what, data) {
-					(Some(Value::Table(..)), Value::Array(..)) => {
-						Ok(DbResponse::Other(Value::Array(Default::default())))
-					}
-					(Some(Value::Table(..)), _) => {
-						Ok(DbResponse::Other(to_value(User::default()).unwrap()))
-					}
-					_ => unreachable!(),
+					..
+				} => match data {
+					Value::Array(..) => Ok(DbResponse::Other(Value::Array(Default::default()))),
+					_ => Ok(DbResponse::Other(value::to_value(&User::default()).unwrap())),
 				},
 				Command::ExportMl {
 					..

@@ -390,7 +390,7 @@ impl Serialize for RouterRequest {
 				if let Some(id) = self.0.id.as_ref() {
 					map.serialize_entry("id", &InnerNumberVariant(*id))?;
 				}
-				map.serialize_entry("method", &self.0.method)?;
+				map.serialize_entry("method", &InnerMethod(self.0.method))?;
 				if let Some(params) = self.0.params.as_ref() {
 					map.serialize_entry("params", params)?;
 				}
@@ -465,7 +465,8 @@ impl Revisioned for RouterRequest {
 			.with_little_endian()
 			.with_varint_encoding()
 			.reject_trailing_bytes()
-			.serialize_into(&mut *w, self.method);
+			.serialize_into(&mut *w, self.method)
+			.map_err(|e| revision::Error::Serialize(format!("{:?}", e)))?;
 
 		if let Some(x) = self.params.as_ref() {
 			serializer
