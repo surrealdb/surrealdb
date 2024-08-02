@@ -945,7 +945,7 @@ pub enum Error {
 	},
 
 	/// The requested database access method already exists
-	#[error("The access method '{ac}' already exists in the database '{db}' in namespace '{ns}'")]
+	#[error("The access method '{ac}' already exists in the database '{db}'")]
 	AccessDbAlreadyExists {
 		ac: String,
 		ns: String,
@@ -961,6 +961,7 @@ pub enum Error {
 	/// The requested root access grant does not exist
 	#[error("The root access grant '{gr}' does not exist")]
 	AccessGrantRootNotFound {
+		ac: String,
 		gr: String,
 	},
 
@@ -974,12 +975,13 @@ pub enum Error {
 	/// The requested namespace access grant does not exist
 	#[error("The access grant '{gr}' does not exist in the namespace '{ns}'")]
 	AccessGrantNsNotFound {
+		ac: String,
 		gr: String,
 		ns: String,
 	},
 
 	/// The requested database access method does not exist
-	#[error("The access method '{ac}' does not exist in the database '{db}' in namespace '{ns}'")]
+	#[error("The access method '{ac}' does not exist in the database '{db}'")]
 	AccessDbNotFound {
 		ac: String,
 		ns: String,
@@ -987,8 +989,9 @@ pub enum Error {
 	},
 
 	/// The requested database access grant does not exist
-	#[error("The access grant '{gr}' does not exist in the database '{db}' in namespace '{ns}'")]
+	#[error("The access grant '{gr}' does not exist in the database '{db}'")]
 	AccessGrantDbNotFound {
+		ac: String,
 		gr: String,
 		ns: String,
 		db: String,

@@ -845,6 +845,7 @@ impl Transaction {
 			Ok(val) => val,
 			Err(cache) => {
 				let val = self.get(key).await?.ok_or(Error::AccessGrantRootNotFound {
+					ac: ac.to_owned(),
 					gr: gr.to_owned(),
 				})?;
 				let val: AccessGrant = val.into();
@@ -936,6 +937,7 @@ impl Transaction {
 			Ok(val) => val,
 			Err(cache) => {
 				let val = self.get(key).await?.ok_or(Error::AccessGrantNsNotFound {
+					ac: ac.to_owned(),
 					gr: gr.to_owned(),
 					ns: ns.to_owned(),
 				})?;
@@ -1037,6 +1039,7 @@ impl Transaction {
 			Ok(val) => val,
 			Err(cache) => {
 				let val = self.get(key).await?.ok_or(Error::AccessGrantDbNotFound {
+					ac: ac.to_owned(),
 					gr: gr.to_owned(),
 					ns: ns.to_owned(),
 					db: db.to_owned(),
