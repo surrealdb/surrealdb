@@ -238,7 +238,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 					decode::<Claims>(token, &cf.0, &cf.1)?;
 					// AUTHENTICATE clause
 					if let Some(au) = &de.authenticate {
-						// Setup the system session for finding the signin record
+						// Setup the system session for executing the clause
 						let mut sess = Session::editor().with_ns(&ns).with_db(&db);
 						sess.tk = Some(token_data.claims.clone().into());
 						sess.ip.clone_from(&session.ip);
@@ -317,7 +317,6 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 					}
 					_ => return Err(Error::AccessMethodMismatch),
 				},
-				_ => return Err(Error::AccessMethodMismatch),
 			};
 			Ok(())
 		}
@@ -392,7 +391,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			decode::<Claims>(token, &cf.0, &cf.1)?;
 			// AUTHENTICATE clause
 			if let Some(au) = &de.authenticate {
-				// Setup the system session for finding the signin record
+				// Setup the system session for executing the clause
 				let mut sess = Session::editor().with_ns(&ns);
 				sess.tk = Some(token_data.claims.clone().into());
 				sess.ip.clone_from(&session.ip);
@@ -490,7 +489,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			decode::<Claims>(token, &cf.0, &cf.1)?;
 			// AUTHENTICATE clause
 			if let Some(au) = &de.authenticate {
-				// Setup the system session for finding the signin record
+				// Setup the system session for executing the clause
 				let mut sess = Session::editor();
 				sess.tk = Some(token_data.claims.clone().into());
 				sess.ip.clone_from(&session.ip);
@@ -635,7 +634,7 @@ fn verify_pass(pass: &str, hash: &str) -> Result<(), Error> {
 }
 
 // Execute the AUTHENTICATE clause for a Record access method
-async fn authenticate_record(
+pub async fn authenticate_record(
 	kvs: &Datastore,
 	session: &Session,
 	authenticate: Value,
@@ -657,7 +656,7 @@ async fn authenticate_record(
 }
 
 // Execute the AUTHENTICATE clause for any other access method
-async fn authenticate_generic(
+pub async fn authenticate_generic(
 	kvs: &Datastore,
 	session: &Session,
 	authenticate: Value,
