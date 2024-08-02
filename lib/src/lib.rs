@@ -116,6 +116,9 @@ compile_error!("The `ml` feature is not supported on the `wasm32` architecture."
 #[macro_use]
 extern crate tracing;
 
+#[doc(hidden)]
+pub use surrealdb_core::*;
+
 use uuid::Uuid;
 
 #[macro_use]
