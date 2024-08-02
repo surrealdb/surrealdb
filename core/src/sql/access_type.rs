@@ -19,12 +19,27 @@ pub enum AccessType {
 	Bearer(BearerAccess),
 }
 
+// Allows retrieving the JWT configuration for any access type.
+pub trait Jwt {
+	fn jwt(&self) -> &JwtAccess;
+}
+
 impl Default for AccessType {
 	fn default() -> Self {
 		// Access type defaults to the most specific
 		Self::Record(RecordAccess {
 			..Default::default()
 		})
+	}
+}
+
+impl Jwt for AccessType {
+	fn jwt(&self) -> &JwtAccess {
+		match self {
+			AccessType::Record(at) => at.jwt(),
+			AccessType::Jwt(at) => at.jwt(),
+			AccessType::Bearer(at) => at.jwt(),
+		}
 	}
 }
 
@@ -129,6 +144,12 @@ impl Default for JwtAccess {
 				key,
 			}),
 		}
+	}
+}
+
+impl Jwt for JwtAccess {
+	fn jwt(&self) -> &JwtAccess {
+		self
 	}
 }
 
@@ -311,6 +332,12 @@ impl Default for RecordAccess {
 	}
 }
 
+impl Jwt for RecordAccess {
+	fn jwt(&self) -> &JwtAccess {
+		&self.jwt
+	}
+}
+
 #[revisioned(revision = 1)]
 #[derive(Debug, Serialize, Deserialize, Hash, Clone, Eq, PartialEq, PartialOrd)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
@@ -327,6 +354,12 @@ impl Default for BearerAccess {
 				..Default::default()
 			},
 		}
+	}
+}
+
+impl Jwt for BearerAccess {
+	fn jwt(&self) -> &JwtAccess {
+		&self.jwt
 	}
 }
 

@@ -5,7 +5,7 @@ use crate::err::Error;
 use crate::iam::jwks;
 use crate::iam::{issue::expiration, token::Claims, Actor, Auth, Level, Role};
 use crate::kvs::{Datastore, LockType::*, TransactionType::*};
-use crate::sql::access_type::{AccessType, JwtAccessVerify};
+use crate::sql::access_type::{AccessType, Jwt, JwtAccessVerify};
 use crate::sql::{statements::DefineUserStatement, Algorithm, Thing, Value};
 use crate::syn;
 use argon2::{Argon2, PasswordHash, PasswordVerifier};
@@ -219,9 +219,9 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			tx.cancel().await?;
 			// Obtain the configuration to verify the token based on the access method
 			match &de.kind {
-				// If the access type is Jwt, this is database access
-				AccessType::Jwt(at) => {
-					let cf = match &at.verify {
+				// If the access type is Jwt or Bearer, this is database access
+				AccessType::Jwt(_) | AccessType::Bearer(_) => {
+					let cf = match &de.kind.jwt().verify {
 						JwtAccessVerify::Key(key) => config(key.alg, key.key.as_bytes()),
 						#[cfg(feature = "jwks")]
 						JwtAccessVerify::Jwks(jwks) => {
@@ -243,7 +243,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 						sess.tk = Some(token_data.claims.clone().into());
 						sess.ip.clone_from(&session.ip);
 						sess.or.clone_from(&session.or);
-						authenticate_jwt(kvs, &sess, au.clone()).await?;
+						authenticate_generic(kvs, &sess, au.clone()).await?;
 					}
 					// Parse the roles
 					let roles = match token_data.claims.roles {
@@ -373,7 +373,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			tx.cancel().await?;
 			// Obtain the configuration to verify the token based on the access method
 			let cf = match &de.kind {
-				AccessType::Jwt(ac) => match &ac.verify {
+				AccessType::Jwt(_) | AccessType::Bearer(_) => match &de.kind.jwt().verify {
 					JwtAccessVerify::Key(key) => config(key.alg, key.key.as_bytes()),
 					#[cfg(feature = "jwks")]
 					JwtAccessVerify::Jwks(jwks) => {
@@ -397,7 +397,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 				sess.tk = Some(token_data.claims.clone().into());
 				sess.ip.clone_from(&session.ip);
 				sess.or.clone_from(&session.or);
-				authenticate_jwt(kvs, &sess, au.clone()).await?;
+				authenticate_generic(kvs, &sess, au.clone()).await?;
 			}
 			// Parse the roles
 			let roles = match token_data.claims.roles {
@@ -471,7 +471,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			tx.cancel().await?;
 			// Obtain the configuration to verify the token based on the access method
 			let cf = match &de.kind {
-				AccessType::Jwt(ac) => match &ac.verify {
+				AccessType::Jwt(_) | AccessType::Bearer(_) => match &de.kind.jwt().verify {
 					JwtAccessVerify::Key(key) => config(key.alg, key.key.as_bytes()),
 					#[cfg(feature = "jwks")]
 					JwtAccessVerify::Jwks(jwks) => {
@@ -495,7 +495,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 				sess.tk = Some(token_data.claims.clone().into());
 				sess.ip.clone_from(&session.ip);
 				sess.or.clone_from(&session.or);
-				authenticate_jwt(kvs, &sess, au.clone()).await?;
+				authenticate_generic(kvs, &sess, au.clone()).await?;
 			}
 			// Parse the roles
 			let roles = match token_data.claims.roles {
@@ -634,7 +634,7 @@ fn verify_pass(pass: &str, hash: &str) -> Result<(), Error> {
 	}
 }
 
-// Execute the AUTHENTICATE clause for a record access method
+// Execute the AUTHENTICATE clause for a Record access method
 async fn authenticate_record(
 	kvs: &Datastore,
 	session: &Session,
@@ -656,8 +656,8 @@ async fn authenticate_record(
 	}
 }
 
-// Execute the AUTHENTICATE clause for a JWT access method
-async fn authenticate_jwt(
+// Execute the AUTHENTICATE clause for any other access method
+async fn authenticate_generic(
 	kvs: &Datastore,
 	session: &Session,
 	authenticate: Value,
