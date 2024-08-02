@@ -1,6 +1,7 @@
 use criterion::measurement::WallTime;
 use criterion::{criterion_group, criterion_main, BenchmarkGroup, Criterion, Throughput};
 use futures::executor::block_on;
+use futures::future::join_all;
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
 use reblessive::TreeStack;
@@ -19,36 +20,26 @@ use surrealdb_core::sql::{Id, Number, Thing, Value};
 use tokio::runtime::{Builder, Runtime};
 use tokio::task;
 
-fn bench_index_mtree_dim_3(c: &mut Criterion) {
-	bench_index_mtree(c, 250, 2500, 3, 100);
-}
-
-fn bench_index_mtree_dim_3_full_cache(c: &mut Criterion) {
-	bench_index_mtree(c, 250, 2500, 3, 0);
-}
-
-fn bench_index_mtree_dim_50(c: &mut Criterion) {
-	bench_index_mtree(c, 100, 1000, 50, 100);
-}
-
-fn bench_index_mtree_dim_50_full_cache(c: &mut Criterion) {
-	bench_index_mtree(c, 100, 1000, 50, 0);
-}
-
-fn bench_index_mtree_dim_300(c: &mut Criterion) {
-	bench_index_mtree(c, 50, 500, 300, 100);
-}
-
-fn bench_index_mtree_dim_300_full_cache(c: &mut Criterion) {
-	bench_index_mtree(c, 50, 500, 300, 0);
-}
-
-fn bench_index_mtree_dim_2048(c: &mut Criterion) {
-	bench_index_mtree(c, 10, 100, 2048, 100);
-}
-
-fn bench_index_mtree_dim_2048_full_cache(c: &mut Criterion) {
-	bench_index_mtree(c, 10, 100, 2048, 0);
+fn bench_index_mtree_combinations(c: &mut Criterion) {
+	for (samples, dimension, cache) in [
+		(2500, 3, 100),
+		(2500, 3, 2500),
+		(2500, 3, 0),
+		(1000, 50, 100),
+		(1000, 50, 1000),
+		(1000, 50, 0),
+		(500, 300, 100),
+		(500, 300, 500),
+		(500, 300, 0),
+		(250, 1024, 75),
+		(250, 1024, 250),
+		(250, 1024, 0),
+		(100, 2048, 50),
+		(100, 2048, 100),
+		(100, 2048, 0),
+	] {
+		bench_index_mtree(c, samples, dimension, cache);
+	}
 }
 
 async fn mtree_index(
@@ -76,15 +67,14 @@ fn runtime() -> Runtime {
 
 fn bench_index_mtree(
 	c: &mut Criterion,
-	debug_samples_len: usize,
-	release_samples_len: usize,
+	samples_len: usize,
 	vector_dimension: usize,
 	cache_size: usize,
 ) {
 	let samples_len = if cfg!(debug_assertions) {
-		debug_samples_len // Debug is slow
+		samples_len / 10 // Debug is slow
 	} else {
-		release_samples_len // Release is fast
+		samples_len // Release is fast
 	};
 
 	// Both benchmark groups are sharing the same datastore
@@ -111,7 +101,7 @@ fn bench_index_mtree(
 			);
 			group.bench_function(id, |b| {
 				b.to_async(runtime()).iter(|| {
-					knn_lookup_objects(&ds, samples_len, vector_dimension, cache_size, knn)
+					knn_lookup_objects(&ds, samples_len / 5, vector_dimension, cache_size, knn)
 				});
 			});
 		}
@@ -180,39 +170,25 @@ async fn knn_lookup_objects(
 		let (ctx, mt, counter) = (ctx.clone(), mt.clone(), counter.clone());
 		let c = task::spawn(async move {
 			let mut rng = StdRng::from_entropy();
-			while counter.fetch_add(1, Ordering::Relaxed) < samples_size {
-				let object = random_object(&mut rng, vector_size);
-				knn_lookup_object(mt.as_ref(), &ctx, object, knn).await;
-			}
+			let mut stack = TreeStack::new();
+			stack
+				.enter(|stk| async {
+					while counter.fetch_add(1, Ordering::Relaxed) < samples_size {
+						let object = random_object(&mut rng, vector_size);
+						let chk = MTreeConditionChecker::new(ctx.as_ref());
+						let r = mt.knn_search(stk, ctx.as_ref(), &object, knn, chk).await.unwrap();
+						assert_eq!(r.len(), knn);
+					}
+				})
+				.finish()
+				.await;
 		});
 		consumers.push(c);
 	}
-	for c in consumers {
-		c.await.unwrap();
+	for c in join_all(consumers).await {
+		c.unwrap();
 	}
 }
 
-async fn knn_lookup_object(mt: &MTreeIndex, ctx: &Context<'_>, object: Vec<Number>, knn: usize) {
-	let mut stack = TreeStack::new();
-	stack
-		.enter(|stk| async {
-			let chk = MTreeConditionChecker::new(ctx);
-			let r = mt.knn_search(stk, ctx, &object, knn, chk).await.unwrap();
-			assert_eq!(r.len(), knn);
-		})
-		.finish()
-		.await;
-}
-
-criterion_group!(
-	benches,
-	bench_index_mtree_dim_3,
-	bench_index_mtree_dim_3_full_cache,
-	bench_index_mtree_dim_50,
-	bench_index_mtree_dim_50_full_cache,
-	bench_index_mtree_dim_300,
-	bench_index_mtree_dim_300_full_cache,
-	bench_index_mtree_dim_2048,
-	bench_index_mtree_dim_2048_full_cache
-);
+criterion_group!(benches, bench_index_mtree_combinations);
 criterion_main!(benches);

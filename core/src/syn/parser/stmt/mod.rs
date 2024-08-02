@@ -25,6 +25,7 @@ use crate::{
 
 use super::{mac::expected, ParseResult, Parser};
 
+mod alter;
 mod create;
 mod define;
 mod delete;
@@ -80,21 +81,21 @@ impl Parser<'_> {
 	fn token_kind_starts_statement(kind: TokenKind) -> bool {
 		matches!(
 			kind,
-			t!("ANALYZE")
-				| t!("BEGIN") | t!("BREAK")
-				| t!("CANCEL") | t!("COMMIT")
-				| t!("CONTINUE") | t!("CREATE")
-				| t!("DEFINE") | t!("DELETE")
-				| t!("FOR") | t!("IF")
-				| t!("INFO") | t!("INSERT")
-				| t!("KILL") | t!("LIVE")
-				| t!("OPTION") | t!("REBUILD")
-				| t!("RETURN") | t!("RELATE")
-				| t!("REMOVE") | t!("SELECT")
-				| t!("LET") | t!("SHOW")
-				| t!("SLEEP") | t!("THROW")
-				| t!("UPDATE") | t!("UPSERT")
-				| t!("USE")
+			t!("ALTER")
+				| t!("ANALYZE") | t!("BEGIN")
+				| t!("BREAK") | t!("CANCEL")
+				| t!("COMMIT") | t!("CONTINUE")
+				| t!("CREATE") | t!("DEFINE")
+				| t!("DELETE") | t!("FOR")
+				| t!("IF") | t!("INFO")
+				| t!("INSERT") | t!("KILL")
+				| t!("LIVE") | t!("OPTION")
+				| t!("REBUILD") | t!("RETURN")
+				| t!("RELATE") | t!("REMOVE")
+				| t!("SELECT") | t!("LET")
+				| t!("SHOW") | t!("SLEEP")
+				| t!("THROW") | t!("UPDATE")
+				| t!("UPSERT") | t!("USE")
 		)
 	}
 
@@ -107,6 +108,10 @@ impl Parser<'_> {
 	async fn parse_stmt_inner(&mut self, ctx: &mut Stk) -> ParseResult<Statement> {
 		let token = self.peek();
 		match token.kind {
+			t!("ALTER") => {
+				self.pop_peek();
+				ctx.run(|ctx| self.parse_alter_stmt(ctx)).await.map(Statement::Alter)
+			}
 			t!("ANALYZE") => {
 				self.pop_peek();
 				self.parse_analyze().map(Statement::Analyze)
@@ -236,6 +241,10 @@ impl Parser<'_> {
 	async fn parse_entry_inner(&mut self, ctx: &mut Stk) -> ParseResult<Entry> {
 		let token = self.peek();
 		match token.kind {
+			t!("ALTER") => {
+				self.pop_peek();
+				self.parse_alter_stmt(ctx).await.map(Entry::Alter)
+			}
 			t!("BREAK") => {
 				self.pop_peek();
 				Ok(Entry::Break(BreakStatement))

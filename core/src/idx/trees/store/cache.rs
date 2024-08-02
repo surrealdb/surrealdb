@@ -2,9 +2,9 @@ use crate::err::Error;
 use crate::idx::trees::store::lru::{CacheKey, ConcurrentLru};
 use crate::idx::trees::store::{NodeId, StoreGeneration, StoredNode, TreeNode, TreeNodeProvider};
 use crate::kvs::{Key, Transaction};
+use ahash::{HashMap, HashSet};
 use dashmap::mapref::entry::Entry;
 use dashmap::DashMap;
-use hashbrown::{HashMap, HashSet};
 use std::cmp::Ordering;
 use std::fmt::{Debug, Display};
 use std::sync::Arc;
@@ -117,7 +117,7 @@ where
 		if cache_size == 0 {
 			Self::Full(cache_key, generation, TreeFullCache::new(keys))
 		} else {
-			Self::Lru(cache_key, generation, TreeLruCache::new(keys, cache_size))
+			Self::Lru(cache_key, generation, TreeLruCache::with_capacity(keys, cache_size))
 		}
 	}
 
@@ -198,8 +198,8 @@ impl<N> TreeLruCache<N>
 where
 	N: TreeNode + Debug + Clone,
 {
-	fn new(keys: TreeNodeProvider, size: usize) -> Self {
-		let lru = ConcurrentLru::new(size);
+	fn with_capacity(keys: TreeNodeProvider, size: usize) -> Self {
+		let lru = ConcurrentLru::with_capacity(size);
 		Self {
 			keys,
 			lru,

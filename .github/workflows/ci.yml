@@ -73,7 +73,7 @@ jobs:
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: stable
+          toolchain: 1.79.0
           components: rustfmt
 
       - name: Checkout sources
@@ -266,7 +266,7 @@ jobs:
 
   test:
     name: Test workspace
-    runs-on: ["self-hosted", "arm64", "builder"]
+    runs-on: [ "self-hosted", "arm64", "builder" ]
     steps:
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -293,8 +293,6 @@ jobs:
 
       - name: Test workspace + coverage
         run: cargo make ci-workspace-coverage
-        env:
-          CARGO_BUILD_JOBS: 4
 
       - name: Upload coverage report
         uses: actions/upload-artifact@v4

@@ -30,7 +30,7 @@ args = ["test", "--locked", "--no-default-features", "--features", "storage-mem,
 [tasks.ci-http-integration]
 category = "CI - INTEGRATION TESTS"
 command = "cargo"
-env = { RUST_BACKTRACE = 1,  RUST_LOG = { value = "http_integration=debug", condition = { env_not_set = ["RUST_LOG"] } } }
+env = { RUST_BACKTRACE = 1, RUST_LOG = { value = "http_integration=debug", condition = { env_not_set = ["RUST_LOG"] } } }
 args = ["test", "--locked", "--no-default-features", "--features", "storage-mem,http-compression,jwks", "--workspace", "--test", "http_integration", "--", "http_integration"]
 
 [tasks.ci-ws-integration]
@@ -316,9 +316,9 @@ category = "CI - BENCHMARK - SurrealDB Target"
 env = { BENCH_DATASTORE_TARGET = "sdk-rocksdb" }
 run_task = { name = ["bench-target"] }
 
-[tasks.bench-lib-surrealkv]
+[tasks.bench-sdk-surrealkv]
 category = "CI - BENCHMARK - SurrealDB Target"
-env = { BENCH_DATASTORE_TARGET = "lib-surrealkv" }
+env = { BENCH_DATASTORE_TARGET = "sdk-surrealkv" }
 run_task = { name = ["bench-target"] }
 
 [tasks.bench-sdk-ws]

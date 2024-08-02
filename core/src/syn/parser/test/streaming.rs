@@ -200,7 +200,6 @@ fn statements() -> Vec<Statement> {
 			kind: AccessType::Record(RecordAccess {
 				signup: None,
 				signin: None,
-				authenticate: None,
 				jwt: JwtAccess {
 					verify: JwtAccessVerify::Key(JwtAccessVerifyKey {
 						alg: Algorithm::EdDSA,
@@ -208,7 +207,11 @@ fn statements() -> Vec<Statement> {
 					}),
 					issue: None,
 				},
+				// TODO(gguillemas): Field kept to gracefully handle breaking change.
+				// Remove when "revision" crate allows doing so.
+				authenticate: None,
 			}),
+			authenticate: None,
 			// Default durations.
 			duration: AccessDuration {
 				grant: None,

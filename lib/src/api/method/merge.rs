@@ -1,5 +1,4 @@
-use crate::api::conn::Method;
-use crate::api::conn::Param;
+use crate::api::conn::Command;
 use crate::api::method::BoxFuture;
 use crate::api::opt::Range;
 use crate::api::opt::Resource;
@@ -52,12 +51,22 @@ macro_rules! into_future {
 			} = self;
 			let content = to_value(content);
 			Box::pin(async move {
-				let param = match range {
+				let param: Value = match range {
 					Some(range) => resource?.with_range(range)?.into(),
 					None => resource?.into(),
 				};
+
+				let content = match content? {
+					Value::None | Value::Null => None,
+					x => Some(x),
+				};
+
 				let router = client.router.extract()?;
-				router.$method(Method::Merge, Param::new(vec![param, content?])).await
+				let cmd = Command::Merge {
+					what: param,
+					data: content,
+				};
+				router.$method(cmd).await
 			})
 		}
 	};

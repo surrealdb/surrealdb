@@ -1,6 +1,9 @@
 mod parse;
+
 use parse::Parse;
+
 mod helpers;
+use crate::helpers::Test;
 
 use helpers::new_ds;
 use surrealdb::dbs::Session;
@@ -205,5 +208,52 @@ async fn relate_with_complex_table() -> Result<(), Error> {
 	let val = Value::parse("[{ rel: [`-`:`-`] }]");
 	assert_eq!(tmp, val);
 	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn schemafull_relate() -> Result<(), Error> {
+	let sql = r#"
+	INSERT INTO person [
+		{ id: 1 },
+		{ id: 2 }
+	];
+
+	DEFINE TABLE likes TYPE RELATION FROM person TO person;
+	DEFINE FIELD reason ON likes TYPE string;
+
+	RELATE person:1 -> likes -> person:2 CONTENT {id: 1, reason: "nice smile"};
+	RELATE person:2 -> likes -> person:1 CONTENT {id: 2, reason: true};
+	RELATE dog:1 -> likes -> person:2 CONTENT {id: 3, reason: "nice smell"};
+	"#;
+
+	let mut t = Test::new(sql).await?;
+
+	t.expect_val(
+		"[
+			{id: person:1},
+			{id: person:2}
+        ]",
+	)?;
+
+	t.skip_ok(2)?;
+
+	t.expect_val(
+		"[
+			{
+				id: likes:1,
+				in: person:1,
+				out: person:2,
+				reason: 'nice smile'
+			}
+        ]",
+	)?;
+
+	// reason is bool not string
+	t.expect_error_func(|e| matches!(e, Error::FieldCheck { .. }))?;
+
+	// dog:1 is not a person
+	t.expect_error_func(|e| matches!(e, Error::FieldCheck { .. }))?;
+
 	Ok(())
 }
