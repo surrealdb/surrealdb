@@ -674,3 +674,56 @@ async fn select_array_count_subquery_group_by() -> Result<(), Error> {
 	//
 	Ok(())
 }
+
+#[tokio::test]
+async fn select_count_group_all() -> Result<(), Error> {
+	let sql = r#"
+		CREATE table CONTENT { bar: "hello", foo: "Man"};
+		CREATE table CONTENT { bar: "hello", foo: "World"};
+		CREATE table CONTENT { bar: "world"};
+		SELECT COUNT() FROM table GROUP ALL EXPLAIN;
+		SELECT COUNT() FROM table GROUP ALL;
+	"#;
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let mut res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 5);
+	//
+	skip_ok(&mut res, 3)?;
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		r#"[
+				{
+					detail: {
+						table: 'table'
+					},
+					operation: 'Iterate Table'
+				},
+				{
+					detail: {
+						idioms: {
+							count: [
+								'count'
+							]
+						},
+						type: 'Group'
+					},
+					operation: 'Collector'
+				}
+			]"#,
+	);
+	assert_eq!(format!("{tmp:#}"), format!("{val:#}"));
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		r#"[
+					{
+						count: 3
+					}
+				]"#,
+	);
+	assert_eq!(format!("{tmp:#}"), format!("{val:#}"));
+	//
+	Ok(())
+}
