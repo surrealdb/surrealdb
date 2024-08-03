@@ -100,7 +100,6 @@ impl UpdateStatement {
 				};
 			};
 		}
-		debug!("update stm is_bulk={:?}", is_bulk);
 		// Output the results
 		match i.output(stk, ctx, opt, &stm).await? {
 			// This is a single record result
