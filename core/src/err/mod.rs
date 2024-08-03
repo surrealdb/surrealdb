@@ -1014,6 +1014,12 @@ pub enum Error {
 	Return {
 		value: Value,
 	},
+
+	/// A destructuring variant was used in a context where it is not supported
+	#[error("{variant} destructuring method is not supported here")]
+	UnsupportedDestructure {
+		variant: String,
+	},
 }
 
 impl From<Error> for String {

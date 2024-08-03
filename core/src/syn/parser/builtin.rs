@@ -125,6 +125,7 @@ pub(crate) static PATHS: phf::Map<UniCase<&'static str>, PathKind> = phf_map! {
 		UniCase::ascii("array::union") => PathKind::Function,
 		UniCase::ascii("array::sort::asc") => PathKind::Function,
 		UniCase::ascii("array::sort::desc") => PathKind::Function,
+		UniCase::ascii("array::windows") => PathKind::Function,
 		//
 		UniCase::ascii("object::entries") => PathKind::Function,
 		UniCase::ascii("object::from_entries") => PathKind::Function,
@@ -461,7 +462,7 @@ impl Parser<'_> {
 				.await
 				.map(|x| Value::Function(Box::new(x))),
 			None => {
-				// Generate an suggestion.
+				// Generate a suggestion.
 				// don't search further if the levenshtein distance is further then 10.
 				let mut cut_off = MAX_LEVENSTHEIN_CUT_OFF;
 
