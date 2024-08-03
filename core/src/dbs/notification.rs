@@ -1,11 +1,11 @@
 #[cfg(test)]
 use crate::dbs::fuzzy_eq::FuzzyEq;
 use crate::sql::{Object, Uuid, Value};
-use revision::revisioned;
+use revision::{revisioned, Revisioned};
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Debug, Display};
 
-#[revisioned(revision = 1)]
+#[revisioned(revision = 2)]
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "UPPERCASE")]
 #[non_exhaustive]
@@ -13,6 +13,8 @@ pub enum Action {
 	Create,
 	Update,
 	Delete,
+	#[revision(start = 2)]
+	Terminate,
 }
 
 impl Display for Action {
@@ -21,6 +23,7 @@ impl Display for Action {
 			Action::Create => write!(f, "CREATE"),
 			Action::Update => write!(f, "UPDATE"),
 			Action::Delete => write!(f, "DELETE"),
+			Action::Terminate => write!(f, "TERMINATE"),
 		}
 	}
 }

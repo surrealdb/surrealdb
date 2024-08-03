@@ -416,6 +416,15 @@ async fn live_select_query() {
 		assert!(notification.data.is_object());
 		// It should be newly created
 		assert_eq!(notification.action, Action::Create);
+
+		info!("Removing table");
+		let s = db.query(format!("REMOVE TABLE {}", table)).await.unwrap();
+
+		// Pull the notification
+		let notification = tokio::time::timeout(LQ_TIMEOUT, users.next()).await.unwrap().unwrap();
+		// It should be Terminated
+		assert_eq!(notification.action, Action::Terminate);
+		assert_eq!(notification.data, Value::None);
 	}
 
 	drop(permit);

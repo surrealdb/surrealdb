@@ -4,6 +4,7 @@ use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::iam::Auth;
 use crate::kvs::Live;
+use crate::sql::paths::{AC, RD, TK};
 use crate::sql::statements::info::InfoStructure;
 use crate::sql::{Cond, Fetchs, Fields, Uuid, Value};
 use derive::Store;
@@ -11,6 +12,7 @@ use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
+use std::sync::Arc;
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
@@ -127,6 +129,48 @@ impl LiveStatement {
 		};
 		// Return the query id
 		Ok(id.into())
+	}
+
+	/// We need to create a new context which we will
+	// 	use for processing this LIVE query statement.
+	// 	This ensures that we are using the session
+	// 	of the user who created the LIVE query.
+	pub(crate) fn context(&self, ctx: &Context<'_>) -> Option<Context> {
+		// Ensure that a session exists on the LIVE query
+		let sess = match self.session.as_ref() {
+			Some(v) => v,
+			None => return None,
+		};
+
+		let mut lqctx = Context::background();
+
+		// Set the current transaction on the new LIVE
+		// query context to prevent unreachable behaviour
+		// and ensure that queries can be executed.
+		lqctx.set_transaction(ctx.tx());
+		// Add the session params to this LIVE query, so
+		// that queries can use these within field
+		// projections and WHERE clauses.
+		lqctx.add_value("access", sess.pick(AC.as_ref()));
+		lqctx.add_value("auth", sess.pick(RD.as_ref()));
+		lqctx.add_value("token", sess.pick(TK.as_ref()));
+		lqctx.add_value("session", sess);
+
+		Some(lqctx)
+	}
+
+	// We need to create a new options which we will
+	// use for processing this LIVE query statement.
+	// This ensures that we are using the auth data
+	// of the user who created the LIVE query.
+	pub(crate) fn options(&self, opt: &Options) -> Option<Options> {
+		// Ensure that auth info exists on the LIVE query
+		let auth = match self.auth.clone() {
+			Some(v) => v,
+			None => return None,
+		};
+
+		Some(opt.new_with_perms(true).with_auth(Arc::from(auth)))
 	}
 }
 
