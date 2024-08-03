@@ -161,9 +161,6 @@ wiremock = "0.5.22"
 [build-dependencies]
 semver = "1.0.20"
 
-[lints.rust]
-unexpected_cfgs = { level = "warn", check-cfg = ['cfg(docker)'] }
-
 [package.metadata.deb]
 maintainer-scripts = "pkg/deb/"
 maintainer = "Tobie Morgan Hitchcock <tobie@surrealdb.com>"
