@@ -225,6 +225,36 @@ impl Datastore {
 				#[cfg(not(feature = "kv-rocksdb"))]
                 return Err(Error::Ds("Cannot connect to the `rocksdb` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
 			}
+			// Parse and initiate a SurrealKV datastore
+			s if s.starts_with("surrealkv:") => {
+				#[cfg(feature = "kv-surrealkv")]
+				{
+					info!(target: TARGET, "Starting kvs store at {}", path);
+					let s = s.trim_start_matches("surrealkv://");
+					let s = s.trim_start_matches("surrealkv:");
+					let v = super::surrealkv::Datastore::new(s).await.map(Inner::SurrealKV);
+					let c = clock.unwrap_or_else(|| Arc::new(SizedClock::system()));
+					info!(target: TARGET, "Started kvs store at {}", path);
+					Ok((v, c))
+				}
+				#[cfg(not(feature = "kv-surrealkv"))]
+                return Err(Error::Ds("Cannot connect to the `surrealkv` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
+			}
+			// Parse and initiate a SurrealCS datastore
+			s if s.starts_with("surrealcs:") => {
+				#[cfg(feature = "kv-surrealcs")]
+				{
+					info!(target: TARGET, "Starting kvs store at {}", path);
+					let s = s.trim_start_matches("surrealcs://");
+					let s = s.trim_start_matches("surrealcs:");
+					let v = super::surrealcs::Datastore::new(s).await.map(Inner::SurrealCS);
+					let c = clock.unwrap_or_else(|| Arc::new(SizedClock::system()));
+					info!(target: TARGET, "Started kvs store at {}", path);
+					Ok((v, c))
+				}
+				#[cfg(not(feature = "kv-surrealcs"))]
+				return Err(Error::Ds("Cannot connect to the `surrealcs` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
+			}
 			// Parse and initiate an IndxDB database
 			s if s.starts_with("indxdb:") => {
 				#[cfg(feature = "kv-indxdb")]
@@ -269,36 +299,6 @@ impl Datastore {
 				}
 				#[cfg(not(feature = "kv-fdb"))]
                 return Err(Error::Ds("Cannot connect to the `foundationdb` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
-			}
-			// Parse and initiate a SurrealKV datastore
-			s if s.starts_with("surrealkv:") => {
-				#[cfg(feature = "kv-surrealkv")]
-				{
-					info!(target: TARGET, "Starting kvs store at {}", path);
-					let s = s.trim_start_matches("surrealkv://");
-					let s = s.trim_start_matches("surrealkv:");
-					let v = super::surrealkv::Datastore::new(s).await.map(Inner::SurrealKV);
-					let c = clock.unwrap_or_else(|| Arc::new(SizedClock::system()));
-					info!(target: TARGET, "Started to kvs store at {}", path);
-					Ok((v, c))
-				}
-				#[cfg(not(feature = "kv-surrealkv"))]
-                return Err(Error::Ds("Cannot connect to the `surrealkv` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
-			}
-			// Parse and initiate a SurrealCS datastore
-			s if s.starts_with("surrealcs:") => {
-				#[cfg(feature = "kv-surrealcs")]
-				{
-					info!("Starting kvs store at {}", path);
-					let s = s.trim_start_matches("surrealcs://");
-					let s = s.trim_start_matches("surrealcs:");
-					let v = super::surrealcs::Datastore::new().await.map(Inner::SurrealCS);
-					let c = clock.unwrap_or_else(|| Arc::new(SizedClock::system()));
-					info!("Started kvs store at {}", path);
-					Ok((v, c))
-				}
-				#[cfg(not(feature = "kv-surrealcs"))]
-				return Err(Error::Ds("Cannot connect to the `surrealcs` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
 			}
 			// The datastore path is not valid
 			_ => {
