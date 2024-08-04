@@ -255,14 +255,15 @@ pub async fn generate_schema(
 
 							let args = ctx.args.as_index_map();
 							// async-graphql should validate that this is present as it is non-null
-							let id =
-								match args.get("id").and_then(GqlValueUtils::as_string) {
-									Some(i) => i,
-									None => {
-										error!("Schema validation failed: no id found in _get_ request");
-										return Err("No id found".into());
-									}
-								};
+							let id = match args.get("id").and_then(GqlValueUtils::as_string) {
+								Some(i) => i,
+								None => {
+									return Err(internal_error(
+										"Schema validation failed: No id found in _get_",
+									)
+									.into());
+								}
+							};
 							let thing = match id.clone().try_into() {
 								Ok(t) => t,
 								Err(_) => Thing::from((tb_name, id)),
@@ -364,6 +365,69 @@ pub async fn generate_schema(
 		types.push(Type::InputObject(table_filter));
 	}
 
+	let sess3 = session.to_owned();
+	let kvs3 = datastore.to_owned();
+	query = query.field(
+		Field::new("_get", TypeRef::named("object"), move |ctx| {
+			let kvs3 = kvs3.clone();
+			FieldFuture::new({
+				let sess3 = sess3.clone();
+				async move {
+					let kvs = kvs3.as_ref();
+
+					let args = ctx.args.as_index_map();
+					// async-graphql should validate that this is present as it is non-null
+					let id = match args.get("id").and_then(GqlValueUtils::as_string) {
+						Some(i) => i,
+						None => {
+							return Err(internal_error(
+								"Schema validation failed: No id found in _get",
+							)
+							.into());
+						}
+					};
+
+					let thing = match id.clone().try_into() {
+						Ok(t) => t,
+						Err(_) => return Err(resolver_error(format!("invalid id: {id}")).into()),
+					};
+
+					let ast = Statement::Select({
+						let mut tmp = SelectStatement::default();
+						tmp.what = vec![SqlValue::Thing(thing)].into();
+						tmp.expr = Fields::all();
+						tmp.only = true;
+						tmp
+					});
+
+					// let query = vec![use_stmt, ast].into();
+					let query = ast.into();
+					trace!("generated query: {}", query);
+
+					let res = kvs.process(query, &sess3, Default::default()).await?;
+					debug_assert_eq!(res.len(), 1);
+					let res = res
+						.into_iter()
+						.next()
+						.expect("response vector should have exactly one value")
+						.result?;
+					match res {
+						obj @ SqlValue::Object(_) => {
+							let out = sql_value_to_gql_value(obj)
+								.map_err(|_| "SQL to GQL translation failed")?;
+
+							Ok(Some(out))
+						}
+						_ => Ok(None),
+					}
+					// let out: Result<Option<GqlValue>, async_graphql::Error> = todo!();
+					// out
+				}
+			})
+		})
+		.argument(id_input!()),
+	);
+
 	trace!("current Query object for schema: {:?}", query);
 
 	let mut schema = Schema::build("Query", None, None).register(query);
@@ -371,15 +435,6 @@ pub async fn generate_schema(
 		trace!("adding type: {ty:?}");
 		schema = schema.register(ty);
 	}
-
-	// TODO: implement geometry
-	// let geometry_type = Type::Scalar(
-	// 	Scalar::new("Geometry")
-	// 		// #[cfg(debug_assertions)]
-	// 		.description("A GeoJson type")
-	// 		.specified_by_url("https://datatracker.ietf.org/doc/html/rfc7946"),
-	// );
-	// schema = schema.register(geometry_type);
 
 	macro_rules! scalar_debug_validated {
 		($schema:ident, $name:expr, $kind:expr) => {
@@ -740,27 +795,27 @@ fn binop(
 	Ok(expr.into())
 }
 
-macro_rules! try_kind {
+macro_rules! either_try_kind {
 	($ks:ident, $val:expr, Kind::Array) => {
 		for arr_kind in $ks.iter().filter(|k| matches!(k, Kind::Array(_, _))).cloned() {
-			try_kind!($ks, $val, arr_kind);
+			either_try_kind!($ks, $val, arr_kind);
 		}
 	};
 	($ks:ident, $val:expr, Array) => {
 		for arr_kind in $ks.iter().filter(|k| matches!(k, Kind::Array(_, _))).cloned() {
-			try_kind!($ks, $val, arr_kind);
+			either_try_kind!($ks, $val, arr_kind);
 		}
 	};
 	($ks:ident, $val:expr, Record) => {
 		for arr_kind in $ks.iter().filter(|k| matches!(k, Kind::Array(_, _))).cloned() {
-			try_kind!($ks, $val, arr_kind);
+			either_try_kind!($ks, $val, arr_kind);
 		}
 	};
 	($ks:ident, $val:expr, AllNumbers) => {
-		try_kind!($ks, $val, Kind::Int);
-		try_kind!($ks, $val, Kind::Float);
-		try_kind!($ks, $val, Kind::Decimal);
-		try_kind!($ks, $val, Kind::Number);
+		either_try_kind!($ks, $val, Kind::Int);
+		either_try_kind!($ks, $val, Kind::Float);
+		either_try_kind!($ks, $val, Kind::Decimal);
+		either_try_kind!($ks, $val, Kind::Number);
 	};
 	($ks:ident, $val:expr, $kind:expr) => {
 		if $ks.contains(&$kind) {
@@ -771,9 +826,22 @@ macro_rules! try_kind {
 	};
 }
 
-macro_rules! try_kinds {
+macro_rules! either_try_kinds {
 	($ks:ident, $val:expr, $($kind:tt),+) => {
-		$(try_kind!($ks, $val, $kind));+
+		$(either_try_kind!($ks, $val, $kind));+
+	};
+}
+
+macro_rules! any_try_kind {
+	($val:expr, $kind:expr) => {
+		if let Ok(out) = gql_to_sql_kind($val, $kind) {
+			return Ok(out);
+		}
+	};
+}
+macro_rules! any_try_kinds {
+	($val:expr, $($kind:tt),+) => {
+		$(any_try_kind!($val, $kind));+
 	};
 }
 
@@ -782,9 +850,18 @@ fn gql_to_sql_kind(val: &GqlValue, kind: Kind) -> Result<SqlValue, GqlError> {
 	match kind {
 		Kind::Any => match val {
 			GqlValue::String(s) => {
+				use Kind::*;
+				// aren't parsed by syn
+				any_try_kinds!(val, Datetime, Duration, Uuid);
 				syn::value_legacy_strand(s.as_str()).map_err(|_| type_error(kind, val))
 			}
-			_ => Err(type_error(kind, val)),
+			GqlValue::Null => Ok(SqlValue::Null),
+			obj @ GqlValue::Object(_) => gql_to_sql_kind(obj, Kind::Object),
+			num @ GqlValue::Number(_) => gql_to_sql_kind(num, Kind::Number),
+			GqlValue::Boolean(b) => Ok(SqlValue::Bool(*b)),
+			bin @ GqlValue::Binary(_) => gql_to_sql_kind(bin, Kind::Bytes),
+			GqlValue::Enum(s) => Ok(SqlValue::Strand(s.as_str().into())),
+			arr @ GqlValue::List(_) => gql_to_sql_kind(arr, Kind::Array(Box::new(Kind::Any), None)),
 		},
 		Kind::Null => match val {
 			GqlValue::Null => Ok(SqlValue::Null),
@@ -910,26 +987,43 @@ fn gql_to_sql_kind(val: &GqlValue, kind: Kind) -> Result<SqlValue, GqlError> {
 			},
 			_ => Err(type_error(kind, val)),
 		},
-		Kind::Object => match val {
-			// GqlValue::Object(o) => {
-			// 	let out: Result<BTreeMap<String, SqlValue>, GqlError> = o
-			// 		.iter()
-			// 		.map(|(k, v)| gql_to_sql_kind(v, Kind::Any).map(|sqlv| (k.to_string(), sqlv)))
-			// 		.collect();
-			// 	let out = out?;
+		Kind::Object => {
+			error!(?val, "validating object");
+			match val {
+				GqlValue::Object(o) => {
+					let out: Result<BTreeMap<String, SqlValue>, GqlError> = o
+						.iter()
+						.map(|(k, v)| {
+							gql_to_sql_kind(v, Kind::Any).map(|sqlv| (k.to_string(), sqlv))
+						})
+						.collect();
+					let out = out?;
+					// let mut out = BTreeMap::new();
+					// for (k, v) in o {
+					// 	match gql_to_sql_kind(v, Kind::Any).map(|sqlv| (k.to_string(), sqlv)) {
+					// 		Ok((name, val)) => {
+					// 			out.insert(name, val);
+					// 		}
+					// 		Err(e) => {
+					// 			error!(?e)
+					// 		}
+					// 	};
+					// }
 
-			// 	Ok(SqlValue::Object(out.into()))
-			// }
-			GqlValue::String(s) => match syn::value_legacy_strand(s.as_str()) {
-				Ok(obj @ SqlValue::Object(_)) => Ok(obj),
+					Ok(SqlValue::Object(out.into()))
+				}
+				GqlValue::String(s) => match syn::value_legacy_strand(s.as_str()) {
+					Ok(obj @ SqlValue::Object(_)) => Ok(obj),
+					_ => Err(type_error(kind, val)),
+				},
 				_ => Err(type_error(kind, val)),
-			},
-			_ => Err(type_error(kind, val)),
-		},
+			}
+		}
 		// TODO: add geometry
 		Kind::Point => Err(resolver_error("Geometry is not yet supported")),
 		Kind::String => match val {
 			GqlValue::String(s) => Ok(SqlValue::Strand(s.to_owned().into())),
+			GqlValue::Enum(s) => Ok(SqlValue::Strand(s.as_str().into())),
 			_ => Err(type_error(kind, val)),
 		},
 		Kind::Uuid => match val {
@@ -970,32 +1064,28 @@ fn gql_to_sql_kind(val: &GqlValue, kind: Kind) -> Result<SqlValue, GqlError> {
 					}
 				}
 				num @ GqlValue::Number(_) => {
-					// 	try_kind!(ks, num, Kind::Int);
-					// 	try_kind!(ks, num, Kind::Float);
-					// 	try_kind!(ks, num, Kind::Decimal);
-					// 	try_kind!(ks, num, Kind::Number);
-					try_kind!(ks, num, AllNumbers);
+					either_try_kind!(ks, num, AllNumbers);
 					Err(type_error(kind, val))
 				}
 				string @ GqlValue::String(_) => {
 					// try parsing first
-					try_kinds!(
+					either_try_kinds!(
 						ks, string, Datetime, Duration, AllNumbers, Object, Uuid, Array, Any,
 						String
 					);
 					Err(type_error(kind, val))
 				}
 				bool @ GqlValue::Boolean(_) => {
-					try_kind!(ks, bool, Kind::Bool);
+					either_try_kind!(ks, bool, Kind::Bool);
 					Err(type_error(kind, val))
 				}
 				GqlValue::Binary(_) => todo!(),
 				GqlValue::Enum(n) => {
-					try_kind!(ks, &GqlValue::String(n.to_string()), Kind::String);
+					either_try_kind!(ks, &GqlValue::String(n.to_string()), Kind::String);
 					Err(type_error(kind, val))
 				}
 				list @ GqlValue::List(_) => {
-					try_kind!(ks, list, Kind::Array);
+					either_try_kind!(ks, list, Kind::Array);
 					Err(type_error(kind, val))
 				}
 				GqlValue::Object(_) => todo!(),
