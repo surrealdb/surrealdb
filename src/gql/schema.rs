@@ -48,7 +48,7 @@ macro_rules! start_input {
 
 macro_rules! id_input {
 	() => {
-		InputValue::new("id", TypeRef::named_nn(TypeRef::STRING))
+		InputValue::new("id", TypeRef::named_nn(TypeRef::ID))
 	};
 }
 
@@ -77,6 +77,8 @@ pub async fn generate_schema(
 	let tbs = tx.all_tb(&ns, &db).await?;
 	let mut query = Object::new("Query");
 	let mut types: Vec<Type> = Vec::new();
+
+	info!(ns, db, ?tbs, "generating schema");
 
 	if tbs.len() == 0 {
 		return Err(schema_error("no tables found in database"));
@@ -108,7 +110,7 @@ pub async fn generate_schema(
 		types.push(Type::InputObject(filter_id()));
 
 		let sess1 = session.to_owned();
-		let fds = tx.all_tb_fields(&db, &ns, &tb.name.0).await?;
+		let fds = tx.all_tb_fields(&ns, &db, &tb.name.0).await?;
 		let fds1 = fds.clone();
 		let kvs1 = datastore.clone();
 
@@ -266,8 +268,6 @@ pub async fn generate_schema(
 								Err(_) => Thing::from((tb_name, id)),
 							};
 
-							// let use_stmt = Statement::Use((value_ns, value_db).intox());
-
 							let ast = Statement::Select({
 								let mut tmp = SelectStatement::default();
 								tmp.what = vec![SqlValue::Thing(thing)].into();
@@ -287,11 +287,15 @@ pub async fn generate_schema(
 								.next()
 								.expect("response vector should have exactly one value")
 								.result?;
+							match res {
+								obj @ SqlValue::Object(_) => {
+									let out = sql_value_to_gql_value(obj)
+										.map_err(|_| "SQL to GQL translation failed")?;
 
-							let out = sql_value_to_gql_value(res)
-								.map_err(|_| "SQL to GQL translation failed")?;
-
-							Ok(Some(out))
+									Ok(Some(out))
+								}
+								_ => Ok(None),
+							}
 						}
 					})
 				},
@@ -377,84 +381,128 @@ pub async fn generate_schema(
 	// );
 	// schema = schema.register(geometry_type);
 
-	let uuid_type = Type::Scalar({
-		let mut tmp = Scalar::new("uuid")
-			.description("description")
-			.specified_by_url("https://datatracker.ietf.org/doc/html/rfc4122");
-		#[cfg(debug_assertions)]
-		tmp.add_validator(|s| match s {
-			GqlValue::String(s) => uuid::Uuid::parse_str(s).is_ok(),
-			_ => false,
-		});
-		tmp
-	});
-	schema = schema.register(uuid_type);
+	macro_rules! scalar_debug_validated {
+		($schema:ident, $name:expr, $kind:expr) => {
+			scalar_debug_validated!(
+				$schema,
+				$name,
+				$kind,
+				::std::option::Option::<&str>::None,
+				::std::option::Option::<&str>::None
+			)
+		};
+		($schema:ident, $name:expr, $kind:expr, $desc:literal) => {
+			scalar_debug_validated!($schema, $name, $kind, std::option::Option::Some($desc), None)
+		};
+		($schema:ident, $name:expr, $kind:expr, $desc:literal, $url:literal) => {
+			scalar_debug_validated!(
+				$schema,
+				$name,
+				$kind,
+				std::option::Option::Some($desc),
+				Some($url)
+			)
+		};
+		($schema:ident, $name:expr, $kind:expr, $desc:expr, $url:expr) => {{
+			let new_type = Type::Scalar({
+				let mut tmp = Scalar::new($name);
+				if let Some(desc) = $desc {
+					tmp = tmp.description(desc);
+				}
+				if let Some(url) = $url {
+					tmp = tmp.specified_by_url(url);
+				}
+				#[cfg(debug_assertions)]
+				tmp.add_validator(|v| gql_to_sql_kind(v, $kind).is_ok());
+				tmp
+			});
+			$schema = $schema.register(new_type);
+		}};
+	}
 
-	let decimal_type = Type::Scalar({
-		let mut tmp = Scalar::new("decimal");
-		#[cfg(debug_assertions)]
-		tmp.add_validator(|v| match v {
-			GqlValue::String(s) => Decimal::try_from(s.as_str()).is_ok(),
-			_ => false,
-		});
-		tmp
-	});
-	schema = schema.register(decimal_type);
+	// let uuid_type = Type::Scalar({
+	// 	let mut tmp = Scalar::new("uuid")
+	// 		.description("description")
+	// 		.specified_by_url("https://datatracker.ietf.org/doc/html/rfc4122");
+	// 	#[cfg(debug_assertions)]
+	// 	tmp.add_validator(|s| match s {
+	// 		GqlValue::String(s) => uuid::Uuid::parse_str(s).is_ok(),
+	// 		_ => false,
+	// 	});
+	// 	tmp
+	// });
+	// schema = schema.register(uuid_type);
+	scalar_debug_validated!(
+		schema,
+		"uuid",
+		Kind::Uuid,
+		"a string encoded uuid",
+		"https://datatracker.ietf.org/doc/html/rfc4122"
+	);
 
-	// let number_type = Type::Union(
-	// 	Union::new("number")
-	// 		.possible_type(TypeRef::INT)
-	// 		.possible_type(TypeRef::FLOAT)
-	// 		.possible_type("decimal"),
-	// );
+	// let decimal_type = Type::Scalar({
+	// 	let mut tmp = Scalar::new("decimal");
+	// 	#[cfg(debug_assertions)]
+	// 	tmp.add_validator(|v| gql_to_sql_kind(v, Kind::Decimal).is_ok());
+	// 	tmp
+	// });
+	// schema = schema.register(decimal_type);
+	scalar_debug_validated!(schema, "decimal", Kind::Decimal);
+	scalar_debug_validated!(schema, "number", Kind::Number);
+	scalar_debug_validated!(schema, "null", Kind::Null);
+	scalar_debug_validated!(schema, "datetime", Kind::Datetime);
+	scalar_debug_validated!(schema, "duration", Kind::Duration);
+	scalar_debug_validated!(schema, "object", Kind::Object);
+	scalar_debug_validated!(schema, "any", Kind::Any);
+
+	// let number_type = Type::Scalar({
+	// 	let mut tmp = Scalar::new("number");
+	// 	#[cfg(debug_assertions)]
+	// 	tmp.add_validator(|v| gql_to_sql_kind(v, Kind::Number).is_ok());
+	// 	tmp
+	// });
 	// schema = schema.register(number_type);
 
-	let null_type = Type::Scalar({
-		let mut tmp = Scalar::new("null");
-		#[cfg(debug_assertions)]
-		tmp.add_validator(|v| match v {
-			GqlValue::Null => true,
-			_ => false,
-		});
-		tmp
-	});
-	schema = schema.register(null_type);
+	// let null_type = Type::Scalar({
+	// 	let mut tmp = Scalar::new("null");
+	// 	#[cfg(debug_assertions)]
+	// 	tmp.add_validator(|v| gql_to_sql_kind(v, Kind::Null).is_ok());
+	// 	tmp
+	// });
+	// schema = schema.register(null_type);
 
-	let datetime_type = Type::Scalar({
-		let mut tmp = Scalar::new("datetime").description("An rfc 3339 encoded datetime");
-		#[cfg(debug_assertions)]
-		tmp.add_validator(|v| match v {
-			GqlValue::String(s) => DateTime::parse_from_rfc3339(s.as_str()).is_ok(),
-			_ => false,
-		});
-		tmp
-	});
-	schema = schema.register(datetime_type);
+	// let datetime_type = Type::Scalar({
+	// 	let mut tmp = Scalar::new("datetime").description("An rfc 3339 encoded datetime");
+	// 	#[cfg(debug_assertions)]
+	// 	tmp.add_validator(|v| gql_to_sql_kind(v, Kind::Datetime).is_ok());
+	// 	tmp
+	// });
+	// schema = schema.register(datetime_type);
 
-	let duration_type = Type::Scalar({
-		let mut tmp = Scalar::new("duration").description("");
-		#[cfg(debug_assertions)]
-		tmp.add_validator(|v| match v {
-			GqlValue::String(s) => syn::duration(s.as_str()).is_ok(),
-			_ => false,
-		});
-		tmp
-	});
-	schema = schema.register(duration_type);
+	// let duration_type = Type::Scalar({
+	// 	let mut tmp = Scalar::new("duration").description("");
+	// 	#[cfg(debug_assertions)]
+	// 	tmp.add_validator(|v| match v {
+	// 		GqlValue::String(s) => syn::duration(s.as_str()).is_ok(),
+	// 		_ => false,
+	// 	});
+	// 	tmp
+	// });
+	// schema = schema.register(duration_type);
 
-	let object_type = Type::Scalar({
-		let mut tmp = Scalar::new("object").description("");
-		#[cfg(debug_assertions)]
-		tmp.add_validator(|v| match v {
-			GqlValue::String(s) => match syn::value(s) {
-				Ok(SqlValue::Object(_)) => true,
-				_ => false,
-			},
-			_ => false,
-		});
-		tmp
-	});
-	schema = schema.register(object_type);
+	// let object_type = Type::Scalar({
+	// 	let mut tmp = Scalar::new("object").description("");
+	// 	#[cfg(debug_assertions)]
+	// 	tmp.add_validator(|v| match v {
+	// 		GqlValue::String(s) => match syn::value(s) {
+	// 			Ok(SqlValue::Object(_)) => true,
+	// 			_ => false,
+	// 		},
+	// 		_ => false,
+	// 	});
+	// 	tmp
+	// });
+	// schema = schema.register(object_type);
 
 	// let any_type = Type::Union(
 	// 	Union::new("any")
@@ -466,16 +514,16 @@ pub async fn generate_schema(
 	// 		.possible_type("duration")
 	// 		.possible_type("datetime"),
 	// );
-	let any_type = Type::Scalar({
-		let mut tmp = Scalar::new("any").description("");
-		#[cfg(debug_assertions)]
-		tmp.add_validator(|v| match v {
-			GqlValue::String(s) => syn::value(s).is_ok(),
-			_ => false,
-		});
-		tmp
-	});
-	schema = schema.register(any_type);
+	// let any_type = Type::Scalar({
+	// 	let mut tmp = Scalar::new("any").description("");
+	// 	#[cfg(debug_assertions)]
+	// 	tmp.add_validator(|v| match v {
+	// 		GqlValue::String(s) => syn::value(s).is_ok(),
+	// 		_ => false,
+	// 	});
+	// 	tmp
+	// });
+	// schema = schema.register(any_type);
 
 	let id_interface =
 		Interface::new("record").field(InterfaceField::new("id", TypeRef::named_nn(TypeRef::ID)));
@@ -787,12 +835,34 @@ macro_rules! try_kind {
 			try_kind!($ks, $val, arr_kind);
 		}
 	};
+	($ks:ident, $val:expr, Array) => {
+		for arr_kind in $ks.iter().filter(|k| matches!(k, Kind::Array(_, _))).cloned() {
+			try_kind!($ks, $val, arr_kind);
+		}
+	};
+	($ks:ident, $val:expr, Record) => {
+		for arr_kind in $ks.iter().filter(|k| matches!(k, Kind::Array(_, _))).cloned() {
+			try_kind!($ks, $val, arr_kind);
+		}
+	};
+	($ks:ident, $val:expr, AllNumbers) => {
+		try_kind!($ks, $val, Kind::Int);
+		try_kind!($ks, $val, Kind::Float);
+		try_kind!($ks, $val, Kind::Decimal);
+		try_kind!($ks, $val, Kind::Number);
+	};
 	($ks:ident, $val:expr, $kind:expr) => {
 		if $ks.contains(&$kind) {
 			if let Ok(out) = gql_to_sql_kind($val, $kind) {
 				return Ok(out);
 			}
 		}
+	};
+}
+
+macro_rules! try_kinds {
+	($ks:ident, $val:expr, $($kind:tt),+) => {
+		$(try_kind!($ks, $val, $kind));+
 	};
 }
 
@@ -974,47 +1044,52 @@ fn gql_to_sql_kind(val: &GqlValue, kind: Kind) -> Result<SqlValue, GqlError> {
 			GqlValue::Null => Ok(SqlValue::None),
 			v => gql_to_sql_kind(v, *k),
 		},
-		Kind::Either(ref ks) => match val {
-			GqlValue::Null => {
-				if ks.iter().find(|k| matches!(k, Kind::Option(_))).is_some() {
-					Ok(SqlValue::None)
-				} else if ks.contains(&Kind::Null) {
-					Ok(SqlValue::Null)
-				} else {
+		// TODO: handle nested eithers
+		Kind::Either(ref ks) => {
+			use Kind::*;
+
+			match val {
+				GqlValue::Null => {
+					if ks.iter().find(|k| matches!(k, Kind::Option(_))).is_some() {
+						Ok(SqlValue::None)
+					} else if ks.contains(&Kind::Null) {
+						Ok(SqlValue::Null)
+					} else {
+						Err(type_error(kind, val))
+					}
+				}
+				num @ GqlValue::Number(_) => {
+					// 	try_kind!(ks, num, Kind::Int);
+					// 	try_kind!(ks, num, Kind::Float);
+					// 	try_kind!(ks, num, Kind::Decimal);
+					// 	try_kind!(ks, num, Kind::Number);
+					try_kind!(ks, num, AllNumbers);
 					Err(type_error(kind, val))
 				}
+				string @ GqlValue::String(_) => {
+					// try parsing first
+					try_kinds!(
+						ks, string, Datetime, Duration, AllNumbers, Object, Uuid, Array, Any,
+						String
+					);
+					Err(type_error(kind, val))
+				}
+				bool @ GqlValue::Boolean(_) => {
+					try_kind!(ks, bool, Kind::Bool);
+					Err(type_error(kind, val))
+				}
+				GqlValue::Binary(_) => todo!(),
+				GqlValue::Enum(n) => {
+					try_kind!(ks, &GqlValue::String(n.to_string()), Kind::String);
+					Err(type_error(kind, val))
+				}
+				list @ GqlValue::List(_) => {
+					try_kind!(ks, list, Kind::Array);
+					Err(type_error(kind, val))
+				}
+				GqlValue::Object(_) => todo!(),
 			}
-			num @ GqlValue::Number(_) => {
-				try_kind!(ks, num, Kind::Int);
-				try_kind!(ks, num, Kind::Float);
-				try_kind!(ks, num, Kind::Decimal);
-				try_kind!(ks, num, Kind::Number);
-				Err(type_error(kind, val))
-			}
-			string @ GqlValue::String(_) => {
-				try_kind!(ks, string, Kind::Int);
-				try_kind!(ks, string, Kind::Float);
-				try_kind!(ks, string, Kind::Decimal);
-				try_kind!(ks, string, Kind::Number);
-				try_kind!(ks, string, Kind::Object);
-				try_kind!(ks, string, Kind::Array);
-				Err(type_error(kind, val))
-			}
-			bool @ GqlValue::Boolean(_) => {
-				try_kind!(ks, bool, Kind::Bool);
-				Err(type_error(kind, val))
-			}
-			GqlValue::Binary(_) => todo!(),
-			GqlValue::Enum(n) => {
-				try_kind!(ks, &GqlValue::String(n.to_string()), Kind::String);
-				Err(type_error(kind, val))
-			}
-			list @ GqlValue::List(_) => {
-				try_kind!(ks, list, Kind::Array);
-				Err(type_error(kind, val))
-			}
-			GqlValue::Object(_) => todo!(),
-		},
+		}
 		// TODO: figure out how to support sets
 		Kind::Set(_k, _n) => Err(resolver_error("Sets are not yet supported")),
 		Kind::Array(ref k, n) => match val {
