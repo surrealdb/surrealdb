@@ -420,18 +420,6 @@ pub async fn generate_schema(
 		}};
 	}
 
-	// let uuid_type = Type::Scalar({
-	// 	let mut tmp = Scalar::new("uuid")
-	// 		.description("description")
-	// 		.specified_by_url("https://datatracker.ietf.org/doc/html/rfc4122");
-	// 	#[cfg(debug_assertions)]
-	// 	tmp.add_validator(|s| match s {
-	// 		GqlValue::String(s) => uuid::Uuid::parse_str(s).is_ok(),
-	// 		_ => false,
-	// 	});
-	// 	tmp
-	// });
-	// schema = schema.register(uuid_type);
 	scalar_debug_validated!(
 		schema,
 		"uuid",
@@ -440,13 +428,6 @@ pub async fn generate_schema(
 		"https://datatracker.ietf.org/doc/html/rfc4122"
 	);
 
-	// let decimal_type = Type::Scalar({
-	// 	let mut tmp = Scalar::new("decimal");
-	// 	#[cfg(debug_assertions)]
-	// 	tmp.add_validator(|v| gql_to_sql_kind(v, Kind::Decimal).is_ok());
-	// 	tmp
-	// });
-	// schema = schema.register(decimal_type);
 	scalar_debug_validated!(schema, "decimal", Kind::Decimal);
 	scalar_debug_validated!(schema, "number", Kind::Number);
 	scalar_debug_validated!(schema, "null", Kind::Null);
@@ -454,76 +435,6 @@ pub async fn generate_schema(
 	scalar_debug_validated!(schema, "duration", Kind::Duration);
 	scalar_debug_validated!(schema, "object", Kind::Object);
 	scalar_debug_validated!(schema, "any", Kind::Any);
-
-	// let number_type = Type::Scalar({
-	// 	let mut tmp = Scalar::new("number");
-	// 	#[cfg(debug_assertions)]
-	// 	tmp.add_validator(|v| gql_to_sql_kind(v, Kind::Number).is_ok());
-	// 	tmp
-	// });
-	// schema = schema.register(number_type);
-
-	// let null_type = Type::Scalar({
-	// 	let mut tmp = Scalar::new("null");
-	// 	#[cfg(debug_assertions)]
-	// 	tmp.add_validator(|v| gql_to_sql_kind(v, Kind::Null).is_ok());
-	// 	tmp
-	// });
-	// schema = schema.register(null_type);
-
-	// let datetime_type = Type::Scalar({
-	// 	let mut tmp = Scalar::new("datetime").description("An rfc 3339 encoded datetime");
-	// 	#[cfg(debug_assertions)]
-	// 	tmp.add_validator(|v| gql_to_sql_kind(v, Kind::Datetime).is_ok());
-	// 	tmp
-	// });
-	// schema = schema.register(datetime_type);
-
-	// let duration_type = Type::Scalar({
-	// 	let mut tmp = Scalar::new("duration").description("");
-	// 	#[cfg(debug_assertions)]
-	// 	tmp.add_validator(|v| match v {
-	// 		GqlValue::String(s) => syn::duration(s.as_str()).is_ok(),
-	// 		_ => false,
-	// 	});
-	// 	tmp
-	// });
-	// schema = schema.register(duration_type);
-
-	// let object_type = Type::Scalar({
-	// 	let mut tmp = Scalar::new("object").description("");
-	// 	#[cfg(debug_assertions)]
-	// 	tmp.add_validator(|v| match v {
-	// 		GqlValue::String(s) => match syn::value(s) {
-	// 			Ok(SqlValue::Object(_)) => true,
-	// 			_ => false,
-	// 		},
-	// 		_ => false,
-	// 	});
-	// 	tmp
-	// });
-	// schema = schema.register(object_type);
-
-	// let any_type = Type::Union(
-	// 	Union::new("any")
-	// 		.description("")
-	// 		.possible_type("object")
-	// 		.possible_type("number")
-	// 		.possible_type(TypeRef::STRING)
-	// 		.possible_type(TypeRef::ID)
-	// 		.possible_type("duration")
-	// 		.possible_type("datetime"),
-	// );
-	// let any_type = Type::Scalar({
-	// 	let mut tmp = Scalar::new("any").description("");
-	// 	#[cfg(debug_assertions)]
-	// 	tmp.add_validator(|v| match v {
-	// 		GqlValue::String(s) => syn::value(s).is_ok(),
-	// 		_ => false,
-	// 	});
-	// 	tmp
-	// });
-	// schema = schema.register(any_type);
 
 	let id_interface =
 		Interface::new("record").field(InterfaceField::new("id", TypeRef::named_nn(TypeRef::ID)));
