@@ -117,7 +117,7 @@ where
 			let executor = match cache.get_schema(session).await {
 				Ok(e) => e,
 				Err(e) => {
-					info!("error generating schema: {e:?}");
+					warn!("error generating schema: {e:?}");
 					return Ok(e.into_response());
 				}
 			};

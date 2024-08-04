@@ -1,4 +1,5 @@
 use std::collections::BTreeMap;
+use std::fmt::Display;
 use std::sync::Arc;
 
 use async_graphql::dynamic::{Enum, Type, Union};
@@ -10,7 +11,6 @@ use async_graphql::dynamic::{Scalar, TypeRef};
 use async_graphql::indexmap::IndexMap;
 use async_graphql::Name;
 use async_graphql::Value as GqlValue;
-use chrono::DateTime;
 use rust_decimal::prelude::FromPrimitive;
 use rust_decimal::Decimal;
 use serde_json::Number;
@@ -22,14 +22,12 @@ use surrealdb::sql::Expression;
 use surrealdb::sql::Kind;
 use surrealdb::sql::{Cond, Fields};
 use surrealdb::sql::{Statement, Thing};
-use surrealdb::syn;
 
 use super::error::{resolver_error, GqlError};
 use super::ext::IntoExt;
 use super::ext::ValidatorExt;
 use crate::gql::error::{internal_error, schema_error, type_error};
 use crate::gql::utils::GqlValueUtils;
-use crate::mac;
 use surrealdb::kvs::LockType;
 use surrealdb::kvs::TransactionType;
 use surrealdb::sql::Value as SqlValue;
@@ -66,6 +64,10 @@ macro_rules! order {
 	}};
 }
 
+fn filter_name_from_table(tb_name: impl Display) -> String {
+	format!("_filter_{tb_name}")
+}
+
 pub async fn generate_schema(
 	datastore: &Arc<Datastore>,
 	session: &Session,
@@ -100,7 +102,7 @@ pub async fn generate_schema(
 			.field(InputValue::new("desc", TypeRef::named(&table_orderable_name)))
 			.field(InputValue::new("then", TypeRef::named(&table_order_name)));
 
-		let table_filter_name = format!("_filter_{tb_name}");
+		let table_filter_name = filter_name_from_table(tb_name);
 		let mut table_filter = InputObject::new(&table_filter_name);
 		table_filter = table_filter
 			.field(InputValue::new("id", TypeRef::named("_filter_id")))
@@ -308,15 +310,31 @@ pub async fn generate_schema(
 			.field(Field::new("id", TypeRef::named_nn(TypeRef::ID), |ctx| {
 				FieldFuture::new(async move {
 					let record = ctx.parent_value.as_value().unwrap();
-					let GqlValue::Object(record_map) = record else {
-						return Err(internal_error(format!(
-							"record should be object, but found: {record:?}"
-						))
-						.into());
-					};
-					let id = record_map.get("id").unwrap();
+					// let GqlValue::Object(record_map) = record else {
+					// 	return Err(internal_error(format!(
+					// 		"record should be object, but found: {record:?}"
+					// 	))
+					// 	.into());
+					// };
+					// let id = record_map.get("id").unwrap();
 
-					Ok(Some(id.to_owned()))
+					let id = match record {
+						GqlValue::String(rid) => GqlValue::String(rid.to_owned()),
+						GqlValue::Object(record_map) => record_map
+							.get("id")
+							.ok_or(internal_error(format!(
+								"expected field: `id` in: {record_map:?}"
+							)))?
+							.to_owned(),
+						_ => {
+							return Err(internal_error(format!(
+								"record should be object, but found: {record:?}"
+							))
+							.into())
+						}
+					};
+
+					Ok(Some(id))
 				})
 			}))
 			.implement(interface);
@@ -346,15 +364,32 @@ pub async fn generate_schema(
 					let fd_name = fd_name.clone();
 					FieldFuture::new(async move {
 						let record = ctx.parent_value.as_value().unwrap();
-						let GqlValue::Object(record_map) = record else {
-							return Err(internal_error(format!(
-								"record should be an object, but found: {record:?}"
-							))
-							.into());
-						};
-						let val = record_map.get(&fd_name).unwrap();
+						// let GqlValue::Object(record_map) = record else {
+						// 	return Err(internal_error(format!(
+						// 		"record should be an object, but found: {record:?}"
+						// 	))
+						// 	.into());
+						// };
 
-						Ok(Some(val.to_owned()))
+						// let val = record_map.get(&fd_name).unwrap();
+
+						let val = match (record, fd_name.as_str()) {
+							(GqlValue::Object(record_map), name) => record_map
+								.get(name)
+								.ok_or(internal_error(format!(
+									"expected field: {name} in: {record_map:?}"
+								)))?
+								.to_owned(),
+							(GqlValue::String(rid), "id") => GqlValue::String(rid.to_owned()),
+							(_, key) => {
+								return Err(internal_error(format!(
+									"record should be an object, but found: key: `{key}` record:{record:?}"
+								))
+								.into())
+							}
+						};
+
+						Ok(Some(val))
 					})
 				}));
 		}
@@ -634,8 +669,18 @@ fn filter_from_type(
 	filter_name: String,
 	types: &mut Vec<Type>,
 ) -> Result<InputObject, GqlError> {
-	let ty = kind_to_type(kind.clone(), types)?;
-	let ty = unwrap_type(ty);
+	let ty = match &kind {
+		Kind::Record(ts) => match ts.len() {
+			1 => TypeRef::named(filter_name_from_table(
+				ts.get(0).expect("ts should have exactly one element").as_str(),
+			)),
+			_ => TypeRef::named(TypeRef::ID),
+		},
+		k => unwrap_type(kind_to_type(k.clone(), types)?),
+	};
+
+	// let ty = kind_to_type(kind.clone(), types)?;
+	// let ty = unwrap_type(ty);
 
 	let mut filter = InputObject::new(filter_name);
 	filter_impl!(filter, ty, "eq");
