@@ -1,7 +1,7 @@
 #[cfg(test)]
 use crate::dbs::fuzzy_eq::FuzzyEq;
 use crate::sql::{Object, Uuid, Value};
-use revision::{revisioned, Revisioned};
+use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Debug, Display};
 
