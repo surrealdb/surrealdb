@@ -3687,6 +3687,25 @@ async fn function_parse_is_uuid() -> Result<(), Error> {
 }
 
 #[tokio::test]
+async fn function_parse_is_record() -> Result<(), Error> {
+	let sql = r#"
+		RETURN string::is::record("test:123");
+		RETURN string::is::record("invalid record id!");
+	"#;
+	let mut test = Test::new(sql).await?;
+	//
+	let tmp = test.next()?.result?;
+	let val = Value::Bool(true);
+	assert_eq!(tmp, val);
+	//
+	let tmp = test.next()?.result?;
+	let val = Value::Bool(false);
+	assert_eq!(tmp, val);
+	//
+	Ok(())
+}
+
+#[tokio::test]
 async fn function_string_join() -> Result<(), Error> {
 	let sql = r#"
 		RETURN string::join("");

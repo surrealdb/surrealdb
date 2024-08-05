@@ -183,6 +183,7 @@ pub mod html {
 pub mod is {
 	use crate::err::Error;
 	use crate::sql::value::Value;
+	use crate::sql::{Datetime, Thing};
 	use chrono::NaiveDateTime;
 	use once_cell::sync::Lazy;
 	use regex::Regex;
@@ -207,8 +208,11 @@ pub mod is {
 		Ok(arg.is_ascii().into())
 	}
 
-	pub fn datetime((arg, fmt): (String, String)) -> Result<Value, Error> {
-		Ok(NaiveDateTime::parse_from_str(&arg, &fmt).is_ok().into())
+	pub fn datetime((arg, fmt): (String, Option<String>)) -> Result<Value, Error> {
+		Ok(match fmt {
+			Some(fmt) => NaiveDateTime::parse_from_str(&arg, &fmt).is_ok().into(),
+			None => Datetime::try_from(arg.as_ref()).is_ok().into(),
+		})
 	}
 
 	pub fn domain((arg,): (String,)) -> Result<Value, Error> {
@@ -255,13 +259,12 @@ pub mod is {
 		Ok(Url::parse(&arg).is_ok().into())
 	}
 
-	pub fn uuid((arg,): (Value,)) -> Result<Value, Error> {
-		Ok(match arg {
-			Value::Strand(v) => Uuid::parse_str(v.as_string().as_str()).is_ok(),
-			Value::Uuid(_) => true,
-			_ => false,
-		}
-		.into())
+	pub fn uuid((arg,): (String,)) -> Result<Value, Error> {
+		Ok(Uuid::parse_str(arg.as_ref()).is_ok().into())
+	}
+
+	pub fn record((arg,): (String,)) -> Result<Value, Error> {
+		Ok(Thing::try_from(arg).is_ok().into())
 	}
 }
 
