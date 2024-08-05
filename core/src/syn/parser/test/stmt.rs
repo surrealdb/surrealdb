@@ -2,8 +2,8 @@ use crate::{
 	sql::{
 		access::AccessDuration,
 		access_type::{
-			AccessType, JwtAccess, JwtAccessIssue, JwtAccessVerify, JwtAccessVerifyJwks,
-			JwtAccessVerifyKey, RecordAccess,
+			AccessType, BearerAccessLevel, JwtAccess, JwtAccessIssue, JwtAccessVerify,
+			JwtAccessVerifyJwks, JwtAccessVerifyKey, RecordAccess,
 		},
 		block::Entry,
 		changefeed::ChangeFeed,
@@ -11,11 +11,13 @@ use crate::{
 		index::{Distance, HnswParams, MTreeParams, SearchParams, VectorType},
 		language::Language,
 		statements::{
+			access,
+			access::{AccessStatementGrant, AccessStatementList, AccessStatementRevoke},
 			analyze::AnalyzeStatement,
 			show::{ShowSince, ShowStatement},
 			sleep::SleepStatement,
-			BeginStatement, BreakStatement, CancelStatement, CommitStatement, ContinueStatement,
-			CreateStatement, DefineAccessStatement, DefineAnalyzerStatement,
+			AccessStatement, BeginStatement, BreakStatement, CancelStatement, CommitStatement,
+			ContinueStatement, CreateStatement, DefineAccessStatement, DefineAnalyzerStatement,
 			DefineDatabaseStatement, DefineEventStatement, DefineFieldStatement,
 			DefineFunctionStatement, DefineIndexStatement, DefineNamespaceStatement,
 			DefineParamStatement, DefineStatement, DefineTableStatement, DeleteStatement,
@@ -2384,5 +2386,40 @@ fn parse_upsert() {
 			timeout: Some(Timeout(Duration(std::time::Duration::from_secs(1)))),
 			parallel: true,
 		})
+	);
+}
+
+#[test]
+fn parse_access_grant() {
+	let res = test_parse!(parse_stmt, r#"ACCESS a GRANT FOR USER b"#).unwrap();
+	assert_eq!(
+		res,
+		Statement::Access(AccessStatement::Grant(AccessStatementGrant {
+			ac: Ident("a".to_string()),
+			subject: Some(access::Subject::User(Ident("b".to_string()))),
+		}))
+	);
+}
+
+#[test]
+fn parse_access_revoke() {
+	let res = test_parse!(parse_stmt, r#"ACCESS a REVOKE b"#).unwrap();
+	assert_eq!(
+		res,
+		Statement::Access(AccessStatement::Revoke(AccessStatementRevoke {
+			ac: Ident("a".to_string()),
+			gr: Ident("b".to_string()),
+		}))
+	);
+}
+
+#[test]
+fn parse_access_list() {
+	let res = test_parse!(parse_stmt, r#"ACCESS a LIST"#).unwrap();
+	assert_eq!(
+		res,
+		Statement::Access(AccessStatement::List(AccessStatementList {
+			ac: Ident("a".to_string())
+		}))
 	);
 }
