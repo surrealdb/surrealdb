@@ -263,8 +263,16 @@ pub mod is {
 		Ok(Uuid::parse_str(arg.as_ref()).is_ok().into())
 	}
 
-	pub fn record((arg,): (String,)) -> Result<Value, Error> {
-		Ok(Thing::try_from(arg).is_ok().into())
+	pub fn record((arg, tb): (String, Option<String>)) -> Result<Value, Error> {
+		let res = match Thing::try_from(arg) {
+			Ok(t) => match tb {
+				Some(tb) => t.tb == tb,
+				None => true,
+			},
+			_ => false,
+		};
+
+		Ok(res.into())
 	}
 }
 
