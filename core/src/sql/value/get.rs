@@ -242,7 +242,6 @@ impl Value {
 											.all();
 										stk.run(|stk| v.get(stk, ctx, opt, None, ID.as_ref()))
 											.await?
-											.flatten()
 											.ok()
 									}
 									_ => {
@@ -252,7 +251,6 @@ impl Value {
 											.all();
 										stk.run(|stk| v.get(stk, ctx, opt, None, path.next()))
 											.await?
-											.flatten()
 											.ok()
 									}
 								}
