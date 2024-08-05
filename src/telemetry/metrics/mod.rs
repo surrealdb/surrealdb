@@ -4,7 +4,7 @@ pub mod ws;
 use std::time::Duration;
 
 use once_cell::sync::Lazy;
-use opentelemetry::global::ObjectSafeMeterProvider;
+use opentelemetry::global::{self, ObjectSafeMeterProvider};
 use opentelemetry::Context as TelemetryContext;
 use opentelemetry::{
 	metrics::{Meter, MeterProvider, MetricsError},
@@ -19,7 +19,10 @@ use opentelemetry::{
 use opentelemetry_otlp::MetricsExporterBuilder;
 use opentelemetry_sdk::metrics::data::Temporality;
 use opentelemetry_sdk::metrics::reader::{DefaultAggregationSelector, DefaultTemporalitySelector};
-use opentelemetry_sdk::metrics::{MeterProviderBuilder, PeriodicReaderBuilder, SdkMeterProvider};
+use opentelemetry_sdk::metrics::{
+	Aggregation, Instrument, MeterProviderBuilder, PeriodicReader, PeriodicReaderBuilder,
+	SdkMeterProvider, Stream,
+};
 // use opentelemetry_sdk::export;
 use opentelemetry_sdk::runtime;
 use opentelemetry_sdk::{export, metrics};
@@ -54,46 +57,47 @@ const HISTOGRAM_BUCKETS_BYTES: &[f64] = &[
 	100.0 * MB, // 100 MB
 ];
 
-fn build_controller(boundaries: &'static [f64]) -> SdkMeterProvider {
+fn build_controller() -> Result<SdkMeterProvider, MetricsError> {
 	let exporter = MetricsExporterBuilder::from(opentelemetry_otlp::new_exporter().tonic())
 		.build_metrics_exporter(
 			Box::new(DefaultTemporalitySelector::new()),
 			Box::new(DefaultAggregationSelector::new()),
 		)
 		.unwrap();
+	let reader = PeriodicReader::builder(exporter, runtime::Tokio).build();
 
-	// let builder = controllers::basic(processors::factory(
-	// 	selectors::simple::histogram(boundaries),
-	// 	aggregation::cumulative_temporality_selector(),
-	// ))
-	// .with_push_timeout(Duration::from_secs(5))
-	// .with_collect_period(Duration::from_secs(5))
-	// .with_exporter(exporter)
-	// .with_resource(OTEL_DEFAULT_RESOURCE.clone());
+	let histo_duration_view = {
+		let criteria = Instrument::new().name("*.duration");
+		let mask = Stream::new().aggregation(Aggregation::ExplicitBucketHistogram {
+			boundaries: HISTOGRAM_BUCKETS_MS.to_vec(),
+			record_min_max: true,
+		});
+		opentelemetry_sdk::metrics::new_view(criteria, mask)?
+	};
 
-	// this is a guess
-	// let builder = MeterProviderBuilder::default().with_reader(exporter);
-	let builder = PeriodicReader::builder();
+	let histo_size_view = {
+		let criteria = Instrument::new().name("*.size");
+		let mask = Stream::new().aggregation(Aggregation::ExplicitBucketHistogram {
+			boundaries: HISTOGRAM_BUCKETS_BYTES.to_vec(),
+			record_min_max: true,
+		});
+		opentelemetry_sdk::metrics::new_view(criteria, mask)?
+	};
 
-	builder.build()
+	Ok(SdkMeterProvider::builder()
+		.with_reader(reader)
+		.with_resource(OTEL_DEFAULT_RESOURCE.clone())
+		.with_view(histo_duration_view)
+		.with_view(histo_size_view)
+		.build())
 }
 
-static METER_PROVIDER_DURATION: Lazy<SdkMeterProvider> =
-	Lazy::new(|| build_controller(HISTOGRAM_BUCKETS_MS));
+// Initialize the metrics subsystem
+// Panics if initialization fails
+pub fn init() -> Result<(), MetricsError> {
+	let meter_provider = build_controller()?;
 
-static METER_PROVIDER_SIZE: Lazy<SdkMeterProvider> =
-	Lazy::new(|| build_controller(HISTOGRAM_BUCKETS_BYTES));
-
-static METER_DURATION: Lazy<Meter> = Lazy::new(|| METER_PROVIDER_DURATION.meter("duration"));
-static METER_SIZE: Lazy<Meter> = Lazy::new(|| METER_PROVIDER_SIZE.meter("size"));
-
-/// Initialize the metrics subsystem
-pub fn init(cx: &TelemetryContext) -> Result<(), MetricsError> {
-	METER_PROVIDER_DURATION.start(cx, runtime::Tokio)?;
-	METER_PROVIDER_SIZE.start(cx, runtime::Tokio)?;
-
-	observe_active_connection(0)?;
-
+	global::set_meter_provider(meter_provider);
 	Ok(())
 }
 

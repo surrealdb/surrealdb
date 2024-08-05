@@ -9,12 +9,12 @@ use opentelemetry::metrics::MetricsError;
 // 	EnvResourceDetector, SdkProvidedResourceDetector, TelemetryResourceDetector,
 // };
 // use opentelemetry::sdk::Resource;
+use opentelemetry::Context;
 use opentelemetry::{Context as TelemetryContext, KeyValue};
 use opentelemetry_sdk::resource::{
 	EnvResourceDetector, SdkProvidedResourceDetector, TelemetryResourceDetector,
 };
 use opentelemetry_sdk::Resource;
-use opentelemetry::{Context, KeyValue};
 use std::time::Duration;
 use tracing::{Level, Subscriber};
 use tracing_subscriber::filter::ParseError;

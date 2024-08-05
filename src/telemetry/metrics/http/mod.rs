@@ -1,15 +1,15 @@
 pub(super) mod tower_layer;
 
 use once_cell::sync::Lazy;
-use opentelemetry::metrics::{Histogram, MetricsError, UpDownCounter};
-use opentelemetry::Context as TelemetryContext;
+use opentelemetry::metrics::{Histogram, Meter, MetricsError, UpDownCounter};
+use opentelemetry::{global, Context as TelemetryContext};
 
 use self::tower_layer::HttpCallMetricTracker;
 
-use super::{METER_DURATION, METER_SIZE};
+static METER: Lazy<Meter> = Lazy::new(|| global::meter("surrealdb.http"));
 
 pub static HTTP_SERVER_DURATION: Lazy<Histogram<u64>> = Lazy::new(|| {
-	METER_DURATION
+	METER
 		.u64_histogram("http.server.duration")
 		.with_description("The HTTP server duration in milliseconds.")
 		.with_unit("ms")
@@ -17,14 +17,14 @@ pub static HTTP_SERVER_DURATION: Lazy<Histogram<u64>> = Lazy::new(|| {
 });
 
 pub static HTTP_SERVER_ACTIVE_REQUESTS: Lazy<UpDownCounter<i64>> = Lazy::new(|| {
-	METER_DURATION
+	METER
 		.i64_up_down_counter("http.server.active_requests")
 		.with_description("The number of active HTTP requests.")
 		.init()
 });
 
 pub static HTTP_SERVER_REQUEST_SIZE: Lazy<Histogram<u64>> = Lazy::new(|| {
-	METER_SIZE
+	METER
 		.u64_histogram("http.server.request.size")
 		.with_description("Measures the size of HTTP request messages.")
 		.with_unit("mb")
@@ -32,7 +32,7 @@ pub static HTTP_SERVER_REQUEST_SIZE: Lazy<Histogram<u64>> = Lazy::new(|| {
 });
 
 pub static HTTP_SERVER_RESPONSE_SIZE: Lazy<Histogram<u64>> = Lazy::new(|| {
-	METER_SIZE
+	METER
 		.u64_histogram("http.server.response.size")
 		.with_description("Measures the size of HTTP response messages.")
 		.with_unit("mb")
