@@ -15,6 +15,11 @@ fn parse_coordinate() {
 }
 
 #[test]
+fn parse_like_operator() {
+	test_parse!(parse_value, "a ~ b").unwrap();
+}
+
+#[test]
 fn parse_large_depth_object() {
 	let mut text = String::new();
 	let start = r#" { foo: "#;
