@@ -3670,7 +3670,7 @@ async fn function_parse_is_url() -> Result<(), Error> {
 #[tokio::test]
 async fn function_parse_is_uuid() -> Result<(), Error> {
 	let sql = r#"
-		RETURN string::is::uuid(u"e72bee20-f49b-11ec-b939-0242ac120002");
+		RETURN string::is::uuid("e72bee20-f49b-11ec-b939-0242ac120002");
 		RETURN string::is::uuid("this is a test!");
 	"#;
 	let mut test = Test::new(sql).await?;
