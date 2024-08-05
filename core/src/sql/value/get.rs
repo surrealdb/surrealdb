@@ -242,6 +242,7 @@ impl Value {
 											.all();
 										stk.run(|stk| v.get(stk, ctx, opt, None, ID.as_ref()))
 											.await?
+											.flatten()
 											.ok()
 									}
 									_ => {
@@ -249,9 +250,13 @@ impl Value {
 											.run(|stk| stm.compute(stk, ctx, opt, None))
 											.await?
 											.all();
-										stk.run(|stk| v.get(stk, ctx, opt, None, path.next()))
-											.await?
-											.ok()
+										let res = stk
+											.run(|stk| v.get(stk, ctx, opt, None, path.next()))
+											.await?;
+										match path[1] {
+											Part::Graph(_) => res.flatten().ok(),
+											_ => res.ok(),
+										}
 									}
 								}
 							}
