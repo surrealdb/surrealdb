@@ -263,10 +263,19 @@ pub mod is {
 		Ok(Uuid::parse_str(arg.as_ref()).is_ok().into())
 	}
 
-	pub fn record((arg, tb): (String, Option<String>)) -> Result<Value, Error> {
+	pub fn record((arg, tb): (String, Option<Value>)) -> Result<Value, Error> {
 		let res = match Thing::try_from(arg) {
 			Ok(t) => match tb {
-				Some(tb) => t.tb == tb,
+				Some(Value::Strand(tb)) => t.tb == *tb,
+				Some(Value::Table(tb)) => t.tb == tb.0,
+				Some(_) => {
+					return Err(Error::InvalidArguments {
+						name: "string::is::record()".into(),
+						message:
+							"Expected an optional string or table type for the second argument"
+								.into(),
+					})
+				}
 				None => true,
 			},
 			_ => false,
