@@ -32,6 +32,7 @@ impl From<&HnswParams> for Heuristic {
 }
 
 impl Heuristic {
+	#[allow(clippy::too_many_arguments)]
 	pub(super) async fn select<S>(
 		&self,
 		tx: &Transaction,
@@ -112,13 +113,15 @@ impl Heuristic {
 		Ok(())
 	}
 
-	fn extend_candidates<S>(
+	async fn extend_candidates<S>(
+		tx: &Transaction,
 		elements: &HnswElements,
 		layer: &HnswLayer<S>,
 		q_id: ElementId,
 		q_pt: &SharedVector,
 		c: &mut DoublePriorityQueue,
-	) where
+	) -> Result<(), Error>
+	where
 		S: DynamicSet,
 	{
 		let m_max = layer.m_max();
@@ -128,7 +131,7 @@ impl Heuristic {
 			if let Some(e_conn) = layer.get_edges(&e_id) {
 				for &e_adj in e_conn.iter() {
 					if e_adj != q_id && ex.insert(e_adj) {
-						if let Some(d) = elements.get_distance(q_pt, &e_adj) {
+						if let Some(d) = elements.get_distance(tx, q_pt, &e_adj).await? {
 							ext.push((d, e_adj));
 						}
 					}
@@ -141,6 +144,7 @@ impl Heuristic {
 		for (e_dist, e_id) in ext {
 			c.push(e_dist, e_id);
 		}
+		Ok(())
 	}
 
 	async fn heuristic_ext<S>(
@@ -155,7 +159,7 @@ impl Heuristic {
 	where
 		S: DynamicSet,
 	{
-		Self::extend_candidates(elements, layer, q_id, q_pt, &mut c);
+		Self::extend_candidates(tx, elements, layer, q_id, q_pt, &mut c).await?;
 		Self::heuristic(tx, elements, layer, c, res).await
 	}
 
@@ -171,7 +175,7 @@ impl Heuristic {
 	where
 		S: DynamicSet,
 	{
-		Self::extend_candidates(elements, layer, q_id, q_pt, &mut c);
+		Self::extend_candidates(tx, elements, layer, q_id, q_pt, &mut c).await?;
 		Self::heuristic_keep(tx, elements, layer, c, res).await
 	}
 
@@ -187,7 +191,7 @@ impl Heuristic {
 	{
 		if let Some(current_vec) = elements.get_vector(tx, &e_id).await? {
 			for r_id in r.iter() {
-				if let Some(r_dist) = elements.get_distance(&current_vec, r_id) {
+				if let Some(r_dist) = elements.get_distance(tx, &current_vec, r_id).await? {
 					if e_dist > r_dist {
 						return Ok(false);
 					}

@@ -26,12 +26,14 @@ impl HnswElements {
 	pub(super) fn set_next_element_id(&mut self, next: ElementId) {
 		self.next_element_id = next;
 	}
+
 	pub(super) fn next_element_id(&self) -> ElementId {
 		self.next_element_id
 	}
 
-	pub(super) fn inc_next_element_id(&mut self) {
+	pub(super) fn inc_next_element_id(&mut self) -> ElementId {
 		self.next_element_id += 1;
+		self.next_element_id
 	}
 
 	#[cfg(test)]
@@ -84,11 +86,19 @@ impl HnswElements {
 		self.dist.calculate(a, b)
 	}
 
-	pub(super) fn get_distance(&self, q: &SharedVector, e_id: &ElementId) -> Option<f64> {
-		self.elements.get(e_id).map(|r| self.dist.calculate(r.value(), q))
+	pub(super) async fn get_distance(
+		&self,
+		tx: &Transaction,
+		q: &SharedVector,
+		e_id: &ElementId,
+	) -> Result<Option<f64>, Error> {
+		Ok(self.get_vector(tx, e_id).await?.map(|r| self.dist.calculate(&r, q)))
 	}
 
-	pub(super) fn remove(&mut self, e_id: &ElementId) {
-		self.elements.remove(e_id);
+	pub(super) async fn remove(&mut self, tx: &Transaction, e_id: ElementId) -> Result<(), Error> {
+		self.elements.remove(&e_id);
+		let key = self.ikb.new_he_key(e_id);
+		tx.del(key).await?;
+		Ok(())
 	}
 }

@@ -1,5 +1,4 @@
 use crate::err::Error;
-use crate::idx::docids::DocId;
 use crate::idx::planner::checker::HnswConditionChecker;
 use crate::idx::planner::iterators::KnnIteratorResult;
 use crate::idx::trees::hnsw::docs::{HnswDocs, VecDocs};
@@ -102,28 +101,11 @@ impl HnswIndex {
 			// Extract the vector
 			let vector = Vector::try_from_value(self.vector_type, self.dim, value)?;
 			vector.check_dimension(self.dim)?;
-			self.insert(tx, vector.into(), doc_id).await?;
+			// Insert the vector
+			self.vec_docs.insert(tx, vector, doc_id, &mut self.hnsw).await?;
 		}
 		self.docs.finish(tx).await?;
 		Ok(())
-	}
-
-	pub(super) async fn insert(
-		&mut self,
-		tx: &Transaction,
-		o: Vector,
-		d: DocId,
-	) -> Result<(), Error> {
-		self.vec_docs.insert(tx, o, d, &mut self.hnsw).await
-	}
-
-	pub(super) async fn remove(
-		&mut self,
-		tx: &Transaction,
-		o: SharedVector,
-		d: DocId,
-	) -> Result<(), Error> {
-		self.vec_docs.remove(tx, o, d, &mut self.hnsw).await
 	}
 
 	pub(crate) async fn remove_document(
@@ -140,7 +122,7 @@ impl HnswIndex {
 				let vector = Vector::try_from_value(self.vector_type, self.dim, v)?;
 				vector.check_dimension(self.dim)?;
 				// Remove the vector
-				self.remove(tx, vector.into(), doc_id).await?;
+				self.vec_docs.remove(tx, &vector, doc_id, &mut self.hnsw).await?;
 			}
 			self.docs.finish(tx).await?;
 		}

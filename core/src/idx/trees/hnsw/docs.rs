@@ -3,15 +3,14 @@ use crate::idx::docids::DocId;
 use crate::idx::trees::hnsw::flavor::HnswFlavor;
 use crate::idx::trees::hnsw::ElementId;
 use crate::idx::trees::knn::Ids64;
-use crate::idx::trees::vector::{SerializedVector, SharedVector, Vector};
+use crate::idx::trees::vector::{SerializedVector, Vector};
 use crate::idx::{IndexKeyBase, VersionedStore};
 use crate::kvs::{Key, Transaction, Val};
 use crate::sql::{Id, Thing};
 use derive::Store;
-use revision::{revisioned, Revisioned};
+use revision::revisioned;
 use roaring::RoaringTreemap;
 use serde::{Deserialize, Serialize};
-use std::ops::Deref;
 use std::sync::Arc;
 
 pub(in crate::idx) struct HnswDocs {
@@ -144,9 +143,9 @@ impl VecDocs {
 	pub(super) async fn get_docs(
 		&self,
 		tx: &Transaction,
-		pt: &SharedVector,
+		pt: &Vector,
 	) -> Result<Option<Ids64>, Error> {
-		let key = self.ikb.new_hv_key(Arc::new(pt.deref().into()));
+		let key = self.ikb.new_hv_key(Arc::new(pt.into()));
 		if let Some(val) = tx.get(key).await? {
 			let ed: ElementDocs = VersionedStore::try_from(val)?;
 			Ok(Some(ed.docs))
@@ -192,21 +191,20 @@ impl VecDocs {
 	pub(super) async fn remove(
 		&self,
 		tx: &Transaction,
-		o: SharedVector,
+		o: &Vector,
 		d: DocId,
 		h: &mut HnswFlavor,
 	) -> Result<(), Error> {
-		let key = self.ikb.new_hv_key(Arc::new(o.deref().into()));
+		let key = self.ikb.new_hv_key(Arc::new(o.into()));
 		if let Some(val) = tx.get(key.clone()).await? {
-			let mut ed = ElementDocs::deserialize_revisioned(&mut val.as_slice())?;
+			let mut ed: ElementDocs = VersionedStore::try_from(val)?;
 			if let Some(new_docs) = ed.docs.remove(d) {
 				if new_docs.is_empty() {
 					tx.del(key).await?;
 					h.remove(tx, ed.e_id).await?;
 				} else {
 					ed.docs = new_docs;
-					let mut val = Vec::new();
-					ed.serialize_revisioned(&mut val)?;
+					let val: Val = VersionedStore::try_into(&ed)?;
 					tx.set(key, val).await?;
 				}
 			}

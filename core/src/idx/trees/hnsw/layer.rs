@@ -140,6 +140,7 @@ where
 		self.search(tx, elements, pt, candidates, visited, w, efc).await
 	}
 
+	#[allow(clippy::too_many_arguments)]
 	pub(super) async fn search(
 		&self,
 		tx: &Transaction,
