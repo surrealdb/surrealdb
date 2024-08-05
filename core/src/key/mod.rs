@@ -9,6 +9,7 @@
 ///
 /// crate::key::node::all                /${nd}
 /// crate::key::node::lq                 /${nd}!lq{lq}{ns}{db}
+/// crate::key::node::se                 /${nd}!se{se}
 ///
 /// crate::key::namespace::all           /*{ns}
 /// crate::key::namespace::db            /*{ns}!db{db}

@@ -26,6 +26,7 @@ async fn live_queries_sent_to_tx_are_received() {
 			archived: None,
 			session: Some(Value::None),
 			auth: None,
+			session_id: Default::default(),
 		},
 	};
 	tx.pre_commit_register_async_event(TrackedResult::LiveQuery(lq_entry.clone())).unwrap();
