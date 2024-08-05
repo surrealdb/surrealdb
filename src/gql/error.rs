@@ -1,4 +1,4 @@
-use std::fmt::Debug;
+use std::{backtrace::Backtrace, fmt::Debug};
 
 use async_graphql::{InputType, InputValueError};
 use axum::{
@@ -36,6 +36,8 @@ pub fn resolver_error(msg: impl Into<String>) -> GqlError {
 }
 pub fn internal_error(msg: impl Into<String>) -> GqlError {
 	let msg = msg.into();
+	// let bt = Backtrace::force_capture();
+	// error!("{}\n{bt:#?}", msg);
 	error!("{}", msg);
 	GqlError::InternalError(msg.into())
 }

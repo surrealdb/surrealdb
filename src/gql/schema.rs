@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 use std::fmt::Display;
 use std::sync::Arc;
 
-use async_graphql::dynamic::{Enum, Type, Union};
+use async_graphql::dynamic::{Enum, FieldValue, ResolverContext, Type, Union};
 use async_graphql::dynamic::{Field, Interface};
 use async_graphql::dynamic::{FieldFuture, InterfaceField};
 use async_graphql::dynamic::{InputObject, Object};
@@ -27,9 +27,10 @@ use super::error::{resolver_error, GqlError};
 use super::ext::IntoExt;
 use super::ext::ValidatorExt;
 use crate::gql::error::{internal_error, schema_error, type_error};
-use crate::gql::utils::GqlValueUtils;
+use crate::gql::utils::{get_record, GqlValueUtils};
 use surrealdb::kvs::LockType;
 use surrealdb::kvs::TransactionType;
+use surrealdb::sql::Object as SqlObject;
 use surrealdb::sql::Value as SqlValue;
 
 macro_rules! limit_input {
@@ -271,32 +272,8 @@ pub async fn generate_schema(
 								Err(_) => Thing::from((tb_name, id)),
 							};
 
-							let ast = Statement::Select({
-								let mut tmp = SelectStatement::default();
-								tmp.what = vec![SqlValue::Thing(thing)].into();
-								tmp.expr = Fields::all();
-								tmp.only = true;
-								tmp
-							});
-
-							// let query = vec![use_stmt, ast].into();
-							let query = ast.into();
-							trace!("generated query: {}", query);
-
-							let res = kvs.process(query, &sess2, Default::default()).await?;
-							debug_assert_eq!(res.len(), 1);
-							let res = res
-								.into_iter()
-								.next()
-								.expect("response vector should have exactly one value")
-								.result?;
-							match res {
-								obj @ SqlValue::Object(_) => {
-									let out = sql_value_to_gql_value(obj)
-										.map_err(|_| "SQL to GQL translation failed")?;
-
-									Ok(Some(out))
-								}
+							match get_record(kvs, &sess2, &thing).await? {
+								SqlValue::Object(o) => Ok(Some(FieldValue::owned_any(o))),
 								_ => Ok(None),
 							}
 						}
@@ -307,36 +284,11 @@ pub async fn generate_schema(
 		);
 
 		let mut table_ty_obj = Object::new(tb.name.to_string())
-			.field(Field::new("id", TypeRef::named_nn(TypeRef::ID), |ctx| {
-				FieldFuture::new(async move {
-					let record = ctx.parent_value.as_value().unwrap();
-					// let GqlValue::Object(record_map) = record else {
-					// 	return Err(internal_error(format!(
-					// 		"record should be object, but found: {record:?}"
-					// 	))
-					// 	.into());
-					// };
-					// let id = record_map.get("id").unwrap();
-
-					let id = match record {
-						GqlValue::String(rid) => GqlValue::String(rid.to_owned()),
-						GqlValue::Object(record_map) => record_map
-							.get("id")
-							.ok_or(internal_error(format!(
-								"expected field: `id` in: {record_map:?}"
-							)))?
-							.to_owned(),
-						_ => {
-							return Err(internal_error(format!(
-								"record should be object, but found: {record:?}"
-							))
-							.into())
-						}
-					};
-
-					Ok(Some(id))
-				})
-			}))
+			.field(Field::new(
+				"id",
+				TypeRef::named_nn(TypeRef::ID),
+				make_table_field_resolver(datastore, session, "id"),
+			))
 			.implement(interface);
 
 		for fd in fds.iter() {
@@ -359,39 +311,11 @@ pub async fn generate_schema(
 			table_filter = table_filter
 				.field(InputValue::new(fd.name.to_string(), TypeRef::named(type_filter_name)));
 
-			table_ty_obj =
-				table_ty_obj.field(Field::new(fd.name.to_string(), fd_type, move |ctx| {
-					let fd_name = fd_name.clone();
-					FieldFuture::new(async move {
-						let record = ctx.parent_value.as_value().unwrap();
-						// let GqlValue::Object(record_map) = record else {
-						// 	return Err(internal_error(format!(
-						// 		"record should be an object, but found: {record:?}"
-						// 	))
-						// 	.into());
-						// };
-
-						// let val = record_map.get(&fd_name).unwrap();
-
-						let val = match (record, fd_name.as_str()) {
-							(GqlValue::Object(record_map), name) => record_map
-								.get(name)
-								.ok_or(internal_error(format!(
-									"expected field: {name} in: {record_map:?}"
-								)))?
-								.to_owned(),
-							(GqlValue::String(rid), "id") => GqlValue::String(rid.to_owned()),
-							(_, key) => {
-								return Err(internal_error(format!(
-									"record should be an object, but found: key: `{key}` record:{record:?}"
-								))
-								.into())
-							}
-						};
-
-						Ok(Some(val))
-					})
-				}));
+			table_ty_obj = table_ty_obj.field(Field::new(
+				fd.name.to_string(),
+				fd_type,
+				make_table_field_resolver(datastore, session, fd_name.as_str()),
+			));
 		}
 
 		types.push(Type::Object(table_ty_obj));
@@ -422,31 +346,12 @@ pub async fn generate_schema(
 						}
 					};
 
-					let thing = match id.clone().try_into() {
+					let thing: Thing = match id.clone().try_into() {
 						Ok(t) => t,
 						Err(_) => return Err(resolver_error(format!("invalid id: {id}")).into()),
 					};
 
-					let ast = Statement::Select({
-						let mut tmp = SelectStatement::default();
-						tmp.what = vec![SqlValue::Thing(thing)].into();
-						tmp.expr = Fields::all();
-						tmp.only = true;
-						tmp
-					});
-
-					// let query = vec![use_stmt, ast].into();
-					let query = ast.into();
-					trace!("generated query: {}", query);
-
-					let res = kvs.process(query, &sess3, Default::default()).await?;
-					debug_assert_eq!(res.len(), 1);
-					let res = res
-						.into_iter()
-						.next()
-						.expect("response vector should have exactly one value")
-						.result?;
-					match res {
+					match get_record(kvs, &sess3, &thing).await? {
 						obj @ SqlValue::Object(_) => {
 							let out = sql_value_to_gql_value(obj)
 								.map_err(|_| "SQL to GQL translation failed")?;
@@ -455,8 +360,6 @@ pub async fn generate_schema(
 						}
 						_ => Ok(None),
 					}
-					// let out: Result<Option<GqlValue>, async_graphql::Error> = todo!();
-					// out
 				}
 			})
 		})
@@ -541,6 +444,55 @@ pub async fn generate_schema(
 	schema
 		.finish()
 		.map_err(|e| schema_error(format!("there was an error generating schema: {e:?}")))
+}
+
+fn make_table_field_resolver(
+	kvs: &Arc<Datastore>,
+	sess: &Session,
+	fd_name: impl Into<String>,
+) -> impl for<'a> Fn(ResolverContext<'a>) -> FieldFuture<'a> + Send + Sync + 'static {
+	let fd_name = fd_name.into();
+	let sess_field = Arc::new(sess.to_owned());
+	let kvs_field = kvs.clone();
+	move |ctx: ResolverContext| {
+		let sess_field = sess_field.clone();
+		let fd_name = fd_name.clone();
+		let kvs_field = kvs_field.clone();
+		FieldFuture::new({
+			let kvs_field = kvs_field.clone();
+			async move {
+				let kvs = kvs_field.as_ref();
+
+				let record: &SqlObject = ctx
+					.parent_value
+					.downcast_ref::<SqlObject>()
+					.ok_or(internal_error("failed to downcast"))?;
+
+				let val = record.get(fd_name.as_str()).ok_or(resolver_error(format!(
+					"couldn't find field: {fd_name} in: {record:?}"
+				)))?;
+
+				let out = match val {
+					SqlValue::Thing(rid) => match get_record(kvs, &sess_field, rid).await?
+						{
+							SqlValue::Object(o) => {
+							    let tmp = FieldValue::owned_any(o);
+								tmp.downcast_ref::<SqlObject>().unwrap();
+								panic!();
+								Ok(Some(tmp))
+							}
+							v => Err(resolver_error(format!("expected object, but found (referential integrity might be broken): {v:?}")).into()),
+						}
+					v => {
+						let out = sql_value_to_gql_value(v.to_owned())
+							.map_err(|_| "SQL to GQL translation failed")?;
+						Ok(Some(out.into()))
+					}
+				};
+				out
+			}
+		})
+	}
 }
 
 fn sql_value_to_gql_value(v: SqlValue) -> Result<GqlValue, GqlError> {

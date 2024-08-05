@@ -65,3 +65,24 @@ impl GqlValueUtils for GqlValue {
 		}
 	}
 }
+
+use surrealdb::dbs::Session;
+use surrealdb::kvs::Datastore;
+use surrealdb::kvs::LockType;
+use surrealdb::kvs::TransactionType;
+use surrealdb::sql::{Thing, Value as SqlValue};
+
+use super::error::GqlError;
+
+pub async fn get_record(
+	kvs: &Datastore,
+	sess: &Session,
+	rid: &Thing,
+) -> Result<SqlValue, GqlError> {
+	let tx = kvs.transaction(TransactionType::Read, LockType::Optimistic).await?;
+	Ok(tx
+		.get_record(&sess.ns.as_ref().unwrap(), &sess.db.as_ref().unwrap(), &rid.tb, &rid.id)
+		.await?
+		.as_ref()
+		.to_owned())
+}
