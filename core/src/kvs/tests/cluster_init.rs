@@ -95,6 +95,7 @@ async fn expired_nodes_get_live_queries_archived() {
 		archived: Some(crate::sql::uuid::Uuid::from(old_node)),
 		session: Some(Value::None),
 		auth: Some(Auth::for_root(Role::Owner)),
+		session_id: Default::default(),
 	};
 	let ctx = context::Context::background();
 	let (sender, _) = channel::unbounded();
@@ -177,6 +178,7 @@ async fn single_live_queries_are_garbage_collected() {
 		archived: None,
 		session: Some(Value::None),
 		auth: Some(Auth::for_root(Role::Owner)),
+		session_id: Default::default(),
 	};
 	live_st
 		.compute(&ctx, &options, &tx, None)
@@ -194,6 +196,7 @@ async fn single_live_queries_are_garbage_collected() {
 		archived: None,
 		session: Some(Value::None),
 		auth: Some(Auth::for_root(Role::Owner)),
+		session_id: Default::default(),
 	};
 	live_st
 		.compute(&ctx, &options, &tx, None)
@@ -264,6 +267,7 @@ async fn bootstrap_does_not_error_on_missing_live_queries() {
 		archived: None,
 		session: Some(Value::None),
 		auth: Some(Auth::for_root(Role::Owner)),
+		session_id: Default::default(),
 	};
 	live_st
 		.compute(&ctx, &options, &tx, None)

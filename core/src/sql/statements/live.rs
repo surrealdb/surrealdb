@@ -13,7 +13,7 @@ use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
-#[revisioned(revision = 2)]
+#[revisioned(revision = 3)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
@@ -34,7 +34,7 @@ pub struct LiveStatement {
 	// so we can chack it later when sending notifications.
 	// This is optional as it is only set by the database
 	// runtime when storing the live query to storage.
-	#[revision(start = 2)]
+	#[revision(start = 2, end = 3, convert_fn = "convert_with_session_id")]
 	pub(crate) session: Option<Value>,
 	// When a live query is created, we must also store the
 	// authenticated session of the user who made the query,
@@ -42,6 +42,24 @@ pub struct LiveStatement {
 	// This is optional as it is only set by the database
 	// runtime when storing the live query to storage.
 	pub(crate) auth: Option<Auth>,
+	// A reference to the session data stored in KV store
+	// This should never be None (MaybeSession::Session(Value::None)), but may be None as the struct is being created
+	#[revision(start = 3)]
+	pub(crate) session_id: MaybeSession,
+}
+
+#[revisioned(revision = 1)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[doc(hidden)]
+pub enum MaybeSession {
+	Session(Value),
+	SessionRef(Uuid),
+}
+
+impl Default for MaybeSession {
+	fn default() -> Self {
+		MaybeSession::Session(Value::None)
+	}
 }
 
 impl LiveStatement {
@@ -147,6 +165,18 @@ impl LiveStatement {
 				Ok(id.into())
 			}
 		}
+	}
+
+	fn convert_with_session_id(
+		&mut self,
+		_revision: u16,
+		previous_sess: Option<Value>,
+	) -> Result<(), revision::Error> {
+		self.session_id =
+			MaybeSession::Session(previous_sess.ok_or(revision::Error::Conversion(
+				"Trying to convert live query that did not have a session".to_string(),
+			))?);
+		Ok(())
 	}
 
 	async fn validate_change_feed_valid(

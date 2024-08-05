@@ -1,7 +1,9 @@
 use crate::ctx::Context;
 use crate::iam::Auth;
 use crate::iam::{Level, Role};
+use crate::sql::statements::live::MaybeSession;
 use crate::sql::value::Value;
+use crate::sql::Uuid;
 use chrono::Utc;
 use std::sync::Arc;
 
@@ -9,6 +11,9 @@ use std::sync::Arc;
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 #[non_exhaustive]
 pub struct Session {
+	/// The session ID, used as a reference on KV store.
+	/// Changes in auth and ns/db/sc should be reflected on KV store.
+	pub sess_id: Uuid,
 	/// The current session [`Auth`] information
 	pub au: Arc<Auth>,
 	/// Whether realtime queries are supported
@@ -147,6 +152,7 @@ impl Session {
 			tk: None,
 			sd: Some(rid),
 			exp: None,
+			sess_id: Uuid::default(),
 		}
 	}
 
