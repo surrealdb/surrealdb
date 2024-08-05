@@ -137,6 +137,7 @@ pub fn synchronous(
 		"array::union" => array::union,
 		"array::sort::asc" => array::sort::asc,
 		"array::sort::desc" => array::sort::desc,
+		"array::windows" => array::windows,
 		//
 		"bytes::len" => bytes::len,
 		//

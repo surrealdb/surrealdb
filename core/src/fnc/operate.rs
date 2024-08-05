@@ -57,7 +57,7 @@ pub fn mul(a: Value, b: Value) -> Result<Value, Error> {
 }
 
 pub fn div(a: Value, b: Value) -> Result<Value, Error> {
-	a.try_div(b)
+	Ok(a.try_div(b).unwrap_or(f64::NAN.into()))
 }
 
 pub fn rem(a: Value, b: Value) -> Result<Value, Error> {
