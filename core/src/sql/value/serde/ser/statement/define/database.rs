@@ -44,6 +44,7 @@ pub struct SerializeDefineDatabaseStatement {
 	id: Option<u32>,
 	comment: Option<Strand>,
 	if_not_exists: bool,
+	overwrite: bool,
 }
 
 impl serde::ser::SerializeStruct for SerializeDefineDatabaseStatement {
@@ -70,6 +71,9 @@ impl serde::ser::SerializeStruct for SerializeDefineDatabaseStatement {
 			"if_not_exists" => {
 				self.if_not_exists = value.serialize(ser::primitive::bool::Serializer.wrap())?
 			}
+			"overwrite" => {
+				self.overwrite = value.serialize(ser::primitive::bool::Serializer.wrap())?
+			}
 			key => {
 				return Err(Error::custom(format!(
 					"unexpected field `DefineDatabaseStatement::{key}`"
@@ -86,6 +90,7 @@ impl serde::ser::SerializeStruct for SerializeDefineDatabaseStatement {
 			id: self.id,
 			comment: self.comment,
 			if_not_exists: self.if_not_exists,
+			overwrite: self.overwrite,
 		})
 	}
 }

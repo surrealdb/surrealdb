@@ -131,6 +131,7 @@ fn parse_define_namespace() {
 			name: Ident("a".to_string()),
 			comment: Some(Strand("test".to_string())),
 			if_not_exists: false,
+			overwrite: false,
 		}))
 	);
 
@@ -142,6 +143,7 @@ fn parse_define_namespace() {
 			name: Ident("a".to_string()),
 			comment: None,
 			if_not_exists: false,
+			overwrite: false,
 		}))
 	)
 }
@@ -162,6 +164,7 @@ fn parse_define_database() {
 				store_diff: true,
 			}),
 			if_not_exists: false,
+			overwrite: false,
 		}))
 	);
 
@@ -174,6 +177,7 @@ fn parse_define_database() {
 			comment: None,
 			changefeed: None,
 			if_not_exists: false,
+			overwrite: false,
 		}))
 	)
 }
@@ -204,6 +208,7 @@ fn parse_define_function() {
 			comment: Some(Strand("test".to_string())),
 			permissions: Permission::Full,
 			if_not_exists: false,
+			overwrite: false,
 		}))
 	)
 }
@@ -375,6 +380,7 @@ fn parse_define_token() {
 			},
 			comment: Some(Strand("bar".to_string())),
 			if_not_exists: false,
+			overwrite: false,
 		})),
 	)
 }
@@ -451,6 +457,7 @@ fn parse_define_token_jwks() {
 			},
 			comment: Some(Strand("bar".to_string())),
 			if_not_exists: false,
+			overwrite: false,
 		})),
 	)
 }
@@ -577,6 +584,7 @@ fn parse_define_access_jwt_key() {
 				},
 				comment: Some(Strand("bar".to_string())),
 				if_not_exists: false,
+				overwrite: false,
 			})),
 		)
 	}
@@ -611,6 +619,7 @@ fn parse_define_access_jwt_key() {
 				},
 				comment: None,
 				if_not_exists: false,
+				overwrite: false,
 			})),
 		)
 	}
@@ -645,6 +654,7 @@ fn parse_define_access_jwt_key() {
 				},
 				comment: None,
 				if_not_exists: false,
+				overwrite: false,
 			})),
 		)
 	}
@@ -679,6 +689,7 @@ fn parse_define_access_jwt_key() {
 				},
 				comment: None,
 				if_not_exists: false,
+				overwrite: false,
 			})),
 		)
 	}
@@ -712,6 +723,7 @@ fn parse_define_access_jwt_key() {
 				},
 				comment: None,
 				if_not_exists: false,
+				overwrite: false,
 			})),
 		)
 	}
@@ -746,6 +758,7 @@ fn parse_define_access_jwt_key() {
 				},
 				comment: None,
 				if_not_exists: false,
+				overwrite: false,
 			})),
 		)
 	}
@@ -825,6 +838,7 @@ fn parse_define_access_jwt_key() {
 				},
 				comment: Some(Strand("bar".to_string())),
 				if_not_exists: false,
+				overwrite: false,
 			})),
 		)
 	}
@@ -856,6 +870,7 @@ fn parse_define_access_jwt_key() {
 				},
 				comment: Some(Strand("bar".to_string())),
 				if_not_exists: false,
+				overwrite: false,
 			})),
 		)
 	}
@@ -890,6 +905,7 @@ fn parse_define_access_jwt_jwks() {
 				},
 				comment: Some(Strand("bar".to_string())),
 				if_not_exists: false,
+				overwrite: false,
 			})),
 		)
 	}
@@ -923,6 +939,7 @@ fn parse_define_access_jwt_jwks() {
 				},
 				comment: None,
 				if_not_exists: false,
+				overwrite: false,
 			})),
 		)
 	}
@@ -955,6 +972,7 @@ fn parse_define_access_jwt_jwks() {
 				},
 				comment: None,
 				if_not_exists: false,
+				overwrite: false,
 			})),
 		)
 	}
@@ -988,6 +1006,7 @@ fn parse_define_access_jwt_jwks() {
 				},
 				comment: None,
 				if_not_exists: false,
+				overwrite: false,
 			})),
 		)
 	}
@@ -1020,6 +1039,7 @@ fn parse_define_access_jwt_jwks() {
 				},
 				comment: None,
 				if_not_exists: false,
+				overwrite: false,
 			})),
 		)
 	}
@@ -1157,6 +1177,7 @@ fn parse_define_access_record() {
 				},
 				comment: None,
 				if_not_exists: false,
+				overwrite: false,
 			})),
 		);
 	}
@@ -1197,6 +1218,7 @@ fn parse_define_access_record() {
 				},
 				comment: None,
 				if_not_exists: false,
+				overwrite: false,
 			})),
 		);
 	}
@@ -1237,6 +1259,7 @@ fn parse_define_access_record() {
 				},
 				comment: None,
 				if_not_exists: false,
+				overwrite: false,
 			})),
 		);
 	}
@@ -1309,6 +1332,7 @@ fn parse_define_access_record_with_jwt() {
 			},
 			comment: Some(Strand("bar".to_string())),
 			if_not_exists: false,
+			overwrite: false,
 		})),
 	)
 }
@@ -1334,6 +1358,7 @@ fn parse_define_param() {
 			comment: None,
 			permissions: Permission::Specific(Value::Null),
 			if_not_exists: false,
+			overwrite: false,
 		}))
 	);
 }
@@ -1381,6 +1406,7 @@ fn parse_define_table() {
 			}),
 			comment: None,
 			if_not_exists: false,
+			overwrite: false,
 			kind: TableType::Any,
 		}))
 	);
@@ -1401,6 +1427,7 @@ fn parse_define_event() {
 			then: Values(vec![Value::Null, Value::None]),
 			comment: None,
 			if_not_exists: false,
+			overwrite: false,
 		}))
 	)
 }
@@ -1439,6 +1466,7 @@ fn parse_define_field() {
 			},
 			comment: None,
 			if_not_exists: false,
+			overwrite: false,
 		}))
 	)
 }
@@ -1487,6 +1515,7 @@ fn parse_define_index() {
 			}),
 			comment: None,
 			if_not_exists: false,
+			overwrite: false,
 		}))
 	);
 
@@ -1502,6 +1531,7 @@ fn parse_define_index() {
 			index: Index::Uniq,
 			comment: None,
 			if_not_exists: false,
+			overwrite: false,
 		}))
 	);
 
@@ -1526,6 +1556,7 @@ fn parse_define_index() {
 			}),
 			comment: None,
 			if_not_exists: false,
+			overwrite: false,
 		}))
 	);
 
@@ -1551,6 +1582,7 @@ fn parse_define_index() {
 			}),
 			comment: None,
 			if_not_exists: false,
+			overwrite: false,
 		}))
 	);
 }
@@ -1583,6 +1615,7 @@ fn parse_define_analyzer() {
 			comment: None,
 			function: Some(Ident("foo::bar".to_string())),
 			if_not_exists: false,
+			overwrite: false,
 		})),
 	)
 }
