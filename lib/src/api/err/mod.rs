@@ -63,10 +63,9 @@ pub enum Error {
 	RangeOnRange,
 
 	/// Tried to use `table:id` syntax as a method parameter when `(table, id)` should be used instead
-	#[error("`{table}:{id}` is not allowed as a method parameter; try `({table}, {id})`")]
+	#[error("Table name `{table}` contained a colon (:), this is dissallowed to avoid confusion with record-id's try `Table(\"{table}\")` instead.")]
 	TableColonId {
 		table: String,
-		id: String,
 	},
 
 	/// Duplicate request ID

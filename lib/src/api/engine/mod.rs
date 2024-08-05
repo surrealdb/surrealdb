@@ -40,7 +40,7 @@ fn resource_to_values(r: Resource) -> CoreValues {
 	let mut res = CoreValues::default();
 	match r {
 		Resource::Table(x) => {
-			res.0 = vec![Table(x).to_core().into()];
+			res.0 = vec![Table(x).into_core().into()];
 		}
 		Resource::RecordId(x) => res.0 = vec![x.to_core().into()],
 		Resource::Object(x) => res.0 = vec![x.to_core().into()],

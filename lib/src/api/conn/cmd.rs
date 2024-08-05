@@ -141,7 +141,7 @@ impl Command {
 			},
 			Command::Invalidate => RouterRequest {
 				id,
-				method: "invalidate".into(),
+				method: "invalidate",
 				params: None,
 			},
 			Command::Create {
@@ -171,7 +171,7 @@ impl Command {
 
 				RouterRequest {
 					id,
-					method: "upsert".into(),
+					method: "upsert",
 					params: Some(CoreValue::Array(params.into())),
 				}
 			}
@@ -196,7 +196,7 @@ impl Command {
 				what,
 				data,
 			} => {
-				let mut params = vec![Table(what).to_core().into()];
+				let mut params = vec![Table(what).into_core().into()];
 				params.push(data.to_core());
 
 				RouterRequest {

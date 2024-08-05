@@ -88,7 +88,7 @@ pub use use_db::UseDb;
 pub use use_ns::UseNs;
 pub use version::Version;
 
-use super::opt::Resource;
+use super::opt::IntoResource;
 use super::value::Serializer;
 
 /// A alias for an often used type of future returned by async methods in this library.
@@ -709,13 +709,10 @@ where
 	/// # Ok(())
 	/// # }
 	/// ```
-	pub fn select<R, O>(&self, resource: R) -> Select<C, O>
-	where
-		Resource: From<R>,
-	{
+	pub fn select<O>(&self, resource: impl IntoResource<O>) -> Select<C, O> {
 		Select {
 			client: Cow::Borrowed(self),
-			resource: Ok(resource.into()),
+			resource: resource.into_resource(),
 			response_type: PhantomData,
 			query_type: PhantomData,
 		}
@@ -767,13 +764,10 @@ where
 	/// # Ok(())
 	/// # }
 	/// ```
-	pub fn create<R>(&self, resource: R) -> Create<C, R>
-	where
-		Resource: From<R>,
-	{
+	pub fn create<R>(&self, resource: impl IntoResource<R>) -> Create<C, R> {
 		Create {
 			client: Cow::Borrowed(self),
-			resource: resource.into(),
+			resource: resource.into_resource(),
 			response_type: PhantomData,
 		}
 	}
@@ -871,13 +865,10 @@ where
 	/// # Ok(())
 	/// # }
 	/// ```
-	pub fn insert<R, O>(&self, resource: R) -> Insert<C, O>
-	where
-		Resource: From<R>,
-	{
+	pub fn insert<O>(&self, resource: impl IntoResource<O>) -> Insert<C, O> {
 		Insert {
 			client: Cow::Borrowed(self),
-			resource: Ok(resource.into()),
+			resource: resource.into_resource(),
 			response_type: PhantomData,
 		}
 	}
@@ -1032,13 +1023,10 @@ where
 	/// # Ok(())
 	/// # }
 	/// ```
-	pub fn upsert<R, O>(&self, resource: R) -> Upsert<C, R>
-	where
-		Resource: From<R>,
-	{
+	pub fn upsert<O>(&self, resource: impl IntoResource<O>) -> Upsert<C, O> {
 		Upsert {
 			client: Cow::Borrowed(self),
-			resource: Ok(resource.into()),
+			resource: resource.into_resource(),
 			response_type: PhantomData,
 		}
 	}
@@ -1193,13 +1181,10 @@ where
 	/// # Ok(())
 	/// # }
 	/// ```
-	pub fn update<R, O>(&self, resource: R) -> Update<C, O>
-	where
-		Resource: From<R>,
-	{
+	pub fn update<O>(&self, resource: impl IntoResource<O>) -> Update<C, O> {
 		Update {
 			client: Cow::Borrowed(self),
-			resource: Ok(resource.into()),
+			resource: resource.into_resource(),
 			response_type: PhantomData,
 		}
 	}
@@ -1228,13 +1213,10 @@ where
 	/// # Ok(())
 	/// # }
 	/// ```
-	pub fn delete<R, O>(&self, resource: R) -> Delete<C, O>
-	where
-		Resource: From<R>,
-	{
+	pub fn delete<O>(&self, resource: impl IntoResource<O>) -> Delete<C, O> {
 		Delete {
 			client: Cow::Borrowed(self),
-			resource: Ok(resource.into()),
+			resource: resource.into_resource(),
 			response_type: PhantomData,
 		}
 	}

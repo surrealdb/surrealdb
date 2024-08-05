@@ -44,10 +44,10 @@ where
 					.parse()
 					.map_err(|_| Error::InvalidSemanticVersion(format!("\"{version}\"")).into())
 			} else {
-				return Err(Error::InvalidSemanticVersion(
+				Err(Error::InvalidSemanticVersion(
 					"server returned a non-string object".to_string(),
 				)
-				.into());
+				.into())
 			}
 		})
 	}

@@ -53,7 +53,7 @@ impl super::Routine for Read {
 				tasks.spawn(async move {
 					let _: Option<Record> = criterion::black_box(
 						client
-							.select((table_name, task_id as u64))
+							.select((table_name, task_id as i64))
 							.await
 							.expect("[run] select operation failed")
 							.expect("[run] the select operation returned None"),

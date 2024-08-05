@@ -280,7 +280,7 @@ async fn router_handle_response(
 								let resp = match DbResponse::from_server_result(response.result) {
 									Ok(x) => x,
 									Err(e) => {
-										let _ = pending.response_channel.send(Err(e));
+										let _ = pending.response_channel.send(Err(e)).await;
 										return HandleResult::Ok;
 									}
 								};

@@ -4,11 +4,14 @@ use crate::{
 	Object, RecordId, RecordIdKey, Value,
 };
 use std::ops::{self, Bound};
-use surrealdb_core::{
-	sql::{Dir, Table as CoreTable, Value as CoreValue},
-	syn,
-};
+use surrealdb_core::sql::{Dir, Table as CoreTable, Value as CoreValue};
 
+/// A wrapper type to assert that you ment to use a string as a table name.
+///
+/// To prevent some possible errors, by defauit [`IntoResource`] does not allow `:` in table names
+/// as this might be an indication that the user might have intended to use a record id instead.
+/// If you wrap your table name string in this tupe the [`IntoResource`] trait will accept any
+/// table names.
 #[derive(Debug)]
 pub struct Table<T>(pub T);
 
@@ -16,10 +19,21 @@ impl<T> Table<T>
 where
 	T: Into<String>,
 {
-	pub(crate) fn to_core(self) -> CoreTable {
+	pub(crate) fn into_core(self) -> CoreTable {
 		let mut t = CoreTable::default();
 		t.0 = self.0.into();
 		t
+	}
+
+	/// Add a range of keys to the table.
+	pub fn with_range<R>(self, range: R) -> QueryRange
+	where
+		KeyRange: From<R>,
+	{
+		QueryRange {
+			table: self.0.into(),
+			range: range.into(),
+		}
 	}
 }
 
@@ -31,6 +45,7 @@ pub struct QueryRange {
 	pub(crate) range: KeyRange,
 }
 
+/// A query edge
 #[derive(Debug, Clone, PartialEq)]
 pub struct Edge {
 	pub(crate) from: RecordId,
@@ -76,22 +91,13 @@ impl Resource {
 
 	pub(crate) fn into_core_value(self) -> CoreValue {
 		match self {
-			Resource::Table(x) => Table(x).to_core().into(),
+			Resource::Table(x) => Table(x).into_core().into(),
 			Resource::RecordId(x) => x.to_core().into(),
 			Resource::Object(x) => x.to_core().into(),
 			Resource::Array(x) => x.to_core().into(),
 			Resource::Edge(x) => x.to_core().into(),
 			Resource::Range(x) => x.to_core().into(),
 		}
-	}
-}
-
-impl<T> From<Table<T>> for Resource
-where
-	T: Into<String>,
-{
-	fn from(table: Table<T>) -> Self {
-		Self::Table(table.0.into())
 	}
 }
 
@@ -133,10 +139,7 @@ impl From<&[Value]> for Resource {
 
 impl From<&str> for Resource {
 	fn from(s: &str) -> Self {
-		match syn::thing(s) {
-			Ok(thing) => Self::RecordId(ToCore::from_core(thing).unwrap()),
-			Err(_) => Self::Table(s.into()),
-		}
+		Resource::from(s.to_string())
 	}
 }
 
@@ -148,10 +151,19 @@ impl From<&String> for Resource {
 
 impl From<String> for Resource {
 	fn from(s: String) -> Self {
-		match syn::thing(s.as_str()) {
-			Ok(thing) => Self::RecordId(ToCore::from_core(thing).unwrap()),
-			Err(_) => Self::Table(s),
-		}
+		Resource::Table(s)
+	}
+}
+
+impl From<Edge> for Resource {
+	fn from(value: Edge) -> Self {
+		Resource::Edge(value)
+	}
+}
+
+impl From<QueryRange> for Resource {
+	fn from(value: QueryRange) -> Self {
+		Resource::Range(value)
 	}
 }
 
@@ -164,13 +176,6 @@ where
 		let record_id = RecordId::from_table_key(table, id);
 		Self::RecordId(record_id)
 	}
-}
-
-/// A database resource into which can be inserted.
-#[derive(Debug)]
-pub enum InsertResource {
-	RecordId(RecordId),
-	Table(String),
 }
 
 /// Holds the `start` and `end` bounds of a range query
@@ -284,5 +289,103 @@ impl From<ops::RangeFull> for KeyRange {
 			start: Bound::Unbounded,
 			end: Bound::Unbounded,
 		}
+	}
+}
+
+/// A trait for types which can be used as a resource selection for a query.
+pub trait IntoResource<Output> {
+	fn into_resource(self) -> Result<Resource>;
+}
+
+fn no_colon(a: &str) -> Result<()> {
+	if a.contains(':') {
+		return Err(Error::TableColonId {
+			table: a.to_string(),
+		}
+		.into());
+	}
+	Ok(())
+}
+
+impl IntoResource<Value> for Resource {
+	fn into_resource(self) -> Result<Resource> {
+		Ok(self)
+	}
+}
+
+impl<R> IntoResource<Option<R>> for Object {
+	fn into_resource(self) -> Result<Resource> {
+		Ok(self.into())
+	}
+}
+
+impl<R> IntoResource<Option<R>> for RecordId {
+	fn into_resource(self) -> Result<Resource> {
+		Ok(self.into())
+	}
+}
+
+impl<R> IntoResource<Option<R>> for &RecordId {
+	fn into_resource(self) -> Result<Resource> {
+		Ok(self.clone().into())
+	}
+}
+
+impl<R, T, I> IntoResource<Option<R>> for (T, I)
+where
+	T: Into<String>,
+	I: Into<RecordIdKey>,
+{
+	fn into_resource(self) -> Result<Resource> {
+		Ok(self.into())
+	}
+}
+
+impl<R> IntoResource<Vec<R>> for Vec<Value> {
+	fn into_resource(self) -> Result<Resource> {
+		Ok(self.into())
+	}
+}
+
+impl<R> IntoResource<Vec<R>> for Edge {
+	fn into_resource(self) -> Result<Resource> {
+		Ok(self.into())
+	}
+}
+
+impl<R> IntoResource<Vec<R>> for QueryRange {
+	fn into_resource(self) -> Result<Resource> {
+		Ok(self.into())
+	}
+}
+
+impl<T, R> IntoResource<Vec<R>> for Table<T>
+where
+	T: Into<String>,
+{
+	fn into_resource(self) -> Result<Resource> {
+		let t = self.0.into();
+		Ok(t.into())
+	}
+}
+
+impl<R> IntoResource<Vec<R>> for &str {
+	fn into_resource(self) -> Result<Resource> {
+		no_colon(self)?;
+		Ok(self.into())
+	}
+}
+
+impl<R> IntoResource<Vec<R>> for String {
+	fn into_resource(self) -> Result<Resource> {
+		no_colon(&self)?;
+		Ok(self.into())
+	}
+}
+
+impl<R> IntoResource<Vec<R>> for &String {
+	fn into_resource(self) -> Result<Resource> {
+		no_colon(self)?;
+		Ok(self.into())
 	}
 }

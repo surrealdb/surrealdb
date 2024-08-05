@@ -21,9 +21,9 @@ impl<'de> Deserializer<'de> for Number {
 			Number::Integer(x) => visitor.visit_i64(x),
 			Number::Float(x) => visitor.visit_f64(x),
 			Number::Decimal(d) => {
-				if let Ok(x) = i64::try_from(d.clone()) {
+				if let Ok(x) = i64::try_from(d) {
 					visitor.visit_i64(x)
-				} else if let Ok(x) = f64::try_from(d.clone()) {
+				} else if let Ok(x) = f64::try_from(d) {
 					visitor.visit_f64(x)
 				} else {
 					visitor.visit_string(d.to_string())

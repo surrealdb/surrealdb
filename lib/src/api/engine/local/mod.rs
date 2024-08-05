@@ -63,7 +63,7 @@ use crate::api::conn::MlExportConfig;
 use futures::StreamExt;
 #[cfg(all(not(target_arch = "wasm32"), feature = "ml"))]
 use surrealdb_core::{
-	iam::{check::check_ns_db, Action, ResourceKind},
+	iam::{check::check_ns_db, Action, Resource},
 	kvs::{LockType, TransactionType},
 	ml::storage::surml_file::SurMlFile,
 	sql::statements::{DefineModelStatement, DefineStatement},
@@ -438,7 +438,7 @@ async fn export_ml(
 	// Ensure a NS and DB are set
 	let (nsv, dbv) = check_ns_db(sess)?;
 	// Check the permissions level
-	kvs.check(sess, Action::View, ResourceKind::Model.on_db(&nsv, &dbv))?;
+	kvs.check(sess, Action::View, Resource::Model.on_db(&nsv, &dbv))?;
 	// Start a new readonly transaction
 	let tx = kvs.transaction(TransactionType::Read, LockType::Optimistic).await?;
 	// Attempt to get the model definition
@@ -596,7 +596,7 @@ async fn router(
 			let one = !data.is_array();
 			let statement = {
 				let mut stmt = InsertStatement::default();
-				stmt.into = Some(Table(what).to_core().into());
+				stmt.into = Some(Table(what).into_core().into());
 				stmt.data = Data::SingleExpression(data.to_core());
 				stmt.output = Some(Output::After);
 				stmt
@@ -911,7 +911,7 @@ async fn router(
 			// Ensure a NS and DB are set
 			let (nsv, dbv) = check_ns_db(session)?;
 			// Check the permissions level
-			kvs.check(session, Action::Edit, ResourceKind::Model.on_db(&nsv, &dbv))?;
+			kvs.check(session, Action::Edit, Resource::Model.on_db(&nsv, &dbv))?;
 			// Create a new buffer
 			let mut buffer = Vec::new();
 			// Load all the uploaded file chunks
@@ -979,14 +979,14 @@ async fn router(
 			uuid,
 			notification_sender,
 		} => {
-			live_queries.insert(uuid.into(), notification_sender);
+			live_queries.insert(uuid, notification_sender);
 			Ok(DbResponse::Other(Value::None))
 		}
 		Command::Kill {
 			uuid,
 		} => {
-			live_queries.remove(&uuid.into());
-			let value = kill_live_query(kvs, uuid.into(), session, vars.clone()).await?;
+			live_queries.remove(&uuid);
+			let value = kill_live_query(kvs, uuid, session, vars.clone()).await?;
 			Ok(DbResponse::Other(value))
 		}
 	}

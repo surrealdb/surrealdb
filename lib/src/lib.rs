@@ -119,7 +119,7 @@ extern crate tracing;
 #[doc(hidden)]
 pub use surrealdb_core::*;
 
-use uuid::Uuid;
+pub use uuid::Uuid;
 
 #[macro_use]
 mod mac;
@@ -147,7 +147,7 @@ pub use api::headers;
 #[doc(inline)]
 pub use api::{
 	engine, method, opt,
-	value::{self, Bytes, Datetime, Number, Object, RecordId, RecordIdKey, Value},
+	value::{self, Bytes, Datetime, Notification, Number, Object, RecordId, RecordIdKey, Value},
 	Connect, Connection, Response, Result, Surreal,
 };
 

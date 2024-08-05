@@ -144,7 +144,7 @@ impl ToCore for Uuid {
 	}
 
 	fn as_core(&self) -> Self::Core {
-		self.clone().to_core()
+		self.to_core()
 	}
 
 	fn from_core(this: Self::Core) -> Option<Self> {
@@ -218,7 +218,7 @@ impl ToCore for RecordIdKey {
 	fn as_core(&self) -> Self::Core {
 		match self {
 			RecordIdKey::String(x) => Id::String(x.clone()),
-			RecordIdKey::Integer(x) => Id::Number(x.clone()),
+			RecordIdKey::Integer(x) => Id::Number(*x),
 			RecordIdKey::Object(x) => Id::Object(x.as_core()),
 			RecordIdKey::Array(x) => Id::Array(x.as_core()),
 		}
