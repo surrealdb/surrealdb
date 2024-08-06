@@ -719,10 +719,6 @@ criteria = "safe-to-run"
 version = "0.9.1"
 criteria = "safe-to-run"
 
-[[exemptions.h2]]
-version = "0.3.26"
-criteria = "safe-to-deploy"
-
 [[exemptions.half]]
 version = "2.4.0"
 criteria = "safe-to-deploy"
@@ -733,10 +729,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.hash32]]
 version = "0.3.1"
-criteria = "safe-to-deploy"
-
-[[exemptions.headers]]
-version = "0.3.9"
 criteria = "safe-to-deploy"
 
 [[exemptions.heapless]]
@@ -759,40 +751,16 @@ criteria = "safe-to-deploy"
 version = "0.27.0"
 criteria = "safe-to-deploy"
 
-[[exemptions.http]]
-version = "0.2.12"
-criteria = "safe-to-deploy"
-
-[[exemptions.http]]
-version = "1.1.0"
-criteria = "safe-to-deploy"
-
 [[exemptions.http-body]]
 version = "0.4.6"
-criteria = "safe-to-deploy"
-
-[[exemptions.http-body-util]]
-version = "0.1.1"
 criteria = "safe-to-deploy"
 
 [[exemptions.http-types]]
 version = "2.12.0"
 criteria = "safe-to-run"
 
-[[exemptions.httparse]]
-version = "1.8.0"
-criteria = "safe-to-deploy"
-
 [[exemptions.humantime]]
 version = "2.1.0"
-criteria = "safe-to-deploy"
-
-[[exemptions.hyper]]
-version = "0.14.28"
-criteria = "safe-to-deploy"
-
-[[exemptions.hyper]]
-version = "1.2.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.hyper-rustls]]
@@ -801,14 +769,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.hyper-timeout]]
 version = "0.4.1"
-criteria = "safe-to-deploy"
-
-[[exemptions.hyper-tls]]
-version = "0.5.0"
-criteria = "safe-to-deploy"
-
-[[exemptions.hyper-util]]
-version = "0.1.3"
 criteria = "safe-to-deploy"
 
 [[exemptions.iana-time-zone]]
@@ -1003,10 +963,6 @@ criteria = "safe-to-deploy"
 version = "0.1.39"
 criteria = "safe-to-deploy"
 
-[[exemptions.mime]]
-version = "0.3.17"
-criteria = "safe-to-deploy"
-
 [[exemptions.mime_guess]]
 version = "2.0.4"
 criteria = "safe-to-deploy"
@@ -1069,10 +1025,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.num-format]]
 version = "0.4.4"
-criteria = "safe-to-deploy"
-
-[[exemptions.num_cpus]]
-version = "1.16.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.object]]
@@ -1385,10 +1337,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.rend]]
 version = "0.4.2"
-criteria = "safe-to-deploy"
-
-[[exemptions.reqwest]]
-version = "0.11.27"
 criteria = "safe-to-deploy"
 
 [[exemptions.retain_mut]]
@@ -1823,6 +1771,10 @@ criteria = "safe-to-deploy"
 version = "0.20.1"
 criteria = "safe-to-deploy"
 
+[[exemptions.tokio-tungstenite]]
+version = "0.21.0"
+criteria = "safe-to-deploy"
+
 [[exemptions.tokio-util]]
 version = "0.7.10"
 criteria = "safe-to-deploy"
@@ -1921,10 +1873,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.uncased]]
 version = "0.9.10"
-criteria = "safe-to-deploy"
-
-[[exemptions.unicase]]
-version = "2.7.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.unicode-script]]
