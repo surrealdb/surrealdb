@@ -60,12 +60,12 @@ mod tests {
 			"testdb",
 			"testtb",
 			"testix",
-			Arc::new(SerializedVector::I16(vec![5])),
+			Arc::new(SerializedVector::I16(vec![2])),
 		);
 		let enc = Hv::encode(&val).unwrap();
 		assert_eq!(
 			enc,
-			b"/*testns\0*testdb\0*testtb\0+testix\0!hv\x3F\xF0\0\0\0\0\0\0\x40\0\0\0\0\0\0\0\x40\x08\0\0\0\0\0\0\x01",
+			b"/*testns\0*testdb\0*testtb\0+testix\0!hv\0\0\0\x04\x80\x02\x01",
 			"{}",
 			String::from_utf8_lossy(&enc)
 		);
