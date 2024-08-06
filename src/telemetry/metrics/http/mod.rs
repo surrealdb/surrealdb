@@ -1,8 +1,8 @@
 pub(super) mod tower_layer;
 
 use once_cell::sync::Lazy;
+use opentelemetry::global;
 use opentelemetry::metrics::{Histogram, Meter, MetricsError, UpDownCounter};
-use opentelemetry::{global, Context as TelemetryContext};
 
 use self::tower_layer::HttpCallMetricTracker;
 

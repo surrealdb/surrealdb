@@ -20,7 +20,6 @@ use axum::{
 use axum_extra::TypedHeader;
 use bytes::Bytes;
 use http::HeaderValue;
-use http_body::Body as HttpBody;
 use surrealdb::dbs::Session;
 use surrealdb::kvs::Datastore;
 use surrealdb::rpc::format::Format;

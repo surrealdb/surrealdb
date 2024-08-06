@@ -10,7 +10,7 @@ use opentelemetry::metrics::MetricsError;
 // };
 // use opentelemetry::sdk::Resource;
 use opentelemetry::Context;
-use opentelemetry::{Context as TelemetryContext, KeyValue};
+use opentelemetry::KeyValue;
 use opentelemetry_sdk::resource::{
 	EnvResourceDetector, SdkProvidedResourceDetector, TelemetryResourceDetector,
 };

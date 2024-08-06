@@ -1,4 +1,3 @@
-use opentelemetry::global::ObjectSafeTracerProvider;
 use tracing::Subscriber;
 use tracing_subscriber::Layer;
 

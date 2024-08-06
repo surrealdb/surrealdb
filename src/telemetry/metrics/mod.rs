@@ -1,34 +1,16 @@
 pub mod http;
 pub mod ws;
 
-use std::time::Duration;
-
-use once_cell::sync::Lazy;
-use opentelemetry::global::{self, ObjectSafeMeterProvider};
+use opentelemetry::metrics::MetricsError;
 use opentelemetry::Context as TelemetryContext;
-use opentelemetry::{
-	metrics::{Meter, MeterProvider, MetricsError},
-	// sdk::{
-	// 	export::metrics::aggregation,
-	// 	metrics::{
-	// 		controllers::{self, BasicController},
-	// 		processors, selectors,
-	// 	},
-	// },
-};
 use opentelemetry_otlp::MetricsExporterBuilder;
-use opentelemetry_sdk::metrics::data::Temporality;
 use opentelemetry_sdk::metrics::reader::{DefaultAggregationSelector, DefaultTemporalitySelector};
 use opentelemetry_sdk::metrics::{
-	Aggregation, Instrument, MeterProviderBuilder, PeriodicReader, PeriodicReaderBuilder,
-	SdkMeterProvider, Stream,
+	Aggregation, Instrument, PeriodicReader, SdkMeterProvider, Stream,
 };
-// use opentelemetry_sdk::export;
 use opentelemetry_sdk::runtime;
-use opentelemetry_sdk::{export, metrics};
 
 pub use self::http::tower_layer::HttpMetricsLayer;
-use self::ws::observe_active_connection;
 
 use super::OTEL_DEFAULT_RESOURCE;
 

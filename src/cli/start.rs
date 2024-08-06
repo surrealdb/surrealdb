@@ -9,7 +9,6 @@ use crate::env;
 use crate::err::Error;
 use crate::net::{self, client_ip::ClientIp};
 use clap::Args;
-use opentelemetry::Context;
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::Arc;

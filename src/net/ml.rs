@@ -11,6 +11,7 @@ use axum::Router;
 use bytes::Bytes;
 use futures_util::StreamExt;
 use http::StatusCode;
+use http_body_util::BodyStream;
 
 use axum::body::Body;
 use surrealdb::dbs::Session;
