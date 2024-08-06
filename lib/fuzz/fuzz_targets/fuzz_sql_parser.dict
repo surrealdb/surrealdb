@@ -310,6 +310,7 @@
 "string::is::semver("
 "string::is::url("
 "string::is::uuid("
+"string::is::record("
 "string::join("
 "string::len("
 "string::lowercase("

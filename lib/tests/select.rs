@@ -1224,3 +1224,75 @@ async fn select_destructure() -> Result<(), Error> {
 	//
 	Ok(())
 }
+
+#[tokio::test]
+async fn select_field_from_graph_no_flattening() -> Result<(), Error> {
+	let sql = "
+        CREATE a:1, a:2;
+
+        RELATE a:1->b:1->a:2 SET list = [1, 2, 3];
+        RELATE a:1->b:2->a:2 SET list = [4, 5, 6];
+
+        SELECT VALUE ->b.list FROM a:1;
+	";
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 4);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
+    		{ id: a:1 },
+    		{ id: a:2 }
+		]",
+	);
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
+			{
+				id: b:1,
+				in: a:1,
+				out: a:2,
+				list: [1, 2, 3]
+			}
+		]",
+	);
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
+			{
+				id: b:2,
+				in: a:1,
+				out: a:2,
+				list: [4, 5, 6]
+			}
+		]",
+	);
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
+		    [
+    			[
+    			    1,
+                    2,
+                    3
+                ],
+                [
+                    4,
+                    5,
+                    6
+                ]
+			]
+		]",
+	);
+	assert_eq!(tmp, val);
+	//
+	Ok(())
+}
