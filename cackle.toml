@@ -1365,3 +1365,6 @@ allow_unsafe = true
 allow_apis = [
     "fs",
 ]
+
+[pkg.atomic-waker]
+allow_unsafe = true
