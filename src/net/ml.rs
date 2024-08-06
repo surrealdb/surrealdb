@@ -2,6 +2,7 @@
 use super::AppState;
 use crate::err::Error;
 use crate::net::output;
+use axum::body::Body;
 use axum::extract::{DefaultBodyLimit, Path};
 use axum::response::IntoResponse;
 use axum::response::Response;
@@ -11,9 +12,7 @@ use axum::Router;
 use bytes::Bytes;
 use futures_util::StreamExt;
 use http::StatusCode;
-use http_body_util::BodyStream;
 
-use axum::body::Body;
 use surrealdb::dbs::Session;
 use surrealdb::iam::check::check_ns_db;
 use surrealdb::iam::Action::{Edit, View};
@@ -41,8 +40,9 @@ where
 async fn import(
 	Extension(state): Extension<AppState>,
 	Extension(session): Extension<Session>,
-	mut stream: BodyStream,
+	body: Body,
 ) -> Result<impl IntoResponse, impl IntoResponse> {
+	let mut stream = body.into_data_stream();
 	// Get the datastore reference
 	let db = &state.datastore;
 	// Ensure a NS and DB are set

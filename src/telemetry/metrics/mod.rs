@@ -2,7 +2,7 @@ pub mod http;
 pub mod ws;
 
 use opentelemetry::metrics::MetricsError;
-use opentelemetry::Context as TelemetryContext;
+use opentelemetry::{global, Context as TelemetryContext};
 use opentelemetry_otlp::MetricsExporterBuilder;
 use opentelemetry_sdk::metrics::reader::{DefaultAggregationSelector, DefaultTemporalitySelector};
 use opentelemetry_sdk::metrics::{
