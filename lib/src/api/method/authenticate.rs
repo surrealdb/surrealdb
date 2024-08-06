@@ -1,7 +1,5 @@
+use crate::api::conn::Command;
 use crate::api::method::BoxFuture;
-
-use crate::api::conn::Method;
-use crate::api::conn::Param;
 use crate::api::method::OnceLockExt;
 use crate::api::opt::auth::Jwt;
 use crate::api::Connection;
@@ -28,7 +26,11 @@ where
 	fn into_future(self) -> Self::IntoFuture {
 		Box::pin(async move {
 			let router = self.client.router.extract()?;
-			router.execute_unit(Method::Authenticate, Param::new(vec![self.token.0.into()])).await
+			router
+				.execute_unit(Command::Authenticate {
+					token: self.token.0,
+				})
+				.await
 		})
 	}
 }

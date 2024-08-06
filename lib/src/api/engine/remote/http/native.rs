@@ -1,6 +1,5 @@
 use super::Client;
 use crate::api::conn::Connection;
-use crate::api::conn::Method;
 use crate::api::conn::Route;
 use crate::api::conn::Router;
 use crate::api::method::BoxFuture;
@@ -12,8 +11,7 @@ use crate::api::OnceLockExt;
 use crate::api::Result;
 use crate::api::Surreal;
 use crate::opt::WaitFor;
-use flume::Receiver;
-use futures::StreamExt;
+use channel::Receiver;
 use indexmap::IndexMap;
 use reqwest::header::HeaderMap;
 use reqwest::ClientBuilder;
@@ -48,11 +46,11 @@ impl Connection for Client {
 
 			let base_url = address.url;
 
-			super::health(client.get(base_url.join(Method::Health.as_str())?)).await?;
+			super::health(client.get(base_url.join("health")?)).await?;
 
 			let (route_tx, route_rx) = match capacity {
-				0 => flume::unbounded(),
-				capacity => flume::bounded(capacity),
+				0 => channel::unbounded(),
+				capacity => channel::bounded(capacity),
 			};
 
 			tokio::spawn(run_router(base_url, client, route_rx));
@@ -76,12 +74,11 @@ pub(crate) async fn run_router(base_url: Url, client: reqwest::Client, route_rx:
 	let mut headers = HeaderMap::new();
 	let mut vars = IndexMap::new();
 	let mut auth = None;
-	let mut stream = route_rx.into_stream();
 
-	while let Some(route) = stream.next().await {
+	while let Ok(route) = route_rx.recv().await {
 		let result =
 			super::router(route.request, &base_url, &client, &mut headers, &mut vars, &mut auth)
 				.await;
-		let _ = route.response.into_send_async(result).await;
+		let _ = route.response.send(result).await;
 	}
 }

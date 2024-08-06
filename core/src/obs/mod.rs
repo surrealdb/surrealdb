@@ -68,7 +68,7 @@ pub async fn get(file: &str) -> Result<Vec<u8>, Error> {
 		Ok(data) => Ok(data.bytes().await?.to_vec()),
 		_ => {
 			let data = STORE.get(&Path::from(file)).await?;
-			CACHE.put(&Path::from(file), data.bytes().await?).await?;
+			CACHE.put(&Path::from(file), data.bytes().await?.into()).await?;
 			Ok(CACHE.get(&Path::from(file)).await?.bytes().await?.to_vec())
 		}
 	}
@@ -76,7 +76,7 @@ pub async fn get(file: &str) -> Result<Vec<u8>, Error> {
 
 /// Puts the file into the local file system or memory object storage.
 pub async fn put(file: &str, data: Vec<u8>) -> Result<(), Error> {
-	let _ = STORE.put(&Path::from(file), Bytes::from(data)).await?;
+	let _ = STORE.put(&Path::from(file), Bytes::from(data).into()).await?;
 	Ok(())
 }
 

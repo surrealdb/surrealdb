@@ -40,7 +40,7 @@ use tokio::sync::RwLock;
 pub(crate) type MatchRef = u8;
 
 pub(crate) struct FtIndex {
-	analyzer: Arc<Analyzer>,
+	analyzer: Analyzer,
 	state_key: Key,
 	index_key_base: IndexKeyBase,
 	state: State,
@@ -106,14 +106,13 @@ impl FtIndex {
 		tt: TransactionType,
 	) -> Result<Self, Error> {
 		let tx = ctx.tx();
-		// TODO: @emmanuel-keller we probably don't need to clone the value here
-		let az = tx.get_db_analyzer(opt.ns()?, opt.db()?, az).await?.as_ref().to_owned();
+		let az = tx.get_db_analyzer(opt.ns()?, opt.db()?, az).await?;
 		Self::with_analyzer(ctx.get_index_stores(), &tx, az, index_key_base, p, tt).await
 	}
 	async fn with_analyzer(
 		ixs: &IndexStores,
 		txn: &Transaction,
-		az: DefineAnalyzerStatement,
+		az: Arc<DefineAnalyzerStatement>,
 		index_key_base: IndexKeyBase,
 		p: &SearchParams,
 		tt: TransactionType,
@@ -165,7 +164,7 @@ impl FtIndex {
 			index_key_base,
 			bm25,
 			highlighting: p.hl,
-			analyzer: Arc::new(az.into()),
+			analyzer: Analyzer::new(az),
 			doc_ids,
 			doc_lengths,
 			postings,
@@ -183,7 +182,7 @@ impl FtIndex {
 		self.terms.clone()
 	}
 
-	pub(super) fn analyzer(&self) -> Arc<Analyzer> {
+	pub(super) fn analyzer(&self) -> Analyzer {
 		self.analyzer.clone()
 	}
 
@@ -583,30 +582,31 @@ mod tests {
 	pub(super) async fn tx_fti<'a>(
 		ds: &Datastore,
 		tt: TransactionType,
-		az: &DefineAnalyzerStatement,
+		az: Arc<DefineAnalyzerStatement>,
 		order: u32,
 		hl: bool,
 	) -> (Context<'a>, Options, FtIndex) {
 		let mut ctx = Context::default();
 		let tx = ds.transaction(tt, Optimistic).await.unwrap();
+		let p = SearchParams {
+			az: az.name.clone(),
+			doc_ids_order: order,
+			doc_lengths_order: order,
+			postings_order: order,
+			terms_order: order,
+			sc: Default::default(),
+			hl,
+			doc_ids_cache: 100,
+			doc_lengths_cache: 100,
+			postings_cache: 100,
+			terms_cache: 100,
+		};
 		let fti = FtIndex::with_analyzer(
 			ctx.get_index_stores(),
 			&tx,
-			az.clone(),
+			az,
 			IndexKeyBase::default(),
-			&SearchParams {
-				az: az.name.clone(),
-				doc_ids_order: order,
-				doc_lengths_order: order,
-				postings_order: order,
-				terms_order: order,
-				sc: Default::default(),
-				hl,
-				doc_ids_cache: 100,
-				doc_lengths_cache: 100,
-				postings_cache: 100,
-				terms_cache: 100,
-			},
+			&p,
 			tt,
 		)
 		.await
@@ -629,6 +629,7 @@ mod tests {
 		let Statement::Define(DefineStatement::Analyzer(az)) = q.0 .0.pop().unwrap() else {
 			panic!()
 		};
+		let az = Arc::new(az);
 		let mut stack = reblessive::TreeStack::new();
 
 		let btree_order = 5;
@@ -641,7 +642,7 @@ mod tests {
 			.enter(|stk| async {
 				// Add one document
 				let (ctx, opt, mut fti) =
-					tx_fti(&ds, TransactionType::Write, &az, btree_order, false).await;
+					tx_fti(&ds, TransactionType::Write, az.clone(), btree_order, false).await;
 				fti.index_document(stk, &ctx, &opt, &doc1, vec![Value::from("hello the world")])
 					.await
 					.unwrap();
@@ -654,7 +655,7 @@ mod tests {
 			.enter(|stk| async {
 				// Add two documents
 				let (ctx, opt, mut fti) =
-					tx_fti(&ds, TransactionType::Write, &az, btree_order, false).await;
+					tx_fti(&ds, TransactionType::Write, az.clone(), btree_order, false).await;
 				fti.index_document(stk, &ctx, &opt, &doc2, vec![Value::from("a yellow hello")])
 					.await
 					.unwrap();
@@ -669,7 +670,7 @@ mod tests {
 		stack
 			.enter(|stk| async {
 				let (ctx, opt, fti) =
-					tx_fti(&ds, TransactionType::Read, &az, btree_order, false).await;
+					tx_fti(&ds, TransactionType::Read, az.clone(), btree_order, false).await;
 				// Check the statistics
 				let statistics = fti.statistics(&ctx).await.unwrap();
 				assert_eq!(statistics.terms.keys_count, 7);
@@ -709,14 +710,14 @@ mod tests {
 			.enter(|stk| async {
 				// Reindex one document
 				let (ctx, opt, mut fti) =
-					tx_fti(&ds, TransactionType::Write, &az, btree_order, false).await;
+					tx_fti(&ds, TransactionType::Write, az.clone(), btree_order, false).await;
 				fti.index_document(stk, &ctx, &opt, &doc3, vec![Value::from("nobar foo")])
 					.await
 					.unwrap();
 				finish(&ctx, fti).await;
 
 				let (ctx, opt, fti) =
-					tx_fti(&ds, TransactionType::Read, &az, btree_order, false).await;
+					tx_fti(&ds, TransactionType::Read, az.clone(), btree_order, false).await;
 
 				// We can still find 'foo'
 				let (hits, scr) = search(stk, &ctx, &opt, &fti, "foo").await;
@@ -736,7 +737,7 @@ mod tests {
 		{
 			// Remove documents
 			let (ctx, _, mut fti) =
-				tx_fti(&ds, TransactionType::Write, &az, btree_order, false).await;
+				tx_fti(&ds, TransactionType::Write, az.clone(), btree_order, false).await;
 			fti.remove_document(&ctx, &doc1).await.unwrap();
 			fti.remove_document(&ctx, &doc2).await.unwrap();
 			fti.remove_document(&ctx, &doc3).await.unwrap();
@@ -746,7 +747,7 @@ mod tests {
 		stack
 			.enter(|stk| async {
 				let (ctx, opt, fti) =
-					tx_fti(&ds, TransactionType::Read, &az, btree_order, false).await;
+					tx_fti(&ds, TransactionType::Read, az.clone(), btree_order, false).await;
 				let (hits, _) = search(stk, &ctx, &opt, &fti, "hello").await;
 				assert!(hits.is_none());
 				let (hits, _) = search(stk, &ctx, &opt, &fti, "foo").await;
@@ -767,6 +768,7 @@ mod tests {
 			let Statement::Define(DefineStatement::Analyzer(az)) = q.0 .0.pop().unwrap() else {
 				panic!()
 			};
+			let az = Arc::new(az);
 			let mut stack = reblessive::TreeStack::new();
 
 			let doc1: Thing = ("t", "doc1").into();
@@ -778,7 +780,7 @@ mod tests {
 			stack
 				.enter(|stk| async {
 					let (ctx, opt, mut fti) =
-						tx_fti(&ds, TransactionType::Write, &az, btree_order, hl).await;
+						tx_fti(&ds, TransactionType::Write, az.clone(), btree_order, hl).await;
 					fti.index_document(
 						stk,
 						&ctx,
@@ -823,7 +825,7 @@ mod tests {
 			stack
 				.enter(|stk| async {
 					let (ctx, opt, fti) =
-						tx_fti(&ds, TransactionType::Read, &az, btree_order, hl).await;
+						tx_fti(&ds, TransactionType::Read, az.clone(), btree_order, hl).await;
 
 					let statistics = fti.statistics(&ctx).await.unwrap();
 					assert_eq!(statistics.terms.keys_count, 17);
@@ -894,7 +896,7 @@ mod tests {
 		test_ft_index_bm_25(true).await;
 	}
 
-	async fn concurrent_task(ds: Arc<Datastore>, az: DefineAnalyzerStatement) {
+	async fn concurrent_task(ds: Arc<Datastore>, az: Arc<DefineAnalyzerStatement>) {
 		let btree_order = 5;
 		let doc1: Thing = ("t", "doc1").into();
 		let content1 = Value::from(Array::from(vec!["Enter a search term", "Welcome", "Docusaurus blogging features are powered by the blog plugin.", "Simply add Markdown files (or folders) to the blog directory.", "blog", "Regular blog authors can be added to authors.yml.", "authors.yml", "The blog post date can be extracted from filenames, such as:", "2019-05-30-welcome.md", "2019-05-30-welcome/index.md", "A blog post folder can be convenient to co-locate blog post images:", "The blog supports tags as well!", "And if you don't want a blog: just delete this directory, and use blog: false in your Docusaurus config.", "blog: false", "MDX Blog Post", "Blog posts support Docusaurus Markdown features, such as MDX.", "Use the power of React to create interactive blog posts.", "Long Blog Post", "This is the summary of a very long blog post,", "Use a <!-- truncate --> comment to limit blog post size in the list view.", "<!--", "truncate", "-->", "First Blog Post", "Lorem ipsum dolor sit amet, consectetur adipiscing elit. Pellentesque elementum dignissim ultricies. Fusce rhoncus ipsum tempor eros aliquam consequat. Lorem ipsum dolor sit amet"]));
@@ -904,7 +906,7 @@ mod tests {
 		while start.elapsed().as_secs() < 3 {
 			stack
 				.enter(|stk| {
-					remove_insert_task(stk, ds.as_ref(), &az, btree_order, &doc1, &content1)
+					remove_insert_task(stk, ds.as_ref(), az.clone(), btree_order, &doc1, &content1)
 				})
 				.finish()
 				.await;
@@ -917,6 +919,7 @@ mod tests {
 		let Statement::Define(DefineStatement::Analyzer(az)) = q.0 .0.pop().unwrap() else {
 			panic!()
 		};
+		let az = Arc::new(az);
 		concurrent_task(ds.clone(), az.clone()).await;
 		let task1 = tokio::spawn(concurrent_task(ds.clone(), az.clone()));
 		let task2 = tokio::spawn(concurrent_task(ds.clone(), az.clone()));
@@ -926,7 +929,7 @@ mod tests {
 	async fn remove_insert_task(
 		stk: &mut Stk,
 		ds: &Datastore,
-		az: &DefineAnalyzerStatement,
+		az: Arc<DefineAnalyzerStatement>,
 		btree_order: u32,
 		rid: &Thing,
 		content: &Value,
@@ -945,13 +948,15 @@ mod tests {
 		let Statement::Define(DefineStatement::Analyzer(az)) = q.0 .0.pop().unwrap() else {
 			panic!()
 		};
+		let az = Arc::new(az);
 		let doc: Thing = ("t", "doc1").into();
 		let content = Value::from(Array::from(vec!["Enter a search term","Welcome","Docusaurus blogging features are powered by the blog plugin.","Simply add Markdown files (or folders) to the blog directory.","blog","Regular blog authors can be added to authors.yml.","authors.yml","The blog post date can be extracted from filenames, such as:","2019-05-30-welcome.md","2019-05-30-welcome/index.md","A blog post folder can be convenient to co-locate blog post images:","The blog supports tags as well!","And if you don't want a blog: just delete this directory, and use blog: false in your Docusaurus config.","blog: false","MDX Blog Post","Blog posts support Docusaurus Markdown features, such as MDX.","Use the power of React to create interactive blog posts.","Long Blog Post","This is the summary of a very long blog post,","Use a <!-- truncate --> comment to limit blog post size in the list view.","<!--","truncate","-->","First Blog Post","Lorem ipsum dolor sit amet, consectetur adipiscing elit. Pellentesque elementum dignissim ultricies. Fusce rhoncus ipsum tempor eros aliquam consequat. Lorem ipsum dolor sit amet"]));
 
 		for i in 0..5 {
 			debug!("Attempt {i}");
 			{
-				let (ctx, opt, mut fti) = tx_fti(&ds, TransactionType::Write, &az, 5, false).await;
+				let (ctx, opt, mut fti) =
+					tx_fti(&ds, TransactionType::Write, az.clone(), 5, false).await;
 				stack
 					.enter(|stk| fti.index_document(stk, &ctx, &opt, &doc, vec![content.clone()]))
 					.finish()
@@ -961,19 +966,20 @@ mod tests {
 			}
 
 			{
-				let (ctx, _, fti) = tx_fti(&ds, TransactionType::Read, &az, 5, false).await;
+				let (ctx, _, fti) = tx_fti(&ds, TransactionType::Read, az.clone(), 5, false).await;
 				let s = fti.statistics(&ctx).await.unwrap();
 				assert_eq!(s.terms.keys_count, 113);
 			}
 
 			{
-				let (ctx, _, mut fti) = tx_fti(&ds, TransactionType::Write, &az, 5, false).await;
+				let (ctx, _, mut fti) =
+					tx_fti(&ds, TransactionType::Write, az.clone(), 5, false).await;
 				fti.remove_document(&ctx, &doc).await.unwrap();
 				finish(&ctx, fti).await;
 			}
 
 			{
-				let (ctx, _, fti) = tx_fti(&ds, TransactionType::Read, &az, 5, false).await;
+				let (ctx, _, fti) = tx_fti(&ds, TransactionType::Read, az.clone(), 5, false).await;
 				let s = fti.statistics(&ctx).await.unwrap();
 				assert_eq!(s.terms.keys_count, 0);
 			}

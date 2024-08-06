@@ -7,6 +7,7 @@ use crate::sql::Base;
 use crate::sql::Duration;
 use crate::sql::Ident;
 use crate::sql::Strand;
+use crate::sql::Value;
 use ser::Serializer as _;
 use serde::ser::Error as _;
 use serde::ser::Impossible;
@@ -45,6 +46,7 @@ pub struct SerializeDefineAccessStatement {
 	name: Ident,
 	base: Base,
 	kind: AccessType,
+	authenticate: Option<Value>,
 	duration: AccessDuration,
 	comment: Option<Strand>,
 	if_not_exists: bool,
@@ -67,6 +69,9 @@ impl serde::ser::SerializeStruct for SerializeDefineAccessStatement {
 			}
 			"kind" => {
 				self.kind = value.serialize(ser::access_type::Serializer.wrap())?;
+			}
+			"authenticate" => {
+				self.authenticate = value.serialize(ser::value::opt::Serializer.wrap())?;
 			}
 			"duration" => {
 				self.duration = value.serialize(SerializerDuration.wrap())?;
@@ -91,6 +96,7 @@ impl serde::ser::SerializeStruct for SerializeDefineAccessStatement {
 			name: self.name,
 			base: self.base,
 			kind: self.kind,
+			authenticate: self.authenticate,
 			duration: self.duration,
 			comment: self.comment,
 			if_not_exists: self.if_not_exists,
