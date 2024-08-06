@@ -115,7 +115,7 @@ async fn export(
 	// Process all stream values
 	tokio::spawn(async move {
 		while let Some(Ok(v)) = data.next().await {
-			let _ = chn.send(Ok(Bytes::from(v))).await;
+			let _ = chn.send(Ok(v)).await;
 		}
 	});
 	// Return the streamed body
