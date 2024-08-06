@@ -152,6 +152,7 @@ impl Heuristic {
 		Ok(())
 	}
 
+	#[allow(clippy::too_many_arguments)]
 	async fn heuristic_ext<S>(
 		tx: &Transaction,
 		elements: &HnswElements,
@@ -169,6 +170,7 @@ impl Heuristic {
 		Self::heuristic(tx, elements, layer, c, res).await
 	}
 
+	#[allow(clippy::too_many_arguments)]
 	async fn heuristic_ext_keep<S>(
 		tx: &Transaction,
 		elements: &HnswElements,
