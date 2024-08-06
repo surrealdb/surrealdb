@@ -43,6 +43,7 @@ pub enum AccessStatement {
 #[non_exhaustive]
 pub struct AccessStatementList {
 	pub ac: Ident,
+	pub base: Option<Base>,
 }
 
 #[revisioned(revision = 1)]
@@ -51,6 +52,7 @@ pub struct AccessStatementList {
 #[non_exhaustive]
 pub struct AccessStatementGrant {
 	pub ac: Ident,
+	pub base: Option<Base>,
 	pub subject: Option<Subject>,
 }
 
@@ -60,6 +62,7 @@ pub struct AccessStatementGrant {
 #[non_exhaustive]
 pub struct AccessStatementRevoke {
 	pub ac: Ident,
+	pub base: Option<Base>,
 	pub gr: Ident,
 }
 
@@ -227,7 +230,10 @@ impl AccessStatement {
 	) -> Result<Value, Error> {
 		match self {
 			AccessStatement::Grant(stmt) => {
-				let base = opt.selected_base()?;
+				let base = match &stmt.base {
+					Some(base) => base.clone(),
+					None => opt.selected_base()?,
+				};
 				// Allowed to run?
 				opt.is_allowed(Action::Edit, ResourceKind::Access, &base)?;
 				match base {
@@ -422,7 +428,10 @@ impl AccessStatement {
 				}
 			}
 			AccessStatement::List(stmt) => {
-				let base = opt.selected_base()?;
+				let base = match &stmt.base {
+					Some(base) => base.clone(),
+					None => opt.selected_base()?,
+				};
 				// Allowed to run?
 				opt.is_allowed(Action::View, ResourceKind::Access, &base)?;
 				match base {
@@ -431,7 +440,9 @@ impl AccessStatement {
 						let txn = ctx.tx();
 						// Clear the cache
 						txn.clear();
-						// Get the grants for the access method
+						// Check if the access method exists.
+						txn.get_root_access(&stmt.ac).await?;
+						// Get the grants for the access method.
 						let mut grants = Array::default();
 						// Show redacted version of the access grants.
 						for v in txn.all_root_access_grants(&stmt.ac).await?.iter() {
@@ -444,7 +455,9 @@ impl AccessStatement {
 						let txn = ctx.tx();
 						// Clear the cache
 						txn.clear();
-						// Get the grants for the access method
+						// Check if the access method exists.
+						txn.get_ns_access(opt.ns()?, &stmt.ac).await?;
+						// Get the grants for the access method.
 						let mut grants = Array::default();
 						// Show redacted version of the access grants.
 						for v in txn.all_ns_access_grants(opt.ns()?, &stmt.ac).await?.iter() {
@@ -457,7 +470,9 @@ impl AccessStatement {
 						let txn = ctx.tx();
 						// Clear the cache
 						txn.clear();
-						// Get the grants for the access method
+						// Check if the access method exists.
+						txn.get_db_access(opt.ns()?, opt.db()?, &stmt.ac).await?;
+						// Get the grants for the access method.
 						let mut grants = Array::default();
 						// Show redacted version of the access grants.
 						for v in
@@ -474,7 +489,10 @@ impl AccessStatement {
 				}
 			}
 			AccessStatement::Revoke(stmt) => {
-				let base = opt.selected_base()?;
+				let base = match &stmt.base {
+					Some(base) => base.clone(),
+					None => opt.selected_base()?,
+				};
 				// Allowed to run?
 				opt.is_allowed(Action::Edit, ResourceKind::Access, &base)?;
 				match base {
@@ -483,6 +501,8 @@ impl AccessStatement {
 						let txn = ctx.tx();
 						// Clear the cache
 						txn.clear();
+						// Check if the access method exists.
+						txn.get_root_access(&stmt.ac).await?;
 						// Get the grants to revoke
 						let ac_str = stmt.ac.to_raw();
 						let gr_str = stmt.gr.to_raw();
@@ -501,6 +521,8 @@ impl AccessStatement {
 						let txn = ctx.tx();
 						// Clear the cache
 						txn.clear();
+						// Check if the access method exists.
+						txn.get_ns_access(opt.ns()?, &stmt.ac).await?;
 						// Get the grants to revoke
 						let ac_str = stmt.ac.to_raw();
 						let gr_str = stmt.gr.to_raw();
@@ -522,6 +544,8 @@ impl AccessStatement {
 						let txn = ctx.tx();
 						// Clear the cache
 						txn.clear();
+						// Check if the access method exists.
+						txn.get_db_access(opt.ns()?, opt.db()?, &stmt.ac).await?;
 						// Get the grants to revoke
 						let ac_str = stmt.ac.to_raw();
 						let gr_str = stmt.gr.to_raw();
@@ -561,9 +585,30 @@ impl AccessStatement {
 impl Display for AccessStatement {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
 		match self {
-			Self::Grant(stmt) => write!(f, "ACCESS {} GRANT", stmt.ac),
-			Self::List(stmt) => write!(f, "ACCESS {} LIST", stmt.ac),
-			Self::Revoke(stmt) => write!(f, "ACCESS {} REVOKE {}", stmt.ac, stmt.gr),
+			Self::Grant(stmt) => {
+				write!(f, "ACCESS {}", stmt.ac)?;
+				if let Some(ref v) = stmt.base {
+					write!(f, " ON {v}")?;
+				}
+				write!(f, "GRANT")?;
+				Ok(())
+			}
+			Self::List(stmt) => {
+				write!(f, "ACCESS {}", stmt.ac)?;
+				if let Some(ref v) = stmt.base {
+					write!(f, " ON {v}")?;
+				}
+				write!(f, "LIST")?;
+				Ok(())
+			}
+			Self::Revoke(stmt) => {
+				write!(f, "ACCESS {}", stmt.ac)?;
+				if let Some(ref v) = stmt.base {
+					write!(f, " ON {v}")?;
+				}
+				write!(f, "REVOKE {}", stmt.gr)?;
+				Ok(())
+			}
 			Self::Prune(stmt) => write!(f, "ACCESS {} PRUNE", stmt),
 		}
 	}

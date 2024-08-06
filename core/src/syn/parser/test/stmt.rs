@@ -2,8 +2,8 @@ use crate::{
 	sql::{
 		access::AccessDuration,
 		access_type::{
-			AccessType, BearerAccessLevel, JwtAccess, JwtAccessIssue, JwtAccessVerify,
-			JwtAccessVerifyJwks, JwtAccessVerifyKey, RecordAccess,
+			AccessType, JwtAccess, JwtAccessIssue, JwtAccessVerify, JwtAccessVerifyJwks,
+			JwtAccessVerifyKey, RecordAccess,
 		},
 		block::Entry,
 		changefeed::ChangeFeed,
@@ -2391,11 +2391,12 @@ fn parse_upsert() {
 
 #[test]
 fn parse_access_grant() {
-	let res = test_parse!(parse_stmt, r#"ACCESS a GRANT FOR USER b"#).unwrap();
+	let res = test_parse!(parse_stmt, r#"ACCESS a ON DATABASE GRANT FOR USER b"#).unwrap();
 	assert_eq!(
 		res,
 		Statement::Access(AccessStatement::Grant(AccessStatementGrant {
 			ac: Ident("a".to_string()),
+			base: Some(Base::Ns),
 			subject: Some(access::Subject::User(Ident("b".to_string()))),
 		}))
 	);
@@ -2403,11 +2404,12 @@ fn parse_access_grant() {
 
 #[test]
 fn parse_access_revoke() {
-	let res = test_parse!(parse_stmt, r#"ACCESS a REVOKE b"#).unwrap();
+	let res = test_parse!(parse_stmt, r#"ACCESS a ON DATABASE REVOKE b"#).unwrap();
 	assert_eq!(
 		res,
 		Statement::Access(AccessStatement::Revoke(AccessStatementRevoke {
 			ac: Ident("a".to_string()),
+			base: Some(Base::Db),
 			gr: Ident("b".to_string()),
 		}))
 	);
@@ -2419,7 +2421,8 @@ fn parse_access_list() {
 	assert_eq!(
 		res,
 		Statement::Access(AccessStatement::List(AccessStatementList {
-			ac: Ident("a".to_string())
+			ac: Ident("a".to_string()),
+			base: None,
 		}))
 	);
 }

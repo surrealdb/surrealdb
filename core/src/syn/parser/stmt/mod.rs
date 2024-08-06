@@ -380,6 +380,7 @@ impl Parser<'_> {
 	/// Parsers an access statement.
 	fn parse_access(&mut self) -> ParseResult<AccessStatement> {
 		let ac = self.next_token_value()?;
+		let base = self.eat(t!("ON")).then(|| self.parse_base(false)).transpose()?;
 		match self.peek_kind() {
 			t!("GRANT") => {
 				self.pop_peek();
@@ -389,6 +390,7 @@ impl Parser<'_> {
 				let user = self.next_token_value()?;
 				Ok(AccessStatement::Grant(AccessStatementGrant {
 					ac,
+					base,
 					subject: Some(Subject::User(user)),
 				}))
 			}
@@ -397,6 +399,7 @@ impl Parser<'_> {
 				// TODO(gguillemas): Implement rest of the syntax.
 				Ok(AccessStatement::List(AccessStatementList {
 					ac,
+					base,
 				}))
 			}
 			t!("REVOKE") => {
@@ -404,6 +407,7 @@ impl Parser<'_> {
 				let gr = self.next_token_value()?;
 				Ok(AccessStatement::Revoke(AccessStatementRevoke {
 					ac,
+					base,
 					gr,
 				}))
 			}
