@@ -420,7 +420,7 @@ impl Parser<'_> {
 			}
 			t!("REMOVE") => {
 				self.pop_peek();
-				let stmt = self.parse_remove_stmt()?;
+				let stmt = self.parse_remove_stmt(ctx).await?;
 				Subquery::Remove(stmt)
 			}
 			t!("REBUILD") => {
@@ -553,7 +553,7 @@ impl Parser<'_> {
 			}
 			t!("REMOVE") => {
 				self.pop_peek();
-				let stmt = self.parse_remove_stmt()?;
+				let stmt = self.parse_remove_stmt(ctx).await?;
 				Subquery::Remove(stmt)
 			}
 			t!("REBUILD") => {

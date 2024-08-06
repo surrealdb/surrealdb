@@ -323,6 +323,103 @@ pub mod is {
 	}
 }
 
+pub mod to {
+	use crate::err::Error;
+	use crate::sql::value::Value;
+	use crate::sql::Kind;
+
+	pub fn array((arg,): (Value,)) -> Result<Value, Error> {
+		arg.convert_to(&Kind::Array(Box::new(Kind::Any), None))
+	}
+
+	pub fn bool((arg,): (Value,)) -> Result<Value, Error> {
+		arg.convert_to(&Kind::Bool)
+	}
+
+	pub fn bytes((arg,): (Value,)) -> Result<Value, Error> {
+		arg.convert_to(&Kind::Bytes)
+	}
+
+	pub fn collection((arg,): (Value,)) -> Result<Value, Error> {
+		arg.convert_to(&Kind::Geometry(vec!["collection".into()]))
+	}
+
+	pub fn datetime((arg,): (Value,)) -> Result<Value, Error> {
+		arg.convert_to(&Kind::Datetime)
+	}
+
+	pub fn decimal((arg,): (Value,)) -> Result<Value, Error> {
+		arg.convert_to(&Kind::Decimal)
+	}
+
+	pub fn duration((arg,): (Value,)) -> Result<Value, Error> {
+		arg.convert_to(&Kind::Duration)
+	}
+
+	pub fn float((arg,): (Value,)) -> Result<Value, Error> {
+		arg.convert_to(&Kind::Float)
+	}
+
+	pub fn geometry((arg,): (Value,)) -> Result<Value, Error> {
+		arg.convert_to(&Kind::Geometry(vec![]))
+	}
+
+	pub fn int((arg,): (Value,)) -> Result<Value, Error> {
+		arg.convert_to(&Kind::Int)
+	}
+
+	pub fn line((arg,): (Value,)) -> Result<Value, Error> {
+		arg.convert_to(&Kind::Geometry(vec!["line".into()]))
+	}
+
+	pub fn null((arg,): (Value,)) -> Result<Value, Error> {
+		arg.convert_to(&Kind::Null)
+	}
+
+	pub fn multiline((arg,): (Value,)) -> Result<Value, Error> {
+		arg.convert_to(&Kind::Geometry(vec!["multiline".into()]))
+	}
+
+	pub fn multipoint((arg,): (Value,)) -> Result<Value, Error> {
+		arg.convert_to(&Kind::Geometry(vec!["multipoint".into()]))
+	}
+
+	pub fn multipolygon((arg,): (Value,)) -> Result<Value, Error> {
+		arg.convert_to(&Kind::Geometry(vec!["multipolygon".into()]))
+	}
+
+	pub fn number((arg,): (Value,)) -> Result<Value, Error> {
+		arg.convert_to(&Kind::Number)
+	}
+
+	pub fn object((arg,): (Value,)) -> Result<Value, Error> {
+		arg.convert_to(&Kind::Object)
+	}
+
+	pub fn point((arg,): (Value,)) -> Result<Value, Error> {
+		arg.convert_to(&Kind::Geometry(vec!["point".into()]))
+	}
+
+	pub fn polygon((arg,): (Value,)) -> Result<Value, Error> {
+		arg.convert_to(&Kind::Geometry(vec!["polygon".into()]))
+	}
+
+	pub fn record((arg, table): (Value, Option<String>)) -> Result<Value, Error> {
+		match table {
+			Some(tb) => arg.convert_to(&Kind::Record(vec![tb.into()])),
+			None => arg.convert_to(&Kind::Record(vec![])),
+		}
+	}
+
+	pub fn string((arg,): (Value,)) -> Result<Value, Error> {
+		arg.convert_to(&Kind::String)
+	}
+
+	pub fn uuid((arg,): (Value,)) -> Result<Value, Error> {
+		arg.convert_to(&Kind::Uuid)
+	}
+}
+
 #[cfg(test)]
 mod tests {
 	use crate::err::Error;

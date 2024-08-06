@@ -6,6 +6,7 @@ use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::exe::try_join_all_buffered;
+use crate::fnc::idiom;
 use crate::sql::edges::Edges;
 use crate::sql::field::{Field, Fields};
 use crate::sql::id::Id;
@@ -56,6 +57,10 @@ impl Value {
 					Part::Destructure(_) => {
 						let obj = Value::Object(v.as_object());
 						stk.run(|stk| obj.get(stk, ctx, opt, doc, path)).await
+					}
+					Part::Method(name, args) => {
+						let v = idiom(ctx, doc, v.clone().into(), name, args.clone())?;
+						stk.run(|stk| v.get(stk, ctx, opt, doc, path.next())).await
 					}
 					// Otherwise return none
 					_ => Ok(Value::None),
@@ -134,6 +139,10 @@ impl Value {
 						let obj = Value::from(obj);
 						stk.run(|stk| obj.get(stk, ctx, opt, doc, path.next())).await
 					}
+					Part::Method(name, args) => {
+						let v = idiom(ctx, doc, v.clone().into(), name, args.clone())?;
+						stk.run(|stk| v.get(stk, ctx, opt, doc, path.next())).await
+					}
 					_ => Ok(Value::None),
 				},
 				// Current value at path is an array
@@ -183,6 +192,10 @@ impl Value {
 						},
 						_ => Ok(Value::None),
 					},
+					Part::Method(name, args) => {
+						let v = idiom(ctx, doc, v.clone().into(), name, args.clone())?;
+						stk.run(|stk| v.get(stk, ctx, opt, doc, path.next())).await
+					}
 					_ => stk
 						.scope(|scope| {
 							let futs =
@@ -267,6 +280,10 @@ impl Value {
 									}
 								}
 							}
+							Part::Method(name, args) => {
+								let v = idiom(ctx, doc, v.clone().into(), name, args.clone())?;
+								stk.run(|stk| v.get(stk, ctx, opt, doc, path.next())).await
+							}
 							// This is a remote field expression
 							_ => {
 								let stm = SelectStatement {
@@ -282,11 +299,16 @@ impl Value {
 					}
 				}
 				v => {
-					if matches!(p, Part::Flatten) {
-						stk.run(|stk| v.get(stk, ctx, opt, None, path.next())).await
-					} else {
+					match p {
+						Part::Flatten => {
+							stk.run(|stk| v.get(stk, ctx, opt, None, path.next())).await
+						}
+						Part::Method(name, args) => {
+							let v = idiom(ctx, doc, v.clone(), name, args.clone())?;
+							stk.run(|stk| v.get(stk, ctx, opt, doc, path.next())).await
+						}
 						// Ignore everything else
-						Ok(Value::None)
+						_ => Ok(Value::None),
 					}
 				}
 			},
