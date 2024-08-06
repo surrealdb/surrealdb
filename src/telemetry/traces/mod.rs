@@ -32,7 +32,7 @@ where
 			// It will be used by the `tracing` crate to decide what spans to send to the global tracer provider
 			Some(
 				tracing_opentelemetry::layer()
-					.with_tracer(tracer_provider.tracer_builder("surealdb").build())
+					.with_tracer(tracer_provider.tracer("surealdb"))
 					.with_filter(filter.0)
 					.boxed(),
 			)
