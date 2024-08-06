@@ -5,7 +5,7 @@ use crate::err::Error;
 use crate::sql::statements::info::InfoStructure;
 use crate::sql::{
 	fmt::{fmt_separated_by, Fmt},
-	part::Next,
+	part::{Next, NextMethod},
 	paths::{ID, IN, META, OUT},
 	Part, Value,
 };
@@ -185,7 +185,13 @@ impl Idiom {
 					v.doc.get(stk, ctx, opt, doc, self).await?.compute(stk, ctx, opt, doc).await
 				}
 				// There isn't any document
-				None => Ok(Value::None),
+				None => {
+					Value::None
+						.get(stk, ctx, opt, doc, self.next_method())
+						.await?
+						.compute(stk, ctx, opt, doc)
+						.await
+				}
 			},
 		}
 	}

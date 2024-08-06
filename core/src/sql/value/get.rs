@@ -10,8 +10,8 @@ use crate::fnc::idiom;
 use crate::sql::edges::Edges;
 use crate::sql::field::{Field, Fields};
 use crate::sql::id::Id;
-use crate::sql::part::Next;
 use crate::sql::part::Part;
+use crate::sql::part::{Next, NextMethod};
 use crate::sql::paths::ID;
 use crate::sql::statements::select::SelectStatement;
 use crate::sql::thing::Thing;
@@ -307,8 +307,11 @@ impl Value {
 							let v = idiom(ctx, doc, v.clone(), name, args.clone())?;
 							stk.run(|stk| v.get(stk, ctx, opt, doc, path.next())).await
 						}
-						// Ignore everything else
-						_ => Ok(Value::None),
+						// Only continue processing the path from the point that it contains a method
+						_ => {
+							stk.run(|stk| Value::None.get(stk, ctx, opt, doc, path.next_method()))
+								.await
+						}
 					}
 				}
 			},
