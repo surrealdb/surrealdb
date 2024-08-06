@@ -1368,3 +1368,6 @@ allow_apis = [
 
 [pkg.atomic-waker]
 allow_unsafe = true
+
+[pkg.rustls-pki-types]
+allow_unsafe = true
