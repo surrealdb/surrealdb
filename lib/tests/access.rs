@@ -65,14 +65,14 @@ async fn access_bearer_database() -> () {
 	//
 	let tmp = res.remove(0).result.unwrap().to_string();
 	let ok = Regex::new(
-		r"\[\{ ac: 'api', .* \}, \{ ac: 'api', .* \}, \{ ac: 'api', .* \}, \{ ac: 'api', .* \}\]",
+		r"\[\{ ac: 'api', .*, grant: \{ id: .*, key: '\[REDACTED\]' \}, .* \}, \{ ac: 'api', .*, grant: \{ id: .*, key: '\[REDACTED\]' \}, .* \}, \{ ac: 'api', .*, grant: \{ id: .*, key: '\[REDACTED\]' \}, .* \}, \{ ac: 'api', .*, grant: \{ id: .*, key: '\[REDACTED\]' \}, .* \}\]",
 	)
 	.unwrap();
 	assert!(ok.is_match(&tmp), "Output '{}' doesn't match regex '{}'", tmp, ok);
 	//
 	let tmp = res.remove(0).result.unwrap().to_string();
 	let ok = Regex::new(
-		r"\[\{ ac: 'api', .* \}, \{ ac: 'api', .* \}, \{ ac: 'api', .* \}, \{ ac: 'api', .* \}\]",
+		r"\[\{ ac: 'api', .*, grant: \{ id: .*, key: '\[REDACTED\]' \}, .* \}, \{ ac: 'api', .*, grant: \{ id: .*, key: '\[REDACTED\]' \}, .* \}, \{ ac: 'api', .*, grant: \{ id: .*, key: '\[REDACTED\]' \}, .* \}, \{ ac: 'api', .*, grant: \{ id: .*, key: '\[REDACTED\]' \}, .* \}\]",
 	)
 	.unwrap();
 	assert!(ok.is_match(&tmp), "Output '{}' doesn't match regex '{}'", tmp, ok);
@@ -166,14 +166,14 @@ async fn access_bearer_namespace() {
 	//
 	let tmp = res.remove(0).result.unwrap().to_string();
 	let ok = Regex::new(
-		r"\[\{ ac: 'api', .* \}, \{ ac: 'api', .* \}, \{ ac: 'api', .* \}, \{ ac: 'api', .* \}\]",
+		r"\[\{ ac: 'api', .*, grant: \{ id: .*, key: '\[REDACTED\]' \}, .* \}, \{ ac: 'api', .*, grant: \{ id: .*, key: '\[REDACTED\]' \}, .* \}, \{ ac: 'api', .*, grant: \{ id: .*, key: '\[REDACTED\]' \}, .* \}, \{ ac: 'api', .*, grant: \{ id: .*, key: '\[REDACTED\]' \}, .* \}\]",
 	)
 	.unwrap();
 	assert!(ok.is_match(&tmp), "Output '{}' doesn't match regex '{}'", tmp, ok);
 	//
 	let tmp = res.remove(0).result.unwrap().to_string();
 	let ok = Regex::new(
-		r"\[\{ ac: 'api', .* \}, \{ ac: 'api', .* \}, \{ ac: 'api', .* \}, \{ ac: 'api', .* \}\]",
+		r"\[\{ ac: 'api', .*, grant: \{ id: .*, key: '\[REDACTED\]' \}, .* \}, \{ ac: 'api', .*, grant: \{ id: .*, key: '\[REDACTED\]' \}, .* \}, \{ ac: 'api', .*, grant: \{ id: .*, key: '\[REDACTED\]' \}, .* \}, \{ ac: 'api', .*, grant: \{ id: .*, key: '\[REDACTED\]' \}, .* \}\]",
 	)
 	.unwrap();
 	assert!(ok.is_match(&tmp), "Output '{}' doesn't match regex '{}'", tmp, ok);
@@ -267,14 +267,15 @@ async fn access_bearer_root() {
 	//
 	let tmp = res.remove(0).result.unwrap().to_string();
 	let ok = Regex::new(
-		r"\[\{ ac: 'api', .* \}, \{ ac: 'api', .* \}, \{ ac: 'api', .* \}, \{ ac: 'api', .* \}\]",
+		r"\[\{ ac: 'api', .*, grant: \{ id: .*, key: '\[REDACTED\]' \}, .* \}, \{ ac: 'api', .*, grant: \{ id: .*, key: '\[REDACTED\]' \}, .* \}, \{ ac: 'api', .*, grant: \{ id: .*, key: '\[REDACTED\]' \}, .* \}, \{ ac: 'api', .*, grant: \{ id: .*, key: '\[REDACTED\]' \}, .* \}\]",
+
 	)
 	.unwrap();
 	assert!(ok.is_match(&tmp), "Output '{}' doesn't match regex '{}'", tmp, ok);
 	//
 	let tmp = res.remove(0).result.unwrap().to_string();
 	let ok = Regex::new(
-		r"\[\{ ac: 'api', .* \}, \{ ac: 'api', .* \}, \{ ac: 'api', .* \}, \{ ac: 'api', .* \}\]",
+		r"\[\{ ac: 'api', .*, grant: \{ id: .*, key: '\[REDACTED\]' \}, .* \}, \{ ac: 'api', .*, grant: \{ id: .*, key: '\[REDACTED\]' \}, .* \}, \{ ac: 'api', .*, grant: \{ id: .*, key: '\[REDACTED\]' \}, .* \}, \{ ac: 'api', .*, grant: \{ id: .*, key: '\[REDACTED\]' \}, .* \}\]",
 	)
 	.unwrap();
 	assert!(ok.is_match(&tmp), "Output '{}' doesn't match regex '{}'", tmp, ok);
@@ -296,6 +297,108 @@ async fn access_bearer_root() {
 	//
 	let tmp = res.remove(0).result.unwrap_err();
 	assert_eq!(tmp.to_string(), "The root access method 'invalid' does not exist");
+}
+
+#[tokio::test]
+async fn access_bearer_revoke_db() -> () {
+	// TODO(gguillemas): Remove this once bearer access is no longer experimental.
+	std::env::set_var("SURREAL_EXPERIMENTAL_BEARER_ACCESS", "true");
+
+	let sql = "
+		-- Initial setup
+		DEFINE ACCESS api ON DATABASE TYPE BEARER;
+		DEFINE USER tobie ON DATABASE PASSWORD 'secret' ROLES EDITOR;
+		ACCESS api ON DATABASE GRANT FOR USER tobie;
+	";
+	let dbs = new_ds().await.unwrap();
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await.unwrap();
+	// Consume the results of the setup statements
+	res.remove(0).result.unwrap();
+	res.remove(0).result.unwrap();
+	// Retrieve the generated bearer key
+	let tmp = res.remove(0).result.unwrap().to_string();
+	let re =
+		Regex::new(r"\{ ac: 'api', creation: .*, expiration: NONE, grant: \{ id: '(.*)', key: .* \}, id: .*, revocation: NONE, subject: \{ user: 'tobie' \} \}")
+				.unwrap();
+	let kid = re.captures(&tmp).unwrap().get(1).unwrap().as_str();
+	// Revoke bearer key
+	let res = &mut dbs.execute(&format!("ACCESS api REVOKE `{kid}`"), &ses, None).await.unwrap();
+	let tmp = res.remove(0).result.unwrap().to_string();
+	let ok = Regex::new(r"\{ ac: 'api', .*, revocation: d'.*', .* \}").unwrap();
+	assert!(ok.is_match(&tmp), "Output '{}' doesn't match regex '{}'", tmp, ok);
+	// Attempt to revoke bearer key again
+	let res = &mut dbs.execute(&format!("ACCESS api REVOKE `{kid}`"), &ses, None).await.unwrap();
+	let tmp = res.remove(0).result.unwrap_err();
+	assert_eq!(tmp.to_string(), "This access grant has been revoked");
+}
+
+#[tokio::test]
+async fn access_bearer_revoke_ns() -> () {
+	// TODO(gguillemas): Remove this once bearer access is no longer experimental.
+	std::env::set_var("SURREAL_EXPERIMENTAL_BEARER_ACCESS", "true");
+
+	let sql = "
+		-- Initial setup
+		DEFINE ACCESS api ON NAMESPACE TYPE BEARER;
+		DEFINE USER tobie ON NAMESPACE PASSWORD 'secret' ROLES EDITOR;
+		ACCESS api ON NAMESPACE GRANT FOR USER tobie;
+	";
+	let dbs = new_ds().await.unwrap();
+	let ses = Session::owner().with_ns("test");
+	let res = &mut dbs.execute(sql, &ses, None).await.unwrap();
+	// Consume the results of the setup statements
+	res.remove(0).result.unwrap();
+	res.remove(0).result.unwrap();
+	// Retrieve the generated bearer key
+	let tmp = res.remove(0).result.unwrap().to_string();
+	let re =
+		Regex::new(r"\{ ac: 'api', creation: .*, expiration: NONE, grant: \{ id: '(.*)', key: .* \}, id: .*, revocation: NONE, subject: \{ user: 'tobie' \} \}")
+				.unwrap();
+	let kid = re.captures(&tmp).unwrap().get(1).unwrap().as_str();
+	// Revoke bearer key
+	let res = &mut dbs.execute(&format!("ACCESS api REVOKE `{kid}`"), &ses, None).await.unwrap();
+	let tmp = res.remove(0).result.unwrap().to_string();
+	let ok = Regex::new(r"\{ ac: 'api', .*, revocation: d'.*', .* \}").unwrap();
+	assert!(ok.is_match(&tmp), "Output '{}' doesn't match regex '{}'", tmp, ok);
+	// Attempt to revoke bearer key again
+	let res = &mut dbs.execute(&format!("ACCESS api REVOKE `{kid}`"), &ses, None).await.unwrap();
+	let tmp = res.remove(0).result.unwrap_err();
+	assert_eq!(tmp.to_string(), "This access grant has been revoked");
+}
+
+#[tokio::test]
+async fn access_bearer_revoke_root() -> () {
+	// TODO(gguillemas): Remove this once bearer access is no longer experimental.
+	std::env::set_var("SURREAL_EXPERIMENTAL_BEARER_ACCESS", "true");
+
+	let sql = "
+		-- Initial setup
+		DEFINE ACCESS api ON ROOT TYPE BEARER;
+		DEFINE USER tobie ON ROOT PASSWORD 'secret' ROLES EDITOR;
+		ACCESS api ON ROOT GRANT FOR USER tobie;
+	";
+	let dbs = new_ds().await.unwrap();
+	let ses = Session::owner();
+	let res = &mut dbs.execute(sql, &ses, None).await.unwrap();
+	// Consume the results of the setup statements
+	res.remove(0).result.unwrap();
+	res.remove(0).result.unwrap();
+	// Retrieve the generated bearer key
+	let tmp = res.remove(0).result.unwrap().to_string();
+	let re =
+		Regex::new(r"\{ ac: 'api', creation: .*, expiration: NONE, grant: \{ id: '(.*)', key: .* \}, id: .*, revocation: NONE, subject: \{ user: 'tobie' \} \}")
+				.unwrap();
+	let kid = re.captures(&tmp).unwrap().get(1).unwrap().as_str();
+	// Revoke bearer key
+	let res = &mut dbs.execute(&format!("ACCESS api REVOKE `{kid}`"), &ses, None).await.unwrap();
+	let tmp = res.remove(0).result.unwrap().to_string();
+	let ok = Regex::new(r"\{ ac: 'api', .*, revocation: d'.*', .* \}").unwrap();
+	assert!(ok.is_match(&tmp), "Output '{}' doesn't match regex '{}'", tmp, ok);
+	// Attempt to revoke bearer key again
+	let res = &mut dbs.execute(&format!("ACCESS api REVOKE `{kid}`"), &ses, None).await.unwrap();
+	let tmp = res.remove(0).result.unwrap_err();
+	assert_eq!(tmp.to_string(), "This access grant has been revoked");
 }
 
 //
