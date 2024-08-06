@@ -6234,7 +6234,7 @@ async fn function_idiom_chaining() -> Result<(), Error> {
 		{ a: 1, b: 2 }.entries().flatten();
 		"ABC".lowercase();
 		true.is_number();
-		true.is_boolean();
+		true.is_bool();
 	"#;
 	Test::new(sql)
 		.await?
