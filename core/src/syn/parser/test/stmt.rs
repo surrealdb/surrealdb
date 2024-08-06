@@ -2391,7 +2391,7 @@ fn parse_upsert() {
 
 #[test]
 fn parse_access_grant() {
-	let res = test_parse!(parse_stmt, r#"ACCESS a ON DATABASE GRANT FOR USER b"#).unwrap();
+	let res = test_parse!(parse_stmt, r#"ACCESS a ON NAMESPACE GRANT FOR USER b"#).unwrap();
 	assert_eq!(
 		res,
 		Statement::Access(AccessStatement::Grant(AccessStatementGrant {
