@@ -26,5 +26,8 @@ impl_module_def!(
 	"string" => run,
 	"table" => run,
 	"thing" => run,
-	"range" => run
+	"range" => run,
+	"record" => run,
+	"uuid" => run,
+	"geometry" => run
 );
