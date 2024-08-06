@@ -5300,6 +5300,9 @@ name = "rustls-pki-types"
 version = "1.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "976295e77ce332211c0d24d92c0e83e50f5c5f046d11082cea19f3df13a3562d"
+dependencies = [
+ "web-time",
+]
 
 [[package]]
 name = "rustls-webpki"
@@ -6001,6 +6004,7 @@ dependencies = [
  "ring 0.17.8",
  "rust_decimal",
  "rustls 0.23.12",
+ "rustls-pki-types",
  "semver",
  "serde",
  "serde_json",
