@@ -81,6 +81,24 @@ where
 		self.search(tx, elements, pt, candidates, visited, w, ef).await
 	}
 
+	pub(super) async fn search_single_with_ignore(
+		&self,
+		tx: &Transaction,
+		elements: &HnswElements,
+		pt: &SharedVector,
+		ignore_id: ElementId,
+		ef: usize,
+	) -> Result<Option<ElementId>, Error> {
+		let visited = HashSet::from_iter([ignore_id]);
+		let mut candidates = DoublePriorityQueue::default();
+		if let Some(dist) = elements.get_distance(tx, pt, &ignore_id).await? {
+			candidates.push(dist, ignore_id);
+		}
+		let w = DoublePriorityQueue::default();
+		let q = self.search(tx, elements, pt, candidates, visited, w, ef).await?;
+		Ok(q.peek_first().map(|(_, e_id)| e_id))
+	}
+
 	#[allow(clippy::too_many_arguments)]
 	pub(super) async fn search_single_checked(
 		&self,
@@ -112,30 +130,21 @@ where
 		self.search(tx, elements, pt, candidates, visited, w, ef).await
 	}
 
-	pub(super) async fn search_single_ignore_ep(
+	pub(super) async fn search_multi_with_ignore(
 		&self,
 		tx: &Transaction,
 		elements: &HnswElements,
 		pt: &SharedVector,
-		ep_id: ElementId,
-	) -> Result<Option<(f64, ElementId)>, Error> {
-		let visited = HashSet::from_iter([ep_id]);
-		let candidates = DoublePriorityQueue::from(0.0, ep_id);
-		let w = candidates.clone();
-		let q = self.search(tx, elements, pt, candidates, visited, w, 1).await?;
-		Ok(q.peek_first())
-	}
-
-	pub(super) async fn search_multi_ignore_ep(
-		&self,
-		tx: &Transaction,
-		elements: &HnswElements,
-		pt: &SharedVector,
-		ep_id: ElementId,
+		ignore_ids: Vec<ElementId>,
 		efc: usize,
 	) -> Result<DoublePriorityQueue, Error> {
-		let visited = HashSet::from_iter([ep_id]);
-		let candidates = DoublePriorityQueue::from(0.0, ep_id);
+		let mut candidates = DoublePriorityQueue::default();
+		for id in &ignore_ids {
+			if let Some(dist) = elements.get_distance(tx, pt, id).await? {
+				candidates.push(dist, *id);
+			}
+		}
+		let visited = HashSet::from_iter(ignore_ids);
 		let w = DoublePriorityQueue::default();
 		self.search(tx, elements, pt, candidates, visited, w, efc).await
 	}
@@ -145,19 +154,15 @@ where
 		&self,
 		tx: &Transaction,
 		elements: &HnswElements,
-		pt: &SharedVector,
-		mut candidates: DoublePriorityQueue,
-		mut visited: HashSet<ElementId>,
-		mut w: DoublePriorityQueue,
+		q: &SharedVector,
+		mut candidates: DoublePriorityQueue, // set of candidates
+		mut visited: HashSet<ElementId>,     // set of visited elements
+		mut w: DoublePriorityQueue,          // dynamic list of found nearest neighbors
 		ef: usize,
 	) -> Result<DoublePriorityQueue, Error> {
-		let mut f_dist = if let Some(d) = w.peek_last_dist() {
-			d
-		} else {
-			return Ok(w);
-		};
-		while let Some((dist, doc)) = candidates.pop_first() {
-			if dist > f_dist {
+		let mut fq_dist = w.peek_last_dist().unwrap_or(f64::MAX);
+		while let Some((cq_dist, doc)) = candidates.pop_first() {
+			if cq_dist > fq_dist {
 				break;
 			}
 			if let Some(neighbourhood) = self.graph.get_edges(&doc) {
@@ -167,14 +172,14 @@ where
 						continue;
 					}
 					if let Some(e_pt) = elements.get_vector(tx, &e_id).await? {
-						let e_dist = elements.distance(&e_pt, pt);
-						if e_dist < f_dist || w.len() < ef {
+						let e_dist = elements.distance(&e_pt, q);
+						if e_dist < fq_dist || w.len() < ef {
 							candidates.push(e_dist, e_id);
 							w.push(e_dist, e_id);
 							if w.len() > ef {
 								w.pop_last();
 							}
-							f_dist = w.peek_last_dist().unwrap(); // w can't be empty
+							fq_dist = w.peek_last_dist().unwrap_or(f64::MAX);
 						}
 					}
 				}
@@ -268,7 +273,7 @@ where
 		{
 			w = self.search_multi(tx, elements, q_pt, eps, efc).await?;
 			eps = w.clone();
-			heuristic.select(tx, elements, self, q_id, q_pt, w, &mut neighbors).await?;
+			heuristic.select(tx, elements, self, q_id, q_pt, w, None, &mut neighbors).await?;
 		};
 
 		let neighbors = self.graph.add_node_and_bidirectional_edges(q_id, neighbors);
@@ -280,7 +285,7 @@ where
 						let e_c = self.build_priority_list(tx, elements, e_id, e_conn).await?;
 						let mut e_new_conn = self.graph.new_edges();
 						heuristic
-							.select(tx, elements, self, e_id, &e_pt, e_c, &mut e_new_conn)
+							.select(tx, elements, self, e_id, &e_pt, e_c, None, &mut e_new_conn)
 							.await?;
 						#[cfg(debug_assertions)]
 						assert!(!e_new_conn.contains(&e_id));
@@ -327,22 +332,26 @@ where
 		if let Some(f_ids) = self.graph.remove_node_and_bidirectional_edges(&e_id) {
 			for &q_id in f_ids.iter() {
 				if let Some(q_pt) = elements.get_vector(tx, &q_id).await? {
-					let c = self.search_multi_ignore_ep(tx, elements, &q_pt, q_id, efc).await?;
-					let mut neighbors = self.graph.new_edges();
-					heuristic.select(tx, elements, self, q_id, &q_pt, c, &mut neighbors).await?;
+					let c = self
+						.search_multi_with_ignore(tx, elements, &q_pt, vec![q_id, e_id], efc)
+						.await?;
+					let mut q_new_conn = self.graph.new_edges();
+					heuristic
+						.select(tx, elements, self, q_id, &q_pt, c, Some(e_id), &mut q_new_conn)
+						.await?;
 					#[cfg(debug_assertions)]
 					{
 						assert!(
-							!neighbors.contains(&q_id),
-							"!neighbors.contains(&q_id) - q_id: {q_id} - f_ids: {neighbors:?}"
+							!q_new_conn.contains(&q_id),
+							"!q_new_conn.contains(&q_id) - q_id: {q_id} - f_ids: {q_new_conn:?}"
 						);
 						assert!(
-							!neighbors.contains(&e_id),
-							"!neighbors.contains(&e_id) - e_id: {e_id} - f_ids: {neighbors:?}"
+							!q_new_conn.contains(&e_id),
+							"!q_new_conn.contains(&e_id) - e_id: {e_id} - f_ids: {q_new_conn:?}"
 						);
-						assert!(neighbors.len() < self.m_max);
+						assert!(q_new_conn.len() <= self.m_max);
 					}
-					self.graph.set_node(q_id, neighbors);
+					self.graph.set_node(q_id, q_new_conn);
 				}
 			}
 			self.save(tx, st).await?;

@@ -287,31 +287,33 @@ where
 	async fn remove(&mut self, tx: &Transaction, e_id: ElementId) -> Result<bool, Error> {
 		let mut removed = false;
 
-		let e_pt = self.elements.get_vector(tx, &e_id).await?;
 		// Do we have the vector?
-		if let Some(e_pt) = e_pt {
-			let layers = self.layers.len();
-			let mut new_enter_point = None;
-
-			// Are we deleting the current enter point?
-			if Some(e_id) == self.state.enter_point {
-				// Let's find a new enter point
-				new_enter_point = if layers == 0 {
-					self.layer0.search_single_ignore_ep(tx, &self.elements, &e_pt, e_id).await?
-				} else {
-					self.layers[layers - 1]
-						.search_single_ignore_ep(tx, &self.elements, &e_pt, e_id)
-						.await?
-				};
-			}
-
-			self.elements.remove(tx, e_id).await?;
+		if let Some(e_pt) = self.elements.get_vector(tx, &e_id).await? {
+			// Check if we are deleted the current enter_point
+			let mut new_enter_point = if Some(e_id) == self.state.enter_point {
+				None
+			} else {
+				self.state.enter_point
+			};
 
 			// Remove from the up layers
-			for (layer, st) in self.layers.iter_mut().zip(self.state.layers.iter_mut()) {
+			for (layer, st) in self.layers.iter_mut().zip(self.state.layers.iter_mut()).rev() {
+				if new_enter_point.is_none() {
+					new_enter_point = layer
+						.search_single_with_ignore(tx, &self.elements, &e_pt, e_id, self.efc)
+						.await?;
+				}
 				if layer.remove(tx, st, &self.elements, &self.heuristic, e_id, self.efc).await? {
 					removed = true;
 				}
+			}
+
+			// Check possible new enter_point at layer0
+			if new_enter_point.is_none() {
+				new_enter_point = self
+					.layer0
+					.search_single_with_ignore(tx, &self.elements, &e_pt, e_id, self.efc)
+					.await?;
 			}
 
 			// Remove from layer 0
@@ -323,11 +325,11 @@ where
 				removed = true;
 			}
 
-			if removed && new_enter_point.is_some() {
-				// Update the enter point
-				self.state.enter_point = new_enter_point.map(|(_, e_id)| e_id);
-			}
+			self.elements.remove(tx, e_id).await?;
+
+			self.state.enter_point = new_enter_point;
 		}
+
 		self.save_state(tx).await?;
 		Ok(removed)
 	}
@@ -758,26 +760,24 @@ mod tests {
 	async fn tests_hnsw_index() -> Result<(), Error> {
 		let mut futures = Vec::new();
 		for (dist, dim) in [
-			// (Distance::Chebyshev, 5),
-			// (Distance::Cosine, 5),
+			(Distance::Chebyshev, 5),
+			(Distance::Cosine, 5),
 			(Distance::Euclidean, 5),
-			// (Distance::Hamming, 20),
+			(Distance::Hamming, 20),
 			// (Distance::Jaccard, 100),
-			// (Distance::Manhattan, 5),
-			// (Distance::Minkowski(2.into()), 5),
+			(Distance::Manhattan, 5),
+			(Distance::Minkowski(2.into()), 5),
 			// (Distance::Pearson, 5),
 		] {
 			for vt in [
-				// VectorType::F64,
+				VectorType::F64,
 				VectorType::F32,
-				// VectorType::I64,
-				// VectorType::I32,
-				// VectorType::I16,
+				VectorType::I64,
+				VectorType::I32,
+				VectorType::I16,
 			] {
-				for (extend, keep) in
-					[(false, false) /*, (true, false), (false, true), (true, true)*/]
-				{
-					for unique in [true /*, false*/] {
+				for (extend, keep) in [(false, false), (true, false), (false, true), (true, true)] {
+					for unique in [true, false] {
 						let p = new_params(dim, vt, dist.clone(), 8, 150, extend, keep);
 						let f = tokio::spawn(async move {
 							test_hnsw_index(30, unique, p).await;

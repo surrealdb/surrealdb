@@ -41,6 +41,7 @@ impl Heuristic {
 		q_id: ElementId,
 		q_pt: &SharedVector,
 		c: DoublePriorityQueue,
+		ignore: Option<ElementId>,
 		res: &mut S,
 	) -> Result<(), Error>
 	where
@@ -48,10 +49,10 @@ impl Heuristic {
 	{
 		match self {
 			Self::Standard => Self::heuristic(tx, elements, layer, c, res).await,
-			Self::Ext => Self::heuristic_ext(tx, elements, layer, q_id, q_pt, c, res).await,
+			Self::Ext => Self::heuristic_ext(tx, elements, layer, q_id, q_pt, c, ignore, res).await,
 			Self::Keep => Self::heuristic_keep(tx, elements, layer, c, res).await,
 			Self::ExtAndKeep => {
-				Self::heuristic_ext_keep(tx, elements, layer, q_id, q_pt, c, res).await
+				Self::heuristic_ext_keep(tx, elements, layer, q_id, q_pt, c, ignore, res).await
 			}
 		}
 	}
@@ -120,12 +121,16 @@ impl Heuristic {
 		q_id: ElementId,
 		q_pt: &SharedVector,
 		c: &mut DoublePriorityQueue,
+		ignore: Option<ElementId>,
 	) -> Result<(), Error>
 	where
 		S: DynamicSet,
 	{
 		let m_max = layer.m_max();
 		let mut ex = c.to_set();
+		if let Some(i) = ignore {
+			ex.insert(i);
+		}
 		let mut ext = Vec::with_capacity(m_max.min(c.len()));
 		for (_, e_id) in c.to_vec().into_iter() {
 			if let Some(e_conn) = layer.get_edges(&e_id) {
@@ -154,12 +159,13 @@ impl Heuristic {
 		q_id: ElementId,
 		q_pt: &SharedVector,
 		mut c: DoublePriorityQueue,
+		ignore: Option<ElementId>,
 		res: &mut S,
 	) -> Result<(), Error>
 	where
 		S: DynamicSet,
 	{
-		Self::extend_candidates(tx, elements, layer, q_id, q_pt, &mut c).await?;
+		Self::extend_candidates(tx, elements, layer, q_id, q_pt, &mut c, ignore).await?;
 		Self::heuristic(tx, elements, layer, c, res).await
 	}
 
@@ -170,12 +176,13 @@ impl Heuristic {
 		q_id: ElementId,
 		q_pt: &SharedVector,
 		mut c: DoublePriorityQueue,
+		ignore: Option<ElementId>,
 		res: &mut S,
 	) -> Result<(), Error>
 	where
 		S: DynamicSet,
 	{
-		Self::extend_candidates(tx, elements, layer, q_id, q_pt, &mut c).await?;
+		Self::extend_candidates(tx, elements, layer, q_id, q_pt, &mut c, ignore).await?;
 		Self::heuristic_keep(tx, elements, layer, c, res).await
 	}
 

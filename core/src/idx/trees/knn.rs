@@ -25,7 +25,7 @@ impl PriorityNode {
 	}
 }
 
-#[derive(Default, Clone)]
+#[derive(Default, Debug, Clone)]
 pub(super) struct DoublePriorityQueue(BTreeMap<FloatKey, VecDeque<ElementId>>, usize);
 
 impl DoublePriorityQueue {
@@ -88,6 +88,7 @@ impl DoublePriorityQueue {
 			(k, v)
 		})
 	}
+
 	pub(super) fn peek_last_dist(&self) -> Option<f64> {
 		self.0.last_key_value().map(|(k, _)| k.0)
 	}
