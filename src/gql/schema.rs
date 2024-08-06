@@ -484,6 +484,7 @@ fn make_table_field_resolver(
 					v => {
 						let out = sql_value_to_gql_value(v.to_owned())
 							.map_err(|_| "SQL to GQL translation failed")?;
+						warn!(?out, fd_name, "returning gqlvalue, for field");
 						Ok(Some(FieldValue::value(out)))
 					}
 				};
