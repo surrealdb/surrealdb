@@ -466,7 +466,7 @@ fn make_table_field_resolver(
 				let record: &SqlObject = ctx
 					.parent_value
 					.downcast_ref::<SqlObject>()
-					.ok_or(internal_error("failed to downcast"))?;
+					.ok_or_else(|| internal_error("failed to downcast"))?;
 
 				let val = record.get(fd_name.as_str()).ok_or(resolver_error(format!(
 					"couldn't find field: {fd_name} in: {record:?}"
@@ -477,8 +477,6 @@ fn make_table_field_resolver(
 						{
 							SqlValue::Object(o) => {
 							    let tmp = FieldValue::owned_any(o);
-								tmp.downcast_ref::<SqlObject>().unwrap();
-								panic!();
 								Ok(Some(tmp))
 							}
 							v => Err(resolver_error(format!("expected object, but found (referential integrity might be broken): {v:?}")).into()),
@@ -486,7 +484,7 @@ fn make_table_field_resolver(
 					v => {
 						let out = sql_value_to_gql_value(v.to_owned())
 							.map_err(|_| "SQL to GQL translation failed")?;
-						Ok(Some(out.into()))
+						Ok(Some(FieldValue::value(out)))
 					}
 				};
 				out
