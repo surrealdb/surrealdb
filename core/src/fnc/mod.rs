@@ -765,6 +765,8 @@ fn get_execution_context<'a>(
 
 #[cfg(test)]
 mod tests {
+	use regex::Regex;
+
 	#[cfg(all(feature = "scripting", feature = "kv-mem"))]
 	use crate::dbs::Capabilities;
 	use crate::sql::{statements::OutputStatement, Function, Query, Statement, Value};
@@ -776,7 +778,12 @@ mod tests {
 
 		// Read the source code of this file
 		let fnc_mod = include_str!("mod.rs");
-		for line in fnc_mod.lines() {
+
+		// Patch out idiom methods
+		let re = Regex::new(r"(?ms)pub fn idiom\(.*}\n+///").unwrap();
+		let fnc_no_idiom = re.replace(fnc_mod, "");
+
+		for line in fnc_no_idiom.lines() {
 			if !(line.contains("=>")
 				&& (line.trim().starts_with('"') || line.trim().ends_with(',')))
 			{

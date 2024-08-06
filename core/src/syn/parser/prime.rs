@@ -643,7 +643,7 @@ impl Parser<'_> {
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::syn::{self, Parse};
+	use crate::syn::Parse;
 
 	#[test]
 	fn subquery_expression_statement() {

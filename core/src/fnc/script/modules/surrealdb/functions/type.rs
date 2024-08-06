@@ -12,6 +12,7 @@ impl_module_def!(
 	Package,
 	"type",
 	"bool" => run,
+	"bytes" => run,
 	"datetime" => run,
 	"decimal" => run,
 	"duration" => run,
