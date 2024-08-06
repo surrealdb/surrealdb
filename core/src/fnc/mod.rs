@@ -65,7 +65,7 @@ pub async fn run(
 /// it is `async`. Finally, the path may be prefixed by a parenthesized wrapper function e.g.
 /// `cpu_intensive`.
 macro_rules! dispatch {
-	($name: ident, $args: ident, $message: expr, $($function_name: literal => $(($wrapper: tt))* $($function_path: ident)::+ $(($ctx_arg: expr))* $(.$await:tt)*,)+) => {
+	($name: ident, $args: expr, $message: expr, $($function_name: literal => $(($wrapper: tt))* $($function_path: ident)::+ $(($ctx_arg: expr))* $(.$await:tt)*,)+) => {
 		{
 			match $name {
 				$($function_name => {
@@ -413,11 +413,11 @@ pub fn idiom(
 	args: Vec<Value>,
 ) -> Result<Value, Error> {
 	let args = [vec![value.clone()], args].concat();
-	match value {
+	let specific = match value {
 		Value::Array(_) => {
 			dispatch!(
 				name,
-				args,
+				args.clone(),
 				"no such method for found the array type",
 				"add" => array::add,
 				"all" => array::all,
@@ -490,7 +490,7 @@ pub fn idiom(
 		Value::Bytes(_) => {
 			dispatch!(
 				name,
-				args,
+				args.clone(),
 				"no such method for found the bytes type",
 				"len" => bytes::len,
 			)
@@ -498,7 +498,7 @@ pub fn idiom(
 		Value::Duration(_) => {
 			dispatch!(
 				name,
-				args,
+				args.clone(),
 				"no such method for found the duration type",
 				"days" => duration::days,
 				"hours" => duration::hours,
@@ -514,7 +514,7 @@ pub fn idiom(
 		Value::Geometry(_) => {
 			dispatch!(
 				name,
-				args,
+				args.clone(),
 				"no such method for found the geometry type",
 				"area" => geo::area,
 				"bearing" => geo::bearing,
@@ -527,7 +527,7 @@ pub fn idiom(
 		Value::Thing(_) => {
 			dispatch!(
 				name,
-				args,
+				args.clone(),
 				"no such method for found the record type",
 				"id" => meta::id,
 				"table" => meta::tb,
@@ -537,7 +537,7 @@ pub fn idiom(
 		Value::Object(_) => {
 			dispatch!(
 				name,
-				args,
+				args.clone(),
 				"no such method for found the object type",
 				"entries" => object::entries,
 				"keys" => object::keys,
@@ -548,7 +548,7 @@ pub fn idiom(
 		Value::Strand(_) => {
 			dispatch!(
 				name,
-				args,
+				args.clone(),
 				"no such method for found the string type",
 				"concat" => string::concat,
 				"contains" => string::contains,
@@ -606,7 +606,7 @@ pub fn idiom(
 		Value::Datetime(_) => {
 			dispatch!(
 				name,
-				args,
+				args.clone(),
 				"no such method for found the datetime type",
 				"time_ceil" => time::ceil,
 				"time_day" => time::day,
@@ -628,7 +628,16 @@ pub fn idiom(
 				"time_year" => time::year,
 			)
 		}
-		_ => {
+		_ => Err(Error::InvalidFunction {
+			name: "".into(),
+			message: "".into(),
+		}),
+	};
+
+	match specific {
+		Err(Error::InvalidFunction {
+			..
+		}) => {
 			let message = format!("no such method found for the {} type", value.kindof());
 			dispatch!(
 				name,
@@ -682,6 +691,7 @@ pub fn idiom(
 				"to_uuid" => r#type::to::uuid,
 			)
 		}
+		v => v,
 	}
 }
 
