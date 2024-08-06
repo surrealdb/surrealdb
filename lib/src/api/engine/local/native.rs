@@ -117,6 +117,7 @@ pub(crate) async fn run_router(
 		feature = "kv-rocksdb",
 		feature = "kv-fdb",
 		feature = "kv-tikv",
+		feature = "kv-surrealcs",
 	))]
 	let kvs = kvs.with_temporary_directory(address.config.temporary_directory);
 

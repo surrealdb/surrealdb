@@ -131,6 +131,7 @@ pub enum EndpointKind {
 	TiKv,
 	Unsupported(String),
 	SurrealKV,
+	SurrealCS
 }
 
 impl From<&str> for EndpointKind {
