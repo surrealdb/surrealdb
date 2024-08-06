@@ -4,12 +4,6 @@ use async_graphql::dynamic::Scalar;
 use surrealdb::sql::{
 	statements::UseStatement, Cond, Ident, Idiom, Limit, Order, Orders, Part, Start, Table, Value,
 };
-// use uuid::Uuid;
-
-// use async_graphql::ScalarType;
-// use async_graphql::Value as GqlValue;
-
-// use super::error::GqlError;
 
 pub trait IntoExt<T> {
 	fn intox(self) -> T;
@@ -160,5 +154,22 @@ impl ValidatorExt for Scalar {
 		mem::swap(self, &mut tmp);
 		*self = tmp.validator(validator);
 		self
+	}
+}
+
+use surrealdb::sql::Object as SqlObject;
+use surrealdb::sql::Value as SqlValue;
+
+pub trait TryAsExt {
+	fn try_as_object(self) -> Result<SqlObject, Self>
+	where
+		Self: Sized;
+}
+impl TryAsExt for SqlValue {
+	fn try_as_object(self) -> Result<SqlObject, Self> {
+		match self {
+			SqlValue::Object(o) => Ok(o),
+			v => Err(v),
+		}
 	}
 }

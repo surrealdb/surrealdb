@@ -27,6 +27,7 @@ use super::error::{resolver_error, GqlError};
 use super::ext::IntoExt;
 use super::ext::ValidatorExt;
 use crate::gql::error::{internal_error, schema_error, type_error};
+use crate::gql::ext::TryAsExt;
 use crate::gql::utils::{get_record, GqlValueUtils};
 use surrealdb::kvs::LockType;
 use surrealdb::kvs::TransactionType;
@@ -226,13 +227,18 @@ pub async fn generate_schema(
 								}
 							};
 
-						let out = res_vec
+						let out: Result<Vec<FieldValue>, SqlValue> = res_vec
 							.0
 							.into_iter()
-							.map(|v| sql_value_to_gql_value(v).unwrap())
+							.map(|v| v.try_as_object().map(|o| FieldValue::owned_any(o)))
 							.collect();
 
-						Ok(Some(GqlValue::List(out)))
+						match out {
+							Ok(l) => Ok(Some(FieldValue::list(l))),
+							Err(v) => {
+								Err(internal_error(format!("expected object, found: {v:?}")).into())
+							}
+						}
 					})
 				},
 			)
@@ -473,9 +479,9 @@ fn make_table_field_resolver(
 				)))?;
 
 				let out = match val {
-					SqlValue::Thing(rid) => match get_record(kvs, &sess_field, rid).await?
+					SqlValue::Thing(rid)if fd_name != "id" => match get_record(kvs, &sess_field, rid).await?
 						{
-							SqlValue::Object(o) if fd_name != "id"=> {
+							SqlValue::Object(o) => {
 							    let tmp = FieldValue::owned_any(o);
 								Ok(Some(tmp))
 							}
