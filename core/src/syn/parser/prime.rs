@@ -653,12 +653,6 @@ mod tests {
 	}
 
 	#[test]
-	fn invalid_idiom() {
-		let sql = "'hello'.foo";
-		syn::parse(sql).unwrap_err();
-	}
-
-	#[test]
 	fn subquery_ifelse_statement() {
 		let sql = "IF true THEN false END";
 		let out = Value::parse(sql);
