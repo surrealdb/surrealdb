@@ -6227,3 +6227,20 @@ async fn function_outside_database() -> Result<(), Error> {
 
 	Ok(())
 }
+
+#[tokio::test]
+async fn function_idiom_chaining() -> Result<(), Error> {
+	let sql = r#"
+		{ a: 1, b: 2 }.entries().flatten();
+		"ABC".lowercase();
+		true.is_number();
+		true.is_boolean();
+	"#;
+	Test::new(sql)
+		.await?
+		.expect_val("['a', 1, 'b', 2]")?
+		.expect_val("'abc'")?
+		.expect_val("false")?
+		.expect_val("true")?;
+	Ok(())
+}
