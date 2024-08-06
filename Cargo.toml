@@ -57,7 +57,7 @@ axum-extra = { version = "0.9.2", features = [
     "typed-routing",
     "typed-header",
 ] }
-axum-server = { version = "0.6.0", features = ["tls-rustls"] }
+axum-server = { version = "0.7.1", features = ["tls-rustls"] }
 base64 = "0.21.5"
 bytes = "1.5.0"
 ciborium = "0.2.1"
@@ -168,7 +168,7 @@ temp-env = { version = "0.3.6", features = ["async_closure"] }
 test-log = { version = "0.2.13", features = ["trace"] }
 tokio-stream = { version = "0.1", features = ["net"] }
 tokio-tungstenite = { version = "0.23.0" }
-tonic = "0.12.0"
+tonic = "0.12.1"
 ulid = "1.1.0"
 wiremock = "0.6.0"
 
