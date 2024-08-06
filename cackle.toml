@@ -1371,3 +1371,8 @@ allow_unsafe = true
 
 [pkg.rustls-pki-types]
 allow_unsafe = true
+
+[pkg.hyper-util]
+allow_apis = [
+    "net",
+]
