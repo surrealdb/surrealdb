@@ -288,6 +288,7 @@ pub(crate) static PATHS: phf::Map<UniCase<&'static str>, PathKind> = phf_map! {
 		UniCase::ascii("string::is::semver") => PathKind::Function,
 		UniCase::ascii("string::is::url") => PathKind::Function,
 		UniCase::ascii("string::is::uuid") => PathKind::Function,
+		UniCase::ascii("string::is::record") => PathKind::Function,
 		UniCase::ascii("string::semver::compare") => PathKind::Function,
 		UniCase::ascii("string::semver::major") => PathKind::Function,
 		UniCase::ascii("string::semver::minor") => PathKind::Function,
