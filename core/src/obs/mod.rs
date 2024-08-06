@@ -10,7 +10,7 @@ use object_store::memory::InMemory;
 use object_store::parse_url;
 use object_store::path::Path;
 use object_store::ObjectStore;
-use once_cell::sync::Lazy;
+use std::sync::LazyLock;
 use sha1::{Digest, Sha1};
 use std::env;
 use std::fs;
@@ -46,11 +46,11 @@ fn initialize_store(env_var: &str, default_dir: &str) -> Arc<dyn ObjectStore> {
 	}
 }
 
-static STORE: Lazy<Arc<dyn ObjectStore>> =
-	Lazy::new(|| initialize_store("SURREAL_OBJECT_STORE", "store"));
+static STORE: LazyLock<Arc<dyn ObjectStore>> =
+	LazyLock::new(|| initialize_store("SURREAL_OBJECT_STORE", "store"));
 
-static CACHE: Lazy<Arc<dyn ObjectStore>> =
-	Lazy::new(|| initialize_store("SURREAL_CACHE_STORE", "cache"));
+static CACHE: LazyLock<Arc<dyn ObjectStore>> =
+	LazyLock::new(|| initialize_store("SURREAL_CACHE_STORE", "cache"));
 
 /// Streams the file from the local system or memory object storage.
 pub async fn stream(

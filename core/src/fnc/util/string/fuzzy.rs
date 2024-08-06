@@ -1,8 +1,8 @@
 use fuzzy_matcher::skim::SkimMatcherV2;
 use fuzzy_matcher::FuzzyMatcher;
-use once_cell::sync::Lazy;
+use std::sync::LazyLock;
 
-static MATCHER: Lazy<SkimMatcherV2> = Lazy::new(|| SkimMatcherV2::default().ignore_case());
+static MATCHER: LazyLock<SkimMatcherV2> = LazyLock::new(|| SkimMatcherV2::default().ignore_case());
 
 pub trait Fuzzy {
 	/// Retrieve the fuzzy similarity score of this &str compared to another &str

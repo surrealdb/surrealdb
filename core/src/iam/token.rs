@@ -2,11 +2,11 @@ use crate::sql::json;
 use crate::sql::Object;
 use crate::sql::Value;
 use jsonwebtoken::{Algorithm, Header};
-use once_cell::sync::Lazy;
+use std::sync::LazyLock;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-pub static HEADER: Lazy<Header> = Lazy::new(|| Header::new(Algorithm::HS512));
+pub static HEADER: LazyLock<Header> = LazyLock::new(|| Header::new(Algorithm::HS512));
 
 #[derive(Debug, Default, Serialize, Deserialize, Clone)]
 #[non_exhaustive]

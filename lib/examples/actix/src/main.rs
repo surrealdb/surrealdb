@@ -2,13 +2,13 @@ mod error;
 mod person;
 
 use actix_web::{App, HttpServer};
-use once_cell::sync::Lazy;
+use std::sync::LazyLock;
 use surrealdb::engine::remote::ws::Client;
 use surrealdb::engine::remote::ws::Ws;
 use surrealdb::opt::auth::Root;
 use surrealdb::Surreal;
 
-static DB: Lazy<Surreal<Client>> = Lazy::new(Surreal::init);
+static DB: LazyLock<Surreal<Client>> = LazyLock::new(Surreal::init);
 
 #[actix_web::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {

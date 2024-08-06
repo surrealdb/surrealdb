@@ -1,7 +1,7 @@
 #[allow(unused_imports, dead_code)]
 mod api_integration {
 	use chrono::DateTime;
-	use once_cell::sync::Lazy;
+	use std::sync::LazyLock;
 	use semver::Version;
 	use serde::Deserialize;
 	use serde::Serialize;

@@ -1,19 +1,19 @@
 use criterion::Criterion;
-use once_cell::sync::Lazy;
+use std::sync::LazyLock;
 use std::sync::OnceLock;
 use tokio::runtime::Runtime;
 
 mod lib;
 mod sdk;
 
-static NUM_OPS: Lazy<usize> =
-	Lazy::new(|| std::env::var("BENCH_NUM_OPS").unwrap_or("1000".to_string()).parse().unwrap());
-static DURATION_SECS: Lazy<u64> =
-	Lazy::new(|| std::env::var("BENCH_DURATION").unwrap_or("30".to_string()).parse().unwrap());
-static SAMPLE_SIZE: Lazy<usize> =
-	Lazy::new(|| std::env::var("BENCH_SAMPLE_SIZE").unwrap_or("30".to_string()).parse().unwrap());
-static WORKER_THREADS: Lazy<usize> =
-	Lazy::new(|| std::env::var("BENCH_WORKER_THREADS").unwrap_or("1".to_string()).parse().unwrap());
+static NUM_OPS: LazyLock<usize> =
+	LazyLock::new(|| std::env::var("BENCH_NUM_OPS").unwrap_or("1000".to_string()).parse().unwrap());
+static DURATION_SECS: LazyLock<u64> =
+	LazyLock::new(|| std::env::var("BENCH_DURATION").unwrap_or("30".to_string()).parse().unwrap());
+static SAMPLE_SIZE: LazyLock<usize> =
+	LazyLock::new(|| std::env::var("BENCH_SAMPLE_SIZE").unwrap_or("30".to_string()).parse().unwrap());
+static WORKER_THREADS: LazyLock<usize> =
+	LazyLock::new(|| std::env::var("BENCH_WORKER_THREADS").unwrap_or("1".to_string()).parse().unwrap());
 static RUNTIME: OnceLock<Runtime> = OnceLock::new();
 
 fn rt() -> &'static Runtime {

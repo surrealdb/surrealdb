@@ -1,10 +1,10 @@
-use once_cell::sync::Lazy;
+use std::sync::LazyLock;
 use surrealdb::engine::remote::ws::Client;
 use surrealdb::engine::remote::ws::Ws;
 use surrealdb::Surreal;
 use tokio::sync::mpsc;
 
-static DB: Lazy<Surreal<Client>> = Lazy::new(Surreal::init);
+static DB: LazyLock<Surreal<Client>> = LazyLock::new(Surreal::init);
 
 const NUM: usize = 100_000;
 
