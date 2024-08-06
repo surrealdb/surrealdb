@@ -475,7 +475,7 @@ fn make_table_field_resolver(
 				let out = match val {
 					SqlValue::Thing(rid) => match get_record(kvs, &sess_field, rid).await?
 						{
-							SqlValue::Object(o) => {
+							SqlValue::Object(o) if fd_name != "id"=> {
 							    let tmp = FieldValue::owned_any(o);
 								Ok(Some(tmp))
 							}

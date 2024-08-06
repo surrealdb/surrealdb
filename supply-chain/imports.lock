@@ -16,12 +16,26 @@ user-id = 3987
 user-login = "rushmorem"
 user-name = "Rushmore Mushambi"
 
+[[publisher.anyhow]]
+version = "1.0.81"
+when = "2024-03-12"
+user-id = 3618
+user-login = "dtolnay"
+user-name = "David Tolnay"
+
 [[publisher.arbitrary]]
 version = "1.3.2"
 when = "2023-10-30"
 user-id = 696
 user-login = "fitzgen"
 user-name = "Nick Fitzgerald"
+
+[[publisher.async-trait]]
+version = "0.1.81"
+when = "2024-07-07"
+user-id = 3618
+user-login = "dtolnay"
+user-name = "David Tolnay"
 
 [[publisher.bumpalo]]
 version = "3.15.4"
@@ -100,12 +114,40 @@ user-id = 145457
 user-login = "tobiemh"
 user-name = "Tobie Morgan Hitchcock"
 
+[[publisher.paste]]
+version = "1.0.14"
+when = "2023-07-15"
+user-id = 3618
+user-login = "dtolnay"
+user-name = "David Tolnay"
+
+[[publisher.prettyplease]]
+version = "0.2.17"
+when = "2024-03-25"
+user-id = 3618
+user-login = "dtolnay"
+user-name = "David Tolnay"
+
 [[publisher.psl-types]]
 version = "2.0.11"
 when = "2022-08-10"
 user-id = 3987
 user-login = "rushmorem"
 user-name = "Rushmore Mushambi"
+
+[[publisher.ref-cast]]
+version = "1.0.22"
+when = "2024-01-02"
+user-id = 3618
+user-login = "dtolnay"
+user-name = "David Tolnay"
+
+[[publisher.ref-cast-impl]]
+version = "1.0.22"
+when = "2024-01-02"
+user-id = 3618
+user-login = "dtolnay"
+user-name = "David Tolnay"
 
 [[publisher.revision]]
 version = "0.7.1"
@@ -134,6 +176,34 @@ when = "2024-07-09"
 user-id = 145457
 user-login = "tobiemh"
 user-name = "Tobie Morgan Hitchcock"
+
+[[publisher.ryu]]
+version = "1.0.17"
+when = "2024-02-19"
+user-id = 3618
+user-login = "dtolnay"
+user-name = "David Tolnay"
+
+[[publisher.serde_bytes]]
+version = "0.11.15"
+when = "2024-06-25"
+user-id = 3618
+user-login = "dtolnay"
+user-name = "David Tolnay"
+
+[[publisher.serde_json]]
+version = "1.0.115"
+when = "2024-03-26"
+user-id = 3618
+user-login = "dtolnay"
+user-name = "David Tolnay"
+
+[[publisher.serde_path_to_error]]
+version = "0.1.16"
+when = "2024-03-09"
+user-id = 3618
+user-login = "dtolnay"
+user-name = "David Tolnay"
 
 [[publisher.storekey]]
 version = "0.5.0"
@@ -184,19 +254,26 @@ user-id = 145457
 user-login = "tobiemh"
 user-name = "Tobie Morgan Hitchcock"
 
-[[publisher.surrealkv]]
-version = "0.3.0"
-when = "2024-07-04"
-user-id = 145457
-user-login = "tobiemh"
-user-name = "Tobie Morgan Hitchcock"
-
 [[publisher.surrealml-core]]
 version = "0.1.2"
 when = "2024-04-02"
 user-id = 145457
 user-login = "tobiemh"
 user-name = "Tobie Morgan Hitchcock"
+
+[[publisher.syn]]
+version = "1.0.109"
+when = "2023-02-24"
+user-id = 3618
+user-login = "dtolnay"
+user-name = "David Tolnay"
+
+[[publisher.syn]]
+version = "2.0.58"
+when = "2024-04-03"
+user-id = 3618
+user-login = "dtolnay"
+user-name = "David Tolnay"
 
 [[publisher.trice]]
 version = "0.4.0"
@@ -233,19 +310,12 @@ user-id = 145457
 user-login = "tobiemh"
 user-name = "Tobie Morgan Hitchcock"
 
-[[publisher.vart]]
-version = "0.4.0"
-when = "2024-07-04"
-user-id = 145457
-user-login = "tobiemh"
-user-name = "Tobie Morgan Hitchcock"
-
 [[audits.bytecode-alliance.wildcard-audits.arbitrary]]
 who = "Nick Fitzgerald <fitzgen@gmail.com>"
 criteria = "safe-to-deploy"
 user-id = 696 # Nick Fitzgerald (fitzgen)
 start = "2020-01-14"
-end = "2024-04-21"
+end = "2025-07-30"
 notes = "I am an author of this crate."
 
 [[audits.bytecode-alliance.wildcard-audits.bumpalo]]
@@ -253,14 +323,14 @@ who = "Nick Fitzgerald <fitzgen@gmail.com>"
 criteria = "safe-to-deploy"
 user-id = 696 # Nick Fitzgerald (fitzgen)
 start = "2019-03-16"
-end = "2024-03-10"
+end = "2025-07-30"
 
 [[audits.bytecode-alliance.wildcard-audits.derive_arbitrary]]
 who = "Nick Fitzgerald <fitzgen@gmail.com>"
 criteria = "safe-to-deploy"
 user-id = 696 # Nick Fitzgerald (fitzgen)
 start = "2020-01-14"
-end = "2024-04-27"
+end = "2025-07-30"
 notes = "I am an author of this crate"
 
 [[audits.bytecode-alliance.audits.adler]]
@@ -1052,7 +1122,6 @@ criteria = "safe-to-deploy"
 version = "0.2.2"
 notes = "Reviewed on https://fxrev.dev/883543"
 aggregated-from = "https://fuchsia.googlesource.com/fuchsia/+/refs/heads/main/third_party/rust_crates/supply-chain/audits.toml?format=TEXT"
-
 
 [[audits.google.audits.termcolor]]
 who = "danakj@chromium.org"
