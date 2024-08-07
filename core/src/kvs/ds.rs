@@ -11,6 +11,7 @@ use crate::err::Error;
 #[cfg(feature = "jwks")]
 use crate::iam::jwks::JwksCache;
 use crate::iam::{Action, Auth, Error as IamError, Resource, Role};
+use crate::idx::builder::IndexBuilder;
 use crate::idx::trees::store::IndexStores;
 use crate::kvs::clock::SizedClock;
 #[allow(unused_imports)]
@@ -22,6 +23,7 @@ use crate::vs::{conv, Versionstamp};
 use channel::{Receiver, Sender};
 use futures::Future;
 use reblessive::TreeStack;
+use std::borrow::Cow;
 use std::fmt;
 #[cfg(any(
 	feature = "kv-mem",
@@ -56,7 +58,7 @@ const INITIAL_USER_ROLE: &str = "owner";
 #[non_exhaustive]
 pub struct Datastore {
 	// The inner datastore type
-	inner: Inner,
+	inner: Arc<Inner>,
 	// The unique id of this datastore, used in notifications
 	id: Uuid,
 	// Whether this datastore runs in strict mode by default
@@ -75,6 +77,8 @@ pub struct Datastore {
 	pub(super) clock: Arc<SizedClock>,
 	// The index store cache
 	index_stores: IndexStores,
+	// The index asynchronous builder
+	index_builder: IndexBuilder,
 	#[cfg(feature = "jwks")]
 	// The JWKS object cache
 	jwks_cache: Arc<RwLock<JwksCache>>,
@@ -297,6 +301,7 @@ impl Datastore {
 			notification_channel: None,
 			capabilities: Capabilities::default(),
 			index_stores: IndexStores::default(),
+			index_builder: IndexBuilder::default(),
 			#[cfg(feature = "jwks")]
 			jwks_cache: Arc::new(RwLock::new(JwksCache::new())),
 			#[cfg(any(

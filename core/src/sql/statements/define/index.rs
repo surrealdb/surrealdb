@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display};
 use std::sync::Arc;
 
-#[revisioned(revision = 3)]
+#[revisioned(revision = 4)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
@@ -27,6 +27,8 @@ pub struct DefineIndexStatement {
 	pub if_not_exists: bool,
 	#[revision(start = 3)]
 	pub overwrite: bool,
+	#[revision(start = 4)]
+	pub concurrently: bool,
 }
 
 impl DefineIndexStatement {
@@ -89,15 +91,19 @@ impl DefineIndexStatement {
 		.await?;
 		// Clear the cache
 		txn.clear();
-		// Force queries to run
-		let opt = &opt.new_with_force(Force::Index(Arc::new([self.clone()])));
-		// Update the index data
-		let stm = UpdateStatement {
-			what: Values(vec![Value::Table(self.what.clone().into())]),
-			output: Some(Output::None),
-			..UpdateStatement::default()
-		};
-		stm.compute(stk, ctx, opt, doc).await?;
+		if !self.concurrently {
+			// Force queries to run
+			let opt = &opt.new_with_force(Force::Index(Arc::new([self.clone()])));
+			// Update the index data
+			let stm = UpdateStatement {
+				what: Values(vec![Value::Table(self.what.clone().into())]),
+				output: Some(Output::None),
+				..UpdateStatement::default()
+			};
+			stm.compute(stk, ctx, opt, doc).await?;
+		} else {
+			txn.batch()
+		}
 		// Ok all good
 		Ok(Value::None)
 	}
