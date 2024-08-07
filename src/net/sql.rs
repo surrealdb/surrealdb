@@ -14,7 +14,6 @@ use axum::Router;
 use axum_extra::TypedHeader;
 use bytes::Bytes;
 use futures::{SinkExt, StreamExt};
-
 use surrealdb::dbs::Session;
 use tower_http::limit::RequestBodyLimitLayer;
 
