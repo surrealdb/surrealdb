@@ -1101,9 +1101,9 @@ checksum = "1fd0f2584146f6f2ef48085050886acf353beff7305ebd1ae69500e27c67f64b"
 
 [[package]]
 name = "bytes"
-version = "1.6.1"
+version = "1.7.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a12916984aab3fa6e39d655a33e09c0071eb36d6ab3aea5c2d78551f1df6d952"
+checksum = "8318a53db07bb3f8dca91a600466bdb3f2eaadeedfdbcf02e1accbad9271ba50"
 
 [[package]]
 name = "bytestring"
@@ -5990,7 +5990,6 @@ dependencies = [
  "serde",
  "serde_json",
  "serial_test",
- "surrealcs-client",
  "surrealdb",
  "surrealdb-jsonwebtoken",
  "temp-env",
@@ -6014,9 +6013,8 @@ dependencies = [
 ]
 
 [[package]]
-name = "surrealcs-client"
+name = "surrealcs"
 version = "0.1.0"
-source = "git+https://github.com/surrealdb/surrealcs#bd4cce6ef0bf52abd088f011a24e722d3b808356"
 dependencies = [
  "bincode",
  "bytes",
@@ -6034,7 +6032,6 @@ dependencies = [
 [[package]]
 name = "surrealcs-kernel"
 version = "0.1.0"
-source = "git+https://github.com/surrealdb/surrealcs#bd4cce6ef0bf52abd088f011a24e722d3b808356"
 dependencies = [
  "bincode",
  "chrono",
@@ -6078,7 +6075,6 @@ dependencies = [
  "serde",
  "serde_json",
  "serial_test",
- "surrealcs-client",
  "surrealdb-core",
  "temp-dir",
  "test-log",
@@ -6176,8 +6172,7 @@ dependencies = [
  "sha2",
  "snap",
  "storekey",
- "surrealcs-client",
- "surrealcs-kernel",
+ "surrealcs",
  "surrealdb-derive",
  "surrealdb-jsonwebtoken",
  "surrealdb-tikv-client",
