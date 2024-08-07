@@ -58,8 +58,12 @@ fn config(alg: Algorithm, key: &[u8]) -> Result<(DecodingKey, Validation), Error
 		}
 	};
 
-	// TODO(PR): Allow users to configure token audience via DEFINE ACCESS.
+	// TODO(gguillemas): This keeps the existing behavior as of SurrealDB 2.0.0-alpha.9.
+	// Up to that point, a fork of the "jsonwebtoken" crate in version 8.3.0 was being used.
+	// Now that the audience claim is validated by default, we should allow users to leverage this.
+	// This will most likely involve defining an audience string via "DEFINE ACCESS ... TYPE JWT".
 	val.validate_aud = false;
+
 	Ok((dec, val))
 }
 
