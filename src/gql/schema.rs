@@ -490,10 +490,9 @@ fn make_table_field_resolver(
 							SqlValue::Object(o) => {
 							    let mut tmp = FieldValue::owned_any(o);
 
-								if let Some(Kind::Record(ts))  = field_kind {
-									if ts.len() != 1 {
-										tmp = tmp.with_type(rid.tb.clone())
-									}
+								match field_kind {
+									Some(Kind::Record(ts)) if ts.len() != 1 => {tmp = tmp.with_type(rid.tb.clone())}
+									_ => {}
 								}
 
 								Ok(Some(tmp))
@@ -501,6 +500,12 @@ fn make_table_field_resolver(
 							v => Err(resolver_error(format!("expected object, but found (referential integrity might be broken): {v:?}")).into()),
 						}
 					v => {
+						match field_kind {
+							Some(Kind::Either(ks)) if ks.len() != 1 => {
+								
+							}
+							_ => {}
+						}
 						let out = sql_value_to_gql_value(v.to_owned())
 							.map_err(|_| "SQL to GQL translation failed")?;
 						Ok(Some(FieldValue::value(out)))
