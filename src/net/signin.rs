@@ -8,7 +8,6 @@ use axum::Extension;
 use axum::Router;
 use axum_extra::TypedHeader;
 use bytes::Bytes;
-
 use serde::Serialize;
 use surrealdb::dbs::Session;
 use surrealdb::sql::Value;
