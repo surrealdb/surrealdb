@@ -51,7 +51,19 @@ impl Closure {
 			}
 		}
 
-		self.body.compute(stk, &ctx, opt, doc).await
+		let result = self.body.compute(stk, &ctx, opt, doc).await?;
+		if let Some(returns) = &self.returns {
+			if let Ok(result) = result.clone().coerce_to(returns) {
+				Ok(result)
+			} else {
+				Err(Error::InvalidFunction {
+					name: "ANONYMOUS".to_string(),
+					message: format!("Expected this closure to return a value of type '{returns}', but found '{}'", result.kindof()),
+				})
+			}
+		} else {
+			Ok(result)
+		}
 	}
 }
 
@@ -68,6 +80,6 @@ impl fmt::Display for Closure {
 		if let Some(returns) = &self.returns {
 			write!(f, " -> {returns}")?;
 		}
-		write!(f, "{}", self.body)
+		write!(f, " {}", self.body)
 	}
 }
