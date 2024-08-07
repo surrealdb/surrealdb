@@ -2,10 +2,10 @@ mod parse;
 use parse::Parse;
 mod helpers;
 use helpers::new_ds;
-use surrealdb::dbs::Session;
-use surrealdb::err::Error;
-use surrealdb::iam::Role;
-use surrealdb::sql::Value;
+use surrealdb_core::dbs::Session;
+use surrealdb_core::err::Error;
+use surrealdb_core::iam::Role;
+use surrealdb_core::sql::Value;
 
 #[tokio::test]
 async fn select_field_value() -> Result<(), Error> {
@@ -866,6 +866,8 @@ async fn common_permissions_checks(auth_enabled: bool) {
 	];
 	let statement = "SELECT * FROM person";
 
+	let empty_array = Value::parse("[]");
+
 	for ((level, role), (ns, db), should_succeed, msg) in tests.into_iter() {
 		let sess = Session::for_level(level, role).with_ns(ns).with_db(db);
 
@@ -879,7 +881,7 @@ async fn common_permissions_checks(auth_enabled: bool) {
 				.unwrap();
 			let res = resp.remove(0).output();
 			assert!(
-				res.is_ok() && res.unwrap() != Value::parse("[]"),
+				res.is_ok() && res.unwrap() != empty_array,
 				"unexpected error creating person record"
 			);
 			let mut resp = ds
@@ -888,7 +890,7 @@ async fn common_permissions_checks(auth_enabled: bool) {
 				.unwrap();
 			let res = resp.remove(0).output();
 			assert!(
-				res.is_ok() && res.unwrap() != Value::parse("[]"),
+				res.is_ok() && res.unwrap() != empty_array,
 				"unexpected error creating person record"
 			);
 			let mut resp = ds
@@ -897,7 +899,7 @@ async fn common_permissions_checks(auth_enabled: bool) {
 				.unwrap();
 			let res = resp.remove(0).output();
 			assert!(
-				res.is_ok() && res.unwrap() != Value::parse("[]"),
+				res.is_ok() && res.unwrap() != empty_array,
 				"unexpected error creating person record"
 			);
 
@@ -909,9 +911,9 @@ async fn common_permissions_checks(auth_enabled: bool) {
 			assert!(res.is_ok());
 
 			if should_succeed {
-				assert!(res.unwrap() != Value::parse("[]"), "{}", msg);
+				assert!(res.unwrap() != empty_array, "{}", msg);
 			} else {
-				assert!(res.unwrap() == Value::parse("[]"), "{}", msg);
+				assert!(res.unwrap() == empty_array, "{}", msg);
 			}
 		}
 	}

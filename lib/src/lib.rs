@@ -147,7 +147,9 @@ pub use api::headers;
 #[doc(inline)]
 pub use api::{
 	engine, method, opt,
-	value::{self, Bytes, Datetime, Notification, Number, Object, RecordId, RecordIdKey, Value},
+	value::{
+		self, Action, Bytes, Datetime, Notification, Number, Object, RecordId, RecordIdKey, Value,
+	},
 	Connect, Connection, Response, Result, Surreal,
 };
 

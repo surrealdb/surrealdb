@@ -203,6 +203,15 @@ impl From<RecordIdKey> for Value {
 	}
 }
 
+impl FromStr for Value {
+	type Err = Error;
+
+	fn from_str(s: &str) -> Result<Self, Self::Err> {
+		Value::from_core(surrealdb_core::syn::value(s)?)
+			.ok_or(crate::api::Error::RecievedInvalidValue.into())
+	}
+}
+
 #[derive(Debug)]
 pub struct RecordIdKeyFromValueError(());
 
@@ -266,6 +275,16 @@ impl FromStr for RecordId {
 		syn::thing(s).map_err(crate::Error::Db).and_then(|x| {
 			RecordId::from_core(x).ok_or(crate::api::Error::RecievedInvalidValue.into())
 		})
+	}
+}
+
+impl<S, I> From<(S, I)> for RecordId
+where
+	S: Into<String>,
+	RecordIdKey: From<I>,
+{
+	fn from(value: (S, I)) -> Self {
+		Self::from_table_key(value.0, value.1)
 	}
 }
 

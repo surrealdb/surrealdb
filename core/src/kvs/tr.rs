@@ -198,7 +198,7 @@ impl Transactor {
 		K: Into<Key> + Debug,
 	{
 		let key = key.into();
-		expand_inner!(&mut self.inner, v => { v.exists(key).await })
+		expand_inner!(&mut self.inner, v => { v.exists(key).await } else { let _ = key; })
 	}
 
 	/// Fetch a key from the datastore.
@@ -208,7 +208,7 @@ impl Transactor {
 		K: Into<Key> + Debug,
 	{
 		let key = key.into();
-		expand_inner!(&mut self.inner, v => { v.get(key).await })
+		expand_inner!(&mut self.inner, v => { v.get(key).await } else { let _ = key; })
 	}
 
 	/// Fetch many keys from the datastore.
@@ -218,7 +218,7 @@ impl Transactor {
 		K: Into<Key> + Debug,
 	{
 		let keys = keys.into_iter().map(Into::into).collect::<Vec<Key>>();
-		expand_inner!(&mut self.inner, v => { v.getm(keys).await })
+		expand_inner!(&mut self.inner, v => { v.getm(keys).await } else { let _ = keys; })
 	}
 
 	/// Retrieve a specific range of keys from the datastore.
@@ -231,7 +231,7 @@ impl Transactor {
 	{
 		let beg: Key = rng.start.into();
 		let end: Key = rng.end.into();
-		expand_inner!(&mut self.inner, v => { v.getr(beg..end).await })
+		expand_inner!(&mut self.inner, v => { v.getr(beg..end).await } else { let _ = beg; let _ = end; })
 	}
 
 	/// Retrieve a specific prefixed range of keys from the datastore.
@@ -243,7 +243,7 @@ impl Transactor {
 		K: Into<Key> + Debug,
 	{
 		let key: Key = key.into();
-		expand_inner!(&mut self.inner, v => { v.getp(key).await })
+		expand_inner!(&mut self.inner, v => { v.getp(key).await } else { let _ = key; })
 	}
 
 	/// Insert or update a key in the datastore.
@@ -254,7 +254,7 @@ impl Transactor {
 		V: Into<Val> + Debug,
 	{
 		let key = key.into();
-		expand_inner!(&mut self.inner, v => { v.set(key, val).await })
+		expand_inner!(&mut self.inner, v => { v.set(key, val).await } else { let _ = key; })
 	}
 
 	/// Insert a key if it doesn't exist in the datastore.
@@ -265,7 +265,7 @@ impl Transactor {
 		V: Into<Val> + Debug,
 	{
 		let key = key.into();
-		expand_inner!(&mut self.inner, v => { v.put(key, val).await })
+		expand_inner!(&mut self.inner, v => { v.put(key, val).await } else { let _ = key; })
 	}
 
 	/// Update a key in the datastore if the current value matches a condition.
@@ -276,7 +276,7 @@ impl Transactor {
 		V: Into<Val> + Debug,
 	{
 		let key = key.into();
-		expand_inner!(&mut self.inner, v => { v.putc(key, val, chk).await })
+		expand_inner!(&mut self.inner, v => { v.putc(key, val, chk).await } else { let _ = key; })
 	}
 
 	/// Delete a key from the datastore.
@@ -297,7 +297,7 @@ impl Transactor {
 		V: Into<Val> + Debug,
 	{
 		let key = key.into();
-		expand_inner!(&mut self.inner, v => { v.delc(key, chk).await })
+		expand_inner!(&mut self.inner, v => { v.delc(key, chk).await } else { let _ = key; })
 	}
 
 	/// Delete a range of keys from the datastore.
@@ -310,7 +310,7 @@ impl Transactor {
 	{
 		let beg: Key = rng.start.into();
 		let end: Key = rng.end.into();
-		expand_inner!(&mut self.inner, v => { v.delr(beg..end).await })
+		expand_inner!(&mut self.inner, v => { v.delr(beg..end).await } else { let _ = (beg,end); })
 	}
 
 	/// Delete a prefixed range of keys from the datastore.
@@ -335,7 +335,7 @@ impl Transactor {
 	{
 		let beg: Key = rng.start.into();
 		let end: Key = rng.end.into();
-		expand_inner!(&mut self.inner, v => { v.keys(beg..end, limit).await })
+		expand_inner!(&mut self.inner, v => { v.keys(beg..end, limit).await } else { let _ = (beg,end); })
 	}
 
 	/// Retrieve a specific range of keys from the datastore.
@@ -348,7 +348,7 @@ impl Transactor {
 	{
 		let beg: Key = rng.start.into();
 		let end: Key = rng.end.into();
-		expand_inner!(&mut self.inner, v => { v.scan(beg..end, limit).await })
+		expand_inner!(&mut self.inner, v => { v.scan(beg..end, limit).await } else { let _ = (beg,end); })
 	}
 
 	/// Retrieve a batched scan over a specific range of keys in the datastore.
@@ -366,7 +366,7 @@ impl Transactor {
 	{
 		let beg: Key = rng.start.into();
 		let end: Key = rng.end.into();
-		expand_inner!(&mut self.inner, v => { v.batch(beg..end, batch, values).await } else { let _ = values;  })
+		expand_inner!(&mut self.inner, v => { v.batch(beg..end, batch, values).await } else { let _ = (values, beg,end);  })
 	}
 
 	/// Obtain a new change timestamp for a key

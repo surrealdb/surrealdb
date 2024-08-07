@@ -35,9 +35,9 @@ async fn live_select_table() {
 		let mut users = db.select(&table).live().await.unwrap();
 
 		// Create a record
-		let created: Vec<RecordId> = db.create(table).await.unwrap();
+		let created: Vec<ApiRecordId> = db.create(table).await.unwrap();
 		// Pull the notification
-		let notification: Notification<RecordId> =
+		let notification: Notification<ApiRecordId> =
 			tokio::time::timeout(LQ_TIMEOUT, users.next()).await.unwrap().unwrap().unwrap();
 		// The returned record should match the created record
 		assert_eq!(created, vec![notification.data.clone()]);
@@ -45,18 +45,18 @@ async fn live_select_table() {
 		assert_eq!(notification.action, Action::Create);
 
 		// Update the record
-		let _: Option<RecordId> =
+		let _: Option<ApiRecordId> =
 			db.update(&notification.data.id).content(json!({"foo": "bar"})).await.unwrap();
 		// Pull the notification
-		let notification: Notification<RecordId> =
+		let notification: Notification<ApiRecordId> =
 			tokio::time::timeout(LQ_TIMEOUT, users.next()).await.unwrap().unwrap().unwrap();
 		// It should be updated
 		assert_eq!(notification.action, Action::Update);
 
 		// Delete the record
-		let _: Option<RecordId> = db.delete(&notification.data.id).await.unwrap();
+		let _: Option<ApiRecordId> = db.delete(&notification.data.id).await.unwrap();
 		// Pull the notification
-		let notification: Notification<RecordId> = users.next().await.unwrap().unwrap();
+		let notification: Notification<ApiRecordId> = users.next().await.unwrap().unwrap();
 		// It should be deleted
 		assert_eq!(notification.action, Action::Delete);
 	}
@@ -102,15 +102,15 @@ async fn live_select_record_id() {
 		} else {
 			db.query(format!("DEFINE TABLE {table}")).await.unwrap();
 		}
-		let record_id = Thing::from((table, "john".to_owned()));
+		let record_id = RecordId::from((table, "john".to_owned()));
 
 		// Start listening
 		let mut users = db.select(&record_id).live().await.unwrap();
 
 		// Create a record
-		let created: Option<RecordId> = db.create(record_id).await.unwrap();
+		let created: Option<ApiRecordId> = db.create(record_id).await.unwrap();
 		// Pull the notification
-		let notification: Notification<RecordId> =
+		let notification: Notification<ApiRecordId> =
 			tokio::time::timeout(LQ_TIMEOUT, users.next()).await.unwrap().unwrap().unwrap();
 		// The returned record should match the created record
 		assert_eq!(created, Some(notification.data.clone()));
@@ -118,18 +118,18 @@ async fn live_select_record_id() {
 		assert_eq!(notification.action, Action::Create);
 
 		// Update the record
-		let _: Option<RecordId> =
+		let _: Option<ApiRecordId> =
 			db.update(&notification.data.id).content(json!({"foo": "bar"})).await.unwrap();
 		// Pull the notification
-		let notification: Notification<RecordId> =
+		let notification: Notification<ApiRecordId> =
 			tokio::time::timeout(LQ_TIMEOUT, users.next()).await.unwrap().unwrap().unwrap();
 		// It should be updated
 		assert_eq!(notification.action, Action::Update);
 
 		// Delete the record
-		let _: Option<RecordId> = db.delete(&notification.data.id).await.unwrap();
+		let _: Option<ApiRecordId> = db.delete(&notification.data.id).await.unwrap();
 		// Pull the notification
-		let notification: Notification<RecordId> =
+		let notification: Notification<ApiRecordId> =
 			tokio::time::timeout(LQ_TIMEOUT, users.next()).await.unwrap().unwrap().unwrap();
 		// It should be deleted
 		assert_eq!(notification.action, Action::Delete);
@@ -144,7 +144,7 @@ async fn live_select_record_id() {
 		} else {
 			db.query(format!("DEFINE TABLE {table}")).await.unwrap();
 		}
-		let record_id = Thing::from((table, "john".to_owned()));
+		let record_id = RecordId::from((table, "john".to_owned()));
 
 		// Start listening
 		let mut users = db.select(Resource::from(&record_id)).live().await.unwrap();
@@ -183,9 +183,9 @@ async fn live_select_record_ranges() {
 		let mut users = db.select(&table).range("jane".."john").live().await.unwrap();
 
 		// Create a record
-		let created: Option<RecordId> = db.create((table, "jane")).await.unwrap();
+		let created: Option<ApiRecordId> = db.create((table, "jane")).await.unwrap();
 		// Pull the notification
-		let notification: Notification<RecordId> =
+		let notification: Notification<ApiRecordId> =
 			tokio::time::timeout(LQ_TIMEOUT, users.next()).await.unwrap().unwrap().unwrap();
 		// The returned record should match the created record
 		assert_eq!(created, Some(notification.data.clone()));
@@ -193,19 +193,19 @@ async fn live_select_record_ranges() {
 		assert_eq!(notification.action, Action::Create);
 
 		// Update the record
-		let _: Option<RecordId> =
+		let _: Option<ApiRecordId> =
 			db.update(&notification.data.id).content(json!({"foo": "bar"})).await.unwrap();
 		// Pull the notification
-		let notification: Notification<RecordId> =
+		let notification: Notification<ApiRecordId> =
 			tokio::time::timeout(LQ_TIMEOUT, users.next()).await.unwrap().unwrap().unwrap();
 		// It should be updated
 		assert_eq!(notification.action, Action::Update);
 
 		// Delete the record
-		let _: Option<RecordId> = db.delete(&notification.data.id).await.unwrap();
+		let _: Option<ApiRecordId> = db.delete(&notification.data.id).await.unwrap();
 
 		// Pull the notification
-		let notification: Notification<RecordId> =
+		let notification: Notification<ApiRecordId> =
 			tokio::time::timeout(LQ_TIMEOUT, users.next()).await.unwrap().unwrap().unwrap();
 
 		// It should be deleted
@@ -241,8 +241,8 @@ async fn live_select_record_ranges() {
 		assert_eq!(notification.action, Action::Create);
 
 		// Delete the record
-		let thing = match created_value.0.get("id").unwrap() {
-			Value::Thing(thing) => thing,
+		let thing = match created_value.get("id").unwrap() {
+			Value::RecordId(thing) => thing,
 			_ => panic!("Expected a thing"),
 		};
 		db.query("DELETE $item").bind(("item", thing.clone())).await.unwrap();
@@ -257,7 +257,7 @@ async fn live_select_record_ranges() {
 			Value::Object(notification) => notification,
 			_ => panic!("Expected an object"),
 		};
-		assert_eq!(notification.0, created_value.0);
+		assert_eq!(notification, created_value);
 	}
 
 	drop(permit);
@@ -280,7 +280,7 @@ async fn live_select_query() {
 
 		// Start listening
 		info!("Starting live query");
-		let users: QueryStream<Notification<RecordId>> = db
+		let users: QueryStream<Notification<ApiRecordId>> = db
 			.query(format!("LIVE SELECT * FROM {table}"))
 			.await
 			.unwrap()
@@ -290,7 +290,7 @@ async fn live_select_query() {
 
 		// Create a record
 		info!("Creating record");
-		let created: Vec<RecordId> = db.create(table).await.unwrap();
+		let created: Vec<ApiRecordId> = db.create(table).await.unwrap();
 		// Pull the notification
 		let notifications = receive_all_pending_notifications(users.clone(), LQ_TIMEOUT).await;
 		// It should be newly created
@@ -305,7 +305,7 @@ async fn live_select_query() {
 
 		// Update the record
 		info!("Updating record");
-		let _: Option<RecordId> =
+		let _: Option<ApiRecordId> =
 			db.update(&notifications[0].data.id).content(json!({"foo": "bar"})).await.unwrap();
 		let notifications = receive_all_pending_notifications(users.clone(), LQ_TIMEOUT).await;
 
@@ -319,7 +319,7 @@ async fn live_select_query() {
 
 		// Delete the record
 		info!("Deleting record");
-		let _: Option<RecordId> = db.delete(&notifications[0].data.id).await.unwrap();
+		let _: Option<ApiRecordId> = db.delete(&notifications[0].data.id).await.unwrap();
 		// Pull the notification
 		let notifications = receive_all_pending_notifications(users.clone(), LQ_TIMEOUT).await;
 		// It should be deleted
@@ -367,9 +367,9 @@ async fn live_select_query() {
 			.unwrap();
 
 		// Create a record
-		let created: Vec<RecordId> = db.create(table).await.unwrap();
+		let created: Vec<ApiRecordId> = db.create(table).await.unwrap();
 		// Pull the notification
-		let notification: Notification<RecordId> =
+		let notification: Notification<ApiRecordId> =
 			tokio::time::timeout(LQ_TIMEOUT, users.next()).await.unwrap().unwrap().unwrap();
 		// The returned record should match the created record
 		assert_eq!(created, vec![notification.data.clone()]);
@@ -377,18 +377,18 @@ async fn live_select_query() {
 		assert_eq!(notification.action, Action::Create, "{:?}", notification);
 
 		// Update the record
-		let _: Option<RecordId> =
+		let _: Option<ApiRecordId> =
 			db.update(&notification.data.id).content(json!({"foo": "bar"})).await.unwrap();
 		// Pull the notification
-		let notification: Notification<RecordId> =
+		let notification: Notification<ApiRecordId> =
 			tokio::time::timeout(LQ_TIMEOUT, users.next()).await.unwrap().unwrap().unwrap();
 		// It should be updated
 		assert_eq!(notification.action, Action::Update, "{:?}", notification);
 
 		// Delete the record
-		let _: Option<RecordId> = db.delete(&notification.data.id).await.unwrap();
+		let _: Option<ApiRecordId> = db.delete(&notification.data.id).await.unwrap();
 		// Pull the notification
-		let notification: Notification<RecordId> =
+		let notification: Notification<ApiRecordId> =
 			tokio::time::timeout(LQ_TIMEOUT, users.next()).await.unwrap().unwrap().unwrap();
 		// It should be deleted
 		assert_eq!(notification.action, Action::Delete, "{:?}", notification);

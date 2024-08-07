@@ -390,7 +390,7 @@ impl RpcContext for Connection {
 		&mut self.vars
 	}
 
-	fn version_data(&self) -> impl Into<Data> {
+	fn version_data(&self) -> Data {
 		format!("{PKG_NAME}-{}", *PKG_VERSION)
 	}
 
@@ -409,36 +409,33 @@ impl RpcContext for Connection {
 
 	// reimplimentaions
 
-	async fn signup(&mut self, params: Array) -> Result<impl Into<Data>, RpcError> {
+	async fn signup(&mut self, params: Array) -> Result<Data, RpcError> {
 		let Ok(Value::Object(v)) = params.needs_one() else {
 			return Err(RpcError::InvalidParams);
 		};
-		let out: Result<Value, RpcError> =
-			surrealdb::iam::signup::signup(&self.datastore, &mut self.session, v)
-				.await
-				.map(Into::into)
-				.map_err(Into::into);
-
-		out
+		surrealdb::iam::signup::signup(&self.datastore, &mut self.session, v)
+			.await
+			.map(Value::from)
+			.map(Into::into)
+			.map_err(Into::into)
 	}
 
-	async fn signin(&mut self, params: Array) -> Result<impl Into<Data>, RpcError> {
+	async fn signin(&mut self, params: Array) -> Result<Data, RpcError> {
 		let Ok(Value::Object(v)) = params.needs_one() else {
 			return Err(RpcError::InvalidParams);
 		};
-		let out: Result<Value, RpcError> =
-			surrealdb::iam::signin::signin(&self.datastore, &mut self.session, v)
-				.await
-				.map(Into::into)
-				.map_err(Into::into);
-		out
+		surrealdb::iam::signin::signin(&self.datastore, &mut self.session, v)
+			.await
+			.map(Value::from)
+			.map(Into::into)
+			.map_err(Into::into)
 	}
 
-	async fn authenticate(&mut self, params: Array) -> Result<impl Into<Data>, RpcError> {
+	async fn authenticate(&mut self, params: Array) -> Result<Data, RpcError> {
 		let Ok(Value::Strand(token)) = params.needs_one() else {
 			return Err(RpcError::InvalidParams);
 		};
 		surrealdb::iam::verify::token(&self.datastore, &mut self.session, &token.0).await?;
-		Ok(Value::None)
+		Ok(Value::None.into())
 	}
 }

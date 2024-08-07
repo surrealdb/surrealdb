@@ -54,42 +54,39 @@ impl RpcContext for BasicRpcContext<'_> {
 		&mut self.vars
 	}
 
-	fn version_data(&self) -> impl Into<super::Data> {
-		Value::Strand(self.version_string.clone().into())
+	fn version_data(&self) -> super::Data {
+		Value::Strand(self.version_string.clone().into()).into()
 	}
 
 	// reimplimentaions:
 
-	async fn signup(&mut self, params: Array) -> Result<impl Into<Data>, RpcError> {
+	async fn signup(&mut self, params: Array) -> Result<Data, RpcError> {
 		let Ok(Value::Object(v)) = params.needs_one() else {
 			return Err(RpcError::InvalidParams);
 		};
-		let out: Result<Value, RpcError> =
-			crate::iam::signup::signup(self.kvs, &mut self.session, v)
-				.await
-				.map(Into::into)
-				.map_err(Into::into);
-
-		out
+		crate::iam::signup::signup(self.kvs, &mut self.session, v)
+			.await
+			.map(Value::from)
+			.map(Into::into)
+			.map_err(Into::into)
 	}
 
-	async fn signin(&mut self, params: Array) -> Result<impl Into<Data>, RpcError> {
+	async fn signin(&mut self, params: Array) -> Result<Data, RpcError> {
 		let Ok(Value::Object(v)) = params.needs_one() else {
 			return Err(RpcError::InvalidParams);
 		};
-		let out: Result<Value, RpcError> =
-			crate::iam::signin::signin(self.kvs, &mut self.session, v)
-				.await
-				.map(Into::into)
-				.map_err(Into::into);
-		out
+		crate::iam::signin::signin(self.kvs, &mut self.session, v)
+			.await
+			.map(Value::from)
+			.map(Into::into)
+			.map_err(Into::into)
 	}
 
-	async fn authenticate(&mut self, params: Array) -> Result<impl Into<Data>, RpcError> {
+	async fn authenticate(&mut self, params: Array) -> Result<Data, RpcError> {
 		let Ok(Value::Strand(token)) = params.needs_one() else {
 			return Err(RpcError::InvalidParams);
 		};
 		crate::iam::verify::token(self.kvs, &mut self.session, &token.0).await?;
-		Ok(Value::None)
+		Ok(Value::None.into())
 	}
 }

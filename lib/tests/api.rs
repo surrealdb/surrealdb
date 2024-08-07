@@ -26,10 +26,7 @@ mod api_integration {
 	use surrealdb::sql::statements::BeginStatement;
 	use surrealdb::sql::statements::CommitStatement;
 	use surrealdb::sql::thing;
-	use surrealdb::sql::Thing;
-	use surrealdb::sql::Value;
-	use surrealdb::Error;
-	use surrealdb::Surreal;
+	use surrealdb::{Error, RecordId, Surreal, Value};
 	use tokio::sync::Semaphore;
 	use tokio::sync::SemaphorePermit;
 	use tracing_subscriber::filter::EnvFilter;
@@ -48,9 +45,9 @@ mod api_integration {
 		name: &'a str,
 	}
 
-	#[derive(Debug, Clone, Deserialize, Eq, PartialEq, Ord, PartialOrd)]
-	struct RecordId {
-		id: Thing,
+	#[derive(Debug, Clone, Deserialize, PartialEq, PartialOrd)]
+	struct ApiRecordId {
+		id: RecordId,
 	}
 
 	#[derive(Debug, Deserialize)]
@@ -58,9 +55,9 @@ mod api_integration {
 		name: String,
 	}
 
-	#[derive(Debug, Clone, Deserialize, Eq, PartialEq, Ord, PartialOrd)]
+	#[derive(Debug, Clone, Deserialize, PartialEq, PartialOrd)]
 	struct RecordBuf {
-		id: Thing,
+		id: RecordId,
 		name: String,
 	}
 
@@ -182,6 +179,7 @@ mod api_integration {
 		use surrealdb::engine::local::Db;
 		use surrealdb::engine::local::Mem;
 		use surrealdb::iam;
+		use surrealdb::RecordIdKey;
 
 		async fn new_db() -> (SemaphorePermit<'static>, Surreal<Db>) {
 			let permit = PERMITS.acquire().await.unwrap();
@@ -216,7 +214,7 @@ mod api_integration {
 			let Some(record): Option<RecordId> = db.create(("item", "foo")).await.unwrap() else {
 				panic!("record not found");
 			};
-			assert_eq!(record.id.to_string(), "item:foo");
+			assert_eq!(*record.key(), RecordIdKey::String("item:foo".to_owned()));
 		}
 
 		#[test_log::test(tokio::test)]
