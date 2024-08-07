@@ -1733,7 +1733,7 @@ mod tests {
 				common: jsonwebtoken::jwk::CommonParameters {
 					public_key_use: None,
 					key_operations: None,
-					algorithm: Some(jsonwebtoken::Algorithm::HS512),
+					key_algorithm: Some(jsonwebtoken::jwk::KeyAlgorithm::HS512),
 					key_id: Some(kid.to_string()),
 					x509_url: None,
 					x509_chain: None,

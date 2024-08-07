@@ -361,7 +361,7 @@ mod tests {
 			common: jsonwebtoken::jwk::CommonParameters {
 				public_key_use: Some(jsonwebtoken::jwk::PublicKeyUse::Signature),
 				key_operations: None,
-				algorithm: Some(jsonwebtoken::Algorithm::RS256),
+				key_algorithm: Some(KeyAlgorithm::RS256),
 				key_id: Some("test_1".to_string()),
 				x509_url: None,
 				x509_chain: Some(vec![
@@ -382,7 +382,7 @@ mod tests {
 			common: jsonwebtoken::jwk::CommonParameters {
 				public_key_use: Some(jsonwebtoken::jwk::PublicKeyUse::Signature),
 				key_operations: None,
-				algorithm: Some(jsonwebtoken::Algorithm::RS256),
+				key_algorithm: Some(KeyAlgorithm::RS256),
 				key_id: Some("test_2".to_string()),
 				x509_url: None,
 				x509_chain: Some(vec![
@@ -648,7 +648,7 @@ mod tests {
 			)),
 		);
 		let mut jwks = DEFAULT_JWKS.clone();
-		jwks.keys[0].common.algorithm = None;
+		jwks.keys[0].common.key_algorithm = None;
 
 		let jwks_path = format!("{}/jwks.json", random_path());
 		let mock_server = MockServer::start().await;
@@ -686,7 +686,7 @@ mod tests {
 			)),
 		);
 		let mut jwks = DEFAULT_JWKS.clone();
-		jwks.keys[0].common.algorithm = None;
+		jwks.keys[0].common.key_algorithm = None;
 
 		let jwks_path = format!("{}/jwks.json", random_path());
 		let mock_server = MockServer::start().await;
