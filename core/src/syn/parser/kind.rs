@@ -82,6 +82,7 @@ impl Parser<'_> {
 			t!("POINT") => Ok(Kind::Point),
 			t!("STRING") => Ok(Kind::String),
 			t!("UUID") => Ok(Kind::Uuid),
+			t!("CLOSURE") => Ok(Kind::Closure),
 			t!("RECORD") => {
 				let span = self.peek().span;
 				if self.eat(t!("<")) {

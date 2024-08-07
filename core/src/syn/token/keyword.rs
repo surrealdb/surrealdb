@@ -49,6 +49,7 @@ keyword! {
 	Changes => "CHANGES",
 	Capacity => "CAPACITY",
 	Class => "CLASS",
+	Closure => "CLOSURE",
 	Comment => "COMMENT",
 	Commit => "COMMIT",
 	Content => "CONTENT",

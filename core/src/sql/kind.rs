@@ -4,7 +4,7 @@ use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Formatter};
 
-#[revisioned(revision = 1)]
+#[revisioned(revision = 2)]
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
@@ -29,6 +29,8 @@ pub enum Kind {
 	Either(Vec<Kind>),
 	Set(Box<Kind>, Option<u64>),
 	Array(Box<Kind>, Option<u64>),
+	#[revision(start = 2)]
+	Closure,
 }
 
 impl Default for Kind {
@@ -71,7 +73,8 @@ impl Kind {
 				| Kind::String
 				| Kind::Uuid
 				| Kind::Record(_)
-				| Kind::Geometry(_) => return None,
+				| Kind::Geometry(_)
+				| Kind::Closure => return None,
 				Kind::Option(x) => {
 					this = x;
 				}
@@ -114,6 +117,7 @@ impl Display for Kind {
 			Kind::Point => f.write_str("point"),
 			Kind::String => f.write_str("string"),
 			Kind::Uuid => f.write_str("uuid"),
+			Kind::Closure => f.write_str("closure"),
 			Kind::Option(k) => write!(f, "option<{}>", k),
 			Kind::Record(k) => match k {
 				k if k.is_empty() => write!(f, "record"),
