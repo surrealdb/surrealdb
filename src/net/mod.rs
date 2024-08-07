@@ -176,7 +176,7 @@ pub async fn init(ds: Arc<Datastore>, ct: CancellationToken) -> Result<(), Error
 		.merge(key::router());
 
 	if env::var("SURREALDB_ENABLE_GRAPHQL") == Ok("true".to_string()) {
-		warn!("IMPORTANT: GraphQL is a pre-release feature. This is not recommended for production use.");
+		warn!("❌🔒IMPORTANT: GraphQL is a pre-release feature with known security flaws. This is not recommended for production use.🔒❌");
 		axum_app = axum_app.merge(gql::router(ds.clone()).await);
 	}
 
