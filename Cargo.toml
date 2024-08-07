@@ -49,6 +49,9 @@ codegen-units = 1
 [profile.bench]
 strip = false
 
+[profile.make]
+inherits = "dev"
+
 [dependencies]
 argon2 = "0.5.2"
 axum = { version = "0.7.4", features = ["tracing", "ws"] }
