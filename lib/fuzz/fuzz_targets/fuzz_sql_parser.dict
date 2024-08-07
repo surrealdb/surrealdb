@@ -201,6 +201,8 @@
 "crypto::sha256("
 "crypto::argon2::compare("
 "crypto::argon2::generate("
+"crypto::blake3::compare("
+"crypto::blake3::generate("
 "crypto::pbkdf2::compare("
 "crypto::pbkdf2::generate("
 "crypto::bcrypt::compare("
