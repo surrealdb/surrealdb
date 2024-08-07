@@ -142,14 +142,14 @@ pub async fn db_access(
 							sess.ip.clone_from(&session.ip);
 							sess.or.clone_from(&session.or);
 							// Compute the value with the params
-							match kvs.evaluate(val.clone(), &sess, vars).await {
+							match kvs.evaluate(val, &sess, vars).await {
 								// The signin value succeeded
 								Ok(val) => {
 									match val.record() {
 										// There is a record returned
 										Some(mut rid) => {
 											// Create the authentication key
-											let key = config(iss.alg, iss.key)?;
+											let key = config(iss.alg, &iss.key)?;
 											// Create the authentication claim
 											let claims = Claims {
 												iss: Some(SERVER_NAME.to_owned()),
@@ -172,8 +172,7 @@ pub async fn db_access(
 												sess.tk = Some(claims.clone().into());
 												sess.ip.clone_from(&session.ip);
 												sess.or.clone_from(&session.or);
-												rid = authenticate_record(kvs, &sess, au.clone())
-													.await?;
+												rid = authenticate_record(kvs, &sess, au).await?;
 											}
 											// Log the authenticated access method info
 											trace!(
@@ -257,7 +256,7 @@ pub async fn db_access(
 						vec![]
 					};
 					// Create the authentication key.
-					let key = config(iss.alg, iss.key)?;
+					let key = config(iss.alg, &iss.key)?;
 					// Create the authentication claim.
 					let claims = Claims {
 						iss: Some(SERVER_NAME.to_owned()),
@@ -291,7 +290,7 @@ pub async fn db_access(
 						sess.tk = Some(claims.clone().into());
 						sess.ip.clone_from(&session.ip);
 						sess.or.clone_from(&session.or);
-						authenticate_generic(kvs, &sess, au.clone()).await?;
+						authenticate_generic(kvs, &sess, au).await?;
 					}
 					// Log the authenticated access method information.
 					trace!("Signing in to database with bearer access method `{}`", ac);
@@ -441,7 +440,7 @@ pub async fn ns_access(
 						vec![]
 					};
 					// Create the authentication key.
-					let key = config(iss.alg, iss.key)?;
+					let key = config(iss.alg, &iss.key)?;
 					// Create the authentication claim.
 					let claims = Claims {
 						iss: Some(SERVER_NAME.to_owned()),
@@ -472,7 +471,7 @@ pub async fn ns_access(
 						sess.tk = Some(claims.clone().into());
 						sess.ip.clone_from(&session.ip);
 						sess.or.clone_from(&session.or);
-						authenticate_generic(kvs, &sess, au.clone()).await?;
+						authenticate_generic(kvs, &sess, au).await?;
 					}
 					// Log the authenticated access method information.
 					trace!("Signing in to database with bearer access method `{}`", ac);
@@ -650,7 +649,7 @@ pub async fn root_access(
 						vec![]
 					};
 					// Create the authentication key.
-					let key = config(iss.alg, iss.key)?;
+					let key = config(iss.alg, &iss.key)?;
 					// Create the authentication claim.
 					let claims = Claims {
 						iss: Some(SERVER_NAME.to_owned()),
@@ -680,7 +679,7 @@ pub async fn root_access(
 						sess.tk = Some(claims.clone().into());
 						sess.ip.clone_from(&session.ip);
 						sess.or.clone_from(&session.or);
-						authenticate_generic(kvs, &sess, au.clone()).await?;
+						authenticate_generic(kvs, &sess, au).await?;
 					}
 					// Log the authenticated access method information.
 					trace!("Signing in to database with bearer access method `{}`", ac);

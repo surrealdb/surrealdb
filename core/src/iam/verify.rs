@@ -183,7 +183,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 				sess.tk = Some(token_data.claims.clone().into());
 				sess.ip.clone_from(&session.ip);
 				sess.or.clone_from(&session.or);
-				rid = authenticate_record(kvs, &sess, au.clone()).await?;
+				rid = authenticate_record(kvs, &sess, au).await?;
 			}
 			// Log the success
 			debug!("Authenticated with record access method `{}`", ac);
@@ -243,7 +243,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 						sess.tk = Some(token_data.claims.clone().into());
 						sess.ip.clone_from(&session.ip);
 						sess.or.clone_from(&session.or);
-						authenticate_generic(kvs, &sess, au.clone()).await?;
+						authenticate_generic(kvs, &sess, au).await?;
 					}
 					// Parse the roles
 					let roles = match token_data.claims.roles {
@@ -299,7 +299,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 						sess.tk = Some(token_data.claims.clone().into());
 						sess.ip.clone_from(&session.ip);
 						sess.or.clone_from(&session.or);
-						let rid = authenticate_record(kvs, &sess, au.clone()).await?;
+						let rid = authenticate_record(kvs, &sess, au).await?;
 						// Log the success
 						debug!("Authenticated with record access method `{}`", ac);
 						// Set the session
@@ -396,7 +396,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 				sess.tk = Some(token_data.claims.clone().into());
 				sess.ip.clone_from(&session.ip);
 				sess.or.clone_from(&session.or);
-				authenticate_generic(kvs, &sess, au.clone()).await?;
+				authenticate_generic(kvs, &sess, au).await?;
 			}
 			// Parse the roles
 			let roles = match token_data.claims.roles {
@@ -494,7 +494,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 				sess.tk = Some(token_data.claims.clone().into());
 				sess.ip.clone_from(&session.ip);
 				sess.or.clone_from(&session.or);
-				authenticate_generic(kvs, &sess, au.clone()).await?;
+				authenticate_generic(kvs, &sess, au).await?;
 			}
 			// Parse the roles
 			let roles = match token_data.claims.roles {
@@ -637,7 +637,7 @@ fn verify_pass(pass: &str, hash: &str) -> Result<(), Error> {
 pub async fn authenticate_record(
 	kvs: &Datastore,
 	session: &Session,
-	authenticate: Value,
+	authenticate: &Value,
 ) -> Result<Thing, Error> {
 	match kvs.evaluate(authenticate, session, None).await {
 		Ok(val) => match val.record() {
@@ -659,7 +659,7 @@ pub async fn authenticate_record(
 pub async fn authenticate_generic(
 	kvs: &Datastore,
 	session: &Session,
-	authenticate: Value,
+	authenticate: &Value,
 ) -> Result<(), Error> {
 	match kvs.evaluate(authenticate, session, None).await {
 		Ok(val) => {
