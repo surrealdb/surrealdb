@@ -5,10 +5,6 @@ pub mod traces;
 use crate::cli::validator::parser::env_filter::CustomEnvFilter;
 use once_cell::sync::Lazy;
 use opentelemetry::metrics::MetricsError;
-// use opentelemetry::sdk::resource::{
-// 	EnvResourceDetector, SdkProvidedResourceDetector, TelemetryResourceDetector,
-// };
-// use opentelemetry::sdk::Resource;
 use opentelemetry::Context;
 use opentelemetry::KeyValue;
 use opentelemetry_sdk::resource::{
