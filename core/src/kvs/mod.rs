@@ -33,6 +33,7 @@ mod rocksdb;
 mod surrealkv;
 mod tikv;
 
+mod index;
 #[cfg(test)]
 mod tests;
 
