@@ -2249,6 +2249,69 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 			}
 		}
 
+		// Test with removed access method
+		{
+			let ds = Datastore::new("memory").await.unwrap();
+			let sess = Session::owner().with_ns("test").with_db("test");
+			let res = ds
+				.execute(
+					r#"
+				DEFINE ACCESS api ON DATABASE TYPE BEARER DURATION FOR GRANT 1s FOR SESSION 2h;
+				DEFINE USER tobie ON DATABASE ROLES EDITOR;
+				ACCESS api GRANT FOR USER tobie;
+				"#,
+					&sess,
+					None,
+				)
+				.await
+				.unwrap();
+
+			// Get the bearer key from grant.
+			let result = if let Ok(res) = &res.last().unwrap().result {
+				res.clone()
+			} else {
+				panic!("Unable to retrieve bearer key grant");
+			};
+			let grant = result
+				.coerce_to_object()
+				.unwrap()
+				.get("grant")
+				.unwrap()
+				.clone()
+				.coerce_to_object()
+				.unwrap();
+			let key = grant.get("key").unwrap().clone().as_string();
+
+			// Remove bearer access method
+			ds.execute(&format!(r#"REMOVE ACCESS api ON DATABASE;"#), &sess, None).await.unwrap();
+
+			// Signin with the bearer key
+			let mut sess = Session {
+				ns: Some("test".to_string()),
+				db: Some("test".to_string()),
+				..Default::default()
+			};
+			let mut vars: HashMap<&str, Value> = HashMap::new();
+			vars.insert("key", key.into());
+			let res = db_access(
+				&ds,
+				&mut sess,
+				"test".to_string(),
+				"test".to_string(),
+				"api".to_string(),
+				vars.into(),
+			)
+			.await;
+
+			match res {
+				Err(Error::AccessNotFound) => {} // ok
+				res => panic!(
+					"Expected an access method not found error, but instead received: {:?}",
+					res
+				),
+			}
+		}
+
 		// Test with missing key
 		{
 			let ds = Datastore::new("memory").await.unwrap();
@@ -2891,6 +2954,61 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 			}
 		}
 
+		// Test with removed access method
+		{
+			let ds = Datastore::new("memory").await.unwrap();
+			let sess = Session::owner().with_ns("test");
+			let res = ds
+				.execute(
+					r#"
+				DEFINE ACCESS api ON NAMESPACE TYPE BEARER DURATION FOR GRANT 1s FOR SESSION 2h;
+				DEFINE USER tobie ON NAMESPACE ROLES EDITOR;
+				ACCESS api GRANT FOR USER tobie;
+				"#,
+					&sess,
+					None,
+				)
+				.await
+				.unwrap();
+
+			// Get the bearer key from grant.
+			let result = if let Ok(res) = &res.last().unwrap().result {
+				res.clone()
+			} else {
+				panic!("Unable to retrieve bearer key grant");
+			};
+			let grant = result
+				.coerce_to_object()
+				.unwrap()
+				.get("grant")
+				.unwrap()
+				.clone()
+				.coerce_to_object()
+				.unwrap();
+			let key = grant.get("key").unwrap().clone().as_string();
+
+			// Remove bearer access method
+			ds.execute(&format!(r#"REMOVE ACCESS api ON NAMESPACE;"#), &sess, None).await.unwrap();
+
+			// Signin with the bearer key
+			let mut sess = Session {
+				ns: Some("test".to_string()),
+				..Default::default()
+			};
+			let mut vars: HashMap<&str, Value> = HashMap::new();
+			vars.insert("key", key.into());
+			let res =
+				ns_access(&ds, &mut sess, "test".to_string(), "api".to_string(), vars.into()).await;
+
+			match res {
+				Err(Error::AccessNotFound) => {} // ok
+				res => panic!(
+					"Expected an access method not found error, but instead received: {:?}",
+					res
+				),
+			}
+		}
+
 		// Test with missing key
 		{
 			let ds = Datastore::new("memory").await.unwrap();
@@ -3478,6 +3596,59 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				Err(Error::InvalidAuth) => {} // ok
 				res => panic!(
 					"Expected a generic authentication error, but instead received: {:?}",
+					res
+				),
+			}
+		}
+
+		// Test with removed access method
+		{
+			let ds = Datastore::new("memory").await.unwrap();
+			let sess = Session::owner();
+			let res = ds
+				.execute(
+					r#"
+				DEFINE ACCESS api ON ROOT TYPE BEARER DURATION FOR GRANT 1s FOR SESSION 2h;
+				DEFINE USER tobie ON ROOT ROLES EDITOR;
+				ACCESS api GRANT FOR USER tobie;
+				"#,
+					&sess,
+					None,
+				)
+				.await
+				.unwrap();
+
+			// Get the bearer key from grant.
+			let result = if let Ok(res) = &res.last().unwrap().result {
+				res.clone()
+			} else {
+				panic!("Unable to retrieve bearer key grant");
+			};
+			let grant = result
+				.coerce_to_object()
+				.unwrap()
+				.get("grant")
+				.unwrap()
+				.clone()
+				.coerce_to_object()
+				.unwrap();
+			let key = grant.get("key").unwrap().clone().as_string();
+
+			// Remove bearer access method
+			ds.execute(&format!(r#"REMOVE ACCESS api ON ROOT;"#), &sess, None).await.unwrap();
+
+			// Signin with the bearer key
+			let mut sess = Session {
+				..Default::default()
+			};
+			let mut vars: HashMap<&str, Value> = HashMap::new();
+			vars.insert("key", key.into());
+			let res = root_access(&ds, &mut sess, "api".to_string(), vars.into()).await;
+
+			match res {
+				Err(Error::AccessNotFound) => {} // ok
+				res => panic!(
+					"Expected an access method not found error, but instead received: {:?}",
 					res
 				),
 			}

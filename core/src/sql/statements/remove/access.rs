@@ -35,6 +35,9 @@ impl RemoveAccessStatement {
 					// Delete the definition
 					let key = crate::key::root::access::ac::new(&ac.name);
 					txn.del(key).await?;
+					// Delete any associated data including access grants.
+					let key = crate::key::root::access::all::new(&ac.name);
+					txn.delp(key).await?;
 					// Clear the cache
 					txn.clear();
 					// Ok all good
