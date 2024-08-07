@@ -29,7 +29,7 @@ impl Closure {
 		args: Vec<Value>,
 	) -> Result<Value, Error> {
 		let mut ctx = Context::new(ctx);
-		for (i, (name, kind)) in (&self.args).iter().enumerate() {
+		for (i, (name, kind)) in self.args.iter().enumerate() {
 			match (kind, args.get(i)) {
 				(Kind::Option(_), None) => continue,
 				(_, None) => {

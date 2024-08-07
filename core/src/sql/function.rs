@@ -213,7 +213,7 @@ impl Function {
 			}
 			Self::Inline(v, x) => {
 				let val = match v {
-					Value::Param(p) => ctx.value(&p.to_raw().as_str()).unwrap_or(&Value::None),
+					Value::Param(p) => ctx.value(p.to_raw().as_str()).unwrap_or(&Value::None),
 					Value::Block(_) | Value::Subquery(_) | Value::Idiom(_) | Value::Function(_) => {
 						&stk.run(|stk| v.compute(stk, ctx, opt, doc)).await?
 					}
@@ -233,12 +233,10 @@ impl Function {
 							.await?;
 						stk.run(|stk| closure.compute(stk, ctx, opt, doc, a)).await
 					}
-					v => {
-						return Err(Error::InvalidFunction {
-							name: "ANONYMOUS".to_string(),
-							message: format!("'{}' is not a function", v.kindof()),
-						})
-					}
+					v => Err(Error::InvalidFunction {
+						name: "ANONYMOUS".to_string(),
+						message: format!("'{}' is not a function", v.kindof()),
+					}),
 				}
 			}
 			Self::Custom(s, x) => {
