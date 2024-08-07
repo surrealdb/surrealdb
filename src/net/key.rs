@@ -9,7 +9,6 @@ use axum::{Extension, Router};
 use axum_extra::extract::Query;
 use axum_extra::TypedHeader;
 use bytes::Bytes;
-
 use serde::Deserialize;
 use std::str;
 use surrealdb::dbs::Session;
