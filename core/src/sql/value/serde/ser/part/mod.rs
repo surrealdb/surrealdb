@@ -57,6 +57,10 @@ impl ser::Serializer for Serializer {
 			"Graph" => Ok(Part::Graph(value.serialize(ser::graph::Serializer.wrap())?)),
 			"Start" => Ok(Part::Start(value.serialize(ser::value::Serializer.wrap())?)),
 			"Value" => Ok(Part::Value(value.serialize(ser::value::Serializer.wrap())?)),
+			"Method" => Ok(Part::Method(
+				value.serialize(ser::string::Serializer.wrap())?,
+				value.serialize(ser::value::vec::Serializer.wrap())?,
+			)),
 			variant => {
 				Err(Error::custom(format!("unexpected newtype variant `{name}::{variant}`")))
 			}
@@ -130,6 +134,13 @@ mod tests {
 	#[test]
 	fn value() {
 		let part = Part::Value(sql::thing("foo:bar").unwrap().into());
+		let serialized = part.serialize(Serializer.wrap()).unwrap();
+		assert_eq!(part, serialized);
+	}
+
+	#[test]
+	fn method() {
+		let part = Part::Method(Default::default(), Default::default());
 		let serialized = part.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(part, serialized);
 	}
