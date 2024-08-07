@@ -720,7 +720,7 @@ mod tests {
 			)),
 		);
 		let mut jwks = DEFAULT_JWKS.clone();
-		jwks.keys[0].common.key_algorithm = Some(jsonwebtoken::jwk::KeyAlgorithm::RSA_OAEP_256);
+		jwks.keys[0].common.key_algorithm = Some(KeyAlgorithm::RSA_OAEP_256);
 
 		let jwks_path = format!("{}/jwks.json", random_path());
 		let mock_server = MockServer::start().await;
