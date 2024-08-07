@@ -1,9 +1,9 @@
 use std::mem;
 
-use async_graphql::dynamic::Scalar;
-use surrealdb::sql::{
+use crate::sql::{
 	statements::UseStatement, Cond, Ident, Idiom, Limit, Order, Orders, Part, Start, Table, Value,
 };
+use async_graphql::dynamic::Scalar;
 
 pub trait IntoExt<T> {
 	fn intox(self) -> T;
@@ -157,8 +157,8 @@ impl ValidatorExt for Scalar {
 	}
 }
 
-use surrealdb::sql::Object as SqlObject;
-use surrealdb::sql::Value as SqlValue;
+use crate::sql::Object as SqlObject;
+use crate::sql::Value as SqlValue;
 
 pub trait TryAsExt {
 	fn try_as_object(self) -> Result<SqlObject, Self>

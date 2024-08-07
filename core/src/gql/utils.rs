@@ -66,11 +66,11 @@ impl GqlValueUtils for GqlValue {
 	}
 }
 
-use surrealdb::dbs::Session;
-use surrealdb::kvs::Datastore;
-use surrealdb::kvs::LockType;
-use surrealdb::kvs::TransactionType;
-use surrealdb::sql::{Thing, Value as SqlValue};
+use crate::dbs::Session;
+use crate::kvs::Datastore;
+use crate::kvs::LockType;
+use crate::kvs::TransactionType;
+use crate::sql::{Thing, Value as SqlValue};
 
 use super::error::GqlError;
 

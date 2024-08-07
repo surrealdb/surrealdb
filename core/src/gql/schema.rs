@@ -14,14 +14,14 @@ use async_graphql::Value as GqlValue;
 use rust_decimal::prelude::FromPrimitive;
 use rust_decimal::Decimal;
 use serde_json::Number;
-use surrealdb::dbs::Session;
-use surrealdb::kvs::Datastore;
-use surrealdb::sql::statements::{DefineFieldStatement, SelectStatement};
-use surrealdb::sql::Kind;
-use surrealdb::sql::{self, Table};
-use surrealdb::sql::{Cond, Fields};
-use surrealdb::sql::{Expression, Geometry};
-use surrealdb::sql::{Statement, Thing};
+use crate::dbs::Session;
+use crate::kvs::Datastore;
+use crate::sql::statements::{DefineFieldStatement, SelectStatement};
+use crate::sql::Kind;
+use crate::sql::{self, Table};
+use crate::sql::{Cond, Fields};
+use crate::sql::{Expression, Geometry};
+use crate::sql::{Statement, Thing};
 
 use super::error::{resolver_error, GqlError};
 use super::ext::IntoExt;
@@ -29,10 +29,10 @@ use super::ext::ValidatorExt;
 use crate::gql::error::{internal_error, schema_error, type_error};
 use crate::gql::ext::TryAsExt;
 use crate::gql::utils::{get_record, GqlValueUtils};
-use surrealdb::kvs::LockType;
-use surrealdb::kvs::TransactionType;
-use surrealdb::sql::Object as SqlObject;
-use surrealdb::sql::Value as SqlValue;
+use crate::kvs::LockType;
+use crate::kvs::TransactionType;
+use crate::sql::Object as SqlObject;
+use crate::sql::Value as SqlValue;
 
 macro_rules! limit_input {
 	() => {
@@ -54,13 +54,13 @@ macro_rules! id_input {
 
 macro_rules! order {
 	(asc, $field:expr) => {{
-		let mut tmp = ::surrealdb::sql::Order::default();
+		let mut tmp = sql::Order::default();
 		tmp.order = $field.into();
 		tmp.direction = true;
 		tmp
 	}};
 	(desc, $field:expr) => {{
-		let mut tmp = ::surrealdb::sql::Order::default();
+		let mut tmp = sql::Order::default();
 		tmp.order = $field.into();
 		tmp
 	}};
@@ -82,7 +82,7 @@ pub async fn generate_schema(
 	let mut query = Object::new("Query");
 	let mut types: Vec<Type> = Vec::new();
 
-	info!(ns, db, ?tbs, "generating schema");
+	trace!(ns, db, ?tbs, "generating schema");
 
 	if tbs.len() == 0 {
 		return Err(schema_error("no tables found in database"));
@@ -517,21 +517,18 @@ fn make_table_field_resolver(
 	}
 }
 
-fn sql_value_to_gql_value(v: SqlValue) -> Result<GqlValue, GqlError> {
+pub fn sql_value_to_gql_value(v: SqlValue) -> Result<GqlValue, GqlError> {
 	let out = match v {
 		SqlValue::None => GqlValue::Null,
 		SqlValue::Null => GqlValue::Null,
 		SqlValue::Bool(b) => GqlValue::Boolean(b),
 		SqlValue::Number(n) => match n {
-			surrealdb::sql::Number::Int(i) => GqlValue::Number(i.into()),
-			surrealdb::sql::Number::Float(f) => GqlValue::Number(
+			crate::sql::Number::Int(i) => GqlValue::Number(i.into()),
+			crate::sql::Number::Float(f) => GqlValue::Number(
 				Number::from_f64(f)
 					.ok_or(resolver_error("unimplemented: graceful NaN and Inf handling"))?,
 			),
-			num @ surrealdb::sql::Number::Decimal(_) => GqlValue::String(num.to_string()),
-			n => {
-				return Err(internal_error(format!("found unsupported number type: {n:?}")));
-			}
+			num @ crate::sql::Number::Decimal(_) => GqlValue::String(num.to_string()),
 		},
 		SqlValue::Strand(s) => GqlValue::String(s.0),
 		d @ SqlValue::Duration(_) => GqlValue::String(d.to_string()),
@@ -617,7 +614,6 @@ fn kind_to_type(kind: Kind, types: &mut Vec<Type>) -> Result<TypeRef, GqlError> 
 		}
 		Kind::Set(_, _) => return Err(schema_error("Kind::Set is not yet supported")),
 		Kind::Array(k, _) => TypeRef::List(Box::new(kind_to_type(*k, types)?)),
-		k => return Err(internal_error(format!("found unkown kind: {k:?}"))),
 	};
 
 	let out = match optional {
@@ -683,7 +679,6 @@ fn filter_from_type(
 		Kind::Either(_) => {}
 		Kind::Set(_, _) => {}
 		Kind::Array(_, _) => {}
-		_ => {}
 	};
 	Ok(filter)
 }
@@ -867,7 +862,7 @@ macro_rules! any_try_kinds {
 }
 
 fn gql_to_sql_kind(val: &GqlValue, kind: Kind) -> Result<SqlValue, GqlError> {
-	use surrealdb::syn;
+	use crate::syn;
 	match kind {
 		Kind::Any => match val {
 			GqlValue::String(s) => {
@@ -923,7 +918,6 @@ fn gql_to_sql_kind(val: &GqlValue, kind: Kind) -> Result<SqlValue, GqlError> {
 						None => Err(type_error(kind, val)),
 					},
 					sql::Number::Decimal(d) => Ok(SqlValue::Number(sql::Number::Decimal(d))),
-					_ => Err(type_error(kind, val)),
 				},
 				_ => Err(type_error(kind, val)),
 			},
@@ -956,7 +950,6 @@ fn gql_to_sql_kind(val: &GqlValue, kind: Kind) -> Result<SqlValue, GqlError> {
 						Ok(f) => Ok(SqlValue::Number(sql::Number::Float(f))),
 						_ => Err(type_error(kind, val)),
 					},
-					_ => Err(type_error(kind, val)),
 				},
 				_ => Err(type_error(kind, val)),
 			},
@@ -984,7 +977,6 @@ fn gql_to_sql_kind(val: &GqlValue, kind: Kind) -> Result<SqlValue, GqlError> {
 						Ok(i) => Ok(SqlValue::Number(sql::Number::Int(i))),
 						_ => Err(type_error(kind, val)),
 					},
-					_ => Err(type_error(kind, val)),
 				},
 				_ => Err(type_error(kind, val)),
 			},
@@ -1128,6 +1120,5 @@ fn gql_to_sql_kind(val: &GqlValue, kind: Kind) -> Result<SqlValue, GqlError> {
 			}
 			_ => Err(type_error(kind, val)),
 		},
-		k => Err(internal_error(format!("unknown kind: {k:?}"))),
 	}
 }

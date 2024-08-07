@@ -1,19 +1,14 @@
 use std::fmt::Debug;
 
 use async_graphql::{InputType, InputValueError};
-use axum::{
-	body::{boxed, BoxBody},
-	response::IntoResponse,
-};
-use http::StatusCode;
-use hyper::Body;
-use surrealdb::sql::Kind;
 use thiserror::Error;
+
+use crate::sql::Kind;
 
 #[derive(Debug, Error)]
 pub enum GqlError {
 	#[error("Database error: {0}")]
-	DbError(surrealdb::err::Error),
+	DbError(crate::err::Error),
 	#[error("Error generating schema: {0}")]
 	SchemaError(String),
 	#[error("Error resolving request: {0}")]
@@ -49,8 +44,8 @@ pub fn type_error(kind: Kind, val: &async_graphql::Value) -> GqlError {
 	}
 }
 
-impl From<surrealdb::err::Error> for GqlError {
-	fn from(value: surrealdb::err::Error) -> Self {
+impl From<crate::err::Error> for GqlError {
+	fn from(value: crate::err::Error) -> Self {
 		GqlError::DbError(value)
 	}
 }
@@ -64,12 +59,12 @@ where
 	}
 }
 
-impl IntoResponse for GqlError {
-	fn into_response(self) -> http::Response<BoxBody> {
-		info!("sending error {self:?}");
-		http::Response::builder()
-			.status(StatusCode::BAD_REQUEST)
-			.body(boxed(Body::from(format!("{}", self))))
-			.unwrap()
-	}
-}
+// impl IntoResponse for GqlError {
+// 	fn into_response(self) -> http::Response<BoxBody> {
+// 		info!("sending error {self:?}");
+// 		http::Response::builder()
+// 			.status(StatusCode::BAD_REQUEST)
+// 			.body(boxed(Body::from(format!("{}", self))))
+// 			.unwrap()
+// 	}
+// }

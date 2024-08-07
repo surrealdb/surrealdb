@@ -1,42 +1,13 @@
-use async_graphql_axum::{self, GraphQLBatchRequest, GraphQLRequest, GraphQLResponse};
 use tokio::sync::RwLock;
 
-use std::{
-	collections::BTreeMap,
-	convert::Infallible,
-	fmt::Debug,
-	hash::Hash,
-	marker::PhantomData,
-	sync::Arc,
-	task::{Context, Poll},
-	time::Duration,
-};
+use std::{collections::BTreeMap, fmt::Debug, hash::Hash, marker::PhantomData, sync::Arc};
 
-use async_graphql::{
-	dynamic::Schema,
-	http::{create_multipart_mixed_stream, is_accept_multipart_mixed},
-	Executor,
-};
-use axum::{
-	body::{BoxBody, HttpBody, StreamBody},
-	extract::FromRequest,
-	http::{Request as HttpRequest, Response as HttpResponse},
-	response::IntoResponse,
-	BoxError,
-};
-use bytes::Bytes;
-use futures_util::{future::BoxFuture, StreamExt};
-use tower_service::Service;
+use async_graphql::dynamic::Schema;
 
-use surrealdb::dbs::Session;
-use surrealdb::kvs::Datastore;
+use crate::dbs::Session;
+use crate::kvs::Datastore;
 
-use crate::net::AppState;
-
-use super::{
-	error::{resolver_error, GqlError},
-	schema::generate_schema,
-};
+use super::{error::GqlError, schema::generate_schema};
 
 pub trait Invalidator: Debug + Clone + Send + Sync + 'static {
 	type MetaData: Debug + Clone + Send + Sync + Hash;
@@ -70,6 +41,7 @@ impl Invalidator for Pessimistic {
 #[derive(Clone)]
 pub struct SchemaCache<I: Invalidator = Pessimistic> {
 	inner: Arc<RwLock<BTreeMap<(String, String), (Schema, I::MetaData)>>>,
+	pub datastore: Arc<Datastore>,
 	_invalidator: PhantomData<I>,
 }
 
@@ -83,9 +55,10 @@ impl<I: Invalidator + Debug> Debug for SchemaCache<I> {
 }
 
 impl<I: Invalidator> SchemaCache<I> {
-	pub fn new() -> Self {
+	pub fn new(datastore: Arc<Datastore>) -> Self {
 		SchemaCache {
-			inner: BTreeMap::new(),
+			inner: Default::default(),
+			datastore,
 			_invalidator: PhantomData,
 		}
 	}
@@ -110,12 +83,4 @@ impl<I: Invalidator> SchemaCache<I> {
 
 		return Ok(schema);
 	}
-
-	// fn get(&self, ns: String, db: String) -> Option<&(Schema, I::MetaData)> {
-	// 	self.inner.get(&(ns, db))
-	// }
-
-	// fn insert(&mut self, ns: String, db: String, schema: Schema, meta: I::MetaData) {
-	// 	self.inner.insert((ns, db), (schema, meta));
-	// }
 }

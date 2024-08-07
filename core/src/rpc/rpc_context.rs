@@ -1,9 +1,11 @@
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, mem};
 
+use async_graphql::BatchRequest;
 use uuid::Uuid;
 
 use crate::{
 	dbs::{QueryType, Response, Session},
+	gql,
 	kvs::Datastore,
 	rpc::args::Take,
 	sql::{Array, Function, Model, Statement, Strand, Value},
@@ -22,10 +24,15 @@ pub trait RpcContext {
 
 	const LQ_SUPPORT: bool = false;
 	fn handle_live(&self, _lqid: &Uuid) -> impl std::future::Future<Output = ()> + Send {
-		async { unreachable!() }
+		async { unimplemented!("handle functions must be redefined if LQ_SUPPORT = true") }
 	}
 	fn handle_kill(&self, _lqid: &Uuid) -> impl std::future::Future<Output = ()> + Send {
-		async { unreachable!() }
+		async { unimplemented!("handle functions must be redefined if LQ_SUPPORT = true") }
+	}
+
+	const GQL_SUPPORT: bool = false;
+	fn graphql_schema_cache(&self) -> gql::cache::SchemaCache {
+		unimplemented!("graphql_schema_cache must be implemented if GQL_SUPPORT = true")
 	}
 
 	async fn execute(&mut self, method: Method, params: Array) -> Result<Data, RpcError> {
@@ -55,6 +62,7 @@ pub trait RpcContext {
 			Method::Query => self.query(params).await.map(Into::into).map_err(Into::into),
 			Method::Relate => self.relate(params).await.map(Into::into).map_err(Into::into),
 			Method::Run => self.run(params).await.map(Into::into).map_err(Into::into),
+			Method::GraphQL => self.graphql(params).await.map(Into::into).map_err(Into::into),
 			Method::Unknown => Err(RpcError::MethodNotFound),
 		}
 	}
@@ -75,6 +83,7 @@ pub trait RpcContext {
 			Method::Query => self.query(params).await.map(Into::into).map_err(Into::into),
 			Method::Relate => self.relate(params).await.map(Into::into).map_err(Into::into),
 			Method::Run => self.run(params).await.map(Into::into).map_err(Into::into),
+			Method::GraphQL => self.graphql(params).await.map(Into::into).map_err(Into::into),
 			Method::Unknown => Err(RpcError::MethodNotFound),
 			_ => Err(RpcError::MethodNotFound),
 		}
@@ -116,12 +125,14 @@ pub trait RpcContext {
 		let Ok(Value::Object(v)) = params.needs_one() else {
 			return Err(RpcError::InvalidParams);
 		};
-		let mut tmp_session = self.session().clone();
+		let mut tmp_session = mem::take(self.session_mut());
+
 		let out: Result<Value, RpcError> =
 			crate::iam::signup::signup(self.kvs(), &mut tmp_session, v)
 				.await
 				.map(Into::into)
 				.map_err(Into::into);
+
 		*self.session_mut() = tmp_session;
 
 		out
@@ -131,7 +142,7 @@ pub trait RpcContext {
 		let Ok(Value::Object(v)) = params.needs_one() else {
 			return Err(RpcError::InvalidParams);
 		};
-		let mut tmp_session = self.session().clone();
+		let mut tmp_session = mem::take(self.session_mut());
 		let out: Result<Value, RpcError> =
 			crate::iam::signin::signin(self.kvs(), &mut tmp_session, v)
 				.await
@@ -150,7 +161,7 @@ pub trait RpcContext {
 		let Ok(Value::Strand(token)) = params.needs_one() else {
 			return Err(RpcError::InvalidParams);
 		};
-		let mut tmp_session = self.session().clone();
+		let mut tmp_session = mem::take(self.session_mut());
 		crate::iam::verify::token(self.kvs(), &mut tmp_session, &token.0).await?;
 		*self.session_mut() = tmp_session;
 		Ok(Value::None)
@@ -601,6 +612,99 @@ pub trait RpcContext {
 			.process(Statement::Value(func).into(), self.session(), Some(self.vars().clone()))
 			.await?;
 		res.remove(0).result.map_err(Into::into)
+	}
+
+	// ------------------------------
+	// Methods for querying with GraphQL
+	// ------------------------------
+
+	async fn graphql(&self, params: Array) -> Result<impl Into<Data>, RpcError> {
+		if !Self::GQL_SUPPORT {
+			return Err(RpcError::BadGQLConfig);
+		}
+
+		let Ok((query, options)) = params.needs_one_or_two() else {
+			return Err(RpcError::InvalidParams);
+		};
+
+		enum GraphQLFormat {
+			Json,
+			Cbor,
+		}
+
+		let mut pretty = false;
+		let mut format = GraphQLFormat::Json;
+		match options {
+			Value::Object(o) => {
+				for (k, v) in o {
+					match (k.as_str(), v) {
+						("pretty", Value::Bool(b)) => pretty = b,
+						("format", Value::Strand(s)) => match s.as_str() {
+							"json" => format = GraphQLFormat::Json,
+							"cbor" => format = GraphQLFormat::Cbor,
+							_ => return Err(RpcError::InvalidParams),
+						},
+						_ => return Err(RpcError::InvalidParams),
+					}
+				}
+			}
+			_ => return Err(RpcError::InvalidParams),
+		}
+
+		let req = match query {
+			Value::Strand(s) => match format {
+				GraphQLFormat::Json => {
+					let tmp: BatchRequest =
+						serde_json::from_str(s.as_str()).map_err(|_| RpcError::ParseError)?;
+					tmp.into_single().map_err(|_| RpcError::ParseError)?
+				}
+				GraphQLFormat::Cbor => {
+					return Err(RpcError::Thrown("Cbor is not yet supported".to_string()))
+				}
+			},
+			Value::Object(mut o) => {
+				let mut tmp = match o.remove("query") {
+					Some(Value::Strand(s)) => async_graphql::Request::new(s),
+					_ => return Err(RpcError::InvalidParams),
+				};
+
+				match o.remove("variables").or(o.remove("vars")) {
+					Some(obj @ Value::Object(_)) => {
+						let gql_vars = gql::schema::sql_value_to_gql_value(obj)
+							.map_err(|_| RpcError::InvalidRequest)?;
+
+						tmp = tmp.variables(async_graphql::Variables::from_value(gql_vars));
+					}
+					Some(_) => return Err(RpcError::InvalidParams),
+					None => {}
+				}
+
+				match o.remove("operationName").or(o.remove("operation")) {
+					Some(Value::Strand(s)) => tmp = tmp.operation_name(s),
+					Some(_) => return Err(RpcError::InvalidParams),
+					None => {}
+				}
+
+				tmp
+			}
+			_ => return Err(RpcError::InvalidParams),
+		};
+
+		let schema = self
+			.graphql_schema_cache()
+			.get_schema(self.session())
+			.await
+			.map_err(|e| RpcError::Thrown(e.to_string()))?;
+
+		let res = schema.execute(req).await;
+
+		let out = match pretty {
+			true => serde_json::to_string_pretty(&res),
+			false => serde_json::to_string(&res),
+		}
+		.map_err(|_| RpcError::Thrown("Serialization Error".to_string()))?;
+
+		Ok(Value::Strand(out.into()))
 	}
 
 	// ------------------------------
