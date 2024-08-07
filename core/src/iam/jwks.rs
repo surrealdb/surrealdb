@@ -2,7 +2,9 @@ use crate::dbs::capabilities::NetTarget;
 use crate::err::Error;
 use crate::kvs::Datastore;
 use chrono::{DateTime, Duration, Utc};
-use jsonwebtoken::jwk::{AlgorithmParameters::*, Jwk, JwkSet, KeyOperations, PublicKeyUse};
+use jsonwebtoken::jwk::{
+	AlgorithmParameters::*, Jwk, JwkSet, KeyAlgorithm, KeyOperations, PublicKeyUse,
+};
 use jsonwebtoken::{Algorithm::*, DecodingKey, Validation};
 use once_cell::sync::Lazy;
 use reqwest::{Client, Url};
@@ -114,8 +116,25 @@ pub(super) async fn config(
 	// When missing, tokens must be validated using only the required key type parameter
 	// This is discouraged, as it requires relying on the algorithm specified in the token
 	// Source: https://datatracker.ietf.org/doc/html/rfc7517#section-4.4
-	let alg = match jwk.common.algorithm {
-		Some(alg) => alg,
+	let alg = match jwk.common.key_algorithm {
+		Some(alg) => match alg {
+			KeyAlgorithm::HS256 => HS256,
+			KeyAlgorithm::HS384 => HS384,
+			KeyAlgorithm::HS512 => HS512,
+			KeyAlgorithm::EdDSA => EdDSA,
+			KeyAlgorithm::ES256 => ES256,
+			KeyAlgorithm::ES384 => ES384,
+			KeyAlgorithm::PS256 => PS256,
+			KeyAlgorithm::PS384 => PS384,
+			KeyAlgorithm::PS512 => PS512,
+			KeyAlgorithm::RS256 => RS256,
+			KeyAlgorithm::RS384 => RS384,
+			KeyAlgorithm::RS512 => RS512,
+			_ => {
+				warn!("Unspported value for parameter 'alg' in JWK object: '{:?}'", alg);
+				return Err(Error::InvalidAuth); // Return opaque error
+			}
+		},
 		// If not specified, use the algorithm provided in the token header
 		// It is critical that the JWT library prevents the "none" algorithm from being used
 		// Reference: https://auth0.com/blog/critical-vulnerabilities-in-json-web-token-libraries/#Meet-the--None--Algorithm

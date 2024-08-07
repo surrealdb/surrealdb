@@ -140,7 +140,7 @@ jemallocator = "0.5.4"
 assert_fs = "1.0.13"
 chrono = { version = "0.4.31", features = ["serde"] }
 env_logger = "0.10.1"
-jsonwebtoken = { version = "8.3.0-surreal.1", package = "surrealdb-jsonwebtoken" }
+jsonwebtoken = { version = "9.3.0" }
 opentelemetry-proto = { version = "0.2.0", features = [
     "gen-tonic",
     "traces",
