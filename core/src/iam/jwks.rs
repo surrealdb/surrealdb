@@ -713,6 +713,39 @@ mod tests {
 	}
 
 	#[tokio::test]
+	async fn test_unsupported_algorithm() {
+		let ds = Datastore::new("memory").await.unwrap().with_capabilities(
+			Capabilities::default().with_network_targets(Targets::<NetTarget>::Some(
+				[NetTarget::from_str("127.0.0.1").unwrap()].into(),
+			)),
+		);
+		let mut jwks = DEFAULT_JWKS.clone();
+		jwks.keys[0].common.key_algorithm = Some(jsonwebtoken::jwk::KeyAlgorithm::RSA_OAEP_256);
+
+		let jwks_path = format!("{}/jwks.json", random_path());
+		let mock_server = MockServer::start().await;
+		let response = ResponseTemplate::new(200).set_body_json(jwks);
+		Mock::given(method("GET"))
+			.and(path(&jwks_path))
+			.respond_with(response)
+			.mount(&mock_server)
+			.await;
+		let url = mock_server.uri();
+
+		let res = config(
+			&ds,
+			"test_1",
+			&format!("{}/{}", &url, &jwks_path),
+			jsonwebtoken::Algorithm::RS256,
+		)
+		.await;
+		assert!(
+			res.is_err(),
+			"Unexpected success validating token with key specifies an unsupported algorithm"
+		);
+	}
+
+	#[tokio::test]
 	async fn test_no_key_use() {
 		let ds = Datastore::new("memory").await.unwrap().with_capabilities(
 			Capabilities::default().with_network_targets(Targets::<NetTarget>::Some(
