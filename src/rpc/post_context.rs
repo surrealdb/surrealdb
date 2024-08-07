@@ -18,7 +18,7 @@ pub struct PostRpcContext {
 	pub gql_schema: SchemaCache<Pessimistic>,
 }
 
-impl<'a> PostRpcContext {
+impl PostRpcContext {
 	pub fn new(kvs: &Arc<Datastore>, session: Session, vars: BTreeMap<String, Value>) -> Self {
 		Self {
 			kvs: kvs.clone(),

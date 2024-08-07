@@ -78,7 +78,7 @@ pub async fn generate_schema(
 	let tx = kvs.transaction(TransactionType::Read, LockType::Optimistic).await?;
 	let ns = session.ns.as_ref().expect("missing ns should have been caught");
 	let db = session.db.as_ref().expect("missing db should have been caught");
-	let tbs = tx.all_tb(&ns, &db).await?;
+	let tbs = tx.all_tb(ns, db).await?;
 	let mut query = Object::new("Query");
 	let mut types: Vec<Type> = Vec::new();
 
@@ -112,7 +112,7 @@ pub async fn generate_schema(
 		types.push(Type::InputObject(filter_id()));
 
 		let sess1 = session.to_owned();
-		let fds = tx.all_tb_fields(&ns, &db, &tb.name.0).await?;
+		let fds = tx.all_tb_fields(ns, db, &tb.name.0).await?;
 		let fds1 = fds.clone();
 		let kvs1 = datastore.clone();
 
@@ -192,15 +192,15 @@ pub async fn generate_schema(
 						trace!("parsed filter: {cond:?}");
 
 						let ast = Statement::Select({
-							let mut tmp = SelectStatement::default();
-							tmp.what = vec![SqlValue::Table(tb_name.intox())].into();
-							tmp.expr = Fields::all();
-							tmp.start = start;
-							tmp.limit = limit;
-							tmp.order = orders.map(IntoExt::intox);
-							tmp.cond = cond;
-
-							tmp
+							SelectStatement {
+								what: vec![SqlValue::Table(tb_name.intox())].into(),
+								expr: Fields::all(),
+								order: orders.map(IntoExt::intox),
+								cond,
+								limit,
+								start,
+								..Default::default()
+							}
 						});
 
 						trace!("generated query ast: {ast:?}");
@@ -228,7 +228,7 @@ pub async fn generate_schema(
 						let out: Result<Vec<FieldValue>, SqlValue> = res_vec
 							.0
 							.into_iter()
-							.map(|v| v.try_as_object().map(|o| FieldValue::owned_any(o)))
+							.map(|v| v.try_as_object().map(FieldValue::owned_any))
 							.collect();
 
 						match out {
@@ -638,7 +638,7 @@ fn filter_from_type(
 	let ty = match &kind {
 		Kind::Record(ts) => match ts.len() {
 			1 => TypeRef::named(filter_name_from_table(
-				ts.get(0).expect("ts should have exactly one element").as_str(),
+				ts.first().expect("ts should have exactly one element").as_str(),
 			)),
 			_ => TypeRef::named(TypeRef::ID),
 		},
@@ -892,7 +892,7 @@ fn gql_to_sql_kind(val: &GqlValue, kind: Kind) -> Result<SqlValue, GqlError> {
 			GqlValue::Number(n) => {
 				if let Some(int) = n.as_i64() {
 					Ok(SqlValue::Number(sql::Number::Decimal(int.into())))
-				} else if let Some(d) = n.as_f64().map(Decimal::from_f64).flatten() {
+				} else if let Some(d) = n.as_f64().and_then(Decimal::from_f64) {
 					Ok(SqlValue::Number(sql::Number::Decimal(d)))
 				} else if let Some(uint) = n.as_u64() {
 					Ok(SqlValue::Number(sql::Number::Decimal(uint.into())))
@@ -1048,7 +1048,7 @@ fn gql_to_sql_kind(val: &GqlValue, kind: Kind) -> Result<SqlValue, GqlError> {
 
 			match val {
 				GqlValue::Null => {
-					if ks.iter().find(|k| matches!(k, Kind::Option(_))).is_some() {
+					if ks.iter().any(|k| matches!(k, Kind::Option(_))) {
 						Ok(SqlValue::None)
 					} else if ks.contains(&Kind::Null) {
 						Ok(SqlValue::Null)

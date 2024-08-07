@@ -81,7 +81,7 @@ pub async fn get_record(
 ) -> Result<SqlValue, GqlError> {
 	let tx = kvs.transaction(TransactionType::Read, LockType::Optimistic).await?;
 	Ok(tx
-		.get_record(&sess.ns.as_ref().unwrap(), &sess.db.as_ref().unwrap(), &rid.tb, &rid.id)
+		.get_record(sess.ns.as_ref().unwrap(), sess.db.as_ref().unwrap(), &rid.tb, &rid.id)
 		.await?
 		.as_ref()
 		.to_owned())

@@ -40,6 +40,7 @@ impl Invalidator for Pessimistic {
 
 #[derive(Clone)]
 pub struct SchemaCache<I: Invalidator = Pessimistic> {
+	#[allow(clippy::type_complexity)]
 	inner: Arc<RwLock<BTreeMap<(String, String), (Schema, I::MetaData)>>>,
 	pub datastore: Arc<Datastore>,
 	_invalidator: PhantomData<I>,
@@ -81,6 +82,6 @@ impl<I: Invalidator> SchemaCache<I> {
 			guard.insert((ns.to_owned(), db.to_owned()), (schema.clone(), meta));
 		}
 
-		return Ok(schema);
+		Ok(schema)
 	}
 }
