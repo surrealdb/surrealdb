@@ -214,7 +214,7 @@ impl Function {
 			}
 			Self::Anonymous(v, x) => {
 				let val = match v {
-					Value::Param(p) => ctx.value(&p).unwrap_or(&Value::None),
+					Value::Param(p) => ctx.value(p).unwrap_or(&Value::None),
 					Value::Block(_) | Value::Subquery(_) | Value::Idiom(_) | Value::Function(_) => {
 						&stk.run(|stk| v.compute(stk, ctx, opt, doc)).await?
 					}
