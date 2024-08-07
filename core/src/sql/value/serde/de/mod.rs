@@ -277,6 +277,7 @@ fn into_json(value: Value, simplify: bool) -> JsonValue {
 		Value::Query(query) => json!(query),
 		Value::Subquery(subquery) => json!(subquery),
 		Value::Expression(expression) => json!(expression),
+		Value::Closure(closure) => json!(closure),
 	}
 }
 

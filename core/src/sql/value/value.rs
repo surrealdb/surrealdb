@@ -6,6 +6,7 @@ use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::fnc::util::string::fuzzy::Fuzzy;
 use crate::sql::statements::info::InfoStructure;
+use crate::sql::Closure;
 use crate::sql::{
 	array::Uniq,
 	fmt::{Fmt, Pretty},
@@ -70,7 +71,7 @@ impl From<&Tables> for Values {
 	}
 }
 
-#[revisioned(revision = 1)]
+#[revisioned(revision = 2)]
 #[derive(Clone, Debug, Default, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[serde(rename = "$surrealdb::private::sql::Value")]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
@@ -121,6 +122,8 @@ pub enum Value {
 	Query(Query),
 	Model(Box<Model>),
 	// Add new variants here
+	#[revision(start = 2)]
+	Closure(Box<Closure>),
 }
 
 impl Eq for Value {}
@@ -2612,6 +2615,7 @@ impl fmt::Display for Value {
 			Value::Table(v) => write!(f, "{v}"),
 			Value::Thing(v) => write!(f, "{v}"),
 			Value::Uuid(v) => write!(f, "{v}"),
+			Value::Closure(v) => write!(f, "{v}"),
 		}
 	}
 }
