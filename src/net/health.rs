@@ -4,7 +4,6 @@ use axum::response::IntoResponse;
 use axum::routing::get;
 use axum::Extension;
 use axum::Router;
-
 use surrealdb::kvs::{LockType::*, TransactionType::*};
 
 pub(super) fn router<S>() -> Router<S>
