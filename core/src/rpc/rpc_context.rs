@@ -3,9 +3,10 @@ use std::{collections::BTreeMap, mem};
 use async_graphql::BatchRequest;
 use uuid::Uuid;
 
+#[cfg(not(target_arch = "wasm32"))]
+use crate::gql::SchemaCache;
 use crate::{
 	dbs::{QueryType, Response, Session},
-	gql::{self, SchemaCache},
 	kvs::Datastore,
 	rpc::args::Take,
 	sql::{Array, Function, Model, Statement, Strand, Value},
@@ -30,7 +31,10 @@ pub trait RpcContext {
 		async { unimplemented!("handle functions must be redefined if LQ_SUPPORT = true") }
 	}
 
+	#[cfg(not(target_arch = "wasm32"))]
 	const GQL_SUPPORT: bool = false;
+
+	#[cfg(not(target_arch = "wasm32"))]
 	fn graphql_schema_cache(&self) -> &SchemaCache {
 		unimplemented!("graphql_schema_cache must be implemented if GQL_SUPPORT = true")
 	}
@@ -618,7 +622,10 @@ pub trait RpcContext {
 	// Methods for querying with GraphQL
 	// ------------------------------
 
+	#[cfg(not(target_arch = "wasm32"))]
 	async fn graphql(&self, params: Array) -> Result<impl Into<Data>, RpcError> {
+		use crate::gql;
+
 		if !Self::GQL_SUPPORT {
 			return Err(RpcError::BadGQLConfig);
 		}
