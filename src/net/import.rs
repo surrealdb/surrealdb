@@ -10,7 +10,6 @@ use axum::Extension;
 use axum::Router;
 use axum_extra::TypedHeader;
 use bytes::Bytes;
-
 use surrealdb::dbs::Session;
 use surrealdb::iam::Action::Edit;
 use surrealdb::iam::ResourceKind::Any;
