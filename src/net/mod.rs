@@ -160,7 +160,7 @@ pub async fn init(ds: Arc<Datastore>, ct: CancellationToken) -> Result<(), Error
 				.max_age(Duration::from_secs(86400)),
 		);
 
-	let mut axum_app = Router::<Arc<RpcState>, _>::new()
+	let mut axum_app = Router::<Arc<RpcState>>::new()
 		// Redirect until we provide a UI
 		.route("/", get(|| async { Redirect::temporary(cnf::APP_ENDPOINT) }))
 		.route("/status", get(|| async {}))

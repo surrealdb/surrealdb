@@ -2,7 +2,8 @@
 use super::AppState;
 use crate::err::Error;
 use crate::net::output;
-use axum::extract::{BodyStream, DefaultBodyLimit, Path};
+use axum::body::Body;
+use axum::extract::{DefaultBodyLimit, Path};
 use axum::response::IntoResponse;
 use axum::response::Response;
 use axum::routing::{get, post};
@@ -11,8 +12,6 @@ use axum::Router;
 use bytes::Bytes;
 use futures_util::StreamExt;
 use http::StatusCode;
-use http_body::Body as HttpBody;
-use hyper::body::Body;
 use surrealdb::dbs::Session;
 use surrealdb::iam::check::check_ns_db;
 use surrealdb::iam::Action::{Edit, View};
@@ -25,11 +24,8 @@ use tower_http::limit::RequestBodyLimitLayer;
 const MAX: usize = 1024 * 1024 * 1024 * 4; // 4 GiB
 
 /// The router definition for the ML API endpoints.
-pub(super) fn router<S, B>() -> Router<S, B>
+pub(super) fn router<S>() -> Router<S>
 where
-	B: HttpBody + Send + 'static,
-	B::Data: Send + Into<Bytes>,
-	B::Error: std::error::Error + Send + Sync + 'static,
 	S: Clone + Send + Sync + 'static,
 {
 	Router::new()
@@ -43,8 +39,9 @@ where
 async fn import(
 	Extension(state): Extension<AppState>,
 	Extension(session): Extension<Session>,
-	mut stream: BodyStream,
+	body: Body,
 ) -> Result<impl IntoResponse, impl IntoResponse> {
+	let mut stream = body.into_data_stream();
 	// Get the datastore reference
 	let db = &state.datastore;
 	// Ensure a NS and DB are set
@@ -112,11 +109,12 @@ async fn export(
 	// Export the file data in to the store
 	let mut data = surrealdb::obs::stream(path).await?;
 	// Create a chunked response
-	let (mut chn, body) = Body::channel();
+	let (chn, body_stream) = surrealdb::channel::bounded::<Result<Bytes, Error>>(1);
+	let body = Body::from_stream(body_stream);
 	// Process all stream values
 	tokio::spawn(async move {
 		while let Some(Ok(v)) = data.next().await {
-			let _ = chn.send_data(v).await;
+			let _ = chn.send(Ok(v)).await;
 		}
 	});
 	// Return the streamed body

@@ -10,6 +10,7 @@ use crate::sql::array::Matches;
 use crate::sql::array::Transpose;
 use crate::sql::array::Union;
 use crate::sql::array::Uniq;
+use crate::sql::array::Windows;
 use crate::sql::value::Value;
 
 use rand::prelude::SliceRandom;
@@ -397,6 +398,11 @@ pub fn transpose((array,): (Array,)) -> Result<Value, Error> {
 
 pub fn union((array, other): (Array, Array)) -> Result<Value, Error> {
 	Ok(array.union(other).into())
+}
+
+pub fn windows((array, window_size): (Array, i64)) -> Result<Value, Error> {
+	let window_size = window_size.max(0) as usize;
+	Ok(array.windows(window_size)?.into())
 }
 
 pub mod sort {

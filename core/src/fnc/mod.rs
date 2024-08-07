@@ -137,6 +137,7 @@ pub fn synchronous(
 		"array::union" => array::union,
 		"array::sort::asc" => array::sort::asc,
 		"array::sort::desc" => array::sort::desc,
+		"array::windows" => array::windows,
 		//
 		"bytes::len" => bytes::len,
 		//
@@ -299,6 +300,7 @@ pub fn synchronous(
 		"string::is::semver" => string::is::semver,
 		"string::is::url" => string::is::url,
 		"string::is::uuid" => string::is::uuid,
+		"string::is::record" => string::is::record,
 		"string::similarity::fuzzy" => string::similarity::fuzzy,
 		"string::similarity::jaro" => string::similarity::jaro,
 		"string::similarity::smithwaterman" => string::similarity::smithwaterman,

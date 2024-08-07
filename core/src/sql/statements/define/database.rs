@@ -10,7 +10,7 @@ use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display};
 
-#[revisioned(revision = 2)]
+#[revisioned(revision = 3)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
@@ -21,6 +21,8 @@ pub struct DefineDatabaseStatement {
 	pub changefeed: Option<ChangeFeed>,
 	#[revision(start = 2)]
 	pub if_not_exists: bool,
+	#[revision(start = 3)]
+	pub overwrite: bool,
 }
 
 impl DefineDatabaseStatement {
@@ -39,7 +41,7 @@ impl DefineDatabaseStatement {
 		if txn.get_db(opt.ns()?, &self.name).await.is_ok() {
 			if self.if_not_exists {
 				return Ok(Value::None);
-			} else {
+			} else if !self.overwrite {
 				return Err(Error::DbAlreadyExists {
 					value: self.name.to_string(),
 				});
@@ -58,6 +60,7 @@ impl DefineDatabaseStatement {
 				},
 				// Don't persist the `IF NOT EXISTS` clause to schema
 				if_not_exists: false,
+				overwrite: false,
 				..self.clone()
 			},
 		)
@@ -74,6 +77,9 @@ impl Display for DefineDatabaseStatement {
 		write!(f, "DEFINE DATABASE")?;
 		if self.if_not_exists {
 			write!(f, " IF NOT EXISTS")?
+		}
+		if self.overwrite {
+			write!(f, " OVERWRITE")?
 		}
 		write!(f, " {}", self.name)?;
 		if let Some(ref v) = self.comment {

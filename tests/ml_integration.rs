@@ -6,7 +6,7 @@ mod ml_integration {
 
 	use super::*;
 	use http::{header, StatusCode};
-	use hyper::Body;
+	use reqwest::Body;
 	use serde::{Deserialize, Serialize};
 	use std::sync::atomic::{AtomicBool, Ordering};
 	use std::time::Duration;

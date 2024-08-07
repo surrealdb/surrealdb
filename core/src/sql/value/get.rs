@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+
 use crate::cnf::MAX_COMPUTATION_DEPTH;
 use crate::ctx::Context;
 use crate::dbs::Options;
@@ -50,6 +52,10 @@ impl Value {
 					Part::Field(f) if f.is_geometries() && v.is_collection() => {
 						let v = v.as_coordinates();
 						stk.run(|stk| v.get(stk, ctx, opt, doc, path.next())).await
+					}
+					Part::Destructure(_) => {
+						let obj = Value::Object(v.as_object());
+						stk.run(|stk| obj.get(stk, ctx, opt, doc, path)).await
 					}
 					// Otherwise return none
 					_ => Ok(Value::None),
@@ -115,6 +121,19 @@ impl Value {
 						_ => Ok(Value::None),
 					},
 					Part::All => stk.run(|stk| self.get(stk, ctx, opt, doc, path.next())).await,
+					Part::Destructure(p) => {
+						let mut obj = BTreeMap::<String, Value>::new();
+						for p in p.iter() {
+							let path = p.path();
+							let v = stk
+								.run(|stk| self.get(stk, ctx, opt, doc, path.as_slice()))
+								.await?;
+							obj.insert(p.field().to_raw(), v);
+						}
+
+						let obj = Value::from(obj);
+						stk.run(|stk| obj.get(stk, ctx, opt, doc, path.next())).await
+					}
 					_ => Ok(Value::None),
 				},
 				// Current value at path is an array
@@ -231,10 +250,20 @@ impl Value {
 											.run(|stk| stm.compute(stk, ctx, opt, None))
 											.await?
 											.all();
-										stk.run(|stk| v.get(stk, ctx, opt, None, path.next()))
-											.await?
-											.flatten()
-											.ok()
+										let res = stk
+											.run(|stk| v.get(stk, ctx, opt, None, path.next()))
+											.await?;
+										// We only want to flatten the results if the next part
+										// is a graph part. Reason being that if we flatten fields,
+										// the results of those fields (which could be arrays) will
+										// be merged into each other. So [1, 2, 3], [4, 5, 6] would
+										// become [1, 2, 3, 4, 5, 6]. This slice access won't panic
+										// as we have already checked the length of the path.
+										Ok(if let Part::Graph(_) = path[1] {
+											res.flatten()
+										} else {
+											res
+										})
 									}
 								}
 							}
