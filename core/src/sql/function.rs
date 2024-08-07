@@ -20,7 +20,7 @@ use super::Kind;
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Function";
 
-#[revisioned(revision = 1)]
+#[revisioned(revision = 2)]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
 #[serde(rename = "$surrealdb::private::sql::Function")]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
@@ -29,7 +29,8 @@ pub enum Function {
 	Normal(String, Vec<Value>),
 	Custom(String, Vec<Value>),
 	Script(Script, Vec<Value>),
-	Inline(Value, Vec<Value>),
+	#[revision(start = 2)]
+	Anonymous(Value, Vec<Value>),
 	// Add new variants here
 }
 
@@ -72,7 +73,7 @@ impl Function {
 	/// Convert function call to a field name
 	pub fn to_idiom(&self) -> Idiom {
 		match self {
-			Self::Inline(_, _) => "inline".to_string().into(),
+			Self::Anonymous(_, _) => "function".to_string().into(),
 			Self::Script(_, _) => "function".to_string().into(),
 			Self::Normal(f, _) => f.to_owned().into(),
 			Self::Custom(f, _) => format!("fn::{f}").into(),
@@ -115,7 +116,7 @@ impl Function {
 
 	/// Check if this function is a closure function
 	pub fn is_inline(&self) -> bool {
-		matches!(self, Self::Inline(_, _))
+		matches!(self, Self::Anonymous(_, _))
 	}
 
 	/// Check if this function is a rolling function
@@ -211,9 +212,9 @@ impl Function {
 				// Run the normal function
 				fnc::run(stk, ctx, opt, doc, s, a).await
 			}
-			Self::Inline(v, x) => {
+			Self::Anonymous(v, x) => {
 				let val = match v {
-					Value::Param(p) => ctx.value(p.to_raw().as_str()).unwrap_or(&Value::None),
+					Value::Param(p) => ctx.value(&p).unwrap_or(&Value::None),
 					Value::Block(_) | Value::Subquery(_) | Value::Idiom(_) | Value::Function(_) => {
 						&stk.run(|stk| v.compute(stk, ctx, opt, doc)).await?
 					}
@@ -343,7 +344,7 @@ impl fmt::Display for Function {
 			Self::Normal(s, e) => write!(f, "{s}({})", Fmt::comma_separated(e)),
 			Self::Custom(s, e) => write!(f, "fn::{s}({})", Fmt::comma_separated(e)),
 			Self::Script(s, e) => write!(f, "function({}) {{{s}}}", Fmt::comma_separated(e)),
-			Self::Inline(p, e) => write!(f, "{p}({})", Fmt::comma_separated(e)),
+			Self::Anonymous(p, e) => write!(f, "{p}({})", Fmt::comma_separated(e)),
 		}
 	}
 }
