@@ -2,6 +2,7 @@ use tracing::Subscriber;
 use tracing_subscriber::Layer;
 
 use crate::cli::validator::parser::env_filter::CustomEnvFilter;
+use opentelemetry::trace::TracerProvider as _;
 
 pub mod otlp;
 pub mod rpc;
@@ -22,8 +23,19 @@ where
 		}
 		// Init the registry with the OTLP tracer
 		"otlp" => {
-			debug!("Setup the OTLP tracer");
-			Some(otlp::new(filter))
+			// Create the OTLP tracer provider
+			let tracer_provider =
+				otlp::build_tracer_provider().expect("Failed to initialize OTLP tracer provider");
+			// Set it as the global tracer provider
+			let _ = opentelemetry::global::set_tracer_provider(tracer_provider.clone());
+			// Returns a tracing subscriber layer built with the selected tracer and filter.
+			// It will be used by the `tracing` crate to decide what spans to send to the global tracer provider
+			Some(
+				tracing_opentelemetry::layer()
+					.with_tracer(tracer_provider.tracer("surealdb"))
+					.with_filter(filter.0)
+					.boxed(),
+			)
 		}
 		tracer => {
 			panic!("unsupported tracer {tracer}");
