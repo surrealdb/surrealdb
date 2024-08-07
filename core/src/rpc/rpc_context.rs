@@ -5,7 +5,7 @@ use uuid::Uuid;
 
 use crate::{
 	dbs::{QueryType, Response, Session},
-	gql,
+	gql::{self, SchemaCache},
 	kvs::Datastore,
 	rpc::args::Take,
 	sql::{Array, Function, Model, Statement, Strand, Value},
@@ -31,7 +31,7 @@ pub trait RpcContext {
 	}
 
 	const GQL_SUPPORT: bool = false;
-	fn graphql_schema_cache(&self) -> gql::cache::SchemaCache {
+	fn graphql_schema_cache(&self) -> &SchemaCache {
 		unimplemented!("graphql_schema_cache must be implemented if GQL_SUPPORT = true")
 	}
 
