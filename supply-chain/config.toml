@@ -447,10 +447,6 @@ criteria = "safe-to-deploy"
 version = "1.1.2"
 criteria = "safe-to-deploy"
 
-[[exemptions.crossbeam]]
-version = "0.8.4"
-criteria = "safe-to-deploy"
-
 [[exemptions.crossbeam-channel]]
 version = "0.5.11"
 criteria = "safe-to-deploy"
@@ -461,10 +457,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.crossbeam-epoch]]
 version = "0.9.18"
-criteria = "safe-to-deploy"
-
-[[exemptions.crossbeam-queue]]
-version = "0.3.11"
 criteria = "safe-to-deploy"
 
 [[exemptions.crossbeam-utils]]
@@ -1217,6 +1209,10 @@ criteria = "safe-to-deploy"
 
 [[exemptions.quick-xml]]
 version = "0.26.0"
+criteria = "safe-to-deploy"
+
+[[exemptions.quick_cache]]
+version = "0.6.2"
 criteria = "safe-to-deploy"
 
 [[exemptions.quinn]]
