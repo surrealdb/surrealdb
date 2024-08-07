@@ -522,7 +522,8 @@ dependencies = [
 [[package]]
 name = "async-graphql"
 version = "7.0.7"
-source = "git+https://github.com/raphaeldarley/async-graphql?branch=axum-export-rejection#ae2c343d49de993b32c3084de0b5487edeb7ead1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2b76aba2f176af685c2229633881a3adeae51f87ae1811781e73910b7001c93e"
 dependencies = [
  "async-graphql-derive",
  "async-graphql-parser",
@@ -552,26 +553,10 @@ dependencies = [
 ]
 
 [[package]]
-name = "async-graphql-axum"
-version = "7.0.7"
-source = "git+https://github.com/raphaeldarley/async-graphql?branch=axum-export-rejection#ae2c343d49de993b32c3084de0b5487edeb7ead1"
-dependencies = [
- "async-graphql",
- "async-trait",
- "axum 0.7.5",
- "bytes",
- "futures-util",
- "serde_json",
- "tokio",
- "tokio-stream",
- "tokio-util",
- "tower-service",
-]
-
-[[package]]
 name = "async-graphql-derive"
 version = "7.0.7"
-source = "git+https://github.com/raphaeldarley/async-graphql?branch=axum-export-rejection#ae2c343d49de993b32c3084de0b5487edeb7ead1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "72e2e26a6b44bc61df3ca8546402cf9204c28e30c06084cc8e75cd5e34d4f150"
 dependencies = [
  "Inflector",
  "async-graphql-parser",
@@ -587,7 +572,8 @@ dependencies = [
 [[package]]
 name = "async-graphql-parser"
 version = "7.0.7"
-source = "git+https://github.com/raphaeldarley/async-graphql?branch=axum-export-rejection#ae2c343d49de993b32c3084de0b5487edeb7ead1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f801451484b4977d6fe67b29030f81353cabdcbb754e5a064f39493582dac0cf"
 dependencies = [
  "async-graphql-value",
  "pest",
@@ -598,7 +584,8 @@ dependencies = [
 [[package]]
 name = "async-graphql-value"
 version = "7.0.7"
-source = "git+https://github.com/raphaeldarley/async-graphql?branch=axum-export-rejection#ae2c343d49de993b32c3084de0b5487edeb7ead1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "69117c43c01d81a69890a9f5dd6235f2f027ca8d1ec62d6d3c5e01ca0edb4f2b"
 dependencies = [
  "bytes",
  "indexmap 2.2.6",
@@ -1176,9 +1163,9 @@ checksum = "1fd0f2584146f6f2ef48085050886acf353beff7305ebd1ae69500e27c67f64b"
 
 [[package]]
 name = "bytes"
-version = "1.6.0"
+version = "1.7.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "514de17de45fdb8dc022b1a7975556c53c86f9f0aa5f534b98977b171857c2c9"
+checksum = "8318a53db07bb3f8dca91a600466bdb3f2eaadeedfdbcf02e1accbad9271ba50"
 dependencies = [
  "serde",
 ]
@@ -5584,12 +5571,13 @@ dependencies = [
 
 [[package]]
 name = "serde_json"
-version = "1.0.115"
+version = "1.0.122"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "12dc5c46daa8e9fdf4f5e71b6cf9a53f2487da0e86e55808e2d35539666497dd"
+checksum = "784b6203951c57ff748476b126ccb5e8e2959a5c19e5c617ab1956be3dbc68da"
 dependencies = [
  "indexmap 2.2.6",
  "itoa",
+ "memchr",
  "ryu",
  "serde",
 ]
@@ -5979,7 +5967,6 @@ dependencies = [
  "argon2",
  "assert_fs",
  "async-graphql",
- "async-graphql-axum",
  "axum 0.7.5",
  "axum-extra",
  "axum-server",
@@ -6022,6 +6009,7 @@ dependencies = [
  "serde_json",
  "serial_test",
  "surrealdb",
+ "surrealdb-async-graphql-axum",
  "temp-env",
  "tempfile",
  "test-log",
@@ -6096,6 +6084,24 @@ dependencies = [
  "wasmtimer",
  "wiremock",
  "ws_stream_wasm",
+]
+
+[[package]]
+name = "surrealdb-async-graphql-axum"
+version = "7.0.7-surrealdb.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6761517bf15e976c363d9d71ddf7f215e545a8ed787dba52d77b42732cf1a3da"
+dependencies = [
+ "async-graphql",
+ "async-trait",
+ "axum 0.7.5",
+ "bytes",
+ "futures-util",
+ "serde_json",
+ "tokio",
+ "tokio-stream",
+ "tokio-util",
+ "tower-service",
 ]
 
 [[package]]
