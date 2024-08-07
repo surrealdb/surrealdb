@@ -12,7 +12,6 @@ use axum::Router;
 use bytes::Bytes;
 use futures_util::StreamExt;
 use http::StatusCode;
-
 use surrealdb::dbs::Session;
 use surrealdb::iam::check::check_ns_db;
 use surrealdb::iam::Action::{Edit, View};
