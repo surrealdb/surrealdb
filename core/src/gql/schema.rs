@@ -261,7 +261,6 @@ pub async fn generate_schema(
 							let kvs = kvs2.as_ref();
 
 							let args = ctx.args.as_index_map();
-							// async-graphql should validate that this is present as it is non-null
 							let id = match args.get("id").and_then(GqlValueUtils::as_string) {
 								Some(i) => i,
 								None => {
@@ -344,7 +343,6 @@ pub async fn generate_schema(
 					let kvs = kvs3.as_ref();
 
 					let args = ctx.args.as_index_map();
-					// async-graphql should validate that this is present as it is non-null
 					let id = match args.get("id").and_then(GqlValueUtils::as_string) {
 						Some(i) => i,
 						None => {
@@ -569,10 +567,8 @@ fn kind_to_type(kind: Kind, types: &mut Vec<Type>) -> Result<TypeRef, GqlError> 
 		Kind::Object => TypeRef::named("object"),
 		Kind::Point => return Err(schema_error("Kind::Point is not yet supported")),
 		Kind::String => TypeRef::named(TypeRef::STRING),
-		// uuid type is always added
 		Kind::Uuid => TypeRef::named("uuid"),
 		Kind::Record(mut r) => match r.len() {
-			// Table types should be added elsewhere
 			0 => TypeRef::named("record"),
 			1 => TypeRef::named(r.pop().unwrap().0),
 			_ => {
@@ -584,7 +580,6 @@ fn kind_to_type(kind: Kind, types: &mut Vec<Type>) -> Result<TypeRef, GqlError> 
 				for n in names {
 					tmp_union = tmp_union.possible_type(n);
 				}
-				// tmp_union = tmp_union
 
 				types.push(Type::Union(tmp_union));
 				TypeRef::named(ty_name)
@@ -650,9 +645,6 @@ fn filter_from_type(
 		},
 		k => unwrap_type(kind_to_type(k.clone(), types)?),
 	};
-
-	// let ty = kind_to_type(kind.clone(), types)?;
-	// let ty = unwrap_type(ty);
 
 	let mut filter = InputObject::new(filter_name);
 	filter_impl!(filter, ty, "eq");
@@ -867,7 +859,6 @@ fn gql_to_sql_kind(val: &GqlValue, kind: Kind) -> Result<SqlValue, GqlError> {
 		Kind::Any => match val {
 			GqlValue::String(s) => {
 				use Kind::*;
-				// aren't parsed by syn
 				any_try_kinds!(val, Datetime, Duration, Uuid);
 				syn::value_legacy_strand(s.as_str()).map_err(|_| type_error(kind, val))
 			}
@@ -1001,7 +992,6 @@ fn gql_to_sql_kind(val: &GqlValue, kind: Kind) -> Result<SqlValue, GqlError> {
 			_ => Err(type_error(kind, val)),
 		},
 		Kind::Object => {
-			error!(?val, "validating object");
 			match val {
 				GqlValue::Object(o) => {
 					let out: Result<BTreeMap<String, SqlValue>, GqlError> = o
@@ -1076,7 +1066,6 @@ fn gql_to_sql_kind(val: &GqlValue, kind: Kind) -> Result<SqlValue, GqlError> {
 					Err(type_error(kind, val))
 				}
 				string @ GqlValue::String(_) => {
-					// try parsing first
 					either_try_kinds!(
 						ks, string, Datetime, Duration, AllNumbers, Object, Uuid, Array, Any,
 						String
@@ -1087,7 +1076,7 @@ fn gql_to_sql_kind(val: &GqlValue, kind: Kind) -> Result<SqlValue, GqlError> {
 					either_try_kind!(ks, bool, Kind::Bool);
 					Err(type_error(kind, val))
 				}
-				GqlValue::Binary(_) => todo!(),
+				GqlValue::Binary(_) => Err(resolver_error("binary input for Either is not yet supported")),
 				GqlValue::Enum(n) => {
 					either_try_kind!(ks, &GqlValue::String(n.to_string()), Kind::String);
 					Err(type_error(kind, val))
@@ -1096,10 +1085,14 @@ fn gql_to_sql_kind(val: &GqlValue, kind: Kind) -> Result<SqlValue, GqlError> {
 					either_try_kind!(ks, list, Kind::Array);
 					Err(type_error(kind, val))
 				}
-				GqlValue::Object(_) => todo!(),
+				// TODO: consider geometry and other types that can come from objects
+				obj @ GqlValue::Object(_) => {
+					either_try_kind!(ks, obj, Object);
+					Err(type_error(kind, val))
+
+				},
 			}
 		}
-		// TODO: figure out how to support sets
 		Kind::Set(_k, _n) => Err(resolver_error("Sets are not yet supported")),
 		Kind::Array(ref k, n) => match val {
 			GqlValue::List(l) => {
