@@ -41,7 +41,6 @@ async fn handler(
 	// Process all chunk values
 	tokio::spawn(async move {
 		while let Ok(v) = rcv.recv().await {
-			// let _ = chn.send_data(Bytes::from(v)).await;
 			let _ = chn.send(Ok(Bytes::from(v))).await;
 		}
 	});
