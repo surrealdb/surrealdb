@@ -8,7 +8,7 @@ use http_body::Body as HttpBody;
 use async_graphql::http::GraphiQLSource;
 use axum::routing::{get, post_service};
 
-use crate::gql::service::{GraphQL, Pessimistic};
+use crate::gql::{cache::Pessimistic, service::GraphQL};
 
 use surrealdb::kvs::Datastore;
 

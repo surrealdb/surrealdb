@@ -25,6 +25,8 @@ pub mod err;
 #[doc(hidden)]
 pub mod fflags;
 #[doc(hidden)]
+pub mod gql;
+#[doc(hidden)]
 pub mod iam;
 #[doc(hidden)]
 pub mod idg;
