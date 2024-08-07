@@ -4,7 +4,6 @@ use crate::err::Error;
 use axum_extra::headers::Header;
 use axum_extra::typed_header::{TypedHeaderRejection, TypedHeaderRejectionReason};
 use axum_extra::TypedHeader;
-
 use http::header::SERVER;
 use http::HeaderValue;
 use surrealdb::cnf::SERVER_NAME;
