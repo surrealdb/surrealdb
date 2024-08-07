@@ -95,7 +95,7 @@ js = { version = "0.6.2", package = "rquickjs", features = [
     "properties",
     "rust-alloc",
 ], optional = true }
-jsonwebtoken = { version = "8.3.0-surreal.1", package = "surrealdb-jsonwebtoken" }
+jsonwebtoken = "9.3.0"
 lexicmp = "0.1.0"
 linfa-linalg = "=0.1.0"
 md-5 = "0.10.6"
@@ -135,7 +135,7 @@ sha1 = "0.10.6"
 sha2 = "0.10.8"
 snap = "1.1.0"
 storekey = "0.5.0"
-surrealkv = { version = "0.3.0", optional = true }
+surrealkv = { version = "0.3.1", optional = true }
 surrealml = { version = "0.1.1", optional = true, package = "surrealml-core" }
 tempfile = { version = "3.10.1", optional = true }
 thiserror = "1.0.50"
