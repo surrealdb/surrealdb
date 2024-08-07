@@ -440,13 +440,15 @@ impl Parser<'_> {
 		ctx: &mut Stk,
 		args: Vec<(Ident, Kind)>,
 	) -> ParseResult<Value> {
-		let returns = if self.eat(t!("->")) {
-			Some(ctx.run(|ctx| self.parse_inner_kind(ctx)).await?)
+		let (returns, body) = if self.eat(t!("->")) {
+			let returns = Some(ctx.run(|ctx| self.parse_inner_kind(ctx)).await?);
+			let start = expected!(self, t!("{")).span;
+			let body = Value::Block(Box::new(ctx.run(|ctx| self.parse_block(ctx, start)).await?));
+			(returns, body)
 		} else {
-			None
+			let body = ctx.run(|ctx| self.parse_value(ctx)).await?;
+			(None, body)
 		};
-
-		let body = self.parse_value(ctx).await?;
 
 		Ok(Value::Closure(Box::new(Closure {
 			args,
