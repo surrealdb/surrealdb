@@ -16,47 +16,55 @@ use std::str::{self, FromStr};
 use std::sync::Arc;
 
 fn config(alg: Algorithm, key: &[u8]) -> Result<(DecodingKey, Validation), Error> {
-	match alg {
+	let (dec, mut val) = match alg {
 		Algorithm::Hs256 => {
-			Ok((DecodingKey::from_secret(key), Validation::new(jsonwebtoken::Algorithm::HS256)))
+			(DecodingKey::from_secret(key), Validation::new(jsonwebtoken::Algorithm::HS256))
 		}
 		Algorithm::Hs384 => {
-			Ok((DecodingKey::from_secret(key), Validation::new(jsonwebtoken::Algorithm::HS384)))
+			(DecodingKey::from_secret(key), Validation::new(jsonwebtoken::Algorithm::HS384))
 		}
 		Algorithm::Hs512 => {
-			Ok((DecodingKey::from_secret(key), Validation::new(jsonwebtoken::Algorithm::HS512)))
+			(DecodingKey::from_secret(key), Validation::new(jsonwebtoken::Algorithm::HS512))
 		}
 		Algorithm::EdDSA => {
-			Ok((DecodingKey::from_ed_pem(key)?, Validation::new(jsonwebtoken::Algorithm::EdDSA)))
+			(DecodingKey::from_ed_pem(key)?, Validation::new(jsonwebtoken::Algorithm::EdDSA))
 		}
 		Algorithm::Es256 => {
-			Ok((DecodingKey::from_ec_pem(key)?, Validation::new(jsonwebtoken::Algorithm::ES256)))
+			(DecodingKey::from_ec_pem(key)?, Validation::new(jsonwebtoken::Algorithm::ES256))
 		}
 		Algorithm::Es384 => {
-			Ok((DecodingKey::from_ec_pem(key)?, Validation::new(jsonwebtoken::Algorithm::ES384)))
+			(DecodingKey::from_ec_pem(key)?, Validation::new(jsonwebtoken::Algorithm::ES384))
 		}
 		Algorithm::Es512 => {
-			Ok((DecodingKey::from_ec_pem(key)?, Validation::new(jsonwebtoken::Algorithm::ES384)))
+			(DecodingKey::from_ec_pem(key)?, Validation::new(jsonwebtoken::Algorithm::ES384))
 		}
 		Algorithm::Ps256 => {
-			Ok((DecodingKey::from_rsa_pem(key)?, Validation::new(jsonwebtoken::Algorithm::PS256)))
+			(DecodingKey::from_rsa_pem(key)?, Validation::new(jsonwebtoken::Algorithm::PS256))
 		}
 		Algorithm::Ps384 => {
-			Ok((DecodingKey::from_rsa_pem(key)?, Validation::new(jsonwebtoken::Algorithm::PS384)))
+			(DecodingKey::from_rsa_pem(key)?, Validation::new(jsonwebtoken::Algorithm::PS384))
 		}
 		Algorithm::Ps512 => {
-			Ok((DecodingKey::from_rsa_pem(key)?, Validation::new(jsonwebtoken::Algorithm::PS512)))
+			(DecodingKey::from_rsa_pem(key)?, Validation::new(jsonwebtoken::Algorithm::PS512))
 		}
 		Algorithm::Rs256 => {
-			Ok((DecodingKey::from_rsa_pem(key)?, Validation::new(jsonwebtoken::Algorithm::RS256)))
+			(DecodingKey::from_rsa_pem(key)?, Validation::new(jsonwebtoken::Algorithm::RS256))
 		}
 		Algorithm::Rs384 => {
-			Ok((DecodingKey::from_rsa_pem(key)?, Validation::new(jsonwebtoken::Algorithm::RS384)))
+			(DecodingKey::from_rsa_pem(key)?, Validation::new(jsonwebtoken::Algorithm::RS384))
 		}
 		Algorithm::Rs512 => {
-			Ok((DecodingKey::from_rsa_pem(key)?, Validation::new(jsonwebtoken::Algorithm::RS512)))
+			(DecodingKey::from_rsa_pem(key)?, Validation::new(jsonwebtoken::Algorithm::RS512))
 		}
-	}
+	};
+
+	// TODO(gguillemas): This keeps the existing behavior as of SurrealDB 2.0.0-alpha.9.
+	// Up to that point, a fork of the "jsonwebtoken" crate in version 8.3.0 was being used.
+	// Now that the audience claim is validated by default, we should allow users to leverage this.
+	// This will most likely involve defining an audience string via "DEFINE ACCESS ... TYPE JWT".
+	val.validate_aud = false;
+
+	Ok((dec, val))
 }
 
 static KEY: Lazy<DecodingKey> = Lazy::new(|| DecodingKey::from_secret(&[]));
@@ -66,6 +74,7 @@ static DUD: Lazy<Validation> = Lazy::new(|| {
 	validation.insecure_disable_signature_validation();
 	validation.validate_nbf = false;
 	validation.validate_exp = false;
+	validation.validate_aud = false;
 	validation
 });
 
@@ -1728,7 +1737,7 @@ mod tests {
 				common: jsonwebtoken::jwk::CommonParameters {
 					public_key_use: None,
 					key_operations: None,
-					algorithm: Some(jsonwebtoken::Algorithm::HS512),
+					key_algorithm: Some(jsonwebtoken::jwk::KeyAlgorithm::HS512),
 					key_id: Some(kid.to_string()),
 					x509_url: None,
 					x509_chain: None,
