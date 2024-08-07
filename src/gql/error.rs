@@ -1,4 +1,4 @@
-use std::{backtrace::Backtrace, fmt::Debug};
+use std::fmt::Debug;
 
 use async_graphql::{InputType, InputValueError};
 use axum::{

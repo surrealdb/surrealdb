@@ -16,11 +16,11 @@ use rust_decimal::Decimal;
 use serde_json::Number;
 use surrealdb::dbs::Session;
 use surrealdb::kvs::Datastore;
-use surrealdb::sql;
 use surrealdb::sql::statements::{DefineFieldStatement, SelectStatement};
-use surrealdb::sql::Expression;
 use surrealdb::sql::Kind;
+use surrealdb::sql::{self, Table};
 use surrealdb::sql::{Cond, Fields};
+use surrealdb::sql::{Expression, Geometry};
 use surrealdb::sql::{Statement, Thing};
 
 use super::error::{resolver_error, GqlError};
@@ -93,8 +93,6 @@ pub async fn generate_schema(
 		let tb_name = tb.name.to_string();
 		let first_tb_name = tb_name.clone();
 		let second_tb_name = tb_name.clone();
-
-		let interface = "record";
 
 		let table_orderable_name = format!("_orderable_{tb_name}");
 		let mut table_orderable = Enum::new(&table_orderable_name).item("id");
@@ -293,9 +291,14 @@ pub async fn generate_schema(
 			.field(Field::new(
 				"id",
 				TypeRef::named_nn(TypeRef::ID),
-				make_table_field_resolver(datastore, session, "id"),
+				make_table_field_resolver(
+					datastore,
+					session,
+					"id",
+					Some(Kind::Record(vec![Table::from(tb.name.to_string())])),
+				),
 			))
-			.implement(interface);
+			.implement("record");
 
 		for fd in fds.iter() {
 			let Some(ref kind) = fd.kind else {
@@ -320,7 +323,7 @@ pub async fn generate_schema(
 			table_ty_obj = table_ty_obj.field(Field::new(
 				fd.name.to_string(),
 				fd_type,
-				make_table_field_resolver(datastore, session, fd_name.as_str()),
+				make_table_field_resolver(datastore, session, fd_name.as_str(), fd.kind.clone()),
 			));
 		}
 
@@ -333,7 +336,7 @@ pub async fn generate_schema(
 	let sess3 = session.to_owned();
 	let kvs3 = datastore.to_owned();
 	query = query.field(
-		Field::new("_get", TypeRef::named("object"), move |ctx| {
+		Field::new("_get", TypeRef::named("record"), move |ctx| {
 			let kvs3 = kvs3.clone();
 			FieldFuture::new({
 				let sess3 = sess3.clone();
@@ -358,9 +361,10 @@ pub async fn generate_schema(
 					};
 
 					match get_record(kvs, &sess3, &thing).await? {
-						obj @ SqlValue::Object(_) => {
-							let out = sql_value_to_gql_value(obj)
-								.map_err(|_| "SQL to GQL translation failed")?;
+						SqlValue::Object(o) => {
+							// let val = sql_value_to_gql_value(obj)
+							// 	.map_err(|_| "SQL to GQL translation failed")?;
+							let out = FieldValue::owned_any(o).with_type(thing.tb.to_string());
 
 							Ok(Some(out))
 						}
@@ -456,6 +460,7 @@ fn make_table_field_resolver(
 	kvs: &Arc<Datastore>,
 	sess: &Session,
 	fd_name: impl Into<String>,
+	kind: Option<Kind>,
 ) -> impl for<'a> Fn(ResolverContext<'a>) -> FieldFuture<'a> + Send + Sync + 'static {
 	let fd_name = fd_name.into();
 	let sess_field = Arc::new(sess.to_owned());
@@ -464,6 +469,7 @@ fn make_table_field_resolver(
 		let sess_field = sess_field.clone();
 		let fd_name = fd_name.clone();
 		let kvs_field = kvs_field.clone();
+		let field_kind = kind.clone();
 		FieldFuture::new({
 			let kvs_field = kvs_field.clone();
 			async move {
@@ -474,15 +480,22 @@ fn make_table_field_resolver(
 					.downcast_ref::<SqlObject>()
 					.ok_or_else(|| internal_error("failed to downcast"))?;
 
-				let val = record.get(fd_name.as_str()).ok_or(resolver_error(format!(
-					"couldn't find field: {fd_name} in: {record:?}"
-				)))?;
+				let Some(val) = record.get(fd_name.as_str()) else {
+					return Ok(None);
+				};
 
 				let out = match val {
 					SqlValue::Thing(rid)if fd_name != "id" => match get_record(kvs, &sess_field, rid).await?
 						{
 							SqlValue::Object(o) => {
-							    let tmp = FieldValue::owned_any(o);
+							    let mut tmp = FieldValue::owned_any(o);
+
+								if let Some(Kind::Record(ts))  = field_kind {
+									if ts.len() != 1 {
+										tmp = tmp.with_type(rid.tb.clone())
+									}
+								}
+
 								Ok(Some(tmp))
 							}
 							v => Err(resolver_error(format!("expected object, but found (referential integrity might be broken): {v:?}")).into()),
@@ -490,7 +503,6 @@ fn make_table_field_resolver(
 					v => {
 						let out = sql_value_to_gql_value(v.to_owned())
 							.map_err(|_| "SQL to GQL translation failed")?;
-						warn!(?out, fd_name, "returning gqlvalue, for field");
 						Ok(Some(FieldValue::value(out)))
 					}
 				};
@@ -559,6 +571,7 @@ fn kind_to_type(kind: Kind, types: &mut Vec<Type>) -> Result<TypeRef, GqlError> 
 		Kind::Uuid => TypeRef::named("uuid"),
 		Kind::Record(mut r) => match r.len() {
 			// Table types should be added elsewhere
+			0 => TypeRef::named("record"),
 			1 => TypeRef::named(r.pop().unwrap().0),
 			_ => {
 				let names: Vec<String> = r.into_iter().map(|t| t.0).collect();
@@ -569,6 +582,7 @@ fn kind_to_type(kind: Kind, types: &mut Vec<Type>) -> Result<TypeRef, GqlError> 
 				for n in names {
 					tmp_union = tmp_union.possible_type(n);
 				}
+				// tmp_union = tmp_union
 
 				types.push(Type::Union(tmp_union));
 				TypeRef::named(ty_name)
@@ -999,20 +1013,7 @@ fn gql_to_sql_kind(val: &GqlValue, kind: Kind) -> Result<SqlValue, GqlError> {
 							gql_to_sql_kind(v, Kind::Any).map(|sqlv| (k.to_string(), sqlv))
 						})
 						.collect();
-					let out = out?;
-					// let mut out = BTreeMap::new();
-					// for (k, v) in o {
-					// 	match gql_to_sql_kind(v, Kind::Any).map(|sqlv| (k.to_string(), sqlv)) {
-					// 		Ok((name, val)) => {
-					// 			out.insert(name, val);
-					// 		}
-					// 		Err(e) => {
-					// 			error!(?e)
-					// 		}
-					// 	};
-					// }
-
-					Ok(SqlValue::Object(out.into()))
+					Ok(SqlValue::Object(out?.into()))
 				}
 				GqlValue::String(s) => match syn::value_legacy_strand(s.as_str()) {
 					Ok(obj @ SqlValue::Object(_)) => Ok(obj),
@@ -1021,8 +1022,16 @@ fn gql_to_sql_kind(val: &GqlValue, kind: Kind) -> Result<SqlValue, GqlError> {
 				_ => Err(type_error(kind, val)),
 			}
 		}
-		// TODO: add geometry
-		Kind::Point => Err(resolver_error("Geometry is not yet supported")),
+		Kind::Point => match val {
+			GqlValue::List(l) => match l.as_slice() {
+				[GqlValue::Number(x), GqlValue::Number(y)] => match (x.as_f64(), y.as_f64()) {
+					(Some(x), Some(y)) => Ok(SqlValue::Geometry(Geometry::Point((x, y).into()))),
+					_ => Err(type_error(kind, val)),
+				},
+				_ => Err(type_error(kind, val)),
+			},
+			_ => Err(type_error(kind, val)),
+		},
 		Kind::String => match val {
 			GqlValue::String(s) => Ok(SqlValue::Strand(s.to_owned().into())),
 			GqlValue::Enum(s) => Ok(SqlValue::Strand(s.as_str().into())),
