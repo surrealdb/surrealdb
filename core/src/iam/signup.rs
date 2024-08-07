@@ -101,7 +101,7 @@ pub async fn db_access(
 												let mut sess =
 													Session::editor().with_ns(&ns).with_db(&db);
 												sess.rd = Some(rid.clone().into());
-												sess.tk = Some(claims.clone().into());
+												sess.tk = Some((&claims).into());
 												sess.ip.clone_from(&session.ip);
 												sess.or.clone_from(&session.or);
 												// Compute the value with the params
@@ -128,7 +128,7 @@ pub async fn db_access(
 											let enc =
 												encode(&Header::new(iss.alg.into()), &claims, &key);
 											// Set the authentication on the session
-											session.tk = Some(claims.into());
+											session.tk = Some((&claims).into());
 											session.ns = Some(ns.to_owned());
 											session.db = Some(db.to_owned());
 											session.ac = Some(ac.to_owned());

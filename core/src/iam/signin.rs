@@ -169,7 +169,7 @@ pub async fn db_access(
 												let mut sess =
 													Session::editor().with_ns(&ns).with_db(&db);
 												sess.rd = Some(rid.clone().into());
-												sess.tk = Some(claims.clone().into());
+												sess.tk = Some((&claims).into());
 												sess.ip.clone_from(&session.ip);
 												sess.or.clone_from(&session.or);
 												rid = authenticate_record(kvs, &sess, au).await?;
@@ -183,7 +183,7 @@ pub async fn db_access(
 											let enc =
 												encode(&Header::new(iss.alg.into()), &claims, &key);
 											// Set the authentication on the session
-											session.tk = Some(claims.into());
+											session.tk = Some((&claims).into());
 											session.ns = Some(ns.to_owned());
 											session.db = Some(db.to_owned());
 											session.ac = Some(ac.to_owned());
@@ -287,7 +287,7 @@ pub async fn db_access(
 					if let Some(au) = &av.authenticate {
 						// Setup the system session for executing the clause
 						let mut sess = Session::editor().with_ns(&ns).with_db(&db);
-						sess.tk = Some(claims.clone().into());
+						sess.tk = Some((&claims).into());
 						sess.ip.clone_from(&session.ip);
 						sess.or.clone_from(&session.or);
 						authenticate_generic(kvs, &sess, au).await?;
@@ -297,7 +297,7 @@ pub async fn db_access(
 					// Create the authentication token.
 					let enc = encode(&Header::new(iss.alg.into()), &claims, &key);
 					// Set the authentication on the session.
-					session.tk = Some(claims.into());
+					session.tk = Some((&claims).into());
 					session.ns = Some(ns.to_owned());
 					session.db = Some(db.to_owned());
 					session.ac = Some(ac.to_owned());
@@ -364,7 +364,7 @@ pub async fn db_user(
 			// Create the authentication token
 			let enc = encode(&HEADER, &val, &key);
 			// Set the authentication on the session
-			session.tk = Some(val.into());
+			session.tk = Some((&val).into());
 			session.ns = Some(ns.to_owned());
 			session.db = Some(db.to_owned());
 			session.exp = expiration(u.duration.session)?;
@@ -468,7 +468,7 @@ pub async fn ns_access(
 					if let Some(au) = &av.authenticate {
 						// Setup the system session for executing the clause
 						let mut sess = Session::editor().with_ns(&ns);
-						sess.tk = Some(claims.clone().into());
+						sess.tk = Some((&claims).into());
 						sess.ip.clone_from(&session.ip);
 						sess.or.clone_from(&session.or);
 						authenticate_generic(kvs, &sess, au).await?;
@@ -478,7 +478,7 @@ pub async fn ns_access(
 					// Create the authentication token.
 					let enc = encode(&Header::new(iss.alg.into()), &claims, &key);
 					// Set the authentication on the session.
-					session.tk = Some(claims.into());
+					session.tk = Some((&claims).into());
 					session.ns = Some(ns.to_owned());
 					session.ac = Some(ac.to_owned());
 					session.exp = expiration(av.duration.session)?;
@@ -534,7 +534,7 @@ pub async fn ns_user(
 			// Create the authentication token
 			let enc = encode(&HEADER, &val, &key);
 			// Set the authentication on the session
-			session.tk = Some(val.into());
+			session.tk = Some((&val).into());
 			session.ns = Some(ns.to_owned());
 			session.exp = expiration(u.duration.session)?;
 			session.au = Arc::new((&u, Level::Namespace(ns.to_owned())).into());
@@ -676,7 +676,7 @@ pub async fn root_access(
 					if let Some(au) = &av.authenticate {
 						// Setup the system session for executing the clause
 						let mut sess = Session::editor();
-						sess.tk = Some(claims.clone().into());
+						sess.tk = Some((&claims).into());
 						sess.ip.clone_from(&session.ip);
 						sess.or.clone_from(&session.or);
 						authenticate_generic(kvs, &sess, au).await?;
@@ -745,10 +745,10 @@ pub fn validate_grant_bearer(vars: Object) -> Result<(String, String), Error> {
 
 pub fn verify_grant_bearer(gr: &Arc<AccessGrant>, key: String) -> Result<(), Error> {
 	// Check if the grant is revoked or expired.
-	match (gr.expiration.clone(), gr.revocation.clone()) {
+	match (&gr.expiration, &gr.revocation) {
 		(None, None) => {}
 		(Some(exp), None) => {
-			if exp < Datetime::default() {
+			if exp < &Datetime::default() {
 				// Return opaque error to avoid leaking revocation status.
 				return Err(Error::InvalidAuth);
 			}
@@ -757,7 +757,7 @@ pub fn verify_grant_bearer(gr: &Arc<AccessGrant>, key: String) -> Result<(), Err
 	}
 	// Check if the provided key matches the bearer key in the grant.
 	// We use time-constant comparison to prevent timing attacks.
-	if let access::Grant::Bearer(grant) = gr.grant.clone() {
+	if let access::Grant::Bearer(grant) = &gr.grant {
 		let grant_key_bytes: &[u8] = grant.key.as_bytes();
 		let signin_key_bytes: &[u8] = key.as_bytes();
 		let ok: bool = grant_key_bytes.ct_eq(signin_key_bytes).into();
