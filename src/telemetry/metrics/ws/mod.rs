@@ -7,6 +7,7 @@ use opentelemetry::{
 	metrics::{Histogram, MetricsError, UpDownCounter},
 	Context as TelemetryContext,
 };
+
 static METER: Lazy<Meter> = Lazy::new(|| global::meter("surrealdb.rpc"));
 
 pub static RPC_SERVER_DURATION: Lazy<Histogram<u64>> = Lazy::new(|| {
