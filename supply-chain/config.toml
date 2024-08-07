@@ -184,23 +184,19 @@ version = "1.9.1"
 criteria = "safe-to-deploy"
 
 [[exemptions.async-graphql]]
-version = "6.0.11"
-criteria = "safe-to-deploy"
-
-[[exemptions.async-graphql-axum]]
-version = "6.0.11"
+version = "7.0.7"
 criteria = "safe-to-deploy"
 
 [[exemptions.async-graphql-derive]]
-version = "6.0.11"
+version = "7.0.7"
 criteria = "safe-to-deploy"
 
 [[exemptions.async-graphql-parser]]
-version = "6.0.11"
+version = "7.0.7"
 criteria = "safe-to-deploy"
 
 [[exemptions.async-graphql-value]]
-version = "6.0.11"
+version = "7.0.7"
 criteria = "safe-to-deploy"
 
 [[exemptions.async-lock]]
@@ -348,7 +344,7 @@ version = "1.5.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.bytes]]
-version = "1.6.0"
+version = "1.7.1"
 criteria = "safe-to-deploy"
 
 [[exemptions.bytestring]]
@@ -467,10 +463,6 @@ criteria = "safe-to-deploy"
 version = "1.1.2"
 criteria = "safe-to-deploy"
 
-[[exemptions.crossbeam-channel]]
-version = "0.5.11"
-criteria = "safe-to-deploy"
-
 [[exemptions.crossbeam-deque]]
 version = "0.8.5"
 criteria = "safe-to-deploy"
@@ -484,15 +476,15 @@ version = "0.8.19"
 criteria = "safe-to-deploy"
 
 [[exemptions.darling]]
-version = "0.20.8"
+version = "0.20.9"
 criteria = "safe-to-deploy"
 
 [[exemptions.darling_core]]
-version = "0.20.8"
+version = "0.20.9"
 criteria = "safe-to-deploy"
 
 [[exemptions.darling_macro]]
-version = "0.20.8"
+version = "0.20.9"
 criteria = "safe-to-deploy"
 
 [[exemptions.dashmap]]
@@ -723,20 +715,12 @@ criteria = "safe-to-run"
 version = "0.9.1"
 criteria = "safe-to-run"
 
-[[exemptions.h2]]
-version = "0.3.26"
-criteria = "safe-to-deploy"
-
 [[exemptions.half]]
 version = "2.3.1"
 criteria = "safe-to-deploy"
 
-[[exemptions.half]]
-version = "2.4.0"
-criteria = "safe-to-deploy"
-
 [[exemptions.handlebars]]
-version = "4.5.0"
+version = "5.1.2"
 criteria = "safe-to-deploy"
 
 [[exemptions.hash32]]
@@ -991,6 +975,10 @@ criteria = "safe-to-deploy"
 version = "2.1.0"
 criteria = "safe-to-deploy"
 
+[[exemptions.multer]]
+version = "3.1.0"
+criteria = "safe-to-deploy"
+
 [[exemptions.multimap]]
 version = "0.8.3"
 criteria = "safe-to-deploy"
@@ -1116,19 +1104,19 @@ version = "3.0.3"
 criteria = "safe-to-deploy"
 
 [[exemptions.pest]]
-version = "2.7.8"
+version = "2.7.11"
 criteria = "safe-to-deploy"
 
 [[exemptions.pest_derive]]
-version = "2.7.8"
+version = "2.7.11"
 criteria = "safe-to-deploy"
 
 [[exemptions.pest_generator]]
-version = "2.7.8"
+version = "2.7.11"
 criteria = "safe-to-deploy"
 
 [[exemptions.pest_meta]]
-version = "2.7.8"
+version = "2.7.11"
 criteria = "safe-to-deploy"
 
 [[exemptions.petgraph]]
@@ -1539,14 +1527,6 @@ criteria = "safe-to-deploy"
 version = "0.2.6"
 criteria = "safe-to-deploy"
 
-[[exemptions.serde_json]]
-version = "1.0.115"
-criteria = "safe-to-deploy"
-
-[[exemptions.serde_path_to_error]]
-version = "0.1.16"
-criteria = "safe-to-deploy"
-
 [[exemptions.serde_spanned]]
 version = "0.6.5"
 criteria = "safe-to-deploy"
@@ -1643,6 +1623,10 @@ criteria = "safe-to-deploy"
 version = "0.6.0"
 criteria = "safe-to-deploy"
 
+[[exemptions.static_assertions_next]]
+version = "1.1.2"
+criteria = "safe-to-deploy"
+
 [[exemptions.str-buf]]
 version = "1.0.6"
 criteria = "safe-to-deploy"
@@ -1661,6 +1645,14 @@ criteria = "safe-to-deploy"
 
 [[exemptions.strsim]]
 version = "0.11.1"
+criteria = "safe-to-deploy"
+
+[[exemptions.strum]]
+version = "0.26.3"
+criteria = "safe-to-deploy"
+
+[[exemptions.strum_macros]]
+version = "0.26.4"
 criteria = "safe-to-deploy"
 
 [[exemptions.symbolic-common]]
