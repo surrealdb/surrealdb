@@ -44,7 +44,10 @@ impl Closure {
 					} else {
 						return Err(Error::InvalidArguments {
 							name: "ANONYMOUS".to_string(),
-							message: format!("Expected a value of type {kind} for ${}", name),
+							message: format!(
+								"Expected a value of type '{kind}' for argument ${}",
+								name
+							),
 						});
 					}
 				}
