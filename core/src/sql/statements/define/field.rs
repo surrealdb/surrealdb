@@ -14,7 +14,7 @@ use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Write};
 
-#[revisioned(revision = 3)]
+#[revisioned(revision = 4)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
@@ -32,6 +32,8 @@ pub struct DefineFieldStatement {
 	pub comment: Option<Strand>,
 	#[revision(start = 3)]
 	pub if_not_exists: bool,
+	#[revision(start = 4)]
+	pub overwrite: bool,
 }
 
 impl DefineFieldStatement {
@@ -55,7 +57,7 @@ impl DefineFieldStatement {
 		if txn.get_tb_field(ns, db, &self.what, &fd).await.is_ok() {
 			if self.if_not_exists {
 				return Ok(Value::None);
-			} else {
+			} else if !self.overwrite {
 				return Err(Error::FdAlreadyExists {
 					value: fd,
 				});
@@ -71,6 +73,7 @@ impl DefineFieldStatement {
 			DefineFieldStatement {
 				// Don't persist the `IF NOT EXISTS` clause to schema
 				if_not_exists: false,
+				overwrite: false,
 				..self.clone()
 			},
 		)
@@ -97,6 +100,7 @@ impl DefineFieldStatement {
 					DefineFieldStatement {
 						kind: Some(cur_kind),
 						if_not_exists: false,
+						overwrite: false,
 						..existing.clone()
 					}
 				} else {
@@ -188,6 +192,9 @@ impl Display for DefineFieldStatement {
 		write!(f, "DEFINE FIELD")?;
 		if self.if_not_exists {
 			write!(f, " IF NOT EXISTS")?
+		}
+		if self.overwrite {
+			write!(f, " OVERWRITE")?
 		}
 		write!(f, " {} ON {}", self.name, self.what)?;
 		if self.flex {

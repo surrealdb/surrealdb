@@ -10,7 +10,7 @@ use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display};
 
-#[revisioned(revision = 3)]
+#[revisioned(revision = 4)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
@@ -23,6 +23,8 @@ pub struct DefineAnalyzerStatement {
 	pub comment: Option<Strand>,
 	#[revision(start = 3)]
 	pub if_not_exists: bool,
+	#[revision(start = 4)]
+	pub overwrite: bool,
 }
 
 impl DefineAnalyzerStatement {
@@ -40,7 +42,7 @@ impl DefineAnalyzerStatement {
 		if txn.get_db_analyzer(opt.ns()?, opt.db()?, &self.name).await.is_ok() {
 			if self.if_not_exists {
 				return Ok(Value::None);
-			} else {
+			} else if !self.overwrite {
 				return Err(Error::AzAlreadyExists {
 					value: self.name.to_string(),
 				});
@@ -55,6 +57,7 @@ impl DefineAnalyzerStatement {
 			DefineAnalyzerStatement {
 				// Don't persist the `IF NOT EXISTS` clause to schema
 				if_not_exists: false,
+				overwrite: false,
 				..self.clone()
 			},
 		)
@@ -71,6 +74,9 @@ impl Display for DefineAnalyzerStatement {
 		write!(f, "DEFINE ANALYZER")?;
 		if self.if_not_exists {
 			write!(f, " IF NOT EXISTS")?
+		}
+		if self.overwrite {
+			write!(f, " OVERWRITE")?
 		}
 		write!(f, " {}", self.name)?;
 		if let Some(ref i) = self.function {
