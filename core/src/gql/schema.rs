@@ -2,6 +2,14 @@ use std::collections::BTreeMap;
 use std::fmt::Display;
 use std::sync::Arc;
 
+use crate::dbs::Session;
+use crate::kvs::Datastore;
+use crate::sql::statements::{DefineFieldStatement, SelectStatement};
+use crate::sql::Kind;
+use crate::sql::{self, Table};
+use crate::sql::{Cond, Fields};
+use crate::sql::{Expression, Geometry};
+use crate::sql::{Statement, Thing};
 use async_graphql::dynamic::{Enum, FieldValue, ResolverContext, Type, Union};
 use async_graphql::dynamic::{Field, Interface};
 use async_graphql::dynamic::{FieldFuture, InterfaceField};
@@ -14,14 +22,6 @@ use async_graphql::Value as GqlValue;
 use rust_decimal::prelude::FromPrimitive;
 use rust_decimal::Decimal;
 use serde_json::Number;
-use crate::dbs::Session;
-use crate::kvs::Datastore;
-use crate::sql::statements::{DefineFieldStatement, SelectStatement};
-use crate::sql::Kind;
-use crate::sql::{self, Table};
-use crate::sql::{Cond, Fields};
-use crate::sql::{Expression, Geometry};
-use crate::sql::{Statement, Thing};
 
 use super::error::{resolver_error, GqlError};
 use super::ext::IntoExt;
@@ -500,7 +500,6 @@ fn make_table_field_resolver(
 					v => {
 						match field_kind {
 							Some(Kind::Either(ks)) if ks.len() != 1 => {
-								
 							}
 							_ => {}
 						}
@@ -991,24 +990,20 @@ fn gql_to_sql_kind(val: &GqlValue, kind: Kind) -> Result<SqlValue, GqlError> {
 			},
 			_ => Err(type_error(kind, val)),
 		},
-		Kind::Object => {
-			match val {
-				GqlValue::Object(o) => {
-					let out: Result<BTreeMap<String, SqlValue>, GqlError> = o
-						.iter()
-						.map(|(k, v)| {
-							gql_to_sql_kind(v, Kind::Any).map(|sqlv| (k.to_string(), sqlv))
-						})
-						.collect();
-					Ok(SqlValue::Object(out?.into()))
-				}
-				GqlValue::String(s) => match syn::value_legacy_strand(s.as_str()) {
-					Ok(obj @ SqlValue::Object(_)) => Ok(obj),
-					_ => Err(type_error(kind, val)),
-				},
-				_ => Err(type_error(kind, val)),
+		Kind::Object => match val {
+			GqlValue::Object(o) => {
+				let out: Result<BTreeMap<String, SqlValue>, GqlError> = o
+					.iter()
+					.map(|(k, v)| gql_to_sql_kind(v, Kind::Any).map(|sqlv| (k.to_string(), sqlv)))
+					.collect();
+				Ok(SqlValue::Object(out?.into()))
 			}
-		}
+			GqlValue::String(s) => match syn::value_legacy_strand(s.as_str()) {
+				Ok(obj @ SqlValue::Object(_)) => Ok(obj),
+				_ => Err(type_error(kind, val)),
+			},
+			_ => Err(type_error(kind, val)),
+		},
 		Kind::Point => match val {
 			GqlValue::List(l) => match l.as_slice() {
 				[GqlValue::Number(x), GqlValue::Number(y)] => match (x.as_f64(), y.as_f64()) {
@@ -1076,7 +1071,9 @@ fn gql_to_sql_kind(val: &GqlValue, kind: Kind) -> Result<SqlValue, GqlError> {
 					either_try_kind!(ks, bool, Kind::Bool);
 					Err(type_error(kind, val))
 				}
-				GqlValue::Binary(_) => Err(resolver_error("binary input for Either is not yet supported")),
+				GqlValue::Binary(_) => {
+					Err(resolver_error("binary input for Either is not yet supported"))
+				}
 				GqlValue::Enum(n) => {
 					either_try_kind!(ks, &GqlValue::String(n.to_string()), Kind::String);
 					Err(type_error(kind, val))
@@ -1089,8 +1086,7 @@ fn gql_to_sql_kind(val: &GqlValue, kind: Kind) -> Result<SqlValue, GqlError> {
 				obj @ GqlValue::Object(_) => {
 					either_try_kind!(ks, obj, Object);
 					Err(type_error(kind, val))
-
-				},
+				}
 			}
 		}
 		Kind::Set(_k, _n) => Err(resolver_error("Sets are not yet supported")),
