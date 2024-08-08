@@ -3,7 +3,6 @@ use std::collections::BTreeMap;
 use crate::cnf::{PKG_NAME, PKG_VERSION};
 use surrealdb::dbs::Session;
 use surrealdb::kvs::Datastore;
-use surrealdb::rpc::args::Take;
 use surrealdb::rpc::Data;
 use surrealdb::rpc::RpcContext;
 use surrealdb::rpc::RpcError;
@@ -64,40 +63,5 @@ impl RpcContext for PostRpcContext<'_> {
 	async fn unset(&mut self, _params: Array) -> Result<impl Into<Data>, RpcError> {
 		let out: Result<Value, RpcError> = Err(RpcError::MethodNotFound);
 		out
-	}
-
-	// reimplimentaions:
-
-	async fn signup(&mut self, params: Array) -> Result<impl Into<Data>, RpcError> {
-		let Ok(Value::Object(v)) = params.needs_one() else {
-			return Err(RpcError::InvalidParams);
-		};
-		let out: Result<Value, RpcError> =
-			surrealdb::iam::signup::signup(self.kvs, &mut self.session, v)
-				.await
-				.map(Into::into)
-				.map_err(Into::into);
-
-		out
-	}
-
-	async fn signin(&mut self, params: Array) -> Result<impl Into<Data>, RpcError> {
-		let Ok(Value::Object(v)) = params.needs_one() else {
-			return Err(RpcError::InvalidParams);
-		};
-		let out: Result<Value, RpcError> =
-			surrealdb::iam::signin::signin(self.kvs, &mut self.session, v)
-				.await
-				.map(Into::into)
-				.map_err(Into::into);
-		out
-	}
-
-	async fn authenticate(&mut self, params: Array) -> Result<impl Into<Data>, RpcError> {
-		let Ok(Value::Strand(token)) = params.needs_one() else {
-			return Err(RpcError::InvalidParams);
-		};
-		surrealdb::iam::verify::token(self.kvs, &mut self.session, &token.0).await?;
-		Ok(Value::None)
 	}
 }

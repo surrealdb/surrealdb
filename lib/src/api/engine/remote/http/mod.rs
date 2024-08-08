@@ -61,6 +61,7 @@ use tokio_util::compat::FuturesAsyncReadCompatExt;
 use wasm_bindgen_futures::spawn_local;
 
 const SQL_PATH: &str = "sql";
+const RPC_PATH: &str = "rpc";
 
 /// The HTTP scheme used to connect to `http://` endpoints
 #[derive(Debug)]
@@ -355,8 +356,9 @@ async fn router(
 			namespace,
 			database,
 		} => {
-			let path = base_url.join(SQL_PATH)?;
+			let path = base_url.join(RPC_PATH)?;
 			let mut request = client.post(path).headers(headers.clone());
+
 			let ns = match namespace {
 				Some(ns) => match HeaderValue::try_from(&ns) {
 					Ok(ns) => {
@@ -381,6 +383,7 @@ async fn router(
 				},
 				None => None,
 			};
+			// What's the point of this request?
 			request = request.auth(auth).body("RETURN true");
 			take(true, request).await?;
 			if let Some(ns) = ns {
