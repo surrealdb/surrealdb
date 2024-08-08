@@ -33,6 +33,17 @@ impl<'a> Lexer<'a> {
 		}
 	}
 
+	pub fn lex_surrounded_param(&mut self, is_backtick: bool) -> Token {
+		debug_assert_eq!(self.scratch, "");
+		match self.lex_surrounded_ident_err(is_backtick) {
+			Ok(_) => self.finish_token(TokenKind::Parameter),
+			Err(e) => {
+				self.scratch.clear();
+				self.invalid_token(e)
+			}
+		}
+	}
+
 	/// Lex an not surrounded identifier in the form of `[a-zA-Z0-9_]*`
 	///
 	/// The start byte should already a valid byte of the identifier.
@@ -80,7 +91,7 @@ impl<'a> Lexer<'a> {
 	/// Lex an ident which is surround by delimiters.
 	pub fn lex_surrounded_ident(&mut self, is_backtick: bool) -> Token {
 		match self.lex_surrounded_ident_err(is_backtick) {
-			Ok(x) => x,
+			Ok(_) => self.finish_token(TokenKind::Identifier),
 			Err(e) => {
 				self.scratch.clear();
 				self.invalid_token(e)
@@ -89,7 +100,7 @@ impl<'a> Lexer<'a> {
 	}
 
 	/// Lex an ident surrounded either by `⟨⟩` or `\`\``
-	pub fn lex_surrounded_ident_err(&mut self, is_backtick: bool) -> Result<Token, Error> {
+	pub fn lex_surrounded_ident_err(&mut self, is_backtick: bool) -> Result<(), Error> {
 		loop {
 			let Some(x) = self.reader.next() else {
 				let end_char = if is_backtick {
@@ -103,7 +114,7 @@ impl<'a> Lexer<'a> {
 				match x {
 					b'`' if is_backtick => {
 						self.string = Some(mem::take(&mut self.scratch));
-						return Ok(self.finish_token(TokenKind::Identifier));
+						return Ok(());
 					}
 					b'\0' => {
 						// null bytes not allowed
@@ -162,7 +173,7 @@ impl<'a> Lexer<'a> {
 				let c = self.reader.complete_char(x)?;
 				if !is_backtick && c == '⟩' {
 					self.string = Some(mem::take(&mut self.scratch));
-					return Ok(self.finish_token(TokenKind::Identifier));
+					return Ok(());
 				}
 				self.scratch.push(c);
 			}

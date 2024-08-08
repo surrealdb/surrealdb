@@ -76,10 +76,12 @@ impl<'a> BytesReader<'a> {
 	pub fn peek(&self) -> Option<u8> {
 		self.remaining().first().copied()
 	}
+
 	#[inline]
 	pub fn span(&self, span: Span) -> &'a [u8] {
 		&self.data[(span.offset as usize)..(span.offset as usize + span.len as usize)]
 	}
+
 	#[inline]
 	pub fn next_continue_byte(&mut self) -> Result<u8, CharError> {
 		const CONTINUE_BYTE_PREFIX_MASK: u8 = 0b1100_0000;
@@ -87,7 +89,7 @@ impl<'a> BytesReader<'a> {
 
 		let byte = self.next().ok_or(CharError::Eof)?;
 		if byte & CONTINUE_BYTE_PREFIX_MASK != 0b1000_0000 {
-			return Err(CharError::Eof);
+			return Err(CharError::Unicode);
 		}
 
 		Ok(byte & CONTINUE_BYTE_MASK)
