@@ -6,14 +6,14 @@ use crate::api::opt::Resource;
 use crate::api::Connection;
 use crate::api::Result;
 use crate::method::OnceLockExt;
-use crate::value::Serializer;
 use crate::Surreal;
-use crate::{Object, Value};
+use crate::Value;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 use std::borrow::Cow;
 use std::future::IntoFuture;
 use std::marker::PhantomData;
+use surrealdb_core::sql::{to_value as to_core_value, Object as CoreObject, Value as CoreValue};
 
 /// An insert future
 #[derive(Debug)]
@@ -47,10 +47,10 @@ macro_rules! into_future {
 			} = self;
 			Box::pin(async move {
 				let (table, data) = match resource? {
-					Resource::Table(table) => (table.into(), Object::new()),
+					Resource::Table(table) => (table.into(), CoreObject::new()),
 					Resource::RecordId(record_id) => {
-						let mut map = Object::new();
-						map.insert("id".to_string(), record_id.key);
+						let mut map = CoreObject::new();
+						map.insert("id".to_string(), record_id.key());
 						(record_id.table, map)
 					}
 					Resource::Object(_) => return Err(Error::InsertOnObject.into()),
@@ -117,7 +117,7 @@ where
 		D: Serialize,
 	{
 		Content::from_closure(self.client, || {
-			let mut data = data.serialize(Serializer)?;
+			let mut data = to_core_value(data)?;
 			match self.resource? {
 				Resource::Table(table) => Ok(Command::Insert {
 					what: table,
@@ -130,13 +130,13 @@ where
 						)
 						.into())
 					} else {
-						let what = thing.table;
-						if let Value::Object(ref mut x) = data {
-							x.insert("id".to_string(), thing.key);
+						let thing = thing.into_inner();
+						if let CoreValue::Object(ref mut x) = data {
+							x.insert("id".to_string(), thing.id.into());
 						}
 
 						Ok(Command::Insert {
-							what,
+							what: thing.tb,
 							data,
 						})
 					}

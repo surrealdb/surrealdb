@@ -1,42 +1,33 @@
-use chrono::{DateTime, Utc};
 use revision::revisioned;
 use rust_decimal::Decimal;
-use serde::{
-	de::{DeserializeOwned, Visitor},
-	ser::Serializer as SerdeSerializer,
-	Deserialize, Deserializer, Serialize,
-};
+use serde::{de::DeserializeOwned, ser::Serializer, Deserialize, Deserializer, Serialize};
 use std::{
-	borrow::Borrow,
 	cmp::{Ordering, PartialEq, PartialOrd},
-	collections::{btree_map, BTreeMap},
 	fmt,
-	iter::FusedIterator,
 	ops::Deref,
 	str::FromStr,
 	time::Duration,
 };
-use surrealdb_core::syn;
+use surrealdb_core::{
+	sql::{
+		Array as CoreArray, Datetime as CoreDatetime, Id as CoreId, Number as CoreNumber,
+		Thing as CoreThing, Value as CoreValue,
+	},
+	syn,
+};
 use uuid::Uuid;
 
-mod core;
-mod de;
-mod deserializer;
-mod ser;
-mod serializer;
-
-pub(crate) use core::ToCore;
-
-pub use serializer::Serializer;
+mod object;
+pub use object::{Iter, IterMut, Object};
 
 use crate::Error;
 
 pub fn from_value<T: DeserializeOwned>(value: Value) -> Result<T, Error> {
-	T::deserialize(value).map_err(|x| x.into())
+	Ok(surrealdb_core::sql::from_value(value.0)?)
 }
 
 pub fn to_value<T: Serialize>(value: &T) -> Result<Value, Error> {
-	value.serialize(Serializer).map_err(|x| x.into())
+	Ok(Value(surrealdb_core::sql::to_value(value)?))
 }
 
 // Keeping bytes implementation minimal since it might be a good idea to use bytes crate here
@@ -85,120 +76,65 @@ impl From<Vec<u8>> for Bytes {
 	}
 }
 
-// Keeping the Datetime wrapped, the chrono is still pre 1.0 so we can't gaurentee stability here,
-// best to keep most methods interal with maybe some functions from coverting between chrono types explicitly marked as unstable.
-#[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize)]
-#[revisioned(revision = 1)]
-pub struct Datetime(DateTime<Utc>);
+transparent_wrapper!(
+	#[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd)]
+	pub struct Datetime(CoreDatetime)
+);
 
-/// The key of a [`RecordId`].
-#[derive(Debug, Clone, PartialEq, PartialOrd, Serialize, Deserialize)]
-#[non_exhaustive]
-pub enum RecordIdKey {
-	/// A integer record id like in `temperature:17493`
-	#[serde(rename = "Number")]
-	Integer(i64),
-	/// A string record id, like in `user:tkwse1j5o0anqjxonvzx`.
-	String(String),
-	/// An array record id like in `temperature:['London', d'2022-08-29T08:03:39']`.
-	#[serde(serialize_with = "serialize_array", deserialize_with = "deserialize_array")]
-	Array(Vec<Value>),
-	/// An object record id like in `weather:{ location: 'London', date: d'2022-08-29T08:03:39' }`.
-	Object(Object),
-}
-
-fn serialize_array<S>(v: &Vec<Value>, s: S) -> Result<S::Ok, S::Error>
-where
-	S: SerdeSerializer,
-{
-	ser::ArraySerializer(v).serialize(s)
-}
-
-fn deserialize_array<'de, D>(d: D) -> Result<Vec<Value>, D::Error>
-where
-	D: Deserializer<'de>,
-{
-	struct _Visitor;
-
-	impl<'de> Visitor<'de> for _Visitor {
-		type Value = Vec<Value>;
-
-		fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-			write!(formatter, "tuple struct Array")
-		}
-
-		fn visit_newtype_struct<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
-		where
-			D: Deserializer<'de>,
-		{
-			let f = Vec::<Value>::deserialize(deserializer)?;
-			Ok(f)
-		}
-
-		fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
-		where
-			A: serde::de::SeqAccess<'de>,
-		{
-			let f = match seq.next_element()? {
-				Some(x) => x,
-				None => {
-					return Err(<A::Error as serde::de::Error>::invalid_length(
-						0,
-						&"tuple struct Array with 1 element",
-					))
-				}
-			};
-
-			Ok(f)
-		}
-	}
-
-	d.deserialize_newtype_struct("$surrealdb::private::sql::Array", _Visitor)
-}
+transparent_wrapper!(
+	/// The key of a [`RecordId`].
+	#[derive(Debug, Clone, PartialEq, PartialOrd)]
+	#[non_exhaustive]
+	pub struct RecordIdKey(CoreId)
+);
 
 impl From<Object> for RecordIdKey {
 	fn from(value: Object) -> Self {
-		RecordIdKey::Object(value)
+		Self::from_inner(CoreId::Object(value.into_inner()))
 	}
 }
 
 impl From<String> for RecordIdKey {
 	fn from(value: String) -> Self {
-		RecordIdKey::String(value)
+		Self(CoreId::String(value))
 	}
 }
 
 impl From<&String> for RecordIdKey {
 	fn from(value: &String) -> Self {
-		RecordIdKey::String(value.clone())
+		Self(CoreId::String(value.clone()))
 	}
 }
 
 impl From<&str> for RecordIdKey {
 	fn from(value: &str) -> Self {
-		RecordIdKey::String(value.to_owned())
+		Self(CoreId::String(value.to_owned()))
 	}
 }
 
 impl From<i64> for RecordIdKey {
 	fn from(value: i64) -> Self {
-		RecordIdKey::Integer(value)
+		Self(CoreId::Number(value))
 	}
 }
 
 impl From<Vec<Value>> for RecordIdKey {
 	fn from(value: Vec<Value>) -> Self {
-		RecordIdKey::Array(value)
+		let res = Value::array_to_core(value);
+		let mut array = CoreArray::default();
+		array.0 = res;
+		Self(CoreId::Array(array))
 	}
 }
 
 impl From<RecordIdKey> for Value {
 	fn from(key: RecordIdKey) -> Self {
-		match key {
-			RecordIdKey::String(x) => Value::String(x),
-			RecordIdKey::Integer(x) => Value::Number(Number::Integer(x)),
-			RecordIdKey::Object(x) => Value::Object(x),
-			RecordIdKey::Array(x) => Value::Array(x),
+		match key.0 {
+			CoreId::String(x) => Value::from(x),
+			CoreId::Number(x) => Value::int(x),
+			CoreId::Object(x) => Value::from(Object::from_inner(x)),
+			CoreId::Array(x) => Value::from(Value::core_to_array(x.0)),
+			_ => panic!("lib recieved generate variant of record id"),
 		}
 	}
 }
@@ -207,8 +143,7 @@ impl FromStr for Value {
 	type Err = Error;
 
 	fn from_str(s: &str) -> Result<Self, Self::Err> {
-		Value::from_core(surrealdb_core::syn::value(s)?)
-			.ok_or(crate::api::Error::RecievedInvalidValue.into())
+		Ok(Value::from_inner(surrealdb_core::syn::value(s)?))
 	}
 }
 
@@ -225,27 +160,24 @@ impl TryFrom<Value> for RecordIdKey {
 	type Error = RecordIdKeyFromValueError;
 
 	fn try_from(key: Value) -> Result<Self, Self::Error> {
-		match key {
-			Value::String(x) => Ok(RecordIdKey::String(x)),
-			Value::Number(Number::Integer(x)) => Ok(RecordIdKey::Integer(x)),
-			Value::Object(x) => Ok(RecordIdKey::Object(x)),
-			Value::Array(x) => Ok(RecordIdKey::Array(x)),
+		match key.0 {
+			CoreValue::Strand(x) => Ok(RecordIdKey::from_inner(CoreId::String(x.0))),
+			CoreValue::Number(CoreNumber::Int(x)) => Ok(RecordIdKey::from_inner(CoreId::Number(x))),
+			CoreValue::Object(x) => Ok(RecordIdKey::from_inner(CoreId::Object(x))),
+			CoreValue::Array(x) => Ok(RecordIdKey::from_inner(CoreId::Array(x))),
 			_ => Err(RecordIdKeyFromValueError(())),
 		}
 	}
 }
 
-/// Struct representing a record id.
-///
-/// Record id's consist of a table name and a key.
-/// For example the record id `user:tkwse1j5o0anqjxonvzx` has the table `user` and the key `tkwse1j5o0anqjxonvzx`.
-#[derive(Debug, Clone, PartialEq, PartialOrd, Serialize, Deserialize)]
-pub struct RecordId {
-	#[serde(rename = "tb")]
-	pub(crate) table: String,
-	#[serde(rename = "id")]
-	pub(crate) key: RecordIdKey,
-}
+transparent_wrapper!(
+	/// Struct representing a record id.
+	///
+	/// Record id's consist of a table name and a key.
+	/// For example the record id `user:tkwse1j5o0anqjxonvzx` has the table `user` and the key `tkwse1j5o0anqjxonvzx`.
+	#[derive(Debug, Clone, PartialEq, PartialOrd)]
+	pub struct RecordId(CoreThing)
+);
 
 impl RecordId {
 	pub fn from_table_key<S, K>(table: S, key: K) -> Self
@@ -253,18 +185,17 @@ impl RecordId {
 		S: Into<String>,
 		K: Into<RecordIdKey>,
 	{
-		RecordId {
-			table: table.into(),
-			key: key.into(),
-		}
+		let tb = table.into();
+		let key = key.into();
+		Self(CoreThing::from((tb, key.0)))
 	}
 
 	pub fn table(&self) -> &str {
-		self.table.as_str()
+		&self.0.tb
 	}
 
 	pub fn key(&self) -> &RecordIdKey {
-		&self.key
+		RecordIdKey::from_inner_ref(&self.0.id)
 	}
 }
 
@@ -272,9 +203,7 @@ impl FromStr for RecordId {
 	type Err = Error;
 
 	fn from_str(s: &str) -> Result<Self, Self::Err> {
-		syn::thing(s).map_err(crate::Error::Db).and_then(|x| {
-			RecordId::from_core(x).ok_or(crate::api::Error::RecievedInvalidValue.into())
-		})
+		syn::thing(s).map_err(crate::Error::Db).map(RecordId::from_inner)
 	}
 }
 
@@ -288,290 +217,146 @@ where
 	}
 }
 
-#[non_exhaustive]
-#[derive(Debug, Clone, PartialEq, PartialOrd)]
-pub enum Number {
-	Float(f64),
-	Integer(i64),
-	Decimal(Decimal),
-}
+transparent_wrapper!(
+	/// The number type of surrealql.
+	/// Can contain either a 64 bit float, 64 bit integer or a decimal.
+	#[derive(Debug, Clone, PartialEq, PartialOrd)]
+	pub struct Number(CoreNumber)
+);
 
 impl Number {
 	pub fn cource_into_i64(self) -> Option<i64> {
-		match self {
-			Self::Integer(x) => Some(x),
-			Self::Float(x) if x.fract() == x => Some(x as i64),
-			Self::Decimal(x) => x.try_into().ok(),
+		match self.0 {
+			CoreNumber::Int(x) => Some(x),
+			CoreNumber::Float(x) if x.fract() == x => Some(x as i64),
+			CoreNumber::Decimal(x) => x.try_into().ok(),
 			_ => None,
 		}
 	}
 }
 
-#[derive(Debug)]
-pub struct IterMut<'a> {
-	iter: btree_map::IterMut<'a, String, Value>,
-}
+transparent_wrapper!(
+	#[derive(Debug, Clone, Default, PartialEq, PartialOrd)]
+	pub struct Value(CoreValue)
+);
 
-impl<'a> Iterator for IterMut<'a> {
-	type Item = (&'a String, &'a mut Value);
-
-	fn next(&mut self) -> Option<Self::Item> {
-		self.iter.next()
-	}
-
-	fn size_hint(&self) -> (usize, Option<usize>) {
-		self.iter.size_hint()
-	}
-}
-
-impl<'a> std::iter::FusedIterator for IterMut<'a> {}
-
-impl<'a> ExactSizeIterator for IterMut<'a> {
-	fn len(&self) -> usize {
-		self.iter.len()
-	}
-}
-
-#[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq, PartialOrd)]
-#[serde(rename = "$surrealdb::private::sql::Thing")]
-#[revisioned(revision = 1)]
-pub struct Object(pub(crate) BTreeMap<String, Value>);
-
-impl Object {
-	pub fn new() -> Self {
-		Object(BTreeMap::new())
-	}
-
-	pub fn clear(&mut self) {
-		self.0.clear()
-	}
-
-	pub fn get<Q>(&self, key: &Q) -> Option<&Value>
+impl Serialize for Value {
+	fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
 	where
-		String: Borrow<Q>,
-		Q: Ord + ?Sized,
+		S: Serializer,
 	{
-		self.0.get(key)
+		self.0.serialize(serializer)
 	}
+}
 
-	pub fn get_mut<Q>(&mut self, key: &Q) -> Option<&mut Value>
+impl<'de> Deserialize<'de> for Value {
+	fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
 	where
-		String: Borrow<Q>,
-		Q: Ord + ?Sized,
+		D: Deserializer<'de>,
 	{
-		self.0.get_mut(key)
+		Ok(Self(Deserialize::deserialize(deserializer)?))
 	}
-
-	pub fn contains_key<Q>(&self, key: &Q) -> bool
-	where
-		String: Borrow<Q>,
-		Q: ?Sized + Ord,
-	{
-		self.0.contains_key(key)
-	}
-
-	pub fn remove<Q>(&mut self, key: &Q) -> Option<Value>
-	where
-		String: Borrow<Q>,
-		Q: ?Sized + Ord,
-	{
-		self.0.remove(key)
-	}
-
-	pub fn remove_entry<Q>(&mut self, key: &Q) -> Option<(String, Value)>
-	where
-		String: Borrow<Q>,
-		Q: ?Sized + Ord,
-	{
-		self.0.remove_entry(key)
-	}
-
-	pub fn iter(&self) -> Iter<'_> {
-		Iter {
-			iter: self.0.iter(),
-		}
-	}
-
-	pub fn iter_mut(&mut self) -> IterMut<'_> {
-		IterMut {
-			iter: self.0.iter_mut(),
-		}
-	}
-
-	pub fn len(&self) -> usize {
-		self.0.len()
-	}
-
-	pub fn is_empty(&self) -> bool {
-		self.0.is_empty()
-	}
-
-	pub fn insert<V>(&mut self, key: String, value: V) -> Option<Value>
-	where
-		V: Into<Value>,
-	{
-		self.0.insert(key, value.into())
-	}
-}
-
-pub struct IntoIter {
-	iter: <BTreeMap<String, Value> as IntoIterator>::IntoIter,
-}
-
-impl Iterator for IntoIter {
-	type Item = (String, Value);
-
-	fn next(&mut self) -> Option<Self::Item> {
-		self.iter.next()
-	}
-
-	fn size_hint(&self) -> (usize, Option<usize>) {
-		self.iter.size_hint()
-	}
-}
-
-impl DoubleEndedIterator for IntoIter {
-	fn next_back(&mut self) -> Option<Self::Item> {
-		self.iter.next_back()
-	}
-}
-
-impl ExactSizeIterator for IntoIter {
-	fn len(&self) -> usize {
-		self.iter.len()
-	}
-}
-
-impl FusedIterator for IntoIter {}
-
-impl IntoIterator for Object {
-	type Item = (String, Value);
-
-	type IntoIter = IntoIter;
-
-	fn into_iter(self) -> Self::IntoIter {
-		IntoIter {
-			iter: self.0.into_iter(),
-		}
-	}
-}
-
-#[derive(Clone)]
-pub struct Iter<'a> {
-	iter: <&'a BTreeMap<String, Value> as IntoIterator>::IntoIter,
-}
-
-impl<'a> IntoIterator for &'a Object {
-	type Item = (&'a String, &'a Value);
-
-	type IntoIter = Iter<'a>;
-
-	fn into_iter(self) -> Self::IntoIter {
-		self.iter()
-	}
-}
-
-impl<'a> Iterator for Iter<'a> {
-	type Item = (&'a String, &'a Value);
-
-	fn next(&mut self) -> Option<Self::Item> {
-		self.iter.next()
-	}
-
-	fn size_hint(&self) -> (usize, Option<usize>) {
-		self.iter.size_hint()
-	}
-
-	fn last(self) -> Option<Self::Item>
-	where
-		Self: Sized,
-	{
-		self.iter.last()
-	}
-
-	fn min(mut self) -> Option<Self::Item> {
-		self.iter.next()
-	}
-
-	fn max(mut self) -> Option<Self::Item> {
-		self.iter.next_back()
-	}
-}
-
-impl FusedIterator for Iter<'_> {}
-
-impl<'a> DoubleEndedIterator for Iter<'a> {
-	fn next_back(&mut self) -> Option<Self::Item> {
-		self.iter.next_back()
-	}
-}
-
-impl<'a> ExactSizeIterator for Iter<'a> {
-	fn len(&self) -> usize {
-		self.iter.len()
-	}
-}
-
-#[non_exhaustive]
-#[derive(Debug, Clone, Default, PartialEq, PartialOrd)]
-pub enum Value {
-	#[default]
-	None,
-	Bool(bool),
-	Number(Number),
-	Object(Object),
-	String(String),
-	Array(Vec<Value>),
-	Uuid(Uuid),
-	Datetime(Datetime),
-	Duration(Duration),
-	Bytes(Bytes),
-	RecordId(RecordId),
 }
 
 impl Value {
 	pub fn int(v: i64) -> Self {
-		Value::Number(Number::Integer(v))
+		Self(CoreValue::Number(CoreNumber::Int(v)))
 	}
 
 	pub fn float(v: f64) -> Self {
-		Value::Number(Number::Float(v))
+		Self(CoreValue::Number(CoreNumber::Float(v)))
 	}
 
 	pub fn decimal(v: Decimal) -> Self {
-		Value::Number(Number::Decimal(v))
+		Self(CoreValue::Number(CoreNumber::Decimal(v)))
 	}
 
 	pub fn is_none(&self) -> bool {
-		matches!(self, Value::None)
+		matches!(self.0, CoreValue::None)
 	}
 
 	#[doc = concat!("Return whether the value contains a ",stringify!(Vec<Value>),".")]
 	pub fn is_array(&self) -> bool {
-		matches!(&self, Value::Array(_))
+		matches!(&self.0, CoreValue::Array(_))
 	}
 	#[doc = concat!("Get a reference to the internal ",stringify!(Vec<Value>)," if the value is of that type")]
 	pub fn as_array(&self) -> Option<&Vec<Value>> {
-		if let Value::Array(ref x) = self {
-			Some(x)
+		if let CoreValue::Array(ref x) = self.0 {
+			// SAFETY: Because Value is `repr(transparent)` transmuting between value and corevalue
+			// is safe.
+			let res = unsafe { std::mem::transmute::<&Vec<CoreValue>, &Vec<Value>>(&x.0) };
+			Some(res)
 		} else {
 			None
 		}
 	}
 	#[doc = concat!("Get a reference to the internal ",stringify!(Vec<Value>)," if the value is of that type")]
 	pub fn as_array_mut(&mut self) -> Option<&mut Vec<Value>> {
-		if let Value::Array(ref mut x) = self {
-			Some(x)
+		if let CoreValue::Array(ref mut x) = self.0 {
+			// SAFETY: Because Value is `repr(transparent)` transmuting between value and corevalue
+			// is safe.
+			let res =
+				unsafe { std::mem::transmute::<&mut Vec<CoreValue>, &mut Vec<Value>>(&mut x.0) };
+			Some(res)
 		} else {
 			None
 		}
 	}
 	#[doc = concat!("Convert the value to ",stringify!(Vec<Value>)," if the value is of that type")]
 	pub fn into_array(self) -> Option<Vec<Value>> {
-		if let Value::Array(x) = self {
-			Some(x)
+		if let CoreValue::Array(x) = self.0 {
+			let res = unsafe { std::mem::transmute::<Vec<CoreValue>, Vec<Value>>(x.0) };
+			Some(res)
 		} else {
 			None
+		}
+	}
+
+	pub(crate) fn core_to_array(v: Vec<CoreValue>) -> Vec<Value> {
+		unsafe {
+			// SAFETY: Because Value is `repr(transparent)` transmuting between value and corevalue
+			// is safe.
+			std::mem::transmute::<Vec<CoreValue>, Vec<Value>>(v)
+		}
+	}
+
+	pub(crate) fn core_to_array_ref(v: &Vec<CoreValue>) -> &Vec<Value> {
+		unsafe {
+			// SAFETY: Because Value is `repr(transparent)` transmuting between value and corevalue
+			// is safe.
+			std::mem::transmute::<&Vec<CoreValue>, &Vec<Value>>(v)
+		}
+	}
+
+	pub(crate) fn core_to_array_mut(v: &mut Vec<CoreValue>) -> &mut Vec<Value> {
+		unsafe {
+			// SAFETY: Because Value is `repr(transparent)` transmuting between value and corevalue
+			// is safe.
+			std::mem::transmute::<&mut Vec<CoreValue>, &mut Vec<Value>>(v)
+		}
+	}
+
+	pub(crate) fn array_to_core(v: Vec<Value>) -> Vec<CoreValue> {
+		unsafe {
+			// SAFETY: Because Value is `repr(transparent)` transmuting between value and corevalue
+			// is safe.
+			std::mem::transmute::<Vec<Value>, Vec<CoreValue>>(v)
+		}
+	}
+
+	pub(crate) fn array_to_core_ref(v: &Vec<Value>) -> &Vec<CoreValue> {
+		unsafe {
+			// SAFETY: Because Value is `repr(transparent)` transmuting between value and corevalue
+			// is safe.
+			std::mem::transmute::<&Vec<Value>, &Vec<CoreValue>>(v)
+		}
+	}
+
+	pub(crate) fn array_to_core_mut(v: &mut Vec<Value>) -> &mut Vec<CoreValue> {
+		unsafe {
+			// SAFETY: Because Value is `repr(transparent)` transmuting between value and corevalue
+			// is safe.
+			std::mem::transmute::<&mut Vec<Value>, &mut Vec<CoreValue>>(v)
 		}
 	}
 }
@@ -605,24 +390,27 @@ where
 	Value: From<T>,
 {
 	fn from(value: Vec<T>) -> Self {
-		Value::Array(value.into_iter().map(From::from).collect())
+		let mut array = CoreArray::default();
+		let res = value.into_iter().map(Value::from).map(Value::into_inner).collect();
+		array.0 = res;
+		Value::from_inner(CoreValue::Array(array))
 	}
 }
 
-macro_rules! impl_convert(
+macro_rules! impl_convert_wrapper(
 	($(($variant:ident($ty:ty), $is:ident, $as:ident,$as_mut:ident, $into:ident)),*$(,)?) => {
 		impl Value{
 
 			$(
 			#[doc = concat!("Return whether the value contains a ",stringify!($ty),".")]
 			pub fn $is(&self) -> bool{
-				matches!(&self, Value::$variant(_))
+				matches!(&self.0, CoreValue::$variant(_))
 			}
 
 			#[doc = concat!("Get a reference to the internal ",stringify!($ty)," if the value is of that type")]
 			pub fn $as(&self) -> Option<&$ty>{
-				if let Value::$variant(ref x) = self{
-					Some(x)
+				if let CoreValue::$variant(ref x) = self.0{
+					Some(<$ty>::from_inner_ref(x))
 				}else{
 					None
 				}
@@ -630,8 +418,8 @@ macro_rules! impl_convert(
 
 			#[doc = concat!("Get a reference to the internal ",stringify!($ty)," if the value is of that type")]
 			pub fn $as_mut(&mut self) -> Option<&mut $ty>{
-				if let Value::$variant(ref mut x) = self{
-					Some(x)
+				if let CoreValue::$variant(ref mut x) = self.0{
+					Some(<$ty>::from_inner_mut(x))
 				}else{
 					None
 				}
@@ -639,8 +427,8 @@ macro_rules! impl_convert(
 
 			#[doc = concat!("Convert the value to ",stringify!($ty)," if the value is of that type")]
 			pub fn $into(self) -> Option<$ty>{
-				if let Value::$variant(x) = self{
-					Some(x)
+				if let CoreValue::$variant(x) = self.0{
+					Some(<$ty>::from_inner(x))
 				}else{
 					None
 				}
@@ -651,16 +439,16 @@ macro_rules! impl_convert(
 		$(
 		impl From<$ty> for Value {
 			fn from(v: $ty) -> Self{
-				Value::$variant(v)
+				Self(CoreValue::$variant(v.into_inner()))
 			}
 		}
 
 		impl From<Option<$ty>> for Value {
 			fn from(v: Option<$ty>) -> Self{
 				if let Some(v) = v {
-					Value::$variant(v)
+					Self(CoreValue::$variant(v.into_inner()))
 				}else{
-					Value::None
+					Self(CoreValue::None)
 				}
 			}
 		}
@@ -679,27 +467,89 @@ macro_rules! impl_convert(
 	};
 );
 
-/// The action performed on a record
-///
-/// This is used in live query notifications.
-#[derive(Debug, Clone, Copy, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-#[non_exhaustive]
-pub enum Action {
-	Create,
-	Update,
-	Delete,
-}
+macro_rules! impl_convert_primitive(
+	($(($variant:ident($ty:ty), $is:ident, $as:ident,$as_mut:ident, $into:ident)),*$(,)?) => {
+		impl Value{
+			$(
+			#[doc = concat!("Return whether the value contains a ",stringify!($ty),".")]
+			pub fn $is(&self) -> bool{
+				matches!(&self.0, CoreValue::$variant(_))
+			}
 
-impl_convert!(
-	(Bool(bool), is_bool, as_bool, as_bool_mut, into_bool),
+			#[doc = concat!("Get a reference to the internal ",stringify!($ty)," if the value is of that type")]
+			pub fn $as(&self) -> Option<&$ty>{
+				if let CoreValue::$variant(ref x) = self.0{
+					Some(<$ty>::from_inner_ref(x))
+				}else{
+					None
+				}
+			}
+
+			#[doc = concat!("Get a reference to the internal ",stringify!($ty)," if the value is of that type")]
+			pub fn $as_mut(&mut self) -> Option<&mut $ty>{
+				if let CoreValue::$variant(ref mut x) = self.0{
+					Some(<$ty>::from_inner_mut(x))
+				}else{
+					None
+				}
+			}
+
+			#[doc = concat!("Convert the value to ",stringify!($ty)," if the value is of that type")]
+			pub fn $into(self) -> Option<$ty>{
+				if let CoreValue::$variant(x) = self.0{
+					Some(<$ty>::from_inner(x))
+				}else{
+					None
+				}
+			}
+			)*
+		}
+
+		$(
+		impl From<$ty> for Value {
+			fn from(v: $ty) -> Self{
+				Self(CoreValue::$variant(v.into_inner()))
+			}
+		}
+
+		impl From<Option<$ty>> for Value {
+			fn from(v: Option<$ty>) -> Self{
+				if let Some(v) = v {
+					Self(CoreValue::$variant(v.into_inner()))
+				}else{
+					Self(CoreValue::None)
+				}
+			}
+		}
+
+		impl TryFrom<Value> for $ty {
+			type Error = ConversionError;
+
+			fn try_from(v: Value) -> Result<Self, Self::Error>{
+				v.$into().ok_or(ConversionError{
+					from: stringify!($variant),
+					expected: stringify!($ty),
+				})
+			}
+		}
+		)*
+
+	};
+);
+
+impl_convert_wrapper!(
 	(Number(Number), is_number, as_number, as_number_mut, into_number),
-	(Uuid(Uuid), is_uuid, as_uuid, as_uuid_mut, into_uuid),
-	(Datetime(Datetime), is_datetime, as_datetime, as_datetime_mut, into_dateime),
-	(Duration(Duration), is_duration, as_duration, as_duration_mut, into_duration),
-	(Bytes(Bytes), is_bytes, as_bytes, as_bytes_mut, into_bytes),
-	(String(String), is_string, as_string, as_string_mut, into_string),
-	(RecordId(RecordId), is_record_id, as_record_id, as_record_id_mut, into_record_id),
+	//(Uuid(Uuid), is_uuid, as_uuid, as_uuid_mut, into_uuid),
+	//(Datetime(Datetime), is_datetime, as_datetime, as_datetime_mut, into_dateime),
+	//(Bytes(Bytes), is_bytes, as_bytes, as_bytes_mut, into_bytes),
+	(Thing(RecordId), is_record_id, as_record_id, as_record_id_mut, into_record_id),
 	(Object(Object), is_object, as_object, as_object_mut, into_object),
+);
+
+impl_convert_primitive!(
+	(Bool(bool), is_bool, as_bool, as_bool_mut, into_bool),
+	(Strand(String), is_string, as_string, as_string_mut, into_string),
+	(Duration(Duration), is_duration, as_duration, as_duration_mut, into_duration),
 );
 
 pub struct ConversionError {
@@ -715,6 +565,17 @@ impl fmt::Display for ConversionError {
 			self.expected, self.from
 		)
 	}
+}
+
+/// The action performed on a record
+///
+/// This is used in live query notifications.
+#[derive(Debug, Clone, Copy, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[non_exhaustive]
+pub enum Action {
+	Create,
+	Update,
+	Delete,
 }
 
 /// A live query notification

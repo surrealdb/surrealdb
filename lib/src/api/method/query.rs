@@ -11,8 +11,7 @@ use crate::method::OnceLockExt;
 use crate::method::Stats;
 use crate::method::WithStats;
 use crate::value::Notification;
-use crate::Surreal;
-use crate::{value, Object, Value};
+use crate::{Object, Surreal, Value};
 use futures::future::Either;
 use futures::stream::SelectAll;
 use futures::StreamExt;
@@ -25,7 +24,9 @@ use std::future::IntoFuture;
 use std::pin::Pin;
 use std::task::Context;
 use std::task::Poll;
-use surrealdb_core::sql::{self, Statement};
+use surrealdb_core::sql::{
+	self, to_value as to_core_value, Object as CoreObject, Statement, Value as CoreValue,
+};
 
 /// A query future
 #[derive(Debug)]
@@ -38,7 +39,7 @@ pub struct Query<'r, C: Connection> {
 pub(crate) struct ValidQuery<'r, C: Connection> {
 	pub client: Cow<'r, Surreal<C>>,
 	pub query: Vec<Statement>,
-	pub bindings: Object,
+	pub bindings: CoreObject,
 	pub register_live_queries: bool,
 }
 
@@ -56,7 +57,7 @@ where
 			inner: Ok(ValidQuery {
 				client,
 				query,
-				bindings,
+				bindings: bindings.into_inner(),
 				register_live_queries,
 			}),
 		}
@@ -167,19 +168,19 @@ where
 				// creating another public error variant for this internal error.
 				let res = match result {
 					Ok(id) => {
-						let Value::Uuid(uuid) = id else {
+						let CoreValue::Uuid(uuid) = id else {
 							return Err(Error::InternalError(
 								"successfull live query did not return a uuid".to_string(),
 							)
 							.into());
 						};
-						live::register(router, *uuid).await.map(|rx| {
+						live::register(router, uuid.0).await.map(|rx| {
 							Stream::new(
 								Surreal::new_from_router_waiter(
 									client.router.clone(),
 									client.waiter.clone(),
 								),
-								*uuid,
+								uuid.0,
 								Some(rx),
 							)
 						})
@@ -272,25 +273,28 @@ where
 	/// ```
 	pub fn bind(self, bindings: impl Serialize) -> Self {
 		self.map_valid(move |mut valid| {
-			let bindings = bindings.serialize(value::Serializer)?;
+			let bindings = to_core_value(bindings)?;
 			match bindings {
-				Value::Object(mut map) => valid.bindings.0.append(&mut map.0),
-				Value::Array(array) => {
-					if array.len() != 2 || !array[0].is_string() {
-						return Err(Error::InvalidBindings(Value::Array(array)).into());
+				CoreValue::Object(mut map) => valid.bindings.append(&mut map.0),
+				CoreValue::Array(array) => {
+					if array.len() != 2 || matches!(array[0], CoreValue::Strand(_)) {
+						let bindings = CoreValue::Array(array);
+						let bindings = Value::into_inner(bindings);
+						return Err(Error::InvalidBindings(bindings).into());
 					}
 
 					let mut iter = array.into_iter();
-					let Some(Value::String(key)) = iter.next() else {
+					let Some(CoreValue::Strand(key)) = iter.next() else {
 						unreachable!()
 					};
 					let Some(value) = iter.next() else {
 						unreachable!()
 					};
 
-					valid.bindings.0.insert(key, value);
+					valid.bindings.0.insert(key.0, value);
 				}
 				_ => {
+					let bindings = Value::into_inner(bindings);
 					return Err(Error::InvalidBindings(bindings).into());
 				}
 			}
@@ -300,14 +304,14 @@ where
 	}
 }
 
-pub(crate) type QueryResult = Result<Value>;
+pub(crate) type QueryResult = Result<CoreValue>;
 
 /// The response type of a `Surreal::query` request
 #[derive(Debug)]
 pub struct Response {
 	pub(crate) client: Surreal<Any>,
 	pub(crate) results: IndexMap<usize, (Stats, QueryResult)>,
-	pub(crate) live_queries: IndexMap<usize, Result<Stream<Value>>>,
+	pub(crate) live_queries: IndexMap<usize, Result<Stream<CoreValue>>>,
 }
 
 /// A `LIVE SELECT` stream from the `query` method
@@ -700,9 +704,8 @@ impl WithStats<Response> {
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::Error::Api;
+	use crate::{value::to_value, Error::Api};
 	use serde::Deserialize;
-	use value::Serializer;
 
 	#[derive(Debug, Clone, Serialize, Deserialize)]
 	struct Summary {
@@ -860,7 +863,7 @@ mod tests {
 		let summary = Summary {
 			title: "Lorem Ipsum".to_owned(),
 		};
-		let value = summary.serialize(Serializer).unwrap();
+		let value = to_value(summary).unwrap();
 
 		let mut response = Response {
 			results: to_map(vec![Ok(value.clone())]),
@@ -889,7 +892,7 @@ mod tests {
 			title: "Lorem Ipsum".to_owned(),
 			body: "Lorem Ipsum Lorem Ipsum".to_owned(),
 		};
-		let value = article.serialize(Serializer).unwrap();
+		let value = to_value(article).unwrap();
 
 		let mut response = Response {
 			results: to_map(vec![Ok(value.clone())]),

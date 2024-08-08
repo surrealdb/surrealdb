@@ -12,7 +12,6 @@ use crate::api::OnceLockExt;
 use crate::api::Surreal;
 use crate::opt::IntoExportDestination;
 use crate::opt::WaitFor;
-use crate::Value;
 use serde::Serialize;
 use std::borrow::Cow;
 use std::marker::PhantomData;
@@ -21,6 +20,7 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::OnceLock;
 use std::time::Duration;
+use surrealdb_core::sql::{to_value as to_core_value, Value as CoreValue};
 
 pub(crate) mod live;
 pub(crate) mod query;
@@ -89,7 +89,6 @@ pub use use_ns::UseNs;
 pub use version::Version;
 
 use super::opt::IntoResource;
-use super::value::Serializer;
 
 /// A alias for an often used type of future returned by async methods in this library.
 pub(crate) type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + Sync + 'a>>;
@@ -328,7 +327,7 @@ where
 		Set {
 			client: Cow::Borrowed(self),
 			key: key.into(),
-			value: value.serialize(Serializer).map_err(Into::into),
+			value: to_core_value(value).map_err(Into::into),
 		}
 	}
 
@@ -426,8 +425,8 @@ where
 	pub fn signup<R>(&self, credentials: impl Credentials<auth::Signup, R>) -> Signup<C, R> {
 		Signup {
 			client: Cow::Borrowed(self),
-			credentials: credentials.serialize(Serializer).map_err(Into::into).and_then(|x| {
-				if let Value::Object(x) = x {
+			credentials: to_core_value(credentials).map_err(Into::into).and_then(|x| {
+				if let CoreValue::Object(x) = x {
 					Ok(x)
 				} else {
 					Err(Error::InternalError(
@@ -554,8 +553,8 @@ where
 	pub fn signin<R>(&self, credentials: impl Credentials<auth::Signin, R>) -> Signin<C, R> {
 		Signin {
 			client: Cow::Borrowed(self),
-			credentials: credentials.serialize(Serializer).map_err(Into::into).and_then(|x| {
-				if let Value::Object(x) = x {
+			credentials: to_core_value(credentials).map_err(Into::into).and_then(|x| {
+				if let CoreValue::Object(x) = x {
 					Ok(x)
 				} else {
 					Err(Error::InternalError(

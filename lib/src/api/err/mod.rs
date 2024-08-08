@@ -8,8 +8,6 @@ use surrealdb_core::{
 };
 use thiserror::Error;
 
-use super::value::ToCore;
-
 /// An error originating from a remote SurrealDB database
 #[derive(Error, Debug)]
 #[non_exhaustive]

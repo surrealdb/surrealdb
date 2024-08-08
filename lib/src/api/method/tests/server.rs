@@ -2,8 +2,8 @@ use super::types::User;
 use crate::api::conn::{Command, DbResponse, Route};
 use crate::api::Response as QueryResponse;
 use crate::opt::Resource;
-use crate::{value, Value};
 use channel::Receiver;
+use surrealdb_core::sql::{to_value as to_core_value, Value as CoreValue};
 
 pub(super) fn mock(route_rx: Receiver<Route>) {
 	tokio::spawn(async move {
@@ -15,7 +15,7 @@ pub(super) fn mock(route_rx: Receiver<Route>) {
 			let cmd = request.command;
 
 			let result = match cmd {
-				Command::Invalidate | Command::Health => Ok(DbResponse::Other(Value::None)),
+				Command::Invalidate | Command::Health => Ok(DbResponse::Other(CoreValue::None)),
 				Command::Authenticate {
 					..
 				}
@@ -24,14 +24,14 @@ pub(super) fn mock(route_rx: Receiver<Route>) {
 				}
 				| Command::Unset {
 					..
-				} => Ok(DbResponse::Other(Value::None)),
+				} => Ok(DbResponse::Other(CoreValue::None)),
 				Command::SubscribeLive {
 					..
 				} => Ok(DbResponse::Other("c6c0e36c-e2cf-42cb-b2d5-75415249b261".to_owned().into())),
 				Command::Version => Ok(DbResponse::Other("1.0.0".into())),
 				Command::Use {
 					..
-				} => Ok(DbResponse::Other(Value::None)),
+				} => Ok(DbResponse::Other(CoreValue::None)),
 				Command::Signup {
 					..
 				}
@@ -40,7 +40,7 @@ pub(super) fn mock(route_rx: Receiver<Route>) {
 				} => Ok(DbResponse::Other("jwt".to_owned().into())),
 				Command::Set {
 					..
-				} => Ok(DbResponse::Other(Value::None)),
+				} => Ok(DbResponse::Other(CoreValue::None)),
 				Command::Query {
 					..
 				} => Ok(DbResponse::Query(QueryResponse::new())),
@@ -48,7 +48,7 @@ pub(super) fn mock(route_rx: Receiver<Route>) {
 					data,
 					..
 				} => match data {
-					None => Ok(DbResponse::Other(value::to_value(&User::default()).unwrap())),
+					None => Ok(DbResponse::Other(to_core_value(&User::default()).unwrap())),
 					Some(user) => Ok(DbResponse::Other(user.clone())),
 				},
 				Command::Select {
@@ -60,10 +60,10 @@ pub(super) fn mock(route_rx: Receiver<Route>) {
 					..
 				} => match what {
 					Resource::RecordId(..) => {
-						Ok(DbResponse::Other(value::to_value(&User::default()).unwrap()))
+						Ok(DbResponse::Other(to_core_value(&User::default()).unwrap()))
 					}
 					Resource::Table(..) | Resource::Array(..) | Resource::Range(..) => {
-						Ok(DbResponse::Other(Value::Array(Default::default())))
+						Ok(DbResponse::Other(CoreValue::Array(Default::default())))
 					}
 					_ => unreachable!(),
 				},
@@ -84,10 +84,10 @@ pub(super) fn mock(route_rx: Receiver<Route>) {
 					..
 				} => match what {
 					Resource::RecordId(..) => {
-						Ok(DbResponse::Other(value::to_value(&User::default()).unwrap()))
+						Ok(DbResponse::Other(to_core_value(&User::default()).unwrap()))
 					}
 					Resource::Table(..) | Resource::Array(..) | Resource::Range(..) => {
-						Ok(DbResponse::Other(Value::Array(Default::default())))
+						Ok(DbResponse::Other(CoreValue::Array(Default::default())))
 					}
 					_ => unreachable!(),
 				},
@@ -95,8 +95,10 @@ pub(super) fn mock(route_rx: Receiver<Route>) {
 					data,
 					..
 				} => match data {
-					Value::Array(..) => Ok(DbResponse::Other(Value::Array(Default::default()))),
-					_ => Ok(DbResponse::Other(value::to_value(&User::default()).unwrap())),
+					CoreValue::Array(..) => {
+						Ok(DbResponse::Other(CoreValue::Array(Default::default())))
+					}
+					_ => Ok(DbResponse::Other(to_core_value(&User::default()).unwrap())),
 				},
 				Command::ExportMl {
 					..
@@ -115,7 +117,7 @@ pub(super) fn mock(route_rx: Receiver<Route>) {
 				}
 				| Command::ImportFile {
 					..
-				} => Ok(DbResponse::Other(Value::None)),
+				} => Ok(DbResponse::Other(CoreValue::None)),
 			};
 
 			if let Err(message) = response.send(result).await {

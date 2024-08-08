@@ -6,11 +6,14 @@ use crate::{
 };
 use futures::future::Either;
 use futures::stream::select_all;
-use serde::{de::DeserializeOwned, Deserialize};
+use serde::de::DeserializeOwned;
 use std::marker::PhantomData;
 use std::mem;
 use surrealdb_core::{
-	sql::{self, statements::*, Statement, Statements},
+	sql::{
+		self, from_value as from_core_value, statements::*, Statement, Statements,
+		Value as CoreValue,
+	},
 	syn,
 };
 
@@ -199,8 +202,8 @@ where
 impl QueryResult<Value> for usize {
 	fn query_result(self, response: &mut QueryResponse) -> Result<Value> {
 		match response.results.swap_remove(&self) {
-			Some((_, result)) => Ok(result?),
-			None => Ok(Value::None),
+			Some((_, result)) => Ok(Value::from_inner(result?)),
+			None => return Ok(Value::from_inner(CoreValue::None)),
 		}
 	}
 
@@ -228,11 +231,11 @@ where
 			}
 		};
 		let result = match value {
-			Value::Array(vec) => match &mut vec[..] {
+			CoreValue::Array(vec) => match &mut vec.0[..] {
 				[] => Ok(None),
 				[value] => {
 					let value = mem::take(value);
-					Deserialize::deserialize(value).map_err(Into::into)
+					from_core_value(value).map_err(Into::into)
 				}
 				_ => Err(Error::LossyTake(QueryResponse {
 					results: mem::take(&mut response.results),
@@ -243,7 +246,7 @@ where
 			},
 			_ => {
 				let value = mem::take(value);
-				Deserialize::deserialize(value).map_err(Into::into)
+				from_core_value(value).map_err(Into::into)
 			}
 		};
 		response.results.swap_remove(&self);
@@ -268,16 +271,16 @@ impl QueryResult<Value> for (usize, &str) {
 				}
 			},
 			None => {
-				return Ok(Value::None);
+				return Ok(Value::from_inner(CoreValue::None));
 			}
 		};
 
 		let value = match value {
-			Value::Object(object) => object.remove(key).unwrap_or_default(),
-			_ => Value::None,
+			CoreValue::Object(object) => object.remove(key).unwrap_or_default(),
+			_ => CoreValue::None,
 		};
 
-		Ok(value)
+		Ok(Value::from_inner(value))
 	}
 
 	fn stats(&self, response: &QueryResponse) -> Option<Stats> {
@@ -305,7 +308,7 @@ where
 			}
 		};
 		let value = match value {
-			Value::Array(vec) => match &mut vec[..] {
+			CoreValue::Array(vec) => match &mut vec.0[..] {
 				[] => {
 					response.results.swap_remove(&index);
 					return Ok(None);
@@ -323,11 +326,11 @@ where
 			value => value,
 		};
 		match value {
-			Value::None => {
+			CoreValue::None => {
 				response.results.swap_remove(&index);
 				Ok(None)
 			}
-			Value::Object(object) => {
+			CoreValue::Object(object) => {
 				if object.is_empty() {
 					response.results.swap_remove(&index);
 					return Ok(None);
@@ -335,7 +338,7 @@ where
 				let Some(value) = object.remove(key) else {
 					return Ok(None);
 				};
-				Option::<T>::deserialize(value).map_err(Into::into)
+				from_core_value(value).map_err(Into::into)
 			}
 			_ => Ok(None),
 		}
@@ -353,15 +356,14 @@ where
 	fn query_result(self, response: &mut QueryResponse) -> Result<Vec<T>> {
 		let vec = match response.results.swap_remove(&self) {
 			Some((_, result)) => match result? {
-				Value::Array(vec) => vec,
+				CoreValue::Array(vec) => vec.0,
 				vec => vec![vec],
 			},
 			None => {
 				return Ok(vec![]);
 			}
 		};
-		//TODO: (delskayn) Check if this actually works
-		Vec::<T>::deserialize(Value::Array(vec)).map_err(Into::into)
+		from_core_value(vec.into()).map_err(Into::into)
 	}
 
 	fn stats(&self, response: &QueryResponse) -> Option<Stats> {
@@ -378,7 +380,7 @@ where
 		let mut response = match response.results.get_mut(&index) {
 			Some((_, result)) => match result {
 				Ok(val) => match val {
-					Value::Array(vec) => mem::take(vec),
+					CoreValue::Array(vec) => mem::take(&mut vec.0),
 					val => {
 						let val = mem::take(val);
 						vec![val]
@@ -396,13 +398,13 @@ where
 		};
 		let mut vec = Vec::with_capacity(response.len());
 		for value in response.iter_mut() {
-			if let Value::Object(object) = value {
+			if let CoreValue::Object(object) = value {
 				if let Some(value) = object.remove(key) {
 					vec.push(value);
 				}
 			}
 		}
-		Vec::<T>::deserialize(Value::Array(vec)).map_err(Into::into)
+		from_core_value(vec.into()).map_err(Into::into)
 	}
 
 	fn stats(&self, response: &QueryResponse) -> Option<Stats> {

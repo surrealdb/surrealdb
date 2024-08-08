@@ -4,13 +4,14 @@ use crate::api::opt::Resource;
 use crate::api::Connection;
 use crate::api::Result;
 use crate::method::OnceLockExt;
-use crate::value::{Serializer, Value};
+use crate::value::Value;
 use crate::Surreal;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 use std::borrow::Cow;
 use std::future::IntoFuture;
 use std::marker::PhantomData;
+use surrealdb_core::sql::{to_value as to_core_value, Value as CoreValue};
 
 /// A merge future
 #[derive(Debug)]
@@ -44,10 +45,10 @@ macro_rules! into_future {
 				content,
 				..
 			} = self;
-			let content = content.serialize(Serializer);
+			let content = to_core_value(content);
 			Box::pin(async move {
 				let content = match content? {
-					Value::None => None,
+					CoreValue::None | CoreValue::Null => None,
 					x => Some(x),
 				};
 

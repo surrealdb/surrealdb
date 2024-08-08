@@ -18,7 +18,6 @@ use crate::api::Surreal;
 use crate::engine::remote::ws::Data;
 use crate::engine::IntervalStream;
 use crate::opt::WaitFor;
-use crate::value::ToCore;
 use crate::Number;
 use crate::Value;
 use channel::Receiver;
@@ -32,6 +31,7 @@ use std::collections::HashSet;
 use std::sync::atomic::AtomicI64;
 use std::sync::Arc;
 use std::sync::OnceLock;
+use surrealdb_core::sql::Value as CoreValue;
 use tokio::net::TcpStream;
 use tokio::sync::watch;
 use tokio::time;
@@ -194,7 +194,7 @@ async fn router_handle_route(
 			ref notification_sender,
 		} => {
 			state.live_queries.insert(*uuid, notification_sender.clone());
-			if response.clone().send(Ok(DbResponse::Other(Value::None))).await.is_err() {
+			if response.clone().send(Ok(DbResponse::Other(CoreValue::None))).await.is_err() {
 				trace!("Receiver dropped");
 			}
 			// There is nothing to send to the server here
@@ -289,7 +289,7 @@ async fn router_handle_response(
 									RequestEffect::None => {}
 									RequestEffect::Insert => {
 										// For insert, we need to flatten single responses in an array
-										if let DbResponse::Other(Value::Array(array)) = resp {
+										if let DbResponse::Other(CoreValue::Array(array)) = resp {
 											if array.len() == 1 {
 												let _ = pending
 													.response_channel
@@ -300,7 +300,7 @@ async fn router_handle_response(
 											} else {
 												let _ = pending
 													.response_channel
-													.send(Ok(DbResponse::Other(Value::Array(
+													.send(Ok(DbResponse::Other(CoreValue::Array(
 														array,
 													))))
 													.await;

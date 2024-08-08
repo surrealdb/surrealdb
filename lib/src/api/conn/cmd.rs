@@ -1,7 +1,7 @@
 use super::MlExportConfig;
 use crate::{
 	opt::Resource,
-	value::{Notification, Object, Value},
+	value::{Notification, Value},
 	Result,
 };
 use bincode::Options;
@@ -10,7 +10,7 @@ use revision::Revisioned;
 use serde::{ser::SerializeMap as _, Serialize};
 use std::io::Read;
 use std::path::PathBuf;
-use surrealdb_core::sql::{Query, Value as CoreValue};
+use surrealdb_core::sql::{Object as CoreObject, Query, Table as CoreTable, Value as CoreValue};
 use uuid::Uuid;
 
 #[derive(Debug, Clone)]
@@ -21,10 +21,10 @@ pub(crate) enum Command {
 		database: Option<String>,
 	},
 	Signup {
-		credentials: Object,
+		credentials: CoreObject,
 	},
 	Signin {
-		credentials: Object,
+		credentials: CoreObject,
 	},
 	Authenticate {
 		token: String,
@@ -32,28 +32,28 @@ pub(crate) enum Command {
 	Invalidate,
 	Create {
 		what: Resource,
-		data: Option<Value>,
+		data: Option<CoreValue>,
 	},
 	Upsert {
 		what: Resource,
-		data: Option<Value>,
+		data: Option<CoreValue>,
 	},
 	Update {
 		what: Resource,
-		data: Option<Value>,
+		data: Option<CoreValue>,
 	},
 	Insert {
 		// inserts can only be on a table.
 		what: String,
-		data: Value,
+		data: CoreValue,
 	},
 	Patch {
 		what: Resource,
-		data: Option<Value>,
+		data: Option<CoreValue>,
 	},
 	Merge {
 		what: Resource,
-		data: Option<Value>,
+		data: Option<CoreValue>,
 	},
 	Select {
 		what: Resource,
@@ -63,7 +63,7 @@ pub(crate) enum Command {
 	},
 	Query {
 		query: Query,
-		variables: Object,
+		variables: CoreObject,
 	},
 	ExportFile {
 		path: PathBuf,
@@ -89,14 +89,14 @@ pub(crate) enum Command {
 	Version,
 	Set {
 		key: String,
-		value: Value,
+		value: CoreValue,
 	},
 	Unset {
 		key: String,
 	},
 	SubscribeLive {
 		uuid: Uuid,
-		notification_sender: Sender<Notification<Value>>,
+		notification_sender: Sender<Notification<CoreValue>>,
 	},
 	Kill {
 		uuid: Uuid,
@@ -106,7 +106,6 @@ pub(crate) enum Command {
 impl Command {
 	#[cfg(feature = "protocol-ws")]
 	pub(crate) fn into_router_request(self, id: Option<i64>) -> Option<RouterRequest> {
-		use crate::{opt::Table, value::ToCore};
 		let res = match self {
 			Command::Use {
 				namespace,
@@ -114,30 +113,28 @@ impl Command {
 			} => RouterRequest {
 				id,
 				method: "use",
-				params: Some(
-					Value::Array(vec![Value::from(namespace), Value::from(database)]).to_core(),
-				),
+				params: Some(vec![CoreValue::from(namespace), CoreValue::from(database)].into()),
 			},
 			Command::Signup {
 				credentials,
 			} => RouterRequest {
 				id,
 				method: "signup",
-				params: Some(Value::Array(vec![Value::from(credentials)]).to_core()),
+				params: Some(vec![CoreValue::from(credentials)].into()),
 			},
 			Command::Signin {
 				credentials,
 			} => RouterRequest {
 				id,
 				method: "signin",
-				params: Some(Value::Array(vec![Value::from(credentials)]).to_core()),
+				params: Some(vec![CoreValue::from(credentials)].into()),
 			},
 			Command::Authenticate {
 				token,
 			} => RouterRequest {
 				id,
 				method: "authenticate",
-				params: Some(Value::Array(vec![Value::from(token)]).to_core()),
+				params: Some(vec![CoreValue::from(token)].into()),
 			},
 			Command::Invalidate => RouterRequest {
 				id,
@@ -150,13 +147,13 @@ impl Command {
 			} => {
 				let mut params = vec![what.into_core_value()];
 				if let Some(data) = data {
-					params.push(data.to_core());
+					params.push(data);
 				}
 
 				RouterRequest {
 					id,
 					method: "create",
-					params: Some(CoreValue::Array(params.into())),
+					params: Some(params.into()),
 				}
 			}
 			Command::Upsert {
@@ -166,13 +163,13 @@ impl Command {
 			} => {
 				let mut params = vec![what.into_core_value()];
 				if let Some(data) = data {
-					params.push(data.to_core());
+					params.push(data);
 				}
 
 				RouterRequest {
 					id,
 					method: "upsert",
-					params: Some(CoreValue::Array(params.into())),
+					params: Some(params.into()),
 				}
 			}
 			Command::Update {
@@ -183,26 +180,27 @@ impl Command {
 				let mut params = vec![what.into_core_value()];
 
 				if let Some(data) = data {
-					params.push(data.to_core());
+					params.push(data);
 				}
 
 				RouterRequest {
 					id,
 					method: "update",
-					params: Some(CoreValue::Array(params.into())),
+					params: Some(params.into()),
 				}
 			}
 			Command::Insert {
 				what,
 				data,
 			} => {
-				let mut params = vec![Table(what).into_core().into()];
-				params.push(data.to_core());
+				let mut table = CoreTable::default();
+				table.0 = what;
+				let params = vec![CoreValue::from(what), data];
 
 				RouterRequest {
 					id,
 					method: "insert",
-					params: Some(CoreValue::Array(params.into())),
+					params: Some(params.into()),
 				}
 			}
 			Command::Patch {
@@ -213,13 +211,13 @@ impl Command {
 				let mut params = vec![what.into_core_value()];
 
 				if let Some(data) = data {
-					params.push(data.to_core());
+					params.push(data);
 				}
 
 				RouterRequest {
 					id,
 					method: "patch",
-					params: Some(CoreValue::Array(params.into())),
+					params: Some(params.into()),
 				}
 			}
 			Command::Merge {
@@ -229,13 +227,13 @@ impl Command {
 			} => {
 				let mut params = vec![what.into_core_value()];
 				if let Some(data) = data {
-					params.push(data.to_core());
+					params.push(data)
 				}
 
 				RouterRequest {
 					id,
 					method: "merge",
-					params: Some(CoreValue::Array(params.into())),
+					params: Some(params.into()),
 				}
 			}
 			Command::Select {
@@ -258,7 +256,7 @@ impl Command {
 				query,
 				variables,
 			} => {
-				let params: Vec<CoreValue> = vec![query.into(), variables.to_core().into()];
+				let params: Vec<CoreValue> = vec![query.into(), variables.into()];
 				RouterRequest {
 					id,
 					method: "query",
@@ -299,14 +297,14 @@ impl Command {
 			} => RouterRequest {
 				id,
 				method: "let",
-				params: Some(Value::Array(vec![Value::from(key), value]).to_core()),
+				params: Some(CoreValue::from(vec![Value::from(key).into_inner(), value])),
 			},
 			Command::Unset {
 				key,
 			} => RouterRequest {
 				id,
 				method: "unset",
-				params: Some(Value::Array(vec![Value::from(key)]).to_core()),
+				params: Some(CoreValue::from(vec![Value::from(key).into_inner()])),
 			},
 			Command::SubscribeLive {
 				..
@@ -316,7 +314,7 @@ impl Command {
 			} => RouterRequest {
 				id,
 				method: "kill",
-				params: Some(Value::Array(vec![Value::from(uuid)]).to_core()),
+				params: Some(CoreValue::from(vec![Value::from(uuid).into_inner()])),
 			},
 		};
 		Some(res)

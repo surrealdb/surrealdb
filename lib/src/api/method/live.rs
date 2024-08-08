@@ -12,7 +12,6 @@ use crate::method::Query;
 use crate::method::Select;
 use crate::opt::Resource;
 use crate::value::Notification;
-use crate::value::ToCore;
 use crate::Surreal;
 use crate::Value;
 use channel::Receiver;

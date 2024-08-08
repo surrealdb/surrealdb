@@ -4,7 +4,6 @@ use crate::api::opt::Resource;
 use crate::api::Connection;
 use crate::api::Result;
 use crate::method::OnceLockExt;
-use crate::value::Serializer;
 use crate::Surreal;
 use crate::Value;
 use serde::de::DeserializeOwned;
@@ -12,6 +11,7 @@ use serde::Serialize;
 use std::borrow::Cow;
 use std::future::IntoFuture;
 use std::marker::PhantomData;
+use surrealdb_core::sql::{to_value as to_core_value, Value as CoreValue};
 
 use super::Content;
 
@@ -99,10 +99,10 @@ where
 		D: Serialize,
 	{
 		Content::from_closure(self.client, || {
-			let content = data.serialize(Serializer)?;
+			let content = to_core_value(data)?;
 
 			let data = match content {
-				Value::None => None,
+				CoreValue::None | CoreValue::Null => None,
 				content => Some(content),
 			};
 

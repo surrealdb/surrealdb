@@ -1,5 +1,50 @@
 //! Functionality for connecting to local and remote databases
 
+use method::BoxFuture;
+use semver::BuildMetadata;
+use semver::Version;
+use semver::VersionReq;
+use std::fmt;
+use std::fmt::Debug;
+use std::future::IntoFuture;
+use std::marker::PhantomData;
+use std::sync::Arc;
+use std::sync::OnceLock;
+use tokio::sync::watch;
+
+macro_rules! transparent_wrapper{
+	(
+		$(#[$m:meta])*
+		$vis:vis struct $name:ident($inner:ty)
+	) => {
+		$(#[$m])*
+		#[repr(transparent)]
+		$vis struct $name($inner);
+
+		impl $name{
+			pub(crate) fn from_inner(inner: $inner) -> Self{
+				$name(inner)
+			}
+
+			pub(crate) fn from_inner_ref(inner: &$inner) -> &Self{
+				unsafe{
+					std::mem::transmute::<&$inner,&$name>(inner)
+				}
+			}
+
+			pub(crate) fn from_inner_mut(inner: &mut $inner) -> &mut Self{
+				unsafe{
+					std::mem::transmute::<&mut $inner,&mut $name>(inner)
+				}
+			}
+
+			pub(crate) fn into_inner(self) -> $inner{
+				self.0
+			}
+		}
+	};
+}
+
 pub mod engine;
 pub mod err;
 #[cfg(feature = "protocol-http")]
@@ -10,22 +55,9 @@ pub mod value;
 
 mod conn;
 
-use method::BoxFuture;
-use semver::Version;
-use tokio::sync::watch;
-
-use crate::api::conn::Router;
-use crate::api::err::Error;
-use crate::api::opt::Endpoint;
-use semver::BuildMetadata;
-use semver::VersionReq;
-use std::fmt;
-use std::fmt::Debug;
-use std::future::IntoFuture;
-use std::marker::PhantomData;
-use std::sync::Arc;
-use std::sync::OnceLock;
-
+use self::conn::Router;
+use self::err::Error;
+use self::opt::Endpoint;
 use self::opt::EndpointKind;
 use self::opt::WaitFor;
 

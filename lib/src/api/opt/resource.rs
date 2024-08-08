@@ -1,10 +1,11 @@
 use crate::{
 	api::{err::Error, Result},
-	value::ToCore,
 	Object, RecordId, RecordIdKey, Value,
 };
 use std::ops::{self, Bound};
-use surrealdb_core::sql::{Dir, Table as CoreTable, Value as CoreValue};
+use surrealdb_core::sql::{
+	Edges as CoreEdges, Range as CoreRange, Table as CoreTable, Value as CoreValue,
+};
 
 /// A wrapper type to assert that you ment to use a string as a table name.
 ///
@@ -30,28 +31,28 @@ where
 	where
 		KeyRange: From<R>,
 	{
-		QueryRange {
-			table: self.0.into(),
-			range: range.into(),
-		}
+		let range = KeyRange::from(range);
+		let res = CoreRange::new(
+			self.0.into(),
+			range.start.map(RecordIdKey::into_inner),
+			range.end.map(RecordIdKey::into_inner),
+		);
+
+		QueryRange(res)
 	}
 }
 
-/// A table range.
-#[derive(Debug, Clone, PartialEq)]
-pub struct QueryRange {
-	/// The table name,
-	pub(crate) table: String,
-	pub(crate) range: KeyRange,
-}
+transparent_wrapper!(
+	/// A table range.
+	#[derive(Debug, Clone, PartialEq)]
+	pub struct QueryRange(CoreRange)
+);
 
-/// A query edge
-#[derive(Debug, Clone, PartialEq)]
-pub struct Edge {
-	pub(crate) from: RecordId,
-	pub(crate) dir: Dir,
-	pub(crate) tables: Vec<String>,
-}
+transparent_wrapper!(
+	/// A query edge
+	#[derive(Debug, Clone, PartialEq)]
+	pub struct Edge(CoreEdges)
+);
 
 /// A database resource
 ///
@@ -77,10 +78,7 @@ impl Resource {
 	/// Add a range to the resource, this only works if the resource is a table.
 	pub fn with_range(self, range: KeyRange) -> Result<Self> {
 		match self {
-			Resource::Table(table) => Ok(Resource::Range(QueryRange {
-				table,
-				range,
-			})),
+			Resource::Table(table) => Ok(Resource::Range(Table(table).with_range(range))),
 			Resource::RecordId(_) => Err(Error::RangeOnRecordId.into()),
 			Resource::Object(_) => Err(Error::RangeOnObject.into()),
 			Resource::Array(_) => Err(Error::RangeOnArray.into()),
@@ -92,11 +90,11 @@ impl Resource {
 	pub(crate) fn into_core_value(self) -> CoreValue {
 		match self {
 			Resource::Table(x) => Table(x).into_core().into(),
-			Resource::RecordId(x) => x.to_core().into(),
-			Resource::Object(x) => x.to_core().into(),
-			Resource::Array(x) => x.to_core().into(),
-			Resource::Edge(x) => x.to_core().into(),
-			Resource::Range(x) => x.to_core().into(),
+			Resource::RecordId(x) => x.into_inner().into(),
+			Resource::Object(x) => x.into_inner().into(),
+			Resource::Array(x) => Value::array_to_core(x).into(),
+			Resource::Edge(x) => x.into_inner().into(),
+			Resource::Range(x) => x.into_inner().into(),
 		}
 	}
 }

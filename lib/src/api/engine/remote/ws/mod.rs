@@ -17,7 +17,6 @@ use crate::api::Surreal;
 use crate::method::Stats;
 use crate::opt::IntoEndpoint;
 use crate::value::Notification;
-use crate::value::ToCore;
 use crate::Value;
 use channel::Sender;
 use indexmap::IndexMap;
@@ -44,7 +43,7 @@ enum RequestEffect {
 	/// Completing this request sets a variable to a give value.
 	Set {
 		key: String,
-		value: Value,
+		value: CoreValue,
 	},
 	/// Completing this request sets a variable to a give value.
 	Clear {
@@ -74,11 +73,11 @@ struct PendingRequest {
 
 struct RouterState<Sink, Stream> {
 	/// Vars currently set by the set method,
-	vars: IndexMap<String, Value>,
+	vars: IndexMap<String, CoreValue>,
 	/// Messages which aught to be replayed on a reconnect.
 	replay: IndexMap<ReplayMethod, Command>,
 	/// Pending live queries
-	live_queries: HashMap<Uuid, channel::Sender<Notification<Value>>>,
+	live_queries: HashMap<Uuid, channel::Sender<Notification<CoreValue>>>,
 	/// Send requests which are still awaiting an awnser.
 	pending_requests: HashMap<i64, PendingRequest>,
 	/// The last time a message was recieved from the server.

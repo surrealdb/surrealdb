@@ -8,8 +8,7 @@ use crate::{
 	},
 	engine::tasks::start_tasks,
 	opt::{auth::Root, WaitFor},
-	value::{Notification, ToCore},
-	Object,
+	value::Notification,
 };
 use channel::{Receiver, Sender};
 use futures::{stream::poll_fn, StreamExt};
@@ -18,7 +17,9 @@ use std::{
 	sync::{atomic::AtomicI64, Arc, OnceLock},
 	task::Poll,
 };
-use surrealdb_core::{dbs::Session, iam::Level, kvs::Datastore, options::EngineOptions};
+use surrealdb_core::{
+	dbs::Session, iam::Level, kvs::Datastore, options::EngineOptions, sql::Object as CoreObject,
+};
 use tokio::sync::watch;
 
 impl crate::api::Connection for Db {}
@@ -114,7 +115,7 @@ pub(crate) async fn run_router(
 	let kvs = kvs.with_temporary_directory(address.config.temporary_directory);
 
 	let kvs = Arc::new(kvs);
-	let mut vars = Object::new();
+	let mut vars = CoreObject::default();
 	let mut live_queries = HashMap::new();
 	let mut session = Session::default().with_rt(true);
 
