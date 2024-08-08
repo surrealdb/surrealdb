@@ -5,7 +5,7 @@ use crate::kvs::ds::TransactionFactory;
 use crate::kvs::LockType::Optimistic;
 use crate::kvs::{LockType, TransactionType};
 use crate::sql::statements::DefineIndexStatement;
-use crate::sql::Id;
+use crate::sql::{Id, Thing, Value};
 use dashmap::mapref::entry::Entry;
 use dashmap::DashMap;
 use std::collections::VecDeque;
@@ -13,17 +13,19 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 use tokio::task;
 use tokio::task::JoinHandle;
+use crate::ctx::Context;
+use crate::idx::index::IndexOperation;
 
 enum BuildingStatus {
-	INITIATED,
-	BUILDING(usize),
-	ERROR(Error),
-	BUILT,
+	Initiated,
+	Building(usize),
+	Error(Error),
+	Done,
 }
 
 pub(crate) struct IndexBuilder {
 	tf: TransactionFactory,
-	indexes: DashMap<DefineIndexStatement, (Arc<Building>, JoinHandle<Result<(), Error>>)>,
+	indexes: DashMap<DefineIndexStatement, (Arc<Building>, JoinHandle<()>)>,
 }
 
 impl IndexBuilder {
@@ -46,25 +48,29 @@ impl IndexBuilder {
 				// No index is currently building, we can start building it
 				let building = Arc::new(Building::new(self.tf.clone(), opt, e.key())?);
 				let b = building.clone();
-				let jh = task::spawn(async move { b.compute().await });
+				let jh = task::spawn(async move { if let Err(err) = b.compute().await {} });
 				e.insert((building, jh));
 			}
 		}
 		Ok(())
 	}
 
-	pub(crate) async fn updated(&self, ix: &DefineIndexStatement, id: Id) -> Result<(), Error> {
+	pub(crate) async fn append(
+		&self,
+		ix: &DefineIndexStatement,
+		old_values: Option<Vec<Value>>,
+		new_values: Option<Vec<Value>>,
+		rid: Thing,
+	) -> Result<(), Error> {
 		if let Some(e) = self.indexes.get(ix) {
-			e.value().0.append(Appending::Updated(id)).await;
-			Ok(())
-		} else {
-			panic!("Not running") // TODO replace by error
-		}
-	}
-
-	pub(crate) async fn removed(&self, ix: &DefineIndexStatement, id: Id) -> Result<(), Error> {
-		if let Some(e) = self.indexes.get(ix) {
-			e.value().0.append(Appending::Removed(id)).await;
+			e.value()
+				.0
+				.append(Appending {
+					old_values,
+					new_values,
+					id: rid.id,
+				})
+				.await;
 			Ok(())
 		} else {
 			panic!("Not running") // TODO replace by error
@@ -72,12 +78,14 @@ impl IndexBuilder {
 	}
 }
 
-enum Appending {
-	Updated(Id),
-	Removed(Id),
+struct Appending {
+	old_values: Option<Vec<Value>>,
+	new_values: Option<Vec<Value>>,
+	id: Id,
 }
 
 struct Building {
+	ctx: Context<'_>,
 	tf: TransactionFactory,
 	ns: String,
 	db: String,
@@ -91,6 +99,7 @@ struct Building {
 
 impl Building {
 	fn new(
+		ctx: &Context<'_>,
 		tf: TransactionFactory,
 		opt: &Options,
 		ix: &DefineIndexStatement,
@@ -100,10 +109,14 @@ impl Building {
 			ns: opt.ns()?.to_string(),
 			db: opt.db()?.to_string(),
 			tb: ix.what.to_string(),
-			status: Arc::new(Mutex::new(BuildingStatus::INITIATED)),
+			status: Arc::new(Mutex::new(BuildingStatus::Initiated)),
 			appended: Default::default(),
 			index_barrier: Default::default(),
 		})
+	}
+
+	async fn set_status(&self, status: BuildingStatus) {
+		*self.status.lock().await = status;
 	}
 
 	async fn append(&self, a: Appending) {
@@ -111,7 +124,7 @@ impl Building {
 	}
 
 	async fn compute(&self) -> Result<(), Error> {
-		*self.status.lock().await = BuildingStatus::BUILDING(0);
+		self.set_status(BuildingStatus::Building(0)).await;
 		// First iteration, we index every keys
 		let beg = crate::key::thing::prefix(&self.ns, &self.db, &self.tb);
 		let end = crate::key::thing::suffix(&self.ns, &self.db, &self.tb);
@@ -130,7 +143,7 @@ impl Building {
 			// Index the records
 			for (_, v) in batch.values.into_iter() {
 				count += 1;
-				*self.status.lock().await = BuildingStatus::BUILDING(count);
+				self.set_status(BuildingStatus::Building(count)).await;
 			}
 			tx.commit().await?;
 		}
@@ -145,7 +158,8 @@ impl Building {
 				break;
 			}
 			let tx = self.tf.transaction(TransactionType::Write, Optimistic).await?;
-			for id in drain {
+			for a in drain {
+				IndexOperation::new()
 				match id {
 					Appending::Updated(id) => {
 						let key = crate::key::thing::new(&self.ns, &self.db, &self.tb, &id);
@@ -157,10 +171,11 @@ impl Building {
 					}
 				}
 				count += 1;
-				*self.status.lock().await = BuildingStatus::BUILDING(count);
+				self.set_status(BuildingStatus::Building(count)).await;
 			}
 			tx.commit().await?;
 		}
+		self.set_status(BuildingStatus::Done).await;
 		Ok(())
 	}
 }
