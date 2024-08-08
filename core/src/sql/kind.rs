@@ -29,7 +29,7 @@ pub enum Kind {
 	Either(Vec<Kind>),
 	Set(Box<Kind>, Option<u64>),
 	Array(Box<Kind>, Option<u64>),
-	Function(Option<Box<Vec<Kind>>>, Option<Box<Kind>>),
+	Function(Option<Vec<Kind>>, Option<Box<Kind>>),
 }
 
 impl Default for Kind {

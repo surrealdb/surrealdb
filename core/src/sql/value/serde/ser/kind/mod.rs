@@ -104,7 +104,7 @@ pub(super) struct SerializeKindTuple {
 enum Inner {
 	Set(Box<Kind>, Option<u64>),
 	Array(Box<Kind>, Option<u64>),
-	Function(Option<Box<Vec<Kind>>>, Option<Box<Kind>>),
+	Function(Option<Vec<Kind>>, Option<Box<Kind>>),
 }
 
 impl serde::ser::SerializeTupleVariant for SerializeKindTuple {
