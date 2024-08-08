@@ -4,7 +4,7 @@ use helpers::Test;
 use surrealdb::err::Error;
 
 #[tokio::test]
-async fn define_global_param() -> Result<(), Error> {
+async fn typed_set() -> Result<(), Error> {
 	let sql = "
         LET $foo: int = 42;
         RETURN $foo;
@@ -17,7 +17,7 @@ async fn define_global_param() -> Result<(), Error> {
 		.expect_val("None")?
 		.expect_val("42")?
 		.expect_error(error)?
-		.expect_error("None")?;
+		.expect_val("None")?;
 
 	Ok(())
 }
