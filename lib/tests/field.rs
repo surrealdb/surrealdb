@@ -147,8 +147,8 @@ async fn field_definition_option_kind_assert() -> Result<(), Error> {
 		CREATE person:mark SET name = 'mark';
 		CREATE person:bob SET name = 'bob';
 	";
-	let dbs = Datastore::new("memory").await?;
-	let ses = Session::for_kv().with_ns("test").with_db("test");
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 5);
 	//
