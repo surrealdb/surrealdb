@@ -6,6 +6,7 @@ use crate::err::Error;
 use crate::iam::Action;
 use crate::sql::permission::Permission;
 use crate::sql::value::Value;
+use crate::sql::Part;
 use reblessive::tree::Stk;
 
 impl<'a> Document<'a> {
@@ -14,7 +15,7 @@ impl<'a> Document<'a> {
 		stk: &mut Stk,
 		ctx: &Context<'_>,
 		opt: &Options,
-		_stm: &Statement<'_>,
+		stm: &Statement<'_>,
 	) -> Result<(), Error> {
 		// Check import
 		if opt.import {
@@ -24,6 +25,35 @@ impl<'a> Document<'a> {
 		let rid = self.id.as_ref().unwrap();
 		// Get the user applied input
 		let inp = self.initial.doc.changed(self.current.doc.as_ref());
+		// Get field definitions
+		// let fds = self.fd(opt, txn).await?;
+		let fds = self.fd(ctx, opt).await?;
+
+		// If a scheaful table check that no excess fields have been provided
+		if self.tb(ctx, opt).await?.full {
+			let data = match stm {
+				Statement::Create(v) => v.data.as_ref(),
+				Statement::Update(v) => v.data.as_ref(),
+				Statement::Relate(v) => v.data.as_ref(),
+				Statement::Insert(v) => Some(&v.data),
+				_ => None,
+			};
+			let stm_fd_names = data.as_ref().map_or(vec![], |d| d.field_names());
+			let fd_names = fds.iter().map(|fd| fd.name.clone()).collect::<Vec<_>>();
+			for stm_name in stm_fd_names {
+				if stm_name.0.starts_with(&[Part::Field("id".into())]) {
+					continue;
+				}
+
+				if !fd_names.contains(&stm_name) {
+					return Err(Error::UndefinedField {
+						table: rid.tb.clone(),
+						field: stm_name,
+					});
+				}
+			}
+		}
+
 		// Loop through all field statements
 		for fd in self.fd(ctx, opt).await?.iter() {
 			// Loop over each field in document
