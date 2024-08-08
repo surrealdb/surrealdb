@@ -1,3 +1,4 @@
+pub(crate) mod access;
 pub(crate) mod alter;
 pub(crate) mod analyze;
 pub(crate) mod begin;
@@ -28,6 +29,8 @@ pub(crate) mod update;
 pub(crate) mod upsert;
 pub(crate) mod r#use;
 
+pub use self::access::AccessGrant;
+pub use self::access::AccessStatement;
 pub use self::analyze::AnalyzeStatement;
 pub use self::begin::BeginStatement;
 pub use self::cancel::CancelStatement;

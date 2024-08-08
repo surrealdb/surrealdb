@@ -5,7 +5,7 @@ use crate::err::Error;
 use crate::iam::jwks;
 use crate::iam::{issue::expiration, token::Claims, Actor, Auth, Level, Role};
 use crate::kvs::{Datastore, LockType::*, TransactionType::*};
-use crate::sql::access_type::{AccessType, JwtAccessVerify};
+use crate::sql::access_type::{AccessType, Jwt, JwtAccessVerify};
 use crate::sql::{statements::DefineUserStatement, Algorithm, Thing, Value};
 use crate::syn;
 use argon2::{Argon2, PasswordHash, PasswordVerifier};
@@ -130,7 +130,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 	// Decode the token without verifying
 	let token_data = decode::<Claims>(token, &KEY, &DUD)?;
 	// Convert the token to a SurrealQL object value
-	let value = token_data.claims.clone().into();
+	let value = (&token_data.claims).into();
 	// Check if the auth token can be used
 	if let Some(nbf) = token_data.claims.nbf {
 		if nbf > Utc::now().timestamp() {
@@ -146,7 +146,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 		}
 	}
 	// Check the token authentication claims
-	match token_data.claims.clone() {
+	match &token_data.claims {
 		// Check if this is record access
 		Claims {
 			ns: Some(ns),
@@ -160,9 +160,9 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			// Create a new readonly transaction
 			let tx = kvs.transaction(Read, Optimistic).await?;
 			// Parse the record id
-			let mut rid = syn::thing(&id)?;
+			let mut rid = syn::thing(id)?;
 			// Get the database access method
-			let de = tx.get_db_access(&ns, &db, &ac).await?;
+			let de = tx.get_db_access(ns, db, ac).await?;
 			// Ensure that the transaction is cancelled
 			tx.cancel().await?;
 			// Obtain the configuration to verify the token based on the access method
@@ -187,12 +187,12 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			// AUTHENTICATE clause
 			if let Some(au) = &de.authenticate {
 				// Setup the system session for finding the signin record
-				let mut sess = Session::editor().with_ns(&ns).with_db(&db);
+				let mut sess = Session::editor().with_ns(ns).with_db(db);
 				sess.rd = Some(rid.clone().into());
-				sess.tk = Some(token_data.claims.clone().into());
+				sess.tk = Some((&token_data.claims).into());
 				sess.ip.clone_from(&session.ip);
 				sess.or.clone_from(&session.or);
-				rid = authenticate_record(kvs, &sess, au.clone()).await?;
+				rid = authenticate_record(kvs, &sess, au).await?;
 			}
 			// Log the success
 			debug!("Authenticated with record access method `{}`", ac);
@@ -206,7 +206,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			session.au = Arc::new(Auth::new(Actor::new(
 				rid.to_string(),
 				Default::default(),
-				Level::Record(ns, db, rid.to_string()),
+				Level::Record(ns.to_string(), db.to_string(), rid.to_string()),
 			)));
 			Ok(())
 		}
@@ -223,14 +223,14 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			// Create a new readonly transaction
 			let tx = kvs.transaction(Read, Optimistic).await?;
 			// Get the database access method
-			let de = tx.get_db_access(&ns, &db, &ac).await?;
+			let de = tx.get_db_access(ns, db, ac).await?;
 			// Ensure that the transaction is cancelled
 			tx.cancel().await?;
 			// Obtain the configuration to verify the token based on the access method
 			match &de.kind {
-				// If the access type is Jwt, this is database access
-				AccessType::Jwt(at) => {
-					let cf = match &at.verify {
+				// If the access type is Jwt or Bearer, this is database access
+				AccessType::Jwt(_) | AccessType::Bearer(_) => {
+					let cf = match &de.kind.jwt().verify {
 						JwtAccessVerify::Key(key) => config(key.alg, key.key.as_bytes()),
 						#[cfg(feature = "jwks")]
 						JwtAccessVerify::Jwks(jwks) => {
@@ -247,15 +247,15 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 					decode::<Claims>(token, &cf.0, &cf.1)?;
 					// AUTHENTICATE clause
 					if let Some(au) = &de.authenticate {
-						// Setup the system session for finding the signin record
-						let mut sess = Session::editor().with_ns(&ns).with_db(&db);
-						sess.tk = Some(token_data.claims.clone().into());
+						// Setup the system session for executing the clause
+						let mut sess = Session::editor().with_ns(ns).with_db(db);
+						sess.tk = Some((&token_data.claims).into());
 						sess.ip.clone_from(&session.ip);
 						sess.or.clone_from(&session.or);
-						authenticate_jwt(kvs, &sess, au.clone()).await?;
+						authenticate_generic(kvs, &sess, au).await?;
 					}
 					// Parse the roles
-					let roles = match token_data.claims.roles {
+					let roles = match &token_data.claims.roles {
 						// If no role is provided, grant the viewer role
 						None => vec![Role::Viewer],
 						// If roles are provided, parse them
@@ -277,7 +277,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 					session.au = Arc::new(Auth::new(Actor::new(
 						de.name.to_string(),
 						roles,
-						Level::Database(ns, db),
+						Level::Database(ns.to_string(), db.to_string()),
 					)));
 				}
 				// If the access type is Record, this is record access
@@ -304,11 +304,11 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 						decode::<Claims>(token, &cf.0, &cf.1)?;
 						// AUTHENTICATE clause
 						// Setup the system session for finding the signin record
-						let mut sess = Session::editor().with_ns(&ns).with_db(&db);
-						sess.tk = Some(token_data.claims.clone().into());
+						let mut sess = Session::editor().with_ns(ns).with_db(db);
+						sess.tk = Some((&token_data.claims).into());
 						sess.ip.clone_from(&session.ip);
 						sess.or.clone_from(&session.or);
-						let rid = authenticate_record(kvs, &sess, au.clone()).await?;
+						let rid = authenticate_record(kvs, &sess, au).await?;
 						// Log the success
 						debug!("Authenticated with record access method `{}`", ac);
 						// Set the session
@@ -321,7 +321,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 						session.au = Arc::new(Auth::new(Actor::new(
 							rid.to_string(),
 							Default::default(),
-							Level::Record(ns, db, rid.to_string()),
+							Level::Record(ns.to_string(), db.to_string(), rid.to_string()),
 						)));
 					}
 					_ => return Err(Error::AccessMethodMismatch),
@@ -341,7 +341,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			// Create a new readonly transaction
 			let tx = kvs.transaction(Read, Optimistic).await?;
 			// Get the database user
-			let de = tx.get_db_user(&ns, &db, &id).await.map_err(|e| {
+			let de = tx.get_db_user(ns, db, id).await.map_err(|e| {
 				trace!("Error while authenticating to database `{db}`: {e}");
 				Error::InvalidAuth
 			})?;
@@ -361,7 +361,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			session.au = Arc::new(Auth::new(Actor::new(
 				id.to_string(),
 				de.roles.iter().map(|r| r.into()).collect(),
-				Level::Database(ns, db),
+				Level::Database(ns.to_string(), db.to_string()),
 			)));
 			Ok(())
 		}
@@ -376,12 +376,12 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			// Create a new readonly transaction
 			let tx = kvs.transaction(Read, Optimistic).await?;
 			// Get the namespace access method
-			let de = tx.get_ns_access(&ns, &ac).await?;
+			let de = tx.get_ns_access(ns, ac).await?;
 			// Ensure that the transaction is cancelled
 			tx.cancel().await?;
 			// Obtain the configuration to verify the token based on the access method
 			let cf = match &de.kind {
-				AccessType::Jwt(ac) => match &ac.verify {
+				AccessType::Jwt(_) | AccessType::Bearer(_) => match &de.kind.jwt().verify {
 					JwtAccessVerify::Key(key) => config(key.alg, key.key.as_bytes()),
 					#[cfg(feature = "jwks")]
 					JwtAccessVerify::Jwks(jwks) => {
@@ -400,15 +400,15 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			decode::<Claims>(token, &cf.0, &cf.1)?;
 			// AUTHENTICATE clause
 			if let Some(au) = &de.authenticate {
-				// Setup the system session for finding the signin record
-				let mut sess = Session::editor().with_ns(&ns);
-				sess.tk = Some(token_data.claims.clone().into());
+				// Setup the system session for executing the clause
+				let mut sess = Session::editor().with_ns(ns);
+				sess.tk = Some((&token_data.claims).into());
 				sess.ip.clone_from(&session.ip);
 				sess.or.clone_from(&session.or);
-				authenticate_jwt(kvs, &sess, au.clone()).await?;
+				authenticate_generic(kvs, &sess, au).await?;
 			}
 			// Parse the roles
-			let roles = match token_data.claims.roles {
+			let roles = match &token_data.claims.roles {
 				// If no role is provided, grant the viewer role
 				None => vec![Role::Viewer],
 				// If roles are provided, parse them
@@ -426,8 +426,11 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			session.ns = Some(ns.to_owned());
 			session.ac = Some(ac.to_owned());
 			session.exp = expiration(de.duration.session)?;
-			session.au =
-				Arc::new(Auth::new(Actor::new(de.name.to_string(), roles, Level::Namespace(ns))));
+			session.au = Arc::new(Auth::new(Actor::new(
+				de.name.to_string(),
+				roles,
+				Level::Namespace(ns.to_string()),
+			)));
 			Ok(())
 		}
 		// Check if this is namespace authentication with user credentials
@@ -441,7 +444,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			// Create a new readonly transaction
 			let tx = kvs.transaction(Read, Optimistic).await?;
 			// Get the namespace user
-			let de = tx.get_ns_user(&ns, &id).await.map_err(|e| {
+			let de = tx.get_ns_user(ns, id).await.map_err(|e| {
 				trace!("Error while authenticating to namespace `{ns}`: {e}");
 				Error::InvalidAuth
 			})?;
@@ -460,7 +463,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			session.au = Arc::new(Auth::new(Actor::new(
 				id.to_string(),
 				de.roles.iter().map(|r| r.into()).collect(),
-				Level::Namespace(ns),
+				Level::Namespace(ns.to_string()),
 			)));
 			Ok(())
 		}
@@ -474,12 +477,12 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			// Create a new readonly transaction
 			let tx = kvs.transaction(Read, Optimistic).await?;
 			// Get the namespace access method
-			let de = tx.get_root_access(&ac).await?;
+			let de = tx.get_root_access(ac).await?;
 			// Ensure that the transaction is cancelled
 			tx.cancel().await?;
 			// Obtain the configuration to verify the token based on the access method
 			let cf = match &de.kind {
-				AccessType::Jwt(ac) => match &ac.verify {
+				AccessType::Jwt(_) | AccessType::Bearer(_) => match &de.kind.jwt().verify {
 					JwtAccessVerify::Key(key) => config(key.alg, key.key.as_bytes()),
 					#[cfg(feature = "jwks")]
 					JwtAccessVerify::Jwks(jwks) => {
@@ -498,15 +501,15 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			decode::<Claims>(token, &cf.0, &cf.1)?;
 			// AUTHENTICATE clause
 			if let Some(au) = &de.authenticate {
-				// Setup the system session for finding the signin record
+				// Setup the system session for executing the clause
 				let mut sess = Session::editor();
-				sess.tk = Some(token_data.claims.clone().into());
+				sess.tk = Some((&token_data.claims).into());
 				sess.ip.clone_from(&session.ip);
 				sess.or.clone_from(&session.or);
-				authenticate_jwt(kvs, &sess, au.clone()).await?;
+				authenticate_generic(kvs, &sess, au).await?;
 			}
 			// Parse the roles
-			let roles = match token_data.claims.roles {
+			let roles = match &token_data.claims.roles {
 				// If no role is provided, grant the viewer role
 				None => vec![Role::Viewer],
 				// If roles are provided, parse them
@@ -536,7 +539,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			// Create a new readonly transaction
 			let tx = kvs.transaction(Read, Optimistic).await?;
 			// Get the namespace user
-			let de = tx.get_root_user(&id).await.map_err(|e| {
+			let de = tx.get_root_user(id).await.map_err(|e| {
 				trace!("Error while authenticating to root: {e}");
 				Error::InvalidAuth
 			})?;
@@ -642,11 +645,11 @@ fn verify_pass(pass: &str, hash: &str) -> Result<(), Error> {
 	}
 }
 
-// Execute the AUTHENTICATE clause for a record access method
-async fn authenticate_record(
+// Execute the AUTHENTICATE clause for a Record access method
+pub async fn authenticate_record(
 	kvs: &Datastore,
 	session: &Session,
-	authenticate: Value,
+	authenticate: &Value,
 ) -> Result<Thing, Error> {
 	match kvs.evaluate(authenticate, session, None).await {
 		Ok(val) => match val.record() {
@@ -664,11 +667,11 @@ async fn authenticate_record(
 	}
 }
 
-// Execute the AUTHENTICATE clause for a JWT access method
-async fn authenticate_jwt(
+// Execute the AUTHENTICATE clause for any other access method
+pub async fn authenticate_generic(
 	kvs: &Datastore,
 	session: &Session,
-	authenticate: Value,
+	authenticate: &Value,
 ) -> Result<(), Error> {
 	match kvs.evaluate(authenticate, session, None).await {
 		Ok(val) => {
