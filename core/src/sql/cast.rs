@@ -43,7 +43,7 @@ impl Cast {
 	) -> Result<Value, Error> {
 		// Compute the value to be cast and convert it
 		match &self.0 {
-			Kind::Closure => self.1.clone().convert_to(&Kind::Closure),
+			Kind::Closure => self.1.clone().convert_to_closure().into(),
 			kind => stk.run(|stk| self.1.compute(stk, ctx, opt, doc)).await?.convert_to(kind),
 		}
 	}
