@@ -47,6 +47,7 @@ impl ser::Serializer for Serializer {
 			"Point" => Ok(Kind::Point),
 			"String" => Ok(Kind::String),
 			"Uuid" => Ok(Kind::Uuid),
+			"Closure" => Ok(Kind::Closure),
 			variant => Err(Error::custom(format!("unexpected unit variant `{name}::{variant}`"))),
 		}
 	}
@@ -234,6 +235,13 @@ mod tests {
 	#[test]
 	fn uuid() {
 		let kind = Kind::Uuid;
+		let serialized = kind.serialize(Serializer.wrap()).unwrap();
+		assert_eq!(kind, serialized);
+	}
+
+	#[test]
+	fn closure() {
+		let kind = Kind::Closure;
 		let serialized = kind.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(kind, serialized);
 	}
