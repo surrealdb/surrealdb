@@ -10,7 +10,6 @@ use serde_content::Value as Content;
 use std::borrow::Cow;
 use std::future::IntoFuture;
 use std::marker::PhantomData;
-use surrealdb_core::sql::Object;
 
 /// A signin future
 #[derive(Debug)]
@@ -53,7 +52,7 @@ where
 			let content = credentials.map_err(crate::error::Db::from)?;
 			router
 				.execute(Command::Signin {
-					credentials: to_value(content)?,
+					credentials: to_value(content)?.try_into()?,
 				})
 				.await
 		})

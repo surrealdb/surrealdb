@@ -1,6 +1,5 @@
 //! Methods to use when interacting with a SurrealDB instance
 use self::query::ValidQuery;
-use crate::api::err::Error;
 use crate::api::opt;
 use crate::api::opt::auth;
 use crate::api::opt::auth::Credentials;
@@ -13,7 +12,6 @@ use crate::api::Surreal;
 use crate::opt::IntoExportDestination;
 use crate::opt::WaitFor;
 use crate::sql::to_value;
-use crate::sql::Value;
 use serde::Serialize;
 use std::borrow::Cow;
 use std::marker::PhantomData;

@@ -64,7 +64,6 @@ macro_rules! into_future {
 impl<'r, Client> IntoFuture for Content<'r, Client, Value>
 where
 	Client: Connection,
-	D: Serialize + 'static,
 {
 	type Output = Result<Value>;
 	type IntoFuture = BoxFuture<'r, Self::Output>;
@@ -75,7 +74,6 @@ where
 impl<'r, Client, R> IntoFuture for Content<'r, Client, Option<R>>
 where
 	Client: Connection,
-	D: Serialize + 'static,
 	R: DeserializeOwned,
 {
 	type Output = Result<Option<R>>;
@@ -87,7 +85,6 @@ where
 impl<'r, Client, R> IntoFuture for Content<'r, Client, Vec<R>>
 where
 	Client: Connection,
-	D: Serialize + 'static,
 	R: DeserializeOwned,
 {
 	type Output = Result<Vec<R>>;

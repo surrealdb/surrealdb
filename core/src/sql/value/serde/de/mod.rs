@@ -357,7 +357,7 @@ where
 	T: DeserializeOwned,
 {
 	let content = value.into_content()?;
-	let deserializer = Deserializer::new(dbg!(content)).coerce_numbers();
+	let deserializer = Deserializer::new(content).coerce_numbers();
 	T::deserialize(deserializer).map_err(Into::into)
 }
 

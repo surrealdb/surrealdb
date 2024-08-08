@@ -130,7 +130,7 @@ where
 	/// Replaces the current document / record data with the specified data
 	pub fn content<D>(self, data: D) -> Content<'r, C, R>
 	where
-		D: Serialize,
+		D: Serialize + 'static,
 	{
 		Content::from_closure(self.client, || {
 			let data = to_value(data)?;

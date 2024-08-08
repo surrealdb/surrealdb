@@ -435,6 +435,7 @@ mod tests {
 	use crate::syn::Parse;
 	use std::collections::HashSet;
 
+	#[allow(clippy::mutable_key_type)]
 	#[test]
 	fn test_hash_index_option() {
 		let mut set = HashSet::new();
