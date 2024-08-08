@@ -4,6 +4,8 @@ use crate::err::Error;
 use crate::sql::value::serde::ser;
 use crate::sql::Ident;
 use crate::sql::Part;
+use crate::sql::Value;
+use ser::Serializer as _;
 use serde::ser::Error as _;
 use serde::ser::Impossible;
 use serde::ser::Serialize;
@@ -17,7 +19,7 @@ impl ser::Serializer for Serializer {
 	type SerializeSeq = Impossible<Part, Error>;
 	type SerializeTuple = Impossible<Part, Error>;
 	type SerializeTupleStruct = Impossible<Part, Error>;
-	type SerializeTupleVariant = Impossible<Part, Error>;
+	type SerializeTupleVariant = SerializePart;
 	type SerializeMap = Impossible<Part, Error>;
 	type SerializeStruct = Impossible<Part, Error>;
 	type SerializeStructVariant = Impossible<Part, Error>;
@@ -57,13 +59,70 @@ impl ser::Serializer for Serializer {
 			"Graph" => Ok(Part::Graph(value.serialize(ser::graph::Serializer.wrap())?)),
 			"Start" => Ok(Part::Start(value.serialize(ser::value::Serializer.wrap())?)),
 			"Value" => Ok(Part::Value(value.serialize(ser::value::Serializer.wrap())?)),
-			"Method" => Ok(Part::Method(
-				value.serialize(ser::string::Serializer.wrap())?,
-				value.serialize(ser::value::vec::Serializer.wrap())?,
-			)),
 			variant => {
 				Err(Error::custom(format!("unexpected newtype variant `{name}::{variant}`")))
 			}
+		}
+	}
+
+	fn serialize_tuple_variant(
+		self,
+		name: &'static str,
+		_variant_index: u32,
+		variant: &'static str,
+		_len: usize,
+	) -> Result<Self::SerializeTupleVariant, Self::Error> {
+		let inner = match variant {
+			"Method" => Inner::Method(Default::default(), Default::default()),
+			variant => {
+				return Err(Error::custom(format!("unexpected tuple variant `{name}::{variant}`")));
+			}
+		};
+		Ok(SerializePart {
+			inner,
+			index: 0,
+		})
+	}
+}
+
+pub(super) struct SerializePart {
+	index: usize,
+	inner: Inner,
+}
+
+enum Inner {
+	Method(String, Vec<Value>),
+}
+
+impl serde::ser::SerializeTupleVariant for SerializePart {
+	type Ok = Part;
+	type Error = Error;
+
+	fn serialize_field<T>(&mut self, value: &T) -> Result<(), Self::Error>
+	where
+		T: Serialize + ?Sized,
+	{
+		match (self.index, &mut self.inner) {
+			(0, Inner::Method(ref mut var, _)) => {
+				*var = value.serialize(ser::string::Serializer.wrap())?;
+			}
+			(1, Inner::Method(_, ref mut var)) => {
+				*var = value.serialize(ser::value::vec::Serializer.wrap())?;
+			}
+			(index, inner) => {
+				let variant = match inner {
+					Inner::Method(..) => "Method",
+				};
+				return Err(Error::custom(format!("unexpected `Part::{variant}` index `{index}`")));
+			}
+		}
+		self.index += 1;
+		Ok(())
+	}
+
+	fn end(self) -> Result<Self::Ok, Self::Error> {
+		match self.inner {
+			Inner::Method(one, two) => Ok(Part::Method(one, two)),
 		}
 	}
 }
