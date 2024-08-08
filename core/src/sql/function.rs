@@ -29,7 +29,6 @@ pub enum Function {
 	Normal(String, Vec<Value>),
 	Custom(String, Vec<Value>),
 	Script(Script, Vec<Value>),
-	//
 	Anonymous(Value, Vec<Value>),
 	// Add new variants here
 }
