@@ -275,11 +275,9 @@ impl Function {
 				}?;
 
 				if let Some(ref returns) = val.returns {
-					let res_kind = result.kindof();
-					result.coerce_to(returns).map_err(|_| Error::InvalidFunction {
-					name: format!("fn::{}", val.name),
-					message: format!("Expected this closure to return a value of type '{returns}', but found '{res_kind}'"),
-				})
+					result
+						.coerce_to(returns)
+						.map_err(|e| e.function_check_from_coerce(val.name.to_string()))
 				} else {
 					Ok(result)
 				}

@@ -6237,7 +6237,7 @@ async fn function_custom_typed_returns() -> Result<(), Error> {
 		RETURN fn::two();
 		RETURN fn::two_bad_type();
 	"#;
-	let error = "There was a problem running the fn::two_bad_type() function. Expected this closure to return a value of type 'string', but found 'int'";
+	let error = "There was a problem running the two_bad_type function. Expected this function to return a value of type string, but found 2";
 	Test::new(sql)
 		.await?
 		.expect_val("None")?
