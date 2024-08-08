@@ -31,9 +31,9 @@ pub trait RpcContext {
 	async fn execute(&mut self, method: Method, params: Array) -> Result<Data, RpcError> {
 		// Check if capabilities allow executing the requested RPC method
 		if !self.kvs().allows_rpc_method(&MethodTarget {
-			method,
+			method: method.clone(),
 		}) {
-			return Err(RpcError::MethodNotFound);
+			return Err(RpcError::MethodNotAllowed);
 		}
 
 		match method {
