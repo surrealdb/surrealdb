@@ -35,6 +35,7 @@ impl ser::Serializer for Serializer {
 			"Normal" => Inner::Normal(None, None),
 			"Custom" => Inner::Custom(None, None),
 			"Script" => Inner::Script(None, None),
+			"Anonymous" => Inner::Anonymous(None, None),
 			variant => {
 				return Err(Error::custom(format!("unexpected tuple variant `{name}::{variant}`")));
 			}
@@ -55,6 +56,7 @@ enum Inner {
 	Normal(Option<String>, Option<Vec<Value>>),
 	Custom(Option<String>, Option<Vec<Value>>),
 	Script(Option<Script>, Option<Vec<Value>>),
+	Anonymous(Option<Value>, Option<Vec<Value>>),
 }
 
 impl serde::ser::SerializeTupleVariant for SerializeFunction {
@@ -72,11 +74,15 @@ impl serde::ser::SerializeTupleVariant for SerializeFunction {
 			(0, Inner::Script(ref mut var, _)) => {
 				*var = Some(Script(value.serialize(ser::string::Serializer.wrap())?));
 			}
+			(0, Inner::Anonymous(ref mut var, _)) => {
+				*var = Some(value.serialize(ser::value::Serializer.wrap())?);
+			}
 			(
 				1,
 				Inner::Normal(_, ref mut var)
 				| Inner::Custom(_, ref mut var)
-				| Inner::Script(_, ref mut var),
+				| Inner::Script(_, ref mut var)
+				| Inner::Anonymous(_, ref mut var),
 			) => {
 				*var = Some(value.serialize(ser::value::vec::Serializer.wrap())?);
 			}
@@ -85,6 +91,7 @@ impl serde::ser::SerializeTupleVariant for SerializeFunction {
 					Inner::Normal(..) => "Normal",
 					Inner::Custom(..) => "Custom",
 					Inner::Script(..) => "Script",
+					Inner::Anonymous(..) => "Anonymous",
 				};
 				return Err(Error::custom(format!(
 					"unexpected `Function::{variant}` index `{index}`"
@@ -100,6 +107,7 @@ impl serde::ser::SerializeTupleVariant for SerializeFunction {
 			Inner::Normal(Some(one), Some(two)) => Ok(Function::Normal(one, two)),
 			Inner::Custom(Some(one), Some(two)) => Ok(Function::Custom(one, two)),
 			Inner::Script(Some(one), Some(two)) => Ok(Function::Script(one, two)),
+			Inner::Anonymous(Some(one), Some(two)) => Ok(Function::Anonymous(one, two)),
 			_ => Err(Error::custom("`Function` missing required value(s)")),
 		}
 	}
@@ -127,6 +135,13 @@ mod tests {
 	#[test]
 	fn script() {
 		let function = Function::Script(Default::default(), vec![Default::default()]);
+		let serialized = function.serialize(Serializer.wrap()).unwrap();
+		assert_eq!(function, serialized);
+	}
+
+	#[test]
+	fn anonymous() {
+		let function = Function::Anonymous(Default::default(), vec![Default::default()]);
 		let serialized = function.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(function, serialized);
 	}
