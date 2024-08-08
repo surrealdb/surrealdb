@@ -237,11 +237,6 @@ pub async fn init(
 					continue;
 				}
 
-				// Persist the variables extracted from the query
-				// for (key, value) in vars {
-				// 	let _ = client.set(key, value).await;
-				// }
-
 				// Process the last `use` statements, if any
 				if namespace.is_some() || database.is_some() {
 					// Use the namespace provided in the query if any, otherwise use the one in the prompt
