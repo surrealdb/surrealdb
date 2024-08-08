@@ -1172,6 +1172,9 @@ allow_apis = [
 allow_apis = [
     "fs",
 ]
+build.allow_build_instructions = [
+    "cargo::rustc-check-cfg=cfg(storage)",
+]
 
 [pkg.surrealdb-core]
 allow_unsafe = true
