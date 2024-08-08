@@ -132,19 +132,19 @@ impl Parser<'_> {
 		let value = match token.kind {
 			t!("NONE") => {
 				self.pop_peek();
-				return Ok(Value::None);
+				Value::None
 			}
 			t!("NULL") => {
 				self.pop_peek();
-				return Ok(Value::Null);
+				Value::Null
 			}
 			t!("true") => {
 				self.pop_peek();
-				return Ok(Value::Bool(true));
+				Value::Bool(true)
 			}
 			t!("false") => {
 				self.pop_peek();
-				return Ok(Value::Bool(false));
+				Value::Bool(false)
 			}
 			t!("<") => {
 				self.pop_peek();
@@ -153,7 +153,7 @@ impl Parser<'_> {
 				self.expect_closing_delimiter(t!(">"), token.span)?;
 				let next = expected!(self, t!("{")).span;
 				let block = self.parse_block(ctx, next).await?;
-				return Ok(Value::Future(Box::new(crate::sql::Future(block))));
+				Value::Future(Box::new(crate::sql::Future(block)))
 			}
 			t!("r\"") => {
 				self.pop_peek();
@@ -180,14 +180,14 @@ impl Parser<'_> {
 						return Ok(x);
 					}
 				}
-				return Ok(Value::Strand(s));
+				Value::Strand(s)
 			}
 			t!("+") | t!("-") | TokenKind::Number(_) | TokenKind::Digits | TokenKind::Duration => {
 				self.parse_number_like_prime()?
 			}
 			TokenKind::NaN => {
 				self.pop_peek();
-				return Ok(Value::Number(Number::Float(f64::NAN)));
+				Value::Number(Number::Float(f64::NAN))
 			}
 			t!("$param") => {
 				let param = self.next_token_value()?;
@@ -285,11 +285,6 @@ impl Parser<'_> {
 		// Parse the rest of the idiom if it is being continued.
 		if Self::continues_idiom(self.peek_kind()) {
 			match value {
-				Value::None
-				| Value::Null
-				| Value::Bool(_)
-				| Value::Future(_)
-				| Value::Strand(_) => unreachable!(),
 				Value::Idiom(Idiom(x)) => self.parse_remaining_value_idiom(ctx, x).await,
 				Value::Table(Table(x)) => {
 					self.parse_remaining_value_idiom(ctx, vec![Part::Field(Ident(x))]).await
@@ -420,7 +415,7 @@ impl Parser<'_> {
 			}
 			t!("REMOVE") => {
 				self.pop_peek();
-				let stmt = self.parse_remove_stmt()?;
+				let stmt = self.parse_remove_stmt(ctx).await?;
 				Subquery::Remove(stmt)
 			}
 			t!("REBUILD") => {
@@ -553,7 +548,7 @@ impl Parser<'_> {
 			}
 			t!("REMOVE") => {
 				self.pop_peek();
-				let stmt = self.parse_remove_stmt()?;
+				let stmt = self.parse_remove_stmt(ctx).await?;
 				Subquery::Remove(stmt)
 			}
 			t!("REBUILD") => {
@@ -648,19 +643,13 @@ impl Parser<'_> {
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::syn::{self, Parse};
+	use crate::syn::Parse;
 
 	#[test]
 	fn subquery_expression_statement() {
 		let sql = "(1 + 2 + 3)";
 		let out = Value::parse(sql);
 		assert_eq!("(1 + 2 + 3)", format!("{}", out))
-	}
-
-	#[test]
-	fn invalid_idiom() {
-		let sql = "'hello'.foo";
-		syn::parse(sql).unwrap_err();
 	}
 
 	#[test]
