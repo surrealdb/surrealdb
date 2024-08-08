@@ -264,7 +264,6 @@ pub(crate) static KEYWORDS: phf::Map<UniCase<&'static str>, TokenKind> = phf_map
 	UniCase::ascii("FUTURE") => TokenKind::Keyword(Keyword::Future),
 	UniCase::ascii("BOOL") => TokenKind::Keyword(Keyword::Bool),
 	UniCase::ascii("BYTES") => TokenKind::Keyword(Keyword::Bytes),
-	UniCase::ascii("CLOSURE") => TokenKind::Keyword(Keyword::Closure),
 	UniCase::ascii("DATETIME") => TokenKind::Keyword(Keyword::Datetime),
 	UniCase::ascii("DECIMAL") => TokenKind::Keyword(Keyword::Decimal),
 	UniCase::ascii("DURATION") => TokenKind::Keyword(Keyword::Duration),
