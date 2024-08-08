@@ -169,6 +169,7 @@ pub enum Action {
 	Create,
 	Update,
 	Delete,
+	Terminate,
 }
 
 impl From<dbs::Action> for Action {
@@ -177,6 +178,7 @@ impl From<dbs::Action> for Action {
 			dbs::Action::Create => Self::Create,
 			dbs::Action::Update => Self::Update,
 			dbs::Action::Delete => Self::Delete,
+			dbs::Action::Terminate => Self::Terminate,
 			_ => unreachable!(),
 		}
 	}
