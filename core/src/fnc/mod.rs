@@ -422,7 +422,7 @@ pub fn idiom(
 			dispatch!(
 				name,
 				args.clone(),
-				"no such method for found the array type",
+				"no such method found for the array type",
 				"add" => array::add,
 				"all" => array::all,
 				"any" => array::any,
@@ -495,7 +495,7 @@ pub fn idiom(
 			dispatch!(
 				name,
 				args.clone(),
-				"no such method for found the bytes type",
+				"no such method found for the bytes type",
 				"len" => bytes::len,
 			)
 		}
@@ -503,7 +503,7 @@ pub fn idiom(
 			dispatch!(
 				name,
 				args.clone(),
-				"no such method for found the duration type",
+				"no such method found for the duration type",
 				"days" => duration::days,
 				"hours" => duration::hours,
 				"micros" => duration::micros,
@@ -519,7 +519,7 @@ pub fn idiom(
 			dispatch!(
 				name,
 				args.clone(),
-				"no such method for found the geometry type",
+				"no such method found for the geometry type",
 				"area" => geo::area,
 				"bearing" => geo::bearing,
 				"centroid" => geo::centroid,
@@ -532,7 +532,7 @@ pub fn idiom(
 			dispatch!(
 				name,
 				args.clone(),
-				"no such method for found the record type",
+				"no such method found for the record type",
 				"id" => meta::id,
 				"table" => meta::tb,
 				"tb" => meta::tb,
@@ -542,7 +542,7 @@ pub fn idiom(
 			dispatch!(
 				name,
 				args.clone(),
-				"no such method for found the object type",
+				"no such method found for the object type",
 				"entries" => object::entries,
 				"keys" => object::keys,
 				"len" => object::len,
@@ -553,7 +553,7 @@ pub fn idiom(
 			dispatch!(
 				name,
 				args.clone(),
-				"no such method for found the string type",
+				"no such method found for the string type",
 				"concat" => string::concat,
 				"contains" => string::contains,
 				"endsWith" => string::ends_with,
@@ -611,7 +611,7 @@ pub fn idiom(
 			dispatch!(
 				name,
 				args.clone(),
-				"no such method for found the datetime type",
+				"no such method found for the datetime type",
 				"time_ceil" => time::ceil,
 				"time_day" => time::day,
 				"time_floor" => time::floor,
