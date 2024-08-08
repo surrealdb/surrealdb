@@ -6,6 +6,7 @@ use crate::err::Error;
 use crate::iam::Action;
 use crate::sql::permission::Permission;
 use crate::sql::value::Value;
+use crate::sql::Kind;
 use reblessive::tree::Stk;
 
 impl<'a> Document<'a> {
@@ -109,22 +110,26 @@ impl<'a> Document<'a> {
 					})?;
 				}
 				// Check for a ASSERT clause
-				if let Some(expr) = &fd.assert {
-					// Configure the context
-					let mut ctx = Context::new(ctx);
-					ctx.add_value("input", &inp);
-					ctx.add_value("value", &val);
-					ctx.add_value("after", &val);
-					ctx.add_value("before", &old);
-					// Process the ASSERT clause
-					if !expr.compute(stk, &ctx, opt, Some(&self.current)).await?.is_truthy() {
-						return Err(Error::FieldValue {
-							thing: rid.to_string(),
-							field: fd.name.clone(),
-							value: val.to_string(),
-							check: expr.to_string(),
-						});
+				match (&fd.assert, &val, &fd.kind) {
+					(_, Value::None, Some(Kind::Option(_))) => (),
+					(Some(expr), _, _) => {
+						// Configure the context
+						let mut ctx = Context::new(ctx);
+						ctx.add_value("input", &inp);
+						ctx.add_value("value", &val);
+						ctx.add_value("after", &val);
+						ctx.add_value("before", &old);
+						// Process the ASSERT clause
+						if !expr.compute(stk, &ctx, opt, Some(&self.current)).await?.is_truthy() {
+							return Err(Error::FieldValue {
+								thing: rid.to_string(),
+								field: fd.name.clone(),
+								value: val.to_string(),
+								check: expr.to_string(),
+							});
+						}
 					}
+					_ => (),
 				}
 				// Check for a PERMISSIONS clause
 				if opt.check_perms(Action::Edit)? {
