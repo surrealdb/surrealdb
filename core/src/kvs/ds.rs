@@ -1,7 +1,7 @@
 use super::tr::Transactor;
 use super::tx::Transaction;
 use crate::cf;
-use crate::ctx::Context;
+use crate::ctx::MutableContext;
 #[cfg(feature = "jwks")]
 use crate::dbs::capabilities::NetTarget;
 use crate::dbs::{
@@ -414,7 +414,9 @@ impl Datastore {
 			// Create and new root user definition
 			let stm = DefineUserStatement::from((Base::Root, user, pass, INITIAL_USER_ROLE));
 			let opt = Options::new().with_auth(Arc::new(Auth::for_root(Role::Owner)));
-			let ctx = Context::default().with_transaction(txn.clone());
+			let mut ctx = MutableContext::default();
+			ctx.set_transaction(txn.clone());
+			let ctx = ctx.freeze();
 			catch!(txn, stm.compute(&ctx, &opt, None));
 			// We added a user, so commit the transaction
 			txn.commit().await
@@ -684,7 +686,7 @@ impl Datastore {
 		// Create a new query executor
 		let mut exe = Executor::new(self);
 		// Create a default context
-		let mut ctx = Context::from_ds(
+		let mut ctx = MutableContext::from_ds(
 			self.query_timeout,
 			self.capabilities.clone(),
 			self.index_stores.clone(),
@@ -702,11 +704,11 @@ impl Datastore {
 			ctx.add_notifications(Some(&channel.0));
 		}
 		// Start an execution context
-		let ctx = sess.context(ctx);
+		sess.context(&mut ctx);
 		// Store the query variables
-		let ctx = vars.attach(ctx)?;
+		vars.attach(&mut ctx)?;
 		// Process all statements
-		exe.execute(ctx, opt, ast).await
+		exe.execute(ctx.freeze(), opt, ast).await
 	}
 
 	/// Ensure a SQL [`Value`] is fully computed
@@ -760,7 +762,7 @@ impl Datastore {
 			.with_strict(self.strict)
 			.with_auth_enabled(self.auth_enabled);
 		// Create a default context
-		let mut ctx = Context::default();
+		let mut ctx = MutableContext::default();
 		// Set context capabilities
 		ctx.add_capabilities(self.capabilities.clone());
 		// Set the global query timeout
@@ -772,13 +774,15 @@ impl Datastore {
 			ctx.add_notifications(Some(&channel.0));
 		}
 		// Start an execution context
-		let ctx = sess.context(ctx);
+		sess.context(&mut ctx);
 		// Store the query variables
-		let ctx = vars.attach(ctx)?;
+		vars.attach(&mut ctx)?;
 		// Start a new transaction
 		let txn = self.transaction(val.writeable().into(), Optimistic).await?.enclose();
 		// Store the transaction
-		let ctx = ctx.with_transaction(txn.clone());
+		ctx.set_transaction(txn.clone());
+		// Freeze the context
+		let ctx = ctx.freeze();
 		// Compute the value
 		let res = stack.enter(|stk| val.compute(stk, &ctx, &opt, None)).finish().await;
 		// Store any data
@@ -837,7 +841,7 @@ impl Datastore {
 			.with_strict(self.strict)
 			.with_auth_enabled(self.auth_enabled);
 		// Create a default context
-		let mut ctx = Context::default();
+		let mut ctx = MutableContext::default();
 		// Set context capabilities
 		ctx.add_capabilities(self.capabilities.clone());
 		// Set the global query timeout
@@ -849,13 +853,15 @@ impl Datastore {
 			ctx.add_notifications(Some(&channel.0));
 		}
 		// Start an execution context
-		let ctx = sess.context(ctx);
+		sess.context(&mut ctx);
 		// Store the query variables
-		let ctx = vars.attach(ctx)?;
+		vars.attach(&mut ctx)?;
 		// Start a new transaction
 		let txn = self.transaction(val.writeable().into(), Optimistic).await?.enclose();
 		// Store the transaction
-		let ctx = ctx.with_transaction(txn.clone());
+		ctx.set_transaction(txn.clone());
+		// Free the context
+		let ctx = ctx.freeze();
 		// Compute the value
 		let res = stack.enter(|stk| val.compute(stk, &ctx, &opt, None)).finish().await;
 		// Store any data
@@ -984,13 +990,15 @@ mod test {
 			.with_futures(true);
 
 		// Create a default context
-		let mut ctx = Context::default();
+		let mut ctx = MutableContext::default();
 		// Set context capabilities
 		ctx.add_capabilities(dbs.capabilities.clone());
 		// Start a new transaction
 		let txn = dbs.transaction(val.writeable().into(), Optimistic).await?;
 		// Store the transaction
-		let ctx = ctx.with_transaction(txn.enclose());
+		ctx.set_transaction(txn.enclose());
+		// Freeze the context
+		let ctx = ctx.freeze();
 		// Compute the value
 		let mut stack = reblessive::tree::TreeStack::new();
 		let res = stack.enter(|stk| val.compute(stk, &ctx, &opt, None)).finish().await.unwrap();

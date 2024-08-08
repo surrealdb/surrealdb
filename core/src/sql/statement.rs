@@ -146,9 +146,9 @@ impl Statement {
 	pub(crate) async fn compute(
 		&self,
 		stk: &mut Stk,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		opt: &Options,
-		doc: Option<&CursorDoc<'_>>,
+		doc: Option<&CursorDoc>,
 	) -> Result<Value, Error> {
 		match self {
 			Self::Alter(v) => v.compute(stk, ctx, opt, doc).await,

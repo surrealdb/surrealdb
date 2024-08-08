@@ -13,83 +13,141 @@ use crate::sql::statements::live::LiveStatement;
 use crate::sql::thing::Thing;
 use crate::sql::value::Value;
 use crate::sql::Base;
-use std::borrow::Cow;
 use std::fmt::{Debug, Formatter};
+use std::mem;
 use std::sync::Arc;
 
-pub(crate) struct Document<'a> {
-	pub(super) id: Option<&'a Thing>,
+pub(crate) struct Document {
+	pub(super) id: Option<Arc<Thing>>,
 	pub(super) extras: Workable,
-	pub(super) initial: CursorDoc<'a>,
-	pub(super) current: CursorDoc<'a>,
+	pub(super) initial: CursorDoc,
+	pub(super) current: CursorDoc,
 }
 
 #[non_exhaustive]
 #[cfg_attr(debug_assertions, derive(Debug))]
-pub struct CursorDoc<'a> {
-	pub(crate) rid: Option<&'a Thing>,
-	pub(crate) ir: Option<&'a IteratorRecord>,
-	pub(crate) doc: Cow<'a, Value>,
+pub struct CursorDoc {
+	pub(crate) rid: Option<Arc<Thing>>,
+	pub(crate) ir: Option<Arc<IteratorRecord>>,
+	pub(crate) doc: CursorValue,
 }
 
-impl<'a> CursorDoc<'a> {
+#[non_exhaustive]
+#[cfg_attr(debug_assertions, derive(Debug))]
+pub(crate) struct CursorValue {
+	mutable: Value,
+	read_only: Option<Arc<Value>>,
+}
+
+impl CursorValue {
+	pub(crate) fn to_mut(&mut self) -> &mut Value {
+		if let Some(ro) = self.read_only.take() {
+			self.mutable = ro.as_ref().clone();
+		}
+		&mut self.mutable
+	}
+
+	pub(crate) fn as_arc(&mut self) -> Arc<Value> {
+		match &self.read_only {
+			None => {
+				let v = Arc::new(mem::take(&mut self.mutable));
+				self.read_only = Some(v.clone());
+				v
+			}
+			Some(v) => v.clone(),
+		}
+	}
+
+	pub(crate) fn as_ref(&self) -> &Value {
+		if let Some(ro) = &self.read_only {
+			ro.as_ref()
+		} else {
+			&self.mutable
+		}
+	}
+
+	pub(crate) fn is_none(&self) -> bool {
+		self.as_ref().is_none()
+	}
+
+	pub(crate) fn is_some(&self) -> bool {
+		self.as_ref().is_some()
+	}
+}
+
+impl CursorDoc {
 	pub(crate) fn new(
-		rid: Option<&'a Thing>,
-		ir: Option<&'a IteratorRecord>,
-		doc: Cow<'a, Value>,
+		rid: Option<Arc<Thing>>,
+		ir: Option<Arc<IteratorRecord>>,
+		doc: Value,
 	) -> Self {
 		Self {
 			rid,
 			ir,
-			doc,
+			doc: doc.into(),
 		}
 	}
 }
 
-impl<'a> From<&'a Value> for CursorDoc<'a> {
-	fn from(doc: &'a Value) -> Self {
+impl From<Value> for CursorValue {
+	fn from(value: Value) -> Self {
+		Self {
+			mutable: value,
+			read_only: None,
+		}
+	}
+}
+
+impl From<Value> for CursorDoc {
+	fn from(val: Value) -> Self {
 		Self {
 			rid: None,
 			ir: None,
-			doc: Cow::Borrowed(doc),
+			doc: CursorValue {
+				mutable: val,
+				read_only: None,
+			},
 		}
 	}
 }
 
-impl<'a> From<&'a mut Value> for CursorDoc<'a> {
-	fn from(doc: &'a mut Value) -> Self {
+impl From<Arc<Value>> for CursorDoc {
+	fn from(doc: Arc<Value>) -> Self {
 		Self {
 			rid: None,
 			ir: None,
-			doc: Cow::Borrowed(doc),
+			doc: CursorValue {
+				mutable: Value::None,
+				read_only: Some(doc),
+			},
 		}
 	}
 }
 
-impl<'a> Debug for Document<'a> {
+impl Debug for Document {
 	fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
 		write!(f, "Document - id: <{:?}>", self.id)
 	}
 }
 
-impl<'a> From<&Document<'a>> for Vec<u8> {
-	fn from(val: &Document<'a>) -> Vec<u8> {
-		val.current.doc.as_ref().into()
+impl From<&Document> for Vec<u8> {
+	fn from(val: &Document) -> Vec<u8> {
+		(&val.current.doc).into()
 	}
 }
 
-impl<'a> Document<'a> {
+impl Document {
 	pub fn new(
-		id: Option<&'a Thing>,
-		ir: Option<&'a IteratorRecord>,
-		val: &'a Value,
+		id: Option<Arc<Thing>>,
+		ir: Option<Arc<IteratorRecord>>,
+		val: Arc<Value>,
 		extras: Workable,
 	) -> Self {
 		Document {
-			id,
+			id: id.clone(),
 			extras,
-			current: CursorDoc::new(id, ir, Cow::Borrowed(val)),
-			initial: CursorDoc::new(id, ir, Cow::Borrowed(val)),
+			current: CursorDoc::new(id.clone(), ir.clone(), val.clone().into()),
+			initial: CursorDoc::new(id, ir, val.into()),
 		}
 	}
 
@@ -106,21 +164,21 @@ impl<'a> Document<'a> {
 	}
 }
 
-impl<'a> Document<'a> {
+impl Document {
 	/// Check if document has changed
 	pub fn changed(&self) -> bool {
-		self.initial.doc != self.current.doc
+		self.initial.doc.as_ref() != self.current.doc.as_ref()
 	}
 
 	/// Check if document is being created
 	pub fn is_new(&self) -> bool {
-		self.initial.doc.is_none() && self.current.doc.is_some()
+		self.initial.doc.as_ref().is_none() && self.current.doc.as_ref().is_some()
 	}
 
 	/// Get the table for this document
 	pub async fn tb(
 		&self,
-		ctx: &Context<'a>,
+		ctx: &Context,
 		opt: &Options,
 	) -> Result<Arc<DefineTableStatement>, Error> {
 		// Get transaction
@@ -149,7 +207,7 @@ impl<'a> Document<'a> {
 	/// Get the foreign tables for this document
 	pub async fn ft(
 		&self,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		opt: &Options,
 	) -> Result<Arc<[DefineTableStatement]>, Error> {
 		// Get the record id
@@ -160,7 +218,7 @@ impl<'a> Document<'a> {
 	/// Get the events for this document
 	pub async fn ev(
 		&self,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		opt: &Options,
 	) -> Result<Arc<[DefineEventStatement]>, Error> {
 		// Get the record id
@@ -171,7 +229,7 @@ impl<'a> Document<'a> {
 	/// Get the fields for this document
 	pub async fn fd(
 		&self,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		opt: &Options,
 	) -> Result<Arc<[DefineFieldStatement]>, Error> {
 		// Get the record id
@@ -182,7 +240,7 @@ impl<'a> Document<'a> {
 	/// Get the indexes for this document
 	pub async fn ix(
 		&self,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		opt: &Options,
 	) -> Result<Arc<[DefineIndexStatement]>, Error> {
 		// Get the record id
@@ -191,11 +249,7 @@ impl<'a> Document<'a> {
 		ctx.tx().all_tb_indexes(opt.ns()?, opt.db()?, &id.tb).await
 	}
 	// Get the lives for this document
-	pub async fn lv(
-		&self,
-		ctx: &Context<'_>,
-		opt: &Options,
-	) -> Result<Arc<[LiveStatement]>, Error> {
+	pub async fn lv(&self, ctx: &Context, opt: &Options) -> Result<Arc<[LiveStatement]>, Error> {
 		// Get the record id
 		let id = self.id.as_ref().unwrap();
 		// Get the table definition

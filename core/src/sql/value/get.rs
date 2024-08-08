@@ -24,9 +24,9 @@ impl Value {
 	pub(crate) async fn get(
 		&self,
 		stk: &mut Stk,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		opt: &Options,
-		doc: Option<&CursorDoc<'_>>,
+		doc: Option<&CursorDoc>,
 		path: &[Part],
 	) -> Result<Self, Error> {
 		// Limit recursion depth.
@@ -164,7 +164,7 @@ impl Value {
 					Part::Where(w) => {
 						let mut a = Vec::new();
 						for v in v.iter() {
-							let cur = v.into();
+							let cur = v.clone().into();
 							if stk
 								.run(|stk| w.compute(stk, ctx, opt, Some(&cur)))
 								.await?

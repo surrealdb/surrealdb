@@ -28,9 +28,9 @@ impl SetStatement {
 	pub(crate) async fn compute(
 		&self,
 		stk: &mut Stk,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		opt: &Options,
-		doc: Option<&CursorDoc<'_>>,
+		doc: Option<&CursorDoc>,
 	) -> Result<Value, Error> {
 		// Check if the variable is a protected variable
 		match PROTECTED_PARAM_NAMES.contains(&self.name.as_str()) {

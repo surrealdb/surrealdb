@@ -1,4 +1,3 @@
-use std::borrow::Cow;
 use std::collections::HashMap;
 
 use crate::cf::{TableMutation, TableMutations};
@@ -71,8 +70,8 @@ impl Writer {
 		db: &str,
 		tb: &str,
 		id: Thing,
-		previous: Cow<'_, Value>,
-		current: Cow<'_, Value>,
+		previous: &Value,
+		current: &Value,
 		store_difference: bool,
 	) {
 		if current.is_some() {
@@ -83,7 +82,7 @@ impl Writer {
 				match store_difference {
 					true => {
 						if previous.is_none() {
-							TableMutation::Set(id, current.into_owned())
+							TableMutation::Set(id, current.clone())
 						} else {
 							// We intentionally record the patches in reverse (current -> previous)
 							// because we cannot otherwise resolve operations such as "replace" and "remove".
@@ -91,12 +90,12 @@ impl Writer {
 								current.diff(&previous, Idiom::default());
 							TableMutation::SetWithDiff(
 								id,
-								current.into_owned(),
+								current.clone(),
 								patches_to_create_previous,
 							)
 						}
 					}
-					false => TableMutation::Set(id, current.into_owned()),
+					false => TableMutation::Set(id, current.clone()),
 				},
 			);
 		} else {
@@ -105,7 +104,7 @@ impl Writer {
 				db.to_string(),
 				tb.to_string(),
 				match store_difference {
-					true => TableMutation::DelWithOriginal(id, previous.into_owned()),
+					true => TableMutation::DelWithOriginal(id, previous.clone()),
 					false => TableMutation::Del(id),
 				},
 			);
@@ -191,16 +190,8 @@ mod tests {
 			id: Id::String("A".to_string()),
 		};
 		let value_a: super::Value = "a".into();
-		let previous = Cow::from(Value::None);
-		tx1.record_change(
-			NS,
-			DB,
-			TB,
-			&thing_a,
-			previous.clone(),
-			Cow::Borrowed(&value_a),
-			DONT_STORE_PREVIOUS,
-		);
+		let previous = Value::None;
+		tx1.record_change(NS, DB, TB, &thing_a, &previous, &value_a, DONT_STORE_PREVIOUS);
 		tx1.complete_changes(true).await.unwrap();
 		tx1.commit().await.unwrap();
 
@@ -210,15 +201,7 @@ mod tests {
 			id: Id::String("C".to_string()),
 		};
 		let value_c: Value = "c".into();
-		tx2.record_change(
-			NS,
-			DB,
-			TB,
-			&thing_c,
-			previous.clone(),
-			Cow::Borrowed(&value_c),
-			DONT_STORE_PREVIOUS,
-		);
+		tx2.record_change(NS, DB, TB, &thing_c, &previous, &value_c, DONT_STORE_PREVIOUS);
 		tx2.complete_changes(true).await.unwrap();
 		tx2.commit().await.unwrap();
 
@@ -228,29 +211,13 @@ mod tests {
 			id: Id::String("B".to_string()),
 		};
 		let value_b: Value = "b".into();
-		tx3.record_change(
-			NS,
-			DB,
-			TB,
-			&thing_b,
-			previous.clone(),
-			Cow::Borrowed(&value_b),
-			DONT_STORE_PREVIOUS,
-		);
+		tx3.record_change(NS, DB, TB, &thing_b, &previous, &value_b, DONT_STORE_PREVIOUS);
 		let thing_c2 = Thing {
 			tb: TB.to_owned(),
 			id: Id::String("C".to_string()),
 		};
 		let value_c2: Value = "c2".into();
-		tx3.record_change(
-			NS,
-			DB,
-			TB,
-			&thing_c2,
-			previous.clone(),
-			Cow::Borrowed(&value_c2),
-			DONT_STORE_PREVIOUS,
-		);
+		tx3.record_change(NS, DB, TB, &thing_c2, &previous, &value_c2, DONT_STORE_PREVIOUS);
 		tx3.complete_changes(true).await.unwrap();
 		tx3.commit().await.unwrap();
 
@@ -537,15 +504,7 @@ mod tests {
 		};
 		let value_a: Value = "a".into();
 		let previous = Cow::from(Value::None);
-		tx.lock().await.record_change(
-			NS,
-			DB,
-			TB,
-			&thing,
-			previous.clone(),
-			Cow::Borrowed(&value_a),
-			DONT_STORE_PREVIOUS,
-		);
+		tx.lock().await.record_change(NS, DB, TB, &thing, &previous, &value_a, DONT_STORE_PREVIOUS);
 		tx.lock().await.complete_changes(true).await.unwrap();
 		tx.commit().await.unwrap();
 		thing

@@ -1,4 +1,4 @@
-use crate::ctx::Context;
+use crate::ctx::{Context, MutableContext};
 use crate::dbs::Options;
 use crate::dbs::Statement;
 use crate::doc::Document;
@@ -7,12 +7,13 @@ use crate::iam::Action;
 use crate::sql::permission::Permission;
 use crate::sql::value::Value;
 use reblessive::tree::Stk;
+use std::sync::Arc;
 
-impl<'a> Document<'a> {
+impl Document {
 	pub async fn field(
 		&mut self,
 		stk: &mut Stk,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		opt: &Options,
 		_stm: &Statement<'_>,
 	) -> Result<(), Error> {
@@ -23,17 +24,17 @@ impl<'a> Document<'a> {
 		// Get the record id
 		let rid = self.id.as_ref().unwrap();
 		// Get the user applied input
-		let inp = self.initial.doc.changed(self.current.doc.as_ref());
+		let inp = self.initial.doc.as_ref().changed(self.current.doc.as_ref());
 		// Loop through all field statements
 		for fd in self.fd(ctx, opt).await?.iter() {
 			// Loop over each field in document
-			for (k, mut val) in self.current.doc.walk(&fd.name).into_iter() {
+			for (k, mut val) in self.current.doc.as_ref().walk(&fd.name).into_iter() {
 				// Get the initial value
-				let old = self.initial.doc.pick(&k);
+				let old = Arc::new(self.initial.doc.as_ref().pick(&k));
 				// Get the input value
-				let inp = inp.pick(&k);
+				let inp = Arc::new(inp.pick(&k));
 				// Check for READONLY clause
-				if fd.readonly && !self.is_new() && val != old {
+				if fd.readonly && !self.is_new() && val.ne(&old) {
 					return Err(Error::FieldReadonly {
 						field: fd.name.clone(),
 						thing: rid.to_string(),
@@ -51,11 +52,13 @@ impl<'a> Document<'a> {
 				if let Some(expr) = def {
 					if self.is_new() && val.is_none() {
 						// Configure the context
-						let mut ctx = Context::new(ctx);
-						ctx.add_value("input", &inp);
-						ctx.add_value("value", &val);
-						ctx.add_value("after", &val);
-						ctx.add_value("before", &old);
+						let mut ctx = MutableContext::new(ctx);
+						let v = Arc::new(val);
+						ctx.add_value("input", inp.clone());
+						ctx.add_value("value", v.clone());
+						ctx.add_value("after", v);
+						ctx.add_value("before", old.clone());
+						let ctx = ctx.freeze();
 						// Process the VALUE clause
 						val = expr.compute(stk, &ctx, opt, Some(&self.current)).await?;
 					}
@@ -82,11 +85,13 @@ impl<'a> Document<'a> {
 					// Only run value clause for mutable and new fields
 					if !fd.readonly || self.is_new() {
 						// Configure the context
-						let mut ctx = Context::new(ctx);
-						ctx.add_value("input", &inp);
-						ctx.add_value("value", &val);
-						ctx.add_value("after", &val);
-						ctx.add_value("before", &old);
+						let v = Arc::new(val);
+						let mut ctx = MutableContext::new(ctx);
+						ctx.add_value("input", inp.clone());
+						ctx.add_value("value", v.clone());
+						ctx.add_value("after", v);
+						ctx.add_value("before", old.clone());
+						let ctx = ctx.freeze();
 						// Process the VALUE clause
 						val = expr.compute(stk, &ctx, opt, Some(&self.current)).await?;
 					}
@@ -111,11 +116,13 @@ impl<'a> Document<'a> {
 				// Check for a ASSERT clause
 				if let Some(expr) = &fd.assert {
 					// Configure the context
-					let mut ctx = Context::new(ctx);
-					ctx.add_value("input", &inp);
-					ctx.add_value("value", &val);
-					ctx.add_value("after", &val);
-					ctx.add_value("before", &old);
+					let mut ctx = MutableContext::new(ctx);
+					let v = Arc::new(val.clone());
+					ctx.add_value("input", inp.clone());
+					ctx.add_value("value", v.clone());
+					ctx.add_value("after", v);
+					ctx.add_value("before", old.clone());
+					let ctx = ctx.freeze();
 					// Process the ASSERT clause
 					if !expr.compute(stk, &ctx, opt, Some(&self.current)).await?.is_truthy() {
 						return Err(Error::FieldValue {
@@ -143,7 +150,7 @@ impl<'a> Document<'a> {
 						// The field PERMISSIONS clause
 						// is NONE, meaning that this
 						// change will be reverted.
-						Permission::None => val = old,
+						Permission::None => val = old.as_ref().clone(),
 						// The field PERMISSIONS clause
 						// is a custom expression, so
 						// we check the expression and
@@ -152,14 +159,16 @@ impl<'a> Document<'a> {
 							// Disable permissions
 							let opt = &opt.new_with_perms(false);
 							// Configure the context
-							let mut ctx = Context::new(ctx);
-							ctx.add_value("input", &inp);
-							ctx.add_value("value", &val);
-							ctx.add_value("after", &val);
-							ctx.add_value("before", &old);
+							let mut ctx = MutableContext::new(ctx);
+							let v = Arc::new(val.clone());
+							ctx.add_value("input", inp);
+							ctx.add_value("value", v.clone());
+							ctx.add_value("after", v);
+							ctx.add_value("before", old.clone());
+							let ctx = ctx.freeze();
 							// Process the PERMISSION clause
 							if !e.compute(stk, &ctx, opt, Some(&self.current)).await?.is_truthy() {
-								val = old
+								val = old.as_ref().clone()
 							}
 						}
 					}
@@ -167,7 +176,7 @@ impl<'a> Document<'a> {
 				// Set the value of the field
 				match val {
 					Value::None => self.current.doc.to_mut().del(stk, ctx, opt, &k).await?,
-					_ => self.current.doc.to_mut().set(stk, ctx, opt, &k, val).await?,
+					v => self.current.doc.to_mut().set(stk, ctx, opt, &k, v).await?,
 				};
 			}
 		}

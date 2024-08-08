@@ -4,10 +4,10 @@ use crate::dbs::Statement;
 use crate::doc::Document;
 use crate::err::Error;
 
-impl<'a> Document<'a> {
+impl Document {
 	pub async fn changefeeds(
 		&self,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		opt: &Options,
 		_stm: &Statement<'_>,
 	) -> Result<(), Error> {
@@ -24,15 +24,17 @@ impl<'a> Document<'a> {
 		// Check if changefeeds are enabled
 		if let Some(cf) = db.as_ref().changefeed.as_ref().or(tb.as_ref().changefeed.as_ref()) {
 			// Create the changefeed entry
-			txn.lock().await.record_change(
-				opt.ns()?,
-				opt.db()?,
-				tb.name.as_str(),
-				self.id.unwrap(),
-				self.initial.doc.clone(),
-				self.current.doc.clone(),
-				cf.store_diff,
-			);
+			if let Some(id) = &self.id {
+				txn.lock().await.record_change(
+					opt.ns()?,
+					opt.db()?,
+					tb.name.as_str(),
+					id.as_ref(),
+					self.initial.doc.as_ref(),
+					&self.current.doc.as_ref(),
+					cf.store_diff,
+				);
+			}
 		}
 		// Carry on
 		Ok(())

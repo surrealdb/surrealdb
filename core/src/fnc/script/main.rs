@@ -22,7 +22,7 @@ use js::{Class, Ctx, Function, Module, Promise};
 /// # Safety
 /// Caller must ensure that the runtime from which `Ctx` originates cannot outlife 'a.
 pub unsafe fn create_query_data<'a>(
-	context: &'a Context<'a>,
+	context: &'a Context,
 	opt: &'a Options,
 	doc: Option<&'a CursorDoc<'a>>,
 	ctx: &Ctx<'_>,
@@ -47,9 +47,9 @@ pub unsafe fn create_query_data<'a>(
 }
 
 pub async fn run(
-	context: &Context<'_>,
+	context: &Context,
 	opt: &Options,
-	doc: Option<&CursorDoc<'_>>,
+	doc: Option<&CursorDoc>,
 	src: &str,
 	arg: Vec<Value>,
 ) -> Result<Value, Error> {

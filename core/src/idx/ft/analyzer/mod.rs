@@ -59,7 +59,7 @@ impl Analyzer {
 	pub(super) async fn extract_querying_terms(
 		&self,
 		stk: &mut Stk,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		opt: &Options,
 		t: &Terms,
 		content: String,
@@ -97,7 +97,7 @@ impl Analyzer {
 	pub(in crate::idx) async fn extract_indexing_terms(
 		&self,
 		stk: &mut Stk,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		opt: &Options,
 		t: &Terms,
 		content: Value,
@@ -128,7 +128,7 @@ impl Analyzer {
 	pub(super) async fn extract_terms_with_frequencies(
 		&self,
 		stk: &mut Stk,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		opt: &Options,
 		terms: &mut Terms,
 		field_content: Vec<Value>,
@@ -170,7 +170,7 @@ impl Analyzer {
 	pub(super) async fn extract_terms_with_frequencies_with_offsets(
 		&self,
 		stk: &mut Stk,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		opt: &Options,
 		terms: &mut Terms,
 		content: Vec<Value>,
@@ -213,7 +213,7 @@ impl Analyzer {
 	async fn analyze_content(
 		&self,
 		stk: &mut Stk,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		opt: &Options,
 		content: Vec<Value>,
 		stage: FilteringStage,
@@ -229,7 +229,7 @@ impl Analyzer {
 	async fn analyze_value(
 		&self,
 		stk: &mut Stk,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		opt: &Options,
 		val: Value,
 		stage: FilteringStage,
@@ -261,7 +261,7 @@ impl Analyzer {
 	async fn generate_tokens(
 		&self,
 		stk: &mut Stk,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		opt: &Options,
 		stage: FilteringStage,
 		mut input: String,
@@ -291,7 +291,7 @@ impl Analyzer {
 	pub(crate) async fn analyze(
 		&self,
 		stk: &mut Stk,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		opt: &Options,
 		input: String,
 	) -> Result<Value, Error> {
@@ -302,7 +302,7 @@ impl Analyzer {
 #[cfg(test)]
 mod tests {
 	use super::Analyzer;
-	use crate::ctx::Context;
+	use crate::ctx::MutableContext;
 	use crate::dbs::Options;
 	use crate::idx::ft::analyzer::filter::FilteringStage;
 	use crate::idx::ft::analyzer::tokenizer::{Token, Tokens};
@@ -316,7 +316,9 @@ mod tests {
 	async fn get_analyzer_tokens(def: &str, input: &str) -> Tokens {
 		let ds = Datastore::new("memory").await.unwrap();
 		let txn = ds.transaction(TransactionType::Read, LockType::Optimistic).await.unwrap();
-		let ctx = Context::default().with_transaction(Arc::new(txn));
+		let mut ctx = MutableContext::default();
+		ctx.set_transaction(Arc::new(txn));
+		let ctx = ctx.freeze();
 
 		let mut stmt = syn::parse(&format!("DEFINE {def}")).unwrap();
 		let Some(Statement::Define(DefineStatement::Analyzer(az))) = stmt.0 .0.pop() else {

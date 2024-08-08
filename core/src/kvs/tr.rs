@@ -14,7 +14,6 @@ use crate::sql::thing::Thing;
 use crate::sql::Value;
 use crate::vs::Versionstamp;
 use sql::statements::DefineTableStatement;
-use std::borrow::Cow;
 use std::fmt;
 use std::fmt::Debug;
 use std::ops::Range;
@@ -410,8 +409,8 @@ impl Transactor {
 		db: &str,
 		tb: &str,
 		id: &Thing,
-		previous: Cow<'_, Value>,
-		current: Cow<'_, Value>,
+		previous: &Value,
+		current: &Value,
 		store_difference: bool,
 	) {
 		self.cf.record_cf_change(ns, db, tb, id.clone(), previous, current, store_difference)

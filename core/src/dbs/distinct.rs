@@ -17,7 +17,7 @@ pub(crate) struct SyncDistinct {
 }
 
 impl SyncDistinct {
-	pub(super) fn new(ctx: &Context<'_>) -> Option<Self> {
+	pub(super) fn new(ctx: &Context) -> Option<Self> {
 		if let Some(pla) = ctx.get_query_planner() {
 			if pla.requires_distinct() {
 				return Some(Self::default());
@@ -48,7 +48,7 @@ pub(crate) struct AsyncDistinct {
 
 #[cfg(not(target_arch = "wasm32"))]
 impl AsyncDistinct {
-	pub(super) fn new(ctx: &Context<'_>) -> Option<Self> {
+	pub(super) fn new(ctx: &Context) -> Option<Self> {
 		if let Some(pla) = ctx.get_query_planner() {
 			if pla.requires_distinct() {
 				return Some(Self::default());

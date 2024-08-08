@@ -39,20 +39,23 @@ impl<'a> From<&'a Value> for Cow<'a, Value> {
 		Cow::Borrowed(v)
 	}
 }
+
+pub type Context = Arc<MutableContext>;
+
 #[non_exhaustive]
-pub struct Context<'a> {
+pub struct MutableContext {
 	// An optional parent context.
-	parent: Option<&'a Context<'a>>,
+	parent: Option<Context>,
 	// An optional deadline.
 	deadline: Option<Instant>,
 	// Whether or not this context is cancelled.
 	cancelled: Arc<AtomicBool>,
 	// A collection of read only values stored in this context.
-	values: HashMap<Cow<'static, str>, Cow<'a, Value>>,
+	values: HashMap<Cow<'static, str>, Arc<Value>>,
 	// Stores the notification channel if available
 	notifications: Option<Sender<Notification>>,
 	// An optional query planner
-	query_planner: Option<&'a QueryPlanner<'a>>,
+	query_planner: Option<Arc<QueryPlanner>>,
 	// An optional query executor
 	query_executor: Option<QueryExecutor>,
 	// An optional iteration stage
@@ -74,19 +77,21 @@ pub struct Context<'a> {
 	transaction: Option<Arc<Transaction>>,
 }
 
-impl<'a> Default for Context<'a> {
+impl Default for MutableContext {
 	fn default() -> Self {
-		Context::background()
+		MutableContext::background()
 	}
 }
 
-impl<'a> From<Transaction> for Context<'a> {
+impl From<Transaction> for MutableContext {
 	fn from(txn: Transaction) -> Self {
-		Context::background().with_transaction(Arc::new(txn))
+		let mut ctx = MutableContext::background();
+		ctx.set_transaction(Arc::new(txn));
+		ctx
 	}
 }
 
-impl<'a> Debug for Context<'a> {
+impl Debug for MutableContext {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		f.debug_struct("Context")
 			.field("parent", &self.parent)
@@ -97,7 +102,7 @@ impl<'a> Debug for Context<'a> {
 	}
 }
 
-impl<'a> Context<'a> {
+impl MutableContext {
 	pub(crate) fn from_ds(
 		time_out: Option<Duration>,
 		capabilities: Capabilities,
@@ -110,7 +115,7 @@ impl<'a> Context<'a> {
 			feature = "kv-tikv",
 		))]
 		temporary_directory: Option<Arc<PathBuf>>,
-	) -> Result<Context<'a>, Error> {
+	) -> Result<MutableContext, Error> {
 		let mut ctx = Self {
 			values: HashMap::default(),
 			parent: None,
@@ -163,14 +168,13 @@ impl<'a> Context<'a> {
 	}
 
 	/// Create a new child from a frozen context.
-	pub fn new(parent: &'a Context) -> Self {
-		Context {
+	pub fn new(parent: &Context) -> Self {
+		MutableContext {
 			values: HashMap::default(),
-			parent: Some(parent),
 			deadline: parent.deadline,
 			cancelled: Arc::new(AtomicBool::new(false)),
 			notifications: parent.notifications.clone(),
-			query_planner: parent.query_planner,
+			query_planner: parent.query_planner.clone(),
 			query_executor: parent.query_executor.clone(),
 			iteration_stage: parent.iteration_stage.clone(),
 			capabilities: parent.capabilities.clone(),
@@ -184,17 +188,27 @@ impl<'a> Context<'a> {
 			))]
 			temporary_directory: parent.temporary_directory.clone(),
 			transaction: parent.transaction.clone(),
+			parent: Some(parent.clone()),
+		}
+	}
+	pub(crate) fn freeze(self) -> Context {
+		Arc::new(self)
+	}
+
+	pub(crate) fn unfreeze(ctx: Context) -> Result<MutableContext, Error> {
+		match Arc::try_unwrap(ctx) {
+			Ok(inner) => Ok(inner),
+			Err(_) => Err(Error::Unreachable("Context::unfreeze")),
 		}
 	}
 
 	/// Add a value to the context. It overwrites any previously set values
 	/// with the same key.
-	pub fn add_value<K, V>(&mut self, key: K, value: V)
+	pub fn add_value<K>(&mut self, key: K, value: Arc<Value>)
 	where
 		K: Into<Cow<'static, str>>,
-		V: Into<Cow<'a, Value>>,
 	{
-		self.values.insert(key.into(), value.into());
+		self.values.insert(key.into(), value);
 	}
 
 	/// Add cancellation to the context. The value that is returned will cancel
@@ -232,8 +246,8 @@ impl<'a> Context<'a> {
 		self.notifications = chn.cloned()
 	}
 
-	pub(crate) fn set_query_planner(&mut self, qp: &'a QueryPlanner) {
-		self.query_planner = Some(qp);
+	pub(crate) fn set_query_planner(&mut self, qp: QueryPlanner) {
+		self.query_planner = Some(Arc::new(qp));
 	}
 
 	pub(crate) fn set_query_executor(&mut self, qe: QueryExecutor) {
@@ -246,11 +260,6 @@ impl<'a> Context<'a> {
 
 	pub(crate) fn set_transaction(&mut self, txn: Arc<Transaction>) {
 		self.transaction = Some(txn);
-	}
-
-	pub(crate) fn with_transaction(mut self, txn: Arc<Transaction>) -> Self {
-		self.transaction = Some(txn);
-		self
 	}
 
 	pub(crate) fn tx(&self) -> Arc<Transaction> {
@@ -270,7 +279,7 @@ impl<'a> Context<'a> {
 	}
 
 	pub(crate) fn get_query_planner(&self) -> Option<&QueryPlanner> {
-		self.query_planner
+		self.query_planner.as_ref().map(|qp| qp.as_ref())
 	}
 
 	pub(crate) fn get_query_executor(&self) -> Option<&QueryExecutor> {
@@ -292,7 +301,7 @@ impl<'a> Context<'a> {
 		match self.deadline {
 			Some(deadline) if deadline <= Instant::now() => Some(Reason::Timedout),
 			_ if self.cancelled.load(Ordering::Relaxed) => Some(Reason::Canceled),
-			_ => match self.parent {
+			_ => match &self.parent {
 				Some(ctx) => ctx.done(),
 				_ => None,
 			},
@@ -330,11 +339,8 @@ impl<'a> Context<'a> {
 	/// provided key, then this will return None.
 	pub fn value(&self, key: &str) -> Option<&Value> {
 		match self.values.get(key) {
-			Some(v) => match v {
-				Cow::Borrowed(v) => Some(*v),
-				Cow::Owned(v) => Some(v),
-			},
-			None => match self.parent {
+			Some(v) => Some(v.as_ref()),
+			None => match &self.parent {
 				Some(p) => p.value(key),
 				_ => None,
 			},
@@ -346,7 +352,7 @@ impl<'a> Context<'a> {
 	pub fn cancellation(&self) -> crate::ctx::cancellation::Cancellation {
 		crate::ctx::cancellation::Cancellation::new(
 			self.deadline,
-			std::iter::successors(Some(self), |ctx| ctx.parent)
+			std::iter::successors(Some(self), |ctx| *ctx.parent)
 				.map(|ctx| ctx.cancelled.clone())
 				.collect(),
 		)
