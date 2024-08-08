@@ -1187,6 +1187,7 @@ impl Value {
 			Self::Strand(_) => "string",
 			Self::Duration(_) => "duration",
 			Self::Datetime(_) => "datetime",
+			Self::Closure(_) => "function",
 			Self::Number(Number::Int(_)) => "int",
 			Self::Number(Number::Float(_)) => "float",
 			Self::Number(Number::Decimal(_)) => "decimal",
@@ -1224,7 +1225,7 @@ impl Value {
 			Kind::Point => self.coerce_to_point().map(Value::from),
 			Kind::Bytes => self.coerce_to_bytes().map(Value::from),
 			Kind::Uuid => self.coerce_to_uuid().map(Value::from),
-			Kind::Closure => self.coerce_to_closure().map(Value::from),
+			Kind::Function(_, _) => self.coerce_to_function().map(Value::from),
 			Kind::Set(t, l) => match l {
 				Some(l) => self.coerce_to_set_type_len(t, l).map(Value::from),
 				None => self.coerce_to_set_type(t).map(Value::from),
@@ -1541,14 +1542,14 @@ impl Value {
 	}
 
 	/// Try to coerce this value to a `Closure`
-	pub(crate) fn coerce_to_closure(self) -> Result<Closure, Error> {
+	pub(crate) fn coerce_to_function(self) -> Result<Closure, Error> {
 		match self {
 			// Closures are allowed
 			Value::Closure(v) => Ok(*v),
 			// Anything else raises an error
 			_ => Err(Error::CoerceTo {
 				from: self,
-				into: "closure".into(),
+				into: "function".into(),
 			}),
 		}
 	}
@@ -1793,7 +1794,7 @@ impl Value {
 			Kind::Point => self.convert_to_point().map(Value::from),
 			Kind::Bytes => self.convert_to_bytes().map(Value::from),
 			Kind::Uuid => self.convert_to_uuid().map(Value::from),
-			Kind::Closure => self.convert_to_closure().map(Value::from),
+			Kind::Function(_, _) => self.convert_to_function().map(Value::from),
 			Kind::Set(t, l) => match l {
 				Some(l) => self.convert_to_set_type_len(t, l).map(Value::from),
 				None => self.convert_to_set_type(t).map(Value::from),
@@ -2090,15 +2091,14 @@ impl Value {
 	}
 
 	/// Try to convert this value to a `Closure`
-	pub(crate) fn convert_to_closure(self) -> Result<Closure, Error> {
+	pub(crate) fn convert_to_function(self) -> Result<Closure, Error> {
 		match self {
 			// Closures are allowed
 			Value::Closure(v) => Ok(*v),
 			// Anything else converts to a closure with self as the body
-			_ => Ok(Closure {
-				body: self,
-				args: vec![],
-				returns: None,
+			_ => Err(Error::ConvertTo {
+				from: self,
+				into: "function".into(),
 			}),
 		}
 	}

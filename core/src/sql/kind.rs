@@ -29,7 +29,7 @@ pub enum Kind {
 	Either(Vec<Kind>),
 	Set(Box<Kind>, Option<u64>),
 	Array(Box<Kind>, Option<u64>),
-	Closure,
+	Function(Option<Box<Vec<Kind>>>, Option<Box<Kind>>),
 }
 
 impl Default for Kind {
@@ -73,7 +73,7 @@ impl Kind {
 				| Kind::Uuid
 				| Kind::Record(_)
 				| Kind::Geometry(_)
-				| Kind::Closure => return None,
+				| Kind::Function(_, _) => return None,
 				Kind::Option(x) => {
 					this = x;
 				}
@@ -116,7 +116,7 @@ impl Display for Kind {
 			Kind::Point => f.write_str("point"),
 			Kind::String => f.write_str("string"),
 			Kind::Uuid => f.write_str("uuid"),
-			Kind::Closure => f.write_str("closure"),
+			Kind::Function(_, _) => f.write_str("function"),
 			Kind::Option(k) => write!(f, "option<{}>", k),
 			Kind::Record(k) => match k {
 				k if k.is_empty() => write!(f, "record"),
