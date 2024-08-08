@@ -1,10 +1,7 @@
-mod parse;
-use parse::Parse;
 mod helpers;
-use helpers::{new_ds, Test};
-use surrealdb::dbs::Session;
+mod parse;
+use helpers::Test;
 use surrealdb::err::Error;
-use surrealdb::sql::Value;
 
 #[tokio::test]
 async fn define_global_param() -> Result<(), Error> {
