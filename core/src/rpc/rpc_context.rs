@@ -629,6 +629,8 @@ pub trait RpcContext {
 
 	#[cfg(not(target_arch = "wasm32"))]
 	async fn graphql(&self, params: Array) -> Result<impl Into<Data>, RpcError> {
+		use serde::Serialize;
+
 		use crate::gql;
 
 		if !Self::GQL_SUPPORT {
@@ -711,10 +713,16 @@ pub trait RpcContext {
 		let res = schema.execute(req).await;
 
 		let out = match pretty {
-			true => serde_json::to_string_pretty(&res),
-			false => serde_json::to_string(&res),
+			true => {
+				let mut buf = Vec::new();
+				let formatter = serde_json::ser::PrettyFormatter::with_indent(b"    ");
+				let mut ser = serde_json::Serializer::with_formatter(&mut buf, formatter);
+
+				res.serialize(&mut ser).ok().and_then(|_| String::from_utf8(buf).ok())
+			}
+			false => serde_json::to_string(&res).ok(),
 		}
-		.map_err(|_| RpcError::Thrown("Serialization Error".to_string()))?;
+		.ok_or(RpcError::Thrown("Serialization Error".to_string()))?;
 
 		Ok(Value::Strand(out.into()))
 	}
