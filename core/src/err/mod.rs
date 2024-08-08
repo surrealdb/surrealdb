@@ -588,6 +588,14 @@ pub enum Error {
 		check: String,
 	},
 
+	/// The specified value did not conform to the LET type check
+	#[error("Found {value} for param ${name}, but expected a {check}")]
+	SetCheck {
+		value: String,
+		name: String,
+		check: String,
+	},
+
 	/// The specified field did not conform to the field ASSERT clause
 	#[error(
 		"Found changed value for field `{field}`, with record `{thing}`, but field is readonly"

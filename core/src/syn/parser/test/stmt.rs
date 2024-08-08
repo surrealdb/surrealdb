@@ -1885,7 +1885,8 @@ fn parse_let() {
 		res,
 		Statement::Set(SetStatement {
 			name: "param".to_owned(),
-			what: Value::Number(Number::Int(1))
+			what: Value::Number(Number::Int(1)),
+			kind: None,
 		})
 	);
 
@@ -1894,7 +1895,8 @@ fn parse_let() {
 		res,
 		Statement::Set(SetStatement {
 			name: "param".to_owned(),
-			what: Value::Number(Number::Int(1))
+			what: Value::Number(Number::Int(1)),
+			kind: None,
 		})
 	);
 }
