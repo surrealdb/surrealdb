@@ -138,6 +138,7 @@ impl<'a> Lexer<'a> {
 			b'(' => t!("("),
 			b';' => t!(";"),
 			b',' => t!(","),
+			b'~' => t!("~"),
 			b'@' => t!("@"),
 			byte::CR | byte::FF | byte::LF | byte::SP | byte::VT | byte::TAB => {
 				self.eat_whitespace();

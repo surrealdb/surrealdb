@@ -12,15 +12,14 @@ use crate::rpc::RpcState;
 use axum::extract::State;
 use axum::routing::get;
 use axum::routing::post;
-use axum::TypedHeader;
 use axum::{
 	extract::ws::{WebSocket, WebSocketUpgrade},
 	response::IntoResponse,
 	Extension, Router,
 };
+use axum_extra::TypedHeader;
 use bytes::Bytes;
 use http::HeaderValue;
-use http_body::Body as HttpBody;
 use surrealdb::dbs::Session;
 use surrealdb::kvs::Datastore;
 use surrealdb::rpc::format::Format;
@@ -35,12 +34,7 @@ use super::AppState;
 
 use surrealdb::rpc::rpc_context::RpcContext;
 
-pub(super) fn router<B>() -> Router<Arc<RpcState>, B>
-where
-	B: HttpBody + Send + 'static,
-	B::Data: Send,
-	B::Error: std::error::Error + Send + Sync + 'static,
-{
+pub(super) fn router() -> Router<Arc<RpcState>> {
 	Router::new().route("/rpc", get(get_handler)).route("/rpc", post(post_handler))
 }
 

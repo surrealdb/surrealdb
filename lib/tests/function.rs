@@ -1036,6 +1036,28 @@ async fn function_array_union() -> Result<(), Error> {
 	Ok(())
 }
 
+#[tokio::test]
+async fn function_array_windows() -> Result<(), Error> {
+	let sql = r#"
+		RETURN array::windows([0, 1, 2, 3], 2);
+		RETURN array::windows([0, 1, 2], 2);
+		RETURN array::windows([0, 1, 2], 3);
+		RETURN array::windows([0, 1, 2, 3, 4, 5], 3);
+		RETURN array::windows([0, 1, 2], 4);
+		RETURN array::windows([0, 1, 2], 0);
+	"#;
+	let error = "Incorrect arguments for function array::windows(). The second argument must be an integer greater than 0";
+	Test::new(sql)
+		.await?
+		.expect_val("[[0, 1], [1, 2], [2, 3]]")?
+		.expect_val("[[0, 1], [1, 2]]")?
+		.expect_val("[[0, 1, 2]]")?
+		.expect_val("[[0, 1, 2], [1, 2, 3], [2, 3, 4], [3, 4, 5]]")?
+		.expect_val("[]")?
+		.expect_error(error)?;
+	Ok(())
+}
+
 // --------------------------------------------------
 // bytes
 // --------------------------------------------------
@@ -3648,8 +3670,27 @@ async fn function_parse_is_url() -> Result<(), Error> {
 #[tokio::test]
 async fn function_parse_is_uuid() -> Result<(), Error> {
 	let sql = r#"
-		RETURN string::is::uuid(u"e72bee20-f49b-11ec-b939-0242ac120002");
+		RETURN string::is::uuid("e72bee20-f49b-11ec-b939-0242ac120002");
 		RETURN string::is::uuid("this is a test!");
+	"#;
+	let mut test = Test::new(sql).await?;
+	//
+	let tmp = test.next()?.result?;
+	let val = Value::Bool(true);
+	assert_eq!(tmp, val);
+	//
+	let tmp = test.next()?.result?;
+	let val = Value::Bool(false);
+	assert_eq!(tmp, val);
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn function_parse_is_record() -> Result<(), Error> {
+	let sql = r#"
+		RETURN string::is::record("test:123");
+		RETURN string::is::record("invalid record id!");
 	"#;
 	let mut test = Test::new(sql).await?;
 	//

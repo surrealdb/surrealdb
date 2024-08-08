@@ -171,6 +171,7 @@ pub(crate) static KEYWORDS: phf::Map<UniCase<&'static str>, TokenKind> = phf_map
 	UniCase::ascii("OPTION") => TokenKind::Keyword(Keyword::Option),
 	UniCase::ascii("ORDER") => TokenKind::Keyword(Keyword::Order),
 	UniCase::ascii("ORIGINAL") => TokenKind::Keyword(Keyword::Original),
+	UniCase::ascii("OVERWRITE") => TokenKind::Keyword(Keyword::Overwrite),
 	UniCase::ascii("PARALLEL") => TokenKind::Keyword(Keyword::Parallel),
 	UniCase::ascii("PARAM") => TokenKind::Keyword(Keyword::Param),
 	UniCase::ascii("PASSHASH") => TokenKind::Keyword(Keyword::Passhash),

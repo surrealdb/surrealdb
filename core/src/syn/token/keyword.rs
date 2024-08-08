@@ -130,6 +130,7 @@ keyword! {
 	Option => "OPTION",
 	Order => "ORDER",
 	Original => "ORIGINAL",
+	Overwrite => "OVERWRITE",
 	Parallel => "PARALLEL",
 	Param => "PARAM",
 	Passhash => "PASSHASH",
