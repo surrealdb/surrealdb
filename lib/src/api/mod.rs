@@ -6,10 +6,10 @@ pub mod err;
 pub mod headers;
 pub mod method;
 pub mod opt;
+pub mod value;
 
 mod conn;
 
-pub use method::query::Response;
 use method::BoxFuture;
 use semver::Version;
 use tokio::sync::watch;
@@ -28,6 +28,8 @@ use std::sync::OnceLock;
 
 use self::opt::EndpointKind;
 use self::opt::WaitFor;
+
+pub use method::query::Response;
 
 /// A specialized `Result` type
 pub type Result<T> = std::result::Result<T, crate::Error>;

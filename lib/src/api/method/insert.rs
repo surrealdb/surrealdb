@@ -6,11 +6,9 @@ use crate::api::opt::Resource;
 use crate::api::Connection;
 use crate::api::Result;
 use crate::method::OnceLockExt;
-use crate::sql::Ident;
-use crate::sql::Part;
-use crate::sql::Table;
-use crate::sql::Value;
+use crate::value::Serializer;
 use crate::Surreal;
+use crate::{Object, Value};
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 use std::borrow::Cow;
@@ -49,19 +47,24 @@ macro_rules! into_future {
 			} = self;
 			Box::pin(async move {
 				let (table, data) = match resource? {
-					Resource::Table(table) => (table.into(), Value::Object(Default::default())),
+					Resource::Table(table) => (table.into(), Object::new()),
 					Resource::RecordId(record_id) => {
-						let mut table = Table::default();
-						table.0 = record_id.tb.clone();
-						(table.into(), map! { String::from("id") => record_id.into() }.into())
+						let mut map = Object::new();
+						map.insert("id".to_string(), record_id.key);
+						(record_id.table, map)
 					}
-					Resource::Object(obj) => return Err(Error::InsertOnObject(obj).into()),
-					Resource::Array(arr) => return Err(Error::InsertOnArray(arr).into()),
-					Resource::Edges(edges) => return Err(Error::InsertOnEdges(edges).into()),
+					Resource::Object(_) => return Err(Error::InsertOnObject.into()),
+					Resource::Array(_) => return Err(Error::InsertOnArray.into()),
+					Resource::Edge {
+						..
+					} => return Err(Error::InsertOnEdges.into()),
+					Resource::Range {
+						..
+					} => return Err(Error::InsertOnRange.into()),
 				};
 				let cmd = Command::Insert {
-					what: Some(table),
-					data,
+					what: table.to_string(),
+					data: data.into(),
 				};
 
 				let router = client.router.extract()?;
@@ -114,10 +117,10 @@ where
 		D: Serialize,
 	{
 		Content::from_closure(self.client, || {
-			let mut data = crate::sql::to_value(data)?;
+			let mut data = data.serialize(Serializer)?;
 			match self.resource? {
 				Resource::Table(table) => Ok(Command::Insert {
-					what: Some(table.into()),
+					what: table,
 					data,
 				}),
 				Resource::RecordId(thing) => {
@@ -127,22 +130,21 @@ where
 						)
 						.into())
 					} else {
-						let mut table = Table::default();
-						table.0.clone_from(&thing.tb);
-						let what = Value::Table(table);
-						let mut ident = Ident::default();
-						"id".clone_into(&mut ident.0);
-						let id = Part::Field(ident);
-						data.put(&[id], thing.into());
+						let what = thing.table;
+						if let Value::Object(ref mut x) = data {
+							x.insert("id".to_string(), thing.key);
+						}
+
 						Ok(Command::Insert {
-							what: Some(what),
+							what,
 							data,
 						})
 					}
 				}
-				Resource::Object(obj) => Err(Error::InsertOnObject(obj).into()),
-				Resource::Array(arr) => Err(Error::InsertOnArray(arr).into()),
-				Resource::Edges(edges) => Err(Error::InsertOnEdges(edges).into()),
+				Resource::Object(_) => Err(Error::InsertOnObject.into()),
+				Resource::Array(_) => Err(Error::InsertOnArray.into()),
+				Resource::Edge(_) => Err(Error::InsertOnEdges.into()),
+				Resource::Range(_) => Err(Error::InsertOnRange.into()),
 			}
 		})
 	}

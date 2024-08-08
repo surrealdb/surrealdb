@@ -21,9 +21,11 @@ pub enum SizedClock {
 }
 
 impl SizedClock {
+	#[allow(dead_code)] // not used when non of the storage backends are enabled.
 	pub(crate) fn system() -> Self {
 		Self::System(Default::default())
 	}
+
 	pub async fn now(&self) -> Timestamp {
 		match self {
 			SizedClock::System(c) => c.now(),

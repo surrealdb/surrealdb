@@ -1,3 +1,4 @@
+#[allow(unused_imports)] // not used when non of the storage backends are enabled.
 use super::api::Transaction;
 use super::Key;
 use super::Val;
@@ -110,7 +111,7 @@ impl fmt::Display for Transactor {
 }
 
 macro_rules! expand_inner {
-	( $v:expr, $arm:pat_param => $b:block ) => {
+	( $v:expr, $arm:pat_param => $b:block $(else $else:block )? ) => {
 		match $v {
 			#[cfg(feature = "kv-mem")]
 			Inner::Mem($arm) => $b,
@@ -125,7 +126,22 @@ macro_rules! expand_inner {
 			#[cfg(feature = "kv-surrealkv")]
 			Inner::SurrealKV($arm) => $b,
 			#[allow(unreachable_patterns)]
-			_ => unreachable!(),
+			_ => {
+				$(
+					#[cfg(not(any(
+						feature = "kv-mem",
+						feature = "kv-rocksdb",
+						feature = "kv-indxdb",
+						feature = "kv-tikv",
+						feature = "kv-fdb",
+						feature = "kv-surrealkv"
+					)))]
+					{
+						$else
+					}
+				)*
+				unreachable!();
+			}
 		}
 	};
 }
@@ -145,7 +161,7 @@ impl Transactor {
 	/// production we should only log a warning.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
 	pub(crate) fn check_level(&mut self, check: Check) {
-		expand_inner!(&mut self.inner, v => { v.check_level(check) })
+		expand_inner!(&mut self.inner, v => { v.check_level(check) } else { let _ = check; })
 	}
 
 	/// Check if transaction is finished.
@@ -350,7 +366,7 @@ impl Transactor {
 	{
 		let beg: Key = rng.start.into();
 		let end: Key = rng.end.into();
-		expand_inner!(&mut self.inner, v => { v.batch(beg..end, batch, values).await })
+		expand_inner!(&mut self.inner, v => { v.batch(beg..end, batch, values).await } else { let _ = values;  })
 	}
 
 	/// Obtain a new change timestamp for a key

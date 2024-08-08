@@ -1,10 +1,4 @@
 //! HTTP engine
-
-#[cfg(not(target_arch = "wasm32"))]
-pub(crate) mod native;
-#[cfg(target_arch = "wasm32")]
-pub(crate) mod wasm;
-
 use crate::api::conn::Command;
 use crate::api::conn::DbResponse;
 use crate::api::conn::RequestData;
@@ -15,17 +9,18 @@ use crate::api::Connect;
 use crate::api::Response as QueryResponse;
 use crate::api::Result;
 use crate::api::Surreal;
-use crate::dbs::Status;
-use crate::engine::value_to_values;
+use crate::engine::resource_to_values;
 use crate::headers::AUTH_DB;
 use crate::headers::AUTH_NS;
 use crate::headers::DB;
 use crate::headers::NS;
 use crate::method::Stats;
 use crate::opt::IntoEndpoint;
-use crate::sql::from_value;
-use crate::sql::serde::deserialize;
-use crate::sql::Value;
+use crate::opt::Resource;
+use crate::opt::Table;
+use crate::value::ToCore;
+use crate::Value;
+#[cfg(not(target_arch = "wasm32"))]
 use futures::TryStreamExt;
 use indexmap::IndexMap;
 use reqwest::header::HeaderMap;
@@ -36,15 +31,17 @@ use serde::Deserialize;
 use serde::Serialize;
 use std::marker::PhantomData;
 use std::mem;
-use surrealdb_core::sql::statements::CreateStatement;
-use surrealdb_core::sql::statements::DeleteStatement;
-use surrealdb_core::sql::statements::InsertStatement;
-use surrealdb_core::sql::statements::SelectStatement;
-use surrealdb_core::sql::statements::UpdateStatement;
-use surrealdb_core::sql::statements::UpsertStatement;
-use surrealdb_core::sql::Data;
-use surrealdb_core::sql::Field;
-use surrealdb_core::sql::Output;
+use surrealdb_core::{
+	dbs::Status,
+	sql::{
+		serde::deserialize,
+		statements::{
+			CreateStatement, DeleteStatement, InsertStatement, SelectStatement, UpdateStatement,
+			UpsertStatement,
+		},
+		Data, Field, Output, Value as CoreValue,
+	},
+};
 use url::Url;
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -59,6 +56,11 @@ use tokio::io;
 use tokio_util::compat::FuturesAsyncReadCompatExt;
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen_futures::spawn_local;
+
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) mod native;
+#[cfg(target_arch = "wasm32")]
+pub(crate) mod wasm;
 
 const SQL_PATH: &str = "sql";
 
@@ -157,7 +159,7 @@ impl Authenticate for RequestBuilder {
 	}
 }
 
-type HttpQueryResponse = (String, Status, Value);
+type HttpQueryResponse = (String, Status, CoreValue);
 
 #[derive(Debug, Serialize, Deserialize)]
 struct Credentials {
@@ -200,9 +202,11 @@ async fn query(request: RequestBuilder) -> Result<QueryResponse> {
 		let stats = Stats {
 			execution_time: duration_from_str(&execution_time),
 		};
+
 		match status {
 			Status::Ok => {
-				map.insert(index, (stats, Ok(value)));
+				let v = Value::from_core(value).ok_or(crate::api::Error::RecievedInvalidValue)?;
+				map.insert(index, (stats, Ok(v)));
 			}
 			Status::Err => {
 				map.insert(index, (stats, Err(Error::Query(value.as_raw_string()).into())));
@@ -223,11 +227,11 @@ async fn take(one: bool, request: RequestBuilder) -> Result<Value> {
 		match one {
 			true => match value {
 				Value::Array(mut vec) => {
-					if let [value] = &mut vec.0[..] {
+					if let [value] = &mut vec[..] {
 						return Ok(mem::take(value));
 					}
 				}
-				Value::None | Value::Null => {}
+				Value::None => {}
 				value => return Ok(value),
 			},
 			false => return Ok(value),
@@ -340,17 +344,14 @@ pub(crate) async fn health(request: RequestBuilder) -> Result<Value> {
 }
 
 async fn router(
-	RequestData {
-		command,
-		..
-	}: RequestData,
+	req: RequestData,
 	base_url: &Url,
 	client: &reqwest::Client,
 	headers: &mut HeaderMap,
 	vars: &mut IndexMap<String, String>,
 	auth: &mut Option<Auth>,
 ) -> Result<DbResponse> {
-	match command {
+	match req.command {
 		Command::Use {
 			namespace,
 			database,
@@ -395,15 +396,18 @@ async fn router(
 			credentials,
 		} => {
 			let path = base_url.join("signin")?;
-			let request =
-				client.post(path).headers(headers.clone()).auth(auth).body(credentials.to_string());
+			let request = client
+				.post(path)
+				.headers(headers.clone())
+				.auth(auth)
+				.body(credentials.as_core().to_string());
 			let value = submit_auth(request).await?;
 			if let Ok(Credentials {
 				user,
 				pass,
 				ns,
 				db,
-			}) = from_value(credentials.into())
+			}) = Deserialize::deserialize(Value::from(credentials))
 			{
 				*auth = Some(Auth::Basic {
 					user,
@@ -413,7 +417,7 @@ async fn router(
 				});
 			} else {
 				*auth = Some(Auth::Bearer {
-					token: value.to_raw_string(),
+					token: value.as_core().to_raw_string(),
 				});
 			}
 			Ok(DbResponse::Other(value))
@@ -422,8 +426,11 @@ async fn router(
 			credentials,
 		} => {
 			let path = base_url.join("signup")?;
-			let request =
-				client.post(path).headers(headers.clone()).auth(auth).body(credentials.to_string());
+			let request = client
+				.post(path)
+				.headers(headers.clone())
+				.auth(auth)
+				.body(credentials.to_core().to_string());
 			let value = submit_auth(request).await?;
 			Ok(DbResponse::Other(value))
 		}
@@ -450,8 +457,8 @@ async fn router(
 			let path = base_url.join(SQL_PATH)?;
 			let statement = {
 				let mut stmt = CreateStatement::default();
-				stmt.what = value_to_values(what);
-				stmt.data = data.map(Data::ContentExpression);
+				stmt.what = resource_to_values(what);
+				stmt.data = data.map(ToCore::to_core).map(Data::ContentExpression);
 				stmt.output = Some(Output::After);
 				stmt
 			};
@@ -465,11 +472,11 @@ async fn router(
 			data,
 		} => {
 			let path = base_url.join(SQL_PATH)?;
-			let one = what.is_thing();
+			let one = matches!(what, Resource::RecordId(_));
 			let statement = {
 				let mut stmt = UpsertStatement::default();
-				stmt.what = value_to_values(what);
-				stmt.data = data.map(Data::ContentExpression);
+				stmt.what = resource_to_values(what);
+				stmt.data = data.map(ToCore::to_core).map(Data::ContentExpression);
 				stmt.output = Some(Output::After);
 				stmt
 			};
@@ -483,11 +490,11 @@ async fn router(
 			data,
 		} => {
 			let path = base_url.join(SQL_PATH)?;
-			let one = what.is_thing();
+			let one = matches!(what, Resource::RecordId(_));
 			let statement = {
 				let mut stmt = UpdateStatement::default();
-				stmt.what = value_to_values(what);
-				stmt.data = data.map(Data::ContentExpression);
+				stmt.what = resource_to_values(what);
+				stmt.data = data.map(ToCore::to_core).map(Data::ContentExpression);
 				stmt.output = Some(Output::After);
 				stmt
 			};
@@ -504,8 +511,8 @@ async fn router(
 			let one = !data.is_array();
 			let statement = {
 				let mut stmt = InsertStatement::default();
-				stmt.into = what;
-				stmt.data = Data::SingleExpression(data);
+				stmt.into = Some(Table(what).into_core().into());
+				stmt.data = Data::SingleExpression(data.to_core());
 				stmt.output = Some(Output::After);
 				stmt
 			};
@@ -519,11 +526,11 @@ async fn router(
 			data,
 		} => {
 			let path = base_url.join(SQL_PATH)?;
-			let one = what.is_thing();
+			let one = matches!(what, Resource::RecordId(_));
 			let statement = {
 				let mut stmt = UpdateStatement::default();
-				stmt.what = value_to_values(what);
-				stmt.data = data.map(Data::PatchExpression);
+				stmt.what = resource_to_values(what);
+				stmt.data = data.map(ToCore::to_core).map(Data::PatchExpression);
 				stmt.output = Some(Output::After);
 				stmt
 			};
@@ -537,11 +544,11 @@ async fn router(
 			data,
 		} => {
 			let path = base_url.join(SQL_PATH)?;
-			let one = what.is_thing();
+			let one = matches!(what, Resource::RecordId(_));
 			let statement = {
 				let mut stmt = UpdateStatement::default();
-				stmt.what = value_to_values(what);
-				stmt.data = data.map(Data::MergeExpression);
+				stmt.what = resource_to_values(what);
+				stmt.data = data.map(ToCore::to_core).map(Data::MergeExpression);
 				stmt.output = Some(Output::After);
 				stmt
 			};
@@ -554,10 +561,10 @@ async fn router(
 			what,
 		} => {
 			let path = base_url.join(SQL_PATH)?;
-			let one = what.is_thing();
+			let one = matches!(what, Resource::RecordId(_));
 			let statement = {
 				let mut stmt = SelectStatement::default();
-				stmt.what = value_to_values(what);
+				stmt.what = resource_to_values(what);
 				stmt.expr.0 = vec![Field::All];
 				stmt
 			};
@@ -569,11 +576,11 @@ async fn router(
 		Command::Delete {
 			what,
 		} => {
-			let one = what.is_thing();
+			let one = matches!(what, Resource::RecordId(_));
 			let path = base_url.join(SQL_PATH)?;
 			let (one, statement) = {
 				let mut stmt = DeleteStatement::default();
-				stmt.what = value_to_values(what);
+				stmt.what = resource_to_values(what);
 				stmt.output = Some(Output::Before);
 				(one, stmt)
 			};
@@ -588,8 +595,7 @@ async fn router(
 		} => {
 			let path = base_url.join(SQL_PATH)?;
 			let mut request = client.post(path).headers(headers.clone()).query(&vars).auth(auth);
-			let bindings: Vec<_> =
-				variables.iter().map(|(key, value)| (key, value.to_string())).collect();
+			let bindings = variables.to_core();
 			request = request.query(&bindings).body(q.to_string());
 			let values = query(request).await?;
 			Ok(DbResponse::Query(values))
@@ -708,7 +714,7 @@ async fn router(
 			value,
 		} => {
 			let path = base_url.join(SQL_PATH)?;
-			let value = value.to_string();
+			let value = value.to_core().to_string();
 			let request = client
 				.post(path)
 				.headers(headers.clone())

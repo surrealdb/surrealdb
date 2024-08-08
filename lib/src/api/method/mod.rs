@@ -12,8 +12,7 @@ use crate::api::OnceLockExt;
 use crate::api::Surreal;
 use crate::opt::IntoExportDestination;
 use crate::opt::WaitFor;
-use crate::sql::to_value;
-use crate::sql::Value;
+use crate::Value;
 use serde::Serialize;
 use std::borrow::Cow;
 use std::marker::PhantomData;
@@ -88,6 +87,9 @@ pub use upsert::Upsert;
 pub use use_db::UseDb;
 pub use use_ns::UseNs;
 pub use version::Version;
+
+use super::opt::IntoResource;
+use super::value::Serializer;
 
 /// A alias for an often used type of future returned by async methods in this library.
 pub(crate) type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + Sync + 'a>>;
@@ -326,7 +328,7 @@ where
 		Set {
 			client: Cow::Borrowed(self),
 			key: key.into(),
-			value: to_value(value).map_err(Into::into),
+			value: value.serialize(Serializer).map_err(Into::into),
 		}
 	}
 
@@ -424,7 +426,7 @@ where
 	pub fn signup<R>(&self, credentials: impl Credentials<auth::Signup, R>) -> Signup<C, R> {
 		Signup {
 			client: Cow::Borrowed(self),
-			credentials: to_value(credentials).map_err(Into::into).and_then(|x| {
+			credentials: credentials.serialize(Serializer).map_err(Into::into).and_then(|x| {
 				if let Value::Object(x) = x {
 					Ok(x)
 				} else {
@@ -552,7 +554,7 @@ where
 	pub fn signin<R>(&self, credentials: impl Credentials<auth::Signin, R>) -> Signin<C, R> {
 		Signin {
 			client: Cow::Borrowed(self),
-			credentials: to_value(credentials).map_err(Into::into).and_then(|x| {
+			credentials: credentials.serialize(Serializer).map_err(Into::into).and_then(|x| {
 				if let Value::Object(x) = x {
 					Ok(x)
 				} else {
@@ -707,11 +709,10 @@ where
 	/// # Ok(())
 	/// # }
 	/// ```
-	pub fn select<R>(&self, resource: impl opt::IntoResource<R>) -> Select<C, R> {
+	pub fn select<O>(&self, resource: impl IntoResource<O>) -> Select<C, O> {
 		Select {
 			client: Cow::Borrowed(self),
 			resource: resource.into_resource(),
-			range: None,
 			response_type: PhantomData,
 			query_type: PhantomData,
 		}
@@ -763,7 +764,7 @@ where
 	/// # Ok(())
 	/// # }
 	/// ```
-	pub fn create<R>(&self, resource: impl opt::IntoResource<R>) -> Create<C, R> {
+	pub fn create<R>(&self, resource: impl IntoResource<R>) -> Create<C, R> {
 		Create {
 			client: Cow::Borrowed(self),
 			resource: resource.into_resource(),
@@ -864,7 +865,7 @@ where
 	/// # Ok(())
 	/// # }
 	/// ```
-	pub fn insert<R>(&self, resource: impl opt::IntoResource<R>) -> Insert<C, R> {
+	pub fn insert<O>(&self, resource: impl IntoResource<O>) -> Insert<C, O> {
 		Insert {
 			client: Cow::Borrowed(self),
 			resource: resource.into_resource(),
@@ -1022,11 +1023,10 @@ where
 	/// # Ok(())
 	/// # }
 	/// ```
-	pub fn upsert<R>(&self, resource: impl opt::IntoResource<R>) -> Upsert<C, R> {
+	pub fn upsert<O>(&self, resource: impl IntoResource<O>) -> Upsert<C, O> {
 		Upsert {
 			client: Cow::Borrowed(self),
 			resource: resource.into_resource(),
-			range: None,
 			response_type: PhantomData,
 		}
 	}
@@ -1181,11 +1181,10 @@ where
 	/// # Ok(())
 	/// # }
 	/// ```
-	pub fn update<R>(&self, resource: impl opt::IntoResource<R>) -> Update<C, R> {
+	pub fn update<O>(&self, resource: impl IntoResource<O>) -> Update<C, O> {
 		Update {
 			client: Cow::Borrowed(self),
 			resource: resource.into_resource(),
-			range: None,
 			response_type: PhantomData,
 		}
 	}
@@ -1214,11 +1213,10 @@ where
 	/// # Ok(())
 	/// # }
 	/// ```
-	pub fn delete<R>(&self, resource: impl opt::IntoResource<R>) -> Delete<C, R> {
+	pub fn delete<O>(&self, resource: impl IntoResource<O>) -> Delete<C, O> {
 		Delete {
 			client: Cow::Borrowed(self),
 			resource: resource.into_resource(),
-			range: None,
 			response_type: PhantomData,
 		}
 	}

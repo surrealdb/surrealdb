@@ -18,6 +18,17 @@ pub struct Edges {
 	pub what: Tables,
 }
 
+impl Edges {
+	#[doc(hidden)]
+	pub fn new(dir: Dir, from: Thing, what: Tables) -> Self {
+		Edges {
+			dir,
+			from,
+			what,
+		}
+	}
+}
+
 impl fmt::Display for Edges {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		match self.what.len() {

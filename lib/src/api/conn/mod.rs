@@ -6,16 +6,16 @@ use crate::api::opt::Endpoint;
 use crate::api::ExtraFeatures;
 use crate::api::Result;
 use crate::api::Surreal;
+use crate::Value;
 use channel::Receiver;
 use channel::Sender;
 use serde::de::DeserializeOwned;
+use serde::Deserialize;
 use std::collections::HashSet;
 use std::sync::atomic::AtomicI64;
 use std::sync::atomic::Ordering;
-use surrealdb_core::sql::{from_value, Value};
 
 mod cmd;
-
 pub(crate) use cmd::Command;
 
 #[derive(Debug)]
@@ -100,7 +100,7 @@ impl Router {
 		Box::pin(async move {
 			let rx = self.send(command).await?;
 			let value = self.recv(rx).await?;
-			from_value(value).map_err(Into::into)
+			Deserialize::deserialize(value).map_err(Into::into)
 		})
 	}
 
@@ -112,8 +112,8 @@ impl Router {
 		Box::pin(async move {
 			let rx = self.send(command).await?;
 			match self.recv(rx).await? {
-				Value::None | Value::Null => Ok(None),
-				value => from_value(value).map_err(Into::into),
+				Value::None => Ok(None),
+				value => Deserialize::deserialize(value).map_err(Into::into),
 			}
 		})
 	}
@@ -126,11 +126,11 @@ impl Router {
 		Box::pin(async move {
 			let rx = self.send(command).await?;
 			let value = match self.recv(rx).await? {
-				Value::None | Value::Null => Value::Array(Default::default()),
+				Value::None => Value::Array(Default::default()),
 				Value::Array(array) => Value::Array(array),
 				value => vec![value].into(),
 			};
-			from_value(value).map_err(Into::into)
+			Deserialize::deserialize(value).map_err(Into::into)
 		})
 	}
 
@@ -139,7 +139,7 @@ impl Router {
 		Box::pin(async move {
 			let rx = self.send(command).await?;
 			match self.recv(rx).await? {
-				Value::None | Value::Null => Ok(()),
+				Value::None => Ok(()),
 				Value::Array(array) if array.is_empty() => Ok(()),
 				value => Err(Error::FromValue {
 					value,

@@ -4,9 +4,9 @@ use crate::api::method::Commit;
 use crate::api::Connection;
 use crate::api::Result;
 use crate::api::Surreal;
-use crate::sql::statements::BeginStatement;
 use std::future::IntoFuture;
 use std::ops::Deref;
+use surrealdb_core::sql::statements::BeginStatement;
 
 /// A beginning of a transaction
 #[derive(Debug)]

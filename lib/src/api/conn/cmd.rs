@@ -1,15 +1,16 @@
 use super::MlExportConfig;
-use crate::Result;
+use crate::{
+	opt::Resource,
+	value::{Notification, Object, Value},
+	Result,
+};
 use bincode::Options;
 use channel::Sender;
 use revision::Revisioned;
 use serde::{ser::SerializeMap as _, Serialize};
+use std::io::Read;
 use std::path::PathBuf;
-use std::{collections::BTreeMap, io::Read};
-use surrealdb_core::{
-	dbs::Notification,
-	sql::{Object, Query, Value},
-};
+use surrealdb_core::sql::{Query, Value as CoreValue};
 use uuid::Uuid;
 
 #[derive(Debug, Clone)]
@@ -30,38 +31,39 @@ pub(crate) enum Command {
 	},
 	Invalidate,
 	Create {
-		what: Value,
+		what: Resource,
 		data: Option<Value>,
 	},
 	Upsert {
-		what: Value,
+		what: Resource,
 		data: Option<Value>,
 	},
 	Update {
-		what: Value,
+		what: Resource,
 		data: Option<Value>,
 	},
 	Insert {
-		what: Option<Value>,
+		// inserts can only be on a table.
+		what: String,
 		data: Value,
 	},
 	Patch {
-		what: Value,
+		what: Resource,
 		data: Option<Value>,
 	},
 	Merge {
-		what: Value,
+		what: Resource,
 		data: Option<Value>,
 	},
 	Select {
-		what: Value,
+		what: Resource,
 	},
 	Delete {
-		what: Value,
+		what: Resource,
 	},
 	Query {
 		query: Query,
-		variables: BTreeMap<String, Value>,
+		variables: Object,
 	},
 	ExportFile {
 		path: PathBuf,
@@ -94,7 +96,7 @@ pub(crate) enum Command {
 	},
 	SubscribeLive {
 		uuid: Uuid,
-		notification_sender: Sender<Notification>,
+		notification_sender: Sender<Notification<Value>>,
 	},
 	Kill {
 		uuid: Uuid,
@@ -104,55 +106,57 @@ pub(crate) enum Command {
 impl Command {
 	#[cfg(feature = "protocol-ws")]
 	pub(crate) fn into_router_request(self, id: Option<i64>) -> Option<RouterRequest> {
-		let id = id.map(Value::from);
+		use crate::{opt::Table, value::ToCore};
 		let res = match self {
 			Command::Use {
 				namespace,
 				database,
 			} => RouterRequest {
 				id,
-				method: Value::from("use"),
-				params: Some(vec![Value::from(namespace), Value::from(database)].into()),
+				method: "use",
+				params: Some(
+					Value::Array(vec![Value::from(namespace), Value::from(database)]).to_core(),
+				),
 			},
 			Command::Signup {
 				credentials,
 			} => RouterRequest {
 				id,
-				method: "signup".into(),
-				params: Some(vec![Value::from(credentials)].into()),
+				method: "signup",
+				params: Some(Value::Array(vec![Value::from(credentials)]).to_core()),
 			},
 			Command::Signin {
 				credentials,
 			} => RouterRequest {
 				id,
-				method: "signin".into(),
-				params: Some(vec![Value::from(credentials)].into()),
+				method: "signin",
+				params: Some(Value::Array(vec![Value::from(credentials)]).to_core()),
 			},
 			Command::Authenticate {
 				token,
 			} => RouterRequest {
 				id,
-				method: "authenticate".into(),
-				params: Some(vec![Value::from(token)].into()),
+				method: "authenticate",
+				params: Some(Value::Array(vec![Value::from(token)]).to_core()),
 			},
 			Command::Invalidate => RouterRequest {
 				id,
-				method: "invalidate".into(),
+				method: "invalidate",
 				params: None,
 			},
 			Command::Create {
 				what,
 				data,
 			} => {
-				let mut params = vec![what];
+				let mut params = vec![what.into_core_value()];
 				if let Some(data) = data {
-					params.push(data);
+					params.push(data.to_core());
 				}
 
 				RouterRequest {
 					id,
-					method: "create".into(),
-					params: Some(params.into()),
+					method: "create",
+					params: Some(CoreValue::Array(params.into())),
 				}
 			}
 			Command::Upsert {
@@ -160,15 +164,15 @@ impl Command {
 				data,
 				..
 			} => {
-				let mut params = vec![what];
+				let mut params = vec![what.into_core_value()];
 				if let Some(data) = data {
-					params.push(data);
+					params.push(data.to_core());
 				}
 
 				RouterRequest {
 					id,
-					method: "upsert".into(),
-					params: Some(params.into()),
+					method: "upsert",
+					params: Some(CoreValue::Array(params.into())),
 				}
 			}
 			Command::Update {
@@ -176,34 +180,29 @@ impl Command {
 				data,
 				..
 			} => {
-				let mut params = vec![what];
+				let mut params = vec![what.into_core_value()];
 
 				if let Some(data) = data {
-					params.push(data);
+					params.push(data.to_core());
 				}
 
 				RouterRequest {
 					id,
-					method: "update".into(),
-					params: Some(params.into()),
+					method: "update",
+					params: Some(CoreValue::Array(params.into())),
 				}
 			}
 			Command::Insert {
 				what,
 				data,
 			} => {
-				let mut params = if let Some(w) = what {
-					vec![w]
-				} else {
-					vec![Value::None]
-				};
-
-				params.push(data);
+				let mut params = vec![Table(what).into_core().into()];
+				params.push(data.to_core());
 
 				RouterRequest {
 					id,
-					method: "insert".into(),
-					params: Some(params.into()),
+					method: "insert",
+					params: Some(CoreValue::Array(params.into())),
 				}
 			}
 			Command::Patch {
@@ -211,15 +210,16 @@ impl Command {
 				data,
 				..
 			} => {
-				let mut params = vec![what];
+				let mut params = vec![what.into_core_value()];
+
 				if let Some(data) = data {
-					params.push(data);
+					params.push(data.to_core());
 				}
 
 				RouterRequest {
 					id,
-					method: "patch".into(),
-					params: Some(params.into()),
+					method: "patch",
+					params: Some(CoreValue::Array(params.into())),
 				}
 			}
 			Command::Merge {
@@ -227,15 +227,15 @@ impl Command {
 				data,
 				..
 			} => {
-				let mut params = vec![what];
+				let mut params = vec![what.into_core_value()];
 				if let Some(data) = data {
-					params.push(data);
+					params.push(data.to_core());
 				}
 
 				RouterRequest {
 					id,
-					method: "merge".into(),
-					params: Some(params.into()),
+					method: "merge",
+					params: Some(CoreValue::Array(params.into())),
 				}
 			}
 			Command::Select {
@@ -243,25 +243,25 @@ impl Command {
 				..
 			} => RouterRequest {
 				id,
-				method: "select".into(),
-				params: Some(vec![what].into()),
+				method: "select",
+				params: Some(CoreValue::Array(vec![what.into_core_value()].into())),
 			},
 			Command::Delete {
 				what,
 				..
 			} => RouterRequest {
 				id,
-				method: "delete".into(),
-				params: Some(vec![what].into()),
+				method: "delete",
+				params: Some(CoreValue::Array(vec![what.into_core_value()].into())),
 			},
 			Command::Query {
 				query,
 				variables,
 			} => {
-				let params: Vec<Value> = vec![query.into(), variables.into()];
+				let params: Vec<CoreValue> = vec![query.into(), variables.to_core().into()];
 				RouterRequest {
 					id,
-					method: "query".into(),
+					method: "query",
 					params: Some(params.into()),
 				}
 			}
@@ -285,12 +285,12 @@ impl Command {
 			} => return None,
 			Command::Health => RouterRequest {
 				id,
-				method: "ping".into(),
+				method: "ping",
 				params: None,
 			},
 			Command::Version => RouterRequest {
 				id,
-				method: "version".into(),
+				method: "version",
 				params: None,
 			},
 			Command::Set {
@@ -298,15 +298,15 @@ impl Command {
 				value,
 			} => RouterRequest {
 				id,
-				method: "let".into(),
-				params: Some(vec![Value::from(key), value].into()),
+				method: "let",
+				params: Some(Value::Array(vec![Value::from(key), value]).to_core()),
 			},
 			Command::Unset {
 				key,
 			} => RouterRequest {
 				id,
-				method: "unset".into(),
-				params: Some(vec![Value::from(key)].into()),
+				method: "unset",
+				params: Some(Value::Array(vec![Value::from(key)]).to_core()),
 			},
 			Command::SubscribeLive {
 				..
@@ -315,8 +315,8 @@ impl Command {
 				uuid,
 			} => RouterRequest {
 				id,
-				method: "kill".into(),
-				params: Some(vec![Value::from(uuid)].into()),
+				method: "kill",
+				params: Some(Value::Array(vec![Value::from(uuid)]).to_core()),
 			},
 		};
 		Some(res)
@@ -328,9 +328,9 @@ impl Command {
 /// This struct serializes as if it is a surrealdb_core::sql::Value::Object.
 #[derive(Debug)]
 pub(crate) struct RouterRequest {
-	id: Option<Value>,
-	method: Value,
-	params: Option<Value>,
+	id: Option<i64>,
+	method: &'static str,
+	params: Option<CoreValue>,
 }
 
 impl Serialize for RouterRequest {
@@ -339,6 +339,46 @@ impl Serialize for RouterRequest {
 		S: serde::Serializer,
 	{
 		struct InnerRequest<'a>(&'a RouterRequest);
+		struct InnerNumberVariant(i64);
+		struct InnerNumber(i64);
+		struct InnerMethod(&'static str);
+		struct InnerStrand(&'static str);
+
+		impl Serialize for InnerNumberVariant {
+			fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
+			where
+				S: serde::Serializer,
+			{
+				serializer.serialize_newtype_variant("Value", 9, "Number", &InnerNumber(self.0))
+			}
+		}
+
+		impl Serialize for InnerNumber {
+			fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
+			where
+				S: serde::Serializer,
+			{
+				serializer.serialize_newtype_variant("Number", 0, "Int", &self.0)
+			}
+		}
+
+		impl Serialize for InnerMethod {
+			fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
+			where
+				S: serde::Serializer,
+			{
+				serializer.serialize_newtype_variant("Value", 4, "Strand", &InnerStrand(self.0))
+			}
+		}
+
+		impl Serialize for InnerStrand {
+			fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
+			where
+				S: serde::Serializer,
+			{
+				serializer.serialize_newtype_struct("$surrealdb::private::sql::Strand", self.0)
+			}
+		}
 
 		impl Serialize for InnerRequest<'_> {
 			fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
@@ -348,9 +388,9 @@ impl Serialize for RouterRequest {
 				let size = 1 + self.0.id.is_some() as usize + self.0.params.is_some() as usize;
 				let mut map = serializer.serialize_map(Some(size))?;
 				if let Some(id) = self.0.id.as_ref() {
-					map.serialize_entry("id", id)?;
+					map.serialize_entry("id", &InnerNumberVariant(*id))?;
 				}
-				map.serialize_entry("method", &self.0.method)?;
+				map.serialize_entry("method", &InnerMethod(self.0.method))?;
 				if let Some(params) = self.0.params.as_ref() {
 					map.serialize_entry("params", params)?;
 				}
@@ -391,12 +431,42 @@ impl Revisioned for RouterRequest {
 			serializer
 				.serialize_into(&mut *w, "id")
 				.map_err(|err| revision::Error::Serialize(err.to_string()))?;
+
+			// the Value version
+			1u16.serialize_revisioned(w)?;
+
+			// the Value::Number variant
+			4u16.serialize_revisioned(w)?;
+
+			// the Number version
+			1u16.serialize_revisioned(w)?;
+
+			// the Number::Int variant
+			0u16.serialize_revisioned(w)?;
+
 			x.serialize_revisioned(w)?;
 		}
+
 		serializer
 			.serialize_into(&mut *w, "method")
 			.map_err(|err| revision::Error::Serialize(err.to_string()))?;
-		self.method.serialize_revisioned(w)?;
+
+		// the Value version
+		1u16.serialize_revisioned(w)?;
+
+		// the Value::Strand variant
+		4u16.serialize_revisioned(w)?;
+
+		// the Strand version
+		1u16.serialize_revisioned(w)?;
+
+		bincode::options()
+			.with_no_limit()
+			.with_little_endian()
+			.with_varint_encoding()
+			.reject_trailing_bytes()
+			.serialize_into(&mut *w, self.method)
+			.map_err(|e| revision::Error::Serialize(format!("{:?}", e)))?;
 
 		if let Some(x) = self.params.as_ref() {
 			serializer
@@ -421,7 +491,7 @@ mod test {
 	use std::io::Cursor;
 
 	use revision::Revisioned;
-	use surrealdb_core::sql::Value;
+	use surrealdb_core::sql::{Number, Value};
 
 	use super::RouterRequest;
 
@@ -435,16 +505,27 @@ mod test {
 		let Value::Object(obj) = val else {
 			panic!("not an object");
 		};
-		assert_eq!(obj.get("id").cloned(), req.id);
-		assert_eq!(obj.get("method").unwrap().clone(), req.method);
+		assert_eq!(
+			obj.get("id").cloned().and_then(|x| if let Value::Number(Number::Int(x)) = x {
+				Some(x)
+			} else {
+				None
+			}),
+			req.id
+		);
+		let Some(Value::Strand(x)) = obj.get("method") else {
+			panic!("invalid method field: {}", obj)
+		};
+		assert_eq!(x.0, req.method);
+
 		assert_eq!(obj.get("params").cloned(), req.params);
 	}
 
 	#[test]
 	fn router_request_value_conversion() {
 		let request = RouterRequest {
-			id: Some(Value::from(1234i64)),
-			method: Value::from("request"),
+			id: Some(1234),
+			method: "request",
 			params: Some(vec![Value::from(1234i64), Value::from("request")].into()),
 		};
 

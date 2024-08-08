@@ -1,15 +1,14 @@
-use crate::api::Response;
-use crate::sql::Array;
-use crate::sql::Edges;
-use crate::sql::FromValueError;
-use crate::sql::Object;
-use crate::sql::Thing;
-use crate::sql::Value;
+use crate::{api::Response, Value};
 use serde::Serialize;
-use std::io;
 use std::path::PathBuf;
-use surrealdb_core::dbs::capabilities::{ParseFuncTargetError, ParseNetTargetError};
+use std::{convert::Infallible, io};
+use surrealdb_core::{
+	dbs::capabilities::{ParseFuncTargetError, ParseNetTargetError},
+	sql::FromValueError,
+};
 use thiserror::Error;
+
+use super::value::ToCore;
 
 /// An error originating from a remote SurrealDB database
 #[derive(Error, Debug)]
@@ -40,30 +39,33 @@ pub enum Error {
 	AlreadyConnected,
 
 	/// `Query::bind` not called with an object nor a key/value tuple
-	#[error("Invalid bindings: {0}")]
+	#[error("Invalid bindings: {0:?}")]
 	InvalidBindings(Value),
 
 	/// Tried to use a range query on a record ID
-	#[error("Range on record IDs not supported: {0}")]
-	RangeOnRecordId(Thing),
+	#[error("Tried to add a range to an record-id resource")]
+	RangeOnRecordId,
 
 	/// Tried to use a range query on an object
-	#[error("Range on objects not supported: {0}")]
-	RangeOnObject(Object),
+	#[error("Tried to add a range to an object resource")]
+	RangeOnObject,
 
 	/// Tried to use a range query on an array
-	#[error("Range on arrays not supported: {0}")]
-	RangeOnArray(Array),
+	#[error("Tried to add a range to an array resource")]
+	RangeOnArray,
 
 	/// Tried to use a range query on an edge or edges
-	#[error("Range on edges not supported: {0}")]
-	RangeOnEdges(Edges),
+	#[error("Tried to add a range to an edge resource")]
+	RangeOnEdges,
+
+	/// Tried to use a range query on an existing range
+	#[error("Tried to add a range to an resource which was already a range")]
+	RangeOnRange,
 
 	/// Tried to use `table:id` syntax as a method parameter when `(table, id)` should be used instead
-	#[error("`{table}:{id}` is not allowed as a method parameter; try `({table}, {id})`")]
+	#[error("Table name `{table}` contained a colon (:), this is dissallowed to avoid confusion with record-id's try `Table(\"{table}\")` instead.")]
 	TableColonId {
 		table: String,
-		id: String,
 	},
 
 	/// Duplicate request ID
@@ -95,7 +97,7 @@ pub enum Error {
 	InvalidUrl(String),
 
 	/// Failed to convert a `sql::Value` to `T`
-	#[error("Failed to convert `{value}` to `T`: {error}")]
+	#[error("Failed to convert `{value:?}` to `T`: {error}")]
 	FromValue {
 		value: Value,
 		error: String,
@@ -109,7 +111,7 @@ pub enum Error {
 	},
 
 	/// Failed to serialize `sql::Value` to JSON string
-	#[error("Failed to serialize `{value}` to JSON string: {error}")]
+	#[error("Failed to serialize `{value:?}` to JSON string: {error}")]
 	ToJsonString {
 		value: Value,
 		error: String,
@@ -173,16 +175,16 @@ pub enum Error {
 	LiveQueriesNotSupported,
 
 	/// Tried to use a range query on an object
-	#[error("Live queries on objects not supported: {0}")]
-	LiveOnObject(Object),
+	#[error("Live queries on objects not supported")]
+	LiveOnObject,
 
 	/// Tried to use a range query on an array
-	#[error("Live queries on arrays not supported: {0}")]
-	LiveOnArray(Array),
+	#[error("Live queries on arrays not supported")]
+	LiveOnArray,
 
 	/// Tried to use a range query on an edge or edges
-	#[error("Live queries on edges not supported: {0}")]
-	LiveOnEdges(Edges),
+	#[error("Live queries on edges not supported")]
+	LiveOnEdges,
 
 	/// Tried to access a query statement as a live query when it isn't a live query
 	#[error("Query statement {0} is not a live query")]
@@ -197,22 +199,64 @@ pub enum Error {
 	ResponseAlreadyTaken,
 
 	/// Tried to insert on an object
-	#[error("Insert queries on objects not supported: {0}")]
-	InsertOnObject(Object),
+	#[error("Insert queries on objects are not supported")]
+	InsertOnObject,
 
 	/// Tried to insert on an array
-	#[error("Insert queries on arrays not supported: {0}")]
-	InsertOnArray(Array),
+	#[error("Insert queries on arrays are not supported")]
+	InsertOnArray,
 
 	/// Tried to insert on an edge or edges
-	#[error("Insert queries on edges not supported: {0}")]
-	InsertOnEdges(Edges),
+	#[error("Insert queries on edges are not supported")]
+	InsertOnEdges,
+
+	/// Tried to insert on an edge or edges
+	#[error("Insert queries on ranges are not supported")]
+	InsertOnRange,
 
 	#[error("{0}")]
 	InvalidNetTarget(#[from] ParseNetTargetError),
 
 	#[error("{0}")]
 	InvalidFuncTarget(#[from] ParseFuncTargetError),
+
+	#[error("failed to serialize Value: {0}")]
+	SerializeValue(String),
+	#[error("failed to deserialize Value: {0}")]
+	DeSerializeValue(String),
+
+	#[error("failed to serialize to a Value: {0}")]
+	Serializer(String),
+	#[error("failed to deserialize from a Value: {0}")]
+	Deserializer(String),
+
+	/// Tried to convert an value which contained something like for example a query or future.
+	#[error("tried to convert from a value which contained non-primitive values to a value which only allows primitive values.")]
+	RecievedInvalidValue,
+}
+
+impl serde::ser::Error for Error {
+	fn custom<T>(msg: T) -> Self
+	where
+		T: std::fmt::Display,
+	{
+		Error::SerializeValue(msg.to_string())
+	}
+}
+
+impl serde::de::Error for Error {
+	fn custom<T>(msg: T) -> Self
+	where
+		T: std::fmt::Display,
+	{
+		Error::DeSerializeValue(msg.to_string())
+	}
+}
+
+impl From<Infallible> for crate::Error {
+	fn from(_: Infallible) -> Self {
+		unreachable!()
+	}
 }
 
 impl From<ParseNetTargetError> for crate::Error {
@@ -287,8 +331,13 @@ impl Serialize for Error {
 
 impl From<FromValueError> for crate::Error {
 	fn from(error: FromValueError) -> Self {
+		let value = match Value::from_core(error.value).ok_or(Error::RecievedInvalidValue) {
+			Ok(x) => x,
+			Err(e) => return Self::Api(e),
+		};
+
 		Self::Api(Error::FromValue {
-			value: error.value,
+			value,
 			error: error.error,
 		})
 	}

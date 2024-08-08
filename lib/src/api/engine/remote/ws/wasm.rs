@@ -18,8 +18,6 @@ use crate::api::Surreal;
 use crate::engine::remote::ws::Data;
 use crate::engine::IntervalStream;
 use crate::opt::WaitFor;
-use crate::sql::Value;
-use channel::{Receiver, Sender};
 use futures::stream::{SplitSink, SplitStream};
 use futures::FutureExt;
 use futures::SinkExt;

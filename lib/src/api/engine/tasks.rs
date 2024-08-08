@@ -1,18 +1,17 @@
 use crate::engine::IntervalStream;
-use crate::kvs::Datastore;
-use crate::options::EngineOptions;
-#[cfg(not(target_arch = "wasm32"))]
-use crate::Error as RootError;
 use futures::StreamExt;
-#[cfg(target_arch = "wasm32")]
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
-#[cfg(not(target_arch = "wasm32"))]
-use tokio::spawn as spawn_future;
+use surrealdb_core::{kvs::Datastore, options::EngineOptions};
 use tokio::sync::oneshot;
+
 #[cfg(not(target_arch = "wasm32"))]
-use tokio::task::JoinHandle;
+use crate::Error as RootError;
+#[cfg(not(target_arch = "wasm32"))]
+use tokio::{spawn as spawn_future, task::JoinHandle};
+
+#[cfg(target_arch = "wasm32")]
+use std::sync::atomic::{AtomicBool, Ordering};
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen_futures::spawn_local as spawn_future;
 
@@ -38,7 +37,7 @@ impl Tasks {
 			Err(e) => {
 				error!("Node agent task failed: {}", e);
 				let inner_err =
-					crate::err::Error::NodeAgent("node task failed and has been logged");
+					surrealdb_core::err::Error::NodeAgent("node task failed and has been logged");
 				return Err(RootError::Db(inner_err));
 			}
 		}
@@ -65,7 +64,7 @@ pub fn start_tasks(opt: &EngineOptions, dbs: Arc<Datastore>) -> (Tasks, [oneshot
 // This function needs to be called before after the dbs::init and before the net::init functions.
 // It needs to be before net::init because the net::init function blocks until the web server stops.
 fn init(opt: &EngineOptions, dbs: Arc<Datastore>) -> (FutureTask, oneshot::Sender<()>) {
-	let _init = crate::dbs::LoggingLifecycle::new("node agent initialisation".to_string());
+	let _init = surrealdb_core::dbs::LoggingLifecycle::new("node agent initialisation".to_string());
 	let tick_interval = opt.tick_interval;
 
 	trace!("Ticker interval is {:?}", tick_interval);
@@ -78,7 +77,7 @@ fn init(opt: &EngineOptions, dbs: Arc<Datastore>) -> (FutureTask, oneshot::Sende
 	let (tx, mut rx) = oneshot::channel();
 
 	let _fut = spawn_future(async move {
-		let _lifecycle = crate::dbs::LoggingLifecycle::new("heartbeat task".to_string());
+		let _lifecycle = surrealdb_core::dbs::LoggingLifecycle::new("heartbeat task".to_string());
 		let mut ticker = interval_ticker(tick_interval).await;
 
 		loop {
@@ -125,10 +124,9 @@ async fn interval_ticker(interval: Duration) -> IntervalStream {
 #[cfg(feature = "kv-mem")]
 mod test {
 	use crate::engine::tasks::start_tasks;
-	use crate::kvs::Datastore;
-	use crate::options::EngineOptions;
 	use std::sync::Arc;
 	use std::time::Duration;
+	use surrealdb_core::{kvs::Datastore, options::EngineOptions};
 
 	#[test_log::test(tokio::test)]
 	pub async fn tasks_complete() {
