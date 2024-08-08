@@ -332,11 +332,6 @@ impl Parser<'_> {
 		// Parse the rest of the idiom if it is being continued.
 		if Self::continues_idiom(self.peek_kind()) {
 			let value = match value {
-				Value::None
-				| Value::Null
-				| Value::Bool(_)
-				| Value::Future(_)
-				| Value::Strand(_) => unreachable!(),
 				Value::Idiom(Idiom(x)) => self.parse_remaining_value_idiom(ctx, x).await,
 				Value::Table(Table(x)) => {
 					self.parse_remaining_value_idiom(ctx, vec![Part::Field(Ident(x))]).await
