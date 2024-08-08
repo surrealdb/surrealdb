@@ -209,6 +209,7 @@ fn parse_define_function() {
 			permissions: Permission::Full,
 			if_not_exists: false,
 			overwrite: false,
+			returns: None,
 		}))
 	)
 }

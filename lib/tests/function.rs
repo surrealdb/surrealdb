@@ -6227,3 +6227,22 @@ async fn function_outside_database() -> Result<(), Error> {
 
 	Ok(())
 }
+
+// tests for custom functions with return types
+#[tokio::test]
+async fn function_custom_typed_returns() -> Result<(), Error> {
+	let sql = r#"
+		DEFINE FUNCTION fn::two() -> int {2};
+		DEFINE FUNCTION fn::two_bad_type() -> string {2};
+		RETURN fn::two();
+		RETURN fn::two_bad_type();
+	"#;
+	let error = "There was a problem running the fn::two_bad_type() function. Expected this closure to return a value of type 'string', but found 'int'";
+	Test::new(sql)
+		.await?
+		.expect_val("None")?
+		.expect_val("None")?
+		.expect_val("2")?
+		.expect_error(error)?;
+	Ok(())
+}

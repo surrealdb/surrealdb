@@ -48,6 +48,7 @@ pub struct SerializeDefineFunctionStatement {
 	permissions: Permission,
 	if_not_exists: bool,
 	overwrite: bool,
+	returns: Option<Kind>,
 }
 
 impl serde::ser::SerializeStruct for SerializeDefineFunctionStatement {
@@ -80,6 +81,7 @@ impl serde::ser::SerializeStruct for SerializeDefineFunctionStatement {
 			"overwrite" => {
 				self.overwrite = value.serialize(ser::primitive::bool::Serializer.wrap())?
 			}
+			"returns" => self.returns = value.serialize(ser::kind::opt::Serializer.wrap())?,
 			key => {
 				return Err(Error::custom(format!(
 					"unexpected field `DefineFunctionStatement::{key}`"
@@ -98,6 +100,7 @@ impl serde::ser::SerializeStruct for SerializeDefineFunctionStatement {
 			permissions: self.permissions,
 			if_not_exists: self.if_not_exists,
 			overwrite: self.overwrite,
+			returns: self.returns,
 		})
 	}
 }

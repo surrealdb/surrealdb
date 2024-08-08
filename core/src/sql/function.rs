@@ -267,11 +267,21 @@ impl Function {
 					ctx.add_value(name.to_raw(), val.coerce_to(kind)?);
 				}
 				// Run the custom function
-				match stk.run(|stk| val.block.compute(stk, &ctx, opt, doc)).await {
+				let result = match stk.run(|stk| val.block.compute(stk, &ctx, opt, doc)).await {
 					Err(Error::Return {
 						value,
 					}) => Ok(value),
 					res => res,
+				}?;
+
+				if let Some(ref returns) = val.returns {
+					let res_kind = result.kindof();
+					result.coerce_to(returns).map_err(|_| Error::InvalidFunction {
+					name: format!("fn::{}", val.name),
+					message: format!("Expected this closure to return a value of type '{returns}', but found '{res_kind}'"),
+				})
+				} else {
+					Ok(result)
 				}
 			}
 			#[allow(unused_variables)]
