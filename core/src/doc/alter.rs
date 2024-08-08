@@ -25,11 +25,19 @@ impl<'a> Document<'a> {
 		if let Some(v) = stm.data() {
 			match v {
 				Data::PatchExpression(data) => {
-					let data = data.compute(stk, ctx, opt, Some(&self.current)).await?;
+					let data = if let Workable::Insert(v) = &self.extras {
+						v.compute(stk, ctx, opt, Some(&self.current)).await?
+					} else {
+						data.compute(stk, ctx, opt, Some(&self.current)).await?
+					};
 					self.current.doc.to_mut().patch(data)?
 				}
 				Data::MergeExpression(data) => {
-					let data = data.compute(stk, ctx, opt, Some(&self.current)).await?;
+					let data = if let Workable::Insert(v) = &self.extras {
+						v.compute(stk, ctx, opt, Some(&self.current)).await?
+					} else {
+						data.compute(stk, ctx, opt, Some(&self.current)).await?
+					};
 					self.current.doc.to_mut().merge(data)?
 				}
 				Data::ReplaceExpression(data) => {
@@ -37,7 +45,11 @@ impl<'a> Document<'a> {
 					self.current.doc.to_mut().replace(data)?
 				}
 				Data::ContentExpression(data) => {
-					let data = data.compute(stk, ctx, opt, Some(&self.current)).await?;
+					let data = if let Workable::Insert(v) = &self.extras {
+						v.compute(stk, ctx, opt, Some(&self.current)).await?
+					} else {
+						data.compute(stk, ctx, opt, Some(&self.current)).await?
+					};
 					self.current.doc.to_mut().replace(data)?
 				}
 				Data::UnsetExpression(i) => {
