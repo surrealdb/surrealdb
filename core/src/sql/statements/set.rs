@@ -40,22 +40,9 @@ impl SetStatement {
 			false => {
 				let result = self.what.compute(stk, ctx, opt, doc).await?;
 				match self.kind {
-					Some(ref kind) => match result.coerce_to(kind) {
-						Ok(r) => Ok(r),
-						Err(Error::CoerceTo {
-							from,
-							into,
-						}) => Err(Error::SetCheck {
-							value: from.to_string(),
-							name: self.name.to_string(),
-							check: into,
-						}),
-						Err(_) => Err(Error::SetCheck {
-							value: "internal error".to_string(),
-							name: format!("${}", self.name),
-							check: kind.to_string(),
-						}),
-					},
+					Some(ref kind) => result
+						.coerce_to(kind)
+						.map_err(|e| e.set_check_from_coerce(self.name.to_string())),
 					None => Ok(result),
 				}
 			}

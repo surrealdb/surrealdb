@@ -1160,3 +1160,18 @@ impl Serialize for Error {
 		serializer.serialize_str(self.to_string().as_str())
 	}
 }
+impl Error {
+	pub fn set_check_from_coerce(self, name: String) -> Error {
+		match self {
+			Error::CoerceTo {
+				from,
+				into,
+			} => Error::SetCheck {
+				name,
+				value: from.to_string(),
+				check: into,
+			},
+			e => e,
+		}
+	}
+}
