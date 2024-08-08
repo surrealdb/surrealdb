@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use uuid::Uuid;
 
 use crate::{
-	dbs::{QueryType, Response, Session},
+	dbs::{capabilities::MethodTarget, QueryType, Response, Session},
 	kvs::Datastore,
 	rpc::args::Take,
 	sql::{Array, Function, Model, Statement, Strand, Value},
@@ -29,6 +29,13 @@ pub trait RpcContext {
 	}
 
 	async fn execute(&mut self, method: Method, params: Array) -> Result<Data, RpcError> {
+		// Check if capabilities allow executing the requested RPC method
+		if !self.kvs().allows_rpc_method(&MethodTarget {
+			method,
+		}) {
+			return Err(RpcError::MethodNotFound);
+		}
+
 		match method {
 			Method::Ping => Ok(Value::None.into()),
 			Method::Info => self.info().await.map(Into::into).map_err(Into::into),

@@ -3,6 +3,7 @@ use std::hash::Hash;
 use std::net::IpAddr;
 use std::{collections::HashSet, sync::Arc};
 
+use crate::rpc::method::Method;
 use ipnet::IpNet;
 use url::Url;
 
@@ -190,6 +191,47 @@ impl std::str::FromStr for NetTarget {
 	}
 }
 
+#[derive(Debug, Clone, Hash, Eq, PartialEq)]
+pub struct MethodTarget {
+	pub method: Method,
+}
+
+// impl display
+impl fmt::Display for MethodTarget {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		write!(f, "{}", self)
+	}
+}
+
+impl Target for MethodTarget {
+	fn matches(&self, elem: &Self) -> bool {
+		self.method == elem.method
+	}
+}
+
+#[derive(Debug)]
+pub struct ParseMethodTargetError;
+
+impl std::error::Error for ParseMethodTargetError {}
+impl fmt::Display for ParseMethodTargetError {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		write!(f, "The provided method target is not a valid method")
+	}
+}
+
+impl std::str::FromStr for MethodTarget {
+	type Err = ParseMethodTargetError;
+
+	fn from_str(s: &str) -> Result<Self, Self::Err> {
+		match Method::parse(s) {
+			Method::Unknown => Err(ParseMethodTargetError),
+			method => Ok(MethodTarget {
+				method,
+			}),
+		}
+	}
+}
+
 #[derive(Debug, Clone, Eq, PartialEq)]
 #[non_exhaustive]
 pub enum Targets<T: Hash + Eq + PartialEq> {
@@ -237,14 +279,16 @@ pub struct Capabilities {
 	deny_funcs: Arc<Targets<FuncTarget>>,
 	allow_net: Arc<Targets<NetTarget>>,
 	deny_net: Arc<Targets<NetTarget>>,
+	allow_rpc: Arc<Targets<MethodTarget>>,
+	deny_rpc: Arc<Targets<MethodTarget>>,
 }
 
 impl fmt::Display for Capabilities {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		write!(
             f,
-            "scripting={}, guest_access={}, live_query_notifications={}, allow_funcs={}, deny_funcs={}, allow_net={}, deny_net={}",
-            self.scripting, self.guest_access, self.live_query_notifications, self.allow_funcs, self.deny_funcs, self.allow_net, self.deny_net
+            "scripting={}, guest_access={}, live_query_notifications={}, allow_funcs={}, deny_funcs={}, allow_net={}, deny_net={}, allow_rpc={}, deny_rpc={}",
+            self.scripting, self.guest_access, self.live_query_notifications, self.allow_funcs, self.deny_funcs, self.allow_net, self.deny_net, self.allow_rpc, self.deny_rpc,
         )
 	}
 }
@@ -260,6 +304,8 @@ impl Default for Capabilities {
 			deny_funcs: Arc::new(Targets::None),
 			allow_net: Arc::new(Targets::None),
 			deny_net: Arc::new(Targets::None),
+			allow_rpc: Arc::new(Targets::All),
+			deny_rpc: Arc::new(Targets::None),
 		}
 	}
 }
@@ -275,6 +321,8 @@ impl Capabilities {
 			deny_funcs: Arc::new(Targets::None),
 			allow_net: Arc::new(Targets::All),
 			deny_net: Arc::new(Targets::None),
+			allow_rpc: Arc::new(Targets::All),
+			deny_rpc: Arc::new(Targets::None),
 		}
 	}
 
@@ -288,6 +336,8 @@ impl Capabilities {
 			deny_funcs: Arc::new(Targets::None),
 			allow_net: Arc::new(Targets::None),
 			deny_net: Arc::new(Targets::None),
+			allow_rpc: Arc::new(Targets::None),
+			deny_rpc: Arc::new(Targets::None),
 		}
 	}
 
@@ -326,6 +376,16 @@ impl Capabilities {
 		self
 	}
 
+	pub fn with_rpc_methods(mut self, allow_rpc: Targets<MethodTarget>) -> Self {
+		self.allow_rpc = Arc::new(allow_rpc);
+		self
+	}
+
+	pub fn without_rpc_methods(mut self, deny_rpc: Targets<MethodTarget>) -> Self {
+		self.deny_rpc = Arc::new(deny_rpc);
+		self
+	}
+
 	pub fn allows_scripting(&self) -> bool {
 		self.scripting
 	}
@@ -351,6 +411,10 @@ impl Capabilities {
 
 	pub fn allows_network_target(&self, target: &NetTarget) -> bool {
 		self.allow_net.matches(target) && !self.deny_net.matches(target)
+	}
+
+	pub fn allows_rpc_method(&self, target: &MethodTarget) -> bool {
+		self.allow_rpc.matches(target) && !self.deny_rpc.matches(target)
 	}
 }
 
@@ -530,6 +594,28 @@ mod tests {
 	}
 
 	#[test]
+	fn test_method_target() {
+		assert!(MethodTarget::from_str("owner")
+			.unwrap()
+			.matches(&MethodTarget::from_str("owner").unwrap()));
+		assert!(MethodTarget::from_str("owner")
+			.unwrap()
+			.matches(&MethodTarget::from_str("Owner").unwrap()));
+		assert!(MethodTarget::from_str("owner")
+			.unwrap()
+			.matches(&MethodTarget::from_str("OWNER").unwrap()));
+		assert!(!MethodTarget::from_str("owner")
+			.unwrap()
+			.matches(&MethodTarget::from_str("editor").unwrap()));
+		assert!(!MethodTarget::from_str("owner")
+			.unwrap()
+			.matches(&MethodTarget::from_str("viewer").unwrap()));
+		assert!(!MethodTarget::from_str("owner")
+			.unwrap()
+			.matches(&MethodTarget::from_str("").unwrap()));
+	}
+
+	#[test]
 	fn test_targets() {
 		assert!(Targets::<NetTarget>::All.matches(&NetTarget::from_str("example.com").unwrap()));
 		assert!(Targets::<FuncTarget>::All.matches("http::get"));
@@ -645,6 +731,46 @@ mod tests {
 			assert!(caps.allows_function(&FuncTarget::from_str("http::get").unwrap()));
 			assert!(caps.allows_function(&FuncTarget::from_str("http::put").unwrap()));
 			assert!(!caps.allows_function(&FuncTarget::from_str("http::post").unwrap()));
+		}
+
+		// When all methods are allowed
+		{
+			let caps = Capabilities::default()
+				.with_rpc_methods(Targets::<MethodTarget>::All)
+				.without_rpc_methods(Targets::<MethodTarget>::None);
+			assert!(caps.allows_rpc_method(&MethodTarget::from_str("owner").unwrap()));
+			assert!(caps.allows_rpc_method(&MethodTarget::from_str("editor").unwrap()));
+			assert!(caps.allows_rpc_method(&MethodTarget::from_str("viewer").unwrap()));
+		}
+
+		// When all methods are allowed and denied at the same time
+		{
+			let caps = Capabilities::default()
+				.with_rpc_methods(Targets::<MethodTarget>::All)
+				.without_rpc_methods(Targets::<MethodTarget>::All);
+			assert!(!caps.allows_rpc_method(&MethodTarget::from_str("owner").unwrap()));
+			assert!(!caps.allows_rpc_method(&MethodTarget::from_str("editor").unwrap()));
+			assert!(!caps.allows_rpc_method(&MethodTarget::from_str("viewer").unwrap()));
+		}
+
+		// When some methods are allowed and some are denied, deny overrides the allow rules
+		{
+			let caps = Capabilities::default()
+				.with_rpc_methods(Targets::<MethodTarget>::Some(
+					[
+						MethodTarget::from_str("owner").unwrap(),
+						MethodTarget::from_str("editor").unwrap(),
+						MethodTarget::from_str("viewer").unwrap(),
+					]
+					.into(),
+				))
+				.without_rpc_methods(Targets::<MethodTarget>::Some(
+					[MethodTarget::from_str("viewer").unwrap()].into(),
+				));
+
+			assert!(caps.allows_rpc_method(&MethodTarget::from_str("owner").unwrap()));
+			assert!(caps.allows_rpc_method(&MethodTarget::from_str("editor").unwrap()));
+			assert!(!caps.allows_rpc_method(&MethodTarget::from_str("viewer").unwrap()));
 		}
 	}
 }

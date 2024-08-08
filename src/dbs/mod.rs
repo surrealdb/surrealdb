@@ -3,7 +3,7 @@ use crate::err::Error;
 use clap::Args;
 use std::path::PathBuf;
 use std::time::Duration;
-use surrealdb::dbs::capabilities::{Capabilities, FuncTarget, NetTarget, Targets};
+use surrealdb::dbs::capabilities::{Capabilities, FuncTarget, MethodTarget, NetTarget, Targets};
 use surrealdb::kvs::Datastore;
 
 #[derive(Args, Debug)]
@@ -81,6 +81,15 @@ Targets must be in the form of <host>[:<port>], <ipv4|ipv6>[/<mask>]. For exampl
 	#[arg(value_parser = super::cli::validator::net_targets)]
 	allow_net: Option<Targets<NetTarget>>,
 
+	#[arg(
+		help = "Allow all RPC methods to be called. Optionally, you can provide a comma-separated list of RPC methods to allow"
+	)]
+	#[arg(env = "SURREAL_CAPS_ALLOW_RPC", long, conflicts_with = "allow_all")]
+	// If the arg is provided without value, then assume it's "", which gets parsed into Targets::All
+	#[arg(default_missing_value_os = "", num_args = 0..)]
+	#[arg(value_parser = super::cli::validator::method_targets)]
+	allow_rpc: Option<Targets<MethodTarget>>,
+
 	//
 	// Deny
 	//
@@ -125,6 +134,15 @@ Targets must be in the form of <host>[:<port>], <ipv4|ipv6>[/<mask>]. For exampl
 	#[arg(default_missing_value_os = "", num_args = 0..)]
 	#[arg(value_parser = super::cli::validator::net_targets)]
 	deny_net: Option<Targets<NetTarget>>,
+
+	#[arg(
+		help = "Deny all RPC methods from being called. Optionally, you can provide a comma-separated list of RPC methods to deny"
+	)]
+	#[arg(env = "SURREAL_CAPS_DENY_RPC", long, conflicts_with = "deny_all")]
+	// If the arg is provided without value, then assume it's "", which gets parsed into Targets::All
+	#[arg(default_missing_value_os = "", num_args = 0..)]
+	#[arg(value_parser = super::cli::validator::method_targets)]
+	deny_rpc: Option<Targets<MethodTarget>>,
 }
 
 impl DbsCapabilities {
@@ -168,6 +186,19 @@ impl DbsCapabilities {
 		self.allow_net.clone().unwrap_or(Targets::None)
 	}
 
+	fn get_allow_rpc(&self) -> Targets<MethodTarget> {
+		if self.deny_all || matches!(self.deny_rpc, Some(Targets::All)) {
+			return Targets::None;
+		}
+
+		if self.allow_all {
+			return Targets::All;
+		}
+
+		// If allow_rpc was not provided and allow_all is false, then don't allow anything (Targets::None)
+		self.allow_rpc.clone().unwrap_or(Targets::None)
+	}
+
 	fn get_deny_funcs(&self) -> Targets<FuncTarget> {
 		if self.deny_all {
 			return Targets::All;
@@ -185,6 +216,15 @@ impl DbsCapabilities {
 		// If deny_net was not provided and deny_all is false, then don't deny anything (Targets::None)
 		self.deny_net.clone().unwrap_or(Targets::None)
 	}
+
+	fn get_deny_rpc(&self) -> Targets<MethodTarget> {
+		if self.deny_all {
+			return Targets::All;
+		}
+
+		// If deny_rpc was not provided and deny_all is false, then don't deny anything (Targets::None)
+		self.deny_rpc.clone().unwrap_or(Targets::None)
+	}
 }
 
 impl From<DbsCapabilities> for Capabilities {
@@ -196,6 +236,8 @@ impl From<DbsCapabilities> for Capabilities {
 			.without_functions(caps.get_deny_funcs())
 			.with_network_targets(caps.get_allow_net())
 			.without_network_targets(caps.get_deny_net())
+			.with_rpc_methods(caps.get_allow_rpc())
+			.without_rpc_methods(caps.get_deny_rpc())
 	}
 }
 
