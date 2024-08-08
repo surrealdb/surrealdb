@@ -121,7 +121,6 @@ pub enum Value {
 	Expression(Box<Expression>),
 	Query(Query),
 	Model(Box<Model>),
-	//
 	Closure(Box<Closure>),
 	// Add new variants here
 }
