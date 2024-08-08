@@ -18,11 +18,10 @@ use std::sync::Arc;
 use surrealdb::channel::{self, Receiver, Sender};
 use surrealdb::dbs::Session;
 use surrealdb::kvs::Datastore;
-use surrealdb::rpc::args::Take;
 use surrealdb::rpc::format::Format;
 use surrealdb::rpc::method::Method;
+use surrealdb::rpc::Data;
 use surrealdb::rpc::RpcContext;
-use surrealdb::rpc::{Data, RpcError};
 use surrealdb::sql::Array;
 use surrealdb::sql::Value;
 use tokio::sync::{RwLock, Semaphore};
@@ -405,40 +404,5 @@ impl RpcContext for Connection {
 		if let Some(id) = self.state.live_queries.write().await.remove(lqid) {
 			trace!("Unregistered live query {} on websocket {}", lqid, id);
 		}
-	}
-
-	// reimplimentaions
-
-	async fn signup(&mut self, params: Array) -> Result<impl Into<Data>, RpcError> {
-		let Ok(Value::Object(v)) = params.needs_one() else {
-			return Err(RpcError::InvalidParams);
-		};
-		let out: Result<Value, RpcError> =
-			surrealdb::iam::signup::signup(&self.datastore, &mut self.session, v)
-				.await
-				.map(Into::into)
-				.map_err(Into::into);
-
-		out
-	}
-
-	async fn signin(&mut self, params: Array) -> Result<impl Into<Data>, RpcError> {
-		let Ok(Value::Object(v)) = params.needs_one() else {
-			return Err(RpcError::InvalidParams);
-		};
-		let out: Result<Value, RpcError> =
-			surrealdb::iam::signin::signin(&self.datastore, &mut self.session, v)
-				.await
-				.map(Into::into)
-				.map_err(Into::into);
-		out
-	}
-
-	async fn authenticate(&mut self, params: Array) -> Result<impl Into<Data>, RpcError> {
-		let Ok(Value::Strand(token)) = params.needs_one() else {
-			return Err(RpcError::InvalidParams);
-		};
-		surrealdb::iam::verify::token(&self.datastore, &mut self.session, &token.0).await?;
-		Ok(Value::None)
 	}
 }
