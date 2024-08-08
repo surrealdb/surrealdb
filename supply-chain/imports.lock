@@ -276,8 +276,8 @@ user-login = "mumoshu"
 user-name = "Yusuke Kuoka"
 
 [[publisher.surrealkv]]
-version = "0.3.0"
-when = "2024-07-04"
+version = "0.3.1"
+when = "2024-08-05"
 user-id = 145457
 user-login = "tobiemh"
 user-name = "Tobie Morgan Hitchcock"
