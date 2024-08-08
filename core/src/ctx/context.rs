@@ -194,11 +194,6 @@ impl<'a> Context<'a> {
 		K: Into<Cow<'static, str>>,
 		V: Into<Cow<'a, Value>>,
 	{
-		let key = key.into();
-		let value = value.into();
-		// let bt = std::backtrace::Backtrace::force_capture();
-		let bt = ();
-		eprintln!("key: {:?}, val: {:?}, bt: {bt:#?}", &key, &value);
 		self.values.insert(key.into(), value.into());
 	}
 
