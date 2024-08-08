@@ -6,7 +6,7 @@ use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::Write;
 use std::fmt::{self, Display, Formatter};
-use std::ops::Deref;
+use std::ops::{Deref, DerefMut};
 use std::str;
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Query";
@@ -40,6 +40,12 @@ impl Deref for Query {
 	type Target = Vec<Statement>;
 	fn deref(&self) -> &Self::Target {
 		&self.0 .0
+	}
+}
+
+impl DerefMut for Query {
+	fn deref_mut(&mut self) -> &mut Self::Target {
+		&mut self.0 .0
 	}
 }
 

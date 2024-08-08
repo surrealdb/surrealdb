@@ -588,6 +588,14 @@ pub enum Error {
 		check: String,
 	},
 
+	/// The specified value did not conform to the LET type check
+	#[error("Found {value} for param ${name}, but expected a {check}")]
+	SetCheck {
+		value: String,
+		name: String,
+		check: String,
+	},
+
 	/// The specified field did not conform to the field ASSERT clause
 	#[error(
 		"Found changed value for field `{field}`, with record `{thing}`, but field is readonly"
@@ -1150,5 +1158,20 @@ impl Serialize for Error {
 		S: serde::Serializer,
 	{
 		serializer.serialize_str(self.to_string().as_str())
+	}
+}
+impl Error {
+	pub fn set_check_from_coerce(self, name: String) -> Error {
+		match self {
+			Error::CoerceTo {
+				from,
+				into,
+			} => Error::SetCheck {
+				name,
+				value: from.to_string(),
+				check: into,
+			},
+			e => e,
+		}
 	}
 }

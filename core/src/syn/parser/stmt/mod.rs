@@ -334,6 +334,7 @@ impl Parser<'_> {
 					return Statement::Set(crate::sql::statements::SetStatement {
 						name: x.0 .0,
 						what: r,
+						kind: None,
 					});
 				}
 				Statement::Value(Value::Expression(x))
@@ -354,6 +355,7 @@ impl Parser<'_> {
 					return Entry::Set(crate::sql::statements::SetStatement {
 						name: x.0 .0,
 						what: r,
+						kind: None,
 					});
 				}
 				Entry::Value(Value::Expression(x))
@@ -596,11 +598,17 @@ impl Parser<'_> {
 	/// Expects `LET` to already be consumed.
 	pub(crate) async fn parse_let_stmt(&mut self, ctx: &mut Stk) -> ParseResult<SetStatement> {
 		let name = self.next_token_value::<Param>()?.0 .0;
+		let kind = if self.eat(t!(":")) {
+			Some(self.parse_inner_kind(ctx).await?)
+		} else {
+			None
+		};
 		expected!(self, t!("="));
 		let what = self.parse_value(ctx).await?;
 		Ok(SetStatement {
 			name,
 			what,
+			kind,
 		})
 	}
 

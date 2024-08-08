@@ -1,6 +1,7 @@
 use crate::err::Error;
 use crate::sql::statements::SetStatement;
 use crate::sql::value::serde::ser;
+use crate::sql::Kind;
 use crate::sql::Value;
 use ser::Serializer as _;
 use serde::ser::Error as _;
@@ -39,6 +40,7 @@ impl ser::Serializer for Serializer {
 pub struct SerializeSetStatement {
 	name: Option<String>,
 	what: Option<Value>,
+	kind: Option<Kind>,
 }
 
 impl serde::ser::SerializeStruct for SerializeSetStatement {
@@ -56,6 +58,7 @@ impl serde::ser::SerializeStruct for SerializeSetStatement {
 			"what" => {
 				self.what = Some(value.serialize(ser::value::Serializer.wrap())?);
 			}
+			"kind" => self.kind = value.serialize(ser::kind::opt::Serializer.wrap())?,
 			key => {
 				return Err(Error::custom(format!("unexpected field `SetStatement::{key}`")));
 			}
@@ -68,6 +71,7 @@ impl serde::ser::SerializeStruct for SerializeSetStatement {
 			(Some(name), Some(what)) => Ok(SetStatement {
 				name,
 				what,
+				kind: self.kind,
 			}),
 			_ => Err(Error::custom("`SetStatement` missing required field(s)")),
 		}
