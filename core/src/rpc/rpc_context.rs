@@ -7,8 +7,7 @@ use uuid::Uuid;
 use crate::gql::SchemaCache;
 use crate::{
 	dbs::{QueryType, Response, Session},
-	gql::GqlError,
-	kvs::{Datastore, Val},
+	kvs::Datastore,
 	rpc::args::Take,
 	sql::{Array, Function, Model, Statement, Strand, Value},
 };
