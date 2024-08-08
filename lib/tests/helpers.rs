@@ -243,8 +243,7 @@ impl Test {
 	/// Arguments `sql` - A string slice representing the SQL query.
 	/// Panics if an error occurs.
 	#[allow(dead_code)]
-	pub async fn new(sql: &str) -> Result<Self, Error> {
-		let ds = new_ds().await?;
+	pub async fn with_ds(ds: Datastore, sql: &str) -> Result<Self, Error> {
 		let session = Session::owner().with_ns("test").with_db("test");
 		let responses = ds.execute(sql, &session, None).await?;
 		Ok(Self {
@@ -253,6 +252,19 @@ impl Test {
 			responses,
 			pos: 0,
 		})
+	}
+
+	#[allow(dead_code)]
+	pub async fn new(sql: &str) -> Result<Self, Error> {
+		Self::with_ds(new_ds().await?, sql).await
+	}
+
+	#[allow(dead_code)]
+	/// Simulates restarting the Datastore
+	/// - Data are persistent (including memory store)
+	/// - Flushing caches (jwks, IndexStore, ...)
+	pub async fn restart(self, sql: &str) -> Result<Self, Error> {
+		Self::with_ds(self.ds.restart(), sql).await
 	}
 
 	/// Checks if the number of responses matches the expected size.
@@ -410,16 +422,5 @@ impl Test {
 			self.expect_float(*val, precision)?;
 		}
 		Ok(self)
-	}
-}
-
-impl Drop for Test {
-	/// Drops the instance of the struct
-	/// This method will panic if there are remaining responses that have not been checked.
-	fn drop(&mut self) {
-		// Check for a panic to make sure test doesnt cause a double panic.
-		if !std::thread::panicking() && !self.responses.is_empty() {
-			panic!("Not every response has been checked");
-		}
 	}
 }

@@ -59,8 +59,8 @@ impl<'a> QueryPlanner<'a> {
 			Some(tree) => {
 				is_knn = is_knn || !tree.knn_expressions.is_empty();
 				let mut exe = InnerQueryExecutor::new(
-					stk,
 					ctx,
+					stk,
 					self.opt,
 					&t,
 					tree.index_map,

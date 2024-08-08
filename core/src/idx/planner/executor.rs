@@ -104,8 +104,8 @@ impl InnerQueryExecutor {
 	#[allow(clippy::too_many_arguments)]
 	#[allow(clippy::mutable_key_type)]
 	pub(super) async fn new(
-		stk: &mut Stk,
 		ctx: &Context<'_>,
+		stk: &mut Stk,
 		opt: &Options,
 		table: &Table,
 		im: IndexesMap,
@@ -208,8 +208,8 @@ impl InnerQueryExecutor {
 							let entry = match hnsw_map.entry(ix_ref) {
 								Entry::Occupied(e) => {
 									HnswEntry::new(
-										stk,
 										ctx,
+										stk,
 										opt,
 										e.get().clone(),
 										a,
@@ -222,11 +222,14 @@ impl InnerQueryExecutor {
 								Entry::Vacant(e) => {
 									let hnsw = ctx
 										.get_index_stores()
-										.get_index_hnsw(opt, idx_def, p)
+										.get_index_hnsw(ctx, opt, idx_def, p)
 										.await?;
+									// Ensure the local HNSW index is up to date with the KVS
+									hnsw.write().await.check_state(&ctx.tx()).await?;
+									// Now we can execute the request
 									let entry = HnswEntry::new(
-										stk,
 										ctx,
+										stk,
 										opt,
 										hnsw.clone(),
 										a,
@@ -776,8 +779,8 @@ pub(super) struct HnswEntry {
 impl HnswEntry {
 	#[allow(clippy::too_many_arguments)]
 	async fn new(
-		stk: &mut Stk,
 		ctx: &Context<'_>,
+		stk: &mut Stk,
 		opt: &Options,
 		h: SharedHnswIndex,
 		v: &[Number],
@@ -788,11 +791,13 @@ impl HnswEntry {
 		let cond_checker = if let Some(cond) = cond {
 			HnswConditionChecker::new_cond(ctx, opt, cond)
 		} else {
-			HnswConditionChecker::default()
+			HnswConditionChecker::new()
 		};
-		let h = h.read().await;
-		let res = h.knn_search(v, n as usize, ef as usize, stk, cond_checker).await?;
-		drop(h);
+		let res = h
+			.read()
+			.await
+			.knn_search(&ctx.tx(), stk, v, n as usize, ef as usize, cond_checker)
+			.await?;
 		Ok(Self {
 			res,
 		})

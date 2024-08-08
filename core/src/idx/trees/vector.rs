@@ -1,5 +1,6 @@
 use crate::err::Error;
 use crate::fnc::util::math::ToFloat;
+use crate::idx::VersionedStore;
 use crate::sql::index::{Distance, VectorType};
 use crate::sql::{Number, Value};
 use ahash::AHasher;
@@ -17,7 +18,7 @@ use std::ops::{Add, Deref, Div, Sub};
 use std::sync::Arc;
 
 /// In the context of a Symmetric MTree index, the term object refers to a vector, representing the indexed item.
-#[derive(Debug, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 #[non_exhaustive]
 pub enum Vector {
 	F64(Array1<f64>),
@@ -28,15 +29,17 @@ pub enum Vector {
 }
 
 #[revisioned(revision = 1)]
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Serialize, Deserialize)]
 #[non_exhaustive]
-enum SerializedVector {
+pub enum SerializedVector {
 	F64(Vec<f64>),
 	F32(Vec<f32>),
 	I64(Vec<i64>),
 	I32(Vec<i32>),
 	I16(Vec<i16>),
 }
+
+impl VersionedStore for SerializedVector {}
 
 impl From<&Vector> for SerializedVector {
 	fn from(value: &Vector) -> Self {
@@ -392,6 +395,27 @@ impl Hash for Vector {
 				state.write_i16(h);
 			}
 		}
+	}
+}
+
+#[cfg(test)]
+impl SharedVector {
+	pub(crate) fn clone_vector(&self) -> Vector {
+		self.0.as_ref().clone()
+	}
+}
+
+#[cfg(test)]
+impl From<&Vector> for Value {
+	fn from(v: &Vector) -> Self {
+		let vec: Vec<Number> = match v {
+			Vector::F64(a) => a.iter().map(|i| Number::Float(*i)).collect(),
+			Vector::F32(a) => a.iter().map(|i| Number::Float(*i as f64)).collect(),
+			Vector::I64(a) => a.iter().map(|i| Number::Int(*i)).collect(),
+			Vector::I32(a) => a.iter().map(|i| Number::Int(*i as i64)).collect(),
+			Vector::I16(a) => a.iter().map(|i| Number::Int(*i as i64)).collect(),
+		};
+		Value::from(vec)
 	}
 }
 
