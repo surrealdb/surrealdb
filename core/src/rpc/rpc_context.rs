@@ -7,7 +7,8 @@ use uuid::Uuid;
 use crate::gql::SchemaCache;
 use crate::{
 	dbs::{QueryType, Response, Session},
-	kvs::Datastore,
+	gql::GqlError,
+	kvs::{Datastore, Val},
 	rpc::args::Take,
 	sql::{Array, Function, Model, Statement, Strand, Value},
 };
@@ -621,6 +622,11 @@ pub trait RpcContext {
 	// ------------------------------
 	// Methods for querying with GraphQL
 	// ------------------------------
+
+	#[cfg(target_arch = "wasm32")]
+	async fn graphql(&self, _params: Array) -> Result<impl Into<Data>, RpcError> {
+		Result::<Value, _>::Err(RpcError::MethodNotFound)
+	}
 
 	#[cfg(not(target_arch = "wasm32"))]
 	async fn graphql(&self, params: Array) -> Result<impl Into<Data>, RpcError> {
