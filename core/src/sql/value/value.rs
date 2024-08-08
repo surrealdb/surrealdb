@@ -1544,7 +1544,7 @@ impl Value {
 	/// Try to coerce this value to a `Closure`
 	pub(crate) fn coerce_to_closure(self) -> Result<Closure, Error> {
 		match self {
-			// Uuids are allowed
+			// Closures are allowed
 			Value::Closure(v) => Ok(*v),
 			// Anything else raises an error
 			_ => Err(Error::CoerceTo {
@@ -2093,7 +2093,7 @@ impl Value {
 	/// Try to convert this value to a `Closure`
 	pub(crate) fn convert_to_closure(self) -> Result<Closure, Error> {
 		match self {
-			// Uuids are allowed
+			// Closures are allowed
 			Value::Closure(v) => Ok(*v),
 			// Anything else converts to a closure with self as the body
 			_ => Ok(Closure {
