@@ -1204,5 +1204,5 @@ allow_unsafe = true
 [pkg.rustls-pki-types]
 allow_unsafe = true
 
-[pkg.static-assertions-next]
+[pkg.static_assertions_next]
 allow_unsafe = true
