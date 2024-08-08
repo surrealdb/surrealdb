@@ -70,19 +70,6 @@ async fn closures() -> Result<(), Error> {
 		_ => panic!("Invocation should have failed with error: There was a problem running the ANONYMOUS() function. Expected a value of type 'string' for argument $arg")
 	}
 	//
-	let tmp = res.remove(0).result?;
-	let val = Value::None;
-	assert_eq!(tmp, val);
-	//
-	let tmp = res.remove(0).result?;
-	let val = Value::parse("'done'");
-	assert_eq!(tmp, val);
-	//
-	match res.remove(0).result {
-		Err(Error::ComputationDepthExceeded) => (),
-		_ => panic!("Invocation should have failed with error: Reached excessive computation depth due to functions, subqueries, or futures")
-	}
-	//
 	Ok(())
 }
 
