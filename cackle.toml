@@ -996,7 +996,7 @@ allow_unsafe = true
 allow_apis = ["fs", "net"]
 
 [pkg.proc-macro-crate]
-allow_apis = ["fs"]
+allow_apis = ["fs", "process"]
 
 [pkg.tonic]
 allow_unsafe = true
