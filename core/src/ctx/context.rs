@@ -289,18 +289,28 @@ impl<'a> Context<'a> {
 	/// Check if the context is done. If it returns `None` the operation may
 	/// proceed, otherwise the operation should be stopped.
 	pub fn done(&self) -> Option<Reason> {
-		match self.deadline {
-			Some(deadline) if deadline <= Instant::now() => Some(Reason::Timedout),
-			_ if self.cancelled.load(Ordering::Relaxed) => Some(Reason::Canceled),
-			_ => match self.parent {
-				Some(ctx) => ctx.done(),
-				_ => None,
-			},
+		// Check if the deadline has passed
+		if let Some(deadline) = self.deadline {
+			if deadline <= Instant::now() {
+				return Some(Reason::Timedout);
+			}
 		}
+
+		// Check if the operation has been cancelled
+		if self.cancelled.load(Ordering::Relaxed) {
+			return Some(Reason::Canceled);
+		}
+
+		// Check the parent context, if any exists.
+		if let Some(ctx) = self.parent {
+			return ctx.done();
+		}
+
+		None
 	}
 
 	/// Check if the context is ok to continue.
-	pub fn is_ok(&self) -> bool {
+	pub fn is_not_done(&self) -> bool {
 		self.done().is_none()
 	}
 

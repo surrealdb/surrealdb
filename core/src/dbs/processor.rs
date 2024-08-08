@@ -118,7 +118,7 @@ impl<'a> Processor<'a> {
 		stm: &Statement<'_>,
 		iterable: Iterable,
 	) -> Result<(), Error> {
-		if ctx.is_ok() {
+		if ctx.is_not_done() {
 			match iterable {
 				Iterable::Value(v) => self.process_value(stk, ctx, opt, stm, v).await?,
 				Iterable::Thing(v) => self.process_thing(stk, ctx, opt, stm, v).await?,
