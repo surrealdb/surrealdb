@@ -595,24 +595,18 @@ mod tests {
 
 	#[test]
 	fn test_method_target() {
-		assert!(MethodTarget::from_str("owner")
+		assert!(MethodTarget::from_str("query")
 			.unwrap()
-			.matches(&MethodTarget::from_str("owner").unwrap()));
-		assert!(MethodTarget::from_str("owner")
+			.matches(&MethodTarget::from_str("query").unwrap()));
+		assert!(MethodTarget::from_str("query")
 			.unwrap()
-			.matches(&MethodTarget::from_str("Owner").unwrap()));
-		assert!(MethodTarget::from_str("owner")
+			.matches(&MethodTarget::from_str("Query").unwrap()));
+		assert!(MethodTarget::from_str("query")
 			.unwrap()
-			.matches(&MethodTarget::from_str("OWNER").unwrap()));
-		assert!(!MethodTarget::from_str("owner")
+			.matches(&MethodTarget::from_str("QUERY").unwrap()));
+		assert!(!MethodTarget::from_str("query")
 			.unwrap()
-			.matches(&MethodTarget::from_str("editor").unwrap()));
-		assert!(!MethodTarget::from_str("owner")
-			.unwrap()
-			.matches(&MethodTarget::from_str("viewer").unwrap()));
-		assert!(!MethodTarget::from_str("owner")
-			.unwrap()
-			.matches(&MethodTarget::from_str("").unwrap()));
+			.matches(&MethodTarget::from_str("ping").unwrap()));
 	}
 
 	#[test]
@@ -733,44 +727,54 @@ mod tests {
 			assert!(!caps.allows_function(&FuncTarget::from_str("http::post").unwrap()));
 		}
 
-		// When all methods are allowed
+		// When all RPC methods are allowed
 		{
 			let caps = Capabilities::default()
 				.with_rpc_methods(Targets::<MethodTarget>::All)
 				.without_rpc_methods(Targets::<MethodTarget>::None);
-			assert!(caps.allows_rpc_method(&MethodTarget::from_str("owner").unwrap()));
-			assert!(caps.allows_rpc_method(&MethodTarget::from_str("editor").unwrap()));
-			assert!(caps.allows_rpc_method(&MethodTarget::from_str("viewer").unwrap()));
+			assert!(caps.allows_rpc_method(&MethodTarget::from_str("ping").unwrap()));
+			assert!(caps.allows_rpc_method(&MethodTarget::from_str("select").unwrap()));
+			assert!(caps.allows_rpc_method(&MethodTarget::from_str("query").unwrap()));
 		}
 
-		// When all methods are allowed and denied at the same time
+		// When all RPC methods are allowed and denied at the same time
 		{
 			let caps = Capabilities::default()
 				.with_rpc_methods(Targets::<MethodTarget>::All)
 				.without_rpc_methods(Targets::<MethodTarget>::All);
-			assert!(!caps.allows_rpc_method(&MethodTarget::from_str("owner").unwrap()));
-			assert!(!caps.allows_rpc_method(&MethodTarget::from_str("editor").unwrap()));
-			assert!(!caps.allows_rpc_method(&MethodTarget::from_str("viewer").unwrap()));
+			assert!(!caps.allows_rpc_method(&MethodTarget::from_str("ping").unwrap()));
+			assert!(!caps.allows_rpc_method(&MethodTarget::from_str("select").unwrap()));
+			assert!(!caps.allows_rpc_method(&MethodTarget::from_str("query").unwrap()));
 		}
 
-		// When some methods are allowed and some are denied, deny overrides the allow rules
+		// When some RPC methods are allowed and some are denied, deny overrides the allow rules
 		{
 			let caps = Capabilities::default()
 				.with_rpc_methods(Targets::<MethodTarget>::Some(
 					[
-						MethodTarget::from_str("owner").unwrap(),
-						MethodTarget::from_str("editor").unwrap(),
-						MethodTarget::from_str("viewer").unwrap(),
+						MethodTarget::from_str("select").unwrap(),
+						MethodTarget::from_str("create").unwrap(),
+						MethodTarget::from_str("insert").unwrap(),
+						MethodTarget::from_str("update").unwrap(),
+						MethodTarget::from_str("query").unwrap(),
+						MethodTarget::from_str("run").unwrap(),
 					]
 					.into(),
 				))
 				.without_rpc_methods(Targets::<MethodTarget>::Some(
-					[MethodTarget::from_str("viewer").unwrap()].into(),
+					[
+						MethodTarget::from_str("query").unwrap(),
+						MethodTarget::from_str("run").unwrap(),
+					]
+					.into(),
 				));
 
-			assert!(caps.allows_rpc_method(&MethodTarget::from_str("owner").unwrap()));
-			assert!(caps.allows_rpc_method(&MethodTarget::from_str("editor").unwrap()));
-			assert!(!caps.allows_rpc_method(&MethodTarget::from_str("viewer").unwrap()));
+			assert!(caps.allows_rpc_method(&MethodTarget::from_str("select").unwrap()));
+			assert!(caps.allows_rpc_method(&MethodTarget::from_str("create").unwrap()));
+			assert!(caps.allows_rpc_method(&MethodTarget::from_str("insert").unwrap()));
+			assert!(caps.allows_rpc_method(&MethodTarget::from_str("update").unwrap()));
+			assert!(!caps.allows_rpc_method(&MethodTarget::from_str("query").unwrap()));
+			assert!(!caps.allows_rpc_method(&MethodTarget::from_str("run").unwrap()));
 		}
 	}
 }
