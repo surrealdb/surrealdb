@@ -102,7 +102,7 @@ impl DefineIndexStatement {
 			};
 			stm.compute(stk, ctx, opt, doc).await?;
 		} else {
-			txn.batch()
+			todo!()
 		}
 		// Ok all good
 		Ok(Value::None)

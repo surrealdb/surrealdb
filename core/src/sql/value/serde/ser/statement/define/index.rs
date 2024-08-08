@@ -47,6 +47,7 @@ pub struct SerializeDefineIndexStatement {
 	comment: Option<Strand>,
 	if_not_exists: bool,
 	overwrite: bool,
+	concurrently: bool,
 }
 
 impl serde::ser::SerializeStruct for SerializeDefineIndexStatement {
@@ -97,6 +98,7 @@ impl serde::ser::SerializeStruct for SerializeDefineIndexStatement {
 			comment: self.comment,
 			if_not_exists: self.if_not_exists,
 			overwrite: self.overwrite,
+			concurrently: self.concurrently,
 		})
 	}
 }
