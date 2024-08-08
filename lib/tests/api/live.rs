@@ -10,6 +10,7 @@ use surrealdb::Action;
 use surrealdb::Notification;
 use surrealdb_core::sql::Object;
 use tokio::sync::RwLock;
+use tokio::time::{sleep, Duration};
 use tracing::info;
 
 const LQ_TIMEOUT: Duration = Duration::from_secs(1);
@@ -33,6 +34,9 @@ async fn live_select_table() {
 
 		// Start listening
 		let mut users = db.select(&table).live().await.unwrap();
+
+		// Prevent race condition where the live query is not yet listening
+		sleep(Duration::from_millis(1000)).await;
 
 		// Create a record
 		let created: Vec<RecordId> = db.create(table).await.unwrap();
@@ -74,6 +78,9 @@ async fn live_select_table() {
 		// Start listening
 		let mut users = db.select(Resource::from(&table)).live().await.unwrap();
 
+		// Prevent race condition where the live query is not yet listening
+		sleep(Duration::from_millis(1000)).await;
+
 		// Create a record
 		db.create(Resource::from(&table)).await.unwrap();
 		// Pull the notification
@@ -106,6 +113,9 @@ async fn live_select_record_id() {
 
 		// Start listening
 		let mut users = db.select(&record_id).live().await.unwrap();
+
+		// Prevent race condition where the live query is not yet listening
+		sleep(Duration::from_millis(1000)).await;
 
 		// Create a record
 		let created: Option<RecordId> = db.create(record_id).await.unwrap();
@@ -149,6 +159,9 @@ async fn live_select_record_id() {
 		// Start listening
 		let mut users = db.select(Resource::from(&record_id)).live().await.unwrap();
 
+		// Prevent race condition where the live query is not yet listening
+		sleep(Duration::from_millis(1000)).await;
+
 		// Create a record
 		db.create(Resource::from(record_id)).await.unwrap();
 		// Pull the notification
@@ -181,6 +194,9 @@ async fn live_select_record_ranges() {
 
 		// Start listening
 		let mut users = db.select(&table).range("jane".."john").live().await.unwrap();
+
+		// Prevent race condition where the live query is not yet listening
+		sleep(Duration::from_millis(1000)).await;
 
 		// Create a record
 		let created: Option<RecordId> = db.create((table, "jane")).await.unwrap();
@@ -225,6 +241,9 @@ async fn live_select_record_ranges() {
 		// Start listening
 		let mut users =
 			db.select(Resource::from(&table)).range("jane".."john").live().await.unwrap();
+
+		// Prevent race condition where the live query is not yet listening
+		sleep(Duration::from_millis(1000)).await;
 
 		// Create a record
 		let created_value = match db.create(Resource::from((table, "job"))).await.unwrap() {
@@ -288,6 +307,9 @@ async fn live_select_query() {
 			.unwrap();
 		let users = Arc::new(RwLock::new(users));
 
+		// Prevent race condition where the live query is not yet listening
+		sleep(Duration::from_millis(1000)).await;
+
 		// Create a record
 		info!("Creating record");
 		let created: Vec<RecordId> = db.create(table).await.unwrap();
@@ -343,6 +365,9 @@ async fn live_select_query() {
 			.stream::<Value>(0)
 			.unwrap();
 
+		// Prevent race condition where the live query is not yet listening
+		sleep(Duration::from_millis(1000)).await;
+
 		// Create a record
 		db.create(Resource::from(&table)).await.unwrap();
 		// Pull the notification
@@ -365,6 +390,9 @@ async fn live_select_query() {
 			.unwrap()
 			.stream::<Notification<_>>(())
 			.unwrap();
+
+		// Prevent race condition where the live query is not yet listening
+		sleep(Duration::from_millis(1000)).await;
 
 		// Create a record
 		let created: Vec<RecordId> = db.create(table).await.unwrap();
@@ -407,6 +435,9 @@ async fn live_select_query() {
 			.unwrap()
 			.stream::<Value>(())
 			.unwrap();
+
+		// Prevent race condition where the live query is not yet listening
+		sleep(Duration::from_millis(1000)).await;
 
 		// Create a record
 		db.create(Resource::from(&table)).await.unwrap();
