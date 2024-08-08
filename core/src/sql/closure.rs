@@ -28,7 +28,7 @@ impl Closure {
 		doc: Option<&CursorDoc<'_>>,
 		args: Vec<Value>,
 	) -> Result<Value, Error> {
-		let mut ctx = Context::new(ctx);
+		let mut ctx = Context::new_isolated(ctx);
 		for (i, (name, kind)) in self.args.iter().enumerate() {
 			match (kind, args.get(i)) {
 				(Kind::Option(_), None) => continue,
