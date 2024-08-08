@@ -165,11 +165,6 @@ build.allow_build_instructions = [
 # Other (e.g. Unsafe, Filesystem, Network, Procedural Macros...)
 #
 
-[pkg.surrealdb-core]
-build.allow_build_instructions = [
-    "cargo::rustc-check-cfg=cfg(storage)",
-]
-
 [pkg.thiserror-impl]
 allow_proc_macro = true
 
@@ -1183,6 +1178,9 @@ allow_unsafe = true
 allow_apis = [
     "net",
     "fs",
+]
+build.allow_build_instructions = [
+    "cargo::rustc-check-cfg=cfg(storage)",
 ]
 
 [pkg.assert_fs]
