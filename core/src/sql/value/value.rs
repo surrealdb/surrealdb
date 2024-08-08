@@ -71,7 +71,7 @@ impl From<&Tables> for Values {
 	}
 }
 
-#[revisioned(revision = 2)]
+#[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[serde(rename = "$surrealdb::private::sql::Value")]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
@@ -121,9 +121,9 @@ pub enum Value {
 	Expression(Box<Expression>),
 	Query(Query),
 	Model(Box<Model>),
-	// Add new variants here
-	#[revision(start = 2)]
+	//
 	Closure(Box<Closure>),
+	// Add new variants here
 }
 
 impl Eq for Value {}

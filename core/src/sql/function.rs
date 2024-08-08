@@ -20,7 +20,7 @@ use super::Kind;
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Function";
 
-#[revisioned(revision = 2)]
+#[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
 #[serde(rename = "$surrealdb::private::sql::Function")]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
@@ -29,7 +29,7 @@ pub enum Function {
 	Normal(String, Vec<Value>),
 	Custom(String, Vec<Value>),
 	Script(Script, Vec<Value>),
-	#[revision(start = 2)]
+	//
 	Anonymous(Value, Vec<Value>),
 	// Add new variants here
 }

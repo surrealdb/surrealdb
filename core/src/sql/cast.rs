@@ -43,6 +43,9 @@ impl Cast {
 	) -> Result<Value, Error> {
 		// Compute the value to be cast and convert it
 		match &self.0 {
+			// We do not compute the value here. As an example,
+			// casting a block into a closure converts it in a way
+			// where it stays uncomputed, until the closure is executed
 			Kind::Closure => self.1.clone().convert_to_closure().into(),
 			kind => stk.run(|stk| self.1.compute(stk, ctx, opt, doc)).await?.convert_to(kind),
 		}
