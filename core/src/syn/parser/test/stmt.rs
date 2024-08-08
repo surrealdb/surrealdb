@@ -1516,6 +1516,7 @@ fn parse_define_index() {
 			comment: None,
 			if_not_exists: false,
 			overwrite: false,
+			concurrently: false
 		}))
 	);
 
@@ -1532,6 +1533,7 @@ fn parse_define_index() {
 			comment: None,
 			if_not_exists: false,
 			overwrite: false,
+			concurrently: false
 		}))
 	);
 
@@ -1557,6 +1559,7 @@ fn parse_define_index() {
 			comment: None,
 			if_not_exists: false,
 			overwrite: false,
+			concurrently: false
 		}))
 	);
 
@@ -1583,6 +1586,7 @@ fn parse_define_index() {
 			comment: None,
 			if_not_exists: false,
 			overwrite: false,
+			concurrently: false
 		}))
 	);
 }

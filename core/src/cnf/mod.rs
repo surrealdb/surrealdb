@@ -31,7 +31,7 @@ pub static NORMAL_FETCH_SIZE: Lazy<u32> = lazy_env_parse!("SURREAL_NORMAL_FETCH_
 /// The maximum number of keys that should be scanned at once for export queries.
 pub static EXPORT_BATCH_SIZE: Lazy<u32> = lazy_env_parse!("SURREAL_EXPORT_BATCH_SIZE", u32, 1000);
 
-/// The maximum number of keys that should be fetched when streaming range scanns in a Scanner.
+/// The maximum number of keys that should be fetched when streaming range scans in a Scanner.
 pub static MAX_STREAM_BATCH_SIZE: Lazy<u32> =
 	lazy_env_parse!("SURREAL_MAX_STREAM_BATCH_SIZE", u32, 1000);
 
