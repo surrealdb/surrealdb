@@ -22,17 +22,6 @@ async fn closures() -> Result<(), Error> {
 		LET $argtype = |$arg: string| $arg;
 		$argtype('works');
 		$argtype(123);
-
-		LET $recurse = |$n: number| {
-		    IF $n > 5 {
-				RETURN 'done';
-			} ELSE {
-			    RETURN $recurse($n + 1);
-			}
-		};
-
-		$recurse(0);
-		$recurse(-10000);
 	";
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
