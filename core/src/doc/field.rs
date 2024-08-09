@@ -124,13 +124,13 @@ impl Document {
 						// Otherwise let's process the ASSERT clause
 						_ => {
 							// Configure the context
-					let mut ctx = MutableContext::new(ctx);
-					let v = Arc::new(val.clone());
-					ctx.add_value("input", inp.clone());
-					ctx.add_value("value", v.clone());
-					ctx.add_value("after", v);
-					ctx.add_value("before", old.clone());
-					let ctx = ctx.freeze();
+							let mut ctx = MutableContext::new(ctx);
+							let v = Arc::new(val.clone());
+							ctx.add_value("input", inp.clone());
+							ctx.add_value("value", v.clone());
+							ctx.add_value("after", v);
+							ctx.add_value("before", old.clone());
+							let ctx = ctx.freeze();
 							// Process the ASSERT clause
 							if !expr.compute(stk, &ctx, opt, Some(&self.current)).await?.is_truthy()
 							{
