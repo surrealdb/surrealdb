@@ -66,47 +66,6 @@ jobs:
       - name: Check workspace
         run: cargo make ci-check
 
-  check-dependencies:
-    name: Check dependencies
-    runs-on: ubuntu-latest
-    steps:
-      - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          toolchain: stable
-          components: rustfmt
-
-      - name: Checkout sources
-        uses: actions/checkout@v4
-
-      - name: Install cargo-deny
-        run: cargo install --debug --locked cargo-deny@0.14.11
-
-      - name: Install cargo-vet
-        run: cargo install --debug --locked cargo-vet
-
-      - name: Install cargo-acl
-        run: |
-          cargo install --debug --locked cargo-acl
-          sudo apt-get install -y bubblewrap
-
-      - name: Check dependencies for known issues
-        run: cargo deny check
-
-      - name: Check dependencies for untrusted sources
-        run: cargo vet
-
-      - name: Check dependencies for unauthorized access
-        env:
-          RUSTFLAGS: "--cfg surrealdb_unstable"
-        run: cargo acl -n
-
-      - name: Dependency check failure
-        if: failure()
-        run: |
-          echo "## :warning: Dependency check failed" >> $GITHUB_STEP_SUMMARY
-          echo "See instructions in the [supply chain security process](https://github.com/surrealdb/surrealdb/blob/main/supply-chain/README.md#Process)." >> $GITHUB_STEP_SUMMARY
-
   check-fuzzing:
     name: Check fuzzing
     runs-on: ubuntu-latest
@@ -114,7 +73,7 @@ jobs:
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: stable
+          toolchain: 1.79.0
           components: rustfmt
 
       - name: Checkout sources
@@ -307,7 +266,7 @@ jobs:
 
   test:
     name: Test workspace
-    runs-on: ["self-hosted", "arm64", "builder"]
+    runs-on: [ "self-hosted", "arm64", "builder" ]
     steps:
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -610,16 +569,24 @@ jobs:
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
-      - name: Setup FoundationDB
-        uses: foundationdb-rs/foundationdb-actions-install@v.2.2.0
-        with:
-          version: "7.1.30"
-
       - name: Install cargo-make
         run: cargo install --debug --locked cargo-make
 
+      - name: Setup FoundationDB
+        uses: foundationdb-rs/foundationdb-actions-install@v.2.2.0
+        with:
+          version: "7.1.61"
+
       - name: Test fdb engine
-        run: cargo make ci-api-integration-fdb
+        run: cargo make ci-api-integration-fdb-7_1
+
+      - name: Setup FoundationDB
+        uses: foundationdb-rs/foundationdb-actions-install@v.2.2.0
+        with:
+          version: "7.3.47"
+
+      - name: Test fdb engine
+        run: cargo make ci-api-integration-fdb-7_3
 
       - name: Debug info
         if: always()

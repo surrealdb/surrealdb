@@ -1,7 +1,7 @@
 use reblessive::Stk;
 
 use crate::{
-	sql::{Function, Ident, Model},
+	sql::{Function, Ident, Model, Value},
 	syn::{
 		parser::{
 			mac::{expected, expected_whitespace, unexpected},
@@ -24,7 +24,13 @@ impl Parser<'_> {
 			name.push_str("::");
 			name.push_str(&self.next_token_value::<Ident>()?.0)
 		}
-		let start = expected!(self, t!("(")).span;
+		expected!(self, t!("(")).span;
+		let args = self.parse_function_args(ctx).await?;
+		Ok(Function::Custom(name, args))
+	}
+
+	pub async fn parse_function_args(&mut self, ctx: &mut Stk) -> ParseResult<Vec<Value>> {
+		let start = self.last_span();
 		let mut args = Vec::new();
 		loop {
 			if self.eat(t!(")")) {
@@ -39,8 +45,7 @@ impl Parser<'_> {
 				break;
 			}
 		}
-
-		Ok(Function::Custom(name, args))
+		Ok(args)
 	}
 
 	/// Parse a model invocation

@@ -1,5 +1,5 @@
+use ahash::{HashMap, HashMapExt};
 use futures::future::join_all;
-use hashbrown::HashMap;
 use std::sync::atomic::Ordering::Relaxed;
 use std::sync::atomic::{AtomicBool, AtomicUsize};
 use tokio::sync::Mutex;
@@ -26,8 +26,9 @@ impl<V> ConcurrentLru<V>
 where
 	V: Clone,
 {
-	pub(super) fn new(capacity: usize) -> Self {
-		let shards_count = num_cpus::get().min(capacity);
+	pub(super) fn with_capacity(capacity: usize) -> Self {
+		// slightly more than the number of CPU cores
+		let shards_count = (num_cpus::get() * 4 / 3).min(capacity);
 		let mut shards = Vec::with_capacity(shards_count);
 		let mut lengths = Vec::with_capacity(shards_count);
 		for _ in 0..shards_count {
@@ -47,10 +48,7 @@ where
 		// Locate the shard
 		let n = key as usize % self.shards_count;
 		// Get and promote the key
-		let mut shard = self.shards[n].lock().await;
-		let v = shard.get_and_promote(key);
-		drop(shard);
-		v
+		self.shards[n].lock().await.get_and_promote(key)
 	}
 
 	pub(super) async fn insert<K: Into<CacheKey>>(&self, key: K, val: V) {
@@ -58,9 +56,7 @@ where
 		// Locate the shard
 		let shard = key as usize % self.shards_count;
 		// Insert the key/object in the shard and get the new length
-		let mut s = self.shards[shard].lock().await;
-		let new_length = s.insert(key, val, self.full.load(Relaxed));
-		drop(s);
+		let new_length = self.shards[shard].lock().await.insert(key, val, self.full.load(Relaxed));
 		// Update lengths
 		self.check_length(new_length, shard);
 	}
@@ -70,9 +66,7 @@ where
 		// Locate the shard
 		let shard = key as usize % self.shards_count;
 		// Remove the key
-		let mut s = self.shards[shard].lock().await;
-		let new_length = s.remove(key);
-		drop(s);
+		let new_length = self.shards[shard].lock().await.remove(key);
 		// Update lengths
 		self.check_length(new_length, shard);
 	}
@@ -101,9 +95,7 @@ where
 			.shards
 			.iter()
 			.map(|s| async {
-				let s = s.lock().await;
-				let shard = s.duplicate(filter);
-				drop(s);
+				let shard = s.lock().await.duplicate(filter);
 				(shard.map.len(), Mutex::new(shard))
 			})
 			.collect();
@@ -139,7 +131,7 @@ where
 {
 	fn new() -> Self {
 		Self {
-			map: HashMap::new(),
+			map: HashMap::default(),
 			vec: Vec::new(),
 		}
 	}
@@ -242,7 +234,7 @@ mod tests {
 
 	#[test(tokio::test)]
 	async fn test_minimal_tree_lru() {
-		let lru = ConcurrentLru::new(1);
+		let lru = ConcurrentLru::with_capacity(1);
 		assert_eq!(lru.len(), 0);
 		//
 		lru.insert(1u64, 'a').await;
@@ -270,7 +262,7 @@ mod tests {
 
 	#[test(tokio::test)]
 	async fn test_tree_lru() {
-		let lru = ConcurrentLru::new(4);
+		let lru = ConcurrentLru::with_capacity(4);
 		//
 		lru.insert(1u64, 'a').await;
 		lru.insert(2u64, 'b').await;
@@ -302,7 +294,7 @@ mod tests {
 	#[test(tokio::test(flavor = "multi_thread"))]
 	async fn concurrent_lru_test() {
 		let num_threads = 4;
-		let lru = ConcurrentLru::new(100);
+		let lru = ConcurrentLru::with_capacity(100);
 
 		let futures: Vec<_> = (0..num_threads)
 			.map(|_| async {

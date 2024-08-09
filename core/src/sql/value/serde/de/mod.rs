@@ -1,5 +1,4 @@
 use crate::sql::constant::ConstantValue;
-use crate::sql::id::Gen;
 use crate::sql::Value;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
@@ -174,6 +173,8 @@ fn into_json(value: Value, simplify: bool) -> JsonValue {
 		}
 	}
 
+	// TODO: Checkout blame for why these are here.
+	/*
 	#[derive(Serialize)]
 	enum Id {
 		Number(i64),
@@ -212,6 +213,7 @@ fn into_json(value: Value, simplify: bool) -> JsonValue {
 			}
 		}
 	}
+	*/
 
 	match value {
 		// These value types are simple values which

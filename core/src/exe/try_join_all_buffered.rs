@@ -32,17 +32,17 @@ where
 	I::Item: TryFuture,
 {
 	#[cfg(target_arch = "wasm32")]
-	const LIMIT: usize = 1;
+	let limit: usize = 1;
 
 	#[cfg(not(target_arch = "wasm32"))]
-	const LIMIT: usize = crate::cnf::MAX_CONCURRENT_TASKS;
+	let limit: usize = *crate::cnf::MAX_CONCURRENT_TASKS;
 
 	let mut input = iter.into_iter();
 	let (lo, hi) = input.size_hint();
 	let initial_capacity = hi.unwrap_or(lo);
 	let mut active = FuturesOrdered::new();
 
-	while active.len() < LIMIT {
+	while active.len() < limit {
 		if let Some(next) = input.next() {
 			active.push_back(TryFutureExt::into_future(next));
 		} else {

@@ -38,8 +38,14 @@ impl Default for Kind {
 }
 
 impl Kind {
-	fn is_any(&self) -> bool {
+	// Returns true if this type is an `any`
+	pub(crate) fn is_any(&self) -> bool {
 		matches!(self, Kind::Any)
+	}
+
+	// Returns true if this type is a record
+	pub(crate) fn is_record(&self) -> bool {
+		matches!(self, Kind::Record(_))
 	}
 
 	// return the kind of the contained value.

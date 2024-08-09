@@ -20,7 +20,7 @@ pub(super) struct Postings {
 impl Postings {
 	pub(super) async fn new(
 		ixs: &IndexStores,
-		tx: &mut Transaction,
+		tx: &Transaction,
 		index_key_base: IndexKeyBase,
 		order: u32,
 		tt: TransactionType,
@@ -51,7 +51,7 @@ impl Postings {
 
 	pub(super) async fn update_posting(
 		&mut self,
-		tx: &mut Transaction,
+		tx: &Transaction,
 		term_id: TermId,
 		doc_id: DocId,
 		term_freq: TermFrequency,
@@ -62,7 +62,7 @@ impl Postings {
 
 	pub(super) async fn get_term_frequency(
 		&self,
-		tx: &mut Transaction,
+		tx: &Transaction,
 		term_id: TermId,
 		doc_id: DocId,
 	) -> Result<Option<TermFrequency>, Error> {
@@ -72,7 +72,7 @@ impl Postings {
 
 	pub(super) async fn remove_posting(
 		&mut self,
-		tx: &mut Transaction,
+		tx: &Transaction,
 		term_id: TermId,
 		doc_id: DocId,
 	) -> Result<Option<TermFrequency>, Error> {
@@ -80,11 +80,11 @@ impl Postings {
 		self.btree.delete(tx, &mut self.store, key).await
 	}
 
-	pub(super) async fn statistics(&self, tx: &mut Transaction) -> Result<BStatistics, Error> {
+	pub(super) async fn statistics(&self, tx: &Transaction) -> Result<BStatistics, Error> {
 		self.btree.statistics(tx, &self.store).await
 	}
 
-	pub(super) async fn finish(&mut self, tx: &mut Transaction) -> Result<(), Error> {
+	pub(super) async fn finish(&mut self, tx: &Transaction) -> Result<(), Error> {
 		if let Some(new_cache) = self.store.finish(tx).await? {
 			let state = self.btree.inc_generation();
 			tx.set(self.state_key.clone(), state.try_to_val()?).await?;
@@ -106,15 +106,15 @@ mod tests {
 		order: u32,
 		tt: TransactionType,
 	) -> (Transaction, Postings) {
-		let mut tx = ds.transaction(tt, Optimistic).await.unwrap();
-		let p = Postings::new(ds.index_store(), &mut tx, IndexKeyBase::default(), order, tt, 100)
+		let tx = ds.transaction(tt, Optimistic).await.unwrap();
+		let p = Postings::new(ds.index_store(), &tx, IndexKeyBase::default(), order, tt, 100)
 			.await
 			.unwrap();
 		(tx, p)
 	}
 
-	async fn finish(mut tx: Transaction, mut p: Postings) {
-		p.finish(&mut tx).await.unwrap();
+	async fn finish(tx: Transaction, mut p: Postings) {
+		p.finish(&tx).await.unwrap();
 		tx.commit().await.unwrap();
 	}
 
@@ -129,33 +129,33 @@ mod tests {
 			let (tx, p) = new_operation(&ds, DEFAULT_BTREE_ORDER, Write).await;
 			finish(tx, p).await;
 
-			let (mut tx, p) = new_operation(&ds, DEFAULT_BTREE_ORDER, Read).await;
-			assert_eq!(p.statistics(&mut tx).await.unwrap().keys_count, 0);
+			let (tx, p) = new_operation(&ds, DEFAULT_BTREE_ORDER, Read).await;
+			assert_eq!(p.statistics(&tx).await.unwrap().keys_count, 0);
 
 			// Add postings
-			let (mut tx, mut p) = new_operation(&ds, DEFAULT_BTREE_ORDER, Write).await;
-			p.update_posting(&mut tx, 1, 2, 3).await.unwrap();
-			p.update_posting(&mut tx, 1, 4, 5).await.unwrap();
+			let (tx, mut p) = new_operation(&ds, DEFAULT_BTREE_ORDER, Write).await;
+			p.update_posting(&tx, 1, 2, 3).await.unwrap();
+			p.update_posting(&tx, 1, 4, 5).await.unwrap();
 			finish(tx, p).await;
 
-			let (mut tx, p) = new_operation(&ds, DEFAULT_BTREE_ORDER, Read).await;
-			assert_eq!(p.statistics(&mut tx).await.unwrap().keys_count, 2);
+			let (tx, p) = new_operation(&ds, DEFAULT_BTREE_ORDER, Read).await;
+			assert_eq!(p.statistics(&tx).await.unwrap().keys_count, 2);
 
-			assert_eq!(p.get_term_frequency(&mut tx, 1, 2).await.unwrap(), Some(3));
-			assert_eq!(p.get_term_frequency(&mut tx, 1, 4).await.unwrap(), Some(5));
+			assert_eq!(p.get_term_frequency(&tx, 1, 2).await.unwrap(), Some(3));
+			assert_eq!(p.get_term_frequency(&tx, 1, 4).await.unwrap(), Some(5));
 
-			let (mut tx, mut p) = new_operation(&ds, DEFAULT_BTREE_ORDER, Write).await;
+			let (tx, mut p) = new_operation(&ds, DEFAULT_BTREE_ORDER, Write).await;
 			// Check removal of doc 2
-			assert_eq!(p.remove_posting(&mut tx, 1, 2).await.unwrap(), Some(3));
+			assert_eq!(p.remove_posting(&tx, 1, 2).await.unwrap(), Some(3));
 			// Again the same
-			assert_eq!(p.remove_posting(&mut tx, 1, 2).await.unwrap(), None);
+			assert_eq!(p.remove_posting(&tx, 1, 2).await.unwrap(), None);
 			// Remove doc 4
-			assert_eq!(p.remove_posting(&mut tx, 1, 4).await.unwrap(), Some(5));
+			assert_eq!(p.remove_posting(&tx, 1, 4).await.unwrap(), Some(5));
 			finish(tx, p).await;
 
 			// The underlying b-tree should be empty now
-			let (mut tx, p) = new_operation(&ds, DEFAULT_BTREE_ORDER, Read).await;
-			assert_eq!(p.statistics(&mut tx).await.unwrap().keys_count, 0);
+			let (tx, p) = new_operation(&ds, DEFAULT_BTREE_ORDER, Read).await;
+			assert_eq!(p.statistics(&tx).await.unwrap().keys_count, 0);
 		}
 	}
 }

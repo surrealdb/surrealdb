@@ -1,9 +1,8 @@
 use crate::cf::{ChangeSet, DatabaseMutation, TableMutations};
 use crate::err::Error;
 use crate::key::change;
-#[cfg(debug_assertions)]
-use crate::key::debug::sprint_key;
-use crate::kvs::{Limit, ScanPage, Transaction};
+use crate::key::debug::Sprintable;
+use crate::kvs::Transaction;
 use crate::sql::statements::show::ShowSince;
 use crate::vs;
 
@@ -16,18 +15,19 @@ use crate::vs;
 // You can use this to read the change feed in chunks.
 // The second call would start from the last versionstamp + 1 of the first call.
 pub async fn read(
-	tx: &mut Transaction,
+	tx: &Transaction,
 	ns: &str,
 	db: &str,
 	tb: Option<&str>,
 	start: ShowSince,
 	limit: Option<u32>,
 ) -> Result<Vec<ChangeSet>, Error> {
+	// Calculate the start of the changefeed range
 	let beg = match start {
 		ShowSince::Versionstamp(x) => change::prefix_ts(ns, db, vs::u64_to_versionstamp(x)),
 		ShowSince::Timestamp(x) => {
 			let ts = x.0.timestamp() as u64;
-			let vs = tx.get_versionstamp_from_timestamp(ts, ns, db, true).await?;
+			let vs = tx.lock().await.get_versionstamp_from_timestamp(ts, ns, db, true).await?;
 			match vs {
 				Some(vs) => change::prefix_ts(ns, db, vs),
 				None => {
@@ -38,63 +38,49 @@ pub async fn read(
 			}
 		}
 	};
+	// Calculate the end of the changefeed range
 	let end = change::suffix(ns, db);
-
-	let limit = limit.unwrap_or(100);
-
-	let scan = tx
-		.scan_paged(
-			ScanPage {
-				range: beg..end,
-				limit: Limit::Limited(limit),
-			},
-			limit,
-		)
-		.await?;
-
+	// Limit the changefeed results with a default
+	let limit = limit.unwrap_or(100).min(1000);
+	// Create an empty buffer for the versionstamp
 	let mut vs: Option<[u8; 10]> = None;
+	// Create an empty buffer for the table mutations
 	let mut buf: Vec<TableMutations> = Vec::new();
-
-	let mut r = Vec::<ChangeSet>::new();
+	// Create an empty buffer for the final changesets
+	let mut res = Vec::<ChangeSet>::new();
 	// iterate over _x and put decoded elements to r
-	for (k, v) in scan.values {
+	for (k, v) in tx.scan(beg..end, limit).await? {
 		#[cfg(debug_assertions)]
-		trace!("read change feed; {}", sprint_key(&k));
-
+		trace!("Reading change feed entry: {}", k.sprint());
+		// Decode the changefeed entry key
 		let dec = crate::key::change::Cf::decode(&k).unwrap();
-
-		if let Some(tb) = tb {
-			if dec.tb != tb {
-				continue;
-			}
+		// Check the change is for the desired table
+		if tb.is_some_and(|tb| tb != dec.tb) {
+			continue;
 		}
-
-		let _tb = dec.tb;
-		let ts = dec.vs;
-
 		// Decode the byte array into a vector of operations
 		let tb_muts: TableMutations = v.into();
-
+		// Get the timestamp of the changefeed entry
 		match vs {
 			Some(x) => {
-				if ts != x {
+				if dec.vs != x {
 					let db_mut = DatabaseMutation(buf);
-					r.push(ChangeSet(x, db_mut));
+					res.push(ChangeSet(x, db_mut));
 					buf = Vec::new();
-					vs = Some(ts)
+					vs = Some(dec.vs)
 				}
 			}
 			None => {
-				vs = Some(ts);
+				vs = Some(dec.vs);
 			}
 		}
 		buf.push(tb_muts);
 	}
-
+	// Collect all mutations together
 	if !buf.is_empty() {
 		let db_mut = DatabaseMutation(buf);
-		r.push(ChangeSet(vs.unwrap(), db_mut));
+		res.push(ChangeSet(vs.unwrap(), db_mut));
 	}
-
-	Ok(r)
+	// Return the results
+	Ok(res)
 }

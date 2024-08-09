@@ -24,15 +24,15 @@ impl RemoveParamStatement {
 		let future = async {
 			// Allowed to run?
 			opt.is_allowed(Action::Edit, ResourceKind::Parameter, &Base::Db)?;
-			// Claim transaction
-			let mut run = ctx.tx_lock().await;
-			// Clear the cache
-			run.clear_cache();
+			// Get the transaction
+			let txn = ctx.tx();
 			// Get the definition
-			let pa = run.get_db_param(opt.ns()?, opt.db()?, &self.name).await?;
+			let pa = txn.get_db_param(opt.ns()?, opt.db()?, &self.name).await?;
 			// Delete the definition
 			let key = crate::key::database::pa::new(opt.ns()?, opt.db()?, &pa.name);
-			run.del(key).await?;
+			txn.del(key).await?;
+			// Clear the cache
+			txn.clear();
 			// Ok all good
 			Ok(Value::None)
 		}

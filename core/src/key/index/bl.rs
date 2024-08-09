@@ -1,7 +1,7 @@
 //! Stores BTree nodes for doc lengths
 use crate::idx::trees::store::NodeId;
-use crate::key::error::KeyCategory;
-use crate::key::key_req::KeyRequirements;
+use crate::key::category::Categorise;
+use crate::key::category::Category;
 use derive::Key;
 use serde::{Deserialize, Serialize};
 
@@ -23,9 +23,9 @@ pub struct Bl<'a> {
 	pub node_id: Option<NodeId>,
 }
 
-impl KeyRequirements for Bl<'_> {
-	fn key_category(&self) -> KeyCategory {
-		KeyCategory::IndexBTreeNodeDocLengths
+impl Categorise for Bl<'_> {
+	fn categorise(&self) -> Category {
+		Category::IndexBTreeNodeDocLengths
 	}
 }
 

@@ -1,5 +1,5 @@
 use super::headers::Accept;
-use crate::dbs::DB;
+use super::AppState;
 use crate::err::Error;
 use crate::net::input::bytes_to_utf8;
 use crate::net::output;
@@ -8,9 +8,8 @@ use axum::response::IntoResponse;
 use axum::routing::post;
 use axum::Extension;
 use axum::Router;
-use axum::TypedHeader;
+use axum_extra::TypedHeader;
 use bytes::Bytes;
-use http_body::Body as HttpBody;
 use surrealdb::dbs::Session;
 use surrealdb::iam::Action::Edit;
 use surrealdb::iam::ResourceKind::Any;
@@ -18,11 +17,8 @@ use tower_http::limit::RequestBodyLimitLayer;
 
 const MAX: usize = 1024 * 1024 * 1024 * 4; // 4 GiB
 
-pub(super) fn router<S, B>() -> Router<S, B>
+pub(super) fn router<S>() -> Router<S>
 where
-	B: HttpBody + Send + 'static,
-	B::Data: Send,
-	B::Error: std::error::Error + Send + Sync + 'static,
 	S: Clone + Send + Sync + 'static,
 {
 	Router::new()
@@ -32,12 +28,13 @@ where
 }
 
 async fn handler(
+	Extension(state): Extension<AppState>,
 	Extension(session): Extension<Session>,
 	accept: Option<TypedHeader<Accept>>,
 	sql: Bytes,
 ) -> Result<impl IntoResponse, impl IntoResponse> {
 	// Get the datastore reference
-	let db = DB.get().unwrap();
+	let db = &state.datastore;
 	// Convert the body to a byte slice
 	let sql = bytes_to_utf8(&sql)?;
 	// Check the permissions level

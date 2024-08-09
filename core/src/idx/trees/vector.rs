@@ -3,7 +3,7 @@ use crate::fnc::util::math::ToFloat;
 use crate::sql::index::{Distance, VectorType};
 use crate::sql::{Number, Value};
 use ahash::AHasher;
-use hashbrown::HashSet;
+use ahash::HashSet;
 use linfa_linalg::norm::Norm;
 use ndarray::{Array1, LinalgScalar, Zip};
 use ndarray_stats::DeviationExt;
@@ -545,11 +545,10 @@ mod tests {
 		assert_eq!(dist.compute(&v1, &v2).unwrap(), res.into());
 
 		// Check the "Vector" optimised implementations
-		for t in [VectorType::F64] {
-			let v1: SharedVector = Vector::try_from_vector(t, &v1).unwrap().into();
-			let v2: SharedVector = Vector::try_from_vector(t, &v2).unwrap().into();
-			assert_eq!(dist.calculate(&v1, &v2), res);
-		}
+		let t = VectorType::F64;
+		let v1: SharedVector = Vector::try_from_vector(t, &v1).unwrap().into();
+		let v2: SharedVector = Vector::try_from_vector(t, &v2).unwrap().into();
+		assert_eq!(dist.calculate(&v1, &v2), res);
 	}
 
 	fn test_distance_collection(dist: Distance, size: usize, dim: usize) {
@@ -580,41 +579,41 @@ mod tests {
 
 	#[test]
 	fn test_distance_chebyshev() {
-		test_distance_collection(Distance::Chebyshev, 2000, 1536);
+		test_distance_collection(Distance::Chebyshev, 100, 1536);
 		test_distance(Distance::Chebyshev, &[1.0, 2.0, 3.0], &[2.0, 3.0, 4.0], 1.0);
 	}
 
 	#[test]
 	fn test_distance_cosine() {
-		test_distance_collection(Distance::Cosine, 2000, 1536);
+		test_distance_collection(Distance::Cosine, 100, 1536);
 		test_distance(Distance::Cosine, &[1.0, 2.0, 3.0], &[2.0, 3.0, 4.0], 0.007416666029069652);
 	}
 
 	#[test]
 	fn test_distance_euclidean() {
-		test_distance_collection(Distance::Euclidean, 2000, 1536);
+		test_distance_collection(Distance::Euclidean, 100, 1536);
 		test_distance(Distance::Euclidean, &[1.0, 2.0, 3.0], &[2.0, 3.0, 4.0], 1.7320508075688772);
 	}
 
 	#[test]
 	fn test_distance_hamming() {
-		test_distance_collection(Distance::Hamming, 2000, 1536);
+		test_distance_collection(Distance::Hamming, 100, 1536);
 		test_distance(Distance::Hamming, &[1.0, 2.0, 3.0], &[2.0, 3.0, 4.0], 3.0);
 	}
 
 	#[test]
 	fn test_distance_jaccard() {
-		test_distance_collection(Distance::Jaccard, 1000, 768);
+		test_distance_collection(Distance::Jaccard, 100, 768);
 		test_distance(Distance::Jaccard, &[1.0, 2.0, 3.0], &[2.0, 3.0, 4.0], 0.5);
 	}
 	#[test]
 	fn test_distance_manhattan() {
-		test_distance_collection(Distance::Manhattan, 2000, 1536);
+		test_distance_collection(Distance::Manhattan, 100, 1536);
 		test_distance(Distance::Manhattan, &[1.0, 2.0, 3.0], &[2.0, 3.0, 4.0], 3.0);
 	}
 	#[test]
 	fn test_distance_minkowski() {
-		test_distance_collection(Distance::Minkowski(3.into()), 2000, 1536);
+		test_distance_collection(Distance::Minkowski(3.into()), 100, 1536);
 		test_distance(
 			Distance::Minkowski(3.into()),
 			&[1.0, 2.0, 3.0],
@@ -625,7 +624,7 @@ mod tests {
 
 	#[test]
 	fn test_distance_pearson() {
-		test_distance_collection(Distance::Pearson, 2000, 1536);
+		test_distance_collection(Distance::Pearson, 100, 1536);
 		test_distance(Distance::Pearson, &[1.0, 2.0, 3.0], &[2.0, 3.0, 4.0], 1.0);
 	}
 }

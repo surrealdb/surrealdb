@@ -3,6 +3,7 @@ use crate::dbs::Options;
 use crate::err::Error;
 use crate::exe::try_join_all_buffered;
 use crate::sql::array::Abolish;
+use crate::sql::part::DestructurePart;
 use crate::sql::part::Next;
 use crate::sql::part::Part;
 use crate::sql::value::Value;
@@ -25,6 +26,19 @@ impl Value {
 			Some(p) => match self {
 				// Current value at path is an object
 				Value::Object(v) => match p {
+					Part::All => match path.len() {
+						1 => {
+							v.clear();
+							Ok(())
+						}
+						_ => {
+							let path = path.next();
+							for v in v.values_mut() {
+								stk.run(|stk| v.del(stk, ctx, opt, path)).await?;
+							}
+							Ok(())
+						}
+					},
 					Part::Field(f) => match path.len() {
 						1 => {
 							v.remove(f.as_str());
@@ -64,6 +78,20 @@ impl Value {
 						},
 						_ => Ok(()),
 					},
+					Part::Destructure(parts) => {
+						for part in parts {
+							if matches!(part, DestructurePart::Aliased(_, _)) {
+								return Err(Error::UnsupportedDestructure {
+									variant: "An aliased".into(),
+								});
+							}
+
+							let path = [part.path().as_slice(), path.next()].concat();
+							stk.run(|stk| self.del(stk, ctx, opt, &path)).await?;
+						}
+
+						Ok(())
+					}
 					_ => Ok(()),
 				},
 				// Current value at path is an array

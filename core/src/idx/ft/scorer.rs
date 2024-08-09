@@ -40,7 +40,7 @@ impl BM25Scorer {
 
 	async fn term_score(
 		&self,
-		tx: &mut Transaction,
+		tx: &Transaction,
 		doc_id: DocId,
 		term_doc_count: DocLength,
 		term_frequency: TermFrequency,
@@ -53,7 +53,7 @@ impl BM25Scorer {
 
 	pub(crate) async fn score(
 		&self,
-		tx: &mut Transaction,
+		tx: &Transaction,
 		doc_id: DocId,
 	) -> Result<Option<Score>, Error> {
 		let mut sc = 0.0;

@@ -2,7 +2,7 @@ use crate::err::Error;
 use crate::idx::trees::store::cache::TreeCache;
 use crate::idx::trees::store::{NodeId, StoredNode, TreeNode, TreeNodeProvider};
 use crate::kvs::{Key, Transaction};
-use hashbrown::{HashMap, HashSet};
+use ahash::{HashMap, HashSet};
 use std::fmt::{Debug, Display};
 use std::mem;
 use std::sync::Arc;
@@ -30,18 +30,18 @@ where
 		Self {
 			np,
 			cache,
-			cached: HashSet::new(),
-			nodes: HashMap::new(),
-			updated: HashSet::new(),
-			removed: HashMap::new(),
+			cached: Default::default(),
+			nodes: Default::default(),
+			updated: Default::default(),
+			removed: Default::default(),
 			#[cfg(debug_assertions)]
-			out: HashSet::new(),
+			out: Default::default(),
 		}
 	}
 
 	pub(super) async fn get_node_mut(
 		&mut self,
-		tx: &mut Transaction,
+		tx: &Transaction,
 		node_id: NodeId,
 	) -> Result<StoredNode<N>, Error> {
 		#[cfg(debug_assertions)]
@@ -95,10 +95,7 @@ where
 		Ok(())
 	}
 
-	pub(super) async fn finish(
-		&mut self,
-		tx: &mut Transaction,
-	) -> Result<Option<TreeCache<N>>, Error> {
+	pub(super) async fn finish(&mut self, tx: &Transaction) -> Result<Option<TreeCache<N>>, Error> {
 		#[cfg(debug_assertions)]
 		{
 			if !self.out.is_empty() {
@@ -167,7 +164,7 @@ where
 
 	pub(super) async fn get_node(
 		&self,
-		tx: &mut Transaction,
+		tx: &Transaction,
 		node_id: NodeId,
 	) -> Result<Arc<StoredNode<N>>, Error> {
 		let r = self.cache.get_node(tx, node_id).await?;

@@ -2,9 +2,12 @@ use crate::sql::{fmt::Fmt, strand::no_nul_bytes, Graph, Ident, Idiom, Number, Va
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
+use std::fmt::Write;
 use std::str;
 
-#[revisioned(revision = 1)]
+use super::fmt::{is_pretty, pretty_indent};
+
+#[revisioned(revision = 2)]
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
@@ -20,6 +23,8 @@ pub enum Part {
 	Value(Value),
 	Start(Value),
 	Method(#[serde(with = "no_nul_bytes")] String, Vec<Value>),
+	#[revision(start = 2)]
+	Destructure(Vec<DestructurePart>),
 }
 
 impl From<i32> for Part {
@@ -107,6 +112,22 @@ impl fmt::Display for Part {
 			Part::Graph(v) => write!(f, "{v}"),
 			Part::Value(v) => write!(f, "[{v}]"),
 			Part::Method(v, a) => write!(f, ".{v}({})", Fmt::comma_separated(a)),
+			Part::Destructure(v) => {
+				f.write_str(".{")?;
+				if !is_pretty() {
+					f.write_char(' ')?;
+				}
+				if !v.is_empty() {
+					let indent = pretty_indent();
+					write!(f, "{}", Fmt::pretty_comma_separated(v))?;
+					drop(indent);
+				}
+				if is_pretty() {
+					f.write_char('}')
+				} else {
+					f.write_str(" }")
+				}
+			}
 		}
 	}
 }
@@ -122,6 +143,78 @@ impl<'a> Next<'a> for &'a [Part] {
 		match self.len() {
 			0 => &[],
 			_ => &self[1..],
+		}
+	}
+}
+
+// ------------------------------
+
+pub trait NextMethod<'a> {
+	fn next_method(&'a self) -> &[Part];
+}
+
+impl<'a> NextMethod<'a> for &'a [Part] {
+	fn next_method(&'a self) -> &'a [Part] {
+		match self.iter().position(|p| matches!(p, Part::Method(_, _))) {
+			None => &[],
+			Some(i) => &self[i..],
+		}
+	}
+}
+
+impl<'a> NextMethod<'a> for &'a Idiom {
+	fn next_method(&'a self) -> &'a [Part] {
+		match self.iter().position(|p| matches!(p, Part::Method(_, _))) {
+			None => &[],
+			Some(i) => &self[i..],
+		}
+	}
+}
+
+// ------------------------------
+
+#[revisioned(revision = 1)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
+#[non_exhaustive]
+pub enum DestructurePart {
+	All(Ident),
+	Field(Ident),
+	Aliased(Ident, Idiom),
+	Destructure(Ident, Vec<DestructurePart>),
+}
+
+impl DestructurePart {
+	pub fn field(&self) -> &Ident {
+		match self {
+			DestructurePart::All(v) => v,
+			DestructurePart::Field(v) => v,
+			DestructurePart::Aliased(v, _) => v,
+			DestructurePart::Destructure(v, _) => v,
+		}
+	}
+
+	pub fn path(&self) -> Vec<Part> {
+		match self {
+			DestructurePart::All(v) => vec![Part::Field(v.clone()), Part::All],
+			DestructurePart::Field(v) => vec![Part::Field(v.clone())],
+			DestructurePart::Aliased(_, v) => v.0.clone(),
+			DestructurePart::Destructure(f, d) => {
+				vec![Part::Field(f.clone()), Part::Destructure(d.clone())]
+			}
+		}
+	}
+}
+
+impl fmt::Display for DestructurePart {
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		match self {
+			DestructurePart::All(fd) => write!(f, "{fd}.*"),
+			DestructurePart::Field(fd) => write!(f, "{fd}"),
+			DestructurePart::Aliased(fd, v) => write!(f, "{fd}: {v}"),
+			DestructurePart::Destructure(fd, d) => {
+				write!(f, "{fd}{}", Part::Destructure(d.clone()))
+			}
 		}
 	}
 }

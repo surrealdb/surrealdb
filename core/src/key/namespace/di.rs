@@ -1,6 +1,6 @@
-use crate::key::error::KeyCategory;
-use crate::key::key_req::KeyRequirements;
-/// Stores a database ID generator state
+//! Stores a database ID generator state
+use crate::key::category::Categorise;
+use crate::key::category::Category;
 use derive::Key;
 use serde::{Deserialize, Serialize};
 
@@ -19,9 +19,9 @@ pub fn new(ns: u32) -> Di {
 	Di::new(ns)
 }
 
-impl KeyRequirements for Di {
-	fn key_category(&self) -> KeyCategory {
-		KeyCategory::DatabaseIdentifier
+impl Categorise for Di {
+	fn categorise(&self) -> Category {
+		Category::DatabaseIdentifier
 	}
 }
 impl Di {

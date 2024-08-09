@@ -25,23 +25,20 @@ impl RemoveIndexStatement {
 		let future = async {
 			// Allowed to run?
 			opt.is_allowed(Action::Edit, ResourceKind::Index, &Base::Db)?;
-			// Claim transaction
-			let mut run = ctx.tx_lock().await;
+			// Get the transaction
+			let txn = ctx.tx();
 			// Clear the index store cache
 			ctx.get_index_stores()
-				.index_removed(&mut run, opt.ns()?, opt.db()?, &self.what, &self.name)
+				.index_removed(&txn, opt.ns()?, opt.db()?, &self.what, &self.name)
 				.await?;
-			// Clear the cache
-			run.clear_cache();
 			// Delete the definition
 			let key = crate::key::table::ix::new(opt.ns()?, opt.db()?, &self.what, &self.name);
-			run.del(key).await?;
+			txn.del(key).await?;
 			// Remove the index data
 			let key = crate::key::index::all::new(opt.ns()?, opt.db()?, &self.what, &self.name);
-			run.delp(key, u32::MAX).await?;
+			txn.delp(key).await?;
 			// Clear the cache
-			let key = crate::key::table::ix::prefix(opt.ns()?, opt.db()?, &self.what);
-			run.clr(key).await?;
+			txn.clear();
 			// Ok all good
 			Ok(Value::None)
 		}

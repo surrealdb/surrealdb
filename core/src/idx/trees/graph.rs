@@ -1,8 +1,8 @@
 use crate::idx::trees::dynamicset::DynamicSet;
-use hashbrown::hash_map::Entry;
-use hashbrown::HashMap;
+use ahash::HashMap;
 #[cfg(test)]
-use hashbrown::HashSet;
+use ahash::HashSet;
+use std::collections::hash_map::Entry;
 use std::fmt::Debug;
 use std::hash::Hash;
 
@@ -24,7 +24,7 @@ where
 	pub(super) fn new(capacity: usize) -> Self {
 		Self {
 			capacity,
-			nodes: HashMap::new(),
+			nodes: HashMap::default(),
 		}
 	}
 

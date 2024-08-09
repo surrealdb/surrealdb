@@ -210,14 +210,7 @@ impl Function {
 				// Check this function is allowed
 				ctx.check_allowed_function(name.as_str())?;
 				// Get the function definition
-				let val = {
-					// Claim transaction
-					let mut run = ctx.tx_lock().await;
-					// Get the function definition
-					let val = run.get_and_cache_db_function(opt.ns()?, opt.db()?, s).await?;
-					drop(run);
-					val
-				};
+				let val = ctx.tx().get_db_function(opt.ns()?, opt.db()?, s).await?;
 				// Check permissions
 				if opt.check_perms(Action::View)? {
 					match &val.permissions {

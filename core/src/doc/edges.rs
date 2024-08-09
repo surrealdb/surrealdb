@@ -21,8 +21,10 @@ impl<'a> Document<'a> {
 		if self.tb(ctx, opt).await?.drop {
 			return Ok(());
 		}
-		// Claim transaction
-		let mut run = ctx.tx_lock().await;
+		// Get the transaction
+		let txn = ctx.tx();
+		// Lock the transaction
+		let mut txn = txn.lock().await;
 		// Get the record id
 		let rid = self.id.as_ref().unwrap();
 		// Store the record edges
@@ -31,16 +33,16 @@ impl<'a> Document<'a> {
 			let (ref o, ref i) = (Dir::Out, Dir::In);
 			// Store the left pointer edge
 			let key = crate::key::graph::new(opt.ns()?, opt.db()?, &l.tb, &l.id, o, rid);
-			run.set(key, vec![]).await?;
+			txn.set(key, vec![]).await?;
 			// Store the left inner edge
 			let key = crate::key::graph::new(opt.ns()?, opt.db()?, &rid.tb, &rid.id, i, l);
-			run.set(key, vec![]).await?;
+			txn.set(key, vec![]).await?;
 			// Store the right inner edge
 			let key = crate::key::graph::new(opt.ns()?, opt.db()?, &rid.tb, &rid.id, o, r);
-			run.set(key, vec![]).await?;
+			txn.set(key, vec![]).await?;
 			// Store the right pointer edge
 			let key = crate::key::graph::new(opt.ns()?, opt.db()?, &r.tb, &r.id, i, rid);
-			run.set(key, vec![]).await?;
+			txn.set(key, vec![]).await?;
 			// Store the edges on the record
 			self.current.doc.to_mut().put(&*EDGE, Value::Bool(true));
 			self.current.doc.to_mut().put(&*IN, l.clone().into());

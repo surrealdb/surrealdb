@@ -1,19 +1,22 @@
 #![cfg(feature = "kv-tikv")]
 
 use crate::err::Error;
-use crate::key::error::KeyCategory;
+use crate::key::debug::Sprintable;
 use crate::kvs::Check;
 use crate::kvs::Key;
 use crate::kvs::Val;
-use crate::vs::{try_to_u64_be, u64_to_versionstamp, Versionstamp};
+use crate::vs::Versionstamp;
+use std::fmt::Debug;
 use std::ops::Range;
+use std::pin::Pin;
+use std::sync::Arc;
 use tikv::CheckLevel;
 use tikv::TimestampExt;
 use tikv::TransactionOptions;
 
 #[non_exhaustive]
 pub struct Datastore {
-	db: tikv::TransactionClient,
+	db: Pin<Arc<tikv::TransactionClient>>,
 }
 
 #[non_exhaustive]
@@ -26,6 +29,11 @@ pub struct Transaction {
 	check: Check,
 	/// The underlying datastore transaction
 	inner: tikv::Transaction,
+	// The above, supposedly 'static transaction
+	// actually points here, so we need to ensure
+	// the memory is kept alive. This pointer must
+	// be declared last, so that it is dropped last.
+	db: Pin<Arc<tikv::TransactionClient>>,
 }
 
 impl Drop for Transaction {
@@ -63,18 +71,13 @@ impl Datastore {
 	pub(crate) async fn new(path: &str) -> Result<Datastore, Error> {
 		match tikv::TransactionClient::new(vec![path]).await {
 			Ok(db) => Ok(Datastore {
-				db,
+				db: Arc::pin(db),
 			}),
 			Err(e) => Err(Error::Ds(e.to_string())),
 		}
 	}
 	/// Start a new transaction
 	pub(crate) async fn transaction(&self, write: bool, lock: bool) -> Result<Transaction, Error> {
-		// TiKV currently has issues with pessimistic locks. Panic in development.
-		#[cfg(debug_assertions)]
-		if lock {
-			panic!("There are issues with pessimistic locking in TiKV");
-		}
 		// Set whether this should be an optimistic or pessimistic transaction
 		let mut opt = if lock {
 			TransactionOptions::new_pessimistic()
@@ -99,23 +102,32 @@ impl Datastore {
 				check,
 				write,
 				inner,
+				db: self.db.clone(),
 			}),
 			Err(e) => Err(Error::Tx(e.to_string())),
 		}
 	}
 }
 
-impl Transaction {
+impl super::api::Transaction for Transaction {
 	/// Behaviour if unclosed
-	pub(crate) fn check_level(&mut self, check: Check) {
+	fn check_level(&mut self, check: Check) {
 		self.check = check;
 	}
+
 	/// Check if closed
-	pub(crate) fn closed(&self) -> bool {
+	fn closed(&self) -> bool {
 		self.done
 	}
+
+	/// Check if writeable
+	fn writeable(&self) -> bool {
+		self.write
+	}
+
 	/// Cancel a transaction
-	pub(crate) async fn cancel(&mut self) -> Result<(), Error> {
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self))]
+	async fn cancel(&mut self) -> Result<(), Error> {
 		// Check to see if transaction is closed
 		if self.done {
 			return Err(Error::TxFinished);
@@ -129,8 +141,10 @@ impl Transaction {
 		// Continue
 		Ok(())
 	}
+
 	/// Commit a transaction
-	pub(crate) async fn commit(&mut self) -> Result<(), Error> {
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self))]
+	async fn commit(&mut self) -> Result<(), Error> {
 		// Check to see if transaction is closed
 		if self.done {
 			return Err(Error::TxFinished);
@@ -151,80 +165,12 @@ impl Transaction {
 		// Continue
 		Ok(())
 	}
-	/// Obtain a new change timestamp for a key
-	/// which is replaced with the current timestamp when the transaction is committed.
-	/// NOTE: This should be called when composing the change feed entries for this transaction,
-	/// which should be done immediately before the transaction commit.
-	/// That is to keep other transactions commit delay(pessimistic) or conflict(optimistic) as less as possible.
-	#[allow(unused)]
-	pub(crate) async fn get_timestamp<K>(
-		&mut self,
-		key: K,
-		lock: bool,
-	) -> Result<Versionstamp, Error>
-	where
-		K: Into<Key>,
-	{
-		// Check to see if transaction is closed
-		if self.done {
-			return Err(Error::TxFinished);
-		}
-		// Get the current timestamp
-		let res = self.inner.get_current_timestamp().await?;
-		let ver = res.version();
-		let verbytes = u64_to_versionstamp(ver);
-		// Write the timestamp to the "last-write-timestamp" key
-		// to ensure that no other transactions can commit with older timestamps.
-		let k: Key = key.into();
-		if lock {
-			let prev = self.inner.get(k.clone()).await?;
-			if let Some(prev) = prev {
-				let slice = prev.as_slice();
-				let res: Result<[u8; 10], Error> = match slice.try_into() {
-					Ok(ba) => Ok(ba),
-					Err(e) => Err(Error::Ds(e.to_string())),
-				};
-				let array = res?;
-				let prev = try_to_u64_be(array)?;
-				if prev >= ver {
-					return Err(Error::TxFailure);
-				}
-			}
 
-			self.inner.put(k, verbytes.to_vec()).await?;
-		}
-		// Return the uint64 representation of the timestamp as the result
-		Ok(u64_to_versionstamp(ver))
-	}
-	/// Obtain a new key that is suffixed with the change timestamp
-	#[allow(unused)]
-	pub(crate) async fn get_versionstamped_key<K>(
-		&mut self,
-		ts_key: K,
-		prefix: K,
-		suffix: K,
-	) -> Result<Vec<u8>, Error>
-	where
-		K: Into<Key>,
-	{
-		// Check to see if transaction is closed
-		if self.done {
-			return Err(Error::TxFinished);
-		}
-		// Check to see if transaction is writable
-		if !self.write {
-			return Err(Error::TxReadonly);
-		}
-		let ts = self.get_timestamp(ts_key, false).await?;
-		let mut k: Vec<u8> = prefix.into();
-		k.append(&mut ts.to_vec());
-		k.append(&mut suffix.into());
-		Ok(k)
-	}
 	/// Check if a key exists
-	pub(crate) async fn exi<K>(&mut self, key: K) -> Result<bool, Error>
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
+	async fn exists<K>(&mut self, key: K) -> Result<bool, Error>
 	where
-		K: Into<Key>,
+		K: Into<Key> + Sprintable + Debug,
 	{
 		// Check to see if transaction is closed
 		if self.done {
@@ -235,10 +181,12 @@ impl Transaction {
 		// Return result
 		Ok(res)
 	}
+
 	/// Fetch a key from the database
-	pub(crate) async fn get<K>(&mut self, key: K) -> Result<Option<Val>, Error>
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
+	async fn get<K>(&mut self, key: K) -> Result<Option<Val>, Error>
 	where
-		K: Into<Key>,
+		K: Into<Key> + Sprintable + Debug,
 	{
 		// Check to see if transaction is closed
 		if self.done {
@@ -249,11 +197,13 @@ impl Transaction {
 		// Return result
 		Ok(res)
 	}
+
 	/// Insert or update a key in the database
-	pub(crate) async fn set<K, V>(&mut self, key: K, val: V) -> Result<(), Error>
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
+	async fn set<K, V>(&mut self, key: K, val: V) -> Result<(), Error>
 	where
-		K: Into<Key>,
-		V: Into<Val>,
+		K: Into<Key> + Sprintable + Debug,
+		V: Into<Val> + Debug,
 	{
 		// Check to see if transaction is closed
 		if self.done {
@@ -268,16 +218,13 @@ impl Transaction {
 		// Return result
 		Ok(())
 	}
+
 	/// Insert a key if it doesn't exist in the database
-	pub(crate) async fn put<K, V>(
-		&mut self,
-		category: KeyCategory,
-		key: K,
-		val: V,
-	) -> Result<(), Error>
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
+	async fn put<K, V>(&mut self, key: K, val: V) -> Result<(), Error>
 	where
-		K: Into<Key>,
-		V: Into<Val>,
+		K: Into<Key> + Sprintable + Debug,
+		V: Into<Val> + Debug,
 	{
 		// Check to see if transaction is closed
 		if self.done {
@@ -294,16 +241,18 @@ impl Transaction {
 		// Set the key if empty
 		match self.inner.key_exists(key.clone()).await? {
 			false => self.inner.put(key, val).await?,
-			_ => return Err(Error::TxKeyAlreadyExistsCategory(category)),
+			_ => return Err(Error::TxKeyAlreadyExists),
 		};
 		// Return result
 		Ok(())
 	}
-	/// Insert a key if it doesn't exist in the database
-	pub(crate) async fn putc<K, V>(&mut self, key: K, val: V, chk: Option<V>) -> Result<(), Error>
+
+	/// Insert a key if the current value matches a condition
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
+	async fn putc<K, V>(&mut self, key: K, val: V, chk: Option<V>) -> Result<(), Error>
 	where
-		K: Into<Key>,
-		V: Into<Val>,
+		K: Into<Key> + Sprintable + Debug,
+		V: Into<Val> + Debug,
 	{
 		// Check to see if transaction is closed
 		if self.done {
@@ -328,10 +277,12 @@ impl Transaction {
 		// Return result
 		Ok(())
 	}
+
 	/// Delete a key
-	pub(crate) async fn del<K>(&mut self, key: K) -> Result<(), Error>
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
+	async fn del<K>(&mut self, key: K) -> Result<(), Error>
 	where
-		K: Into<Key>,
+		K: Into<Key> + Sprintable + Debug,
 	{
 		// Check to see if transaction is closed
 		if self.done {
@@ -346,11 +297,13 @@ impl Transaction {
 		// Return result
 		Ok(())
 	}
-	/// Delete a key
-	pub(crate) async fn delc<K, V>(&mut self, key: K, chk: Option<V>) -> Result<(), Error>
+
+	/// Delete a key if the current value matches a condition
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
+	async fn delc<K, V>(&mut self, key: K, chk: Option<V>) -> Result<(), Error>
 	where
-		K: Into<Key>,
-		V: Into<Val>,
+		K: Into<Key> + Sprintable + Debug,
+		V: Into<Val> + Debug,
 	{
 		// Check to see if transaction is closed
 		if self.done {
@@ -373,34 +326,12 @@ impl Transaction {
 		// Return result
 		Ok(())
 	}
-	/// Retrieve a range of keys from the databases
-	pub(crate) async fn scan<K>(
-		&mut self,
-		rng: Range<K>,
-		limit: u32,
-	) -> Result<Vec<(Key, Val)>, Error>
-	where
-		K: Into<Key>,
-	{
-		// Check to see if transaction is closed
-		if self.done {
-			return Err(Error::TxFinished);
-		}
-		// Convert the range to bytes
-		let rng: Range<Key> = Range {
-			start: rng.start.into(),
-			end: rng.end.into(),
-		};
-		// Scan the keys
-		let res = self.inner.scan(rng, limit).await?;
-		let res = res.map(|kv| (Key::from(kv.0), kv.1)).collect();
-		// Return result
-		Ok(res)
-	}
+
 	/// Delete a range of keys from the databases
-	pub(crate) async fn delr<K>(&mut self, rng: Range<K>, limit: u32) -> Result<(), Error>
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.sprint()))]
+	async fn delr<K>(&mut self, rng: Range<K>) -> Result<(), Error>
 	where
-		K: Into<Key>,
+		K: Into<Key> + Sprintable + Debug,
 	{
 		// Check to see if transaction is closed
 		if self.done {
@@ -410,18 +341,84 @@ impl Transaction {
 		if !self.write {
 			return Err(Error::TxReadonly);
 		}
+		// Delete the key range
+		self.db.unsafe_destroy_range(rng.start.into()..rng.end.into()).await?;
+		// Return result
+		Ok(())
+	}
+
+	/// Delete a range of keys from the database
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.sprint()))]
+	async fn keys<K>(&mut self, rng: Range<K>, limit: u32) -> Result<Vec<Key>, Error>
+	where
+		K: Into<Key> + Sprintable + Debug,
+	{
+		// Check to see if transaction is closed
+		if self.done {
+			return Err(Error::TxFinished);
+		}
 		// Convert the range to bytes
 		let rng: Range<Key> = Range {
 			start: rng.start.into(),
 			end: rng.end.into(),
 		};
 		// Scan the keys
-		let res = self.inner.scan_keys(rng, limit).await?;
-		// Delete all the keys
-		for key in res {
-			self.inner.delete(key).await?;
-		}
+		let res = self.inner.scan_keys(rng, limit).await?.map(Key::from).collect();
 		// Return result
-		Ok(())
+		Ok(res)
+	}
+
+	/// Retrieve a range of keys from the database
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.sprint()))]
+	async fn scan<K>(&mut self, rng: Range<K>, limit: u32) -> Result<Vec<(Key, Val)>, Error>
+	where
+		K: Into<Key> + Sprintable + Debug,
+	{
+		// Check to see if transaction is closed
+		if self.done {
+			return Err(Error::TxFinished);
+		}
+		// Convert the range to bytes
+		let rng: Range<Key> = Range {
+			start: rng.start.into(),
+			end: rng.end.into(),
+		};
+		// Scan the keys
+		let res = self.inner.scan(rng, limit).await?.map(|kv| (Key::from(kv.0), kv.1)).collect();
+		// Return result
+		Ok(res)
+	}
+
+	/// Obtain a new change timestamp for a key
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
+	async fn get_timestamp<K>(&mut self, key: K) -> Result<Versionstamp, Error>
+	where
+		K: Into<Key> + Sprintable + Debug,
+	{
+		// Check to see if transaction is closed
+		if self.done {
+			return Err(Error::TxFinished);
+		}
+		// Calculate the version key
+		let key = key.into();
+		// Get the transaction version
+		let ver = self.inner.current_timestamp().await?.version();
+		// Calculate the previous version value
+		if let Some(prev) = self.get(key.as_slice()).await? {
+			let res: Result<[u8; 10], Error> = match prev.as_slice().try_into() {
+				Ok(ba) => Ok(ba),
+				Err(e) => Err(Error::Tx(e.to_string())),
+			};
+			let prev = crate::vs::try_to_u64_be(res?)?;
+			if prev >= ver {
+				return Err(Error::TxFailure);
+			}
+		};
+		// Convert the timestamp to a versionstamp
+		let verbytes = crate::vs::u64_to_versionstamp(ver);
+		// Store the timestamp to prevent other transactions from committing
+		self.set(key.as_slice(), verbytes.to_vec()).await?;
+		// Return the uint64 representation of the timestamp as the result
+		Ok(verbytes)
 	}
 }

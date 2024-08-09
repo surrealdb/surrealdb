@@ -142,6 +142,12 @@ impl IntoQuery for DefineStatement {
 	}
 }
 
+impl IntoQuery for AlterStatement {
+	fn into_query(self) -> Result<Vec<Statement>> {
+		Ok(vec![Statement::Alter(self)])
+	}
+}
+
 impl IntoQuery for RemoveStatement {
 	fn into_query(self) -> Result<Vec<Statement>> {
 		Ok(vec![Statement::Remove(self)])

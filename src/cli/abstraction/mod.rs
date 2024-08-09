@@ -23,6 +23,14 @@ pub(crate) struct AuthArguments {
 		requires = "username"
 	)]
 	pub(crate) password: Option<String>,
+	#[arg(help = "Authentication token in JWT format to use when connecting")]
+	#[arg(
+		env = "SURREAL_TOKEN",
+		short = 't',
+		long = "token",
+		conflicts_with_all = ["username", "password", "auth_level"],
+	)]
+	pub(crate) token: Option<String>,
 	#[arg(help = "Authentication level to use when connecting")]
 	#[arg(env = "SURREAL_AUTH_LEVEL", long = "auth-level", default_value = "root")]
 	#[arg(value_parser = super::validator::parser::creds_level::CredentialsLevelParser::new())]

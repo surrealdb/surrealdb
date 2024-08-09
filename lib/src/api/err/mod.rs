@@ -242,14 +242,14 @@ impl From<tokio_tungstenite::tungstenite::Error> for crate::Error {
 	}
 }
 
-impl<T> From<flume::SendError<T>> for crate::Error {
-	fn from(error: flume::SendError<T>) -> Self {
+impl<T> From<channel::SendError<T>> for crate::Error {
+	fn from(error: channel::SendError<T>) -> Self {
 		Self::Api(Error::InternalError(error.to_string()))
 	}
 }
 
-impl From<flume::RecvError> for crate::Error {
-	fn from(error: flume::RecvError) -> Self {
+impl From<channel::RecvError> for crate::Error {
+	fn from(error: channel::RecvError) -> Self {
 		Self::Api(Error::InternalError(error.to_string()))
 	}
 }

@@ -7,6 +7,8 @@ use serde::ser::Error as _;
 use serde::ser::Impossible;
 use serde::ser::Serialize;
 
+pub mod opt;
+
 #[non_exhaustive]
 pub struct Serializer;
 

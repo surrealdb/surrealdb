@@ -1,4 +1,4 @@
-use crate::cnf::PROCESSOR_BATCH_SIZE;
+use crate::cnf::NORMAL_FETCH_SIZE;
 use crate::ctx::Context;
 #[cfg(not(target_arch = "wasm32"))]
 use crate::dbs::distinct::AsyncDistinct;
@@ -8,12 +8,12 @@ use crate::err::Error;
 use crate::idx::planner::iterators::{CollectorRecord, IteratorRef, ThingIterator};
 use crate::idx::planner::IterationStage;
 use crate::key::{graph, thing};
-use crate::kvs;
-use crate::kvs::ScanPage;
+use crate::kvs::Transaction;
 use crate::sql::dir::Dir;
 use crate::sql::{Edges, Range, Table, Thing, Value};
 #[cfg(not(target_arch = "wasm32"))]
 use channel::Sender;
+use futures::StreamExt;
 use reblessive::tree::Stk;
 use std::ops::Bound;
 use std::vec;
@@ -150,10 +150,10 @@ impl<'a> Processor<'a> {
 					self.process_index(stk, ctx, opt, stm, &t, irf).await?
 				}
 				Iterable::Mergeable(v, o) => {
-					self.process_mergeable(stk, ctx, opt, stm, v, o).await?
+					self.process_mergeable(stk, ctx, opt, stm, (v, o)).await?
 				}
 				Iterable::Relatable(f, v, w, o) => {
-					self.process_relatable(stk, ctx, opt, stm, f, v, w, o).await?
+					self.process_relatable(stk, ctx, opt, stm, (f, v, w, o)).await?
 				}
 			}
 		}
@@ -178,6 +178,27 @@ impl<'a> Processor<'a> {
 		self.process(stk, ctx, opt, stm, pro).await
 	}
 
+	async fn process_defer(
+		&mut self,
+		stk: &mut Stk,
+		ctx: &Context<'_>,
+		opt: &Options,
+		stm: &Statement<'_>,
+		v: Thing,
+	) -> Result<(), Error> {
+		// Check that the table exists
+		ctx.tx().check_ns_db_tb(opt.ns()?, opt.db()?, &v.tb, opt.strict).await?;
+		// Process the document record
+		let pro = Processed {
+			rid: Some(v),
+			ir: None,
+			val: Operable::Value(Value::None),
+		};
+		self.process(stk, ctx, opt, stm, pro).await?;
+		// Everything ok
+		Ok(())
+	}
+
 	async fn process_thing(
 		&mut self,
 		stk: &mut Stk,
@@ -187,10 +208,10 @@ impl<'a> Processor<'a> {
 		v: Thing,
 	) -> Result<(), Error> {
 		// Check that the table exists
-		ctx.tx_lock().await.check_ns_db_tb(opt.ns()?, opt.db()?, &v.tb, opt.strict).await?;
+		ctx.tx().check_ns_db_tb(opt.ns()?, opt.db()?, &v.tb, opt.strict).await?;
 		// Fetch the data from the store
 		let key = thing::new(opt.ns()?, opt.db()?, &v.tb, &v.id);
-		let val = ctx.tx_lock().await.get(key).await?;
+		let val = ctx.tx().get(key).await?;
 		// Parse the data from the store
 		let val = Operable::Value(match val {
 			Some(v) => Value::from(v),
@@ -207,41 +228,19 @@ impl<'a> Processor<'a> {
 		Ok(())
 	}
 
-	async fn process_defer(
-		&mut self,
-		stk: &mut Stk,
-		ctx: &Context<'_>,
-		opt: &Options,
-		stm: &Statement<'_>,
-		v: Thing,
-	) -> Result<(), Error> {
-		// Check that the table exists
-		ctx.tx_lock().await.check_ns_db_tb(opt.ns()?, opt.db()?, &v.tb, opt.strict).await?;
-		// Process the document record
-		let pro = Processed {
-			rid: Some(v),
-			ir: None,
-			val: Operable::Value(Value::None),
-		};
-		self.process(stk, ctx, opt, stm, pro).await?;
-		// Everything ok
-		Ok(())
-	}
-
 	async fn process_mergeable(
 		&mut self,
 		stk: &mut Stk,
 		ctx: &Context<'_>,
 		opt: &Options,
 		stm: &Statement<'_>,
-		v: Thing,
-		o: Value,
+		(v, o): (Thing, Value),
 	) -> Result<(), Error> {
 		// Check that the table exists
-		ctx.tx_lock().await.check_ns_db_tb(opt.ns()?, opt.db()?, &v.tb, opt.strict).await?;
+		ctx.tx().check_ns_db_tb(opt.ns()?, opt.db()?, &v.tb, opt.strict).await?;
 		// Fetch the data from the store
 		let key = thing::new(opt.ns()?, opt.db()?, &v.tb, &v.id);
-		let val = ctx.tx_lock().await.get(key).await?;
+		let val = ctx.tx().get(key).await?;
 		// Parse the data from the store
 		let x = match val {
 			Some(v) => Value::from(v),
@@ -260,23 +259,19 @@ impl<'a> Processor<'a> {
 		Ok(())
 	}
 
-	#[allow(clippy::too_many_arguments)]
 	async fn process_relatable(
 		&mut self,
 		stk: &mut Stk,
 		ctx: &Context<'_>,
 		opt: &Options,
 		stm: &Statement<'_>,
-		f: Thing,
-		v: Thing,
-		w: Thing,
-		o: Option<Value>,
+		(f, v, w, o): (Thing, Thing, Thing, Option<Value>),
 	) -> Result<(), Error> {
 		// Check that the table exists
-		ctx.tx_lock().await.check_ns_db_tb(opt.ns()?, opt.db()?, &v.tb, opt.strict).await?;
+		ctx.tx().check_ns_db_tb(opt.ns()?, opt.db()?, &v.tb, opt.strict).await?;
 		// Fetch the data from the store
 		let key = thing::new(opt.ns()?, opt.db()?, &v.tb, &v.id);
-		let val = ctx.tx_lock().await.get(key).await?;
+		let val = ctx.tx().get(key).await?;
 		// Parse the data from the store
 		let x = match val {
 			Some(v) => Value::from(v),
@@ -303,47 +298,35 @@ impl<'a> Processor<'a> {
 		stm: &Statement<'_>,
 		v: &Table,
 	) -> Result<(), Error> {
+		// Get the transaction
+		let txn = ctx.tx();
 		// Check that the table exists
-		ctx.tx_lock().await.check_ns_db_tb(opt.ns()?, opt.db()?, v, opt.strict).await?;
+		txn.check_ns_db_tb(opt.ns()?, opt.db()?, v, opt.strict).await?;
 		// Prepare the start and end keys
 		let beg = thing::prefix(opt.ns()?, opt.db()?, v);
 		let end = thing::suffix(opt.ns()?, opt.db()?, v);
-		// Loop until no more keys
-		let mut next_page = Some(ScanPage::from(beg..end));
-		while let Some(page) = next_page {
+		// Create a new iterable range
+		let mut stream = txn.stream(beg..end);
+		// Loop until no more entries
+		while let Some(res) = stream.next().await {
 			// Check if the context is finished
 			if ctx.is_done() {
 				break;
 			}
-			// Get the next batch of key-value entries
-			let res = ctx.tx_lock().await.scan_paged(page, PROCESSOR_BATCH_SIZE).await?;
-			next_page = res.next_page;
-			let res = res.values;
-			// If no results then break
-			if res.is_empty() {
-				break;
-			}
-			// Loop over results
-			for (k, v) in res.into_iter() {
-				// Check the context
-				if ctx.is_done() {
-					break;
-				}
-				// Parse the data from the store
-				let key: thing::Thing = (&k).into();
-				let val: Value = (&v).into();
-				let rid = Thing::from((key.tb, key.id));
-				// Create a new operable value
-				let val = Operable::Value(val);
-				// Process the record
-				let pro = Processed {
-					rid: Some(rid),
-					ir: None,
-					val,
-				};
-				self.process(stk, ctx, opt, stm, pro).await?;
-			}
-			continue;
+			// Parse the data from the store
+			let (k, v) = res?;
+			let key: thing::Thing = (&k).into();
+			let val: Value = (&v).into();
+			let rid = Thing::from((key.tb, key.id));
+			// Create a new operable value
+			let val = Operable::Value(val);
+			// Process the record
+			let pro = Processed {
+				rid: Some(rid),
+				ir: None,
+				val,
+			};
+			self.process(stk, ctx, opt, stm, pro).await?;
 		}
 		// Everything ok
 		Ok(())
@@ -357,8 +340,10 @@ impl<'a> Processor<'a> {
 		stm: &Statement<'_>,
 		v: Range,
 	) -> Result<(), Error> {
+		// Get the transaction
+		let txn = ctx.tx();
 		// Check that the table exists
-		ctx.tx_lock().await.check_ns_db_tb(opt.ns()?, opt.db()?, &v.tb, opt.strict).await?;
+		txn.check_ns_db_tb(opt.ns()?, opt.db()?, &v.tb, opt.strict).await?;
 		// Prepare the range start key
 		let beg = match &v.beg {
 			Bound::Unbounded => thing::prefix(opt.ns()?, opt.db()?, &v.tb),
@@ -379,42 +364,28 @@ impl<'a> Processor<'a> {
 				key
 			}
 		};
-		// Loop until no more keys
-		let mut next_page = Some(ScanPage::from(beg..end));
-		while let Some(page) = next_page {
+		// Create a new iterable range
+		let mut stream = txn.stream(beg..end);
+		// Loop until no more entries
+		while let Some(res) = stream.next().await {
 			// Check if the context is finished
 			if ctx.is_done() {
 				break;
 			}
-			let res = ctx.tx_lock().await.scan_paged(page, PROCESSOR_BATCH_SIZE).await?;
-			next_page = res.next_page;
-			// Get the next batch of key-value entries
-			let res = res.values;
-			// If there are key-value entries then fetch them
-			if res.is_empty() {
-				break;
-			}
-			// Loop over results
-			for (k, v) in res.into_iter() {
-				// Check the context
-				if ctx.is_done() {
-					break;
-				}
-				// Parse the data from the store
-				let key: thing::Thing = (&k).into();
-				let val: Value = (&v).into();
-				let rid = Thing::from((key.tb, key.id));
-				// Create a new operable value
-				let val = Operable::Value(val);
-				// Process the record
-				let pro = Processed {
-					rid: Some(rid),
-					ir: None,
-					val,
-				};
-				self.process(stk, ctx, opt, stm, pro).await?;
-			}
-			continue;
+			// Parse the data from the store
+			let (k, v) = res?;
+			let key: thing::Thing = (&k).into();
+			let val: Value = (&v).into();
+			let rid = Thing::from((key.tb, key.id));
+			// Create a new operable value
+			let val = Operable::Value(val);
+			// Process the record
+			let pro = Processed {
+				rid: Some(rid),
+				ir: None,
+				val,
+			};
+			self.process(stk, ctx, opt, stm, pro).await?;
 		}
 		// Everything ok
 		Ok(())
@@ -456,7 +427,7 @@ impl<'a> Processor<'a> {
 				Dir::In => e
 					.what
 					.iter()
-					.map(|v| v.to_string())
+					.map(|v| v.0.to_owned())
 					.map(|v| {
 						(
 							graph::ftprefix(ns, db, tb, id, &e.dir, &v),
@@ -468,7 +439,7 @@ impl<'a> Processor<'a> {
 				Dir::Out => e
 					.what
 					.iter()
-					.map(|v| v.to_string())
+					.map(|v| v.0.to_owned())
 					.map(|v| {
 						(
 							graph::ftprefix(ns, db, tb, id, &e.dir, &v),
@@ -480,7 +451,7 @@ impl<'a> Processor<'a> {
 				Dir::Both => e
 					.what
 					.iter()
-					.map(|v| v.to_string())
+					.map(|v| v.0.to_owned())
 					.flat_map(|v| {
 						vec![
 							(
@@ -496,49 +467,40 @@ impl<'a> Processor<'a> {
 					.collect::<Vec<_>>(),
 			},
 		};
-		//
-		for (beg, end) in keys.iter() {
-			// Loop until no more keys
-			let mut next_page = Some(ScanPage::from(beg.clone()..end.clone()));
-			while let Some(page) = next_page {
+		// Get the transaction
+		let txn = ctx.tx();
+		// Check that the table exists
+		txn.check_ns_db_tb(opt.ns()?, opt.db()?, tb, opt.strict).await?;
+		// Loop over the chosen edge types
+		for (beg, end) in keys.into_iter() {
+			// Create a new iterable range
+			let mut stream = txn.stream(beg..end);
+			// Loop until no more entries
+			while let Some(res) = stream.next().await {
 				// Check if the context is finished
 				if ctx.is_done() {
 					break;
 				}
-				// Get the next batch key-value entries
-				let res = ctx.tx_lock().await.scan_paged(page, PROCESSOR_BATCH_SIZE).await?;
-				next_page = res.next_page;
-				let res = res.values;
-				// If there are key-value entries then fetch them
-				if res.is_empty() {
-					break;
-				}
-				// Loop over results
-				for (k, _) in res.into_iter() {
-					// Check the context
-					if ctx.is_done() {
-						break;
-					}
-					// Parse the data from the store
-					let gra: graph::Graph = graph::Graph::decode(&k)?;
-					// Fetch the data from the store
-					let key = thing::new(opt.ns()?, opt.db()?, gra.ft, &gra.fk);
-					let val = ctx.tx_lock().await.get(key).await?;
-					let rid = Thing::from((gra.ft, gra.fk));
-					// Parse the data from the store
-					let val = Operable::Value(match val {
-						Some(v) => Value::from(v),
-						None => Value::None,
-					});
-					// Process the record
-					let pro = Processed {
-						rid: Some(rid),
-						ir: None,
-						val,
-					};
-					self.process(stk, ctx, opt, stm, pro).await?;
-				}
-				continue;
+				// Parse the key from the result
+				let key = res?.0;
+				// Parse the data from the store
+				let gra: graph::Graph = graph::Graph::decode(&key)?;
+				// Fetch the data from the store
+				let key = thing::new(opt.ns()?, opt.db()?, gra.ft, &gra.fk);
+				let val = txn.get(key).await?;
+				let rid = Thing::from((gra.ft, gra.fk));
+				// Parse the data from the store
+				let val = Operable::Value(match val {
+					Some(v) => Value::from(v),
+					None => Value::None,
+				});
+				// Process the record
+				let pro = Processed {
+					rid: Some(rid),
+					ir: None,
+					val,
+				};
+				self.process(stk, ctx, opt, stm, pro).await?;
 			}
 		}
 		// Everything ok
@@ -555,7 +517,7 @@ impl<'a> Processor<'a> {
 		irf: IteratorRef,
 	) -> Result<(), Error> {
 		// Check that the table exists
-		ctx.tx_lock().await.check_ns_db_tb(opt.ns()?, opt.db()?, &table.0, opt.strict).await?;
+		ctx.tx().check_ns_db_tb(opt.ns()?, opt.db()?, &table.0, opt.strict).await?;
 		if let Some(exe) = ctx.get_query_executor() {
 			if let Some(mut iterator) = exe.new_iterator(opt, irf).await? {
 				// Get the first batch
@@ -592,9 +554,9 @@ impl<'a> Processor<'a> {
 		opt: &Options,
 		iterator: &mut ThingIterator,
 	) -> Result<Vec<Processed>, Error> {
-		let mut tx = ctx.tx_lock().await;
+		let txn = ctx.tx();
 		let records: Vec<CollectorRecord> =
-			iterator.next_batch(ctx, &mut tx, PROCESSOR_BATCH_SIZE).await?;
+			iterator.next_batch(ctx, &txn, *NORMAL_FETCH_SIZE).await?;
 		let mut to_process = Vec::with_capacity(records.len());
 		for r in records {
 			let v = if let Some(v) = r.2 {
@@ -602,7 +564,7 @@ impl<'a> Processor<'a> {
 				v
 			} else {
 				// Otherwise we have to fetch the record
-				Iterable::fetch_thing(&mut tx, opt, &r.0).await?
+				Iterable::fetch_thing(&txn, opt, &r.0).await?
 			};
 			let p = Processed {
 				rid: Some(r.0),
@@ -618,14 +580,14 @@ impl<'a> Processor<'a> {
 impl Iterable {
 	/// Returns the value from the store, or Value::None it the value does not exist.
 	pub(crate) async fn fetch_thing(
-		tx: &mut kvs::Transaction,
+		txn: &Transaction,
 		opt: &Options,
 		thg: &Thing,
 	) -> Result<Value, Error> {
 		// Fetch the data from the store
 		let key = thing::new(opt.ns()?, opt.db()?, &thg.tb, &thg.id);
 		// Fetch and parse the data from the store
-		let val = tx.get(key).await?.map(Value::from).unwrap_or(Value::None);
+		let val = txn.get(key).await?.map(Value::from).unwrap_or(Value::None);
 		// Return the result
 		Ok(val)
 	}

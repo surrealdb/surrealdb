@@ -1,7 +1,7 @@
 use crate::idx::trees::hnsw::ElementId;
 use crate::idx::trees::vector::SharedVector;
 use crate::sql::index::Distance;
-use hashbrown::HashMap;
+use ahash::HashMap;
 
 pub(super) struct HnswElements {
 	elements: HashMap<ElementId, SharedVector>,

@@ -28,6 +28,7 @@ Temporary Items
 **/*.rs.bk
 *.db
 *.sw?
+*.skv
 
 # -----------------------------------
 # Folders
@@ -54,3 +55,4 @@ Temporary Items
 /store/
 surreal
 history.txt
+

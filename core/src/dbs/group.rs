@@ -329,7 +329,7 @@ impl Aggregator {
 			OptimisedAggregate::MathSum => self.math_sum.take().unwrap_or(Value::None),
 			OptimisedAggregate::MathMean => {
 				if let Some((v, i)) = self.math_mean.take() {
-					v.try_div(i.into())?
+					v.try_div(i.into()).unwrap_or(f64::NAN.into())
 				} else {
 					Value::None
 				}

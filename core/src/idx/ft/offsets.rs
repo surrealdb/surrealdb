@@ -19,7 +19,7 @@ impl Offsets {
 
 	pub(super) async fn set_offsets(
 		&self,
-		tx: &mut Transaction,
+		tx: &Transaction,
 		doc_id: DocId,
 		term_id: TermId,
 		offsets: OffsetRecords,
@@ -32,7 +32,7 @@ impl Offsets {
 
 	pub(super) async fn get_offsets(
 		&self,
-		tx: &mut Transaction,
+		tx: &Transaction,
 		doc_id: DocId,
 		term_id: TermId,
 	) -> Result<Option<OffsetRecords>, Error> {
@@ -47,7 +47,7 @@ impl Offsets {
 
 	pub(super) async fn remove_offsets(
 		&self,
-		tx: &mut Transaction,
+		tx: &Transaction,
 		doc_id: DocId,
 		term_id: TermId,
 	) -> Result<(), Error> {

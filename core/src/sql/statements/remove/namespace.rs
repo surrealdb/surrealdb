@@ -24,20 +24,20 @@ impl RemoveNamespaceStatement {
 		let future = async {
 			// Allowed to run?
 			opt.is_allowed(Action::Edit, ResourceKind::Namespace, &Base::Root)?;
-			// Claim transaction
-			let mut run = ctx.tx_lock().await;
-			// Delete index stores instance
-			ctx.get_index_stores().namespace_removed(&mut run, &self.name).await?;
-			// Clear the cache
-			run.clear_cache();
+			// Get the transaction
+			let txn = ctx.tx();
+			// Remove the index stores
+			ctx.get_index_stores().namespace_removed(&txn, &self.name).await?;
 			// Get the definition
-			let ns = run.get_ns(&self.name).await?;
+			let ns = txn.get_ns(&self.name).await?;
 			// Delete the definition
 			let key = crate::key::root::ns::new(&ns.name);
-			run.del(key).await?;
+			txn.del(key).await?;
 			// Delete the resource data
 			let key = crate::key::namespace::all::new(&ns.name);
-			run.delp(key, u32::MAX).await?;
+			txn.delp(key).await?;
+			// Clear the cache
+			txn.clear();
 			// Ok all good
 			Ok(Value::None)
 		}

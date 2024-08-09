@@ -24,20 +24,20 @@ impl RemoveDatabaseStatement {
 		let future = async {
 			// Allowed to run?
 			opt.is_allowed(Action::Edit, ResourceKind::Database, &Base::Ns)?;
-			// Claim transaction
-			let mut run = ctx.tx_lock().await;
-			// Remove index store
-			ctx.get_index_stores().database_removed(&mut run, opt.ns()?, &self.name).await?;
-			// Clear the cache
-			run.clear_cache();
+			// Get the transaction
+			let txn = ctx.tx();
+			// Remove the index stores
+			ctx.get_index_stores().database_removed(&txn, opt.ns()?, &self.name).await?;
 			// Get the definition
-			let db = run.get_db(opt.ns()?, &self.name).await?;
+			let db = txn.get_db(opt.ns()?, &self.name).await?;
 			// Delete the definition
 			let key = crate::key::namespace::db::new(opt.ns()?, &db.name);
-			run.del(key).await?;
+			txn.del(key).await?;
 			// Delete the resource data
 			let key = crate::key::database::all::new(opt.ns()?, &db.name);
-			run.delp(key, u32::MAX).await?;
+			txn.delp(key).await?;
+			// Clear the cache
+			txn.clear();
 			// Ok all good
 			Ok(Value::None)
 		}

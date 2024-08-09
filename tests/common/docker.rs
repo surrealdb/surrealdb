@@ -54,7 +54,7 @@ impl DockerContainer {
 		if !output.stderr.is_empty() {
 			error!("{}", String::from_utf8(output.stderr).unwrap());
 		}
-		assert_eq!(output.status.code(), Some(0), "Docker command failure: {:?}", command);
+		assert_eq!(output.status.code(), Some(0), "Docker command failure: {command:?}");
 		std_out
 	}
 }

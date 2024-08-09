@@ -1,10 +1,8 @@
 use super::Client;
 use crate::api::conn::Connection;
-use crate::api::conn::DbResponse;
-use crate::api::conn::Method;
-use crate::api::conn::Param;
 use crate::api::conn::Route;
 use crate::api::conn::Router;
+use crate::api::method::BoxFuture;
 use crate::api::opt::Endpoint;
 #[cfg(any(feature = "native-tls", feature = "rustls"))]
 use crate::api::opt::Tls;
@@ -13,14 +11,11 @@ use crate::api::OnceLockExt;
 use crate::api::Result;
 use crate::api::Surreal;
 use crate::opt::WaitFor;
-use flume::Receiver;
-use futures::StreamExt;
+use channel::Receiver;
 use indexmap::IndexMap;
 use reqwest::header::HeaderMap;
 use reqwest::ClientBuilder;
 use std::collections::HashSet;
-use std::future::Future;
-use std::pin::Pin;
 use std::sync::atomic::AtomicI64;
 use std::sync::Arc;
 use std::sync::OnceLock;
@@ -30,16 +25,7 @@ use url::Url;
 impl crate::api::Connection for Client {}
 
 impl Connection for Client {
-	fn new(method: Method) -> Self {
-		Self {
-			method,
-		}
-	}
-
-	fn connect(
-		address: Endpoint,
-		capacity: usize,
-	) -> Pin<Box<dyn Future<Output = Result<Surreal<Self>>> + Send + Sync + 'static>> {
+	fn connect(address: Endpoint, capacity: usize) -> BoxFuture<'static, Result<Surreal<Self>>> {
 		Box::pin(async move {
 			let headers = super::default_headers();
 
@@ -60,11 +46,11 @@ impl Connection for Client {
 
 			let base_url = address.url;
 
-			super::health(client.get(base_url.join(Method::Health.as_str())?)).await?;
+			super::health(client.get(base_url.join("health")?)).await?;
 
 			let (route_tx, route_rx) = match capacity {
-				0 => flume::unbounded(),
-				capacity => flume::bounded(capacity),
+				0 => channel::unbounded(),
+				capacity => channel::bounded(capacity),
 			};
 
 			tokio::spawn(run_router(base_url, client, route_rx));
@@ -82,34 +68,17 @@ impl Connection for Client {
 			))
 		})
 	}
-
-	fn send<'r>(
-		&'r mut self,
-		router: &'r Router,
-		param: Param,
-	) -> Pin<Box<dyn Future<Output = Result<Receiver<Result<DbResponse>>>> + Send + Sync + 'r>> {
-		Box::pin(async move {
-			let (sender, receiver) = flume::bounded(1);
-			let route = Route {
-				request: (0, self.method, param),
-				response: sender,
-			};
-			router.sender.send_async(route).await?;
-			Ok(receiver)
-		})
-	}
 }
 
 pub(crate) async fn run_router(base_url: Url, client: reqwest::Client, route_rx: Receiver<Route>) {
 	let mut headers = HeaderMap::new();
 	let mut vars = IndexMap::new();
 	let mut auth = None;
-	let mut stream = route_rx.into_stream();
 
-	while let Some(route) = stream.next().await {
+	while let Ok(route) = route_rx.recv().await {
 		let result =
 			super::router(route.request, &base_url, &client, &mut headers, &mut vars, &mut auth)
 				.await;
-		let _ = route.response.into_send_async(result).await;
+		let _ = route.response.send(result).await;
 	}
 }

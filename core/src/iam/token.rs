@@ -20,6 +20,10 @@ pub struct Claims {
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub iss: Option<String>,
 	#[serde(skip_serializing_if = "Option::is_none")]
+	pub sub: Option<String>,
+	#[serde(skip_serializing_if = "Option::is_none")]
+	pub aud: Option<String>,
+	#[serde(skip_serializing_if = "Option::is_none")]
 	pub jti: Option<String>,
 	#[serde(alias = "ns")]
 	#[serde(alias = "NS")]
@@ -69,6 +73,14 @@ impl From<Claims> for Value {
 		// Add iss field if set
 		if let Some(iss) = v.iss {
 			out.insert("iss".to_string(), iss.into());
+		}
+		// Add sub field if set
+		if let Some(sub) = v.sub {
+			out.insert("sub".to_string(), sub.into());
+		}
+		// Add aud field if set
+		if let Some(aud) = v.aud {
+			out.insert("aud".to_string(), aud.into());
 		}
 		// Add iat field if set
 		if let Some(iat) = v.iat {

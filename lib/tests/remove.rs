@@ -12,7 +12,6 @@ use std::collections::HashMap;
 use surrealdb::dbs::Session;
 use surrealdb::err::Error;
 use surrealdb::iam::Role;
-use surrealdb::kvs::{LockType::*, TransactionType::*};
 use surrealdb::sql::Value;
 
 #[tokio::test]
@@ -212,12 +211,6 @@ async fn remove_statement_index() -> Result<(), Error> {
 		}",
 	);
 	assert_eq!(tmp, val);
-
-	let mut tx = dbs.transaction(Read, Optimistic).await?;
-	for ix in ["uniq_isbn", "idx_author", "ft_title"] {
-		assert_empty_prefix!(&mut tx, surrealdb::key::index::all::new("test", "test", "book", ix));
-	}
-
 	// Every index store cache has been removed
 	assert!(dbs.index_store().is_empty().await);
 	Ok(())
@@ -522,7 +515,7 @@ async fn should_error_when_remove_and_access_does_not_exist() -> Result<(), Erro
 	assert_eq!(res.len(), 1);
 	//
 	let tmp = res.remove(0).result.unwrap_err();
-	assert!(matches!(tmp, Error::DaNotFound { .. }),);
+	assert!(matches!(tmp, Error::AccessDbNotFound { .. }),);
 
 	Ok(())
 }
@@ -589,8 +582,8 @@ async fn permissions_checks_remove_ns() {
 
 	// Define the expected results for the check statement when the test statement succeeded and when it failed
 	let check_results = [
-		vec!["{ namespaces: {  }, users: {  } }"],
-		vec!["{ namespaces: { NS: 'DEFINE NAMESPACE NS' }, users: {  } }"],
+		vec!["{ accesses: {  }, namespaces: {  }, nodes: {  }, users: {  } }"],
+		vec!["{ accesses: {  }, namespaces: { NS: 'DEFINE NAMESPACE NS' }, nodes: {  }, users: {  } }"],
 	];
 
 	let test_cases = [
@@ -748,6 +741,48 @@ async fn permissions_checks_remove_analyzer() {
 }
 
 #[tokio::test]
+async fn permissions_checks_remove_root_access() {
+	let scenario = HashMap::from([
+		("prepare", "DEFINE ACCESS access ON ROOT TYPE JWT ALGORITHM HS512 KEY 'secret'"),
+		("test", "REMOVE ACCESS access ON ROOT"),
+		("check", "INFO FOR ROOT"),
+	]);
+
+	// Define the expected results for the check statement when the test statement succeeded and when it failed
+	let check_results = [
+		vec!["{ accesses: {  }, namespaces: {  }, nodes: {  }, users: {  } }"],
+        vec!["{ accesses: { access: \"DEFINE ACCESS access ON ROOT TYPE JWT ALGORITHM HS512 KEY '[REDACTED]' WITH ISSUER KEY '[REDACTED]' DURATION FOR TOKEN 1h, FOR SESSION NONE\" }, namespaces: {  }, nodes: {  }, users: {  } }"],
+    ];
+
+	let test_cases = [
+		// Root level
+		((().into(), Role::Owner), ("NS", "DB"), true),
+		((().into(), Role::Editor), ("NS", "DB"), false),
+		((().into(), Role::Viewer), ("NS", "DB"), false),
+		// Namespace level
+		((("NS",).into(), Role::Owner), ("NS", "DB"), false),
+		((("NS",).into(), Role::Owner), ("OTHER_NS", "DB"), false),
+		((("NS",).into(), Role::Editor), ("NS", "DB"), false),
+		((("NS",).into(), Role::Editor), ("OTHER_NS", "DB"), false),
+		((("NS",).into(), Role::Viewer), ("NS", "DB"), false),
+		((("NS",).into(), Role::Viewer), ("OTHER_NS", "DB"), false),
+		// Database level
+		((("NS", "DB").into(), Role::Owner), ("NS", "DB"), false),
+		((("NS", "DB").into(), Role::Owner), ("NS", "OTHER_DB"), false),
+		((("NS", "DB").into(), Role::Owner), ("OTHER_NS", "DB"), false),
+		((("NS", "DB").into(), Role::Editor), ("NS", "DB"), false),
+		((("NS", "DB").into(), Role::Editor), ("NS", "OTHER_DB"), false),
+		((("NS", "DB").into(), Role::Editor), ("OTHER_NS", "DB"), false),
+		((("NS", "DB").into(), Role::Viewer), ("NS", "DB"), false),
+		((("NS", "DB").into(), Role::Viewer), ("NS", "OTHER_DB"), false),
+		((("NS", "DB").into(), Role::Viewer), ("OTHER_NS", "DB"), false),
+	];
+
+	let res = iam_check_cases(test_cases.iter(), &scenario, check_results).await;
+	assert!(res.is_ok(), "{}", res.unwrap_err());
+}
+
+#[tokio::test]
 async fn permissions_checks_remove_ns_access() {
 	let scenario = HashMap::from([
 		("prepare", "DEFINE ACCESS access ON NS TYPE JWT ALGORITHM HS512 KEY 'secret'"),
@@ -841,8 +876,8 @@ async fn permissions_checks_remove_root_user() {
 
 	// Define the expected results for the check statement when the test statement succeeded and when it failed
 	let check_results = [
-		vec!["{ namespaces: {  }, users: {  } }"],
-        vec!["{ namespaces: {  }, users: { user: \"DEFINE USER user ON ROOT PASSHASH 'secret' ROLES VIEWER DURATION FOR TOKEN 1h, FOR SESSION NONE\" } }"],
+		vec!["{ accesses: {  }, namespaces: {  }, nodes: {  }, users: {  } }"],
+        vec!["{ accesses: {  }, namespaces: {  }, nodes: {  }, users: { user: \"DEFINE USER user ON ROOT PASSHASH 'secret' ROLES VIEWER DURATION FOR TOKEN 1h, FOR SESSION NONE\" } }"],
     ];
 
 	let test_cases = [

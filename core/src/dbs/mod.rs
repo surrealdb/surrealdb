@@ -15,7 +15,6 @@ mod result;
 mod session;
 mod statement;
 mod store;
-mod transaction;
 mod variables;
 
 pub mod capabilities;
@@ -32,7 +31,6 @@ pub use self::session::*;
 pub(crate) use self::executor::*;
 pub(crate) use self::iterator::*;
 pub(crate) use self::statement::*;
-pub(crate) use self::transaction::*;
 pub(crate) use self::variables::*;
 
 #[doc(hidden)]

@@ -116,6 +116,9 @@ compile_error!("The `ml` feature is not supported on the `wasm32` architecture."
 #[macro_use]
 extern crate tracing;
 
+#[macro_use]
+mod mac;
+
 mod api;
 
 #[doc(inline)]

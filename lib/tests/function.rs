@@ -1136,6 +1136,28 @@ async fn function_array_union() -> Result<(), Error> {
 	Ok(())
 }
 
+#[tokio::test]
+async fn function_array_windows() -> Result<(), Error> {
+	let sql = r#"
+		RETURN array::windows([0, 1, 2, 3], 2);
+		RETURN array::windows([0, 1, 2], 2);
+		RETURN array::windows([0, 1, 2], 3);
+		RETURN array::windows([0, 1, 2, 3, 4, 5], 3);
+		RETURN array::windows([0, 1, 2], 4);
+		RETURN array::windows([0, 1, 2], 0);
+	"#;
+	let error = "Incorrect arguments for function array::windows(). The second argument must be an integer greater than 0";
+	Test::new(sql)
+		.await?
+		.expect_val("[[0, 1], [1, 2], [2, 3]]")?
+		.expect_val("[[0, 1], [1, 2]]")?
+		.expect_val("[[0, 1, 2]]")?
+		.expect_val("[[0, 1, 2], [1, 2, 3], [2, 3, 4], [3, 4, 5]]")?
+		.expect_val("[]")?
+		.expect_error(error)?;
+	Ok(())
+}
+
 // --------------------------------------------------
 // bytes
 // --------------------------------------------------
@@ -3054,6 +3076,39 @@ async fn function_rand_ulid() -> Result<(), Error> {
 }
 
 #[tokio::test]
+async fn function_rand_ulid_from_datetime() -> Result<(), Error> {
+	let sql = r#"
+        CREATE ONLY test:[rand::ulid()] SET created = time::now(), num = 1;
+        SLEEP 100ms;
+        LET $rec = CREATE ONLY test:[rand::ulid()] SET created = time::now(), num = 2;
+        SLEEP 100ms;
+        CREATE ONLY test:[rand::ulid()] SET created = time::now(), num = 3;
+		SELECT VALUE num FROM test:[rand::ulid($rec.created - 50ms)]..;
+	"#;
+	let mut test = Test::new(sql).await?;
+	//
+	let tmp = test.next()?.result?;
+	assert!(tmp.is_object());
+	//
+	let tmp = test.next()?.result?;
+	assert!(tmp.is_none());
+	//
+	let tmp = test.next()?.result?;
+	assert!(tmp.is_none());
+	//
+	let tmp = test.next()?.result?;
+	assert!(tmp.is_none());
+	//
+	let tmp = test.next()?.result?;
+	assert!(tmp.is_object());
+	//
+	let tmp = test.next()?.result?;
+	assert_eq!(tmp, Value::parse("[2, 3]"));
+	//
+	Ok(())
+}
+
+#[tokio::test]
 async fn function_rand_uuid() -> Result<(), Error> {
 	let sql = r#"
 		RETURN rand::uuid();
@@ -3062,6 +3117,39 @@ async fn function_rand_uuid() -> Result<(), Error> {
 	//
 	let tmp = test.next()?.result?;
 	assert!(tmp.is_uuid());
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn function_rand_uuid_from_datetime() -> Result<(), Error> {
+	let sql = r#"
+        CREATE ONLY test:[rand::uuid()] SET created = time::now(), num = 1;
+        SLEEP 100ms;
+        LET $rec = CREATE ONLY test:[rand::uuid()] SET created = time::now(), num = 2;
+        SLEEP 100ms;
+        CREATE ONLY test:[rand::uuid()] SET created = time::now(), num = 3;
+		SELECT VALUE num FROM test:[rand::uuid($rec.created - 50ms)]..;
+	"#;
+	let mut test = Test::new(sql).await?;
+	//
+	let tmp = test.next()?.result?;
+	assert!(tmp.is_object());
+	//
+	let tmp = test.next()?.result?;
+	assert!(tmp.is_none());
+	//
+	let tmp = test.next()?.result?;
+	assert!(tmp.is_none());
+	//
+	let tmp = test.next()?.result?;
+	assert!(tmp.is_none());
+	//
+	let tmp = test.next()?.result?;
+	assert!(tmp.is_object());
+	//
+	let tmp = test.next()?.result?;
+	assert_eq!(tmp, Value::parse("[2, 3]"));
 	//
 	Ok(())
 }
@@ -3088,6 +3176,39 @@ async fn function_rand_uuid_v7() -> Result<(), Error> {
 	//
 	let tmp = test.next()?.result?;
 	assert!(tmp.is_uuid());
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn function_rand_uuid_v7_from_datetime() -> Result<(), Error> {
+	let sql = r#"
+        CREATE ONLY test:[rand::uuid::v7()] SET created = time::now(), num = 1;
+        SLEEP 100ms;
+        LET $rec = CREATE ONLY test:[rand::uuid::v7()] SET created = time::now(), num = 2;
+        SLEEP 100ms;
+        CREATE ONLY test:[rand::uuid::v7()] SET created = time::now(), num = 3;
+		SELECT VALUE num FROM test:[rand::uuid::v7($rec.created - 50ms)]..;
+	"#;
+	let mut test = Test::new(sql).await?;
+	//
+	let tmp = test.next()?.result?;
+	assert!(tmp.is_object());
+	//
+	let tmp = test.next()?.result?;
+	assert!(tmp.is_none());
+	//
+	let tmp = test.next()?.result?;
+	assert!(tmp.is_none());
+	//
+	let tmp = test.next()?.result?;
+	assert!(tmp.is_none());
+	//
+	let tmp = test.next()?.result?;
+	assert!(tmp.is_object());
+	//
+	let tmp = test.next()?.result?;
+	assert_eq!(tmp, Value::parse("[2, 3]"));
 	//
 	Ok(())
 }
@@ -3649,8 +3770,27 @@ async fn function_parse_is_url() -> Result<(), Error> {
 #[tokio::test]
 async fn function_parse_is_uuid() -> Result<(), Error> {
 	let sql = r#"
-		RETURN string::is::uuid(u"e72bee20-f49b-11ec-b939-0242ac120002");
+		RETURN string::is::uuid("e72bee20-f49b-11ec-b939-0242ac120002");
 		RETURN string::is::uuid("this is a test!");
+	"#;
+	let mut test = Test::new(sql).await?;
+	//
+	let tmp = test.next()?.result?;
+	let val = Value::Bool(true);
+	assert_eq!(tmp, val);
+	//
+	let tmp = test.next()?.result?;
+	let val = Value::Bool(false);
+	assert_eq!(tmp, val);
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn function_parse_is_record() -> Result<(), Error> {
+	let sql = r#"
+		RETURN string::is::record("test:123");
+		RETURN string::is::record("invalid record id!");
 	"#;
 	let mut test = Test::new(sql).await?;
 	//
@@ -6184,5 +6324,26 @@ async fn function_outside_database() -> Result<(), Error> {
 		_ => panic!("Query should have failed with error: Specify a database to use"),
 	}
 
+	Ok(())
+}
+
+#[tokio::test]
+async fn function_idiom_chaining() -> Result<(), Error> {
+	let sql = r#"
+		{ a: 1, b: 2 }.entries().flatten();
+		"ABC".lowercase();
+		true.is_number();
+		true.is_bool();
+		true.doesnt_exist();
+		field.bla.nested.is_none();
+	"#;
+	Test::new(sql)
+		.await?
+		.expect_val("['a', 1, 'b', 2]")?
+		.expect_val("'abc'")?
+		.expect_val("false")?
+		.expect_val("true")?
+        .expect_error("There was a problem running the doesnt_exist() function. no such method found for the bool type")?
+	    .expect_val("true")?;
 	Ok(())
 }

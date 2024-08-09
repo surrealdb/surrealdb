@@ -1,5 +1,5 @@
 use crate::sql::{Expression, Number, Thing};
-use hashbrown::{HashMap, HashSet};
+use ahash::{HashMap, HashMapExt, HashSet, HashSetExt};
 use std::collections::btree_map::Entry;
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -16,7 +16,7 @@ impl KnnPriorityList {
 	pub(super) fn new(knn: usize) -> Self {
 		Self(Arc::new(Mutex::new(Inner {
 			knn,
-			docs: HashSet::new(),
+			docs: HashSet::with_capacity(knn),
 			priority_list: BTreeMap::default(),
 		})))
 	}

@@ -38,7 +38,7 @@ impl Child {
 		let a = self
 			.inner
 			.as_mut()
-			.map(|child| child.kill().map_err(|e| format!("failed to kill: {}", e)))
+			.map(|child| child.kill().map_err(|e| format!("failed to kill: {e}")))
 			.unwrap_or(Err("no inner".to_string()));
 		a.map(|_ok| self)
 	}
@@ -85,10 +85,10 @@ impl Drop for Child {
 			let _ = inner.kill();
 			let stdout =
 				std::fs::read_to_string(&self.stdout_path).expect("Failed to read the stdout file");
-			println!("Server STDOUT: \n{}", stdout);
+			println!("Server STDOUT: \n{stdout}");
 			let stderr =
 				std::fs::read_to_string(&self.stderr_path).expect("Failed to read the stderr file");
-			println!("Server STDERR: \n{}", stderr);
+			println!("Server STDERR: \n{stderr}");
 		}
 		let _ = std::fs::remove_file(&self.stdout_path);
 		let _ = std::fs::remove_file(&self.stderr_path);

@@ -20,13 +20,13 @@ pub(super) enum Filter {
 	Uppercase,
 }
 
-impl From<SqlFilter> for Filter {
-	fn from(f: SqlFilter) -> Self {
+impl From<&SqlFilter> for Filter {
+	fn from(f: &SqlFilter) -> Self {
 		match f {
 			SqlFilter::Ascii => Filter::Ascii,
-			SqlFilter::EdgeNgram(min, max) => Filter::EdgeNgram(min, max),
+			SqlFilter::EdgeNgram(min, max) => Filter::EdgeNgram(*min, *max),
 			SqlFilter::Lowercase => Filter::Lowercase,
-			SqlFilter::Ngram(min, max) => Filter::Ngram(min, max),
+			SqlFilter::Ngram(min, max) => Filter::Ngram(*min, *max),
 			SqlFilter::Snowball(l) => {
 				let a = match l {
 					Language::Arabic => Stemmer::create(Algorithm::Arabic),
@@ -55,9 +55,9 @@ impl From<SqlFilter> for Filter {
 }
 
 impl Filter {
-	pub(super) fn from(fs: Option<Vec<SqlFilter>>) -> Option<Vec<Filter>> {
+	pub(super) fn from(fs: &Option<Vec<SqlFilter>>) -> Option<Vec<Filter>> {
 		if let Some(fs) = fs {
-			let r = fs.into_iter().map(|f| f.into()).collect();
+			let r = fs.iter().map(|f| f.into()).collect();
 			Some(r)
 		} else {
 			None

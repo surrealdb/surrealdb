@@ -10,8 +10,11 @@ use geo_types::{MultiLineString, MultiPoint, MultiPolygon};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
+use std::collections::BTreeMap;
 use std::iter::once;
 use std::{fmt, hash};
+
+use super::Object;
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Geometry";
 
@@ -115,6 +118,21 @@ impl Geometry {
 			Self::MultiPolygon(v) => multipolygon(v),
 			Self::Collection(v) => collection(v),
 		}
+	}
+	/// Get the GeoJSON object representation for this geometry
+	pub fn as_object(&self) -> Object {
+		let mut obj = BTreeMap::<String, Value>::new();
+		obj.insert("type".into(), self.as_type().into());
+		obj.insert(
+			match self {
+				Self::Collection(_) => "geometries",
+				_ => "coordinates",
+			}
+			.into(),
+			self.as_coordinates(),
+		);
+
+		obj.into()
 	}
 }
 

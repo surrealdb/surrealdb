@@ -66,15 +66,7 @@ impl Model {
 		// Check this function is allowed
 		ctx.check_allowed_function(name.as_str())?;
 		// Get the model definition
-		let val = {
-			// Claim transaction
-			let mut run = ctx.tx_lock().await;
-			// Get the function definition
-			let val =
-				run.get_and_cache_db_model(opt.ns()?, opt.db()?, &self.name, &self.version).await?;
-			drop(run);
-			val
-		};
+		let val = ctx.tx().get_db_model(opt.ns()?, opt.db()?, &self.name, &self.version).await?;
 		// Calculate the model path
 		let path = format!(
 			"ml/{}/{}/{}-{}-{}.surml",

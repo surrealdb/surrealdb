@@ -5,33 +5,7 @@ use crate::sql::Kind;
 use crate::sql::Value;
 use ser::Serializer as _;
 use serde::ser::Error as _;
-use serde::ser::Impossible;
 use serde::ser::Serialize;
-
-pub(super) struct Serializer;
-
-impl ser::Serializer for Serializer {
-	type Ok = Cast;
-	type Error = Error;
-
-	type SerializeSeq = Impossible<Cast, Error>;
-	type SerializeTuple = Impossible<Cast, Error>;
-	type SerializeTupleStruct = SerializeCast;
-	type SerializeTupleVariant = Impossible<Cast, Error>;
-	type SerializeMap = Impossible<Cast, Error>;
-	type SerializeStruct = Impossible<Cast, Error>;
-	type SerializeStructVariant = Impossible<Cast, Error>;
-
-	const EXPECTED: &'static str = "an struct `Cast`";
-
-	fn serialize_tuple_struct(
-		self,
-		_name: &'static str,
-		_len: usize,
-	) -> Result<Self::SerializeTupleStruct, Error> {
-		Ok(SerializeCast::default())
-	}
-}
 
 #[derive(Default)]
 pub(super) struct SerializeCast {
@@ -74,7 +48,33 @@ impl serde::ser::SerializeTupleStruct for SerializeCast {
 #[cfg(test)]
 mod tests {
 	use super::*;
+	use serde::ser::Impossible;
 	use serde::Serialize;
+
+	pub(super) struct Serializer;
+
+	impl ser::Serializer for Serializer {
+		type Ok = Cast;
+		type Error = Error;
+
+		type SerializeSeq = Impossible<Cast, Error>;
+		type SerializeTuple = Impossible<Cast, Error>;
+		type SerializeTupleStruct = SerializeCast;
+		type SerializeTupleVariant = Impossible<Cast, Error>;
+		type SerializeMap = Impossible<Cast, Error>;
+		type SerializeStruct = Impossible<Cast, Error>;
+		type SerializeStructVariant = Impossible<Cast, Error>;
+
+		const EXPECTED: &'static str = "an struct `Cast`";
+
+		fn serialize_tuple_struct(
+			self,
+			_name: &'static str,
+			_len: usize,
+		) -> Result<Self::SerializeTupleStruct, Error> {
+			Ok(SerializeCast::default())
+		}
+	}
 
 	#[test]
 	fn cast() {

@@ -3,7 +3,6 @@ use std::ops::Deref;
 use std::sync::Arc;
 
 use crate::cnf;
-use crate::dbs::DB;
 use crate::err::Error;
 use crate::rpc::connection::Connection;
 use crate::rpc::format::HttpFormat;
@@ -13,16 +12,16 @@ use crate::rpc::RpcState;
 use axum::extract::State;
 use axum::routing::get;
 use axum::routing::post;
-use axum::TypedHeader;
 use axum::{
 	extract::ws::{WebSocket, WebSocketUpgrade},
 	response::IntoResponse,
 	Extension, Router,
 };
+use axum_extra::TypedHeader;
 use bytes::Bytes;
 use http::HeaderValue;
-use http_body::Body as HttpBody;
 use surrealdb::dbs::Session;
+use surrealdb::kvs::Datastore;
 use surrealdb::rpc::format::Format;
 use surrealdb::rpc::format::PROTOCOLS;
 use surrealdb::rpc::method::Method;
@@ -31,20 +30,17 @@ use uuid::Uuid;
 
 use super::headers::Accept;
 use super::headers::ContentType;
+use super::AppState;
 
 use surrealdb::rpc::rpc_context::RpcContext;
 
-pub(super) fn router<B>() -> Router<Arc<RpcState>, B>
-where
-	B: HttpBody + Send + 'static,
-	B::Data: Send,
-	B::Error: std::error::Error + Send + Sync + 'static,
-{
+pub(super) fn router() -> Router<Arc<RpcState>> {
 	Router::new().route("/rpc", get(get_handler)).route("/rpc", post(post_handler))
 }
 
 async fn get_handler(
 	ws: WebSocketUpgrade,
+	Extension(state): Extension<AppState>,
 	Extension(id): Extension<RequestId>,
 	Extension(sess): Extension<Session>,
 	State(rpc_state): State<Arc<RpcState>>,
@@ -79,10 +75,18 @@ async fn get_handler(
 		// Set the maximum WebSocket message size
 		.max_message_size(*cnf::WEBSOCKET_MAX_MESSAGE_SIZE)
 		// Handle the WebSocket upgrade and process messages
-		.on_upgrade(move |socket| handle_socket(rpc_state, socket, sess, id)))
+		.on_upgrade(move |socket| {
+			handle_socket(state.datastore.clone(), rpc_state, socket, sess, id)
+		}))
 }
 
-async fn handle_socket(state: Arc<RpcState>, ws: WebSocket, sess: Session, id: Uuid) {
+async fn handle_socket(
+	datastore: Arc<Datastore>,
+	state: Arc<RpcState>,
+	ws: WebSocket,
+	sess: Session,
+	id: Uuid,
+) {
 	// Check if there is a WebSocket protocol specified
 	let format = match ws.protocol().map(HeaderValue::to_str) {
 		// Any selected protocol will always be a valie value
@@ -92,12 +96,13 @@ async fn handle_socket(state: Arc<RpcState>, ws: WebSocket, sess: Session, id: U
 	};
 	// Format::Unsupported is not in the PROTOCOLS list so cannot be the value of format here
 	// Create a new connection instance
-	let rpc = Connection::new(state, id, sess, format);
+	let rpc = Connection::new(datastore, state, id, sess, format);
 	// Serve the socket connection requests
 	Connection::serve(rpc, ws).await;
 }
 
 async fn post_handler(
+	Extension(state): Extension<AppState>,
 	Extension(session): Extension<Session>,
 	output: Option<TypedHeader<Accept>>,
 	content_type: TypedHeader<ContentType>,
@@ -114,7 +119,7 @@ async fn post_handler(
 		return Err(Error::InvalidType);
 	}
 
-	let mut rpc_ctx = PostRpcContext::new(DB.get().unwrap(), session, BTreeMap::new());
+	let mut rpc_ctx = PostRpcContext::new(&state.datastore, session, BTreeMap::new());
 
 	match fmt.req_http(body) {
 		Ok(req) => {

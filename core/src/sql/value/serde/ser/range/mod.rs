@@ -6,35 +6,8 @@ use crate::sql::Id;
 use crate::sql::Range;
 use ser::Serializer as _;
 use serde::ser::Error as _;
-use serde::ser::Impossible;
 use serde::ser::Serialize;
 use std::ops::Bound;
-
-pub(super) struct Serializer;
-
-impl ser::Serializer for Serializer {
-	type Ok = Range;
-	type Error = Error;
-
-	type SerializeSeq = Impossible<Range, Error>;
-	type SerializeTuple = Impossible<Range, Error>;
-	type SerializeTupleStruct = Impossible<Range, Error>;
-	type SerializeTupleVariant = Impossible<Range, Error>;
-	type SerializeMap = Impossible<Range, Error>;
-	type SerializeStruct = SerializeRange;
-	type SerializeStructVariant = Impossible<Range, Error>;
-
-	const EXPECTED: &'static str = "a struct `Range`";
-
-	#[inline]
-	fn serialize_struct(
-		self,
-		_name: &'static str,
-		_len: usize,
-	) -> Result<Self::SerializeStruct, Error> {
-		Ok(SerializeRange::default())
-	}
-}
 
 #[derive(Default)]
 pub(super) struct SerializeRange {
@@ -83,7 +56,34 @@ impl serde::ser::SerializeStruct for SerializeRange {
 #[cfg(test)]
 mod tests {
 	use super::*;
+	use serde::ser::Impossible;
 	use serde::Serialize;
+
+	pub(super) struct Serializer;
+
+	impl ser::Serializer for Serializer {
+		type Ok = Range;
+		type Error = Error;
+
+		type SerializeSeq = Impossible<Range, Error>;
+		type SerializeTuple = Impossible<Range, Error>;
+		type SerializeTupleStruct = Impossible<Range, Error>;
+		type SerializeTupleVariant = Impossible<Range, Error>;
+		type SerializeMap = Impossible<Range, Error>;
+		type SerializeStruct = SerializeRange;
+		type SerializeStructVariant = Impossible<Range, Error>;
+
+		const EXPECTED: &'static str = "a struct `Range`";
+
+		#[inline]
+		fn serialize_struct(
+			self,
+			_name: &'static str,
+			_len: usize,
+		) -> Result<Self::SerializeStruct, Error> {
+			Ok(SerializeRange::default())
+		}
+	}
 
 	#[test]
 	fn range() {

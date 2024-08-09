@@ -21,6 +21,9 @@ pub enum SizedClock {
 }
 
 impl SizedClock {
+	pub(crate) fn system() -> Self {
+		Self::System(Default::default())
+	}
 	pub async fn now(&self) -> Timestamp {
 		match self {
 			SizedClock::System(c) => c.now(),

@@ -69,6 +69,7 @@ impl ForeachStatement {
 							Entry::Relate(v) => stk.run(|stk| v.compute(stk, &ctx, opt, doc)).await,
 							Entry::Insert(v) => stk.run(|stk| v.compute(stk, &ctx, opt, doc)).await,
 							Entry::Define(v) => v.compute(stk, &ctx, opt, doc).await,
+							Entry::Alter(v) => v.compute(stk, &ctx, opt, doc).await,
 							Entry::Rebuild(v) => v.compute(stk, &ctx, opt, doc).await,
 							Entry::Remove(v) => v.compute(&ctx, opt, doc).await,
 							Entry::Output(v) => {

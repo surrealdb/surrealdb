@@ -26,78 +26,58 @@ pub(crate) mod native;
 #[cfg(target_arch = "wasm32")]
 pub(crate) mod wasm;
 
-use crate::api::conn::DbResponse;
-use crate::api::conn::Method;
-#[cfg(not(target_arch = "wasm32"))]
-use crate::api::conn::MlConfig;
-use crate::api::conn::Param;
-use crate::api::engine::create_statement;
-use crate::api::engine::delete_statement;
-use crate::api::engine::insert_statement;
-use crate::api::engine::merge_statement;
-use crate::api::engine::patch_statement;
-use crate::api::engine::select_statement;
-use crate::api::engine::update_statement;
-use crate::api::engine::upsert_statement;
+use crate::{
+	api::{
+		conn::{Command, DbResponse, RequestData},
+		Connect, Response as QueryResponse, Result, Surreal,
+	},
+	method::Stats,
+	opt::IntoEndpoint,
+};
+use channel::Sender;
+use indexmap::IndexMap;
+use std::{
+	collections::{BTreeMap, HashMap},
+	marker::PhantomData,
+	mem,
+	sync::Arc,
+	time::Duration,
+};
+use surrealdb_core::{
+	dbs::{Notification, Response, Session},
+	kvs::Datastore,
+	sql::{
+		statements::{
+			CreateStatement, DeleteStatement, InsertStatement, KillStatement, SelectStatement,
+			UpdateStatement, UpsertStatement,
+		},
+		Data, Field, Output, Query, Statement, Uuid, Value,
+	},
+};
+
 #[cfg(not(target_arch = "wasm32"))]
 use crate::api::err::Error;
-use crate::api::Connect;
-use crate::api::Response as QueryResponse;
-use crate::api::Result;
-use crate::api::Surreal;
-use crate::dbs::Notification;
-use crate::dbs::Response;
-use crate::dbs::Session;
-#[cfg(feature = "ml")]
-#[cfg(not(target_arch = "wasm32"))]
-use crate::iam::check::check_ns_db;
-#[cfg(feature = "ml")]
-#[cfg(not(target_arch = "wasm32"))]
-use crate::iam::Action;
-#[cfg(feature = "ml")]
-#[cfg(not(target_arch = "wasm32"))]
-use crate::iam::ResourceKind;
-use crate::kvs::Datastore;
-#[cfg(feature = "ml")]
-#[cfg(not(target_arch = "wasm32"))]
-use crate::kvs::{LockType, TransactionType};
-use crate::method::Stats;
-#[cfg(feature = "ml")]
-#[cfg(not(target_arch = "wasm32"))]
-use crate::ml::storage::surml_file::SurMlFile;
-use crate::opt::IntoEndpoint;
-#[cfg(feature = "ml")]
-#[cfg(not(target_arch = "wasm32"))]
-use crate::sql::statements::DefineModelStatement;
-#[cfg(feature = "ml")]
-#[cfg(not(target_arch = "wasm32"))]
-use crate::sql::statements::DefineStatement;
-use crate::sql::statements::KillStatement;
-use crate::sql::Query;
-use crate::sql::Statement;
-use crate::sql::Uuid;
-use crate::sql::Value;
-use channel::Sender;
-#[cfg(feature = "ml")]
-#[cfg(not(target_arch = "wasm32"))]
-use futures::StreamExt;
-use indexmap::IndexMap;
-use std::collections::BTreeMap;
-use std::collections::HashMap;
-use std::marker::PhantomData;
-use std::mem;
 #[cfg(not(target_arch = "wasm32"))]
 use std::path::PathBuf;
-use std::sync::Arc;
-use std::time::Duration;
 #[cfg(not(target_arch = "wasm32"))]
-use tokio::fs::OpenOptions;
-#[cfg(not(target_arch = "wasm32"))]
-use tokio::io;
-#[cfg(not(target_arch = "wasm32"))]
-use tokio::io::AsyncReadExt;
-#[cfg(not(target_arch = "wasm32"))]
-use tokio::io::AsyncWriteExt;
+use tokio::{
+	fs::OpenOptions,
+	io::{self, AsyncReadExt, AsyncWriteExt},
+};
+
+#[cfg(all(not(target_arch = "wasm32"), feature = "ml"))]
+use crate::api::conn::MlExportConfig;
+#[cfg(all(not(target_arch = "wasm32"), feature = "ml"))]
+use futures::StreamExt;
+#[cfg(all(not(target_arch = "wasm32"), feature = "ml"))]
+use surrealdb_core::{
+	iam::{check::check_ns_db, Action, ResourceKind},
+	kvs::{LockType, TransactionType},
+	ml::storage::surml_file::SurMlFile,
+	sql::statements::{DefineModelStatement, DefineStatement},
+};
+
+use super::value_to_values;
 
 const DEFAULT_TICK_INTERVAL: Duration = Duration::from_secs(10);
 
@@ -373,9 +353,7 @@ pub struct SurrealKV;
 
 /// An embedded database
 #[derive(Debug, Clone)]
-pub struct Db {
-	pub(crate) method: crate::api::conn::Method,
-}
+pub struct Db(());
 
 impl Surreal<Db> {
 	/// Connects to a specific database endpoint, saving the connection on the static client
@@ -431,44 +409,42 @@ async fn take(one: bool, responses: Vec<Response>) -> Result<Value> {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-async fn export(
+async fn export_file(kvs: &Datastore, sess: &Session, chn: channel::Sender<Vec<u8>>) -> Result<()> {
+	if let Err(error) = kvs.export(sess, chn).await?.await {
+		if let crate::error::Db::Channel(message) = error {
+			// This is not really an error. Just logging it for improved visibility.
+			trace!("{message}");
+			return Ok(());
+		}
+		return Err(error.into());
+	}
+	Ok(())
+}
+
+#[cfg(all(not(target_arch = "wasm32"), feature = "ml"))]
+async fn export_ml(
 	kvs: &Datastore,
 	sess: &Session,
 	chn: channel::Sender<Vec<u8>>,
-	ml_config: Option<MlConfig>,
+	MlExportConfig {
+		name,
+		version,
+	}: MlExportConfig,
 ) -> Result<()> {
-	match ml_config {
-		#[cfg(feature = "ml")]
-		Some(MlConfig::Export {
-			name,
-			version,
-		}) => {
-			// Ensure a NS and DB are set
-			let (nsv, dbv) = check_ns_db(sess)?;
-			// Check the permissions level
-			kvs.check(sess, Action::View, ResourceKind::Model.on_db(&nsv, &dbv))?;
-			// Start a new readonly transaction
-			let mut tx = kvs.transaction(TransactionType::Read, LockType::Optimistic).await?;
-			// Attempt to get the model definition
-			let info = tx.get_db_model(&nsv, &dbv, &name, &version).await?;
-			// Export the file data in to the store
-			let mut data = crate::obs::stream(info.hash.to_owned()).await?;
-			// Process all stream values
-			while let Some(Ok(bytes)) = data.next().await {
-				if chn.send(bytes.to_vec()).await.is_err() {
-					break;
-				}
-			}
-		}
-		_ => {
-			if let Err(error) = kvs.export(sess, chn).await?.await {
-				if let crate::error::Db::Channel(message) = error {
-					// This is not really an error. Just logging it for improved visibility.
-					trace!("{message}");
-					return Ok(());
-				}
-				return Err(error.into());
-			}
+	// Ensure a NS and DB are set
+	let (nsv, dbv) = check_ns_db(sess)?;
+	// Check the permissions level
+	kvs.check(sess, Action::View, ResourceKind::Model.on_db(&nsv, &dbv))?;
+	// Start a new readonly transaction
+	let tx = kvs.transaction(TransactionType::Read, LockType::Optimistic).await?;
+	// Attempt to get the model definition
+	let info = tx.get_db_model(&nsv, &dbv, &name, &version).await?;
+	// Export the file data in to the store
+	let mut data = crate::obs::stream(info.hash.to_owned()).await?;
+	// Process all stream values
+	while let Some(Ok(bytes)) = data.next().await {
+		if chn.send(bytes.to_vec()).await.is_err() {
+			break;
 		}
 	}
 	Ok(())
@@ -507,211 +483,376 @@ async fn kill_live_query(
 }
 
 async fn router(
-	(_, method, param): (i64, Method, Param),
+	RequestData {
+		command,
+		..
+	}: RequestData,
 	kvs: &Arc<Datastore>,
 	session: &mut Session,
 	vars: &mut BTreeMap<String, Value>,
 	live_queries: &mut HashMap<Uuid, Sender<Notification>>,
 ) -> Result<DbResponse> {
-	let mut params = param.other;
-
-	match method {
-		Method::Use => {
-			match &mut params[..] {
-				[Value::Strand(ns), Value::Strand(db)] => {
-					session.ns = Some(mem::take(&mut ns.0));
-					session.db = Some(mem::take(&mut db.0));
-				}
-				[Value::Strand(ns), Value::None] => {
-					session.ns = Some(mem::take(&mut ns.0));
-				}
-				[Value::None, Value::Strand(db)] => {
-					session.db = Some(mem::take(&mut db.0));
-				}
-				_ => unreachable!(),
+	match command {
+		Command::Use {
+			namespace,
+			database,
+		} => {
+			if let Some(ns) = namespace {
+				session.ns = Some(ns);
+			}
+			if let Some(db) = database {
+				session.db = Some(db);
 			}
 			Ok(DbResponse::Other(Value::None))
 		}
-		Method::Signup => {
-			let credentials = match &mut params[..] {
-				[Value::Object(credentials)] => mem::take(credentials),
-				_ => unreachable!(),
-			};
+		Command::Signup {
+			credentials,
+		} => {
 			let response = crate::iam::signup::signup(kvs, session, credentials).await?;
 			Ok(DbResponse::Other(response.into()))
 		}
-		Method::Signin => {
-			let credentials = match &mut params[..] {
-				[Value::Object(credentials)] => mem::take(credentials),
-				_ => unreachable!(),
-			};
+		Command::Signin {
+			credentials,
+		} => {
 			let response = crate::iam::signin::signin(kvs, session, credentials).await?;
 			Ok(DbResponse::Other(response.into()))
 		}
-		Method::Authenticate => {
-			let token = match &mut params[..] {
-				[Value::Strand(token)] => mem::take(&mut token.0),
-				_ => unreachable!(),
-			};
+		Command::Authenticate {
+			token,
+		} => {
 			crate::iam::verify::token(kvs, session, &token).await?;
 			Ok(DbResponse::Other(Value::None))
 		}
-		Method::Invalidate => {
+		Command::Invalidate => {
 			crate::iam::clear::clear(session)?;
 			Ok(DbResponse::Other(Value::None))
 		}
-		Method::Create => {
+		Command::Create {
+			what,
+			data,
+		} => {
 			let mut query = Query::default();
-			let statement = create_statement(&mut params);
+			let statement = {
+				let mut stmt = CreateStatement::default();
+				stmt.what = value_to_values(what);
+				stmt.data = data.map(Data::ContentExpression);
+				stmt.output = Some(Output::After);
+				stmt
+			};
 			query.0 .0 = vec![Statement::Create(statement)];
 			let response = kvs.process(query, &*session, Some(vars.clone())).await?;
 			let value = take(true, response).await?;
 			Ok(DbResponse::Other(value))
 		}
-		Method::Upsert => {
+		Command::Upsert {
+			what,
+			data,
+		} => {
 			let mut query = Query::default();
-			let (one, statement) = upsert_statement(&mut params);
+			let one = what.is_thing();
+			let statement = {
+				let mut stmt = UpsertStatement::default();
+				stmt.what = value_to_values(what);
+				stmt.data = data.map(Data::ContentExpression);
+				stmt.output = Some(Output::After);
+				stmt
+			};
 			query.0 .0 = vec![Statement::Upsert(statement)];
 			let response = kvs.process(query, &*session, Some(vars.clone())).await?;
 			let value = take(one, response).await?;
 			Ok(DbResponse::Other(value))
 		}
-		Method::Update => {
+		Command::Update {
+			what,
+			data,
+		} => {
 			let mut query = Query::default();
-			let (one, statement) = update_statement(&mut params);
+			let one = what.is_thing();
+			let statement = {
+				let mut stmt = UpdateStatement::default();
+				stmt.what = value_to_values(what);
+				stmt.data = data.map(Data::ContentExpression);
+				stmt.output = Some(Output::After);
+				stmt
+			};
 			query.0 .0 = vec![Statement::Update(statement)];
 			let response = kvs.process(query, &*session, Some(vars.clone())).await?;
 			let value = take(one, response).await?;
 			Ok(DbResponse::Other(value))
 		}
-		Method::Insert => {
+		Command::Insert {
+			what,
+			data,
+		} => {
 			let mut query = Query::default();
-			let (one, statement) = insert_statement(&mut params);
+			let one = !data.is_array();
+			let statement = {
+				let mut stmt = InsertStatement::default();
+				stmt.into = what;
+				stmt.data = Data::SingleExpression(data);
+				stmt.output = Some(Output::After);
+				stmt
+			};
 			query.0 .0 = vec![Statement::Insert(statement)];
 			let response = kvs.process(query, &*session, Some(vars.clone())).await?;
 			let value = take(one, response).await?;
 			Ok(DbResponse::Other(value))
 		}
-		Method::Patch => {
+		Command::Patch {
+			what,
+			data,
+		} => {
 			let mut query = Query::default();
-			let (one, statement) = patch_statement(&mut params);
+			let one = what.is_thing();
+			let statement = {
+				let mut stmt = UpdateStatement::default();
+				stmt.what = value_to_values(what);
+				stmt.data = data.map(Data::PatchExpression);
+				stmt.output = Some(Output::After);
+				stmt
+			};
 			query.0 .0 = vec![Statement::Update(statement)];
 			let response = kvs.process(query, &*session, Some(vars.clone())).await?;
 			let value = take(one, response).await?;
 			Ok(DbResponse::Other(value))
 		}
-		Method::Merge => {
+		Command::Merge {
+			what,
+			data,
+		} => {
 			let mut query = Query::default();
-			let (one, statement) = merge_statement(&mut params);
+			let one = what.is_thing();
+			let statement = {
+				let mut stmt = UpdateStatement::default();
+				stmt.what = value_to_values(what);
+				stmt.data = data.map(Data::MergeExpression);
+				stmt.output = Some(Output::After);
+				stmt
+			};
 			query.0 .0 = vec![Statement::Update(statement)];
 			let response = kvs.process(query, &*session, Some(vars.clone())).await?;
 			let value = take(one, response).await?;
 			Ok(DbResponse::Other(value))
 		}
-		Method::Select => {
+		Command::Select {
+			what,
+		} => {
 			let mut query = Query::default();
-			let (one, statement) = select_statement(&mut params);
+			let one = what.is_thing();
+			let statement = {
+				let mut stmt = SelectStatement::default();
+				stmt.what = value_to_values(what);
+				stmt.expr.0 = vec![Field::All];
+				stmt
+			};
 			query.0 .0 = vec![Statement::Select(statement)];
 			let response = kvs.process(query, &*session, Some(vars.clone())).await?;
 			let value = take(one, response).await?;
 			Ok(DbResponse::Other(value))
 		}
-		Method::Delete => {
+		Command::Delete {
+			what,
+		} => {
 			let mut query = Query::default();
-			let (one, statement) = delete_statement(&mut params);
+			let one = what.is_thing();
+			let statement = {
+				let mut stmt = DeleteStatement::default();
+				stmt.what = value_to_values(what);
+				stmt.output = Some(Output::Before);
+				stmt
+			};
 			query.0 .0 = vec![Statement::Delete(statement)];
 			let response = kvs.process(query, &*session, Some(vars.clone())).await?;
 			let value = take(one, response).await?;
 			Ok(DbResponse::Other(value))
 		}
-		Method::Query => {
-			let response = match param.query {
-				Some((query, mut bindings)) => {
-					let mut vars = vars.clone();
-					vars.append(&mut bindings);
-					kvs.process(query, &*session, Some(vars)).await?
-				}
-				None => unreachable!(),
-			};
+		Command::Query {
+			query,
+			mut variables,
+		} => {
+			let mut vars = vars.clone();
+			vars.append(&mut variables);
+			let response = kvs.process(query, &*session, Some(vars)).await?;
 			let response = process(response);
 			Ok(DbResponse::Query(response))
 		}
+
 		#[cfg(target_arch = "wasm32")]
-		Method::Export | Method::Import => unreachable!(),
+		Command::ExportFile {
+			..
+		}
+		| Command::ExportBytes {
+			..
+		}
+		| Command::ImportFile {
+			..
+		} => Err(crate::api::Error::BackupsNotSupported.into()),
+
+		#[cfg(any(target_arch = "wasm32", not(feature = "ml")))]
+		Command::ExportMl {
+			..
+		}
+		| Command::ExportBytesMl {
+			..
+		}
+		| Command::ImportMl {
+			..
+		} => Err(crate::api::Error::BackupsNotSupported.into()),
+
 		#[cfg(not(target_arch = "wasm32"))]
-		Method::Export => {
+		Command::ExportFile {
+			path: file,
+		} => {
+			let (tx, rx) = crate::channel::bounded(1);
+			let (mut writer, mut reader) = io::duplex(10_240);
+
+			// Write to channel.
+			let export = export_file(kvs, session, tx);
+
+			// Read from channel and write to pipe.
+			let bridge = async move {
+				while let Ok(value) = rx.recv().await {
+					if writer.write_all(&value).await.is_err() {
+						// Broken pipe. Let either side's error be propagated.
+						break;
+					}
+				}
+				Ok(())
+			};
+
+			// Output to stdout or file.
+			let mut output = match OpenOptions::new()
+				.write(true)
+				.create(true)
+				.truncate(true)
+				.open(&file)
+				.await
+			{
+				Ok(path) => path,
+				Err(error) => {
+					return Err(Error::FileOpen {
+						path: file,
+						error,
+					}
+					.into());
+				}
+			};
+
+			// Copy from pipe to output.
+			let copy = copy(file, &mut reader, &mut output);
+
+			tokio::try_join!(export, bridge, copy)?;
+			Ok(DbResponse::Other(Value::None))
+		}
+
+		#[cfg(all(not(target_arch = "wasm32"), feature = "ml"))]
+		Command::ExportMl {
+			path,
+			config,
+		} => {
+			let (tx, rx) = crate::channel::bounded(1);
+			let (mut writer, mut reader) = io::duplex(10_240);
+
+			// Write to channel.
+			let export = export_ml(kvs, session, tx, config);
+
+			// Read from channel and write to pipe.
+			let bridge = async move {
+				while let Ok(value) = rx.recv().await {
+					if writer.write_all(&value).await.is_err() {
+						// Broken pipe. Let either side's error be propagated.
+						break;
+					}
+				}
+				Ok(())
+			};
+
+			// Output to stdout or file.
+			let mut output = match OpenOptions::new()
+				.write(true)
+				.create(true)
+				.truncate(true)
+				.open(&path)
+				.await
+			{
+				Ok(path) => path,
+				Err(error) => {
+					return Err(Error::FileOpen {
+						path,
+						error,
+					}
+					.into());
+				}
+			};
+
+			// Copy from pipe to output.
+			let copy = copy(path, &mut reader, &mut output);
+
+			tokio::try_join!(export, bridge, copy)?;
+			Ok(DbResponse::Other(Value::None))
+		}
+
+		#[cfg(not(target_arch = "wasm32"))]
+		Command::ExportBytes {
+			bytes,
+		} => {
 			let (tx, rx) = crate::channel::bounded(1);
 
-			match (param.file, param.bytes_sender) {
-				(Some(path), None) => {
-					let (mut writer, mut reader) = io::duplex(10_240);
+			let kvs = kvs.clone();
+			let session = session.clone();
+			tokio::spawn(async move {
+				let export = async {
+					if let Err(error) = export_file(&kvs, &session, tx).await {
+						let _ = bytes.send(Err(error)).await;
+					}
+				};
 
-					// Write to channel.
-					let export = export(kvs, session, tx, param.ml_config);
-
-					// Read from channel and write to pipe.
-					let bridge = async move {
-						while let Ok(value) = rx.recv().await {
-							if writer.write_all(&value).await.is_err() {
-								// Broken pipe. Let either side's error be propagated.
-								break;
-							}
+				let bridge = async {
+					while let Ok(b) = rx.recv().await {
+						if bytes.send(Ok(b)).await.is_err() {
+							break;
 						}
-						Ok(())
-					};
+					}
+				};
 
-					// Output to stdout or file.
-					let mut output = match OpenOptions::new()
-						.write(true)
-						.create(true)
-						.truncate(true)
-						.open(&path)
-						.await
-					{
-						Ok(path) => path,
-						Err(error) => {
-							return Err(Error::FileOpen {
-								path,
-								error,
-							}
-							.into());
+				tokio::join!(export, bridge);
+			});
+
+			Ok(DbResponse::Other(Value::None))
+		}
+		#[cfg(all(not(target_arch = "wasm32"), feature = "ml"))]
+		Command::ExportBytesMl {
+			bytes,
+			config,
+		} => {
+			let (tx, rx) = crate::channel::bounded(1);
+
+			let kvs = kvs.clone();
+			let session = session.clone();
+			tokio::spawn(async move {
+				let export = async {
+					if let Err(error) = export_ml(&kvs, &session, tx, config).await {
+						let _ = bytes.send(Err(error)).await;
+					}
+				};
+
+				let bridge = async {
+					while let Ok(b) = rx.recv().await {
+						if bytes.send(Ok(b)).await.is_err() {
+							break;
 						}
-					};
+					}
+				};
 
-					// Copy from pipe to output.
-					let copy = copy(path, &mut reader, &mut output);
-
-					tokio::try_join!(export, bridge, copy)?;
-				}
-				(None, Some(backup)) => {
-					let kvs = kvs.clone();
-					let session = session.clone();
-					tokio::spawn(async move {
-						let export = async {
-							if let Err(error) = export(&kvs, &session, tx, param.ml_config).await {
-								let _ = backup.send(Err(error)).await;
-							}
-						};
-
-						let bridge = async {
-							while let Ok(bytes) = rx.recv().await {
-								if backup.send(Ok(bytes)).await.is_err() {
-									break;
-								}
-							}
-						};
-
-						tokio::join!(export, bridge);
-					});
-				}
-				_ => unreachable!(),
-			}
+				tokio::join!(export, bridge);
+			});
 
 			Ok(DbResponse::Other(Value::None))
 		}
 		#[cfg(not(target_arch = "wasm32"))]
-		Method::Import => {
-			let path = param.file.expect("file to import from");
+		Command::ImportFile {
+			path,
+		} => {
 			let mut file = match OpenOptions::new().read(true).open(&path).await {
 				Ok(path) => path,
 				Err(error) => {
@@ -722,77 +863,94 @@ async fn router(
 					.into());
 				}
 			};
-			let responses = match param.ml_config {
-				#[cfg(feature = "ml")]
-				Some(MlConfig::Import) => {
-					// Ensure a NS and DB are set
-					let (nsv, dbv) = check_ns_db(session)?;
-					// Check the permissions level
-					kvs.check(session, Action::Edit, ResourceKind::Model.on_db(&nsv, &dbv))?;
-					// Create a new buffer
-					let mut buffer = Vec::new();
-					// Load all the uploaded file chunks
-					if let Err(error) = file.read_to_end(&mut buffer).await {
-						return Err(Error::FileRead {
-							path,
-							error,
-						}
-						.into());
-					}
-					// Check that the SurrealML file is valid
-					let file = match SurMlFile::from_bytes(buffer) {
-						Ok(file) => file,
-						Err(error) => {
-							return Err(Error::FileRead {
-								path,
-								error: io::Error::new(
-									io::ErrorKind::InvalidData,
-									error.message.to_string(),
-								),
-							}
-							.into());
-						}
-					};
-					// Convert the file back in to raw bytes
-					let data = file.to_bytes();
-					// Calculate the hash of the model file
-					let hash = crate::obs::hash(&data);
-					// Insert the file data in to the store
-					crate::obs::put(&hash, data).await?;
-					// Insert the model in to the database
-					let mut model = DefineModelStatement::default();
-					model.name = file.header.name.to_string().into();
-					model.version = file.header.version.to_string();
-					model.comment = Some(file.header.description.to_string().into());
-					model.hash = hash;
-					let query = DefineStatement::Model(model).into();
-					kvs.process(query, session, Some(vars.clone())).await?
+			let mut statements = String::new();
+			if let Err(error) = file.read_to_string(&mut statements).await {
+				return Err(Error::FileRead {
+					path,
+					error,
 				}
-				_ => {
-					let mut statements = String::new();
-					if let Err(error) = file.read_to_string(&mut statements).await {
-						return Err(Error::FileRead {
-							path,
-							error,
-						}
-						.into());
-					}
-					kvs.execute(&statements, &*session, Some(vars.clone())).await?
-				}
-			};
+				.into());
+			}
+
+			let responses = kvs.execute(&statements, &*session, Some(vars.clone())).await?;
+
 			for response in responses {
 				response.result?;
 			}
+
 			Ok(DbResponse::Other(Value::None))
 		}
-		Method::Health => Ok(DbResponse::Other(Value::None)),
-		Method::Version => Ok(DbResponse::Other(crate::env::VERSION.into())),
-		Method::Set => {
-			let (key, value) = match &mut params[..2] {
-				[Value::Strand(key), value] => (mem::take(&mut key.0), mem::take(value)),
-				_ => unreachable!(),
+		#[cfg(all(not(target_arch = "wasm32"), feature = "ml"))]
+		Command::ImportMl {
+			path,
+		} => {
+			let mut file = match OpenOptions::new().read(true).open(&path).await {
+				Ok(path) => path,
+				Err(error) => {
+					return Err(Error::FileOpen {
+						path,
+						error,
+					}
+					.into());
+				}
 			};
-			let var = Some(crate::map! {
+
+			// Ensure a NS and DB are set
+			let (nsv, dbv) = check_ns_db(session)?;
+			// Check the permissions level
+			kvs.check(session, Action::Edit, ResourceKind::Model.on_db(&nsv, &dbv))?;
+			// Create a new buffer
+			let mut buffer = Vec::new();
+			// Load all the uploaded file chunks
+			if let Err(error) = file.read_to_end(&mut buffer).await {
+				return Err(Error::FileRead {
+					path,
+					error,
+				}
+				.into());
+			}
+			// Check that the SurrealML file is valid
+			let file = match SurMlFile::from_bytes(buffer) {
+				Ok(file) => file,
+				Err(error) => {
+					return Err(Error::FileRead {
+						path,
+						error: io::Error::new(
+							io::ErrorKind::InvalidData,
+							error.message.to_string(),
+						),
+					}
+					.into());
+				}
+			};
+			// Convert the file back in to raw bytes
+			let data = file.to_bytes();
+			// Calculate the hash of the model file
+			let hash = crate::obs::hash(&data);
+			// Insert the file data in to the store
+			crate::obs::put(&hash, data).await?;
+			// Insert the model in to the database
+			let mut model = DefineModelStatement::default();
+			model.name = file.header.name.to_string().into();
+			model.version = file.header.version.to_string();
+			model.comment = Some(file.header.description.to_string().into());
+			model.hash = hash;
+			let query = DefineStatement::Model(model).into();
+			let responses = kvs.process(query, session, Some(vars.clone())).await?;
+
+			for response in responses {
+				response.result?;
+			}
+
+			Ok(DbResponse::Other(Value::None))
+		}
+		Command::Health => Ok(DbResponse::Other(Value::None)),
+		Command::Version => Ok(DbResponse::Other(crate::env::VERSION.into())),
+		Command::Set {
+			key,
+			value,
+		} => {
+			let var = Some(map! {
 				key.clone() => Value::None,
 				=> vars
 			});
@@ -802,27 +960,24 @@ async fn router(
 			};
 			Ok(DbResponse::Other(Value::None))
 		}
-		Method::Unset => {
-			if let [Value::Strand(key)] = &params[..1] {
-				vars.remove(&key.0);
-			}
+		Command::Unset {
+			key,
+		} => {
+			vars.remove(&key);
 			Ok(DbResponse::Other(Value::None))
 		}
-		Method::Live => {
-			if let Some(sender) = param.notification_sender {
-				if let [Value::Uuid(id)] = &params[..1] {
-					live_queries.insert(*id, sender);
-				}
-			}
+		Command::SubscribeLive {
+			uuid,
+			notification_sender,
+		} => {
+			live_queries.insert(uuid.into(), notification_sender);
 			Ok(DbResponse::Other(Value::None))
 		}
-		Method::Kill => {
-			let id = match &params[..] {
-				[Value::Uuid(id)] => *id,
-				_ => unreachable!(),
-			};
-			live_queries.remove(&id);
-			let value = kill_live_query(kvs, id, session, vars.clone()).await?;
+		Command::Kill {
+			uuid,
+		} => {
+			live_queries.remove(&uuid.into());
+			let value = kill_live_query(kvs, uuid.into(), session, vars.clone()).await?;
 			Ok(DbResponse::Other(value))
 		}
 	}

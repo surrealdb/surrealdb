@@ -1,5 +1,5 @@
-use crate::api::conn::Method;
-use crate::api::conn::Param;
+use crate::api::conn::Command;
+use crate::api::method::BoxFuture;
 use crate::api::method::Content;
 use crate::api::method::Merge;
 use crate::api::method::Patch;
@@ -15,10 +15,9 @@ use crate::Surreal;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 use std::borrow::Cow;
-use std::future::Future;
 use std::future::IntoFuture;
 use std::marker::PhantomData;
-use std::pin::Pin;
+use surrealdb_core::sql::to_value;
 
 /// An update future
 #[derive(Debug)]
@@ -53,12 +52,17 @@ macro_rules! into_future {
 				..
 			} = self;
 			Box::pin(async move {
-				let param = match range {
+				let param: Value = match range {
 					Some(range) => resource?.with_range(range)?.into(),
 					None => resource?.into(),
 				};
-				let mut conn = Client::new(Method::Update);
-				conn.$method(client.router.extract()?, Param::new(vec![param])).await
+				let router = client.router.extract()?;
+				router
+					.$method(Command::Update {
+						what: param,
+						data: None,
+					})
+					.await
 			})
 		}
 	};
@@ -69,7 +73,7 @@ where
 	Client: Connection,
 {
 	type Output = Result<Value>;
-	type IntoFuture = Pin<Box<dyn Future<Output = Self::Output> + Send + Sync + 'r>>;
+	type IntoFuture = BoxFuture<'r, Self::Output>;
 
 	into_future! {execute_value}
 }
@@ -80,7 +84,7 @@ where
 	R: DeserializeOwned,
 {
 	type Output = Result<Option<R>>;
-	type IntoFuture = Pin<Box<dyn Future<Output = Self::Output> + Send + Sync + 'r>>;
+	type IntoFuture = BoxFuture<'r, Self::Output>;
 
 	into_future! {execute_opt}
 }
@@ -91,7 +95,7 @@ where
 	R: DeserializeOwned,
 {
 	type Output = Result<Vec<R>>;
-	type IntoFuture = Pin<Box<dyn Future<Output = Self::Output> + Send + Sync + 'r>>;
+	type IntoFuture = BoxFuture<'r, Self::Output>;
 
 	into_future! {execute_vec}
 }
@@ -124,18 +128,28 @@ where
 	R: DeserializeOwned,
 {
 	/// Replaces the current document / record data with the specified data
-	pub fn content<D>(self, data: D) -> Content<'r, C, D, R>
+	pub fn content<D>(self, data: D) -> Content<'r, C, R>
 	where
 		D: Serialize,
 	{
-		Content {
-			client: self.client,
-			method: Method::Update,
-			resource: self.resource,
-			range: self.range,
-			content: data,
-			response_type: PhantomData,
-		}
+		Content::from_closure(self.client, || {
+			let data = to_value(data)?;
+
+			let what: Value = match self.range {
+				Some(range) => self.resource?.with_range(range)?.into(),
+				None => self.resource?.into(),
+			};
+
+			let data = match data {
+				Value::None | Value::Null => None,
+				content => Some(content),
+			};
+
+			Ok(Command::Update {
+				what,
+				data,
+			})
+		})
 	}
 
 	/// Merges the current document / record data with the specified data

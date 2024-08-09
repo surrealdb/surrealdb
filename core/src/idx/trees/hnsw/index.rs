@@ -10,9 +10,9 @@ use crate::idx::trees::knn::{Ids64, KnnResult, KnnResultBuilder};
 use crate::idx::trees::vector::{SharedVector, Vector};
 use crate::sql::index::{HnswParams, VectorType};
 use crate::sql::{Number, Thing, Value};
-use hashbrown::hash_map::Entry;
-use hashbrown::HashMap;
+use ahash::HashMap;
 use reblessive::tree::Stk;
+use std::collections::hash_map::Entry;
 use std::collections::VecDeque;
 
 pub struct HnswIndex {
@@ -197,7 +197,7 @@ impl HnswIndex {
 		}
 		builder.build(
 			#[cfg(debug_assertions)]
-			HashMap::new(),
+			HashMap::default(),
 		)
 	}
 

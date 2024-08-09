@@ -54,5 +54,6 @@ impl_module_def!(
 	"sort" => (sort::Package),
 	"swap" => run,
 	"transpose" => run,
-	"union" => run
+	"union" => run,
+	"windows" => run
 );

@@ -6,12 +6,12 @@ use std::ops::Deref;
 use std::str;
 use std::str::FromStr;
 
+use super::Datetime;
+
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Uuid";
 
 #[revisioned(revision = 1)]
-#[derive(
-	Clone, Copy, Debug, Default, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize, Hash,
-)]
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[serde(rename = "$surrealdb::private::sql::Uuid")]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
@@ -79,6 +79,15 @@ impl Uuid {
 	/// Generate a new V7 UUID
 	pub fn new_v7() -> Self {
 		Self(uuid::Uuid::now_v7())
+	}
+	/// Generate a new V7 UUID
+	pub fn new_v7_from_datetime(timestamp: Datetime) -> Self {
+		let ts = uuid::Timestamp::from_unix(
+			uuid::NoContext,
+			timestamp.0.timestamp() as u64,
+			timestamp.0.timestamp_subsec_nanos(),
+		);
+		Self(uuid::Uuid::new_v7(ts))
 	}
 	/// Convert the Uuid to a raw String
 	pub fn to_raw(&self) -> String {

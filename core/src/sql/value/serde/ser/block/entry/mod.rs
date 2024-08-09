@@ -38,6 +38,7 @@ impl ser::Serializer for Serializer {
 			"Value" => Ok(Entry::Value(value.serialize(ser::value::Serializer.wrap())?)),
 			"Set" => Ok(Entry::Set(value.serialize(ser::statement::set::Serializer.wrap())?)),
 			"Throw" => Ok(Entry::Throw(value.serialize(ser::statement::throw::Serializer.wrap())?)),
+			"Alter" => Ok(Entry::Alter(value.serialize(ser::statement::alter::Serializer.wrap())?)),
 			"Break" => {
 				Ok(Entry::Break(value.serialize(ser::statement::r#break::Serializer.wrap())?))
 			}

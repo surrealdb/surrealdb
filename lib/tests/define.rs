@@ -29,7 +29,9 @@ async fn define_statement_namespace() -> Result<(), Error> {
 	let tmp = res.remove(0).result?;
 	let val = Value::parse(
 		"{
+			accesses: {},
 			namespaces: { test: 'DEFINE NAMESPACE test' },
+			nodes: {},
 			users: {},
 		}",
 	);
@@ -1253,7 +1255,7 @@ where
 	let res = val.walk(&part);
 	for (i, v) in res {
 		let mut idiom = Idiom::default();
-		idiom.0 = part.clone();
+		idiom.0.clone_from(&part);
 		assert_eq!(idiom, i);
 		check(v);
 	}
@@ -1273,8 +1275,8 @@ async fn permissions_checks_define_ns() {
 
 	// Define the expected results for the check statement when the test statement succeeded and when it failed
 	let check_results = [
-		vec!["{ namespaces: { NS: 'DEFINE NAMESPACE NS' }, users: {  } }"],
-		vec!["{ namespaces: {  }, users: {  } }"],
+		vec!["{ accesses: {  }, namespaces: { NS: 'DEFINE NAMESPACE NS' }, nodes: {  }, users: {  } }"],
+		vec!["{ accesses: {  }, namespaces: {  }, nodes: {  }, users: {  } }"],
 	];
 
 	let test_cases = [
@@ -1429,6 +1431,48 @@ async fn permissions_checks_define_analyzer() {
 }
 
 #[tokio::test]
+async fn permissions_checks_define_access_root() {
+	let scenario = HashMap::from([
+		("prepare", ""),
+		("test", "DEFINE ACCESS access ON ROOT TYPE JWT ALGORITHM HS512 KEY 'secret'"),
+		("check", "INFO FOR ROOT"),
+	]);
+
+	// Define the expected results for the check statement when the test statement succeeded and when it failed
+	let check_results = [
+        vec!["{ accesses: { access: \"DEFINE ACCESS access ON ROOT TYPE JWT ALGORITHM HS512 KEY '[REDACTED]' WITH ISSUER KEY '[REDACTED]' DURATION FOR TOKEN 1h, FOR SESSION NONE\" }, namespaces: {  }, nodes: {  }, users: {  } }"],
+		vec!["{ accesses: {  }, namespaces: {  }, nodes: {  }, users: {  } }"]
+    ];
+
+	let test_cases = [
+		// Root level
+		((().into(), Role::Owner), ("NS", "DB"), true),
+		((().into(), Role::Editor), ("NS", "DB"), false),
+		((().into(), Role::Viewer), ("NS", "DB"), false),
+		// Namespace level
+		((("NS",).into(), Role::Owner), ("NS", "DB"), false),
+		((("NS",).into(), Role::Owner), ("OTHER_NS", "DB"), false),
+		((("NS",).into(), Role::Editor), ("NS", "DB"), false),
+		((("NS",).into(), Role::Editor), ("OTHER_NS", "DB"), false),
+		((("NS",).into(), Role::Viewer), ("NS", "DB"), false),
+		((("NS",).into(), Role::Viewer), ("OTHER_NS", "DB"), false),
+		// Database level
+		((("NS", "DB").into(), Role::Owner), ("NS", "DB"), false),
+		((("NS", "DB").into(), Role::Owner), ("NS", "OTHER_DB"), false),
+		((("NS", "DB").into(), Role::Owner), ("OTHER_NS", "DB"), false),
+		((("NS", "DB").into(), Role::Editor), ("NS", "DB"), false),
+		((("NS", "DB").into(), Role::Editor), ("NS", "OTHER_DB"), false),
+		((("NS", "DB").into(), Role::Editor), ("OTHER_NS", "DB"), false),
+		((("NS", "DB").into(), Role::Viewer), ("NS", "DB"), false),
+		((("NS", "DB").into(), Role::Viewer), ("NS", "OTHER_DB"), false),
+		((("NS", "DB").into(), Role::Viewer), ("OTHER_NS", "DB"), false),
+	];
+
+	let res = iam_check_cases(test_cases.iter(), &scenario, check_results).await;
+	assert!(res.is_ok(), "{}", res.unwrap_err());
+}
+
+#[tokio::test]
 async fn permissions_checks_define_access_ns() {
 	let scenario = HashMap::from([
 		("prepare", ""),
@@ -1522,8 +1566,8 @@ async fn permissions_checks_define_user_root() {
 
 	// Define the expected results for the check statement when the test statement succeeded and when it failed
 	let check_results = [
-        vec!["{ namespaces: {  }, users: { user: \"DEFINE USER user ON ROOT PASSHASH 'secret' ROLES VIEWER DURATION FOR TOKEN 15m, FOR SESSION 6h\" } }"],
-		vec!["{ namespaces: {  }, users: {  } }"]
+        vec!["{ accesses: {  }, namespaces: {  }, nodes: {  }, users: { user: \"DEFINE USER user ON ROOT PASSHASH 'secret' ROLES VIEWER DURATION FOR TOKEN 15m, FOR SESSION 6h\" } }"],
+		vec!["{ accesses: {  }, namespaces: {  }, nodes: {  }, users: {  } }"]
     ];
 
 	let test_cases = [
@@ -1937,6 +1981,7 @@ async fn define_remove_analyzer() -> Result<(), Error> {
 	let sql = "
 		DEFINE ANALYZER example_blank TOKENIZERS blank;
 		DEFINE ANALYZER IF NOT EXISTS example_blank TOKENIZERS blank;
+		DEFINE ANALYZER OVERWRITE example_blank TOKENIZERS blank;
 		DEFINE ANALYZER example_blank TOKENIZERS blank;
 		REMOVE ANALYZER IF EXISTS example_blank;
 		REMOVE ANALYZER example_blank;
@@ -1945,6 +1990,7 @@ async fn define_remove_analyzer() -> Result<(), Error> {
 	let mut t = Test::new(sql).await?;
 	t.skip_ok(1)?;
 	t.expect_val("None")?;
+	t.skip_ok(1)?;
 	t.expect_error("The analyzer 'example_blank' already exists")?;
 	t.skip_ok(1)?;
 	t.expect_error("The analyzer 'example_blank' does not exist")?;
@@ -1957,6 +2003,7 @@ async fn define_remove_database() -> Result<(), Error> {
 	let sql = "
 		DEFINE DATABASE example;
 		DEFINE DATABASE IF NOT EXISTS example;
+		DEFINE DATABASE OVERWRITE example;
 		DEFINE DATABASE example;
 		REMOVE DATABASE IF EXISTS example;
 		REMOVE DATABASE example;
@@ -1965,6 +2012,7 @@ async fn define_remove_database() -> Result<(), Error> {
 	let mut t = Test::new(sql).await?;
 	t.skip_ok(1)?;
 	t.expect_val("None")?;
+	t.skip_ok(1)?;
 	t.expect_error("The database 'example' already exists")?;
 	t.skip_ok(1)?;
 	t.expect_error("The database 'example' does not exist")?;
@@ -1977,6 +2025,7 @@ async fn define_remove_event() -> Result<(), Error> {
 	let sql = "
 		DEFINE EVENT example ON example THEN {};
 		DEFINE EVENT IF NOT EXISTS example ON example THEN {};
+		DEFINE EVENT OVERWRITE example ON example THEN {};
 		DEFINE EVENT example ON example THEN {};
 		REMOVE EVENT IF EXISTS example ON example;
 		REMOVE EVENT example ON example;
@@ -1985,6 +2034,7 @@ async fn define_remove_event() -> Result<(), Error> {
 	let mut t = Test::new(sql).await?;
 	t.skip_ok(1)?;
 	t.expect_val("None")?;
+	t.skip_ok(1)?;
 	t.expect_error("The event 'example' already exists")?;
 	t.skip_ok(1)?;
 	t.expect_error("The event 'example' does not exist")?;
@@ -1997,6 +2047,7 @@ async fn define_remove_field() -> Result<(), Error> {
 	let sql = "
 		DEFINE FIELD example ON example;
 		DEFINE FIELD IF NOT EXISTS example ON example;
+		DEFINE FIELD OVERWRITE example ON example;
 		DEFINE FIELD example ON example;
 		REMOVE FIELD IF EXISTS example ON example;
 		REMOVE FIELD example ON example;
@@ -2005,6 +2056,7 @@ async fn define_remove_field() -> Result<(), Error> {
 	let mut t = Test::new(sql).await?;
 	t.skip_ok(1)?;
 	t.expect_val("None")?;
+	t.skip_ok(1)?;
 	t.expect_error("The field 'example' already exists")?;
 	t.skip_ok(1)?;
 	t.expect_error("The field 'example' does not exist")?;
@@ -2017,6 +2069,7 @@ async fn define_remove_function() -> Result<(), Error> {
 	let sql = "
 		DEFINE FUNCTION fn::example() {};
 		DEFINE FUNCTION IF NOT EXISTS fn::example() {};
+		DEFINE FUNCTION OVERWRITE fn::example() {};
 		DEFINE FUNCTION fn::example() {};
 		REMOVE FUNCTION IF EXISTS fn::example();
 		REMOVE FUNCTION fn::example();
@@ -2025,6 +2078,7 @@ async fn define_remove_function() -> Result<(), Error> {
 	let mut t = Test::new(sql).await?;
 	t.skip_ok(1)?;
 	t.expect_val("None")?;
+	t.skip_ok(1)?;
 	t.expect_error("The function 'fn::example' already exists")?;
 	t.skip_ok(1)?;
 	t.expect_error("The function 'fn::example' does not exist")?;
@@ -2037,6 +2091,7 @@ async fn define_remove_indexes() -> Result<(), Error> {
 	let sql = "
 		DEFINE INDEX example ON example FIELDS example;
 		DEFINE INDEX IF NOT EXISTS example ON example FIELDS example;
+		DEFINE INDEX OVERWRITE example ON example FIELDS example;
 		DEFINE INDEX example ON example FIELDS example;
 		REMOVE INDEX IF EXISTS example ON example;
 		REMOVE INDEX example ON example;
@@ -2045,6 +2100,7 @@ async fn define_remove_indexes() -> Result<(), Error> {
 	let mut t = Test::new(sql).await?;
 	t.skip_ok(1)?;
 	t.expect_val("None")?;
+	t.skip_ok(1)?;
 	t.expect_error("The index 'example' already exists")?;
 	t.skip_ok(1)?;
 	t.expect_error("The index 'example' does not exist")?;
@@ -2057,6 +2113,7 @@ async fn define_remove_namespace() -> Result<(), Error> {
 	let sql = "
 		DEFINE NAMESPACE example;
 		DEFINE NAMESPACE IF NOT EXISTS example;
+		DEFINE NAMESPACE OVERWRITE example;
 		DEFINE NAMESPACE example;
 		REMOVE NAMESPACE IF EXISTS example;
 		REMOVE NAMESPACE example;
@@ -2065,6 +2122,7 @@ async fn define_remove_namespace() -> Result<(), Error> {
 	let mut t = Test::new(sql).await?;
 	t.skip_ok(1)?;
 	t.expect_val("None")?;
+	t.skip_ok(1)?;
 	t.expect_error("The namespace 'example' already exists")?;
 	t.skip_ok(1)?;
 	t.expect_error("The namespace 'example' does not exist")?;
@@ -2077,6 +2135,7 @@ async fn define_remove_param() -> Result<(), Error> {
 	let sql = "
 		DEFINE PARAM $example VALUE 123;
 		DEFINE PARAM IF NOT EXISTS $example VALUE 123;
+		DEFINE PARAM OVERWRITE $example VALUE 123;
 		DEFINE PARAM $example VALUE 123;
 		REMOVE PARAM IF EXISTS $example;
 		REMOVE PARAM $example;
@@ -2085,6 +2144,7 @@ async fn define_remove_param() -> Result<(), Error> {
 	let mut t = Test::new(sql).await?;
 	t.skip_ok(1)?;
 	t.expect_val("None")?;
+	t.skip_ok(1)?;
 	t.expect_error("The param '$example' already exists")?;
 	t.skip_ok(1)?;
 	t.expect_error("The param '$example' does not exist")?;
@@ -2097,6 +2157,7 @@ async fn define_remove_access() -> Result<(), Error> {
 	let sql = "
 		DEFINE ACCESS example ON DATABASE TYPE JWT ALGORITHM HS512 KEY 'secret';
 		DEFINE ACCESS IF NOT EXISTS example ON DATABASE TYPE JWT ALGORITHM HS512 KEY 'secret';
+		DEFINE ACCESS OVERWRITE example ON DATABASE TYPE JWT ALGORITHM HS512 KEY 'secret';
 		DEFINE ACCESS example ON DATABASE TYPE JWT ALGORITHM HS512 KEY 'secret';
 		REMOVE ACCESS IF EXISTS example ON DB;
 		REMOVE ACCESS example ON DB;
@@ -2105,9 +2166,10 @@ async fn define_remove_access() -> Result<(), Error> {
 	let mut t = Test::new(sql).await?;
 	t.skip_ok(1)?;
 	t.expect_val("None")?;
-	t.expect_error("The database access method 'example' already exists")?;
 	t.skip_ok(1)?;
-	t.expect_error("The database access method 'example' does not exist")?;
+	t.expect_error("The access method 'example' already exists in the database 'test'")?;
+	t.skip_ok(1)?;
+	t.expect_error("The access method 'example' does not exist in the database 'test'")?;
 	t.expect_val("None")?;
 	Ok(())
 }
@@ -2117,6 +2179,7 @@ async fn define_remove_tables() -> Result<(), Error> {
 	let sql = "
 		DEFINE TABLE example;
 		DEFINE TABLE IF NOT EXISTS example;
+		DEFINE TABLE OVERWRITE example;
 		DEFINE TABLE example;
 		REMOVE TABLE IF EXISTS example;
 		REMOVE TABLE example;
@@ -2125,6 +2188,7 @@ async fn define_remove_tables() -> Result<(), Error> {
 	let mut t = Test::new(sql).await?;
 	t.skip_ok(1)?;
 	t.expect_val("None")?;
+	t.skip_ok(1)?;
 	t.expect_error("The table 'example' already exists")?;
 	t.skip_ok(1)?;
 	t.expect_error("The table 'example' does not exist")?;
@@ -2137,6 +2201,7 @@ async fn define_remove_users() -> Result<(), Error> {
 	let sql = "
 		DEFINE USER example ON ROOT PASSWORD \"example\" ROLES OWNER DURATION FOR TOKEN 15m, FOR SESSION 6h;
 		DEFINE USER IF NOT EXISTS example ON ROOT PASSWORD \"example\" ROLES OWNER DURATION FOR TOKEN 15m, FOR SESSION 6h;
+		DEFINE USER OVERWRITE example ON ROOT PASSWORD \"example\" ROLES OWNER DURATION FOR TOKEN 15m, FOR SESSION 6h;
 		DEFINE USER example ON ROOT PASSWORD \"example\" ROLES OWNER DURATION FOR TOKEN 15m, FOR SESSION 6h;
 		REMOVE USER IF EXISTS example ON ROOT;
 		REMOVE USER example ON ROOT;
@@ -2145,6 +2210,7 @@ async fn define_remove_users() -> Result<(), Error> {
 	let mut t = Test::new(sql).await?;
 	t.skip_ok(1)?;
 	t.expect_val("None")?;
+	t.skip_ok(1)?;
 	t.expect_error("The root user 'example' already exists")?;
 	t.skip_ok(1)?;
 	t.expect_error("The root user 'example' does not exist")?;

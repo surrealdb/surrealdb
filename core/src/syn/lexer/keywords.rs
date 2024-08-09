@@ -7,6 +7,7 @@ use unicase::UniCase;
 
 /// A set of keywords which might in some contexts are dissallowed as an identifier.
 pub static RESERVED_KEYWORD: phf::Set<UniCase<&'static str>> = phf_set! {
+	UniCase::ascii("ALTER"),
 	UniCase::ascii("ANALYZE"),
 	UniCase::ascii("BEGIN"),
 	UniCase::ascii("BREAK"),
@@ -59,6 +60,7 @@ pub(crate) static KEYWORDS: phf::Map<UniCase<&'static str>, TokenKind> = phf_map
 	UniCase::ascii("AFTER") => TokenKind::Keyword(Keyword::After),
 	UniCase::ascii("ALGORITHM") => TokenKind::Keyword(Keyword::Algorithm),
 	UniCase::ascii("ALL") => TokenKind::Keyword(Keyword::All),
+	UniCase::ascii("Alter") => TokenKind::Keyword(Keyword::Alter),
 	UniCase::ascii("ANALYZE") => TokenKind::Keyword(Keyword::Analyze),
 	UniCase::ascii("ANALYZER") => TokenKind::Keyword(Keyword::Analyzer),
 	UniCase::ascii("AS") => TokenKind::Keyword(Keyword::As),
@@ -167,6 +169,7 @@ pub(crate) static KEYWORDS: phf::Map<UniCase<&'static str>, TokenKind> = phf_map
 	UniCase::ascii("OPTION") => TokenKind::Keyword(Keyword::Option),
 	UniCase::ascii("ORDER") => TokenKind::Keyword(Keyword::Order),
 	UniCase::ascii("ORIGINAL") => TokenKind::Keyword(Keyword::Original),
+	UniCase::ascii("OVERWRITE") => TokenKind::Keyword(Keyword::Overwrite),
 	UniCase::ascii("PARALLEL") => TokenKind::Keyword(Keyword::Parallel),
 	UniCase::ascii("PARAM") => TokenKind::Keyword(Keyword::Param),
 	UniCase::ascii("PASSHASH") => TokenKind::Keyword(Keyword::Passhash),

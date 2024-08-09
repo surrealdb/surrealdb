@@ -1,6 +1,6 @@
-/// Stores a DEFINE ACCESS ON DATABASE config definition
-use crate::key::error::KeyCategory;
-use crate::key::key_req::KeyRequirements;
+//! Stores a DEFINE ACCESS ON DATABASE config definition
+use crate::key::category::Categorise;
+use crate::key::category::Category;
 use derive::Key;
 use serde::{Deserialize, Serialize};
 
@@ -34,9 +34,9 @@ pub fn suffix(ns: &str, db: &str) -> Vec<u8> {
 	k
 }
 
-impl KeyRequirements for Ac<'_> {
-	fn key_category(&self) -> KeyCategory {
-		KeyCategory::DatabaseAccess
+impl Categorise for Ac<'_> {
+	fn categorise(&self) -> Category {
+		Category::DatabaseAccess
 	}
 }
 

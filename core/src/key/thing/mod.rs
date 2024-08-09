@@ -1,6 +1,6 @@
 //! Stores a record document
-use crate::key::error::KeyCategory;
-use crate::key::key_req::KeyRequirements;
+use crate::key::category::Categorise;
+use crate::key::category::Category;
 use crate::sql::id::Id;
 use derive::Key;
 use serde::{Deserialize, Serialize};
@@ -35,9 +35,9 @@ pub fn suffix(ns: &str, db: &str, tb: &str) -> Vec<u8> {
 	k
 }
 
-impl KeyRequirements for Thing<'_> {
-	fn key_category(&self) -> KeyCategory {
-		KeyCategory::Thing
+impl Categorise for Thing<'_> {
+	fn categorise(&self) -> Category {
+		Category::Thing
 	}
 }
 

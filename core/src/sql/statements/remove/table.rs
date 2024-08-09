@@ -24,31 +24,29 @@ impl RemoveTableStatement {
 		let future = async {
 			// Allowed to run?
 			opt.is_allowed(Action::Edit, ResourceKind::Table, &Base::Db)?;
-			// Claim transaction
-			let mut run = ctx.tx_lock().await;
+			// Get the transaction
+			let txn = ctx.tx();
 			// Remove the index stores
-			ctx.get_index_stores()
-				.table_removed(&mut run, opt.ns()?, opt.db()?, &self.name)
-				.await?;
-			// Clear the cache
-			run.clear_cache();
+			ctx.get_index_stores().table_removed(&txn, opt.ns()?, opt.db()?, &self.name).await?;
 			// Get the defined table
-			let tb = run.get_tb(opt.ns()?, opt.db()?, &self.name).await?;
+			let tb = txn.get_tb(opt.ns()?, opt.db()?, &self.name).await?;
 			// Delete the definition
 			let key = crate::key::database::tb::new(opt.ns()?, opt.db()?, &self.name);
-			run.del(key).await?;
+			txn.del(key).await?;
 			// Remove the resource data
 			let key = crate::key::table::all::new(opt.ns()?, opt.db()?, &self.name);
-			run.delp(key, u32::MAX).await?;
+			txn.delp(key).await?;
 			// Check if this is a foreign table
 			if let Some(view) = &tb.view {
 				// Process each foreign table
 				for v in view.what.0.iter() {
 					// Save the view config
 					let key = crate::key::table::ft::new(opt.ns()?, opt.db()?, v, &self.name);
-					run.del(key).await?;
+					txn.del(key).await?;
 				}
 			}
+			// Clear the cache
+			txn.clear();
 			// Ok all good
 			Ok(Value::None)
 		}

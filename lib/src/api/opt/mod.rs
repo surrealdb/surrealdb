@@ -1,4 +1,9 @@
 //! The different options and types for use in API functions
+use crate::sql::to_value;
+use crate::sql::Thing;
+use crate::sql::Value;
+use dmp::Diff;
+use serde::Serialize;
 
 pub mod auth;
 pub mod capabilities;
@@ -9,12 +14,6 @@ mod export;
 mod query;
 mod resource;
 mod tls;
-
-use crate::sql::to_value;
-use crate::sql::Thing;
-use crate::sql::Value;
-use dmp::Diff;
-use serde::Serialize;
 
 pub use config::*;
 pub use endpoint::*;
