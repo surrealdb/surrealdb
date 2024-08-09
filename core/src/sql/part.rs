@@ -149,6 +149,30 @@ impl<'a> Next<'a> for &'a [Part] {
 
 // ------------------------------
 
+pub trait NextMethod<'a> {
+	fn next_method(&'a self) -> &[Part];
+}
+
+impl<'a> NextMethod<'a> for &'a [Part] {
+	fn next_method(&'a self) -> &'a [Part] {
+		match self.iter().position(|p| matches!(p, Part::Method(_, _))) {
+			None => &[],
+			Some(i) => &self[i..],
+		}
+	}
+}
+
+impl<'a> NextMethod<'a> for &'a Idiom {
+	fn next_method(&'a self) -> &'a [Part] {
+		match self.iter().position(|p| matches!(p, Part::Method(_, _))) {
+			None => &[],
+			Some(i) => &self[i..],
+		}
+	}
+}
+
+// ------------------------------
+
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]

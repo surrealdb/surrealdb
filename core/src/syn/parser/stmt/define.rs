@@ -47,7 +47,9 @@ impl Parser<'_> {
 			t!("FIELD") => {
 				ctx.run(|ctx| self.parse_define_field(ctx)).await.map(DefineStatement::Field)
 			}
-			t!("INDEX") => self.parse_define_index().map(DefineStatement::Index),
+			t!("INDEX") => {
+				ctx.run(|ctx| self.parse_define_index(ctx)).await.map(DefineStatement::Index)
+			}
 			t!("ANALYZER") => self.parse_define_analyzer().map(DefineStatement::Analyzer),
 			t!("ACCESS") => self.parse_define_access(ctx).await.map(DefineStatement::Access),
 			x => unexpected!(self, x, "a define statement keyword"),
@@ -745,7 +747,7 @@ impl Parser<'_> {
 		} else {
 			(false, false)
 		};
-		let name = self.parse_local_idiom()?;
+		let name = self.parse_local_idiom(ctx).await?;
 		expected!(self, t!("ON"));
 		self.eat(t!("TABLE"));
 		let what = self.next_token_value()?;
@@ -800,7 +802,7 @@ impl Parser<'_> {
 		Ok(res)
 	}
 
-	pub fn parse_define_index(&mut self) -> ParseResult<DefineIndexStatement> {
+	pub async fn parse_define_index(&mut self, ctx: &mut Stk) -> ParseResult<DefineIndexStatement> {
 		let (if_not_exists, overwrite) = if self.eat(t!("IF")) {
 			expected!(self, t!("NOT"));
 			expected!(self, t!("EXISTS"));
@@ -829,9 +831,9 @@ impl Parser<'_> {
 				// COLUMNS and FIELDS are the same tokenkind
 				t!("FIELDS") => {
 					self.pop_peek();
-					res.cols = Idioms(vec![self.parse_local_idiom()?]);
+					res.cols = Idioms(vec![self.parse_local_idiom(ctx).await?]);
 					while self.eat(t!(",")) {
-						res.cols.0.push(self.parse_local_idiom()?);
+						res.cols.0.push(self.parse_local_idiom(ctx).await?);
 					}
 				}
 				t!("UNIQUE") => {

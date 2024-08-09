@@ -6228,6 +6228,27 @@ async fn function_outside_database() -> Result<(), Error> {
 	Ok(())
 }
 
+#[tokio::test]
+async fn function_idiom_chaining() -> Result<(), Error> {
+	let sql = r#"
+		{ a: 1, b: 2 }.entries().flatten();
+		"ABC".lowercase();
+		true.is_number();
+		true.is_bool();
+		true.doesnt_exist();
+		field.bla.nested.is_none();
+	"#;
+	Test::new(sql)
+		.await?
+		.expect_val("['a', 1, 'b', 2]")?
+		.expect_val("'abc'")?
+		.expect_val("false")?
+		.expect_val("true")?
+        .expect_error("There was a problem running the doesnt_exist() function. no such method found for the bool type")?
+	    .expect_val("true")?;
+	Ok(())
+}
+
 // tests for custom functions with return types
 #[tokio::test]
 async fn function_custom_typed_returns() -> Result<(), Error> {
