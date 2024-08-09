@@ -23,6 +23,7 @@ async fn create_with_id() -> Result<(), Error> {
 		CREATE test CONTENT { id: other:715917898417176677 };
 		CREATE test CONTENT { id: other:⟨715917898.417176677⟩ };
 		CREATE test CONTENT { id: other:9223372036854775808 };
+		CREATE person CONTENT { id: type::string(8), name: 'Tester' };
 		-- Should error as id is empty
 		CREATE person SET id = '';
 		CREATE person CONTENT { id: '', name: 'Tester' };
@@ -33,7 +34,7 @@ async fn create_with_id() -> Result<(), Error> {
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
-	assert_eq!(res.len(), 14);
+	assert_eq!(res.len(), 15);
 	//
 	let tmp = res.remove(0).result?;
 	let val = Value::parse(
@@ -137,6 +138,17 @@ async fn create_with_id() -> Result<(), Error> {
 		"[
 			{
 				id: test:⟨9223372036854775808⟩
+			}
+		]",
+	);
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
+			{
+				id: person:⟨8⟩,
+				name: 'Tester'
 			}
 		]",
 	);
