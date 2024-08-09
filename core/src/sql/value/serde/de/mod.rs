@@ -14,11 +14,11 @@ use std::borrow::Cow;
 
 impl From<Value> for serde_json::Value {
 	fn from(value: Value) -> Self {
-		into_json(value, true)
+		into_json(value)
 	}
 }
 
-fn into_json(value: Value, simplify: bool) -> JsonValue {
+fn into_json(value: Value) -> JsonValue {
 	use crate::sql;
 	use crate::sql::Number;
 	use serde_json::Map;
@@ -26,11 +26,11 @@ fn into_json(value: Value, simplify: bool) -> JsonValue {
 	#[derive(Serialize)]
 	struct Array(Vec<JsonValue>);
 
-	impl From<(sql::Array, bool)> for Array {
-		fn from((arr, simplify): (sql::Array, bool)) -> Self {
-			let mut vec = Vec::with_capacity(arr.0.len());
-			for value in arr.0 {
-				vec.push(into_json(value, simplify));
+	impl From<sql::Array> for Array {
+		fn from(arr: sql::Array) -> Self {
+			let mut vec = Vec::with_capacity(arr.len());
+			for value in arr {
+				vec.push(into_json(value));
 			}
 			Self(vec)
 		}
@@ -39,11 +39,11 @@ fn into_json(value: Value, simplify: bool) -> JsonValue {
 	#[derive(Serialize)]
 	struct Object(Map<String, JsonValue>);
 
-	impl From<(sql::Object, bool)> for Object {
-		fn from((obj, simplify): (sql::Object, bool)) -> Self {
-			let mut map = Map::with_capacity(obj.0.len());
-			for (key, value) in obj.0 {
-				map.insert(key.to_owned(), into_json(value, simplify));
+	impl From<sql::Object> for Object {
+		fn from(obj: sql::Object) -> Self {
+			let mut map = Map::with_capacity(obj.len());
+			for (key, value) in obj {
+				map.insert(key.to_owned(), into_json(value));
 			}
 			Self(map)
 		}
@@ -234,31 +234,14 @@ fn into_json(value: Value, simplify: bool) -> JsonValue {
 			Number::Decimal(decimal) => json!(decimal),
 		},
 		Value::Strand(strand) => strand.0.into(),
-		Value::Duration(duration) => match simplify {
-			true => duration.to_raw().into(),
-			false => json!(duration.0),
-		},
+		Value::Duration(duration) => duration.to_raw().into(),
 		Value::Datetime(datetime) => json!(datetime.0),
 		Value::Uuid(uuid) => json!(uuid.0),
-		Value::Array(array) => JsonValue::Array(Array::from((array, simplify)).0),
-		Value::Object(object) => JsonValue::Object(Object::from((object, simplify)).0),
-		Value::Geometry(geo) => match simplify {
-			true => Geometry::from(geo).0,
-			false => match geo {
-				sql::Geometry::Point(geo) => json!(geo),
-				sql::Geometry::Line(geo) => json!(geo),
-				sql::Geometry::Polygon(geo) => json!(geo),
-				sql::Geometry::MultiPoint(geo) => json!(geo),
-				sql::Geometry::MultiLine(geo) => json!(geo),
-				sql::Geometry::MultiPolygon(geo) => json!(geo),
-				sql::Geometry::Collection(geo) => json!(geo),
-			},
-		},
+		Value::Array(array) => JsonValue::Array(Array::from(array).0),
+		Value::Object(object) => JsonValue::Object(Object::from(object).0),
+		Value::Geometry(geo) => Geometry::from(geo).0,
 		Value::Bytes(bytes) => json!(bytes.0),
-		Value::Thing(thing) => match simplify {
-			true => thing.to_string().into(),
-			false => json!(thing),
-		},
+		Value::Thing(thing) => thing.to_string().into(),
 		// These Value types are un-computed values
 		// and are not used in query responses sent
 		// to the client.
@@ -271,12 +254,9 @@ fn into_json(value: Value, simplify: bool) -> JsonValue {
 		Value::Range(range) => json!(range),
 		Value::Edges(edges) => json!(edges),
 		Value::Future(future) => json!(future),
-		Value::Constant(constant) => match simplify {
-			true => match constant.value() {
-				ConstantValue::Datetime(datetime) => json!(datetime.0),
-				ConstantValue::Float(float) => float.into(),
-			},
-			false => json!(constant),
+		Value::Constant(constant) => match constant.value() {
+			ConstantValue::Datetime(datetime) => json!(datetime.0),
+			ConstantValue::Float(float) => float.into(),
 		},
 		Value::Cast(cast) => json!(cast),
 		Value::Function(function) => json!(function),
@@ -388,11 +368,8 @@ mod tests {
 		#[test]
 		fn none_or_null() {
 			for value in [Value::None, Value::Null] {
-				let simple_json = into_json(value.clone(), true);
+				let simple_json = into_json(value.clone());
 				assert_eq!(simple_json, json!(null));
-
-				let json = into_json(value.clone(), false);
-				assert_eq!(json, json!(null));
 
 				let response: Option<String> = from_value(value).unwrap();
 				assert_eq!(response, None);
@@ -404,11 +381,8 @@ mod tests {
 			for boolean in [true, false] {
 				let value = Value::Bool(boolean);
 
-				let simple_json = into_json(value.clone(), true);
+				let simple_json = into_json(value.clone());
 				assert_eq!(simple_json, json!(boolean));
-
-				let json = into_json(value.clone(), false);
-				assert_eq!(json, json!(boolean));
 
 				let response: bool = from_value(value).unwrap();
 				assert_eq!(response, boolean);
@@ -420,11 +394,8 @@ mod tests {
 			for num in [i64::MIN, 0, i64::MAX] {
 				let value = Value::Number(sql::Number::Int(num));
 
-				let simple_json = into_json(value.clone(), true);
+				let simple_json = into_json(value.clone());
 				assert_eq!(simple_json, json!(num));
-
-				let json = into_json(value.clone(), false);
-				assert_eq!(json, json!(num));
 
 				let response: i64 = from_value(value).unwrap();
 				assert_eq!(response, num);
@@ -436,11 +407,8 @@ mod tests {
 			for num in [f64::NEG_INFINITY, f64::MIN, 0.0, f64::MAX, f64::INFINITY, f64::NAN] {
 				let value = Value::Number(sql::Number::Float(num));
 
-				let simple_json = into_json(value.clone(), true);
+				let simple_json = into_json(value.clone());
 				assert_eq!(simple_json, json!(num));
-
-				let json = into_json(value.clone(), false);
-				assert_eq!(json, json!(num));
 
 				let response: f64 = from_value(value).unwrap();
 				if response.is_finite() {
@@ -456,11 +424,8 @@ mod tests {
 				let num = Decimal::new(num, 0);
 				let value = Value::Number(sql::Number::Decimal(num));
 
-				let simple_json = into_json(value.clone(), true);
+				let simple_json = into_json(value.clone());
 				assert_eq!(simple_json, json!(num.to_string()));
-
-				let json = into_json(value.clone(), false);
-				assert_eq!(json, json!(num));
 
 				let response: Decimal = from_value(value).unwrap();
 				assert_eq!(response, num);
@@ -472,11 +437,8 @@ mod tests {
 			for str in ["", "foo"] {
 				let value = Value::Strand(str.into());
 
-				let simple_json = into_json(value.clone(), true);
+				let simple_json = into_json(value.clone());
 				assert_eq!(simple_json, json!(str));
-
-				let json = into_json(value.clone(), false);
-				assert_eq!(json, json!(str));
 
 				let response: String = from_value(value).unwrap();
 				assert_eq!(response, str);
@@ -488,11 +450,8 @@ mod tests {
 			for duration in [Duration::ZERO, Duration::MAX] {
 				let value = Value::Duration(duration.into());
 
-				let simple_json = into_json(value.clone(), true);
+				let simple_json = into_json(value.clone());
 				assert_eq!(simple_json, json!(sql::Duration(duration).to_raw()));
-
-				let json = into_json(value.clone(), false);
-				assert_eq!(json, json!(duration));
 
 				let response: Duration = from_value(value).unwrap();
 				assert_eq!(response, duration);
@@ -504,11 +463,8 @@ mod tests {
 			for datetime in [DateTime::<Utc>::MIN_UTC, DateTime::<Utc>::MAX_UTC] {
 				let value = Value::Datetime(datetime.into());
 
-				let simple_json = into_json(value.clone(), true);
+				let simple_json = into_json(value.clone());
 				assert_eq!(simple_json, json!(datetime));
-
-				let json = into_json(value.clone(), false);
-				assert_eq!(json, json!(datetime));
 
 				let response: DateTime<Utc> = from_value(value).unwrap();
 				assert_eq!(response, datetime);
@@ -520,11 +476,8 @@ mod tests {
 			for uuid in [Uuid::nil(), Uuid::max()] {
 				let value = Value::Uuid(uuid.into());
 
-				let simple_json = into_json(value.clone(), true);
+				let simple_json = into_json(value.clone());
 				assert_eq!(simple_json, json!(uuid));
-
-				let json = into_json(value.clone(), false);
-				assert_eq!(json, json!(uuid));
 
 				let response: Uuid = from_value(value).unwrap();
 				assert_eq!(response, uuid);
@@ -537,11 +490,8 @@ mod tests {
 				let value =
 					Value::Array(sql::Array(vec.iter().copied().map(Value::from).collect()));
 
-				let simple_json = into_json(value.clone(), true);
+				let simple_json = into_json(value.clone());
 				assert_eq!(simple_json, json!(vec));
-
-				let json = into_json(value.clone(), false);
-				assert_eq!(json, json!(vec));
 
 				let response: Vec<bool> = from_value(value).unwrap();
 				assert_eq!(response, vec);
@@ -555,11 +505,8 @@ mod tests {
 					map.iter().map(|(key, value)| (key.clone(), Value::from(*value))).collect(),
 				));
 
-				let simple_json = into_json(value.clone(), true);
+				let simple_json = into_json(value.clone());
 				assert_eq!(simple_json, json!(map));
-
-				let json = into_json(value.clone(), false);
-				assert_eq!(json, json!(map));
 
 				let response: BTreeMap<String, bool> = from_value(value).unwrap();
 				assert_eq!(response, map);
@@ -571,11 +518,8 @@ mod tests {
 			let point = point! { x: 10., y: 20. };
 			let value = Value::Geometry(sql::Geometry::Point(point));
 
-			let simple_json = into_json(value.clone(), true);
+			let simple_json = into_json(value.clone());
 			assert_eq!(simple_json, json!({ "type": "Point", "coordinates": [10., 20.]}));
-
-			let json = into_json(value.clone(), false);
-			assert_eq!(json, json!(point));
 
 			let response: Point = from_value(value).unwrap();
 			assert_eq!(response, point);
@@ -589,14 +533,11 @@ mod tests {
 			];
 			let value = Value::Geometry(sql::Geometry::Line(line_string.clone()));
 
-			let simple_json = into_json(value.clone(), true);
+			let simple_json = into_json(value.clone());
 			assert_eq!(
 				simple_json,
 				json!({ "type": "LineString", "coordinates": [[0., 0.], [10., 0.]]})
 			);
-
-			let json = into_json(value.clone(), false);
-			assert_eq!(json, json!(line_string));
 
 			let response: LineString = from_value(value).unwrap();
 			assert_eq!(response, line_string);
@@ -612,7 +553,7 @@ mod tests {
 			];
 			let value = Value::Geometry(sql::Geometry::Polygon(polygon.clone()));
 
-			let simple_json = into_json(value.clone(), true);
+			let simple_json = into_json(value.clone());
 			assert_eq!(
 				simple_json,
 				json!({ "type": "Polygon", "coordinates": [[
@@ -624,9 +565,6 @@ mod tests {
 				]]})
 			);
 
-			let json = into_json(value.clone(), false);
-			assert_eq!(json, json!(polygon));
-
 			let response: Polygon = from_value(value).unwrap();
 			assert_eq!(response, polygon);
 		}
@@ -637,14 +575,11 @@ mod tests {
 				vec![point! { x: 0., y: 0. }, point! { x: 1., y: 2. }].into();
 			let value = Value::Geometry(sql::Geometry::MultiPoint(multi_point.clone()));
 
-			let simple_json = into_json(value.clone(), true);
+			let simple_json = into_json(value.clone());
 			assert_eq!(
 				simple_json,
 				json!({ "type": "MultiPoint", "coordinates": [[0., 0.], [1., 2.]]})
 			);
-
-			let json = into_json(value.clone(), false);
-			assert_eq!(json, json!(multi_point));
 
 			let response: MultiPoint = from_value(value).unwrap();
 			assert_eq!(response, multi_point);
@@ -658,14 +593,11 @@ mod tests {
 			]]);
 			let value = Value::Geometry(sql::Geometry::MultiLine(multi_line.clone()));
 
-			let simple_json = into_json(value.clone(), true);
+			let simple_json = into_json(value.clone());
 			assert_eq!(
 				simple_json,
 				json!({ "type": "MultiLineString", "coordinates": [[[0., 0.], [1., 2.]]]})
 			);
-
-			let json = into_json(value.clone(), false);
-			assert_eq!(json, json!(multi_line));
 
 			let response: MultiLineString = from_value(value).unwrap();
 			assert_eq!(response, multi_line);
@@ -682,7 +614,7 @@ mod tests {
 			.into();
 			let value = Value::Geometry(sql::Geometry::MultiPolygon(multi_polygon.clone()));
 
-			let simple_json = into_json(value.clone(), true);
+			let simple_json = into_json(value.clone());
 			assert_eq!(
 				simple_json,
 				json!({ "type": "MultiPolygon", "coordinates": [[[
@@ -694,9 +626,6 @@ mod tests {
 				]]]})
 			);
 
-			let json = into_json(value.clone(), false);
-			assert_eq!(json, json!(multi_polygon));
-
 			let response: MultiPolygon = from_value(value).unwrap();
 			assert_eq!(response, multi_polygon);
 		}
@@ -706,17 +635,14 @@ mod tests {
 			for geometries in [vec![], vec![sql::Geometry::Point(point! { x: 10., y: 20. })]] {
 				let value = Value::Geometry(geometries.clone().into());
 
-				let simple_json = into_json(value.clone(), true);
+				let simple_json = into_json(value.clone());
 				assert_eq!(
 					simple_json,
 					json!({
 						"type": "GeometryCollection",
-						"geometries": geometries.clone().into_iter().map(|geo| into_json(Value::from(geo), true)).collect::<Vec<_>>(),
+						"geometries": geometries.clone().into_iter().map(|geo| into_json(Value::from(geo))).collect::<Vec<_>>(),
 					})
 				);
-
-				let json = into_json(value.clone(), false);
-				assert_eq!(json, json!(geometries));
 
 				let response: Vec<sql::Geometry> = from_value(value).unwrap();
 				assert_eq!(response, geometries);
@@ -728,11 +654,8 @@ mod tests {
 			for bytes in [vec![], b"foo".to_vec()] {
 				let value = Value::Bytes(sql::Bytes(bytes.clone()));
 
-				let simple_json = into_json(value.clone(), true);
+				let simple_json = into_json(value.clone());
 				assert_eq!(simple_json, json!(bytes));
-
-				let json = into_json(value.clone(), false);
-				assert_eq!(json, json!(bytes));
 
 				let sql::Bytes(response) = from_value(value).unwrap();
 				assert_eq!(response, bytes);
@@ -745,11 +668,8 @@ mod tests {
 			let thing = sql::thing(record_id).unwrap();
 			let value = Value::Thing(thing.clone());
 
-			let simple_json = into_json(value.clone(), true);
+			let simple_json = into_json(value.clone());
 			assert_eq!(simple_json, json!(record_id));
-
-			let json = into_json(value.clone(), false);
-			assert_eq!(json, json!(thing));
 
 			let response: sql::Thing = from_value(value).unwrap();
 			assert_eq!(response, thing);
