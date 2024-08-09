@@ -76,10 +76,10 @@ impl CursorValue {
 }
 
 impl CursorDoc {
-	pub(crate) fn new(
+	pub(crate) fn new<T: Into<CursorValue>>(
 		rid: Option<Arc<Thing>>,
 		ir: Option<Arc<IteratorRecord>>,
-		doc: Value,
+		doc: T,
 	) -> Self {
 		Self {
 			rid,
