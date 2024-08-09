@@ -410,8 +410,8 @@ pub fn synchronous(
 
 /// Attempts to run any synchronous function.
 pub fn idiom(
-	ctx: &Context<'_>,
-	doc: Option<&CursorDoc<'_>>,
+	ctx: &Context,
+	doc: Option<&CursorDoc>,
 	value: Value,
 	name: &str,
 	args: Vec<Value>,

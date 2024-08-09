@@ -6,6 +6,7 @@ use crate::err::Error;
 use crate::iam::Action;
 use crate::sql::permission::Permission;
 use crate::sql::value::Value;
+use crate::sql::Kind;
 use reblessive::tree::Stk;
 use std::sync::Arc;
 
@@ -115,7 +116,14 @@ impl Document {
 				}
 				// Check for a ASSERT clause
 				if let Some(expr) = &fd.assert {
-					// Configure the context
+					match (&val, &fd.kind) {
+						// The field TYPE is optional, and the field
+						// value was not set or a NONE value was
+						// specified, so let's ignore the ASSERT clause
+						(Value::None, Some(Kind::Option(_))) => (),
+						// Otherwise let's process the ASSERT clause
+						_ => {
+							// Configure the context
 					let mut ctx = MutableContext::new(ctx);
 					let v = Arc::new(val.clone());
 					ctx.add_value("input", inp.clone());
@@ -123,14 +131,17 @@ impl Document {
 					ctx.add_value("after", v);
 					ctx.add_value("before", old.clone());
 					let ctx = ctx.freeze();
-					// Process the ASSERT clause
-					if !expr.compute(stk, &ctx, opt, Some(&self.current)).await?.is_truthy() {
-						return Err(Error::FieldValue {
-							thing: rid.to_string(),
-							field: fd.name.clone(),
-							value: val.to_string(),
-							check: expr.to_string(),
-						});
+							// Process the ASSERT clause
+							if !expr.compute(stk, &ctx, opt, Some(&self.current)).await?.is_truthy()
+							{
+								return Err(Error::FieldValue {
+									thing: rid.to_string(),
+									field: fd.name.clone(),
+									value: val.to_string(),
+									check: expr.to_string(),
+								});
+							}
+						}
 					}
 				}
 				// Check for a PERMISSIONS clause
