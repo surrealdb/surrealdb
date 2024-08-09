@@ -1,3 +1,4 @@
+use core::panic;
 use std::{
 	convert::Infallible,
 	sync::Arc,
@@ -7,7 +8,7 @@ use std::{
 
 use async_graphql::{
 	http::{create_multipart_mixed_stream, is_accept_multipart_mixed},
-	Executor,
+	Executor, ParseRequestError,
 };
 use async_graphql_axum::{
 	rejection::GraphQLRejection, GraphQLBatchRequest, GraphQLRequest, GraphQLResponse,
@@ -23,6 +24,7 @@ use bytes::Bytes;
 use futures_util::{future::BoxFuture, StreamExt};
 use surrealdb::dbs::Session;
 use surrealdb::gql::cache::{Invalidator, SchemaCache};
+use surrealdb::gql::error::resolver_error;
 use surrealdb::kvs::Datastore;
 use tower_service::Service;
 
@@ -68,12 +70,10 @@ where
 				req.extensions().get::<Session>().expect("session extractor should always succeed");
 
 			let Some(_ns) = session.ns.as_ref() else {
-				// return Ok(resolver_error("No namespace specified").into_response());
-				todo!()
+				return Ok(to_rejection(resolver_error("No namespace specified")).into_response());
 			};
 			let Some(_db) = session.db.as_ref() else {
-				// return Ok(resolver_error("No database specified").into_response());
-				todo!()
+				return Ok(to_rejection(resolver_error("No database specified")).into_response());
 			};
 
 			#[cfg(debug_assertions)]
@@ -85,8 +85,8 @@ where
 			let executor = match cache.get_schema(session).await {
 				Ok(e) => e,
 				Err(e) => {
-					error!(?e, "error generating schema");
-					todo!()
+					info!(?e, "error generating schema");
+					return Ok(to_rejection(e).into_response());
 				}
 			};
 
@@ -102,7 +102,7 @@ where
 					Ok(req) => req,
 					Err(err) => return Ok(err.into_response()),
 				};
-				// let stream = executor.execute_stream(req.0, None);
+
 				let stream = Executor::execute_stream(&executor, req.0, None);
 				let body = Body::from_stream(
 					create_multipart_mixed_stream(
@@ -128,4 +128,8 @@ where
 			}
 		})
 	}
+}
+
+fn to_rejection(err: impl std::error::Error + Send + Sync + 'static) -> GraphQLRejection {
+	GraphQLRejection(ParseRequestError::InvalidRequest(Box::new(err)))
 }
