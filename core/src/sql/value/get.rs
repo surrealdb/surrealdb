@@ -513,7 +513,7 @@ mod tests {
 		let doc = Value::parse("{ name: 'Tobie', something: [{ age: 34 }, { age: 36 }] }");
 		let idi = Idiom::parse("test.something[WHERE age > 35]");
 		let val = Value::parse("{ test: <future> { { something: something } } }");
-		let cur = (&doc).into();
+		let cur = doc.into();
 		let mut stack = reblessive::tree::TreeStack::new();
 		let res =
 			stack.enter(|stk| val.get(stk, &ctx, &opt, Some(&cur), &idi)).finish().await.unwrap();

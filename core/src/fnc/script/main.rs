@@ -24,7 +24,7 @@ use js::{Class, Ctx, Function, Module, Promise};
 pub unsafe fn create_query_data<'a>(
 	context: &'a Context,
 	opt: &'a Options,
-	doc: Option<&'a CursorDoc<'a>>,
+	doc: Option<&'a CursorDoc>,
 	ctx: &Ctx<'_>,
 ) -> Result<(), js::Error> {
 	// remove the restricting lifetime.

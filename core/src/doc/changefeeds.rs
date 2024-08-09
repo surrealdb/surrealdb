@@ -31,7 +31,7 @@ impl Document {
 					tb.name.as_str(),
 					id.as_ref(),
 					self.initial.doc.as_ref(),
-					&self.current.doc.as_ref(),
+					self.current.doc.as_ref(),
 					cf.store_diff,
 				);
 			}

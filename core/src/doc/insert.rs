@@ -15,7 +15,7 @@ impl Document {
 		stm: &Statement<'_>,
 	) -> Result<Value, Error> {
 		// Check whether current record exists
-		match self.current.doc.is_some() {
+		match self.current.doc.as_ref().is_some() {
 			// We attempted to INSERT a document with an ID,
 			// and this ID already exists in the database,
 			// so we need to update the record instead.

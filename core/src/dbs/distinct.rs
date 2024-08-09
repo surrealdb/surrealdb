@@ -27,7 +27,7 @@ impl SyncDistinct {
 	}
 
 	pub(super) fn check_already_processed(&mut self, pro: &Processed) -> bool {
-		if let Some(key) = pro.rid.as_ref().map(std::convert::Into::<Vec<u8>>::into) {
+		if let Some(key) = pro.rid.as_ref().map(|r| r.as_ref().into()) {
 			if self.processed.get(&key).is_some() {
 				true
 			} else {

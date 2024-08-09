@@ -572,9 +572,9 @@ impl<'a> Processor<'a> {
 				Iterable::fetch_thing(&txn, opt, &r.0).await?.into()
 			};
 			let p = Processed {
-				rid: Some(r.0.into()),
+				rid: Some(r.0),
 				ir: Some(r.1.into()),
-				val: Operable::Value(v.into()),
+				val: Operable::Value(v),
 			};
 			to_process.push(p);
 		}

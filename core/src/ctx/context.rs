@@ -352,7 +352,7 @@ impl MutableContext {
 	pub fn cancellation(&self) -> crate::ctx::cancellation::Cancellation {
 		crate::ctx::cancellation::Cancellation::new(
 			self.deadline,
-			std::iter::successors(Some(self), |ctx| *ctx.parent)
+			std::iter::successors(Some(self), |ctx| ctx.parent.as_ref().map(|c| c.as_ref()))
 				.map(|ctx| ctx.cancelled.clone())
 				.collect(),
 		)

@@ -82,7 +82,7 @@ async fn build_opt_values(
 	ix: &DefineIndexStatement,
 	doc: &CursorDoc,
 ) -> Result<Option<Vec<Value>>, Error> {
-	if !doc.doc.is_some() {
+	if !doc.doc.as_ref().is_some() {
 		return Ok(None);
 	}
 	let mut o = Vec::with_capacity(ix.cols.len());

@@ -65,14 +65,6 @@ impl CursorValue {
 			&self.mutable
 		}
 	}
-
-	pub(crate) fn is_none(&self) -> bool {
-		self.as_ref().is_none()
-	}
-
-	pub(crate) fn is_some(&self) -> bool {
-		self.as_ref().is_some()
-	}
 }
 
 impl CursorDoc {
@@ -94,6 +86,15 @@ impl From<Value> for CursorValue {
 		Self {
 			mutable: value,
 			read_only: None,
+		}
+	}
+}
+
+impl From<Arc<Value>> for CursorValue {
+	fn from(value: Arc<Value>) -> Self {
+		Self {
+			mutable: Value::None,
+			read_only: Some(value),
 		}
 	}
 }
@@ -132,7 +133,7 @@ impl Debug for Document {
 
 impl From<&Document> for Vec<u8> {
 	fn from(val: &Document) -> Vec<u8> {
-		(&val.current.doc).into()
+		val.current.doc.as_ref().into()
 	}
 }
 
@@ -146,8 +147,8 @@ impl Document {
 		Document {
 			id: id.clone(),
 			extras,
-			current: CursorDoc::new(id.clone(), ir.clone(), val.clone().into()),
-			initial: CursorDoc::new(id, ir, val.into()),
+			current: CursorDoc::new(id.clone(), ir.clone(), val.clone()),
+			initial: CursorDoc::new(id, ir, val),
 		}
 	}
 

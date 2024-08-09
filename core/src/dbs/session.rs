@@ -83,7 +83,7 @@ impl Session {
 	}
 
 	/// Convert a session into a runtime
-	pub(crate) fn context<'a>(&self, ctx: &mut MutableContext) {
+	pub(crate) fn context(&self, ctx: &mut MutableContext) {
 		// Add access method data
 		let val: Value = self.ac.to_owned().into();
 		ctx.add_value("access", val.into());

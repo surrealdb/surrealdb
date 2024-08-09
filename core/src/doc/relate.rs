@@ -17,7 +17,7 @@ impl Document {
 		// Check if table has correct relation status
 		self.relation(ctx, opt, stm).await?;
 		// Check whether current record exists
-		match self.current.doc.is_some() {
+		match self.current.doc.as_ref().is_some() {
 			// We attempted to RELATE a document with an ID,
 			// and this ID already exists in the database,
 			// so we need to update the record instead.
