@@ -147,6 +147,7 @@ urlencoding = "2.1.3"
 uuid = { version = "1.6.1", features = ["serde", "js", "v4", "v7"] }
 tokio-tungstenite = "0.23.0"
 async-graphql-axum = { package = "surrealdb-async-graphql-axum", version = "7.0.7-surrealdb.1" }
+async-graphql = { version = "7.0.7", default-features = false }
 
 [target.'cfg(unix)'.dependencies]
 nix = { version = "0.27.1", features = ["user"] }
