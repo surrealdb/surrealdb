@@ -23,6 +23,25 @@ impl Parser<'_> {
 
 	/// Parse an inner kind, a kind without enclosing `<` `>`.
 	pub async fn parse_inner_kind(&mut self, ctx: &mut Stk) -> ParseResult<Kind> {
+		match self.parse_inner_single_kind(ctx).await? {
+			Kind::Any => Ok(Kind::Any),
+			Kind::Option(k) => Ok(Kind::Option(k)),
+			first => {
+				if self.peek_kind() == t!("|") {
+					let mut kind = vec![first];
+					while self.eat(t!("|")) {
+						kind.push(ctx.run(|ctx| self.parse_concrete_kind(ctx)).await?);
+					}
+					Ok(Kind::Either(kind))
+				} else {
+					Ok(first)
+				}
+			}
+		}
+	}
+
+	/// Parse a single inner kind, a kind without enclosing `<` `>`.
+	pub async fn parse_inner_single_kind(&mut self, ctx: &mut Stk) -> ParseResult<Kind> {
 		match self.peek_kind() {
 			t!("ANY") => {
 				self.pop_peek();
@@ -43,18 +62,7 @@ impl Parser<'_> {
 				self.expect_closing_delimiter(t!(">"), delim)?;
 				Ok(Kind::Option(Box::new(first)))
 			}
-			_ => {
-				let first = ctx.run(|ctx| self.parse_concrete_kind(ctx)).await?;
-				if self.peek_kind() == t!("|") {
-					let mut kind = vec![first];
-					while self.eat(t!("|")) {
-						kind.push(ctx.run(|ctx| self.parse_concrete_kind(ctx)).await?);
-					}
-					Ok(Kind::Either(kind))
-				} else {
-					Ok(first)
-				}
-			}
+			_ => ctx.run(|ctx| self.parse_concrete_kind(ctx)).await,
 		}
 	}
 
@@ -74,6 +82,7 @@ impl Parser<'_> {
 			t!("POINT") => Ok(Kind::Point),
 			t!("STRING") => Ok(Kind::String),
 			t!("UUID") => Ok(Kind::Uuid),
+			t!("FUNCTION") => Ok(Kind::Function(Default::default(), Default::default())),
 			t!("RECORD") => {
 				let span = self.peek().span;
 				if self.eat(t!("<")) {

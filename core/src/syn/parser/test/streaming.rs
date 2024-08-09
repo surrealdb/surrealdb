@@ -198,6 +198,7 @@ fn statements() -> Vec<Statement> {
 			permissions: Permission::Full,
 			if_not_exists: false,
 			overwrite: false,
+			returns: None,
 		})),
 		Statement::Define(DefineStatement::Access(DefineAccessStatement {
 			name: Ident("a".to_string()),

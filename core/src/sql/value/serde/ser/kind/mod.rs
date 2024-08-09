@@ -81,26 +81,30 @@ impl ser::Serializer for Serializer {
 		variant: &'static str,
 		_len: usize,
 	) -> Result<Self::SerializeTupleVariant, Self::Error> {
-		match variant {
-			"Set" => Ok(SerializeKindTuple {
-				variant,
-				..Default::default()
-			}),
-			"Array" => Ok(SerializeKindTuple {
-				variant,
-				..Default::default()
-			}),
-			variant => Err(Error::custom(format!("unexpected tuple variant `{name}::{variant}`"))),
-		}
+		let inner = match variant {
+			"Set" => Inner::Set(Default::default(), Default::default()),
+			"Array" => Inner::Array(Default::default(), Default::default()),
+			"Function" => Inner::Function(Default::default(), Default::default()),
+			variant => {
+				return Err(Error::custom(format!("unexpected tuple variant `{name}::{variant}`")));
+			}
+		};
+		Ok(SerializeKindTuple {
+			inner,
+			index: 0,
+		})
 	}
 }
 
-#[derive(Default)]
 pub(super) struct SerializeKindTuple {
 	index: usize,
-	variant: &'static str,
-	kind: Option<Kind>,
-	num: Option<u64>,
+	inner: Inner,
+}
+
+enum Inner {
+	Set(Box<Kind>, Option<u64>),
+	Array(Box<Kind>, Option<u64>),
+	Function(Option<Vec<Kind>>, Option<Box<Kind>>),
 }
 
 impl serde::ser::SerializeTupleVariant for SerializeKindTuple {
@@ -111,15 +115,25 @@ impl serde::ser::SerializeTupleVariant for SerializeKindTuple {
 	where
 		T: Serialize + ?Sized,
 	{
-		match self.index {
-			0 => {
-				self.kind = Some(value.serialize(Serializer.wrap())?);
+		match (self.index, &mut self.inner) {
+			(0, Inner::Set(ref mut var, _) | Inner::Array(ref mut var, _)) => {
+				*var = Box::new(value.serialize(Serializer.wrap())?);
 			}
-			1 => {
-				self.num = value.serialize(ser::primitive::u64::opt::Serializer.wrap())?;
+			(1, Inner::Set(_, ref mut var) | Inner::Array(_, ref mut var)) => {
+				*var = value.serialize(ser::primitive::u64::opt::Serializer.wrap())?;
 			}
-			index => {
-				let variant = self.variant;
+			(0, Inner::Function(ref mut var, _)) => {
+				*var = value.serialize(ser::kind::vec::opt::Serializer.wrap())?;
+			}
+			(1, Inner::Function(_, ref mut var)) => {
+				*var = value.serialize(ser::kind::opt::Serializer.wrap())?.map(Box::new);
+			}
+			(index, inner) => {
+				let variant = match inner {
+					Inner::Set(..) => "Set",
+					Inner::Array(..) => "Array",
+					Inner::Function(..) => "Function",
+				};
 				return Err(Error::custom(format!("unexpected `Kind::{variant}` index `{index}`")));
 			}
 		}
@@ -128,17 +142,10 @@ impl serde::ser::SerializeTupleVariant for SerializeKindTuple {
 	}
 
 	fn end(self) -> Result<Self::Ok, Self::Error> {
-		let variant = self.variant;
-		let kind = match self.kind {
-			Some(kind) => kind,
-			_ => {
-				return Err(Error::custom("`Kind::{variant}` missing required value(s)"));
-			}
-		};
-		match variant {
-			"Set" => Ok(Kind::Set(Box::new(kind), self.num)),
-			"Array" => Ok(Kind::Array(Box::new(kind), self.num)),
-			_ => Err(Error::custom("unknown tuple variant `Kind::{variant}`")),
+		match self.inner {
+			Inner::Set(one, two) => Ok(Kind::Set(one, two)),
+			Inner::Array(one, two) => Ok(Kind::Array(one, two)),
+			Inner::Function(one, two) => Ok(Kind::Function(one, two)),
 		}
 	}
 }
@@ -234,6 +241,13 @@ mod tests {
 	#[test]
 	fn uuid() {
 		let kind = Kind::Uuid;
+		let serialized = kind.serialize(Serializer.wrap()).unwrap();
+		assert_eq!(kind, serialized);
+	}
+
+	#[test]
+	fn function() {
+		let kind = Kind::Function(Default::default(), Default::default());
 		let serialized = kind.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(kind, serialized);
 	}

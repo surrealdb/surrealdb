@@ -37,6 +37,8 @@ use serde::ser::SerializeSeq as _;
 use std::fmt::Display;
 use vec::SerializeValueVec;
 
+use super::closure::SerializeClosure;
+
 /// Convert a `T` into `surrealdb::sql::Value` which is an enum that can represent any valid SQL data.
 pub fn to_value<T>(value: T) -> Result<Value, Error>
 where
@@ -344,6 +346,7 @@ impl ser::Serializer for Serializer {
 			sql::thing::TOKEN => SerializeStruct::Thing(Default::default()),
 			sql::edges::TOKEN => SerializeStruct::Edges(Default::default()),
 			sql::range::TOKEN => SerializeStruct::Range(Default::default()),
+			sql::closure::TOKEN => SerializeStruct::Closure(Default::default()),
 			_ => SerializeStruct::Unknown(Default::default()),
 		})
 	}
@@ -519,6 +522,7 @@ pub(super) enum SerializeStruct {
 	Thing(SerializeThing),
 	Edges(SerializeEdges),
 	Range(SerializeRange),
+	Closure(SerializeClosure),
 	Unknown(SerializeValueMap),
 }
 
@@ -534,6 +538,7 @@ impl serde::ser::SerializeStruct for SerializeStruct {
 			Self::Thing(thing) => thing.serialize_field(key, value),
 			Self::Edges(edges) => edges.serialize_field(key, value),
 			Self::Range(range) => range.serialize_field(key, value),
+			Self::Closure(closure) => closure.serialize_field(key, value),
 			Self::Unknown(map) => map.serialize_entry(key, value),
 		}
 	}
@@ -543,6 +548,7 @@ impl serde::ser::SerializeStruct for SerializeStruct {
 			Self::Thing(thing) => Ok(Value::Thing(thing.end()?)),
 			Self::Edges(edges) => Ok(Value::Edges(Box::new(edges.end()?))),
 			Self::Range(range) => Ok(Value::Range(Box::new(range.end()?))),
+			Self::Closure(closure) => Ok(Value::Closure(Box::new(closure.end()?))),
 			Self::Unknown(map) => Ok(Value::Object(Object(map.end()?))),
 		}
 	}

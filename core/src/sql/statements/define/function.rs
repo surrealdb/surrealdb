@@ -11,7 +11,7 @@ use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Write};
 
-#[revisioned(revision = 3)]
+#[revisioned(revision = 4)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
@@ -25,6 +25,8 @@ pub struct DefineFunctionStatement {
 	pub if_not_exists: bool,
 	#[revision(start = 3)]
 	pub overwrite: bool,
+	#[revision(start = 4)]
+	pub returns: Option<Kind>,
 }
 
 impl DefineFunctionStatement {
