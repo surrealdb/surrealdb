@@ -233,11 +233,16 @@ impl Transaction {
 	///
 	/// This function fetches the full range of key-value pairs, in a single request to the underlying datastore.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
-	pub async fn scan<K>(&self, rng: Range<K>, limit: u32) -> Result<Vec<(Key, Val)>, Error>
+	pub async fn scan<K>(
+		&self,
+		rng: Range<K>,
+		limit: u32,
+		version: Option<u64>,
+	) -> Result<Vec<(Key, Val)>, Error>
 	where
 		K: Into<Key> + Debug,
 	{
-		self.lock().await.scan(rng, limit).await
+		self.lock().await.scan(rng, limit, version).await
 	}
 
 	/// Retrieve a batched scan over a specific range of keys in the datastore.
@@ -255,7 +260,11 @@ impl Transaction {
 	///
 	/// This function fetches the key-value pairs in batches, with multiple requests to the underlying datastore.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
-	pub fn stream<K>(&self, rng: Range<K>) -> impl Stream<Item = Result<(Key, Val), Error>> + '_
+	pub fn stream<K>(
+		&self,
+		rng: Range<K>,
+		version: Option<u64>,
+	) -> impl Stream<Item = Result<(Key, Val), Error>> + '_
 	where
 		K: Into<Key> + Debug,
 	{
@@ -266,6 +275,7 @@ impl Transaction {
 				start: rng.start.into(),
 				end: rng.end.into(),
 			},
+			version,
 		)
 	}
 

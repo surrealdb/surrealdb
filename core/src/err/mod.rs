@@ -1019,6 +1019,10 @@ pub enum Error {
 	UnsupportedDestructure {
 		variant: String,
 	},
+
+	#[doc(hidden)]
+	#[error("The underlying datastore does not support versioned queries")]
+	UnsupportedVersionedQueries,
 }
 
 impl From<Error> for String {
