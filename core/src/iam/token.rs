@@ -4,7 +4,6 @@ use crate::sql::Value;
 use jsonwebtoken::{Algorithm, Header};
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
-use std::borrow::Cow;
 use std::collections::HashMap;
 
 pub static HEADER: Lazy<Header> = Lazy::new(|| Header::new(Algorithm::HS512));
@@ -89,7 +88,7 @@ impl From<Claims> for Value {
 		// Add aud field if set
 		if let Some(aud) = v.aud {
 			match aud {
-				Audience::Single(s) => out.insert("aud".to_string(), vec![s].into()),
+				Audience::Single(s) => out.insert("aud".to_string(), s.into()),
 				Audience::Multiple(v) => out.insert("aud".to_string(), v.into()),
 			};
 		}
