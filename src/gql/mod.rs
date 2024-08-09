@@ -1,4 +1,3 @@
-use core::panic;
 use std::{
 	convert::Infallible,
 	sync::Arc,

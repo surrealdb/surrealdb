@@ -629,14 +629,13 @@ pub trait RpcContext {
 
 	#[cfg(not(target_arch = "wasm32"))]
 	async fn graphql(&self, params: Array) -> Result<impl Into<Data>, RpcError> {
-		let var = std::env::var("SURREALDB_ENABLE_GRAPHQL");
-		match var.as_ref().map(|s| s.as_str()) {
-			Ok("true") => {}
-			_ => return Err(RpcError::BadGQLConfig),
-		};
+		if !*GRAPHQL_ENABLE {
+			return Err(RpcError::BadGQLConfig);
+		}
+
 		use serde::Serialize;
 
-		use crate::gql;
+		use crate::{cnf::GRAPHQL_ENABLE, gql};
 
 		if !Self::GQL_SUPPORT {
 			return Err(RpcError::BadGQLConfig);

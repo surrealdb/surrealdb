@@ -22,7 +22,7 @@ mod version;
 mod ml;
 
 use crate::cli::CF;
-use crate::cnf;
+use crate::cnf::{self, GRAPHQL_ENABLE};
 use crate::err::Error;
 use crate::net::signals::graceful_shutdown;
 use crate::rpc::{notifications, RpcState};
@@ -175,7 +175,7 @@ pub async fn init(ds: Arc<Datastore>, ct: CancellationToken) -> Result<(), Error
 		.merge(signup::router())
 		.merge(key::router());
 
-	if env::var("SURREALDB_ENABLE_GRAPHQL") == Ok("true".to_string()) {
+	if *GRAPHQL_ENABLE {
 		warn!("❌🔒IMPORTANT: GraphQL is a pre-release feature with known security flaws. This is not recommended for production use.🔒❌");
 		axum_app = axum_app.merge(gql::router(ds.clone()).await);
 	}

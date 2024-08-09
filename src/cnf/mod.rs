@@ -66,3 +66,5 @@ pub static PKG_VERSION: Lazy<String> = Lazy::new(|| match option_env!("SURREAL_B
 	}
 	_ => env!("CARGO_PKG_VERSION").to_owned(),
 });
+
+pub static GRAPHQL_ENABLE: Lazy<bool> = lazy_env_parse!("SURREAL_GRAPHQL_ENABLE", bool, false);
