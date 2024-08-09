@@ -1,6 +1,7 @@
 mod auth;
 pub mod client_ip;
 mod export;
+mod gql;
 pub(crate) mod headers;
 mod health;
 mod import;
@@ -21,7 +22,7 @@ mod version;
 mod ml;
 
 use crate::cli::CF;
-use crate::cnf;
+use crate::cnf::{self, GRAPHQL_ENABLE};
 use crate::err::Error;
 use crate::net::signals::graceful_shutdown;
 use crate::rpc::{notifications, RpcState};
@@ -59,9 +60,9 @@ const LOG: &str = "surrealdb::net";
 /// AppState is used to share data between routes.
 ///
 #[derive(Clone)]
-struct AppState {
-	client_ip: client_ip::ClientIp,
-	datastore: Arc<Datastore>,
+pub struct AppState {
+	pub client_ip: client_ip::ClientIp,
+	pub datastore: Arc<Datastore>,
 }
 
 pub async fn init(ds: Arc<Datastore>, ct: CancellationToken) -> Result<(), Error> {
@@ -158,7 +159,7 @@ pub async fn init(ds: Arc<Datastore>, ct: CancellationToken) -> Result<(), Error
 				.max_age(Duration::from_secs(86400)),
 		);
 
-	let axum_app = Router::<Arc<RpcState>>::new()
+	let mut axum_app = Router::<Arc<RpcState>>::new()
 		// Redirect until we provide a UI
 		.route("/", get(|| async { Redirect::temporary(cnf::APP_ENDPOINT) }))
 		.route("/status", get(|| async {}))
@@ -172,6 +173,11 @@ pub async fn init(ds: Arc<Datastore>, ct: CancellationToken) -> Result<(), Error
 		.merge(signin::router())
 		.merge(signup::router())
 		.merge(key::router());
+
+	if *GRAPHQL_ENABLE {
+		warn!("❌🔒IMPORTANT: GraphQL is a pre-release feature with known security flaws. This is not recommended for production use.🔒❌");
+		axum_app = axum_app.merge(gql::router(ds.clone()).await);
+	}
 
 	#[cfg(feature = "ml")]
 	let axum_app = axum_app.merge(ml::router());

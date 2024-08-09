@@ -24,6 +24,7 @@ pub enum Method {
 	Query,
 	Relate,
 	Run,
+	GraphQL,
 }
 
 impl Method {
@@ -55,6 +56,7 @@ impl Method {
 			"query" => Self::Query,
 			"relate" => Self::Relate,
 			"run" => Self::Run,
+			"graphql" => Self::GraphQL,
 			_ => Self::Unknown,
 		}
 	}
@@ -87,6 +89,7 @@ impl Method {
 			Self::Query => "query",
 			Self::Relate => "relate",
 			Self::Run => "run",
+			Self::GraphQL => "graphql",
 		}
 	}
 }
@@ -111,7 +114,8 @@ impl Method {
 				| Method::Merge | Method::Patch
 				| Method::Delete | Method::Version
 				| Method::Query | Method::Relate
-				| Method::Run | Method::Unknown
+				| Method::Run | Method::GraphQL
+				| Method::Unknown
 		)
 	}
 }

@@ -36,6 +36,12 @@ impl From<Statement> for Query {
 	}
 }
 
+impl From<Vec<Statement>> for Query {
+	fn from(s: Vec<Statement>) -> Self {
+		Query(Statements(s))
+	}
+}
+
 impl Deref for Query {
 	type Target = Vec<Statement>;
 	fn deref(&self) -> &Self::Target {

@@ -17,8 +17,10 @@ pub enum RpcError {
 	InternalError(err::Error),
 	#[error("Live Query was made, but is not supported")]
 	LqNotSuported,
-	#[error("RT is enabled for the session, but LQ is not supported with the context")]
+	#[error("RT is enabled for the session, but LQ is not supported by the context")]
 	BadLQConfig,
+	#[error("A GraphQL request was made, but GraphQL is not supported by the context")]
+	BadGQLConfig,
 	#[error("Error: {0}")]
 	Thrown(String),
 }
