@@ -213,7 +213,7 @@ impl Function {
 			}
 			Self::Anonymous(v, x) => {
 				let val = match v {
-					Value::Closure(p) => &Value::Closure(p.to_owned()),
+					c @ Value::Closure(_) => c,
 					Value::Param(p) => ctx.value(p).unwrap_or(&Value::None),
 					Value::Block(_) | Value::Subquery(_) | Value::Idiom(_) | Value::Function(_) => {
 						&stk.run(|stk| v.compute(stk, ctx, opt, doc)).await?
@@ -297,7 +297,7 @@ impl Function {
 					})
 					.await?;
 				// Duplicate context
-				let mut ctx = Context::new(ctx);
+				let mut ctx = Context::new_isolated(ctx);
 				// Process the function arguments
 				for (val, (name, kind)) in a.into_iter().zip(&val.args) {
 					ctx.add_value(name.to_raw(), val.coerce_to(kind)?);
