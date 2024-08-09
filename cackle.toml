@@ -1172,12 +1172,18 @@ allow_apis = [
 allow_apis = [
     "fs",
 ]
+build.allow_build_instructions = [
+    "cargo::rustc-check-cfg=cfg(storage)",
+]
 
 [pkg.surrealdb-core]
 allow_unsafe = true
 allow_apis = [
     "net",
     "fs",
+]
+build.allow_build_instructions = [
+    "cargo::rustc-check-cfg=cfg(storage)",
 ]
 
 [pkg.assert_fs]
@@ -1373,4 +1379,7 @@ allow_apis = [
 allow_unsafe = true
 
 [pkg.rustls-pki-types]
+allow_unsafe = true
+
+[pkg.castaway]
 allow_unsafe = true

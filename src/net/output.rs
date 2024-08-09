@@ -67,7 +67,7 @@ where
 }
 
 /// Convert and simplify the value into JSON
-pub fn simplify<T: Serialize>(v: T) -> Json {
+pub fn simplify<T: Serialize + 'static>(v: T) -> Json {
 	sql::to_value(v).unwrap().into()
 }
 
