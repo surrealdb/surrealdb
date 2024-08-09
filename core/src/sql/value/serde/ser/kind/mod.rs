@@ -122,15 +122,19 @@ impl serde::ser::SerializeTupleVariant for SerializeKindTuple {
 			(1, Inner::Set(_, ref mut var) | Inner::Array(_, ref mut var)) => {
 				*var = value.serialize(ser::primitive::u64::opt::Serializer.wrap())?;
 			}
+			(0, Inner::Function(ref mut var, _)) => {
+				*var = value.serialize(ser::kind::vec::opt::Serializer.wrap())?;
+			}
+			(1, Inner::Function(_, ref mut var)) => {
+				*var = value.serialize(ser::kind::opt::Serializer.wrap())?.map(Box::new);
+			}
 			(index, inner) => {
 				let variant = match inner {
 					Inner::Set(..) => "Set",
 					Inner::Array(..) => "Array",
 					Inner::Function(..) => "Function",
 				};
-				return Err(Error::custom(format!(
-					"unexpected `Filter::{variant}` index `{index}`"
-				)));
+				return Err(Error::custom(format!("unexpected `Kind::{variant}` index `{index}`")));
 			}
 		}
 		self.index += 1;
