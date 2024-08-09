@@ -51,4 +51,5 @@ pub static INSECURE_FORWARD_ACCESS_ERRORS: Lazy<bool> =
 pub static EXTERNAL_SORTING_BUFFER_LIMIT: Lazy<usize> =
 	lazy_env_parse!("SURREAL_EXTERNAL_SORTING_BUFFER_LIMIT", usize, 50_000);
 
-pub static GRAPHQL_ENABLE: Lazy<bool> = lazy_env_parse!("SURREAL_GRAPHQL_ENABLE", bool, false);
+pub static GRAPHQL_ENABLE: Lazy<bool> =
+	lazy_env_parse!("SURREAL_EXPERIMENTAL_GRAPHQL", bool, false);
