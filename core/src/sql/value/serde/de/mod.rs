@@ -180,48 +180,6 @@ fn into_json(value: Value) -> JsonValue {
 		}
 	}
 
-	// TODO: Checkout blame for why these are here.
-	/*
-	#[derive(Serialize)]
-	enum Id {
-		Number(i64),
-		String(String),
-		Array(Array),
-		Object(Object),
-	}
-
-	impl From<(sql::Id, bool)> for Id {
-		fn from((id, simplify): (sql::Id, bool)) -> Self {
-			match id {
-				sql::Id::Number(n) => Id::Number(n),
-				sql::Id::String(s) => Id::String(s),
-				sql::Id::Array(arr) => Id::Array((arr, simplify).into()),
-				sql::Id::Object(obj) => Id::Object((obj, simplify).into()),
-				sql::Id::Generate(v) => match v {
-					Gen::Rand => Id::from((sql::Id::rand(), simplify)),
-					Gen::Ulid => Id::from((sql::Id::ulid(), simplify)),
-					Gen::Uuid => Id::from((sql::Id::uuid(), simplify)),
-				},
-			}
-		}
-	}
-
-	#[derive(Serialize)]
-	struct Thing {
-		tb: String,
-		id: Id,
-	}
-
-	impl From<(sql::Thing, bool)> for Thing {
-		fn from((thing, simplify): (sql::Thing, bool)) -> Self {
-			Self {
-				tb: thing.tb,
-				id: (thing.id, simplify).into(),
-			}
-		}
-	}
-	*/
-
 	match value {
 		// These value types are simple values which
 		// can be used in query responses sent to
