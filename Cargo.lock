@@ -5966,7 +5966,6 @@ version = "2.0.0"
 dependencies = [
  "argon2",
  "assert_fs",
- "async-graphql",
  "axum 0.7.5",
  "axum-extra",
  "axum-server",
