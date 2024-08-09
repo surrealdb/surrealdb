@@ -3,7 +3,7 @@ mod analyzer;
 mod database;
 mod event;
 mod field;
-mod function;
+pub mod function;
 mod index;
 mod namespace;
 mod param;

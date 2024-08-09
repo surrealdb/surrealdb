@@ -4,6 +4,7 @@ mod base;
 mod block;
 mod cast;
 mod changefeed;
+mod closure;
 mod cond;
 mod constant;
 mod data;

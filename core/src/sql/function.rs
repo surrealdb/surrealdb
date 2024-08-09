@@ -29,6 +29,7 @@ pub enum Function {
 	Normal(String, Vec<Value>),
 	Custom(String, Vec<Value>),
 	Script(Script, Vec<Value>),
+	Anonymous(Value, Vec<Value>),
 	// Add new variants here
 }
 
@@ -71,6 +72,7 @@ impl Function {
 	/// Convert function call to a field name
 	pub fn to_idiom(&self) -> Idiom {
 		match self {
+			Self::Anonymous(_, _) => "function".to_string().into(),
 			Self::Script(_, _) => "function".to_string().into(),
 			Self::Normal(f, _) => f.to_owned().into(),
 			Self::Custom(f, _) => format!("fn::{f}").into(),
@@ -109,6 +111,11 @@ impl Function {
 			Self::Normal(_, a) => a.iter().all(Value::is_static),
 			_ => false,
 		}
+	}
+
+	/// Check if this function is a closure function
+	pub fn is_inline(&self) -> bool {
+		matches!(self, Self::Anonymous(_, _))
 	}
 
 	/// Check if this function is a rolling function
@@ -203,6 +210,35 @@ impl Function {
 					.await?;
 				// Run the normal function
 				fnc::run(stk, ctx, opt, doc, s, a).await
+			}
+			Self::Anonymous(v, x) => {
+				let val = match v {
+					Value::Closure(p) => &Value::Closure(p.to_owned()),
+					Value::Param(p) => ctx.value(p).unwrap_or(&Value::None),
+					Value::Block(_) | Value::Subquery(_) | Value::Idiom(_) | Value::Function(_) => {
+						&stk.run(|stk| v.compute(stk, ctx, opt, doc)).await?
+					}
+					_ => &Value::None,
+				};
+
+				match val {
+					Value::Closure(closure) => {
+						// Compute the function arguments
+						let a = stk
+							.scope(|scope| {
+								try_join_all(
+									x.iter()
+										.map(|v| scope.run(|stk| v.compute(stk, ctx, opt, doc))),
+								)
+							})
+							.await?;
+						stk.run(|stk| closure.compute(stk, ctx, opt, doc, a)).await
+					}
+					v => Err(Error::InvalidFunction {
+						name: "ANONYMOUS".to_string(),
+						message: format!("'{}' is not a function", v.kindof()),
+					}),
+				}
 			}
 			Self::Custom(s, x) => {
 				// Get the full name of this function
@@ -308,6 +344,7 @@ impl fmt::Display for Function {
 			Self::Normal(s, e) => write!(f, "{s}({})", Fmt::comma_separated(e)),
 			Self::Custom(s, e) => write!(f, "fn::{s}({})", Fmt::comma_separated(e)),
 			Self::Script(s, e) => write!(f, "function({}) {{{s}}}", Fmt::comma_separated(e)),
+			Self::Anonymous(p, e) => write!(f, "{p}({})", Fmt::comma_separated(e)),
 		}
 	}
 }

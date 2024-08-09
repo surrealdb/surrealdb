@@ -72,6 +72,8 @@ pub struct Context<'a> {
 	temporary_directory: Option<Arc<PathBuf>>,
 	// An optional transaction
 	transaction: Option<Arc<Transaction>>,
+	// Does not read from parent `values`.
+	isolated: bool,
 }
 
 impl<'a> Default for Context<'a> {
@@ -131,6 +133,7 @@ impl<'a> Context<'a> {
 			))]
 			temporary_directory,
 			transaction: None,
+			isolated: false,
 		};
 		if let Some(timeout) = time_out {
 			ctx.add_timeout(timeout)?;
@@ -159,6 +162,7 @@ impl<'a> Context<'a> {
 			))]
 			temporary_directory: None,
 			transaction: None,
+			isolated: false,
 		}
 	}
 
@@ -184,6 +188,33 @@ impl<'a> Context<'a> {
 			))]
 			temporary_directory: parent.temporary_directory.clone(),
 			transaction: parent.transaction.clone(),
+			isolated: false,
+		}
+	}
+
+	/// Create a new child from a frozen context.
+	pub fn new_isolated(parent: &'a Context) -> Self {
+		Context {
+			values: HashMap::default(),
+			parent: Some(parent),
+			deadline: parent.deadline,
+			cancelled: Arc::new(AtomicBool::new(false)),
+			notifications: parent.notifications.clone(),
+			query_planner: parent.query_planner,
+			query_executor: parent.query_executor.clone(),
+			iteration_stage: parent.iteration_stage.clone(),
+			capabilities: parent.capabilities.clone(),
+			index_stores: parent.index_stores.clone(),
+			#[cfg(any(
+				feature = "kv-mem",
+				feature = "kv-surrealkv",
+				feature = "kv-rocksdb",
+				feature = "kv-fdb",
+				feature = "kv-tikv",
+			))]
+			temporary_directory: parent.temporary_directory.clone(),
+			transaction: parent.transaction.clone(),
+			isolated: true,
 		}
 	}
 
@@ -334,10 +365,11 @@ impl<'a> Context<'a> {
 				Cow::Borrowed(v) => Some(*v),
 				Cow::Owned(v) => Some(v),
 			},
-			None => match self.parent {
+			None if !self.isolated => match self.parent {
 				Some(p) => p.value(key),
 				_ => None,
 			},
+			None => None,
 		}
 	}
 

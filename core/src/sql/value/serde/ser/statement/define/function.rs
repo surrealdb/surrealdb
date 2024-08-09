@@ -104,7 +104,7 @@ impl serde::ser::SerializeStruct for SerializeDefineFunctionStatement {
 
 type IdentKindTuple = (Ident, Kind);
 
-struct IdentKindVecSerializer;
+pub struct IdentKindVecSerializer;
 
 impl ser::Serializer for IdentKindVecSerializer {
 	type Ok = Vec<IdentKindTuple>;
@@ -125,7 +125,7 @@ impl ser::Serializer for IdentKindVecSerializer {
 	}
 }
 
-struct SerializeIdentKindVec(Vec<IdentKindTuple>);
+pub struct SerializeIdentKindVec(Vec<IdentKindTuple>);
 
 impl serde::ser::SerializeSeq for SerializeIdentKindVec {
 	type Ok = Vec<IdentKindTuple>;
