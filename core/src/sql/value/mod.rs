@@ -24,6 +24,7 @@ mod generate;
 mod get;
 mod inc;
 mod increment;
+mod into_json;
 mod last;
 mod merge;
 mod patch;
