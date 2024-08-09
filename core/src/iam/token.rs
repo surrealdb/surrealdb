@@ -3,7 +3,7 @@ use crate::sql::Object;
 use crate::sql::Value;
 use jsonwebtoken::{Algorithm, Header};
 use once_cell::sync::Lazy;
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 use std::collections::HashMap;
 
 pub static HEADER: Lazy<Header> = Lazy::new(|| Header::new(Algorithm::HS512));
@@ -21,8 +21,8 @@ pub struct Claims {
 	pub iss: Option<String>,
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub sub: Option<String>,
-	#[serde(skip_serializing_if = "Option::is_none")]
-	pub aud: Option<String>,
+	#[serde(deserialize_with = "deserialize_aud")]
+	pub aud: Option<Vec<String>>,
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub jti: Option<String>,
 	#[serde(alias = "ns")]
@@ -64,6 +64,28 @@ pub struct Claims {
 	#[serde(flatten)]
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub custom_claims: Option<HashMap<String, serde_json::Value>>,
+}
+
+fn deserialize_aud<'de, D>(deserializer: D) -> Result<Option<Vec<String>>, D::Error>
+where
+	D: Deserializer<'de>,
+{
+	let value: serde_json::Value = Deserialize::deserialize(deserializer)?;
+	match value {
+		serde_json::Value::String(s) => Ok(Some(vec![s])),
+		serde_json::Value::Array(arr) => {
+			let result: Result<Vec<String>, _> = arr
+				.into_iter()
+				.map(|val| {
+					val.as_str()
+						.map(|s| s.to_string())
+						.ok_or_else(|| serde::de::Error::custom("Invalid type for aud"))
+				})
+				.collect();
+			result.map(Some)
+		}
+		_ => Err(serde::de::Error::custom("invalid type for aud")),
+	}
 }
 
 impl From<Claims> for Value {
