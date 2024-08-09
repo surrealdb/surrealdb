@@ -3,10 +3,18 @@ use crate::sql::Object;
 use crate::sql::Value;
 use jsonwebtoken::{Algorithm, Header};
 use once_cell::sync::Lazy;
-use serde::{Deserialize, Deserializer, Serialize};
+use serde::{Deserialize, Serialize};
+use std::borrow::Cow;
 use std::collections::HashMap;
 
 pub static HEADER: Lazy<Header> = Lazy::new(|| Header::new(Algorithm::HS512));
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(untagged)]
+pub enum Audience {
+	Single(String),
+	Multiple(Vec<String>),
+}
 
 #[derive(Debug, Default, Serialize, Deserialize, Clone)]
 #[non_exhaustive]
@@ -22,8 +30,7 @@ pub struct Claims {
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub sub: Option<String>,
 	#[serde(skip_serializing_if = "Option::is_none")]
-	#[serde(deserialize_with = "deserialize_aud")]
-	pub aud: Option<Vec<String>>,
+	pub aud: Option<Audience>,
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub jti: Option<String>,
 	#[serde(alias = "ns")]
@@ -67,29 +74,6 @@ pub struct Claims {
 	pub custom_claims: Option<HashMap<String, serde_json::Value>>,
 }
 
-fn deserialize_aud<'de, D>(deserializer: D) -> Result<Option<Vec<String>>, D::Error>
-where
-	D: Deserializer<'de>,
-{
-	let value: Option<serde_json::Value> = Deserialize::deserialize(deserializer)?;
-	match value {
-		Some(serde_json::Value::String(s)) => Ok(Some(vec![s])),
-		Some(serde_json::Value::Array(arr)) => {
-			let result: Result<Vec<String>, _> = arr
-				.into_iter()
-				.map(|val| {
-					val.as_str()
-						.map(|s| s.to_string())
-						.ok_or_else(|| serde::de::Error::custom("Invalid type for aud"))
-				})
-				.collect();
-			result.map(Some)
-		}
-		Some(_) => Err(serde::de::Error::custom("invalid type for aud")),
-		None => Ok(None), // Handle the case where aud is not present
-	}
-}
-
 impl From<Claims> for Value {
 	fn from(v: Claims) -> Value {
 		// Set default value
@@ -104,7 +88,10 @@ impl From<Claims> for Value {
 		}
 		// Add aud field if set
 		if let Some(aud) = v.aud {
-			out.insert("aud".to_string(), aud.into());
+			match aud {
+				Audience::Single(s) => out.insert("aud".to_string(), vec![s].into()),
+				Audience::Multiple(v) => out.insert("aud".to_string(), v.into()),
+			};
 		}
 		// Add iat field if set
 		if let Some(iat) = v.iat {
