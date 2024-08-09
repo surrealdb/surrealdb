@@ -6,11 +6,11 @@ use crate::err::Error;
 use crate::sql::permission::Permission;
 use reblessive::tree::Stk;
 
-impl<'a> Document<'a> {
+impl Document {
 	pub async fn allow(
 		&self,
 		stk: &mut Stk,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		opt: &Options,
 		stm: &Statement<'_>,
 	) -> Result<(), Error> {

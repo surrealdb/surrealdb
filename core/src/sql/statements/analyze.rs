@@ -29,9 +29,9 @@ impl AnalyzeStatement {
 	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		opt: &Options,
-		_doc: Option<&CursorDoc<'_>>,
+		_doc: Option<&CursorDoc>,
 	) -> Result<Value, Error> {
 		match self {
 			AnalyzeStatement::Idx(tb, idx) => {

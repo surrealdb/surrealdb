@@ -45,9 +45,9 @@ impl DefineTableStatement {
 	pub(crate) async fn compute(
 		&self,
 		stk: &mut Stk,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		opt: &Options,
-		doc: Option<&CursorDoc<'_>>,
+		doc: Option<&CursorDoc>,
 	) -> Result<Value, Error> {
 		// Allowed to run?
 		opt.is_allowed(Action::Edit, ResourceKind::Table, &Base::Db)?;

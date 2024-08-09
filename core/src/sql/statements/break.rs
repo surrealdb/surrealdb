@@ -22,9 +22,9 @@ impl BreakStatement {
 	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
-		_ctx: &Context<'_>,
+		_ctx: &Context,
 		_opt: &Options,
-		_doc: Option<&CursorDoc<'_>>,
+		_doc: Option<&CursorDoc>,
 	) -> Result<Value, Error> {
 		Err(Error::Break)
 	}

@@ -1,4 +1,4 @@
-use crate::ctx::Context;
+use crate::ctx::MutableContext;
 use crate::iam::Auth;
 use crate::iam::{Level, Role};
 use crate::sql::value::Value;
@@ -83,16 +83,16 @@ impl Session {
 	}
 
 	/// Convert a session into a runtime
-	pub(crate) fn context<'a>(&self, mut ctx: Context<'a>) -> Context<'a> {
+	pub(crate) fn context(&self, ctx: &mut MutableContext) {
 		// Add access method data
 		let val: Value = self.ac.to_owned().into();
-		ctx.add_value("access", val);
+		ctx.add_value("access", val.into());
 		// Add record access data
 		let val: Value = self.rd.to_owned().into();
-		ctx.add_value("auth", val);
+		ctx.add_value("auth", val.into());
 		// Add token data
 		let val: Value = self.tk.to_owned().into();
-		ctx.add_value("token", val);
+		ctx.add_value("token", val.into());
 		// Add session value
 		let val: Value = Value::from(map! {
 			"ac".to_string() => self.ac.to_owned().into(),
@@ -105,9 +105,7 @@ impl Session {
 			"rd".to_string() => self.rd.to_owned().into(),
 			"tk".to_string() => self.tk.to_owned().into(),
 		});
-		ctx.add_value("session", val);
-		// Output context
-		ctx
+		ctx.add_value("session", val.into());
 	}
 
 	/// Create a system session for a given level and role

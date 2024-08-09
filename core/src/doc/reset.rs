@@ -9,10 +9,10 @@ use crate::sql::paths::IN;
 use crate::sql::paths::OUT;
 use crate::sql::value::Value;
 
-impl<'a> Document<'a> {
+impl Document {
 	pub async fn reset(
 		&mut self,
-		_ctx: &Context<'_>,
+		_ctx: &Context,
 		_opt: &Options,
 		_stm: &Statement<'_>,
 	) -> Result<(), Error> {
@@ -27,10 +27,10 @@ impl<'a> Document<'a> {
 			self.current.doc.to_mut().put(&*OUT, r.clone().into());
 		}
 		// This is an UPDATE of a graph edge, so reset fields
-		if self.initial.doc.pick(&*EDGE).is_true() {
+		if self.initial.doc.as_ref().pick(&*EDGE).is_true() {
 			self.current.doc.to_mut().put(&*EDGE, Value::Bool(true));
-			self.current.doc.to_mut().put(&*IN, self.initial.doc.pick(&*IN));
-			self.current.doc.to_mut().put(&*OUT, self.initial.doc.pick(&*OUT));
+			self.current.doc.to_mut().put(&*IN, self.initial.doc.as_ref().pick(&*IN));
+			self.current.doc.to_mut().put(&*OUT, self.initial.doc.as_ref().pick(&*OUT));
 		}
 		// Carry on
 		Ok(())

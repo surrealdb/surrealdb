@@ -13,11 +13,11 @@ use crate::sql::table::Tables;
 use crate::sql::value::{Value, Values};
 use reblessive::tree::Stk;
 
-impl<'a> Document<'a> {
+impl Document {
 	pub async fn purge(
 		&self,
 		stk: &mut Stk,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		opt: &Options,
 		_stm: &Statement<'_>,
 	) -> Result<(), Error> {
@@ -30,15 +30,15 @@ impl<'a> Document<'a> {
 		// Lock the transaction
 		let mut txn = txn.lock().await;
 		// Get the record id
-		if let Some(rid) = self.id {
+		if let Some(rid) = &self.id {
 			// Purge the record data
 			let key = crate::key::thing::new(opt.ns()?, opt.db()?, &rid.tb, &rid.id);
 			txn.del(key).await?;
 			// Purge the record edges
 			match (
-				self.initial.doc.pick(&*EDGE),
-				self.initial.doc.pick(&*IN),
-				self.initial.doc.pick(&*OUT),
+				self.initial.doc.as_ref().pick(&*EDGE),
+				self.initial.doc.as_ref().pick(&*IN),
+				self.initial.doc.as_ref().pick(&*OUT),
 			) {
 				(Value::Bool(true), Value::Thing(ref l), Value::Thing(ref r)) => {
 					// Get temporary edge references
@@ -63,7 +63,7 @@ impl<'a> Document<'a> {
 					let stm = DeleteStatement {
 						what: Values(vec![Value::from(Edges {
 							dir: Dir::Both,
-							from: rid.clone(),
+							from: rid.as_ref().clone(),
 							what: Tables::default(),
 						})]),
 						..DeleteStatement::default()

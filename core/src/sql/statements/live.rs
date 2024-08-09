@@ -70,9 +70,9 @@ impl LiveStatement {
 	pub(crate) async fn compute(
 		&self,
 		stk: &mut Stk,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		opt: &Options,
-		doc: Option<&CursorDoc<'_>>,
+		doc: Option<&CursorDoc>,
 	) -> Result<Value, Error> {
 		// Is realtime enabled?
 		opt.realtime()?;

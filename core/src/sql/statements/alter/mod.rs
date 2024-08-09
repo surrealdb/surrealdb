@@ -30,9 +30,9 @@ impl AlterStatement {
 	pub(crate) async fn compute(
 		&self,
 		stk: &mut Stk,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		opt: &Options,
-		doc: Option<&CursorDoc<'_>>,
+		doc: Option<&CursorDoc>,
 	) -> Result<Value, Error> {
 		match self {
 			Self::Table(ref v) => v.compute(stk, ctx, opt, doc).await,

@@ -45,7 +45,7 @@ impl<'a> Stream for Scanner<'a> {
 	type Item = Result<(Key, Val), Error>;
 	fn poll_next(
 		mut self: Pin<&mut Self>,
-		cx: &mut Context<'_>,
+		cx: &mut Context,
 	) -> Poll<Option<Result<(Key, Val), Error>>> {
 		// If we have results, return the first one
 		if let Some(v) = self.results.pop_front() {

@@ -1,4 +1,4 @@
-use crate::ctx::Context;
+use crate::ctx::{Context, MutableContext};
 use crate::dbs::Options;
 use crate::dbs::Statement;
 use crate::doc::Document;
@@ -10,15 +10,16 @@ use crate::sql::paths::META;
 use crate::sql::permission::Permission;
 use crate::sql::value::Value;
 use reblessive::tree::Stk;
+use std::sync::Arc;
 
-impl<'a> Document<'a> {
+impl Document {
 	/// Evaluates a doc that has been modified so that it can be further computed into a result Value
 	/// This includes some permissions handling, output format handling (as specified in statement),
 	/// field handling (like params, links etc).
 	pub async fn pluck(
-		&self,
+		&mut self,
 		stk: &mut Stk,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		opt: &Options,
 		stm: &Statement<'_>,
 	) -> Result<Value, Error> {
@@ -31,47 +32,58 @@ impl<'a> Document<'a> {
 				Output::Null => Ok(Value::Null),
 				Output::Diff => {
 					// Output a DIFF of any changes applied to the document
-					Ok(self.initial.doc.diff(self.current.doc.as_ref(), Idiom::default()).into())
+					Ok(self
+						.initial
+						.doc
+						.as_ref()
+						.diff(self.current.doc.as_ref(), Idiom::default())
+						.into())
 				}
 				Output::After => {
 					// Output the full document after all changes were applied
-					self.current.doc.compute(stk, ctx, opt, Some(&self.current)).await
+					self.current.doc.as_ref().compute(stk, ctx, opt, Some(&self.current)).await
 				}
 				Output::Before => {
 					// Output the full document before any changes were applied
-					self.initial.doc.compute(stk, ctx, opt, Some(&self.initial)).await
+					self.initial.doc.as_ref().compute(stk, ctx, opt, Some(&self.initial)).await
 				}
 				Output::Fields(v) => {
 					// Configure the context
-					let mut ctx = Context::new(ctx);
-					ctx.add_value("after", self.current.doc.as_ref());
-					ctx.add_value("before", self.initial.doc.as_ref());
+					let mut ctx = MutableContext::new(ctx);
+					ctx.add_value("after", self.current.doc.as_arc());
+					ctx.add_value("before", self.initial.doc.as_arc());
+					let ctx = ctx.freeze();
 					// Output the specified fields
 					v.compute(stk, &ctx, opt, Some(&self.current), false).await
 				}
 			},
 			None => match stm {
 				Statement::Live(s) => match s.expr.len() {
-					0 => Ok(self.initial.doc.diff(&self.current.doc, Idiom::default()).into()),
+					0 => Ok(self
+						.initial
+						.doc
+						.as_ref()
+						.diff(self.current.doc.as_ref(), Idiom::default())
+						.into()),
 					_ => s.expr.compute(stk, ctx, opt, Some(&self.current), false).await,
 				},
 				Statement::Select(s) => {
 					s.expr.compute(stk, ctx, opt, Some(&self.current), s.group.is_some()).await
 				}
 				Statement::Create(_) => {
-					self.current.doc.compute(stk, ctx, opt, Some(&self.current)).await
+					self.current.doc.as_ref().compute(stk, ctx, opt, Some(&self.current)).await
 				}
 				Statement::Upsert(_) => {
-					self.current.doc.compute(stk, ctx, opt, Some(&self.current)).await
+					self.current.doc.as_ref().compute(stk, ctx, opt, Some(&self.current)).await
 				}
 				Statement::Update(_) => {
-					self.current.doc.compute(stk, ctx, opt, Some(&self.current)).await
+					self.current.doc.as_ref().compute(stk, ctx, opt, Some(&self.current)).await
 				}
 				Statement::Relate(_) => {
-					self.current.doc.compute(stk, ctx, opt, Some(&self.current)).await
+					self.current.doc.as_ref().compute(stk, ctx, opt, Some(&self.current)).await
 				}
 				Statement::Insert(_) => {
-					self.current.doc.compute(stk, ctx, opt, Some(&self.current)).await
+					self.current.doc.as_ref().compute(stk, ctx, opt, Some(&self.current)).await
 				}
 				_ => Err(Error::Ignore),
 			},
@@ -92,10 +104,11 @@ impl<'a> Document<'a> {
 								// Disable permissions
 								let opt = &opt.new_with_perms(false);
 								// Get the current value
-								let val = self.current.doc.pick(k);
+								let val = Arc::new(self.current.doc.as_ref().pick(k));
 								// Configure the context
-								let mut ctx = Context::new(ctx);
-								ctx.add_value("value", &val);
+								let mut ctx = MutableContext::new(ctx);
+								ctx.add_value("value", val);
+								let ctx = ctx.freeze();
 								// Process the PERMISSION clause
 								if !e
 									.compute(stk, &ctx, opt, Some(&self.current))

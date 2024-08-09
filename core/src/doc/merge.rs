@@ -6,11 +6,11 @@ use crate::doc::Document;
 use crate::err::Error;
 use reblessive::tree::Stk;
 
-impl<'a> Document<'a> {
+impl Document {
 	pub async fn merge(
 		&mut self,
 		stk: &mut Stk,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		opt: &Options,
 		_stm: &Statement<'_>,
 	) -> Result<(), Error> {

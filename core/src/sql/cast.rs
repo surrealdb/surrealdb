@@ -37,9 +37,9 @@ impl Cast {
 	pub(crate) async fn compute(
 		&self,
 		stk: &mut Stk,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		opt: &Options,
-		doc: Option<&CursorDoc<'_>>,
+		doc: Option<&CursorDoc>,
 	) -> Result<Value, Error> {
 		// Compute the value to be cast and convert it
 		stk.run(|stk| self.1.compute(stk, ctx, opt, doc)).await?.convert_to(&self.0)

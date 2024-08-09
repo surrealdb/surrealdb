@@ -1,4 +1,4 @@
-use crate::ctx::Context;
+use crate::ctx::{Context, MutableContext};
 use crate::dbs::Options;
 use crate::dbs::Statement;
 use crate::dbs::Workable;
@@ -9,11 +9,11 @@ use crate::sql::operator::Operator;
 use crate::sql::value::Value;
 use reblessive::tree::Stk;
 
-impl<'a> Document<'a> {
+impl Document {
 	pub async fn alter(
 		&mut self,
 		stk: &mut Stk,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		opt: &Options,
 		stm: &Statement<'_>,
 	) -> Result<(), Error> {
@@ -70,14 +70,16 @@ impl<'a> Document<'a> {
 				}
 				Data::UpdateExpression(x) => {
 					// Duplicate context
-					let mut ctx = Context::new(ctx);
+					let mut ctx = MutableContext::new(ctx);
 					// Add insertable value
 					if let Workable::Insert(value) = &self.extras {
-						ctx.add_value("input", value);
+						ctx.add_value("input", value.clone());
 					}
 					if let Workable::Relate(_, _, Some(value)) = &self.extras {
-						ctx.add_value("input", value);
+						ctx.add_value("input", value.clone());
 					}
+					// Freeze the context
+					let ctx: Context = ctx.into();
 					// Process ON DUPLICATE KEY clause
 					for x in x.iter() {
 						let v = x.2.compute(stk, &ctx, opt, Some(&self.current)).await?;

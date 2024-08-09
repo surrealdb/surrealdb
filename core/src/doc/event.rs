@@ -1,17 +1,16 @@
-use crate::ctx::Context;
+use crate::ctx::{Context, MutableContext};
 use crate::dbs::Options;
 use crate::dbs::Statement;
 use crate::doc::Document;
 use crate::err::Error;
 use crate::sql::value::Value;
 use reblessive::tree::Stk;
-use std::ops::Deref;
 
-impl<'a> Document<'a> {
+impl Document {
 	pub async fn event(
-		&self,
+		&mut self,
 		stk: &mut Stk,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		opt: &Options,
 		stm: &Statement<'_>,
 	) -> Result<(), Error> {
@@ -35,17 +34,21 @@ impl<'a> Document<'a> {
 			} else {
 				Value::from("UPDATE")
 			};
+			let after = self.current.doc.as_arc();
+			let before = self.initial.doc.as_arc();
 			// Depending on type of event, how do we populate the document
 			let doc = match stm.is_delete() {
-				true => &self.initial,
-				false => &self.current,
+				true => &mut self.initial,
+				false => &mut self.current,
 			};
 			// Configure the context
-			let mut ctx = Context::new(ctx);
-			ctx.add_value("event", evt);
-			ctx.add_value("value", doc.doc.deref());
-			ctx.add_value("after", self.current.doc.deref());
-			ctx.add_value("before", self.initial.doc.deref());
+			let mut ctx = MutableContext::new(ctx);
+			ctx.add_value("event", evt.into());
+			ctx.add_value("value", doc.doc.as_arc());
+			ctx.add_value("after", after);
+			ctx.add_value("before", before);
+			// Freeze the context
+			let ctx = ctx.freeze();
 			// Process conditional clause
 			let val = ev.when.compute(stk, &ctx, opt, Some(doc)).await?;
 			// Execute event if value is truthy

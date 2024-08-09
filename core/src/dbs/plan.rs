@@ -11,7 +11,7 @@ pub(super) struct Plan {
 
 impl Plan {
 	pub(super) fn new(
-		ctx: &Context<'_>,
+		ctx: &Context,
 		stm: &Statement<'_>,
 		iterables: &Vec<Iterable>,
 		results: &Results,
@@ -43,7 +43,7 @@ impl Plan {
 pub(super) struct Explanation(Vec<ExplainItem>);
 
 impl Explanation {
-	fn add_iter(&mut self, ctx: &Context<'_>, iter: &Iterable) {
+	fn add_iter(&mut self, ctx: &Context, iter: &Iterable) {
 		self.0.push(ExplainItem::new_iter(ctx, iter));
 	}
 
@@ -87,7 +87,7 @@ impl ExplainItem {
 		}
 	}
 
-	fn new_iter(ctx: &Context<'_>, iter: &Iterable) -> Self {
+	fn new_iter(ctx: &Context, iter: &Iterable) -> Self {
 		match iter {
 			Iterable::Value(v) => Self {
 				name: "Iterate Value".into(),

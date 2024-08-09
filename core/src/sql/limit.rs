@@ -19,9 +19,9 @@ impl Limit {
 	pub(crate) async fn process(
 		&self,
 		stk: &mut Stk,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		opt: &Options,
-		doc: Option<&CursorDoc<'_>>,
+		doc: Option<&CursorDoc>,
 	) -> Result<usize, Error> {
 		match self.0.compute(stk, ctx, opt, doc).await {
 			// This is a valid limiting number

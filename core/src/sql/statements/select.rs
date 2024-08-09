@@ -1,4 +1,4 @@
-use crate::ctx::Context;
+use crate::ctx::{Context, MutableContext};
 use crate::dbs::{Iterable, Iterator, Options, Statement};
 use crate::doc::CursorDoc;
 use crate::err::Error;
@@ -12,6 +12,7 @@ use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
+use std::sync::Arc;
 
 #[revisioned(revision = 3)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
@@ -61,21 +62,25 @@ impl SelectStatement {
 	pub(crate) async fn compute(
 		&self,
 		stk: &mut Stk,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		opt: &Options,
-		doc: Option<&CursorDoc<'_>>,
+		doc: Option<&CursorDoc>,
 	) -> Result<Value, Error> {
 		// Valid options?
 		opt.valid_for_db()?;
 		// Create a new iterator
 		let mut i = Iterator::new();
 		// Ensure futures are stored
-		let opt = &opt.new_with_futures(false).with_projections(true);
+		let opt = Arc::new(opt.new_with_futures(false).with_projections(true));
 		// Get a query planner
-		let mut planner = QueryPlanner::new(opt, &self.with, &self.cond);
+		let mut planner = QueryPlanner::new(
+			opt.clone(),
+			self.with.as_ref().cloned().map(|w| w.into()),
+			self.cond.as_ref().cloned().map(|c| c.into()),
+		);
 		// Used for ONLY: is the limit 1?
 		let limit_is_one_or_zero = match &self.limit {
-			Some(l) => l.process(stk, ctx, opt, doc).await? <= 1,
+			Some(l) => l.process(stk, ctx, &opt, doc).await? <= 1,
 			_ => false,
 		};
 		// Fail for multiple targets without a limit
@@ -84,7 +89,7 @@ impl SelectStatement {
 		}
 		// Loop over the select targets
 		for w in self.what.0.iter() {
-			let v = w.compute(stk, ctx, opt, doc).await?;
+			let v = w.compute(stk, ctx, &opt, doc).await?;
 			match v {
 				Value::Table(t) => {
 					if self.only && !limit_is_one_or_zero {
@@ -142,15 +147,16 @@ impl SelectStatement {
 			};
 		}
 		// Create a new context
-		let mut ctx = Context::new(ctx);
+		let mut ctx = MutableContext::new(ctx);
 		// Assign the statement
 		let stm = Statement::from(self);
 		// Add query executors if any
 		if planner.has_executors() {
-			ctx.set_query_planner(&planner);
+			ctx.set_query_planner(planner);
 		}
+		let ctx = ctx.freeze();
 		// Output the results
-		match i.output(stk, &ctx, opt, &stm).await? {
+		match i.output(stk, &ctx, &opt, &stm).await? {
 			// This is a single record result
 			Value::Array(mut a) if self.only => match a.len() {
 				// There were no results

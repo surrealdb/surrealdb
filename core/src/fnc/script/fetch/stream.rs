@@ -11,7 +11,7 @@ impl<R> Stream for ChannelStream<R> {
 	type Item = R;
 	fn poll_next(
 		self: Pin<&mut Self>,
-		cx: &mut std::task::Context<'_>,
+		cx: &mut std::task::Context,
 	) -> std::task::Poll<Option<Self::Item>> {
 		self.0.recv().poll_unpin(cx).map(|x| x.ok())
 	}
@@ -62,7 +62,7 @@ impl<R> Stream for ReadableStream<R> {
 
 	fn poll_next(
 		mut self: Pin<&mut Self>,
-		cx: &mut std::task::Context<'_>,
+		cx: &mut std::task::Context,
 	) -> std::task::Poll<Option<Self::Item>> {
 		self.0.poll_next_unpin(cx)
 	}

@@ -2645,9 +2645,9 @@ impl Value {
 	pub(crate) async fn compute_unbordered(
 		&self,
 		stk: &mut Stk,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		opt: &Options,
-		doc: Option<&CursorDoc<'_>>,
+		doc: Option<&CursorDoc>,
 	) -> Result<Value, Error> {
 		// Prevent infinite recursion due to casting, expressions, etc.
 		let opt = &opt.dive(1)?;
@@ -2674,9 +2674,9 @@ impl Value {
 	pub(crate) async fn compute(
 		&self,
 		stk: &mut Stk,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		opt: &Options,
-		doc: Option<&CursorDoc<'_>>,
+		doc: Option<&CursorDoc>,
 	) -> Result<Value, Error> {
 		match self.compute_unbordered(stk, ctx, opt, doc).await {
 			Err(Error::Return {

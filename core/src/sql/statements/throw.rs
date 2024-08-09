@@ -26,9 +26,9 @@ impl ThrowStatement {
 	pub(crate) async fn compute(
 		&self,
 		stk: &mut Stk,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		opt: &Options,
-		doc: Option<&CursorDoc<'_>>,
+		doc: Option<&CursorDoc>,
 	) -> Result<Value, Error> {
 		Err(Error::Thrown(self.error.compute(stk, ctx, opt, doc).await?.to_raw_string()))
 	}

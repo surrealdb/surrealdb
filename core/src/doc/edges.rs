@@ -10,10 +10,10 @@ use crate::sql::paths::OUT;
 use crate::sql::value::Value;
 use crate::sql::Dir;
 
-impl<'a> Document<'a> {
+impl Document {
 	pub async fn edges(
 		&mut self,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		opt: &Options,
 		_stm: &Statement<'_>,
 	) -> Result<(), Error> {

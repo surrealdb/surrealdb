@@ -1,4 +1,4 @@
-use crate::ctx::Context;
+use crate::ctx::{Context, MutableContext};
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
@@ -182,9 +182,9 @@ impl Function {
 	pub(crate) async fn compute(
 		&self,
 		stk: &mut Stk,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		opt: &Options,
-		doc: Option<&CursorDoc<'_>>,
+		doc: Option<&CursorDoc>,
 	) -> Result<Value, Error> {
 		// Ensure futures are run
 		let opt = &opt.new_with_futures(true);
@@ -261,11 +261,12 @@ impl Function {
 					})
 					.await?;
 				// Duplicate context
-				let mut ctx = Context::new(ctx);
+				let mut ctx = MutableContext::new(ctx);
 				// Process the function arguments
 				for (val, (name, kind)) in a.into_iter().zip(&val.args) {
-					ctx.add_value(name.to_raw(), val.coerce_to(kind)?);
+					ctx.add_value(name.to_raw(), val.coerce_to(kind)?.into());
 				}
+				let ctx = ctx.freeze();
 				// Run the custom function
 				match stk.run(|stk| val.block.compute(stk, &ctx, opt, doc)).await {
 					Err(Error::Return {

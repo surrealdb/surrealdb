@@ -1,4 +1,4 @@
-use crate::ctx::Context;
+use crate::ctx::{Context, MutableContext};
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
@@ -73,16 +73,17 @@ impl Subquery {
 	pub(crate) async fn compute(
 		&self,
 		stk: &mut Stk,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		opt: &Options,
-		doc: Option<&CursorDoc<'_>>,
+		doc: Option<&CursorDoc>,
 	) -> Result<Value, Error> {
 		// Duplicate context
-		let mut ctx = Context::new(ctx);
+		let mut ctx = MutableContext::new(ctx);
 		// Add parent document
 		if let Some(doc) = doc {
-			ctx.add_value("parent", doc.doc.as_ref());
+			ctx.add_value("parent", doc.doc.as_ref().clone().into());
 		}
+		let ctx = ctx.freeze();
 		// Process the subquery
 		match self {
 			Self::Value(ref v) => v.compute(stk, &ctx, opt, doc).await,

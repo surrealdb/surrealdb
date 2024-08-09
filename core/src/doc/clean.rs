@@ -6,11 +6,11 @@ use crate::err::Error;
 use crate::sql::idiom::Idiom;
 use reblessive::tree::Stk;
 
-impl<'a> Document<'a> {
+impl Document {
 	pub async fn clean(
 		&mut self,
 		stk: &mut Stk,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		opt: &Options,
 		_stm: &Statement<'_>,
 	) -> Result<(), Error> {
@@ -26,20 +26,22 @@ impl<'a> Document<'a> {
 				match fd.flex {
 					false => {
 						// Loop over this field in the document
-						for k in self.current.doc.each(&fd.name).into_iter() {
+						for k in self.current.doc.as_ref().each(&fd.name).into_iter() {
 							keys.push(k);
 						}
 					}
 					true => {
 						// Loop over every field under this field in the document
-						for k in self.current.doc.every(Some(&fd.name), true, true).into_iter() {
+						for k in
+							self.current.doc.as_ref().every(Some(&fd.name), true, true).into_iter()
+						{
 							keys.push(k);
 						}
 					}
 				}
 			}
 			// Loop over every field in the document
-			for fd in self.current.doc.every(None, true, true).iter() {
+			for fd in self.current.doc.as_ref().every(None, true, true).iter() {
 				if !keys.contains(fd) {
 					match fd {
 						fd if fd.is_id() => continue,

@@ -10,7 +10,7 @@ impl Value {
 	pub(crate) async fn extend(
 		&mut self,
 		stk: &mut Stk,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		opt: &Options,
 		path: &[Part],
 		val: Value,

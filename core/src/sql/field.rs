@@ -78,15 +78,15 @@ impl Fields {
 	pub(crate) async fn compute(
 		&self,
 		stk: &mut Stk,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		opt: &Options,
-		doc: Option<&CursorDoc<'_>>,
+		doc: Option<&CursorDoc>,
 		group: bool,
 	) -> Result<Value, Error> {
 		if let Some(doc) = doc {
 			self.compute_value(stk, ctx, opt, doc, group).await
 		} else {
-			let doc = (&Value::None).into();
+			let doc = Value::None.into();
 			self.compute_value(stk, ctx, opt, &doc, group).await
 		}
 	}
@@ -94,16 +94,16 @@ impl Fields {
 	async fn compute_value(
 		&self,
 		stk: &mut Stk,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		opt: &Options,
-		doc: &CursorDoc<'_>,
+		doc: &CursorDoc,
 		group: bool,
 	) -> Result<Value, Error> {
 		// Ensure futures are run
 		let opt = &opt.new_with_futures(true);
 		// Process the desired output
 		let mut out = match self.is_all() {
-			true => doc.doc.compute(stk, ctx, opt, Some(doc)).await?,
+			true => doc.doc.as_ref().compute(stk, ctx, opt, Some(doc)).await?,
 			false => Value::base(),
 		};
 		for v in self.other() {

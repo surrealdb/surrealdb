@@ -31,7 +31,7 @@ pub(super) struct PlanBuilder {
 impl PlanBuilder {
 	pub(super) fn build(
 		root: Node,
-		with: &Option<With>,
+		with: Option<&With>,
 		with_indexes: Vec<IndexRef>,
 	) -> Result<Plan, Error> {
 		if let Some(With::NoIndex) = with {

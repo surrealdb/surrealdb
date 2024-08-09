@@ -32,9 +32,9 @@ impl AlterTableStatement {
 	pub(crate) async fn compute(
 		&self,
 		_stk: &mut Stk,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		opt: &Options,
-		_doc: Option<&CursorDoc<'_>>,
+		_doc: Option<&CursorDoc>,
 	) -> Result<Value, Error> {
 		// Allowed to run?
 		opt.is_allowed(Action::Edit, ResourceKind::Table, &Base::Db)?;

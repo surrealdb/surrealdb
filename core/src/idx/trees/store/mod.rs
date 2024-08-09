@@ -69,7 +69,7 @@ where
 
 	pub(in crate::idx) async fn get_node_txn(
 		&self,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		node_id: NodeId,
 	) -> Result<Arc<StoredNode<N>>, Error> {
 		match self {
