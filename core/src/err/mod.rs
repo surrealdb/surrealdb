@@ -1162,13 +1162,13 @@ impl Serialize for Error {
 }
 
 impl Error {
-	pub fn function_check_from_coerce(self, name: String) -> Error {
+	pub fn function_check_from_coerce(self, name: impl Into<String>) -> Error {
 		match self {
 			Error::CoerceTo {
 				from,
 				into,
 			} => Error::FunctionCheck {
-				name,
+				name: name.into(),
 				value: from.to_string(),
 				check: into,
 			},
