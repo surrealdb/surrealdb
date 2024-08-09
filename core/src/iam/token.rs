@@ -21,6 +21,7 @@ pub struct Claims {
 	pub iss: Option<String>,
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub sub: Option<String>,
+	#[serde(skip_serializing_if = "Option::is_none")]
 	#[serde(deserialize_with = "deserialize_aud")]
 	pub aud: Option<Vec<String>>,
 	#[serde(skip_serializing_if = "Option::is_none")]
@@ -70,10 +71,10 @@ fn deserialize_aud<'de, D>(deserializer: D) -> Result<Option<Vec<String>>, D::Er
 where
 	D: Deserializer<'de>,
 {
-	let value: serde_json::Value = Deserialize::deserialize(deserializer)?;
+	let value: Option<serde_json::Value> = Deserialize::deserialize(deserializer)?;
 	match value {
-		serde_json::Value::String(s) => Ok(Some(vec![s])),
-		serde_json::Value::Array(arr) => {
+		Some(serde_json::Value::String(s)) => Ok(Some(vec![s])),
+		Some(serde_json::Value::Array(arr)) => {
 			let result: Result<Vec<String>, _> = arr
 				.into_iter()
 				.map(|val| {
@@ -84,7 +85,8 @@ where
 				.collect();
 			result.map(Some)
 		}
-		_ => Err(serde::de::Error::custom("invalid type for aud")),
+		Some(_) => Err(serde::de::Error::custom("invalid type for aud")),
+		None => Ok(None), // Handle the case where aud is not present
 	}
 }
 
