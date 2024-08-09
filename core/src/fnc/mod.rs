@@ -65,7 +65,7 @@ pub async fn run(
 /// it is `async`. Finally, the path may be prefixed by a parenthesized wrapper function e.g.
 /// `cpu_intensive`.
 macro_rules! dispatch {
-	($name: ident, $args: ident, $($function_name: literal => $(($wrapper: tt))* $($function_path: ident)::+ $(($ctx_arg: expr))* $(.$await:tt)*,)+) => {
+	($name: ident, $args: expr, $message: expr, $($function_name: literal => $(($wrapper: tt))* $($function_path: ident)::+ $(($ctx_arg: expr))* $(.$await:tt)*,)+) => {
 		{
 			match $name {
 				$($function_name => {
@@ -76,7 +76,7 @@ macro_rules! dispatch {
 				_ => {
 					return Err($crate::err::Error::InvalidFunction{
 						name: String::from($name),
-						message: "no such builtin function".to_string()
+						message: $message.to_string()
 					})
 				}
 			}
@@ -94,6 +94,7 @@ pub fn synchronous(
 	dispatch!(
 		name,
 		args,
+		"no such builtin function found",
 		"array::add" => array::add,
 		"array::all" => array::all,
 		"array::any" => array::any,
@@ -344,17 +345,21 @@ pub fn synchronous(
 		"time::from::unix" => time::from::unix,
 		//
 		"type::bool" => r#type::bool,
+		"type::bytes" => r#type::bytes,
 		"type::datetime" => r#type::datetime,
 		"type::decimal" => r#type::decimal,
 		"type::duration" => r#type::duration,
 		"type::float" => r#type::float,
+		"type::geometry" => r#type::geometry,
 		"type::int" => r#type::int,
 		"type::number" => r#type::number,
 		"type::point" => r#type::point,
+		"type::range" => r#type::range,
+		"type::record" => r#type::record,
 		"type::string" => r#type::string,
 		"type::table" => r#type::table,
 		"type::thing" => r#type::thing,
-		"type::range" => r#type::range,
+		"type::uuid" => r#type::uuid,
 		"type::is::array" => r#type::is::array,
 		"type::is::bool" => r#type::is::bool,
 		"type::is::bytes" => r#type::is::bytes,
@@ -403,6 +408,288 @@ pub fn synchronous(
 	)
 }
 
+/// Attempts to run any synchronous function.
+pub fn idiom(
+	ctx: &Context<'_>,
+	doc: Option<&CursorDoc<'_>>,
+	value: Value,
+	name: &str,
+	args: Vec<Value>,
+) -> Result<Value, Error> {
+	let args = [vec![value.clone()], args].concat();
+	let specific = match value {
+		Value::Array(_) => {
+			dispatch!(
+				name,
+				args.clone(),
+				"no such method found for the array type",
+				"add" => array::add,
+				"all" => array::all,
+				"any" => array::any,
+				"append" => array::append,
+				"at" => array::at,
+				"boolean_and" => array::boolean_and,
+				"boolean_not" => array::boolean_not,
+				"boolean_or" => array::boolean_or,
+				"boolean_xor" => array::boolean_xor,
+				"clump" => array::clump,
+				"combine" => array::combine,
+				"complement" => array::complement,
+				"concat" => array::concat,
+				"difference" => array::difference,
+				"distinct" => array::distinct,
+				"filter_index" => array::filter_index,
+				"find_index" => array::find_index,
+				"first" => array::first,
+				"flatten" => array::flatten,
+				"group" => array::group,
+				"insert" => array::insert,
+				"intersect" => array::intersect,
+				"join" => array::join,
+				"last" => array::last,
+				"len" => array::len,
+				"logical_and" => array::logical_and,
+				"logical_or" => array::logical_or,
+				"logical_xor" => array::logical_xor,
+				"matches" => array::matches,
+				"max" => array::max,
+				"min" => array::min,
+				"pop" => array::pop,
+				"prepend" => array::prepend,
+				"push" => array::push,
+				"remove" => array::remove,
+				"reverse" => array::reverse,
+				"shuffle" => array::shuffle,
+				"slice" => array::slice,
+				"sort" => array::sort,
+				"transpose" => array::transpose,
+				"union" => array::union,
+				"sort_asc" => array::sort::asc,
+				"sort_desc" => array::sort::desc,
+				"windows" => array::windows,
+				//
+				"vector_add" => vector::add,
+				"vector_angle" => vector::angle,
+				"vector_cross" => vector::cross,
+				"vector_dot" => vector::dot,
+				"vector_divide" => vector::divide,
+				"vector_magnitude" => vector::magnitude,
+				"vector_multiply" => vector::multiply,
+				"vector_normalize" => vector::normalize,
+				"vector_project" => vector::project,
+				"vector_subtract" => vector::subtract,
+				"vector_distance_chebyshev" => vector::distance::chebyshev,
+				"vector_distance_euclidean" => vector::distance::euclidean,
+				"vector_distance_hamming" => vector::distance::hamming,
+				"vector_distance_knn" => vector::distance::knn((ctx, doc)),
+				"vector_distance_mahalanobis" => vector::distance::mahalanobis,
+				"vector_distance_manhattan" => vector::distance::manhattan,
+				"vector_distance_minkowski" => vector::distance::minkowski,
+				"vector_similarity_cosine" => vector::similarity::cosine,
+				"vector_similarity_jaccard" => vector::similarity::jaccard,
+				"vector_similarity_pearson" => vector::similarity::pearson,
+				"vector_similarity_spearman" => vector::similarity::spearman,
+			)
+		}
+		Value::Bytes(_) => {
+			dispatch!(
+				name,
+				args.clone(),
+				"no such method found for the bytes type",
+				"len" => bytes::len,
+			)
+		}
+		Value::Duration(_) => {
+			dispatch!(
+				name,
+				args.clone(),
+				"no such method found for the duration type",
+				"days" => duration::days,
+				"hours" => duration::hours,
+				"micros" => duration::micros,
+				"millis" => duration::millis,
+				"mins" => duration::mins,
+				"nanos" => duration::nanos,
+				"secs" => duration::secs,
+				"weeks" => duration::weeks,
+				"years" => duration::years,
+			)
+		}
+		Value::Geometry(_) => {
+			dispatch!(
+				name,
+				args.clone(),
+				"no such method found for the geometry type",
+				"area" => geo::area,
+				"bearing" => geo::bearing,
+				"centroid" => geo::centroid,
+				"distance" => geo::distance,
+				"hash::decode" => geo::hash::decode,
+				"hash::encode" => geo::hash::encode,
+			)
+		}
+		Value::Thing(_) => {
+			dispatch!(
+				name,
+				args.clone(),
+				"no such method found for the record type",
+				"id" => meta::id,
+				"table" => meta::tb,
+				"tb" => meta::tb,
+			)
+		}
+		Value::Object(_) => {
+			dispatch!(
+				name,
+				args.clone(),
+				"no such method found for the object type",
+				"entries" => object::entries,
+				"keys" => object::keys,
+				"len" => object::len,
+				"values" => object::values,
+			)
+		}
+		Value::Strand(_) => {
+			dispatch!(
+				name,
+				args.clone(),
+				"no such method found for the string type",
+				"concat" => string::concat,
+				"contains" => string::contains,
+				"endsWith" => string::ends_with,
+				"join" => string::join,
+				"len" => string::len,
+				"lowercase" => string::lowercase,
+				"matches" => string::matches,
+				"repeat" => string::repeat,
+				"replace" => string::replace,
+				"reverse" => string::reverse,
+				"slice" => string::slice,
+				"slug" => string::slug,
+				"split" => string::split,
+				"startsWith" => string::starts_with,
+				"trim" => string::trim,
+				"uppercase" => string::uppercase,
+				"words" => string::words,
+				"distance_hamming" => string::distance::hamming,
+				"distance_levenshtein" => string::distance::levenshtein,
+				"html_encode" => string::html::encode,
+				"html_sanitize" => string::html::sanitize,
+				"is_alphanum" => string::is::alphanum,
+				"is_alpha" => string::is::alpha,
+				"is_ascii" => string::is::ascii,
+				"is_datetime" => string::is::datetime,
+				"is_domain" => string::is::domain,
+				"is_email" => string::is::email,
+				"is_hexadecimal" => string::is::hexadecimal,
+				"is_ip" => string::is::ip,
+				"is_ipv4" => string::is::ipv4,
+				"is_ipv6" => string::is::ipv6,
+				"is_latitude" => string::is::latitude,
+				"is_longitude" => string::is::longitude,
+				"is_numeric" => string::is::numeric,
+				"is_semver" => string::is::semver,
+				"is_url" => string::is::url,
+				"is_uuid" => string::is::uuid,
+				"is_record" => string::is::record,
+				"similarity_fuzzy" => string::similarity::fuzzy,
+				"similarity_jaro" => string::similarity::jaro,
+				"similarity_smithwaterman" => string::similarity::smithwaterman,
+				"semver_compare" => string::semver::compare,
+				"semver_major" => string::semver::major,
+				"semver_minor" => string::semver::minor,
+				"semver_patch" => string::semver::patch,
+				"semver_inc::major" => string::semver::inc::major,
+				"semver_inc::minor" => string::semver::inc::minor,
+				"semver_inc::patch" => string::semver::inc::patch,
+				"semver_set::major" => string::semver::set::major,
+				"semver_set::minor" => string::semver::set::minor,
+				"semver_set::patch" => string::semver::set::patch,
+			)
+		}
+		Value::Datetime(_) => {
+			dispatch!(
+				name,
+				args.clone(),
+				"no such method found for the datetime type",
+				"time_ceil" => time::ceil,
+				"time_day" => time::day,
+				"time_floor" => time::floor,
+				"time_format" => time::format,
+				"time_group" => time::group,
+				"time_hour" => time::hour,
+				"time_minute" => time::minute,
+				"time_month" => time::month,
+				"time_nano" => time::nano,
+				"time_micros" => time::micros,
+				"time_millis" => time::millis,
+				"time_round" => time::round,
+				"time_second" => time::second,
+				"time_unix" => time::unix,
+				"time_wday" => time::wday,
+				"time_week" => time::week,
+				"time_yday" => time::yday,
+				"time_year" => time::year,
+			)
+		}
+		_ => Err(Error::InvalidFunction {
+			name: "".into(),
+			message: "".into(),
+		}),
+	};
+
+	match specific {
+		Err(Error::InvalidFunction {
+			..
+		}) => {
+			let message = format!("no such method found for the {} type", value.kindof());
+			dispatch!(
+				name,
+				args,
+				message,
+				"is_array" => r#type::is::array,
+				"is_bool" => r#type::is::bool,
+				"is_bytes" => r#type::is::bytes,
+				"is_collection" => r#type::is::collection,
+				"is_datetime" => r#type::is::datetime,
+				"is_decimal" => r#type::is::decimal,
+				"is_duration" => r#type::is::duration,
+				"is_float" => r#type::is::float,
+				"is_geometry" => r#type::is::geometry,
+				"is_int" => r#type::is::int,
+				"is_line" => r#type::is::line,
+				"is_none" => r#type::is::none,
+				"is_null" => r#type::is::null,
+				"is_multiline" => r#type::is::multiline,
+				"is_multipoint" => r#type::is::multipoint,
+				"is_multipolygon" => r#type::is::multipolygon,
+				"is_number" => r#type::is::number,
+				"is_object" => r#type::is::object,
+				"is_point" => r#type::is::point,
+				"is_polygon" => r#type::is::polygon,
+				"is_record" => r#type::is::record,
+				"is_string" => r#type::is::string,
+				"is_uuid" => r#type::is::uuid,
+				//
+				"to_bool" => r#type::bool,
+				"to_bytes" => r#type::bytes,
+				"to_datetime" => r#type::datetime,
+				"to_decimal" => r#type::decimal,
+				"to_duration" => r#type::duration,
+				"to_float" => r#type::float,
+				"to_geometry" => r#type::geometry,
+				"to_int" => r#type::int,
+				"to_number" => r#type::number,
+				"to_point" => r#type::point,
+				"to_record" => r#type::record,
+				"to_string" => r#type::string,
+				"to_uuid" => r#type::uuid,
+			)
+		}
+		v => v,
+	}
+}
+
 /// Attempts to run any asynchronous function.
 pub async fn asynchronous(
 	stk: &mut Stk,
@@ -431,6 +718,7 @@ pub async fn asynchronous(
 	dispatch!(
 		name,
 		args,
+		"no such builtin function found",
 		"crypto::argon2::compare" => (cpu_intensive) crypto::argon2::cmp.await,
 		"crypto::argon2::generate" => (cpu_intensive) crypto::argon2::gen.await,
 		"crypto::bcrypt::compare" => (cpu_intensive) crypto::bcrypt::cmp.await,
@@ -477,6 +765,8 @@ fn get_execution_context<'a>(
 
 #[cfg(test)]
 mod tests {
+	use regex::Regex;
+
 	#[cfg(all(feature = "scripting", feature = "kv-mem"))]
 	use crate::dbs::Capabilities;
 	use crate::sql::{statements::OutputStatement, Function, Query, Statement, Value};
@@ -488,7 +778,12 @@ mod tests {
 
 		// Read the source code of this file
 		let fnc_mod = include_str!("mod.rs");
-		for line in fnc_mod.lines() {
+
+		// Patch out idiom methods
+		let re = Regex::new(r"(?ms)pub fn idiom\(.*}\n+///").unwrap();
+		let fnc_no_idiom = re.replace(fnc_mod, "");
+
+		for line in fnc_no_idiom.lines() {
 			if !(line.contains("=>")
 				&& (line.trim().starts_with('"') || line.trim().ends_with(',')))
 			{

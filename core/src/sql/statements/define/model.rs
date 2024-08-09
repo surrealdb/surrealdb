@@ -11,7 +11,7 @@ use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Write};
 
-#[revisioned(revision = 2)]
+#[revisioned(revision = 3)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
@@ -23,6 +23,8 @@ pub struct DefineModelStatement {
 	pub permissions: Permission,
 	#[revision(start = 2)]
 	pub if_not_exists: bool,
+	#[revision(start = 3)]
+	pub overwrite: bool,
 }
 
 impl DefineModelStatement {
@@ -41,7 +43,7 @@ impl DefineModelStatement {
 		if txn.get_db_model(opt.ns()?, opt.db()?, &self.name, &self.version).await.is_ok() {
 			if self.if_not_exists {
 				return Ok(Value::None);
-			} else {
+			} else if !self.overwrite {
 				return Err(Error::MlAlreadyExists {
 					value: self.name.to_string(),
 				});
@@ -56,6 +58,7 @@ impl DefineModelStatement {
 			DefineModelStatement {
 				// Don't persist the `IF NOT EXISTS` clause to schema
 				if_not_exists: false,
+				overwrite: false,
 				..self.clone()
 			},
 		)
@@ -72,6 +75,9 @@ impl fmt::Display for DefineModelStatement {
 		write!(f, "DEFINE MODEL")?;
 		if self.if_not_exists {
 			write!(f, " IF NOT EXISTS")?
+		}
+		if self.overwrite {
+			write!(f, " OVERWRITE")?
 		}
 		write!(f, " ml::{}<{}>", self.name, self.version)?;
 		if let Some(comment) = self.comment.as_ref() {

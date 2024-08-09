@@ -139,6 +139,60 @@ async fn field_definition_value_assert_success() -> Result<(), Error> {
 }
 
 #[tokio::test]
+async fn field_definition_option_kind_assert() -> Result<(), Error> {
+	let sql = "
+		DEFINE TABLE person SCHEMAFULL;
+		DEFINE FIELD name ON TABLE person TYPE option<string> ASSERT string::len($value) > 3;
+		CREATE person:test;
+		CREATE person:mark SET name = 'mark';
+		CREATE person:bob SET name = 'bob';
+	";
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 5);
+	//
+	let tmp = res.remove(0).result;
+	assert!(tmp.is_ok());
+	//
+	let tmp = res.remove(0).result;
+	assert!(tmp.is_ok());
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
+			{
+				id: person:test
+			}
+		]",
+	);
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
+			{
+				id: person:mark,
+				name: 'mark'
+			}
+		]",
+	);
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result;
+	assert!(
+		matches!(
+			&tmp,
+			Err(e) if e.to_string() == "Found 'bob' for field `name`, with record `person:bob`, but field must conform to: string::len($value) > 3"
+		),
+		"{}",
+		tmp.unwrap_err().to_string()
+	);
+
+	Ok(())
+}
+
+#[tokio::test]
 async fn field_definition_empty_nested_objects() -> Result<(), Error> {
 	let sql = "
 		DEFINE TABLE person SCHEMAFULL;

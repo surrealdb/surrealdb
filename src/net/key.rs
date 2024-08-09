@@ -5,10 +5,10 @@ use crate::net::params::Params;
 use axum::extract::{DefaultBodyLimit, Path};
 use axum::response::IntoResponse;
 use axum::routing::options;
-use axum::{Extension, Router, TypedHeader};
+use axum::{Extension, Router};
 use axum_extra::extract::Query;
+use axum_extra::TypedHeader;
 use bytes::Bytes;
-use http_body::Body as HttpBody;
 use serde::Deserialize;
 use std::str;
 use surrealdb::dbs::Session;
@@ -28,11 +28,8 @@ struct QueryOptions {
 	pub fields: Option<Vec<String>>,
 }
 
-pub(super) fn router<S, B>() -> Router<S, B>
+pub(super) fn router<S>() -> Router<S>
 where
-	B: HttpBody + Send + 'static,
-	B::Data: Send,
-	B::Error: std::error::Error + Send + Sync + 'static,
 	S: Clone + Send + Sync + 'static,
 {
 	Router::new()

@@ -45,6 +45,7 @@ pub struct SerializeDefineParamStatement {
 	comment: Option<Strand>,
 	permissions: Permission,
 	if_not_exists: bool,
+	overwrite: bool,
 }
 
 impl serde::ser::SerializeStruct for SerializeDefineParamStatement {
@@ -71,6 +72,9 @@ impl serde::ser::SerializeStruct for SerializeDefineParamStatement {
 			"if_not_exists" => {
 				self.if_not_exists = value.serialize(ser::primitive::bool::Serializer.wrap())?
 			}
+			"overwrite" => {
+				self.overwrite = value.serialize(ser::primitive::bool::Serializer.wrap())?
+			}
 			key => {
 				return Err(Error::custom(format!(
 					"unexpected field `DefineParamStatement::{key}`"
@@ -87,6 +91,7 @@ impl serde::ser::SerializeStruct for SerializeDefineParamStatement {
 			comment: self.comment,
 			permissions: self.permissions,
 			if_not_exists: self.if_not_exists,
+			overwrite: self.overwrite,
 		})
 	}
 }

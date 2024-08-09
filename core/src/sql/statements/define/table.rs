@@ -20,7 +20,7 @@ use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Write};
 use std::sync::Arc;
 
-#[revisioned(revision = 3)]
+#[revisioned(revision = 4)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
@@ -37,6 +37,8 @@ pub struct DefineTableStatement {
 	pub if_not_exists: bool,
 	#[revision(start = 3)]
 	pub kind: TableType,
+	#[revision(start = 4)]
+	pub overwrite: bool,
 }
 
 impl DefineTableStatement {
@@ -55,7 +57,7 @@ impl DefineTableStatement {
 		if txn.get_tb(opt.ns()?, opt.db()?, &self.name).await.is_ok() {
 			if self.if_not_exists {
 				return Ok(Value::None);
-			} else {
+			} else if !self.overwrite {
 				return Err(Error::TbAlreadyExists {
 					value: self.name.to_string(),
 				});
@@ -73,6 +75,7 @@ impl DefineTableStatement {
 			},
 			// Don't persist the `IF NOT EXISTS` clause to schema
 			if_not_exists: false,
+			overwrite: false,
 			..self.clone()
 		};
 		txn.set(key, &dt).await?;
@@ -172,6 +175,9 @@ impl Display for DefineTableStatement {
 		write!(f, "DEFINE TABLE")?;
 		if self.if_not_exists {
 			write!(f, " IF NOT EXISTS")?
+		}
+		if self.overwrite {
+			write!(f, " OVERWRITE")?
 		}
 		write!(f, " {}", self.name)?;
 		write!(f, " TYPE")?;

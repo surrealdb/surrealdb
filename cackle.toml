@@ -1012,6 +1012,9 @@ allow_unsafe = true
 
 [pkg.hyper-util]
 allow_unsafe = true
+allow_apis = [
+    "net",
+]
 
 [pkg.terminal_size]
 allow_unsafe = true
@@ -1365,3 +1368,9 @@ allow_unsafe = true
 allow_apis = [
     "fs",
 ]
+
+[pkg.atomic-waker]
+allow_unsafe = true
+
+[pkg.rustls-pki-types]
+allow_unsafe = true
