@@ -17,7 +17,7 @@ pub struct Session {
 	pub ip: Option<String>,
 	/// The current connection origin
 	pub or: Option<String>,
-	/// The current connection ID
+	/// The current user-defined connection ID
 	pub id: Option<String>,
 	/// The currently selected namespace
 	pub ns: Option<String>,

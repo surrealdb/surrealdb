@@ -87,7 +87,11 @@ impl<'a> Document<'a> {
 				lqctx.add_value("after", self.current.doc.deref());
 				lqctx.add_value("before", self.initial.doc.deref());
 				// We include session id into notifications
-				let session_id = sess.pick(ID.as_ref());
+				let session_id = match sess.pick(ID.as_ref()) {
+					Value::None => None,
+					s => Some(s.to_string()),
+				};
+
 				// We need to create a new options which we will
 				// use for processing this LIVE query statement.
 				// This ensures that we are using the auth data

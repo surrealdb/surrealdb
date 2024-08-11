@@ -37,7 +37,7 @@ pub struct Notification {
 	pub result: Value,
 	// session that started the query
 	#[revision(start = 2)]
-	pub session: Value,
+	pub session: Option<String>,
 }
 
 impl Display for Notification {
@@ -54,7 +54,7 @@ impl Display for Notification {
 
 impl Notification {
 	/// Construct a new notification
-	pub const fn new(id: Uuid, action: Action, result: Value, session: Value) -> Self {
+	pub const fn new(id: Uuid, action: Action, result: Value, session: Option<String>) -> Self {
 		Self {
 			id,
 			action,
