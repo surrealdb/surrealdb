@@ -42,7 +42,7 @@ pub fn float((range,): (Option<(f64, f64)>,)) -> Result<Value, Error> {
 	.into())
 }
 
-pub fn guid((arg1, arg2): (Option<i64>, Option<i64>)) -> Result<Value, Error> {
+pub fn id((arg1, arg2): (Option<i64>, Option<i64>)) -> Result<Value, Error> {
 	// Set a reasonable maximum length
 	const LIMIT: i64 = 64;
 	// Check the function input arguments
@@ -52,12 +52,12 @@ pub fn guid((arg1, arg2): (Option<i64>, Option<i64>)) -> Result<Value, Error> {
 				max if min <= max && max <= LIMIT => rand::thread_rng().gen_range(min as usize..=max as usize),
 				max if max >= 1 && max <= min => rand::thread_rng().gen_range(max as usize..=min as usize),
 				_ => return Err(Error::InvalidArguments {
-					name: String::from("rand::guid"),
-					message: format!("To generate a guid of between X and Y characters in length, the 2 arguments must be positive numbers and no higher than {LIMIT}."),
+					name: String::from("rand::id"),
+					message: format!("To generate a string of between X and Y characters in length, the 2 arguments must be positive numbers and no higher than {LIMIT}."),
 				}),
 			},
 			_ => return Err(Error::InvalidArguments {
-				name: String::from("rand::guid"),
+				name: String::from("rand::id"),
 				message: format!("To generate a string of between X and Y characters in length, the 2 arguments must be positive numbers and no higher than {LIMIT}."),
 			}),
 		}
@@ -66,14 +66,14 @@ pub fn guid((arg1, arg2): (Option<i64>, Option<i64>)) -> Result<Value, Error> {
 			len as usize
 		} else {
 			return Err(Error::InvalidArguments {
-				name: String::from("rand::guid"),
+				name: String::from("rand::id"),
 				message: format!("To generate a string of X characters in length, the argument must be a positive number and no higher than {LIMIT}."),
 			});
 		}
 	} else {
 		20
 	};
-	// Generate the random guid
+	// Generate the random nanoid
 	Ok(nanoid!(val, &ID_CHARS).into())
 }
 

@@ -2979,11 +2979,11 @@ async fn function_rand_float() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn function_rand_guid() -> Result<(), Error> {
+async fn function_rand_id() -> Result<(), Error> {
 	let sql = r#"
-		RETURN rand::guid();
-		RETURN rand::guid(10);
-		RETURN rand::guid(10, 15);
+		RETURN rand::id();
+		RETURN rand::id(10);
+		RETURN rand::id(10, 15);
 	"#;
 	let mut test = Test::new(sql).await?;
 	//
