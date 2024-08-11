@@ -75,6 +75,8 @@ pub struct MutableContext {
 	temporary_directory: Option<Arc<PathBuf>>,
 	// An optional transaction
 	transaction: Option<Arc<Transaction>>,
+	// Does not read from parent `values`.
+	isolated: bool,
 }
 
 impl Default for MutableContext {
@@ -136,6 +138,7 @@ impl MutableContext {
 			))]
 			temporary_directory,
 			transaction: None,
+			isolated: false,
 		};
 		if let Some(timeout) = time_out {
 			ctx.add_timeout(timeout)?;
@@ -164,6 +167,7 @@ impl MutableContext {
 			))]
 			temporary_directory: None,
 			transaction: None,
+			isolated: false,
 		}
 	}
 
@@ -188,6 +192,7 @@ impl MutableContext {
 			))]
 			temporary_directory: parent.temporary_directory.clone(),
 			transaction: parent.transaction.clone(),
+            isolated: false,
 			parent: Some(parent.clone()),
 		}
 	}
@@ -201,6 +206,32 @@ impl MutableContext {
 			Err(_) => Err(Error::Unreachable("Context::unfreeze")),
 		}
 	}
+
+    /// Create a new child from a frozen context.
+    pub fn new_isolated(parent: &Context) -> Self {
+        Context {
+            values: HashMap::default(),
+            parent: Some(parent.clone()),
+            deadline: parent.deadline,
+            cancelled: Arc::new(AtomicBool::new(false)),
+            notifications: parent.notifications.clone(),
+            query_planner: parent.query_planner,
+            query_executor: parent.query_executor.clone(),
+            iteration_stage: parent.iteration_stage.clone(),
+            capabilities: parent.capabilities.clone(),
+            index_stores: parent.index_stores.clone(),
+            #[cfg(any(
+                feature = "kv-mem",
+                feature = "kv-surrealkv",
+                feature = "kv-rocksdb",
+                feature = "kv-fdb",
+                feature = "kv-tikv",
+            ))]
+            temporary_directory: parent.temporary_directory.clone(),
+            transaction: parent.transaction.clone(),
+            isolated: true,
+        }
+    }
 
 	/// Add a value to the context. It overwrites any previously set values
 	/// with the same key.
@@ -340,10 +371,11 @@ impl MutableContext {
 	pub fn value(&self, key: &str) -> Option<&Value> {
 		match self.values.get(key) {
 			Some(v) => Some(v.as_ref()),
-			None => match &self.parent {
+			None if !self.isolated => match &self.parent {
 				Some(p) => p.value(key),
 				_ => None,
 			},
+			None => None,
 		}
 	}
 

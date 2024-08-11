@@ -16,6 +16,7 @@ use crate::sql::paths::ID;
 use crate::sql::statements::select::SelectStatement;
 use crate::sql::thing::Thing;
 use crate::sql::value::{Value, Values};
+use crate::sql::Function;
 use reblessive::tree::Stk;
 
 impl Value {
@@ -140,8 +141,28 @@ impl Value {
 						stk.run(|stk| obj.get(stk, ctx, opt, doc, path.next())).await
 					}
 					Part::Method(name, args) => {
-						let v = idiom(ctx, doc, v.clone().into(), name, args.clone())?;
-						stk.run(|stk| v.get(stk, ctx, opt, doc, path.next())).await
+						let res = idiom(ctx, doc, v.clone().into(), name, args.clone());
+						let res = match &res {
+							Ok(_) => res,
+							Err(Error::InvalidFunction {
+								..
+							}) => match v.get(name) {
+								Some(v) => {
+									let fnc = Function::Anonymous(v.clone(), args.clone());
+									match stk.run(|stk| fnc.compute(stk, ctx, opt, doc)).await {
+										Ok(v) => Ok(v),
+										Err(Error::InvalidFunction {
+											..
+										}) => res,
+										e => e,
+									}
+								}
+								None => res,
+							},
+							_ => res,
+						}?;
+
+						stk.run(|stk| res.get(stk, ctx, opt, doc, path.next())).await
 					}
 					_ => Ok(Value::None),
 				},
