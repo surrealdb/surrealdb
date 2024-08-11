@@ -422,6 +422,7 @@ async fn delete_filtered_live_notification() -> Result<(), Error> {
 					condition: true,
 				}"
 			),
+			None
 		)
 	);
 	Ok(())
