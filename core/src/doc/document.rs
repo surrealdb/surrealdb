@@ -15,6 +15,7 @@ use crate::sql::value::Value;
 use crate::sql::Base;
 use std::fmt::{Debug, Formatter};
 use std::mem;
+use std::ops::Deref;
 use std::sync::Arc;
 
 pub(crate) struct Document {
@@ -34,6 +35,7 @@ pub struct CursorDoc {
 
 #[non_exhaustive]
 #[cfg_attr(debug_assertions, derive(Debug))]
+#[derive(Clone)]
 pub(crate) struct CursorValue {
 	mutable: Value,
 	read_only: Option<Arc<Value>>,
@@ -64,6 +66,22 @@ impl CursorValue {
 		} else {
 			&self.mutable
 		}
+	}
+
+	pub(crate) fn into_owned(self) -> Value {
+		if let Some(ro) = &self.read_only {
+			ro.as_ref().clone()
+		} else {
+			self.mutable
+		}
+	}
+}
+
+impl Deref for CursorValue {
+	type Target = Value;
+
+	fn deref(&self) -> &Self::Target {
+		self.as_ref()
 	}
 }
 
@@ -155,13 +173,13 @@ impl Document {
 	/// Get the current document, as it is being modified
 	#[allow(unused)]
 	pub(crate) fn current_doc(&self) -> &Value {
-		self.current.doc.as_ref()
+		&self.current.doc
 	}
 
 	/// Get the initial version of the document before it is modified
 	#[allow(unused)]
 	pub(crate) fn initial_doc(&self) -> &Value {
-		self.initial.doc.as_ref()
+		&self.initial.doc
 	}
 }
 

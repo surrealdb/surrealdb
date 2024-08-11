@@ -3,6 +3,7 @@ use super::Key;
 use super::Val;
 use crate::cf;
 use crate::dbs::node::Timestamp;
+use crate::doc::CursorValue;
 use crate::err::Error;
 use crate::idg::u32::U32;
 use crate::key::debug::Sprintable;
@@ -11,7 +12,6 @@ use crate::kvs::clock::SizedClock;
 use crate::kvs::stash::Stash;
 use crate::sql;
 use crate::sql::thing::Thing;
-use crate::sql::Value;
 use crate::vs::Versionstamp;
 use sql::statements::DefineTableStatement;
 use std::fmt;
@@ -409,8 +409,8 @@ impl Transactor {
 		db: &str,
 		tb: &str,
 		id: &Thing,
-		previous: &Value,
-		current: &Value,
+		previous: CursorValue,
+		current: CursorValue,
 		store_difference: bool,
 	) {
 		self.cf.record_cf_change(ns, db, tb, id.clone(), previous, current, store_difference)

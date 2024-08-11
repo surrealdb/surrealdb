@@ -1,10 +1,10 @@
 use std::collections::HashMap;
 
 use crate::cf::{TableMutation, TableMutations};
+use crate::doc::CursorValue;
 use crate::kvs::Key;
 use crate::sql::statements::DefineTableStatement;
 use crate::sql::thing::Thing;
-use crate::sql::value::Value;
 use crate::sql::Idiom;
 
 // PreparedWrite is a tuple of (versionstamp key, key prefix, key suffix, serialized table mutations).
@@ -70,32 +70,32 @@ impl Writer {
 		db: &str,
 		tb: &str,
 		id: Thing,
-		previous: &Value,
-		current: &Value,
+		previous: CursorValue,
+		current: CursorValue,
 		store_difference: bool,
 	) {
-		if current.is_some() {
+		if current.as_ref().is_some() {
 			self.buf.push(
 				ns.to_string(),
 				db.to_string(),
 				tb.to_string(),
 				match store_difference {
 					true => {
-						if previous.is_none() {
-							TableMutation::Set(id, current.clone())
+						if previous.as_ref().is_none() {
+							TableMutation::Set(id, current.into_owned())
 						} else {
 							// We intentionally record the patches in reverse (current -> previous)
 							// because we cannot otherwise resolve operations such as "replace" and "remove".
 							let patches_to_create_previous =
-								current.diff(previous, Idiom::default());
+								current.diff(&previous, Idiom::default());
 							TableMutation::SetWithDiff(
 								id,
-								current.clone(),
+								current.into_owned(),
 								patches_to_create_previous,
 							)
 						}
 					}
-					false => TableMutation::Set(id, current.clone()),
+					false => TableMutation::Set(id, current.into_owned()),
 				},
 			);
 		} else {
@@ -104,7 +104,7 @@ impl Writer {
 				db.to_string(),
 				tb.to_string(),
 				match store_difference {
-					true => TableMutation::DelWithOriginal(id, previous.clone()),
+					true => TableMutation::DelWithOriginal(id, previous.into_owned()),
 					false => TableMutation::Del(id),
 				},
 			);
@@ -146,7 +146,6 @@ impl Writer {
 
 #[cfg(test)]
 mod tests {
-	use std::borrow::Cow;
 	use std::time::Duration;
 
 	use crate::cf::{ChangeSet, DatabaseMutation, TableMutation, TableMutations};
@@ -189,9 +188,17 @@ mod tests {
 			tb: TB.to_owned(),
 			id: Id::String("A".to_string()),
 		};
-		let value_a: super::Value = "a".into();
+		let value_a: Value = "a".into();
 		let previous = Value::None;
-		tx1.record_change(NS, DB, TB, &thing_a, &previous, &value_a, DONT_STORE_PREVIOUS);
+		tx1.record_change(
+			NS,
+			DB,
+			TB,
+			&thing_a,
+			previous.clone().into(),
+			value_a.into(),
+			DONT_STORE_PREVIOUS,
+		);
 		tx1.complete_changes(true).await.unwrap();
 		tx1.commit().await.unwrap();
 
@@ -201,7 +208,15 @@ mod tests {
 			id: Id::String("C".to_string()),
 		};
 		let value_c: Value = "c".into();
-		tx2.record_change(NS, DB, TB, &thing_c, &previous, &value_c, DONT_STORE_PREVIOUS);
+		tx2.record_change(
+			NS,
+			DB,
+			TB,
+			&thing_c,
+			previous.clone().into(),
+			value_c.into(),
+			DONT_STORE_PREVIOUS,
+		);
 		tx2.complete_changes(true).await.unwrap();
 		tx2.commit().await.unwrap();
 
@@ -211,13 +226,29 @@ mod tests {
 			id: Id::String("B".to_string()),
 		};
 		let value_b: Value = "b".into();
-		tx3.record_change(NS, DB, TB, &thing_b, &previous, &value_b, DONT_STORE_PREVIOUS);
+		tx3.record_change(
+			NS,
+			DB,
+			TB,
+			&thing_b,
+			previous.clone().into(),
+			value_b.into(),
+			DONT_STORE_PREVIOUS,
+		);
 		let thing_c2 = Thing {
 			tb: TB.to_owned(),
 			id: Id::String("C".to_string()),
 		};
 		let value_c2: Value = "c2".into();
-		tx3.record_change(NS, DB, TB, &thing_c2, &previous, &value_c2, DONT_STORE_PREVIOUS);
+		tx3.record_change(
+			NS,
+			DB,
+			TB,
+			&thing_c2,
+			previous.clone().into(),
+			value_c2.into(),
+			DONT_STORE_PREVIOUS,
+		);
 		tx3.complete_changes(true).await.unwrap();
 		tx3.commit().await.unwrap();
 
@@ -503,8 +534,16 @@ mod tests {
 			id: Id::String(id),
 		};
 		let value_a: Value = "a".into();
-		let previous = Cow::from(Value::None);
-		tx.lock().await.record_change(NS, DB, TB, &thing, &previous, &value_a, DONT_STORE_PREVIOUS);
+		let previous = Value::None.into();
+		tx.lock().await.record_change(
+			NS,
+			DB,
+			TB,
+			&thing,
+			previous,
+			value_a.into(),
+			DONT_STORE_PREVIOUS,
+		);
 		tx.lock().await.complete_changes(true).await.unwrap();
 		tx.commit().await.unwrap();
 		thing
