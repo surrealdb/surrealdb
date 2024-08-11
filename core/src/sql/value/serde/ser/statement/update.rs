@@ -42,6 +42,7 @@ impl ser::Serializer for Serializer {
 #[derive(Default)]
 #[non_exhaustive]
 pub struct SerializeUpdateStatement {
+	if_exists: Option<bool>,
 	only: Option<bool>,
 	what: Option<Values>,
 	data: Option<Data>,
@@ -60,6 +61,9 @@ impl serde::ser::SerializeStruct for SerializeUpdateStatement {
 		T: ?Sized + Serialize,
 	{
 		match key {
+			"if_exists" => {
+				self.if_exists = Some(value.serialize(ser::primitive::bool::Serializer.wrap())?);
+			}
 			"only" => {
 				self.only = Some(value.serialize(ser::primitive::bool::Serializer.wrap())?);
 			}
@@ -93,6 +97,7 @@ impl serde::ser::SerializeStruct for SerializeUpdateStatement {
 	fn end(self) -> Result<Self::Ok, Error> {
 		match (self.what, self.parallel) {
 			(Some(what), Some(parallel)) => Ok(UpdateStatement {
+				if_exists: self.if_exists.is_some_and(|v| v),
 				only: self.only.is_some_and(|v| v),
 				what,
 				parallel,
