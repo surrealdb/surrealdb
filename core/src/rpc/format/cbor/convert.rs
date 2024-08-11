@@ -114,13 +114,7 @@ impl TryFrom<Cbor> for Value {
 						_ => Err("Expected a CBOR text data type"),
 					},
 					// A byte string uuid
-					TAG_SPEC_UUID => match *v {
-						Data::Bytes(v) if v.len() == 16 => match v.as_slice().try_into() {
-							Ok(v) => Ok(Value::Uuid(Uuid::from(uuid::Uuid::from_bytes(v)))),
-							Err(_) => Err("Expected a CBOR byte array with 16 elements"),
-						},
-						_ => Err("Expected a CBOR byte array with 16 elements"),
-					},
+					TAG_SPEC_UUID => v.deref().to_owned().try_into().map(Value::Uuid),
 					// A literal decimal
 					TAG_STRING_DECIMAL => match *v {
 						Data::Text(v) => match Decimal::from_str(v.as_str()) {
@@ -383,6 +377,7 @@ impl TryFrom<Value> for Cbor {
 					match v.id {
 						Id::Number(v) => Data::Integer(v.into()),
 						Id::String(v) => Data::Text(v),
+						Id::Uuid(v) => Cbor::try_from(Value::from(v))?.0,
 						Id::Array(v) => Cbor::try_from(Value::from(v))?.0,
 						Id::Object(v) => Cbor::try_from(Value::from(v))?.0,
 						Id::Generate(_) => {
@@ -550,6 +545,8 @@ impl TryFrom<Data> for Id {
 			Data::Array(v) => Ok(Id::Array(v.try_into()?)),
 			Data::Map(v) => Ok(Id::Object(v.try_into()?)),
 			Data::Tag(TAG_RANGE, v) => Ok(Id::Range(Box::new(IdRange::try_from(*v)?))),
+			Data::Tag(TAG_STRING_UUID, v) => v.deref().to_owned().try_into().map(Id::Uuid),
+			Data::Tag(TAG_SPEC_UUID, v) => v.deref().to_owned().try_into().map(Id::Uuid),
 			_ => Err("Expected a CBOR integer, text, array or map"),
 		}
 	}
@@ -564,6 +561,9 @@ impl TryFrom<Id> for Data {
 			Id::Array(v) => Ok(Cbor::try_from(Value::from(v))?.0),
 			Id::Object(v) => Ok(Cbor::try_from(Value::from(v))?.0),
 			Id::Range(v) => Ok(Data::Tag(TAG_RANGE, Box::new(v.deref().to_owned().try_into()?))),
+			Id::Uuid(v) => {
+				Ok(Data::Tag(TAG_SPEC_UUID, Box::new(Data::Bytes(v.into_bytes().into()))))
+			}
 			Id::Generate(_) => Err("Cannot encode an ungenerated Record ID into CBOR"),
 		}
 	}
@@ -588,5 +588,18 @@ impl TryFrom<Vec<(Data, Data)>> for Object {
 				})
 				.collect::<Result<BTreeMap<String, Value>, &str>>()?,
 		))
+	}
+}
+
+impl TryFrom<Data> for Uuid {
+	type Error = &'static str;
+	fn try_from(val: Data) -> Result<Self, &'static str> {
+		match val {
+			Data::Bytes(v) if v.len() == 16 => match v.as_slice().try_into() {
+				Ok(v) => Ok(Uuid::from(uuid::Uuid::from_bytes(v))),
+				Err(_) => Err("Expected a CBOR byte array with 16 elements"),
+			},
+			_ => Err("Expected a CBOR byte array with 16 elements"),
+		}
 	}
 }
