@@ -131,7 +131,6 @@ impl serde::ser::SerializeTupleVariant for SerializePart {
 mod tests {
 	use super::*;
 	use crate::sql;
-	use ser::Serializer as _;
 	use serde::Serialize;
 
 	#[test]

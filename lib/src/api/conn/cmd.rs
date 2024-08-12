@@ -340,13 +340,14 @@ impl Serialize for RouterRequest {
 		struct InnerNumber(i64);
 		struct InnerMethod(&'static str);
 		struct InnerStrand(&'static str);
+		struct InnerObject<'a>(&'a RouterRequest);
 
 		impl Serialize for InnerNumberVariant {
 			fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
 			where
 				S: serde::Serializer,
 			{
-				serializer.serialize_newtype_variant("Value", 9, "Number", &InnerNumber(self.0))
+				serializer.serialize_newtype_variant("Value", 3, "Number", &InnerNumber(self.0))
 			}
 		}
 
@@ -395,7 +396,21 @@ impl Serialize for RouterRequest {
 			}
 		}
 
-		serializer.serialize_newtype_variant("Value", 9, "Object", &InnerRequest(self))
+		impl Serialize for InnerObject<'_> {
+			fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
+			where
+				S: serde::Serializer,
+			{
+				serializer.serialize_newtype_struct("Object", &InnerRequest(self.0))
+			}
+		}
+
+		serializer.serialize_newtype_variant(
+			"$surrealdb::private::sql::Value",
+			9,
+			"Object",
+			&InnerObject(self),
+		)
 	}
 }
 
@@ -433,7 +448,7 @@ impl Revisioned for RouterRequest {
 			1u16.serialize_revisioned(w)?;
 
 			// the Value::Number variant
-			4u16.serialize_revisioned(w)?;
+			3u16.serialize_revisioned(w)?;
 
 			// the Number version
 			1u16.serialize_revisioned(w)?;
@@ -457,11 +472,7 @@ impl Revisioned for RouterRequest {
 		// the Strand version
 		1u16.serialize_revisioned(w)?;
 
-		bincode::options()
-			.with_no_limit()
-			.with_little_endian()
-			.with_varint_encoding()
-			.reject_trailing_bytes()
+		serializer
 			.serialize_into(&mut *w, self.method)
 			.map_err(|e| revision::Error::Serialize(format!("{:?}", e)))?;
 
@@ -531,7 +542,7 @@ mod test {
 		assert_converts(
 			&request,
 			|i| bincode::serialize(i).unwrap(),
-			|b| bincode::deserialize(dbg!(&b)).unwrap(),
+			|b| bincode::deserialize(&b).unwrap(),
 		);
 
 		println!("test convert json");

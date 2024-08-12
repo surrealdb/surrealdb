@@ -277,7 +277,7 @@ where
 			match bindings {
 				CoreValue::Object(mut map) => valid.bindings.append(&mut map.0),
 				CoreValue::Array(array) => {
-					if array.len() != 2 || matches!(array[0], CoreValue::Strand(_)) {
+					if array.len() != 2 || !matches!(array[0], CoreValue::Strand(_)) {
 						let bindings = CoreValue::Array(array);
 						let bindings = Value::from_inner(bindings);
 						return Err(Error::InvalidBindings(bindings).into());
@@ -425,7 +425,7 @@ impl Response {
 	/// ```no_run
 	/// use serde::Deserialize;
 	/// use surrealdb::Notification;
-	/// use surrealdb::sql::Value;
+	/// use surrealdb::Value;
 	///
 	/// #[derive(Debug, Deserialize)]
 	/// # #[allow(dead_code)]
@@ -470,7 +470,6 @@ impl Response {
 	/// # Examples
 	///
 	/// ```no_run
-	/// use surrealdb::sql;
 	///
 	/// # #[tokio::main]
 	/// # async fn main() -> surrealdb::Result<()> {
@@ -501,7 +500,6 @@ impl Response {
 	/// # Examples
 	///
 	/// ```no_run
-	/// use surrealdb::sql;
 	///
 	/// # #[tokio::main]
 	/// # async fn main() -> surrealdb::Result<()> {
@@ -532,7 +530,6 @@ impl Response {
 	/// # Examples
 	///
 	/// ```no_run
-	/// use surrealdb::sql;
 	///
 	/// # #[tokio::main]
 	/// # async fn main() -> surrealdb::Result<()> {
@@ -559,7 +556,6 @@ impl WithStats<Response> {
 	///
 	/// ```no_run
 	/// use serde::Deserialize;
-	/// use surrealdb::sql;
 	///
 	/// #[derive(Debug, Deserialize)]
 	/// # #[allow(dead_code)]
@@ -629,7 +625,6 @@ impl WithStats<Response> {
 	/// # Examples
 	///
 	/// ```no_run
-	/// use surrealdb::sql;
 	///
 	/// # #[tokio::main]
 	/// # async fn main() -> surrealdb::Result<()> {
@@ -660,7 +655,6 @@ impl WithStats<Response> {
 	/// # Examples
 	///
 	/// ```no_run
-	/// use surrealdb::sql;
 	///
 	/// # #[tokio::main]
 	/// # async fn main() -> surrealdb::Result<()> {
@@ -680,7 +674,6 @@ impl WithStats<Response> {
 	/// # Examples
 	///
 	/// ```no_run
-	/// use surrealdb::sql;
 	///
 	/// # #[tokio::main]
 	/// # async fn main() -> surrealdb::Result<()> {

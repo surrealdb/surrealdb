@@ -5807,7 +5807,6 @@ dependencies = [
  "serial_test",
  "surrealdb",
  "surrealdb-core",
- "surrealdb-jsonwebtoken",
  "temp-env",
  "tempfile",
  "test-log",

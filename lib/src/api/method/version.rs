@@ -38,7 +38,7 @@ where
 		Box::pin(async move {
 			let router = self.client.router.extract()?;
 			let version = router.execute_value(Command::Version).await?;
-			let version = version.into_inner().to_string();
+			let version = version.into_inner().to_raw_string();
 			let semantic = version.trim_start_matches("surrealdb-");
 			semantic
 				.parse()
