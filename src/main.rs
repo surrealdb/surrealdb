@@ -21,6 +21,7 @@ mod cnf;
 mod dbs;
 mod env;
 mod err;
+#[cfg(surrealdb_unstable)]
 mod gql;
 mod mem;
 mod net;

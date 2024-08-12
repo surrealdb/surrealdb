@@ -3,6 +3,7 @@ use std::sync::Arc;
 
 use crate::cnf::{PKG_NAME, PKG_VERSION};
 use surrealdb::dbs::Session;
+#[cfg(surrealdb_unstable)]
 use surrealdb::gql::{Pessimistic, SchemaCache};
 use surrealdb::kvs::Datastore;
 use surrealdb::rpc::Data;
@@ -15,6 +16,7 @@ pub struct PostRpcContext {
 	pub kvs: Arc<Datastore>,
 	pub session: Session,
 	pub vars: BTreeMap<String, Value>,
+	#[cfg(surrealdb_unstable)]
 	pub gql_schema: SchemaCache<Pessimistic>,
 }
 
@@ -24,6 +26,7 @@ impl PostRpcContext {
 			kvs: kvs.clone(),
 			session,
 			vars,
+			#[cfg(surrealdb_unstable)]
 			gql_schema: SchemaCache::new(kvs.clone()),
 		}
 	}
@@ -55,7 +58,9 @@ impl RpcContext for PostRpcContext {
 		val
 	}
 
+	#[cfg(surrealdb_unstable)]
 	const GQL_SUPPORT: bool = true;
+	#[cfg(surrealdb_unstable)]
 	fn graphql_schema_cache(&self) -> &SchemaCache {
 		&self.gql_schema
 	}

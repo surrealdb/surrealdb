@@ -17,6 +17,7 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 use surrealdb::channel::{self, Receiver, Sender};
 use surrealdb::dbs::Session;
+#[cfg(surrealdb_unstable)]
 use surrealdb::gql::{Pessimistic, SchemaCache};
 use surrealdb::kvs::Datastore;
 use surrealdb::rpc::format::Format;
@@ -44,6 +45,7 @@ pub struct Connection {
 	pub(crate) channels: (Sender<Message>, Receiver<Message>),
 	pub(crate) state: Arc<RpcState>,
 	pub(crate) datastore: Arc<Datastore>,
+	#[cfg(surrealdb_unstable)]
 	pub(crate) gql_schema: SchemaCache<Pessimistic>,
 }
 
@@ -68,6 +70,7 @@ impl Connection {
 			canceller: CancellationToken::new(),
 			channels: channel::bounded(*WEBSOCKET_MAX_CONCURRENT_REQUESTS),
 			state,
+			#[cfg(surrealdb_unstable)]
 			gql_schema: SchemaCache::new(datastore.clone()),
 			datastore,
 		}))
@@ -409,7 +412,9 @@ impl RpcContext for Connection {
 		}
 	}
 
+	#[cfg(surrealdb_unstable)]
 	const GQL_SUPPORT: bool = true;
+	#[cfg(surrealdb_unstable)]
 	fn graphql_schema_cache(&self) -> &SchemaCache {
 		&self.gql_schema
 	}
