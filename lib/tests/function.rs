@@ -6237,6 +6237,9 @@ async fn function_idiom_chaining() -> Result<(), Error> {
 		true.is_bool();
 		true.doesnt_exist();
 		field.bla.nested.is_none();
+		// String is one of the types in the initial match statement,
+		// this test ensures that the dispatch macro does not exit early
+		"string".is_bool();
 	"#;
 	Test::new(sql)
 		.await?
@@ -6245,7 +6248,8 @@ async fn function_idiom_chaining() -> Result<(), Error> {
 		.expect_val("false")?
 		.expect_val("true")?
         .expect_error("There was a problem running the doesnt_exist() function. no such method found for the bool type")?
-	    .expect_val("true")?;
+	    .expect_val("true")?
+		.expect_val("false")?;
 	Ok(())
 }
 
