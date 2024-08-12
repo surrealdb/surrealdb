@@ -48,7 +48,7 @@ pub(super) fn mock(route_rx: Receiver<Route>) {
 					data,
 					..
 				} => match data {
-					None => Ok(DbResponse::Other(to_core_value(&User::default()).unwrap())),
+					None => Ok(DbResponse::Other(to_core_value(User::default()).unwrap())),
 					Some(user) => Ok(DbResponse::Other(user.clone())),
 				},
 				Command::Select {
@@ -60,7 +60,7 @@ pub(super) fn mock(route_rx: Receiver<Route>) {
 					..
 				} => match what {
 					Resource::RecordId(..) => {
-						Ok(DbResponse::Other(to_core_value(&User::default()).unwrap()))
+						Ok(DbResponse::Other(to_core_value(User::default()).unwrap()))
 					}
 					Resource::Table(..) | Resource::Array(..) | Resource::Range(..) => {
 						Ok(DbResponse::Other(CoreValue::Array(Default::default())))
@@ -84,7 +84,7 @@ pub(super) fn mock(route_rx: Receiver<Route>) {
 					..
 				} => match what {
 					Resource::RecordId(..) => {
-						Ok(DbResponse::Other(to_core_value(&User::default()).unwrap()))
+						Ok(DbResponse::Other(to_core_value(User::default()).unwrap()))
 					}
 					Resource::Table(..) | Resource::Array(..) | Resource::Range(..) => {
 						Ok(DbResponse::Other(CoreValue::Array(Default::default())))
@@ -98,7 +98,7 @@ pub(super) fn mock(route_rx: Receiver<Route>) {
 					CoreValue::Array(..) => {
 						Ok(DbResponse::Other(CoreValue::Array(Default::default())))
 					}
-					_ => Ok(DbResponse::Other(to_core_value(&User::default()).unwrap())),
+					_ => Ok(DbResponse::Other(to_core_value(User::default()).unwrap())),
 				},
 				Command::ExportMl {
 					..

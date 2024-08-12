@@ -15,31 +15,92 @@ use tokio::sync::watch;
 macro_rules! transparent_wrapper{
 	(
 		$(#[$m:meta])*
-		$vis:vis struct $name:ident($inner:ty)
+		$vis:vis struct $name:ident($field_vis:vis $inner:ty)
 	) => {
 		$(#[$m])*
 		#[repr(transparent)]
-		$vis struct $name($inner);
+		$vis struct $name($field_vis $inner);
 
 		impl $name{
-			pub(crate) fn from_inner(inner: $inner) -> Self{
+			#[doc(hidden)]
+			#[allow(dead_code)]
+			pub fn from_inner(inner: $inner) -> Self{
 				$name(inner)
 			}
 
-			pub(crate) fn from_inner_ref(inner: &$inner) -> &Self{
+			#[doc(hidden)]
+			#[allow(dead_code)]
+			pub fn from_inner_ref(inner: &$inner) -> &Self{
 				unsafe{
 					std::mem::transmute::<&$inner,&$name>(inner)
 				}
 			}
 
-			pub(crate) fn from_inner_mut(inner: &mut $inner) -> &mut Self{
+			#[doc(hidden)]
+			#[allow(dead_code)]
+			pub fn from_inner_mut(inner: &mut $inner) -> &mut Self{
 				unsafe{
 					std::mem::transmute::<&mut $inner,&mut $name>(inner)
 				}
 			}
 
-			pub(crate) fn into_inner(self) -> $inner{
+			#[doc(hidden)]
+			#[allow(dead_code)]
+			pub fn into_inner(self) -> $inner{
 				self.0
+			}
+		}
+
+		impl std::fmt::Display for $name{
+			fn fmt(&self, fmt: &mut std::fmt::Formatter) -> std::fmt::Result{
+				self.0.fmt(fmt)
+			}
+		}
+		impl std::fmt::Debug for $name{
+			fn fmt(&self, fmt: &mut std::fmt::Formatter) -> std::fmt::Result{
+				self.0.fmt(fmt)
+			}
+		}
+	};
+}
+
+macro_rules! impl_serialize_wrapper {
+	($ty:ty) => {
+		impl ::revision::Revisioned for $ty {
+			fn revision() -> u16 {
+				CoreValue::revision()
+			}
+
+			fn serialize_revisioned<W: std::io::Write>(
+				&self,
+				w: &mut W,
+			) -> Result<(), revision::Error> {
+				self.0.serialize_revisioned(w)
+			}
+
+			fn deserialize_revisioned<R: std::io::Read>(r: &mut R) -> Result<Self, revision::Error>
+			where
+				Self: Sized,
+			{
+				::revision::Revisioned::deserialize_revisioned(r).map(Self::from_inner)
+			}
+		}
+
+		impl ::serde::Serialize for $ty {
+			fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+			where
+				S: ::serde::ser::Serializer,
+			{
+				self.0.serialize(serializer)
+			}
+		}
+
+		impl<'de> ::serde::de::Deserialize<'de> for $ty {
+			fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+			where
+				D: ::serde::de::Deserializer<'de>,
+			{
+				Ok(Self::from_inner(::serde::de::Deserialize::deserialize(deserializer)?))
 			}
 		}
 	};

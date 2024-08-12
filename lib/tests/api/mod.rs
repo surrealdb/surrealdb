@@ -3,6 +3,7 @@
 use surrealdb::fflags::FFLAGS;
 use surrealdb::value;
 use surrealdb::Response;
+use surrealdb_core::sql::{Id, Value as CoreValue};
 
 static PERMITS: Semaphore = Semaphore::const_new(1);
 
@@ -495,7 +496,10 @@ async fn create_record_with_id_with_content() {
 		})
 		.await
 		.unwrap();
-	assert_eq!(value.into_record_id(), "user:jane".parse().ok());
+	assert_eq!(
+		value.into_inner(),
+		CoreValue::from("user:jane".parse::<RecordId>().unwrap().into_inner())
+	);
 }
 
 #[test_log::test(tokio::test)]
@@ -561,7 +565,10 @@ async fn select_record_id() {
 	};
 	assert_eq!(record.id, "user:john".parse().unwrap());
 	let value: Value = db.select(Resource::from(record_id)).await.unwrap();
-	assert_eq!(value.into_record_id(), "user:john".parse().ok());
+	assert_eq!(
+		value.into_inner(),
+		CoreValue::from("user:john".parse::<RecordId>().unwrap().into_inner())
+	);
 }
 
 #[test_log::test(tokio::test)]
@@ -578,7 +585,7 @@ async fn select_record_ranges() {
 		users
 			.into_iter()
 			.map(|user| {
-				let surrealdb::RecordIdKey::String(ref x) = user.id.key() else {
+				let Id::String(ref x) = user.id.into_inner().id else {
 					panic!()
 				};
 				x.clone()
@@ -597,10 +604,9 @@ async fn select_record_ranges() {
 	assert_eq!(convert(users), vec!["jane"]);
 	let users: Vec<ApiRecordId> = db.select(table).range("jane"..="john").await.unwrap();
 	assert_eq!(convert(users), vec!["jane", "john"]);
-	let Value::Array(array): Value =
-		db.select(Resource::from(table)).range("jane"..="john").await.unwrap()
-	else {
-		unreachable!();
+	let v: Value = db.select(Resource::from(table)).range("jane"..="john").await.unwrap();
+	let CoreValue::Array(array) = v.into_inner() else {
+		panic!()
 	};
 	assert_eq!(array.len(), 2);
 	let users: Vec<ApiRecordId> =
@@ -1039,8 +1045,8 @@ async fn delete_record_id() {
 	// non-existing user
 	let jane: Option<ApiRecordId> = db.delete(("user", "jane")).await.unwrap();
 	assert!(jane.is_none());
-	let value = db.delete(Resource::from(("user", "jane"))).await.unwrap();
-	assert_eq!(value, Value::None);
+	let value: Value = db.delete(Resource::from(("user", "jane"))).await.unwrap();
+	assert_eq!(value.into_inner(), CoreValue::None);
 }
 
 #[test_log::test(tokio::test)]
@@ -1131,22 +1137,19 @@ async fn changefeed() {
         SHOW CHANGES FOR TABLE user SINCE 0 LIMIT 10;
     ";
 	let mut response = db.query(sql).await.unwrap();
-	let value: Value = response.take(0).unwrap();
-	let Value::Array(array) = value.clone() else {
-		unreachable!()
-	};
+	let array: Vec<Value> = response.take(0).unwrap();
 	assert_eq!(array.len(), 5);
 	// DEFINE TABLE
 	let a = array.first().unwrap();
-	let Value::Object(a) = a else {
+	let CoreValue::Object(a) = a.clone().into_inner() else {
 		unreachable!()
 	};
-	let Value::Number(_versionstamp1) = a.get("versionstamp").unwrap() else {
+	let CoreValue::Number(_versionstamp1) = a.get("versionstamp").clone().unwrap() else {
 		unreachable!()
 	};
-	let changes = a.get("changes").unwrap().to_owned();
+	let changes = a.get("changes").unwrap().clone().to_owned();
 	assert_eq!(
-		changes,
+		Value::from_inner(changes),
 		"[
 		{
 			define_table: {
@@ -1159,17 +1162,17 @@ async fn changefeed() {
 	);
 	// UPDATE user:amos
 	let a = array.get(1).unwrap();
-	let Value::Object(a) = a else {
+	let CoreValue::Object(a) = a.clone().into_inner() else {
 		unreachable!()
 	};
-	let Value::Number(versionstamp1) = a.get("versionstamp").unwrap() else {
+	let CoreValue::Number(versionstamp1) = a.get("versionstamp").unwrap() else {
 		unreachable!()
 	};
 	let changes = a.get("changes").unwrap().to_owned();
 	match FFLAGS.change_feed_live_queries.enabled() {
 		true => {
 			assert_eq!(
-				changes,
+				Value::from_inner(changes),
 				r#"[
 				 {
 					  create: {
@@ -1184,7 +1187,7 @@ async fn changefeed() {
 		}
 		false => {
 			assert_eq!(
-				changes,
+				Value::from_inner(changes),
 				r#"[
 				 {
 					  update: {
@@ -1200,18 +1203,18 @@ async fn changefeed() {
 	}
 	// UPDATE user:jane
 	let a = array.get(2).unwrap();
-	let Value::Object(a) = a else {
+	let CoreValue::Object(a) = a.clone().into_inner() else {
 		unreachable!()
 	};
-	let Value::Number(versionstamp2) = a.get("versionstamp").unwrap() else {
+	let CoreValue::Number(versionstamp2) = a.get("versionstamp").unwrap().clone() else {
 		unreachable!()
 	};
-	assert!(versionstamp1 < versionstamp2);
+	assert!(*versionstamp1 < versionstamp2);
 	let changes = a.get("changes").unwrap().to_owned();
 	match FFLAGS.change_feed_live_queries.enabled() {
 		true => {
 			assert_eq!(
-				changes,
+				Value::from_inner(changes),
 				"[
 					{
 						 create: {
@@ -1226,7 +1229,7 @@ async fn changefeed() {
 		}
 		false => {
 			assert_eq!(
-				changes,
+				Value::from_inner(changes),
 				"[
 					{
 						 update: {
@@ -1242,18 +1245,18 @@ async fn changefeed() {
 	}
 	// UPDATE user:amos
 	let a = array.get(3).unwrap();
-	let Value::Object(a) = a else {
+	let CoreValue::Object(a) = a.clone().into_inner() else {
 		unreachable!()
 	};
-	let Value::Number(versionstamp3) = a.get("versionstamp").unwrap() else {
+	let CoreValue::Number(versionstamp3) = a.get("versionstamp").unwrap() else {
 		unreachable!()
 	};
-	assert!(versionstamp2 < versionstamp3);
+	assert!(versionstamp2 < *versionstamp3);
 	let changes = a.get("changes").unwrap().to_owned();
 	match FFLAGS.change_feed_live_queries.enabled() {
 		true => {
 			assert_eq!(
-				changes,
+				Value::from_inner(changes),
 				"[
 					{
 						create: {
@@ -1268,7 +1271,7 @@ async fn changefeed() {
 		}
 		false => {
 			assert_eq!(
-				changes,
+				Value::from_inner(changes),
 				"[
 					{
 						update: {
@@ -1284,16 +1287,16 @@ async fn changefeed() {
 	};
 	// UPDATE table
 	let a = array.get(4).unwrap();
-	let Value::Object(a) = a else {
+	let CoreValue::Object(a) = a.clone().into_inner() else {
 		unreachable!()
 	};
-	let Value::Number(versionstamp4) = a.get("versionstamp").unwrap() else {
+	let CoreValue::Number(versionstamp4) = a.get("versionstamp").unwrap() else {
 		unreachable!()
 	};
 	assert!(versionstamp3 < versionstamp4);
 	let changes = a.get("changes").unwrap().to_owned();
 	assert_eq!(
-		changes,
+		Value::from_inner(changes),
 		"[
 		{
 			update: {
@@ -1354,5 +1357,5 @@ async fn return_bool() {
 	assert!(boolean);
 	let mut response = db.query("RETURN false").await.unwrap();
 	let value: Value = response.take(0).unwrap();
-	assert_eq!(value, Value::Bool(false));
+	assert_eq!(value.into_inner(), CoreValue::Bool(false));
 }

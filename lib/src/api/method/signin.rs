@@ -3,19 +3,19 @@ use crate::api::method::BoxFuture;
 use crate::api::Connection;
 use crate::api::Result;
 use crate::method::OnceLockExt;
-use crate::Object;
 use crate::Surreal;
 use serde::de::DeserializeOwned;
 use std::borrow::Cow;
 use std::future::IntoFuture;
 use std::marker::PhantomData;
+use surrealdb_core::sql::Object as CoreObject;
 
 /// A signin future
 #[derive(Debug)]
 #[must_use = "futures do nothing unless you `.await` or poll them"]
 pub struct Signin<'r, C: Connection, R> {
 	pub(super) client: Cow<'r, Surreal<C>>,
-	pub(super) credentials: Result<Object>,
+	pub(super) credentials: Result<CoreObject>,
 	pub(super) response_type: PhantomData<R>,
 }
 

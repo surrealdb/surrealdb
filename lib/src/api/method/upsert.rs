@@ -16,7 +16,7 @@ use serde::Serialize;
 use std::borrow::Cow;
 use std::future::IntoFuture;
 use std::marker::PhantomData;
-use surrealdb_core::sql::to_value as to_core_value;
+use surrealdb_core::sql::{to_value as to_core_value, Value as CoreValue};
 
 /// An upsert future
 #[derive(Debug)]
@@ -129,7 +129,7 @@ where
 			let data = to_core_value(data)?;
 
 			let data = match data {
-				Value::None => None,
+				CoreValue::None => None,
 				content => Some(content),
 			};
 

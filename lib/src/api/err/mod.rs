@@ -329,13 +329,8 @@ impl Serialize for Error {
 
 impl From<FromValueError> for crate::Error {
 	fn from(error: FromValueError) -> Self {
-		let value = match Value::from_core(error.value).ok_or(Error::RecievedInvalidValue) {
-			Ok(x) => x,
-			Err(e) => return Self::Api(e),
-		};
-
 		Self::Api(Error::FromValue {
-			value,
+			value: Value::from_inner(error.value),
 			error: error.error,
 		})
 	}

@@ -170,7 +170,7 @@ pub enum ResponseAction {
 pub struct ResponseNotification {
 	id: Uuid,
 	action: ResponseAction,
-	result: Value,
+	result: CoreValue,
 }
 
 #[revisioned(revision = 1)]
@@ -205,10 +205,7 @@ impl From<Failure> for Error {
 impl DbResponse {
 	fn from_server_result(result: ServerResult) -> Result<Self> {
 		match result.map_err(Error::from)? {
-			Data::Other(value) => {
-				let value = Value::from_core(value).ok_or(Error::RecievedInvalidValue)?;
-				Ok(DbResponse::Other(value))
-			}
+			Data::Other(value) => Ok(DbResponse::Other(value)),
 			Data::Query(responses) => {
 				let mut map =
 					IndexMap::<usize, (Stats, QueryResult)>::with_capacity(responses.len());
@@ -219,9 +216,7 @@ impl DbResponse {
 					};
 					match response.status {
 						Status::Ok => {
-							let result = Value::from_core(response.result)
-								.ok_or(Error::RecievedInvalidValue.into());
-
+							let result = Ok(response.result);
 							map.insert(index, (stats, result));
 						}
 						Status::Err => {

@@ -18,8 +18,7 @@ use crate::api::Surreal;
 use crate::engine::remote::ws::Data;
 use crate::engine::IntervalStream;
 use crate::opt::WaitFor;
-use crate::Number;
-use crate::Value;
+use crate::{Action, Notification};
 use channel::Receiver;
 use futures::stream::{SplitSink, SplitStream};
 use futures::SinkExt;
@@ -275,7 +274,7 @@ async fn router_handle_response(
 				match response.id {
 					// If `id` is set this is a normal response
 					Some(id) => {
-						if let Some(id) = id.into_number().and_then(|x| x.cource_into_i64()) {
+						if let Ok(id) = id.0.coerce_to_i64() {
 							if let Some(pending) = state.pending_requests.remove(&id) {
 								let resp = match DbResponse::from_server_result(response.result) {
 									Ok(x) => x,
@@ -335,11 +334,10 @@ async fn router_handle_response(
 								if let Some(sender) = state.live_queries.get(&live_query_id) {
 									// Send the notification back to the caller or kill live query if the receiver is already dropped
 
-									let Some(notification) = ToCore::from_core(notification) else {
-										warn!(
-											"recieved an invalid value with non-primitive values"
-										);
-										return HandleResult::Ok;
+									let notification = Notification {
+										query_id: *notification.id,
+										action: Action::from_core(notification.action),
+										data: notification.result,
 									};
 									if sender.send(notification).await.is_err() {
 										state.live_queries.remove(&live_query_id);
@@ -371,20 +369,18 @@ async fn router_handle_response(
 		Err(error) => {
 			#[revisioned(revision = 1)]
 			#[derive(Deserialize)]
-			struct Response {
-				id: Option<Value>,
+			struct ErrorResponse {
+				id: Option<CoreValue>,
 			}
 
 			// Let's try to find out the ID of the response that failed to deserialise
 			if let Message::Binary(binary) = response {
-				if let Ok(Response {
+				if let Ok(ErrorResponse {
 					id,
 				}) = deserialize(&mut &binary[..], endpoint.supports_revision)
 				{
 					// Return an error if an ID was returned
-					if let Some(id) =
-						id.and_then(Value::into_number).and_then(Number::cource_into_i64)
-					{
+					if let Some(Ok(id)) = id.map(CoreValue::coerce_to_i64) {
 						if let Some(pending) = state.pending_requests.remove(&id) {
 							let _res = pending.response_channel.send(Err(error)).await;
 						} else {

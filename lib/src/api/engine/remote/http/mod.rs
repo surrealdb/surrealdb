@@ -18,7 +18,6 @@ use crate::method::Stats;
 use crate::opt::IntoEndpoint;
 use crate::opt::Resource;
 use crate::opt::Table;
-use crate::Value;
 #[cfg(not(target_arch = "wasm32"))]
 use futures::TryStreamExt;
 use indexmap::IndexMap;

@@ -79,7 +79,7 @@ async fn live_select_table() {
 		// Pull the notification
 		let notification = tokio::time::timeout(LQ_TIMEOUT, users.next()).await.unwrap().unwrap();
 		// The returned record should be an object
-		assert!(notification.data.is_object());
+		assert!(notification.data.into_inner().is_object());
 		// It should be newly created
 		assert_eq!(notification.action, Action::Create);
 	}
@@ -155,7 +155,7 @@ async fn live_select_record_id() {
 		let notification: Notification<Value> =
 			tokio::time::timeout(LQ_TIMEOUT, users.next()).await.unwrap().unwrap();
 		// The returned record should be an object
-		assert!(notification.data.is_object());
+		assert!(notification.data.into_inner().is_object());
 		// It should be newly created
 		assert_eq!(notification.action, Action::Create);
 	}
@@ -227,25 +227,26 @@ async fn live_select_record_ranges() {
 			db.select(Resource::from(&table)).range("jane".."john").live().await.unwrap();
 
 		// Create a record
-		let created_value = match db.create(Resource::from((table, "job"))).await.unwrap() {
-			Value::Object(created_value) => created_value,
-			_ => panic!("Expected an object"),
-		};
+		let created_value =
+			match db.create(Resource::from((table, "job"))).await.unwrap().into_inner() {
+				CoreValue::Object(created_value) => created_value,
+				_ => panic!("Expected an object"),
+			};
 
 		// Pull the notification
 		let notification: Notification<Value> =
 			tokio::time::timeout(LQ_TIMEOUT, users.next()).await.unwrap().unwrap();
 		// The returned record should be an object
-		assert!(notification.data.is_object());
+		assert!(notification.data.into_inner().is_object());
 		// It should be newly created
 		assert_eq!(notification.action, Action::Create);
 
 		// Delete the record
 		let thing = match created_value.get("id").unwrap() {
-			Value::RecordId(thing) => thing,
+			CoreValue::Thing(thing) => thing,
 			_ => panic!("Expected a thing"),
 		};
-		db.query("DELETE $item").bind(("item", thing.clone())).await.unwrap();
+		db.query("DELETE $item").bind(("item", RecordId::from_inner(thing.clone()))).await.unwrap();
 
 		// Pull the notification
 		let notification: Notification<Value> =
@@ -253,8 +254,8 @@ async fn live_select_record_ranges() {
 
 		// It should be deleted
 		assert_eq!(notification.action, Action::Delete);
-		let notification = match notification.data {
-			Value::Object(notification) => notification,
+		let notification = match notification.data.into_inner() {
+			CoreValue::Object(notification) => notification,
 			_ => panic!("Expected an object"),
 		};
 		assert_eq!(notification, created_value);
@@ -349,7 +350,7 @@ async fn live_select_query() {
 		let notification = tokio::time::timeout(LQ_TIMEOUT, users.next()).await.unwrap().unwrap();
 
 		// The returned record should be an object
-		assert!(notification.data.is_object());
+		assert!(notification.data.into_inner().is_object());
 		// It should be newly created
 		assert_eq!(notification.action, Action::Create);
 	}
@@ -413,7 +414,7 @@ async fn live_select_query() {
 		// Pull the notification
 		let notification = tokio::time::timeout(LQ_TIMEOUT, users.next()).await.unwrap().unwrap();
 		// The returned record should be an object
-		assert!(notification.data.is_object());
+		assert!(notification.data.into_inner().is_object());
 		// It should be newly created
 		assert_eq!(notification.action, Action::Create);
 	}

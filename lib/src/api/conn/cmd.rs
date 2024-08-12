@@ -1,9 +1,5 @@
 use super::MlExportConfig;
-use crate::{
-	opt::Resource,
-	value::{Notification, Value},
-	Result,
-};
+use crate::{opt::Resource, value::Notification, Result};
 use bincode::Options;
 use channel::Sender;
 use revision::Revisioned;
@@ -194,7 +190,7 @@ impl Command {
 				data,
 			} => {
 				let mut table = CoreTable::default();
-				table.0 = what;
+				table.0 = what.clone();
 				let params = vec![CoreValue::from(what), data];
 
 				RouterRequest {
@@ -297,14 +293,14 @@ impl Command {
 			} => RouterRequest {
 				id,
 				method: "let",
-				params: Some(CoreValue::from(vec![Value::from(key).into_inner(), value])),
+				params: Some(CoreValue::from(vec![CoreValue::from(key), value])),
 			},
 			Command::Unset {
 				key,
 			} => RouterRequest {
 				id,
 				method: "unset",
-				params: Some(CoreValue::from(vec![Value::from(key).into_inner()])),
+				params: Some(CoreValue::from(vec![CoreValue::from(key)])),
 			},
 			Command::SubscribeLive {
 				..
@@ -314,7 +310,7 @@ impl Command {
 			} => RouterRequest {
 				id,
 				method: "kill",
-				params: Some(CoreValue::from(vec![Value::from(uuid).into_inner()])),
+				params: Some(CoreValue::from(vec![CoreValue::from(uuid)])),
 			},
 		};
 		Some(res)

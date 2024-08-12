@@ -47,11 +47,12 @@ macro_rules! into_future {
 			} = self;
 			Box::pin(async move {
 				let (table, data) = match resource? {
-					Resource::Table(table) => (table.into(), CoreObject::new()),
+					Resource::Table(table) => (table.into(), CoreObject::default()),
 					Resource::RecordId(record_id) => {
-						let mut map = CoreObject::new();
-						map.insert("id".to_string(), record_id.key());
-						(record_id.table, map)
+						let record_id = record_id.into_inner();
+						let mut map = CoreObject::default();
+						map.insert("id".to_string(), record_id.id.into());
+						(record_id.tb, map)
 					}
 					Resource::Object(_) => return Err(Error::InsertOnObject.into()),
 					Resource::Array(_) => return Err(Error::InsertOnArray.into()),

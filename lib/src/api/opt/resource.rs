@@ -44,13 +44,13 @@ where
 
 transparent_wrapper!(
 	/// A table range.
-	#[derive(Debug, Clone, PartialEq)]
+	#[derive( Clone, PartialEq)]
 	pub struct QueryRange(CoreRange)
 );
 
 transparent_wrapper!(
 	/// A query edge
-	#[derive(Debug, Clone, PartialEq)]
+	#[derive( Clone, PartialEq)]
 	pub struct Edge(CoreEdges)
 );
 

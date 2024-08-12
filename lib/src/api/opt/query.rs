@@ -203,7 +203,7 @@ impl QueryResult<Value> for usize {
 	fn query_result(self, response: &mut QueryResponse) -> Result<Value> {
 		match response.results.swap_remove(&self) {
 			Some((_, result)) => Ok(Value::from_inner(result?)),
-			None => return Ok(Value::from_inner(CoreValue::None)),
+			None => Ok(Value::from_inner(CoreValue::None)),
 		}
 	}
 

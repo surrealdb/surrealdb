@@ -24,7 +24,7 @@ use std::task::Context;
 use std::task::Poll;
 use surrealdb_core::sql::{
 	statements::LiveStatement, Cond, Expression, Field, Fields, Ident, Idiom, Operator, Part,
-	Statement, Table,
+	Statement, Table, Value as CoreValue,
 };
 use uuid::Uuid;
 
@@ -58,7 +58,8 @@ macro_rules! into_future {
 						stmt.what = table.into();
 					}
 					Resource::RecordId(record) => {
-						table.0 = record.table;
+						let record = record.into_inner();
+						table.0 = record.tb.clone();
 						stmt.what = table.into();
 						let mut ident = Ident::default();
 						ident.0 = ID.to_owned();
@@ -68,7 +69,7 @@ macro_rules! into_future {
 						cond.0 = surrealdb_core::sql::Value::Expression(Box::new(Expression::new(
 							idiom.into(),
 							Operator::Equal,
-							record.key.to_core().into(),
+							record.into(),
 						)));
 						stmt.cond = Some(cond);
 					}
@@ -76,9 +77,10 @@ macro_rules! into_future {
 					Resource::Array(_) => return Err(Error::LiveOnArray.into()),
 					Resource::Edge(_) => return Err(Error::LiveOnEdges.into()),
 					Resource::Range(range) => {
-						table.0 = range.table.clone();
+						let range = range.into_inner();
+						table.0 = range.tb.clone();
 						stmt.what = table.into();
-						stmt.cond = range.to_core().to_cond();
+						stmt.cond = range.to_cond();
 					}
 				}
 				let query = Query::new(
@@ -87,16 +89,16 @@ macro_rules! into_future {
 					Default::default(),
 					false,
 				);
-				let Value::Uuid(id) = query.await?.take(0)? else {
+				let CoreValue::Uuid(id) = query.await?.take::<Value>(0)?.into_inner() else {
 					return Err(Error::InternalError(
 						"successufull live query didn't return a uuid".to_string(),
 					)
 					.into());
 				};
-				let rx = register(router, id).await?;
+				let rx = register(router, *id).await?;
 				Ok(Stream::new(
 					Surreal::new_from_router_waiter(client.router.clone(), client.waiter.clone()),
-					id,
+					*id,
 					Some(rx),
 				))
 			})
@@ -104,7 +106,10 @@ macro_rules! into_future {
 	};
 }
 
-pub(crate) async fn register(router: &Router, id: Uuid) -> Result<Receiver<Notification<Value>>> {
+pub(crate) async fn register(
+	router: &Router,
+	id: Uuid,
+) -> Result<Receiver<Notification<CoreValue>>> {
 	let (tx, rx) = channel::unbounded();
 	router
 		.execute_unit(Command::SubscribeLive {
@@ -155,7 +160,7 @@ pub struct Stream<R> {
 	// We no longer need the lifetime and the type parameter
 	// Leaving them in for backwards compatibility
 	pub(crate) id: Uuid,
-	pub(crate) rx: Option<Receiver<Notification<Value>>>,
+	pub(crate) rx: Option<Receiver<Notification<CoreValue>>>,
 	pub(crate) response_type: PhantomData<R>,
 }
 
@@ -163,7 +168,7 @@ impl<R> Stream<R> {
 	pub(crate) fn new(
 		client: Surreal<Any>,
 		id: Uuid,
-		rx: Option<Receiver<Notification<Value>>>,
+		rx: Option<Receiver<Notification<CoreValue>>>,
 	) -> Self {
 		Self {
 			id,
@@ -193,7 +198,14 @@ impl futures::Stream for Stream<Value> {
 	type Item = Notification<Value>;
 
 	poll_next! {
-		notification => Poll::Ready(Some(notification))
+		notification => {
+			let r = Notification{
+				query_id: notification.query_id,
+				action: notification.action,
+				data: Value::from_inner(notification.data),
+			};
+			Poll::Ready(Some(r))
+		}
 	}
 }
 

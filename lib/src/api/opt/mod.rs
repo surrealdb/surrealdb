@@ -53,7 +53,7 @@ enum InnerOp<'a, T> {
 /// [JSON Patch]: https://jsonpatch.com/
 #[derive(Debug)]
 #[must_use]
-pub struct PatchOp(pub(crate) Result<CoreValue, crate::api::Error>);
+pub struct PatchOp(pub(crate) Result<CoreValue, crate::err::Error>);
 
 impl PatchOp {
 	/// Adds a value to an object or inserts it into an array.
@@ -118,10 +118,10 @@ impl PatchOp {
 	where
 		T: Serialize,
 	{
-		Self(InnerOp::Replace {
+		Self(to_core_value(InnerOp::Replace {
 			path,
 			value,
-		})
+		}))
 	}
 
 	/// Changes a value

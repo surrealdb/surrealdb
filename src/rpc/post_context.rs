@@ -5,9 +5,9 @@ use surrealdb::sql::Array;
 use surrealdb_core::dbs::Session;
 use surrealdb_core::kvs::Datastore;
 use surrealdb_core::rpc::args::Take;
+use surrealdb_core::rpc::Data;
 use surrealdb_core::rpc::RpcContext;
 use surrealdb_core::rpc::RpcError;
-use surrealdb_core::sql::Data;
 use surrealdb_core::sql::Value;
 
 pub struct PostRpcContext<'a> {
@@ -71,7 +71,7 @@ impl RpcContext for PostRpcContext<'_> {
 		};
 		surrealdb::iam::signup::signup(self.kvs, &mut self.session, v)
 			.await
-			.map(Value::Strand)
+			.map(Value::from)
 			.map(Into::into)
 			.map_err(Into::into)
 	}
@@ -82,7 +82,7 @@ impl RpcContext for PostRpcContext<'_> {
 		};
 		surrealdb::iam::signin::signin(self.kvs, &mut self.session, v)
 			.await
-			.map(Value::Strand)
+			.map(Value::from)
 			.map(Into::into)
 			.map_err(Into::into)
 	}
@@ -92,6 +92,6 @@ impl RpcContext for PostRpcContext<'_> {
 			return Err(RpcError::InvalidParams);
 		};
 		surrealdb::iam::verify::token(self.kvs, &mut self.session, &token.0).await?;
-		Ok(Value::None)
+		Ok(Value::None.into())
 	}
 }

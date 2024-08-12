@@ -1,11 +1,17 @@
-use super::Value;
-use std::{borrow::Borrow, collections::BTreeMap, iter::FusedIterator};
+use std::{
+	borrow::Borrow,
+	collections::btree_map::{IntoIter as BIntoIter, Iter as BIter, IterMut as BIterMut},
+	iter::FusedIterator,
+};
 use surrealdb_core::sql::{Object as CoreObject, Value as CoreValue};
 
-transparent_wrapper!(
-	#[derive(Debug, Default, Clone,  PartialEq, PartialOrd)]
+use super::Value;
+
+transparent_wrapper! {
+	#[derive( Clone, Eq, PartialEq, Ord, PartialOrd, Default)]
 	pub struct Object(CoreObject)
-);
+}
+impl_serialize_wrapper!(Object);
 
 impl Object {
 	pub fn new() -> Self {
@@ -53,18 +59,18 @@ impl Object {
 		String: Borrow<Q>,
 		Q: ?Sized + Ord,
 	{
-		self.0.remove_entry(key).map(|x| (x.0, Value::from_inner(x.1)))
+		self.0.remove_entry(key).map(|(a, b)| (a, Value::from_inner(b)))
 	}
 
 	pub fn iter(&self) -> Iter<'_> {
 		Iter {
-			iter: self.0 .0.iter(),
+			iter: self.0.iter(),
 		}
 	}
 
 	pub fn iter_mut(&mut self) -> IterMut<'_> {
 		IterMut {
-			iter: self.0 .0.iter_mut(),
+			iter: self.0.iter_mut(),
 		}
 	}
 
@@ -85,7 +91,7 @@ impl Object {
 }
 
 pub struct IntoIter {
-	iter: <BTreeMap<String, CoreValue> as IntoIterator>::IntoIter,
+	iter: BIntoIter<String, CoreValue>,
 }
 
 impl Iterator for IntoIter {
@@ -121,14 +127,14 @@ impl IntoIterator for Object {
 
 	fn into_iter(self) -> Self::IntoIter {
 		IntoIter {
-			iter: self.0.into_iter(),
+			iter: self.0 .0.into_iter(),
 		}
 	}
 }
 
 #[derive(Clone)]
 pub struct Iter<'a> {
-	iter: <&'a BTreeMap<String, CoreValue> as IntoIterator>::IntoIter,
+	iter: BIter<'a, String, CoreValue>,
 }
 
 impl<'a> IntoIterator for &'a Object {
@@ -145,7 +151,7 @@ impl<'a> Iterator for Iter<'a> {
 	type Item = (&'a String, &'a Value);
 
 	fn next(&mut self) -> Option<Self::Item> {
-		self.iter.next().map(|x| (x.0, Value::from_inner_ref(x.1)))
+		self.iter.next().map(|(a, b)| (a, Value::from_inner_ref(b)))
 	}
 
 	fn size_hint(&self) -> (usize, Option<usize>) {
@@ -156,15 +162,15 @@ impl<'a> Iterator for Iter<'a> {
 	where
 		Self: Sized,
 	{
-		self.iter.last().map(|x| (x.0, Value::from_inner_ref(x.1)))
+		self.iter.last().map(|(a, b)| (a, Value::from_inner_ref(b)))
 	}
 
 	fn min(mut self) -> Option<Self::Item> {
-		self.iter.next().map(|x| (x.0, Value::from_inner_ref(x.1)))
+		self.iter.next().map(|(a, b)| (a, Value::from_inner_ref(b)))
 	}
 
 	fn max(mut self) -> Option<Self::Item> {
-		self.iter.next_back().map(|x| (x.0, Value::from_inner_ref(x.1)))
+		self.iter.next_back().map(|(a, b)| (a, Value::from_inner_ref(b)))
 	}
 }
 
@@ -172,7 +178,7 @@ impl FusedIterator for Iter<'_> {}
 
 impl<'a> DoubleEndedIterator for Iter<'a> {
 	fn next_back(&mut self) -> Option<Self::Item> {
-		self.iter.next_back().map(|x| (x.0, Value::from_inner_ref(x.1)))
+		self.iter.next_back().map(|(a, b)| (a, Value::from_inner_ref(b)))
 	}
 }
 
@@ -183,7 +189,7 @@ impl<'a> ExactSizeIterator for Iter<'a> {
 }
 
 pub struct IterMut<'a> {
-	iter: <&'a mut BTreeMap<String, CoreValue> as IntoIterator>::IntoIter,
+	iter: BIterMut<'a, String, CoreValue>,
 }
 
 impl<'a> IntoIterator for &'a mut Object {
@@ -200,7 +206,7 @@ impl<'a> Iterator for IterMut<'a> {
 	type Item = (&'a String, &'a mut Value);
 
 	fn next(&mut self) -> Option<Self::Item> {
-		self.iter.next().map(|x| (x.0, Value::from_inner_mut(x.1)))
+		self.iter.next().map(|(a, b)| (a, Value::from_inner_mut(b)))
 	}
 
 	fn size_hint(&self) -> (usize, Option<usize>) {
@@ -211,15 +217,15 @@ impl<'a> Iterator for IterMut<'a> {
 	where
 		Self: Sized,
 	{
-		self.iter.last().map(|x| (x.0, Value::from_inner_mut(x.1)))
+		self.iter.last().map(|(a, b)| (a, Value::from_inner_mut(b)))
 	}
 
 	fn min(mut self) -> Option<Self::Item> {
-		self.iter.next().map(|x| (x.0, Value::from_inner_mut(x.1)))
+		self.iter.next().map(|(a, b)| (a, Value::from_inner_mut(b)))
 	}
 
 	fn max(mut self) -> Option<Self::Item> {
-		self.iter.next_back().map(|x| (x.0, Value::from_inner_mut(x.1)))
+		self.iter.next_back().map(|(a, b)| (a, Value::from_inner_mut(b)))
 	}
 }
 
@@ -227,7 +233,7 @@ impl FusedIterator for IterMut<'_> {}
 
 impl<'a> DoubleEndedIterator for IterMut<'a> {
 	fn next_back(&mut self) -> Option<Self::Item> {
-		self.iter.next_back().map(|x| (x.0, Value::from_inner_mut(x.1)))
+		self.iter.next_back().map(|(a, b)| (a, Value::from_inner_mut(b)))
 	}
 }
 

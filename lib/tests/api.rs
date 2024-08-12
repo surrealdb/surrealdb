@@ -214,7 +214,7 @@ mod api_integration {
 			let Some(record): Option<RecordId> = db.create(("item", "foo")).await.unwrap() else {
 				panic!("record not found");
 			};
-			assert_eq!(*record.key(), RecordIdKey::String("item:foo".to_owned()));
+			assert_eq!(*record.key(), RecordIdKey::from("item:foo".to_owned()));
 		}
 
 		#[test_log::test(tokio::test)]

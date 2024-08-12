@@ -9,6 +9,7 @@ use crate::{
 	engine::tasks::start_tasks,
 	opt::{auth::Root, WaitFor},
 	value::Notification,
+	Action,
 };
 use channel::{Receiver, Sender};
 use futures::{stream::poll_fn, StreamExt};
@@ -160,9 +161,11 @@ pub(crate) async fn run_router(
 					// channel?
 					continue
 				};
-				let Some(notification) = Notification::from_core(notification) else {
-					warn!("bla");
-					continue
+
+				let notification = Notification{
+					query_id: *notification.id,
+					action: Action::from_core(notification.action),
+					data: notification.result
 				};
 
 				let id = notification.query_id;

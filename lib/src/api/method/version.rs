@@ -38,17 +38,11 @@ where
 		Box::pin(async move {
 			let router = self.client.router.extract()?;
 			let version = router.execute_value(Command::Version).await?;
-			if let Some(version) = version.into_string() {
-				let semantic = version.trim_start_matches("surrealdb-");
-				semantic
-					.parse()
-					.map_err(|_| Error::InvalidSemanticVersion(format!("\"{version}\"")).into())
-			} else {
-				Err(Error::InvalidSemanticVersion(
-					"server returned a non-string object".to_string(),
-				)
-				.into())
-			}
+			let version = version.into_inner().to_string();
+			let semantic = version.trim_start_matches("surrealdb-");
+			semantic
+				.parse()
+				.map_err(|_| Error::InvalidSemanticVersion(format!("\"{version}\"")).into())
 		})
 	}
 }

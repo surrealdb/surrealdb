@@ -16,7 +16,7 @@ use serde::Serialize;
 use std::borrow::Cow;
 use std::future::IntoFuture;
 use std::marker::PhantomData;
-use surrealdb_core::sql::to_value as to_core_value;
+use surrealdb_core::sql::{to_value as to_core_value, Value as CoreValue};
 
 /// An update future
 #[derive(Debug)]
@@ -131,7 +131,7 @@ where
 			let what = self.resource?;
 
 			let data = match data {
-				Value::None => None,
+				CoreValue::None => None,
 				content => Some(content),
 			};
 

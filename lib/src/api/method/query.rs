@@ -11,7 +11,7 @@ use crate::method::OnceLockExt;
 use crate::method::Stats;
 use crate::method::WithStats;
 use crate::value::Notification;
-use crate::{Object, Surreal, Value};
+use crate::{Surreal, Value};
 use futures::future::Either;
 use futures::stream::SelectAll;
 use futures::StreamExt;
@@ -50,14 +50,14 @@ where
 	pub(crate) fn new(
 		client: Cow<'r, Surreal<C>>,
 		query: Vec<Statement>,
-		bindings: Object,
+		bindings: CoreObject,
 		register_live_queries: bool,
 	) -> Self {
 		Query {
 			inner: Ok(ValidQuery {
 				client,
 				query,
-				bindings: bindings.into_inner(),
+				bindings,
 				register_live_queries,
 			}),
 		}
@@ -279,7 +279,7 @@ where
 				CoreValue::Array(array) => {
 					if array.len() != 2 || matches!(array[0], CoreValue::Strand(_)) {
 						let bindings = CoreValue::Array(array);
-						let bindings = Value::into_inner(bindings);
+						let bindings = Value::from_inner(bindings);
 						return Err(Error::InvalidBindings(bindings).into());
 					}
 
@@ -294,7 +294,7 @@ where
 					valid.bindings.0.insert(key.0, value);
 				}
 				_ => {
-					let bindings = Value::into_inner(bindings);
+					let bindings = Value::from_inner(bindings);
 					return Err(Error::InvalidBindings(bindings).into());
 				}
 			}
@@ -311,7 +311,7 @@ pub(crate) type QueryResult = Result<CoreValue>;
 pub struct Response {
 	pub(crate) client: Surreal<Any>,
 	pub(crate) results: IndexMap<usize, (Stats, QueryResult)>,
-	pub(crate) live_queries: IndexMap<usize, Result<Stream<CoreValue>>>,
+	pub(crate) live_queries: IndexMap<usize, Result<Stream<Value>>>,
 }
 
 /// A `LIVE SELECT` stream from the `query` method
@@ -706,6 +706,7 @@ mod tests {
 	use super::*;
 	use crate::{value::to_value, Error::Api};
 	use serde::Deserialize;
+	use surrealdb_core::sql::Value as CoreValue;
 
 	#[derive(Debug, Clone, Serialize, Deserialize)]
 	struct Summary {
@@ -734,7 +735,7 @@ mod tests {
 	fn take_from_an_empty_response() {
 		let mut response = Response::new();
 		let value: Value = response.take(0).unwrap();
-		assert!(value.is_none());
+		assert!(value.into_inner().is_none());
 
 		let mut response = Response::new();
 		let option: Option<String> = response.take(0).unwrap();
@@ -787,7 +788,7 @@ mod tests {
 			..Response::new()
 		};
 		let value: Value = response.take(0).unwrap();
-		assert_eq!(value, Value::from(scalar));
+		assert_eq!(value.into_inner(), CoreValue::from(scalar));
 
 		let mut response = Response {
 			results: to_map(vec![Ok(scalar.into())]),
@@ -810,7 +811,7 @@ mod tests {
 			..Response::new()
 		};
 		let value: Value = response.take(0).unwrap();
-		assert_eq!(value, Value::from(scalar));
+		assert_eq!(value.into_inner(), CoreValue::from(scalar));
 
 		let mut response = Response {
 			results: to_map(vec![Ok(scalar.into())]),
@@ -855,7 +856,7 @@ mod tests {
 		};
 		assert_eq!(zero, 0);
 		let one: Value = response.take(1).unwrap();
-		assert_eq!(one, Value::from(1));
+		assert_eq!(one.into_inner(), CoreValue::from(1));
 	}
 
 	#[test]
@@ -863,17 +864,17 @@ mod tests {
 		let summary = Summary {
 			title: "Lorem Ipsum".to_owned(),
 		};
-		let value = to_value(summary).unwrap();
+		let value = to_value(&summary).unwrap();
 
 		let mut response = Response {
-			results: to_map(vec![Ok(value.clone())]),
+			results: to_map(vec![Ok(value.clone().into_inner())]),
 			..Response::new()
 		};
 		let title: Value = response.take("title").unwrap();
-		assert_eq!(title, Value::from(summary.title.as_str()));
+		assert_eq!(title.into_inner(), CoreValue::from(summary.title.as_str()));
 
 		let mut response = Response {
-			results: to_map(vec![Ok(value.clone())]),
+			results: to_map(vec![Ok(value.clone().into_inner())]),
 			..Response::new()
 		};
 		let Some(title): Option<String> = response.take("title").unwrap() else {
@@ -882,7 +883,7 @@ mod tests {
 		assert_eq!(title, summary.title);
 
 		let mut response = Response {
-			results: to_map(vec![Ok(value)]),
+			results: to_map(vec![Ok(value.into_inner())]),
 			..Response::new()
 		};
 		let vec: Vec<String> = response.take("title").unwrap();
@@ -892,10 +893,10 @@ mod tests {
 			title: "Lorem Ipsum".to_owned(),
 			body: "Lorem Ipsum Lorem Ipsum".to_owned(),
 		};
-		let value = to_value(article).unwrap();
+		let value = to_value(&article).unwrap();
 
 		let mut response = Response {
-			results: to_map(vec![Ok(value.clone())]),
+			results: to_map(vec![Ok(value.clone().into_inner())]),
 			..Response::new()
 		};
 		let Some(title): Option<String> = response.take("title").unwrap() else {
@@ -908,18 +909,18 @@ mod tests {
 		assert_eq!(body, article.body);
 
 		let mut response = Response {
-			results: to_map(vec![Ok(value.clone())]),
+			results: to_map(vec![Ok(value.clone().into_inner())]),
 			..Response::new()
 		};
 		let vec: Vec<String> = response.take("title").unwrap();
 		assert_eq!(vec, vec![article.title.clone()]);
 
 		let mut response = Response {
-			results: to_map(vec![Ok(value)]),
+			results: to_map(vec![Ok(value.into_inner())]),
 			..Response::new()
 		};
 		let value: Value = response.take("title").unwrap();
-		assert_eq!(value, Value::from(article.title));
+		assert_eq!(value.into_inner(), CoreValue::from(article.title));
 	}
 
 	#[test]
@@ -929,7 +930,7 @@ mod tests {
 			..Response::new()
 		};
 		let value: Value = response.take(0).unwrap();
-		assert_eq!(value, vec![Value::from(true), Value::from(false)].into());
+		assert_eq!(value.into_inner(), vec![CoreValue::from(true), CoreValue::from(false)].into());
 
 		let mut response = Response {
 			results: to_map(vec![Ok(vec![true, false].into())]),
@@ -1014,6 +1015,6 @@ mod tests {
 		};
 		assert_eq!(value, 2);
 		let value: Value = response.take(4).unwrap();
-		assert_eq!(value, Value::from(3));
+		assert_eq!(value.into_inner(), CoreValue::from(3));
 	}
 }
