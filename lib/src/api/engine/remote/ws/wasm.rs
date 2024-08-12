@@ -18,6 +18,8 @@ use crate::api::Surreal;
 use crate::engine::remote::ws::Data;
 use crate::engine::IntervalStream;
 use crate::opt::WaitFor;
+use crate::{Action, Notification};
+use channel::{Receiver, Sender};
 use futures::stream::{SplitSink, SplitStream};
 use futures::FutureExt;
 use futures::SinkExt;
@@ -231,16 +233,18 @@ async fn router_handle_response(
 											if value.len() == 1 {
 												let _ = pending
 													.response_channel
-													.send(DbResponse::from(Ok(Data::Other(
-														value.into_iter().next().unwrap(),
-													))))
+													.send(DbResponse::from_server_result(Ok(
+														Data::Other(
+															value.into_iter().next().unwrap(),
+														),
+													)))
 													.await;
 											} else {
 												let _ = pending
 													.response_channel
-													.send(DbResponse::from(Ok(Data::Other(
-														CoreValue::Array(value),
-													))))
+													.send(DbResponse::from_server_result(Ok(
+														Data::Other(CoreValue::Array(value)),
+													)))
 													.await;
 											}
 											return HandleResult::Ok;
@@ -260,7 +264,7 @@ async fn router_handle_response(
 								}
 								let _res = pending
 									.response_channel
-									.send(DbResponse::from(response.result))
+									.send(DbResponse::from_server_result(response.result))
 									.await;
 							} else {
 								warn!("got response for request with id '{id}', which was not in pending requests")
@@ -274,6 +278,12 @@ async fn router_handle_response(
 							// Check if this live query is registered
 							if let Some(sender) = state.live_queries.get(&live_query_id) {
 								// Send the notification back to the caller or kill live query if the receiver is already dropped
+								let notification = Notification {
+									query_id: notification.id.0,
+									action: Action::from_core(notification.action),
+									data: notification.result,
+								};
+
 								if sender.send(notification).await.is_err() {
 									state.live_queries.remove(&live_query_id);
 									let kill = {

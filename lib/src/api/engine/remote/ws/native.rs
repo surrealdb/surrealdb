@@ -274,7 +274,7 @@ async fn router_handle_response(
 				match response.id {
 					// If `id` is set this is a normal response
 					Some(id) => {
-						if let Ok(id) = id.0.coerce_to_i64() {
+						if let Ok(id) = id.coerce_to_i64() {
 							if let Some(pending) = state.pending_requests.remove(&id) {
 								let resp = match DbResponse::from_server_result(response.result) {
 									Ok(x) => x,

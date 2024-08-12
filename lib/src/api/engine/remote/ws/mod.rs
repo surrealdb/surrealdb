@@ -17,7 +17,6 @@ use crate::api::Surreal;
 use crate::method::Stats;
 use crate::opt::IntoEndpoint;
 use crate::value::Notification;
-use crate::Value;
 use channel::Sender;
 use indexmap::IndexMap;
 use revision::revisioned;
@@ -243,7 +242,7 @@ impl DbResponse {
 #[revisioned(revision = 1)]
 #[derive(Debug, Deserialize)]
 pub(crate) struct Response {
-	id: Option<Value>,
+	id: Option<CoreValue>,
 	pub(crate) result: ServerResult,
 }
 

@@ -14,7 +14,7 @@ use crate::{
 use channel::{Receiver, Sender};
 use futures::{stream::poll_fn, StreamExt};
 use std::{
-	collections::{HashMap, HashSet},
+	collections::{BTreeMap, HashMap, HashSet},
 	sync::{atomic::AtomicI64, Arc, OnceLock},
 	task::Poll,
 };
@@ -116,7 +116,7 @@ pub(crate) async fn run_router(
 	let kvs = kvs.with_temporary_directory(address.config.temporary_directory);
 
 	let kvs = Arc::new(kvs);
-	let mut vars = CoreObject::default();
+	let mut vars = BTreeMap::default();
 	let mut live_queries = HashMap::new();
 	let mut session = Session::default().with_rt(true);
 

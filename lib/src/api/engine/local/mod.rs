@@ -31,7 +31,13 @@ use crate::{
 };
 use channel::Sender;
 use indexmap::IndexMap;
-use std::{collections::HashMap, marker::PhantomData, mem, sync::Arc, time::Duration};
+use std::{
+	collections::{BTreeMap, HashMap},
+	marker::PhantomData,
+	mem,
+	sync::Arc,
+	time::Duration,
+};
 use surrealdb_core::{
 	dbs::{Response, Session},
 	iam,
@@ -41,7 +47,7 @@ use surrealdb_core::{
 			CreateStatement, DeleteStatement, InsertStatement, KillStatement, SelectStatement,
 			UpdateStatement, UpsertStatement,
 		},
-		Data, Field, Object as CoreObject, Output, Query, Statement, Value as CoreValue,
+		Data, Field, Output, Query, Statement, Value as CoreValue,
 	},
 };
 use uuid::Uuid;
@@ -62,7 +68,7 @@ use crate::api::conn::MlExportConfig;
 use futures::StreamExt;
 #[cfg(all(not(target_arch = "wasm32"), feature = "ml"))]
 use surrealdb_core::{
-	iam::{check::check_ns_db, Action, Resource},
+	iam::{check::check_ns_db, Action, ResourceKind},
 	kvs::{LockType, TransactionType},
 	ml::storage::surml_file::SurMlFile,
 	sql::statements::{DefineModelStatement, DefineStatement},
@@ -435,7 +441,7 @@ async fn export_ml(
 	// Ensure a NS and DB are set
 	let (nsv, dbv) = check_ns_db(sess)?;
 	// Check the permissions level
-	kvs.check(sess, Action::View, Resource::Model.on_db(&nsv, &dbv))?;
+	kvs.check(sess, Action::View, ResourceKind::Model.on_db(&nsv, &dbv))?;
 	// Start a new readonly transaction
 	let tx = kvs.transaction(TransactionType::Read, LockType::Optimistic).await?;
 	// Attempt to get the model definition
@@ -473,13 +479,13 @@ async fn kill_live_query(
 	kvs: &Datastore,
 	id: Uuid,
 	session: &Session,
-	vars: CoreObject,
+	vars: BTreeMap<String, CoreValue>,
 ) -> Result<CoreValue> {
 	let mut query = Query::default();
 	let mut kill = KillStatement::default();
 	kill.id = id.into();
 	query.0 .0 = vec![Statement::Kill(kill)];
-	let response = kvs.process(query, session, Some(vars.0)).await?;
+	let response = kvs.process(query, session, Some(vars)).await?;
 	take(true, response).await
 }
 
@@ -490,7 +496,7 @@ async fn router(
 	}: RequestData,
 	kvs: &Arc<Datastore>,
 	session: &mut Session,
-	vars: &mut CoreObject,
+	vars: &mut BTreeMap<String, CoreValue>,
 	live_queries: &mut HashMap<Uuid, Sender<Notification<CoreValue>>>,
 ) -> Result<DbResponse> {
 	match command {
@@ -541,8 +547,7 @@ async fn router(
 				stmt
 			};
 			query.0 .0 = vec![Statement::Create(statement)];
-			let vars = vars.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
-			let response = kvs.process(query, &*session, Some(vars)).await?;
+			let response = kvs.process(query, &*session, Some(vars.clone())).await?;
 			let value = take(true, response).await?;
 			Ok(DbResponse::Other(value))
 		}
@@ -680,8 +685,8 @@ async fn router(
 			mut variables,
 		} => {
 			let mut vars = vars.clone();
-			vars.0.append(&mut variables.0);
-			let response = kvs.process(query, &*session, Some(vars.0)).await?;
+			vars.append(&mut variables.0);
+			let response = kvs.process(query, &*session, Some(vars)).await?;
 			let response = process(response);
 			Ok(DbResponse::Query(response))
 		}
