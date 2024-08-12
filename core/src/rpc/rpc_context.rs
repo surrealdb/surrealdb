@@ -67,6 +67,13 @@ pub trait RpcContext {
 	}
 
 	async fn execute_immut(&self, method: Method, params: Array) -> Result<Data, RpcError> {
+		// Check if capabilities allow executing the requested RPC method
+		if !self.kvs().allows_rpc_method(&MethodTarget {
+			method: method.clone(),
+		}) {
+			return Err(RpcError::MethodNotAllowed);
+		}
+
 		match method {
 			Method::Ping => Ok(Value::None.into()),
 			Method::Info => self.info().await.map(Into::into).map_err(Into::into),
