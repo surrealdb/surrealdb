@@ -1,11 +1,10 @@
-use axum::{
-	body::{boxed, Body, BoxBody},
-	headers::{
-		authorization::{Basic, Bearer},
-		Authorization, Origin,
-	},
-	Extension, RequestPartsExt, TypedHeader,
+use axum::RequestPartsExt;
+use axum::{body::Body, Extension};
+use axum_extra::headers::{
+	authorization::{Basic, Bearer},
+	Authorization, Origin,
 };
+use axum_extra::TypedHeader;
 use futures_util::future::BoxFuture;
 use http::{request::Parts, StatusCode};
 use hyper::{Request, Response};
@@ -46,15 +45,12 @@ use super::{
 #[derive(Clone, Copy)]
 pub(super) struct SurrealAuth;
 
-impl<B> AsyncAuthorizeRequest<B> for SurrealAuth
-where
-	B: Send + Sync + 'static,
-{
-	type RequestBody = B;
-	type ResponseBody = BoxBody;
-	type Future = BoxFuture<'static, Result<Request<B>, Response<Self::ResponseBody>>>;
+impl AsyncAuthorizeRequest<Body> for SurrealAuth {
+	type RequestBody = Body;
+	type ResponseBody = Body;
+	type Future = BoxFuture<'static, Result<Request<Body>, Response<Self::ResponseBody>>>;
 
-	fn authorize(&mut self, request: Request<B>) -> Self::Future {
+	fn authorize(&mut self, request: Request<Body>) -> Self::Future {
 		Box::pin(async {
 			let (mut parts, body) = request.into_parts();
 			match check_auth(&mut parts).await {
@@ -65,7 +61,7 @@ where
 				Err(err) => {
 					let unauthorized_response = Response::builder()
 						.status(StatusCode::UNAUTHORIZED)
-						.body(boxed(Body::from(err.to_string())))
+						.body(Body::new(err.to_string()))
 						.unwrap();
 					Err(unauthorized_response)
 				}

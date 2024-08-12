@@ -1,3 +1,4 @@
+pub mod alter;
 pub mod analyze;
 pub mod begin;
 pub mod r#break;
@@ -62,6 +63,7 @@ impl ser::Serializer for Serializer {
 		T: ?Sized + Serialize,
 	{
 		match variant {
+			"Alter" => Ok(Statement::Alter(value.serialize(alter::Serializer.wrap())?)),
 			"Analyze" => Ok(Statement::Analyze(value.serialize(analyze::Serializer.wrap())?)),
 			"Begin" => Ok(Statement::Begin(value.serialize(begin::Serializer.wrap())?)),
 			"Break" => Ok(Statement::Break(value.serialize(r#break::Serializer.wrap())?)),
@@ -100,11 +102,19 @@ impl ser::Serializer for Serializer {
 mod tests {
 	use super::*;
 	use crate::sql::statements::analyze::AnalyzeStatement;
+	use crate::sql::statements::AlterStatement;
 	use crate::sql::statements::DefineStatement;
 	use crate::sql::statements::InfoStatement;
 	use crate::sql::statements::RemoveStatement;
 	use ser::Serializer as _;
 	use serde::Serialize;
+
+	#[test]
+	fn alter() {
+		let statement = Statement::Alter(AlterStatement::Table(Default::default()));
+		let serialized = statement.serialize(Serializer.wrap()).unwrap();
+		assert_eq!(statement, serialized);
+	}
 
 	#[test]
 	fn analyze() {

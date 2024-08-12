@@ -84,6 +84,7 @@ impl Parser<'_> {
 			| t!("DELETE")
 			| t!("RELATE")
 			| t!("DEFINE")
+			| t!("ALTER")
 			| t!("REMOVE")
 			| t!("REBUILD") => {
 				self.parse_inner_subquery(ctx, None).await.map(|x| Value::Subquery(Box::new(x)))

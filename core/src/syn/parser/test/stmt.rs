@@ -131,6 +131,7 @@ fn parse_define_namespace() {
 			name: Ident("a".to_string()),
 			comment: Some(Strand("test".to_string())),
 			if_not_exists: false,
+			overwrite: false,
 		}))
 	);
 
@@ -142,6 +143,7 @@ fn parse_define_namespace() {
 			name: Ident("a".to_string()),
 			comment: None,
 			if_not_exists: false,
+			overwrite: false,
 		}))
 	)
 }
@@ -162,6 +164,7 @@ fn parse_define_database() {
 				store_diff: true,
 			}),
 			if_not_exists: false,
+			overwrite: false,
 		}))
 	);
 
@@ -174,6 +177,7 @@ fn parse_define_database() {
 			comment: None,
 			changefeed: None,
 			if_not_exists: false,
+			overwrite: false,
 		}))
 	)
 }
@@ -204,6 +208,7 @@ fn parse_define_function() {
 			comment: Some(Strand("test".to_string())),
 			permissions: Permission::Full,
 			if_not_exists: false,
+			overwrite: false,
 		}))
 	)
 }
@@ -366,6 +371,7 @@ fn parse_define_token() {
 				}),
 				issue: None,
 			}),
+			authenticate: None,
 			// Default durations.
 			duration: AccessDuration {
 				grant: None,
@@ -374,6 +380,7 @@ fn parse_define_token() {
 			},
 			comment: Some(Strand("bar".to_string())),
 			if_not_exists: false,
+			overwrite: false,
 		})),
 	)
 }
@@ -441,6 +448,7 @@ fn parse_define_token_jwks() {
 				}),
 				issue: None,
 			}),
+			authenticate: None,
 			// Default durations.
 			duration: AccessDuration {
 				grant: None,
@@ -449,6 +457,7 @@ fn parse_define_token_jwks() {
 			},
 			comment: Some(Strand("bar".to_string())),
 			if_not_exists: false,
+			overwrite: false,
 		})),
 	)
 }
@@ -566,6 +575,7 @@ fn parse_define_access_jwt_key() {
 					}),
 					issue: None,
 				}),
+				authenticate: None,
 				// Default durations.
 				duration: AccessDuration {
 					grant: None,
@@ -574,6 +584,7 @@ fn parse_define_access_jwt_key() {
 				},
 				comment: Some(Strand("bar".to_string())),
 				if_not_exists: false,
+				overwrite: false,
 			})),
 		)
 	}
@@ -599,6 +610,7 @@ fn parse_define_access_jwt_key() {
 						key: "bar".to_string(),
 					}),
 				}),
+				authenticate: None,
 				// Default durations.
 				duration: AccessDuration {
 					grant: None,
@@ -607,6 +619,42 @@ fn parse_define_access_jwt_key() {
 				},
 				comment: None,
 				if_not_exists: false,
+				overwrite: false,
+			})),
+		)
+	}
+	// Asymmetric verify and issue with authenticate clause.
+	{
+		let res = test_parse!(
+			parse_stmt,
+			r#"DEFINE ACCESS a ON DATABASE TYPE JWT ALGORITHM EDDSA KEY "foo" WITH ISSUER KEY "bar" AUTHENTICATE true"#
+		)
+		.unwrap();
+		assert_eq!(
+			res,
+			Statement::Define(DefineStatement::Access(DefineAccessStatement {
+				name: Ident("a".to_string()),
+				base: Base::Db,
+				kind: AccessType::Jwt(JwtAccess {
+					verify: JwtAccessVerify::Key(JwtAccessVerifyKey {
+						alg: Algorithm::EdDSA,
+						key: "foo".to_string(),
+					}),
+					issue: Some(JwtAccessIssue {
+						alg: Algorithm::EdDSA,
+						key: "bar".to_string(),
+					}),
+				}),
+				authenticate: Some(Value::Bool(true)),
+				// Default durations.
+				duration: AccessDuration {
+					grant: None,
+					token: Some(Duration::from_hours(1)),
+					session: None,
+				},
+				comment: None,
+				if_not_exists: false,
+				overwrite: false,
 			})),
 		)
 	}
@@ -632,6 +680,7 @@ fn parse_define_access_jwt_key() {
 						key: "foo".to_string(),
 					}),
 				}),
+				authenticate: None,
 				// Default durations.
 				duration: AccessDuration {
 					grant: None,
@@ -640,6 +689,7 @@ fn parse_define_access_jwt_key() {
 				},
 				comment: None,
 				if_not_exists: false,
+				overwrite: false,
 			})),
 		)
 	}
@@ -665,6 +715,7 @@ fn parse_define_access_jwt_key() {
 						key: "foo".to_string(),
 					}),
 				}),
+				authenticate: None,
 				duration: AccessDuration {
 					grant: None,
 					token: Some(Duration::from_secs(10)),
@@ -672,6 +723,7 @@ fn parse_define_access_jwt_key() {
 				},
 				comment: None,
 				if_not_exists: false,
+				overwrite: false,
 			})),
 		)
 	}
@@ -697,6 +749,7 @@ fn parse_define_access_jwt_key() {
 						key: "foo".to_string(),
 					}),
 				}),
+				authenticate: None,
 				// Default durations.
 				duration: AccessDuration {
 					grant: None,
@@ -705,6 +758,7 @@ fn parse_define_access_jwt_key() {
 				},
 				comment: None,
 				if_not_exists: false,
+				overwrite: false,
 			})),
 		)
 	}
@@ -775,6 +829,7 @@ fn parse_define_access_jwt_key() {
 					}),
 					issue: None,
 				}),
+				authenticate: None,
 				// Default durations.
 				duration: AccessDuration {
 					grant: None,
@@ -783,6 +838,7 @@ fn parse_define_access_jwt_key() {
 				},
 				comment: Some(Strand("bar".to_string())),
 				if_not_exists: false,
+				overwrite: false,
 			})),
 		)
 	}
@@ -805,6 +861,7 @@ fn parse_define_access_jwt_key() {
 					}),
 					issue: None,
 				}),
+				authenticate: None,
 				// Default durations.
 				duration: AccessDuration {
 					grant: None,
@@ -813,6 +870,7 @@ fn parse_define_access_jwt_key() {
 				},
 				comment: Some(Strand("bar".to_string())),
 				if_not_exists: false,
+				overwrite: false,
 			})),
 		)
 	}
@@ -838,6 +896,7 @@ fn parse_define_access_jwt_jwks() {
 					}),
 					issue: None,
 				}),
+				authenticate: None,
 				// Default durations.
 				duration: AccessDuration {
 					grant: None,
@@ -846,6 +905,7 @@ fn parse_define_access_jwt_jwks() {
 				},
 				comment: Some(Strand("bar".to_string())),
 				if_not_exists: false,
+				overwrite: false,
 			})),
 		)
 	}
@@ -870,6 +930,7 @@ fn parse_define_access_jwt_jwks() {
 						key: "foo".to_string(),
 					}),
 				}),
+				authenticate: None,
 				// Default durations.
 				duration: AccessDuration {
 					grant: None,
@@ -878,6 +939,7 @@ fn parse_define_access_jwt_jwks() {
 				},
 				comment: None,
 				if_not_exists: false,
+				overwrite: false,
 			})),
 		)
 	}
@@ -902,6 +964,7 @@ fn parse_define_access_jwt_jwks() {
 						key: "foo".to_string(),
 					}),
 				}),
+				authenticate: None,
 				duration: AccessDuration {
 					grant: None,
 					token: Some(Duration::from_secs(10)),
@@ -909,6 +972,7 @@ fn parse_define_access_jwt_jwks() {
 				},
 				comment: None,
 				if_not_exists: false,
+				overwrite: false,
 			})),
 		)
 	}
@@ -933,6 +997,7 @@ fn parse_define_access_jwt_jwks() {
 						key: "foo".to_string(),
 					}),
 				}),
+				authenticate: None,
 				// Default durations.
 				duration: AccessDuration {
 					grant: None,
@@ -941,6 +1006,7 @@ fn parse_define_access_jwt_jwks() {
 				},
 				comment: None,
 				if_not_exists: false,
+				overwrite: false,
 			})),
 		)
 	}
@@ -965,6 +1031,7 @@ fn parse_define_access_jwt_jwks() {
 						key: "foo".to_string(),
 					}),
 				}),
+				authenticate: None,
 				duration: AccessDuration {
 					grant: None,
 					token: Some(Duration::from_secs(10)),
@@ -972,6 +1039,7 @@ fn parse_define_access_jwt_jwks() {
 				},
 				comment: None,
 				if_not_exists: false,
+				overwrite: false,
 			})),
 		)
 	}
@@ -992,6 +1060,7 @@ fn parse_define_access_record() {
 
 		assert_eq!(stmt.name, Ident("a".to_string()));
 		assert_eq!(stmt.base, Base::Db);
+		assert_eq!(stmt.authenticate, None);
 		assert_eq!(
 			stmt.duration,
 			// Default durations.
@@ -1023,7 +1092,7 @@ fn parse_define_access_record() {
 			_ => panic!(),
 		}
 	}
-	// Session duration, signing and authentication queries are explicitly defined.
+	// Session duration, signing and authenticate clauses are explicitly defined.
 	{
 		let res = test_parse!(
 			parse_stmt,
@@ -1039,6 +1108,7 @@ fn parse_define_access_record() {
 
 		assert_eq!(stmt.name, Ident("a".to_string()));
 		assert_eq!(stmt.base, Base::Db);
+		assert_eq!(stmt.authenticate, Some(Value::Bool(true)));
 		assert_eq!(
 			stmt.duration,
 			AccessDuration {
@@ -1053,7 +1123,6 @@ fn parse_define_access_record() {
 			AccessType::Record(ac) => {
 				assert_eq!(ac.signup, Some(Value::Bool(true)));
 				assert_eq!(ac.signin, Some(Value::Bool(false)));
-				assert_eq!(ac.authenticate, Some(Value::Bool(true)));
 				match ac.jwt.verify {
 					JwtAccessVerify::Key(key) => {
 						assert_eq!(key.alg, Algorithm::Hs512);
@@ -1085,7 +1154,6 @@ fn parse_define_access_record() {
 				kind: AccessType::Record(RecordAccess {
 					signup: None,
 					signin: None,
-					authenticate: None,
 					jwt: JwtAccess {
 						verify: JwtAccessVerify::Key(JwtAccessVerifyKey {
 							alg: Algorithm::Hs384,
@@ -1096,8 +1164,12 @@ fn parse_define_access_record() {
 							// Issuer key matches verification key by default in symmetric algorithms.
 							key: "foo".to_string(),
 						}),
-					}
+					},
+					// TODO(gguillemas): Field kept to gracefully handle breaking change.
+					// Remove when "revision" crate allows doing so.
+					authenticate: None
 				}),
+				authenticate: None,
 				duration: AccessDuration {
 					grant: None,
 					token: Some(Duration::from_secs(10)),
@@ -1105,6 +1177,7 @@ fn parse_define_access_record() {
 				},
 				comment: None,
 				if_not_exists: false,
+				overwrite: false,
 			})),
 		);
 	}
@@ -1123,7 +1196,6 @@ fn parse_define_access_record() {
 				kind: AccessType::Record(RecordAccess {
 					signup: None,
 					signin: None,
-					authenticate: None,
 					jwt: JwtAccess {
 						verify: JwtAccessVerify::Key(JwtAccessVerifyKey {
 							alg: Algorithm::Ps512,
@@ -1133,8 +1205,12 @@ fn parse_define_access_record() {
 							alg: Algorithm::Ps512,
 							key: "bar".to_string(),
 						}),
-					}
+					},
+					// TODO(gguillemas): Field kept to gracefully handle breaking change.
+					// Remove when "revision" crate allows doing so.
+					authenticate: None
 				}),
+				authenticate: None,
 				duration: AccessDuration {
 					grant: None,
 					token: Some(Duration::from_secs(10)),
@@ -1142,6 +1218,7 @@ fn parse_define_access_record() {
 				},
 				comment: None,
 				if_not_exists: false,
+				overwrite: false,
 			})),
 		);
 	}
@@ -1160,7 +1237,6 @@ fn parse_define_access_record() {
 				kind: AccessType::Record(RecordAccess {
 					signup: None,
 					signin: None,
-					authenticate: None,
 					jwt: JwtAccess {
 						verify: JwtAccessVerify::Key(JwtAccessVerifyKey {
 							alg: Algorithm::Rs256,
@@ -1170,8 +1246,12 @@ fn parse_define_access_record() {
 							alg: Algorithm::Rs256,
 							key: "bar".to_string(),
 						}),
-					}
+					},
+					// TODO(gguillemas): Field kept to gracefully handle breaking change.
+					// Remove when "revision" crate allows doing so.
+					authenticate: None
 				}),
+				authenticate: None,
 				duration: AccessDuration {
 					grant: None,
 					token: Some(Duration::from_secs(10)),
@@ -1179,6 +1259,7 @@ fn parse_define_access_record() {
 				},
 				comment: None,
 				if_not_exists: false,
+				overwrite: false,
 			})),
 		);
 	}
@@ -1231,15 +1312,18 @@ fn parse_define_access_record_with_jwt() {
 			kind: AccessType::Record(RecordAccess {
 				signup: None,
 				signin: None,
-				authenticate: None,
 				jwt: JwtAccess {
 					verify: JwtAccessVerify::Key(JwtAccessVerifyKey {
 						alg: Algorithm::EdDSA,
 						key: "foo".to_string(),
 					}),
 					issue: None,
-				}
+				},
+				// TODO(gguillemas): Field kept to gracefully handle breaking change.
+				// Remove when "revision" crate allows doing so.
+				authenticate: None
 			}),
+			authenticate: None,
 			// Default durations.
 			duration: AccessDuration {
 				grant: None,
@@ -1248,6 +1332,7 @@ fn parse_define_access_record_with_jwt() {
 			},
 			comment: Some(Strand("bar".to_string())),
 			if_not_exists: false,
+			overwrite: false,
 		})),
 	)
 }
@@ -1273,6 +1358,7 @@ fn parse_define_param() {
 			comment: None,
 			permissions: Permission::Specific(Value::Null),
 			if_not_exists: false,
+			overwrite: false,
 		}))
 	);
 }
@@ -1320,6 +1406,7 @@ fn parse_define_table() {
 			}),
 			comment: None,
 			if_not_exists: false,
+			overwrite: false,
 			kind: TableType::Any,
 		}))
 	);
@@ -1340,6 +1427,7 @@ fn parse_define_event() {
 			then: Values(vec![Value::Null, Value::None]),
 			comment: None,
 			if_not_exists: false,
+			overwrite: false,
 		}))
 	)
 }
@@ -1378,6 +1466,7 @@ fn parse_define_field() {
 			},
 			comment: None,
 			if_not_exists: false,
+			overwrite: false,
 		}))
 	)
 }
@@ -1426,6 +1515,7 @@ fn parse_define_index() {
 			}),
 			comment: None,
 			if_not_exists: false,
+			overwrite: false,
 		}))
 	);
 
@@ -1441,6 +1531,7 @@ fn parse_define_index() {
 			index: Index::Uniq,
 			comment: None,
 			if_not_exists: false,
+			overwrite: false,
 		}))
 	);
 
@@ -1465,6 +1556,7 @@ fn parse_define_index() {
 			}),
 			comment: None,
 			if_not_exists: false,
+			overwrite: false,
 		}))
 	);
 
@@ -1490,6 +1582,7 @@ fn parse_define_index() {
 			}),
 			comment: None,
 			if_not_exists: false,
+			overwrite: false,
 		}))
 	);
 }
@@ -1522,6 +1615,7 @@ fn parse_define_analyzer() {
 			comment: None,
 			function: Some(Ident("foo::bar".to_string())),
 			if_not_exists: false,
+			overwrite: false,
 		})),
 	)
 }

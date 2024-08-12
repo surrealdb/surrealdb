@@ -4,6 +4,7 @@ use crate::dbs::{Force, Options};
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::iam::{Action, ResourceKind};
+use crate::kvs::Transaction;
 use crate::sql::fmt::{is_pretty, pretty_indent};
 use crate::sql::paths::{IN, OUT};
 use crate::sql::statements::info::InfoStructure;
@@ -19,7 +20,7 @@ use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Write};
 use std::sync::Arc;
 
-#[revisioned(revision = 3)]
+#[revisioned(revision = 4)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
@@ -36,6 +37,8 @@ pub struct DefineTableStatement {
 	pub if_not_exists: bool,
 	#[revision(start = 3)]
 	pub kind: TableType,
+	#[revision(start = 4)]
+	pub overwrite: bool,
 }
 
 impl DefineTableStatement {
@@ -54,7 +57,7 @@ impl DefineTableStatement {
 		if txn.get_tb(opt.ns()?, opt.db()?, &self.name).await.is_ok() {
 			if self.if_not_exists {
 				return Ok(Value::None);
-			} else {
+			} else if !self.overwrite {
 				return Err(Error::TbAlreadyExists {
 					value: self.name.to_string(),
 				});
@@ -72,42 +75,12 @@ impl DefineTableStatement {
 			},
 			// Don't persist the `IF NOT EXISTS` clause to schema
 			if_not_exists: false,
+			overwrite: false,
 			..self.clone()
 		};
 		txn.set(key, &dt).await?;
 		// Add table relational fields
-		if let TableType::Relation(rel) = &self.kind {
-			// Set the `in` field as a DEFINE FIELD definition
-			{
-				let key = crate::key::table::fd::new(opt.ns()?, opt.db()?, &self.name, "in");
-				let val = rel.from.clone().unwrap_or(Kind::Record(vec![]));
-				txn.set(
-					key,
-					DefineFieldStatement {
-						name: Idiom::from(IN.to_vec()),
-						what: self.name.to_owned(),
-						kind: Some(val),
-						..Default::default()
-					},
-				)
-				.await?;
-			}
-			// Set the `out` field as a DEFINE FIELD definition
-			{
-				let key = crate::key::table::fd::new(opt.ns()?, opt.db()?, &self.name, "out");
-				let val = rel.to.clone().unwrap_or(Kind::Record(vec![]));
-				txn.set(
-					key,
-					DefineFieldStatement {
-						name: Idiom::from(OUT.to_vec()),
-						what: self.name.to_owned(),
-						kind: Some(val),
-						..Default::default()
-					},
-				)
-				.await?;
-			}
-		}
+		self.add_in_out_fields(&txn, opt).await?;
 		// Clear the cache
 		txn.clear();
 		// Record definition change
@@ -158,6 +131,43 @@ impl DefineTableStatement {
 	pub fn allows_normal(&self) -> bool {
 		matches!(self.kind, TableType::Normal | TableType::Any)
 	}
+	/// Used to add relational fields to existing table records
+	pub async fn add_in_out_fields(&self, txn: &Transaction, opt: &Options) -> Result<(), Error> {
+		// Add table relational fields
+		if let TableType::Relation(rel) = &self.kind {
+			// Set the `in` field as a DEFINE FIELD definition
+			{
+				let key = crate::key::table::fd::new(opt.ns()?, opt.db()?, &self.name, "in");
+				let val = rel.from.clone().unwrap_or(Kind::Record(vec![]));
+				txn.set(
+					key,
+					DefineFieldStatement {
+						name: Idiom::from(IN.to_vec()),
+						what: self.name.to_owned(),
+						kind: Some(val),
+						..Default::default()
+					},
+				)
+				.await?;
+			}
+			// Set the `out` field as a DEFINE FIELD definition
+			{
+				let key = crate::key::table::fd::new(opt.ns()?, opt.db()?, &self.name, "out");
+				let val = rel.to.clone().unwrap_or(Kind::Record(vec![]));
+				txn.set(
+					key,
+					DefineFieldStatement {
+						name: Idiom::from(OUT.to_vec()),
+						what: self.name.to_owned(),
+						kind: Some(val),
+						..Default::default()
+					},
+				)
+				.await?;
+			}
+		}
+		Ok(())
+	}
 }
 
 impl Display for DefineTableStatement {
@@ -165,6 +175,9 @@ impl Display for DefineTableStatement {
 		write!(f, "DEFINE TABLE")?;
 		if self.if_not_exists {
 			write!(f, " IF NOT EXISTS")?
+		}
+		if self.overwrite {
+			write!(f, " OVERWRITE")?
 		}
 		write!(f, " {}", self.name)?;
 		write!(f, " TYPE")?;

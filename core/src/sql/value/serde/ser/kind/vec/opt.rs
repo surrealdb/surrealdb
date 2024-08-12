@@ -1,6 +1,6 @@
 use crate::err::Error;
-use crate::sql::changefeed::ChangeFeed;
 use crate::sql::value::serde::ser;
+use crate::sql::Kind;
 use serde::ser::Impossible;
 use serde::ser::Serialize;
 
@@ -8,18 +8,18 @@ use serde::ser::Serialize;
 pub struct Serializer;
 
 impl ser::Serializer for Serializer {
-	type Ok = Option<ChangeFeed>;
+	type Ok = Option<Vec<Kind>>;
 	type Error = Error;
 
-	type SerializeSeq = Impossible<Option<ChangeFeed>, Error>;
-	type SerializeTuple = Impossible<Option<ChangeFeed>, Error>;
-	type SerializeTupleStruct = Impossible<Option<ChangeFeed>, Error>;
-	type SerializeTupleVariant = Impossible<Option<ChangeFeed>, Error>;
-	type SerializeMap = Impossible<Option<ChangeFeed>, Error>;
-	type SerializeStruct = Impossible<Option<ChangeFeed>, Error>;
-	type SerializeStructVariant = Impossible<Option<ChangeFeed>, Error>;
+	type SerializeSeq = Impossible<Option<Vec<Kind>>, Error>;
+	type SerializeTuple = Impossible<Option<Vec<Kind>>, Error>;
+	type SerializeTupleStruct = Impossible<Option<Vec<Kind>>, Error>;
+	type SerializeTupleVariant = Impossible<Option<Vec<Kind>>, Error>;
+	type SerializeMap = Impossible<Option<Vec<Kind>>, Error>;
+	type SerializeStruct = Impossible<Option<Vec<Kind>>, Error>;
+	type SerializeStructVariant = Impossible<Option<Vec<Kind>>, Error>;
 
-	const EXPECTED: &'static str = "an `Option<ChangeFeed>`";
+	const EXPECTED: &'static str = "an `Option<Vec<Kind>>`";
 
 	#[inline]
 	fn serialize_none(self) -> Result<Self::Ok, Self::Error> {
@@ -42,14 +42,14 @@ mod tests {
 
 	#[test]
 	fn none() {
-		let option: Option<ChangeFeed> = None;
+		let option: Option<Vec<Kind>> = None;
 		let serialized = option.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(option, serialized);
 	}
 
 	#[test]
 	fn some() {
-		let option = Some(ChangeFeed::default());
+		let option = Some(vec![Kind::default()]);
 		let serialized = option.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(option, serialized);
 	}

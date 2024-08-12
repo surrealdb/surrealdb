@@ -484,6 +484,7 @@ pub(crate) trait Uniq<T> {
 
 impl Uniq<Array> for Array {
 	fn uniq(mut self) -> Array {
+		#[allow(clippy::mutable_key_type)]
 		let mut set: HashSet<&Value> = HashSet::new();
 		let mut to_remove: Vec<usize> = Vec::new();
 		for (i, item) in self.iter().enumerate() {
@@ -495,5 +496,29 @@ impl Uniq<Array> for Array {
 			self.remove(*i);
 		}
 		self
+	}
+}
+
+// ------------------------------
+
+pub(crate) trait Windows<T> {
+	fn windows(self, window_size: usize) -> Result<T, Error>;
+}
+
+impl Windows<Array> for Array {
+	fn windows(self, window_size: usize) -> Result<Array, Error> {
+		if window_size < 1 {
+			return Err(Error::InvalidArguments {
+				name: "array::windows".to_string(),
+				message: "The second argument must be an integer greater than 0".to_string(),
+			});
+		}
+
+		Ok(self
+			.0
+			.windows(window_size)
+			.map::<Value, _>(|chunk| chunk.to_vec().into())
+			.collect::<Vec<_>>()
+			.into())
 	}
 }

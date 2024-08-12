@@ -61,12 +61,7 @@ notice = "warn"
 # Threshold for security vulnerabilities: None, Low, Medium, High, Critical.
 severity-threshold = "None"
 # A list of security advisory identifiers to ignore.
-ignore = [
-	# Will be resolved once "surrealdb-jsonwebtoken", a temporary fork
-	# of "jsonwebtoken", is replaced by the upstream version which no
-	# longer uses the affected "rsa" crate.
-	"RUSTSEC-2023-0071",
-]
+ignore = []
 
 # --------------------------------------------------
 # LICENSES

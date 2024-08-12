@@ -47,7 +47,9 @@ impl Parser<'_> {
 			t!("FIELD") => {
 				ctx.run(|ctx| self.parse_define_field(ctx)).await.map(DefineStatement::Field)
 			}
-			t!("INDEX") => self.parse_define_index().map(DefineStatement::Index),
+			t!("INDEX") => {
+				ctx.run(|ctx| self.parse_define_index(ctx)).await.map(DefineStatement::Index)
+			}
 			t!("ANALYZER") => self.parse_define_analyzer().map(DefineStatement::Analyzer),
 			t!("ACCESS") => self.parse_define_access(ctx).await.map(DefineStatement::Access),
 			x => unexpected!(self, x, "a define statement keyword"),
@@ -55,18 +57,21 @@ impl Parser<'_> {
 	}
 
 	pub fn parse_define_namespace(&mut self) -> ParseResult<DefineNamespaceStatement> {
-		let if_not_exists = if self.eat(t!("IF")) {
+		let (if_not_exists, overwrite) = if self.eat(t!("IF")) {
 			expected!(self, t!("NOT"));
 			expected!(self, t!("EXISTS"));
-			true
+			(true, false)
+		} else if self.eat(t!("OVERWRITE")) {
+			(false, true)
 		} else {
-			false
+			(false, false)
 		};
 		let name = self.next_token_value()?;
 		let mut res = DefineNamespaceStatement {
 			id: None,
 			name,
 			if_not_exists,
+			overwrite,
 			..Default::default()
 		};
 
@@ -79,17 +84,20 @@ impl Parser<'_> {
 	}
 
 	pub fn parse_define_database(&mut self) -> ParseResult<DefineDatabaseStatement> {
-		let if_not_exists = if self.eat(t!("IF")) {
+		let (if_not_exists, overwrite) = if self.eat(t!("IF")) {
 			expected!(self, t!("NOT"));
 			expected!(self, t!("EXISTS"));
-			true
+			(true, false)
+		} else if self.eat(t!("OVERWRITE")) {
+			(false, true)
 		} else {
-			false
+			(false, false)
 		};
 		let name = self.next_token_value()?;
 		let mut res = DefineDatabaseStatement {
 			name,
 			if_not_exists,
+			overwrite,
 			..Default::default()
 		};
 		loop {
@@ -113,12 +121,14 @@ impl Parser<'_> {
 		&mut self,
 		ctx: &mut Stk,
 	) -> ParseResult<DefineFunctionStatement> {
-		let if_not_exists = if self.eat(t!("IF")) {
+		let (if_not_exists, overwrite) = if self.eat(t!("IF")) {
 			expected!(self, t!("NOT"));
 			expected!(self, t!("EXISTS"));
-			true
+			(true, false)
+		} else if self.eat(t!("OVERWRITE")) {
+			(false, true)
 		} else {
-			false
+			(false, false)
 		};
 		let name = self.parse_custom_function_name()?;
 		let token = expected!(self, t!("(")).span;
@@ -148,6 +158,7 @@ impl Parser<'_> {
 			args,
 			block,
 			if_not_exists,
+			overwrite,
 			..Default::default()
 		};
 
@@ -169,12 +180,14 @@ impl Parser<'_> {
 	}
 
 	pub fn parse_define_user(&mut self) -> ParseResult<DefineUserStatement> {
-		let if_not_exists = if self.eat(t!("IF")) {
+		let (if_not_exists, overwrite) = if self.eat(t!("IF")) {
 			expected!(self, t!("NOT"));
 			expected!(self, t!("EXISTS"));
-			true
+			(true, false)
+		} else if self.eat(t!("OVERWRITE")) {
+			(false, true)
 		} else {
-			false
+			(false, false)
 		};
 		let name = self.next_token_value()?;
 		expected!(self, t!("ON"));
@@ -189,6 +202,10 @@ impl Parser<'_> {
 
 		if if_not_exists {
 			res.if_not_exists = true;
+		}
+
+		if overwrite {
+			res.overwrite = true;
 		}
 
 		loop {
@@ -253,12 +270,14 @@ impl Parser<'_> {
 		&mut self,
 		stk: &mut Stk,
 	) -> ParseResult<DefineAccessStatement> {
-		let if_not_exists = if self.eat(t!("IF")) {
+		let (if_not_exists, overwrite) = if self.eat(t!("IF")) {
 			expected!(self, t!("NOT"));
 			expected!(self, t!("EXISTS"));
-			true
+			(true, false)
+		} else if self.eat(t!("OVERWRITE")) {
+			(false, true)
 		} else {
-			false
+			(false, false)
 		};
 		let name = self.next_token_value()?;
 		expected!(self, t!("ON"));
@@ -269,6 +288,7 @@ impl Parser<'_> {
 			name,
 			base,
 			if_not_exists,
+			overwrite,
 			..Default::default()
 		};
 
@@ -310,11 +330,6 @@ impl Parser<'_> {
 										ac.signin =
 											Some(stk.run(|stk| self.parse_value(stk)).await?);
 									}
-									t!("AUTHENTICATE") => {
-										self.pop_peek();
-										ac.authenticate =
-											Some(stk.run(|stk| self.parse_value(stk)).await?);
-									}
 									_ => break,
 								}
 							}
@@ -326,6 +341,10 @@ impl Parser<'_> {
 						}
 						_ => break,
 					}
+				}
+				t!("AUTHENTICATE") => {
+					self.pop_peek();
+					res.authenticate = Some(stk.run(|stk| self.parse_value(stk)).await?);
 				}
 				t!("DURATION") => {
 					self.pop_peek();
@@ -378,12 +397,14 @@ impl Parser<'_> {
 
 	// TODO(gguillemas): Deprecated in 2.0.0. Drop this in 3.0.0 in favor of DEFINE ACCESS
 	pub fn parse_define_token(&mut self) -> ParseResult<DefineAccessStatement> {
-		let if_not_exists = if self.eat(t!("IF")) {
+		let (if_not_exists, overwrite) = if self.eat(t!("IF")) {
 			expected!(self, t!("NOT"));
 			expected!(self, t!("EXISTS"));
-			true
+			(true, false)
+		} else if self.eat(t!("OVERWRITE")) {
+			(false, true)
 		} else {
-			false
+			(false, false)
 		};
 		let name = self.next_token_value()?;
 		expected!(self, t!("ON"));
@@ -393,6 +414,7 @@ impl Parser<'_> {
 			name,
 			base: base.clone(),
 			if_not_exists,
+			overwrite,
 			..Default::default()
 		};
 
@@ -492,18 +514,21 @@ impl Parser<'_> {
 		&mut self,
 		stk: &mut Stk,
 	) -> ParseResult<DefineAccessStatement> {
-		let if_not_exists = if self.eat(t!("IF")) {
+		let (if_not_exists, overwrite) = if self.eat(t!("IF")) {
 			expected!(self, t!("NOT"));
 			expected!(self, t!("EXISTS"));
-			true
+			(true, false)
+		} else if self.eat(t!("OVERWRITE")) {
+			(false, true)
 		} else {
-			false
+			(false, false)
 		};
 		let name = self.next_token_value()?;
 		let mut res = DefineAccessStatement {
 			name,
 			base: Base::Db,
 			if_not_exists,
+			overwrite,
 			..Default::default()
 		};
 		let mut ac = access_type::RecordAccess {
@@ -528,10 +553,6 @@ impl Parser<'_> {
 					self.pop_peek();
 					ac.signin = Some(stk.run(|stk| self.parse_value(stk)).await?);
 				}
-				t!("AUTHENTICATE") => {
-					self.pop_peek();
-					ac.authenticate = Some(stk.run(|stk| self.parse_value(stk)).await?);
-				}
 				_ => break,
 			}
 		}
@@ -542,18 +563,21 @@ impl Parser<'_> {
 	}
 
 	pub async fn parse_define_param(&mut self, ctx: &mut Stk) -> ParseResult<DefineParamStatement> {
-		let if_not_exists = if self.eat(t!("IF")) {
+		let (if_not_exists, overwrite) = if self.eat(t!("IF")) {
 			expected!(self, t!("NOT"));
 			expected!(self, t!("EXISTS"));
-			true
+			(true, false)
+		} else if self.eat(t!("OVERWRITE")) {
+			(false, true)
 		} else {
-			false
+			(false, false)
 		};
 		let name = self.next_token_value::<Param>()?.0;
 
 		let mut res = DefineParamStatement {
 			name,
 			if_not_exists,
+			overwrite,
 			..Default::default()
 		};
 
@@ -578,18 +602,21 @@ impl Parser<'_> {
 	}
 
 	pub async fn parse_define_table(&mut self, ctx: &mut Stk) -> ParseResult<DefineTableStatement> {
-		let if_not_exists = if self.eat(t!("IF")) {
+		let (if_not_exists, overwrite) = if self.eat(t!("IF")) {
 			expected!(self, t!("NOT"));
 			expected!(self, t!("EXISTS"));
-			true
+			(true, false)
+		} else if self.eat(t!("OVERWRITE")) {
+			(false, true)
 		} else {
-			false
+			(false, false)
 		};
 		let name = self.next_token_value()?;
 		let mut res = DefineTableStatement {
 			name,
 			permissions: Permissions::none(),
 			if_not_exists,
+			overwrite,
 			..Default::default()
 		};
 
@@ -659,12 +686,14 @@ impl Parser<'_> {
 	}
 
 	pub async fn parse_define_event(&mut self, ctx: &mut Stk) -> ParseResult<DefineEventStatement> {
-		let if_not_exists = if self.eat(t!("IF")) {
+		let (if_not_exists, overwrite) = if self.eat(t!("IF")) {
 			expected!(self, t!("NOT"));
 			expected!(self, t!("EXISTS"));
-			true
+			(true, false)
+		} else if self.eat(t!("OVERWRITE")) {
+			(false, true)
 		} else {
-			false
+			(false, false)
 		};
 		let name = self.next_token_value()?;
 		expected!(self, t!("ON"));
@@ -675,6 +704,7 @@ impl Parser<'_> {
 			name,
 			what,
 			if_not_exists,
+			overwrite,
 			..Default::default()
 		};
 
@@ -702,14 +732,16 @@ impl Parser<'_> {
 	}
 
 	pub async fn parse_define_field(&mut self, ctx: &mut Stk) -> ParseResult<DefineFieldStatement> {
-		let if_not_exists = if self.eat(t!("IF")) {
+		let (if_not_exists, overwrite) = if self.eat(t!("IF")) {
 			expected!(self, t!("NOT"));
 			expected!(self, t!("EXISTS"));
-			true
+			(true, false)
+		} else if self.eat(t!("OVERWRITE")) {
+			(false, true)
 		} else {
-			false
+			(false, false)
 		};
-		let name = self.parse_local_idiom()?;
+		let name = self.parse_local_idiom(ctx).await?;
 		expected!(self, t!("ON"));
 		self.eat(t!("TABLE"));
 		let what = self.next_token_value()?;
@@ -718,6 +750,7 @@ impl Parser<'_> {
 			name,
 			what,
 			if_not_exists,
+			overwrite,
 			..Default::default()
 		};
 
@@ -763,13 +796,15 @@ impl Parser<'_> {
 		Ok(res)
 	}
 
-	pub fn parse_define_index(&mut self) -> ParseResult<DefineIndexStatement> {
-		let if_not_exists = if self.eat(t!("IF")) {
+	pub async fn parse_define_index(&mut self, ctx: &mut Stk) -> ParseResult<DefineIndexStatement> {
+		let (if_not_exists, overwrite) = if self.eat(t!("IF")) {
 			expected!(self, t!("NOT"));
 			expected!(self, t!("EXISTS"));
-			true
+			(true, false)
+		} else if self.eat(t!("OVERWRITE")) {
+			(false, true)
 		} else {
-			false
+			(false, false)
 		};
 		let name = self.next_token_value()?;
 		expected!(self, t!("ON"));
@@ -781,6 +816,7 @@ impl Parser<'_> {
 			what,
 
 			if_not_exists,
+			overwrite,
 			..Default::default()
 		};
 
@@ -789,9 +825,9 @@ impl Parser<'_> {
 				// COLUMNS and FIELDS are the same tokenkind
 				t!("FIELDS") => {
 					self.pop_peek();
-					res.cols = Idioms(vec![self.parse_local_idiom()?]);
+					res.cols = Idioms(vec![self.parse_local_idiom(ctx).await?]);
 					while self.eat(t!(",")) {
-						res.cols.0.push(self.parse_local_idiom()?);
+						res.cols.0.push(self.parse_local_idiom(ctx).await?);
 					}
 				}
 				t!("UNIQUE") => {
@@ -1020,12 +1056,14 @@ impl Parser<'_> {
 	}
 
 	pub fn parse_define_analyzer(&mut self) -> ParseResult<DefineAnalyzerStatement> {
-		let if_not_exists = if self.eat(t!("IF")) {
+		let (if_not_exists, overwrite) = if self.eat(t!("IF")) {
 			expected!(self, t!("NOT"));
 			expected!(self, t!("EXISTS"));
-			true
+			(true, false)
+		} else if self.eat(t!("OVERWRITE")) {
+			(false, true)
 		} else {
-			false
+			(false, false)
 		};
 		let name = self.next_token_value()?;
 		let mut res = DefineAnalyzerStatement {
@@ -1037,6 +1075,7 @@ impl Parser<'_> {
 			comment: None,
 
 			if_not_exists,
+			overwrite,
 		};
 		loop {
 			match self.peek_kind() {
