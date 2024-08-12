@@ -26,7 +26,7 @@ use crate::{
 		Connect, Response as QueryResponse, Result, Surreal,
 	},
 	method::Stats,
-	opt::{IntoEndpoint, Resource, Table},
+	opt::{IntoEndpoint, Resource as ApiResource, Table},
 	value::Notification,
 };
 use channel::Sender;
@@ -551,7 +551,7 @@ async fn router(
 			data,
 		} => {
 			let mut query = Query::default();
-			let one = matches!(what, Resource::RecordId(_));
+			let one = matches!(what, ApiResource::RecordId(_));
 			let statement = {
 				let mut stmt = UpsertStatement::default();
 				stmt.what = resource_to_values(what);
@@ -570,7 +570,7 @@ async fn router(
 			data,
 		} => {
 			let mut query = Query::default();
-			let one = matches!(what, Resource::RecordId(_));
+			let one = matches!(what, ApiResource::RecordId(_));
 			let statement = {
 				let mut stmt = UpdateStatement::default();
 				stmt.what = resource_to_values(what);
@@ -608,7 +608,7 @@ async fn router(
 			data,
 		} => {
 			let mut query = Query::default();
-			let one = matches!(what, Resource::RecordId(_));
+			let one = matches!(what, ApiResource::RecordId(_));
 			let statement = {
 				let mut stmt = UpdateStatement::default();
 				stmt.what = resource_to_values(what);
@@ -627,7 +627,7 @@ async fn router(
 			data,
 		} => {
 			let mut query = Query::default();
-			let one = matches!(what, Resource::RecordId(_));
+			let one = matches!(what, ApiResource::RecordId(_));
 			let statement = {
 				let mut stmt = UpdateStatement::default();
 				stmt.what = resource_to_values(what);
@@ -645,7 +645,7 @@ async fn router(
 			what,
 		} => {
 			let mut query = Query::default();
-			let one = matches!(what, Resource::RecordId(_));
+			let one = matches!(what, ApiResource::RecordId(_));
 			let statement = {
 				let mut stmt = SelectStatement::default();
 				stmt.what = resource_to_values(what);
@@ -662,7 +662,7 @@ async fn router(
 			what,
 		} => {
 			let mut query = Query::default();
-			let one = matches!(what, Resource::RecordId(_));
+			let one = matches!(what, ApiResource::RecordId(_));
 			let statement = {
 				let mut stmt = DeleteStatement::default();
 				stmt.what = resource_to_values(what);

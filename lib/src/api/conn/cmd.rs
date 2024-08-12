@@ -531,7 +531,7 @@ mod test {
 		assert_converts(
 			&request,
 			|i| bincode::serialize(i).unwrap(),
-			|b| bincode::deserialize(&b).unwrap(),
+			|b| bincode::deserialize(dbg!(&b)).unwrap(),
 		);
 
 		println!("test convert json");

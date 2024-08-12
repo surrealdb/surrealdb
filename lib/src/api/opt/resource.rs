@@ -3,9 +3,7 @@ use crate::{
 	Object, RecordId, RecordIdKey, Value,
 };
 use std::ops::{self, Bound};
-use surrealdb_core::sql::{
-	Edges as CoreEdges, Range as CoreRange, Table as CoreTable, Value as CoreValue,
-};
+use surrealdb_core::sql::{Edges as CoreEdges, Range as CoreRange, Table as CoreTable};
 
 /// A wrapper type to assert that you ment to use a string as a table name.
 ///
@@ -88,7 +86,7 @@ impl Resource {
 	}
 
 	#[cfg(feature = "protocol-ws")]
-	pub(crate) fn into_core_value(self) -> CoreValue {
+	pub(crate) fn into_core_value(self) -> surrealdb_core::sql::Value {
 		match self {
 			Resource::Table(x) => Table(x).into_core().into(),
 			Resource::RecordId(x) => x.into_inner().into(),
