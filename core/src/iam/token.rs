@@ -88,7 +88,7 @@ impl From<Claims> for Value {
 		// Add aud field if set
 		if let Some(aud) = v.aud {
 			match aud {
-				Audience::Single(s) => out.insert("aud".to_string(), s.into()),
+				Audience::Single(v) => out.insert("aud".to_string(), v.into()),
 				Audience::Multiple(v) => out.insert("aud".to_string(), v.into()),
 			};
 		}
