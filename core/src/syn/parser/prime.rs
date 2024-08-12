@@ -703,17 +703,13 @@ impl Parser<'_> {
 		matches!(
 			kind,
 			t!("ANALYZE")
-				| t!("BEGIN")
-				| t!("BREAK")
-				| t!("CANCEL")
-				| t!("COMMIT")
-				| t!("CONTINUE")
-				| t!("FOR") | t!("INFO")
-				| t!("KILL") | t!("LIVE")
-				| t!("OPTION")
+				| t!("BEGIN") | t!("BREAK")
+				| t!("CANCEL") | t!("COMMIT")
+				| t!("CONTINUE") | t!("FOR")
+				| t!("INFO") | t!("KILL")
+				| t!("LIVE") | t!("OPTION")
 				| t!("LET") | t!("SHOW")
-				| t!("SLEEP")
-				| t!("THROW")
+				| t!("SLEEP") | t!("THROW")
 				| t!("USE")
 		)
 	}
