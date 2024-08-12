@@ -122,6 +122,7 @@ surrealdb = { version = "2", path = "lib", features = [
     "protocol-http",
     "protocol-ws",
     "rustls",
+    "unstable",
 ] }
 tempfile = "3.8.1"
 thiserror = "1.0.50"

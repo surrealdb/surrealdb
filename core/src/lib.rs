@@ -24,7 +24,7 @@ pub mod env;
 pub mod err;
 #[doc(hidden)]
 pub mod fflags;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(all(not(target_arch = "wasm32"), feature = "unstable"))]
 #[doc(hidden)]
 pub mod gql;
 #[doc(hidden)]

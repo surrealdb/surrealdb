@@ -41,6 +41,7 @@ arbitrary = [
     "geo-types/arbitrary",
     "uuid/arbitrary",
 ]
+unstable = ["async-graphql"]
 # Special features
 kv-fdb-7_1 = ["foundationdb/fdb-7_1"]
 kv-fdb-7_3 = ["foundationdb/fdb-7_3"]
@@ -152,7 +153,7 @@ trice = "0.4.0"
 ulid = { version = "1.1.0", features = ["serde"] }
 unicase = "2.7.0"
 url = "2.5.0"
-async-graphql = { version = "7.0.7", default-features = false, features = [
+async-graphql = { version = "7.0.7", default-features = false, optional = true, features = [
     "dynamic-schema",
 ] }
 
