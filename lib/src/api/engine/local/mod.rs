@@ -950,7 +950,7 @@ async fn router(
 			model.comment = Some(file.header.description.to_string().into());
 			model.hash = hash;
 			let query = DefineStatement::Model(model).into();
-			let responses = kvs.process(query, session, Some(vars.as_core().0)).await?;
+			let responses = kvs.process(query, session, Some(vars.clone())).await?;
 
 			for response in responses {
 				response.result?;
