@@ -192,7 +192,7 @@ impl MutableContext {
 			))]
 			temporary_directory: parent.temporary_directory.clone(),
 			transaction: parent.transaction.clone(),
-            isolated: false,
+			isolated: false,
 			parent: Some(parent.clone()),
 		}
 	}
@@ -207,31 +207,31 @@ impl MutableContext {
 		}
 	}
 
-    /// Create a new child from a frozen context.
-    pub fn new_isolated(parent: &Context) -> Self {
-        Context {
-            values: HashMap::default(),
-            parent: Some(parent.clone()),
-            deadline: parent.deadline,
-            cancelled: Arc::new(AtomicBool::new(false)),
-            notifications: parent.notifications.clone(),
-            query_planner: parent.query_planner,
-            query_executor: parent.query_executor.clone(),
-            iteration_stage: parent.iteration_stage.clone(),
-            capabilities: parent.capabilities.clone(),
-            index_stores: parent.index_stores.clone(),
-            #[cfg(any(
-                feature = "kv-mem",
-                feature = "kv-surrealkv",
-                feature = "kv-rocksdb",
-                feature = "kv-fdb",
-                feature = "kv-tikv",
-            ))]
-            temporary_directory: parent.temporary_directory.clone(),
-            transaction: parent.transaction.clone(),
-            isolated: true,
-        }
-    }
+	/// Create a new child from a frozen context.
+	pub fn new_isolated(parent: &Context) -> Self {
+		Self {
+			values: HashMap::default(),
+			deadline: parent.deadline,
+			cancelled: Arc::new(AtomicBool::new(false)),
+			notifications: parent.notifications.clone(),
+			query_planner: parent.query_planner.clone(),
+			query_executor: parent.query_executor.clone(),
+			iteration_stage: parent.iteration_stage.clone(),
+			capabilities: parent.capabilities.clone(),
+			index_stores: parent.index_stores.clone(),
+			#[cfg(any(
+				feature = "kv-mem",
+				feature = "kv-surrealkv",
+				feature = "kv-rocksdb",
+				feature = "kv-fdb",
+				feature = "kv-tikv",
+			))]
+			temporary_directory: parent.temporary_directory.clone(),
+			transaction: parent.transaction.clone(),
+			isolated: true,
+			parent: Some(parent.clone()),
+		}
+	}
 
 	/// Add a value to the context. It overwrites any previously set values
 	/// with the same key.
