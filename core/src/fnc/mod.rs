@@ -74,7 +74,7 @@ macro_rules! dispatch {
 					$($wrapper)*(|| $($function_path)::+($($ctx_arg,)* args))()$(.$await)*
 				},)+
 				_ => {
-					return Err($crate::err::Error::InvalidFunction{
+					Err($crate::err::Error::InvalidFunction{
 						name: String::from($name),
 						message: $message.to_string()
 					})
