@@ -13,7 +13,7 @@ use crate::sql::Relation;
 use crate::sql::TableType;
 
 impl Document {
-	pub async fn edges(
+	pub async fn store_edges_data(
 		&mut self,
 		ctx: &Context,
 		opt: &Options,
@@ -30,7 +30,7 @@ impl Document {
 		// Lock the transaction
 		let mut txn = txn.lock().await;
 		// Get the record id
-		let rid = self.id.as_ref().unwrap();
+		let rid = self.id()?;
 		// Store the record edges
 		if let Workable::Relate(l, r, _) = &self.extras {
 			// For enforced relations, ensure that the edges exist
@@ -41,13 +41,14 @@ impl Document {
 					..
 				})
 			) {
+				// Check that the `in` record exists
 				let key = crate::key::thing::new(opt.ns()?, opt.db()?, &l.tb, &l.id);
 				if !txn.exists(key).await? {
 					return Err(Error::IdNotFound {
 						value: l.to_string(),
 					});
 				}
-
+				// Check that the `out` record exists
 				let key = crate::key::thing::new(opt.ns()?, opt.db()?, &r.tb, &r.id);
 				if !txn.exists(key).await? {
 					return Err(Error::IdNotFound {
@@ -58,7 +59,7 @@ impl Document {
 			// Get temporary edge references
 			let (ref o, ref i) = (Dir::Out, Dir::In);
 			// Store the left pointer edge
-			let key = crate::key::graph::new(opt.ns()?, opt.db()?, &l.tb, &l.id, o, rid);
+			let key = crate::key::graph::new(opt.ns()?, opt.db()?, &l.tb, &l.id, o, &rid);
 			txn.set(key, vec![], None).await?;
 			// Store the left inner edge
 			let key = crate::key::graph::new(opt.ns()?, opt.db()?, &rid.tb, &rid.id, i, l);
@@ -67,7 +68,7 @@ impl Document {
 			let key = crate::key::graph::new(opt.ns()?, opt.db()?, &rid.tb, &rid.id, o, r);
 			txn.set(key, vec![], None).await?;
 			// Store the right pointer edge
-			let key = crate::key::graph::new(opt.ns()?, opt.db()?, &r.tb, &r.id, i, rid);
+			let key = crate::key::graph::new(opt.ns()?, opt.db()?, &r.tb, &r.id, i, &rid);
 			txn.set(key, vec![], None).await?;
 			// Store the edges on the record
 			self.current.doc.to_mut().put(&*EDGE, Value::Bool(true));

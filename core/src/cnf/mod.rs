@@ -21,6 +21,9 @@ pub static MAX_CONCURRENT_TASKS: LazyLock<usize> =
 pub static MAX_COMPUTATION_DEPTH: LazyLock<u32> =
 	lazy_env_parse!("SURREAL_MAX_COMPUTATION_DEPTH", u32, 120);
 
+pub static REGEX_CACHE_SIZE: LazyLock<usize> =
+	lazy_env_parse!("SURREAL_REGEX_CACHE_SIZE", usize, 1_000);
+
 /// Specifies the number of items which can be cached within a single transaction.
 pub static TRANSACTION_CACHE_SIZE: LazyLock<usize> =
 	lazy_env_parse!("SURREAL_TRANSACTION_CACHE_SIZE", usize, 10_000);

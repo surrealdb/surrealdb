@@ -169,13 +169,13 @@ async fn create_with_id() -> Result<(), Error> {
 	let tmp = res.remove(0).result;
 	assert!(matches!(
 		tmp.err(),
-		Some(e) if e.to_string() == r#"Found 'tobie' for the id field, but a specific record has been specified"#
+		Some(e) if e.to_string() == r#"Found 'tobie' for the `id` field, but a specific record has been specified"#
 	));
 	//
 	let tmp = res.remove(0).result;
 	assert!(matches!(
 		tmp.err(),
-		Some(e) if e.to_string() == r#"Found 'tobie' for the id field, but a specific record has been specified"#
+		Some(e) if e.to_string() == r#"Found 'tobie' for the `id` field, but a specific record has been specified"#
 	));
 	//
 	Ok(())

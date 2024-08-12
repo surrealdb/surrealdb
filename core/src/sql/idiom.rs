@@ -137,6 +137,10 @@ impl Idiom {
 	pub(crate) fn is_meta(&self) -> bool {
 		self.0.len() == 1 && self.0[0].eq(&META[0])
 	}
+	/// Check if this Idiom is an specific field
+	pub(crate) fn is_field(&self, other: &[Part]) -> bool {
+		self.as_ref().eq(other)
+	}
 	/// Check if this is an expression with multiple yields
 	pub(crate) fn is_multi_yield(&self) -> bool {
 		self.iter().any(Self::split_multi_yield)

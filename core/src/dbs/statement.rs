@@ -116,18 +116,27 @@ impl<'a> fmt::Display for Statement<'a> {
 }
 
 impl<'a> Statement<'a> {
-	/// Check the type of statement
-	#[inline]
+	/// Check if this is a SELECT statement
 	pub fn is_select(&self) -> bool {
 		matches!(self, Statement::Select(_))
 	}
-	/// Check the type of statement
-	#[inline]
+	/// Check if this is a CREATE statement
+	pub fn is_create(&self) -> bool {
+		matches!(self, Statement::Create(_))
+	}
+	/// Check if this is a DELETE statement
 	pub fn is_delete(&self) -> bool {
 		matches!(self, Statement::Delete(_))
 	}
+	/// Returns whether retrieval can be deferred
+	pub fn is_deferable(&self) -> bool {
+		matches!(self, Statement::Create(_) | Statement::Upsert(_))
+	}
+	/// Returns whether this requires savepoints
+	pub fn is_retryable(&self) -> bool {
+		matches!(self, Statement::Insert(_) if self.data().is_some())
+	}
 	/// Returns any query fields if specified
-	#[inline]
 	pub fn expr(&self) -> Option<&Fields> {
 		match self {
 			Statement::Select(v) => Some(&v.expr),
@@ -136,15 +145,13 @@ impl<'a> Statement<'a> {
 		}
 	}
 	/// Returns any OMIT clause if specified
-	#[inline]
 	pub fn omit(&self) -> Option<&Idioms> {
 		match self {
 			Statement::Select(v) => v.omit.as_ref(),
 			_ => None,
 		}
 	}
-	/// Returns any SET clause if specified
-	#[inline]
+	/// Returns any SET, CONTENT, or MERGE clause if specified
 	pub fn data(&self) -> Option<&Data> {
 		match self {
 			Statement::Create(v) => v.data.as_ref(),
@@ -156,7 +163,6 @@ impl<'a> Statement<'a> {
 		}
 	}
 	/// Returns any WHERE clause if specified
-	#[inline]
 	pub fn conds(&self) -> Option<&Cond> {
 		match self {
 			Statement::Live(v) => v.cond.as_ref(),
@@ -168,7 +174,6 @@ impl<'a> Statement<'a> {
 		}
 	}
 	/// Returns any SPLIT clause if specified
-	#[inline]
 	pub fn split(&self) -> Option<&Splits> {
 		match self {
 			Statement::Select(v) => v.split.as_ref(),
@@ -176,7 +181,6 @@ impl<'a> Statement<'a> {
 		}
 	}
 	/// Returns any GROUP clause if specified
-	#[inline]
 	pub fn group(&self) -> Option<&Groups> {
 		match self {
 			Statement::Select(v) => v.group.as_ref(),
@@ -184,7 +188,6 @@ impl<'a> Statement<'a> {
 		}
 	}
 	/// Returns any ORDER clause if specified
-	#[inline]
 	pub fn order(&self) -> Option<&Orders> {
 		match self {
 			Statement::Select(v) => v.order.as_ref(),
@@ -192,7 +195,6 @@ impl<'a> Statement<'a> {
 		}
 	}
 	/// Returns any FETCH clause if specified
-	#[inline]
 	pub fn fetch(&self) -> Option<&Fetchs> {
 		match self {
 			Statement::Select(v) => v.fetch.as_ref(),
@@ -200,7 +202,6 @@ impl<'a> Statement<'a> {
 		}
 	}
 	/// Returns any START clause if specified
-	#[inline]
 	pub fn start(&self) -> Option<&Start> {
 		match self {
 			Statement::Select(v) => v.start.as_ref(),
@@ -208,7 +209,6 @@ impl<'a> Statement<'a> {
 		}
 	}
 	/// Returns any LIMIT clause if specified
-	#[inline]
 	pub fn limit(&self) -> Option<&Limit> {
 		match self {
 			Statement::Select(v) => v.limit.as_ref(),
@@ -216,7 +216,6 @@ impl<'a> Statement<'a> {
 		}
 	}
 	/// Returns any RETURN clause if specified
-	#[inline]
 	pub fn output(&self) -> Option<&Output> {
 		match self {
 			Statement::Create(v) => v.output.as_ref(),
@@ -229,7 +228,6 @@ impl<'a> Statement<'a> {
 		}
 	}
 	/// Returns any PARALLEL clause if specified
-	#[inline]
 	#[cfg(not(target_arch = "wasm32"))]
 	pub fn parallel(&self) -> bool {
 		match self {
@@ -243,9 +241,7 @@ impl<'a> Statement<'a> {
 			_ => false,
 		}
 	}
-
 	/// Returns any TEMPFILES clause if specified
-	#[inline]
 	#[cfg(storage)]
 	pub fn tempfiles(&self) -> bool {
 		match self {
@@ -253,9 +249,7 @@ impl<'a> Statement<'a> {
 			_ => false,
 		}
 	}
-
 	/// Returns any EXPLAIN clause if specified
-	#[inline]
 	pub fn explain(&self) -> Option<&Explain> {
 		match self {
 			Statement::Select(v) => v.explain.as_ref(),

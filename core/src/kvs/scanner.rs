@@ -94,7 +94,7 @@ impl<'a> Stream for Scanner<'a, (Key, Val)> {
 							}
 							// Get the last element of the results
 							let last = v.last().ok_or_else(|| {
-								Error::Unreachable("Last key/val can't be none".to_string())
+								fail!("Expected the last key-value pair to not be none")
 							})?;
 							// Start the next scan from the last result
 							self.range.start.clone_from(&last.0);
@@ -161,7 +161,7 @@ impl<'a> Stream for Scanner<'a, Key> {
 							}
 							// Get the last element of the results
 							let last = v.last().ok_or_else(|| {
-								Error::Unreachable("Last key can't be none".to_string())
+								fail!("Expected the last key-value pair to not be none")
 							})?;
 							// Start the next scan from the last result
 							self.range.start.clone_from(last);

@@ -136,11 +136,10 @@ impl<'a> Processor<'a> {
 		if ctx.is_ok() {
 			match iterable {
 				Iterable::Value(v) => self.process_value(stk, ctx, opt, stm, v).await?,
+				Iterable::Yield(v) => self.process_yield(stk, ctx, opt, stm, v).await?,
 				Iterable::Thing(v) => self.process_thing(stk, ctx, opt, stm, v).await?,
 				Iterable::Defer(v) => self.process_defer(stk, ctx, opt, stm, v).await?,
-				Iterable::TableRange(tb, v) => {
-					self.process_range(stk, ctx, opt, stm, tb, v).await?
-				}
+				Iterable::Range(tb, v) => self.process_range(stk, ctx, opt, stm, tb, v).await?,
 				Iterable::Edges(e) => self.process_edge(stk, ctx, opt, stm, e).await?,
 				Iterable::Table(v, keys_only) => {
 					let ctx = Self::check_query_planner_context(ctx, &v);
@@ -187,6 +186,36 @@ impl<'a> Processor<'a> {
 			rid: None,
 			ir: None,
 			val: Operable::Value(v.into()),
+		};
+		// Process the document record
+		self.process(stk, ctx, opt, stm, pro).await
+	}
+
+	async fn process_yield(
+		&mut self,
+		stk: &mut Stk,
+		ctx: &Context,
+		opt: &Options,
+		stm: &Statement<'_>,
+		v: Table,
+	) -> Result<(), Error> {
+		// Fetch the record id if specified
+		let v = match stm.data() {
+			// There is a data clause so fetch a record id
+			Some(data) => match data.rid(stk, ctx, opt).await? {
+				// Generate a new id from the id field
+				Some(id) => id.generate(&v, false)?,
+				// Generate a new random table id
+				None => v.generate(),
+			},
+			// There is no data clause so create a record id
+			None => v.generate(),
+		};
+		// Pass the value through
+		let pro = Processed {
+			rid: Some(v.into()),
+			ir: None,
+			val: Operable::Value(Value::None.into()),
 		};
 		// Process the document record
 		self.process(stk, ctx, opt, stm, pro).await
@@ -255,21 +284,11 @@ impl<'a> Processor<'a> {
 	) -> Result<(), Error> {
 		// Check that the table exists
 		ctx.tx().check_ns_db_tb(opt.ns()?, opt.db()?, &v.tb, opt.strict).await?;
-		// Fetch the data from the store
-		let key = thing::new(opt.ns()?, opt.db()?, &v.tb, &v.id);
-		let val = ctx.tx().get(key, None).await?;
-		// Parse the data from the store
-		let x = match val {
-			Some(v) => Value::from(v),
-			None => Value::None,
-		};
-		// Create a new operable value
-		let val = Operable::Mergeable(x.into(), o.into());
 		// Process the document record
 		let pro = Processed {
 			rid: Some(v.into()),
 			ir: None,
-			val,
+			val: Operable::Mergeable(Value::None.into(), o.into(), false),
 		};
 		self.process(stk, ctx, opt, stm, pro).await?;
 		// Everything ok

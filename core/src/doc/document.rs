@@ -79,7 +79,6 @@ impl CursorValue {
 
 impl Deref for CursorValue {
 	type Target = Value;
-
 	fn deref(&self) -> &Self::Target {
 		self.as_ref()
 	}
@@ -194,6 +193,14 @@ impl Document {
 		self.initial.doc.as_ref().is_none() && self.current.doc.as_ref().is_some()
 	}
 
+	/// Retrieve the record id for this document
+	pub fn id(&self) -> Result<Arc<Thing>, Error> {
+		match self.id.as_ref() {
+			Some(id) => Ok(id.clone()),
+			_ => Err(fail!("Expected a document id to be present")),
+		}
+	}
+
 	/// Get the table for this document
 	pub async fn tb(
 		&self,
@@ -203,9 +210,9 @@ impl Document {
 		// Get transaction
 		let txn = ctx.tx();
 		// Get the record id
-		let rid = self.id.as_ref().unwrap();
+		let id = self.id()?;
 		// Get the table definition
-		let tb = txn.get_tb(opt.ns()?, opt.db()?, &rid.tb).await;
+		let tb = txn.get_tb(opt.ns()?, opt.db()?, &id.tb).await;
 		// Return the table or attempt to define it
 		match tb {
 			// The table doesn't exist
@@ -215,7 +222,7 @@ impl Document {
 				// Allowed to run?
 				opt.is_allowed(Action::Edit, ResourceKind::Table, &Base::Db)?;
 				// We can create the table automatically
-				txn.ensure_ns_db_tb(opt.ns()?, opt.db()?, &rid.tb, opt.strict).await
+				txn.ensure_ns_db_tb(opt.ns()?, opt.db()?, &id.tb, opt.strict).await
 			}
 			// There was an error
 			Err(err) => Err(err),
@@ -230,7 +237,7 @@ impl Document {
 		opt: &Options,
 	) -> Result<Arc<[DefineTableStatement]>, Error> {
 		// Get the record id
-		let id = self.id.as_ref().unwrap();
+		let id = self.id()?;
 		// Get the table definitions
 		ctx.tx().all_tb_views(opt.ns()?, opt.db()?, &id.tb).await
 	}
@@ -241,7 +248,7 @@ impl Document {
 		opt: &Options,
 	) -> Result<Arc<[DefineEventStatement]>, Error> {
 		// Get the record id
-		let id = self.id.as_ref().unwrap();
+		let id = self.id()?;
 		// Get the event definitions
 		ctx.tx().all_tb_events(opt.ns()?, opt.db()?, &id.tb).await
 	}
@@ -252,7 +259,7 @@ impl Document {
 		opt: &Options,
 	) -> Result<Arc<[DefineFieldStatement]>, Error> {
 		// Get the record id
-		let id = self.id.as_ref().unwrap();
+		let id = self.id()?;
 		// Get the field definitions
 		ctx.tx().all_tb_fields(opt.ns()?, opt.db()?, &id.tb, None).await
 	}
@@ -263,14 +270,14 @@ impl Document {
 		opt: &Options,
 	) -> Result<Arc<[DefineIndexStatement]>, Error> {
 		// Get the record id
-		let id = self.id.as_ref().unwrap();
+		let id = self.id()?;
 		// Get the index definitions
 		ctx.tx().all_tb_indexes(opt.ns()?, opt.db()?, &id.tb).await
 	}
 	// Get the lives for this document
 	pub async fn lv(&self, ctx: &Context, opt: &Options) -> Result<Arc<[LiveStatement]>, Error> {
 		// Get the record id
-		let id = self.id.as_ref().unwrap();
+		let id = self.id()?;
 		// Get the table definition
 		ctx.tx().all_tb_lives(opt.ns()?, opt.db()?, &id.tb).await
 	}

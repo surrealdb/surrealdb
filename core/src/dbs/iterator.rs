@@ -11,7 +11,10 @@ use crate::doc::Document;
 use crate::err::Error;
 use crate::idx::planner::iterators::{IteratorRecord, IteratorRef};
 use crate::idx::planner::IterationStage;
+use crate::sql::array::Array;
 use crate::sql::edges::Edges;
+use crate::sql::mock::Mock;
+use crate::sql::object::Object;
 use crate::sql::table::Table;
 use crate::sql::thing::Thing;
 use crate::sql::value::Value;
@@ -26,15 +29,62 @@ const TARGET: &str = "surrealdb::core::dbs";
 
 #[derive(Clone)]
 pub(crate) enum Iterable {
+	/// Any [Value] which does not exists in storage. This
+	/// could be the result of a query, an arbritrary
+	/// SurrealQL value, object, or array of values.
 	Value(Value),
-	Table(Table, bool), // true = keys only
-	Thing(Thing),
-	TableRange(String, IdRange),
-	Edges(Edges),
+	/// An iterable which does not actually fetch the record
+	/// data from storage. This is used in CREATE statements
+	/// where we attempt to write data without first checking
+	/// if the record exists, throwing an error on failure.
 	Defer(Thing),
+	/// An iterable whose Record ID needs to be generated
+	/// before processing. This is used in CREATE statements
+	/// when generating a new id, or generating an id based
+	/// on the id field which is specified within the data.
+	Yield(Table),
+	/// An iterable which needs to fetch the data of a
+	/// specific record before processing the document.
+	Thing(Thing),
+	/// An iterable which needs to fetch the related edges
+	/// of a record before processing each document.
+	Edges(Edges),
+	/// An iterable which needs to iterate over the records
+	/// in a table before processing each document. When the
+	/// second argument is true, we iterate over keys only.
+	Table(Table, bool),
+	/// An iterable which fetches a specific range of records
+	/// from storage, used in range and time-series scenarios.
+	Range(String, IdRange),
+	/// An iterable which fetches a record from storage, and
+	/// which has the specific value to update the record with.
+	/// This is used in INSERT statements, where each value
+	/// passed in to the iterable is unique for each record.
 	Mergeable(Thing, Value),
+	/// An iterable which fetches a record from storage, and
+	/// which has the specific value to update the record with.
+	/// This is used in RELATE statements. The optional value
+	/// is used in INSERT RELATION statements, where each value
+	/// passed in to the iterable is unique for each record.
 	Relatable(Thing, Thing, Thing, Option<Value>),
+	/// An iterable which iterates over an index range for a
+	/// table, which then fetches the correesponding records
+	/// which are matched within the index.
 	Index(Table, IteratorRef),
+}
+
+#[derive(Debug)]
+pub(crate) enum Operable {
+	Value(Arc<Value>),
+	Mergeable(Arc<Value>, Arc<Value>, bool),
+	Relatable(Thing, Arc<Value>, Thing, Option<Arc<Value>>),
+}
+
+#[derive(Debug)]
+pub(crate) enum Workable {
+	Normal,
+	Insert(Arc<Value>, bool),
+	Relate(Thing, Thing, Option<Arc<Value>>),
 }
 
 #[derive(Debug)]
@@ -44,18 +94,15 @@ pub(crate) struct Processed {
 	pub(crate) val: Operable,
 }
 
-#[derive(Debug)]
-pub(crate) enum Operable {
-	Value(Arc<Value>),
-	Mergeable(Arc<Value>, Arc<Value>),
-	Relatable(Thing, Arc<Value>, Thing, Option<Arc<Value>>),
-}
-
-#[derive(Debug)]
-pub(crate) enum Workable {
-	Normal,
-	Insert(Arc<Value>),
-	Relate(Thing, Thing, Option<Arc<Value>>),
+impl Workable {
+	/// Check if this is the first iteration of an INSERT statement
+	pub(crate) fn is_insert_initial(&self) -> bool {
+		matches!(self, Self::Insert(_, false))
+	}
+	/// Check if this is an INSERT with a specific id field
+	pub(crate) fn is_insert_with_specific_id(&self) -> bool {
+		matches!(self, Self::Insert(v, _) if v.rid().is_some())
+	}
 }
 
 #[derive(Default)]
@@ -97,188 +144,138 @@ impl Iterator {
 	}
 
 	/// Ingests an iterable for processing
-	pub fn ingest(&mut self, val: Iterable) {
+	pub(crate) fn ingest(&mut self, val: Iterable) {
 		self.entries.push(val)
 	}
 
 	/// Prepares a value for processing
-	pub async fn prepare(
-		&mut self,
-		stk: &mut Stk,
-		ctx: &Context,
-		opt: &Options,
-		stm: &Statement<'_>,
-		val: Value,
-	) -> Result<(), Error> {
+	pub(crate) fn prepare(&mut self, stm: &Statement<'_>, val: Value) -> Result<(), Error> {
 		// Match the values
 		match val {
-			Value::Table(v) => match stm.data() {
-				// There is a data clause so fetch a record id
-				Some(data) => match stm {
-					Statement::Create(_) => {
-						let id = match data.rid(stk, ctx, opt).await? {
-							// Generate a new id from the id field
-							Some(id) => id.generate(&v, false)?,
-							// Generate a new random table id
-							None => v.generate(),
-						};
-						self.ingest(Iterable::Thing(id))
-					}
-					_ => {
-						// Ingest the table for scanning
-						self.ingest(Iterable::Table(v, false))
-					}
-				},
-				// There is no data clause so create a record id
-				None => match stm {
-					Statement::Create(_) => {
-						// Generate a new random table id
-						self.ingest(Iterable::Thing(v.generate()))
-					}
-					_ => {
-						// Ingest the table for scanning
-						self.ingest(Iterable::Table(v, false))
-					}
-				},
+			Value::Mock(v) => self.prepare_mock(stm, v)?,
+			Value::Table(v) => self.prepare_table(stm, v)?,
+			Value::Edges(v) => self.prepare_edges(stm, *v)?,
+			Value::Object(v) => self.prepare_object(stm, v)?,
+			Value::Array(v) => self.prepare_array(stm, v)?,
+			Value::Thing(v) => match v.is_range() {
+				true => self.prepare_range(stm, v)?,
+				false => self.prepare_thing(stm, v)?,
 			},
-			Value::Thing(v) => {
-				// Check if there is a data clause
-				if let Some(data) = stm.data() {
-					// Check if there is an id field specified
-					if let Some(id) = data.rid(stk, ctx, opt).await? {
-						// Check to see the type of the id
-						match id {
-							// The id is a match, so don't error
-							Value::Thing(id) if id == v => (),
-							// The id does not match
-							id => {
-								return Err(Error::IdMismatch {
-									value: id.to_string(),
-								});
-							}
-						}
-					}
-				}
-				// Add the record to the iterator
-				match &v.id {
-					Id::Range(r) => {
-						match stm {
-							Statement::Create(_) => {
-								return Err(Error::InvalidStatementTarget {
-									value: v.to_string(),
-								});
-							}
-							_ => {
-								self.ingest(Iterable::TableRange(v.tb, *r.to_owned()));
-							}
-						};
-					}
-					_ => {
-						match stm {
-							Statement::Create(_) => {
-								self.ingest(Iterable::Defer(v));
-							}
-							_ => {
-								self.ingest(Iterable::Thing(v));
-							}
-						};
-					}
-				}
-			}
-			Value::Mock(v) => {
-				// Check if there is a data clause
-				if let Some(data) = stm.data() {
-					// Check if there is an id field specified
-					if let Some(id) = data.rid(stk, ctx, opt).await? {
-						return Err(Error::IdMismatch {
-							value: id.to_string(),
-						});
-					}
-				}
-				// Add the records to the iterator
-				for v in v {
-					self.ingest(Iterable::Thing(v))
-				}
-			}
-			Value::Edges(v) => {
-				// Check if this is a create statement
-				if let Statement::Create(_) = stm {
-					return Err(Error::InvalidStatementTarget {
-						value: v.to_string(),
-					});
-				}
-				// Check if there is a data clause
-				if let Some(data) = stm.data() {
-					// Check if there is an id field specified
-					if let Some(id) = data.rid(stk, ctx, opt).await? {
-						return Err(Error::IdMismatch {
-							value: id.to_string(),
-						});
-					}
-				}
-				// Add the record to the iterator
-				self.ingest(Iterable::Edges(*v));
-			}
-			Value::Object(v) => {
-				// Check if there is a data clause
-				if let Some(data) = stm.data() {
-					// Check if there is an id field specified
-					if let Some(id) = data.rid(stk, ctx, opt).await? {
-						return Err(Error::IdMismatch {
-							value: id.to_string(),
-						});
-					}
-				}
-				// Check if the object has an id field
-				match v.rid() {
-					Some(id) => {
-						// Add the record to the iterator
-						self.ingest(Iterable::Thing(id))
-					}
-					None => {
-						return Err(Error::InvalidStatementTarget {
-							value: v.to_string(),
-						});
-					}
-				}
-			}
-			Value::Array(v) => {
-				// Check if there is a data clause
-				if let Some(data) = stm.data() {
-					// Check if there is an id field specified
-					if let Some(id) = data.rid(stk, ctx, opt).await? {
-						return Err(Error::IdMismatch {
-							value: id.to_string(),
-						});
-					}
-				}
-				// Add the records to the iterator
-				for v in v {
-					match v {
-						Value::Thing(v) => self.ingest(Iterable::Thing(v)),
-						Value::Edges(v) => self.ingest(Iterable::Edges(*v)),
-						Value::Object(v) => match v.rid() {
-							Some(v) => self.ingest(Iterable::Thing(v)),
-							None => {
-								return Err(Error::InvalidStatementTarget {
-									value: v.to_string(),
-								})
-							}
-						},
-						_ => {
-							return Err(Error::InvalidStatementTarget {
-								value: v.to_string(),
-							})
-						}
-					}
-				}
-			}
 			v => {
 				return Err(Error::InvalidStatementTarget {
 					value: v.to_string(),
 				})
 			}
 		};
+		// All ingested ok
+		Ok(())
+	}
+
+	/// Prepares a value for processing
+	pub(crate) fn prepare_table(&mut self, stm: &Statement<'_>, v: Table) -> Result<(), Error> {
+		// Add the record to the iterator
+		match stm.is_create() {
+			true => self.ingest(Iterable::Yield(v)),
+			false => self.ingest(Iterable::Table(v, false)),
+		}
+		// All ingested ok
+		Ok(())
+	}
+
+	/// Prepares a value for processing
+	pub(crate) fn prepare_thing(&mut self, stm: &Statement<'_>, v: Thing) -> Result<(), Error> {
+		// Add the record to the iterator
+		match stm.is_deferable() {
+			true => self.ingest(Iterable::Defer(v)),
+			false => self.ingest(Iterable::Thing(v)),
+		}
+		// All ingested ok
+		Ok(())
+	}
+
+	/// Prepares a value for processing
+	pub(crate) fn prepare_mock(&mut self, stm: &Statement<'_>, v: Mock) -> Result<(), Error> {
+		// Add the records to the iterator
+		for v in v {
+			match stm.is_deferable() {
+				true => self.ingest(Iterable::Defer(v)),
+				false => self.ingest(Iterable::Thing(v)),
+			}
+		}
+		// All ingested ok
+		Ok(())
+	}
+
+	/// Prepares a value for processing
+	pub(crate) fn prepare_edges(&mut self, stm: &Statement<'_>, v: Edges) -> Result<(), Error> {
+		// Check if this is a create statement
+		if stm.is_create() {
+			return Err(Error::InvalidStatementTarget {
+				value: v.to_string(),
+			});
+		}
+		// Add the record to the iterator
+		self.ingest(Iterable::Edges(v));
+		// All ingested ok
+		Ok(())
+	}
+
+	/// Prepares a value for processing
+	pub(crate) fn prepare_range(&mut self, stm: &Statement<'_>, v: Thing) -> Result<(), Error> {
+		// Check if this is a create statement
+		if stm.is_create() {
+			return Err(Error::InvalidStatementTarget {
+				value: v.to_string(),
+			});
+		}
+		// Add the record to the iterator
+		if let (tb, Id::Range(v)) = (v.tb, v.id) {
+			self.ingest(Iterable::Range(tb, *v));
+		}
+		// All ingested ok
+		Ok(())
+	}
+
+	/// Prepares a value for processing
+	pub(crate) fn prepare_object(&mut self, stm: &Statement<'_>, v: Object) -> Result<(), Error> {
+		// Add the record to the iterator
+		match v.rid() {
+			// This object has an 'id' field
+			Some(v) => match stm.is_deferable() {
+				true => self.ingest(Iterable::Defer(v)),
+				false => self.ingest(Iterable::Thing(v)),
+			},
+			// This object has no 'id' field
+			None => {
+				return Err(Error::InvalidStatementTarget {
+					value: v.to_string(),
+				});
+			}
+		}
+		// All ingested ok
+		Ok(())
+	}
+
+	/// Prepares a value for processing
+	pub(crate) fn prepare_array(&mut self, stm: &Statement<'_>, v: Array) -> Result<(), Error> {
+		// Add the records to the iterator
+		for v in v {
+			match v {
+				Value::Mock(v) => self.prepare_mock(stm, v)?,
+				Value::Table(v) => self.prepare_table(stm, v)?,
+				Value::Edges(v) => self.prepare_edges(stm, *v)?,
+				Value::Object(v) => self.prepare_object(stm, v)?,
+				Value::Thing(v) => match v.is_range() {
+					true => self.prepare_range(stm, v)?,
+					false => self.prepare_thing(stm, v)?,
+				},
+				_ => {
+					return Err(Error::InvalidStatementTarget {
+						value: v.to_string(),
+					})
+				}
+			}
+		}
 		// All ingested ok
 		Ok(())
 	}

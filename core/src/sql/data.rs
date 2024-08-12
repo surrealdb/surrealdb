@@ -4,6 +4,8 @@ use crate::err::Error;
 use crate::sql::fmt::Fmt;
 use crate::sql::idiom::Idiom;
 use crate::sql::operator::Operator;
+use crate::sql::part::Part;
+use crate::sql::paths::ID;
 use crate::sql::value::Value;
 use reblessive::tree::Stk;
 use revision::revisioned;
@@ -41,31 +43,41 @@ impl Data {
 		ctx: &Context,
 		opt: &Options,
 	) -> Result<Option<Value>, Error> {
+		self.pick(stk, ctx, opt, &*ID).await
+	}
+	/// Fetch a field path value if one is specified
+	pub(crate) async fn pick(
+		&self,
+		stk: &mut Stk,
+		ctx: &Context,
+		opt: &Options,
+		path: &[Part],
+	) -> Result<Option<Value>, Error> {
 		match self {
 			Self::MergeExpression(v) => match v {
-				Value::Param(v) => Ok(v.compute(stk, ctx, opt, None).await?.rid().some()),
-				Value::Object(_) => Ok(v.rid().compute(stk, ctx, opt, None).await?.some()),
+				Value::Param(v) => Ok(v.compute(stk, ctx, opt, None).await?.pick(path).some()),
+				Value::Object(_) => Ok(v.pick(path).compute(stk, ctx, opt, None).await?.some()),
 				_ => Ok(None),
 			},
 			Self::ReplaceExpression(v) => match v {
-				Value::Param(v) => Ok(v.compute(stk, ctx, opt, None).await?.rid().some()),
-				Value::Object(_) => Ok(v.rid().compute(stk, ctx, opt, None).await?.some()),
+				Value::Param(v) => Ok(v.compute(stk, ctx, opt, None).await?.pick(path).some()),
+				Value::Object(_) => Ok(v.pick(path).compute(stk, ctx, opt, None).await?.some()),
 				_ => Ok(None),
 			},
 			Self::ContentExpression(v) => match v {
-				Value::Param(v) => Ok(v.compute(stk, ctx, opt, None).await?.rid().some()),
-				Value::Object(_) => Ok(v.rid().compute(stk, ctx, opt, None).await?.some()),
+				Value::Param(v) => Ok(v.compute(stk, ctx, opt, None).await?.pick(path).some()),
+				Value::Object(_) => Ok(v.pick(path).compute(stk, ctx, opt, None).await?.some()),
 				_ => Ok(None),
 			},
-			Self::SetExpression(v) => match v.iter().find(|f| f.0.is_id()) {
+			Self::SetExpression(v) => match v.iter().find(|f| f.0.is_field(path)) {
 				Some((_, _, v)) => {
-					// This SET expression has an 'id' field
+					// This SET expression has this field
 					Ok(v.compute(stk, ctx, opt, None).await?.some())
 				}
-				// This SET expression had no 'id' field
+				// This SET expression does not have this field
 				_ => Ok(None),
 			},
-			// Generate a random id for all other data clauses
+			// Return nothing
 			_ => Ok(None),
 		}
 	}

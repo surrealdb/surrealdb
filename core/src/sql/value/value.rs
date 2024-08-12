@@ -2909,6 +2909,7 @@ impl Value {
 	/// Check if we require a writeable transaction
 	pub(crate) fn writeable(&self) -> bool {
 		match self {
+			Value::Cast(v) => v.writeable(),
 			Value::Block(v) => v.writeable(),
 			Value::Idiom(v) => v.writeable(),
 			Value::Array(v) => v.iter().any(Value::writeable),
@@ -2923,8 +2924,21 @@ impl Value {
 		}
 	}
 	/// Process this type returning a computed simple Value
-	///
-	/// Is used recursively.
+	pub(crate) async fn compute(
+		&self,
+		stk: &mut Stk,
+		ctx: &Context,
+		opt: &Options,
+		doc: Option<&CursorDoc>,
+	) -> Result<Value, Error> {
+		match self.compute_unbordered(stk, ctx, opt, doc).await {
+			Err(Error::Return {
+				value,
+			}) => Ok(value),
+			res => res,
+		}
+	}
+	/// Process this type returning a computed simple Value, without catching errors
 	pub(crate) async fn compute_unbordered(
 		&self,
 		stk: &mut Stk,
@@ -2951,21 +2965,6 @@ impl Value {
 			Value::Subquery(v) => stk.run(|stk| v.compute(stk, ctx, opt, doc)).await,
 			Value::Expression(v) => stk.run(|stk| v.compute(stk, ctx, opt, doc)).await,
 			_ => Ok(self.to_owned()),
-		}
-	}
-
-	pub(crate) async fn compute(
-		&self,
-		stk: &mut Stk,
-		ctx: &Context,
-		opt: &Options,
-		doc: Option<&CursorDoc>,
-	) -> Result<Value, Error> {
-		match self.compute_unbordered(stk, ctx, opt, doc).await {
-			Err(Error::Return {
-				value,
-			}) => Ok(value),
-			res => res,
 		}
 	}
 }

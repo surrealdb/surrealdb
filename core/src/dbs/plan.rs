@@ -102,6 +102,10 @@ impl ExplainItem {
 				.into(),
 				details: vec![("table", Value::from(t.0.to_owned()))],
 			},
+			Iterable::Yield(t) => Self {
+				name: "Iterate Yield".into(),
+				details: vec![("table", Value::from(t.0.to_owned()))],
+			},
 			Iterable::Thing(t) => Self {
 				name: "Iterate Thing".into(),
 				details: vec![("thing", Value::Thing(t.to_owned()))],
@@ -110,7 +114,7 @@ impl ExplainItem {
 				name: "Iterate Defer".into(),
 				details: vec![("thing", Value::Thing(t.to_owned()))],
 			},
-			Iterable::TableRange(tb, r) => Self {
+			Iterable::Range(tb, r) => Self {
 				name: "Iterate Range".into(),
 				details: vec![("table", tb.to_owned().into()), ("range", r.to_owned().into())],
 			},
