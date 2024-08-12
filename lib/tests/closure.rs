@@ -53,8 +53,12 @@ async fn closures() -> Result<(), Error> {
 	assert_eq!(tmp, val);
 	//
 	match res.remove(0).result {
-		Err(Error::InvalidFunction { name, message }) if name == "ANONYMOUS" && message == "Expected this closure to return a value of type 'string', but found 'int'" => (),
-		_ => panic!("Invocation should have failed with error: There was a problem running the ANONYMOUS() function. Expected this closure to return a value of type 'string', but found 'int'")
+		Err(Error::FunctionCheck {
+			name,
+			value,
+			check,
+		}) if name == "ANONYMOUS" && value == "123" && check == "string" => (),
+		_ => panic!("Invocation should have failed with error"),
 	}
 	//
 	let tmp = res.remove(0).result?;
