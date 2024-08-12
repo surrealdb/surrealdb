@@ -912,7 +912,7 @@ async fn router(
 			// Ensure a NS and DB are set
 			let (nsv, dbv) = check_ns_db(session)?;
 			// Check the permissions level
-			kvs.check(session, Action::Edit, Resource::Model.on_db(&nsv, &dbv))?;
+			kvs.check(session, Action::Edit, ResourceKind::Model.on_db(&nsv, &dbv))?;
 			// Create a new buffer
 			let mut buffer = Vec::new();
 			// Load all the uploaded file chunks
