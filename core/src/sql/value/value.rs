@@ -1028,7 +1028,7 @@ impl Value {
 	/// Check if this Value is a Thing of a specific type
 	pub fn is_record_type(&self, types: &[Table]) -> bool {
 		match self {
-			Value::Thing(v) => types.is_empty() || types.iter().any(|tb| tb.0 == v.tb),
+			Value::Thing(v) => v.is_record_type(types),
 			_ => false,
 		}
 	}
@@ -2245,9 +2245,9 @@ impl Value {
 
 	/// Try to convert this value to a Record of a certain type
 	pub(crate) fn convert_to_record_type(self, val: &[Table]) -> Result<Thing, Error> {
-		match self {
+		match self.clone().convert_to_record() {
 			// Records are allowed if correct type
-			Value::Thing(v) if self.is_record_type(val) => Ok(v),
+			Ok(t) if t.is_record_type(val) => Ok(t),
 			// Anything else raises an error
 			_ => Err(Error::ConvertTo {
 				from: self,
