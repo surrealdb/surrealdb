@@ -12,7 +12,7 @@ use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display};
 
-#[revisioned(revision = 2)]
+#[revisioned(revision = 3)]
 #[derive(Clone, Default, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
@@ -25,6 +25,8 @@ pub struct DefineAccessStatement {
 	pub duration: AccessDuration,
 	pub comment: Option<Strand>,
 	pub if_not_exists: bool,
+	#[revision(start = 3)]
+	pub overwrite: bool,
 }
 
 impl DefineAccessStatement {
@@ -70,7 +72,7 @@ impl DefineAccessStatement {
 				if txn.get_root_access(&self.name).await.is_ok() {
 					if self.if_not_exists {
 						return Ok(Value::None);
-					} else {
+					} else if !self.overwrite {
 						return Err(Error::AccessRootAlreadyExists {
 							value: self.name.to_string(),
 						});
@@ -83,6 +85,7 @@ impl DefineAccessStatement {
 					DefineAccessStatement {
 						// Don't persist the `IF NOT EXISTS` clause to schema
 						if_not_exists: false,
+						overwrite: false,
 						..self.clone()
 					},
 				)
@@ -99,7 +102,7 @@ impl DefineAccessStatement {
 				if txn.get_ns_access(opt.ns()?, &self.name).await.is_ok() {
 					if self.if_not_exists {
 						return Ok(Value::None);
-					} else {
+					} else if !self.overwrite {
 						return Err(Error::AccessNsAlreadyExists {
 							value: self.name.to_string(),
 							ns: opt.ns()?.into(),
@@ -114,6 +117,7 @@ impl DefineAccessStatement {
 					DefineAccessStatement {
 						// Don't persist the `IF NOT EXISTS` clause to schema
 						if_not_exists: false,
+						overwrite: false,
 						..self.clone()
 					},
 				)
@@ -130,7 +134,7 @@ impl DefineAccessStatement {
 				if txn.get_db_access(opt.ns()?, opt.db()?, &self.name).await.is_ok() {
 					if self.if_not_exists {
 						return Ok(Value::None);
-					} else {
+					} else if !self.overwrite {
 						return Err(Error::AccessDbAlreadyExists {
 							value: self.name.to_string(),
 							ns: opt.ns()?.into(),
@@ -147,6 +151,7 @@ impl DefineAccessStatement {
 					DefineAccessStatement {
 						// Don't persist the `IF NOT EXISTS` clause to schema
 						if_not_exists: false,
+						overwrite: false,
 						..self.clone()
 					},
 				)
@@ -167,6 +172,9 @@ impl Display for DefineAccessStatement {
 		write!(f, "DEFINE ACCESS",)?;
 		if self.if_not_exists {
 			write!(f, " IF NOT EXISTS")?
+		}
+		if self.overwrite {
+			write!(f, " OVERWRITE")?
 		}
 		// The specific access method definition is displayed by AccessType
 		write!(f, " {} ON {} TYPE {}", self.name, self.base, self.kind)?;

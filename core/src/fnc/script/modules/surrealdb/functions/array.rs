@@ -49,5 +49,6 @@ impl_module_def!(
 	"slice" => run,
 	"sort" => (sort::Package),
 	"transpose" => run,
-	"union" => run
+	"union" => run,
+	"windows" => run
 );

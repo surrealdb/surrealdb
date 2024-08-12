@@ -6,15 +6,17 @@ use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::exe::try_join_all_buffered;
+use crate::fnc::idiom;
 use crate::sql::edges::Edges;
 use crate::sql::field::{Field, Fields};
 use crate::sql::id::Id;
-use crate::sql::part::Next;
 use crate::sql::part::Part;
+use crate::sql::part::{Next, NextMethod};
 use crate::sql::paths::ID;
 use crate::sql::statements::select::SelectStatement;
 use crate::sql::thing::Thing;
 use crate::sql::value::{Value, Values};
+use crate::sql::Function;
 use reblessive::tree::Stk;
 
 impl Value {
@@ -56,6 +58,10 @@ impl Value {
 					Part::Destructure(_) => {
 						let obj = Value::Object(v.as_object());
 						stk.run(|stk| obj.get(stk, ctx, opt, doc, path)).await
+					}
+					Part::Method(name, args) => {
+						let v = idiom(ctx, doc, v.clone().into(), name, args.clone())?;
+						stk.run(|stk| v.get(stk, ctx, opt, doc, path.next())).await
 					}
 					// Otherwise return none
 					_ => Ok(Value::None),
@@ -134,6 +140,30 @@ impl Value {
 						let obj = Value::from(obj);
 						stk.run(|stk| obj.get(stk, ctx, opt, doc, path.next())).await
 					}
+					Part::Method(name, args) => {
+						let res = idiom(ctx, doc, v.clone().into(), name, args.clone());
+						let res = match &res {
+							Ok(_) => res,
+							Err(Error::InvalidFunction {
+								..
+							}) => match v.get(name) {
+								Some(v) => {
+									let fnc = Function::Anonymous(v.clone(), args.clone());
+									match stk.run(|stk| fnc.compute(stk, ctx, opt, doc)).await {
+										Ok(v) => Ok(v),
+										Err(Error::InvalidFunction {
+											..
+										}) => res,
+										e => e,
+									}
+								}
+								None => res,
+							},
+							_ => res,
+						}?;
+
+						stk.run(|stk| res.get(stk, ctx, opt, doc, path.next())).await
+					}
 					_ => Ok(Value::None),
 				},
 				// Current value at path is an array
@@ -183,6 +213,10 @@ impl Value {
 						},
 						_ => Ok(Value::None),
 					},
+					Part::Method(name, args) => {
+						let v = idiom(ctx, doc, v.clone().into(), name, args.clone())?;
+						stk.run(|stk| v.get(stk, ctx, opt, doc, path.next())).await
+					}
 					_ => stk
 						.scope(|scope| {
 							let futs =
@@ -250,12 +284,26 @@ impl Value {
 											.run(|stk| stm.compute(stk, ctx, opt, None))
 											.await?
 											.all();
-										stk.run(|stk| v.get(stk, ctx, opt, None, path.next()))
-											.await?
-											.flatten()
-											.ok()
+										let res = stk
+											.run(|stk| v.get(stk, ctx, opt, None, path.next()))
+											.await?;
+										// We only want to flatten the results if the next part
+										// is a graph part. Reason being that if we flatten fields,
+										// the results of those fields (which could be arrays) will
+										// be merged into each other. So [1, 2, 3], [4, 5, 6] would
+										// become [1, 2, 3, 4, 5, 6]. This slice access won't panic
+										// as we have already checked the length of the path.
+										Ok(if let Part::Graph(_) = path[1] {
+											res.flatten()
+										} else {
+											res
+										})
 									}
 								}
+							}
+							Part::Method(name, args) => {
+								let v = idiom(ctx, doc, v.clone().into(), name, args.clone())?;
+								stk.run(|stk| v.get(stk, ctx, opt, doc, path.next())).await
 							}
 							// This is a remote field expression
 							_ => {
@@ -272,11 +320,19 @@ impl Value {
 					}
 				}
 				v => {
-					if matches!(p, Part::Flatten) {
-						stk.run(|stk| v.get(stk, ctx, opt, None, path.next())).await
-					} else {
-						// Ignore everything else
-						Ok(Value::None)
+					match p {
+						Part::Flatten => {
+							stk.run(|stk| v.get(stk, ctx, opt, None, path.next())).await
+						}
+						Part::Method(name, args) => {
+							let v = idiom(ctx, doc, v.clone(), name, args.clone())?;
+							stk.run(|stk| v.get(stk, ctx, opt, doc, path.next())).await
+						}
+						// Only continue processing the path from the point that it contains a method
+						_ => {
+							stk.run(|stk| Value::None.get(stk, ctx, opt, doc, path.next_method()))
+								.await
+						}
 					}
 				}
 			},
