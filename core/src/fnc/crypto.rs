@@ -38,6 +38,10 @@ pub fn sha512((arg,): (String,)) -> Result<Value, Error> {
 	Ok(val.into())
 }
 
+pub fn blake3((arg,): (String,)) -> Result<Value, Error> {
+	Ok(blake3::hash(arg.as_bytes()).to_string().into())
+}
+
 /// Allowed to cost this much more than default setting for each hash function.
 const COST_ALLOWANCE: u32 = 4;
 
@@ -137,32 +141,6 @@ pub mod bcrypt {
 
 	pub fn gen((pass,): (String,)) -> Result<Value, Error> {
 		let hash = bcrypt::hash(pass, bcrypt::DEFAULT_COST).unwrap();
-		Ok(hash.into())
-	}
-}
-
-pub mod blake3 {
-	use crate::err::Error;
-	use crate::sql::value::Value;
-	use blake3::{self, Hash};
-	use std::str::FromStr;
-
-	pub fn cmp((hash, pass): (String, String)) -> Result<Value, Error> {
-		Ok(Hash::from_str(hash.as_str())
-			.ok()
-			.filter(|test| {
-				if test == &blake3::hash(pass.as_bytes()) {
-					true
-				} else {
-					false
-				}
-			})
-			.is_some()
-			.into())
-	}
-
-	pub fn gen((pass,): (String,)) -> Result<Value, Error> {
-		let hash = blake3::hash(pass.as_bytes()).to_string();
 		Ok(hash.into())
 	}
 }

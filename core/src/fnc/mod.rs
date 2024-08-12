@@ -50,7 +50,6 @@ pub async fn run(
 		|| name.starts_with("type::fields")
 		|| name.starts_with("crypto::argon2")
 		|| name.starts_with("crypto::bcrypt")
-		|| name.starts_with("crypto::blake3")
 		|| name.starts_with("crypto::pbkdf2")
 		|| name.starts_with("crypto::scrypt")
 	{
@@ -147,6 +146,7 @@ pub fn synchronous(
 		"crypto::sha1" => crypto::sha1,
 		"crypto::sha256" => crypto::sha256,
 		"crypto::sha512" => crypto::sha512,
+		"crypto::blake3" => crypto::blake3,
 		//
 		"duration::days" => duration::days,
 		"duration::hours" => duration::hours,
@@ -434,8 +434,6 @@ pub async fn asynchronous(
 		"crypto::argon2::generate" => (cpu_intensive) crypto::argon2::gen.await,
 		"crypto::bcrypt::compare" => (cpu_intensive) crypto::bcrypt::cmp.await,
 		"crypto::bcrypt::generate" => (cpu_intensive) crypto::bcrypt::gen.await,
-		"crypto::blake3::compare" => (cpu_intensive) crypto::blake3::cmp.await,
-		"crypto::blake3::generate" => (cpu_intensive) crypto::blake3::gen.await,
 		"crypto::pbkdf2::compare" => (cpu_intensive) crypto::pbkdf2::cmp.await,
 		"crypto::pbkdf2::generate" => (cpu_intensive) crypto::pbkdf2::gen.await,
 		"crypto::scrypt::compare" => (cpu_intensive) crypto::scrypt::cmp.await,
