@@ -36,74 +36,71 @@ use wasm_bindgen_futures::spawn_local as spawn;
 
 const ID: &str = "id";
 
-macro_rules! into_future {
-	() => {
-		fn into_future(self) -> Self::IntoFuture {
-			let Select {
-				client,
-				resource,
-				..
-			} = self;
-			Box::pin(async move {
-				let router = client.router.extract()?;
-				if !router.features.contains(&ExtraFeatures::LiveQueries) {
-					return Err(Error::LiveQueriesNotSupported.into());
-				}
-				let mut fields = Fields::default();
-				fields.0 = vec![Field::All];
-				let mut stmt = LiveStatement::new(fields);
-				let mut table = Table::default();
-				match resource? {
-					Resource::Table(table) => {
-						stmt.what = table.into();
-					}
-					Resource::RecordId(record) => {
-						let record = record.into_inner();
-						table.0 = record.tb.clone();
-						stmt.what = table.into();
-						let mut ident = Ident::default();
-						ident.0 = ID.to_owned();
-						let mut idiom = Idiom::default();
-						idiom.0 = vec![Part::from(ident)];
-						let mut cond = Cond::default();
-						cond.0 = surrealdb_core::sql::Value::Expression(Box::new(Expression::new(
-							idiom.into(),
-							Operator::Equal,
-							record.into(),
-						)));
-						stmt.cond = Some(cond);
-					}
-					Resource::Object(_) => return Err(Error::LiveOnObject.into()),
-					Resource::Array(_) => return Err(Error::LiveOnArray.into()),
-					Resource::Edge(_) => return Err(Error::LiveOnEdges.into()),
-					Resource::Range(range) => {
-						let range = range.into_inner();
-						table.0 = range.tb.clone();
-						stmt.what = table.into();
-						stmt.cond = range.to_cond();
-					}
-				}
-				let query = Query::new(
-					client.clone(),
-					vec![Statement::Live(stmt)],
-					Default::default(),
-					false,
-				);
-				let CoreValue::Uuid(id) = query.await?.take::<Value>(0)?.into_inner() else {
-					return Err(Error::InternalError(
-						"successufull live query didn't return a uuid".to_string(),
-					)
-					.into());
-				};
-				let rx = register(router, *id).await?;
-				Ok(Stream::new(
-					Surreal::new_from_router_waiter(client.router.clone(), client.waiter.clone()),
-					*id,
-					Some(rx),
-				))
-			})
+fn into_future<C, O>(this: Select<C, O, Live>) -> BoxFuture<Result<Stream<O>>>
+where
+	C: Connection,
+{
+	let Select {
+		client,
+		resource,
+		..
+	} = this;
+	Box::pin(async move {
+		let router = client.router.extract()?;
+		if !router.features.contains(&ExtraFeatures::LiveQueries) {
+			return Err(Error::LiveQueriesNotSupported.into());
 		}
-	};
+		let mut fields = Fields::default();
+		fields.0 = vec![Field::All];
+		let mut stmt = LiveStatement::new(fields);
+		let mut table = Table::default();
+		match resource? {
+			Resource::Table(table) => {
+				let mut core_table = Table::default();
+				core_table.0 = table;
+				stmt.what = core_table.into()
+			}
+			Resource::RecordId(record) => {
+				let record = record.into_inner();
+				table.0 = record.tb.clone();
+				stmt.what = table.into();
+				let mut ident = Ident::default();
+				ident.0 = ID.to_owned();
+				let mut idiom = Idiom::default();
+				idiom.0 = vec![Part::from(ident)];
+				let mut cond = Cond::default();
+				cond.0 = surrealdb_core::sql::Value::Expression(Box::new(Expression::new(
+					idiom.into(),
+					Operator::Equal,
+					record.into(),
+				)));
+				stmt.cond = Some(cond);
+			}
+			Resource::Object(_) => return Err(Error::LiveOnObject.into()),
+			Resource::Array(_) => return Err(Error::LiveOnArray.into()),
+			Resource::Edge(_) => return Err(Error::LiveOnEdges.into()),
+			Resource::Range(range) => {
+				let range = range.into_inner();
+				table.0 = range.tb.clone();
+				stmt.what = table.into();
+				stmt.cond = range.to_cond();
+			}
+		}
+		let query =
+			Query::new(client.clone(), vec![Statement::Live(stmt)], Default::default(), false);
+		let CoreValue::Uuid(id) = query.await?.take::<Value>(0)?.into_inner() else {
+			return Err(Error::InternalError(
+				"successufull live query didn't return a uuid".to_string(),
+			)
+			.into());
+		};
+		let rx = register(router, *id).await?;
+		Ok(Stream::new(
+			Surreal::new_from_router_waiter(client.router.clone(), client.waiter.clone()),
+			*id,
+			Some(rx),
+		))
+	})
 }
 
 pub(crate) async fn register(
@@ -127,7 +124,9 @@ where
 	type Output = Result<Stream<Value>>;
 	type IntoFuture = BoxFuture<'r, Self::Output>;
 
-	into_future! {}
+	fn into_future(self) -> Self::IntoFuture {
+		into_future(self)
+	}
 }
 
 impl<'r, Client, R> IntoFuture for Select<'r, Client, Option<R>, Live>
@@ -138,7 +137,9 @@ where
 	type Output = Result<Stream<Option<R>>>;
 	type IntoFuture = BoxFuture<'r, Self::Output>;
 
-	into_future! {}
+	fn into_future(self) -> Self::IntoFuture {
+		into_future(self)
+	}
 }
 
 impl<'r, Client, R> IntoFuture for Select<'r, Client, Vec<R>, Live>
@@ -149,7 +150,9 @@ where
 	type Output = Result<Stream<Vec<R>>>;
 	type IntoFuture = BoxFuture<'r, Self::Output>;
 
-	into_future! {}
+	fn into_future(self) -> Self::IntoFuture {
+		into_future(self)
+	}
 }
 
 /// A stream of live query notifications

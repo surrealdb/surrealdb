@@ -490,15 +490,15 @@ async fn create_record_with_id_with_content() {
 		.unwrap();
 	assert_eq!(record.unwrap().id, "user:john".parse::<RecordId>().unwrap());
 	let value: Value = db
-		.create(Resource::from("user:jane"))
+		.create(Resource::from("user:jane".parse::<RecordId>().unwrap()))
 		.content(Record {
 			name: "Jane Doe",
 		})
 		.await
 		.unwrap();
 	assert_eq!(
-		value.into_inner(),
-		CoreValue::from("user:jane".parse::<RecordId>().unwrap().into_inner())
+		value.into_inner().record(),
+		Some("user:jane".parse::<RecordId>().unwrap().into_inner())
 	);
 }
 
@@ -566,8 +566,8 @@ async fn select_record_id() {
 	assert_eq!(record.id, "user:john".parse().unwrap());
 	let value: Value = db.select(Resource::from(record_id)).await.unwrap();
 	assert_eq!(
-		value.into_inner(),
-		CoreValue::from("user:john".parse::<RecordId>().unwrap().into_inner())
+		value.into_inner().record(),
+		Some("user:john".parse::<RecordId>().unwrap().into_inner())
 	);
 }
 
@@ -1137,11 +1137,14 @@ async fn changefeed() {
         SHOW CHANGES FOR TABLE user SINCE 0 LIMIT 10;
     ";
 	let mut response = db.query(sql).await.unwrap();
-	let array: Vec<Value> = response.take(0).unwrap();
+	let v: Value = response.take(0).unwrap();
+	let CoreValue::Array(array) = v.into_inner() else {
+		panic!()
+	};
 	assert_eq!(array.len(), 5);
 	// DEFINE TABLE
 	let a = array.first().unwrap();
-	let CoreValue::Object(a) = a.clone().into_inner() else {
+	let CoreValue::Object(a) = a.clone() else {
 		unreachable!()
 	};
 	let CoreValue::Number(_versionstamp1) = a.get("versionstamp").clone().unwrap() else {
@@ -1162,7 +1165,7 @@ async fn changefeed() {
 	);
 	// UPDATE user:amos
 	let a = array.get(1).unwrap();
-	let CoreValue::Object(a) = a.clone().into_inner() else {
+	let CoreValue::Object(a) = a.clone() else {
 		unreachable!()
 	};
 	let CoreValue::Number(versionstamp1) = a.get("versionstamp").unwrap() else {
@@ -1203,7 +1206,7 @@ async fn changefeed() {
 	}
 	// UPDATE user:jane
 	let a = array.get(2).unwrap();
-	let CoreValue::Object(a) = a.clone().into_inner() else {
+	let CoreValue::Object(a) = a.clone() else {
 		unreachable!()
 	};
 	let CoreValue::Number(versionstamp2) = a.get("versionstamp").unwrap().clone() else {
@@ -1245,7 +1248,7 @@ async fn changefeed() {
 	}
 	// UPDATE user:amos
 	let a = array.get(3).unwrap();
-	let CoreValue::Object(a) = a.clone().into_inner() else {
+	let CoreValue::Object(a) = a.clone() else {
 		unreachable!()
 	};
 	let CoreValue::Number(versionstamp3) = a.get("versionstamp").unwrap() else {
@@ -1287,7 +1290,7 @@ async fn changefeed() {
 	};
 	// UPDATE table
 	let a = array.get(4).unwrap();
-	let CoreValue::Object(a) = a.clone().into_inner() else {
+	let CoreValue::Object(a) = a.clone() else {
 		unreachable!()
 	};
 	let CoreValue::Number(versionstamp4) = a.get("versionstamp").unwrap() else {

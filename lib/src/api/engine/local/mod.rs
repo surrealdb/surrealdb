@@ -966,8 +966,16 @@ async fn router(
 			key,
 			value,
 		} => {
-			// No longer need to compute this value as it can't be a non-primitive value.
-			vars.insert(key, value);
+			let mut tmp_vars = vars.clone();
+			tmp_vars.insert(key.clone(), value.clone());
+
+			// Need to compute because certain keys might not be allowed to be set and those should
+			// be rejected by an error.
+			match kvs.compute(value, &*session, Some(tmp_vars)).await? {
+				CoreValue::None => vars.remove(&key),
+				v => vars.insert(key, v),
+			};
+
 			Ok(DbResponse::Other(CoreValue::None))
 		}
 		Command::Unset {

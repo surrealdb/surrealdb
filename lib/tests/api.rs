@@ -211,10 +211,11 @@ mod api_integration {
 		async fn signin_first_not_necessary() {
 			let db = Surreal::new::<Mem>(()).await.unwrap();
 			db.use_ns("namespace").use_db("database").await.unwrap();
-			let Some(record): Option<RecordId> = db.create(("item", "foo")).await.unwrap() else {
+			let Some(record): Option<ApiRecordId> = db.create(("item", "foo")).await.unwrap()
+			else {
 				panic!("record not found");
 			};
-			assert_eq!(*record.key(), RecordIdKey::from("item:foo".to_owned()));
+			assert_eq!(*record.id.key(), RecordIdKey::from("foo".to_owned()));
 		}
 
 		#[test_log::test(tokio::test)]
