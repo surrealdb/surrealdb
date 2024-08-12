@@ -35,6 +35,7 @@ use std::sync::atomic::AtomicI64;
 use std::sync::Arc;
 use std::sync::OnceLock;
 use std::time::Duration;
+use surrealdb_core::sql::Value as CoreValue;
 use tokio::sync::watch;
 use trice::Instant;
 use wasm_bindgen_futures::spawn_local;
@@ -136,7 +137,7 @@ async fn router_handle_request(
 			ref notification_sender,
 		} => {
 			state.live_queries.insert(*uuid, notification_sender.clone());
-			if response.send(Ok(DbResponse::Other(Value::None))).await.is_err() {
+			if response.send(Ok(DbResponse::Other(CoreValue::None))).await.is_err() {
 				trace!("Receiver dropped");
 			}
 			// There is nothing to send to the server here
@@ -224,7 +225,7 @@ async fn router_handle_response(
 									RequestEffect::None => {}
 									RequestEffect::Insert => {
 										// For insert, we need to flatten single responses in an array
-										if let Ok(Data::Other(Value::Array(value))) =
+										if let Ok(Data::Other(CoreValue::Array(value))) =
 											response.result
 										{
 											if value.len() == 1 {
@@ -238,7 +239,7 @@ async fn router_handle_response(
 												let _ = pending
 													.response_channel
 													.send(DbResponse::from(Ok(Data::Other(
-														Value::Array(value),
+														CoreValue::Array(value),
 													))))
 													.await;
 											}
@@ -303,7 +304,7 @@ async fn router_handle_response(
 			#[derive(Deserialize)]
 			#[revisioned(revision = 1)]
 			struct Response {
-				id: Option<Value>,
+				id: Option<CoreValue>,
 			}
 
 			// Let's try to find out the ID of the response that failed to deserialise
@@ -313,7 +314,7 @@ async fn router_handle_response(
 				}) = deserialize(&mut &binary[..], endpoint.supports_revision)
 				{
 					// Return an error if an ID was returned
-					if let Some(Ok(id)) = id.map(Value::coerce_to_i64) {
+					if let Some(Ok(id)) = id.map(CoreValue::coerce_to_i64) {
 						if let Some(req) = state.pending_requests.remove(&id) {
 							let _res = req.response_channel.send(Err(error)).await;
 						} else {
@@ -433,7 +434,7 @@ pub(crate) async fn run_router(
 	let ping = {
 		let mut request = BTreeMap::new();
 		request.insert("method".to_owned(), "ping".into());
-		let value = Value::from(request);
+		let value = CoreValue::from(request);
 		let value = serialize(&value, endpoint.supports_revision).unwrap();
 		Message::Binary(value)
 	};

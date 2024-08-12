@@ -6,8 +6,11 @@ use revision::Revisioned;
 use serde::{ser::SerializeMap as _, Serialize};
 use std::io::Read;
 use std::path::PathBuf;
-use surrealdb_core::sql::{Object as CoreObject, Query, Table as CoreTable, Value as CoreValue};
+use surrealdb_core::sql::{Object as CoreObject, Query, Value as CoreValue};
 use uuid::Uuid;
+
+#[cfg(feature = "protocol-ws")]
+use surrealdb_core::sql::Table as CoreTable;
 
 #[derive(Debug, Clone)]
 #[allow(dead_code)]

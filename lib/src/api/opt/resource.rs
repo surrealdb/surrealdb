@@ -87,6 +87,7 @@ impl Resource {
 		}
 	}
 
+	#[cfg(feature = "protocol-ws")]
 	pub(crate) fn into_core_value(self) -> CoreValue {
 		match self {
 			Resource::Table(x) => Table(x).into_core().into(),
