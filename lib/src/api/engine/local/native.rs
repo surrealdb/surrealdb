@@ -18,9 +18,7 @@ use std::{
 	sync::{atomic::AtomicI64, Arc, OnceLock},
 	task::Poll,
 };
-use surrealdb_core::{
-	dbs::Session, iam::Level, kvs::Datastore, options::EngineOptions, sql::Object as CoreObject,
-};
+use surrealdb_core::{dbs::Session, iam::Level, kvs::Datastore, options::EngineOptions};
 use tokio::sync::watch;
 
 impl crate::api::Connection for Db {}
