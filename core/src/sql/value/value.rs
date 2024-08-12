@@ -2245,12 +2245,12 @@ impl Value {
 
 	/// Try to convert this value to a Record of a certain type
 	pub(crate) fn convert_to_record_type(self, val: &[Table]) -> Result<Thing, Error> {
-		match self.clone().convert_to_record() {
+		match self.convert_to_record()? {
 			// Records are allowed if correct type
-			Ok(t) if t.is_record_type(val) => Ok(t),
+			t if t.is_record_type(val) => Ok(t),
 			// Anything else raises an error
-			_ => Err(Error::ConvertTo {
-				from: self,
+			t => Err(Error::ConvertTo {
+				from: t.into(),
 				into: "record".into(),
 			}),
 		}
