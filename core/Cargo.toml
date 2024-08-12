@@ -41,7 +41,6 @@ arbitrary = [
     "geo-types/arbitrary",
     "uuid/arbitrary",
 ]
-unstable = ["async-graphql"]
 # Special features
 kv-fdb-7_1 = ["foundationdb/fdb-7_1"]
 kv-fdb-7_3 = ["foundationdb/fdb-7_3"]
@@ -153,7 +152,7 @@ trice = "0.4.0"
 ulid = { version = "1.1.0", features = ["serde"] }
 unicase = "2.7.0"
 url = "2.5.0"
-async-graphql = { version = "7.0.7", default-features = false, optional = true, features = [
+async-graphql = { version = "7.0.7", default-features = false, features = [
     "dynamic-schema",
 ] }
 
@@ -196,6 +195,9 @@ tokio = { version = "1.34.0", default-features = false, features = [
 ] }
 tokio-tungstenite = { version = "0.21.0", optional = true }
 uuid = { version = "1.6.1", features = ["serde", "v4", "v7"] }
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(surrealdb_unstable)'] }
 
 [lib]
 name = "surrealdb_core"

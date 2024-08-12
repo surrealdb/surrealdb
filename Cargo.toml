@@ -122,7 +122,6 @@ surrealdb = { version = "2", path = "lib", features = [
     "protocol-http",
     "protocol-ws",
     "rustls",
-    "unstable",
 ] }
 tempfile = "3.8.1"
 thiserror = "1.0.50"
@@ -209,4 +208,7 @@ extended-description = "A scalable, distributed, collaborative, document-graph d
 license-file = ["LICENSE", "4"]
 
 [lints.rust]
-unexpected_cfgs = { level = "warn", check-cfg = ['cfg(docker)'] }
+unexpected_cfgs = { level = "warn", check-cfg = [
+    'cfg(docker)',
+    'cfg(surrealdb_unstable)',
+] }

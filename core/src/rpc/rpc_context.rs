@@ -1,10 +1,10 @@
 use std::{collections::BTreeMap, mem};
 
-#[cfg(all(not(target_arch = "wasm32"), feature = "unstable"))]
+#[cfg(all(not(target_arch = "wasm32"), surrealdb_unstable))]
 use async_graphql::BatchRequest;
 use uuid::Uuid;
 
-#[cfg(all(not(target_arch = "wasm32"), feature = "unstable"))]
+#[cfg(all(not(target_arch = "wasm32"), surrealdb_unstable))]
 use crate::gql::SchemaCache;
 use crate::{
 	dbs::{QueryType, Response, Session},
@@ -32,10 +32,10 @@ pub trait RpcContext {
 		async { unimplemented!("handle functions must be redefined if LQ_SUPPORT = true") }
 	}
 
-	#[cfg(all(not(target_arch = "wasm32"), feature = "unstable"))]
+	#[cfg(all(not(target_arch = "wasm32"), surrealdb_unstable))]
 	const GQL_SUPPORT: bool = false;
 
-	#[cfg(all(not(target_arch = "wasm32"), feature = "unstable"))]
+	#[cfg(all(not(target_arch = "wasm32"), surrealdb_unstable))]
 	fn graphql_schema_cache(&self) -> &SchemaCache {
 		unimplemented!("graphql_schema_cache must be implemented if GQL_SUPPORT = true")
 	}
@@ -623,12 +623,12 @@ pub trait RpcContext {
 	// Methods for querying with GraphQL
 	// ------------------------------
 
-	#[cfg(any(target_arch = "wasm32", not(feature = "unstable")))]
+	#[cfg(any(target_arch = "wasm32", not(surrealdb_unstable)))]
 	async fn graphql(&self, _params: Array) -> Result<impl Into<Data>, RpcError> {
 		Result::<Value, _>::Err(RpcError::MethodNotFound)
 	}
 
-	#[cfg(all(not(target_arch = "wasm32"), feature = "unstable"))]
+	#[cfg(all(not(target_arch = "wasm32"), surrealdb_unstable))]
 	async fn graphql(&self, params: Array) -> Result<impl Into<Data>, RpcError> {
 		if !*GRAPHQL_ENABLE {
 			return Err(RpcError::BadGQLConfig);

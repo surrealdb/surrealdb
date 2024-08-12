@@ -47,7 +47,6 @@ rustls = [
 ml = ["surrealdb-core/ml"]
 jwks = ["surrealdb-core/jwks"]
 arbitrary = ["surrealdb-core/arbitrary"]
-unstable = ["surrealdb-core/unstable"]
 # Special features
 kv-fdb-7_1 = ["surrealdb-core/kv-fdb-7_1"]
 kv-fdb-7_3 = ["surrealdb-core/kv-fdb-7_3"]
@@ -154,6 +153,9 @@ tokio = { version = "1.34.0", default-features = false, features = [
 ] }
 tokio-tungstenite = { version = "0.23.1", optional = true, features = ["url"] }
 uuid = { version = "1.6.1", features = ["serde", "v4", "v7"] }
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(surrealdb_unstable)'] }
 
 [lib]
 name = "surrealdb" # Needed for the nightly crate as we will be renaming it
