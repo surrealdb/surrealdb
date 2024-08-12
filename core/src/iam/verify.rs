@@ -691,7 +691,7 @@ async fn authenticate_jwt(
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::iam::token::HEADER;
+	use crate::iam::token::{Audience, HEADER};
 	use argon2::password_hash::{PasswordHasher, SaltString};
 	use chrono::Duration;
 	use jsonwebtoken::{encode, EncodingKey};
@@ -2246,7 +2246,7 @@ mod tests {
 			let key = EncodingKey::from_secret(secret.as_ref());
 			let claims = Claims {
 				iss: Some("surrealdb-test".to_string()),
-				aud: Some("surrealdb-test".to_string()),
+				aud: Some(Audience::Single("surrealdb-test".to_string())),
 				iat: Some(Utc::now().timestamp()),
 				nbf: Some(Utc::now().timestamp()),
 				exp: Some((Utc::now() + Duration::hours(1)).timestamp()),
@@ -2315,7 +2315,7 @@ mod tests {
 			let key = EncodingKey::from_secret(secret.as_ref());
 			let claims = Claims {
 				iss: Some("surrealdb-test".to_string()),
-				aud: Some("invalid".to_string()),
+				aud: Some(Audience::Single("invalid".to_string())),
 				iat: Some(Utc::now().timestamp()),
 				nbf: Some(Utc::now().timestamp()),
 				exp: Some((Utc::now() + Duration::hours(1)).timestamp()),
@@ -2372,7 +2372,7 @@ mod tests {
 			let key = EncodingKey::from_secret(secret.as_ref());
 			let claims = Claims {
 				iss: Some("surrealdb-test".to_string()),
-				aud: Some("invalid".to_string()),
+				aud: Some(Audience::Single("invalid".to_string())),
 				iat: Some(Utc::now().timestamp()),
 				nbf: Some(Utc::now().timestamp()),
 				exp: Some((Utc::now() + Duration::hours(1)).timestamp()),
@@ -2431,7 +2431,7 @@ mod tests {
 			let key = EncodingKey::from_secret(secret.as_ref());
 			let claims = Claims {
 				iss: Some("surrealdb-test".to_string()),
-				aud: Some("surrealdb-test".to_string()),
+				aud: Some(Audience::Single("surrealdb-test".to_string())),
 				iat: Some(Utc::now().timestamp()),
 				nbf: Some(Utc::now().timestamp()),
 				exp: Some((Utc::now() + Duration::hours(1)).timestamp()),
@@ -2498,7 +2498,7 @@ mod tests {
 			let key = EncodingKey::from_secret(secret.as_ref());
 			let claims = Claims {
 				iss: Some("surrealdb-test".to_string()),
-				aud: Some("invalid".to_string()),
+				aud: Some(Audience::Single("invalid".to_string())),
 				iat: Some(Utc::now().timestamp()),
 				nbf: Some(Utc::now().timestamp()),
 				exp: Some((Utc::now() + Duration::hours(1)).timestamp()),
@@ -2554,7 +2554,7 @@ mod tests {
 			let key = EncodingKey::from_secret(secret.as_ref());
 			let claims = Claims {
 				iss: Some("surrealdb-test".to_string()),
-				aud: Some("invalid".to_string()),
+				aud: Some(Audience::Single("invalid".to_string())),
 				iat: Some(Utc::now().timestamp()),
 				nbf: Some(Utc::now().timestamp()),
 				exp: Some((Utc::now() + Duration::hours(1)).timestamp()),
@@ -2612,7 +2612,7 @@ mod tests {
 			let key = EncodingKey::from_secret(secret.as_ref());
 			let claims = Claims {
 				iss: Some("surrealdb-test".to_string()),
-				aud: Some("surrealdb-test".to_string()),
+				aud: Some(Audience::Single("surrealdb-test".to_string())),
 				iat: Some(Utc::now().timestamp()),
 				nbf: Some(Utc::now().timestamp()),
 				exp: Some((Utc::now() + Duration::hours(1)).timestamp()),
@@ -2677,7 +2677,7 @@ mod tests {
 			let key = EncodingKey::from_secret(secret.as_ref());
 			let claims = Claims {
 				iss: Some("surrealdb-test".to_string()),
-				aud: Some("invalid".to_string()),
+				aud: Some(Audience::Single("invalid".to_string())),
 				iat: Some(Utc::now().timestamp()),
 				nbf: Some(Utc::now().timestamp()),
 				exp: Some((Utc::now() + Duration::hours(1)).timestamp()),
@@ -2732,7 +2732,7 @@ mod tests {
 			let key = EncodingKey::from_secret(secret.as_ref());
 			let claims = Claims {
 				iss: Some("surrealdb-test".to_string()),
-				aud: Some("invalid".to_string()),
+				aud: Some(Audience::Single("invalid".to_string())),
 				iat: Some(Utc::now().timestamp()),
 				nbf: Some(Utc::now().timestamp()),
 				exp: Some((Utc::now() + Duration::hours(1)).timestamp()),
