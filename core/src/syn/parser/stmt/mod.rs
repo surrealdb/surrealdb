@@ -210,7 +210,7 @@ impl Parser<'_> {
 			}
 			t!("REMOVE") => {
 				self.pop_peek();
-				self.parse_remove_stmt().map(Statement::Remove)
+				ctx.run(|ctx| self.parse_remove_stmt(ctx)).await.map(Statement::Remove)
 			}
 			t!("SELECT") => {
 				self.pop_peek();
@@ -311,7 +311,7 @@ impl Parser<'_> {
 			}
 			t!("REMOVE") => {
 				self.pop_peek();
-				self.parse_remove_stmt().map(Entry::Remove)
+				self.parse_remove_stmt(ctx).await.map(Entry::Remove)
 			}
 			t!("SELECT") => {
 				self.pop_peek();

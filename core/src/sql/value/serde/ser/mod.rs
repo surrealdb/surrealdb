@@ -1,504 +1,547 @@
-mod access_type;
-mod algorithm;
-mod base;
-mod block;
-mod cast;
-mod changefeed;
-mod cond;
-mod constant;
-mod data;
-mod datetime;
-mod decimal;
-mod dir;
-mod distance;
-mod duration;
-mod edges;
-mod explain;
-mod expression;
-mod fetch;
-mod fetchs;
-mod field;
-mod fields;
-mod filter;
-mod function;
-mod geometry;
-mod graph;
-mod group;
-mod id;
-mod ident;
-mod idiom;
-mod index;
-mod kind;
-mod language;
-mod limit;
-mod mock;
-mod number;
-mod operator;
-mod order;
-mod output;
-mod part;
-mod permission;
-mod permissions;
-mod primitive;
-mod range;
-mod relation;
-mod scoring;
-mod split;
-mod start;
-mod statement;
-mod strand;
-mod string;
-mod subquery;
-mod table;
-mod table_type;
-mod thing;
-mod timeout;
-mod tokenizer;
-mod uuid;
-mod value;
-mod vectortype;
-mod version;
-mod view;
-mod with;
+mod r#enum;
+mod r#struct;
 
-use serde::ser::Error;
+use crate::err::Error;
+use crate::sql;
+use crate::sql::value::Value;
+use castaway::match_type;
 use serde::ser::Serialize;
-use serde::ser::SerializeMap;
-use serde::ser::SerializeSeq;
-use serde::ser::SerializeStruct;
-use serde::ser::SerializeStructVariant;
-use serde::ser::SerializeTuple;
-use serde::ser::SerializeTupleStruct;
-use serde::ser::SerializeTupleVariant;
+use serde_content::Number;
+use serde_content::Serializer;
+use serde_content::Unexpected;
+use std::borrow::Cow;
+use std::collections::BTreeMap;
 use std::fmt::Display;
 
-pub use value::to_value;
+type Content = serde_content::Value<'static>;
 
-trait Serializer: Sized {
-	type Ok;
-	type Error: Error;
+/// Convert a `T` into `surrealdb::sql::Value` which is an enum that can represent any valid SQL data.
+pub fn to_value<T>(value: T) -> Result<Value, Error>
+where
+	T: Serialize + 'static,
+{
+	match_type!(value, {
+		Value as v => Ok(v),
+		sql::Number as v => Ok(v.into()),
+		rust_decimal::Decimal as v => Ok(v.into()),
+		sql::Strand as v => Ok(v.into()),
+		sql::Duration as v => Ok(v.into()),
+		core::time::Duration as v => Ok(v.into()),
+		sql::Datetime as v => Ok(v.into()),
+		chrono::DateTime<chrono::Utc> as v => Ok(v.into()),
+		sql::Uuid as v => Ok(v.into()),
+		uuid::Uuid as v => Ok(v.into()),
+		sql::Array as v => Ok(v.into()),
+		sql::Object as v => Ok(v.into()),
+		sql::Geometry as v => Ok(v.into()),
+		geo_types::Point as v => Ok(v.into()),
+		geo_types::LineString as v => Ok(Value::Geometry(v.into())),
+		geo_types::Polygon as v => Ok(Value::Geometry(v.into())),
+		geo_types::MultiPoint as v => Ok(Value::Geometry(v.into())),
+		geo_types::MultiLineString as v => Ok(Value::Geometry(v.into())),
+		geo_types::MultiPolygon as v => Ok(Value::Geometry(v.into())),
+		geo_types::Point as v => Ok(Value::Geometry(v.into())),
+		sql::Bytes as v => Ok(v.into()),
+		sql::Thing as v => Ok(v.into()),
+		sql::Param as v => Ok(v.into()),
+		sql::Idiom as v => Ok(v.into()),
+		sql::Table as v => Ok(v.into()),
+		sql::Mock as v => Ok(v.into()),
+		sql::Regex as v => Ok(v.into()),
+		sql::Cast as v => Ok(v.into()),
+		sql::Block as v => Ok(v.into()),
+		sql::Range as v => Ok(v.into()),
+		sql::Edges as v => Ok(v.into()),
+		sql::Future as v => Ok(v.into()),
+		sql::Constant as v => Ok(v.into()),
+		sql::Function as v => Ok(v.into()),
+		sql::Subquery as v => Ok(v.into()),
+		sql::Expression as v => Ok(v.into()),
+		sql::Query as v => Ok(v.into()),
+		sql::Model as v => Ok(v.into()),
+		sql::Closure as v => Ok(v.into()),
+		value => Serializer::new().serialize(value)?.try_into(),
+	})
+}
 
-	type SerializeSeq: SerializeSeq<Ok = Self::Ok, Error = Self::Error>;
-	type SerializeTuple: SerializeTuple<Ok = Self::Ok, Error = Self::Error>;
-	type SerializeTupleStruct: SerializeTupleStruct<Ok = Self::Ok, Error = Self::Error>;
-	type SerializeTupleVariant: SerializeTupleVariant<Ok = Self::Ok, Error = Self::Error>;
-	type SerializeMap: SerializeMap<Ok = Self::Ok, Error = Self::Error>;
-	type SerializeStruct: SerializeStruct<Ok = Self::Ok, Error = Self::Error>;
-	type SerializeStructVariant: SerializeStructVariant<Ok = Self::Ok, Error = Self::Error>;
+impl TryFrom<Content> for Value {
+	type Error = Error;
 
-	const EXPECTED: &'static str;
-
-	fn unexpected(typ: &str, value: Option<impl Display>) -> Self::Error {
-		let message = match value {
-			Some(value) => format!("unexpected {typ} `{value}`, expected {}", Self::EXPECTED),
-			None => format!("unexpected {typ}, expected {}", Self::EXPECTED),
-		};
-		Self::Error::custom(message)
-	}
-
-	#[inline]
-	fn wrap(self) -> Wrapper<Self> {
-		Wrapper(self)
-	}
-
-	fn serialize_bool(self, value: bool) -> Result<Self::Ok, Self::Error> {
-		Err(Self::unexpected("bool", Some(value)))
-	}
-
-	fn serialize_i8(self, value: i8) -> Result<Self::Ok, Self::Error> {
-		Err(Self::unexpected("i8", Some(value)))
-	}
-
-	fn serialize_i16(self, value: i16) -> Result<Self::Ok, Self::Error> {
-		Err(Self::unexpected("i16", Some(value)))
-	}
-
-	fn serialize_i32(self, value: i32) -> Result<Self::Ok, Self::Error> {
-		Err(Self::unexpected("i32", Some(value)))
-	}
-
-	fn serialize_i64(self, value: i64) -> Result<Self::Ok, Self::Error> {
-		Err(Self::unexpected("i64", Some(value)))
-	}
-
-	fn serialize_i128(self, value: i128) -> Result<Self::Ok, Self::Error> {
-		Err(Self::unexpected("i128", Some(value)))
-	}
-
-	fn serialize_u8(self, value: u8) -> Result<Self::Ok, Self::Error> {
-		Err(Self::unexpected("u8", Some(value)))
-	}
-
-	fn serialize_u16(self, value: u16) -> Result<Self::Ok, Self::Error> {
-		Err(Self::unexpected("u16", Some(value)))
-	}
-
-	fn serialize_u32(self, value: u32) -> Result<Self::Ok, Self::Error> {
-		Err(Self::unexpected("u32", Some(value)))
-	}
-
-	fn serialize_u64(self, value: u64) -> Result<Self::Ok, Self::Error> {
-		Err(Self::unexpected("u64", Some(value)))
-	}
-
-	fn serialize_u128(self, value: u128) -> Result<Self::Ok, Self::Error> {
-		Err(Self::unexpected("u128", Some(value)))
-	}
-
-	fn serialize_f32(self, value: f32) -> Result<Self::Ok, Self::Error> {
-		Err(Self::unexpected("f32", Some(value)))
-	}
-
-	fn serialize_f64(self, value: f64) -> Result<Self::Ok, Self::Error> {
-		Err(Self::unexpected("f64", Some(value)))
-	}
-
-	fn serialize_char(self, value: char) -> Result<Self::Ok, Self::Error> {
-		Err(Self::unexpected("char", Some(value)))
-	}
-
-	fn serialize_str(self, _value: &str) -> Result<Self::Ok, Self::Error> {
-		Err(Self::unexpected("str", None::<String>))
-	}
-
-	fn serialize_bytes(self, _value: &[u8]) -> Result<Self::Ok, Self::Error> {
-		Err(Self::unexpected("bytes", None::<String>))
-	}
-
-	fn serialize_unit(self) -> Result<Self::Ok, Self::Error> {
-		Err(Self::unexpected("unit", None::<String>))
-	}
-
-	fn serialize_unit_variant(
-		self,
-		name: &'static str,
-		_variant_index: u32,
-		variant: &'static str,
-	) -> Result<Self::Ok, Self::Error> {
-		Err(Self::unexpected("unit variant", Some(format!("{name}::{variant}"))))
-	}
-
-	fn serialize_unit_struct(self, name: &'static str) -> Result<Self::Ok, Self::Error> {
-		Err(Self::unexpected("unit struct", Some(name)))
-	}
-
-	fn serialize_newtype_variant<T>(
-		self,
-		name: &'static str,
-		_variant_index: u32,
-		_variant: &'static str,
-		_value: &T,
-	) -> Result<Self::Ok, Self::Error>
-	where
-		T: ?Sized + Serialize,
-	{
-		Err(Self::unexpected("newtype variant", Some(name)))
-	}
-
-	fn serialize_newtype_struct<T>(
-		self,
-		name: &'static str,
-		_value: &T,
-	) -> Result<Self::Ok, Self::Error>
-	where
-		T: ?Sized + Serialize,
-	{
-		Err(Self::unexpected("newtype struct", Some(name)))
-	}
-
-	fn serialize_none(self) -> Result<Self::Ok, Self::Error> {
-		Err(Self::unexpected("none", None::<String>))
-	}
-
-	fn serialize_some<T>(self, _value: &T) -> Result<Self::Ok, Self::Error>
-	where
-		T: ?Sized + Serialize,
-	{
-		Err(Self::unexpected("some", None::<String>))
-	}
-
-	fn serialize_seq(self, _len: Option<usize>) -> Result<Self::SerializeSeq, Self::Error> {
-		Err(Self::unexpected("sequence", None::<String>))
-	}
-
-	fn serialize_tuple(self, _len: usize) -> Result<Self::SerializeTuple, Self::Error> {
-		Err(Self::unexpected("tuple", None::<String>))
-	}
-
-	fn serialize_tuple_struct(
-		self,
-		name: &'static str,
-		_len: usize,
-	) -> Result<Self::SerializeTupleStruct, Self::Error> {
-		Err(Self::unexpected("tuple struct", Some(name)))
-	}
-
-	fn serialize_tuple_variant(
-		self,
-		name: &'static str,
-		_variant_index: u32,
-		_variant: &'static str,
-		_len: usize,
-	) -> Result<Self::SerializeTupleVariant, Self::Error> {
-		Err(Self::unexpected("tuple variant", Some(name)))
-	}
-
-	fn serialize_map(self, _len: Option<usize>) -> Result<Self::SerializeMap, Self::Error> {
-		Err(Self::unexpected("map", None::<String>))
-	}
-
-	fn serialize_struct(
-		self,
-		name: &'static str,
-		_len: usize,
-	) -> Result<Self::SerializeStruct, Self::Error> {
-		Err(Self::unexpected("struct", Some(name)))
-	}
-
-	fn serialize_struct_variant(
-		self,
-		name: &'static str,
-		_variant_index: u32,
-		_variant: &'static str,
-		_len: usize,
-	) -> Result<Self::SerializeStructVariant, Self::Error> {
-		Err(Self::unexpected("struct variant", Some(name)))
-	}
-
-	fn collect_str<T>(self, value: &T) -> Result<Self::Ok, Self::Error>
-	where
-		T: Display + ?Sized,
-	{
-		self.serialize_str(&value.to_string())
-	}
-
-	#[inline]
-	fn is_human_readable(&self) -> bool {
-		false
+	fn try_from(content: Content) -> Result<Self, Self::Error> {
+		match content {
+			Content::Unit => Ok(Value::None),
+			Content::Bool(v) => Ok(v.into()),
+			Content::Number(v) => match v {
+				Number::I8(v) => Ok(v.into()),
+				Number::U8(v) => Ok(v.into()),
+				Number::I16(v) => Ok(v.into()),
+				Number::U16(v) => Ok(v.into()),
+				Number::I32(v) => Ok(v.into()),
+				Number::U32(v) => Ok(v.into()),
+				Number::F32(v) => Ok(v.into()),
+				Number::I64(v) => Ok(v.into()),
+				Number::U64(v) => Ok(v.into()),
+				Number::F64(v) => Ok(v.into()),
+				Number::I128(v) => Ok(v.into()),
+				Number::U128(v) => Ok(v.into()),
+				_ => Err(Error::Serialization("unsupported number".to_owned())),
+			},
+			Content::Char(v) => Ok(v.to_string().into()),
+			Content::String(v) => match v {
+				Cow::Borrowed(v) => Ok(v.into()),
+				Cow::Owned(v) => Ok(v.into()),
+			},
+			Content::Bytes(v) => match v {
+				Cow::Borrowed(v) => Ok(v.to_vec().into()),
+				Cow::Owned(v) => Ok(v.into()),
+			},
+			Content::Seq(v) => v.try_into(),
+			Content::Map(v) => v.try_into(),
+			Content::Option(v) => match v {
+				Some(v) => (*v).try_into(),
+				None => Ok(Value::None),
+			},
+			Content::Struct(_) => r#struct::to_value(content),
+			Content::Enum(_) => r#enum::to_value(content),
+			Content::Tuple(v) => v.try_into(),
+		}
 	}
 }
 
-struct Wrapper<S: Serializer>(S);
+impl TryFrom<Vec<Content>> for Value {
+	type Error = Error;
 
-impl<S> serde::ser::Serializer for Wrapper<S>
-where
-	S: Serializer,
-{
-	type Ok = S::Ok;
-	type Error = S::Error;
-
-	type SerializeSeq = S::SerializeSeq;
-	type SerializeTuple = S::SerializeTuple;
-	type SerializeTupleStruct = S::SerializeTupleStruct;
-	type SerializeTupleVariant = S::SerializeTupleVariant;
-	type SerializeMap = S::SerializeMap;
-	type SerializeStruct = S::SerializeStruct;
-	type SerializeStructVariant = S::SerializeStructVariant;
-
-	#[inline]
-	fn serialize_bool(self, value: bool) -> Result<Self::Ok, Self::Error> {
-		self.0.serialize_bool(value)
+	fn try_from(v: Vec<Content>) -> Result<Self, Self::Error> {
+		let mut vec = Vec::with_capacity(v.len());
+		for content in v {
+			vec.push(content.try_into()?);
+		}
+		Ok(Self::Array(sql::Array(vec)))
 	}
+}
 
-	#[inline]
-	fn serialize_i8(self, value: i8) -> Result<Self::Ok, Self::Error> {
-		self.0.serialize_i8(value)
+impl TryFrom<Vec<(Content, Content)>> for Value {
+	type Error = Error;
+
+	fn try_from(v: Vec<(Content, Content)>) -> Result<Self, Self::Error> {
+		let mut map = BTreeMap::new();
+		for (key, value) in v {
+			let key = match key {
+				Content::String(v) => match v {
+					Cow::Borrowed(v) => v.to_owned(),
+					Cow::Owned(v) => v,
+				},
+				content => {
+					return Err(content.unexpected(serde_content::Expected::String))?;
+				}
+			};
+			let value = value.try_into()?;
+			map.insert(key, value);
+		}
+		Ok(Self::Object(sql::Object(map)))
 	}
+}
 
-	#[inline]
-	fn serialize_i16(self, value: i16) -> Result<Self::Ok, Self::Error> {
-		self.0.serialize_i16(value)
+impl TryFrom<Vec<(Cow<'static, str>, Content)>> for Value {
+	type Error = Error;
+
+	fn try_from(v: Vec<(Cow<'static, str>, Content)>) -> Result<Self, Self::Error> {
+		let mut map = BTreeMap::new();
+		for (key, value) in v {
+			map.insert(key.into_owned(), value.try_into()?);
+		}
+		Ok(Self::Object(sql::Object(map)))
 	}
+}
 
-	#[inline]
-	fn serialize_i32(self, value: i32) -> Result<Self::Ok, Self::Error> {
-		self.0.serialize_i32(value)
+impl TryFrom<(Cow<'static, str>, Content)> for Value {
+	type Error = Error;
+
+	fn try_from((key, value): (Cow<'static, str>, Content)) -> Result<Self, Self::Error> {
+		let mut map = BTreeMap::new();
+		map.insert(key.into_owned(), value.try_into()?);
+		Ok(Self::Object(sql::Object(map)))
 	}
+}
 
-	#[inline]
-	fn serialize_i64(self, value: i64) -> Result<Self::Ok, Self::Error> {
-		self.0.serialize_i64(value)
-	}
-
-	#[inline]
-	fn serialize_i128(self, value: i128) -> Result<Self::Ok, Self::Error> {
-		self.0.serialize_i128(value)
-	}
-
-	#[inline]
-	fn serialize_u8(self, value: u8) -> Result<Self::Ok, Self::Error> {
-		self.0.serialize_u8(value)
-	}
-
-	#[inline]
-	fn serialize_u16(self, value: u16) -> Result<Self::Ok, Self::Error> {
-		self.0.serialize_u16(value)
-	}
-
-	#[inline]
-	fn serialize_u32(self, value: u32) -> Result<Self::Ok, Self::Error> {
-		self.0.serialize_u32(value)
-	}
-
-	#[inline]
-	fn serialize_u64(self, value: u64) -> Result<Self::Ok, Self::Error> {
-		self.0.serialize_u64(value)
-	}
-
-	#[inline]
-	fn serialize_u128(self, value: u128) -> Result<Self::Ok, Self::Error> {
-		self.0.serialize_u128(value)
-	}
-
-	#[inline]
-	fn serialize_f32(self, value: f32) -> Result<Self::Ok, Self::Error> {
-		self.0.serialize_f32(value)
-	}
-
-	#[inline]
-	fn serialize_f64(self, value: f64) -> Result<Self::Ok, Self::Error> {
-		self.0.serialize_f64(value)
-	}
-
-	#[inline]
-	fn serialize_char(self, value: char) -> Result<Self::Ok, Self::Error> {
-		self.0.serialize_char(value)
-	}
-
-	#[inline]
-	fn serialize_str(self, value: &str) -> Result<Self::Ok, Self::Error> {
-		self.0.serialize_str(value)
-	}
-
-	#[inline]
-	fn serialize_bytes(self, value: &[u8]) -> Result<Self::Ok, Self::Error> {
-		self.0.serialize_bytes(value)
-	}
-
-	#[inline]
-	fn serialize_unit(self) -> Result<Self::Ok, Self::Error> {
-		self.0.serialize_unit()
-	}
-
-	#[inline]
-	fn serialize_unit_variant(
-		self,
-		name: &'static str,
-		variant_index: u32,
-		variant: &'static str,
-	) -> Result<Self::Ok, Self::Error> {
-		self.0.serialize_unit_variant(name, variant_index, variant)
-	}
-
-	#[inline]
-	fn serialize_unit_struct(self, name: &'static str) -> Result<Self::Ok, Self::Error> {
-		self.0.serialize_unit_struct(name)
-	}
-
-	#[inline]
-	fn serialize_newtype_variant<T>(
-		self,
-		name: &'static str,
-		variant_index: u32,
-		variant: &'static str,
-		value: &T,
-	) -> Result<Self::Ok, Self::Error>
+impl serde::ser::Error for Error {
+	fn custom<T>(msg: T) -> Self
 	where
-		T: ?Sized + Serialize,
+		T: Display,
 	{
-		self.0.serialize_newtype_variant(name, variant_index, variant, value)
+		Self::Serialization(msg.to_string())
+	}
+}
+
+impl From<serde_content::Error> for Error {
+	fn from(error: serde_content::Error) -> Self {
+		Self::Serialization(error.to_string())
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+	use crate::sql;
+	use crate::sql::block::Entry;
+	use crate::sql::statements::CreateStatement;
+	use crate::sql::Number;
+	use crate::sql::*;
+	use ::serde::Serialize;
+	use std::ops::Bound;
+
+	#[test]
+	fn value_none() {
+		let expected = Value::None;
+		assert_eq!(expected, to_value(None::<u32>).unwrap());
+		assert_eq!(expected.clone(), to_value(expected).unwrap());
 	}
 
-	#[inline]
-	fn serialize_newtype_struct<T>(
-		self,
-		name: &'static str,
-		value: &T,
-	) -> Result<Self::Ok, Self::Error>
-	where
-		T: ?Sized + Serialize,
-	{
-		self.0.serialize_newtype_struct(name, value)
+	#[test]
+	fn null() {
+		let expected = Value::Null;
+		assert_eq!(expected.clone(), to_value(expected).unwrap());
 	}
 
-	#[inline]
-	fn serialize_none(self) -> Result<Self::Ok, Self::Error> {
-		self.0.serialize_none()
+	#[test]
+	fn r#false() {
+		let expected = Value::Bool(false);
+		assert_eq!(expected, to_value(false).unwrap());
+		assert_eq!(expected.clone(), to_value(expected).unwrap());
 	}
 
-	#[inline]
-	fn serialize_some<T>(self, value: &T) -> Result<Self::Ok, Self::Error>
-	where
-		T: ?Sized + Serialize,
-	{
-		self.0.serialize_some(value)
+	#[test]
+	fn r#true() {
+		let expected = Value::Bool(true);
+		assert_eq!(expected, to_value(true).unwrap());
+		assert_eq!(expected.clone(), to_value(expected).unwrap());
 	}
 
-	#[inline]
-	fn serialize_seq(self, len: Option<usize>) -> Result<Self::SerializeSeq, Self::Error> {
-		self.0.serialize_seq(len)
+	#[test]
+	fn number() {
+		let number = Number::Int(Default::default());
+		let value = to_value(number.clone()).unwrap();
+		let expected = Value::Number(number);
+		assert_eq!(value, expected);
+		assert_eq!(expected.clone(), to_value(expected).unwrap());
+
+		let number = Number::Float(Default::default());
+		let value = to_value(number.clone()).unwrap();
+		let expected = Value::Number(number);
+		assert_eq!(value, expected);
+		assert_eq!(expected.clone(), to_value(expected).unwrap());
+
+		let number = Number::Decimal(Default::default());
+		let value = to_value(number.clone()).unwrap();
+		let expected = Value::Number(number);
+		assert_eq!(value, expected);
+		assert_eq!(expected.clone(), to_value(expected).unwrap());
 	}
 
-	#[inline]
-	fn serialize_tuple(self, len: usize) -> Result<Self::SerializeTuple, Self::Error> {
-		self.0.serialize_tuple(len)
+	#[test]
+	fn strand() {
+		let strand = Strand("foobar".to_owned());
+		let value = to_value(strand.clone()).unwrap();
+		let expected = Value::Strand(strand);
+		assert_eq!(value, expected);
+		assert_eq!(expected.clone(), to_value(expected).unwrap());
+
+		let strand = "foobar".to_owned();
+		let value = to_value(strand.clone()).unwrap();
+		let expected = Value::Strand(strand.into());
+		assert_eq!(value, expected);
+		assert_eq!(expected.clone(), to_value(expected).unwrap());
+
+		let strand = "foobar";
+		let value = to_value(strand).unwrap();
+		let expected = Value::Strand(strand.into());
+		assert_eq!(value, expected);
+		assert_eq!(expected.clone(), to_value(expected).unwrap());
 	}
 
-	#[inline]
-	fn serialize_tuple_struct(
-		self,
-		name: &'static str,
-		len: usize,
-	) -> Result<Self::SerializeTupleStruct, Self::Error> {
-		self.0.serialize_tuple_struct(name, len)
+	#[test]
+	fn duration() {
+		let duration = Duration::default();
+		let value = to_value(duration).unwrap();
+		let expected = Value::Duration(duration);
+		assert_eq!(value, expected);
+		assert_eq!(expected.clone(), to_value(expected).unwrap());
 	}
 
-	#[inline]
-	fn serialize_tuple_variant(
-		self,
-		name: &'static str,
-		variant_index: u32,
-		variant: &'static str,
-		len: usize,
-	) -> Result<Self::SerializeTupleVariant, Self::Error> {
-		self.0.serialize_tuple_variant(name, variant_index, variant, len)
+	#[test]
+	fn datetime() {
+		let datetime = Datetime::default();
+		let value = to_value(datetime.clone()).unwrap();
+		let expected = Value::Datetime(datetime);
+		assert_eq!(value, expected);
+		assert_eq!(expected.clone(), to_value(expected).unwrap());
 	}
 
-	#[inline]
-	fn serialize_map(self, len: Option<usize>) -> Result<Self::SerializeMap, Self::Error> {
-		self.0.serialize_map(len)
+	#[test]
+	fn uuid() {
+		let uuid = Uuid::default();
+		let value = to_value(uuid).unwrap();
+		let expected = Value::Uuid(uuid);
+		assert_eq!(value, expected);
+		assert_eq!(expected.clone(), to_value(expected).unwrap());
 	}
 
-	#[inline]
-	fn serialize_struct(
-		self,
-		name: &'static str,
-		len: usize,
-	) -> Result<Self::SerializeStruct, Self::Error> {
-		self.0.serialize_struct(name, len)
+	#[test]
+	fn array() {
+		let array = Array::default();
+		let value = to_value(array.clone()).unwrap();
+		let expected = Value::Array(array);
+		assert_eq!(value, expected);
+		assert_eq!(expected.clone(), to_value(expected).unwrap());
 	}
 
-	#[inline]
-	fn serialize_struct_variant(
-		self,
-		name: &'static str,
-		variant_index: u32,
-		variant: &'static str,
-		len: usize,
-	) -> Result<Self::SerializeStructVariant, Self::Error> {
-		self.0.serialize_struct_variant(name, variant_index, variant, len)
+	#[test]
+	fn object() {
+		let object = Object::default();
+		let value = to_value(object.clone()).unwrap();
+		let expected = Value::Object(object);
+		assert_eq!(value, expected);
+		assert_eq!(expected.clone(), to_value(expected).unwrap());
 	}
 
-	#[inline]
-	fn collect_str<T>(self, value: &T) -> Result<Self::Ok, Self::Error>
-	where
-		T: Display + ?Sized,
-	{
-		self.0.collect_str(value)
+	#[test]
+	fn geometry() {
+		let geometry = Geometry::Collection(Vec::new());
+		let value = to_value(geometry.clone()).unwrap();
+		let expected = Value::Geometry(geometry);
+		assert_eq!(value, expected);
+		assert_eq!(expected.clone(), to_value(expected).unwrap());
 	}
 
-	#[inline]
-	fn is_human_readable(&self) -> bool {
-		self.0.is_human_readable()
+	#[test]
+	fn bytes() {
+		let bytes = Bytes("foobar".as_bytes().to_owned());
+		let value = to_value(bytes.clone()).unwrap();
+		let expected = Value::Bytes(bytes);
+		assert_eq!(value, expected);
+		assert_eq!(expected.clone(), to_value(expected).unwrap());
+	}
+
+	#[test]
+	fn param() {
+		let param = Param::default();
+		let value = to_value(param.clone()).unwrap();
+		let expected = Value::Param(param);
+		assert_eq!(value, expected);
+		assert_eq!(expected.clone(), to_value(expected).unwrap());
+	}
+
+	#[test]
+	fn idiom() {
+		let idiom = Idiom::default();
+		let value = to_value(idiom.clone()).unwrap();
+		let expected = Value::Idiom(idiom);
+		assert_eq!(value, expected);
+		assert_eq!(expected.clone(), to_value(expected).unwrap());
+	}
+
+	#[test]
+	fn table() {
+		let table = Table("foo".to_owned());
+		let value = to_value(table.clone()).unwrap();
+		let expected = Value::Table(table);
+		assert_eq!(value, expected);
+		assert_eq!(expected.clone(), to_value(expected).unwrap());
+	}
+
+	#[test]
+	fn thing() {
+		let record_id = sql::thing("foo:bar").unwrap();
+		let value = to_value(record_id.clone()).unwrap();
+		let expected = Value::Thing(record_id);
+		assert_eq!(value, expected);
+		assert_eq!(expected.clone(), to_value(expected).unwrap());
+	}
+
+	#[test]
+	fn model() {
+		let model = Mock::Count("foo".to_owned(), Default::default());
+		let value = to_value(model.clone()).unwrap();
+		let expected = Value::Mock(model);
+		assert_eq!(value, expected);
+		assert_eq!(expected.clone(), to_value(expected).unwrap());
+	}
+
+	#[test]
+	fn regex() {
+		let regex = "abc".parse::<Regex>().unwrap();
+		let value = to_value(regex.clone()).unwrap();
+		let expected = Value::Regex(regex);
+		assert_eq!(value, expected);
+		assert_eq!(expected.clone(), to_value(expected).unwrap());
+	}
+
+	#[test]
+	fn block() {
+		let block: Box<Block> = Default::default();
+		let value = to_value(block.clone()).unwrap();
+		let expected = Value::Block(block);
+		assert_eq!(value, expected);
+		assert_eq!(expected.clone(), to_value(expected).unwrap());
+	}
+
+	#[test]
+	fn range() {
+		let range = Box::new(Range {
+			tb: "foo".to_owned(),
+			beg: Bound::Included("foo".into()),
+			end: Bound::Unbounded,
+		});
+		let value = to_value(range.clone()).unwrap();
+		let expected = Value::Range(range);
+		assert_eq!(value, expected);
+		assert_eq!(expected.clone(), to_value(expected).unwrap());
+	}
+
+	#[test]
+	fn edges() {
+		let edges = Box::new(Edges {
+			dir: Dir::In,
+			from: sql::thing("foo:bar").unwrap(),
+			what: Tables(vec!["foo".into()]),
+		});
+		let value = to_value(edges.clone()).unwrap();
+		let expected = Value::Edges(edges);
+		assert_eq!(value, expected);
+		assert_eq!(expected.clone(), to_value(expected).unwrap());
+	}
+
+	#[test]
+	fn future() {
+		let future = Box::new(Future(Value::default().into()));
+		let value = to_value(future.clone()).unwrap();
+		let expected = Value::Future(future);
+		assert_eq!(value, expected);
+		assert_eq!(expected.clone(), to_value(expected).unwrap());
+
+		let future = Box::new(Future(Block(vec![Entry::Create(CreateStatement::default())])));
+		let value = to_value(future.clone()).unwrap();
+		let expected = Value::Future(future);
+		assert_eq!(value, expected);
+		assert_eq!(expected.clone(), to_value(expected).unwrap());
+	}
+
+	#[test]
+	fn constant() {
+		let constant = Constant::MathPi;
+		let value = to_value(constant.clone()).unwrap();
+		let expected = Value::Constant(constant);
+		assert_eq!(value, expected);
+		assert_eq!(expected.clone(), to_value(expected).unwrap());
+	}
+
+	#[test]
+	fn function() {
+		let function = Box::new(Function::Normal(Default::default(), Default::default()));
+		let value = to_value(function.clone()).unwrap();
+		let expected = Value::Function(function);
+		assert_eq!(value, expected);
+		assert_eq!(expected.clone(), to_value(expected).unwrap());
+	}
+
+	#[test]
+	fn query() {
+		let query = sql::parse("SELECT * FROM foo").unwrap();
+		let value = to_value(query.clone()).unwrap();
+		let expected = Value::Query(query);
+		assert_eq!(value, expected);
+		assert_eq!(expected.clone(), to_value(expected).unwrap());
+	}
+
+	#[test]
+	fn subquery() {
+		let subquery = Box::new(Subquery::Value(Value::None));
+		let value = to_value(subquery.clone()).unwrap();
+		let expected = Value::Subquery(subquery);
+		assert_eq!(value, expected);
+		assert_eq!(expected.clone(), to_value(expected).unwrap());
+	}
+
+	#[test]
+	fn expression() {
+		let expression = Box::new(Expression::Binary {
+			l: "foo".into(),
+			o: Operator::Equal,
+			r: "Bar".into(),
+		});
+		let value = to_value(expression.clone()).unwrap();
+		let expected = Value::Expression(expression);
+		assert_eq!(value, expected);
+		assert_eq!(expected.clone(), to_value(expected).unwrap());
+	}
+
+	#[test]
+	fn unknown_struct() {
+		#[derive(Debug, Serialize)]
+		struct FooBar {
+			foo: String,
+			bar: i32,
+		}
+
+		let foo = "Foo";
+		let bar = Default::default();
+		let foo_bar = FooBar {
+			bar,
+			foo: foo.to_owned(),
+		};
+		let value = to_value(foo_bar).unwrap();
+		let expected = Value::Object(
+			map! {
+				"foo".to_owned() => foo.into(),
+				"bar".to_owned() => bar.into(),
+			}
+			.into(),
+		);
+		assert_eq!(value, expected);
+		assert_eq!(expected.clone(), to_value(expected).unwrap());
+	}
+
+	#[test]
+	fn none() {
+		let option: Option<Value> = None;
+		let serialized = to_value(option).unwrap();
+		assert_eq!(Value::None, serialized);
+	}
+
+	#[test]
+	fn some() {
+		let option = Some(Value::Bool(true));
+		let serialized = to_value(option).unwrap();
+		assert_eq!(Value::Bool(true), serialized);
+	}
+
+	#[test]
+	fn empty_map() {
+		let map: BTreeMap<String, Value> = Default::default();
+		let serialized = to_value(map).unwrap();
+		assert_eq!(Value::Object(Default::default()), serialized);
+	}
+
+	#[test]
+	fn map() {
+		let map = map! {
+			String::from("foo") => Value::from("bar"),
+		};
+		let serialized = to_value(map.clone()).unwrap();
+		assert_eq!(serialized, map.into());
+	}
+
+	#[test]
+	fn empty_vec() {
+		let vec: Vec<Value> = Vec::new();
+		let serialized = to_value(vec).unwrap();
+		assert_eq!(Value::Array(Default::default()), serialized);
+	}
+
+	#[test]
+	fn vec() {
+		let vec = vec![Value::default()];
+		let serialized = to_value(vec).unwrap();
+		assert_eq!(Value::Array(vec![Value::None].into()), serialized);
 	}
 }

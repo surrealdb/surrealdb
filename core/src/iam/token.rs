@@ -8,6 +8,13 @@ use std::collections::HashMap;
 
 pub static HEADER: Lazy<Header> = Lazy::new(|| Header::new(Algorithm::HS512));
 
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(untagged)]
+pub enum Audience {
+	Single(String),
+	Multiple(Vec<String>),
+}
+
 #[derive(Debug, Default, Serialize, Deserialize, Clone)]
 #[non_exhaustive]
 pub struct Claims {
@@ -22,7 +29,7 @@ pub struct Claims {
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub sub: Option<String>,
 	#[serde(skip_serializing_if = "Option::is_none")]
-	pub aud: Option<String>,
+	pub aud: Option<Audience>,
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub jti: Option<String>,
 	#[serde(alias = "ns")]
@@ -80,7 +87,10 @@ impl From<Claims> for Value {
 		}
 		// Add aud field if set
 		if let Some(aud) = v.aud {
-			out.insert("aud".to_string(), aud.into());
+			match aud {
+				Audience::Single(v) => out.insert("aud".to_string(), v.into()),
+				Audience::Multiple(v) => out.insert("aud".to_string(), v.into()),
+			};
 		}
 		// Add iat field if set
 		if let Some(iat) = v.iat {

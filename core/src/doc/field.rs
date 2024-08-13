@@ -6,6 +6,7 @@ use crate::err::Error;
 use crate::iam::Action;
 use crate::sql::permission::Permission;
 use crate::sql::value::Value;
+use crate::sql::Kind;
 use reblessive::tree::Stk;
 
 impl<'a> Document<'a> {
@@ -110,20 +111,30 @@ impl<'a> Document<'a> {
 				}
 				// Check for a ASSERT clause
 				if let Some(expr) = &fd.assert {
-					// Configure the context
-					let mut ctx = Context::new(ctx);
-					ctx.add_value("input", &inp);
-					ctx.add_value("value", &val);
-					ctx.add_value("after", &val);
-					ctx.add_value("before", &old);
-					// Process the ASSERT clause
-					if !expr.compute(stk, &ctx, opt, Some(&self.current)).await?.is_truthy() {
-						return Err(Error::FieldValue {
-							thing: rid.to_string(),
-							field: fd.name.clone(),
-							value: val.to_string(),
-							check: expr.to_string(),
-						});
+					match (&val, &fd.kind) {
+						// The field TYPE is optional, and the field
+						// value was not set or a NONE value was
+						// specified, so let's ignore the ASSERT clause
+						(Value::None, Some(Kind::Option(_))) => (),
+						// Otherwise let's process the ASSERT clause
+						_ => {
+							// Configure the context
+							let mut ctx = Context::new(ctx);
+							ctx.add_value("input", &inp);
+							ctx.add_value("value", &val);
+							ctx.add_value("after", &val);
+							ctx.add_value("before", &old);
+							// Process the ASSERT clause
+							if !expr.compute(stk, &ctx, opt, Some(&self.current)).await?.is_truthy()
+							{
+								return Err(Error::FieldValue {
+									thing: rid.to_string(),
+									field: fd.name.clone(),
+									value: val.to_string(),
+									check: expr.to_string(),
+								});
+							}
+						}
 					}
 				}
 				// Check for a PERMISSIONS clause

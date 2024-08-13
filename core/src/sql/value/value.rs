@@ -6,6 +6,7 @@ use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::fnc::util::string::fuzzy::Fuzzy;
 use crate::sql::statements::info::InfoStructure;
+use crate::sql::Closure;
 use crate::sql::{
 	array::Uniq,
 	fmt::{Fmt, Pretty},
@@ -120,6 +121,7 @@ pub enum Value {
 	Expression(Box<Expression>),
 	Query(Query),
 	Model(Box<Model>),
+	Closure(Box<Closure>),
 	// Add new variants here
 }
 
@@ -141,6 +143,12 @@ impl From<bool> for Value {
 impl From<Uuid> for Value {
 	fn from(v: Uuid) -> Self {
 		Value::Uuid(v)
+	}
+}
+
+impl From<Closure> for Value {
+	fn from(v: Closure) -> Self {
+		Value::Closure(Box::new(v))
 	}
 }
 
@@ -1188,6 +1196,7 @@ impl Value {
 			Self::Strand(_) => "string",
 			Self::Duration(_) => "duration",
 			Self::Datetime(_) => "datetime",
+			Self::Closure(_) => "function",
 			Self::Number(Number::Int(_)) => "int",
 			Self::Number(Number::Float(_)) => "float",
 			Self::Number(Number::Decimal(_)) => "decimal",
@@ -1225,6 +1234,7 @@ impl Value {
 			Kind::Point => self.coerce_to_point().map(Value::from),
 			Kind::Bytes => self.coerce_to_bytes().map(Value::from),
 			Kind::Uuid => self.coerce_to_uuid().map(Value::from),
+			Kind::Function(_, _) => self.coerce_to_function().map(Value::from),
 			Kind::Set(t, l) => match l {
 				Some(l) => self.coerce_to_set_type_len(t, l).map(Value::from),
 				None => self.coerce_to_set_type(t).map(Value::from),
@@ -1540,6 +1550,19 @@ impl Value {
 		}
 	}
 
+	/// Try to coerce this value to a `Closure`
+	pub(crate) fn coerce_to_function(self) -> Result<Closure, Error> {
+		match self {
+			// Closures are allowed
+			Value::Closure(v) => Ok(*v),
+			// Anything else raises an error
+			_ => Err(Error::CoerceTo {
+				from: self,
+				into: "function".into(),
+			}),
+		}
+	}
+
 	/// Try to coerce this value to a `Datetime`
 	pub(crate) fn coerce_to_datetime(self) -> Result<Datetime, Error> {
 		match self {
@@ -1780,6 +1803,7 @@ impl Value {
 			Kind::Point => self.convert_to_point().map(Value::from),
 			Kind::Bytes => self.convert_to_bytes().map(Value::from),
 			Kind::Uuid => self.convert_to_uuid().map(Value::from),
+			Kind::Function(_, _) => self.convert_to_function().map(Value::from),
 			Kind::Set(t, l) => match l {
 				Some(l) => self.convert_to_set_type_len(t, l).map(Value::from),
 				None => self.convert_to_set_type(t).map(Value::from),
@@ -2071,6 +2095,19 @@ impl Value {
 			_ => Err(Error::ConvertTo {
 				from: self,
 				into: "uuid".into(),
+			}),
+		}
+	}
+
+	/// Try to convert this value to a `Closure`
+	pub(crate) fn convert_to_function(self) -> Result<Closure, Error> {
+		match self {
+			// Closures are allowed
+			Value::Closure(v) => Ok(*v),
+			// Anything else converts to a closure with self as the body
+			_ => Err(Error::ConvertTo {
+				from: self,
+				into: "function".into(),
 			}),
 		}
 	}
@@ -2621,6 +2658,7 @@ impl fmt::Display for Value {
 			Value::Table(v) => write!(f, "{v}"),
 			Value::Thing(v) => write!(f, "{v}"),
 			Value::Uuid(v) => write!(f, "{v}"),
+			Value::Closure(v) => write!(f, "{v}"),
 		}
 	}
 }
