@@ -72,8 +72,9 @@ impl SelectStatement {
 		let mut i = Iterator::new();
 		// Ensure futures are stored and the version is set if specified
 		let version = self.version.as_ref().map(|v| v.to_u64());
-        let opt = Arc::new(opt.new_with_futures(false).with_projections(true).with_version(version));
-        //;
+		let opt =
+			Arc::new(opt.new_with_futures(false).with_projections(true).with_version(version));
+		//;
 		// Get a query planner
 		let mut planner = QueryPlanner::new(
 			opt.clone(),
