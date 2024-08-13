@@ -1358,3 +1358,6 @@ allow_unsafe = true
 
 [pkg.rustls-pki-types]
 allow_unsafe = true
+
+[pkg.castaway]
+allow_unsafe = true
