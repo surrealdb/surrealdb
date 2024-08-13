@@ -586,7 +586,8 @@ async fn router(
 		} => {
 			let path = base_url.join(SQL_PATH)?;
 			let mut request = client.post(path).headers(headers.clone()).query(&vars).auth(auth);
-			request = request.query(&variables).body(q.to_string());
+			let bindings: Vec<_> = variables.iter().map(|(k, v)| (k, v.to_string())).collect();
+			request = request.query(&bindings).body(q.to_string());
 			let values = query(request).await?;
 			Ok(DbResponse::Query(values))
 		}

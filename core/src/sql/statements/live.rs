@@ -121,7 +121,7 @@ impl LiveStatement {
 			}
 			v => {
 				return Err(Error::LiveStatement {
-					value: dbg!(v).to_string(),
+					value: v.to_string(),
 				});
 			}
 		};
