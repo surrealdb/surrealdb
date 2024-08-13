@@ -49,7 +49,7 @@ pub async fn read(
 	// Create an empty buffer for the final changesets
 	let mut res = Vec::<ChangeSet>::new();
 	// iterate over _x and put decoded elements to r
-	for (k, v) in tx.scan(beg..end, limit).await? {
+	for (k, v) in tx.scan(beg..end, limit, None).await? {
 		#[cfg(debug_assertions)]
 		trace!("Reading change feed entry: {}", k.sprint());
 		// Decode the changefeed entry key
