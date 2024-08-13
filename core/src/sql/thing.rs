@@ -11,6 +11,8 @@ use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::str::FromStr;
 
+use super::Table;
+
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Thing";
 
 #[revisioned(revision = 1)]
@@ -89,6 +91,10 @@ impl Thing {
 	/// Convert the Thing to a raw String
 	pub fn to_raw(&self) -> String {
 		self.to_string()
+	}
+
+	pub fn is_record_type(&self, types: &[Table]) -> bool {
+		types.is_empty() || types.iter().any(|tb| tb.0 == self.tb)
 	}
 }
 
