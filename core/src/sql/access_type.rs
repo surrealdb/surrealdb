@@ -9,13 +9,16 @@ use std::fmt;
 use std::fmt::Display;
 
 /// The type of access methods available
-#[revisioned(revision = 1)]
+#[revisioned(revision = 2)]
 #[derive(Debug, Serialize, Deserialize, Hash, Clone, Eq, PartialEq, PartialOrd)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub enum AccessType {
 	Record(RecordAccess),
 	Jwt(JwtAccess),
+	// TODO(gguillemas): Document once bearer access is no longer experimental.
+	#[doc(hidden)]
+	#[revision(start = 2)]
 	Bearer(BearerAccess),
 }
 
@@ -96,6 +99,8 @@ impl InfoStructure for AccessType {
 }
 
 impl AccessType {
+	// TODO(gguillemas): Document once bearer access is no longer experimental.
+	#[doc(hidden)]
 	/// Returns whether or not the access method can issue non-token grants
 	/// In this context, token refers exclusively to JWT
 	#[allow(unreachable_patterns)]
@@ -338,6 +343,8 @@ impl Jwt for RecordAccess {
 	}
 }
 
+// TODO(gguillemas): Document once bearer access is no longer experimental.
+#[doc(hidden)]
 #[revisioned(revision = 1)]
 #[derive(Debug, Serialize, Deserialize, Hash, Clone, Eq, PartialEq, PartialOrd)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]

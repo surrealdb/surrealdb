@@ -7,14 +7,12 @@ use crate::sql::statements::rebuild::{RebuildIndexStatement, RebuildStatement};
 use crate::sql::statements::show::{ShowSince, ShowStatement};
 use crate::sql::statements::sleep::SleepStatement;
 use crate::sql::statements::{
+	access::{
+		AccessStatement, AccessStatementGrant, AccessStatementList, AccessStatementRevoke, Subject,
+	},
 	KillStatement, LiveStatement, OptionStatement, SetStatement, ThrowStatement,
 };
 use crate::sql::{Fields, Ident, Param};
-#[cfg(surrealdb_unstable)]
-use crate::statements::access::{
-	access::AccessStatement, access::AccessStatementGrant, access::AccessStatementList,
-	access::AccessStatementRevoke, access::Subject,
-};
 use crate::syn::parser::{ParseError, ParseErrorKind};
 use crate::syn::token::{t, TokenKind};
 use crate::{
@@ -115,7 +113,6 @@ impl Parser<'_> {
 	async fn parse_stmt_inner(&mut self, ctx: &mut Stk) -> ParseResult<Statement> {
 		let token = self.peek();
 		match token.kind {
-			#[cfg(surrealdb_unstable)]
 			t!("ACCESS") => {
 				// TODO(gguillemas): Remove this once bearer access is no longer experimental.
 				if !*EXPERIMENTAL_BEARER_ACCESS {
@@ -382,7 +379,6 @@ impl Parser<'_> {
 		}
 	}
 
-	#[cfg(surrealdb_unstable)]
 	/// Parsers an access statement.
 	fn parse_access(&mut self) -> ParseResult<AccessStatement> {
 		let ac = self.next_token_value()?;

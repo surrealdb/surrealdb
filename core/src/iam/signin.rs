@@ -1,28 +1,24 @@
-use super::verify::{authenticate_record, verify_db_creds, verify_ns_creds, verify_root_creds};
-use super::{Actor, Level};
-use crate::cnf::{INSECURE_FORWARD_ACCESS_ERRORS, SERVER_NAME};
+use super::verify::{
+	authenticate_generic, authenticate_record, verify_db_creds, verify_ns_creds, verify_root_creds,
+};
+use super::{Actor, Level, Role};
+use crate::cnf::{EXPERIMENTAL_BEARER_ACCESS, INSECURE_FORWARD_ACCESS_ERRORS, SERVER_NAME};
 use crate::dbs::Session;
 use crate::err::Error;
 use crate::iam::issue::{config, expiration};
 use crate::iam::token::{Claims, HEADER};
 use crate::iam::Auth;
 use crate::kvs::{Datastore, LockType::*, TransactionType::*};
+use crate::sql::statements::{access, AccessGrant};
 use crate::sql::AccessType;
+use crate::sql::Datetime;
 use crate::sql::Object;
 use crate::sql::Value;
 use chrono::Utc;
 use jsonwebtoken::{encode, EncodingKey, Header};
 use std::sync::Arc;
+use subtle::ConstantTimeEq;
 use uuid::Uuid;
-#[cfg(surrealdb_unstable)]
-use {
-	super::verify::authenticate_generic,
-	super::Role,
-	crate::cnf::EXPERIMENTAL_BEARER_ACCESS,
-	crate::sql::statements::{access, AccessGrant},
-	sql::Datetime,
-	subtle::ConstantTimeEq,
-};
 
 pub async fn signin(kvs: &Datastore, session: &mut Session, vars: Object) -> Result<String, Error> {
 	// Parse the specified variables
@@ -60,7 +56,6 @@ pub async fn signin(kvs: &Datastore, session: &mut Session, vars: Object) -> Res
 				_ => Err(Error::MissingUserOrPass),
 			}
 		}
-		#[cfg(surrealdb_unstable)]
 		// NS signin with access method
 		(Some(ns), None, Some(ac)) => {
 			// Process the provided values
@@ -220,7 +215,6 @@ pub async fn db_access(
 						_ => Err(Error::AccessRecordNoSignin),
 					}
 				}
-				#[cfg(surrealdb_unstable)]
 				AccessType::Bearer(at) => {
 					// TODO(gguillemas): Remove this once bearer access is no longer experimental.
 					if !*EXPERIMENTAL_BEARER_ACCESS {
@@ -387,7 +381,6 @@ pub async fn db_user(
 	}
 }
 
-#[cfg(surrealdb_unstable)]
 pub async fn ns_access(
 	kvs: &Datastore,
 	session: &mut Session,
@@ -615,7 +608,6 @@ pub async fn root_access(
 		Ok(av) => {
 			// Check the access method type
 			match &av.kind {
-				#[cfg(surrealdb_unstable)]
 				AccessType::Bearer(at) => {
 					// TODO(gguillemas): Remove this once bearer access is no longer experimental.
 					if !*EXPERIMENTAL_BEARER_ACCESS {
@@ -723,7 +715,6 @@ pub async fn root_access(
 	}
 }
 
-#[cfg(surrealdb_unstable)]
 pub fn validate_grant_bearer(vars: Object) -> Result<(String, String), Error> {
 	// Extract the provided key.
 	let key = match vars.get("key") {
@@ -753,7 +744,6 @@ pub fn validate_grant_bearer(vars: Object) -> Result<(String, String), Error> {
 	Ok((kid, key))
 }
 
-#[cfg(surrealdb_unstable)]
 pub fn verify_grant_bearer(gr: &Arc<AccessGrant>, key: String) -> Result<(), Error> {
 	// Check if the grant is revoked or expired.
 	match (&gr.expiration, &gr.revocation) {
@@ -1903,7 +1893,6 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 		}
 	}
 
-	#[cfg(surrealdb_unstable)]
 	#[tokio::test]
 	async fn test_signin_bearer_for_user_db() {
 		// Test with correct bearer key
@@ -2649,7 +2638,6 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 		}
 	}
 
-	#[cfg(surrealdb_unstable)]
 	#[tokio::test]
 	async fn test_signin_bearer_for_user_ns() {
 		// Test with correct bearer key
@@ -3307,7 +3295,6 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 		}
 	}
 
-	#[cfg(surrealdb_unstable)]
 	#[tokio::test]
 	async fn test_signin_bearer_for_user_root() {
 		// Test with correct bearer key

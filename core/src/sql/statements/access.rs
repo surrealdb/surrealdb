@@ -26,6 +26,8 @@ pub static GRANT_BEARER_KEY_LENGTH: usize = 24;
 pub static GRANT_BEARER_LENGTH: usize =
 	GRANT_BEARER_PREFIX.len() + 1 + GRANT_BEARER_ID_LENGTH + 1 + GRANT_BEARER_KEY_LENGTH;
 
+// TODO(gguillemas): Document once bearer access is no longer experimental.
+#[doc(hidden)]
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
@@ -37,6 +39,8 @@ pub enum AccessStatement {
 	Prune(Ident),                  // Prune access grants.
 }
 
+// TODO(gguillemas): Document once bearer access is no longer experimental.
+#[doc(hidden)]
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
@@ -46,6 +50,8 @@ pub struct AccessStatementList {
 	pub base: Option<Base>,
 }
 
+// TODO(gguillemas): Document once bearer access is no longer experimental.
+#[doc(hidden)]
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
@@ -56,6 +62,8 @@ pub struct AccessStatementGrant {
 	pub subject: Option<Subject>,
 }
 
+// TODO(gguillemas): Document once bearer access is no longer experimental.
+#[doc(hidden)]
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
@@ -66,6 +74,8 @@ pub struct AccessStatementRevoke {
 	pub gr: Ident,
 }
 
+// TODO(gguillemas): Document once bearer access is no longer experimental.
+#[doc(hidden)]
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]

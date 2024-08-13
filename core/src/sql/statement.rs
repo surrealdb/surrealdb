@@ -3,7 +3,6 @@ use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::sql::statements::rebuild::RebuildStatement;
-#[cfg(surrealdb_unstable)]
 use crate::sql::statements::AccessStatement;
 use crate::sql::{
 	fmt::{Fmt, Pretty},
@@ -95,8 +94,9 @@ pub enum Statement {
 	Upsert(UpsertStatement),
 	#[revision(start = 4)]
 	Alter(AlterStatement),
+	// TODO(gguillemas): Document once bearer access is no longer experimental.
+	#[doc(hidden)]
 	#[revision(start = 5)]
-	#[cfg(surrealdb_unstable)]
 	Access(AccessStatement),
 }
 
@@ -118,7 +118,6 @@ impl Statement {
 	pub(crate) fn writeable(&self) -> bool {
 		match self {
 			Self::Value(v) => v.writeable(),
-			#[cfg(surrealdb_unstable)]
 			Self::Access(_) => true,
 			Self::Alter(_) => true,
 			Self::Analyze(_) => false,
@@ -158,7 +157,6 @@ impl Statement {
 		doc: Option<&CursorDoc<'_>>,
 	) -> Result<Value, Error> {
 		match self {
-			#[cfg(surrealdb_unstable)]
 			Self::Access(v) => v.compute(ctx, opt, doc).await,
 			Self::Alter(v) => v.compute(stk, ctx, opt, doc).await,
 			Self::Analyze(v) => v.compute(ctx, opt, doc).await,
@@ -199,7 +197,6 @@ impl Display for Statement {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
 		match self {
 			Self::Value(v) => write!(Pretty::from(f), "{v}"),
-			#[cfg(surrealdb_unstable)]
 			Self::Access(v) => write!(Pretty::from(f), "{v}"),
 			Self::Alter(v) => write!(Pretty::from(f), "{v}"),
 			Self::Analyze(v) => write!(Pretty::from(f), "{v}"),

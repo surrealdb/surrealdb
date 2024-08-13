@@ -54,7 +54,6 @@ impl From<&Statement<'_>> for Action {
 			Statement::Relate(_) => Action::Edit,
 			Statement::Delete(_) => Action::Edit,
 			Statement::Insert(_) => Action::Edit,
-			#[cfg(surrealdb_unstable)]
 			Statement::Access(_) => Action::Edit,
 		}
 	}

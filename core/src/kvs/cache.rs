@@ -1,6 +1,5 @@
 use super::Key;
 use crate::dbs::node::Node;
-#[cfg(surrealdb_unstable)]
 use crate::sql::statements::AccessGrant;
 use crate::sql::statements::DefineAccessStatement;
 use crate::sql::statements::DefineAnalyzerStatement;
@@ -55,7 +54,6 @@ pub(super) enum Entry {
 	Rus(Arc<[DefineUserStatement]>),
 	/// A slice of DefineAccessStatement specified at the root.
 	Ras(Arc<[DefineAccessStatement]>),
-	#[cfg(surrealdb_unstable)]
 	/// A slice of AccessGrant specified at the root.
 	Rag(Arc<[AccessGrant]>),
 	/// A slice of DefineNamespaceStatement specified on a namespace.
@@ -64,7 +62,6 @@ pub(super) enum Entry {
 	Nus(Arc<[DefineUserStatement]>),
 	/// A slice of DefineAccessStatement specified on a namespace.
 	Nas(Arc<[DefineAccessStatement]>),
-	#[cfg(surrealdb_unstable)]
 	/// A slice of AccessGrant specified at on a namespace.
 	Nag(Arc<[AccessGrant]>),
 	/// A slice of DefineDatabaseStatement specified on a namespace.
@@ -73,7 +70,6 @@ pub(super) enum Entry {
 	Azs(Arc<[DefineAnalyzerStatement]>),
 	/// A slice of DefineAccessStatement specified on a database.
 	Das(Arc<[DefineAccessStatement]>),
-	#[cfg(surrealdb_unstable)]
 	/// A slice of AccessGrant specified at on a database.
 	Dag(Arc<[AccessGrant]>),
 	/// A slice of DefineUserStatement specified on a database.
@@ -131,7 +127,6 @@ impl Entry {
 			_ => unreachable!(),
 		}
 	}
-	#[cfg(surrealdb_unstable)]
 	/// Converts this cache entry into a slice of [`AccessGrant`].
 	/// This panics if called on a cache entry that is not an [`Entry::Rag`].
 	pub(super) fn into_rag(self) -> Arc<[AccessGrant]> {
@@ -156,7 +151,6 @@ impl Entry {
 			_ => unreachable!(),
 		}
 	}
-	#[cfg(surrealdb_unstable)]
 	/// Converts this cache entry into a slice of [`AccessGrant`].
 	/// This panics if called on a cache entry that is not an [`Entry::Nag`].
 	pub(super) fn into_nag(self) -> Arc<[AccessGrant]> {
@@ -189,7 +183,6 @@ impl Entry {
 			_ => unreachable!(),
 		}
 	}
-	#[cfg(surrealdb_unstable)]
 	/// Converts this cache entry into a slice of [`AccessGrant`].
 	/// This panics if called on a cache entry that is not an [`Entry::Dag`].
 	pub(super) fn into_dag(self) -> Arc<[AccessGrant]> {

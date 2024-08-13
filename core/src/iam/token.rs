@@ -169,7 +169,10 @@ impl From<&Claims> for Value {
 		}
 		// Add aud field if set
 		if let Some(aud) = &v.aud {
-			out.insert("aud".to_string(), aud.clone().into());
+			match aud {
+				Audience::Single(v) => out.insert("aud".to_string(), v.clone().into()),
+				Audience::Multiple(v) => out.insert("aud".to_string(), v.clone().into()),
+			};
 		}
 		// Add iat field if set
 		if let Some(iat) = v.iat {
