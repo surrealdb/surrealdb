@@ -1455,7 +1455,7 @@ mod cli_integration {
 	async fn double_create() {
 		info!("* check only one output created");
 		{
-			let args = format!("sql --conn memory --ns test --db test --pretty --hide-welcome");
+			let args = "sql --conn memory --ns test --db test --pretty --hide-welcome".to_string();
 			let output = common::run(&args)
 				.input("let $a = create foo;\n")
 				.input("select * from foo;\n")
