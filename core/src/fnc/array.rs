@@ -10,6 +10,7 @@ use crate::sql::array::Matches;
 use crate::sql::array::Transpose;
 use crate::sql::array::Union;
 use crate::sql::array::Uniq;
+use crate::sql::array::Windows;
 use crate::sql::value::Value;
 
 use rand::prelude::SliceRandom;
@@ -399,6 +400,11 @@ pub fn union((array, other): (Array, Array)) -> Result<Value, Error> {
 	Ok(array.union(other).into())
 }
 
+pub fn windows((array, window_size): (Array, i64)) -> Result<Value, Error> {
+	let window_size = window_size.max(0) as usize;
+	Ok(array.windows(window_size)?.into())
+}
+
 pub mod sort {
 
 	use crate::err::Error;
@@ -431,14 +437,14 @@ mod tests {
 			assert_eq!(slice((initial_values, beg, lim)).unwrap(), expected_values.into());
 		}
 
-		let array = &[b'a', b'b', b'c', b'd', b'e', b'f', b'g'];
+		let array = b"abcdefg";
 		test(array, None, None, array);
 		test(array, Some(2), None, &array[2..]);
 		test(array, Some(2), Some(3), &array[2..5]);
-		test(array, Some(2), Some(-1), &[b'c', b'd', b'e', b'f']);
-		test(array, Some(-2), None, &[b'f', b'g']);
-		test(array, Some(-4), Some(2), &[b'd', b'e']);
-		test(array, Some(-4), Some(-1), &[b'd', b'e', b'f']);
+		test(array, Some(2), Some(-1), b"cdef");
+		test(array, Some(-2), None, b"fg");
+		test(array, Some(-4), Some(2), b"de");
+		test(array, Some(-4), Some(-1), b"def");
 	}
 
 	#[test]

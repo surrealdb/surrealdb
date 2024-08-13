@@ -8,7 +8,8 @@ use std::sync::Arc;
 pub async fn mock<'a>() -> (Context<'a>, Options) {
 	let opt = Options::default().with_auth(Arc::new(Auth::for_root(Role::Owner)));
 	let kvs = Datastore::new("memory").await.unwrap();
-	let txn = kvs.transaction(Write, Optimistic).await.unwrap().rollback_and_ignore().enclose();
-	let ctx = Context::default().set_transaction(txn);
+	let txn = kvs.transaction(Write, Optimistic).await.unwrap();
+	let txn = txn.rollback_and_ignore().await.enclose();
+	let ctx = Context::default().with_transaction(txn);
 	(ctx, opt)
 }

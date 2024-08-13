@@ -6,7 +6,7 @@ use crate::idx::planner::executor::{
 };
 use crate::idx::planner::plan::{IndexOperator, IndexOption};
 use crate::idx::planner::rewriter::KnnConditionRewriter;
-use crate::kvs;
+use crate::kvs::Transaction;
 use crate::sql::index::Index;
 use crate::sql::statements::{DefineFieldStatement, DefineIndexStatement};
 use crate::sql::{
@@ -115,7 +115,7 @@ impl<'a> TreeBuilder<'a> {
 
 	async fn lazy_load_schema_resolver(
 		&mut self,
-		tx: &mut kvs::Transaction,
+		tx: &Transaction,
 		table: &Table,
 	) -> Result<(), Error> {
 		if self.schemas.contains_key(table) {
@@ -198,8 +198,8 @@ impl<'a> TreeBuilder<'a> {
 	}
 
 	async fn resolve_idiom(&mut self, i: &Idiom) -> Result<Node, Error> {
-		let mut tx = self.ctx.tx_lock().await;
-		self.lazy_load_schema_resolver(&mut tx, self.table).await?;
+		let tx = self.ctx.tx();
+		self.lazy_load_schema_resolver(&tx, self.table).await?;
 
 		// Try to detect if it matches an index
 		if let Some(schema) = self.schemas.get(self.table).cloned() {
@@ -208,12 +208,10 @@ impl<'a> TreeBuilder<'a> {
 				return Ok(Node::IndexedField(i.clone(), irs));
 			}
 			// Try to detect an indexed record field
-			if let Some(ro) = self.resolve_record_field(&mut tx, schema.fields.as_ref(), i).await? {
-				drop(tx);
+			if let Some(ro) = self.resolve_record_field(&tx, schema.fields.as_ref(), i).await? {
 				return Ok(Node::RecordField(i.clone(), ro));
 			}
 		}
-		drop(tx);
 		Ok(Node::NonIndexedField(i.clone()))
 	}
 
@@ -246,7 +244,7 @@ impl<'a> TreeBuilder<'a> {
 
 	async fn resolve_record_field(
 		&mut self,
-		tx: &mut kvs::Transaction,
+		tx: &Transaction,
 		fields: &[DefineFieldStatement],
 		idiom: &Idiom,
 	) -> Result<Option<RecordOptions>, Error> {
@@ -544,7 +542,7 @@ struct SchemaCache {
 }
 
 impl SchemaCache {
-	async fn new(opt: &Options, table: &Table, tx: &mut kvs::Transaction) -> Result<Self, Error> {
+	async fn new(opt: &Options, table: &Table, tx: &Transaction) -> Result<Self, Error> {
 		let indexes = tx.all_tb_indexes(opt.ns()?, opt.db()?, table).await?;
 		let fields = tx.all_tb_fields(opt.ns()?, opt.db()?, table).await?;
 		Ok(Self {

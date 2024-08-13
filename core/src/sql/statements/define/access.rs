@@ -12,7 +12,7 @@ use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display};
 
-#[revisioned(revision = 1)]
+#[revisioned(revision = 3)]
 #[derive(Clone, Default, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
@@ -20,9 +20,13 @@ pub struct DefineAccessStatement {
 	pub name: Ident,
 	pub base: Base,
 	pub kind: AccessType,
+	#[revision(start = 2)]
+	pub authenticate: Option<Value>,
 	pub duration: AccessDuration,
 	pub comment: Option<Strand>,
 	pub if_not_exists: bool,
+	#[revision(start = 3)]
+	pub overwrite: bool,
 }
 
 impl DefineAccessStatement {
@@ -57,65 +61,103 @@ impl DefineAccessStatement {
 		opt: &Options,
 		_doc: Option<&CursorDoc<'_>>,
 	) -> Result<Value, Error> {
+		// Allowed to run?
 		opt.is_allowed(Action::Edit, ResourceKind::Actor, &self.base)?;
-
+		// Check the statement type
 		match &self.base {
-			Base::Ns => {
-				// Claim transaction
-				let mut run = ctx.tx_lock().await;
-				// Clear the cache
-				run.clear_cache();
+			Base::Root => {
+				// Fetch the transaction
+				let txn = ctx.tx();
 				// Check if access method already exists
-				if run.get_ns_access(opt.ns()?, &self.name).await.is_ok() {
+				if txn.get_root_access(&self.name).await.is_ok() {
 					if self.if_not_exists {
 						return Ok(Value::None);
-					} else {
+					} else if !self.overwrite {
+						return Err(Error::AccessRootAlreadyExists {
+							value: self.name.to_string(),
+						});
+					}
+				}
+				// Process the statement
+				let key = crate::key::root::ac::new(&self.name);
+				txn.set(
+					key,
+					DefineAccessStatement {
+						// Don't persist the `IF NOT EXISTS` clause to schema
+						if_not_exists: false,
+						overwrite: false,
+						..self.clone()
+					},
+				)
+				.await?;
+				// Clear the cache
+				txn.clear();
+				// Ok all good
+				Ok(Value::None)
+			}
+			Base::Ns => {
+				// Fetch the transaction
+				let txn = ctx.tx();
+				// Check if the definition exists
+				if txn.get_ns_access(opt.ns()?, &self.name).await.is_ok() {
+					if self.if_not_exists {
+						return Ok(Value::None);
+					} else if !self.overwrite {
 						return Err(Error::AccessNsAlreadyExists {
 							value: self.name.to_string(),
+							ns: opt.ns()?.into(),
 						});
 					}
 				}
 				// Process the statement
 				let key = crate::key::namespace::ac::new(opt.ns()?, &self.name);
-				run.add_ns(opt.ns()?, opt.strict).await?;
-				run.set(
+				txn.get_or_add_ns(opt.ns()?, opt.strict).await?;
+				txn.set(
 					key,
 					DefineAccessStatement {
+						// Don't persist the `IF NOT EXISTS` clause to schema
 						if_not_exists: false,
+						overwrite: false,
 						..self.clone()
 					},
 				)
 				.await?;
+				// Clear the cache
+				txn.clear();
 				// Ok all good
 				Ok(Value::None)
 			}
 			Base::Db => {
-				// Claim transaction
-				let mut run = ctx.tx_lock().await;
-				// Clear the cache
-				run.clear_cache();
-				// Check if access method already exists
-				if run.get_db_access(opt.ns()?, opt.db()?, &self.name).await.is_ok() {
+				// Fetch the transaction
+				let txn = ctx.tx();
+				// Check if the definition exists
+				if txn.get_db_access(opt.ns()?, opt.db()?, &self.name).await.is_ok() {
 					if self.if_not_exists {
 						return Ok(Value::None);
-					} else {
+					} else if !self.overwrite {
 						return Err(Error::AccessDbAlreadyExists {
 							value: self.name.to_string(),
+							ns: opt.ns()?.into(),
+							db: opt.db()?.into(),
 						});
 					}
 				}
 				// Process the statement
 				let key = crate::key::database::ac::new(opt.ns()?, opt.db()?, &self.name);
-				run.add_ns(opt.ns()?, opt.strict).await?;
-				run.add_db(opt.ns()?, opt.db()?, opt.strict).await?;
-				run.set(
+				txn.get_or_add_ns(opt.ns()?, opt.strict).await?;
+				txn.get_or_add_db(opt.ns()?, opt.db()?, opt.strict).await?;
+				txn.set(
 					key,
 					DefineAccessStatement {
+						// Don't persist the `IF NOT EXISTS` clause to schema
 						if_not_exists: false,
+						overwrite: false,
 						..self.clone()
 					},
 				)
 				.await?;
+				// Clear the cache
+				txn.clear();
 				// Ok all good
 				Ok(Value::None)
 			}
@@ -131,8 +173,15 @@ impl Display for DefineAccessStatement {
 		if self.if_not_exists {
 			write!(f, " IF NOT EXISTS")?
 		}
+		if self.overwrite {
+			write!(f, " OVERWRITE")?
+		}
 		// The specific access method definition is displayed by AccessType
 		write!(f, " {} ON {} TYPE {}", self.name, self.base, self.kind)?;
+		// The additional authentication clause
+		if let Some(ref v) = self.authenticate {
+			write!(f, " AUTHENTICATE {v}")?
+		}
 		// Always print relevant durations so defaults can be changed in the future
 		// If default values were not printed, exports would not be forward compatible
 		// None values need to be printed, as they are different from the default values
@@ -177,6 +226,7 @@ impl InfoStructure for DefineAccessStatement {
 		Value::from(map! {
 			"name".to_string() => self.name.structure(),
 			"base".to_string() => self.base.structure(),
+			"authenticate".to_string(), if let Some(v) = self.authenticate => v.structure(),
 			"duration".to_string() => Value::from(map!{
 				"session".to_string() => self.duration.session.into(),
 				"grant".to_string(), if self.kind.can_issue_grants() => self.duration.grant.into(),

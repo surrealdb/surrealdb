@@ -71,31 +71,19 @@ impl RebuildIndexStatement {
 		let future = async {
 			// Allowed to run?
 			opt.is_allowed(Action::Edit, ResourceKind::Index, &Base::Db)?;
-
 			// Get the index definition
-			let ix = ctx
-				.tx_lock()
-				.await
-				.get_and_cache_tb_index(
-					opt.ns()?,
-					opt.db()?,
-					self.what.as_str(),
-					self.name.as_str(),
-				)
-				.await?;
-
-			// Remove the index
-			let remove = RemoveIndexStatement {
+			let ix = ctx.tx().get_tb_index(opt.ns()?, opt.db()?, &self.what, &self.name).await?;
+			// Create the remove statement
+			let stm = RemoveIndexStatement {
 				name: self.name.clone(),
 				what: self.what.clone(),
 				if_exists: false,
 			};
-			remove.compute(ctx, opt).await?;
-
+			// Execute the delete statement
+			stm.compute(ctx, opt).await?;
 			// Rebuild the index
 			ix.compute(stk, ctx, opt, doc).await?;
-
-			// Return the result object
+			// Ok all good
 			Ok(Value::None)
 		}
 		.await;

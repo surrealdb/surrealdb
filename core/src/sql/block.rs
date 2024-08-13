@@ -6,10 +6,10 @@ use crate::sql::fmt::{is_pretty, pretty_indent, Fmt, Pretty};
 use crate::sql::statements::info::InfoStructure;
 use crate::sql::statements::rebuild::RebuildStatement;
 use crate::sql::statements::{
-	BreakStatement, ContinueStatement, CreateStatement, DefineStatement, DeleteStatement,
-	ForeachStatement, IfelseStatement, InsertStatement, OutputStatement, RelateStatement,
-	RemoveStatement, SelectStatement, SetStatement, ThrowStatement, UpdateStatement,
-	UpsertStatement,
+	AlterStatement, BreakStatement, ContinueStatement, CreateStatement, DefineStatement,
+	DeleteStatement, ForeachStatement, IfelseStatement, InsertStatement, OutputStatement,
+	RelateStatement, RemoveStatement, SelectStatement, SetStatement, ThrowStatement,
+	UpdateStatement, UpsertStatement,
 };
 use crate::sql::value::Value;
 use reblessive::tree::Stk;
@@ -112,16 +112,18 @@ impl Block {
 					v.compute(&ctx, opt, doc).await?;
 				}
 				Entry::Output(v) => {
-					// Return the RETURN value
-					return v.compute(stk, &ctx, opt, doc).await;
+					v.compute(stk, &ctx, opt, doc).await?;
+				}
+				Entry::Alter(v) => {
+					v.compute(stk, &ctx, opt, doc).await?;
 				}
 				Entry::Value(v) => {
 					if i == self.len() - 1 {
 						// If the last entry then return the value
-						return v.compute(stk, &ctx, opt, doc).await;
+						return v.compute_unbordered(stk, &ctx, opt, doc).await;
 					} else {
 						// Otherwise just process the value
-						v.compute(stk, &ctx, opt, doc).await?;
+						v.compute_unbordered(stk, &ctx, opt, doc).await?;
 					}
 				}
 			}
@@ -182,7 +184,7 @@ impl InfoStructure for Block {
 	}
 }
 
-#[revisioned(revision = 3)]
+#[revisioned(revision = 4)]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
@@ -207,6 +209,8 @@ pub enum Entry {
 	Rebuild(RebuildStatement),
 	#[revision(start = 3)]
 	Upsert(UpsertStatement),
+	#[revision(start = 4)]
+	Alter(AlterStatement),
 }
 
 impl PartialOrd for Entry {
@@ -238,6 +242,7 @@ impl Entry {
 			Self::Break(v) => v.writeable(),
 			Self::Continue(v) => v.writeable(),
 			Self::Foreach(v) => v.writeable(),
+			Self::Alter(v) => v.writeable(),
 		}
 	}
 }
@@ -263,6 +268,7 @@ impl Display for Entry {
 			Self::Break(v) => write!(f, "{v}"),
 			Self::Continue(v) => write!(f, "{v}"),
 			Self::Foreach(v) => write!(f, "{v}"),
+			Self::Alter(v) => write!(f, "{v}"),
 		}
 	}
 }

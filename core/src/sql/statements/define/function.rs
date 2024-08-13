@@ -11,7 +11,7 @@ use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Write};
 
-#[revisioned(revision = 2)]
+#[revisioned(revision = 3)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
@@ -23,6 +23,8 @@ pub struct DefineFunctionStatement {
 	pub permissions: Permission,
 	#[revision(start = 2)]
 	pub if_not_exists: bool,
+	#[revision(start = 3)]
+	pub overwrite: bool,
 }
 
 impl DefineFunctionStatement {
@@ -35,15 +37,13 @@ impl DefineFunctionStatement {
 	) -> Result<Value, Error> {
 		// Allowed to run?
 		opt.is_allowed(Action::Edit, ResourceKind::Function, &Base::Db)?;
-		// Claim transaction
-		let mut run = ctx.tx_lock().await;
-		// Clear the cache
-		run.clear_cache();
-		// Check if function already exists
-		if run.get_db_function(opt.ns()?, opt.db()?, &self.name).await.is_ok() {
+		// Fetch the transaction
+		let txn = ctx.tx();
+		// Check if the definition exists
+		if txn.get_db_function(opt.ns()?, opt.db()?, &self.name).await.is_ok() {
 			if self.if_not_exists {
 				return Ok(Value::None);
-			} else {
+			} else if !self.overwrite {
 				return Err(Error::FcAlreadyExists {
 					value: self.name.to_string(),
 				});
@@ -51,17 +51,20 @@ impl DefineFunctionStatement {
 		}
 		// Process the statement
 		let key = crate::key::database::fc::new(opt.ns()?, opt.db()?, &self.name);
-		run.add_ns(opt.ns()?, opt.strict).await?;
-		run.add_db(opt.ns()?, opt.db()?, opt.strict).await?;
-		run.set(
+		txn.get_or_add_ns(opt.ns()?, opt.strict).await?;
+		txn.get_or_add_db(opt.ns()?, opt.db()?, opt.strict).await?;
+		txn.set(
 			key,
 			DefineFunctionStatement {
-				// Don't persist the "IF NOT EXISTS" clause to schema
+				// Don't persist the `IF NOT EXISTS` clause to schema
 				if_not_exists: false,
+				overwrite: false,
 				..self.clone()
 			},
 		)
 		.await?;
+		// Clear the cache
+		txn.clear();
 		// Ok all good
 		Ok(Value::None)
 	}
@@ -72,6 +75,9 @@ impl fmt::Display for DefineFunctionStatement {
 		write!(f, "DEFINE FUNCTION")?;
 		if self.if_not_exists {
 			write!(f, " IF NOT EXISTS")?
+		}
+		if self.overwrite {
+			write!(f, " OVERWRITE")?
 		}
 		write!(f, " fn::{}(", self.name.0)?;
 		for (i, (name, kind)) in self.args.iter().enumerate() {

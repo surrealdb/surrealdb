@@ -1,11 +1,10 @@
 use crate::cnf::{
 	PKG_NAME, PKG_VERSION, WEBSOCKET_MAX_CONCURRENT_REQUESTS, WEBSOCKET_PING_FREQUENCY,
 };
-use crate::dbs::DB;
 use crate::rpc::failure::Failure;
 use crate::rpc::format::WsFormat;
 use crate::rpc::response::{failure, IntoRpcResponse};
-use crate::rpc::{CONN_CLOSED_ERR, LIVE_QUERIES, WEBSOCKETS};
+use crate::rpc::CONN_CLOSED_ERR;
 use crate::telemetry;
 use crate::telemetry::metrics::ws::RequestContext;
 use crate::telemetry::traces::rpc::span_for_request;
@@ -33,6 +32,8 @@ use tracing::Instrument;
 use tracing::Span;
 use uuid::Uuid;
 
+use super::RpcState;
+
 pub struct Connection {
 	pub(crate) id: Uuid,
 	pub(crate) format: Format,
@@ -41,11 +42,19 @@ pub struct Connection {
 	pub(crate) limiter: Arc<Semaphore>,
 	pub(crate) canceller: CancellationToken,
 	pub(crate) channels: (Sender<Message>, Receiver<Message>),
+	pub(crate) state: Arc<RpcState>,
+	pub(crate) datastore: Arc<Datastore>,
 }
 
 impl Connection {
 	/// Instantiate a new RPC
-	pub fn new(id: Uuid, mut session: Session, format: Format) -> Arc<RwLock<Connection>> {
+	pub fn new(
+		datastore: Arc<Datastore>,
+		state: Arc<RpcState>,
+		id: Uuid,
+		mut session: Session,
+		format: Format,
+	) -> Arc<RwLock<Connection>> {
 		// Enable real-time mode
 		session.rt = true;
 		// Create and store the RPC connection
@@ -57,27 +66,37 @@ impl Connection {
 			limiter: Arc::new(Semaphore::new(*WEBSOCKET_MAX_CONCURRENT_REQUESTS)),
 			canceller: CancellationToken::new(),
 			channels: channel::bounded(*WEBSOCKET_MAX_CONCURRENT_REQUESTS),
+			state,
+			datastore,
 		}))
 	}
 
 	/// Serve the RPC endpoint
 	pub async fn serve(rpc: Arc<RwLock<Connection>>, ws: WebSocket) {
-		// Get the WebSocket ID
-		let id = rpc.read().await.id;
+		// Get the RPC lock
+		let rpc_lock = rpc.read().await;
+		// Get the WebSocket id
+		let id = rpc_lock.id;
+		// Get the WebSocket state
+		let state = rpc_lock.state.clone();
+		// Get the Datastore
+		let ds = rpc_lock.datastore.clone();
+		// Log the succesful WebSocket connection
+		trace!("WebSocket {} connected", id);
 		// Split the socket into sending and receiving streams
 		let (sender, receiver) = ws.split();
 		// Create an internal channel for sending and receiving
-		let internal_sender = rpc.read().await.channels.0.clone();
-		let internal_receiver = rpc.read().await.channels.1.clone();
-
-		trace!("WebSocket {} connected", id);
+		let internal_sender = rpc_lock.channels.0.clone();
+		let internal_receiver = rpc_lock.channels.1.clone();
+		// Drop the lock early so rpc is free to be written to.
+		std::mem::drop(rpc_lock);
 
 		if let Err(err) = telemetry::metrics::ws::on_connect() {
 			error!("Error running metrics::ws::on_connect hook: {}", err);
 		}
 
 		// Add this WebSocket to the list
-		WEBSOCKETS.write().await.insert(id, rpc.clone());
+		state.web_sockets.write().await.insert(id, rpc.clone());
 
 		// Spawn async tasks for the WebSocket
 		let mut tasks = JoinSet::new();
@@ -97,11 +116,11 @@ impl Connection {
 		trace!("WebSocket {} disconnected", id);
 
 		// Remove this WebSocket from the list
-		WEBSOCKETS.write().await.remove(&id);
+		state.web_sockets.write().await.remove(&id);
 
 		// Remove all live queries
 		let mut gc = Vec::new();
-		LIVE_QUERIES.write().await.retain(|key, value| {
+		state.live_queries.write().await.retain(|key, value| {
 			if value == &id {
 				trace!("Removing live query: {}", key);
 				gc.push(*key);
@@ -110,9 +129,8 @@ impl Connection {
 			true
 		});
 
-		// Garbage collect queries
-		if let Err(e) = DB.get().unwrap().garbage_collect_dead_session(gc.as_slice()).await {
-			error!("Failed to garbage collect dead sessions: {:?}", e);
+		if let Err(err) = ds.delete_queries(gc).await {
+			error!("Error handling RPC connection: {}", err);
 		}
 
 		if let Err(err) = telemetry::metrics::ws::on_disconnect() {
@@ -353,7 +371,7 @@ impl Connection {
 
 impl RpcContext for Connection {
 	fn kvs(&self) -> &Datastore {
-		DB.get().unwrap()
+		&self.datastore
 	}
 
 	fn session(&self) -> &Session {
@@ -379,12 +397,12 @@ impl RpcContext for Connection {
 	const LQ_SUPPORT: bool = true;
 
 	async fn handle_live(&self, lqid: &Uuid) {
-		LIVE_QUERIES.write().await.insert(*lqid, self.id);
+		self.state.live_queries.write().await.insert(*lqid, self.id);
 		trace!("Registered live query {} on websocket {}", lqid, self.id);
 	}
 
 	async fn handle_kill(&self, lqid: &Uuid) {
-		if let Some(id) = LIVE_QUERIES.write().await.remove(lqid) {
+		if let Some(id) = self.state.live_queries.write().await.remove(lqid) {
 			trace!("Unregistered live query {} on websocket {}", lqid, id);
 		}
 	}
@@ -396,7 +414,7 @@ impl RpcContext for Connection {
 			return Err(RpcError::InvalidParams);
 		};
 		let out: Result<Value, RpcError> =
-			surrealdb::iam::signup::signup(DB.get().unwrap(), &mut self.session, v)
+			surrealdb::iam::signup::signup(&self.datastore, &mut self.session, v)
 				.await
 				.map(Into::into)
 				.map_err(Into::into);
@@ -409,7 +427,7 @@ impl RpcContext for Connection {
 			return Err(RpcError::InvalidParams);
 		};
 		let out: Result<Value, RpcError> =
-			surrealdb::iam::signin::signin(DB.get().unwrap(), &mut self.session, v)
+			surrealdb::iam::signin::signin(&self.datastore, &mut self.session, v)
 				.await
 				.map(Into::into)
 				.map_err(Into::into);
@@ -420,7 +438,7 @@ impl RpcContext for Connection {
 		let Ok(Value::Strand(token)) = params.needs_one() else {
 			return Err(RpcError::InvalidParams);
 		};
-		surrealdb::iam::verify::token(DB.get().unwrap(), &mut self.session, &token.0).await?;
+		surrealdb::iam::verify::token(&self.datastore, &mut self.session, &token.0).await?;
 		Ok(Value::None)
 	}
 }

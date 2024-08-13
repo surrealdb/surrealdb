@@ -1,3 +1,4 @@
+pub(crate) mod alter;
 pub(crate) mod analyze;
 pub(crate) mod begin;
 pub(crate) mod r#break;
@@ -52,6 +53,8 @@ pub use self::sleep::SleepStatement;
 pub use self::throw::ThrowStatement;
 pub use self::update::UpdateStatement;
 pub use self::upsert::UpsertStatement;
+
+pub use self::alter::{AlterStatement, AlterTableStatement};
 
 pub use self::define::{
 	DefineAccessStatement, DefineAnalyzerStatement, DefineDatabaseStatement, DefineEventStatement,

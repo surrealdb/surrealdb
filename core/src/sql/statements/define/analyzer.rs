@@ -10,7 +10,7 @@ use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display};
 
-#[revisioned(revision = 3)]
+#[revisioned(revision = 4)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
@@ -23,6 +23,8 @@ pub struct DefineAnalyzerStatement {
 	pub comment: Option<Strand>,
 	#[revision(start = 3)]
 	pub if_not_exists: bool,
+	#[revision(start = 4)]
+	pub overwrite: bool,
 }
 
 impl DefineAnalyzerStatement {
@@ -34,15 +36,13 @@ impl DefineAnalyzerStatement {
 	) -> Result<Value, Error> {
 		// Allowed to run?
 		opt.is_allowed(Action::Edit, ResourceKind::Analyzer, &Base::Db)?;
-		// Claim transaction
-		let mut run = ctx.tx_lock().await;
-		// Clear the cache
-		run.clear_cache();
-		// Check if analyzer already exists
-		if run.get_db_analyzer(opt.ns()?, opt.db()?, &self.name).await.is_ok() {
+		// Fetch the transaction
+		let txn = ctx.tx();
+		// Check if the definition exists
+		if txn.get_db_analyzer(opt.ns()?, opt.db()?, &self.name).await.is_ok() {
 			if self.if_not_exists {
 				return Ok(Value::None);
-			} else {
+			} else if !self.overwrite {
 				return Err(Error::AzAlreadyExists {
 					value: self.name.to_string(),
 				});
@@ -50,21 +50,21 @@ impl DefineAnalyzerStatement {
 		}
 		// Process the statement
 		let key = crate::key::database::az::new(opt.ns()?, opt.db()?, &self.name);
-		run.add_ns(opt.ns()?, opt.strict).await?;
-		run.add_db(opt.ns()?, opt.db()?, opt.strict).await?;
-		// Persist the definition
-		run.set(
+		txn.get_or_add_ns(opt.ns()?, opt.strict).await?;
+		txn.get_or_add_db(opt.ns()?, opt.db()?, opt.strict).await?;
+		txn.set(
 			key,
 			DefineAnalyzerStatement {
-				// Don't persist the "IF NOT EXISTS" clause to schema
+				// Don't persist the `IF NOT EXISTS` clause to schema
 				if_not_exists: false,
+				overwrite: false,
 				..self.clone()
 			},
 		)
 		.await?;
-		// Release the transaction
-		drop(run); // Do we really need this?
-		   // Ok all good
+		// Clear the cache
+		txn.clear();
+		// Ok all good
 		Ok(Value::None)
 	}
 }
@@ -74,6 +74,9 @@ impl Display for DefineAnalyzerStatement {
 		write!(f, "DEFINE ANALYZER")?;
 		if self.if_not_exists {
 			write!(f, " IF NOT EXISTS")?
+		}
+		if self.overwrite {
+			write!(f, " OVERWRITE")?
 		}
 		write!(f, " {}", self.name)?;
 		if let Some(ref i) = self.function {

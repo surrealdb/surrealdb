@@ -1,4 +1,4 @@
-use crate::cnf::{INSECURE_FORWARD_RECORD_ACCESS_ERRORS, SERVER_NAME};
+use crate::cnf::{INSECURE_FORWARD_ACCESS_ERRORS, SERVER_NAME};
 use crate::dbs::Session;
 use crate::err::Error;
 use crate::iam::issue::{config, expiration};
@@ -47,7 +47,7 @@ pub async fn db_access(
 	vars: Object,
 ) -> Result<Option<String>, Error> {
 	// Create a new readonly transaction
-	let mut tx = kvs.transaction(Read, Optimistic).await?;
+	let tx = kvs.transaction(Read, Optimistic).await?;
 	// Fetch the specified access method from storage
 	let access = tx.get_db_access(&ns, &db, &ac).await;
 	// Ensure that the transaction is cancelled
@@ -57,7 +57,7 @@ pub async fn db_access(
 		Ok(av) => {
 			// Check the access method type
 			// Currently, only the record access method supports signup
-			match av.kind {
+			match av.kind.clone() {
 				AccessType::Record(at) => {
 					// Check if the record access method supports issuing tokens
 					let iss = match at.jwt.issue {
@@ -96,7 +96,7 @@ pub async fn db_access(
 												..Claims::default()
 											};
 											// AUTHENTICATE clause
-											if let Some(au) = at.authenticate {
+											if let Some(au) = &av.authenticate {
 												// Setup the system session for finding the signin record
 												let mut sess =
 													Session::editor().with_ns(&ns).with_db(&db);
@@ -105,7 +105,7 @@ pub async fn db_access(
 												sess.ip.clone_from(&session.ip);
 												sess.or.clone_from(&session.or);
 												// Compute the value with the params
-												match kvs.evaluate(au, &sess, None).await {
+												match kvs.evaluate(au.clone(), &sess, None).await {
 													Ok(val) => match val.record() {
 														Some(id) => {
 															// Update rid with result from AUTHENTICATE clause
@@ -113,13 +113,13 @@ pub async fn db_access(
 														}
 														_ => return Err(Error::InvalidAuth),
 													},
-													Err(e) => {
-														return match e {
-															Error::Thrown(_) => Err(e),
-															e if *INSECURE_FORWARD_RECORD_ACCESS_ERRORS => Err(e),
-															_ => Err(Error::InvalidAuth),
+													Err(e) => return match e {
+														Error::Thrown(_) => Err(e),
+														e if *INSECURE_FORWARD_ACCESS_ERRORS => {
+															Err(e)
 														}
-													}
+														_ => Err(Error::InvalidAuth),
+													},
 												}
 											}
 											// Log the authenticated access method info
@@ -151,7 +151,7 @@ pub async fn db_access(
 								}
 								Err(e) => match e {
 									Error::Thrown(_) => Err(e),
-									e if *INSECURE_FORWARD_RECORD_ACCESS_ERRORS => Err(e),
+									e if *INSECURE_FORWARD_ACCESS_ERRORS => Err(e),
 									_ => Err(Error::AccessRecordSignupQueryFailed),
 								},
 							}

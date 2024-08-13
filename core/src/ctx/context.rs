@@ -2,15 +2,14 @@ use crate::ctx::canceller::Canceller;
 use crate::ctx::reason::Reason;
 #[cfg(feature = "http")]
 use crate::dbs::capabilities::NetTarget;
-use crate::dbs::{Capabilities, Notification, Transaction};
+use crate::dbs::{Capabilities, Notification};
 use crate::err::Error;
 use crate::idx::planner::executor::QueryExecutor;
 use crate::idx::planner::{IterationStage, QueryPlanner};
 use crate::idx::trees::store::IndexStores;
-use crate::kvs;
+use crate::kvs::Transaction;
 use crate::sql::value::Value;
 use channel::Sender;
-use futures::lock::MutexLockFuture;
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::fmt::{self, Debug};
@@ -72,12 +71,20 @@ pub struct Context<'a> {
 	// The temporary directory
 	temporary_directory: Option<Arc<PathBuf>>,
 	// An optional transaction
-	transaction: Option<Transaction>,
+	transaction: Option<Arc<Transaction>>,
+	// Does not read from parent `values`.
+	isolated: bool,
 }
 
 impl<'a> Default for Context<'a> {
 	fn default() -> Self {
 		Context::background()
+	}
+}
+
+impl<'a> From<Transaction> for Context<'a> {
+	fn from(txn: Transaction) -> Self {
+		Context::background().with_transaction(Arc::new(txn))
 	}
 }
 
@@ -126,6 +133,7 @@ impl<'a> Context<'a> {
 			))]
 			temporary_directory,
 			transaction: None,
+			isolated: false,
 		};
 		if let Some(timeout) = time_out {
 			ctx.add_timeout(timeout)?;
@@ -154,6 +162,7 @@ impl<'a> Context<'a> {
 			))]
 			temporary_directory: None,
 			transaction: None,
+			isolated: false,
 		}
 	}
 
@@ -179,6 +188,33 @@ impl<'a> Context<'a> {
 			))]
 			temporary_directory: parent.temporary_directory.clone(),
 			transaction: parent.transaction.clone(),
+			isolated: false,
+		}
+	}
+
+	/// Create a new child from a frozen context.
+	pub fn new_isolated(parent: &'a Context) -> Self {
+		Context {
+			values: HashMap::default(),
+			parent: Some(parent),
+			deadline: parent.deadline,
+			cancelled: Arc::new(AtomicBool::new(false)),
+			notifications: parent.notifications.clone(),
+			query_planner: parent.query_planner,
+			query_executor: parent.query_executor.clone(),
+			iteration_stage: parent.iteration_stage.clone(),
+			capabilities: parent.capabilities.clone(),
+			index_stores: parent.index_stores.clone(),
+			#[cfg(any(
+				feature = "kv-mem",
+				feature = "kv-surrealkv",
+				feature = "kv-rocksdb",
+				feature = "kv-fdb",
+				feature = "kv-tikv",
+			))]
+			temporary_directory: parent.temporary_directory.clone(),
+			transaction: parent.transaction.clone(),
+			isolated: true,
 		}
 	}
 
@@ -239,17 +275,19 @@ impl<'a> Context<'a> {
 		self.iteration_stage = Some(is);
 	}
 
-	pub(crate) fn set_transaction_mut(&mut self, txn: Transaction) {
+	pub(crate) fn set_transaction(&mut self, txn: Arc<Transaction>) {
 		self.transaction = Some(txn);
 	}
 
-	pub fn set_transaction(mut self, txn: Transaction) -> Self {
+	pub(crate) fn with_transaction(mut self, txn: Arc<Transaction>) -> Self {
 		self.transaction = Some(txn);
 		self
 	}
 
-	pub(crate) fn tx_lock(&self) -> MutexLockFuture<'_, kvs::Transaction> {
-		self.transaction.as_ref().map(|txn| txn.lock()).unwrap_or_else(|| unreachable!())
+	pub(crate) fn tx(&self) -> Arc<Transaction> {
+		self.transaction
+			.clone()
+			.unwrap_or_else(|| unreachable!("The context was not associated with a transaction"))
 	}
 
 	/// Get the timeout for this operation, if any. This is useful for
@@ -327,10 +365,11 @@ impl<'a> Context<'a> {
 				Cow::Borrowed(v) => Some(*v),
 				Cow::Owned(v) => Some(v),
 			},
-			None => match self.parent {
+			None if !self.isolated => match self.parent {
 				Some(p) => p.value(key),
 				_ => None,
 			},
+			None => None,
 		}
 	}
 

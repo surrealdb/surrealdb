@@ -595,10 +595,10 @@ async fn select_array_group_group_by() -> Result<(), Error> {
 	";
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
-	let mut res = &mut dbs.execute(sql, &ses, None).await?;
+	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 5);
 	//
-	skip_ok(&mut res, 4)?;
+	skip_ok(res, 4)?;
 	//
 	let tmp = res.remove(0).result?;
 	let val = Value::parse(
@@ -633,10 +633,10 @@ async fn select_array_count_subquery_group_by() -> Result<(), Error> {
 	"#;
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
-	let mut res = &mut dbs.execute(sql, &ses, None).await?;
+	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 5);
 	//
-	skip_ok(&mut res, 3)?;
+	skip_ok(res, 3)?;
 	//
 	let tmp = res.remove(0).result?;
 	let val = Value::parse(
@@ -672,5 +672,65 @@ async fn select_array_count_subquery_group_by() -> Result<(), Error> {
 	);
 	assert_eq!(format!("{tmp:#}"), format!("{val:#}"));
 	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn select_aggregate_mean_update() -> Result<(), Error> {
+	let sql = "
+		CREATE test:a SET a = 3;
+		DEFINE TABLE foo AS SELECT
+			math::mean(a) AS avg
+		FROM test
+		GROUP ALL;
+
+		UPDATE test:a SET a = 2;
+
+		SELECT avg FROM foo;
+	";
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 4);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
+		{
+			id: test:a,
+			a: 3
+		}
+	]",
+	);
+
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse("None");
+
+	assert_eq!(tmp, val);
+
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
+			{
+				id: test:a,
+				a: 2
+			}
+		]",
+	);
+
+	assert_eq!(tmp, val);
+
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
+			{
+				avg: 2
+			}
+		]",
+	);
+	assert_eq!(tmp, val);
+
 	Ok(())
 }

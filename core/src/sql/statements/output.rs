@@ -35,15 +35,21 @@ impl OutputStatement {
 		// Ensure futures are processed
 		let opt = &opt.new_with_futures(true);
 		// Process the output value
-		let mut val = self.what.compute(stk, ctx, opt, doc).await?;
+		let mut value = self.what.compute(stk, ctx, opt, doc).await?;
 		// Fetch any
 		if let Some(fetchs) = &self.fetch {
+			let mut idioms = Vec::with_capacity(fetchs.0.len());
 			for fetch in fetchs.iter() {
-				val.fetch(stk, ctx, opt, fetch).await?;
+				fetch.compute(stk, ctx, opt, &mut idioms).await?
+			}
+			for i in &idioms {
+				value.fetch(stk, ctx, opt, i).await?;
 			}
 		}
 		//
-		Ok(val)
+		Err(Error::Return {
+			value,
+		})
 	}
 }
 

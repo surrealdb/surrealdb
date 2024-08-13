@@ -29,6 +29,7 @@ pub enum Kind {
 	Either(Vec<Kind>),
 	Set(Box<Kind>, Option<u64>),
 	Array(Box<Kind>, Option<u64>),
+	Function(Option<Vec<Kind>>, Option<Box<Kind>>),
 }
 
 impl Default for Kind {
@@ -38,8 +39,14 @@ impl Default for Kind {
 }
 
 impl Kind {
-	fn is_any(&self) -> bool {
+	// Returns true if this type is an `any`
+	pub(crate) fn is_any(&self) -> bool {
 		matches!(self, Kind::Any)
+	}
+
+	// Returns true if this type is a record
+	pub(crate) fn is_record(&self) -> bool {
+		matches!(self, Kind::Record(_))
 	}
 
 	// return the kind of the contained value.
@@ -65,7 +72,8 @@ impl Kind {
 				| Kind::String
 				| Kind::Uuid
 				| Kind::Record(_)
-				| Kind::Geometry(_) => return None,
+				| Kind::Geometry(_)
+				| Kind::Function(_, _) => return None,
 				Kind::Option(x) => {
 					this = x;
 				}
@@ -108,6 +116,7 @@ impl Display for Kind {
 			Kind::Point => f.write_str("point"),
 			Kind::String => f.write_str("string"),
 			Kind::Uuid => f.write_str("uuid"),
+			Kind::Function(_, _) => f.write_str("function"),
 			Kind::Option(k) => write!(f, "option<{}>", k),
 			Kind::Record(k) => match k {
 				k if k.is_empty() => write!(f, "record"),

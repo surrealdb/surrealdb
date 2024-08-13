@@ -48,11 +48,11 @@ impl IfelseStatement {
 		for (ref cond, ref then) in &self.exprs {
 			let v = cond.compute(stk, ctx, opt, doc).await?;
 			if v.is_truthy() {
-				return then.compute(stk, ctx, opt, doc).await;
+				return then.compute_unbordered(stk, ctx, opt, doc).await;
 			}
 		}
 		match self.close {
-			Some(ref v) => v.compute(stk, ctx, opt, doc).await,
+			Some(ref v) => v.compute_unbordered(stk, ctx, opt, doc).await,
 			None => Ok(Value::None),
 		}
 	}

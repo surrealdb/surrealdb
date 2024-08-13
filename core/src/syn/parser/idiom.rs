@@ -1,7 +1,10 @@
 use reblessive::Stk;
 
 use crate::{
-	sql::{Dir, Edges, Field, Fields, Graph, Ident, Idiom, Part, Table, Tables, Value},
+	sql::{
+		part::DestructurePart, Dir, Edges, Field, Fields, Graph, Ident, Idiom, Part, Table, Tables,
+		Value,
+	},
 	syn::token::{t, Span, TokenKind},
 };
 
@@ -53,7 +56,7 @@ impl Parser<'_> {
 		}
 	}
 
-	/// Parses a list of idioms seperated by a `,`
+	/// Parses a list of idioms separated by a `,`
 	pub async fn parse_idiom_list(&mut self, ctx: &mut Stk) -> ParseResult<Vec<Idiom>> {
 		let mut res = vec![self.parse_plain_idiom(ctx).await?];
 		while self.eat(t!(",")) {
@@ -80,7 +83,7 @@ impl Parser<'_> {
 				}
 				t!(".") => {
 					self.pop_peek();
-					res.push(self.parse_dot_part()?)
+					res.push(self.parse_dot_part(stk).await?)
 				}
 				t!("[") => {
 					let span = self.pop_peek().span;
@@ -138,7 +141,7 @@ impl Parser<'_> {
 				}
 				t!(".") => {
 					self.pop_peek();
-					res.push(self.parse_dot_part()?)
+					res.push(self.parse_dot_part(ctx).await?)
 				}
 				t!("[") => {
 					let span = self.pop_peek().span;
@@ -246,15 +249,77 @@ impl Parser<'_> {
 	}
 
 	/// Parse the part after the `.` in a idiom
-	pub fn parse_dot_part(&mut self) -> ParseResult<Part> {
+	pub async fn parse_dot_part(&mut self, ctx: &mut Stk) -> ParseResult<Part> {
 		let res = match self.peek_kind() {
 			t!("*") => {
 				self.pop_peek();
 				Part::All
 			}
-			_ => Part::Field(self.next_token_value()?),
+			t!("{") => {
+				self.pop_peek();
+				ctx.run(|ctx| self.parse_destructure_part(ctx)).await?
+			}
+			_ => {
+				let ident: Ident = self.next_token_value()?;
+				if self.eat(t!("(")) {
+					self.parse_function_part(ctx, ident).await?
+				} else {
+					Part::Field(ident)
+				}
+			}
 		};
 		Ok(res)
+	}
+	pub async fn parse_function_part(&mut self, ctx: &mut Stk, name: Ident) -> ParseResult<Part> {
+		let args = self.parse_function_args(ctx).await?;
+		Ok(Part::Method(name.0, args))
+	}
+	/// Parse the part after the `.{` in an idiom
+	pub async fn parse_destructure_part(&mut self, ctx: &mut Stk) -> ParseResult<Part> {
+		let start = self.last_span();
+		let mut destructured: Vec<DestructurePart> = Vec::new();
+		loop {
+			if self.eat(t!("}")) {
+				// We've reached the end of the destructure
+				break;
+			}
+
+			let field: Ident = self.next_token_value()?;
+			let part = match self.peek_kind() {
+				t!(":") => {
+					self.pop_peek();
+					DestructurePart::Aliased(field, self.parse_local_idiom(ctx).await?)
+				}
+				t!(".") => {
+					self.pop_peek();
+					let found = self.peek_kind();
+					match self.parse_dot_part(ctx).await? {
+						Part::All => DestructurePart::All(field),
+						Part::Destructure(v) => DestructurePart::Destructure(field, v),
+						_ => {
+							return Err(ParseError::new(
+								ParseErrorKind::Unexpected {
+									found,
+									expected: "a star or a destructuring",
+								},
+								self.last_span(),
+							))
+						}
+					}
+				}
+				_ => DestructurePart::Field(field),
+			};
+
+			destructured.push(part);
+
+			if !self.eat(t!(",")) {
+				// We've reached the end of the destructure
+				self.expect_closing_delimiter(t!("}"), start)?;
+				break;
+			}
+		}
+
+		Ok(Part::Destructure(destructured))
 	}
 	/// Parse the part after the `[` in a idiom
 	pub async fn parse_bracket_part(&mut self, ctx: &mut Stk, start: Span) -> ParseResult<Part> {
@@ -284,7 +349,7 @@ impl Parser<'_> {
 			t!("$param") => Part::Value(Value::Param(self.next_token_value()?)),
 			TokenKind::Qoute(_x) => Part::Value(Value::Strand(self.next_token_value()?)),
 			_ => {
-				let idiom = self.parse_basic_idiom()?;
+				let idiom = self.parse_basic_idiom(ctx).await?;
 				Part::Value(Value::Idiom(idiom))
 			}
 		};
@@ -293,10 +358,10 @@ impl Parser<'_> {
 	}
 
 	/// Parse a list of basic idioms seperated by a ','
-	pub fn parse_basic_idiom_list(&mut self) -> ParseResult<Vec<Idiom>> {
-		let mut res = vec![self.parse_basic_idiom()?];
+	pub async fn parse_basic_idiom_list(&mut self, ctx: &mut Stk) -> ParseResult<Vec<Idiom>> {
+		let mut res = vec![self.parse_basic_idiom(ctx).await?];
 		while self.eat(t!(",")) {
-			res.push(self.parse_basic_idiom()?);
+			res.push(self.parse_basic_idiom(ctx).await?);
 		}
 		Ok(res)
 	}
@@ -305,7 +370,7 @@ impl Parser<'_> {
 	///
 	/// Basic idioms differ from normal idioms in that they are more restrictive.
 	/// Flatten, graphs, conditions and indexing by param is not allowed.
-	pub fn parse_basic_idiom(&mut self) -> ParseResult<Idiom> {
+	pub async fn parse_basic_idiom(&mut self, ctx: &mut Stk) -> ParseResult<Idiom> {
 		let start = self.next_token_value::<Ident>()?;
 		let mut parts = vec![Part::Field(start)];
 		loop {
@@ -313,7 +378,7 @@ impl Parser<'_> {
 			let part = match token.kind {
 				t!(".") => {
 					self.pop_peek();
-					self.parse_dot_part()?
+					self.parse_dot_part(ctx).await?
 				}
 				t!("[") => {
 					self.pop_peek();
@@ -355,7 +420,7 @@ impl Parser<'_> {
 	/// Basic idioms differ from local idioms in that they are more restrictive.
 	/// Only field, all and number indexing is allowed. Flatten is also allowed but only at the
 	/// end.
-	pub fn parse_local_idiom(&mut self) -> ParseResult<Idiom> {
+	pub async fn parse_local_idiom(&mut self, ctx: &mut Stk) -> ParseResult<Idiom> {
 		let start = self.next_token_value()?;
 		let mut parts = vec![Part::Field(start)];
 		loop {
@@ -363,7 +428,7 @@ impl Parser<'_> {
 			let part = match token.kind {
 				t!(".") => {
 					self.pop_peek();
-					self.parse_dot_part()?
+					self.parse_dot_part(ctx).await?
 				}
 				t!("[") => {
 					self.pop_peek();

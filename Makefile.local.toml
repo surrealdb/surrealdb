@@ -17,45 +17,36 @@ dependencies = ["cargo-upgrade", "cargo-update"]
 [tasks.docs]
 category = "LOCAL USAGE"
 command = "cargo"
-env = { RUSTDOCFLAGS = "--cfg surrealdb_unstable" }
 args = ["doc", "--open", "--no-deps", "--package", "surrealdb", "--features", "rustls,native-tls,protocol-ws,protocol-http,kv-mem,kv-rocksdb,kv-tikv,http,scripting,jwks"]
 
 # Test
 [tasks.test]
 category = "LOCAL USAGE"
 command = "cargo"
-env = { RUSTFLAGS = "--cfg surrealdb_unstable", RUSTDOCFLAGS = "--cfg surrealdb_unstable", RUST_MIN_STACK={ value = "4194304", condition = { env_not_set = ["RUST_MIN_STACK"] } } }
-args = ["test", "--workspace", "--no-fail-fast"]
+env = { RUST_MIN_STACK={ value = "4194304", condition = { env_not_set = ["RUST_MIN_STACK"] } } }
+args = ["test", "--profile", "make", "--workspace", "--no-fail-fast"]
 
-# Check
-[tasks.cargo-check]
-category = "LOCAL USAGE"
-command = "cargo"
-env = { RUSTFLAGS = "--cfg surrealdb_unstable" }
-args = ["check", "--workspace", "--features", "${DEV_FEATURES}"]
-
+# Format
 [tasks.cargo-fmt]
 category = "LOCAL USAGE"
 command = "cargo"
 args = ["fmt", "--all", "--check"]
 
-[tasks.cargo-fmt-unlinked]
+# Check
+[tasks.cargo-check]
 category = "LOCAL USAGE"
-script = """
-	set -e
-	cd ${CARGO_MAKE_WORKSPACE_WORKING_DIRECTORY}/
-	cargo fmt --all --check -- ./lib/tests/**/*.rs ./core/src/kvs/tests/*.rs
-"""
+command = "cargo"
+args = ["check", "--profile", "make", "--workspace", "--all-targets", "--features", "${ALL_FEATURES}"]
 
+# Clippy
 [tasks.cargo-clippy]
 category = "LOCAL USAGE"
 command = "cargo"
-env = { RUSTFLAGS = "--cfg surrealdb_unstable" }
-args = ["clippy", "--all-targets", "--all-features", "--", "-D", "warnings"]
+args = ["clippy", "--profile", "make", "--workspace", "--all-targets", "--features", "${ALL_FEATURES}", "--", "-D", "warnings"]
 
 [tasks.check]
 category = "LOCAL USAGE"
-dependencies = ["cargo-check", "cargo-fmt", "cargo-fmt-unlinked", "cargo-clippy"]
+dependencies = ["cargo-fmt", "cargo-check", "cargo-clippy"]
 
 [tasks.check-wasm]
 category = "LOCAL USAGE"
@@ -71,41 +62,36 @@ args = ["clean"]
 [tasks.bench]
 category = "LOCAL USAGE"
 command = "cargo"
-env = { RUSTFLAGS = "--cfg surrealdb_unstable" }
 args = ["bench", "--package", "surrealdb", "--no-default-features", "--features", "kv-mem,http,scripting,jwks", "--", "${@}"]
 
 # Run
 [tasks.run]
 category = "LOCAL USAGE"
 command = "cargo"
-env = { RUSTFLAGS = "--cfg surrealdb_unstable" }
-args = ["run", "--no-default-features", "--features", "${DEV_FEATURES}", "--", "${@}"]
+args = ["run", "--profile", "make", "--no-default-features", "--features", "${DEV_FEATURES}", "--", "${@}"]
 
 # Serve
 [tasks.serve]
 category = "LOCAL USAGE"
 command = "cargo"
-env = { RUSTFLAGS = "--cfg surrealdb_unstable" }
-args = ["run", "--no-default-features", "--features", "${DEV_FEATURES}", "--", "start", "--allow-all", "${@}"]
+args = ["run", "--profile", "make", "--no-default-features", "--features", "${DEV_FEATURES}", "--", "start", "--allow-all", "${@}"]
 
 # SQL
 [tasks.sql]
 category = "LOCAL USAGE"
 command = "cargo"
-env = { RUSTFLAGS = "--cfg surrealdb_unstable" }
-args = ["run", "--no-default-features", "--features", "${DEV_FEATURES}", "--", "sql", "--pretty", "${@}"]
-
-# Quick
-[tasks.quick]
-category = "LOCAL USAGE"
-command = "cargo"
-args = ["build", "${@}"]
+args = ["run", "--profile", "make", "--no-default-features", "--features", "${DEV_FEATURES}", "--", "sql", "--pretty", "${@}"]
 
 # Build
 [tasks.build]
 category = "LOCAL USAGE"
 command = "cargo"
-env = { RUSTFLAGS = "--cfg surrealdb_unstable" }
+args = ["build", "--profile", "make", "${@}"]
+
+# Release
+[tasks.release]
+category = "LOCAL USAGE"
+command = "cargo"
 args = ["build", "--release", "${@}"]
 
 # Default
