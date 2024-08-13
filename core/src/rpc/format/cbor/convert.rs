@@ -3,6 +3,7 @@ use geo::{LineString, Point, Polygon};
 use geo_types::{MultiLineString, MultiPoint, MultiPolygon};
 use rust_decimal::Decimal;
 use std::iter::once;
+use std::ops::Bound;
 use std::ops::Deref;
 
 use crate::sql::Datetime;
@@ -10,6 +11,7 @@ use crate::sql::Duration;
 use crate::sql::Geometry;
 use crate::sql::Id;
 use crate::sql::Number;
+use crate::sql::Range;
 use crate::sql::Thing;
 use crate::sql::Uuid;
 use crate::sql::Value;
@@ -29,6 +31,11 @@ const TAG_STRING_DECIMAL: u64 = 10;
 const TAG_CUSTOM_DATETIME: u64 = 12;
 const TAG_STRING_DURATION: u64 = 13;
 const TAG_CUSTOM_DURATION: u64 = 14;
+
+// Ranges
+const TAG_RANGE: u64 = 49;
+const TAG_BOUND_INCLUDED: u64 = 50;
+const TAG_BOUND_EXCLUDED: u64 = 51;
 
 // Custom Geometries
 const TAG_GEOMETRY_POINT: u64 = 88;
@@ -188,6 +195,9 @@ impl TryFrom<Cbor> for Value {
 								Ok(Value::Object(id)) => {
 									Ok(Value::from(Thing::from((tb, Id::from(id)))))
 								}
+								Ok(Value::Range(id)) => {
+									Ok(Value::from(Thing::from((tb, Id::try_from(*id).map_err(|_| "Expected a valid Id::Range value")?))))
+								}
 								_ => Err("Expected the id of a Record Id to be a String, Integer, Array or Object value"),
 							}
 						}
@@ -198,6 +208,8 @@ impl TryFrom<Cbor> for Value {
 						Data::Text(v) => Ok(Value::Table(v.into())),
 						_ => Err("Expected a CBOR text data type"),
 					},
+					// A range
+					TAG_RANGE => Ok(Value::Range(Box::new(Range::try_from(*v)?))),
 					TAG_GEOMETRY_POINT => match *v {
 						Data::Array(mut v) if v.len() == 2 => {
 							let x = Value::try_from(Cbor(v.remove(0)))?;
@@ -318,6 +330,48 @@ impl TryFrom<Cbor> for Value {
 	}
 }
 
+impl TryFrom<Data> for Range {
+	type Error = &'static str;
+	fn try_from(val: Data) -> Result<Self, &'static str> {
+		fn decode_bound(v: Data) -> Result<Bound<Value>, &'static str> {
+			match v {
+				Data::Tag(TAG_BOUND_INCLUDED, v) => Ok(Bound::Included(Value::try_from(Cbor(*v))?)),
+				Data::Tag(TAG_BOUND_EXCLUDED, v) => Ok(Bound::Excluded(Value::try_from(Cbor(*v))?)),
+				Data::Null => Ok(Bound::Unbounded),
+				_ => Err("Expected a bound tag"),
+			}
+		}
+
+		match val {
+			Data::Array(v) if v.len() == 2 => {
+				let beg = decode_bound(v.get(0).unwrap().to_owned())?;
+				let end = decode_bound(v.get(1).unwrap().to_owned())?;
+				Ok(Range::new(beg, end))
+			}
+			_ => Err("Expected a CBOR array with 2 bounds"),
+		}
+	}
+}
+
+impl TryFrom<Range> for Data {
+	type Error = &'static str;
+	fn try_from(r: Range) -> Result<Data, &'static str> {
+		fn encode(b: Bound<Value>) -> Result<Data, &'static str> {
+			match b {
+				Bound::Included(v) => {
+					Ok(Data::Tag(TAG_BOUND_INCLUDED, Box::new(Cbor::try_from(v)?.0)))
+				}
+				Bound::Excluded(v) => {
+					Ok(Data::Tag(TAG_BOUND_EXCLUDED, Box::new(Cbor::try_from(v)?.0)))
+				}
+				Bound::Unbounded => Ok(Data::Null),
+			}
+		}
+
+		Ok(Data::Array(vec![encode(r.beg)?, encode(r.end)?]))
+	}
+}
+
 impl TryFrom<Value> for Cbor {
 	type Error = &'static str;
 	fn try_from(val: Value) -> Result<Self, &'static str> {
@@ -393,11 +447,13 @@ impl TryFrom<Value> for Cbor {
 						Id::Generate(_) => {
 							return Err("Cannot encode an ungenerated Record ID into CBOR")
 						}
+						Id::Range(v) => Data::try_from(*v)?,
 					},
 				])),
 			))),
 			Value::Table(v) => Ok(Cbor(Data::Tag(TAG_TABLE, Box::new(Data::Text(v.0))))),
 			Value::Geometry(v) => Ok(Cbor(encode_geometry(v)?)),
+			Value::Range(v) => Ok(Cbor(Data::try_from(*v)?)),
 			// We shouldn't reach here
 			_ => Err("Found unsupported SurrealQL value being encoded into a CBOR value"),
 		}

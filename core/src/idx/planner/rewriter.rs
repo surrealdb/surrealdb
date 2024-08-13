@@ -127,6 +127,7 @@ impl<'a> KnnConditionRewriter<'a> {
 			Id::Number(_) | Id::String(_) | Id::Generate(_) => Some(id.clone()),
 			Id::Array(a) => self.eval_array(a).map(Id::Array),
 			Id::Object(o) => self.eval_object(o).map(Id::Object),
+			Id::Range(r) => self.eval_range(r).map(|r| Id::Range(Box::new(r))),
 		}
 	}
 
@@ -177,7 +178,6 @@ impl<'a> KnnConditionRewriter<'a> {
 	fn eval_range(&self, r: &Range) -> Option<Range> {
 		if let Some(beg) = self.eval_bound(&r.beg) {
 			self.eval_bound(&r.end).map(|end| Range {
-				tb: r.tb.clone(),
 				beg,
 				end,
 			})
@@ -186,10 +186,10 @@ impl<'a> KnnConditionRewriter<'a> {
 		}
 	}
 
-	fn eval_bound(&self, b: &Bound<Id>) -> Option<Bound<Id>> {
+	fn eval_bound(&self, b: &Bound<Value>) -> Option<Bound<Value>> {
 		match b {
-			Bound::Included(id) => self.eval_id(id).map(Bound::Included),
-			Bound::Excluded(id) => self.eval_id(id).map(Bound::Excluded),
+			Bound::Included(v) => self.eval_value(v).map(Bound::Included),
+			Bound::Excluded(v) => self.eval_value(v).map(Bound::Excluded),
 			Bound::Unbounded => Some(Bound::Unbounded),
 		}
 	}

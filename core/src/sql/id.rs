@@ -10,7 +10,10 @@ use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fmt::{self, Display, Formatter};
+use std::ops::Bound;
 use ulid::Ulid;
+
+use super::Range;
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize, Hash)]
@@ -32,6 +35,7 @@ pub enum Id {
 	Array(Array),
 	Object(Object),
 	Generate(Gen),
+	Range(Box<Range>),
 }
 
 impl From<i64> for Id {
@@ -128,6 +132,29 @@ impl From<Number> for Id {
 	}
 }
 
+impl TryFrom<Range> for Id {
+	type Error = Error;
+	fn try_from(v: Range) -> Result<Self, Self::Error> {
+		if let Bound::Included(v) | Bound::Excluded(v) = &v.beg {
+			if !Id::value_valid_as_id(v) {
+				return Err(Error::IdInvalid {
+					value: v.kindof().to_string(),
+				});
+			}
+		}
+
+		if let Bound::Included(v) | Bound::Excluded(v) = &v.end {
+			if !Id::value_valid_as_id(v) {
+				return Err(Error::IdInvalid {
+					value: v.kindof().to_string(),
+				});
+			}
+		}
+
+		Ok(Id::Range(Box::new(v)))
+	}
+}
+
 impl From<Thing> for Id {
 	fn from(v: Thing) -> Self {
 		v.id
@@ -159,6 +186,25 @@ impl Id {
 				Gen::Ulid => "ulid()".to_string(),
 				Gen::Uuid => "uuid()".to_string(),
 			},
+			Self::Range(v) => v.to_string(),
+		}
+	}
+	/// Can this value be a valid Id?
+	pub fn value_valid_as_id(v: &Value) -> bool {
+		match v {
+			Value::Number(Number::Int(_)) => true,
+			Value::Strand(_) => true,
+			Value::Array(_) => true,
+			Value::Object(_) => true,
+			Value::Range(_) => true,
+			_ => false,
+		}
+	}
+	/// Can this value be a valid Id?
+	pub fn bound_valid_as_id(v: &Bound<Value>) -> bool {
+		match v {
+			Bound::Included(v) | Bound::Excluded(v) => Self::value_valid_as_id(v),
+			Bound::Unbounded => true,
 		}
 	}
 }
@@ -175,6 +221,7 @@ impl Display for Id {
 				Gen::Ulid => Display::fmt("ulid()", f),
 				Gen::Uuid => Display::fmt("uuid()", f),
 			},
+			Self::Range(v) => Display::fmt(v, f),
 		}
 	}
 }
@@ -203,6 +250,10 @@ impl Id {
 				Gen::Rand => Ok(Self::rand()),
 				Gen::Ulid => Ok(Self::ulid()),
 				Gen::Uuid => Ok(Self::uuid()),
+			},
+			Id::Range(v) => match v.compute(stk, ctx, opt, doc).await? {
+				Value::Range(v) => Ok(Id::Range(v)),
+				_ => unreachable!(),
 			},
 		}
 	}
