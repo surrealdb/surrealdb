@@ -35,6 +35,7 @@ const TAG_STRING_DECIMAL: u64 = 10;
 const TAG_CUSTOM_DATETIME: u64 = 12;
 const TAG_STRING_DURATION: u64 = 13;
 const TAG_CUSTOM_DURATION: u64 = 14;
+const TAG_FUTURE: u64 = 15;
 
 // Ranges
 const TAG_RANGE: u64 = 49;
@@ -395,6 +396,11 @@ impl TryFrom<Value> for Cbor {
 			Value::Table(v) => Ok(Cbor(Data::Tag(TAG_TABLE, Box::new(Data::Text(v.0))))),
 			Value::Geometry(v) => Ok(Cbor(encode_geometry(v)?)),
 			Value::Range(v) => Ok(Cbor(Data::try_from(*v)?)),
+			Value::Future(v) => {
+				let bin = Data::Text(format!("{}", (*v).0));
+
+				Ok(Cbor(Data::Tag(TAG_FUTURE, Box::new(bin))))
+			}
 			// We shouldn't reach here
 			_ => Err("Found unsupported SurrealQL value being encoded into a CBOR value"),
 		}
