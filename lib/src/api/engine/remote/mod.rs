@@ -112,6 +112,13 @@ impl From<Failure> for Error {
 	}
 }
 
+impl From<Failure> for crate::Error {
+	fn from(value: Failure) -> Self {
+		let api_err: Error = value.into();
+		api_err.into()
+	}
+}
+
 impl DbResponse {
 	fn from(result: ServerResult) -> Result<Self> {
 		match result.map_err(Error::from)? {

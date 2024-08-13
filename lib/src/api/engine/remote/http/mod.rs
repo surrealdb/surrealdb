@@ -5,28 +5,29 @@ pub(crate) mod native;
 #[cfg(target_arch = "wasm32")]
 pub(crate) mod wasm;
 
-use crate::api::conn::Command;
+// use crate::api::conn::Command;
 use crate::api::conn::DbResponse;
 use crate::api::conn::RequestData;
-use crate::api::engine::remote::duration_from_str;
+// use crate::api::engine::remote::duration_from_str;
 use crate::api::err::Error;
-use crate::api::method::query::QueryResult;
+// use crate::api::method::query::QueryResult;
 use crate::api::Connect;
-use crate::api::Response as QueryResponse;
+// use crate::api::Response as QueryResponse;
 use crate::api::Result;
 use crate::api::Surreal;
-use crate::dbs::Status;
-use crate::engine::value_to_values;
+// use crate::dbs::Status;
+use crate::engine::remote::Response;
+// use crate::engine::value_to_values;
 use crate::headers::AUTH_DB;
 use crate::headers::AUTH_NS;
-use crate::headers::DB;
-use crate::headers::NS;
-use crate::method::Stats;
+// use crate::headers::DB;
+// use crate::headers::NS;
+// use crate::method::Stats;
 use crate::opt::IntoEndpoint;
-use crate::sql::from_value;
+// use crate::sql::from_value;
 use crate::sql::serde::deserialize;
 use crate::sql::Value;
-use futures::TryStreamExt;
+// use futures::TryStreamExt;
 use indexmap::IndexMap;
 use reqwest::header::HeaderMap;
 use reqwest::header::HeaderValue;
@@ -35,34 +36,34 @@ use reqwest::RequestBuilder;
 use serde::Deserialize;
 use serde::Serialize;
 use std::marker::PhantomData;
-use std::mem;
-use surrealdb_core::sql::statements::CreateStatement;
-use surrealdb_core::sql::statements::DeleteStatement;
-use surrealdb_core::sql::statements::InsertStatement;
-use surrealdb_core::sql::statements::SelectStatement;
-use surrealdb_core::sql::statements::UpdateStatement;
-use surrealdb_core::sql::statements::UpsertStatement;
-use surrealdb_core::sql::Data;
-use surrealdb_core::sql::Field;
-use surrealdb_core::sql::Output;
+// use std::mem;
+// use surrealdb_core::sql::statements::CreateStatement;
+// use surrealdb_core::sql::statements::DeleteStatement;
+// use surrealdb_core::sql::statements::InsertStatement;
+// use surrealdb_core::sql::statements::SelectStatement;
+// use surrealdb_core::sql::statements::UpdateStatement;
+// use surrealdb_core::sql::statements::UpsertStatement;
+// use surrealdb_core::sql::Data;
+// use surrealdb_core::sql::Field;
+// use surrealdb_core::sql::Output;
 use url::Url;
 
-#[cfg(not(target_arch = "wasm32"))]
-use reqwest::header::CONTENT_TYPE;
-#[cfg(not(target_arch = "wasm32"))]
-use std::path::PathBuf;
-#[cfg(not(target_arch = "wasm32"))]
-use tokio::fs::OpenOptions;
-#[cfg(not(target_arch = "wasm32"))]
-use tokio::io;
-#[cfg(not(target_arch = "wasm32"))]
-use tokio_util::compat::FuturesAsyncReadCompatExt;
-#[cfg(target_arch = "wasm32")]
-use wasm_bindgen_futures::spawn_local;
+// #[cfg(not(target_arch = "wasm32"))]
+// use reqwest::header::CONTENT_TYPE;
+// #[cfg(not(target_arch = "wasm32"))]
+// use std::path::PathBuf;
+// #[cfg(not(target_arch = "wasm32"))]
+// use tokio::fs::OpenOptions;
+// #[cfg(not(target_arch = "wasm32"))]
+// use tokio::io;
+// #[cfg(not(target_arch = "wasm32"))]
+// use tokio_util::compat::FuturesAsyncReadCompatExt;
+// #[cfg(target_arch = "wasm32")]
+// use wasm_bindgen_futures::spawn_local;
 
 use super::serialize;
 
-const SQL_PATH: &str = "sql";
+// const SQL_PATH: &str = "sql";
 const RPC_PATH: &str = "rpc";
 
 // The HTTP scheme used to connect to `http://` endpoints
@@ -117,6 +118,7 @@ pub(crate) fn default_headers() -> HeaderMap {
 	headers
 }
 
+#[allow(dead_code)]
 #[derive(Debug)]
 enum Auth {
 	Basic {
@@ -160,7 +162,7 @@ impl Authenticate for RequestBuilder {
 	}
 }
 
-type HttpQueryResponse = (String, Status, Value);
+// type HttpQueryResponse = (String, Status, Value);
 
 #[derive(Debug, Serialize, Deserialize)]
 struct Credentials {
@@ -364,7 +366,7 @@ async fn router(
 	base_url: &Url,
 	client: &reqwest::Client,
 	headers: &mut HeaderMap,
-	vars: &mut IndexMap<String, String>,
+	_vars: &mut IndexMap<String, String>,
 	auth: &mut Option<Auth>,
 ) -> Result<DbResponse> {
 	if let Some(req) = command.into_router_request(None) {
@@ -373,12 +375,12 @@ async fn router(
 			client.post(url).headers(headers.clone()).auth(auth).body(serialize(&req, false)?);
 		let response = http_req.send().await?.error_for_status()?;
 		let bytes = response.bytes().await?;
-		let responses = deserialize::<Vec<HttpQueryResponse>>(&bytes).map_err(|error| {
-			Error::ResponseFromBinary {
+		let response =
+			deserialize::<Response>(&bytes).map_err(|error| Error::ResponseFromBinary {
 				binary: bytes.to_vec(),
 				error,
-			}
-		})?;
+			})?;
+		return DbResponse::from(response.result);
 	}
 	todo!()
 
