@@ -323,6 +323,10 @@ criteria = "safe-to-deploy"
 version = "0.6.12"
 criteria = "safe-to-deploy"
 
+[[exemptions.bytemuck]]
+version = "1.15.0"
+criteria = "safe-to-deploy"
+
 [[exemptions.byteorder]]
 version = "1.5.0"
 criteria = "safe-to-deploy"
@@ -341,6 +345,10 @@ criteria = "safe-to-deploy"
 
 [[exemptions.cast]]
 version = "0.3.0"
+criteria = "safe-to-deploy"
+
+[[exemptions.castaway]]
+version = "0.2.3"
 criteria = "safe-to-deploy"
 
 [[exemptions.cc]]
@@ -445,10 +453,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.critical-section]]
 version = "1.1.2"
-criteria = "safe-to-deploy"
-
-[[exemptions.crossbeam-channel]]
-version = "0.5.11"
 criteria = "safe-to-deploy"
 
 [[exemptions.crossbeam-deque]]
@@ -1503,6 +1507,10 @@ criteria = "safe-to-deploy"
 version = "0.6.0"
 criteria = "safe-to-deploy"
 
+[[exemptions.serde-content]]
+version = "0.1.0"
+criteria = "safe-to-deploy"
+
 [[exemptions.serde_bytes]]
 version = "0.11.15"
 criteria = "safe-to-deploy"
@@ -2041,10 +2049,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.wyz]]
 version = "0.5.1"
-criteria = "safe-to-deploy"
-
-[[exemptions.xattr]]
-version = "1.3.1"
 criteria = "safe-to-deploy"
 
 [[exemptions.xml-rs]]
