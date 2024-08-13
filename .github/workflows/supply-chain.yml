@@ -10,6 +10,8 @@ on:
       - Cargo.toml
       - core/Cargo.toml
       - lib/Cargo.toml
+      - build.rs
+      - lib/build.rs
       - supply-chain/audits.toml
       - supply-chain/config.toml
       - supply-chain/imports.lock
@@ -23,6 +25,8 @@ on:
       - Cargo.toml
       - core/Cargo.toml
       - lib/Cargo.toml
+      - build.rs
+      - lib/build.rs
       - supply-chain/audits.toml
       - supply-chain/config.toml
       - supply-chain/imports.lock

@@ -333,6 +333,7 @@ pub(crate) static PATHS: phf::Map<UniCase<&'static str>, PathKind> = phf_map! {
 		UniCase::ascii("time::from::unix") => PathKind::Function,
 		//
 		UniCase::ascii("type::bool") => PathKind::Function,
+		UniCase::ascii("type::bytes") => PathKind::Function,
 		UniCase::ascii("type::datetime") => PathKind::Function,
 		UniCase::ascii("type::decimal") => PathKind::Function,
 		UniCase::ascii("type::duration") => PathKind::Function,
@@ -344,6 +345,9 @@ pub(crate) static PATHS: phf::Map<UniCase<&'static str>, PathKind> = phf_map! {
 		UniCase::ascii("type::table") => PathKind::Function,
 		UniCase::ascii("type::thing") => PathKind::Function,
 		UniCase::ascii("type::range") => PathKind::Function,
+		UniCase::ascii("type::record") => PathKind::Function,
+		UniCase::ascii("type::uuid") => PathKind::Function,
+		UniCase::ascii("type::geometry") => PathKind::Function,
 		UniCase::ascii("type::is::array") => PathKind::Function,
 		UniCase::ascii("type::is::bool") => PathKind::Function,
 		UniCase::ascii("type::is::bytes") => PathKind::Function,
