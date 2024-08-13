@@ -857,7 +857,7 @@ mod tests {
 		let summary = Summary {
 			title: "Lorem Ipsum".to_owned(),
 		};
-		let value = to_value(&summary).unwrap();
+		let value = to_value(summary.clone()).unwrap();
 
 		let mut response = Response {
 			results: to_map(vec![Ok(value.clone().into_inner())]),
@@ -886,7 +886,7 @@ mod tests {
 			title: "Lorem Ipsum".to_owned(),
 			body: "Lorem Ipsum Lorem Ipsum".to_owned(),
 		};
-		let value = to_value(&article).unwrap();
+		let value = to_value(article.clone()).unwrap();
 
 		let mut response = Response {
 			results: to_map(vec![Ok(value.clone().into_inner())]),
