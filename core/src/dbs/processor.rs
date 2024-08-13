@@ -10,7 +10,7 @@ use crate::idx::planner::IterationStage;
 use crate::key::{graph, thing};
 use crate::kvs::Transaction;
 use crate::sql::dir::Dir;
-use crate::sql::{Edges, Range, Table, Thing, Value};
+use crate::sql::{Edges, Id, Range, Table, Thing, Value};
 #[cfg(not(target_arch = "wasm32"))]
 use channel::Sender;
 use futures::StreamExt;
@@ -123,7 +123,7 @@ impl<'a> Processor<'a> {
 				Iterable::Value(v) => self.process_value(stk, ctx, opt, stm, v).await?,
 				Iterable::Thing(v) => self.process_thing(stk, ctx, opt, stm, v).await?,
 				Iterable::Defer(v) => self.process_defer(stk, ctx, opt, stm, v).await?,
-				Iterable::Range(v) => self.process_range(stk, ctx, opt, stm, v).await?,
+				// Iterable::Range(v) => self.process_range(stk, ctx, opt, stm, v).await?,
 				Iterable::Edges(e) => self.process_edge(stk, ctx, opt, stm, e).await?,
 				Iterable::Table(v) => {
 					if let Some(qp) = ctx.get_query_planner() {
@@ -157,6 +157,7 @@ impl<'a> Processor<'a> {
 				Iterable::Relatable(f, v, w, o) => {
 					self.process_relatable(stk, ctx, opt, stm, (f, v, w, o)).await?
 				}
+				_ => todo!(),
 			}
 		}
 		Ok(())
@@ -209,28 +210,33 @@ impl<'a> Processor<'a> {
 		stm: &Statement<'_>,
 		v: Thing,
 	) -> Result<(), Error> {
-		// Check that the table exists
-		ctx.tx().check_ns_db_tb(opt.ns()?, opt.db()?, &v.tb, opt.strict).await?;
-		// Fetch the data from the store
-		let key = thing::new(opt.ns()?, opt.db()?, &v.tb, &v.id);
-		let val = ctx.tx().get(key, opt.version).await?;
-		// Parse the data from the store
-		let val = Operable::Value(
-			match val {
-				Some(v) => Value::from(v),
-				None => Value::None,
+		match &v.id {
+			Id::Range(r) => self.process_thing_range(stk, ctx, opt, stm, v.tb, *r.to_owned()).await,
+			_ => {
+				// Check that the table exists
+				ctx.tx().check_ns_db_tb(opt.ns()?, opt.db()?, &v.tb, opt.strict).await?;
+				// Fetch the data from the store
+				let key = thing::new(opt.ns()?, opt.db()?, &v.tb, &v.id);
+				let val = ctx.tx().get(key, opt.version).await?;
+				// Parse the data from the store
+				let val = Operable::Value(
+					match val {
+						Some(v) => Value::from(v),
+						None => Value::None,
+					}
+					.into(),
+				);
+				// Process the document record
+				let pro = Processed {
+					rid: Some(v.into()),
+					ir: None,
+					val,
+				};
+				self.process(stk, ctx, opt, stm, pro).await?;
+				// Everything ok
+				Ok(())
 			}
-			.into(),
-		);
-		// Process the document record
-		let pro = Processed {
-			rid: Some(v.into()),
-			ir: None,
-			val,
-		};
-		self.process(stk, ctx, opt, stm, pro).await?;
-		// Everything ok
-		Ok(())
+		}
 	}
 
 	async fn process_mergeable(
@@ -337,34 +343,47 @@ impl<'a> Processor<'a> {
 		Ok(())
 	}
 
-	async fn process_range(
+	async fn process_thing_range(
 		&mut self,
 		stk: &mut Stk,
 		ctx: &Context,
 		opt: &Options,
 		stm: &Statement<'_>,
-		v: Range,
+		tb: String,
+		r: Range,
 	) -> Result<(), Error> {
 		// Get the transaction
 		let txn = ctx.tx();
 		// Check that the table exists
-		txn.check_ns_db_tb(opt.ns()?, opt.db()?, &v.tb, opt.strict).await?;
+		txn.check_ns_db_tb(opt.ns()?, opt.db()?, &tb, opt.strict).await?;
 		// Prepare the range start key
-		let beg = match &v.beg {
-			Bound::Unbounded => thing::prefix(opt.ns()?, opt.db()?, &v.tb),
-			Bound::Included(id) => thing::new(opt.ns()?, opt.db()?, &v.tb, id).encode().unwrap(),
-			Bound::Excluded(id) => {
-				let mut key = thing::new(opt.ns()?, opt.db()?, &v.tb, id).encode().unwrap();
+		let beg = match &r.beg {
+			Bound::Unbounded => thing::prefix(opt.ns()?, opt.db()?, &tb),
+			Bound::Included(v) => {
+				thing::new(opt.ns()?, opt.db()?, &tb, &Id::try_from(v.to_owned())?)
+					.encode()
+					.unwrap()
+			}
+			Bound::Excluded(v) => {
+				let mut key = thing::new(opt.ns()?, opt.db()?, &tb, &Id::try_from(v.to_owned())?)
+					.encode()
+					.unwrap();
 				key.push(0x00);
 				key
 			}
 		};
 		// Prepare the range end key
-		let end = match &v.end {
-			Bound::Unbounded => thing::suffix(opt.ns()?, opt.db()?, &v.tb),
-			Bound::Excluded(id) => thing::new(opt.ns()?, opt.db()?, &v.tb, id).encode().unwrap(),
-			Bound::Included(id) => {
-				let mut key = thing::new(opt.ns()?, opt.db()?, &v.tb, id).encode().unwrap();
+		let end = match &r.end {
+			Bound::Unbounded => thing::suffix(opt.ns()?, opt.db()?, &tb),
+			Bound::Excluded(v) => {
+				thing::new(opt.ns()?, opt.db()?, &tb, &Id::try_from(v.to_owned())?)
+					.encode()
+					.unwrap()
+			}
+			Bound::Included(v) => {
+				let mut key = thing::new(opt.ns()?, opt.db()?, &tb, &Id::try_from(v.to_owned())?)
+					.encode()
+					.unwrap();
 				key.push(0x00);
 				key
 			}

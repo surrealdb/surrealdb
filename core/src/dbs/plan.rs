@@ -107,7 +107,7 @@ impl ExplainItem {
 			},
 			Iterable::Range(r) => Self {
 				name: "Iterate Range".into(),
-				details: vec![("table", Value::from(r.tb.to_owned()))],
+				details: vec![("range", r.to_owned().into())],
 			},
 			Iterable::Edges(e) => Self {
 				name: "Iterate Edges".into(),

@@ -14,13 +14,10 @@ use crate::method::Select;
 use crate::opt::Resource;
 use crate::sql::from_value;
 use crate::sql::statements::LiveStatement;
-use crate::sql::Cond;
-use crate::sql::Expression;
 use crate::sql::Field;
 use crate::sql::Fields;
 use crate::sql::Ident;
 use crate::sql::Idiom;
-use crate::sql::Operator;
 use crate::sql::Part;
 use crate::sql::Statement;
 use crate::sql::Table;
@@ -63,10 +60,10 @@ macro_rules! into_future {
 				let mut table = Table::default();
 				match range {
 					Some(range) => {
-						let range = resource?.with_range(range)?;
-						table.0 = range.tb.clone();
+						let record = resource?.with_range(range)?;
+						table.0 = record.tb.clone();
 						stmt.what = table.into();
-						stmt.cond = range.to_cond();
+						stmt.cond = record.to_cond();
 					}
 					None => match resource? {
 						Resource::Table(table) => {
@@ -79,13 +76,7 @@ macro_rules! into_future {
 							ident.0 = ID.to_owned();
 							let mut idiom = Idiom::default();
 							idiom.0 = vec![Part::from(ident)];
-							let mut cond = Cond::default();
-							cond.0 = Value::Expression(Box::new(Expression::new(
-								idiom.into(),
-								Operator::Equal,
-								record.into(),
-							)));
-							stmt.cond = Some(cond);
+							stmt.cond = record.to_cond();
 						}
 						Resource::Object(object) => return Err(Error::LiveOnObject(object).into()),
 						Resource::Array(array) => return Err(Error::LiveOnArray(array).into()),

@@ -12,6 +12,8 @@ use std::fmt;
 use std::ops::Bound;
 use std::str::FromStr;
 
+use super::Id;
+
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Range";
 
 #[revisioned(revision = 1)]
@@ -37,6 +39,23 @@ impl TryFrom<&str> for Range {
 		match syn::range(v) {
 			Ok(v) => Ok(v),
 			_ => Err(()),
+		}
+	}
+}
+
+impl From<(Bound<Id>, Bound<Id>)> for Range {
+	fn from(v: (Bound<Id>, Bound<Id>)) -> Self {
+		fn convert(v: Bound<Id>) -> Bound<Value> {
+			match v {
+				Bound::Included(v) => Bound::Included(v.into()),
+				Bound::Excluded(v) => Bound::Excluded(v.into()),
+				Bound::Unbounded => Bound::Unbounded,
+			}
+		}
+
+		Self {
+			beg: convert(v.0),
+			end: convert(v.1),
 		}
 	}
 }

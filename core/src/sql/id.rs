@@ -155,6 +155,22 @@ impl TryFrom<Range> for Id {
 	}
 }
 
+impl TryFrom<Value> for Id {
+	type Error = Error;
+	fn try_from(v: Value) -> Result<Self, Self::Error> {
+		match v {
+			Value::Number(Number::Int(v)) => Ok(v.into()),
+			Value::Strand(v) => Ok(v.into()),
+			Value::Array(v) => Ok(v.into()),
+			Value::Object(v) => Ok(v.into()),
+			Value::Range(v) => Id::try_from(*v),
+			v => Err(Error::IdInvalid {
+				value: v.kindof().to_string(),
+			}),
+		}
+	}
+}
+
 impl From<Thing> for Id {
 	fn from(v: Thing) -> Self {
 		v.id
