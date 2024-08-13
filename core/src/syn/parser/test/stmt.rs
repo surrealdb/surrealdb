@@ -1,3 +1,9 @@
+#[cfg(surrealdb_unstable)]
+use crate::sql::statements::{
+	access,
+	access::{AccessStatementGrant, AccessStatementList, AccessStatementRevoke},
+	AccessStatement,
+};
 use crate::{
 	sql::{
 		access::AccessDuration,
@@ -11,13 +17,11 @@ use crate::{
 		index::{Distance, HnswParams, MTreeParams, SearchParams, VectorType},
 		language::Language,
 		statements::{
-			access,
-			access::{AccessStatementGrant, AccessStatementList, AccessStatementRevoke},
 			analyze::AnalyzeStatement,
 			show::{ShowSince, ShowStatement},
 			sleep::SleepStatement,
-			AccessStatement, BeginStatement, BreakStatement, CancelStatement, CommitStatement,
-			ContinueStatement, CreateStatement, DefineAccessStatement, DefineAnalyzerStatement,
+			BeginStatement, BreakStatement, CancelStatement, CommitStatement, ContinueStatement,
+			CreateStatement, DefineAccessStatement, DefineAnalyzerStatement,
 			DefineDatabaseStatement, DefineEventStatement, DefineFieldStatement,
 			DefineFunctionStatement, DefineIndexStatement, DefineNamespaceStatement,
 			DefineParamStatement, DefineStatement, DefineTableStatement, DeleteStatement,
@@ -2422,6 +2426,7 @@ fn parse_upsert() {
 	);
 }
 
+#[cfg(surrealdb_unstable)]
 #[test]
 fn parse_access_grant() {
 	let res = test_parse!(parse_stmt, r#"ACCESS a ON NAMESPACE GRANT FOR USER b"#).unwrap();
@@ -2435,6 +2440,7 @@ fn parse_access_grant() {
 	);
 }
 
+#[cfg(surrealdb_unstable)]
 #[test]
 fn parse_access_revoke() {
 	let res = test_parse!(parse_stmt, r#"ACCESS a ON DATABASE REVOKE b"#).unwrap();
@@ -2448,6 +2454,7 @@ fn parse_access_revoke() {
 	);
 }
 
+#[cfg(surrealdb_unstable)]
 #[test]
 fn parse_access_list() {
 	let res = test_parse!(parse_stmt, r#"ACCESS a LIST"#).unwrap();

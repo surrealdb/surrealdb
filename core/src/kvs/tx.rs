@@ -11,6 +11,7 @@ use crate::kvs::cache::Entry;
 use crate::kvs::cache::EntryWeighter;
 use crate::kvs::scanner::Scanner;
 use crate::kvs::Transactor;
+#[cfg(surrealdb_unstable)]
 use crate::sql::statements::AccessGrant;
 use crate::sql::statements::DefineAccessStatement;
 use crate::sql::statements::DefineAnalyzerStatement;
@@ -353,6 +354,7 @@ impl Transaction {
 		.into_ras())
 	}
 
+	#[cfg(surrealdb_unstable)]
 	/// Retrieve all root access grants in a datastore.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
 	pub async fn all_root_access_grants(&self, ra: &str) -> Result<Arc<[AccessGrant]>, Error> {
@@ -429,6 +431,7 @@ impl Transaction {
 		.into_nas())
 	}
 
+	#[cfg(surrealdb_unstable)]
 	/// Retrieve all namespace access grants for a specific namespace.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
 	pub async fn all_ns_access_grants(
@@ -517,6 +520,7 @@ impl Transaction {
 		.into_das())
 	}
 
+	#[cfg(surrealdb_unstable)]
 	/// Retrieve all database access grants for a specific database.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
 	pub async fn all_db_access_grants(
@@ -832,6 +836,7 @@ impl Transaction {
 		.into_type())
 	}
 
+	#[cfg(surrealdb_unstable)]
 	/// Retrieve a specific root access grant.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
 	pub async fn get_root_access_grant(
@@ -923,6 +928,7 @@ impl Transaction {
 		.into_type())
 	}
 
+	#[cfg(surrealdb_unstable)]
 	/// Retrieve a specific namespace access grant.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
 	pub async fn get_ns_access_grant(
@@ -1024,6 +1030,7 @@ impl Transaction {
 		.into_type())
 	}
 
+	#[cfg(surrealdb_unstable)]
 	/// Retrieve a specific database access grant.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
 	pub async fn get_db_access_grant(

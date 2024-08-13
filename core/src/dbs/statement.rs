@@ -9,6 +9,7 @@ use crate::sql::order::Orders;
 use crate::sql::output::Output;
 use crate::sql::split::Splits;
 use crate::sql::start::Start;
+#[cfg(surrealdb_unstable)]
 use crate::sql::statements::access::AccessStatement;
 use crate::sql::statements::create::CreateStatement;
 use crate::sql::statements::delete::DeleteStatement;
@@ -33,6 +34,7 @@ pub(crate) enum Statement<'a> {
 	Relate(&'a RelateStatement),
 	Delete(&'a DeleteStatement),
 	Insert(&'a InsertStatement),
+	#[cfg(surrealdb_unstable)]
 	Access(&'a AccessStatement),
 }
 
@@ -90,6 +92,7 @@ impl<'a> From<&'a InsertStatement> for Statement<'a> {
 	}
 }
 
+#[cfg(surrealdb_unstable)]
 impl<'a> From<&'a AccessStatement> for Statement<'a> {
 	fn from(v: &'a AccessStatement) -> Self {
 		Statement::Access(v)
@@ -108,6 +111,7 @@ impl<'a> fmt::Display for Statement<'a> {
 			Statement::Relate(v) => write!(f, "{v}"),
 			Statement::Delete(v) => write!(f, "{v}"),
 			Statement::Insert(v) => write!(f, "{v}"),
+			#[cfg(surrealdb_unstable)]
 			Statement::Access(v) => write!(f, "{v}"),
 		}
 	}
