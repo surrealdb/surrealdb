@@ -173,7 +173,7 @@ impl IndexEqualThingIterator {
 	) -> Result<B, Error> {
 		let min = beg.clone();
 		let max = end.to_owned();
-		let res = tx.scan(min..max, limit).await?;
+		let res = tx.scan(min..max, limit, None).await?;
 		if let Some((key, _)) = res.last() {
 			let mut key = key.clone();
 			key.push(0x00);
@@ -303,7 +303,7 @@ impl IndexRangeThingIterator {
 	) -> Result<B, Error> {
 		let min = self.r.beg.clone();
 		let max = self.r.end.clone();
-		let res = tx.scan(min..max, limit).await?;
+		let res = tx.scan(min..max, limit, None).await?;
 		if let Some((key, _)) = res.last() {
 			self.r.beg.clone_from(key);
 			self.r.beg.push(0x00);
@@ -602,7 +602,7 @@ impl UniqueRangeThingIterator {
 		let min = self.r.beg.clone();
 		let max = self.r.end.clone();
 		limit += 1;
-		let res = tx.scan(min..max, limit).await?;
+		let res = tx.scan(min..max, limit, None).await?;
 		let mut records = B::with_capacity(res.len());
 		for (k, v) in res {
 			limit -= 1;

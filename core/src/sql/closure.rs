@@ -57,14 +57,7 @@ impl Closure {
 		let ctx = ctx.freeze();
 		let result = self.body.compute(stk, &ctx, opt, doc).await?;
 		if let Some(returns) = &self.returns {
-			if let Ok(result) = result.clone().coerce_to(returns) {
-				Ok(result)
-			} else {
-				Err(Error::InvalidFunction {
-					name: "ANONYMOUS".to_string(),
-					message: format!("Expected this closure to return a value of type '{returns}', but found '{}'", result.kindof()),
-				})
-			}
+			result.coerce_to(returns).map_err(|e| e.function_check_from_coerce("ANONYMOUS"))
 		} else {
 			Ok(result)
 		}

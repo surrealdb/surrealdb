@@ -311,7 +311,7 @@ impl<'a> Processor<'a> {
 		let beg = thing::prefix(opt.ns()?, opt.db()?, v);
 		let end = thing::suffix(opt.ns()?, opt.db()?, v);
 		// Create a new iterable range
-		let mut stream = txn.stream(beg..end);
+		let mut stream = txn.stream(beg..end, opt.version);
 		// Loop until no more entries
 		while let Some(res) = stream.next().await {
 			// Check if the context is finished
@@ -370,7 +370,7 @@ impl<'a> Processor<'a> {
 			}
 		};
 		// Create a new iterable range
-		let mut stream = txn.stream(beg..end);
+		let mut stream = txn.stream(beg..end, None);
 		// Loop until no more entries
 		while let Some(res) = stream.next().await {
 			// Check if the context is finished
@@ -479,7 +479,7 @@ impl<'a> Processor<'a> {
 		// Loop over the chosen edge types
 		for (beg, end) in keys.into_iter() {
 			// Create a new iterable range
-			let mut stream = txn.stream(beg..end);
+			let mut stream = txn.stream(beg..end, None);
 			// Loop until no more entries
 			while let Some(res) = stream.next().await {
 				// Check if the context is finished
