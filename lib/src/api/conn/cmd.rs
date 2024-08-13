@@ -102,7 +102,7 @@ pub(crate) enum Command {
 }
 
 impl Command {
-	#[cfg(feature = "protocol-ws")]
+	#[cfg(any(feature = "protocol-ws", feature = "protocol-http"))]
 	pub(crate) fn into_router_request(self, id: Option<i64>) -> Option<RouterRequest> {
 		let id = id.map(Value::from);
 		let res = match self {
