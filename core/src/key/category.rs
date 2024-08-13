@@ -12,8 +12,12 @@ pub(crate) trait Categorise {
 pub enum Category {
 	/// crate::key::root::all                /
 	Root,
-	/// crate::key::root::ac                 /!ac{ac}
+	/// crate::key::root::access::ac         /!ac{ac}
 	Access,
+	/// crate::key::root::access::all        /*{ac}
+	AccessRoot,
+	/// crate::key::root::access::gr         /*{ac}!gr{gr}
+	AccessGrant,
 	/// crate::key::root::nd                 /!nd{nd}
 	Node,
 	/// crate::key::root::ni                 /!ni
@@ -43,8 +47,12 @@ pub enum Category {
 	NamespaceRoot,
 	/// crate::key::namespace::db            /*{ns}!db{db}
 	DatabaseAlias,
-	/// crate::key::namespace::ac            /*{ns}!ac{ac}
+	/// crate::key::namespace::access::ac    /*{ns}!ac{ac}
 	NamespaceAccess,
+	/// crate::key::namespace::access::all   /*{ns}*{ac}
+	NamespaceAccessRoot,
+	/// crate::key::namespace::access::gr    /*{ns}*{ac}!gr{gr}
+	NamespaceAccessGrant,
 	/// crate::key::namespace::us            /*{ns}!us{us}
 	NamespaceUser,
 	///
@@ -52,8 +60,12 @@ pub enum Category {
 	///
 	/// crate::key::database::all            /*{ns}*{db}
 	DatabaseRoot,
-	/// crate::key::database::ac             /*{ns}*{db}!ac{ac}
+	/// crate::key::database::access::ac     /*{ns}*{db}!ac{ac}
 	DatabaseAccess,
+	/// crate::key::database::access::all    /*{ns}*{db}*{ac}
+	DatabaseAccessRoot,
+	/// crate::key::database::access::gr     /*{ns}*{db}*ac!gr{gr}
+	DatabaseAccessGrant,
 	/// crate::key::database::az             /*{ns}*{db}!az{az}
 	DatabaseAnalyzer,
 	/// crate::key::database::fc             /*{ns}*{db}!fn{fc}
@@ -144,6 +156,8 @@ impl Display for Category {
 		let name = match self {
 			Self::Root => "Root",
 			Self::Access => "Access",
+			Self::AccessRoot => "AccessRoot",
+			Self::AccessGrant => "AccessGrant",
 			Self::Node => "Node",
 			Self::NamespaceIdentifier => "NamespaceIdentifier",
 			Self::Namespace => "Namespace",
@@ -154,9 +168,13 @@ impl Display for Category {
 			Self::DatabaseAlias => "DatabaseAlias",
 			Self::DatabaseIdentifier => "DatabaseIdentifier",
 			Self::NamespaceAccess => "NamespaceAccess",
+			Self::NamespaceAccessRoot => "NamespaceAccessRoot",
+			Self::NamespaceAccessGrant => "NamespaceAccessGrant",
 			Self::NamespaceUser => "NamespaceUser",
 			Self::DatabaseRoot => "DatabaseRoot",
 			Self::DatabaseAccess => "DatabaseAccess",
+			Self::DatabaseAccessRoot => "DatabaseAccessRoot",
+			Self::DatabaseAccessGrant => "DatabaseAccessGrant",
 			Self::DatabaseAnalyzer => "DatabaseAnalyzer",
 			Self::DatabaseFunction => "DatabaseFunction",
 			Self::DatabaseModel => "DatabaseModel",

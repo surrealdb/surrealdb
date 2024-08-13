@@ -6,6 +6,8 @@ use crate::syn::{
 	token::{t, DatetimeChars, Token, TokenKind},
 };
 
+use super::CharError;
+
 impl<'a> Lexer<'a> {
 	/// Eats a single line comment.
 	pub fn eat_single_line_comment(&mut self) {
@@ -312,13 +314,28 @@ impl<'a> Lexer<'a> {
 				}
 				_ => t!(":"),
 			},
-			b'$' => {
-				if self.reader.peek().map(|x| x.is_ascii_alphabetic() || x == b'_').unwrap_or(false)
-				{
-					return self.lex_param();
+			b'$' => match self.reader.peek() {
+				Some(b'_') => return self.lex_param(),
+				Some(b'`') => {
+					self.reader.next();
+					return self.lex_surrounded_param(true);
 				}
-				t!("$")
-			}
+				Some(x) if x.is_ascii_alphabetic() => return self.lex_param(),
+				Some(x) if !x.is_ascii() => {
+					let backup = self.reader.offset();
+					self.reader.next();
+					match self.reader.complete_char(x) {
+						Ok('⟨') => return self.lex_surrounded_param(false),
+						Err(CharError::Eof) => return self.invalid_token(Error::InvalidUtf8),
+						Err(CharError::Unicode) => return self.invalid_token(Error::InvalidUtf8),
+						_ => {
+							self.reader.backup(backup);
+							t!("$")
+						}
+					}
+				}
+				_ => t!("$"),
+			},
 			b'#' => {
 				self.eat_single_line_comment();
 				TokenKind::WhiteSpace

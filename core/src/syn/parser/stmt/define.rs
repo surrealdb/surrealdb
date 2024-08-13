@@ -1,5 +1,6 @@
 use reblessive::Stk;
 
+use crate::cnf::EXPERIMENTAL_BEARER_ACCESS;
 use crate::sql::access_type::JwtAccessVerify;
 use crate::sql::index::HnswParams;
 use crate::{
@@ -149,6 +150,11 @@ impl Parser<'_> {
 				break;
 			}
 		}
+		let returns = if self.eat(t!("->")) {
+			Some(ctx.run(|ctx| self.parse_inner_kind(ctx)).await?)
+		} else {
+			None
+		};
 
 		let next = expected!(self, t!("{")).span;
 		let block = self.parse_block(ctx, next).await?;
@@ -159,6 +165,7 @@ impl Parser<'_> {
 			block,
 			if_not_exists,
 			overwrite,
+			returns,
 			..Default::default()
 		};
 
@@ -338,6 +345,25 @@ impl Parser<'_> {
 								ac.jwt = self.parse_jwt()?;
 							}
 							res.kind = AccessType::Record(ac);
+						}
+						t!("BEARER") => {
+							// TODO(gguillemas): Remove this once bearer access is no longer experimental.
+							if !*EXPERIMENTAL_BEARER_ACCESS {
+								unexpected!(
+									self,
+									t!("BEARER"),
+									"the experimental bearer access feature to be enabled"
+								);
+							}
+							self.pop_peek();
+							let mut ac = access_type::BearerAccess {
+								..Default::default()
+							};
+							if self.eat(t!("WITH")) {
+								expected!(self, t!("JWT"));
+								ac.jwt = self.parse_jwt()?;
+							}
+							res.kind = AccessType::Bearer(ac);
 						}
 						_ => break,
 					}

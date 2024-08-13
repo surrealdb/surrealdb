@@ -838,14 +838,14 @@ impl Datastore {
 	///     let ds = Datastore::new("memory").await?;
 	///     let ses = Session::owner();
 	///     let val = Value::Future(Box::new(Future::from(Value::Bool(true))));
-	///     let res = ds.evaluate(val, &ses, None).await?;
+	///     let res = ds.evaluate(&val, &ses, None).await?;
 	///     Ok(())
 	/// }
 	/// ```
 	#[instrument(level = "debug", target = "surrealdb::core::kvs::ds", skip_all)]
 	pub async fn evaluate(
 		&self,
-		val: Value,
+		val: &Value,
 		sess: &Session,
 		vars: Variables,
 	) -> Result<Value, Error> {
