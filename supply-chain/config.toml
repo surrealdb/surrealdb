@@ -363,6 +363,10 @@ criteria = "safe-to-deploy"
 version = "0.3.0"
 criteria = "safe-to-deploy"
 
+[[exemptions.castaway]]
+version = "0.2.3"
+criteria = "safe-to-deploy"
+
 [[exemptions.cc]]
 version = "1.0.90"
 criteria = "safe-to-deploy"
@@ -1525,6 +1529,14 @@ criteria = "safe-to-deploy"
 
 [[exemptions.send_wrapper]]
 version = "0.6.0"
+criteria = "safe-to-deploy"
+
+[[exemptions.serde-content]]
+version = "0.1.0"
+criteria = "safe-to-deploy"
+
+[[exemptions.serde_bytes]]
+version = "0.11.15"
 criteria = "safe-to-deploy"
 
 [[exemptions.serde_html_form]]

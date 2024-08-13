@@ -155,6 +155,8 @@ url = "2.5.0"
 async-graphql = { version = "7.0.7", default-features = false, features = [
     "dynamic-schema",
 ] }
+castaway = "0.2.3"
+serde-content = "0.1.0"
 
 [dev-dependencies]
 criterion = { version = "0.5.1", features = ["async_tokio"] }

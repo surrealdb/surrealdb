@@ -1168,3 +1168,6 @@ allow_unsafe = true
 allow_apis = [
     "net",
 ]
+
+[pkg.castaway]
+allow_unsafe = true
