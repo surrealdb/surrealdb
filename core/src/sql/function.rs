@@ -213,12 +213,12 @@ impl Function {
 			}
 			Self::Anonymous(v, x) => {
 				let val = match v {
-					c @ Value::Closure(_) => c,
-					Value::Param(p) => ctx.value(p).unwrap_or(&Value::None),
+					c @ Value::Closure(_) => c.clone(),
+					Value::Param(p) => ctx.value(p).cloned().unwrap_or(Value::None),
 					Value::Block(_) | Value::Subquery(_) | Value::Idiom(_) | Value::Function(_) => {
-						&stk.run(|stk| v.compute(stk, ctx, opt, doc)).await?
+						stk.run(|stk| v.compute(stk, ctx, opt, doc)).await?
 					}
-					_ => &Value::None,
+					_ => Value::None,
 				};
 
 				match val {
