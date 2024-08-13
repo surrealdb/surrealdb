@@ -199,6 +199,7 @@ impl Display for Statement {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
 		match self {
 			Self::Value(v) => write!(Pretty::from(f), "{v}"),
+			#[cfg(surrealdb_unstable)]
 			Self::Access(v) => write!(Pretty::from(f), "{v}"),
 			Self::Alter(v) => write!(Pretty::from(f), "{v}"),
 			Self::Analyze(v) => write!(Pretty::from(f), "{v}"),
