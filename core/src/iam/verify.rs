@@ -60,7 +60,7 @@ fn config(alg: Algorithm, key: &[u8]) -> Result<(DecodingKey, Validation), Error
 
 	// TODO(gguillemas): This keeps the existing behavior as of SurrealDB 2.0.0-alpha.9.
 	// Up to that point, a fork of the "jsonwebtoken" crate in version 8.3.0 was being used.
-	// Now that the audience claim is validated by default, we should allow users to leverage this.
+	// Now that the audience claim is validated by default, we could allow users to leverage this.
 	// This will most likely involve defining an audience string via "DEFINE ACCESS ... TYPE JWT".
 	val.validate_aud = false;
 
@@ -1801,6 +1801,7 @@ mod tests {
 			iss: Some("surrealdb-test".to_string()),
 			iat: Some(Utc::now().timestamp()),
 			nbf: Some(Utc::now().timestamp()),
+			aud: Some(Audience::Single("surrealdb-test".to_string())),
 			exp: Some((Utc::now() + Duration::hours(1)).timestamp()),
 			ns: Some("test".to_string()),
 			db: Some("test".to_string()),
