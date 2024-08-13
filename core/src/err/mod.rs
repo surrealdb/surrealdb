@@ -932,43 +932,67 @@ pub enum Error {
 	Serialization(String),
 
 	/// The requested root access method already exists
-	#[error("The root access method '{value}' already exists")]
+	#[error("The root access method '{ac}' already exists")]
 	AccessRootAlreadyExists {
-		value: String,
+		ac: String,
 	},
 
 	/// The requested namespace access method already exists
-	#[error("The access method '{value}' already exists in the namespace '{ns}'")]
+	#[error("The access method '{ac}' already exists in the namespace '{ns}'")]
 	AccessNsAlreadyExists {
-		value: String,
+		ac: String,
 		ns: String,
 	},
 
 	/// The requested database access method already exists
-	#[error("The access method '{value}' already exists in the database '{db}'")]
+	#[error("The access method '{ac}' already exists in the database '{db}'")]
 	AccessDbAlreadyExists {
-		value: String,
+		ac: String,
 		ns: String,
 		db: String,
 	},
 
 	/// The requested root access method does not exist
-	#[error("The root access method '{value}' does not exist")]
+	#[error("The root access method '{ac}' does not exist")]
 	AccessRootNotFound {
-		value: String,
+		ac: String,
+	},
+
+	/// The requested root access grant does not exist
+	#[error("The root access grant '{gr}' does not exist")]
+	AccessGrantRootNotFound {
+		ac: String,
+		gr: String,
 	},
 
 	/// The requested namespace access method does not exist
-	#[error("The access method '{value}' does not exist in the namespace '{ns}'")]
+	#[error("The access method '{ac}' does not exist in the namespace '{ns}'")]
 	AccessNsNotFound {
-		value: String,
+		ac: String,
+		ns: String,
+	},
+
+	/// The requested namespace access grant does not exist
+	#[error("The access grant '{gr}' does not exist in the namespace '{ns}'")]
+	AccessGrantNsNotFound {
+		ac: String,
+		gr: String,
 		ns: String,
 	},
 
 	/// The requested database access method does not exist
-	#[error("The access method '{value}' does not exist in the database '{db}'")]
+	#[error("The access method '{ac}' does not exist in the database '{db}'")]
 	AccessDbNotFound {
-		value: String,
+		ac: String,
+		ns: String,
+		db: String,
+	},
+
+	/// The requested database access grant does not exist
+	#[error("The access grant '{gr}' does not exist in the database '{db}'")]
+	AccessGrantDbNotFound {
+		ac: String,
+		gr: String,
 		ns: String,
 		db: String,
 	},
@@ -1000,6 +1024,18 @@ pub enum Error {
 
 	#[error("This record access method does not allow signin")]
 	AccessRecordNoSignin,
+
+	#[error("This bearer access method requires a key to be provided")]
+	AccessBearerMissingKey,
+
+	#[error("This bearer access grant has an invalid format")]
+	AccessGrantBearerInvalid,
+
+	#[error("This access grant has an invalid subject")]
+	AccessGrantInvalidSubject,
+
+	#[error("This access grant has been revoked")]
+	AccessGrantRevoked,
 
 	/// Found a table name for the record but this is not a valid table
 	#[error("Found {value} for the Record ID but this is not a valid table name")]

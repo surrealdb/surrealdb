@@ -147,7 +147,89 @@ impl From<Claims> for Value {
 						continue;
 					}
 				};
-				out.insert(claim, claim_value);
+				out.insert(claim.to_owned(), claim_value);
+			}
+		}
+		// Return value
+		out.into()
+	}
+}
+
+impl From<&Claims> for Value {
+	fn from(v: &Claims) -> Value {
+		// Set default value
+		let mut out = Object::default();
+		// Add iss field if set
+		if let Some(iss) = &v.iss {
+			out.insert("iss".to_string(), iss.clone().into());
+		}
+		// Add sub field if set
+		if let Some(sub) = &v.sub {
+			out.insert("sub".to_string(), sub.clone().into());
+		}
+		// Add aud field if set
+		if let Some(aud) = &v.aud {
+			match aud {
+				Audience::Single(v) => out.insert("aud".to_string(), v.clone().into()),
+				Audience::Multiple(v) => out.insert("aud".to_string(), v.clone().into()),
+			};
+		}
+		// Add iat field if set
+		if let Some(iat) = v.iat {
+			out.insert("iat".to_string(), iat.into());
+		}
+		// Add nbf field if set
+		if let Some(nbf) = v.nbf {
+			out.insert("nbf".to_string(), nbf.into());
+		}
+		// Add exp field if set
+		if let Some(exp) = v.exp {
+			out.insert("exp".to_string(), exp.into());
+		}
+		// Add jti field if set
+		if let Some(jti) = &v.jti {
+			out.insert("jti".to_string(), jti.clone().into());
+		}
+		// Add NS field if set
+		if let Some(ns) = &v.ns {
+			out.insert("NS".to_string(), ns.clone().into());
+		}
+		// Add DB field if set
+		if let Some(db) = &v.db {
+			out.insert("DB".to_string(), db.clone().into());
+		}
+		// Add AC field if set
+		if let Some(ac) = &v.ac {
+			out.insert("AC".to_string(), ac.clone().into());
+		}
+		// Add ID field if set
+		if let Some(id) = &v.id {
+			out.insert("ID".to_string(), id.clone().into());
+		}
+		// Add RL field if set
+		if let Some(role) = &v.roles {
+			out.insert("RL".to_string(), role.clone().into());
+		}
+		// Add custom claims if set
+		if let Some(custom_claims) = &v.custom_claims {
+			for (claim, value) in custom_claims {
+				// Serialize the raw JSON string representing the claim value
+				let claim_json = match serde_json::to_string(&value) {
+					Ok(claim_json) => claim_json,
+					Err(err) => {
+						debug!("Failed to serialize token claim '{}': {}", claim, err);
+						continue;
+					}
+				};
+				// Parse that JSON string into the corresponding SurrealQL value
+				let claim_value = match json(&claim_json) {
+					Ok(claim_value) => claim_value,
+					Err(err) => {
+						debug!("Failed to parse token claim '{}': {}", claim, err);
+						continue;
+					}
+				};
+				out.insert(claim.to_owned(), claim_value);
 			}
 		}
 		// Return value
