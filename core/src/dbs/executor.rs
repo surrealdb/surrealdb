@@ -243,7 +243,13 @@ impl<'a> Executor<'a> {
 						} else {
 							Force::None
 						}),
-						"FUTURES" => opt.with_futures(stm.what),
+						"FUTURES" => {
+							if stm.what {
+								opt.with_futures(true)
+							} else {
+								opt.with_futures_never()
+							}
+						}
 						_ => break,
 					};
 					// Continue
