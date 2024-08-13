@@ -154,6 +154,8 @@ env_logger = "0.10.1"
 flate2 = "1.0.28"
 pprof = { version = "0.13.0", features = ["flamegraph", "criterion"] }
 serial_test = "2.0.0"
+strum = "0.26.2"
+strum_macros = "0.26.2"
 temp-dir = "0.1.11"
 test-log = { version = "0.2.13", features = ["trace"] }
 time = { version = "0.3.36", features = ["serde"] }
