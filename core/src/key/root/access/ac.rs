@@ -1,4 +1,4 @@
-//! Stores a DEFINE ACCESS ON NAMESPACE config definition
+//! Stores a DEFINE ACCESS ON ROOT configuration
 use crate::key::category::Categorise;
 use crate::key::category::Category;
 use derive::Key;
@@ -9,44 +9,40 @@ use serde::{Deserialize, Serialize};
 pub struct Ac<'a> {
 	__: u8,
 	_a: u8,
-	pub ns: &'a str,
 	_b: u8,
 	_c: u8,
-	_d: u8,
 	pub ac: &'a str,
 }
 
-pub fn new<'a>(ns: &'a str, ac: &'a str) -> Ac<'a> {
-	Ac::new(ns, ac)
+pub fn new(ac: &str) -> Ac<'_> {
+	Ac::new(ac)
 }
 
-pub fn prefix(ns: &str) -> Vec<u8> {
-	let mut k = super::all::new(ns).encode().unwrap();
+pub fn prefix() -> Vec<u8> {
+	let mut k = crate::key::root::all::new().encode().unwrap();
 	k.extend_from_slice(&[b'!', b'a', b'c', 0x00]);
 	k
 }
 
-pub fn suffix(ns: &str) -> Vec<u8> {
-	let mut k = super::all::new(ns).encode().unwrap();
+pub fn suffix() -> Vec<u8> {
+	let mut k = crate::key::root::all::new().encode().unwrap();
 	k.extend_from_slice(&[b'!', b'a', b'c', 0xff]);
 	k
 }
 
 impl Categorise for Ac<'_> {
 	fn categorise(&self) -> Category {
-		Category::NamespaceAccess
+		Category::Access
 	}
 }
 
 impl<'a> Ac<'a> {
-	pub fn new(ns: &'a str, ac: &'a str) -> Self {
+	pub fn new(ac: &'a str) -> Self {
 		Self {
 			__: b'/',
-			_a: b'*',
-			ns,
-			_b: b'!',
-			_c: b'a',
-			_d: b'c',
+			_a: b'!',
+			_b: b'a',
+			_c: b'c',
 			ac,
 		}
 	}
@@ -58,13 +54,22 @@ mod tests {
 	fn key() {
 		use super::*;
 		#[rustfmt::skip]
-		let val = Ac::new(
-			"testns",
-			"testac",
-		);
+		let val = Ac::new("testac");
 		let enc = Ac::encode(&val).unwrap();
-		assert_eq!(enc, b"/*testns\0!actestac\0");
+		assert_eq!(enc, b"/!actestac\x00");
 		let dec = Ac::decode(&enc).unwrap();
 		assert_eq!(val, dec);
+	}
+
+	#[test]
+	fn test_prefix() {
+		let val = super::prefix();
+		assert_eq!(val, b"/!ac\0");
+	}
+
+	#[test]
+	fn test_suffix() {
+		let val = super::suffix();
+		assert_eq!(val, b"/!ac\xff");
 	}
 }

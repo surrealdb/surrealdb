@@ -325,13 +325,18 @@ impl Transactor {
 	///
 	/// This function fetches the full range of key-value pairs, in a single request to the underlying datastore.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
-	pub async fn scan<K>(&mut self, rng: Range<K>, limit: u32) -> Result<Vec<(Key, Val)>, Error>
+	pub async fn scan<K>(
+		&mut self,
+		rng: Range<K>,
+		limit: u32,
+		version: Option<u64>,
+	) -> Result<Vec<(Key, Val)>, Error>
 	where
 		K: Into<Key> + Debug,
 	{
 		let beg: Key = rng.start.into();
 		let end: Key = rng.end.into();
-		expand_inner!(&mut self.inner, v => { v.scan(beg..end, limit).await })
+		expand_inner!(&mut self.inner, v => { v.scan(beg..end, limit, version).await })
 	}
 
 	/// Retrieve a batched scan over a specific range of keys in the datastore.
