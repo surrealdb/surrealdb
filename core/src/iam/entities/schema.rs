@@ -46,6 +46,7 @@ pub static DEFAULT_CEDAR_SCHEMA: Lazy<serde_json::Value> = Lazy::new(|| {
 					"Event": {"shape": {"type": "Resource"}, "memberOfTypes": ["Level"]},
 					"Field": {"shape": {"type": "Resource"}, "memberOfTypes": ["Level"]},
 					"Index": {"shape": {"type": "Resource"}, "memberOfTypes": ["Level"]},
+					"Access": {"shape": {"type": "Resource"}, "memberOfTypes": ["Level"]},
 
 					// IAM resource types
 					"Role": {},
@@ -65,14 +66,14 @@ pub static DEFAULT_CEDAR_SCHEMA: Lazy<serde_json::Value> = Lazy::new(|| {
 					"View": {
 						"appliesTo": {
 							"principalTypes": [ "Actor" ],
-							"resourceTypes": [ "Any", "Namespace", "Database", "Record", "Table", "Document", "Option", "Function", "Analyzer", "Parameter", "Event", "Field", "Index", "Actor" ],
+							"resourceTypes": [ "Any", "Namespace", "Database", "Record", "Table", "Document", "Option", "Function", "Analyzer", "Parameter", "Event", "Field", "Index", "Access", "Actor" ],
 
 						},
 					},
 					"Edit": {
 						"appliesTo": {
 							"principalTypes": [ "Actor" ],
-							"resourceTypes": [ "Any", "Namespace", "Database", "Record", "Table", "Document", "Option", "Function", "Analyzer", "Parameter", "Event", "Field", "Index", "Actor" ],
+							"resourceTypes": [ "Any", "Namespace", "Database", "Record", "Table", "Document", "Option", "Function", "Analyzer", "Parameter", "Event", "Field", "Index", "Access", "Actor" ],
 						},
 					},
 				},
