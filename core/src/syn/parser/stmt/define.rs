@@ -150,6 +150,11 @@ impl Parser<'_> {
 				break;
 			}
 		}
+		let returns = if self.eat(t!("->")) {
+			Some(ctx.run(|ctx| self.parse_inner_kind(ctx)).await?)
+		} else {
+			None
+		};
 
 		let next = expected!(self, t!("{")).span;
 		let block = self.parse_block(ctx, next).await?;
@@ -160,6 +165,7 @@ impl Parser<'_> {
 			block,
 			if_not_exists,
 			overwrite,
+			returns,
 			..Default::default()
 		};
 

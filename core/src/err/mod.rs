@@ -228,6 +228,14 @@ pub enum Error {
 		message: String,
 	},
 
+	/// The wrong quantity or magnitude of arguments was given for the specified function
+	#[error("There was a problem running the {name} function. Expected this function to return a value of type {check}, but found {value}")]
+	FunctionCheck {
+		name: String,
+		value: String,
+		check: String,
+	},
+
 	/// The URL is invalid
 	#[error("The URL `{0}` is invalid")]
 	InvalidUrl(String),
@@ -1190,5 +1198,26 @@ impl Serialize for Error {
 		S: serde::Serializer,
 	{
 		serializer.serialize_str(self.to_string().as_str())
+	}
+}
+
+impl Error {
+	pub fn function_check_from_coerce(self, name: impl Into<String>) -> Error {
+		match self {
+			Error::CoerceTo {
+				from,
+				into,
+			} => Error::FunctionCheck {
+				name: name.into(),
+				value: from.to_string(),
+				check: into,
+			},
+			fc @ Error::FunctionCheck {
+				..
+			} => fc,
+			_ => Error::Internal(
+				"function_check_from_coerce called on Error that wasn't CoerceTo".to_string(),
+			),
+		}
 	}
 }
