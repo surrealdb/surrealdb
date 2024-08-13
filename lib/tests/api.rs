@@ -275,6 +275,7 @@ mod api_integration {
 	mod file {
 		use super::*;
 		use surrealdb::engine::local::Db;
+		#[allow(deprecated)]
 		use surrealdb::engine::local::File;
 
 		async fn new_db() -> (SemaphorePermit<'static>, Surreal<Db>) {
@@ -288,6 +289,7 @@ mod api_integration {
 				.user(root)
 				.tick_interval(TICK_INTERVAL)
 				.capabilities(Capabilities::all());
+			#[allow(deprecated)]
 			let db = Surreal::new::<File>((path, config)).await.unwrap();
 			db.signin(root).await.unwrap();
 			(permit, db)
