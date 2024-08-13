@@ -149,9 +149,9 @@ pub use self::thing::Thing;
 pub use self::timeout::Timeout;
 pub use self::tokenizer::Tokenizer;
 pub use self::uuid::Uuid;
-pub use self::value::serde::to_value;
 #[doc(hidden)]
-pub use self::value::serde::{from_value, FromValueError};
+pub use self::value::serde::from_value;
+pub use self::value::serde::to_value;
 pub use self::value::Value;
 pub use self::value::Values;
 pub use self::version::Version;
