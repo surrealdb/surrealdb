@@ -60,7 +60,7 @@ fn config(alg: Algorithm, key: &[u8]) -> Result<(DecodingKey, Validation), Error
 
 	// TODO(gguillemas): This keeps the existing behavior as of SurrealDB 2.0.0-alpha.9.
 	// Up to that point, a fork of the "jsonwebtoken" crate in version 8.3.0 was being used.
-	// Now that the audience claim is validated by default, we should allow users to leverage this.
+	// Now that the audience claim is validated by default, we could allow users to leverage this.
 	// This will most likely involve defining an audience string via "DEFINE ACCESS ... TYPE JWT".
 	val.validate_aud = false;
 
@@ -691,7 +691,7 @@ async fn authenticate_jwt(
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::iam::token::HEADER;
+	use crate::iam::token::{Audience, HEADER};
 	use argon2::password_hash::{PasswordHasher, SaltString};
 	use chrono::Duration;
 	use jsonwebtoken::{encode, EncodingKey};
@@ -1801,6 +1801,7 @@ mod tests {
 			iss: Some("surrealdb-test".to_string()),
 			iat: Some(Utc::now().timestamp()),
 			nbf: Some(Utc::now().timestamp()),
+			aud: Some(Audience::Single("surrealdb-test".to_string())),
 			exp: Some((Utc::now() + Duration::hours(1)).timestamp()),
 			ns: Some("test".to_string()),
 			db: Some("test".to_string()),
@@ -2246,7 +2247,7 @@ mod tests {
 			let key = EncodingKey::from_secret(secret.as_ref());
 			let claims = Claims {
 				iss: Some("surrealdb-test".to_string()),
-				aud: Some("surrealdb-test".to_string()),
+				aud: Some(Audience::Single("surrealdb-test".to_string())),
 				iat: Some(Utc::now().timestamp()),
 				nbf: Some(Utc::now().timestamp()),
 				exp: Some((Utc::now() + Duration::hours(1)).timestamp()),
@@ -2315,7 +2316,7 @@ mod tests {
 			let key = EncodingKey::from_secret(secret.as_ref());
 			let claims = Claims {
 				iss: Some("surrealdb-test".to_string()),
-				aud: Some("invalid".to_string()),
+				aud: Some(Audience::Single("invalid".to_string())),
 				iat: Some(Utc::now().timestamp()),
 				nbf: Some(Utc::now().timestamp()),
 				exp: Some((Utc::now() + Duration::hours(1)).timestamp()),
@@ -2372,7 +2373,7 @@ mod tests {
 			let key = EncodingKey::from_secret(secret.as_ref());
 			let claims = Claims {
 				iss: Some("surrealdb-test".to_string()),
-				aud: Some("invalid".to_string()),
+				aud: Some(Audience::Single("invalid".to_string())),
 				iat: Some(Utc::now().timestamp()),
 				nbf: Some(Utc::now().timestamp()),
 				exp: Some((Utc::now() + Duration::hours(1)).timestamp()),
@@ -2431,7 +2432,7 @@ mod tests {
 			let key = EncodingKey::from_secret(secret.as_ref());
 			let claims = Claims {
 				iss: Some("surrealdb-test".to_string()),
-				aud: Some("surrealdb-test".to_string()),
+				aud: Some(Audience::Single("surrealdb-test".to_string())),
 				iat: Some(Utc::now().timestamp()),
 				nbf: Some(Utc::now().timestamp()),
 				exp: Some((Utc::now() + Duration::hours(1)).timestamp()),
@@ -2498,7 +2499,7 @@ mod tests {
 			let key = EncodingKey::from_secret(secret.as_ref());
 			let claims = Claims {
 				iss: Some("surrealdb-test".to_string()),
-				aud: Some("invalid".to_string()),
+				aud: Some(Audience::Single("invalid".to_string())),
 				iat: Some(Utc::now().timestamp()),
 				nbf: Some(Utc::now().timestamp()),
 				exp: Some((Utc::now() + Duration::hours(1)).timestamp()),
@@ -2554,7 +2555,7 @@ mod tests {
 			let key = EncodingKey::from_secret(secret.as_ref());
 			let claims = Claims {
 				iss: Some("surrealdb-test".to_string()),
-				aud: Some("invalid".to_string()),
+				aud: Some(Audience::Single("invalid".to_string())),
 				iat: Some(Utc::now().timestamp()),
 				nbf: Some(Utc::now().timestamp()),
 				exp: Some((Utc::now() + Duration::hours(1)).timestamp()),
@@ -2612,7 +2613,7 @@ mod tests {
 			let key = EncodingKey::from_secret(secret.as_ref());
 			let claims = Claims {
 				iss: Some("surrealdb-test".to_string()),
-				aud: Some("surrealdb-test".to_string()),
+				aud: Some(Audience::Single("surrealdb-test".to_string())),
 				iat: Some(Utc::now().timestamp()),
 				nbf: Some(Utc::now().timestamp()),
 				exp: Some((Utc::now() + Duration::hours(1)).timestamp()),
@@ -2677,7 +2678,7 @@ mod tests {
 			let key = EncodingKey::from_secret(secret.as_ref());
 			let claims = Claims {
 				iss: Some("surrealdb-test".to_string()),
-				aud: Some("invalid".to_string()),
+				aud: Some(Audience::Single("invalid".to_string())),
 				iat: Some(Utc::now().timestamp()),
 				nbf: Some(Utc::now().timestamp()),
 				exp: Some((Utc::now() + Duration::hours(1)).timestamp()),
@@ -2732,7 +2733,7 @@ mod tests {
 			let key = EncodingKey::from_secret(secret.as_ref());
 			let claims = Claims {
 				iss: Some("surrealdb-test".to_string()),
-				aud: Some("invalid".to_string()),
+				aud: Some(Audience::Single("invalid".to_string())),
 				iat: Some(Utc::now().timestamp()),
 				nbf: Some(Utc::now().timestamp()),
 				exp: Some((Utc::now() + Duration::hours(1)).timestamp()),

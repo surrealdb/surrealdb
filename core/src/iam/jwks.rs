@@ -203,7 +203,17 @@ pub(super) async fn config(
 
 	// Return verification configuration if a decoding key can be retrieved from the JWK object
 	match DecodingKey::from_jwk(&jwk) {
-		Ok(dec) => Ok((dec, Validation::new(alg))),
+		Ok(dec) => {
+			let mut val = Validation::new(alg);
+
+			// TODO(gguillemas): This keeps the existing behavior as of SurrealDB 2.0.0-alpha.9.
+			// Up to that point, a fork of the "jsonwebtoken" crate in version 8.3.0 was being used.
+			// Now that the audience claim is validated by default, we could allow users to leverage this.
+			// This will most likely involve defining an audience string via "DEFINE ACCESS ... TYPE JWT".
+			val.validate_aud = false;
+
+			Ok((dec, val))
+		}
 		Err(err) => {
 			warn!("Failed to retrieve decoding key from JWK object: '{}'", err);
 			Err(Error::InvalidAuth) // Return opaque error
