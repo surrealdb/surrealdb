@@ -16,6 +16,7 @@ async fn access_bearer_database() -> () {
 		-- Initial setup
 		DEFINE ACCESS api ON DATABASE TYPE BEARER;
 		DEFINE USER tobie ON DATABASE PASSWORD 'secret' ROLES EDITOR;
+		INFO FOR DB;
 		-- Should succeed
 		ACCESS api ON DATABASE GRANT FOR USER tobie;
 		ACCESS api ON DATABASE GRANT FOR USER tobie;
@@ -34,10 +35,16 @@ async fn access_bearer_database() -> () {
 	let dbs = new_ds().await.unwrap();
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await.unwrap();
-	assert_eq!(res.len(), 14);
+	assert_eq!(res.len(), 15);
 	// Consume the results of the setup statements
 	res.remove(0).result.unwrap();
 	res.remove(0).result.unwrap();
+	// Ensure the access method was created as expected
+	let tmp = res.remove(0).result.unwrap().to_string();
+	let ok =
+		Regex::new(r"\{ accesses: \{ api: 'DEFINE ACCESS api ON DATABASE TYPE BEARER DURATION FOR GRANT NONE, FOR TOKEN 1h, FOR SESSION NONE' \}, .* \}")
+				.unwrap();
+	assert!(ok.is_match(&tmp), "Output '{}' doesn't match regex '{}'", tmp, ok);
 	//
 	let tmp = res.remove(0).result.unwrap().to_string();
 	let ok =
@@ -117,6 +124,7 @@ async fn access_bearer_namespace() {
 		-- Initial setup
 		DEFINE ACCESS api ON NAMESPACE TYPE BEARER;
 		DEFINE USER tobie ON NAMESPACE PASSWORD 'secret' ROLES EDITOR;
+		INFO FOR NS;
 		-- Should succeed
 		ACCESS api ON NAMESPACE GRANT FOR USER tobie;
 		ACCESS api ON NAMESPACE GRANT FOR USER tobie;
@@ -135,10 +143,16 @@ async fn access_bearer_namespace() {
 	let dbs = new_ds().await.unwrap();
 	let ses = Session::owner().with_ns("test");
 	let res = &mut dbs.execute(sql, &ses, None).await.unwrap();
-	assert_eq!(res.len(), 14);
+	assert_eq!(res.len(), 15);
 	// Consume the results of the setup statements
 	res.remove(0).result.unwrap();
 	res.remove(0).result.unwrap();
+	// Ensure the access method was created as expected
+	let tmp = res.remove(0).result.unwrap().to_string();
+	let ok =
+		Regex::new(r"\{ accesses: \{ api: 'DEFINE ACCESS api ON NAMESPACE TYPE BEARER DURATION FOR GRANT NONE, FOR TOKEN 1h, FOR SESSION NONE' \}, .* \}")
+				.unwrap();
+	assert!(ok.is_match(&tmp), "Output '{}' doesn't match regex '{}'", tmp, ok);
 	//
 	let tmp = res.remove(0).result.unwrap().to_string();
 	let ok =
@@ -218,6 +232,7 @@ async fn access_bearer_root() {
 		-- Initial setup
 		DEFINE ACCESS api ON ROOT TYPE BEARER;
 		DEFINE USER tobie ON ROOT PASSWORD 'secret' ROLES EDITOR;
+		INFO FOR ROOT;
 		-- Should succeed
 		ACCESS api ON ROOT GRANT FOR USER tobie;
 		ACCESS api ON ROOT GRANT FOR USER tobie;
@@ -236,10 +251,16 @@ async fn access_bearer_root() {
 	let dbs = new_ds().await.unwrap();
 	let ses = Session::owner();
 	let res = &mut dbs.execute(sql, &ses, None).await.unwrap();
-	assert_eq!(res.len(), 14);
+	assert_eq!(res.len(), 15);
 	// Consume the results of the setup statements
 	res.remove(0).result.unwrap();
 	res.remove(0).result.unwrap();
+	// Ensure the access method was created as expected
+	let tmp = res.remove(0).result.unwrap().to_string();
+	let ok =
+		Regex::new(r"\{ accesses: \{ api: 'DEFINE ACCESS api ON ROOT TYPE BEARER DURATION FOR GRANT NONE, FOR TOKEN 1h, FOR SESSION NONE' \}, .* \}")
+				.unwrap();
+	assert!(ok.is_match(&tmp), "Output '{}' doesn't match regex '{}'", tmp, ok);
 	//
 	let tmp = res.remove(0).result.unwrap().to_string();
 	let ok =
