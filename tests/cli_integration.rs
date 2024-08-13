@@ -1450,6 +1450,21 @@ mod cli_integration {
 			server.finish().unwrap();
 		}
 	}
+
+	#[test(tokio::test)]
+	async fn double_create() {
+		info!("* check only one output created");
+		{
+			let args = format!("sql --conn memory --ns test --db test --pretty --hide-welcome");
+			let output = common::run(&args)
+				.input("let $a = create foo;\n")
+				.input("select * from foo;\n")
+				.output()
+				.unwrap();
+			let output = remove_debug_info(output);
+			assert_eq!(output.matches("foo:").count(), 1);
+		}
+	}
 }
 
 fn remove_debug_info(output: String) -> String {
