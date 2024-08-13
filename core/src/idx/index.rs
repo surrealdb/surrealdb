@@ -12,7 +12,7 @@ use crate::sql::{Array, Index, Part, Thing, Value};
 use reblessive::tree::Stk;
 
 pub(crate) struct IndexOperation<'a> {
-	ctx: &'a Context<'a>,
+	ctx: &'a Context,
 	opt: &'a Options,
 	ix: &'a DefineIndexStatement,
 	/// The old values (if existing)
@@ -24,7 +24,8 @@ pub(crate) struct IndexOperation<'a> {
 
 impl<'a> IndexOperation<'a> {
 	pub(crate) fn new(
-		ctx: &'a Context<'a>,
+		ctx: &'a Context,
+		opt: &'a Options,
 		ix: &'a DefineIndexStatement,
 		o: Option<Vec<Value>>,
 		n: Option<Vec<Value>>,
@@ -159,7 +160,7 @@ impl<'a> IndexOperation<'a> {
 		} else {
 			ft.remove_document(self.ctx, self.rid).await?;
 		}
-		ft.finish(&self.ctx.tx()).await
+		ft.finish(&self.ctx).await
 	}
 
 	async fn index_mtree(&mut self, stk: &mut Stk, p: &MTreeParams) -> Result<(), Error> {

@@ -51,7 +51,7 @@ pub struct MutableContext {
 	// Whether or not this context is cancelled.
 	cancelled: Arc<AtomicBool>,
 	// A collection of read only values stored in this context.
-	values: HashMap<&'static str, Arc<Value>>,
+	values: HashMap<Cow<'static, str>, Arc<Value>>,
 	// Stores the notification channel if available
 	notifications: Option<Sender<Notification>>,
 	// An optional query planner

@@ -1,20 +1,21 @@
 use crate::cnf::{EXPORT_BATCH_SIZE, NORMAL_FETCH_SIZE};
+use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::err::Error;
+use crate::idx::index::IndexOperation;
 use crate::kvs::ds::TransactionFactory;
 use crate::kvs::LockType::Optimistic;
-use crate::kvs::{LockType, TransactionType};
+use crate::kvs::TransactionType;
 use crate::sql::statements::DefineIndexStatement;
 use crate::sql::{Id, Thing, Value};
 use dashmap::mapref::entry::Entry;
 use dashmap::DashMap;
+use reblessive::TreeStack;
 use std::collections::VecDeque;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tokio::task;
 use tokio::task::JoinHandle;
-use crate::ctx::Context;
-use crate::idx::index::IndexOperation;
 
 enum BuildingStatus {
 	Initiated,
@@ -24,19 +25,25 @@ enum BuildingStatus {
 }
 
 pub(crate) struct IndexBuilder {
+	ctx: Context,
 	tf: TransactionFactory,
-	indexes: DashMap<DefineIndexStatement, (Arc<Building>, JoinHandle<()>)>,
+	indexes: DashMap<Arc<DefineIndexStatement>, (Arc<Building>, JoinHandle<()>)>,
 }
 
 impl IndexBuilder {
-	pub(super) fn new(tf: TransactionFactory) -> Self {
+	pub(super) fn new(ctx: Context, tf: TransactionFactory) -> Self {
 		Self {
+			ctx,
 			tf,
 			indexes: Default::default(),
 		}
 	}
 
-	pub(crate) fn build(&mut self, opt: &Options, ix: DefineIndexStatement) -> Result<(), Error> {
+	pub(crate) fn build(
+		&mut self,
+		opt: &Options,
+		ix: Arc<DefineIndexStatement>,
+	) -> Result<(), Error> {
 		match self.indexes.entry(ix) {
 			Entry::Occupied(e) => {
 				// If the building is currently running we return error
@@ -46,9 +53,18 @@ impl IndexBuilder {
 			}
 			Entry::Vacant(e) => {
 				// No index is currently building, we can start building it
-				let building = Arc::new(Building::new(self.tf.clone(), opt, e.key())?);
+				let building = Arc::new(Building::new(
+					self.ctx.clone(),
+					self.tf.clone(),
+					opt,
+					e.key().clone(),
+				)?);
 				let b = building.clone();
-				let jh = task::spawn(async move { if let Err(err) = b.compute().await {} });
+				let jh = task::spawn(async move {
+					if let Err(err) = b.compute().await {
+						panic!("{err}") // TODO replace by error
+					}
+				});
 				e.insert((building, jh));
 			}
 		}
@@ -85,8 +101,9 @@ struct Appending {
 }
 
 struct Building {
-	ctx: Context<'_>,
+	ctx: Context,
 	tf: TransactionFactory,
+	ix: Arc<DefineIndexStatement>,
 	ns: String,
 	db: String,
 	tb: String,
@@ -99,16 +116,18 @@ struct Building {
 
 impl Building {
 	fn new(
-		ctx: &Context<'_>,
+		ctx: Context,
 		tf: TransactionFactory,
 		opt: &Options,
-		ix: &DefineIndexStatement,
+		ix: Arc<DefineIndexStatement>,
 	) -> Result<Self, Error> {
 		Ok(Self {
+			ctx,
 			tf,
 			ns: opt.ns()?.to_string(),
 			db: opt.db()?.to_string(),
 			tb: ix.what.to_string(),
+			ix,
 			status: Arc::new(Mutex::new(BuildingStatus::Initiated)),
 			appended: Default::default(),
 			index_barrier: Default::default(),
@@ -131,7 +150,7 @@ impl Building {
 		let mut next = Some(beg..end);
 		let mut count = 0;
 		while let Some(rng) = next {
-			let tx = self.tf.transaction(TransactionType::Write, LockType::Optimistic).await?;
+			let tx = self.tf.transaction(TransactionType::Write, Optimistic).await?;
 			// Get the next batch of records
 			let batch = tx.batch(rng, *EXPORT_BATCH_SIZE, true).await?;
 			// Set the next scan range
@@ -147,29 +166,25 @@ impl Building {
 			}
 			tx.commit().await?;
 		}
-		// Second iteration, we index/remove any keys that has been added or removed since the initial indexing
+		// Second iteration, we index/remove any records that has been added or removed since the initial indexing
 		loop {
 			let mut batch = self.appended.lock().await;
 			let drain = batch.drain(0..*NORMAL_FETCH_SIZE as usize);
 			if drain.len() == 0 {
+				// ATOMIC SWAP
 				// LOCK INDEXING
-				// if self.appended is still empty, we are done
+				// if self.appended is still empty, we are done, otherwise we continue
 				// UNLOCK INDEXING
 				break;
 			}
 			let tx = self.tf.transaction(TransactionType::Write, Optimistic).await?;
+			let mut stack = TreeStack::new();
+
 			for a in drain {
-				IndexOperation::new()
-				match id {
-					Appending::Updated(id) => {
-						let key = crate::key::thing::new(&self.ns, &self.db, &self.tb, &id);
-						let val = tx.get(key).await?;
-						todo!("Add to index");
-					}
-					Appending::Removed(id) => {
-						todo!("Remove from index")
-					}
-				}
+				let rid = Thing::from((self.tb.clone(), a.id));
+				let mut io =
+					IndexOperation::new(&self.ctx, &self.ix, a.old_values, a.new_values, &rid);
+				stack.enter(|stk| io.compute(stk)).finish().await?;
 				count += 1;
 				self.set_status(BuildingStatus::Building(count)).await;
 			}

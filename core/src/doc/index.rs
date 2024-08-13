@@ -77,10 +77,10 @@ impl Document {
 /// It will return: ["Tobie", "piano"]
 async fn build_opt_values(
 	stk: &mut Stk,
-	ctx: &Context<'_>,
+	ctx: &Context,
 	opt: &Options,
 	ix: &DefineIndexStatement,
-	doc: &CursorDoc<'_>,
+	doc: &CursorDoc,
 ) -> Result<Option<Vec<Value>>, Error> {
 	if !doc.doc.as_ref().is_some() {
 		return Ok(None);
