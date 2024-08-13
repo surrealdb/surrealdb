@@ -96,7 +96,7 @@ where
 	/// Sets content of a record
 	pub fn content<D>(self, data: D) -> Content<'r, C, R>
 	where
-		D: Serialize,
+		D: Serialize + 'static,
 	{
 		Content::from_closure(self.client, || {
 			let content = to_core_value(data)?;

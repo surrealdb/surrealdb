@@ -107,6 +107,7 @@ tracing = "0.1.40"
 trice = { version = "0.4.0", optional = true }
 url = "2.5.0"
 reblessive = { version = "0.4.0", features = ["tree"] }
+serde-content = "0.1.0"
 
 [dev-dependencies]
 ciborium = "0.2.1"

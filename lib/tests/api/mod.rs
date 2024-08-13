@@ -381,7 +381,7 @@ async fn query_binds() {
 	let mut response = db
 		.query("CREATE user SET name = $name")
 		.bind(Record {
-			name: "John Doe",
+			name: "John Doe".to_owned(),
 		})
 		.await
 		.unwrap();
@@ -463,14 +463,14 @@ async fn create_record_no_id_with_content() {
 	let _: Vec<ApiRecordId> = db
 		.create("user")
 		.content(Record {
-			name: "John Doe",
+			name: "John Doe".to_owned(),
 		})
 		.await
 		.unwrap();
 	let _: Value = db
 		.create(Resource::from("user"))
 		.content(Record {
-			name: "John Doe",
+			name: "John Doe".to_owned(),
 		})
 		.await
 		.unwrap();
@@ -484,7 +484,7 @@ async fn create_record_with_id_with_content() {
 	let record: Option<ApiRecordId> = db
 		.create(("user", "john"))
 		.content(Record {
-			name: "John Doe",
+			name: "John Doe".to_owned(),
 		})
 		.await
 		.unwrap();
@@ -492,7 +492,7 @@ async fn create_record_with_id_with_content() {
 	let value: Value = db
 		.create(Resource::from("user:jane".parse::<RecordId>().unwrap()))
 		.content(Record {
-			name: "Jane Doe",
+			name: "Jane Doe".to_owned(),
 		})
 		.await
 		.unwrap();
@@ -810,7 +810,7 @@ async fn update_table_with_content() {
 	let users: Vec<RecordBuf> = db
 		.update(table)
 		.content(Record {
-			name: "Doe",
+			name: "Doe".to_owned(),
 		})
 		.await
 		.unwrap();
@@ -855,7 +855,7 @@ async fn update_record_range_with_content() {
 		.update(table)
 		.range("jane".."zoey")
 		.content(Record {
-			name: "Doe",
+			name: "Doe".to_owned(),
 		})
 		.await
 		.unwrap();
@@ -905,7 +905,7 @@ async fn update_record_id_with_content() {
 	let user: Option<RecordName> = db
 		.create(record_id)
 		.content(Record {
-			name: "Jane Doe",
+			name: "Jane Doe".to_owned(),
 		})
 		.await
 		.unwrap();
@@ -913,7 +913,7 @@ async fn update_record_id_with_content() {
 	let user: Option<RecordName> = db
 		.update(record_id)
 		.content(Record {
-			name: "John Doe",
+			name: "John Doe".to_owned(),
 		})
 		.await
 		.unwrap();
@@ -1116,7 +1116,7 @@ async fn changefeed() {
 	let users: Vec<RecordBuf> = db
 		.update(table)
 		.content(Record {
-			name: "Doe",
+			name: "Doe".to_owned(),
 		})
 		.await
 		.unwrap();

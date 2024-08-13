@@ -1,6 +1,5 @@
 //! Methods to use when interacting with a SurrealDB instance
 use self::query::ValidQuery;
-use crate::api::err::Error;
 use crate::api::opt;
 use crate::api::opt::auth;
 use crate::api::opt::auth::Credentials;
@@ -20,7 +19,7 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::OnceLock;
 use std::time::Duration;
-use surrealdb_core::sql::{to_value as to_core_value, Value as CoreValue};
+use surrealdb_core::sql::to_value as to_core_value;
 
 pub(crate) mod live;
 pub(crate) mod query;
@@ -77,6 +76,7 @@ pub use patch::Patch;
 pub use query::Query;
 pub use query::QueryStream;
 pub use select::Select;
+use serde_content::Serializer;
 pub use set::Set;
 pub use signin::Signin;
 pub use signup::Signup;
@@ -323,7 +323,7 @@ where
 	/// # Ok(())
 	/// # }
 	/// ```
-	pub fn set(&self, key: impl Into<String>, value: impl Serialize) -> Set<C> {
+	pub fn set(&self, key: impl Into<String>, value: impl Serialize + 'static) -> Set<C> {
 		Set {
 			client: Cow::Borrowed(self),
 			key: key.into(),
@@ -425,16 +425,7 @@ where
 	pub fn signup<R>(&self, credentials: impl Credentials<auth::Signup, R>) -> Signup<C, R> {
 		Signup {
 			client: Cow::Borrowed(self),
-			credentials: to_core_value(credentials).map_err(Into::into).and_then(|x| {
-				if let CoreValue::Object(x) = x {
-					Ok(x)
-				} else {
-					Err(Error::InternalError(
-						"credentials did not serialize to an object".to_string(),
-					)
-					.into())
-				}
-			}),
+			credentials: Serializer::new().serialize(credentials),
 			response_type: PhantomData,
 		}
 	}
@@ -553,16 +544,7 @@ where
 	pub fn signin<R>(&self, credentials: impl Credentials<auth::Signin, R>) -> Signin<C, R> {
 		Signin {
 			client: Cow::Borrowed(self),
-			credentials: to_core_value(credentials).map_err(Into::into).and_then(|x| {
-				if let CoreValue::Object(x) = x {
-					Ok(x)
-				} else {
-					Err(Error::InternalError(
-						"credentials did not serialize to an object".to_string(),
-					)
-					.into())
-				}
-			}),
+			credentials: Serializer::new().serialize(credentials),
 			response_type: PhantomData,
 		}
 	}

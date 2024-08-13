@@ -24,8 +24,9 @@ pub fn from_value<T: DeserializeOwned>(value: Value) -> Result<T, Error> {
 	Ok(surrealdb_core::sql::from_value(value.0)?)
 }
 
-pub fn to_value<T: Serialize>(value: &T) -> Result<Value, Error> {
-	Ok(Value(surrealdb_core::sql::to_value(value)?))
+pub fn to_value<T: Serialize + 'static>(value: T) -> Result<Value, Error> {
+	let v = surrealdb_core::sql::to_value(value)?;
+	Ok(Value(v))
 }
 
 // Keeping bytes implementation minimal since it might be a good idea to use bytes crate here
@@ -356,16 +357,11 @@ pub struct Notification<R> {
 }
 
 impl Notification<CoreValue> {
-	pub fn map_deserialize<R>(self) -> Result<Notification<R>, crate::api::Error>
+	pub fn map_deserialize<R>(self) -> Result<Notification<R>, crate::error::Db>
 	where
 		R: DeserializeOwned,
 	{
-		let data = surrealdb_core::sql::from_value(self.data).map_err(|e| {
-			crate::api::Error::FromValue {
-				value: Value::from_inner(e.value),
-				error: e.error,
-			}
-		})?;
+		let data = surrealdb_core::sql::from_value(self.data)?;
 		Ok(Notification {
 			query_id: self.query_id,
 			action: self.action,

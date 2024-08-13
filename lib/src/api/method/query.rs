@@ -271,7 +271,7 @@ where
 	/// # Ok(())
 	/// # }
 	/// ```
-	pub fn bind(self, bindings: impl Serialize) -> Self {
+	pub fn bind(self, bindings: impl Serialize + 'static) -> Self {
 		self.map_valid(move |mut valid| {
 			let bindings = to_core_value(bindings)?;
 			match bindings {

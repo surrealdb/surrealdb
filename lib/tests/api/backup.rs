@@ -13,7 +13,7 @@ async fn export_import() {
 		let _: Vec<ApiRecordId> = db
 			.create("user")
 			.content(Record {
-				name: &format!("User {i}"),
+				name: format!("User {i}"),
 			})
 			.await
 			.unwrap();

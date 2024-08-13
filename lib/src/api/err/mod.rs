@@ -2,10 +2,7 @@ use crate::{api::Response, Value};
 use serde::Serialize;
 use std::path::PathBuf;
 use std::{convert::Infallible, io};
-use surrealdb_core::{
-	dbs::capabilities::{ParseFuncTargetError, ParseNetTargetError},
-	sql::FromValueError,
-};
+use surrealdb_core::dbs::capabilities::{ParseFuncTargetError, ParseNetTargetError};
 use thiserror::Error;
 
 /// An error originating from a remote SurrealDB database
@@ -324,14 +321,5 @@ impl Serialize for Error {
 		S: serde::Serializer,
 	{
 		serializer.serialize_str(self.to_string().as_str())
-	}
-}
-
-impl From<FromValueError> for crate::Error {
-	fn from(error: FromValueError) -> Self {
-		Self::Api(Error::FromValue {
-			value: Value::from_inner(error.value),
-			error: error.error,
-		})
 	}
 }

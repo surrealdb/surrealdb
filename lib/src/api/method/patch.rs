@@ -8,11 +8,11 @@ use crate::method::OnceLockExt;
 use crate::Surreal;
 use crate::Value;
 use serde::de::DeserializeOwned;
+use serde_content::Value as Content;
 use std::borrow::Cow;
 use std::future::IntoFuture;
 use std::marker::PhantomData;
-use std::result::Result as StdResult;
-use surrealdb_core::sql::Value as CoreValue;
+use surrealdb_core::sql::{to_value as to_core_value, Value as CoreValue};
 
 /// A patch future
 #[derive(Debug)]
@@ -20,7 +20,7 @@ use surrealdb_core::sql::Value as CoreValue;
 pub struct Patch<'r, C: Connection, R> {
 	pub(super) client: Cow<'r, Surreal<C>>,
 	pub(super) resource: Result<Resource>,
-	pub(super) patches: Vec<StdResult<CoreValue, crate::err::Error>>,
+	pub(super) patches: Vec<serde_content::Result<Content<'static>>>,
 	pub(super) response_type: PhantomData<R>,
 }
 
@@ -49,7 +49,9 @@ macro_rules! into_future {
 			Box::pin(async move {
 				let mut vec = Vec::with_capacity(patches.len());
 				for result in patches {
-					vec.push(result?);
+					let content = result.map_err(crate::error::Db::from)?;
+					let value = to_core_value(content)?;
+					vec.push(value);
 				}
 				let patches = CoreValue::from(vec);
 				let router = client.router.extract()?;

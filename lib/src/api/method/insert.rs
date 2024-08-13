@@ -115,7 +115,7 @@ where
 	/// Specifies the data to insert into the table
 	pub fn content<D>(self, data: D) -> Content<'r, C, R>
 	where
-		D: Serialize,
+		D: Serialize + 'static,
 	{
 		Content::from_closure(self.client, || {
 			let mut data = to_core_value(data)?;

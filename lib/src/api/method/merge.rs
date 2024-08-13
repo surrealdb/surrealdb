@@ -66,7 +66,7 @@ macro_rules! into_future {
 impl<'r, Client, D> IntoFuture for Merge<'r, Client, D, Value>
 where
 	Client: Connection,
-	D: Serialize,
+	D: Serialize + 'static,
 {
 	type Output = Result<Value>;
 	type IntoFuture = BoxFuture<'r, Self::Output>;
@@ -77,7 +77,7 @@ where
 impl<'r, Client, D, R> IntoFuture for Merge<'r, Client, D, Option<R>>
 where
 	Client: Connection,
-	D: Serialize,
+	D: Serialize + 'static,
 	R: DeserializeOwned,
 {
 	type Output = Result<Option<R>>;
@@ -89,7 +89,7 @@ where
 impl<'r, Client, D, R> IntoFuture for Merge<'r, Client, D, Vec<R>>
 where
 	Client: Connection,
-	D: Serialize,
+	D: Serialize + 'static,
 	R: DeserializeOwned,
 {
 	type Output = Result<Vec<R>>;

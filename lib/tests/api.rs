@@ -41,8 +41,8 @@ mod api_integration {
 	const TICK_INTERVAL: Duration = Duration::from_secs(1);
 
 	#[derive(Debug, Serialize)]
-	struct Record<'a> {
-		name: &'a str,
+	struct Record {
+		name: String,
 	}
 
 	#[derive(Debug, Clone, Deserialize, PartialEq, PartialOrd)]
