@@ -338,8 +338,8 @@ async fn create_relate_select() -> Result<(), Error> {
 	res.remove(0);
 	match res.remove(0).result {
 		Err(Error::InvalidFetch {
-			value: Value::Number(Number::Float(1.0)),
-		}) => {}
+			value,
+		}) if value == Value::Number(Number::Float(1.0)) => {}
 		found => panic!("Expected Err(Error::InvalidFetch), found '{found:?}'"),
 	};
 	assert_eq!(tmp, val);

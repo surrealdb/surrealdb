@@ -5773,9 +5773,9 @@ checksum = "7da8b5736845d9f2fcb837ea5d9e2628564b3b043a70948a3f0b778838c5fb4f"
 
 [[package]]
 name = "subtle"
-version = "2.5.0"
+version = "2.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "81cdd64d312baedb58e21336b31bc043b77e01cc99033ce76ef539f78e965ebc"
+checksum = "13c2bddecc57b384dee18652358fb23172facb8a2c51ccc10d74c157bdea3292"
 
 [[package]]
 name = "surreal"
@@ -5981,6 +5981,7 @@ dependencies = [
  "sha2",
  "snap",
  "storekey",
+ "subtle",
  "surrealdb-derive",
  "surrealdb-tikv-client",
  "surrealkv",
@@ -6046,9 +6047,9 @@ dependencies = [
 
 [[package]]
 name = "surrealkv"
-version = "0.3.1"
+version = "0.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "85cbebbb653d3a28eb67d371a1f2d09954e09834ef51cd6bab79d7958c95ca81"
+checksum = "079b1114b1bbe22e2738f0c6fccc0109d06be9be7f48d2e38d143baf935358e9"
 dependencies = [
  "ahash 0.8.11",
  "async-channel 2.2.0",

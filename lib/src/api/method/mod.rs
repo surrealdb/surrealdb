@@ -109,7 +109,7 @@ pub struct Live;
 
 /// Responses returned with statistics
 #[derive(Debug)]
-pub struct WithStats<T>(T);
+pub struct WithStats<T>(pub T);
 
 impl<C> Surreal<C>
 where

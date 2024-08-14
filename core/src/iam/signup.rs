@@ -57,14 +57,14 @@ pub async fn db_access(
 		Ok(av) => {
 			// Check the access method type
 			// Currently, only the record access method supports signup
-			match av.kind.clone() {
+			match &av.kind {
 				AccessType::Record(at) => {
 					// Check if the record access method supports issuing tokens
-					let iss = match at.jwt.issue {
+					let iss = match &at.jwt.issue {
 						Some(iss) => iss,
 						_ => return Err(Error::AccessMethodMismatch),
 					};
-					match at.signup {
+					match &at.signup {
 						// This record access allows signup
 						Some(val) => {
 							// Setup the query params
@@ -81,7 +81,7 @@ pub async fn db_access(
 										// There is a record returned
 										Some(mut rid) => {
 											// Create the authentication key
-											let key = config(iss.alg, iss.key)?;
+											let key = config(iss.alg, &iss.key)?;
 											// Create the authentication claim
 											let claims = Claims {
 												iss: Some(SERVER_NAME.to_owned()),
@@ -101,11 +101,11 @@ pub async fn db_access(
 												let mut sess =
 													Session::editor().with_ns(&ns).with_db(&db);
 												sess.rd = Some(rid.clone().into());
-												sess.tk = Some(claims.clone().into());
+												sess.tk = Some((&claims).into());
 												sess.ip.clone_from(&session.ip);
 												sess.or.clone_from(&session.or);
 												// Compute the value with the params
-												match kvs.evaluate(au.clone(), &sess, None).await {
+												match kvs.evaluate(au, &sess, None).await {
 													Ok(val) => match val.record() {
 														Some(id) => {
 															// Update rid with result from AUTHENTICATE clause
@@ -128,7 +128,7 @@ pub async fn db_access(
 											let enc =
 												encode(&Header::new(iss.alg.into()), &claims, &key);
 											// Set the authentication on the session
-											session.tk = Some(claims.into());
+											session.tk = Some((&claims).into());
 											session.ns = Some(ns.to_owned());
 											session.db = Some(db.to_owned());
 											session.ac = Some(ac.to_owned());

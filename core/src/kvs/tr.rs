@@ -111,7 +111,7 @@ impl fmt::Display for Transactor {
 }
 
 macro_rules! expand_inner {
-	( $v:expr, $arm:pat_param => $b:block $(else $else:block )? ) => {
+	( $v:expr, $arm:pat_param => $b:block ) => {
 		match $v {
 			#[cfg(feature = "kv-mem")]
 			Inner::Mem($arm) => $b,
@@ -127,19 +127,6 @@ macro_rules! expand_inner {
 			Inner::SurrealKV($arm) => $b,
 			#[allow(unreachable_patterns)]
 			_ => {
-				$(
-					#[cfg(not(any(
-						feature = "kv-mem",
-						feature = "kv-rocksdb",
-						feature = "kv-indxdb",
-						feature = "kv-tikv",
-						feature = "kv-fdb",
-						feature = "kv-surrealkv"
-					)))]
-					{
-						$else
-					}
-				)*
 				unreachable!();
 			}
 		}
@@ -161,7 +148,7 @@ impl Transactor {
 	/// production we should only log a warning.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
 	pub(crate) fn check_level(&mut self, check: Check) {
-		expand_inner!(&mut self.inner, v => { v.check_level(check) } else { let _ = check; })
+		expand_inner!(&mut self.inner, v => { v.check_level(check) })
 	}
 
 	/// Check if transaction is finished.
@@ -198,7 +185,7 @@ impl Transactor {
 		K: Into<Key> + Debug,
 	{
 		let key = key.into();
-		expand_inner!(&mut self.inner, v => { v.exists(key).await } else { let _ = key; })
+		expand_inner!(&mut self.inner, v => { v.exists(key).await })
 	}
 
 	/// Fetch a key from the datastore.
@@ -208,7 +195,7 @@ impl Transactor {
 		K: Into<Key> + Debug,
 	{
 		let key = key.into();
-		expand_inner!(&mut self.inner, v => { v.get(key).await } else { let _ = key; })
+		expand_inner!(&mut self.inner, v => { v.get(key).await })
 	}
 
 	/// Fetch many keys from the datastore.
@@ -218,7 +205,7 @@ impl Transactor {
 		K: Into<Key> + Debug,
 	{
 		let keys = keys.into_iter().map(Into::into).collect::<Vec<Key>>();
-		expand_inner!(&mut self.inner, v => { v.getm(keys).await } else { let _ = keys; })
+		expand_inner!(&mut self.inner, v => { v.getm(keys).await })
 	}
 
 	/// Retrieve a specific range of keys from the datastore.
@@ -231,7 +218,7 @@ impl Transactor {
 	{
 		let beg: Key = rng.start.into();
 		let end: Key = rng.end.into();
-		expand_inner!(&mut self.inner, v => { v.getr(beg..end).await } else { let _ = beg; let _ = end; })
+		expand_inner!(&mut self.inner, v => { v.getr(beg..end).await })
 	}
 
 	/// Retrieve a specific prefixed range of keys from the datastore.
@@ -243,7 +230,7 @@ impl Transactor {
 		K: Into<Key> + Debug,
 	{
 		let key: Key = key.into();
-		expand_inner!(&mut self.inner, v => { v.getp(key).await } else { let _ = key; })
+		expand_inner!(&mut self.inner, v => { v.getp(key).await })
 	}
 
 	/// Insert or update a key in the datastore.
@@ -254,7 +241,7 @@ impl Transactor {
 		V: Into<Val> + Debug,
 	{
 		let key = key.into();
-		expand_inner!(&mut self.inner, v => { v.set(key, val).await } else { let _ = key; })
+		expand_inner!(&mut self.inner, v => { v.set(key, val).await })
 	}
 
 	/// Insert a key if it doesn't exist in the datastore.
@@ -265,7 +252,7 @@ impl Transactor {
 		V: Into<Val> + Debug,
 	{
 		let key = key.into();
-		expand_inner!(&mut self.inner, v => { v.put(key, val).await } else { let _ = key; })
+		expand_inner!(&mut self.inner, v => { v.put(key, val).await })
 	}
 
 	/// Update a key in the datastore if the current value matches a condition.
@@ -276,7 +263,7 @@ impl Transactor {
 		V: Into<Val> + Debug,
 	{
 		let key = key.into();
-		expand_inner!(&mut self.inner, v => { v.putc(key, val, chk).await } else { let _ = key; })
+		expand_inner!(&mut self.inner, v => { v.putc(key, val, chk).await })
 	}
 
 	/// Delete a key from the datastore.
@@ -297,7 +284,7 @@ impl Transactor {
 		V: Into<Val> + Debug,
 	{
 		let key = key.into();
-		expand_inner!(&mut self.inner, v => { v.delc(key, chk).await } else { let _ = key; })
+		expand_inner!(&mut self.inner, v => { v.delc(key, chk).await })
 	}
 
 	/// Delete a range of keys from the datastore.
@@ -310,7 +297,7 @@ impl Transactor {
 	{
 		let beg: Key = rng.start.into();
 		let end: Key = rng.end.into();
-		expand_inner!(&mut self.inner, v => { v.delr(beg..end).await } else { let _ = (beg,end); })
+		expand_inner!(&mut self.inner, v => { v.delr(beg..end).await })
 	}
 
 	/// Delete a prefixed range of keys from the datastore.
@@ -335,20 +322,25 @@ impl Transactor {
 	{
 		let beg: Key = rng.start.into();
 		let end: Key = rng.end.into();
-		expand_inner!(&mut self.inner, v => { v.keys(beg..end, limit).await } else { let _ = (beg,end); })
+		expand_inner!(&mut self.inner, v => { v.keys(beg..end, limit).await })
 	}
 
 	/// Retrieve a specific range of keys from the datastore.
 	///
 	/// This function fetches the full range of key-value pairs, in a single request to the underlying datastore.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
-	pub async fn scan<K>(&mut self, rng: Range<K>, limit: u32) -> Result<Vec<(Key, Val)>, Error>
+	pub async fn scan<K>(
+		&mut self,
+		rng: Range<K>,
+		limit: u32,
+		version: Option<u64>,
+	) -> Result<Vec<(Key, Val)>, Error>
 	where
 		K: Into<Key> + Debug,
 	{
 		let beg: Key = rng.start.into();
 		let end: Key = rng.end.into();
-		expand_inner!(&mut self.inner, v => { v.scan(beg..end, limit).await } else { let _ = (beg,end); })
+		expand_inner!(&mut self.inner, v => { v.scan(beg..end, limit, version).await })
 	}
 
 	/// Retrieve a batched scan over a specific range of keys in the datastore.
@@ -366,7 +358,7 @@ impl Transactor {
 	{
 		let beg: Key = rng.start.into();
 		let end: Key = rng.end.into();
-		expand_inner!(&mut self.inner, v => { v.batch(beg..end, batch, values).await } else { let _ = (values, beg,end);  })
+		expand_inner!(&mut self.inner, v => { v.batch(beg..end, batch, values).await })
 	}
 
 	/// Obtain a new change timestamp for a key
