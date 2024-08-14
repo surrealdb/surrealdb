@@ -1,3 +1,4 @@
+use crate::cnf::ARRAY_ALLOCATION_LIMIT;
 use crate::err::Error;
 use crate::sql::array::Array;
 use crate::sql::array::Clump;
@@ -18,11 +19,10 @@ use std::mem::size_of_val;
 
 /// Returns an error if an array of this length is too much to allocate.
 fn limit(name: &str, n: usize) -> Result<(), Error> {
-	const LIMIT: usize = 2usize.pow(20);
-	if n > LIMIT {
+	if n > *ARRAY_ALLOCATION_LIMIT {
 		Err(Error::InvalidArguments {
 			name: name.to_owned(),
-			message: format!("Output must not exceed {LIMIT} bytes."),
+			message: format!("Output must not exceed {} bytes.", *ARRAY_ALLOCATION_LIMIT),
 		})
 	} else {
 		Ok(())
