@@ -421,6 +421,7 @@
 "vector::multiply("
 "vector::normalize("
 "vector::project("
+"vector::scale("
 "vector::subtract("
 "vector::distance::chebyshev("
 "vector::distance::euclidean("
