@@ -605,6 +605,16 @@ RETURN array::logical_xor([0, 1], []);"#,
 }
 
 #[tokio::test]
+async fn function_array_map() -> Result<(), Error> {
+	let sql = r#"
+		RETURN array::map([1,2,3], |$n, $i| $n + $i);
+	"#;
+	//
+	Test::new(sql).await?.expect_val("[1, 3, 5]")?;
+	Ok(())
+}
+
+#[tokio::test]
 async fn function_array_matches() -> Result<(), Error> {
 	test_queries(
 		r#"RETURN array::matches([0, 1, 2], 1);
