@@ -63,7 +63,7 @@ pub static EXPERIMENTAL_BEARER_ACCESS: Lazy<bool> = Lazy::new(|| true);
 /// Forward all signup/signin/authenticate query errors to a client performing authentication. Do not use in production.
 pub static ARRAY_ALLOCATION_LIMIT: Lazy<usize> = once_cell::sync::Lazy::new(|| {
 	let n = std::env::var("SURREAL_ARRAY_ALLOCATION_LIMIT")
-		.and_then(|s| Ok(s.parse::<u32>().unwrap_or(20)))
+		.map(|s| s.parse::<u32>().unwrap_or(20))
 		.unwrap_or(20);
-	2usize.pow(n) as usize
+	2usize.pow(n)
 });
