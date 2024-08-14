@@ -151,6 +151,11 @@ impl Value {
 						Ok(())
 					}
 				},
+				// Current value at path is a record
+				Value::Thing(_) => {
+					*self = Value::base();
+					stk.run(|stk| self.set(stk, ctx, opt, path, val)).await
+				}
 				// Current value at path is empty
 				Value::Null => {
 					*self = Value::base();
