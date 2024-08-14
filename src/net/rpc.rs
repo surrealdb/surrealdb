@@ -118,6 +118,7 @@ async fn post_handler(
 	if fmt == Format::Unsupported || fmt == Format::None {
 		return Err(Error::InvalidType);
 	}
+	error!(?fmt, "recieved request");
 
 	let mut rpc_ctx = PostRpcContext::new(&state.datastore, session, BTreeMap::new());
 

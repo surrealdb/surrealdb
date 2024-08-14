@@ -266,6 +266,9 @@ async fn router_handle_response(
 	state: &mut RouterState,
 	endpoint: &Endpoint,
 ) -> HandleResult {
+	if let Message::Binary(b) = &response {
+		error!(?b);
+	}
 	match Response::try_from(&response, endpoint.supports_revision) {
 		Ok(option) => {
 			// We are only interested in responses that are not empty

@@ -25,16 +25,18 @@ use crate::headers::AUTH_NS;
 // use crate::method::Stats;
 use crate::opt::IntoEndpoint;
 // use crate::sql::from_value;
-use crate::sql::serde::deserialize;
 use crate::sql::Value;
 // use futures::TryStreamExt;
+use crate::api::engine::remote::{deserialize, serialize};
 use indexmap::IndexMap;
 use reqwest::header::HeaderMap;
 use reqwest::header::HeaderValue;
 use reqwest::header::ACCEPT;
+use reqwest::header::CONTENT_TYPE;
 use reqwest::RequestBuilder;
 use serde::Deserialize;
 use serde::Serialize;
+use std::io::Read;
 use std::marker::PhantomData;
 // use std::mem;
 // use surrealdb_core::sql::statements::CreateStatement;
@@ -60,8 +62,6 @@ use url::Url;
 // use tokio_util::compat::FuturesAsyncReadCompatExt;
 // #[cfg(target_arch = "wasm32")]
 // use wasm_bindgen_futures::spawn_local;
-
-use super::serialize;
 
 // const SQL_PATH: &str = "sql";
 const RPC_PATH: &str = "rpc";
@@ -115,6 +115,7 @@ impl Surreal<Client> {
 pub(crate) fn default_headers() -> HeaderMap {
 	let mut headers = HeaderMap::new();
 	headers.insert(ACCEPT, HeaderValue::from_static("application/surrealdb"));
+	headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/surrealdb"));
 	headers
 }
 
@@ -370,17 +371,23 @@ async fn router(
 	auth: &mut Option<Auth>,
 ) -> Result<DbResponse> {
 	if let Some(req) = command.into_router_request(None) {
+		error!(?req, "sending");
 		let url = base_url.join(RPC_PATH).unwrap();
 		let http_req =
 			client.post(url).headers(headers.clone()).auth(auth).body(serialize(&req, false)?);
 		let response = http_req.send().await?.error_for_status()?;
+		error!(?response, "got response");
 		let bytes = response.bytes().await?;
-		let response =
-			deserialize::<Response>(&bytes).map_err(|error| Error::ResponseFromBinary {
-				binary: bytes.to_vec(),
-				error,
-			})?;
-		return DbResponse::from(response.result);
+		error!(bytes = ?&bytes[..], "got response");
+
+		let response: Response = deserialize(&mut &bytes[..], true)?;
+		// if let Ok(res) = deserialize(&mut &bytes[..], false) else {
+
+		// 			warn!("Failed to deserialise message; {error:?}");
+		// };
+		// return DbResponse::from(response.result);
+		error!(?response);
+		// return Ok(DbResponse::Other(response));
 	}
 	todo!()
 
