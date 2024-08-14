@@ -360,8 +360,6 @@ pub async fn generate_schema(
 
 					match get_record(kvs, &sess3, &thing).await? {
 						SqlValue::Object(o) => {
-							// let val = sql_value_to_gql_value(obj)
-							// 	.map_err(|_| "SQL to GQL translation failed")?;
 							let out = FieldValue::owned_any(o).with_type(thing.tb.to_string());
 
 							Ok(Some(out))
