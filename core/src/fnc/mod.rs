@@ -27,6 +27,7 @@ pub mod rand;
 pub mod script;
 pub mod search;
 pub mod session;
+pub mod shared;
 pub mod sleep;
 pub mod string;
 pub mod time;
@@ -698,6 +699,8 @@ pub async fn idiom(
 				"to_uuid" => r#type::uuid,
 				//
 				"repeat" => array::repeat,
+				//
+				"chain" => shared::chain((stk, ctx, opt, doc)).await,
 			)
 		}
 		v => v,
