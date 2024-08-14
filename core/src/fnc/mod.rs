@@ -789,6 +789,7 @@ mod tests {
 
 	#[tokio::test]
 	async fn implementations_are_present() {
+		#[cfg(all(feature = "scripting", feature = "kv-mem"))]
 		let excluded_from_scripting = &["array::map"];
 
 		// Accumulate and display all problems at once to avoid a test -> fix -> test -> fix cycle.
@@ -798,7 +799,7 @@ mod tests {
 		let fnc_mod = include_str!("mod.rs");
 
 		// Patch out idiom methods
-		let re = Regex::new(r"(?ms)pub fn idiom\(.*}\n+///").unwrap();
+		let re = Regex::new(r"(?ms)pub async fn idiom\(.*}\n+///").unwrap();
 		let fnc_no_idiom = re.replace(fnc_mod, "");
 
 		for line in fnc_no_idiom.lines() {
