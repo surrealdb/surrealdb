@@ -547,8 +547,7 @@ mod tests {
 
 	#[test]
 	pub fn execute_futures() {
-		let mut opts = Options::default()
-			.with_futures(false);
+		let mut opts = Options::default().with_futures(false);
 
 		// Futures should be disabled
 		assert!(matches!(opts.futures, Futures::Disabled));
