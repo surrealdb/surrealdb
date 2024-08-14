@@ -14,7 +14,7 @@ use serde_json::ser::PrettyFormatter;
 use surrealdb::engine::any::{connect, IntoEndpoint};
 use surrealdb::method::{Stats, WithStats};
 use surrealdb::opt::{capabilities::Capabilities, Config};
-use surrealdb::sql::{self, Statement, Uuid as CoreUuid, Value as CoreValue};
+use surrealdb::sql::{self, Param, Statement, Uuid as CoreUuid, Value as CoreValue};
 use surrealdb::{Notification, Response, Value};
 
 #[derive(Args, Debug)]
@@ -207,7 +207,7 @@ pub async fn init(
 				}
 
 				for var in &vars {
-					query.push(Statement::Value(Value::Param(Param::from(var.as_str()))))
+					query.push(Statement::Value(CoreValue::Param(Param::from(var.as_str()))))
 				}
 
 				// Extract the namespace and database from the current prompt
