@@ -106,29 +106,37 @@ impl Value {
 							stk.run(|stk| v.get(stk, ctx, opt, doc, path.next())).await
 						}
 						Some(v) => stk.run(|stk| v.get(stk, ctx, opt, doc, path.next())).await,
-						None => Ok(Value::None),
+						None => {
+							stk.run(|stk| Value::None.get(stk, ctx, opt, doc, path.next())).await
+						}
 					},
 					Part::Graph(_) => match v.rid() {
 						Some(v) => {
 							let v = Value::Thing(v);
 							stk.run(|stk| v.get(stk, ctx, opt, doc, path)).await
 						}
-						None => Ok(Value::None),
+						None => {
+							stk.run(|stk| Value::None.get(stk, ctx, opt, doc, path.next())).await
+						}
 					},
 					Part::Field(f) => match v.get(f.as_str()) {
 						Some(v) => stk.run(|stk| v.get(stk, ctx, opt, doc, path.next())).await,
-						None => Ok(Value::None),
+						None => {
+							stk.run(|stk| Value::None.get(stk, ctx, opt, doc, path.next())).await
+						}
 					},
 					Part::Index(i) => match v.get(&i.to_string()) {
 						Some(v) => stk.run(|stk| v.get(stk, ctx, opt, doc, path.next())).await,
-						None => Ok(Value::None),
+						None => {
+							stk.run(|stk| Value::None.get(stk, ctx, opt, doc, path.next())).await
+						}
 					},
 					Part::Value(x) => match stk.run(|stk| x.compute(stk, ctx, opt, doc)).await? {
 						Value::Strand(f) => match v.get(f.as_str()) {
 							Some(v) => stk.run(|stk| v.get(stk, ctx, opt, doc, path.next())).await,
 							None => Ok(Value::None),
 						},
-						_ => Ok(Value::None),
+						_ => stk.run(|stk| Value::None.get(stk, ctx, opt, doc, path.next())).await,
 					},
 					Part::All => stk.run(|stk| self.get(stk, ctx, opt, doc, path.next())).await,
 					Part::Destructure(p) => {
@@ -189,15 +197,21 @@ impl Value {
 					}
 					Part::First => match v.first() {
 						Some(v) => stk.run(|stk| v.get(stk, ctx, opt, doc, path.next())).await,
-						None => Ok(Value::None),
+						None => {
+							stk.run(|stk| Value::None.get(stk, ctx, opt, doc, path.next())).await
+						}
 					},
 					Part::Last => match v.last() {
 						Some(v) => stk.run(|stk| v.get(stk, ctx, opt, doc, path.next())).await,
-						None => Ok(Value::None),
+						None => {
+							stk.run(|stk| Value::None.get(stk, ctx, opt, doc, path.next())).await
+						}
 					},
 					Part::Index(i) => match v.get(i.to_usize()) {
 						Some(v) => stk.run(|stk| v.get(stk, ctx, opt, doc, path.next())).await,
-						None => Ok(Value::None),
+						None => {
+							stk.run(|stk| Value::None.get(stk, ctx, opt, doc, path.next())).await
+						}
 					},
 					Part::Where(w) => {
 						let mut a = Vec::new();
@@ -219,7 +233,7 @@ impl Value {
 							Some(v) => stk.run(|stk| v.get(stk, ctx, opt, doc, path.next())).await,
 							None => Ok(Value::None),
 						},
-						_ => Ok(Value::None),
+						_ => stk.run(|stk| Value::None.get(stk, ctx, opt, doc, path.next())).await,
 					},
 					Part::Method(name, args) => {
 						let v = stk
@@ -345,6 +359,15 @@ impl Value {
 				}
 				v => {
 					match p {
+						Part::Optional => match &self {
+							Value::None => Ok(Value::None),
+							_ => {
+								stk.run(|stk| {
+									Value::None.get(stk, ctx, opt, doc, path.next_method())
+								})
+								.await
+							}
+						},
 						Part::Flatten => {
 							stk.run(|stk| v.get(stk, ctx, opt, None, path.next())).await
 						}
