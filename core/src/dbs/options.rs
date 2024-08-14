@@ -544,4 +544,22 @@ mod tests {
 				.unwrap();
 		}
 	}
+
+	#[test]
+	pub fn execute_futures() {
+		let mut opts = Options::default()
+			.with_futures(false);
+
+		// Futures should be disabled
+		assert!(matches!(opts.futures, Futures::Disabled));
+
+		// Allow setting to true
+		opts = opts.with_futures(true);
+		assert!(matches!(opts.futures, Futures::Enabled));
+
+		// Set to never and disallow setting to true
+		opts = opts.with_futures_never();
+		opts = opts.with_futures(true);
+		assert!(matches!(opts.futures, Futures::Never));
+	}
 }
