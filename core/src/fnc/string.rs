@@ -1,3 +1,4 @@
+use crate::cnf::FNC_ALLOCATION_LIMIT;
 use crate::err::Error;
 use crate::fnc::util::string;
 use crate::sql::value::Value;
@@ -5,11 +6,10 @@ use crate::sql::Regex;
 
 /// Returns `true` if a string of this length is too much to allocate.
 fn limit(name: &str, n: usize) -> Result<(), Error> {
-	const LIMIT: usize = 2usize.pow(20);
-	if n > LIMIT {
+	if n > *FNC_ALLOCATION_LIMIT {
 		Err(Error::InvalidArguments {
 			name: name.to_owned(),
-			message: format!("Output must not exceed {LIMIT} bytes."),
+			message: format!("Output must not exceed {} bytes.", *FNC_ALLOCATION_LIMIT),
 		})
 	} else {
 		Ok(())

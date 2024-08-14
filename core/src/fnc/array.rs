@@ -1,4 +1,4 @@
-use crate::cnf::ARRAY_ALLOCATION_LIMIT;
+use crate::cnf::FNC_ALLOCATION_LIMIT;
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
@@ -25,10 +25,10 @@ use std::mem::size_of_val;
 
 /// Returns an error if an array of this length is too much to allocate.
 fn limit(name: &str, n: usize) -> Result<(), Error> {
-	if n > *ARRAY_ALLOCATION_LIMIT {
+	if n > *FNC_ALLOCATION_LIMIT {
 		Err(Error::InvalidArguments {
 			name: name.to_owned(),
-			message: format!("Output must not exceed {} bytes.", *ARRAY_ALLOCATION_LIMIT),
+			message: format!("Output must not exceed {} bytes.", *FNC_ALLOCATION_LIMIT),
 		})
 	} else {
 		Ok(())
