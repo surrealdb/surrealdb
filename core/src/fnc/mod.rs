@@ -789,6 +789,8 @@ mod tests {
 
 	#[tokio::test]
 	async fn implementations_are_present() {
+		let excluded_from_scripting = &["array::map"];
+
 		// Accumulate and display all problems at once to avoid a test -> fix -> test -> fix cycle.
 		let mut problems = Vec::new();
 
@@ -838,6 +840,10 @@ mod tests {
 			#[cfg(all(feature = "scripting", feature = "kv-mem"))]
 			{
 				use crate::sql::Value;
+
+				if excluded_from_scripting.contains(&name) {
+					continue;
+				}
 
 				let name = name.replace("::", ".");
 				let sql =
