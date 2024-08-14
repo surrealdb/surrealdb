@@ -199,7 +199,7 @@ pub struct MethodTarget {
 // impl display
 impl fmt::Display for MethodTarget {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-		write!(f, "{}", self)
+		write!(f, "{}", self.method.to_str())
 	}
 }
 
