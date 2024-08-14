@@ -1,6 +1,8 @@
 use crate::err::Error;
 use crate::sql::value::Value;
-use crate::sql::{Array, Bytes, Datetime, Duration, Kind, Number, Object, Regex, Strand, Thing};
+use crate::sql::{
+	Array, Bytes, Closure, Datetime, Duration, Kind, Number, Object, Regex, Strand, Thing,
+};
 use std::vec::IntoIter;
 
 /// Implemented by types that are commonly used, in a certain way, as arguments.
@@ -11,6 +13,12 @@ pub trait FromArg: Sized {
 impl FromArg for Value {
 	fn from_arg(arg: Value) -> Result<Self, Error> {
 		Ok(arg)
+	}
+}
+
+impl FromArg for Closure {
+	fn from_arg(arg: Value) -> Result<Self, Error> {
+		arg.coerce_to_function()
 	}
 }
 

@@ -52,8 +52,9 @@ pub async fn run(
 		|| name.starts_with("crypto::bcrypt")
 		|| name.starts_with("crypto::pbkdf2")
 		|| name.starts_with("crypto::scrypt")
+		|| name.starts_with("array::map")
 	{
-		stk.run(|stk| asynchronous(stk, ctx, Some(opt), doc, name, args)).await
+		stk.run(|stk| asynchronous(stk, ctx, opt, doc, name, args)).await
 	} else {
 		synchronous(ctx, doc, name, args)
 	}
@@ -414,8 +415,10 @@ pub fn synchronous(
 }
 
 /// Attempts to run any synchronous function.
-pub fn idiom(
+pub async fn idiom(
+	stk: &mut Stk,
 	ctx: &Context<'_>,
+	opt: &Options,
 	doc: Option<&CursorDoc<'_>>,
 	value: Value,
 	name: &str,
@@ -459,6 +462,7 @@ pub fn idiom(
 				"logical_or" => array::logical_or,
 				"logical_xor" => array::logical_xor,
 				"matches" => array::matches,
+				"map" => array::map((stk, ctx, opt, doc)).await,
 				"max" => array::max,
 				"min" => array::min,
 				"pop" => array::pop,
@@ -704,7 +708,7 @@ pub fn idiom(
 pub async fn asynchronous(
 	stk: &mut Stk,
 	ctx: &Context<'_>,
-	opt: Option<&Options>,
+	opt: &Options,
 	doc: Option<&CursorDoc<'_>>,
 	name: &str,
 	args: Vec<Value>,
@@ -729,6 +733,8 @@ pub async fn asynchronous(
 		name,
 		args,
 		"no such builtin function found",
+		"array::map" => array::map((stk, ctx, opt, doc)).await,
+		//
 		"crypto::argon2::compare" => (cpu_intensive) crypto::argon2::cmp.await,
 		"crypto::argon2::generate" => (cpu_intensive) crypto::argon2::gen.await,
 		"crypto::bcrypt::compare" => (cpu_intensive) crypto::bcrypt::cmp.await,
@@ -745,15 +751,15 @@ pub async fn asynchronous(
 		"http::patch" => http::patch(ctx).await,
 		"http::delete" => http::delete(ctx).await,
 		//
-		"search::analyze" => search::analyze((stk,ctx, opt)).await,
+		"search::analyze" => search::analyze((stk,ctx, Some(opt))).await,
 		"search::score" => search::score((ctx, doc)).await,
 		"search::highlight" => search::highlight((ctx, doc)).await,
 		"search::offsets" => search::offsets((ctx, doc)).await,
 		//
 		"sleep" => sleep::sleep(ctx).await,
 		//
-		"type::field" => r#type::field((stk,ctx, opt, doc)).await,
-		"type::fields" => r#type::fields((stk,ctx, opt, doc)).await,
+		"type::field" => r#type::field((stk,ctx, Some(opt), doc)).await,
+		"type::fields" => r#type::fields((stk,ctx, Some(opt), doc)).await,
 	)
 }
 

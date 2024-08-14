@@ -1,4 +1,7 @@
 use crate::cnf::ARRAY_ALLOCATION_LIMIT;
+use crate::ctx::Context;
+use crate::dbs::Options;
+use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::sql::array::Array;
 use crate::sql::array::Clump;
@@ -13,8 +16,11 @@ use crate::sql::array::Union;
 use crate::sql::array::Uniq;
 use crate::sql::array::Windows;
 use crate::sql::value::Value;
+use crate::sql::Closure;
+use crate::sql::Function;
 
 use rand::prelude::SliceRandom;
+use reblessive::tree::Stk;
 use std::mem::size_of_val;
 
 /// Returns an error if an array of this length is too much to allocate.
@@ -344,6 +350,20 @@ pub fn logical_xor((lh, rh): (Array, Array)) -> Result<Value, Error> {
 		result_arr.push(r);
 	}
 	Ok(result_arr.into())
+}
+
+pub async fn map(
+	(stk, ctx, opt, doc): (&mut Stk, &Context<'_>, &Options, Option<&CursorDoc<'_>>),
+	(array, mapper): (Array, Closure),
+) -> Result<Value, Error> {
+	let mut array = array;
+	for i in 0..array.len() {
+		let v = array.get(i).unwrap();
+		let fnc = Function::Anonymous(mapper.clone().into(), vec![v.to_owned(), i.into()]);
+		array[i] = fnc.compute(stk, ctx, opt, doc).await?;
+	}
+
+	Ok(array.into())
 }
 
 pub fn matches((array, compare_val): (Array, Value)) -> Result<Value, Error> {
