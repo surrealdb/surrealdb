@@ -52,8 +52,9 @@ pub async fn run(
 		|| name.starts_with("crypto::bcrypt")
 		|| name.starts_with("crypto::pbkdf2")
 		|| name.starts_with("crypto::scrypt")
+		|| name.starts_with("array::map")
 	{
-		stk.run(|stk| asynchronous(stk, ctx, Some(opt), doc, name, args)).await
+		stk.run(|stk| asynchronous(stk, ctx, opt, doc, name, args)).await
 	} else {
 		synchronous(ctx, doc, name, args)
 	}
@@ -110,6 +111,7 @@ pub fn synchronous(
 		"array::concat" => array::concat,
 		"array::difference" => array::difference,
 		"array::distinct" => array::distinct,
+		"array::fill" => array::fill,
 		"array::filter_index" => array::filter_index,
 		"array::find_index" => array::find_index,
 		"array::first" => array::first,
@@ -117,6 +119,7 @@ pub fn synchronous(
 		"array::group" => array::group,
 		"array::insert" => array::insert,
 		"array::intersect" => array::intersect,
+		"array::is_empty" => array::is_empty,
 		"array::join" => array::join,
 		"array::last" => array::last,
 		"array::len" => array::len,
@@ -129,11 +132,14 @@ pub fn synchronous(
 		"array::pop" => array::pop,
 		"array::prepend" => array::prepend,
 		"array::push" => array::push,
+		"array::range" => array::range,
 		"array::remove" => array::remove,
+		"array::repeat" => array::repeat,
 		"array::reverse" => array::reverse,
 		"array::shuffle" => array::shuffle,
 		"array::slice" => array::slice,
 		"array::sort" => array::sort,
+		"array::swap" => array::swap,
 		"array::transpose" => array::transpose,
 		"array::union" => array::union,
 		"array::sort::asc" => array::sort::asc,
@@ -409,8 +415,10 @@ pub fn synchronous(
 }
 
 /// Attempts to run any synchronous function.
-pub fn idiom(
+pub async fn idiom(
+	stk: &mut Stk,
 	ctx: &Context<'_>,
+	opt: &Options,
 	doc: Option<&CursorDoc<'_>>,
 	value: Value,
 	name: &str,
@@ -438,6 +446,7 @@ pub fn idiom(
 				"concat" => array::concat,
 				"difference" => array::difference,
 				"distinct" => array::distinct,
+				"fill" => array::fill,
 				"filter_index" => array::filter_index,
 				"find_index" => array::find_index,
 				"first" => array::first,
@@ -445,6 +454,7 @@ pub fn idiom(
 				"group" => array::group,
 				"insert" => array::insert,
 				"intersect" => array::intersect,
+				"is_empty" => array::is_empty,
 				"join" => array::join,
 				"last" => array::last,
 				"len" => array::len,
@@ -452,6 +462,7 @@ pub fn idiom(
 				"logical_or" => array::logical_or,
 				"logical_xor" => array::logical_xor,
 				"matches" => array::matches,
+				"map" => array::map((stk, ctx, opt, doc)).await,
 				"max" => array::max,
 				"min" => array::min,
 				"pop" => array::pop,
@@ -462,6 +473,7 @@ pub fn idiom(
 				"shuffle" => array::shuffle,
 				"slice" => array::slice,
 				"sort" => array::sort,
+				"swap" => array::swap,
 				"transpose" => array::transpose,
 				"union" => array::union,
 				"sort_asc" => array::sort::asc,
@@ -684,6 +696,8 @@ pub fn idiom(
 				"to_record" => r#type::record,
 				"to_string" => r#type::string,
 				"to_uuid" => r#type::uuid,
+				//
+				"repeat" => array::repeat,
 			)
 		}
 		v => v,
@@ -694,7 +708,7 @@ pub fn idiom(
 pub async fn asynchronous(
 	stk: &mut Stk,
 	ctx: &Context<'_>,
-	opt: Option<&Options>,
+	opt: &Options,
 	doc: Option<&CursorDoc<'_>>,
 	name: &str,
 	args: Vec<Value>,
@@ -719,6 +733,8 @@ pub async fn asynchronous(
 		name,
 		args,
 		"no such builtin function found",
+		"array::map" => array::map((stk, ctx, opt, doc)).await,
+		//
 		"crypto::argon2::compare" => (cpu_intensive) crypto::argon2::cmp.await,
 		"crypto::argon2::generate" => (cpu_intensive) crypto::argon2::gen.await,
 		"crypto::bcrypt::compare" => (cpu_intensive) crypto::bcrypt::cmp.await,
@@ -735,15 +751,15 @@ pub async fn asynchronous(
 		"http::patch" => http::patch(ctx).await,
 		"http::delete" => http::delete(ctx).await,
 		//
-		"search::analyze" => search::analyze((stk,ctx, opt)).await,
+		"search::analyze" => search::analyze((stk,ctx, Some(opt))).await,
 		"search::score" => search::score((ctx, doc)).await,
 		"search::highlight" => search::highlight((ctx, doc)).await,
 		"search::offsets" => search::offsets((ctx, doc)).await,
 		//
 		"sleep" => sleep::sleep(ctx).await,
 		//
-		"type::field" => r#type::field((stk,ctx, opt, doc)).await,
-		"type::fields" => r#type::fields((stk,ctx, opt, doc)).await,
+		"type::field" => r#type::field((stk,ctx, Some(opt), doc)).await,
+		"type::fields" => r#type::fields((stk,ctx, Some(opt), doc)).await,
 	)
 }
 
@@ -773,6 +789,9 @@ mod tests {
 
 	#[tokio::test]
 	async fn implementations_are_present() {
+		#[cfg(all(feature = "scripting", feature = "kv-mem"))]
+		let excluded_from_scripting = &["array::map"];
+
 		// Accumulate and display all problems at once to avoid a test -> fix -> test -> fix cycle.
 		let mut problems = Vec::new();
 
@@ -780,7 +799,7 @@ mod tests {
 		let fnc_mod = include_str!("mod.rs");
 
 		// Patch out idiom methods
-		let re = Regex::new(r"(?ms)pub fn idiom\(.*}\n+///").unwrap();
+		let re = Regex::new(r"(?ms)pub async fn idiom\(.*}\n+///").unwrap();
 		let fnc_no_idiom = re.replace(fnc_mod, "");
 
 		for line in fnc_no_idiom.lines() {
@@ -822,6 +841,10 @@ mod tests {
 			#[cfg(all(feature = "scripting", feature = "kv-mem"))]
 			{
 				use crate::sql::Value;
+
+				if excluded_from_scripting.contains(&name) {
+					continue;
+				}
 
 				let name = name.replace("::", ".");
 				let sql =
