@@ -3,6 +3,7 @@ use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::sql::statements::rebuild::RebuildStatement;
+use crate::sql::statements::AccessStatement;
 use crate::sql::{
 	fmt::{Fmt, Pretty},
 	statements::{
@@ -55,7 +56,7 @@ impl Display for Statements {
 	}
 }
 
-#[revisioned(revision = 4)]
+#[revisioned(revision = 5)]
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
@@ -93,6 +94,10 @@ pub enum Statement {
 	Upsert(UpsertStatement),
 	#[revision(start = 4)]
 	Alter(AlterStatement),
+	// TODO(gguillemas): Document once bearer access is no longer experimental.
+	#[doc(hidden)]
+	#[revision(start = 5)]
+	Access(AccessStatement),
 }
 
 impl Statement {
@@ -113,6 +118,7 @@ impl Statement {
 	pub(crate) fn writeable(&self) -> bool {
 		match self {
 			Self::Value(v) => v.writeable(),
+			Self::Access(_) => true,
 			Self::Alter(_) => true,
 			Self::Analyze(_) => false,
 			Self::Break(_) => false,
@@ -151,6 +157,7 @@ impl Statement {
 		doc: Option<&CursorDoc<'_>>,
 	) -> Result<Value, Error> {
 		match self {
+			Self::Access(v) => v.compute(ctx, opt, doc).await,
 			Self::Alter(v) => v.compute(stk, ctx, opt, doc).await,
 			Self::Analyze(v) => v.compute(ctx, opt, doc).await,
 			Self::Break(v) => v.compute(ctx, opt, doc).await,
@@ -190,6 +197,7 @@ impl Display for Statement {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
 		match self {
 			Self::Value(v) => write!(Pretty::from(f), "{v}"),
+			Self::Access(v) => write!(Pretty::from(f), "{v}"),
 			Self::Alter(v) => write!(Pretty::from(f), "{v}"),
 			Self::Analyze(v) => write!(Pretty::from(f), "{v}"),
 			Self::Begin(v) => write!(Pretty::from(f), "{v}"),
