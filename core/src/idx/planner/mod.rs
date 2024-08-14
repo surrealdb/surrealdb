@@ -71,7 +71,7 @@ impl QueryPlanner {
 				let mut exe = InnerQueryExecutor::new(
 					stk,
 					ctx,
-					self.opt,
+					&self.opt,
 					&t,
 					tree.index_map,
 					tree.knn_expressions,
@@ -81,7 +81,7 @@ impl QueryPlanner {
 				.await?;
 				match PlanBuilder::build(
 					tree.root,
-					&self.with.as_ref().map(|w| w.as_ref()),
+					self.with.as_ref().map(|w| w.as_ref()),
 					tree.with_indexes,
 				)? {
 					Plan::SingleIndex(exp, io) => {

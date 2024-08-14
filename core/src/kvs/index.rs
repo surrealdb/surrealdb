@@ -24,24 +24,24 @@ enum BuildingStatus {
 	Done,
 }
 
+#[derive(Clone)]
 pub(crate) struct IndexBuilder {
-	ctx: Context,
 	tf: TransactionFactory,
-	indexes: DashMap<Arc<DefineIndexStatement>, (Arc<Building>, JoinHandle<()>)>,
+	indexes: Arc<DashMap<Arc<DefineIndexStatement>, (Arc<Building>, JoinHandle<()>)>>,
 }
 
 impl IndexBuilder {
-	pub(super) fn new(ctx: Context, tf: TransactionFactory) -> Self {
+	pub(super) fn new(tf: TransactionFactory) -> Self {
 		Self {
-			ctx,
 			tf,
 			indexes: Default::default(),
 		}
 	}
 
 	pub(crate) fn build(
-		&mut self,
-		opt: &Options,
+		&self,
+		ctx: Context,
+		opt: Options,
 		ix: Arc<DefineIndexStatement>,
 	) -> Result<(), Error> {
 		match self.indexes.entry(ix) {
@@ -53,12 +53,7 @@ impl IndexBuilder {
 			}
 			Entry::Vacant(e) => {
 				// No index is currently building, we can start building it
-				let building = Arc::new(Building::new(
-					self.ctx.clone(),
-					self.tf.clone(),
-					opt,
-					e.key().clone(),
-				)?);
+				let building = Arc::new(Building::new(ctx, self.tf.clone(), opt, e.key().clone())?);
 				let b = building.clone();
 				let jh = task::spawn(async move {
 					if let Err(err) = b.compute().await {
@@ -102,10 +97,9 @@ struct Appending {
 
 struct Building {
 	ctx: Context,
+	opt: Options,
 	tf: TransactionFactory,
 	ix: Arc<DefineIndexStatement>,
-	ns: String,
-	db: String,
 	tb: String,
 	status: Arc<Mutex<BuildingStatus>>,
 	// Should be stored on a temporary table
@@ -118,14 +112,13 @@ impl Building {
 	fn new(
 		ctx: Context,
 		tf: TransactionFactory,
-		opt: &Options,
+		opt: Options,
 		ix: Arc<DefineIndexStatement>,
 	) -> Result<Self, Error> {
 		Ok(Self {
 			ctx,
+			opt,
 			tf,
-			ns: opt.ns()?.to_string(),
-			db: opt.db()?.to_string(),
 			tb: ix.what.to_string(),
 			ix,
 			status: Arc::new(Mutex::new(BuildingStatus::Initiated)),
@@ -143,10 +136,14 @@ impl Building {
 	}
 
 	async fn compute(&self) -> Result<(), Error> {
+		let mut stack = TreeStack::new();
+
 		self.set_status(BuildingStatus::Building(0)).await;
 		// First iteration, we index every keys
-		let beg = crate::key::thing::prefix(&self.ns, &self.db, &self.tb);
-		let end = crate::key::thing::suffix(&self.ns, &self.db, &self.tb);
+		let ns = self.opt.ns()?;
+		let db = self.opt.db()?;
+		let beg = crate::key::thing::prefix(ns, db, &self.tb);
+		let end = crate::key::thing::suffix(ns, db, &self.tb);
 		let mut next = Some(beg..end);
 		let mut count = 0;
 		while let Some(rng) = next {
@@ -160,7 +157,9 @@ impl Building {
 				break;
 			}
 			// Index the records
-			for (_, v) in batch.values.into_iter() {
+			for (k, v) in batch.values.into_iter() {
+				// Parse the value
+				let v: Value = (&v).into();
 				count += 1;
 				self.set_status(BuildingStatus::Building(count)).await;
 			}
@@ -178,12 +177,17 @@ impl Building {
 				break;
 			}
 			let tx = self.tf.transaction(TransactionType::Write, Optimistic).await?;
-			let mut stack = TreeStack::new();
 
 			for a in drain {
 				let rid = Thing::from((self.tb.clone(), a.id));
-				let mut io =
-					IndexOperation::new(&self.ctx, &self.ix, a.old_values, a.new_values, &rid);
+				let mut io = IndexOperation::new(
+					&self.ctx,
+					&self.opt,
+					&self.ix,
+					a.old_values,
+					a.new_values,
+					&rid,
+				);
 				stack.enter(|stk| io.compute(stk)).finish().await?;
 				count += 1;
 				self.set_status(BuildingStatus::Building(count)).await;

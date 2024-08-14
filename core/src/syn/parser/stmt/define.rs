@@ -1070,6 +1070,10 @@ impl Parser<'_> {
 						keep_pruned_connections,
 					));
 				}
+				t!("CONCURRENTLY") => {
+					self.pop_peek();
+					res.concurrently = true;
+				}
 				t!("COMMENT") => {
 					self.pop_peek();
 					res.comment = Some(self.next_token_value()?);

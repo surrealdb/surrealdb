@@ -76,7 +76,8 @@ impl<'a> IndexOperation<'a> {
 
 	async fn index_unique(&mut self) -> Result<(), Error> {
 		// Lock the transaction
-		let mut txn = self.ctx.tx().lock().await;
+		let tx = self.ctx.tx();
+		let mut txn = tx.lock().await;
 		// Delete the old index data
 		if let Some(o) = self.o.take() {
 			let i = Indexable::new(o, self.ix);
@@ -109,7 +110,8 @@ impl<'a> IndexOperation<'a> {
 
 	async fn index_non_unique(&mut self) -> Result<(), Error> {
 		// Lock the transaction
-		let mut txn = self.ctx.tx().lock().await;
+		let tx = self.ctx.tx();
+		let mut txn = tx.lock().await;
 		// Delete the old index data
 		if let Some(o) = self.o.take() {
 			let i = Indexable::new(o, self.ix);

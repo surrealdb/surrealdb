@@ -102,7 +102,11 @@ impl DefineIndexStatement {
 			};
 			stm.compute(stk, ctx, opt, doc).await?;
 		} else {
-			todo!()
+			ctx.get_index_builder().ok_or(Error::Unreachable("No Index Builder"))?.build(
+				ctx.clone(),
+				opt.clone(),
+				self.clone().into(),
+			)?;
 		}
 		// Ok all good
 		Ok(Value::None)
@@ -124,6 +128,9 @@ impl Display for DefineIndexStatement {
 		}
 		if let Some(ref v) = self.comment {
 			write!(f, " COMMENT {v}")?
+		}
+		if self.overwrite {
+			write!(f, " CONCURRENTLY")?
 		}
 		Ok(())
 	}

@@ -721,6 +721,7 @@ impl Datastore {
 			self.query_timeout,
 			self.capabilities.clone(),
 			self.index_stores.clone(),
+			self.index_builder.clone(),
 			#[cfg(any(
 				feature = "kv-mem",
 				feature = "kv-surrealkv",

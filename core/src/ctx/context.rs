@@ -7,7 +7,7 @@ use crate::err::Error;
 use crate::idx::planner::executor::QueryExecutor;
 use crate::idx::planner::{IterationStage, QueryPlanner};
 use crate::idx::trees::store::IndexStores;
-use crate::kvs::Transaction;
+use crate::kvs::{IndexBuilder, Transaction};
 use crate::sql::value::Value;
 use channel::Sender;
 use std::borrow::Cow;
@@ -62,6 +62,8 @@ pub struct MutableContext {
 	iteration_stage: Option<IterationStage>,
 	// The index store
 	index_stores: IndexStores,
+	// The index concurrent builders
+	index_builder: Option<IndexBuilder>,
 	// Capabilities
 	capabilities: Arc<Capabilities>,
 	#[cfg(any(
@@ -109,6 +111,7 @@ impl MutableContext {
 		time_out: Option<Duration>,
 		capabilities: Capabilities,
 		index_stores: IndexStores,
+		index_builder: IndexBuilder,
 		#[cfg(any(
 			feature = "kv-mem",
 			feature = "kv-surrealkv",
@@ -129,6 +132,7 @@ impl MutableContext {
 			iteration_stage: None,
 			capabilities: Arc::new(capabilities),
 			index_stores,
+			index_builder: Some(index_builder),
 			#[cfg(any(
 				feature = "kv-mem",
 				feature = "kv-surrealkv",
@@ -158,6 +162,7 @@ impl MutableContext {
 			iteration_stage: None,
 			capabilities: Arc::new(Capabilities::default()),
 			index_stores: IndexStores::default(),
+			index_builder: None,
 			#[cfg(any(
 				feature = "kv-mem",
 				feature = "kv-surrealkv",
@@ -183,6 +188,7 @@ impl MutableContext {
 			iteration_stage: parent.iteration_stage.clone(),
 			capabilities: parent.capabilities.clone(),
 			index_stores: parent.index_stores.clone(),
+			index_builder: parent.index_builder.clone(),
 			#[cfg(any(
 				feature = "kv-mem",
 				feature = "kv-surrealkv",
@@ -219,6 +225,7 @@ impl MutableContext {
 			iteration_stage: parent.iteration_stage.clone(),
 			capabilities: parent.capabilities.clone(),
 			index_stores: parent.index_stores.clone(),
+			index_builder: parent.index_builder.clone(),
 			#[cfg(any(
 				feature = "kv-mem",
 				feature = "kv-surrealkv",
@@ -324,6 +331,11 @@ impl MutableContext {
 	/// Get the index_store for this context/ds
 	pub(crate) fn get_index_stores(&self) -> &IndexStores {
 		&self.index_stores
+	}
+
+	/// Get the index_builder for this context/ds
+	pub(crate) fn get_index_builder(&self) -> Option<&IndexBuilder> {
+		self.index_builder.as_ref()
 	}
 
 	/// Check if the context is done. If it returns `None` the operation may

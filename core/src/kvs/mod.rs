@@ -38,6 +38,7 @@ mod index;
 mod tests;
 
 pub use self::ds::*;
+pub(crate) use self::index::*;
 pub use self::kv::*;
 pub use self::live::*;
 pub use self::tr::*;
