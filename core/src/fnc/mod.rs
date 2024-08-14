@@ -443,6 +443,7 @@ pub fn idiom(
 				"concat" => array::concat,
 				"difference" => array::difference,
 				"distinct" => array::distinct,
+				"fill" => array::fill,
 				"filter_index" => array::filter_index,
 				"find_index" => array::find_index,
 				"first" => array::first,
@@ -450,6 +451,7 @@ pub fn idiom(
 				"group" => array::group,
 				"insert" => array::insert,
 				"intersect" => array::intersect,
+				"is_empty" => array::is_empty,
 				"join" => array::join,
 				"last" => array::last,
 				"len" => array::len,
@@ -467,6 +469,7 @@ pub fn idiom(
 				"shuffle" => array::shuffle,
 				"slice" => array::slice,
 				"sort" => array::sort,
+				"swap" => array::swap,
 				"transpose" => array::transpose,
 				"union" => array::union,
 				"sort_asc" => array::sort::asc,
@@ -689,6 +692,8 @@ pub fn idiom(
 				"to_record" => r#type::record,
 				"to_string" => r#type::string,
 				"to_uuid" => r#type::uuid,
+				//
+				"repeat" => array::repeat,
 			)
 		}
 		v => v,
