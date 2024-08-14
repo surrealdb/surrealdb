@@ -122,7 +122,14 @@ reqwest = { version = "0.12.5", default-features = false, features = [
     "stream",
     "multipart",
 ], optional = true }
-revision = { version = "0.8.0", features = ["chrono", "geo", "roaring", "regex", "rust_decimal", "uuid"] }
+revision = { version = "0.8.0", features = [
+    "chrono",
+    "geo",
+    "roaring",
+    "regex",
+    "rust_decimal",
+    "uuid",
+] }
 rmpv = "1.0.1"
 roaring = { version = "0.10.2", features = ["serde"] }
 rocksdb = { version = "0.21.0", features = ["lz4", "snappy"], optional = true }
@@ -136,7 +143,8 @@ sha1 = "0.10.6"
 sha2 = "0.10.8"
 snap = "1.1.0"
 storekey = "0.5.0"
-surrealkv = { version = "0.3.1", optional = true }
+subtle = "2.6"
+surrealkv = { version = "0.3.2", optional = true }
 surrealml = { version = "0.1.1", optional = true, package = "surrealml-core" }
 tempfile = { version = "3.10.1", optional = true }
 thiserror = "1.0.50"

@@ -198,6 +198,7 @@ fn statements() -> Vec<Statement> {
 			permissions: Permission::Full,
 			if_not_exists: false,
 			overwrite: false,
+			returns: None,
 		})),
 		Statement::Define(DefineStatement::Access(DefineAccessStatement {
 			name: Ident("a".to_string()),
@@ -533,6 +534,7 @@ fn statements() -> Vec<Statement> {
 		Statement::Set(SetStatement {
 			name: "param".to_owned(),
 			what: Value::Number(Number::Int(1)),
+			kind: None,
 		}),
 		Statement::Show(ShowStatement {
 			table: Some(Table("foo".to_owned())),

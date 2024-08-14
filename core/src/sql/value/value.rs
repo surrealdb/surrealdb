@@ -542,6 +542,15 @@ impl From<Option<Duration>> for Value {
 	}
 }
 
+impl From<Option<Datetime>> for Value {
+	fn from(v: Option<Datetime>) -> Self {
+		match v {
+			Some(v) => Value::from(v),
+			None => Value::None,
+		}
+	}
+}
+
 impl From<Id> for Value {
 	fn from(v: Id) -> Self {
 		match v {
@@ -1028,7 +1037,7 @@ impl Value {
 	/// Check if this Value is a Thing of a specific type
 	pub fn is_record_type(&self, types: &[Table]) -> bool {
 		match self {
-			Value::Thing(v) => types.is_empty() || types.iter().any(|tb| tb.0 == v.tb),
+			Value::Thing(v) => v.is_record_type(types),
 			_ => false,
 		}
 	}
@@ -1870,7 +1879,7 @@ impl Value {
 			Value::Bool(v) => Ok(v),
 			// Attempt to convert a string value
 			Value::Strand(ref v) => match v.parse::<bool>() {
-				// The string can be represented as a Float
+				// The string can be parsed as a Float
 				Ok(v) => Ok(v),
 				// This string is not a float
 				_ => Err(Error::ConvertTo {
@@ -1895,7 +1904,7 @@ impl Value {
 			Value::Number(Number::Float(v)) if v.fract() == 0.0 => Ok(Number::Int(v as i64)),
 			// Attempt to convert a decimal number
 			Value::Number(Number::Decimal(v)) if v.is_integer() => match v.try_into() {
-				// The Decimal can be represented as an Int
+				// The Decimal can be parsed as an Int
 				Ok(v) => Ok(Number::Int(v)),
 				// The Decimal is out of bounds
 				_ => Err(Error::ConvertTo {
@@ -1905,7 +1914,7 @@ impl Value {
 			},
 			// Attempt to convert a string value
 			Value::Strand(ref v) => match v.parse::<i64>() {
-				// The string can be represented as a Float
+				// The string can be parsed as a Float
 				Ok(v) => Ok(Number::Int(v)),
 				// This string is not a float
 				_ => Err(Error::ConvertTo {
@@ -1930,7 +1939,7 @@ impl Value {
 			Value::Number(Number::Int(v)) => Ok(Number::Float(v as f64)),
 			// Attempt to convert a decimal number
 			Value::Number(Number::Decimal(v)) => match v.try_into() {
-				// The Decimal can be represented as a Float
+				// The Decimal can be parsed as a Float
 				Ok(v) => Ok(Number::Float(v)),
 				// The Decimal loses precision
 				_ => Err(Error::ConvertTo {
@@ -1940,7 +1949,7 @@ impl Value {
 			},
 			// Attempt to convert a string value
 			Value::Strand(ref v) => match v.parse::<f64>() {
-				// The string can be represented as a Float
+				// The string can be parsed as a Float
 				Ok(v) => Ok(Number::Float(v)),
 				// This string is not a float
 				_ => Err(Error::ConvertTo {
@@ -1975,7 +1984,7 @@ impl Value {
 			},
 			// Attempt to convert a string value
 			Value::Strand(ref v) => match Decimal::from_str(v) {
-				// The string can be represented as a Decimal
+				// The string can be parsed as a Decimal
 				Ok(v) => Ok(Number::Decimal(v)),
 				// This string is not a Decimal
 				_ => Err(Error::ConvertTo {
@@ -1998,7 +2007,7 @@ impl Value {
 			Value::Number(v) => Ok(v),
 			// Attempt to convert a string value
 			Value::Strand(ref v) => match Number::from_str(v) {
-				// The string can be represented as a Float
+				// The string can be parsed as a number
 				Ok(v) => Ok(v),
 				// This string is not a float
 				_ => Err(Error::ConvertTo {
@@ -2073,11 +2082,11 @@ impl Value {
 			// Uuids are allowed
 			Value::Uuid(v) => Ok(v),
 			// Attempt to parse a string
-			Value::Strand(ref v) => match Uuid::try_from(v.as_str()) {
-				// The string can be represented as a uuid
+			Value::Strand(ref v) => match Uuid::from_str(v) {
+				// The string can be parsed as a uuid
 				Ok(v) => Ok(v),
 				// This string is not a uuid
-				Err(_) => Err(Error::ConvertTo {
+				_ => Err(Error::ConvertTo {
 					from: self,
 					into: "uuid".into(),
 				}),
@@ -2109,11 +2118,11 @@ impl Value {
 			// Datetimes are allowed
 			Value::Datetime(v) => Ok(v),
 			// Attempt to parse a string
-			Value::Strand(ref v) => match Datetime::try_from(v.as_str()) {
-				// The string can be represented as a datetime
+			Value::Strand(ref v) => match Datetime::from_str(v) {
+				// The string can be parsed as a datetime
 				Ok(v) => Ok(v),
 				// This string is not a datetime
-				Err(_) => Err(Error::ConvertTo {
+				_ => Err(Error::ConvertTo {
 					from: self,
 					into: "datetime".into(),
 				}),
@@ -2132,11 +2141,11 @@ impl Value {
 			// Durations are allowed
 			Value::Duration(v) => Ok(v),
 			// Attempt to parse a string
-			Value::Strand(ref v) => match Duration::try_from(v.as_str()) {
-				// The string can be represented as a duration
+			Value::Strand(ref v) => match Duration::from_str(v) {
+				// The string can be parsed as a duration
 				Ok(v) => Ok(v),
 				// This string is not a duration
-				Err(_) => Err(Error::ConvertTo {
+				_ => Err(Error::ConvertTo {
 					from: self,
 					into: "duration".into(),
 				}),
@@ -2218,10 +2227,16 @@ impl Value {
 		match self {
 			// Records are allowed
 			Value::Thing(v) => Ok(v),
-			Value::Strand(v) => Thing::try_from(v.as_str()).map_err(move |_| Error::ConvertTo {
-				from: Value::Strand(v),
-				into: "record".into(),
-			}),
+			// Attempt to parse a string
+			Value::Strand(ref v) => match Thing::from_str(v) {
+				// The string can be parsed as a record
+				Ok(v) => Ok(v),
+				// This string is not a record
+				_ => Err(Error::ConvertTo {
+					from: self,
+					into: "record".into(),
+				}),
+			},
 			// Anything else raises an error
 			_ => Err(Error::ConvertTo {
 				from: self,
@@ -2248,6 +2263,16 @@ impl Value {
 		match self {
 			// Records are allowed if correct type
 			Value::Thing(v) if self.is_record_type(val) => Ok(v),
+			// Attempt to parse a string
+			Value::Strand(ref v) => match Thing::from_str(v) {
+				// The string can be parsed as a record of this type
+				Ok(v) if v.is_record_type(val) => Ok(v),
+				// This string is not a record of this type
+				_ => Err(Error::ConvertTo {
+					from: self,
+					into: "record".into(),
+				}),
+			},
 			// Anything else raises an error
 			_ => Err(Error::ConvertTo {
 				from: self,

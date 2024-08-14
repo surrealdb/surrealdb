@@ -321,7 +321,12 @@ impl super::api::Transaction for Transaction {
 
 	/// Retrieves a range of key-value pairs from the database.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.sprint()))]
-	async fn scan<K>(&mut self, rng: Range<K>, limit: u32) -> Result<Vec<(Key, Val)>, Error>
+	async fn scan<K>(
+		&mut self,
+		rng: Range<K>,
+		limit: u32,
+		version: Option<u64>,
+	) -> Result<Vec<(Key, Val)>, Error>
 	where
 		K: Into<Key> + Sprintable + Debug,
 	{
@@ -332,11 +337,19 @@ impl super::api::Transaction for Transaction {
 		// Set the key range
 		let beg = rng.start.into();
 		let end = rng.end.into();
+		let range = beg.as_slice()..end.as_slice();
+
 		// Retrieve the scan range
-		let res = self.inner.scan(beg.as_slice()..end.as_slice(), Some(limit as usize))?;
-		// Convert the keys and values
-		let res = res.into_iter().map(|kv| (Key::from(kv.0), kv.1)).collect();
-		// Return result
+		let res = match version {
+			Some(ts) => self.inner.scan_at_ts(range, ts, Some(limit as usize))?,
+			None => self
+				.inner
+				.scan(range, Some(limit as usize))?
+				.into_iter()
+				.map(|kv| (kv.0, kv.1))
+				.collect(),
+		};
+
 		Ok(res)
 	}
 }

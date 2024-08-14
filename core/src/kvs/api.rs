@@ -97,7 +97,12 @@ pub trait Transaction {
 	/// Retrieve a specific range of keys from the datastore.
 	///
 	/// This function fetches the full range of key-value pairs, in a single request to the underlying datastore.
-	async fn scan<K>(&mut self, rng: Range<K>, limit: u32) -> Result<Vec<(Key, Val)>, Error>
+	async fn scan<K>(
+		&mut self,
+		rng: Range<K>,
+		limit: u32,
+		version: Option<u64>,
+	) -> Result<Vec<(Key, Val)>, Error>
 	where
 		K: Into<Key> + Sprintable + Debug;
 
@@ -239,7 +244,7 @@ pub trait Transaction {
 		let end: Key = rng.end.into();
 		// Scan for the next batch
 		let res = if values {
-			self.scan(beg..end.clone(), batch).await?
+			self.scan(beg..end.clone(), batch, None).await?
 		} else {
 			self.keys(beg..end.clone(), batch)
 				.await?
