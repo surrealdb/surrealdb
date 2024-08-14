@@ -181,6 +181,7 @@
 "array::logical_or("
 "array::logical_xor("
 "array::matches("
+"array::map("
 "array::max("
 "array::min("
 "array::pop("
