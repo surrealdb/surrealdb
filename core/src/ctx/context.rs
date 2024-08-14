@@ -240,6 +240,33 @@ impl MutableContext {
 		}
 	}
 
+	/// Create a new child from a frozen context.
+	pub fn new_concurrent(from: &Context) -> Self {
+		Self {
+			values: HashMap::default(),
+			deadline: None,
+			cancelled: Arc::new(AtomicBool::new(false)),
+			notifications: from.notifications.clone(),
+			query_planner: from.query_planner.clone(),
+			query_executor: from.query_executor.clone(),
+			iteration_stage: from.iteration_stage.clone(),
+			capabilities: from.capabilities.clone(),
+			index_stores: from.index_stores.clone(),
+			index_builder: from.index_builder.clone(),
+			#[cfg(any(
+				feature = "kv-mem",
+				feature = "kv-surrealkv",
+				feature = "kv-rocksdb",
+				feature = "kv-fdb",
+				feature = "kv-tikv",
+			))]
+			temporary_directory: from.temporary_directory.clone(),
+			transaction: None,
+			isolated: false,
+			parent: None,
+		}
+	}
+
 	/// Add a value to the context. It overwrites any previously set values
 	/// with the same key.
 	pub fn add_value<K>(&mut self, key: K, value: Arc<Value>)

@@ -103,7 +103,7 @@ impl DefineIndexStatement {
 			stm.compute(stk, ctx, opt, doc).await?;
 		} else {
 			ctx.get_index_builder().ok_or(Error::Unreachable("No Index Builder"))?.build(
-				ctx.clone(),
+				ctx,
 				opt.clone(),
 				self.clone().into(),
 			)?;

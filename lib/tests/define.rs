@@ -695,7 +695,7 @@ async fn define_statement_index_concurrently() -> Result<(), Error> {
 		INFO FOR TABLE user;
 	";
 	let mut t = Test::new(sql).await?;
-	t.skip_ok(5)?;
+	t.skip_ok(4)?;
 	t.expect_val(
 		"{
 			events: {},

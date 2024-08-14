@@ -1,11 +1,13 @@
 use crate::cnf::{EXPORT_BATCH_SIZE, NORMAL_FETCH_SIZE};
-use crate::ctx::Context;
+use crate::ctx::{Context, MutableContext};
 use crate::dbs::Options;
+use crate::doc::{build_opt_values, CursorDoc};
 use crate::err::Error;
 use crate::idx::index::IndexOperation;
+use crate::key::thing;
 use crate::kvs::ds::TransactionFactory;
 use crate::kvs::LockType::Optimistic;
-use crate::kvs::TransactionType;
+use crate::kvs::{Transaction, TransactionType};
 use crate::sql::statements::DefineIndexStatement;
 use crate::sql::{Id, Thing, Value};
 use dashmap::mapref::entry::Entry;
@@ -40,7 +42,7 @@ impl IndexBuilder {
 
 	pub(crate) fn build(
 		&self,
-		ctx: Context,
+		ctx: &Context,
 		opt: Options,
 		ix: Arc<DefineIndexStatement>,
 	) -> Result<(), Error> {
@@ -110,13 +112,13 @@ struct Building {
 
 impl Building {
 	fn new(
-		ctx: Context,
+		ctx: &Context,
 		tf: TransactionFactory,
 		opt: Options,
 		ix: Arc<DefineIndexStatement>,
 	) -> Result<Self, Error> {
 		Ok(Self {
-			ctx,
+			ctx: MutableContext::new_concurrent(ctx).freeze(),
 			opt,
 			tf,
 			tb: ix.what.to_string(),
@@ -135,6 +137,17 @@ impl Building {
 		self.appended.lock().await.push_back(a);
 	}
 
+	async fn new_read_tx(&self) -> Result<Transaction, Error> {
+		self.tf.transaction(TransactionType::Read, Optimistic).await
+	}
+
+	async fn new_write_tx_ctx(&self) -> Result<Context, Error> {
+		let tx = self.tf.transaction(TransactionType::Write, Optimistic).await?.into();
+		let mut ctx = MutableContext::new(&self.ctx);
+		ctx.set_transaction(tx);
+		Ok(ctx.freeze())
+	}
+
 	async fn compute(&self) -> Result<(), Error> {
 		let mut stack = TreeStack::new();
 
@@ -147,23 +160,34 @@ impl Building {
 		let mut next = Some(beg..end);
 		let mut count = 0;
 		while let Some(rng) = next {
-			let tx = self.tf.transaction(TransactionType::Write, Optimistic).await?;
 			// Get the next batch of records
-			let batch = tx.batch(rng, *EXPORT_BATCH_SIZE, true).await?;
+			let batch = self.new_read_tx().await?.batch(rng, *EXPORT_BATCH_SIZE, true).await?;
 			// Set the next scan range
 			next = batch.next;
 			// Check there are records
 			if batch.values.is_empty() {
 				break;
 			}
+			// Create a new context with a write transaction
+			let ctx = self.new_write_tx_ctx().await?;
 			// Index the records
 			for (k, v) in batch.values.into_iter() {
+				let key: thing::Thing = (&k).into();
 				// Parse the value
-				let v: Value = (&v).into();
+				let val: Value = (&v).into();
+				let rid: Arc<Thing> = Thing::from((key.tb, key.id)).into();
+				let doc = CursorDoc::new(Some(rid.clone()), None, val);
+				let opt_values = stack
+					.enter(|stk| build_opt_values(stk, &ctx, &self.opt, &self.ix, &doc))
+					.finish()
+					.await?;
+				// Index the record
+				let mut io = IndexOperation::new(&ctx, &self.opt, &self.ix, None, opt_values, &rid);
+				stack.enter(|stk| io.compute(stk)).finish().await?;
 				count += 1;
 				self.set_status(BuildingStatus::Building(count)).await;
 			}
-			tx.commit().await?;
+			ctx.tx().commit().await?;
 		}
 		// Second iteration, we index/remove any records that has been added or removed since the initial indexing
 		loop {
@@ -176,12 +200,13 @@ impl Building {
 				// UNLOCK INDEXING
 				break;
 			}
-			let tx = self.tf.transaction(TransactionType::Write, Optimistic).await?;
+			// Create a new context with a write transaction
+			let ctx = self.new_write_tx_ctx().await?;
 
 			for a in drain {
 				let rid = Thing::from((self.tb.clone(), a.id));
 				let mut io = IndexOperation::new(
-					&self.ctx,
+					&ctx,
 					&self.opt,
 					&self.ix,
 					a.old_values,
@@ -192,7 +217,7 @@ impl Building {
 				count += 1;
 				self.set_status(BuildingStatus::Building(count)).await;
 			}
-			tx.commit().await?;
+			ctx.tx().commit().await?;
 		}
 		self.set_status(BuildingStatus::Done).await;
 		Ok(())

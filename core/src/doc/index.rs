@@ -75,7 +75,7 @@ impl Document {
 /// Eg. IF the index is composed of the columns `name` and `instrument`
 /// Given this doc: { "id": 1, "instrument":"piano", "name":"Tobie" }
 /// It will return: ["Tobie", "piano"]
-async fn build_opt_values(
+pub(crate) async fn build_opt_values(
 	stk: &mut Stk,
 	ctx: &Context,
 	opt: &Options,
