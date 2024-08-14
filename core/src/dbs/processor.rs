@@ -211,7 +211,7 @@ impl<'a> Processor<'a> {
 		ctx.tx().check_ns_db_tb(opt.ns()?, opt.db()?, &v.tb, opt.strict).await?;
 		// Fetch the data from the store
 		let key = thing::new(opt.ns()?, opt.db()?, &v.tb, &v.id);
-		let val = ctx.tx().get(key).await?;
+		let val = ctx.tx().get(key, opt.version).await?;
 		// Parse the data from the store
 		let val = Operable::Value(match val {
 			Some(v) => Value::from(v),
@@ -240,7 +240,7 @@ impl<'a> Processor<'a> {
 		ctx.tx().check_ns_db_tb(opt.ns()?, opt.db()?, &v.tb, opt.strict).await?;
 		// Fetch the data from the store
 		let key = thing::new(opt.ns()?, opt.db()?, &v.tb, &v.id);
-		let val = ctx.tx().get(key).await?;
+		let val = ctx.tx().get(key, None).await?;
 		// Parse the data from the store
 		let x = match val {
 			Some(v) => Value::from(v),
@@ -271,7 +271,7 @@ impl<'a> Processor<'a> {
 		ctx.tx().check_ns_db_tb(opt.ns()?, opt.db()?, &v.tb, opt.strict).await?;
 		// Fetch the data from the store
 		let key = thing::new(opt.ns()?, opt.db()?, &v.tb, &v.id);
-		let val = ctx.tx().get(key).await?;
+		let val = ctx.tx().get(key, None).await?;
 		// Parse the data from the store
 		let x = match val {
 			Some(v) => Value::from(v),
@@ -487,7 +487,7 @@ impl<'a> Processor<'a> {
 				let gra: graph::Graph = graph::Graph::decode(&key)?;
 				// Fetch the data from the store
 				let key = thing::new(opt.ns()?, opt.db()?, gra.ft, &gra.fk);
-				let val = txn.get(key).await?;
+				let val = txn.get(key, None).await?;
 				let rid = Thing::from((gra.ft, gra.fk));
 				// Parse the data from the store
 				let val = Operable::Value(match val {
@@ -587,7 +587,7 @@ impl Iterable {
 		// Fetch the data from the store
 		let key = thing::new(opt.ns()?, opt.db()?, &thg.tb, &thg.id);
 		// Fetch and parse the data from the store
-		let val = txn.get(key).await?.map(Value::from).unwrap_or(Value::None);
+		let val = txn.get(key, None).await?.map(Value::from).unwrap_or(Value::None);
 		// Return the result
 		Ok(val)
 	}

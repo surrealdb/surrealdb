@@ -280,7 +280,7 @@ impl Datastore {
 			// Get the key for this node live query
 			let nlq = crate::key::node::lq::new(self.id(), id);
 			// Fetch the LIVE meta data node entry
-			if let Some(val) = catch!(txn, txn.get(nlq)) {
+			if let Some(val) = catch!(txn, txn.get(nlq, None)) {
 				// Decode the data for this live query
 				let lq: Live = val.into();
 				// Get the key for this node live query
