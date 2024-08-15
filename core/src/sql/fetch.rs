@@ -66,7 +66,7 @@ impl Fetch {
 	pub(crate) async fn compute(
 		&self,
 		stk: &mut Stk,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		opt: &Options,
 		idioms: &mut Vec<Idiom>,
 	) -> Result<(), Error> {

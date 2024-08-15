@@ -30,11 +30,11 @@ impl Tree {
 	/// that can be resolved by an index.
 	pub(super) async fn build<'a>(
 		stk: &mut Stk,
-		ctx: &'a Context<'_>,
+		ctx: &'a Context,
 		opt: &'a Options,
 		table: &'a Table,
-		cond: &'a Option<Cond>,
-		with: &'a Option<With>,
+		cond: Option<&Cond>,
+		with: Option<&With>,
 	) -> Result<Option<Self>, Error> {
 		let mut b = TreeBuilder::new(ctx, opt, table, with);
 		if let Some(cond) = cond {
@@ -59,10 +59,10 @@ impl Tree {
 }
 
 struct TreeBuilder<'a> {
-	ctx: &'a Context<'a>,
+	ctx: &'a Context,
 	opt: &'a Options,
 	table: &'a Table,
-	with: &'a Option<With>,
+	with: Option<&'a With>,
 	schemas: HashMap<Table, SchemaCache>,
 	idioms_indexes: HashMap<Table, HashMap<Idiom, LocalIndexRefs>>,
 	resolved_expressions: HashMap<Arc<Expression>, ResolvedExpression>,
@@ -85,12 +85,7 @@ pub(super) type LocalIndexRefs = Vec<IndexRef>;
 pub(super) type RemoteIndexRefs = Arc<Vec<(Idiom, LocalIndexRefs)>>;
 
 impl<'a> TreeBuilder<'a> {
-	fn new(
-		ctx: &'a Context<'_>,
-		opt: &'a Options,
-		table: &'a Table,
-		with: &'a Option<With>,
-	) -> Self {
+	fn new(ctx: &'a Context, opt: &'a Options, table: &'a Table, with: Option<&'a With>) -> Self {
 		let with_indexes = match with {
 			Some(With::Index(ixs)) => Vec::with_capacity(ixs.len()),
 			_ => vec![],
@@ -225,7 +220,7 @@ impl<'a> TreeBuilder<'a> {
 		for ix in schema.indexes.iter() {
 			if ix.cols.len() == 1 && ix.cols[0].eq(i) {
 				let ixr = self.index_map.definitions.len() as IndexRef;
-				if let Some(With::Index(ixs)) = self.with {
+				if let Some(With::Index(ixs)) = &self.with {
 					if ixs.contains(&ix.name.0) {
 						self.with_indexes.push(ixr);
 					}

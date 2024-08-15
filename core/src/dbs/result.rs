@@ -42,7 +42,7 @@ impl Results {
 			feature = "kv-tikv",
 			feature = "kv-surrealcs",
 		))]
-		ctx: &Context<'_>,
+		ctx: &Context,
 		stm: &Statement<'_>,
 	) -> Result<Self, Error> {
 		if stm.expr().is_some() && stm.group().is_some() {
@@ -67,7 +67,7 @@ impl Results {
 	pub(super) async fn push(
 		&mut self,
 		stk: &mut Stk,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		opt: &Options,
 		stm: &Statement<'_>,
 		val: Value,

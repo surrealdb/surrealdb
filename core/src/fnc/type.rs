@@ -7,12 +7,16 @@ use crate::err::Error;
 use crate::sql::table::Table;
 use crate::sql::thing::Thing;
 use crate::sql::value::Value;
-use crate::sql::{Id, Range, Strand};
+use crate::sql::{Id, Kind, Range, Strand};
 use crate::syn;
 use reblessive::tree::Stk;
 
 pub fn bool((val,): (Value,)) -> Result<Value, Error> {
 	val.convert_to_bool().map(Value::from)
+}
+
+pub fn bytes((val,): (Value,)) -> Result<Value, Error> {
+	val.convert_to_bytes().map(Value::from)
 }
 
 pub fn datetime((val,): (Value,)) -> Result<Value, Error> {
@@ -28,7 +32,7 @@ pub fn duration((val,): (Value,)) -> Result<Value, Error> {
 }
 
 pub async fn field(
-	(stk, ctx, opt, doc): (&mut Stk, &Context<'_>, Option<&Options>, Option<&CursorDoc<'_>>),
+	(stk, ctx, opt, doc): (&mut Stk, &Context, Option<&Options>, Option<&CursorDoc>),
 	(val,): (String,),
 ) -> Result<Value, Error> {
 	match opt {
@@ -46,7 +50,7 @@ pub async fn field(
 }
 
 pub async fn fields(
-	(stk, ctx, opt, doc): (&mut Stk, &Context<'_>, Option<&Options>, Option<&CursorDoc<'_>>),
+	(stk, ctx, opt, doc): (&mut Stk, &Context, Option<&Options>, Option<&CursorDoc>),
 	(val,): (Vec<String>,),
 ) -> Result<Value, Error> {
 	match opt {
@@ -71,6 +75,10 @@ pub fn float((val,): (Value,)) -> Result<Value, Error> {
 	val.convert_to_float().map(Value::from)
 }
 
+pub fn geometry((val,): (Value,)) -> Result<Value, Error> {
+	val.convert_to_geometry().map(Value::from)
+}
+
 pub fn int((val,): (Value,)) -> Result<Value, Error> {
 	val.convert_to_int().map(Value::from)
 }
@@ -81,57 +89,6 @@ pub fn number((val,): (Value,)) -> Result<Value, Error> {
 
 pub fn point((val,): (Value,)) -> Result<Value, Error> {
 	val.convert_to_point().map(Value::from)
-}
-
-pub fn string((val,): (Value,)) -> Result<Value, Error> {
-	val.convert_to_strand().map(Value::from)
-}
-
-pub fn table((val,): (Value,)) -> Result<Value, Error> {
-	Ok(Value::Table(Table(match val {
-		Value::Thing(t) => t.tb,
-		v => v.as_string(),
-	})))
-}
-
-pub fn thing((arg1, arg2): (Value, Option<Value>)) -> Result<Value, Error> {
-	match (arg1, arg2) {
-		// Empty table name
-		(Value::Strand(arg1), _) if arg1.is_empty() => Err(Error::TbInvalid {
-			value: arg1.as_string(),
-		}),
-
-		// Empty ID part
-		(_, Some(Value::Strand(arg2))) if arg2.is_empty() => Err(Error::IdInvalid {
-			value: arg2.as_string(),
-		}),
-
-		// Handle second argument
-		(arg1, Some(arg2)) => Ok(Value::Thing(Thing {
-			tb: arg1.as_string(),
-			id: match arg2 {
-				Value::Thing(v) => v.id,
-				Value::Array(v) => v.into(),
-				Value::Object(v) => v.into(),
-				Value::Number(v) => v.into(),
-				v => v.as_string().into(),
-			},
-		})),
-
-		// No second argument passed
-		(arg1, _) => Ok(match arg1 {
-			Value::Thing(v) => Ok(v),
-			Value::Strand(v) => Thing::try_from(v.as_str()).map_err(move |_| Error::ConvertTo {
-				from: Value::Strand(v),
-				into: "record".into(),
-			}),
-			v => Err(Error::ConvertTo {
-				from: v,
-				into: "record".into(),
-			}),
-		}?
-		.into()),
-	}
 }
 
 pub fn range(args: Vec<Value>) -> Result<Value, Error> {
@@ -219,6 +176,79 @@ pub fn range(args: Vec<Value>) -> Result<Value, Error> {
 		end,
 	}
 	.into())
+}
+
+pub fn record((rid, tb): (Value, Option<Value>)) -> Result<Value, Error> {
+	match tb {
+		Some(Value::Strand(Strand(tb)) | Value::Table(Table(tb))) if tb.is_empty() => {
+			Err(Error::TbInvalid {
+				value: tb,
+			})
+		}
+		Some(Value::Strand(Strand(tb)) | Value::Table(Table(tb))) => {
+			rid.convert_to(&Kind::Record(vec![tb.into()]))
+		}
+		Some(_) => Err(Error::InvalidArguments {
+			name: "type::record".into(),
+			message: "The second argument must be a table name or a string.".into(),
+		}),
+		None => rid.convert_to(&Kind::Record(vec![])),
+	}
+}
+
+pub fn string((val,): (Value,)) -> Result<Value, Error> {
+	val.convert_to_strand().map(Value::from)
+}
+
+pub fn table((val,): (Value,)) -> Result<Value, Error> {
+	Ok(Value::Table(Table(match val {
+		Value::Thing(t) => t.tb,
+		v => v.as_string(),
+	})))
+}
+
+pub fn thing((arg1, arg2): (Value, Option<Value>)) -> Result<Value, Error> {
+	match (arg1, arg2) {
+		// Empty table name
+		(Value::Strand(arg1), _) if arg1.is_empty() => Err(Error::TbInvalid {
+			value: arg1.as_string(),
+		}),
+
+		// Empty ID part
+		(_, Some(Value::Strand(arg2))) if arg2.is_empty() => Err(Error::IdInvalid {
+			value: arg2.as_string(),
+		}),
+
+		// Handle second argument
+		(arg1, Some(arg2)) => Ok(Value::Thing(Thing {
+			tb: arg1.as_string(),
+			id: match arg2 {
+				Value::Thing(v) => v.id,
+				Value::Array(v) => v.into(),
+				Value::Object(v) => v.into(),
+				Value::Number(v) => v.into(),
+				v => v.as_string().into(),
+			},
+		})),
+
+		// No second argument passed
+		(arg1, _) => Ok(match arg1 {
+			Value::Thing(v) => Ok(v),
+			Value::Strand(v) => Thing::try_from(v.as_str()).map_err(move |_| Error::ConvertTo {
+				from: Value::Strand(v),
+				into: "record".into(),
+			}),
+			v => Err(Error::ConvertTo {
+				from: v,
+				into: "record".into(),
+			}),
+		}?
+		.into()),
+	}
+}
+
+pub fn uuid((val,): (Value,)) -> Result<Value, Error> {
+	val.convert_to_uuid().map(Value::from)
 }
 
 pub mod is {

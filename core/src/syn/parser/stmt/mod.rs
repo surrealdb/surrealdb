@@ -1,11 +1,15 @@
 use reblessive::Stk;
 
+use crate::cnf::EXPERIMENTAL_BEARER_ACCESS;
 use crate::enter_query_recursion;
 use crate::sql::block::Entry;
 use crate::sql::statements::rebuild::{RebuildIndexStatement, RebuildStatement};
 use crate::sql::statements::show::{ShowSince, ShowStatement};
 use crate::sql::statements::sleep::SleepStatement;
 use crate::sql::statements::{
+	access::{
+		AccessStatement, AccessStatementGrant, AccessStatementList, AccessStatementRevoke, Subject,
+	},
 	KillStatement, LiveStatement, OptionStatement, SetStatement, ThrowStatement,
 };
 use crate::sql::{Fields, Ident, Param};
@@ -81,21 +85,22 @@ impl Parser<'_> {
 	fn token_kind_starts_statement(kind: TokenKind) -> bool {
 		matches!(
 			kind,
-			t!("ALTER")
-				| t!("ANALYZE") | t!("BEGIN")
-				| t!("BREAK") | t!("CANCEL")
-				| t!("COMMIT") | t!("CONTINUE")
-				| t!("CREATE") | t!("DEFINE")
-				| t!("DELETE") | t!("FOR")
-				| t!("IF") | t!("INFO")
-				| t!("INSERT") | t!("KILL")
-				| t!("LIVE") | t!("OPTION")
-				| t!("REBUILD") | t!("RETURN")
-				| t!("RELATE") | t!("REMOVE")
-				| t!("SELECT") | t!("LET")
-				| t!("SHOW") | t!("SLEEP")
-				| t!("THROW") | t!("UPDATE")
-				| t!("UPSERT") | t!("USE")
+			t!("ACCESS")
+				| t!("ALTER") | t!("ANALYZE")
+				| t!("BEGIN") | t!("BREAK")
+				| t!("CANCEL") | t!("COMMIT")
+				| t!("CONTINUE") | t!("CREATE")
+				| t!("DEFINE") | t!("DELETE")
+				| t!("FOR") | t!("IF")
+				| t!("INFO") | t!("INSERT")
+				| t!("KILL") | t!("LIVE")
+				| t!("OPTION") | t!("REBUILD")
+				| t!("RETURN") | t!("RELATE")
+				| t!("REMOVE") | t!("SELECT")
+				| t!("LET") | t!("SHOW")
+				| t!("SLEEP") | t!("THROW")
+				| t!("UPDATE") | t!("UPSERT")
+				| t!("USE")
 		)
 	}
 
@@ -108,6 +113,18 @@ impl Parser<'_> {
 	async fn parse_stmt_inner(&mut self, ctx: &mut Stk) -> ParseResult<Statement> {
 		let token = self.peek();
 		match token.kind {
+			t!("ACCESS") => {
+				// TODO(gguillemas): Remove this once bearer access is no longer experimental.
+				if !*EXPERIMENTAL_BEARER_ACCESS {
+					unexpected!(
+						self,
+						t!("ACCESS"),
+						"the experimental bearer access feature to be enabled"
+					);
+				}
+				self.pop_peek();
+				self.parse_access().map(Statement::Access)
+			}
 			t!("ALTER") => {
 				self.pop_peek();
 				ctx.run(|ctx| self.parse_alter_stmt(ctx)).await.map(Statement::Alter)
@@ -190,7 +207,7 @@ impl Parser<'_> {
 			}
 			t!("REMOVE") => {
 				self.pop_peek();
-				self.parse_remove_stmt().map(Statement::Remove)
+				ctx.run(|ctx| self.parse_remove_stmt(ctx)).await.map(Statement::Remove)
 			}
 			t!("SELECT") => {
 				self.pop_peek();
@@ -291,7 +308,7 @@ impl Parser<'_> {
 			}
 			t!("REMOVE") => {
 				self.pop_peek();
-				self.parse_remove_stmt().map(Entry::Remove)
+				self.parse_remove_stmt(ctx).await.map(Entry::Remove)
 			}
 			t!("SELECT") => {
 				self.pop_peek();
@@ -334,6 +351,7 @@ impl Parser<'_> {
 					return Statement::Set(crate::sql::statements::SetStatement {
 						name: x.0 .0,
 						what: r,
+						kind: None,
 					});
 				}
 				Statement::Value(Value::Expression(x))
@@ -354,11 +372,51 @@ impl Parser<'_> {
 					return Entry::Set(crate::sql::statements::SetStatement {
 						name: x.0 .0,
 						what: r,
+						kind: None,
 					});
 				}
 				Entry::Value(Value::Expression(x))
 			}
 			_ => Entry::Value(value),
+		}
+	}
+
+	/// Parsers an access statement.
+	fn parse_access(&mut self) -> ParseResult<AccessStatement> {
+		let ac = self.next_token_value()?;
+		let base = self.eat(t!("ON")).then(|| self.parse_base(false)).transpose()?;
+		match self.peek_kind() {
+			t!("GRANT") => {
+				self.pop_peek();
+				// TODO(gguillemas): Implement rest of the syntax.
+				expected!(self, t!("FOR"));
+				expected!(self, t!("USER"));
+				let user = self.next_token_value()?;
+				Ok(AccessStatement::Grant(AccessStatementGrant {
+					ac,
+					base,
+					subject: Some(Subject::User(user)),
+				}))
+			}
+			t!("LIST") => {
+				self.pop_peek();
+				// TODO(gguillemas): Implement rest of the syntax.
+				Ok(AccessStatement::List(AccessStatementList {
+					ac,
+					base,
+				}))
+			}
+			t!("REVOKE") => {
+				self.pop_peek();
+				let gr = self.next_token_value()?;
+				Ok(AccessStatement::Revoke(AccessStatementRevoke {
+					ac,
+					base,
+					gr,
+				}))
+			}
+			// TODO(gguillemas): Implement rest of the statements.
+			x => unexpected!(self, x, "an implemented statement"),
 		}
 	}
 
@@ -596,11 +654,17 @@ impl Parser<'_> {
 	/// Expects `LET` to already be consumed.
 	pub(crate) async fn parse_let_stmt(&mut self, ctx: &mut Stk) -> ParseResult<SetStatement> {
 		let name = self.next_token_value::<Param>()?.0 .0;
+		let kind = if self.eat(t!(":")) {
+			Some(self.parse_inner_kind(ctx).await?)
+		} else {
+			None
+		};
 		expected!(self, t!("="));
 		let what = self.parse_value(ctx).await?;
 		Ok(SetStatement {
 			name,
 			what,
+			kind,
 		})
 	}
 

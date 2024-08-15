@@ -794,9 +794,6 @@ allow_unsafe = true
 [pkg.time]
 allow_unsafe = true
 
-[pkg.crossbeam-channel]
-allow_unsafe = true
-
 [pkg.thread_local]
 allow_unsafe = true
 
@@ -807,9 +804,6 @@ build.allow_apis = [
 allow_unsafe = true
 
 [pkg.utf8parse]
-allow_unsafe = true
-
-[pkg.retain_mut]
 allow_unsafe = true
 
 [pkg.base64ct]
@@ -989,9 +983,6 @@ allow_unsafe = true
 [pkg.crossbeam-deque]
 allow_unsafe = true
 
-[pkg.crossbeam-queue]
-allow_unsafe = true
-
 [pkg.anstream]
 allow_unsafe = true
 
@@ -1012,6 +1003,9 @@ allow_unsafe = true
 
 [pkg.hyper-util]
 allow_unsafe = true
+allow_apis = [
+    "net",
+]
 
 [pkg.terminal_size]
 allow_unsafe = true
@@ -1028,20 +1022,10 @@ allow_unsafe = true
 [pkg.geo]
 allow_unsafe = true
 
-[pkg.nanorand]
-allow_unsafe = true
-
 [pkg.futures-lite]
 allow_unsafe = true
 
 [pkg.half]
-allow_unsafe = true
-
-[pkg.http-types]
-build.allow_apis = [
-    "fs",
-    "process",
-]
 allow_unsafe = true
 
 [pkg.any_ascii]
@@ -1114,9 +1098,6 @@ allow_apis = [
 [pkg.predicates]
 allow_unsafe = true
 
-[pkg.futures-timer]
-allow_unsafe = true
-
 [pkg.rustyline]
 allow_unsafe = true
 allow_apis = [
@@ -1169,12 +1150,18 @@ allow_apis = [
 allow_apis = [
     "fs",
 ]
+build.allow_build_instructions = [
+    "cargo::rustc-check-cfg=*",
+]
 
 [pkg.surrealdb-core]
 allow_unsafe = true
 allow_apis = [
     "net",
     "fs",
+]
+build.allow_build_instructions = [
+    "cargo::rustc-check-cfg=*",
 ]
 
 [pkg.assert_fs]
@@ -1365,3 +1352,12 @@ allow_unsafe = true
 allow_apis = [
     "fs",
 ]
+
+[pkg.atomic-waker]
+allow_unsafe = true
+
+[pkg.rustls-pki-types]
+allow_unsafe = true
+
+[pkg.castaway]
+allow_unsafe = true

@@ -4,9 +4,9 @@ use crate::net::output;
 use axum::extract::DefaultBodyLimit;
 use axum::response::IntoResponse;
 use axum::routing::options;
-use axum::{Extension, Router, TypedHeader};
+use axum::{Extension, Router};
+use axum_extra::TypedHeader;
 use bytes::Bytes;
-use http_body::Body as HttpBody;
 use serde::Serialize;
 use surrealdb::dbs::Session;
 use surrealdb::sql::Value;
@@ -34,11 +34,8 @@ impl Success {
 	}
 }
 
-pub(super) fn router<S, B>() -> Router<S, B>
+pub(super) fn router<S>() -> Router<S>
 where
-	B: HttpBody + Send + 'static,
-	B::Data: Send,
-	B::Error: std::error::Error + Send + Sync + 'static,
 	S: Clone + Send + Sync + 'static,
 {
 	Router::new()

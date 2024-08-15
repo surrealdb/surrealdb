@@ -54,7 +54,7 @@ pub trait Transaction {
 		K: Into<Key> + Sprintable + Debug;
 
 	/// Fetch a key from the datastore.
-	async fn get<K>(&mut self, key: K) -> Result<Option<Val>, Error>
+	async fn get<K>(&mut self, key: K, version: Option<u64>) -> Result<Option<Val>, Error>
 	where
 		K: Into<Key> + Sprintable + Debug;
 
@@ -97,7 +97,12 @@ pub trait Transaction {
 	/// Retrieve a specific range of keys from the datastore.
 	///
 	/// This function fetches the full range of key-value pairs, in a single request to the underlying datastore.
-	async fn scan<K>(&mut self, rng: Range<K>, limit: u32) -> Result<Vec<(Key, Val)>, Error>
+	async fn scan<K>(
+		&mut self,
+		rng: Range<K>,
+		limit: u32,
+		version: Option<u64>,
+	) -> Result<Vec<(Key, Val)>, Error>
 	where
 		K: Into<Key> + Sprintable + Debug;
 
@@ -116,7 +121,7 @@ pub trait Transaction {
 		// Continue with function logic
 		let mut out = Vec::with_capacity(keys.len());
 		for key in keys.into_iter() {
-			if let Some(val) = self.get(key).await? {
+			if let Some(val) = self.get(key, None).await? {
 				out.push(val);
 			} else {
 				out.push(vec![]);
@@ -239,7 +244,7 @@ pub trait Transaction {
 		let end: Key = rng.end.into();
 		// Scan for the next batch
 		let res = if values {
-			self.scan(beg..end.clone(), batch).await?
+			self.scan(beg..end.clone(), batch, None).await?
 		} else {
 			self.keys(beg..end.clone(), batch)
 				.await?
@@ -288,7 +293,7 @@ pub trait Transaction {
 		// Calculate the version key
 		let key = key.into();
 		// Calculate the version number
-		let ver = match self.get(key.as_slice()).await? {
+		let ver = match self.get(key.as_slice(), None).await? {
 			Some(prev) => {
 				let res: Result<[u8; 10], Error> = match prev.as_slice().try_into() {
 					Ok(ba) => Ok(ba),

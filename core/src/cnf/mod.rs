@@ -51,3 +51,20 @@ pub static INSECURE_FORWARD_ACCESS_ERRORS: Lazy<bool> =
 /// If the environment variable is not present or cannot be parsed, a default value of 50,000 is used.
 pub static EXTERNAL_SORTING_BUFFER_LIMIT: Lazy<usize> =
 	lazy_env_parse!("SURREAL_EXTERNAL_SORTING_BUFFER_LIMIT", usize, 50_000);
+
+/// Enable experimental bearer access and stateful access grant management. Still under active development.
+/// Using this experimental feature may introduce risks related to breaking changes and security issues.
+#[cfg(not(test))]
+pub static EXPERIMENTAL_BEARER_ACCESS: Lazy<bool> =
+	lazy_env_parse!("SURREAL_EXPERIMENTAL_BEARER_ACCESS", bool, false);
+// Run tests with bearer access enabled as it introduces new functionality that needs to be tested.
+#[cfg(test)]
+pub static EXPERIMENTAL_BEARER_ACCESS: Lazy<bool> = Lazy::new(|| true);
+
+/// Used to limit allocation for builtin functions
+pub static FUNCTION_ALLOCATION_LIMIT: Lazy<usize> = once_cell::sync::Lazy::new(|| {
+	let n = std::env::var("SURREAL_FUNCTION_ALLOCATION_LIMIT")
+		.map(|s| s.parse::<u32>().unwrap_or(20))
+		.unwrap_or(20);
+	2usize.pow(n)
+});

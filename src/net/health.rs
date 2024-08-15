@@ -4,12 +4,10 @@ use axum::response::IntoResponse;
 use axum::routing::get;
 use axum::Extension;
 use axum::Router;
-use http_body::Body as HttpBody;
 use surrealdb::kvs::{LockType::*, TransactionType::*};
 
-pub(super) fn router<S, B>() -> Router<S, B>
+pub(super) fn router<S>() -> Router<S>
 where
-	B: HttpBody + Send + 'static,
 	S: Clone + Send + Sync + 'static,
 {
 	Router::new().route("/health", get(handler))
@@ -27,7 +25,7 @@ async fn handler(Extension(state): Extension<AppState>) -> impl IntoResponse {
 			// Cancel the transaction
 			trace!("Health endpoint cancelling transaction");
 			// Attempt to fetch data
-			match tx.get(vec![0x00]).await {
+			match tx.get(vec![0x00], None).await {
 				Err(_) => {
 					// Ensure the transaction is cancelled
 					let _ = tx.cancel().await;
