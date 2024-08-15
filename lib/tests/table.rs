@@ -260,6 +260,16 @@ async fn define_foreign_table_with_cond_group_sum() -> Result<(), Error> {
 }
 
 #[tokio::test]
+async fn define_foreign_table_with_cond_and_group_stddev() -> Result<(), Error> {
+	define_foreign_table_group(true, "math::stddev(value)").await
+}
+
+#[tokio::test]
+async fn define_foreign_table_with_cond_and_group_variance() -> Result<(), Error> {
+	define_foreign_table_group(true, "math::variance(value)").await
+}
+
+#[tokio::test]
 async fn define_foreign_table_with_no_cond_and_group_mean() -> Result<(), Error> {
 	define_foreign_table_group(false, "math::mean(value)").await
 }
@@ -282,4 +292,14 @@ async fn define_foreign_table_with_no_cond_and_group_max() -> Result<(), Error> 
 #[tokio::test]
 async fn define_foreign_table_with_no_cond_and_group_sum() -> Result<(), Error> {
 	define_foreign_table_group(false, "math::sum(value)").await
+}
+
+#[tokio::test]
+async fn define_foreign_table_with_no_cond_and_group_stddev() -> Result<(), Error> {
+	define_foreign_table_group(false, "math::stddev(value)").await
+}
+
+#[tokio::test]
+async fn define_foreign_table_with_no_cond_and_group_variance() -> Result<(), Error> {
+	define_foreign_table_group(false, "math::variance(value)").await
 }
