@@ -118,7 +118,7 @@ impl FtIndex {
 		tt: TransactionType,
 	) -> Result<Self, Error> {
 		let state_key: Key = index_key_base.new_bs_key();
-		let state: State = if let Some(val) = txn.get(state_key.clone()).await? {
+		let state: State = if let Some(val) = txn.get(state_key.clone(), None).await? {
 			VersionedStore::try_from(val)?
 		} else {
 			State::default()
@@ -208,7 +208,9 @@ impl FtIndex {
 			}
 
 			// Get the term list
-			if let Some(term_list_vec) = tx.get(self.index_key_base.new_bk_key(doc_id)).await? {
+			if let Some(term_list_vec) =
+				tx.get(self.index_key_base.new_bk_key(doc_id), None).await?
+			{
 				let term_list = RoaringTreemap::deserialize_from(&mut term_list_vec.as_slice())?;
 				// Remove the postings
 				let mut p = self.postings.write().await;
@@ -280,7 +282,7 @@ impl FtIndex {
 
 		// Retrieve the existing terms for this document (if any)
 		let term_ids_key = self.index_key_base.new_bk_key(doc_id);
-		let mut old_term_ids = if let Some(val) = tx.get(term_ids_key.clone()).await? {
+		let mut old_term_ids = if let Some(val) = tx.get(term_ids_key.clone(), None).await? {
 			Some(RoaringTreemap::deserialize_from(&mut val.as_slice())?)
 		} else {
 			None

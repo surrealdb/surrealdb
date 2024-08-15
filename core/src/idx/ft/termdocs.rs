@@ -42,7 +42,7 @@ impl TermDocs {
 		term_id: TermId,
 	) -> Result<Option<RoaringTreemap>, Error> {
 		let key = self.index_key_base.new_bc_key(term_id);
-		if let Some(val) = tx.get(key).await? {
+		if let Some(val) = tx.get(key, None).await? {
 			let docs = RoaringTreemap::deserialize_from(&mut val.as_slice())?;
 			Ok(Some(docs))
 		} else {

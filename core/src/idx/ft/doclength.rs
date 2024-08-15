@@ -25,7 +25,7 @@ impl DocLengths {
 		cache_size: u32,
 	) -> Result<Self, Error> {
 		let state_key: Key = ikb.new_bl_key(None);
-		let state: BState = if let Some(val) = tx.get(state_key.clone()).await? {
+		let state: BState = if let Some(val) = tx.get(state_key.clone(), None).await? {
 			VersionedStore::try_from(val)?
 		} else {
 			BState::new(default_btree_order)

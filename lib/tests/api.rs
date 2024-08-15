@@ -468,6 +468,28 @@ mod api_integration {
 				panic!("query returned no record");
 			};
 			assert_eq!(name, "John v1");
+
+			let mut response = db
+				.query(format!("SELECT name FROM user VERSION d'{}'", version))
+				.await
+				.unwrap()
+				.check()
+				.unwrap();
+			let Some(name): Option<String> = response.take("name").unwrap() else {
+				panic!("query returned no record");
+			};
+			assert_eq!(name, "John v1");
+
+			let mut response = db
+				.query(format!("SELECT name FROM user:john VERSION d'{}'", version))
+				.await
+				.unwrap()
+				.check()
+				.unwrap();
+			let Some(name): Option<String> = response.take("name").unwrap() else {
+				panic!("query returned no record");
+			};
+			assert_eq!(name, "John v1");
 		}
 
 		include!("api/mod.rs");
