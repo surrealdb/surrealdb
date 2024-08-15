@@ -280,6 +280,32 @@ async fn function_array_distinct() -> Result<(), Error> {
 }
 
 #[tokio::test]
+async fn function_array_fill() -> Result<(), Error> {
+	let sql = r#"
+		RETURN array::fill([1,2,3,4,5], 10);
+		RETURN array::fill([1,2,3,4,5], 10, 0, 7);
+		RETURN array::fill([1,NONE,NONE,NONE,NONE], 10, 1);
+		RETURN array::fill([1,NONE,3,4,5], 10, 1, 2);
+		RETURN array::fill([1,2,3,4,5], 10, 1, 1);
+		RETURN array::fill([1,2,3,4,5], 10, 7, 7);
+		RETURN array::fill([1,2,3,4,5], 10, 7, 9);
+		RETURN array::fill([1,2,NONE,4,5], 10, -3, -2);
+	"#;
+	//
+	Test::new(sql)
+		.await?
+		.expect_val("[10,10,10,10,10]")?
+		.expect_val("[10,10,10,10,10]")?
+		.expect_val("[1,10,10,10,10]")?
+		.expect_val("[1,10,3,4,5]")?
+		.expect_val("[1,2,3,4,5]")?
+		.expect_val("[1,2,3,4,5]")?
+		.expect_val("[1,2,3,4,5]")?
+		.expect_val("[1,2,10,4,5]")?;
+	Ok(())
+}
+
+#[tokio::test]
 async fn function_array_filter_index() -> Result<(), Error> {
 	let sql = r#"RETURN array::filter_index([0, 1, 2], 1);
 RETURN array::filter_index([0, 0, 2], 0);
@@ -449,6 +475,17 @@ async fn function_array_intersect() -> Result<(), Error> {
 }
 
 #[tokio::test]
+async fn function_array_is_empty() -> Result<(), Error> {
+	let sql = r#"
+		RETURN array::is_empty([]);
+		RETURN array::is_empty([1,2,3,4,5]);
+	"#;
+	//
+	Test::new(sql).await?.expect_val("true")?.expect_val("false")?;
+	Ok(())
+}
+
+#[tokio::test]
 async fn function_string_join_arr() -> Result<(), Error> {
 	let sql = r#"
 		RETURN array::join([], "");
@@ -564,6 +601,16 @@ RETURN array::logical_xor([0, 1], []);"#,
 		&["[false, true, true, false]", r#"[false, "true", 1, 0]"#, "[0, 1]"],
 	)
 	.await?;
+	Ok(())
+}
+
+#[tokio::test]
+async fn function_array_map() -> Result<(), Error> {
+	let sql = r#"
+		RETURN array::map([1,2,3], |$n, $i| $n + $i);
+	"#;
+	//
+	Test::new(sql).await?.expect_val("[1, 3, 5]")?;
 	Ok(())
 }
 
@@ -730,6 +777,27 @@ async fn function_array_push() -> Result<(), Error> {
 }
 
 #[tokio::test]
+async fn function_array_range() -> Result<(), Error> {
+	let sql = r#"
+		RETURN array::range(1, 10);
+		RETURN array::range(3, 1);
+		RETURN array::range(44, 0);
+		RETURN array::range(0, -1);
+		RETURN array::range(0, -256);
+		RETURN array::range(9223372036854775800, 100);
+	"#;
+	//
+	Test::new(sql).await?
+		.expect_val("[1,2,3,4,5,6,7,8,9,10]")?
+		.expect_val("[3]")?
+		.expect_val("[]")?
+		.expect_error("Incorrect arguments for function array::range(). Argument 1 was the wrong type. Expected a positive number but found -1")?
+		.expect_error("Incorrect arguments for function array::range(). Argument 1 was the wrong type. Expected a positive number but found -256")?
+		.expect_error("Incorrect arguments for function array::range(). The range overflowed the maximum value for an integer")?;
+	Ok(())
+}
+
+#[tokio::test]
 async fn function_array_remove() -> Result<(), Error> {
 	let sql = r#"
 		RETURN array::remove([3], 0);
@@ -755,6 +823,27 @@ async fn function_array_remove() -> Result<(), Error> {
 	let val = Value::parse("[1,2,3]");
 	assert_eq!(tmp, val);
 	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn function_array_repeat() -> Result<(), Error> {
+	let sql = r#"
+		RETURN array::repeat(1, 10);
+		RETURN array::repeat("hello", 2);
+		RETURN array::repeat(NONE, 3);
+		RETURN array::repeat(44, 0);
+		RETURN array::repeat(0, -1);
+		RETURN array::repeat(0, -256);
+	"#;
+	//
+	Test::new(sql).await?
+		.expect_val("[1,1,1,1,1,1,1,1,1,1]")?
+		.expect_val(r#"["hello","hello"]"#)?
+		.expect_val("[NONE,NONE,NONE]")?
+		.expect_val("[]")?
+		.expect_error("Incorrect arguments for function array::repeat(). Output must not exceed 1048576 bytes.")?
+		.expect_error("Incorrect arguments for function array::repeat(). Output must not exceed 1048576 bytes.")?;
 	Ok(())
 }
 
@@ -983,6 +1072,27 @@ async fn function_array_sort_desc() -> Result<(), Error> {
 	let val = Value::parse("['text',4,4,3,2,1]");
 	assert_eq!(tmp, val);
 	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn function_array_swap() -> Result<(), Error> {
+	let sql = r#"
+		RETURN array::swap([1,2,3,4,5], 1, 2);
+		RETURN array::swap([1,2,3,4,5], 1, 1);
+		RETURN array::swap([1,2,3,4,5], -1, -2);
+		RETURN array::swap([1,2,3,4,5], -5, -4);
+		RETURN array::swap([1,2,3,4,5], 8, 1);
+		RETURN array::swap([1,2,3,4,5], 1, -8);
+	"#;
+	//
+	Test::new(sql).await?
+		.expect_val("[1,3,2,4,5]")?
+		.expect_val("[1,2,3,4,5]")?
+		.expect_val("[1,2,3,5,4]")?
+		.expect_val("[2,1,3,4,5]")?
+		.expect_error("Incorrect arguments for function array::swap(). Argument 1 is out of range. Expected a number between -5 and 5")?
+		.expect_error("Incorrect arguments for function array::swap(). Argument 2 is out of range. Expected a number between -5 and 5")?;
 	Ok(())
 }
 
@@ -6086,7 +6196,7 @@ pub async fn function_http_get_from_script() -> Result<(), Error> {
 
 #[cfg(not(feature = "http"))]
 #[tokio::test]
-pub async fn function_http_disabled() {
+pub async fn function_http_disabled() -> Result<(), Error> {
 	Test::new(
 		r#"
 	RETURN http::get({});
@@ -6097,8 +6207,7 @@ pub async fn function_http_disabled() {
 	RETURN http::delete({});
 	"#,
 	)
-	.await
-	.unwrap()
+	.await?
 	.expect_errors(&[
 		"Remote HTTP request functions are not enabled",
 		"Remote HTTP request functions are not enabled",
@@ -6106,8 +6215,8 @@ pub async fn function_http_disabled() {
 		"Remote HTTP request functions are not enabled",
 		"Remote HTTP request functions are not enabled",
 		"Remote HTTP request functions are not enabled",
-	])
-	.unwrap();
+	])?;
+	Ok(())
 }
 
 // Tests for custom defined functions
@@ -6240,6 +6349,7 @@ async fn function_idiom_chaining() -> Result<(), Error> {
 		// String is one of the types in the initial match statement,
 		// this test ensures that the dispatch macro does not exit early
 		"string".is_bool();
+		["1", "2"].join('').chain(|$v| <int> $v);
 	"#;
 	Test::new(sql)
 		.await?
@@ -6249,7 +6359,8 @@ async fn function_idiom_chaining() -> Result<(), Error> {
 		.expect_val("true")?
         .expect_error("There was a problem running the doesnt_exist() function. no such method found for the bool type")?
 	    .expect_val("true")?
-		.expect_val("false")?;
+		.expect_val("false")?
+        .expect_val("12")?;
 	Ok(())
 }
 

@@ -110,11 +110,11 @@ impl Transaction {
 
 	/// Fetch a key from the datastore.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
-	pub async fn get<K>(&self, key: K) -> Result<Option<Val>, Error>
+	pub async fn get<K>(&self, key: K, version: Option<u64>) -> Result<Option<Val>, Error>
 	where
 		K: Into<Key> + Debug,
 	{
-		self.lock().await.get(key).await
+		self.lock().await.get(key, version).await
 	}
 
 	/// Retrieve a batch set of keys from the datastore.
@@ -790,7 +790,7 @@ impl Transaction {
 		Ok(match res {
 			Ok(val) => val,
 			Err(cache) => {
-				let val = self.get(key).await?.ok_or(Error::NdNotFound {
+				let val = self.get(key, None).await?.ok_or(Error::NdNotFound {
 					value: id.to_string(),
 				})?;
 				let val: Node = val.into();
@@ -810,7 +810,7 @@ impl Transaction {
 		Ok(match res {
 			Ok(val) => val,
 			Err(cache) => {
-				let val = self.get(key).await?.ok_or(Error::UserRootNotFound {
+				let val = self.get(key, None).await?.ok_or(Error::UserRootNotFound {
 					value: us.to_owned(),
 				})?;
 				let val: DefineUserStatement = val.into();
@@ -830,7 +830,7 @@ impl Transaction {
 		Ok(match res {
 			Ok(val) => val,
 			Err(cache) => {
-				let val = self.get(key).await?.ok_or(Error::AccessRootNotFound {
+				let val = self.get(key, None).await?.ok_or(Error::AccessRootNotFound {
 					ac: ra.to_owned(),
 				})?;
 				let val: DefineAccessStatement = val.into();
@@ -854,7 +854,7 @@ impl Transaction {
 		Ok(match res {
 			Ok(val) => val,
 			Err(cache) => {
-				let val = self.get(key).await?.ok_or(Error::AccessGrantRootNotFound {
+				let val = self.get(key, None).await?.ok_or(Error::AccessGrantRootNotFound {
 					ac: ac.to_owned(),
 					gr: gr.to_owned(),
 				})?;
@@ -875,7 +875,7 @@ impl Transaction {
 		Ok(match res {
 			Ok(val) => val,
 			Err(cache) => {
-				let val = self.get(key).await?.ok_or(Error::NsNotFound {
+				let val = self.get(key, None).await?.ok_or(Error::NsNotFound {
 					value: ns.to_owned(),
 				})?;
 				let val: DefineNamespaceStatement = val.into();
@@ -895,7 +895,7 @@ impl Transaction {
 		Ok(match res {
 			Ok(val) => val,
 			Err(cache) => {
-				let val = self.get(key).await?.ok_or(Error::UserNsNotFound {
+				let val = self.get(key, None).await?.ok_or(Error::UserNsNotFound {
 					value: us.to_owned(),
 					ns: ns.to_owned(),
 				})?;
@@ -920,7 +920,7 @@ impl Transaction {
 		Ok(match res {
 			Ok(val) => val,
 			Err(cache) => {
-				let val = self.get(key).await?.ok_or(Error::AccessNsNotFound {
+				let val = self.get(key, None).await?.ok_or(Error::AccessNsNotFound {
 					ac: na.to_owned(),
 					ns: ns.to_owned(),
 				})?;
@@ -946,7 +946,7 @@ impl Transaction {
 		Ok(match res {
 			Ok(val) => val,
 			Err(cache) => {
-				let val = self.get(key).await?.ok_or(Error::AccessGrantNsNotFound {
+				let val = self.get(key, None).await?.ok_or(Error::AccessGrantNsNotFound {
 					ac: ac.to_owned(),
 					gr: gr.to_owned(),
 					ns: ns.to_owned(),
@@ -968,7 +968,7 @@ impl Transaction {
 		Ok(match res {
 			Ok(val) => val,
 			Err(cache) => {
-				let val = self.get(key).await?.ok_or(Error::DbNotFound {
+				let val = self.get(key, None).await?.ok_or(Error::DbNotFound {
 					value: db.to_owned(),
 				})?;
 				let val: DefineDatabaseStatement = val.into();
@@ -993,7 +993,7 @@ impl Transaction {
 		Ok(match res {
 			Ok(val) => val,
 			Err(cache) => {
-				let val = self.get(key).await?.ok_or(Error::UserDbNotFound {
+				let val = self.get(key, None).await?.ok_or(Error::UserDbNotFound {
 					value: us.to_owned(),
 					ns: ns.to_owned(),
 					db: db.to_owned(),
@@ -1020,7 +1020,7 @@ impl Transaction {
 		Ok(match res {
 			Ok(val) => val,
 			Err(cache) => {
-				let val = self.get(key).await?.ok_or(Error::AccessDbNotFound {
+				let val = self.get(key, None).await?.ok_or(Error::AccessDbNotFound {
 					ac: da.to_owned(),
 					ns: ns.to_owned(),
 					db: db.to_owned(),
@@ -1048,7 +1048,7 @@ impl Transaction {
 		Ok(match res {
 			Ok(val) => val,
 			Err(cache) => {
-				let val = self.get(key).await?.ok_or(Error::AccessGrantDbNotFound {
+				let val = self.get(key, None).await?.ok_or(Error::AccessGrantDbNotFound {
 					ac: ac.to_owned(),
 					gr: gr.to_owned(),
 					ns: ns.to_owned(),
@@ -1077,7 +1077,7 @@ impl Transaction {
 		Ok(match res {
 			Ok(val) => val,
 			Err(cache) => {
-				let val = self.get(key).await?.ok_or(Error::MlNotFound {
+				let val = self.get(key, None).await?.ok_or(Error::MlNotFound {
 					value: format!("{ml}<{vn}>"),
 				})?;
 				let val: DefineModelStatement = val.into();
@@ -1102,7 +1102,7 @@ impl Transaction {
 		Ok(match res {
 			Ok(val) => val,
 			Err(cache) => {
-				let val = self.get(key).await?.ok_or(Error::AzNotFound {
+				let val = self.get(key, None).await?.ok_or(Error::AzNotFound {
 					value: az.to_owned(),
 				})?;
 				let val: DefineAnalyzerStatement = val.into();
@@ -1127,7 +1127,7 @@ impl Transaction {
 		Ok(match res {
 			Ok(val) => val,
 			Err(cache) => {
-				let val = self.get(key).await?.ok_or(Error::FcNotFound {
+				let val = self.get(key, None).await?.ok_or(Error::FcNotFound {
 					value: fc.to_owned(),
 				})?;
 				let val: DefineFunctionStatement = val.into();
@@ -1152,7 +1152,7 @@ impl Transaction {
 		Ok(match res {
 			Ok(val) => val,
 			Err(cache) => {
-				let val = self.get(key).await?.ok_or(Error::PaNotFound {
+				let val = self.get(key, None).await?.ok_or(Error::PaNotFound {
 					value: pa.to_owned(),
 				})?;
 				let val: DefineParamStatement = val.into();
@@ -1177,7 +1177,7 @@ impl Transaction {
 		Ok(match res {
 			Ok(val) => val,
 			Err(cache) => {
-				let val = self.get(key).await?.ok_or(Error::TbNotFound {
+				let val = self.get(key, None).await?.ok_or(Error::TbNotFound {
 					value: tb.to_owned(),
 				})?;
 				let val: DefineTableStatement = val.into();
@@ -1203,7 +1203,7 @@ impl Transaction {
 		Ok(match res {
 			Ok(val) => val,
 			Err(cache) => {
-				let val = self.get(key).await?.ok_or(Error::EvNotFound {
+				let val = self.get(key, None).await?.ok_or(Error::EvNotFound {
 					value: ev.to_owned(),
 				})?;
 				let val: DefineEventStatement = val.into();
@@ -1229,7 +1229,7 @@ impl Transaction {
 		Ok(match res {
 			Ok(val) => val,
 			Err(cache) => {
-				let val = self.get(key).await?.ok_or(Error::FdNotFound {
+				let val = self.get(key, None).await?.ok_or(Error::FdNotFound {
 					value: fd.to_owned(),
 				})?;
 				let val: DefineFieldStatement = val.into();
@@ -1255,7 +1255,7 @@ impl Transaction {
 		Ok(match res {
 			Ok(val) => val,
 			Err(cache) => {
-				let val = self.get(key).await?.ok_or(Error::IxNotFound {
+				let val = self.get(key, None).await?.ok_or(Error::IxNotFound {
 					value: ix.to_owned(),
 				})?;
 				let val: DefineIndexStatement = val.into();
@@ -1282,7 +1282,7 @@ impl Transaction {
 			// The entry is in the cache
 			Ok(val) => Ok(val.into_val()),
 			// The entry is not in the cache
-			Err(cache) => match self.get(key).await? {
+			Err(cache) => match self.get(key, None).await? {
 				// The value exists in the datastore
 				Some(val) => {
 					let val = Entry::Val(Arc::new(val.into()));
@@ -1445,7 +1445,7 @@ impl Transaction {
 			// The entry is not in the cache
 			Err(cache) => {
 				// Try to fetch the value from the datastore
-				let res = self.get(&key).await?.ok_or(Error::NsNotFound {
+				let res = self.get(&key, None).await?.ok_or(Error::NsNotFound {
 					value: ns.to_owned(),
 				});
 				// Check whether the value exists in the datastore
@@ -1498,7 +1498,7 @@ impl Transaction {
 			// The entry is not in the cache
 			Err(cache) => {
 				// Try to fetch the value from the datastore
-				let res = self.get(&key).await?.ok_or(Error::DbNotFound {
+				let res = self.get(&key, None).await?.ok_or(Error::DbNotFound {
 					value: db.to_owned(),
 				});
 				// Check whether the value exists in the datastore
@@ -1566,7 +1566,7 @@ impl Transaction {
 			// The entry is not in the cache
 			Err(cache) => {
 				// Try to fetch the value from the datastore
-				let res = self.get(&key).await?.ok_or(Error::TbNotFound {
+				let res = self.get(&key, None).await?.ok_or(Error::TbNotFound {
 					value: tb.to_owned(),
 				});
 				// Check whether the value exists in the datastore

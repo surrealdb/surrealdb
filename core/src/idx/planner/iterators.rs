@@ -526,7 +526,7 @@ impl UniqueEqualThingIterator {
 
 	async fn next_batch<B: IteratorBatch>(&mut self, tx: &Transaction) -> Result<B, Error> {
 		if let Some(key) = self.key.take() {
-			if let Some(val) = tx.get(key).await? {
+			if let Some(val) = tx.get(key, None).await? {
 				let rid: Thing = val.into();
 				let record = (rid.into(), self.irf.into(), None);
 				return Ok(B::from_one(record));
@@ -617,7 +617,7 @@ impl UniqueRangeThingIterator {
 		}
 		let end = self.r.end.clone();
 		if self.r.matches(&end) {
-			if let Some(v) = tx.get(end).await? {
+			if let Some(v) = tx.get(end, None).await? {
 				let rid: Thing = v.into();
 				records.add((rid.into(), self.irf.into(), None));
 			}
@@ -666,7 +666,7 @@ impl UniqueUnionThingIterator {
 			if ctx.is_done() {
 				break;
 			}
-			if let Some(val) = tx.get(key).await? {
+			if let Some(val) = tx.get(key, None).await? {
 				let rid: Thing = val.into();
 				results.add((rid.into(), self.irf.into(), None));
 				if results.len() >= limit {

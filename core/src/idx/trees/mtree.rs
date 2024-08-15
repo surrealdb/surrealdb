@@ -57,7 +57,7 @@ impl MTreeIndex {
 			DocIds::new(ixs, txn, tt, ikb.clone(), p.doc_ids_order, p.doc_ids_cache).await?,
 		));
 		let state_key = ikb.new_vm_key(None);
-		let state: MState = if let Some(val) = txn.get(state_key.clone()).await? {
+		let state: MState = if let Some(val) = txn.get(state_key.clone(), None).await? {
 			MState::try_from_val(val)?
 		} else {
 			MState::new(p.capacity)
