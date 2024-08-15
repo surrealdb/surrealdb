@@ -198,6 +198,7 @@ impl Parser<'_> {
 					if_exists,
 				})
 			}
+			// TODO(raphaeldarley): add Config here
 			x => unexpected!(self, x, "a remove statement keyword"),
 		};
 		Ok(res)

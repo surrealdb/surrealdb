@@ -3,6 +3,8 @@ use reblessive::Stk;
 use crate::cnf::EXPERIMENTAL_BEARER_ACCESS;
 use crate::sql::access_type::JwtAccessVerify;
 use crate::sql::index::HnswParams;
+use crate::sql::statements::define::config::graphql::GraphQLConfig;
+use crate::sql::statements::define::DefineConfigStatement;
 use crate::{
 	sql::{
 		access_type,
@@ -10,10 +12,10 @@ use crate::{
 		filter::Filter,
 		index::{Distance, VectorType},
 		statements::{
-			DefineAccessStatement, DefineAnalyzerStatement, DefineDatabaseStatement,
-			DefineEventStatement, DefineFieldStatement, DefineFunctionStatement,
-			DefineIndexStatement, DefineNamespaceStatement, DefineParamStatement, DefineStatement,
-			DefineTableStatement, DefineUserStatement,
+			define::config::graphql, DefineAccessStatement, DefineAnalyzerStatement,
+			DefineDatabaseStatement, DefineEventStatement, DefineFieldStatement,
+			DefineFunctionStatement, DefineIndexStatement, DefineNamespaceStatement,
+			DefineParamStatement, DefineStatement, DefineTableStatement, DefineUserStatement,
 		},
 		table_type,
 		tokenizer::Tokenizer,
@@ -53,6 +55,7 @@ impl Parser<'_> {
 			}
 			t!("ANALYZER") => self.parse_define_analyzer().map(DefineStatement::Analyzer),
 			t!("ACCESS") => self.parse_define_access(ctx).await.map(DefineStatement::Access),
+			t!("CONFIG") => self.parse_define_config().await.map(DefineStatement::Config),
 			x => unexpected!(self, x, "a define statement keyword"),
 		}
 	}
@@ -1189,6 +1192,65 @@ impl Parser<'_> {
 			}
 		}
 		Ok(res)
+	}
+
+	pub async fn parse_define_config(&mut self) -> ParseResult<DefineConfigStatement> {
+		let (if_not_exists, overwrite) = if self.eat(t!("IF")) {
+			expected!(self, t!("NOT"));
+			expected!(self, t!("EXISTS"));
+			(true, false)
+		} else if self.eat(t!("OVERWRITE")) {
+			(false, true)
+		} else {
+			(false, false)
+		};
+
+		match self.peek_kind() {
+			t!("GRAPHQL") => self.parse_graphql_config().await.map(DefineConfigStatement::GraphQL),
+			_ => todo!(),
+		}
+	}
+
+	pub async fn parse_graphql_config(&mut self) -> ParseResult<GraphQLConfig> {
+		use graphql::*;
+		// let mut tmp = GraphQLConfig::default();
+		let mut tmp_tables = Option::<TablesConfig>::None;
+		let mut tmp_fncs = Option::<FunctionsConfig>::None;
+		loop {
+			match self.peek_kind() {
+				t!("TABLES") => {
+					if tmp_tables.is_some() {
+						todo!()
+					}
+					self.pop_peek();
+
+					match self.peek_kind() {
+						t!("INCLUDE") => {}
+						// t!("EXCLUDE") => {}
+						t!("NONE") => tmp_tables = Some(TablesConfig::None),
+						// t!("AUTO") => tmp_tables = Some(TablesConfig::Auto),
+						_ => todo!(),
+					}
+				}
+				t!("FUNCTIONS") => {
+					if tmp_fncs.is_some() {
+						todo!()
+					}
+					self.pop_peek();
+
+					match self.peek_kind() {
+						t!("INCLUDE") => {}
+						// t!("EXCLUDE") => {}
+						t!("NONE") => tmp_tables = Some(TablesConfig::None),
+						// t!("AUTO") => tmp_tables = Some(TablesConfig::Auto),
+						_ => todo!(),
+					}
+				}
+				_ => break,
+			}
+		}
+
+		todo!()
 	}
 
 	pub fn parse_relation_schema(&mut self) -> ParseResult<table_type::Relation> {

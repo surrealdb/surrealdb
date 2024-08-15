@@ -1,4 +1,4 @@
-mod graphql;
+pub mod graphql;
 
 use crate::ctx::Context;
 use crate::dbs::Options;

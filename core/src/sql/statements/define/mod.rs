@@ -1,6 +1,6 @@
 mod access;
 mod analyzer;
-mod config;
+pub mod config;
 mod database;
 mod event;
 mod field;

@@ -13,7 +13,7 @@ use revision::revisioned;
 use serde::{Deserialize, Serialize};
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub struct GraphQLConfig {
@@ -22,12 +22,13 @@ pub struct GraphQLConfig {
 }
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub enum TablesConfig {
-	Auto,
+	#[default]
 	None,
+	Auto,
 	Include(Vec<TableConfig>),
 	Exclude(Vec<TableConfig>),
 }
@@ -42,12 +43,13 @@ pub struct TableConfig {
 }
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub enum FunctionsConfig {
-	Auto,
+	#[default]
 	None,
+	Auto,
 	Include(Vec<Ident>),
 	Exclude(Vec<Ident>),
 }
@@ -98,7 +100,7 @@ impl Display for TablesConfig {
 
 impl Display for TableConfig {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f,)?;
+		write!(f, "todo")?;
 		Ok(())
 	}
 }

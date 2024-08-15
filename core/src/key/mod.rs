@@ -35,6 +35,7 @@
 /// crate::key::database::ts             /*{ns}*{db}!ts{ts}
 /// crate::key::database::us             /*{ns}*{db}!us{us}
 /// crate::key::database::vs             /*{ns}*{db}!vs
+/// crate::key::database::cg             /*{ns}*{db}!cg{ty}
 ///
 /// crate::key::table::all               /*{ns}*{db}*{tb}
 /// crate::key::table::ev                /*{ns}*{db}*{tb}!ev{ev}
