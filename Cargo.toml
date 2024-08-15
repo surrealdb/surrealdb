@@ -81,17 +81,9 @@ http-body = "1.0.0"
 http-body-util = "0.1.1"
 hyper = "1.2.0"
 once_cell = "1.18.0"
-
-tracing = "0.1"
-tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }
-# OpenTelemetry versions are dependant on tracing-opentelemetry. See https://github.com/open-telemetry/opentelemetry-rust/issues/1571
-# Make sure to update the versions of the OpenTelemetry crates if you update the version of tracing-opentelemetry.
-# See matching versions here: https://github.com/tokio-rs/tracing-opentelemetry/blob/v0.1.x/Cargo.toml
-tracing-opentelemetry = "0.25.0"
 opentelemetry = { version = "0.24" }
 opentelemetry_sdk = { version = "0.24", features = ["rt-tokio"] }
 opentelemetry-otlp = { version = "0.17.0", features = ["metrics"] }
-
 pin-project-lite = "0.2.13"
 pprof = { version = "0.13.0", features = [
     "flamegraph",
@@ -140,6 +132,9 @@ tower-http = { version = "0.5.2", features = [
     "add-extension",
     "compression-full",
 ] }
+tracing = "0.1"
+tracing-opentelemetry = "0.25.0"
+tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }
 urlencoding = "2.1.3"
 uuid = { version = "1.6.1", features = ["serde", "js", "v4", "v7"] }
 tokio-tungstenite = "0.23.0"
