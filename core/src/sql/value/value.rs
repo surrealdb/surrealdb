@@ -28,7 +28,7 @@ use std::cmp::Ordering;
 use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::fmt::{self, Display, Formatter, Write};
-use std::ops::Deref;
+use std::ops::{Bound, Deref};
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Value";
 
@@ -2198,6 +2198,10 @@ impl Value {
 		match self {
 			// Arrays are allowed
 			Value::Array(v) => Ok(v),
+			Value::Range(r) => {
+				let range: std::ops::Range<i64> = r.deref().to_owned().try_into()?;
+				Ok(range.into_iter().map(Value::from).collect::<Vec<Value>>().into())
+			}
 			// Anything else raises an error
 			_ => Err(Error::ConvertTo {
 				from: self,
@@ -2580,6 +2584,19 @@ impl Value {
 				Value::Geometry(w) => v.contains(w),
 				_ => false,
 			},
+			Value::Range(r) => {
+				let beg = match &r.beg {
+					Bound::Unbounded => true,
+					Bound::Included(beg) => beg.le(other),
+					Bound::Excluded(beg) => beg.lt(other),
+				};
+
+				beg && match &r.end {
+					Bound::Unbounded => true,
+					Bound::Included(end) => end.ge(other),
+					Bound::Excluded(end) => end.gt(other),
+				}
+			}
 			_ => false,
 		}
 	}

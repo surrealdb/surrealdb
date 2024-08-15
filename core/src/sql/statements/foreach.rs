@@ -8,6 +8,7 @@ use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display};
+use std::ops::Deref;
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
@@ -35,70 +36,74 @@ impl ForeachStatement {
 		doc: Option<&CursorDoc>,
 	) -> Result<Value, Error> {
 		// Check the loop data
-		match &self.range.compute(stk, ctx, opt, doc).await? {
-			Value::Array(arr) => {
-				// Loop over the values
-				'foreach: for v in arr.iter() {
-					// Duplicate context
-					let ctx = MutableContext::new(ctx).freeze();
-					// Set the current parameter
-					let key = self.param.0.to_raw();
-					let val = stk.run(|stk| v.compute(stk, &ctx, opt, doc)).await?;
-					let mut ctx = MutableContext::unfreeze(ctx)?;
-					ctx.add_value(key, val.into());
-					let mut ctx = ctx.freeze();
-					// Loop over the code block statements
-					for v in self.block.iter() {
-						// Compute each block entry
-						let res = match v {
-							Entry::Set(v) => {
-								let val = stk.run(|stk| v.compute(stk, &ctx, opt, doc)).await?;
-								let mut c = MutableContext::unfreeze(ctx)?;
-								c.add_value(v.name.to_owned(), val.into());
-								ctx = c.freeze();
-								Ok(Value::None)
-							}
-							Entry::Value(v) => stk.run(|stk| v.compute(stk, &ctx, opt, doc)).await,
-							Entry::Break(v) => v.compute(&ctx, opt, doc).await,
-							Entry::Continue(v) => v.compute(&ctx, opt, doc).await,
-							Entry::Foreach(v) => {
-								stk.run(|stk| v.compute(stk, &ctx, opt, doc)).await
-							}
-							Entry::Ifelse(v) => stk.run(|stk| v.compute(stk, &ctx, opt, doc)).await,
-							Entry::Select(v) => stk.run(|stk| v.compute(stk, &ctx, opt, doc)).await,
-							Entry::Create(v) => stk.run(|stk| v.compute(stk, &ctx, opt, doc)).await,
-							Entry::Upsert(v) => stk.run(|stk| v.compute(stk, &ctx, opt, doc)).await,
-							Entry::Update(v) => stk.run(|stk| v.compute(stk, &ctx, opt, doc)).await,
-							Entry::Delete(v) => stk.run(|stk| v.compute(stk, &ctx, opt, doc)).await,
-							Entry::Relate(v) => stk.run(|stk| v.compute(stk, &ctx, opt, doc)).await,
-							Entry::Insert(v) => stk.run(|stk| v.compute(stk, &ctx, opt, doc)).await,
-							Entry::Define(v) => v.compute(stk, &ctx, opt, doc).await,
-							Entry::Alter(v) => v.compute(stk, &ctx, opt, doc).await,
-							Entry::Rebuild(v) => v.compute(stk, &ctx, opt, doc).await,
-							Entry::Remove(v) => v.compute(&ctx, opt, doc).await,
-							Entry::Output(v) => {
-								return stk.run(|stk| v.compute(stk, &ctx, opt, doc)).await;
-							}
-							Entry::Throw(v) => {
-								return stk.run(|stk| v.compute(stk, &ctx, opt, doc)).await;
-							}
-						};
-						// Catch any special errors
-						match res {
-							Err(Error::Continue) => continue 'foreach,
-							Err(Error::Break) => return Ok(Value::None),
-							Err(err) => return Err(err),
-							_ => (),
-						};
-					}
-				}
-				// Ok all good
-				Ok(Value::None)
+		let iter = match &self.range.compute(stk, ctx, opt, doc).await? {
+			Value::Array(arr) => arr.to_owned().into_iter(),
+			Value::Range(r) => {
+				let r: std::ops::Range<i64> = r.deref().to_owned().try_into()?;
+				r.map(Value::from).collect::<Vec<Value>>().into_iter()
 			}
-			v => Err(Error::InvalidStatementTarget {
-				value: v.to_string(),
-			}),
+			v => {
+				return Err(Error::InvalidStatementTarget {
+					value: v.to_string(),
+				})
+			}
+		};
+
+		// Loop over the values
+		'foreach: for v in iter {
+			// Duplicate context
+			let ctx = MutableContext::new(ctx).freeze();
+			// Set the current parameter
+			let key = self.param.0.to_raw();
+			let val: Value = v.into();
+			let mut ctx = MutableContext::unfreeze(ctx)?;
+			ctx.add_value(key, val.into());
+			let mut ctx = ctx.freeze();
+			// Loop over the code block statements
+			for v in self.block.iter() {
+				// Compute each block entry
+				let res = match v {
+					Entry::Set(v) => {
+						let val = stk.run(|stk| v.compute(stk, &ctx, opt, doc)).await?;
+						let mut c = MutableContext::unfreeze(ctx)?;
+						c.add_value(v.name.to_owned(), val.into());
+						ctx = c.freeze();
+						Ok(Value::None)
+					}
+					Entry::Value(v) => stk.run(|stk| v.compute(stk, &ctx, opt, doc)).await,
+					Entry::Break(v) => v.compute(&ctx, opt, doc).await,
+					Entry::Continue(v) => v.compute(&ctx, opt, doc).await,
+					Entry::Foreach(v) => stk.run(|stk| v.compute(stk, &ctx, opt, doc)).await,
+					Entry::Ifelse(v) => stk.run(|stk| v.compute(stk, &ctx, opt, doc)).await,
+					Entry::Select(v) => stk.run(|stk| v.compute(stk, &ctx, opt, doc)).await,
+					Entry::Create(v) => stk.run(|stk| v.compute(stk, &ctx, opt, doc)).await,
+					Entry::Upsert(v) => stk.run(|stk| v.compute(stk, &ctx, opt, doc)).await,
+					Entry::Update(v) => stk.run(|stk| v.compute(stk, &ctx, opt, doc)).await,
+					Entry::Delete(v) => stk.run(|stk| v.compute(stk, &ctx, opt, doc)).await,
+					Entry::Relate(v) => stk.run(|stk| v.compute(stk, &ctx, opt, doc)).await,
+					Entry::Insert(v) => stk.run(|stk| v.compute(stk, &ctx, opt, doc)).await,
+					Entry::Define(v) => v.compute(stk, &ctx, opt, doc).await,
+					Entry::Alter(v) => v.compute(stk, &ctx, opt, doc).await,
+					Entry::Rebuild(v) => v.compute(stk, &ctx, opt, doc).await,
+					Entry::Remove(v) => v.compute(&ctx, opt, doc).await,
+					Entry::Output(v) => {
+						return stk.run(|stk| v.compute(stk, &ctx, opt, doc)).await;
+					}
+					Entry::Throw(v) => {
+						return stk.run(|stk| v.compute(stk, &ctx, opt, doc)).await;
+					}
+				};
+				// Catch any special errors
+				match res {
+					Err(Error::Continue) => continue 'foreach,
+					Err(Error::Break) => return Ok(Value::None),
+					Err(err) => return Err(err),
+					_ => (),
+				};
+			}
 		}
+		// Ok all good
+		Ok(Value::None)
 	}
 }
 

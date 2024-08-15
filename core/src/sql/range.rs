@@ -1,15 +1,16 @@
+use crate::cnf::FUNCTION_ALLOCATION_LIMIT;
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::sql::Value;
+use crate::sql::{Number, Value};
 use crate::syn;
 use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
 use std::fmt;
-use std::ops::Bound;
+use std::ops::{Bound, RangeBounds};
 use std::str::FromStr;
 
 use super::Id;
@@ -56,6 +57,31 @@ impl From<(Bound<Id>, Bound<Id>)> for Range {
 		Self {
 			beg: convert(v.0),
 			end: convert(v.1),
+		}
+	}
+}
+
+impl TryInto<std::ops::Range<i64>> for Range {
+	type Error = Error;
+	fn try_into(self) -> Result<std::ops::Range<i64>, Self::Error> {
+		let beg = match self.beg {
+			Bound::Unbounded => i64::MIN,
+			Bound::Included(beg) => to_i64(beg)?,
+			Bound::Excluded(beg) => to_i64(beg)? + 1,
+		};
+
+		let end = match self.end {
+			Bound::Unbounded => i64::MAX,
+			Bound::Included(end) => to_i64(end)? + 1,
+			Bound::Excluded(end) => to_i64(end)?,
+		};
+
+		if (beg + *FUNCTION_ALLOCATION_LIMIT as i64) < end {
+			Err(Error::RangeTooBig {
+				max: *FUNCTION_ALLOCATION_LIMIT,
+			})
+		} else {
+			Ok(beg..end)
 		}
 	}
 }
@@ -213,5 +239,15 @@ impl fmt::Display for Range {
 			Bound::Included(v) => write!(f, "..={v}"),
 		}?;
 		Ok(())
+	}
+}
+
+fn to_i64(v: Value) -> Result<i64, Error> {
+	match v {
+		Value::Number(Number::Int(v)) => Ok(v),
+		v => Err(Error::InvalidRangeValue {
+			expected: "int".to_string(),
+			found: v.kindof().to_string(),
+		}),
 	}
 }

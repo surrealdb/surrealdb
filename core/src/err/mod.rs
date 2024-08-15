@@ -1075,6 +1075,19 @@ pub enum Error {
 	#[doc(hidden)]
 	#[error("The underlying datastore does not support versioned queries")]
 	UnsupportedVersionedQueries,
+
+	/// Found an unexpected value in a range
+	#[error("Expected a range value of '{expected}', but found '{found}'")]
+	InvalidRangeValue {
+		expected: String,
+		found: String,
+	},
+
+	/// Found an unexpected value in a range
+	#[error("The range cannot exceed a size of {max} for this operation")]
+	RangeTooBig {
+		max: usize,
+	},
 }
 
 impl From<Error> for String {
