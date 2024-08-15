@@ -353,7 +353,7 @@ pub fn logical_xor((lh, rh): (Array, Array)) -> Result<Value, Error> {
 }
 
 pub async fn map(
-	(stk, ctx, opt, doc): (&mut Stk, &Context<'_>, &Options, Option<&CursorDoc<'_>>),
+	(stk, ctx, opt, doc): (&mut Stk, &Context, &Options, Option<&CursorDoc>),
 	(array, mapper): (Array, Closure),
 ) -> Result<Value, Error> {
 	let mut array = array;
