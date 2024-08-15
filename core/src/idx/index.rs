@@ -98,7 +98,7 @@ impl<'a> IndexOperation<'a> {
 					let key = self.get_unique_index_key(&n)?;
 					if txn.putc(key, self.rid, None).await.is_err() {
 						let key = self.get_unique_index_key(&n)?;
-						let val = txn.get(key).await?.unwrap();
+						let val = txn.get(key, None).await?.unwrap();
 						let rid: Thing = val.into();
 						return self.err_index_exists(rid, n);
 					}
@@ -131,7 +131,7 @@ impl<'a> IndexOperation<'a> {
 				let key = self.get_non_unique_index_key(&n)?;
 				if txn.putc(key, self.rid, None).await.is_err() {
 					let key = self.get_non_unique_index_key(&n)?;
-					let val = txn.get(key).await?.unwrap();
+					let val = txn.get(key, None).await?.unwrap();
 					let rid: Thing = val.into();
 					return self.err_index_exists(rid, n);
 				}
@@ -162,7 +162,7 @@ impl<'a> IndexOperation<'a> {
 		} else {
 			ft.remove_document(self.ctx, self.rid).await?;
 		}
-		ft.finish(&self.ctx).await
+		ft.finish(self.ctx).await
 	}
 
 	async fn index_mtree(&mut self, stk: &mut Stk, p: &MTreeParams) -> Result<(), Error> {

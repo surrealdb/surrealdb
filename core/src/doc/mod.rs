@@ -5,7 +5,6 @@
 //! - `initial`: value before the transaction
 //! - `id`: traditionally an integer but can be an object or collection such as an array
 pub(crate) use self::document::*;
-pub(crate) use self::index::build_opt_values;
 
 mod document; // The entry point for a document to be processed
 

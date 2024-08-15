@@ -83,7 +83,7 @@ impl SelectStatement {
 		);
 		// Used for ONLY: is the limit 1?
 		let limit_is_one_or_zero = match &self.limit {
-			Some(l) => l.process(stk, &ctx, &opt, doc).await? <= 1,
+			Some(l) => l.process(stk, ctx, &opt, doc).await? <= 1,
 			_ => false,
 		};
 		// Fail for multiple targets without a limit
@@ -99,7 +99,7 @@ impl SelectStatement {
 						return Err(Error::SingleOnlyOutput);
 					}
 
-					planner.add_iterables(stk, &ctx, t, &mut i).await?;
+					planner.add_iterables(stk, ctx, t, &mut i).await?;
 				}
 				Value::Thing(v) => i.ingest(Iterable::Thing(v)),
 				Value::Range(v) => {
