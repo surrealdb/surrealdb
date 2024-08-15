@@ -6349,6 +6349,7 @@ async fn function_idiom_chaining() -> Result<(), Error> {
 		// String is one of the types in the initial match statement,
 		// this test ensures that the dispatch macro does not exit early
 		"string".is_bool();
+		["1", "2"].join('').chain(|$v| <int> $v);
 	"#;
 	Test::new(sql)
 		.await?
@@ -6358,7 +6359,8 @@ async fn function_idiom_chaining() -> Result<(), Error> {
 		.expect_val("true")?
         .expect_error("There was a problem running the doesnt_exist() function. no such method found for the bool type")?
 	    .expect_val("true")?
-		.expect_val("false")?;
+		.expect_val("false")?
+        .expect_val("12")?;
 	Ok(())
 }
 
