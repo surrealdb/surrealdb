@@ -60,7 +60,11 @@ impl Value {
 						stk.run(|stk| obj.get(stk, ctx, opt, doc, path)).await
 					}
 					Part::Method(name, args) => {
-						let v = idiom(ctx, doc, v.clone().into(), name, args.clone())?;
+						let v = stk
+							.run(|stk| {
+								idiom(stk, ctx, opt, doc, v.clone().into(), name, args.clone())
+							})
+							.await?;
 						stk.run(|stk| v.get(stk, ctx, opt, doc, path.next())).await
 					}
 					// Otherwise return none
@@ -141,7 +145,11 @@ impl Value {
 						stk.run(|stk| obj.get(stk, ctx, opt, doc, path.next())).await
 					}
 					Part::Method(name, args) => {
-						let res = idiom(ctx, doc, v.clone().into(), name, args.clone());
+						let res = stk
+							.run(|stk| {
+								idiom(stk, ctx, opt, doc, v.clone().into(), name, args.clone())
+							})
+							.await;
 						let res = match &res {
 							Ok(_) => res,
 							Err(Error::InvalidFunction {
@@ -214,7 +222,11 @@ impl Value {
 						_ => Ok(Value::None),
 					},
 					Part::Method(name, args) => {
-						let v = idiom(ctx, doc, v.clone().into(), name, args.clone())?;
+						let v = stk
+							.run(|stk| {
+								idiom(stk, ctx, opt, doc, v.clone().into(), name, args.clone())
+							})
+							.await?;
 						stk.run(|stk| v.get(stk, ctx, opt, doc, path.next())).await
 					}
 					_ => stk
@@ -302,7 +314,19 @@ impl Value {
 								}
 							}
 							Part::Method(name, args) => {
-								let v = idiom(ctx, doc, v.clone().into(), name, args.clone())?;
+								let v = stk
+									.run(|stk| {
+										idiom(
+											stk,
+											ctx,
+											opt,
+											doc,
+											v.clone().into(),
+											name,
+											args.clone(),
+										)
+									})
+									.await?;
 								stk.run(|stk| v.get(stk, ctx, opt, doc, path.next())).await
 							}
 							// This is a remote field expression
@@ -325,7 +349,9 @@ impl Value {
 							stk.run(|stk| v.get(stk, ctx, opt, None, path.next())).await
 						}
 						Part::Method(name, args) => {
-							let v = idiom(ctx, doc, v.clone(), name, args.clone())?;
+							let v = stk
+								.run(|stk| idiom(stk, ctx, opt, doc, v.clone(), name, args.clone()))
+								.await?;
 							stk.run(|stk| v.get(stk, ctx, opt, doc, path.next())).await
 						}
 						// Only continue processing the path from the point that it contains a method

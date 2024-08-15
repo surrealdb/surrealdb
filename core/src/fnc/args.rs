@@ -1,6 +1,8 @@
 use crate::err::Error;
 use crate::sql::value::Value;
-use crate::sql::{Array, Bytes, Datetime, Duration, Kind, Number, Object, Regex, Strand, Thing};
+use crate::sql::{
+	Array, Bytes, Closure, Datetime, Duration, Kind, Number, Object, Regex, Strand, Thing,
+};
 use std::vec::IntoIter;
 
 /// Implemented by types that are commonly used, in a certain way, as arguments.
@@ -11,6 +13,12 @@ pub trait FromArg: Sized {
 impl FromArg for Value {
 	fn from_arg(arg: Value) -> Result<Self, Error> {
 		Ok(arg)
+	}
+}
+
+impl FromArg for Closure {
+	fn from_arg(arg: Value) -> Result<Self, Error> {
+		arg.coerce_to_function()
 	}
 }
 
@@ -239,6 +247,41 @@ impl<A: FromArg, B: FromArg> FromArgs for (A, Option<B>) {
 			return Err(err());
 		}
 		Ok((a, b))
+	}
+}
+
+// Some functions take 4 arguments, with the 3rd and 4th being optional.
+impl<A: FromArg, B: FromArg, C: FromArg, D: FromArg> FromArgs for (A, B, Option<C>, Option<D>) {
+	fn from_args(name: &str, args: Vec<Value>) -> Result<Self, Error> {
+		let err = || Error::InvalidArguments {
+			name: name.to_owned(),
+			message: String::from("Expected 2, 3 or 4 arguments."),
+		};
+		// Process the function arguments
+		let mut args = args.into_iter();
+		// Process the first argument
+		let a = A::from_arg(args.next().ok_or_else(err)?).map_err(|e| Error::InvalidArguments {
+			name: name.to_owned(),
+			message: format!("Argument 1 was the wrong type. {e}"),
+		})?;
+		let b = B::from_arg(args.next().ok_or_else(err)?).map_err(|e| Error::InvalidArguments {
+			name: name.to_owned(),
+			message: format!("Argument 2 was the wrong type. {e}"),
+		})?;
+		let c = match args.next() {
+			Some(c) => Some(C::from_arg(c)?),
+			None => None,
+		};
+		let d = match args.next() {
+			Some(d) => Some(D::from_arg(d)?),
+			None => None,
+		};
+		// Process additional function arguments
+		if args.next().is_some() {
+			// Too many arguments
+			return Err(err());
+		}
+		Ok((a, b, c, d))
 	}
 }
 
