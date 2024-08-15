@@ -36,8 +36,9 @@ impl ForeachStatement {
 		doc: Option<&CursorDoc>,
 	) -> Result<Value, Error> {
 		// Check the loop data
-		let iter = match &self.range.compute(stk, ctx, opt, doc).await? {
-			Value::Array(arr) => arr.to_owned().into_iter(),
+		let data = self.range.compute(stk, ctx, opt, doc).await?;
+		let iter = match data {
+			Value::Array(arr) => arr.into_iter(),
 			Value::Range(r) => {
 				let r: std::ops::Range<i64> = r.deref().to_owned().try_into()?;
 				r.map(Value::from).collect::<Vec<Value>>().into_iter()
@@ -55,7 +56,7 @@ impl ForeachStatement {
 			let ctx = MutableContext::new(ctx).freeze();
 			// Set the current parameter
 			let key = self.param.0.to_raw();
-			let val: Value = v.into();
+			let val = stk.run(|stk| v.compute(stk, &ctx, opt, doc)).await?;
 			let mut ctx = MutableContext::unfreeze(ctx)?;
 			ctx.add_value(key, val.into());
 			let mut ctx = ctx.freeze();

@@ -344,8 +344,9 @@ impl TryFrom<Data> for Range {
 
 		match val {
 			Data::Array(v) if v.len() == 2 => {
-				let beg = decode_bound(v.get(0).unwrap().to_owned())?;
-				let end = decode_bound(v.get(1).unwrap().to_owned())?;
+				let mut v = v;
+				let beg = decode_bound(v.remove(0).to_owned())?;
+				let end = decode_bound(v.remove(0).to_owned())?;
 				Ok(Range::new(beg, end))
 			}
 			_ => Err("Expected a CBOR array with 2 bounds"),

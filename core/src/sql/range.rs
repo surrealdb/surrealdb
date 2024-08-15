@@ -10,7 +10,7 @@ use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
 use std::fmt;
-use std::ops::{Bound, RangeBounds};
+use std::ops::Bound;
 use std::str::FromStr;
 
 use super::Id;
@@ -120,55 +120,7 @@ impl Range {
 
 impl PartialOrd for Range {
 	fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-		match &self.beg {
-			Bound::Unbounded => match &other.beg {
-				Bound::Unbounded => Some(Ordering::Equal),
-				_ => Some(Ordering::Less),
-			},
-			Bound::Included(v) => match &other.beg {
-				Bound::Unbounded => Some(Ordering::Greater),
-				Bound::Included(w) => match v.partial_cmp(w) {
-					Some(Ordering::Equal) => match &self.end {
-						Bound::Unbounded => match &other.end {
-							Bound::Unbounded => Some(Ordering::Equal),
-							_ => Some(Ordering::Greater),
-						},
-						Bound::Included(v) => match &other.end {
-							Bound::Unbounded => Some(Ordering::Less),
-							Bound::Included(w) => v.partial_cmp(w),
-							_ => Some(Ordering::Greater),
-						},
-						Bound::Excluded(v) => match &other.end {
-							Bound::Excluded(w) => v.partial_cmp(w),
-							_ => Some(Ordering::Less),
-						},
-					},
-					ordering => ordering,
-				},
-				_ => Some(Ordering::Less),
-			},
-			Bound::Excluded(v) => match &other.beg {
-				Bound::Excluded(w) => match v.partial_cmp(w) {
-					Some(Ordering::Equal) => match &self.end {
-						Bound::Unbounded => match &other.end {
-							Bound::Unbounded => Some(Ordering::Equal),
-							_ => Some(Ordering::Greater),
-						},
-						Bound::Included(v) => match &other.end {
-							Bound::Unbounded => Some(Ordering::Less),
-							Bound::Included(w) => v.partial_cmp(w),
-							_ => Some(Ordering::Greater),
-						},
-						Bound::Excluded(v) => match &other.end {
-							Bound::Excluded(w) => v.partial_cmp(w),
-							_ => Some(Ordering::Less),
-						},
-					},
-					ordering => ordering,
-				},
-				_ => Some(Ordering::Greater),
-			},
-		}
+		Some(self.cmp(other))
 	}
 }
 

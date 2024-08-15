@@ -207,14 +207,14 @@ impl Id {
 	}
 	/// Can this value be a valid Id?
 	pub fn value_valid_as_id(v: &Value) -> bool {
-		match v {
-			Value::Number(Number::Int(_)) => true,
-			Value::Strand(_) => true,
-			Value::Array(_) => true,
-			Value::Object(_) => true,
-			Value::Range(_) => true,
-			_ => false,
-		}
+		matches!(
+			v,
+			Value::Number(Number::Int(_))
+				| Value::Strand(_)
+				| Value::Array(_)
+				| Value::Object(_)
+				| Value::Range(_)
+		)
 	}
 	/// Can this value be a valid Id?
 	pub fn bound_valid_as_id(v: &Bound<Value>) -> bool {
