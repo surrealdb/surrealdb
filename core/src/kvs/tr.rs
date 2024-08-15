@@ -187,12 +187,12 @@ impl Transactor {
 
 	/// Fetch a key from the datastore.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
-	pub async fn get<K>(&mut self, key: K) -> Result<Option<Val>, Error>
+	pub async fn get<K>(&mut self, key: K, version: Option<u64>) -> Result<Option<Val>, Error>
 	where
 		K: Into<Key> + Debug,
 	{
 		let key = key.into();
-		expand_inner!(&mut self.inner, v => { v.get(key).await })
+		expand_inner!(&mut self.inner, v => { v.get(key, version).await })
 	}
 
 	/// Fetch many keys from the datastore.
@@ -437,7 +437,7 @@ impl Transactor {
 		Ok(if let Some(v) = self.stash.get(key) {
 			v
 		} else {
-			let val = self.get(key.clone()).await?;
+			let val = self.get(key.clone(), None).await?;
 			if let Some(val) = val {
 				U32::new(key.clone(), Some(val)).await?
 			} else {

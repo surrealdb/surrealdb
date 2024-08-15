@@ -234,10 +234,15 @@ impl super::api::Transaction for Transaction {
 
 	/// Fetch a key from the database
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
-	async fn get<K>(&mut self, key: K) -> Result<Option<Val>, Error>
+	async fn get<K>(&mut self, key: K, version: Option<u64>) -> Result<Option<Val>, Error>
 	where
 		K: Into<Key> + Sprintable + Debug,
 	{
+		// RocksDB does not support verisoned queries.
+		if version.is_some() {
+			return Err(Error::UnsupportedVersionedQueries);
+		}
+
 		// Check to see if transaction is closed
 		if self.done {
 			return Err(Error::TxFinished);

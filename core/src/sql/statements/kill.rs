@@ -53,7 +53,7 @@ impl KillStatement {
 		// Fetch the live query key
 		let key = crate::key::node::lq::new(nid, lid);
 		// Fetch the live query key if it exists
-		match txn.get(key).await? {
+		match txn.get(key, None).await? {
 			Some(val) => {
 				// Decode the data for this live query
 				let val: Live = val.into();

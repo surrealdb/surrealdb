@@ -146,7 +146,7 @@ impl TreeNodeProvider {
 		N: TreeNode + Clone,
 	{
 		let key = self.get_key(id);
-		if let Some(val) = tx.get(key.clone()).await? {
+		if let Some(val) = tx.get(key.clone(), None).await? {
 			let size = val.len() as u32;
 			let node = N::try_from_val(val)?;
 			Ok(StoredNode::new(node, id, key, size))
