@@ -1,5 +1,5 @@
 use crate::cnf::NORMAL_FETCH_SIZE;
-use crate::ctx::Context;
+use crate::ctx::{Context, MutableContext};
 #[cfg(not(target_arch = "wasm32"))]
 use crate::dbs::distinct::AsyncDistinct;
 use crate::dbs::distinct::SyncDistinct;
@@ -22,7 +22,7 @@ impl Iterable {
 	pub(crate) async fn iterate(
 		self,
 		stk: &mut Stk,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		opt: &Options,
 		stm: &Statement<'_>,
 		ite: &mut Iterator,
@@ -39,7 +39,7 @@ impl Iterable {
 	pub(crate) async fn channel(
 		self,
 		stk: &mut Stk,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		opt: &Options,
 		stm: &Statement<'_>,
 		chn: Sender<Processed>,
@@ -52,7 +52,7 @@ impl Iterable {
 		}
 	}
 
-	fn iteration_stage_check(&self, ctx: &Context<'_>) -> bool {
+	fn iteration_stage_check(&self, ctx: &Context) -> bool {
 		match self {
 			Iterable::Table(tb) | Iterable::Index(tb, _) => {
 				if let Some(IterationStage::BuildKnn) = ctx.get_iteration_stage() {
@@ -79,7 +79,7 @@ impl<'a> Processor<'a> {
 	async fn process(
 		&mut self,
 		stk: &mut Stk,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		opt: &Options,
 		stm: &Statement<'_>,
 		pro: Processed,
@@ -113,7 +113,7 @@ impl<'a> Processor<'a> {
 	async fn process_iterable(
 		&mut self,
 		stk: &mut Stk,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		opt: &Options,
 		stm: &Statement<'_>,
 		iterable: Iterable,
@@ -130,8 +130,9 @@ impl<'a> Processor<'a> {
 						if let Some(exe) = qp.get_query_executor(&v.0) {
 							// We set the query executor matching the current table in the Context
 							// Avoiding search in the hashmap of the query planner for each doc
-							let mut ctx = Context::new(ctx);
+							let mut ctx = MutableContext::new(ctx);
 							ctx.set_query_executor(exe.clone());
+							let ctx = ctx.freeze();
 							return self.process_table(stk, &ctx, opt, stm, &v).await;
 						}
 					}
@@ -142,8 +143,9 @@ impl<'a> Processor<'a> {
 						if let Some(exe) = qp.get_query_executor(&t.0) {
 							// We set the query executor matching the current table in the Context
 							// Avoiding search in the hashmap of the query planner for each doc
-							let mut ctx = Context::new(ctx);
+							let mut ctx = MutableContext::new(ctx);
 							ctx.set_query_executor(exe.clone());
+							let ctx = ctx.freeze();
 							return self.process_index(stk, &ctx, opt, stm, &t, irf).await;
 						}
 					}
@@ -163,7 +165,7 @@ impl<'a> Processor<'a> {
 	async fn process_value(
 		&mut self,
 		stk: &mut Stk,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		opt: &Options,
 		stm: &Statement<'_>,
 		v: Value,
@@ -172,7 +174,7 @@ impl<'a> Processor<'a> {
 		let pro = Processed {
 			rid: None,
 			ir: None,
-			val: Operable::Value(v),
+			val: Operable::Value(v.into()),
 		};
 		// Process the document record
 		self.process(stk, ctx, opt, stm, pro).await
@@ -181,7 +183,7 @@ impl<'a> Processor<'a> {
 	async fn process_defer(
 		&mut self,
 		stk: &mut Stk,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		opt: &Options,
 		stm: &Statement<'_>,
 		v: Thing,
@@ -190,9 +192,9 @@ impl<'a> Processor<'a> {
 		ctx.tx().check_ns_db_tb(opt.ns()?, opt.db()?, &v.tb, opt.strict).await?;
 		// Process the document record
 		let pro = Processed {
-			rid: Some(v),
+			rid: Some(v.into()),
 			ir: None,
-			val: Operable::Value(Value::None),
+			val: Operable::Value(Value::None.into()),
 		};
 		self.process(stk, ctx, opt, stm, pro).await?;
 		// Everything ok
@@ -202,7 +204,7 @@ impl<'a> Processor<'a> {
 	async fn process_thing(
 		&mut self,
 		stk: &mut Stk,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		opt: &Options,
 		stm: &Statement<'_>,
 		v: Thing,
@@ -213,13 +215,16 @@ impl<'a> Processor<'a> {
 		let key = thing::new(opt.ns()?, opt.db()?, &v.tb, &v.id);
 		let val = ctx.tx().get(key, opt.version).await?;
 		// Parse the data from the store
-		let val = Operable::Value(match val {
-			Some(v) => Value::from(v),
-			None => Value::None,
-		});
+		let val = Operable::Value(
+			match val {
+				Some(v) => Value::from(v),
+				None => Value::None,
+			}
+			.into(),
+		);
 		// Process the document record
 		let pro = Processed {
-			rid: Some(v),
+			rid: Some(v.into()),
 			ir: None,
 			val,
 		};
@@ -231,7 +236,7 @@ impl<'a> Processor<'a> {
 	async fn process_mergeable(
 		&mut self,
 		stk: &mut Stk,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		opt: &Options,
 		stm: &Statement<'_>,
 		(v, o): (Thing, Value),
@@ -247,10 +252,10 @@ impl<'a> Processor<'a> {
 			None => Value::None,
 		};
 		// Create a new operable value
-		let val = Operable::Mergeable(x, o);
+		let val = Operable::Mergeable(x.into(), o.into());
 		// Process the document record
 		let pro = Processed {
-			rid: Some(v),
+			rid: Some(v.into()),
 			ir: None,
 			val,
 		};
@@ -262,7 +267,7 @@ impl<'a> Processor<'a> {
 	async fn process_relatable(
 		&mut self,
 		stk: &mut Stk,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		opt: &Options,
 		stm: &Statement<'_>,
 		(f, v, w, o): (Thing, Thing, Thing, Option<Value>),
@@ -278,10 +283,10 @@ impl<'a> Processor<'a> {
 			None => Value::None,
 		};
 		// Create a new operable value
-		let val = Operable::Relatable(f, x, w, o);
+		let val = Operable::Relatable(f, x.into(), w, o.map(|v| v.into()));
 		// Process the document record
 		let pro = Processed {
-			rid: Some(v),
+			rid: Some(v.into()),
 			ir: None,
 			val,
 		};
@@ -293,7 +298,7 @@ impl<'a> Processor<'a> {
 	async fn process_table(
 		&mut self,
 		stk: &mut Stk,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		opt: &Options,
 		stm: &Statement<'_>,
 		v: &Table,
@@ -319,10 +324,10 @@ impl<'a> Processor<'a> {
 			let val: Value = (&v).into();
 			let rid = Thing::from((key.tb, key.id));
 			// Create a new operable value
-			let val = Operable::Value(val);
+			let val = Operable::Value(val.into());
 			// Process the record
 			let pro = Processed {
-				rid: Some(rid),
+				rid: Some(rid.into()),
 				ir: None,
 				val,
 			};
@@ -335,7 +340,7 @@ impl<'a> Processor<'a> {
 	async fn process_range(
 		&mut self,
 		stk: &mut Stk,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		opt: &Options,
 		stm: &Statement<'_>,
 		v: Range,
@@ -378,10 +383,10 @@ impl<'a> Processor<'a> {
 			let val: Value = (&v).into();
 			let rid = Thing::from((key.tb, key.id));
 			// Create a new operable value
-			let val = Operable::Value(val);
+			let val = Operable::Value(val.into());
 			// Process the record
 			let pro = Processed {
-				rid: Some(rid),
+				rid: Some(rid.into()),
 				ir: None,
 				val,
 			};
@@ -394,7 +399,7 @@ impl<'a> Processor<'a> {
 	async fn process_edge(
 		&mut self,
 		stk: &mut Stk,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		opt: &Options,
 		stm: &Statement<'_>,
 		e: Edges,
@@ -491,12 +496,12 @@ impl<'a> Processor<'a> {
 				let rid = Thing::from((gra.ft, gra.fk));
 				// Parse the data from the store
 				let val = Operable::Value(match val {
-					Some(v) => Value::from(v),
-					None => Value::None,
+					Some(v) => Value::from(v).into(),
+					None => Value::None.into(),
 				});
 				// Process the record
 				let pro = Processed {
-					rid: Some(rid),
+					rid: Some(rid.into()),
 					ir: None,
 					val,
 				};
@@ -510,7 +515,7 @@ impl<'a> Processor<'a> {
 	async fn process_index(
 		&mut self,
 		stk: &mut Stk,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		opt: &Options,
 		stm: &Statement<'_>,
 		table: &Table,
@@ -550,7 +555,7 @@ impl<'a> Processor<'a> {
 	}
 
 	async fn next_batch(
-		ctx: &Context<'_>,
+		ctx: &Context,
 		opt: &Options,
 		iterator: &mut ThingIterator,
 	) -> Result<Vec<Processed>, Error> {
@@ -564,11 +569,11 @@ impl<'a> Processor<'a> {
 				v
 			} else {
 				// Otherwise we have to fetch the record
-				Iterable::fetch_thing(&txn, opt, &r.0).await?
+				Iterable::fetch_thing(&txn, opt, &r.0).await?.into()
 			};
 			let p = Processed {
 				rid: Some(r.0),
-				ir: Some(r.1),
+				ir: Some(r.1.into()),
 				val: Operable::Value(v),
 			};
 			to_process.push(p);

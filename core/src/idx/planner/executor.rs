@@ -104,7 +104,7 @@ impl InnerQueryExecutor {
 	#[allow(clippy::too_many_arguments)]
 	#[allow(clippy::mutable_key_type)]
 	pub(super) async fn new(
-		ctx: &Context<'_>,
+		ctx: &Context,
 		stk: &mut Stk,
 		opt: &Options,
 		table: &Table,
@@ -279,10 +279,10 @@ impl QueryExecutor {
 	pub(crate) async fn knn(
 		&self,
 		stk: &mut Stk,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		opt: &Options,
 		thg: &Thing,
-		doc: Option<&CursorDoc<'_>>,
+		doc: Option<&CursorDoc>,
 		exp: &Expression,
 	) -> Result<Value, Error> {
 		if let Some(IterationStage::Iterate(e)) = ctx.get_iteration_stage() {
@@ -538,7 +538,7 @@ impl QueryExecutor {
 	pub(crate) async fn matches(
 		&self,
 		stk: &mut Stk,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		opt: &Options,
 		thg: &Thing,
 		exp: &Expression,
@@ -562,7 +562,7 @@ impl QueryExecutor {
 
 	async fn matches_with_doc_id(
 		&self,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		thg: &Thing,
 		ft: &FtEntry,
 	) -> Result<bool, Error> {
@@ -595,7 +595,7 @@ impl QueryExecutor {
 	async fn matches_with_value(
 		&self,
 		stk: &mut Stk,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		opt: &Options,
 		ft: &FtEntry,
 		l: Value,
@@ -637,7 +637,7 @@ impl QueryExecutor {
 
 	pub(crate) async fn highlight(
 		&self,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		thg: &Thing,
 		hlp: HighlightParams,
 		doc: &Value,
@@ -654,7 +654,7 @@ impl QueryExecutor {
 
 	pub(crate) async fn offsets(
 		&self,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		thg: &Thing,
 		match_ref: Value,
 		partial: bool,
@@ -669,10 +669,10 @@ impl QueryExecutor {
 
 	pub(crate) async fn score(
 		&self,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		match_ref: &Value,
 		rid: &Thing,
-		ir: Option<&IteratorRecord>,
+		ir: Option<&Arc<IteratorRecord>>,
 	) -> Result<Value, Error> {
 		if let Some(e) = self.get_ft_entry(match_ref) {
 			if let Some(scorer) = &e.0.scorer {
@@ -717,7 +717,7 @@ struct Inner {
 impl FtEntry {
 	async fn new(
 		stk: &mut Stk,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		opt: &Options,
 		ft: &FtIndex,
 		io: IndexOption,
@@ -752,7 +752,7 @@ pub(super) struct MtEntry {
 impl MtEntry {
 	async fn new(
 		stk: &mut Stk,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		opt: &Options,
 		mt: &MTreeIndex,
 		o: &[Number],
@@ -779,7 +779,7 @@ pub(super) struct HnswEntry {
 impl HnswEntry {
 	#[allow(clippy::too_many_arguments)]
 	async fn new(
-		ctx: &Context<'_>,
+		ctx: &Context,
 		stk: &mut Stk,
 		opt: &Options,
 		h: SharedHnswIndex,

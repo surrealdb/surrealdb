@@ -38,9 +38,9 @@ pub mod vector;
 /// Attempts to run any function
 pub async fn run(
 	stk: &mut Stk,
-	ctx: &Context<'_>,
+	ctx: &Context,
 	opt: &Options,
-	doc: Option<&CursorDoc<'_>>,
+	doc: Option<&CursorDoc>,
 	name: &str,
 	args: Vec<Value>,
 ) -> Result<Value, Error> {
@@ -88,8 +88,8 @@ macro_rules! dispatch {
 
 /// Attempts to run any synchronous function.
 pub fn synchronous(
-	ctx: &Context<'_>,
-	doc: Option<&CursorDoc<'_>>,
+	ctx: &Context,
+	doc: Option<&CursorDoc>,
 	name: &str,
 	args: Vec<Value>,
 ) -> Result<Value, Error> {
@@ -419,9 +419,9 @@ pub fn synchronous(
 /// Attempts to run any synchronous function.
 pub async fn idiom(
 	stk: &mut Stk,
-	ctx: &Context<'_>,
+	ctx: &Context,
 	opt: &Options,
-	doc: Option<&CursorDoc<'_>>,
+	doc: Option<&CursorDoc>,
 	value: Value,
 	name: &str,
 	args: Vec<Value>,
@@ -712,9 +712,9 @@ pub async fn idiom(
 /// Attempts to run any asynchronous function.
 pub async fn asynchronous(
 	stk: &mut Stk,
-	ctx: &Context<'_>,
+	ctx: &Context,
 	opt: &Options,
-	doc: Option<&CursorDoc<'_>>,
+	doc: Option<&CursorDoc>,
 	name: &str,
 	args: Vec<Value>,
 ) -> Result<Value, Error> {
@@ -769,11 +769,11 @@ pub async fn asynchronous(
 }
 
 fn get_execution_context<'a>(
-	ctx: &'a Context<'_>,
-	doc: Option<&'a CursorDoc<'_>>,
-) -> Option<(&'a QueryExecutor, &'a CursorDoc<'a>, &'a Thing)> {
+	ctx: &'a Context,
+	doc: Option<&'a CursorDoc>,
+) -> Option<(&'a QueryExecutor, &'a CursorDoc, &'a Thing)> {
 	if let Some(doc) = doc {
-		if let Some(thg) = doc.rid {
+		if let Some(thg) = &doc.rid {
 			if let Some(pla) = ctx.get_query_planner() {
 				if let Some(exe) = pla.get_query_executor(&thg.tb) {
 					return Some((exe, doc, thg));

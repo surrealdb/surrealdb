@@ -19,11 +19,12 @@ use crate::sql::{Cond, Table};
 use reblessive::tree::Stk;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU8, Ordering};
+use std::sync::Arc;
 
-pub(crate) struct QueryPlanner<'a> {
-	opt: &'a Options,
-	with: &'a Option<With>,
-	cond: &'a Option<Cond>,
+pub(crate) struct QueryPlanner {
+	opt: Arc<Options>,
+	with: Option<Arc<With>>,
+	cond: Option<Arc<Cond>>,
 	/// There is one executor per table
 	executors: HashMap<String, QueryExecutor>,
 	requires_distinct: bool,
@@ -32,8 +33,8 @@ pub(crate) struct QueryPlanner<'a> {
 	iteration_index: AtomicU8,
 }
 
-impl<'a> QueryPlanner<'a> {
-	pub(crate) fn new(opt: &'a Options, with: &'a Option<With>, cond: &'a Option<Cond>) -> Self {
+impl QueryPlanner {
+	pub(crate) fn new(opt: Arc<Options>, with: Option<Arc<With>>, cond: Option<Arc<Cond>>) -> Self {
 		Self {
 			opt,
 			with,
@@ -49,19 +50,28 @@ impl<'a> QueryPlanner<'a> {
 	pub(crate) async fn add_iterables(
 		&mut self,
 		stk: &mut Stk,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		t: Table,
 		it: &mut Iterator,
 	) -> Result<(), Error> {
 		let mut is_table_iterator = false;
 		let mut is_knn = false;
-		match Tree::build(stk, ctx, self.opt, &t, self.cond, self.with).await? {
+		match Tree::build(
+			stk,
+			ctx,
+			&self.opt,
+			&t,
+			self.cond.as_ref().map(|w| w.as_ref()),
+			self.with.as_ref().map(|c| c.as_ref()),
+		)
+		.await?
+		{
 			Some(tree) => {
 				is_knn = is_knn || !tree.knn_expressions.is_empty();
 				let mut exe = InnerQueryExecutor::new(
 					ctx,
-					stk,
-					self.opt,
+                    stk,
+					&self.opt,
 					&t,
 					tree.index_map,
 					tree.knn_expressions,
@@ -69,7 +79,11 @@ impl<'a> QueryPlanner<'a> {
 					tree.knn_condition,
 				)
 				.await?;
-				match PlanBuilder::build(tree.root, self.with, tree.with_indexes)? {
+				match PlanBuilder::build(
+					tree.root,
+					self.with.as_ref().map(|w| w.as_ref()),
+					tree.with_indexes,
+				)? {
 					Plan::SingleIndex(exp, io) => {
 						if io.require_distinct() {
 							self.requires_distinct = true;

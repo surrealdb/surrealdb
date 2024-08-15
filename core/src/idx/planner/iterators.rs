@@ -12,6 +12,7 @@ use crate::sql::statements::DefineIndexStatement;
 use crate::sql::{Array, Ident, Thing, Value};
 use radix_trie::Trie;
 use std::collections::VecDeque;
+use std::sync::Arc;
 
 pub(crate) type IteratorRef = u16;
 
@@ -117,7 +118,7 @@ pub(crate) enum ThingIterator {
 impl ThingIterator {
 	pub(crate) async fn next_batch<B: IteratorBatch>(
 		&mut self,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		txn: &Transaction,
 		size: u32,
 	) -> Result<B, Error> {
@@ -136,7 +137,7 @@ impl ThingIterator {
 	}
 }
 
-pub(crate) type CollectorRecord = (Thing, IteratorRecord, Option<Value>);
+pub(crate) type CollectorRecord = (Arc<Thing>, IteratorRecord, Option<Arc<Value>>);
 
 pub(crate) struct IndexEqualThingIterator {
 	irf: IteratorRef,
@@ -179,7 +180,7 @@ impl IndexEqualThingIterator {
 			*beg = key;
 		}
 		let mut records = B::with_capacity(res.len());
-		res.into_iter().for_each(|(_, val)| records.add((val.into(), irf.into(), None)));
+		res.into_iter().for_each(|(_, val)| records.add((Arc::new(val.into()), irf.into(), None)));
 		Ok(records)
 	}
 
@@ -310,7 +311,7 @@ impl IndexRangeThingIterator {
 		let mut records = B::with_capacity(res.len());
 		res.into_iter()
 			.filter(|(k, _)| self.r.matches(k))
-			.for_each(|(_, v)| records.add((v.into(), self.irf.into(), None)));
+			.for_each(|(_, v)| records.add((Arc::new(v.into()), self.irf.into(), None)));
 		Ok(records)
 	}
 }
@@ -350,7 +351,7 @@ impl IndexUnionThingIterator {
 
 	async fn next_batch<B: IteratorBatch>(
 		&mut self,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		tx: &Transaction,
 		limit: u32,
 	) -> Result<B, Error> {
@@ -404,7 +405,7 @@ impl JoinThingIterator {
 impl JoinThingIterator {
 	async fn next_current_remote_batch(
 		&mut self,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		tx: &Transaction,
 		limit: u32,
 	) -> Result<bool, Error> {
@@ -425,7 +426,7 @@ impl JoinThingIterator {
 
 	async fn next_current_local<F>(
 		&mut self,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		tx: &Transaction,
 		limit: u32,
 		new_iter: F,
@@ -435,8 +436,8 @@ impl JoinThingIterator {
 	{
 		while !ctx.is_done() {
 			while let Some((thing, _, _)) = self.current_remote_batch.pop_front() {
-				let k: Key = (&thing).into();
-				let value = Value::from(thing);
+				let k: Key = thing.as_ref().into();
+				let value = Value::from(thing.as_ref().clone());
 				if self.distinct.insert(k, true).is_none() {
 					self.current_local =
 						Some(new_iter(&self.ns, &self.db, &self.ix_what, &self.ix_name, value));
@@ -452,7 +453,7 @@ impl JoinThingIterator {
 
 	async fn next_batch<F, B: IteratorBatch>(
 		&mut self,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		tx: &Transaction,
 		limit: u32,
 		new_iter: F,
@@ -489,7 +490,7 @@ impl IndexJoinThingIterator {
 
 	async fn next_batch<B: IteratorBatch>(
 		&mut self,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		tx: &Transaction,
 		limit: u32,
 	) -> Result<B, Error> {
@@ -526,7 +527,8 @@ impl UniqueEqualThingIterator {
 	async fn next_batch<B: IteratorBatch>(&mut self, tx: &Transaction) -> Result<B, Error> {
 		if let Some(key) = self.key.take() {
 			if let Some(val) = tx.get(key, None).await? {
-				let record = (val.into(), self.irf.into(), None);
+				let rid: Thing = val.into();
+				let record = (rid.into(), self.irf.into(), None);
 				return Ok(B::from_one(record));
 			}
 		}
@@ -609,13 +611,15 @@ impl UniqueRangeThingIterator {
 				return Ok(records);
 			}
 			if self.r.matches(&k) {
-				records.add((v.into(), self.irf.into(), None));
+				let rid: Thing = v.into();
+				records.add((rid.into(), self.irf.into(), None));
 			}
 		}
 		let end = self.r.end.clone();
 		if self.r.matches(&end) {
 			if let Some(v) = tx.get(end, None).await? {
-				records.add((v.into(), self.irf.into(), None));
+				let rid: Thing = v.into();
+				records.add((rid.into(), self.irf.into(), None));
 			}
 		}
 		self.done = true;
@@ -652,7 +656,7 @@ impl UniqueUnionThingIterator {
 
 	async fn next_batch<B: IteratorBatch>(
 		&mut self,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		tx: &Transaction,
 		limit: u32,
 	) -> Result<B, Error> {
@@ -663,7 +667,8 @@ impl UniqueUnionThingIterator {
 				break;
 			}
 			if let Some(val) = tx.get(key, None).await? {
-				results.add((val.into(), self.irf.into(), None));
+				let rid: Thing = val.into();
+				results.add((rid.into(), self.irf.into(), None));
 				if results.len() >= limit {
 					break;
 				}
@@ -687,7 +692,7 @@ impl UniqueJoinThingIterator {
 
 	async fn next_batch<B: IteratorBatch>(
 		&mut self,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		tx: &Transaction,
 		limit: u32,
 	) -> Result<B, Error> {
@@ -726,7 +731,7 @@ impl MatchesThingIterator {
 
 	async fn next_batch<B: IteratorBatch>(
 		&mut self,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		tx: &Transaction,
 		limit: u32,
 	) -> Result<B, Error> {
@@ -740,7 +745,7 @@ impl MatchesThingIterator {
 						doc_id: Some(doc_id),
 						dist: None,
 					};
-					records.add((thg, ir, None));
+					records.add((thg.into(), ir, None));
 					self.hits_left -= 1;
 				} else {
 					break;
@@ -753,7 +758,7 @@ impl MatchesThingIterator {
 	}
 }
 
-pub(crate) type KnnIteratorResult = (Thing, f64, Option<Value>);
+pub(crate) type KnnIteratorResult = (Arc<Thing>, f64, Option<Arc<Value>>);
 
 pub(crate) struct KnnIterator {
 	irf: IteratorRef,
@@ -769,7 +774,7 @@ impl KnnIterator {
 	}
 	async fn next_batch<B: IteratorBatch>(
 		&mut self,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		limit: u32,
 	) -> Result<B, Error> {
 		let limit = limit as usize;

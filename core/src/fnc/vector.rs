@@ -73,11 +73,11 @@ pub mod distance {
 	}
 
 	pub fn knn(
-		(ctx, doc): (&Context<'_>, Option<&CursorDoc<'_>>),
+		(ctx, doc): (&Context, Option<&CursorDoc>),
 		(knn_ref,): (Option<Value>,),
 	) -> Result<Value, Error> {
 		if let Some((_exe, doc, thg)) = get_execution_context(ctx, doc) {
-			if let Some(ir) = doc.ir {
+			if let Some(ir) = &doc.ir {
 				if let Some(d) = ir.dist() {
 					return Ok(d.into());
 				}
