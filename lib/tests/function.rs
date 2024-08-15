@@ -1140,6 +1140,20 @@ async fn function_count() -> Result<(), Error> {
 // --------------------------------------------------
 
 #[tokio::test]
+async fn function_crypto_blake3() -> Result<(), Error> {
+	let sql = r#"
+		RETURN crypto::blake3('tobie');
+	"#;
+	let mut test = Test::new(sql).await?;
+	//
+	let tmp = test.next()?.result?;
+	let val = Value::from("f75ef30a80a78016f4a4da40ac56c858c0001b3a320118adc3785972901ddce6");
+	assert_eq!(tmp, val);
+	//
+	Ok(())
+}
+
+#[tokio::test]
 async fn function_crypto_md5() -> Result<(), Error> {
 	let sql = r#"
 		RETURN crypto::md5('tobie');
@@ -1192,20 +1206,6 @@ async fn function_crypto_sha512() -> Result<(), Error> {
 	let val = Value::from(
 		"39f0160c946c4c53702112d6ef3eea7957ea8e1c78787a482a89f8b0a8860a20ecd543432e4a187d9fdcd1c415cf61008e51a7e8bf2f22ac77e458789c9cdccc"
 	);
-	assert_eq!(tmp, val);
-	//
-	Ok(())
-}
-
-#[tokio::test]
-async fn function_crypto_blake3() -> Result<(), Error> {
-	let sql = r#"
-		RETURN crypto::blake3('tobie');
-	"#;
-	let mut test = Test::new(sql).await?;
-	//
-	let tmp = test.next()?.result?;
-	let val = Value::from("f75ef30a80a78016f4a4da40ac56c858c0001b3a320118adc3785972901ddce6");
 	assert_eq!(tmp, val);
 	//
 	Ok(())

@@ -138,11 +138,11 @@ pub(crate) static PATHS: phf::Map<UniCase<&'static str>, PathKind> = phf_map! {
 		//
 		UniCase::ascii("count") => PathKind::Function,
 		//
+		UniCase::ascii("crypto::blake3") => PathKind::Function,
 		UniCase::ascii("crypto::md5") => PathKind::Function,
 		UniCase::ascii("crypto::sha1") => PathKind::Function,
 		UniCase::ascii("crypto::sha256") => PathKind::Function,
 		UniCase::ascii("crypto::sha512") => PathKind::Function,
-		UniCase::ascii("crypto::blake3") => PathKind::Function,
 		//
 		UniCase::ascii("duration::days") => PathKind::Function,
 		UniCase::ascii("duration::hours") => PathKind::Function,
