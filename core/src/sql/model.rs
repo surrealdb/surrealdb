@@ -58,9 +58,9 @@ impl Model {
 	pub(crate) async fn compute(
 		&self,
 		stk: &mut Stk,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		opt: &Options,
-		doc: Option<&CursorDoc<'_>>,
+		doc: Option<&CursorDoc>,
 	) -> Result<Value, Error> {
 		// Ensure futures are run
 		let opt = &opt.new_with_futures(true);
@@ -217,9 +217,9 @@ impl Model {
 	pub(crate) async fn compute(
 		&self,
 		_stk: &mut Stk,
-		_ctx: &Context<'_>,
+		_ctx: &Context,
 		_opt: &Options,
-		_doc: Option<&CursorDoc<'_>>,
+		_doc: Option<&CursorDoc>,
 	) -> Result<Value, Error> {
 		Err(Error::InvalidModel {
 			message: String::from("Machine learning computation is not enabled."),

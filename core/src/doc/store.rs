@@ -4,10 +4,10 @@ use crate::dbs::Statement;
 use crate::doc::Document;
 use crate::err::Error;
 
-impl<'a> Document<'a> {
+impl Document {
 	pub async fn store(
 		&self,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		opt: &Options,
 		stm: &Statement<'_>,
 	) -> Result<(), Error> {

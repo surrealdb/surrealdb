@@ -38,7 +38,7 @@ impl Data {
 	pub(crate) async fn rid(
 		&self,
 		stk: &mut Stk,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		opt: &Options,
 	) -> Result<Option<Value>, Error> {
 		match self {
