@@ -208,8 +208,8 @@ impl InnerQueryExecutor {
 							let entry = match hnsw_map.entry(ix_ref) {
 								Entry::Occupied(e) => {
 									HnswEntry::new(
-										ctx,
 										stk,
+										ctx,
 										opt,
 										e.get().clone(),
 										a,
@@ -228,8 +228,8 @@ impl InnerQueryExecutor {
 									hnsw.write().await.check_state(&ctx.tx()).await?;
 									// Now we can execute the request
 									let entry = HnswEntry::new(
-										ctx,
 										stk,
+										ctx,
 										opt,
 										hnsw.clone(),
 										a,
