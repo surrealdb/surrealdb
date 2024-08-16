@@ -3,8 +3,8 @@ use crate::idx::trees::dynamicset::DynamicSet;
 use crate::idx::trees::hnsw::ElementId;
 use crate::idx::trees::store::NodeId;
 #[cfg(debug_assertions)]
-use hashbrown::HashMap;
-use hashbrown::HashSet;
+use ahash::HashMap;
+use ahash::{HashSet, HashSetExt};
 use roaring::RoaringTreemap;
 use std::cmp::{Ordering, Reverse};
 use std::collections::btree_map::Entry;
@@ -619,10 +619,10 @@ pub(super) mod tests {
 	use crate::sql::index::{Distance, VectorType};
 	use crate::sql::{Array, Number, Value};
 	use crate::syn::Parse;
-	use flate2::read::GzDecoder;
 	#[cfg(debug_assertions)]
-	use hashbrown::HashMap;
-	use hashbrown::HashSet;
+	use ahash::HashMap;
+	use ahash::HashSet;
+	use flate2::read::GzDecoder;
 	use rand::prelude::SmallRng;
 	use rand::{Rng, SeedableRng};
 	use roaring::RoaringTreemap;
@@ -732,7 +732,7 @@ pub(super) mod tests {
 			distance: &Distance,
 		) -> Self {
 			let mut rng = get_seed_rnd();
-			let gen = RandomItemGenerator::new(&distance, dimension);
+			let gen = RandomItemGenerator::new(distance, dimension);
 			if unique {
 				TestCollection::new_unique(collection_size, vt, dimension, &gen, &mut rng)
 			} else {
@@ -755,7 +755,7 @@ pub(super) mod tests {
 			gen: &RandomItemGenerator,
 			rng: &mut SmallRng,
 		) -> Self {
-			let mut vector_set = HashSet::new();
+			let mut vector_set = HashSet::default();
 			let mut attempts = collection_size * 2;
 			while vector_set.len() < collection_size {
 				vector_set.insert(new_random_vec(rng, vector_type, dimension, gen));
@@ -766,7 +766,7 @@ pub(super) mod tests {
 			}
 			let mut coll = TestCollection::Unique(Vec::with_capacity(vector_set.len()));
 			for (i, v) in vector_set.into_iter().enumerate() {
-				coll.add(i as DocId, v.into());
+				coll.add(i as DocId, v);
 			}
 			coll
 		}
@@ -781,7 +781,7 @@ pub(super) mod tests {
 			let mut coll = TestCollection::NonUnique(Vec::with_capacity(collection_size));
 			// Prepare data set
 			for doc_id in 0..collection_size {
-				coll.add(doc_id as DocId, new_random_vec(rng, vector_type, dimension, gen).into());
+				coll.add(doc_id as DocId, new_random_vec(rng, vector_type, dimension, gen));
 			}
 			coll
 		}
@@ -821,7 +821,7 @@ pub(super) mod tests {
 		b.add(0.2, &Ids64::Vec2([6, 8]));
 		let res = b.build(
 			#[cfg(debug_assertions)]
-			HashMap::new(),
+			HashMap::default(),
 		);
 		assert_eq!(
 			res.docs,

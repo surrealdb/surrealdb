@@ -14,7 +14,7 @@ use serde_json::ser::PrettyFormatter;
 use surrealdb::engine::any::{connect, IntoEndpoint};
 use surrealdb::method::{Stats, WithStats};
 use surrealdb::opt::{capabilities::Capabilities, Config};
-use surrealdb::sql::{self, Statement, Value};
+use surrealdb::sql::{self, Param, Statement, Value};
 use surrealdb::{Notification, Response};
 
 #[derive(Args, Debug)]
@@ -44,6 +44,7 @@ pub async fn init(
 		auth: AuthArguments {
 			username,
 			password,
+			token,
 			auth_level,
 		},
 		conn: DatabaseConnectionArguments {
@@ -86,6 +87,11 @@ pub async fn init(
 			CredentialsLevel::Namespace => client.signin(creds.namespace()?).await?,
 			CredentialsLevel::Database => client.signin(creds.database()?).await?,
 		};
+
+		client
+	} else if token.is_some() && !endpoint.clone().into_endpoint()?.parse_kind()?.is_local() {
+		let client = connect(endpoint).await?;
+		client.authenticate(token.unwrap()).await?;
 
 		client
 	} else {
@@ -179,10 +185,11 @@ pub async fn init(
 		}
 		// Complete the request
 		match sql::parse(&line) {
-			Ok(query) => {
+			Ok(mut query) => {
 				let mut namespace = None;
 				let mut database = None;
 				let mut vars = Vec::new();
+				let init_length = query.len();
 				// Capture `use` and `set/let` statements from the query
 				for statement in query.iter() {
 					match statement {
@@ -194,12 +201,15 @@ pub async fn init(
 								database = Some(db.clone());
 							}
 						}
-						Statement::Set(stmt) => {
-							vars.push((stmt.name.clone(), stmt.what.clone()));
-						}
+						Statement::Set(stmt) => vars.push(stmt.name.clone()),
 						_ => {}
 					}
 				}
+
+				for var in &vars {
+					query.push(Statement::Value(Value::Param(Param::from(var.as_str()))))
+				}
+
 				// Extract the namespace and database from the current prompt
 				let (prompt_ns, prompt_db) = split_prompt(&prompt);
 				// The namespace should be set before the database can be set
@@ -210,17 +220,23 @@ pub async fn init(
 					continue;
 				}
 				// Run the query provided
-				let result = client.query(query).with_stats().await;
+				let mut result = client.query(query).with_stats().await;
+
+				if let Ok(WithStats(res)) = &mut result {
+					for (i, n) in vars.into_iter().enumerate() {
+						if let Result::<Value, _>::Ok(v) = res.take(init_length + i) {
+							let _ = client.set(n, v).await;
+						}
+					}
+				}
+
 				let result = process(pretty, json, result);
 				let result_is_error = result.is_err();
 				print(result);
 				if result_is_error {
 					continue;
 				}
-				// Persist the variables extracted from the query
-				for (key, value) in vars {
-					let _ = client.set(key, value).await;
-				}
+
 				// Process the last `use` statements, if any
 				if namespace.is_some() || database.is_some() {
 					// Use the namespace provided in the query if any, otherwise use the one in the prompt

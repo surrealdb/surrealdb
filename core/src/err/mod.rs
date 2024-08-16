@@ -1,7 +1,6 @@
 use crate::iam::Error as IamError;
 use crate::idx::ft::MatchRef;
 use crate::idx::trees::vector::SharedVector;
-use crate::key::error::KeyCategory;
 use crate::sql::idiom::Idiom;
 use crate::sql::index::Distance;
 use crate::sql::thing::Thing;
@@ -92,7 +91,6 @@ pub enum Error {
 
 	/// The key being inserted in the transaction already exists
 	#[error("The key being inserted already exists")]
-	#[deprecated(note = "Use TxKeyAlreadyExistsCategory")]
 	TxKeyAlreadyExists,
 
 	/// The key exceeds a limit set by the KV store
@@ -168,6 +166,12 @@ pub enum Error {
 		field: String,
 	},
 
+	/// The FETCH clause accepts idioms, strings and fields.
+	#[error("Found {value} on FETCH CLAUSE, but FETCH expects an idiom, a string or fields")]
+	InvalidFetch {
+		value: Value,
+	},
+
 	#[error("Found '{field}' in SPLIT ON clause on line {line}, but field is not present in SELECT expression")]
 	InvalidSplit {
 		line: usize,
@@ -222,6 +226,14 @@ pub enum Error {
 	InvalidArguments {
 		name: String,
 		message: String,
+	},
+
+	/// The wrong quantity or magnitude of arguments was given for the specified function
+	#[error("There was a problem running the {name} function. Expected this function to return a value of type {check}, but found {value}")]
+	FunctionCheck {
+		name: String,
+		value: String,
+		check: String,
 	},
 
 	/// The URL is invalid
@@ -298,12 +310,6 @@ pub enum Error {
 		value: String,
 	},
 
-	/// The requested namespace access method does not exist
-	#[error("The namespace access method '{value}' does not exist")]
-	NaNotFound {
-		value: String,
-	},
-
 	/// The requested namespace login does not exist
 	#[error("The namespace login '{value}' does not exist")]
 	NlNotFound {
@@ -313,12 +319,6 @@ pub enum Error {
 	/// The requested database does not exist
 	#[error("The database '{value}' does not exist")]
 	DbNotFound {
-		value: String,
-	},
-
-	/// The requested database access method does not exist
-	#[error("The database access method '{value}' does not exist")]
-	DaNotFound {
 		value: String,
 	},
 
@@ -397,6 +397,12 @@ pub enum Error {
 	/// The requested analyzer does not exist
 	#[error("The index '{value}' does not exist")]
 	IxNotFound {
+		value: String,
+	},
+
+	/// The requested record does not exist
+	#[error("The record '{value}' does not exist")]
+	IdNotFound {
 		value: String,
 	},
 
@@ -587,6 +593,14 @@ pub enum Error {
 		thing: String,
 		value: String,
 		field: Idiom,
+		check: String,
+	},
+
+	/// The specified value did not conform to the LET type check
+	#[error("Found {value} for param ${name}, but expected a {check}")]
+	SetCheck {
+		value: String,
+		name: String,
 		check: String,
 	},
 
@@ -822,10 +836,6 @@ pub enum Error {
 	#[error("Auth token is missing the '{0}' claim")]
 	MissingTokenClaim(String),
 
-	/// The key being inserted in the transaction already exists
-	#[error("The key being inserted already exists: {0}")]
-	TxKeyAlreadyExistsCategory(KeyCategory),
-
 	/// The db is running without an available storage engine
 	#[error("The db is running without an available storage engine")]
 	MissingStorageEngine,
@@ -933,48 +943,74 @@ pub enum Error {
 	#[error("A node task has failed: {0}")]
 	NodeAgent(&'static str),
 
-	/// An error related to live query occurred
-	#[error("Failed to process Live Query: {0}")]
-	LiveQueryError(LiveQueryCause),
-
 	/// The supplied type could not be serialiazed into `sql::Value`
 	#[error("Serialization error: {0}")]
 	Serialization(String),
 
 	/// The requested root access method already exists
-	#[error("The root access method '{value}' already exists")]
+	#[error("The root access method '{ac}' already exists")]
 	AccessRootAlreadyExists {
-		value: String,
+		ac: String,
 	},
 
 	/// The requested namespace access method already exists
-	#[error("The namespace access method '{value}' already exists")]
+	#[error("The access method '{ac}' already exists in the namespace '{ns}'")]
 	AccessNsAlreadyExists {
-		value: String,
+		ac: String,
+		ns: String,
 	},
 
 	/// The requested database access method already exists
-	#[error("The database access method '{value}' already exists")]
+	#[error("The access method '{ac}' already exists in the database '{db}'")]
 	AccessDbAlreadyExists {
-		value: String,
+		ac: String,
+		ns: String,
+		db: String,
 	},
 
 	/// The requested root access method does not exist
-	#[error("The root access method '{value}' does not exist")]
+	#[error("The root access method '{ac}' does not exist")]
 	AccessRootNotFound {
-		value: String,
+		ac: String,
+	},
+
+	/// The requested root access grant does not exist
+	#[error("The root access grant '{gr}' does not exist")]
+	AccessGrantRootNotFound {
+		ac: String,
+		gr: String,
 	},
 
 	/// The requested namespace access method does not exist
-	#[error("The namespace access method '{value}' does not exist")]
+	#[error("The access method '{ac}' does not exist in the namespace '{ns}'")]
 	AccessNsNotFound {
-		value: String,
+		ac: String,
+		ns: String,
+	},
+
+	/// The requested namespace access grant does not exist
+	#[error("The access grant '{gr}' does not exist in the namespace '{ns}'")]
+	AccessGrantNsNotFound {
+		ac: String,
+		gr: String,
+		ns: String,
 	},
 
 	/// The requested database access method does not exist
-	#[error("The database access method '{value}' does not exist")]
+	#[error("The access method '{ac}' does not exist in the database '{db}'")]
 	AccessDbNotFound {
-		value: String,
+		ac: String,
+		ns: String,
+		db: String,
+	},
+
+	/// The requested database access grant does not exist
+	#[error("The access grant '{gr}' does not exist in the database '{db}'")]
+	AccessGrantDbNotFound {
+		ac: String,
+		gr: String,
+		ns: String,
+		db: String,
 	},
 
 	/// The access method cannot be defined on the requested level
@@ -1005,11 +1041,40 @@ pub enum Error {
 	#[error("This record access method does not allow signin")]
 	AccessRecordNoSignin,
 
+	#[error("This bearer access method requires a key to be provided")]
+	AccessBearerMissingKey,
+
+	#[error("This bearer access grant has an invalid format")]
+	AccessGrantBearerInvalid,
+
+	#[error("This access grant has an invalid subject")]
+	AccessGrantInvalidSubject,
+
+	#[error("This access grant has been revoked")]
+	AccessGrantRevoked,
+
 	/// Found a table name for the record but this is not a valid table
 	#[error("Found {value} for the Record ID but this is not a valid table name")]
 	TbInvalid {
 		value: String,
 	},
+
+	/// This error is used for breaking execution when a value is returned
+	#[doc(hidden)]
+	#[error("Return statement has been reached")]
+	Return {
+		value: Value,
+	},
+
+	/// A destructuring variant was used in a context where it is not supported
+	#[error("{variant} destructuring method is not supported here")]
+	UnsupportedDestructure {
+		variant: String,
+	},
+
+	#[doc(hidden)]
+	#[error("The underlying datastore does not support versioned queries")]
+	UnsupportedVersionedQueries,
 }
 
 impl From<Error> for String {
@@ -1040,9 +1105,7 @@ impl From<regex::Error> for Error {
 impl From<echodb::err::Error> for Error {
 	fn from(e: echodb::err::Error) -> Error {
 		match e {
-			echodb::err::Error::KeyAlreadyExists => {
-				Error::TxKeyAlreadyExistsCategory(crate::key::error::KeyCategory::Unknown)
-			}
+			echodb::err::Error::KeyAlreadyExists => Error::TxKeyAlreadyExists,
 			echodb::err::Error::ValNotExpectedValue => Error::TxConditionNotMet,
 			_ => Error::Tx(e.to_string()),
 		}
@@ -1053,9 +1116,7 @@ impl From<echodb::err::Error> for Error {
 impl From<indxdb::err::Error> for Error {
 	fn from(e: indxdb::err::Error) -> Error {
 		match e {
-			indxdb::err::Error::KeyAlreadyExists => {
-				Error::TxKeyAlreadyExistsCategory(crate::key::error::KeyCategory::Unknown)
-			}
+			indxdb::err::Error::KeyAlreadyExists => Error::TxKeyAlreadyExists,
 			indxdb::err::Error::ValNotExpectedValue => Error::TxConditionNotMet,
 			_ => Error::Tx(e.to_string()),
 		}
@@ -1066,9 +1127,7 @@ impl From<indxdb::err::Error> for Error {
 impl From<tikv::Error> for Error {
 	fn from(e: tikv::Error) -> Error {
 		match e {
-			tikv::Error::DuplicateKeyInsertion => {
-				Error::TxKeyAlreadyExistsCategory(crate::key::error::KeyCategory::Unknown)
-			}
+			tikv::Error::DuplicateKeyInsertion => Error::TxKeyAlreadyExists,
 			tikv::Error::KeyError(ke) if ke.abort.contains("KeyTooLarge") => Error::TxKeyTooLarge,
 			tikv::Error::RegionError(re) if re.raft_entry_too_large.is_some() => Error::TxTooLarge,
 			_ => Error::Tx(e.to_string()),
@@ -1086,6 +1145,20 @@ impl From<rocksdb::Error> for Error {
 #[cfg(feature = "kv-surrealkv")]
 impl From<surrealkv::Error> for Error {
 	fn from(e: surrealkv::Error) -> Error {
+		Error::Tx(e.to_string())
+	}
+}
+
+#[cfg(feature = "kv-fdb")]
+impl From<foundationdb::FdbError> for Error {
+	fn from(e: foundationdb::FdbError) -> Error {
+		Error::Ds(e.to_string())
+	}
+}
+
+#[cfg(feature = "kv-fdb")]
+impl From<foundationdb::TransactionCommitError> for Error {
+	fn from(e: foundationdb::TransactionCommitError) -> Error {
 		Error::Tx(e.to_string())
 	}
 }
@@ -1135,14 +1208,32 @@ impl Serialize for Error {
 		serializer.serialize_str(self.to_string().as_str())
 	}
 }
+impl Error {
+	pub fn set_check_from_coerce(self, name: String) -> Error {
+		match self {
+			Error::CoerceTo {
+				from,
+				into,
+			} => Error::SetCheck {
+				name,
+				value: from.to_string(),
+				check: into,
+			},
+			e => e,
+		}
+	}
 
-#[derive(Error, Debug)]
-#[non_exhaustive]
-pub enum LiveQueryCause {
-	#[doc(hidden)]
-	#[error("The Live Query must have a change feed for it it work")]
-	MissingChangeFeed,
-	#[doc(hidden)]
-	#[error("The Live Query must have a change feed that includes relative changes")]
-	ChangeFeedNoOriginal,
+	pub fn function_check_from_coerce(self, name: impl Into<String>) -> Error {
+		match self {
+			Error::CoerceTo {
+				from,
+				into,
+			} => Error::FunctionCheck {
+				name: name.into(),
+				value: from.to_string(),
+				check: into,
+			},
+			e => e,
+		}
+	}
 }

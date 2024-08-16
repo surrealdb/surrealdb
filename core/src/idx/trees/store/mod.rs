@@ -47,7 +47,7 @@ where
 
 	pub(in crate::idx) async fn get_node_mut(
 		&mut self,
-		tx: &mut Transaction,
+		tx: &Transaction,
 		node_id: NodeId,
 	) -> Result<StoredNode<N>, Error> {
 		match self {
@@ -58,7 +58,7 @@ where
 
 	pub(in crate::idx) async fn get_node(
 		&self,
-		tx: &mut Transaction,
+		tx: &Transaction,
 		node_id: NodeId,
 	) -> Result<Arc<StoredNode<N>>, Error> {
 		match self {
@@ -69,15 +69,13 @@ where
 
 	pub(in crate::idx) async fn get_node_txn(
 		&self,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		node_id: NodeId,
 	) -> Result<Arc<StoredNode<N>>, Error> {
 		match self {
 			Self::Read(r) => {
-				let mut tx = ctx.tx_lock().await;
-				let n = r.get_node(&mut tx, node_id).await;
-				drop(tx);
-				n
+				let tx = ctx.tx();
+				r.get_node(&tx, node_id).await
 			}
 			_ => Err(Error::Unreachable("TreeStore::get_node_txn")),
 		}
@@ -112,7 +110,7 @@ where
 		}
 	}
 
-	pub async fn finish(&mut self, tx: &mut Transaction) -> Result<Option<TreeCache<N>>, Error> {
+	pub async fn finish(&mut self, tx: &Transaction) -> Result<Option<TreeCache<N>>, Error> {
 		match self {
 			Self::Write(w) => w.finish(tx).await,
 			_ => Ok(None),
@@ -143,12 +141,12 @@ impl TreeNodeProvider {
 		}
 	}
 
-	async fn load<N>(&self, tx: &mut Transaction, id: NodeId) -> Result<StoredNode<N>, Error>
+	async fn load<N>(&self, tx: &Transaction, id: NodeId) -> Result<StoredNode<N>, Error>
 	where
 		N: TreeNode + Clone,
 	{
 		let key = self.get_key(id);
-		if let Some(val) = tx.get(key.clone()).await? {
+		if let Some(val) = tx.get(key.clone(), None).await? {
 			let size = val.len() as u32;
 			let node = N::try_from_val(val)?;
 			Ok(StoredNode::new(node, id, key, size))
@@ -157,7 +155,7 @@ impl TreeNodeProvider {
 		}
 	}
 
-	async fn save<N>(&self, tx: &mut Transaction, node: &mut StoredNode<N>) -> Result<(), Error>
+	async fn save<N>(&self, tx: &Transaction, node: &mut StoredNode<N>) -> Result<(), Error>
 	where
 		N: TreeNode + Clone + Display,
 	{
@@ -290,20 +288,16 @@ impl IndexStores {
 
 	pub(crate) async fn index_removed(
 		&self,
-		tx: &mut Transaction,
+		tx: &Transaction,
 		ns: &str,
 		db: &str,
 		tb: &str,
 		ix: &str,
 	) -> Result<(), Error> {
-		self.remove_index(ns, db, tx.get_and_cache_tb_index(ns, db, tb, ix).await?.as_ref()).await
+		self.remove_index(ns, db, tx.get_tb_index(ns, db, tb, ix).await?.as_ref()).await
 	}
 
-	pub(crate) async fn namespace_removed(
-		&self,
-		tx: &mut Transaction,
-		ns: &str,
-	) -> Result<(), Error> {
+	pub(crate) async fn namespace_removed(&self, tx: &Transaction, ns: &str) -> Result<(), Error> {
 		for db in tx.all_db(ns).await?.iter() {
 			self.database_removed(tx, ns, &db.name).await?;
 		}
@@ -312,7 +306,7 @@ impl IndexStores {
 
 	pub(crate) async fn database_removed(
 		&self,
-		tx: &mut Transaction,
+		tx: &Transaction,
 		ns: &str,
 		db: &str,
 	) -> Result<(), Error> {
@@ -324,7 +318,7 @@ impl IndexStores {
 
 	pub(crate) async fn table_removed(
 		&self,
-		tx: &mut Transaction,
+		tx: &Transaction,
 		ns: &str,
 		db: &str,
 		tb: &str,

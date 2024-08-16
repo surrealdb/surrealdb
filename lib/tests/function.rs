@@ -280,6 +280,32 @@ async fn function_array_distinct() -> Result<(), Error> {
 }
 
 #[tokio::test]
+async fn function_array_fill() -> Result<(), Error> {
+	let sql = r#"
+		RETURN array::fill([1,2,3,4,5], 10);
+		RETURN array::fill([1,2,3,4,5], 10, 0, 7);
+		RETURN array::fill([1,NONE,NONE,NONE,NONE], 10, 1);
+		RETURN array::fill([1,NONE,3,4,5], 10, 1, 2);
+		RETURN array::fill([1,2,3,4,5], 10, 1, 1);
+		RETURN array::fill([1,2,3,4,5], 10, 7, 7);
+		RETURN array::fill([1,2,3,4,5], 10, 7, 9);
+		RETURN array::fill([1,2,NONE,4,5], 10, -3, -2);
+	"#;
+	//
+	Test::new(sql)
+		.await?
+		.expect_val("[10,10,10,10,10]")?
+		.expect_val("[10,10,10,10,10]")?
+		.expect_val("[1,10,10,10,10]")?
+		.expect_val("[1,10,3,4,5]")?
+		.expect_val("[1,2,3,4,5]")?
+		.expect_val("[1,2,3,4,5]")?
+		.expect_val("[1,2,3,4,5]")?
+		.expect_val("[1,2,10,4,5]")?;
+	Ok(())
+}
+
+#[tokio::test]
 async fn function_array_filter_index() -> Result<(), Error> {
 	let sql = r#"RETURN array::filter_index([0, 1, 2], 1);
 RETURN array::filter_index([0, 0, 2], 0);
@@ -449,6 +475,17 @@ async fn function_array_intersect() -> Result<(), Error> {
 }
 
 #[tokio::test]
+async fn function_array_is_empty() -> Result<(), Error> {
+	let sql = r#"
+		RETURN array::is_empty([]);
+		RETURN array::is_empty([1,2,3,4,5]);
+	"#;
+	//
+	Test::new(sql).await?.expect_val("true")?.expect_val("false")?;
+	Ok(())
+}
+
+#[tokio::test]
 async fn function_string_join_arr() -> Result<(), Error> {
 	let sql = r#"
 		RETURN array::join([], "");
@@ -564,6 +601,16 @@ RETURN array::logical_xor([0, 1], []);"#,
 		&["[false, true, true, false]", r#"[false, "true", 1, 0]"#, "[0, 1]"],
 	)
 	.await?;
+	Ok(())
+}
+
+#[tokio::test]
+async fn function_array_map() -> Result<(), Error> {
+	let sql = r#"
+		RETURN array::map([1,2,3], |$n, $i| $n + $i);
+	"#;
+	//
+	Test::new(sql).await?.expect_val("[1, 3, 5]")?;
 	Ok(())
 }
 
@@ -730,6 +777,27 @@ async fn function_array_push() -> Result<(), Error> {
 }
 
 #[tokio::test]
+async fn function_array_range() -> Result<(), Error> {
+	let sql = r#"
+		RETURN array::range(1, 10);
+		RETURN array::range(3, 1);
+		RETURN array::range(44, 0);
+		RETURN array::range(0, -1);
+		RETURN array::range(0, -256);
+		RETURN array::range(9223372036854775800, 100);
+	"#;
+	//
+	Test::new(sql).await?
+		.expect_val("[1,2,3,4,5,6,7,8,9,10]")?
+		.expect_val("[3]")?
+		.expect_val("[]")?
+		.expect_error("Incorrect arguments for function array::range(). Argument 1 was the wrong type. Expected a positive number but found -1")?
+		.expect_error("Incorrect arguments for function array::range(). Argument 1 was the wrong type. Expected a positive number but found -256")?
+		.expect_error("Incorrect arguments for function array::range(). The range overflowed the maximum value for an integer")?;
+	Ok(())
+}
+
+#[tokio::test]
 async fn function_array_remove() -> Result<(), Error> {
 	let sql = r#"
 		RETURN array::remove([3], 0);
@@ -755,6 +823,27 @@ async fn function_array_remove() -> Result<(), Error> {
 	let val = Value::parse("[1,2,3]");
 	assert_eq!(tmp, val);
 	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn function_array_repeat() -> Result<(), Error> {
+	let sql = r#"
+		RETURN array::repeat(1, 10);
+		RETURN array::repeat("hello", 2);
+		RETURN array::repeat(NONE, 3);
+		RETURN array::repeat(44, 0);
+		RETURN array::repeat(0, -1);
+		RETURN array::repeat(0, -256);
+	"#;
+	//
+	Test::new(sql).await?
+		.expect_val("[1,1,1,1,1,1,1,1,1,1]")?
+		.expect_val(r#"["hello","hello"]"#)?
+		.expect_val("[NONE,NONE,NONE]")?
+		.expect_val("[]")?
+		.expect_error("Incorrect arguments for function array::repeat(). Output must not exceed 1048576 bytes.")?
+		.expect_error("Incorrect arguments for function array::repeat(). Output must not exceed 1048576 bytes.")?;
 	Ok(())
 }
 
@@ -987,6 +1076,27 @@ async fn function_array_sort_desc() -> Result<(), Error> {
 }
 
 #[tokio::test]
+async fn function_array_swap() -> Result<(), Error> {
+	let sql = r#"
+		RETURN array::swap([1,2,3,4,5], 1, 2);
+		RETURN array::swap([1,2,3,4,5], 1, 1);
+		RETURN array::swap([1,2,3,4,5], -1, -2);
+		RETURN array::swap([1,2,3,4,5], -5, -4);
+		RETURN array::swap([1,2,3,4,5], 8, 1);
+		RETURN array::swap([1,2,3,4,5], 1, -8);
+	"#;
+	//
+	Test::new(sql).await?
+		.expect_val("[1,3,2,4,5]")?
+		.expect_val("[1,2,3,4,5]")?
+		.expect_val("[1,2,3,5,4]")?
+		.expect_val("[2,1,3,4,5]")?
+		.expect_error("Incorrect arguments for function array::swap(). Argument 1 is out of range. Expected a number between -5 and 5")?
+		.expect_error("Incorrect arguments for function array::swap(). Argument 2 is out of range. Expected a number between -5 and 5")?;
+	Ok(())
+}
+
+#[tokio::test]
 async fn function_array_transpose() -> Result<(), Error> {
 	let sql = r#"
 		RETURN array::transpose([[0, 1], [2, 3]]);
@@ -1033,6 +1143,28 @@ async fn function_array_union() -> Result<(), Error> {
 	let val = Value::parse("[1,2,6,3,4,5]");
 	assert_eq!(tmp, val);
 	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn function_array_windows() -> Result<(), Error> {
+	let sql = r#"
+		RETURN array::windows([0, 1, 2, 3], 2);
+		RETURN array::windows([0, 1, 2], 2);
+		RETURN array::windows([0, 1, 2], 3);
+		RETURN array::windows([0, 1, 2, 3, 4, 5], 3);
+		RETURN array::windows([0, 1, 2], 4);
+		RETURN array::windows([0, 1, 2], 0);
+	"#;
+	let error = "Incorrect arguments for function array::windows(). The second argument must be an integer greater than 0";
+	Test::new(sql)
+		.await?
+		.expect_val("[[0, 1], [1, 2], [2, 3]]")?
+		.expect_val("[[0, 1], [1, 2]]")?
+		.expect_val("[[0, 1, 2]]")?
+		.expect_val("[[0, 1, 2], [1, 2, 3], [2, 3, 4], [3, 4, 5]]")?
+		.expect_val("[]")?
+		.expect_error(error)?;
 	Ok(())
 }
 
@@ -1881,7 +2013,12 @@ async fn function_math_deg2rad() -> Result<(), Error> {
 		RETURN math::deg2rad(math::rad2deg(0.7853981633974483));
 	"#;
 	Test::new(sql).await?.expect_floats(
-		&[0.7853981633974483, -1.5707963267948966, 6.283185307179586, 0.7853981633974483],
+		&[
+			std::f64::consts::FRAC_PI_4,
+			-std::f64::consts::FRAC_PI_2,
+			std::f64::consts::TAU,
+			std::f64::consts::FRAC_PI_4,
+		],
 		f64::EPSILON,
 	)?;
 	Ok(())
@@ -2032,7 +2169,7 @@ async fn function_math_log10() -> Result<(), Error> {
 	"#;
 	Test::new(sql)
 		.await?
-		.expect_floats(&[0.43429738512450866, 0.3010299956639812, 0.0], f64::EPSILON)?
+		.expect_floats(&[0.43429738512450866, std::f64::consts::LOG10_2, 0.0], f64::EPSILON)?
 		.expect_vals(&["Math::Neg_Inf", "NaN", "true"])?;
 	Ok(())
 }
@@ -2949,6 +3086,39 @@ async fn function_rand_ulid() -> Result<(), Error> {
 }
 
 #[tokio::test]
+async fn function_rand_ulid_from_datetime() -> Result<(), Error> {
+	let sql = r#"
+        CREATE ONLY test:[rand::ulid()] SET created = time::now(), num = 1;
+        SLEEP 100ms;
+        LET $rec = CREATE ONLY test:[rand::ulid()] SET created = time::now(), num = 2;
+        SLEEP 100ms;
+        CREATE ONLY test:[rand::ulid()] SET created = time::now(), num = 3;
+		SELECT VALUE num FROM test:[rand::ulid($rec.created - 50ms)]..;
+	"#;
+	let mut test = Test::new(sql).await?;
+	//
+	let tmp = test.next()?.result?;
+	assert!(tmp.is_object());
+	//
+	let tmp = test.next()?.result?;
+	assert!(tmp.is_none());
+	//
+	let tmp = test.next()?.result?;
+	assert!(tmp.is_none());
+	//
+	let tmp = test.next()?.result?;
+	assert!(tmp.is_none());
+	//
+	let tmp = test.next()?.result?;
+	assert!(tmp.is_object());
+	//
+	let tmp = test.next()?.result?;
+	assert_eq!(tmp, Value::parse("[2, 3]"));
+	//
+	Ok(())
+}
+
+#[tokio::test]
 async fn function_rand_uuid() -> Result<(), Error> {
 	let sql = r#"
 		RETURN rand::uuid();
@@ -2957,6 +3127,39 @@ async fn function_rand_uuid() -> Result<(), Error> {
 	//
 	let tmp = test.next()?.result?;
 	assert!(tmp.is_uuid());
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn function_rand_uuid_from_datetime() -> Result<(), Error> {
+	let sql = r#"
+        CREATE ONLY test:[rand::uuid()] SET created = time::now(), num = 1;
+        SLEEP 100ms;
+        LET $rec = CREATE ONLY test:[rand::uuid()] SET created = time::now(), num = 2;
+        SLEEP 100ms;
+        CREATE ONLY test:[rand::uuid()] SET created = time::now(), num = 3;
+		SELECT VALUE num FROM test:[rand::uuid($rec.created - 50ms)]..;
+	"#;
+	let mut test = Test::new(sql).await?;
+	//
+	let tmp = test.next()?.result?;
+	assert!(tmp.is_object());
+	//
+	let tmp = test.next()?.result?;
+	assert!(tmp.is_none());
+	//
+	let tmp = test.next()?.result?;
+	assert!(tmp.is_none());
+	//
+	let tmp = test.next()?.result?;
+	assert!(tmp.is_none());
+	//
+	let tmp = test.next()?.result?;
+	assert!(tmp.is_object());
+	//
+	let tmp = test.next()?.result?;
+	assert_eq!(tmp, Value::parse("[2, 3]"));
 	//
 	Ok(())
 }
@@ -2983,6 +3186,39 @@ async fn function_rand_uuid_v7() -> Result<(), Error> {
 	//
 	let tmp = test.next()?.result?;
 	assert!(tmp.is_uuid());
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn function_rand_uuid_v7_from_datetime() -> Result<(), Error> {
+	let sql = r#"
+        CREATE ONLY test:[rand::uuid::v7()] SET created = time::now(), num = 1;
+        SLEEP 100ms;
+        LET $rec = CREATE ONLY test:[rand::uuid::v7()] SET created = time::now(), num = 2;
+        SLEEP 100ms;
+        CREATE ONLY test:[rand::uuid::v7()] SET created = time::now(), num = 3;
+		SELECT VALUE num FROM test:[rand::uuid::v7($rec.created - 50ms)]..;
+	"#;
+	let mut test = Test::new(sql).await?;
+	//
+	let tmp = test.next()?.result?;
+	assert!(tmp.is_object());
+	//
+	let tmp = test.next()?.result?;
+	assert!(tmp.is_none());
+	//
+	let tmp = test.next()?.result?;
+	assert!(tmp.is_none());
+	//
+	let tmp = test.next()?.result?;
+	assert!(tmp.is_none());
+	//
+	let tmp = test.next()?.result?;
+	assert!(tmp.is_object());
+	//
+	let tmp = test.next()?.result?;
+	assert_eq!(tmp, Value::parse("[2, 3]"));
 	//
 	Ok(())
 }
@@ -3544,8 +3780,27 @@ async fn function_parse_is_url() -> Result<(), Error> {
 #[tokio::test]
 async fn function_parse_is_uuid() -> Result<(), Error> {
 	let sql = r#"
-		RETURN string::is::uuid(u"e72bee20-f49b-11ec-b939-0242ac120002");
+		RETURN string::is::uuid("e72bee20-f49b-11ec-b939-0242ac120002");
 		RETURN string::is::uuid("this is a test!");
+	"#;
+	let mut test = Test::new(sql).await?;
+	//
+	let tmp = test.next()?.result?;
+	let val = Value::Bool(true);
+	assert_eq!(tmp, val);
+	//
+	let tmp = test.next()?.result?;
+	let val = Value::Bool(false);
+	assert_eq!(tmp, val);
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn function_parse_is_record() -> Result<(), Error> {
+	let sql = r#"
+		RETURN string::is::record("test:123");
+		RETURN string::is::record("invalid record id!");
 	"#;
 	let mut test = Test::new(sql).await?;
 	//
@@ -4648,7 +4903,7 @@ async fn function_type_is_bytes() -> Result<(), Error> {
 async fn function_type_is_collection() -> Result<(), Error> {
 	let sql = r#"
 		LET $collection = <geometry<collection>> {
-			type: 'GeometryCollection', 
+			type: 'GeometryCollection',
 			geometries: [{ type: 'MultiPoint', coordinates: [[10, 11.2], [10.5, 11.9]] }]
 		};
 		RETURN type::is::collection($collection);
@@ -4902,7 +5157,7 @@ async fn function_type_is_multipoint() -> Result<(), Error> {
 async fn function_type_is_multipolygon() -> Result<(), Error> {
 	let sql = r#"
 		LET $multipolygon = <geometry<multipolygon>> {
-			type: 'MultiPolygon', 
+			type: 'MultiPolygon',
 			coordinates: [[[[10, 11.2], [10.5, 11.9], [10.8, 12], [10, 11.2]]], [[[9, 11.2], [10.5, 11.9], [10.3, 13], [9, 11.2]]]]
 		};
 		RETURN type::is::multipolygon($multipolygon);
@@ -5001,7 +5256,7 @@ async fn function_type_is_point() -> Result<(), Error> {
 async fn function_type_is_polygon() -> Result<(), Error> {
 	let sql = r#"
 		LET $polygon = <geometry<polygon>> {
-			type: 'Polygon', 
+			type: 'Polygon',
 			coordinates: [
 				[
 					[-0.38314819, 51.37692386],
@@ -5941,7 +6196,7 @@ pub async fn function_http_get_from_script() -> Result<(), Error> {
 
 #[cfg(not(feature = "http"))]
 #[tokio::test]
-pub async fn function_http_disabled() {
+pub async fn function_http_disabled() -> Result<(), Error> {
 	Test::new(
 		r#"
 	RETURN http::get({});
@@ -5952,7 +6207,7 @@ pub async fn function_http_disabled() {
 	RETURN http::delete({});
 	"#,
 	)
-	.await
+	.await?
 	.expect_errors(&[
 		"Remote HTTP request functions are not enabled",
 		"Remote HTTP request functions are not enabled",
@@ -5960,7 +6215,8 @@ pub async fn function_http_disabled() {
 		"Remote HTTP request functions are not enabled",
 		"Remote HTTP request functions are not enabled",
 		"Remote HTTP request functions are not enabled",
-	]);
+	])?;
+	Ok(())
 }
 
 // Tests for custom defined functions
@@ -6078,5 +6334,51 @@ async fn function_outside_database() -> Result<(), Error> {
 		_ => panic!("Query should have failed with error: Specify a database to use"),
 	}
 
+	Ok(())
+}
+
+#[tokio::test]
+async fn function_idiom_chaining() -> Result<(), Error> {
+	let sql = r#"
+		{ a: 1, b: 2 }.entries().flatten();
+		"ABC".lowercase();
+		true.is_number();
+		true.is_bool();
+		true.doesnt_exist();
+		field.bla.nested.is_none();
+		// String is one of the types in the initial match statement,
+		// this test ensures that the dispatch macro does not exit early
+		"string".is_bool();
+		["1", "2"].join('').chain(|$v| <int> $v);
+	"#;
+	Test::new(sql)
+		.await?
+		.expect_val("['a', 1, 'b', 2]")?
+		.expect_val("'abc'")?
+		.expect_val("false")?
+		.expect_val("true")?
+        .expect_error("There was a problem running the doesnt_exist() function. no such method found for the bool type")?
+	    .expect_val("true")?
+		.expect_val("false")?
+        .expect_val("12")?;
+	Ok(())
+}
+
+// tests for custom functions with return types
+#[tokio::test]
+async fn function_custom_typed_returns() -> Result<(), Error> {
+	let sql = r#"
+		DEFINE FUNCTION fn::two() -> int {2};
+		DEFINE FUNCTION fn::two_bad_type() -> string {2};
+		RETURN fn::two();
+		RETURN fn::two_bad_type();
+	"#;
+	let error = "There was a problem running the two_bad_type function. Expected this function to return a value of type string, but found 2";
+	Test::new(sql)
+		.await?
+		.expect_val("None")?
+		.expect_val("None")?
+		.expect_val("2")?
+		.expect_error(error)?;
 	Ok(())
 }

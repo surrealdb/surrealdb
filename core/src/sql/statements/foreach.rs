@@ -1,4 +1,4 @@
-use crate::ctx::Context;
+use crate::ctx::{Context, MutableContext};
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
@@ -30,9 +30,9 @@ impl ForeachStatement {
 	pub(crate) async fn compute(
 		&self,
 		stk: &mut Stk,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		opt: &Options,
-		doc: Option<&CursorDoc<'_>>,
+		doc: Option<&CursorDoc>,
 	) -> Result<Value, Error> {
 		// Check the loop data
 		match &self.range.compute(stk, ctx, opt, doc).await? {
@@ -40,18 +40,22 @@ impl ForeachStatement {
 				// Loop over the values
 				'foreach: for v in arr.iter() {
 					// Duplicate context
-					let mut ctx = Context::new(ctx);
+					let ctx = MutableContext::new(ctx).freeze();
 					// Set the current parameter
 					let key = self.param.0.to_raw();
 					let val = stk.run(|stk| v.compute(stk, &ctx, opt, doc)).await?;
-					ctx.add_value(key, val);
+					let mut ctx = MutableContext::unfreeze(ctx)?;
+					ctx.add_value(key, val.into());
+					let mut ctx = ctx.freeze();
 					// Loop over the code block statements
 					for v in self.block.iter() {
 						// Compute each block entry
 						let res = match v {
 							Entry::Set(v) => {
 								let val = stk.run(|stk| v.compute(stk, &ctx, opt, doc)).await?;
-								ctx.add_value(v.name.to_owned(), val);
+								let mut c = MutableContext::unfreeze(ctx)?;
+								c.add_value(v.name.to_owned(), val.into());
+								ctx = c.freeze();
 								Ok(Value::None)
 							}
 							Entry::Value(v) => stk.run(|stk| v.compute(stk, &ctx, opt, doc)).await,
@@ -69,6 +73,7 @@ impl ForeachStatement {
 							Entry::Relate(v) => stk.run(|stk| v.compute(stk, &ctx, opt, doc)).await,
 							Entry::Insert(v) => stk.run(|stk| v.compute(stk, &ctx, opt, doc)).await,
 							Entry::Define(v) => v.compute(stk, &ctx, opt, doc).await,
+							Entry::Alter(v) => v.compute(stk, &ctx, opt, doc).await,
 							Entry::Rebuild(v) => v.compute(stk, &ctx, opt, doc).await,
 							Entry::Remove(v) => v.compute(&ctx, opt, doc).await,
 							Entry::Output(v) => {

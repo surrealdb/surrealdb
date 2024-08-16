@@ -6,8 +6,8 @@ pub(crate) mod native;
 pub(crate) mod wasm;
 
 use crate::api;
+use crate::api::conn::Command;
 use crate::api::conn::DbResponse;
-use crate::api::conn::Method;
 use crate::api::engine::remote::duration_from_str;
 use crate::api::err::Error;
 use crate::api::method::query::QueryResult;
@@ -20,19 +20,93 @@ use crate::dbs::Status;
 use crate::method::Stats;
 use crate::opt::IntoEndpoint;
 use crate::sql::Value;
+use channel::Sender;
 use indexmap::IndexMap;
 use revision::revisioned;
 use revision::Revisioned;
 use serde::de::DeserializeOwned;
 use serde::Deserialize;
+use std::collections::HashMap;
 use std::io::Read;
 use std::marker::PhantomData;
 use std::time::Duration;
+use surrealdb_core::dbs::Notification as CoreNotification;
+use trice::Instant;
+use uuid::Uuid;
 
 pub(crate) const PATH: &str = "rpc";
 const PING_INTERVAL: Duration = Duration::from_secs(5);
-const PING_METHOD: &str = "ping";
 const REVISION_HEADER: &str = "revision";
+
+enum RequestEffect {
+	/// Completing this request sets a variable to a give value.
+	Set {
+		key: String,
+		value: Value,
+	},
+	/// Completing this request sets a variable to a give value.
+	Clear {
+		key: String,
+	},
+	/// Insert requests repsonses need to be flattened in an array.
+	Insert,
+	/// No effect
+	None,
+}
+
+#[derive(Clone, Copy, Eq, PartialEq, Hash)]
+enum ReplayMethod {
+	Use,
+	Signup,
+	Signin,
+	Invalidate,
+	Authenticate,
+}
+
+struct PendingRequest {
+	// Does resolving this request has some effects.
+	effect: RequestEffect,
+	// The channel to send the result of the request into.
+	response_channel: Sender<Result<DbResponse>>,
+}
+
+struct RouterState<Sink, Stream> {
+	/// Vars currently set by the set method,
+	vars: IndexMap<String, Value>,
+	/// Messages which aught to be replayed on a reconnect.
+	replay: IndexMap<ReplayMethod, Command>,
+	/// Pending live queries
+	live_queries: HashMap<Uuid, channel::Sender<CoreNotification>>,
+	/// Send requests which are still awaiting an awnser.
+	pending_requests: HashMap<i64, PendingRequest>,
+	/// The last time a message was recieved from the server.
+	last_activity: Instant,
+	/// The sink into which messages are send to surrealdb
+	sink: Sink,
+	/// The stream from which messages are recieved from surrealdb
+	stream: Stream,
+}
+
+impl<Sink, Stream> RouterState<Sink, Stream> {
+	pub fn new(sink: Sink, stream: Stream) -> Self {
+		RouterState {
+			vars: IndexMap::new(),
+			replay: IndexMap::new(),
+			live_queries: HashMap::new(),
+			pending_requests: HashMap::new(),
+			last_activity: Instant::now(),
+			sink,
+			stream,
+		}
+	}
+}
+
+enum HandleResult {
+	/// Socket disconnected, should continue to reconnect
+	Disconnected,
+	/// Nothing wrong continue as normal.
+	Ok,
+}
 
 /// The WS scheme used to connect to `ws://` endpoints
 #[derive(Debug)]
@@ -44,10 +118,7 @@ pub struct Wss;
 
 /// A WebSocket client for communicating with the server via WebSockets
 #[derive(Debug, Clone)]
-pub struct Client {
-	pub(crate) id: i64,
-	method: Method,
-}
+pub struct Client(());
 
 impl Surreal<Client> {
 	/// Connects to a specific database endpoint, saving the connection on the static client
@@ -156,7 +227,10 @@ pub(crate) struct Response {
 	pub(crate) result: ServerResult,
 }
 
-fn serialize(value: &Value, revisioned: bool) -> Result<Vec<u8>> {
+fn serialize<V>(value: &V, revisioned: bool) -> Result<Vec<u8>>
+where
+	V: serde::Serialize + Revisioned,
+{
 	if revisioned {
 		let mut buf = Vec::new();
 		value.serialize_revisioned(&mut buf).map_err(|error| crate::Error::Db(error.into()))?;

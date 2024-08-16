@@ -1,3 +1,4 @@
+use crate::cnf::FUNCTION_ALLOCATION_LIMIT;
 use crate::err::Error;
 use crate::fnc::util::string;
 use crate::sql::value::Value;
@@ -5,11 +6,10 @@ use crate::sql::Regex;
 
 /// Returns `true` if a string of this length is too much to allocate.
 fn limit(name: &str, n: usize) -> Result<(), Error> {
-	const LIMIT: usize = 2usize.pow(20);
-	if n > LIMIT {
+	if n > *FUNCTION_ALLOCATION_LIMIT {
 		Err(Error::InvalidArguments {
 			name: name.to_owned(),
-			message: format!("Output must not exceed {LIMIT} bytes."),
+			message: format!("Output must not exceed {} bytes.", *FUNCTION_ALLOCATION_LIMIT),
 		})
 	} else {
 		Ok(())
@@ -183,6 +183,7 @@ pub mod html {
 pub mod is {
 	use crate::err::Error;
 	use crate::sql::value::Value;
+	use crate::sql::{Datetime, Thing};
 	use chrono::NaiveDateTime;
 	use once_cell::sync::Lazy;
 	use regex::Regex;
@@ -207,8 +208,11 @@ pub mod is {
 		Ok(arg.is_ascii().into())
 	}
 
-	pub fn datetime((arg, fmt): (String, String)) -> Result<Value, Error> {
-		Ok(NaiveDateTime::parse_from_str(&arg, &fmt).is_ok().into())
+	pub fn datetime((arg, fmt): (String, Option<String>)) -> Result<Value, Error> {
+		Ok(match fmt {
+			Some(fmt) => NaiveDateTime::parse_from_str(&arg, &fmt).is_ok().into(),
+			None => Datetime::try_from(arg.as_ref()).is_ok().into(),
+		})
 	}
 
 	pub fn domain((arg,): (String,)) -> Result<Value, Error> {
@@ -255,13 +259,29 @@ pub mod is {
 		Ok(Url::parse(&arg).is_ok().into())
 	}
 
-	pub fn uuid((arg,): (Value,)) -> Result<Value, Error> {
-		Ok(match arg {
-			Value::Strand(v) => Uuid::parse_str(v.as_string().as_str()).is_ok(),
-			Value::Uuid(_) => true,
+	pub fn uuid((arg,): (String,)) -> Result<Value, Error> {
+		Ok(Uuid::parse_str(arg.as_ref()).is_ok().into())
+	}
+
+	pub fn record((arg, tb): (String, Option<Value>)) -> Result<Value, Error> {
+		let res = match Thing::try_from(arg) {
+			Ok(t) => match tb {
+				Some(Value::Strand(tb)) => t.tb == *tb,
+				Some(Value::Table(tb)) => t.tb == tb.0,
+				Some(_) => {
+					return Err(Error::InvalidArguments {
+						name: "string::is::record()".into(),
+						message:
+							"Expected an optional string or table type for the second argument"
+								.into(),
+					})
+				}
+				None => true,
+			},
 			_ => false,
-		}
-		.into())
+		};
+
+		Ok(res.into())
 	}
 }
 
@@ -615,11 +635,11 @@ mod tests {
 
 	#[test]
 	fn is_uuid() {
-		let input = (String::from("123e4567-e89b-12d3-a456-426614174000").into(),);
+		let input = (String::from("123e4567-e89b-12d3-a456-426614174000"),);
 		let value = super::is::uuid(input).unwrap();
 		assert_eq!(value, Value::Bool(true));
 
-		let input = (String::from("foo-bar").into(),);
+		let input = (String::from("foo-bar"),);
 		let value = super::is::uuid(input).unwrap();
 		assert_eq!(value, Value::Bool(false));
 	}

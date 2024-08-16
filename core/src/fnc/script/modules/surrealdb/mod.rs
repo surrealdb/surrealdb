@@ -70,6 +70,6 @@ where
 	D: ModuleDef,
 {
 	let (m, promise) = Module::evaluate_def::<D, _>(ctx.clone(), name)?;
-	promise.finish()?;
+	promise.finish::<()>()?;
 	m.get::<_, js::Value>("default")
 }

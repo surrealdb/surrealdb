@@ -1,7 +1,7 @@
-use crate::api::conn::Method;
-use crate::api::conn::Param;
+use crate::api::conn::Command;
 use crate::api::conn::Router;
 use crate::api::err::Error;
+use crate::api::method::BoxFuture;
 use crate::api::Connection;
 use crate::api::ExtraFeatures;
 use crate::api::Result;
@@ -30,15 +30,14 @@ use crate::Surreal;
 use channel::Receiver;
 use futures::StreamExt;
 use serde::de::DeserializeOwned;
-use std::future::Future;
 use std::future::IntoFuture;
 use std::marker::PhantomData;
-use std::mem;
 use std::pin::Pin;
 use std::task::Context;
 use std::task::Poll;
 #[cfg(not(target_arch = "wasm32"))]
 use tokio::spawn;
+use uuid::Uuid;
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen_futures::spawn_local as spawn;
 
@@ -99,11 +98,16 @@ macro_rules! into_future {
 					Default::default(),
 					false,
 				);
-				let id: Value = query.await?.take(0)?;
-				let rx = register::<Client>(router, id.clone()).await?;
+				let Value::Uuid(id) = query.await?.take(0)? else {
+					return Err(Error::InternalError(
+						"successufull live query didn't return a uuid".to_string(),
+					)
+					.into());
+				};
+				let rx = register(router, id.0).await?;
 				Ok(Stream::new(
 					Surreal::new_from_router_waiter(client.router.clone(), client.waiter.clone()),
-					id,
+					id.0,
 					Some(rx),
 				))
 			})
@@ -111,18 +115,14 @@ macro_rules! into_future {
 	};
 }
 
-pub(crate) async fn register<Client>(
-	router: &Router,
-	id: Value,
-) -> Result<Receiver<dbs::Notification>>
-where
-	Client: Connection,
-{
-	let mut conn = Client::new(Method::Live);
+pub(crate) async fn register(router: &Router, id: Uuid) -> Result<Receiver<dbs::Notification>> {
 	let (tx, rx) = channel::unbounded();
-	let mut param = Param::notification_sender(tx);
-	param.other = vec![id];
-	conn.execute_unit(router, param).await?;
+	router
+		.execute_unit(Command::SubscribeLive {
+			uuid: id,
+			notification_sender: tx,
+		})
+		.await?;
 	Ok(rx)
 }
 
@@ -130,8 +130,8 @@ impl<'r, Client> IntoFuture for Select<'r, Client, Value, Live>
 where
 	Client: Connection,
 {
-	type Output = Result<Stream<'r, Client, Value>>;
-	type IntoFuture = Pin<Box<dyn Future<Output = Self::Output> + Send + Sync + 'r>>;
+	type Output = Result<Stream<Value>>;
+	type IntoFuture = BoxFuture<'r, Self::Output>;
 
 	into_future! {}
 }
@@ -141,8 +141,8 @@ where
 	Client: Connection,
 	R: DeserializeOwned,
 {
-	type Output = Result<Stream<'r, Client, Option<R>>>;
-	type IntoFuture = Pin<Box<dyn Future<Output = Self::Output> + Send + Sync + 'r>>;
+	type Output = Result<Stream<Option<R>>>;
+	type IntoFuture = BoxFuture<'r, Self::Output>;
 
 	into_future! {}
 }
@@ -152,8 +152,8 @@ where
 	Client: Connection,
 	R: DeserializeOwned,
 {
-	type Output = Result<Stream<'r, Client, Vec<R>>>;
-	type IntoFuture = Pin<Box<dyn Future<Output = Self::Output> + Send + Sync + 'r>>;
+	type Output = Result<Stream<Vec<R>>>;
+	type IntoFuture = BoxFuture<'r, Self::Output>;
 
 	into_future! {}
 }
@@ -161,20 +161,19 @@ where
 /// A stream of live query notifications
 #[derive(Debug)]
 #[must_use = "streams do nothing unless you poll them"]
-pub struct Stream<'r, C: Connection, R> {
+pub struct Stream<R> {
 	pub(crate) client: Surreal<Any>,
 	// We no longer need the lifetime and the type parameter
 	// Leaving them in for backwards compatibility
-	pub(crate) engine: PhantomData<&'r C>,
-	pub(crate) id: Value,
+	pub(crate) id: Uuid,
 	pub(crate) rx: Option<Receiver<dbs::Notification>>,
 	pub(crate) response_type: PhantomData<R>,
 }
 
-impl<'r, C: Connection, R> Stream<'r, C, R> {
+impl<R> Stream<R> {
 	pub(crate) fn new(
 		client: Surreal<Any>,
-		id: Value,
+		id: Uuid,
 		rx: Option<Receiver<dbs::Notification>>,
 	) -> Self {
 		Self {
@@ -182,7 +181,6 @@ impl<'r, C: Connection, R> Stream<'r, C, R> {
 			rx,
 			client,
 			response_type: PhantomData,
-			engine: PhantomData,
 		}
 	}
 }
@@ -202,10 +200,7 @@ macro_rules! poll_next {
 	};
 }
 
-impl<C> futures::Stream for Stream<'_, C, Value>
-where
-	C: Connection,
-{
+impl futures::Stream for Stream<Value> {
 	type Item = Notification<Value>;
 
 	poll_next! {
@@ -232,9 +227,8 @@ macro_rules! poll_next_and_convert {
 	};
 }
 
-impl<C, R> futures::Stream for Stream<'_, C, Option<R>>
+impl<R> futures::Stream for Stream<Option<R>>
 where
-	C: Connection,
 	R: DeserializeOwned + Unpin,
 {
 	type Item = Result<Notification<R>>;
@@ -242,9 +236,8 @@ where
 	poll_next_and_convert! {}
 }
 
-impl<C, R> futures::Stream for Stream<'_, C, Vec<R>>
+impl<R> futures::Stream for Stream<Vec<R>>
 where
-	C: Connection,
 	R: DeserializeOwned + Unpin,
 {
 	type Item = Result<Notification<R>>;
@@ -252,9 +245,8 @@ where
 	poll_next_and_convert! {}
 }
 
-impl<C, R> futures::Stream for Stream<'_, C, Notification<R>>
+impl<R> futures::Stream for Stream<Notification<R>>
 where
-	C: Connection,
 	R: DeserializeOwned + Unpin,
 {
 	type Item = Result<Notification<R>>;
@@ -262,30 +254,30 @@ where
 	poll_next_and_convert! {}
 }
 
-pub(crate) fn kill<Client>(client: &Surreal<Client>, id: Value)
+pub(crate) fn kill<Client>(client: &Surreal<Client>, uuid: Uuid)
 where
 	Client: Connection,
 {
 	let client = client.clone();
 	spawn(async move {
 		if let Ok(router) = client.router.extract() {
-			let mut conn = Client::new(Method::Kill);
-			conn.execute_unit(router, Param::new(vec![id.clone()])).await.ok();
+			router
+				.execute_unit(Command::Kill {
+					uuid,
+				})
+				.await
+				.ok();
 		}
 	});
 }
 
-impl<Client, R> Drop for Stream<'_, Client, R>
-where
-	Client: Connection,
-{
+impl<R> Drop for Stream<R> {
 	/// Close the live query stream
 	///
 	/// This kills the live query process responsible for this stream.
 	fn drop(&mut self) {
-		if !self.id.is_none() && self.rx.is_some() {
-			let id = mem::take(&mut self.id);
-			kill(&self.client, id);
+		if self.rx.is_some() {
+			kill(&self.client, self.id);
 		}
 	}
 }

@@ -97,6 +97,7 @@ pub(crate) static PATHS: phf::Map<UniCase<&'static str>, PathKind> = phf_map! {
 		UniCase::ascii("array::concat") => PathKind::Function,
 		UniCase::ascii("array::difference") => PathKind::Function,
 		UniCase::ascii("array::distinct") => PathKind::Function,
+		UniCase::ascii("array::fill") => PathKind::Function,
 		UniCase::ascii("array::filter_index") => PathKind::Function,
 		UniCase::ascii("array::find_index") => PathKind::Function,
 		UniCase::ascii("array::first") => PathKind::Function,
@@ -104,6 +105,7 @@ pub(crate) static PATHS: phf::Map<UniCase<&'static str>, PathKind> = phf_map! {
 		UniCase::ascii("array::group") => PathKind::Function,
 		UniCase::ascii("array::insert") => PathKind::Function,
 		UniCase::ascii("array::intersect") => PathKind::Function,
+		UniCase::ascii("array::is_empty") => PathKind::Function,
 		UniCase::ascii("array::join") => PathKind::Function,
 		UniCase::ascii("array::last") => PathKind::Function,
 		UniCase::ascii("array::len") => PathKind::Function,
@@ -111,20 +113,25 @@ pub(crate) static PATHS: phf::Map<UniCase<&'static str>, PathKind> = phf_map! {
 		UniCase::ascii("array::logical_or") => PathKind::Function,
 		UniCase::ascii("array::logical_xor") => PathKind::Function,
 		UniCase::ascii("array::matches") => PathKind::Function,
+		UniCase::ascii("array::map") => PathKind::Function,
 		UniCase::ascii("array::max") => PathKind::Function,
 		UniCase::ascii("array::min") => PathKind::Function,
 		UniCase::ascii("array::pop") => PathKind::Function,
 		UniCase::ascii("array::prepend") => PathKind::Function,
 		UniCase::ascii("array::push") => PathKind::Function,
 		UniCase::ascii("array::remove") => PathKind::Function,
+		UniCase::ascii("array::repeat") => PathKind::Function,
+		UniCase::ascii("array::range") => PathKind::Function,
 		UniCase::ascii("array::reverse") => PathKind::Function,
 		UniCase::ascii("array::shuffle") => PathKind::Function,
 		UniCase::ascii("array::slice") => PathKind::Function,
 		UniCase::ascii("array::sort") => PathKind::Function,
+		UniCase::ascii("array::swap") => PathKind::Function,
 		UniCase::ascii("array::transpose") => PathKind::Function,
 		UniCase::ascii("array::union") => PathKind::Function,
 		UniCase::ascii("array::sort::asc") => PathKind::Function,
 		UniCase::ascii("array::sort::desc") => PathKind::Function,
+		UniCase::ascii("array::windows") => PathKind::Function,
 		//
 		UniCase::ascii("object::entries") => PathKind::Function,
 		UniCase::ascii("object::from_entries") => PathKind::Function,
@@ -287,6 +294,7 @@ pub(crate) static PATHS: phf::Map<UniCase<&'static str>, PathKind> = phf_map! {
 		UniCase::ascii("string::is::semver") => PathKind::Function,
 		UniCase::ascii("string::is::url") => PathKind::Function,
 		UniCase::ascii("string::is::uuid") => PathKind::Function,
+		UniCase::ascii("string::is::record") => PathKind::Function,
 		UniCase::ascii("string::semver::compare") => PathKind::Function,
 		UniCase::ascii("string::semver::major") => PathKind::Function,
 		UniCase::ascii("string::semver::minor") => PathKind::Function,
@@ -331,6 +339,7 @@ pub(crate) static PATHS: phf::Map<UniCase<&'static str>, PathKind> = phf_map! {
 		UniCase::ascii("time::from::unix") => PathKind::Function,
 		//
 		UniCase::ascii("type::bool") => PathKind::Function,
+		UniCase::ascii("type::bytes") => PathKind::Function,
 		UniCase::ascii("type::datetime") => PathKind::Function,
 		UniCase::ascii("type::decimal") => PathKind::Function,
 		UniCase::ascii("type::duration") => PathKind::Function,
@@ -342,6 +351,9 @@ pub(crate) static PATHS: phf::Map<UniCase<&'static str>, PathKind> = phf_map! {
 		UniCase::ascii("type::table") => PathKind::Function,
 		UniCase::ascii("type::thing") => PathKind::Function,
 		UniCase::ascii("type::range") => PathKind::Function,
+		UniCase::ascii("type::record") => PathKind::Function,
+		UniCase::ascii("type::uuid") => PathKind::Function,
+		UniCase::ascii("type::geometry") => PathKind::Function,
 		UniCase::ascii("type::is::array") => PathKind::Function,
 		UniCase::ascii("type::is::bool") => PathKind::Function,
 		UniCase::ascii("type::is::bytes") => PathKind::Function,
@@ -375,6 +387,7 @@ pub(crate) static PATHS: phf::Map<UniCase<&'static str>, PathKind> = phf_map! {
 		UniCase::ascii("vector::multiply") => PathKind::Function,
 		UniCase::ascii("vector::normalize") => PathKind::Function,
 		UniCase::ascii("vector::project") => PathKind::Function,
+		UniCase::ascii("vector::scale") => PathKind::Function,
 		UniCase::ascii("vector::subtract") => PathKind::Function,
 		UniCase::ascii("vector::distance::chebyshev") => PathKind::Function,
 		UniCase::ascii("vector::distance::euclidean") => PathKind::Function,
@@ -461,7 +474,7 @@ impl Parser<'_> {
 				.await
 				.map(|x| Value::Function(Box::new(x))),
 			None => {
-				// Generate an suggestion.
+				// Generate a suggestion.
 				// don't search further if the levenshtein distance is further then 10.
 				let mut cut_off = MAX_LEVENSTHEIN_CUT_OFF;
 

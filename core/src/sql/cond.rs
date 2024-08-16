@@ -23,6 +23,7 @@ impl fmt::Display for Cond {
 		write!(f, "WHERE {}", self.0)
 	}
 }
+
 impl InfoStructure for Cond {
 	fn structure(self) -> Value {
 		self.0.structure()

@@ -3,6 +3,7 @@
 
 mod common;
 
+#[cfg(docker)]
 mod database_upgrade {
 	use super::common::docker::DockerContainer;
 	use super::common::expected::Expected;
@@ -22,14 +23,17 @@ mod database_upgrade {
 	const USER: &str = "root";
 	const PASS: &str = "root";
 
-	async fn upgrade_test_1_0(version: &str) {
+	// This test include a feature set that is supported since v1.0
+	async fn upgrade_test_from_1_0(version: &str) {
 		// Start the docker instance
 		let (path, mut docker, client) = start_docker(version).await;
 
 		// Create the data set
+		create_data_on_docker(&client, "IDX", &DATA_IDX).await;
 		create_data_on_docker(&client, "FTS", &DATA_FTS).await;
 
 		// Check the data set
+		check_data_on_docker(&client, "IDX", &CHECK_IDX).await;
 		check_data_on_docker(&client, "FTS", &CHECK_FTS).await;
 		check_data_on_docker(&client, "DB", &CHECK_DB).await;
 
@@ -43,6 +47,7 @@ mod database_upgrade {
 		let db = new_local_instance(&path).await;
 
 		// Check that the data has properly migrated
+		check_migrated_data(&db, "IDX", &CHECK_IDX).await;
 		check_migrated_data(&db, "DB", &CHECK_DB).await;
 		check_migrated_data(&db, "FTS", &CHECK_FTS).await;
 	}
@@ -50,26 +55,29 @@ mod database_upgrade {
 	#[test(tokio::test(flavor = "multi_thread"))]
 	#[cfg(feature = "storage-rocksdb")]
 	#[serial]
-	async fn upgrade_test_1_0_0() {
-		upgrade_test_1_0("1.0.0").await;
+	async fn upgrade_test_from_1_0_0() {
+		upgrade_test_from_1_0("1.0.0").await;
 	}
 
 	#[test(tokio::test(flavor = "multi_thread"))]
 	#[cfg(feature = "storage-rocksdb")]
 	#[serial]
-	async fn upgrade_test_1_0_1() {
-		upgrade_test_1_0("1.0.1").await;
+	async fn upgrade_test_from_1_0_1() {
+		upgrade_test_from_1_0("1.0.1").await;
 	}
 
-	async fn upgrade_test_1_1(version: &str) {
+	// This test include a feature set that since v1.1
+	async fn upgrade_test_from_1_1(version: &str) {
 		// Start the docker instance
 		let (path, mut docker, client) = start_docker(version).await;
 
 		// Create the data set
+		create_data_on_docker(&client, "IDX", &DATA_IDX).await;
 		create_data_on_docker(&client, "FTS", &DATA_FTS).await;
 		create_data_on_docker(&client, "MTREE", &DATA_MTREE).await;
 
 		// Check the data set
+		check_data_on_docker(&client, "IDX", &CHECK_IDX).await;
 		check_data_on_docker(&client, "DB", &CHECK_DB).await;
 		check_data_on_docker(&client, "FTS", &CHECK_FTS).await;
 		check_data_on_docker(&client, "MTREE", &CHECK_MTREE_RPC).await;
@@ -84,6 +92,7 @@ mod database_upgrade {
 		let db = new_local_instance(&path).await;
 
 		// Check that the data has properly migrated
+		check_migrated_data(&db, "IDX", &CHECK_IDX).await;
 		check_migrated_data(&db, "DB", &CHECK_DB).await;
 		check_migrated_data(&db, "FTS", &CHECK_FTS).await;
 		check_migrated_data(&db, "MTREE", &CHECK_MTREE_DB).await;
@@ -92,26 +101,29 @@ mod database_upgrade {
 	#[test(tokio::test(flavor = "multi_thread"))]
 	#[cfg(feature = "storage-rocksdb")]
 	#[serial]
-	async fn upgrade_test_1_1_0() {
-		upgrade_test_1_1("v1.1.0").await;
+	async fn upgrade_test_from_1_1_0() {
+		upgrade_test_from_1_1("v1.1.0").await;
 	}
 
 	#[test(tokio::test(flavor = "multi_thread"))]
 	#[cfg(feature = "storage-rocksdb")]
 	#[serial]
-	async fn upgrade_test_1_1_1() {
-		upgrade_test_1_1("v1.1.1").await;
+	async fn upgrade_test_from_1_1_1() {
+		upgrade_test_from_1_1("v1.1.1").await;
 	}
 
-	async fn upgrade_test_1_2_to_1_4(version: &str) {
+	// This test include a feature set that is supported since 1.2
+	async fn upgrade_test_from_1_2(version: &str) {
 		// Start the docker instance
 		let (path, mut docker, client) = start_docker(version).await;
 
 		// Create the data set
+		create_data_on_docker(&client, "IDX", &DATA_IDX).await;
 		create_data_on_docker(&client, "FTS", &DATA_FTS).await;
 		create_data_on_docker(&client, "MTREE", &DATA_MTREE).await;
 
 		// Check the data set
+		check_data_on_docker(&client, "IDX", &CHECK_IDX).await;
 		check_data_on_docker(&client, "DB", &CHECK_DB).await;
 		check_data_on_docker(&client, "FTS", &CHECK_FTS).await;
 		check_data_on_docker(&client, "MTREE", &CHECK_MTREE_RPC).await;
@@ -126,6 +138,7 @@ mod database_upgrade {
 		let db = new_local_instance(&path).await;
 
 		// Check that the data has properly migrated
+		check_migrated_data(&db, "IDX", &CHECK_IDX).await;
 		check_migrated_data(&db, "DB", &CHECK_DB).await;
 		check_migrated_data(&db, "FTS", &CHECK_FTS).await;
 		check_migrated_data(&db, "MTREE", &CHECK_MTREE_DB).await;
@@ -135,55 +148,96 @@ mod database_upgrade {
 	#[test(tokio::test(flavor = "multi_thread"))]
 	#[cfg(feature = "storage-rocksdb")]
 	#[serial]
-	async fn upgrade_test_1_2_0() {
-		upgrade_test_1_2_to_1_4("v1.2.0").await;
+	async fn upgrade_test_from_1_2_0() {
+		upgrade_test_from_1_2("v1.2.0").await;
 	}
 
 	#[test(tokio::test(flavor = "multi_thread"))]
 	#[cfg(feature = "storage-rocksdb")]
 	#[serial]
-	async fn upgrade_test_1_2_1() {
-		upgrade_test_1_2_to_1_4("v1.2.1").await;
+	async fn upgrade_test_from_1_2_1() {
+		upgrade_test_from_1_2("v1.2.1").await;
 	}
 
 	#[test(tokio::test(flavor = "multi_thread"))]
 	#[cfg(feature = "storage-rocksdb")]
 	#[serial]
-	async fn upgrade_test_1_2_2() {
-		upgrade_test_1_2_to_1_4("v1.2.2").await;
+	async fn upgrade_test_from_1_2_2() {
+		upgrade_test_from_1_2("v1.2.2").await;
 	}
 
 	#[test(tokio::test(flavor = "multi_thread"))]
 	#[cfg(feature = "storage-rocksdb")]
 	#[serial]
-	async fn upgrade_test_1_3_0() {
-		upgrade_test_1_2_to_1_4("v1.3.0").await;
+	async fn upgrade_test_from_1_3_0() {
+		upgrade_test_from_1_2("v1.3.0").await;
 	}
 
 	#[test(tokio::test(flavor = "multi_thread"))]
 	#[cfg(feature = "storage-rocksdb")]
 	#[serial]
-	async fn upgrade_test_1_3_1() {
-		upgrade_test_1_2_to_1_4("v1.3.1").await;
+	async fn upgrade_test_from_1_3_1() {
+		upgrade_test_from_1_2("v1.3.1").await;
 	}
 
 	#[test(tokio::test(flavor = "multi_thread"))]
 	#[cfg(feature = "storage-rocksdb")]
 	#[serial]
-	async fn upgrade_test_1_4_0() {
-		upgrade_test_1_2_to_1_4("v1.4.0").await;
+	async fn upgrade_test_from_1_4_0() {
+		upgrade_test_from_1_2("v1.4.0").await;
 	}
 
 	#[test(tokio::test(flavor = "multi_thread"))]
 	#[cfg(feature = "storage-rocksdb")]
 	#[serial]
-	async fn upgrade_test_1_4_2() {
-		upgrade_test_1_2_to_1_4("v1.4.2").await;
+	async fn upgrade_test_from_1_4_2() {
+		upgrade_test_from_1_2("v1.4.2").await;
+	}
+
+	#[test(tokio::test(flavor = "multi_thread"))]
+	#[cfg(feature = "storage-rocksdb")]
+	#[serial]
+	async fn upgrade_test_from_1_5_0() {
+		upgrade_test_from_1_2("v1.5.0").await;
+	}
+
+	#[test(tokio::test(flavor = "multi_thread"))]
+	#[cfg(feature = "storage-rocksdb")]
+	#[serial]
+	async fn upgrade_test_from_1_5_2() {
+		upgrade_test_from_1_2("v1.5.2").await;
+	}
+
+	#[test(tokio::test(flavor = "multi_thread"))]
+	#[cfg(feature = "storage-rocksdb")]
+	#[serial]
+	async fn upgrade_test_from_1_5_3() {
+		upgrade_test_from_1_2("v1.5.3").await;
 	}
 
 	// *******
 	// DATASET
 	// *******
+
+	// Set of DATA for Standard and unique indexes
+	const DATA_IDX: [&str; 4] = [
+		"DEFINE INDEX uniq_name ON TABLE person COLUMNS name UNIQUE",
+		"DEFINE INDEX idx_company ON TABLE person COLUMNS company",
+		"CREATE person:tobie SET name = 'Tobie', company='SurrealDB'",
+		"CREATE person:jaime SET name = 'Jaime', company='SurrealDB'",
+	];
+
+	// Set of QUERY and RESULT to check for standard and unique indexes
+	const CHECK_IDX: [Check; 2] = [
+		(
+			"SELECT name FROM person WITH INDEX uniq_name WHERE name = 'Tobie'",
+			Expected::One("{\"name\":\"Tobie\"}"),
+		),
+		(
+			"SELECT name FROM person WITH INDEX idx_company WHERE company = 'SurrealDB'",
+			Expected::Two("{\"name\":\"Jaime\"}", "{\"name\":\"Tobie\"}"),
+		),
+	];
 
 	// Set of DATA for Full Text Search
 	const DATA_FTS: [&str; 5] = [
@@ -274,7 +328,7 @@ mod database_upgrade {
 	}
 
 	async fn new_local_instance(file_path: &String) -> Surreal<Any> {
-		let db = connect(format!("file:{}", file_path)).await.unwrap();
+		let db = connect(format!("file:{file_path}")).await.unwrap();
 		db.use_ns(NS).await.unwrap();
 		db.use_db(DB).await.unwrap();
 		db

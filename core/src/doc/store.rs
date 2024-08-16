@@ -3,12 +3,11 @@ use crate::dbs::Options;
 use crate::dbs::Statement;
 use crate::doc::Document;
 use crate::err::Error;
-use crate::key::key_req::KeyRequirements;
 
-impl<'a> Document<'a> {
+impl Document {
 	pub async fn store(
 		&self,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		opt: &Options,
 		stm: &Statement<'_>,
 	) -> Result<(), Error> {
@@ -20,18 +19,18 @@ impl<'a> Document<'a> {
 		if self.tb(ctx, opt).await?.drop {
 			return Ok(());
 		}
-		// Claim transaction
-		let mut run = ctx.tx_lock().await;
+		// Get the transaction
+		let txn = ctx.tx();
 		// Get the record id
 		let rid = self.id.as_ref().unwrap();
 		// Store the record data
 		let key = crate::key::thing::new(opt.ns()?, opt.db()?, &rid.tb, &rid.id);
-		//
+		// Match the statement type
 		match stm {
 			// This is a CREATE statement so try to insert the key
-			Statement::Create(_) => match run.put(key.key_category(), key, self).await {
+			Statement::Create(_) => match txn.put(key, self).await {
 				// The key already exists, so return an error
-				Err(Error::TxKeyAlreadyExistsCategory(_)) => Err(Error::RecordExists {
+				Err(Error::TxKeyAlreadyExists) => Err(Error::RecordExists {
 					thing: rid.to_string(),
 				}),
 				// Return any other received error
@@ -40,7 +39,7 @@ impl<'a> Document<'a> {
 				Ok(v) => Ok(v),
 			},
 			// This is not a CREATE statement, so update the key
-			_ => run.set(key, self).await,
+			_ => txn.set(key, self).await,
 		}?;
 		// Carry on
 		Ok(())

@@ -1,11 +1,10 @@
-use std::borrow::Cow;
 use std::collections::HashMap;
 
 use crate::cf::{TableMutation, TableMutations};
+use crate::doc::CursorValue;
 use crate::kvs::Key;
 use crate::sql::statements::DefineTableStatement;
 use crate::sql::thing::Thing;
-use crate::sql::value::Value;
 use crate::sql::Idiom;
 
 // PreparedWrite is a tuple of (versionstamp key, key prefix, key suffix, serialized table mutations).
@@ -71,18 +70,18 @@ impl Writer {
 		db: &str,
 		tb: &str,
 		id: Thing,
-		previous: Cow<'_, Value>,
-		current: Cow<'_, Value>,
+		previous: CursorValue,
+		current: CursorValue,
 		store_difference: bool,
 	) {
-		if current.is_some() {
+		if current.as_ref().is_some() {
 			self.buf.push(
 				ns.to_string(),
 				db.to_string(),
 				tb.to_string(),
 				match store_difference {
 					true => {
-						if previous.is_none() {
+						if previous.as_ref().is_none() {
 							TableMutation::Set(id, current.into_owned())
 						} else {
 							// We intentionally record the patches in reverse (current -> previous)
@@ -147,13 +146,11 @@ impl Writer {
 
 #[cfg(test)]
 mod tests {
-	use std::borrow::Cow;
 	use std::time::Duration;
 
 	use crate::cf::{ChangeSet, DatabaseMutation, TableMutation, TableMutations};
 	use crate::dbs::Session;
 	use crate::fflags::FFLAGS;
-	use crate::key::key_req::KeyRequirements;
 	use crate::kvs::{Datastore, LockType::*, Transaction, TransactionType::*};
 	use crate::sql::changefeed::ChangeFeed;
 	use crate::sql::id::Id;
@@ -186,26 +183,26 @@ mod tests {
 		// Write things to the table.
 		//
 
-		let mut tx1 = ds.transaction(Write, Optimistic).await.unwrap();
+		let mut tx1 = ds.transaction(Write, Optimistic).await.unwrap().inner();
 		let thing_a = Thing {
 			tb: TB.to_owned(),
 			id: Id::String("A".to_string()),
 		};
-		let value_a: super::Value = "a".into();
-		let previous = Cow::from(Value::None);
+		let value_a: Value = "a".into();
+		let previous = Value::None;
 		tx1.record_change(
 			NS,
 			DB,
 			TB,
 			&thing_a,
-			previous.clone(),
-			Cow::Borrowed(&value_a),
+			previous.clone().into(),
+			value_a.into(),
 			DONT_STORE_PREVIOUS,
 		);
 		tx1.complete_changes(true).await.unwrap();
 		tx1.commit().await.unwrap();
 
-		let mut tx2 = ds.transaction(Write, Optimistic).await.unwrap();
+		let mut tx2 = ds.transaction(Write, Optimistic).await.unwrap().inner();
 		let thing_c = Thing {
 			tb: TB.to_owned(),
 			id: Id::String("C".to_string()),
@@ -216,15 +213,14 @@ mod tests {
 			DB,
 			TB,
 			&thing_c,
-			previous.clone(),
-			Cow::Borrowed(&value_c),
+			previous.clone().into(),
+			value_c.into(),
 			DONT_STORE_PREVIOUS,
 		);
 		tx2.complete_changes(true).await.unwrap();
 		tx2.commit().await.unwrap();
 
-		let x = ds.transaction(Write, Optimistic).await;
-		let mut tx3 = x.unwrap();
+		let mut tx3 = ds.transaction(Write, Optimistic).await.unwrap().inner();
 		let thing_b = Thing {
 			tb: TB.to_owned(),
 			id: Id::String("B".to_string()),
@@ -235,8 +231,8 @@ mod tests {
 			DB,
 			TB,
 			&thing_b,
-			previous.clone(),
-			Cow::Borrowed(&value_b),
+			previous.clone().into(),
+			value_b.into(),
 			DONT_STORE_PREVIOUS,
 		);
 		let thing_c2 = Thing {
@@ -249,8 +245,8 @@ mod tests {
 			DB,
 			TB,
 			&thing_c2,
-			previous.clone(),
-			Cow::Borrowed(&value_c2),
+			previous.clone().into(),
+			value_c2.into(),
 			DONT_STORE_PREVIOUS,
 		);
 		tx3.complete_changes(true).await.unwrap();
@@ -262,11 +258,10 @@ mod tests {
 
 		let start: u64 = 0;
 
-		let mut tx4 = ds.transaction(Write, Optimistic).await.unwrap();
-		let r =
-			crate::cf::read(&mut tx4, NS, DB, Some(TB), ShowSince::Versionstamp(start), Some(10))
-				.await
-				.unwrap();
+		let tx4 = ds.transaction(Write, Optimistic).await.unwrap();
+		let r = crate::cf::read(&tx4, NS, DB, Some(TB), ShowSince::Versionstamp(start), Some(10))
+			.await
+			.unwrap();
 		tx4.commit().await.unwrap();
 
 		let want: Vec<ChangeSet> = vec![
@@ -338,18 +333,17 @@ mod tests {
 
 		assert_eq!(r, want);
 
-		let mut tx5 = ds.transaction(Write, Optimistic).await.unwrap();
+		let tx5 = ds.transaction(Write, Optimistic).await.unwrap();
 		// gc_all needs to be committed before we can read the changes
-		crate::cf::gc_db(&mut tx5, NS, DB, vs::u64_to_versionstamp(4), Some(10)).await.unwrap();
+		crate::cf::gc_range(&tx5, NS, DB, vs::u64_to_versionstamp(4)).await.unwrap();
 		// We now commit tx5, which should persist the gc_all resullts
 		tx5.commit().await.unwrap();
 
 		// Now we should see the gc_all results
-		let mut tx6 = ds.transaction(Write, Optimistic).await.unwrap();
-		let r =
-			crate::cf::read(&mut tx6, NS, DB, Some(TB), ShowSince::Versionstamp(start), Some(10))
-				.await
-				.unwrap();
+		let tx6 = ds.transaction(Write, Optimistic).await.unwrap();
+		let r = crate::cf::read(&tx6, NS, DB, Some(TB), ShowSince::Versionstamp(start), Some(10))
+			.await
+			.unwrap();
 		tx6.commit().await.unwrap();
 
 		let want: Vec<ChangeSet> = vec![ChangeSet(
@@ -387,8 +381,8 @@ mod tests {
 		// Now we should see the gc_all results
 		ds.tick_at((ts.0.timestamp() + 5).try_into().unwrap()).await.unwrap();
 
-		let mut tx7 = ds.transaction(Write, Optimistic).await.unwrap();
-		let r = crate::cf::read(&mut tx7, NS, DB, Some(TB), ShowSince::Timestamp(ts), Some(10))
+		let tx7 = ds.transaction(Write, Optimistic).await.unwrap();
+		let r = crate::cf::read(&tx7, NS, DB, Some(TB), ShowSince::Timestamp(ts), Some(10))
 			.await
 			.unwrap();
 		tx7.commit().await.unwrap();
@@ -406,7 +400,7 @@ mod tests {
 		)
 		.await;
 		ds.tick_at(10).await.unwrap();
-		let mut tx = ds.transaction(Write, Optimistic).await.unwrap();
+		let mut tx = ds.transaction(Write, Optimistic).await.unwrap().inner();
 		let vs1 = tx.get_versionstamp_from_timestamp(5, NS, DB, false).await.unwrap().unwrap();
 		let vs2 = tx.get_versionstamp_from_timestamp(10, NS, DB, false).await.unwrap().unwrap();
 		tx.cancel().await.unwrap();
@@ -511,18 +505,17 @@ mod tests {
 		assert_eq!(r, expected);
 	}
 
-	async fn change_feed_ts(mut tx: Transaction, ts: &Datetime) -> Vec<ChangeSet> {
-		let r =
-			crate::cf::read(&mut tx, NS, DB, Some(TB), ShowSince::Timestamp(ts.clone()), Some(10))
-				.await
-				.unwrap();
+	async fn change_feed_ts(tx: Transaction, ts: &Datetime) -> Vec<ChangeSet> {
+		let r = crate::cf::read(&tx, NS, DB, Some(TB), ShowSince::Timestamp(ts.clone()), Some(10))
+			.await
+			.unwrap();
 		tx.cancel().await.unwrap();
 		r
 	}
 
-	async fn change_feed_vs(mut tx: Transaction, vs: &Versionstamp) -> Vec<ChangeSet> {
+	async fn change_feed_vs(tx: Transaction, vs: &Versionstamp) -> Vec<ChangeSet> {
 		let r = crate::cf::read(
-			&mut tx,
+			&tx,
 			NS,
 			DB,
 			Some(TB),
@@ -535,23 +528,23 @@ mod tests {
 		r
 	}
 
-	async fn record_change_feed_entry(mut tx: Transaction, id: String) -> Thing {
+	async fn record_change_feed_entry(tx: Transaction, id: String) -> Thing {
 		let thing = Thing {
 			tb: TB.to_owned(),
 			id: Id::String(id),
 		};
 		let value_a: Value = "a".into();
-		let previous = Cow::from(Value::None);
-		tx.record_change(
+		let previous = Value::None.into();
+		tx.lock().await.record_change(
 			NS,
 			DB,
 			TB,
 			&thing,
-			previous.clone(),
-			Cow::Borrowed(&value_a),
+			previous,
+			value_a.into(),
 			DONT_STORE_PREVIOUS,
 		);
-		tx.complete_changes(true).await.unwrap();
+		tx.lock().await.complete_changes(true).await.unwrap();
 		tx.commit().await.unwrap();
 		thing
 	}
@@ -585,14 +578,14 @@ mod tests {
 		// work.
 		//
 
-		let mut tx0 = ds.transaction(Write, Optimistic).await.unwrap();
+		let mut tx = ds.transaction(Write, Optimistic).await.unwrap().inner();
 		let ns_root = crate::key::root::ns::new(NS);
-		tx0.put(ns_root.key_category(), &ns_root, dns).await.unwrap();
+		tx.put(&ns_root, dns).await.unwrap();
 		let db_root = crate::key::namespace::db::new(NS, DB);
-		tx0.put(db_root.key_category(), &db_root, ddb).await.unwrap();
+		tx.put(&db_root, ddb).await.unwrap();
 		let tb_root = crate::key::database::tb::new(NS, DB, TB);
-		tx0.put(tb_root.key_category(), &tb_root, dtb.clone()).await.unwrap();
-		tx0.commit().await.unwrap();
+		tx.put(&tb_root, dtb.clone()).await.unwrap();
+		tx.commit().await.unwrap();
 		ds
 	}
 }

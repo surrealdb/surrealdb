@@ -4,14 +4,14 @@ use crate::cli::validator::parser::env_filter::CustomEnvFilter;
 use crate::cli::validator::parser::env_filter::CustomEnvFilterParser;
 use crate::cnf::LOGO;
 use crate::dbs;
-use crate::dbs::{StartCommandDbsOptions, DB};
+use crate::dbs::StartCommandDbsOptions;
 use crate::env;
 use crate::err::Error;
 use crate::net::{self, client_ip::ClientIp};
 use clap::Args;
-use opentelemetry::Context as TelemetryContext;
 use std::net::SocketAddr;
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::time::Duration;
 use surrealdb::engine::any::IntoEndpoint;
 use surrealdb::engine::tasks::start_tasks;
@@ -153,12 +153,10 @@ pub async fn init(
 	// Initialize opentelemetry and logging
 	crate::telemetry::builder().with_filter(log).init();
 	// Start metrics subsystem
-	crate::telemetry::metrics::init(&TelemetryContext::current())
-		.expect("failed to initialize metrics");
+	crate::telemetry::metrics::init().expect("failed to initialize metrics");
 
-	// Check if a banner should be outputted
+	// Check if we should output a banner
 	if !no_banner {
-		// Output SurrealDB logo
 		println!("{LOGO}");
 	}
 	// Clean the path
@@ -168,7 +166,13 @@ pub async fn init(
 	} else {
 		endpoint.path
 	};
-	// Setup the cli options
+	// Extract the certificate and key
+	let (crt, key) = if let Some(val) = web {
+		(val.web_crt, val.web_key)
+	} else {
+		(None, None)
+	};
+	// Setup the command-line options
 	let _ = config::CF.set(Config {
 		bind: listen_addresses.first().cloned().unwrap(),
 		client_ip,
@@ -176,28 +180,26 @@ pub async fn init(
 		user,
 		pass,
 		no_identification_headers,
-		crt: web.as_ref().and_then(|x| x.web_crt.clone()),
-		key: web.as_ref().and_then(|x| x.web_key.clone()),
 		engine: Some(EngineOptions::default().with_tick_interval(tick_interval)),
+		crt,
+		key,
 	});
 	// This is the cancellation token propagated down to
 	// all the async functions that needs to be stopped gracefully.
 	let ct = CancellationToken::new();
 	// Initiate environment
 	env::init().await?;
-	// Start the kvs server
-	dbs::init(dbs).await?;
+	// Start the datastore
+	let ds = Arc::new(dbs::init(dbs).await?);
 	// Start the node agent
-	let (tasks, task_chans) = start_tasks(
-		&config::CF.get().unwrap().engine.unwrap_or_default(),
-		DB.get().unwrap().clone(),
-	);
+	let (tasks, task_chans) =
+		start_tasks(&config::CF.get().unwrap().engine.unwrap_or_default(), ds.clone());
 	// Start the web server
-	net::init(ct.clone()).await?;
+	net::init(ds, ct.clone()).await?;
 	// Shutdown and stop closed tasks
 	task_chans.into_iter().for_each(|chan| {
-		if let Err(e) = chan.send(()) {
-			error!("Failed to send shutdown signal to task: {}", e);
+		if chan.send(()).is_err() {
+			error!("Failed to send shutdown signal to task");
 		}
 	});
 	ct.cancel();

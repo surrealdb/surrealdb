@@ -5,7 +5,7 @@ use crate::err::Error;
 use crate::sql::statements::info::InfoStructure;
 use crate::sql::{
 	fmt::{fmt_separated_by, Fmt},
-	part::Next,
+	part::{Next, NextMethod},
 	paths::{ID, IN, META, OUT},
 	Part, Value,
 };
@@ -43,6 +43,12 @@ impl IntoIterator for Idioms {
 impl Display for Idioms {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
 		Display::fmt(&Fmt::comma_separated(&self.0), f)
+	}
+}
+
+impl InfoStructure for Idioms {
+	fn structure(self) -> Value {
+		self.to_string().into()
 	}
 }
 
@@ -158,9 +164,9 @@ impl Idiom {
 	pub(crate) async fn compute(
 		&self,
 		stk: &mut Stk,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		opt: &Options,
-		doc: Option<&CursorDoc<'_>>,
+		doc: Option<&CursorDoc>,
 	) -> Result<Value, Error> {
 		match self.first() {
 			// The starting part is a value
@@ -176,10 +182,21 @@ impl Idiom {
 			_ => match doc {
 				// There is a current document
 				Some(v) => {
-					v.doc.get(stk, ctx, opt, doc, self).await?.compute(stk, ctx, opt, doc).await
+					v.doc
+						.as_ref()
+						.get(stk, ctx, opt, doc, self)
+						.await?
+						.compute(stk, ctx, opt, doc)
+						.await
 				}
 				// There isn't any document
-				None => Ok(Value::None),
+				None => {
+					Value::None
+						.get(stk, ctx, opt, doc, self.next_method())
+						.await?
+						.compute(stk, ctx, opt, doc)
+						.await
+				}
 			},
 		}
 	}
@@ -199,12 +216,6 @@ impl Display for Idiom {
 			),
 			f,
 		)
-	}
-}
-
-impl InfoStructure for Idioms {
-	fn structure(self) -> Value {
-		self.to_string().into()
 	}
 }
 

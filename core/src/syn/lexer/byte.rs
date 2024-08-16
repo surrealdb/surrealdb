@@ -6,6 +6,8 @@ use crate::syn::{
 	token::{t, DatetimeChars, Token, TokenKind},
 };
 
+use super::CharError;
+
 impl<'a> Lexer<'a> {
 	/// Eats a single line comment.
 	pub fn eat_single_line_comment(&mut self) {
@@ -138,6 +140,7 @@ impl<'a> Lexer<'a> {
 			b'(' => t!("("),
 			b';' => t!(";"),
 			b',' => t!(","),
+			b'~' => t!("~"),
 			b'@' => t!("@"),
 			byte::CR | byte::FF | byte::LF | byte::SP | byte::VT | byte::TAB => {
 				self.eat_whitespace();
@@ -311,12 +314,28 @@ impl<'a> Lexer<'a> {
 				}
 				_ => t!(":"),
 			},
-			b'$' => {
-				if self.reader.peek().map(|x| x.is_ascii_alphabetic()).unwrap_or(false) {
-					return self.lex_param();
+			b'$' => match self.reader.peek() {
+				Some(b'_') => return self.lex_param(),
+				Some(b'`') => {
+					self.reader.next();
+					return self.lex_surrounded_param(true);
 				}
-				t!("$")
-			}
+				Some(x) if x.is_ascii_alphabetic() => return self.lex_param(),
+				Some(x) if !x.is_ascii() => {
+					let backup = self.reader.offset();
+					self.reader.next();
+					match self.reader.complete_char(x) {
+						Ok('⟨') => return self.lex_surrounded_param(false),
+						Err(CharError::Eof) => return self.invalid_token(Error::InvalidUtf8),
+						Err(CharError::Unicode) => return self.invalid_token(Error::InvalidUtf8),
+						_ => {
+							self.reader.backup(backup);
+							t!("$")
+						}
+					}
+				}
+				_ => t!("$"),
+			},
 			b'#' => {
 				self.eat_single_line_comment();
 				TokenKind::WhiteSpace
@@ -402,13 +421,20 @@ impl<'a> Lexer<'a> {
 					return self.lex_ident_from_next_byte(b'm');
 				}
 			},
-			b's' => {
-				if self.reader.peek().map(|x| x.is_ascii_alphabetic()).unwrap_or(false) {
-					return self.lex_ident_from_next_byte(b's');
-				} else {
-					t!("s")
+			b's' => match self.reader.peek() {
+				Some(b'"') => {
+					self.reader.next();
+					t!("\"")
 				}
-			}
+				Some(b'\'') => {
+					self.reader.next();
+					t!("'")
+				}
+				Some(x) if x.is_ascii_alphabetic() => {
+					return self.lex_ident_from_next_byte(b's');
+				}
+				_ => t!("s"),
+			},
 			b'h' => {
 				if self.reader.peek().map(|x| x.is_ascii_alphabetic()).unwrap_or(false) {
 					return self.lex_ident_from_next_byte(b'h');

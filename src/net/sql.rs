@@ -1,4 +1,3 @@
-use crate::dbs::DB;
 use crate::err::Error;
 use crate::net::input::bytes_to_utf8;
 use crate::net::output;
@@ -12,22 +11,19 @@ use axum::response::IntoResponse;
 use axum::routing::options;
 use axum::Extension;
 use axum::Router;
-use axum::TypedHeader;
+use axum_extra::TypedHeader;
 use bytes::Bytes;
 use futures::{SinkExt, StreamExt};
-use http_body::Body as HttpBody;
 use surrealdb::dbs::Session;
 use tower_http::limit::RequestBodyLimitLayer;
 
 use super::headers::Accept;
+use super::AppState;
 
 const MAX: usize = 1024 * 1024; // 1 MiB
 
-pub(super) fn router<S, B>() -> Router<S, B>
+pub(super) fn router<S>() -> Router<S>
 where
-	B: HttpBody + Send + 'static,
-	B::Data: Send,
-	B::Error: std::error::Error + Send + Sync + 'static,
 	S: Clone + Send + Sync + 'static,
 {
 	Router::new()
@@ -37,13 +33,14 @@ where
 }
 
 async fn post_handler(
+	Extension(state): Extension<AppState>,
 	Extension(session): Extension<Session>,
 	output: Option<TypedHeader<Accept>>,
 	params: Query<Params>,
 	sql: Bytes,
 ) -> Result<impl IntoResponse, impl IntoResponse> {
 	// Get a database reference
-	let db = DB.get().unwrap();
+	let db = &state.datastore;
 	// Convert the received sql query
 	let sql = bytes_to_utf8(&sql)?;
 	// Execute the received sql query
@@ -65,12 +62,13 @@ async fn post_handler(
 
 async fn ws_handler(
 	ws: WebSocketUpgrade,
+	Extension(state): Extension<AppState>,
 	Extension(sess): Extension<Session>,
 ) -> impl IntoResponse {
-	ws.on_upgrade(move |socket| handle_socket(socket, sess))
+	ws.on_upgrade(move |socket| handle_socket(state, socket, sess))
 }
 
-async fn handle_socket(ws: WebSocket, session: Session) {
+async fn handle_socket(state: AppState, ws: WebSocket, session: Session) {
 	// Split the WebSocket connection
 	let (mut tx, mut rx) = ws.split();
 	// Wait to receive the next message
@@ -78,7 +76,7 @@ async fn handle_socket(ws: WebSocket, session: Session) {
 		if let Ok(msg) = res {
 			if let Ok(sql) = msg.to_text() {
 				// Get a database reference
-				let db = DB.get().unwrap();
+				let db = &state.datastore;
 				// Execute the received sql query
 				let _ = match db.execute(sql, &session, None).await {
 					// Convert the response to JSON

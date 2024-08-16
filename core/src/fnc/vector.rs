@@ -1,6 +1,7 @@
 use crate::err::Error;
 use crate::fnc::util::math::vector::{
-	Add, Angle, CrossProduct, Divide, DotProduct, Magnitude, Multiply, Normalize, Project, Subtract,
+	Add, Angle, CrossProduct, Divide, DotProduct, Magnitude, Multiply, Normalize, Project, Scale,
+	Subtract,
 };
 use crate::sql::{Number, Value};
 
@@ -44,6 +45,10 @@ pub fn subtract((a, b): (Vec<Number>, Vec<Number>)) -> Result<Value, Error> {
 	Ok(a.subtract(&b)?.into())
 }
 
+pub fn scale((a, b): (Vec<Number>, Number)) -> Result<Value, Error> {
+	Ok(a.scale(&b)?.into())
+}
+
 pub mod distance {
 	use crate::ctx::Context;
 	use crate::doc::CursorDoc;
@@ -68,11 +73,11 @@ pub mod distance {
 	}
 
 	pub fn knn(
-		(ctx, doc): (&Context<'_>, Option<&CursorDoc<'_>>),
+		(ctx, doc): (&Context, Option<&CursorDoc>),
 		(knn_ref,): (Option<Value>,),
 	) -> Result<Value, Error> {
 		if let Some((_exe, doc, thg)) = get_execution_context(ctx, doc) {
-			if let Some(ir) = doc.ir {
+			if let Some(ir) = &doc.ir {
 				if let Some(d) = ir.dist() {
 					return Ok(d.into());
 				}
@@ -158,5 +163,53 @@ impl TryFrom<Value> for Vec<Number> {
 		} else {
 			Err(Error::InvalidVectorValue(val.to_string()))
 		}
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+	use crate::sql::Number;
+	use rust_decimal::Decimal;
+
+	#[test]
+	fn vector_scale_int() {
+		let input_vector: Vec<Number> = vec![1, 2, 3, 4].into_iter().map(Number::Int).collect();
+		let scalar_int = Number::Int(2);
+
+		let result: Result<Value, Error> = scale((input_vector.clone(), scalar_int.clone()));
+
+		let expected_output: Vec<Number> = vec![2, 4, 6, 8].into_iter().map(Number::Int).collect();
+
+		assert!(result.is_ok());
+		assert_eq!(result.unwrap(), expected_output.into());
+	}
+
+	#[test]
+	fn vector_scale_float() {
+		let input_vector: Vec<Number> = vec![1, 2, 3, 4].into_iter().map(Number::Int).collect();
+		let scalar_float = Number::Float(1.51);
+
+		let result: Result<Value, Error> = scale((input_vector.clone(), scalar_float.clone()));
+		let expected_output: Vec<Number> =
+			vec![1.51, 3.02, 4.53, 6.04].into_iter().map(Number::Float).collect();
+		assert!(result.is_ok());
+		assert_eq!(result.unwrap(), expected_output.into());
+	}
+
+	#[test]
+	fn vector_scale_decimal() {
+		let input_vector: Vec<Number> = vec![1, 2, 3, 4].into_iter().map(Number::Int).collect();
+		let scalar_decimal = Number::Decimal(Decimal::new(3141, 3));
+
+		let result: Result<Value, Error> = scale((input_vector.clone(), scalar_decimal.clone()));
+		let expected_output: Vec<Number> = vec![
+			Number::Decimal(Decimal::new(3141, 3)),  // 3.141 * 1
+			Number::Decimal(Decimal::new(6282, 3)),  // 3.141 * 2
+			Number::Decimal(Decimal::new(9423, 3)),  // 3.141 * 3
+			Number::Decimal(Decimal::new(12564, 3)), // 3.141 * 4
+		];
+		assert!(result.is_ok());
+		assert_eq!(result.unwrap(), expected_output.into());
 	}
 }

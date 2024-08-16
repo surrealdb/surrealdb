@@ -4,9 +4,8 @@ use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::iam::{Action, ResourceKind};
 use crate::sql::statements::info::InfoStructure;
-use crate::sql::{
-	statements::UpdateStatement, Base, Ident, Idioms, Index, Object, Part, Strand, Value, Values,
-};
+use crate::sql::statements::UpdateStatement;
+use crate::sql::{Base, Ident, Idioms, Index, Output, Part, Strand, Value, Values};
 use derive::Store;
 use reblessive::tree::Stk;
 use revision::revisioned;
@@ -14,7 +13,7 @@ use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display};
 use std::sync::Arc;
 
-#[revisioned(revision = 2)]
+#[revisioned(revision = 3)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
@@ -26,6 +25,8 @@ pub struct DefineIndexStatement {
 	pub comment: Option<Strand>,
 	#[revision(start = 2)]
 	pub if_not_exists: bool,
+	#[revision(start = 3)]
+	pub overwrite: bool,
 }
 
 impl DefineIndexStatement {
@@ -33,37 +34,33 @@ impl DefineIndexStatement {
 	pub(crate) async fn compute(
 		&self,
 		stk: &mut Stk,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		opt: &Options,
-		doc: Option<&CursorDoc<'_>>,
+		doc: Option<&CursorDoc>,
 	) -> Result<Value, Error> {
 		// Allowed to run?
 		opt.is_allowed(Action::Edit, ResourceKind::Index, &Base::Db)?;
-		// Claim transaction
-		let mut run = ctx.tx_lock().await;
-		// Clear the cache
-		run.clear_cache();
-		// Check if index already exists
-		if run.get_tb_index(opt.ns()?, opt.db()?, &self.what, &self.name).await.is_ok() {
+		// Fetch the transaction
+		let txn = ctx.tx();
+		// Check if the definition exists
+		if txn.get_tb_index(opt.ns()?, opt.db()?, &self.what, &self.name).await.is_ok() {
 			if self.if_not_exists {
 				return Ok(Value::None);
-			} else {
+			} else if !self.overwrite {
 				return Err(Error::IxAlreadyExists {
 					value: self.name.to_string(),
 				});
 			}
 		}
-		// If we are strict, check that the table exists
-		run.check_ns_db_tb(opt.ns()?, opt.db()?, &self.what, opt.strict).await?;
 		// Does the table exists?
-		match run.get_and_cache_tb(opt.ns()?, opt.db()?, &self.what).await {
+		match txn.get_tb(opt.ns()?, opt.db()?, &self.what).await {
 			Ok(db) => {
 				// Are we SchemaFull?
 				if db.full {
 					// Check that the fields exists
 					for idiom in self.cols.iter() {
 						if let Some(Part::Field(id)) = idiom.first() {
-							run.get_tb_field(opt.ns()?, opt.db()?, &self.what, id).await?;
+							txn.get_tb_field(opt.ns()?, opt.db()?, &self.what, id).await?;
 						}
 					}
 				}
@@ -75,34 +72,29 @@ impl DefineIndexStatement {
 			// Any other error should be returned
 			Err(e) => return Err(e),
 		}
-
 		// Process the statement
 		let key = crate::key::table::ix::new(opt.ns()?, opt.db()?, &self.what, &self.name);
-		run.add_ns(opt.ns()?, opt.strict).await?;
-		run.add_db(opt.ns()?, opt.db()?, opt.strict).await?;
-		run.add_tb(opt.ns()?, opt.db()?, &self.what, opt.strict).await?;
-		run.set(
+		txn.get_or_add_ns(opt.ns()?, opt.strict).await?;
+		txn.get_or_add_db(opt.ns()?, opt.db()?, opt.strict).await?;
+		txn.get_or_add_tb(opt.ns()?, opt.db()?, &self.what, opt.strict).await?;
+		txn.set(
 			key,
 			DefineIndexStatement {
-				// Don't persist the "IF NOT EXISTS" clause to schema
+				// Don't persist the `IF NOT EXISTS` clause to schema
 				if_not_exists: false,
+				overwrite: false,
 				..self.clone()
 			},
 		)
 		.await?;
-		// Remove the index data
-		let key = crate::key::index::all::new(opt.ns()?, opt.db()?, &self.what, &self.name);
-		run.delp(key, u32::MAX).await?;
 		// Clear the cache
-		let key = crate::key::table::ix::prefix(opt.ns()?, opt.db()?, &self.what);
-		run.clr(key).await?;
-		// Release the transaction
-		drop(run);
+		txn.clear();
 		// Force queries to run
 		let opt = &opt.new_with_force(Force::Index(Arc::new([self.clone()])));
 		// Update the index data
 		let stm = UpdateStatement {
 			what: Values(vec![Value::Table(self.what.clone().into())]),
+			output: Some(Output::None),
 			..UpdateStatement::default()
 		};
 		stm.compute(stk, ctx, opt, doc).await?;
@@ -117,6 +109,9 @@ impl Display for DefineIndexStatement {
 		if self.if_not_exists {
 			write!(f, " IF NOT EXISTS")?
 		}
+		if self.overwrite {
+			write!(f, " OVERWRITE")?
+		}
 		write!(f, " {} ON {} FIELDS {}", self.name, self.what, self.cols)?;
 		if Index::Idx != self.index {
 			write!(f, " {}", self.index)?;
@@ -130,28 +125,12 @@ impl Display for DefineIndexStatement {
 
 impl InfoStructure for DefineIndexStatement {
 	fn structure(self) -> Value {
-		let Self {
-			name,
-			what,
-			cols,
-			index,
-			comment,
-			..
-		} = self;
-		let mut acc = Object::default();
-
-		acc.insert("name".to_string(), name.structure());
-
-		acc.insert("what".to_string(), what.structure());
-
-		acc.insert("cols".to_string(), cols.structure());
-
-		acc.insert("index".to_string(), index.structure());
-
-		if let Some(comment) = comment {
-			acc.insert("comment".to_string(), comment.into());
-		}
-
-		Value::Object(acc)
+		Value::from(map! {
+			"name".to_string() => self.name.structure(),
+			"what".to_string() => self.what.structure(),
+			"cols".to_string() => self.cols.structure(),
+			"index".to_string() => self.index.structure(),
+			"comment".to_string(), if let Some(v) = self.comment => v.into(),
+		})
 	}
 }
