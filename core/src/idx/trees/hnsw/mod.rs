@@ -702,7 +702,7 @@ mod tests {
 		Ok(())
 	}
 
-	async fn new_ctx(ds: &Datastore, tt: TransactionType) -> Context<'_> {
+	async fn new_ctx(ds: &Datastore, tt: TransactionType) -> Context {
 		let tx = Arc::new(ds.transaction(tt, Optimistic).await.unwrap());
 		let mut ctx = Context::default();
 		ctx.set_transaction(tx);
