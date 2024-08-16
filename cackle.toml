@@ -272,7 +272,7 @@ allow_unsafe = true
 allow_apis = ["fs"]
 
 [pkg.proc-macro2]
-build.allow_apis = [ "process"]
+build.allow_apis = ["process"]
 allow_unsafe = true
 
 [pkg.libc]
@@ -537,7 +537,7 @@ allow_unsafe = true
 allow_unsafe = true
 
 [pkg.anyhow]
-build.allow_apis = [ "process"]
+build.allow_apis = ["process"]
 allow_unsafe = true
 
 [pkg.siphasher]
@@ -968,17 +968,13 @@ allow_apis = ["fs"]
 
 [pkg.surrealdb]
 allow_apis = ["fs"]
-build.allow_build_instructions = [
-    "cargo::rustc-check-cfg=*",
-]
+build.allow_build_instructions = ["cargo::rustc-check-cfg=*"]
 
 [pkg.surrealdb-core]
 allow_unsafe = true
-allow_apis = [
-    "net",
-    "fs",
-]
+allow_apis = ["net", "fs"]
 build.allow_build_instructions = [
+    "cargo::rustc-check-cfg=cfg(storage)",
     "cargo::rustc-check-cfg=*",
 ]
 
@@ -1165,17 +1161,13 @@ allow_unsafe = true
 allow_unsafe = true
 
 [pkg.surrealdb-async-graphql-axum]
-allow_apis = [
-    "net",
-]
+allow_apis = ["net"]
 
 [pkg.castaway]
 allow_unsafe = true
 
 [pkg.blake3]
-build.allow_apis = [
-    "fs",
-]
+build.allow_apis = ["fs"]
 build.allow_build_instructions = [
     "cargo:rustc-link-lib=static=blake3_avx512_assembly",
     "cargo:rustc-link-lib=static=blake3_sse2_sse41_avx2_assembly",
