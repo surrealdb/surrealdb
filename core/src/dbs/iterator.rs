@@ -12,10 +12,10 @@ use crate::err::Error;
 use crate::idx::planner::iterators::{IteratorRecord, IteratorRef};
 use crate::idx::planner::IterationStage;
 use crate::sql::edges::Edges;
-use crate::sql::range::Range;
 use crate::sql::table::Table;
 use crate::sql::thing::Thing;
 use crate::sql::value::Value;
+use crate::sql::{Id, IdRange};
 use reblessive::tree::Stk;
 #[cfg(not(target_arch = "wasm32"))]
 use reblessive::TreeStack;
@@ -27,7 +27,7 @@ pub(crate) enum Iterable {
 	Value(Value),
 	Table(Table),
 	Thing(Thing),
-	Range(Range),
+	TableRange(String, IdRange),
 	Edges(Edges),
 	Defer(Thing),
 	Mergeable(Thing, Value),
@@ -152,14 +152,30 @@ impl Iterator {
 					}
 				}
 				// Add the record to the iterator
-				match stm {
-					Statement::Create(_) => {
-						self.ingest(Iterable::Defer(v));
+				match &v.id {
+					Id::Range(r) => {
+						match stm {
+							Statement::Create(_) => {
+								return Err(Error::InvalidStatementTarget {
+									value: v.to_string(),
+								});
+							}
+							_ => {
+								self.ingest(Iterable::TableRange(v.tb, r.to_owned()));
+							}
+						};
 					}
 					_ => {
-						self.ingest(Iterable::Thing(v));
+						match stm {
+							Statement::Create(_) => {
+								self.ingest(Iterable::Defer(v));
+							}
+							_ => {
+								self.ingest(Iterable::Thing(v));
+							}
+						};
 					}
-				};
+				}
 			}
 			Value::Mock(v) => {
 				// Check if there is a data clause
@@ -175,25 +191,6 @@ impl Iterator {
 				for v in v {
 					self.ingest(Iterable::Thing(v))
 				}
-			}
-			Value::Range(v) => {
-				// Check if this is a create statement
-				if let Statement::Create(_) = stm {
-					return Err(Error::InvalidStatementTarget {
-						value: v.to_string(),
-					});
-				}
-				// Check if there is a data clause
-				if let Some(data) = stm.data() {
-					// Check if there is an id field specified
-					if let Some(id) = data.rid(stk, ctx, opt).await? {
-						return Err(Error::IdMismatch {
-							value: id.to_string(),
-						});
-					}
-				}
-				// Add the record to the iterator
-				self.ingest(Iterable::Range(*v));
 			}
 			Value::Edges(v) => {
 				// Check if this is a create statement

@@ -11,7 +11,7 @@ use crate::key::{graph, thing};
 use crate::kvs::Transaction;
 use crate::sql::dir::Dir;
 use crate::sql::id::range::IdRange;
-use crate::sql::{Edges, Id, Table, Thing, Value};
+use crate::sql::{Edges, Table, Thing, Value};
 #[cfg(not(target_arch = "wasm32"))]
 use channel::Sender;
 use futures::StreamExt;
@@ -124,7 +124,9 @@ impl<'a> Processor<'a> {
 				Iterable::Value(v) => self.process_value(stk, ctx, opt, stm, v).await?,
 				Iterable::Thing(v) => self.process_thing(stk, ctx, opt, stm, v).await?,
 				Iterable::Defer(v) => self.process_defer(stk, ctx, opt, stm, v).await?,
-				// Iterable::Range(v) => self.process_range(stk, ctx, opt, stm, v).await?,
+				Iterable::TableRange(tb, v) => {
+					self.process_range(stk, ctx, opt, stm, tb, v).await?
+				}
 				Iterable::Edges(e) => self.process_edge(stk, ctx, opt, stm, e).await?,
 				Iterable::Table(v) => {
 					if let Some(qp) = ctx.get_query_planner() {
@@ -158,7 +160,6 @@ impl<'a> Processor<'a> {
 				Iterable::Relatable(f, v, w, o) => {
 					self.process_relatable(stk, ctx, opt, stm, (f, v, w, o)).await?
 				}
-				_ => todo!(),
 			}
 		}
 		Ok(())
@@ -211,33 +212,28 @@ impl<'a> Processor<'a> {
 		stm: &Statement<'_>,
 		v: Thing,
 	) -> Result<(), Error> {
-		match &v.id {
-			Id::Range(r) => self.process_thing_range(stk, ctx, opt, stm, v.tb, r.to_owned()).await,
-			_ => {
-				// Check that the table exists
-				ctx.tx().check_ns_db_tb(opt.ns()?, opt.db()?, &v.tb, opt.strict).await?;
-				// Fetch the data from the store
-				let key = thing::new(opt.ns()?, opt.db()?, &v.tb, &v.id.to_owned().try_into()?);
-				let val = ctx.tx().get(key, opt.version).await?;
-				// Parse the data from the store
-				let val = Operable::Value(
-					match val {
-						Some(v) => Value::from(v),
-						None => Value::None,
-					}
-					.into(),
-				);
-				// Process the document record
-				let pro = Processed {
-					rid: Some(v.into()),
-					ir: None,
-					val,
-				};
-				self.process(stk, ctx, opt, stm, pro).await?;
-				// Everything ok
-				Ok(())
+		// Check that the table exists
+		ctx.tx().check_ns_db_tb(opt.ns()?, opt.db()?, &v.tb, opt.strict).await?;
+		// Fetch the data from the store
+		let key = thing::new(opt.ns()?, opt.db()?, &v.tb, &v.id.to_owned().try_into()?);
+		let val = ctx.tx().get(key, opt.version).await?;
+		// Parse the data from the store
+		let val = Operable::Value(
+			match val {
+				Some(v) => Value::from(v),
+				None => Value::None,
 			}
-		}
+			.into(),
+		);
+		// Process the document record
+		let pro = Processed {
+			rid: Some(v.into()),
+			ir: None,
+			val,
+		};
+		self.process(stk, ctx, opt, stm, pro).await?;
+		// Everything ok
+		Ok(())
 	}
 
 	async fn process_mergeable(
@@ -344,7 +340,7 @@ impl<'a> Processor<'a> {
 		Ok(())
 	}
 
-	async fn process_thing_range(
+	async fn process_range(
 		&mut self,
 		stk: &mut Stk,
 		ctx: &Context,
