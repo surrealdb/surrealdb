@@ -3090,8 +3090,8 @@ mod tests {
 	#[test]
 	fn check_size() {
 		assert!(104 >= std::mem::size_of::<Value>(), "size of value too big");
-		assert_eq!(112, std::mem::size_of::<Error>());
-		assert_eq!(112, std::mem::size_of::<Result<Value, Error>>());
+		assert_eq!(152, std::mem::size_of::<Error>());
+		assert_eq!(152, std::mem::size_of::<Result<Value, Error>>());
 		assert_eq!(24, std::mem::size_of::<crate::sql::number::Number>());
 		assert_eq!(24, std::mem::size_of::<crate::sql::strand::Strand>());
 		assert_eq!(16, std::mem::size_of::<crate::sql::duration::Duration>());
@@ -3102,7 +3102,7 @@ mod tests {
 		assert_eq!(24, std::mem::size_of::<crate::sql::param::Param>());
 		assert_eq!(24, std::mem::size_of::<crate::sql::idiom::Idiom>());
 		assert_eq!(24, std::mem::size_of::<crate::sql::table::Table>());
-		assert_eq!(56, std::mem::size_of::<crate::sql::thing::Thing>());
+		assert_eq!(104, std::mem::size_of::<crate::sql::thing::Thing>());
 		assert_eq!(40, std::mem::size_of::<crate::sql::mock::Mock>());
 		assert_eq!(32, std::mem::size_of::<crate::sql::regex::Regex>());
 		assert_eq!(8, std::mem::size_of::<Box<crate::sql::range::Range>>());
