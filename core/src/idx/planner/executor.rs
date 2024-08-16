@@ -104,8 +104,8 @@ impl InnerQueryExecutor {
 	#[allow(clippy::too_many_arguments)]
 	#[allow(clippy::mutable_key_type)]
 	pub(super) async fn new(
-		ctx: &Context,
 		stk: &mut Stk,
+		ctx: &Context,
 		opt: &Options,
 		table: &Table,
 		im: IndexesMap,
@@ -779,8 +779,8 @@ pub(super) struct HnswEntry {
 impl HnswEntry {
 	#[allow(clippy::too_many_arguments)]
 	async fn new(
-		ctx: &Context,
 		stk: &mut Stk,
+		ctx: &Context,
 		opt: &Options,
 		h: SharedHnswIndex,
 		v: &[Number],
