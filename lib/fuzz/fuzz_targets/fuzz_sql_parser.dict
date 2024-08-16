@@ -202,6 +202,7 @@
 "count("
 "crypto"
 "crypto::"
+"crypto::blake3("
 "crypto::md5("
 "crypto::sha1("
 "crypto::sha256("
