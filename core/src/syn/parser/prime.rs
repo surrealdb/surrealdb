@@ -393,10 +393,7 @@ impl Parser<'_> {
 	) -> ParseResult<Value> {
 		match self.peek_kind() {
 			t!("$param") => ctx.run(|ctx| self.parse_closure(ctx, start)).await,
-			v => {
-				println!("{:?}", v);
-				self.parse_mock(start).map(Value::Mock)
-			}
+			v => self.parse_mock(start).map(Value::Mock),
 		}
 	}
 
