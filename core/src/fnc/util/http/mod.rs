@@ -45,7 +45,7 @@ async fn decode_response(res: Response) -> Result<Value, Error> {
 	}
 }
 
-pub async fn head(ctx: &Context<'_>, uri: Strand, opts: impl Into<Object>) -> Result<Value, Error> {
+pub async fn head(ctx: &Context, uri: Strand, opts: impl Into<Object>) -> Result<Value, Error> {
 	// Check if the URI is valid and allowed
 	let url = Url::parse(&uri).map_err(|_| Error::InvalidUrl(uri.to_string()))?;
 	ctx.check_allowed_net(&url)?;
@@ -74,7 +74,7 @@ pub async fn head(ctx: &Context<'_>, uri: Strand, opts: impl Into<Object>) -> Re
 	}
 }
 
-pub async fn get(ctx: &Context<'_>, uri: Strand, opts: impl Into<Object>) -> Result<Value, Error> {
+pub async fn get(ctx: &Context, uri: Strand, opts: impl Into<Object>) -> Result<Value, Error> {
 	// Check if the URI is valid and allowed
 	let url = Url::parse(&uri).map_err(|_| Error::InvalidUrl(uri.to_string()))?;
 	ctx.check_allowed_net(&url)?;
@@ -101,7 +101,7 @@ pub async fn get(ctx: &Context<'_>, uri: Strand, opts: impl Into<Object>) -> Res
 }
 
 pub async fn put(
-	ctx: &Context<'_>,
+	ctx: &Context,
 	uri: Strand,
 	body: Value,
 	opts: impl Into<Object>,
@@ -134,7 +134,7 @@ pub async fn put(
 }
 
 pub async fn post(
-	ctx: &Context<'_>,
+	ctx: &Context,
 	uri: Strand,
 	body: Value,
 	opts: impl Into<Object>,
@@ -167,7 +167,7 @@ pub async fn post(
 }
 
 pub async fn patch(
-	ctx: &Context<'_>,
+	ctx: &Context,
 	uri: Strand,
 	body: Value,
 	opts: impl Into<Object>,
@@ -199,11 +199,7 @@ pub async fn patch(
 	decode_response(res).await
 }
 
-pub async fn delete(
-	ctx: &Context<'_>,
-	uri: Strand,
-	opts: impl Into<Object>,
-) -> Result<Value, Error> {
+pub async fn delete(ctx: &Context, uri: Strand, opts: impl Into<Object>) -> Result<Value, Error> {
 	// Check if the URI is valid and allowed
 	let url = Url::parse(&uri).map_err(|_| Error::InvalidUrl(uri.to_string()))?;
 	ctx.check_allowed_net(&url)?;

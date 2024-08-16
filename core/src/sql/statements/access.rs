@@ -232,9 +232,9 @@ fn random_string(length: usize) -> String {
 
 async fn compute_grant(
 	stmt: &AccessStatementGrant,
-	ctx: &Context<'_>,
+	ctx: &Context,
 	opt: &Options,
-	_doc: Option<&CursorDoc<'_>>,
+	_doc: Option<&CursorDoc>,
 ) -> Result<Value, Error> {
 	let base = match &stmt.base {
 		Some(base) => base.clone(),
@@ -431,9 +431,9 @@ async fn compute_grant(
 
 async fn compute_list(
 	stmt: &AccessStatementList,
-	ctx: &Context<'_>,
+	ctx: &Context,
 	opt: &Options,
-	_doc: Option<&CursorDoc<'_>>,
+	_doc: Option<&CursorDoc>,
 ) -> Result<Value, Error> {
 	let base = match &stmt.base {
 		Some(base) => base.clone(),
@@ -495,9 +495,9 @@ async fn compute_list(
 
 async fn compute_revoke(
 	stmt: &AccessStatementRevoke,
-	ctx: &Context<'_>,
+	ctx: &Context,
 	opt: &Options,
-	_doc: Option<&CursorDoc<'_>>,
+	_doc: Option<&CursorDoc>,
 ) -> Result<Value, Error> {
 	let base = match &stmt.base {
 		Some(base) => base.clone(),
@@ -580,9 +580,9 @@ impl AccessStatement {
 	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		opt: &Options,
-		_doc: Option<&CursorDoc<'_>>,
+		_doc: Option<&CursorDoc>,
 	) -> Result<Value, Error> {
 		match self {
 			AccessStatement::Grant(stmt) => compute_grant(stmt, ctx, opt, _doc).await,

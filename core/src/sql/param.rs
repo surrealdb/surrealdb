@@ -50,16 +50,16 @@ impl Param {
 	pub(crate) async fn compute(
 		&self,
 		stk: &mut Stk,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		opt: &Options,
-		doc: Option<&CursorDoc<'_>>,
+		doc: Option<&CursorDoc>,
 	) -> Result<Value, Error> {
 		// Find the variable by name
 		match self.as_str() {
 			// This is a special param
 			"this" | "self" => match doc {
 				// The base document exists
-				Some(v) => v.doc.compute(stk, ctx, opt, doc).await,
+				Some(v) => v.doc.as_ref().compute(stk, ctx, opt, doc).await,
 				// The base document does not exist
 				None => Ok(Value::None),
 			},

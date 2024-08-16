@@ -25,7 +25,7 @@ async fn handler(Extension(state): Extension<AppState>) -> impl IntoResponse {
 			// Cancel the transaction
 			trace!("Health endpoint cancelling transaction");
 			// Attempt to fetch data
-			match tx.get(vec![0x00]).await {
+			match tx.get(vec![0x00], None).await {
 				Err(_) => {
 					// Ensure the transaction is cancelled
 					let _ = tx.cancel().await;

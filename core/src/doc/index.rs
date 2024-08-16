@@ -14,11 +14,11 @@ use crate::sql::statements::DefineIndexStatement;
 use crate::sql::{Part, Thing, Value};
 use reblessive::tree::Stk;
 
-impl<'a> Document<'a> {
+impl Document {
 	pub async fn index(
 		&self,
 		stk: &mut Stk,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		opt: &Options,
 		_stm: &Statement<'_>,
 	) -> Result<(), Error> {
@@ -27,7 +27,9 @@ impl<'a> Document<'a> {
 		// Collect indexes or skip
 		let ixs = match &opt.force {
 			Force::Index(ix)
-				if ix.first().is_some_and(|ix| self.id.is_some_and(|id| ix.what.0 == id.tb)) =>
+				if ix
+					.first()
+					.is_some_and(|ix| self.id.as_ref().is_some_and(|id| ix.what.0 == id.tb)) =>
 			{
 				ix.clone()
 			}
@@ -75,12 +77,12 @@ impl<'a> Document<'a> {
 /// It will return: ["Tobie", "piano"]
 async fn build_opt_values(
 	stk: &mut Stk,
-	ctx: &Context<'_>,
+	ctx: &Context,
 	opt: &Options,
 	ix: &DefineIndexStatement,
-	doc: &CursorDoc<'_>,
+	doc: &CursorDoc,
 ) -> Result<Option<Vec<Value>>, Error> {
-	if !doc.doc.is_some() {
+	if !doc.doc.as_ref().is_some() {
 		return Ok(None);
 	}
 	let mut o = Vec::with_capacity(ix.cols.len());
@@ -279,7 +281,7 @@ impl<'a> IndexOperation<'a> {
 		))
 	}
 
-	async fn index_unique(&mut self, ctx: &Context<'_>) -> Result<(), Error> {
+	async fn index_unique(&mut self, ctx: &Context) -> Result<(), Error> {
 		// Get the transaction
 		let txn = ctx.tx();
 		// Lock the transaction
@@ -304,7 +306,7 @@ impl<'a> IndexOperation<'a> {
 					let key = self.get_unique_index_key(&n)?;
 					if txn.putc(key, self.rid, None).await.is_err() {
 						let key = self.get_unique_index_key(&n)?;
-						let val = txn.get(key).await?.unwrap();
+						let val = txn.get(key, None).await?.unwrap();
 						let rid: Thing = val.into();
 						return self.err_index_exists(rid, n);
 					}
@@ -314,7 +316,7 @@ impl<'a> IndexOperation<'a> {
 		Ok(())
 	}
 
-	async fn index_non_unique(&mut self, ctx: &Context<'_>) -> Result<(), Error> {
+	async fn index_non_unique(&mut self, ctx: &Context) -> Result<(), Error> {
 		// Get the transaction
 		let txn = ctx.tx();
 		// Lock the transaction
@@ -338,7 +340,7 @@ impl<'a> IndexOperation<'a> {
 				let key = self.get_non_unique_index_key(&n)?;
 				if txn.putc(key, self.rid, None).await.is_err() {
 					let key = self.get_non_unique_index_key(&n)?;
-					let val = txn.get(key).await?.unwrap();
+					let val = txn.get(key, None).await?.unwrap();
 					let rid: Thing = val.into();
 					return self.err_index_exists(rid, n);
 				}
@@ -361,7 +363,7 @@ impl<'a> IndexOperation<'a> {
 	async fn index_full_text(
 		&mut self,
 		stk: &mut Stk,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		p: &SearchParams,
 	) -> Result<(), Error> {
 		let ikb = IndexKeyBase::new(self.opt.ns()?, self.opt.db()?, self.ix)?;
@@ -379,7 +381,7 @@ impl<'a> IndexOperation<'a> {
 	async fn index_mtree(
 		&mut self,
 		stk: &mut Stk,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		p: &MTreeParams,
 	) -> Result<(), Error> {
 		let txn = ctx.tx();
@@ -397,7 +399,7 @@ impl<'a> IndexOperation<'a> {
 		mt.finish(&txn).await
 	}
 
-	async fn index_hnsw(&mut self, ctx: &Context<'_>, p: &HnswParams) -> Result<(), Error> {
+	async fn index_hnsw(&mut self, ctx: &Context, p: &HnswParams) -> Result<(), Error> {
 		let hnsw = ctx.get_index_stores().get_index_hnsw(self.opt, self.ix, p).await?;
 		let mut hnsw = hnsw.write().await;
 		// Delete the old index data

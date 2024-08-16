@@ -43,14 +43,14 @@ struct FieldDataContext<'a> {
 	view: &'a View,
 	groups: &'a Groups,
 	group_ids: Vec<Value>,
-	doc: &'a CursorDoc<'a>,
+	doc: &'a CursorDoc,
 }
 
-impl<'a> Document<'a> {
+impl Document {
 	pub async fn table(
 		&self,
 		stk: &mut Stk,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		opt: &Options,
 		stm: &Statement<'_>,
 	) -> Result<(), Error> {
@@ -65,7 +65,7 @@ impl<'a> Document<'a> {
 			Force::Table(tb)
 				if tb.first().is_some_and(|tb| {
 					tb.view.as_ref().is_some_and(|v| {
-						self.id.is_some_and(|id| v.what.iter().any(|p| p.0 == id.tb))
+						self.id.as_ref().is_some_and(|id| v.what.iter().any(|p| p.0 == id.tb))
 					})
 				}) =>
 			{
@@ -277,10 +277,10 @@ impl<'a> Document<'a> {
 
 	async fn get_group_ids(
 		stk: &mut Stk,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		opt: &Options,
 		group: &Groups,
-		doc: &CursorDoc<'_>,
+		doc: &CursorDoc,
 	) -> Result<Vec<Value>, Error> {
 		Ok(stk
 			.scope(|scope| {
@@ -297,7 +297,7 @@ impl<'a> Document<'a> {
 	async fn full(
 		&self,
 		stk: &mut Stk,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		opt: &Options,
 		exp: &Fields,
 	) -> Result<Data, Error> {
@@ -309,7 +309,7 @@ impl<'a> Document<'a> {
 	async fn data(
 		&self,
 		stk: &mut Stk,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		opt: &Options,
 		fdc: FieldDataContext<'_>,
 	) -> Result<(), Error> {
@@ -363,7 +363,7 @@ impl<'a> Document<'a> {
 	async fn fields(
 		&self,
 		stk: &mut Stk,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		opt: &Options,
 		fdc: &FieldDataContext<'_>,
 	) -> Result<(Ops, Ops), Error> {
@@ -441,7 +441,7 @@ impl<'a> Document<'a> {
 		&self,
 		set_ops: &mut Ops,
 		del_ops: &mut Ops,
-		fdc: &FieldDataContext<'_>,
+		fdc: &FieldDataContext,
 		field: &Field,
 		key: Idiom,
 		val: Value,
@@ -487,7 +487,7 @@ impl<'a> Document<'a> {
 		&self,
 		set_ops: &mut Ops,
 		del_ops: &mut Ops,
-		fdc: &FieldDataContext<'_>,
+		fdc: &FieldDataContext,
 		field: &Field,
 		key: Idiom,
 		val: Value,
@@ -531,12 +531,7 @@ impl<'a> Document<'a> {
 	}
 
 	/// Recomputes the value for one group
-	fn one_group_query(
-		fdc: &FieldDataContext<'_>,
-		field: &Field,
-		key: &Idiom,
-		val: Value,
-	) -> Value {
+	fn one_group_query(fdc: &FieldDataContext, field: &Field, key: &Idiom, val: Value) -> Value {
 		// Build the condition merging the optional user provided condition and the group
 		let mut iter = fdc.groups.0.iter().enumerate();
 		let cond = if let Some((i, g)) = iter.next() {

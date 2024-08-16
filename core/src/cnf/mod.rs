@@ -62,3 +62,11 @@ pub static EXPERIMENTAL_BEARER_ACCESS: Lazy<bool> =
 // Run tests with bearer access enabled as it introduces new functionality that needs to be tested.
 #[cfg(test)]
 pub static EXPERIMENTAL_BEARER_ACCESS: Lazy<bool> = Lazy::new(|| true);
+
+/// Used to limit allocation for builtin functions
+pub static FUNCTION_ALLOCATION_LIMIT: Lazy<usize> = once_cell::sync::Lazy::new(|| {
+	let n = std::env::var("SURREAL_FUNCTION_ALLOCATION_LIMIT")
+		.map(|s| s.parse::<u32>().unwrap_or(20))
+		.unwrap_or(20);
+	2usize.pow(n)
+});
