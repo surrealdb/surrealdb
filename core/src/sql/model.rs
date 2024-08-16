@@ -144,8 +144,8 @@ impl Model {
 				.unwrap()?;
 				// Convert the output to a value
 				let mut buffer = Vec::with_capacity(outcome.len());
-				for (k, v) in outcome {
-					buffer.push((k, v.into()));
+				for v in outcome {
+					buffer.push(v.into());
 				}
 				Ok(buffer.into())
 			}
@@ -177,8 +177,8 @@ impl Model {
 				// Convert the output to a value
 				// Convert the output to a value
 				let mut buffer = Vec::with_capacity(outcome.len());
-				for (k, v) in outcome {
-					buffer.push((k, v.into()));
+				for v in outcome {
+					buffer.push(v.into());
 				}
 				Ok(buffer.into())
 			}
@@ -214,8 +214,8 @@ impl Model {
 				// Convert the output to a value
 				// Convert the output to a value
 				let mut buffer = Vec::with_capacity(outcome.len());
-				for (k, v) in outcome {
-					buffer.push((k, v.into()));
+				for v in outcome {
+					buffer.push(v.into());
 				}
 				Ok(buffer.into())
 			}
