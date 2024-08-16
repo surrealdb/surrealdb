@@ -458,6 +458,12 @@ impl From<Vec<i32>> for Value {
 	}
 }
 
+impl From<Vec<f32>> for Value {
+	fn from(v: Vec<f32>) -> Self {
+		Value::Array(Array::from(v))
+	}
+}
+
 impl From<Vec<Value>> for Value {
 	fn from(v: Vec<Value>) -> Self {
 		Value::Array(Array::from(v))
@@ -3007,13 +3013,16 @@ mod tests {
 	}
 
 	#[test]
-	fn test_value_from_vec() {
-		let vector = vec![1.0 as f32, 2.0, 3.0, 4.0, 5.0, 6.0];
-		let mut buffer = vec![];
+	fn test_value_from_vec_i32() {
+		let vector: Vec<i32> = vec![1, 2, 3, 4, 5, 6];
+		let value = Value::from(vector);
+		assert!(matches!(value, Value::Array(Array(_))));
+	}
 
-		for value in vector {
-			buffer.push(Value::from(value));
-		}
-		let value = Value::from(buffer);
+	#[test]
+	fn test_value_from_vec_f32() {
+		let vector: Vec<f32> = vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0];
+		let value = Value::from(vector);
+		assert!(matches!(value, Value::Array(Array(_))));
 	}
 }

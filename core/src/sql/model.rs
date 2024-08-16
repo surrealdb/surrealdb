@@ -143,12 +143,7 @@ impl Model {
 				.await
 				.unwrap()?;
 				// Convert the output to a value
-				let mut buffer = Vec::with_capacity(outcome.len());
-				for v in outcome {
-					buffer.push(Value::from(v));
-				}
-				let package: Value = Value::from(buffer);
-				Ok(package)
+				Ok(outcome.into())
 			}
 			// Perform raw compute
 			Value::Number(v) => {
@@ -176,12 +171,7 @@ impl Model {
 				.await
 				.unwrap()?;
 				// Convert the output to a value
-				let mut buffer = Vec::with_capacity(outcome.len());
-				for v in outcome {
-					buffer.push(Value::from(v));
-				}
-				let package: Value = Value::from(buffer);
-				Ok(package)
+				Ok(outcome.into())
 			}
 			// Perform raw compute
 			Value::Array(v) => {
@@ -213,12 +203,7 @@ impl Model {
 				.await
 				.unwrap()?;
 				// Convert the output to a value
-				let mut buffer = Vec::with_capacity(outcome.len());
-				for v in outcome {
-					buffer.push(Value::from(v));
-				}
-				let package: Value = Value::from(buffer);
-				Ok(package)
+				Ok(outcome.into())
 			}
 			//
 			_ => Err(Error::InvalidArguments {
