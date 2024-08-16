@@ -126,7 +126,9 @@ impl<'a> KnnConditionRewriter<'a> {
 
 	fn eval_id(&self, id: &Id) -> Option<Id> {
 		match id {
-			Id::Value(v) => self.eval_id_value(v).map(Id::Value),
+			Id::Number(_) | Id::String(_) | Id::Generate(_) => Some(id.clone()),
+			Id::Array(a) => self.eval_array(a).map(Id::Array),
+			Id::Object(o) => self.eval_object(o).map(Id::Object),
 			Id::Range(r) => self.eval_id_range(r).map(Id::Range),
 		}
 	}

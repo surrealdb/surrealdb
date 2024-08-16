@@ -599,7 +599,15 @@ impl From<IdRange> for Value {
 impl From<Id> for Value {
 	fn from(v: Id) -> Self {
 		match v {
-			Id::Value(v) => v.into(),
+			Id::Number(v) => v.into(),
+			Id::String(v) => v.into(),
+			Id::Array(v) => v.into(),
+			Id::Object(v) => v.into(),
+			Id::Generate(v) => match v {
+				Gen::Rand => Id::rand().into(),
+				Gen::Ulid => Id::ulid().into(),
+				Gen::Uuid => Id::uuid().into(),
+			},
 			Id::Range(v) => v.into(),
 		}
 	}

@@ -32,7 +32,12 @@ impl Document {
 		// Get the record id
 		if let Some(rid) = &self.id {
 			// Purge the record data
-			let key = crate::key::thing::new(opt.ns()?, opt.db()?, &rid.tb, rid.id.value()?);
+			let key = crate::key::thing::new(
+				opt.ns()?,
+				opt.db()?,
+				&rid.tb,
+				&rid.id.to_owned().try_into()?,
+			);
 			txn.del(key).await?;
 			// Purge the record edges
 			match (

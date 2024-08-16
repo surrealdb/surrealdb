@@ -180,7 +180,7 @@ impl TryFrom<Cbor> for Value {
 
 							let id = match v.remove(0) {
 								Data::Tag(TAG_RANGE, v) => Id::Range(IdRange::try_from(*v)?),
-								v => Id::Value(v.try_into()?),
+								v => IdValue::try_from(v)?.into(),
 							};
 
 							Ok(Value::Thing(Thing {
@@ -385,7 +385,13 @@ impl TryFrom<Value> for Cbor {
 				Box::new(Data::Array(vec![
 					Data::Text(v.tb),
 					match v.id {
-						Id::Value(v) => Data::try_from(v)?,
+						Id::Number(v) => Data::Integer(v.into()),
+						Id::String(v) => Data::Text(v),
+						Id::Array(v) => Cbor::try_from(Value::from(v))?.0,
+						Id::Object(v) => Cbor::try_from(Value::from(v))?.0,
+						Id::Generate(_) => {
+							return Err("Cannot encode an ungenerated Record ID into CBOR")
+						}
 						Id::Range(v) => Data::try_from(v)?,
 					},
 				])),

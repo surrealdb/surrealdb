@@ -69,7 +69,7 @@ impl TryFrom<Id> for IdRange {
 	fn try_from(v: Id) -> Result<Self, Self::Error> {
 		match v {
 			Id::Range(v) => Ok(v),
-			Id::Value(_) => Err(Error::IdInvalid {
+			_ => Err(Error::IdInvalid {
 				value: "idvalue".to_string(),
 			}),
 		}

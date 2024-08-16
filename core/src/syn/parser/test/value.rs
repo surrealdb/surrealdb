@@ -4,8 +4,7 @@ use reblessive::Stack;
 
 use crate::{
 	sql::{
-		id::value::IdValue, Array, Constant, Id, Number, Object, Query, Statement, Statements,
-		Strand, Thing, Value,
+		Array, Constant, Id, Number, Object, Query, Statement, Statements, Strand, Thing, Value,
 	},
 	syn::parser::{mac::test_parse, Parser},
 };
@@ -77,7 +76,7 @@ fn parse_large_depth_record_id() {
 	};
 	let mut thing = thing;
 	for _ in 0..999 {
-		let Id::Value(IdValue::Array(ref x)) = thing.id else {
+		let Id::Array(ref x) = thing.id else {
 			panic!()
 		};
 		let Value::Thing(ref new_thing) = x[0] else {

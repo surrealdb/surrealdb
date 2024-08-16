@@ -125,7 +125,7 @@ impl Parser<'_> {
 			};
 			Ok(Value::Thing(Thing {
 				tb: ident,
-				id: Id::Value(id),
+				id: id.into(),
 			}))
 		}
 	}

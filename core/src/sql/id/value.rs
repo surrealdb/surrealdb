@@ -153,7 +153,11 @@ impl TryFrom<Id> for IdValue {
 	type Error = Error;
 	fn try_from(v: Id) -> Result<Self, Self::Error> {
 		match v {
-			Id::Value(v) => Ok(v),
+			Id::Number(v) => Ok(Self::Number(v)),
+			Id::String(v) => Ok(Self::String(v)),
+			Id::Array(v) => Ok(Self::Array(v)),
+			Id::Object(v) => Ok(Self::Object(v)),
+			Id::Generate(v) => Ok(Self::Generate(v)),
 			Id::Range(_) => Err(Error::IdInvalid {
 				value: "idrange".to_string(),
 			}),

@@ -1,8 +1,10 @@
+use crate::cnf::ID_CHARS;
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::sql::{Array, Number, Object, Strand, Thing, Uuid, Value};
+use nanoid::nanoid;
 use range::IdRange;
 use reblessive::tree::Stk;
 use revision::revisioned;
@@ -10,8 +12,10 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fmt::{self, Display, Formatter};
 use std::ops::Bound;
-use value::IdValue;
+use ulid::Ulid;
+use value::{Gen, IdValue};
 
+use super::escape::escape_rid;
 use super::Range;
 
 pub mod range;
@@ -22,91 +26,95 @@ pub mod value;
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub enum Id {
-	Value(IdValue),
+	Number(i64),
+	String(String),
+	Array(Array),
+	Object(Object),
+	Generate(Gen),
 	Range(IdRange),
 }
 
 impl From<i64> for Id {
 	fn from(v: i64) -> Self {
-		Self::Value(v.into())
+		Self::Number(v)
 	}
 }
 
 impl From<i32> for Id {
 	fn from(v: i32) -> Self {
-		Self::Value(v.into())
+		Self::Number(v as i64)
 	}
 }
 
 impl From<u64> for Id {
 	fn from(v: u64) -> Self {
-		Self::Value(v.into())
+		Self::Number(v as i64)
 	}
 }
 
 impl From<String> for Id {
 	fn from(v: String) -> Self {
-		Self::Value(v.into())
+		Self::String(v)
 	}
 }
 
 impl From<Array> for Id {
 	fn from(v: Array) -> Self {
-		Self::Value(v.into())
+		Self::Array(v)
 	}
 }
 
 impl From<Object> for Id {
 	fn from(v: Object) -> Self {
-		Self::Value(v.into())
+		Self::Object(v)
 	}
 }
 
 impl From<Uuid> for Id {
 	fn from(v: Uuid) -> Self {
-		Self::Value(v.into())
+		Self::String(v.to_raw())
 	}
 }
 
 impl From<Strand> for Id {
 	fn from(v: Strand) -> Self {
-		Self::Value(v.into())
+		Self::String(v.as_string())
 	}
 }
 
 impl From<&str> for Id {
 	fn from(v: &str) -> Self {
-		Self::Value(v.into())
+		Self::String(v.to_owned())
 	}
 }
 
 impl From<&String> for Id {
 	fn from(v: &String) -> Self {
-		Self::Value(v.into())
+		Self::String(v.to_owned())
 	}
 }
 
 impl From<Vec<&str>> for Id {
 	fn from(v: Vec<&str>) -> Self {
-		Id::Value(v.into())
+		Self::Array(v.into())
 	}
 }
 
 impl From<Vec<String>> for Id {
 	fn from(v: Vec<String>) -> Self {
-		Id::Value(v.into())
+		Self::Array(v.into())
 	}
 }
 
 impl From<Vec<Value>> for Id {
 	fn from(v: Vec<Value>) -> Self {
-		Id::Value(v.into())
+		Self::Array(v.into())
 	}
 }
 
 impl From<BTreeMap<String, Value>> for Id {
 	fn from(v: BTreeMap<String, Value>) -> Self {
-		Id::Value(v.into())
+		Self::Object(v.into())
 	}
 }
 
@@ -122,7 +130,13 @@ impl From<Number> for Id {
 
 impl From<IdValue> for Id {
 	fn from(v: IdValue) -> Self {
-		Self::Value(v)
+		match v {
+			IdValue::Number(v) => Self::Number(v),
+			IdValue::String(v) => Self::String(v),
+			IdValue::Array(v) => Self::Array(v),
+			IdValue::Object(v) => Self::Object(v),
+			IdValue::Generate(v) => Self::Generate(v),
+		}
 	}
 }
 
@@ -149,8 +163,13 @@ impl TryFrom<Value> for Id {
 	type Error = Error;
 	fn try_from(v: Value) -> Result<Self, Self::Error> {
 		match v {
-			Value::Range(v) => Ok(Id::Range(IdRange::try_from(*v)?)),
-			v => Ok(Id::Value(IdValue::try_from(v)?)),
+			Value::Number(Number::Int(v)) => Ok(v.into()),
+			Value::Strand(v) => Ok(v.into()),
+			Value::Array(v) => Ok(v.into()),
+			Value::Object(v) => Ok(v.into()),
+			v => Err(Error::IdInvalid {
+				value: v.kindof().to_string(),
+			}),
 		}
 	}
 }
@@ -164,20 +183,28 @@ impl From<Thing> for Id {
 impl Id {
 	/// Generate a new random ID
 	pub fn rand() -> Self {
-		Self::Value(IdValue::rand())
+		Self::String(nanoid!(20, &ID_CHARS))
 	}
 	/// Generate a new random ULID
 	pub fn ulid() -> Self {
-		Self::Value(IdValue::ulid())
+		Self::String(Ulid::new().to_string())
 	}
 	/// Generate a new random UUID
 	pub fn uuid() -> Self {
-		Self::Value(IdValue::uuid())
+		Self::String(Uuid::new_v7().to_raw())
 	}
 	/// Convert the Id to a raw String
 	pub fn to_raw(&self) -> String {
 		match self {
-			Self::Value(v) => v.to_raw(),
+			Self::Number(v) => v.to_string(),
+			Self::String(v) => v.to_string(),
+			Self::Array(v) => v.to_string(),
+			Self::Object(v) => v.to_string(),
+			Self::Generate(v) => match v {
+				Gen::Rand => "rand()".to_string(),
+				Gen::Ulid => "ulid()".to_string(),
+				Gen::Uuid => "uuid()".to_string(),
+			},
 			Self::Range(v) => v.to_string(),
 		}
 	}
@@ -186,7 +213,15 @@ impl Id {
 impl Display for Id {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
 		match self {
-			Self::Value(v) => Display::fmt(v, f),
+			Self::Number(v) => Display::fmt(v, f),
+			Self::String(v) => Display::fmt(&escape_rid(v), f),
+			Self::Array(v) => Display::fmt(v, f),
+			Self::Object(v) => Display::fmt(v, f),
+			Self::Generate(v) => match v {
+				Gen::Rand => Display::fmt("rand()", f),
+				Gen::Ulid => Display::fmt("ulid()", f),
+				Gen::Uuid => Display::fmt("uuid()", f),
+			},
 			Self::Range(v) => Display::fmt(v, f),
 		}
 	}
@@ -202,26 +237,22 @@ impl Id {
 		doc: Option<&CursorDoc>,
 	) -> Result<Id, Error> {
 		match self {
-			Id::Value(v) => Ok(Id::Value(v.compute(stk, ctx, opt, doc).await?)),
+			Id::Number(v) => Ok(Id::Number(*v)),
+			Id::String(v) => Ok(Id::String(v.clone())),
+			Id::Array(v) => match v.compute(stk, ctx, opt, doc).await? {
+				Value::Array(v) => Ok(Id::Array(v)),
+				_ => unreachable!(),
+			},
+			Id::Object(v) => match v.compute(stk, ctx, opt, doc).await? {
+				Value::Object(v) => Ok(Id::Object(v)),
+				_ => unreachable!(),
+			},
+			Id::Generate(v) => match v {
+				Gen::Rand => Ok(Self::rand()),
+				Gen::Ulid => Ok(Self::ulid()),
+				Gen::Uuid => Ok(Self::uuid()),
+			},
 			Id::Range(v) => Ok(Id::Range(v.compute(stk, ctx, opt, doc).await?)),
-		}
-	}
-
-	pub fn value(&self) -> Result<&IdValue, Error> {
-		match self {
-			Id::Value(v) => Ok(v),
-			Id::Range(_) => Err(Error::IdInvalid {
-				value: "idrange".to_string(),
-			}),
-		}
-	}
-
-	pub fn range(&self) -> Result<&IdRange, Error> {
-		match self {
-			Id::Range(v) => Ok(v),
-			Id::Value(_) => Err(Error::IdInvalid {
-				value: "idvalue".to_string(),
-			}),
 		}
 	}
 }

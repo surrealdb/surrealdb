@@ -1,7 +1,6 @@
 use super::classes;
 use crate::sql::array::Array;
 use crate::sql::datetime::Datetime;
-use crate::sql::id::value::IdValue;
 use crate::sql::object::Object;
 use crate::sql::value::Value;
 use crate::sql::Id;
@@ -67,7 +66,7 @@ impl<'js> FromJs<'js> for Value {
 					let borrow = v.borrow();
 					let v: &classes::record::Record = &borrow;
 					check_nul(&v.value.tb)?;
-					if let Id::Value(IdValue::String(s)) = &v.value.id {
+					if let Id::String(s) = &v.value.id {
 						check_nul(s)?;
 					}
 					return Ok(v.value.clone().into());

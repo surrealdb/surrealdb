@@ -52,7 +52,12 @@ impl Document {
 				// we load the new record, and reprocess
 				Err(Error::RetryWithId(v)) => {
 					// Fetch the data from the store
-					let key = crate::key::thing::new(opt.ns()?, opt.db()?, &v.tb, v.id.value()?);
+					let key = crate::key::thing::new(
+						opt.ns()?,
+						opt.db()?,
+						&v.tb,
+						&v.id.to_owned().try_into()?,
+					);
 					let val = ctx.tx().get(key, None).await?;
 					// Parse the data from the store
 					let val = Arc::new(match val {
