@@ -649,7 +649,7 @@ async fn define_statement_index_single_simple() -> Result<(), Error> {
 			events: {},
 			fields: {},
 			tables: {},
-			indexes: { test: 'DEFINE INDEX test ON user FIELDS age' },
+			indexes: { test: { sql: 'DEFINE INDEX test ON user FIELDS age' }},
 			lives: {},
 		}",
 	)?;
@@ -674,7 +674,7 @@ async fn define_statement_index_single() -> Result<(), Error> {
 			events: {},
 			fields: {},
 			tables: {},
-			indexes: { test: 'DEFINE INDEX test ON user FIELDS email' },
+			indexes: { test: { sql:'DEFINE INDEX test ON user FIELDS email' } },
 			lives: {},
 		}",
 	)?;
@@ -765,7 +765,7 @@ async fn define_statement_index_single_unique() -> Result<(), Error> {
 			events: {},
 			fields: {},
 			tables: {},
-			indexes: { test: 'DEFINE INDEX test ON user FIELDS email UNIQUE' },
+			indexes: { test: { sql: 'DEFINE INDEX test ON user FIELDS email UNIQUE' } },
 			lives: {},
 		}",
 	)?;
@@ -924,7 +924,7 @@ async fn define_statement_index_single_unique_embedded_multiple() -> Result<(), 
 			events: {},
 			fields: {},
 			tables: {},
-			indexes: { test: 'DEFINE INDEX test ON user FIELDS tags UNIQUE' },
+			indexes: { test: { sql: 'DEFINE INDEX test ON user FIELDS tags UNIQUE' } },
 			lives: {},
 		}",
 	)?;

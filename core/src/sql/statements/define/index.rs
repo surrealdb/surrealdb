@@ -122,6 +122,7 @@ impl DefineIndexStatement {
 		Ok(())
 	}
 
+	#[cfg(not(target_arch = "wasm32"))]
 	fn async_index(&self, ctx: &Context, opt: &Options) -> Result<(), Error> {
 		ctx.get_index_builder().ok_or(Error::Unreachable("No Index Builder"))?.build(
 			ctx,

@@ -39,6 +39,7 @@ mod index;
 mod tests;
 
 pub use self::ds::*;
+#[cfg(not(target_arch = "wasm32"))]
 pub(crate) use self::index::*;
 pub use self::kv::*;
 pub use self::live::*;

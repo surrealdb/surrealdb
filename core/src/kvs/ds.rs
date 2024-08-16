@@ -724,6 +724,7 @@ impl Datastore {
 			self.query_timeout,
 			self.capabilities.clone(),
 			self.index_stores.clone(),
+			#[cfg(not(target_arch = "wasm32"))]
 			self.index_builder.clone(),
 			#[cfg(any(
 				feature = "kv-mem",
