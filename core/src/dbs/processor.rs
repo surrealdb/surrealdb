@@ -10,7 +10,8 @@ use crate::idx::planner::IterationStage;
 use crate::key::{graph, thing};
 use crate::kvs::Transaction;
 use crate::sql::dir::Dir;
-use crate::sql::{Edges, Id, Range, Table, Thing, Value};
+use crate::sql::id::range::IdRange;
+use crate::sql::{Edges, Id, Table, Thing, Value};
 #[cfg(not(target_arch = "wasm32"))]
 use channel::Sender;
 use futures::StreamExt;
@@ -211,12 +212,12 @@ impl<'a> Processor<'a> {
 		v: Thing,
 	) -> Result<(), Error> {
 		match &v.id {
-			Id::Range(r) => self.process_thing_range(stk, ctx, opt, stm, v.tb, *r.to_owned()).await,
+			Id::Range(r) => self.process_thing_range(stk, ctx, opt, stm, v.tb, r.to_owned()).await,
 			_ => {
 				// Check that the table exists
 				ctx.tx().check_ns_db_tb(opt.ns()?, opt.db()?, &v.tb, opt.strict).await?;
 				// Fetch the data from the store
-				let key = thing::new(opt.ns()?, opt.db()?, &v.tb, &v.id);
+				let key = thing::new(opt.ns()?, opt.db()?, &v.tb, v.id.value()?);
 				let val = ctx.tx().get(key, opt.version).await?;
 				// Parse the data from the store
 				let val = Operable::Value(
@@ -250,7 +251,7 @@ impl<'a> Processor<'a> {
 		// Check that the table exists
 		ctx.tx().check_ns_db_tb(opt.ns()?, opt.db()?, &v.tb, opt.strict).await?;
 		// Fetch the data from the store
-		let key = thing::new(opt.ns()?, opt.db()?, &v.tb, &v.id);
+		let key = thing::new(opt.ns()?, opt.db()?, &v.tb, v.id.value()?);
 		let val = ctx.tx().get(key, None).await?;
 		// Parse the data from the store
 		let x = match val {
@@ -281,7 +282,7 @@ impl<'a> Processor<'a> {
 		// Check that the table exists
 		ctx.tx().check_ns_db_tb(opt.ns()?, opt.db()?, &v.tb, opt.strict).await?;
 		// Fetch the data from the store
-		let key = thing::new(opt.ns()?, opt.db()?, &v.tb, &v.id);
+		let key = thing::new(opt.ns()?, opt.db()?, &v.tb, v.id.value()?);
 		let val = ctx.tx().get(key, None).await?;
 		// Parse the data from the store
 		let x = match val {
@@ -350,7 +351,7 @@ impl<'a> Processor<'a> {
 		opt: &Options,
 		stm: &Statement<'_>,
 		tb: String,
-		r: Range,
+		r: IdRange,
 	) -> Result<(), Error> {
 		// Get the transaction
 		let txn = ctx.tx();
@@ -359,15 +360,9 @@ impl<'a> Processor<'a> {
 		// Prepare the range start key
 		let beg = match &r.beg {
 			Bound::Unbounded => thing::prefix(opt.ns()?, opt.db()?, &tb),
-			Bound::Included(v) => {
-				thing::new(opt.ns()?, opt.db()?, &tb, &Id::try_from(v.to_owned())?)
-					.encode()
-					.unwrap()
-			}
+			Bound::Included(v) => thing::new(opt.ns()?, opt.db()?, &tb, v).encode().unwrap(),
 			Bound::Excluded(v) => {
-				let mut key = thing::new(opt.ns()?, opt.db()?, &tb, &Id::try_from(v.to_owned())?)
-					.encode()
-					.unwrap();
+				let mut key = thing::new(opt.ns()?, opt.db()?, &tb, v).encode().unwrap();
 				key.push(0x00);
 				key
 			}
@@ -375,15 +370,9 @@ impl<'a> Processor<'a> {
 		// Prepare the range end key
 		let end = match &r.end {
 			Bound::Unbounded => thing::suffix(opt.ns()?, opt.db()?, &tb),
-			Bound::Excluded(v) => {
-				thing::new(opt.ns()?, opt.db()?, &tb, &Id::try_from(v.to_owned())?)
-					.encode()
-					.unwrap()
-			}
+			Bound::Excluded(v) => thing::new(opt.ns()?, opt.db()?, &tb, v).encode().unwrap(),
 			Bound::Included(v) => {
-				let mut key = thing::new(opt.ns()?, opt.db()?, &tb, &Id::try_from(v.to_owned())?)
-					.encode()
-					.unwrap();
+				let mut key = thing::new(opt.ns()?, opt.db()?, &tb, v).encode().unwrap();
 				key.push(0x00);
 				key
 			}
@@ -510,7 +499,7 @@ impl<'a> Processor<'a> {
 				// Parse the data from the store
 				let gra: graph::Graph = graph::Graph::decode(&key)?;
 				// Fetch the data from the store
-				let key = thing::new(opt.ns()?, opt.db()?, gra.ft, &gra.fk);
+				let key = thing::new(opt.ns()?, opt.db()?, gra.ft, gra.fk.value()?);
 				let val = txn.get(key, None).await?;
 				let rid = Thing::from((gra.ft, gra.fk));
 				// Parse the data from the store
@@ -609,7 +598,7 @@ impl Iterable {
 		thg: &Thing,
 	) -> Result<Value, Error> {
 		// Fetch the data from the store
-		let key = thing::new(opt.ns()?, opt.db()?, &thg.tb, &thg.id);
+		let key = thing::new(opt.ns()?, opt.db()?, &thg.tb, thg.id.value()?);
 		// Fetch and parse the data from the store
 		let val = txn.get(key, None).await?.map(Value::from).unwrap_or(Value::None);
 		// Return the result

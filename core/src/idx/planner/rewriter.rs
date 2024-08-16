@@ -1,4 +1,6 @@
 use crate::idx::planner::executor::KnnExpressions;
+use crate::sql::id::range::IdRange;
+use crate::sql::id::value::IdValue;
 use crate::sql::part::DestructurePart;
 use crate::sql::{
 	Array, Cast, Cond, Expression, Function, Id, Idiom, Model, Object, Part, Range, Thing, Value,
@@ -124,10 +126,8 @@ impl<'a> KnnConditionRewriter<'a> {
 
 	fn eval_id(&self, id: &Id) -> Option<Id> {
 		match id {
-			Id::Number(_) | Id::String(_) | Id::Generate(_) => Some(id.clone()),
-			Id::Array(a) => self.eval_array(a).map(Id::Array),
-			Id::Object(o) => self.eval_object(o).map(Id::Object),
-			Id::Range(r) => self.eval_range(r).map(|r| Id::Range(Box::new(r))),
+			Id::Value(v) => self.eval_id_value(v).map(Id::Value),
+			Id::Range(r) => self.eval_id_range(r).map(Id::Range),
 		}
 	}
 
@@ -191,6 +191,33 @@ impl<'a> KnnConditionRewriter<'a> {
 			Bound::Included(v) => self.eval_value(v).map(Bound::Included),
 			Bound::Excluded(v) => self.eval_value(v).map(Bound::Excluded),
 			Bound::Unbounded => Some(Bound::Unbounded),
+		}
+	}
+
+	fn eval_id_range(&self, r: &IdRange) -> Option<IdRange> {
+		if let Some(beg) = self.eval_id_bound(&r.beg) {
+			self.eval_id_bound(&r.end).map(|end| IdRange {
+				beg,
+				end,
+			})
+		} else {
+			None
+		}
+	}
+
+	fn eval_id_bound(&self, b: &Bound<IdValue>) -> Option<Bound<IdValue>> {
+		match b {
+			Bound::Included(v) => self.eval_id_value(v).map(Bound::Included),
+			Bound::Excluded(v) => self.eval_id_value(v).map(Bound::Excluded),
+			Bound::Unbounded => Some(Bound::Unbounded),
+		}
+	}
+
+	fn eval_id_value(&self, v: &IdValue) -> Option<IdValue> {
+		match v {
+			IdValue::Number(_) | IdValue::String(_) | IdValue::Generate(_) => Some(v.clone()),
+			IdValue::Array(a) => self.eval_array(a).map(IdValue::Array),
+			IdValue::Object(o) => self.eval_object(o).map(IdValue::Object),
 		}
 	}
 

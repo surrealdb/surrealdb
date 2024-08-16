@@ -1,3 +1,5 @@
+use super::id::range::IdRange;
+use super::id::value::IdValue;
 use super::{Cond, Expression, Ident, Idiom, Operator, Part, Table};
 use crate::ctx::Context;
 use crate::dbs::Options;
@@ -149,6 +151,42 @@ impl From<(String, Id)> for Thing {
 		Self {
 			tb,
 			id,
+		}
+	}
+}
+
+impl From<(&str, IdValue)> for Thing {
+	fn from((tb, id): (&str, IdValue)) -> Self {
+		Self {
+			tb: tb.to_owned(),
+			id: id.into(),
+		}
+	}
+}
+
+impl From<(String, IdValue)> for Thing {
+	fn from((tb, id): (String, IdValue)) -> Self {
+		Self {
+			tb,
+			id: id.into(),
+		}
+	}
+}
+
+impl From<(&str, IdRange)> for Thing {
+	fn from((tb, id): (&str, IdRange)) -> Self {
+		Self {
+			tb: tb.to_owned(),
+			id: id.into(),
+		}
+	}
+}
+
+impl From<(String, IdRange)> for Thing {
+	fn from((tb, id): (String, IdRange)) -> Self {
+		Self {
+			tb,
+			id: id.into(),
 		}
 	}
 }

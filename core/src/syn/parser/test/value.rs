@@ -4,7 +4,8 @@ use reblessive::Stack;
 
 use crate::{
 	sql::{
-		Array, Constant, Id, Number, Object, Query, Statement, Statements, Strand, Thing, Value,
+		id::value::IdValue, Array, Constant, Id, Number, Object, Query, Statement, Statements,
+		Strand, Thing, Value,
 	},
 	syn::parser::{mac::test_parse, Parser},
 };
@@ -76,7 +77,7 @@ fn parse_large_depth_record_id() {
 	};
 	let mut thing = thing;
 	for _ in 0..999 {
-		let Id::Array(ref x) = thing.id else {
+		let Id::Value(IdValue::Array(ref x)) = thing.id else {
 			panic!()
 		};
 		let Value::Thing(ref new_thing) = x[0] else {
@@ -93,13 +94,13 @@ fn parse_recursive_record_string() {
 		res,
 		Value::Thing(Thing {
 			tb: "a".to_owned(),
-			id: Id::Array(Array(vec![Value::Thing(Thing {
+			id: Id::from(Array(vec![Value::Thing(Thing {
 				tb: "b".to_owned(),
-				id: Id::Object(Object(BTreeMap::from([(
+				id: Id::from(Object(BTreeMap::from([(
 					"c".to_owned(),
 					Value::Thing(Thing {
 						tb: "d".to_owned(),
-						id: Id::Number(1)
+						id: Id::from(1)
 					})
 				)])))
 			})]))
@@ -114,7 +115,7 @@ fn parse_record_string_2() {
 		res,
 		Value::Thing(Thing {
 			tb: "a".to_owned(),
-			id: Id::Array(Array(vec![Value::Strand(Strand("foo".to_owned()))]))
+			id: Id::from(Array(vec![Value::Strand(Strand("foo".to_owned()))]))
 		})
 	)
 }

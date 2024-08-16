@@ -9,7 +9,6 @@ use crate::api::opt::Resource;
 use crate::api::Connection;
 use crate::api::Result;
 use crate::method::OnceLockExt;
-use crate::sql::Id;
 use crate::sql::Value;
 use crate::Surreal;
 use serde::de::DeserializeOwned;
@@ -18,6 +17,7 @@ use std::borrow::Cow;
 use std::future::IntoFuture;
 use std::marker::PhantomData;
 use surrealdb_core::sql::to_value;
+use surrealdb_core::sql::IdValue;
 
 /// An upsert future
 #[derive(Debug)]
@@ -25,7 +25,7 @@ use surrealdb_core::sql::to_value;
 pub struct Upsert<'r, C: Connection, R> {
 	pub(super) client: Cow<'r, Surreal<C>>,
 	pub(super) resource: Result<Resource>,
-	pub(super) range: Option<Range<Id>>,
+	pub(super) range: Option<Range<IdValue>>,
 	pub(super) response_type: PhantomData<R>,
 }
 
@@ -105,7 +105,7 @@ where
 	C: Connection,
 {
 	/// Restricts the records to upsert to those in the specified range
-	pub fn range(mut self, bounds: impl Into<Range<Id>>) -> Self {
+	pub fn range(mut self, bounds: impl Into<Range<IdValue>>) -> Self {
 		self.range = Some(bounds.into());
 		self
 	}
@@ -116,7 +116,7 @@ where
 	C: Connection,
 {
 	/// Restricts the records to upsert to those in the specified range
-	pub fn range(mut self, bounds: impl Into<Range<Id>>) -> Self {
+	pub fn range(mut self, bounds: impl Into<Range<IdValue>>) -> Self {
 		self.range = Some(bounds.into());
 		self
 	}

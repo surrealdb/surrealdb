@@ -9,6 +9,7 @@ use crate::exe::try_join_all_buffered;
 use crate::fnc::idiom;
 use crate::sql::edges::Edges;
 use crate::sql::field::{Field, Fields};
+use crate::sql::id::value::IdValue;
 use crate::sql::id::Id;
 use crate::sql::part::Part;
 use crate::sql::part::{Next, NextMethod};
@@ -92,14 +93,14 @@ impl Value {
 					// If requesting an `id` field, check if it is a complex Record ID
 					Part::Field(f) if f.is_id() && path.len() > 1 => match v.get(f.as_str()) {
 						Some(Value::Thing(Thing {
-							id: Id::Object(v),
+							id: Id::Value(IdValue::Object(v)),
 							..
 						})) => {
 							let v = Value::Object(v.clone());
 							stk.run(|stk| v.get(stk, ctx, opt, doc, path.next())).await
 						}
 						Some(Value::Thing(Thing {
-							id: Id::Array(v),
+							id: Id::Value(IdValue::Array(v)),
 							..
 						})) => {
 							let v = Value::Array(v.clone());

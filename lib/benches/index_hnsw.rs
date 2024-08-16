@@ -171,7 +171,7 @@ fn new_vectors_from_file(path: &str) -> Vec<(Thing, Array)> {
 		let line = line_result.unwrap();
 		let value = value(&line).unwrap();
 		if let Value::Array(a) = value {
-			res.push((Thing::from(("e", Id::Number(i as i64))), a));
+			res.push((Thing::from(("e", Id::from(i as i64))), a));
 		} else {
 			panic!("Wrong value");
 		}

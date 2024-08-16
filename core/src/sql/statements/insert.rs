@@ -2,6 +2,7 @@ use crate::ctx::Context;
 use crate::dbs::{Iterable, Iterator, Options, Statement};
 use crate::doc::CursorDoc;
 use crate::err::Error;
+use crate::sql::id::value::IdValue;
 use crate::sql::paths::IN;
 use crate::sql::paths::OUT;
 use crate::sql::{Data, Id, Output, Table, Thing, Timeout, Value};
@@ -170,7 +171,7 @@ fn gen_id(v: &Value, into: &Option<Table>) -> Result<Thing, Error> {
 		None => match v.rid() {
 			Value::Thing(v) => match v {
 				Thing {
-					id: Id::Generate(_),
+					id: Id::Value(IdValue::Generate(_)),
 					..
 				} => Err(Error::InsertStatementId {
 					value: v.to_string(),

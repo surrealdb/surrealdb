@@ -2,7 +2,13 @@ use reblessive::Stk;
 
 use super::{ParseResult, Parser};
 use crate::{
-	sql::{id::Gen, Id, Ident, Range, Thing, Value},
+	sql::{
+		id::{
+			range::IdRange,
+			value::{Gen, IdValue},
+		},
+		Id, Ident, Range, Thing, Value,
+	},
 	syn::{
 		parser::{
 			mac::{expected, expected_whitespace, unexpected},
@@ -43,26 +49,26 @@ impl Parser<'_> {
 		if self.eat_whitespace(t!("..")) {
 			// Check for inclusive
 			let end = if self.eat_whitespace(t!("=")) {
-				let id: Value = stk.run(|stk| self.parse_id(stk)).await?.into();
+				let id = stk.run(|stk| self.parse_id(stk)).await?;
 				Bound::Included(id)
 			} else if Self::kind_cast_start_id(self.peek_whitespace().kind) {
-				let id: Value = stk.run(|stk| self.parse_id(stk)).await?.into();
+				let id = stk.run(|stk| self.parse_id(stk)).await?;
 				Bound::Excluded(id)
 			} else {
 				Bound::Unbounded
 			};
 			return Ok(Value::Thing(Thing {
 				tb: ident,
-				id: Id::Range(Box::new(Range {
+				id: Id::Range(IdRange {
 					beg: Bound::Unbounded,
 					end,
-				})),
+				}),
 			}));
 		}
 
 		// Didn't eat range yet so we need to parse the id.
 		let beg = if Self::kind_cast_start_id(self.peek_whitespace().kind) {
-			let v: Value = stk.run(|stk| self.parse_id(stk)).await?.into();
+			let v = stk.run(|stk| self.parse_id(stk)).await?;
 
 			// check for exclusive
 			if self.eat_whitespace(t!(">")) {
@@ -78,23 +84,23 @@ impl Parser<'_> {
 		// If we already ate the exclusive it must be a range.
 		if self.eat_whitespace(t!("..")) {
 			let end = if self.eat_whitespace(t!("=")) {
-				let id: Value = stk.run(|stk| self.parse_id(stk)).await?.into();
+				let id = stk.run(|stk| self.parse_id(stk)).await?;
 				Bound::Included(id)
 			} else if Self::kind_cast_start_id(self.peek_whitespace().kind) {
-				let id: Value = stk.run(|stk| self.parse_id(stk)).await?.into();
+				let id = stk.run(|stk| self.parse_id(stk)).await?;
 				Bound::Excluded(id)
 			} else {
 				Bound::Unbounded
 			};
 			Ok(Value::Thing(Thing {
 				tb: ident,
-				id: Id::Range(Box::new(Range {
+				id: Id::Range(IdRange {
 					beg,
 					end,
-				})),
+				}),
 			}))
 		} else {
-			let id: Id = match beg {
+			let id = match beg {
 				Bound::Unbounded => {
 					if self.peek_whitespace().kind == t!("$param") {
 						return Err(ParseError::new(
@@ -115,11 +121,11 @@ impl Parser<'_> {
 					unexpected!(self, self.peek_whitespace().kind, "the range operator `..`")
 				}
 				// We previously converted the `Id` value to `Value` so it's safe to unwrap here.
-				Bound::Included(v) => Id::try_from(v).unwrap(),
+				Bound::Included(v) => v,
 			};
 			Ok(Value::Thing(Thing {
 				tb: ident,
-				id,
+				id: Id::Value(id),
 			}))
 		}
 	}
@@ -177,24 +183,24 @@ impl Parser<'_> {
 
 		Ok(Thing {
 			tb: ident,
-			id,
+			id: id.into(),
 		})
 	}
 
-	pub async fn parse_id(&mut self, stk: &mut Stk) -> ParseResult<Id> {
+	pub async fn parse_id(&mut self, stk: &mut Stk) -> ParseResult<IdValue> {
 		let token = self.peek_whitespace();
 		match token.kind {
 			t!("{") => {
 				self.pop_peek();
 				// object record id
 				let object = self.parse_object(stk, token.span).await?;
-				Ok(Id::Object(object))
+				Ok(IdValue::Object(object))
 			}
 			t!("[") => {
 				self.pop_peek();
 				// array record id
 				let array = self.parse_array(stk, token.span).await?;
-				Ok(Id::Array(array))
+				Ok(IdValue::Array(array))
 			}
 			t!("+") => {
 				self.pop_peek();
@@ -222,9 +228,9 @@ impl Parser<'_> {
 
 				let digits_str = self.span_str(digits_token.span);
 				if let Ok(number) = digits_str.parse() {
-					Ok(Id::Number(number))
+					Ok(IdValue::Number(number))
 				} else {
-					Ok(Id::String(digits_str.to_owned()))
+					Ok(IdValue::String(digits_str.to_owned()))
 				}
 			}
 			t!("-") => {
@@ -256,12 +262,12 @@ impl Parser<'_> {
 					// Parse to u64 and check if the value is equal to `-i64::MIN` via u64 as
 					// `-i64::MIN` doesn't fit in an i64
 					match number.cmp(&((i64::MAX as u64) + 1)) {
-						Ordering::Less => Ok(Id::Number(-(number as i64))),
-						Ordering::Equal => Ok(Id::Number(i64::MIN)),
-						Ordering::Greater => Ok(Id::String(format!("-{}", digits_str))),
+						Ordering::Less => Ok(IdValue::Number(-(number as i64))),
+						Ordering::Equal => Ok(IdValue::Number(i64::MIN)),
+						Ordering::Greater => Ok(IdValue::String(format!("-{}", digits_str))),
 					}
 				} else {
-					Ok(Id::String(format!("-{}", digits_str)))
+					Ok(IdValue::String(format!("-{}", digits_str)))
 				}
 			}
 			TokenKind::Digits => {
@@ -271,7 +277,7 @@ impl Parser<'_> {
 					let glued = self.glue_ident(self.flexible_record_id)?;
 					if let TokenKind::Identifier = glued.kind {
 						self.pop_peek();
-						return Ok(Id::String(self.lexer.string.take().unwrap()));
+						return Ok(IdValue::String(self.lexer.string.take().unwrap()));
 					} else {
 						unexpected!(self, glued.kind, "a record-id id")
 					}
@@ -281,9 +287,9 @@ impl Parser<'_> {
 
 				let digits_str = self.span_str(token.span);
 				if let Ok(number) = digits_str.parse::<i64>() {
-					Ok(Id::Number(number))
+					Ok(IdValue::Number(number))
 				} else {
-					Ok(Id::String(digits_str.to_owned()))
+					Ok(IdValue::String(digits_str.to_owned()))
 				}
 			}
 			TokenKind::Duration if self.flexible_record_id => {
@@ -294,31 +300,31 @@ impl Parser<'_> {
 				}
 				// Should be valid utf-8 as it was already parsed by the lexer
 				let text = String::from_utf8(slice.to_vec()).unwrap();
-				Ok(Id::String(text))
+				Ok(IdValue::String(text))
 			}
 			t!("ULID") => {
 				self.pop_peek();
 				// TODO: error message about how to use `ulid` as an identifier.
 				expected!(self, t!("("));
 				expected!(self, t!(")"));
-				Ok(Id::Generate(Gen::Ulid))
+				Ok(IdValue::Generate(Gen::Ulid))
 			}
 			t!("UUID") => {
 				self.pop_peek();
 				expected!(self, t!("("));
 				expected!(self, t!(")"));
-				Ok(Id::Generate(Gen::Uuid))
+				Ok(IdValue::Generate(Gen::Uuid))
 			}
 			t!("RAND") => {
 				self.pop_peek();
 				expected!(self, t!("("));
 				expected!(self, t!(")"));
-				Ok(Id::Generate(Gen::Rand))
+				Ok(IdValue::Generate(Gen::Rand))
 			}
 			_ => {
 				self.glue_ident(self.flexible_record_id)?;
 				let ident = self.next_token_value::<Ident>()?.0;
-				Ok(Id::String(ident))
+				Ok(IdValue::String(ident))
 			}
 		}
 	}
@@ -498,7 +504,7 @@ mod tests {
 			out,
 			Thing {
 				tb: String::from("test"),
-				id: Id::Object(Object::from(map! {
+				id: Id::from(Object::from(map! {
 					"location".to_string() => Value::from("GBR"),
 					"year".to_string() => Value::from(2022),
 				})),
@@ -516,7 +522,7 @@ mod tests {
 			out,
 			Thing {
 				tb: String::from("test"),
-				id: Id::Array(Array::from(vec![Value::from("GBR"), Value::from(2022)])),
+				id: Id::from(Array::from(vec![Value::from("GBR"), Value::from(2022)])),
 			}
 		);
 	}
@@ -535,7 +541,7 @@ mod tests {
 				.finish()
 				.unwrap_or_else(|_| panic!("failed on {}", ident))
 				.id;
-			assert_eq!(r, Id::String(ident.to_string()),);
+			assert_eq!(r, Id::from(ident.to_string()),);
 
 			let mut parser = Parser::new(thing.as_bytes());
 			let r = stack
@@ -548,7 +554,7 @@ mod tests {
 				sql::Query(sql::Statements(vec![sql::Statement::Value(sql::Value::Thing(
 					sql::Thing {
 						tb: "t".to_string(),
-						id: Id::String(ident.to_string())
+						id: Id::from(ident.to_string())
 					}
 				))]))
 			)

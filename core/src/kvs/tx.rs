@@ -1276,7 +1276,7 @@ impl Transaction {
 		tb: &str,
 		id: &Id,
 	) -> Result<Arc<Value>, Error> {
-		let key = crate::key::thing::new(ns, db, tb, id).encode()?;
+		let key = crate::key::thing::new(ns, db, tb, id.value()?).encode()?;
 		let res = self.cache.get_value_or_guard_async(&key).await;
 		match res {
 			// The entry is in the cache
@@ -1304,8 +1304,8 @@ impl Transaction {
 		id: &Id,
 		val: Value,
 	) -> Result<(), Error> {
-		let key = crate::key::thing::new(ns, db, tb, id);
-		let enc = crate::key::thing::new(ns, db, tb, id).encode()?;
+		let key = crate::key::thing::new(ns, db, tb, id.value()?);
+		let enc = crate::key::thing::new(ns, db, tb, id.value()?).encode()?;
 		// Set the value in the datastore
 		self.set(&key, &val).await?;
 		// Set the value in the cache

@@ -5,12 +5,14 @@ use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::fnc::util::string::fuzzy::Fuzzy;
+use crate::sql::id::range::IdRange;
+use crate::sql::id::value::IdValue;
 use crate::sql::statements::info::InfoStructure;
 use crate::sql::Closure;
 use crate::sql::{
 	array::Uniq,
 	fmt::{Fmt, Pretty},
-	id::{Gen, Id},
+	id::{value::Gen, Id},
 	model::Model,
 	Array, Block, Bytes, Cast, Constant, Datetime, Duration, Edges, Expression, Function, Future,
 	Geometry, Idiom, Kind, Mock, Number, Object, Operation, Param, Part, Query, Range, Regex,
@@ -557,18 +559,47 @@ impl From<Option<Datetime>> for Value {
 	}
 }
 
+impl From<IdValue> for Value {
+	fn from(v: IdValue) -> Self {
+		match v {
+			IdValue::Number(v) => v.into(),
+			IdValue::String(v) => v.into(),
+			IdValue::Array(v) => v.into(),
+			IdValue::Object(v) => v.into(),
+			IdValue::Generate(v) => match v {
+				Gen::Rand => IdValue::rand().into(),
+				Gen::Ulid => IdValue::ulid().into(),
+				Gen::Uuid => IdValue::uuid().into(),
+			},
+		}
+	}
+}
+
+impl From<IdRange> for Value {
+	fn from(v: IdRange) -> Self {
+		let beg = match v.beg {
+			Bound::Included(beg) => Bound::Included(Value::from(beg)),
+			Bound::Excluded(beg) => Bound::Excluded(Value::from(beg)),
+			Bound::Unbounded => Bound::Unbounded,
+		};
+
+		let end = match v.end {
+			Bound::Included(end) => Bound::Included(Value::from(end)),
+			Bound::Excluded(end) => Bound::Excluded(Value::from(end)),
+			Bound::Unbounded => Bound::Unbounded,
+		};
+
+		Value::Range(Box::new(Range {
+			beg,
+			end,
+		}))
+	}
+}
+
 impl From<Id> for Value {
 	fn from(v: Id) -> Self {
 		match v {
-			Id::Number(v) => v.into(),
-			Id::String(v) => v.into(),
-			Id::Array(v) => v.into(),
-			Id::Object(v) => v.into(),
-			Id::Generate(v) => match v {
-				Gen::Rand => Id::rand().into(),
-				Gen::Ulid => Id::ulid().into(),
-				Gen::Uuid => Id::uuid().into(),
-			},
+			Id::Value(v) => v.into(),
 			Id::Range(v) => v.into(),
 		}
 	}

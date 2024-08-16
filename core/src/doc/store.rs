@@ -24,7 +24,7 @@ impl Document {
 		// Get the record id
 		let rid = self.id.as_ref().unwrap();
 		// Store the record data
-		let key = crate::key::thing::new(opt.ns()?, opt.db()?, &rid.tb, &rid.id);
+		let key = crate::key::thing::new(opt.ns()?, opt.db()?, &rid.tb, rid.id.value()?);
 		// Match the statement type
 		match stm {
 			// This is a CREATE statement so try to insert the key

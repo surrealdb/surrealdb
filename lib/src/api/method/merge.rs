@@ -6,7 +6,6 @@ use crate::api::Connection;
 use crate::api::Result;
 use crate::method::OnceLockExt;
 use crate::sql::to_value;
-use crate::sql::Id;
 use crate::sql::Value;
 use crate::Surreal;
 use serde::de::DeserializeOwned;
@@ -14,6 +13,7 @@ use serde::Serialize;
 use std::borrow::Cow;
 use std::future::IntoFuture;
 use std::marker::PhantomData;
+use surrealdb_core::sql::IdValue;
 
 /// A merge future
 #[derive(Debug)]
@@ -21,7 +21,7 @@ use std::marker::PhantomData;
 pub struct Merge<'r, C: Connection, D, R> {
 	pub(super) client: Cow<'r, Surreal<C>>,
 	pub(super) resource: Result<Resource>,
-	pub(super) range: Option<Range<Id>>,
+	pub(super) range: Option<Range<IdValue>>,
 	pub(super) content: D,
 	pub(super) response_type: PhantomData<R>,
 }
