@@ -976,6 +976,8 @@ allow_apis = ["net", "fs"]
 build.allow_build_instructions = [
     "cargo::rustc-cfg=*",
     "cargo::rustc-check-cfg=*",
+    "cargo:rustc-cfg=storage",
+    "cargo::rustc-check-cfg=cfg(storage)",
 ]
 
 [pkg.assert_fs]
