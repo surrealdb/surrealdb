@@ -3011,8 +3011,8 @@ mod tests {
 		let vector = vec![1.0 as f32, 2.0, 3.0, 4.0, 5.0, 6.0];
 		let mut buffer = vec![];
 
-		for value in vector.iter() {
-			buffer.push(Value::from(*value));
+		for value in vector {
+			buffer.push(Value::from(value));
 		}
 		let value = Value::from(buffer);
 	}
