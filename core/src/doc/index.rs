@@ -7,7 +7,9 @@ use crate::idx::ft::FtIndex;
 use crate::idx::trees::mtree::MTreeIndex;
 use crate::idx::IndexKeyBase;
 use crate::key;
-use crate::kvs::{ConsumeResult, TransactionType};
+#[cfg(not(target_arch = "wasm32"))]
+use crate::kvs::ConsumeResult;
+use crate::kvs::TransactionType;
 use crate::sql::array::Array;
 use crate::sql::index::{HnswParams, Index, MTreeParams, SearchParams};
 use crate::sql::statements::DefineIndexStatement;

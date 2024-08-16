@@ -16,6 +16,7 @@ use crate::idx::trees::store::IndexStores;
 use crate::kvs::clock::SizedClock;
 #[allow(unused_imports)]
 use crate::kvs::clock::SystemClock;
+#[cfg(not(target_arch = "wasm32"))]
 use crate::kvs::index::IndexBuilder;
 use crate::kvs::{LockType, LockType::*, TransactionType, TransactionType::*};
 use crate::sql::{statements::DefineUserStatement, Base, Query, Value};
@@ -75,6 +76,7 @@ pub struct Datastore {
 	// The index store cache
 	index_stores: IndexStores,
 	// The index asynchronous builder
+	#[cfg(not(target_arch = "wasm32"))]
 	index_builder: IndexBuilder,
 	#[cfg(feature = "jwks")]
 	// The JWKS object cache
@@ -375,6 +377,7 @@ impl Datastore {
 				notification_channel: None,
 				capabilities: Capabilities::default(),
 				index_stores: IndexStores::default(),
+				#[cfg(not(target_arch = "wasm32"))]
 				index_builder: IndexBuilder::new(tf),
 				#[cfg(feature = "jwks")]
 				jwks_cache: Arc::new(RwLock::new(JwksCache::new())),

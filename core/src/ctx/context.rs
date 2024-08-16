@@ -7,7 +7,9 @@ use crate::err::Error;
 use crate::idx::planner::executor::QueryExecutor;
 use crate::idx::planner::{IterationStage, QueryPlanner};
 use crate::idx::trees::store::IndexStores;
-use crate::kvs::{IndexBuilder, Transaction};
+#[cfg(not(target_arch = "wasm32"))]
+use crate::kvs::IndexBuilder;
+use crate::kvs::Transaction;
 use crate::sql::value::Value;
 use channel::Sender;
 use std::borrow::Cow;
@@ -63,6 +65,7 @@ pub struct MutableContext {
 	// The index store
 	index_stores: IndexStores,
 	// The index concurrent builders
+	#[cfg(not(target_arch = "wasm32"))]
 	index_builder: Option<IndexBuilder>,
 	// Capabilities
 	capabilities: Arc<Capabilities>,
@@ -111,7 +114,7 @@ impl MutableContext {
 		time_out: Option<Duration>,
 		capabilities: Capabilities,
 		index_stores: IndexStores,
-		index_builder: IndexBuilder,
+		#[cfg(not(target_arch = "wasm32"))] index_builder: IndexBuilder,
 		#[cfg(any(
 			feature = "kv-mem",
 			feature = "kv-surrealkv",
@@ -132,6 +135,7 @@ impl MutableContext {
 			iteration_stage: None,
 			capabilities: Arc::new(capabilities),
 			index_stores,
+			#[cfg(not(target_arch = "wasm32"))]
 			index_builder: Some(index_builder),
 			#[cfg(any(
 				feature = "kv-mem",
@@ -162,6 +166,7 @@ impl MutableContext {
 			iteration_stage: None,
 			capabilities: Arc::new(Capabilities::default()),
 			index_stores: IndexStores::default(),
+			#[cfg(not(target_arch = "wasm32"))]
 			index_builder: None,
 			#[cfg(any(
 				feature = "kv-mem",
@@ -188,6 +193,7 @@ impl MutableContext {
 			iteration_stage: parent.iteration_stage.clone(),
 			capabilities: parent.capabilities.clone(),
 			index_stores: parent.index_stores.clone(),
+			#[cfg(not(target_arch = "wasm32"))]
 			index_builder: parent.index_builder.clone(),
 			#[cfg(any(
 				feature = "kv-mem",
@@ -225,6 +231,7 @@ impl MutableContext {
 			iteration_stage: parent.iteration_stage.clone(),
 			capabilities: parent.capabilities.clone(),
 			index_stores: parent.index_stores.clone(),
+			#[cfg(not(target_arch = "wasm32"))]
 			index_builder: parent.index_builder.clone(),
 			#[cfg(any(
 				feature = "kv-mem",
@@ -252,6 +259,7 @@ impl MutableContext {
 			iteration_stage: from.iteration_stage.clone(),
 			capabilities: from.capabilities.clone(),
 			index_stores: from.index_stores.clone(),
+			#[cfg(not(target_arch = "wasm32"))]
 			index_builder: from.index_builder.clone(),
 			#[cfg(any(
 				feature = "kv-mem",
@@ -361,6 +369,7 @@ impl MutableContext {
 	}
 
 	/// Get the index_builder for this context/ds
+	#[cfg(not(target_arch = "wasm32"))]
 	pub(crate) fn get_index_builder(&self) -> Option<&IndexBuilder> {
 		self.index_builder.as_ref()
 	}
