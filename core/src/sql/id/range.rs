@@ -166,9 +166,9 @@ impl IdRange {
 	pub(crate) async fn compute(
 		&self,
 		stk: &mut Stk,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		opt: &Options,
-		doc: Option<&CursorDoc<'_>>,
+		doc: Option<&CursorDoc>,
 	) -> Result<IdRange, Error> {
 		let beg = match &self.beg {
 			Bound::Included(beg) => Bound::Included(beg.compute(stk, ctx, opt, doc).await?),
