@@ -1,4 +1,4 @@
-use crate::cnf::FUNCTION_ALLOCATION_LIMIT;
+use crate::cnf::GENERATION_ALLOCATION_LIMIT;
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
@@ -76,9 +76,9 @@ impl TryInto<std::ops::Range<i64>> for Range {
 			Bound::Excluded(end) => to_i64(end)?,
 		};
 
-		if (beg + *FUNCTION_ALLOCATION_LIMIT as i64) < end {
+		if (beg + *GENERATION_ALLOCATION_LIMIT as i64) < end {
 			Err(Error::RangeTooBig {
-				max: *FUNCTION_ALLOCATION_LIMIT,
+				max: *GENERATION_ALLOCATION_LIMIT,
 			})
 		} else {
 			Ok(beg..end)
