@@ -3089,7 +3089,6 @@ mod tests {
 
 	#[test]
 	fn check_size() {
-		println!("{:?}", std::mem::size_of::<Value>());
 		assert!(104 >= std::mem::size_of::<Value>(), "size of value too big");
 		assert_eq!(112, std::mem::size_of::<Error>());
 		assert_eq!(112, std::mem::size_of::<Result<Value, Error>>());
