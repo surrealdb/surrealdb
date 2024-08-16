@@ -11,6 +11,10 @@ use crate::sql::{Kind, Range, Strand};
 use crate::syn;
 use reblessive::tree::Stk;
 
+pub fn array((val,): (Value,)) -> Result<Value, Error> {
+	val.convert_to_array().map(Value::from)
+}
+
 pub fn bool((val,): (Value,)) -> Result<Value, Error> {
 	val.convert_to_bool().map(Value::from)
 }

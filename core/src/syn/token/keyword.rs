@@ -141,6 +141,7 @@ keyword! {
 	PostingsOrder => "POSTINGS_ORDER",
 	Prune => "PRUNE",
 	Punct => "PUNCT",
+	Range => "RANGE",
 	Readonly => "READONLY",
 	Rebuild => "REBUILD",
 	Relate => "RELATE",

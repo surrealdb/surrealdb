@@ -342,6 +342,11 @@ impl<'a> Parser<'a> {
 		}
 	}
 
+	/// Check if the next token is whitespace
+	pub fn next_is_whitespace(&mut self) -> bool {
+		self.peek().kind == TokenKind::WhiteSpace
+	}
+
 	/// Forces the next token to be the given one.
 	/// Used in token gluing to replace the current one with the glued token.
 	fn prepend_token(&mut self, token: Token) {

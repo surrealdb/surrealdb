@@ -31,21 +31,21 @@ impl Parser<'_> {
 			}
 			t!("r\"") => {
 				self.pop_peek();
-				let thing = self.parse_record_string(ctx, true).await?;
-				Ok(Value::Thing(thing))
+				let value = Value::Thing(self.parse_record_string(ctx, true).await?);
+				Ok(self.try_parse_range(ctx, Some(&value)).await?.unwrap_or(value))
 			}
 			t!("r'") => {
 				self.pop_peek();
-				let thing = self.parse_record_string(ctx, false).await?;
-				Ok(Value::Thing(thing))
+				let value = Value::Thing(self.parse_record_string(ctx, false).await?);
+				Ok(self.try_parse_range(ctx, Some(&value)).await?.unwrap_or(value))
 			}
 			t!("d\"") | t!("d'") => {
-				let datetime = self.next_token_value()?;
-				Ok(Value::Datetime(datetime))
+				let value = Value::Datetime(self.next_token_value()?);
+				Ok(self.try_parse_range(ctx, Some(&value)).await?.unwrap_or(value))
 			}
 			t!("u\"") | t!("u'") => {
-				let uuid = self.next_token_value()?;
-				Ok(Value::Uuid(uuid))
+				let value = Value::Uuid(self.next_token_value()?);
+				Ok(self.try_parse_range(ctx, Some(&value)).await?.unwrap_or(value))
 			}
 			t!("$param") => {
 				let value = Value::Param(self.next_token_value()?);
@@ -160,10 +160,10 @@ impl Parser<'_> {
 		};
 
 		let end = if self.eat_whitespace(t!("=")) {
-			let id: Value = ctx.run(|ctx| self.parse_id(ctx)).await?.into();
+			let id = ctx.run(|ctx| self.parse_simple_value(ctx)).await?;
 			Bound::Included(id)
-		} else if Self::kind_can_be_range_value(self.peek_whitespace().kind) {
-			let id: Value = ctx.run(|ctx| self.parse_id(ctx)).await?.into();
+		} else if !self.next_is_whitespace() {
+			let id = ctx.run(|ctx| self.parse_simple_value(ctx)).await?;
 			Bound::Excluded(id)
 		} else {
 			Bound::Unbounded
@@ -173,11 +173,6 @@ impl Parser<'_> {
 			beg,
 			end,
 		}))))
-	}
-
-	fn kind_can_be_range_value(kind: TokenKind) -> bool {
-		Self::tokenkind_can_start_ident(kind)
-			|| matches!(kind, TokenKind::Digits | t!("{") | t!("[") | t!("+") | t!("-"))
 	}
 
 	pub async fn try_parse_inline(
@@ -258,22 +253,20 @@ impl Parser<'_> {
 			}
 			t!("r\"") => {
 				self.pop_peek();
-				let thing = self.parse_record_string(ctx, true).await?;
-				Value::Thing(thing)
+				let value = Value::Thing(self.parse_record_string(ctx, true).await?);
+				self.try_parse_range(ctx, Some(&value)).await?.unwrap_or(value)
 			}
 			t!("r'") => {
 				self.pop_peek();
-				let thing = self.parse_record_string(ctx, false).await?;
-				Value::Thing(thing)
+				let value = Value::Thing(self.parse_record_string(ctx, false).await?);
+				self.try_parse_range(ctx, Some(&value)).await?.unwrap_or(value)
 			}
 			t!("d\"") | t!("d'") => {
-				let datetime = self.next_token_value()?;
-				let value = Value::Datetime(datetime);
+				let value = Value::Datetime(self.next_token_value()?);
 				self.try_parse_range(ctx, Some(&value)).await?.unwrap_or(value)
 			}
 			t!("u\"") | t!("u'") => {
-				let uuid = self.next_token_value()?;
-				let value = Value::Uuid(uuid);
+				let value = Value::Uuid(self.next_token_value()?);
 				self.try_parse_range(ctx, Some(&value)).await?.unwrap_or(value)
 			}
 			t!("'") | t!("\"") | TokenKind::Strand => {
@@ -820,6 +813,110 @@ impl Parser<'_> {
 			.lex_js_function_body()
 			.map_err(|(e, span)| ParseError::new(ParseErrorKind::InvalidToken(e), span))?;
 		Ok(Function::Script(Script(body), args))
+	}
+
+	/// Parse a simple singular value
+	pub async fn parse_simple_value(&mut self, ctx: &mut Stk) -> ParseResult<Value> {
+		let token = self.peek();
+		let value = match token.kind {
+			t!("NONE") => {
+				self.pop_peek();
+				let value = Value::None;
+				self.try_parse_range(ctx, Some(&value)).await?.unwrap_or(value)
+			}
+			t!("NULL") => {
+				self.pop_peek();
+				let value = Value::Null;
+				self.try_parse_range(ctx, Some(&value)).await?.unwrap_or(value)
+			}
+			t!("true") => {
+				self.pop_peek();
+				let value = Value::Bool(true);
+				self.try_parse_range(ctx, Some(&value)).await?.unwrap_or(value)
+			}
+			t!("false") => {
+				self.pop_peek();
+				let value = Value::Bool(false);
+				self.try_parse_range(ctx, Some(&value)).await?.unwrap_or(value)
+			}
+			t!("r\"") => {
+				self.pop_peek();
+				let thing = self.parse_record_string(ctx, true).await?;
+				Value::Thing(thing)
+			}
+			t!("r'") => {
+				self.pop_peek();
+				let thing = self.parse_record_string(ctx, false).await?;
+				Value::Thing(thing)
+			}
+			t!("d\"") | t!("d'") => {
+				let datetime = self.next_token_value()?;
+				Value::Datetime(datetime)
+			}
+			t!("u\"") | t!("u'") => {
+				let uuid = self.next_token_value()?;
+				Value::Uuid(uuid)
+			}
+			t!("'") | t!("\"") | TokenKind::Strand => {
+				let s = self.next_token_value::<Strand>()?;
+				if self.legacy_strands {
+					if let Some(x) = self.reparse_legacy_strand(ctx, &s.0).await {
+						return Ok(x);
+					}
+				}
+				Value::Strand(s)
+			}
+			t!("+") | t!("-") | TokenKind::Number(_) | TokenKind::Digits | TokenKind::Duration => {
+				self.parse_number_like_prime()?
+			}
+			TokenKind::NaN => {
+				self.pop_peek();
+				Value::Number(Number::Float(f64::NAN))
+			}
+			t!("$param") => {
+				let value = Value::Param(self.next_token_value()?);
+				self.try_parse_inline(ctx, &value).await?.unwrap_or(value)
+			}
+			t!("[") => {
+				self.pop_peek();
+				self.parse_array(ctx, token.span).await.map(Value::Array)?
+			}
+			t!("{") => {
+				self.pop_peek();
+				let value = self.parse_object_like(ctx, token.span).await?;
+				self.try_parse_inline(ctx, &value).await?.unwrap_or(value)
+			}
+			t!("(") => {
+				self.pop_peek();
+				let value = self.parse_inner_subquery_or_coordinate(ctx, token.span).await?;
+				self.try_parse_inline(ctx, &value).await?.unwrap_or(value)
+			}
+			_ => {
+				self.glue()?;
+				let x = self.peek_token_at(1).kind;
+				if x.has_data() {
+					unexpected!(self, x, "a value");
+				} else if self.table_as_field {
+					Value::Idiom(Idiom(vec![Part::Field(self.next_token_value()?)]))
+				} else {
+					Value::Table(self.next_token_value()?)
+				}
+			}
+		};
+
+		// Parse the rest of the idiom if it is being continued.
+		if Self::continues_idiom(self.peek_kind()) {
+			let value = match value {
+				Value::Idiom(Idiom(x)) => self.parse_remaining_value_idiom(ctx, x).await,
+				Value::Table(Table(x)) => {
+					self.parse_remaining_value_idiom(ctx, vec![Part::Field(Ident(x))]).await
+				}
+				x => self.parse_remaining_value_idiom(ctx, vec![Part::Start(x)]).await,
+			}?;
+			Ok(self.try_parse_inline(ctx, &value).await?.unwrap_or(value))
+		} else {
+			Ok(value)
+		}
 	}
 }
 

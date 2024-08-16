@@ -1246,6 +1246,7 @@ impl Value {
 			Self::Geometry(Geometry::MultiPolygon(_)) => "geometry<multipolygon>",
 			Self::Geometry(Geometry::Collection(_)) => "geometry<collection>",
 			Self::Bytes(_) => "bytes",
+			Self::Range(_) => "range",
 			_ => "incorrect type",
 		}
 	}
@@ -1272,6 +1273,7 @@ impl Value {
 			Kind::Point => self.coerce_to_point().map(Value::from),
 			Kind::Bytes => self.coerce_to_bytes().map(Value::from),
 			Kind::Uuid => self.coerce_to_uuid().map(Value::from),
+			Kind::Range => self.coerce_to_range().map(Value::from),
 			Kind::Function(_, _) => self.coerce_to_function().map(Value::from),
 			Kind::Set(t, l) => match l {
 				Some(l) => self.coerce_to_set_type_len(t, l).map(Value::from),
@@ -1666,6 +1668,19 @@ impl Value {
 		}
 	}
 
+	/// Try to coerce this value to a `Range`
+	pub(crate) fn coerce_to_range(self) -> Result<Range, Error> {
+		match self {
+			// Ranges are allowed
+			Value::Range(v) => Ok(*v),
+			// Anything else raises an error
+			_ => Err(Error::CoerceTo {
+				from: self,
+				into: "range".into(),
+			}),
+		}
+	}
+
 	/// Try to coerce this value to an `Geometry` point
 	pub(crate) fn coerce_to_point(self) -> Result<Geometry, Error> {
 		match self {
@@ -1841,6 +1856,7 @@ impl Value {
 			Kind::Point => self.convert_to_point().map(Value::from),
 			Kind::Bytes => self.convert_to_bytes().map(Value::from),
 			Kind::Uuid => self.convert_to_uuid().map(Value::from),
+			Kind::Range => self.convert_to_range().map(Value::from),
 			Kind::Function(_, _) => self.convert_to_function().map(Value::from),
 			Kind::Set(t, l) => match l {
 				Some(l) => self.convert_to_set_type_len(t, l).map(Value::from),
@@ -2237,6 +2253,26 @@ impl Value {
 			_ => Err(Error::ConvertTo {
 				from: self,
 				into: "array".into(),
+			}),
+		}
+	}
+
+	/// Try to convert this value to a `Range`
+	pub(crate) fn convert_to_range(self) -> Result<Range, Error> {
+		match self {
+			// Arrays with two elements are allowed
+			Value::Array(v) if v.len() == 2 => {
+				let mut v = v;
+				Ok(Range {
+					beg: Bound::Included(v.remove(0)),
+					end: Bound::Excluded(v.remove(0)),
+				})
+			}
+			Value::Range(r) => Ok(*r),
+			// Anything else raises an error
+			_ => Err(Error::ConvertTo {
+				from: self,
+				into: "range".into(),
 			}),
 		}
 	}
