@@ -122,7 +122,7 @@ impl Parser<'_> {
 			};
 			Ok(Value::Thing(Thing {
 				tb: ident,
-				id: id.into(),
+				id,
 			}))
 		}
 	}
@@ -180,7 +180,7 @@ impl Parser<'_> {
 
 		Ok(Thing {
 			tb: ident,
-			id: id.into(),
+			id,
 		})
 	}
 
