@@ -17,8 +17,8 @@ use serde::{Deserialize, Serialize};
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub struct GraphQLConfig {
-	tables: TablesConfig,
-	functions: FunctionsConfig,
+	pub tables: TablesConfig,
+	pub functions: FunctionsConfig,
 }
 
 #[revisioned(revision = 1)]

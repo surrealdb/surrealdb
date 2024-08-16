@@ -5,6 +5,7 @@ use crate::sql::access_type::JwtAccessVerify;
 use crate::sql::index::HnswParams;
 use crate::sql::statements::define::config::graphql::GraphQLConfig;
 use crate::sql::statements::define::DefineConfigStatement;
+use crate::sql::Idiom;
 use crate::{
 	sql::{
 		access_type,
@@ -1226,9 +1227,15 @@ impl Parser<'_> {
 
 					match self.peek_kind() {
 						t!("INCLUDE") => {}
-						// t!("EXCLUDE") => {}
-						t!("NONE") => tmp_tables = Some(TablesConfig::None),
-						// t!("AUTO") => tmp_tables = Some(TablesConfig::Auto),
+						t!("EXCLUDE") => {}
+						t!("NONE") => {
+							self.pop_peek();
+							tmp_tables = Some(TablesConfig::None);
+						}
+						t!("AUTO") => {
+							self.pop_peek();
+							tmp_tables = Some(TablesConfig::Auto);
+						}
 						_ => todo!(),
 					}
 				}
@@ -1240,9 +1247,15 @@ impl Parser<'_> {
 
 					match self.peek_kind() {
 						t!("INCLUDE") => {}
-						// t!("EXCLUDE") => {}
-						t!("NONE") => tmp_tables = Some(TablesConfig::None),
-						// t!("AUTO") => tmp_tables = Some(TablesConfig::Auto),
+						t!("EXCLUDE") => {}
+						t!("NONE") => {
+							self.pop_peek();
+							tmp_fncs = Some(FunctionsConfig::None);
+						}
+						t!("AUTO") => {
+							self.pop_peek();
+							tmp_fncs = Some(FunctionsConfig::Auto);
+						}
 						_ => todo!(),
 					}
 				}
@@ -1250,7 +1263,14 @@ impl Parser<'_> {
 			}
 		}
 
-		todo!()
+		Ok(GraphQLConfig {
+			tables: tmp_tables.unwrap_or_default(),
+			functions: tmp_fncs.unwrap_or_default(),
+		})
+	}
+
+	pub fn parse_ident_array(&mut self) -> ParseResult<Vec<Ident>> {
+		Ok(vec![])
 	}
 
 	pub fn parse_relation_schema(&mut self) -> ParseResult<table_type::Relation> {

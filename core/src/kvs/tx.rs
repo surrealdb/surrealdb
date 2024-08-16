@@ -11,6 +11,7 @@ use crate::kvs::cache::Entry;
 use crate::kvs::cache::EntryWeighter;
 use crate::kvs::scanner::Scanner;
 use crate::kvs::Transactor;
+use crate::sql::statements::define::DefineConfigStatement;
 use crate::sql::statements::AccessGrant;
 use crate::sql::statements::DefineAccessStatement;
 use crate::sql::statements::DefineAnalyzerStatement;
@@ -641,6 +642,29 @@ impl Transaction {
 			}
 		}
 		.into_mls())
+	}
+
+	/// Retrieve all model definitions for a specific database.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
+	pub async fn all_db_config(
+		&self,
+		ns: &str,
+		db: &str,
+	) -> Result<Arc<[DefineConfigStatement]>, Error> {
+		let key = crate::key::database::cg::prefix(ns, db);
+		let res = self.cache.get_value_or_guard_async(&key).await;
+		Ok(match res {
+			Ok(val) => val,
+			Err(cache) => {
+				let end = crate::key::database::cg::suffix(ns, db);
+				let val = self.getr(key..end).await?;
+				let val = val.convert().into();
+				let val = Entry::Cgs(Arc::clone(&val));
+				let _ = cache.insert(val.clone());
+				val
+			}
+		}
+		.into_cgs())
 	}
 
 	/// Retrieve all table definitions for a specific database.

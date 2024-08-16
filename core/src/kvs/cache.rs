@@ -1,5 +1,6 @@
 use super::Key;
 use crate::dbs::node::Node;
+use crate::sql::statements::define::DefineConfigStatement;
 use crate::sql::statements::AccessGrant;
 use crate::sql::statements::DefineAccessStatement;
 use crate::sql::statements::DefineAnalyzerStatement;
@@ -80,6 +81,8 @@ pub(super) enum Entry {
 	Fts(Arc<[DefineTableStatement]>),
 	/// A slice of DefineModelStatement specified on a database.
 	Mls(Arc<[DefineModelStatement]>),
+	/// A slice of DefineConfigStatement specified on a database.
+	Cgs(Arc<[DefineConfigStatement]>),
 	/// A slice of DefineParamStatement specified on a database.
 	Pas(Arc<[DefineParamStatement]>),
 	/// A slice of DefineTableStatement specified on a database.
@@ -228,6 +231,14 @@ impl Entry {
 	pub(super) fn into_mls(self) -> Arc<[DefineModelStatement]> {
 		match self {
 			Entry::Mls(v) => v,
+			_ => unreachable!(),
+		}
+	}
+	/// Converts this cache entry into a slice of [`DefineModelStatement`].
+	/// This panics if called on a cache entry that is not an [`Entry::Mls`].
+	pub(super) fn into_cgs(self) -> Arc<[DefineConfigStatement]> {
+		match self {
+			Entry::Cgs(v) => v,
 			_ => unreachable!(),
 		}
 	}
