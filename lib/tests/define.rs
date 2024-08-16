@@ -733,7 +733,7 @@ async fn define_statement_index_multiple() -> Result<(), Error> {
 			events: {},
 			fields: {},
 			tables: {},
-			indexes: { test: 'DEFINE INDEX test ON user FIELDS account, email' },
+			indexes: { test: {sql: 'DEFINE INDEX test ON user FIELDS account, email' } },
 			lives: {},
 		}",
 	)?;
@@ -807,7 +807,7 @@ async fn define_statement_index_multiple_unique() -> Result<(), Error> {
 			events: {},
 			fields: {},
 			tables: {},
-			indexes: { test: 'DEFINE INDEX test ON user FIELDS account, email UNIQUE' },
+			indexes: { test: {sql: 'DEFINE INDEX test ON user FIELDS account, email UNIQUE' } },
 			lives: {},
 		}",
 	)?;
@@ -952,7 +952,7 @@ async fn define_statement_index_multiple_unique_embedded_multiple() -> Result<()
 			events: {},
 			fields: {},
 			tables: {},
-			indexes: { test: 'DEFINE INDEX test ON user FIELDS account, tags UNIQUE' },
+			indexes: { test: { sql: 'DEFINE INDEX test ON user FIELDS account, tags UNIQUE' } },
 			lives: {},
 		}",
 	)?;
@@ -989,7 +989,7 @@ async fn define_statement_index_multiple_hnsw() -> Result<(), Error> {
 			fields: {},
 			tables: {},
 			indexes: {
-				hnsw_pts: 'DEFINE INDEX hnsw_pts ON pts FIELDS point HNSW DIMENSION 4 DIST EUCLIDEAN TYPE F32 EFC 500 M 12 M0 24 LM 0.40242960438184466f'
+				hnsw_pts: {sql: 'DEFINE INDEX hnsw_pts ON pts FIELDS point HNSW DIMENSION 4 DIST EUCLIDEAN TYPE F32 EFC 500 M 12 M0 24 LM 0.40242960438184466f' }
 			},
 			lives: {},
 		}",
@@ -1102,10 +1102,10 @@ async fn define_statement_search_index() -> Result<(), Error> {
 			events: {},
 			fields: {},
 			tables: {},
-			indexes: { blog_title: 'DEFINE INDEX blog_title ON blog FIELDS title \
+			indexes: { blog_title: { sql: 'DEFINE INDEX blog_title ON blog FIELDS title \
 			SEARCH ANALYZER simple BM25(1.2,0.75) \
 			DOC_IDS_ORDER 100 DOC_LENGTHS_ORDER 100 POSTINGS_ORDER 100 TERMS_ORDER 100 \
-			DOC_IDS_CACHE 100 DOC_LENGTHS_CACHE 100 POSTINGS_CACHE 100 TERMS_CACHE 100 HIGHLIGHTS' },
+			DOC_IDS_CACHE 100 DOC_LENGTHS_CACHE 100 POSTINGS_CACHE 100 TERMS_CACHE 100 HIGHLIGHTS' } },
 			lives: {},
 		}",
 	);
@@ -1928,7 +1928,7 @@ async fn permissions_checks_define_index() {
 
 	// Define the expected results for the check statement when the test statement succeeded and when it failed
 	let check_results = [
-        vec!["{ events: {  }, fields: {  }, indexes: { index: 'DEFINE INDEX index ON TB FIELDS field' }, lives: {  }, tables: {  } }"],
+        vec!["{ events: {  }, fields: {  }, indexes: { index: { sql: 'DEFINE INDEX index ON TB FIELDS field' } }, lives: {  }, tables: {  } }"],
 		vec!["{ events: {  }, fields: {  }, indexes: {  }, lives: {  }, tables: {  } }"]
     ];
 
