@@ -559,7 +559,7 @@ impl TryFrom<IdValue> for Data {
 			IdValue::String(v) => Ok(Data::Text(v)),
 			IdValue::Array(v) => Ok(Cbor::try_from(Value::from(v))?.0),
 			IdValue::Object(v) => Ok(Cbor::try_from(Value::from(v))?.0),
-			IdValue::Generate(_) => return Err("Cannot encode an ungenerated Record ID into CBOR"),
+			IdValue::Generate(_) => Err("Cannot encode an ungenerated Record ID into CBOR"),
 		}
 	}
 }

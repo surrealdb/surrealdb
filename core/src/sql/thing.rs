@@ -39,28 +39,28 @@ impl Thing {
 					Some(Cond(Value::Expression(Box::new(Expression::new(
 						Idiom(vec![Part::from(Ident(ID.to_owned()))]).into(),
 						Operator::LessThan,
-						Thing::from((self.tb, Id::try_from(id.to_owned()).unwrap())).into(),
+						Thing::from((self.tb, Id::from(id.to_owned()))).into(),
 					)))))
 				}
 				(Bound::Unbounded, Bound::Included(id)) => {
 					Some(Cond(Value::Expression(Box::new(Expression::new(
 						Idiom(vec![Part::from(Ident(ID.to_owned()))]).into(),
 						Operator::LessThanOrEqual,
-						Thing::from((self.tb, Id::try_from(id.to_owned()).unwrap())).into(),
+						Thing::from((self.tb, Id::from(id.to_owned()))).into(),
 					)))))
 				}
 				(Bound::Excluded(id), Bound::Unbounded) => {
 					Some(Cond(Value::Expression(Box::new(Expression::new(
 						Idiom(vec![Part::from(Ident(ID.to_owned()))]).into(),
 						Operator::MoreThan,
-						Thing::from((self.tb, Id::try_from(id.to_owned()).unwrap())).into(),
+						Thing::from((self.tb, Id::from(id.to_owned()))).into(),
 					)))))
 				}
 				(Bound::Included(id), Bound::Unbounded) => {
 					Some(Cond(Value::Expression(Box::new(Expression::new(
 						Idiom(vec![Part::from(Ident(ID.to_owned()))]).into(),
 						Operator::MoreThanOrEqual,
-						Thing::from((self.tb, Id::try_from(id.to_owned()).unwrap())).into(),
+						Thing::from((self.tb, Id::from(id.to_owned()))).into(),
 					)))))
 				}
 				(Bound::Included(lid), Bound::Included(rid)) => {
@@ -68,14 +68,13 @@ impl Thing {
 						Value::Expression(Box::new(Expression::new(
 							Idiom(vec![Part::from(Ident(ID.to_owned()))]).into(),
 							Operator::MoreThanOrEqual,
-							Thing::from((self.tb.clone(), Id::try_from(lid.to_owned()).unwrap()))
-								.into(),
+							Thing::from((self.tb.clone(), Id::from(lid.to_owned()))).into(),
 						))),
 						Operator::And,
 						Value::Expression(Box::new(Expression::new(
 							Idiom(vec![Part::from(Ident(ID.to_owned()))]).into(),
 							Operator::LessThanOrEqual,
-							Thing::from((self.tb, Id::try_from(rid.to_owned()).unwrap())).into(),
+							Thing::from((self.tb, Id::from(rid.to_owned()))).into(),
 						))),
 					)))))
 				}
@@ -84,14 +83,13 @@ impl Thing {
 						Value::Expression(Box::new(Expression::new(
 							Idiom(vec![Part::from(Ident(ID.to_owned()))]).into(),
 							Operator::MoreThanOrEqual,
-							Thing::from((self.tb.clone(), Id::try_from(lid.to_owned()).unwrap()))
-								.into(),
+							Thing::from((self.tb.clone(), Id::from(lid.to_owned()))).into(),
 						))),
 						Operator::And,
 						Value::Expression(Box::new(Expression::new(
 							Idiom(vec![Part::from(Ident(ID.to_owned()))]).into(),
 							Operator::LessThan,
-							Thing::from((self.tb, Id::try_from(rid.to_owned()).unwrap())).into(),
+							Thing::from((self.tb, Id::from(rid.to_owned()))).into(),
 						))),
 					)))))
 				}
@@ -100,14 +98,13 @@ impl Thing {
 						Value::Expression(Box::new(Expression::new(
 							Idiom(vec![Part::from(Ident(ID.to_owned()))]).into(),
 							Operator::MoreThan,
-							Thing::from((self.tb.clone(), Id::try_from(lid.to_owned()).unwrap()))
-								.into(),
+							Thing::from((self.tb.clone(), Id::from(lid.to_owned()))).into(),
 						))),
 						Operator::And,
 						Value::Expression(Box::new(Expression::new(
 							Idiom(vec![Part::from(Ident(ID.to_owned()))]).into(),
 							Operator::LessThanOrEqual,
-							Thing::from((self.tb, Id::try_from(rid.to_owned()).unwrap())).into(),
+							Thing::from((self.tb, Id::from(rid.to_owned()))).into(),
 						))),
 					)))))
 				}
@@ -116,14 +113,13 @@ impl Thing {
 						Value::Expression(Box::new(Expression::new(
 							Idiom(vec![Part::from(Ident(ID.to_owned()))]).into(),
 							Operator::MoreThan,
-							Thing::from((self.tb.clone(), Id::try_from(lid.to_owned()).unwrap()))
-								.into(),
+							Thing::from((self.tb.clone(), Id::from(lid.to_owned()))).into(),
 						))),
 						Operator::And,
 						Value::Expression(Box::new(Expression::new(
 							Idiom(vec![Part::from(Ident(ID.to_owned()))]).into(),
 							Operator::LessThan,
-							Thing::from((self.tb, Id::try_from(rid.to_owned()).unwrap())).into(),
+							Thing::from((self.tb, Id::from(rid.to_owned()))).into(),
 						))),
 					)))))
 				}
