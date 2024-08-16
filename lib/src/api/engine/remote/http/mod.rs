@@ -380,7 +380,7 @@ async fn router(
 		let bytes = response.bytes().await?;
 		error!(bytes = ?&bytes[..], "got response");
 
-		let response: Response = deserialize(&mut &bytes[..], true)?;
+		let response: Response = deserialize(&mut &bytes[..], false)?;
 		// if let Ok(res) = deserialize(&mut &bytes[..], false) else {
 
 		// 			warn!("Failed to deserialise message; {error:?}");
