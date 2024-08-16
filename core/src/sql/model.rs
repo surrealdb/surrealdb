@@ -162,7 +162,7 @@ impl Model {
 				// Convert the argument to a tensor
 				let tensor = ndarray::arr1::<f32>(&[args]).into_dyn();
 				// Run the compute in a blocking task
-				let outcome = tokio::task::spawn_blocking(move || {
+				let outcome: Vec<f32> = tokio::task::spawn_blocking(move || {
 					let mut file = SurMlFile::from_bytes(bytes).map_err(|err: SurrealError| {
 						Error::ModelComputation(err.message.to_string())
 					})?;
@@ -199,7 +199,7 @@ impl Model {
 				// Convert the argument to a tensor
 				let tensor = ndarray::arr1::<f32>(&args).into_dyn();
 				// Run the compute in a blocking task
-				let outcome = tokio::task::spawn_blocking(move || {
+				let outcome: Vec<f32> = tokio::task::spawn_blocking(move || {
 					let mut file = SurMlFile::from_bytes(bytes).map_err(|err: SurrealError| {
 						Error::ModelComputation(err.message.to_string())
 					})?;
