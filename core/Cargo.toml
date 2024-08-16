@@ -104,7 +104,6 @@ nanoid = "0.4.0"
 ndarray = { version = "=0.15.6" }
 ndarray-stats = "=0.5.1"
 num-traits = "0.2.18"
-nom = { version = "7.1.3", features = ["alloc"] }
 num_cpus = "1.16.0"
 object_store = { version = "0.10.2", optional = false }
 once_cell = "1.18.0"
