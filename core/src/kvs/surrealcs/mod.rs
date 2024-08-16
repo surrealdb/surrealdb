@@ -11,7 +11,7 @@ use std::ops::Range;
 use std::sync::Arc;
 use surrealcs::kernel::messages::server::interface::ServerTransactionMessage;
 use surrealcs::kernel::messages::server::kv_operations::*;
-use surrealcs::router::create_connection;
+use surrealcs::router::create_connection_pool;
 use surrealcs::transactions::interface::bridge::BridgeHandle;
 use surrealcs::transactions::interface::interface::{
 	Any as AnyState, Transaction as SurrealCSTransaction,
@@ -69,9 +69,7 @@ impl Drop for Transaction {
 impl Datastore {
 	/// Open a new database
 	pub(crate) async fn new(path: &str) -> Result<Datastore, Error> {
-		for _ in 0..num_cpus::get() {
-			create_connection(path).await.unwrap();
-		}
+		create_connection_pool(path, None).await.unwrap();
 		Ok(Datastore {})
 	}
 
@@ -201,7 +199,7 @@ impl super::api::Transaction for Transaction {
 
 	/// Fetch a key from the database
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
-	async fn get<K>(&mut self, key: K) -> Result<Option<Val>, Error>
+	async fn get<K>(&mut self, key: K, version: Option<u64>) -> Result<Option<Val>, Error>
 	where
 		K: Into<Key> + Sprintable + Debug,
 	{
@@ -399,7 +397,12 @@ impl super::api::Transaction for Transaction {
 
 	/// Retrieves a range of key-value pairs from the database.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.sprint()))]
-	async fn scan<K>(&mut self, rng: Range<K>, limit: u32) -> Result<Vec<(Key, Val)>, Error>
+	async fn scan<K>(
+		&mut self,
+		rng: Range<K>,
+		limit: u32,
+		version: Option<u64>,
+	) -> Result<Vec<(Key, Val)>, Error>
 	where
 		K: Into<Key> + Sprintable + Debug,
 	{
