@@ -33,6 +33,7 @@ mod rocksdb;
 mod surrealkv;
 mod tikv;
 
+#[cfg(not(target_arch = "wasm32"))]
 mod index;
 #[cfg(test)]
 mod tests;

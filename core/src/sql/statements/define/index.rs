@@ -91,25 +91,43 @@ impl DefineIndexStatement {
 		.await?;
 		// Clear the cache
 		txn.clear();
-		if !self.concurrently {
-			// Force queries to run
-			let opt = &opt.new_with_force(Force::Index(Arc::new([self.clone()])));
-			// Update the index data
-			let stm = UpdateStatement {
-				what: Values(vec![Value::Table(self.what.clone().into())]),
-				output: Some(Output::None),
-				..UpdateStatement::default()
-			};
-			stm.compute(stk, ctx, opt, doc).await?;
+		#[cfg(not(target_arch = "wasm32"))]
+		if self.concurrently {
+			self.async_index(ctx, opt)?;
 		} else {
-			ctx.get_index_builder().ok_or(Error::Unreachable("No Index Builder"))?.build(
-				ctx,
-				opt.clone(),
-				self.clone().into(),
-			)?;
+			self.sync_index(stk, ctx, opt, doc).await?;
 		}
+		#[cfg(target_arch = "wasm32")]
+		self.sync_index(stk, ctx, opt, doc).await?;
 		// Ok all good
 		Ok(Value::None)
+	}
+
+	async fn sync_index(
+		&self,
+		stk: &mut Stk,
+		ctx: &Context,
+		opt: &Options,
+		doc: Option<&CursorDoc>,
+	) -> Result<(), Error> {
+		// Force queries to run
+		let opt = &opt.new_with_force(Force::Index(Arc::new([self.clone()])));
+		// Update the index data
+		let stm = UpdateStatement {
+			what: Values(vec![Value::Table(self.what.clone().into())]),
+			output: Some(Output::None),
+			..UpdateStatement::default()
+		};
+		stm.compute(stk, ctx, opt, doc).await?;
+		Ok(())
+	}
+
+	fn async_index(&self, ctx: &Context, opt: &Options) -> Result<(), Error> {
+		ctx.get_index_builder().ok_or(Error::Unreachable("No Index Builder"))?.build(
+			ctx,
+			opt.clone(),
+			self.clone().into(),
+		)
 	}
 }
 
