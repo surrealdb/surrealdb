@@ -215,7 +215,7 @@ impl<'a> Processor<'a> {
 		// Check that the table exists
 		ctx.tx().check_ns_db_tb(opt.ns()?, opt.db()?, &v.tb, opt.strict).await?;
 		// Fetch the data from the store
-		let key = thing::new(opt.ns()?, opt.db()?, &v.tb, &v.id.to_owned().try_into()?);
+		let key = thing::new(opt.ns()?, opt.db()?, &v.tb, &v.id);
 		let val = ctx.tx().get(key, opt.version).await?;
 		// Parse the data from the store
 		let val = Operable::Value(
@@ -247,7 +247,7 @@ impl<'a> Processor<'a> {
 		// Check that the table exists
 		ctx.tx().check_ns_db_tb(opt.ns()?, opt.db()?, &v.tb, opt.strict).await?;
 		// Fetch the data from the store
-		let key = thing::new(opt.ns()?, opt.db()?, &v.tb, &v.id.to_owned().try_into()?);
+		let key = thing::new(opt.ns()?, opt.db()?, &v.tb, &v.id);
 		let val = ctx.tx().get(key, None).await?;
 		// Parse the data from the store
 		let x = match val {
@@ -278,7 +278,7 @@ impl<'a> Processor<'a> {
 		// Check that the table exists
 		ctx.tx().check_ns_db_tb(opt.ns()?, opt.db()?, &v.tb, opt.strict).await?;
 		// Fetch the data from the store
-		let key = thing::new(opt.ns()?, opt.db()?, &v.tb, &v.id.to_owned().try_into()?);
+		let key = thing::new(opt.ns()?, opt.db()?, &v.tb, &v.id);
 		let val = ctx.tx().get(key, None).await?;
 		// Parse the data from the store
 		let x = match val {
@@ -495,7 +495,7 @@ impl<'a> Processor<'a> {
 				// Parse the data from the store
 				let gra: graph::Graph = graph::Graph::decode(&key)?;
 				// Fetch the data from the store
-				let key = thing::new(opt.ns()?, opt.db()?, gra.ft, &gra.fk.to_owned().try_into()?);
+				let key = thing::new(opt.ns()?, opt.db()?, gra.ft, &gra.fk);
 				let val = txn.get(key, None).await?;
 				let rid = Thing::from((gra.ft, gra.fk));
 				// Parse the data from the store
@@ -594,7 +594,7 @@ impl Iterable {
 		thg: &Thing,
 	) -> Result<Value, Error> {
 		// Fetch the data from the store
-		let key = thing::new(opt.ns()?, opt.db()?, &thg.tb, &thg.id.to_owned().try_into()?);
+		let key = thing::new(opt.ns()?, opt.db()?, &thg.tb, &thg.id);
 		// Fetch and parse the data from the store
 		let val = txn.get(key, None).await?.map(Value::from).unwrap_or(Value::None);
 		// Return the result

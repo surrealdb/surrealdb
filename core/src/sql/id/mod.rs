@@ -11,15 +11,13 @@ use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fmt::{self, Display, Formatter};
-use std::ops::Bound;
+use std::ops::{Bound, Deref};
 use ulid::Ulid;
-use value::{Gen, IdValue};
 
 use super::escape::escape_rid;
 use super::Range;
 
 pub mod range;
-pub mod value;
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize, Hash)]
@@ -31,7 +29,17 @@ pub enum Id {
 	Array(Array),
 	Object(Object),
 	Generate(Gen),
-	Range(IdRange),
+	Range(Box<IdRange>),
+}
+
+#[revisioned(revision = 1)]
+#[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize, Hash)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
+#[non_exhaustive]
+pub enum Gen {
+	Rand,
+	Ulid,
+	Uuid,
 }
 
 impl From<i64> for Id {
@@ -128,34 +136,23 @@ impl From<Number> for Id {
 	}
 }
 
-impl From<IdValue> for Id {
-	fn from(v: IdValue) -> Self {
-		match v {
-			IdValue::Number(v) => Self::Number(v),
-			IdValue::String(v) => Self::String(v),
-			IdValue::Array(v) => Self::Array(v),
-			IdValue::Object(v) => Self::Object(v),
-			IdValue::Generate(v) => Self::Generate(v),
-		}
-	}
-}
-
 impl From<IdRange> for Id {
 	fn from(v: IdRange) -> Self {
-		Self::Range(v)
+		Self::Range(Box::new(v))
 	}
 }
 
-impl From<(Bound<IdValue>, Bound<IdValue>)> for Id {
-	fn from(v: (Bound<IdValue>, Bound<IdValue>)) -> Self {
-		Self::Range(v.into())
+impl TryFrom<(Bound<Id>, Bound<Id>)> for Id {
+	type Error = Error;
+	fn try_from(v: (Bound<Id>, Bound<Id>)) -> Result<Self, Self::Error> {
+		Ok(Self::Range(Box::new(v.try_into()?)))
 	}
 }
 
 impl TryFrom<Range> for Id {
 	type Error = Error;
 	fn try_from(v: Range) -> Result<Self, Self::Error> {
-		Ok(Id::Range(IdRange::try_from(v)?))
+		Ok(Id::Range(Box::new(v.try_into()?)))
 	}
 }
 
@@ -167,6 +164,7 @@ impl TryFrom<Value> for Id {
 			Value::Strand(v) => Ok(v.into()),
 			Value::Array(v) => Ok(v.into()),
 			Value::Object(v) => Ok(v.into()),
+			Value::Range(v) => v.deref().to_owned().try_into(),
 			v => Err(Error::IdInvalid {
 				value: v.kindof().to_string(),
 			}),
@@ -252,7 +250,7 @@ impl Id {
 				Gen::Ulid => Ok(Self::ulid()),
 				Gen::Uuid => Ok(Self::uuid()),
 			},
-			Id::Range(v) => Ok(Id::Range(v.compute(stk, ctx, opt, doc).await?)),
+			Id::Range(v) => Ok(Id::Range(Box::new(v.compute(stk, ctx, opt, doc).await?))),
 		}
 	}
 }

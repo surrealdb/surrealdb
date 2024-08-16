@@ -6,13 +6,12 @@ use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::fnc::util::string::fuzzy::Fuzzy;
 use crate::sql::id::range::IdRange;
-use crate::sql::id::value::IdValue;
 use crate::sql::statements::info::InfoStructure;
 use crate::sql::Closure;
 use crate::sql::{
 	array::Uniq,
 	fmt::{Fmt, Pretty},
-	id::{value::Gen, Id},
+	id::{Gen, Id},
 	model::Model,
 	Array, Block, Bytes, Cast, Constant, Datetime, Duration, Edges, Expression, Function, Future,
 	Geometry, Idiom, Kind, Mock, Number, Object, Operation, Param, Part, Query, Range, Regex,
@@ -559,22 +558,6 @@ impl From<Option<Datetime>> for Value {
 	}
 }
 
-impl From<IdValue> for Value {
-	fn from(v: IdValue) -> Self {
-		match v {
-			IdValue::Number(v) => v.into(),
-			IdValue::String(v) => v.into(),
-			IdValue::Array(v) => v.into(),
-			IdValue::Object(v) => v.into(),
-			IdValue::Generate(v) => match v {
-				Gen::Rand => IdValue::rand().into(),
-				Gen::Ulid => IdValue::ulid().into(),
-				Gen::Uuid => IdValue::uuid().into(),
-			},
-		}
-	}
-}
-
 impl From<IdRange> for Value {
 	fn from(v: IdRange) -> Self {
 		let beg = match v.beg {
@@ -608,7 +591,7 @@ impl From<Id> for Value {
 				Gen::Ulid => Id::ulid().into(),
 				Gen::Uuid => Id::uuid().into(),
 			},
-			Id::Range(v) => v.into(),
+			Id::Range(v) => v.deref().to_owned().into(),
 		}
 	}
 }
@@ -3089,9 +3072,9 @@ mod tests {
 
 	#[test]
 	fn check_size() {
-		assert!(104 >= std::mem::size_of::<Value>(), "size of value too big");
-		assert_eq!(152, std::mem::size_of::<Error>());
-		assert_eq!(152, std::mem::size_of::<Result<Value, Error>>());
+		assert!(64 >= std::mem::size_of::<Value>(), "size of value too big");
+		assert_eq!(112, std::mem::size_of::<Error>());
+		assert_eq!(112, std::mem::size_of::<Result<Value, Error>>());
 		assert_eq!(24, std::mem::size_of::<crate::sql::number::Number>());
 		assert_eq!(24, std::mem::size_of::<crate::sql::strand::Strand>());
 		assert_eq!(16, std::mem::size_of::<crate::sql::duration::Duration>());
@@ -3102,7 +3085,7 @@ mod tests {
 		assert_eq!(24, std::mem::size_of::<crate::sql::param::Param>());
 		assert_eq!(24, std::mem::size_of::<crate::sql::idiom::Idiom>());
 		assert_eq!(24, std::mem::size_of::<crate::sql::table::Table>());
-		assert_eq!(104, std::mem::size_of::<crate::sql::thing::Thing>());
+		assert_eq!(56, std::mem::size_of::<crate::sql::thing::Thing>());
 		assert_eq!(40, std::mem::size_of::<crate::sql::mock::Mock>());
 		assert_eq!(32, std::mem::size_of::<crate::sql::regex::Regex>());
 		assert_eq!(8, std::mem::size_of::<Box<crate::sql::range::Range>>());

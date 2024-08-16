@@ -13,7 +13,7 @@ use serde::Serialize;
 use std::borrow::Cow;
 use std::future::IntoFuture;
 use std::marker::PhantomData;
-use surrealdb_core::sql::IdValue;
+use surrealdb_core::sql::Id;
 
 /// A merge future
 #[derive(Debug)]
@@ -21,7 +21,7 @@ use surrealdb_core::sql::IdValue;
 pub struct Merge<'r, C: Connection, D, R> {
 	pub(super) client: Cow<'r, Surreal<C>>,
 	pub(super) resource: Result<Resource>,
-	pub(super) range: Option<Range<IdValue>>,
+	pub(super) range: Option<Range<Id>>,
 	pub(super) content: D,
 	pub(super) response_type: PhantomData<R>,
 }

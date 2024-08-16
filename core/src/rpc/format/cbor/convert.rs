@@ -8,7 +8,6 @@ use std::ops::Bound;
 use std::ops::Deref;
 
 use crate::sql::id::range::IdRange;
-use crate::sql::id::value::IdValue;
 use crate::sql::Array;
 use crate::sql::Datetime;
 use crate::sql::Duration;
@@ -178,10 +177,7 @@ impl TryFrom<Cbor> for Value {
 								),
 							};
 
-							let id = match v.remove(0) {
-								Data::Tag(TAG_RANGE, v) => Id::Range(IdRange::try_from(*v)?),
-								v => IdValue::try_from(v)?.into(),
-							};
+							let id = Id::try_from(v.remove(0))?;
 
 							Ok(Value::Thing(Thing {
 								tb,
@@ -392,7 +388,7 @@ impl TryFrom<Value> for Cbor {
 						Id::Generate(_) => {
 							return Err("Cannot encode an ungenerated Record ID into CBOR")
 						}
-						Id::Range(v) => Data::try_from(v)?,
+						Id::Range(v) => Data::try_from(*v)?,
 					},
 				])),
 			))),
@@ -508,10 +504,10 @@ impl TryFrom<Range> for Data {
 impl TryFrom<Data> for IdRange {
 	type Error = &'static str;
 	fn try_from(val: Data) -> Result<Self, &'static str> {
-		fn decode_bound(v: Data) -> Result<Bound<IdValue>, &'static str> {
+		fn decode_bound(v: Data) -> Result<Bound<Id>, &'static str> {
 			match v {
-				Data::Tag(TAG_BOUND_INCLUDED, v) => Ok(Bound::Included(IdValue::try_from(*v)?)),
-				Data::Tag(TAG_BOUND_EXCLUDED, v) => Ok(Bound::Excluded(IdValue::try_from(*v)?)),
+				Data::Tag(TAG_BOUND_INCLUDED, v) => Ok(Bound::Included(Id::try_from(*v)?)),
+				Data::Tag(TAG_BOUND_EXCLUDED, v) => Ok(Bound::Excluded(Id::try_from(*v)?)),
 				Data::Null => Ok(Bound::Unbounded),
 				_ => Err("Expected a bound tag"),
 			}
@@ -522,7 +518,8 @@ impl TryFrom<Data> for IdRange {
 				let mut v = v;
 				let beg = decode_bound(v.remove(0).to_owned())?;
 				let end = decode_bound(v.remove(0).to_owned())?;
-				Ok(IdRange::new(beg, end))
+				Ok(IdRange::try_from((beg, end))
+					.map_err(|_| "Found an invalid range with ranges as bounds")?)
 			}
 			_ => Err("Expected a CBOR array with 2 bounds"),
 		}
@@ -532,7 +529,7 @@ impl TryFrom<Data> for IdRange {
 impl TryFrom<IdRange> for Data {
 	type Error = &'static str;
 	fn try_from(r: IdRange) -> Result<Data, &'static str> {
-		fn encode(b: Bound<IdValue>) -> Result<Data, &'static str> {
+		fn encode(b: Bound<Id>) -> Result<Data, &'static str> {
 			match b {
 				Bound::Included(v) => Ok(Data::Tag(TAG_BOUND_INCLUDED, Box::new(v.try_into()?))),
 				Bound::Excluded(v) => Ok(Data::Tag(TAG_BOUND_EXCLUDED, Box::new(v.try_into()?))),
@@ -544,28 +541,30 @@ impl TryFrom<IdRange> for Data {
 	}
 }
 
-impl TryFrom<Data> for IdValue {
+impl TryFrom<Data> for Id {
 	type Error = &'static str;
 	fn try_from(val: Data) -> Result<Self, &'static str> {
 		match val {
-			Data::Integer(v) => Ok(IdValue::Number(i128::from(v) as i64)),
-			Data::Text(v) => Ok(IdValue::String(v)),
-			Data::Array(v) => Ok(IdValue::Array(v.try_into()?)),
-			Data::Map(v) => Ok(IdValue::Object(v.try_into()?)),
+			Data::Integer(v) => Ok(Id::Number(i128::from(v) as i64)),
+			Data::Text(v) => Ok(Id::String(v)),
+			Data::Array(v) => Ok(Id::Array(v.try_into()?)),
+			Data::Map(v) => Ok(Id::Object(v.try_into()?)),
+			Data::Tag(TAG_RANGE, v) => Ok(Id::Range(Box::new(IdRange::try_from(*v)?))),
 			_ => Err("Expected a CBOR integer, text, array or map"),
 		}
 	}
 }
 
-impl TryFrom<IdValue> for Data {
+impl TryFrom<Id> for Data {
 	type Error = &'static str;
-	fn try_from(v: IdValue) -> Result<Data, &'static str> {
+	fn try_from(v: Id) -> Result<Data, &'static str> {
 		match v {
-			IdValue::Number(v) => Ok(Data::Integer(v.into())),
-			IdValue::String(v) => Ok(Data::Text(v)),
-			IdValue::Array(v) => Ok(Cbor::try_from(Value::from(v))?.0),
-			IdValue::Object(v) => Ok(Cbor::try_from(Value::from(v))?.0),
-			IdValue::Generate(_) => Err("Cannot encode an ungenerated Record ID into CBOR"),
+			Id::Number(v) => Ok(Data::Integer(v.into())),
+			Id::String(v) => Ok(Data::Text(v)),
+			Id::Array(v) => Ok(Cbor::try_from(Value::from(v))?.0),
+			Id::Object(v) => Ok(Cbor::try_from(Value::from(v))?.0),
+			Id::Range(v) => Ok(Data::Tag(TAG_RANGE, Box::new(v.deref().to_owned().try_into()?))),
+			Id::Generate(_) => Err("Cannot encode an ungenerated Record ID into CBOR"),
 		}
 	}
 }

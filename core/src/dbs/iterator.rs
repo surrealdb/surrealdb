@@ -161,7 +161,7 @@ impl Iterator {
 								});
 							}
 							_ => {
-								self.ingest(Iterable::TableRange(v.tb, r.to_owned()));
+								self.ingest(Iterable::TableRange(v.tb, *r.to_owned()));
 							}
 						};
 					}

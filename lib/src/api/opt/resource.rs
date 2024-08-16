@@ -1,5 +1,3 @@
-use surrealdb_core::sql::IdValue;
-
 use crate::api::{err::Error, Result};
 use crate::sql::{self, Array, Edges, Id, Object, Table, Thing, Value};
 use crate::syn;
@@ -21,11 +19,11 @@ pub enum Resource {
 }
 
 impl Resource {
-	pub(crate) fn with_range(self, range: Range<IdValue>) -> Result<sql::Thing> {
+	pub(crate) fn with_range(self, range: Range<Id>) -> Result<sql::Thing> {
 		match self {
 			Resource::Table(table) => Ok(sql::Thing::from((
 				table.0,
-				sql::Id::Range(sql::IdRange::from((range.start, range.end))),
+				sql::Id::Range(Box::new(sql::IdRange::try_from((range.start, range.end))?)),
 			))),
 			Resource::RecordId(record_id) => Err(Error::RangeOnRecordId(record_id).into()),
 			Resource::Object(object) => Err(Error::RangeOnObject(object).into()),
@@ -249,9 +247,9 @@ pub struct Range<T> {
 	pub(crate) end: Bound<T>,
 }
 
-impl<T> From<(Bound<T>, Bound<T>)> for Range<IdValue>
+impl<T> From<(Bound<T>, Bound<T>)> for Range<Id>
 where
-	T: Into<IdValue>,
+	T: Into<Id>,
 {
 	fn from((start, end): (Bound<T>, Bound<T>)) -> Self {
 		Self {
@@ -269,9 +267,9 @@ where
 	}
 }
 
-impl<T> From<ops::Range<T>> for Range<IdValue>
+impl<T> From<ops::Range<T>> for Range<Id>
 where
-	T: Into<IdValue>,
+	T: Into<Id>,
 {
 	fn from(
 		ops::Range {
@@ -286,9 +284,9 @@ where
 	}
 }
 
-impl<T> From<ops::RangeInclusive<T>> for Range<IdValue>
+impl<T> From<ops::RangeInclusive<T>> for Range<Id>
 where
-	T: Into<IdValue>,
+	T: Into<Id>,
 {
 	fn from(range: ops::RangeInclusive<T>) -> Self {
 		let (start, end) = range.into_inner();
@@ -299,9 +297,9 @@ where
 	}
 }
 
-impl<T> From<ops::RangeFrom<T>> for Range<IdValue>
+impl<T> From<ops::RangeFrom<T>> for Range<Id>
 where
-	T: Into<IdValue>,
+	T: Into<Id>,
 {
 	fn from(
 		ops::RangeFrom {
@@ -315,9 +313,9 @@ where
 	}
 }
 
-impl<T> From<ops::RangeTo<T>> for Range<IdValue>
+impl<T> From<ops::RangeTo<T>> for Range<Id>
 where
-	T: Into<IdValue>,
+	T: Into<Id>,
 {
 	fn from(
 		ops::RangeTo {
@@ -331,9 +329,9 @@ where
 	}
 }
 
-impl<T> From<ops::RangeToInclusive<T>> for Range<IdValue>
+impl<T> From<ops::RangeToInclusive<T>> for Range<Id>
 where
-	T: Into<IdValue>,
+	T: Into<Id>,
 {
 	fn from(
 		ops::RangeToInclusive {
@@ -347,7 +345,7 @@ where
 	}
 }
 
-impl From<ops::RangeFull> for Range<IdValue> {
+impl From<ops::RangeFull> for Range<Id> {
 	fn from(_: ops::RangeFull) -> Self {
 		Self {
 			start: Bound::Unbounded,

@@ -6,7 +6,7 @@ use crate::{
 	sql::{Range, Value},
 };
 
-use super::{value::IdValue, Id};
+use super::Id;
 use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -17,16 +17,29 @@ use std::{cmp::Ordering, fmt, ops::Bound};
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub struct IdRange {
-	pub beg: Bound<IdValue>,
-	pub end: Bound<IdValue>,
+	pub beg: Bound<Id>,
+	pub end: Bound<Id>,
 }
 
-impl From<(Bound<IdValue>, Bound<IdValue>)> for IdRange {
-	fn from((beg, end): (Bound<IdValue>, Bound<IdValue>)) -> Self {
-		IdRange {
+impl TryFrom<(Bound<Id>, Bound<Id>)> for IdRange {
+	type Error = Error;
+	fn try_from((beg, end): (Bound<Id>, Bound<Id>)) -> Result<Self, Self::Error> {
+		if matches!(beg, Bound::Included(Id::Range(_)) | Bound::Excluded(Id::Range(_))) {
+			return Err(Error::IdInvalid {
+				value: "range".into(),
+			});
+		}
+
+		if matches!(end, Bound::Included(Id::Range(_)) | Bound::Excluded(Id::Range(_))) {
+			return Err(Error::IdInvalid {
+				value: "range".into(),
+			});
+		}
+
+		Ok(IdRange {
 			beg,
 			end,
-		}
+		})
 	}
 }
 
@@ -34,21 +47,18 @@ impl TryFrom<Range> for IdRange {
 	type Error = Error;
 	fn try_from(v: Range) -> Result<Self, Self::Error> {
 		let beg = match v.beg {
-			Bound::Included(beg) => Bound::Included(IdValue::try_from(beg)?),
-			Bound::Excluded(beg) => Bound::Excluded(IdValue::try_from(beg)?),
+			Bound::Included(beg) => Bound::Included(Id::try_from(beg)?),
+			Bound::Excluded(beg) => Bound::Excluded(Id::try_from(beg)?),
 			Bound::Unbounded => Bound::Unbounded,
 		};
 
 		let end = match v.end {
-			Bound::Included(end) => Bound::Included(IdValue::try_from(end)?),
-			Bound::Excluded(end) => Bound::Excluded(IdValue::try_from(end)?),
+			Bound::Included(end) => Bound::Included(Id::try_from(end)?),
+			Bound::Excluded(end) => Bound::Excluded(Id::try_from(end)?),
 			Bound::Unbounded => Bound::Unbounded,
 		};
 
-		Ok(IdRange {
-			beg,
-			end,
-		})
+		IdRange::try_from((beg, end))
 	}
 }
 
@@ -59,18 +69,6 @@ impl TryFrom<Value> for IdRange {
 			Value::Range(v) => IdRange::try_from(*v),
 			v => Err(Error::IdInvalid {
 				value: v.kindof().to_string(),
-			}),
-		}
-	}
-}
-
-impl TryFrom<Id> for IdRange {
-	type Error = Error;
-	fn try_from(v: Id) -> Result<Self, Self::Error> {
-		match v {
-			Id::Range(v) => Ok(v),
-			_ => Err(Error::IdInvalid {
-				value: "idvalue".to_string(),
 			}),
 		}
 	}
@@ -153,15 +151,6 @@ impl fmt::Display for IdRange {
 }
 
 impl IdRange {
-	pub fn new(beg: Bound<IdValue>, end: Bound<IdValue>) -> IdRange {
-		IdRange {
-			beg,
-			end,
-		}
-	}
-}
-
-impl IdRange {
 	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
@@ -171,20 +160,25 @@ impl IdRange {
 		doc: Option<&CursorDoc>,
 	) -> Result<IdRange, Error> {
 		let beg = match &self.beg {
-			Bound::Included(beg) => Bound::Included(beg.compute(stk, ctx, opt, doc).await?),
-			Bound::Excluded(beg) => Bound::Excluded(beg.compute(stk, ctx, opt, doc).await?),
+			Bound::Included(beg) => {
+				Bound::Included(stk.run(|stk| beg.compute(stk, ctx, opt, doc)).await?)
+			}
+			Bound::Excluded(beg) => {
+				Bound::Excluded(stk.run(|stk| beg.compute(stk, ctx, opt, doc)).await?)
+			}
 			Bound::Unbounded => Bound::Unbounded,
 		};
 
 		let end = match &self.end {
-			Bound::Included(end) => Bound::Included(end.compute(stk, ctx, opt, doc).await?),
-			Bound::Excluded(end) => Bound::Excluded(end.compute(stk, ctx, opt, doc).await?),
+			Bound::Included(end) => {
+				Bound::Included(stk.run(|stk| end.compute(stk, ctx, opt, doc)).await?)
+			}
+			Bound::Excluded(end) => {
+				Bound::Excluded(stk.run(|stk| end.compute(stk, ctx, opt, doc)).await?)
+			}
 			Bound::Unbounded => Bound::Unbounded,
 		};
 
-		Ok(IdRange {
-			beg,
-			end,
-		})
+		IdRange::try_from((beg, end))
 	}
 }

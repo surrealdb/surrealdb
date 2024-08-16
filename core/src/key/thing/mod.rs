@@ -1,7 +1,7 @@
 //! Stores a record document
 use crate::key::category::Categorise;
 use crate::key::category::Category;
-use crate::sql::id::value::IdValue;
+use crate::sql::Id;
 use derive::Key;
 use serde::{Deserialize, Serialize};
 
@@ -16,10 +16,10 @@ pub struct Thing<'a> {
 	_c: u8,
 	pub tb: &'a str,
 	_d: u8,
-	pub id: IdValue,
+	pub id: Id,
 }
 
-pub fn new<'a>(ns: &'a str, db: &'a str, tb: &'a str, id: &IdValue) -> Thing<'a> {
+pub fn new<'a>(ns: &'a str, db: &'a str, tb: &'a str, id: &Id) -> Thing<'a> {
 	Thing::new(ns, db, tb, id.to_owned())
 }
 
@@ -42,7 +42,7 @@ impl Categorise for Thing<'_> {
 }
 
 impl<'a> Thing<'a> {
-	pub fn new(ns: &'a str, db: &'a str, tb: &'a str, id: IdValue) -> Self {
+	pub fn new(ns: &'a str, db: &'a str, tb: &'a str, id: Id) -> Self {
 		Self {
 			__: b'/',
 			_a: b'*',

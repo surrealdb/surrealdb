@@ -102,7 +102,7 @@ impl SelectStatement {
 					planner.add_iterables(stk, ctx, t, &mut i).await?;
 				}
 				Value::Thing(v) => match &v.id {
-					Id::Range(r) => i.ingest(Iterable::TableRange(v.tb, r.to_owned())),
+					Id::Range(r) => i.ingest(Iterable::TableRange(v.tb, *r.to_owned())),
 					_ => i.ingest(Iterable::Thing(v)),
 				},
 				Value::Edges(v) => {

@@ -14,7 +14,7 @@ use serde_content::Value as Content;
 use std::borrow::Cow;
 use std::future::IntoFuture;
 use std::marker::PhantomData;
-use surrealdb_core::sql::IdValue;
+use surrealdb_core::sql::Id;
 
 /// A patch future
 #[derive(Debug)]
@@ -22,7 +22,7 @@ use surrealdb_core::sql::IdValue;
 pub struct Patch<'r, C: Connection, R> {
 	pub(super) client: Cow<'r, Surreal<C>>,
 	pub(super) resource: Result<Resource>,
-	pub(super) range: Option<Range<IdValue>>,
+	pub(super) range: Option<Range<Id>>,
 	pub(super) patches: Vec<serde_content::Result<Content<'static>>>,
 	pub(super) response_type: PhantomData<R>,
 }

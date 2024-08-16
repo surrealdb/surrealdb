@@ -11,7 +11,7 @@ use serde::de::DeserializeOwned;
 use std::borrow::Cow;
 use std::future::IntoFuture;
 use std::marker::PhantomData;
-use surrealdb_core::sql::IdValue;
+use surrealdb_core::sql::Id;
 
 /// A record delete future
 #[derive(Debug)]
@@ -19,7 +19,7 @@ use surrealdb_core::sql::IdValue;
 pub struct Delete<'r, C: Connection, R> {
 	pub(super) client: Cow<'r, Surreal<C>>,
 	pub(super) resource: Result<Resource>,
-	pub(super) range: Option<Range<IdValue>>,
+	pub(super) range: Option<Range<Id>>,
 	pub(super) response_type: PhantomData<R>,
 }
 
@@ -98,7 +98,7 @@ where
 	C: Connection,
 {
 	/// Restricts a range of records to delete
-	pub fn range(mut self, bounds: impl Into<Range<IdValue>>) -> Self {
+	pub fn range(mut self, bounds: impl Into<Range<Id>>) -> Self {
 		self.range = Some(bounds.into());
 		self
 	}
@@ -109,7 +109,7 @@ where
 	C: Connection,
 {
 	/// Restricts a range of records to delete
-	pub fn range(mut self, bounds: impl Into<Range<IdValue>>) -> Self {
+	pub fn range(mut self, bounds: impl Into<Range<Id>>) -> Self {
 		self.range = Some(bounds.into());
 		self
 	}

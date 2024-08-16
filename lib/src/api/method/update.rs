@@ -17,7 +17,7 @@ use std::borrow::Cow;
 use std::future::IntoFuture;
 use std::marker::PhantomData;
 use surrealdb_core::sql::to_value;
-use surrealdb_core::sql::IdValue;
+use surrealdb_core::sql::Id;
 
 /// An update future
 #[derive(Debug)]
@@ -25,7 +25,7 @@ use surrealdb_core::sql::IdValue;
 pub struct Update<'r, C: Connection, R> {
 	pub(super) client: Cow<'r, Surreal<C>>,
 	pub(super) resource: Result<Resource>,
-	pub(super) range: Option<Range<IdValue>>,
+	pub(super) range: Option<Range<Id>>,
 	pub(super) response_type: PhantomData<R>,
 }
 
@@ -105,7 +105,7 @@ where
 	C: Connection,
 {
 	/// Restricts the records to update to those in the specified range
-	pub fn range(mut self, bounds: impl Into<Range<IdValue>>) -> Self {
+	pub fn range(mut self, bounds: impl Into<Range<Id>>) -> Self {
 		self.range = Some(bounds.into());
 		self
 	}
@@ -116,7 +116,7 @@ where
 	C: Connection,
 {
 	/// Restricts the records to update to those in the specified range
-	pub fn range(mut self, bounds: impl Into<Range<IdValue>>) -> Self {
+	pub fn range(mut self, bounds: impl Into<Range<Id>>) -> Self {
 		self.range = Some(bounds.into());
 		self
 	}
