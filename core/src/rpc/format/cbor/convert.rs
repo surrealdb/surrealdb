@@ -408,10 +408,7 @@ fn encode_geometry(v: Geometry) -> Result<Data, &'static str> {
 	match v {
 		Geometry::Point(v) => Ok(Data::Tag(
 			TAG_GEOMETRY_POINT,
-			Box::new(Data::Array(vec![
-				Data::Tag(TAG_STRING_DECIMAL, Box::new(Data::Text(v.x().to_string()))),
-				Data::Tag(TAG_STRING_DECIMAL, Box::new(Data::Text(v.y().to_string()))),
-			])),
+			Box::new(Data::Array(vec![Data::Float(v.x()), Data::Float(v.y())])),
 		)),
 		Geometry::Line(v) => {
 			let data = v

@@ -21,20 +21,20 @@ pub struct RemoveModelStatement {
 
 impl RemoveModelStatement {
 	/// Process this type returning a computed simple Value
-	pub(crate) async fn compute(&self, ctx: &Context<'_>, opt: &Options) -> Result<Value, Error> {
+	pub(crate) async fn compute(&self, ctx: &Context, opt: &Options) -> Result<Value, Error> {
 		let future = async {
 			// Allowed to run?
 			opt.is_allowed(Action::Edit, ResourceKind::Model, &Base::Db)?;
-			// Claim transaction
-			let mut run = ctx.tx_lock().await;
-			// Clear the cache
-			run.clear_cache();
+			// Get the transaction
+			let txn = ctx.tx();
+			// Get the defined model
+			let ml = txn.get_db_model(opt.ns()?, opt.db()?, &self.name, &self.version).await?;
 			// Delete the definition
-			let key =
-				crate::key::database::ml::new(opt.ns()?, opt.db()?, &self.name, &self.version);
-			run.del(key).await?;
-			// Remove the model file
-			// TODO
+			let key = crate::key::database::ml::new(opt.ns()?, opt.db()?, &ml.name, &ml.version);
+			txn.del(key).await?;
+			// Clear the cache
+			txn.clear();
+			// TODO Remove the model file from storage
 			// Ok all good
 			Ok(Value::None)
 		}

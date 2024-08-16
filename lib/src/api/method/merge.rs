@@ -1,5 +1,5 @@
-use crate::api::conn::Method;
-use crate::api::conn::Param;
+use crate::api::conn::Command;
+use crate::api::method::BoxFuture;
 use crate::api::opt::Range;
 use crate::api::opt::Resource;
 use crate::api::Connection;
@@ -12,10 +12,8 @@ use crate::Surreal;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 use std::borrow::Cow;
-use std::future::Future;
 use std::future::IntoFuture;
 use std::marker::PhantomData;
-use std::pin::Pin;
 
 /// A merge future
 #[derive(Debug)]
@@ -53,12 +51,22 @@ macro_rules! into_future {
 			} = self;
 			let content = to_value(content);
 			Box::pin(async move {
-				let param = match range {
+				let param: Value = match range {
 					Some(range) => resource?.with_range(range)?.into(),
 					None => resource?.into(),
 				};
-				let mut conn = Client::new(Method::Merge);
-				conn.$method(client.router.extract()?, Param::new(vec![param, content?])).await
+
+				let content = match content? {
+					Value::None | Value::Null => None,
+					x => Some(x),
+				};
+
+				let router = client.router.extract()?;
+				let cmd = Command::Merge {
+					what: param,
+					data: content,
+				};
+				router.$method(cmd).await
 			})
 		}
 	};
@@ -67,10 +75,10 @@ macro_rules! into_future {
 impl<'r, Client, D> IntoFuture for Merge<'r, Client, D, Value>
 where
 	Client: Connection,
-	D: Serialize,
+	D: Serialize + 'static,
 {
 	type Output = Result<Value>;
-	type IntoFuture = Pin<Box<dyn Future<Output = Self::Output> + Send + Sync + 'r>>;
+	type IntoFuture = BoxFuture<'r, Self::Output>;
 
 	into_future! {execute_value}
 }
@@ -78,11 +86,11 @@ where
 impl<'r, Client, D, R> IntoFuture for Merge<'r, Client, D, Option<R>>
 where
 	Client: Connection,
-	D: Serialize,
+	D: Serialize + 'static,
 	R: DeserializeOwned,
 {
 	type Output = Result<Option<R>>;
-	type IntoFuture = Pin<Box<dyn Future<Output = Self::Output> + Send + Sync + 'r>>;
+	type IntoFuture = BoxFuture<'r, Self::Output>;
 
 	into_future! {execute_opt}
 }
@@ -90,11 +98,11 @@ where
 impl<'r, Client, D, R> IntoFuture for Merge<'r, Client, D, Vec<R>>
 where
 	Client: Connection,
-	D: Serialize,
+	D: Serialize + 'static,
 	R: DeserializeOwned,
 {
 	type Output = Result<Vec<R>>;
-	type IntoFuture = Pin<Box<dyn Future<Output = Self::Output> + Send + Sync + 'r>>;
+	type IntoFuture = BoxFuture<'r, Self::Output>;
 
 	into_future! {execute_vec}
 }

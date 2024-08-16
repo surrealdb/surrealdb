@@ -1,3 +1,5 @@
+use reblessive::Stk;
+
 use crate::{
 	sql::{
 		statements::{
@@ -18,9 +20,9 @@ use crate::{
 };
 
 impl Parser<'_> {
-	pub fn parse_remove_stmt(&mut self) -> ParseResult<RemoveStatement> {
+	pub async fn parse_remove_stmt(&mut self, ctx: &mut Stk) -> ParseResult<RemoveStatement> {
 		let res = match self.next().kind {
-			t!("NAMESPACE") => {
+			t!("NAMESPACE") | t!("ns") => {
 				let if_exists = if self.eat(t!("IF")) {
 					expected!(self, t!("EXISTS"));
 					true
@@ -136,7 +138,7 @@ impl Parser<'_> {
 				} else {
 					false
 				};
-				let idiom = self.parse_local_idiom()?;
+				let idiom = self.parse_local_idiom(ctx).await?;
 				expected!(self, t!("ON"));
 				self.eat(t!("TABLE"));
 				let table = self.next_token_value()?;

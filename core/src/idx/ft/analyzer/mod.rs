@@ -8,31 +8,21 @@ use crate::idx::ft::offsets::{Offset, OffsetRecords};
 use crate::idx::ft::postings::TermFrequency;
 use crate::idx::ft::terms::{TermId, TermLen, Terms};
 use crate::sql::statements::DefineAnalyzerStatement;
-use crate::sql::tokenizer::Tokenizer as SqlTokenizer;
 use crate::sql::Value;
 use crate::sql::{Function, Strand};
 use filter::Filter;
 use reblessive::tree::Stk;
 use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
 
 mod filter;
 mod tokenizer;
 
+#[derive(Clone)]
 pub(crate) struct Analyzer {
-	function: Option<String>,
-	tokenizers: Option<Vec<SqlTokenizer>>,
-	filters: Option<Vec<Filter>>,
-}
-
-impl From<DefineAnalyzerStatement> for Analyzer {
-	fn from(az: DefineAnalyzerStatement) -> Self {
-		Self {
-			function: az.function.map(|i| i.0),
-			tokenizers: az.tokenizers,
-			filters: Filter::from(az.filters),
-		}
-	}
+	az: Arc<DefineAnalyzerStatement>,
+	filters: Arc<Option<Vec<Filter>>>,
 }
 
 pub(in crate::idx) type TermsList = Vec<Option<(TermId, TermLen)>>;
@@ -59,10 +49,17 @@ impl TermsSet {
 }
 
 impl Analyzer {
+	pub(crate) fn new(az: Arc<DefineAnalyzerStatement>) -> Self {
+		Self {
+			filters: Arc::new(Filter::from(&az.filters)),
+			az,
+		}
+	}
+
 	pub(super) async fn extract_querying_terms(
 		&self,
 		stk: &mut Stk,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		opt: &Options,
 		t: &Terms,
 		content: String,
@@ -72,13 +69,13 @@ impl Analyzer {
 		let mut list = Vec::with_capacity(tokens.list().len());
 		let mut unique_tokens = HashSet::new();
 		let mut set = HashSet::new();
-		let mut tx = ctx.tx_lock().await;
+		let tx = ctx.tx();
 		let mut has_unknown_terms = false;
 		for token in tokens.list() {
 			// Tokens can contains duplicated, not need to evaluate them again
 			if unique_tokens.insert(token) {
 				// Is the term known in the index?
-				let opt_term_id = t.get_term_id(&mut tx, tokens.get_token_string(token)?).await?;
+				let opt_term_id = t.get_term_id(&tx, tokens.get_token_string(token)?).await?;
 				list.push(opt_term_id.map(|tid| (tid, token.get_char_len())));
 				if let Some(term_id) = opt_term_id {
 					set.insert(term_id);
@@ -100,7 +97,7 @@ impl Analyzer {
 	pub(in crate::idx) async fn extract_indexing_terms(
 		&self,
 		stk: &mut Stk,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		opt: &Options,
 		t: &Terms,
 		content: Value,
@@ -109,12 +106,10 @@ impl Analyzer {
 		self.analyze_value(stk, ctx, opt, content, FilteringStage::Indexing, &mut tv).await?;
 		let mut set = HashSet::new();
 		let mut has_unknown_terms = false;
-		let mut tx = ctx.tx_lock().await;
+		let tx = ctx.tx();
 		for tokens in tv {
 			for token in tokens.list() {
-				if let Some(term_id) =
-					t.get_term_id(&mut tx, tokens.get_token_string(token)?).await?
-				{
+				if let Some(term_id) = t.get_term_id(&tx, tokens.get_token_string(token)?).await? {
 					set.insert(term_id);
 				} else {
 					has_unknown_terms = true;
@@ -133,7 +128,7 @@ impl Analyzer {
 	pub(super) async fn extract_terms_with_frequencies(
 		&self,
 		stk: &mut Stk,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		opt: &Options,
 		terms: &mut Terms,
 		field_content: Vec<Value>,
@@ -162,9 +157,9 @@ impl Analyzer {
 		}
 		// Now we can resolve the term ids
 		let mut tfid = Vec::with_capacity(tf.len());
-		let mut tx = ctx.tx_lock().await;
+		let tx = ctx.tx();
 		for (t, f) in tf {
-			tfid.push((terms.resolve_term_id(&mut tx, t).await?, f));
+			tfid.push((terms.resolve_term_id(&tx, t).await?, f));
 		}
 		drop(tx);
 		Ok((dl, tfid))
@@ -175,7 +170,7 @@ impl Analyzer {
 	pub(super) async fn extract_terms_with_frequencies_with_offsets(
 		&self,
 		stk: &mut Stk,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		opt: &Options,
 		terms: &mut Terms,
 		content: Vec<Value>,
@@ -204,9 +199,9 @@ impl Analyzer {
 		// Now we can resolve the term ids
 		let mut tfid = Vec::with_capacity(tfos.len());
 		let mut osid = Vec::with_capacity(tfos.len());
-		let mut tx = ctx.tx_lock().await;
+		let tx = ctx.tx();
 		for (t, o) in tfos {
-			let id = terms.resolve_term_id(&mut tx, t).await?;
+			let id = terms.resolve_term_id(&tx, t).await?;
 			tfid.push((id, o.len() as TermFrequency));
 			osid.push((id, OffsetRecords(o)));
 		}
@@ -218,7 +213,7 @@ impl Analyzer {
 	async fn analyze_content(
 		&self,
 		stk: &mut Stk,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		opt: &Options,
 		content: Vec<Value>,
 		stage: FilteringStage,
@@ -234,7 +229,7 @@ impl Analyzer {
 	async fn analyze_value(
 		&self,
 		stk: &mut Stk,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		opt: &Options,
 		val: Value,
 		stage: FilteringStage,
@@ -266,12 +261,12 @@ impl Analyzer {
 	async fn generate_tokens(
 		&self,
 		stk: &mut Stk,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		opt: &Options,
 		stage: FilteringStage,
 		mut input: String,
 	) -> Result<Tokens, Error> {
-		if let Some(function_name) = self.function.clone() {
+		if let Some(function_name) = self.az.function.as_ref().map(|i| i.0.clone()) {
 			let fns = Function::Custom(function_name.clone(), vec![Value::Strand(Strand(input))]);
 			let val = fns.compute(stk, ctx, opt, None).await?;
 			if let Value::Strand(val) = val {
@@ -283,7 +278,7 @@ impl Analyzer {
 				});
 			}
 		}
-		if let Some(t) = &self.tokenizers {
+		if let Some(t) = &self.az.tokenizers {
 			if !input.is_empty() {
 				let t = Tokenizer::tokenize(t, input);
 				return Filter::apply_filters(t, &self.filters, stage);
@@ -296,7 +291,7 @@ impl Analyzer {
 	pub(crate) async fn analyze(
 		&self,
 		stk: &mut Stk,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		opt: &Options,
 		input: String,
 	) -> Result<Value, Error> {
@@ -307,8 +302,8 @@ impl Analyzer {
 #[cfg(test)]
 mod tests {
 	use super::Analyzer;
-	use crate::ctx::Context;
-	use crate::dbs::{Options, Transaction};
+	use crate::ctx::MutableContext;
+	use crate::dbs::Options;
 	use crate::idx::ft::analyzer::filter::FilteringStage;
 	use crate::idx::ft::analyzer::tokenizer::{Token, Tokens};
 	use crate::kvs::{Datastore, LockType, TransactionType};
@@ -316,20 +311,20 @@ mod tests {
 		sql::{statements::DefineStatement, Statement},
 		syn,
 	};
-	use futures::lock::Mutex;
 	use std::sync::Arc;
 
 	async fn get_analyzer_tokens(def: &str, input: &str) -> Tokens {
 		let ds = Datastore::new("memory").await.unwrap();
-		let tx = ds.transaction(TransactionType::Read, LockType::Optimistic).await.unwrap();
-		let txn: Transaction = Arc::new(Mutex::new(tx));
-		let ctx = Context::default().set_transaction(txn);
+		let txn = ds.transaction(TransactionType::Read, LockType::Optimistic).await.unwrap();
+		let mut ctx = MutableContext::default();
+		ctx.set_transaction(Arc::new(txn));
+		let ctx = ctx.freeze();
 
 		let mut stmt = syn::parse(&format!("DEFINE {def}")).unwrap();
 		let Some(Statement::Define(DefineStatement::Analyzer(az))) = stmt.0 .0.pop() else {
 			panic!()
 		};
-		let a: Analyzer = az.into();
+		let a = Analyzer::new(Arc::new(az));
 
 		let mut stack = reblessive::TreeStack::new();
 

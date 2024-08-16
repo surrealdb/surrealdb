@@ -29,22 +29,17 @@ impl AnalyzeStatement {
 	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		opt: &Options,
-		_doc: Option<&CursorDoc<'_>>,
+		_doc: Option<&CursorDoc>,
 	) -> Result<Value, Error> {
 		match self {
 			AnalyzeStatement::Idx(tb, idx) => {
 				// Allowed to run?
 				opt.is_allowed(Action::View, ResourceKind::Index, &Base::Db)?;
 				// Read the index
-				let ix = ctx
-					.tx_lock()
-					.await
-					.get_and_cache_tb_index(opt.ns()?, opt.db()?, tb, idx)
-					.await?;
+				let ix = ctx.tx().get_tb_index(opt.ns()?, opt.db()?, tb, idx).await?;
 				let ikb = IndexKeyBase::new(opt.ns()?, opt.db()?, &ix)?;
-
 				// Index operation dispatching
 				let value: Value = match &ix.index {
 					Index::Search(p) => {
@@ -54,16 +49,16 @@ impl AnalyzeStatement {
 						ft.statistics(ctx).await?.into()
 					}
 					Index::MTree(p) => {
-						let mut tx = ctx.tx_lock().await;
+						let tx = ctx.tx();
 						let mt = MTreeIndex::new(
 							ctx.get_index_stores(),
-							&mut tx,
+							&tx,
 							ikb,
 							p,
 							TransactionType::Read,
 						)
 						.await?;
-						mt.statistics(&mut tx).await?.into()
+						mt.statistics(&tx).await?.into()
 					}
 					_ => {
 						return Err(Error::FeatureNotYetImplemented {

@@ -32,6 +32,7 @@ pub async fn init(
 		auth: AuthArguments {
 			username,
 			password,
+			token,
 			auth_level,
 		},
 		sel: DatabaseSelectionArguments {
@@ -64,6 +65,11 @@ pub async fn init(
 			CredentialsLevel::Namespace => client.signin(creds.namespace()?).await?,
 			CredentialsLevel::Database => client.signin(creds.database()?).await?,
 		};
+
+		client
+	} else if token.is_some() && !endpoint.clone().into_endpoint()?.parse_kind()?.is_local() {
+		let client = connect(endpoint).await?;
+		client.authenticate(token.unwrap()).await?;
 
 		client
 	} else {

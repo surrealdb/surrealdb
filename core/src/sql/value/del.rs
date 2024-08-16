@@ -3,6 +3,7 @@ use crate::dbs::Options;
 use crate::err::Error;
 use crate::exe::try_join_all_buffered;
 use crate::sql::array::Abolish;
+use crate::sql::part::DestructurePart;
 use crate::sql::part::Next;
 use crate::sql::part::Part;
 use crate::sql::value::Value;
@@ -16,7 +17,7 @@ impl Value {
 	pub(crate) async fn del(
 		&mut self,
 		stk: &mut Stk,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		opt: &Options,
 		path: &[Part],
 	) -> Result<(), Error> {
@@ -25,6 +26,19 @@ impl Value {
 			Some(p) => match self {
 				// Current value at path is an object
 				Value::Object(v) => match p {
+					Part::All => match path.len() {
+						1 => {
+							v.clear();
+							Ok(())
+						}
+						_ => {
+							let path = path.next();
+							for v in v.values_mut() {
+								stk.run(|stk| v.del(stk, ctx, opt, path)).await?;
+							}
+							Ok(())
+						}
+					},
 					Part::Field(f) => match path.len() {
 						1 => {
 							v.remove(f.as_str());
@@ -64,6 +78,20 @@ impl Value {
 						},
 						_ => Ok(()),
 					},
+					Part::Destructure(parts) => {
+						for part in parts {
+							if matches!(part, DestructurePart::Aliased(_, _)) {
+								return Err(Error::UnsupportedDestructure {
+									variant: "An aliased".into(),
+								});
+							}
+
+							let path = [part.path().as_slice(), path.next()].concat();
+							stk.run(|stk| self.del(stk, ctx, opt, &path)).await?;
+						}
+
+						Ok(())
+					}
 					_ => Ok(()),
 				},
 				// Current value at path is an array
@@ -129,7 +157,8 @@ impl Value {
 							// iterate in reverse, and call swap_remove
 							let mut m = HashSet::new();
 							for (i, v) in v.iter().enumerate() {
-								let cur = v.into();
+								// TODO: Can we avoid the cloning?
+								let cur = v.clone().into();
 								if w.compute(stk, ctx, opt, Some(&cur)).await?.is_truthy() {
 									m.insert(i);
 								};
@@ -143,7 +172,7 @@ impl Value {
 								let mut p = Vec::new();
 								// Store the elements and positions to update
 								for (i, o) in v.iter_mut().enumerate() {
-									let cur = o.into();
+									let cur = o.clone().into();
 									if w.compute(stk, ctx, opt, Some(&cur)).await?.is_truthy() {
 										a.push(o.clone());
 										p.push(i);
@@ -167,7 +196,7 @@ impl Value {
 							_ => {
 								let path = path.next();
 								for v in v.iter_mut() {
-									let cur = v.into();
+									let cur = v.clone().into();
 									if w.compute(stk, ctx, opt, Some(&cur)).await?.is_truthy() {
 										stk.run(|stk| v.del(stk, ctx, opt, path)).await?;
 									}

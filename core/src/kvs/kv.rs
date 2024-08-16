@@ -4,15 +4,6 @@ pub type Key = Vec<u8>;
 /// The value part of a key-value pair. An alias for [`Vec<u8>`].
 pub type Val = Vec<u8>;
 
-/// Used to determine the behaviour when a transaction is not handled correctly
-#[derive(Default)]
-pub(crate) enum Check {
-	#[default]
-	None,
-	Warn,
-	Panic,
-}
-
 /// This trait appends an element to a collection, and allows chaining
 pub(super) trait Add<T> {
 	fn add(self, v: T) -> Self;

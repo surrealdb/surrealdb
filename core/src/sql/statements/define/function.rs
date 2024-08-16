@@ -3,17 +3,15 @@ use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::iam::{Action, ResourceKind};
+use crate::sql::fmt::{is_pretty, pretty_indent};
 use crate::sql::statements::info::InfoStructure;
-use crate::sql::{
-	fmt::{is_pretty, pretty_indent},
-	Base, Block, Ident, Kind, Object, Permission, Strand, Value,
-};
+use crate::sql::{Base, Block, Ident, Kind, Permission, Strand, Value};
 use derive::Store;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Write};
 
-#[revisioned(revision = 2)]
+#[revisioned(revision = 4)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
@@ -25,27 +23,29 @@ pub struct DefineFunctionStatement {
 	pub permissions: Permission,
 	#[revision(start = 2)]
 	pub if_not_exists: bool,
+	#[revision(start = 3)]
+	pub overwrite: bool,
+	#[revision(start = 4)]
+	pub returns: Option<Kind>,
 }
 
 impl DefineFunctionStatement {
 	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		opt: &Options,
-		_doc: Option<&CursorDoc<'_>>,
+		_doc: Option<&CursorDoc>,
 	) -> Result<Value, Error> {
 		// Allowed to run?
 		opt.is_allowed(Action::Edit, ResourceKind::Function, &Base::Db)?;
-		// Claim transaction
-		let mut run = ctx.tx_lock().await;
-		// Clear the cache
-		run.clear_cache();
-		// Check if function already exists
-		if run.get_db_function(opt.ns()?, opt.db()?, &self.name).await.is_ok() {
+		// Fetch the transaction
+		let txn = ctx.tx();
+		// Check if the definition exists
+		if txn.get_db_function(opt.ns()?, opt.db()?, &self.name).await.is_ok() {
 			if self.if_not_exists {
 				return Ok(Value::None);
-			} else {
+			} else if !self.overwrite {
 				return Err(Error::FcAlreadyExists {
 					value: self.name.to_string(),
 				});
@@ -53,17 +53,20 @@ impl DefineFunctionStatement {
 		}
 		// Process the statement
 		let key = crate::key::database::fc::new(opt.ns()?, opt.db()?, &self.name);
-		run.add_ns(opt.ns()?, opt.strict).await?;
-		run.add_db(opt.ns()?, opt.db()?, opt.strict).await?;
-		run.set(
+		txn.get_or_add_ns(opt.ns()?, opt.strict).await?;
+		txn.get_or_add_db(opt.ns()?, opt.db()?, opt.strict).await?;
+		txn.set(
 			key,
 			DefineFunctionStatement {
-				// Don't persist the "IF NOT EXISTS" clause to schema
+				// Don't persist the `IF NOT EXISTS` clause to schema
 				if_not_exists: false,
+				overwrite: false,
 				..self.clone()
 			},
 		)
 		.await?;
+		// Clear the cache
+		txn.clear();
 		// Ok all good
 		Ok(Value::None)
 	}
@@ -74,6 +77,9 @@ impl fmt::Display for DefineFunctionStatement {
 		write!(f, "DEFINE FUNCTION")?;
 		if self.if_not_exists {
 			write!(f, " IF NOT EXISTS")?
+		}
+		if self.overwrite {
+			write!(f, " OVERWRITE")?
 		}
 		write!(f, " fn::{}(", self.name.0)?;
 		for (i, (name, kind)) in self.args.iter().enumerate() {
@@ -100,36 +106,16 @@ impl fmt::Display for DefineFunctionStatement {
 
 impl InfoStructure for DefineFunctionStatement {
 	fn structure(self) -> Value {
-		let Self {
-			name,
-			args,
-			block,
-			comment,
-			permissions,
-			..
-		} = self;
-		let mut acc = Object::default();
-
-		acc.insert("name".to_string(), name.structure());
-
-		acc.insert(
-			"args".to_string(),
-			Value::Array(
-				args.into_iter()
-					.map(|(n, k)| Value::Array(vec![n.structure(), k.structure()].into()))
-					.collect::<Vec<Value>>()
-					.into(),
-			),
-		);
-
-		acc.insert("block".to_string(), block.structure());
-
-		acc.insert("permissions".to_string(), permissions.structure());
-
-		if let Some(comment) = comment {
-			acc.insert("comment".to_string(), comment.into());
-		}
-
-		Value::Object(acc)
+		Value::from(map! {
+			"name".to_string() => self.name.structure(),
+			"args".to_string() => self.args
+				.into_iter()
+				.map(|(n, k)| vec![n.structure(), k.structure()].into())
+				.collect::<Vec<Value>>()
+				.into(),
+			"block".to_string() => self.block.structure(),
+			"permissions".to_string() => self.permissions.structure(),
+			"comment".to_string(), if let Some(v) = self.comment => v.into(),
+		})
 	}
 }

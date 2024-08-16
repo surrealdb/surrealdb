@@ -32,17 +32,17 @@ where
 	I::Item: TryFuture,
 {
 	#[cfg(target_arch = "wasm32")]
-	const LIMIT: usize = 1;
+	let limit: usize = 1;
 
 	#[cfg(not(target_arch = "wasm32"))]
-	const LIMIT: usize = crate::cnf::MAX_CONCURRENT_TASKS;
+	let limit: usize = *crate::cnf::MAX_CONCURRENT_TASKS;
 
 	let mut input = iter.into_iter();
 	let (lo, hi) = input.size_hint();
 	let initial_capacity = hi.unwrap_or(lo);
 	let mut active = FuturesOrdered::new();
 
-	while active.len() < LIMIT {
+	while active.len() < limit {
 		if let Some(next) = input.next() {
 			active.push_back(TryFutureExt::into_future(next));
 		} else {
@@ -64,7 +64,7 @@ where
 {
 	type Output = Result<Vec<F::Ok>, F::Error>;
 
-	fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+	fn poll(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
 		let mut this = self.project();
 		Poll::Ready(Ok(loop {
 			match ready!(this.active.as_mut().try_poll_next(cx)?) {
@@ -105,7 +105,7 @@ mod tests {
 
 		fn poll(
 			self: std::pin::Pin<&mut Self>,
-			cx: &mut std::task::Context<'_>,
+			cx: &mut std::task::Context,
 		) -> std::task::Poll<Self::Output> {
 			let me = self.project();
 			ready!(me.sleep.poll(cx));

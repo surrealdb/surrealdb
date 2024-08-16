@@ -21,24 +21,21 @@ pub struct RemoveFieldStatement {
 
 impl RemoveFieldStatement {
 	/// Process this type returning a computed simple Value
-	pub(crate) async fn compute(&self, ctx: &Context<'_>, opt: &Options) -> Result<Value, Error> {
+	pub(crate) async fn compute(&self, ctx: &Context, opt: &Options) -> Result<Value, Error> {
 		let future = async {
 			// Allowed to run?
 			opt.is_allowed(Action::Edit, ResourceKind::Field, &Base::Db)?;
-			// Claim transaction
-			let mut run = ctx.tx_lock().await;
-			// Clear the cache
-			run.clear_cache();
+			// Get the transaction
+			let txn = ctx.tx();
+			// Get the field name
+			let na = self.name.to_string();
 			// Get the definition
-			let fd_name = self.name.to_string();
-			let fd = run.get_tb_field(opt.ns()?, opt.db()?, &self.what, &fd_name).await?;
+			let fd = txn.get_tb_field(opt.ns()?, opt.db()?, &self.what, &na).await?;
 			// Delete the definition
-			let fd_name = fd.name.to_string();
-			let key = crate::key::table::fd::new(opt.ns()?, opt.db()?, &self.what, &fd_name);
-			run.del(key).await?;
+			let key = crate::key::table::fd::new(opt.ns()?, opt.db()?, &fd.what, &na);
+			txn.del(key).await?;
 			// Clear the cache
-			let key = crate::key::table::fd::prefix(opt.ns()?, opt.db()?, &self.what);
-			run.clr(key).await?;
+			txn.clear();
 			// Ok all good
 			Ok(Value::None)
 		}

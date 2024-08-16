@@ -1,4 +1,5 @@
 use crate::idx::planner::executor::KnnExpressions;
+use crate::sql::part::DestructurePart;
 use crate::sql::{
 	Array, Cast, Cond, Expression, Function, Id, Idiom, Model, Object, Part, Range, Thing, Value,
 };
@@ -10,6 +11,7 @@ pub(super) struct KnnConditionRewriter<'a>(&'a KnnExpressions);
 
 impl<'a> KnnConditionRewriter<'a> {
 	// This function rebuild the same condition, but replaces any KnnExpression by a `true` value
+	#[allow(clippy::mutable_key_type)]
 	pub(super) fn build(expressions: &'a KnnExpressions, cond: &Cond) -> Option<Cond> {
 		let b = Self(expressions);
 		b.eval_value(&cond.0).map(Cond)
@@ -45,7 +47,8 @@ impl<'a> KnnConditionRewriter<'a> {
 			| Value::Table(_)
 			| Value::Mock(_)
 			| Value::Regex(_)
-			| Value::Constant(_) => Some(v.clone()),
+			| Value::Constant(_)
+			| Value::Closure(_) => Some(v.clone()),
 		}
 	}
 
@@ -62,6 +65,30 @@ impl<'a> KnnConditionRewriter<'a> {
 		for v in values {
 			if let Some(v) = self.eval_value(v) {
 				new_vec.push(v);
+			} else {
+				return None;
+			}
+		}
+		Some(new_vec)
+	}
+
+	fn eval_destructure_part(&self, part: &DestructurePart) -> Option<DestructurePart> {
+		match part {
+			DestructurePart::Aliased(f, v) => {
+				self.eval_idiom(v).map(|v| DestructurePart::Aliased(f.clone(), v))
+			}
+			DestructurePart::Destructure(f, v) => {
+				self.eval_destructure_parts(v).map(|v| DestructurePart::Destructure(f.clone(), v))
+			}
+			p => Some(p.clone()),
+		}
+	}
+
+	fn eval_destructure_parts(&self, parts: &[DestructurePart]) -> Option<Vec<DestructurePart>> {
+		let mut new_vec = Vec::with_capacity(parts.len());
+		for part in parts {
+			if let Some(part) = self.eval_destructure_part(part) {
+				new_vec.push(part);
 			} else {
 				return None;
 			}
@@ -131,6 +158,7 @@ impl<'a> KnnConditionRewriter<'a> {
 			Part::Value(v) => self.eval_value(v).map(Part::Value),
 			Part::Start(v) => self.eval_value(v).map(Part::Start),
 			Part::Method(n, p) => self.eval_values(p).map(|v| Part::Method(n.clone(), v)),
+			Part::Destructure(p) => self.eval_destructure_parts(p).map(Part::Destructure),
 		}
 	}
 
@@ -180,6 +208,9 @@ impl<'a> KnnConditionRewriter<'a> {
 			}
 			Function::Script(s, args) => {
 				self.eval_values(args).map(|args| Function::Script(s.clone(), args))
+			}
+			Function::Anonymous(p, args) => {
+				self.eval_values(args).map(|args| Function::Anonymous(p.clone(), args))
 			}
 		}
 	}
