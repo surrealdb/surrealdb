@@ -25,6 +25,7 @@ pub enum Part {
 	Method(#[serde(with = "no_nul_bytes")] String, Vec<Value>),
 	#[revision(start = 2)]
 	Destructure(Vec<DestructurePart>),
+	Optional,
 }
 
 impl From<i32> for Part {
@@ -128,6 +129,7 @@ impl fmt::Display for Part {
 					f.write_str(" }")
 				}
 			}
+			Part::Optional => write!(f, "?"),
 		}
 	}
 }
