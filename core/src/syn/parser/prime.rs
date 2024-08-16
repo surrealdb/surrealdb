@@ -140,6 +140,14 @@ impl Parser<'_> {
 		ctx: &mut Stk,
 		subject: Option<&Value>,
 	) -> ParseResult<Option<Value>> {
+		// The ">" can also mean a comparison.
+		// If the token after is not "..", then return
+		if self.peek_whitespace().kind == t!(">")
+			&& self.peek_whitespace_token_at(1).kind != t!("..")
+		{
+			return Ok(None);
+		}
+
 		let beg = if let Some(subject) = subject {
 			if self.eat_whitespace(t!(">")) {
 				expected_whitespace!(self, t!(".."));
@@ -180,7 +188,7 @@ impl Parser<'_> {
 		ctx: &mut Stk,
 		subject: &Value,
 	) -> ParseResult<Option<Value>> {
-		if self.eat(t!("(")) {
+		if self.eat_whitespace(t!("(")) {
 			let start = self.last_span();
 			let mut args = Vec::new();
 			loop {
