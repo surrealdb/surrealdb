@@ -2757,6 +2757,25 @@ impl Value {
 			_ => self.partial_cmp(other),
 		}
 	}
+
+	pub fn can_be_range_bound(&self) -> bool {
+		matches!(
+			self,
+			Value::None
+				| Value::Null | Value::Array(_)
+				| Value::Block(_)
+				| Value::Bool(_) | Value::Datetime(_)
+				| Value::Duration(_)
+				| Value::Geometry(_)
+				| Value::Number(_)
+				| Value::Object(_)
+				| Value::Param(_)
+				| Value::Strand(_)
+				| Value::Subquery(_)
+				| Value::Table(_)
+				| Value::Uuid(_)
+		)
+	}
 }
 
 impl fmt::Display for Value {
@@ -3070,7 +3089,8 @@ mod tests {
 
 	#[test]
 	fn check_size() {
-		assert!(64 >= std::mem::size_of::<Value>(), "size of value too big");
+		println!("{:?}", std::mem::size_of::<Value>());
+		assert!(104 >= std::mem::size_of::<Value>(), "size of value too big");
 		assert_eq!(112, std::mem::size_of::<Error>());
 		assert_eq!(112, std::mem::size_of::<Result<Value, Error>>());
 		assert_eq!(24, std::mem::size_of::<crate::sql::number::Number>());

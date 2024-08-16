@@ -698,6 +698,7 @@ pub async fn idiom(
 				"to_int" => r#type::int,
 				"to_number" => r#type::number,
 				"to_point" => r#type::point,
+				"to_range" => r#type::range,
 				"to_record" => r#type::record,
 				"to_string" => r#type::string,
 				"to_uuid" => r#type::uuid,

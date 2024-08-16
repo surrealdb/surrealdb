@@ -3,7 +3,7 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::sql::{Number, Value};
+use crate::sql::{Number, Subquery, Value};
 use crate::syn;
 use reblessive::tree::Stk;
 use revision::revisioned;
@@ -180,15 +180,23 @@ impl Ord for Range {
 
 impl fmt::Display for Range {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		fn bound_value(v: &Value) -> Value {
+			if v.can_be_range_bound() {
+				v.to_owned()
+			} else {
+				Value::Subquery(Box::new(Subquery::Value(v.to_owned())))
+			}
+		}
+
 		match &self.beg {
 			Bound::Unbounded => write!(f, ""),
-			Bound::Included(v) => write!(f, "{v}"),
-			Bound::Excluded(v) => write!(f, "{v}>"),
+			Bound::Included(v) => write!(f, "{}", bound_value(v)),
+			Bound::Excluded(v) => write!(f, "{}>", bound_value(v)),
 		}?;
 		match &self.end {
 			Bound::Unbounded => write!(f, ".."),
-			Bound::Excluded(v) => write!(f, "..{v}"),
-			Bound::Included(v) => write!(f, "..={v}"),
+			Bound::Excluded(v) => write!(f, "..{}", bound_value(v)),
+			Bound::Included(v) => write!(f, "..={}", bound_value(v)),
 		}?;
 		Ok(())
 	}

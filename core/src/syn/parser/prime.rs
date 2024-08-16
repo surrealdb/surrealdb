@@ -15,7 +15,7 @@ use crate::{
 			mac::{expected, expected_whitespace, unexpected},
 			ParseError, ParseErrorKind,
 		},
-		token::{t, Span, TokenKind},
+		token::{t, DurationSuffix, Span, TokenKind},
 	},
 };
 
@@ -170,7 +170,7 @@ impl Parser<'_> {
 		let end = if self.eat_whitespace(t!("=")) {
 			let id = ctx.run(|ctx| self.parse_simple_value(ctx)).await?;
 			Bound::Included(id)
-		} else if !self.next_is_whitespace() {
+		} else if Self::tokenkind_can_start_simple_value(self.peek_whitespace().kind) {
 			let id = ctx.run(|ctx| self.parse_simple_value(ctx)).await?;
 			Bound::Excluded(id)
 		} else {
@@ -912,19 +912,42 @@ impl Parser<'_> {
 			}
 		};
 
-		// Parse the rest of the idiom if it is being continued.
-		if Self::continues_idiom(self.peek_kind()) {
-			let value = match value {
-				Value::Idiom(Idiom(x)) => self.parse_remaining_value_idiom(ctx, x).await,
-				Value::Table(Table(x)) => {
-					self.parse_remaining_value_idiom(ctx, vec![Part::Field(Ident(x))]).await
-				}
-				x => self.parse_remaining_value_idiom(ctx, vec![Part::Start(x)]).await,
-			}?;
-			Ok(self.try_parse_inline(ctx, &value).await?.unwrap_or(value))
-		} else {
-			Ok(value)
-		}
+		Ok(value)
+	}
+
+	pub fn tokenkind_can_start_simple_value(t: TokenKind) -> bool {
+		matches!(
+			t,
+			t!("NONE")
+				| t!("NULL") | t!("true")
+				| t!("false") | t!("r\"")
+				| t!("r'") | t!("d\"")
+				| t!("d'") | t!("u\"")
+				| t!("u'") | t!("\"")
+				| t!("'") | t!("+")
+				| t!("-") | TokenKind::Number(_)
+				| TokenKind::Digits
+				| TokenKind::Duration
+				| TokenKind::NaN | t!("$param")
+				| t!("[") | t!("{")
+				| t!("(") | TokenKind::Keyword(_)
+				| TokenKind::Language(_)
+				| TokenKind::Algorithm(_)
+				| TokenKind::Distance(_)
+				| TokenKind::VectorType(_)
+				| TokenKind::Identifier
+				| TokenKind::Exponent
+				| TokenKind::DatetimeChars(_)
+				| TokenKind::NumberSuffix(_)
+				| TokenKind::DurationSuffix(
+					// All except Micro unicode
+					DurationSuffix::Nano
+						| DurationSuffix::Micro | DurationSuffix::Milli
+						| DurationSuffix::Second | DurationSuffix::Minute
+						| DurationSuffix::Hour | DurationSuffix::Day
+						| DurationSuffix::Week | DurationSuffix::Year
+				)
+		)
 	}
 }
 

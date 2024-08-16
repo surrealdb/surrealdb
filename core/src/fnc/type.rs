@@ -1,5 +1,3 @@
-use std::ops::Bound;
-
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
@@ -7,7 +5,7 @@ use crate::err::Error;
 use crate::sql::table::Table;
 use crate::sql::thing::Thing;
 use crate::sql::value::Value;
-use crate::sql::{Kind, Range, Strand};
+use crate::sql::{Kind, Strand};
 use crate::syn;
 use reblessive::tree::Stk;
 
@@ -95,73 +93,8 @@ pub fn point((val,): (Value,)) -> Result<Value, Error> {
 	val.convert_to_point().map(Value::from)
 }
 
-pub fn range(args: Vec<Value>) -> Result<Value, Error> {
-	if args.len() > 3 {
-		return Err(Error::InvalidArguments {
-			name: "type::range".to_owned(),
-			message: "Expected at most 3 arguments".to_owned(),
-		});
-	}
-	let mut args = args.into_iter();
-	let beg = args.next();
-	let end = args.next();
-	let (beg, end) = if let Some(x) = args.next() {
-		let Value::Object(x) = x else {
-			return Err(Error::ConvertTo {
-				from: x,
-				into: "object".to_owned(),
-			});
-		};
-		let beg = if let Some(x) = x.get("begin") {
-			let beg = beg.ok_or_else(|| Error::InvalidArguments {
-				name: "type::range".to_string(),
-				message: "Can't define an inclusion for begin if there is no begin bound"
-					.to_string(),
-			})?;
-			match x {
-				Value::Strand(Strand(x)) if x == "included" => Bound::Included(beg),
-				Value::Strand(Strand(x)) if x == "excluded" => Bound::Excluded(beg),
-				x => {
-					return Err(Error::ConvertTo {
-						from: x.clone(),
-						into: r#""included" | "excluded""#.to_owned(),
-					})
-				}
-			}
-		} else {
-			beg.map(Bound::Included).unwrap_or(Bound::Unbounded)
-		};
-		let end = if let Some(x) = x.get("end") {
-			let end = end.ok_or_else(|| Error::InvalidArguments {
-				name: "type::range".to_string(),
-				message: "Can't define an inclusion for end if there is no end bound".to_string(),
-			})?;
-			match x {
-				Value::Strand(Strand(x)) if x == "included" => Bound::Included(end),
-				Value::Strand(Strand(x)) if x == "excluded" => Bound::Excluded(end),
-				x => {
-					return Err(Error::ConvertTo {
-						from: x.clone(),
-						into: r#""included" | "excluded""#.to_owned(),
-					})
-				}
-			}
-		} else {
-			end.map(Bound::Excluded).unwrap_or(Bound::Unbounded)
-		};
-		(beg, end)
-	} else {
-		(
-			beg.map(Bound::Included).unwrap_or(Bound::Unbounded),
-			end.map(Bound::Excluded).unwrap_or(Bound::Unbounded),
-		)
-	};
-
-	Ok(Range {
-		beg,
-		end,
-	}
-	.into())
+pub fn range((val,): (Value,)) -> Result<Value, Error> {
+	val.convert_to_range().map(Value::from)
 }
 
 pub fn record((rid, tb): (Value, Option<Value>)) -> Result<Value, Error> {

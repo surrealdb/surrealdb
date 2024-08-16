@@ -5513,33 +5513,24 @@ async fn function_type_thing() -> Result<(), Error> {
 #[tokio::test]
 async fn function_type_range() -> Result<(), Error> {
 	let sql = r#"
-		RETURN type::range('person');
-		RETURN type::range('person',1);
-		RETURN type::range('person',null,10);
-		RETURN type::range('person',1,10);
-		RETURN type::range('person',1,10, { begin: "excluded", end: "included"});
+	    RETURN type::range(..);
+		RETURN type::range(1..2);
+		RETURN type::range([1, 2]);
 	"#;
 	let mut test = Test::new(sql).await?;
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::parse("person:..");
+	let val = Value::parse("..");
 	assert_eq!(tmp, val);
-
+	//
 	let tmp = test.next()?.result?;
-	let val = Value::parse("person:1..");
+	let val = Value::parse("1..2");
 	assert_eq!(tmp, val);
-
+	//
 	let tmp = test.next()?.result?;
-	let val = Value::parse("person:..10");
+	let val = Value::parse("1..2");
 	assert_eq!(tmp, val);
-
-	let tmp = test.next()?.result?;
-	let val = Value::parse("person:1..10");
-	assert_eq!(tmp, val);
-
-	let tmp = test.next()?.result?;
-	let val = Value::parse("person:1>..=10");
-	assert_eq!(tmp, val);
+	//
 	Ok(())
 }
 
