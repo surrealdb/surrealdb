@@ -20,6 +20,22 @@ pub struct ForeachStatement {
 	pub block: Block,
 }
 
+enum ForeachIter {
+	Array(std::vec::IntoIter<Value>),
+	Range(std::iter::Map<std::ops::Range<i64>, fn(i64) -> Value>),
+}
+
+impl Iterator for ForeachIter {
+	type Item = Value;
+
+	fn next(&mut self) -> Option<Self::Item> {
+		match self {
+			ForeachIter::Array(iter) => iter.next(),
+			ForeachIter::Range(iter) => iter.next(),
+		}
+	}
+}
+
 impl ForeachStatement {
 	/// Check if we require a writeable transaction
 	pub(crate) fn writeable(&self) -> bool {
@@ -38,15 +54,12 @@ impl ForeachStatement {
 		// Check the loop data
 		let data = self.range.compute(stk, ctx, opt, doc).await?;
 		let iter = match data {
-			Value::Array(arr) => arr.into_iter(),
-
-			// TODO can we improve this return an iterator instead of mapping it to a vec first?
-			// My issue was that array would return an iterator for Value, and ranges for i64.
-			// I could not figure out how to make this generic.
+			Value::Array(arr) => ForeachIter::Array(arr.into_iter()),
 			Value::Range(r) => {
 				let r: std::ops::Range<i64> = r.deref().to_owned().try_into()?;
-				r.map(Value::from).collect::<Vec<Value>>().into_iter()
+				ForeachIter::Range(r.map(Value::from))
 			}
+
 			v => {
 				return Err(Error::InvalidStatementTarget {
 					value: v.to_string(),
