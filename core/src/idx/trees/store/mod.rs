@@ -278,7 +278,7 @@ impl IndexStores {
 
 	pub(crate) async fn get_index_hnsw(
 		&self,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		opt: &Options,
 		ix: &DefineIndexStatement,
 		p: &HnswParams,

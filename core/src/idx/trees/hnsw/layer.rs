@@ -389,7 +389,8 @@ where
 		// Load the chunks
 		for i in 0..st.chunks {
 			let key = self.ikb.new_hl_key(self.level, i);
-			let chunk = tx.get(key).await?.ok_or_else(|| Error::Unreachable("Missing chunk"))?;
+			let chunk =
+				tx.get(key, None).await?.ok_or_else(|| Error::Unreachable("Missing chunk"))?;
 			val.extend(chunk);
 		}
 		// Rebuild the graph

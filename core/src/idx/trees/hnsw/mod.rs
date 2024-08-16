@@ -98,7 +98,7 @@ where
 
 	async fn check_state(&mut self, tx: &Transaction) -> Result<(), Error> {
 		// Read the state
-		let st: HnswState = if let Some(val) = tx.get(self.state_key.clone()).await? {
+		let st: HnswState = if let Some(val) = tx.get(self.state_key.clone(), None).await? {
 			VersionedStore::try_from(val)?
 		} else {
 			Default::default()

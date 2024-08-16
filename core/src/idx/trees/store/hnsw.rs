@@ -22,7 +22,7 @@ impl Default for HnswIndexes {
 impl HnswIndexes {
 	pub(super) async fn get(
 		&self,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		tb: &str,
 		ikb: &IndexKeyBase,
 		p: &HnswParams,

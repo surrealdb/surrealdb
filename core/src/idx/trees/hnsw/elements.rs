@@ -70,7 +70,7 @@ impl HnswElements {
 			return Ok(Some(r.value().clone()));
 		}
 		let key = self.ikb.new_he_key(*e_id);
-		match tx.get(key).await? {
+		match tx.get(key, None).await? {
 			None => Ok(None),
 			Some(val) => {
 				let vec: SerializedVector = VersionedStore::try_from(val)?;

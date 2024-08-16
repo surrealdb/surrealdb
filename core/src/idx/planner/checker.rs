@@ -79,12 +79,12 @@ impl<'a> HnswConditionChecker<'a> {
 impl<'a> MTreeConditionChecker<'a> {
 	pub fn new_cond(ctx: &'a Context, opt: &'a Options, cond: Arc<Cond>) -> Self {
 		if Cond(Value::Bool(true)).ne(cond.as_ref()) {
-			return Self::MTreeCondition(MTreeCondChecker {
+			Self::MTreeCondition(MTreeCondChecker {
 				ctx,
 				opt,
 				cond,
 				cache: Default::default(),
-			});
+			})
 		} else {
 			Self::new(ctx)
 		}
@@ -266,7 +266,7 @@ impl HnswChecker {
 		}
 		let mut result = VecDeque::with_capacity(res.len());
 		for (doc_id, dist) in res {
-			if let Some(rid) = docs.get_thing(tx, doc_id) {
+			if let Some(rid) = docs.get_thing(tx, doc_id).await? {
 				result.push_back((rid.clone().into(), dist, None));
 			}
 		}
