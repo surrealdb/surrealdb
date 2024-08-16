@@ -974,8 +974,8 @@ build.allow_build_instructions = ["cargo::rustc-check-cfg=*"]
 allow_unsafe = true
 allow_apis = ["net", "fs"]
 build.allow_build_instructions = [
-    "cargo:rustc-cfg=storage",
-    "cargo::rustc-check-cfg=cfg(storage)",
+    "cargo:rustc-cfg=*",
+    "cargo::rustc-check-cfg=*",
 ]
 
 [pkg.assert_fs]
