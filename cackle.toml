@@ -1361,3 +1361,20 @@ allow_unsafe = true
 
 [pkg.castaway]
 allow_unsafe = true
+
+[pkg.blake3]
+build.allow_apis = [
+    "fs",
+]
+build.allow_build_instructions = [
+    "cargo:rustc-link-lib=static=blake3_avx512_assembly",
+    "cargo:rustc-link-lib=static=blake3_sse2_sse41_avx2_assembly",
+    "cargo:rustc-link-search=native=*",
+]
+allow_unsafe = true
+
+[pkg.arrayref]
+allow_unsafe = true
+
+[pkg.constant_time_eq]
+allow_unsafe = true
