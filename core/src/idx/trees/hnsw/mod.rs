@@ -433,7 +433,7 @@ where
 
 #[cfg(test)]
 mod tests {
-	use crate::ctx::Context;
+	use crate::ctx::{Context, MutableContext};
 	use crate::err::Error;
 	use crate::idx::docids::DocId;
 	use crate::idx::planner::checker::HnswConditionChecker;
@@ -704,9 +704,9 @@ mod tests {
 
 	async fn new_ctx(ds: &Datastore, tt: TransactionType) -> Context {
 		let tx = Arc::new(ds.transaction(tt, Optimistic).await.unwrap());
-		let mut ctx = Context::default();
+		let mut ctx = MutableContext::default();
 		ctx.set_transaction(tx);
-		ctx
+		ctx.freeze()
 	}
 
 	async fn test_hnsw_index(collection_size: usize, unique: bool, p: HnswParams) {
