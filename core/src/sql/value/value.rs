@@ -3005,4 +3005,15 @@ mod tests {
 		let dec: Value = enc.into();
 		assert_eq!(res, dec);
 	}
+
+	#[test]
+	fn test_value_from_vec() {
+		let vector = vec![1.0 as f32, 2.0, 3.0, 4.0, 5.0, 6.0];
+		let mut buffer = vec![];
+
+		for value in vector.iter() {
+			buffer.push(Value::from(*value));
+		}
+		let value = Value::from(buffer);
+	}
 }

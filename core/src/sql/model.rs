@@ -129,7 +129,7 @@ impl Model {
 				// Get the model file as bytes
 				let bytes = crate::obs::get(&path).await?;
 				// Run the compute in a blocking task
-				let outcome = tokio::task::spawn_blocking(move || {
+				let outcome: Vec<f32> = tokio::task::spawn_blocking(move || {
 					let mut file = SurMlFile::from_bytes(bytes).map_err(|err: SurrealError| {
 						Error::ModelComputation(err.message.to_string())
 					})?;
@@ -145,9 +145,10 @@ impl Model {
 				// Convert the output to a value
 				let mut buffer = Vec::with_capacity(outcome.len());
 				for v in outcome {
-					buffer.push(v.into());
+					buffer.push(Value::from(*v));
 				}
-				Ok(buffer.into())
+				let package: Value = Value::from(buffer);
+				Ok(package)
 			}
 			// Perform raw compute
 			Value::Number(v) => {
@@ -175,12 +176,12 @@ impl Model {
 				.await
 				.unwrap()?;
 				// Convert the output to a value
-				// Convert the output to a value
 				let mut buffer = Vec::with_capacity(outcome.len());
 				for v in outcome {
-					buffer.push(v.into());
+					buffer.push(Value::from(*v));
 				}
-				Ok(buffer.into())
+				let package: Value = Value::from(buffer);
+				Ok(package)
 			}
 			// Perform raw compute
 			Value::Array(v) => {
@@ -212,12 +213,12 @@ impl Model {
 				.await
 				.unwrap()?;
 				// Convert the output to a value
-				// Convert the output to a value
 				let mut buffer = Vec::with_capacity(outcome.len());
 				for v in outcome {
-					buffer.push(v.into());
+					buffer.push(Value::from(*v));
 				}
-				Ok(buffer.into())
+				let package: Value = Value::from(buffer);
+				Ok(package)
 			}
 			//
 			_ => Err(Error::InvalidArguments {
