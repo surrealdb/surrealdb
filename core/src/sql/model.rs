@@ -148,7 +148,7 @@ impl Model {
 				.await
 				.unwrap()?;
 				// Convert the output to a value
-				Ok(outcome[0].into())
+				Ok(outcome.into())
 			}
 			// Perform raw compute
 			Value::Number(v) => {
@@ -176,7 +176,7 @@ impl Model {
 				.await
 				.unwrap()?;
 				// Convert the output to a value
-				Ok(outcome[0].into())
+				Ok(outcome.into())
 			}
 			// Perform raw compute
 			Value::Array(v) => {
@@ -208,7 +208,7 @@ impl Model {
 				.await
 				.unwrap()?;
 				// Convert the output to a value
-				Ok(outcome[0].into())
+				Ok(outcome.into())
 			}
 			//
 			_ => Err(Error::InvalidArguments {
