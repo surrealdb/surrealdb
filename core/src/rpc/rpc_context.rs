@@ -251,7 +251,7 @@ pub trait RpcContext {
 			return Err(RpcError::InvalidParams);
 		};
 		// Return a single result?
-		let one = what.is_thing();
+		let one = what.is_thing_single();
 		// Specify the SQL query string
 		let sql = "SELECT * FROM $what";
 		// Specify the query parameters
@@ -279,7 +279,7 @@ pub trait RpcContext {
 			return Err(RpcError::InvalidParams);
 		};
 		// Return a single result?
-		let one = what.is_thing();
+		let one = what.is_thing_single();
 		// Specify the SQL query string
 		let sql = "INSERT INTO $what $data RETURN AFTER";
 		// Specify the query parameters
@@ -308,7 +308,7 @@ pub trait RpcContext {
 			return Err(RpcError::InvalidParams);
 		};
 		// Return a single result?
-		let one = what.is_thing();
+		let one = what.is_thing_single();
 		// Specify the SQL query string
 		let sql = if data.is_none_or_null() {
 			"CREATE $what RETURN AFTER"
@@ -341,7 +341,7 @@ pub trait RpcContext {
 			return Err(RpcError::InvalidParams);
 		};
 		// Return a single result?
-		let one = what.is_thing();
+		let one = what.is_thing_single();
 		// Specify the SQL query string
 		let sql = if data.is_none_or_null() {
 			"UPSERT $what RETURN AFTER"
@@ -374,7 +374,7 @@ pub trait RpcContext {
 			return Err(RpcError::InvalidParams);
 		};
 		// Return a single result?
-		let one = what.is_thing();
+		let one = what.is_thing_single();
 		// Specify the SQL query string
 		let sql = if data.is_none_or_null() {
 			"UPDATE $what RETURN AFTER"
@@ -407,7 +407,7 @@ pub trait RpcContext {
 			return Err(RpcError::InvalidParams);
 		};
 		// Return a single result?
-		let one = what.is_thing();
+		let one = what.is_thing_single();
 		// Specify the SQL query string
 		let sql = if data.is_none_or_null() {
 			"UPDATE $what RETURN AFTER"
@@ -440,7 +440,7 @@ pub trait RpcContext {
 			return Err(RpcError::InvalidParams);
 		};
 		// Return a single result?
-		let one = what.is_thing();
+		let one = what.is_thing_single();
 		// Specify the SQL query string
 		let sql = match diff.is_true() {
 			true => "UPDATE $what PATCH $data RETURN DIFF",
@@ -472,7 +472,7 @@ pub trait RpcContext {
 			return Err(RpcError::InvalidParams);
 		};
 		// Return a single result?
-		let one = kind.is_thing();
+		let one = kind.is_thing_single();
 		// Specify the SQL query string
 		let sql = if data.is_none_or_null() {
 			"RELATE $from->$kind->$to"
@@ -507,7 +507,7 @@ pub trait RpcContext {
 			return Err(RpcError::InvalidParams);
 		};
 		// Return a single result?
-		let one = what.is_thing();
+		let one = what.is_thing_single();
 		// Specify the SQL query string
 		let sql = "DELETE $what RETURN BEFORE";
 		// Specify the query parameters

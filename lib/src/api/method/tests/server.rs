@@ -6,6 +6,8 @@ use crate::api::Response as QueryResponse;
 use crate::sql::to_value;
 use crate::sql::Value;
 use channel::Receiver;
+use surrealdb_core::sql::Id;
+use surrealdb_core::sql::Thing;
 
 pub(super) fn mock(route_rx: Receiver<Route>) {
 	tokio::spawn(async move {
@@ -61,10 +63,13 @@ pub(super) fn mock(route_rx: Receiver<Route>) {
 					what,
 					..
 				} => match what {
+					Value::Table(..)
+					| Value::Array(..)
+					| Value::Thing(Thing {
+						id: Id::Range(_),
+						..
+					}) => Ok(DbResponse::Other(Value::Array(Default::default()))),
 					Value::Thing(..) => Ok(DbResponse::Other(to_value(User::default()).unwrap())),
-					Value::Table(..) | Value::Array(..) | Value::Range(..) => {
-						Ok(DbResponse::Other(Value::Array(Default::default())))
-					}
 					_ => unreachable!(),
 				},
 				Command::Upsert {
@@ -83,10 +88,13 @@ pub(super) fn mock(route_rx: Receiver<Route>) {
 					what,
 					..
 				} => match what {
+					Value::Table(..)
+					| Value::Array(..)
+					| Value::Thing(Thing {
+						id: Id::Range(_),
+						..
+					}) => Ok(DbResponse::Other(Value::Array(Default::default()))),
 					Value::Thing(..) => Ok(DbResponse::Other(to_value(User::default()).unwrap())),
-					Value::Table(..) | Value::Array(..) | Value::Range(..) => {
-						Ok(DbResponse::Other(Value::Array(Default::default())))
-					}
 					_ => unreachable!(),
 				},
 				Command::Insert {

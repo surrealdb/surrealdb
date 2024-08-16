@@ -549,7 +549,7 @@ async fn router(
 			data,
 		} => {
 			let mut query = Query::default();
-			let one = what.is_thing();
+			let one = what.is_thing_single();
 			let statement = {
 				let mut stmt = UpsertStatement::default();
 				stmt.what = value_to_values(what);
@@ -567,7 +567,7 @@ async fn router(
 			data,
 		} => {
 			let mut query = Query::default();
-			let one = what.is_thing();
+			let one = what.is_thing_single();
 			let statement = {
 				let mut stmt = UpdateStatement::default();
 				stmt.what = value_to_values(what);
@@ -603,7 +603,7 @@ async fn router(
 			data,
 		} => {
 			let mut query = Query::default();
-			let one = what.is_thing();
+			let one = what.is_thing_single();
 			let statement = {
 				let mut stmt = UpdateStatement::default();
 				stmt.what = value_to_values(what);
@@ -621,7 +621,7 @@ async fn router(
 			data,
 		} => {
 			let mut query = Query::default();
-			let one = what.is_thing();
+			let one = what.is_thing_single();
 			let statement = {
 				let mut stmt = UpdateStatement::default();
 				stmt.what = value_to_values(what);
@@ -638,7 +638,7 @@ async fn router(
 			what,
 		} => {
 			let mut query = Query::default();
-			let one = what.is_thing();
+			let one = what.is_thing_single();
 			let statement = {
 				let mut stmt = SelectStatement::default();
 				stmt.what = value_to_values(what);
@@ -654,7 +654,7 @@ async fn router(
 			what,
 		} => {
 			let mut query = Query::default();
-			let one = what.is_thing();
+			let one = what.is_thing_single();
 			let statement = {
 				let mut stmt = DeleteStatement::default();
 				stmt.what = value_to_values(what);

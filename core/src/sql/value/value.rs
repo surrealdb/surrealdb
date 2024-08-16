@@ -954,6 +954,25 @@ impl Value {
 		matches!(self, Value::Thing(_))
 	}
 
+	/// Check if this Value is a single Thing
+	pub fn is_thing_single(&self) -> bool {
+		match self {
+			Value::Thing(t) => !matches!(t.id, Id::Range(_)),
+			_ => false,
+		}
+	}
+
+	/// Check if this Value is a single Thing
+	pub fn is_thing_range(&self) -> bool {
+		matches!(
+			self,
+			Value::Thing(Thing {
+				id: Id::Range(_),
+				..
+			})
+		)
+	}
+
 	/// Check if this Value is a Mock
 	pub fn is_mock(&self) -> bool {
 		matches!(self, Value::Mock(_))
