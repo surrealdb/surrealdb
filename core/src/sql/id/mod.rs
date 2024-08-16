@@ -1,3 +1,5 @@
+use super::escape::escape_rid;
+use super::Range;
 use crate::cnf::ID_CHARS;
 use crate::ctx::Context;
 use crate::dbs::Options;
@@ -14,10 +16,17 @@ use std::fmt::{self, Display, Formatter};
 use std::ops::{Bound, Deref};
 use ulid::Ulid;
 
-use super::escape::escape_rid;
-use super::Range;
-
 pub mod range;
+
+#[revisioned(revision = 1)]
+#[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize, Hash)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
+#[non_exhaustive]
+pub enum Gen {
+	Rand,
+	Ulid,
+	Uuid,
+}
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize, Hash)]
@@ -30,16 +39,6 @@ pub enum Id {
 	Object(Object),
 	Generate(Gen),
 	Range(Box<IdRange>),
-}
-
-#[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize, Hash)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
-pub enum Gen {
-	Rand,
-	Ulid,
-	Uuid,
 }
 
 impl From<i64> for Id {

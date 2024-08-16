@@ -25,10 +25,7 @@ impl Parser<'_> {
 	/// What's are values which are more restricted in what expressions they can contain.
 	pub async fn parse_what_primary(&mut self, ctx: &mut Stk) -> ParseResult<Value> {
 		match self.peek_kind() {
-			t!("..") => {
-				self.clear_whitespace();
-				Ok(self.try_parse_range(ctx, None).await?.unwrap())
-			}
+			t!("..") => Ok(self.try_parse_range(ctx, None).await?.unwrap()),
 			t!("r\"") => {
 				self.pop_peek();
 				let value = Value::Thing(self.parse_record_string(ctx, true).await?);
@@ -226,10 +223,7 @@ impl Parser<'_> {
 	pub async fn parse_idiom_expression(&mut self, ctx: &mut Stk) -> ParseResult<Value> {
 		let token = self.peek();
 		let value = match token.kind {
-			t!("..") => {
-				self.clear_whitespace();
-				self.try_parse_range(ctx, None).await?.unwrap()
-			}
+			t!("..") => self.try_parse_range(ctx, None).await?.unwrap(),
 			t!("NONE") => {
 				self.pop_peek();
 				let value = Value::None;

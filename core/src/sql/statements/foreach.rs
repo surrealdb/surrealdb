@@ -39,6 +39,10 @@ impl ForeachStatement {
 		let data = self.range.compute(stk, ctx, opt, doc).await?;
 		let iter = match data {
 			Value::Array(arr) => arr.into_iter(),
+
+			// TODO can we improve this return an iterator instead of mapping it to a vec first?
+			// My issue was that array would return an iterator for Value, and ranges for i64.
+			// I could not figure out how to make this generic.
 			Value::Range(r) => {
 				let r: std::ops::Range<i64> = r.deref().to_owned().try_into()?;
 				r.map(Value::from).collect::<Vec<Value>>().into_iter()

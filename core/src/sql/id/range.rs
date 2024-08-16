@@ -1,3 +1,4 @@
+use super::Id;
 use crate::{
 	ctx::Context,
 	dbs::Options,
@@ -5,8 +6,6 @@ use crate::{
 	err::Error,
 	sql::{Range, Value},
 };
-
-use super::Id;
 use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -58,6 +57,7 @@ impl TryFrom<Range> for IdRange {
 			Bound::Unbounded => Bound::Unbounded,
 		};
 
+		// The TryFrom implementation ensures that the bounds do not contain an `Id::Range` value
 		IdRange::try_from((beg, end))
 	}
 }
@@ -151,7 +151,7 @@ impl fmt::Display for IdRange {
 }
 
 impl IdRange {
-	/// Process this type returning a computed simple Value
+	/// Process the values in the bounds for this IdRange
 	pub(crate) async fn compute(
 		&self,
 		stk: &mut Stk,
@@ -179,6 +179,7 @@ impl IdRange {
 			Bound::Unbounded => Bound::Unbounded,
 		};
 
+		// The TryFrom implementation ensures that the bounds do not contain an `Id::Range` value
 		IdRange::try_from((beg, end))
 	}
 }

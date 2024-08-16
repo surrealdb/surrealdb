@@ -6,13 +6,13 @@ use crate::api::opt::Resource;
 use crate::api::Connection;
 use crate::api::Result;
 use crate::method::Live;
+use crate::sql::Id;
 use crate::sql::Value;
 use crate::Surreal;
 use serde::de::DeserializeOwned;
 use std::borrow::Cow;
 use std::future::IntoFuture;
 use std::marker::PhantomData;
-use surrealdb_core::sql::Id;
 
 /// A select future
 #[derive(Debug)]
