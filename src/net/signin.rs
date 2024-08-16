@@ -1,4 +1,3 @@
-use crate::dbs::DB;
 use crate::err::Error;
 use crate::net::input::bytes_to_utf8;
 use crate::net::output;
@@ -7,15 +6,15 @@ use axum::response::IntoResponse;
 use axum::routing::options;
 use axum::Extension;
 use axum::Router;
-use axum::TypedHeader;
+use axum_extra::TypedHeader;
 use bytes::Bytes;
-use http_body::Body as HttpBody;
 use serde::Serialize;
 use surrealdb::dbs::Session;
 use surrealdb::sql::Value;
 use tower_http::limit::RequestBodyLimitLayer;
 
 use super::headers::Accept;
+use super::AppState;
 
 const MAX: usize = 1024; // 1 KiB
 
@@ -27,20 +26,17 @@ struct Success {
 }
 
 impl Success {
-	fn new(token: Option<String>) -> Success {
+	fn new(token: String) -> Success {
 		Success {
-			token,
+			token: Some(token),
 			code: 200,
 			details: String::from("Authentication succeeded"),
 		}
 	}
 }
 
-pub(super) fn router<S, B>() -> Router<S, B>
+pub(super) fn router<S>() -> Router<S>
 where
-	B: HttpBody + Send + 'static,
-	B::Data: Send,
-	B::Error: std::error::Error + Send + Sync + 'static,
 	S: Clone + Send + Sync + 'static,
 {
 	Router::new()
@@ -50,12 +46,13 @@ where
 }
 
 async fn handler(
+	Extension(state): Extension<AppState>,
 	Extension(mut session): Extension<Session>,
 	accept: Option<TypedHeader<Accept>>,
 	body: Bytes,
 ) -> Result<impl IntoResponse, impl IntoResponse> {
 	// Get a database reference
-	let kvs = DB.get().unwrap();
+	let kvs = &state.datastore;
 	// Convert the HTTP body into text
 	let data = bytes_to_utf8(&body)?;
 	// Parse the provided data as JSON
@@ -71,7 +68,7 @@ async fn handler(
 					Some(Accept::ApplicationCbor) => Ok(output::cbor(&Success::new(v))),
 					Some(Accept::ApplicationPack) => Ok(output::pack(&Success::new(v))),
 					// Text serialization
-					Some(Accept::TextPlain) => Ok(output::text(v.unwrap_or_default())),
+					Some(Accept::TextPlain) => Ok(output::text(v)),
 					// Internal serialization
 					Some(Accept::Surrealdb) => Ok(output::full(&Success::new(v))),
 					// Return nothing

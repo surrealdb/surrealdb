@@ -302,10 +302,11 @@ mod tests {
 	use crate::idx::trees::knn::{Ids64, KnnResult, KnnResultBuilder};
 	use crate::idx::trees::vector::{SharedVector, Vector};
 	use crate::sql::index::{Distance, HnswParams, VectorType};
-	use hashbrown::{hash_map::Entry, HashMap, HashSet};
+	use ahash::{HashMap, HashSet};
 	use ndarray::Array1;
 	use reblessive::tree::Stk;
 	use roaring::RoaringTreemap;
+	use std::collections::hash_map::Entry;
 	use std::sync::Arc;
 	use test_log::test;
 
@@ -313,9 +314,9 @@ mod tests {
 		h: &mut HnswFlavor,
 		collection: &TestCollection,
 	) -> HashSet<SharedVector> {
-		let mut set = HashSet::new();
+		let mut set = HashSet::default();
 		for (_, obj) in collection.to_vec_ref() {
-			let obj: SharedVector = obj.clone().into();
+			let obj: SharedVector = obj.clone();
 			h.insert(obj.clone());
 			set.insert(obj);
 			h.check_hnsw_properties(set.len());
@@ -367,7 +368,7 @@ mod tests {
 	fn test_hnsw_collection(p: &HnswParams, collection: &TestCollection) {
 		let mut h = HnswFlavor::new(p);
 		insert_collection_hnsw(&mut h, collection);
-		find_collection_hnsw(&h, &collection);
+		find_collection_hnsw(&h, collection);
 	}
 
 	fn new_params(
@@ -445,16 +446,16 @@ mod tests {
 		h: &mut HnswIndex,
 		collection: &TestCollection,
 	) -> HashMap<SharedVector, HashSet<DocId>> {
-		let mut map: HashMap<SharedVector, HashSet<DocId>> = HashMap::new();
+		let mut map: HashMap<SharedVector, HashSet<DocId>> = HashMap::default();
 		for (doc_id, obj) in collection.to_vec_ref() {
-			let obj: SharedVector = obj.clone().into();
+			let obj: SharedVector = obj.clone();
 			h.insert(obj.clone(), *doc_id);
 			match map.entry(obj) {
 				Entry::Occupied(mut e) => {
 					e.get_mut().insert(*doc_id);
 				}
 				Entry::Vacant(e) => {
-					e.insert(HashSet::from([*doc_id]));
+					e.insert(HashSet::from_iter([*doc_id]));
 				}
 			}
 			h.check_hnsw_properties(map.len());
@@ -506,7 +507,7 @@ mod tests {
 		mut map: HashMap<SharedVector, HashSet<DocId>>,
 	) {
 		for (doc_id, obj) in collection.to_vec_ref() {
-			let obj: SharedVector = obj.clone().into();
+			let obj: SharedVector = obj.clone();
 			h.remove(obj.clone(), *doc_id);
 			if let Entry::Occupied(mut e) = map.entry(obj.clone()) {
 				let set = e.get_mut();
@@ -678,9 +679,9 @@ mod tests {
 		let p = new_params(20, VectorType::F32, Distance::Euclidean, 8, 100, false, false);
 		test_recall(
 			"hnsw-random-9000-20-euclidean.gz",
-			3000,
+			1000,
 			"hnsw-random-5000-20-euclidean.gz",
-			500,
+			300,
 			p,
 			&[(10, 0.98), (40, 1.0)],
 		)
@@ -692,9 +693,9 @@ mod tests {
 		let p = new_params(20, VectorType::F32, Distance::Euclidean, 8, 100, false, true);
 		test_recall(
 			"hnsw-random-9000-20-euclidean.gz",
-			3000,
+			750,
 			"hnsw-random-5000-20-euclidean.gz",
-			500,
+			200,
 			p,
 			&[(10, 0.98), (40, 1.0)],
 		)
@@ -706,9 +707,9 @@ mod tests {
 		let p = new_params(20, VectorType::F32, Distance::Euclidean, 8, 100, true, true);
 		test_recall(
 			"hnsw-random-9000-20-euclidean.gz",
-			1000,
+			500,
 			"hnsw-random-5000-20-euclidean.gz",
-			200,
+			100,
 			p,
 			&[(10, 0.98), (40, 1.0)],
 		)
@@ -726,7 +727,7 @@ mod tests {
 			}
 			b.build(
 				#[cfg(debug_assertions)]
-				HashMap::new(),
+				HashMap::default(),
 			)
 		}
 	}

@@ -142,6 +142,12 @@ impl IntoQuery for DefineStatement {
 	}
 }
 
+impl IntoQuery for AlterStatement {
+	fn into_query(self) -> Result<Vec<Statement>> {
+		Ok(vec![Statement::Alter(self)])
+	}
+}
+
 impl IntoQuery for RemoveStatement {
 	fn into_query(self) -> Result<Vec<Statement>> {
 		Ok(vec![Statement::Remove(self)])
@@ -492,7 +498,6 @@ where
 			})?;
 		Ok(method::QueryStream(Either::Left(Stream {
 			client: stream.client.clone(),
-			engine: stream.engine,
 			id: mem::take(&mut stream.id),
 			rx: stream.rx.take(),
 			response_type: PhantomData,
@@ -524,7 +529,6 @@ where
 			};
 			streams.push(Stream {
 				client: stream.client.clone(),
-				engine: stream.engine,
 				id: mem::take(&mut stream.id),
 				rx: stream.rx.take(),
 				response_type: PhantomData,

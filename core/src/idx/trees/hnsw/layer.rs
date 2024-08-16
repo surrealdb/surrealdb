@@ -7,7 +7,7 @@ use crate::idx::trees::hnsw::index::HnswCheckedSearchContext;
 use crate::idx::trees::hnsw::{ElementId, HnswElements};
 use crate::idx::trees::knn::DoublePriorityQueue;
 use crate::idx::trees::vector::SharedVector;
-use hashbrown::HashSet;
+use ahash::HashSet;
 use reblessive::tree::Stk;
 
 #[derive(Debug)]
@@ -49,7 +49,7 @@ where
 		ep_id: ElementId,
 		ef: usize,
 	) -> DoublePriorityQueue {
-		let visited = HashSet::from([ep_id]);
+		let visited = HashSet::from_iter([ep_id]);
 		let candidates = DoublePriorityQueue::from(ep_dist, ep_id);
 		let w = candidates.clone();
 		self.search(elements, pt, candidates, visited, w, ef)
@@ -64,7 +64,7 @@ where
 		stk: &mut Stk,
 		chk: &mut HnswConditionChecker<'_>,
 	) -> Result<DoublePriorityQueue, Error> {
-		let visited = HashSet::from([ep_id]);
+		let visited = HashSet::from_iter([ep_id]);
 		let candidates = DoublePriorityQueue::from(ep_dist, ep_id);
 		let mut w = DoublePriorityQueue::default();
 		Self::add_if_truthy(search, &mut w, ep_pt, ep_dist, ep_id, stk, chk).await?;
@@ -89,7 +89,7 @@ where
 		pt: &SharedVector,
 		ep_id: ElementId,
 	) -> Option<(f64, ElementId)> {
-		let visited = HashSet::from([ep_id]);
+		let visited = HashSet::from_iter([ep_id]);
 		let candidates = DoublePriorityQueue::from(0.0, ep_id);
 		let w = candidates.clone();
 		let q = self.search(elements, pt, candidates, visited, w, 1);
@@ -103,7 +103,7 @@ where
 		ep_id: ElementId,
 		efc: usize,
 	) -> DoublePriorityQueue {
-		let visited = HashSet::from([ep_id]);
+		let visited = HashSet::from_iter([ep_id]);
 		let candidates = DoublePriorityQueue::from(0.0, ep_id);
 		let w = DoublePriorityQueue::default();
 		self.search(elements, pt, candidates, visited, w, efc)

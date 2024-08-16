@@ -4,10 +4,10 @@ use crate::dbs::Statement;
 use crate::doc::Document;
 use crate::err::Error;
 
-impl<'a> Document<'a> {
+impl Document {
 	pub async fn erase(
 		&mut self,
-		_ctx: &Context<'_>,
+		_ctx: &Context,
 		_opt: &Options,
 		_stm: &Statement<'_>,
 	) -> Result<(), Error> {

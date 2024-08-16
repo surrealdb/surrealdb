@@ -29,15 +29,8 @@ protocol-ws = ["dep:tokio-tungstenite", "dep:trice", "tokio/time"]
 kv-mem = ["surrealdb-core/kv-mem", "tokio/time"]
 kv-indxdb = ["surrealdb-core/kv-indxdb"]
 kv-rocksdb = ["surrealdb-core/kv-rocksdb", "tokio/time"]
-kv-tikv = ["surrealdb-core/kv-tikv"]
-kv-fdb-5_1 = ["surrealdb-core/kv-fdb-5_1", "kv-fdb"]
-kv-fdb-5_2 = ["surrealdb-core/kv-fdb-5_2", "kv-fdb"]
-kv-fdb-6_0 = ["surrealdb-core/kv-fdb-6_0", "kv-fdb"]
-kv-fdb-6_1 = ["surrealdb-core/kv-fdb-6_1", "kv-fdb"]
-kv-fdb-6_2 = ["surrealdb-core/kv-fdb-6_2", "kv-fdb"]
-kv-fdb-6_3 = ["surrealdb-core/kv-fdb-6_3", "kv-fdb"]
-kv-fdb-7_0 = ["surrealdb-core/kv-fdb-7_0", "kv-fdb"]
-kv-fdb-7_1 = ["surrealdb-core/kv-fdb-7_1", "kv-fdb"]
+kv-tikv = ["surrealdb-core/kv-tikv", "tokio/time"]
+kv-fdb = ["surrealdb-core/kv-fdb", "tokio/time"]
 kv-surrealkv = ["surrealdb-core/kv-surrealkv", "tokio/time"]
 scripting = ["surrealdb-core/scripting"]
 http = ["surrealdb-core/http"]
@@ -54,9 +47,9 @@ rustls = [
 ml = ["surrealdb-core/ml"]
 jwks = ["surrealdb-core/jwks"]
 arbitrary = ["surrealdb-core/arbitrary"]
-
-# Private features
-kv-fdb = ["tokio/time"]
+# Special features
+kv-fdb-7_1 = ["surrealdb-core/kv-fdb-7_1"]
+kv-fdb-7_3 = ["surrealdb-core/kv-fdb-7_3"]
 
 [package.metadata.docs.rs]
 rustdoc-args = ["--cfg", "docsrs"]
@@ -73,24 +66,22 @@ features = [
 targets = []
 
 [dependencies]
+reqwest = { version = "0.12.5", default-features = false, features = [
+    "json",
+    "multipart",
+    "stream",
+], optional = true }
 bincode = "1.3.3"
 channel = { version = "1.9.0", package = "async-channel" }
 chrono = { version = "0.4.31", features = ["serde"] }
 dmp = "0.2.0"
-flume = "0.11.0"
 futures = "0.3.29"
-futures-concurrency = "7.4.3"
 geo = { version = "0.27.0", features = ["use-serde"] }
 indexmap = { version = "2.1.0", features = ["serde"] }
 native-tls = { version = "0.2.11", optional = true }
 once_cell = "1.18.0"
 path-clean = "1.0.1"
-reqwest = { version = "0.11.22", default-features = false, features = [
-    "json",
-    "stream",
-    "multipart",
-], optional = true }
-revision = { version = "0.7.0", features = [
+revision = { version = "0.8.0", features = [
     "chrono",
     "geo",
     "roaring",
@@ -99,7 +90,13 @@ revision = { version = "0.7.0", features = [
     "uuid",
 ] }
 rust_decimal = { version = "1.33.1", features = ["maths", "serde-str"] }
-rustls = { version = "0.21.11", optional = true }
+rustls = { version = "0.23.12", default-features = false, features = [
+    "ring",
+    "logging",
+    "std",
+    "tls12",
+], optional = true }
+rustls-pki-types = { version = "1.7.0", features = ["web"] }
 semver = { version = "1.0.20", features = ["serde"] }
 serde = { version = "1.0.193", features = ["derive"] }
 serde_json = "1.0.108"
@@ -109,7 +106,8 @@ tokio-util = { version = "0.7.10", optional = true, features = ["compat"] }
 tracing = "0.1.40"
 trice = { version = "0.4.0", optional = true }
 url = "2.5.0"
-reblessive = { version = "0.3.5", features = ["tree"] }
+reblessive = { version = "0.4.0", features = ["tree"] }
+serde-content = "0.1.0"
 
 [dev-dependencies]
 ciborium = "0.2.1"
@@ -124,11 +122,11 @@ regex = "1.10.2"
 serial_test = "2.0.0"
 temp-dir = "0.1.11"
 test-log = { version = "0.2.13", features = ["trace"] }
-time = { version = "0.3.30", features = ["serde"] }
+time = { version = "0.3.36", features = ["serde"] }
 tokio = { version = "1.34.0", features = ["macros", "sync", "rt-multi-thread"] }
 tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }
 ulid = { version = "1.1.0", features = ["serde"] }
-wiremock = "0.5.22"
+wiremock = "0.6.0"
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 pharos = "0.5.3"
@@ -154,7 +152,7 @@ tokio = { version = "1.34.0", default-features = false, features = [
     "time",
     "sync",
 ] }
-tokio-tungstenite = { version = "0.20.1", optional = true }
+tokio-tungstenite = { version = "0.23.1", optional = true, features = ["url"] }
 uuid = { version = "1.6.1", features = ["serde", "v4", "v7"] }
 
 [lib]

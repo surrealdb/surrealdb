@@ -6,7 +6,7 @@ use crate::idx::planner::executor::{
 };
 use crate::idx::planner::plan::{IndexOperator, IndexOption};
 use crate::idx::planner::rewriter::KnnConditionRewriter;
-use crate::kvs;
+use crate::kvs::Transaction;
 use crate::sql::index::Index;
 use crate::sql::statements::{DefineFieldStatement, DefineIndexStatement};
 use crate::sql::{
@@ -30,11 +30,11 @@ impl Tree {
 	/// that can be resolved by an index.
 	pub(super) async fn build<'a>(
 		stk: &mut Stk,
-		ctx: &'a Context<'_>,
+		ctx: &'a Context,
 		opt: &'a Options,
 		table: &'a Table,
-		cond: &'a Option<Cond>,
-		with: &'a Option<With>,
+		cond: Option<&Cond>,
+		with: Option<&With>,
 	) -> Result<Option<Self>, Error> {
 		let mut b = TreeBuilder::new(ctx, opt, table, with);
 		if let Some(cond) = cond {
@@ -59,10 +59,10 @@ impl Tree {
 }
 
 struct TreeBuilder<'a> {
-	ctx: &'a Context<'a>,
+	ctx: &'a Context,
 	opt: &'a Options,
 	table: &'a Table,
-	with: &'a Option<With>,
+	with: Option<&'a With>,
 	schemas: HashMap<Table, SchemaCache>,
 	idioms_indexes: HashMap<Table, HashMap<Idiom, LocalIndexRefs>>,
 	resolved_expressions: HashMap<Arc<Expression>, ResolvedExpression>,
@@ -85,12 +85,7 @@ pub(super) type LocalIndexRefs = Vec<IndexRef>;
 pub(super) type RemoteIndexRefs = Arc<Vec<(Idiom, LocalIndexRefs)>>;
 
 impl<'a> TreeBuilder<'a> {
-	fn new(
-		ctx: &'a Context<'_>,
-		opt: &'a Options,
-		table: &'a Table,
-		with: &'a Option<With>,
-	) -> Self {
+	fn new(ctx: &'a Context, opt: &'a Options, table: &'a Table, with: Option<&'a With>) -> Self {
 		let with_indexes = match with {
 			Some(With::Index(ixs)) => Vec::with_capacity(ixs.len()),
 			_ => vec![],
@@ -115,7 +110,7 @@ impl<'a> TreeBuilder<'a> {
 
 	async fn lazy_load_schema_resolver(
 		&mut self,
-		tx: &mut kvs::Transaction,
+		tx: &Transaction,
 		table: &Table,
 	) -> Result<(), Error> {
 		if self.schemas.contains_key(table) {
@@ -198,8 +193,8 @@ impl<'a> TreeBuilder<'a> {
 	}
 
 	async fn resolve_idiom(&mut self, i: &Idiom) -> Result<Node, Error> {
-		let mut tx = self.ctx.tx_lock().await;
-		self.lazy_load_schema_resolver(&mut tx, self.table).await?;
+		let tx = self.ctx.tx();
+		self.lazy_load_schema_resolver(&tx, self.table).await?;
 
 		// Try to detect if it matches an index
 		if let Some(schema) = self.schemas.get(self.table).cloned() {
@@ -208,12 +203,10 @@ impl<'a> TreeBuilder<'a> {
 				return Ok(Node::IndexedField(i.clone(), irs));
 			}
 			// Try to detect an indexed record field
-			if let Some(ro) = self.resolve_record_field(&mut tx, schema.fields.as_ref(), i).await? {
-				drop(tx);
+			if let Some(ro) = self.resolve_record_field(&tx, schema.fields.as_ref(), i).await? {
 				return Ok(Node::RecordField(i.clone(), ro));
 			}
 		}
-		drop(tx);
 		Ok(Node::NonIndexedField(i.clone()))
 	}
 
@@ -227,7 +220,7 @@ impl<'a> TreeBuilder<'a> {
 		for ix in schema.indexes.iter() {
 			if ix.cols.len() == 1 && ix.cols[0].eq(i) {
 				let ixr = self.index_map.definitions.len() as IndexRef;
-				if let Some(With::Index(ixs)) = self.with {
+				if let Some(With::Index(ixs)) = &self.with {
 					if ixs.contains(&ix.name.0) {
 						self.with_indexes.push(ixr);
 					}
@@ -246,7 +239,7 @@ impl<'a> TreeBuilder<'a> {
 
 	async fn resolve_record_field(
 		&mut self,
-		tx: &mut kvs::Transaction,
+		tx: &Transaction,
 		fields: &[DefineFieldStatement],
 		idiom: &Idiom,
 	) -> Result<Option<RecordOptions>, Error> {
@@ -544,7 +537,7 @@ struct SchemaCache {
 }
 
 impl SchemaCache {
-	async fn new(opt: &Options, table: &Table, tx: &mut kvs::Transaction) -> Result<Self, Error> {
+	async fn new(opt: &Options, table: &Table, tx: &Transaction) -> Result<Self, Error> {
 		let indexes = tx.all_tb_indexes(opt.ns()?, opt.db()?, table).await?;
 		let fields = tx.all_tb_fields(opt.ns()?, opt.db()?, table).await?;
 		Ok(Self {

@@ -1,10 +1,9 @@
 use crate::cnf::PKG_NAME;
 use crate::cnf::PKG_VERSION;
 use crate::err::Error;
-use axum::extract::rejection::TypedHeaderRejection;
-use axum::extract::rejection::TypedHeaderRejectionReason;
-use axum::headers::Header;
-use axum::TypedHeader;
+use axum_extra::headers::Header;
+use axum_extra::typed_header::{TypedHeaderRejection, TypedHeaderRejectionReason};
+use axum_extra::TypedHeader;
 use http::header::SERVER;
 use http::HeaderValue;
 use surrealdb::cnf::SERVER_NAME;

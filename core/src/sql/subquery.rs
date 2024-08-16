@@ -1,12 +1,12 @@
-use crate::ctx::Context;
+use crate::ctx::{Context, MutableContext};
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::sql::statements::rebuild::RebuildStatement;
 use crate::sql::statements::{
-	CreateStatement, DefineStatement, DeleteStatement, IfelseStatement, InsertStatement,
-	OutputStatement, RelateStatement, RemoveStatement, SelectStatement, UpdateStatement,
-	UpsertStatement,
+	AlterStatement, CreateStatement, DefineStatement, DeleteStatement, IfelseStatement,
+	InsertStatement, OutputStatement, RelateStatement, RemoveStatement, SelectStatement,
+	UpdateStatement, UpsertStatement,
 };
 use crate::sql::value::Value;
 use reblessive::tree::Stk;
@@ -17,7 +17,7 @@ use std::fmt::{self, Display, Formatter};
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Subquery";
 
-#[revisioned(revision = 3)]
+#[revisioned(revision = 4)]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
 #[serde(rename = "$surrealdb::private::sql::Subquery")]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
@@ -38,6 +38,8 @@ pub enum Subquery {
 	Rebuild(RebuildStatement),
 	#[revision(start = 3)]
 	Upsert(UpsertStatement),
+	#[revision(start = 4)]
+	Alter(AlterStatement),
 }
 
 impl PartialOrd for Subquery {
@@ -64,22 +66,24 @@ impl Subquery {
 			Self::Define(v) => v.writeable(),
 			Self::Remove(v) => v.writeable(),
 			Self::Rebuild(v) => v.writeable(),
+			Self::Alter(v) => v.writeable(),
 		}
 	}
 	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
 		stk: &mut Stk,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		opt: &Options,
-		doc: Option<&CursorDoc<'_>>,
+		doc: Option<&CursorDoc>,
 	) -> Result<Value, Error> {
 		// Duplicate context
-		let mut ctx = Context::new(ctx);
+		let mut ctx = MutableContext::new(ctx);
 		// Add parent document
 		if let Some(doc) = doc {
-			ctx.add_value("parent", doc.doc.as_ref());
+			ctx.add_value("parent", doc.doc.as_ref().clone().into());
 		}
+		let ctx = ctx.freeze();
 		// Process the subquery
 		match self {
 			Self::Value(ref v) => v.compute(stk, &ctx, opt, doc).await,
@@ -95,6 +99,7 @@ impl Subquery {
 			Self::Delete(ref v) => v.compute(stk, &ctx, opt, doc).await,
 			Self::Relate(ref v) => v.compute(stk, &ctx, opt, doc).await,
 			Self::Insert(ref v) => v.compute(stk, &ctx, opt, doc).await,
+			Self::Alter(ref v) => v.compute(stk, &ctx, opt, doc).await,
 		}
 	}
 }
@@ -114,6 +119,7 @@ impl Display for Subquery {
 			Self::Define(v) => write!(f, "({v})"),
 			Self::Remove(v) => write!(f, "({v})"),
 			Self::Rebuild(v) => write!(f, "({v})"),
+			Self::Alter(v) => write!(f, "({v})"),
 			Self::Ifelse(v) => Display::fmt(v, f),
 		}
 	}

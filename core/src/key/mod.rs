@@ -1,6 +1,9 @@
 //! How the keys are structured in the key value store
 ///
 /// crate::key::root::all                /
+/// crate::key::root::access::all        /*{ac}
+/// crate::key::root::access::ac         /!ac{ac}
+/// crate::key::root::access::gr         /*{ac}!gr{gr}
 /// crate::key::root::hb                 /!hb{ts}/{nd}
 /// crate::key::root::nd                 /!nd{nd}
 /// crate::key::root::ni                 /!ni
@@ -11,17 +14,21 @@
 /// crate::key::node::lq                 /${nd}!lq{lq}{ns}{db}
 ///
 /// crate::key::namespace::all           /*{ns}
-/// crate::key::namespace::ac            /*{ns}!ac{ac}
+/// crate::key::namespace::access::all   /*{ns}*{ac}
+/// crate::key::namespace::access::ac    /*{ns}!ac{ac}
+/// crate::key::namespace::access::gr    /*{ns}*{ac}!gr{gr}
 /// crate::key::namespace::db            /*{ns}!db{db}
 /// crate::key::namespace::di            /+{ns id}!di
 /// crate::key::namespace::lg            /*{ns}!lg{lg}
 /// crate::key::namespace::us            /*{ns}!us{us}
 ///
 /// crate::key::database::all            /*{ns}*{db}
-/// crate::key::database::ac             /*{ns}*{db}!ac{ac}
+/// crate::key::database::access::all    /*{ns}*{db}*{ac}
+/// crate::key::database::access::ac     /*{ns}*{db}!ac{ac}
+/// crate::key::database::access::gr     /*{ns}*{db}*{ac}!gr{gr}
 /// crate::key::database::az             /*{ns}*{db}!az{az}
 /// crate::key::database::fc             /*{ns}*{db}!fn{fc}
-/// crate::key::database::lg             /*{ns}*{db}!lg{lg}
+/// crate::key::database::ml             /*{ns}*{db}!ml{ml}{vn}
 /// crate::key::database::pa             /*{ns}*{db}!pa{pa}
 /// crate::key::database::tb             /*{ns}*{db}!tb{tb}
 /// crate::key::database::ti             /+{ns id}*{db id}!ti
@@ -56,15 +63,14 @@
 ///
 /// crate::key::graph                    /*{ns}*{db}*{tb}~{id}{eg}{fk}
 ///
-pub mod change;
-pub mod database;
-pub mod debug;
-pub(crate) mod error;
-pub mod graph;
-pub mod index;
-pub(crate) mod key_req;
-pub mod namespace;
-pub mod node;
-pub mod root;
-pub mod table;
-pub mod thing;
+pub(crate) mod category;
+pub(crate) mod change;
+pub(crate) mod database;
+pub(crate) mod debug;
+pub(crate) mod graph;
+pub(crate) mod index;
+pub(crate) mod namespace;
+pub(crate) mod node;
+pub(crate) mod root;
+pub(crate) mod table;
+pub(crate) mod thing;

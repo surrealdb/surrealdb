@@ -1,6 +1,5 @@
-use crate::api::conn::Method;
-use crate::api::conn::Param;
-use crate::api::method::Content;
+use crate::api::conn::Command;
+use crate::api::method::BoxFuture;
 use crate::api::opt::Resource;
 use crate::api::Connection;
 use crate::api::Result;
@@ -10,10 +9,11 @@ use crate::Surreal;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 use std::borrow::Cow;
-use std::future::Future;
 use std::future::IntoFuture;
 use std::marker::PhantomData;
-use std::pin::Pin;
+use surrealdb_core::sql::to_value;
+
+use super::Content;
 
 /// A record create future
 #[derive(Debug)]
@@ -46,8 +46,12 @@ macro_rules! into_future {
 				..
 			} = self;
 			Box::pin(async move {
-				let mut conn = Client::new(Method::Create);
-				conn.$method(client.router.extract()?, Param::new(vec![resource?.into()])).await
+				let router = client.router.extract()?;
+				let cmd = Command::Create {
+					what: resource?.into(),
+					data: None,
+				};
+				router.$method(cmd).await
 			})
 		}
 	};
@@ -58,7 +62,7 @@ where
 	Client: Connection,
 {
 	type Output = Result<Value>;
-	type IntoFuture = Pin<Box<dyn Future<Output = Self::Output> + Send + Sync + 'r>>;
+	type IntoFuture = BoxFuture<'r, Self::Output>;
 
 	into_future! {execute_value}
 }
@@ -69,7 +73,7 @@ where
 	R: DeserializeOwned,
 {
 	type Output = Result<Option<R>>;
-	type IntoFuture = Pin<Box<dyn Future<Output = Self::Output> + Send + Sync + 'r>>;
+	type IntoFuture = BoxFuture<'r, Self::Output>;
 
 	into_future! {execute_opt}
 }
@@ -80,7 +84,7 @@ where
 	R: DeserializeOwned,
 {
 	type Output = Result<Vec<R>>;
-	type IntoFuture = Pin<Box<dyn Future<Output = Self::Output> + Send + Sync + 'r>>;
+	type IntoFuture = BoxFuture<'r, Self::Output>;
 
 	into_future! {execute_vec}
 }
@@ -90,17 +94,22 @@ where
 	C: Connection,
 {
 	/// Sets content of a record
-	pub fn content<D>(self, data: D) -> Content<'r, C, D, R>
+	pub fn content<D>(self, data: D) -> Content<'r, C, R>
 	where
-		D: Serialize,
+		D: Serialize + 'static,
 	{
-		Content {
-			client: self.client,
-			method: Method::Create,
-			resource: self.resource,
-			range: None,
-			content: data,
-			response_type: PhantomData,
-		}
+		Content::from_closure(self.client, || {
+			let content = to_value(data)?;
+
+			let data = match content {
+				Value::None | Value::Null => None,
+				content => Some(content),
+			};
+
+			Ok(Command::Create {
+				what: self.resource?.into(),
+				data,
+			})
+		})
 	}
 }

@@ -31,7 +31,7 @@ pub(super) struct PlanBuilder {
 impl PlanBuilder {
 	pub(super) fn build(
 		root: Node,
-		with: &Option<With>,
+		with: Option<&With>,
 		with_indexes: Vec<IndexRef>,
 	) -> Result<Plan, Error> {
 		if let Some(With::NoIndex) = with {
@@ -435,6 +435,7 @@ mod tests {
 	use crate::syn::Parse;
 	use std::collections::HashSet;
 
+	#[allow(clippy::mutable_key_type)]
 	#[test]
 	fn test_hash_index_option() {
 		let mut set = HashSet::new();

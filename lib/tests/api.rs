@@ -44,8 +44,8 @@ mod api_integration {
 	const TICK_INTERVAL: Duration = Duration::from_secs(1);
 
 	#[derive(Debug, Serialize)]
-	struct Record<'a> {
-		name: &'a str,
+	struct Record {
+		name: String,
 	}
 
 	#[derive(Debug, Clone, Deserialize, Eq, PartialEq, Ord, PartialOrd)]
@@ -432,6 +432,64 @@ mod api_integration {
 			surrealdb::engine::any::connect(format!("surrealkv://{path}")).await.unwrap();
 			surrealdb::engine::any::connect(format!("surrealkv:///tmp/{path}")).await.unwrap();
 			tokio::fs::remove_dir_all(path).await.unwrap();
+		}
+
+		#[test_log::test(tokio::test)]
+		async fn select_with_version() {
+			let (permit, db) = new_db().await;
+			db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
+			drop(permit);
+
+			// Create the initial version and record its timestamp.
+			let _ =
+				db.query("CREATE user:john SET name = 'John v1'").await.unwrap().check().unwrap();
+			let create_ts = chrono::Utc::now();
+
+			// Create a new version by updating the record.
+			let _ =
+				db.query("UPDATE user:john SET name = 'John v2'").await.unwrap().check().unwrap();
+
+			// Without VERSION, SELECT should return the latest update.
+			let mut response = db.query("SELECT * FROM user").await.unwrap().check().unwrap();
+			let Some(name): Option<String> = response.take("name").unwrap() else {
+				panic!("query returned no record");
+			};
+			assert_eq!(name, "John v2");
+
+			// SELECT with VERSION of `create_ts` should return the initial record.
+			let version = create_ts.to_rfc3339();
+			let mut response = db
+				.query(format!("SELECT * FROM user VERSION d'{}'", version))
+				.await
+				.unwrap()
+				.check()
+				.unwrap();
+			let Some(name): Option<String> = response.take("name").unwrap() else {
+				panic!("query returned no record");
+			};
+			assert_eq!(name, "John v1");
+
+			let mut response = db
+				.query(format!("SELECT name FROM user VERSION d'{}'", version))
+				.await
+				.unwrap()
+				.check()
+				.unwrap();
+			let Some(name): Option<String> = response.take("name").unwrap() else {
+				panic!("query returned no record");
+			};
+			assert_eq!(name, "John v1");
+
+			let mut response = db
+				.query(format!("SELECT name FROM user:john VERSION d'{}'", version))
+				.await
+				.unwrap()
+				.check()
+				.unwrap();
+			let Some(name): Option<String> = response.take("name").unwrap() else {
+				panic!("query returned no record");
+			};
+			assert_eq!(name, "John v1");
 		}
 
 		include!("api/mod.rs");

@@ -17,7 +17,7 @@ use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display};
 
-#[revisioned(revision = 3)]
+#[revisioned(revision = 4)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
@@ -32,6 +32,8 @@ pub struct DefineUserStatement {
 	pub comment: Option<Strand>,
 	#[revision(start = 2)]
 	pub if_not_exists: bool,
+	#[revision(start = 4)]
+	pub overwrite: bool,
 }
 
 impl From<(Base, &str, &str, &str)> for DefineUserStatement {
@@ -52,6 +54,7 @@ impl From<(Base, &str, &str, &str)> for DefineUserStatement {
 			duration: UserDuration::default(),
 			comment: None,
 			if_not_exists: false,
+			overwrite: false,
 		}
 	}
 }
@@ -99,24 +102,22 @@ impl DefineUserStatement {
 	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		opt: &Options,
-		_doc: Option<&CursorDoc<'_>>,
+		_doc: Option<&CursorDoc>,
 	) -> Result<Value, Error> {
 		// Allowed to run?
 		opt.is_allowed(Action::Edit, ResourceKind::Actor, &self.base)?;
-
+		// Check the statement type
 		match self.base {
 			Base::Root => {
-				// Claim transaction
-				let mut run = ctx.tx_lock().await;
-				// Clear the cache
-				run.clear_cache();
-				// Check if user already exists
-				if run.get_root_user(&self.name).await.is_ok() {
+				// Fetch the transaction
+				let txn = ctx.tx();
+				// Check if the definition exists
+				if txn.get_root_user(&self.name).await.is_ok() {
 					if self.if_not_exists {
 						return Ok(Value::None);
-					} else {
+					} else if !self.overwrite {
 						return Err(Error::UserRootAlreadyExists {
 							value: self.name.to_string(),
 						});
@@ -124,28 +125,29 @@ impl DefineUserStatement {
 				}
 				// Process the statement
 				let key = crate::key::root::us::new(&self.name);
-				run.set(
+				txn.set(
 					key,
 					DefineUserStatement {
-						// Don't persist the "IF NOT EXISTS" clause to schema
+						// Don't persist the `IF NOT EXISTS` clause to schema
 						if_not_exists: false,
+						overwrite: false,
 						..self.clone()
 					},
 				)
 				.await?;
+				// Clear the cache
+				txn.clear();
 				// Ok all good
 				Ok(Value::None)
 			}
 			Base::Ns => {
-				// Claim transaction
-				let mut run = ctx.tx_lock().await;
-				// Clear the cache
-				run.clear_cache();
-				// Check if user already exists
-				if run.get_ns_user(opt.ns()?, &self.name).await.is_ok() {
+				// Fetch the transaction
+				let txn = ctx.tx();
+				// Check if the definition exists
+				if txn.get_ns_user(opt.ns()?, &self.name).await.is_ok() {
 					if self.if_not_exists {
 						return Ok(Value::None);
-					} else {
+					} else if !self.overwrite {
 						return Err(Error::UserNsAlreadyExists {
 							value: self.name.to_string(),
 							ns: opt.ns()?.into(),
@@ -154,29 +156,30 @@ impl DefineUserStatement {
 				}
 				// Process the statement
 				let key = crate::key::namespace::us::new(opt.ns()?, &self.name);
-				run.add_ns(opt.ns()?, opt.strict).await?;
-				run.set(
+				txn.get_or_add_ns(opt.ns()?, opt.strict).await?;
+				txn.set(
 					key,
 					DefineUserStatement {
-						// Don't persist the "IF NOT EXISTS" clause to schema
+						// Don't persist the `IF NOT EXISTS` clause to schema
 						if_not_exists: false,
+						overwrite: false,
 						..self.clone()
 					},
 				)
 				.await?;
+				// Clear the cache
+				txn.clear();
 				// Ok all good
 				Ok(Value::None)
 			}
 			Base::Db => {
-				// Claim transaction
-				let mut run = ctx.tx_lock().await;
-				// Clear the cache
-				run.clear_cache();
-				// Check if user already exists
-				if run.get_db_user(opt.ns()?, opt.db()?, &self.name).await.is_ok() {
+				// Fetch the transaction
+				let txn = ctx.tx();
+				// Check if the definition exists
+				if txn.get_db_user(opt.ns()?, opt.db()?, &self.name).await.is_ok() {
 					if self.if_not_exists {
 						return Ok(Value::None);
-					} else {
+					} else if !self.overwrite {
 						return Err(Error::UserDbAlreadyExists {
 							value: self.name.to_string(),
 							ns: opt.ns()?.into(),
@@ -186,17 +189,20 @@ impl DefineUserStatement {
 				}
 				// Process the statement
 				let key = crate::key::database::us::new(opt.ns()?, opt.db()?, &self.name);
-				run.add_ns(opt.ns()?, opt.strict).await?;
-				run.add_db(opt.ns()?, opt.db()?, opt.strict).await?;
-				run.set(
+				txn.get_or_add_ns(opt.ns()?, opt.strict).await?;
+				txn.get_or_add_db(opt.ns()?, opt.db()?, opt.strict).await?;
+				txn.set(
 					key,
 					DefineUserStatement {
-						// Don't persist the "IF NOT EXISTS" clause to schema
+						// Don't persist the `IF NOT EXISTS` clause to schema
 						if_not_exists: false,
+						overwrite: false,
 						..self.clone()
 					},
 				)
 				.await?;
+				// Clear the cache
+				txn.clear();
 				// Ok all good
 				Ok(Value::None)
 			}
@@ -211,6 +217,9 @@ impl Display for DefineUserStatement {
 		write!(f, "DEFINE USER")?;
 		if self.if_not_exists {
 			write!(f, " IF NOT EXISTS")?
+		}
+		if self.overwrite {
+			write!(f, " OVERWRITE")?
 		}
 		write!(
 			f,

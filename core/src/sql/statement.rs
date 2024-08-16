@@ -3,15 +3,16 @@ use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::sql::statements::rebuild::RebuildStatement;
+use crate::sql::statements::AccessStatement;
 use crate::sql::{
 	fmt::{Fmt, Pretty},
 	statements::{
-		AnalyzeStatement, BeginStatement, BreakStatement, CancelStatement, CommitStatement,
-		ContinueStatement, CreateStatement, DefineStatement, DeleteStatement, ForeachStatement,
-		IfelseStatement, InfoStatement, InsertStatement, KillStatement, LiveStatement,
-		OptionStatement, OutputStatement, RelateStatement, RemoveStatement, SelectStatement,
-		SetStatement, ShowStatement, SleepStatement, ThrowStatement, UpdateStatement,
-		UpsertStatement, UseStatement,
+		AlterStatement, AnalyzeStatement, BeginStatement, BreakStatement, CancelStatement,
+		CommitStatement, ContinueStatement, CreateStatement, DefineStatement, DeleteStatement,
+		ForeachStatement, IfelseStatement, InfoStatement, InsertStatement, KillStatement,
+		LiveStatement, OptionStatement, OutputStatement, RelateStatement, RemoveStatement,
+		SelectStatement, SetStatement, ShowStatement, SleepStatement, ThrowStatement,
+		UpdateStatement, UpsertStatement, UseStatement,
 	},
 	value::Value,
 };
@@ -55,7 +56,7 @@ impl Display for Statements {
 	}
 }
 
-#[revisioned(revision = 3)]
+#[revisioned(revision = 5)]
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
@@ -91,6 +92,12 @@ pub enum Statement {
 	Rebuild(RebuildStatement),
 	#[revision(start = 3)]
 	Upsert(UpsertStatement),
+	#[revision(start = 4)]
+	Alter(AlterStatement),
+	// TODO(gguillemas): Document once bearer access is no longer experimental.
+	#[doc(hidden)]
+	#[revision(start = 5)]
+	Access(AccessStatement),
 }
 
 impl Statement {
@@ -111,6 +118,8 @@ impl Statement {
 	pub(crate) fn writeable(&self) -> bool {
 		match self {
 			Self::Value(v) => v.writeable(),
+			Self::Access(_) => true,
+			Self::Alter(_) => true,
 			Self::Analyze(_) => false,
 			Self::Break(_) => false,
 			Self::Continue(_) => false,
@@ -143,11 +152,13 @@ impl Statement {
 	pub(crate) async fn compute(
 		&self,
 		stk: &mut Stk,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		opt: &Options,
-		doc: Option<&CursorDoc<'_>>,
+		doc: Option<&CursorDoc>,
 	) -> Result<Value, Error> {
 		match self {
+			Self::Access(v) => v.compute(ctx, opt, doc).await,
+			Self::Alter(v) => v.compute(stk, ctx, opt, doc).await,
 			Self::Analyze(v) => v.compute(ctx, opt, doc).await,
 			Self::Break(v) => v.compute(ctx, opt, doc).await,
 			Self::Continue(v) => v.compute(ctx, opt, doc).await,
@@ -175,7 +186,7 @@ impl Statement {
 				// Ensure futures are processed
 				let opt = &opt.new_with_futures(true);
 				// Process the output value
-				v.compute(stk, ctx, opt, doc).await
+				v.compute_unbordered(stk, ctx, opt, doc).await
 			}
 			_ => unreachable!(),
 		}
@@ -186,6 +197,8 @@ impl Display for Statement {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
 		match self {
 			Self::Value(v) => write!(Pretty::from(f), "{v}"),
+			Self::Access(v) => write!(Pretty::from(f), "{v}"),
+			Self::Alter(v) => write!(Pretty::from(f), "{v}"),
 			Self::Analyze(v) => write!(Pretty::from(f), "{v}"),
 			Self::Begin(v) => write!(Pretty::from(f), "{v}"),
 			Self::Break(v) => write!(Pretty::from(f), "{v}"),

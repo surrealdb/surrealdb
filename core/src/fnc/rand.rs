@@ -2,6 +2,7 @@ use crate::cnf::ID_CHARS;
 use crate::err::Error;
 use crate::sql::uuid::Uuid;
 use crate::sql::value::Value;
+use crate::sql::Datetime;
 use chrono::{TimeZone, Utc};
 use nanoid::nanoid;
 use rand::distributions::{Alphanumeric, DistString};
@@ -150,12 +151,21 @@ pub fn time((range,): (Option<(i64, i64)>,)) -> Result<Value, Error> {
 	Ok(Utc.timestamp_opt(val, 0).earliest().unwrap().into())
 }
 
-pub fn ulid(_: ()) -> Result<Value, Error> {
-	Ok(Ulid::new().to_string().into())
+pub fn ulid((timestamp,): (Option<Datetime>,)) -> Result<Value, Error> {
+	let ulid = match timestamp {
+		Some(timestamp) => Ulid::from_datetime(timestamp.0.into()),
+		None => Ulid::new(),
+	};
+
+	Ok(ulid.to_string().into())
 }
 
-pub fn uuid(_: ()) -> Result<Value, Error> {
-	Ok(Uuid::new().into())
+pub fn uuid((timestamp,): (Option<Datetime>,)) -> Result<Value, Error> {
+	let uuid = match timestamp {
+		Some(timestamp) => Uuid::new_v7_from_datetime(timestamp),
+		None => Uuid::new(),
+	};
+	Ok(uuid.into())
 }
 
 pub mod uuid {
@@ -163,12 +173,17 @@ pub mod uuid {
 	use crate::err::Error;
 	use crate::sql::uuid::Uuid;
 	use crate::sql::value::Value;
+	use crate::sql::Datetime;
 
 	pub fn v4(_: ()) -> Result<Value, Error> {
 		Ok(Uuid::new_v4().into())
 	}
 
-	pub fn v7(_: ()) -> Result<Value, Error> {
-		Ok(Uuid::new_v7().into())
+	pub fn v7((timestamp,): (Option<Datetime>,)) -> Result<Value, Error> {
+		let uuid = match timestamp {
+			Some(timestamp) => Uuid::new_v7_from_datetime(timestamp),
+			None => Uuid::new(),
+		};
+		Ok(uuid.into())
 	}
 }

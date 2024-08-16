@@ -1,5 +1,5 @@
-use crate::ctx::Canceller;
 use crate::ctx::Context;
+use crate::ctx::{Canceller, MutableContext};
 #[cfg(not(target_arch = "wasm32"))]
 use crate::dbs::distinct::AsyncDistinct;
 use crate::dbs::distinct::SyncDistinct;
@@ -16,8 +16,11 @@ use crate::sql::range::Range;
 use crate::sql::table::Table;
 use crate::sql::thing::Thing;
 use crate::sql::value::Value;
-use reblessive::{tree::Stk, TreeStack};
+use reblessive::tree::Stk;
+#[cfg(not(target_arch = "wasm32"))]
+use reblessive::TreeStack;
 use std::mem;
+use std::sync::Arc;
 
 #[derive(Clone)]
 pub(crate) enum Iterable {
@@ -33,21 +36,21 @@ pub(crate) enum Iterable {
 }
 
 pub(crate) struct Processed {
-	pub(crate) rid: Option<Thing>,
-	pub(crate) ir: Option<IteratorRecord>,
+	pub(crate) rid: Option<Arc<Thing>>,
+	pub(crate) ir: Option<Arc<IteratorRecord>>,
 	pub(crate) val: Operable,
 }
 
 pub(crate) enum Operable {
-	Value(Value),
-	Mergeable(Value, Value),
-	Relatable(Thing, Value, Thing, Option<Value>),
+	Value(Arc<Value>),
+	Mergeable(Arc<Value>, Arc<Value>),
+	Relatable(Thing, Arc<Value>, Thing, Option<Arc<Value>>),
 }
 
 pub(crate) enum Workable {
 	Normal,
-	Insert(Value),
-	Relate(Thing, Thing, Option<Value>),
+	Insert(Arc<Value>),
+	Relate(Thing, Thing, Option<Arc<Value>>),
 }
 
 #[derive(Default)]
@@ -94,7 +97,7 @@ impl Iterator {
 	pub async fn prepare(
 		&mut self,
 		stk: &mut Stk,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		opt: &Options,
 		stm: &Statement<'_>,
 		val: Value,
@@ -279,15 +282,16 @@ impl Iterator {
 	pub async fn output(
 		&mut self,
 		stk: &mut Stk,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		opt: &Options,
 		stm: &Statement<'_>,
 	) -> Result<Value, Error> {
 		// Log the statement
 		trace!("Iterating: {}", stm);
 		// Enable context override
-		let mut cancel_ctx = Context::new(ctx);
+		let mut cancel_ctx = MutableContext::new(ctx);
 		self.run = cancel_ctx.add_cancel();
+		let mut cancel_ctx = cancel_ctx.freeze();
 		// Process the query LIMIT clause
 		self.setup_limit(stk, &cancel_ctx, opt, stm).await?;
 		// Process the query START clause
@@ -311,7 +315,9 @@ impl Iterator {
 			if let Some(qp) = ctx.get_query_planner() {
 				while let Some(s) = qp.next_iteration_stage().await {
 					let is_last = matches!(s, IterationStage::Iterate(_));
-					cancel_ctx.set_iteration_stage(s);
+					let mut c = MutableContext::unfreeze(cancel_ctx)?;
+					c.set_iteration_stage(s);
+					cancel_ctx = c.freeze();
 					if !is_last {
 						self.clone().iterate(stk, &cancel_ctx, opt, stm).await?;
 					};
@@ -364,7 +370,7 @@ impl Iterator {
 	async fn setup_limit(
 		&mut self,
 		stk: &mut Stk,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		opt: &Options,
 		stm: &Statement<'_>,
 	) -> Result<(), Error> {
@@ -378,7 +384,7 @@ impl Iterator {
 	async fn setup_start(
 		&mut self,
 		stk: &mut Stk,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		opt: &Options,
 		stm: &Statement<'_>,
 	) -> Result<(), Error> {
@@ -392,7 +398,7 @@ impl Iterator {
 	async fn output_split(
 		&mut self,
 		stk: &mut Stk,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		opt: &Options,
 		stm: &Statement<'_>,
 	) -> Result<(), Error> {
@@ -436,17 +442,21 @@ impl Iterator {
 	async fn output_fetch(
 		&mut self,
 		stk: &mut Stk,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		opt: &Options,
 		stm: &Statement<'_>,
 	) -> Result<(), Error> {
 		if let Some(fetchs) = stm.fetch() {
+			let mut idioms = Vec::with_capacity(fetchs.0.len());
 			for fetch in fetchs.iter() {
+				fetch.compute(stk, ctx, opt, &mut idioms).await?;
+			}
+			for i in &idioms {
 				let mut values = self.results.take()?;
 				// Loop over each result value
 				for obj in &mut values {
 					// Fetch the value at the path
-					stk.run(|stk| obj.fetch(stk, ctx, opt, fetch)).await?;
+					stk.run(|stk| obj.fetch(stk, ctx, opt, i)).await?;
 				}
 				self.results = values.into();
 			}
@@ -458,7 +468,7 @@ impl Iterator {
 	async fn iterate(
 		&mut self,
 		stk: &mut Stk,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		opt: &Options,
 		stm: &Statement<'_>,
 	) -> Result<(), Error> {
@@ -478,7 +488,7 @@ impl Iterator {
 	async fn iterate(
 		&mut self,
 		stk: &mut Stk,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		opt: &Options,
 		stm: &Statement<'_>,
 	) -> Result<(), Error> {
@@ -508,7 +518,7 @@ impl Iterator {
 				// Create a channel to shutdown
 				let (end, exit) = channel::bounded::<()>(1);
 				// Create an unbounded channel
-				let (chn, docs) = channel::bounded(crate::cnf::MAX_CONCURRENT_TASKS);
+				let (chn, docs) = channel::bounded(*crate::cnf::MAX_CONCURRENT_TASKS);
 				// Create an async closure for prepared values
 				let adocs = async {
 					// Process all prepared values
@@ -532,7 +542,7 @@ impl Iterator {
 					drop(chn);
 				};
 				// Create an unbounded channel
-				let (chn, vals) = channel::bounded(crate::cnf::MAX_CONCURRENT_TASKS);
+				let (chn, vals) = channel::bounded(*crate::cnf::MAX_CONCURRENT_TASKS);
 				// Create an async closure for received values
 				let avals = async {
 					// Process all received values
@@ -576,7 +586,7 @@ impl Iterator {
 	pub async fn process(
 		&mut self,
 		stk: &mut Stk,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		opt: &Options,
 		stm: &Statement<'_>,
 		pro: Processed,
@@ -591,7 +601,7 @@ impl Iterator {
 	async fn result(
 		&mut self,
 		stk: &mut Stk,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		opt: &Options,
 		stm: &Statement<'_>,
 		res: Result<Value, Error>,

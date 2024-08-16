@@ -7,10 +7,9 @@ use crate::idx::planner::iterators::KnnIteratorResult;
 use crate::idx::trees::hnsw::docs::HnswDocs;
 use crate::idx::trees::knn::Ids64;
 use crate::sql::{Cond, Thing, Value};
-use hashbrown::hash_map::Entry;
-use hashbrown::HashMap;
+use ahash::HashMap;
 use reblessive::tree::Stk;
-use std::borrow::Cow;
+use std::collections::hash_map::Entry;
 use std::collections::VecDeque;
 use std::sync::Arc;
 
@@ -31,11 +30,7 @@ impl<'a> Default for HnswConditionChecker<'a> {
 }
 
 impl<'a> HnswConditionChecker<'a> {
-	pub(in crate::idx) fn new_cond(
-		ctx: &'a Context<'_>,
-		opt: &'a Options,
-		cond: Arc<Cond>,
-	) -> Self {
+	pub(in crate::idx) fn new_cond(ctx: &'a Context, opt: &'a Options, cond: Arc<Cond>) -> Self {
 		Self::HnswCondition(HnswCondChecker {
 			ctx,
 			opt,
@@ -81,7 +76,7 @@ impl<'a> HnswConditionChecker<'a> {
 }
 
 impl<'a> MTreeConditionChecker<'a> {
-	pub fn new_cond(ctx: &'a Context<'_>, opt: &'a Options, cond: Arc<Cond>) -> Self {
+	pub fn new_cond(ctx: &'a Context, opt: &'a Options, cond: Arc<Cond>) -> Self {
 		if Cond(Value::Bool(true)).ne(cond.as_ref()) {
 			return Self::MTreeCondition(MTreeCondChecker {
 				ctx,
@@ -94,7 +89,7 @@ impl<'a> MTreeConditionChecker<'a> {
 		}
 	}
 
-	pub fn new(ctx: &'a Context<'a>) -> Self {
+	pub fn new(ctx: &'a Context) -> Self {
 		Self::MTree(MTreeChecker {
 			ctx,
 		})
@@ -131,7 +126,7 @@ impl<'a> MTreeConditionChecker<'a> {
 }
 
 pub struct MTreeChecker<'a> {
-	ctx: &'a Context<'a>,
+	ctx: &'a Context,
 }
 
 impl<'a> MTreeChecker<'a> {
@@ -144,19 +139,19 @@ impl<'a> MTreeChecker<'a> {
 			return Ok(VecDeque::from([]));
 		}
 		let mut result = VecDeque::with_capacity(res.len());
-		let mut tx = self.ctx.tx_lock().await;
+		let txn = self.ctx.tx();
 		for (doc_id, dist) in res {
-			if let Some(key) = doc_ids.get_doc_key(&mut tx, doc_id).await? {
-				result.push_back((key.into(), dist, None));
+			if let Some(key) = doc_ids.get_doc_key(&txn, doc_id).await? {
+				let rid: Thing = key.into();
+				result.push_back((rid.into(), dist, None));
 			}
 		}
-		drop(tx);
 		Ok(result)
 	}
 }
 
 struct CheckerCacheEntry {
-	record: Option<(Thing, Value)>,
+	record: Option<(Arc<Thing>, Arc<Value>)>,
 	truthy: bool,
 }
 
@@ -180,24 +175,24 @@ impl CheckerCacheEntry {
 
 	async fn build(
 		stk: &mut Stk,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		opt: &Options,
 		rid: Option<Thing>,
 		cond: &Cond,
 	) -> Result<Self, Error> {
 		if let Some(rid) = rid {
-			let mut tx = ctx.tx_lock().await;
-			let val = Iterable::fetch_thing(&mut tx, opt, &rid).await?;
-			drop(tx);
+			let rid = Arc::new(rid);
+			let txn = ctx.tx();
+			let val = Iterable::fetch_thing(&txn, opt, &rid).await?;
 			if !val.is_none_or_null() {
 				let (value, truthy) = {
-					let cursor_doc = CursorDoc {
-						rid: Some(&rid),
+					let mut cursor_doc = CursorDoc {
+						rid: Some(rid.clone()),
 						ir: None,
-						doc: Cow::Owned(val),
+						doc: val.into(),
 					};
 					let truthy = cond.compute(stk, ctx, opt, Some(&cursor_doc)).await?.is_truthy();
-					(cursor_doc.doc.into_owned(), truthy)
+					(cursor_doc.doc.as_arc(), truthy)
 				};
 				return Ok(CheckerCacheEntry {
 					record: Some((rid, value)),
@@ -213,7 +208,7 @@ impl CheckerCacheEntry {
 }
 
 pub struct MTreeCondChecker<'a> {
-	ctx: &'a Context<'a>,
+	ctx: &'a Context,
 	opt: &'a Options,
 	cond: Arc<Cond>,
 	cache: HashMap<DocId, CheckerCacheEntry>,
@@ -229,9 +224,8 @@ impl<'a> MTreeCondChecker<'a> {
 		match self.cache.entry(doc_id) {
 			Entry::Occupied(e) => Ok(e.get().truthy),
 			Entry::Vacant(e) => {
-				let mut tx = self.ctx.tx_lock().await;
-				let rid = doc_ids.get_doc_key(&mut tx, doc_id).await?.map(|k| k.into());
-				drop(tx);
+				let txn = self.ctx.tx();
+				let rid = doc_ids.get_doc_key(&txn, doc_id).await?.map(|k| k.into());
 				let ent =
 					CheckerCacheEntry::build(stk, self.ctx, self.opt, rid, self.cond.as_ref())
 						.await?;
@@ -271,7 +265,7 @@ impl<'a> HnswChecker {
 		let mut result = VecDeque::with_capacity(res.len());
 		for (doc_id, dist) in res {
 			if let Some(rid) = docs.get_thing(doc_id) {
-				result.push_back((rid.clone(), dist, None));
+				result.push_back((rid.clone().into(), dist, None));
 			}
 		}
 		Ok(result)
@@ -279,7 +273,7 @@ impl<'a> HnswChecker {
 }
 
 pub struct HnswCondChecker<'a> {
-	ctx: &'a Context<'a>,
+	ctx: &'a Context,
 	opt: &'a Options,
 	cond: Arc<Cond>,
 	cache: HashMap<DocId, CheckerCacheEntry>,
