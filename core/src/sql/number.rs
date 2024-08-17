@@ -940,3 +940,19 @@ impl ToFloat for Number {
 		self.to_float()
 	}
 }
+
+#[cfg(test)]
+mod tests {
+	use super::Number;
+	use super::TryFloatDiv;
+	fn test_try_float_div() {
+		let (sum_one, count_one) = (Number::Int(5), Number::Int(2));
+		assert_eq!(sum_one.try_float_div(count_one).unwrap(), Number::Float(2.5));
+
+		let (sum_two, count_two) = (Number::Int(10), Number::Int(5));
+		assert_eq!(sum_two.try_float_div(count_two).unwrap(), Number::Int(2));
+
+		let (sum_three, count_three) = (Number::Float(6.3), Number::Int(3));
+		assert_eq!(sum_three.try_float_div(count_three).unwrap(), Number::Float(2.1));
+	}
+}

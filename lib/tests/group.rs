@@ -288,8 +288,8 @@ async fn select_aggregate() -> Result<(), Error> {
 #[tokio::test]
 async fn select_multi_aggregate() -> Result<(), Error> {
 	let sql = "
-		CREATE test:1 SET group = 1, one = 1, two = 2.4;
-		CREATE test:2 SET group = 1, one = 4, two = 3.9;
+		CREATE test:1 SET group = 1, one = 1.7, two = 2.4;
+		CREATE test:2 SET group = 1, one = 4.7, two = 3.9;
 		CREATE test:3 SET group = 2, one = 3.2, two = 9.7;
 		CREATE test:4 SET group = 2, one = 4.4, two = 3.0;
 		SELECT group, math::sum(one) AS one, math::sum(two) AS two, math::min(one) as min FROM test GROUP BY group;
@@ -307,7 +307,7 @@ async fn select_multi_aggregate() -> Result<(), Error> {
 			{
 				id: test:1,
 				group: 1,
-				one: 1,
+				one: 1.7,
 				two: 2.4,
 			}
 		]",
@@ -320,7 +320,7 @@ async fn select_multi_aggregate() -> Result<(), Error> {
 			{
 				id: test:2,
 				group: 1,
-				one: 4,
+				one: 4.7,
 				two: 3.9,
 			}
 		]",
@@ -358,8 +358,8 @@ async fn select_multi_aggregate() -> Result<(), Error> {
 		"[
 				{
 					group: 1,
-					min: 1,
-					one: 5,
+					min: 1.7,
+					one: 6.4,
 					two: 6.3
 				},
 				{
@@ -378,8 +378,8 @@ async fn select_multi_aggregate() -> Result<(), Error> {
 				{
 					group: 1,
 					max: 3.9,
-					mean: 2.5,
-					one: 5,
+					mean: 3.2,
+					one: 6.4,
 					two: 6.3
 				},
 				{
