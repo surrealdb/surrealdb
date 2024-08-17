@@ -55,7 +55,7 @@ impl Document {
 					false => &self.current,
 				};
 
-				let mut lqctx = match lv.context(ctx) {
+				let mut lqctx = match lv.construct_lq_context(ctx) {
 					Some(ctx) => ctx,
 					None => continue,
 				};

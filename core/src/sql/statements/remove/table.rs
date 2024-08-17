@@ -74,7 +74,7 @@ impl RemoveTableStatement {
 				// Create a new statement
 				let met = Value::from("TERMINATE");
 
-				let mut lqctx = match lv.context(ctx) {
+				let mut lqctx = match lv.construct_lq_context(ctx) {
 					Some(ctx) => ctx,
 					None => continue,
 				};

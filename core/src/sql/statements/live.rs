@@ -135,7 +135,7 @@ impl LiveStatement {
 	// use for processing this LIVE query statement.
 	// This ensures that we are using the session
 	// of the user who created the LIVE query.
-	pub(crate) fn context(&self, ctx: &Context) -> Option<MutableContext> {
+	pub(crate) fn construct_lq_context(&self, ctx: &Context) -> Option<MutableContext> {
 		// Ensure that a session exists on the LIVE query
 		let sess = match self.session.as_ref() {
 			Some(v) => v,
