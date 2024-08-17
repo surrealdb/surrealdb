@@ -135,6 +135,10 @@ impl Parser<'_> {
 		let mut res = start;
 		loop {
 			match self.peek_kind() {
+				t!("?") => {
+					self.pop_peek();
+					res.push(Part::Optional);
+				}
 				t!("...") => {
 					self.pop_peek();
 					res.push(Part::Flatten);
