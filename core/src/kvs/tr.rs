@@ -3,6 +3,7 @@ use super::Key;
 use super::Val;
 use crate::cf;
 use crate::dbs::node::Timestamp;
+use crate::doc::CursorValue;
 use crate::err::Error;
 use crate::idg::u32::U32;
 use crate::key::debug::Sprintable;
@@ -11,10 +12,8 @@ use crate::kvs::clock::SizedClock;
 use crate::kvs::stash::Stash;
 use crate::sql;
 use crate::sql::thing::Thing;
-use crate::sql::Value;
 use crate::vs::Versionstamp;
 use sql::statements::DefineTableStatement;
-use std::borrow::Cow;
 use std::fmt;
 use std::fmt::Debug;
 use std::ops::Range;
@@ -187,12 +186,12 @@ impl Transactor {
 
 	/// Fetch a key from the datastore.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
-	pub async fn get<K>(&mut self, key: K) -> Result<Option<Val>, Error>
+	pub async fn get<K>(&mut self, key: K, version: Option<u64>) -> Result<Option<Val>, Error>
 	where
 		K: Into<Key> + Debug,
 	{
 		let key = key.into();
-		expand_inner!(&mut self.inner, v => { v.get(key).await })
+		expand_inner!(&mut self.inner, v => { v.get(key, version).await })
 	}
 
 	/// Fetch many keys from the datastore.
@@ -326,13 +325,18 @@ impl Transactor {
 	///
 	/// This function fetches the full range of key-value pairs, in a single request to the underlying datastore.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
-	pub async fn scan<K>(&mut self, rng: Range<K>, limit: u32) -> Result<Vec<(Key, Val)>, Error>
+	pub async fn scan<K>(
+		&mut self,
+		rng: Range<K>,
+		limit: u32,
+		version: Option<u64>,
+	) -> Result<Vec<(Key, Val)>, Error>
 	where
 		K: Into<Key> + Debug,
 	{
 		let beg: Key = rng.start.into();
 		let end: Key = rng.end.into();
-		expand_inner!(&mut self.inner, v => { v.scan(beg..end, limit).await })
+		expand_inner!(&mut self.inner, v => { v.scan(beg..end, limit, version).await })
 	}
 
 	/// Retrieve a batched scan over a specific range of keys in the datastore.
@@ -410,8 +414,8 @@ impl Transactor {
 		db: &str,
 		tb: &str,
 		id: &Thing,
-		previous: Cow<'_, Value>,
-		current: Cow<'_, Value>,
+		previous: CursorValue,
+		current: CursorValue,
 		store_difference: bool,
 	) {
 		self.cf.record_cf_change(ns, db, tb, id.clone(), previous, current, store_difference)
@@ -432,7 +436,7 @@ impl Transactor {
 		Ok(if let Some(v) = self.stash.get(key) {
 			v
 		} else {
-			let val = self.get(key.clone()).await?;
+			let val = self.get(key.clone(), None).await?;
 			if let Some(val) = val {
 				U32::new(key.clone(), Some(val)).await?
 			} else {

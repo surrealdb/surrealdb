@@ -47,7 +47,8 @@ impl<'a> KnnConditionRewriter<'a> {
 			| Value::Table(_)
 			| Value::Mock(_)
 			| Value::Regex(_)
-			| Value::Constant(_) => Some(v.clone()),
+			| Value::Constant(_)
+			| Value::Closure(_) => Some(v.clone()),
 		}
 	}
 
@@ -151,7 +152,8 @@ impl<'a> KnnConditionRewriter<'a> {
 			| Part::Last
 			| Part::First
 			| Part::Field(_)
-			| Part::Index(_) => Some(p.clone()),
+			| Part::Index(_)
+			| Part::Optional => Some(p.clone()),
 			Part::Where(v) => self.eval_value(v).map(Part::Where),
 			Part::Graph(_) => None,
 			Part::Value(v) => self.eval_value(v).map(Part::Value),
@@ -207,6 +209,9 @@ impl<'a> KnnConditionRewriter<'a> {
 			}
 			Function::Script(s, args) => {
 				self.eval_values(args).map(|args| Function::Script(s.clone(), args))
+			}
+			Function::Anonymous(p, args) => {
+				self.eval_values(args).map(|args| Function::Anonymous(p.clone(), args))
 			}
 		}
 	}

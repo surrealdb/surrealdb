@@ -21,7 +21,7 @@ pub struct RemoveTableStatement {
 
 impl RemoveTableStatement {
 	/// Process this type returning a computed simple Value
-	pub(crate) async fn compute(&self, ctx: &Context<'_>, opt: &Options) -> Result<Value, Error> {
+	pub(crate) async fn compute(&self, ctx: &Context, opt: &Options) -> Result<Value, Error> {
 		let future = async {
 			// Allowed to run?
 			opt.is_allowed(Action::Edit, ResourceKind::Table, &Base::Db)?;
@@ -64,7 +64,7 @@ impl RemoveTableStatement {
 		}
 	}
 
-	async fn terminate_lives(&self, ctx: &Context<'_>, opt: &Options) -> Result<(), Error> {
+	async fn terminate_lives(&self, ctx: &Context, opt: &Options) -> Result<(), Error> {
 		// Check if we can send notifications
 		if let Some(chn) = &opt.sender {
 			// Get all live queries for this table
@@ -79,7 +79,7 @@ impl RemoveTableStatement {
 					None => continue,
 				};
 
-				lqctx.add_value("event", met);
+				lqctx.add_value("event", met.into());
 
 				if opt.id()? == lv.node.0 {
 					chn.send(Notification {

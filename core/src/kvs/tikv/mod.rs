@@ -184,10 +184,15 @@ impl super::api::Transaction for Transaction {
 
 	/// Fetch a key from the database
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
-	async fn get<K>(&mut self, key: K) -> Result<Option<Val>, Error>
+	async fn get<K>(&mut self, key: K, version: Option<u64>) -> Result<Option<Val>, Error>
 	where
 		K: Into<Key> + Sprintable + Debug,
 	{
+		// TiKV does not support verisoned queries.
+		if version.is_some() {
+			return Err(Error::UnsupportedVersionedQueries);
+		}
+
 		// Check to see if transaction is closed
 		if self.done {
 			return Err(Error::TxFinished);
@@ -370,10 +375,20 @@ impl super::api::Transaction for Transaction {
 
 	/// Retrieve a range of keys from the database
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.sprint()))]
-	async fn scan<K>(&mut self, rng: Range<K>, limit: u32) -> Result<Vec<(Key, Val)>, Error>
+	async fn scan<K>(
+		&mut self,
+		rng: Range<K>,
+		limit: u32,
+		version: Option<u64>,
+	) -> Result<Vec<(Key, Val)>, Error>
 	where
 		K: Into<Key> + Sprintable + Debug,
 	{
+		// TiKV does not support verisoned queries.
+		if version.is_some() {
+			return Err(Error::UnsupportedVersionedQueries);
+		}
+
 		// Check to see if transaction is closed
 		if self.done {
 			return Err(Error::TxFinished);
@@ -404,7 +419,7 @@ impl super::api::Transaction for Transaction {
 		// Get the transaction version
 		let ver = self.inner.current_timestamp().await?.version();
 		// Calculate the previous version value
-		if let Some(prev) = self.get(key.as_slice()).await? {
+		if let Some(prev) = self.get(key.as_slice(), None).await? {
 			let res: Result<[u8; 10], Error> = match prev.as_slice().try_into() {
 				Ok(ba) => Ok(ba),
 				Err(e) => Err(Error::Tx(e.to_string())),

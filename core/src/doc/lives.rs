@@ -1,4 +1,4 @@
-use crate::ctx::Context;
+use crate::ctx::{Context, MutableContext};
 use crate::dbs::Action;
 use crate::dbs::Notification;
 use crate::dbs::Options;
@@ -13,14 +13,13 @@ use crate::sql::paths::TK;
 use crate::sql::permission::Permission;
 use crate::sql::Value;
 use reblessive::tree::Stk;
-use std::ops::Deref;
 use std::sync::Arc;
 
-impl<'a> Document<'a> {
+impl Document {
 	pub async fn lives(
-		&self,
+		&mut self,
 		stk: &mut Stk,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		opt: &Options,
 		stm: &Statement<'_>,
 	) -> Result<(), Error> {
@@ -48,6 +47,8 @@ impl<'a> Document<'a> {
 				} else {
 					Value::from("UPDATE")
 				};
+				let current = self.current.doc.as_arc();
+				let initial = self.initial.doc.as_arc();
 				// Check if this is a delete statement
 				let doc = match stm.is_delete() {
 					true => &self.initial,
@@ -62,19 +63,19 @@ impl<'a> Document<'a> {
 				// Add $before, $after, $value, and $event params
 				// to this LIVE query so the user can use these
 				// within field projections and WHERE clauses.
-				lqctx.add_value("event", met);
-				lqctx.add_value("value", self.current.doc.deref());
-				lqctx.add_value("after", self.current.doc.deref());
-				lqctx.add_value("before", self.initial.doc.deref());
+				lqctx.add_value("event", met.into());
+				lqctx.add_value("value", current.clone());
+				lqctx.add_value("after", current);
+				lqctx.add_value("before", initial);
 
 				let lqopt = match lv.options(opt) {
 					Some(opt) => opt,
 					None => continue,
 				};
-
 				// First of all, let's check to see if the WHERE
 				// clause of the LIVE query is matched by this
 				// document. If it is then we can continue.
+				let lqctx = lqctx.freeze();
 				match self.lq_check(stk, &lqctx, &lqopt, &lq, doc).await {
 					Err(Error::Ignore) => continue,
 					Err(e) => return Err(e),
@@ -103,7 +104,7 @@ impl<'a> Document<'a> {
 								let lqopt: &Options = &lqopt.new_with_futures(true);
 								// Output the full document before any changes were applied
 								let mut value =
-									doc.doc.compute(stk, &lqctx, lqopt, Some(doc)).await?;
+									doc.doc.as_ref().compute(stk, &lqctx, lqopt, Some(doc)).await?;
 								// Remove metadata fields on output
 								value.del(stk, &lqctx, lqopt, &*META).await?;
 								// Output result
@@ -148,10 +149,10 @@ impl<'a> Document<'a> {
 	async fn lq_check(
 		&self,
 		stk: &mut Stk,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		opt: &Options,
 		stm: &Statement<'_>,
-		doc: &CursorDoc<'_>,
+		doc: &CursorDoc,
 	) -> Result<(), Error> {
 		// Check where condition
 		if let Some(cond) = stm.conds() {
@@ -168,10 +169,10 @@ impl<'a> Document<'a> {
 	async fn lq_allow(
 		&self,
 		stk: &mut Stk,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		opt: &Options,
 		stm: &Statement<'_>,
-		doc: &CursorDoc<'_>,
+		doc: &CursorDoc,
 	) -> Result<(), Error> {
 		// Should we run permissions checks?
 		if opt.check_perms(stm.into())? {

@@ -1,4 +1,4 @@
-use crate::ctx::Context;
+use crate::ctx::{Context, MutableContext};
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
@@ -72,9 +72,9 @@ impl LiveStatement {
 	pub(crate) async fn compute(
 		&self,
 		stk: &mut Stk,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		opt: &Options,
-		doc: Option<&CursorDoc<'_>>,
+		doc: Option<&CursorDoc>,
 	) -> Result<Value, Error> {
 		// Is realtime enabled?
 		opt.realtime()?;
@@ -131,19 +131,18 @@ impl LiveStatement {
 		Ok(id.into())
 	}
 
-	/// We need to create a new context which we will
-	// 	use for processing this LIVE query statement.
-	// 	This ensures that we are using the session
-	// 	of the user who created the LIVE query.
-	pub(crate) fn context(&self, ctx: &Context<'_>) -> Option<Context> {
+	// We need to create a new context which we will
+	// use for processing this LIVE query statement.
+	// This ensures that we are using the session
+	// of the user who created the LIVE query.
+	pub(crate) fn context(&self, ctx: &Context) -> Option<MutableContext> {
 		// Ensure that a session exists on the LIVE query
 		let sess = match self.session.as_ref() {
 			Some(v) => v,
 			None => return None,
 		};
 
-		let mut lqctx = Context::background();
-
+		let mut lqctx = MutableContext::background();
 		// Set the current transaction on the new LIVE
 		// query context to prevent unreachable behaviour
 		// and ensure that queries can be executed.
@@ -151,10 +150,10 @@ impl LiveStatement {
 		// Add the session params to this LIVE query, so
 		// that queries can use these within field
 		// projections and WHERE clauses.
-		lqctx.add_value("access", sess.pick(AC.as_ref()));
-		lqctx.add_value("auth", sess.pick(RD.as_ref()));
-		lqctx.add_value("token", sess.pick(TK.as_ref()));
-		lqctx.add_value("session", sess);
+		lqctx.add_value("access", sess.pick(AC.as_ref()).into());
+		lqctx.add_value("auth", sess.pick(RD.as_ref()).into());
+		lqctx.add_value("token", sess.pick(TK.as_ref()).into());
+		lqctx.add_value("session", sess.clone().into());
 
 		Some(lqctx)
 	}

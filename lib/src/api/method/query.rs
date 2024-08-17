@@ -276,7 +276,7 @@ where
 	/// # Ok(())
 	/// # }
 	/// ```
-	pub fn bind(self, bindings: impl Serialize) -> Self {
+	pub fn bind(self, bindings: impl Serialize + 'static) -> Self {
 		self.map_valid(move |mut valid| {
 			let mut bindings = to_value(bindings)?;
 			if let Value::Array(array) = &mut bindings {

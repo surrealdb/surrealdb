@@ -1,6 +1,5 @@
 //! Methods to use when interacting with a SurrealDB instance
 use self::query::ValidQuery;
-use crate::api::err::Error;
 use crate::api::opt;
 use crate::api::opt::auth;
 use crate::api::opt::auth::Credentials;
@@ -13,7 +12,6 @@ use crate::api::Surreal;
 use crate::opt::IntoExportDestination;
 use crate::opt::WaitFor;
 use crate::sql::to_value;
-use crate::sql::Value;
 use serde::Serialize;
 use std::borrow::Cow;
 use std::marker::PhantomData;
@@ -78,6 +76,7 @@ pub use patch::Patch;
 pub use query::Query;
 pub use query::QueryStream;
 pub use select::Select;
+use serde_content::Serializer;
 pub use set::Set;
 pub use signin::Signin;
 pub use signup::Signup;
@@ -108,7 +107,7 @@ pub struct Live;
 
 /// Responses returned with statistics
 #[derive(Debug)]
-pub struct WithStats<T>(T);
+pub struct WithStats<T>(pub T);
 
 impl<C> Surreal<C>
 where
@@ -322,7 +321,7 @@ where
 	/// # Ok(())
 	/// # }
 	/// ```
-	pub fn set(&self, key: impl Into<String>, value: impl Serialize) -> Set<C> {
+	pub fn set(&self, key: impl Into<String>, value: impl Serialize + 'static) -> Set<C> {
 		Set {
 			client: Cow::Borrowed(self),
 			key: key.into(),
@@ -424,16 +423,7 @@ where
 	pub fn signup<R>(&self, credentials: impl Credentials<auth::Signup, R>) -> Signup<C, R> {
 		Signup {
 			client: Cow::Borrowed(self),
-			credentials: to_value(credentials).map_err(Into::into).and_then(|x| {
-				if let Value::Object(x) = x {
-					Ok(x)
-				} else {
-					Err(Error::InternalError(
-						"credentials did not serialize to an object".to_string(),
-					)
-					.into())
-				}
-			}),
+			credentials: Serializer::new().serialize(credentials),
 			response_type: PhantomData,
 		}
 	}
@@ -552,16 +542,7 @@ where
 	pub fn signin<R>(&self, credentials: impl Credentials<auth::Signin, R>) -> Signin<C, R> {
 		Signin {
 			client: Cow::Borrowed(self),
-			credentials: to_value(credentials).map_err(Into::into).and_then(|x| {
-				if let Value::Object(x) = x {
-					Ok(x)
-				} else {
-					Err(Error::InternalError(
-						"credentials did not serialize to an object".to_string(),
-					)
-					.into())
-				}
-			}),
+			credentials: Serializer::new().serialize(credentials),
 			response_type: PhantomData,
 		}
 	}

@@ -64,7 +64,7 @@ where
 {
 	type Output = Result<Vec<F::Ok>, F::Error>;
 
-	fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+	fn poll(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
 		let mut this = self.project();
 		Poll::Ready(Ok(loop {
 			match ready!(this.active.as_mut().try_poll_next(cx)?) {
@@ -105,7 +105,7 @@ mod tests {
 
 		fn poll(
 			self: std::pin::Pin<&mut Self>,
-			cx: &mut std::task::Context<'_>,
+			cx: &mut std::task::Context,
 		) -> std::task::Poll<Self::Output> {
 			let me = self.project();
 			ready!(me.sleep.poll(cx));

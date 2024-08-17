@@ -25,6 +25,7 @@ pub enum Part {
 	Method(#[serde(with = "no_nul_bytes")] String, Vec<Value>),
 	#[revision(start = 2)]
 	Destructure(Vec<DestructurePart>),
+	Optional,
 }
 
 impl From<i32> for Part {
@@ -128,6 +129,7 @@ impl fmt::Display for Part {
 					f.write_str(" }")
 				}
 			}
+			Part::Optional => write!(f, "?"),
 		}
 	}
 }
@@ -143,6 +145,30 @@ impl<'a> Next<'a> for &'a [Part] {
 		match self.len() {
 			0 => &[],
 			_ => &self[1..],
+		}
+	}
+}
+
+// ------------------------------
+
+pub trait NextMethod<'a> {
+	fn next_method(&'a self) -> &[Part];
+}
+
+impl<'a> NextMethod<'a> for &'a [Part] {
+	fn next_method(&'a self) -> &'a [Part] {
+		match self.iter().position(|p| matches!(p, Part::Method(_, _))) {
+			None => &[],
+			Some(i) => &self[i..],
+		}
+	}
+}
+
+impl<'a> NextMethod<'a> for &'a Idiom {
+	fn next_method(&'a self) -> &'a [Part] {
+		match self.iter().position(|p| matches!(p, Part::Method(_, _))) {
+			None => &[],
+			Some(i) => &self[i..],
 		}
 	}
 }

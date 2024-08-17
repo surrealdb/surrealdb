@@ -39,7 +39,7 @@ pub struct MTreeIndex {
 }
 
 struct MTreeSearchContext<'a> {
-	ctx: &'a Context<'a>,
+	ctx: &'a Context,
 	pt: SharedVector,
 	k: usize,
 	store: &'a MTreeStore,
@@ -57,7 +57,7 @@ impl MTreeIndex {
 			DocIds::new(ixs, txn, tt, ikb.clone(), p.doc_ids_order, p.doc_ids_cache).await?,
 		));
 		let state_key = ikb.new_vm_key(None);
-		let state: MState = if let Some(val) = txn.get(state_key.clone()).await? {
+		let state: MState = if let Some(val) = txn.get(state_key.clone(), None).await? {
 			MState::try_from_val(val)?
 		} else {
 			MState::new(p.capacity)
@@ -135,7 +135,7 @@ impl MTreeIndex {
 	pub async fn knn_search(
 		&self,
 		stk: &mut Stk,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		v: &[Number],
 		k: usize,
 		mut chk: MTreeConditionChecker<'_>,
@@ -1473,7 +1473,7 @@ impl VersionedSerdeState for MState {}
 #[cfg(test)]
 mod tests {
 
-	use crate::ctx::Context;
+	use crate::ctx::{Context, MutableContext};
 	use crate::err::Error;
 	use crate::idx::docids::{DocId, DocIds};
 	use crate::idx::planner::checker::MTreeConditionChecker;
@@ -1491,19 +1491,20 @@ mod tests {
 	use std::collections::VecDeque;
 	use test_log::test;
 
-	async fn new_operation<'a>(
+	async fn new_operation(
 		ds: &Datastore,
 		t: &MTree,
 		tt: TransactionType,
 		cache_size: usize,
-	) -> (Context<'a>, TreeStore<MTreeNode>) {
+	) -> (Context, TreeStore<MTreeNode>) {
 		let st = ds
 			.index_store()
 			.get_store_mtree(TreeNodeProvider::Debug, t.state.generation, tt, cache_size)
 			.await;
 		let tx = ds.transaction(tt, Optimistic).await.unwrap().enclose();
-		let ctx = Context::default().with_transaction(tx);
-		(ctx, st)
+		let mut ctx = MutableContext::default();
+		ctx.set_transaction(tx);
+		(ctx.freeze(), st)
 	}
 
 	async fn finish_operation(

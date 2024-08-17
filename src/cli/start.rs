@@ -9,7 +9,6 @@ use crate::env;
 use crate::err::Error;
 use crate::net::{self, client_ip::ClientIp};
 use clap::Args;
-use opentelemetry::Context;
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -154,7 +153,7 @@ pub async fn init(
 	// Initialize opentelemetry and logging
 	crate::telemetry::builder().with_filter(log).init();
 	// Start metrics subsystem
-	crate::telemetry::metrics::init(&Context::current()).expect("failed to initialize metrics");
+	crate::telemetry::metrics::init().expect("failed to initialize metrics");
 
 	// Check if we should output a banner
 	if !no_banner {
