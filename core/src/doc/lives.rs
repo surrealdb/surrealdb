@@ -68,7 +68,7 @@ impl Document {
 				lqctx.add_value("after", current);
 				lqctx.add_value("before", initial);
 
-				let lqopt = match lv.options(opt) {
+				let lqopt = match lv.construct_options(opt) {
 					Some(opt) => opt,
 					None => continue,
 				};

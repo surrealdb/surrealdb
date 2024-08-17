@@ -162,7 +162,7 @@ impl LiveStatement {
 	// use for processing this LIVE query statement.
 	// This ensures that we are using the auth data
 	// of the user who created the LIVE query.
-	pub(crate) fn options(&self, opt: &Options) -> Option<Options> {
+	pub(crate) fn construct_options(&self, opt: &Options) -> Option<Options> {
 		// Ensure that auth info exists on the LIVE query
 		let auth = match self.auth.clone() {
 			Some(v) => v,
