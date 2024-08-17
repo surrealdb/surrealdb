@@ -156,12 +156,14 @@ fn statements() -> Vec<Statement> {
 			name: Ident("a".to_string()),
 			comment: Some(Strand("test".to_string())),
 			if_not_exists: false,
+			overwrite: false,
 		})),
 		Statement::Define(DefineStatement::Namespace(DefineNamespaceStatement {
 			id: None,
 			name: Ident("a".to_string()),
 			comment: None,
 			if_not_exists: false,
+			overwrite: false,
 		})),
 		Statement::Define(DefineStatement::Database(DefineDatabaseStatement {
 			id: None,
@@ -172,6 +174,7 @@ fn statements() -> Vec<Statement> {
 				store_diff: false,
 			}),
 			if_not_exists: false,
+			overwrite: false,
 		})),
 		Statement::Define(DefineStatement::Database(DefineDatabaseStatement {
 			id: None,
@@ -179,6 +182,7 @@ fn statements() -> Vec<Statement> {
 			comment: None,
 			changefeed: None,
 			if_not_exists: false,
+			overwrite: false,
 		})),
 		Statement::Define(DefineStatement::Function(DefineFunctionStatement {
 			name: Ident("foo::bar".to_string()),
@@ -193,6 +197,8 @@ fn statements() -> Vec<Statement> {
 			comment: Some(Strand("test".to_string())),
 			permissions: Permission::Full,
 			if_not_exists: false,
+			overwrite: false,
+			returns: None,
 		})),
 		Statement::Define(DefineStatement::Access(DefineAccessStatement {
 			name: Ident("a".to_string()),
@@ -200,7 +206,6 @@ fn statements() -> Vec<Statement> {
 			kind: AccessType::Record(RecordAccess {
 				signup: None,
 				signin: None,
-				authenticate: None,
 				jwt: JwtAccess {
 					verify: JwtAccessVerify::Key(JwtAccessVerifyKey {
 						alg: Algorithm::EdDSA,
@@ -208,7 +213,11 @@ fn statements() -> Vec<Statement> {
 					}),
 					issue: None,
 				},
+				// TODO(gguillemas): Field kept to gracefully handle breaking change.
+				// Remove when "revision" crate allows doing so.
+				authenticate: None,
 			}),
+			authenticate: None,
 			// Default durations.
 			duration: AccessDuration {
 				grant: None,
@@ -217,6 +226,7 @@ fn statements() -> Vec<Statement> {
 			},
 			comment: Some(Strand("bar".to_string())),
 			if_not_exists: false,
+			overwrite: false,
 		})),
 		Statement::Define(DefineStatement::Param(DefineParamStatement {
 			name: Ident("a".to_string()),
@@ -231,6 +241,7 @@ fn statements() -> Vec<Statement> {
 			comment: None,
 			permissions: Permission::Specific(Value::Null),
 			if_not_exists: false,
+			overwrite: false,
 		})),
 		Statement::Define(DefineStatement::Table(DefineTableStatement {
 			id: None,
@@ -267,6 +278,7 @@ fn statements() -> Vec<Statement> {
 			}),
 			comment: None,
 			if_not_exists: false,
+			overwrite: false,
 			kind: TableType::Any,
 		})),
 		Statement::Define(DefineStatement::Event(DefineEventStatement {
@@ -276,6 +288,7 @@ fn statements() -> Vec<Statement> {
 			then: Values(vec![Value::Null, Value::None]),
 			comment: None,
 			if_not_exists: false,
+			overwrite: false,
 		})),
 		Statement::Define(DefineStatement::Field(DefineFieldStatement {
 			name: Idiom(vec![
@@ -302,6 +315,7 @@ fn statements() -> Vec<Statement> {
 			},
 			comment: None,
 			if_not_exists: false,
+			overwrite: false,
 		})),
 		Statement::Define(DefineStatement::Index(DefineIndexStatement {
 			name: Ident("index".to_owned()),
@@ -328,6 +342,7 @@ fn statements() -> Vec<Statement> {
 			}),
 			comment: None,
 			if_not_exists: false,
+			overwrite: false,
 		})),
 		Statement::Define(DefineStatement::Index(DefineIndexStatement {
 			name: Ident("index".to_owned()),
@@ -336,6 +351,7 @@ fn statements() -> Vec<Statement> {
 			index: Index::Uniq,
 			comment: None,
 			if_not_exists: false,
+			overwrite: false,
 		})),
 		Statement::Define(DefineStatement::Index(DefineIndexStatement {
 			name: Ident("index".to_owned()),
@@ -353,6 +369,7 @@ fn statements() -> Vec<Statement> {
 			}),
 			comment: None,
 			if_not_exists: false,
+			overwrite: false,
 		})),
 		Statement::Define(DefineStatement::Analyzer(DefineAnalyzerStatement {
 			name: Ident("ana".to_owned()),
@@ -373,6 +390,7 @@ fn statements() -> Vec<Statement> {
 			function: Some(Ident("foo::bar".to_string())),
 			comment: None,
 			if_not_exists: false,
+			overwrite: false,
 		})),
 		Statement::Delete(DeleteStatement {
 			only: true,
@@ -516,6 +534,7 @@ fn statements() -> Vec<Statement> {
 		Statement::Set(SetStatement {
 			name: "param".to_owned(),
 			what: Value::Number(Number::Int(1)),
+			kind: None,
 		}),
 		Statement::Show(ShowStatement {
 			table: Some(Table("foo".to_owned())),

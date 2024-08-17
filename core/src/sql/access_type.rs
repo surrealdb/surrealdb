@@ -3,18 +3,28 @@ use crate::sql::statements::info::InfoStructure;
 use crate::sql::statements::DefineAccessStatement;
 use crate::sql::{escape::quote_str, Algorithm};
 use revision::revisioned;
+use revision::Error as RevisionError;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::fmt::Display;
 
 /// The type of access methods available
-#[revisioned(revision = 1)]
+#[revisioned(revision = 2)]
 #[derive(Debug, Serialize, Deserialize, Hash, Clone, Eq, PartialEq, PartialOrd)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub enum AccessType {
 	Record(RecordAccess),
 	Jwt(JwtAccess),
+	// TODO(gguillemas): Document once bearer access is no longer experimental.
+	#[doc(hidden)]
+	#[revision(start = 2)]
+	Bearer(BearerAccess),
+}
+
+// Allows retrieving the JWT configuration for any access type.
+pub trait Jwt {
+	fn jwt(&self) -> &JwtAccess;
 }
 
 impl Default for AccessType {
@@ -23,6 +33,16 @@ impl Default for AccessType {
 		Self::Record(RecordAccess {
 			..Default::default()
 		})
+	}
+}
+
+impl Jwt for AccessType {
+	fn jwt(&self) -> &JwtAccess {
+		match self {
+			AccessType::Record(at) => at.jwt(),
+			AccessType::Jwt(at) => at.jwt(),
+			AccessType::Bearer(at) => at.jwt(),
+		}
 	}
 }
 
@@ -40,10 +60,13 @@ impl Display for AccessType {
 				if let Some(ref v) = ac.signin {
 					write!(f, " SIGNIN {v}")?
 				}
-				if let Some(ref v) = ac.authenticate {
-					write!(f, " AUTHENTICATE {v}")?
-				}
 				write!(f, " WITH JWT {}", ac.jwt)?;
+			}
+			AccessType::Bearer(ac) => {
+				write!(f, "BEARER")?;
+				if let BearerAccessLevel::Record = ac.level {
+					write!(f, " FOR RECORD")?;
+				}
 			}
 		}
 		Ok(())
@@ -62,13 +85,22 @@ impl InfoStructure for AccessType {
 				"jwt".to_string() => v.jwt.structure(),
 				"signup".to_string(), if let Some(v) = v.signup => v.structure(),
 				"signin".to_string(), if let Some(v) = v.signin => v.structure(),
-				"authenticate".to_string(), if let Some(v) = v.authenticate => v.structure(),
 			}),
+			AccessType::Bearer(ac) => Value::from(map! {
+					"kind".to_string() => "BEARER".into(),
+					"level".to_string() => match ac.level {
+							BearerAccessLevel::Record => "RECORD",
+							BearerAccessLevel::User => "USER",
+			}.into(),
+					"jwt".to_string() => ac.jwt.structure(),
+				}),
 		}
 	}
 }
 
 impl AccessType {
+	// TODO(gguillemas): Document once bearer access is no longer experimental.
+	#[doc(hidden)]
 	/// Returns whether or not the access method can issue non-token grants
 	/// In this context, token refers exclusively to JWT
 	#[allow(unreachable_patterns)]
@@ -76,8 +108,7 @@ impl AccessType {
 		match self {
 			// The grants for JWT and record access methods are JWT
 			AccessType::Jwt(_) | AccessType::Record(_) => false,
-			// TODO(gguillemas): This arm should be reachable by the bearer access method
-			_ => unreachable!(),
+			AccessType::Bearer(_) => true,
 		}
 	}
 	/// Returns whether or not the access method can issue tokens
@@ -118,6 +149,12 @@ impl Default for JwtAccess {
 				key,
 			}),
 		}
+	}
+}
+
+impl Jwt for JwtAccess {
+	fn jwt(&self) -> &JwtAccess {
+		self
 	}
 }
 
@@ -260,15 +297,29 @@ pub struct JwtAccessVerifyJwks {
 	pub url: String,
 }
 
-#[revisioned(revision = 2)]
+#[revisioned(revision = 3)]
 #[derive(Debug, Serialize, Deserialize, Hash, Clone, Eq, PartialEq, PartialOrd)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct RecordAccess {
 	pub signup: Option<Value>,
 	pub signin: Option<Value>,
 	pub jwt: JwtAccess,
-	#[revision(start = 2)]
+	// TODO(gguillemas): Field kept to gracefully handle breaking change.
+	// Remove when "revision" crate allows doing so.
+	#[revision(start = 2, end = 3, convert_fn = "authenticate_revision")]
 	pub authenticate: Option<Value>,
+}
+
+impl RecordAccess {
+	fn authenticate_revision(
+		&self,
+		_revision: u16,
+		_value: Option<Value>,
+	) -> Result<(), RevisionError> {
+		Err(RevisionError::Conversion(
+			"The \"AUTHENTICATE\" clause has been moved to \"DEFINE ACCESS\"".to_string(),
+		))
+	}
 }
 
 impl Default for RecordAccess {
@@ -276,10 +327,54 @@ impl Default for RecordAccess {
 		Self {
 			signup: None,
 			signin: None,
+			jwt: JwtAccess {
+				..Default::default()
+			},
+			// TODO(gguillemas): Field kept to gracefully handle breaking change.
+			// Remove when "revision" crate allows doing so.
 			authenticate: None,
+		}
+	}
+}
+
+impl Jwt for RecordAccess {
+	fn jwt(&self) -> &JwtAccess {
+		&self.jwt
+	}
+}
+
+// TODO(gguillemas): Document once bearer access is no longer experimental.
+#[doc(hidden)]
+#[revisioned(revision = 1)]
+#[derive(Debug, Serialize, Deserialize, Hash, Clone, Eq, PartialEq, PartialOrd)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
+pub struct BearerAccess {
+	pub level: BearerAccessLevel,
+	pub jwt: JwtAccess,
+}
+
+impl Default for BearerAccess {
+	fn default() -> Self {
+		Self {
+			level: BearerAccessLevel::User,
 			jwt: JwtAccess {
 				..Default::default()
 			},
 		}
 	}
+}
+
+impl Jwt for BearerAccess {
+	fn jwt(&self) -> &JwtAccess {
+		&self.jwt
+	}
+}
+
+#[revisioned(revision = 1)]
+#[derive(Debug, Serialize, Deserialize, Hash, Clone, Eq, PartialEq, PartialOrd)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
+#[non_exhaustive]
+pub enum BearerAccessLevel {
+	Record,
+	User,
 }

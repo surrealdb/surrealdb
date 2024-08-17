@@ -11,10 +11,9 @@ use axum::response::IntoResponse;
 use axum::routing::options;
 use axum::Extension;
 use axum::Router;
-use axum::TypedHeader;
+use axum_extra::TypedHeader;
 use bytes::Bytes;
 use futures::{SinkExt, StreamExt};
-use http_body::Body as HttpBody;
 use surrealdb::dbs::Session;
 use tower_http::limit::RequestBodyLimitLayer;
 
@@ -23,11 +22,8 @@ use super::AppState;
 
 const MAX: usize = 1024 * 1024; // 1 MiB
 
-pub(super) fn router<S, B>() -> Router<S, B>
+pub(super) fn router<S>() -> Router<S>
 where
-	B: HttpBody + Send + 'static,
-	B::Data: Send,
-	B::Error: std::error::Error + Send + Sync + 'static,
 	S: Clone + Send + Sync + 'static,
 {
 	Router::new()

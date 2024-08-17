@@ -1,5 +1,4 @@
-use crate::api::conn::Method;
-use crate::api::conn::Param;
+use crate::api::conn::Command;
 use crate::api::method::BoxFuture;
 use crate::api::Connection;
 use crate::api::Result;
@@ -41,7 +40,12 @@ where
 	fn into_future(self) -> Self::IntoFuture {
 		Box::pin(async move {
 			let router = self.client.router.extract()?;
-			router.execute_unit(Method::Set, Param::new(vec![self.key.into(), self.value?])).await
+			router
+				.execute_unit(Command::Set {
+					key: self.key,
+					value: self.value?,
+				})
+				.await
 		})
 	}
 }

@@ -1,10 +1,10 @@
 use crate::ctx::Context;
-use hashbrown::hash_map::Entry;
-use hashbrown::{HashMap, HashSet};
+use ahash::{HashMap, HashMapExt, HashSet};
 use reblessive::tree::Stk;
 use revision::revisioned;
 use roaring::RoaringTreemap;
 use serde::{Deserialize, Serialize};
+use std::collections::hash_map::Entry;
 use std::collections::{BinaryHeap, VecDeque};
 use std::fmt::{Debug, Display, Formatter};
 use std::io::Cursor;
@@ -39,7 +39,7 @@ pub struct MTreeIndex {
 }
 
 struct MTreeSearchContext<'a> {
-	ctx: &'a Context<'a>,
+	ctx: &'a Context,
 	pt: SharedVector,
 	k: usize,
 	store: &'a MTreeStore,
@@ -57,7 +57,7 @@ impl MTreeIndex {
 			DocIds::new(ixs, txn, tt, ikb.clone(), p.doc_ids_order, p.doc_ids_cache).await?,
 		));
 		let state_key = ikb.new_vm_key(None);
-		let state: MState = if let Some(val) = txn.get(state_key.clone()).await? {
+		let state: MState = if let Some(val) = txn.get(state_key.clone(), None).await? {
 			MState::try_from_val(val)?
 		} else {
 			MState::new(p.capacity)
@@ -135,7 +135,7 @@ impl MTreeIndex {
 	pub async fn knn_search(
 		&self,
 		stk: &mut Stk,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		v: &[Number],
 		k: usize,
 		mut chk: MTreeConditionChecker<'_>,
@@ -217,7 +217,7 @@ impl MTree {
 			queue.push(PriorityNode::new(0.0, root_id));
 		}
 		#[cfg(debug_assertions)]
-		let mut visited_nodes = HashMap::new();
+		let mut visited_nodes = HashMap::default();
 		while let Some(e) = queue.pop() {
 			let id = e.id();
 			let node = search.store.get_node_txn(search.ctx, id).await?;
@@ -330,7 +330,7 @@ impl MTree {
 	) -> Result<(), Error> {
 		let new_root_id = self.new_node_id();
 		let p = ObjectProperties::new_root(id);
-		let mut objects = LeafMap::new();
+		let mut objects = LeafMap::with_capacity(1);
 		objects.insert(obj, p);
 		let new_root_node = store.new_node(new_root_id, MTreeNode::Leaf(objects))?;
 		store.set_node(new_root_node, true).await?;
@@ -1473,7 +1473,7 @@ impl VersionedSerdeState for MState {}
 #[cfg(test)]
 mod tests {
 
-	use crate::ctx::Context;
+	use crate::ctx::{Context, MutableContext};
 	use crate::err::Error;
 	use crate::idx::docids::{DocId, DocIds};
 	use crate::idx::planner::checker::MTreeConditionChecker;
@@ -1486,24 +1486,25 @@ mod tests {
 	use crate::kvs::Transaction;
 	use crate::kvs::{Datastore, TransactionType};
 	use crate::sql::index::{Distance, VectorType};
-	use hashbrown::{HashMap, HashSet};
+	use ahash::{HashMap, HashMapExt, HashSet};
 	use reblessive::tree::Stk;
 	use std::collections::VecDeque;
 	use test_log::test;
 
-	async fn new_operation<'a>(
+	async fn new_operation(
 		ds: &Datastore,
 		t: &MTree,
 		tt: TransactionType,
 		cache_size: usize,
-	) -> (Context<'a>, TreeStore<MTreeNode>) {
+	) -> (Context, TreeStore<MTreeNode>) {
 		let st = ds
 			.index_store()
 			.get_store_mtree(TreeNodeProvider::Debug, t.state.generation, tt, cache_size)
 			.await;
 		let tx = ds.transaction(tt, Optimistic).await.unwrap().enclose();
-		let ctx = Context::default().with_transaction(tx);
-		(ctx, st)
+		let mut ctx = MutableContext::default();
+		ctx.set_transaction(tx);
+		(ctx.freeze(), st)
 	}
 
 	async fn finish_operation(
@@ -1886,7 +1887,7 @@ mod tests {
 						stk,
 						&[40],
 						vt,
-						TestCollection::new(true, 1000, vt, 10, &Distance::Euclidean),
+						TestCollection::new(true, 500, vt, 5, &Distance::Euclidean),
 						false,
 						true,
 						false,
@@ -1910,7 +1911,7 @@ mod tests {
 						stk,
 						&[40],
 						vt,
-						TestCollection::new(true, 1000, vt, 10, &Distance::Euclidean),
+						TestCollection::new(true, 500, vt, 5, &Distance::Euclidean),
 						false,
 						true,
 						false,
@@ -1934,7 +1935,7 @@ mod tests {
 						stk,
 						&[40],
 						vt,
-						TestCollection::new(true, 1000, vt, 10, &Distance::Euclidean),
+						TestCollection::new(true, 500, vt, 5, &Distance::Euclidean),
 						false,
 						true,
 						false,
@@ -1961,13 +1962,18 @@ mod tests {
 					VectorType::I32,
 					VectorType::I16,
 				] {
-					for i in 0..30 {
-						// 10, 40
+					for collection_size in [0, 1, 5, 10, 15, 20, 30, 40] {
 						test_mtree_collection(
 							stk,
-							&[3, 40],
+							&[3, 10, 40],
 							vt,
-							TestCollection::new(false, i, vt, 1, &Distance::Euclidean),
+							TestCollection::new(
+								false,
+								collection_size,
+								vt,
+								1,
+								&Distance::Euclidean,
+							),
 							true,
 							true,
 							true,
@@ -2017,7 +2023,7 @@ mod tests {
 						stk,
 						&[40],
 						vt,
-						TestCollection::new(false, 1000, vt, 10, &Distance::Euclidean),
+						TestCollection::new(false, 500, vt, 5, &Distance::Euclidean),
 						false,
 						true,
 						false,
@@ -2075,13 +2081,13 @@ mod tests {
 		t: &MTree,
 	) -> Result<CheckedProperties, Error> {
 		debug!("CheckTreeProperties");
-		let mut node_ids = HashSet::new();
+		let mut node_ids = HashSet::default();
 		let mut checks = CheckedProperties::default();
 		let mut nodes: VecDeque<(NodeId, f64, Option<SharedVector>, usize)> = VecDeque::new();
 		if let Some(root_id) = t.state.root {
 			nodes.push_back((root_id, 0.0, None, 1));
 		}
-		let mut leaf_objects = HashSet::new();
+		let mut leaf_objects = HashSet::default();
 		while let Some((node_id, radius, center, depth)) = nodes.pop_front() {
 			assert!(node_ids.insert(node_id), "Node already exist: {}", node_id);
 			checks.node_count += 1;

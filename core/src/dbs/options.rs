@@ -46,6 +46,8 @@ pub struct Options {
 	pub projections: bool,
 	/// The channel over which we send notifications
 	pub sender: Option<Sender<Notification>>,
+	/// Version as nanosecond timestamp passed down to Datastore
+	pub version: Option<u64>,
 }
 
 #[derive(Clone, Debug)]
@@ -81,6 +83,7 @@ impl Options {
 			auth_enabled: true,
 			sender: None,
 			auth: Arc::new(Auth::default()),
+			version: None,
 		}
 	}
 
@@ -199,6 +202,12 @@ impl Options {
 	/// Create a new Options object with auth enabled
 	pub fn with_auth_enabled(mut self, auth_enabled: bool) -> Self {
 		self.auth_enabled = auth_enabled;
+		self
+	}
+
+	// Set the version
+	pub fn with_version(mut self, version: Option<u64>) -> Self {
+		self.version = version;
 		self
 	}
 

@@ -82,12 +82,12 @@ mod cli_integration {
 
 		#[cfg(debug_assertions)]
 		{
-			info!("* Debug builds contain debug message");
+			info!("* Development builds contain debug message");
 			let args = format!(
 				"sql --conn http://{addr} {creds} --ns {ns} --db {db} --multi --hide-welcome"
 			);
 			let output = common::run(&args).input("CREATE any:any;\n").output().unwrap();
-			assert!(output.contains("Debug builds are not intended for production use"));
+			assert!(output.contains("Development builds are not intended for production use"));
 		}
 
 		info!("* Create a record");
@@ -1450,16 +1450,30 @@ mod cli_integration {
 			server.finish().unwrap();
 		}
 	}
+
+	#[test(tokio::test)]
+	async fn double_create() {
+		info!("* check only one output created");
+		{
+			let args = "sql --conn memory --ns test --db test --pretty --hide-welcome".to_string();
+			let output = common::run(&args)
+				.input("let $a = create foo;\n")
+				.input("select * from foo;\n")
+				.output()
+				.unwrap();
+			let output = remove_debug_info(output);
+			assert_eq!(output.matches("foo:").count(), 1);
+		}
+	}
 }
 
 fn remove_debug_info(output: String) -> String {
 	// Look... sometimes you just gotta copy paste
 	let output_warning = "\
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│                        !!! THIS IS A DEBUG BUILD !!!                        │
-│        Debug builds are not intended for production use and include         │
-│       tooling and features that we would not recommend people run on        │
-│                                  live data.                                 │
+│                     !!! THIS IS A DEVELOPMENT BUILD !!!                     │
+│     Development builds are not intended for production use and include      │
+│    tooling and features that may affect the performance of the database.    |
 └─────────────────────────────────────────────────────────────────────────────┘
 ";
 	// The last line in the above is important

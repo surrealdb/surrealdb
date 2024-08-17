@@ -5,11 +5,12 @@ pub mod traces;
 use crate::cli::validator::parser::env_filter::CustomEnvFilter;
 use once_cell::sync::Lazy;
 use opentelemetry::metrics::MetricsError;
-use opentelemetry::sdk::resource::{
+use opentelemetry::Context;
+use opentelemetry::KeyValue;
+use opentelemetry_sdk::resource::{
 	EnvResourceDetector, SdkProvidedResourceDetector, TelemetryResourceDetector,
 };
-use opentelemetry::sdk::Resource;
-use opentelemetry::{Context, KeyValue};
+use opentelemetry_sdk::Resource;
 use std::time::Duration;
 use tracing::{Level, Subscriber};
 use tracing_subscriber::filter::ParseError;
@@ -108,10 +109,10 @@ pub fn filter_from_value(v: &str) -> Result<EnvFilter, ParseError> {
 		"info" => Ok(EnvFilter::default().add_directive(Level::INFO.into())),
 		// Otherwise, let's show debugs and above
 		"debug" => EnvFilter::builder()
-			.parse("warn,surreal=debug,surrealdb=debug,surrealdb::core::kvs=info"),
+			.parse("warn,surreal=debug,surrealdb=debug,surrealdb::core::kvs=debug"),
 		// Specify the log level for each code area
 		"trace" => EnvFilter::builder()
-			.parse("warn,surreal=trace,surrealdb=trace,surrealdb::core::kvs=info"),
+			.parse("warn,surreal=trace,surrealdb=trace,surrealdb::core::kvs=debug"),
 		// Check if we should show all surreal logs
 		"full" => EnvFilter::builder().parse("debug,surreal=trace,surrealdb=trace"),
 		// Check if we should show all module logs

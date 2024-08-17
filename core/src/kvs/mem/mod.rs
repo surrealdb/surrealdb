@@ -1,6 +1,7 @@
 #![cfg(feature = "kv-mem")]
 
 use crate::err::Error;
+use crate::key::debug::Sprintable;
 use crate::kvs::Check;
 use crate::kvs::Key;
 use crate::kvs::Val;
@@ -98,6 +99,7 @@ impl super::api::Transaction for Transaction {
 	}
 
 	/// Cancel a transaction
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self))]
 	async fn cancel(&mut self) -> Result<(), Error> {
 		// Check to see if transaction is closed
 		if self.done {
@@ -112,6 +114,7 @@ impl super::api::Transaction for Transaction {
 	}
 
 	/// Commit a transaction
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self))]
 	async fn commit(&mut self) -> Result<(), Error> {
 		// Check to see if transaction is closed
 		if self.done {
@@ -130,9 +133,10 @@ impl super::api::Transaction for Transaction {
 	}
 
 	/// Check if a key exists
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
 	async fn exists<K>(&mut self, key: K) -> Result<bool, Error>
 	where
-		K: Into<Key> + Debug,
+		K: Into<Key> + Sprintable + Debug,
 	{
 		// Check to see if transaction is closed
 		if self.done {
@@ -145,10 +149,16 @@ impl super::api::Transaction for Transaction {
 	}
 
 	/// Fetch a key from the database
-	async fn get<K>(&mut self, key: K) -> Result<Option<Val>, Error>
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
+	async fn get<K>(&mut self, key: K, version: Option<u64>) -> Result<Option<Val>, Error>
 	where
-		K: Into<Key> + Debug,
+		K: Into<Key> + Sprintable + Debug,
 	{
+		// MemDB does not support verisoned queries.
+		if version.is_some() {
+			return Err(Error::UnsupportedVersionedQueries);
+		}
+
 		// Check to see if transaction is closed
 		if self.done {
 			return Err(Error::TxFinished);
@@ -160,9 +170,10 @@ impl super::api::Transaction for Transaction {
 	}
 
 	/// Insert or update a key in the database
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
 	async fn set<K, V>(&mut self, key: K, val: V) -> Result<(), Error>
 	where
-		K: Into<Key> + Debug,
+		K: Into<Key> + Sprintable + Debug,
 		V: Into<Val> + Debug,
 	{
 		// Check to see if transaction is closed
@@ -180,9 +191,10 @@ impl super::api::Transaction for Transaction {
 	}
 
 	/// Insert a key if it doesn't exist in the database
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
 	async fn put<K, V>(&mut self, key: K, val: V) -> Result<(), Error>
 	where
-		K: Into<Key> + Debug,
+		K: Into<Key> + Sprintable + Debug,
 		V: Into<Val> + Debug,
 	{
 		// Check to see if transaction is closed
@@ -200,9 +212,10 @@ impl super::api::Transaction for Transaction {
 	}
 
 	/// Insert a key if the current value matches a condition
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
 	async fn putc<K, V>(&mut self, key: K, val: V, chk: Option<V>) -> Result<(), Error>
 	where
-		K: Into<Key> + Debug,
+		K: Into<Key> + Sprintable + Debug,
 		V: Into<Val> + Debug,
 	{
 		// Check to see if transaction is closed
@@ -220,9 +233,10 @@ impl super::api::Transaction for Transaction {
 	}
 
 	/// Delete a key
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
 	async fn del<K>(&mut self, key: K) -> Result<(), Error>
 	where
-		K: Into<Key> + Debug,
+		K: Into<Key> + Sprintable + Debug,
 	{
 		// Check to see if transaction is closed
 		if self.done {
@@ -239,9 +253,10 @@ impl super::api::Transaction for Transaction {
 	}
 
 	/// Delete a key if the current value matches a condition
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
 	async fn delc<K, V>(&mut self, key: K, chk: Option<V>) -> Result<(), Error>
 	where
-		K: Into<Key> + Debug,
+		K: Into<Key> + Sprintable + Debug,
 		V: Into<Val> + Debug,
 	{
 		// Check to see if transaction is closed
@@ -259,9 +274,10 @@ impl super::api::Transaction for Transaction {
 	}
 
 	/// Retrieve a range of keys from the databases
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.sprint()))]
 	async fn keys<K>(&mut self, rng: Range<K>, limit: u32) -> Result<Vec<Key>, Error>
 	where
-		K: Into<Key> + Debug,
+		K: Into<Key> + Sprintable + Debug,
 	{
 		// Check to see if transaction is closed
 		if self.done {
@@ -279,10 +295,21 @@ impl super::api::Transaction for Transaction {
 	}
 
 	/// Retrieve a range of keys from the databases
-	async fn scan<K>(&mut self, rng: Range<K>, limit: u32) -> Result<Vec<(Key, Val)>, Error>
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.sprint()))]
+	async fn scan<K>(
+		&mut self,
+		rng: Range<K>,
+		limit: u32,
+		version: Option<u64>,
+	) -> Result<Vec<(Key, Val)>, Error>
 	where
-		K: Into<Key> + Debug,
+		K: Into<Key> + Sprintable + Debug,
 	{
+		// MemDB does not support verisoned queries.
+		if version.is_some() {
+			return Err(Error::UnsupportedVersionedQueries);
+		}
+
 		// Check to see if transaction is closed
 		if self.done {
 			return Err(Error::TxFinished);

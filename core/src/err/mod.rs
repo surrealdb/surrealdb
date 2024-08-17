@@ -228,6 +228,14 @@ pub enum Error {
 		message: String,
 	},
 
+	/// The wrong quantity or magnitude of arguments was given for the specified function
+	#[error("There was a problem running the {name} function. Expected this function to return a value of type {check}, but found {value}")]
+	FunctionCheck {
+		name: String,
+		value: String,
+		check: String,
+	},
+
 	/// The URL is invalid
 	#[error("The URL `{0}` is invalid")]
 	InvalidUrl(String),
@@ -588,6 +596,14 @@ pub enum Error {
 		check: String,
 	},
 
+	/// The specified value did not conform to the LET type check
+	#[error("Found {value} for param ${name}, but expected a {check}")]
+	SetCheck {
+		value: String,
+		name: String,
+		check: String,
+	},
+
 	/// The specified field did not conform to the field ASSERT clause
 	#[error(
 		"Found changed value for field `{field}`, with record `{thing}`, but field is readonly"
@@ -932,43 +948,67 @@ pub enum Error {
 	Serialization(String),
 
 	/// The requested root access method already exists
-	#[error("The root access method '{value}' already exists")]
+	#[error("The root access method '{ac}' already exists")]
 	AccessRootAlreadyExists {
-		value: String,
+		ac: String,
 	},
 
 	/// The requested namespace access method already exists
-	#[error("The access method '{value}' already exists in the namespace '{ns}'")]
+	#[error("The access method '{ac}' already exists in the namespace '{ns}'")]
 	AccessNsAlreadyExists {
-		value: String,
+		ac: String,
 		ns: String,
 	},
 
 	/// The requested database access method already exists
-	#[error("The access method '{value}' already exists in the database '{db}'")]
+	#[error("The access method '{ac}' already exists in the database '{db}'")]
 	AccessDbAlreadyExists {
-		value: String,
+		ac: String,
 		ns: String,
 		db: String,
 	},
 
 	/// The requested root access method does not exist
-	#[error("The root access method '{value}' does not exist")]
+	#[error("The root access method '{ac}' does not exist")]
 	AccessRootNotFound {
-		value: String,
+		ac: String,
+	},
+
+	/// The requested root access grant does not exist
+	#[error("The root access grant '{gr}' does not exist")]
+	AccessGrantRootNotFound {
+		ac: String,
+		gr: String,
 	},
 
 	/// The requested namespace access method does not exist
-	#[error("The access method '{value}' does not exist in the namespace '{ns}'")]
+	#[error("The access method '{ac}' does not exist in the namespace '{ns}'")]
 	AccessNsNotFound {
-		value: String,
+		ac: String,
+		ns: String,
+	},
+
+	/// The requested namespace access grant does not exist
+	#[error("The access grant '{gr}' does not exist in the namespace '{ns}'")]
+	AccessGrantNsNotFound {
+		ac: String,
+		gr: String,
 		ns: String,
 	},
 
 	/// The requested database access method does not exist
-	#[error("The access method '{value}' does not exist in the database '{db}'")]
+	#[error("The access method '{ac}' does not exist in the database '{db}'")]
 	AccessDbNotFound {
-		value: String,
+		ac: String,
+		ns: String,
+		db: String,
+	},
+
+	/// The requested database access grant does not exist
+	#[error("The access grant '{gr}' does not exist in the database '{db}'")]
+	AccessGrantDbNotFound {
+		ac: String,
+		gr: String,
 		ns: String,
 		db: String,
 	},
@@ -1001,6 +1041,18 @@ pub enum Error {
 	#[error("This record access method does not allow signin")]
 	AccessRecordNoSignin,
 
+	#[error("This bearer access method requires a key to be provided")]
+	AccessBearerMissingKey,
+
+	#[error("This bearer access grant has an invalid format")]
+	AccessGrantBearerInvalid,
+
+	#[error("This access grant has an invalid subject")]
+	AccessGrantInvalidSubject,
+
+	#[error("This access grant has been revoked")]
+	AccessGrantRevoked,
+
 	/// Found a table name for the record but this is not a valid table
 	#[error("Found {value} for the Record ID but this is not a valid table name")]
 	TbInvalid {
@@ -1013,6 +1065,16 @@ pub enum Error {
 	Return {
 		value: Value,
 	},
+
+	/// A destructuring variant was used in a context where it is not supported
+	#[error("{variant} destructuring method is not supported here")]
+	UnsupportedDestructure {
+		variant: String,
+	},
+
+	#[doc(hidden)]
+	#[error("The underlying datastore does not support versioned queries")]
+	UnsupportedVersionedQueries,
 }
 
 impl From<Error> for String {
@@ -1144,5 +1206,34 @@ impl Serialize for Error {
 		S: serde::Serializer,
 	{
 		serializer.serialize_str(self.to_string().as_str())
+	}
+}
+impl Error {
+	pub fn set_check_from_coerce(self, name: String) -> Error {
+		match self {
+			Error::CoerceTo {
+				from,
+				into,
+			} => Error::SetCheck {
+				name,
+				value: from.to_string(),
+				check: into,
+			},
+			e => e,
+		}
+	}
+
+	pub fn function_check_from_coerce(self, name: impl Into<String>) -> Error {
+		match self {
+			Error::CoerceTo {
+				from,
+				into,
+			} => Error::FunctionCheck {
+				name: name.into(),
+				value: from.to_string(),
+				check: into,
+			},
+			e => e,
+		}
 	}
 }

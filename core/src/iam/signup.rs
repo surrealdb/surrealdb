@@ -1,4 +1,4 @@
-use crate::cnf::{INSECURE_FORWARD_RECORD_ACCESS_ERRORS, SERVER_NAME};
+use crate::cnf::{INSECURE_FORWARD_ACCESS_ERRORS, SERVER_NAME};
 use crate::dbs::Session;
 use crate::err::Error;
 use crate::iam::issue::{config, expiration};
@@ -57,14 +57,14 @@ pub async fn db_access(
 		Ok(av) => {
 			// Check the access method type
 			// Currently, only the record access method supports signup
-			match av.kind.clone() {
+			match &av.kind {
 				AccessType::Record(at) => {
 					// Check if the record access method supports issuing tokens
-					let iss = match at.jwt.issue {
+					let iss = match &at.jwt.issue {
 						Some(iss) => iss,
 						_ => return Err(Error::AccessMethodMismatch),
 					};
-					match at.signup {
+					match &at.signup {
 						// This record access allows signup
 						Some(val) => {
 							// Setup the query params
@@ -81,7 +81,7 @@ pub async fn db_access(
 										// There is a record returned
 										Some(mut rid) => {
 											// Create the authentication key
-											let key = config(iss.alg, iss.key)?;
+											let key = config(iss.alg, &iss.key)?;
 											// Create the authentication claim
 											let claims = Claims {
 												iss: Some(SERVER_NAME.to_owned()),
@@ -96,30 +96,30 @@ pub async fn db_access(
 												..Claims::default()
 											};
 											// AUTHENTICATE clause
-											if let Some(au) = at.authenticate {
+											if let Some(au) = &av.authenticate {
 												// Setup the system session for finding the signin record
 												let mut sess =
 													Session::editor().with_ns(&ns).with_db(&db);
 												sess.rd = Some(rid.clone().into());
-												sess.tk = Some(claims.clone().into());
+												sess.tk = Some((&claims).into());
 												sess.ip.clone_from(&session.ip);
 												sess.or.clone_from(&session.or);
 												// Compute the value with the params
 												match kvs.evaluate(au, &sess, None).await {
-    												Ok(val) => match val.record() {
+													Ok(val) => match val.record() {
 														Some(id) => {
 															// Update rid with result from AUTHENTICATE clause
 															rid = id;
 														}
 														_ => return Err(Error::InvalidAuth),
 													},
-													Err(e) => {
-														return match e {
-															Error::Thrown(_) => Err(e),
-															e if *INSECURE_FORWARD_RECORD_ACCESS_ERRORS => Err(e),
-															_ => Err(Error::InvalidAuth),
+													Err(e) => return match e {
+														Error::Thrown(_) => Err(e),
+														e if *INSECURE_FORWARD_ACCESS_ERRORS => {
+															Err(e)
 														}
-													}
+														_ => Err(Error::InvalidAuth),
+													},
 												}
 											}
 											// Log the authenticated access method info
@@ -128,7 +128,7 @@ pub async fn db_access(
 											let enc =
 												encode(&Header::new(iss.alg.into()), &claims, &key);
 											// Set the authentication on the session
-											session.tk = Some(claims.into());
+											session.tk = Some((&claims).into());
 											session.ns = Some(ns.to_owned());
 											session.db = Some(db.to_owned());
 											session.ac = Some(ac.to_owned());
@@ -151,7 +151,7 @@ pub async fn db_access(
 								}
 								Err(e) => match e {
 									Error::Thrown(_) => Err(e),
-									e if *INSECURE_FORWARD_RECORD_ACCESS_ERRORS => Err(e),
+									e if *INSECURE_FORWARD_ACCESS_ERRORS => Err(e),
 									_ => Err(Error::AccessRecordSignupQueryFailed),
 								},
 							}

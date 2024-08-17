@@ -5,7 +5,7 @@ use crate::idx::VersionedSerdeState;
 use crate::kvs::{Key, Transaction, Val};
 use crate::sql::{Object, Value};
 #[cfg(debug_assertions)]
-use hashbrown::HashSet;
+use ahash::HashSet;
 use revision::{revisioned, Revisioned};
 use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
@@ -954,7 +954,7 @@ where
 	) -> Result<BStatistics, Error> {
 		let mut stats = BStatistics::default();
 		#[cfg(debug_assertions)]
-		let mut keys = HashSet::new();
+		let mut keys = HashSet::default();
 		let mut node_queue = VecDeque::new();
 		if let Some(node_id) = self.state.root {
 			node_queue.push_front((node_id, 1));
@@ -1432,7 +1432,7 @@ mod tests {
 		assert_eq!(s.max_depth, 3);
 		assert_eq!(s.nodes_count, 10);
 		// There should be one record per node
-		assert_eq!(10, tx.scan(vec![]..vec![0xf], 100).await.unwrap().len());
+		assert_eq!(10, tx.scan(vec![]..vec![0xf], 100, None).await.unwrap().len());
 
 		let nodes_count = t
 			.inspect_nodes(&tx, &mut st, |count, depth, node_id, node| match count {
@@ -1571,7 +1571,7 @@ mod tests {
 		assert_eq!(s.max_depth, 2);
 		assert_eq!(s.nodes_count, 7);
 		// There should be one record per node
-		assert_eq!(7, tx.scan(vec![]..vec![0xf], 100).await.unwrap().len());
+		assert_eq!(7, tx.scan(vec![]..vec![0xf], 100, None).await.unwrap().len());
 
 		let nodes_count = t
 			.inspect_nodes(&tx, &mut st, |count, depth, node_id, node| match count {
@@ -1695,7 +1695,7 @@ mod tests {
 		assert_eq!(s.max_depth, 0);
 		assert_eq!(s.nodes_count, 0);
 		// There should not be any record in the database
-		assert_eq!(0, tx.scan(vec![]..vec![0xf], 100).await.unwrap().len());
+		assert_eq!(0, tx.scan(vec![]..vec![0xf], 100, None).await.unwrap().len());
 		tx.cancel().await?;
 		Ok(())
 	}

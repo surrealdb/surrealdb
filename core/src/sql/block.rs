@@ -1,4 +1,4 @@
-use crate::ctx::Context;
+use crate::ctx::{Context, MutableContext};
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
@@ -6,10 +6,10 @@ use crate::sql::fmt::{is_pretty, pretty_indent, Fmt, Pretty};
 use crate::sql::statements::info::InfoStructure;
 use crate::sql::statements::rebuild::RebuildStatement;
 use crate::sql::statements::{
-	BreakStatement, ContinueStatement, CreateStatement, DefineStatement, DeleteStatement,
-	ForeachStatement, IfelseStatement, InsertStatement, OutputStatement, RelateStatement,
-	RemoveStatement, SelectStatement, SetStatement, ThrowStatement, UpdateStatement,
-	UpsertStatement,
+	AlterStatement, BreakStatement, ContinueStatement, CreateStatement, DefineStatement,
+	DeleteStatement, ForeachStatement, IfelseStatement, InsertStatement, OutputStatement,
+	RelateStatement, RemoveStatement, SelectStatement, SetStatement, ThrowStatement,
+	UpdateStatement, UpsertStatement,
 };
 use crate::sql::value::Value;
 use reblessive::tree::Stk;
@@ -50,18 +50,20 @@ impl Block {
 	pub(crate) async fn compute(
 		&self,
 		stk: &mut Stk,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		opt: &Options,
-		doc: Option<&CursorDoc<'_>>,
+		doc: Option<&CursorDoc>,
 	) -> Result<Value, Error> {
 		// Duplicate context
-		let mut ctx = Context::new(ctx);
+		let mut ctx = MutableContext::new(ctx).freeze();
 		// Loop over the statements
 		for (i, v) in self.iter().enumerate() {
 			match v {
 				Entry::Set(v) => {
 					let val = v.compute(stk, &ctx, opt, doc).await?;
-					ctx.add_value(v.name.to_owned(), val);
+					let mut c = MutableContext::unfreeze(ctx)?;
+					c.add_value(v.name.to_owned(), val.into());
+					ctx = c.freeze();
 				}
 				Entry::Throw(v) => {
 					// Always errors immediately
@@ -112,6 +114,9 @@ impl Block {
 					v.compute(&ctx, opt, doc).await?;
 				}
 				Entry::Output(v) => {
+					v.compute(stk, &ctx, opt, doc).await?;
+				}
+				Entry::Alter(v) => {
 					v.compute(stk, &ctx, opt, doc).await?;
 				}
 				Entry::Value(v) => {
@@ -181,7 +186,7 @@ impl InfoStructure for Block {
 	}
 }
 
-#[revisioned(revision = 3)]
+#[revisioned(revision = 4)]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
@@ -206,6 +211,8 @@ pub enum Entry {
 	Rebuild(RebuildStatement),
 	#[revision(start = 3)]
 	Upsert(UpsertStatement),
+	#[revision(start = 4)]
+	Alter(AlterStatement),
 }
 
 impl PartialOrd for Entry {
@@ -237,6 +244,7 @@ impl Entry {
 			Self::Break(v) => v.writeable(),
 			Self::Continue(v) => v.writeable(),
 			Self::Foreach(v) => v.writeable(),
+			Self::Alter(v) => v.writeable(),
 		}
 	}
 }
@@ -262,6 +270,7 @@ impl Display for Entry {
 			Self::Break(v) => write!(f, "{v}"),
 			Self::Continue(v) => write!(f, "{v}"),
 			Self::Foreach(v) => write!(f, "{v}"),
+			Self::Alter(v) => write!(f, "{v}"),
 		}
 	}
 }

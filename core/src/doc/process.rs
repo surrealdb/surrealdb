@@ -7,12 +7,13 @@ use crate::doc::Document;
 use crate::err::Error;
 use crate::sql::value::Value;
 use reblessive::tree::Stk;
+use std::sync::Arc;
 
-impl<'a> Document<'a> {
+impl Document {
 	#[allow(dead_code)]
 	pub(crate) async fn process(
 		stk: &mut Stk,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		opt: &Options,
 		stm: &Statement<'_>,
 		mut pro: Processed,
@@ -26,7 +27,7 @@ impl<'a> Document<'a> {
 				Operable::Relatable(f, v, w, o) => (v, Workable::Relate(f, w, o)),
 			};
 			// Setup a new document
-			let mut doc = Document::new(pro.rid.as_ref(), pro.ir.as_ref(), &ins.0, ins.1);
+			let mut doc = Document::new(pro.rid, pro.ir, ins.0, ins.1);
 			// Process the statement
 			let res = match stm {
 				Statement::Select(_) => doc.select(stk, ctx, opt, stm).await,
@@ -46,14 +47,14 @@ impl<'a> Document<'a> {
 				Err(Error::RetryWithId(v)) => {
 					// Fetch the data from the store
 					let key = crate::key::thing::new(opt.ns()?, opt.db()?, &v.tb, &v.id);
-					let val = ctx.tx().get(key).await?;
+					let val = ctx.tx().get(key, None).await?;
 					// Parse the data from the store
-					let val = match val {
+					let val = Arc::new(match val {
 						Some(v) => Value::from(v),
 						None => Value::None,
-					};
+					});
 					pro = Processed {
-						rid: Some(v),
+						rid: Some(Arc::new(v)),
 						ir: None,
 						val: match doc.extras {
 							Workable::Normal => Operable::Value(val),
