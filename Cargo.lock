@@ -5971,7 +5971,6 @@ dependencies = [
  "nanoid",
  "ndarray",
  "ndarray-stats",
- "nom",
  "num-traits",
  "num_cpus",
  "object_store",
