@@ -945,6 +945,7 @@ impl ToFloat for Number {
 mod tests {
 	use super::Number;
 	use super::TryFloatDiv;
+	#[test]
 	fn test_try_float_div() {
 		let (sum_one, count_one) = (Number::Int(5), Number::Int(2));
 		assert_eq!(sum_one.try_float_div(count_one).unwrap(), Number::Float(2.5));
