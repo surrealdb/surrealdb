@@ -42,10 +42,10 @@ async fn get_handler(
 	ws: WebSocketUpgrade,
 	Extension(state): Extension<AppState>,
 	Extension(id): Extension<RequestId>,
-	Extension(sess): Extension<Session>,
+	Extension(mut sess): Extension<Session>,
 	State(rpc_state): State<Arc<RpcState>>,
 ) -> Result<impl IntoResponse, impl IntoResponse> {
-	// Check if there is a request id header specified
+	// Check if there is a connection id header specified
 	let id = match id.header_value().is_empty() {
 		// No request id was specified so create a new id
 		true => Uuid::new_v4(),
@@ -62,6 +62,9 @@ async fn get_handler(
 			Err(_) => return Err(Error::Request),
 		},
 	};
+	// Store connection id in session
+	sess.id = Some(id.to_string());
+
 	// Check if a connection with this id already exists
 	if rpc_state.web_sockets.read().await.contains_key(&id) {
 		return Err(Error::Request);
