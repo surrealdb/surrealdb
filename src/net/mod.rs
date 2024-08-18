@@ -183,7 +183,7 @@ pub async fn init(ds: Arc<Datastore>, ct: CancellationToken) -> Result<(), Error
 		}
 		#[cfg(not(surrealdb_unstable))]
 		{
-			warn!("GraphQL is a pre-release reature and only availible on builds with the surrealdb_unstable flag");
+			warn!("GraphQL is a pre-release feature and only available on builds with the surrealdb_unstable flag");
 			axum_app
 		}
 	} else {
