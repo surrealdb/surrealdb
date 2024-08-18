@@ -371,23 +371,21 @@ async fn router(
 	auth: &mut Option<Auth>,
 ) -> Result<DbResponse> {
 	if let Some(req) = command.into_router_request(None) {
-		error!(?req, "sending");
+		// error!(?req, "sending");
 		let url = base_url.join(RPC_PATH).unwrap();
 		let http_req =
 			client.post(url).headers(headers.clone()).auth(auth).body(serialize(&req, false)?);
 		let response = http_req.send().await?.error_for_status()?;
-		error!(?response, "got response");
+		// error!(?response, "got response");
 		let bytes = response.bytes().await?;
-		error!(bytes = ?&bytes[..], "got response");
+		// error!(bytes = ?&bytes[..], "got response");
 
 		let response: Response = deserialize(&mut &bytes[..], false)?;
 		// if let Ok(res) = deserialize(&mut &bytes[..], false) else {
 
 		// 			warn!("Failed to deserialise message; {error:?}");
 		// };
-		// return DbResponse::from(response.result);
-		error!(?response);
-		// return Ok(DbResponse::Other(response));
+		return DbResponse::from(response.result);
 	}
 	todo!()
 
