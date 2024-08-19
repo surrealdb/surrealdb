@@ -33,6 +33,7 @@ impl PlanBuilder {
 		root: Option<Node>,
 		with: Option<&With>,
 		with_indexes: Vec<IndexRef>,
+		indexed_order: Option<(IndexRef, bool)>,
 	) -> Result<Plan, Error> {
 		if let Some(With::NoIndex) = with {
 			return Ok(Plan::TableIterator(Some("WITH NOINDEX".to_string())));
@@ -52,13 +53,14 @@ impl PlanBuilder {
 				return Ok(Plan::TableIterator(Some(e.to_string())));
 			}
 		}
-		// If we didn't find any index, we're done with no index plan
-		if !b.has_indexes {
-			return Ok(Plan::TableIterator(Some("NO INDEX FOUND".to_string())));
-		}
 
-		// If every boolean operator are AND then we can use the single index plan
-		if b.all_and {
+		if root.is_none() {
+			// If there is no conditions, and the first ORDER is backed by an index
+			if let Some((ir, asc)) = indexed_order {
+				return Ok(Plan::SortedSingleIndex(ir, asc));
+			}
+		} else if b.all_and {
+			// If every boolean operator are AND then we can use the single index plan
 			// TODO: This is currently pretty arbitrary
 			// We take the "first" range query if one is available
 			if let Some((_, group)) = b.groups.into_iter().next() {
@@ -159,10 +161,16 @@ impl PlanBuilder {
 }
 
 pub(super) enum Plan {
+	/// Table full scan
 	TableIterator(Option<String>),
+	/// Index scan filtered on records matching a given expression
 	SingleIndex(Arc<Expression>, IndexOption),
+	/// Union of filtered index scans
 	MultiIndex(Vec<(Arc<Expression>, IndexOption)>, Vec<(IndexRef, UnionRangeQueryBuilder)>),
+	/// Index scan for record matching a given range
 	SingleIndexRange(IndexRef, UnionRangeQueryBuilder),
+	/// Sorted index scan without filter
+	SortedSingleIndex(IndexRef, bool),
 }
 
 #[derive(Debug, Eq, PartialEq, Hash, Clone)]

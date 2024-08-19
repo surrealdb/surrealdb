@@ -89,6 +89,7 @@ impl QueryPlanner {
 			tree.root,
 			self.with.as_ref().map(|w| w.as_ref()),
 			tree.with_indexes,
+			tree.indexed_order,
 		)? {
 			Plan::SingleIndex(exp, io) => {
 				if io.require_distinct() {
@@ -97,14 +98,18 @@ impl QueryPlanner {
 				let ir = exe.add_iterator(IteratorEntry::Single(exp, io));
 				self.add(t.clone(), Some(ir), exe, it);
 			}
+			Plan::SortedSingleIndex(ir, asc) => {
+				let ir = exe.add_iterator(IteratorEntry::SingleSorted(ir, asc));
+				self.add(t.clone(), Some(ir), exe, it);
+			}
 			Plan::MultiIndex(non_range_indexes, ranges_indexes) => {
 				for (exp, io) in non_range_indexes {
 					let ie = IteratorEntry::Single(exp, io);
 					let ir = exe.add_iterator(ie);
 					it.ingest(Iterable::Index(t.clone(), ir));
 				}
-				for (ixn, rq) in ranges_indexes {
-					let ie = IteratorEntry::Range(rq.exps, ixn, rq.from, rq.to);
+				for (ixr, rq) in ranges_indexes {
+					let ie = IteratorEntry::Range(rq.exps, ixr, rq.from, rq.to);
 					let ir = exe.add_iterator(ie);
 					it.ingest(Iterable::Index(t.clone(), ir));
 				}

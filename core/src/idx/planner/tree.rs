@@ -10,8 +10,8 @@ use crate::kvs::Transaction;
 use crate::sql::index::Index;
 use crate::sql::statements::{DefineFieldStatement, DefineIndexStatement};
 use crate::sql::{
-	Array, Cond, Expression, Idiom, Kind, Number, Operator, Orders, Part, Subquery, Table, Value,
-	With,
+	Array, Cond, Expression, Idiom, Kind, Number, Operator, Order, Orders, Part, Subquery, Table,
+	Value, With,
 };
 use reblessive::tree::Stk;
 use std::collections::HashMap;
@@ -24,6 +24,7 @@ pub(super) struct Tree {
 	pub(super) knn_expressions: KnnExpressions,
 	pub(super) knn_brute_force_expressions: KnnBruteForceExpressions,
 	pub(super) knn_condition: Option<Cond>,
+	pub(super) indexed_order: Option<(IndexRef, bool)>,
 }
 
 impl Tree {
@@ -43,7 +44,9 @@ impl Tree {
 			b.eval_cond(stk, cond).await?;
 		}
 		if let Some(orders) = order {
-			b.eval_orders(orders)?;
+			if let Some(order) = orders.0.get(0) {
+				b.eval_indexed_order(order).await?;
+			}
 		}
 		Ok(Self {
 			root: b.root,
@@ -52,6 +55,7 @@ impl Tree {
 			knn_expressions: b.knn_expressions,
 			knn_brute_force_expressions: b.knn_brute_force_expressions,
 			knn_condition: b.knn_condition,
+			indexed_order: b.indexed_order,
 		})
 	}
 }
@@ -73,6 +77,7 @@ struct TreeBuilder<'a> {
 	group_sequence: GroupRef,
 	root: Option<Node>,
 	knn_condition: Option<Cond>,
+	indexed_order: Option<(IndexRef, bool)>,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
@@ -107,6 +112,7 @@ impl<'a> TreeBuilder<'a> {
 			group_sequence: 0,
 			root: None,
 			knn_condition: None,
+			indexed_order: None,
 		}
 	}
 
@@ -133,8 +139,28 @@ impl<'a> TreeBuilder<'a> {
 		Ok(())
 	}
 
-	fn eval_orders(&mut self, orders: &Orders) -> Result<(), Error> {
-		todo!()
+	async fn eval_indexed_order(&mut self, order: &Order) -> Result<(), Error> {
+		if order.random {
+			return Ok(());
+		}
+		if let Node::IndexedField(_, irs) = self.resolve_idiom(order).await? {
+			for ir in irs {
+				let valid = if let Some(ix_def) = self.index_map.definitions.get(ir as usize) {
+					match ix_def.index {
+						Index::Idx => true,
+						Index::Uniq => true,
+						_ => false,
+					}
+				} else {
+					false
+				};
+				if valid {
+					self.indexed_order = Some((ir, order.direction));
+					break;
+				}
+			}
+		}
+		Ok(())
 	}
 
 	async fn eval_value(
@@ -202,8 +228,6 @@ impl<'a> TreeBuilder<'a> {
 		}
 
 		let n = self.resolve_idiom(i).await?;
-		self.resolved_idioms.insert(i.clone(), n.clone());
-
 		Ok(n)
 	}
 
@@ -212,17 +236,23 @@ impl<'a> TreeBuilder<'a> {
 		self.lazy_load_schema_resolver(&tx, self.table).await?;
 
 		// Try to detect if it matches an index
-		if let Some(schema) = self.schemas.get(self.table).cloned() {
+		let n = if let Some(schema) = self.schemas.get(self.table).cloned() {
 			let irs = self.resolve_indexes(self.table, i, &schema);
 			if !irs.is_empty() {
-				return Ok(Node::IndexedField(i.clone(), irs));
+				Node::IndexedField(i.clone(), irs)
+			} else if let Some(ro) =
+				self.resolve_record_field(&tx, schema.fields.as_ref(), i).await?
+			{
+				// Try to detect an indexed record field
+				Node::RecordField(i.clone(), ro)
+			} else {
+				Node::NonIndexedField(i.clone())
 			}
-			// Try to detect an indexed record field
-			if let Some(ro) = self.resolve_record_field(&tx, schema.fields.as_ref(), i).await? {
-				return Ok(Node::RecordField(i.clone(), ro));
-			}
-		}
-		Ok(Node::NonIndexedField(i.clone()))
+		} else {
+			Node::NonIndexedField(i.clone())
+		};
+		self.resolved_idioms.insert(i.clone(), n.clone());
+		Ok(n)
 	}
 
 	fn resolve_indexes(&mut self, t: &Table, i: &Idiom, schema: &SchemaCache) -> Vec<IndexRef> {
@@ -612,7 +642,9 @@ impl Node {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub(super) enum IdiomPosition {
+	/// The idiom is on the left of the condition clause
 	Left,
+	/// The idiom is on the right tf the condition clause
 	Right,
 }
 
