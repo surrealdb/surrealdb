@@ -5,6 +5,7 @@ pub(crate) mod native;
 #[cfg(target_arch = "wasm32")]
 pub(crate) mod wasm;
 
+use crate::api::conn::Command;
 // use crate::api::conn::Command;
 use crate::api::conn::DbResponse;
 use crate::api::conn::RequestData;
@@ -20,11 +21,14 @@ use crate::engine::remote::Response;
 // use crate::engine::value_to_values;
 use crate::headers::AUTH_DB;
 use crate::headers::AUTH_NS;
+use crate::headers::DB;
+use crate::headers::NS;
 // use crate::headers::DB;
 // use crate::headers::NS;
 // use crate::method::Stats;
 use crate::opt::IntoEndpoint;
 // use crate::sql::from_value;
+use crate::api::conn::RouterRequest;
 use crate::sql::Value;
 // use futures::TryStreamExt;
 use crate::api::engine::remote::{deserialize, serialize};
@@ -36,6 +40,7 @@ use reqwest::header::CONTENT_TYPE;
 use reqwest::RequestBuilder;
 use serde::Deserialize;
 use serde::Serialize;
+use serde_json::from_value;
 use std::io::Read;
 use std::marker::PhantomData;
 // use std::mem;
@@ -359,6 +364,23 @@ pub(crate) async fn health(request: RequestBuilder) -> Result<Value> {
 // 	let res = client.post(url).headers(headers.clone()).auth(auth).body("todo");
 // }
 
+async fn process_req(
+	req: RouterRequest,
+	base_url: &Url,
+	client: &reqwest::Client,
+	headers: &HeaderMap,
+	auth: &Option<Auth>,
+) -> Result<DbResponse> {
+	let url = base_url.join(RPC_PATH).unwrap();
+	let http_req =
+		client.post(url).headers(headers.clone()).auth(auth).body(serialize(&req, false)?);
+	let response = http_req.send().await?.error_for_status()?;
+	let bytes = response.bytes().await?;
+
+	let response: Response = deserialize(&mut &bytes[..], false)?;
+	return DbResponse::from(response.result);
+}
+
 async fn router(
 	RequestData {
 		command,
@@ -370,97 +392,117 @@ async fn router(
 	_vars: &mut IndexMap<String, String>,
 	auth: &mut Option<Auth>,
 ) -> Result<DbResponse> {
-	if let Some(req) = command.into_router_request(None) {
-		// error!(?req, "sending");
-		let url = base_url.join(RPC_PATH).unwrap();
-		let http_req =
-			client.post(url).headers(headers.clone()).auth(auth).body(serialize(&req, false)?);
-		let response = http_req.send().await?.error_for_status()?;
-		// error!(?response, "got response");
-		let bytes = response.bytes().await?;
-		// error!(bytes = ?&bytes[..], "got response");
+	// error!(?command);
+	match command {
+		Command::ExportFile {
+			..
+		} => todo!(),
+		Command::ExportBytes {
+			..
+		} => todo!(),
+		Command::ImportFile {
+			..
+		} => todo!(),
+		Command::ExportBytesMl {
+			..
+		} => todo!(),
+		Command::ExportMl {
+			..
+		} => todo!(),
+		Command::ImportMl {
+			..
+		} => todo!(),
+		Command::SubscribeLive {
+			..
+		} => todo!(),
+		ref cmd @ Command::Use {
+			ref namespace,
+			ref database,
+		} => {
+			let req = cmd
+				.clone()
+				.into_router_request(None)
+				.expect("use should be a valid router request");
+			// process request to check permissions
+			let out = process_req(req, base_url, client, headers, auth).await?;
+			match namespace {
+				Some(ns) => match HeaderValue::try_from(ns) {
+					Ok(ns) => {
+						headers.insert(&NS, ns.into());
+					}
+					Err(_) => {
+						return Err(Error::InvalidNsName(ns.to_owned()).into());
+					}
+				},
+				None => {}
+			};
 
-		let response: Response = deserialize(&mut &bytes[..], false)?;
-		// if let Ok(res) = deserialize(&mut &bytes[..], false) else {
+			match database {
+				Some(db) => match HeaderValue::try_from(db) {
+					Ok(db) => {
+						headers.insert(&DB, db.into());
+					}
+					Err(_) => {
+						return Err(Error::InvalidDbName(db.to_owned()).into());
+					}
+				},
+				None => {}
+			};
 
-		// 			warn!("Failed to deserialise message; {error:?}");
-		// };
-		return DbResponse::from(response.result);
+			Ok(out)
+		}
+		Command::Signin {
+			credentials,
+		} => {
+			// let path = base_url.join("signin")?;
+			// let request =
+			// 	client.post(path).headers(headers.clone()).auth(auth).body(credentials.to_string());
+			// let value = submit_auth(request).await?;
+
+			let req = Command::Signin {
+				credentials: credentials.clone(),
+			}
+			.into_router_request(None)
+			.expect("signin should be a valid router request");
+
+			let DbResponse::Other(value) =
+				process_req(req, base_url, client, headers, auth).await?
+			else {
+				unreachable!("didn't make query")
+			};
+
+			match (credentials.get("user"), credentials.get("pass"), credentials.get("ns"))
+
+			// if let Ok(Credentials {
+			// 	user,
+			// 	pass,
+			// 	ns,
+			// 	db,
+			// }) = from_value(credentials.into())
+			// {
+			// 	*auth = Some(Auth::Basic {
+			// 		user,
+			// 		pass,
+			// 		ns,
+			// 		db,
+			// 	});
+			// } else {
+			// 	*auth = Some(Auth::Bearer {
+			// 		token: value.to_raw_string(),
+			// 	});
+			// }
+
+			Ok(DbResponse::Other(value))
+		}
+		cmd => {
+			let req = cmd
+				.into_router_request(None)
+				.expect("all invalid variants should have been caught");
+			process_req(req, base_url, client, headers, auth).await
+		}
 	}
-	todo!()
 
 	// match command {
-	// 	Command::ExportFile {
-	// 		..
-	// 	} => todo!(),
-	// 	Command::ExportBytes {
-	// 		..
-	// 	} => todo!(),
-	// 	Command::ImportFile {
-	// 		..
-	// 	} => todo!(),
-	// 	Command::ExportBytesMl {
-	// 		..
-	// 	} => todo!(),
-	// 	Command::ExportMl {
-	// 		..
-	// 	} => todo!(),
-	// 	Command::ImportMl {
-	// 		..
-	// 	} => todo!(),
-	// 	Command::SubscribeLive {
-	// 		..
-	// 	} => todo!(),
-	// 	cmd => {
-	// 		let req = cmd.into_router_request(None);
-	// 		todo!()
-	// 	}
-	// }
-
-	// match command {
-	// 	Command::Use {
-	// 		namespace,
-	// 		database,
-	// 	} => {
-	// 		todo!();
-	// 		// let path = base_url.join(RPC_PATH)?;
-	// 		let mut request = client.post(path).headers(headers.clone());
-
-	// 		let ns = match namespace {
-	// 			Some(ns) => match HeaderValue::try_from(&ns) {
-	// 				Ok(ns) => {
-	// 					request = request.header(&NS, &ns);
-	// 					Some(ns)
-	// 				}
-	// 				Err(_) => {
-	// 					return Err(Error::InvalidNsName(ns).into());
-	// 				}
-	// 			},
-	// 			None => None,
-	// 		};
-	// 		let db = match database {
-	// 			Some(db) => match HeaderValue::try_from(&db) {
-	// 				Ok(db) => {
-	// 					request = request.header(&DB, &db);
-	// 					Some(db)
-	// 				}
-	// 				Err(_) => {
-	// 					return Err(Error::InvalidDbName(db).into());
-	// 				}
-	// 			},
-	// 			None => None,
-	// 		};
-	// 		// What's the point of this request?
-	// 		request = request.auth(auth).body("RETURN true");
-	// 		take(true, request).await?;
-	// 		if let Some(ns) = ns {
-	// 			headers.insert(&NS, ns);
-	// 		}
-	// 		if let Some(db) = db {
-	// 			headers.insert(&DB, db);
-	// 		}
-	// 		Ok(DbResponse::Other(Value::None))
-	// 	}
 	// 	Command::Signin {
 	// 		credentials,
 	// 	} => {

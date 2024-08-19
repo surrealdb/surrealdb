@@ -83,7 +83,6 @@ impl HttpFormat for Format {
 	}
 
 	fn res_http(&self, res: Response) -> Result<AxumResponse, RpcError> {
-		// let val = res.into_value();
 		let res = self.res(res)?;
 		if matches!(self, Format::Json) {
 			// If this has significant performance overhead it could be replaced with unsafe { String::from_utf8_unchecked(res) }
