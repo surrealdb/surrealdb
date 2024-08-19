@@ -38,6 +38,15 @@ pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Value";
 #[non_exhaustive]
 pub struct Values(pub Vec<Value>);
 
+impl<V> From<V> for Values
+where
+	V: Into<Vec<Value>>,
+{
+	fn from(value: V) -> Self {
+		Self(value.into())
+	}
+}
+
 impl Deref for Values {
 	type Target = Vec<Value>;
 	fn deref(&self) -> &Self::Target {
@@ -454,6 +463,12 @@ impl From<Vec<String>> for Value {
 
 impl From<Vec<i32>> for Value {
 	fn from(v: Vec<i32>) -> Self {
+		Value::Array(Array::from(v))
+	}
+}
+
+impl From<Vec<f32>> for Value {
+	fn from(v: Vec<f32>) -> Self {
 		Value::Array(Array::from(v))
 	}
 }
@@ -3004,5 +3019,19 @@ mod tests {
 		let enc: Vec<u8> = val.into();
 		let dec: Value = enc.into();
 		assert_eq!(res, dec);
+	}
+
+	#[test]
+	fn test_value_from_vec_i32() {
+		let vector: Vec<i32> = vec![1, 2, 3, 4, 5, 6];
+		let value = Value::from(vector);
+		assert!(matches!(value, Value::Array(Array(_))));
+	}
+
+	#[test]
+	fn test_value_from_vec_f32() {
+		let vector: Vec<f32> = vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0];
+		let value = Value::from(vector);
+		assert!(matches!(value, Value::Array(Array(_))));
 	}
 }
