@@ -28,7 +28,7 @@ impl Document {
 		// Match the statement type
 		match stm {
 			// This is a CREATE statement so try to insert the key
-			Statement::Create(_) => match txn.put(key, self).await {
+			Statement::Create(_) => match txn.put(key, self, opt.version).await {
 				// The key already exists, so return an error
 				Err(Error::TxKeyAlreadyExists) => Err(Error::RecordExists {
 					thing: rid.to_string(),
