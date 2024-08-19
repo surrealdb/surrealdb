@@ -1,4 +1,4 @@
-use crate::ctx::{Context, MutableContext};
+use crate::ctx::Context;
 use crate::dbs::Action;
 use crate::dbs::Notification;
 use crate::dbs::Options;
@@ -6,14 +6,10 @@ use crate::dbs::Statement;
 use crate::doc::CursorDoc;
 use crate::doc::Document;
 use crate::err::Error;
-use crate::sql::paths::AC;
 use crate::sql::paths::META;
-use crate::sql::paths::RD;
-use crate::sql::paths::TK;
 use crate::sql::permission::Permission;
 use crate::sql::Value;
 use reblessive::tree::Stk;
-use std::sync::Arc;
 
 impl Document {
 	pub async fn lives(

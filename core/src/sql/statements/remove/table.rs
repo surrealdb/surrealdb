@@ -1,5 +1,5 @@
 use crate::ctx::Context;
-use crate::dbs::{Action as LiveAction, Notification, Options, Statement};
+use crate::dbs::{Action as LiveAction, Notification, Options};
 use crate::err::Error;
 use crate::iam::{Action, ResourceKind};
 use crate::sql::{Base, Ident, Value};
@@ -7,7 +7,6 @@ use derive::Store;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Formatter};
-use std::ops::Deref;
 
 #[revisioned(revision = 2)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
