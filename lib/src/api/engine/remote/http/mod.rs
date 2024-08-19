@@ -148,8 +148,6 @@ impl Authenticate for RequestBuilder {
 	}
 }
 
-// type HttpQueryResponse = (String, Status, Value);
-
 #[derive(Debug, Serialize, Deserialize)]
 struct Credentials {
 	user: String,
@@ -165,70 +163,6 @@ struct AuthResponse {
 	details: String,
 	token: Option<String>,
 }
-
-// async fn submit_auth(request: RequestBuilder) -> Result<Value> {
-// 	let response = request.send().await?.error_for_status()?;
-// 	let bytes = response.bytes().await?;
-// 	let response: AuthResponse =
-// 		deserialize(&bytes).map_err(|error| Error::ResponseFromBinary {
-// 			binary: bytes.to_vec(),
-// 			error,
-// 		})?;
-// 	Ok(response.token.into())
-// }
-
-// async fn query(request: RequestBuilder) -> Result<QueryResponse> {
-// 	let response = request.send().await?.error_for_status()?;
-// 	let bytes = response.bytes().await?;
-// 	let responses = deserialize::<Vec<HttpQueryResponse>>(&bytes).map_err(|error| {
-// 		Error::ResponseFromBinary {
-// 			binary: bytes.to_vec(),
-// 			error,
-// 		}
-// 	})?;
-// 	let mut map = IndexMap::<usize, (Stats, QueryResult)>::with_capacity(responses.len());
-// 	for (index, (execution_time, status, value)) in responses.into_iter().enumerate() {
-// 		let stats = Stats {
-// 			execution_time: duration_from_str(&execution_time),
-// 		};
-// 		match status {
-// 			Status::Ok => {
-// 				map.insert(index, (stats, Ok(value)));
-// 			}
-// 			Status::Err => {
-// 				map.insert(index, (stats, Err(Error::Query(value.as_raw_string()).into())));
-// 			}
-// 			_ => unreachable!(),
-// 		}
-// 	}
-
-// 	Ok(QueryResponse {
-// 		results: map,
-// 		..QueryResponse::new()
-// 	})
-// }
-
-// async fn take(one: bool, request: RequestBuilder) -> Result<Value> {
-// 	if let Some((_stats, result)) = query(request).await?.results.swap_remove(&0) {
-// 		let value = result?;
-// 		match one {
-// 			true => match value {
-// 				Value::Array(mut vec) => {
-// 					if let [value] = &mut vec.0[..] {
-// 						return Ok(mem::take(value));
-// 					}
-// 				}
-// 				Value::None | Value::Null => {}
-// 				value => return Ok(value),
-// 			},
-// 			false => return Ok(value),
-// 		}
-// 	}
-// 	match one {
-// 		true => Ok(Value::None),
-// 		false => Ok(Value::Array(Default::default())),
-// 	}
-// }
 
 type BackupSender = channel::Sender<Result<Vec<u8>>>;
 
