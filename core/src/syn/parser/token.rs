@@ -128,6 +128,11 @@ impl Parser<'_> {
 
 				self.span_str(start.span).to_owned()
 			}
+			TokenKind::DatetimeChars(_) => {
+				self.pop_peek();
+
+				self.span_str(start.span).to_owned()
+			}
 			_ => return Ok(start),
 		};
 
@@ -168,7 +173,7 @@ impl Parser<'_> {
 					break;
 				}
 				// These tokens might have some more parts following them
-				TokenKind::Exponent => {
+				TokenKind::Exponent | TokenKind::DatetimeChars(_) | TokenKind::Digits => {
 					self.pop_peek();
 					let str = self.span_str(p.span);
 					token_buffer.push_str(str);
@@ -181,12 +186,6 @@ impl Parser<'_> {
 						return Err(ParseError::new(ParseErrorKind::InvalidIdent, p.span));
 					}
 					token_buffer.push_str(suffix.as_str());
-					prev = p;
-				}
-				TokenKind::Digits => {
-					self.pop_peek();
-					let str = self.span_str(p.span);
-					token_buffer.push_str(str);
 					prev = p;
 				}
 				_ => break,

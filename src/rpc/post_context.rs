@@ -1,7 +1,10 @@
 use std::collections::BTreeMap;
+use std::sync::Arc;
 
 use crate::cnf::{PKG_NAME, PKG_VERSION};
 use surrealdb::dbs::Session;
+#[cfg(surrealdb_unstable)]
+use surrealdb::gql::{Pessimistic, SchemaCache};
 use surrealdb::kvs::Datastore;
 use surrealdb::rpc::Data;
 use surrealdb::rpc::RpcContext;
@@ -9,25 +12,29 @@ use surrealdb::rpc::RpcError;
 use surrealdb::sql::Array;
 use surrealdb::sql::Value;
 
-pub struct PostRpcContext<'a> {
-	pub kvs: &'a Datastore,
+pub struct PostRpcContext {
+	pub kvs: Arc<Datastore>,
 	pub session: Session,
 	pub vars: BTreeMap<String, Value>,
+	#[cfg(surrealdb_unstable)]
+	pub gql_schema: SchemaCache<Pessimistic>,
 }
 
-impl<'a> PostRpcContext<'a> {
-	pub fn new(kvs: &'a Datastore, session: Session, vars: BTreeMap<String, Value>) -> Self {
+impl PostRpcContext {
+	pub fn new(kvs: &Arc<Datastore>, session: Session, vars: BTreeMap<String, Value>) -> Self {
 		Self {
-			kvs,
+			kvs: kvs.clone(),
 			session,
 			vars,
+			#[cfg(surrealdb_unstable)]
+			gql_schema: SchemaCache::new(kvs.clone()),
 		}
 	}
 }
 
-impl RpcContext for PostRpcContext<'_> {
+impl RpcContext for PostRpcContext {
 	fn kvs(&self) -> &Datastore {
-		self.kvs
+		&self.kvs
 	}
 
 	fn session(&self) -> &Session {
@@ -49,6 +56,13 @@ impl RpcContext for PostRpcContext<'_> {
 	fn version_data(&self) -> impl Into<Data> {
 		let val: Value = format!("{PKG_NAME}-{}", *PKG_VERSION).into();
 		val
+	}
+
+	#[cfg(surrealdb_unstable)]
+	const GQL_SUPPORT: bool = true;
+	#[cfg(surrealdb_unstable)]
+	fn graphql_schema_cache(&self) -> &SchemaCache {
+		&self.gql_schema
 	}
 
 	// disable:

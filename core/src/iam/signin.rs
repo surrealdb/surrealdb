@@ -2284,7 +2284,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 			let key = grant.get("key").unwrap().clone().as_string();
 
 			// Remove bearer access method
-			ds.execute(&format!(r#"REMOVE ACCESS api ON DATABASE;"#), &sess, None).await.unwrap();
+			ds.execute("REMOVE ACCESS api ON DATABASE", &sess, None).await.unwrap();
 
 			// Signin with the bearer key
 			let mut sess = Session {
@@ -2989,7 +2989,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 			let key = grant.get("key").unwrap().clone().as_string();
 
 			// Remove bearer access method
-			ds.execute(&format!(r#"REMOVE ACCESS api ON NAMESPACE;"#), &sess, None).await.unwrap();
+			ds.execute("REMOVE ACCESS api ON NAMESPACE", &sess, None).await.unwrap();
 
 			// Signin with the bearer key
 			let mut sess = Session {
@@ -3636,7 +3636,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 			let key = grant.get("key").unwrap().clone().as_string();
 
 			// Remove bearer access method
-			ds.execute(&format!(r#"REMOVE ACCESS api ON ROOT;"#), &sess, None).await.unwrap();
+			ds.execute("REMOVE ACCESS api ON ROOT", &sess, None).await.unwrap();
 
 			// Signin with the bearer key
 			let mut sess = Session {

@@ -596,6 +596,14 @@ pub enum Error {
 		check: String,
 	},
 
+	/// The specified value did not conform to the LET type check
+	#[error("Found {value} for param ${name}, but expected a {check}")]
+	SetCheck {
+		value: String,
+		name: String,
+		check: String,
+	},
+
 	/// The specified field did not conform to the field ASSERT clause
 	#[error(
 		"Found changed value for field `{field}`, with record `{thing}`, but field is readonly"
@@ -1200,8 +1208,21 @@ impl Serialize for Error {
 		serializer.serialize_str(self.to_string().as_str())
 	}
 }
-
 impl Error {
+	pub fn set_check_from_coerce(self, name: String) -> Error {
+		match self {
+			Error::CoerceTo {
+				from,
+				into,
+			} => Error::SetCheck {
+				name,
+				value: from.to_string(),
+				check: into,
+			},
+			e => e,
+		}
+	}
+
 	pub fn function_check_from_coerce(self, name: impl Into<String>) -> Error {
 		match self {
 			Error::CoerceTo {
@@ -1212,12 +1233,7 @@ impl Error {
 				value: from.to_string(),
 				check: into,
 			},
-			fc @ Error::FunctionCheck {
-				..
-			} => fc,
-			_ => Error::Internal(
-				"function_check_from_coerce called on Error that wasn't CoerceTo".to_string(),
-			),
+			e => e,
 		}
 	}
 }

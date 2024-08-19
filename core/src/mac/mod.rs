@@ -188,7 +188,7 @@ macro_rules! async_defer{
 		{
 			type Output = ::std::thread::Result<R>;
 
-			fn poll(self: ::std::pin::Pin<&mut Self>, cx: &mut ::std::task::Context<'_>) -> ::std::task::Poll<Self::Output>{
+			fn poll(self: ::std::pin::Pin<&mut Self>, cx: &mut ::std::task::Context) -> ::std::task::Poll<Self::Output>{
 				let pin = unsafe{ self.map_unchecked_mut(|x| &mut x.0) };
 				match ::std::panic::catch_unwind(::std::panic::AssertUnwindSafe(||{
 					pin.poll(cx)

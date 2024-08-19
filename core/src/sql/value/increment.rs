@@ -11,7 +11,7 @@ impl Value {
 	pub(crate) async fn increment(
 		&mut self,
 		stk: &mut Stk,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		opt: &Options,
 		path: &[Part],
 		val: Value,

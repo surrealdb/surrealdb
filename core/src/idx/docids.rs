@@ -30,7 +30,7 @@ impl DocIds {
 		cache_size: u32,
 	) -> Result<Self, Error> {
 		let state_key: Key = ikb.new_bd_key(None);
-		let state: State = if let Some(val) = tx.get(state_key.clone()).await? {
+		let state: State = if let Some(val) = tx.get(state_key.clone(), None).await? {
 			State::try_from_val(val)?
 		} else {
 			State::new(default_btree_order)
@@ -123,7 +123,7 @@ impl DocIds {
 		doc_id: DocId,
 	) -> Result<Option<Key>, Error> {
 		let doc_id_key = self.index_key_base.new_bi_key(doc_id);
-		if let Some(val) = tx.get(doc_id_key).await? {
+		if let Some(val) = tx.get(doc_id_key, None).await? {
 			Ok(Some(val))
 		} else {
 			Ok(None)

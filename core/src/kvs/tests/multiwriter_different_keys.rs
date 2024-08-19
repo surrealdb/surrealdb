@@ -24,13 +24,13 @@ async fn multiwriter_different_keys() {
 	tx3.commit().await.unwrap();
 	// Check that the key was updated ok
 	let mut tx = ds.transaction(Read, Optimistic).await.unwrap().inner();
-	let val = tx.get("test").await.unwrap().unwrap();
+	let val = tx.get("test", None).await.unwrap().unwrap();
 	assert_eq!(val, b"some text");
-	let val = tx.get("test1").await.unwrap().unwrap();
+	let val = tx.get("test1", None).await.unwrap().unwrap();
 	assert_eq!(val, b"other text 1");
-	let val = tx.get("test2").await.unwrap().unwrap();
+	let val = tx.get("test2", None).await.unwrap().unwrap();
 	assert_eq!(val, b"other text 2");
-	let val = tx.get("test3").await.unwrap().unwrap();
+	let val = tx.get("test3", None).await.unwrap().unwrap();
 	assert_eq!(val, b"other text 3");
 	tx.cancel().await.unwrap();
 }

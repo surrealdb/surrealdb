@@ -534,6 +534,7 @@ fn statements() -> Vec<Statement> {
 		Statement::Set(SetStatement {
 			name: "param".to_owned(),
 			what: Value::Number(Number::Int(1)),
+			kind: None,
 		}),
 		Statement::Show(ShowStatement {
 			table: Some(Table("foo".to_owned())),

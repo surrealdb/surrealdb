@@ -27,7 +27,7 @@ impl Postings {
 		cache_size: u32,
 	) -> Result<Self, Error> {
 		let state_key: Key = index_key_base.new_bp_key(None);
-		let state: BState = if let Some(val) = tx.get(state_key.clone()).await? {
+		let state: BState = if let Some(val) = tx.get(state_key.clone(), None).await? {
 			BState::try_from_val(val)?
 		} else {
 			BState::new(order)

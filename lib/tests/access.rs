@@ -8,7 +8,7 @@ use surrealdb::iam::Role;
 use surrealdb::sql::Value;
 
 #[tokio::test]
-async fn access_bearer_database() -> () {
+async fn access_bearer_database() {
 	// TODO(gguillemas): Remove this once bearer access is no longer experimental.
 	std::env::set_var("SURREAL_EXPERIMENTAL_BEARER_ACCESS", "true");
 
@@ -321,7 +321,7 @@ async fn access_bearer_root() {
 }
 
 #[tokio::test]
-async fn access_bearer_revoke_db() -> () {
+async fn access_bearer_revoke_db() {
 	// TODO(gguillemas): Remove this once bearer access is no longer experimental.
 	std::env::set_var("SURREAL_EXPERIMENTAL_BEARER_ACCESS", "true");
 
@@ -355,7 +355,7 @@ async fn access_bearer_revoke_db() -> () {
 }
 
 #[tokio::test]
-async fn access_bearer_revoke_ns() -> () {
+async fn access_bearer_revoke_ns() {
 	// TODO(gguillemas): Remove this once bearer access is no longer experimental.
 	std::env::set_var("SURREAL_EXPERIMENTAL_BEARER_ACCESS", "true");
 
@@ -389,7 +389,7 @@ async fn access_bearer_revoke_ns() -> () {
 }
 
 #[tokio::test]
-async fn access_bearer_revoke_root() -> () {
+async fn access_bearer_revoke_root() {
 	// TODO(gguillemas): Remove this once bearer access is no longer experimental.
 	std::env::set_var("SURREAL_EXPERIMENTAL_BEARER_ACCESS", "true");
 
@@ -469,7 +469,7 @@ async fn permissions_access_grant_db() {
 		{
 			let ds = new_ds().await.unwrap().with_auth_enabled(true);
 
-			let mut resp = ds.execute(&statement_setup, &sess_setup, None).await.unwrap();
+			let mut resp = ds.execute(statement_setup, &sess_setup, None).await.unwrap();
 			let res = resp.remove(0).output();
 			assert!(res.is_ok(), "Error setting up access method: {:?}", res);
 			let res = resp.remove(0).output();
@@ -536,7 +536,7 @@ async fn permissions_access_grant_ns() {
 		{
 			let ds = new_ds().await.unwrap().with_auth_enabled(true);
 
-			let mut resp = ds.execute(&statement_setup, &sess_setup, None).await.unwrap();
+			let mut resp = ds.execute(statement_setup, &sess_setup, None).await.unwrap();
 			let res = resp.remove(0).output();
 			assert!(res.is_ok(), "Error setting up access method: {:?}", res);
 			let res = resp.remove(0).output();
@@ -603,7 +603,7 @@ async fn permissions_access_grant_root() {
 		{
 			let ds = new_ds().await.unwrap().with_auth_enabled(true);
 
-			let mut resp = ds.execute(&statement_setup, &sess_setup, None).await.unwrap();
+			let mut resp = ds.execute(statement_setup, &sess_setup, None).await.unwrap();
 			let res = resp.remove(0).output();
 			assert!(res.is_ok(), "Error setting up access method: {:?}", res);
 			let res = resp.remove(0).output();
