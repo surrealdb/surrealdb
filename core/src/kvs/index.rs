@@ -1,4 +1,4 @@
-use crate::cnf::{EXPORT_BATCH_SIZE, NORMAL_FETCH_SIZE};
+use crate::cnf::{INDEXING_BATCH_SIZE, NORMAL_FETCH_SIZE};
 use crate::ctx::{Context, MutableContext};
 use crate::dbs::Options;
 use crate::doc::{CursorDoc, Document};
@@ -12,7 +12,6 @@ use crate::sql::statements::DefineIndexStatement;
 use crate::sql::{Id, Object, Thing, Value};
 use dashmap::mapref::entry::Entry;
 use dashmap::DashMap;
-use nom::ToUsize;
 use reblessive::TreeStack;
 use std::collections::VecDeque;
 use std::sync::Arc;
@@ -229,7 +228,7 @@ impl Building {
 		let mut count = 0;
 		while let Some(rng) = next {
 			// Get the next batch of records
-			let batch = self.new_read_tx().await?.batch(rng, *EXPORT_BATCH_SIZE, true).await?;
+			let batch = self.new_read_tx().await?.batch(rng, *INDEXING_BATCH_SIZE, true).await?;
 			// Set the next scan range
 			next = batch.next;
 			// Check there are records
@@ -269,7 +268,7 @@ impl Building {
 				batch.clear();
 				break;
 			}
-			let fetch = NORMAL_FETCH_SIZE.to_usize().min(batch.len());
+			let fetch = (*NORMAL_FETCH_SIZE as usize).min(batch.len());
 			let drain = batch.drain(0..fetch);
 			// Create a new context with a write transaction
 			let ctx = self.new_write_tx_ctx().await?;
