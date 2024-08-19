@@ -1,3 +1,4 @@
+use crate::cnf::PROTECTED_PARAM_NAMES;
 use crate::ctx::canceller::Canceller;
 use crate::ctx::reason::Reason;
 #[cfg(feature = "http")]
@@ -371,7 +372,7 @@ impl MutableContext {
 	pub fn value(&self, key: &str) -> Option<&Value> {
 		match self.values.get(key) {
 			Some(v) => Some(v.as_ref()),
-			None if !self.isolated => match &self.parent {
+			None if PROTECTED_PARAM_NAMES.contains(&key) || !self.isolated => match &self.parent {
 				Some(p) => p.value(key),
 				_ => None,
 			},
