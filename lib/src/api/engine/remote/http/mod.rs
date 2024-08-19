@@ -6,29 +6,19 @@ pub(crate) mod native;
 pub(crate) mod wasm;
 
 use crate::api::conn::Command;
-// use crate::api::conn::Command;
 use crate::api::conn::DbResponse;
 use crate::api::conn::RequestData;
-// use crate::api::engine::remote::duration_from_str;
+use crate::api::conn::RouterRequest;
+use crate::api::engine::remote::{deserialize, serialize};
 use crate::api::err::Error;
-// use crate::api::method::query::QueryResult;
 use crate::api::Connect;
-// use crate::api::Response as QueryResponse;
 use crate::api::Result;
 use crate::api::Surreal;
-use crate::engine::local::Db;
-// use crate::dbs::Status;
 use crate::engine::remote::Response;
-// use crate::engine::value_to_values;
 use crate::headers::AUTH_DB;
 use crate::headers::AUTH_NS;
 use crate::headers::DB;
 use crate::headers::NS;
-// use crate::headers::DB;
-// use crate::headers::NS;
-// use crate::method::Stats;
-use crate::api::conn::RouterRequest;
-use crate::api::engine::remote::{deserialize, serialize};
 use crate::opt::IntoEndpoint;
 use crate::sql::from_value;
 use crate::sql::Value;
@@ -40,20 +30,9 @@ use reqwest::header::ACCEPT;
 use reqwest::RequestBuilder;
 use serde::Deserialize;
 use serde::Serialize;
-use std::io::Read;
 use std::marker::PhantomData;
 use surrealdb_core::sql::Query;
 use surrealdb_core::sql::Statement;
-// use std::mem;
-// use surrealdb_core::sql::statements::CreateStatement;
-// use surrealdb_core::sql::statements::DeleteStatement;
-// use surrealdb_core::sql::statements::InsertStatement;
-// use surrealdb_core::sql::statements::SelectStatement;
-// use surrealdb_core::sql::statements::UpdateStatement;
-// use surrealdb_core::sql::statements::UpsertStatement;
-// use surrealdb_core::sql::Data;
-// use surrealdb_core::sql::Field;
-// use surrealdb_core::sql::Output;
 use url::Url;
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -340,30 +319,10 @@ async fn import(request: RequestBuilder, path: PathBuf) -> Result<Value> {
 	Ok(Value::None)
 }
 
-// async fn version(request: RequestBuilder) -> Result<Value> {
-// 	let response = request.send().await?.error_for_status()?;
-// 	let version = response.text().await?;
-// 	Ok(version.into())
-// }
-
 pub(crate) async fn health(request: RequestBuilder) -> Result<Value> {
 	request.send().await?.error_for_status()?;
 	Ok(Value::None)
 }
-
-// async fn rpc_request(
-// 	client: &reqwest::Client,
-// 	base: &Url,
-// 	method: &str,
-// 	headers: &HeaderMap,
-// 	vars: &IndexMap<String, String>,
-// 	auth: &Option<Auth>,
-// 	ns: impl AsRef<str>,
-// 	db: impl AsRef<str>,
-// ) -> () {
-// 	let url = base.join(RPC_PATH).unwrap();
-// 	let res = client.post(url).headers(headers.clone()).auth(auth).body("todo");
-// }
 
 async fn process_req(
 	req: RouterRequest,
@@ -490,16 +449,6 @@ async fn router(
 			key,
 			value,
 		} => {
-			// let path = base_url.join(SQL_PATH)?;
-			// let value = value.to_string();
-			// let request = client
-			// 	.post(path)
-			// 	.headers(headers.clone())
-			// 	.auth(auth)
-			// 	.query(&[(key.as_str(), value.as_str())])
-			// 	.body(format!("RETURN ${key}"));
-			// take(true, request).await?;
-			// let query = "RETURN $val";
 			let query: Query = Statement::Value(value).into();
 			let req = Command::Query {
 				query,
@@ -624,19 +573,6 @@ async fn router(
 		Command::SubscribeLive {
 			..
 		} => Err(Error::LiveQueriesNotSupported.into()),
-		Command::Kill {
-			uuid,
-		} => {
-			let path = base_url.join(SQL_PATH)?;
-			let request = client
-				.post(path)
-				.headers(headers.clone())
-				.auth(auth)
-				.query(&[("id", uuid)])
-				.body("KILL type::string($id)");
-			let value = take(true, request).await?;
-			Ok(DbResponse::Other(value))
-		}
 
 		cmd => {
 			let req = cmd
