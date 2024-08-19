@@ -24,6 +24,9 @@ pub mod env;
 pub mod err;
 #[doc(hidden)]
 pub mod fflags;
+#[cfg(all(not(target_arch = "wasm32"), surrealdb_unstable))]
+#[doc(hidden)]
+pub mod gql;
 #[doc(hidden)]
 pub mod iam;
 #[doc(hidden)]

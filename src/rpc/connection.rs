@@ -17,12 +17,13 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 use surrealdb::channel::{self, Receiver, Sender};
 use surrealdb::dbs::Session;
+#[cfg(surrealdb_unstable)]
+use surrealdb::gql::{Pessimistic, SchemaCache};
 use surrealdb::kvs::Datastore;
-use surrealdb::rpc::args::Take;
 use surrealdb::rpc::format::Format;
 use surrealdb::rpc::method::Method;
+use surrealdb::rpc::Data;
 use surrealdb::rpc::RpcContext;
-use surrealdb::rpc::{Data, RpcError};
 use surrealdb::sql::Array;
 use surrealdb::sql::Value;
 use tokio::sync::{RwLock, Semaphore};
@@ -44,6 +45,8 @@ pub struct Connection {
 	pub(crate) channels: (Sender<Message>, Receiver<Message>),
 	pub(crate) state: Arc<RpcState>,
 	pub(crate) datastore: Arc<Datastore>,
+	#[cfg(surrealdb_unstable)]
+	pub(crate) gql_schema: SchemaCache<Pessimistic>,
 }
 
 impl Connection {
@@ -67,6 +70,8 @@ impl Connection {
 			canceller: CancellationToken::new(),
 			channels: channel::bounded(*WEBSOCKET_MAX_CONCURRENT_REQUESTS),
 			state,
+			#[cfg(surrealdb_unstable)]
+			gql_schema: SchemaCache::new(datastore.clone()),
 			datastore,
 		}))
 	}
@@ -407,38 +412,10 @@ impl RpcContext for Connection {
 		}
 	}
 
-	// reimplimentaions
-
-	async fn signup(&mut self, params: Array) -> Result<impl Into<Data>, RpcError> {
-		let Ok(Value::Object(v)) = params.needs_one() else {
-			return Err(RpcError::InvalidParams);
-		};
-		let out: Result<Value, RpcError> =
-			surrealdb::iam::signup::signup(&self.datastore, &mut self.session, v)
-				.await
-				.map(Into::into)
-				.map_err(Into::into);
-
-		out
-	}
-
-	async fn signin(&mut self, params: Array) -> Result<impl Into<Data>, RpcError> {
-		let Ok(Value::Object(v)) = params.needs_one() else {
-			return Err(RpcError::InvalidParams);
-		};
-		let out: Result<Value, RpcError> =
-			surrealdb::iam::signin::signin(&self.datastore, &mut self.session, v)
-				.await
-				.map(Into::into)
-				.map_err(Into::into);
-		out
-	}
-
-	async fn authenticate(&mut self, params: Array) -> Result<impl Into<Data>, RpcError> {
-		let Ok(Value::Strand(token)) = params.needs_one() else {
-			return Err(RpcError::InvalidParams);
-		};
-		surrealdb::iam::verify::token(&self.datastore, &mut self.session, &token.0).await?;
-		Ok(Value::None)
+	#[cfg(surrealdb_unstable)]
+	const GQL_SUPPORT: bool = true;
+	#[cfg(surrealdb_unstable)]
+	fn graphql_schema_cache(&self) -> &SchemaCache {
+		&self.gql_schema
 	}
 }
