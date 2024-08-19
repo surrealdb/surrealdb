@@ -10,6 +10,7 @@ use axum::Extension;
 use axum::Router;
 use axum_extra::TypedHeader;
 use bytes::Bytes;
+use surrealdb::dbs::capabilities::RouteTarget;
 use surrealdb::dbs::Session;
 use surrealdb::iam::Action::Edit;
 use surrealdb::iam::ResourceKind::Any;
@@ -35,6 +36,10 @@ async fn handler(
 ) -> Result<impl IntoResponse, impl IntoResponse> {
 	// Get the datastore reference
 	let db = &state.datastore;
+	// Check if capabilities allow querying the requested HTTP route
+	if !db.allows_http_route(&RouteTarget::Import) {
+		return Err(Error::OperationForbidden);
+	}
 	// Convert the body to a byte slice
 	let sql = bytes_to_utf8(&sql)?;
 	// Check the permissions level

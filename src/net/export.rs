@@ -7,6 +7,7 @@ use axum::Router;
 use axum::{response::Response, Extension};
 use bytes::Bytes;
 use http::StatusCode;
+use surrealdb::dbs::capabilities::RouteTarget;
 use surrealdb::dbs::Session;
 use surrealdb::iam::check::check_ns_db;
 use surrealdb::iam::Action::View;
@@ -25,6 +26,10 @@ async fn handler(
 ) -> Result<impl IntoResponse, Error> {
 	// Get the datastore reference
 	let db = &state.datastore;
+	// Check if capabilities allow querying the requested HTTP route
+	if !db.allows_http_route(&RouteTarget::Export) {
+		return Err(Error::OperationForbidden);
+	}
 	// Create a chunked response
 	let (chn, body_stream) = surrealdb::channel::bounded::<Result<Bytes, Error>>(1);
 	let body = Body::from_stream(body_stream);

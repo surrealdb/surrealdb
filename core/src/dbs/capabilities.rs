@@ -241,12 +241,15 @@ pub enum RouteTarget {
 	Import,
 	Rpc,
 	Version,
-	Sync,
+	SyncLoad,
+	SyncSave,
 	Sql,
 	Signin,
 	Signup,
-	Key,
-	Ml,
+	KeyAll,
+	KeyOne,
+	MlImport,
+	MlExport,
 }
 
 // impl display
@@ -259,12 +262,15 @@ impl fmt::Display for RouteTarget {
 			RouteTarget::Import => write!(f, "import"),
 			RouteTarget::Rpc => write!(f, "rpc"),
 			RouteTarget::Version => write!(f, "version"),
-			RouteTarget::Sync => write!(f, "sync"),
+			RouteTarget::SyncLoad => write!(f, "sync_load"),
+			RouteTarget::SyncSave => write!(f, "sync_save"),
 			RouteTarget::Sql => write!(f, "sql"),
 			RouteTarget::Signin => write!(f, "signin"),
 			RouteTarget::Signup => write!(f, "signup"),
-			RouteTarget::Key => write!(f, "key"),
-			RouteTarget::Ml => write!(f, "ml"),
+			RouteTarget::KeyAll => write!(f, "key_all"),
+			RouteTarget::KeyOne => write!(f, "key_one"),
+			RouteTarget::MlImport => write!(f, "ml_import"),
+			RouteTarget::MlExport => write!(f, "ml_export"),
 		}
 	}
 }
@@ -292,16 +298,19 @@ impl std::str::FromStr for RouteTarget {
 		match s {
 			"status" => Ok(RouteTarget::Status),
 			"health" => Ok(RouteTarget::Health),
-			"import" => Ok(RouteTarget::Import),
 			"export" => Ok(RouteTarget::Export),
+			"import" => Ok(RouteTarget::Import),
 			"rpc" => Ok(RouteTarget::Rpc),
 			"version" => Ok(RouteTarget::Version),
-			"sync" => Ok(RouteTarget::Sync),
+			"sync_load" => Ok(RouteTarget::SyncLoad),
+			"sync_save" => Ok(RouteTarget::SyncSave),
 			"sql" => Ok(RouteTarget::Sql),
 			"signin" => Ok(RouteTarget::Signin),
 			"signup" => Ok(RouteTarget::Signup),
-			"key" => Ok(RouteTarget::Key),
-			"ml" => Ok(RouteTarget::Ml),
+			"key_all" => Ok(RouteTarget::KeyAll),
+			"key_one" => Ok(RouteTarget::KeyOne),
+			"ml_import" => Ok(RouteTarget::MlImport),
+			"ml_export" => Ok(RouteTarget::MlExport),
 			_ => Err(ParseRouteTargetError),
 		}
 	}

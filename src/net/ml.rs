@@ -12,6 +12,7 @@ use axum::Router;
 use bytes::Bytes;
 use futures_util::StreamExt;
 use http::StatusCode;
+use surrealdb::dbs::capabilities::RouteTarget;
 use surrealdb::dbs::Session;
 use surrealdb::iam::check::check_ns_db;
 use surrealdb::iam::Action::{Edit, View};
@@ -44,6 +45,10 @@ async fn import(
 	let mut stream = body.into_data_stream();
 	// Get the datastore reference
 	let db = &state.datastore;
+	// Check if capabilities allow querying the requested HTTP route
+	if !db.allows_http_route(&RouteTarget::MlImport) {
+		return Err(Error::OperationForbidden);
+	}
 	// Ensure a NS and DB are set
 	let (nsv, dbv) = check_ns_db(&session)?;
 	// Check the permissions level
@@ -96,6 +101,10 @@ async fn export(
 ) -> Result<impl IntoResponse, Error> {
 	// Get the datastore reference
 	let db = &state.datastore;
+	// Check if capabilities allow querying the requested HTTP route
+	if !db.allows_http_route(&RouteTarget::MlExport) {
+		return Err(Error::OperationForbidden);
+	}
 	// Ensure a NS and DB are set
 	let (nsv, dbv) = check_ns_db(&session)?;
 	// Check the permissions level

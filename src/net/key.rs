@@ -11,6 +11,7 @@ use axum_extra::TypedHeader;
 use bytes::Bytes;
 use serde::Deserialize;
 use std::str;
+use surrealdb::dbs::capabilities::RouteTarget;
 use surrealdb::dbs::Session;
 use surrealdb::iam::check::check_ns_db;
 use surrealdb::sql::Value;
@@ -73,6 +74,10 @@ async fn select_all(
 ) -> Result<impl IntoResponse, impl IntoResponse> {
 	// Get the datastore reference
 	let db = &state.datastore;
+	// Check if capabilities allow querying the requested HTTP route
+	if !db.allows_http_route(&RouteTarget::KeyAll) {
+		return Err(Error::OperationForbidden);
+	}
 	// Ensure a NS and DB are set
 	let _ = check_ns_db(&session)?;
 	// Specify the request statement
@@ -115,6 +120,10 @@ async fn create_all(
 ) -> Result<impl IntoResponse, impl IntoResponse> {
 	// Get the datastore reference
 	let db = &state.datastore;
+	// Check if capabilities allow querying the requested HTTP route
+	if !db.allows_http_route(&RouteTarget::KeyAll) {
+		return Err(Error::OperationForbidden);
+	}
 	// Ensure a NS and DB are set
 	let _ = check_ns_db(&session)?;
 	// Convert the HTTP request body
@@ -160,6 +169,10 @@ async fn update_all(
 ) -> Result<impl IntoResponse, impl IntoResponse> {
 	// Get the datastore reference
 	let db = &state.datastore;
+	// Check if capabilities allow querying the requested HTTP route
+	if !db.allows_http_route(&RouteTarget::KeyAll) {
+		return Err(Error::OperationForbidden);
+	}
 	// Ensure a NS and DB are set
 	let _ = check_ns_db(&session)?;
 	// Convert the HTTP request body
@@ -205,6 +218,10 @@ async fn modify_all(
 ) -> Result<impl IntoResponse, impl IntoResponse> {
 	// Get the datastore reference
 	let db = &state.datastore;
+	// Check if capabilities allow querying the requested HTTP route
+	if !db.allows_http_route(&RouteTarget::KeyAll) {
+		return Err(Error::OperationForbidden);
+	}
 	// Ensure a NS and DB are set
 	let _ = check_ns_db(&session)?;
 	// Convert the HTTP request body
@@ -249,6 +266,10 @@ async fn delete_all(
 ) -> Result<impl IntoResponse, impl IntoResponse> {
 	// Get the datastore reference
 	let db = &state.datastore;
+	// Check if capabilities allow querying the requested HTTP route
+	if !db.allows_http_route(&RouteTarget::KeyAll) {
+		return Err(Error::OperationForbidden);
+	}
 	// Ensure a NS and DB are set
 	let _ = check_ns_db(&session)?;
 	// Specify the request statement
@@ -288,6 +309,10 @@ async fn select_one(
 ) -> Result<impl IntoResponse, impl IntoResponse> {
 	// Get the datastore reference
 	let db = &state.datastore;
+	// Check if capabilities allow querying the requested HTTP route
+	if !db.allows_http_route(&RouteTarget::KeyOne) {
+		return Err(Error::OperationForbidden);
+	}
 	// Ensure a NS and DB are set
 	let _ = check_ns_db(&session)?;
 	// Specify the request statement
@@ -333,6 +358,10 @@ async fn create_one(
 ) -> Result<impl IntoResponse, impl IntoResponse> {
 	// Get the datastore reference
 	let db = &state.datastore;
+	// Check if capabilities allow querying the requested HTTP route
+	if !db.allows_http_route(&RouteTarget::KeyOne) {
+		return Err(Error::OperationForbidden);
+	}
 	// Ensure a NS and DB are set
 	let _ = check_ns_db(&session)?;
 	// Convert the HTTP request body
@@ -384,6 +413,10 @@ async fn update_one(
 ) -> Result<impl IntoResponse, impl IntoResponse> {
 	// Get the datastore reference
 	let db = &state.datastore;
+	// Check if capabilities allow querying the requested HTTP route
+	if !db.allows_http_route(&RouteTarget::KeyOne) {
+		return Err(Error::OperationForbidden);
+	}
 	// Ensure a NS and DB are set
 	let _ = check_ns_db(&session)?;
 	// Convert the HTTP request body
@@ -435,6 +468,10 @@ async fn modify_one(
 ) -> Result<impl IntoResponse, impl IntoResponse> {
 	// Get the datastore reference
 	let db = &state.datastore;
+	// Check if capabilities allow querying the requested HTTP route
+	if !db.allows_http_route(&RouteTarget::KeyOne) {
+		return Err(Error::OperationForbidden);
+	}
 	// Ensure a NS and DB are set
 	let _ = check_ns_db(&session)?;
 	// Convert the HTTP request body
@@ -484,6 +521,10 @@ async fn delete_one(
 ) -> Result<impl IntoResponse, impl IntoResponse> {
 	// Get the datastore reference
 	let db = &state.datastore;
+	// Check if capabilities allow querying the requested HTTP route
+	if !db.allows_http_route(&RouteTarget::KeyOne) {
+		return Err(Error::OperationForbidden);
+	}
 	// Ensure a NS and DB are set
 	let _ = check_ns_db(&session)?;
 	// Specify the request statement

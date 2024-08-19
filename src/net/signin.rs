@@ -9,6 +9,7 @@ use axum::Router;
 use axum_extra::TypedHeader;
 use bytes::Bytes;
 use serde::Serialize;
+use surrealdb::dbs::capabilities::RouteTarget;
 use surrealdb::dbs::Session;
 use surrealdb::sql::Value;
 use tower_http::limit::RequestBodyLimitLayer;
@@ -53,6 +54,10 @@ async fn handler(
 ) -> Result<impl IntoResponse, impl IntoResponse> {
 	// Get a database reference
 	let kvs = &state.datastore;
+	// Check if capabilities allow querying the requested HTTP route
+	if !kvs.allows_http_route(&RouteTarget::Signin) {
+		return Err(Error::OperationForbidden);
+	}
 	// Convert the HTTP body into text
 	let data = bytes_to_utf8(&body)?;
 	// Parse the provided data as JSON
