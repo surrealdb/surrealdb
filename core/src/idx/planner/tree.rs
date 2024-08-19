@@ -10,14 +10,15 @@ use crate::kvs::Transaction;
 use crate::sql::index::Index;
 use crate::sql::statements::{DefineFieldStatement, DefineIndexStatement};
 use crate::sql::{
-	Array, Cond, Expression, Idiom, Kind, Number, Operator, Part, Subquery, Table, Value, With,
+	Array, Cond, Expression, Idiom, Kind, Number, Operator, Orders, Part, Subquery, Table, Value,
+	With,
 };
 use reblessive::tree::Stk;
 use std::collections::HashMap;
 use std::sync::Arc;
 
 pub(super) struct Tree {
-	pub(super) root: Node,
+	pub(super) root: Option<Node>,
 	pub(super) index_map: IndexesMap,
 	pub(super) with_indexes: Vec<IndexRef>,
 	pub(super) knn_expressions: KnnExpressions,
@@ -35,26 +36,23 @@ impl Tree {
 		table: &'a Table,
 		cond: Option<&Cond>,
 		with: Option<&With>,
-	) -> Result<Option<Self>, Error> {
+		order: Option<&Orders>,
+	) -> Result<Self, Error> {
 		let mut b = TreeBuilder::new(ctx, opt, table, with);
 		if let Some(cond) = cond {
-			let root = b.eval_value(stk, 0, &cond.0).await?;
-			let knn_condition = if b.knn_expressions.is_empty() {
-				None
-			} else {
-				KnnConditionRewriter::build(&b.knn_expressions, cond)
-			};
-			Ok(Some(Self {
-				root,
-				index_map: b.index_map,
-				with_indexes: b.with_indexes,
-				knn_expressions: b.knn_expressions,
-				knn_brute_force_expressions: b.knn_brute_force_expressions,
-				knn_condition,
-			}))
-		} else {
-			Ok(None)
+			b.eval_cond(stk, cond).await?;
 		}
+		if let Some(orders) = order {
+			b.eval_orders(orders)?;
+		}
+		Ok(Self {
+			root: b.root,
+			index_map: b.index_map,
+			with_indexes: b.with_indexes,
+			knn_expressions: b.knn_expressions,
+			knn_brute_force_expressions: b.knn_brute_force_expressions,
+			knn_condition: b.knn_condition,
+		})
 	}
 }
 
@@ -73,6 +71,8 @@ struct TreeBuilder<'a> {
 	knn_expressions: KnnExpressions,
 	idioms_record_options: HashMap<Idiom, RecordOptions>,
 	group_sequence: GroupRef,
+	root: Option<Node>,
+	knn_condition: Option<Cond>,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
@@ -105,6 +105,8 @@ impl<'a> TreeBuilder<'a> {
 			knn_expressions: Default::default(),
 			idioms_record_options: Default::default(),
 			group_sequence: 0,
+			root: None,
+			knn_condition: None,
 		}
 	}
 
@@ -121,7 +123,20 @@ impl<'a> TreeBuilder<'a> {
 		Ok(())
 	}
 
-	/// Was marked recursive
+	async fn eval_cond(&mut self, stk: &mut Stk, cond: &Cond) -> Result<(), Error> {
+		self.root = Some(self.eval_value(stk, 0, &cond.0).await?);
+		self.knn_condition = if self.knn_expressions.is_empty() {
+			None
+		} else {
+			KnnConditionRewriter::build(&self.knn_expressions, cond)
+		};
+		Ok(())
+	}
+
+	fn eval_orders(&mut self, orders: &Orders) -> Result<(), Error> {
+		todo!()
+	}
+
 	async fn eval_value(
 		&mut self,
 		stk: &mut Stk,

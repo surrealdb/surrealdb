@@ -30,7 +30,7 @@ pub(super) struct PlanBuilder {
 
 impl PlanBuilder {
 	pub(super) fn build(
-		root: Node,
+		root: Option<Node>,
 		with: Option<&With>,
 		with_indexes: Vec<IndexRef>,
 	) -> Result<Plan, Error> {
@@ -47,8 +47,10 @@ impl PlanBuilder {
 			all_exp_with_index: true,
 		};
 		// Browse the AST and collect information
-		if let Err(e) = b.eval_node(&root) {
-			return Ok(Plan::TableIterator(Some(e.to_string())));
+		if let Some(root) = &root {
+			if let Err(e) = b.eval_node(root) {
+				return Ok(Plan::TableIterator(Some(e.to_string())));
+			}
 		}
 		// If we didn't find any index, we're done with no index plan
 		if !b.has_indexes {

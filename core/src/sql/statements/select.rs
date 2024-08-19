@@ -80,6 +80,7 @@ impl SelectStatement {
 			opt.clone(),
 			self.with.as_ref().cloned().map(|w| w.into()),
 			self.cond.as_ref().cloned().map(|c| c.into()),
+			self.order.as_ref().cloned().map(|o| o.into()),
 		);
 		// Used for ONLY: is the limit 1?
 		let limit_is_one_or_zero = match &self.limit {
