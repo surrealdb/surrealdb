@@ -270,7 +270,7 @@ async fn process_req(
 	let bytes = response.bytes().await?;
 
 	let response: Response = deserialize(&mut &bytes[..], false)?;
-	return DbResponse::from(response.result);
+	DbResponse::from(response.result)
 }
 
 fn try_one(res: DbResponse, needed: bool) -> DbResponse {
@@ -324,7 +324,7 @@ async fn router(
 			match namespace {
 				Some(ns) => match HeaderValue::try_from(ns) {
 					Ok(ns) => {
-						headers.insert(&NS, ns.into());
+						headers.insert(&NS, ns);
 					}
 					Err(_) => {
 						return Err(Error::InvalidNsName(ns.to_owned()).into());
@@ -336,7 +336,7 @@ async fn router(
 			match database {
 				Some(db) => match HeaderValue::try_from(db) {
 					Ok(db) => {
-						headers.insert(&DB, db.into());
+						headers.insert(&DB, db);
 					}
 					Err(_) => {
 						return Err(Error::InvalidDbName(db.to_owned()).into());
