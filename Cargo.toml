@@ -112,7 +112,7 @@ revision = { version = "0.8.0", features = [
     "uuid",
 ] }
 rmpv = "1.0.1"
-rust_decimal = "1.35.0"
+rust_decimal = "1.36.0"
 rustyline = { version = "12.0.0", features = ["derive"] }
 semver = "1.0.20"
 serde = { version = "1.0.193", features = ["derive"] }
