@@ -76,10 +76,13 @@ where
 			};
 
 			#[cfg(debug_assertions)]
-			let state = req.extensions()
-				.get::<crate::net::AppState>()
-				.expect("state extractor should always succeed");
-			debug_assert!(Arc::ptr_eq(&state.datastore, &cache.datastore));
+			{
+				let state = req
+					.extensions()
+					.get::<crate::net::AppState>()
+					.expect("state extractor should always succeed");
+				debug_assert!(Arc::ptr_eq(&state.datastore, &cache.datastore));
+			}
 
 			let executor = match cache.get_schema(session).await {
 				Ok(e) => e,
