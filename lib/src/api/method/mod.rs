@@ -12,6 +12,7 @@ use crate::api::Surreal;
 use crate::opt::IntoExportDestination;
 use crate::opt::WaitFor;
 use crate::sql::to_value;
+use run::IntoArgs;
 use serde::Serialize;
 use std::borrow::Cow;
 use std::marker::PhantomData;
@@ -1248,13 +1249,13 @@ where
 	/// # }
 	/// ```
 	///
-	pub fn run(&self, fn_name: impl IntoFn, params: impl IntoParams) -> Run<C> {
-		let (fn_name, fn_version) = fn_name.into_fn();
+	pub fn run(&self, name: impl IntoFn, args: impl IntoArgs) -> Run<C> {
+		let (name, version) = name.into_fn();
 		Run {
 			client: Cow::Borrowed(self),
-			fn_name,
-			fn_version,
-			params: params.into_params(),
+			name,
+			version,
+			args: args.into_args(),
 		}
 	}
 

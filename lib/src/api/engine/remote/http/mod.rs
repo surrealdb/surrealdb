@@ -37,7 +37,6 @@ use url::Url;
 
 #[cfg(not(target_arch = "wasm32"))]
 use std::path::PathBuf;
-use surrealdb_core::sql::Function;
 #[cfg(not(target_arch = "wasm32"))]
 use tokio::fs::OpenOptions;
 #[cfg(not(target_arch = "wasm32"))]

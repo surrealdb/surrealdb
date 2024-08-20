@@ -331,7 +331,9 @@ impl Command {
 			} => RouterRequest {
 				id,
 				method: "run".into(),
-				params: Some(vec![Value::from(name), Value::from(version), Value::Array(args)]),
+				params: Some(
+					vec![Value::from(name), Value::from(version), Value::Array(args)].into(),
+				),
 			},
 		};
 		Some(res)

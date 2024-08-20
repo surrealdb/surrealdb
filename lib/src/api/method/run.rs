@@ -15,9 +15,9 @@ use std::pin::Pin;
 #[must_use = "futures do nothing unless you `.await` or poll them"]
 pub struct Run<'r, C: Connection> {
 	pub(super) client: Cow<'r, Surreal<C>>,
-	pub(super) fn_name: String,
-	pub(super) fn_version: Option<String>,
-	pub(super) params: Array,
+	pub(super) name: String,
+	pub(super) version: Option<String>,
+	pub(super) args: Array,
 }
 impl<C> Run<'_, C>
 where
@@ -42,113 +42,113 @@ where
 	fn into_future(self) -> Self::IntoFuture {
 		let Run {
 			client,
-			fn_name,
-			fn_version,
-			params,
+			name,
+			version,
+			args,
 		} = self;
 		Box::pin(async move {
-			// let mut conn = Client::new(Method::Run);
-			// conn.execute_value(
-			// 	self.client.router.extract()?,
-			// 	Param::new(vec![self.fn_name.into(), self.fn_version.into(), self.params.into()]),
-			// )
-			// .await
 			let router = client.router.extract()?;
-			router.execute_value(Command)
+			router
+				.execute_value(Command::Run {
+					name,
+					version,
+					args,
+				})
+				.await
 		})
 	}
 }
 
-pub trait IntoParams {
-	fn into_params(self) -> Array;
+pub trait IntoArgs {
+	fn into_args(self) -> Array;
 }
 
-impl IntoParams for Array {
-	fn into_params(self) -> Array {
+impl IntoArgs for Array {
+	fn into_args(self) -> Array {
 		self
 	}
 }
 
-impl IntoParams for Value {
-	fn into_params(self) -> Array {
+impl IntoArgs for Value {
+	fn into_args(self) -> Array {
 		let arr: Vec<Value> = vec![self];
 		Array::from(arr)
 	}
 }
 
-impl<T> IntoParams for Vec<T>
+impl<T> IntoArgs for Vec<T>
 where
 	T: Into<Value>,
 {
-	fn into_params(self) -> Array {
+	fn into_args(self) -> Array {
 		let arr: Vec<Value> = self.into_iter().map(Into::into).collect();
 		Array::from(arr)
 	}
 }
 
-impl<T, const N: usize> IntoParams for [T; N]
+impl<T, const N: usize> IntoArgs for [T; N]
 where
 	T: Into<Value>,
 {
-	fn into_params(self) -> Array {
+	fn into_args(self) -> Array {
 		let arr: Vec<Value> = self.into_iter().map(Into::into).collect();
 		Array::from(arr)
 	}
 }
 
-impl<T, const N: usize> IntoParams for &[T; N]
+impl<T, const N: usize> IntoArgs for &[T; N]
 where
 	T: Into<Value> + Clone,
 {
-	fn into_params(self) -> Array {
+	fn into_args(self) -> Array {
 		let arr: Vec<Value> = self.iter().cloned().map(Into::into).collect();
 		Array::from(arr)
 	}
 }
 
-impl<T> IntoParams for &[T]
+impl<T> IntoArgs for &[T]
 where
 	T: Into<Value> + Clone,
 {
-	fn into_params(self) -> Array {
+	fn into_args(self) -> Array {
 		let arr: Vec<Value> = self.iter().cloned().map(Into::into).collect();
 		Array::from(arr)
 	}
 }
-impl IntoParams for () {
-	fn into_params(self) -> Array {
+impl IntoArgs for () {
+	fn into_args(self) -> Array {
 		Vec::<Value>::new().into()
 	}
 }
 
-impl<T0> IntoParams for (T0,)
+impl<T0> IntoArgs for (T0,)
 where
 	T0: Into<Value>,
 {
-	fn into_params(self) -> Array {
+	fn into_args(self) -> Array {
 		let arr: Vec<Value> = vec![self.0.into()];
 		Array::from(arr)
 	}
 }
 
-impl<T0, T1> IntoParams for (T0, T1)
+impl<T0, T1> IntoArgs for (T0, T1)
 where
 	T0: Into<Value>,
 	T1: Into<Value>,
 {
-	fn into_params(self) -> Array {
+	fn into_args(self) -> Array {
 		let arr: Vec<Value> = vec![self.0.into(), self.1.into()];
 		Array::from(arr)
 	}
 }
 
-impl<T0, T1, T2> IntoParams for (T0, T1, T2)
+impl<T0, T1, T2> IntoArgs for (T0, T1, T2)
 where
 	T0: Into<Value>,
 	T1: Into<Value>,
 	T2: Into<Value>,
 {
-	fn into_params(self) -> Array {
+	fn into_args(self) -> Array {
 		let arr: Vec<Value> = vec![self.0.into(), self.1.into(), self.2.into()];
 		Array::from(arr)
 	}
@@ -156,8 +156,8 @@ where
 
 macro_rules! into_impl {
 	($type:ty) => {
-		impl IntoParams for $type {
-			fn into_params(self) -> Array {
+		impl IntoArgs for $type {
+			fn into_args(self) -> Array {
 				let val: Value = self.into();
 				Array::from(val)
 			}
