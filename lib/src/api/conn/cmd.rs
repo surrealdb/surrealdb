@@ -6,7 +6,7 @@ use revision::Revisioned;
 use serde::{ser::SerializeMap as _, Serialize};
 use std::io::Read;
 use std::path::PathBuf;
-use surrealdb_core::sql::{Object as CoreObject, Query, Value as CoreValue};
+use surrealdb_core::sql::{Array as CoreArray, Object as CoreObject, Query, Value as CoreValue};
 use uuid::Uuid;
 
 #[cfg(feature = "protocol-ws")]
@@ -99,6 +99,11 @@ pub(crate) enum Command {
 	},
 	Kill {
 		uuid: Uuid,
+	},
+	Run {
+		name: String,
+		version: Option<String>,
+		args: CoreArray,
 	},
 }
 
@@ -314,6 +319,18 @@ impl Command {
 				id,
 				method: "kill",
 				params: Some(CoreValue::from(vec![CoreValue::from(uuid)])),
+			},
+			Command::Run {
+				name,
+				version,
+				args,
+			} => RouterRequest {
+				id,
+				method: "run".into(),
+				params: Some(
+					vec![CoreValue::from(name), CoreValue::from(version), CoreValue::Array(args)]
+						.into(),
+				),
 			},
 		};
 		Some(res)

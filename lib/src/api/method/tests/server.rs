@@ -2,6 +2,7 @@ use super::types::User;
 use crate::api::conn::{Command, DbResponse, Route};
 use crate::api::Response as QueryResponse;
 use crate::opt::Resource;
+use crate::RecordId;
 use channel::Receiver;
 use surrealdb_core::sql::{to_value as to_core_value, Value as CoreValue};
 
@@ -59,11 +60,12 @@ pub(super) fn mock(route_rx: Receiver<Route>) {
 					what,
 					..
 				} => match what {
+					Resource::Table(..)
+					| Resource::Array(..)
+					| Resource::Range(..)
+					| Resource::Range(_) => Ok(DbResponse::Other(CoreValue::Array(Default::default()))),
 					Resource::RecordId(..) => {
 						Ok(DbResponse::Other(to_core_value(User::default()).unwrap()))
-					}
-					Resource::Table(..) | Resource::Array(..) | Resource::Range(..) => {
-						Ok(DbResponse::Other(CoreValue::Array(Default::default())))
 					}
 					_ => unreachable!(),
 				},
@@ -83,11 +85,11 @@ pub(super) fn mock(route_rx: Receiver<Route>) {
 					what,
 					..
 				} => match what {
-					Resource::RecordId(..) => {
-						Ok(DbResponse::Other(to_core_value(User::default()).unwrap()))
-					}
 					Resource::Table(..) | Resource::Array(..) | Resource::Range(..) => {
 						Ok(DbResponse::Other(CoreValue::Array(Default::default())))
+					}
+					Resource::RecordId(..) => {
+						Ok(DbResponse::Other(to_core_value(User::default()).unwrap()))
 					}
 					_ => unreachable!(),
 				},
@@ -100,6 +102,9 @@ pub(super) fn mock(route_rx: Receiver<Route>) {
 					}
 					_ => Ok(DbResponse::Other(to_core_value(User::default()).unwrap())),
 				},
+				Command::Run {
+					..
+				} => Ok(DbResponse::Other(CoreValue::None)),
 				Command::ExportMl {
 					..
 				}

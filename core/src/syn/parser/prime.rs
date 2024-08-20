@@ -1,3 +1,5 @@
+use std::ops::Bound;
+
 use geo::Point;
 use reblessive::Stk;
 
@@ -6,14 +8,14 @@ use crate::{
 	enter_object_recursion, enter_query_recursion,
 	sql::{
 		Array, Closure, Dir, Function, Geometry, Ident, Idiom, Kind, Mock, Number, Param, Part,
-		Script, Strand, Subquery, Table, Value,
+		Range, Script, Strand, Subquery, Table, Value,
 	},
 	syn::{
 		parser::{
-			mac::{expected, unexpected},
+			mac::{expected, expected_whitespace, unexpected},
 			ParseError, ParseErrorKind,
 		},
-		token::{t, Span, TokenKind},
+		token::{t, DurationSuffix, Span, TokenKind},
 	},
 };
 
@@ -23,27 +25,29 @@ impl Parser<'_> {
 	/// What's are values which are more restricted in what expressions they can contain.
 	pub async fn parse_what_primary(&mut self, ctx: &mut Stk) -> ParseResult<Value> {
 		match self.peek_kind() {
+			t!("..") => Ok(self.try_parse_range(ctx, None).await?.unwrap()),
 			t!("r\"") => {
 				self.pop_peek();
-				let thing = self.parse_record_string(ctx, true).await?;
-				Ok(Value::Thing(thing))
+				let value = Value::Thing(self.parse_record_string(ctx, true).await?);
+				Ok(self.try_parse_range(ctx, Some(&value)).await?.unwrap_or(value))
 			}
 			t!("r'") => {
 				self.pop_peek();
-				let thing = self.parse_record_string(ctx, false).await?;
-				Ok(Value::Thing(thing))
+				let value = Value::Thing(self.parse_record_string(ctx, false).await?);
+				Ok(self.try_parse_range(ctx, Some(&value)).await?.unwrap_or(value))
 			}
 			t!("d\"") | t!("d'") => {
-				let datetime = self.next_token_value()?;
-				Ok(Value::Datetime(datetime))
+				let value = Value::Datetime(self.next_token_value()?);
+				Ok(self.try_parse_range(ctx, Some(&value)).await?.unwrap_or(value))
 			}
 			t!("u\"") | t!("u'") => {
-				let uuid = self.next_token_value()?;
-				Ok(Value::Uuid(uuid))
+				let value = Value::Uuid(self.next_token_value()?);
+				Ok(self.try_parse_range(ctx, Some(&value)).await?.unwrap_or(value))
 			}
 			t!("$param") => {
 				let value = Value::Param(self.next_token_value()?);
-				Ok(self.try_parse_inline(ctx, &value).await?.unwrap_or(value))
+				let value = self.try_parse_inline(ctx, &value).await?.unwrap_or(value);
+				Ok(self.try_parse_range(ctx, Some(&value)).await?.unwrap_or(value))
 			}
 			t!("FUNCTION") => {
 				self.pop_peek();
@@ -128,12 +132,60 @@ impl Parser<'_> {
 		}
 	}
 
+	pub async fn try_parse_range(
+		&mut self,
+		ctx: &mut Stk,
+		subject: Option<&Value>,
+	) -> ParseResult<Option<Value>> {
+		// The ">" can also mean a comparison.
+		// If the token after is not "..", then return
+		if self.peek_whitespace().kind == t!(">")
+			&& self.peek_whitespace_token_at(1).kind != t!("..")
+		{
+			return Ok(None);
+		}
+
+		let beg = if let Some(subject) = subject {
+			if self.eat_whitespace(t!(">")) {
+				expected_whitespace!(self, t!(".."));
+				Bound::Excluded(subject.to_owned())
+			} else {
+				if !self.eat_whitespace(t!("..")) {
+					return Ok(None);
+				}
+
+				Bound::Included(subject.to_owned())
+			}
+		} else {
+			if !self.eat_whitespace(t!("..")) {
+				return Ok(None);
+			}
+
+			Bound::Unbounded
+		};
+
+		let end = if self.eat_whitespace(t!("=")) {
+			let id = ctx.run(|ctx| self.parse_simple_value(ctx)).await?;
+			Bound::Included(id)
+		} else if Self::tokenkind_can_start_simple_value(self.peek_whitespace().kind) {
+			let id = ctx.run(|ctx| self.parse_simple_value(ctx)).await?;
+			Bound::Excluded(id)
+		} else {
+			Bound::Unbounded
+		};
+
+		Ok(Some(Value::Range(Box::new(Range {
+			beg,
+			end,
+		}))))
+	}
+
 	pub async fn try_parse_inline(
 		&mut self,
 		ctx: &mut Stk,
 		subject: &Value,
 	) -> ParseResult<Option<Value>> {
-		if self.eat(t!("(")) {
+		if self.eat_whitespace(t!("(")) {
 			let start = self.last_span();
 			let mut args = Vec::new();
 			loop {
@@ -171,21 +223,26 @@ impl Parser<'_> {
 	pub async fn parse_idiom_expression(&mut self, ctx: &mut Stk) -> ParseResult<Value> {
 		let token = self.peek();
 		let value = match token.kind {
+			t!("..") => self.try_parse_range(ctx, None).await?.unwrap(),
 			t!("NONE") => {
 				self.pop_peek();
-				Value::None
+				let value = Value::None;
+				self.try_parse_range(ctx, Some(&value)).await?.unwrap_or(value)
 			}
 			t!("NULL") => {
 				self.pop_peek();
-				Value::Null
+				let value = Value::Null;
+				self.try_parse_range(ctx, Some(&value)).await?.unwrap_or(value)
 			}
 			t!("true") => {
 				self.pop_peek();
-				Value::Bool(true)
+				let value = Value::Bool(true);
+				self.try_parse_range(ctx, Some(&value)).await?.unwrap_or(value)
 			}
 			t!("false") => {
 				self.pop_peek();
-				Value::Bool(false)
+				let value = Value::Bool(false);
+				self.try_parse_range(ctx, Some(&value)).await?.unwrap_or(value)
 			}
 			t!("<") => {
 				self.pop_peek();
@@ -198,21 +255,21 @@ impl Parser<'_> {
 			}
 			t!("r\"") => {
 				self.pop_peek();
-				let thing = self.parse_record_string(ctx, true).await?;
-				Value::Thing(thing)
+				let value = Value::Thing(self.parse_record_string(ctx, true).await?);
+				self.try_parse_range(ctx, Some(&value)).await?.unwrap_or(value)
 			}
 			t!("r'") => {
 				self.pop_peek();
-				let thing = self.parse_record_string(ctx, false).await?;
-				Value::Thing(thing)
+				let value = Value::Thing(self.parse_record_string(ctx, false).await?);
+				self.try_parse_range(ctx, Some(&value)).await?.unwrap_or(value)
 			}
 			t!("d\"") | t!("d'") => {
-				let datetime = self.next_token_value()?;
-				Value::Datetime(datetime)
+				let value = Value::Datetime(self.next_token_value()?);
+				self.try_parse_range(ctx, Some(&value)).await?.unwrap_or(value)
 			}
 			t!("u\"") | t!("u'") => {
-				let uuid = self.next_token_value()?;
-				Value::Uuid(uuid)
+				let value = Value::Uuid(self.next_token_value()?);
+				self.try_parse_range(ctx, Some(&value)).await?.unwrap_or(value)
 			}
 			t!("'") | t!("\"") | TokenKind::Strand => {
 				let s = self.next_token_value::<Strand>()?;
@@ -221,18 +278,22 @@ impl Parser<'_> {
 						return Ok(x);
 					}
 				}
-				Value::Strand(s)
+				let value = Value::Strand(s);
+				self.try_parse_range(ctx, Some(&value)).await?.unwrap_or(value)
 			}
 			t!("+") | t!("-") | TokenKind::Number(_) | TokenKind::Digits | TokenKind::Duration => {
-				self.parse_number_like_prime()?
+				let value = self.parse_number_like_prime()?;
+				self.try_parse_range(ctx, Some(&value)).await?.unwrap_or(value)
 			}
 			TokenKind::NaN => {
 				self.pop_peek();
-				Value::Number(Number::Float(f64::NAN))
+				let value = Value::Number(Number::Float(f64::NAN));
+				self.try_parse_range(ctx, Some(&value)).await?.unwrap_or(value)
 			}
 			t!("$param") => {
 				let value = Value::Param(self.next_token_value()?);
-				self.try_parse_inline(ctx, &value).await?.unwrap_or(value)
+				let value = self.try_parse_inline(ctx, &value).await?.unwrap_or(value);
+				self.try_parse_range(ctx, Some(&value)).await?.unwrap_or(value)
 			}
 			t!("FUNCTION") => {
 				self.pop_peek();
@@ -256,12 +317,14 @@ impl Parser<'_> {
 			}
 			t!("[") => {
 				self.pop_peek();
-				self.parse_array(ctx, token.span).await.map(Value::Array)?
+				let value = self.parse_array(ctx, token.span).await.map(Value::Array)?;
+				self.try_parse_range(ctx, Some(&value)).await?.unwrap_or(value)
 			}
 			t!("{") => {
 				self.pop_peek();
 				let value = self.parse_object_like(ctx, token.span).await?;
-				self.try_parse_inline(ctx, &value).await?.unwrap_or(value)
+				let value = self.try_parse_inline(ctx, &value).await?.unwrap_or(value);
+				self.try_parse_range(ctx, Some(&value)).await?.unwrap_or(value)
 			}
 			t!("|") => {
 				self.pop_peek();
@@ -281,7 +344,8 @@ impl Parser<'_> {
 			t!("(") => {
 				self.pop_peek();
 				let value = self.parse_inner_subquery_or_coordinate(ctx, token.span).await?;
-				self.try_parse_inline(ctx, &value).await?.unwrap_or(value)
+				let value = self.try_parse_inline(ctx, &value).await?.unwrap_or(value);
+				self.try_parse_range(ctx, Some(&value)).await?.unwrap_or(value)
 			}
 			t!("/") => self.next_token_value().map(Value::Regex)?,
 			t!("RETURN")
@@ -748,6 +812,133 @@ impl Parser<'_> {
 			.lex_js_function_body()
 			.map_err(|(e, span)| ParseError::new(ParseErrorKind::InvalidToken(e), span))?;
 		Ok(Function::Script(Script(body), args))
+	}
+
+	/// Parse a simple singular value
+	pub async fn parse_simple_value(&mut self, ctx: &mut Stk) -> ParseResult<Value> {
+		let token = self.peek();
+		let value = match token.kind {
+			t!("NONE") => {
+				self.pop_peek();
+				let value = Value::None;
+				self.try_parse_range(ctx, Some(&value)).await?.unwrap_or(value)
+			}
+			t!("NULL") => {
+				self.pop_peek();
+				let value = Value::Null;
+				self.try_parse_range(ctx, Some(&value)).await?.unwrap_or(value)
+			}
+			t!("true") => {
+				self.pop_peek();
+				let value = Value::Bool(true);
+				self.try_parse_range(ctx, Some(&value)).await?.unwrap_or(value)
+			}
+			t!("false") => {
+				self.pop_peek();
+				let value = Value::Bool(false);
+				self.try_parse_range(ctx, Some(&value)).await?.unwrap_or(value)
+			}
+			t!("r\"") => {
+				self.pop_peek();
+				let thing = self.parse_record_string(ctx, true).await?;
+				Value::Thing(thing)
+			}
+			t!("r'") => {
+				self.pop_peek();
+				let thing = self.parse_record_string(ctx, false).await?;
+				Value::Thing(thing)
+			}
+			t!("d\"") | t!("d'") => {
+				let datetime = self.next_token_value()?;
+				Value::Datetime(datetime)
+			}
+			t!("u\"") | t!("u'") => {
+				let uuid = self.next_token_value()?;
+				Value::Uuid(uuid)
+			}
+			t!("'") | t!("\"") | TokenKind::Strand => {
+				let s = self.next_token_value::<Strand>()?;
+				if self.legacy_strands {
+					if let Some(x) = self.reparse_legacy_strand(ctx, &s.0).await {
+						return Ok(x);
+					}
+				}
+				Value::Strand(s)
+			}
+			t!("+") | t!("-") | TokenKind::Number(_) | TokenKind::Digits | TokenKind::Duration => {
+				self.parse_number_like_prime()?
+			}
+			TokenKind::NaN => {
+				self.pop_peek();
+				Value::Number(Number::Float(f64::NAN))
+			}
+			t!("$param") => {
+				let value = Value::Param(self.next_token_value()?);
+				self.try_parse_inline(ctx, &value).await?.unwrap_or(value)
+			}
+			t!("[") => {
+				self.pop_peek();
+				self.parse_array(ctx, token.span).await.map(Value::Array)?
+			}
+			t!("{") => {
+				self.pop_peek();
+				let value = self.parse_object_like(ctx, token.span).await?;
+				self.try_parse_inline(ctx, &value).await?.unwrap_or(value)
+			}
+			t!("(") => {
+				self.pop_peek();
+				let value = self.parse_inner_subquery_or_coordinate(ctx, token.span).await?;
+				self.try_parse_inline(ctx, &value).await?.unwrap_or(value)
+			}
+			_ => {
+				self.glue()?;
+				let x = self.peek_token_at(1).kind;
+				if x.has_data() {
+					unexpected!(self, x, "a value");
+				} else if self.table_as_field {
+					Value::Idiom(Idiom(vec![Part::Field(self.next_token_value()?)]))
+				} else {
+					Value::Table(self.next_token_value()?)
+				}
+			}
+		};
+
+		Ok(value)
+	}
+
+	pub fn tokenkind_can_start_simple_value(t: TokenKind) -> bool {
+		matches!(
+			t,
+			t!("NONE")
+				| t!("NULL") | t!("true")
+				| t!("false") | t!("r\"")
+				| t!("r'") | t!("d\"")
+				| t!("d'") | t!("u\"")
+				| t!("u'") | t!("\"")
+				| t!("'") | t!("+")
+				| t!("-") | TokenKind::Number(_)
+				| TokenKind::Digits
+				| TokenKind::Duration
+				| TokenKind::NaN | t!("$param")
+				| t!("[") | t!("{")
+				| t!("(") | TokenKind::Keyword(_)
+				| TokenKind::Language(_)
+				| TokenKind::Algorithm(_)
+				| TokenKind::Distance(_)
+				| TokenKind::VectorType(_)
+				| TokenKind::Identifier
+				| TokenKind::Exponent
+				| TokenKind::DatetimeChars(_)
+				| TokenKind::NumberSuffix(_)
+				| TokenKind::DurationSuffix(
+					// All except Micro unicode
+					DurationSuffix::Nano
+						| DurationSuffix::Micro | DurationSuffix::Milli
+						| DurationSuffix::Second | DurationSuffix::Minute
+						| DurationSuffix::Hour | DurationSuffix::Day
+						| DurationSuffix::Week | DurationSuffix::Year
+				)
+		)
 	}
 }
 

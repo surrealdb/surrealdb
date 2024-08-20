@@ -19,7 +19,7 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::OnceLock;
 use std::time::Duration;
-use surrealdb_core::sql::to_value as to_core_value;
+use surrealdb_core::sql::{to_value as to_core_value, Array as CoreArray};
 
 pub(crate) mod live;
 pub(crate) mod query;
@@ -38,6 +38,7 @@ mod insert;
 mod invalidate;
 mod merge;
 mod patch;
+mod run;
 mod select;
 mod set;
 mod signin;
@@ -75,6 +76,8 @@ pub use merge::Merge;
 pub use patch::Patch;
 pub use query::Query;
 pub use query::QueryStream;
+pub use run::Run;
+pub use run::{IntoArgs, IntoFn};
 pub use select::Select;
 use serde_content::Serializer;
 pub use set::Set;
@@ -1217,6 +1220,41 @@ where
 	pub fn version(&self) -> Version<C> {
 		Version {
 			client: Cow::Borrowed(self),
+		}
+	}
+
+	/// Runs a function
+	///
+	/// # Examples
+	///
+	/// ```no_run
+	/// # #[tokio::main]
+	/// # async fn main() -> surrealdb::Result<()> {
+	/// # let db = surrealdb::engine::any::connect("mem://").await?;
+	/// // specify no args with an empty tuple, vec, or slice
+	/// let foo = db.run("fn::foo", ()).await?; // fn::foo()
+	/// // a single value will be turned into one arguement unless it is a tuple or vec
+	/// let bar = db.run("fn::bar", 42).await?; // fn::bar(42)
+	/// // to specify a single arguement, which is an array turn it into a value, or wrap in a singleton tuple
+	/// let count = db.run("count", Value::from(vec![1,2,3])).await?;
+	/// let count = db.run("count", (vec![1,2,3],)).await?;
+	/// // specify multiple args with either a tuple or vec
+	/// let two = db.run("math::log", (100, 10)).await?; // math::log(100, 10)
+	/// let two = db.run("math::log", [100, 10]).await?; // math::log(100, 10)
+	///
+	/// # Ok(())
+	/// # }
+	/// ```
+	///
+	pub fn run(&self, name: impl IntoFn, args: impl IntoArgs) -> Run<C> {
+		let (name, version) = name.into_fn();
+		let mut arguments = CoreArray::default();
+		arguments.0 = crate::Value::array_to_core(args.into_args());
+		Run {
+			client: Cow::Borrowed(self),
+			name,
+			version,
+			args: arguments,
 		}
 	}
 

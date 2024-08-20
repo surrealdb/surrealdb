@@ -607,6 +607,7 @@ fn kind_to_type(kind: Kind, types: &mut Vec<Type>) -> Result<TypeRef, GqlError> 
 		Kind::Set(_, _) => return Err(schema_error("Kind::Set is not yet supported")),
 		Kind::Array(k, _) => TypeRef::List(Box::new(kind_to_type(*k, types)?)),
 		Kind::Function(_, _) => return Err(schema_error("Kind::Function is not yet supported")),
+		Kind::Range => return Err(schema_error("Kind::Range is not yet supported")),
 	};
 
 	let out = match optional {
@@ -670,6 +671,7 @@ fn filter_from_type(
 		Kind::Set(_, _) => {}
 		Kind::Array(_, _) => {}
 		Kind::Function(_, _) => {}
+		Kind::Range => {}
 	};
 	Ok(filter)
 }
@@ -1110,5 +1112,6 @@ fn gql_to_sql_kind(val: &GqlValue, kind: Kind) -> Result<SqlValue, GqlError> {
 			_ => Err(type_error(kind, val)),
 		},
 		Kind::Function(_, _) => Err(resolver_error("Sets are not yet supported")),
+		Kind::Range => Err(resolver_error("Ranges are not yet supported")),
 	}
 }

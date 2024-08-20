@@ -56,6 +56,9 @@ use uuid::Uuid;
 use crate::api::err::Error;
 #[cfg(not(target_arch = "wasm32"))]
 use std::path::PathBuf;
+use surrealdb_core::sql::Function;
+#[cfg(feature = "ml")]
+use surrealdb_core::sql::Model;
 #[cfg(not(target_arch = "wasm32"))]
 use tokio::{
 	fs::OpenOptions,
@@ -997,6 +1000,35 @@ async fn router(
 		} => {
 			live_queries.remove(&uuid);
 			let value = kill_live_query(kvs, uuid, session, vars.clone()).await?;
+			Ok(DbResponse::Other(value))
+		}
+
+		Command::Run {
+			name,
+			version: _version,
+			args,
+		} => {
+			let func: Value = match &name[0..4] {
+				"fn::" => Function::Custom(name.chars().skip(4).collect(), args.0).into(),
+				// should return error, but can't on wasm
+				#[cfg(feature = "ml")]
+				"ml::" => {
+					let mut tmp = Model::default();
+
+					tmp.name = name.chars().skip(4).collect();
+					tmp.args = args.0;
+					tmp.version = _version
+						.ok_or(Error::Query("ML functions must have a version".to_string()))?;
+					tmp
+				}
+				.into(),
+				_ => Function::Normal(name, args.0).into(),
+			};
+			let stmt = Statement::Value(func);
+
+			let response = kvs.process(stmt.into(), &*session, Some(vars.clone())).await?;
+			let value = take(true, response).await?;
+
 			Ok(DbResponse::Other(value))
 		}
 	}

@@ -3,7 +3,10 @@ use crate::{
 	Object, RecordId, RecordIdKey, Value,
 };
 use std::ops::{self, Bound};
-use surrealdb_core::sql::{Edges as CoreEdges, Range as CoreRange, Table as CoreTable};
+use surrealdb_core::sql::{
+	Edges as CoreEdges, IdRange as CoreIdRange, Table as CoreTable, Thing as CoreThing,
+	Value as CoreValue,
+};
 
 /// A wrapper type to assert that you ment to use a string as a table name.
 ///
@@ -30,12 +33,11 @@ where
 		KeyRange: From<R>,
 	{
 		let range = KeyRange::from(range);
-		let res = CoreRange::new(
-			self.0.into(),
-			range.start.map(RecordIdKey::into_inner),
-			range.end.map(RecordIdKey::into_inner),
-		);
-
+		let res = CoreIdRange {
+			beg: range.start.map(RecordIdKey::into_inner),
+			end: range.end.map(RecordIdKey::into_inner),
+		};
+		let res = CoreThing::from((self.0.into(), res));
 		QueryRange(res)
 	}
 }
@@ -43,7 +45,7 @@ where
 transparent_wrapper!(
 	/// A table range.
 	#[derive( Clone, PartialEq)]
-	pub struct QueryRange(CoreRange)
+	pub struct QueryRange(CoreThing)
 );
 
 transparent_wrapper!(
@@ -86,7 +88,7 @@ impl Resource {
 	}
 
 	#[cfg(feature = "protocol-ws")]
-	pub(crate) fn into_core_value(self) -> surrealdb_core::sql::Value {
+	pub(crate) fn into_core_value(self) -> CoreValue {
 		match self {
 			Resource::Table(x) => Table(x).into_core().into(),
 			Resource::RecordId(x) => x.into_inner().into(),

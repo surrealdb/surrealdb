@@ -30,6 +30,7 @@ pub enum Kind {
 	Set(Box<Kind>, Option<u64>),
 	Array(Box<Kind>, Option<u64>),
 	Function(Option<Vec<Kind>>, Option<Box<Kind>>),
+	Range,
 }
 
 impl Default for Kind {
@@ -73,7 +74,8 @@ impl Kind {
 				| Kind::Uuid
 				| Kind::Record(_)
 				| Kind::Geometry(_)
-				| Kind::Function(_, _) => return None,
+				| Kind::Function(_, _)
+				| Kind::Range => return None,
 				Kind::Option(x) => {
 					this = x;
 				}
@@ -137,6 +139,7 @@ impl Display for Kind {
 				(k, Some(l)) => write!(f, "array<{k}, {l}>"),
 			},
 			Kind::Either(k) => write!(f, "{}", Fmt::verbar_separated(k)),
+			Kind::Range => f.write_str("range"),
 		}
 	}
 }

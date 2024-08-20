@@ -1,3 +1,4 @@
+use super::Range;
 use crate::cnf::ID_CHARS;
 use crate::ctx::Context;
 use crate::dbs::Options;
@@ -6,12 +7,16 @@ use crate::err::Error;
 use crate::sql::{escape::escape_rid, Array, Number, Object, Strand, Thing, Uuid, Value};
 use derive::Key;
 use nanoid::nanoid;
+use range::IdRange;
 use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fmt::{self, Display, Formatter};
+use std::ops::{Bound, Deref};
 use ulid::Ulid;
+
+pub mod range;
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize, Hash)]
@@ -33,6 +38,7 @@ pub enum Id {
 	Array(Array),
 	Object(Object),
 	Generate(Gen),
+	Range(Box<IdRange>),
 }
 
 impl From<i64> for Id {
@@ -97,25 +103,25 @@ impl From<&String> for Id {
 
 impl From<Vec<&str>> for Id {
 	fn from(v: Vec<&str>) -> Self {
-		Id::Array(v.into())
+		Self::Array(v.into())
 	}
 }
 
 impl From<Vec<String>> for Id {
 	fn from(v: Vec<String>) -> Self {
-		Id::Array(v.into())
+		Self::Array(v.into())
 	}
 }
 
 impl From<Vec<Value>> for Id {
 	fn from(v: Vec<Value>) -> Self {
-		Id::Array(v.into())
+		Self::Array(v.into())
 	}
 }
 
 impl From<BTreeMap<String, Value>> for Id {
 	fn from(v: BTreeMap<String, Value>) -> Self {
-		Id::Object(v.into())
+		Self::Object(v.into())
 	}
 }
 
@@ -125,6 +131,42 @@ impl From<Number> for Id {
 			Number::Int(v) => v.into(),
 			Number::Float(v) => v.to_string().into(),
 			Number::Decimal(v) => v.to_string().into(),
+		}
+	}
+}
+
+impl From<IdRange> for Id {
+	fn from(v: IdRange) -> Self {
+		Self::Range(Box::new(v))
+	}
+}
+
+impl TryFrom<(Bound<Id>, Bound<Id>)> for Id {
+	type Error = Error;
+	fn try_from(v: (Bound<Id>, Bound<Id>)) -> Result<Self, Self::Error> {
+		Ok(Self::Range(Box::new(v.try_into()?)))
+	}
+}
+
+impl TryFrom<Range> for Id {
+	type Error = Error;
+	fn try_from(v: Range) -> Result<Self, Self::Error> {
+		Ok(Id::Range(Box::new(v.try_into()?)))
+	}
+}
+
+impl TryFrom<Value> for Id {
+	type Error = Error;
+	fn try_from(v: Value) -> Result<Self, Self::Error> {
+		match v {
+			Value::Number(Number::Int(v)) => Ok(v.into()),
+			Value::Strand(v) => Ok(v.into()),
+			Value::Array(v) => Ok(v.into()),
+			Value::Object(v) => Ok(v.into()),
+			Value::Range(v) => v.deref().to_owned().try_into(),
+			v => Err(Error::IdInvalid {
+				value: v.kindof().to_string(),
+			}),
 		}
 	}
 }
@@ -160,6 +202,7 @@ impl Id {
 				Gen::Ulid => "ulid()".to_string(),
 				Gen::Uuid => "uuid()".to_string(),
 			},
+			Self::Range(v) => v.to_string(),
 		}
 	}
 }
@@ -176,6 +219,7 @@ impl Display for Id {
 				Gen::Ulid => Display::fmt("ulid()", f),
 				Gen::Uuid => Display::fmt("uuid()", f),
 			},
+			Self::Range(v) => Display::fmt(v, f),
 		}
 	}
 }
@@ -205,6 +249,7 @@ impl Id {
 				Gen::Ulid => Ok(Self::ulid()),
 				Gen::Uuid => Ok(Self::uuid()),
 			},
+			Id::Range(v) => Ok(Id::Range(Box::new(v.compute(stk, ctx, opt, doc).await?))),
 		}
 	}
 }
