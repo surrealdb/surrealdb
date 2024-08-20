@@ -739,7 +739,7 @@ async fn define_statement_index_multiple() -> Result<(), Error> {
 			events: {},
 			fields: {},
 			tables: {},
-			indexes: { test: {sql: 'DEFINE INDEX test ON user FIELDS account, email' } },
+			indexes: { test: 'DEFINE INDEX test ON user FIELDS account, email' },
 			lives: {},
 		}",
 	)?;
@@ -813,7 +813,7 @@ async fn define_statement_index_multiple_unique() -> Result<(), Error> {
 			events: {},
 			fields: {},
 			tables: {},
-			indexes: { test: {sql: 'DEFINE INDEX test ON user FIELDS account, email UNIQUE' } },
+			indexes: { test: 'DEFINE INDEX test ON user FIELDS account, email UNIQUE' },
 			lives: {},
 		}",
 	)?;
@@ -995,7 +995,7 @@ async fn define_statement_index_multiple_hnsw() -> Result<(), Error> {
 			fields: {},
 			tables: {},
 			indexes: {
-				hnsw_pts: {sql: 'DEFINE INDEX hnsw_pts ON pts FIELDS point HNSW DIMENSION 4 DIST EUCLIDEAN TYPE F32 EFC 500 M 12 M0 24 LM 0.40242960438184466f' }
+				hnsw_pts: 'DEFINE INDEX hnsw_pts ON pts FIELDS point HNSW DIMENSION 4 DIST EUCLIDEAN TYPE F32 EFC 500 M 12 M0 24 LM 0.40242960438184466f'
 			},
 			lives: {},
 		}",
