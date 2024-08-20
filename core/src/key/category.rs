@@ -127,12 +127,12 @@ pub enum Category {
 	/// crate::key::index::he                /*{ns}*{db}*{tb}+{ix}!he{id}
 	IndexHnswElements,
 	/// crate::key::index::hd                /*{ns}*{db}*{tb}+{ix}!hd{id}
-	IndexHnswDodIds,
+	IndexHnswDocIds,
 	/// crate::key::index::hi               /*{ns}*{db}*{tb}+{ix}!hi{id}
 	IndexHnswThings,
 	/// crate::key::index::hv                /*{ns}*{db}*{tb}+{ix}!hv{vec}
 	IndexHnswVec,
-	// 	crate::key::index                    /*{ns}*{db}*{tb}+{ix}*{fd}{id}
+	/// crate::key::index                    /*{ns}*{db}*{tb}+{ix}*{fd}{id}
 	Index,
 	///
 	/// ------------------------------
