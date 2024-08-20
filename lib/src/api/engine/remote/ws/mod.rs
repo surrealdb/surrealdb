@@ -17,10 +17,7 @@ use indexmap::IndexMap;
 use std::collections::HashMap;
 use std::marker::PhantomData;
 use std::time::Duration;
-use surrealdb_core::{
-	dbs::{self, Status},
-	sql::Value as CoreValue,
-};
+use surrealdb_core::sql::Value as CoreValue;
 use trice::Instant;
 use uuid::Uuid;
 

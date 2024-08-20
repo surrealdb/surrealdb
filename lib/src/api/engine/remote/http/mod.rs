@@ -13,8 +13,8 @@ use crate::headers::AUTH_DB;
 use crate::headers::AUTH_NS;
 use crate::headers::DB;
 use crate::headers::NS;
-use crate::method::Query;
 use crate::opt::IntoEndpoint;
+use crate::Value;
 use futures::TryStreamExt;
 use indexmap::IndexMap;
 use reqwest::header::HeaderMap;
@@ -26,8 +26,8 @@ use serde::Deserialize;
 use serde::Serialize;
 use std::marker::PhantomData;
 use surrealdb_core::sql::{
-	from_value as from_core_value, statements::OutputStatement, Param, Query, Statement,
-	Value as CoreValue,
+	from_value as from_core_value, statements::OutputStatement, Object as CoreObject, Param, Query,
+	Statement, Value as CoreValue,
 };
 use url::Url;
 
@@ -41,6 +41,11 @@ use tokio::io;
 use tokio_util::compat::FuturesAsyncReadCompatExt;
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen_futures::spawn_local;
+
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) mod native;
+#[cfg(target_arch = "wasm32")]
+pub(crate) mod wasm;
 
 // const SQL_PATH: &str = "sql";
 const RPC_PATH: &str = "rpc";
@@ -247,7 +252,7 @@ async fn import(request: RequestBuilder, path: PathBuf) -> Result<()> {
 	Ok(())
 }
 
-pub(crate) async fn health(request: RequestBuilder) -> Result<Value> {
+pub(crate) async fn health(request: RequestBuilder) -> Result<()> {
 	request.send().await?.error_for_status()?;
 	Ok(())
 }
@@ -266,7 +271,7 @@ async fn send_request(
 	let bytes = response.bytes().await?;
 
 	let response: Response = deserialize(&bytes, false)?;
-	DbResponse::from(response.result)
+	DbResponse::from_server_result(response.result)
 }
 
 fn flatten_dbresponse_array(res: DbResponse) -> DbResponse {
@@ -315,13 +320,13 @@ async fn router(
 			let out = send_request(req, base_url, client, headers, auth).await?;
 			if let Some(ns) = namespace {
 				let value =
-					HeaderValue::try_from(ns).map_err(|_| Error::InvalidNsName(ns.to_owned()))?;
-				headers.insert(&NS, value)
+					HeaderValue::try_from(&ns).map_err(|_| Error::InvalidNsName(ns.to_owned()))?;
+				headers.insert(&NS, value);
 			};
 			if let Some(db) = database {
 				let value =
-					HeaderValue::try_from(db).map_err(|_| Error::InvalidDbName(db.to_owned()))?;
-				headers.insert(&DB, value)
+					HeaderValue::try_from(&db).map_err(|_| Error::InvalidDbName(db.to_owned()))?;
+				headers.insert(&DB, value);
 			};
 
 			Ok(out)
@@ -340,7 +345,8 @@ async fn router(
 			else {
 				return Err(Error::InternalError(
 					"recieved invalid result from server".to_string(),
-				));
+				)
+				.into());
 			};
 
 			if let Ok(Credentials {
@@ -388,12 +394,13 @@ async fn router(
 			value,
 		} => {
 			let mut output_stmt = OutputStatement::default();
-			output_stmt.what = CoreValue::Param(Param::from(key));
+			output_stmt.what = CoreValue::Param(Param::from(key.clone()));
 			let query = Query::from(Statement::Output(output_stmt));
-
+			let mut variables = CoreObject::default();
+			variables.insert(key.clone(), value);
 			let req = Command::Query {
 				query,
-				variables: [(key.clone(), value)].into(),
+				variables,
 			}
 			.into_router_request(None)
 			.expect("query is valid request");
@@ -402,12 +409,12 @@ async fn router(
 			else {
 				return Err(Error::InternalError(
 					"recieved invalid result from server".to_string(),
-				));
+				)
+				.into());
 			};
 
-			let val: CoreValue = res.take(0)?;
-
-			vars.insert(key, val);
+			let val: Value = res.take(0)?;
+			vars.insert(key, val.0);
 			Ok(DbResponse::Other(CoreValue::None))
 		}
 		Command::Unset {
