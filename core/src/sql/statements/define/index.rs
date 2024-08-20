@@ -148,7 +148,7 @@ impl Display for DefineIndexStatement {
 		if let Some(ref v) = self.comment {
 			write!(f, " COMMENT {v}")?
 		}
-		if self.overwrite {
+		if self.concurrently {
 			write!(f, " CONCURRENTLY")?
 		}
 		Ok(())
