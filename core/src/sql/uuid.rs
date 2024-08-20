@@ -11,7 +11,9 @@ use super::Datetime;
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Uuid";
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Copy, Debug, Default, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[derive(
+	Clone, Copy, Debug, Default, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize, Hash,
+)]
 #[serde(rename = "$surrealdb::private::sql::Uuid")]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
