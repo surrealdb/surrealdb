@@ -1410,7 +1410,7 @@ fn parse_define_table() {
 			comment: None,
 			if_not_exists: false,
 			overwrite: false,
-			kind: TableType::Any,
+			kind: TableType::Normal,
 		}))
 	);
 }
