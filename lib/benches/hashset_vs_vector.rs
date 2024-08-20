@@ -19,7 +19,7 @@ fn bench_hashset(samples_vec: &Vec<Vec<u64>>) {
 
 fn bench_hashbrown(samples_vec: &Vec<Vec<u64>>) {
 	for samples in samples_vec {
-		let mut h = AHashSet::<u64>::with_capacity(samples.len());
+		let mut h = AHashSet::with_capacity(samples.len());
 		for &s in samples {
 			h.insert(s);
 		}
@@ -48,7 +48,7 @@ fn bench_vector(samples_vec: &Vec<Vec<u64>>) {
 
 fn bench_array<const N: usize>(samples_vec: &Vec<Vec<u64>>) {
 	for samples in samples_vec {
-		let mut v = ArraySet::<u64, N>::with_capacity(samples.len());
+		let mut v = ArraySet::<N>::with_capacity(samples.len());
 		for &s in samples {
 			v.insert(s);
 		}
