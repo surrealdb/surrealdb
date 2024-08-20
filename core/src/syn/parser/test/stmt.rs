@@ -1664,7 +1664,7 @@ fn parse_delete_2() {
 					dir: Dir::Out,
 					from: Thing {
 						tb: "a".to_owned(),
-						id: Id::String("b".to_owned()),
+						id: Id::from("b"),
 					},
 					what: Tables::default(),
 				}))),
@@ -1867,7 +1867,7 @@ SELECT bar as foo,[1,2],bar OMIT bar FROM ONLY a,1
 			}])),
 			limit: Some(Limit(Value::Thing(Thing {
 				tb: "a".to_owned(),
-				id: Id::String("b".to_owned()),
+				id: Id::from("b"),
 			}))),
 			start: Some(Start(Value::Object(Object(
 				[("a".to_owned(), Value::Bool(true))].into_iter().collect()
@@ -2191,7 +2191,7 @@ fn parse_relate() {
 			only: true,
 			kind: Value::Thing(Thing {
 				tb: "a".to_owned(),
-				id: Id::String("b".to_owned()),
+				id: Id::from("b"),
 			}),
 			from: Value::Array(Array(vec![
 				Value::Number(Number::Int(1)),

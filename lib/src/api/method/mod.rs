@@ -12,6 +12,7 @@ use crate::api::Surreal;
 use crate::opt::IntoExportDestination;
 use crate::opt::WaitFor;
 use crate::sql::to_value;
+use run::IntoArgs;
 use serde::Serialize;
 use std::borrow::Cow;
 use std::marker::PhantomData;
@@ -38,6 +39,7 @@ mod insert;
 mod invalidate;
 mod merge;
 mod patch;
+mod run;
 mod select;
 mod set;
 mod signin;
@@ -75,6 +77,8 @@ pub use merge::Merge;
 pub use patch::Patch;
 pub use query::Query;
 pub use query::QueryStream;
+use run::IntoFn;
+pub use run::Run;
 pub use select::Select;
 use serde_content::Serializer;
 pub use set::Set;
@@ -1219,6 +1223,39 @@ where
 	pub fn version(&self) -> Version<C> {
 		Version {
 			client: Cow::Borrowed(self),
+		}
+	}
+
+	/// Runs a function
+	///
+	/// # Examples
+	///
+	/// ```no_run
+	/// # #[tokio::main]
+	/// # async fn main() -> surrealdb::Result<()> {
+	/// # let db = surrealdb::engine::any::connect("mem://").await?;
+	/// // specify no args with an empty tuple, vec, or slice
+	/// let foo = db.run("fn::foo", ()).await?; // fn::foo()
+	/// // a single value will be turned into one arguement unless it is a tuple or vec
+	/// let bar = db.run("fn::bar", 42).await?; // fn::bar(42)
+	/// // to specify a single arguement, which is an array turn it into a value, or wrap in a singleton tuple
+	/// let count = db.run("count", Value::from(vec![1,2,3])).await?;
+	/// let count = db.run("count", (vec![1,2,3],)).await?;
+	/// // specify multiple args with either a tuple or vec
+	/// let two = db.run("math::log", (100, 10)).await?; // math::log(100, 10)
+	/// let two = db.run("math::log", [100, 10]).await?; // math::log(100, 10)
+	///
+	/// # Ok(())
+	/// # }
+	/// ```
+	///
+	pub fn run(&self, name: impl IntoFn, args: impl IntoArgs) -> Run<C> {
+		let (name, version) = name.into_fn();
+		Run {
+			client: Cow::Borrowed(self),
+			name,
+			version,
+			args: args.into_args(),
 		}
 	}
 

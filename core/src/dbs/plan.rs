@@ -105,9 +105,9 @@ impl ExplainItem {
 				name: "Iterate Defer".into(),
 				details: vec![("thing", Value::Thing(t.to_owned()))],
 			},
-			Iterable::Range(r) => Self {
+			Iterable::TableRange(tb, r) => Self {
 				name: "Iterate Range".into(),
-				details: vec![("table", Value::from(r.tb.to_owned()))],
+				details: vec![("table", tb.to_owned().into()), ("range", r.to_owned().into())],
 			},
 			Iterable::Edges(e) => Self {
 				name: "Iterate Edges".into(),

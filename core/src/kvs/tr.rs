@@ -6,6 +6,7 @@ use crate::dbs::node::Timestamp;
 use crate::doc::CursorValue;
 use crate::err::Error;
 use crate::idg::u32::U32;
+#[cfg(debug_assertions)]
 use crate::key::debug::Sprintable;
 use crate::kvs::batch::Batch;
 use crate::kvs::clock::SizedClock;

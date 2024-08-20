@@ -59,6 +59,9 @@ use surrealdb_core::{
 use crate::api::err::Error;
 #[cfg(not(target_arch = "wasm32"))]
 use std::path::PathBuf;
+use surrealdb_core::sql::Function;
+#[cfg(feature = "ml")]
+use surrealdb_core::sql::Model;
 #[cfg(not(target_arch = "wasm32"))]
 use tokio::{
 	fs::OpenOptions,
@@ -169,6 +172,7 @@ pub struct Mem;
 #[cfg(feature = "kv-rocksdb")]
 #[cfg_attr(docsrs, doc(cfg(feature = "kv-rocksdb")))]
 #[derive(Debug)]
+#[deprecated]
 pub struct File;
 
 /// RocksDB database
@@ -549,7 +553,7 @@ async fn router(
 			data,
 		} => {
 			let mut query = Query::default();
-			let one = what.is_thing();
+			let one = what.is_thing_single();
 			let statement = {
 				let mut stmt = UpsertStatement::default();
 				stmt.what = value_to_values(what);
@@ -567,7 +571,7 @@ async fn router(
 			data,
 		} => {
 			let mut query = Query::default();
-			let one = what.is_thing();
+			let one = what.is_thing_single();
 			let statement = {
 				let mut stmt = UpdateStatement::default();
 				stmt.what = value_to_values(what);
@@ -603,7 +607,7 @@ async fn router(
 			data,
 		} => {
 			let mut query = Query::default();
-			let one = what.is_thing();
+			let one = what.is_thing_single();
 			let statement = {
 				let mut stmt = UpdateStatement::default();
 				stmt.what = value_to_values(what);
@@ -621,7 +625,7 @@ async fn router(
 			data,
 		} => {
 			let mut query = Query::default();
-			let one = what.is_thing();
+			let one = what.is_thing_single();
 			let statement = {
 				let mut stmt = UpdateStatement::default();
 				stmt.what = value_to_values(what);
@@ -638,7 +642,7 @@ async fn router(
 			what,
 		} => {
 			let mut query = Query::default();
-			let one = what.is_thing();
+			let one = what.is_thing_single();
 			let statement = {
 				let mut stmt = SelectStatement::default();
 				stmt.what = value_to_values(what);
@@ -654,7 +658,7 @@ async fn router(
 			what,
 		} => {
 			let mut query = Query::default();
-			let one = what.is_thing();
+			let one = what.is_thing_single();
 			let statement = {
 				let mut stmt = DeleteStatement::default();
 				stmt.what = value_to_values(what);
@@ -978,6 +982,35 @@ async fn router(
 		} => {
 			live_queries.remove(&uuid.into());
 			let value = kill_live_query(kvs, uuid.into(), session, vars.clone()).await?;
+			Ok(DbResponse::Other(value))
+		}
+
+		Command::Run {
+			name,
+			version: _version,
+			args,
+		} => {
+			let func: Value = match &name[0..4] {
+				"fn::" => Function::Custom(name.chars().skip(4).collect(), args.0).into(),
+				// should return error, but can't on wasm
+				#[cfg(feature = "ml")]
+				"ml::" => {
+					let mut tmp = Model::default();
+
+					tmp.name = name.chars().skip(4).collect();
+					tmp.args = args.0;
+					tmp.version = _version
+						.ok_or(Error::Query("ML functions must have a version".to_string()))?;
+					tmp
+				}
+				.into(),
+				_ => Function::Normal(name, args.0).into(),
+			};
+			let stmt = Statement::Value(func);
+
+			let response = kvs.process(stmt.into(), &*session, Some(vars.clone())).await?;
+			let value = take(true, response).await?;
+
 			Ok(DbResponse::Other(value))
 		}
 	}

@@ -4,8 +4,8 @@ use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::idx::planner::QueryPlanner;
 use crate::sql::{
-	Cond, Explain, Fetchs, Field, Fields, Groups, Idioms, Limit, Orders, Splits, Start, Timeout,
-	Value, Values, Version, With,
+	Cond, Explain, Fetchs, Field, Fields, Groups, Id, Idioms, Limit, Orders, Splits, Start,
+	Timeout, Value, Values, Version, With,
 };
 use derive::Store;
 use reblessive::tree::Stk;
@@ -102,14 +102,10 @@ impl SelectStatement {
 
 					planner.add_iterables(stk, ctx, t, &mut i).await?;
 				}
-				Value::Thing(v) => i.ingest(Iterable::Thing(v)),
-				Value::Range(v) => {
-					if self.only && !limit_is_one_or_zero {
-						return Err(Error::SingleOnlyOutput);
-					}
-
-					i.ingest(Iterable::Range(*v))
-				}
+				Value::Thing(v) => match &v.id {
+					Id::Range(r) => i.ingest(Iterable::TableRange(v.tb, *r.to_owned())),
+					_ => i.ingest(Iterable::Thing(v)),
+				},
 				Value::Edges(v) => {
 					if self.only && !limit_is_one_or_zero {
 						return Err(Error::SingleOnlyOutput);
