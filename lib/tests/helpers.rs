@@ -258,7 +258,6 @@ impl Test {
 		Self::with_ds(new_ds().await?, sql).await
 	}
 
-	#[allow(dead_code)]
 	/// Simulates restarting the Datastore
 	/// - Data are persistent (including memory store)
 	/// - Flushing caches (jwks, IndexStore, ...)
