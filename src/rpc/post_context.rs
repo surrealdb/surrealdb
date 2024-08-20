@@ -2,14 +2,8 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use crate::cnf::{PKG_NAME, PKG_VERSION};
-use surrealdb::rpc::Data;
-use surrealdb::rpc::RpcContext;
-use surrealdb::rpc::RpcError;
-use surrealdb_core::dbs::Session;
 use surrealdb_core::dbs::Session;
 use surrealdb_core::kvs::Datastore;
-use surrealdb_core::kvs::Datastore;
-use surrealdb_core::rpc::args::Take;
 use surrealdb_core::rpc::Data;
 use surrealdb_core::rpc::RpcContext;
 use surrealdb_core::rpc::RpcError;
