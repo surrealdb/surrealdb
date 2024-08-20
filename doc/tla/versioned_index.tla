@@ -88,6 +88,7 @@ Next ==
 Invariant ==
   /\ \A n \in Nodes: localVersion[n] >= remoteVersion
   /\ \A c \in Clients: clientVersion[c] <= remoteVersion
+  /\ \A n \in Nodes: localIndex[n] <= remoteIndex
 
 ====
 
