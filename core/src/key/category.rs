@@ -124,6 +124,14 @@ pub enum Category {
 	IndexBTreeNodeTerms,
 	/// crate::key::index::bu                /*{ns}*{db}*{tb}+{ix}!bu{id}
 	IndexTerms,
+	/// crate::key::index::he                /*{ns}*{db}*{tb}+{ix}!he{id}
+	IndexHnswElements,
+	/// crate::key::index::hd                /*{ns}*{db}*{tb}+{ix}!hd{id}
+	IndexHnswDocIds,
+	/// crate::key::index::hi               /*{ns}*{db}*{tb}+{ix}!hi{id}
+	IndexHnswThings,
+	/// crate::key::index::hv                /*{ns}*{db}*{tb}+{ix}!hv{vec}
+	IndexHnswVec,
 	/// crate::key::index                    /*{ns}*{db}*{tb}+{ix}*{fd}{id}
 	Index,
 	///
@@ -194,6 +202,10 @@ impl Display for Category {
 			Self::IndexFullTextState => "IndexFullTextState",
 			Self::IndexBTreeNodeTerms => "IndexBTreeNodeTerms",
 			Self::IndexTerms => "IndexTerms",
+			Self::IndexHnswElements => "IndexHnswElements",
+			Self::IndexHnswDocIds => "IndexHnswDocIds",
+			Self::IndexHnswThings => "IndexHnswThings",
+			Self::IndexHnswVec => "IndexHnswVec",
 			Self::Index => "Index",
 			Self::ChangeFeed => "ChangeFeed",
 			Self::Thing => "Thing",

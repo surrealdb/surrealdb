@@ -2,7 +2,7 @@ use criterion::measurement::WallTime;
 use criterion::{criterion_group, criterion_main, BenchmarkGroup, Criterion, Throughput};
 use std::collections::HashSet;
 use std::time::{Duration, SystemTime};
-use surrealdb_core::idx::trees::dynamicset::{ArraySet, DynamicSet, HashBrownSet};
+use surrealdb_core::idx::trees::dynamicset::{AHashSet, ArraySet, DynamicSet};
 
 fn bench_hashset(samples_vec: &Vec<Vec<u64>>) {
 	for samples in samples_vec {
@@ -19,7 +19,7 @@ fn bench_hashset(samples_vec: &Vec<Vec<u64>>) {
 
 fn bench_hashbrown(samples_vec: &Vec<Vec<u64>>) {
 	for samples in samples_vec {
-		let mut h = HashBrownSet::<u64>::with_capacity(samples.len());
+		let mut h = AHashSet::<u64>::with_capacity(samples.len());
 		for &s in samples {
 			h.insert(s);
 		}

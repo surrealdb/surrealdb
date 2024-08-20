@@ -1,11 +1,11 @@
-use super::escape::escape_rid;
 use super::Range;
 use crate::cnf::ID_CHARS;
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::sql::{Array, Number, Object, Strand, Thing, Uuid, Value};
+use crate::sql::{escape::escape_rid, Array, Number, Object, Strand, Thing, Uuid, Value};
+use derive::Key;
 use nanoid::nanoid;
 use range::IdRange;
 use reblessive::tree::Stk;
@@ -29,7 +29,7 @@ pub enum Gen {
 }
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize, Key, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub enum Id {

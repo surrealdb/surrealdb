@@ -1,15 +1,19 @@
 use criterion::measurement::WallTime;
 use criterion::{criterion_group, criterion_main, BenchmarkGroup, Criterion, Throughput};
 use flate2::read::GzDecoder;
+use futures::executor::block_on;
 use reblessive::TreeStack;
 use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::time::Duration;
 use surrealdb::sql::index::Distance;
 use surrealdb_core::dbs::Session;
-use surrealdb_core::idx::planner::checker::HnswConditionChecker;
+use surrealdb_core::idx::planner::checker::{HnswChecker, HnswConditionChecker};
 use surrealdb_core::idx::trees::hnsw::index::HnswIndex;
-use surrealdb_core::kvs::Datastore;
+use surrealdb_core::idx::IndexKeyBase;
+use surrealdb_core::kvs::LockType::Optimistic;
+use surrealdb_core::kvs::TransactionType::{Read, Write};
+use surrealdb_core::kvs::{Datastore, Transaction};
 use surrealdb_core::sql::index::{HnswParams, VectorType};
 use surrealdb_core::sql::{value, Array, Id, Number, Thing, Value};
 use tokio::runtime::{Builder, Runtime};
@@ -38,13 +42,13 @@ fn bench_hnsw_no_db(c: &mut Criterion) {
 		let mut group = get_group(c, GROUP_NAME, samples.len(), 10);
 		let id = format!("insert len: {}", samples.len());
 		group.bench_function(id, |b| {
-			b.iter(|| insert_objects(&samples));
+			b.to_async(Runtime::new().unwrap()).iter(|| insert_objects(&samples));
 		});
 		group.finish();
 	}
 
 	// Create an HNSW instance with data
-	let hnsw = insert_objects(&samples);
+	let (ds, hnsw) = block_on(insert_objects(&samples));
 
 	let samples = new_vectors_from_file(QUERYING_SOURCE);
 	let samples: Vec<Vec<Number>> =
@@ -55,7 +59,7 @@ fn bench_hnsw_no_db(c: &mut Criterion) {
 		let mut group = get_group(c, GROUP_NAME, samples.len(), 10);
 		let id = format!("lookup len: {}", samples.len());
 		group.bench_function(id, |b| {
-			b.to_async(Runtime::new().unwrap()).iter(|| knn_lookup_objects(&hnsw, &samples));
+			b.to_async(Runtime::new().unwrap()).iter(|| knn_lookup_objects(&ds, &hnsw, &samples));
 		});
 		group.finish();
 	}
@@ -74,7 +78,6 @@ fn bench_hnsw_with_db(c: &mut Criterion) {
 	{
 		let mut group = get_group(c, GROUP_NAME, samples.len(), 10);
 		let id = format!("insert len: {}", samples.len());
-
 		group.bench_function(id, |b| {
 			b.to_async(Runtime::new().unwrap()).iter(|| insert_objects_db(session, true, &samples));
 		});
@@ -200,7 +203,7 @@ async fn init_datastore(session: &Session, with_index: bool) -> Datastore {
 	ds
 }
 
-fn hnsw() -> HnswIndex {
+async fn hnsw(tx: &Transaction) -> HnswIndex {
 	let p = HnswParams::new(
 		DIMENSION,
 		Distance::Euclidean,
@@ -212,15 +215,18 @@ fn hnsw() -> HnswIndex {
 		false,
 		false,
 	);
-	HnswIndex::new(&p)
+	HnswIndex::new(tx, IndexKeyBase::default(), "test".to_string(), &p).await.unwrap()
 }
 
-fn insert_objects(samples: &[(Thing, Vec<Value>)]) -> HnswIndex {
-	let mut h = hnsw();
-	for (id, content) in samples {
-		h.index_document(id, content).unwrap();
+async fn insert_objects(samples: &[(Thing, Vec<Value>)]) -> (Datastore, HnswIndex) {
+	let ds = Datastore::new("memory").await.unwrap();
+	let tx = ds.transaction(Write, Optimistic).await.unwrap();
+	let mut h = hnsw(&tx).await;
+	for (thg, content) in samples {
+		h.index_document(&tx, thg.id.clone(), content).await.unwrap();
 	}
-	h
+	tx.commit().await.unwrap();
+	(ds, h)
 }
 
 async fn insert_objects_db(session: &Session, create_index: bool, inserts: &[String]) -> Datastore {
@@ -231,13 +237,21 @@ async fn insert_objects_db(session: &Session, create_index: bool, inserts: &[Str
 	ds
 }
 
-async fn knn_lookup_objects(h: &HnswIndex, samples: &[Vec<Number>]) {
+async fn knn_lookup_objects(ds: &Datastore, h: &HnswIndex, samples: &[Vec<Number>]) {
 	let mut stack = TreeStack::new();
 	stack
 		.enter(|stk| async {
+			let tx = ds.transaction(Read, Optimistic).await.unwrap();
 			for v in samples {
 				let r = h
-					.knn_search(v, NN, EF_SEARCH, stk, HnswConditionChecker::default())
+					.knn_search(
+						&tx,
+						stk,
+						v,
+						NN,
+						EF_SEARCH,
+						HnswConditionChecker::Hnsw(HnswChecker {}),
+					)
 					.await
 					.unwrap();
 				assert_eq!(r.len(), NN);

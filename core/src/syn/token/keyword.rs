@@ -52,6 +52,7 @@ keyword! {
 	Class => "CLASS",
 	Comment => "COMMENT",
 	Commit => "COMMIT",
+	Concurrently => "CONCURRENTLY",
 	Content => "CONTENT",
 	Continue => "CONTINUE",
 	Create => "CREATE",

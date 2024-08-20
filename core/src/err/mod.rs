@@ -933,6 +933,12 @@ pub enum Error {
 		db: String,
 	},
 
+	/// A database index entry for the specified table is already building
+	#[error("Database index `{index}` is currently building")]
+	IndexAlreadyBuilding {
+		index: String,
+	},
+
 	/// The session has expired either because the token used
 	/// to establish it has expired or because an expiration
 	/// was explicitly defined when establishing it

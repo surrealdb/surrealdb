@@ -343,6 +343,7 @@ fn statements() -> Vec<Statement> {
 			comment: None,
 			if_not_exists: false,
 			overwrite: false,
+			concurrently: false,
 		})),
 		Statement::Define(DefineStatement::Index(DefineIndexStatement {
 			name: Ident("index".to_owned()),
@@ -352,6 +353,7 @@ fn statements() -> Vec<Statement> {
 			comment: None,
 			if_not_exists: false,
 			overwrite: false,
+			concurrently: false,
 		})),
 		Statement::Define(DefineStatement::Index(DefineIndexStatement {
 			name: Ident("index".to_owned()),
@@ -370,6 +372,7 @@ fn statements() -> Vec<Statement> {
 			comment: None,
 			if_not_exists: false,
 			overwrite: false,
+			concurrently: false,
 		})),
 		Statement::Define(DefineStatement::Analyzer(DefineAnalyzerStatement {
 			name: Ident("ana".to_owned()),

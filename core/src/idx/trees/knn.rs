@@ -5,7 +5,9 @@ use crate::idx::trees::store::NodeId;
 #[cfg(debug_assertions)]
 use ahash::HashMap;
 use ahash::{HashSet, HashSetExt};
+use revision::revisioned;
 use roaring::RoaringTreemap;
+use serde::{Deserialize, Serialize};
 use std::cmp::{Ordering, Reverse};
 use std::collections::btree_map::Entry;
 use std::collections::{BTreeMap, VecDeque};
@@ -23,7 +25,7 @@ impl PriorityNode {
 	}
 }
 
-#[derive(Default, Clone)]
+#[derive(Default, Debug, Clone)]
 pub(super) struct DoublePriorityQueue(BTreeMap<FloatKey, VecDeque<ElementId>>, usize);
 
 impl DoublePriorityQueue {
@@ -86,6 +88,7 @@ impl DoublePriorityQueue {
 			(k, v)
 		})
 	}
+
 	pub(super) fn peek_last_dist(&self) -> Option<f64> {
 		self.0.last_key_value().map(|(k, _)| k.0)
 	}
@@ -124,7 +127,7 @@ impl DoublePriorityQueue {
 		s
 	}
 
-	pub(super) fn to_dynamic_set<S: DynamicSet<ElementId>>(&self, set: &mut S) {
+	pub(super) fn to_dynamic_set<S: DynamicSet>(&self, set: &mut S) {
 		for q in self.0.values() {
 			for v in q {
 				set.insert(*v);
@@ -175,8 +178,10 @@ impl Ord for FloatKey {
 /// When identifiers are added or removed, the method returned the most appropriate
 /// variant (if required).
 #[derive(Debug, Clone, PartialEq)]
+#[revisioned(revision = 1)]
+#[derive(Serialize, Deserialize)]
+#[non_exhaustive]
 pub(in crate::idx) enum Ids64 {
-	#[allow(dead_code)] // Will be used with HNSW
 	Empty,
 	One(u64),
 	Vec2([u64; 2]),
@@ -408,7 +413,6 @@ impl Ids64 {
 		}
 	}
 
-	#[allow(dead_code)] // Will be used with HNSW
 	pub(super) fn remove(&mut self, d: DocId) -> Option<Self> {
 		match self {
 			Self::Empty => None,
@@ -541,7 +545,7 @@ impl KnnResultBuilder {
 		true
 	}
 
-	pub(super) fn add(&mut self, dist: f64, docs: &Ids64) -> Ids64 {
+	pub(super) fn add(&mut self, dist: f64, docs: Ids64) -> Ids64 {
 		let pr = FloatKey(dist);
 		docs.append_to(&mut self.docs);
 		match self.priority_list.entry(pr) {
@@ -550,7 +554,7 @@ impl KnnResultBuilder {
 			}
 			Entry::Occupied(mut e) => {
 				let d = e.get_mut();
-				if let Some(n) = d.append_from(docs) {
+				if let Some(n) = d.append_from(&docs) {
 					e.insert(n);
 				}
 			}
@@ -815,10 +819,10 @@ pub(super) mod tests {
 	#[test]
 	fn knn_result_builder_test() {
 		let mut b = KnnResultBuilder::new(7);
-		b.add(0.0, &Ids64::One(5));
-		b.add(0.2, &Ids64::Vec3([0, 1, 2]));
-		b.add(0.2, &Ids64::One(3));
-		b.add(0.2, &Ids64::Vec2([6, 8]));
+		b.add(0.0, Ids64::One(5));
+		b.add(0.2, Ids64::Vec3([0, 1, 2]));
+		b.add(0.2, Ids64::One(3));
+		b.add(0.2, Ids64::Vec2([6, 8]));
 		let res = b.build(
 			#[cfg(debug_assertions)]
 			HashMap::default(),
