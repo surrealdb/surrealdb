@@ -1,13 +1,12 @@
-use super::{
-	deserialize, serialize, HandleResult, PendingRequest, ReplayMethod, RequestEffect, PATH,
-};
+use super::{HandleResult, PendingRequest, ReplayMethod, RequestEffect, PATH};
 use crate::api::conn::Route;
 use crate::api::conn::Router;
 use crate::api::conn::{Command, DbResponse};
 use crate::api::conn::{Connection, RequestData};
 use crate::api::engine::remote::ws::Client;
-use crate::api::engine::remote::ws::Response;
 use crate::api::engine::remote::ws::PING_INTERVAL;
+use crate::api::engine::remote::Response;
+use crate::api::engine::remote::{deserialize, serialize};
 use crate::api::err::Error;
 use crate::api::method::BoxFuture;
 use crate::api::opt::Endpoint;
@@ -17,7 +16,7 @@ use crate::api::ExtraFeatures;
 use crate::api::OnceLockExt;
 use crate::api::Result;
 use crate::api::Surreal;
-use crate::engine::remote::ws::Data;
+use crate::engine::remote::Data;
 use crate::engine::IntervalStream;
 use crate::opt::WaitFor;
 use crate::sql::Value;
@@ -267,6 +266,9 @@ async fn router_handle_response(
 	state: &mut RouterState,
 	endpoint: &Endpoint,
 ) -> HandleResult {
+	if let Message::Binary(b) = &response {
+		error!(?b);
+	}
 	match Response::try_from(&response, endpoint.supports_revision) {
 		Ok(option) => {
 			// We are only interested in responses that are not empty
