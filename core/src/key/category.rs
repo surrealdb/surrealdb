@@ -203,7 +203,7 @@ impl Display for Category {
 			Self::IndexBTreeNodeTerms => "IndexBTreeNodeTerms",
 			Self::IndexTerms => "IndexTerms",
 			Self::IndexHnswElements => "IndexHnswElements",
-			Self::IndexHnswDodIds => "IndexHnswDodIds",
+			Self::IndexHnswDocIds => "IndexHnswDocIds",
 			Self::IndexHnswThings => "IndexHnswThings",
 			Self::IndexHnswVec => "IndexHnswVec",
 			Self::Index => "Index",
