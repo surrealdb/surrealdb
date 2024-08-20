@@ -703,7 +703,7 @@ async fn define_statement_index_concurrently() -> Result<(), Error> {
 			fields: {},
 			tables: {},
 			indexes: {
-				test: 'DEFINE INDEX test ON user FIELDS email',
+				test: 'DEFINE INDEX test ON user FIELDS email CONCURRENTLY',
 			},
 			lives: {},
 		}",
