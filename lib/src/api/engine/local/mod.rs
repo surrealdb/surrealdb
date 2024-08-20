@@ -1008,22 +1008,30 @@ async fn router(
 			version: _version,
 			args,
 		} => {
-			let func: Value = match &name[0..4] {
-				"fn::" => Function::Custom(name.chars().skip(4).collect(), args.0).into(),
-				// should return error, but can't on wasm
+			let func: CoreValue = if let Some(name) = name.strip_prefix("fn::") {
+				Function::Custom(name.to_owned(), args.0).into()
+			} else if let Some(_name) = name.strip_prefix("ml::") {
 				#[cfg(feature = "ml")]
-				"ml::" => {
-					let mut tmp = Model::default();
+				{
+					let mut model = Model::default();
 
-					tmp.name = name.chars().skip(4).collect();
-					tmp.args = args.0;
-					tmp.version = _version
+					model.name = _name.to_owned();
+					model.args = args.0;
+					model.version = _version
 						.ok_or(Error::Query("ML functions must have a version".to_string()))?;
-					tmp
+					model.into()
 				}
-				.into(),
-				_ => Function::Normal(name, args.0).into(),
+				#[cfg(not(feature = "ml"))]
+				{
+					return Err(crate::error::Db::InvalidModel {
+						message: "Machine learning computation is not enabled.".to_owned(),
+					}
+					.into());
+				}
+			} else {
+				Function::Custom(name, args.0).into()
 			};
+
 			let stmt = Statement::Value(func);
 
 			let response = kvs.process(stmt.into(), &*session, Some(vars.clone())).await?;
