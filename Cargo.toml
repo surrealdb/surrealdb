@@ -28,7 +28,7 @@ jwks = ["surrealdb/jwks"]
 performance-profiler = ["dep:pprof"]
 # Special features
 storage-fdb-7_1 = ["surrealdb-core/kv-fdb-7_1"]
-storage-fdb-7_3 = ["surrealdb-core/kv-fdb-7_1"]
+storage-fdb-7_3 = ["surrealdb-core/kv-fdb-7_3"]
 
 [workspace]
 members = [
