@@ -6,18 +6,18 @@ use crate::err::Error;
 use crate::sql::value::Value;
 use reblessive::tree::Stk;
 
-impl<'a> Document<'a> {
+impl Document {
 	pub async fn relate(
 		&mut self,
 		stk: &mut Stk,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		opt: &Options,
 		stm: &Statement<'_>,
 	) -> Result<Value, Error> {
 		// Check if table has correct relation status
 		self.relation(ctx, opt, stm).await?;
 		// Check whether current record exists
-		match self.current.doc.is_some() {
+		match self.current.doc.as_ref().is_some() {
 			// We attempted to RELATE a document with an ID,
 			// and this ID already exists in the database,
 			// so we need to update the record instead.
@@ -33,14 +33,14 @@ impl<'a> Document<'a> {
 	async fn relate_create(
 		&mut self,
 		stk: &mut Stk,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		opt: &Options,
 		stm: &Statement<'_>,
 	) -> Result<Value, Error> {
-		// Store record edges
-		self.edges(ctx, opt, stm).await?;
 		// Alter record data
 		self.alter(stk, ctx, opt, stm).await?;
+		// Store record edges
+		self.edges(ctx, opt, stm).await?;
 		// Merge fields data
 		self.field(stk, ctx, opt, stm).await?;
 		// Reset fields data
@@ -69,7 +69,7 @@ impl<'a> Document<'a> {
 	async fn relate_update(
 		&mut self,
 		stk: &mut Stk,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		opt: &Options,
 		stm: &Statement<'_>,
 	) -> Result<Value, Error> {

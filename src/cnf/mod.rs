@@ -14,12 +14,12 @@ Y88b  d88P Y88b 888 888     888     Y8b.     888  888 888 888  .d88P 888   d88P
 
 ";
 
+#[cfg(debug_assertions)]
 pub const DEBUG_BUILD_WARNING: &str = "\
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│                        !!! THIS IS A DEBUG BUILD !!!                        │
-│        Debug builds are not intended for production use and include         │
-│       tooling and features that we would not recommend people run on        │
-│                                  live data.                                 │
+│                     !!! THIS IS A DEVELOPMENT BUILD !!!                     │
+│     Development builds are not intended for production use and include      │
+│    tooling and features that may affect the performance of the database.    |
 └─────────────────────────────────────────────────────────────────────────────┘";
 
 /// The publicly visible name of the server
@@ -66,3 +66,6 @@ pub static PKG_VERSION: Lazy<String> = Lazy::new(|| match option_env!("SURREAL_B
 	}
 	_ => env!("CARGO_PKG_VERSION").to_owned(),
 });
+
+pub static GRAPHQL_ENABLE: Lazy<bool> =
+	lazy_env_parse!("SURREAL_EXPERIMENTAL_GRAPHQL", bool, false);

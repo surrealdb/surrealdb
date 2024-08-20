@@ -32,8 +32,7 @@ impl ShowSince {
 	}
 }
 
-// ShowStatement is used to show changes in a table or database via
-// the SHOW CHANGES statement.
+/// A SHOW CHANGES statement for displaying changes made to a table or database.
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
@@ -48,33 +47,30 @@ impl ShowStatement {
 	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		opt: &Options,
-		_doc: Option<&CursorDoc<'_>>,
+		_doc: Option<&CursorDoc>,
 	) -> Result<Value, Error> {
-		// Selected DB?
+		// Allowed to run?
 		opt.is_allowed(Action::View, ResourceKind::Table, &Base::Db)?;
-		// Claim transaction
-		let mut run = ctx.tx_lock().await;
+		// Get the transaction
+		let txn = ctx.tx();
 		// Process the show query
-		let tb = self.table.as_deref();
 		let r = crate::cf::read(
-			&mut run,
+			&txn,
 			opt.ns()?,
 			opt.db()?,
-			tb.map(|x| x.as_str()),
+			self.table.as_deref().map(String::as_str),
 			self.since.clone(),
 			self.limit,
 		)
 		.await?;
 		// Return the changes
-		let mut a = Vec::<Value>::new();
+		let mut a: Vec<Value> = Vec::new();
 		for r in r.iter() {
-			let v: Value = r.clone().into_value();
-			a.push(v);
+			a.push(r.clone().into_value());
 		}
-		let v: Value = Value::Array(crate::sql::array::Array(a));
-		Ok(v)
+		Ok(a.into())
 	}
 }
 

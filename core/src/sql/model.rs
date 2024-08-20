@@ -27,8 +27,11 @@ use std::collections::HashMap;
 #[cfg(feature = "ml")]
 const ARGUMENTS: &str = "The model expects 1 argument. The argument can be either a number, an object, or an array of numbers.";
 
+pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Model";
+
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
+#[serde(rename = "$surrealdb::private::sql::Model")]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub struct Model {
@@ -55,9 +58,9 @@ impl Model {
 	pub(crate) async fn compute(
 		&self,
 		stk: &mut Stk,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		opt: &Options,
-		doc: Option<&CursorDoc<'_>>,
+		doc: Option<&CursorDoc>,
 	) -> Result<Value, Error> {
 		// Ensure futures are run
 		let opt = &opt.new_with_futures(true);
@@ -66,15 +69,7 @@ impl Model {
 		// Check this function is allowed
 		ctx.check_allowed_function(name.as_str())?;
 		// Get the model definition
-		let val = {
-			// Claim transaction
-			let mut run = ctx.tx_lock().await;
-			// Get the function definition
-			let val =
-				run.get_and_cache_db_model(opt.ns()?, opt.db()?, &self.name, &self.version).await?;
-			drop(run);
-			val
-		};
+		let val = ctx.tx().get_db_model(opt.ns()?, opt.db()?, &self.name, &self.version).await?;
 		// Calculate the model path
 		let path = format!(
 			"ml/{}/{}/{}-{}-{}.surml",
@@ -134,7 +129,7 @@ impl Model {
 				// Get the model file as bytes
 				let bytes = crate::obs::get(&path).await?;
 				// Run the compute in a blocking task
-				let outcome = tokio::task::spawn_blocking(move || {
+				let outcome: Vec<f32> = tokio::task::spawn_blocking(move || {
 					let mut file = SurMlFile::from_bytes(bytes).map_err(|err: SurrealError| {
 						Error::ModelComputation(err.message.to_string())
 					})?;
@@ -148,7 +143,7 @@ impl Model {
 				.await
 				.unwrap()?;
 				// Convert the output to a value
-				Ok(outcome[0].into())
+				Ok(outcome.into())
 			}
 			// Perform raw compute
 			Value::Number(v) => {
@@ -162,7 +157,7 @@ impl Model {
 				// Convert the argument to a tensor
 				let tensor = ndarray::arr1::<f32>(&[args]).into_dyn();
 				// Run the compute in a blocking task
-				let outcome = tokio::task::spawn_blocking(move || {
+				let outcome: Vec<f32> = tokio::task::spawn_blocking(move || {
 					let mut file = SurMlFile::from_bytes(bytes).map_err(|err: SurrealError| {
 						Error::ModelComputation(err.message.to_string())
 					})?;
@@ -176,7 +171,7 @@ impl Model {
 				.await
 				.unwrap()?;
 				// Convert the output to a value
-				Ok(outcome[0].into())
+				Ok(outcome.into())
 			}
 			// Perform raw compute
 			Value::Array(v) => {
@@ -194,7 +189,7 @@ impl Model {
 				// Convert the argument to a tensor
 				let tensor = ndarray::arr1::<f32>(&args).into_dyn();
 				// Run the compute in a blocking task
-				let outcome = tokio::task::spawn_blocking(move || {
+				let outcome: Vec<f32> = tokio::task::spawn_blocking(move || {
 					let mut file = SurMlFile::from_bytes(bytes).map_err(|err: SurrealError| {
 						Error::ModelComputation(err.message.to_string())
 					})?;
@@ -208,7 +203,7 @@ impl Model {
 				.await
 				.unwrap()?;
 				// Convert the output to a value
-				Ok(outcome[0].into())
+				Ok(outcome.into())
 			}
 			//
 			_ => Err(Error::InvalidArguments {
@@ -222,9 +217,9 @@ impl Model {
 	pub(crate) async fn compute(
 		&self,
 		_stk: &mut Stk,
-		_ctx: &Context<'_>,
+		_ctx: &Context,
 		_opt: &Options,
-		_doc: Option<&CursorDoc<'_>>,
+		_doc: Option<&CursorDoc>,
 	) -> Result<Value, Error> {
 		Err(Error::InvalidModel {
 			message: String::from("Machine learning computation is not enabled."),

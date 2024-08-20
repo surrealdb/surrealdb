@@ -1,4 +1,25 @@
 //! Methods to use when interacting with a SurrealDB instance
+use self::query::ValidQuery;
+use crate::api::opt;
+use crate::api::opt::auth;
+use crate::api::opt::auth::Credentials;
+use crate::api::opt::auth::Jwt;
+use crate::api::opt::IntoEndpoint;
+use crate::api::Connect;
+use crate::api::Connection;
+use crate::api::OnceLockExt;
+use crate::api::Surreal;
+use crate::opt::IntoExportDestination;
+use crate::opt::WaitFor;
+use crate::sql::to_value;
+use serde::Serialize;
+use std::borrow::Cow;
+use std::marker::PhantomData;
+use std::path::Path;
+use std::pin::Pin;
+use std::sync::Arc;
+use std::sync::OnceLock;
+use std::time::Duration;
 
 pub(crate) mod live;
 pub(crate) mod query;
@@ -44,8 +65,8 @@ pub use commit::Commit;
 pub use content::Content;
 pub use create::Create;
 pub use delete::Delete;
-pub use export::Backup;
-pub use export::Export;
+pub use export::{Backup, Export};
+use futures::Future;
 pub use health::Health;
 pub use import::Import;
 pub use insert::Insert;
@@ -58,6 +79,7 @@ pub use query::QueryStream;
 use run::IntoFn;
 pub use run::Run;
 pub use select::Select;
+use serde_content::Serializer;
 pub use set::Set;
 pub use signin::Signin;
 pub use signup::Signup;
@@ -69,6 +91,8 @@ pub use use_db::UseDb;
 pub use use_ns::UseNs;
 pub use version::Version;
 
+/// A alias for an often used type of future returned by async methods in this library.
+pub(crate) type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + Sync + 'a>>;
 use crate::api::conn::Method;
 use crate::api::opt;
 use crate::api::opt::auth;
@@ -110,7 +134,7 @@ pub struct Live;
 
 /// Responses returned with statistics
 #[derive(Debug)]
-pub struct WithStats<T>(T);
+pub struct WithStats<T>(pub T);
 
 impl Method {
 	#[allow(dead_code)] // used by `ws` and `http`
@@ -318,7 +342,7 @@ where
 	pub fn use_db(&self, db: impl Into<String>) -> UseDb<C> {
 		UseDb {
 			client: Cow::Borrowed(self),
-			ns: Value::None,
+			ns: None,
 			db: db.into(),
 		}
 	}
@@ -355,7 +379,7 @@ where
 	/// # Ok(())
 	/// # }
 	/// ```
-	pub fn set(&self, key: impl Into<String>, value: impl Serialize) -> Set<C> {
+	pub fn set(&self, key: impl Into<String>, value: impl Serialize + 'static) -> Set<C> {
 		Set {
 			client: Cow::Borrowed(self),
 			key: key.into(),
@@ -457,7 +481,7 @@ where
 	pub fn signup<R>(&self, credentials: impl Credentials<auth::Signup, R>) -> Signup<C, R> {
 		Signup {
 			client: Cow::Borrowed(self),
-			credentials: to_value(credentials).map_err(Into::into),
+			credentials: Serializer::new().serialize(credentials),
 			response_type: PhantomData,
 		}
 	}
@@ -576,7 +600,7 @@ where
 	pub fn signin<R>(&self, credentials: impl Credentials<auth::Signin, R>) -> Signin<C, R> {
 		Signin {
 			client: Cow::Borrowed(self),
-			credentials: to_value(credentials).map_err(Into::into),
+			credentials: Serializer::new().serialize(credentials),
 			response_type: PhantomData,
 		}
 	}
@@ -1392,7 +1416,7 @@ where
 		Import {
 			client: Cow::Borrowed(self),
 			file: file.as_ref().to_owned(),
-			ml_config: None,
+			is_ml: false,
 			import_type: PhantomData,
 		}
 	}

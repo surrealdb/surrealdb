@@ -29,17 +29,6 @@ $ cargo make bench-lib-rocksdb
 $ cargo make bench-sdk-rocksdb
 ```
 
-* FoundationDB datastore using the lib or the SDK
-    * Start FoundationDB
-    ```
-    $ docker run -ti -e FDB_NETWORKING_MODE=host --net=host foundationdb/foundationdb:7.1.30
-    ```
-    * Run the benchmarks
-    ```console
-    $ cargo make bench-lib-rocksdb
-    $ cargo make bench-sdk-rocksdb
-    ```
-
 * WebSocket remote server using the SDK
     * Start SurrealDB server
     ```

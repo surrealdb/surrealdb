@@ -63,9 +63,9 @@ impl DefineStatement {
 	pub(crate) async fn compute(
 		&self,
 		stk: &mut Stk,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		opt: &Options,
-		doc: Option<&CursorDoc<'_>>,
+		doc: Option<&CursorDoc>,
 	) -> Result<Value, Error> {
 		match self {
 			Self::Namespace(ref v) => v.compute(ctx, opt, doc).await,
@@ -116,6 +116,6 @@ mod tests {
 			..Default::default()
 		});
 		let enc: Vec<u8> = stm.into();
-		assert_eq!(12, enc.len());
+		assert_eq!(13, enc.len());
 	}
 }

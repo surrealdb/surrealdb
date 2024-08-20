@@ -9,12 +9,11 @@ use crate::sql::Value;
 use reblessive::tree::Stk;
 
 pub async fn analyze(
-	(stk, ctx, opt): (&mut Stk, &Context<'_>, Option<&Options>),
+	(stk, ctx, opt): (&mut Stk, &Context, Option<&Options>),
 	(az, val): (Value, Value),
 ) -> Result<Value, Error> {
 	if let (Some(opt), Value::Strand(az), Value::Strand(val)) = (opt, az, val) {
-		let az: Analyzer =
-			ctx.tx_lock().await.get_db_analyzer(opt.ns()?, opt.db()?, az.as_str()).await?.into();
+		let az = Analyzer::new(ctx.tx().get_db_analyzer(opt.ns()?, opt.db()?, &az).await?);
 		az.analyze(stk, ctx, opt, val.0).await
 	} else {
 		Ok(Value::None)
@@ -22,17 +21,17 @@ pub async fn analyze(
 }
 
 pub async fn score(
-	(ctx, doc): (&Context<'_>, Option<&CursorDoc<'_>>),
+	(ctx, doc): (&Context, Option<&CursorDoc>),
 	(match_ref,): (Value,),
 ) -> Result<Value, Error> {
 	if let Some((exe, doc, thg)) = get_execution_context(ctx, doc) {
-		return exe.score(ctx, &match_ref, thg, doc.ir).await;
+		return exe.score(ctx, &match_ref, thg, doc.ir.as_ref()).await;
 	}
 	Ok(Value::None)
 }
 
 pub async fn highlight(
-	(ctx, doc): (&Context<'_>, Option<&CursorDoc<'_>>),
+	(ctx, doc): (&Context, Option<&CursorDoc>),
 	args: (Value, Value, Value, Option<Value>),
 ) -> Result<Value, Error> {
 	if let Some((exe, doc, thg)) = get_execution_context(ctx, doc) {
@@ -43,7 +42,7 @@ pub async fn highlight(
 }
 
 pub async fn offsets(
-	(ctx, doc): (&Context<'_>, Option<&CursorDoc<'_>>),
+	(ctx, doc): (&Context, Option<&CursorDoc>),
 	(match_ref, partial): (Value, Option<Value>),
 ) -> Result<Value, Error> {
 	if let Some((exe, _, thg)) = get_execution_context(ctx, doc) {

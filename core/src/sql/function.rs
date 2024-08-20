@@ -1,4 +1,4 @@
-use crate::ctx::Context;
+use crate::ctx::{Context, MutableContext};
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
@@ -29,6 +29,7 @@ pub enum Function {
 	Normal(String, Vec<Value>),
 	Custom(String, Vec<Value>),
 	Script(Script, Vec<Value>),
+	Anonymous(Value, Vec<Value>),
 	// Add new variants here
 }
 
@@ -71,6 +72,7 @@ impl Function {
 	/// Convert function call to a field name
 	pub fn to_idiom(&self) -> Idiom {
 		match self {
+			Self::Anonymous(_, _) => "function".to_string().into(),
 			Self::Script(_, _) => "function".to_string().into(),
 			Self::Normal(f, _) => f.to_owned().into(),
 			Self::Custom(f, _) => format!("fn::{f}").into(),
@@ -109,6 +111,11 @@ impl Function {
 			Self::Normal(_, a) => a.iter().all(Value::is_static),
 			_ => false,
 		}
+	}
+
+	/// Check if this function is a closure function
+	pub fn is_inline(&self) -> bool {
+		matches!(self, Self::Anonymous(_, _))
 	}
 
 	/// Check if this function is a rolling function
@@ -182,9 +189,9 @@ impl Function {
 	pub(crate) async fn compute(
 		&self,
 		stk: &mut Stk,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		opt: &Options,
-		doc: Option<&CursorDoc<'_>>,
+		doc: Option<&CursorDoc>,
 	) -> Result<Value, Error> {
 		// Ensure futures are run
 		let opt = &opt.new_with_futures(true);
@@ -204,20 +211,42 @@ impl Function {
 				// Run the normal function
 				fnc::run(stk, ctx, opt, doc, s, a).await
 			}
+			Self::Anonymous(v, x) => {
+				let val = match v {
+					c @ Value::Closure(_) => c.clone(),
+					Value::Param(p) => ctx.value(p).cloned().unwrap_or(Value::None),
+					Value::Block(_) | Value::Subquery(_) | Value::Idiom(_) | Value::Function(_) => {
+						stk.run(|stk| v.compute(stk, ctx, opt, doc)).await?
+					}
+					_ => Value::None,
+				};
+
+				match val {
+					Value::Closure(closure) => {
+						// Compute the function arguments
+						let a = stk
+							.scope(|scope| {
+								try_join_all(
+									x.iter()
+										.map(|v| scope.run(|stk| v.compute(stk, ctx, opt, doc))),
+								)
+							})
+							.await?;
+						stk.run(|stk| closure.compute(stk, ctx, opt, doc, a)).await
+					}
+					v => Err(Error::InvalidFunction {
+						name: "ANONYMOUS".to_string(),
+						message: format!("'{}' is not a function", v.kindof()),
+					}),
+				}
+			}
 			Self::Custom(s, x) => {
 				// Get the full name of this function
 				let name = format!("fn::{s}");
 				// Check this function is allowed
 				ctx.check_allowed_function(name.as_str())?;
 				// Get the function definition
-				let val = {
-					// Claim transaction
-					let mut run = ctx.tx_lock().await;
-					// Get the function definition
-					let val = run.get_and_cache_db_function(opt.ns()?, opt.db()?, s).await?;
-					drop(run);
-					val
-				};
+				let val = ctx.tx().get_db_function(opt.ns()?, opt.db()?, s).await?;
 				// Check permissions
 				if opt.check_perms(Action::View)? {
 					match &val.permissions {
@@ -268,17 +297,26 @@ impl Function {
 					})
 					.await?;
 				// Duplicate context
-				let mut ctx = Context::new(ctx);
+				let mut ctx = MutableContext::new_isolated(ctx);
 				// Process the function arguments
 				for (val, (name, kind)) in a.into_iter().zip(&val.args) {
-					ctx.add_value(name.to_raw(), val.coerce_to(kind)?);
+					ctx.add_value(name.to_raw(), val.coerce_to(kind)?.into());
 				}
+				let ctx = ctx.freeze();
 				// Run the custom function
-				match stk.run(|stk| val.block.compute(stk, &ctx, opt, doc)).await {
+				let result = match stk.run(|stk| val.block.compute(stk, &ctx, opt, doc)).await {
 					Err(Error::Return {
 						value,
 					}) => Ok(value),
 					res => res,
+				}?;
+
+				if let Some(ref returns) = val.returns {
+					result
+						.coerce_to(returns)
+						.map_err(|e| e.function_check_from_coerce(val.name.to_string()))
+				} else {
+					Ok(result)
 				}
 			}
 			#[allow(unused_variables)]
@@ -315,6 +353,7 @@ impl fmt::Display for Function {
 			Self::Normal(s, e) => write!(f, "{s}({})", Fmt::comma_separated(e)),
 			Self::Custom(s, e) => write!(f, "fn::{s}({})", Fmt::comma_separated(e)),
 			Self::Script(s, e) => write!(f, "function({}) {{{s}}}", Fmt::comma_separated(e)),
+			Self::Anonymous(p, e) => write!(f, "{p}({})", Fmt::comma_separated(e)),
 		}
 	}
 }

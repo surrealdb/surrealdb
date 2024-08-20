@@ -21,5 +21,6 @@ impl_module_def!(
 	"multiply" => run,
 	"normalize" => run,
 	"project" => run,
+	"scale" => run,
 	"subtract" => run
 );

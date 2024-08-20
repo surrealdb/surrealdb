@@ -21,22 +21,19 @@ pub struct RemoveEventStatement {
 
 impl RemoveEventStatement {
 	/// Process this type returning a computed simple Value
-	pub(crate) async fn compute(&self, ctx: &Context<'_>, opt: &Options) -> Result<Value, Error> {
+	pub(crate) async fn compute(&self, ctx: &Context, opt: &Options) -> Result<Value, Error> {
 		let future = async {
 			// Allowed to run?
 			opt.is_allowed(Action::Edit, ResourceKind::Event, &Base::Db)?;
-			// Claim transaction
-			let mut run = ctx.tx_lock().await;
-			// Clear the cache
-			run.clear_cache();
+			// Get the transaction
+			let txn = ctx.tx();
 			// Get the definition
-			let ev = run.get_tb_event(opt.ns()?, opt.db()?, &self.what, &self.name).await?;
+			let ev = txn.get_tb_event(opt.ns()?, opt.db()?, &self.what, &self.name).await?;
 			// Delete the definition
 			let key = crate::key::table::ev::new(opt.ns()?, opt.db()?, &ev.what, &ev.name);
-			run.del(key).await?;
+			txn.del(key).await?;
 			// Clear the cache
-			let key = crate::key::table::ev::prefix(opt.ns()?, opt.db()?, &ev.what);
-			run.clr(key).await?;
+			txn.clear();
 			// Ok all good
 			Ok(Value::None)
 		}

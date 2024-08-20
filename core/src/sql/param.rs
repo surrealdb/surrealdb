@@ -50,16 +50,16 @@ impl Param {
 	pub(crate) async fn compute(
 		&self,
 		stk: &mut Stk,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		opt: &Options,
-		doc: Option<&CursorDoc<'_>>,
+		doc: Option<&CursorDoc>,
 	) -> Result<Value, Error> {
 		// Find the variable by name
 		match self.as_str() {
 			// This is a special param
 			"this" | "self" => match doc {
 				// The base document exists
-				Some(v) => v.doc.compute(stk, ctx, opt, doc).await,
+				Some(v) => v.doc.as_ref().compute(stk, ctx, opt, doc).await,
 				// The base document does not exist
 				None => Ok(Value::None),
 			},
@@ -69,12 +69,10 @@ impl Param {
 				Some(v) => v.compute(stk, ctx, opt, doc).await,
 				// The param has not been set locally
 				None => {
-					let val = {
-						// Claim transaction
-						let mut run = ctx.tx_lock().await;
-						// Get the param definition
-						run.get_and_cache_db_param(opt.ns()?, opt.db()?, v).await
-					};
+					// Ensure a database is set
+					opt.valid_for_db()?;
+					// Fetch a defined param if set
+					let val = ctx.tx().get_db_param(opt.ns()?, opt.db()?, v).await;
 					// Check if the param has been set globally
 					match val {
 						// The param has been set globally
@@ -104,7 +102,11 @@ impl Param {
 							val.value.compute(stk, ctx, opt, doc).await
 						}
 						// The param has not been set globally
-						Err(_) => Ok(Value::None),
+						Err(Error::PaNotFound {
+							..
+						}) => Ok(Value::None),
+						// There was another request error
+						Err(e) => Err(e),
 					}
 				}
 			},

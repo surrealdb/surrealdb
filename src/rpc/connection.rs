@@ -1,7 +1,6 @@
 use crate::cnf::{
 	PKG_NAME, PKG_VERSION, WEBSOCKET_MAX_CONCURRENT_REQUESTS, WEBSOCKET_PING_FREQUENCY,
 };
-use crate::dbs::DB;
 use crate::rpc::failure::Failure;
 use crate::rpc::format::WsFormat;
 use crate::rpc::response::{failure, IntoRpcResponse};
@@ -18,12 +17,13 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 use surrealdb::channel::{self, Receiver, Sender};
 use surrealdb::dbs::Session;
+#[cfg(surrealdb_unstable)]
+use surrealdb::gql::{Pessimistic, SchemaCache};
 use surrealdb::kvs::Datastore;
-use surrealdb::rpc::args::Take;
 use surrealdb::rpc::format::Format;
 use surrealdb::rpc::method::Method;
+use surrealdb::rpc::Data;
 use surrealdb::rpc::RpcContext;
-use surrealdb::rpc::{Data, RpcError};
 use surrealdb::sql::Array;
 use surrealdb::sql::Value;
 use tokio::sync::{RwLock, Semaphore};
@@ -44,11 +44,15 @@ pub struct Connection {
 	pub(crate) canceller: CancellationToken,
 	pub(crate) channels: (Sender<Message>, Receiver<Message>),
 	pub(crate) state: Arc<RpcState>,
+	pub(crate) datastore: Arc<Datastore>,
+	#[cfg(surrealdb_unstable)]
+	pub(crate) gql_schema: SchemaCache<Pessimistic>,
 }
 
 impl Connection {
 	/// Instantiate a new RPC
 	pub fn new(
+		datastore: Arc<Datastore>,
 		state: Arc<RpcState>,
 		id: Uuid,
 		mut session: Session,
@@ -66,27 +70,31 @@ impl Connection {
 			canceller: CancellationToken::new(),
 			channels: channel::bounded(*WEBSOCKET_MAX_CONCURRENT_REQUESTS),
 			state,
+			#[cfg(surrealdb_unstable)]
+			gql_schema: SchemaCache::new(datastore.clone()),
+			datastore,
 		}))
 	}
 
 	/// Serve the RPC endpoint
 	pub async fn serve(rpc: Arc<RwLock<Connection>>, ws: WebSocket) {
-		// Get the WebSocket ID
+		// Get the RPC lock
 		let rpc_lock = rpc.read().await;
-		// Get the WebSocket ID
+		// Get the WebSocket id
 		let id = rpc_lock.id;
+		// Get the WebSocket state
 		let state = rpc_lock.state.clone();
-
+		// Get the Datastore
+		let ds = rpc_lock.datastore.clone();
+		// Log the succesful WebSocket connection
+		trace!("WebSocket {} connected", id);
 		// Split the socket into sending and receiving streams
 		let (sender, receiver) = ws.split();
 		// Create an internal channel for sending and receiving
 		let internal_sender = rpc_lock.channels.0.clone();
 		let internal_receiver = rpc_lock.channels.1.clone();
-
-		// drop the lock early so rpc is free to be written to.
+		// Drop the lock early so rpc is free to be written to.
 		std::mem::drop(rpc_lock);
-
-		trace!("WebSocket {} connected", id);
 
 		if let Err(err) = telemetry::metrics::ws::on_connect() {
 			error!("Error running metrics::ws::on_connect hook: {}", err);
@@ -126,9 +134,8 @@ impl Connection {
 			true
 		});
 
-		// Garbage collect queries
-		if let Err(e) = DB.get().unwrap().garbage_collect_dead_session(gc.as_slice()).await {
-			error!("Failed to garbage collect dead sessions: {:?}", e);
+		if let Err(err) = ds.delete_queries(gc).await {
+			error!("Error handling RPC connection: {}", err);
 		}
 
 		if let Err(err) = telemetry::metrics::ws::on_disconnect() {
@@ -369,7 +376,7 @@ impl Connection {
 
 impl RpcContext for Connection {
 	fn kvs(&self) -> &Datastore {
-		DB.get().unwrap()
+		&self.datastore
 	}
 
 	fn session(&self) -> &Session {
@@ -405,38 +412,10 @@ impl RpcContext for Connection {
 		}
 	}
 
-	// reimplimentaions
-
-	async fn signup(&mut self, params: Array) -> Result<impl Into<Data>, RpcError> {
-		let Ok(Value::Object(v)) = params.needs_one() else {
-			return Err(RpcError::InvalidParams);
-		};
-		let out: Result<Value, RpcError> =
-			surrealdb::iam::signup::signup(DB.get().unwrap(), &mut self.session, v)
-				.await
-				.map(Into::into)
-				.map_err(Into::into);
-
-		out
-	}
-
-	async fn signin(&mut self, params: Array) -> Result<impl Into<Data>, RpcError> {
-		let Ok(Value::Object(v)) = params.needs_one() else {
-			return Err(RpcError::InvalidParams);
-		};
-		let out: Result<Value, RpcError> =
-			surrealdb::iam::signin::signin(DB.get().unwrap(), &mut self.session, v)
-				.await
-				.map(Into::into)
-				.map_err(Into::into);
-		out
-	}
-
-	async fn authenticate(&mut self, params: Array) -> Result<impl Into<Data>, RpcError> {
-		let Ok(Value::Strand(token)) = params.needs_one() else {
-			return Err(RpcError::InvalidParams);
-		};
-		surrealdb::iam::verify::token(DB.get().unwrap(), &mut self.session, &token.0).await?;
-		Ok(Value::None)
+	#[cfg(surrealdb_unstable)]
+	const GQL_SUPPORT: bool = true;
+	#[cfg(surrealdb_unstable)]
+	fn graphql_schema_cache(&self) -> &SchemaCache {
+		&self.gql_schema
 	}
 }

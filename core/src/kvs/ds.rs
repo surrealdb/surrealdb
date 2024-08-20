@@ -1,4 +1,27 @@
-use std::collections::{BTreeMap, BTreeSet};
+use super::tr::Transactor;
+use super::tx::Transaction;
+use crate::cf;
+use crate::ctx::MutableContext;
+#[cfg(feature = "jwks")]
+use crate::dbs::capabilities::NetTarget;
+use crate::dbs::{
+	Attach, Capabilities, Executor, Notification, Options, Response, Session, Variables,
+};
+use crate::err::Error;
+#[cfg(feature = "jwks")]
+use crate::iam::jwks::JwksCache;
+use crate::iam::{Action, Auth, Error as IamError, Resource, Role};
+use crate::idx::trees::store::IndexStores;
+use crate::kvs::clock::SizedClock;
+#[allow(unused_imports)]
+use crate::kvs::clock::SystemClock;
+use crate::kvs::{LockType, LockType::*, TransactionType, TransactionType::*};
+use crate::sql::{statements::DefineUserStatement, Base, Query, Value};
+use crate::syn;
+use crate::vs::{conv, Versionstamp};
+use channel::{Receiver, Sender};
+use futures::Future;
+use reblessive::TreeStack;
 use std::fmt;
 #[cfg(any(
 	feature = "kv-mem",
@@ -12,50 +35,18 @@ use std::sync::Arc;
 use std::time::Duration;
 #[cfg(not(target_arch = "wasm32"))]
 use std::time::{SystemTime, UNIX_EPOCH};
-
-use channel::{Receiver, Sender};
-use futures::{lock::Mutex, Future};
-use reblessive::{tree::Stk, TreeStack};
+#[cfg(feature = "jwks")]
 use tokio::sync::RwLock;
 use tracing::instrument;
 use tracing::trace;
-
+use uuid::Uuid;
 #[cfg(target_arch = "wasm32")]
 use wasmtimer::std::{SystemTime, UNIX_EPOCH};
 
-use super::tx::Transaction;
-use crate::cf;
-use crate::ctx::Context;
-#[cfg(feature = "jwks")]
-use crate::dbs::capabilities::NetTarget;
-use crate::dbs::{
-	node::Timestamp, Attach, Capabilities, Executor, Notification, Options, Response, Session,
-	Variables,
-};
-use crate::err::Error;
-#[cfg(feature = "jwks")]
-use crate::iam::jwks::JwksCache;
-use crate::iam::{Action, Auth, Error as IamError, Resource, Role};
-use crate::idx::trees::store::IndexStores;
-use crate::key::root::hb::Hb;
-use crate::kvs::clock::SizedClock;
-#[allow(unused_imports)]
-use crate::kvs::clock::SystemClock;
-use crate::kvs::lq_cf::LiveQueryTracker;
-use crate::kvs::lq_structs::{LqValue, TrackedResult, UnreachableLqType};
-use crate::kvs::lq_v2_fut::process_lq_notifications;
-use crate::kvs::{LockType, LockType::*, TransactionType, TransactionType::*};
-use crate::options::EngineOptions;
-use crate::sql::{self, statements::DefineUserStatement, Base, Query, Uuid, Value};
-use crate::syn;
-use crate::vs::{conv, Oracle, Versionstamp};
+const TARGET: &str = "surrealdb::core::kvs::tr";
 
 // If there are an infinite number of heartbeats, then we want to go batch-by-batch spread over several checks
-const HEARTBEAT_BATCH_SIZE: u32 = 1000;
 const LQ_CHANNEL_SIZE: usize = 100;
-
-// The batch size used for non-paged operations (i.e. if there are more results, they are ignored)
-const NON_PAGED_BATCH_SIZE: u32 = 100_000;
 
 // The role assigned to the initial user created when starting the server with credentials for the first time
 const INITIAL_USER_ROLE: &str = "owner";
@@ -78,14 +69,10 @@ pub struct Datastore {
 	transaction_timeout: Option<Duration>,
 	// Capabilities for this datastore
 	capabilities: Capabilities,
-	pub(super) engine_options: EngineOptions,
-	// The versionstamp oracle for this datastore.
-	// Used only in some datastores, such as tikv.
-	versionstamp_oracle: Arc<Mutex<Oracle>>,
 	// Whether this datastore enables live query notifications to subscribers
 	pub(super) notification_channel: Option<(Sender<Notification>, Receiver<Notification>)>,
 	// Clock for tracking time. It is read only and accessible to all transactions. It is behind a mutex as tests may write to it.
-	clock: Arc<SizedClock>,
+	pub(super) clock: Arc<SizedClock>,
 	// The index store cache
 	index_stores: IndexStores,
 	#[cfg(feature = "jwks")]
@@ -100,12 +87,7 @@ pub struct Datastore {
 	))]
 	// The temporary directory
 	temporary_directory: Option<Arc<PathBuf>>,
-	pub(crate) lq_cf_store: Arc<RwLock<LiveQueryTracker>>,
 }
-
-/// We always want to be circulating the live query information
-/// And we will sometimes have an error attached but still not want to lose the LQ.
-pub(crate) type BootstrapOperationResult = (LqValue, Option<Error>);
 
 #[allow(clippy::large_enum_variant)]
 pub(super) enum Inner {
@@ -184,80 +166,55 @@ impl Datastore {
 	/// # }
 	/// ```
 	pub async fn new(path: &str) -> Result<Datastore, Error> {
-		Self::new_full_impl(path, None).await
+		Self::new_with_clock(path, None).await
 	}
 
-	#[allow(dead_code)]
-	#[cfg(test)]
-	pub async fn new_full(
+	#[allow(unused_variables)]
+	pub async fn new_with_clock(
 		path: &str,
-		clock_override: Option<Arc<SizedClock>>,
+		clock: Option<Arc<SizedClock>>,
 	) -> Result<Datastore, Error> {
-		Self::new_full_impl(path, clock_override).await
-	}
-
-	#[allow(dead_code)]
-	async fn new_full_impl(
-		path: &str,
-		#[allow(unused_variables)] clock_override: Option<Arc<SizedClock>>,
-	) -> Result<Datastore, Error> {
-		#[allow(unused_variables)]
-		let default_clock: Arc<SizedClock> = Arc::new(SizedClock::System(SystemClock::new()));
-
-		// removes warning if no storage is enabled.
-		#[cfg(not(any(
-			feature = "kv-mem",
-			feature = "kv-rocksdb",
-			feature = "kv-indxdb",
-			feature = "kv-tikv",
-			feature = "kv-fdb",
-			feature = "kv-surrealkv"
-		)))]
-		let _ = (clock_override, default_clock);
-
 		// Initiate the desired datastore
 		let (inner, clock): (Result<Inner, Error>, Arc<SizedClock>) = match path {
+			// Initiate an in-memory datastore
 			"memory" => {
 				#[cfg(feature = "kv-mem")]
 				{
-					info!("Starting kvs store in {}", path);
+					info!(target: TARGET, "Starting kvs store in {}", path);
 					let v = super::mem::Datastore::new().await.map(Inner::Mem);
-					let default_clock = Arc::new(SizedClock::System(SystemClock::new()));
-					let clock = clock_override.unwrap_or(default_clock);
-					info!("Started kvs store in {}", path);
-					Ok((v, clock))
+					let c = clock.unwrap_or_else(|| Arc::new(SizedClock::system()));
+					info!(target: TARGET, "Started kvs store in {}", path);
+					Ok((v, c))
 				}
 				#[cfg(not(feature = "kv-mem"))]
                 return Err(Error::Ds("Cannot connect to the `memory` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
 			}
-			// Parse and initiate an File database
+			// Parse and initiate a File datastore
 			s if s.starts_with("file:") => {
 				#[cfg(feature = "kv-rocksdb")]
 				{
-					info!("Starting kvs store at {}", path);
+					info!(target: TARGET, "Starting kvs store at {}", path);
 					let s = s.trim_start_matches("file://");
 					let s = s.trim_start_matches("file:");
 					let v = super::rocksdb::Datastore::new(s).await.map(Inner::RocksDB);
-					let default_clock = Arc::new(SizedClock::System(SystemClock::new()));
-					let clock = clock_override.unwrap_or(default_clock);
-					info!("Started kvs store at {}", path);
-					Ok((v, clock))
+					let c = clock.unwrap_or_else(|| Arc::new(SizedClock::system()));
+					info!(target: TARGET, "Started kvs store at {}", path);
+					Ok((v, c))
 				}
 				#[cfg(not(feature = "kv-rocksdb"))]
                 return Err(Error::Ds("Cannot connect to the `rocksdb` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
 			}
-			// Parse and initiate an RocksDB database
+			// Parse and initiate a RocksDB datastore
 			s if s.starts_with("rocksdb:") => {
 				#[cfg(feature = "kv-rocksdb")]
 				{
-					info!("Starting kvs store at {}", path);
+					info!(target: TARGET, "Starting kvs store at {}", path);
 					let s = s.trim_start_matches("rocksdb://");
 					let s = s.trim_start_matches("rocksdb:");
 					let v = super::rocksdb::Datastore::new(s).await.map(Inner::RocksDB);
-					info!("Started kvs store at {}", path);
-					let default_clock = Arc::new(SizedClock::System(SystemClock::new()));
-					let clock = clock_override.unwrap_or(default_clock);
-					Ok((v, clock))
+					let c = clock.unwrap_or_else(|| Arc::new(SizedClock::system()));
+					info!(target: TARGET, "Started kvs store at {}", path);
+					Ok((v, c))
 				}
 				#[cfg(not(feature = "kv-rocksdb"))]
                 return Err(Error::Ds("Cannot connect to the `rocksdb` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
@@ -266,71 +223,65 @@ impl Datastore {
 			s if s.starts_with("indxdb:") => {
 				#[cfg(feature = "kv-indxdb")]
 				{
-					info!("Starting kvs store at {}", path);
+					info!(target: TARGET, "Starting kvs store at {}", path);
 					let s = s.trim_start_matches("indxdb://");
 					let s = s.trim_start_matches("indxdb:");
 					let v = super::indxdb::Datastore::new(s).await.map(Inner::IndxDB);
-					info!("Started kvs store at {}", path);
-					let default_clock = Arc::new(SizedClock::System(SystemClock::new()));
-					let clock = clock_override.unwrap_or(default_clock);
-					Ok((v, clock))
+					let c = clock.unwrap_or_else(|| Arc::new(SizedClock::system()));
+					info!(target: TARGET, "Started kvs store at {}", path);
+					Ok((v, c))
 				}
 				#[cfg(not(feature = "kv-indxdb"))]
                 return Err(Error::Ds("Cannot connect to the `indxdb` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
 			}
-			// Parse and initiate a TiKV database
+			// Parse and initiate a TiKV datastore
 			s if s.starts_with("tikv:") => {
 				#[cfg(feature = "kv-tikv")]
 				{
-					info!("Connecting to kvs store at {}", path);
+					info!(target: TARGET, "Connecting to kvs store at {}", path);
 					let s = s.trim_start_matches("tikv://");
 					let s = s.trim_start_matches("tikv:");
 					let v = super::tikv::Datastore::new(s).await.map(Inner::TiKV);
-					info!("Connected to kvs store at {}", path);
-					let default_clock = Arc::new(SizedClock::System(SystemClock::new()));
-					let clock = clock_override.unwrap_or(default_clock);
-					Ok((v, clock))
+					let c = clock.unwrap_or_else(|| Arc::new(SizedClock::system()));
+					info!(target: TARGET, "Connected to kvs store at {}", path);
+					Ok((v, c))
 				}
 				#[cfg(not(feature = "kv-tikv"))]
                 return Err(Error::Ds("Cannot connect to the `tikv` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
 			}
-			// Parse and initiate a FoundationDB database
+			// Parse and initiate a FoundationDB datastore
 			s if s.starts_with("fdb:") => {
 				#[cfg(feature = "kv-fdb")]
 				{
-					info!("Connecting to kvs store at {}", path);
+					info!(target: TARGET, "Connecting to kvs store at {}", path);
 					let s = s.trim_start_matches("fdb://");
 					let s = s.trim_start_matches("fdb:");
 					let v = super::fdb::Datastore::new(s).await.map(Inner::FoundationDB);
-					info!("Connected to kvs store at {}", path);
-					let default_clock = Arc::new(SizedClock::System(SystemClock::new()));
-					let clock = clock_override.unwrap_or(default_clock);
-					Ok((v, clock))
+					let c = clock.unwrap_or_else(|| Arc::new(SizedClock::system()));
+					info!(target: TARGET, "Connected to kvs store at {}", path);
+					Ok((v, c))
 				}
 				#[cfg(not(feature = "kv-fdb"))]
                 return Err(Error::Ds("Cannot connect to the `foundationdb` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
 			}
-			// Parse and initiate a SurrealKV database
+			// Parse and initiate a SurrealKV datastore
 			s if s.starts_with("surrealkv:") => {
 				#[cfg(feature = "kv-surrealkv")]
 				{
-					info!("Starting kvs store at {}", path);
+					info!(target: TARGET, "Starting kvs store at {}", path);
 					let s = s.trim_start_matches("surrealkv://");
 					let s = s.trim_start_matches("surrealkv:");
 					let v = super::surrealkv::Datastore::new(s).await.map(Inner::SurrealKV);
-					info!("Started to kvs store at {}", path);
-					let default_clock = Arc::new(SizedClock::System(SystemClock::new()));
-					let clock = clock_override.unwrap_or(default_clock);
-					Ok((v, clock))
+					let c = clock.unwrap_or_else(|| Arc::new(SizedClock::system()));
+					info!(target: TARGET, "Started to kvs store at {}", path);
+					Ok((v, c))
 				}
 				#[cfg(not(feature = "kv-surrealkv"))]
                 return Err(Error::Ds("Cannot connect to the `surrealkv` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
 			}
 			// The datastore path is not valid
 			_ => {
-				// use clock_override and default_clock to remove warning when no kv is enabled.
-				let _ = default_clock;
-				info!("Unable to load the specified datastore {}", path);
+				info!(target: TARGET, "Unable to load the specified datastore {}", path);
 				Err(Error::Ds("Unable to load the specified datastore".into()))
 			}
 		}?;
@@ -338,15 +289,13 @@ impl Datastore {
 		inner.map(|inner| Self {
 			id: Uuid::new_v4(),
 			inner,
+			clock,
 			strict: false,
 			auth_enabled: false,
 			query_timeout: None,
 			transaction_timeout: None,
 			notification_channel: None,
 			capabilities: Capabilities::default(),
-			engine_options: EngineOptions::default(),
-			versionstamp_oracle: Arc::new(Mutex::new(Oracle::systime_counter())),
-			clock,
 			index_stores: IndexStores::default(),
 			#[cfg(feature = "jwks")]
 			jwks_cache: Arc::new(RwLock::new(JwksCache::new())),
@@ -358,7 +307,6 @@ impl Datastore {
 				feature = "kv-tikv",
 			))]
 			temporary_directory: None,
-			lq_cf_store: Arc::new(RwLock::new(LiveQueryTracker::new())),
 		})
 	}
 
@@ -411,14 +359,9 @@ impl Datastore {
 		feature = "kv-fdb",
 		feature = "kv-tikv",
 	))]
-	pub fn with_temporary_directory(mut self, path: PathBuf) -> Self {
-		self.temporary_directory = Some(Arc::new(path));
-		self
-	}
-
-	/// Set the engine options for the datastore
-	pub fn with_engine_options(mut self, engine_options: EngineOptions) -> Self {
-		self.engine_options = engine_options;
+	/// Set a temporary directory for ordering of large result sets
+	pub fn with_temporary_directory(mut self, path: Option<PathBuf>) -> Self {
+		self.temporary_directory = path.map(Arc::new);
 		self
 	}
 
@@ -429,6 +372,10 @@ impl Datastore {
 	/// Is authentication enabled for this Datastore?
 	pub fn is_auth_enabled(&self) -> bool {
 		self.auth_enabled
+	}
+
+	pub fn id(&self) -> Uuid {
+		self.id
 	}
 
 	/// Does the datastore allow connections to a network target?
@@ -442,379 +389,49 @@ impl Datastore {
 		&self.jwks_cache
 	}
 
-	/// Setup the initial credentials
-	/// Trigger the `unreachable definition` compilation error, probably due to this issue:
-	/// https://github.com/rust-lang/rust/issues/111370
-	#[allow(unreachable_code, unused_variables)]
-	pub async fn setup_initial_creds(&self, username: &str, password: &str) -> Result<(), Error> {
-		// Start a new writeable transaction
-		let txn = self.transaction(Write, Optimistic).await?.rollback_with_panic().enclose();
-		// Fetch the root users from the storage
-		let users = txn.lock().await.all_root_users().await;
-		// Process credentials, depending on existing users
-		match users {
-			Ok(v) if v.is_empty() => {
-				// Display information in the logs
-				info!("Credentials were provided, and no root users were found. The root user '{}' will be created", username);
-				// Create and save a new root user
-				let stm =
-					DefineUserStatement::from((Base::Root, username, password, INITIAL_USER_ROLE));
-				let ctx = Context::default().set_transaction(txn.clone());
-				let opt = Options::new().with_auth(Arc::new(Auth::for_root(Role::Owner)));
-				let _ = stm.compute(&ctx, &opt, None).await?;
-				// We added a new user, so commit the transaction
-				txn.lock().await.commit().await?;
-				// Everything ok
-				Ok(())
-			}
-			Ok(_) => {
-				// Display warnings in the logs
-				warn!("Credentials were provided, but existing root users were found. The root user '{}' will not be created", username);
-				warn!("Consider removing the --user and --pass arguments from the server start command");
-				// We didn't write anything, so just rollback
-				txn.lock().await.cancel().await?;
-				// Everything ok
-				Ok(())
-			}
-			Err(e) => {
-				// There was an unexpected error, so rollback
-				txn.lock().await.cancel().await?;
-				// Return any error
-				Err(e)
-			}
-		}
-	}
-
-	// Initialise bootstrap with implicit values intended for runtime
-	// An error indicates that a failure happened, but that does not mean that the bootstrap
-	// completely failed. It may have partially completed. It certainly has side-effects
-	// that weren't reversed, as it tries to bootstrap and garbage collect to the best of its
-	// ability.
-	// NOTE: If you get rust mutex deadlocks, check your transactions around this method.
-	// This should be called before any transactions are made in release mode
-	// In tests, it should be outside any other transaction - in isolation.
-	// We cannot easily systematise this, since we aren't counting transactions created.
+	// Initialise the cluster and run bootstrap utilities
+	#[instrument(err, level = "trace", target = "surrealdb::core::kvs::ds", skip_all)]
 	pub async fn bootstrap(&self) -> Result<(), Error> {
-		// First we clear unreachable state that could exist by upgrading from
-		// previous beta versions
-		trace!("Clearing unreachable state");
-		let mut tx = self.transaction(Write, Optimistic).await?;
-		match self.clear_unreachable_state(&mut tx).await {
-			Ok(_) => tx.commit().await,
-			Err(e) => {
-				let msg = format!("Error clearing unreachable cluster state at bootstrap: {:?}", e);
-				error!(msg);
-				tx.cancel().await?;
-				Err(Error::Tx(msg))
-			}
-		}?;
-
-		trace!("Bootstrapping {}", self.id);
-		let mut tx = self.transaction(Write, Optimistic).await?;
-		let archived = match self.register_remove_and_archive(&mut tx, &self.id).await {
-			Ok(archived) => {
-				tx.commit().await?;
-				archived
-			}
-			Err(e) => {
-				error!("Error bootstrapping mark phase: {:?}", e);
-				tx.cancel().await?;
-				return Err(e);
-			}
-		};
-		// Filtered includes all lqs that should be used in subsequent step
-		// Currently that is all of them, no matter the error encountered
-		let mut filtered: Vec<LqValue> = vec![];
-		// err is used to aggregate all errors across all stages
-		let mut err = vec![];
-		for res in archived {
-			match res {
-				(lq, Some(e)) => {
-					filtered.push(lq);
-					err.push(e);
-				}
-				(lq, None) => {
-					filtered.push(lq);
-				}
-			}
-		}
-
-		let mut tx = self.transaction(Write, Optimistic).await?;
-		let val = self.remove_archived(&mut tx, filtered).await;
-		let resolve_err = match val {
-			Ok(_) => tx.commit().await,
-			Err(e) => {
-				error!("Error bootstrapping sweep phase: {:?}", e);
-				match tx.cancel().await {
-					Ok(_) => Err(e),
-					Err(e) => {
-						// We have a nested error
-						Err(Error::Tx(format!("Error bootstrapping sweep phase: {:?} and error cancelling transaction: {:?}", e, e)))
-					}
-				}
-			}
-		};
-		if let Err(e) = resolve_err {
-			err.push(e);
-		}
-		if !err.is_empty() {
-			error!("Error bootstrapping sweep phase: {:?}", err);
-			return Err(Error::Tx(format!("Error bootstrapping sweep phase: {:?}", err)));
-		}
+		// Insert this node in the cluster
+		self.insert_node(self.id).await?;
+		// Mark expired nodes as archived
+		self.expire_nodes().await?;
+		// Everything ok
 		Ok(())
 	}
 
-	// Node registration + "mark" stage of mark-and-sweep gc
-	pub async fn register_remove_and_archive(
-		&self,
-		tx: &mut Transaction,
-		node_id: &Uuid,
-	) -> Result<Vec<BootstrapOperationResult>, Error> {
-		trace!("Registering node {}", node_id);
-		let timestamp = tx.clock().await;
-		self.register_membership(tx, node_id, timestamp).await?;
-		// Determine the timeout for when a cluster node is expired
-		let ts_expired = (&timestamp - &sql::duration::Duration::from_secs(5))?;
-		let dead = self.remove_dead_nodes(tx, &ts_expired).await?;
-		trace!("Archiving dead nodes: {:?}", dead);
-		self.archive_dead_lqs(tx, &dead, node_id).await
-	}
-
-	// Adds entries to the KV store indicating membership information
-	pub async fn register_membership(
-		&self,
-		tx: &mut Transaction,
-		node_id: &Uuid,
-		timestamp: Timestamp,
-	) -> Result<(), Error> {
-		tx.set_nd(node_id.0).await?;
-		tx.set_hb(timestamp, node_id.0).await?;
-		Ok(())
-	}
-
-	/// Delete dead heartbeats and nodes
-	/// Returns node IDs
-	pub async fn remove_dead_nodes(
-		&self,
-		tx: &mut Transaction,
-		ts: &Timestamp,
-	) -> Result<Vec<Uuid>, Error> {
-		let hbs = self.delete_dead_heartbeats(tx, ts).await?;
-		trace!("Found {} expired heartbeats", hbs.len());
-		let mut nodes = vec![];
-		for hb in hbs {
-			trace!("Deleting node {}", &hb.nd);
-			// TODO should be delr in case of nested entries
-			tx.del_nd(hb.nd).await?;
-			nodes.push(crate::sql::uuid::Uuid::from(hb.nd));
+	/// Setup the initial cluster access credentials
+	#[instrument(err, level = "trace", target = "surrealdb::core::kvs::ds", skip_all)]
+	pub async fn initialise_credentials(&self, user: &str, pass: &str) -> Result<(), Error> {
+		// Start a new writeable transaction
+		let txn = self.transaction(Write, Optimistic).await?.enclose();
+		// Fetch the root users from the storage
+		let users = catch!(txn, txn.all_root_users());
+		// Process credentials, depending on existing users
+		if users.is_empty() {
+			// Display information in the logs
+			info!(target: TARGET, "Credentials were provided, and no root users were found. The root user '{user}' will be created");
+			// Create and new root user definition
+			let stm = DefineUserStatement::from((Base::Root, user, pass, INITIAL_USER_ROLE));
+			let opt = Options::new().with_auth(Arc::new(Auth::for_root(Role::Owner)));
+			let mut ctx = MutableContext::default();
+			ctx.set_transaction(txn.clone());
+			let ctx = ctx.freeze();
+			catch!(txn, stm.compute(&ctx, &opt, None));
+			// We added a user, so commit the transaction
+			txn.commit().await
+		} else {
+			// Display information in the logs
+			warn!(target: TARGET, "Credentials were provided, but existing root users were found. The root user '{user}' will not be created");
+			warn!(target: TARGET, "Consider removing the --user and --pass arguments from the server start command");
+			// We didn't write anything, so just rollback
+			txn.cancel().await
 		}
-		Ok(nodes)
-	}
-
-	/// Accepts cluster IDs
-	/// Archives related live queries
-	/// Returns live query keys that can be used for deletes
-	///
-	/// The reason we archive first is to stop other nodes from picking it up for further updates
-	/// This means it will be easier to wipe the range in a subsequent transaction
-	pub async fn archive_dead_lqs(
-		&self,
-		tx: &mut Transaction,
-		nodes: &[Uuid],
-		this_node_id: &Uuid,
-	) -> Result<Vec<BootstrapOperationResult>, Error> {
-		let mut archived = vec![];
-		for nd in nodes.iter() {
-			trace!("Archiving node {}", &nd);
-			// Scan on node prefix for LQ space
-			let node_lqs = tx.scan_ndlq(nd, NON_PAGED_BATCH_SIZE).await?;
-			trace!("Found {} LQ entries for {:?}", node_lqs.len(), nd);
-			for lq in node_lqs {
-				trace!("Archiving query {:?}", &lq);
-				let node_archived_lqs =
-					match self.archive_lv_for_node(tx, &lq.nd, *this_node_id).await {
-						Ok(lq) => lq,
-						Err(e) => {
-							error!("Error archiving lqs during bootstrap phase: {:?}", e);
-							vec![]
-						}
-					};
-				// We need to add lv nodes not found so that they can be deleted in second stage
-				for lq_value in node_archived_lqs {
-					archived.push(lq_value);
-				}
-			}
-		}
-		Ok(archived)
-	}
-
-	pub async fn remove_archived(
-		&self,
-		tx: &mut Transaction,
-		archived: Vec<LqValue>,
-	) -> Result<(), Error> {
-		trace!("Gone into removing archived: {:?}", archived.len());
-		for lq in archived {
-			// Delete the cluster key, used for finding LQ associated with a node
-			let key = crate::key::node::lq::new(lq.nd.0, lq.lq.0, &lq.ns, &lq.db);
-			tx.del(key).await?;
-			// Delete the table key, used for finding LQ associated with a table
-			let key = crate::key::table::lq::new(&lq.ns, &lq.db, &lq.tb, lq.lq.0);
-			tx.del(key).await?;
-		}
-		Ok(())
-	}
-
-	pub async fn clear_unreachable_state(&self, tx: &mut Transaction) -> Result<(), Error> {
-		// Scan nodes
-		let cluster = tx.scan_nd(NON_PAGED_BATCH_SIZE).await?;
-		trace!("Found {} nodes", cluster.len());
-		let mut unreachable_nodes = BTreeMap::new();
-		for cl in &cluster {
-			unreachable_nodes.insert(cl.name.clone(), cl.clone());
-		}
-		// Scan all heartbeats
-		let end_of_time = Timestamp {
-			// We remove one, because the scan range adds one
-			value: u64::MAX - 1,
-		};
-		let hbs = tx.scan_hb(&end_of_time, NON_PAGED_BATCH_SIZE).await?;
-		trace!("Found {} heartbeats", hbs.len());
-		for hb in hbs {
-			match unreachable_nodes.remove(&hb.nd.to_string()) {
-				None => {
-					// Didnt exist in cluster and should be deleted
-					tx.del_hb(hb.hb, hb.nd).await?;
-				}
-				Some(_) => {}
-			}
-		}
-		// Remove unreachable nodes
-		for (_, cl) in unreachable_nodes {
-			trace!("Removing unreachable node {}", cl.name);
-			tx.del_nd(
-				uuid::Uuid::parse_str(&cl.name).map_err(|e| {
-					Error::Unimplemented(format!("cluster id was not uuid: {:?}", e))
-				})?,
-			)
-			.await?;
-		}
-		// Scan node live queries for every node
-		let mut nd_lq_set: BTreeSet<UnreachableLqType> = BTreeSet::new();
-		for cl in &cluster {
-			let nds = tx.scan_ndlq(&uuid::Uuid::parse_str(&cl.name).map_err(|e| {
-                Error::Unimplemented(format!("cluster id was not uuid when parsing to aggregate cluster live queries: {:?}", e))
-            })?, NON_PAGED_BATCH_SIZE).await?;
-			nd_lq_set.extend(nds.into_iter().map(UnreachableLqType::Nd));
-		}
-		trace!("Found {} node live queries", nd_lq_set.len());
-		// Scan tables for all live queries
-		// let mut tb_lqs: Vec<LqValue> = vec![];
-		let mut tb_lq_set: BTreeSet<UnreachableLqType> = BTreeSet::new();
-		for ndlq in &nd_lq_set {
-			let lq = ndlq.get_inner();
-			let tbs = tx.scan_tblq(&lq.ns, &lq.db, &lq.tb, NON_PAGED_BATCH_SIZE).await?;
-			tb_lq_set.extend(tbs.into_iter().map(UnreachableLqType::Tb));
-		}
-		trace!("Found {} table live queries", tb_lq_set.len());
-		// Find and delete missing
-		for missing in nd_lq_set.symmetric_difference(&tb_lq_set) {
-			match missing {
-				UnreachableLqType::Nd(ndlq) => {
-					warn!("Deleting ndlq {:?}", &ndlq);
-					tx.del_ndlq(ndlq.nd.0, ndlq.lq.0, &ndlq.ns, &ndlq.db).await?;
-				}
-				UnreachableLqType::Tb(tblq) => {
-					warn!("Deleting tblq {:?}", &tblq);
-					tx.del_tblq(&tblq.ns, &tblq.db, &tblq.tb, tblq.lq.0).await?;
-				}
-			}
-		}
-		trace!("Successfully cleared cluster of unreachable state");
-		Ok(())
-	}
-
-	// Garbage collection task to run when a client disconnects from a surrealdb node
-	// i.e. we know the node, we are not performing a full wipe on the node
-	// and the wipe must be fully performed by this node
-	pub async fn garbage_collect_dead_session(
-		&self,
-		live_queries: &[uuid::Uuid],
-	) -> Result<(), Error> {
-		let mut tx = self.transaction(Write, Optimistic).await?;
-
-		// Find all the LQs we own, so that we can get the ns/ds from provided uuids
-		// We may improve this in future by tracking in web layer
-		let lqs = tx.scan_ndlq(&self.id, NON_PAGED_BATCH_SIZE).await?;
-		let mut hits = vec![];
-		for lq_value in lqs {
-			if live_queries.contains(&lq_value.lq) {
-				hits.push(lq_value.clone());
-				let lq = crate::key::node::lq::Lq::new(
-					lq_value.nd.0,
-					lq_value.lq.0,
-					lq_value.ns.as_str(),
-					lq_value.db.as_str(),
-				);
-				tx.del(lq).await?;
-				trace!("Deleted lq {:?} as part of session garbage collection", lq_value.clone());
-			}
-		}
-
-		// Now delete the table entries for the live queries
-		for lq in hits {
-			let lv =
-				crate::key::table::lq::new(lq.ns.as_str(), lq.db.as_str(), lq.tb.as_str(), lq.lq.0);
-			tx.del(lv.clone()).await?;
-			trace!("Deleted lv {:?} as part of session garbage collection", lv);
-		}
-		tx.commit().await
-	}
-
-	// Returns a list of live query IDs
-	pub async fn archive_lv_for_node(
-		&self,
-		tx: &mut Transaction,
-		nd: &Uuid,
-		this_node_id: Uuid,
-	) -> Result<Vec<BootstrapOperationResult>, Error> {
-		let lqs = tx.all_lq(nd).await?;
-		trace!("Archiving lqs and found {} LQ entries for {}", lqs.len(), nd);
-		let mut ret: Vec<BootstrapOperationResult> = vec![];
-		for lq in lqs {
-			let lv_res =
-				tx.get_tb_live(lq.ns.as_str(), lq.db.as_str(), lq.tb.as_str(), &lq.lq).await;
-			if let Err(e) = lv_res {
-				error!("Error getting live query for node {}: {:?}", nd, e);
-				ret.push((lq, Some(e)));
-				continue;
-			}
-			let lv = lv_res.unwrap();
-			let archived_lvs = lv.clone().archive(this_node_id);
-			tx.putc_tblq(&lq.ns, &lq.db, &lq.tb, archived_lvs, Some(lv)).await?;
-			ret.push((lq, None));
-		}
-		Ok(ret)
-	}
-
-	/// Given a timestamp, delete all the heartbeats that have expired
-	/// Return the removed heartbeats as they will contain node information
-	pub async fn delete_dead_heartbeats(
-		&self,
-		tx: &mut Transaction,
-		ts: &Timestamp,
-	) -> Result<Vec<Hb>, Error> {
-		let dead = tx.scan_hb(ts, HEARTBEAT_BATCH_SIZE).await?;
-		// Delete the heartbeat and everything nested
-		tx.delr_hb(dead.clone(), NON_PAGED_BATCH_SIZE).await?;
-		for dead_node in dead.clone() {
-			tx.del_nd(dead_node.nd).await?;
-		}
-		Ok::<Vec<Hb>, Error>(dead)
 	}
 
 	// tick is called periodically to perform maintenance tasks.
 	// This is called every TICK_INTERVAL.
+	#[instrument(err, level = "trace", target = "surrealdb::core::kvs::ds", skip(self))]
 	pub async fn tick(&self) -> Result<(), Error> {
 		let now = SystemTime::now().duration_since(UNIX_EPOCH).map_err(|e| {
 			Error::Internal(format!("Clock may have gone backwards: {:?}", e.duration()))
@@ -827,12 +444,20 @@ impl Datastore {
 	// tick_at is the utility function that is called by tick.
 	// It is handy for testing, because it allows you to specify the timestamp,
 	// without depending on a system clock.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::ds", skip(self))]
 	pub async fn tick_at(&self, ts: u64) -> Result<(), Error> {
-		trace!("Ticking at timestamp {} ({:?})", ts, conv::u64_to_versionstamp(ts));
+		trace!(target: TARGET, "Ticking at timestamp {ts} ({:?})", conv::u64_to_versionstamp(ts));
 		let _vs = self.save_timestamp_for_versionstamp(ts).await?;
 		self.garbage_collect_stale_change_feeds(ts).await?;
-		// TODO Add LQ GC
-		// TODO Add Node GC?
+		// Update this node in the cluster
+		self.update_node(self.id).await?;
+		// Mark expired nodes as archived
+		self.expire_nodes().await?;
+		// Cleanup expired nodes data
+		self.cleanup_nodes().await?;
+		// Garbage collect other data
+		self.garbage_collect().await?;
+		// Everything ok
 		Ok(())
 	}
 
@@ -842,8 +467,8 @@ impl Datastore {
 		&self,
 		ts: u64,
 	) -> Result<Option<Versionstamp>, Error> {
-		let mut tx = self.transaction(Write, Optimistic).await?;
-		match self.save_timestamp_for_versionstamp_impl(ts, &mut tx).await {
+		let tx = self.transaction(Write, Optimistic).await?;
+		match self.save_timestamp_for_versionstamp_impl(ts, &tx).await {
             Ok(vs) => Ok(vs),
             Err(e) => {
                 match tx.cancel().await {
@@ -858,41 +483,10 @@ impl Datastore {
         }
 	}
 
-	/// Poll change feeds for live query notifications
-	pub async fn process_lq_notifications(
-		&self,
-		stk: &mut Stk,
-		ctx: &Context<'_>,
-		opt: &Options,
-	) -> Result<(), Error> {
-		process_lq_notifications(self, ctx, stk, opt).await
-	}
-
-	/// Add and kill live queries being track on the datastore
-	/// These get polled by the change feed tick
-	pub(crate) async fn handle_postprocessing_of_statements(
-		&self,
-		lqs: &Vec<TrackedResult>,
-	) -> Result<(), Error> {
-		// Lock the local live queries
-		let mut lq_cf_store = self.lq_cf_store.write().await;
-		for lq in lqs {
-			match lq {
-				TrackedResult::LiveQuery(lq) => {
-					lq_cf_store.register_live_query(lq, Versionstamp::default()).unwrap();
-				}
-				TrackedResult::KillQuery(kill_entry) => {
-					lq_cf_store.unregister_live_query(kill_entry);
-				}
-			}
-		}
-		Ok(())
-	}
-
 	async fn save_timestamp_for_versionstamp_impl(
 		&self,
 		ts: u64,
-		tx: &mut Transaction,
+		tx: &Transaction,
 	) -> Result<Option<Versionstamp>, Error> {
 		let mut vs: Option<Versionstamp> = None;
 		let nses = tx.all_ns().await?;
@@ -904,7 +498,7 @@ impl Datastore {
 			for db in dbs {
 				let db = db.name.as_str();
 				// TODO(SUR-341): This is incorrect, it's a [ns,db] to vs pair
-				vs = Some(tx.set_timestamp_for_versionstamp(ts, ns, db, true).await?);
+				vs = Some(tx.lock().await.set_timestamp_for_versionstamp(ts, ns, db).await?);
 			}
 		}
 		tx.commit().await?;
@@ -913,8 +507,8 @@ impl Datastore {
 
 	// garbage_collect_stale_change_feeds deletes all change feed entries that are older than the watermarks.
 	pub(crate) async fn garbage_collect_stale_change_feeds(&self, ts: u64) -> Result<(), Error> {
-		let mut tx = self.transaction(Write, Optimistic).await?;
-		if let Err(e) = self.garbage_collect_stale_change_feeds_impl(ts, &mut tx).await {
+		let tx = self.transaction(Write, Optimistic).await?;
+		if let Err(e) = self.garbage_collect_stale_change_feeds_impl(&tx, ts).await {
 			return match tx.cancel().await {
                 Ok(_) => {
                     Err(e)
@@ -929,41 +523,13 @@ impl Datastore {
 
 	async fn garbage_collect_stale_change_feeds_impl(
 		&self,
+		tx: &Transaction,
 		ts: u64,
-		tx: &mut Transaction,
 	) -> Result<(), Error> {
-		// TODO Make gc batch size/limit configurable?
-		cf::gc_all_at(tx, ts, Some(100)).await?;
+		cf::gc_all_at(tx, ts).await?;
 		tx.commit().await?;
 		Ok(())
 	}
-
-	// Creates a heartbeat entry for the member indicating to the cluster
-	// that the node is alive.
-	// This is the preferred way of creating heartbeats inside the database, so try to use this.
-	pub async fn heartbeat(&self) -> Result<(), Error> {
-		let mut tx = self.transaction(Write, Optimistic).await?;
-		let timestamp = tx.clock().await;
-		self.heartbeat_full(&mut tx, timestamp, self.id).await?;
-		tx.commit().await
-	}
-
-	// Creates a heartbeat entry for the member indicating to the cluster
-	// that the node is alive. Intended for testing.
-	// This includes all dependencies that are hard to control and is done in such a way for testing.
-	// Inside the database, try to use the heartbeat() function instead.
-	pub async fn heartbeat_full(
-		&self,
-		tx: &mut Transaction,
-		timestamp: Timestamp,
-		node_id: Uuid,
-	) -> Result<(), Error> {
-		tx.set_hb(timestamp, node_id.0).await
-	}
-
-	// -----
-	// End cluster helpers, storage functions here
-	// -----
 
 	/// Create a new transaction on this datastore
 	///
@@ -985,66 +551,60 @@ impl Datastore {
 		write: TransactionType,
 		lock: LockType,
 	) -> Result<Transaction, Error> {
+		// Specify if the transaction is writeable
 		#[allow(unused_variables)]
 		let write = match write {
 			Read => false,
 			Write => true,
 		};
-
+		// Specify if the transaction is lockable
 		#[allow(unused_variables)]
 		let lock = match lock {
 			Pessimistic => true,
 			Optimistic => false,
 		};
-
+		// Create a new transaction on the datastore
 		#[allow(unused_variables)]
 		let inner = match &self.inner {
 			#[cfg(feature = "kv-mem")]
 			Inner::Mem(v) => {
 				let tx = v.transaction(write, lock).await?;
-				super::tx::Inner::Mem(tx)
+				super::tr::Inner::Mem(tx)
 			}
 			#[cfg(feature = "kv-rocksdb")]
 			Inner::RocksDB(v) => {
 				let tx = v.transaction(write, lock).await?;
-				super::tx::Inner::RocksDB(tx)
+				super::tr::Inner::RocksDB(tx)
 			}
 			#[cfg(feature = "kv-indxdb")]
 			Inner::IndxDB(v) => {
 				let tx = v.transaction(write, lock).await?;
-				super::tx::Inner::IndxDB(tx)
+				super::tr::Inner::IndxDB(tx)
 			}
 			#[cfg(feature = "kv-tikv")]
 			Inner::TiKV(v) => {
 				let tx = v.transaction(write, lock).await?;
-				super::tx::Inner::TiKV(tx)
+				super::tr::Inner::TiKV(tx)
 			}
 			#[cfg(feature = "kv-fdb")]
 			Inner::FoundationDB(v) => {
 				let tx = v.transaction(write, lock).await?;
-				super::tx::Inner::FoundationDB(tx)
+				super::tr::Inner::FoundationDB(tx)
 			}
 			#[cfg(feature = "kv-surrealkv")]
 			Inner::SurrealKV(v) => {
 				let tx = v.transaction(write, lock).await?;
-				super::tx::Inner::SurrealKV(tx)
+				super::tr::Inner::SurrealKV(tx)
 			}
 			#[allow(unreachable_patterns)]
 			_ => unreachable!(),
 		};
-
-		let (send, recv): (Sender<TrackedResult>, Receiver<TrackedResult>) =
-			channel::bounded(LQ_CHANNEL_SIZE);
-
-		Ok(Transaction {
+		Ok(Transaction::new(Transactor {
 			inner,
-			cache: super::cache::Cache::default(),
+			stash: super::stash::Stash::default(),
 			cf: cf::Writer::new(),
-			vso: self.versionstamp_oracle.clone(),
 			clock: self.clock.clone(),
-			prepared_async_events: (Arc::new(send), Arc::new(recv)),
-			engine_options: self.engine_options,
-		})
+		}))
 	}
 
 	/// Parse and execute an SQL query
@@ -1063,7 +623,7 @@ impl Datastore {
 	///     Ok(())
 	/// }
 	/// ```
-	#[instrument(level = "debug", skip_all)]
+	#[instrument(level = "debug", target = "surrealdb::core::kvs::ds", skip_all)]
 	pub async fn execute(
 		&self,
 		txt: &str,
@@ -1093,7 +653,7 @@ impl Datastore {
 	///     Ok(())
 	/// }
 	/// ```
-	#[instrument(level = "debug", skip_all)]
+	#[instrument(level = "debug", target = "surrealdb::core::kvs::ds", skip_all)]
 	pub async fn process(
 		&self,
 		ast: Query,
@@ -1116,7 +676,7 @@ impl Datastore {
 		}
 		// Create a new query options
 		let opt = Options::default()
-			.with_id(self.id.0)
+			.with_id(self.id)
 			.with_ns(sess.ns())
 			.with_db(sess.db())
 			.with_live(sess.live())
@@ -1126,7 +686,7 @@ impl Datastore {
 		// Create a new query executor
 		let mut exe = Executor::new(self);
 		// Create a default context
-		let mut ctx = Context::from_ds(
+		let mut ctx = MutableContext::from_ds(
 			self.query_timeout,
 			self.capabilities.clone(),
 			self.index_stores.clone(),
@@ -1144,19 +704,11 @@ impl Datastore {
 			ctx.add_notifications(Some(&channel.0));
 		}
 		// Start an execution context
-		let ctx = sess.context(ctx);
+		sess.context(&mut ctx);
 		// Store the query variables
-		let ctx = vars.attach(ctx)?;
+		vars.attach(&mut ctx)?;
 		// Process all statements
-		let res = exe.execute(ctx, opt, ast).await;
-		match res {
-			Ok((responses, lives)) => {
-				// Register live queries
-				self.handle_postprocessing_of_statements(&lives).await?;
-				Ok(responses)
-			}
-			Err(e) => Err(e),
-		}
+		exe.execute(ctx.freeze(), opt, ast).await
 	}
 
 	/// Ensure a SQL [`Value`] is fully computed
@@ -1177,7 +729,7 @@ impl Datastore {
 	///     Ok(())
 	/// }
 	/// ```
-	#[instrument(level = "debug", skip_all)]
+	#[instrument(level = "debug", target = "surrealdb::core::kvs::ds", skip_all)]
 	pub async fn compute(
 		&self,
 		val: Value,
@@ -1188,9 +740,6 @@ impl Datastore {
 		if sess.expired() {
 			return Err(Error::ExpiredSession);
 		}
-
-		let mut stack = TreeStack::new();
-
 		// Check if anonymous actors can compute values when auth is enabled
 		// TODO(sgirones): Check this as part of the authorisation layer
 		if sess.au.is_anon() && self.auth_enabled && !self.capabilities.allows_guest_access() {
@@ -1201,9 +750,11 @@ impl Datastore {
 			}
 			.into());
 		}
+		// Create a new memory stack
+		let mut stack = TreeStack::new();
 		// Create a new query options
 		let opt = Options::default()
-			.with_id(self.id.0)
+			.with_id(self.id)
 			.with_ns(sess.ns())
 			.with_db(sess.db())
 			.with_live(sess.live())
@@ -1211,7 +762,7 @@ impl Datastore {
 			.with_strict(self.strict)
 			.with_auth_enabled(self.auth_enabled);
 		// Create a default context
-		let mut ctx = Context::default();
+		let mut ctx = MutableContext::default();
 		// Set context capabilities
 		ctx.add_capabilities(self.capabilities.clone());
 		// Set the global query timeout
@@ -1223,21 +774,23 @@ impl Datastore {
 			ctx.add_notifications(Some(&channel.0));
 		}
 		// Start an execution context
-		let ctx = sess.context(ctx);
+		sess.context(&mut ctx);
 		// Store the query variables
-		let ctx = vars.attach(ctx)?;
+		vars.attach(&mut ctx)?;
 		// Start a new transaction
 		let txn = self.transaction(val.writeable().into(), Optimistic).await?.enclose();
-		// Set the context transaction
-		let ctx = ctx.set_transaction(txn.clone());
+		// Store the transaction
+		ctx.set_transaction(txn.clone());
+		// Freeze the context
+		let ctx = ctx.freeze();
 		// Compute the value
 		let res = stack.enter(|stk| val.compute(stk, &ctx, &opt, None)).finish().await;
 		// Store any data
 		match (res.is_ok(), val.writeable()) {
 			// If the compute was successful, then commit if writeable
-			(true, true) => txn.lock().await.commit().await?,
+			(true, true) => txn.commit().await?,
 			// Cancel if the compute was an error, or if readonly
-			(_, _) => txn.lock().await.cancel().await?,
+			(_, _) => txn.cancel().await?,
 		};
 		// Return result
 		res
@@ -1261,14 +814,14 @@ impl Datastore {
 	///     let ds = Datastore::new("memory").await?;
 	///     let ses = Session::owner();
 	///     let val = Value::Future(Box::new(Future::from(Value::Bool(true))));
-	///     let res = ds.evaluate(val, &ses, None).await?;
+	///     let res = ds.evaluate(&val, &ses, None).await?;
 	///     Ok(())
 	/// }
 	/// ```
-	#[instrument(level = "debug", skip_all)]
+	#[instrument(level = "debug", target = "surrealdb::core::kvs::ds", skip_all)]
 	pub async fn evaluate(
 		&self,
-		val: Value,
+		val: &Value,
 		sess: &Session,
 		vars: Variables,
 	) -> Result<Value, Error> {
@@ -1276,11 +829,11 @@ impl Datastore {
 		if sess.expired() {
 			return Err(Error::ExpiredSession);
 		}
-
+		// Create a new memory stack
 		let mut stack = TreeStack::new();
 		// Create a new query options
 		let opt = Options::default()
-			.with_id(self.id.0)
+			.with_id(self.id)
 			.with_ns(sess.ns())
 			.with_db(sess.db())
 			.with_live(sess.live())
@@ -1288,7 +841,7 @@ impl Datastore {
 			.with_strict(self.strict)
 			.with_auth_enabled(self.auth_enabled);
 		// Create a default context
-		let mut ctx = Context::default();
+		let mut ctx = MutableContext::default();
 		// Set context capabilities
 		ctx.add_capabilities(self.capabilities.clone());
 		// Set the global query timeout
@@ -1300,21 +853,23 @@ impl Datastore {
 			ctx.add_notifications(Some(&channel.0));
 		}
 		// Start an execution context
-		let ctx = sess.context(ctx);
+		sess.context(&mut ctx);
 		// Store the query variables
-		let ctx = vars.attach(ctx)?;
+		vars.attach(&mut ctx)?;
 		// Start a new transaction
 		let txn = self.transaction(val.writeable().into(), Optimistic).await?.enclose();
-		let ctx = ctx.set_transaction(txn.clone());
-
+		// Store the transaction
+		ctx.set_transaction(txn.clone());
+		// Free the context
+		let ctx = ctx.freeze();
 		// Compute the value
 		let res = stack.enter(|stk| val.compute(stk, &ctx, &opt, None)).finish().await;
 		// Store any data
 		match (res.is_ok(), val.writeable()) {
 			// If the compute was successful, then commit if writeable
-			(true, true) => txn.lock().await.commit().await?,
+			(true, true) => txn.commit().await?,
 			// Cancel if the compute was an error, or if readonly
-			(_, _) => txn.lock().await.cancel().await?,
+			(_, _) => txn.cancel().await?,
 		};
 		// Return result
 		res
@@ -1339,20 +894,24 @@ impl Datastore {
 	///     Ok(())
 	/// }
 	/// ```
-	#[instrument(level = "debug", skip_all)]
+	#[instrument(level = "debug", target = "surrealdb::core::kvs::ds", skip_all)]
 	pub fn notifications(&self) -> Option<Receiver<Notification>> {
 		self.notification_channel.as_ref().map(|v| v.1.clone())
 	}
 
 	/// Performs a database import from SQL
-	#[instrument(level = "debug", skip(self, sess, sql))]
+	#[instrument(level = "debug", target = "surrealdb::core::kvs::ds", skip_all)]
 	pub async fn import(&self, sql: &str, sess: &Session) -> Result<Vec<Response>, Error> {
+		// Check if the session has expired
+		if sess.expired() {
+			return Err(Error::ExpiredSession);
+		}
 		// Execute the SQL import
 		self.execute(sql, sess, None).await
 	}
 
 	/// Performs a full database export as SQL
-	#[instrument(level = "debug", skip(self, sess, chn))]
+	#[instrument(level = "debug", target = "surrealdb::core::kvs::ds", skip_all)]
 	pub async fn export(
 		&self,
 		sess: &Session,
@@ -1365,7 +924,7 @@ impl Datastore {
 		// Retrieve the provided NS and DB
 		let (ns, db) = crate::iam::check::check_ns_db(sess)?;
 		// Create a new readonly transaction
-		let mut txn = self.transaction(Read, Optimistic).await?;
+		let txn = self.transaction(Read, Optimistic).await?;
 		// Return an async export job
 		Ok(async move {
 			// Process the export
@@ -1376,7 +935,7 @@ impl Datastore {
 	}
 
 	/// Checks the required permissions level for this session
-	#[instrument(level = "debug", skip(self, sess))]
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::ds", skip(self, sess))]
 	pub fn check(&self, sess: &Session, action: Action, resource: Resource) -> Result<(), Error> {
 		// Check if the session has expired
 		if sess.expired() {
@@ -1421,7 +980,7 @@ mod test {
 		let dbs = Datastore::new("memory").await.unwrap().with_capabilities(Capabilities::all());
 
 		let opt = Options::default()
-			.with_id(dbs.id.0)
+			.with_id(dbs.id)
 			.with_ns(Some("test".into()))
 			.with_db(Some("test".into()))
 			.with_live(false)
@@ -1431,12 +990,15 @@ mod test {
 			.with_futures(true);
 
 		// Create a default context
-		let mut ctx = Context::default();
+		let mut ctx = MutableContext::default();
 		// Set context capabilities
 		ctx.add_capabilities(dbs.capabilities.clone());
 		// Start a new transaction
-		let txn = dbs.transaction(val.writeable().into(), Optimistic).await?.enclose();
-		let ctx = ctx.set_transaction(txn);
+		let txn = dbs.transaction(val.writeable().into(), Optimistic).await?;
+		// Store the transaction
+		ctx.set_transaction(txn.enclose());
+		// Freeze the context
+		let ctx = ctx.freeze();
 		// Compute the value
 		let mut stack = reblessive::tree::TreeStack::new();
 		let res = stack.enter(|stk| val.compute(stk, &ctx, &opt, None)).finish().await.unwrap();

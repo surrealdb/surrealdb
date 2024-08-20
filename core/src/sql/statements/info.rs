@@ -9,6 +9,7 @@ use derive::Store;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
+use std::sync::Arc;
 
 #[revisioned(revision = 2)]
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
@@ -66,305 +67,242 @@ impl InfoStatement {
 	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		opt: &Options,
-		_doc: Option<&CursorDoc<'_>>,
+		_doc: Option<&CursorDoc>,
 	) -> Result<Value, Error> {
-		// Allowed to run?
 		match self {
-			InfoStatement::Root(false) => {
+			InfoStatement::Root(structured) => {
 				// Allowed to run?
 				opt.is_allowed(Action::View, ResourceKind::Any, &Base::Root)?;
-				// Claim transaction
-				let mut run = ctx.tx_lock().await;
+				// Get the transaction
+				let txn = ctx.tx();
 				// Create the result set
-				let mut res = Object::default();
-				// Process the namespaces
-				let mut tmp = Object::default();
-				for v in run.all_ns().await?.iter() {
-					tmp.insert(v.name.to_string(), v.to_string().into());
-				}
-				res.insert("namespaces".to_owned(), tmp.into());
-				// Process the users
-				let mut tmp = Object::default();
-				for v in run.all_root_users().await?.iter() {
-					tmp.insert(v.name.to_string(), v.to_string().into());
-				}
-				res.insert("users".to_owned(), tmp.into());
-				// Ok all good
-				Value::from(res).ok()
+				Ok(match structured {
+					true => Value::from(map! {
+						"accesses".to_string() => process(txn.all_root_accesses().await?.iter().map(|v| v.redacted()).collect()),
+						"namespaces".to_string() => process(txn.all_ns().await?),
+						"nodes".to_string() => process(txn.all_nodes().await?),
+						"users".to_string() => process(txn.all_root_users().await?),
+					}),
+					false => Value::from(map! {
+						"accesses".to_string() => {
+							let mut out = Object::default();
+							for v in txn.all_root_accesses().await?.iter().map(|v| v.redacted()) {
+								out.insert(v.name.to_raw(), v.to_string().into());
+							}
+							out.into()
+						},
+						"namespaces".to_string() => {
+							let mut out = Object::default();
+							for v in txn.all_ns().await?.iter() {
+								out.insert(v.name.to_raw(), v.to_string().into());
+							}
+							out.into()
+						},
+						"nodes".to_string() => {
+							let mut out = Object::default();
+							for v in txn.all_nodes().await?.iter() {
+								out.insert(v.id.to_string(), v.to_string().into());
+							}
+							out.into()
+						},
+						"users".to_string() => {
+							let mut out = Object::default();
+							for v in txn.all_root_users().await?.iter() {
+								out.insert(v.name.to_raw(), v.to_string().into());
+							}
+							out.into()
+						},
+					}),
+				})
 			}
-			InfoStatement::Ns(false) => {
+			InfoStatement::Ns(structured) => {
 				// Allowed to run?
 				opt.is_allowed(Action::View, ResourceKind::Any, &Base::Ns)?;
-				// Claim transaction
-				let mut run = ctx.tx_lock().await;
+				// Get the NS
+				let ns = opt.ns()?;
+				// Get the transaction
+				let txn = ctx.tx();
 				// Create the result set
-				let mut res = Object::default();
-				// Process the databases
-				let mut tmp = Object::default();
-				for v in run.all_db(opt.ns()?).await?.iter() {
-					tmp.insert(v.name.to_string(), v.to_string().into());
-				}
-				res.insert("databases".to_owned(), tmp.into());
-				// Process the users
-				let mut tmp = Object::default();
-				for v in run.all_ns_users(opt.ns()?).await?.iter() {
-					tmp.insert(v.name.to_string(), v.to_string().into());
-				}
-				res.insert("users".to_owned(), tmp.into());
-				// Process the accesses
-				let mut tmp = Object::default();
-				for v in run.all_ns_accesses_redacted(opt.ns()?).await?.iter() {
-					tmp.insert(v.name.to_string(), v.to_string().into());
-				}
-				res.insert("accesses".to_owned(), tmp.into());
-				// Ok all good
-				Value::from(res).ok()
+				Ok(match structured {
+					true => Value::from(map! {
+						"accesses".to_string() => process(txn.all_ns_accesses(ns).await?.iter().map(|v| v.redacted()).collect()),
+						"databases".to_string() => process(txn.all_db(ns).await?),
+						"users".to_string() => process(txn.all_ns_users(ns).await?),
+					}),
+					false => Value::from(map! {
+						"accesses".to_string() => {
+							let mut out = Object::default();
+							for v in txn.all_ns_accesses(ns).await?.iter().map(|v| v.redacted()) {
+								out.insert(v.name.to_raw(), v.to_string().into());
+							}
+							out.into()
+						},
+						"databases".to_string() => {
+							let mut out = Object::default();
+							for v in txn.all_db(ns).await?.iter() {
+								out.insert(v.name.to_raw(), v.to_string().into());
+							}
+							out.into()
+						},
+						"users".to_string() => {
+							let mut out = Object::default();
+							for v in txn.all_ns_users(ns).await?.iter() {
+								out.insert(v.name.to_raw(), v.to_string().into());
+							}
+							out.into()
+						},
+					}),
+				})
 			}
-			InfoStatement::Db(false) => {
+			InfoStatement::Db(structured) => {
 				// Allowed to run?
 				opt.is_allowed(Action::View, ResourceKind::Any, &Base::Db)?;
-				// Claim transaction
-				let mut run = ctx.tx_lock().await;
+				// Get the NS and DB
+				let ns = opt.ns()?;
+				let db = opt.db()?;
+				// Get the transaction
+				let txn = ctx.tx();
 				// Create the result set
-				let mut res = Object::default();
-				// Process the users
-				let mut tmp = Object::default();
-				for v in run.all_db_users(opt.ns()?, opt.db()?).await?.iter() {
-					tmp.insert(v.name.to_string(), v.to_string().into());
-				}
-				res.insert("users".to_owned(), tmp.into());
-				// Process the functions
-				let mut tmp = Object::default();
-				for v in run.all_db_functions(opt.ns()?, opt.db()?).await?.iter() {
-					tmp.insert(v.name.to_string(), v.to_string().into());
-				}
-				res.insert("functions".to_owned(), tmp.into());
-				// Process the models
-				let mut tmp = Object::default();
-				for v in run.all_db_models(opt.ns()?, opt.db()?).await?.iter() {
-					tmp.insert(format!("{}<{}>", v.name, v.version), v.to_string().into());
-				}
-				res.insert("models".to_owned(), tmp.into());
-				// Process the params
-				let mut tmp = Object::default();
-				for v in run.all_db_params(opt.ns()?, opt.db()?).await?.iter() {
-					tmp.insert(v.name.to_string(), v.to_string().into());
-				}
-				res.insert("params".to_owned(), tmp.into());
-				// Process the accesses
-				let mut tmp = Object::default();
-				for v in run.all_db_accesses_redacted(opt.ns()?, opt.db()?).await?.iter() {
-					tmp.insert(v.name.to_string(), v.to_string().into());
-				}
-				res.insert("accesses".to_owned(), tmp.into());
-				// Process the tables
-				let mut tmp = Object::default();
-				for v in run.all_tb(opt.ns()?, opt.db()?).await?.iter() {
-					tmp.insert(v.name.to_string(), v.to_string().into());
-				}
-				res.insert("tables".to_owned(), tmp.into());
-				// Process the analyzers
-				let mut tmp = Object::default();
-				for v in run.all_db_analyzers(opt.ns()?, opt.db()?).await?.iter() {
-					tmp.insert(v.name.to_string(), v.to_string().into());
-				}
-				res.insert("analyzers".to_owned(), tmp.into());
-				// Ok all good
-				Value::from(res).ok()
+				Ok(match structured {
+					true => Value::from(map! {
+						"accesses".to_string() => process(txn.all_db_accesses(ns, db).await?.iter().map(|v| v.redacted()).collect()),
+						"analyzers".to_string() => process(txn.all_db_analyzers(ns, db).await?),
+						"functions".to_string() => process(txn.all_db_functions(ns, db).await?),
+						"models".to_string() => process(txn.all_db_models(ns, db).await?),
+						"params".to_string() => process(txn.all_db_params(ns, db).await?),
+						"tables".to_string() => process(txn.all_tb(ns, db).await?),
+						"users".to_string() => process(txn.all_db_users(ns, db).await?),
+					}),
+					false => Value::from(map! {
+						"accesses".to_string() => {
+							let mut out = Object::default();
+							for v in txn.all_db_accesses(ns, db).await?.iter().map(|v| v.redacted()) {
+								out.insert(v.name.to_raw(), v.to_string().into());
+							}
+							out.into()
+						},
+						"analyzers".to_string() => {
+							let mut out = Object::default();
+							for v in txn.all_db_analyzers(ns, db).await?.iter() {
+								out.insert(v.name.to_raw(), v.to_string().into());
+							}
+							out.into()
+						},
+						"functions".to_string() => {
+							let mut out = Object::default();
+							for v in txn.all_db_functions(ns, db).await?.iter() {
+								out.insert(v.name.to_raw(), v.to_string().into());
+							}
+							out.into()
+						},
+						"models".to_string() => {
+							let mut out = Object::default();
+							for v in txn.all_db_models(ns, db).await?.iter() {
+								out.insert(v.name.to_raw(), v.to_string().into());
+							}
+							out.into()
+						},
+						"params".to_string() => {
+							let mut out = Object::default();
+							for v in txn.all_db_params(ns, db).await?.iter() {
+								out.insert(v.name.to_raw(), v.to_string().into());
+							}
+							out.into()
+						},
+						"tables".to_string() => {
+							let mut out = Object::default();
+							for v in txn.all_tb(ns, db).await?.iter() {
+								out.insert(v.name.to_raw(), v.to_string().into());
+							}
+							out.into()
+						},
+						"users".to_string() => {
+							let mut out = Object::default();
+							for v in txn.all_db_users(ns, db).await?.iter() {
+								out.insert(v.name.to_raw(), v.to_string().into());
+							}
+							out.into()
+						},
+					}),
+				})
 			}
-			InfoStatement::Tb(tb, false) => {
+			InfoStatement::Tb(tb, structured) => {
 				// Allowed to run?
 				opt.is_allowed(Action::View, ResourceKind::Any, &Base::Db)?;
-				// Claim transaction
-				let mut run = ctx.tx_lock().await;
+				// Get the NS and DB
+				let ns = opt.ns()?;
+				let db = opt.db()?;
+				// Get the transaction
+				let txn = ctx.tx();
 				// Create the result set
-				let mut res = Object::default();
-				// Process the events
-				let mut tmp = Object::default();
-				for v in run.all_tb_events(opt.ns()?, opt.db()?, tb).await?.iter() {
-					tmp.insert(v.name.to_string(), v.to_string().into());
-				}
-				res.insert("events".to_owned(), tmp.into());
-				// Process the fields
-				let mut tmp = Object::default();
-				for v in run.all_tb_fields(opt.ns()?, opt.db()?, tb).await?.iter() {
-					tmp.insert(v.name.to_string(), v.to_string().into());
-				}
-				res.insert("fields".to_owned(), tmp.into());
-				// Process the tables
-				let mut tmp = Object::default();
-				for v in run.all_tb_views(opt.ns()?, opt.db()?, tb).await?.iter() {
-					tmp.insert(v.name.to_string(), v.to_string().into());
-				}
-				res.insert("tables".to_owned(), tmp.into());
-				// Process the indexes
-				let mut tmp = Object::default();
-				for v in run.all_tb_indexes(opt.ns()?, opt.db()?, tb).await?.iter() {
-					tmp.insert(v.name.to_string(), v.to_string().into());
-				}
-				res.insert("indexes".to_owned(), tmp.into());
-				// Process the live queries
-				let mut tmp = Object::default();
-				for v in run.all_tb_lives(opt.ns()?, opt.db()?, tb).await?.iter() {
-					tmp.insert(v.id.to_raw(), v.to_string().into());
-				}
-				res.insert("lives".to_owned(), tmp.into());
-				// Ok all good
-				Value::from(res).ok()
+				Ok(match structured {
+					true => Value::from(map! {
+						"events".to_string() => process(txn.all_tb_events(ns, db, tb).await?),
+						"fields".to_string() => process(txn.all_tb_fields(ns, db, tb).await?),
+						"indexes".to_string() => process(txn.all_tb_indexes(ns, db, tb).await?),
+						"lives".to_string() => process(txn.all_tb_lives(ns, db, tb).await?),
+						"tables".to_string() => process(txn.all_tb_views(ns, db, tb).await?),
+					}),
+					false => Value::from(map! {
+						"events".to_string() => {
+							let mut out = Object::default();
+							for v in txn.all_tb_events(ns, db, tb).await?.iter() {
+								out.insert(v.name.to_raw(), v.to_string().into());
+							}
+							out.into()
+						},
+						"fields".to_string() => {
+							let mut out = Object::default();
+							for v in txn.all_tb_fields(ns, db, tb).await?.iter() {
+								out.insert(v.name.to_string(), v.to_string().into());
+							}
+							out.into()
+						},
+						"indexes".to_string() => {
+							let mut out = Object::default();
+							for v in txn.all_tb_indexes(ns, db, tb).await?.iter() {
+								out.insert(v.name.to_raw(), v.to_string().into());
+							}
+							out.into()
+						},
+						"lives".to_string() => {
+							let mut out = Object::default();
+							for v in txn.all_tb_lives(ns, db, tb).await?.iter() {
+								out.insert(v.id.to_raw(), v.to_string().into());
+							}
+							out.into()
+						},
+						"tables".to_string() => {
+							let mut out = Object::default();
+							for v in txn.all_tb_views(ns, db, tb).await?.iter() {
+								out.insert(v.name.to_raw(), v.to_string().into());
+							}
+							out.into()
+						},
+					}),
+				})
 			}
-			InfoStatement::User(user, base, false) => {
+			InfoStatement::User(user, base, structured) => {
+				// Get the base type
 				let base = base.clone().unwrap_or(opt.selected_base()?);
 				// Allowed to run?
 				opt.is_allowed(Action::View, ResourceKind::Actor, &base)?;
-
-				// Claim transaction
-				let mut run = ctx.tx_lock().await;
+				// Get the transaction
+				let txn = ctx.tx();
 				// Process the user
 				let res = match base {
-					Base::Root => run.get_root_user(user).await?,
-					Base::Ns => run.get_ns_user(opt.ns()?, user).await?,
-					Base::Db => run.get_db_user(opt.ns()?, opt.db()?, user).await?,
+					Base::Root => txn.get_root_user(user).await?,
+					Base::Ns => txn.get_ns_user(opt.ns()?, user).await?,
+					Base::Db => txn.get_db_user(opt.ns()?, opt.db()?, user).await?,
 					_ => return Err(Error::InvalidLevel(base.to_string())),
 				};
 				// Ok all good
-				Value::from(res.to_string()).ok()
-			}
-			InfoStatement::Root(true) => {
-				// Allowed to run?
-				opt.is_allowed(Action::View, ResourceKind::Any, &Base::Root)?;
-				// Claim transaction
-				let mut run = ctx.tx_lock().await;
-				// Create the result set
-				let mut res = Object::default();
-				// Process the namespaces
-				res.insert("namespaces".to_owned(), process_arr(run.all_ns().await?));
-				// Process the users
-				res.insert("users".to_owned(), process_arr(run.all_root_users().await?));
-				// Ok all good
-				Value::from(res).ok()
-			}
-			InfoStatement::Ns(true) => {
-				// Allowed to run?
-				opt.is_allowed(Action::View, ResourceKind::Any, &Base::Ns)?;
-				// Claim transaction
-				let mut run = ctx.tx_lock().await;
-				// Create the result set
-				let mut res = Object::default();
-				// Process the databases
-				res.insert("databases".to_owned(), process_arr(run.all_db(opt.ns()?).await?));
-				// Process the users
-				res.insert("users".to_owned(), process_arr(run.all_ns_users(opt.ns()?).await?));
-				// Process the accesses
-				res.insert(
-					"accesses".to_owned(),
-					process_arr(run.all_ns_accesses_redacted(opt.ns()?).await?),
-				);
-				// Ok all good
-				Value::from(res).ok()
-			}
-			InfoStatement::Db(true) => {
-				// Allowed to run?
-				opt.is_allowed(Action::View, ResourceKind::Any, &Base::Db)?;
-				// Claim transaction
-				let mut run = ctx.tx_lock().await;
-				// Create the result set
-				let mut res = Object::default();
-				// Process the users
-				res.insert(
-					"users".to_owned(),
-					process_arr(run.all_db_users(opt.ns()?, opt.db()?).await?),
-				);
-				// Process the accesses
-				res.insert(
-					"accesses".to_owned(),
-					process_arr(run.all_db_accesses(opt.ns()?, opt.db()?).await?),
-				);
-				// Process the functions
-				res.insert(
-					"functions".to_owned(),
-					process_arr(run.all_db_functions(opt.ns()?, opt.db()?).await?),
-				);
-				// Process the models
-				res.insert(
-					"models".to_owned(),
-					process_arr(run.all_db_models(opt.ns()?, opt.db()?).await?),
-				);
-				// Process the params
-				res.insert(
-					"params".to_owned(),
-					process_arr(run.all_db_params(opt.ns()?, opt.db()?).await?),
-				);
-				// Process the accesses
-				res.insert(
-					"accesses".to_owned(),
-					process_arr(run.all_db_accesses_redacted(opt.ns()?, opt.db()?).await?),
-				);
-				// Process the tables
-				res.insert(
-					"tables".to_owned(),
-					process_arr(run.all_tb(opt.ns()?, opt.db()?).await?),
-				);
-				// Process the analyzers
-				res.insert(
-					"analyzers".to_owned(),
-					process_arr(run.all_db_analyzers(opt.ns()?, opt.db()?).await?),
-				);
-				// Ok all good
-				Value::from(res).ok()
-			}
-			InfoStatement::Tb(tb, true) => {
-				// Allowed to run?
-				opt.is_allowed(Action::View, ResourceKind::Any, &Base::Db)?;
-				// Claim transaction
-				let mut run = ctx.tx_lock().await;
-				// Create the result set
-				let mut res = Object::default();
-				// Process the events
-				res.insert(
-					"events".to_owned(),
-					process_arr(run.all_tb_events(opt.ns()?, opt.db()?, tb).await?),
-				);
-				// Process the fields
-				res.insert(
-					"fields".to_owned(),
-					process_arr(run.all_tb_fields(opt.ns()?, opt.db()?, tb).await?),
-				);
-				// Process the tables
-				res.insert(
-					"tables".to_owned(),
-					process_arr(run.all_tb_views(opt.ns()?, opt.db()?, tb).await?),
-				);
-				// Process the indexes
-				res.insert(
-					"indexes".to_owned(),
-					process_arr(run.all_tb_indexes(opt.ns()?, opt.db()?, tb).await?),
-				);
-				// Process the live queries
-				res.insert(
-					"lives".to_owned(),
-					process_arr(run.all_tb_lives(opt.ns()?, opt.db()?, tb).await?),
-				);
-				// Ok all good
-				Value::from(res).ok()
-			}
-			InfoStatement::User(user, base, true) => {
-				let base = base.clone().unwrap_or(opt.selected_base()?);
-				// Allowed to run?
-				opt.is_allowed(Action::View, ResourceKind::Actor, &base)?;
-
-				// Claim transaction
-				let mut run = ctx.tx_lock().await;
-				// Process the user
-				let res = match base {
-					Base::Root => run.get_root_user(user).await?,
-					Base::Ns => run.get_ns_user(opt.ns()?, user).await?,
-					Base::Db => run.get_db_user(opt.ns()?, opt.db()?, user).await?,
-					_ => return Err(Error::InvalidLevel(base.to_string())),
-				};
-				// Ok all good
-				Ok(res.structure())
+				Ok(match structured {
+					true => res.as_ref().clone().structure(),
+					false => Value::from(res.to_string()),
+				})
 			}
 		}
 	}
@@ -393,8 +331,6 @@ impl fmt::Display for InfoStatement {
 	}
 }
 
-use std::sync::Arc;
-
 pub(crate) trait InfoStructure {
 	fn structure(self) -> Value;
 }
@@ -411,7 +347,7 @@ impl InfoStatement {
 	}
 }
 
-fn process_arr<T>(a: Arc<[T]>) -> Value
+fn process<T>(a: Arc<[T]>) -> Value
 where
 	T: InfoStructure + Clone,
 {

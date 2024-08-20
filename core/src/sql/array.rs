@@ -42,6 +42,12 @@ impl From<Vec<i32>> for Array {
 	}
 }
 
+impl From<Vec<f32>> for Array {
+	fn from(v: Vec<f32>) -> Self {
+		Self(v.into_iter().map(Value::from).collect())
+	}
+}
+
 impl From<Vec<f64>> for Array {
 	fn from(v: Vec<f64>) -> Self {
 		Self(v.into_iter().map(Value::from).collect())
@@ -135,9 +141,9 @@ impl Array {
 	pub(crate) async fn compute(
 		&self,
 		stk: &mut Stk,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		opt: &Options,
-		doc: Option<&CursorDoc<'_>>,
+		doc: Option<&CursorDoc>,
 	) -> Result<Value, Error> {
 		let mut x = Self::with_capacity(self.len());
 		for v in self.iter() {
@@ -484,6 +490,7 @@ pub(crate) trait Uniq<T> {
 
 impl Uniq<Array> for Array {
 	fn uniq(mut self) -> Array {
+		#[allow(clippy::mutable_key_type)]
 		let mut set: HashSet<&Value> = HashSet::new();
 		let mut to_remove: Vec<usize> = Vec::new();
 		for (i, item) in self.iter().enumerate() {
@@ -495,5 +502,29 @@ impl Uniq<Array> for Array {
 			self.remove(*i);
 		}
 		self
+	}
+}
+
+// ------------------------------
+
+pub(crate) trait Windows<T> {
+	fn windows(self, window_size: usize) -> Result<T, Error>;
+}
+
+impl Windows<Array> for Array {
+	fn windows(self, window_size: usize) -> Result<Array, Error> {
+		if window_size < 1 {
+			return Err(Error::InvalidArguments {
+				name: "array::windows".to_string(),
+				message: "The second argument must be an integer greater than 0".to_string(),
+			});
+		}
+
+		Ok(self
+			.0
+			.windows(window_size)
+			.map::<Value, _>(|chunk| chunk.to_vec().into())
+			.collect::<Vec<_>>()
+			.into())
 	}
 }

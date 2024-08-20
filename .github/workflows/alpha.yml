@@ -35,7 +35,7 @@ jobs:
     uses: ./.github/workflows/reusable_publish_version.yml
     with:
       environment: alpha
-      extra-features: storage-surrealkv
+      extra-features: storage-surrealkv,ml
       git-ref: ${{ inputs.git-ref }}
       patch: ${{ inputs.patch }}
       publish: ${{ inputs.publish }}

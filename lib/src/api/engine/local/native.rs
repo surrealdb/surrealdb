@@ -1,10 +1,8 @@
 use crate::api::conn::Connection;
-use crate::api::conn::DbResponse;
-use crate::api::conn::Method;
-use crate::api::conn::Param;
 use crate::api::conn::Route;
 use crate::api::conn::Router;
 use crate::api::engine::local::Db;
+use crate::api::method::BoxFuture;
 use crate::api::opt::{Endpoint, EndpointKind};
 use crate::api::ExtraFeatures;
 use crate::api::OnceLockExt;
@@ -17,15 +15,13 @@ use crate::kvs::Datastore;
 use crate::opt::auth::Root;
 use crate::opt::WaitFor;
 use crate::options::EngineOptions;
-use flume::Receiver;
-use flume::Sender;
+use channel::Receiver;
+use channel::Sender;
 use futures::stream::poll_fn;
 use futures::StreamExt;
 use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::collections::HashSet;
-use std::future::Future;
-use std::pin::Pin;
 use std::sync::atomic::AtomicI64;
 use std::sync::Arc;
 use std::sync::OnceLock;
@@ -35,27 +31,18 @@ use tokio::sync::watch;
 impl crate::api::Connection for Db {}
 
 impl Connection for Db {
-	fn new(method: Method) -> Self {
-		Self {
-			method,
-		}
-	}
-
-	fn connect(
-		address: Endpoint,
-		capacity: usize,
-	) -> Pin<Box<dyn Future<Output = Result<Surreal<Self>>> + Send + Sync + 'static>> {
+	fn connect(address: Endpoint, capacity: usize) -> BoxFuture<'static, Result<Surreal<Self>>> {
 		Box::pin(async move {
 			let (route_tx, route_rx) = match capacity {
-				0 => flume::unbounded(),
-				capacity => flume::bounded(capacity),
+				0 => channel::unbounded(),
+				capacity => channel::bounded(capacity),
 			};
 
-			let (conn_tx, conn_rx) = flume::bounded(1);
+			let (conn_tx, conn_rx) = channel::bounded(1);
 
 			tokio::spawn(run_router(address, conn_tx, route_rx));
 
-			conn_rx.into_recv_async().await??;
+			conn_rx.recv().await??;
 
 			let mut features = HashSet::new();
 			features.insert(ExtraFeatures::Backup);
@@ -69,22 +56,6 @@ impl Connection for Db {
 				})),
 				Arc::new(watch::channel(Some(WaitFor::Connection))),
 			))
-		})
-	}
-
-	fn send<'r>(
-		&'r mut self,
-		router: &'r Router,
-		param: Param,
-	) -> Pin<Box<dyn Future<Output = Result<Receiver<Result<DbResponse>>>> + Send + Sync + 'r>> {
-		Box::pin(async move {
-			let (sender, receiver) = flume::bounded(1);
-			let route = Route {
-				request: (0, self.method, param),
-				response: sender,
-			};
-			router.sender.send_async(route).await?;
-			Ok(receiver)
 		})
 	}
 }
@@ -110,21 +81,21 @@ pub(crate) async fn run_router(
 	let kvs = match Datastore::new(endpoint).await {
 		Ok(kvs) => {
 			if let Err(error) = kvs.bootstrap().await {
-				let _ = conn_tx.into_send_async(Err(error.into())).await;
+				let _ = conn_tx.send(Err(error.into())).await;
 				return;
 			}
 			// If a root user is specified, setup the initial datastore credentials
 			if let Some(root) = configured_root {
-				if let Err(error) = kvs.setup_initial_creds(root.username, root.password).await {
-					let _ = conn_tx.into_send_async(Err(error.into())).await;
+				if let Err(error) = kvs.initialise_credentials(root.username, root.password).await {
+					let _ = conn_tx.send(Err(error.into())).await;
 					return;
 				}
 			}
-			let _ = conn_tx.into_send_async(Ok(())).await;
+			let _ = conn_tx.send(Ok(())).await;
 			kvs.with_auth_enabled(configured_root.is_some())
 		}
 		Err(error) => {
-			let _ = conn_tx.into_send_async(Err(error.into())).await;
+			let _ = conn_tx.send(Err(error.into())).await;
 			return;
 		}
 	};
@@ -147,10 +118,7 @@ pub(crate) async fn run_router(
 		feature = "kv-fdb",
 		feature = "kv-tikv",
 	))]
-	let kvs = match address.config.temporary_directory {
-		Some(tmp_dir) => kvs.with_temporary_directory(tmp_dir),
-		_ => kvs,
-	};
+	let kvs = kvs.with_temporary_directory(address.config.temporary_directory);
 
 	let kvs = Arc::new(kvs);
 	let mut vars = BTreeMap::new();
@@ -174,22 +142,21 @@ pub(crate) async fn run_router(
 		// constantly polled.
 		None => Poll::Pending,
 	});
-	let mut route_stream = route_rx.into_stream();
 
 	loop {
 		tokio::select! {
-			route = route_stream.next() => {
-				let Some(route) = route else {
+			route = route_rx.recv() => {
+				let Ok(route) = route else {
 					break
 				};
 				match super::router(route.request, &kvs, &mut session, &mut vars, &mut live_queries)
 					.await
 				{
 					Ok(value) => {
-						let _ = route.response.into_send_async(Ok(value)).await;
+						let _ = route.response.send(Ok(value)).await;
 					}
 					Err(error) => {
-						let _ = route.response.into_send_async(Err(error)).await;
+						let _ = route.response.send(Err(error)).await;
 					}
 				}
 			}

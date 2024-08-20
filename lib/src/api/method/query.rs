@@ -1,9 +1,9 @@
 use super::live;
 use super::Stream;
 
-use crate::api::conn::Method;
-use crate::api::conn::Param;
+use crate::api::conn::Command;
 use crate::api::err::Error;
+use crate::api::method::BoxFuture;
 use crate::api::opt;
 use crate::api::Connection;
 use crate::api::ExtraFeatures;
@@ -27,7 +27,6 @@ use serde::Serialize;
 use std::borrow::Cow;
 use std::collections::BTreeMap;
 use std::collections::HashMap;
-use std::future::Future;
 use std::future::IntoFuture;
 use std::mem;
 use std::pin::Pin;
@@ -111,7 +110,7 @@ where
 	Client: Connection,
 {
 	type Output = Result<Response>;
-	type IntoFuture = Pin<Box<dyn Future<Output = Self::Output> + Send + Sync + 'r>>;
+	type IntoFuture = BoxFuture<'r, Self::Output>;
 
 	fn into_future(self) -> Self::IntoFuture {
 		let ValidQuery {
@@ -158,9 +157,12 @@ where
 			let mut query = sql::Query::default();
 			query.0 .0 = query_statements;
 
-			let param = Param::query(query, bindings);
-			let mut conn = Client::new(Method::Query);
-			let mut response = conn.execute_query(router, param).await?;
+			let mut response = router
+				.execute_query(Command::Query {
+					query,
+					variables: bindings,
+				})
+				.await?;
 
 			for idx in query_indicies {
 				let Some((_, result)) = response.results.get(&idx) else {
@@ -170,16 +172,24 @@ where
 				// This is a live query. We are using this as a workaround to avoid
 				// creating another public error variant for this internal error.
 				let res = match result {
-					Ok(id) => live::register::<Client>(router, id.clone()).await.map(|rx| {
-						Stream::new(
-							Surreal::new_from_router_waiter(
-								client.router.clone(),
-								client.waiter.clone(),
-							),
-							id.clone(),
-							Some(rx),
-						)
-					}),
+					Ok(id) => {
+						let Value::Uuid(uuid) = id else {
+							return Err(Error::InternalError(
+								"successfull live query did not return a uuid".to_string(),
+							)
+							.into());
+						};
+						live::register(router, uuid.0).await.map(|rx| {
+							Stream::new(
+								Surreal::new_from_router_waiter(
+									client.router.clone(),
+									client.waiter.clone(),
+								),
+								uuid.0,
+								Some(rx),
+							)
+						})
+					}
 					Err(_) => Err(crate::Error::from(Error::NotLiveQuery(idx))),
 				};
 				response.live_queries.insert(idx, res);
@@ -197,7 +207,7 @@ where
 	Client: Connection,
 {
 	type Output = Result<WithStats<Response>>;
-	type IntoFuture = Pin<Box<dyn Future<Output = Self::Output> + Send + Sync + 'r>>;
+	type IntoFuture = BoxFuture<'r, Self::Output>;
 
 	fn into_future(self) -> Self::IntoFuture {
 		Box::pin(async move {
@@ -266,7 +276,7 @@ where
 	/// # Ok(())
 	/// # }
 	/// ```
-	pub fn bind(self, bindings: impl Serialize) -> Self {
+	pub fn bind(self, bindings: impl Serialize + 'static) -> Self {
 		self.map_valid(move |mut valid| {
 			let mut bindings = to_value(bindings)?;
 			if let Value::Array(array) = &mut bindings {

@@ -22,6 +22,18 @@ user-id = 3987 # Rushmore Mushambi (rushmorem)
 start = "2021-02-25"
 end = "2025-01-24"
 
+[[trusted.anyhow]]
+criteria = "safe-to-deploy"
+user-id = 3618 # David Tolnay (dtolnay)
+start = "2019-10-05"
+end = "2025-08-06"
+
+[[trusted.async-trait]]
+criteria = "safe-to-deploy"
+user-id = 3618 # David Tolnay (dtolnay)
+start = "2019-07-23"
+end = "2025-08-06"
+
 [[trusted.dmp]]
 criteria = "safe-to-deploy"
 user-id = 145457 # Tobie Morgan Hitchcock (tobiemh)
@@ -34,11 +46,65 @@ user-id = 145457 # Tobie Morgan Hitchcock (tobiemh)
 start = "2022-01-27"
 end = "2025-01-24"
 
+[[trusted.h2]]
+criteria = "safe-to-deploy"
+user-id = 359 # Sean McArthur (seanmonstar)
+start = "2019-03-13"
+end = "2025-08-06"
+
 [[trusted.hashbrown]]
 criteria = "safe-to-deploy"
 user-id = 2915 # Amanieu d'Antras (Amanieu)
 start = "2019-04-02"
 end = "2025-05-02"
+
+[[trusted.headers]]
+criteria = "safe-to-deploy"
+user-id = 359 # Sean McArthur (seanmonstar)
+start = "2019-09-09"
+end = "2025-08-06"
+
+[[trusted.headers-core]]
+criteria = "safe-to-deploy"
+user-id = 359 # Sean McArthur (seanmonstar)
+start = "2019-06-11"
+end = "2025-08-06"
+
+[[trusted.http]]
+criteria = "safe-to-deploy"
+user-id = 359 # Sean McArthur (seanmonstar)
+start = "2019-04-05"
+end = "2025-08-06"
+
+[[trusted.http-body-util]]
+criteria = "safe-to-deploy"
+user-id = 359 # Sean McArthur (seanmonstar)
+start = "2022-10-25"
+end = "2025-08-06"
+
+[[trusted.httparse]]
+criteria = "safe-to-deploy"
+user-id = 359 # Sean McArthur (seanmonstar)
+start = "2019-07-03"
+end = "2025-08-06"
+
+[[trusted.hyper]]
+criteria = "safe-to-deploy"
+user-id = 359 # Sean McArthur (seanmonstar)
+start = "2019-03-01"
+end = "2025-08-06"
+
+[[trusted.hyper-tls]]
+criteria = "safe-to-deploy"
+user-id = 359 # Sean McArthur (seanmonstar)
+start = "2019-03-19"
+end = "2025-08-06"
+
+[[trusted.hyper-util]]
+criteria = "safe-to-deploy"
+user-id = 359 # Sean McArthur (seanmonstar)
+start = "2022-01-15"
+end = "2025-08-06"
 
 [[trusted.indxdb]]
 criteria = "safe-to-deploy"
@@ -52,11 +118,53 @@ user-id = 145457 # Tobie Morgan Hitchcock (tobiemh)
 start = "2023-03-26"
 end = "2025-01-24"
 
+[[trusted.mime]]
+criteria = "safe-to-deploy"
+user-id = 359 # Sean McArthur (seanmonstar)
+start = "2019-09-09"
+end = "2025-08-06"
+
+[[trusted.num_cpus]]
+criteria = "safe-to-deploy"
+user-id = 359 # Sean McArthur (seanmonstar)
+start = "2019-06-10"
+end = "2025-08-06"
+
+[[trusted.paste]]
+criteria = "safe-to-deploy"
+user-id = 3618 # David Tolnay (dtolnay)
+start = "2019-03-19"
+end = "2025-08-06"
+
+[[trusted.prettyplease]]
+criteria = "safe-to-deploy"
+user-id = 3618 # David Tolnay (dtolnay)
+start = "2022-01-04"
+end = "2025-08-06"
+
 [[trusted.psl-types]]
 criteria = "safe-to-deploy"
 user-id = 3987 # Rushmore Mushambi (rushmorem)
 start = "2021-03-12"
 end = "2025-01-24"
+
+[[trusted.ref-cast]]
+criteria = "safe-to-deploy"
+user-id = 3618 # David Tolnay (dtolnay)
+start = "2019-05-05"
+end = "2025-08-06"
+
+[[trusted.ref-cast-impl]]
+criteria = "safe-to-deploy"
+user-id = 3618 # David Tolnay (dtolnay)
+start = "2019-05-05"
+end = "2025-08-06"
+
+[[trusted.reqwest]]
+criteria = "safe-to-deploy"
+user-id = 359 # Sean McArthur (seanmonstar)
+start = "2019-03-04"
+end = "2025-08-06"
 
 [[trusted.revision]]
 criteria = "safe-to-deploy"
@@ -70,6 +178,42 @@ user-id = 145457 # Tobie Morgan Hitchcock (tobiemh)
 start = "2023-08-09"
 end = "2025-01-24"
 
+[[trusted.ryu]]
+criteria = "safe-to-deploy"
+user-id = 3618 # David Tolnay (dtolnay)
+start = "2019-05-02"
+end = "2025-08-06"
+
+[[trusted.serde]]
+criteria = "safe-to-deploy"
+user-id = 3618 # David Tolnay (dtolnay)
+start = "2019-03-01"
+end = "2025-08-18"
+
+[[trusted.serde_bytes]]
+criteria = "safe-to-deploy"
+user-id = 3618 # David Tolnay (dtolnay)
+start = "2019-02-25"
+end = "2025-08-06"
+
+[[trusted.serde_derive]]
+criteria = "safe-to-deploy"
+user-id = 3618 # David Tolnay (dtolnay)
+start = "2019-03-01"
+end = "2025-08-18"
+
+[[trusted.serde_json]]
+criteria = "safe-to-deploy"
+user-id = 3618 # David Tolnay (dtolnay)
+start = "2019-02-28"
+end = "2025-08-06"
+
+[[trusted.serde_path_to_error]]
+criteria = "safe-to-deploy"
+user-id = 3618 # David Tolnay (dtolnay)
+start = "2019-08-20"
+end = "2025-08-06"
+
 [[trusted.storekey]]
 criteria = "safe-to-deploy"
 user-id = 145457 # Tobie Morgan Hitchcock (tobiemh)
@@ -81,6 +225,12 @@ criteria = "safe-to-deploy"
 user-id = 145457 # Tobie Morgan Hitchcock (tobiemh)
 start = "2022-07-19"
 end = "2025-01-24"
+
+[[trusted.surrealdb-async-graphql-axum]]
+criteria = "safe-to-deploy"
+user-id = 145457 # Tobie Morgan Hitchcock (tobiemh)
+start = "2024-08-07"
+end = "2025-08-07"
 
 [[trusted.surrealdb-core]]
 criteria = "safe-to-deploy"
@@ -100,6 +250,12 @@ user-id = 3987 # Rushmore Mushambi (rushmorem)
 start = "2023-08-29"
 end = "2025-01-24"
 
+[[trusted.surrealdb-tikv-client]]
+criteria = "safe-to-deploy"
+user-id = 217605 # Yusuke Kuoka (mumoshu)
+start = "2023-06-19"
+end = "2025-07-08"
+
 [[trusted.surrealkv]]
 criteria = "safe-to-deploy"
 user-id = 145457 # Tobie Morgan Hitchcock (tobiemh)
@@ -112,11 +268,23 @@ user-id = 145457 # Tobie Morgan Hitchcock (tobiemh)
 start = "2023-10-31"
 end = "2025-01-24"
 
+[[trusted.syn]]
+criteria = "safe-to-deploy"
+user-id = 3618 # David Tolnay (dtolnay)
+start = "2019-03-01"
+end = "2025-08-06"
+
 [[trusted.trice]]
 criteria = "safe-to-deploy"
 user-id = 145457 # Tobie Morgan Hitchcock (tobiemh)
 start = "2022-02-17"
 end = "2025-01-24"
+
+[[trusted.unicase]]
+criteria = "safe-to-deploy"
+user-id = 359 # Sean McArthur (seanmonstar)
+start = "2019-03-05"
+end = "2025-08-06"
 
 [[trusted.vart]]
 criteria = "safe-to-deploy"

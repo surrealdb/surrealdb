@@ -29,6 +29,7 @@ pub enum ResourceKind {
 	Event,
 	Field,
 	Index,
+	Access,
 
 	// IAM
 	Actor,
@@ -51,6 +52,7 @@ impl std::fmt::Display for ResourceKind {
 			ResourceKind::Event => write!(f, "Event"),
 			ResourceKind::Field => write!(f, "Field"),
 			ResourceKind::Index => write!(f, "Index"),
+			ResourceKind::Access => write!(f, "Access"),
 			ResourceKind::Actor => write!(f, "Actor"),
 		}
 	}

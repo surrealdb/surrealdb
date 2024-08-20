@@ -170,6 +170,16 @@ impl Multiply for Vec<Number> {
 	}
 }
 
+pub trait Scale {
+	fn scale(&self, other: &Number) -> Result<Vec<Number>, Error>;
+}
+
+impl Scale for Vec<Number> {
+	fn scale(&self, other: &Number) -> Result<Vec<Number>, Error> {
+		Ok(self.iter().map(|a| a * other).collect())
+	}
+}
+
 pub trait Project {
 	/// Projection of two vectors
 	fn project(&self, other: &Self) -> Result<Vec<Number>, Error>;

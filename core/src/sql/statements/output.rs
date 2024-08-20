@@ -1,10 +1,9 @@
+use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::sql::fetch::Fetchs;
 use crate::sql::value::Value;
-use crate::sql::{Ident, Idiom};
-use crate::{ctx::Context, sql::Part};
 use derive::Store;
 use reblessive::tree::Stk;
 use revision::revisioned;
@@ -29,9 +28,9 @@ impl OutputStatement {
 	pub(crate) async fn compute(
 		&self,
 		stk: &mut Stk,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		opt: &Options,
-		doc: Option<&CursorDoc<'_>>,
+		doc: Option<&CursorDoc>,
 	) -> Result<Value, Error> {
 		// Ensure futures are processed
 		let opt = &opt.new_with_futures(true);
@@ -39,23 +38,11 @@ impl OutputStatement {
 		let mut value = self.what.compute(stk, ctx, opt, doc).await?;
 		// Fetch any
 		if let Some(fetchs) = &self.fetch {
+			let mut idioms = Vec::with_capacity(fetchs.0.len());
 			for fetch in fetchs.iter() {
-				let i: &Idiom;
-				let new_idiom: Idiom;
-				if let Value::Idiom(idiom) = &fetch.0 {
-					i = idiom;
-				} else if let Value::Param(param) = &fetch.0 {
-					let p = param.compute(stk, ctx, opt, None).await?;
-					if let Value::Strand(s) = p {
-						let p: Part = Part::Field(Ident(s.0));
-						new_idiom = Idiom(vec![p]);
-						i = &new_idiom;
-					} else {
-						return Err(Error::Thrown("Parameter should be a string".to_string()));
-					}
-				} else {
-					return Err(Error::Thrown("Invalid field".to_string()));
-				}
+				fetch.compute(stk, ctx, opt, &mut idioms).await?
+			}
+			for i in &idioms {
 				value.fetch(stk, ctx, opt, i).await?;
 			}
 		}
