@@ -1363,9 +1363,6 @@ async fn return_bool() {
 	assert_eq!(value.into_inner(), CoreValue::Bool(false));
 }
 
-/*
- * TODO: Reenable test.
- * Disabling run test for now as it depends on value conversions which are removed
 #[test_log::test(tokio::test)]
 async fn run() {
 	let (permit, db) = new_db().await;
@@ -1384,24 +1381,23 @@ async fn run() {
 	";
 	let _ = db.query(sql).await;
 
-	let tmp = db.run("fn::foo", ()).await.unwrap();
-	assert_eq!(tmp, Value::from(42));
+	let tmp: i32 = db.run("fn::foo").await.unwrap();
+	assert_eq!(tmp, 42);
 
-	let tmp = db.run("fn::foo", 7).await.unwrap_err();
+	let tmp = db.run::<i32>("fn::foo").args(7).await.unwrap_err();
 	println!("fn::foo res: {tmp}");
 	assert!(tmp.to_string().contains("The function expects 0 arguments."));
 
-	let tmp = db.run("fn::idnotexist", ()).await.unwrap_err();
+	let tmp = db.run::<()>("fn::idnotexist").await.unwrap_err();
 	println!("fn::idontexist res: {tmp}");
 	assert!(tmp.to_string().contains("The function 'fn::idnotexist' does not exist"));
 
-	let tmp = db.run("count", Value::from(vec![1, 2, 3])).await.unwrap();
-	assert_eq!(tmp, Value::from(3));
+	let tmp: usize = db.run("count").args(vec![1, 2, 3]).await.unwrap();
+	assert_eq!(tmp, 3);
 
-	let tmp = db.run("fn::bar", 7).await.unwrap();
-	assert_eq!(tmp, Value::None);
+	let tmp: Option<RecordId> = db.run("fn::bar").args(7).await.unwrap();
+	assert_eq!(tmp, None);
 
-	let tmp = db.run("fn::baz", ()).await.unwrap();
-	assert_eq!(tmp, Value::from(7));
+	let tmp: i32 = db.run("fn::baz").await.unwrap();
+	assert_eq!(tmp, 7);
 }
-*/

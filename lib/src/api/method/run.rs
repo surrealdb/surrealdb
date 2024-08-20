@@ -1,30 +1,35 @@
 use crate::api::conn::Command;
+use crate::api::method::BoxFuture;
 use crate::api::Connection;
 use crate::api::Result;
 use crate::method::OnceLockExt;
+use crate::sql::Value;
 use crate::Surreal;
-use crate::Value;
+use serde::de::DeserializeOwned;
+use serde::Serialize;
+use serde_content::Serializer;
+use serde_content::Value as Content;
 use std::borrow::Cow;
 use std::future::IntoFuture;
-use surrealdb_core::sql::Array as CoreArray;
-
-use super::BoxFuture;
+use std::marker::PhantomData;
+use surrealdb_core::sql::to_value;
+use surrealdb_core::sql::Array;
 
 /// A run future
 #[derive(Debug)]
 #[must_use = "futures do nothing unless you `.await` or poll them"]
-pub struct Run<'r, C: Connection> {
+pub struct Run<'r, C: Connection, R> {
 	pub(super) client: Cow<'r, Surreal<C>>,
-	pub(super) name: String,
-	pub(super) version: Option<String>,
-	pub(super) args: CoreArray,
+	pub(super) function: Result<(String, Option<String>)>,
+	pub(super) args: serde_content::Result<serde_content::Value<'static>>,
+	pub(super) response_type: PhantomData<R>,
 }
-impl<C> Run<'_, C>
+impl<C, R> Run<'_, C, R>
 where
 	C: Connection,
 {
 	/// Converts to an owned type which can easily be moved to a different thread
-	pub fn into_owned(self) -> Run<'static, C> {
+	pub fn into_owned(self) -> Run<'static, C, R> {
 		Run {
 			client: Cow::Owned(self.client.into_owned()),
 			..self
@@ -32,24 +37,36 @@ where
 	}
 }
 
-impl<'r, Client> IntoFuture for Run<'r, Client>
+impl<'r, Client, R> IntoFuture for Run<'r, Client, R>
 where
 	Client: Connection,
+	R: DeserializeOwned,
 {
-	type Output = Result<Value>;
+	type Output = Result<R>;
 	type IntoFuture = BoxFuture<'r, Self::Output>;
 
 	fn into_future(self) -> Self::IntoFuture {
 		let Run {
 			client,
-			name,
-			version,
+			function,
 			args,
+			..
 		} = self;
 		Box::pin(async move {
 			let router = client.router.extract()?;
+			let (name, version) = function?;
+			let value = match args.map_err(crate::error::Db::from)? {
+				// Tuples are treated as multiple function arguments
+				Content::Tuple(tup) => tup,
+				// Everything else is treated as a single argument
+				content => vec![content],
+			};
+			let args = match to_value(value)? {
+				Value::Array(array) => array,
+				value => Array::from(vec![value]),
+			};
 			router
-				.execute_value(Command::Run {
+				.execute(Command::Run {
 					name,
 					version,
 					args,
@@ -59,132 +76,57 @@ where
 	}
 }
 
-pub trait IntoArgs {
-	fn into_args(self) -> Vec<Value>;
-}
-
-impl IntoArgs for Value {
-	fn into_args(self) -> Vec<Value> {
-		vec![self]
-	}
-}
-
-impl<T> IntoArgs for Vec<T>
+impl<'r, Client, R> Run<'r, Client, R>
 where
-	T: Into<Value>,
+	Client: Connection,
 {
-	fn into_args(self) -> Vec<Value> {
-		self.into_iter().map(Into::into).collect()
+	/// Supply arguments to the function being run.
+	pub fn args(mut self, args: impl Serialize) -> Self {
+		self.args = Serializer::new().serialize(args);
+		self
 	}
 }
 
-impl<T, const N: usize> IntoArgs for [T; N]
-where
-	T: Into<Value>,
-{
-	fn into_args(self) -> Vec<Value> {
-		self.into_iter().map(Into::into).collect()
-	}
-}
-
-impl<T, const N: usize> IntoArgs for &[T; N]
-where
-	T: Into<Value> + Clone,
-{
-	fn into_args(self) -> Vec<Value> {
-		self.iter().cloned().map(Into::into).collect()
-	}
-}
-
-impl<T> IntoArgs for &[T]
-where
-	T: Into<Value> + Clone,
-{
-	fn into_args(self) -> Vec<Value> {
-		self.iter().cloned().map(Into::into).collect()
-	}
-}
-
-macro_rules! impl_args_tuple {
-    ($($i:ident), *$(,)?) => {
-		impl_args_tuple!(@marker $($i,)*);
-    };
-    ($($cur:ident,)* @marker $head:ident, $($tail:ident,)*) => {
-		impl<$($cur: Into<Value>,)*> IntoArgs for ($($cur,)*) {
-			#[allow(non_snake_case)]
-			fn into_args(self) -> Vec<Value> {
-				let ($($cur,)*) = self;
-				vec![$($cur.into(),)*]
-			}
-		}
-
-		impl_args_tuple!($($cur,)* $head, @marker $($tail,)*);
-	};
-    ($($cur:ident,)* @marker ) => {
-		impl<$($cur: Into<Value>,)*> IntoArgs for ($($cur,)*) {
-			#[allow(non_snake_case)]
-			fn into_args(self) -> Vec<Value> {
-				let ($($cur,)*) = self;
-				vec![$($cur.into(),)*]
-			}
-		}
-	}
-}
-
-impl_args_tuple!(A, B, C, D, E, F,);
-
-/* TODO: Removed for now.
- * The detach value PR removed a lot of conversion methods with, pending later request which might
- * add them back depending on how the sdk turns out.
- *
-macro_rules! into_impl {
-	($type:ty) => {
-		impl IntoArgs for $type {
-			fn into_args(self) -> Vec<Value> {
-				vec![Value::from(self)]
-			}
-		}
-	};
-}
-into_impl!(i8);
-into_impl!(i16);
-into_impl!(i32);
-into_impl!(i64);
-into_impl!(i128);
-into_impl!(u8);
-into_impl!(u16);
-into_impl!(u32);
-into_impl!(u64);
-into_impl!(u128);
-into_impl!(usize);
-into_impl!(isize);
-into_impl!(f32);
-into_impl!(f64);
-into_impl!(String);
-into_impl!(&str);
-*/
-
+/// Converts a function into name and version parts
 pub trait IntoFn {
-	fn into_fn(self) -> (String, Option<String>);
+	/// Handles the conversion of the function string
+	fn into_fn(self) -> Result<(String, Option<String>)>;
 }
 
 impl IntoFn for String {
-	fn into_fn(self) -> (String, Option<String>) {
-		(self, None)
-	}
-}
-impl IntoFn for &str {
-	fn into_fn(self) -> (String, Option<String>) {
-		(self.to_owned(), None)
+	fn into_fn(self) -> Result<(String, Option<String>)> {
+		match self.split_once('<') {
+			Some((name, rest)) => match rest.strip_suffix('>') {
+				Some(version) => Ok((name.to_owned(), Some(version.to_owned()))),
+				None => Err(crate::error::Db::InvalidFunction {
+					name: self,
+					message: "function version is missing a clossing '>'".to_owned(),
+				}
+				.into()),
+			},
+			None => Ok((self, None)),
+		}
 	}
 }
 
-impl<S0, S1> IntoFn for (S0, S1)
-where
-	S0: Into<String>,
-	S1: Into<String>,
-{
-	fn into_fn(self) -> (String, Option<String>) {
-		(self.0.into(), Some(self.1.into()))
+impl IntoFn for &str {
+	fn into_fn(self) -> Result<(String, Option<String>)> {
+		match self.split_once('<') {
+			Some((name, rest)) => match rest.strip_suffix('>') {
+				Some(version) => Ok((name.to_owned(), Some(version.to_owned()))),
+				None => Err(crate::error::Db::InvalidFunction {
+					name: self.to_owned(),
+					message: "function version is missing a clossing '>'".to_owned(),
+				}
+				.into()),
+			},
+			None => Ok((self.to_owned(), None)),
+		}
+	}
+}
+
+impl IntoFn for &String {
+	fn into_fn(self) -> Result<(String, Option<String>)> {
+		self.as_str().into_fn()
 	}
 }

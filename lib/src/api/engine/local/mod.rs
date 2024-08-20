@@ -52,7 +52,6 @@ use surrealdb_core::{
 };
 use uuid::Uuid;
 
-#[cfg(not(target_arch = "wasm32"))]
 use crate::api::err::Error;
 #[cfg(not(target_arch = "wasm32"))]
 use std::path::PathBuf;
@@ -1008,28 +1007,24 @@ async fn router(
 			version: _version,
 			args,
 		} => {
-			let func: CoreValue = if let Some(name) = name.strip_prefix("fn::") {
-				Function::Custom(name.to_owned(), args.0).into()
-			} else if let Some(_name) = name.strip_prefix("ml::") {
-				#[cfg(feature = "ml")]
-				{
-					let mut model = Model::default();
-
-					model.name = _name.to_owned();
-					model.args = args.0;
-					model.version = _version
-						.ok_or(Error::Query("ML functions must have a version".to_string()))?;
-					model.into()
-				}
-				#[cfg(not(feature = "ml"))]
-				{
-					return Err(crate::error::Db::InvalidModel {
-						message: "Machine learning computation is not enabled.".to_owned(),
+			let func: CoreValue = match name.strip_prefix("fn::") {
+				Some(name) => Function::Custom(name.to_owned(), args.0).into(),
+				None => match name.strip_prefix("ml::") {
+					#[cfg(feature = "ml")]
+					Some(name) => {
+						let mut tmp = Model::default();
+						tmp.name = name.to_owned();
+						tmp.args = args.0;
+						tmp.version = _version
+							.ok_or(Error::Query("ML functions must have a version".to_string()))?;
+						tmp.into()
 					}
-					.into());
-				}
-			} else {
-				Function::Custom(name, args.0).into()
+					#[cfg(not(feature = "ml"))]
+					Some(_) => {
+						return Err(Error::Query(format!("tried to call an ML function `{name}` but the `ml` feature is not enabled")).into());
+					}
+					None => Function::Normal(name, args.0).into(),
+				},
 			};
 
 			let stmt = Statement::Value(func);
