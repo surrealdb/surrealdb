@@ -89,7 +89,7 @@ revision = { version = "0.8.0", features = [
     "rust_decimal",
     "uuid",
 ] }
-rust_decimal = { version = "1.33.1", features = ["maths", "serde-str"] }
+rust_decimal = { version = "1.36.0", features = ["maths", "serde-str"] }
 rustls = { version = "0.23.12", default-features = false, features = [
     "ring",
     "logging",

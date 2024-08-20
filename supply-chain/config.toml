@@ -1432,7 +1432,7 @@ version = "1.2.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.rust_decimal]]
-version = "1.35.0"
+version = "1.36.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.rustc_lexer]]
