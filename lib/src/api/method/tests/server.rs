@@ -101,16 +101,6 @@ pub(super) fn mock(route_rx: Receiver<Route>) {
 					}
 					_ => unreachable!(),
 				},
-				// Command::Run => match &params[..] {
-				// 	[Value::Strand(..), Value::Strand(..), Value::Array(..)] => {
-				// 		Ok(DbResponse::Other(Value::None))
-				// 	}
-				// 	[Value::Strand(..), Value::None, Value::Array(..)] => {
-				// 		Ok(DbResponse::Other(Value::None))
-				// 	}
-				// 	_ => unreachable!(),
-				// },
-				// Command::R
 				Command::Run {
 					..
 				} => Ok(DbResponse::Other(Value::None)),
