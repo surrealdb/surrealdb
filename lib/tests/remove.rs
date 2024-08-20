@@ -1171,7 +1171,7 @@ async fn permissions_checks_remove_index() {
 	// Define the expected results for the check statement when the test statement succeeded and when it failed
 	let check_results = [
 		vec!["{ events: {  }, fields: {  }, indexes: {  }, lives: {  }, tables: {  } }"],
-        vec!["{ events: {  }, fields: {  }, indexes: { index: { sql: 'DEFINE INDEX index ON TB FIELDS field' } }, lives: {  }, tables: {  } }"],
+        vec!["{ events: {  }, fields: {  }, indexes: { index: 'DEFINE INDEX index ON TB FIELDS field' }, lives: {  }, tables: {  } }"],
     ];
 
 	let test_cases = [

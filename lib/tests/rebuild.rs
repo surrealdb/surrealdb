@@ -41,7 +41,7 @@ async fn rebuild_index_statement() -> Result<(), Error> {
 				events: {},
 				fields: {},
 				indexes: {
-					uniq_isbn: { sql: 'DEFINE INDEX uniq_isbn ON book FIELDS isbn UNIQUE' }
+					uniq_isbn: 'DEFINE INDEX uniq_isbn ON book FIELDS isbn UNIQUE'
 				},
 				lives: {},
 				tables: {}
@@ -59,9 +59,9 @@ async fn rebuild_index_statement() -> Result<(), Error> {
 				events: {},
 				fields: {},
 				indexes: {
-					ft_title: { sql: 'DEFINE INDEX ft_title ON book FIELDS title SEARCH ANALYZER simple BM25(1.2,0.75) DOC_IDS_ORDER 100 DOC_LENGTHS_ORDER 100 POSTINGS_ORDER 100 TERMS_ORDER 100 DOC_IDS_CACHE 100 DOC_LENGTHS_CACHE 100 POSTINGS_CACHE 100 TERMS_CACHE 100 HIGHLIGHTS' },
-					idx_author: { sql: 'DEFINE INDEX idx_author ON book FIELDS author' },
-					uniq_isbn: { sql: 'DEFINE INDEX uniq_isbn ON book FIELDS isbn UNIQUE' }
+					ft_title: 'DEFINE INDEX ft_title ON book FIELDS title SEARCH ANALYZER simple BM25(1.2,0.75) DOC_IDS_ORDER 100 DOC_LENGTHS_ORDER 100 POSTINGS_ORDER 100 TERMS_ORDER 100 DOC_IDS_CACHE 100 DOC_LENGTHS_CACHE 100 POSTINGS_CACHE 100 TERMS_CACHE 100 HIGHLIGHTS',
+					idx_author: 'DEFINE INDEX idx_author ON book FIELDS author',
+					uniq_isbn: 'DEFINE INDEX uniq_isbn ON book FIELDS isbn UNIQUE'
 				},
 				lives: {},
 				tables: {}

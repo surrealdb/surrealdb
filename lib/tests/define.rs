@@ -649,7 +649,7 @@ async fn define_statement_index_single_simple() -> Result<(), Error> {
 			events: {},
 			fields: {},
 			tables: {},
-			indexes: { test: { sql: 'DEFINE INDEX test ON user FIELDS age' }},
+			indexes: { test: 'DEFINE INDEX test ON user FIELDS age' },
 			lives: {},
 		}",
 	)?;
@@ -674,7 +674,7 @@ async fn define_statement_index_single() -> Result<(), Error> {
 			events: {},
 			fields: {},
 			tables: {},
-			indexes: { test: { sql:'DEFINE INDEX test ON user FIELDS email' } },
+			indexes: { test: 'DEFINE INDEX test ON user FIELDS email' },
 			lives: {},
 		}",
 	)?;
@@ -693,6 +693,7 @@ async fn define_statement_index_concurrently() -> Result<(), Error> {
 		DEFINE INDEX test ON user FIELDS email CONCURRENTLY;
 		SLEEP 1s;
 		INFO FOR TABLE user;
+		INFO FOR INDEX test ON user;
 	";
 	let mut t = Test::new(sql).await?;
 	t.skip_ok(4)?;
@@ -702,12 +703,17 @@ async fn define_statement_index_concurrently() -> Result<(), Error> {
 			fields: {},
 			tables: {},
 			indexes: {
-				test: {
+				test: 'DEFINE INDEX test ON user FIELDS email',
 					building: { status: 'built' },
-					sql: 'DEFINE INDEX test ON user FIELDS email'
+					sql:
 				}
 			},
 			lives: {},
+		}",
+	)?;
+	t.expect_val(
+		"{
+			building: { status: 'built' }
 		}",
 	)?;
 
@@ -765,7 +771,7 @@ async fn define_statement_index_single_unique() -> Result<(), Error> {
 			events: {},
 			fields: {},
 			tables: {},
-			indexes: { test: { sql: 'DEFINE INDEX test ON user FIELDS email UNIQUE' } },
+			indexes: { test: 'DEFINE INDEX test ON user FIELDS email UNIQUE' },
 			lives: {},
 		}",
 	)?;
@@ -924,7 +930,7 @@ async fn define_statement_index_single_unique_embedded_multiple() -> Result<(), 
 			events: {},
 			fields: {},
 			tables: {},
-			indexes: { test: { sql: 'DEFINE INDEX test ON user FIELDS tags UNIQUE' } },
+			indexes: { test: 'DEFINE INDEX test ON user FIELDS tags UNIQUE' },
 			lives: {},
 		}",
 	)?;
@@ -952,7 +958,7 @@ async fn define_statement_index_multiple_unique_embedded_multiple() -> Result<()
 			events: {},
 			fields: {},
 			tables: {},
-			indexes: { test: { sql: 'DEFINE INDEX test ON user FIELDS account, tags UNIQUE' } },
+			indexes: { test: 'DEFINE INDEX test ON user FIELDS account, tags UNIQUE' },
 			lives: {},
 		}",
 	)?;
@@ -1102,10 +1108,10 @@ async fn define_statement_search_index() -> Result<(), Error> {
 			events: {},
 			fields: {},
 			tables: {},
-			indexes: { blog_title: { sql: 'DEFINE INDEX blog_title ON blog FIELDS title \
+			indexes: { blog_title: 'DEFINE INDEX blog_title ON blog FIELDS title \
 			SEARCH ANALYZER simple BM25(1.2,0.75) \
 			DOC_IDS_ORDER 100 DOC_LENGTHS_ORDER 100 POSTINGS_ORDER 100 TERMS_ORDER 100 \
-			DOC_IDS_CACHE 100 DOC_LENGTHS_CACHE 100 POSTINGS_CACHE 100 TERMS_CACHE 100 HIGHLIGHTS' } },
+			DOC_IDS_CACHE 100 DOC_LENGTHS_CACHE 100 POSTINGS_CACHE 100 TERMS_CACHE 100 HIGHLIGHTS' },
 			lives: {},
 		}",
 	);
@@ -1928,7 +1934,7 @@ async fn permissions_checks_define_index() {
 
 	// Define the expected results for the check statement when the test statement succeeded and when it failed
 	let check_results = [
-        vec!["{ events: {  }, fields: {  }, indexes: { index: { sql: 'DEFINE INDEX index ON TB FIELDS field' } }, lives: {  }, tables: {  } }"],
+        vec!["{ events: {  }, fields: {  }, indexes: { index: 'DEFINE INDEX index ON TB FIELDS field' }, lives: {  }, tables: {  } }"],
 		vec!["{ events: {  }, fields: {  }, indexes: {  }, lives: {  }, tables: {  } }"]
     ];
 
