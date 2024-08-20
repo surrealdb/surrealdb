@@ -224,7 +224,7 @@ impl Datastore {
 	/// # use surrealdb_core::err::Error;
 	/// # #[tokio::main]
 	/// # async fn main() -> Result<(), Error> {
-	/// let ds = Datastore::new("file://temp.db").await?;
+	/// let ds = Datastore::new("surrealkv://temp.skv").await?;
 	/// # Ok(())
 	/// # }
 	/// ```
@@ -298,6 +298,7 @@ impl Datastore {
 				#[cfg(feature = "kv-rocksdb")]
 				{
 					info!(target: TARGET, "Starting kvs store at {}", path);
+					warn!("file:// is deprecated, please use surrealkv:// or rocksdb://");
 					let s = s.trim_start_matches("file://");
 					let s = s.trim_start_matches("file:");
 					let v = super::rocksdb::Datastore::new(s).await.map(DatastoreFlavor::RocksDB);
