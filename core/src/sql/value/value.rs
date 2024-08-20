@@ -5,6 +5,7 @@ use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::fnc::util::string::fuzzy::Fuzzy;
+use crate::sql::id::range::IdRange;
 use crate::sql::statements::info::InfoStructure;
 use crate::sql::Closure;
 use crate::sql::{
@@ -28,7 +29,7 @@ use std::cmp::Ordering;
 use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::fmt::{self, Display, Formatter, Write};
-use std::ops::Deref;
+use std::ops::{Bound, Deref};
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Value";
 
@@ -260,6 +261,12 @@ impl From<Block> for Value {
 impl From<Range> for Value {
 	fn from(v: Range) -> Self {
 		Value::Range(Box::new(v))
+	}
+}
+
+impl From<Box<Range>> for Value {
+	fn from(v: Box<Range>) -> Self {
+		Value::Range(v)
 	}
 }
 
@@ -566,6 +573,27 @@ impl From<Option<Datetime>> for Value {
 	}
 }
 
+impl From<IdRange> for Value {
+	fn from(v: IdRange) -> Self {
+		let beg = match v.beg {
+			Bound::Included(beg) => Bound::Included(Value::from(beg)),
+			Bound::Excluded(beg) => Bound::Excluded(Value::from(beg)),
+			Bound::Unbounded => Bound::Unbounded,
+		};
+
+		let end = match v.end {
+			Bound::Included(end) => Bound::Included(Value::from(end)),
+			Bound::Excluded(end) => Bound::Excluded(Value::from(end)),
+			Bound::Unbounded => Bound::Unbounded,
+		};
+
+		Value::Range(Box::new(Range {
+			beg,
+			end,
+		}))
+	}
+}
+
 impl From<Id> for Value {
 	fn from(v: Id) -> Self {
 		match v {
@@ -578,6 +606,7 @@ impl From<Id> for Value {
 				Gen::Ulid => Id::ulid().into(),
 				Gen::Uuid => Id::uuid().into(),
 			},
+			Id::Range(v) => v.deref().to_owned().into(),
 		}
 	}
 }
@@ -923,6 +952,25 @@ impl Value {
 		matches!(self, Value::Thing(_))
 	}
 
+	/// Check if this Value is a single Thing
+	pub fn is_thing_single(&self) -> bool {
+		match self {
+			Value::Thing(t) => !matches!(t.id, Id::Range(_)),
+			_ => false,
+		}
+	}
+
+	/// Check if this Value is a single Thing
+	pub fn is_thing_range(&self) -> bool {
+		matches!(
+			self,
+			Value::Thing(Thing {
+				id: Id::Range(_),
+				..
+			})
+		)
+	}
+
 	/// Check if this Value is a Mock
 	pub fn is_mock(&self) -> bool {
 		matches!(self, Value::Mock(_))
@@ -1223,6 +1271,7 @@ impl Value {
 			Self::Geometry(Geometry::MultiPolygon(_)) => "geometry<multipolygon>",
 			Self::Geometry(Geometry::Collection(_)) => "geometry<collection>",
 			Self::Bytes(_) => "bytes",
+			Self::Range(_) => "range",
 			_ => "incorrect type",
 		}
 	}
@@ -1249,6 +1298,7 @@ impl Value {
 			Kind::Point => self.coerce_to_point().map(Value::from),
 			Kind::Bytes => self.coerce_to_bytes().map(Value::from),
 			Kind::Uuid => self.coerce_to_uuid().map(Value::from),
+			Kind::Range => self.coerce_to_range().map(Value::from),
 			Kind::Function(_, _) => self.coerce_to_function().map(Value::from),
 			Kind::Set(t, l) => match l {
 				Some(l) => self.coerce_to_set_type_len(t, l).map(Value::from),
@@ -1643,6 +1693,19 @@ impl Value {
 		}
 	}
 
+	/// Try to coerce this value to a `Range`
+	pub(crate) fn coerce_to_range(self) -> Result<Range, Error> {
+		match self {
+			// Ranges are allowed
+			Value::Range(v) => Ok(*v),
+			// Anything else raises an error
+			_ => Err(Error::CoerceTo {
+				from: self,
+				into: "range".into(),
+			}),
+		}
+	}
+
 	/// Try to coerce this value to an `Geometry` point
 	pub(crate) fn coerce_to_point(self) -> Result<Geometry, Error> {
 		match self {
@@ -1818,6 +1881,7 @@ impl Value {
 			Kind::Point => self.convert_to_point().map(Value::from),
 			Kind::Bytes => self.convert_to_bytes().map(Value::from),
 			Kind::Uuid => self.convert_to_uuid().map(Value::from),
+			Kind::Range => self.convert_to_range().map(Value::from),
 			Kind::Function(_, _) => self.convert_to_function().map(Value::from),
 			Kind::Set(t, l) => match l {
 				Some(l) => self.convert_to_set_type_len(t, l).map(Value::from),
@@ -2206,10 +2270,34 @@ impl Value {
 		match self {
 			// Arrays are allowed
 			Value::Array(v) => Ok(v),
+			Value::Range(r) => {
+				let range: std::ops::Range<i64> = r.deref().to_owned().try_into()?;
+				Ok(range.into_iter().map(Value::from).collect::<Vec<Value>>().into())
+			}
 			// Anything else raises an error
 			_ => Err(Error::ConvertTo {
 				from: self,
 				into: "array".into(),
+			}),
+		}
+	}
+
+	/// Try to convert this value to a `Range`
+	pub(crate) fn convert_to_range(self) -> Result<Range, Error> {
+		match self {
+			// Arrays with two elements are allowed
+			Value::Array(v) if v.len() == 2 => {
+				let mut v = v;
+				Ok(Range {
+					beg: Bound::Included(v.remove(0)),
+					end: Bound::Excluded(v.remove(0)),
+				})
+			}
+			Value::Range(r) => Ok(*r),
+			// Anything else raises an error
+			_ => Err(Error::ConvertTo {
+				from: self,
+				into: "range".into(),
 			}),
 		}
 	}
@@ -2588,6 +2676,19 @@ impl Value {
 				Value::Geometry(w) => v.contains(w),
 				_ => false,
 			},
+			Value::Range(r) => {
+				let beg = match &r.beg {
+					Bound::Unbounded => true,
+					Bound::Included(beg) => beg.le(other),
+					Bound::Excluded(beg) => beg.lt(other),
+				};
+
+				beg && match &r.end {
+					Bound::Unbounded => true,
+					Bound::Included(end) => end.ge(other),
+					Bound::Excluded(end) => end.gt(other),
+				}
+			}
 			_ => false,
 		}
 	}
@@ -2653,6 +2754,25 @@ impl Value {
 			(Value::Strand(a), Value::Strand(b)) => Some(lexicmp::natural_lexical_cmp(a, b)),
 			_ => self.partial_cmp(other),
 		}
+	}
+
+	pub fn can_be_range_bound(&self) -> bool {
+		matches!(
+			self,
+			Value::None
+				| Value::Null | Value::Array(_)
+				| Value::Block(_)
+				| Value::Bool(_) | Value::Datetime(_)
+				| Value::Duration(_)
+				| Value::Geometry(_)
+				| Value::Number(_)
+				| Value::Object(_)
+				| Value::Param(_)
+				| Value::Strand(_)
+				| Value::Subquery(_)
+				| Value::Table(_)
+				| Value::Uuid(_)
+		)
 	}
 }
 

@@ -410,7 +410,7 @@ fn statements() -> Vec<Statement> {
 					dir: Dir::Out,
 					from: Thing {
 						tb: "a".to_owned(),
-						id: Id::String("b".to_owned()),
+						id: Id::from("b"),
 					},
 					what: Tables::default(),
 				}))),
@@ -519,7 +519,7 @@ fn statements() -> Vec<Statement> {
 			}])),
 			limit: Some(Limit(Value::Thing(Thing {
 				tb: "a".to_owned(),
-				id: Id::String("b".to_owned()),
+				id: Id::from("b"),
 			}))),
 			start: Some(Start(Value::Object(Object(
 				[("a".to_owned(), Value::Bool(true))].into_iter().collect(),
@@ -625,7 +625,7 @@ fn statements() -> Vec<Statement> {
 			only: true,
 			kind: Value::Thing(Thing {
 				tb: "a".to_owned(),
-				id: Id::String("b".to_owned()),
+				id: Id::from("b"),
 			}),
 			from: Value::Array(Array(vec![
 				Value::Number(Number::Int(1)),

@@ -19,9 +19,12 @@ pub enum Resource {
 }
 
 impl Resource {
-	pub(crate) fn with_range(self, range: Range<Id>) -> Result<sql::Range> {
+	pub(crate) fn with_range(self, range: Range<Id>) -> Result<sql::Thing> {
 		match self {
-			Resource::Table(table) => Ok(sql::Range::new(table.0, range.start, range.end)),
+			Resource::Table(table) => Ok(sql::Thing::from((
+				table.0,
+				sql::Id::Range(Box::new(sql::IdRange::try_from((range.start, range.end))?)),
+			))),
 			Resource::RecordId(record_id) => Err(Error::RangeOnRecordId(record_id).into()),
 			Resource::Object(object) => Err(Error::RangeOnObject(object).into()),
 			Resource::Array(array) => Err(Error::RangeOnArray(array).into()),

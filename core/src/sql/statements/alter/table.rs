@@ -63,7 +63,7 @@ impl AlterTableStatement {
 			dt.changefeed = *changefeed;
 		}
 		if let Some(ref comment) = &self.comment {
-			dt.comment = comment.clone();
+			dt.comment.clone_from(comment);
 		}
 		if let Some(ref kind) = &self.kind {
 			dt.kind = kind.clone();
