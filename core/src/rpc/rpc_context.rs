@@ -139,7 +139,7 @@ pub trait RpcContext {
 				.map_err(Into::into);
 
 		*self.session_mut() = tmp_session;
-		out
+		out.map(Into::into)
 	}
 
 	async fn signin(&mut self, params: Array) -> Result<Data, RpcError> {
@@ -153,7 +153,7 @@ pub trait RpcContext {
 				.map(Into::into)
 				.map_err(Into::into);
 		*self.session_mut() = tmp_session;
-		out
+		out.map(Into::into)
 	}
 
 	async fn invalidate(&mut self) -> Result<Data, RpcError> {

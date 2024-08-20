@@ -133,6 +133,18 @@ macro_rules! expand_inner {
 }
 
 impl Transactor {
+	// Allow unused_variables when no storage is enabled as none of the values are used then.
+	#![cfg_attr(
+		not(any(
+			feature = "kv-mem",
+			feature = "kv-rocksdb",
+			feature = "kv-indxdb",
+			feature = "kv-tikv",
+			feature = "kv-fdb",
+			feature = "kv-surrealkv",
+		)),
+		allow(unused_variables)
+	)]
 	// --------------------------------------------------
 	// Integral methods
 	// --------------------------------------------------
