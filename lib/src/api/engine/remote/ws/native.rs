@@ -599,7 +599,7 @@ impl Response {
 				Ok(None)
 			}
 			Message::Binary(binary) => {
-				deserialize(&binary, supports_revision).map(Some).map_err(|error| {
+				deserialize(binary, supports_revision).map(Some).map_err(|error| {
 					Error::ResponseFromBinary {
 						binary: binary.clone(),
 						error: bincode::ErrorKind::Custom(error.to_string()).into(),

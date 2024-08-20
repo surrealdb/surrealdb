@@ -9,7 +9,7 @@ use std::path::PathBuf;
 use surrealdb_core::sql::{Array as CoreArray, Object as CoreObject, Query, Value as CoreValue};
 use uuid::Uuid;
 
-#[cfg(feature = "protocol-ws")]
+#[cfg(any(feature = "protocol-ws", feature = "protocol-http"))]
 use surrealdb_core::sql::Table as CoreTable;
 
 #[derive(Debug, Clone)]
@@ -326,7 +326,7 @@ impl Command {
 				args,
 			} => RouterRequest {
 				id,
-				method: "run".into(),
+				method: "run",
 				params: Some(
 					vec![CoreValue::from(name), CoreValue::from(version), CoreValue::Array(args)]
 						.into(),
