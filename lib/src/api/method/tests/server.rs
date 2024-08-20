@@ -101,6 +101,9 @@ pub(super) fn mock(route_rx: Receiver<Route>) {
 					}
 					_ => unreachable!(),
 				},
+				Command::Run {
+					..
+				} => Ok(DbResponse::Other(Value::None)),
 				Command::ExportMl {
 					..
 				}
