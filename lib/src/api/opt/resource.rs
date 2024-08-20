@@ -131,6 +131,13 @@ where
 	}
 }
 
+impl From<()> for Resource {
+	fn from(value: ()) -> Self {
+		let _ = value;
+		Self::Unspecified
+	}
+}
+
 impl From<Resource> for Value {
 	fn from(resource: Resource) -> Self {
 		match resource {
@@ -171,6 +178,12 @@ impl<R> IntoResource<Option<R>> for Thing {
 impl<R> IntoResource<Option<R>> for &Thing {
 	fn into_resource(self) -> Result<Resource> {
 		Ok(Resource::RecordId(self.clone()))
+	}
+}
+
+impl<R> IntoResource<Vec<R>> for () {
+	fn into_resource(self) -> Result<Resource> {
+		Ok(Resource::Unspecified)
 	}
 }
 

@@ -335,7 +335,7 @@ pub trait RpcContext {
 					String::from("data") => data,
 					=> &self.vars()
 				});
-				self.kvs().execute(&sql, self.session(), vars).await?
+				self.kvs().execute(sql, self.session(), vars).await?
 			}
 			Value::Table(_) | Value::Strand(_) => {
 				let sql = "INSERT RELATION INTO $what $data RETURN AFTER";
@@ -344,7 +344,7 @@ pub trait RpcContext {
 				String::from("what") => what.could_be_table(),
 						=> &self.vars()
 					});
-				self.kvs().execute(&sql, self.session(), vars).await?
+				self.kvs().execute(sql, self.session(), vars).await?
 			}
 			_ => return Err(RpcError::InvalidParams),
 		};

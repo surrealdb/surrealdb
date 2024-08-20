@@ -1,7 +1,7 @@
 // Tests common to all protocols and storage engines
 
 use surrealdb::fflags::FFLAGS;
-use surrealdb::sql::value;
+use surrealdb::sql::{thing, value};
 use surrealdb::Response;
 
 static PERMITS: Semaphore = Semaphore::const_new(1);
@@ -534,6 +534,38 @@ async fn insert_thing() {
 			id: thing("user:user3").unwrap(),
 		})
 	);
+}
+
+#[test_log::test(tokio::test)]
+async fn insert_unspecified() {
+	let (permit, db) = new_db().await;
+	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
+	drop(permit);
+	let tmp: Result<Vec<RecordId>, _> = db.insert(()).await;
+	tmp.unwrap_err();
+	let tmp: Result<Vec<RecordId>, _> = db.insert(()).content(json!({ "foo": "bar" })).await;
+	tmp.unwrap_err();
+	let tmp: Vec<RecordId> =
+		db.insert(()).content(value("{id: user:user1, foo: 'bar'}").unwrap()).await.unwrap();
+	assert_eq!(
+		tmp,
+		vec![RecordId {
+			id: thing("user:user1").unwrap(),
+		}]
+	);
+
+	let tmp: Result<Value, _> = db.insert(Resource::from(())).await;
+	tmp.unwrap_err();
+	let tmp: Result<Value, _> =
+		db.insert(Resource::from(())).content(json!({ "foo": "bar" })).await;
+	tmp.unwrap_err();
+	let tmp: Value = db
+		.insert(Resource::from(()))
+		.content(value("{id: user:user2, foo: 'bar'}").unwrap())
+		.await
+		.unwrap();
+	let val = value("{id: user:user2, foo: 'bar'}").unwrap();
+	assert_eq!(tmp, val);
 }
 
 #[test_log::test(tokio::test)]
