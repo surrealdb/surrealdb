@@ -1,5 +1,6 @@
 pub mod docids;
 pub(crate) mod ft;
+pub(crate) mod index;
 pub mod planner;
 pub mod trees;
 
