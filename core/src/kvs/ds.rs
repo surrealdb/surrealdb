@@ -257,6 +257,7 @@ impl Datastore {
 			capabilities: self.capabilities,
 			notification_channel: self.notification_channel,
 			index_stores: Default::default(),
+			#[cfg(not(target_arch = "wasm32"))]
 			index_builder: IndexBuilder::new(self.transaction_factory.clone()),
 			#[cfg(feature = "jwks")]
 			jwks_cache: Arc::new(Default::default()),
