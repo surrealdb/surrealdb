@@ -249,7 +249,6 @@ impl Datastore {
 	/// Simulating a server restart
 	pub fn restart(self) -> Self {
 		Self {
-			inner: self.inner,
 			id: self.id,
 			strict: self.strict,
 			auth_enabled: self.auth_enabled,
@@ -257,8 +256,8 @@ impl Datastore {
 			transaction_timeout: self.transaction_timeout,
 			capabilities: self.capabilities,
 			notification_channel: self.notification_channel,
-			clock: self.clock,
 			index_stores: Default::default(),
+			index_builder: IndexBuilder::new(self.transaction_factory.clone()),
 			#[cfg(feature = "jwks")]
 			jwks_cache: Arc::new(Default::default()),
 			#[cfg(any(
@@ -269,6 +268,7 @@ impl Datastore {
 				feature = "kv-tikv",
 			))]
 			temporary_directory: self.temporary_directory,
+			transaction_factory: self.transaction_factory,
 		}
 	}
 
