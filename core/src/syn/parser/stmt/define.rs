@@ -1163,6 +1163,7 @@ impl Parser<'_> {
 							t!("CAMEL") => Tokenizer::Camel,
 							t!("CLASS") => Tokenizer::Class,
 							t!("PUNCT") => Tokenizer::Punct,
+							t!("JIEBA") => Tokenizer::Jieba,
 							x => unexpected!(self, x, "a tokenizer"),
 						};
 						tokenizers.push(tokenizer);

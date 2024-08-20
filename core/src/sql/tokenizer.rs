@@ -12,6 +12,7 @@ pub enum Tokenizer {
 	Camel,
 	Class,
 	Punct,
+	Jieba,
 }
 
 impl Display for Tokenizer {
@@ -21,6 +22,7 @@ impl Display for Tokenizer {
 			Self::Camel => "CAMEL",
 			Self::Class => "CLASS",
 			Self::Punct => "PUNCT",
+			Self::Jieba => "Jieba",
 		})
 	}
 }

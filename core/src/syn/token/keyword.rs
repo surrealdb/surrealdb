@@ -142,6 +142,7 @@ keyword! {
 	PostingsOrder => "POSTINGS_ORDER",
 	Prune => "PRUNE",
 	Punct => "PUNCT",
+	Jieba => "JIEBA",
 	Readonly => "READONLY",
 	Rebuild => "REBUILD",
 	Relate => "RELATE",
