@@ -322,7 +322,7 @@ impl InfoStatement {
 						return Ok(out);
 					}
 				}
-				Ok(Object::default())
+				Ok(Object::default().into())
 			}
 		}
 	}
