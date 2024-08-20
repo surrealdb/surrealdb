@@ -85,6 +85,7 @@ pub(crate) static KEYWORDS: phf::Map<UniCase<&'static str>, TokenKind> = phf_map
 	UniCase::ascii("CLASS") => TokenKind::Keyword(Keyword::Class),
 	UniCase::ascii("COMMENT") => TokenKind::Keyword(Keyword::Comment),
 	UniCase::ascii("COMMIT") => TokenKind::Keyword(Keyword::Commit),
+	UniCase::ascii("CONCURRENTLY") => TokenKind::Keyword(Keyword::Concurrently),
 	UniCase::ascii("CONTENT") => TokenKind::Keyword(Keyword::Content),
 	UniCase::ascii("CONTINUE") => TokenKind::Keyword(Keyword::Continue),
 	UniCase::ascii("CREATE") => TokenKind::Keyword(Keyword::Create),
