@@ -296,7 +296,6 @@ async fn router(
 	vars: &mut IndexMap<String, Value>,
 	auth: &mut Option<Auth>,
 ) -> Result<DbResponse> {
-	error!(?command, ?headers, ?vars, ?auth);
 	match command {
 		Command::Query {
 			query,
