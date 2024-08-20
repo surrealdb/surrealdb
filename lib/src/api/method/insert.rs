@@ -167,7 +167,7 @@ where
 		InsertRelation::from_closure(self.client, || {
 			let mut data = crate::sql::to_value(data)?;
 			match self.resource? {
-				Resource::Table(table) => Ok(Command::Insert {
+				Resource::Table(table) => Ok(Command::InsertRelation {
 					what: Some(table.into()),
 					data,
 				}),

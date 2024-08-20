@@ -1,5 +1,6 @@
 // Tests common to all protocols and storage engines
 
+use serde::de::value;
 use surrealdb::fflags::FFLAGS;
 use surrealdb::sql::{thing, value};
 use surrealdb::Response;
@@ -566,6 +567,83 @@ async fn insert_unspecified() {
 		.unwrap();
 	let val = value("{id: user:user2, foo: 'bar'}").unwrap();
 	assert_eq!(tmp, val);
+}
+
+#[test_log::test(tokio::test)]
+async fn insert_relation_unspecified() {
+	let (permit, db) = new_db().await;
+	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
+	drop(permit);
+	// no id so should error
+	let tmp: Result<Vec<RecordId>, _> = db.insert(()).relation(value("{}").unwrap()).await;
+	tmp.unwrap_err();
+	let val = value("{id: likes:1, in: person:a, out: thing:a}").unwrap();
+	let tmp: Vec<RecordId> = db.insert(()).relation(val).await.unwrap();
+	assert_eq!(
+		tmp,
+		vec![RecordId {
+			id: thing("likes:1").unwrap()
+		}]
+	);
+
+	let vals = value(
+		"[{id: likes:2, in: person:a, out: thing:a}, {id: hates:3, in: person:a, out: thing:a}]",
+	)
+	.unwrap();
+	let tmp: Vec<RecordId> = db.insert(()).relation(vals).await.unwrap();
+	assert_eq!(
+		tmp,
+		vec![
+			RecordId {
+				id: thing("likes:2").unwrap()
+			},
+			RecordId {
+				id: thing("hates:3").unwrap()
+			}
+		]
+	);
+}
+
+#[test_log::test(tokio::test)]
+async fn insert_relation_table() {
+	let (permit, db) = new_db().await;
+	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
+	drop(permit);
+	let tmp: Result<Vec<RecordId>, _> = db.insert("likes").relation(value("{}").unwrap()).await;
+	tmp.unwrap_err();
+	let val = value("{in: person:a, out: thing:a}").unwrap();
+	let _: Vec<RecordId> = db.insert("likes").relation(val).await.unwrap();
+	// test override
+	// let val = value("{id: other:1, in: person:a, out: thing:a}").unwrap();
+	// let tmp: Vec<RecordId> = db.insert("likes").relation(val).await.unwrap();
+	// assert_eq!(
+	// 	tmp,
+	// 	vec![RecordId {
+	// 		id: thing("other:1").unwrap()
+	// 	}]
+	// );
+
+	let vals = value(
+		"[{in: person:b, out: thing:a}, {id: likes:2, in: person:a, out: thing:a}, {id: hates:3, in: person:a, out: thing:a}]",
+	)
+	.unwrap();
+	let _: Vec<RecordId> = db.insert("likes").relation(vals).await.unwrap();
+	// let vals = value(
+	// 	"[{id: likes:2, in: person:a, out: thing:a}, {id: hates:3, in: person:a, out: thing:a}]",
+	// )
+	// .unwrap();
+	// let tmp: Vec<RecordId> = db.insert("likes").relation(vals).await.unwrap();
+	// assert_eq!(
+	// 	tmp,
+	// 	vec![
+	// 		RecordId {
+	// 			id: thing("likes:2").unwrap()
+	// 		},
+	// 		RecordId {
+	// 			id: thing("hates:3").unwrap()
+	// 		}
+	// 	]
+	// );
 }
 
 #[test_log::test(tokio::test)]
