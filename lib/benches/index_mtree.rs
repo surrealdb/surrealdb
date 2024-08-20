@@ -10,7 +10,7 @@ use std::sync::Arc;
 use surrealdb::kvs::Datastore;
 use surrealdb::kvs::LockType::Optimistic;
 use surrealdb::kvs::TransactionType::{Read, Write};
-use surrealdb_core::ctx::Context;
+use surrealdb_core::ctx::MutableContext;
 use surrealdb_core::idx::planner::checker::MTreeConditionChecker;
 use surrealdb_core::idx::trees::mtree::MTreeIndex;
 use surrealdb_core::idx::IndexKeyBase;
@@ -22,21 +22,21 @@ use tokio::task;
 
 fn bench_index_mtree_combinations(c: &mut Criterion) {
 	for (samples, dimension, cache) in [
-		(2500, 3, 100),
-		(2500, 3, 2500),
-		(2500, 3, 0),
-		(1000, 50, 100),
-		(1000, 50, 1000),
-		(1000, 50, 0),
-		(500, 300, 100),
-		(500, 300, 500),
-		(500, 300, 0),
-		(250, 1024, 75),
-		(250, 1024, 250),
-		(250, 1024, 0),
-		(100, 2048, 50),
-		(100, 2048, 100),
-		(100, 2048, 0),
+		(1000, 3, 100),
+		(1000, 3, 1000),
+		(1000, 3, 0),
+		(300, 50, 100),
+		(300, 50, 300),
+		(300, 50, 0),
+		(150, 300, 50),
+		(150, 300, 150),
+		(150, 300, 0),
+		(75, 1024, 25),
+		(75, 1024, 75),
+		(75, 1024, 0),
+		(50, 2048, 20),
+		(50, 2048, 50),
+		(50, 2048, 0),
 	] {
 		bench_index_mtree(c, samples, dimension, cache);
 	}
@@ -161,7 +161,7 @@ async fn knn_lookup_objects(
 ) {
 	let txn = ds.transaction(Read, Optimistic).await.unwrap();
 	let mt = Arc::new(mtree_index(ds, &txn, vector_size, cache_size, Read).await);
-	let ctx = Arc::new(Context::from(txn));
+	let ctx = Arc::new(MutableContext::from(txn));
 
 	let counter = Arc::new(AtomicUsize::new(0));
 
@@ -175,8 +175,8 @@ async fn knn_lookup_objects(
 				.enter(|stk| async {
 					while counter.fetch_add(1, Ordering::Relaxed) < samples_size {
 						let object = random_object(&mut rng, vector_size);
-						let chk = MTreeConditionChecker::new(ctx.as_ref());
-						let r = mt.knn_search(stk, ctx.as_ref(), &object, knn, chk).await.unwrap();
+						let chk = MTreeConditionChecker::new(&ctx);
+						let r = mt.knn_search(stk, &ctx, &object, knn, chk).await.unwrap();
 						assert_eq!(r.len(), knn);
 					}
 				})

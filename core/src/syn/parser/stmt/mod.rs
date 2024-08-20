@@ -531,6 +531,13 @@ impl Parser<'_> {
 				let base = self.eat(t!("ON")).then(|| self.parse_base(false)).transpose()?;
 				InfoStatement::User(ident, base, false)
 			}
+			t!("INDEX") => {
+				let index = self.next_token_value()?;
+				expected!(self, t!("ON"));
+				self.eat(t!("TABLE"));
+				let table = self.next_token_value()?;
+				InfoStatement::Index(index, table, false)
+			}
 			x => unexpected!(self, x, "an info target"),
 		};
 

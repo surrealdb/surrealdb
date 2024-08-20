@@ -17,6 +17,8 @@ use surrealdb_core::sql::{from_value as from_core_value, Value as CoreValue};
 
 mod cmd;
 pub(crate) use cmd::Command;
+#[cfg(feature = "protocol-http")]
+pub(crate) use cmd::RouterRequest;
 
 #[derive(Debug)]
 #[allow(dead_code)] // used by the embedded and remote connections

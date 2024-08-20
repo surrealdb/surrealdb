@@ -4,6 +4,7 @@ use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::sql::{escape::escape_rid, Array, Number, Object, Strand, Thing, Uuid, Value};
+use derive::Key;
 use nanoid::nanoid;
 use reblessive::tree::Stk;
 use revision::revisioned;
@@ -23,7 +24,7 @@ pub enum Gen {
 }
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize, Key, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub enum Id {
@@ -184,9 +185,9 @@ impl Id {
 	pub(crate) async fn compute(
 		&self,
 		stk: &mut Stk,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		opt: &Options,
-		doc: Option<&CursorDoc<'_>>,
+		doc: Option<&CursorDoc>,
 	) -> Result<Id, Error> {
 		match self {
 			Id::Number(v) => Ok(Id::Number(*v)),

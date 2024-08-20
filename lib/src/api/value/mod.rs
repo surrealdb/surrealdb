@@ -249,6 +249,12 @@ transparent_wrapper!(
 );
 impl_serialize_wrapper!(Value);
 
+impl fmt::Display for Value {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		self.0.fmt(f)
+	}
+}
+
 impl Value {
 	// TODO: Check if all of theses are actually used.
 	#[allow(dead_code)]

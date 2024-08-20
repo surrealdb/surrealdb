@@ -32,7 +32,7 @@ pub fn duration((val,): (Value,)) -> Result<Value, Error> {
 }
 
 pub async fn field(
-	(stk, ctx, opt, doc): (&mut Stk, &Context<'_>, Option<&Options>, Option<&CursorDoc<'_>>),
+	(stk, ctx, opt, doc): (&mut Stk, &Context, Option<&Options>, Option<&CursorDoc>),
 	(val,): (String,),
 ) -> Result<Value, Error> {
 	match opt {
@@ -50,7 +50,7 @@ pub async fn field(
 }
 
 pub async fn fields(
-	(stk, ctx, opt, doc): (&mut Stk, &Context<'_>, Option<&Options>, Option<&CursorDoc<'_>>),
+	(stk, ctx, opt, doc): (&mut Stk, &Context, Option<&Options>, Option<&CursorDoc>),
 	(val,): (Vec<String>,),
 ) -> Result<Value, Error> {
 	match opt {

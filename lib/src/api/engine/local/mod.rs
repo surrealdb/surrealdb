@@ -171,6 +171,7 @@ pub struct Mem;
 #[cfg(feature = "kv-rocksdb")]
 #[cfg_attr(docsrs, doc(cfg(feature = "kv-rocksdb")))]
 #[derive(Debug)]
+#[deprecated]
 pub struct File;
 
 /// RocksDB database

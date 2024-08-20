@@ -60,6 +60,7 @@ ascii = { version = "0.3.2", package = "any_ascii" }
 async-recursion = "1.0.5"
 base64 = "0.21.5"
 bcrypt = "0.15.0"
+blake3 = "1.5.3"
 bincode = "1.3.3"
 bytes = "1.5.0"
 ciborium = "0.2.1"
@@ -103,7 +104,6 @@ nanoid = "0.4.0"
 ndarray = { version = "=0.15.6" }
 ndarray-stats = "=0.5.1"
 num-traits = "0.2.18"
-nom = { version = "7.1.3", features = ["alloc"] }
 num_cpus = "1.16.0"
 object_store = { version = "0.10.2", optional = false }
 once_cell = "1.18.0"
@@ -132,7 +132,7 @@ revision = { version = "0.8.0", features = [
 rmpv = "1.0.1"
 roaring = { version = "0.10.2", features = ["serde"] }
 rocksdb = { version = "0.21.0", features = ["lz4", "snappy"], optional = true }
-rust_decimal = { version = "1.33.1", features = ["maths", "serde-str"] }
+rust_decimal = { version = "1.36.0", features = ["maths", "serde-str"] }
 rust-stemmers = "1.2.0"
 scrypt = "0.11.0"
 semver = { version = "1.0.20", features = ["serde"] }
@@ -143,7 +143,7 @@ sha2 = "0.10.8"
 snap = "1.1.0"
 storekey = "0.5.0"
 subtle = "2.6"
-surrealkv = { version = "0.3.2", optional = true }
+surrealkv = { version = "0.3.3", optional = true }
 surrealml = { version = "0.1.1", optional = true, package = "surrealml-core" }
 tempfile = { version = "3.10.1", optional = true }
 thiserror = "1.0.50"
@@ -153,6 +153,9 @@ trice = "0.4.0"
 ulid = { version = "1.1.0", features = ["serde"] }
 unicase = "2.7.0"
 url = "2.5.0"
+async-graphql = { version = "7.0.7", default-features = false, features = [
+    "dynamic-schema",
+] }
 castaway = "0.2.3"
 serde-content = "0.1.0"
 
@@ -195,6 +198,9 @@ tokio = { version = "1.34.0", default-features = false, features = [
 ] }
 tokio-tungstenite = { version = "0.21.0", optional = true }
 uuid = { version = "1.6.1", features = ["serde", "v4", "v7"] }
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(surrealdb_unstable)'] }
 
 [lib]
 name = "surrealdb_core"

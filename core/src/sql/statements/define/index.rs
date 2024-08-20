@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display};
 use std::sync::Arc;
 
-#[revisioned(revision = 3)]
+#[revisioned(revision = 4)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
@@ -27,6 +27,8 @@ pub struct DefineIndexStatement {
 	pub if_not_exists: bool,
 	#[revision(start = 3)]
 	pub overwrite: bool,
+	#[revision(start = 4)]
+	pub concurrently: bool,
 }
 
 impl DefineIndexStatement {
@@ -34,9 +36,9 @@ impl DefineIndexStatement {
 	pub(crate) async fn compute(
 		&self,
 		stk: &mut Stk,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		opt: &Options,
-		doc: Option<&CursorDoc<'_>>,
+		doc: Option<&CursorDoc>,
 	) -> Result<Value, Error> {
 		// Allowed to run?
 		opt.is_allowed(Action::Edit, ResourceKind::Index, &Base::Db)?;
@@ -89,6 +91,25 @@ impl DefineIndexStatement {
 		.await?;
 		// Clear the cache
 		txn.clear();
+		#[cfg(not(target_arch = "wasm32"))]
+		if self.concurrently {
+			self.async_index(ctx, opt)?;
+		} else {
+			self.sync_index(stk, ctx, opt, doc).await?;
+		}
+		#[cfg(target_arch = "wasm32")]
+		self.sync_index(stk, ctx, opt, doc).await?;
+		// Ok all good
+		Ok(Value::None)
+	}
+
+	async fn sync_index(
+		&self,
+		stk: &mut Stk,
+		ctx: &Context,
+		opt: &Options,
+		doc: Option<&CursorDoc>,
+	) -> Result<(), Error> {
 		// Force queries to run
 		let opt = &opt.new_with_force(Force::Index(Arc::new([self.clone()])));
 		// Update the index data
@@ -98,8 +119,16 @@ impl DefineIndexStatement {
 			..UpdateStatement::default()
 		};
 		stm.compute(stk, ctx, opt, doc).await?;
-		// Ok all good
-		Ok(Value::None)
+		Ok(())
+	}
+
+	#[cfg(not(target_arch = "wasm32"))]
+	fn async_index(&self, ctx: &Context, opt: &Options) -> Result<(), Error> {
+		ctx.get_index_builder().ok_or(Error::Unreachable("No Index Builder"))?.build(
+			ctx,
+			opt.clone(),
+			self.clone().into(),
+		)
 	}
 }
 
@@ -118,6 +147,9 @@ impl Display for DefineIndexStatement {
 		}
 		if let Some(ref v) = self.comment {
 			write!(f, " COMMENT {v}")?
+		}
+		if self.concurrently {
+			write!(f, " CONCURRENTLY")?
 		}
 		Ok(())
 	}

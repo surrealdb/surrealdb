@@ -69,7 +69,7 @@ where
 
 	pub(in crate::idx) async fn get_node_txn(
 		&self,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		node_id: NodeId,
 	) -> Result<Arc<StoredNode<N>>, Error> {
 		match self {
@@ -146,7 +146,7 @@ impl TreeNodeProvider {
 		N: TreeNode + Clone,
 	{
 		let key = self.get_key(id);
-		if let Some(val) = tx.get(key.clone()).await? {
+		if let Some(val) = tx.get(key.clone(), None).await? {
 			let size = val.len() as u32;
 			let node = N::try_from_val(val)?;
 			Ok(StoredNode::new(node, id, key, size))
@@ -278,12 +278,13 @@ impl IndexStores {
 
 	pub(crate) async fn get_index_hnsw(
 		&self,
+		ctx: &Context,
 		opt: &Options,
 		ix: &DefineIndexStatement,
 		p: &HnswParams,
 	) -> Result<SharedHnswIndex, Error> {
 		let ikb = IndexKeyBase::new(opt.ns()?, opt.db()?, ix)?;
-		Ok(self.0.hnsw_indexes.get(&ikb, p).await)
+		self.0.hnsw_indexes.get(ctx, &ix.what, &ikb, p).await
 	}
 
 	pub(crate) async fn index_removed(

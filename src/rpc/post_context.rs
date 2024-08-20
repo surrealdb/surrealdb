@@ -1,34 +1,47 @@
 use std::collections::BTreeMap;
+use std::sync::Arc;
 
 use crate::cnf::{PKG_NAME, PKG_VERSION};
-use surrealdb::sql::Array;
+use surrealdb::rpc::Data;
+use surrealdb::rpc::RpcContext;
+use surrealdb::rpc::RpcError;
 use surrealdb_core::dbs::Session;
+use surrealdb_core::dbs::Session;
+use surrealdb_core::kvs::Datastore;
 use surrealdb_core::kvs::Datastore;
 use surrealdb_core::rpc::args::Take;
 use surrealdb_core::rpc::Data;
 use surrealdb_core::rpc::RpcContext;
 use surrealdb_core::rpc::RpcError;
+use surrealdb_core::sql::Array;
 use surrealdb_core::sql::Value;
 
-pub struct PostRpcContext<'a> {
-	pub kvs: &'a Datastore,
+#[cfg(surrealdb_unstable)]
+use surrealdb_core::gql::{Pessimistic, SchemaCache};
+
+pub struct PostRpcContext {
+	pub kvs: Arc<Datastore>,
 	pub session: Session,
 	pub vars: BTreeMap<String, Value>,
+	#[cfg(surrealdb_unstable)]
+	pub gql_schema: SchemaCache<Pessimistic>,
 }
 
-impl<'a> PostRpcContext<'a> {
-	pub fn new(kvs: &'a Datastore, session: Session, vars: BTreeMap<String, Value>) -> Self {
+impl PostRpcContext {
+	pub fn new(kvs: &Arc<Datastore>, session: Session, vars: BTreeMap<String, Value>) -> Self {
 		Self {
-			kvs,
+			kvs: kvs.clone(),
 			session,
 			vars,
+			#[cfg(surrealdb_unstable)]
+			gql_schema: SchemaCache::new(kvs.clone()),
 		}
 	}
 }
 
-impl RpcContext for PostRpcContext<'_> {
+impl RpcContext for PostRpcContext {
 	fn kvs(&self) -> &Datastore {
-		self.kvs
+		&self.kvs
 	}
 
 	fn session(&self) -> &Session {
@@ -51,6 +64,13 @@ impl RpcContext for PostRpcContext<'_> {
 		Value::from(format!("{PKG_NAME}-{}", *PKG_VERSION)).into()
 	}
 
+	#[cfg(surrealdb_unstable)]
+	const GQL_SUPPORT: bool = true;
+	#[cfg(surrealdb_unstable)]
+	fn graphql_schema_cache(&self) -> &SchemaCache {
+		&self.gql_schema
+	}
+
 	// disable:
 
 	// doesn't do anything so shouldn't be supported
@@ -61,37 +81,5 @@ impl RpcContext for PostRpcContext<'_> {
 	// doesn't do anything so shouldn't be supported
 	async fn unset(&mut self, _params: Array) -> Result<Data, RpcError> {
 		Err(RpcError::MethodNotFound)
-	}
-
-	// reimplimentaions:
-
-	async fn signup(&mut self, params: Array) -> Result<Data, RpcError> {
-		let Ok(Value::Object(v)) = params.needs_one() else {
-			return Err(RpcError::InvalidParams);
-		};
-		surrealdb::iam::signup::signup(self.kvs, &mut self.session, v)
-			.await
-			.map(Value::from)
-			.map(Into::into)
-			.map_err(Into::into)
-	}
-
-	async fn signin(&mut self, params: Array) -> Result<Data, RpcError> {
-		let Ok(Value::Object(v)) = params.needs_one() else {
-			return Err(RpcError::InvalidParams);
-		};
-		surrealdb::iam::signin::signin(self.kvs, &mut self.session, v)
-			.await
-			.map(Value::from)
-			.map(Into::into)
-			.map_err(Into::into)
-	}
-
-	async fn authenticate(&mut self, params: Array) -> Result<Data, RpcError> {
-		let Ok(Value::Strand(token)) = params.needs_one() else {
-			return Err(RpcError::InvalidParams);
-		};
-		surrealdb::iam::verify::token(self.kvs, &mut self.session, &token.0).await?;
-		Ok(Value::None.into())
 	}
 }

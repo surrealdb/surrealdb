@@ -686,6 +686,38 @@ async fn define_statement_index_single() -> Result<(), Error> {
 }
 
 #[tokio::test]
+async fn define_statement_index_concurrently() -> Result<(), Error> {
+	let sql = "
+		CREATE user:1 SET email = 'test@surrealdb.com';
+		CREATE user:2 SET email = 'test@surrealdb.com';
+		DEFINE INDEX test ON user FIELDS email CONCURRENTLY;
+		SLEEP 1s;
+		INFO FOR TABLE user;
+		INFO FOR INDEX test ON user;
+	";
+	let mut t = Test::new(sql).await?;
+	t.skip_ok(4)?;
+	t.expect_val(
+		"{
+			events: {},
+			fields: {},
+			tables: {},
+			indexes: {
+				test: 'DEFINE INDEX test ON user FIELDS email CONCURRENTLY',
+			},
+			lives: {},
+		}",
+	)?;
+	t.expect_val(
+		"{
+			building: { status: 'built' }
+		}",
+	)?;
+
+	Ok(())
+}
+
+#[tokio::test]
 async fn define_statement_index_multiple() -> Result<(), Error> {
 	let sql = "
 		DEFINE INDEX test ON user FIELDS account, email;

@@ -1,13 +1,6 @@
 use std::collections::BTreeMap;
 
-use crate::{
-	dbs::Session,
-	kvs::Datastore,
-	rpc::RpcContext,
-	sql::{Array, Value},
-};
-
-use super::{args::Take, Data, RpcError};
+use crate::{dbs::Session, kvs::Datastore, rpc::RpcContext, sql::Value};
 
 #[non_exhaustive]
 pub struct BasicRpcContext<'a> {
@@ -56,37 +49,5 @@ impl RpcContext for BasicRpcContext<'_> {
 
 	fn version_data(&self) -> super::Data {
 		Value::Strand(self.version_string.clone().into()).into()
-	}
-
-	// reimplimentaions:
-
-	async fn signup(&mut self, params: Array) -> Result<Data, RpcError> {
-		let Ok(Value::Object(v)) = params.needs_one() else {
-			return Err(RpcError::InvalidParams);
-		};
-		crate::iam::signup::signup(self.kvs, &mut self.session, v)
-			.await
-			.map(Value::from)
-			.map(Into::into)
-			.map_err(Into::into)
-	}
-
-	async fn signin(&mut self, params: Array) -> Result<Data, RpcError> {
-		let Ok(Value::Object(v)) = params.needs_one() else {
-			return Err(RpcError::InvalidParams);
-		};
-		crate::iam::signin::signin(self.kvs, &mut self.session, v)
-			.await
-			.map(Value::from)
-			.map(Into::into)
-			.map_err(Into::into)
-	}
-
-	async fn authenticate(&mut self, params: Array) -> Result<Data, RpcError> {
-		let Ok(Value::Strand(token)) = params.needs_one() else {
-			return Err(RpcError::InvalidParams);
-		};
-		crate::iam::verify::token(self.kvs, &mut self.session, &token.0).await?;
-		Ok(Value::None.into())
 	}
 }

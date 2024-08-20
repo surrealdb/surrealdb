@@ -21,7 +21,7 @@ use crate::idx::ft::termdocs::{TermDocs, TermsDocs};
 use crate::idx::ft::terms::{TermId, TermLen, Terms};
 use crate::idx::trees::btree::BStatistics;
 use crate::idx::trees::store::IndexStores;
-use crate::idx::{IndexKeyBase, VersionedSerdeState};
+use crate::idx::{IndexKeyBase, VersionedStore};
 use crate::kvs::Transaction;
 use crate::kvs::{Key, TransactionType};
 use crate::sql::index::SearchParams;
@@ -94,11 +94,11 @@ struct State {
 	doc_count: u64,
 }
 
-impl VersionedSerdeState for State {}
+impl VersionedStore for State {}
 
 impl FtIndex {
 	pub(crate) async fn new(
-		ctx: &Context<'_>,
+		ctx: &Context,
 		opt: &Options,
 		az: &str,
 		index_key_base: IndexKeyBase,
@@ -118,8 +118,8 @@ impl FtIndex {
 		tt: TransactionType,
 	) -> Result<Self, Error> {
 		let state_key: Key = index_key_base.new_bs_key();
-		let state: State = if let Some(val) = txn.get(state_key.clone()).await? {
-			State::try_from_val(val)?
+		let state: State = if let Some(val) = txn.get(state_key.clone(), None).await? {
+			VersionedStore::try_from(val)?
 		} else {
 			State::default()
 		};
@@ -188,7 +188,7 @@ impl FtIndex {
 
 	pub(crate) async fn remove_document(
 		&mut self,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		rid: &Thing,
 	) -> Result<(), Error> {
 		let tx = ctx.tx();
@@ -208,7 +208,9 @@ impl FtIndex {
 			}
 
 			// Get the term list
-			if let Some(term_list_vec) = tx.get(self.index_key_base.new_bk_key(doc_id)).await? {
+			if let Some(term_list_vec) =
+				tx.get(self.index_key_base.new_bk_key(doc_id), None).await?
+			{
 				let term_list = RoaringTreemap::deserialize_from(&mut term_list_vec.as_slice())?;
 				// Remove the postings
 				let mut p = self.postings.write().await;
@@ -239,7 +241,7 @@ impl FtIndex {
 	pub(crate) async fn index_document(
 		&mut self,
 		stk: &mut Stk,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		opt: &Options,
 		rid: &Thing,
 		content: Vec<Value>,
@@ -280,7 +282,7 @@ impl FtIndex {
 
 		// Retrieve the existing terms for this document (if any)
 		let term_ids_key = self.index_key_base.new_bk_key(doc_id);
-		let mut old_term_ids = if let Some(val) = tx.get(term_ids_key.clone()).await? {
+		let mut old_term_ids = if let Some(val) = tx.get(term_ids_key.clone(), None).await? {
 			Some(RoaringTreemap::deserialize_from(&mut val.as_slice())?)
 		} else {
 			None
@@ -341,7 +343,7 @@ impl FtIndex {
 		}
 
 		// Update the states
-		tx.set(self.state_key.clone(), self.state.try_to_val()?).await?;
+		tx.set(self.state_key.clone(), VersionedStore::try_into(&self.state)?).await?;
 		drop(tx);
 		Ok(())
 	}
@@ -349,7 +351,7 @@ impl FtIndex {
 	pub(super) async fn extract_querying_terms(
 		&self,
 		stk: &mut Stk,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		opt: &Options,
 		query_string: String,
 	) -> Result<(TermsList, TermsSet), Error> {
@@ -468,7 +470,7 @@ impl FtIndex {
 		Ok(Value::None)
 	}
 
-	pub(crate) async fn statistics(&self, ctx: &Context<'_>) -> Result<FtStatistics, Error> {
+	pub(crate) async fn statistics(&self, ctx: &Context) -> Result<FtStatistics, Error> {
 		let txn = ctx.tx();
 		let res = FtStatistics {
 			doc_ids: self.doc_ids.read().await.statistics(&txn).await?,
@@ -479,7 +481,7 @@ impl FtIndex {
 		Ok(res)
 	}
 
-	pub(crate) async fn finish(&self, ctx: &Context<'_>) -> Result<(), Error> {
+	pub(crate) async fn finish(&self, ctx: &Context) -> Result<(), Error> {
 		let txn = ctx.tx();
 		self.doc_ids.write().await.finish(&txn).await?;
 		self.doc_lengths.write().await.finish(&txn).await?;
@@ -526,7 +528,7 @@ impl HitsIterator {
 
 #[cfg(test)]
 mod tests {
-	use crate::ctx::Context;
+	use crate::ctx::{Context, MutableContext};
 	use crate::dbs::Options;
 	use crate::idx::ft::scorer::{BM25Scorer, Score};
 	use crate::idx::ft::{FtIndex, HitsIterator};
@@ -542,7 +544,7 @@ mod tests {
 	use test_log::test;
 
 	async fn check_hits(
-		ctx: &Context<'_>,
+		ctx: &Context,
 		hits: Option<HitsIterator>,
 		scr: BM25Scorer,
 		e: Vec<(&Thing, Option<Score>)>,
@@ -565,7 +567,7 @@ mod tests {
 
 	async fn search(
 		stk: &mut Stk,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		opt: &Options,
 		fti: &FtIndex,
 		qs: &str,
@@ -585,8 +587,8 @@ mod tests {
 		az: Arc<DefineAnalyzerStatement>,
 		order: u32,
 		hl: bool,
-	) -> (Context<'a>, Options, FtIndex) {
-		let mut ctx = Context::default();
+	) -> (Context, Options, FtIndex) {
+		let mut ctx = MutableContext::default();
 		let tx = ds.transaction(tt, Optimistic).await.unwrap();
 		let p = SearchParams {
 			az: az.name.clone(),
@@ -613,10 +615,10 @@ mod tests {
 		.unwrap();
 		let txn = Arc::new(tx);
 		ctx.set_transaction(txn);
-		(ctx, Options::default(), fti)
+		(ctx.freeze(), Options::default(), fti)
 	}
 
-	pub(super) async fn finish(ctx: &Context<'_>, fti: FtIndex) {
+	pub(super) async fn finish(ctx: &Context, fti: FtIndex) {
 		fti.finish(ctx).await.unwrap();
 		let tx = ctx.tx();
 		tx.commit().await.unwrap();

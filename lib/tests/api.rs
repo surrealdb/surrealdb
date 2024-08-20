@@ -274,6 +274,7 @@ mod api_integration {
 	mod file {
 		use super::*;
 		use surrealdb::engine::local::Db;
+		#[allow(deprecated)]
 		use surrealdb::engine::local::File;
 
 		async fn new_db() -> (SemaphorePermit<'static>, Surreal<Db>) {
@@ -287,6 +288,7 @@ mod api_integration {
 				.user(root)
 				.tick_interval(TICK_INTERVAL)
 				.capabilities(Capabilities::all());
+			#[allow(deprecated)]
 			let db = Surreal::new::<File>((path, config)).await.unwrap();
 			db.signin(root).await.unwrap();
 			(permit, db)
@@ -459,6 +461,28 @@ mod api_integration {
 			let version = create_ts.to_rfc3339();
 			let mut response = db
 				.query(format!("SELECT * FROM user VERSION d'{}'", version))
+				.await
+				.unwrap()
+				.check()
+				.unwrap();
+			let Some(name): Option<String> = response.take("name").unwrap() else {
+				panic!("query returned no record");
+			};
+			assert_eq!(name, "John v1");
+
+			let mut response = db
+				.query(format!("SELECT name FROM user VERSION d'{}'", version))
+				.await
+				.unwrap()
+				.check()
+				.unwrap();
+			let Some(name): Option<String> = response.take("name").unwrap() else {
+				panic!("query returned no record");
+			};
+			assert_eq!(name, "John v1");
+
+			let mut response = db
+				.query(format!("SELECT name FROM user:john VERSION d'{}'", version))
 				.await
 				.unwrap()
 				.check()
