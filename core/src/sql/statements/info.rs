@@ -318,7 +318,7 @@ impl InfoStatement {
 				let mut out = Object::default();
 				#[cfg(not(target_arch = "wasm32"))]
 				if let Some(ib) = ctx.get_index_builder() {
-					if let Some(status) = ib.get_status(&res.deref()).await {
+					if let Some(status) = ib.get_status(res.deref()).await {
 						out.insert("building".to_string(), status.into());
 					}
 				}
