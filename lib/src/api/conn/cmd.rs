@@ -322,6 +322,7 @@ impl Command {
 		Some(res)
 	}
 
+	#[cfg(feature = "protocol-http")]
 	pub(crate) fn needs_one(&self) -> bool {
 		match self {
 			Command::Upsert {
