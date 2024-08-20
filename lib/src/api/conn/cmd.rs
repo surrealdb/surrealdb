@@ -6,6 +6,7 @@ use revision::Revisioned;
 use serde::{ser::SerializeMap as _, Serialize};
 use std::path::PathBuf;
 use std::{collections::BTreeMap, io::Read};
+use surrealdb_core::sql::Array;
 use surrealdb_core::{
 	dbs::Notification,
 	sql::{Object, Query, Value},
@@ -98,6 +99,11 @@ pub(crate) enum Command {
 	},
 	Kill {
 		uuid: Uuid,
+	},
+	Run {
+		name: String,
+		version: Option<String>,
+		args: Array,
 	},
 }
 
@@ -317,6 +323,15 @@ impl Command {
 				id,
 				method: "kill".into(),
 				params: Some(vec![Value::from(uuid)].into()),
+			},
+			Command::Run {
+				name,
+				version,
+				args,
+			} => RouterRequest {
+				id,
+				method: "run".into(),
+				params: Some(vec![Value::from(name), Value::from(version), Value::Array(args)]),
 			},
 		};
 		Some(res)

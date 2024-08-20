@@ -742,54 +742,5 @@ async fn router(
 			let value = take(true, request).await?;
 			Ok(DbResponse::Other(value))
 		}
-		Method::Run => {
-			let path = base_url.join(SQL_PATH)?;
-			let (fn_name, _fn_version, fn_params) = match &mut params[..] {
-				[Value::Strand(n), Value::Strand(v), Value::Array(p)] => (n, Some(v), p),
-				[Value::Strand(n), Value::None, Value::Array(p)] => (n, None, p),
-				_ => unreachable!(),
-			};
-			let args: Vec<(String, Value)> = fn_params
-				.iter()
-				.enumerate()
-				.map(|(i, v)| (format!("p{i}"), v.to_owned()))
-				.collect();
-			// let arg_str =
-			// 	(0..args.len()).map(|i| format!("$p{i}")).collect::<Vec<String>>().join(", ");
-			// let statement = match fn_version {
-			// 	Some(v) => format!("{fn_name}::<{v}>({arg_str})"),
-			// 	None => format!("{fn_name}({arg_str})"),
-			// };
-
-			let func: Value = match &fn_name[0..4] {
-				"fn::" => {
-					Function::Custom(fn_name.chars().skip(4).collect(), fn_params.0.clone()).into()
-				}
-				// should return error, but can't on wasm
-				#[cfg(feature = "ml")]
-				"ml::" => {
-					let mut tmp = Model::default();
-
-					tmp.name = fn_name.chars().skip(4).collect();
-					tmp.args = mem::take(fn_params).0;
-					tmp.version = mem::take(
-						_fn_version
-							.ok_or(Error::Query("ML functions must have a version".to_string()))?,
-					)
-					.0;
-					tmp
-				}
-				.into(),
-				_ => Function::Normal(mem::take(fn_name).0, mem::take(fn_params).0).into(),
-			};
-			let statement = func.to_string();
-
-			println!("statement: {statement}");
-			let request =
-				client.post(path).headers(headers.clone()).auth(auth).query(&args).body(statement);
-			// TODO: unwrap for debugging
-			let value = take(true, request).await.unwrap();
-			Ok(DbResponse::Other(value))
-		}
 	}
 }

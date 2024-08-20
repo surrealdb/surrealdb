@@ -1,5 +1,4 @@
-use crate::api::conn::Method;
-use crate::api::conn::Param;
+use crate::api::conn::Command;
 use crate::api::Connection;
 use crate::api::Result;
 use crate::method::OnceLockExt;
@@ -41,13 +40,21 @@ where
 	type IntoFuture = Pin<Box<dyn Future<Output = Self::Output> + Send + Sync + 'r>>;
 
 	fn into_future(self) -> Self::IntoFuture {
+		let Run {
+			client,
+			fn_name,
+			fn_version,
+			params,
+		} = self;
 		Box::pin(async move {
-			let mut conn = Client::new(Method::Run);
-			conn.execute_value(
-				self.client.router.extract()?,
-				Param::new(vec![self.fn_name.into(), self.fn_version.into(), self.params.into()]),
-			)
-			.await
+			// let mut conn = Client::new(Method::Run);
+			// conn.execute_value(
+			// 	self.client.router.extract()?,
+			// 	Param::new(vec![self.fn_name.into(), self.fn_version.into(), self.params.into()]),
+			// )
+			// .await
+			let router = client.router.extract()?;
+			router.execute_value(Command)
 		})
 	}
 }

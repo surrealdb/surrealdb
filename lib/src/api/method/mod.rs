@@ -93,30 +93,6 @@ pub use version::Version;
 
 /// A alias for an often used type of future returned by async methods in this library.
 pub(crate) type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + Sync + 'a>>;
-use crate::api::conn::Method;
-use crate::api::opt;
-use crate::api::opt::auth;
-use crate::api::opt::auth::Credentials;
-use crate::api::opt::auth::Jwt;
-use crate::api::opt::IntoEndpoint;
-use crate::api::Connect;
-use crate::api::Connection;
-use crate::api::OnceLockExt;
-use crate::api::Surreal;
-use crate::opt::IntoExportDestination;
-use crate::opt::WaitFor;
-use crate::sql::to_value;
-use crate::sql::Value;
-use run::IntoParams;
-use serde::Serialize;
-use std::borrow::Cow;
-use std::marker::PhantomData;
-use std::path::Path;
-use std::sync::Arc;
-use std::sync::OnceLock;
-use std::time::Duration;
-
-use self::query::ValidQuery;
 
 /// Query statistics
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -135,37 +111,6 @@ pub struct Live;
 /// Responses returned with statistics
 #[derive(Debug)]
 pub struct WithStats<T>(pub T);
-
-impl Method {
-	#[allow(dead_code)] // used by `ws` and `http`
-	pub(crate) fn as_str(&self) -> &str {
-		match self {
-			Method::Authenticate => "authenticate",
-			Method::Create => "create",
-			Method::Delete => "delete",
-			Method::Export => "export",
-			Method::Health => "health",
-			Method::Import => "import",
-			Method::Invalidate => "invalidate",
-			Method::Insert => "insert",
-			Method::Kill => "kill",
-			Method::Live => "live",
-			Method::Merge => "merge",
-			Method::Patch => "patch",
-			Method::Query => "query",
-			Method::Select => "select",
-			Method::Set => "set",
-			Method::Signin => "signin",
-			Method::Signup => "signup",
-			Method::Unset => "unset",
-			Method::Update => "update",
-			Method::Upsert => "upsert",
-			Method::Use => "use",
-			Method::Version => "version",
-			Method::Run => "run",
-		}
-	}
-}
 
 impl<C> Surreal<C>
 where
