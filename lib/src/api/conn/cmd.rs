@@ -102,7 +102,7 @@ pub(crate) enum Command {
 }
 
 impl Command {
-	#[cfg(feature = "protocol-ws")]
+	#[cfg(any(feature = "protocol-ws", feature = "protocol-http"))]
 	pub(crate) fn into_router_request(self, id: Option<i64>) -> Option<RouterRequest> {
 		let id = id.map(Value::from);
 		let res = match self {
@@ -320,6 +320,39 @@ impl Command {
 			},
 		};
 		Some(res)
+	}
+
+	#[cfg(feature = "protocol-http")]
+	pub(crate) fn needs_one(&self) -> bool {
+		match self {
+			Command::Upsert {
+				what,
+				..
+			} => what.is_thing(),
+			Command::Update {
+				what,
+				..
+			} => what.is_thing(),
+			Command::Insert {
+				data,
+				..
+			} => !data.is_array(),
+			Command::Patch {
+				what,
+				..
+			} => what.is_thing(),
+			Command::Merge {
+				what,
+				..
+			} => what.is_thing(),
+			Command::Select {
+				what,
+			} => what.is_thing(),
+			Command::Delete {
+				what,
+			} => what.is_thing(),
+			_ => false,
+		}
 	}
 }
 
