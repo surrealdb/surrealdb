@@ -2609,15 +2609,16 @@ async fn select_from_standard_index_limit() -> Result<(), Error> {
 		DEFINE INDEX time ON TABLE session COLUMNS time;
 		CREATE session:1 SET time = d'2024-07-01T01:00:00Z';
 		CREATE session:2 SET time = d'2024-06-30T23:00:00Z';
-		CREATE session:3 SET time = d'2024-07-01T02:00:00Z';
-		CREATE session:4 SET time = d'2024-06-30T23:30:00Z';
-		SELECT * FROM session ORDER BY time ASC LIMIT 3 EXPLAIN;
-		SELECT * FROM session ORDER BY time ASC LIMIT 3;
-		SELECT * FROM session ORDER BY time ASC EXPLAIN;
-		SELECT * FROM session ORDER BY time ASC;
+		CREATE session:3 SET time = null;
+		CREATE session:4 SET time = d'2024-07-01T02:00:00Z';
+		CREATE session:5 SET time = d'2024-06-30T23:30:00Z';
+		SELECT * FROM session WHERE time != null ORDER BY time ASC LIMIT 3 EXPLAIN;
+		SELECT * FROM session WHERE time != null ORDER BY time ASC LIMIT 3;
+		SELECT * FROM session WHERE time != null ORDER BY time DESC LIMIT 3 EXPLAIN;
+		SELECT * FROM session WHERE time != null ORDER BY time DESC LIMIT 3;
 	";
 	let mut t = Test::new(sql).await?;
-	t.skip_ok(5)?;
+	t.skip_ok(6)?;
 	//
 	t.expect_vals(&vec![
 		"[
@@ -2640,7 +2641,7 @@ async fn select_from_standard_index_limit() -> Result<(), Error> {
 				time: d'2024-06-30T23:00:00Z'
 			},
 			{
-				id: session:4,
+				id: session:5,
 				time: d'2024-06-30T23:30:00Z'
 			},
 			{
@@ -2664,20 +2665,16 @@ async fn select_from_standard_index_limit() -> Result<(), Error> {
 			]",
 		"[
 			{
-				id: session:2,
-				time: d'2024-06-30T23:00:00Z'
-			},
-			{
 				id: session:4,
-				time: d'2024-06-30T23:30:00Z'
+				time: d'2024-07-01T02:00:00Z'
 			},
 			{
 				id: session:1,
 				time: d'2024-07-01T01:00:00Z'
 			},
 			{
-				id: session:3,
-				time: d'2024-07-01T02:00:00Z'
+				id: session:5,
+				time: d'2024-06-30T23:30:00Z'
 			}
 		]",
 	])?;

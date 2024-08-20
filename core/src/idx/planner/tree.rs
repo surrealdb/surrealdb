@@ -182,6 +182,8 @@ impl<'a> TreeBuilder<'a> {
 			| Value::Geometry(_)
 			| Value::Datetime(_)
 			| Value::Param(_)
+			| Value::Null
+			| Value::None
 			| Value::Function(_) => Ok(Node::Computable),
 			Value::Array(a) => self.eval_array(stk, a).await,
 			Value::Subquery(s) => self.eval_subquery(stk, s).await,

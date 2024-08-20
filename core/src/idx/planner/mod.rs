@@ -98,8 +98,8 @@ impl QueryPlanner {
 				let ir = exe.add_iterator(IteratorEntry::Single(exp, io));
 				self.add(t.clone(), Some(ir), exe, it);
 			}
-			Plan::SortedSingleIndex(ir, asc) => {
-				let ir = exe.add_iterator(IteratorEntry::SingleSorted(ir, asc));
+			Plan::SortedSingleIndex(ir, asc, limit) => {
+				let ir = exe.add_iterator(IteratorEntry::SingleSorted(ir, asc, limit));
 				self.add(t.clone(), Some(ir), exe, it);
 			}
 			Plan::MultiIndex(non_range_indexes, ranges_indexes) => {

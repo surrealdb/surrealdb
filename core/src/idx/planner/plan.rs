@@ -54,13 +54,8 @@ impl PlanBuilder {
 			}
 		}
 
-		if root.is_none() {
-			// If there is no conditions, and the first ORDER is backed by an index
-			if let Some((ir, asc)) = indexed_order {
-				return Ok(Plan::SortedSingleIndex(ir, asc));
-			}
-		} else if b.all_and {
-			// If every boolean operator are AND then we can use the single index plan
+		// If every boolean operator are AND then we can use the single index plan
+		if b.all_and {
 			// TODO: This is currently pretty arbitrary
 			// We take the "first" range query if one is available
 			if let Some((_, group)) = b.groups.into_iter().next() {
@@ -169,8 +164,8 @@ pub(super) enum Plan {
 	MultiIndex(Vec<(Arc<Expression>, IndexOption)>, Vec<(IndexRef, UnionRangeQueryBuilder)>),
 	/// Index scan for record matching a given range
 	SingleIndexRange(IndexRef, UnionRangeQueryBuilder),
-	/// Sorted index scan without filter
-	SortedSingleIndex(IndexRef, bool),
+	/// Sorted index scan without limit
+	SortedSingleIndex(IndexRef, bool, usize),
 }
 
 #[derive(Debug, Eq, PartialEq, Hash, Clone)]
