@@ -1223,14 +1223,18 @@ where
 		}
 	}
 
+	// TODO: Re-enable doc tests
 	/// Runs a function
 	///
 	/// # Examples
 	///
-	/// ```no_run
+	/// ```ignore
 	/// # #[tokio::main]
 	/// # async fn main() -> surrealdb::Result<()> {
 	/// # let db = surrealdb::engine::any::connect("mem://").await?;
+	/// // Note that the sdk is currently undergoing some changes so the below examples might not
+	/// work until the sdk is somewhat more stable.
+	///
 	/// // specify no args with an empty tuple, vec, or slice
 	/// let foo = db.run("fn::foo", ()).await?; // fn::foo()
 	/// // a single value will be turned into one arguement unless it is a tuple or vec
