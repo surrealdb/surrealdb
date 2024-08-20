@@ -59,8 +59,6 @@ use surrealdb_core::{
 use crate::api::err::Error;
 #[cfg(not(target_arch = "wasm32"))]
 use std::path::PathBuf;
-// use std::sync::Arc;
-// use std::time::Duration;
 use surrealdb_core::sql::Function;
 #[cfg(feature = "ml")]
 use surrealdb_core::sql::Model;
