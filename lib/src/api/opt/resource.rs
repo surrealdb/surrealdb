@@ -5,8 +5,10 @@ use crate::{
 use std::ops::{self, Bound};
 use surrealdb_core::sql::{
 	Edges as CoreEdges, IdRange as CoreIdRange, Table as CoreTable, Thing as CoreThing,
-	Value as CoreValue,
 };
+
+#[cfg(any(feature = "protocol-ws", feature = "protocol-http"))]
+use surrealdb_core::sql::Value as CoreValue;
 
 /// A wrapper type to assert that you ment to use a string as a table name.
 ///
@@ -87,7 +89,7 @@ impl Resource {
 		}
 	}
 
-	#[cfg(feature = "protocol-ws")]
+	#[cfg(any(feature = "protocol-ws", feature = "protocol-http"))]
 	pub(crate) fn into_core_value(self) -> CoreValue {
 		match self {
 			Resource::Table(x) => Table(x).into_core().into(),
