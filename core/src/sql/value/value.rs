@@ -1133,6 +1133,14 @@ impl Value {
 		}
 	}
 
+	pub fn is_single(&self) -> bool {
+		match self {
+			Value::Object(_) => true,
+			Value::Array(a) if a.len() == 1 => true,
+			_ => false,
+		}
+	}
+
 	// -----------------------------------
 	// Simple conversion of value
 	// -----------------------------------

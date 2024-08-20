@@ -68,6 +68,9 @@ pub trait RpcContext {
 			Method::Relate => self.relate(params).await.map(Into::into).map_err(Into::into),
 			Method::Run => self.run(params).await.map(Into::into).map_err(Into::into),
 			Method::GraphQL => self.graphql(params).await.map(Into::into).map_err(Into::into),
+			Method::InsertRelation => {
+				self.insert_relation(params).await.map(Into::into).map_err(Into::into)
+			}
 			Method::Unknown => Err(RpcError::MethodNotFound),
 		}
 	}
@@ -89,6 +92,9 @@ pub trait RpcContext {
 			Method::Relate => self.relate(params).await.map(Into::into).map_err(Into::into),
 			Method::Run => self.run(params).await.map(Into::into).map_err(Into::into),
 			Method::GraphQL => self.graphql(params).await.map(Into::into).map_err(Into::into),
+			Method::InsertRelation => {
+				self.insert_relation(params).await.map(Into::into).map_err(Into::into)
+			}
 			Method::Unknown => Err(RpcError::MethodNotFound),
 			_ => Err(RpcError::MethodNotFound),
 		}
@@ -312,6 +318,41 @@ pub trait RpcContext {
 			false => res.remove(0).result?,
 		};
 		// Return the result to the client
+		Ok(res)
+	}
+
+	async fn insert_relation(&self, params: Array) -> Result<impl Into<Data>, RpcError> {
+		let Ok((what, data)) = params.needs_two() else {
+			return Err(RpcError::InvalidParams);
+		};
+
+		let one = data.is_single();
+
+		let mut res = match what {
+			Value::None | Value::Null => {
+				let sql = "INSERT RELATION $data RETURN AFTER";
+				let vars = Some(map! {
+					String::from("data") => data,
+					=> &self.vars()
+				});
+				self.kvs().execute(&sql, self.session(), vars).await?
+			}
+			Value::Table(_) | Value::Strand(_) => {
+				let sql = "INSERT INTO $what RELATION $data RETURN AFTER";
+				let vars = Some(map! {
+						String::from("data") => data,
+				String::from("what") => what.could_be_table(),
+						=> &self.vars()
+					});
+				self.kvs().execute(&sql, self.session(), vars).await?
+			}
+			_ => return Err(RpcError::InvalidParams),
+		};
+
+		let res = match one {
+			true => res.remove(0).result?.first(),
+			false => res.remove(0).result?,
+		};
 		Ok(res)
 	}
 
