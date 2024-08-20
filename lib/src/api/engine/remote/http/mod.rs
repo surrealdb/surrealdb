@@ -273,6 +273,18 @@ async fn process_req(
 	return DbResponse::from(response.result);
 }
 
+fn try_one(res: DbResponse, needed: bool) -> DbResponse {
+	if !needed {
+		return res;
+	}
+	match res {
+		DbResponse::Other(Value::Array(arr)) if arr.len() == 1 => {
+			DbResponse::Other(arr.into_iter().next().unwrap())
+		}
+		r => r,
+	}
+}
+
 async fn router(
 	RequestData {
 		command,
@@ -520,10 +532,11 @@ async fn router(
 		} => Err(Error::LiveQueriesNotSupported.into()),
 
 		cmd => {
+			let one = cmd.needs_one();
 			let req = cmd
 				.into_router_request(None)
 				.expect("all invalid variants should have been caught");
-			process_req(req, base_url, client, headers, auth).await
+			process_req(req, base_url, client, headers, auth).await.map(|r| try_one(r, one))
 		}
 	}
 }

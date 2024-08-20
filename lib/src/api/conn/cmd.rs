@@ -321,6 +321,38 @@ impl Command {
 		};
 		Some(res)
 	}
+
+	pub(crate) fn needs_one(&self) -> bool {
+		match self {
+			Command::Upsert {
+				what,
+				..
+			} => what.is_thing(),
+			Command::Update {
+				what,
+				..
+			} => what.is_thing(),
+			Command::Insert {
+				data,
+				..
+			} => !data.is_array(),
+			Command::Patch {
+				what,
+				..
+			} => what.is_thing(),
+			Command::Merge {
+				what,
+				..
+			} => what.is_thing(),
+			Command::Select {
+				what,
+			} => what.is_thing(),
+			Command::Delete {
+				what,
+			} => what.is_thing(),
+			_ => false,
+		}
+	}
 }
 
 /// A struct which will be serialized as a map to behave like the previously used BTreeMap.
