@@ -27,16 +27,14 @@ use indexmap::IndexMap;
 use reqwest::header::HeaderMap;
 use reqwest::header::HeaderValue;
 use reqwest::header::ACCEPT;
+use reqwest::header::CONTENT_TYPE;
 use reqwest::RequestBuilder;
 use serde::Deserialize;
 use serde::Serialize;
 use std::marker::PhantomData;
 use surrealdb_core::sql::Query;
-use surrealdb_core::sql::Statement;
 use url::Url;
 
-#[cfg(not(target_arch = "wasm32"))]
-use reqwest::header::CONTENT_TYPE;
 #[cfg(not(target_arch = "wasm32"))]
 use std::path::PathBuf;
 #[cfg(not(target_arch = "wasm32"))]
@@ -288,6 +286,19 @@ async fn router(
 ) -> Result<DbResponse> {
 	error!(?command, ?headers, ?vars, ?auth);
 	match command {
+		Command::Query {
+			query,
+			mut variables,
+		} => {
+			variables.extend(vars.clone());
+			let req = Command::Query {
+				query,
+				variables,
+			}
+			.into_router_request(None)
+			.expect("query should be valid request");
+			process_req(req, base_url, client, headers, auth).await
+		}
 		ref cmd @ Command::Use {
 			ref namespace,
 			ref database,
@@ -383,10 +394,10 @@ async fn router(
 			key,
 			value,
 		} => {
-			let query: Query = Statement::Value(value).into();
+			let query: Query = surrealdb_core::sql::parse(&format!("RETURN ${key};"))?;
 			let req = Command::Query {
 				query,
-				variables: Default::default(),
+				variables: [(key.clone(), value)].into(),
 			}
 			.into_router_request(None)
 			.expect("query is valid request");
