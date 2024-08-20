@@ -254,7 +254,6 @@ impl Test {
 		})
 	}
 
-	#[allow(dead_code)]
 	pub async fn new(sql: &str) -> Result<Self, Error> {
 		Self::with_ds(new_ds().await?, sql).await
 	}
