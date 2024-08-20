@@ -109,6 +109,18 @@ pub(super) fn mock(route_rx: Receiver<Route>) {
 					}
 					_ => unreachable!(),
 				},
+				Command::InsertRelation {
+					what,
+					data,
+				} => match (what, data) {
+					(Some(Value::Table(..)), Value::Array(..)) => {
+						Ok(DbResponse::Other(Value::Array(Default::default())))
+					}
+					(Some(Value::Table(..)), _) => {
+						Ok(DbResponse::Other(to_value(User::default()).unwrap()))
+					}
+					_ => unreachable!(),
+				},
 				Command::Run {
 					..
 				} => Ok(DbResponse::Other(Value::None)),

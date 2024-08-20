@@ -16,6 +16,8 @@ pub enum Resource {
 	Array(Array),
 	/// Edges
 	Edges(Edges),
+	/// Unspecified
+	Unspecified,
 }
 
 impl Resource {
@@ -29,6 +31,7 @@ impl Resource {
 			Resource::Object(object) => Err(Error::RangeOnObject(object).into()),
 			Resource::Array(array) => Err(Error::RangeOnArray(array).into()),
 			Resource::Edges(edges) => Err(Error::RangeOnEdges(edges).into()),
+			Resource::Unspecified => Err(Error::RangeOnUnspecified.into()),
 		}
 	}
 }
@@ -136,6 +139,7 @@ impl From<Resource> for Value {
 			Resource::Object(resource) => resource.into(),
 			Resource::Array(resource) => resource.into(),
 			Resource::Edges(resource) => resource.into(),
+			Resource::Unspecified => Value::None,
 		}
 	}
 }

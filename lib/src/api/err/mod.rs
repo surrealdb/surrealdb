@@ -58,6 +58,10 @@ pub enum Error {
 	#[error("Range on edges not supported: {0}")]
 	RangeOnEdges(Edges),
 
+	/// Tried to use a range query on an unspecified resource
+	#[error("Range on unspecified resource not supported")]
+	RangeOnUnspecified,
+
 	/// Tried to use `table:id` syntax as a method parameter when `(table, id)` should be used instead
 	#[error("`{table}:{id}` is not allowed as a method parameter; try `({table}, {id})`")]
 	TableColonId {
@@ -183,6 +187,10 @@ pub enum Error {
 	#[error("Live queries on edges not supported: {0}")]
 	LiveOnEdges(Edges),
 
+	/// Tried to use a range query on an unspecified resource
+	#[error("Live queries on unspecified resources not supported")]
+	LiveOnUnspecified,
+
 	/// Tried to access a query statement as a live query when it isn't a live query
 	#[error("Query statement {0} is not a live query")]
 	NotLiveQuery(usize),
@@ -206,6 +214,10 @@ pub enum Error {
 	/// Tried to insert on an edge or edges
 	#[error("Insert queries on edges not supported: {0}")]
 	InsertOnEdges(Edges),
+
+	/// Tried to insert on an unspecified resource with no data
+	#[error("Insert queries on unspecified resource with no data not supported")]
+	InsertOnUnspecified,
 
 	#[error("{0}")]
 	InvalidNetTarget(#[from] ParseNetTargetError),

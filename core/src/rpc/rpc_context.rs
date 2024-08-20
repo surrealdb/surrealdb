@@ -338,7 +338,7 @@ pub trait RpcContext {
 				self.kvs().execute(&sql, self.session(), vars).await?
 			}
 			Value::Table(_) | Value::Strand(_) => {
-				let sql = "INSERT INTO $what RELATION $data RETURN AFTER";
+				let sql = "INSERT RELATION INTO $what $data RETURN AFTER";
 				let vars = Some(map! {
 						String::from("data") => data,
 				String::from("what") => what.could_be_table(),

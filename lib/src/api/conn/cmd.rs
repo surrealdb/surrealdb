@@ -46,6 +46,10 @@ pub(crate) enum Command {
 		what: Option<Value>,
 		data: Value,
 	},
+	InsertRelation {
+		what: Option<Value>,
+		data: Value,
+	},
 	Patch {
 		what: Value,
 		data: Option<Value>,
@@ -209,6 +213,24 @@ impl Command {
 				RouterRequest {
 					id,
 					method: "insert".into(),
+					params: Some(params.into()),
+				}
+			}
+			Command::InsertRelation {
+				what,
+				data,
+			} => {
+				let mut params = if let Some(w) = what {
+					vec![w]
+				} else {
+					vec![Value::None]
+				};
+
+				params.push(data);
+
+				RouterRequest {
+					id,
+					method: "insert-relation".into(),
 					params: Some(params.into()),
 				}
 			}

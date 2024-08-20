@@ -36,6 +36,7 @@ mod export;
 mod health;
 mod import;
 mod insert;
+mod insert_relation;
 mod invalidate;
 mod merge;
 mod patch;

@@ -17,6 +17,8 @@ use std::borrow::Cow;
 use std::future::IntoFuture;
 use std::marker::PhantomData;
 
+use super::insert_relation::InsertRelation;
+
 /// An insert future
 #[derive(Debug)]
 #[must_use = "futures do nothing unless you `.await` or poll them"]
@@ -58,6 +60,7 @@ macro_rules! into_future {
 					Resource::Object(obj) => return Err(Error::InsertOnObject(obj).into()),
 					Resource::Array(arr) => return Err(Error::InsertOnArray(arr).into()),
 					Resource::Edges(edges) => return Err(Error::InsertOnEdges(edges).into()),
+					Resource::Unspecified => return Err(Error::InsertOnUnspecified.into()),
 				};
 				let cmd = Command::Insert {
 					what: Some(table),
@@ -140,6 +143,58 @@ where
 						})
 					}
 				}
+				Resource::Unspecified => Ok(Command::Insert {
+					what: None,
+					data,
+				}),
+				Resource::Object(obj) => Err(Error::InsertOnObject(obj).into()),
+				Resource::Array(arr) => Err(Error::InsertOnArray(arr).into()),
+				Resource::Edges(edges) => Err(Error::InsertOnEdges(edges).into()),
+			}
+		})
+	}
+}
+
+impl<'r, C, R> Insert<'r, C, R>
+where
+	C: Connection,
+	R: DeserializeOwned,
+{
+	pub fn relation<D>(self, data: D) -> InsertRelation<'r, C, R>
+	where
+		D: Serialize + 'static,
+	{
+		InsertRelation::from_closure(self.client, || {
+			let mut data = crate::sql::to_value(data)?;
+			match self.resource? {
+				Resource::Table(table) => Ok(Command::Insert {
+					what: Some(table.into()),
+					data,
+				}),
+				Resource::RecordId(thing) => {
+					if data.is_array() {
+						Err(Error::InvalidParams(
+							"Tried to insert multiple records on a record ID".to_owned(),
+						)
+						.into())
+					} else {
+						let mut table = Table::default();
+						table.0.clone_from(&thing.tb);
+						let what = Value::Table(table);
+						let mut ident = Ident::default();
+						"id".clone_into(&mut ident.0);
+						let id = Part::Field(ident);
+						data.put(&[id], thing.into());
+						Ok(Command::InsertRelation {
+							what: Some(what),
+							data,
+						})
+					}
+				}
+				Resource::Unspecified => Ok(Command::InsertRelation {
+					what: None,
+					data,
+				}),
 				Resource::Object(obj) => Err(Error::InsertOnObject(obj).into()),
 				Resource::Array(arr) => Err(Error::InsertOnArray(arr).into()),
 				Resource::Edges(edges) => Err(Error::InsertOnEdges(edges).into()),

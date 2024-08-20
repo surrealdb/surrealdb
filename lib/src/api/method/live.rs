@@ -81,6 +81,7 @@ macro_rules! into_future {
 						Resource::Object(object) => return Err(Error::LiveOnObject(object).into()),
 						Resource::Array(array) => return Err(Error::LiveOnArray(array).into()),
 						Resource::Edges(edges) => return Err(Error::LiveOnEdges(edges).into()),
+						Resource::Unspecified => return Err(Error::LiveOnUnspecified.into()),
 					},
 				}
 				let query = Query::new(
