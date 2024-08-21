@@ -85,7 +85,6 @@ where
 				stmt.what = table.into();
 				stmt.cond = range.to_cond();
 			}
-			Resource::Unspecified => return Err(Error::LiveOnUnspecified.into()),
 		}
 		let query =
 			Query::new(client.clone(), vec![Statement::Live(stmt)], Default::default(), false);
