@@ -549,12 +549,15 @@ async fn insert_unspecified() {
 	tmp.unwrap_err();
 	let tmp: Result<Vec<RecordId>, _> = db.insert(()).content(json!({ "foo": "bar" })).await;
 	tmp.unwrap_err();
-	let tmp: Vec<RecordId> =
-		db.insert(()).content(value("{id: user:user1, foo: 'bar'}").unwrap()).await.unwrap();
+	let tmp: Vec<ApiRecordId> = db
+		.insert(())
+		.content("{id: user:user1, foo: 'bar'}".parse::<Value>().unwrap())
+		.await
+		.unwrap();
 	assert_eq!(
 		tmp,
 		vec![ApiRecordId {
-			id: thing("user:user1").unwrap(),
+			id: "user:user1".parse::<RecordId>().unwrap(),
 		}]
 	);
 
@@ -565,10 +568,10 @@ async fn insert_unspecified() {
 	tmp.unwrap_err();
 	let tmp: Value = db
 		.insert(Resource::from(()))
-		.content(value("{id: user:user2, foo: 'bar'}").unwrap())
+		.content("{id: user:user2, foo: 'bar'}".parse::<Value>().unwrap())
 		.await
 		.unwrap();
-	let val = value("{id: user:user2, foo: 'bar'}").unwrap();
+	let val = "{id: user:user2, foo: 'bar'}".parse::<Value>().unwrap();
 	assert_eq!(tmp, val);
 }
 

@@ -197,9 +197,6 @@ impl Command {
 				what,
 				data,
 			} => {
-				// let mut table = CoreTable::default();
-				// table.0 = what.clone();
-
 				let table = match what {
 					Some(w) => {
 						let mut tmp = CoreTable::default();

@@ -184,8 +184,7 @@ where
 }
 
 impl From<()> for Resource {
-	fn from(value: ()) -> Self {
-		let _ = value;
+	fn from(_value: ()) -> Self {
 		Self::Unspecified
 	}
 }
