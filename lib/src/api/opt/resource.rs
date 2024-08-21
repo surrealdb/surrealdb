@@ -74,8 +74,6 @@ pub enum Resource {
 	Edge(Edge),
 	/// A range of id's on a table.
 	Range(QueryRange),
-	/// Unspecified
-	Unspecified,
 }
 
 impl Resource {
@@ -88,7 +86,6 @@ impl Resource {
 			Resource::Array(_) => Err(Error::RangeOnArray.into()),
 			Resource::Edge(_) => Err(Error::RangeOnEdges.into()),
 			Resource::Range(_) => Err(Error::RangeOnRange.into()),
-			Resource::Unspecified => Err(Error::RangeOnUnspecified.into()),
 		}
 	}
 
@@ -179,134 +176,6 @@ where
 	fn from((table, id): (T, I)) -> Self {
 		let record_id = RecordId::from_table_key(table, id);
 		Self::RecordId(record_id)
-		let record_id = (table.into(), id.into());
-		Self::RecordId(record_id.into())
-	}
-}
-
-impl From<()> for Resource {
-	fn from(value: ()) -> Self {
-		let _ = value;
-		Self::Unspecified
-	}
-}
-
-impl From<Resource> for Value {
-	fn from(resource: Resource) -> Self {
-		match resource {
-			Resource::Table(resource) => resource.into(),
-			Resource::RecordId(resource) => resource.into(),
-			Resource::Object(resource) => resource.into(),
-			Resource::Array(resource) => resource.into(),
-			Resource::Edges(resource) => resource.into(),
-			Resource::Unspecified => Value::None,
-		}
-	}
-}
-
-/// A trait for converting inputs into database resources
-pub trait IntoResource<Response>: Sized {
-	/// Converts an input into a database resource
-	fn into_resource(self) -> Result<Resource>;
-}
-
-impl IntoResource<Value> for Resource {
-	fn into_resource(self) -> Result<Resource> {
-		Ok(self)
-	}
-}
-
-impl<R> IntoResource<Option<R>> for Object {
-	fn into_resource(self) -> Result<Resource> {
-		Ok(Resource::Object(self))
-	}
-}
-
-impl<R> IntoResource<Option<R>> for Thing {
-	fn into_resource(self) -> Result<Resource> {
-		Ok(Resource::RecordId(self))
-	}
-}
-
-impl<R> IntoResource<Option<R>> for &Thing {
-	fn into_resource(self) -> Result<Resource> {
-		Ok(Resource::RecordId(self.clone()))
-	}
-}
-
-impl<R> IntoResource<Vec<R>> for () {
-	fn into_resource(self) -> Result<Resource> {
-		Ok(Resource::Unspecified)
-	}
-}
-
-impl<R, T, I> IntoResource<Option<R>> for (T, I)
-where
-	T: Into<String>,
-	I: Into<Id>,
-{
-	fn into_resource(self) -> Result<Resource> {
-		let (table, id) = self;
-		let record_id = (table.into(), id.into());
-		Ok(Resource::RecordId(record_id.into()))
-	}
-}
-
-impl<R> IntoResource<Vec<R>> for Array {
-	fn into_resource(self) -> Result<Resource> {
-		Ok(Resource::Array(self))
-	}
-}
-
-impl<R> IntoResource<Vec<R>> for Edges {
-	fn into_resource(self) -> Result<Resource> {
-		Ok(Resource::Edges(self))
-	}
-}
-
-impl<R> IntoResource<Vec<R>> for Table {
-	fn into_resource(self) -> Result<Resource> {
-		Ok(Resource::Table(self))
-	}
-}
-
-fn blacklist_colon(input: &str) -> Result<()> {
-	match input.contains(':') {
-		true => {
-			// We already know this string contains a colon
-			let (table, id) = input.split_once(':').unwrap();
-			Err(Error::TableColonId {
-				table: table.to_owned(),
-				id: id.to_owned(),
-			}
-			.into())
-		}
-		false => Ok(()),
-	}
-}
-
-impl<R> IntoResource<Vec<R>> for &str {
-	fn into_resource(self) -> Result<Resource> {
-		blacklist_colon(self)?;
-		let mut table = Table::default();
-		self.clone_into(&mut table.0);
-		Ok(Resource::Table(table))
-	}
-}
-
-impl<R> IntoResource<Vec<R>> for &String {
-	fn into_resource(self) -> Result<Resource> {
-		blacklist_colon(self)?;
-		IntoResource::<Vec<R>>::into_resource(self.as_str())
-	}
-}
-
-impl<R> IntoResource<Vec<R>> for String {
-	fn into_resource(self) -> Result<Resource> {
-		blacklist_colon(&self)?;
-		let mut table = Table::default();
-		table.0 = self;
-		Ok(Resource::Table(table))
 	}
 }
 
