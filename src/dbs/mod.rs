@@ -89,6 +89,7 @@ Targets must be in the form of <host>[:<port>], <ipv4|ipv6>[/<mask>]. For exampl
 	#[arg(env = "SURREAL_CAPS_ALLOW_RPC", long, conflicts_with = "allow_all")]
 	// If the arg is provided without value, then assume it's "", which gets parsed into Targets::All
 	#[arg(default_missing_value_os = "", num_args = 0..)]
+	#[arg(default_value_os = "")] // Allow all RPC methods by default
 	#[arg(value_parser = super::cli::validator::method_targets)]
 	allow_rpc: Option<Targets<MethodTarget>>,
 
@@ -98,6 +99,7 @@ Targets must be in the form of <host>[:<port>], <ipv4|ipv6>[/<mask>]. For exampl
 	#[arg(env = "SURREAL_CAPS_ALLOW_HTTP", long, conflicts_with = "allow_all")]
 	// If the arg is provided without value, then assume it's "", which gets parsed into Targets::All
 	#[arg(default_missing_value_os = "", num_args = 0..)]
+	#[arg(default_value_os = "")] // Allow all HTTP routes by default
 	#[arg(value_parser = super::cli::validator::route_targets)]
 	allow_http: Option<Targets<RouteTarget>>,
 
