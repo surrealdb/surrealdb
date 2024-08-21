@@ -35,11 +35,11 @@ pub enum Gen {
 pub enum Id {
 	Number(i64),
 	String(String),
+	Uuid(Uuid),
 	Array(Array),
 	Object(Object),
 	Generate(Gen),
 	Range(Box<IdRange>),
-	Uuid(Uuid),
 }
 
 impl From<i64> for Id {

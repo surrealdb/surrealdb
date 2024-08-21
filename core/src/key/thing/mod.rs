@@ -86,7 +86,7 @@ mod tests {
 		let id1 = thing.id;
 		let val = Thing::new("testns", "testdb", "testtb", id1);
 		let enc = Thing::encode(&val).unwrap();
-		assert_eq!(enc, b"/*testns\0*testdb\0*testtb\0*\0\0\0\x02\0\0\0\x04test\0\x01");
+		assert_eq!(enc, b"/*testns\0*testdb\0*testtb\0*\0\0\0\x03\0\0\0\x04test\0\x01");
 
 		let dec = Thing::decode(&enc).unwrap();
 		assert_eq!(val, dec);
