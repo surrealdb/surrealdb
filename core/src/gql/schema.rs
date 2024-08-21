@@ -608,6 +608,9 @@ fn kind_to_type(kind: Kind, types: &mut Vec<Type>) -> Result<TypeRef, GqlError> 
 		Kind::Array(k, _) => TypeRef::List(Box::new(kind_to_type(*k, types)?)),
 		Kind::Function(_, _) => return Err(schema_error("Kind::Function is not yet supported")),
 		Kind::Range => return Err(schema_error("Kind::Range is not yet supported")),
+		// TODO(raphaeldarley): check if union is of literals and generate enum
+		// generate custom scalar from other literals?
+		Kind::Literal(_) => return Err(schema_error("Kind::Range is not yet supported")),
 	};
 
 	let out = match optional {
@@ -672,6 +675,7 @@ fn filter_from_type(
 		Kind::Array(_, _) => {}
 		Kind::Function(_, _) => {}
 		Kind::Range => {}
+		Kind::Literal(_) => todo!(),
 	};
 	Ok(filter)
 }
@@ -1113,5 +1117,6 @@ fn gql_to_sql_kind(val: &GqlValue, kind: Kind) -> Result<SqlValue, GqlError> {
 		},
 		Kind::Function(_, _) => Err(resolver_error("Sets are not yet supported")),
 		Kind::Range => Err(resolver_error("Ranges are not yet supported")),
+		Kind::Literal(_) => Err(resolver_error("Literals are not yet supported")),
 	}
 }
