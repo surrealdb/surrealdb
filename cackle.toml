@@ -1186,3 +1186,6 @@ allow_proc_macro = true
 
 [pkg.jieba-rs]
 build.allow_apis = ["fs"]
+
+[pkg.cedarwood]
+allow_unsafe = true
