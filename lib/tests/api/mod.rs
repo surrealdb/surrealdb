@@ -613,37 +613,12 @@ async fn insert_relation_table() {
 	tmp.unwrap_err();
 	let val = value("{in: person:a, out: thing:a}").unwrap();
 	let _: Vec<RecordId> = db.insert("likes").relation(val).await.unwrap();
-	// test override
-	// let val = value("{id: other:1, in: person:a, out: thing:a}").unwrap();
-	// let tmp: Vec<RecordId> = db.insert("likes").relation(val).await.unwrap();
-	// assert_eq!(
-	// 	tmp,
-	// 	vec![RecordId {
-	// 		id: thing("other:1").unwrap()
-	// 	}]
-	// );
 
 	let vals = value(
 		"[{in: person:b, out: thing:a}, {id: likes:2, in: person:a, out: thing:a}, {id: hates:3, in: person:a, out: thing:a}]",
 	)
 	.unwrap();
 	let _: Vec<RecordId> = db.insert("likes").relation(vals).await.unwrap();
-	// let vals = value(
-	// 	"[{id: likes:2, in: person:a, out: thing:a}, {id: hates:3, in: person:a, out: thing:a}]",
-	// )
-	// .unwrap();
-	// let tmp: Vec<RecordId> = db.insert("likes").relation(vals).await.unwrap();
-	// assert_eq!(
-	// 	tmp,
-	// 	vec![
-	// 		RecordId {
-	// 			id: thing("likes:2").unwrap()
-	// 		},
-	// 		RecordId {
-	// 			id: thing("hates:3").unwrap()
-	// 		}
-	// 	]
-	// );
 }
 
 #[test_log::test(tokio::test)]
