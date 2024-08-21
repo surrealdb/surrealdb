@@ -183,6 +183,13 @@ where
 	}
 }
 
+impl From<()> for Resource {
+	fn from(value: ()) -> Self {
+		let _ = value;
+		Self::Unspecified
+	}
+}
+
 /// Holds the `start` and `end` bounds of a range query
 #[derive(Debug, PartialEq, Clone)]
 pub struct KeyRange {
@@ -392,5 +399,11 @@ impl<R> IntoResource<Vec<R>> for &String {
 	fn into_resource(self) -> Result<Resource> {
 		no_colon(self)?;
 		Ok(self.into())
+	}
+}
+
+impl<R> IntoResource<Vec<R>> for () {
+	fn into_resource(self) -> Result<Resource> {
+		Ok(Resource::Unspecified)
 	}
 }
