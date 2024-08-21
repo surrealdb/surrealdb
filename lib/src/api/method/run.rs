@@ -2,13 +2,13 @@ use crate::api::conn::Command;
 use crate::api::Connection;
 use crate::api::Result;
 use crate::method::OnceLockExt;
-use crate::sql::Array;
-use crate::sql::Value;
 use crate::Surreal;
+use crate::Value;
 use std::borrow::Cow;
-use std::future::Future;
 use std::future::IntoFuture;
-use std::pin::Pin;
+use surrealdb_core::sql::Array as CoreArray;
+
+use super::BoxFuture;
 
 /// A run future
 #[derive(Debug)]
@@ -17,7 +17,7 @@ pub struct Run<'r, C: Connection> {
 	pub(super) client: Cow<'r, Surreal<C>>,
 	pub(super) name: String,
 	pub(super) version: Option<String>,
-	pub(super) args: Array,
+	pub(super) args: CoreArray,
 }
 impl<C> Run<'_, C>
 where
@@ -37,7 +37,7 @@ where
 	Client: Connection,
 {
 	type Output = Result<Value>;
-	type IntoFuture = Pin<Box<dyn Future<Output = Self::Output> + Send + Sync + 'r>>;
+	type IntoFuture = BoxFuture<'r, Self::Output>;
 
 	fn into_future(self) -> Self::IntoFuture {
 		let Run {
@@ -60,19 +60,12 @@ where
 }
 
 pub trait IntoArgs {
-	fn into_args(self) -> Array;
-}
-
-impl IntoArgs for Array {
-	fn into_args(self) -> Array {
-		self
-	}
+	fn into_args(self) -> Vec<Value>;
 }
 
 impl IntoArgs for Value {
-	fn into_args(self) -> Array {
-		let arr: Vec<Value> = vec![self];
-		Array::from(arr)
+	fn into_args(self) -> Vec<Value> {
+		vec![self]
 	}
 }
 
@@ -80,9 +73,8 @@ impl<T> IntoArgs for Vec<T>
 where
 	T: Into<Value>,
 {
-	fn into_args(self) -> Array {
-		let arr: Vec<Value> = self.into_iter().map(Into::into).collect();
-		Array::from(arr)
+	fn into_args(self) -> Vec<Value> {
+		self.into_iter().map(Into::into).collect()
 	}
 }
 
@@ -90,9 +82,8 @@ impl<T, const N: usize> IntoArgs for [T; N]
 where
 	T: Into<Value>,
 {
-	fn into_args(self) -> Array {
-		let arr: Vec<Value> = self.into_iter().map(Into::into).collect();
-		Array::from(arr)
+	fn into_args(self) -> Vec<Value> {
+		self.into_iter().map(Into::into).collect()
 	}
 }
 
@@ -100,9 +91,8 @@ impl<T, const N: usize> IntoArgs for &[T; N]
 where
 	T: Into<Value> + Clone,
 {
-	fn into_args(self) -> Array {
-		let arr: Vec<Value> = self.iter().cloned().map(Into::into).collect();
-		Array::from(arr)
+	fn into_args(self) -> Vec<Value> {
+		self.iter().cloned().map(Into::into).collect()
 	}
 }
 
@@ -110,56 +100,48 @@ impl<T> IntoArgs for &[T]
 where
 	T: Into<Value> + Clone,
 {
-	fn into_args(self) -> Array {
-		let arr: Vec<Value> = self.iter().cloned().map(Into::into).collect();
-		Array::from(arr)
-	}
-}
-impl IntoArgs for () {
-	fn into_args(self) -> Array {
-		Vec::<Value>::new().into()
+	fn into_args(self) -> Vec<Value> {
+		self.iter().cloned().map(Into::into).collect()
 	}
 }
 
-impl<T0> IntoArgs for (T0,)
-where
-	T0: Into<Value>,
-{
-	fn into_args(self) -> Array {
-		let arr: Vec<Value> = vec![self.0.into()];
-		Array::from(arr)
+macro_rules! impl_args_tuple {
+    ($($i:ident), *$(,)?) => {
+		impl_args_tuple!(@marker $($i,)*);
+    };
+    ($($cur:ident,)* @marker $head:ident, $($tail:ident,)*) => {
+		impl<$($cur: Into<Value>,)*> IntoArgs for ($($cur,)*) {
+			#[allow(non_snake_case)]
+			fn into_args(self) -> Vec<Value> {
+				let ($($cur,)*) = self;
+				vec![$($cur.into(),)*]
+			}
+		}
+
+		impl_args_tuple!($($cur,)* $head, @marker $($tail,)*);
+	};
+    ($($cur:ident,)* @marker ) => {
+		impl<$($cur: Into<Value>,)*> IntoArgs for ($($cur,)*) {
+			#[allow(non_snake_case)]
+			fn into_args(self) -> Vec<Value> {
+				let ($($cur,)*) = self;
+				vec![$($cur.into(),)*]
+			}
+		}
 	}
 }
 
-impl<T0, T1> IntoArgs for (T0, T1)
-where
-	T0: Into<Value>,
-	T1: Into<Value>,
-{
-	fn into_args(self) -> Array {
-		let arr: Vec<Value> = vec![self.0.into(), self.1.into()];
-		Array::from(arr)
-	}
-}
+impl_args_tuple!(A, B, C, D, E, F,);
 
-impl<T0, T1, T2> IntoArgs for (T0, T1, T2)
-where
-	T0: Into<Value>,
-	T1: Into<Value>,
-	T2: Into<Value>,
-{
-	fn into_args(self) -> Array {
-		let arr: Vec<Value> = vec![self.0.into(), self.1.into(), self.2.into()];
-		Array::from(arr)
-	}
-}
-
+/* TODO: Removed for now.
+ * The detach value PR removed a lot of conversion methods with, pending later request which might
+ * add them back depending on how the sdk turns out.
+ *
 macro_rules! into_impl {
 	($type:ty) => {
 		impl IntoArgs for $type {
-			fn into_args(self) -> Array {
-				let val: Value = self.into();
-				Array::from(val)
+			fn into_args(self) -> Vec<Value> {
+				vec![Value::from(self)]
 			}
 		}
 	};
@@ -180,6 +162,7 @@ into_impl!(f32);
 into_impl!(f64);
 into_impl!(String);
 into_impl!(&str);
+*/
 
 pub trait IntoFn {
 	fn into_fn(self) -> (String, Option<String>);

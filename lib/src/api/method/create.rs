@@ -4,14 +4,14 @@ use crate::api::opt::Resource;
 use crate::api::Connection;
 use crate::api::Result;
 use crate::method::OnceLockExt;
-use crate::sql::Value;
 use crate::Surreal;
+use crate::Value;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 use std::borrow::Cow;
 use std::future::IntoFuture;
 use std::marker::PhantomData;
-use surrealdb_core::sql::to_value;
+use surrealdb_core::sql::{to_value as to_core_value, Value as CoreValue};
 
 use super::Content;
 
@@ -48,7 +48,7 @@ macro_rules! into_future {
 			Box::pin(async move {
 				let router = client.router.extract()?;
 				let cmd = Command::Create {
-					what: resource?.into(),
+					what: resource?,
 					data: None,
 				};
 				router.$method(cmd).await
@@ -99,15 +99,15 @@ where
 		D: Serialize + 'static,
 	{
 		Content::from_closure(self.client, || {
-			let content = to_value(data)?;
+			let content = to_core_value(data)?;
 
 			let data = match content {
-				Value::None | Value::Null => None,
+				CoreValue::None | CoreValue::Null => None,
 				content => Some(content),
 			};
 
 			Ok(Command::Create {
-				what: self.resource?.into(),
+				what: self.resource?,
 				data,
 			})
 		})

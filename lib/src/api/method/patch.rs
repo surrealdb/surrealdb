@@ -1,20 +1,18 @@
 use crate::api::conn::Command;
 use crate::api::method::BoxFuture;
 use crate::api::opt::PatchOp;
-use crate::api::opt::Range;
 use crate::api::opt::Resource;
 use crate::api::Connection;
 use crate::api::Result;
 use crate::method::OnceLockExt;
-use crate::sql::to_value;
-use crate::sql::Id;
-use crate::sql::Value;
 use crate::Surreal;
+use crate::Value;
 use serde::de::DeserializeOwned;
 use serde_content::Value as Content;
 use std::borrow::Cow;
 use std::future::IntoFuture;
 use std::marker::PhantomData;
+use surrealdb_core::sql::{to_value as to_core_value, Value as CoreValue};
 
 /// A patch future
 #[derive(Debug)]
@@ -22,7 +20,6 @@ use std::marker::PhantomData;
 pub struct Patch<'r, C: Connection, R> {
 	pub(super) client: Cow<'r, Surreal<C>>,
 	pub(super) resource: Result<Resource>,
-	pub(super) range: Option<Range<Id>>,
 	pub(super) patches: Vec<serde_content::Result<Content<'static>>>,
 	pub(super) response_type: PhantomData<R>,
 }
@@ -46,25 +43,20 @@ macro_rules! into_future {
 			let Patch {
 				client,
 				resource,
-				range,
 				patches,
 				..
 			} = self;
 			Box::pin(async move {
-				let param: Value = match range {
-					Some(range) => resource?.with_range(range)?.into(),
-					None => resource?.into(),
-				};
 				let mut vec = Vec::with_capacity(patches.len());
 				for result in patches {
 					let content = result.map_err(crate::error::Db::from)?;
-					let value = to_value(content)?;
+					let value = to_core_value(content)?;
 					vec.push(value);
 				}
-				let patches = Value::from(vec);
+				let patches = CoreValue::from(vec);
 				let router = client.router.extract()?;
 				let cmd = Command::Patch {
-					what: param,
+					what: resource?,
 					data: Some(patches),
 				};
 

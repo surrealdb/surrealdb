@@ -16,6 +16,7 @@ use crate::kvs::Datastore;
 use crate::opt::auth::Root;
 use crate::opt::WaitFor;
 use crate::options::EngineOptions;
+use crate::{Action, Notification};
 use channel::{Receiver, Sender};
 use futures::stream::poll_fn;
 use futures::FutureExt;
@@ -157,10 +158,17 @@ pub(crate) async fn run_router(
 
 				let id = notification.id;
 				if let Some(sender) = live_queries.get(&id) {
+
+					let notification = Notification {
+						query_id: notification.id.0,
+						action: Action::from_core(notification.action),
+						data: notification.result,
+					};
+
 					if sender.send(notification).await.is_err() {
 						live_queries.remove(&id);
 						if let Err(error) =
-							super::kill_live_query(&kvs, id, &session, vars.clone()).await
+							super::kill_live_query(&kvs, *id, &session, vars.clone()).await
 						{
 							warn!("Failed to kill live query '{id}'; {error}");
 						}

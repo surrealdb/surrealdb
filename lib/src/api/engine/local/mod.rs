@@ -20,19 +20,14 @@
 //! useful is to only enable the in-memory engine (`kv-mem`) during development. Besides letting you not
 //! worry about those dependencies on your dev machine, it allows you to keep compile times low
 //! during development while allowing you to test your code fully.
-
-#[cfg(not(target_arch = "wasm32"))]
-pub(crate) mod native;
-#[cfg(target_arch = "wasm32")]
-pub(crate) mod wasm;
-
 use crate::{
 	api::{
 		conn::{Command, DbResponse, RequestData},
 		Connect, Response as QueryResponse, Result, Surreal,
 	},
 	method::Stats,
-	opt::IntoEndpoint,
+	opt::{IntoEndpoint, Resource as ApiResource, Table},
+	value::Notification,
 };
 use channel::Sender;
 use indexmap::IndexMap;
@@ -44,16 +39,18 @@ use std::{
 	time::Duration,
 };
 use surrealdb_core::{
-	dbs::{Notification, Response, Session},
+	dbs::{Response, Session},
+	iam,
 	kvs::Datastore,
 	sql::{
 		statements::{
 			CreateStatement, DeleteStatement, InsertStatement, KillStatement, SelectStatement,
 			UpdateStatement, UpsertStatement,
 		},
-		Data, Field, Output, Query, Statement, Uuid, Value,
+		Data, Field, Output, Query, Statement, Value as CoreValue,
 	},
 };
+use uuid::Uuid;
 
 #[cfg(not(target_arch = "wasm32"))]
 use crate::api::err::Error;
@@ -80,7 +77,12 @@ use surrealdb_core::{
 	sql::statements::{DefineModelStatement, DefineStatement},
 };
 
-use super::value_to_values;
+use super::resource_to_values;
+
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) mod native;
+#[cfg(target_arch = "wasm32")]
+pub(crate) mod wasm;
 
 const DEFAULT_TICK_INTERVAL: Duration = Duration::from_secs(10);
 
@@ -374,14 +376,19 @@ impl Surreal<Db> {
 }
 
 fn process(responses: Vec<Response>) -> QueryResponse {
-	let mut map = IndexMap::with_capacity(responses.len());
+	let mut map = IndexMap::<usize, (Stats, Result<CoreValue>)>::with_capacity(responses.len());
 	for (index, response) in responses.into_iter().enumerate() {
 		let stats = Stats {
 			execution_time: Some(response.time),
 		};
 		match response.result {
-			Ok(value) => map.insert(index, (stats, Ok(value))),
-			Err(error) => map.insert(index, (stats, Err(error.into()))),
+			Ok(value) => {
+				// Deserializing from a core value should always work.
+				map.insert(index, (stats, Ok(value)));
+			}
+			Err(error) => {
+				map.insert(index, (stats, Err(error.into())));
+			}
 		};
 	}
 	QueryResponse {
@@ -390,25 +397,25 @@ fn process(responses: Vec<Response>) -> QueryResponse {
 	}
 }
 
-async fn take(one: bool, responses: Vec<Response>) -> Result<Value> {
+async fn take(one: bool, responses: Vec<Response>) -> Result<CoreValue> {
 	if let Some((_stats, result)) = process(responses).results.swap_remove(&0) {
 		let value = result?;
 		match one {
 			true => match value {
-				Value::Array(mut array) => {
-					if let [value] = &mut array.0[..] {
-						return Ok(mem::take(value));
+				CoreValue::Array(mut array) => {
+					if let [ref mut value] = array[..] {
+						return Ok(mem::replace(value, CoreValue::None));
 					}
 				}
-				Value::None | Value::Null => {}
+				CoreValue::None | CoreValue::Null => {}
 				value => return Ok(value),
 			},
 			false => return Ok(value),
 		}
 	}
 	match one {
-		true => Ok(Value::None),
-		false => Ok(Value::Array(Default::default())),
+		true => Ok(CoreValue::None),
+		false => Ok(CoreValue::Array(Default::default())),
 	}
 }
 
@@ -476,8 +483,8 @@ async fn kill_live_query(
 	kvs: &Datastore,
 	id: Uuid,
 	session: &Session,
-	vars: BTreeMap<String, Value>,
-) -> Result<Value> {
+	vars: BTreeMap<String, CoreValue>,
+) -> Result<CoreValue> {
 	let mut query = Query::default();
 	let mut kill = KillStatement::default();
 	kill.id = id.into();
@@ -493,8 +500,8 @@ async fn router(
 	}: RequestData,
 	kvs: &Arc<Datastore>,
 	session: &mut Session,
-	vars: &mut BTreeMap<String, Value>,
-	live_queries: &mut HashMap<Uuid, Sender<Notification>>,
+	vars: &mut BTreeMap<String, CoreValue>,
+	live_queries: &mut HashMap<Uuid, Sender<Notification<CoreValue>>>,
 ) -> Result<DbResponse> {
 	match command {
 		Command::Use {
@@ -507,29 +514,29 @@ async fn router(
 			if let Some(db) = database {
 				session.db = Some(db);
 			}
-			Ok(DbResponse::Other(Value::None))
+			Ok(DbResponse::Other(CoreValue::None))
 		}
 		Command::Signup {
 			credentials,
 		} => {
-			let response = crate::iam::signup::signup(kvs, session, credentials).await?;
+			let response = iam::signup::signup(kvs, session, credentials).await?;
 			Ok(DbResponse::Other(response.into()))
 		}
 		Command::Signin {
 			credentials,
 		} => {
-			let response = crate::iam::signin::signin(kvs, session, credentials).await?;
+			let response = iam::signin::signin(kvs, session, credentials).await?;
 			Ok(DbResponse::Other(response.into()))
 		}
 		Command::Authenticate {
 			token,
 		} => {
-			crate::iam::verify::token(kvs, session, &token).await?;
-			Ok(DbResponse::Other(Value::None))
+			iam::verify::token(kvs, session, &token).await?;
+			Ok(DbResponse::Other(CoreValue::None))
 		}
 		Command::Invalidate => {
-			crate::iam::clear::clear(session)?;
-			Ok(DbResponse::Other(Value::None))
+			iam::clear::clear(session)?;
+			Ok(DbResponse::Other(CoreValue::None))
 		}
 		Command::Create {
 			what,
@@ -538,7 +545,7 @@ async fn router(
 			let mut query = Query::default();
 			let statement = {
 				let mut stmt = CreateStatement::default();
-				stmt.what = value_to_values(what);
+				stmt.what = resource_to_values(what);
 				stmt.data = data.map(Data::ContentExpression);
 				stmt.output = Some(Output::After);
 				stmt
@@ -553,16 +560,17 @@ async fn router(
 			data,
 		} => {
 			let mut query = Query::default();
-			let one = what.is_thing_single();
+			let one = matches!(what, ApiResource::RecordId(_));
 			let statement = {
 				let mut stmt = UpsertStatement::default();
-				stmt.what = value_to_values(what);
+				stmt.what = resource_to_values(what);
 				stmt.data = data.map(Data::ContentExpression);
 				stmt.output = Some(Output::After);
 				stmt
 			};
 			query.0 .0 = vec![Statement::Upsert(statement)];
-			let response = kvs.process(query, &*session, Some(vars.clone())).await?;
+			let vars = vars.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
+			let response = kvs.process(query, &*session, Some(vars)).await?;
 			let value = take(one, response).await?;
 			Ok(DbResponse::Other(value))
 		}
@@ -571,16 +579,17 @@ async fn router(
 			data,
 		} => {
 			let mut query = Query::default();
-			let one = what.is_thing_single();
+			let one = matches!(what, ApiResource::RecordId(_));
 			let statement = {
 				let mut stmt = UpdateStatement::default();
-				stmt.what = value_to_values(what);
+				stmt.what = resource_to_values(what);
 				stmt.data = data.map(Data::ContentExpression);
 				stmt.output = Some(Output::After);
 				stmt
 			};
 			query.0 .0 = vec![Statement::Update(statement)];
-			let response = kvs.process(query, &*session, Some(vars.clone())).await?;
+			let vars = vars.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
+			let response = kvs.process(query, &*session, Some(vars)).await?;
 			let value = take(one, response).await?;
 			Ok(DbResponse::Other(value))
 		}
@@ -592,13 +601,14 @@ async fn router(
 			let one = !data.is_array();
 			let statement = {
 				let mut stmt = InsertStatement::default();
-				stmt.into = what;
+				stmt.into = Some(Table(what).into_core().into());
 				stmt.data = Data::SingleExpression(data);
 				stmt.output = Some(Output::After);
 				stmt
 			};
 			query.0 .0 = vec![Statement::Insert(statement)];
-			let response = kvs.process(query, &*session, Some(vars.clone())).await?;
+			let vars = vars.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
+			let response = kvs.process(query, &*session, Some(vars)).await?;
 			let value = take(one, response).await?;
 			Ok(DbResponse::Other(value))
 		}
@@ -607,16 +617,17 @@ async fn router(
 			data,
 		} => {
 			let mut query = Query::default();
-			let one = what.is_thing_single();
+			let one = matches!(what, ApiResource::RecordId(_));
 			let statement = {
 				let mut stmt = UpdateStatement::default();
-				stmt.what = value_to_values(what);
+				stmt.what = resource_to_values(what);
 				stmt.data = data.map(Data::PatchExpression);
 				stmt.output = Some(Output::After);
 				stmt
 			};
 			query.0 .0 = vec![Statement::Update(statement)];
-			let response = kvs.process(query, &*session, Some(vars.clone())).await?;
+			let vars = vars.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
+			let response = kvs.process(query, &*session, Some(vars)).await?;
 			let value = take(one, response).await?;
 			Ok(DbResponse::Other(value))
 		}
@@ -625,16 +636,17 @@ async fn router(
 			data,
 		} => {
 			let mut query = Query::default();
-			let one = what.is_thing_single();
+			let one = matches!(what, ApiResource::RecordId(_));
 			let statement = {
 				let mut stmt = UpdateStatement::default();
-				stmt.what = value_to_values(what);
+				stmt.what = resource_to_values(what);
 				stmt.data = data.map(Data::MergeExpression);
 				stmt.output = Some(Output::After);
 				stmt
 			};
 			query.0 .0 = vec![Statement::Update(statement)];
-			let response = kvs.process(query, &*session, Some(vars.clone())).await?;
+			let vars = vars.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
+			let response = kvs.process(query, &*session, Some(vars)).await?;
 			let value = take(one, response).await?;
 			Ok(DbResponse::Other(value))
 		}
@@ -642,15 +654,16 @@ async fn router(
 			what,
 		} => {
 			let mut query = Query::default();
-			let one = what.is_thing_single();
+			let one = matches!(what, ApiResource::RecordId(_));
 			let statement = {
 				let mut stmt = SelectStatement::default();
-				stmt.what = value_to_values(what);
+				stmt.what = resource_to_values(what);
 				stmt.expr.0 = vec![Field::All];
 				stmt
 			};
 			query.0 .0 = vec![Statement::Select(statement)];
-			let response = kvs.process(query, &*session, Some(vars.clone())).await?;
+			let vars = vars.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
+			let response = kvs.process(query, &*session, Some(vars)).await?;
 			let value = take(one, response).await?;
 			Ok(DbResponse::Other(value))
 		}
@@ -658,15 +671,16 @@ async fn router(
 			what,
 		} => {
 			let mut query = Query::default();
-			let one = what.is_thing_single();
+			let one = matches!(what, ApiResource::RecordId(_));
 			let statement = {
 				let mut stmt = DeleteStatement::default();
-				stmt.what = value_to_values(what);
+				stmt.what = resource_to_values(what);
 				stmt.output = Some(Output::Before);
 				stmt
 			};
 			query.0 .0 = vec![Statement::Delete(statement)];
-			let response = kvs.process(query, &*session, Some(vars.clone())).await?;
+			let vars = vars.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
+			let response = kvs.process(query, &*session, Some(vars)).await?;
 			let value = take(one, response).await?;
 			Ok(DbResponse::Other(value))
 		}
@@ -675,7 +689,7 @@ async fn router(
 			mut variables,
 		} => {
 			let mut vars = vars.clone();
-			vars.append(&mut variables);
+			vars.append(&mut variables.0);
 			let response = kvs.process(query, &*session, Some(vars)).await?;
 			let response = process(response);
 			Ok(DbResponse::Query(response))
@@ -746,7 +760,7 @@ async fn router(
 			let copy = copy(file, &mut reader, &mut output);
 
 			tokio::try_join!(export, bridge, copy)?;
-			Ok(DbResponse::Other(Value::None))
+			Ok(DbResponse::Other(CoreValue::None))
 		}
 
 		#[cfg(all(not(target_arch = "wasm32"), feature = "ml"))]
@@ -793,7 +807,7 @@ async fn router(
 			let copy = copy(path, &mut reader, &mut output);
 
 			tokio::try_join!(export, bridge, copy)?;
-			Ok(DbResponse::Other(Value::None))
+			Ok(DbResponse::Other(CoreValue::None))
 		}
 
 		#[cfg(not(target_arch = "wasm32"))]
@@ -822,7 +836,7 @@ async fn router(
 				tokio::join!(export, bridge);
 			});
 
-			Ok(DbResponse::Other(Value::None))
+			Ok(DbResponse::Other(CoreValue::None))
 		}
 		#[cfg(all(not(target_arch = "wasm32"), feature = "ml"))]
 		Command::ExportBytesMl {
@@ -851,7 +865,7 @@ async fn router(
 				tokio::join!(export, bridge);
 			});
 
-			Ok(DbResponse::Other(Value::None))
+			Ok(DbResponse::Other(CoreValue::None))
 		}
 		#[cfg(not(target_arch = "wasm32"))]
 		Command::ImportFile {
@@ -882,7 +896,7 @@ async fn router(
 				response.result?;
 			}
 
-			Ok(DbResponse::Other(Value::None))
+			Ok(DbResponse::Other(CoreValue::None))
 		}
 		#[cfg(all(not(target_arch = "wasm32"), feature = "ml"))]
 		Command::ImportMl {
@@ -946,42 +960,46 @@ async fn router(
 				response.result?;
 			}
 
-			Ok(DbResponse::Other(Value::None))
+			Ok(DbResponse::Other(CoreValue::None))
 		}
-		Command::Health => Ok(DbResponse::Other(Value::None)),
-		Command::Version => Ok(DbResponse::Other(crate::env::VERSION.into())),
+		Command::Health => Ok(DbResponse::Other(CoreValue::None)),
+		Command::Version => {
+			Ok(DbResponse::Other(CoreValue::from(surrealdb_core::env::VERSION.to_string())))
+		}
 		Command::Set {
 			key,
 			value,
 		} => {
-			let var = Some(map! {
-				key.clone() => Value::None,
-				=> vars
-			});
-			match kvs.compute(value, &*session, var).await? {
-				Value::None => vars.remove(&key),
+			let mut tmp_vars = vars.clone();
+			tmp_vars.insert(key.clone(), value.clone());
+
+			// Need to compute because certain keys might not be allowed to be set and those should
+			// be rejected by an error.
+			match kvs.compute(value, &*session, Some(tmp_vars)).await? {
+				CoreValue::None => vars.remove(&key),
 				v => vars.insert(key, v),
 			};
-			Ok(DbResponse::Other(Value::None))
+
+			Ok(DbResponse::Other(CoreValue::None))
 		}
 		Command::Unset {
 			key,
 		} => {
 			vars.remove(&key);
-			Ok(DbResponse::Other(Value::None))
+			Ok(DbResponse::Other(CoreValue::None))
 		}
 		Command::SubscribeLive {
 			uuid,
 			notification_sender,
 		} => {
-			live_queries.insert(uuid.into(), notification_sender);
-			Ok(DbResponse::Other(Value::None))
+			live_queries.insert(uuid, notification_sender);
+			Ok(DbResponse::Other(CoreValue::None))
 		}
 		Command::Kill {
 			uuid,
 		} => {
-			live_queries.remove(&uuid.into());
-			let value = kill_live_query(kvs, uuid.into(), session, vars.clone()).await?;
+			live_queries.remove(&uuid);
+			let value = kill_live_query(kvs, uuid, session, vars.clone()).await?;
 			Ok(DbResponse::Other(value))
 		}
 
@@ -990,22 +1008,30 @@ async fn router(
 			version: _version,
 			args,
 		} => {
-			let func: Value = match &name[0..4] {
-				"fn::" => Function::Custom(name.chars().skip(4).collect(), args.0).into(),
-				// should return error, but can't on wasm
+			let func: CoreValue = if let Some(name) = name.strip_prefix("fn::") {
+				Function::Custom(name.to_owned(), args.0).into()
+			} else if let Some(_name) = name.strip_prefix("ml::") {
 				#[cfg(feature = "ml")]
-				"ml::" => {
-					let mut tmp = Model::default();
+				{
+					let mut model = Model::default();
 
-					tmp.name = name.chars().skip(4).collect();
-					tmp.args = args.0;
-					tmp.version = _version
+					model.name = _name.to_owned();
+					model.args = args.0;
+					model.version = _version
 						.ok_or(Error::Query("ML functions must have a version".to_string()))?;
-					tmp
+					model.into()
 				}
-				.into(),
-				_ => Function::Normal(name, args.0).into(),
+				#[cfg(not(feature = "ml"))]
+				{
+					return Err(crate::error::Db::InvalidModel {
+						message: "Machine learning computation is not enabled.".to_owned(),
+					}
+					.into());
+				}
+			} else {
+				Function::Custom(name, args.0).into()
 			};
+
 			let stmt = Statement::Value(func);
 
 			let response = kvs.process(stmt.into(), &*session, Some(vars.clone())).await?;
