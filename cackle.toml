@@ -1180,3 +1180,6 @@ allow_unsafe = true
 
 [pkg.constant_time_eq]
 allow_unsafe = true
+
+[pkg.derive_builder_macro]
+allow_proc_macro = true
