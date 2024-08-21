@@ -189,7 +189,7 @@ impl Id {
 	}
 	/// Generate a new random UUID
 	pub fn uuid() -> Self {
-		Self::String(Uuid::new_v7().to_raw())
+		Self::Uuid(Uuid::new_v7())
 	}
 	/// Convert the Id to a raw String
 	pub fn to_raw(&self) -> String {

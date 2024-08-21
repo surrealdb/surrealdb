@@ -32,7 +32,10 @@ impl Parser<'_> {
 
 	fn kind_cast_start_id(kind: TokenKind) -> bool {
 		Self::tokenkind_can_start_ident(kind)
-			|| matches!(kind, TokenKind::Digits | t!("{") | t!("[") | t!("+") | t!("-"))
+			|| matches!(
+				kind,
+				TokenKind::Digits | t!("{") | t!("[") | t!("+") | t!("-") | t!("u'") | t!("\"")
+			)
 	}
 
 	pub async fn parse_thing_or_range(
@@ -187,6 +190,7 @@ impl Parser<'_> {
 	pub async fn parse_id(&mut self, stk: &mut Stk) -> ParseResult<Id> {
 		let token = self.peek_whitespace();
 		match token.kind {
+			t!("u'") | t!("u\"") => Ok(Id::Uuid(self.next_token_value()?)),
 			t!("{") => {
 				self.pop_peek();
 				// object record id

@@ -170,7 +170,7 @@ impl super::api::Transaction for Transaction {
 
 		// Fetch the value from the database.
 		let res = match version {
-			Some(ts) => self.inner.get_at_ts(&key.into(), ts)?,
+			Some(ts) => Some(self.inner.get_at_ts(&key.into(), ts)?),
 			None => self.inner.get(&key.into())?,
 		};
 
