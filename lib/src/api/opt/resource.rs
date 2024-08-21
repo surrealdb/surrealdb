@@ -74,6 +74,8 @@ pub enum Resource {
 	Edge(Edge),
 	/// A range of id's on a table.
 	Range(QueryRange),
+	/// Unspecified resource
+	Unspecified,
 }
 
 impl Resource {
@@ -86,6 +88,7 @@ impl Resource {
 			Resource::Array(_) => Err(Error::RangeOnArray.into()),
 			Resource::Edge(_) => Err(Error::RangeOnEdges.into()),
 			Resource::Range(_) => Err(Error::RangeOnRange.into()),
+			Resource::Unspecified => Err(Error::RangeOnUnspecified.into()),
 		}
 	}
 
@@ -98,6 +101,7 @@ impl Resource {
 			Resource::Array(x) => Value::array_to_core(x).into(),
 			Resource::Edge(x) => x.into_inner().into(),
 			Resource::Range(x) => x.into_inner().into(),
+			Resource::Unspecified => CoreValue::None,
 		}
 	}
 }
