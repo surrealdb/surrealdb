@@ -13,8 +13,6 @@ use serde::Serialize;
 use std::borrow::Cow;
 use std::future::IntoFuture;
 use std::marker::PhantomData;
-
-use super::insert_relation::InsertRelation;
 use surrealdb_core::sql::{to_value as to_core_value, Object as CoreObject, Value as CoreValue};
 
 /// An insert future
@@ -139,48 +137,6 @@ where
 						}
 
 						Ok(Command::Insert {
-							what: thing.tb,
-							data,
-						})
-					}
-				}
-				Resource::Object(obj) => Err(Error::InsertOnObject(obj).into()),
-				Resource::Array(arr) => Err(Error::InsertOnArray(arr).into()),
-				Resource::Edges(edges) => Err(Error::InsertOnEdges(edges).into()),
-			}
-		})
-	}
-}
-
-impl<'r, C, R> Insert<'r, C, R>
-where
-	C: Connection,
-	R: DeserializeOwned,
-{
-	pub fn relation<D>(self, data: D) -> InsertRelation<'r, C, R>
-	where
-		D: Serialize + 'static,
-	{
-		InsertRelation::from_closure(self.client, || {
-			let mut data = to_core_value(data)?;
-			match self.resource? {
-				Resource::Table(table) => Ok(Command::InsertRelation {
-					what: Some(table.into()),
-					data,
-				}),
-				Resource::RecordId(thing) => {
-					if data.is_array() {
-						Err(Error::InvalidParams(
-							"Tried to insert multiple records on a record ID".to_owned(),
-						)
-						.into())
-					} else {
-						let thing = thing.into_inner();
-						if let CoreValue::Object(ref mut x) = data {
-							x.insert("id".to_string(), thing.id.into());
-						}
-
-						Ok(Command::InsertRelation {
 							what: thing.tb,
 							data,
 						})
