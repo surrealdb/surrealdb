@@ -228,7 +228,7 @@ impl Parser<'_> {
 		Ok(Some(Start(value)))
 	}
 
-	fn try_parse_version(&mut self) -> ParseResult<Option<Version>> {
+	pub(crate) fn try_parse_version(&mut self) -> ParseResult<Option<Version>> {
 		if !self.eat(t!("VERSION")) {
 			return Ok(None);
 		}

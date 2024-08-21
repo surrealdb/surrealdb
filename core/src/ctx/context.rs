@@ -1,3 +1,4 @@
+use crate::cnf::PROTECTED_PARAM_NAMES;
 use crate::ctx::canceller::Canceller;
 use crate::ctx::reason::Reason;
 #[cfg(feature = "http")]
@@ -7,6 +8,8 @@ use crate::err::Error;
 use crate::idx::planner::executor::QueryExecutor;
 use crate::idx::planner::{IterationStage, QueryPlanner};
 use crate::idx::trees::store::IndexStores;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::kvs::IndexBuilder;
 use crate::kvs::Transaction;
 use crate::sql::value::Value;
 use channel::Sender;
@@ -62,6 +65,9 @@ pub struct MutableContext {
 	iteration_stage: Option<IterationStage>,
 	// The index store
 	index_stores: IndexStores,
+	// The index concurrent builders
+	#[cfg(not(target_arch = "wasm32"))]
+	index_builder: Option<IndexBuilder>,
 	// Capabilities
 	capabilities: Arc<Capabilities>,
 	#[cfg(any(
@@ -109,6 +115,7 @@ impl MutableContext {
 		time_out: Option<Duration>,
 		capabilities: Capabilities,
 		index_stores: IndexStores,
+		#[cfg(not(target_arch = "wasm32"))] index_builder: IndexBuilder,
 		#[cfg(any(
 			feature = "kv-mem",
 			feature = "kv-surrealkv",
@@ -129,6 +136,8 @@ impl MutableContext {
 			iteration_stage: None,
 			capabilities: Arc::new(capabilities),
 			index_stores,
+			#[cfg(not(target_arch = "wasm32"))]
+			index_builder: Some(index_builder),
 			#[cfg(any(
 				feature = "kv-mem",
 				feature = "kv-surrealkv",
@@ -158,6 +167,8 @@ impl MutableContext {
 			iteration_stage: None,
 			capabilities: Arc::new(Capabilities::default()),
 			index_stores: IndexStores::default(),
+			#[cfg(not(target_arch = "wasm32"))]
+			index_builder: None,
 			#[cfg(any(
 				feature = "kv-mem",
 				feature = "kv-surrealkv",
@@ -183,6 +194,8 @@ impl MutableContext {
 			iteration_stage: parent.iteration_stage.clone(),
 			capabilities: parent.capabilities.clone(),
 			index_stores: parent.index_stores.clone(),
+			#[cfg(not(target_arch = "wasm32"))]
+			index_builder: parent.index_builder.clone(),
 			#[cfg(any(
 				feature = "kv-mem",
 				feature = "kv-surrealkv",
@@ -219,6 +232,8 @@ impl MutableContext {
 			iteration_stage: parent.iteration_stage.clone(),
 			capabilities: parent.capabilities.clone(),
 			index_stores: parent.index_stores.clone(),
+			#[cfg(not(target_arch = "wasm32"))]
+			index_builder: parent.index_builder.clone(),
 			#[cfg(any(
 				feature = "kv-mem",
 				feature = "kv-surrealkv",
@@ -230,6 +245,34 @@ impl MutableContext {
 			transaction: parent.transaction.clone(),
 			isolated: true,
 			parent: Some(parent.clone()),
+		}
+	}
+
+	/// Create a new child from a frozen context.
+	pub fn new_concurrent(from: &Context) -> Self {
+		Self {
+			values: HashMap::default(),
+			deadline: None,
+			cancelled: Arc::new(AtomicBool::new(false)),
+			notifications: from.notifications.clone(),
+			query_planner: from.query_planner.clone(),
+			query_executor: from.query_executor.clone(),
+			iteration_stage: from.iteration_stage.clone(),
+			capabilities: from.capabilities.clone(),
+			index_stores: from.index_stores.clone(),
+			#[cfg(not(target_arch = "wasm32"))]
+			index_builder: from.index_builder.clone(),
+			#[cfg(any(
+				feature = "kv-mem",
+				feature = "kv-surrealkv",
+				feature = "kv-rocksdb",
+				feature = "kv-fdb",
+				feature = "kv-tikv",
+			))]
+			temporary_directory: from.temporary_directory.clone(),
+			transaction: None,
+			isolated: false,
+			parent: None,
 		}
 	}
 
@@ -326,6 +369,12 @@ impl MutableContext {
 		&self.index_stores
 	}
 
+	/// Get the index_builder for this context/ds
+	#[cfg(not(target_arch = "wasm32"))]
+	pub(crate) fn get_index_builder(&self) -> Option<&IndexBuilder> {
+		self.index_builder.as_ref()
+	}
+
 	/// Check if the context is done. If it returns `None` the operation may
 	/// proceed, otherwise the operation should be stopped.
 	pub fn done(&self) -> Option<Reason> {
@@ -371,7 +420,7 @@ impl MutableContext {
 	pub fn value(&self, key: &str) -> Option<&Value> {
 		match self.values.get(key) {
 			Some(v) => Some(v.as_ref()),
-			None if !self.isolated => match &self.parent {
+			None if PROTECTED_PARAM_NAMES.contains(&key) || !self.isolated => match &self.parent {
 				Some(p) => p.value(key),
 				_ => None,
 			},

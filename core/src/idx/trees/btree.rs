@@ -1,7 +1,7 @@
 use crate::err::Error;
 use crate::idx::trees::bkeys::BKeys;
 use crate::idx::trees::store::{NodeId, StoreGeneration, StoredNode, TreeNode, TreeStore};
-use crate::idx::VersionedSerdeState;
+use crate::idx::VersionedStore;
 use crate::kvs::{Key, Transaction, Val};
 use crate::sql::{Object, Value};
 #[cfg(debug_assertions)]
@@ -39,8 +39,8 @@ pub struct BState {
 	generation: StoreGeneration,
 }
 
-impl VersionedSerdeState for BState {
-	fn try_from_val(val: Val) -> Result<Self, Error> {
+impl VersionedStore for BState {
+	fn try_from(val: Val) -> Result<Self, Error> {
 		match Self::deserialize_revisioned(&mut val.as_slice()) {
 			Ok(r) => Ok(r),
 			// If it fails here, there is the chance it was an old version of BState
@@ -997,7 +997,7 @@ mod tests {
 		BState, BStatistics, BStoredNode, BTree, BTreeNode, BTreeStore, Payload,
 	};
 	use crate::idx::trees::store::{NodeId, TreeNode, TreeNodeProvider};
-	use crate::idx::VersionedSerdeState;
+	use crate::idx::VersionedStore;
 	use crate::kvs::{Datastore, Key, LockType::*, Transaction, TransactionType};
 	use rand::prelude::SliceRandom;
 	use rand::thread_rng;
@@ -1010,8 +1010,8 @@ mod tests {
 	#[test]
 	fn test_btree_state_serde() {
 		let s = BState::new(3);
-		let val = s.try_to_val().unwrap();
-		let s: BState = BState::try_from_val(val).unwrap();
+		let val = VersionedStore::try_into(&s).unwrap();
+		let s: BState = VersionedStore::try_from(val).unwrap();
 		assert_eq!(s.minimum_degree, 3);
 		assert_eq!(s.root, None);
 		assert_eq!(s.next_node_id, 0);

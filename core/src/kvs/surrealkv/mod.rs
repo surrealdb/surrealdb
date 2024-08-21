@@ -170,7 +170,7 @@ impl super::api::Transaction for Transaction {
 
 		// Fetch the value from the database.
 		let res = match version {
-			Some(ts) => Some(self.inner.get_at_ts(&key.into(), ts)?),
+			Some(ts) => self.inner.get_at_ts(&key.into(), ts)?,
 			None => self.inner.get(&key.into())?,
 		};
 
@@ -201,7 +201,7 @@ impl super::api::Transaction for Transaction {
 
 	/// Insert a key if it doesn't exist in the database
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
-	async fn put<K, V>(&mut self, key: K, val: V) -> Result<(), Error>
+	async fn put<K, V>(&mut self, key: K, val: V, version: Option<u64>) -> Result<(), Error>
 	where
 		K: Into<Key> + Sprintable + Debug,
 		V: Into<Val> + Debug,
@@ -218,10 +218,14 @@ impl super::api::Transaction for Transaction {
 		let key = key.into();
 		let val = val.into();
 		// Set the key if empty
-		match self.inner.get(&key)? {
-			None => self.inner.set(&key, &val)?,
-			_ => return Err(Error::TxKeyAlreadyExists),
-		};
+		if let Some(ts) = version {
+			self.inner.set_at_ts(&key, &val, ts)?;
+		} else {
+			match self.inner.get(&key)? {
+				None => self.inner.set(&key, &val)?,
+				_ => return Err(Error::TxKeyAlreadyExists),
+			};
+		}
 		// Return result
 		Ok(())
 	}

@@ -4,20 +4,19 @@ use crate::api::method::Content;
 use crate::api::method::Merge;
 use crate::api::method::Patch;
 use crate::api::opt::PatchOp;
-use crate::api::opt::Range;
 use crate::api::opt::Resource;
 use crate::api::Connection;
 use crate::api::Result;
 use crate::method::OnceLockExt;
-use crate::sql::Id;
-use crate::sql::Value;
+use crate::opt::KeyRange;
 use crate::Surreal;
+use crate::Value;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 use std::borrow::Cow;
 use std::future::IntoFuture;
 use std::marker::PhantomData;
-use surrealdb_core::sql::to_value;
+use surrealdb_core::sql::{to_value as to_core_value, Value as CoreValue};
 
 /// An update future
 #[derive(Debug)]
@@ -25,7 +24,6 @@ use surrealdb_core::sql::to_value;
 pub struct Update<'r, C: Connection, R> {
 	pub(super) client: Cow<'r, Surreal<C>>,
 	pub(super) resource: Result<Resource>,
-	pub(super) range: Option<Range<Id>>,
 	pub(super) response_type: PhantomData<R>,
 }
 
@@ -48,18 +46,13 @@ macro_rules! into_future {
 			let Update {
 				client,
 				resource,
-				range,
 				..
 			} = self;
 			Box::pin(async move {
-				let param: Value = match range {
-					Some(range) => resource?.with_range(range)?.into(),
-					None => resource?.into(),
-				};
 				let router = client.router.extract()?;
 				router
 					.$method(Command::Update {
-						what: param,
+						what: resource?,
 						data: None,
 					})
 					.await
@@ -105,8 +98,8 @@ where
 	C: Connection,
 {
 	/// Restricts the records to update to those in the specified range
-	pub fn range(mut self, bounds: impl Into<Range<Id>>) -> Self {
-		self.range = Some(bounds.into());
+	pub fn range(mut self, range: impl Into<KeyRange>) -> Self {
+		self.resource = self.resource.and_then(|x| x.with_range(range.into()));
 		self
 	}
 }
@@ -116,8 +109,8 @@ where
 	C: Connection,
 {
 	/// Restricts the records to update to those in the specified range
-	pub fn range(mut self, bounds: impl Into<Range<Id>>) -> Self {
-		self.range = Some(bounds.into());
+	pub fn range(mut self, range: impl Into<KeyRange>) -> Self {
+		self.resource = self.resource.and_then(|x| x.with_range(range.into()));
 		self
 	}
 }
@@ -133,15 +126,12 @@ where
 		D: Serialize + 'static,
 	{
 		Content::from_closure(self.client, || {
-			let data = to_value(data)?;
+			let data = to_core_value(data)?;
 
-			let what: Value = match self.range {
-				Some(range) => self.resource?.with_range(range)?.into(),
-				None => self.resource?.into(),
-			};
+			let what = self.resource?;
 
 			let data = match data {
-				Value::None | Value::Null => None,
+				CoreValue::None => None,
 				content => Some(content),
 			};
 
@@ -160,7 +150,6 @@ where
 		Merge {
 			client: self.client,
 			resource: self.resource,
-			range: self.range,
 			content: data,
 			response_type: PhantomData,
 		}
@@ -171,7 +160,6 @@ where
 		Patch {
 			client: self.client,
 			resource: self.resource,
-			range: self.range,
 			patches: vec![patch],
 			response_type: PhantomData,
 		}

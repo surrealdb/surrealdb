@@ -68,6 +68,24 @@ async fn future_function_arguments() -> Result<(), Error> {
 }
 
 #[tokio::test]
+async fn future_disabled() -> Result<(), Error> {
+	let sql = "
+	    OPTION FUTURES = false;
+		<future> { 123 };
+	";
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 1);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse("<future> { 123 }");
+	assert_eq!(tmp, val);
+	//
+	Ok(())
+}
+
+#[tokio::test]
 async fn concurrency() -> Result<(), Error> {
 	// cargo test --package surrealdb --test future --features kv-mem --release -- concurrency --nocapture
 

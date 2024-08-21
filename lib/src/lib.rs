@@ -116,34 +116,14 @@ compile_error!("The `ml` feature is not supported on the `wasm32` architecture."
 #[macro_use]
 extern crate tracing;
 
-#[macro_use]
-mod mac;
-
-mod api;
-
-#[doc(inline)]
-pub use api::engine;
-#[cfg(feature = "protocol-http")]
 #[doc(hidden)]
-pub use api::headers;
-#[doc(inline)]
-pub use api::method;
-#[doc(inline)]
-pub use api::opt;
-#[doc(inline)]
-pub use api::Connect;
-#[doc(inline)]
-pub use api::Connection;
-#[doc(inline)]
-pub use api::Response;
-#[doc(inline)]
-pub use api::Result;
-#[doc(inline)]
-pub use api::Surreal;
-#[doc(inline)]
 pub use surrealdb_core::*;
 
-use uuid::Uuid;
+pub use uuid::Uuid;
+
+#[macro_use]
+mod mac;
+mod api;
 
 #[doc(hidden)]
 /// Channels for receiving a SurrealQL database export
@@ -157,43 +137,21 @@ pub mod channel {
 /// Different error types for embedded and remote databases
 pub mod error {
 	pub use crate::api::err::Error as Api;
-	pub use crate::err::Error as Db;
+	pub use surrealdb_core::err::Error as Db;
 }
 
-/// The action performed on a record
-///
-/// This is used in live query notifications.
-#[derive(Debug, Clone, Copy, Eq, PartialEq, Ord, PartialOrd, Hash)]
-#[non_exhaustive]
-pub enum Action {
-	Create,
-	Update,
-	Delete,
-}
+#[cfg(feature = "protocol-http")]
+#[doc(hidden)]
+pub use api::headers;
 
-impl From<dbs::Action> for Action {
-	fn from(action: dbs::Action) -> Self {
-		match action {
-			dbs::Action::Create => Self::Create,
-			dbs::Action::Update => Self::Update,
-			dbs::Action::Delete => Self::Delete,
-			_ => unreachable!(),
-		}
-	}
-}
-
-/// A live query notification
-///
-/// Live queries return a stream of notifications. The notification contains an `action` that triggered the change in the database record and `data` itself.
-/// For deletions the data is the record before it was deleted. For everything else, it's the newly created record or updated record depending on whether
-/// the action is create or update.
-#[derive(Debug, Clone, Copy, Eq, PartialEq, Ord, PartialOrd, Hash)]
-#[non_exhaustive]
-pub struct Notification<R> {
-	pub query_id: Uuid,
-	pub action: Action,
-	pub data: R,
-}
+#[doc(inline)]
+pub use api::{
+	engine, method, opt,
+	value::{
+		self, Action, Bytes, Datetime, Notification, Number, Object, RecordId, RecordIdKey, Value,
+	},
+	Connect, Connection, Response, Result, Surreal,
+};
 
 /// An error originating from the SurrealDB client library
 #[derive(Debug, thiserror::Error, serde::Serialize)]

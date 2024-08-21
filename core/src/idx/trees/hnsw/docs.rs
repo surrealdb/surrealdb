@@ -1,56 +1,214 @@
+use crate::err::Error;
 use crate::idx::docids::DocId;
-use crate::kvs::Key;
-use crate::sql::Thing;
-use radix_trie::Trie;
+use crate::idx::trees::hnsw::flavor::HnswFlavor;
+use crate::idx::trees::hnsw::ElementId;
+use crate::idx::trees::knn::Ids64;
+use crate::idx::trees::vector::{SerializedVector, Vector};
+use crate::idx::{IndexKeyBase, VersionedStore};
+use crate::kvs::{Key, Transaction, Val};
+use crate::sql::{Id, Thing};
+use derive::Store;
+use revision::revisioned;
 use roaring::RoaringTreemap;
+use serde::{Deserialize, Serialize};
+use std::sync::Arc;
 
-#[derive(Default)]
 pub(in crate::idx) struct HnswDocs {
-	doc_ids: Trie<Key, DocId>,
-	ids_doc: Vec<Option<Thing>>,
-	available: RoaringTreemap,
+	tb: String,
+	ikb: IndexKeyBase,
+	state_key: Key,
+	state_updated: bool,
+	state: State,
 }
 
+#[revisioned(revision = 1)]
+#[derive(Default, Clone, Serialize, Deserialize, Store)]
+#[non_exhaustive]
+struct State {
+	available: RoaringTreemap,
+	next_doc_id: DocId,
+}
+
+impl VersionedStore for State {}
+
 impl HnswDocs {
-	pub(super) fn resolve(&mut self, rid: &Thing) -> DocId {
-		let doc_key: Key = rid.into();
-		if let Some(doc_id) = self.doc_ids.get(&doc_key) {
-			*doc_id
+	pub(in crate::idx) async fn new(
+		tx: &Transaction,
+		tb: String,
+		ikb: IndexKeyBase,
+	) -> Result<Self, Error> {
+		let state_key = ikb.new_hd_key(None);
+		let state = if let Some(k) = tx.get(state_key.clone(), None).await? {
+			VersionedStore::try_from(k)?
+		} else {
+			State::default()
+		};
+		Ok(Self {
+			tb,
+			ikb,
+			state_updated: false,
+			state_key,
+			state,
+		})
+	}
+
+	pub(super) async fn resolve(&mut self, tx: &Transaction, id: Id) -> Result<DocId, Error> {
+		let id_key = self.ikb.new_hi_key(id.clone());
+		if let Some(v) = tx.get(id_key.clone(), None).await? {
+			let doc_id = u64::from_be_bytes(v.try_into().unwrap());
+			Ok(doc_id)
 		} else {
 			let doc_id = self.next_doc_id();
-			self.ids_doc.push(Some(rid.clone()));
-			self.doc_ids.insert(doc_key, doc_id);
-			doc_id
+			tx.set(id_key, doc_id.to_be_bytes()).await?;
+			let doc_key = self.ikb.new_hd_key(Some(doc_id));
+			tx.set(doc_key, id).await?;
+			Ok(doc_id)
 		}
 	}
 
 	fn next_doc_id(&mut self) -> DocId {
-		if let Some(doc_id) = self.available.iter().next() {
-			self.available.remove(doc_id);
+		self.state_updated = true;
+		if let Some(doc_id) = self.state.available.iter().next() {
+			self.state.available.remove(doc_id);
 			doc_id
 		} else {
-			self.ids_doc.len() as DocId
+			let doc_id = self.state.next_doc_id;
+			self.state.next_doc_id += 1;
+			doc_id
 		}
 	}
 
-	pub(in crate::idx) fn get_thing(&self, doc_id: DocId) -> Option<&Thing> {
-		if let Some(r) = self.ids_doc.get(doc_id as usize) {
-			r.as_ref()
+	pub(in crate::idx) async fn get_thing(
+		&self,
+		tx: &Transaction,
+		doc_id: DocId,
+	) -> Result<Option<Thing>, Error> {
+		let doc_key = self.ikb.new_hd_key(Some(doc_id));
+		if let Some(val) = tx.get(doc_key, None).await? {
+			let id: Id = val.into();
+			Ok(Some(Thing::from((self.tb.to_owned(), id))))
 		} else {
-			None
+			Ok(None)
 		}
 	}
-	pub(super) fn remove(&mut self, rid: &Thing) -> Option<DocId> {
-		let doc_key: Key = rid.into();
-		if let Some(doc_id) = self.doc_ids.remove(&doc_key) {
-			let n = doc_id as usize;
-			if n < self.ids_doc.len() {
-				self.ids_doc[n] = None;
-			}
-			self.available.insert(doc_id);
-			Some(doc_id)
+
+	pub(super) async fn remove(
+		&mut self,
+		tx: &Transaction,
+		id: Id,
+	) -> Result<Option<DocId>, Error> {
+		let id_key = self.ikb.new_hi_key(id);
+		if let Some(v) = tx.get(id_key.clone(), None).await? {
+			let doc_id = u64::from_be_bytes(v.try_into().unwrap());
+			let doc_key = self.ikb.new_hd_key(Some(doc_id));
+			tx.del(doc_key).await?;
+			tx.del(id_key).await?;
+			self.state.available.insert(doc_id);
+			Ok(Some(doc_id))
 		} else {
-			None
+			Ok(None)
 		}
+	}
+
+	pub(in crate::idx) async fn finish(&mut self, tx: &Transaction) -> Result<(), Error> {
+		if self.state_updated {
+			tx.set(self.state_key.clone(), VersionedStore::try_into(&self.state)?).await?;
+			self.state_updated = true;
+		}
+		Ok(())
+	}
+}
+
+#[revisioned(revision = 1)]
+#[derive(Serialize, Deserialize)]
+#[non_exhaustive]
+struct ElementDocs {
+	e_id: ElementId,
+	docs: Ids64,
+}
+
+impl VersionedStore for ElementDocs {}
+
+pub(in crate::idx) struct VecDocs {
+	ikb: IndexKeyBase,
+}
+
+impl VecDocs {
+	pub(super) fn new(ikb: IndexKeyBase) -> Self {
+		Self {
+			ikb,
+		}
+	}
+
+	pub(super) async fn get_docs(
+		&self,
+		tx: &Transaction,
+		pt: &Vector,
+	) -> Result<Option<Ids64>, Error> {
+		let key = self.ikb.new_hv_key(Arc::new(pt.into()));
+		if let Some(val) = tx.get(key, None).await? {
+			let ed: ElementDocs = VersionedStore::try_from(val)?;
+			Ok(Some(ed.docs))
+		} else {
+			Ok(None)
+		}
+	}
+
+	pub(super) async fn insert(
+		&self,
+		tx: &Transaction,
+		o: Vector,
+		d: DocId,
+		h: &mut HnswFlavor,
+	) -> Result<(), Error> {
+		let ser_vec = Arc::new(SerializedVector::from(&o));
+		let key = self.ikb.new_hv_key(ser_vec);
+		if let Some(ed) = match tx.get(key.clone(), None).await? {
+			Some(val) => {
+				// We already have the vector
+				let mut ed: ElementDocs = VersionedStore::try_from(val)?;
+				ed.docs.insert(d).map(|new_docs| {
+					ed.docs = new_docs;
+					ed
+				})
+			}
+			None => {
+				//  We don't have the vector, we insert it in the graph
+				let element_id = h.insert(tx, o).await?;
+				let ed = ElementDocs {
+					e_id: element_id,
+					docs: Ids64::One(d),
+				};
+				Some(ed)
+			}
+		} {
+			let val: Val = VersionedStore::try_into(&ed)?;
+			tx.set(key, val).await?;
+		}
+		Ok(())
+	}
+
+	pub(super) async fn remove(
+		&self,
+		tx: &Transaction,
+		o: &Vector,
+		d: DocId,
+		h: &mut HnswFlavor,
+	) -> Result<(), Error> {
+		let key = self.ikb.new_hv_key(Arc::new(o.into()));
+		if let Some(val) = tx.get(key.clone(), None).await? {
+			let mut ed: ElementDocs = VersionedStore::try_from(val)?;
+			if let Some(new_docs) = ed.docs.remove(d) {
+				if new_docs.is_empty() {
+					tx.del(key).await?;
+					h.remove(tx, ed.e_id).await?;
+				} else {
+					ed.docs = new_docs;
+					let val: Val = VersionedStore::try_into(&ed)?;
+					tx.set(key, val).await?;
+				}
+			}
+		};
+		Ok(())
 	}
 }

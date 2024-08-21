@@ -222,8 +222,11 @@ impl InnerQueryExecutor {
 								Entry::Vacant(e) => {
 									let hnsw = ctx
 										.get_index_stores()
-										.get_index_hnsw(opt, idx_def, p)
+										.get_index_hnsw(ctx, opt, idx_def, p)
 										.await?;
+									// Ensure the local HNSW index is up to date with the KVS
+									hnsw.write().await.check_state(&ctx.tx()).await?;
+									// Now we can execute the request
 									let entry = HnswEntry::new(
 										stk,
 										ctx,
@@ -788,11 +791,13 @@ impl HnswEntry {
 		let cond_checker = if let Some(cond) = cond {
 			HnswConditionChecker::new_cond(ctx, opt, cond)
 		} else {
-			HnswConditionChecker::default()
+			HnswConditionChecker::new()
 		};
-		let h = h.read().await;
-		let res = h.knn_search(v, n as usize, ef as usize, stk, cond_checker).await?;
-		drop(h);
+		let res = h
+			.read()
+			.await
+			.knn_search(&ctx.tx(), stk, v, n as usize, ef as usize, cond_checker)
+			.await?;
 		Ok(Self {
 			res,
 		})

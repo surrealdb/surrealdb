@@ -71,7 +71,7 @@ fn bench_hash_trie_btree_thing(c: &mut Criterion) {
 	const N: usize = 50_000;
 	let mut samples = Vec::with_capacity(N);
 	for i in 0..N {
-		let key = Thing::from(("test", Id::Array(Array::from(vec![i as i32; 5]))));
+		let key = Thing::from(("test", Id::from(Array::from(vec![i as i32; 5]))));
 		samples.push((key, i));
 	}
 

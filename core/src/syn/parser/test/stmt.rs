@@ -119,6 +119,7 @@ fn parse_create() {
 			))),
 			timeout: Some(Timeout(Duration(std::time::Duration::from_secs(1)))),
 			parallel: true,
+			version: None,
 		}),
 	);
 }
@@ -1410,7 +1411,7 @@ fn parse_define_table() {
 			comment: None,
 			if_not_exists: false,
 			overwrite: false,
-			kind: TableType::Any,
+			kind: TableType::Normal,
 		}))
 	);
 }
@@ -1519,6 +1520,7 @@ fn parse_define_index() {
 			comment: None,
 			if_not_exists: false,
 			overwrite: false,
+			concurrently: false
 		}))
 	);
 
@@ -1535,6 +1537,7 @@ fn parse_define_index() {
 			comment: None,
 			if_not_exists: false,
 			overwrite: false,
+			concurrently: false
 		}))
 	);
 
@@ -1560,6 +1563,7 @@ fn parse_define_index() {
 			comment: None,
 			if_not_exists: false,
 			overwrite: false,
+			concurrently: false
 		}))
 	);
 
@@ -1586,6 +1590,7 @@ fn parse_define_index() {
 			comment: None,
 			if_not_exists: false,
 			overwrite: false,
+			concurrently: false
 		}))
 	);
 }
@@ -1660,7 +1665,7 @@ fn parse_delete_2() {
 					dir: Dir::Out,
 					from: Thing {
 						tb: "a".to_owned(),
-						id: Id::String("b".to_owned()),
+						id: Id::from("b"),
 					},
 					what: Tables::default(),
 				}))),
@@ -1863,7 +1868,7 @@ SELECT bar as foo,[1,2],bar OMIT bar FROM ONLY a,1
 			}])),
 			limit: Some(Limit(Value::Thing(Thing {
 				tb: "a".to_owned(),
-				id: Id::String("b".to_owned()),
+				id: Id::from("b"),
 			}))),
 			start: Some(Start(Value::Object(Object(
 				[("a".to_owned(), Value::Bool(true))].into_iter().collect()
@@ -2187,7 +2192,7 @@ fn parse_relate() {
 			only: true,
 			kind: Value::Thing(Thing {
 				tb: "a".to_owned(),
-				id: Id::String("b".to_owned()),
+				id: Id::from("b"),
 			}),
 			from: Value::Array(Array(vec![
 				Value::Number(Number::Int(1)),
@@ -2200,6 +2205,7 @@ fn parse_relate() {
 				output: None,
 				timeout: None,
 				parallel: false,
+				version: None,
 			}))),
 			uniq: true,
 			data: Some(Data::SetExpression(vec![(

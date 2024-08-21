@@ -1,5 +1,4 @@
 //! The different options and types for use in API functions
-use crate::sql::Thing;
 use dmp::Diff;
 use serde::Serialize;
 
@@ -22,9 +21,6 @@ use serde_content::Serializer;
 use serde_content::Value as Content;
 #[cfg(any(feature = "native-tls", feature = "rustls"))]
 pub use tls::*;
-
-/// Record ID
-pub type RecordId = Thing;
 
 type UnitOp<'a> = InnerOp<'a, ()>;
 

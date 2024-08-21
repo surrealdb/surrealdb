@@ -25,9 +25,9 @@ impl Datastore {
 		// Open transaction and set node data
 		let txn = self.transaction(Write, Optimistic).await?;
 		let key = crate::key::root::nd::Nd::new(id);
-		let now = self.clock.now().await;
+		let now = self.clock_now().await;
 		let val = Node::new(id, now, false);
-		match run!(txn, txn.put(key, val)) {
+		match run!(txn, txn.put(key, val, None)) {
 			Err(Error::TxKeyAlreadyExists) => Err(Error::ClAlreadyExists {
 				value: id.to_string(),
 			}),
@@ -49,7 +49,7 @@ impl Datastore {
 		// Open transaction and set node data
 		let txn = self.transaction(Write, Optimistic).await?;
 		let key = crate::key::root::nd::new(id);
-		let now = self.clock.now().await;
+		let now = self.clock_now().await;
 		let val = Node::new(id, now, false);
 		run!(txn, txn.set(key, val))
 	}
@@ -86,7 +86,7 @@ impl Datastore {
 		trace!(target: TARGET, "Archiving expired nodes in the cluster");
 		// Open transaction and fetch nodes
 		let txn = self.transaction(Write, Optimistic).await?;
-		let now = self.clock.now().await;
+		let now = self.clock_now().await;
 		let nds = catch!(txn, txn.all_nodes());
 		for nd in nds.iter() {
 			// Check that the node is active

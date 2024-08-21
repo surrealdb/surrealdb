@@ -179,7 +179,7 @@ async fn define_statement_table_schemafull() -> Result<(), Error> {
 			functions: {},
 			models: {},
 			params: {},
-			tables: { test: 'DEFINE TABLE test TYPE ANY SCHEMAFULL PERMISSIONS NONE' },
+			tables: { test: 'DEFINE TABLE test TYPE NORMAL SCHEMAFULL PERMISSIONS NONE' },
 			users: {},
 		}",
 	)?;
@@ -208,7 +208,7 @@ async fn define_statement_table_schemaful() -> Result<(), Error> {
 			functions: {},
 			models: {},
 			params: {},
-			tables: { test: 'DEFINE TABLE test TYPE ANY SCHEMAFULL PERMISSIONS NONE' },
+			tables: { test: 'DEFINE TABLE test TYPE NORMAL SCHEMAFULL PERMISSIONS NONE' },
 			users: {},
 		}",
 	);
@@ -248,7 +248,7 @@ async fn define_statement_table_foreigntable() -> Result<(), Error> {
 			models: {},
 			params: {},
 			tables: {
-				test: 'DEFINE TABLE test TYPE ANY SCHEMAFULL PERMISSIONS NONE',
+				test: 'DEFINE TABLE test TYPE NORMAL SCHEMAFULL PERMISSIONS NONE',
 				view: 'DEFINE TABLE view TYPE ANY SCHEMALESS AS SELECT count() FROM test GROUP ALL PERMISSIONS NONE',
 			},
 			users: {},
@@ -280,7 +280,7 @@ async fn define_statement_table_foreigntable() -> Result<(), Error> {
 			models: {},
 			params: {},
 			tables: {
-				test: 'DEFINE TABLE test TYPE ANY SCHEMAFULL PERMISSIONS NONE',
+				test: 'DEFINE TABLE test TYPE NORMAL SCHEMAFULL PERMISSIONS NONE',
 			},
 			users: {},
 		}",
@@ -682,6 +682,38 @@ async fn define_statement_index_single() -> Result<(), Error> {
 		"[{ id: user:1, email: 'test@surrealdb.com' }]",
 		"[{ id: user:2, email: 'test@surrealdb.com' }]",
 	])?;
+	Ok(())
+}
+
+#[tokio::test]
+async fn define_statement_index_concurrently() -> Result<(), Error> {
+	let sql = "
+		CREATE user:1 SET email = 'test@surrealdb.com';
+		CREATE user:2 SET email = 'test@surrealdb.com';
+		DEFINE INDEX test ON user FIELDS email CONCURRENTLY;
+		SLEEP 1s;
+		INFO FOR TABLE user;
+		INFO FOR INDEX test ON user;
+	";
+	let mut t = Test::new(sql).await?;
+	t.skip_ok(4)?;
+	t.expect_val(
+		"{
+			events: {},
+			fields: {},
+			tables: {},
+			indexes: {
+				test: 'DEFINE INDEX test ON user FIELDS email CONCURRENTLY',
+			},
+			lives: {},
+		}",
+	)?;
+	t.expect_val(
+		"{
+			building: { status: 'built' }
+		}",
+	)?;
+
 	Ok(())
 }
 
