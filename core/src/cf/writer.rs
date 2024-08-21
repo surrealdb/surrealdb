@@ -186,7 +186,7 @@ mod tests {
 		let mut tx1 = ds.transaction(Write, Optimistic).await.unwrap().inner();
 		let thing_a = Thing {
 			tb: TB.to_owned(),
-			id: Id::String("A".to_string()),
+			id: Id::from("A"),
 		};
 		let value_a: Value = "a".into();
 		let previous = Value::None;
@@ -205,7 +205,7 @@ mod tests {
 		let mut tx2 = ds.transaction(Write, Optimistic).await.unwrap().inner();
 		let thing_c = Thing {
 			tb: TB.to_owned(),
-			id: Id::String("C".to_string()),
+			id: Id::from("C"),
 		};
 		let value_c: Value = "c".into();
 		tx2.record_change(
@@ -223,7 +223,7 @@ mod tests {
 		let mut tx3 = ds.transaction(Write, Optimistic).await.unwrap().inner();
 		let thing_b = Thing {
 			tb: TB.to_owned(),
-			id: Id::String("B".to_string()),
+			id: Id::from("B"),
 		};
 		let value_b: Value = "b".into();
 		tx3.record_change(
@@ -237,7 +237,7 @@ mod tests {
 		);
 		let thing_c2 = Thing {
 			tb: TB.to_owned(),
-			id: Id::String("C".to_string()),
+			id: Id::from("C"),
 		};
 		let value_c2: Value = "c2".into();
 		tx3.record_change(
@@ -434,7 +434,7 @@ mod tests {
 		ds.tick_at(ts.0.timestamp().try_into().unwrap()).await.unwrap();
 		let thing = Thing {
 			tb: TB.to_owned(),
-			id: Id::String("A".to_string()),
+			id: Id::from("A"),
 		};
 		let ses = Session::owner().with_ns(NS).with_db(DB);
 		let res =
@@ -531,7 +531,7 @@ mod tests {
 	async fn record_change_feed_entry(tx: Transaction, id: String) -> Thing {
 		let thing = Thing {
 			tb: TB.to_owned(),
-			id: Id::String(id),
+			id: Id::from(id),
 		};
 		let value_a: Value = "a".into();
 		let previous = Value::None.into();

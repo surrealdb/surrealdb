@@ -352,6 +352,7 @@ pub fn synchronous(
 		"time::from::secs" => time::from::secs,
 		"time::from::unix" => time::from::unix,
 		//
+		"type::array" => r#type::array,
 		"type::bool" => r#type::bool,
 		"type::bytes" => r#type::bytes,
 		"type::datetime" => r#type::datetime,
@@ -687,6 +688,7 @@ pub async fn idiom(
 				"is_string" => r#type::is::string,
 				"is_uuid" => r#type::is::uuid,
 				//
+				"to_array" => r#type::array,
 				"to_bool" => r#type::bool,
 				"to_bytes" => r#type::bytes,
 				"to_datetime" => r#type::datetime,
@@ -697,6 +699,7 @@ pub async fn idiom(
 				"to_int" => r#type::int,
 				"to_number" => r#type::number,
 				"to_point" => r#type::point,
+				"to_range" => r#type::range,
 				"to_record" => r#type::record,
 				"to_string" => r#type::string,
 				"to_uuid" => r#type::uuid,

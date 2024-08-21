@@ -93,13 +93,13 @@ fn parse_recursive_record_string() {
 		res,
 		Value::Thing(Thing {
 			tb: "a".to_owned(),
-			id: Id::Array(Array(vec![Value::Thing(Thing {
+			id: Id::from(Array(vec![Value::Thing(Thing {
 				tb: "b".to_owned(),
-				id: Id::Object(Object(BTreeMap::from([(
+				id: Id::from(Object(BTreeMap::from([(
 					"c".to_owned(),
 					Value::Thing(Thing {
 						tb: "d".to_owned(),
-						id: Id::Number(1)
+						id: Id::from(1)
 					})
 				)])))
 			})]))
@@ -114,7 +114,7 @@ fn parse_record_string_2() {
 		res,
 		Value::Thing(Thing {
 			tb: "a".to_owned(),
-			id: Id::Array(Array(vec![Value::Strand(Strand("foo".to_owned()))]))
+			id: Id::from(Array(vec![Value::Strand(Strand("foo".to_owned()))]))
 		})
 	)
 }

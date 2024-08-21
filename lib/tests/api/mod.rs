@@ -1356,3 +1356,42 @@ async fn return_bool() {
 	let value: Value = response.take(0).unwrap();
 	assert_eq!(value, Value::Bool(false));
 }
+
+#[test_log::test(tokio::test)]
+async fn run() {
+	let (permit, db) = new_db().await;
+	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
+	drop(permit);
+	let sql = "
+	DEFINE FUNCTION fn::foo() {
+	   RETURN 42;
+	};
+	DEFINE FUNCTION fn::bar($val: any) {
+	   CREATE foo:1 set val = $val;
+	};
+	DEFINE FUNCTION fn::baz() {
+	   RETURN SELECT VALUE val FROM ONLY foo:1;
+	};
+	";
+	let _ = db.query(sql).await;
+
+	let tmp = db.run("fn::foo", ()).await.unwrap();
+	assert_eq!(tmp, Value::from(42));
+
+	let tmp = db.run("fn::foo", 7).await.unwrap_err();
+	println!("fn::foo res: {tmp}");
+	assert!(tmp.to_string().contains("The function expects 0 arguments."));
+
+	let tmp = db.run("fn::idnotexist", ()).await.unwrap_err();
+	println!("fn::idontexist res: {tmp}");
+	assert!(tmp.to_string().contains("The function 'fn::idnotexist' does not exist"));
+
+	let tmp = db.run("count", Value::from(vec![1, 2, 3])).await.unwrap();
+	assert_eq!(tmp, Value::from(3));
+
+	let tmp = db.run("fn::bar", 7).await.unwrap();
+	assert_eq!(tmp, Value::None);
+
+	let tmp = db.run("fn::baz", ()).await.unwrap();
+	assert_eq!(tmp, Value::from(7));
+}

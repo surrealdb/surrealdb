@@ -143,6 +143,7 @@ keyword! {
 	Prune => "PRUNE",
 	Punct => "PUNCT",
 	Jieba => "JIEBA",
+	Range => "RANGE",
 	Readonly => "READONLY",
 	Rebuild => "REBUILD",
 	Relate => "RELATE",

@@ -428,15 +428,15 @@ impl<'a> IndexOperation<'a> {
 	}
 
 	async fn index_hnsw(&mut self, ctx: &Context, p: &HnswParams) -> Result<(), Error> {
-		let hnsw = ctx.get_index_stores().get_index_hnsw(self.opt, self.ix, p).await?;
+		let hnsw = ctx.get_index_stores().get_index_hnsw(ctx, self.opt, self.ix, p).await?;
 		let mut hnsw = hnsw.write().await;
 		// Delete the old index data
 		if let Some(o) = self.o.take() {
-			hnsw.remove_document(self.rid, &o)?;
+			hnsw.remove_document(&ctx.tx(), self.rid.id.clone(), &o).await?;
 		}
 		// Create the new index data
 		if let Some(n) = self.n.take() {
-			hnsw.index_document(self.rid, &n)?;
+			hnsw.index_document(&ctx.tx(), self.rid.id.clone(), &n).await?;
 		}
 		Ok(())
 	}

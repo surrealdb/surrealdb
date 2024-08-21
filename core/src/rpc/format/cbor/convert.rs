@@ -2,14 +2,20 @@ use ciborium::Value as Data;
 use geo::{LineString, Point, Polygon};
 use geo_types::{MultiLineString, MultiPoint, MultiPolygon};
 use rust_decimal::Decimal;
+use std::collections::BTreeMap;
 use std::iter::once;
+use std::ops::Bound;
 use std::ops::Deref;
 
+use crate::sql::id::range::IdRange;
+use crate::sql::Array;
 use crate::sql::Datetime;
 use crate::sql::Duration;
 use crate::sql::Geometry;
 use crate::sql::Id;
 use crate::sql::Number;
+use crate::sql::Object;
+use crate::sql::Range;
 use crate::sql::Thing;
 use crate::sql::Uuid;
 use crate::sql::Value;
@@ -29,6 +35,11 @@ const TAG_STRING_DECIMAL: u64 = 10;
 const TAG_CUSTOM_DATETIME: u64 = 12;
 const TAG_STRING_DURATION: u64 = 13;
 const TAG_CUSTOM_DURATION: u64 = 14;
+
+// Ranges
+const TAG_RANGE: u64 = 49;
+const TAG_BOUND_INCLUDED: u64 = 50;
+const TAG_BOUND_EXCLUDED: u64 = 51;
 
 // Custom Geometries
 const TAG_GEOMETRY_POINT: u64 = 88;
@@ -52,17 +63,8 @@ impl TryFrom<Cbor> for Value {
 			Data::Float(v) => Ok(Value::from(v)),
 			Data::Bytes(v) => Ok(Value::Bytes(v.into())),
 			Data::Text(v) => Ok(Value::from(v)),
-			Data::Array(v) => {
-				v.into_iter().map(|v| Value::try_from(Cbor(v))).collect::<Result<Value, &str>>()
-			}
-			Data::Map(v) => v
-				.into_iter()
-				.map(|(k, v)| {
-					let k = Value::try_from(Cbor(k)).map(|k| k.as_raw_string());
-					let v = Value::try_from(Cbor(v));
-					Ok((k?, v?))
-				})
-				.collect::<Result<Value, &str>>(),
+			Data::Array(v) => Ok(Value::Array(Array::try_from(v)?)),
+			Data::Map(v) => Ok(Value::Object(Object::try_from(v)?)),
 			Data::Tag(t, v) => {
 				match t {
 					// A literal datetime
@@ -175,21 +177,12 @@ impl TryFrom<Cbor> for Value {
 								),
 							};
 
-							match Value::try_from(Cbor(v.remove(0))) {
-								Ok(Value::Strand(id)) => {
-									Ok(Value::from(Thing::from((tb, Id::from(id)))))
-								}
-								Ok(Value::Number(Number::Int(id))) => {
-									Ok(Value::from(Thing::from((tb, Id::from(id)))))
-								}
-								Ok(Value::Array(id)) => {
-									Ok(Value::from(Thing::from((tb, Id::from(id)))))
-								}
-								Ok(Value::Object(id)) => {
-									Ok(Value::from(Thing::from((tb, Id::from(id)))))
-								}
-								_ => Err("Expected the id of a Record Id to be a String, Integer, Array or Object value"),
-							}
+							let id = Id::try_from(v.remove(0))?;
+
+							Ok(Value::Thing(Thing {
+								tb,
+								id,
+							}))
 						}
 						_ => Err("Expected a CBOR text data type, or a CBOR array with 2 elements"),
 					},
@@ -198,6 +191,8 @@ impl TryFrom<Cbor> for Value {
 						Data::Text(v) => Ok(Value::Table(v.into())),
 						_ => Err("Expected a CBOR text data type"),
 					},
+					// A range
+					TAG_RANGE => Ok(Value::Range(Box::new(Range::try_from(*v)?))),
 					TAG_GEOMETRY_POINT => match *v {
 						Data::Array(mut v) if v.len() == 2 => {
 							let x = Value::try_from(Cbor(v.remove(0)))?;
@@ -393,11 +388,13 @@ impl TryFrom<Value> for Cbor {
 						Id::Generate(_) => {
 							return Err("Cannot encode an ungenerated Record ID into CBOR")
 						}
+						Id::Range(v) => Data::try_from(*v)?,
 					},
 				])),
 			))),
 			Value::Table(v) => Ok(Cbor(Data::Tag(TAG_TABLE, Box::new(Data::Text(v.0))))),
 			Value::Geometry(v) => Ok(Cbor(encode_geometry(v)?)),
+			Value::Range(v) => Ok(Cbor(Data::try_from(*v)?)),
 			// We shouldn't reach here
 			_ => Err("Found unsupported SurrealQL value being encoded into a CBOR value"),
 		}
@@ -458,5 +455,138 @@ fn encode_geometry(v: Geometry) -> Result<Data, &'static str> {
 
 			Ok(Data::Tag(TAG_GEOMETRY_COLLECTION, Box::new(Data::Array(data))))
 		}
+	}
+}
+
+impl TryFrom<Data> for Range {
+	type Error = &'static str;
+	fn try_from(val: Data) -> Result<Self, &'static str> {
+		fn decode_bound(v: Data) -> Result<Bound<Value>, &'static str> {
+			match v {
+				Data::Tag(TAG_BOUND_INCLUDED, v) => Ok(Bound::Included(Value::try_from(Cbor(*v))?)),
+				Data::Tag(TAG_BOUND_EXCLUDED, v) => Ok(Bound::Excluded(Value::try_from(Cbor(*v))?)),
+				Data::Null => Ok(Bound::Unbounded),
+				_ => Err("Expected a bound tag"),
+			}
+		}
+
+		match val {
+			Data::Array(v) if v.len() == 2 => {
+				let mut v = v;
+				let beg = decode_bound(v.remove(0).to_owned())?;
+				let end = decode_bound(v.remove(0).to_owned())?;
+				Ok(Range::new(beg, end))
+			}
+			_ => Err("Expected a CBOR array with 2 bounds"),
+		}
+	}
+}
+
+impl TryFrom<Range> for Data {
+	type Error = &'static str;
+	fn try_from(r: Range) -> Result<Data, &'static str> {
+		fn encode(b: Bound<Value>) -> Result<Data, &'static str> {
+			match b {
+				Bound::Included(v) => {
+					Ok(Data::Tag(TAG_BOUND_INCLUDED, Box::new(Cbor::try_from(v)?.0)))
+				}
+				Bound::Excluded(v) => {
+					Ok(Data::Tag(TAG_BOUND_EXCLUDED, Box::new(Cbor::try_from(v)?.0)))
+				}
+				Bound::Unbounded => Ok(Data::Null),
+			}
+		}
+
+		Ok(Data::Array(vec![encode(r.beg)?, encode(r.end)?]))
+	}
+}
+
+impl TryFrom<Data> for IdRange {
+	type Error = &'static str;
+	fn try_from(val: Data) -> Result<Self, &'static str> {
+		fn decode_bound(v: Data) -> Result<Bound<Id>, &'static str> {
+			match v {
+				Data::Tag(TAG_BOUND_INCLUDED, v) => Ok(Bound::Included(Id::try_from(*v)?)),
+				Data::Tag(TAG_BOUND_EXCLUDED, v) => Ok(Bound::Excluded(Id::try_from(*v)?)),
+				Data::Null => Ok(Bound::Unbounded),
+				_ => Err("Expected a bound tag"),
+			}
+		}
+
+		match val {
+			Data::Array(v) if v.len() == 2 => {
+				let mut v = v;
+				let beg = decode_bound(v.remove(0).to_owned())?;
+				let end = decode_bound(v.remove(0).to_owned())?;
+				Ok(IdRange::try_from((beg, end))
+					.map_err(|_| "Found an invalid range with ranges as bounds")?)
+			}
+			_ => Err("Expected a CBOR array with 2 bounds"),
+		}
+	}
+}
+
+impl TryFrom<IdRange> for Data {
+	type Error = &'static str;
+	fn try_from(r: IdRange) -> Result<Data, &'static str> {
+		fn encode(b: Bound<Id>) -> Result<Data, &'static str> {
+			match b {
+				Bound::Included(v) => Ok(Data::Tag(TAG_BOUND_INCLUDED, Box::new(v.try_into()?))),
+				Bound::Excluded(v) => Ok(Data::Tag(TAG_BOUND_EXCLUDED, Box::new(v.try_into()?))),
+				Bound::Unbounded => Ok(Data::Null),
+			}
+		}
+
+		Ok(Data::Array(vec![encode(r.beg)?, encode(r.end)?]))
+	}
+}
+
+impl TryFrom<Data> for Id {
+	type Error = &'static str;
+	fn try_from(val: Data) -> Result<Self, &'static str> {
+		match val {
+			Data::Integer(v) => Ok(Id::Number(i128::from(v) as i64)),
+			Data::Text(v) => Ok(Id::String(v)),
+			Data::Array(v) => Ok(Id::Array(v.try_into()?)),
+			Data::Map(v) => Ok(Id::Object(v.try_into()?)),
+			Data::Tag(TAG_RANGE, v) => Ok(Id::Range(Box::new(IdRange::try_from(*v)?))),
+			_ => Err("Expected a CBOR integer, text, array or map"),
+		}
+	}
+}
+
+impl TryFrom<Id> for Data {
+	type Error = &'static str;
+	fn try_from(v: Id) -> Result<Data, &'static str> {
+		match v {
+			Id::Number(v) => Ok(Data::Integer(v.into())),
+			Id::String(v) => Ok(Data::Text(v)),
+			Id::Array(v) => Ok(Cbor::try_from(Value::from(v))?.0),
+			Id::Object(v) => Ok(Cbor::try_from(Value::from(v))?.0),
+			Id::Range(v) => Ok(Data::Tag(TAG_RANGE, Box::new(v.deref().to_owned().try_into()?))),
+			Id::Generate(_) => Err("Cannot encode an ungenerated Record ID into CBOR"),
+		}
+	}
+}
+
+impl TryFrom<Vec<Data>> for Array {
+	type Error = &'static str;
+	fn try_from(val: Vec<Data>) -> Result<Self, &'static str> {
+		val.into_iter().map(|v| Value::try_from(Cbor(v))).collect::<Result<Array, &str>>()
+	}
+}
+
+impl TryFrom<Vec<(Data, Data)>> for Object {
+	type Error = &'static str;
+	fn try_from(val: Vec<(Data, Data)>) -> Result<Self, &'static str> {
+		Ok(Object(
+			val.into_iter()
+				.map(|(k, v)| {
+					let k = Value::try_from(Cbor(k)).map(|k| k.as_raw_string());
+					let v = Value::try_from(Cbor(v));
+					Ok((k?, v?))
+				})
+				.collect::<Result<BTreeMap<String, Value>, &str>>()?,
+		))
 	}
 }
