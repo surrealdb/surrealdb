@@ -177,4 +177,38 @@ mod tests {
 		assert!(net_targets("127777.0.0.1").is_err());
 		assert!(net_targets("127.0.0.1,127777.0.0.1").is_err());
 	}
+
+	#[test]
+	fn test_method_targets() {
+		assert_eq!(method_targets("*").unwrap(), Targets::<MethodTarget>::All);
+		assert_eq!(method_targets("").unwrap(), Targets::<MethodTarget>::All);
+		assert_eq!(
+			method_targets("query").unwrap(),
+			Targets::<MethodTarget>::Some(vec!["query".parse().unwrap()].into_iter().collect())
+		);
+		assert_eq!(
+			method_targets("query,authenticate").unwrap(),
+			Targets::<MethodTarget>::Some(
+				vec!["query".parse().unwrap(), "authenticate".parse().unwrap()]
+					.into_iter()
+					.collect()
+			)
+		);
+	}
+
+	#[test]
+	fn test_route_targets() {
+		assert_eq!(route_targets("*").unwrap(), Targets::<RouteTarget>::All);
+		assert_eq!(route_targets("").unwrap(), Targets::<RouteTarget>::All);
+		assert_eq!(
+			route_targets("key").unwrap(),
+			Targets::<RouteTarget>::Some(vec!["key".parse().unwrap()].into_iter().collect())
+		);
+		assert_eq!(
+			route_targets("key,sql").unwrap(),
+			Targets::<RouteTarget>::Some(
+				vec!["key".parse().unwrap(), "sql".parse().unwrap()].into_iter().collect()
+			)
+		);
+	}
 }
