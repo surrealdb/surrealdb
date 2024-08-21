@@ -151,7 +151,7 @@ Targets must be in the form of <host>[:<port>], <ipv4|ipv6>[/<mask>]. For exampl
 	#[arg(
 		help = "Deny all RPC methods from being called. Optionally, you can provide a comma-separated list of RPC methods to deny"
 	)]
-	#[arg(env = "SURREAL_CAPS_DENY_RPC", long, conflicts_with = "deny_all")]
+	#[arg(env = "SURREAL_CAPS_DENY_RPC", long)]
 	// If the arg is provided without value, then assume it's "", which gets parsed into Targets::All
 	#[arg(default_missing_value_os = "", num_args = 0..)]
 	#[arg(value_parser = super::cli::validator::method_targets)]
@@ -160,7 +160,7 @@ Targets must be in the form of <host>[:<port>], <ipv4|ipv6>[/<mask>]. For exampl
 	#[arg(
 		help = "Deny all HTTP routes from being requested. Optionally, you can provide a comma-separated list of HTTP routes to deny"
 	)]
-	#[arg(env = "SURREAL_CAPS_DENY_HTTP", long, conflicts_with = "deny_all")]
+	#[arg(env = "SURREAL_CAPS_DENY_HTTP", long)]
 	// If the arg is provided without value, then assume it's "", which gets parsed into Targets::All
 	#[arg(default_missing_value_os = "", num_args = 0..)]
 	#[arg(value_parser = super::cli::validator::route_targets)]
@@ -209,7 +209,8 @@ impl DbsCapabilities {
 	}
 
 	fn get_allow_rpc(&self) -> Targets<MethodTarget> {
-		if self.deny_all || matches!(self.deny_rpc, Some(Targets::All)) {
+		// To prevent unexpected behavior as well as breaking changes, deny_all does not disable the RPC API
+		if matches!(self.deny_rpc, Some(Targets::All)) {
 			return Targets::None;
 		}
 
@@ -222,7 +223,8 @@ impl DbsCapabilities {
 	}
 
 	fn get_allow_http(&self) -> Targets<RouteTarget> {
-		if self.deny_all || matches!(self.deny_http, Some(Targets::All)) {
+		// To prevent unexpected behavior as well as breaking changes, deny_all does not disable the HTTP REST API
+		if matches!(self.deny_http, Some(Targets::All)) {
 			return Targets::None;
 		}
 
@@ -253,20 +255,14 @@ impl DbsCapabilities {
 	}
 
 	fn get_deny_rpc(&self) -> Targets<MethodTarget> {
-		if self.deny_all {
-			return Targets::All;
-		}
-
-		// If deny_rpc was not provided and deny_all is false, then don't deny anything (Targets::None)
+		// To prevent unexpected behavior as well as breaking changes, deny_all does not disable the RPC API
+		// If deny_rpc was not provided, then don't deny anything (Targets::None)
 		self.deny_rpc.clone().unwrap_or(Targets::None)
 	}
 
 	fn get_deny_http(&self) -> Targets<RouteTarget> {
-		if self.deny_all {
-			return Targets::All;
-		}
-
-		// If deny_http was not provided and deny_all is false, then don't deny anything (Targets::None)
+		// To prevent unexpected behavior as well as breaking changes, deny_all does not disable the RPC API
+		// If deny_http was not provided, then don't deny anything (Targets::None)
 		self.deny_http.clone().unwrap_or(Targets::None)
 	}
 }
