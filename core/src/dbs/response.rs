@@ -1,5 +1,5 @@
 use crate::err::Error;
-use crate::sql::value::Value;
+use crate::sql::Value as CoreValue;
 use revision::revisioned;
 use revision::Revisioned;
 use serde::ser::SerializeStruct;
@@ -25,7 +25,7 @@ pub enum QueryType {
 #[non_exhaustive]
 pub struct Response {
 	pub time: Duration,
-	pub result: Result<Value, Error>,
+	pub result: Result<CoreValue, Error>,
 	// Record the query type in case processing the response is necessary (such as tracking live queries).
 	pub query_type: QueryType,
 }
@@ -37,7 +37,7 @@ impl Response {
 	}
 
 	/// Retrieve the response as a normal result
-	pub fn output(self) -> Result<Value, Error> {
+	pub fn output(self) -> Result<CoreValue, Error> {
 		self.result
 	}
 }
@@ -66,7 +66,7 @@ impl Serialize for Response {
 			}
 			Err(e) => {
 				val.serialize_field("status", &Status::Err)?;
-				val.serialize_field("result", &Value::from(e.to_string()))?;
+				val.serialize_field("result", &CoreValue::from(e.to_string()))?;
 			}
 		}
 		val.end()
@@ -80,7 +80,7 @@ impl Serialize for Response {
 pub struct QueryMethodResponse {
 	pub time: String,
 	pub status: Status,
-	pub result: Value,
+	pub result: CoreValue,
 }
 
 impl From<&Response> for QueryMethodResponse {
@@ -88,7 +88,7 @@ impl From<&Response> for QueryMethodResponse {
 		let time = res.speed();
 		let (status, result) = match &res.result {
 			Ok(value) => (Status::Ok, value.clone()),
-			Err(error) => (Status::Err, Value::from(error.to_string())),
+			Err(error) => (Status::Err, CoreValue::from(error.to_string())),
 		};
 		Self {
 			status,

@@ -47,7 +47,7 @@ impl RpcContext for BasicRpcContext<'_> {
 		&mut self.vars
 	}
 
-	fn version_data(&self) -> impl Into<super::Data> {
-		Value::Strand(self.version_string.clone().into())
+	fn version_data(&self) -> super::Data {
+		Value::Strand(self.version_string.clone().into()).into()
 	}
 }

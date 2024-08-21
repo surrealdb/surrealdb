@@ -1,31 +1,24 @@
-use crate::api::conn::Connection;
-use crate::api::conn::Route;
-use crate::api::conn::Router;
-use crate::api::engine::local::Db;
-use crate::api::method::BoxFuture;
-use crate::api::opt::{Endpoint, EndpointKind};
-use crate::api::ExtraFeatures;
-use crate::api::OnceLockExt;
-use crate::api::Result;
-use crate::api::Surreal;
-use crate::dbs::Session;
-use crate::engine::tasks::start_tasks;
-use crate::iam::Level;
-use crate::kvs::Datastore;
-use crate::opt::auth::Root;
-use crate::opt::WaitFor;
-use crate::options::EngineOptions;
-use channel::Receiver;
-use channel::Sender;
-use futures::stream::poll_fn;
-use futures::StreamExt;
-use std::collections::BTreeMap;
-use std::collections::HashMap;
-use std::collections::HashSet;
-use std::sync::atomic::AtomicI64;
-use std::sync::Arc;
-use std::sync::OnceLock;
-use std::task::Poll;
+use crate::{
+	api::{
+		conn::{Connection, Route, Router},
+		engine::local::Db,
+		method::BoxFuture,
+		opt::{Endpoint, EndpointKind},
+		ExtraFeatures, OnceLockExt, Result, Surreal,
+	},
+	engine::tasks::start_tasks,
+	opt::{auth::Root, WaitFor},
+	value::Notification,
+	Action,
+};
+use channel::{Receiver, Sender};
+use futures::{stream::poll_fn, StreamExt};
+use std::{
+	collections::{BTreeMap, HashMap, HashSet},
+	sync::{atomic::AtomicI64, Arc, OnceLock},
+	task::Poll,
+};
+use surrealdb_core::{dbs::Session, iam::Level, kvs::Datastore, options::EngineOptions};
 use tokio::sync::watch;
 
 impl crate::api::Connection for Db {}
@@ -121,7 +114,7 @@ pub(crate) async fn run_router(
 	let kvs = kvs.with_temporary_directory(address.config.temporary_directory);
 
 	let kvs = Arc::new(kvs);
-	let mut vars = BTreeMap::new();
+	let mut vars = BTreeMap::default();
 	let mut live_queries = HashMap::new();
 	let mut session = Session::default().with_rt(true);
 
@@ -166,8 +159,16 @@ pub(crate) async fn run_router(
 					// channel?
 					continue
 				};
-				let id = notification.id;
+
+				let notification = Notification{
+					query_id: *notification.id,
+					action: Action::from_core(notification.action),
+					data: notification.result
+				};
+
+				let id = notification.query_id;
 				if let Some(sender) = live_queries.get(&id) {
+
 					if sender.send(notification).await.is_err() {
 						live_queries.remove(&id);
 						if let Err(error) =

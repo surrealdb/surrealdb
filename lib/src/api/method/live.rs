@@ -5,25 +5,15 @@ use crate::api::method::BoxFuture;
 use crate::api::Connection;
 use crate::api::ExtraFeatures;
 use crate::api::Result;
-use crate::dbs;
 use crate::engine::any::Any;
 use crate::method::Live;
 use crate::method::OnceLockExt;
 use crate::method::Query;
 use crate::method::Select;
 use crate::opt::Resource;
-use crate::sql::from_value;
-use crate::sql::statements::LiveStatement;
-use crate::sql::Field;
-use crate::sql::Fields;
-use crate::sql::Ident;
-use crate::sql::Idiom;
-use crate::sql::Part;
-use crate::sql::Statement;
-use crate::sql::Table;
-use crate::sql::Value;
-use crate::Notification;
+use crate::value::Notification;
 use crate::Surreal;
+use crate::Value;
 use channel::Receiver;
 use futures::StreamExt;
 use serde::de::DeserializeOwned;
@@ -32,82 +22,91 @@ use std::marker::PhantomData;
 use std::pin::Pin;
 use std::task::Context;
 use std::task::Poll;
+use surrealdb_core::sql::{
+	statements::LiveStatement, Cond, Expression, Field, Fields, Ident, Idiom, Operator, Part,
+	Statement, Table, Value as CoreValue,
+};
+use uuid::Uuid;
+
 #[cfg(not(target_arch = "wasm32"))]
 use tokio::spawn;
-use uuid::Uuid;
+
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen_futures::spawn_local as spawn;
 
 const ID: &str = "id";
 
-macro_rules! into_future {
-	() => {
-		fn into_future(self) -> Self::IntoFuture {
-			let Select {
-				client,
-				resource,
-				range,
-				..
-			} = self;
-			Box::pin(async move {
-				let router = client.router.extract()?;
-				if !router.features.contains(&ExtraFeatures::LiveQueries) {
-					return Err(Error::LiveQueriesNotSupported.into());
-				}
-				let mut fields = Fields::default();
-				fields.0 = vec![Field::All];
-				let mut stmt = LiveStatement::new(fields);
-				let mut table = Table::default();
-				match range {
-					Some(range) => {
-						let record = resource?.with_range(range)?;
-						table.0 = record.tb.clone();
-						stmt.what = table.into();
-						stmt.cond = record.to_cond();
-					}
-					None => match resource? {
-						Resource::Table(table) => {
-							stmt.what = table.into();
-						}
-						Resource::RecordId(record) => {
-							table.0 = record.tb.clone();
-							stmt.what = table.into();
-							let mut ident = Ident::default();
-							ident.0 = ID.to_owned();
-							let mut idiom = Idiom::default();
-							idiom.0 = vec![Part::from(ident)];
-							stmt.cond = record.to_cond();
-						}
-						Resource::Object(object) => return Err(Error::LiveOnObject(object).into()),
-						Resource::Array(array) => return Err(Error::LiveOnArray(array).into()),
-						Resource::Edges(edges) => return Err(Error::LiveOnEdges(edges).into()),
-						Resource::Unspecified => return Err(Error::LiveOnUnspecified.into()),
-					},
-				}
-				let query = Query::new(
-					client.clone(),
-					vec![Statement::Live(stmt)],
-					Default::default(),
-					false,
-				);
-				let Value::Uuid(id) = query.await?.take(0)? else {
-					return Err(Error::InternalError(
-						"successufull live query didn't return a uuid".to_string(),
-					)
-					.into());
-				};
-				let rx = register(router, id.0).await?;
-				Ok(Stream::new(
-					Surreal::new_from_router_waiter(client.router.clone(), client.waiter.clone()),
-					id.0,
-					Some(rx),
-				))
-			})
+fn into_future<C, O>(this: Select<C, O, Live>) -> BoxFuture<Result<Stream<O>>>
+where
+	C: Connection,
+{
+	let Select {
+		client,
+		resource,
+		..
+	} = this;
+	Box::pin(async move {
+		let router = client.router.extract()?;
+		if !router.features.contains(&ExtraFeatures::LiveQueries) {
+			return Err(Error::LiveQueriesNotSupported.into());
 		}
-	};
+		let mut fields = Fields::default();
+		fields.0 = vec![Field::All];
+		let mut stmt = LiveStatement::new(fields);
+		let mut table = Table::default();
+		match resource? {
+			Resource::Table(table) => {
+				let mut core_table = Table::default();
+				core_table.0 = table;
+				stmt.what = core_table.into()
+			}
+			Resource::RecordId(record) => {
+				let record = record.into_inner();
+				table.0 = record.tb.clone();
+				stmt.what = table.into();
+				let mut ident = Ident::default();
+				ident.0 = ID.to_owned();
+				let mut idiom = Idiom::default();
+				idiom.0 = vec![Part::from(ident)];
+				let mut cond = Cond::default();
+				cond.0 = surrealdb_core::sql::Value::Expression(Box::new(Expression::new(
+					idiom.into(),
+					Operator::Equal,
+					record.into(),
+				)));
+				stmt.cond = Some(cond);
+			}
+			Resource::Object(_) => return Err(Error::LiveOnObject.into()),
+			Resource::Array(_) => return Err(Error::LiveOnArray.into()),
+			Resource::Edge(_) => return Err(Error::LiveOnEdges.into()),
+			Resource::Range(range) => {
+				let range = range.into_inner();
+				table.0 = range.tb.clone();
+				stmt.what = table.into();
+				stmt.cond = range.to_cond();
+			}
+		}
+		let query =
+			Query::new(client.clone(), vec![Statement::Live(stmt)], Default::default(), false);
+		let CoreValue::Uuid(id) = query.await?.take::<Value>(0)?.into_inner() else {
+			return Err(Error::InternalError(
+				"successufull live query didn't return a uuid".to_string(),
+			)
+			.into());
+		};
+		let rx = register(router, *id).await?;
+		Ok(Stream::new(
+			Surreal::new_from_router_waiter(client.router.clone(), client.waiter.clone()),
+			*id,
+			Some(rx),
+		))
+	})
 }
 
-pub(crate) async fn register(router: &Router, id: Uuid) -> Result<Receiver<dbs::Notification>> {
+pub(crate) async fn register(
+	router: &Router,
+	id: Uuid,
+) -> Result<Receiver<Notification<CoreValue>>> {
 	let (tx, rx) = channel::unbounded();
 	router
 		.execute_unit(Command::SubscribeLive {
@@ -125,7 +124,9 @@ where
 	type Output = Result<Stream<Value>>;
 	type IntoFuture = BoxFuture<'r, Self::Output>;
 
-	into_future! {}
+	fn into_future(self) -> Self::IntoFuture {
+		into_future(self)
+	}
 }
 
 impl<'r, Client, R> IntoFuture for Select<'r, Client, Option<R>, Live>
@@ -136,7 +137,9 @@ where
 	type Output = Result<Stream<Option<R>>>;
 	type IntoFuture = BoxFuture<'r, Self::Output>;
 
-	into_future! {}
+	fn into_future(self) -> Self::IntoFuture {
+		into_future(self)
+	}
 }
 
 impl<'r, Client, R> IntoFuture for Select<'r, Client, Vec<R>, Live>
@@ -147,7 +150,9 @@ where
 	type Output = Result<Stream<Vec<R>>>;
 	type IntoFuture = BoxFuture<'r, Self::Output>;
 
-	into_future! {}
+	fn into_future(self) -> Self::IntoFuture {
+		into_future(self)
+	}
 }
 
 /// A stream of live query notifications
@@ -158,7 +163,7 @@ pub struct Stream<R> {
 	// We no longer need the lifetime and the type parameter
 	// Leaving them in for backwards compatibility
 	pub(crate) id: Uuid,
-	pub(crate) rx: Option<Receiver<dbs::Notification>>,
+	pub(crate) rx: Option<Receiver<Notification<CoreValue>>>,
 	pub(crate) response_type: PhantomData<R>,
 }
 
@@ -166,7 +171,7 @@ impl<R> Stream<R> {
 	pub(crate) fn new(
 		client: Surreal<Any>,
 		id: Uuid,
-		rx: Option<Receiver<dbs::Notification>>,
+		rx: Option<Receiver<Notification<CoreValue>>>,
 	) -> Self {
 		Self {
 			id,
@@ -196,23 +201,22 @@ impl futures::Stream for Stream<Value> {
 	type Item = Notification<Value>;
 
 	poll_next! {
-		notification => Poll::Ready(Some(Notification {
-			query_id: notification.id.0,
-			action: notification.action.into(),
-			data: notification.result,
-		}))
+		notification => {
+			let r = Notification{
+				query_id: notification.query_id,
+				action: notification.action,
+				data: Value::from_inner(notification.data),
+			};
+			Poll::Ready(Some(r))
+		}
 	}
 }
 
 macro_rules! poll_next_and_convert {
 	() => {
 		poll_next! {
-			notification => match from_value(notification.result) {
-				Ok(data) => Poll::Ready(Some(Ok(Notification {
-					data,
-					query_id: notification.id.0,
-					action: notification.action.into(),
-				}))),
+			notification => match notification.map_deserialize(){
+				Ok(data) => Poll::Ready(Some(Ok(data))),
 				Err(error) => Poll::Ready(Some(Err(error.into()))),
 			}
 		}

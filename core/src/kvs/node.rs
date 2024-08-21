@@ -27,7 +27,7 @@ impl Datastore {
 		let key = crate::key::root::nd::Nd::new(id);
 		let now = self.clock_now().await;
 		let val = Node::new(id, now, false);
-		match run!(txn, txn.put(key, val)) {
+		match run!(txn, txn.put(key, val, None)) {
 			Err(Error::TxKeyAlreadyExists) => Err(Error::ClAlreadyExists {
 				value: id.to_string(),
 			}),

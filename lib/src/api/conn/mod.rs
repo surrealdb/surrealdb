@@ -6,16 +6,16 @@ use crate::api::opt::Endpoint;
 use crate::api::ExtraFeatures;
 use crate::api::Result;
 use crate::api::Surreal;
+use crate::Value;
 use channel::Receiver;
 use channel::Sender;
 use serde::de::DeserializeOwned;
 use std::collections::HashSet;
 use std::sync::atomic::AtomicI64;
 use std::sync::atomic::Ordering;
-use surrealdb_core::sql::{from_value, Value};
+use surrealdb_core::sql::{from_value as from_core_value, Value as CoreValue};
 
 mod cmd;
-
 pub(crate) use cmd::Command;
 #[cfg(feature = "protocol-http")]
 pub(crate) use cmd::RouterRequest;
@@ -70,7 +70,7 @@ impl Router {
 	pub(crate) fn recv(
 		&self,
 		receiver: Receiver<Result<DbResponse>>,
-	) -> BoxFuture<'_, Result<Value>> {
+	) -> BoxFuture<'_, Result<CoreValue>> {
 		Box::pin(async move {
 			let response = receiver.recv().await?;
 			match response? {
@@ -102,7 +102,7 @@ impl Router {
 		Box::pin(async move {
 			let rx = self.send(command).await?;
 			let value = self.recv(rx).await?;
-			from_value(value).map_err(Into::into)
+			from_core_value(value).map_err(Into::into)
 		})
 	}
 
@@ -114,8 +114,8 @@ impl Router {
 		Box::pin(async move {
 			let rx = self.send(command).await?;
 			match self.recv(rx).await? {
-				Value::None | Value::Null => Ok(None),
-				value => from_value(value).map_err(Into::into),
+				CoreValue::None | CoreValue::Null => Ok(None),
+				value => from_core_value(value).map_err(Into::into),
 			}
 		})
 	}
@@ -128,11 +128,11 @@ impl Router {
 		Box::pin(async move {
 			let rx = self.send(command).await?;
 			let value = match self.recv(rx).await? {
-				Value::None | Value::Null => Value::Array(Default::default()),
-				Value::Array(array) => Value::Array(array),
+				CoreValue::None | CoreValue::Null => return Ok(Vec::new()),
+				CoreValue::Array(array) => CoreValue::Array(array),
 				value => vec![value].into(),
 			};
-			from_value(value).map_err(Into::into)
+			from_core_value(value).map_err(Into::into)
 		})
 	}
 
@@ -141,10 +141,10 @@ impl Router {
 		Box::pin(async move {
 			let rx = self.send(command).await?;
 			match self.recv(rx).await? {
-				Value::None | Value::Null => Ok(()),
-				Value::Array(array) if array.is_empty() => Ok(()),
+				CoreValue::None | CoreValue::Null => Ok(()),
+				CoreValue::Array(array) if array.is_empty() => Ok(()),
 				value => Err(Error::FromValue {
-					value,
+					value: Value::from_inner(value),
 					error: "expected the database to return nothing".to_owned(),
 				}
 				.into()),
@@ -156,7 +156,7 @@ impl Router {
 	pub(crate) fn execute_value(&self, command: Command) -> BoxFuture<'_, Result<Value>> {
 		Box::pin(async move {
 			let rx = self.send(command).await?;
-			self.recv(rx).await
+			Ok(Value::from_inner(self.recv(rx).await?))
 		})
 	}
 
@@ -175,7 +175,7 @@ pub enum DbResponse {
 	/// The response sent for the `query` method
 	Query(Response),
 	/// The response sent for any method except `query`
-	Other(Value),
+	Other(CoreValue),
 }
 
 #[derive(Debug, Clone)]

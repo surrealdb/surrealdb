@@ -70,7 +70,7 @@ async fn cast_range_to_array() -> Result<(), Error> {
     	<array> 1>..5;
     	<array> 1..=5;
     	<array> 1>..=5;
-	"#;
+    "#;
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
@@ -90,6 +90,43 @@ async fn cast_range_to_array() -> Result<(), Error> {
 	//
 	let tmp = res.remove(0).result?;
 	let val = Value::parse("[2, 3, 4, 5]");
+	assert_eq!(tmp, val);
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn cast_with_literal_kind() -> Result<(), Error> {
+	let sql = r#"
+    	<"a" | "b"> "a";
+    	<123 | 456> 123;
+    	<123 | "b"> 123;
+        <[number, "abc"]> [123, "abc"];
+        <{ a: 1d | 2d }> { a: 1d };
+	"#;
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 5);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse("'a'");
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse("123");
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse("123");
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse("[123, 'abc']");
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse("{ a: 1d }");
 	assert_eq!(tmp, val);
 	//
 	Ok(())

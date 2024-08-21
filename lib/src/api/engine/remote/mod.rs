@@ -8,14 +8,8 @@ pub mod http;
 #[cfg_attr(docsrs, doc(cfg(feature = "protocol-ws")))]
 pub mod ws;
 
-use crate::api;
-use crate::api::conn::DbResponse;
-use crate::api::err::Error;
-use crate::api::method::query::QueryResult;
-use crate::api::Result;
-use crate::dbs::Notification;
-use crate::dbs::QueryMethodResponse;
-use crate::dbs::Status;
+use crate::api::{self, conn::DbResponse, err::Error, method::query::QueryResult, Result};
+use crate::dbs::{self, Status};
 use crate::method::Stats;
 use indexmap::IndexMap;
 use revision::revisioned;
@@ -24,13 +18,14 @@ use rust_decimal::prelude::ToPrimitive;
 use rust_decimal::Decimal;
 use serde::de::DeserializeOwned;
 use serde::Deserialize;
-use std::io::Read;
 use std::time::Duration;
-use surrealdb_core::sql::Value;
+use surrealdb_core::sql::Value as CoreValue;
 
 const NANOS_PER_SEC: i64 = 1_000_000_000;
 const NANOS_PER_MILLI: i64 = 1_000_000;
 const NANOS_PER_MICRO: i64 = 1_000;
+
+pub struct WsNotification {}
 
 // Converts a debug representation of `std::time::Duration` back
 fn duration_from_str(duration: &str) -> Option<std::time::Duration> {
@@ -93,9 +88,9 @@ pub(crate) struct Failure {
 #[revisioned(revision = 1)]
 #[derive(Debug, Deserialize)]
 pub(crate) enum Data {
-	Other(Value),
-	Query(Vec<QueryMethodResponse>),
-	Live(Notification),
+	Other(CoreValue),
+	Query(Vec<dbs::QueryMethodResponse>),
+	Live(dbs::Notification),
 }
 
 type ServerResult = std::result::Result<Data, Failure>;
@@ -120,7 +115,7 @@ impl From<Failure> for crate::Error {
 }
 
 impl DbResponse {
-	fn from(result: ServerResult) -> Result<Self> {
+	fn from_server_result(result: ServerResult) -> Result<Self> {
 		match result.map_err(Error::from)? {
 			Data::Other(value) => Ok(DbResponse::Other(value)),
 			Data::Query(responses) => {
@@ -159,7 +154,7 @@ impl DbResponse {
 #[revisioned(revision = 1)]
 #[derive(Debug, Deserialize)]
 pub(crate) struct Response {
-	id: Option<Value>,
+	id: Option<CoreValue>,
 	pub(crate) result: ServerResult,
 }
 
@@ -172,18 +167,16 @@ where
 		value.serialize_revisioned(&mut buf).map_err(|error| crate::Error::Db(error.into()))?;
 		return Ok(buf);
 	}
-	crate::sql::serde::serialize(value).map_err(|error| crate::Error::Db(error.into()))
+	surrealdb_core::sql::serde::serialize(value).map_err(|error| crate::Error::Db(error.into()))
 }
 
-fn deserialize<A, T>(bytes: &mut A, revisioned: bool) -> Result<T>
+fn deserialize<T>(bytes: &[u8], revisioned: bool) -> Result<T>
 where
-	A: Read,
 	T: Revisioned + DeserializeOwned,
 {
 	if revisioned {
-		return T::deserialize_revisioned(bytes).map_err(|x| crate::Error::Db(x.into()));
+		let mut read = std::io::Cursor::new(bytes);
+		return T::deserialize_revisioned(&mut read).map_err(|x| crate::Error::Db(x.into()));
 	}
-	let mut buf = Vec::new();
-	bytes.read_to_end(&mut buf).map_err(crate::err::Error::Io)?;
-	crate::sql::serde::deserialize(&buf).map_err(|error| crate::Error::Db(error.into()))
+	surrealdb_core::sql::serde::deserialize(bytes).map_err(|error| crate::Error::Db(error.into()))
 }

@@ -299,11 +299,13 @@ pub fn connect(address: impl IntoEndpoint) -> Connect<Any, Surreal<Any>> {
 
 #[cfg(all(test, feature = "kv-mem"))]
 mod tests {
+
+	use surrealdb_core::sql::Object;
+
 	use super::*;
 	use crate::opt::auth::Root;
 	use crate::opt::capabilities::Capabilities;
-	use crate::sql;
-	use crate::sql::Value;
+	use crate::Value;
 
 	#[tokio::test]
 	async fn local_engine_without_auth() {
@@ -328,7 +330,11 @@ mod tests {
 		let mut res = db.query("INFO FOR ROOT").await.unwrap();
 		let users: Value = res.take("users").unwrap();
 
-		assert_eq!(users, sql::value("{}").unwrap(), "there should be no users in the system");
+		assert_eq!(
+			users.into_inner(),
+			Object::default().into(),
+			"there should be no users in the system"
+		);
 	}
 
 	#[tokio::test]

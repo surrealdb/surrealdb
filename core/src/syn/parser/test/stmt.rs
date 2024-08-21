@@ -119,6 +119,7 @@ fn parse_create() {
 			))),
 			timeout: Some(Timeout(Duration(std::time::Duration::from_secs(1)))),
 			parallel: true,
+			version: None,
 		}),
 	);
 }
@@ -1410,7 +1411,7 @@ fn parse_define_table() {
 			comment: None,
 			if_not_exists: false,
 			overwrite: false,
-			kind: TableType::Any,
+			kind: TableType::Normal,
 		}))
 	);
 }
@@ -2204,6 +2205,7 @@ fn parse_relate() {
 				output: None,
 				timeout: None,
 				parallel: false,
+				version: None,
 			}))),
 			uniq: true,
 			data: Some(Data::SetExpression(vec![(
