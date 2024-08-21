@@ -37,12 +37,12 @@ impl Tree {
 		cond: Option<&Cond>,
 		with: Option<&With>,
 		order: Option<&Orders>,
-		limit: Option<usize>,
 	) -> Result<Self, Error> {
-		let mut b = TreeBuilder::new(ctx, opt, table, with, order, limit);
+		let mut b = TreeBuilder::new(ctx, opt, table, with, order);
 		if let Some(cond) = cond {
 			b.eval_cond(stk, cond).await?;
 		}
+		b.eval_order().await?;
 		Ok(Self {
 			root: b.root,
 			index_map: b.index_map,
@@ -60,7 +60,6 @@ struct TreeBuilder<'a> {
 	table: &'a Table,
 	with: Option<&'a With>,
 	first_order: Option<&'a Order>,
-	limit: Option<usize>,
 	schemas: HashMap<Table, SchemaCache>,
 	idioms_indexes: HashMap<Table, HashMap<Idiom, LocalIndexRefs>>,
 	resolved_expressions: HashMap<Arc<Expression>, ResolvedExpression>,
@@ -91,14 +90,13 @@ impl<'a> TreeBuilder<'a> {
 		table: &'a Table,
 		with: Option<&'a With>,
 		orders: Option<&'a Orders>,
-		limit: Option<usize>,
 	) -> Self {
 		let with_indexes = match with {
 			Some(With::Index(ixs)) => Vec::with_capacity(ixs.len()),
 			_ => vec![],
 		};
 		let first_order = if let Some(o) = orders {
-			o.0.get(0)
+			o.0.first()
 		} else {
 			None
 		};
@@ -108,7 +106,6 @@ impl<'a> TreeBuilder<'a> {
 			table,
 			with,
 			first_order,
-			limit,
 			schemas: Default::default(),
 			idioms_indexes: Default::default(),
 			resolved_expressions: Default::default(),
@@ -134,6 +131,24 @@ impl<'a> TreeBuilder<'a> {
 		}
 		let l = SchemaCache::new(self.opt, table, tx).await?;
 		self.schemas.insert(table.clone(), l);
+		Ok(())
+	}
+
+	async fn eval_order(&mut self) -> Result<(), Error> {
+		if let Some(o) = self.first_order {
+			if !o.random {
+				if let Node::IndexedField(id, irf) = self.resolve_idiom(&o.order).await? {
+					if let Some(ix_ref) = irf.first().cloned() {
+						self.index_map.order_limit = Some(IndexOption::new(
+							ix_ref,
+							id,
+							IdiomPosition::None,
+							IndexOperator::Order(o.direction),
+						));
+					}
+				}
+			}
+		}
 		Ok(())
 	}
 
@@ -178,7 +193,7 @@ impl<'a> TreeBuilder<'a> {
 	async fn compute(&self, stk: &mut Stk, v: &Value, n: Node) -> Result<Node, Error> {
 		Ok(if n == Node::Computable {
 			match v.compute(stk, self.ctx, self.opt, None).await {
-				Ok(v) => Node::computed_value(v),
+				Ok(v) => Node::Computed(v.into()),
 				Err(_) => Node::Unsupported(format!("Unsupported value: {}", v)),
 			}
 		} else {
@@ -191,7 +206,7 @@ impl<'a> TreeBuilder<'a> {
 		for v in &a.0 {
 			values.push(stk.run(|stk| v.compute(stk, self.ctx, self.opt, None)).await?);
 		}
-		Ok(Node::ComputedValue(Arc::new(Value::Array(Array::from(values)))))
+		Ok(Node::Computed(Arc::new(Value::Array(Array::from(values)))))
 	}
 
 	async fn eval_idiom(
@@ -423,8 +438,8 @@ impl<'a> TreeBuilder<'a> {
 		for ir in irs {
 			if let Some(ix) = self.index_map.definitions.get(*ir as usize) {
 				let op = match &ix.index {
-					Index::Idx => self.eval_index_operator(op, id, n, p),
-					Index::Uniq => self.eval_index_operator(op, id, n, p),
+					Index::Idx => self.eval_index_operator(op, n, p),
+					Index::Uniq => self.eval_index_operator(op, n, p),
 					Index::Search {
 						..
 					} => Self::eval_matches_operator(op, n),
@@ -469,7 +484,7 @@ impl<'a> TreeBuilder<'a> {
 		n: &Node,
 	) -> Result<Option<IndexOperator>, Error> {
 		if let Operator::Knn(k, None) = op {
-			if let Node::ComputedValue(v) = n {
+			if let Node::Computed(v) = n {
 				let vec: Arc<Vec<Number>> = Arc::new(v.as_ref().try_into()?);
 				self.knn_expressions.insert(exp.clone());
 				return Ok(Some(IndexOperator::Knn(vec, *k)));
@@ -485,7 +500,7 @@ impl<'a> TreeBuilder<'a> {
 		n: &Node,
 	) -> Result<Option<IndexOperator>, Error> {
 		if let Operator::Ann(k, ef) = op {
-			if let Node::ComputedValue(v) = n {
+			if let Node::Computed(v) = n {
 				let vec: Arc<Vec<Number>> = Arc::new(v.as_ref().try_into()?);
 				self.knn_expressions.insert(exp.clone());
 				return Ok(Some(IndexOperator::Ann(vec, *k, *ef)));
@@ -501,7 +516,7 @@ impl<'a> TreeBuilder<'a> {
 		exp: &Arc<Expression>,
 	) -> Result<(), Error> {
 		if let Operator::Knn(k, Some(d)) = exp.operator() {
-			if let Node::ComputedValue(v) = val {
+			if let Node::Computed(v) = val {
 				let vec: Arc<Vec<Number>> = Arc::new(v.as_ref().try_into()?);
 				self.knn_expressions.insert(exp.clone());
 				self.knn_brute_force_expressions.insert(
@@ -516,7 +531,6 @@ impl<'a> TreeBuilder<'a> {
 	fn eval_index_operator(
 		&self,
 		op: &Operator,
-		id: &Idiom,
 		n: &Node,
 		p: IdiomPosition,
 	) -> Option<IndexOperator> {
@@ -549,15 +563,6 @@ impl<'a> TreeBuilder<'a> {
 				) => return Some(IndexOperator::RangePart(p.transform(op), v)),
 				_ => {}
 			}
-		} else if let Some(_) = n.is_null_or_none() {
-			match (op, self.first_order, self.limit) {
-				(Operator::NotEqual, Some(o), Some(l)) => {
-					if !o.random && o.order.eq(id) {
-						return Some(IndexOperator::OrderLimit(o.direction, l));
-					}
-				}
-				_ => {}
-			}
 		}
 		None
 	}
@@ -577,6 +582,7 @@ pub(super) type IndexRef = u16;
 pub(super) struct IndexesMap {
 	pub(super) options: Vec<(Arc<Expression>, IndexOption)>,
 	pub(super) definitions: Vec<DefineIndexStatement>,
+	pub(super) order_limit: Option<IndexOption>,
 }
 
 #[derive(Clone)]
@@ -611,29 +617,13 @@ pub(super) enum Node {
 	RecordField(Idiom, RecordOptions),
 	NonIndexedField(Idiom),
 	Computable,
-	ComputedValue(Arc<Value>),
-	NullOrNoneValue(Arc<Value>),
+	Computed(Arc<Value>),
 	Unsupported(String),
 }
 
 impl Node {
-	fn computed_value(v: Value) -> Self {
-		if v.is_none_or_null() {
-			Self::NullOrNoneValue(v.into())
-		} else {
-			Self::ComputedValue(v.into())
-		}
-	}
-	pub(super) fn is_null_or_none(&self) -> Option<Arc<Value>> {
-		if let Self::NullOrNoneValue(v) = self {
-			Some(v.clone())
-		} else {
-			None
-		}
-	}
-
 	pub(super) fn is_computed(&self) -> Option<Arc<Value>> {
-		if let Self::ComputedValue(v) = self {
+		if let Self::Computed(v) = self {
 			Some(v.clone())
 		} else {
 			None
@@ -666,6 +656,8 @@ pub(super) enum IdiomPosition {
 	Left,
 	/// The idiom is on the right tf the condition clause
 	Right,
+	/// Eg. ORDER LIMIT
+	None,
 }
 
 impl IdiomPosition {
@@ -680,6 +672,7 @@ impl IdiomPosition {
 				Operator::MoreThanOrEqual => Operator::LessThanOrEqual,
 				_ => op.clone(),
 			},
+			IdiomPosition::None => op.clone(),
 		}
 	}
 }

@@ -106,11 +106,13 @@ pub(crate) enum ThingIterator {
 	IndexEqual(IndexEqualThingIterator),
 	IndexRange(IndexRangeThingIterator),
 	IndexUnion(IndexUnionThingIterator),
+	IndexAscending(IndexAscendingThingIterator),
 	IndexJoin(Box<IndexJoinThingIterator>),
 	UniqueEqual(UniqueEqualThingIterator),
 	UniqueRange(UniqueRangeThingIterator),
 	UniqueUnion(UniqueUnionThingIterator),
 	UniqueJoin(Box<UniqueJoinThingIterator>),
+	UniqueAscending(UniqueAscendingThingIterator),
 	Matches(MatchesThingIterator),
 	Knn(KnnIterator),
 }
@@ -129,6 +131,8 @@ impl ThingIterator {
 			Self::UniqueRange(i) => i.next_batch(txn, size).await,
 			Self::IndexUnion(i) => i.next_batch(ctx, txn, size).await,
 			Self::UniqueUnion(i) => i.next_batch(ctx, txn, size).await,
+			Self::IndexAscending(i) => i.next_batch(txn, size).await,
+			Self::UniqueAscending(i) => i.next_batch(txn, size).await,
 			Self::Matches(i) => i.next_batch(ctx, txn, size).await,
 			Self::Knn(i) => i.next_batch(ctx, size).await,
 			Self::IndexJoin(i) => Box::pin(i.next_batch(ctx, txn, size)).await,
@@ -798,5 +802,71 @@ impl KnnIterator {
 			}
 		}
 		Ok(records)
+	}
+}
+
+pub(crate) struct IndexAscendingThingIterator {
+	irf: IteratorRef,
+	r: RangeScan,
+}
+
+impl IndexAscendingThingIterator {
+	pub(super) fn new(
+		irf: IteratorRef,
+		ns: &str,
+		db: &str,
+		ix_what: &Ident,
+		ix_name: &Ident,
+	) -> Self {
+		let beg = Index::prefix_beg(ns, db, ix_what, ix_name);
+		let end = Index::prefix_end(ns, db, ix_what, ix_name);
+		Self {
+			irf,
+			r: RangeScan::new(beg, true, end, true),
+		}
+	}
+
+	async fn next_batch<B: IteratorBatch>(
+		&mut self,
+		tx: &Transaction,
+		limit: u32,
+	) -> Result<B, Error> {
+		let min = self.r.beg.clone();
+		let max = self.r.end.clone();
+		let res = tx.scan(min..max, limit, None).await?;
+		if let Some((key, _)) = res.last() {
+			self.r.beg.clone_from(key);
+			self.r.beg.push(0x00);
+		}
+		let mut records = B::with_capacity(res.len());
+		res.into_iter()
+			.filter(|(k, _)| self.r.matches(k))
+			.for_each(|(_, v)| records.add((Arc::new(v.into()), self.irf.into(), None)));
+		Ok(records)
+	}
+}
+
+pub(crate) struct UniqueAscendingThingIterator {
+	irf: IteratorRef,
+}
+impl UniqueAscendingThingIterator {
+	pub(super) fn new(
+		irf: IteratorRef,
+		_ns: &str,
+		_db: &str,
+		_ix_what: &Ident,
+		_ix_name: &Ident,
+	) -> Self {
+		Self {
+			irf,
+		}
+	}
+
+	async fn next_batch<B: IteratorBatch>(
+		&mut self,
+		_tx: &Transaction,
+		_limit: u32,
+	) -> Result<B, Error> {
+		todo!()
 	}
 }

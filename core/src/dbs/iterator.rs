@@ -58,9 +58,9 @@ pub(crate) struct Iterator {
 	// Iterator status
 	run: Canceller,
 	// Iterator limit value
-	limit: Option<usize>,
+	limit: Option<u32>,
 	// Iterator start value
-	start: Option<usize>,
+	start: Option<u32>,
 	// Iterator runtime error
 	error: Option<Error>,
 	// Iterator output results
@@ -338,7 +338,7 @@ impl Iterator {
 			}
 
 			// Process any START & LIMIT clause
-			self.results.start_limit(self.start.as_ref(), self.limit.as_ref());
+			self.results.start_limit(self.start, self.limit);
 
 			if let Some(e) = &mut plan.explanation {
 				e.add_fetch(self.results.len());
@@ -370,7 +370,7 @@ impl Iterator {
 		ctx: &Context,
 		opt: &Options,
 		stm: &Statement<'_>,
-	) -> Result<Option<usize>, Error> {
+	) -> Result<Option<u32>, Error> {
 		if self.limit.is_none() {
 			if let Some(v) = stm.limit() {
 				self.limit = Some(v.process(stk, ctx, opt, None).await?);
@@ -627,10 +627,10 @@ impl Iterator {
 		if stm.group().is_none() && stm.order().is_none() {
 			if let Some(l) = self.limit {
 				if let Some(s) = self.start {
-					if self.results.len() == l + s {
+					if self.results.len() == (l + s) as usize {
 						self.run.cancel()
 					}
-				} else if self.results.len() == l {
+				} else if self.results.len() == l as usize {
 					self.run.cancel()
 				}
 			}

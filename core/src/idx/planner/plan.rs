@@ -33,6 +33,7 @@ impl PlanBuilder {
 		root: Option<Node>,
 		with: Option<&With>,
 		with_indexes: Vec<IndexRef>,
+		order: Option<IndexOption>,
 	) -> Result<Plan, Error> {
 		if let Some(With::NoIndex) = with {
 			return Ok(Plan::TableIterator(Some("WITH NOINDEX".to_string())));
@@ -64,7 +65,11 @@ impl PlanBuilder {
 			}
 			// Otherwise we take the first single index option
 			if let Some((e, i)) = b.non_range_indexes.pop() {
-				return Ok(Plan::SingleIndex(e, i));
+				return Ok(Plan::SingleIndex(Some(e), i));
+			}
+			// If there is an order option
+			if let Some(o) = order {
+				return Ok(Plan::SingleIndex(None, o.clone()));
 			}
 		}
 		// If every expression is backed by an index with can use the MultiIndex plan
@@ -158,7 +163,7 @@ pub(super) enum Plan {
 	/// Table full scan
 	TableIterator(Option<String>),
 	/// Index scan filtered on records matching a given expression
-	SingleIndex(Arc<Expression>, IndexOption),
+	SingleIndex(Option<Arc<Expression>>, IndexOption),
 	/// Union of filtered index scans
 	MultiIndex(Vec<(Arc<Expression>, IndexOption)>, Vec<(IndexRef, UnionRangeQueryBuilder)>),
 	/// Index scan for record matching a given range
@@ -184,7 +189,7 @@ pub(super) enum IndexOperator {
 	Matches(String, Option<MatchRef>),
 	Knn(Arc<Vec<Number>>, u32),
 	Ann(Arc<Vec<Number>>, u32, u32),
-	OrderLimit(bool, usize),
+	Order(bool),
 }
 
 impl IndexOption {
@@ -278,10 +283,9 @@ impl IndexOption {
 				e.insert("operator", op);
 				e.insert("value", val);
 			}
-			IndexOperator::OrderLimit(asc, limit) => {
-				e.insert("operator", Value::from("OrderLimit"));
+			IndexOperator::Order(asc) => {
+				e.insert("operator", Value::from("Order"));
 				e.insert("ascending", Value::from(*asc));
-				e.insert("limit", Value::from(*limit));
 			}
 		};
 		Value::from(e)

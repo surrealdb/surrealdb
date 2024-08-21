@@ -72,8 +72,6 @@ impl SelectStatement {
 		let stm = Statement::from(self);
 		// Create a new iterator
 		let mut i = Iterator::new();
-		// Extract the limit
-		let limit = i.setup_limit(stk, ctx, opt, &stm).await?;
 		// Ensure futures are stored and the version is set if specified
 		let version = self.version.as_ref().map(|v| v.to_u64());
 		let opt =
@@ -84,8 +82,9 @@ impl SelectStatement {
 			self.with.as_ref().cloned().map(|w| w.into()),
 			self.cond.as_ref().cloned().map(|c| c.into()),
 			self.order.as_ref().cloned().map(|o| o.into()),
-			limit,
 		);
+		// Extract the limit
+		let limit = i.setup_limit(stk, ctx, &opt, &stm).await?;
 		// Used for ONLY: is the limit 1?
 		let limit_is_one_or_zero = match limit {
 			Some(l) => l <= 1,
