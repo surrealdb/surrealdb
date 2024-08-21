@@ -35,7 +35,6 @@ mod export;
 mod health;
 mod import;
 mod insert;
-mod insert_relation;
 mod invalidate;
 mod merge;
 mod patch;
@@ -843,26 +842,6 @@ where
 	///                 active: true,
 	///                 marketing: true,
 	///             },
-	///         },
-	///     ])
-	///     .await?;
-	///
-	/// // Insert multiple records into different tables
-	/// #[derive(Serialize)]
-	/// struct WithId<'a> {
-	///     id: sql::Thing,
-	///     name: &'a str,
-	/// }
-	///
-	/// let people: Vec<Person> = db.insert(())
-	///     .content(vec![
-	///         WithId {
-	///             id: sql::thing("person:tobie")?,
-	///             name: "Tobie",
-	///         },
-	///         WithId {
-	///             id: sql::thing("company:surrealdb")?,
-	///             name: "SurrealDB",
 	///         },
 	///     ])
 	///     .await?;
