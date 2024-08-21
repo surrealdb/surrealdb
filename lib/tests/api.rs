@@ -26,10 +26,7 @@ mod api_integration {
 	use surrealdb::sql::statements::BeginStatement;
 	use surrealdb::sql::statements::CommitStatement;
 	use surrealdb::sql::thing;
-	use surrealdb::sql::Thing;
-	use surrealdb::sql::Value;
-	use surrealdb::Error;
-	use surrealdb::Surreal;
+	use surrealdb::{Error, RecordId, Surreal, Value};
 	use tokio::sync::Semaphore;
 	use tokio::sync::SemaphorePermit;
 	use tracing_subscriber::filter::EnvFilter;
@@ -48,9 +45,9 @@ mod api_integration {
 		name: String,
 	}
 
-	#[derive(Debug, Clone, Deserialize, Eq, PartialEq, Ord, PartialOrd)]
-	struct RecordId {
-		id: Thing,
+	#[derive(Debug, Clone, Deserialize, PartialEq, PartialOrd)]
+	struct ApiRecordId {
+		id: RecordId,
 	}
 
 	#[derive(Debug, Deserialize)]
@@ -58,9 +55,9 @@ mod api_integration {
 		name: String,
 	}
 
-	#[derive(Debug, Clone, Deserialize, Eq, PartialEq, Ord, PartialOrd)]
+	#[derive(Debug, Clone, Deserialize, PartialEq, PartialOrd)]
 	struct RecordBuf {
-		id: Thing,
+		id: RecordId,
 		name: String,
 	}
 
@@ -182,6 +179,7 @@ mod api_integration {
 		use surrealdb::engine::local::Db;
 		use surrealdb::engine::local::Mem;
 		use surrealdb::iam;
+		use surrealdb::RecordIdKey;
 
 		async fn new_db() -> (SemaphorePermit<'static>, Surreal<Db>) {
 			let permit = PERMITS.acquire().await.unwrap();
@@ -213,10 +211,11 @@ mod api_integration {
 		async fn signin_first_not_necessary() {
 			let db = Surreal::new::<Mem>(()).await.unwrap();
 			db.use_ns("namespace").use_db("database").await.unwrap();
-			let Some(record): Option<RecordId> = db.create(("item", "foo")).await.unwrap() else {
+			let Some(record): Option<ApiRecordId> = db.create(("item", "foo")).await.unwrap()
+			else {
 				panic!("record not found");
 			};
-			assert_eq!(record.id.to_string(), "item:foo");
+			assert_eq!(*record.id.key(), RecordIdKey::from("foo".to_owned()));
 		}
 
 		#[test_log::test(tokio::test)]
@@ -275,6 +274,7 @@ mod api_integration {
 	mod file {
 		use super::*;
 		use surrealdb::engine::local::Db;
+		#[allow(deprecated)]
 		use surrealdb::engine::local::File;
 
 		async fn new_db() -> (SemaphorePermit<'static>, Surreal<Db>) {
@@ -288,6 +288,7 @@ mod api_integration {
 				.user(root)
 				.tick_interval(TICK_INTERVAL)
 				.capabilities(Capabilities::all());
+			#[allow(deprecated)]
 			let db = Surreal::new::<File>((path, config)).await.unwrap();
 			db.signin(root).await.unwrap();
 			(permit, db)
@@ -490,6 +491,50 @@ mod api_integration {
 				panic!("query returned no record");
 			};
 			assert_eq!(name, "John v1");
+		}
+
+		#[test_log::test(tokio::test)]
+		async fn create_with_version() {
+			let (permit, db) = new_db().await;
+			db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
+			drop(permit);
+
+			// Create a record in the past.
+			let _ = db
+				.query("CREATE user:john SET name = 'John' VERSION d'2024-08-19T08:00:00Z'")
+				.await
+				.unwrap()
+				.check()
+				.unwrap();
+
+			// Without VERSION, SELECT should return the record.
+			let mut response = db.query("SELECT * FROM user:john").await.unwrap().check().unwrap();
+			let Some(name): Option<String> = response.take("name").unwrap() else {
+				panic!("query returned no record");
+			};
+			assert_eq!(name, "John");
+
+			// SELECT with the VERSION set to the creation timestamp or later should return the record.
+			let mut response = db
+				.query("SELECT * FROM user:john VERSION d'2024-08-19T08:00:00Z'")
+				.await
+				.unwrap()
+				.check()
+				.unwrap();
+			let Some(name): Option<String> = response.take("name").unwrap() else {
+				panic!("query returned no record");
+			};
+			assert_eq!(name, "John");
+
+			// SELECT with the VERSION set before the creation timestamp should return nothing.
+			let mut response = db
+				.query("SELECT * FROM user:john VERSION d'2024-08-19T07:00:00Z'")
+				.await
+				.unwrap()
+				.check()
+				.unwrap();
+			let response: Option<String> = response.take("name").unwrap();
+			assert!(response.is_none());
 		}
 
 		include!("api/mod.rs");

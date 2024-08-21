@@ -199,3 +199,36 @@ async fn foreach_nested() -> Result<(), Error> {
 	//
 	Ok(())
 }
+
+#[tokio::test]
+async fn foreach_range() -> Result<(), Error> {
+	let sql = "
+		FOR $test IN 1..4 {
+			IF $test == 2 {
+				BREAK;
+			};
+			UPSERT type::thing('person', $test) SET test = $test;
+		};
+		SELECT * FROM person;
+	";
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 2);
+	//
+	let tmp = res.remove(0).result;
+	assert!(tmp.is_ok());
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
+			{
+				id: person:1,
+				test: 1,
+			},
+		]",
+	);
+	assert_eq!(tmp, val);
+	//
+	Ok(())
+}

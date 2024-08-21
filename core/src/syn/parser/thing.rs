@@ -2,7 +2,10 @@ use reblessive::Stk;
 
 use super::{ParseResult, Parser};
 use crate::{
-	sql::{id::Gen, Id, Ident, Range, Thing, Value},
+	sql::{
+		id::{range::IdRange, Gen},
+		Id, Ident, Range, Thing, Value,
+	},
 	syn::{
 		parser::{
 			mac::{expected, expected_whitespace, unexpected},
@@ -51,22 +54,24 @@ impl Parser<'_> {
 			} else {
 				Bound::Unbounded
 			};
-			return Ok(Value::Range(Box::new(Range {
+			return Ok(Value::Thing(Thing {
 				tb: ident,
-				beg: Bound::Unbounded,
-				end,
-			})));
+				id: Id::Range(Box::new(IdRange {
+					beg: Bound::Unbounded,
+					end,
+				})),
+			}));
 		}
 
 		// Didn't eat range yet so we need to parse the id.
 		let beg = if Self::kind_cast_start_id(self.peek_whitespace().kind) {
-			let id = stk.run(|ctx| self.parse_id(ctx)).await?;
+			let v = stk.run(|stk| self.parse_id(stk)).await?;
 
 			// check for exclusive
 			if self.eat_whitespace(t!(">")) {
-				Bound::Excluded(id)
+				Bound::Excluded(v)
 			} else {
-				Bound::Included(id)
+				Bound::Included(v)
 			}
 		} else {
 			Bound::Unbounded
@@ -76,31 +81,33 @@ impl Parser<'_> {
 		// If we already ate the exclusive it must be a range.
 		if self.eat_whitespace(t!("..")) {
 			let end = if self.eat_whitespace(t!("=")) {
-				let id = stk.run(|ctx| self.parse_id(ctx)).await?;
+				let id = stk.run(|stk| self.parse_id(stk)).await?;
 				Bound::Included(id)
 			} else if Self::kind_cast_start_id(self.peek_whitespace().kind) {
-				let id = stk.run(|ctx| self.parse_id(ctx)).await?;
+				let id = stk.run(|stk| self.parse_id(stk)).await?;
 				Bound::Excluded(id)
 			} else {
 				Bound::Unbounded
 			};
-			Ok(Value::Range(Box::new(Range {
+			Ok(Value::Thing(Thing {
 				tb: ident,
-				beg,
-				end,
-			})))
+				id: Id::Range(Box::new(IdRange {
+					beg,
+					end,
+				})),
+			}))
 		} else {
 			let id = match beg {
 				Bound::Unbounded => {
 					if self.peek_whitespace().kind == t!("$param") {
 						return Err(ParseError::new(
-									ParseErrorKind::UnexpectedExplain {
-										found: t!("$param"),
-										expected: "a record-id id",
-										explain: "you can create a record-id from a param with the function 'type::thing'",
-									},
-									self.recent_span(),
-									));
+							ParseErrorKind::UnexpectedExplain {
+								found: t!("$param"),
+								expected: "a record-id id",
+								explain: "you can create a record-id from a param with the function 'type::thing'",
+							},
+							self.recent_span(),
+						));
 					}
 
 					// we haven't matched anythong so far so we still want any type of id.
@@ -110,7 +117,8 @@ impl Parser<'_> {
 					// we have matched a bounded id but we don't see an range operator.
 					unexpected!(self, self.peek_whitespace().kind, "the range operator `..`")
 				}
-				Bound::Included(id) => id,
+				// We previously converted the `Id` value to `Value` so it's safe to unwrap here.
+				Bound::Included(v) => v,
 			};
 			Ok(Value::Thing(Thing {
 				tb: ident,
@@ -121,18 +129,14 @@ impl Parser<'_> {
 
 	/// Parse an range
 	pub async fn parse_range(&mut self, ctx: &mut Stk) -> ParseResult<Range> {
-		let tb = self.next_token_value::<Ident>()?.0;
-
-		expected_whitespace!(self, t!(":"));
-
 		// Check for beginning id
 		let beg = if Self::tokenkind_can_start_ident(self.peek_whitespace().kind) {
-			let id = ctx.run(|ctx| self.parse_id(ctx)).await?;
+			let v = ctx.run(|ctx| self.parse_value(ctx)).await?;
 
 			if self.eat_whitespace(t!(">")) {
-				Bound::Excluded(id)
+				Bound::Excluded(v)
 			} else {
-				Bound::Included(id)
+				Bound::Included(v)
 			}
 		} else {
 			Bound::Unbounded
@@ -144,18 +148,17 @@ impl Parser<'_> {
 
 		// parse ending id.
 		let end = if Self::tokenkind_can_start_ident(self.peek_whitespace().kind) {
-			let id = ctx.run(|ctx| self.parse_id(ctx)).await?;
+			let v = ctx.run(|ctx| self.parse_value(ctx)).await?;
 			if inclusive {
-				Bound::Included(id)
+				Bound::Included(v)
 			} else {
-				Bound::Excluded(id)
+				Bound::Excluded(v)
 			}
 		} else {
 			Bound::Unbounded
 		};
 
 		Ok(Range {
-			tb,
 			beg,
 			end,
 		})
@@ -498,7 +501,7 @@ mod tests {
 			out,
 			Thing {
 				tb: String::from("test"),
-				id: Id::Object(Object::from(map! {
+				id: Id::from(Object::from(map! {
 					"location".to_string() => Value::from("GBR"),
 					"year".to_string() => Value::from(2022),
 				})),
@@ -516,7 +519,7 @@ mod tests {
 			out,
 			Thing {
 				tb: String::from("test"),
-				id: Id::Array(Array::from(vec![Value::from("GBR"), Value::from(2022)])),
+				id: Id::from(Array::from(vec![Value::from("GBR"), Value::from(2022)])),
 			}
 		);
 	}
@@ -535,7 +538,7 @@ mod tests {
 				.finish()
 				.unwrap_or_else(|_| panic!("failed on {}", ident))
 				.id;
-			assert_eq!(r, Id::String(ident.to_string()),);
+			assert_eq!(r, Id::from(ident.to_string()),);
 
 			let mut parser = Parser::new(thing.as_bytes());
 			let r = stack
@@ -548,7 +551,7 @@ mod tests {
 				sql::Query(sql::Statements(vec![sql::Statement::Value(sql::Value::Thing(
 					sql::Thing {
 						tb: "t".to_string(),
-						id: Id::String(ident.to_string())
+						id: Id::from(ident.to_string())
 					}
 				))]))
 			)

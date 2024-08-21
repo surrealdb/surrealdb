@@ -395,8 +395,8 @@ impl RpcContext for Connection {
 		&mut self.vars
 	}
 
-	fn version_data(&self) -> impl Into<Data> {
-		format!("{PKG_NAME}-{}", *PKG_VERSION)
+	fn version_data(&self) -> Data {
+		format!("{PKG_NAME}-{}", *PKG_VERSION).into()
 	}
 
 	const LQ_SUPPORT: bool = true;

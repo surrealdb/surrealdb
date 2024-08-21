@@ -5261,9 +5261,9 @@ dependencies = [
 
 [[package]]
 name = "rust_decimal"
-version = "1.35.0"
+version = "1.36.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1790d1c4c0ca81211399e0e0af16333276f375209e71a37b67698a373db5b47a"
+checksum = "b082d80e3e3cc52b2ed634388d436fe1f4de6af5786cc2de9ba9737527bdf555"
 dependencies = [
  "arbitrary",
  "arrayvec",
@@ -6053,6 +6053,7 @@ dependencies = [
  "serial_test",
  "surrealdb",
  "surrealdb-async-graphql-axum",
+ "surrealdb-core",
  "temp-env",
  "tempfile",
  "test-log",
@@ -6296,9 +6297,9 @@ dependencies = [
 
 [[package]]
 name = "surrealkv"
-version = "0.3.3"
+version = "0.3.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1ab634895ff2c9289cb854a56335e428338ba71074c9eff02d84b360f0210155"
+checksum = "7d5fe193207896e6eeb445b88b810830097a9940058174bbbe8ec5597b1f52e1"
 dependencies = [
  "ahash 0.8.11",
  "async-channel 2.2.0",

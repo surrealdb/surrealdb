@@ -1,8 +1,10 @@
+use crate::err::Error;
 use crate::idx::trees::dynamicset::DynamicSet;
 use crate::idx::trees::hnsw::layer::HnswLayer;
 use crate::idx::trees::hnsw::{ElementId, HnswElements};
 use crate::idx::trees::knn::DoublePriorityQueue;
 use crate::idx::trees::vector::SharedVector;
+use crate::kvs::Transaction;
 use crate::sql::index::HnswParams;
 
 #[derive(Debug)]
@@ -30,61 +32,72 @@ impl From<&HnswParams> for Heuristic {
 }
 
 impl Heuristic {
-	pub(super) fn select<S>(
+	#[allow(clippy::too_many_arguments)]
+	pub(super) async fn select<S>(
 		&self,
+		tx: &Transaction,
 		elements: &HnswElements,
 		layer: &HnswLayer<S>,
 		q_id: ElementId,
 		q_pt: &SharedVector,
 		c: DoublePriorityQueue,
+		ignore: Option<ElementId>,
 		res: &mut S,
-	) where
-		S: DynamicSet<ElementId>,
+	) -> Result<(), Error>
+	where
+		S: DynamicSet,
 	{
 		match self {
-			Self::Standard => Self::heuristic(elements, layer, c, res),
-			Self::Ext => Self::heuristic_ext(elements, layer, q_id, q_pt, c, res),
-			Self::Keep => Self::heuristic_keep(elements, layer, c, res),
-			Self::ExtAndKeep => Self::heuristic_ext_keep(elements, layer, q_id, q_pt, c, res),
+			Self::Standard => Self::heuristic(tx, elements, layer, c, res).await,
+			Self::Ext => Self::heuristic_ext(tx, elements, layer, q_id, q_pt, c, ignore, res).await,
+			Self::Keep => Self::heuristic_keep(tx, elements, layer, c, res).await,
+			Self::ExtAndKeep => {
+				Self::heuristic_ext_keep(tx, elements, layer, q_id, q_pt, c, ignore, res).await
+			}
 		}
 	}
 
-	fn heuristic<S>(
+	async fn heuristic<S>(
+		tx: &Transaction,
 		elements: &HnswElements,
 		layer: &HnswLayer<S>,
 		mut c: DoublePriorityQueue,
 		res: &mut S,
-	) where
-		S: DynamicSet<ElementId>,
+	) -> Result<(), Error>
+	where
+		S: DynamicSet,
 	{
 		let m_max = layer.m_max();
 		if c.len() <= m_max {
 			c.to_dynamic_set(res);
 		} else {
 			while let Some((e_dist, e_id)) = c.pop_first() {
-				if Self::is_closer(elements, e_dist, e_id, res) && res.len() == m_max {
+				if Self::is_closer(tx, elements, e_dist, e_id, res).await? && res.len() == m_max {
 					break;
 				}
 			}
 		}
+		Ok(())
 	}
 
-	fn heuristic_keep<S>(
+	async fn heuristic_keep<S>(
+		tx: &Transaction,
 		elements: &HnswElements,
 		layer: &HnswLayer<S>,
 		mut c: DoublePriorityQueue,
 		res: &mut S,
-	) where
-		S: DynamicSet<ElementId>,
+	) -> Result<(), Error>
+	where
+		S: DynamicSet,
 	{
 		let m_max = layer.m_max();
 		if c.len() <= m_max {
 			c.to_dynamic_set(res);
-			return;
+			return Ok(());
 		}
 		let mut pruned = Vec::new();
 		while let Some((e_dist, e_id)) = c.pop_first() {
-			if Self::is_closer(elements, e_dist, e_id, res) {
+			if Self::is_closer(tx, elements, e_dist, e_id, res).await? {
 				if res.len() == m_max {
 					break;
 				}
@@ -98,25 +111,32 @@ impl Heuristic {
 				res.insert(e_id);
 			}
 		}
+		Ok(())
 	}
 
-	fn extend_candidates<S>(
+	async fn extend_candidates<S>(
+		tx: &Transaction,
 		elements: &HnswElements,
 		layer: &HnswLayer<S>,
 		q_id: ElementId,
 		q_pt: &SharedVector,
 		c: &mut DoublePriorityQueue,
-	) where
-		S: DynamicSet<ElementId>,
+		ignore: Option<ElementId>,
+	) -> Result<(), Error>
+	where
+		S: DynamicSet,
 	{
 		let m_max = layer.m_max();
 		let mut ex = c.to_set();
+		if let Some(i) = ignore {
+			ex.insert(i);
+		}
 		let mut ext = Vec::with_capacity(m_max.min(c.len()));
 		for (_, e_id) in c.to_vec().into_iter() {
 			if let Some(e_conn) = layer.get_edges(&e_id) {
 				for &e_adj in e_conn.iter() {
 					if e_adj != q_id && ex.insert(e_adj) {
-						if let Some(d) = elements.get_distance(q_pt, &e_adj) {
+						if let Some(d) = elements.get_distance(tx, q_pt, &e_adj).await? {
 							ext.push((d, e_adj));
 						}
 					}
@@ -129,52 +149,67 @@ impl Heuristic {
 		for (e_dist, e_id) in ext {
 			c.push(e_dist, e_id);
 		}
+		Ok(())
 	}
 
-	fn heuristic_ext<S>(
+	#[allow(clippy::too_many_arguments)]
+	async fn heuristic_ext<S>(
+		tx: &Transaction,
 		elements: &HnswElements,
 		layer: &HnswLayer<S>,
 		q_id: ElementId,
 		q_pt: &SharedVector,
 		mut c: DoublePriorityQueue,
+		ignore: Option<ElementId>,
 		res: &mut S,
-	) where
-		S: DynamicSet<ElementId>,
-	{
-		Self::extend_candidates(elements, layer, q_id, q_pt, &mut c);
-		Self::heuristic(elements, layer, c, res)
-	}
-
-	fn heuristic_ext_keep<S>(
-		elements: &HnswElements,
-		layer: &HnswLayer<S>,
-		q_id: ElementId,
-		q_pt: &SharedVector,
-		mut c: DoublePriorityQueue,
-		res: &mut S,
-	) where
-		S: DynamicSet<ElementId>,
-	{
-		Self::extend_candidates(elements, layer, q_id, q_pt, &mut c);
-		Self::heuristic_keep(elements, layer, c, res)
-	}
-
-	fn is_closer<S>(elements: &HnswElements, e_dist: f64, e_id: ElementId, r: &mut S) -> bool
+	) -> Result<(), Error>
 	where
-		S: DynamicSet<ElementId>,
+		S: DynamicSet,
 	{
-		if let Some(current_vec) = elements.get_vector(&e_id) {
+		Self::extend_candidates(tx, elements, layer, q_id, q_pt, &mut c, ignore).await?;
+		Self::heuristic(tx, elements, layer, c, res).await
+	}
+
+	#[allow(clippy::too_many_arguments)]
+	async fn heuristic_ext_keep<S>(
+		tx: &Transaction,
+		elements: &HnswElements,
+		layer: &HnswLayer<S>,
+		q_id: ElementId,
+		q_pt: &SharedVector,
+		mut c: DoublePriorityQueue,
+		ignore: Option<ElementId>,
+		res: &mut S,
+	) -> Result<(), Error>
+	where
+		S: DynamicSet,
+	{
+		Self::extend_candidates(tx, elements, layer, q_id, q_pt, &mut c, ignore).await?;
+		Self::heuristic_keep(tx, elements, layer, c, res).await
+	}
+
+	async fn is_closer<S>(
+		tx: &Transaction,
+		elements: &HnswElements,
+		e_dist: f64,
+		e_id: ElementId,
+		r: &mut S,
+	) -> Result<bool, Error>
+	where
+		S: DynamicSet,
+	{
+		if let Some(current_vec) = elements.get_vector(tx, &e_id).await? {
 			for r_id in r.iter() {
-				if let Some(r_dist) = elements.get_distance(current_vec, r_id) {
+				if let Some(r_dist) = elements.get_distance(tx, &current_vec, r_id).await? {
 					if e_dist > r_dist {
-						return false;
+						return Ok(false);
 					}
 				}
 			}
 			r.insert(e_id);
-			true
+			Ok(true)
 		} else {
-			false
+			Ok(false)
 		}
 	}
 }

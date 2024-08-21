@@ -110,6 +110,7 @@ pub use self::geometry::Geometry;
 pub use self::graph::Graph;
 pub use self::group::Group;
 pub use self::group::Groups;
+pub use self::id::range::IdRange;
 pub use self::id::Id;
 pub use self::ident::Ident;
 pub use self::idiom::Idiom;

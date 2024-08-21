@@ -1,13 +1,12 @@
-use super::{
-	deserialize, serialize, HandleResult, PendingRequest, ReplayMethod, RequestEffect, PATH,
-};
+use super::{HandleResult, PendingRequest, ReplayMethod, RequestEffect, PATH};
 use crate::api::conn::DbResponse;
 use crate::api::conn::Route;
 use crate::api::conn::Router;
 use crate::api::conn::{Command, Connection, RequestData};
 use crate::api::engine::remote::ws::Client;
-use crate::api::engine::remote::ws::Response;
 use crate::api::engine::remote::ws::PING_INTERVAL;
+use crate::api::engine::remote::Response;
+use crate::api::engine::remote::{deserialize, serialize};
 use crate::api::err::Error;
 use crate::api::method::BoxFuture;
 use crate::api::opt::Endpoint;
@@ -15,10 +14,10 @@ use crate::api::ExtraFeatures;
 use crate::api::OnceLockExt;
 use crate::api::Result;
 use crate::api::Surreal;
-use crate::engine::remote::ws::Data;
+use crate::engine::remote::Data;
 use crate::engine::IntervalStream;
 use crate::opt::WaitFor;
-use crate::sql::Value;
+use crate::{Action, Notification};
 use channel::{Receiver, Sender};
 use futures::stream::{SplitSink, SplitStream};
 use futures::FutureExt;
@@ -37,6 +36,7 @@ use std::sync::atomic::AtomicI64;
 use std::sync::Arc;
 use std::sync::OnceLock;
 use std::time::Duration;
+use surrealdb_core::sql::Value as CoreValue;
 use tokio::sync::watch;
 use trice::Instant;
 use wasm_bindgen_futures::spawn_local;
@@ -138,7 +138,7 @@ async fn router_handle_request(
 			ref notification_sender,
 		} => {
 			state.live_queries.insert(*uuid, notification_sender.clone());
-			if response.send(Ok(DbResponse::Other(Value::None))).await.is_err() {
+			if response.send(Ok(DbResponse::Other(CoreValue::None))).await.is_err() {
 				trace!("Receiver dropped");
 			}
 			// There is nothing to send to the server here
@@ -226,22 +226,24 @@ async fn router_handle_response(
 									RequestEffect::None => {}
 									RequestEffect::Insert => {
 										// For insert, we need to flatten single responses in an array
-										if let Ok(Data::Other(Value::Array(value))) =
+										if let Ok(Data::Other(CoreValue::Array(value))) =
 											response.result
 										{
 											if value.len() == 1 {
 												let _ = pending
 													.response_channel
-													.send(DbResponse::from(Ok(Data::Other(
-														value.into_iter().next().unwrap(),
-													))))
+													.send(DbResponse::from_server_result(Ok(
+														Data::Other(
+															value.into_iter().next().unwrap(),
+														),
+													)))
 													.await;
 											} else {
 												let _ = pending
 													.response_channel
-													.send(DbResponse::from(Ok(Data::Other(
-														Value::Array(value),
-													))))
+													.send(DbResponse::from_server_result(Ok(
+														Data::Other(CoreValue::Array(value)),
+													)))
 													.await;
 											}
 											return HandleResult::Ok;
@@ -261,7 +263,7 @@ async fn router_handle_response(
 								}
 								let _res = pending
 									.response_channel
-									.send(DbResponse::from(response.result))
+									.send(DbResponse::from_server_result(response.result))
 									.await;
 							} else {
 								warn!("got response for request with id '{id}', which was not in pending requests")
@@ -275,6 +277,12 @@ async fn router_handle_response(
 							// Check if this live query is registered
 							if let Some(sender) = state.live_queries.get(&live_query_id) {
 								// Send the notification back to the caller or kill live query if the receiver is already dropped
+								let notification = Notification {
+									query_id: notification.id.0,
+									action: Action::from_core(notification.action),
+									data: notification.result,
+								};
+
 								if sender.send(notification).await.is_err() {
 									state.live_queries.remove(&live_query_id);
 									let kill = {
@@ -305,7 +313,7 @@ async fn router_handle_response(
 			#[derive(Deserialize)]
 			#[revisioned(revision = 1)]
 			struct Response {
-				id: Option<Value>,
+				id: Option<CoreValue>,
 			}
 
 			// Let's try to find out the ID of the response that failed to deserialise
@@ -315,7 +323,7 @@ async fn router_handle_response(
 				}) = deserialize(&mut &binary[..], endpoint.supports_revision)
 				{
 					// Return an error if an ID was returned
-					if let Some(Ok(id)) = id.map(Value::coerce_to_i64) {
+					if let Some(Ok(id)) = id.map(CoreValue::coerce_to_i64) {
 						if let Some(req) = state.pending_requests.remove(&id) {
 							let _res = req.response_channel.send(Err(error)).await;
 						} else {
@@ -435,7 +443,7 @@ pub(crate) async fn run_router(
 	let ping = {
 		let mut request = BTreeMap::new();
 		request.insert("method".to_owned(), "ping".into());
-		let value = Value::from(request);
+		let value = CoreValue::from(request);
 		let value = serialize(&value, endpoint.supports_revision).unwrap();
 		Message::Binary(value)
 	};
