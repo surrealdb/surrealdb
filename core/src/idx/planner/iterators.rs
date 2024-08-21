@@ -329,10 +329,10 @@ impl IndexUnionThingIterator {
 		db: &str,
 		ix_what: &Ident,
 		ix_name: &Ident,
-		a: &Array,
+		a: &Value,
 	) -> Self {
 		// We create a VecDeque to hold the prefix keys (begin and end) for each value in the array.
-		let mut values: VecDeque<(Vec<u8>, Vec<u8>)> =
+		let mut values: VecDeque<(Vec<u8>, Vec<u8>)> = if let Value::Array(a) = a {
 			a.0.iter()
 				.map(|v| {
 					let a = Array::from(v.clone());
@@ -340,7 +340,10 @@ impl IndexUnionThingIterator {
 					let end = Index::prefix_ids_end(ns, db, ix_what, ix_name, &a);
 					(beg, end)
 				})
-				.collect();
+				.collect()
+		} else {
+			VecDeque::with_capacity(0)
+		};
 		let current = values.pop_front();
 		Self {
 			irf,
@@ -637,17 +640,20 @@ impl UniqueUnionThingIterator {
 		irf: IteratorRef,
 		opt: &Options,
 		ix: &DefineIndexStatement,
-		a: &Array,
+		a: &Value,
 	) -> Result<Self, Error> {
 		// We create a VecDeque to hold the key for each value in the array.
-		let keys: VecDeque<Key> =
+		let keys: VecDeque<Key> = if let Value::Array(a) = a {
 			a.0.iter()
 				.map(|v| -> Result<Key, Error> {
 					let a = Array::from(v.clone());
 					let key = Index::new(opt.ns()?, opt.db()?, &ix.what, &ix.name, &a, None).into();
 					Ok(key)
 				})
-				.collect::<Result<VecDeque<Key>, Error>>()?;
+				.collect::<Result<VecDeque<Key>, Error>>()?
+		} else {
+			VecDeque::with_capacity(0)
+		};
 		Ok(Self {
 			irf,
 			keys,

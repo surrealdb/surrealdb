@@ -2624,6 +2624,12 @@ async fn select_from_standard_index_limit() -> Result<(), Error> {
 		"[
 				{
 					detail: {
+						plan: {
+							ascending: true,
+							index: 'time',
+							limit: 3,
+							operator: 'OrderLimit'
+						},
 						table: 'session'
 					},
 					operation: 'Iterate Index'

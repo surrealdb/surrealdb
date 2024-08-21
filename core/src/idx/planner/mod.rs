@@ -26,6 +26,7 @@ pub(crate) struct QueryPlanner {
 	with: Option<Arc<With>>,
 	cond: Option<Arc<Cond>>,
 	order: Option<Arc<Orders>>,
+	limit: Option<usize>,
 	/// There is one executor per table
 	executors: HashMap<String, QueryExecutor>,
 	requires_distinct: bool,
@@ -40,12 +41,14 @@ impl QueryPlanner {
 		with: Option<Arc<With>>,
 		cond: Option<Arc<Cond>>,
 		order: Option<Arc<Orders>>,
+		limit: Option<usize>,
 	) -> Self {
 		Self {
 			opt,
 			with,
 			cond,
 			order,
+			limit,
 			executors: HashMap::default(),
 			requires_distinct: false,
 			fallbacks: vec![],
@@ -70,6 +73,7 @@ impl QueryPlanner {
 			self.cond.as_ref().map(|w| w.as_ref()),
 			self.with.as_ref().map(|c| c.as_ref()),
 			self.order.as_ref().map(|o| o.as_ref()),
+			self.limit,
 		)
 		.await?;
 
@@ -89,17 +93,12 @@ impl QueryPlanner {
 			tree.root,
 			self.with.as_ref().map(|w| w.as_ref()),
 			tree.with_indexes,
-			tree.indexed_order,
 		)? {
 			Plan::SingleIndex(exp, io) => {
 				if io.require_distinct() {
 					self.requires_distinct = true;
 				}
 				let ir = exe.add_iterator(IteratorEntry::Single(exp, io));
-				self.add(t.clone(), Some(ir), exe, it);
-			}
-			Plan::SortedSingleIndex(ir, asc, limit) => {
-				let ir = exe.add_iterator(IteratorEntry::SingleSorted(ir, asc, limit));
 				self.add(t.clone(), Some(ir), exe, it);
 			}
 			Plan::MultiIndex(non_range_indexes, ranges_indexes) => {

@@ -68,23 +68,27 @@ impl SelectStatement {
 	) -> Result<Value, Error> {
 		// Valid options?
 		opt.valid_for_db()?;
+		// Assign the statement
+		let stm = Statement::from(self);
 		// Create a new iterator
 		let mut i = Iterator::new();
+		// Extract the limit
+		let limit = i.setup_limit(stk, ctx, opt, &stm).await?;
 		// Ensure futures are stored and the version is set if specified
 		let version = self.version.as_ref().map(|v| v.to_u64());
 		let opt =
 			Arc::new(opt.new_with_futures(false).with_projections(true).with_version(version));
-		//;
 		// Get a query planner
 		let mut planner = QueryPlanner::new(
 			opt.clone(),
 			self.with.as_ref().cloned().map(|w| w.into()),
 			self.cond.as_ref().cloned().map(|c| c.into()),
 			self.order.as_ref().cloned().map(|o| o.into()),
+			limit,
 		);
 		// Used for ONLY: is the limit 1?
-		let limit_is_one_or_zero = match &self.limit {
-			Some(l) => l.process(stk, ctx, &opt, doc).await? <= 1,
+		let limit_is_one_or_zero = match limit {
+			Some(l) => l <= 1,
 			_ => false,
 		};
 		// Fail for multiple targets without a limit
@@ -148,8 +152,6 @@ impl SelectStatement {
 		}
 		// Create a new context
 		let mut ctx = MutableContext::new(ctx);
-		// Assign the statement
-		let stm = Statement::from(self);
 		// Add query executors if any
 		if planner.has_executors() {
 			ctx.set_query_planner(planner);

@@ -24,7 +24,6 @@ pub(super) struct Tree {
 	pub(super) knn_expressions: KnnExpressions,
 	pub(super) knn_brute_force_expressions: KnnBruteForceExpressions,
 	pub(super) knn_condition: Option<Cond>,
-	pub(super) indexed_order: Option<(IndexRef, bool)>,
 }
 
 impl Tree {
@@ -38,15 +37,11 @@ impl Tree {
 		cond: Option<&Cond>,
 		with: Option<&With>,
 		order: Option<&Orders>,
+		limit: Option<usize>,
 	) -> Result<Self, Error> {
-		let mut b = TreeBuilder::new(ctx, opt, table, with);
+		let mut b = TreeBuilder::new(ctx, opt, table, with, order, limit);
 		if let Some(cond) = cond {
 			b.eval_cond(stk, cond).await?;
-		}
-		if let Some(orders) = order {
-			if let Some(order) = orders.0.get(0) {
-				b.eval_indexed_order(order).await?;
-			}
 		}
 		Ok(Self {
 			root: b.root,
@@ -55,7 +50,6 @@ impl Tree {
 			knn_expressions: b.knn_expressions,
 			knn_brute_force_expressions: b.knn_brute_force_expressions,
 			knn_condition: b.knn_condition,
-			indexed_order: b.indexed_order,
 		})
 	}
 }
@@ -65,6 +59,8 @@ struct TreeBuilder<'a> {
 	opt: &'a Options,
 	table: &'a Table,
 	with: Option<&'a With>,
+	first_order: Option<&'a Order>,
+	limit: Option<usize>,
 	schemas: HashMap<Table, SchemaCache>,
 	idioms_indexes: HashMap<Table, HashMap<Idiom, LocalIndexRefs>>,
 	resolved_expressions: HashMap<Arc<Expression>, ResolvedExpression>,
@@ -77,7 +73,6 @@ struct TreeBuilder<'a> {
 	group_sequence: GroupRef,
 	root: Option<Node>,
 	knn_condition: Option<Cond>,
-	indexed_order: Option<(IndexRef, bool)>,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
@@ -90,16 +85,30 @@ pub(super) type LocalIndexRefs = Vec<IndexRef>;
 pub(super) type RemoteIndexRefs = Arc<Vec<(Idiom, LocalIndexRefs)>>;
 
 impl<'a> TreeBuilder<'a> {
-	fn new(ctx: &'a Context, opt: &'a Options, table: &'a Table, with: Option<&'a With>) -> Self {
+	fn new(
+		ctx: &'a Context,
+		opt: &'a Options,
+		table: &'a Table,
+		with: Option<&'a With>,
+		orders: Option<&'a Orders>,
+		limit: Option<usize>,
+	) -> Self {
 		let with_indexes = match with {
 			Some(With::Index(ixs)) => Vec::with_capacity(ixs.len()),
 			_ => vec![],
+		};
+		let first_order = if let Some(o) = orders {
+			o.0.get(0)
+		} else {
+			None
 		};
 		Self {
 			ctx,
 			opt,
 			table,
 			with,
+			first_order,
+			limit,
 			schemas: Default::default(),
 			idioms_indexes: Default::default(),
 			resolved_expressions: Default::default(),
@@ -112,7 +121,6 @@ impl<'a> TreeBuilder<'a> {
 			group_sequence: 0,
 			root: None,
 			knn_condition: None,
-			indexed_order: None,
 		}
 	}
 
@@ -136,30 +144,6 @@ impl<'a> TreeBuilder<'a> {
 		} else {
 			KnnConditionRewriter::build(&self.knn_expressions, cond)
 		};
-		Ok(())
-	}
-
-	async fn eval_indexed_order(&mut self, order: &Order) -> Result<(), Error> {
-		if order.random {
-			return Ok(());
-		}
-		if let Node::IndexedField(_, irs) = self.resolve_idiom(order).await? {
-			for ir in irs {
-				let valid = if let Some(ix_def) = self.index_map.definitions.get(ir as usize) {
-					match ix_def.index {
-						Index::Idx => true,
-						Index::Uniq => true,
-						_ => false,
-					}
-				} else {
-					false
-				};
-				if valid {
-					self.indexed_order = Some((ir, order.direction));
-					break;
-				}
-			}
-		}
 		Ok(())
 	}
 
@@ -194,7 +178,7 @@ impl<'a> TreeBuilder<'a> {
 	async fn compute(&self, stk: &mut Stk, v: &Value, n: Node) -> Result<Node, Error> {
 		Ok(if n == Node::Computable {
 			match v.compute(stk, self.ctx, self.opt, None).await {
-				Ok(v) => Node::Computed(Arc::new(v)),
+				Ok(v) => Node::computed_value(v),
 				Err(_) => Node::Unsupported(format!("Unsupported value: {}", v)),
 			}
 		} else {
@@ -207,7 +191,7 @@ impl<'a> TreeBuilder<'a> {
 		for v in &a.0 {
 			values.push(stk.run(|stk| v.compute(stk, self.ctx, self.opt, None)).await?);
 		}
-		Ok(Node::Computed(Arc::new(Value::Array(Array::from(values)))))
+		Ok(Node::ComputedValue(Arc::new(Value::Array(Array::from(values)))))
 	}
 
 	async fn eval_idiom(
@@ -439,8 +423,8 @@ impl<'a> TreeBuilder<'a> {
 		for ir in irs {
 			if let Some(ix) = self.index_map.definitions.get(*ir as usize) {
 				let op = match &ix.index {
-					Index::Idx => Self::eval_index_operator(op, n, p),
-					Index::Uniq => Self::eval_index_operator(op, n, p),
+					Index::Idx => self.eval_index_operator(op, id, n, p),
+					Index::Uniq => self.eval_index_operator(op, id, n, p),
 					Index::Search {
 						..
 					} => Self::eval_matches_operator(op, n),
@@ -472,7 +456,7 @@ impl<'a> TreeBuilder<'a> {
 	fn eval_matches_operator(op: &Operator, n: &Node) -> Option<IndexOperator> {
 		if let Some(v) = n.is_computed() {
 			if let Operator::Matches(mr) = op {
-				return Some(IndexOperator::Matches(v.clone().to_raw_string(), *mr));
+				return Some(IndexOperator::Matches(v.to_raw_string(), *mr));
 			}
 		}
 		None
@@ -485,7 +469,7 @@ impl<'a> TreeBuilder<'a> {
 		n: &Node,
 	) -> Result<Option<IndexOperator>, Error> {
 		if let Operator::Knn(k, None) = op {
-			if let Node::Computed(v) = n {
+			if let Node::ComputedValue(v) = n {
 				let vec: Arc<Vec<Number>> = Arc::new(v.as_ref().try_into()?);
 				self.knn_expressions.insert(exp.clone());
 				return Ok(Some(IndexOperator::Knn(vec, *k)));
@@ -501,7 +485,7 @@ impl<'a> TreeBuilder<'a> {
 		n: &Node,
 	) -> Result<Option<IndexOperator>, Error> {
 		if let Operator::Ann(k, ef) = op {
-			if let Node::Computed(v) = n {
+			if let Node::ComputedValue(v) = n {
 				let vec: Arc<Vec<Number>> = Arc::new(v.as_ref().try_into()?);
 				self.knn_expressions.insert(exp.clone());
 				return Ok(Some(IndexOperator::Ann(vec, *k, *ef)));
@@ -517,7 +501,7 @@ impl<'a> TreeBuilder<'a> {
 		exp: &Arc<Expression>,
 	) -> Result<(), Error> {
 		if let Operator::Knn(k, Some(d)) = exp.operator() {
-			if let Node::Computed(v) = val {
+			if let Node::ComputedValue(v) = val {
 				let vec: Arc<Vec<Number>> = Arc::new(v.as_ref().try_into()?);
 				self.knn_expressions.insert(exp.clone());
 				self.knn_brute_force_expressions.insert(
@@ -529,22 +513,32 @@ impl<'a> TreeBuilder<'a> {
 		Ok(())
 	}
 
-	fn eval_index_operator(op: &Operator, n: &Node, p: IdiomPosition) -> Option<IndexOperator> {
+	fn eval_index_operator(
+		&self,
+		op: &Operator,
+		id: &Idiom,
+		n: &Node,
+		p: IdiomPosition,
+	) -> Option<IndexOperator> {
 		if let Some(v) = n.is_computed() {
 			match (op, v, p) {
-				(Operator::Equal, v, _) => Some(IndexOperator::Equality(v.clone())),
-				(Operator::Exact, v, _) => Some(IndexOperator::Exactness(v.clone())),
+				(Operator::Equal, v, _) => return Some(IndexOperator::Equality(v)),
+				(Operator::Exact, v, _) => return Some(IndexOperator::Exactness(v)),
 				(Operator::Contain, v, IdiomPosition::Left) => {
-					Some(IndexOperator::Equality(v.clone()))
+					return Some(IndexOperator::Equality(v))
 				}
 				(Operator::Inside, v, IdiomPosition::Right) => {
-					Some(IndexOperator::Equality(v.clone()))
+					return Some(IndexOperator::Equality(v))
 				}
 				(
 					Operator::ContainAny | Operator::ContainAll | Operator::Inside,
-					Value::Array(a),
+					v,
 					IdiomPosition::Left,
-				) => Some(IndexOperator::Union(a.clone())),
+				) => {
+					if let Value::Array(_) = v.as_ref() {
+						return Some(IndexOperator::Union(v));
+					}
+				}
 				(
 					Operator::LessThan
 					| Operator::LessThanOrEqual
@@ -552,12 +546,20 @@ impl<'a> TreeBuilder<'a> {
 					| Operator::MoreThanOrEqual,
 					v,
 					p,
-				) => Some(IndexOperator::RangePart(p.transform(op), v.clone())),
-				_ => None,
+				) => return Some(IndexOperator::RangePart(p.transform(op), v)),
+				_ => {}
 			}
-		} else {
-			None
+		} else if let Some(_) = n.is_null_or_none() {
+			match (op, self.first_order, self.limit) {
+				(Operator::NotEqual, Some(o), Some(l)) => {
+					if !o.random && o.order.eq(id) {
+						return Some(IndexOperator::OrderLimit(o.direction, l));
+					}
+				}
+				_ => {}
+			}
 		}
+		None
 	}
 
 	async fn eval_subquery(&mut self, stk: &mut Stk, s: &Subquery) -> Result<Node, Error> {
@@ -609,14 +611,30 @@ pub(super) enum Node {
 	RecordField(Idiom, RecordOptions),
 	NonIndexedField(Idiom),
 	Computable,
-	Computed(Arc<Value>),
+	ComputedValue(Arc<Value>),
+	NullOrNoneValue(Arc<Value>),
 	Unsupported(String),
 }
 
 impl Node {
-	pub(super) fn is_computed(&self) -> Option<&Value> {
-		if let Node::Computed(v) = self {
-			Some(v)
+	fn computed_value(v: Value) -> Self {
+		if v.is_none_or_null() {
+			Self::NullOrNoneValue(v.into())
+		} else {
+			Self::ComputedValue(v.into())
+		}
+	}
+	pub(super) fn is_null_or_none(&self) -> Option<Arc<Value>> {
+		if let Self::NullOrNoneValue(v) = self {
+			Some(v.clone())
+		} else {
+			None
+		}
+	}
+
+	pub(super) fn is_computed(&self) -> Option<Arc<Value>> {
+		if let Self::ComputedValue(v) = self {
+			Some(v.clone())
 		} else {
 			None
 		}
@@ -626,17 +644,17 @@ impl Node {
 		&self,
 	) -> Option<(&Idiom, LocalIndexRefs, Option<RemoteIndexRefs>)> {
 		match self {
-			Node::IndexedField(id, irs) => Some((id, irs.clone(), None)),
-			Node::RecordField(id, ro) => Some((id, ro.locals.clone(), Some(ro.remotes.clone()))),
+			Self::IndexedField(id, irs) => Some((id, irs.clone(), None)),
+			Self::RecordField(id, ro) => Some((id, ro.locals.clone(), Some(ro.remotes.clone()))),
 			_ => None,
 		}
 	}
 
 	pub(super) fn is_field(&self) -> Option<&Idiom> {
 		match self {
-			Node::IndexedField(id, _) => Some(id),
-			Node::RecordField(id, _) => Some(id),
-			Node::NonIndexedField(id) => Some(id),
+			Self::IndexedField(id, _) => Some(id),
+			Self::RecordField(id, _) => Some(id),
+			Self::NonIndexedField(id) => Some(id),
 			_ => None,
 		}
 	}

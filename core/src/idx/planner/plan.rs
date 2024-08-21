@@ -33,7 +33,6 @@ impl PlanBuilder {
 		root: Option<Node>,
 		with: Option<&With>,
 		with_indexes: Vec<IndexRef>,
-		indexed_order: Option<(IndexRef, bool)>,
 	) -> Result<Plan, Error> {
 		if let Some(With::NoIndex) = with {
 			return Ok(Plan::TableIterator(Some("WITH NOINDEX".to_string())));
@@ -164,13 +163,11 @@ pub(super) enum Plan {
 	MultiIndex(Vec<(Arc<Expression>, IndexOption)>, Vec<(IndexRef, UnionRangeQueryBuilder)>),
 	/// Index scan for record matching a given range
 	SingleIndexRange(IndexRef, UnionRangeQueryBuilder),
-	/// Sorted index scan without limit
-	SortedSingleIndex(IndexRef, bool, usize),
 }
 
 #[derive(Debug, Eq, PartialEq, Hash, Clone)]
 pub(super) struct IndexOption {
-	/// A reference o the index definition
+	/// A reference to the index definition
 	ix_ref: IndexRef,
 	id: Idiom,
 	id_pos: IdiomPosition,
@@ -179,14 +176,15 @@ pub(super) struct IndexOption {
 
 #[derive(Debug, Eq, PartialEq, Hash)]
 pub(super) enum IndexOperator {
-	Equality(Value),
-	Exactness(Value),
-	Union(Array),
+	Equality(Arc<Value>),
+	Exactness(Arc<Value>),
+	Union(Arc<Value>),
 	Join(Vec<IndexOption>),
-	RangePart(Operator, Value),
+	RangePart(Operator, Arc<Value>),
 	Matches(String, Option<MatchRef>),
 	Knn(Arc<Vec<Number>>, u32),
 	Ann(Arc<Vec<Number>>, u32, u32),
+	OrderLimit(bool, usize),
 }
 
 impl IndexOption {
@@ -247,9 +245,9 @@ impl IndexOption {
 				e.insert("operator", Value::from(Operator::Exact.to_string()));
 				e.insert("value", Self::reduce_array(v));
 			}
-			IndexOperator::Union(a) => {
+			IndexOperator::Union(v) => {
 				e.insert("operator", Value::from("union"));
-				e.insert("value", Value::Array(a.clone()));
+				e.insert("value", v.as_ref().clone());
 			}
 			IndexOperator::Join(ios) => {
 				e.insert("operator", Value::from("join"));
@@ -266,7 +264,7 @@ impl IndexOption {
 			}
 			IndexOperator::RangePart(op, v) => {
 				e.insert("operator", Value::from(op.to_string()));
-				e.insert("value", v.to_owned());
+				e.insert("value", v.as_ref().to_owned());
 			}
 			IndexOperator::Knn(a, k) => {
 				let op = Value::from(Operator::Knn(*k, None).to_string());
@@ -279,6 +277,11 @@ impl IndexOption {
 				let val = Value::Array(Array::from(a.as_ref().clone()));
 				e.insert("operator", op);
 				e.insert("value", val);
+			}
+			IndexOperator::OrderLimit(asc, limit) => {
+				e.insert("operator", Value::from("OrderLimit"));
+				e.insert("ascending", Value::from(*asc));
+				e.insert("limit", Value::from(*limit));
 			}
 		};
 		Value::from(e)
@@ -448,14 +451,14 @@ mod tests {
 			1,
 			Idiom::parse("test"),
 			IdiomPosition::Right,
-			IndexOperator::Equality(Value::Array(Array::from(vec!["test"]))),
+			IndexOperator::Equality(Value::Array(Array::from(vec!["test"])).into()),
 		);
 
 		let io2 = IndexOption::new(
 			1,
 			Idiom::parse("test"),
 			IdiomPosition::Right,
-			IndexOperator::Equality(Value::Array(Array::from(vec!["test"]))),
+			IndexOperator::Equality(Value::Array(Array::from(vec!["test"])).into()),
 		);
 
 		set.insert(io1);

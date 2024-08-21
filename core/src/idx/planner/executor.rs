@@ -82,7 +82,6 @@ impl From<InnerQueryExecutor> for QueryExecutor {
 pub(super) enum IteratorEntry {
 	Single(Arc<Expression>, IndexOption),
 	Range(HashSet<Arc<Expression>>, IndexRef, RangeValue, RangeValue),
-	SingleSorted(IndexRef, bool, usize),
 }
 
 impl IteratorEntry {
@@ -96,15 +95,6 @@ impl IteratorEntry {
 				}
 				e.insert("from", Value::from(from));
 				e.insert("to", Value::from(to));
-				Value::from(Object::from(e))
-			}
-			Self::SingleSorted(ir, asc, limit) => {
-				let mut e = HashMap::default();
-				if let Some(ix) = ix_def.get(*ir as usize) {
-					e.insert("index", Value::from(ix.name.0.to_owned()));
-				};
-				e.insert("ascending", Value::from(*asc));
-				e.insert("limit", Value::from(*limit));
 				Value::from(Object::from(e))
 			}
 		}
@@ -361,9 +351,6 @@ impl QueryExecutor {
 				IteratorEntry::Single(_, io) => self.new_single_iterator(opt, irf, io).await,
 				IteratorEntry::Range(_, ixr, from, to) => {
 					Ok(self.new_range_iterator(opt, *ixr, from, to)?)
-				}
-				IteratorEntry::SingleSorted(irx, asc, limit) => {
-					self.new_sorted_single_iterator(*irx, *asc, *limit).await
 				}
 			}
 		} else {

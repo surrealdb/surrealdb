@@ -364,17 +364,19 @@ impl Iterator {
 	}
 
 	#[inline]
-	async fn setup_limit(
+	pub(crate) async fn setup_limit(
 		&mut self,
 		stk: &mut Stk,
 		ctx: &Context,
 		opt: &Options,
 		stm: &Statement<'_>,
-	) -> Result<(), Error> {
-		if let Some(v) = stm.limit() {
-			self.limit = Some(v.process(stk, ctx, opt, None).await?);
+	) -> Result<Option<usize>, Error> {
+		if self.limit.is_none() {
+			if let Some(v) = stm.limit() {
+				self.limit = Some(v.process(stk, ctx, opt, None).await?);
+			}
 		}
-		Ok(())
+		Ok(self.limit)
 	}
 
 	#[inline]
