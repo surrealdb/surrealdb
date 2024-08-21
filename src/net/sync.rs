@@ -19,7 +19,7 @@ async fn load(
 	// Get the datastore reference
 	let db = &state.datastore;
 	// Check if capabilities allow querying the requested HTTP route
-	if !db.allows_http_route(&RouteTarget::SyncLoad) {
+	if !db.allows_http_route(&RouteTarget::Sync) {
 		return Err(Error::OperationForbidden);
 	}
 
@@ -32,7 +32,7 @@ async fn save(
 	// Get the datastore reference
 	let db = &state.datastore;
 	// Check if capabilities allow querying the requested HTTP route
-	if !db.allows_http_route(&RouteTarget::SyncSave) {
+	if !db.allows_http_route(&RouteTarget::Sync) {
 		return Err(Error::OperationForbidden);
 	}
 

@@ -75,7 +75,7 @@ async fn select_all(
 	// Get the datastore reference
 	let db = &state.datastore;
 	// Check if capabilities allow querying the requested HTTP route
-	if !db.allows_http_route(&RouteTarget::KeyAll) {
+	if !db.allows_http_route(&RouteTarget::Key) {
 		return Err(Error::OperationForbidden);
 	}
 	// Ensure a NS and DB are set
@@ -121,7 +121,7 @@ async fn create_all(
 	// Get the datastore reference
 	let db = &state.datastore;
 	// Check if capabilities allow querying the requested HTTP route
-	if !db.allows_http_route(&RouteTarget::KeyAll) {
+	if !db.allows_http_route(&RouteTarget::Key) {
 		return Err(Error::OperationForbidden);
 	}
 	// Ensure a NS and DB are set
@@ -170,7 +170,7 @@ async fn update_all(
 	// Get the datastore reference
 	let db = &state.datastore;
 	// Check if capabilities allow querying the requested HTTP route
-	if !db.allows_http_route(&RouteTarget::KeyAll) {
+	if !db.allows_http_route(&RouteTarget::Key) {
 		return Err(Error::OperationForbidden);
 	}
 	// Ensure a NS and DB are set
@@ -219,7 +219,7 @@ async fn modify_all(
 	// Get the datastore reference
 	let db = &state.datastore;
 	// Check if capabilities allow querying the requested HTTP route
-	if !db.allows_http_route(&RouteTarget::KeyAll) {
+	if !db.allows_http_route(&RouteTarget::Key) {
 		return Err(Error::OperationForbidden);
 	}
 	// Ensure a NS and DB are set
@@ -267,7 +267,7 @@ async fn delete_all(
 	// Get the datastore reference
 	let db = &state.datastore;
 	// Check if capabilities allow querying the requested HTTP route
-	if !db.allows_http_route(&RouteTarget::KeyAll) {
+	if !db.allows_http_route(&RouteTarget::Key) {
 		return Err(Error::OperationForbidden);
 	}
 	// Ensure a NS and DB are set
@@ -310,7 +310,7 @@ async fn select_one(
 	// Get the datastore reference
 	let db = &state.datastore;
 	// Check if capabilities allow querying the requested HTTP route
-	if !db.allows_http_route(&RouteTarget::KeyOne) {
+	if !db.allows_http_route(&RouteTarget::Key) {
 		return Err(Error::OperationForbidden);
 	}
 	// Ensure a NS and DB are set
@@ -359,7 +359,7 @@ async fn create_one(
 	// Get the datastore reference
 	let db = &state.datastore;
 	// Check if capabilities allow querying the requested HTTP route
-	if !db.allows_http_route(&RouteTarget::KeyOne) {
+	if !db.allows_http_route(&RouteTarget::Key) {
 		return Err(Error::OperationForbidden);
 	}
 	// Ensure a NS and DB are set
@@ -414,7 +414,7 @@ async fn update_one(
 	// Get the datastore reference
 	let db = &state.datastore;
 	// Check if capabilities allow querying the requested HTTP route
-	if !db.allows_http_route(&RouteTarget::KeyOne) {
+	if !db.allows_http_route(&RouteTarget::Key) {
 		return Err(Error::OperationForbidden);
 	}
 	// Ensure a NS and DB are set
@@ -469,7 +469,7 @@ async fn modify_one(
 	// Get the datastore reference
 	let db = &state.datastore;
 	// Check if capabilities allow querying the requested HTTP route
-	if !db.allows_http_route(&RouteTarget::KeyOne) {
+	if !db.allows_http_route(&RouteTarget::Key) {
 		return Err(Error::OperationForbidden);
 	}
 	// Ensure a NS and DB are set
@@ -522,7 +522,7 @@ async fn delete_one(
 	// Get the datastore reference
 	let db = &state.datastore;
 	// Check if capabilities allow querying the requested HTTP route
-	if !db.allows_http_route(&RouteTarget::KeyOne) {
+	if !db.allows_http_route(&RouteTarget::Key) {
 		return Err(Error::OperationForbidden);
 	}
 	// Ensure a NS and DB are set

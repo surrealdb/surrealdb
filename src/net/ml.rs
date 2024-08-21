@@ -46,7 +46,7 @@ async fn import(
 	// Get the datastore reference
 	let db = &state.datastore;
 	// Check if capabilities allow querying the requested HTTP route
-	if !db.allows_http_route(&RouteTarget::MlImport) {
+	if !db.allows_http_route(&RouteTarget::Ml) {
 		return Err(Error::OperationForbidden);
 	}
 	// Ensure a NS and DB are set
@@ -102,7 +102,7 @@ async fn export(
 	// Get the datastore reference
 	let db = &state.datastore;
 	// Check if capabilities allow querying the requested HTTP route
-	if !db.allows_http_route(&RouteTarget::MlExport) {
+	if !db.allows_http_route(&RouteTarget::Ml) {
 		return Err(Error::OperationForbidden);
 	}
 	// Ensure a NS and DB are set
