@@ -14,7 +14,6 @@ use crate::api::opt::auth::Root;
 use crate::api::opt::PatchOp;
 use crate::api::Response as QueryResponse;
 use crate::api::Surreal;
-use crate::Value;
 use once_cell::sync::Lazy;
 use protocol::Client;
 use protocol::Test;
@@ -170,7 +169,7 @@ async fn api() {
 	let _: Version = DB.version().await.unwrap();
 
 	// run
-	let _: Value = DB.run("foo", ()).await.unwrap();
+	let _: Option<User> = DB.run("foo").await.unwrap();
 }
 
 fn assert_send_sync(_: impl Send + Sync) {}
