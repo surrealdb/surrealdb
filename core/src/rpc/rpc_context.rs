@@ -22,7 +22,7 @@ pub trait RpcContext {
 	fn session_mut(&mut self) -> &mut Session;
 	fn vars(&self) -> &BTreeMap<String, Value>;
 	fn vars_mut(&mut self) -> &mut BTreeMap<String, Value>;
-	fn version_data(&self) -> impl Into<Data>;
+	fn version_data(&self) -> Data;
 
 	const LQ_SUPPORT: bool = false;
 	fn handle_live(&self, _lqid: &Uuid) -> impl std::future::Future<Output = ()> + Send {
@@ -98,7 +98,7 @@ pub trait RpcContext {
 	// Methods for authentication
 	// ------------------------------
 
-	async fn yuse(&mut self, params: Array) -> Result<impl Into<Data>, RpcError> {
+	async fn yuse(&mut self, params: Array) -> Result<Data, RpcError> {
 		// For both ns+db, string = change, null = unset, none = do nothing
 		// We need to be able to adjust either ns or db without affecting the other
 		// To be able to select a namespace, and then list resources in that namespace, as an example
@@ -123,10 +123,10 @@ pub trait RpcContext {
 			self.session_mut().db = Some(db.0);
 		}
 
-		Ok(Value::None)
+		Ok(Value::None.into())
 	}
 
-	async fn signup(&mut self, params: Array) -> Result<impl Into<Data>, RpcError> {
+	async fn signup(&mut self, params: Array) -> Result<Data, RpcError> {
 		let Ok(Value::Object(v)) = params.needs_one() else {
 			return Err(RpcError::InvalidParams);
 		};
@@ -139,11 +139,10 @@ pub trait RpcContext {
 				.map_err(Into::into);
 
 		*self.session_mut() = tmp_session;
-
-		out
+		out.map(Into::into)
 	}
 
-	async fn signin(&mut self, params: Array) -> Result<impl Into<Data>, RpcError> {
+	async fn signin(&mut self, params: Array) -> Result<Data, RpcError> {
 		let Ok(Value::Object(v)) = params.needs_one() else {
 			return Err(RpcError::InvalidParams);
 		};
@@ -154,29 +153,29 @@ pub trait RpcContext {
 				.map(Into::into)
 				.map_err(Into::into);
 		*self.session_mut() = tmp_session;
-		out
+		out.map(Into::into)
 	}
 
-	async fn invalidate(&mut self) -> Result<impl Into<Data>, RpcError> {
+	async fn invalidate(&mut self) -> Result<Data, RpcError> {
 		crate::iam::clear::clear(self.session_mut())?;
-		Ok(Value::None)
+		Ok(Value::None.into())
 	}
 
-	async fn authenticate(&mut self, params: Array) -> Result<impl Into<Data>, RpcError> {
+	async fn authenticate(&mut self, params: Array) -> Result<Data, RpcError> {
 		let Ok(Value::Strand(token)) = params.needs_one() else {
 			return Err(RpcError::InvalidParams);
 		};
 		let mut tmp_session = mem::take(self.session_mut());
 		crate::iam::verify::token(self.kvs(), &mut tmp_session, &token.0).await?;
 		*self.session_mut() = tmp_session;
-		Ok(Value::None)
+		Ok(Value::None.into())
 	}
 
 	// ------------------------------
 	// Methods for identification
 	// ------------------------------
 
-	async fn info(&self) -> Result<impl Into<Data>, RpcError> {
+	async fn info(&self) -> Result<Data, RpcError> {
 		// Specify the SQL query string
 		let sql = "SELECT * FROM $auth";
 		// Execute the query on the database
@@ -184,14 +183,14 @@ pub trait RpcContext {
 		// Extract the first value from the result
 		let res = res.remove(0).result?.first();
 		// Return the result to the client
-		Ok(res)
+		Ok(res.into())
 	}
 
 	// ------------------------------
 	// Methods for setting variables
 	// ------------------------------
 
-	async fn set(&mut self, params: Array) -> Result<impl Into<Data>, RpcError> {
+	async fn set(&mut self, params: Array) -> Result<Data, RpcError> {
 		let Ok((Value::Strand(key), val)) = params.needs_one_or_two() else {
 			return Err(RpcError::InvalidParams);
 		};
@@ -207,22 +206,22 @@ pub trait RpcContext {
 			// Store the variable if defined
 			v => self.vars_mut().insert(key.0, v),
 		};
-		Ok(Value::Null)
+		Ok(Value::Null.into())
 	}
 
-	async fn unset(&mut self, params: Array) -> Result<impl Into<Data>, RpcError> {
+	async fn unset(&mut self, params: Array) -> Result<Data, RpcError> {
 		let Ok(Value::Strand(key)) = params.needs_one() else {
 			return Err(RpcError::InvalidParams);
 		};
 		self.vars_mut().remove(&key.0);
-		Ok(Value::Null)
+		Ok(Value::Null.into())
 	}
 
 	// ------------------------------
 	// Methods for live queries
 	// ------------------------------
 
-	async fn kill(&mut self, params: Array) -> Result<impl Into<Data>, RpcError> {
+	async fn kill(&mut self, params: Array) -> Result<Data, RpcError> {
 		let id = params.needs_one()?;
 		// Specify the SQL query string
 		let sql = "KILL $id";
@@ -236,10 +235,10 @@ pub trait RpcContext {
 		let mut res = self.query_inner(Value::from(sql), Some(var)).await?;
 		// Extract the first query result
 		let response = res.remove(0);
-		response.result.map_err(Into::into)
+		response.result.map_err(Into::into).map(Into::into)
 	}
 
-	async fn live(&mut self, params: Array) -> Result<impl Into<Data>, RpcError> {
+	async fn live(&mut self, params: Array) -> Result<Data, RpcError> {
 		let (tb, diff) = params.needs_one_or_two()?;
 		// Specify the SQL query string
 		let sql = match diff.is_true() {
@@ -255,14 +254,14 @@ pub trait RpcContext {
 		let mut res = self.query_inner(Value::from(sql), Some(var)).await?;
 		// Extract the first query result
 		let response = res.remove(0);
-		response.result.map_err(Into::into)
+		response.result.map_err(Into::into).map(Into::into)
 	}
 
 	// ------------------------------
 	// Methods for selecting
 	// ------------------------------
 
-	async fn select(&self, params: Array) -> Result<impl Into<Data>, RpcError> {
+	async fn select(&self, params: Array) -> Result<Data, RpcError> {
 		let Ok(what) = params.needs_one() else {
 			return Err(RpcError::InvalidParams);
 		};
@@ -283,14 +282,14 @@ pub trait RpcContext {
 			false => res.remove(0).result?,
 		};
 		// Return the result to the client
-		Ok(res)
+		Ok(res.into())
 	}
 
 	// ------------------------------
 	// Methods for inserting
 	// ------------------------------
 
-	async fn insert(&self, params: Array) -> Result<impl Into<Data>, RpcError> {
+	async fn insert(&self, params: Array) -> Result<Data, RpcError> {
 		let Ok((what, data)) = params.needs_two() else {
 			return Err(RpcError::InvalidParams);
 		};
@@ -312,14 +311,14 @@ pub trait RpcContext {
 			false => res.remove(0).result?,
 		};
 		// Return the result to the client
-		Ok(res)
+		Ok(res.into())
 	}
 
 	// ------------------------------
 	// Methods for creating
 	// ------------------------------
 
-	async fn create(&self, params: Array) -> Result<impl Into<Data>, RpcError> {
+	async fn create(&self, params: Array) -> Result<Data, RpcError> {
 		let Ok((what, data)) = params.needs_one_or_two() else {
 			return Err(RpcError::InvalidParams);
 		};
@@ -345,14 +344,14 @@ pub trait RpcContext {
 			false => res.remove(0).result?,
 		};
 		// Return the result to the client
-		Ok(res)
+		Ok(res.into())
 	}
 
 	// ------------------------------
 	// Methods for upserting
 	// ------------------------------
 
-	async fn upsert(&self, params: Array) -> Result<impl Into<Data>, RpcError> {
+	async fn upsert(&self, params: Array) -> Result<Data, RpcError> {
 		let Ok((what, data)) = params.needs_one_or_two() else {
 			return Err(RpcError::InvalidParams);
 		};
@@ -378,14 +377,14 @@ pub trait RpcContext {
 			false => res.remove(0).result?,
 		};
 		// Return the result to the client
-		Ok(res)
+		Ok(res.into())
 	}
 
 	// ------------------------------
 	// Methods for updating
 	// ------------------------------
 
-	async fn update(&self, params: Array) -> Result<impl Into<Data>, RpcError> {
+	async fn update(&self, params: Array) -> Result<Data, RpcError> {
 		let Ok((what, data)) = params.needs_one_or_two() else {
 			return Err(RpcError::InvalidParams);
 		};
@@ -411,14 +410,14 @@ pub trait RpcContext {
 			false => res.remove(0).result?,
 		};
 		// Return the result to the client
-		Ok(res)
+		Ok(res.into())
 	}
 
 	// ------------------------------
 	// Methods for merging
 	// ------------------------------
 
-	async fn merge(&self, params: Array) -> Result<impl Into<Data>, RpcError> {
+	async fn merge(&self, params: Array) -> Result<Data, RpcError> {
 		let Ok((what, data)) = params.needs_one_or_two() else {
 			return Err(RpcError::InvalidParams);
 		};
@@ -444,14 +443,14 @@ pub trait RpcContext {
 			false => res.remove(0).result?,
 		};
 		// Return the result to the client
-		Ok(res)
+		Ok(res.into())
 	}
 
 	// ------------------------------
 	// Methods for patching
 	// ------------------------------
 
-	async fn patch(&self, params: Array) -> Result<impl Into<Data>, RpcError> {
+	async fn patch(&self, params: Array) -> Result<Data, RpcError> {
 		let Ok((what, data, diff)) = params.needs_one_two_or_three() else {
 			return Err(RpcError::InvalidParams);
 		};
@@ -476,14 +475,14 @@ pub trait RpcContext {
 			false => res.remove(0).result?,
 		};
 		// Return the result to the client
-		Ok(res)
+		Ok(res.into())
 	}
 
 	// ------------------------------
 	// Methods for relating
 	// ------------------------------
 
-	async fn relate(&self, params: Array) -> Result<impl Into<Data>, RpcError> {
+	async fn relate(&self, params: Array) -> Result<Data, RpcError> {
 		let Ok((from, kind, to, data)) = params.needs_three_or_four() else {
 			return Err(RpcError::InvalidParams);
 		};
@@ -511,14 +510,14 @@ pub trait RpcContext {
 			false => res.remove(0).result?,
 		};
 		// Return the result to the client
-		Ok(res)
+		Ok(res.into())
 	}
 
 	// ------------------------------
 	// Methods for deleting
 	// ------------------------------
 
-	async fn delete(&self, params: Array) -> Result<impl Into<Data>, RpcError> {
+	async fn delete(&self, params: Array) -> Result<Data, RpcError> {
 		let Ok(what) = params.needs_one() else {
 			return Err(RpcError::InvalidParams);
 		};
@@ -539,14 +538,14 @@ pub trait RpcContext {
 			false => res.remove(0).result?,
 		};
 		// Return the result to the client
-		Ok(res)
+		Ok(res.into())
 	}
 
 	// ------------------------------
 	// Methods for getting info
 	// ------------------------------
 
-	async fn version(&self, params: Array) -> Result<impl Into<Data>, RpcError> {
+	async fn version(&self, params: Array) -> Result<Data, RpcError> {
 		match params.len() {
 			0 => Ok(self.version_data()),
 			_ => Err(RpcError::InvalidParams),
@@ -557,7 +556,7 @@ pub trait RpcContext {
 	// Methods for querying
 	// ------------------------------
 
-	async fn query(&self, params: Array) -> Result<impl Into<Data>, RpcError> {
+	async fn query(&self, params: Array) -> Result<Data, RpcError> {
 		let Ok((query, o)) = params.needs_one_or_two() else {
 			return Err(RpcError::InvalidParams);
 		};
@@ -576,14 +575,14 @@ pub trait RpcContext {
 			Some(mut v) => Some(mrg! {v.0, &self.vars()}),
 			None => Some(self.vars().clone()),
 		};
-		self.query_inner(query, vars).await
+		self.query_inner(query, vars).await.map(Into::into)
 	}
 
 	// ------------------------------
 	// Methods for running functions
 	// ------------------------------
 
-	async fn run(&self, params: Array) -> Result<impl Into<Data>, RpcError> {
+	async fn run(&self, params: Array) -> Result<Data, RpcError> {
 		let Ok((Value::Strand(Strand(func_name)), version, args)) = params.needs_one_two_or_three()
 		else {
 			return Err(RpcError::InvalidParams);
@@ -616,7 +615,7 @@ pub trait RpcContext {
 			.kvs()
 			.process(Statement::Value(func).into(), self.session(), Some(self.vars().clone()))
 			.await?;
-		res.remove(0).result.map_err(Into::into)
+		res.remove(0).result.map_err(Into::into).map(Into::into)
 	}
 
 	// ------------------------------

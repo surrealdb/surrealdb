@@ -27,8 +27,8 @@ ml = ["surrealdb/ml"]
 jwks = ["surrealdb/jwks"]
 performance-profiler = ["dep:pprof"]
 # Special features
-storage-fdb-7_1 = ["surrealdb/kv-fdb-7_1"]
-storage-fdb-7_3 = ["surrealdb/kv-fdb-7_3"]
+storage-fdb-7_1 = ["surrealdb-core/kv-fdb-7_1"]
+storage-fdb-7_3 = ["surrealdb-core/kv-fdb-7_3"]
 
 [workspace]
 members = [
@@ -123,6 +123,7 @@ surrealdb = { version = "2", path = "lib", features = [
     "protocol-ws",
     "rustls",
 ] }
+surrealdb-core = { version = "2", path = "core" }
 tempfile = "3.8.1"
 thiserror = "1.0.50"
 tokio = { version = "1.34.0", features = ["macros", "signal"] }

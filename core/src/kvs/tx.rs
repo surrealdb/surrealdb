@@ -201,12 +201,12 @@ impl Transaction {
 
 	/// Insert a key if it doesn't exist in the datastore.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
-	pub async fn put<K, V>(&self, key: K, val: V) -> Result<(), Error>
+	pub async fn put<K, V>(&self, key: K, val: V, version: Option<u64>) -> Result<(), Error>
 	where
 		K: Into<Key> + Debug,
 		V: Into<Val> + Debug,
 	{
-		self.lock().await.put(key, val).await
+		self.lock().await.put(key, val, version).await
 	}
 
 	/// Update a key in the datastore if the current value matches a condition.
@@ -1459,7 +1459,7 @@ impl Transaction {
 							..Default::default()
 						};
 						let val = {
-							self.put(&key, &val).await?;
+							self.put(&key, &val, None).await?;
 							Entry::Any(Arc::new(val))
 						};
 						let _ = cache.insert(val.clone());
@@ -1517,7 +1517,7 @@ impl Transaction {
 							..Default::default()
 						};
 						let val = {
-							self.put(&key, &val).await?;
+							self.put(&key, &val, None).await?;
 							Entry::Any(Arc::new(val))
 						};
 						let _ = cache.insert(val.clone());
@@ -1586,7 +1586,7 @@ impl Transaction {
 							..Default::default()
 						};
 						let val = {
-							self.put(&key, &val).await?;
+							self.put(&key, &val, None).await?;
 							Entry::Any(Arc::new(val))
 						};
 						let _ = cache.insert(val.clone());

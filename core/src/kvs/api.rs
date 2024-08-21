@@ -10,6 +10,7 @@ use crate::vs::Versionstamp;
 use std::fmt::Debug;
 use std::ops::Range;
 
+#[allow(dead_code)] // not used when non of the storage backends are enabled.
 pub trait Transaction {
 	/// Specify how we should handle unclosed transactions.
 	///
@@ -65,7 +66,7 @@ pub trait Transaction {
 		V: Into<Val> + Debug;
 
 	/// Insert a key if it doesn't exist in the datastore.
-	async fn put<K, V>(&mut self, key: K, val: V) -> Result<(), Error>
+	async fn put<K, V>(&mut self, key: K, val: V, version: Option<u64>) -> Result<(), Error>
 	where
 		K: Into<Key> + Sprintable + Debug,
 		V: Into<Val> + Debug;

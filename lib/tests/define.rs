@@ -179,7 +179,7 @@ async fn define_statement_table_schemafull() -> Result<(), Error> {
 			functions: {},
 			models: {},
 			params: {},
-			tables: { test: 'DEFINE TABLE test TYPE ANY SCHEMAFULL PERMISSIONS NONE' },
+			tables: { test: 'DEFINE TABLE test TYPE NORMAL SCHEMAFULL PERMISSIONS NONE' },
 			users: {},
 		}",
 	)?;
@@ -208,7 +208,7 @@ async fn define_statement_table_schemaful() -> Result<(), Error> {
 			functions: {},
 			models: {},
 			params: {},
-			tables: { test: 'DEFINE TABLE test TYPE ANY SCHEMAFULL PERMISSIONS NONE' },
+			tables: { test: 'DEFINE TABLE test TYPE NORMAL SCHEMAFULL PERMISSIONS NONE' },
 			users: {},
 		}",
 	);
@@ -248,7 +248,7 @@ async fn define_statement_table_foreigntable() -> Result<(), Error> {
 			models: {},
 			params: {},
 			tables: {
-				test: 'DEFINE TABLE test TYPE ANY SCHEMAFULL PERMISSIONS NONE',
+				test: 'DEFINE TABLE test TYPE NORMAL SCHEMAFULL PERMISSIONS NONE',
 				view: 'DEFINE TABLE view TYPE ANY SCHEMALESS AS SELECT count() FROM test GROUP ALL PERMISSIONS NONE',
 			},
 			users: {},
@@ -280,7 +280,7 @@ async fn define_statement_table_foreigntable() -> Result<(), Error> {
 			models: {},
 			params: {},
 			tables: {
-				test: 'DEFINE TABLE test TYPE ANY SCHEMAFULL PERMISSIONS NONE',
+				test: 'DEFINE TABLE test TYPE NORMAL SCHEMAFULL PERMISSIONS NONE',
 			},
 			users: {},
 		}",

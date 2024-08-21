@@ -11,13 +11,13 @@ use crate::api::Connect;
 use crate::api::Result;
 use crate::api::Surreal;
 use crate::opt::IntoEndpoint;
-use crate::sql::Value;
+use crate::value::Notification;
 use channel::Sender;
 use indexmap::IndexMap;
 use std::collections::HashMap;
 use std::marker::PhantomData;
 use std::time::Duration;
-use surrealdb_core::dbs::Notification as CoreNotification;
+use surrealdb_core::sql::Value as CoreValue;
 use trice::Instant;
 use uuid::Uuid;
 
@@ -29,7 +29,7 @@ enum RequestEffect {
 	/// Completing this request sets a variable to a give value.
 	Set {
 		key: String,
-		value: Value,
+		value: CoreValue,
 	},
 	/// Completing this request sets a variable to a give value.
 	Clear {
@@ -59,11 +59,11 @@ struct PendingRequest {
 
 struct RouterState<Sink, Stream> {
 	/// Vars currently set by the set method,
-	vars: IndexMap<String, Value>,
+	vars: IndexMap<String, CoreValue>,
 	/// Messages which aught to be replayed on a reconnect.
 	replay: IndexMap<ReplayMethod, Command>,
 	/// Pending live queries
-	live_queries: HashMap<Uuid, channel::Sender<CoreNotification>>,
+	live_queries: HashMap<Uuid, channel::Sender<Notification<CoreValue>>>,
 	/// Send requests which are still awaiting an awnser.
 	pending_requests: HashMap<i64, PendingRequest>,
 	/// The last time a message was recieved from the server.

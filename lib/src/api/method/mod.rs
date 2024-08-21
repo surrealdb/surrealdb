@@ -11,8 +11,6 @@ use crate::api::OnceLockExt;
 use crate::api::Surreal;
 use crate::opt::IntoExportDestination;
 use crate::opt::WaitFor;
-use crate::sql::to_value;
-use run::IntoArgs;
 use serde::Serialize;
 use std::borrow::Cow;
 use std::marker::PhantomData;
@@ -21,6 +19,7 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::OnceLock;
 use std::time::Duration;
+use surrealdb_core::sql::to_value as to_core_value;
 
 pub(crate) mod live;
 pub(crate) mod query;
@@ -77,7 +76,7 @@ pub use merge::Merge;
 pub use patch::Patch;
 pub use query::Query;
 pub use query::QueryStream;
-use run::IntoFn;
+pub use run::IntoFn;
 pub use run::Run;
 pub use select::Select;
 use serde_content::Serializer;
@@ -91,6 +90,8 @@ pub use upsert::Upsert;
 pub use use_db::UseDb;
 pub use use_ns::UseNs;
 pub use version::Version;
+
+use super::opt::IntoResource;
 
 /// A alias for an often used type of future returned by async methods in this library.
 pub(crate) type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + Sync + 'a>>;
@@ -329,7 +330,7 @@ where
 		Set {
 			client: Cow::Borrowed(self),
 			key: key.into(),
-			value: to_value(value).map_err(Into::into),
+			value: to_core_value(value).map_err(Into::into),
 		}
 	}
 
@@ -692,11 +693,10 @@ where
 	/// # Ok(())
 	/// # }
 	/// ```
-	pub fn select<R>(&self, resource: impl opt::IntoResource<R>) -> Select<C, R> {
+	pub fn select<O>(&self, resource: impl IntoResource<O>) -> Select<C, O> {
 		Select {
 			client: Cow::Borrowed(self),
 			resource: resource.into_resource(),
-			range: None,
 			response_type: PhantomData,
 			query_type: PhantomData,
 		}
@@ -748,7 +748,7 @@ where
 	/// # Ok(())
 	/// # }
 	/// ```
-	pub fn create<R>(&self, resource: impl opt::IntoResource<R>) -> Create<C, R> {
+	pub fn create<R>(&self, resource: impl IntoResource<R>) -> Create<C, R> {
 		Create {
 			client: Cow::Borrowed(self),
 			resource: resource.into_resource(),
@@ -849,7 +849,7 @@ where
 	/// # Ok(())
 	/// # }
 	/// ```
-	pub fn insert<R>(&self, resource: impl opt::IntoResource<R>) -> Insert<C, R> {
+	pub fn insert<O>(&self, resource: impl IntoResource<O>) -> Insert<C, O> {
 		Insert {
 			client: Cow::Borrowed(self),
 			resource: resource.into_resource(),
@@ -1007,11 +1007,10 @@ where
 	/// # Ok(())
 	/// # }
 	/// ```
-	pub fn upsert<R>(&self, resource: impl opt::IntoResource<R>) -> Upsert<C, R> {
+	pub fn upsert<O>(&self, resource: impl IntoResource<O>) -> Upsert<C, O> {
 		Upsert {
 			client: Cow::Borrowed(self),
 			resource: resource.into_resource(),
-			range: None,
 			response_type: PhantomData,
 		}
 	}
@@ -1166,11 +1165,10 @@ where
 	/// # Ok(())
 	/// # }
 	/// ```
-	pub fn update<R>(&self, resource: impl opt::IntoResource<R>) -> Update<C, R> {
+	pub fn update<O>(&self, resource: impl IntoResource<O>) -> Update<C, O> {
 		Update {
 			client: Cow::Borrowed(self),
 			resource: resource.into_resource(),
-			range: None,
 			response_type: PhantomData,
 		}
 	}
@@ -1199,11 +1197,10 @@ where
 	/// # Ok(())
 	/// # }
 	/// ```
-	pub fn delete<R>(&self, resource: impl opt::IntoResource<R>) -> Delete<C, R> {
+	pub fn delete<O>(&self, resource: impl IntoResource<O>) -> Delete<C, O> {
 		Delete {
 			client: Cow::Borrowed(self),
 			resource: resource.into_resource(),
-			range: None,
 			response_type: PhantomData,
 		}
 	}
@@ -1234,28 +1231,25 @@ where
 	/// # #[tokio::main]
 	/// # async fn main() -> surrealdb::Result<()> {
 	/// # let db = surrealdb::engine::any::connect("mem://").await?;
-	/// // specify no args with an empty tuple, vec, or slice
-	/// let foo = db.run("fn::foo", ()).await?; // fn::foo()
-	/// // a single value will be turned into one arguement unless it is a tuple or vec
-	/// let bar = db.run("fn::bar", 42).await?; // fn::bar(42)
-	/// // to specify a single arguement, which is an array turn it into a value, or wrap in a singleton tuple
-	/// let count = db.run("count", Value::from(vec![1,2,3])).await?;
-	/// let count = db.run("count", (vec![1,2,3],)).await?;
-	/// // specify multiple args with either a tuple or vec
-	/// let two = db.run("math::log", (100, 10)).await?; // math::log(100, 10)
-	/// let two = db.run("math::log", [100, 10]).await?; // math::log(100, 10)
+	/// // Specify no args by not calling `.args()`
+	/// let foo = db.run("fn::foo").await?; // fn::foo()
+	/// // A single value will be turned into one argument
+	/// let bar = db.run("fn::bar").args(42).await?; // fn::bar(42)
+	/// // Arrays are treated as single arguments
+	/// let count = db.run("count").args(vec![1,2,3]).await?;
+	/// // Specify multiple args using a tuple
+	/// let two = db.run("math::log").args((100, 10)).await?; // math::log(100, 10)
 	///
 	/// # Ok(())
 	/// # }
 	/// ```
 	///
-	pub fn run(&self, name: impl IntoFn, args: impl IntoArgs) -> Run<C> {
-		let (name, version) = name.into_fn();
+	pub fn run<R>(&self, function: impl IntoFn) -> Run<C, R> {
 		Run {
 			client: Cow::Borrowed(self),
-			name,
-			version,
-			args: args.into_args(),
+			function: function.into_fn(),
+			args: Ok(serde_content::Value::Tuple(vec![])),
+			response_type: PhantomData,
 		}
 	}
 
