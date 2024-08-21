@@ -379,6 +379,10 @@ criteria = "safe-to-deploy"
 version = "2.4.2"
 criteria = "safe-to-deploy"
 
+[[exemptions.cedarwood]]
+version = "0.4.6"
+criteria = "safe-to-deploy"
+
 [[exemptions.chrono]]
 version = "0.4.38"
 criteria = "safe-to-deploy"
@@ -506,6 +510,18 @@ criteria = "safe-to-run"
 [[exemptions.deadpool-runtime]]
 version = "0.1.3"
 criteria = "safe-to-run"
+
+[[exemptions.derive_builder]]
+version = "0.20.0"
+criteria = "safe-to-deploy"
+
+[[exemptions.derive_builder_core]]
+version = "0.20.0"
+criteria = "safe-to-deploy"
+
+[[exemptions.derive_builder_macro]]
+version = "0.20.0"
+criteria = "safe-to-deploy"
 
 [[exemptions.deunicode]]
 version = "1.4.3"
