@@ -34,7 +34,7 @@ impl Parser<'_> {
 		Self::tokenkind_can_start_ident(kind)
 			|| matches!(
 				kind,
-				TokenKind::Digits | t!("{") | t!("[") | t!("+") | t!("-") | t!("u'") | t!("\"")
+				TokenKind::Digits | t!("{") | t!("[") | t!("+") | t!("-") | t!("u'") | t!("u\"")
 			)
 	}
 
