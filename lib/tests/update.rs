@@ -9,6 +9,85 @@ use surrealdb::iam::Role;
 use surrealdb::sql::Value;
 
 #[tokio::test]
+async fn update_bulk_merge_and_content() -> Result<(), Error> {
+	let sql = "
+		INSERT into person [{ id: 1, name: 'Tobie' }, { id: 2, name: 'some content'}];
+		UPDATE person CONTENT { id: 1, name: 'Jamie' };
+		UPDATE person CONTENT [{ id: 2, name: 'some name'}, { id: 3, name: 'Tobie'}];
+		UPDATE person:test CONTENT [{ id: 1, name: 'some content'}];
+		UPDATE person MERGE { id: 1, age: 50 };
+		UPDATE person:test MERGE [{ id: 1, name: 'some content'}];
+	";
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 6);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
+			{
+				id: person:1,
+				name: 'Tobie',
+			},
+			{
+				id: person:2,
+				name: 'some content',
+			}
+		]",
+	);
+	assert_eq!(tmp, val);
+
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
+			{
+				id: person:1,
+				name: 'Jamie',
+			}
+		]",
+	);
+	assert_eq!(tmp, val);
+
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
+			{
+				id: person:2,
+				name: 'some name',
+			}
+		]",
+	);
+	assert_eq!(tmp, val);
+
+	let tmp = res.remove(0).result;
+	assert!(matches!(
+		tmp.err(),
+		Some(e) if e.to_string() == r#"Can not use [{ id: 1, name: 'some content' }] in a CONTENT clause"#
+	));
+
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
+			{
+				id: person:1,
+				name: 'Jamie',
+				age: 50
+			}
+		]",
+	);
+	assert_eq!(tmp, val);
+
+	let tmp = res.remove(0).result;
+	assert!(matches!(
+		tmp.err(),
+		Some(e) if e.to_string() == r#"Can not use [{ id: 1, name: 'some content' }] in a MERGE clause"#
+	));
+
+	Ok(())
+}
+
+#[tokio::test]
 async fn update_merge_and_content() -> Result<(), Error> {
 	let sql = "
 		CREATE person:test CONTENT { name: 'Tobie' };
