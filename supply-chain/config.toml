@@ -831,6 +831,10 @@ criteria = "safe-to-deploy"
 version = "0.5.4"
 criteria = "safe-to-deploy"
 
+[[exemptions.jieba-rs]]
+version = "0.7.0"
+criteria = "safe-to-deploy"
+
 [[exemptions.jobserver]]
 version = "0.1.28"
 criteria = "safe-to-deploy"
