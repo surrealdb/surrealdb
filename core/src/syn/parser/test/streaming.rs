@@ -279,7 +279,7 @@ fn statements() -> Vec<Statement> {
 			comment: None,
 			if_not_exists: false,
 			overwrite: false,
-			kind: TableType::Any,
+			kind: TableType::Normal,
 		})),
 		Statement::Define(DefineStatement::Event(DefineEventStatement {
 			name: Ident("event".to_owned()),
