@@ -185,7 +185,7 @@ where
 							x.insert("id".to_string(), thing.id.into());
 						}
 
-						Ok(Command::Insert {
+						Ok(Command::InsertRelation {
 							what: thing.tb,
 							data,
 						})
