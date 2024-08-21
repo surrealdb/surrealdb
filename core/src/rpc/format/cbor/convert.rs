@@ -11,6 +11,7 @@ use crate::sql::id::range::IdRange;
 use crate::sql::Array;
 use crate::sql::Datetime;
 use crate::sql::Duration;
+use crate::sql::Future;
 use crate::sql::Geometry;
 use crate::sql::Id;
 use crate::sql::Number;
@@ -194,6 +195,14 @@ impl TryFrom<Cbor> for Value {
 					},
 					// A range
 					TAG_RANGE => Ok(Value::Range(Box::new(Range::try_from(*v)?))),
+					TAG_FUTURE => match *v {
+						Data::Text(v) => {
+							let block = crate::syn::block(format!("{{{v}}}").as_str())
+								.map_err(|_| "Failed to parse block")?;
+							Ok(Value::Future(Box::new(Future(block))))
+						}
+						_ => Err("Expected a CBOR text data type"),
+					},
 					TAG_GEOMETRY_POINT => match *v {
 						Data::Array(mut v) if v.len() == 2 => {
 							let x = Value::try_from(Cbor(v.remove(0)))?;
@@ -398,7 +407,6 @@ impl TryFrom<Value> for Cbor {
 			Value::Range(v) => Ok(Cbor(Data::try_from(*v)?)),
 			Value::Future(v) => {
 				let bin = Data::Text(format!("{}", (*v).0));
-
 				Ok(Cbor(Data::Tag(TAG_FUTURE, Box::new(bin))))
 			}
 			// We shouldn't reach here
