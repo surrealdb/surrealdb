@@ -177,14 +177,6 @@ pub async fn start_server_without_auth() -> Result<(String, Child), Box<dyn Erro
 	.await
 }
 
-pub async fn start_server_with_functions() -> Result<(String, Child), Box<dyn Error>> {
-	start_server(StartServerArguments {
-		args: "--allow-funcs".to_string(),
-		..Default::default()
-	})
-	.await
-}
-
 pub async fn start_server_with_guests() -> Result<(String, Child), Box<dyn Error>> {
 	start_server(StartServerArguments {
 		args: "--allow-guests".to_string(),

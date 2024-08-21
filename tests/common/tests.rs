@@ -1669,7 +1669,7 @@ async fn session_use_change_database_scope() {
 #[test(tokio::test)]
 async fn run_functions() {
 	// Setup database server
-	let (addr, mut server) = common::start_server_with_functions().await.unwrap();
+	let (addr, mut server) = common::start_server_with_defaults().await.unwrap();
 	// Connect to WebSocket
 	let mut socket = Socket::connect(&addr, SERVER, FORMAT).await.unwrap();
 	// Authenticate the connection
