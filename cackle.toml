@@ -1183,3 +1183,6 @@ allow_unsafe = true
 
 [pkg.derive_builder_macro]
 allow_proc_macro = true
+
+[pkg.jieba-rs]
+build.allow_apis = ["fs"]
