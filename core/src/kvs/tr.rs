@@ -258,13 +258,13 @@ impl Transactor {
 
 	/// Insert a key if it doesn't exist in the datastore.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
-	pub async fn put<K, V>(&mut self, key: K, val: V) -> Result<(), Error>
+	pub async fn put<K, V>(&mut self, key: K, val: V, version: Option<u64>) -> Result<(), Error>
 	where
 		K: Into<Key> + Debug,
 		V: Into<Val> + Debug,
 	{
 		let key = key.into();
-		expand_inner!(&mut self.inner, v => { v.put(key, val).await })
+		expand_inner!(&mut self.inner, v => { v.put(key, val, version).await })
 	}
 
 	/// Update a key in the datastore if the current value matches a condition.
