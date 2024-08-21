@@ -167,7 +167,7 @@ where
 		D: Serialize + 'static,
 	{
 		InsertRelation::from_closure(self.client, || {
-			let mut data = crate::sql::to_value(data)?;
+			let mut data = to_core_value(data)?;
 			match self.resource? {
 				Resource::Table(table) => Ok(Command::InsertRelation {
 					what: Some(table.into()),
@@ -180,15 +180,13 @@ where
 						)
 						.into())
 					} else {
-						let mut table = Table::default();
-						table.0.clone_from(&thing.tb);
-						let what = Value::Table(table);
-						let mut ident = Ident::default();
-						"id".clone_into(&mut ident.0);
-						let id = Part::Field(ident);
-						data.put(&[id], thing.into());
-						Ok(Command::InsertRelation {
-							what: Some(what),
+						let thing = thing.into_inner();
+						if let CoreValue::Object(ref mut x) = data {
+							x.insert("id".to_string(), thing.id.into());
+						}
+
+						Ok(Command::Insert {
+							what: thing.tb,
 							data,
 						})
 					}

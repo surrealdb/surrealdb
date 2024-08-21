@@ -554,7 +554,7 @@ async fn insert_unspecified() {
 		db.insert(()).content(value("{id: user:user1, foo: 'bar'}").unwrap()).await.unwrap();
 	assert_eq!(
 		tmp,
-		vec![RecordId {
+		vec![ApiRecordId {
 			id: thing("user:user1").unwrap(),
 		}]
 	);
@@ -585,7 +585,7 @@ async fn insert_relation_unspecified() {
 	let tmp: Vec<RecordId> = db.insert(()).relation(val).await.unwrap();
 	assert_eq!(
 		tmp,
-		vec![RecordId {
+		vec![ApiRecordId {
 			id: thing("likes:1").unwrap()
 		}]
 	);
@@ -598,10 +598,10 @@ async fn insert_relation_unspecified() {
 	assert_eq!(
 		tmp,
 		vec![
-			RecordId {
+			ApiRecordId {
 				id: thing("likes:2").unwrap()
 			},
-			RecordId {
+			ApiRecordId {
 				id: thing("hates:3").unwrap()
 			}
 		]
