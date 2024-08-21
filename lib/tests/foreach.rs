@@ -13,21 +13,21 @@ async fn foreach_simple() -> Result<(), Error> {
 			IF $test == 2 {
 				BREAK;
 			};
-			UPDATE type::thing('person', $test) SET test = $test;
+			UPSERT type::thing('person', $test) SET test = $test;
 		};
 		SELECT * FROM person;
 		FOR $test IN [4, 5, 6] {
 			IF $test == 5 {
 				CONTINUE;
 			};
-			UPDATE type::thing('person', $test) SET test = $test;
+			UPSERT type::thing('person', $test) SET test = $test;
 		};
 		SELECT * FROM person;
 		FOR $test IN <future> { [7, 8, 9] } {
 			IF $test > 8 {
 				THROW 'This is an error';
 			};
-			UPDATE type::thing('person', $test) SET test = $test;
+			UPSERT type::thing('person', $test) SET test = $test;
 		};
 		SELECT * FROM person;
 	";
@@ -193,6 +193,39 @@ async fn foreach_nested() -> Result<(), Error> {
 			{
 				id: person:[5, 9]
 			}
+		]",
+	);
+	assert_eq!(tmp, val);
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn foreach_range() -> Result<(), Error> {
+	let sql = "
+		FOR $test IN 1..4 {
+			IF $test == 2 {
+				BREAK;
+			};
+			UPSERT type::thing('person', $test) SET test = $test;
+		};
+		SELECT * FROM person;
+	";
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 2);
+	//
+	let tmp = res.remove(0).result;
+	assert!(tmp.is_ok());
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
+			{
+				id: person:1,
+				test: 1,
+			},
 		]",
 	);
 	assert_eq!(tmp, val);

@@ -1,9 +1,7 @@
-use super::live;
-use super::Stream;
-
-use crate::api::conn::Method;
-use crate::api::conn::Param;
+use super::{live, Stream};
+use crate::api::conn::Command;
 use crate::api::err::Error;
+use crate::api::method::BoxFuture;
 use crate::api::opt;
 use crate::api::Connection;
 use crate::api::ExtraFeatures;
@@ -12,16 +10,8 @@ use crate::engine::any::Any;
 use crate::method::OnceLockExt;
 use crate::method::Stats;
 use crate::method::WithStats;
-use crate::sql;
-use crate::sql::to_value;
-use crate::sql::Array;
-use crate::sql::Object;
-use crate::sql::Statement;
-use crate::sql::Statements;
-use crate::sql::Strand;
-use crate::sql::Value;
-use crate::Notification;
-use crate::Surreal;
+use crate::value::Notification;
+use crate::{Surreal, Value};
 use futures::future::Either;
 use futures::stream::SelectAll;
 use futures::StreamExt;
@@ -29,35 +19,83 @@ use indexmap::IndexMap;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 use std::borrow::Cow;
-use std::collections::BTreeMap;
 use std::collections::HashMap;
-use std::future::Future;
 use std::future::IntoFuture;
-use std::marker::PhantomData;
-use std::mem;
 use std::pin::Pin;
 use std::task::Context;
 use std::task::Poll;
+use surrealdb_core::sql::{
+	self, to_value as to_core_value, Object as CoreObject, Statement, Value as CoreValue,
+};
 
 /// A query future
 #[derive(Debug)]
 #[must_use = "futures do nothing unless you `.await` or poll them"]
 pub struct Query<'r, C: Connection> {
-	pub(super) client: Cow<'r, Surreal<C>>,
-	pub(super) query: Vec<Result<Vec<Statement>>>,
-	pub(super) bindings: Result<BTreeMap<String, Value>>,
-	pub(crate) register_live_queries: bool,
+	pub(crate) inner: Result<ValidQuery<'r, C>>,
 }
 
-impl<C> Query<'_, C>
+#[derive(Debug)]
+pub(crate) struct ValidQuery<'r, C: Connection> {
+	pub client: Cow<'r, Surreal<C>>,
+	pub query: Vec<Statement>,
+	pub bindings: CoreObject,
+	pub register_live_queries: bool,
+}
+
+impl<'r, C> Query<'r, C>
 where
 	C: Connection,
 {
+	pub(crate) fn new(
+		client: Cow<'r, Surreal<C>>,
+		query: Vec<Statement>,
+		bindings: CoreObject,
+		register_live_queries: bool,
+	) -> Self {
+		Query {
+			inner: Ok(ValidQuery {
+				client,
+				query,
+				bindings,
+				register_live_queries,
+			}),
+		}
+	}
+
+	pub(crate) fn map_valid<F>(self, f: F) -> Self
+	where
+		F: FnOnce(ValidQuery<'r, C>) -> Result<ValidQuery<'r, C>>,
+	{
+		match self.inner {
+			Ok(x) => Query {
+				inner: f(x),
+			},
+			x => Query {
+				inner: x,
+			},
+		}
+	}
+
 	/// Converts to an owned type which can easily be moved to a different thread
 	pub fn into_owned(self) -> Query<'static, C> {
+		let inner = match self.inner {
+			Ok(ValidQuery {
+				client,
+				query,
+				bindings,
+				register_live_queries,
+			}) => Ok(ValidQuery::<'static, C> {
+				client: Cow::Owned(client.into_owned()),
+				query,
+				bindings,
+				register_live_queries,
+			}),
+			Err(e) => Err(e),
+		};
+
 		Query {
-			client: Cow::Owned(self.client.into_owned()),
-			..self
+			inner,
 		}
 	}
 }
@@ -67,69 +105,93 @@ where
 	Client: Connection,
 {
 	type Output = Result<Response>;
-	type IntoFuture = Pin<Box<dyn Future<Output = Self::Output> + Send + Sync + 'r>>;
+	type IntoFuture = BoxFuture<'r, Self::Output>;
 
 	fn into_future(self) -> Self::IntoFuture {
+		let ValidQuery {
+			client,
+			query,
+			bindings,
+			register_live_queries,
+		} = match self.inner {
+			Ok(x) => x,
+			Err(error) => return Box::pin(async move { Err(error) }),
+		};
+
+		let query_statements = query;
+
 		Box::pin(async move {
 			// Extract the router from the client
-			let router = self.client.router.extract()?;
-			// Combine all query statements supplied
-			let mut statements = Vec::with_capacity(self.query.len());
-			for query in self.query {
-				statements.extend(query?);
-			}
-			// Build the query and execute it
-			let query = sql::Query(Statements(statements.clone()));
-			let param = Param::query(query, self.bindings?);
-			let mut conn = Client::new(Method::Query);
-			let mut response = conn.execute_query(router, param).await?;
-			// Register live queries if necessary
-			if self.register_live_queries {
-				let mut live_queries = IndexMap::new();
-				let mut checked = false;
-				// Adjusting offsets as a workaround to https://github.com/surrealdb/surrealdb/issues/3318
-				let mut offset = 0;
-				for (index, stmt) in statements.into_iter().enumerate() {
-					if let Statement::Live(stmt) = stmt {
-						if !checked && !router.features.contains(&ExtraFeatures::LiveQueries) {
-							return Err(Error::LiveQueriesNotSupported.into());
-						}
-						checked = true;
-						let index = index - offset;
-						if let Some((_, result)) = response.results.get(&index) {
-							let result =
-								match result {
-									Ok(id) => live::register::<Client>(router, id.clone())
-										.await
-										.map(|rx| Stream {
-											id: stmt.id.into(),
-											rx: Some(rx),
-											client: Surreal {
-												router: self.client.router.clone(),
-												engine: PhantomData,
-											},
-											response_type: PhantomData,
-											engine: PhantomData,
-										}),
-									// This is a live query. We are using this as a workaround to avoid
-									// creating another public error variant for this internal error.
-									Err(..) => Err(Error::NotLiveQuery(index).into()),
-								};
-							live_queries.insert(index, result);
-						}
-					} else if matches!(
-						stmt,
-						Statement::Begin(..) | Statement::Commit(..) | Statement::Cancel(..)
-					) {
-						offset += 1;
-					}
-				}
-				response.live_queries = live_queries;
-			}
-			response.client = Surreal {
-				router: self.client.router.clone(),
-				engine: PhantomData,
+			let router = client.router.extract()?;
+
+			// Collect the indexes of the live queries which should be registerd.
+			let query_indicies = if register_live_queries {
+				query_statements
+					.iter()
+					// BEGIN, COMMIT, and CANCEL don't return a result.
+					.filter(|x| {
+						!matches!(
+							x,
+							Statement::Begin(_) | Statement::Commit(_) | Statement::Cancel(_)
+						)
+					})
+					.enumerate()
+					.filter(|(_, x)| matches!(x, Statement::Live(_)))
+					.map(|(i, _)| i)
+					.collect()
+			} else {
+				Vec::new()
 			};
+
+			// If there are live queries and it is not supported, return an error.
+			if !query_indicies.is_empty() && !router.features.contains(&ExtraFeatures::LiveQueries)
+			{
+				return Err(Error::LiveQueriesNotSupported.into());
+			}
+
+			let mut query = sql::Query::default();
+			query.0 .0 = query_statements;
+
+			let mut response = router
+				.execute_query(Command::Query {
+					query,
+					variables: bindings,
+				})
+				.await?;
+
+			for idx in query_indicies {
+				let Some((_, result)) = response.results.get(&idx) else {
+					continue;
+				};
+
+				// This is a live query. We are using this as a workaround to avoid
+				// creating another public error variant for this internal error.
+				let res = match result {
+					Ok(id) => {
+						let CoreValue::Uuid(uuid) = id else {
+							return Err(Error::InternalError(
+								"successfull live query did not return a uuid".to_string(),
+							)
+							.into());
+						};
+						live::register(router, uuid.0).await.map(|rx| {
+							Stream::new(
+								Surreal::new_from_router_waiter(
+									client.router.clone(),
+									client.waiter.clone(),
+								),
+								uuid.0,
+								Some(rx),
+							)
+						})
+					}
+					Err(_) => Err(crate::Error::from(Error::NotLiveQuery(idx))),
+				};
+				response.live_queries.insert(idx, res);
+			}
+
+			response.client =
+				Surreal::new_from_router_waiter(client.router.clone(), client.waiter.clone());
 			Ok(response)
 		})
 	}
@@ -140,7 +202,7 @@ where
 	Client: Connection,
 {
 	type Output = Result<WithStats<Response>>;
-	type IntoFuture = Pin<Box<dyn Future<Output = Self::Output> + Send + Sync + 'r>>;
+	type IntoFuture = BoxFuture<'r, Self::Output>;
 
 	fn into_future(self) -> Self::IntoFuture {
 		Box::pin(async move {
@@ -155,9 +217,12 @@ where
 	C: Connection,
 {
 	/// Chains a query onto an existing query
-	pub fn query(mut self, query: impl opt::IntoQuery) -> Self {
-		self.query.push(query.into_query());
-		self
+	pub fn query(self, query: impl opt::IntoQuery) -> Self {
+		self.map_valid(move |mut valid| {
+			let new_query = query.into_query()?;
+			valid.query.extend(new_query);
+			Ok(valid)
+		})
 	}
 
 	/// Return query statistics along with its results
@@ -206,49 +271,53 @@ where
 	/// # Ok(())
 	/// # }
 	/// ```
-	pub fn bind(mut self, bindings: impl Serialize) -> Self {
-		if let Ok(current) = &mut self.bindings {
-			match to_value(bindings) {
-				Ok(mut bindings) => {
-					if let Value::Array(Array(array)) = &mut bindings {
-						if let [Value::Strand(Strand(key)), value] = &mut array[..] {
-							let mut map = BTreeMap::new();
-							map.insert(mem::take(key), mem::take(value));
-							bindings = map.into();
-						}
+	pub fn bind(self, bindings: impl Serialize + 'static) -> Self {
+		self.map_valid(move |mut valid| {
+			let bindings = to_core_value(bindings)?;
+			match bindings {
+				CoreValue::Object(mut map) => valid.bindings.append(&mut map.0),
+				CoreValue::Array(array) => {
+					if array.len() != 2 || !matches!(array[0], CoreValue::Strand(_)) {
+						let bindings = CoreValue::Array(array);
+						let bindings = Value::from_inner(bindings);
+						return Err(Error::InvalidBindings(bindings).into());
 					}
-					match &mut bindings {
-						Value::Object(Object(map)) => current.append(map),
-						_ => {
-							self.bindings = Err(Error::InvalidBindings(bindings).into());
-						}
-					}
+
+					let mut iter = array.into_iter();
+					let Some(CoreValue::Strand(key)) = iter.next() else {
+						unreachable!()
+					};
+					let Some(value) = iter.next() else {
+						unreachable!()
+					};
+
+					valid.bindings.0.insert(key.0, value);
 				}
-				Err(error) => {
-					self.bindings = Err(error.into());
+				_ => {
+					let bindings = Value::from_inner(bindings);
+					return Err(Error::InvalidBindings(bindings).into());
 				}
 			}
-		}
-		self
+
+			Ok(valid)
+		})
 	}
 }
 
-pub(crate) type QueryResult = Result<Value>;
+pub(crate) type QueryResult = Result<CoreValue>;
 
 /// The response type of a `Surreal::query` request
 #[derive(Debug)]
 pub struct Response {
 	pub(crate) client: Surreal<Any>,
 	pub(crate) results: IndexMap<usize, (Stats, QueryResult)>,
-	pub(crate) live_queries: IndexMap<usize, Result<Stream<'static, Any, Value>>>,
+	pub(crate) live_queries: IndexMap<usize, Result<Stream<Value>>>,
 }
 
 /// A `LIVE SELECT` stream from the `query` method
 #[derive(Debug)]
 #[must_use = "streams do nothing unless you poll them"]
-pub struct QueryStream<R>(
-	pub(crate) Either<Stream<'static, Any, R>, SelectAll<Stream<'static, Any, R>>>,
-);
+pub struct QueryStream<R>(pub(crate) Either<Stream<R>, SelectAll<Stream<R>>>);
 
 impl futures::Stream for QueryStream<Value> {
 	type Item = Notification<Value>;
@@ -356,7 +425,7 @@ impl Response {
 	/// ```no_run
 	/// use serde::Deserialize;
 	/// use surrealdb::Notification;
-	/// use surrealdb::sql::Value;
+	/// use surrealdb::Value;
 	///
 	/// #[derive(Debug, Deserialize)]
 	/// # #[allow(dead_code)]
@@ -401,7 +470,6 @@ impl Response {
 	/// # Examples
 	///
 	/// ```no_run
-	/// use surrealdb::sql;
 	///
 	/// # #[tokio::main]
 	/// # async fn main() -> surrealdb::Result<()> {
@@ -420,7 +488,7 @@ impl Response {
 		}
 		let mut errors = HashMap::with_capacity(keys.len());
 		for key in keys {
-			if let Some((_, Err(error))) = self.results.remove(&key) {
+			if let Some((_, Err(error))) = self.results.swap_remove(&key) {
 				errors.insert(key, error);
 			}
 		}
@@ -432,7 +500,6 @@ impl Response {
 	/// # Examples
 	///
 	/// ```no_run
-	/// use surrealdb::sql;
 	///
 	/// # #[tokio::main]
 	/// # async fn main() -> surrealdb::Result<()> {
@@ -451,7 +518,7 @@ impl Response {
 			}
 		}
 		if let Some(key) = first_error {
-			if let Some((_, Err(error))) = self.results.remove(&key) {
+			if let Some((_, Err(error))) = self.results.swap_remove(&key) {
 				return Err(error);
 			}
 		}
@@ -463,7 +530,6 @@ impl Response {
 	/// # Examples
 	///
 	/// ```no_run
-	/// use surrealdb::sql;
 	///
 	/// # #[tokio::main]
 	/// # async fn main() -> surrealdb::Result<()> {
@@ -490,7 +556,6 @@ impl WithStats<Response> {
 	///
 	/// ```no_run
 	/// use serde::Deserialize;
-	/// use surrealdb::sql;
 	///
 	/// #[derive(Debug, Deserialize)]
 	/// # #[allow(dead_code)]
@@ -560,7 +625,6 @@ impl WithStats<Response> {
 	/// # Examples
 	///
 	/// ```no_run
-	/// use surrealdb::sql;
 	///
 	/// # #[tokio::main]
 	/// # async fn main() -> surrealdb::Result<()> {
@@ -579,7 +643,7 @@ impl WithStats<Response> {
 		}
 		let mut errors = HashMap::with_capacity(keys.len());
 		for key in keys {
-			if let Some((stats, Err(error))) = self.0.results.remove(&key) {
+			if let Some((stats, Err(error))) = self.0.results.swap_remove(&key) {
 				errors.insert(key, (stats, error));
 			}
 		}
@@ -591,7 +655,6 @@ impl WithStats<Response> {
 	/// # Examples
 	///
 	/// ```no_run
-	/// use surrealdb::sql;
 	///
 	/// # #[tokio::main]
 	/// # async fn main() -> surrealdb::Result<()> {
@@ -611,7 +674,6 @@ impl WithStats<Response> {
 	/// # Examples
 	///
 	/// ```no_run
-	/// use surrealdb::sql;
 	///
 	/// # #[tokio::main]
 	/// # async fn main() -> surrealdb::Result<()> {
@@ -635,8 +697,9 @@ impl WithStats<Response> {
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::Error::Api;
+	use crate::{value::to_value, Error::Api};
 	use serde::Deserialize;
+	use surrealdb_core::sql::Value as CoreValue;
 
 	#[derive(Debug, Clone, Serialize, Deserialize)]
 	struct Summary {
@@ -665,7 +728,7 @@ mod tests {
 	fn take_from_an_empty_response() {
 		let mut response = Response::new();
 		let value: Value = response.take(0).unwrap();
-		assert!(value.is_none());
+		assert!(value.into_inner().is_none());
 
 		let mut response = Response::new();
 		let option: Option<String> = response.take(0).unwrap();
@@ -718,7 +781,7 @@ mod tests {
 			..Response::new()
 		};
 		let value: Value = response.take(0).unwrap();
-		assert_eq!(value, Value::from(scalar));
+		assert_eq!(value.into_inner(), CoreValue::from(scalar));
 
 		let mut response = Response {
 			results: to_map(vec![Ok(scalar.into())]),
@@ -731,7 +794,7 @@ mod tests {
 			results: to_map(vec![Ok(scalar.into())]),
 			..Response::new()
 		};
-		let vec: Vec<usize> = response.take(0).unwrap();
+		let vec: Vec<i64> = response.take(0).unwrap();
 		assert_eq!(vec, vec![scalar]);
 
 		let scalar = true;
@@ -741,7 +804,7 @@ mod tests {
 			..Response::new()
 		};
 		let value: Value = response.take(0).unwrap();
-		assert_eq!(value, Value::from(scalar));
+		assert_eq!(value.into_inner(), CoreValue::from(scalar));
 
 		let mut response = Response {
 			results: to_map(vec![Ok(scalar.into())]),
@@ -786,7 +849,7 @@ mod tests {
 		};
 		assert_eq!(zero, 0);
 		let one: Value = response.take(1).unwrap();
-		assert_eq!(one, Value::from(1));
+		assert_eq!(one.into_inner(), CoreValue::from(1));
 	}
 
 	#[test]
@@ -797,14 +860,14 @@ mod tests {
 		let value = to_value(summary.clone()).unwrap();
 
 		let mut response = Response {
-			results: to_map(vec![Ok(value.clone())]),
+			results: to_map(vec![Ok(value.clone().into_inner())]),
 			..Response::new()
 		};
 		let title: Value = response.take("title").unwrap();
-		assert_eq!(title, Value::from(summary.title.as_str()));
+		assert_eq!(title.into_inner(), CoreValue::from(summary.title.as_str()));
 
 		let mut response = Response {
-			results: to_map(vec![Ok(value.clone())]),
+			results: to_map(vec![Ok(value.clone().into_inner())]),
 			..Response::new()
 		};
 		let Some(title): Option<String> = response.take("title").unwrap() else {
@@ -813,7 +876,7 @@ mod tests {
 		assert_eq!(title, summary.title);
 
 		let mut response = Response {
-			results: to_map(vec![Ok(value)]),
+			results: to_map(vec![Ok(value.into_inner())]),
 			..Response::new()
 		};
 		let vec: Vec<String> = response.take("title").unwrap();
@@ -826,7 +889,7 @@ mod tests {
 		let value = to_value(article.clone()).unwrap();
 
 		let mut response = Response {
-			results: to_map(vec![Ok(value.clone())]),
+			results: to_map(vec![Ok(value.clone().into_inner())]),
 			..Response::new()
 		};
 		let Some(title): Option<String> = response.take("title").unwrap() else {
@@ -839,18 +902,18 @@ mod tests {
 		assert_eq!(body, article.body);
 
 		let mut response = Response {
-			results: to_map(vec![Ok(value.clone())]),
+			results: to_map(vec![Ok(value.clone().into_inner())]),
 			..Response::new()
 		};
 		let vec: Vec<String> = response.take("title").unwrap();
 		assert_eq!(vec, vec![article.title.clone()]);
 
 		let mut response = Response {
-			results: to_map(vec![Ok(value)]),
+			results: to_map(vec![Ok(value.into_inner())]),
 			..Response::new()
 		};
 		let value: Value = response.take("title").unwrap();
-		assert_eq!(value, Value::from(article.title));
+		assert_eq!(value.into_inner(), CoreValue::from(article.title));
 	}
 
 	#[test]
@@ -860,7 +923,7 @@ mod tests {
 			..Response::new()
 		};
 		let value: Value = response.take(0).unwrap();
-		assert_eq!(value, vec![Value::from(true), Value::from(false)].into());
+		assert_eq!(value.into_inner(), vec![CoreValue::from(true), CoreValue::from(false)].into());
 
 		let mut response = Response {
 			results: to_map(vec![Ok(vec![true, false].into())]),
@@ -880,7 +943,7 @@ mod tests {
 		else {
 			panic!("silently dropping records not allowed");
 		};
-		let records = map.remove(&0).unwrap().1.unwrap();
+		let records = map.swap_remove(&0).unwrap().1.unwrap();
 		assert_eq!(records, vec![true, false].into());
 	}
 
@@ -945,6 +1008,6 @@ mod tests {
 		};
 		assert_eq!(value, 2);
 		let value: Value = response.take(4).unwrap();
-		assert_eq!(value, Value::from(3));
+		assert_eq!(value.into_inner(), CoreValue::from(3));
 	}
 }

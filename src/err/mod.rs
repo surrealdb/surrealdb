@@ -1,8 +1,8 @@
 use crate::cli::abstraction::auth::Error as SurrealAuthError;
-use axum::extract::rejection::TypedHeaderRejection;
 use axum::response::{IntoResponse, Response};
 use axum::Error as AxumError;
 use axum::Json;
+use axum_extra::typed_header::TypedHeaderRejection;
 use base64::DecodeError as Base64Error;
 use http::{HeaderName, StatusCode};
 use reqwest::Error as ReqwestError;
@@ -132,6 +132,17 @@ impl From<surrealdb::error::Db> for Error {
 			return Error::InvalidAuth;
 		}
 		Error::Db(error.into())
+	}
+}
+
+impl From<surrealdb::rpc::RpcError> for Error {
+	fn from(value: surrealdb::rpc::RpcError) -> Self {
+		use surrealdb::rpc::RpcError;
+		match value {
+			RpcError::InternalError(e) => Error::Db(surrealdb::Error::Db(e)),
+			RpcError::Thrown(e) => Error::Other(e),
+			_ => Error::Other(value.to_string()),
+		}
 	}
 }
 

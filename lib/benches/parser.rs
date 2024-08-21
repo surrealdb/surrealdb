@@ -59,7 +59,7 @@ fn bench_parser(c: &mut Criterion) {
 			&(1..=100).map(|n| format!("'{n}': {n}")).collect::<Vec<_>>().join(", ")
 		)
 	);
-	parser!(c, full_test, surrealdb::sql::parse, include_str!("../test.surql"));
+	parser!(c, full_test, surrealdb::sql::parse, include_str!("../../core/test.surql"));
 	c.finish();
 }
 

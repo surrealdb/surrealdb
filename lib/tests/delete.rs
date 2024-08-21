@@ -6,7 +6,7 @@ use helpers::new_ds;
 use surrealdb::dbs::{Action, Notification, Session};
 use surrealdb::err::Error;
 use surrealdb::iam::Role;
-use surrealdb::sql::Value;
+use surrealdb::sql::{Thing, Value};
 
 #[tokio::test]
 async fn delete() -> Result<(), Error> {
@@ -413,16 +413,68 @@ async fn delete_filtered_live_notification() -> Result<(), Error> {
 	let notification = notifications.recv().await.unwrap();
 	assert_eq!(
 		notification,
-		Notification {
-			id: live_id,
-			action: Action::Delete,
-			result: Value::parse(
+		Notification::new(
+			live_id,
+			Action::Delete,
+			Value::parse(
 				"{
 					id: person:test_true,
 					condition: true,
 				}"
 			),
-		}
+		)
 	);
+	Ok(())
+}
+
+#[tokio::test]
+async fn delete_with_permissions() -> Result<(), Error> {
+	let sql = "
+		DEFINE TABLE friends_with PERMISSIONS FOR delete WHERE in = $auth;
+		CREATE user:john, user:mary;
+		RELATE user:john->friends_with:1->user:mary;
+		RELATE user:mary->friends_with:2->user:john;
+	";
+	let dbs = new_ds().await?.with_auth_enabled(true);
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 4);
+	//
+	let tmp = res.remove(0).result;
+	assert!(tmp.is_ok());
+	//
+	let tmp = res.remove(0).result;
+	assert!(tmp.is_ok());
+	//
+	let tmp = res.remove(0).result;
+	assert!(tmp.is_ok());
+	//
+	let tmp = res.remove(0).result;
+	assert!(tmp.is_ok());
+	//
+	let sql = "
+		DELETE friends_with:1 RETURN BEFORE;
+		DELETE friends_with:2 RETURN BEFORE;
+	";
+	let ses = Session::for_record("test", "test", "test", Thing::from(("user", "john")).into());
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 2);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
+			{
+				id: friends_with:1,
+				in: user:john,
+				out: user:mary,
+			},
+		]",
+	);
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse("[]");
+	assert_eq!(tmp, val);
+	//
 	Ok(())
 }

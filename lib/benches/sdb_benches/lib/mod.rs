@@ -1,6 +1,7 @@
 use criterion::{Criterion, Throughput};
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
+#[cfg(any(feature = "kv-rocksdb", feature = "kv-fdb", feature = "kv-surrealkv"))]
 use surrealdb::dbs::Session;
 use surrealdb::kvs::Datastore;
 
@@ -30,15 +31,23 @@ pub(super) async fn init(target: &str) {
 				.expect("Unable to execute the query");
 			let _ = DB.set(Arc::new(ds));
 		}
-		#[cfg(feature = "kv-fdb")]
-		"lib-fdb" => {
-			let ds = Datastore::new("fdb:///etc/foundationdb/fdb.cluster").await.unwrap();
-			// Verify it can connect to the FDB cluster
+		#[cfg(feature = "kv-surrealkv")]
+		"lib-surrealkv" => {
+			let path = format!(
+				"surrealkv://lib-surrealkv-{}.db",
+				std::time::SystemTime::now()
+					.duration_since(std::time::UNIX_EPOCH)
+					.unwrap()
+					.as_millis()
+			);
+			println!("\n### Using path: {} ###\n", path);
+			let ds = Datastore::new(&path).await.unwrap();
 			ds.execute("INFO FOR DB", &Session::owner().with_ns("ns").with_db("db"), None)
 				.await
-				.expect("Unable to connect to FDB cluster");
+				.expect("Unable to execute the query");
 			let _ = DB.set(Arc::new(ds));
 		}
+
 		_ => panic!("Unknown target: {}", target),
 	}
 }

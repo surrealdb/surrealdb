@@ -1,65 +1,18 @@
 use crate::rpc::failure::Failure;
-use crate::rpc::format::Format;
+use crate::rpc::format::WsFormat;
 use crate::telemetry::metrics::ws::record_rpc;
 use axum::extract::ws::Message;
 use opentelemetry::Context as TelemetryContext;
+use revision::revisioned;
 use serde::Serialize;
-use serde_json::Value as Json;
+use std::sync::Arc;
 use surrealdb::channel::Sender;
-use surrealdb::dbs;
-use surrealdb::dbs::Notification;
-use surrealdb::sql;
+use surrealdb::rpc::format::Format;
+use surrealdb::rpc::Data;
 use surrealdb::sql::Value;
 use tracing::Span;
 
-/// The data returned by the database
-// The variants here should be in exactly the same order as `surrealdb::engine::remote::ws::Data`
-// In future, they will possibly be merged to avoid having to keep them in sync.
-#[derive(Debug, Serialize)]
-pub enum Data {
-	/// Generally methods return a `sql::Value`
-	Other(Value),
-	/// The query methods, `query` and `query_with` return a `Vec` of responses
-	Query(Vec<dbs::Response>),
-	/// Live queries return a notification
-	Live(Notification),
-	// Add new variants here
-}
-
-impl From<Value> for Data {
-	fn from(v: Value) -> Self {
-		Data::Other(v)
-	}
-}
-
-impl From<String> for Data {
-	fn from(v: String) -> Self {
-		Data::Other(Value::from(v))
-	}
-}
-
-impl From<Notification> for Data {
-	fn from(n: Notification) -> Self {
-		Data::Live(n)
-	}
-}
-
-impl From<Vec<dbs::Response>> for Data {
-	fn from(v: Vec<dbs::Response>) -> Self {
-		Data::Query(v)
-	}
-}
-
-impl From<Data> for Value {
-	fn from(val: Data) -> Self {
-		match val {
-			Data::Query(v) => sql::to_value(v).unwrap(),
-			Data::Live(v) => sql::to_value(v).unwrap(),
-			Data::Other(v) => v,
-		}
-	}
-}
-
+#[revisioned(revision = 1)]
 #[derive(Debug, Serialize)]
 pub struct Response {
 	id: Option<Value>,
@@ -67,12 +20,6 @@ pub struct Response {
 }
 
 impl Response {
-	/// Convert and simplify the value into JSON
-	#[inline]
-	pub fn into_json(self) -> Json {
-		Json::from(self.into_value())
-	}
-
 	#[inline]
 	pub fn into_value(self) -> Value {
 		let mut value = match self.result {
@@ -90,7 +37,7 @@ impl Response {
 	}
 
 	/// Send the response to the WebSocket channel
-	pub async fn send(self, fmt: Format, chn: &Sender<Message>) {
+	pub async fn send(self, cx: Arc<TelemetryContext>, fmt: Format, chn: &Sender<Message>) {
 		// Create a new tracing span
 		let span = Span::current();
 		// Log the rpc response call
@@ -107,11 +54,17 @@ impl Response {
 			span.record("rpc.error_message", err.message.as_ref());
 		}
 		// Process the response for the format
-		let (len, msg) = fmt.res(self).unwrap();
+		let (len, msg) = fmt.res_ws(self).unwrap();
 		// Send the message to the write channel
 		if chn.send(msg).await.is_ok() {
-			record_rpc(&TelemetryContext::current(), len, is_error);
+			record_rpc(cx.as_ref(), len, is_error);
 		};
+	}
+}
+
+impl From<Response> for Value {
+	fn from(value: Response) -> Self {
+		value.into_value()
 	}
 }
 

@@ -1,20 +1,17 @@
-use crate::api::conn::Method;
-use crate::api::conn::Param;
+use crate::api::conn::Command;
+use crate::api::method::BoxFuture;
 use crate::api::method::OnceLockExt;
-use crate::api::opt::Range;
 use crate::api::opt::Resource;
 use crate::api::Connection;
 use crate::api::Result;
 use crate::method::Live;
-use crate::sql::Id;
-use crate::sql::Value;
+use crate::opt::KeyRange;
 use crate::Surreal;
+use crate::Value;
 use serde::de::DeserializeOwned;
 use std::borrow::Cow;
-use std::future::Future;
 use std::future::IntoFuture;
 use std::marker::PhantomData;
-use std::pin::Pin;
 
 /// A select future
 #[derive(Debug)]
@@ -22,7 +19,6 @@ use std::pin::Pin;
 pub struct Select<'r, C: Connection, R, T = ()> {
 	pub(super) client: Cow<'r, Surreal<C>>,
 	pub(super) resource: Result<Resource>,
-	pub(super) range: Option<Range<Id>>,
 	pub(super) response_type: PhantomData<R>,
 	pub(super) query_type: PhantomData<T>,
 }
@@ -46,16 +42,15 @@ macro_rules! into_future {
 			let Select {
 				client,
 				resource,
-				range,
 				..
 			} = self;
 			Box::pin(async move {
-				let param = match range {
-					Some(range) => resource?.with_range(range)?.into(),
-					None => resource?.into(),
-				};
-				let mut conn = Client::new(Method::Select);
-				conn.$method(client.router.extract()?, Param::new(vec![param])).await
+				let router = client.router.extract()?;
+				router
+					.$method(Command::Select {
+						what: resource?,
+					})
+					.await
 			})
 		}
 	};
@@ -66,7 +61,7 @@ where
 	Client: Connection,
 {
 	type Output = Result<Value>;
-	type IntoFuture = Pin<Box<dyn Future<Output = Self::Output> + Send + Sync + 'r>>;
+	type IntoFuture = BoxFuture<'r, Self::Output>;
 
 	into_future! {execute_value}
 }
@@ -77,7 +72,7 @@ where
 	R: DeserializeOwned,
 {
 	type Output = Result<Option<R>>;
-	type IntoFuture = Pin<Box<dyn Future<Output = Self::Output> + Send + Sync + 'r>>;
+	type IntoFuture = BoxFuture<'r, Self::Output>;
 
 	into_future! {execute_opt}
 }
@@ -88,7 +83,7 @@ where
 	R: DeserializeOwned,
 {
 	type Output = Result<Vec<R>>;
-	type IntoFuture = Pin<Box<dyn Future<Output = Self::Output> + Send + Sync + 'r>>;
+	type IntoFuture = BoxFuture<'r, Self::Output>;
 
 	into_future! {execute_vec}
 }
@@ -98,8 +93,8 @@ where
 	C: Connection,
 {
 	/// Restricts the records selected to those in the specified range
-	pub fn range(mut self, bounds: impl Into<Range<Id>>) -> Self {
-		self.range = Some(bounds.into());
+	pub fn range(mut self, range: impl Into<KeyRange>) -> Self {
+		self.resource = self.resource.and_then(|x| x.with_range(range.into()));
 		self
 	}
 }
@@ -109,8 +104,8 @@ where
 	C: Connection,
 {
 	/// Restricts the records selected to those in the specified range
-	pub fn range(mut self, bounds: impl Into<Range<Id>>) -> Self {
-		self.range = Some(bounds.into());
+	pub fn range(mut self, range: impl Into<KeyRange>) -> Self {
+		self.resource = self.resource.and_then(|x| x.with_range(range.into()));
 		self
 	}
 }
@@ -171,7 +166,6 @@ where
 		Select {
 			client: self.client,
 			resource: self.resource,
-			range: self.range,
 			response_type: self.response_type,
 			query_type: PhantomData,
 		}

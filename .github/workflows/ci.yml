@@ -15,26 +15,14 @@ defaults:
     shell: bash
 
 jobs:
-  # TODO: Do not run it on CI because it's very slow right now.
-  # Build the Docker image but don't push it.
-  # docker:
-  #   uses: ./.github/workflows/reusable_docker.yml
-  #   with:
-  #     git-ref: ${{ github.ref }}
-  #     tag-prefix: ${{ github.head_ref || github.ref_name }}
-  #     build: true
-  #     push: false
-  #   secrets: inherit
-
   format:
     name: Check format
     runs-on: ubuntu-latest
     steps:
-
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: 1.75.0
+          toolchain: stable
           components: rustfmt
 
       - name: Checkout sources
@@ -55,11 +43,10 @@ jobs:
     name: Check workspace
     runs-on: ubuntu-latest
     steps:
-
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: 1.75.0
+          toolchain: stable
 
       - name: Checkout sources
         uses: actions/checkout@v4
@@ -79,35 +66,43 @@ jobs:
       - name: Check workspace
         run: cargo make ci-check
 
-  check-dependencies:
-    name: Check dependencies
+  check-fuzzing:
+    name: Check fuzzing
     runs-on: ubuntu-latest
     steps:
-
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: 1.75.0
+          toolchain: 1.79.0
           components: rustfmt
 
       - name: Checkout sources
         uses: actions/checkout@v4
 
-      - name: Install cargo-deny
-        run: cargo install --debug --locked cargo-deny
+      - name: Setup cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
-      - name: Check dependencies
-        run: cargo deny check
+      - name: Check fuzzers
+        run: cargo build --manifest-path lib/fuzz/Cargo.toml
+
+      - name: Check OSS-Fuzz
+        uses: google/oss-fuzz/infra/cifuzz/actions/build_fuzzers@master
+        with:
+          oss-fuzz-project-name: surrealdb
+          language: rust
+        # Temporarily allow this step to fail
+        continue-on-error: true
 
   check-wasm:
     name: Check Wasm
     runs-on: ubuntu-latest
     steps:
-
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: 1.75.0
+          toolchain: stable
           targets: wasm32-unknown-unknown
 
       - name: Checkout sources
@@ -128,11 +123,10 @@ jobs:
     name: Check clippy
     runs-on: ubuntu-latest
     steps:
-
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: 1.75.0
+          toolchain: stable
           components: clippy
 
       - name: Checkout sources
@@ -157,11 +151,10 @@ jobs:
     name: CLI integration tests
     runs-on: ubuntu-latest
     steps:
-
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: 1.75.0
+          toolchain: stable
 
       - name: Checkout sources
         uses: actions/checkout@v4
@@ -190,16 +183,14 @@ jobs:
           ps auxf
           cat /tmp/surrealdb.log || true
 
-
   http-server:
     name: HTTP integration tests
     runs-on: ubuntu-latest
     steps:
-
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: 1.75.0
+          toolchain: stable
 
       - name: Checkout sources
         uses: actions/checkout@v4
@@ -223,14 +214,13 @@ jobs:
     name: ML integration tests
     runs-on: ubuntu-latest
     steps:
-
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: 1.74.1
+          toolchain: stable
 
       - name: Checkout sources
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Setup cache
         uses: Swatinem/rust-cache@v2
@@ -251,11 +241,10 @@ jobs:
     name: WebSocket integration tests
     runs-on: ubuntu-latest
     steps:
-
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: 1.75.0
+          toolchain: stable
 
       - name: Checkout sources
         uses: actions/checkout@v4
@@ -277,13 +266,12 @@ jobs:
 
   test:
     name: Test workspace
-    runs-on: ubuntu-latest
+    runs-on: [ "self-hosted", "arm64", "builder" ]
     steps:
-
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: 1.75.0
+          toolchain: stable
 
       - name: Checkout sources
         uses: actions/checkout@v4
@@ -296,17 +284,6 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get -y update
-
-      - name: Free up some disk space
-        run: |
-          (set -x; df -h)
-          # Free up some disk space by removing unused files
-          (set -x; sudo rm -rf /imagegeneration || true)
-          (set -x; sudo rm -rf /opt/az || true)
-          (set -x; sudo rm -rf /opt/hostedtoolcache || true)
-          (set -x; sudo rm -rf /opt/google || true)
-          (set -x; sudo rm -rf /opt/pipx || true)
-          (set -x; df -h)
 
       - name: Install cargo-llvm-cov
         uses: taiki-e/install-action@cargo-llvm-cov
@@ -318,7 +295,7 @@ jobs:
         run: cargo make ci-workspace-coverage
 
       - name: Upload coverage report
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         timeout-minutes: 1
         continue-on-error: true
         with:
@@ -326,15 +303,14 @@ jobs:
           path: target/llvm-cov/html/
           retention-days: 5
 
-  test-parser:
-    name: Test workspace with experimental parser
+  test-sdk-build:
+    name: Test SDK build
     runs-on: ubuntu-latest
     steps:
-
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: 1.75.0
+          toolchain: stable
 
       - name: Checkout sources
         uses: actions/checkout@v4
@@ -348,32 +324,22 @@ jobs:
         run: |
           sudo apt-get -y update
 
-      - name: Free up some disk space
-        run: |
-          (set -x; df -h)
-          # Free up some disk space by removing unused files
-          (set -x; sudo rm -rf /imagegeneration || true)
-          (set -x; sudo rm -rf /opt/az || true)
-          (set -x; sudo rm -rf /opt/hostedtoolcache || true)
-          (set -x; sudo rm -rf /opt/google || true)
-          (set -x; sudo rm -rf /opt/pipx || true)
-          (set -x; df -h)
+      - name: Build local
+        working-directory: tests/sdk/local
+        run: cargo build
 
-      - name: Install cargo-make
-        run: cargo install --debug --locked cargo-make
-
-      - name: Test workspace for experimental_parser
-        run: cargo make test-experimental-parser
+      - name: Build remote
+        working-directory: tests/sdk/remote
+        run: cargo build
 
   ws-engine:
     name: WebSocket engine
     runs-on: ubuntu-latest
     steps:
-
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: 1.75.0
+          toolchain: stable
 
       - name: Checkout sources
         uses: actions/checkout@v4
@@ -406,11 +372,10 @@ jobs:
     name: HTTP engine
     runs-on: ubuntu-latest
     steps:
-
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: 1.75.0
+          toolchain: stable
 
       - name: Checkout sources
         uses: actions/checkout@v4
@@ -443,11 +408,10 @@ jobs:
     name: Any engine
     runs-on: ubuntu-latest
     steps:
-
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: 1.75.0
+          toolchain: stable
 
       - name: Checkout sources
         uses: actions/checkout@v4
@@ -480,11 +444,10 @@ jobs:
     name: Memory engine
     runs-on: ubuntu-latest
     steps:
-
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: 1.75.0
+          toolchain: stable
 
       - name: Checkout sources
         uses: actions/checkout@v4
@@ -504,11 +467,10 @@ jobs:
     name: File engine
     runs-on: ubuntu-latest
     steps:
-
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: 1.75.0
+          toolchain: stable
 
       - name: Checkout sources
         uses: actions/checkout@v4
@@ -528,11 +490,10 @@ jobs:
     name: RocksDB engine
     runs-on: ubuntu-latest
     steps:
-
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: 1.75.0
+          toolchain: stable
 
       - name: Checkout sources
         uses: actions/checkout@v4
@@ -548,39 +509,14 @@ jobs:
       - name: Test rocksdb engine
         run: cargo make ci-api-integration-rocksdb
 
-  speedb-engine:
-    name: SpeeDB engine
+  tikv-engine:
+    name: TiKV engine
     runs-on: ubuntu-latest
     steps:
-
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: 1.75.0
-
-      - name: Checkout sources
-        uses: actions/checkout@v4
-
-      - name: Setup cache
-        uses: Swatinem/rust-cache@v2
-        with:
-          save-if: ${{ github.ref == 'refs/heads/main' }}
-
-      - name: Install cargo-make
-        run: cargo install --debug --locked cargo-make
-
-      - name: Test speedb engine
-        run: cargo make ci-api-integration-speedb
-
-  tikv-engine:
-     name: TiKV engine
-     runs-on: ubuntu-latest
-     steps:
-
-      - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          toolchain: 1.75.0
+          toolchain: stable
 
       - name: Checkout sources
         uses: actions/checkout@v4
@@ -620,11 +556,10 @@ jobs:
     name: FoundationDB engine
     runs-on: ubuntu-latest
     steps:
-
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: 1.75.0
+          toolchain: stable
 
       - name: Checkout sources
         uses: actions/checkout@v4
@@ -634,16 +569,24 @@ jobs:
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
-      - name: Setup FoundationDB
-        uses: foundationdb-rs/foundationdb-actions-install@v2.1.0
-        with:
-          version: "7.1.30"
-
       - name: Install cargo-make
         run: cargo install --debug --locked cargo-make
 
+      - name: Setup FoundationDB
+        uses: foundationdb-rs/foundationdb-actions-install@v.2.2.0
+        with:
+          version: "7.1.61"
+
       - name: Test fdb engine
-        run: cargo make ci-api-integration-fdb
+        run: cargo make ci-api-integration-fdb-7_1
+
+      - name: Setup FoundationDB
+        uses: foundationdb-rs/foundationdb-actions-install@v.2.2.0
+        with:
+          version: "7.3.47"
+
+      - name: Test fdb engine
+        run: cargo make ci-api-integration-fdb-7_3
 
       - name: Debug info
         if: always()
@@ -653,3 +596,60 @@ jobs:
           df -h
           ps auxf
           cat /tmp/surrealdb.log || true
+
+  surrealkv-engine:
+    name: SurrealKV engine
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+
+      - name: Checkout sources
+        uses: actions/checkout@v4
+
+      - name: Setup cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Install cargo-make
+        run: cargo install --debug --locked cargo-make
+
+      - name: Test surrealkv engine
+        run: cargo make ci-api-integration-surrealkv
+
+      - name: Debug info
+        if: always()
+        run: |
+          set -x
+          free -m
+          df -h
+          ps auxf
+          cat /tmp/surrealdb.log || true
+
+  db-upgrade:
+    name: Database Upgrade from previous versions
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+
+      - name: Checkout sources
+        uses: actions/checkout@v4
+
+      - name: Setup cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Install cargo-make
+        run: cargo install --debug --locked cargo-make
+
+      - name: Test upgrade
+        # Allow breaking changes until v2 stabilises
+        continue-on-error: true
+        run: cargo make ci-database-upgrade

@@ -1,12 +1,43 @@
 use crate::err::Error;
+use revision::revisioned;
+use revision::Revisioned;
 use serde::Serialize;
 use std::borrow::Cow;
+use surrealdb::rpc::RpcError;
 use surrealdb::sql::Value;
 
 #[derive(Clone, Debug, Serialize)]
 pub struct Failure {
 	pub(crate) code: i64,
 	pub(crate) message: Cow<'static, str>,
+}
+
+#[revisioned(revision = 1)]
+#[derive(Clone, Debug, Serialize)]
+struct Inner {
+	code: i64,
+	message: String,
+}
+
+impl Revisioned for Failure {
+	fn serialize_revisioned<W: std::io::Write>(
+		&self,
+		writer: &mut W,
+	) -> Result<(), revision::Error> {
+		let inner = Inner {
+			code: self.code,
+			message: self.message.as_ref().to_owned(),
+		};
+		inner.serialize_revisioned(writer)
+	}
+
+	fn deserialize_revisioned<R: std::io::Read>(_reader: &mut R) -> Result<Self, revision::Error> {
+		unreachable!("deserialization not supported for this type")
+	}
+
+	fn revision() -> u16 {
+		1
+	}
 }
 
 impl From<&str> for Failure {
@@ -18,6 +49,20 @@ impl From<&str> for Failure {
 impl From<Error> for Failure {
 	fn from(err: Error) -> Self {
 		Failure::custom(err.to_string())
+	}
+}
+
+impl From<RpcError> for Failure {
+	fn from(err: RpcError) -> Self {
+		match err {
+			RpcError::ParseError => Failure::PARSE_ERROR,
+			RpcError::InvalidRequest => Failure::INVALID_REQUEST,
+			RpcError::MethodNotFound => Failure::METHOD_NOT_FOUND,
+			RpcError::InvalidParams => Failure::INVALID_PARAMS,
+			RpcError::InternalError(_) => Failure::custom(err.to_string()),
+			RpcError::Thrown(_) => Failure::custom(err.to_string()),
+			_ => Failure::custom(err.to_string()),
+		}
 	}
 }
 

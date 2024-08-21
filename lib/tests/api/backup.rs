@@ -1,6 +1,7 @@
 // Tests for exporting and importing data
 // Supported by the storage engines and the HTTP protocol
 
+use surrealdb_core::sql::Table;
 use tokio::fs::remove_file;
 
 #[test_log::test(tokio::test)]
@@ -9,10 +10,10 @@ async fn export_import() {
 	let db_name = Ulid::new().to_string();
 	db.use_ns(NS).use_db(&db_name).await.unwrap();
 	for i in 0..10 {
-		let _: Vec<RecordId> = db
+		let _: Vec<ApiRecordId> = db
 			.create("user")
 			.content(Record {
-				name: &format!("User {i}"),
+				name: format!("User {i}"),
 			})
 			.await
 			.unwrap();
@@ -22,6 +23,7 @@ async fn export_import() {
 
 	let res = async {
 		db.export(&file).await?;
+		db.query("REMOVE TABLE user").await?;
 		db.import(&file).await?;
 		Result::<(), Error>::Ok(())
 	}

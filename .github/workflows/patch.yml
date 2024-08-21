@@ -36,20 +36,21 @@ jobs:
     needs: [tag-check]
     runs-on: ubuntu-latest
     steps:
-      - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          toolchain: stable
-
       - name: Checkout sources
         uses: actions/checkout@v4
         with:
           ref: ${{ inputs.git-tag }}
+          token: ${{ secrets.RELEASE_PLZ_TOKEN }}
 
       - name: Install a TOML parser
-        run: cargo install --force --locked --version 0.8.1 taplo-cli
+        run: |
+          curl -L https://github.com/tamasfe/taplo/releases/download/0.8.1/taplo-full-linux-x86_64.gz | gunzip - > taplo
+          chmod +x taplo
+          sudo mv taplo /usr/bin/taplo
 
       - name: Prepare patch branch
+        env:
+          RUSTFLAGS: "--cfg surrealdb_unstable"
         run: |
           set -x
 
@@ -59,7 +60,7 @@ jobs:
           git config --add --bool push.autoSetupRemote true
 
           # Calculate new version
-          currentVersion=$(/home/runner/.cargo/bin/taplo get -f lib/Cargo.toml "package.version")
+          currentVersion=$(taplo get -f Cargo.toml "package.version")
           major=$(echo $currentVersion | tr "." "\n" | sed -n 1p)
           minor=$(echo $currentVersion | tr "." "\n" | sed -n 2p)
           patch=$(echo $currentVersion | tr "." "\n" | sed -n 3p)
@@ -68,6 +69,10 @@ jobs:
           # Bump the crate version
           sed -i "s#^version = \".*\"#version = \"${version}\"#" Cargo.toml
           sed -i "s#^version = \".*\"#version = \"${version}\"#" lib/Cargo.toml
+          sed -i "s#^version = \".*\"#version = \"2.0.0-${version}\"#" core/Cargo.toml
+
+          # Update dependency versions
+          sed -i "s#surrealdb-core2 = { version = \"=2.0.0-${currentVersion}\"#surrealdb-core2 = { version = \"=2.0.0-${version}\"#" lib/Cargo.toml
 
           # Update Cargo.lock without updating dependency versions
           cargo check --no-default-features --features storage-mem

@@ -1,13 +1,21 @@
-use crate::api::{err::Error, opt::from_value, Response as QueryResponse, Result};
-use crate::method;
-use crate::method::{Stats, Stream};
-use crate::sql::{self, statements::*, Array, Object, Statement, Statements, Value};
-use crate::{syn, Notification};
+use crate::{
+	api::{err::Error, Response as QueryResponse, Result},
+	method::{self, Stats, Stream},
+	value::Notification,
+	Value,
+};
 use futures::future::Either;
 use futures::stream::select_all;
 use serde::de::DeserializeOwned;
 use std::marker::PhantomData;
 use std::mem;
+use surrealdb_core::{
+	sql::{
+		self, from_value as from_core_value, statements::*, Statement, Statements,
+		Value as CoreValue,
+	},
+	syn,
+};
 
 /// A trait for converting inputs into SQL statements
 pub trait IntoQuery {
@@ -17,15 +25,13 @@ pub trait IntoQuery {
 
 impl IntoQuery for sql::Query {
 	fn into_query(self) -> Result<Vec<Statement>> {
-		let sql::Query(Statements(statements)) = self;
-		Ok(statements)
+		Ok(self.0 .0)
 	}
 }
 
 impl IntoQuery for Statements {
 	fn into_query(self) -> Result<Vec<Statement>> {
-		let Statements(statements) = self;
-		Ok(statements)
+		Ok(self.0)
 	}
 }
 
@@ -143,6 +149,12 @@ impl IntoQuery for DefineStatement {
 	}
 }
 
+impl IntoQuery for AlterStatement {
+	fn into_query(self) -> Result<Vec<Statement>> {
+		Ok(vec![Statement::Alter(self)])
+	}
+}
+
 impl IntoQuery for RemoveStatement {
 	fn into_query(self) -> Result<Vec<Statement>> {
 		Ok(vec![Statement::Remove(self)])
@@ -189,9 +201,9 @@ where
 
 impl QueryResult<Value> for usize {
 	fn query_result(self, response: &mut QueryResponse) -> Result<Value> {
-		match response.results.remove(&self) {
-			Some((_, result)) => Ok(result?),
-			None => Ok(Value::None),
+		match response.results.swap_remove(&self) {
+			Some((_, result)) => Ok(Value::from_inner(result?)),
+			None => Ok(Value::from_inner(CoreValue::None)),
 		}
 	}
 
@@ -210,7 +222,7 @@ where
 				Ok(val) => val,
 				Err(error) => {
 					let error = mem::replace(error, Error::ConnectionUninitialised.into());
-					response.results.remove(&self);
+					response.results.swap_remove(&self);
 					return Err(error);
 				}
 			},
@@ -219,11 +231,11 @@ where
 			}
 		};
 		let result = match value {
-			Value::Array(Array(vec)) => match &mut vec[..] {
+			CoreValue::Array(vec) => match &mut vec.0[..] {
 				[] => Ok(None),
 				[value] => {
 					let value = mem::take(value);
-					from_value(value).map_err(Into::into)
+					from_core_value(value).map_err(Into::into)
 				}
 				_ => Err(Error::LossyTake(QueryResponse {
 					results: mem::take(&mut response.results),
@@ -234,10 +246,10 @@ where
 			},
 			_ => {
 				let value = mem::take(value);
-				from_value(value).map_err(Into::into)
+				from_core_value(value).map_err(Into::into)
 			}
 		};
-		response.results.remove(&self);
+		response.results.swap_remove(&self);
 		result
 	}
 
@@ -254,21 +266,21 @@ impl QueryResult<Value> for (usize, &str) {
 				Ok(val) => val,
 				Err(error) => {
 					let error = mem::replace(error, Error::ConnectionUninitialised.into());
-					response.results.remove(&index);
+					response.results.swap_remove(&index);
 					return Err(error);
 				}
 			},
 			None => {
-				return Ok(Value::None);
+				return Ok(Value::from_inner(CoreValue::None));
 			}
 		};
 
 		let value = match value {
-			Value::Object(Object(object)) => object.remove(key).unwrap_or_default(),
-			_ => Value::None,
+			CoreValue::Object(object) => object.remove(key).unwrap_or_default(),
+			_ => CoreValue::None,
 		};
 
-		Ok(value)
+		Ok(Value::from_inner(value))
 	}
 
 	fn stats(&self, response: &QueryResponse) -> Option<Stats> {
@@ -287,7 +299,7 @@ where
 				Ok(val) => val,
 				Err(error) => {
 					let error = mem::replace(error, Error::ConnectionUninitialised.into());
-					response.results.remove(&index);
+					response.results.swap_remove(&index);
 					return Err(error);
 				}
 			},
@@ -296,9 +308,9 @@ where
 			}
 		};
 		let value = match value {
-			Value::Array(Array(vec)) => match &mut vec[..] {
+			CoreValue::Array(vec) => match &mut vec.0[..] {
 				[] => {
-					response.results.remove(&index);
+					response.results.swap_remove(&index);
 					return Ok(None);
 				}
 				[value] => value,
@@ -314,19 +326,19 @@ where
 			value => value,
 		};
 		match value {
-			Value::None | Value::Null => {
-				response.results.remove(&index);
+			CoreValue::None => {
+				response.results.swap_remove(&index);
 				Ok(None)
 			}
-			Value::Object(Object(object)) => {
+			CoreValue::Object(object) => {
 				if object.is_empty() {
-					response.results.remove(&index);
+					response.results.swap_remove(&index);
 					return Ok(None);
 				}
 				let Some(value) = object.remove(key) else {
 					return Ok(None);
 				};
-				from_value(value).map_err(Into::into)
+				from_core_value(value).map_err(Into::into)
 			}
 			_ => Ok(None),
 		}
@@ -342,16 +354,16 @@ where
 	T: DeserializeOwned,
 {
 	fn query_result(self, response: &mut QueryResponse) -> Result<Vec<T>> {
-		let vec = match response.results.remove(&self) {
+		let vec = match response.results.swap_remove(&self) {
 			Some((_, result)) => match result? {
-				Value::Array(Array(vec)) => vec,
+				CoreValue::Array(vec) => vec.0,
 				vec => vec![vec],
 			},
 			None => {
 				return Ok(vec![]);
 			}
 		};
-		from_value(vec.into()).map_err(Into::into)
+		from_core_value(vec.into()).map_err(Into::into)
 	}
 
 	fn stats(&self, response: &QueryResponse) -> Option<Stats> {
@@ -368,7 +380,7 @@ where
 		let mut response = match response.results.get_mut(&index) {
 			Some((_, result)) => match result {
 				Ok(val) => match val {
-					Value::Array(Array(vec)) => mem::take(vec),
+					CoreValue::Array(vec) => mem::take(&mut vec.0),
 					val => {
 						let val = mem::take(val);
 						vec![val]
@@ -376,7 +388,7 @@ where
 				},
 				Err(error) => {
 					let error = mem::replace(error, Error::ConnectionUninitialised.into());
-					response.results.remove(&index);
+					response.results.swap_remove(&index);
 					return Err(error);
 				}
 			},
@@ -386,13 +398,13 @@ where
 		};
 		let mut vec = Vec::with_capacity(response.len());
 		for value in response.iter_mut() {
-			if let Value::Object(Object(object)) = value {
+			if let CoreValue::Object(object) = value {
 				if let Some(value) = object.remove(key) {
 					vec.push(value);
 				}
 			}
 		}
-		from_value(vec.into()).map_err(Into::into)
+		from_core_value(vec.into()).map_err(Into::into)
 	}
 
 	fn stats(&self, response: &QueryResponse) -> Option<Stats> {
@@ -434,10 +446,10 @@ impl QueryStream<Value> for usize {
 	fn query_stream(self, response: &mut QueryResponse) -> Result<method::QueryStream<Value>> {
 		let stream = response
 			.live_queries
-			.remove(&self)
+			.swap_remove(&self)
 			.and_then(|result| match result {
 				Err(crate::Error::Api(Error::NotLiveQuery(..))) => {
-					response.results.remove(&self).and_then(|x| x.1.err().map(Err))
+					response.results.swap_remove(&self).and_then(|x| x.1.err().map(Err))
 				}
 				result => Some(result),
 			})
@@ -455,7 +467,7 @@ impl QueryStream<Value> for () {
 		for (index, result) in mem::take(&mut response.live_queries) {
 			match result {
 				Ok(stream) => streams.push(stream),
-				Err(crate::Error::Api(Error::NotLiveQuery(..))) => match response.results.remove(&index) {
+				Err(crate::Error::Api(Error::NotLiveQuery(..))) => match response.results.swap_remove(&index) {
 					Some((stats, Err(error))) => {
 						response.results.insert(index, (stats, Err(Error::ResponseAlreadyTaken.into())));
 						return Err(error);
@@ -480,10 +492,10 @@ where
 	) -> Result<method::QueryStream<Notification<R>>> {
 		let mut stream = response
 			.live_queries
-			.remove(&self)
+			.swap_remove(&self)
 			.and_then(|result| match result {
 				Err(crate::Error::Api(Error::NotLiveQuery(..))) => {
-					response.results.remove(&self).and_then(|x| x.1.err().map(Err))
+					response.results.swap_remove(&self).and_then(|x| x.1.err().map(Err))
 				}
 				result => Some(result),
 			})
@@ -493,7 +505,6 @@ where
 			})?;
 		Ok(method::QueryStream(Either::Left(Stream {
 			client: stream.client.clone(),
-			engine: stream.engine,
 			id: mem::take(&mut stream.id),
 			rx: stream.rx.take(),
 			response_type: PhantomData,
@@ -513,7 +524,7 @@ where
 		for (index, result) in mem::take(&mut response.live_queries) {
 			let mut stream = match result {
 				Ok(stream) => stream,
-				Err(crate::Error::Api(Error::NotLiveQuery(..))) => match response.results.remove(&index) {
+				Err(crate::Error::Api(Error::NotLiveQuery(..))) => match response.results.swap_remove(&index) {
 					Some((stats, Err(error))) => {
 						response.results.insert(index, (stats, Err(Error::ResponseAlreadyTaken.into())));
 						return Err(error);
@@ -525,7 +536,6 @@ where
 			};
 			streams.push(Stream {
 				client: stream.client.clone(),
-				engine: stream.engine,
 				id: mem::take(&mut stream.id),
 				rx: stream.rx.take(),
 				response_type: PhantomData,

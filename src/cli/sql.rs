@@ -5,19 +5,17 @@ use crate::cli::abstraction::{
 use crate::cnf::PKG_VERSION;
 use crate::err::Error;
 use clap::Args;
-use futures::channel::mpsc::{self, UnboundedReceiver, UnboundedSender};
-use futures_util::{SinkExt, StreamExt};
+use futures::StreamExt;
 use rustyline::error::ReadlineError;
 use rustyline::validate::{ValidationContext, ValidationResult, Validator};
 use rustyline::{Completer, Editor, Helper, Highlighter, Hinter};
 use serde::Serialize;
 use serde_json::ser::PrettyFormatter;
-use surrealdb::dbs::Capabilities;
 use surrealdb::engine::any::{connect, IntoEndpoint};
 use surrealdb::method::{Stats, WithStats};
-use surrealdb::opt::Config;
-use surrealdb::sql::{self, Statement, Value};
-use surrealdb::{Notification, Response};
+use surrealdb::opt::{capabilities::Capabilities, Config};
+use surrealdb::sql::{self, Param, Statement, Uuid as CoreUuid, Value as CoreValue};
+use surrealdb::{Notification, Response, Value};
 
 #[derive(Args, Debug)]
 pub struct SqlCommandArguments {
@@ -46,6 +44,7 @@ pub async fn init(
 		auth: AuthArguments {
 			username,
 			password,
+			token,
 			auth_level,
 		},
 		conn: DatabaseConnectionArguments {
@@ -68,7 +67,7 @@ pub async fn init(
 	let config = Config::new().capabilities(Capabilities::all());
 
 	// If username and password are specified, and we are connecting to a remote SurrealDB server, then we need to authenticate.
-	// If we are connecting directly to a datastore (i.e. file://local.db or tikv://...), then we don't need to authenticate because we use an embedded (local) SurrealDB instance with auth disabled.
+	// If we are connecting directly to a datastore (i.e. surrealkv://local.skv or tikv://...), then we don't need to authenticate because we use an embedded (local) SurrealDB instance with auth disabled.
 	let client = if username.is_some()
 		&& password.is_some()
 		&& !endpoint.clone().into_endpoint()?.parse_kind()?.is_local()
@@ -88,6 +87,11 @@ pub async fn init(
 			CredentialsLevel::Namespace => client.signin(creds.namespace()?).await?,
 			CredentialsLevel::Database => client.signin(creds.database()?).await?,
 		};
+
+		client
+	} else if token.is_some() && !endpoint.clone().into_endpoint()?.parse_kind()?.is_local() {
+		let client = connect(endpoint).await?;
+		client.authenticate(token.unwrap()).await?;
 
 		client
 	} else {
@@ -151,10 +155,6 @@ pub async fn init(
 		);
 	}
 
-	// Set up the print job
-	let (tx, rx) = mpsc::unbounded();
-	tokio::spawn(printer(rx));
-
 	// Loop over each command-line input
 	loop {
 		// Prompt the user to input SQL and check the input.
@@ -179,12 +179,17 @@ pub async fn init(
 				break;
 			}
 		};
+		// Move on if the line is empty
+		if line.trim().is_empty() {
+			continue;
+		}
 		// Complete the request
 		match sql::parse(&line) {
-			Ok(query) => {
+			Ok(mut query) => {
 				let mut namespace = None;
 				let mut database = None;
 				let mut vars = Vec::new();
+				let init_length = query.len();
 				// Capture `use` and `set/let` statements from the query
 				for statement in query.iter() {
 					match statement {
@@ -196,12 +201,15 @@ pub async fn init(
 								database = Some(db.clone());
 							}
 						}
-						Statement::Set(stmt) => {
-							vars.push((stmt.name.clone(), stmt.what.clone()));
-						}
+						Statement::Set(stmt) => vars.push(stmt.name.clone()),
 						_ => {}
 					}
 				}
+
+				for var in &vars {
+					query.push(Statement::Value(CoreValue::Param(Param::from(var.as_str()))))
+				}
+
 				// Extract the namespace and database from the current prompt
 				let (prompt_ns, prompt_db) = split_prompt(&prompt);
 				// The namespace should be set before the database can be set
@@ -212,17 +220,23 @@ pub async fn init(
 					continue;
 				}
 				// Run the query provided
-				let result = client.query(query).with_stats().await;
-				let result = process(pretty, json, result, tx.clone());
+				let mut result = client.query(query).with_stats().await;
+
+				if let Ok(WithStats(res)) = &mut result {
+					for (i, n) in vars.into_iter().enumerate() {
+						if let Result::<Value, _>::Ok(v) = res.take(init_length + i) {
+							let _ = client.set(n, v).await;
+						}
+					}
+				}
+
+				let result = process(pretty, json, result);
 				let result_is_error = result.is_err();
-				tx.clone().send(result).await.expect("print job terminated unexpectedly");
+				print(result);
 				if result_is_error {
 					continue;
 				}
-				// Persist the variables extracted from the query
-				for (key, value) in vars {
-					let _ = client.set(key, value).await;
-				}
+
 				// Process the last `use` statements, if any
 				if namespace.is_some() || database.is_some() {
 					// Use the namespace provided in the query if any, otherwise use the one in the prompt
@@ -256,7 +270,6 @@ fn process(
 	pretty: bool,
 	json: bool,
 	res: surrealdb::Result<WithStats<Response>>,
-	mut tx: UnboundedSender<Result<String, Error>>,
 ) -> Result<String, Error> {
 	// Check query response for an error
 	let mut response = res?;
@@ -271,7 +284,7 @@ fn process(
 				format!("Expected some result for a query with index {index}, but found none")
 			})
 			.map_err(Error::Other)?;
-		let output = result.unwrap_or_else(|e| e.to_string().into());
+		let output = result.unwrap_or_else(|e| Value::from_inner(CoreValue::from(e.to_string())));
 		vec.push((stats, output));
 	}
 
@@ -279,7 +292,7 @@ fn process(
 		let mut stream = match response.into_inner().stream::<Value>(()) {
 			Ok(stream) => stream,
 			Err(error) => {
-				tx.send(Err(error.into())).await.ok();
+				print(Err(error.into()));
 				return;
 			}
 		};
@@ -293,10 +306,10 @@ fn process(
 			let message = match (json, pretty) {
 				// Don't prettify the SurrealQL response
 				(false, false) => {
-					let value = Value::from(map! {
-						String::from("id") => query_id.into(),
+					let value = CoreValue::from(map! {
+						String::from("id") => CoreValue::from(CoreUuid::from(query_id)),
 						String::from("action") => format!("{action:?}").to_ascii_uppercase().into(),
-						String::from("result") => data,
+						String::from("result") => data.into_inner(),
 					});
 					value.to_string()
 				}
@@ -306,10 +319,10 @@ fn process(
 				),
 				// Don't pretty print the JSON response
 				(true, false) => {
-					let value = Value::from(map! {
-						String::from("id") => query_id.into(),
+					let value = CoreValue::from(map! {
+						String::from("id") => CoreValue::from(CoreUuid::from(query_id)),
 						String::from("action") => format!("{action:?}").to_ascii_uppercase().into(),
-						String::from("result") => data,
+						String::from("result") => data.into_inner(),
 					});
 					value.into_json().to_string()
 				}
@@ -320,14 +333,12 @@ fn process(
 						&mut buf,
 						PrettyFormatter::with_indent(b"\t"),
 					);
-					data.into_json().serialize(&mut serializer).unwrap();
+					data.into_inner().into_json().serialize(&mut serializer).unwrap();
 					let output = String::from_utf8(buf).unwrap();
 					format!("-- Notification (action: {action:?}, live query ID: {query_id})\n{output:#}")
 				}
 			};
-			if tx.send(Ok(format!("\n{message}"))).await.is_err() {
-				return;
-			}
+			print(Ok(format!("\n{message}")));
 		}
 	});
 
@@ -335,7 +346,8 @@ fn process(
 	Ok(match (json, pretty) {
 		// Don't prettify the SurrealQL response
 		(false, false) => {
-			Value::from(vec.into_iter().map(|(_, x)| x).collect::<Vec<_>>()).to_string()
+			CoreValue::from(vec.into_iter().map(|(_, x)| x.into_inner()).collect::<Vec<_>>())
+				.to_string()
 		}
 		// Yes prettify the SurrealQL response
 		(false, true) => vec
@@ -350,7 +362,8 @@ fn process(
 			.join("\n"),
 		// Don't pretty print the JSON response
 		(true, false) => {
-			let value = Value::from(vec.into_iter().map(|(_, x)| x).collect::<Vec<_>>());
+			let value =
+				CoreValue::from(vec.into_iter().map(|(_, x)| x.into_inner()).collect::<Vec<_>>());
 			serde_json::to_string(&value.into_json()).unwrap()
 		}
 		// Yes prettify the JSON response
@@ -363,7 +376,7 @@ fn process(
 					&mut buf,
 					PrettyFormatter::with_indent(b"\t"),
 				);
-				value.into_json().serialize(&mut serializer).unwrap();
+				value.into_inner().into_json().serialize(&mut serializer).unwrap();
 				let output = String::from_utf8(buf).unwrap();
 				let query_num = index + 1;
 				let execution_time = stats.execution_time.unwrap_or_default();
@@ -374,15 +387,13 @@ fn process(
 	})
 }
 
-async fn printer(mut rx: UnboundedReceiver<Result<String, Error>>) {
-	while let Some(result) = rx.next().await {
-		match result {
-			Ok(v) => {
-				println!("{v}\n");
-			}
-			Err(e) => {
-				eprintln!("{e}\n");
-			}
+fn print(result: Result<String, Error>) {
+	match result {
+		Ok(v) => {
+			println!("{v}\n");
+		}
+		Err(e) => {
+			eprintln!("{e}\n");
 		}
 	}
 }
@@ -408,6 +419,8 @@ impl Validator for InputValidator {
 			Incomplete // The line was empty and we are in multi mode
 		} else if input.ends_with('\\') {
 			Incomplete // The line ends with a backslash
+		} else if input.is_empty() {
+			Valid(None) // Ignore empty lines
 		} else if let Err(e) = sql::parse(input) {
 			Invalid(Some(format!(" --< {e}")))
 		} else {

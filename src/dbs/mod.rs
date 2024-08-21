@@ -1,13 +1,10 @@
 use crate::cli::CF;
 use crate::err::Error;
 use clap::Args;
-use std::sync::OnceLock;
+use std::path::PathBuf;
 use std::time::Duration;
 use surrealdb::dbs::capabilities::{Capabilities, FuncTarget, NetTarget, Targets};
 use surrealdb::kvs::Datastore;
-use surrealdb::opt::auth::Root;
-
-pub static DB: OnceLock<Datastore> = OnceLock::new();
 
 #[derive(Args, Debug)]
 pub struct StartCommandDbsOptions {
@@ -23,21 +20,17 @@ pub struct StartCommandDbsOptions {
 	#[arg(env = "SURREAL_TRANSACTION_TIMEOUT", long)]
 	#[arg(value_parser = super::cli::validator::duration)]
 	transaction_timeout: Option<Duration>,
-	#[arg(help = "Whether to enable authentication", help_heading = "Authentication")]
-	#[arg(env = "SURREAL_AUTH", long = "auth")]
+	#[arg(help = "Whether to allow unauthenticated access", help_heading = "Authentication")]
+	#[arg(env = "SURREAL_UNAUTHENTICATED", long = "unauthenticated")]
 	#[arg(default_value_t = false)]
-	auth_enabled: bool,
-	// TODO(gguillemas): Remove this argument once the legacy authentication is deprecated in v2.0.0
-	#[arg(
-		help = "Whether to enable explicit authentication level selection",
-		help_heading = "Authentication"
-	)]
-	#[arg(env = "SURREAL_AUTH_LEVEL_ENABLED", long = "auth-level-enabled")]
-	#[arg(default_value_t = false)]
-	auth_level_enabled: bool,
+	unauthenticated: bool,
 	#[command(flatten)]
 	#[command(next_help_heading = "Capabilities")]
-	caps: DbsCapabilities,
+	capabilities: DbsCapabilities,
+	#[arg(help = "Sets the directory for storing temporary database files")]
+	#[arg(env = "SURREAL_TEMPORARY_DIRECTORY", long = "temporary-directory")]
+	#[arg(value_parser = super::cli::validator::dir_exists)]
+	temporary_directory: Option<PathBuf>,
 }
 
 #[derive(Args, Debug)]
@@ -211,14 +204,15 @@ pub async fn init(
 		strict_mode,
 		query_timeout,
 		transaction_timeout,
-		auth_enabled,
-		// TODO(gguillemas): Remove this field once the legacy authentication is deprecated in v2.0.0
-		auth_level_enabled,
-		caps,
+		unauthenticated,
+		capabilities,
+		temporary_directory,
 	}: StartCommandDbsOptions,
-) -> Result<(), Error> {
+) -> Result<Datastore, Error> {
 	// Get local copy of options
 	let opt = CF.get().unwrap();
+	// Convert the capabilities
+	let capabilities = capabilities.into();
 	// Log specified strict mode
 	debug!("Database strict mode is {strict_mode}");
 	// Log specified query timeout
@@ -229,21 +223,12 @@ pub async fn init(
 	if let Some(v) = transaction_timeout {
 		debug!("Maximum transaction processing timeout is {v:?}");
 	}
-	// Log whether authentication is enabled
-	if auth_enabled {
-		info!("✅🔒 Authentication is enabled 🔒✅");
-	} else {
+	// Log whether authentication is disabled
+	if unauthenticated {
 		warn!("❌🔒 IMPORTANT: Authentication is disabled. This is not recommended for production use. 🔒❌");
 	}
-	// Log whether authentication levels are enabled
-	// TODO(gguillemas): Remove this condition once the legacy authentication is deprecated in v2.0.0
-	if auth_level_enabled {
-		info!("Authentication levels are enabled");
-	}
-
-	let caps = caps.into();
-	debug!("Server capabilities: {caps}");
-
+	// Log the specified server capabilities
+	debug!("Server capabilities: {capabilities}");
 	// Parse and setup the desired kv datastore
 	let dbs = Datastore::new(&opt.path)
 		.await?
@@ -251,25 +236,17 @@ pub async fn init(
 		.with_strict_mode(strict_mode)
 		.with_query_timeout(query_timeout)
 		.with_transaction_timeout(transaction_timeout)
-		.with_auth_enabled(auth_enabled)
-		.with_auth_level_enabled(auth_level_enabled)
-		.with_capabilities(caps);
-
-	dbs.bootstrap().await?;
-
-	if let Some(user) = opt.user.as_ref() {
-		dbs.setup_initial_creds(Root {
-			username: user,
-			password: opt.pass.as_ref().unwrap(),
-		})
-		.await?;
+		.with_auth_enabled(!unauthenticated)
+		.with_temporary_directory(temporary_directory)
+		.with_capabilities(capabilities);
+	// Setup initial server auth credentials
+	if let (Some(user), Some(pass)) = (opt.user.as_ref(), opt.pass.as_ref()) {
+		dbs.initialise_credentials(user, pass).await?;
 	}
-
-	// Store database instance
-	let _ = DB.set(dbs);
-
+	// Bootstrap the datastore
+	dbs.bootstrap().await?;
 	// All ok
-	Ok(())
+	Ok(dbs)
 }
 
 #[cfg(test)]
@@ -278,11 +255,12 @@ mod tests {
 
 	use surrealdb::dbs::Session;
 	use surrealdb::iam::verify::verify_root_creds;
-	use surrealdb::kvs::{Datastore, LockType::*, TransactionType::*};
+	use surrealdb::kvs::{LockType::*, TransactionType::*};
 	use test_log::test;
 	use wiremock::{matchers::method, Mock, MockServer, ResponseTemplate};
 
 	use super::*;
+	use surrealdb::opt::auth::Root;
 
 	#[test(tokio::test)]
 	async fn test_setup_superuser() {
@@ -297,7 +275,7 @@ mod tests {
 			ds.transaction(Read, Optimistic).await.unwrap().all_root_users().await.unwrap().len(),
 			0
 		);
-		ds.setup_initial_creds(creds).await.unwrap();
+		ds.initialise_credentials(creds.username, creds.password).await.unwrap();
 		assert_eq!(
 			ds.transaction(Read, Optimistic).await.unwrap().all_root_users().await.unwrap().len(),
 			1
@@ -316,9 +294,10 @@ mod tests {
 			.get_root_user(creds.username)
 			.await
 			.unwrap()
-			.hash;
+			.hash
+			.clone();
 
-		ds.setup_initial_creds(creds).await.unwrap();
+		ds.initialise_credentials(creds.username, creds.password).await.unwrap();
 		assert_eq!(
 			pass_hash,
 			ds.transaction(Read, Optimistic)
@@ -328,6 +307,7 @@ mod tests {
 				.await
 				.unwrap()
 				.hash
+				.clone()
 		)
 	}
 
@@ -585,19 +565,16 @@ mod tests {
 
 			let res = res.unwrap().remove(0).output();
 			let res = if succeeds {
-				assert!(res.is_ok(), "Unexpected error for test case {}: {:?}", idx, res);
+				assert!(res.is_ok(), "Unexpected error for test case {idx}: {res:?}");
 				res.unwrap().to_string()
 			} else {
-				assert!(res.is_err(), "Unexpected success for test case {}: {:?}", idx, res);
+				assert!(res.is_err(), "Unexpected success for test case {idx}: {res:?}");
 				res.unwrap_err().to_string()
 			};
 
 			assert!(
 				res.contains(&contains),
-				"Unexpected result for test case {}: expected to contain = `{}`, got `{}`",
-				idx,
-				contains,
-				res
+				"Unexpected result for test case {idx}: expected to contain = `{contains}`, got `{res}`"
 			);
 		}
 

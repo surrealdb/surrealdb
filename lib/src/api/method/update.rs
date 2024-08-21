@@ -1,24 +1,22 @@
-use crate::api::conn::Method;
-use crate::api::conn::Param;
+use crate::api::conn::Command;
+use crate::api::method::BoxFuture;
 use crate::api::method::Content;
 use crate::api::method::Merge;
 use crate::api::method::Patch;
 use crate::api::opt::PatchOp;
-use crate::api::opt::Range;
 use crate::api::opt::Resource;
 use crate::api::Connection;
 use crate::api::Result;
 use crate::method::OnceLockExt;
-use crate::sql::Id;
-use crate::sql::Value;
+use crate::opt::KeyRange;
 use crate::Surreal;
+use crate::Value;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 use std::borrow::Cow;
-use std::future::Future;
 use std::future::IntoFuture;
 use std::marker::PhantomData;
-use std::pin::Pin;
+use surrealdb_core::sql::{to_value as to_core_value, Value as CoreValue};
 
 /// An update future
 #[derive(Debug)]
@@ -26,7 +24,6 @@ use std::pin::Pin;
 pub struct Update<'r, C: Connection, R> {
 	pub(super) client: Cow<'r, Surreal<C>>,
 	pub(super) resource: Result<Resource>,
-	pub(super) range: Option<Range<Id>>,
 	pub(super) response_type: PhantomData<R>,
 }
 
@@ -49,16 +46,16 @@ macro_rules! into_future {
 			let Update {
 				client,
 				resource,
-				range,
 				..
 			} = self;
 			Box::pin(async move {
-				let param = match range {
-					Some(range) => resource?.with_range(range)?.into(),
-					None => resource?.into(),
-				};
-				let mut conn = Client::new(Method::Update);
-				conn.$method(client.router.extract()?, Param::new(vec![param])).await
+				let router = client.router.extract()?;
+				router
+					.$method(Command::Update {
+						what: resource?,
+						data: None,
+					})
+					.await
 			})
 		}
 	};
@@ -69,7 +66,7 @@ where
 	Client: Connection,
 {
 	type Output = Result<Value>;
-	type IntoFuture = Pin<Box<dyn Future<Output = Self::Output> + Send + Sync + 'r>>;
+	type IntoFuture = BoxFuture<'r, Self::Output>;
 
 	into_future! {execute_value}
 }
@@ -80,7 +77,7 @@ where
 	R: DeserializeOwned,
 {
 	type Output = Result<Option<R>>;
-	type IntoFuture = Pin<Box<dyn Future<Output = Self::Output> + Send + Sync + 'r>>;
+	type IntoFuture = BoxFuture<'r, Self::Output>;
 
 	into_future! {execute_opt}
 }
@@ -91,7 +88,7 @@ where
 	R: DeserializeOwned,
 {
 	type Output = Result<Vec<R>>;
-	type IntoFuture = Pin<Box<dyn Future<Output = Self::Output> + Send + Sync + 'r>>;
+	type IntoFuture = BoxFuture<'r, Self::Output>;
 
 	into_future! {execute_vec}
 }
@@ -101,8 +98,8 @@ where
 	C: Connection,
 {
 	/// Restricts the records to update to those in the specified range
-	pub fn range(mut self, bounds: impl Into<Range<Id>>) -> Self {
-		self.range = Some(bounds.into());
+	pub fn range(mut self, range: impl Into<KeyRange>) -> Self {
+		self.resource = self.resource.and_then(|x| x.with_range(range.into()));
 		self
 	}
 }
@@ -112,8 +109,8 @@ where
 	C: Connection,
 {
 	/// Restricts the records to update to those in the specified range
-	pub fn range(mut self, bounds: impl Into<Range<Id>>) -> Self {
-		self.range = Some(bounds.into());
+	pub fn range(mut self, range: impl Into<KeyRange>) -> Self {
+		self.resource = self.resource.and_then(|x| x.with_range(range.into()));
 		self
 	}
 }
@@ -124,18 +121,25 @@ where
 	R: DeserializeOwned,
 {
 	/// Replaces the current document / record data with the specified data
-	pub fn content<D>(self, data: D) -> Content<'r, C, D, R>
+	pub fn content<D>(self, data: D) -> Content<'r, C, R>
 	where
-		D: Serialize,
+		D: Serialize + 'static,
 	{
-		Content {
-			client: self.client,
-			method: Method::Update,
-			resource: self.resource,
-			range: self.range,
-			content: data,
-			response_type: PhantomData,
-		}
+		Content::from_closure(self.client, || {
+			let data = to_core_value(data)?;
+
+			let what = self.resource?;
+
+			let data = match data {
+				CoreValue::None => None,
+				content => Some(content),
+			};
+
+			Ok(Command::Update {
+				what,
+				data,
+			})
+		})
 	}
 
 	/// Merges the current document / record data with the specified data
@@ -146,7 +150,6 @@ where
 		Merge {
 			client: self.client,
 			resource: self.resource,
-			range: self.range,
 			content: data,
 			response_type: PhantomData,
 		}
@@ -157,7 +160,6 @@ where
 		Patch {
 			client: self.client,
 			resource: self.resource,
-			range: self.range,
 			patches: vec![patch],
 			response_type: PhantomData,
 		}

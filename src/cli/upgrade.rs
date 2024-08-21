@@ -1,6 +1,9 @@
+use crate::cli::version_client;
+use crate::cli::version_client::VersionClient;
 use crate::cnf::PKG_VERSION;
 use crate::err::Error;
 use clap::Args;
+use semver::{Comparator, Op, Version};
 use std::borrow::Cow;
 use std::fs;
 use std::io::{Error as IoError, ErrorKind};
@@ -9,18 +12,25 @@ use std::path::Path;
 use std::process::Command;
 use surrealdb::env::{arch, os};
 
-const ROOT: &str = "https://download.surrealdb.com";
+pub(crate) const ROOT: &str = "https://download.surrealdb.com";
+const ALPHA: &str = "alpha";
+const BETA: &str = "beta";
+const LATEST: &str = "latest";
+const NIGHTLY: &str = "nightly";
 
 #[derive(Args, Debug)]
 pub struct UpgradeCommandArguments {
 	/// Install the latest nightly version
-	#[arg(long, conflicts_with = "beta", conflicts_with = "version")]
+	#[arg(long, conflicts_with = "alpha", conflicts_with = "beta", conflicts_with = "version")]
 	nightly: bool,
 	/// Install the latest beta version
-	#[arg(long, conflicts_with = "nightly", conflicts_with = "version")]
+	#[arg(long, conflicts_with = "nightly", conflicts_with = "beta", conflicts_with = "version")]
+	alpha: bool,
+	/// Install the latest beta version
+	#[arg(long, conflicts_with = "nightly", conflicts_with = "alpha", conflicts_with = "version")]
 	beta: bool,
 	/// Install a specific version
-	#[arg(long, conflicts_with = "nightly", conflicts_with = "beta")]
+	#[arg(long, conflicts_with = "nightly", conflicts_with = "alpha", conflicts_with = "beta")]
 	version: Option<String>,
 	/// Don't actually replace the executable
 	#[arg(long)]
@@ -30,27 +40,50 @@ pub struct UpgradeCommandArguments {
 impl UpgradeCommandArguments {
 	/// Get the version string to download based on the user preference
 	async fn version(&self) -> Result<Cow<'_, str>, Error> {
-		if self.nightly {
-			Ok(Cow::Borrowed("nightly"))
-		} else if self.beta {
-			fetch("beta").await
-		} else if let Some(version) = self.version.as_ref() {
-			Ok(Cow::Borrowed(version))
+		// Convert the version to lowercase, if supplied
+		let version = self.version.as_deref().map(str::to_ascii_lowercase);
+		let client = version_client::new(None)?;
+
+		if self.nightly || version.as_deref() == Some(NIGHTLY) {
+			Ok(Cow::Borrowed(NIGHTLY))
+		} else if self.alpha || version.as_deref() == Some(ALPHA) {
+			client.fetch(ALPHA).await
+		} else if self.beta || version.as_deref() == Some(BETA) {
+			client.fetch(BETA).await
+		} else if let Some(version) = version {
+			// Parse the version string to make sure it's valid, return an error if not
+			let version = parse_version(&version)?;
+			// Return the version, ensuring it's prefixed by `v`
+			Ok(Cow::Owned(format!("v{version}")))
 		} else {
-			fetch("latest").await
+			client.fetch(LATEST).await
 		}
 	}
 }
 
-async fn fetch(version: &str) -> Result<Cow<'_, str>, Error> {
-	let response = reqwest::get(format!("{ROOT}/{version}.txt")).await?;
-	if !response.status().is_success() {
-		return Err(Error::Io(IoError::new(
-			ErrorKind::Other,
-			format!("received status {} when fetching version", response.status()),
+pub(crate) fn parse_version(input: &str) -> Result<Version, Error> {
+	// Remove the `v` prefix, if supplied
+	let version = input.strip_prefix('v').unwrap_or(input);
+	// Parse the version
+	let comp = Comparator::parse(version)
+		.map_err(|_| Error::Other(format!("Invalid version `{input}`",)))?;
+	// See if a supported operation was requested
+	if !matches!(comp.op, Op::Exact | Op::Caret) {
+		return Err(Error::Other(format!(
+			"Unsupported version `{version}`. Only exact matches are supported."
 		)));
 	}
-	Ok(Cow::Owned(response.text().await?.trim().to_owned()))
+	// Build and return the version if supported
+	match (comp.minor, comp.patch) {
+		(Some(minor), Some(patch)) => {
+			let mut version = Version::new(comp.major, minor, patch);
+			version.pre = comp.pre;
+			Ok(version)
+		}
+		_ => Err(Error::Other(format!(
+			"Unsupported version `{version}`. Please specify a full version, like `v1.2.1`."
+		))),
+	}
 }
 
 pub async fn init(args: UpgradeCommandArguments) -> Result<(), Error> {
@@ -83,9 +116,15 @@ pub async fn init(args: UpgradeCommandArguments) -> Result<(), Error> {
 	let old_version = PKG_VERSION.deref().clone();
 	let new_version = args.version().await?;
 
-	if old_version == new_version {
-		println!("{old_version} is already installed");
-		return Ok(());
+	// Parsed version numbers follow semver format (major.minor.patch)
+	if new_version != NIGHTLY && new_version != ALPHA && new_version != BETA {
+		let old_version_parsed = parse_version(&old_version)?;
+		let new_version_parsed = parse_version(&new_version)?;
+
+		if old_version_parsed == new_version_parsed {
+			println!("{old_version} is already installed");
+			return Ok(());
+		}
 	}
 
 	let arch = arch();

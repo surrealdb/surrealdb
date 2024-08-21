@@ -61,12 +61,7 @@ notice = "warn"
 # Threshold for security vulnerabilities: None, Low, Medium, High, Critical.
 severity-threshold = "None"
 # A list of security advisory identifiers to ignore.
-ignore = [
-	# Will be resolved once "surrealdb-jsonwebtoken", a temporary fork
-	# of "jsonwebtoken", is replaced by the upstream version which no
-	# longer uses the affected "rsa" crate.
-	"RUSTSEC-2023-0071",
-]
+ignore = []
 
 # --------------------------------------------------
 # LICENSES
@@ -88,7 +83,9 @@ allow = [
 	"CC0-1.0",
 	"MPL-2.0",
 	"Apache-2.0",
+	"BSD-2-Clause",
 	"BSD-3-Clause",
+	"BSD-2-Clause",
 	"Unlicense",
 ]
 # The confidence threshold for detecting a license from license text.
@@ -98,27 +95,26 @@ confidence-threshold = 0.95
 
 [[licenses.exceptions]]
 name = "ring"
-version = "*"
 allow = ["OpenSSL"]
 
 [[licenses.exceptions]]
 name = "surreal"
-version = "*"
 allow = ["BUSL-1.1"]
 
 [[licenses.exceptions]]
 name = "surrealdb"
-version = "*"
+allow = ["BUSL-1.1"]
+
+[[licenses.exceptions]]
+name = "surrealdb-core"
 allow = ["BUSL-1.1"]
 
 [[licenses.exceptions]]
 name = "surrealml-core"
-version = "*"
 allow = ["Apache-2.0"]
 
 [[licenses.exceptions]]
 name = "unicode-ident"
-version = "*"
 allow = ["Unicode-DFS-2016"]
 
 # Specify overrides for crates where licenses are hard to guess.
@@ -130,6 +126,11 @@ license-files = []
 
 [[licenses.clarify]]
 name = "surrealdb"
+expression = "BUSL-1.1"
+license-files = []
+
+[[licenses.clarify]]
+name = "surrealdb-core"
 expression = "BUSL-1.1"
 license-files = []
 

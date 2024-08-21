@@ -12,7 +12,7 @@ impl Read {
 	pub fn new(runtime: &'static Runtime) -> Self {
 		Self {
 			runtime,
-			table_name: format!("table_{}", Id::rand()),
+			table_name: format!("table_{}", Id::rand().to_raw()),
 		}
 	}
 }
@@ -27,7 +27,7 @@ impl super::Routine for Read {
 
 				tasks.spawn(async move {
 					let _: Option<Record> = client
-						.create((table_name, task_id as u64))
+						.create((table_name, task_id as i64))
 						.content(Record {
 							field: Id::rand(),
 						})
@@ -53,7 +53,7 @@ impl super::Routine for Read {
 				tasks.spawn(async move {
 					let _: Option<Record> = criterion::black_box(
 						client
-							.select((table_name, task_id as u64))
+							.select((table_name, task_id as i64))
 							.await
 							.expect("[run] select operation failed")
 							.expect("[run] the select operation returned None"),

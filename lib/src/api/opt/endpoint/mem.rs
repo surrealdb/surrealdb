@@ -10,11 +10,12 @@ impl IntoEndpoint<Mem> for () {
 	type Client = Db;
 
 	fn into_endpoint(self) -> Result<Endpoint> {
-		Ok(Endpoint {
-			url: Url::parse("mem://").unwrap(),
-			path: "memory".to_owned(),
-			config: Default::default(),
-		})
+		let protocol = "mem://";
+		let url = Url::parse(protocol)
+			.unwrap_or_else(|_| unreachable!("`{protocol}` should be static and valid"));
+		let mut endpoint = Endpoint::new(url);
+		"memory".clone_into(&mut endpoint.path);
+		Ok(endpoint)
 	}
 }
 

@@ -4,8 +4,10 @@ mod parse;
 use parse::Parse;
 mod helpers;
 use helpers::new_ds;
+use rust_decimal::Decimal;
 use surrealdb::dbs::Session;
 use surrealdb::err::Error;
+use surrealdb::sql::Number;
 use surrealdb::sql::Value;
 
 #[tokio::test]
@@ -324,5 +326,51 @@ async fn script_value_function_inline_values() -> Result<(), Error> {
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 1);
 	res.remove(0).result?;
+	Ok(())
+}
+
+#[tokio::test]
+async fn script_function_number_conversion_test() -> Result<(), Error> {
+	let sql = r#"
+		RETURN function() {
+			if(await surrealdb.value(`2147483647`) !== 2147483647){
+				throw new Error(1)
+			}
+			if(await surrealdb.value(`9007199254740991`) !== 9007199254740991){
+				throw new Error(2)
+			}
+			if(await surrealdb.value(`9007199254740992`) !== 9007199254740992n){
+				throw new Error(3)
+			}
+			if(await surrealdb.value(`-9007199254740992`) !== -9007199254740992){
+				throw new Error(4)
+			}
+			if(await surrealdb.value(`-9007199254740993`) !== -9007199254740993n){
+				throw new Error(5)
+			}
+			return {
+				a:  9007199254740991,
+				b: -9007199254740992,
+				c: 100000000000000000n,
+				d: 9223372036854775808n
+			}
+		}
+	"#;
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 1);
+
+	let Value::Object(res) = res.remove(0).result? else {
+		panic!("not an object")
+	};
+	assert_eq!(res.get("a").unwrap(), &Value::Number(Number::Float(9007199254740991f64)));
+	assert_eq!(res.get("b").unwrap(), &Value::Number(Number::Float(-9007199254740992f64)));
+	assert_eq!(res.get("c").unwrap(), &Value::Number(Number::Int(100000000000000000i64)));
+	assert_eq!(
+		res.get("d").unwrap(),
+		&Value::Number(Number::Decimal(Decimal::from(9223372036854775808u128)))
+	);
+
 	Ok(())
 }

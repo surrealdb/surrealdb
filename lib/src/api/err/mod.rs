@@ -1,12 +1,8 @@
-use crate::api::Response;
-use crate::sql::Array;
-use crate::sql::Edges;
-use crate::sql::Object;
-use crate::sql::Thing;
-use crate::sql::Value;
+use crate::{api::Response, Value};
 use serde::Serialize;
-use std::io;
 use std::path::PathBuf;
+use std::{convert::Infallible, io};
+use surrealdb_core::dbs::capabilities::{ParseFuncTargetError, ParseNetTargetError};
 use thiserror::Error;
 
 /// An error originating from a remote SurrealDB database
@@ -42,26 +38,29 @@ pub enum Error {
 	InvalidBindings(Value),
 
 	/// Tried to use a range query on a record ID
-	#[error("Range on record IDs not supported: {0}")]
-	RangeOnRecordId(Thing),
+	#[error("Tried to add a range to an record-id resource")]
+	RangeOnRecordId,
 
 	/// Tried to use a range query on an object
-	#[error("Range on objects not supported: {0}")]
-	RangeOnObject(Object),
+	#[error("Tried to add a range to an object resource")]
+	RangeOnObject,
 
 	/// Tried to use a range query on an array
-	#[error("Range on arrays not supported: {0}")]
-	RangeOnArray(Array),
+	#[error("Tried to add a range to an array resource")]
+	RangeOnArray,
 
 	/// Tried to use a range query on an edge or edges
-	#[error("Range on edges not supported: {0}")]
-	RangeOnEdges(Edges),
+	#[error("Tried to add a range to an edge resource")]
+	RangeOnEdges,
+
+	/// Tried to use a range query on an existing range
+	#[error("Tried to add a range to an resource which was already a range")]
+	RangeOnRange,
 
 	/// Tried to use `table:id` syntax as a method parameter when `(table, id)` should be used instead
-	#[error("`{table}:{id}` is not allowed as a method parameter; try `({table}, {id})`")]
+	#[error("Table name `{table}` contained a colon (:), this is dissallowed to avoid confusion with record-id's try `Table(\"{table}\")` instead.")]
 	TableColonId {
 		table: String,
-		id: String,
 	},
 
 	/// Duplicate request ID
@@ -171,16 +170,16 @@ pub enum Error {
 	LiveQueriesNotSupported,
 
 	/// Tried to use a range query on an object
-	#[error("Live queries on objects not supported: {0}")]
-	LiveOnObject(Object),
+	#[error("Live queries on objects not supported")]
+	LiveOnObject,
 
 	/// Tried to use a range query on an array
-	#[error("Live queries on arrays not supported: {0}")]
-	LiveOnArray(Array),
+	#[error("Live queries on arrays not supported")]
+	LiveOnArray,
 
 	/// Tried to use a range query on an edge or edges
-	#[error("Live queries on edges not supported: {0}")]
-	LiveOnEdges(Edges),
+	#[error("Live queries on edges not supported")]
+	LiveOnEdges,
 
 	/// Tried to access a query statement as a live query when it isn't a live query
 	#[error("Query statement {0} is not a live query")]
@@ -193,6 +192,78 @@ pub enum Error {
 	/// Called `Response::take` or `Response::stream` on a query response more than once
 	#[error("Tried to take a query response that has already been taken")]
 	ResponseAlreadyTaken,
+
+	/// Tried to insert on an object
+	#[error("Insert queries on objects are not supported")]
+	InsertOnObject,
+
+	/// Tried to insert on an array
+	#[error("Insert queries on arrays are not supported")]
+	InsertOnArray,
+
+	/// Tried to insert on an edge or edges
+	#[error("Insert queries on edges are not supported")]
+	InsertOnEdges,
+
+	/// Tried to insert on an edge or edges
+	#[error("Insert queries on ranges are not supported")]
+	InsertOnRange,
+
+	#[error("{0}")]
+	InvalidNetTarget(#[from] ParseNetTargetError),
+
+	#[error("{0}")]
+	InvalidFuncTarget(#[from] ParseFuncTargetError),
+
+	#[error("failed to serialize Value: {0}")]
+	SerializeValue(String),
+	#[error("failed to deserialize Value: {0}")]
+	DeSerializeValue(String),
+
+	#[error("failed to serialize to a Value: {0}")]
+	Serializer(String),
+	#[error("failed to deserialize from a Value: {0}")]
+	Deserializer(String),
+
+	/// Tried to convert an value which contained something like for example a query or future.
+	#[error("tried to convert from a value which contained non-primitive values to a value which only allows primitive values.")]
+	RecievedInvalidValue,
+}
+
+impl serde::ser::Error for Error {
+	fn custom<T>(msg: T) -> Self
+	where
+		T: std::fmt::Display,
+	{
+		Error::SerializeValue(msg.to_string())
+	}
+}
+
+impl serde::de::Error for Error {
+	fn custom<T>(msg: T) -> Self
+	where
+		T: std::fmt::Display,
+	{
+		Error::DeSerializeValue(msg.to_string())
+	}
+}
+
+impl From<Infallible> for crate::Error {
+	fn from(_: Infallible) -> Self {
+		unreachable!()
+	}
+}
+
+impl From<ParseNetTargetError> for crate::Error {
+	fn from(e: ParseNetTargetError) -> Self {
+		Self::Api(Error::from(e))
+	}
+}
+
+impl From<ParseFuncTargetError> for crate::Error {
+	fn from(e: ParseFuncTargetError) -> Self {
+		Self::Api(Error::from(e))
+	}
 }
 
 #[cfg(feature = "protocol-http")]
@@ -210,14 +281,14 @@ impl From<tokio_tungstenite::tungstenite::Error> for crate::Error {
 	}
 }
 
-impl<T> From<flume::SendError<T>> for crate::Error {
-	fn from(error: flume::SendError<T>) -> Self {
+impl<T> From<channel::SendError<T>> for crate::Error {
+	fn from(error: channel::SendError<T>) -> Self {
 		Self::Api(Error::InternalError(error.to_string()))
 	}
 }
 
-impl From<flume::RecvError> for crate::Error {
-	fn from(error: flume::RecvError) -> Self {
+impl From<channel::RecvError> for crate::Error {
+	fn from(error: channel::RecvError) -> Self {
 		Self::Api(Error::InternalError(error.to_string()))
 	}
 }

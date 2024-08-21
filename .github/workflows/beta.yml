@@ -43,7 +43,7 @@ jobs:
           if git branch -r | grep -w 'releases/beta'; then
             echo "branch=releases/beta" >> $GITHUB_OUTPUT
           else
-            echo "branch=main" >> $GITHUB_OUTPUT
+            echo "branch=1.x" >> $GITHUB_OUTPUT
           fi
 
   release:
@@ -57,3 +57,94 @@ jobs:
       publish: ${{ inputs.publish }}
       create-release: ${{ inputs.publish }}
     secrets: inherit
+
+  bump-version:
+    name: Bump 1.x version
+    if: ${{ inputs.publish }}
+    needs: [checks, release]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v4
+        with:
+          ref: releases/beta
+
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+
+      - name: Install a TOML parser
+        run: |
+          curl -L https://github.com/tamasfe/taplo/releases/download/0.8.1/taplo-full-linux-x86_64.gz | gunzip - > taplo
+          chmod +x taplo
+          sudo mv taplo /usr/bin/taplo
+
+      - name: Get version info
+        id: bump
+        run: |
+          set -x
+
+          # Retrieve just released version
+          betaVersion=$(taplo get -f Cargo.toml "package.version")
+          major=$(echo $betaVersion | tr "." "\n" | sed -n 1p)
+          minor=$(echo $betaVersion | tr "." "\n" | sed -n 2p)
+          betaNum=$(echo $betaVersion | tr "." "\n" | sed -n 4p)
+          nightlyVersion=${major}.$(($minor + 1)).0
+          echo "version=${nightlyVersion}" >> $GITHUB_OUTPUT
+          echo "beta-num=${betaNum}"  >> $GITHUB_OUTPUT
+
+      - name: Create version bump branch
+        if: ${{ steps.bump.outputs.beta-num == '1' }}
+        env:
+          RUSTFLAGS: "--cfg surrealdb_unstable"
+        run: |
+          set -x
+
+          # Checkout the 1.x branch
+          git fetch origin 1.x
+          git checkout 1.x
+
+          # Switch to version bump branch
+          git checkout -b version-bump/v${{ steps.bump.outputs.version }}
+
+          # Bump the crate version
+          sed -i "s#^version = \".*\"#version = \"${{ steps.bump.outputs.version }}\"#" Cargo.toml
+          sed -i "s#^version = \".*\"#version = \"${{ steps.bump.outputs.version }}\"#" lib/Cargo.toml
+          sed -i "s#^version = \".*\"#version = \"2.0.0-${{ steps.bump.outputs.version }}\"#" core/Cargo.toml
+
+          # Update dependency versions
+          sed -i "s#surrealdb-core2 = { version = \".*\", default-features#surrealdb-core2 = { version = \"=2.0.0-${{ steps.bump.outputs.version }}\", default-features#" lib/Cargo.toml
+
+          # Update Cargo.lock without updating dependency versions
+          cargo check --no-default-features --features storage-mem
+
+      - name: Push the branch
+        if: ${{ steps.bump.outputs.beta-num == '1' }}
+        run: |
+          # Configure git
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git config user.name "github-actions[bot]"
+          git config --add --bool push.autoSetupRemote true
+
+          # Commit changes
+          git commit -am "Bump version to v${{ steps.bump.outputs.version }}"
+          git push
+
+      - name: Create a PR
+        if: ${{ steps.bump.outputs.beta-num == '1' }}
+        id: pr
+        env:
+          GITHUB_TOKEN: ${{ secrets.RELEASE_PLZ_TOKEN }}
+        run: |
+          set -x
+          url=$(gh pr create --base 1.x --title "Bump version to v${{ steps.bump.outputs.version }}" --body "Update 1.x version")
+          echo "url=${url}" >> $GITHUB_OUTPUT
+
+      - name: Merge the PR
+        if: ${{ steps.bump.outputs.beta-num == '1' }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.RELEASE_PLZ_TOKEN }} # Need the custom user token here so we can approve and merge the PR
+        run: |
+          set -x
+          gh pr merge ${{ steps.pr.outputs.url }} --delete-branch --admin --squash

@@ -209,7 +209,7 @@ fn excessive_cast_chain_depth() -> Result<(), Error> {
 async fn run_queries(
 	sql: &str,
 ) -> Result<
-	impl Iterator<Item = Result<Value, Error>> + ExactSizeIterator + DoubleEndedIterator + 'static,
+	impl ExactSizeIterator<Item = Result<Value, Error>> + DoubleEndedIterator + 'static,
 	Error,
 > {
 	let dbs = new_ds().await?;

@@ -24,4 +24,5 @@ let
 in craneLib.buildPackage (buildSpec // {
   inherit cargoArtifacts;
   inherit (util) version SURREAL_BUILD_METADATA;
+
 })

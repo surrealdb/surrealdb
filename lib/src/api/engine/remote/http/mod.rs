@@ -1,54 +1,36 @@
 //! HTTP engine
-
-#[cfg(not(target_arch = "wasm32"))]
-pub(crate) mod native;
-#[cfg(target_arch = "wasm32")]
-pub(crate) mod wasm;
-
+use crate::api::conn::Command;
 use crate::api::conn::DbResponse;
-use crate::api::conn::Method;
-#[cfg(feature = "ml")]
-#[cfg(not(target_arch = "wasm32"))]
-use crate::api::conn::MlConfig;
-use crate::api::conn::Param;
-use crate::api::engine::create_statement;
-use crate::api::engine::delete_statement;
-use crate::api::engine::merge_statement;
-use crate::api::engine::patch_statement;
-use crate::api::engine::remote::duration_from_str;
-use crate::api::engine::select_statement;
-use crate::api::engine::update_statement;
+use crate::api::conn::RequestData;
+use crate::api::conn::RouterRequest;
+use crate::api::engine::remote::{deserialize, serialize};
 use crate::api::err::Error;
-use crate::api::method::query::QueryResult;
-use crate::api::opt::from_value;
 use crate::api::Connect;
-use crate::api::Response as QueryResponse;
 use crate::api::Result;
 use crate::api::Surreal;
-use crate::dbs::Status;
+use crate::engine::remote::Response;
 use crate::headers::AUTH_DB;
 use crate::headers::AUTH_NS;
-use crate::headers::DB_LEGACY;
-use crate::headers::NS_LEGACY;
-use crate::method::Stats;
+use crate::headers::DB;
+use crate::headers::NS;
 use crate::opt::IntoEndpoint;
-use crate::sql::serde::deserialize;
-use crate::sql::Array;
-use crate::sql::Strand;
-use crate::sql::Value;
-#[cfg(not(target_arch = "wasm32"))]
+use crate::Value;
 use futures::TryStreamExt;
 use indexmap::IndexMap;
 use reqwest::header::HeaderMap;
 use reqwest::header::HeaderValue;
 use reqwest::header::ACCEPT;
-#[cfg(not(target_arch = "wasm32"))]
 use reqwest::header::CONTENT_TYPE;
 use reqwest::RequestBuilder;
 use serde::Deserialize;
 use serde::Serialize;
 use std::marker::PhantomData;
-use std::mem;
+use surrealdb_core::sql::{
+	from_value as from_core_value, statements::OutputStatement, Object as CoreObject, Param, Query,
+	Statement, Value as CoreValue,
+};
+use url::Url;
+
 #[cfg(not(target_arch = "wasm32"))]
 use std::path::PathBuf;
 #[cfg(not(target_arch = "wasm32"))]
@@ -57,11 +39,18 @@ use tokio::fs::OpenOptions;
 use tokio::io;
 #[cfg(not(target_arch = "wasm32"))]
 use tokio_util::compat::FuturesAsyncReadCompatExt;
-use url::Url;
+#[cfg(target_arch = "wasm32")]
+use wasm_bindgen_futures::spawn_local;
 
-const SQL_PATH: &str = "sql";
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) mod native;
+#[cfg(target_arch = "wasm32")]
+pub(crate) mod wasm;
 
-/// The HTTP scheme used to connect to `http://` endpoints
+// const SQL_PATH: &str = "sql";
+const RPC_PATH: &str = "rpc";
+
+// The HTTP scheme used to connect to `http://` endpoints
 #[derive(Debug)]
 pub struct Http;
 
@@ -71,9 +60,7 @@ pub struct Https;
 
 /// An HTTP client for communicating with the server via HTTP
 #[derive(Debug, Clone)]
-pub struct Client {
-	method: Method,
-}
+pub struct Client(());
 
 impl Surreal<Client> {
 	/// Connects to a specific database endpoint, saving the connection on the static client
@@ -103,7 +90,7 @@ impl Surreal<Client> {
 			engine: PhantomData,
 			address: address.into_endpoint(),
 			capacity: 0,
-			client: PhantomData,
+			waiter: self.waiter.clone(),
 			response_type: PhantomData,
 		}
 	}
@@ -112,9 +99,11 @@ impl Surreal<Client> {
 pub(crate) fn default_headers() -> HeaderMap {
 	let mut headers = HeaderMap::new();
 	headers.insert(ACCEPT, HeaderValue::from_static("application/surrealdb"));
+	headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/surrealdb"));
 	headers
 }
 
+#[allow(dead_code)]
 #[derive(Debug)]
 enum Auth {
 	Basic {
@@ -158,8 +147,6 @@ impl Authenticate for RequestBuilder {
 	}
 }
 
-type HttpQueryResponse = (String, Status, Value);
-
 #[derive(Debug, Serialize, Deserialize)]
 struct Credentials {
 	user: String,
@@ -176,130 +163,63 @@ struct AuthResponse {
 	token: Option<String>,
 }
 
-async fn submit_auth(request: RequestBuilder) -> Result<Value> {
-	let response = request.send().await?.error_for_status()?;
-	let bytes = response.bytes().await?;
-	let response: AuthResponse =
-		deserialize(&bytes).map_err(|error| Error::ResponseFromBinary {
-			binary: bytes.to_vec(),
-			error,
-		})?;
-	Ok(response.token.into())
-}
-
-async fn query(request: RequestBuilder) -> Result<QueryResponse> {
-	let response = request.send().await?.error_for_status()?;
-	let bytes = response.bytes().await?;
-	let responses = deserialize::<Vec<HttpQueryResponse>>(&bytes).map_err(|error| {
-		Error::ResponseFromBinary {
-			binary: bytes.to_vec(),
-			error,
-		}
-	})?;
-	let mut map = IndexMap::<usize, (Stats, QueryResult)>::with_capacity(responses.len());
-	for (index, (execution_time, status, value)) in responses.into_iter().enumerate() {
-		let stats = Stats {
-			execution_time: duration_from_str(&execution_time),
-		};
-		match status {
-			Status::Ok => {
-				map.insert(index, (stats, Ok(value)));
-			}
-			Status::Err => {
-				map.insert(index, (stats, Err(Error::Query(value.as_raw_string()).into())));
-			}
-		}
-	}
-
-	Ok(QueryResponse {
-		results: map,
-		..QueryResponse::new()
-	})
-}
-
-async fn take(one: bool, request: RequestBuilder) -> Result<Value> {
-	if let Some((_stats, result)) = query(request).await?.results.remove(&0) {
-		let value = result?;
-		match one {
-			true => match value {
-				Value::Array(Array(mut vec)) => {
-					if let [value] = &mut vec[..] {
-						return Ok(mem::take(value));
-					}
-				}
-				Value::None | Value::Null => {}
-				value => return Ok(value),
-			},
-			false => return Ok(value),
-		}
-	}
-	match one {
-		true => Ok(Value::None),
-		false => Ok(Value::Array(Array(vec![]))),
-	}
-}
-
-#[cfg(not(target_arch = "wasm32"))]
 type BackupSender = channel::Sender<Result<Vec<u8>>>;
 
 #[cfg(not(target_arch = "wasm32"))]
-async fn export(
-	request: RequestBuilder,
-	(file, sender): (Option<PathBuf>, Option<BackupSender>),
-) -> Result<Value> {
-	match (file, sender) {
-		(Some(path), None) => {
-			let mut response = request
-				.send()
-				.await?
-				.error_for_status()?
-				.bytes_stream()
-				.map_err(|e| futures::io::Error::new(futures::io::ErrorKind::Other, e))
-				.into_async_read()
-				.compat();
-			let mut file = match OpenOptions::new()
-				.write(true)
-				.create(true)
-				.truncate(true)
-				.open(&path)
-				.await
-			{
-				Ok(path) => path,
-				Err(error) => {
-					return Err(Error::FileOpen {
-						path,
-						error,
-					}
-					.into());
-				}
-			};
-			if let Err(error) = io::copy(&mut response, &mut file).await {
-				return Err(Error::FileRead {
+async fn export_file(request: RequestBuilder, path: PathBuf) -> Result<()> {
+	let mut response = request
+		.send()
+		.await?
+		.error_for_status()?
+		.bytes_stream()
+		.map_err(|e| futures::io::Error::new(futures::io::ErrorKind::Other, e))
+		.into_async_read()
+		.compat();
+	let mut file =
+		match OpenOptions::new().write(true).create(true).truncate(true).open(&path).await {
+			Ok(path) => path,
+			Err(error) => {
+				return Err(Error::FileOpen {
 					path,
 					error,
 				}
 				.into());
 			}
+		};
+	if let Err(error) = io::copy(&mut response, &mut file).await {
+		return Err(Error::FileRead {
+			path,
+			error,
 		}
-		(None, Some(tx)) => {
-			let mut response = request.send().await?.error_for_status()?.bytes_stream();
-
-			tokio::spawn(async move {
-				while let Ok(Some(bytes)) = response.try_next().await {
-					if tx.send(Ok(bytes.to_vec())).await.is_err() {
-						break;
-					}
-				}
-			});
-		}
-		_ => unreachable!(),
+		.into());
 	}
 
-	Ok(Value::None)
+	Ok(())
+}
+
+async fn export_bytes(request: RequestBuilder, bytes: BackupSender) -> Result<()> {
+	let response = request.send().await?.error_for_status()?;
+
+	let future = async move {
+		let mut response = response.bytes_stream();
+		while let Ok(Some(b)) = response.try_next().await {
+			if bytes.send(Ok(b.to_vec())).await.is_err() {
+				break;
+			}
+		}
+	};
+
+	#[cfg(not(target_arch = "wasm32"))]
+	tokio::spawn(future);
+
+	#[cfg(target_arch = "wasm32")]
+	spawn_local(future);
+
+	Ok(())
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-async fn import(request: RequestBuilder, path: PathBuf) -> Result<Value> {
+async fn import(request: RequestBuilder, path: PathBuf) -> Result<()> {
 	let file = match OpenOptions::new().read(true).open(&path).await {
 		Ok(path) => path,
 		Err(error) => {
@@ -329,295 +249,288 @@ async fn import(request: RequestBuilder, path: PathBuf) -> Result<Value> {
 			}
 		}
 	}
-	Ok(Value::None)
+	Ok(())
 }
 
-async fn version(request: RequestBuilder) -> Result<Value> {
-	let response = request.send().await?.error_for_status()?;
-	let version = response.text().await?;
-	Ok(version.into())
-}
-
-pub(crate) async fn health(request: RequestBuilder) -> Result<Value> {
+pub(crate) async fn health(request: RequestBuilder) -> Result<()> {
 	request.send().await?.error_for_status()?;
-	Ok(Value::None)
+	Ok(())
+}
+
+async fn send_request(
+	req: RouterRequest,
+	base_url: &Url,
+	client: &reqwest::Client,
+	headers: &HeaderMap,
+	auth: &Option<Auth>,
+) -> Result<DbResponse> {
+	let url = base_url.join(RPC_PATH).unwrap();
+	let http_req =
+		client.post(url).headers(headers.clone()).auth(auth).body(serialize(&req, false)?);
+	let response = http_req.send().await?.error_for_status()?;
+	let bytes = response.bytes().await?;
+
+	let response: Response = deserialize(&bytes, false)?;
+	DbResponse::from_server_result(response.result)
+}
+
+fn flatten_dbresponse_array(res: DbResponse) -> DbResponse {
+	match res {
+		DbResponse::Other(CoreValue::Array(array)) if array.len() == 1 => {
+			let v = array.into_iter().next().unwrap();
+			DbResponse::Other(v)
+		}
+		x => x,
+	}
 }
 
 async fn router(
-	(_, method, param): (i64, Method, Param),
+	req: RequestData,
 	base_url: &Url,
 	client: &reqwest::Client,
 	headers: &mut HeaderMap,
-	vars: &mut IndexMap<String, String>,
+	vars: &mut IndexMap<String, CoreValue>,
 	auth: &mut Option<Auth>,
 ) -> Result<DbResponse> {
-	let mut params = param.other;
-
-	match method {
-		Method::Use => {
-			let path = base_url.join(SQL_PATH)?;
-			let mut request = client.post(path).headers(headers.clone());
-			let (ns, db) = match &mut params[..] {
-				[Value::Strand(Strand(ns)), Value::Strand(Strand(db))] => {
-					(Some(mem::take(ns)), Some(mem::take(db)))
-				}
-				[Value::Strand(Strand(ns)), Value::None] => (Some(mem::take(ns)), None),
-				[Value::None, Value::Strand(Strand(db))] => (None, Some(mem::take(db))),
-				_ => unreachable!(),
-			};
-			let ns = match ns {
-				Some(ns) => match HeaderValue::try_from(&ns) {
-					Ok(ns) => {
-						request = request.header(&NS_LEGACY, &ns);
-						Some(ns)
-					}
-					Err(_) => {
-						return Err(Error::InvalidNsName(ns).into());
-					}
-				},
-				None => None,
-			};
-			let db = match db {
-				Some(db) => match HeaderValue::try_from(&db) {
-					Ok(db) => {
-						request = request.header(&DB_LEGACY, &db);
-						Some(db)
-					}
-					Err(_) => {
-						return Err(Error::InvalidDbName(db).into());
-					}
-				},
-				None => None,
-			};
-			request = request.auth(auth).body("RETURN true");
-			take(true, request).await?;
-			if let Some(ns) = ns {
-				headers.insert(&NS_LEGACY, ns);
+	match req.command {
+		Command::Query {
+			query,
+			mut variables,
+		} => {
+			variables.extend(vars.clone());
+			let req = Command::Query {
+				query,
+				variables,
 			}
-			if let Some(db) = db {
-				headers.insert(&DB_LEGACY, db);
-			}
-			Ok(DbResponse::Other(Value::None))
+			.into_router_request(None)
+			.expect("query should be valid request");
+			send_request(req, base_url, client, headers, auth).await
 		}
-		Method::Signin => {
-			let path = base_url.join(Method::Signin.as_str())?;
-			let credentials = match &mut params[..] {
-				[credentials] => credentials.to_string(),
-				_ => unreachable!(),
+		Command::Use {
+			namespace,
+			database,
+		} => {
+			let req = Command::Use {
+				namespace: namespace.clone(),
+				database: database.clone(),
+			}
+			.into_router_request(None)
+			.unwrap();
+			// process request to check permissions
+			let out = send_request(req, base_url, client, headers, auth).await?;
+			if let Some(ns) = namespace {
+				let value =
+					HeaderValue::try_from(&ns).map_err(|_| Error::InvalidNsName(ns.to_owned()))?;
+				headers.insert(&NS, value);
 			};
-			let request = client.post(path).headers(headers.clone()).auth(auth).body(credentials);
-			let value = submit_auth(request).await?;
-			if let [credentials] = &mut params[..] {
-				if let Ok(Credentials {
+			if let Some(db) = database {
+				let value =
+					HeaderValue::try_from(&db).map_err(|_| Error::InvalidDbName(db.to_owned()))?;
+				headers.insert(&DB, value);
+			};
+
+			Ok(out)
+		}
+		Command::Signin {
+			credentials,
+		} => {
+			let req = Command::Signin {
+				credentials: credentials.clone(),
+			}
+			.into_router_request(None)
+			.expect("signin should be a valid router request");
+
+			let DbResponse::Other(value) =
+				send_request(req, base_url, client, headers, auth).await?
+			else {
+				return Err(Error::InternalError(
+					"recieved invalid result from server".to_string(),
+				)
+				.into());
+			};
+
+			if let Ok(Credentials {
+				user,
+				pass,
+				ns,
+				db,
+			}) = from_core_value(credentials.into())
+			{
+				*auth = Some(Auth::Basic {
 					user,
 					pass,
 					ns,
 					db,
-				}) = from_value(mem::take(credentials))
-				{
-					*auth = Some(Auth::Basic {
-						user,
-						pass,
-						ns,
-						db,
-					});
-				} else {
-					*auth = Some(Auth::Bearer {
-						token: value.to_raw_string(),
-					});
-				}
+				});
+			} else {
+				*auth = Some(Auth::Bearer {
+					token: value.to_raw_string(),
+				});
 			}
+
 			Ok(DbResponse::Other(value))
 		}
-		Method::Signup => {
-			let path = base_url.join(Method::Signup.as_str())?;
-			let credentials = match &mut params[..] {
-				[credentials] => credentials.to_string(),
-				_ => unreachable!(),
-			};
-			let request = client.post(path).headers(headers.clone()).auth(auth).body(credentials);
-			let value = submit_auth(request).await?;
-			Ok(DbResponse::Other(value))
-		}
-		Method::Authenticate => {
-			let path = base_url.join(SQL_PATH)?;
-			let token = match &mut params[..1] {
-				[Value::Strand(Strand(token))] => mem::take(token),
-				_ => unreachable!(),
-			};
-			let request =
-				client.post(path).headers(headers.clone()).bearer_auth(&token).body("RETURN true");
-			take(true, request).await?;
+		Command::Authenticate {
+			token,
+		} => {
+			let req = Command::Authenticate {
+				token: token.clone(),
+			}
+			.into_router_request(None)
+			.expect("authenticate should be a valid router request");
+			send_request(req, base_url, client, headers, auth).await?;
+
 			*auth = Some(Auth::Bearer {
 				token,
 			});
-			Ok(DbResponse::Other(Value::None))
+			Ok(DbResponse::Other(CoreValue::None))
 		}
-		Method::Invalidate => {
+		Command::Invalidate => {
 			*auth = None;
-			Ok(DbResponse::Other(Value::None))
+			Ok(DbResponse::Other(CoreValue::None))
 		}
-		Method::Create => {
-			let path = base_url.join(SQL_PATH)?;
-			let statement = create_statement(&mut params);
-			let request =
-				client.post(path).headers(headers.clone()).auth(auth).body(statement.to_string());
-			let value = take(true, request).await?;
-			Ok(DbResponse::Other(value))
-		}
-		Method::Update => {
-			let path = base_url.join(SQL_PATH)?;
-			let (one, statement) = update_statement(&mut params);
-			let request =
-				client.post(path).headers(headers.clone()).auth(auth).body(statement.to_string());
-			let value = take(one, request).await?;
-			Ok(DbResponse::Other(value))
-		}
-		Method::Patch => {
-			let path = base_url.join(SQL_PATH)?;
-			let (one, statement) = patch_statement(&mut params);
-			let request =
-				client.post(path).headers(headers.clone()).auth(auth).body(statement.to_string());
-			let value = take(one, request).await?;
-			Ok(DbResponse::Other(value))
-		}
-		Method::Merge => {
-			let path = base_url.join(SQL_PATH)?;
-			let (one, statement) = merge_statement(&mut params);
-			let request =
-				client.post(path).headers(headers.clone()).auth(auth).body(statement.to_string());
-			let value = take(one, request).await?;
-			Ok(DbResponse::Other(value))
-		}
-		Method::Select => {
-			let path = base_url.join(SQL_PATH)?;
-			let (one, statement) = select_statement(&mut params);
-			let request =
-				client.post(path).headers(headers.clone()).auth(auth).body(statement.to_string());
-			let value = take(one, request).await?;
-			Ok(DbResponse::Other(value))
-		}
-		Method::Delete => {
-			let path = base_url.join(SQL_PATH)?;
-			let (one, statement) = delete_statement(&mut params);
-			let request =
-				client.post(path).headers(headers.clone()).auth(auth).body(statement.to_string());
-			let value = take(one, request).await?;
-			Ok(DbResponse::Other(value))
-		}
-		Method::Query => {
-			let path = base_url.join(SQL_PATH)?;
-			let mut request = client.post(path).headers(headers.clone()).query(&vars).auth(auth);
-			match param.query {
-				Some((query, bindings)) => {
-					let bindings: Vec<_> =
-						bindings.iter().map(|(key, value)| (key, value.to_string())).collect();
-					request = request.query(&bindings).body(query.to_string());
-				}
-				None => unreachable!(),
+		Command::Set {
+			key,
+			value,
+		} => {
+			let mut output_stmt = OutputStatement::default();
+			output_stmt.what = CoreValue::Param(Param::from(key.clone()));
+			let query = Query::from(Statement::Output(output_stmt));
+			let mut variables = CoreObject::default();
+			variables.insert(key.clone(), value);
+			let req = Command::Query {
+				query,
+				variables,
 			}
-			let values = query(request).await?;
-			Ok(DbResponse::Query(values))
+			.into_router_request(None)
+			.expect("query is valid request");
+			let DbResponse::Query(mut res) =
+				send_request(req, base_url, client, headers, auth).await?
+			else {
+				return Err(Error::InternalError(
+					"recieved invalid result from server".to_string(),
+				)
+				.into());
+			};
+
+			let val: Value = res.take(0)?;
+			vars.insert(key, val.0);
+			Ok(DbResponse::Other(CoreValue::None))
+		}
+		Command::Unset {
+			key,
+		} => {
+			vars.shift_remove(&key);
+			Ok(DbResponse::Other(CoreValue::None))
 		}
 		#[cfg(target_arch = "wasm32")]
-		Method::Export | Method::Import => unreachable!(),
+		Command::ExportFile {
+			..
+		}
+		| Command::ExportMl {
+			..
+		}
+		| Command::ImportFile {
+			..
+		}
+		| Command::ImportMl {
+			..
+		} => {
+			// TODO: Better error message here, some backups are supported
+			Err(Error::BackupsNotSupported.into())
+		}
+
 		#[cfg(not(target_arch = "wasm32"))]
-		Method::Export => {
-			let path = match param.ml_config {
-				#[cfg(feature = "ml")]
-				Some(MlConfig::Export {
-					name,
-					version,
-				}) => base_url.join(&format!("ml/export/{name}/{version}"))?,
-				_ => base_url.join(Method::Export.as_str())?,
-			};
+		Command::ExportFile {
+			path,
+		} => {
+			let req_path = base_url.join("export")?;
 			let request = client
-				.get(path)
+				.get(req_path)
 				.headers(headers.clone())
 				.auth(auth)
 				.header(ACCEPT, "application/octet-stream");
-			let value = export(request, (param.file, param.bytes_sender)).await?;
-			Ok(DbResponse::Other(value))
+			export_file(request, path).await?;
+			Ok(DbResponse::Other(CoreValue::None))
+		}
+		Command::ExportBytes {
+			bytes,
+		} => {
+			let req_path = base_url.join("export")?;
+			let request = client
+				.get(req_path)
+				.headers(headers.clone())
+				.auth(auth)
+				.header(ACCEPT, "application/octet-stream");
+			export_bytes(request, bytes).await?;
+			Ok(DbResponse::Other(CoreValue::None))
 		}
 		#[cfg(not(target_arch = "wasm32"))]
-		Method::Import => {
-			let path = match param.ml_config {
-				#[cfg(feature = "ml")]
-				Some(MlConfig::Import) => base_url.join("ml/import")?,
-				_ => base_url.join(Method::Import.as_str())?,
-			};
-			let file = param.file.expect("file to import from");
+		Command::ExportMl {
+			path,
+			config,
+		} => {
+			let req_path =
+				base_url.join("ml")?.join("export")?.join(&config.name)?.join(&config.version)?;
 			let request = client
-				.post(path)
+				.get(req_path)
+				.headers(headers.clone())
+				.auth(auth)
+				.header(ACCEPT, "application/octet-stream");
+			export_file(request, path).await?;
+			Ok(DbResponse::Other(CoreValue::None))
+		}
+		Command::ExportBytesMl {
+			bytes,
+			config,
+		} => {
+			let req_path =
+				base_url.join("ml")?.join("export")?.join(&config.name)?.join(&config.version)?;
+			let request = client
+				.get(req_path)
+				.headers(headers.clone())
+				.auth(auth)
+				.header(ACCEPT, "application/octet-stream");
+			export_bytes(request, bytes).await?;
+			Ok(DbResponse::Other(CoreValue::None))
+		}
+		#[cfg(not(target_arch = "wasm32"))]
+		Command::ImportFile {
+			path,
+		} => {
+			let req_path = base_url.join("import")?;
+			let request = client
+				.post(req_path)
 				.headers(headers.clone())
 				.auth(auth)
 				.header(CONTENT_TYPE, "application/octet-stream");
-			let value = import(request, file).await?;
-			Ok(DbResponse::Other(value))
+			import(request, path).await?;
+			Ok(DbResponse::Other(CoreValue::None))
 		}
-		Method::Health => {
-			let path = base_url.join(Method::Health.as_str())?;
-			let request = client.get(path);
-			let value = health(request).await?;
-			Ok(DbResponse::Other(value))
-		}
-		Method::Version => {
-			let path = base_url.join(method.as_str())?;
-			let request = client.get(path);
-			let value = version(request).await?;
-			Ok(DbResponse::Other(value))
-		}
-		Method::Set => {
-			let path = base_url.join(SQL_PATH)?;
-			let (key, value) = match &mut params[..2] {
-				[Value::Strand(Strand(key)), value] => (mem::take(key), value.to_string()),
-				_ => unreachable!(),
-			};
+		#[cfg(not(target_arch = "wasm32"))]
+		Command::ImportMl {
+			path,
+		} => {
+			let req_path = base_url.join("ml")?.join("import")?;
 			let request = client
-				.post(path)
+				.post(req_path)
 				.headers(headers.clone())
 				.auth(auth)
-				.query(&[(key.as_str(), value.as_str())])
-				.body(format!("RETURN ${key}"));
-			take(true, request).await?;
-			vars.insert(key, value);
-			Ok(DbResponse::Other(Value::None))
+				.header(CONTENT_TYPE, "application/octet-stream");
+			import(request, path).await?;
+			Ok(DbResponse::Other(CoreValue::None))
 		}
-		Method::Unset => {
-			if let [Value::Strand(Strand(key))] = &params[..1] {
-				vars.remove(key);
+		Command::SubscribeLive {
+			..
+		} => Err(Error::LiveQueriesNotSupported.into()),
+		cmd => {
+			let needs_flatten = cmd.needs_flatten();
+			let req = cmd.into_router_request(None).unwrap();
+			let mut res = send_request(req, base_url, client, headers, auth).await?;
+			if needs_flatten {
+				res = flatten_dbresponse_array(res);
 			}
-			Ok(DbResponse::Other(Value::None))
-		}
-		Method::Live => {
-			let path = base_url.join(SQL_PATH)?;
-			let table = match &params[..] {
-				[table] => table.to_string(),
-				_ => unreachable!(),
-			};
-			let request = client
-				.post(path)
-				.headers(headers.clone())
-				.auth(auth)
-				.query(&[("table", table)])
-				.body("LIVE SELECT * FROM type::table($table)");
-			let value = take(true, request).await?;
-			Ok(DbResponse::Other(value))
-		}
-		Method::Kill => {
-			let path = base_url.join(SQL_PATH)?;
-			let id = match &params[..] {
-				[id] => id.to_string(),
-				_ => unreachable!(),
-			};
-			let request = client
-				.post(path)
-				.headers(headers.clone())
-				.auth(auth)
-				.query(&[("id", id)])
-				.body("KILL type::string($id)");
-			let value = take(true, request).await?;
-			Ok(DbResponse::Other(value))
+			Ok(res)
 		}
 	}
 }

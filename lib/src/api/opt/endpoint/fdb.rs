@@ -16,11 +16,11 @@ macro_rules! endpoints {
 
 				fn into_endpoint(self) -> Result<Endpoint> {
 					let protocol = "fdb://";
-					Ok(Endpoint {
-						url: Url::parse(protocol).unwrap(),
-						path: super::path_to_string(protocol, self),
-						config: Default::default(),
-					})
+					let url = Url::parse(protocol)
+					    .unwrap_or_else(|_| unreachable!("`{protocol}` should be static and valid"));
+					let mut endpoint = Endpoint::new(url);
+					endpoint.path = super::path_to_string(protocol, self);
+					Ok(endpoint)
 				}
 			}
 

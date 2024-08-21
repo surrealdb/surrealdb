@@ -9,7 +9,7 @@ FROM docker.io/rockylinux:8 as builder
 RUN yum install -y gcc-toolset-13 git cmake llvm-toolset patch zlib-devel python3.11
 
 # Install rust
-ARG RUST_VERSION=1.75.0
+ARG RUST_VERSION=1.77.0
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs > /tmp/rustup.sh
 RUN bash /tmp/rustup.sh -y --default-toolchain ${RUST_VERSION}
 ENV PATH="/root/.cargo/bin:${PATH}"
@@ -47,16 +47,24 @@ COPY ${ARTIFACT_PREFIX}.${TARGETOS}-${TARGETARCH}/surreal /surreal
 
 RUN chmod +x /surreal
 
+# Allow connectivity from the host with bridge networking
+# This still requires publishing the port when running the container
+ENV SURREAL_BIND="0.0.0.0:8000"
+
 ENTRYPOINT ["/surreal"]
 
 #
-# Development image (built on the CI environment)
+# Production image (built on the CI environment)
 #
 FROM --platform=$TARGETPLATFORM cgr.dev/chainguard/glibc-dynamic:latest as prod-ci
 
 ARG TARGETPLATFORM
 
 COPY --from=dev-ci /surreal /surreal
+
+# Allow connectivity from the host with bridge networking
+# This still requires publishing the port when running the container
+ENV SURREAL_BIND="0.0.0.0:8000"
 
 ENTRYPOINT ["/surreal"]
 
@@ -73,6 +81,10 @@ RUN chmod +x /surreal
 
 USER root
 
+# Allow connectivity from the host with bridge networking
+# This still requires publishing the port when running the container
+ENV SURREAL_BIND="0.0.0.0:8000"
+
 ENTRYPOINT ["/surreal"]
 
 #
@@ -81,5 +93,9 @@ ENTRYPOINT ["/surreal"]
 FROM cgr.dev/chainguard/glibc-dynamic:latest as prod
 
 COPY --from=dev /surreal /surreal
+
+# Allow connectivity from the host with bridge networking
+# This still requires publishing the port when running the container
+ENV SURREAL_BIND="0.0.0.0:8000"
 
 ENTRYPOINT ["/surreal"]

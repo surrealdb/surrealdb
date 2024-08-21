@@ -2,7 +2,7 @@
 
 name: Stable release
 
-run-name: "Stable release '${{ inputs.branch }}' (publish: ${{ inputs.publish }}, latest: ${{ inputs.branch == 'releases/beta' || inputs.latest }}, HTTP compression: ${{ inputs.http-compression }}, ML: ${{ inputs.ml }})"
+run-name: "Stable release '${{ inputs.branch }}' (publish: ${{ inputs.publish }}, latest: ${{ inputs.branch == 'releases/beta' || inputs.latest }})"
 
 on:
   workflow_dispatch:
@@ -22,16 +22,6 @@ on:
         type: boolean
         default: false
         description: "Publish the release"
-      http-compression:
-        required: false
-        type: boolean
-        default: true
-        description: "Enable HTTP compression in binaries"
-      ml:
-        required: false
-        type: boolean
-        default: true
-        description: "Enable ML support in binaries"
 
 defaults:
   run:
@@ -66,93 +56,18 @@ jobs:
       latest: ${{ inputs.branch == 'releases/beta' || inputs.latest }}
       publish: ${{ inputs.publish }}
       create-release: ${{ inputs.publish }}
-      http-compression: ${{ inputs.http-compression }}
-      ml: ${{ inputs.ml }}
     secrets: inherit
 
-  release-branch:
+  delete-branches:
     name: Bump main version
+    if: ${{ inputs.publish }}
     needs: [release]
     runs-on: ubuntu-latest
     steps:
       - name: Checkout sources
         uses: actions/checkout@v4
-        with:
-          ref: ${{ inputs.branch }}
-
-      - name: Install stable toolchain
-        if: ${{ inputs.branch == 'releases/beta' || inputs.latest }}
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          toolchain: stable
-
-      - name: Install a TOML parser
-        if: ${{ inputs.branch == 'releases/beta' || inputs.latest }}
-        run: cargo install --force --locked --version 0.8.1 taplo-cli
-
-      - name: Create version bump branch
-        id: bump
-        if: ${{ inputs.branch == 'releases/beta' || inputs.latest }}
-        run: |
-          set -x
-
-          # When moving from beta we are going to pull the version from the stable branch
-          if [[ "${{ inputs.branch }}" == "releases/beta" ]]; then
-            git fetch origin releases/stable
-            git checkout releases/stable
-          fi
-
-          # Retrieve just released version
-          version=$(/home/runner/.cargo/bin/taplo get -f lib/Cargo.toml "package.version")
-          echo "version=${version}" >> $GITHUB_OUTPUT
-
-          # Checkout the main branch
-          git fetch origin main
-          git checkout main
-
-          # Switch to version bump branch
-          git checkout -b version-bump/v${version}
-
-          # Bump the crate version
-          sed -i "s#^version = \".*\"#version = \"${version}\"#" Cargo.toml
-          sed -i "s#^version = \".*\"#version = \"${version}\"#" lib/Cargo.toml
-
-          # Update Cargo.lock without updating dependency versions
-          cargo check --no-default-features --features storage-mem
-
-      - name: Push the branch
-        if: ${{ inputs.publish && (inputs.branch == 'releases/beta' || inputs.latest) }}
-        run: |
-          # Configure git
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git config user.name "github-actions[bot]"
-          git config --add --bool push.autoSetupRemote true
-
-          # Commit changes
-          git commit -am "Bump version to v${{ steps.bump.outputs.version }}"
-          git push
-
-      - name: Create a PR
-        id: pr
-        if: ${{ inputs.publish && (inputs.branch == 'releases/beta' || inputs.latest) }}
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          set -x
-          url=$(gh pr create --base main --title "Bump version to v${{ steps.bump.outputs.version }}" --body "Update main version")
-          echo "url=${url}" >> $GITHUB_OUTPUT
-
-      - name: Merge the PR
-        if: ${{ inputs.publish && (inputs.branch == 'releases/beta' || inputs.latest) }}
-        env:
-          GITHUB_TOKEN: ${{ secrets.RELEASE_PLZ_TOKEN }} # Need the custom user token here so we can approve and merge the PR
-        run: |
-          set -x
-          gh pr review ${{ steps.pr.outputs.url }} --approve
-          gh pr merge ${{ steps.pr.outputs.url }} --delete-branch --admin --squash
 
       - name: Delete the release branch
-        if: ${{ inputs.publish }}
         run: |
           set -x
           git push origin --delete ${{ inputs.branch }} || true

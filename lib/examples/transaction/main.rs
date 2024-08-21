@@ -20,7 +20,7 @@ async fn main() -> surrealdb::Result<()> {
     let response = db
 
         // Start transaction
-        .query(BeginStatement)
+        .query(BeginStatement::default())
 
         // Setup accounts
         .query("
@@ -35,7 +35,7 @@ async fn main() -> surrealdb::Result<()> {
         ")
 
         // Finalise
-        .query(CommitStatement)
+        .query(CommitStatement::default())
         .await?;
 
 	// See if any errors were returned

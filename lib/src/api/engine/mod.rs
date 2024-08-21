@@ -5,30 +5,22 @@ pub mod any;
 	feature = "kv-mem",
 	feature = "kv-tikv",
 	feature = "kv-rocksdb",
-	feature = "kv-speedb",
 	feature = "kv-fdb",
 	feature = "kv-indxdb",
+	feature = "kv-surrealkv",
 ))]
 pub mod local;
+pub mod proto;
 #[cfg(any(feature = "protocol-http", feature = "protocol-ws"))]
 pub mod remote;
+#[doc(hidden)]
+pub mod tasks;
 
-use crate::sql::statements::CreateStatement;
-use crate::sql::statements::DeleteStatement;
-use crate::sql::statements::SelectStatement;
-use crate::sql::statements::UpdateStatement;
-use crate::sql::Array;
-use crate::sql::Data;
-use crate::sql::Field;
-use crate::sql::Fields;
-use crate::sql::Output;
-use crate::sql::Value;
-use crate::sql::Values;
 use futures::Stream;
-use std::mem;
 use std::pin::Pin;
 use std::task::Context;
 use std::task::Poll;
+use surrealdb_core::sql::Values as CoreValues;
 #[cfg(not(target_arch = "wasm32"))]
 use tokio::time::Instant;
 #[cfg(not(target_arch = "wasm32"))]
@@ -38,114 +30,26 @@ use wasmtimer::std::Instant;
 #[cfg(target_arch = "wasm32")]
 use wasmtimer::tokio::Interval;
 
-#[allow(dead_code)] // used by the the embedded database and `http`
-fn split_params(params: &mut [Value]) -> (bool, Values, Value) {
-	let (what, data) = match params {
-		[what] => (mem::take(what), Value::None),
-		[what, data] => (mem::take(what), mem::take(data)),
-		_ => unreachable!(),
-	};
-	let one = what.is_thing();
-	let what = match what {
-		Value::Array(Array(vec)) => Values(vec),
-		value => Values(vec![value]),
-	};
-	(one, what, data)
-}
+use crate::Value;
 
-#[allow(dead_code)] // used by the the embedded database and `http`
-fn create_statement(params: &mut [Value]) -> CreateStatement {
-	let (_, what, data) = split_params(params);
-	let data = match data {
-		Value::None | Value::Null => None,
-		value => Some(Data::ContentExpression(value)),
-	};
-	CreateStatement {
-		what,
-		data,
-		output: Some(Output::After),
-		..Default::default()
+use super::opt::Resource;
+use super::opt::Table;
+
+// used in http and all local engines.
+#[allow(dead_code)]
+fn resource_to_values(r: Resource) -> CoreValues {
+	let mut res = CoreValues::default();
+	match r {
+		Resource::Table(x) => {
+			res.0 = vec![Table(x).into_core().into()];
+		}
+		Resource::RecordId(x) => res.0 = vec![x.into_inner().into()],
+		Resource::Object(x) => res.0 = vec![x.into_inner().into()],
+		Resource::Array(x) => res.0 = Value::array_to_core(x),
+		Resource::Edge(x) => res.0 = vec![x.into_inner().into()],
+		Resource::Range(x) => res.0 = vec![x.into_inner().into()],
 	}
-}
-
-#[allow(dead_code)] // used by the the embedded database and `http`
-fn update_statement(params: &mut [Value]) -> (bool, UpdateStatement) {
-	let (one, what, data) = split_params(params);
-	let data = match data {
-		Value::None | Value::Null => None,
-		value => Some(Data::ContentExpression(value)),
-	};
-	(
-		one,
-		UpdateStatement {
-			what,
-			data,
-			output: Some(Output::After),
-			..Default::default()
-		},
-	)
-}
-
-#[allow(dead_code)] // used by the the embedded database and `http`
-fn patch_statement(params: &mut [Value]) -> (bool, UpdateStatement) {
-	let (one, what, data) = split_params(params);
-	let data = match data {
-		Value::None | Value::Null => None,
-		value => Some(Data::PatchExpression(value)),
-	};
-	(
-		one,
-		UpdateStatement {
-			what,
-			data,
-			output: Some(Output::After),
-			..Default::default()
-		},
-	)
-}
-
-#[allow(dead_code)] // used by the the embedded database and `http`
-fn merge_statement(params: &mut [Value]) -> (bool, UpdateStatement) {
-	let (one, what, data) = split_params(params);
-	let data = match data {
-		Value::None | Value::Null => None,
-		value => Some(Data::MergeExpression(value)),
-	};
-	(
-		one,
-		UpdateStatement {
-			what,
-			data,
-			output: Some(Output::After),
-			..Default::default()
-		},
-	)
-}
-
-#[allow(dead_code)] // used by the the embedded database and `http`
-fn select_statement(params: &mut [Value]) -> (bool, SelectStatement) {
-	let (one, what, _) = split_params(params);
-	(
-		one,
-		SelectStatement {
-			what,
-			expr: Fields(vec![Field::All], false),
-			..Default::default()
-		},
-	)
-}
-
-#[allow(dead_code)] // used by the the embedded database and `http`
-fn delete_statement(params: &mut [Value]) -> (bool, DeleteStatement) {
-	let (one, what, _) = split_params(params);
-	(
-		one,
-		DeleteStatement {
-			what,
-			output: Some(Output::Before),
-			..Default::default()
-		},
-	)
+	res
 }
 
 struct IntervalStream {

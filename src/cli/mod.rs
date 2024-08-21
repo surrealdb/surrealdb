@@ -1,5 +1,4 @@
 pub(crate) mod abstraction;
-mod backup;
 mod config;
 mod export;
 mod import;
@@ -7,23 +6,31 @@ mod isready;
 mod ml;
 mod sql;
 mod start;
+#[cfg(test)]
+mod test;
 mod upgrade;
 mod validate;
 pub(crate) mod validator;
 mod version;
+mod version_client;
 
-use crate::cnf::LOGO;
+use crate::cli::version_client::VersionClient;
+#[cfg(debug_assertions)]
+use crate::cnf::DEBUG_BUILD_WARNING;
+use crate::cnf::{LOGO, PKG_VERSION};
 use crate::env::RELEASE;
-use backup::BackupCommandArguments;
 use clap::{Parser, Subcommand};
 pub use config::CF;
 use export::ExportCommandArguments;
 use import::ImportCommandArguments;
 use isready::IsReadyCommandArguments;
 use ml::MlCommand;
+use semver::Version;
 use sql::SqlCommandArguments;
 use start::StartCommandArguments;
+use std::ops::Deref;
 use std::process::ExitCode;
+use std::time::Duration;
 use upgrade::UpgradeCommandArguments;
 use validate::ValidateCommandArguments;
 use version::VersionCommandArguments;
@@ -48,6 +55,10 @@ We would love it if you could star the repository (https://github.com/surrealdb/
 struct Cli {
 	#[command(subcommand)]
 	command: Commands,
+	#[arg(help = "Whether to allow web check for client version upgrades at start")]
+	#[arg(env = "SURREAL_ONLINE_VERSION_CHECK", long)]
+	#[arg(default_value_t = true)]
+	online_version_check: bool,
 }
 
 #[allow(clippy::large_enum_variant)]
@@ -55,8 +66,10 @@ struct Cli {
 enum Commands {
 	#[command(about = "Start the database server")]
 	Start(StartCommandArguments),
+	/* Not implemented yet
 	#[command(about = "Backup data to or from an existing database")]
 	Backup(BackupCommandArguments),
+	*/
 	#[command(about = "Import a SurrealQL script into an existing database")]
 	Import(ImportCommandArguments),
 	#[command(about = "Export an existing database as a SurrealQL script")]
@@ -79,10 +92,38 @@ enum Commands {
 }
 
 pub async fn init() -> ExitCode {
+	// Start a new CPU profiler
+	#[cfg(feature = "performance-profiler")]
+	let guard = pprof::ProfilerGuardBuilder::default()
+		.frequency(1000)
+		.blocklist(&["libc", "libgcc", "pthread", "vdso"])
+		.build()
+		.unwrap();
+	// Parse the CLI arguments
 	let args = Cli::parse();
+
+	#[cfg(debug_assertions)]
+	println!("{DEBUG_BUILD_WARNING}");
+
+	// After parsing arguments, we check the version online
+	if args.online_version_check {
+		let client = version_client::new(Some(Duration::from_millis(500))).unwrap();
+		if let Err(opt_version) = check_upgrade(&client, PKG_VERSION.deref()).await {
+			match opt_version {
+				None => {
+					warn!("A new version of SurrealDB may be available.");
+				}
+				Some(new_version) => {
+					warn!("A new version of SurrealDB is available: {}", new_version);
+				}
+			}
+			// TODO ansi_term crate?
+			warn!("You can upgrade using the {} command", "surreal upgrade");
+		}
+	}
+	// After version warning we can run the respective command
 	let output = match args.command {
 		Commands::Start(args) => start::init(args).await,
-		Commands::Backup(args) => backup::init(args).await,
 		Commands::Import(args) => import::init(args).await,
 		Commands::Export(args) => export::init(args).await,
 		Commands::Version(args) => version::init(args).await,
@@ -92,10 +133,49 @@ pub async fn init() -> ExitCode {
 		Commands::IsReady(args) => isready::init(args).await,
 		Commands::Validate(args) => validate::init(args).await,
 	};
+	// Save the flamegraph and profile
+	#[cfg(feature = "performance-profiler")]
+	if let Ok(report) = guard.report().build() {
+		// Import necessary traits
+		use pprof::protos::Message;
+		use std::io::Write;
+		// Output a flamegraph
+		let file = std::fs::File::create("flamegraph.svg").unwrap();
+		report.flamegraph(file).unwrap();
+		// Output a pprof
+		let mut file = std::fs::File::create("profile.pb").unwrap();
+		let profile = report.pprof().unwrap();
+		let mut content = Vec::new();
+		profile.encode(&mut content).unwrap();
+		file.write_all(&content).unwrap();
+	};
+	// Error and exit the programme
 	if let Err(e) = output {
 		error!("{}", e);
 		ExitCode::FAILURE
 	} else {
 		ExitCode::SUCCESS
 	}
+}
+
+/// Check if there is a newer version
+/// Ok = No upgrade needed
+/// Err = Upgrade needed, returns the new version if it is available
+async fn check_upgrade<C: VersionClient>(
+	client: &C,
+	pkg_version: &str,
+) -> Result<(), Option<Version>> {
+	if let Ok(version) = client.fetch("latest").await {
+		// Request was successful, compare against current
+		let old_version = upgrade::parse_version(pkg_version).unwrap();
+		let new_version = upgrade::parse_version(&version).unwrap();
+		if old_version < new_version {
+			return Err(Some(new_version));
+		}
+	} else {
+		// Request failed, check against date
+		// TODO: We don't have an "expiry" set per-version, so this is a todo
+		// It would return Err(None) if the version is too old
+	}
+	Ok(())
 }

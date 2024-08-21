@@ -1,6 +1,7 @@
 mod parse;
 use parse::Parse;
 mod helpers;
+use crate::helpers::Test;
 use helpers::new_ds;
 use helpers::with_enough_stack;
 use surrealdb::dbs::Session;
@@ -138,11 +139,65 @@ async fn field_definition_value_assert_success() -> Result<(), Error> {
 }
 
 #[tokio::test]
+async fn field_definition_option_kind_assert() -> Result<(), Error> {
+	let sql = "
+		DEFINE TABLE person SCHEMAFULL;
+		DEFINE FIELD name ON TABLE person TYPE option<string> ASSERT string::len($value) > 3;
+		CREATE person:test;
+		CREATE person:mark SET name = 'mark';
+		CREATE person:bob SET name = 'bob';
+	";
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 5);
+	//
+	let tmp = res.remove(0).result;
+	assert!(tmp.is_ok());
+	//
+	let tmp = res.remove(0).result;
+	assert!(tmp.is_ok());
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
+			{
+				id: person:test
+			}
+		]",
+	);
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
+			{
+				id: person:mark,
+				name: 'mark'
+			}
+		]",
+	);
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result;
+	assert!(
+		matches!(
+			&tmp,
+			Err(e) if e.to_string() == "Found 'bob' for field `name`, with record `person:bob`, but field must conform to: string::len($value) > 3"
+		),
+		"{}",
+		tmp.unwrap_err().to_string()
+	);
+
+	Ok(())
+}
+
+#[tokio::test]
 async fn field_definition_empty_nested_objects() -> Result<(), Error> {
 	let sql = "
 		DEFINE TABLE person SCHEMAFULL;
 		DEFINE FIELD settings on person TYPE object;
-		UPDATE person:test CONTENT {
+		UPSERT person:test CONTENT {
 		    settings: {
 		        nested: {
 		            object: {
@@ -194,7 +249,7 @@ async fn field_definition_empty_nested_arrays() -> Result<(), Error> {
 	let sql = "
 		DEFINE TABLE person SCHEMAFULL;
 		DEFINE FIELD settings on person TYPE object;
-		UPDATE person:test CONTENT {
+		UPSERT person:test CONTENT {
 		    settings: {
 		        nested: [
 					1,
@@ -248,7 +303,7 @@ async fn field_definition_empty_nested_flexible() -> Result<(), Error> {
 	let sql = "
 		DEFINE TABLE person SCHEMAFULL;
 		DEFINE FIELD settings on person FLEXIBLE TYPE object;
-		UPDATE person:test CONTENT {
+		UPSERT person:test CONTENT {
 		    settings: {
 				nested: {
 		            object: {
@@ -464,9 +519,9 @@ async fn field_definition_default_value() -> Result<(), Error> {
 		CREATE product:test SET tertiary = 123;
 		CREATE product:test;
 		--
-		UPDATE product:test SET primary = 654.321;
-		UPDATE product:test SET secondary = false;
-		UPDATE product:test SET tertiary = 'something';
+		UPSERT product:test SET primary = 654.321;
+		UPSERT product:test SET secondary = false;
+		UPSERT product:test SET tertiary = 'something';
 	";
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
@@ -789,7 +844,7 @@ async fn field_definition_edge_permissions() -> Result<(), Error> {
 		DEFINE TABLE user SCHEMAFULL;
 		DEFINE TABLE business SCHEMAFULL;
 		DEFINE FIELD owner ON TABLE business TYPE record<user>;
-		DEFINE TABLE contact SCHEMAFULL PERMISSIONS FOR create WHERE in.owner.id = $auth.id;
+		DEFINE TABLE contact TYPE RELATION SCHEMAFULL PERMISSIONS FOR create WHERE in.owner.id = $auth.id;
 		INSERT INTO user (id, name) VALUES (user:one, 'John'), (user:two, 'Lucy');
 		INSERT INTO business (id, owner) VALUES (business:one, user:one), (business:two, user:two);
 	";
@@ -842,7 +897,7 @@ async fn field_definition_edge_permissions() -> Result<(), Error> {
 		RELATE business:one->contact:one->business:two;
 		RELATE business:two->contact:two->business:one;
 	";
-	let ses = Session::for_scope("test", "test", "test", Thing::from(("user", "one")).into());
+	let ses = Session::for_record("test", "test", "test", Thing::from(("user", "one")).into());
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 2);
 	//
@@ -871,8 +926,8 @@ async fn field_definition_readonly() -> Result<(), Error> {
 		DEFINE TABLE person SCHEMAFULL;
 		DEFINE FIELD birthdate ON person TYPE datetime READONLY;
 		CREATE person:test SET birthdate = d'2023-12-13T21:27:55.632Z';
-		UPDATE person:test SET birthdate = d'2023-12-13T21:27:55.632Z';
-		UPDATE person:test SET birthdate = d'2024-12-13T21:27:55.632Z';
+		UPSERT person:test SET birthdate = d'2023-12-13T21:27:55.632Z';
+		UPSERT person:test SET birthdate = d'2024-12-13T21:27:55.632Z';
 	";
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
@@ -926,27 +981,15 @@ async fn field_definition_flexible_array_any() -> Result<(), Error> {
 	let sql = "
 		DEFINE TABLE user SCHEMAFULL;
 		DEFINE FIELD custom ON user TYPE option<array>;
+		REMOVE FIELD custom.* ON user;
 		DEFINE FIELD custom.* ON user FLEXIBLE TYPE any;
 		CREATE user:one CONTENT { custom: ['sometext'] };
 		CREATE user:two CONTENT { custom: [ ['sometext'] ] };
 		CREATE user:three CONTENT { custom: [ { key: 'sometext' } ] };
 	";
-	let dbs = new_ds().await?.with_auth_enabled(true);
-	let ses = Session::owner().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(sql, &ses, None).await?;
-	assert_eq!(res.len(), 6);
-	//
-	let tmp = res.remove(0).result;
-	assert!(tmp.is_ok());
-	//
-	let tmp = res.remove(0).result;
-	assert!(tmp.is_ok());
-	//
-	let tmp = res.remove(0).result;
-	assert!(tmp.is_ok());
-	//
-	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let mut t = Test::new(sql).await?;
+	t.skip_ok(4)?;
+	t.expect_val(
 		"[
 			{
 				custom: [
@@ -955,11 +998,8 @@ async fn field_definition_flexible_array_any() -> Result<(), Error> {
 				id: user:one
 			},
 		]",
-	);
-	assert_eq!(tmp, val);
-	//
-	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	)?;
+	t.expect_val(
 		"[
 			{
 				custom: [
@@ -970,11 +1010,8 @@ async fn field_definition_flexible_array_any() -> Result<(), Error> {
 				id: user:two
 			},
 		]",
-	);
-	assert_eq!(tmp, val);
-	//
-	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	)?;
+	t.expect_val(
 		"[
 			{
 				custom: [
@@ -985,8 +1022,6 @@ async fn field_definition_flexible_array_any() -> Result<(), Error> {
 				id: user:three
 			}
 		]",
-	);
-	assert_eq!(tmp, val);
-	//
+	)?;
 	Ok(())
 }

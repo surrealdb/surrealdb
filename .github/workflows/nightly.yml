@@ -2,16 +2,11 @@
 
 name: Nightly release
 
-run-name: "Nightly release '${{ inputs.git-ref || github.ref_name }}' (publish: ${{ inputs.publish || github.event_name == 'schedule' }})"
+run-name: "Nightly release (publish: ${{ inputs.publish || github.event_name == 'schedule' }})"
 
 on:
   workflow_dispatch:
     inputs:
-      git-ref:
-        required: true
-        type: string
-        description: "The github ref of this nightly version (i.e. main, 1234567)"
-        default: main
       publish:
         required: false
         type: boolean
@@ -33,6 +28,7 @@ jobs:
     uses: ./.github/workflows/reusable_publish_version.yml
     with:
       environment: nightly
-      git-ref: ${{ inputs.git-ref || github.ref_name }}
+      extra-features: storage-surrealkv,ml
+      git-ref: main
       publish: ${{ inputs.publish || github.event_name == 'schedule' }}
     secrets: inherit

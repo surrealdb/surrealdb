@@ -1,50 +1,36 @@
 use crate::api::conn::Connection;
-use crate::api::conn::Method;
-use crate::api::conn::Param;
-use crate::api::conn::Route;
 use crate::api::conn::Router;
 #[allow(unused_imports)] // used by the DB engines
 use crate::api::engine;
 use crate::api::engine::any::Any;
 use crate::api::err::Error;
+use crate::api::method::BoxFuture;
 use crate::api::opt::{Endpoint, EndpointKind};
-use crate::api::DbResponse;
 use crate::api::ExtraFeatures;
 use crate::api::OnceLockExt;
 use crate::api::Result;
 use crate::api::Surreal;
 use crate::error::Db as DbError;
-use flume::Receiver;
+use crate::opt::WaitFor;
 use std::collections::HashSet;
-use std::future::Future;
-use std::marker::PhantomData;
-use std::pin::Pin;
 use std::sync::atomic::AtomicI64;
 use std::sync::Arc;
 use std::sync::OnceLock;
+use tokio::sync::watch;
+use wasm_bindgen_futures::spawn_local;
 
 impl crate::api::Connection for Any {}
 
 impl Connection for Any {
-	fn new(method: Method) -> Self {
-		Self {
-			method,
-			id: 0,
-		}
-	}
-
 	#[allow(unused_variables, unreachable_code, unused_mut)] // these are all used depending on feature
-	fn connect(
-		address: Endpoint,
-		capacity: usize,
-	) -> Pin<Box<dyn Future<Output = Result<Surreal<Self>>> + Send + Sync + 'static>> {
+	fn connect(address: Endpoint, capacity: usize) -> BoxFuture<'static, Result<Surreal<Self>>> {
 		Box::pin(async move {
 			let (route_tx, route_rx) = match capacity {
-				0 => flume::unbounded(),
-				capacity => flume::bounded(capacity),
+				0 => channel::unbounded(),
+				capacity => channel::bounded(capacity),
 			};
 
-			let (conn_tx, conn_rx) = flume::bounded::<Result<()>>(1);
+			let (conn_tx, conn_rx) = channel::bounded::<Result<()>>(1);
 			let mut features = HashSet::new();
 
 			match EndpointKind::from(address.url.scheme()) {
@@ -52,8 +38,8 @@ impl Connection for Any {
 					#[cfg(feature = "kv-fdb")]
 					{
 						features.insert(ExtraFeatures::LiveQueries);
-						engine::local::wasm::router(address, conn_tx, route_rx);
-						conn_rx.into_recv_async().await??;
+						spawn_local(engine::local::wasm::run_router(address, conn_tx, route_rx));
+						conn_rx.recv().await??;
 					}
 
 					#[cfg(not(feature = "kv-fdb"))]
@@ -66,8 +52,8 @@ impl Connection for Any {
 					#[cfg(feature = "kv-indxdb")]
 					{
 						features.insert(ExtraFeatures::LiveQueries);
-						engine::local::wasm::router(address, conn_tx, route_rx);
-						conn_rx.into_recv_async().await??;
+						spawn_local(engine::local::wasm::run_router(address, conn_tx, route_rx));
+						conn_rx.recv().await??;
 					}
 
 					#[cfg(not(feature = "kv-indxdb"))]
@@ -80,8 +66,8 @@ impl Connection for Any {
 					#[cfg(feature = "kv-mem")]
 					{
 						features.insert(ExtraFeatures::LiveQueries);
-						engine::local::wasm::router(address, conn_tx, route_rx);
-						conn_rx.into_recv_async().await??;
+						spawn_local(engine::local::wasm::run_router(address, conn_tx, route_rx));
+						conn_rx.recv().await??;
 					}
 
 					#[cfg(not(feature = "kv-mem"))]
@@ -94,8 +80,8 @@ impl Connection for Any {
 					#[cfg(feature = "kv-rocksdb")]
 					{
 						features.insert(ExtraFeatures::LiveQueries);
-						engine::local::wasm::router(address, conn_tx, route_rx);
-						conn_rx.into_recv_async().await??;
+						spawn_local(engine::local::wasm::run_router(address, conn_tx, route_rx));
+						conn_rx.recv().await??;
 					}
 
 					#[cfg(not(feature = "kv-rocksdb"))]
@@ -105,17 +91,17 @@ impl Connection for Any {
 					.into());
 				}
 
-				EndpointKind::SpeeDb => {
-					#[cfg(feature = "kv-speedb")]
+				EndpointKind::SurrealKV => {
+					#[cfg(feature = "kv-surrealkv")]
 					{
 						features.insert(ExtraFeatures::LiveQueries);
-						engine::local::wasm::router(address, conn_tx, route_rx);
-						conn_rx.into_recv_async().await??;
+						spawn_local(engine::local::wasm::run_router(address, conn_tx, route_rx));
+						conn_rx.recv().await??;
 					}
 
-					#[cfg(not(feature = "kv-speedb"))]
+					#[cfg(not(feature = "kv-surrealkv"))]
 					return Err(DbError::Ds(
-						"Cannot connect to the `speedb` storage engine as it is not enabled in this build of SurrealDB".to_owned(),
+						"Cannot connect to the `surrealkv` storage engine as it is not enabled in this build of SurrealDB".to_owned(),
 					)
 					.into());
 				}
@@ -124,8 +110,8 @@ impl Connection for Any {
 					#[cfg(feature = "kv-tikv")]
 					{
 						features.insert(ExtraFeatures::LiveQueries);
-						engine::local::wasm::router(address, conn_tx, route_rx);
-						conn_rx.into_recv_async().await??;
+						spawn_local(engine::local::wasm::run_router(address, conn_tx, route_rx));
+						conn_rx.recv().await??;
 					}
 
 					#[cfg(not(feature = "kv-tikv"))]
@@ -137,7 +123,9 @@ impl Connection for Any {
 				EndpointKind::Http | EndpointKind::Https => {
 					#[cfg(feature = "protocol-http")]
 					{
-						engine::remote::http::wasm::router(address, conn_tx, route_rx);
+						spawn_local(engine::remote::http::wasm::run_router(
+							address, conn_tx, route_rx,
+						));
 					}
 
 					#[cfg(not(feature = "protocol-http"))]
@@ -151,10 +139,12 @@ impl Connection for Any {
 					#[cfg(feature = "protocol-ws")]
 					{
 						features.insert(ExtraFeatures::LiveQueries);
-						let mut address = address;
-						address.url = address.url.join(engine::remote::ws::PATH)?;
-						engine::remote::ws::wasm::router(address, capacity, conn_tx, route_rx);
-						conn_rx.into_recv_async().await??;
+						let mut endpoint = address;
+						endpoint.url = endpoint.url.join(engine::remote::ws::PATH)?;
+						spawn_local(engine::remote::ws::wasm::run_router(
+							endpoint, capacity, conn_tx, route_rx,
+						));
+						conn_rx.recv().await??;
 					}
 
 					#[cfg(not(feature = "protocol-ws"))]
@@ -167,31 +157,14 @@ impl Connection for Any {
 				EndpointKind::Unsupported(v) => return Err(Error::Scheme(v).into()),
 			}
 
-			Ok(Surreal {
-				router: Arc::new(OnceLock::with_value(Router {
+			Ok(Surreal::new_from_router_waiter(
+				Arc::new(OnceLock::with_value(Router {
 					features,
 					sender: route_tx,
 					last_id: AtomicI64::new(0),
 				})),
-				engine: PhantomData,
-			})
-		})
-	}
-
-	fn send<'r>(
-		&'r mut self,
-		router: &'r Router,
-		param: Param,
-	) -> Pin<Box<dyn Future<Output = Result<Receiver<Result<DbResponse>>>> + Send + Sync + 'r>> {
-		Box::pin(async move {
-			let (sender, receiver) = flume::bounded(1);
-			self.id = router.next_id();
-			let route = Route {
-				request: (self.id, self.method, param),
-				response: sender,
-			};
-			router.sender.send_async(Some(route)).await?;
-			Ok(receiver)
+				Arc::new(watch::channel(Some(WaitFor::Connection))),
+			))
 		})
 	}
 }

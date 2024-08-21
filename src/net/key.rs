@@ -1,4 +1,3 @@
-use crate::dbs::DB;
 use crate::err::Error;
 use crate::net::input::bytes_to_utf8;
 use crate::net::output;
@@ -6,10 +5,10 @@ use crate::net::params::Params;
 use axum::extract::{DefaultBodyLimit, Path};
 use axum::response::IntoResponse;
 use axum::routing::options;
-use axum::{Extension, Router, TypedHeader};
+use axum::{Extension, Router};
 use axum_extra::extract::Query;
+use axum_extra::TypedHeader;
 use bytes::Bytes;
-use http_body::Body as HttpBody;
 use serde::Deserialize;
 use std::str;
 use surrealdb::dbs::Session;
@@ -18,6 +17,7 @@ use surrealdb::sql::Value;
 use tower_http::limit::RequestBodyLimitLayer;
 
 use super::headers::Accept;
+use super::AppState;
 
 const MAX: usize = 1024 * 16; // 16 KiB
 
@@ -28,11 +28,8 @@ struct QueryOptions {
 	pub fields: Option<Vec<String>>,
 }
 
-pub(super) fn router<S, B>() -> Router<S, B>
+pub(super) fn router<S>() -> Router<S>
 where
-	B: HttpBody + Send + 'static,
-	B::Data: Send,
-	B::Error: std::error::Error + Send + Sync + 'static,
 	S: Clone + Send + Sync + 'static,
 {
 	Router::new()
@@ -68,13 +65,14 @@ where
 // ------------------------------
 
 async fn select_all(
+	Extension(state): Extension<AppState>,
 	Extension(session): Extension<Session>,
 	accept: Option<TypedHeader<Accept>>,
 	Path(table): Path<String>,
 	Query(query): Query<QueryOptions>,
 ) -> Result<impl IntoResponse, impl IntoResponse> {
 	// Get the datastore reference
-	let db = DB.get().unwrap();
+	let db = &state.datastore;
 	// Ensure a NS and DB are set
 	let _ = check_ns_db(&session)?;
 	// Specify the request statement
@@ -97,6 +95,7 @@ async fn select_all(
 			Some(Accept::ApplicationCbor) => Ok(output::cbor(&output::simplify(res))),
 			Some(Accept::ApplicationPack) => Ok(output::pack(&output::simplify(res))),
 			// Internal serialization
+			// TODO: remove format in 2.0.0
 			Some(Accept::Surrealdb) => Ok(output::full(&res)),
 			// An incorrect content-type was requested
 			_ => Err(Error::InvalidType),
@@ -107,6 +106,7 @@ async fn select_all(
 }
 
 async fn create_all(
+	Extension(state): Extension<AppState>,
 	Extension(session): Extension<Session>,
 	accept: Option<TypedHeader<Accept>>,
 	Path(table): Path<String>,
@@ -114,7 +114,7 @@ async fn create_all(
 	body: Bytes,
 ) -> Result<impl IntoResponse, impl IntoResponse> {
 	// Get the datastore reference
-	let db = DB.get().unwrap();
+	let db = &state.datastore;
 	// Ensure a NS and DB are set
 	let _ = check_ns_db(&session)?;
 	// Convert the HTTP request body
@@ -151,6 +151,7 @@ async fn create_all(
 }
 
 async fn update_all(
+	Extension(state): Extension<AppState>,
 	Extension(session): Extension<Session>,
 	accept: Option<TypedHeader<Accept>>,
 	Path(table): Path<String>,
@@ -158,7 +159,7 @@ async fn update_all(
 	body: Bytes,
 ) -> Result<impl IntoResponse, impl IntoResponse> {
 	// Get the datastore reference
-	let db = DB.get().unwrap();
+	let db = &state.datastore;
 	// Ensure a NS and DB are set
 	let _ = check_ns_db(&session)?;
 	// Convert the HTTP request body
@@ -167,7 +168,7 @@ async fn update_all(
 	match surrealdb::sql::value(data) {
 		Ok(data) => {
 			// Specify the request statement
-			let sql = "UPDATE type::table($table) CONTENT $data";
+			let sql = "UPSERT type::table($table) CONTENT $data";
 			// Specify the request variables
 			let vars = map! {
 				String::from("table") => Value::from(table),
@@ -195,6 +196,7 @@ async fn update_all(
 }
 
 async fn modify_all(
+	Extension(state): Extension<AppState>,
 	Extension(session): Extension<Session>,
 	accept: Option<TypedHeader<Accept>>,
 	Path(table): Path<String>,
@@ -202,7 +204,7 @@ async fn modify_all(
 	body: Bytes,
 ) -> Result<impl IntoResponse, impl IntoResponse> {
 	// Get the datastore reference
-	let db = DB.get().unwrap();
+	let db = &state.datastore;
 	// Ensure a NS and DB are set
 	let _ = check_ns_db(&session)?;
 	// Convert the HTTP request body
@@ -211,7 +213,7 @@ async fn modify_all(
 	match surrealdb::sql::value(data) {
 		Ok(data) => {
 			// Specify the request statement
-			let sql = "UPDATE type::table($table) MERGE $data";
+			let sql = "UPSERT type::table($table) MERGE $data";
 			// Specify the request variables
 			let vars = map! {
 				String::from("table") => Value::from(table),
@@ -239,13 +241,14 @@ async fn modify_all(
 }
 
 async fn delete_all(
+	Extension(state): Extension<AppState>,
 	Extension(session): Extension<Session>,
 	accept: Option<TypedHeader<Accept>>,
 	Path(table): Path<String>,
 	Query(params): Query<Params>,
 ) -> Result<impl IntoResponse, impl IntoResponse> {
 	// Get the datastore reference
-	let db = DB.get().unwrap();
+	let db = &state.datastore;
 	// Ensure a NS and DB are set
 	let _ = check_ns_db(&session)?;
 	// Specify the request statement
@@ -277,13 +280,14 @@ async fn delete_all(
 // ------------------------------
 
 async fn select_one(
+	Extension(state): Extension<AppState>,
 	Extension(session): Extension<Session>,
 	accept: Option<TypedHeader<Accept>>,
 	Path((table, id)): Path<(String, String)>,
 	Query(query): Query<QueryOptions>,
 ) -> Result<impl IntoResponse, impl IntoResponse> {
 	// Get the datastore reference
-	let db = DB.get().unwrap();
+	let db = &state.datastore;
 	// Ensure a NS and DB are set
 	let _ = check_ns_db(&session)?;
 	// Specify the request statement
@@ -320,6 +324,7 @@ async fn select_one(
 }
 
 async fn create_one(
+	Extension(state): Extension<AppState>,
 	Extension(session): Extension<Session>,
 	accept: Option<TypedHeader<Accept>>,
 	Query(params): Query<Params>,
@@ -327,7 +332,7 @@ async fn create_one(
 	body: Bytes,
 ) -> Result<impl IntoResponse, impl IntoResponse> {
 	// Get the datastore reference
-	let db = DB.get().unwrap();
+	let db = &state.datastore;
 	// Ensure a NS and DB are set
 	let _ = check_ns_db(&session)?;
 	// Convert the HTTP request body
@@ -370,6 +375,7 @@ async fn create_one(
 }
 
 async fn update_one(
+	Extension(state): Extension<AppState>,
 	Extension(session): Extension<Session>,
 	accept: Option<TypedHeader<Accept>>,
 	Query(params): Query<Params>,
@@ -377,7 +383,7 @@ async fn update_one(
 	body: Bytes,
 ) -> Result<impl IntoResponse, impl IntoResponse> {
 	// Get the datastore reference
-	let db = DB.get().unwrap();
+	let db = &state.datastore;
 	// Ensure a NS and DB are set
 	let _ = check_ns_db(&session)?;
 	// Convert the HTTP request body
@@ -391,7 +397,7 @@ async fn update_one(
 	match surrealdb::sql::value(data) {
 		Ok(data) => {
 			// Specify the request statement
-			let sql = "UPDATE type::thing($table, $id) CONTENT $data";
+			let sql = "UPSERT type::thing($table, $id) CONTENT $data";
 			// Specify the request variables
 			let vars = map! {
 				String::from("table") => Value::from(table),
@@ -420,6 +426,7 @@ async fn update_one(
 }
 
 async fn modify_one(
+	Extension(state): Extension<AppState>,
 	Extension(session): Extension<Session>,
 	accept: Option<TypedHeader<Accept>>,
 	Query(params): Query<Params>,
@@ -427,7 +434,7 @@ async fn modify_one(
 	body: Bytes,
 ) -> Result<impl IntoResponse, impl IntoResponse> {
 	// Get the datastore reference
-	let db = DB.get().unwrap();
+	let db = &state.datastore;
 	// Ensure a NS and DB are set
 	let _ = check_ns_db(&session)?;
 	// Convert the HTTP request body
@@ -441,7 +448,7 @@ async fn modify_one(
 	match surrealdb::sql::value(data) {
 		Ok(data) => {
 			// Specify the request statement
-			let sql = "UPDATE type::thing($table, $id) MERGE $data";
+			let sql = "UPSERT type::thing($table, $id) MERGE $data";
 			// Specify the request variables
 			let vars = map! {
 				String::from("table") => Value::from(table),
@@ -470,12 +477,13 @@ async fn modify_one(
 }
 
 async fn delete_one(
+	Extension(state): Extension<AppState>,
 	Extension(session): Extension<Session>,
 	accept: Option<TypedHeader<Accept>>,
 	Path((table, id)): Path<(String, String)>,
 ) -> Result<impl IntoResponse, impl IntoResponse> {
 	// Get the datastore reference
-	let db = DB.get().unwrap();
+	let db = &state.datastore;
 	// Ensure a NS and DB are set
 	let _ = check_ns_db(&session)?;
 	// Specify the request statement

@@ -12,7 +12,6 @@ use std::collections::HashMap;
 use surrealdb::dbs::Session;
 use surrealdb::err::Error;
 use surrealdb::iam::Role;
-use surrealdb::kvs::{LockType::*, TransactionType::*};
 use surrealdb::sql::Value;
 
 #[tokio::test]
@@ -36,17 +35,112 @@ async fn remove_statement_table() -> Result<(), Error> {
 	let tmp = res.remove(0).result?;
 	let val = Value::parse(
 		"{
+			accesses: {},
 			analyzers: {},
-			tokens: {},
 			functions: {},
 			models: {},
 			params: {},
-			scopes: {},
 			tables: {},
 			users: {}
 		}",
 	);
 	assert_eq!(tmp, val);
+	Ok(())
+}
+
+#[tokio::test]
+async fn remove_statement_namespace() -> Result<(), Error> {
+	// Namespace not selected
+	{
+		let sql = "
+			REMOVE NAMESPACE test;
+			DEFINE NAMESPACE test;
+			REMOVE NAMESPACE test;
+		";
+		let dbs = new_ds().await?;
+		let ses = Session::owner();
+		let res = &mut dbs.execute(sql, &ses, None).await?;
+		assert_eq!(res.len(), 3);
+		//
+		let tmp = res.remove(0).result;
+		assert!(tmp.is_err());
+		//
+		let tmp = res.remove(0).result;
+		assert!(tmp.is_ok());
+		//
+		let tmp = res.remove(0).result;
+		assert!(tmp.is_ok());
+	}
+	// Namespace selected
+	{
+		let sql = "
+			REMOVE NAMESPACE test;
+			DEFINE NAMESPACE test;
+			REMOVE NAMESPACE test;
+		";
+		let dbs = new_ds().await?;
+		// No namespace is selected
+		let ses = Session::owner().with_ns("test");
+		let res = &mut dbs.execute(sql, &ses, None).await?;
+		assert_eq!(res.len(), 3);
+		//
+		let tmp = res.remove(0).result;
+		assert!(tmp.is_err());
+		//
+		let tmp = res.remove(0).result;
+		assert!(tmp.is_ok());
+		//
+		let tmp = res.remove(0).result;
+		assert!(tmp.is_ok());
+	}
+	Ok(())
+}
+
+#[tokio::test]
+async fn remove_statement_database() -> Result<(), Error> {
+	// Database not selected
+	{
+		let sql = "
+			REMOVE DATABASE test;
+			DEFINE DATABASE test;
+			REMOVE DATABASE test;
+		";
+		let dbs = new_ds().await?;
+		let ses = Session::owner().with_ns("test");
+		let res = &mut dbs.execute(sql, &ses, None).await?;
+		assert_eq!(res.len(), 3);
+		//
+		let tmp = res.remove(0).result;
+		assert!(tmp.is_err());
+		//
+		let tmp = res.remove(0).result;
+		assert!(tmp.is_ok());
+		//
+		let tmp = res.remove(0).result;
+		assert!(tmp.is_ok());
+	}
+	// Database selected
+	{
+		let sql = "
+			REMOVE DATABASE test;
+			DEFINE DATABASE test;
+			REMOVE DATABASE test;
+		";
+		let dbs = new_ds().await?;
+		// No database is selected
+		let ses = Session::owner().with_ns("test").with_db("test");
+		let res = &mut dbs.execute(sql, &ses, None).await?;
+		assert_eq!(res.len(), 3);
+		//
+		let tmp = res.remove(0).result;
+		assert!(tmp.is_err());
+		//
+		let tmp = res.remove(0).result;
+		assert!(tmp.is_ok());
+		//
+		let tmp = res.remove(0).result;
+		assert!(tmp.is_ok());
+	}
 	Ok(())
 }
 
@@ -71,12 +165,11 @@ async fn remove_statement_analyzer() -> Result<(), Error> {
 	let tmp = res.remove(0).result?;
 	let val = Value::parse(
 		"{
+			accesses: {},
 			analyzers: {},
-			tokens: {},
 			functions: {},
 			models: {},
 			params: {},
-			scopes: {},
 			tables: {},
 			users: {}
 		}",
@@ -118,12 +211,6 @@ async fn remove_statement_index() -> Result<(), Error> {
 		}",
 	);
 	assert_eq!(tmp, val);
-
-	let mut tx = dbs.transaction(Read, Optimistic).await?;
-	for ix in ["uniq_isbn", "idx_author", "ft_title"] {
-		assert_empty_prefix!(&mut tx, surrealdb::key::index::all::new("test", "test", "book", ix));
-	}
-
 	// Every index store cache has been removed
 	assert!(dbs.index_store().is_empty().await);
 	Ok(())
@@ -146,9 +233,329 @@ async fn should_error_when_remove_and_table_does_not_exist() -> Result<(), Error
 }
 
 #[tokio::test]
-async fn should_not_error_when_remove_if_exists() -> Result<(), Error> {
+async fn should_not_error_when_remove_table_if_exists() -> Result<(), Error> {
 	let sql = "
-		REMOVE TABLE foo IF EXISTS;
+		REMOVE TABLE IF EXISTS foo;
+	";
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 1);
+	//
+	let tmp = res.remove(0).result?;
+	assert_eq!(tmp, Value::None);
+
+	Ok(())
+}
+
+#[tokio::test]
+async fn should_error_when_remove_and_analyzer_does_not_exist() -> Result<(), Error> {
+	let sql = "
+		REMOVE ANALYZER foo;
+	";
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 1);
+	//
+	let tmp = res.remove(0).result.unwrap_err();
+	assert!(matches!(tmp, Error::AzNotFound { .. }),);
+
+	Ok(())
+}
+
+#[tokio::test]
+async fn should_not_error_when_remove_analyzer_if_exists() -> Result<(), Error> {
+	let sql = "
+		REMOVE ANALYZER IF EXISTS foo;
+	";
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 1);
+	//
+	let tmp = res.remove(0).result?;
+	assert_eq!(tmp, Value::None);
+
+	Ok(())
+}
+
+#[tokio::test]
+async fn should_error_when_remove_and_database_does_not_exist() -> Result<(), Error> {
+	let sql = "
+		REMOVE DATABASE foo;
+	";
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 1);
+	//
+	let tmp = res.remove(0).result.unwrap_err();
+	assert!(matches!(tmp, Error::DbNotFound { .. }),);
+
+	Ok(())
+}
+
+#[tokio::test]
+async fn should_not_error_when_remove_database_if_exists() -> Result<(), Error> {
+	let sql = "
+		REMOVE DATABASE IF EXISTS foo;
+	";
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 1);
+	//
+	let tmp = res.remove(0).result?;
+	assert_eq!(tmp, Value::None);
+
+	Ok(())
+}
+
+#[tokio::test]
+async fn should_error_when_remove_and_event_does_not_exist() -> Result<(), Error> {
+	let sql = "
+		REMOVE EVENT foo ON bar;
+	";
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 1);
+	//
+	let tmp = res.remove(0).result.unwrap_err();
+	assert!(matches!(tmp, Error::EvNotFound { .. }),);
+
+	Ok(())
+}
+
+#[tokio::test]
+async fn should_not_error_when_remove_event_if_exists() -> Result<(), Error> {
+	let sql = "
+		REMOVE EVENT IF EXISTS foo ON bar;
+	";
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 1);
+	//
+	let tmp = res.remove(0).result?;
+	assert_eq!(tmp, Value::None);
+
+	Ok(())
+}
+
+#[tokio::test]
+async fn should_error_when_remove_and_field_does_not_exist() -> Result<(), Error> {
+	let sql = "
+		REMOVE FIELD foo ON bar;
+	";
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 1);
+	//
+	let tmp = res.remove(0).result.unwrap_err();
+	assert!(matches!(tmp, Error::FdNotFound { .. }),);
+
+	Ok(())
+}
+
+#[tokio::test]
+async fn should_not_error_when_remove_field_if_exists() -> Result<(), Error> {
+	let sql = "
+		REMOVE FIELD IF EXISTS foo ON bar;
+	";
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 1);
+	//
+	let tmp = res.remove(0).result?;
+	assert_eq!(tmp, Value::None);
+
+	Ok(())
+}
+
+#[tokio::test]
+async fn should_error_when_remove_and_function_does_not_exist() -> Result<(), Error> {
+	let sql = "
+		REMOVE FUNCTION fn::foo;
+	";
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 1);
+	//
+	let tmp = res.remove(0).result.unwrap_err();
+	assert!(matches!(tmp, Error::FcNotFound { .. }),);
+
+	Ok(())
+}
+
+#[tokio::test]
+async fn should_not_error_when_remove_function_if_exists() -> Result<(), Error> {
+	let sql = "
+		REMOVE FUNCTION IF EXISTS fn::foo;
+	";
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 1);
+	//
+	let tmp = res.remove(0).result?;
+	assert_eq!(tmp, Value::None);
+
+	Ok(())
+}
+
+#[tokio::test]
+async fn should_error_when_remove_and_index_does_not_exist() -> Result<(), Error> {
+	let sql = "
+		REMOVE INDEX foo ON bar;
+	";
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 1);
+	//
+	let tmp = res.remove(0).result.unwrap_err();
+	assert!(matches!(tmp, Error::IxNotFound { .. }),);
+
+	Ok(())
+}
+
+#[tokio::test]
+async fn should_not_error_when_remove_index_if_exists() -> Result<(), Error> {
+	let sql = "
+		REMOVE INDEX IF EXISTS foo ON bar;
+	";
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 1);
+	//
+	let tmp = res.remove(0).result?;
+	assert_eq!(tmp, Value::None);
+
+	Ok(())
+}
+
+#[tokio::test]
+async fn should_error_when_remove_and_namespace_does_not_exist() -> Result<(), Error> {
+	let sql = "
+		REMOVE NAMESPACE foo;
+	";
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 1);
+	//
+	let tmp = res.remove(0).result.unwrap_err();
+	assert!(matches!(tmp, Error::NsNotFound { .. }),);
+
+	Ok(())
+}
+
+#[tokio::test]
+async fn should_not_error_when_remove_namespace_if_exists() -> Result<(), Error> {
+	let sql = "
+		REMOVE NAMESPACE IF EXISTS foo;
+	";
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 1);
+	//
+	let tmp = res.remove(0).result?;
+	assert_eq!(tmp, Value::None);
+
+	Ok(())
+}
+
+#[tokio::test]
+async fn should_error_when_remove_and_param_does_not_exist() -> Result<(), Error> {
+	let sql = "
+		REMOVE PARAM $foo;
+	";
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 1);
+	//
+	let tmp = res.remove(0).result.unwrap_err();
+	assert!(matches!(tmp, Error::PaNotFound { .. }),);
+
+	Ok(())
+}
+
+#[tokio::test]
+async fn should_not_error_when_remove_param_if_exists() -> Result<(), Error> {
+	let sql = "
+		REMOVE PARAM IF EXISTS $foo;
+	";
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 1);
+	//
+	let tmp = res.remove(0).result?;
+	assert_eq!(tmp, Value::None);
+
+	Ok(())
+}
+
+#[tokio::test]
+async fn should_error_when_remove_and_access_does_not_exist() -> Result<(), Error> {
+	let sql = "
+		REMOVE ACCESS foo ON DB;
+	";
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 1);
+	//
+	let tmp = res.remove(0).result.unwrap_err();
+	assert!(matches!(tmp, Error::AccessDbNotFound { .. }),);
+
+	Ok(())
+}
+
+#[tokio::test]
+async fn should_not_error_when_remove_access_if_exists() -> Result<(), Error> {
+	let sql = "
+		REMOVE ACCESS IF EXISTS foo ON DB;
+	";
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 1);
+	//
+	let tmp = res.remove(0).result?;
+	assert_eq!(tmp, Value::None);
+
+	Ok(())
+}
+
+#[tokio::test]
+async fn should_error_when_remove_and_user_does_not_exist() -> Result<(), Error> {
+	let sql = "
+		REMOVE USER foo ON ROOT;
+	";
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 1);
+	//
+	let tmp = res.remove(0).result.unwrap_err();
+	assert!(matches!(tmp, Error::UserRootNotFound { .. }),);
+
+	Ok(())
+}
+
+#[tokio::test]
+async fn should_not_error_when_remove_user_if_exists() -> Result<(), Error> {
+	let sql = "
+		REMOVE USER IF EXISTS foo ON ROOT;
 	";
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
@@ -175,8 +582,8 @@ async fn permissions_checks_remove_ns() {
 
 	// Define the expected results for the check statement when the test statement succeeded and when it failed
 	let check_results = [
-		vec!["{ namespaces: {  }, users: {  } }"],
-		vec!["{ namespaces: { NS: 'DEFINE NAMESPACE NS' }, users: {  } }"],
+		vec!["{ accesses: {  }, namespaces: {  }, nodes: {  }, users: {  } }"],
+		vec!["{ accesses: {  }, namespaces: { NS: 'DEFINE NAMESPACE NS' }, nodes: {  }, users: {  } }"],
 	];
 
 	let test_cases = [
@@ -217,8 +624,8 @@ async fn permissions_checks_remove_db() {
 
 	// Define the expected results for the check statement when the test statement succeeded and when it failed
 	let check_results = [
-		vec!["{ databases: {  }, tokens: {  }, users: {  } }"],
-		vec!["{ databases: { DB: 'DEFINE DATABASE DB' }, tokens: {  }, users: {  } }"],
+		vec!["{ accesses: {  }, databases: {  }, users: {  } }"],
+		vec!["{ accesses: {  }, databases: { DB: 'DEFINE DATABASE DB' }, users: {  } }"],
 	];
 
 	let test_cases = [
@@ -259,8 +666,8 @@ async fn permissions_checks_remove_function() {
 
 	// Define the expected results for the check statement when the test statement succeeded and when it failed
 	let check_results = [
-		vec!["{ analyzers: {  }, functions: {  }, models: {  }, params: {  }, scopes: {  }, tables: {  }, tokens: {  }, users: {  } }"],
-        vec!["{ analyzers: {  }, functions: { greet: \"DEFINE FUNCTION fn::greet() { RETURN 'Hello'; } PERMISSIONS FULL\" }, models: {  }, params: {  }, scopes: {  }, tables: {  }, tokens: {  }, users: {  } }"],
+		vec!["{ accesses: {  }, analyzers: {  }, functions: {  }, models: {  }, params: {  }, tables: {  }, users: {  } }"],
+        vec!["{ accesses: {  }, analyzers: {  }, functions: { greet: \"DEFINE FUNCTION fn::greet() { RETURN 'Hello'; } PERMISSIONS FULL\" }, models: {  }, params: {  }, tables: {  }, users: {  } }"],
     ];
 
 	let test_cases = [
@@ -301,8 +708,8 @@ async fn permissions_checks_remove_analyzer() {
 
 	// Define the expected results for the check statement when the test statement succeeded and when it failed
 	let check_results = [
-		vec!["{ analyzers: {  }, functions: {  }, models: {  }, params: {  }, scopes: {  }, tables: {  }, tokens: {  }, users: {  } }"],
-        vec!["{ analyzers: { analyzer: 'DEFINE ANALYZER analyzer TOKENIZERS BLANK' }, functions: {  }, models: {  }, params: {  }, scopes: {  }, tables: {  }, tokens: {  }, users: {  } }"],
+		vec!["{ accesses: {  }, analyzers: {  }, functions: {  }, models: {  }, params: {  }, tables: {  }, users: {  } }"],
+        vec!["{ accesses: {  }, analyzers: { analyzer: 'DEFINE ANALYZER analyzer TOKENIZERS BLANK' }, functions: {  }, models: {  }, params: {  }, tables: {  }, users: {  } }"],
     ];
 
 	let test_cases = [
@@ -334,17 +741,59 @@ async fn permissions_checks_remove_analyzer() {
 }
 
 #[tokio::test]
-async fn permissions_checks_remove_ns_token() {
+async fn permissions_checks_remove_root_access() {
 	let scenario = HashMap::from([
-		("prepare", "DEFINE TOKEN token ON NS TYPE HS512 VALUE 'secret'"),
-		("test", "REMOVE TOKEN token ON NS"),
+		("prepare", "DEFINE ACCESS access ON ROOT TYPE JWT ALGORITHM HS512 KEY 'secret'"),
+		("test", "REMOVE ACCESS access ON ROOT"),
+		("check", "INFO FOR ROOT"),
+	]);
+
+	// Define the expected results for the check statement when the test statement succeeded and when it failed
+	let check_results = [
+		vec!["{ accesses: {  }, namespaces: {  }, nodes: {  }, users: {  } }"],
+        vec!["{ accesses: { access: \"DEFINE ACCESS access ON ROOT TYPE JWT ALGORITHM HS512 KEY '[REDACTED]' WITH ISSUER KEY '[REDACTED]' DURATION FOR TOKEN 1h, FOR SESSION NONE\" }, namespaces: {  }, nodes: {  }, users: {  } }"],
+    ];
+
+	let test_cases = [
+		// Root level
+		((().into(), Role::Owner), ("NS", "DB"), true),
+		((().into(), Role::Editor), ("NS", "DB"), false),
+		((().into(), Role::Viewer), ("NS", "DB"), false),
+		// Namespace level
+		((("NS",).into(), Role::Owner), ("NS", "DB"), false),
+		((("NS",).into(), Role::Owner), ("OTHER_NS", "DB"), false),
+		((("NS",).into(), Role::Editor), ("NS", "DB"), false),
+		((("NS",).into(), Role::Editor), ("OTHER_NS", "DB"), false),
+		((("NS",).into(), Role::Viewer), ("NS", "DB"), false),
+		((("NS",).into(), Role::Viewer), ("OTHER_NS", "DB"), false),
+		// Database level
+		((("NS", "DB").into(), Role::Owner), ("NS", "DB"), false),
+		((("NS", "DB").into(), Role::Owner), ("NS", "OTHER_DB"), false),
+		((("NS", "DB").into(), Role::Owner), ("OTHER_NS", "DB"), false),
+		((("NS", "DB").into(), Role::Editor), ("NS", "DB"), false),
+		((("NS", "DB").into(), Role::Editor), ("NS", "OTHER_DB"), false),
+		((("NS", "DB").into(), Role::Editor), ("OTHER_NS", "DB"), false),
+		((("NS", "DB").into(), Role::Viewer), ("NS", "DB"), false),
+		((("NS", "DB").into(), Role::Viewer), ("NS", "OTHER_DB"), false),
+		((("NS", "DB").into(), Role::Viewer), ("OTHER_NS", "DB"), false),
+	];
+
+	let res = iam_check_cases(test_cases.iter(), &scenario, check_results).await;
+	assert!(res.is_ok(), "{}", res.unwrap_err());
+}
+
+#[tokio::test]
+async fn permissions_checks_remove_ns_access() {
+	let scenario = HashMap::from([
+		("prepare", "DEFINE ACCESS access ON NS TYPE JWT ALGORITHM HS512 KEY 'secret'"),
+		("test", "REMOVE ACCESS access ON NS"),
 		("check", "INFO FOR NS"),
 	]);
 
 	// Define the expected results for the check statement when the test statement succeeded and when it failed
 	let check_results = [
-		vec!["{ databases: {  }, tokens: {  }, users: {  } }"],
-        vec!["{ databases: {  }, tokens: { token: \"DEFINE TOKEN token ON NAMESPACE TYPE HS512 VALUE 'secret'\" }, users: {  } }"],
+		vec!["{ accesses: {  }, databases: {  }, users: {  } }"],
+        vec!["{ accesses: { access: \"DEFINE ACCESS access ON NAMESPACE TYPE JWT ALGORITHM HS512 KEY '[REDACTED]' WITH ISSUER KEY '[REDACTED]' DURATION FOR TOKEN 1h, FOR SESSION NONE\" }, databases: {  }, users: {  } }"],
     ];
 
 	let test_cases = [
@@ -376,17 +825,17 @@ async fn permissions_checks_remove_ns_token() {
 }
 
 #[tokio::test]
-async fn permissions_checks_remove_db_token() {
+async fn permissions_checks_remove_db_access() {
 	let scenario = HashMap::from([
-		("prepare", "DEFINE TOKEN token ON DB TYPE HS512 VALUE 'secret'"),
-		("test", "REMOVE TOKEN token ON DB"),
+		("prepare", "DEFINE ACCESS access ON DB TYPE JWT ALGORITHM HS512 KEY 'secret'"),
+		("test", "REMOVE ACCESS access ON DB"),
 		("check", "INFO FOR DB"),
 	]);
 
 	// Define the expected results for the check statement when the test statement succeeded and when it failed
 	let check_results = [
-		vec!["{ analyzers: {  }, functions: {  }, models: {  }, params: {  }, scopes: {  }, tables: {  }, tokens: {  }, users: {  } }"],
-        vec!["{ analyzers: {  }, functions: {  }, models: {  }, params: {  }, scopes: {  }, tables: {  }, tokens: { token: \"DEFINE TOKEN token ON DATABASE TYPE HS512 VALUE 'secret'\" }, users: {  } }"],
+		vec!["{ accesses: {  }, analyzers: {  }, functions: {  }, models: {  }, params: {  }, tables: {  }, users: {  } }"],
+        vec!["{ accesses: { access: \"DEFINE ACCESS access ON DATABASE TYPE JWT ALGORITHM HS512 KEY '[REDACTED]' WITH ISSUER KEY '[REDACTED]' DURATION FOR TOKEN 1h, FOR SESSION NONE\" }, analyzers: {  }, functions: {  }, models: {  }, params: {  }, tables: {  }, users: {  } }"],
     ];
 
 	let test_cases = [
@@ -427,8 +876,8 @@ async fn permissions_checks_remove_root_user() {
 
 	// Define the expected results for the check statement when the test statement succeeded and when it failed
 	let check_results = [
-		vec!["{ namespaces: {  }, users: {  } }"],
-        vec!["{ namespaces: {  }, users: { user: \"DEFINE USER user ON ROOT PASSHASH 'secret' ROLES VIEWER\" } }"],
+		vec!["{ accesses: {  }, namespaces: {  }, nodes: {  }, users: {  } }"],
+        vec!["{ accesses: {  }, namespaces: {  }, nodes: {  }, users: { user: \"DEFINE USER user ON ROOT PASSHASH 'secret' ROLES VIEWER DURATION FOR TOKEN 1h, FOR SESSION NONE\" } }"],
     ];
 
 	let test_cases = [
@@ -469,8 +918,8 @@ async fn permissions_checks_remove_ns_user() {
 
 	// Define the expected results for the check statement when the test statement succeeded and when it failed
 	let check_results = [
-		vec!["{ databases: {  }, tokens: {  }, users: {  } }"],
-        vec!["{ databases: {  }, tokens: {  }, users: { user: \"DEFINE USER user ON NAMESPACE PASSHASH 'secret' ROLES VIEWER\" } }"],
+		vec!["{ accesses: {  }, databases: {  }, users: {  } }"],
+        vec!["{ accesses: {  }, databases: {  }, users: { user: \"DEFINE USER user ON NAMESPACE PASSHASH 'secret' ROLES VIEWER DURATION FOR TOKEN 1h, FOR SESSION NONE\" } }"],
     ];
 
 	let test_cases = [
@@ -511,8 +960,8 @@ async fn permissions_checks_remove_db_user() {
 
 	// Define the expected results for the check statement when the test statement succeeded and when it failed
 	let check_results = [
-		vec!["{ analyzers: {  }, functions: {  }, models: {  }, params: {  }, scopes: {  }, tables: {  }, tokens: {  }, users: {  } }"],
-        vec!["{ analyzers: {  }, functions: {  }, models: {  }, params: {  }, scopes: {  }, tables: {  }, tokens: {  }, users: { user: \"DEFINE USER user ON DATABASE PASSHASH 'secret' ROLES VIEWER\" } }"],
+		vec!["{ accesses: {  }, analyzers: {  }, functions: {  }, models: {  }, params: {  }, tables: {  }, users: {  } }"],
+        vec!["{ accesses: {  }, analyzers: {  }, functions: {  }, models: {  }, params: {  }, tables: {  }, users: { user: \"DEFINE USER user ON DATABASE PASSHASH 'secret' ROLES VIEWER DURATION FOR TOKEN 1h, FOR SESSION NONE\" } }"],
     ];
 
 	let test_cases = [
@@ -544,48 +993,6 @@ async fn permissions_checks_remove_db_user() {
 }
 
 #[tokio::test]
-async fn permissions_checks_remove_scope() {
-	let scenario = HashMap::from([
-		("prepare", "DEFINE SCOPE account SESSION 1h;"),
-		("test", "REMOVE SCOPE account"),
-		("check", "INFO FOR DB"),
-	]);
-
-	// Define the expected results for the check statement when the test statement succeeded and when it failed
-	let check_results = [
-		vec!["{ analyzers: {  }, functions: {  }, models: {  }, params: {  }, scopes: {  }, tables: {  }, tokens: {  }, users: {  } }"],
-        vec!["{ analyzers: {  }, functions: {  }, models: {  }, params: {  }, scopes: { account: 'DEFINE SCOPE account SESSION 1h' }, tables: {  }, tokens: {  }, users: {  } }"],
-    ];
-
-	let test_cases = [
-		// Root level
-		((().into(), Role::Owner), ("NS", "DB"), true),
-		((().into(), Role::Editor), ("NS", "DB"), true),
-		((().into(), Role::Viewer), ("NS", "DB"), false),
-		// Namespace level
-		((("NS",).into(), Role::Owner), ("NS", "DB"), true),
-		((("NS",).into(), Role::Owner), ("OTHER_NS", "DB"), false),
-		((("NS",).into(), Role::Editor), ("NS", "DB"), true),
-		((("NS",).into(), Role::Editor), ("OTHER_NS", "DB"), false),
-		((("NS",).into(), Role::Viewer), ("NS", "DB"), false),
-		((("NS",).into(), Role::Viewer), ("OTHER_NS", "DB"), false),
-		// Database level
-		((("NS", "DB").into(), Role::Owner), ("NS", "DB"), true),
-		((("NS", "DB").into(), Role::Owner), ("NS", "OTHER_DB"), false),
-		((("NS", "DB").into(), Role::Owner), ("OTHER_NS", "DB"), false),
-		((("NS", "DB").into(), Role::Editor), ("NS", "DB"), true),
-		((("NS", "DB").into(), Role::Editor), ("NS", "OTHER_DB"), false),
-		((("NS", "DB").into(), Role::Editor), ("OTHER_NS", "DB"), false),
-		((("NS", "DB").into(), Role::Viewer), ("NS", "DB"), false),
-		((("NS", "DB").into(), Role::Viewer), ("NS", "OTHER_DB"), false),
-		((("NS", "DB").into(), Role::Viewer), ("OTHER_NS", "DB"), false),
-	];
-
-	let res = iam_check_cases(test_cases.iter(), &scenario, check_results).await;
-	assert!(res.is_ok(), "{}", res.unwrap_err());
-}
-
-#[tokio::test]
 async fn permissions_checks_remove_param() {
 	let scenario = HashMap::from([
 		("prepare", "DEFINE PARAM $param VALUE 'foo'"),
@@ -595,8 +1002,8 @@ async fn permissions_checks_remove_param() {
 
 	// Define the expected results for the check statement when the test statement succeeded and when it failed
 	let check_results = [
-		vec!["{ analyzers: {  }, functions: {  }, models: {  }, params: {  }, scopes: {  }, tables: {  }, tokens: {  }, users: {  } }"],
-        vec!["{ analyzers: {  }, functions: {  }, models: {  }, params: { param: \"DEFINE PARAM $param VALUE 'foo' PERMISSIONS FULL\" }, scopes: {  }, tables: {  }, tokens: {  }, users: {  } }"],
+		vec!["{ accesses: {  }, analyzers: {  }, functions: {  }, models: {  }, params: {  }, tables: {  }, users: {  } }"],
+        vec!["{ accesses: {  }, analyzers: {  }, functions: {  }, models: {  }, params: { param: \"DEFINE PARAM $param VALUE 'foo' PERMISSIONS FULL\" }, tables: {  }, users: {  } }"],
     ];
 
 	let test_cases = [
@@ -637,8 +1044,8 @@ async fn permissions_checks_remove_table() {
 
 	// Define the expected results for the check statement when the test statement succeeded and when it failed
 	let check_results = [
-		vec!["{ analyzers: {  }, functions: {  }, models: {  }, params: {  }, scopes: {  }, tables: {  }, tokens: {  }, users: {  } }"],
-        vec!["{ analyzers: {  }, functions: {  }, models: {  }, params: {  }, scopes: {  }, tables: { TB: 'DEFINE TABLE TB SCHEMALESS PERMISSIONS NONE' }, tokens: {  }, users: {  } }"],
+		vec!["{ accesses: {  }, analyzers: {  }, functions: {  }, models: {  }, params: {  }, tables: {  }, users: {  } }"],
+        vec!["{ accesses: {  }, analyzers: {  }, functions: {  }, models: {  }, params: {  }, tables: { TB: 'DEFINE TABLE TB TYPE ANY SCHEMALESS PERMISSIONS NONE' }, users: {  } }"],
     ];
 
 	let test_cases = [

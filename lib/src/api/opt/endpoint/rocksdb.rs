@@ -1,4 +1,5 @@
 use crate::api::engine::local::Db;
+#[allow(deprecated)]
 use crate::api::engine::local::File;
 use crate::api::engine::local::RocksDb;
 use crate::api::opt::Config;
@@ -17,11 +18,11 @@ macro_rules! endpoints {
 
 				fn into_endpoint(self) -> Result<Endpoint> {
 					let protocol = "rocksdb://";
-					Ok(Endpoint {
-						url: Url::parse(protocol).unwrap(),
-						path: super::path_to_string(protocol, self),
-						config: Default::default(),
-					})
+					let url = Url::parse(protocol)
+					    .unwrap_or_else(|_| unreachable!("`{protocol}` should be static and valid"));
+					let mut endpoint = Endpoint::new(url);
+					endpoint.path = super::path_to_string(protocol, self);
+					Ok(endpoint)
 				}
 			}
 
@@ -35,19 +36,21 @@ macro_rules! endpoints {
 				}
 			}
 
+			#[allow(deprecated)]
 			impl IntoEndpoint<File> for $name {
 				type Client = Db;
 
 				fn into_endpoint(self) -> Result<Endpoint> {
 					let protocol = "file://";
-					Ok(Endpoint {
-						url: Url::parse(protocol).unwrap(),
-						path: super::path_to_string(protocol, self),
-						config: Default::default(),
-					})
+					let url = Url::parse(protocol)
+					    .unwrap_or_else(|_| unreachable!("`{protocol}` should be static and valid"));
+					let mut endpoint = Endpoint::new(url);
+					endpoint.path = super::path_to_string(protocol, self);
+					Ok(endpoint)
 				}
 			}
 
+			#[allow(deprecated)]
 			impl IntoEndpoint<File> for ($name, Config) {
 				type Client = Db;
 
