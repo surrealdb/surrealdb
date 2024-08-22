@@ -94,7 +94,7 @@ async fn create_with_id() -> Result<(), Error> {
 	let val = Value::parse(
 		"[
 			{
-				id: city:⟨8e60244d-95f6-4f95-9e30-09a98977efb0⟩,
+				id: city:u'8e60244d-95f6-4f95-9e30-09a98977efb0',
 				name: 'London'
 			}
 		]",
