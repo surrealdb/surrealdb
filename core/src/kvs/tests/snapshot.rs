@@ -12,7 +12,7 @@ async fn snapshot() {
 	// Create a readonly transaction
 	let mut tx1 = ds.transaction(Read, Optimistic).await.unwrap().inner();
 	// Check that the key was inserted ok
-	let val = tx1.get("test").await.unwrap().unwrap();
+	let val = tx1.get("test", None).await.unwrap().unwrap();
 	assert_eq!(val, b"some text");
 	// Create a new writeable transaction
 	let mut txw = ds.transaction(Write, Optimistic).await.unwrap().inner();
@@ -20,16 +20,16 @@ async fn snapshot() {
 	txw.set("test", "other text").await.unwrap();
 	// Create a readonly transaction
 	let mut tx2 = ds.transaction(Read, Optimistic).await.unwrap().inner();
-	let val = tx2.get("test").await.unwrap().unwrap();
+	let val = tx2.get("test", None).await.unwrap().unwrap();
 	assert_eq!(val, b"some text");
 	// Create a readonly transaction
 	let mut tx3 = ds.transaction(Read, Optimistic).await.unwrap().inner();
-	let val = tx3.get("test").await.unwrap().unwrap();
+	let val = tx3.get("test", None).await.unwrap().unwrap();
 	assert_eq!(val, b"some text");
 	// Update the test key content
 	txw.set("test", "extra text").await.unwrap();
 	// Check the key from the original transaction
-	let val = tx1.get("test").await.unwrap().unwrap();
+	let val = tx1.get("test", None).await.unwrap().unwrap();
 	assert_eq!(val, b"some text");
 	// Cancel both readonly transactions
 	tx1.cancel().await.unwrap();
@@ -39,7 +39,7 @@ async fn snapshot() {
 	txw.commit().await.unwrap();
 	// Check that the key was updated ok
 	let mut tx = ds.transaction(Read, Optimistic).await.unwrap().inner();
-	let val = tx.get("test").await.unwrap().unwrap();
+	let val = tx.get("test", None).await.unwrap().unwrap();
 	assert_eq!(val, b"extra text");
 	tx.cancel().await.unwrap();
 }

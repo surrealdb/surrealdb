@@ -1,8 +1,14 @@
+use super::escape::escape_key;
+use super::{Duration, Number, Strand};
 use crate::sql::statements::info::InfoStructure;
-use crate::sql::{fmt::Fmt, Table, Value};
+use crate::sql::{
+	fmt::{is_pretty, pretty_indent, Fmt, Pretty},
+	Table, Value,
+};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
-use std::fmt::{self, Display, Formatter};
+use std::collections::BTreeMap;
+use std::fmt::{self, Display, Formatter, Write};
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
@@ -29,6 +35,9 @@ pub enum Kind {
 	Either(Vec<Kind>),
 	Set(Box<Kind>, Option<u64>),
 	Array(Box<Kind>, Option<u64>),
+	Function(Option<Vec<Kind>>, Option<Box<Kind>>),
+	Range,
+	Literal(Literal),
 }
 
 impl Default for Kind {
@@ -71,7 +80,10 @@ impl Kind {
 				| Kind::String
 				| Kind::Uuid
 				| Kind::Record(_)
-				| Kind::Geometry(_) => return None,
+				| Kind::Geometry(_)
+				| Kind::Function(_, _)
+				| Kind::Range
+				| Kind::Literal(_) => return None,
 				Kind::Option(x) => {
 					this = x;
 				}
@@ -114,6 +126,7 @@ impl Display for Kind {
 			Kind::Point => f.write_str("point"),
 			Kind::String => f.write_str("string"),
 			Kind::Uuid => f.write_str("uuid"),
+			Kind::Function(_, _) => f.write_str("function"),
 			Kind::Option(k) => write!(f, "option<{}>", k),
 			Kind::Record(k) => match k {
 				k if k.is_empty() => write!(f, "record"),
@@ -134,6 +147,8 @@ impl Display for Kind {
 				(k, Some(l)) => write!(f, "array<{k}, {l}>"),
 			},
 			Kind::Either(k) => write!(f, "{}", Fmt::verbar_separated(k)),
+			Kind::Range => f.write_str("range"),
+			Kind::Literal(l) => write!(f, "{}", l),
 		}
 	}
 }
@@ -141,5 +156,139 @@ impl Display for Kind {
 impl InfoStructure for Kind {
 	fn structure(self) -> Value {
 		self.to_string().into()
+	}
+}
+
+#[revisioned(revision = 1)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
+#[non_exhaustive]
+pub enum Literal {
+	String(Strand),
+	Number(Number),
+	Duration(Duration),
+	Array(Vec<Kind>),
+	Object(BTreeMap<String, Kind>),
+}
+
+impl Literal {
+	pub fn to_kind(&self) -> Kind {
+		match self {
+			Self::String(_) => Kind::String,
+			Self::Number(_) => Kind::Number,
+			Self::Duration(_) => Kind::Duration,
+			Self::Array(a) => {
+				if let Some(inner) = a.first() {
+					if a.iter().all(|x| x == inner) {
+						return Kind::Array(Box::new(inner.to_owned()), Some(a.len() as u64));
+					}
+				}
+
+				Kind::Array(Box::new(Kind::Any), None)
+			}
+			Self::Object(_) => Kind::Object,
+		}
+	}
+
+	pub fn validate_value(&self, value: &Value) -> bool {
+		match self {
+			Self::String(v) => match value {
+				Value::Strand(s) => s == v,
+				_ => false,
+			},
+			Self::Number(v) => match value {
+				Value::Number(n) => n == v,
+				_ => false,
+			},
+			Self::Duration(v) => match value {
+				Value::Duration(n) => n == v,
+				_ => false,
+			},
+			Self::Array(a) => match value {
+				Value::Array(x) => {
+					if a.len() != x.len() {
+						return false;
+					}
+
+					for (i, inner) in a.iter().enumerate() {
+						if let Some(value) = x.get(i) {
+							if value.to_owned().coerce_to(inner).is_err() {
+								return false;
+							}
+						} else {
+							return false;
+						}
+					}
+
+					true
+				}
+				_ => false,
+			},
+			Self::Object(o) => match value {
+				Value::Object(x) => {
+					if o.len() != x.len() {
+						return false;
+					}
+
+					for (k, v) in o.iter() {
+						if let Some(value) = x.get(k) {
+							if value.to_owned().coerce_to(v).is_err() {
+								return false;
+							}
+						} else {
+							return false;
+						}
+					}
+
+					true
+				}
+				_ => false,
+			},
+		}
+	}
+}
+
+impl Display for Literal {
+	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+		match self {
+			Literal::String(s) => write!(f, "{}", s),
+			Literal::Number(n) => write!(f, "{}", n),
+			Literal::Duration(n) => write!(f, "{}", n),
+			Literal::Array(a) => {
+				let mut f = Pretty::from(f);
+				f.write_char('[')?;
+				if !a.is_empty() {
+					let indent = pretty_indent();
+					write!(f, "{}", Fmt::pretty_comma_separated(a.as_slice()))?;
+					drop(indent);
+				}
+				f.write_char(']')
+			}
+			Literal::Object(o) => {
+				let mut f = Pretty::from(f);
+				if is_pretty() {
+					f.write_char('{')?;
+				} else {
+					f.write_str("{ ")?;
+				}
+				if !o.is_empty() {
+					let indent = pretty_indent();
+					write!(
+						f,
+						"{}",
+						Fmt::pretty_comma_separated(o.iter().map(|args| Fmt::new(
+							args,
+							|(k, v), f| write!(f, "{}: {}", escape_key(k), v)
+						)),)
+					)?;
+					drop(indent);
+				}
+				if is_pretty() {
+					f.write_char('}')
+				} else {
+					f.write_str(" }")
+				}
+			}
+		}
 	}
 }

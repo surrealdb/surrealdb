@@ -1,4 +1,4 @@
-use crate::ctx::Context;
+use crate::ctx::{Context, MutableContext};
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
@@ -50,18 +50,20 @@ impl Block {
 	pub(crate) async fn compute(
 		&self,
 		stk: &mut Stk,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		opt: &Options,
-		doc: Option<&CursorDoc<'_>>,
+		doc: Option<&CursorDoc>,
 	) -> Result<Value, Error> {
 		// Duplicate context
-		let mut ctx = Context::new(ctx);
+		let mut ctx = MutableContext::new(ctx).freeze();
 		// Loop over the statements
 		for (i, v) in self.iter().enumerate() {
 			match v {
 				Entry::Set(v) => {
 					let val = v.compute(stk, &ctx, opt, doc).await?;
-					ctx.add_value(v.name.to_owned(), val);
+					let mut c = MutableContext::unfreeze(ctx)?;
+					c.add_value(v.name.to_owned(), val.into());
+					ctx = c.freeze();
 				}
 				Entry::Throw(v) => {
 					// Always errors immediately

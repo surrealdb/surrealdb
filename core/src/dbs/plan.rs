@@ -11,7 +11,7 @@ pub(super) struct Plan {
 
 impl Plan {
 	pub(super) fn new(
-		ctx: &Context<'_>,
+		ctx: &Context,
 		stm: &Statement<'_>,
 		iterables: &Vec<Iterable>,
 		results: &Results,
@@ -43,7 +43,7 @@ impl Plan {
 pub(super) struct Explanation(Vec<ExplainItem>);
 
 impl Explanation {
-	fn add_iter(&mut self, ctx: &Context<'_>, iter: &Iterable) {
+	fn add_iter(&mut self, ctx: &Context, iter: &Iterable) {
 		self.0.push(ExplainItem::new_iter(ctx, iter));
 	}
 
@@ -87,7 +87,7 @@ impl ExplainItem {
 		}
 	}
 
-	fn new_iter(ctx: &Context<'_>, iter: &Iterable) -> Self {
+	fn new_iter(ctx: &Context, iter: &Iterable) -> Self {
 		match iter {
 			Iterable::Value(v) => Self {
 				name: "Iterate Value".into(),
@@ -105,9 +105,9 @@ impl ExplainItem {
 				name: "Iterate Defer".into(),
 				details: vec![("thing", Value::Thing(t.to_owned()))],
 			},
-			Iterable::Range(r) => Self {
+			Iterable::TableRange(tb, r) => Self {
 				name: "Iterate Range".into(),
-				details: vec![("table", Value::from(r.tb.to_owned()))],
+				details: vec![("table", tb.to_owned().into()), ("range", r.to_owned().into())],
 			},
 			Iterable::Edges(e) => Self {
 				name: "Iterate Edges".into(),

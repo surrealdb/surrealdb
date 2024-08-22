@@ -1,4 +1,4 @@
-use crate::ctx::Context;
+use crate::ctx::{Context, MutableContext};
 use crate::dbs::response::Response;
 use crate::dbs::Force;
 use crate::dbs::Notification;
@@ -143,7 +143,7 @@ impl<'a> Executor<'a> {
 	}
 
 	/// Consume the live query notifications
-	async fn clear(&self, _: &Context<'_>, mut rcv: Receiver<Notification>) {
+	async fn clear(&self, _: &Context, mut rcv: Receiver<Notification>) {
 		spawn(async move {
 			while rcv.next().await.is_some() {
 				// Ignore notification
@@ -153,7 +153,7 @@ impl<'a> Executor<'a> {
 
 	/// Flush notifications from a buffer channel (live queries) to the committed notification channel.
 	/// This is because we don't want to broadcast notifications to the user for failed transactions.
-	async fn flush(&self, ctx: &Context<'_>, mut rcv: Receiver<Notification>) {
+	async fn flush(&self, ctx: &Context, mut rcv: Receiver<Notification>) {
 		let sender = ctx.notifications();
 		spawn(async move {
 			while let Some(notification) = rcv.next().await {
@@ -166,24 +166,28 @@ impl<'a> Executor<'a> {
 		});
 	}
 
-	async fn set_ns(&self, ctx: &mut Context<'_>, opt: &mut Options, ns: &str) {
+	async fn set_ns(&self, ctx: Context, opt: &mut Options, ns: &str) -> Result<Context, Error> {
+		let mut ctx = MutableContext::unfreeze(ctx)?;
 		let mut session = ctx.value("session").unwrap_or(&Value::None).clone();
 		session.put(NS.as_ref(), ns.to_owned().into());
-		ctx.add_value("session", session);
+		ctx.add_value("session", session.into());
 		opt.set_ns(Some(ns.into()));
+		Ok(ctx.freeze())
 	}
 
-	async fn set_db(&self, ctx: &mut Context<'_>, opt: &mut Options, db: &str) {
+	async fn set_db(&self, ctx: Context, opt: &mut Options, db: &str) -> Result<Context, Error> {
+		let mut ctx = MutableContext::unfreeze(ctx)?;
 		let mut session = ctx.value("session").unwrap_or(&Value::None).clone();
 		session.put(DB.as_ref(), db.to_owned().into());
-		ctx.add_value("session", session);
+		ctx.add_value("session", session.into());
 		opt.set_db(Some(db.into()));
+		Ok(ctx.freeze())
 	}
 
 	#[instrument(level = "debug", name = "executor", skip_all)]
 	pub async fn execute(
 		&mut self,
-		mut ctx: Context<'_>,
+		mut ctx: Context,
 		opt: Options,
 		qry: Query,
 	) -> Result<Vec<Response>, Error> {
@@ -239,6 +243,13 @@ impl<'a> Executor<'a> {
 						} else {
 							Force::None
 						}),
+						"FUTURES" => {
+							if stm.what {
+								opt.with_futures(true)
+							} else {
+								opt.with_futures_never()
+							}
+						}
 						_ => break,
 					};
 					// Continue
@@ -273,10 +284,10 @@ impl<'a> Executor<'a> {
 				// Switch to a different NS or DB
 				Statement::Use(stm) => {
 					if let Some(ref ns) = stm.ns {
-						self.set_ns(&mut ctx, &mut opt, ns).await;
+						ctx = self.set_ns(ctx, &mut opt, ns).await?;
 					}
 					if let Some(ref db) = stm.db {
-						self.set_db(&mut ctx, &mut opt, db).await;
+						ctx = self.set_db(ctx, &mut opt, db).await?;
 					}
 					Ok(Value::None)
 				}
@@ -291,7 +302,9 @@ impl<'a> Executor<'a> {
 						// The transaction began successfully
 						false => {
 							// ctx.set_transaction(txn)
-							ctx.set_transaction(self.txn());
+							let mut c = MutableContext::unfreeze(ctx)?;
+							c.set_transaction(self.txn());
+							ctx = c.freeze();
 							// Check the statement
 							match stack
 								.enter(|stk| stm.compute(stk, &ctx, &opt, None))
@@ -302,7 +315,9 @@ impl<'a> Executor<'a> {
 									// Check if writeable
 									let writeable = stm.writeable();
 									// Set the parameter
-									ctx.add_value(stm.name, val);
+									let mut c = MutableContext::unfreeze(ctx)?;
+									c.add_value(stm.name, val.into());
+									ctx = c.freeze();
 									// Finalise transaction, returning nothing unless it couldn't commit
 									if writeable {
 										match self.commit(loc).await {
@@ -349,7 +364,7 @@ impl<'a> Executor<'a> {
 							true => Err(Error::TxFailure),
 							// The transaction began successfully
 							false => {
-								let mut ctx = Context::new(&ctx);
+								let mut ctx = MutableContext::new(&ctx);
 								// Process the statement
 								let res = match stm.timeout() {
 									// There is a timeout clause
@@ -359,11 +374,13 @@ impl<'a> Executor<'a> {
 											Err(err)
 										} else {
 											ctx.set_transaction(self.txn());
+											let c = ctx.freeze();
 											// Process the statement
 											let res = stack
-												.enter(|stk| stm.compute(stk, &ctx, &opt, None))
+												.enter(|stk| stm.compute(stk, &c, &opt, None))
 												.finish()
 												.await;
+											ctx = MutableContext::unfreeze(c)?;
 											// Catch statement timeout
 											match ctx.is_timedout() {
 												true => Err(Error::QueryTimedout),
@@ -374,10 +391,13 @@ impl<'a> Executor<'a> {
 									// There is no timeout clause
 									None => {
 										ctx.set_transaction(self.txn());
-										stack
-											.enter(|stk| stm.compute(stk, &ctx, &opt, None))
+										let c = ctx.freeze();
+										let r = stack
+											.enter(|stk| stm.compute(stk, &c, &opt, None))
 											.finish()
-											.await
+											.await;
+										ctx = MutableContext::unfreeze(c)?;
+										r
 									}
 								};
 								// Check if this is a RETURN statement
@@ -396,6 +416,7 @@ impl<'a> Executor<'a> {
 										res => res,
 									},
 								};
+								let ctx = ctx.freeze();
 								// Finalise transaction and return the result.
 								if res.is_ok() && stm.writeable() {
 									if let Err(e) = self.commit(loc).await {

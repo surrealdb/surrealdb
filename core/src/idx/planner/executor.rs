@@ -105,7 +105,7 @@ impl InnerQueryExecutor {
 	#[allow(clippy::mutable_key_type)]
 	pub(super) async fn new(
 		stk: &mut Stk,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		opt: &Options,
 		table: &Table,
 		im: IndexesMap,
@@ -222,8 +222,11 @@ impl InnerQueryExecutor {
 								Entry::Vacant(e) => {
 									let hnsw = ctx
 										.get_index_stores()
-										.get_index_hnsw(opt, idx_def, p)
+										.get_index_hnsw(ctx, opt, idx_def, p)
 										.await?;
+									// Ensure the local HNSW index is up to date with the KVS
+									hnsw.write().await.check_state(&ctx.tx()).await?;
+									// Now we can execute the request
 									let entry = HnswEntry::new(
 										stk,
 										ctx,
@@ -276,10 +279,10 @@ impl QueryExecutor {
 	pub(crate) async fn knn(
 		&self,
 		stk: &mut Stk,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		opt: &Options,
 		thg: &Thing,
-		doc: Option<&CursorDoc<'_>>,
+		doc: Option<&CursorDoc>,
 		exp: &Expression,
 	) -> Result<Value, Error> {
 		if let Some(IterationStage::Iterate(e)) = ctx.get_iteration_stage() {
@@ -535,7 +538,7 @@ impl QueryExecutor {
 	pub(crate) async fn matches(
 		&self,
 		stk: &mut Stk,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		opt: &Options,
 		thg: &Thing,
 		exp: &Expression,
@@ -559,7 +562,7 @@ impl QueryExecutor {
 
 	async fn matches_with_doc_id(
 		&self,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		thg: &Thing,
 		ft: &FtEntry,
 	) -> Result<bool, Error> {
@@ -592,7 +595,7 @@ impl QueryExecutor {
 	async fn matches_with_value(
 		&self,
 		stk: &mut Stk,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		opt: &Options,
 		ft: &FtEntry,
 		l: Value,
@@ -634,7 +637,7 @@ impl QueryExecutor {
 
 	pub(crate) async fn highlight(
 		&self,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		thg: &Thing,
 		hlp: HighlightParams,
 		doc: &Value,
@@ -651,7 +654,7 @@ impl QueryExecutor {
 
 	pub(crate) async fn offsets(
 		&self,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		thg: &Thing,
 		match_ref: Value,
 		partial: bool,
@@ -666,10 +669,10 @@ impl QueryExecutor {
 
 	pub(crate) async fn score(
 		&self,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		match_ref: &Value,
 		rid: &Thing,
-		ir: Option<&IteratorRecord>,
+		ir: Option<&Arc<IteratorRecord>>,
 	) -> Result<Value, Error> {
 		if let Some(e) = self.get_ft_entry(match_ref) {
 			if let Some(scorer) = &e.0.scorer {
@@ -714,7 +717,7 @@ struct Inner {
 impl FtEntry {
 	async fn new(
 		stk: &mut Stk,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		opt: &Options,
 		ft: &FtIndex,
 		io: IndexOption,
@@ -749,7 +752,7 @@ pub(super) struct MtEntry {
 impl MtEntry {
 	async fn new(
 		stk: &mut Stk,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		opt: &Options,
 		mt: &MTreeIndex,
 		o: &[Number],
@@ -777,7 +780,7 @@ impl HnswEntry {
 	#[allow(clippy::too_many_arguments)]
 	async fn new(
 		stk: &mut Stk,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		opt: &Options,
 		h: SharedHnswIndex,
 		v: &[Number],
@@ -788,11 +791,13 @@ impl HnswEntry {
 		let cond_checker = if let Some(cond) = cond {
 			HnswConditionChecker::new_cond(ctx, opt, cond)
 		} else {
-			HnswConditionChecker::default()
+			HnswConditionChecker::new()
 		};
-		let h = h.read().await;
-		let res = h.knn_search(v, n as usize, ef as usize, stk, cond_checker).await?;
-		drop(h);
+		let res = h
+			.read()
+			.await
+			.knn_search(&ctx.tx(), stk, v, n as usize, ef as usize, cond_checker)
+			.await?;
 		Ok(Self {
 			res,
 		})

@@ -3,7 +3,7 @@ use crate::idx::docids::DocId;
 use crate::idx::trees::bkeys::TrieKeys;
 use crate::idx::trees::btree::{BState, BStatistics, BTree, BTreeStore, Payload};
 use crate::idx::trees::store::{IndexStores, TreeNodeProvider};
-use crate::idx::{IndexKeyBase, VersionedSerdeState};
+use crate::idx::{IndexKeyBase, VersionedStore};
 use crate::kvs::{Key, Transaction, TransactionType};
 
 pub(super) type DocLength = u64;
@@ -25,8 +25,8 @@ impl DocLengths {
 		cache_size: u32,
 	) -> Result<Self, Error> {
 		let state_key: Key = ikb.new_bl_key(None);
-		let state: BState = if let Some(val) = tx.get(state_key.clone()).await? {
-			BState::try_from_val(val)?
+		let state: BState = if let Some(val) = tx.get(state_key.clone(), None).await? {
+			VersionedStore::try_from(val)?
 		} else {
 			BState::new(default_btree_order)
 		};
@@ -87,7 +87,7 @@ impl DocLengths {
 	pub(super) async fn finish(&mut self, tx: &Transaction) -> Result<(), Error> {
 		if let Some(new_cache) = self.store.finish(tx).await? {
 			let state = self.btree.inc_generation();
-			tx.set(self.state_key.clone(), state.try_to_val()?).await?;
+			tx.set(self.state_key.clone(), VersionedStore::try_into(state)?).await?;
 			self.ixs.advance_cache_btree_trie(new_cache);
 		}
 		Ok(())

@@ -70,9 +70,9 @@ impl LiveStatement {
 	pub(crate) async fn compute(
 		&self,
 		stk: &mut Stk,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		opt: &Options,
-		doc: Option<&CursorDoc<'_>>,
+		doc: Option<&CursorDoc>,
 	) -> Result<Value, Error> {
 		// Is realtime enabled?
 		opt.realtime()?;
@@ -114,10 +114,10 @@ impl LiveStatement {
 				let mut txn = txn.lock().await;
 				// Insert the node live query
 				let key = crate::key::node::lq::new(nid, id);
-				txn.put(key, lq).await?;
+				txn.put(key, lq, None).await?;
 				// Insert the table live query
 				let key = crate::key::table::lq::new(ns, db, &tb, id);
-				txn.put(key, stm).await?;
+				txn.put(key, stm, None).await?;
 			}
 			v => {
 				return Err(Error::LiveStatement {

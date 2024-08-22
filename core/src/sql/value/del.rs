@@ -17,7 +17,7 @@ impl Value {
 	pub(crate) async fn del(
 		&mut self,
 		stk: &mut Stk,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		opt: &Options,
 		path: &[Part],
 	) -> Result<(), Error> {
@@ -157,7 +157,8 @@ impl Value {
 							// iterate in reverse, and call swap_remove
 							let mut m = HashSet::new();
 							for (i, v) in v.iter().enumerate() {
-								let cur = v.into();
+								// TODO: Can we avoid the cloning?
+								let cur = v.clone().into();
 								if w.compute(stk, ctx, opt, Some(&cur)).await?.is_truthy() {
 									m.insert(i);
 								};
@@ -171,7 +172,7 @@ impl Value {
 								let mut p = Vec::new();
 								// Store the elements and positions to update
 								for (i, o) in v.iter_mut().enumerate() {
-									let cur = o.into();
+									let cur = o.clone().into();
 									if w.compute(stk, ctx, opt, Some(&cur)).await?.is_truthy() {
 										a.push(o.clone());
 										p.push(i);
@@ -195,7 +196,7 @@ impl Value {
 							_ => {
 								let path = path.next();
 								for v in v.iter_mut() {
-									let cur = v.into();
+									let cur = v.clone().into();
 									if w.compute(stk, ctx, opt, Some(&cur)).await?.is_truthy() {
 										stk.run(|stk| v.del(stk, ctx, opt, path)).await?;
 									}

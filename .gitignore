@@ -27,7 +27,9 @@ Temporary Items
 
 **/*.rs.bk
 *.db
+*.skv
 *.sw?
+*.skv
 
 # -----------------------------------
 # Folders
@@ -54,3 +56,5 @@ Temporary Items
 /store/
 surreal
 history.txt
+/doc/tla/states/
+

@@ -12,7 +12,7 @@ use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display};
 
-#[revisioned(revision = 2)]
+#[revisioned(revision = 3)]
 #[derive(Clone, Default, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
@@ -25,6 +25,8 @@ pub struct DefineAccessStatement {
 	pub duration: AccessDuration,
 	pub comment: Option<Strand>,
 	pub if_not_exists: bool,
+	#[revision(start = 3)]
+	pub overwrite: bool,
 }
 
 impl DefineAccessStatement {
@@ -46,6 +48,10 @@ impl DefineAccessStatement {
 				ac.jwt = ac.jwt.redacted();
 				AccessType::Record(ac)
 			}
+			AccessType::Bearer(mut ac) => {
+				ac.jwt = ac.jwt.redacted();
+				AccessType::Bearer(ac)
+			}
 		};
 		das
 	}
@@ -55,9 +61,9 @@ impl DefineAccessStatement {
 	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		opt: &Options,
-		_doc: Option<&CursorDoc<'_>>,
+		_doc: Option<&CursorDoc>,
 	) -> Result<Value, Error> {
 		// Allowed to run?
 		opt.is_allowed(Action::Edit, ResourceKind::Actor, &self.base)?;
@@ -70,19 +76,20 @@ impl DefineAccessStatement {
 				if txn.get_root_access(&self.name).await.is_ok() {
 					if self.if_not_exists {
 						return Ok(Value::None);
-					} else {
+					} else if !self.overwrite {
 						return Err(Error::AccessRootAlreadyExists {
-							value: self.name.to_string(),
+							ac: self.name.to_string(),
 						});
 					}
 				}
 				// Process the statement
-				let key = crate::key::root::ac::new(&self.name);
+				let key = crate::key::root::access::ac::new(&self.name);
 				txn.set(
 					key,
 					DefineAccessStatement {
 						// Don't persist the `IF NOT EXISTS` clause to schema
 						if_not_exists: false,
+						overwrite: false,
 						..self.clone()
 					},
 				)
@@ -99,21 +106,22 @@ impl DefineAccessStatement {
 				if txn.get_ns_access(opt.ns()?, &self.name).await.is_ok() {
 					if self.if_not_exists {
 						return Ok(Value::None);
-					} else {
+					} else if !self.overwrite {
 						return Err(Error::AccessNsAlreadyExists {
-							value: self.name.to_string(),
+							ac: self.name.to_string(),
 							ns: opt.ns()?.into(),
 						});
 					}
 				}
 				// Process the statement
-				let key = crate::key::namespace::ac::new(opt.ns()?, &self.name);
+				let key = crate::key::namespace::access::ac::new(opt.ns()?, &self.name);
 				txn.get_or_add_ns(opt.ns()?, opt.strict).await?;
 				txn.set(
 					key,
 					DefineAccessStatement {
 						// Don't persist the `IF NOT EXISTS` clause to schema
 						if_not_exists: false,
+						overwrite: false,
 						..self.clone()
 					},
 				)
@@ -130,16 +138,16 @@ impl DefineAccessStatement {
 				if txn.get_db_access(opt.ns()?, opt.db()?, &self.name).await.is_ok() {
 					if self.if_not_exists {
 						return Ok(Value::None);
-					} else {
+					} else if !self.overwrite {
 						return Err(Error::AccessDbAlreadyExists {
-							value: self.name.to_string(),
+							ac: self.name.to_string(),
 							ns: opt.ns()?.into(),
 							db: opt.db()?.into(),
 						});
 					}
 				}
 				// Process the statement
-				let key = crate::key::database::ac::new(opt.ns()?, opt.db()?, &self.name);
+				let key = crate::key::database::access::ac::new(opt.ns()?, opt.db()?, &self.name);
 				txn.get_or_add_ns(opt.ns()?, opt.strict).await?;
 				txn.get_or_add_db(opt.ns()?, opt.db()?, opt.strict).await?;
 				txn.set(
@@ -147,6 +155,7 @@ impl DefineAccessStatement {
 					DefineAccessStatement {
 						// Don't persist the `IF NOT EXISTS` clause to schema
 						if_not_exists: false,
+						overwrite: false,
 						..self.clone()
 					},
 				)
@@ -167,6 +176,9 @@ impl Display for DefineAccessStatement {
 		write!(f, "DEFINE ACCESS",)?;
 		if self.if_not_exists {
 			write!(f, " IF NOT EXISTS")?
+		}
+		if self.overwrite {
+			write!(f, " OVERWRITE")?
 		}
 		// The specific access method definition is displayed by AccessType
 		write!(f, " {} ON {} TYPE {}", self.name, self.base, self.kind)?;

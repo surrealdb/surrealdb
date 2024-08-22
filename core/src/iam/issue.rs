@@ -5,7 +5,7 @@ use chrono::Duration as ChronoDuration;
 use chrono::Utc;
 use jsonwebtoken::EncodingKey;
 
-pub(crate) fn config(alg: Algorithm, key: String) -> Result<EncodingKey, Error> {
+pub(crate) fn config(alg: Algorithm, key: &str) -> Result<EncodingKey, Error> {
 	match alg {
 		Algorithm::Hs256 => Ok(EncodingKey::from_secret(key.as_ref())),
 		Algorithm::Hs384 => Ok(EncodingKey::from_secret(key.as_ref())),

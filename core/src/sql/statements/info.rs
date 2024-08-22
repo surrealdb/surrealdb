@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::sync::Arc;
 
-#[revisioned(revision = 2)]
+#[revisioned(revision = 3)]
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
@@ -36,6 +36,8 @@ pub enum InfoStatement {
 	User(Ident, Option<Base>),
 	#[revision(start = 2)]
 	User(Ident, Option<Base>, bool),
+	#[revision(start = 3)]
+	Index(Ident, Ident, bool),
 }
 
 impl InfoStatement {
@@ -67,9 +69,9 @@ impl InfoStatement {
 	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		opt: &Options,
-		_doc: Option<&CursorDoc<'_>>,
+		_doc: Option<&CursorDoc>,
 	) -> Result<Value, Error> {
 		match self {
 			InfoStatement::Root(structured) => {
@@ -304,6 +306,24 @@ impl InfoStatement {
 					false => Value::from(res.to_string()),
 				})
 			}
+			InfoStatement::Index(index, table, _structured) => {
+				// Allowed to run?
+				opt.is_allowed(Action::View, ResourceKind::Actor, &Base::Db)?;
+				// Get the transaction
+				let txn = ctx.tx();
+				// Output
+				#[cfg(not(target_arch = "wasm32"))]
+				if let Some(ib) = ctx.get_index_builder() {
+					// Obtain the index
+					let res = txn.get_tb_index(opt.ns()?, opt.db()?, table, index).await?;
+					if let Some(status) = ib.get_status(&res).await {
+						let mut out = Object::default();
+						out.insert("building".to_string(), status.into());
+						return Ok(out.into());
+					}
+				}
+				Ok(Object::default().into())
+			}
 		}
 	}
 }
@@ -327,6 +347,8 @@ impl fmt::Display for InfoStatement {
 				Some(ref b) => write!(f, "INFO FOR USER {u} ON {b} STRUCTURE"),
 				None => write!(f, "INFO FOR USER {u} STRUCTURE"),
 			},
+			Self::Index(ref i, ref t, false) => write!(f, "INFO FOR INDEX {i} ON {t}"),
+			Self::Index(ref i, ref t, true) => write!(f, "INFO FOR INDEX {i} ON {t} STRUCTURE"),
 		}
 	}
 }
@@ -343,6 +365,7 @@ impl InfoStatement {
 			InfoStatement::Db(_) => InfoStatement::Db(true),
 			InfoStatement::Tb(t, _) => InfoStatement::Tb(t, true),
 			InfoStatement::User(u, b, _) => InfoStatement::User(u, b, true),
+			InfoStatement::Index(i, t, _) => InfoStatement::Index(i, t, true),
 		}
 	}
 }

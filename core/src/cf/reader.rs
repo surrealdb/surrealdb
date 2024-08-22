@@ -1,6 +1,7 @@
 use crate::cf::{ChangeSet, DatabaseMutation, TableMutations};
 use crate::err::Error;
 use crate::key::change;
+#[cfg(debug_assertions)]
 use crate::key::debug::Sprintable;
 use crate::kvs::Transaction;
 use crate::sql::statements::show::ShowSince;
@@ -49,7 +50,7 @@ pub async fn read(
 	// Create an empty buffer for the final changesets
 	let mut res = Vec::<ChangeSet>::new();
 	// iterate over _x and put decoded elements to r
-	for (k, v) in tx.scan(beg..end, limit).await? {
+	for (k, v) in tx.scan(beg..end, limit, None).await? {
 		#[cfg(debug_assertions)]
 		trace!("Reading change feed entry: {}", k.sprint());
 		// Decode the changefeed entry key

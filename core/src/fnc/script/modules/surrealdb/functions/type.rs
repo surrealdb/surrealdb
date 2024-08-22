@@ -11,7 +11,9 @@ pub struct Package;
 impl_module_def!(
 	Package,
 	"type",
+	"array" => run,
 	"bool" => run,
+	"bytes" => run,
 	"datetime" => run,
 	"decimal" => run,
 	"duration" => run,
@@ -26,5 +28,8 @@ impl_module_def!(
 	"string" => run,
 	"table" => run,
 	"thing" => run,
-	"range" => run
+	"range" => run,
+	"record" => run,
+	"uuid" => run,
+	"geometry" => run
 );

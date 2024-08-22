@@ -1,5 +1,5 @@
-use crate::ctx::Canceller;
 use crate::ctx::Context;
+use crate::ctx::{Canceller, MutableContext};
 #[cfg(not(target_arch = "wasm32"))]
 use crate::dbs::distinct::AsyncDistinct;
 use crate::dbs::distinct::SyncDistinct;
@@ -12,21 +12,22 @@ use crate::err::Error;
 use crate::idx::planner::iterators::{IteratorRecord, IteratorRef};
 use crate::idx::planner::IterationStage;
 use crate::sql::edges::Edges;
-use crate::sql::range::Range;
 use crate::sql::table::Table;
 use crate::sql::thing::Thing;
 use crate::sql::value::Value;
+use crate::sql::{Id, IdRange};
 use reblessive::tree::Stk;
 #[cfg(not(target_arch = "wasm32"))]
 use reblessive::TreeStack;
 use std::mem;
+use std::sync::Arc;
 
 #[derive(Clone)]
 pub(crate) enum Iterable {
 	Value(Value),
 	Table(Table),
 	Thing(Thing),
-	Range(Range),
+	TableRange(String, IdRange),
 	Edges(Edges),
 	Defer(Thing),
 	Mergeable(Thing, Value),
@@ -35,21 +36,21 @@ pub(crate) enum Iterable {
 }
 
 pub(crate) struct Processed {
-	pub(crate) rid: Option<Thing>,
-	pub(crate) ir: Option<IteratorRecord>,
+	pub(crate) rid: Option<Arc<Thing>>,
+	pub(crate) ir: Option<Arc<IteratorRecord>>,
 	pub(crate) val: Operable,
 }
 
 pub(crate) enum Operable {
-	Value(Value),
-	Mergeable(Value, Value),
-	Relatable(Thing, Value, Thing, Option<Value>),
+	Value(Arc<Value>),
+	Mergeable(Arc<Value>, Arc<Value>),
+	Relatable(Thing, Arc<Value>, Thing, Option<Arc<Value>>),
 }
 
 pub(crate) enum Workable {
 	Normal,
-	Insert(Value),
-	Relate(Thing, Thing, Option<Value>),
+	Insert(Arc<Value>),
+	Relate(Thing, Thing, Option<Arc<Value>>),
 }
 
 #[derive(Default)]
@@ -96,7 +97,7 @@ impl Iterator {
 	pub async fn prepare(
 		&mut self,
 		stk: &mut Stk,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		opt: &Options,
 		stm: &Statement<'_>,
 		val: Value,
@@ -151,14 +152,30 @@ impl Iterator {
 					}
 				}
 				// Add the record to the iterator
-				match stm {
-					Statement::Create(_) => {
-						self.ingest(Iterable::Defer(v));
+				match &v.id {
+					Id::Range(r) => {
+						match stm {
+							Statement::Create(_) => {
+								return Err(Error::InvalidStatementTarget {
+									value: v.to_string(),
+								});
+							}
+							_ => {
+								self.ingest(Iterable::TableRange(v.tb, *r.to_owned()));
+							}
+						};
 					}
 					_ => {
-						self.ingest(Iterable::Thing(v));
+						match stm {
+							Statement::Create(_) => {
+								self.ingest(Iterable::Defer(v));
+							}
+							_ => {
+								self.ingest(Iterable::Thing(v));
+							}
+						};
 					}
-				};
+				}
 			}
 			Value::Mock(v) => {
 				// Check if there is a data clause
@@ -174,25 +191,6 @@ impl Iterator {
 				for v in v {
 					self.ingest(Iterable::Thing(v))
 				}
-			}
-			Value::Range(v) => {
-				// Check if this is a create statement
-				if let Statement::Create(_) = stm {
-					return Err(Error::InvalidStatementTarget {
-						value: v.to_string(),
-					});
-				}
-				// Check if there is a data clause
-				if let Some(data) = stm.data() {
-					// Check if there is an id field specified
-					if let Some(id) = data.rid(stk, ctx, opt).await? {
-						return Err(Error::IdMismatch {
-							value: id.to_string(),
-						});
-					}
-				}
-				// Add the record to the iterator
-				self.ingest(Iterable::Range(*v));
 			}
 			Value::Edges(v) => {
 				// Check if this is a create statement
@@ -281,15 +279,16 @@ impl Iterator {
 	pub async fn output(
 		&mut self,
 		stk: &mut Stk,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		opt: &Options,
 		stm: &Statement<'_>,
 	) -> Result<Value, Error> {
 		// Log the statement
 		trace!("Iterating: {}", stm);
 		// Enable context override
-		let mut cancel_ctx = Context::new(ctx);
+		let mut cancel_ctx = MutableContext::new(ctx);
 		self.run = cancel_ctx.add_cancel();
+		let mut cancel_ctx = cancel_ctx.freeze();
 		// Process the query LIMIT clause
 		self.setup_limit(stk, &cancel_ctx, opt, stm).await?;
 		// Process the query START clause
@@ -313,7 +312,9 @@ impl Iterator {
 			if let Some(qp) = ctx.get_query_planner() {
 				while let Some(s) = qp.next_iteration_stage().await {
 					let is_last = matches!(s, IterationStage::Iterate(_));
-					cancel_ctx.set_iteration_stage(s);
+					let mut c = MutableContext::unfreeze(cancel_ctx)?;
+					c.set_iteration_stage(s);
+					cancel_ctx = c.freeze();
 					if !is_last {
 						self.clone().iterate(stk, &cancel_ctx, opt, stm).await?;
 					};
@@ -366,7 +367,7 @@ impl Iterator {
 	async fn setup_limit(
 		&mut self,
 		stk: &mut Stk,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		opt: &Options,
 		stm: &Statement<'_>,
 	) -> Result<(), Error> {
@@ -380,7 +381,7 @@ impl Iterator {
 	async fn setup_start(
 		&mut self,
 		stk: &mut Stk,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		opt: &Options,
 		stm: &Statement<'_>,
 	) -> Result<(), Error> {
@@ -394,7 +395,7 @@ impl Iterator {
 	async fn output_split(
 		&mut self,
 		stk: &mut Stk,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		opt: &Options,
 		stm: &Statement<'_>,
 	) -> Result<(), Error> {
@@ -438,7 +439,7 @@ impl Iterator {
 	async fn output_fetch(
 		&mut self,
 		stk: &mut Stk,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		opt: &Options,
 		stm: &Statement<'_>,
 	) -> Result<(), Error> {
@@ -464,7 +465,7 @@ impl Iterator {
 	async fn iterate(
 		&mut self,
 		stk: &mut Stk,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		opt: &Options,
 		stm: &Statement<'_>,
 	) -> Result<(), Error> {
@@ -484,7 +485,7 @@ impl Iterator {
 	async fn iterate(
 		&mut self,
 		stk: &mut Stk,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		opt: &Options,
 		stm: &Statement<'_>,
 	) -> Result<(), Error> {
@@ -582,7 +583,7 @@ impl Iterator {
 	pub async fn process(
 		&mut self,
 		stk: &mut Stk,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		opt: &Options,
 		stm: &Statement<'_>,
 		pro: Processed,
@@ -597,7 +598,7 @@ impl Iterator {
 	async fn result(
 		&mut self,
 		stk: &mut Stk,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		opt: &Options,
 		stm: &Statement<'_>,
 		res: Result<Value, Error>,
