@@ -4,6 +4,7 @@ mod common;
 mod http_integration {
 	use std::time::Duration;
 
+	use http::header::HeaderValue;
 	use http::{header, Method};
 	use reqwest::Client;
 	use serde_json::json;
@@ -293,6 +294,60 @@ mod http_integration {
 	async fn client_ip_extractor() -> Result<(), Box<dyn std::error::Error>> {
 		// TODO: test the client IP extractor
 		Ok(())
+	}
+
+	#[test(tokio::test)]
+	async fn session_id() {
+		let (addr, _server) = common::start_server_with_guests().await.unwrap();
+		let url = &format!("http://{addr}/sql");
+
+		// Request without header, gives a randomly generated session identifier
+		{
+			// Prepare HTTP client without header
+			let mut headers = reqwest::header::HeaderMap::new();
+			let ns = Ulid::new().to_string();
+			let db = Ulid::new().to_string();
+			headers.insert("surreal-ns", ns.parse().unwrap());
+			headers.insert("surreal-db", db.parse().unwrap());
+			headers.insert(header::ACCEPT, "application/json".parse().unwrap());
+			let client = reqwest::Client::builder()
+				.connect_timeout(Duration::from_millis(10))
+				.default_headers(headers)
+				.build()
+				.unwrap();
+
+			let res = client.post(url).body("SELECT VALUE id FROM $session").send().await.unwrap();
+			assert_eq!(res.status(), 200);
+			let body = res.text().await.unwrap();
+			// Any randomly generated UUIDv4 will be in the format:
+			// xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx
+			assert!(body.contains("-4"), "body: {body}");
+		}
+
+		// Request with header, gives a the session identifier specified in the header
+		{
+			// Prepare HTTP client with header
+			let mut headers = reqwest::header::HeaderMap::new();
+			let ns = Ulid::new().to_string();
+			let db = Ulid::new().to_string();
+			headers.insert("surreal-ns", ns.parse().unwrap());
+			headers.insert("surreal-db", db.parse().unwrap());
+			headers.insert(
+				"surreal-id",
+				HeaderValue::from_static("00000000-0000-0000-0000-000000000000"),
+			);
+			headers.insert(header::ACCEPT, "application/json".parse().unwrap());
+			let client = reqwest::Client::builder()
+				.connect_timeout(Duration::from_millis(10))
+				.default_headers(headers)
+				.build()
+				.unwrap();
+
+			let res = client.post(url).body("SELECT VALUE id FROM $session").send().await.unwrap();
+			assert_eq!(res.status(), 200);
+			let body = res.text().await.unwrap();
+			assert!(body.contains("00000000-0000-0000-0000-000000000000"), "body: {body}");
+		}
 	}
 
 	#[test(tokio::test)]
