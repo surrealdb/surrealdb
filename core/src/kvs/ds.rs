@@ -521,7 +521,7 @@ impl Datastore {
 						.try_into()
 						.map_err(|_| Error::InvalidStorageVersion)?;
 
-					u16::from_ne_bytes(bytes).into()
+					u16::from_be_bytes(bytes).into()
 				}
 				None => {
 					// If there are no keys in the database, this indicates that the database is new, and thus the latest storage version
@@ -536,7 +536,7 @@ impl Datastore {
 
 					// Persist the version in the datastore
 					let key = crate::key::storage::version::new();
-					let bytes = version.to_ne_bytes().to_vec();
+					let bytes = version.to_be_bytes().to_vec();
 					tx.set(key, bytes).await?;
 
 					version.into()
