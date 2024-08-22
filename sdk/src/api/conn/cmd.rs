@@ -221,7 +221,7 @@ impl Command {
 
 				RouterRequest {
 					id,
-					method: "insert-relation".into(),
+					method: "insert_relation",
 					params: Some(params.into()),
 				}
 			}
