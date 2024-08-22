@@ -296,15 +296,27 @@ pub trait RpcContext {
 		// Return a single result?
 		let one = what.is_thing_single();
 		// Specify the SQL query string
-		let sql = "INSERT INTO $what $data RETURN AFTER";
-		// Specify the query parameters
-		let var = Some(map! {
-			String::from("what") => what.could_be_table(),
-			String::from("data") => data,
-			=> &self.vars()
-		});
-		// Execute the query on the database
-		let mut res = self.kvs().execute(sql, self.session(), var).await?;
+
+		let mut res = match what {
+			Value::None | Value::Null => {
+				let sql = "INSERT $data RETURN AFTER";
+				let var = Some(map! {
+					String::from("data") => data,
+					=> &self.vars()
+				});
+				self.kvs().execute(sql, self.session(), var).await?
+			}
+			what => {
+				let sql = "INSERT INTO $what $data RETURN AFTER";
+				let var = Some(map! {
+					String::from("what") => what.could_be_table(),
+					String::from("data") => data,
+					=> &self.vars()
+				});
+				self.kvs().execute(sql, self.session(), var).await?
+			}
+		};
+
 		// Extract the first query result
 		let res = match one {
 			true => res.remove(0).result?.first(),
