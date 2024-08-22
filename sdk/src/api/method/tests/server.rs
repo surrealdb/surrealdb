@@ -104,11 +104,11 @@ pub(super) fn mock(route_rx: Receiver<Route>) {
 					what,
 					data,
 				} => match (what, data) {
-					(Some(Value::Table(..)), Value::Array(..)) => {
-						Ok(DbResponse::Other(Value::Array(Default::default())))
+					(Some(CoreValue::Table(..)), CoreValue::Array(..)) => {
+						Ok(DbResponse::Other(CoreValue::Array(Default::default())))
 					}
-					(Some(Value::Table(..)), _) => {
-						Ok(DbResponse::Other(to_value(User::default()).unwrap()))
+					(Some(CoreValue::Table(..)), _) => {
+						Ok(DbResponse::Other(to_core_value(User::default()).unwrap()))
 					}
 					_ => unreachable!(),
 				},
