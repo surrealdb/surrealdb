@@ -1818,7 +1818,7 @@ async fn session_id_undefined() {
 	// Specify a namespace and database
 	socket.send_message_use(Some(NS), Some(DB)).await.unwrap();
 
-	let mut res = socket.send_message_query("SELECT id FROM $session").await.unwrap();
+	let mut res = socket.send_message_query("SELECT VALUE id FROM $session").await.unwrap();
 	// The field is expected to be present even when not provided in the header
 	let unexpected = json!([null]);
 	assert_ne!(res.remove(0)["result"], unexpected);
