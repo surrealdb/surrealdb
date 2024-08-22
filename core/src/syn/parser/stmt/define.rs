@@ -1208,6 +1208,7 @@ impl Parser<'_> {
 		let mut res = table_type::Relation {
 			from: None,
 			to: None,
+			enforced: false,
 		};
 		loop {
 			match self.peek_kind() {
@@ -1223,6 +1224,9 @@ impl Parser<'_> {
 				}
 				_ => break,
 			}
+		}
+		if self.eat(t!("ENFORCED")) {
+			res.enforced = true;
 		}
 		Ok(res)
 	}

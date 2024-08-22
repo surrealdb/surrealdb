@@ -710,7 +710,7 @@ fn filter_from_type(
 		Kind::Array(_, _) => {}
 		Kind::Function(_, _) => {}
 		Kind::Range => {}
-		Kind::Literal(_) => todo!(),
+		Kind::Literal(_) => {}
 	};
 	Ok(filter)
 }
