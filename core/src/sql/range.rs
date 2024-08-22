@@ -5,6 +5,7 @@ use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::sql::{Number, Subquery, Value};
 use crate::syn;
+use derive::Key;
 use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -13,7 +14,8 @@ use std::fmt;
 use std::ops::Bound;
 use std::str::FromStr;
 
-use super::Id;
+use super::id::Gen;
+use super::{Array, Id, Object};
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Range";
 
@@ -209,5 +211,42 @@ fn to_i64(v: Value) -> Result<i64, Error> {
 			expected: "int".to_string(),
 			found: v.kindof().to_string(),
 		}),
+	}
+}
+
+// Structs needed for revision convertion from old ranges
+
+#[revisioned(revision = 1)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
+#[serde(rename = "$surrealdb::private::sql::Range")]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
+#[non_exhaustive]
+pub struct OldRange {
+	pub tb: String,
+	pub beg: Bound<OldId>,
+	pub end: Bound<OldId>,
+}
+
+#[revisioned(revision = 1)]
+#[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize, Key, Hash)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
+#[non_exhaustive]
+pub enum OldId {
+	Number(i64),
+	String(String),
+	Array(Array),
+	Object(Object),
+	Generate(Gen),
+}
+
+impl Into<Id> for OldId {
+	fn into(self) -> Id {
+		match self {
+			OldId::Number(n) => Id::Number(n),
+			OldId::String(s) => Id::String(s),
+			OldId::Array(a) => Id::Array(a),
+			OldId::Object(o) => Id::Object(o),
+			OldId::Generate(g) => Id::Generate(g),
+		}
 	}
 }

@@ -7,6 +7,7 @@ use crate::err::Error;
 use crate::fnc::util::string::fuzzy::Fuzzy;
 use crate::sql::id::range::IdRange;
 use crate::sql::kind::Literal;
+use crate::sql::range::OldRange;
 use crate::sql::statements::info::InfoStructure;
 use crate::sql::Closure;
 use crate::sql::{
@@ -82,7 +83,7 @@ impl From<&Tables> for Values {
 	}
 }
 
-#[revisioned(revision = 1)]
+#[revisioned(revision = 2)]
 #[derive(Clone, Debug, Default, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[serde(rename = "$surrealdb::private::sql::Value")]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
@@ -123,7 +124,8 @@ pub enum Value {
 	Regex(Regex),
 	Cast(Box<Cast>),
 	Block(Box<Block>),
-	Range(Box<Range>),
+	#[revision(end = 2, convert_fn = "convert_old_range")]
+	Range(OldRange),
 	Edges(Box<Edges>),
 	Future(Box<Future>),
 	Constant(Constant),
@@ -133,7 +135,29 @@ pub enum Value {
 	Query(Query),
 	Model(Box<Model>),
 	Closure(Box<Closure>),
+	#[revision(start = 2)]
+	Range(Box<Range>),
 	// Add new variants here
+}
+
+impl Value {
+	fn convert_old_range(_revision: u16, (or,): (OldRange,)) -> Result<Self, revision::Error> {
+		Ok(Value::Thing(Thing {
+			tb: or.tb,
+			id: Id::Range(Box::new(IdRange {
+				beg: match or.beg {
+					Bound::Unbounded => Bound::Unbounded,
+					Bound::Excluded(id) => Bound::Excluded(id.into()),
+					Bound::Included(id) => Bound::Included(id.into()),
+				},
+				end: match or.end {
+					Bound::Unbounded => Bound::Unbounded,
+					Bound::Excluded(id) => Bound::Excluded(id.into()),
+					Bound::Included(id) => Bound::Included(id.into()),
+				},
+			})),
+		}))
+	}
 }
 
 impl Eq for Value {}
