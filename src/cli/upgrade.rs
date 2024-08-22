@@ -23,7 +23,7 @@ pub struct UpgradeCommandArguments {
 	/// Install the latest nightly version
 	#[arg(long, conflicts_with = "alpha", conflicts_with = "beta", conflicts_with = "version")]
 	nightly: bool,
-	/// Install the latest beta version
+	/// Install the latest alpha version
 	#[arg(long, conflicts_with = "nightly", conflicts_with = "beta", conflicts_with = "version")]
 	alpha: bool,
 	/// Install the latest beta version
