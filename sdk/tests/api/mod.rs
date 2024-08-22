@@ -541,6 +541,41 @@ async fn insert_thing() {
 }
 
 #[test_log::test(tokio::test)]
+async fn insert_unspecified() {
+	let (permit, db) = new_db().await;
+	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
+	drop(permit);
+	let tmp: Result<Vec<RecordId>, _> = db.insert(()).await;
+	tmp.unwrap_err();
+	let tmp: Result<Vec<RecordId>, _> = db.insert(()).content(json!({ "foo": "bar" })).await;
+	tmp.unwrap_err();
+	let tmp: Vec<ApiRecordId> = db
+		.insert(())
+		.content("{id: user:user1, foo: 'bar'}".parse::<Value>().unwrap())
+		.await
+		.unwrap();
+	assert_eq!(
+		tmp,
+		vec![ApiRecordId {
+			id: "user:user1".parse::<RecordId>().unwrap(),
+		}]
+	);
+
+	let tmp: Result<Value, _> = db.insert(Resource::from(())).await;
+	tmp.unwrap_err();
+	let tmp: Result<Value, _> =
+		db.insert(Resource::from(())).content(json!({ "foo": "bar" })).await;
+	tmp.unwrap_err();
+	let tmp: Value = db
+		.insert(Resource::from(()))
+		.content("{id: user:user2, foo: 'bar'}".parse::<Value>().unwrap())
+		.await
+		.unwrap();
+	let val = "{id: user:user2, foo: 'bar'}".parse::<Value>().unwrap();
+	assert_eq!(tmp, val);
+}
+
+#[test_log::test(tokio::test)]
 async fn insert_relation_table() {
 	let (permit, db) = new_db().await;
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();

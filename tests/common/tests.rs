@@ -1,4 +1,5 @@
 use super::common::{self, Format, Socket, DB, NS, PASS, USER};
+use http::header::{HeaderMap, HeaderValue};
 use assert_fs::TempDir;
 use serde_json::json;
 use std::future::Future;
@@ -1782,4 +1783,92 @@ async fn temporary_directory() {
 	server.finish().unwrap();
 	// Cleanup
 	temp_dir.close().unwrap();
+}
+
+#[test(tokio::test)]
+async fn session_id_defined() {
+	// Setup database server
+	let (addr, mut server) = common::start_server_with_defaults().await.unwrap();
+	// We specify a request identifier via a specific SurrealDB header
+	let mut headers = HeaderMap::new();
+	headers.insert("surreal-id", HeaderValue::from_static("00000000-0000-0000-0000-000000000000"));
+	// Connect to WebSocket
+	let mut socket = Socket::connect_with_headers(&addr, SERVER, FORMAT, headers).await.unwrap();
+	// Authenticate the connection
+	socket.send_message_signin(USER, PASS, None, None, None).await.unwrap();
+	// Specify a namespace and database
+	socket.send_message_use(Some(NS), Some(DB)).await.unwrap();
+
+	let mut res = socket.send_message_query("SELECT VALUE id FROM $session").await.unwrap();
+	let expected = json!(["00000000-0000-0000-0000-000000000000"]);
+	assert_eq!(res.remove(0)["result"], expected);
+
+	// Test passed
+	server.finish().unwrap();
+}
+
+#[test(tokio::test)]
+async fn session_id_defined_generic() {
+	// Setup database server
+	let (addr, mut server) = common::start_server_with_defaults().await.unwrap();
+	// We specify a request identifier via a generic header
+	let mut headers = HeaderMap::new();
+	headers.insert("x-request-id", HeaderValue::from_static("00000000-0000-0000-0000-000000000000"));
+	// Connect to WebSocket
+	let mut socket = Socket::connect_with_headers(&addr, SERVER, FORMAT, headers).await.unwrap();
+	// Authenticate the connection
+	socket.send_message_signin(USER, PASS, None, None, None).await.unwrap();
+	// Specify a namespace and database
+	socket.send_message_use(Some(NS), Some(DB)).await.unwrap();
+
+	let mut res = socket.send_message_query("SELECT VALUE id FROM $session").await.unwrap();
+	let expected = json!(["00000000-0000-0000-0000-000000000000"]);
+	assert_eq!(res.remove(0)["result"], expected);
+
+	// Test passed
+	server.finish().unwrap();
+}
+
+#[test(tokio::test)]
+async fn session_id_defined_both() {
+	// Setup database server
+	let (addr, mut server) = common::start_server_with_defaults().await.unwrap();
+	// We specify a request identifier via both headers
+	let mut headers = HeaderMap::new();
+	headers.insert("surreal-id", HeaderValue::from_static("00000000-0000-0000-0000-000000000000"));
+	headers.insert("x-request-id", HeaderValue::from_static("aaaaaaaa-aaaa-0000-0000-000000000000"));
+	// Connect to WebSocket
+	let mut socket = Socket::connect_with_headers(&addr, SERVER, FORMAT, headers).await.unwrap();
+	// Authenticate the connection
+	socket.send_message_signin(USER, PASS, None, None, None).await.unwrap();
+	// Specify a namespace and database
+	socket.send_message_use(Some(NS), Some(DB)).await.unwrap();
+
+	let mut res = socket.send_message_query("SELECT VALUE id FROM $session").await.unwrap();
+	// The specific header should be used
+	let expected = json!(["00000000-0000-0000-0000-000000000000"]);
+	assert_eq!(res.remove(0)["result"], expected);
+
+	// Test passed
+	server.finish().unwrap();
+}
+
+#[test(tokio::test)]
+async fn session_id_undefined() {
+	// Setup database server
+	let (addr, mut server) = common::start_server_with_defaults().await.unwrap();
+	// Connect to WebSocket
+	let mut socket = Socket::connect(&addr, SERVER, FORMAT).await.unwrap();
+	// Authenticate the connection
+	socket.send_message_signin(USER, PASS, None, None, None).await.unwrap();
+	// Specify a namespace and database
+	socket.send_message_use(Some(NS), Some(DB)).await.unwrap();
+
+	let mut res = socket.send_message_query("SELECT VALUE id FROM $session").await.unwrap();
+	// The field is expected to be present even when not provided in the header
+	let unexpected = json!([null]);
+	assert_ne!(res.remove(0)["result"], unexpected);
+
+	// Test passed
+	server.finish().unwrap();
 }

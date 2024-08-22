@@ -64,9 +64,10 @@ macro_rules! into_future {
 					Resource::Range {
 						..
 					} => return Err(Error::InsertOnRange.into()),
+					Resource::Unspecified => return Err(Error::InsertOnUnspecified.into()),
 				};
 				let cmd = Command::Insert {
-					what: table.to_string(),
+					what: Some(table.to_string()),
 					data: data.into(),
 				};
 
@@ -123,7 +124,7 @@ where
 			let mut data = to_core_value(data)?;
 			match self.resource? {
 				Resource::Table(table) => Ok(Command::Insert {
-					what: table,
+					what: Some(table),
 					data,
 				}),
 				Resource::RecordId(thing) => {
@@ -139,7 +140,7 @@ where
 						}
 
 						Ok(Command::Insert {
-							what: thing.tb,
+							what: Some(thing.tb),
 							data,
 						})
 					}
@@ -148,6 +149,10 @@ where
 				Resource::Array(_) => Err(Error::InsertOnArray.into()),
 				Resource::Edge(_) => Err(Error::InsertOnEdges.into()),
 				Resource::Range(_) => Err(Error::InsertOnRange.into()),
+				Resource::Unspecified => Ok(Command::Insert {
+					what: None,
+					data,
+				}),
 			}
 		})
 	}

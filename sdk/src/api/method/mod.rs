@@ -847,6 +847,27 @@ where
 	///     ])
 	///     .await?;
 	///
+	/// // Insert multiple records into different tables
+	/// #[derive(Serialize)]
+	/// struct WithId<'a> {
+	///     id: sql::Thing,
+	///     name: &'a str,
+	/// }
+	///
+	/// let people: Vec<Person> = db.insert(())
+	///     .content(vec![
+	///         WithId {
+	///             id: sql::thing("person:tobie")?,
+	///             name: "Tobie",
+	///         },
+	///         WithId {
+	///             id: sql::thing("company:surrealdb")?,
+	///             name: "SurrealDB",
+	///         },
+	///     ])
+	///     .await?;
+	///
+	///
 	/// // Insert relations
 	/// #[derive(Serialize, Deserialize)]
 	/// struct Founded {
