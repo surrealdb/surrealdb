@@ -878,7 +878,7 @@ mod tests {
 			for problem in problems {
 				eprintln!(" - {problem}");
 			}
-			panic!("ensure functions can be parsed in lib/src/sql/function.rs and are exported to JS in lib/src/fnc/script/modules/surrealdb");
+			panic!("ensure functions can be parsed in core/src/sql/function.rs and are exported to JS in core/src/fnc/script/modules/surrealdb");
 		}
 	}
 }
