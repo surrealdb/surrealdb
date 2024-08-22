@@ -24,6 +24,7 @@ mod scanner;
 mod stash;
 mod tr;
 mod tx;
+mod version;
 
 mod fdb;
 mod indxdb;

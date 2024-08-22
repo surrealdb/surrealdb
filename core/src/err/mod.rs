@@ -1098,6 +1098,10 @@ pub enum Error {
 	/// There was an invalid storage version stored in the database
 	#[error("There was an invalid storage version stored in the database")]
 	InvalidStorageVersion,
+
+	/// There was an outdated storage version stored in the database
+	#[error("The data stored on disk is out-of-date with this version. Please follow the upgrade guides in the documentation")]
+	OutdatedStorageVersion,
 }
 
 impl From<Error> for String {

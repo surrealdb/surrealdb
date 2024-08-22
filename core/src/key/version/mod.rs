@@ -3,6 +3,7 @@ use crate::key::category::Categorise;
 use crate::key::category::Category;
 use derive::Key;
 use serde::{Deserialize, Serialize};
+use std::ops::Range;
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Key)]
 #[non_exhaustive]
@@ -15,8 +16,8 @@ pub fn new() -> StorageVersion {
 	StorageVersion::new()
 }
 
-pub fn suffix() -> Vec<u8> {
-	vec![b'!', b'v', 0xff]
+pub fn range() -> Range<Vec<u8>> {
+	vec![b'!', b'v', 0x00]..vec![0xff]
 }
 
 impl Categorise for StorageVersion {

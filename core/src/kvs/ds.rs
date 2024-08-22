@@ -1,5 +1,6 @@
 use super::tr::Transactor;
 use super::tx::Transaction;
+use super::version::Version;
 use crate::cf;
 use crate::ctx::MutableContext;
 #[cfg(feature = "jwks")]
@@ -20,7 +21,6 @@ use crate::kvs::clock::SystemClock;
 use crate::kvs::index::IndexBuilder;
 use crate::kvs::{LockType, LockType::*, TransactionType, TransactionType::*};
 use crate::sql::{statements::DefineUserStatement, Base, Query, Value};
-use crate::sv::StorageVersion;
 use crate::syn;
 use crate::vs::{conv, Versionstamp};
 use channel::{Receiver, Sender};
@@ -509,53 +509,59 @@ impl Datastore {
 
 	// Initialise the cluster and run bootstrap utilities
 	#[instrument(err, level = "trace", target = "surrealdb::core::kvs::ds", skip_all)]
-	pub async fn get_version(&self) -> Result<StorageVersion, Error> {
-		let tx = self.transaction(TransactionType::Write, LockType::Pessimistic).await?.enclose();
-
-		let version: StorageVersion =
-			match catch!(tx, tx.get(crate::key::storage::version::new(), None)) {
-				Some(v) => {
-					let bytes: [u8; 2] = v
-						.as_slice()
-						.to_owned()
-						.try_into()
-						.map_err(|_| Error::InvalidStorageVersion)?;
-
-					u16::from_be_bytes(bytes).into()
+	pub async fn check_version(&self) -> Result<Version, Error> {
+		// Start a new writeable transaction
+		let txn = self.transaction(Write, Pessimistic).await?.enclose();
+		// Create the key where the version is stored
+		let key = crate::key::version::new();
+		// Check if a version is already set in storage
+		let val = match catch!(txn, txn.get(key.clone(), None)) {
+			// There is a version set in the storage
+			Some(v) => {
+				// Attempt to decode the current stored version
+				let val = TryInto::<Version>::try_into(v);
+				// Check for errors, and cancel the transaction
+				match val {
+					// There was en error getting the version
+					Err(err) => {
+						// We didn't write anything, so just rollback
+						txn.cancel().await?;
+						// Return the error
+						return Err(err);
+					}
+					// We could decode the version correctly
+					Ok(val) => val,
 				}
-				None => {
-					// If there are no keys in the database, this indicates that the database is new, and thus the latest storage version
-					let keys =
-						catch!(tx, tx.keys(crate::key::storage::version::suffix()..vec![0xff], 1));
-
-					let version = if keys.is_empty() {
-						StorageVersion::LATEST
-					} else {
-						StorageVersion::FIRST
-					};
-
-					// Persist the version in the datastore
-					let key = crate::key::storage::version::new();
-					let bytes = version.to_be_bytes().to_vec();
-					tx.set(key, bytes).await?;
-
-					version.into()
-				}
-			};
-
-		tx.commit().await?;
-
-		Ok(version)
-	}
-
-	// Initialise the cluster and run bootstrap utilities
-	#[instrument(err, level = "trace", target = "surrealdb::core::kvs::ds", skip_all)]
-	pub async fn set_version_latest(&self) -> Result<(), Error> {
-		let tx = self.transaction(TransactionType::Write, LockType::Pessimistic).await?;
-		let bytes = StorageVersion::LATEST.to_be_bytes().to_vec();
-		tx.set(crate::key::storage::version::new(), bytes).await?;
-		tx.commit().await?;
-		Ok(())
+			}
+			// There is no version set in the storage
+			None => {
+				// Fetch any keys immediately following the version key
+				let rng = crate::key::version::range();
+				let keys = catch!(txn, txn.keys(rng, 1));
+				// Check the storage if there are any other keys set
+				let val = if keys.is_empty() {
+					// There are no keys set in storage, so this is a new database
+					Version::latest()
+				} else {
+					// There were keys in storage, so this is an upgrade
+					Version::v1()
+				};
+				// Convert the version to binary
+				let bytes: Vec<u8> = val.into();
+				// Attempt to set the current version in storage
+				catch!(txn, txn.set(key, bytes));
+				// We set the version, so commit the transaction
+				catch!(txn, txn.commit());
+				// Return the current version
+				val
+			}
+		};
+		// Check we are running the latest version
+		if !val.is_latest() {
+			return Err(Error::OutdatedStorageVersion);
+		}
+		// Everything ok
+		Ok(val)
 	}
 
 	/// Setup the initial cluster access credentials
