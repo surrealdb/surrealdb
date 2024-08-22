@@ -156,6 +156,7 @@ pub enum Category {
 impl Display for Category {
 	fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
 		let name = match self {
+			Self::StorageVersion => "StorageVersion",
 			Self::Root => "Root",
 			Self::Access => "Access",
 			Self::AccessRoot => "AccessRoot",

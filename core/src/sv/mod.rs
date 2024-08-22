@@ -1,32 +1,36 @@
-use crate::kvs::{Datastore, LockType, TransactionType};
+#[derive(Debug, Clone)]
+pub struct StorageVersion(u16);
 
-enum StorageVersion {
-	V0,
-	V1,
+impl From<u16> for StorageVersion {
+	fn from(version: u16) -> Self {
+		if version <= StorageVersion::LATEST {
+			StorageVersion(version)
+		} else {
+			panic!("Invalid storage version: {}", version);
+		}
+	}
 }
 
-const latest_version: StorageVersion = StorageVersion::V1;
+impl From<Option<u16>> for StorageVersion {
+	fn from(version: Option<u16>) -> Self {
+		version.unwrap_or_else(|| 0).into()
+	}
+}
+
+impl Into<u16> for StorageVersion {
+	fn into(self) -> u16 {
+		self.0
+	}
+}
 
 impl StorageVersion {
-	fn from_version(version: Option<u32>) -> Self {
-		match version {
-			None | Some(0) => Ok(StorageVersion::V0),
-			Some(1) => Ok(StorageVersion::V1),
-			Some(v) => panic!("Found unsupported storage version {v}"),
-		}
+	pub const LATEST: u16 = 1;
+
+	pub fn latest() -> Self {
+		Self(Self::LATEST)
 	}
 
-	fn to_version(&self) -> u32 {
-		match self {
-			StorageVersion::V0 => 0,
-			StorageVersion::V1 => 1,
-		}
-	}
-
-	async fn from_ds(ds: Datastore) -> Self {
-		let tx = ds.transaction(TransactionType::Read, LockType::Pessimistic).await.unwrap();
-		let version_num = tx.get(crate::key::storage::version::new(), None);
-
-		StorageVersion::V0
+	pub fn is_latest(&self) -> bool {
+		self.0 == Self::LATEST
 	}
 }

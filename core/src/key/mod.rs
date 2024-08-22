@@ -1,6 +1,6 @@
 //! How the keys are structured in the key value store
 ///
-/// crate::key::storage::version         /!sv
+/// crate::key::storage::version         !v
 ///
 /// crate::key::root::all                /
 /// crate::key::root::access::all        /*{ac}

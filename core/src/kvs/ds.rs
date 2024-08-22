@@ -20,6 +20,7 @@ use crate::kvs::clock::SystemClock;
 use crate::kvs::index::IndexBuilder;
 use crate::kvs::{LockType, LockType::*, TransactionType, TransactionType::*};
 use crate::sql::{statements::DefineUserStatement, Base, Query, Value};
+use crate::sv::StorageVersion;
 use crate::syn;
 use crate::vs::{conv, Versionstamp};
 use channel::{Receiver, Sender};
@@ -508,12 +509,37 @@ impl Datastore {
 
 	// Initialise the cluster and run bootstrap utilities
 	#[instrument(err, level = "trace", target = "surrealdb::core::kvs::ds", skip_all)]
-	pub async fn bootstrap(&self) -> Result<(), Error> {
-		// Insert this node in the cluster
-		self.insert_node(self.id).await?;
-		// Mark expired nodes as archived
-		self.expire_nodes().await?;
-		// Everything ok
+	pub async fn get_version(&self) -> Result<StorageVersion, Error> {
+		let tx = self.transaction(TransactionType::Write, LockType::Pessimistic).await?.enclose();
+		let keys = catch!(tx, tx.keys(crate::key::storage::version::suffix()..vec![0xff], 1));
+
+		let version = if keys.is_empty() {
+			StorageVersion::latest()
+		} else {
+			let key = crate::key::storage::version::new();
+			let num = match catch!(tx, tx.get(key, None)) {
+				Some(v) => u16::from_ne_bytes(v.as_slice().to_owned().try_into().unwrap()),
+				None => 0 as u16,
+			};
+			num.into()
+		};
+
+		let num: u16 = version.clone().into();
+		let bytes = num.to_ne_bytes().to_vec();
+		tx.set(crate::key::storage::version::new(), bytes).await?;
+
+		tx.commit().await?;
+
+		Ok(version)
+	}
+
+	// Initialise the cluster and run bootstrap utilities
+	#[instrument(err, level = "trace", target = "surrealdb::core::kvs::ds", skip_all)]
+	pub async fn set_version_latest(&self) -> Result<(), Error> {
+		let tx = self.transaction(TransactionType::Write, LockType::Pessimistic).await?;
+		let bytes = StorageVersion::LATEST.to_ne_bytes().to_vec();
+		tx.set(crate::key::storage::version::new(), bytes).await?;
+		tx.commit().await?;
 		Ok(())
 	}
 
@@ -544,6 +570,17 @@ impl Datastore {
 			// We didn't write anything, so just rollback
 			txn.cancel().await
 		}
+	}
+
+	// Initialise the cluster and run bootstrap utilities
+	#[instrument(err, level = "trace", target = "surrealdb::core::kvs::ds", skip_all)]
+	pub async fn bootstrap(&self) -> Result<(), Error> {
+		// Insert this node in the cluster
+		self.insert_node(self.id).await?;
+		// Mark expired nodes as archived
+		self.expire_nodes().await?;
+		// Everything ok
+		Ok(())
 	}
 
 	// tick is called periodically to perform maintenance tasks.

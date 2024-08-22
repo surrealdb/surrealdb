@@ -239,6 +239,11 @@ pub async fn init(
 		.with_auth_enabled(!unauthenticated)
 		.with_temporary_directory(temporary_directory)
 		.with_capabilities(capabilities);
+	// Ensure the storage version is up-to-date to prevent corruption
+	let version = dbs.get_version().await?;
+	if !version.is_latest() {
+		panic!("Storage version is out-of-date. Please follow the upgrade guides found at https://surrealdb.com/docs/surrealdb/installation/upgrading");
+	}
 	// Setup initial server auth credentials
 	if let (Some(user), Some(pass)) = (opt.user.as_ref(), opt.pass.as_ref()) {
 		dbs.initialise_credentials(user, pass).await?;

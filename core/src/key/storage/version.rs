@@ -6,28 +6,30 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Key)]
 #[non_exhaustive]
-pub struct StorageVersion<'a> {
+pub struct StorageVersion {
 	__: u8,
 	_a: u8,
-	_b: u8,
 }
 
-pub fn new<'a>() -> StorageVersion<'a> {
+pub fn new() -> StorageVersion {
 	StorageVersion::new()
 }
 
-impl Categorise for StorageVersion<'_> {
+pub fn suffix() -> Vec<u8> {
+	vec![b'!', b'v', 0xff]
+}
+
+impl Categorise for StorageVersion {
 	fn categorise(&self) -> Category {
 		Category::StorageVersion
 	}
 }
 
-impl<'a> StorageVersion<'a> {
+impl StorageVersion {
 	pub fn new() -> Self {
 		Self {
-			__: b'/',
-			_a: b's',
-			_b: b'v',
+			__: b'!',
+			_a: b'v',
 		}
 	}
 }
@@ -40,7 +42,7 @@ mod tests {
 		#[rustfmt::skip]
 		let val = StorageVersion::new();
 		let enc = StorageVersion::encode(&val).unwrap();
-		assert_eq!(enc, b"/sv");
+		assert_eq!(enc, b"!v");
 
 		let dec = StorageVersion::decode(&enc).unwrap();
 		assert_eq!(val, dec);
