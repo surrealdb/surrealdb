@@ -536,7 +536,7 @@ impl Datastore {
 			// There is no version set in the storage
 			None => {
 				// Fetch any keys immediately following the version key
-				let rng = crate::key::version::range();
+				let rng = crate::key::version::proceeding();
 				let keys = catch!(txn, txn.keys(rng, 1));
 				// Check the storage if there are any other keys set
 				let val = if keys.is_empty() {

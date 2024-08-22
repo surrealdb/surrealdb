@@ -7,26 +7,26 @@ use std::ops::Range;
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Key)]
 #[non_exhaustive]
-pub struct StorageVersion {
+pub struct Version {
 	__: u8,
 	_a: u8,
 }
 
-pub fn new() -> StorageVersion {
-	StorageVersion::new()
+pub fn new() -> Version {
+	Version::new()
 }
 
-pub fn range() -> Range<Vec<u8>> {
+pub fn proceeding() -> Range<Vec<u8>> {
 	vec![b'!', b'v', 0x00]..vec![0xff]
 }
 
-impl Categorise for StorageVersion {
+impl Categorise for Version {
 	fn categorise(&self) -> Category {
-		Category::StorageVersion
+		Category::Version
 	}
 }
 
-impl StorageVersion {
+impl Version {
 	pub fn new() -> Self {
 		Self {
 			__: b'!',
@@ -35,7 +35,7 @@ impl StorageVersion {
 	}
 }
 
-impl Default for StorageVersion {
+impl Default for Version {
 	fn default() -> Self {
 		Self::new()
 	}
@@ -47,11 +47,11 @@ mod tests {
 	fn key() {
 		use super::*;
 		#[rustfmt::skip]
-		let val = StorageVersion::new();
-		let enc = StorageVersion::encode(&val).unwrap();
+		let val = Version::new();
+		let enc = Version::encode(&val).unwrap();
 		assert_eq!(enc, b"!v");
 
-		let dec = StorageVersion::decode(&enc).unwrap();
+		let dec = Version::decode(&enc).unwrap();
 		assert_eq!(val, dec);
 	}
 }
