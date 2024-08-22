@@ -67,6 +67,8 @@ pub(crate) struct Iterator {
 	results: Results,
 	// Iterator input values
 	entries: Vec<Iterable>,
+	// Set if the iterator can be cancelled once it reaches start/limit
+	cancel_on_limit: Option<u32>,
 }
 
 impl Clone for Iterator {
@@ -78,6 +80,7 @@ impl Clone for Iterator {
 			error: None,
 			results: Results::default(),
 			entries: self.entries.clone(),
+			cancel_on_limit: None,
 		}
 	}
 }
@@ -393,6 +396,44 @@ impl Iterator {
 		Ok(())
 	}
 
+	/// Check if the iteration can be limited per iterator
+	fn check_set_start_limit(&mut self, ctx: &Context, stm: &Statement<'_>) -> bool {
+		// If there are groups we can't
+		if stm.group().is_some() {
+			return false;
+		}
+		// If there is no specified order, we can
+		if stm.order().is_none() {
+			return true;
+		}
+		// If there is more than 1 iterator, we can't
+		if self.entries.len() != 1 {
+			return false;
+		}
+		// If the iterator is backed by a sorted index
+		// and the sorting matches the first ORDER entry, we can
+		if let Some(Iterable::Index(_, irf)) = self.entries.first() {
+			if let Some(qp) = ctx.get_query_planner() {
+				if qp.is_order(irf) {
+					return true;
+				}
+			}
+		}
+		false
+	}
+
+	fn compute_start_limit(&mut self, ctx: &Context, stm: &Statement<'_>) {
+		if self.check_set_start_limit(ctx, stm) {
+			if let Some(l) = self.limit {
+				if let Some(s) = self.start {
+					self.cancel_on_limit = Some(l + s);
+				} else {
+					self.cancel_on_limit = Some(l);
+				}
+			}
+		}
+	}
+
 	#[inline]
 	async fn output_split(
 		&mut self,
@@ -491,13 +532,15 @@ impl Iterator {
 		opt: &Options,
 		stm: &Statement<'_>,
 	) -> Result<(), Error> {
+		// Compute iteration limits
+		self.compute_start_limit(ctx, stm);
 		// Prevent deep recursion
 		let opt = &opt.dive(4)?;
 		// Check if iterating in parallel
 		match stm.parallel() {
 			// Run statements sequentially
 			false => {
-				// If any iterator requires distinct, we new to create a global distinct instance
+				// If any iterator requires distinct, we need to create a global distinct instance
 				let mut distinct = SyncDistinct::new(ctx);
 				// Process all prepared values
 				for v in mem::take(&mut self.entries) {
@@ -623,16 +666,10 @@ impl Iterator {
 				}
 			}
 		}
-		// Check if we can exit
-		if stm.group().is_none() && stm.order().is_none() {
-			if let Some(l) = self.limit {
-				if let Some(s) = self.start {
-					if self.results.len() == (l + s) as usize {
-						self.run.cancel()
-					}
-				} else if self.results.len() == l as usize {
-					self.run.cancel()
-				}
+		// Check if we have enough results
+		if let Some(l) = self.cancel_on_limit {
+			if self.results.len() == l as usize {
+				self.run.cancel()
 			}
 		}
 	}

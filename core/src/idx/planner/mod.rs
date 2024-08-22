@@ -32,6 +32,7 @@ pub(crate) struct QueryPlanner {
 	fallbacks: Vec<String>,
 	iteration_workflow: Vec<IterationStage>,
 	iteration_index: AtomicU8,
+	orders: Vec<IteratorRef>,
 }
 
 impl QueryPlanner {
@@ -51,6 +52,7 @@ impl QueryPlanner {
 			fallbacks: vec![],
 			iteration_workflow: Vec::default(),
 			iteration_index: AtomicU8::new(0),
+			orders: vec![],
 		}
 	}
 
@@ -96,8 +98,12 @@ impl QueryPlanner {
 				if io.require_distinct() {
 					self.requires_distinct = true;
 				}
+				let is_order = exp.is_none();
 				let ir = exe.add_iterator(IteratorEntry::Single(exp, io));
 				self.add(t.clone(), Some(ir), exe, it);
+				if is_order {
+					self.orders.push(ir);
+				}
 			}
 			Plan::MultiIndex(non_range_indexes, ranges_indexes) => {
 				for (exp, io) in non_range_indexes {
@@ -160,6 +166,10 @@ impl QueryPlanner {
 
 	pub(crate) fn fallbacks(&self) -> &Vec<String> {
 		&self.fallbacks
+	}
+
+	pub(crate) fn is_order(&self, irf: &IteratorRef) -> bool {
+		self.orders.contains(irf)
 	}
 
 	pub(crate) async fn next_iteration_stage(&self) -> Option<IterationStage> {

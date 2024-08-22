@@ -102,7 +102,6 @@ impl SelectStatement {
 					if self.only && !limit_is_one_or_zero {
 						return Err(Error::SingleOnlyOutput);
 					}
-
 					planner.add_iterables(stk, ctx, t, &mut i).await?;
 				}
 				Value::Thing(v) => match &v.id {
