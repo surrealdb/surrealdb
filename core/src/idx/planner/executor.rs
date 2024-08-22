@@ -11,11 +11,10 @@ use crate::idx::ft::terms::Terms;
 use crate::idx::ft::{FtIndex, MatchRef};
 use crate::idx::planner::checker::{HnswConditionChecker, MTreeConditionChecker};
 use crate::idx::planner::iterators::{
-	IndexAscendingThingIterator, IndexEqualThingIterator, IndexJoinThingIterator,
-	IndexRangeThingIterator, IndexUnionThingIterator, IteratorRecord, IteratorRef, KnnIterator,
-	KnnIteratorResult, MatchesThingIterator, ThingIterator, UniqueAscendingThingIterator,
-	UniqueEqualThingIterator, UniqueJoinThingIterator, UniqueRangeThingIterator,
-	UniqueUnionThingIterator,
+	IndexEqualThingIterator, IndexJoinThingIterator, IndexRangeThingIterator,
+	IndexUnionThingIterator, IteratorRecord, IteratorRef, KnnIterator, KnnIteratorResult,
+	MatchesThingIterator, ThingIterator, UniqueEqualThingIterator, UniqueJoinThingIterator,
+	UniqueRangeThingIterator, UniqueUnionThingIterator,
 };
 use crate::idx::planner::knn::{KnnBruteForceResult, KnnPriorityList};
 use crate::idx::planner::plan::IndexOperator::Matches;
@@ -408,7 +407,7 @@ impl QueryExecutor {
 			}
 			IndexOperator::Order(asc) => {
 				if *asc {
-					Some(ThingIterator::IndexAscending(IndexAscendingThingIterator::new(
+					Some(ThingIterator::IndexRange(IndexRangeThingIterator::full_range(
 						irf,
 						opt.ns()?,
 						opt.db()?,
@@ -488,7 +487,7 @@ impl QueryExecutor {
 			}
 			IndexOperator::Order(asc) => {
 				if *asc {
-					Some(ThingIterator::UniqueAscending(UniqueAscendingThingIterator::new(
+					Some(ThingIterator::UniqueRange(UniqueRangeThingIterator::full_range(
 						irf,
 						opt.ns()?,
 						opt.db()?,
