@@ -552,7 +552,7 @@ impl Datastore {
 	#[instrument(err, level = "trace", target = "surrealdb::core::kvs::ds", skip_all)]
 	pub async fn set_version_latest(&self) -> Result<(), Error> {
 		let tx = self.transaction(TransactionType::Write, LockType::Pessimistic).await?;
-		let bytes = StorageVersion::LATEST.to_ne_bytes().to_vec();
+		let bytes = StorageVersion::LATEST.to_be_bytes().to_vec();
 		tx.set(crate::key::storage::version::new(), bytes).await?;
 		tx.commit().await?;
 		Ok(())
