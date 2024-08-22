@@ -600,6 +600,7 @@ impl From<Id> for Value {
 		match v {
 			Id::Number(v) => v.into(),
 			Id::String(v) => v.into(),
+			Id::Uuid(v) => v.into(),
 			Id::Array(v) => v.into(),
 			Id::Object(v) => v.into(),
 			Id::Generate(v) => match v {
