@@ -62,10 +62,10 @@ where
 			}
 			Resource::RecordId(record) => {
 				let record = record.into_inner();
-				table.0 = record.tb.clone();
+				table.0.clone_from(&record.tb);
 				stmt.what = table.into();
 				let mut ident = Ident::default();
-				ident.0 = ID.to_owned();
+				ID.clone_into(&mut ident.0);
 				let mut idiom = Idiom::default();
 				idiom.0 = vec![Part::from(ident)];
 				let mut cond = Cond::default();
@@ -81,7 +81,7 @@ where
 			Resource::Edge(_) => return Err(Error::LiveOnEdges.into()),
 			Resource::Range(range) => {
 				let range = range.into_inner();
-				table.0 = range.tb.clone();
+				table.0.clone_from(&range.tb);
 				stmt.what = table.into();
 				stmt.cond = range.to_cond();
 			}

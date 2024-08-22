@@ -13,18 +13,23 @@ impl From<u16> for StorageVersion {
 
 impl From<Option<u16>> for StorageVersion {
 	fn from(version: Option<u16>) -> Self {
-		version.unwrap_or_else(|| 0).into()
+		version.unwrap_or(0).into()
 	}
 }
 
-impl Into<u16> for StorageVersion {
-	fn into(self) -> u16 {
-		self.0
+impl From<StorageVersion> for u16 {
+	fn from(version: StorageVersion) -> Self {
+		version.0
 	}
 }
 
 impl StorageVersion {
+	pub const FIRST: u16 = 0;
 	pub const LATEST: u16 = 1;
+
+	pub fn first() -> Self {
+		Self(Self::FIRST)
+	}
 
 	pub fn latest() -> Self {
 		Self(Self::LATEST)

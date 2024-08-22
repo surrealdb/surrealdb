@@ -511,22 +511,37 @@ impl Datastore {
 	#[instrument(err, level = "trace", target = "surrealdb::core::kvs::ds", skip_all)]
 	pub async fn get_version(&self) -> Result<StorageVersion, Error> {
 		let tx = self.transaction(TransactionType::Write, LockType::Pessimistic).await?.enclose();
-		let keys = catch!(tx, tx.keys(crate::key::storage::version::suffix()..vec![0xff], 1));
 
-		let version = if keys.is_empty() {
-			StorageVersion::latest()
-		} else {
-			let key = crate::key::storage::version::new();
-			let num = match catch!(tx, tx.get(key, None)) {
-				Some(v) => u16::from_ne_bytes(v.as_slice().to_owned().try_into().unwrap()),
-				None => 0 as u16,
+		let version: StorageVersion =
+			match catch!(tx, tx.get(crate::key::storage::version::new(), None)) {
+				Some(v) => {
+					let bytes: [u8; 2] = v
+						.as_slice()
+						.to_owned()
+						.try_into()
+						.map_err(|_| Error::InvalidStorageVersion)?;
+
+					u16::from_ne_bytes(bytes).into()
+				}
+				None => {
+					// If there are no keys in the database, this indicates that the database is new, and thus the latest storage version
+					let keys =
+						catch!(tx, tx.keys(crate::key::storage::version::suffix()..vec![0xff], 1));
+
+					let version = if keys.is_empty() {
+						StorageVersion::LATEST
+					} else {
+						StorageVersion::FIRST
+					};
+
+					// Persist the version in the datastore
+					let key = crate::key::storage::version::new();
+					let bytes = version.to_ne_bytes().to_vec();
+					tx.set(key, bytes).await?;
+
+					version.into()
+				}
 			};
-			num.into()
-		};
-
-		let num: u16 = version.clone().into();
-		let bytes = num.to_ne_bytes().to_vec();
-		tx.set(crate::key::storage::version::new(), bytes).await?;
 
 		tx.commit().await?;
 

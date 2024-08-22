@@ -34,6 +34,12 @@ impl StorageVersion {
 	}
 }
 
+impl Default for StorageVersion {
+	fn default() -> Self {
+		Self::new()
+	}
+}
+
 #[cfg(test)]
 mod tests {
 	#[test]

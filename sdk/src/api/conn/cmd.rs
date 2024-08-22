@@ -198,7 +198,7 @@ impl Command {
 				data,
 			} => {
 				let mut table = CoreTable::default();
-				table.0 = what.clone();
+				table.0.clone_from(&what);
 				let params = vec![CoreValue::from(what), data];
 
 				RouterRequest {

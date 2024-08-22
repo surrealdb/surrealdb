@@ -1094,6 +1094,10 @@ pub enum Error {
 	RangeTooBig {
 		max: usize,
 	},
+
+	/// There was an invalid storage version stored in the database
+	#[error("There was an invalid storage version stored in the database")]
+	InvalidStorageVersion,
 }
 
 impl From<Error> for String {
