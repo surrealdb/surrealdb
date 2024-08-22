@@ -5,7 +5,6 @@ use crate::sql::idiom::Idiom;
 use crate::sql::index::Distance;
 use crate::sql::thing::Thing;
 use crate::sql::value::Value;
-use crate::sql::TableType;
 use crate::syn::error::RenderedError as RenderedParserError;
 use crate::vs::Error as VersionstampError;
 use base64::DecodeError as Base64Error;
@@ -575,7 +574,7 @@ pub enum Error {
 	TableCheck {
 		thing: String,
 		relation: bool,
-		target_type: TableType,
+		target_type: String,
 	},
 
 	/// The specified field did not conform to the field type check

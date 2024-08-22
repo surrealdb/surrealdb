@@ -10,6 +10,7 @@ use surrealdb::channel::Sender;
 use surrealdb::rpc::format::Format;
 use surrealdb::rpc::Data;
 use surrealdb::sql::Value;
+use surrealdb_core::rpc::RpcError;
 use tracing::Span;
 
 #[revisioned(revision = 1)]
@@ -54,7 +55,14 @@ impl Response {
 			span.record("rpc.error_message", err.message.as_ref());
 		}
 		// Process the response for the format
-		let (len, msg) = fmt.res_ws(self).unwrap();
+		let (len, msg) = match fmt.res_ws(self) {
+			Ok((l, m)) => (l, m),
+			Err(_) => {
+				let err: Failure = RpcError::Thrown("Serialisation Error".to_string()).into();
+				fmt.res_ws(failure(None, err))
+					.expect("Serialising known thrown error should succeed")
+			}
+		};
 		// Send the message to the write channel
 		if chn.send(msg).await.is_ok() {
 			record_rpc(cx.as_ref(), len, is_error);
