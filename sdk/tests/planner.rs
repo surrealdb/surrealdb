@@ -1050,12 +1050,6 @@ const CONTAINS_TABLE_EXPLAIN: &str = r"[
 					},
 					{
 						detail: {
-							reason: 'NO INDEX FOUND'
-						},
-						operation: 'Fallback'
-					},
-					{
-						detail: {
 							type: 'Memory'
 						},
 						operation: 'Collector'
@@ -1956,12 +1950,6 @@ async fn select_with_record_id_link_no_index() -> Result<(), Error> {
 				},
 				{
 					detail: {
-						reason: 'NO INDEX FOUND'
-					},
-					operation: 'Fallback'
-				},
-				{
-					detail: {
 						type: 'Memory'
 					},
 					operation: 'Collector'
@@ -2259,12 +2247,6 @@ async fn select_with_record_id_link_full_text_no_record_index() -> Result<(), Er
 					},
 					{
 						detail: {
-							reason: 'NO INDEX FOUND'
-						},
-						operation: 'Fallback'
-					},
-					{
-						detail: {
 							type: 'Memory'
 						},
 						operation: 'Collector'
@@ -2328,12 +2310,6 @@ async fn select_with_record_id_index() -> Result<(), Error> {
 						table: 't'
 					},
 					operation: 'Iterate Table'
-				},
-				{
-					detail: {
-						reason: 'NO INDEX FOUND'
-					},
-					operation: 'Fallback'
 				},
 				{
 					detail: {
