@@ -69,7 +69,7 @@ impl AlterTableStatement {
 			dt.kind = kind.clone();
 		}
 
-		txn.set(key, &dt).await?;
+		txn.set(key, &dt, None).await?;
 		// Add table relational fields
 		if matches!(self.kind, Some(TableType::Relation(_))) {
 			dt.add_in_out_fields(&txn, opt).await?;

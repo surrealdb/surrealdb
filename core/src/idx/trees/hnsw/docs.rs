@@ -59,9 +59,9 @@ impl HnswDocs {
 			Ok(doc_id)
 		} else {
 			let doc_id = self.next_doc_id();
-			tx.set(id_key, doc_id.to_be_bytes()).await?;
+			tx.set(id_key, doc_id.to_be_bytes(), None).await?;
 			let doc_key = self.ikb.new_hd_key(Some(doc_id));
-			tx.set(doc_key, id).await?;
+			tx.set(doc_key, id, None).await?;
 			Ok(doc_id)
 		}
 	}
@@ -112,7 +112,7 @@ impl HnswDocs {
 
 	pub(in crate::idx) async fn finish(&mut self, tx: &Transaction) -> Result<(), Error> {
 		if self.state_updated {
-			tx.set(self.state_key.clone(), VersionedStore::try_into(&self.state)?).await?;
+			tx.set(self.state_key.clone(), VersionedStore::try_into(&self.state)?, None).await?;
 			self.state_updated = true;
 		}
 		Ok(())
@@ -183,7 +183,7 @@ impl VecDocs {
 			}
 		} {
 			let val: Val = VersionedStore::try_into(&ed)?;
-			tx.set(key, val).await?;
+			tx.set(key, val, None).await?;
 		}
 		Ok(())
 	}
@@ -205,7 +205,7 @@ impl VecDocs {
 				} else {
 					ed.docs = new_docs;
 					let val: Val = VersionedStore::try_into(&ed)?;
-					tx.set(key, val).await?;
+					tx.set(key, val, None).await?;
 				}
 			}
 		};

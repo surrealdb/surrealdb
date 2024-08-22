@@ -92,7 +92,7 @@ impl DocIds {
 			}
 		}
 		let doc_id = self.get_next_doc_id();
-		tx.set(self.index_key_base.new_bi_key(doc_id), doc_key.clone()).await?;
+		tx.set(self.index_key_base.new_bi_key(doc_id), doc_key.clone(), None).await?;
 		self.btree.insert(tx, &mut self.store, doc_key, doc_id).await?;
 		Ok(Resolved::New(doc_id))
 	}
@@ -142,7 +142,7 @@ impl DocIds {
 				available_ids: self.available_ids.take(),
 				next_doc_id: self.next_doc_id,
 			};
-			tx.set(self.state_key.clone(), VersionedStore::try_into(&state)?).await?;
+			tx.set(self.state_key.clone(), VersionedStore::try_into(&state)?, None).await?;
 			self.ixs.advance_cache_btree_trie(new_cache);
 		}
 		Ok(())
