@@ -1789,7 +1789,29 @@ async fn temporary_directory() {
 async fn session_id_defined() {
 	// Setup database server
 	let (addr, mut server) = common::start_server_with_defaults().await.unwrap();
-	// We specify a request identifier via headers
+	// We specify a request identifier via a specific SurrealDB header
+	let mut headers = HeaderMap::new();
+	headers.insert("surreal-id", HeaderValue::from_static("00000000-0000-0000-0000-000000000000"));
+	// Connect to WebSocket
+	let mut socket = Socket::connect_with_headers(&addr, SERVER, FORMAT, headers).await.unwrap();
+	// Authenticate the connection
+	socket.send_message_signin(USER, PASS, None, None, None).await.unwrap();
+	// Specify a namespace and database
+	socket.send_message_use(Some(NS), Some(DB)).await.unwrap();
+
+	let mut res = socket.send_message_query("SELECT VALUE id FROM $session").await.unwrap();
+	let expected = json!(["00000000-0000-0000-0000-000000000000"]);
+	assert_eq!(res.remove(0)["result"], expected);
+
+	// Test passed
+	server.finish().unwrap();
+}
+
+#[test(tokio::test)]
+async fn session_id_defined_generic() {
+	// Setup database server
+	let (addr, mut server) = common::start_server_with_defaults().await.unwrap();
+	// We specify a request identifier via a generic header
 	let mut headers = HeaderMap::new();
 	headers.insert("x-request-id", HeaderValue::from_static("00000000-0000-0000-0000-000000000000"));
 	// Connect to WebSocket
@@ -1800,6 +1822,30 @@ async fn session_id_defined() {
 	socket.send_message_use(Some(NS), Some(DB)).await.unwrap();
 
 	let mut res = socket.send_message_query("SELECT VALUE id FROM $session").await.unwrap();
+	let expected = json!(["00000000-0000-0000-0000-000000000000"]);
+	assert_eq!(res.remove(0)["result"], expected);
+
+	// Test passed
+	server.finish().unwrap();
+}
+
+#[test(tokio::test)]
+async fn session_id_defined_both() {
+	// Setup database server
+	let (addr, mut server) = common::start_server_with_defaults().await.unwrap();
+	// We specify a request identifier via both headers
+	let mut headers = HeaderMap::new();
+	headers.insert("surreal-id", HeaderValue::from_static("00000000-0000-0000-0000-000000000000"));
+	headers.insert("x-request-id", HeaderValue::from_static("aaaaaaaa-aaaa-0000-0000-000000000000"));
+	// Connect to WebSocket
+	let mut socket = Socket::connect_with_headers(&addr, SERVER, FORMAT, headers).await.unwrap();
+	// Authenticate the connection
+	socket.send_message_signin(USER, PASS, None, None, None).await.unwrap();
+	// Specify a namespace and database
+	socket.send_message_use(Some(NS), Some(DB)).await.unwrap();
+
+	let mut res = socket.send_message_query("SELECT VALUE id FROM $session").await.unwrap();
+	// The specific header should be used
 	let expected = json!(["00000000-0000-0000-0000-000000000000"]);
 	assert_eq!(res.remove(0)["result"], expected);
 
