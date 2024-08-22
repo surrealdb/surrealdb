@@ -619,7 +619,7 @@ async fn router(
 			let one = !data.is_array();
 			let statement = {
 				let mut stmt = InsertStatement::default();
-				stmt.into = Some(Table(what).into_core().into());
+				stmt.into = what.map(|w| Table(w).into_core().into());
 				stmt.data = Data::SingleExpression(data);
 				stmt.output = Some(Output::After);
 				stmt.relation = true;

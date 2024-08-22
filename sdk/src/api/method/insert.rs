@@ -172,7 +172,7 @@ where
 			let mut data = to_core_value(data)?;
 			match self.resource? {
 				Resource::Table(table) => Ok(Command::InsertRelation {
-					what: table,
+					what: Some(table),
 					data,
 				}),
 				Resource::RecordId(thing) => {
@@ -188,11 +188,15 @@ where
 						}
 
 						Ok(Command::InsertRelation {
-							what: thing.tb,
+							what: Some(thing.tb),
 							data,
 						})
 					}
 				}
+				Resource::Unspecified => Ok(Command::InsertRelation {
+					what: None,
+					data,
+				}),
 				Resource::Object(_) => Err(Error::InsertOnObject.into()),
 				Resource::Array(_) => Err(Error::InsertOnArray.into()),
 				Resource::Edge(_) => Err(Error::InsertOnEdges.into()),
