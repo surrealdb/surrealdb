@@ -166,7 +166,7 @@ where
 		InsertRelation::from_closure(self.client, || {
 			let mut data = to_core_value(data)?;
 			match self.resource? {
-				Resource::Table(table) => Ok(Command::Insert {
+				Resource::Table(table) => Ok(Command::InsertRelation {
 					what: table,
 					data,
 				}),
@@ -182,7 +182,7 @@ where
 							x.insert("id".to_string(), thing.id.into());
 						}
 
-						Ok(Command::Insert {
+						Ok(Command::InsertRelation {
 							what: thing.tb,
 							data,
 						})

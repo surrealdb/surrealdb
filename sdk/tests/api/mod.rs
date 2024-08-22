@@ -545,16 +545,16 @@ async fn insert_relation_table() {
 	let (permit, db) = new_db().await;
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
 	drop(permit);
-	let tmp: Result<Vec<RecordId>, _> = db.insert("likes").relation("{}".parse::<Value>().unwrap()).await;
+	let tmp: Result<Vec<ApiRecordId>, _> = db.insert("likes").relation("{}".parse::<Value>().unwrap()).await;
 	tmp.unwrap_err();
 	let val = "{in: person:a, out: thing:a}".parse::<Value>().unwrap();
-	let _: Vec<RecordId> = db.insert("likes").relation(val).await.unwrap();
+	let _: Vec<ApiRecordId> = db.insert("likes").relation(val).await.unwrap();
 
 	let vals = 
 		"[{in: person:b, out: thing:a}, {id: likes:2, in: person:a, out: thing:a}, {id: hates:3, in: person:a, out: thing:a}]"
 		.parse::<Value>()
 	.unwrap();
-	let _: Vec<RecordId> = db.insert("likes").relation(vals).await.unwrap();
+	let _: Vec<ApiRecordId> = db.insert("likes").relation(vals).await.unwrap();
 }
 
 #[test_log::test(tokio::test)]
