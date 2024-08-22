@@ -22,7 +22,7 @@ impl Display for Tokenizer {
 			Self::Camel => "CAMEL",
 			Self::Class => "CLASS",
 			Self::Punct => "PUNCT",
-			Self::Jieba => "Jieba",
+			Self::Jieba => "JIEBA",
 		})
 	}
 }
