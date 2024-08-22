@@ -128,7 +128,7 @@ revision = { version = "0.8.0", features = [
     "regex",
     "rust_decimal",
     "uuid",
-] }
+], path = "../../revision" }
 rmpv = "1.0.1"
 roaring = { version = "0.10.2", features = ["serde"] }
 rocksdb = { version = "0.21.0", features = ["lz4", "snappy"], optional = true }
