@@ -762,10 +762,10 @@ where
 	/// # Examples
 	///
 	/// ```no_run
-	/// use serde::Serialize;
+	/// use serde::{Serialize, Deserialize};
 	/// use surrealdb::sql;
 	///
-	/// # #[derive(serde::Deserialize)]
+	/// # #[derive(Deserialize)]
 	/// # struct Person;
 	/// #
 	/// #[derive(Serialize)]
@@ -850,9 +850,9 @@ where
 	/// // Insert relations
 	/// #[derive(Serialize, Deserialize)]
 	/// struct Founded {
-	///     #[serde(rename = 'in')]
+	///     #[serde(rename = "in")]
 	///     founder: sql::Thing,
-	///     #[serde(rename = 'out')]
+	///     #[serde(rename = "out")]
 	///     company: sql::Thing,
 	/// }
 	///
