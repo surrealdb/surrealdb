@@ -38,8 +38,10 @@ impl Document {
 				// Record creation worked fine
 				Ok(v) => Ok(v),
 			},
+			// INSERT can be versioned
+			Statement::Insert(_) => txn.set(key, self, opt.version).await,
 			// This is not a CREATE statement, so update the key
-			_ => txn.set(key, self).await,
+			_ => txn.set(key, self, None).await,
 		}?;
 		// Carry on
 		Ok(())

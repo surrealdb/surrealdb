@@ -61,6 +61,7 @@ impl DefineModelStatement {
 				overwrite: false,
 				..self.clone()
 			},
+			None,
 		)
 		.await?;
 		// Clear the cache

@@ -133,6 +133,7 @@ impl DefineUserStatement {
 						overwrite: false,
 						..self.clone()
 					},
+					None,
 				)
 				.await?;
 				// Clear the cache
@@ -165,6 +166,7 @@ impl DefineUserStatement {
 						overwrite: false,
 						..self.clone()
 					},
+					None,
 				)
 				.await?;
 				// Clear the cache
@@ -199,6 +201,7 @@ impl DefineUserStatement {
 						overwrite: false,
 						..self.clone()
 					},
+					None,
 				)
 				.await?;
 				// Clear the cache
