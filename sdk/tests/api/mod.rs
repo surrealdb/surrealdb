@@ -1,6 +1,5 @@
 // Tests common to all protocols and storage engines
 
-use serde::de::value;
 use surrealdb::fflags::FFLAGS;
 use surrealdb::value;
 use surrealdb::Response;
@@ -546,14 +545,14 @@ async fn insert_relation_table() {
 	let (permit, db) = new_db().await;
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
 	drop(permit);
-	let tmp: Result<Vec<RecordId>, _> = db.insert("likes").relation(value("{}").unwrap()).await;
+	let tmp: Result<Vec<RecordId>, _> = db.insert("likes").relation("{}".parse::<Value>().unwrap()).await;
 	tmp.unwrap_err();
-	let val = value("{in: person:a, out: thing:a}").unwrap();
+	let val = "{in: person:a, out: thing:a}".parse::<Value>().unwrap();
 	let _: Vec<RecordId> = db.insert("likes").relation(val).await.unwrap();
 
-	let vals = value(
-		"[{in: person:b, out: thing:a}, {id: likes:2, in: person:a, out: thing:a}, {id: hates:3, in: person:a, out: thing:a}]",
-	)
+	let vals = 
+		"[{in: person:b, out: thing:a}, {id: likes:2, in: person:a, out: thing:a}, {id: hates:3, in: person:a, out: thing:a}]"
+		.parse::<Value>()
 	.unwrap();
 	let _: Vec<RecordId> = db.insert("likes").relation(vals).await.unwrap();
 }
