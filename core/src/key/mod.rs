@@ -1,5 +1,7 @@
 //! How the keys are structured in the key value store
 ///
+/// crate::key::storage::version         /!sv
+///
 /// crate::key::root::all                /
 /// crate::key::root::access::all        /*{ac}
 /// crate::key::root::access::ac         /!ac{ac}
@@ -72,5 +74,6 @@ pub(crate) mod index;
 pub(crate) mod namespace;
 pub(crate) mod node;
 pub(crate) mod root;
+pub(crate) mod storage;
 pub(crate) mod table;
 pub(crate) mod thing;

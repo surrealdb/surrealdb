@@ -42,6 +42,8 @@ pub mod options;
 #[doc(hidden)]
 pub mod rpc;
 #[doc(hidden)]
+pub mod sv;
+#[doc(hidden)]
 pub mod syn;
 
 #[cfg(feature = "ml")]

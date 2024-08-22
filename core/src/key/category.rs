@@ -10,6 +10,8 @@ pub(crate) trait Categorise {
 #[non_exhaustive]
 #[allow(unused)]
 pub enum Category {
+	/// crate::key::storage::version         /sv
+	StorageVersion,
 	/// crate::key::root::all                /
 	Root,
 	/// crate::key::root::access::ac         /!ac{ac}
