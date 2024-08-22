@@ -101,16 +101,13 @@ pub(super) fn mock(route_rx: Receiver<Route>) {
 					_ => Ok(DbResponse::Other(to_core_value(User::default()).unwrap())),
 				},
 				Command::InsertRelation {
-					what,
 					data,
-				} => match (what, data) {
-					(Some(CoreValue::Table(..)), CoreValue::Array(..)) => {
+					..
+				} => match data {
+					CoreValue::Array(..) => {
 						Ok(DbResponse::Other(CoreValue::Array(Default::default())))
 					}
-					(Some(CoreValue::Table(..)), _) => {
-						Ok(DbResponse::Other(to_core_value(User::default()).unwrap()))
-					}
-					_ => unreachable!(),
+					_ => Ok(DbResponse::Other(to_core_value(User::default()).unwrap())),
 				},
 				Command::Run {
 					..

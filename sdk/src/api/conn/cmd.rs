@@ -47,8 +47,8 @@ pub(crate) enum Command {
 		data: CoreValue,
 	},
 	InsertRelation {
-		what: Option<Value>,
-		data: Value,
+		what: String,
+		data: CoreValue,
 	},
 	Patch {
 		what: Resource,
@@ -215,13 +215,9 @@ impl Command {
 				what,
 				data,
 			} => {
-				let mut params = if let Some(w) = what {
-					vec![w]
-				} else {
-					vec![Value::None]
-				};
-
-				params.push(data);
+				let mut table = CoreTable::default();
+				table.0 = what.clone();
+				let params = vec![CoreValue::from(what), data];
 
 				RouterRequest {
 					id,
