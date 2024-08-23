@@ -124,8 +124,10 @@ pub enum Value {
 	Regex(Regex),
 	Cast(Box<Cast>),
 	Block(Box<Block>),
-	#[revision(end = 2, convert_fn = "convert_old_range")]
+	#[revision(end = 2, convert_fn = "convert_old_range", fields_name = "OldValueRangeFields")]
 	Range(OldRange),
+	#[revision(start = 2)]
+	Range(Box<Range>),
 	Edges(Box<Edges>),
 	Future(Box<Future>),
 	Constant(Constant),
@@ -135,22 +137,23 @@ pub enum Value {
 	Query(Query),
 	Model(Box<Model>),
 	Closure(Box<Closure>),
-	#[revision(start = 2)]
-	Range(Box<Range>),
 	// Add new variants here
 }
 
 impl Value {
-	fn convert_old_range(_revision: u16, (or,): (OldRange,)) -> Result<Self, revision::Error> {
+	fn convert_old_range(
+		fields: OldValueRangeFields,
+		_revision: u16,
+	) -> Result<Self, revision::Error> {
 		Ok(Value::Thing(Thing {
-			tb: or.tb,
+			tb: fields.0.tb,
 			id: Id::Range(Box::new(IdRange {
-				beg: match or.beg {
+				beg: match fields.0.beg {
 					Bound::Unbounded => Bound::Unbounded,
 					Bound::Excluded(id) => Bound::Excluded(id.into()),
 					Bound::Included(id) => Bound::Included(id.into()),
 				},
-				end: match or.end {
+				end: match fields.0.end {
 					Bound::Unbounded => Bound::Unbounded,
 					Bound::Excluded(id) => Bound::Excluded(id.into()),
 					Bound::Included(id) => Bound::Included(id.into()),
