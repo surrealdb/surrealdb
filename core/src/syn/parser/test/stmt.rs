@@ -2084,6 +2084,7 @@ fn parse_insert() {
 				),
 			])),
 			output: Some(Output::After),
+			version: None,
 			timeout: None,
 			parallel: false,
 			relation: false,

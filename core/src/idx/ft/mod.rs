@@ -334,7 +334,7 @@ impl FtIndex {
 		// Stores the term list for this doc_id
 		let mut val = Vec::new();
 		terms_ids.serialize_into(&mut val)?;
-		tx.set(term_ids_key, val).await?;
+		tx.set(term_ids_key, val, None).await?;
 
 		// Update the index state
 		self.state.total_docs_lengths += doc_length as u128;
@@ -343,7 +343,7 @@ impl FtIndex {
 		}
 
 		// Update the states
-		tx.set(self.state_key.clone(), VersionedStore::try_into(&self.state)?).await?;
+		tx.set(self.state_key.clone(), VersionedStore::try_into(&self.state)?, None).await?;
 		drop(tx);
 		Ok(())
 	}

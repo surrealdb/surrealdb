@@ -180,7 +180,7 @@ impl super::api::Transaction for Transaction {
 
 	/// Insert or update a key in the database
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
-	async fn set<K, V>(&mut self, key: K, val: V) -> Result<(), Error>
+	async fn set<K, V>(&mut self, key: K, val: V, version: Option<u64>) -> Result<(), Error>
 	where
 		K: Into<Key> + Sprintable + Debug,
 		V: Into<Val> + Debug,
@@ -194,7 +194,10 @@ impl super::api::Transaction for Transaction {
 			return Err(Error::TxReadonly);
 		}
 		// Set the key
-		self.inner.set(&key.into(), &val.into())?;
+		match version {
+			Some(ts) => self.inner.set_at_ts(&key.into(), &val.into(), ts)?,
+			None => self.inner.set(&key.into(), &val.into())?,
+		}
 		// Return result
 		Ok(())
 	}

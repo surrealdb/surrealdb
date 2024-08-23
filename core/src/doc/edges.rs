@@ -59,16 +59,16 @@ impl Document {
 			let (ref o, ref i) = (Dir::Out, Dir::In);
 			// Store the left pointer edge
 			let key = crate::key::graph::new(opt.ns()?, opt.db()?, &l.tb, &l.id, o, rid);
-			txn.set(key, vec![]).await?;
+			txn.set(key, vec![], None).await?;
 			// Store the left inner edge
 			let key = crate::key::graph::new(opt.ns()?, opt.db()?, &rid.tb, &rid.id, i, l);
-			txn.set(key, vec![]).await?;
+			txn.set(key, vec![], None).await?;
 			// Store the right inner edge
 			let key = crate::key::graph::new(opt.ns()?, opt.db()?, &rid.tb, &rid.id, o, r);
-			txn.set(key, vec![]).await?;
+			txn.set(key, vec![], None).await?;
 			// Store the right pointer edge
 			let key = crate::key::graph::new(opt.ns()?, opt.db()?, &r.tb, &r.id, i, rid);
-			txn.set(key, vec![]).await?;
+			txn.set(key, vec![], None).await?;
 			// Store the edges on the record
 			self.current.doc.to_mut().put(&*EDGE, Value::Bool(true));
 			self.current.doc.to_mut().put(&*IN, l.clone().into());

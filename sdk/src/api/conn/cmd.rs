@@ -203,9 +203,9 @@ impl Command {
 			} => {
 				let table = match what {
 					Some(w) => {
-						let mut tmp = CoreTable::default();
-						tmp.0 = w.clone();
-						CoreValue::from(tmp)
+						let mut table = CoreTable::default();
+						table.0.clone_from(&w);
+						CoreValue::from(table)
 					}
 					None => CoreValue::None,
 				};

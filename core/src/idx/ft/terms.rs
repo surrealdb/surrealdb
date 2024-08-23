@@ -84,7 +84,7 @@ impl Terms {
 			}
 		}
 		let term_id = self.get_next_term_id();
-		tx.set(self.index_key_base.new_bu_key(term_id), term_key.clone()).await?;
+		tx.set(self.index_key_base.new_bu_key(term_id), term_key.clone(), None).await?;
 		self.btree.insert(tx, &mut self.store, term_key, term_id).await?;
 		Ok(term_id)
 	}
@@ -129,7 +129,7 @@ impl Terms {
 				available_ids: self.available_ids.take(),
 				next_term_id: self.next_term_id,
 			};
-			tx.set(self.state_key.clone(), VersionedStore::try_into(&state)?).await?;
+			tx.set(self.state_key.clone(), VersionedStore::try_into(&state)?, None).await?;
 			self.ixs.advance_store_btree_fst(new_cache);
 		}
 		Ok(())

@@ -293,7 +293,7 @@ async fn compute_grant(
 					let gr_str = gr.id.to_raw();
 					// Process the statement
 					let key = crate::key::root::access::gr::new(&ac_str, &gr_str);
-					txn.set(key, &gr).await?;
+					txn.set(key, &gr, None).await?;
 					Ok(Value::Object(gr.into()))
 				}
 				_ => Err(Error::AccessMethodMismatch),
@@ -350,7 +350,7 @@ async fn compute_grant(
 					// Process the statement
 					let key = crate::key::namespace::access::gr::new(opt.ns()?, &ac_str, &gr_str);
 					txn.get_or_add_ns(opt.ns()?, opt.strict).await?;
-					txn.set(key, &gr).await?;
+					txn.set(key, &gr, None).await?;
 					Ok(Value::Object(gr.into()))
 				}
 				_ => Err(Error::AccessMethodMismatch),
@@ -418,7 +418,7 @@ async fn compute_grant(
 					);
 					txn.get_or_add_ns(opt.ns()?, opt.strict).await?;
 					txn.get_or_add_db(opt.ns()?, opt.db()?, opt.strict).await?;
-					txn.set(key, &gr).await?;
+					txn.set(key, &gr, None).await?;
 					Ok(Value::Object(gr.into()))
 				}
 			}
@@ -523,7 +523,7 @@ async fn compute_revoke(
 			gr.revocation = Some(Datetime::default());
 			// Process the statement
 			let key = crate::key::root::access::gr::new(&ac_str, &gr_str);
-			txn.set(key, &gr).await?;
+			txn.set(key, &gr, None).await?;
 			Ok(Value::Object(gr.redacted().into()))
 		}
 		Base::Ns => {
@@ -544,7 +544,7 @@ async fn compute_revoke(
 			// Process the statement
 			let key = crate::key::namespace::access::gr::new(opt.ns()?, &ac_str, &gr_str);
 			txn.get_or_add_ns(opt.ns()?, opt.strict).await?;
-			txn.set(key, &gr).await?;
+			txn.set(key, &gr, None).await?;
 			Ok(Value::Object(gr.redacted().into()))
 		}
 		Base::Db => {
@@ -567,7 +567,7 @@ async fn compute_revoke(
 			let key = crate::key::database::access::gr::new(opt.ns()?, opt.db()?, &ac_str, &gr_str);
 			txn.get_or_add_ns(opt.ns()?, opt.strict).await?;
 			txn.get_or_add_db(opt.ns()?, opt.db()?, opt.strict).await?;
-			txn.set(key, &gr).await?;
+			txn.set(key, &gr, None).await?;
 			Ok(Value::Object(gr.redacted().into()))
 		}
 		_ => Err(Error::Unimplemented(
