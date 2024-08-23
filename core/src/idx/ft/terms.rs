@@ -2,7 +2,7 @@ use crate::err::Error;
 use crate::idx::trees::bkeys::FstKeys;
 use crate::idx::trees::btree::{BState, BState1, BState1skip, BStatistics, BTree, BTreeStore};
 use crate::idx::trees::store::{IndexStores, TreeNodeProvider};
-use crate::idx::{IndexKeyBase, VersionedSerdeState};
+use crate::idx::{IndexKeyBase, VersionedStore};
 use crate::kvs::{Key, Transaction, TransactionType, Val};
 use revision::{revisioned, Revisioned};
 use roaring::RoaringTreemap;
@@ -31,8 +31,8 @@ impl Terms {
 		cache_size: u32,
 	) -> Result<Self, Error> {
 		let state_key: Key = index_key_base.new_bt_key(None);
-		let state: State = if let Some(val) = tx.get(state_key.clone()).await? {
-			State::try_from_val(val)?
+		let state: State = if let Some(val) = tx.get(state_key.clone(), None).await? {
+			VersionedStore::try_from(val)?
 		} else {
 			State::new(default_btree_order)
 		};
@@ -84,7 +84,7 @@ impl Terms {
 			}
 		}
 		let term_id = self.get_next_term_id();
-		tx.set(self.index_key_base.new_bu_key(term_id), term_key.clone()).await?;
+		tx.set(self.index_key_base.new_bu_key(term_id), term_key.clone(), None).await?;
 		self.btree.insert(tx, &mut self.store, term_key, term_id).await?;
 		Ok(term_id)
 	}
@@ -103,7 +103,7 @@ impl Terms {
 		term_id: TermId,
 	) -> Result<(), Error> {
 		let term_id_key = self.index_key_base.new_bu_key(term_id);
-		if let Some(term_key) = tx.get(term_id_key.clone()).await? {
+		if let Some(term_key) = tx.get(term_id_key.clone(), None).await? {
 			self.btree.delete(tx, &mut self.store, term_key.clone()).await?;
 			tx.del(term_id_key).await?;
 			if let Some(available_ids) = &mut self.available_ids {
@@ -129,7 +129,7 @@ impl Terms {
 				available_ids: self.available_ids.take(),
 				next_term_id: self.next_term_id,
 			};
-			tx.set(self.state_key.clone(), state.try_to_val()?).await?;
+			tx.set(self.state_key.clone(), VersionedStore::try_into(&state)?, None).await?;
 			self.ixs.advance_store_btree_fst(new_cache);
 		}
 		Ok(())
@@ -152,7 +152,7 @@ struct State1 {
 	next_term_id: TermId,
 }
 
-impl VersionedSerdeState for State1 {}
+impl VersionedStore for State1 {}
 
 #[revisioned(revision = 1)]
 #[derive(Serialize, Deserialize)]
@@ -162,7 +162,7 @@ struct State1skip {
 	next_term_id: TermId,
 }
 
-impl VersionedSerdeState for State1skip {}
+impl VersionedStore for State1skip {}
 
 impl From<State1> for State {
 	fn from(state: State1) -> Self {
@@ -194,8 +194,8 @@ impl State {
 	}
 }
 
-impl VersionedSerdeState for State {
-	fn try_from_val(val: Val) -> Result<Self, Error> {
+impl VersionedStore for State {
+	fn try_from(val: Val) -> Result<Self, Error> {
 		match Self::deserialize_revisioned(&mut val.as_slice()) {
 			Ok(r) => Ok(r),
 			// If it fails here, there is the chance it was an old version of BState
@@ -216,7 +216,7 @@ impl VersionedSerdeState for State {
 mod tests {
 	use crate::idx::ft::postings::TermFrequency;
 	use crate::idx::ft::terms::{State, Terms};
-	use crate::idx::{IndexKeyBase, VersionedSerdeState};
+	use crate::idx::{IndexKeyBase, VersionedStore};
 	use crate::kvs::TransactionType::{Read, Write};
 	use crate::kvs::{Datastore, LockType::*, Transaction, TransactionType};
 	use rand::{thread_rng, Rng};
@@ -226,8 +226,8 @@ mod tests {
 	#[test]
 	fn test_state_serde() {
 		let s = State::new(3);
-		let val = s.try_to_val().unwrap();
-		let s = State::try_from_val(val).unwrap();
+		let val = VersionedStore::try_into(&s).unwrap();
+		let s: State = VersionedStore::try_from(val).unwrap();
 		assert_eq!(s.btree.generation(), 0);
 		assert_eq!(s.next_term_id, 0);
 	}

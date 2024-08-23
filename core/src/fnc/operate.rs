@@ -175,13 +175,13 @@ enum ExecutorOption<'a> {
 }
 
 fn get_executor_and_thing<'a>(
-	ctx: &'a Context<'_>,
+	ctx: &'a Context,
 	doc: &'a CursorDoc,
 ) -> Option<(&'a QueryExecutor, &'a Thing)> {
-	if let Some(thg) = doc.rid {
+	if let Some(thg) = &doc.rid {
 		if let Some(exe) = ctx.get_query_executor() {
 			if exe.is_table(&thg.tb) {
-				return Some((exe, thg));
+				return Some((exe, thg.as_ref()));
 			}
 		}
 		if let Some(pla) = ctx.get_query_planner() {
@@ -194,13 +194,13 @@ fn get_executor_and_thing<'a>(
 }
 
 fn get_executor_option<'a>(
-	ctx: &'a Context<'_>,
-	doc: Option<&'a CursorDoc<'_>>,
+	ctx: &'a Context,
+	doc: Option<&'a CursorDoc>,
 	exp: &'a Expression,
 ) -> ExecutorOption<'a> {
 	if let Some(doc) = doc {
 		if let Some((exe, thg)) = get_executor_and_thing(ctx, doc) {
-			if let Some(ir) = doc.ir {
+			if let Some(ir) = &doc.ir {
 				if exe.is_iterator_expression(ir.irf(), exp) {
 					return ExecutorOption::PreMatch;
 				}
@@ -213,9 +213,9 @@ fn get_executor_option<'a>(
 
 pub(crate) async fn matches(
 	stk: &mut Stk,
-	ctx: &Context<'_>,
+	ctx: &Context,
 	opt: &Options,
-	doc: Option<&CursorDoc<'_>>,
+	doc: Option<&CursorDoc>,
 	exp: &Expression,
 	l: Value,
 	r: Value,
@@ -230,9 +230,9 @@ pub(crate) async fn matches(
 
 pub(crate) async fn knn(
 	stk: &mut Stk,
-	ctx: &Context<'_>,
+	ctx: &Context,
 	opt: &Options,
-	doc: Option<&CursorDoc<'_>>,
+	doc: Option<&CursorDoc>,
 	exp: &Expression,
 ) -> Result<Value, Error> {
 	match get_executor_option(ctx, doc, exp) {

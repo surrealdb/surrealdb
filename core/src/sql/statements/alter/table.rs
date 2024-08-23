@@ -32,9 +32,9 @@ impl AlterTableStatement {
 	pub(crate) async fn compute(
 		&self,
 		_stk: &mut Stk,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		opt: &Options,
-		_doc: Option<&CursorDoc<'_>>,
+		_doc: Option<&CursorDoc>,
 	) -> Result<Value, Error> {
 		// Allowed to run?
 		opt.is_allowed(Action::Edit, ResourceKind::Table, &Base::Db)?;
@@ -63,13 +63,13 @@ impl AlterTableStatement {
 			dt.changefeed = *changefeed;
 		}
 		if let Some(ref comment) = &self.comment {
-			dt.comment = comment.clone();
+			dt.comment.clone_from(comment);
 		}
 		if let Some(ref kind) = &self.kind {
 			dt.kind = kind.clone();
 		}
 
-		txn.set(key, &dt).await?;
+		txn.set(key, &dt, None).await?;
 		// Add table relational fields
 		if matches!(self.kind, Some(TableType::Relation(_))) {
 			dt.add_in_out_fields(&txn, opt).await?;

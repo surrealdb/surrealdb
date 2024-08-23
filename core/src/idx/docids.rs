@@ -2,7 +2,7 @@ use crate::err::Error;
 use crate::idx::trees::bkeys::TrieKeys;
 use crate::idx::trees::btree::{BState, BState1, BState1skip, BStatistics, BTree, BTreeStore};
 use crate::idx::trees::store::{IndexStores, TreeNodeProvider};
-use crate::idx::{IndexKeyBase, VersionedSerdeState};
+use crate::idx::{IndexKeyBase, VersionedStore};
 use crate::kvs::{Key, Transaction, TransactionType, Val};
 use revision::{revisioned, Revisioned};
 use roaring::RoaringTreemap;
@@ -30,8 +30,8 @@ impl DocIds {
 		cache_size: u32,
 	) -> Result<Self, Error> {
 		let state_key: Key = ikb.new_bd_key(None);
-		let state: State = if let Some(val) = tx.get(state_key.clone()).await? {
-			State::try_from_val(val)?
+		let state: State = if let Some(val) = tx.get(state_key.clone(), None).await? {
+			VersionedStore::try_from(val)?
 		} else {
 			State::new(default_btree_order)
 		};
@@ -92,7 +92,7 @@ impl DocIds {
 			}
 		}
 		let doc_id = self.get_next_doc_id();
-		tx.set(self.index_key_base.new_bi_key(doc_id), doc_key.clone()).await?;
+		tx.set(self.index_key_base.new_bi_key(doc_id), doc_key.clone(), None).await?;
 		self.btree.insert(tx, &mut self.store, doc_key, doc_id).await?;
 		Ok(Resolved::New(doc_id))
 	}
@@ -123,7 +123,7 @@ impl DocIds {
 		doc_id: DocId,
 	) -> Result<Option<Key>, Error> {
 		let doc_id_key = self.index_key_base.new_bi_key(doc_id);
-		if let Some(val) = tx.get(doc_id_key).await? {
+		if let Some(val) = tx.get(doc_id_key, None).await? {
 			Ok(Some(val))
 		} else {
 			Ok(None)
@@ -142,7 +142,7 @@ impl DocIds {
 				available_ids: self.available_ids.take(),
 				next_doc_id: self.next_doc_id,
 			};
-			tx.set(self.state_key.clone(), state.try_to_val()?).await?;
+			tx.set(self.state_key.clone(), VersionedStore::try_into(&state)?, None).await?;
 			self.ixs.advance_cache_btree_trie(new_cache);
 		}
 		Ok(())
@@ -157,8 +157,8 @@ struct State {
 	next_doc_id: DocId,
 }
 
-impl VersionedSerdeState for State {
-	fn try_from_val(val: Val) -> Result<Self, Error> {
+impl VersionedStore for State {
+	fn try_from(val: Val) -> Result<Self, Error> {
 		match Self::deserialize_revisioned(&mut val.as_slice()) {
 			Ok(r) => Ok(r),
 			// If it fails here, there is the chance it was an old version of BState
@@ -193,7 +193,7 @@ impl From<State1> for State {
 	}
 }
 
-impl VersionedSerdeState for State1 {}
+impl VersionedStore for State1 {}
 
 #[revisioned(revision = 1)]
 #[derive(Serialize, Deserialize)]
@@ -213,7 +213,7 @@ impl From<State1skip> for State {
 	}
 }
 
-impl VersionedSerdeState for State1skip {}
+impl VersionedStore for State1skip {}
 
 impl State {
 	fn new(default_btree_order: u32) -> Self {

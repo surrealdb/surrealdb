@@ -1,5 +1,6 @@
 use reblessive::Stk;
 
+use crate::cnf::EXPERIMENTAL_BEARER_ACCESS;
 use crate::sql::access_type::JwtAccessVerify;
 use crate::sql::index::HnswParams;
 use crate::{
@@ -149,6 +150,11 @@ impl Parser<'_> {
 				break;
 			}
 		}
+		let returns = if self.eat(t!("->")) {
+			Some(ctx.run(|ctx| self.parse_inner_kind(ctx)).await?)
+		} else {
+			None
+		};
 
 		let next = expected!(self, t!("{")).span;
 		let block = self.parse_block(ctx, next).await?;
@@ -159,6 +165,7 @@ impl Parser<'_> {
 			block,
 			if_not_exists,
 			overwrite,
+			returns,
 			..Default::default()
 		};
 
@@ -338,6 +345,25 @@ impl Parser<'_> {
 								ac.jwt = self.parse_jwt()?;
 							}
 							res.kind = AccessType::Record(ac);
+						}
+						t!("BEARER") => {
+							// TODO(gguillemas): Remove this once bearer access is no longer experimental.
+							if !*EXPERIMENTAL_BEARER_ACCESS {
+								unexpected!(
+									self,
+									t!("BEARER"),
+									"the experimental bearer access feature to be enabled"
+								);
+							}
+							self.pop_peek();
+							let mut ac = access_type::BearerAccess {
+								..Default::default()
+							};
+							if self.eat(t!("WITH")) {
+								expected!(self, t!("JWT"));
+								ac.jwt = self.parse_jwt()?;
+							}
+							res.kind = AccessType::Bearer(ac);
 						}
 						_ => break,
 					}
@@ -620,6 +646,8 @@ impl Parser<'_> {
 			..Default::default()
 		};
 
+		let mut kind: Option<TableType> = None;
+
 		loop {
 			match self.peek_kind() {
 				t!("COMMENT") => {
@@ -635,15 +663,15 @@ impl Parser<'_> {
 					match self.peek_kind() {
 						t!("NORMAL") => {
 							self.pop_peek();
-							res.kind = TableType::Normal;
+							kind = Some(TableType::Normal);
 						}
 						t!("RELATION") => {
 							self.pop_peek();
-							res.kind = TableType::Relation(self.parse_relation_schema()?);
+							kind = Some(TableType::Relation(self.parse_relation_schema()?));
 						}
 						t!("ANY") => {
 							self.pop_peek();
-							res.kind = TableType::Any;
+							kind = Some(TableType::Any);
 						}
 						x => unexpected!(self, x, "`NORMAL`, `RELATION`, or `ANY`"),
 					}
@@ -655,6 +683,9 @@ impl Parser<'_> {
 				t!("SCHEMAFULL") => {
 					self.pop_peek();
 					res.full = true;
+					if kind.is_none() {
+						kind = Some(TableType::Normal);
+					}
 				}
 				t!("PERMISSIONS") => {
 					self.pop_peek();
@@ -680,6 +711,10 @@ impl Parser<'_> {
 				}
 				_ => break,
 			}
+		}
+
+		if let Some(kind) = kind {
+			res.kind = kind;
 		}
 
 		Ok(res)
@@ -1044,6 +1079,10 @@ impl Parser<'_> {
 						keep_pruned_connections,
 					));
 				}
+				t!("CONCURRENTLY") => {
+					self.pop_peek();
+					res.concurrently = true;
+				}
 				t!("COMMENT") => {
 					self.pop_peek();
 					res.comment = Some(self.next_token_value()?);
@@ -1169,6 +1208,7 @@ impl Parser<'_> {
 		let mut res = table_type::Relation {
 			from: None,
 			to: None,
+			enforced: false,
 		};
 		loop {
 			match self.peek_kind() {
@@ -1184,6 +1224,9 @@ impl Parser<'_> {
 				}
 				_ => break,
 			}
+		}
+		if self.eat(t!("ENFORCED")) {
+			res.enforced = true;
 		}
 		Ok(res)
 	}

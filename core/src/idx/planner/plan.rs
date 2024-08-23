@@ -30,9 +30,10 @@ pub(super) struct PlanBuilder {
 
 impl PlanBuilder {
 	pub(super) fn build(
-		root: Node,
-		with: &Option<With>,
+		root: Option<Node>,
+		with: Option<&With>,
 		with_indexes: Vec<IndexRef>,
+		order: Option<IndexOption>,
 	) -> Result<Plan, Error> {
 		if let Some(With::NoIndex) = with {
 			return Ok(Plan::TableIterator(Some("WITH NOINDEX".to_string())));
@@ -47,12 +48,10 @@ impl PlanBuilder {
 			all_exp_with_index: true,
 		};
 		// Browse the AST and collect information
-		if let Err(e) = b.eval_node(&root) {
-			return Ok(Plan::TableIterator(Some(e.to_string())));
-		}
-		// If we didn't find any index, we're done with no index plan
-		if !b.has_indexes {
-			return Ok(Plan::TableIterator(Some("NO INDEX FOUND".to_string())));
+		if let Some(root) = &root {
+			if let Err(e) = b.eval_node(root) {
+				return Ok(Plan::TableIterator(Some(e.to_string())));
+			}
 		}
 
 		// If every boolean operator are AND then we can use the single index plan
@@ -66,7 +65,11 @@ impl PlanBuilder {
 			}
 			// Otherwise we take the first single index option
 			if let Some((e, i)) = b.non_range_indexes.pop() {
-				return Ok(Plan::SingleIndex(e, i));
+				return Ok(Plan::SingleIndex(Some(e), i));
+			}
+			// If there is an order option
+			if let Some(o) = order {
+				return Ok(Plan::SingleIndex(None, o.clone()));
 			}
 		}
 		// If every expression is backed by an index with can use the MultiIndex plan
@@ -157,15 +160,19 @@ impl PlanBuilder {
 }
 
 pub(super) enum Plan {
+	/// Table full scan
 	TableIterator(Option<String>),
-	SingleIndex(Arc<Expression>, IndexOption),
+	/// Index scan filtered on records matching a given expression
+	SingleIndex(Option<Arc<Expression>>, IndexOption),
+	/// Union of filtered index scans
 	MultiIndex(Vec<(Arc<Expression>, IndexOption)>, Vec<(IndexRef, UnionRangeQueryBuilder)>),
+	/// Index scan for record matching a given range
 	SingleIndexRange(IndexRef, UnionRangeQueryBuilder),
 }
 
 #[derive(Debug, Eq, PartialEq, Hash, Clone)]
 pub(super) struct IndexOption {
-	/// A reference o the index definition
+	/// A reference to the index definition
 	ix_ref: IndexRef,
 	id: Idiom,
 	id_pos: IdiomPosition,
@@ -174,14 +181,15 @@ pub(super) struct IndexOption {
 
 #[derive(Debug, Eq, PartialEq, Hash)]
 pub(super) enum IndexOperator {
-	Equality(Value),
-	Exactness(Value),
-	Union(Array),
+	Equality(Arc<Value>),
+	Exactness(Arc<Value>),
+	Union(Arc<Value>),
 	Join(Vec<IndexOption>),
-	RangePart(Operator, Value),
+	RangePart(Operator, Arc<Value>),
 	Matches(String, Option<MatchRef>),
 	Knn(Arc<Vec<Number>>, u32),
 	Ann(Arc<Vec<Number>>, u32, u32),
+	Order(bool),
 }
 
 impl IndexOption {
@@ -242,9 +250,9 @@ impl IndexOption {
 				e.insert("operator", Value::from(Operator::Exact.to_string()));
 				e.insert("value", Self::reduce_array(v));
 			}
-			IndexOperator::Union(a) => {
+			IndexOperator::Union(v) => {
 				e.insert("operator", Value::from("union"));
-				e.insert("value", Value::Array(a.clone()));
+				e.insert("value", v.as_ref().clone());
 			}
 			IndexOperator::Join(ios) => {
 				e.insert("operator", Value::from("join"));
@@ -261,7 +269,7 @@ impl IndexOption {
 			}
 			IndexOperator::RangePart(op, v) => {
 				e.insert("operator", Value::from(op.to_string()));
-				e.insert("value", v.to_owned());
+				e.insert("value", v.as_ref().to_owned());
 			}
 			IndexOperator::Knn(a, k) => {
 				let op = Value::from(Operator::Knn(*k, None).to_string());
@@ -274,6 +282,10 @@ impl IndexOption {
 				let val = Value::Array(Array::from(a.as_ref().clone()));
 				e.insert("operator", op);
 				e.insert("value", val);
+			}
+			IndexOperator::Order(asc) => {
+				e.insert("operator", Value::from("Order"));
+				e.insert("ascending", Value::from(*asc));
 			}
 		};
 		Value::from(e)
@@ -435,6 +447,7 @@ mod tests {
 	use crate::syn::Parse;
 	use std::collections::HashSet;
 
+	#[allow(clippy::mutable_key_type)]
 	#[test]
 	fn test_hash_index_option() {
 		let mut set = HashSet::new();
@@ -442,14 +455,14 @@ mod tests {
 			1,
 			Idiom::parse("test"),
 			IdiomPosition::Right,
-			IndexOperator::Equality(Value::Array(Array::from(vec!["test"]))),
+			IndexOperator::Equality(Value::Array(Array::from(vec!["test"])).into()),
 		);
 
 		let io2 = IndexOption::new(
 			1,
 			Idiom::parse("test"),
 			IdiomPosition::Right,
-			IndexOperator::Equality(Value::Array(Array::from(vec!["test"]))),
+			IndexOperator::Equality(Value::Array(Array::from(vec!["test"])).into()),
 		);
 
 		set.insert(io1);

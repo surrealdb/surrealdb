@@ -1,4 +1,4 @@
-//! Stores a DEFINE ACCESS ON NAMESPACE config definition
+//! Stores a DEFINE ACCESS ON NAMESPACE configuration
 use crate::key::category::Categorise;
 use crate::key::category::Category;
 use derive::Key;
@@ -21,13 +21,13 @@ pub fn new<'a>(ns: &'a str, ac: &'a str) -> Ac<'a> {
 }
 
 pub fn prefix(ns: &str) -> Vec<u8> {
-	let mut k = super::all::new(ns).encode().unwrap();
+	let mut k = crate::key::namespace::all::new(ns).encode().unwrap();
 	k.extend_from_slice(&[b'!', b'a', b'c', 0x00]);
 	k
 }
 
 pub fn suffix(ns: &str) -> Vec<u8> {
-	let mut k = super::all::new(ns).encode().unwrap();
+	let mut k = crate::key::namespace::all::new(ns).encode().unwrap();
 	k.extend_from_slice(&[b'!', b'a', b'c', 0xff]);
 	k
 }
@@ -64,7 +64,20 @@ mod tests {
 		);
 		let enc = Ac::encode(&val).unwrap();
 		assert_eq!(enc, b"/*testns\0!actestac\0");
+
 		let dec = Ac::decode(&enc).unwrap();
 		assert_eq!(val, dec);
+	}
+
+	#[test]
+	fn test_prefix() {
+		let val = super::prefix("testns");
+		assert_eq!(val, b"/*testns\0!ac\0");
+	}
+
+	#[test]
+	fn test_suffix() {
+		let val = super::suffix("testns");
+		assert_eq!(val, b"/*testns\0!ac\xff");
 	}
 }

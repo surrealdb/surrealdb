@@ -39,7 +39,7 @@ impl Results {
 			feature = "kv-fdb",
 			feature = "kv-tikv",
 		))]
-		ctx: &Context<'_>,
+		ctx: &Context,
 		stm: &Statement<'_>,
 	) -> Result<Self, Error> {
 		if stm.expr().is_some() && stm.group().is_some() {
@@ -63,7 +63,7 @@ impl Results {
 	pub(super) async fn push(
 		&mut self,
 		stk: &mut Stk,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		opt: &Options,
 		stm: &Statement<'_>,
 		val: Value,
@@ -105,7 +105,7 @@ impl Results {
 		}
 	}
 
-	pub(super) fn start_limit(&mut self, start: Option<&usize>, limit: Option<&usize>) {
+	pub(super) fn start_limit(&mut self, start: Option<u32>, limit: Option<u32>) {
 		match self {
 			Self::None => {}
 			Self::Memory(m) => m.start_limit(start, limit),

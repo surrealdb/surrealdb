@@ -10,10 +10,16 @@ pub(crate) trait Categorise {
 #[non_exhaustive]
 #[allow(unused)]
 pub enum Category {
+	/// crate::key::storage::version         /sv
+	Version,
 	/// crate::key::root::all                /
 	Root,
-	/// crate::key::root::ac                 /!ac{ac}
+	/// crate::key::root::access::ac         /!ac{ac}
 	Access,
+	/// crate::key::root::access::all        /*{ac}
+	AccessRoot,
+	/// crate::key::root::access::gr         /*{ac}!gr{gr}
+	AccessGrant,
 	/// crate::key::root::nd                 /!nd{nd}
 	Node,
 	/// crate::key::root::ni                 /!ni
@@ -43,8 +49,12 @@ pub enum Category {
 	NamespaceRoot,
 	/// crate::key::namespace::db            /*{ns}!db{db}
 	DatabaseAlias,
-	/// crate::key::namespace::ac            /*{ns}!ac{ac}
+	/// crate::key::namespace::access::ac    /*{ns}!ac{ac}
 	NamespaceAccess,
+	/// crate::key::namespace::access::all   /*{ns}*{ac}
+	NamespaceAccessRoot,
+	/// crate::key::namespace::access::gr    /*{ns}*{ac}!gr{gr}
+	NamespaceAccessGrant,
 	/// crate::key::namespace::us            /*{ns}!us{us}
 	NamespaceUser,
 	///
@@ -52,8 +62,12 @@ pub enum Category {
 	///
 	/// crate::key::database::all            /*{ns}*{db}
 	DatabaseRoot,
-	/// crate::key::database::ac             /*{ns}*{db}!ac{ac}
+	/// crate::key::database::access::ac     /*{ns}*{db}!ac{ac}
 	DatabaseAccess,
+	/// crate::key::database::access::all    /*{ns}*{db}*{ac}
+	DatabaseAccessRoot,
+	/// crate::key::database::access::gr     /*{ns}*{db}*ac!gr{gr}
+	DatabaseAccessGrant,
 	/// crate::key::database::az             /*{ns}*{db}!az{az}
 	DatabaseAnalyzer,
 	/// crate::key::database::fc             /*{ns}*{db}!fn{fc}
@@ -112,6 +126,14 @@ pub enum Category {
 	IndexBTreeNodeTerms,
 	/// crate::key::index::bu                /*{ns}*{db}*{tb}+{ix}!bu{id}
 	IndexTerms,
+	/// crate::key::index::he                /*{ns}*{db}*{tb}+{ix}!he{id}
+	IndexHnswElements,
+	/// crate::key::index::hd                /*{ns}*{db}*{tb}+{ix}!hd{id}
+	IndexHnswDocIds,
+	/// crate::key::index::hi               /*{ns}*{db}*{tb}+{ix}!hi{id}
+	IndexHnswThings,
+	/// crate::key::index::hv                /*{ns}*{db}*{tb}+{ix}!hv{vec}
+	IndexHnswVec,
 	/// crate::key::index                    /*{ns}*{db}*{tb}+{ix}*{fd}{id}
 	Index,
 	///
@@ -134,8 +156,11 @@ pub enum Category {
 impl Display for Category {
 	fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
 		let name = match self {
+			Self::Version => "StorageVersion",
 			Self::Root => "Root",
 			Self::Access => "Access",
+			Self::AccessRoot => "AccessRoot",
+			Self::AccessGrant => "AccessGrant",
 			Self::Node => "Node",
 			Self::NamespaceIdentifier => "NamespaceIdentifier",
 			Self::Namespace => "Namespace",
@@ -146,9 +171,13 @@ impl Display for Category {
 			Self::DatabaseAlias => "DatabaseAlias",
 			Self::DatabaseIdentifier => "DatabaseIdentifier",
 			Self::NamespaceAccess => "NamespaceAccess",
+			Self::NamespaceAccessRoot => "NamespaceAccessRoot",
+			Self::NamespaceAccessGrant => "NamespaceAccessGrant",
 			Self::NamespaceUser => "NamespaceUser",
 			Self::DatabaseRoot => "DatabaseRoot",
 			Self::DatabaseAccess => "DatabaseAccess",
+			Self::DatabaseAccessRoot => "DatabaseAccessRoot",
+			Self::DatabaseAccessGrant => "DatabaseAccessGrant",
 			Self::DatabaseAnalyzer => "DatabaseAnalyzer",
 			Self::DatabaseFunction => "DatabaseFunction",
 			Self::DatabaseModel => "DatabaseModel",
@@ -176,6 +205,10 @@ impl Display for Category {
 			Self::IndexFullTextState => "IndexFullTextState",
 			Self::IndexBTreeNodeTerms => "IndexBTreeNodeTerms",
 			Self::IndexTerms => "IndexTerms",
+			Self::IndexHnswElements => "IndexHnswElements",
+			Self::IndexHnswDocIds => "IndexHnswDocIds",
+			Self::IndexHnswThings => "IndexHnswThings",
+			Self::IndexHnswVec => "IndexHnswVec",
 			Self::Index => "Index",
 			Self::ChangeFeed => "ChangeFeed",
 			Self::Thing => "Thing",

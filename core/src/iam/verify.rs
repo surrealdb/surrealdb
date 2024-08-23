@@ -5,7 +5,7 @@ use crate::err::Error;
 use crate::iam::jwks;
 use crate::iam::{issue::expiration, token::Claims, Actor, Auth, Level, Role};
 use crate::kvs::{Datastore, LockType::*, TransactionType::*};
-use crate::sql::access_type::{AccessType, JwtAccessVerify};
+use crate::sql::access_type::{AccessType, Jwt, JwtAccessVerify};
 use crate::sql::{statements::DefineUserStatement, Algorithm, Thing, Value};
 use crate::syn;
 use argon2::{Argon2, PasswordHash, PasswordVerifier};
@@ -60,7 +60,7 @@ fn config(alg: Algorithm, key: &[u8]) -> Result<(DecodingKey, Validation), Error
 
 	// TODO(gguillemas): This keeps the existing behavior as of SurrealDB 2.0.0-alpha.9.
 	// Up to that point, a fork of the "jsonwebtoken" crate in version 8.3.0 was being used.
-	// Now that the audience claim is validated by default, we should allow users to leverage this.
+	// Now that the audience claim is validated by default, we could allow users to leverage this.
 	// This will most likely involve defining an audience string via "DEFINE ACCESS ... TYPE JWT".
 	val.validate_aud = false;
 
@@ -130,7 +130,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 	// Decode the token without verifying
 	let token_data = decode::<Claims>(token, &KEY, &DUD)?;
 	// Convert the token to a SurrealQL object value
-	let value = token_data.claims.clone().into();
+	let value = (&token_data.claims).into();
 	// Check if the auth token can be used
 	if let Some(nbf) = token_data.claims.nbf {
 		if nbf > Utc::now().timestamp() {
@@ -146,7 +146,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 		}
 	}
 	// Check the token authentication claims
-	match token_data.claims.clone() {
+	match &token_data.claims {
 		// Check if this is record access
 		Claims {
 			ns: Some(ns),
@@ -160,9 +160,9 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			// Create a new readonly transaction
 			let tx = kvs.transaction(Read, Optimistic).await?;
 			// Parse the record id
-			let mut rid = syn::thing(&id)?;
+			let mut rid = syn::thing(id)?;
 			// Get the database access method
-			let de = tx.get_db_access(&ns, &db, &ac).await?;
+			let de = tx.get_db_access(ns, db, ac).await?;
 			// Ensure that the transaction is cancelled
 			tx.cancel().await?;
 			// Obtain the configuration to verify the token based on the access method
@@ -187,12 +187,12 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			// AUTHENTICATE clause
 			if let Some(au) = &de.authenticate {
 				// Setup the system session for finding the signin record
-				let mut sess = Session::editor().with_ns(&ns).with_db(&db);
+				let mut sess = Session::editor().with_ns(ns).with_db(db);
 				sess.rd = Some(rid.clone().into());
-				sess.tk = Some(token_data.claims.clone().into());
+				sess.tk = Some((&token_data.claims).into());
 				sess.ip.clone_from(&session.ip);
 				sess.or.clone_from(&session.or);
-				rid = authenticate_record(kvs, &sess, au.clone()).await?;
+				rid = authenticate_record(kvs, &sess, au).await?;
 			}
 			// Log the success
 			debug!("Authenticated with record access method `{}`", ac);
@@ -206,7 +206,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			session.au = Arc::new(Auth::new(Actor::new(
 				rid.to_string(),
 				Default::default(),
-				Level::Record(ns, db, rid.to_string()),
+				Level::Record(ns.to_string(), db.to_string(), rid.to_string()),
 			)));
 			Ok(())
 		}
@@ -223,14 +223,14 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			// Create a new readonly transaction
 			let tx = kvs.transaction(Read, Optimistic).await?;
 			// Get the database access method
-			let de = tx.get_db_access(&ns, &db, &ac).await?;
+			let de = tx.get_db_access(ns, db, ac).await?;
 			// Ensure that the transaction is cancelled
 			tx.cancel().await?;
 			// Obtain the configuration to verify the token based on the access method
 			match &de.kind {
-				// If the access type is Jwt, this is database access
-				AccessType::Jwt(at) => {
-					let cf = match &at.verify {
+				// If the access type is Jwt or Bearer, this is database access
+				AccessType::Jwt(_) | AccessType::Bearer(_) => {
+					let cf = match &de.kind.jwt().verify {
 						JwtAccessVerify::Key(key) => config(key.alg, key.key.as_bytes()),
 						#[cfg(feature = "jwks")]
 						JwtAccessVerify::Jwks(jwks) => {
@@ -247,15 +247,15 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 					decode::<Claims>(token, &cf.0, &cf.1)?;
 					// AUTHENTICATE clause
 					if let Some(au) = &de.authenticate {
-						// Setup the system session for finding the signin record
-						let mut sess = Session::editor().with_ns(&ns).with_db(&db);
-						sess.tk = Some(token_data.claims.clone().into());
+						// Setup the system session for executing the clause
+						let mut sess = Session::editor().with_ns(ns).with_db(db);
+						sess.tk = Some((&token_data.claims).into());
 						sess.ip.clone_from(&session.ip);
 						sess.or.clone_from(&session.or);
-						authenticate_jwt(kvs, &sess, au.clone()).await?;
+						authenticate_generic(kvs, &sess, au).await?;
 					}
 					// Parse the roles
-					let roles = match token_data.claims.roles {
+					let roles = match &token_data.claims.roles {
 						// If no role is provided, grant the viewer role
 						None => vec![Role::Viewer],
 						// If roles are provided, parse them
@@ -277,7 +277,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 					session.au = Arc::new(Auth::new(Actor::new(
 						de.name.to_string(),
 						roles,
-						Level::Database(ns, db),
+						Level::Database(ns.to_string(), db.to_string()),
 					)));
 				}
 				// If the access type is Record, this is record access
@@ -304,11 +304,11 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 						decode::<Claims>(token, &cf.0, &cf.1)?;
 						// AUTHENTICATE clause
 						// Setup the system session for finding the signin record
-						let mut sess = Session::editor().with_ns(&ns).with_db(&db);
-						sess.tk = Some(token_data.claims.clone().into());
+						let mut sess = Session::editor().with_ns(ns).with_db(db);
+						sess.tk = Some((&token_data.claims).into());
 						sess.ip.clone_from(&session.ip);
 						sess.or.clone_from(&session.or);
-						let rid = authenticate_record(kvs, &sess, au.clone()).await?;
+						let rid = authenticate_record(kvs, &sess, au).await?;
 						// Log the success
 						debug!("Authenticated with record access method `{}`", ac);
 						// Set the session
@@ -321,7 +321,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 						session.au = Arc::new(Auth::new(Actor::new(
 							rid.to_string(),
 							Default::default(),
-							Level::Record(ns, db, rid.to_string()),
+							Level::Record(ns.to_string(), db.to_string(), rid.to_string()),
 						)));
 					}
 					_ => return Err(Error::AccessMethodMismatch),
@@ -341,7 +341,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			// Create a new readonly transaction
 			let tx = kvs.transaction(Read, Optimistic).await?;
 			// Get the database user
-			let de = tx.get_db_user(&ns, &db, &id).await.map_err(|e| {
+			let de = tx.get_db_user(ns, db, id).await.map_err(|e| {
 				trace!("Error while authenticating to database `{db}`: {e}");
 				Error::InvalidAuth
 			})?;
@@ -361,7 +361,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			session.au = Arc::new(Auth::new(Actor::new(
 				id.to_string(),
 				de.roles.iter().map(|r| r.into()).collect(),
-				Level::Database(ns, db),
+				Level::Database(ns.to_string(), db.to_string()),
 			)));
 			Ok(())
 		}
@@ -376,12 +376,12 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			// Create a new readonly transaction
 			let tx = kvs.transaction(Read, Optimistic).await?;
 			// Get the namespace access method
-			let de = tx.get_ns_access(&ns, &ac).await?;
+			let de = tx.get_ns_access(ns, ac).await?;
 			// Ensure that the transaction is cancelled
 			tx.cancel().await?;
 			// Obtain the configuration to verify the token based on the access method
 			let cf = match &de.kind {
-				AccessType::Jwt(ac) => match &ac.verify {
+				AccessType::Jwt(_) | AccessType::Bearer(_) => match &de.kind.jwt().verify {
 					JwtAccessVerify::Key(key) => config(key.alg, key.key.as_bytes()),
 					#[cfg(feature = "jwks")]
 					JwtAccessVerify::Jwks(jwks) => {
@@ -400,15 +400,15 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			decode::<Claims>(token, &cf.0, &cf.1)?;
 			// AUTHENTICATE clause
 			if let Some(au) = &de.authenticate {
-				// Setup the system session for finding the signin record
-				let mut sess = Session::editor().with_ns(&ns);
-				sess.tk = Some(token_data.claims.clone().into());
+				// Setup the system session for executing the clause
+				let mut sess = Session::editor().with_ns(ns);
+				sess.tk = Some((&token_data.claims).into());
 				sess.ip.clone_from(&session.ip);
 				sess.or.clone_from(&session.or);
-				authenticate_jwt(kvs, &sess, au.clone()).await?;
+				authenticate_generic(kvs, &sess, au).await?;
 			}
 			// Parse the roles
-			let roles = match token_data.claims.roles {
+			let roles = match &token_data.claims.roles {
 				// If no role is provided, grant the viewer role
 				None => vec![Role::Viewer],
 				// If roles are provided, parse them
@@ -426,8 +426,11 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			session.ns = Some(ns.to_owned());
 			session.ac = Some(ac.to_owned());
 			session.exp = expiration(de.duration.session)?;
-			session.au =
-				Arc::new(Auth::new(Actor::new(de.name.to_string(), roles, Level::Namespace(ns))));
+			session.au = Arc::new(Auth::new(Actor::new(
+				de.name.to_string(),
+				roles,
+				Level::Namespace(ns.to_string()),
+			)));
 			Ok(())
 		}
 		// Check if this is namespace authentication with user credentials
@@ -441,7 +444,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			// Create a new readonly transaction
 			let tx = kvs.transaction(Read, Optimistic).await?;
 			// Get the namespace user
-			let de = tx.get_ns_user(&ns, &id).await.map_err(|e| {
+			let de = tx.get_ns_user(ns, id).await.map_err(|e| {
 				trace!("Error while authenticating to namespace `{ns}`: {e}");
 				Error::InvalidAuth
 			})?;
@@ -460,7 +463,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			session.au = Arc::new(Auth::new(Actor::new(
 				id.to_string(),
 				de.roles.iter().map(|r| r.into()).collect(),
-				Level::Namespace(ns),
+				Level::Namespace(ns.to_string()),
 			)));
 			Ok(())
 		}
@@ -474,12 +477,12 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			// Create a new readonly transaction
 			let tx = kvs.transaction(Read, Optimistic).await?;
 			// Get the namespace access method
-			let de = tx.get_root_access(&ac).await?;
+			let de = tx.get_root_access(ac).await?;
 			// Ensure that the transaction is cancelled
 			tx.cancel().await?;
 			// Obtain the configuration to verify the token based on the access method
 			let cf = match &de.kind {
-				AccessType::Jwt(ac) => match &ac.verify {
+				AccessType::Jwt(_) | AccessType::Bearer(_) => match &de.kind.jwt().verify {
 					JwtAccessVerify::Key(key) => config(key.alg, key.key.as_bytes()),
 					#[cfg(feature = "jwks")]
 					JwtAccessVerify::Jwks(jwks) => {
@@ -498,15 +501,15 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			decode::<Claims>(token, &cf.0, &cf.1)?;
 			// AUTHENTICATE clause
 			if let Some(au) = &de.authenticate {
-				// Setup the system session for finding the signin record
+				// Setup the system session for executing the clause
 				let mut sess = Session::editor();
-				sess.tk = Some(token_data.claims.clone().into());
+				sess.tk = Some((&token_data.claims).into());
 				sess.ip.clone_from(&session.ip);
 				sess.or.clone_from(&session.or);
-				authenticate_jwt(kvs, &sess, au.clone()).await?;
+				authenticate_generic(kvs, &sess, au).await?;
 			}
 			// Parse the roles
-			let roles = match token_data.claims.roles {
+			let roles = match &token_data.claims.roles {
 				// If no role is provided, grant the viewer role
 				None => vec![Role::Viewer],
 				// If roles are provided, parse them
@@ -536,7 +539,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			// Create a new readonly transaction
 			let tx = kvs.transaction(Read, Optimistic).await?;
 			// Get the namespace user
-			let de = tx.get_root_user(&id).await.map_err(|e| {
+			let de = tx.get_root_user(id).await.map_err(|e| {
 				trace!("Error while authenticating to root: {e}");
 				Error::InvalidAuth
 			})?;
@@ -642,11 +645,11 @@ fn verify_pass(pass: &str, hash: &str) -> Result<(), Error> {
 	}
 }
 
-// Execute the AUTHENTICATE clause for a record access method
-async fn authenticate_record(
+// Execute the AUTHENTICATE clause for a Record access method
+pub async fn authenticate_record(
 	kvs: &Datastore,
 	session: &Session,
-	authenticate: Value,
+	authenticate: &Value,
 ) -> Result<Thing, Error> {
 	match kvs.evaluate(authenticate, session, None).await {
 		Ok(val) => match val.record() {
@@ -664,11 +667,11 @@ async fn authenticate_record(
 	}
 }
 
-// Execute the AUTHENTICATE clause for a JWT access method
-async fn authenticate_jwt(
+// Execute the AUTHENTICATE clause for any other access method
+pub async fn authenticate_generic(
 	kvs: &Datastore,
 	session: &Session,
-	authenticate: Value,
+	authenticate: &Value,
 ) -> Result<(), Error> {
 	match kvs.evaluate(authenticate, session, None).await {
 		Ok(val) => {
@@ -691,7 +694,7 @@ async fn authenticate_jwt(
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::iam::token::HEADER;
+	use crate::iam::token::{Audience, HEADER};
 	use argon2::password_hash::{PasswordHasher, SaltString};
 	use chrono::Duration;
 	use jsonwebtoken::{encode, EncodingKey};
@@ -1464,7 +1467,7 @@ mod tests {
 		// Test with generic user identifier
 		//
 		{
-			let resource_id = "user:⟨2k9qnabxuxh8k4d5gfto⟩".to_string();
+			let resource_id = "user:2k9qnabxuxh8k4d5gfto".to_string();
 			// Prepare the claims object
 			let mut claims = claims.clone();
 			claims.id = Some(resource_id.clone());
@@ -1801,6 +1804,7 @@ mod tests {
 			iss: Some("surrealdb-test".to_string()),
 			iat: Some(Utc::now().timestamp()),
 			nbf: Some(Utc::now().timestamp()),
+			aud: Some(Audience::Single("surrealdb-test".to_string())),
 			exp: Some((Utc::now() + Duration::hours(1)).timestamp()),
 			ns: Some("test".to_string()),
 			db: Some("test".to_string()),
@@ -2246,7 +2250,7 @@ mod tests {
 			let key = EncodingKey::from_secret(secret.as_ref());
 			let claims = Claims {
 				iss: Some("surrealdb-test".to_string()),
-				aud: Some("surrealdb-test".to_string()),
+				aud: Some(Audience::Single("surrealdb-test".to_string())),
 				iat: Some(Utc::now().timestamp()),
 				nbf: Some(Utc::now().timestamp()),
 				exp: Some((Utc::now() + Duration::hours(1)).timestamp()),
@@ -2265,9 +2269,89 @@ mod tests {
  				        ALGORITHM HS512 KEY '{secret}'
     					AUTHENTICATE {{
 							IF $token.iss != "surrealdb-test" {{ THROW "Invalid token issuer" }};
-							IF $token.aud != "surrealdb-test" {{ THROW "Invalid token audience" }};
+							IF type::is::array($token.aud) {{
+								IF "surrealdb-test" NOT IN $token.aud {{ THROW "Invalid token audience array" }}
+							}} ELSE {{
+								IF $token.aud IS NOT "surrealdb-test" {{ THROW "Invalid token audience string" }}
+							}};
 						}}
-    					DURATION FOR SESSION 2h
+						DURATION FOR SESSION 2h
+					;
+				"#
+				)
+				.as_str(),
+				&sess,
+				None,
+			)
+			.await
+			.unwrap();
+
+			// Prepare the claims object
+			let mut claims = claims.clone();
+			claims.roles = None;
+			// Create the token
+			let enc = encode(&HEADER, &claims, &key).unwrap();
+			// Signin with the token
+			let mut sess = Session::default();
+			let res = token(&ds, &mut sess, &enc).await;
+
+			assert!(res.is_ok(), "Failed to signin with token: {:?}", res);
+			assert_eq!(sess.ns, Some("test".to_string()));
+			assert_eq!(sess.db, Some("test".to_string()));
+			assert_eq!(sess.ac, Some("user".to_string()));
+			assert!(sess.au.is_db());
+			assert_eq!(sess.au.level().ns(), Some("test"));
+			assert_eq!(sess.au.level().db(), Some("test"));
+			// Record users should not have roles
+			assert!(sess.au.has_role(&Role::Viewer), "Auth user expected to have Viewer role");
+			assert!(!sess.au.has_role(&Role::Editor), "Auth user expected to not have Editor role");
+			assert!(!sess.au.has_role(&Role::Owner), "Auth user expected to not have Owner role");
+			// Expiration should match the defined duration
+			let exp = sess.exp.unwrap();
+			// Expiration should match the current time plus session duration with some margin
+			let min_exp = (Utc::now() + Duration::hours(2) - Duration::seconds(10)).timestamp();
+			let max_exp = (Utc::now() + Duration::hours(2) + Duration::seconds(10)).timestamp();
+			assert!(
+				exp > min_exp && exp < max_exp,
+				"Session expiration is expected to follow the defined duration"
+			);
+		}
+
+		// Test with correct "iss" and "aud" claims, with multiple audiences
+		{
+			let secret = "jwt_secret";
+			let key = EncodingKey::from_secret(secret.as_ref());
+			let claims = Claims {
+				iss: Some("surrealdb-test".to_string()),
+				aud: Some(Audience::Multiple(vec![
+					"invalid".to_string(),
+					"surrealdb-test".to_string(),
+				])),
+				iat: Some(Utc::now().timestamp()),
+				nbf: Some(Utc::now().timestamp()),
+				exp: Some((Utc::now() + Duration::hours(1)).timestamp()),
+				ns: Some("test".to_string()),
+				db: Some("test".to_string()),
+				ac: Some("user".to_string()),
+				..Claims::default()
+			};
+
+			let ds = Datastore::new("memory").await.unwrap();
+			let sess = Session::owner().with_ns("test").with_db("test");
+			ds.execute(
+				format!(
+					r#"
+					DEFINE ACCESS user ON DATABASE TYPE JWT
+				        ALGORITHM HS512 KEY '{secret}'
+						AUTHENTICATE {{
+							IF $token.iss != "surrealdb-test" {{ THROW "Invalid token issuer" }};
+							IF type::is::array($token.aud) {{
+								IF "surrealdb-test" NOT IN $token.aud {{ THROW "Invalid token audience array" }}
+							}} ELSE {{
+								IF $token.aud IS NOT "surrealdb-test" {{ THROW "Invalid token audience string" }}
+							}};
+						}}
+						DURATION FOR SESSION 2h
     				;
 				"#
 				)
@@ -2315,7 +2399,7 @@ mod tests {
 			let key = EncodingKey::from_secret(secret.as_ref());
 			let claims = Claims {
 				iss: Some("surrealdb-test".to_string()),
-				aud: Some("invalid".to_string()),
+				aud: Some(Audience::Single("invalid".to_string())),
 				iat: Some(Utc::now().timestamp()),
 				nbf: Some(Utc::now().timestamp()),
 				exp: Some((Utc::now() + Duration::hours(1)).timestamp()),
@@ -2334,10 +2418,14 @@ mod tests {
  				        ALGORITHM HS512 KEY '{secret}'
     					AUTHENTICATE {{
 							IF $token.iss != "surrealdb-test" {{ THROW "Invalid token issuer" }};
-							IF $token.aud != "surrealdb-test" {{ THROW "Invalid token audience" }};
+							IF type::is::array($token.aud) {{
+								IF "surrealdb-test" NOT IN $token.aud {{ THROW "Invalid token audience array" }}
+							}} ELSE {{
+								IF $token.aud IS NOT "surrealdb-test" {{ THROW "Invalid token audience string" }}
+							}};
 						}}
     					DURATION FOR SESSION 2h
-    				;
+					;
 				"#
 				)
 				.as_str(),
@@ -2357,9 +2445,71 @@ mod tests {
 			let res = token(&ds, &mut sess, &enc).await;
 
 			match res {
-				Err(Error::Thrown(e)) if e == "Invalid token audience" => {} // ok
+				Err(Error::Thrown(e)) if e == "Invalid token audience string" => {} // ok
 				res => panic!(
 				    "Expected authentication to failed due to invalid token audience, but instead received: {:?}",
+					res
+				),
+			}
+		}
+
+		// Test with correct "iss" claim but incorrect "aud" claim, with multiple audiences
+		{
+			let secret = "jwt_secret";
+			let key = EncodingKey::from_secret(secret.as_ref());
+			let claims = Claims {
+				iss: Some("surrealdb-test".to_string()),
+				aud: Some(Audience::Multiple(vec![
+					"surrealdb-test-different".to_string(),
+					"invalid".to_string(),
+				])),
+				iat: Some(Utc::now().timestamp()),
+				nbf: Some(Utc::now().timestamp()),
+				exp: Some((Utc::now() + Duration::hours(1)).timestamp()),
+				ns: Some("test".to_string()),
+				db: Some("test".to_string()),
+				ac: Some("user".to_string()),
+				..Claims::default()
+			};
+
+			let ds = Datastore::new("memory").await.unwrap();
+			let sess = Session::owner().with_ns("test").with_db("test");
+			ds.execute(
+				format!(
+					r#"
+					DEFINE ACCESS user ON DATABASE TYPE JWT
+				        ALGORITHM HS512 KEY '{secret}'
+						AUTHENTICATE {{
+							IF $token.iss != "surrealdb-test" {{ THROW "Invalid token issuer" }};
+							IF type::is::array($token.aud) {{
+								IF "surrealdb-test" NOT IN $token.aud {{ THROW "Invalid token audience array" }}
+							}} ELSE {{
+								IF $token.aud IS NOT "surrealdb-test" {{ THROW "Invalid token audience string" }}
+							}};
+						}}
+						DURATION FOR SESSION 2h
+				"#
+				)
+				.as_str(),
+				&sess,
+				None,
+			)
+			.await
+			.unwrap();
+
+			// Prepare the claims object
+			let mut claims = claims.clone();
+			claims.roles = None;
+			// Create the token
+			let enc = encode(&HEADER, &claims, &key).unwrap();
+			// Signin with the token
+			let mut sess = Session::default();
+			let res = token(&ds, &mut sess, &enc).await;
+
+			match res {
+				Err(Error::Thrown(e)) if e == "Invalid token audience array" => {} // ok
+				res => panic!(
+				    "Expected authentication to failed due to invalid token audience array, but instead received: {:?}",
 					res
 				),
 			}
@@ -2372,7 +2522,7 @@ mod tests {
 			let key = EncodingKey::from_secret(secret.as_ref());
 			let claims = Claims {
 				iss: Some("surrealdb-test".to_string()),
-				aud: Some("invalid".to_string()),
+				aud: Some(Audience::Single("invalid".to_string())),
 				iat: Some(Utc::now().timestamp()),
 				nbf: Some(Utc::now().timestamp()),
 				exp: Some((Utc::now() + Duration::hours(1)).timestamp()),
@@ -2391,7 +2541,11 @@ mod tests {
  				        ALGORITHM HS512 KEY '{secret}'
     					AUTHENTICATE {{
 							IF $token.iss != "surrealdb-test" {{ RETURN "FAIL" }};
-							IF $token.aud != "surrealdb-test" {{ RETURN "FAIL" }};
+							IF type::is::array($token.aud) {{
+								IF "surrealdb-test" NOT IN $token.aud {{ RETURN "FAIL" }}
+							}} ELSE {{
+								IF $token.aud IS NOT "surrealdb-test" {{ RETURN "FAIL" }}
+							}};
 						}}
     					DURATION FOR SESSION 2h
     				;
@@ -2431,7 +2585,7 @@ mod tests {
 			let key = EncodingKey::from_secret(secret.as_ref());
 			let claims = Claims {
 				iss: Some("surrealdb-test".to_string()),
-				aud: Some("surrealdb-test".to_string()),
+				aud: Some(Audience::Single("surrealdb-test".to_string())),
 				iat: Some(Utc::now().timestamp()),
 				nbf: Some(Utc::now().timestamp()),
 				exp: Some((Utc::now() + Duration::hours(1)).timestamp()),
@@ -2449,10 +2603,14 @@ mod tests {
  				        ALGORITHM HS512 KEY '{secret}'
     					AUTHENTICATE {{
 							IF $token.iss != "surrealdb-test" {{ THROW "Invalid token issuer" }};
-							IF $token.aud != "surrealdb-test" {{ THROW "Invalid token audience" }};
+							IF type::is::array($token.aud) {{
+								IF "surrealdb-test" NOT IN $token.aud {{ THROW "Invalid token audience array" }}
+							}} ELSE {{
+								IF $token.aud IS NOT "surrealdb-test" {{ THROW "Invalid token audience string" }}
+							}};
 						}}
-    					DURATION FOR SESSION 2h
-    				;
+						DURATION FOR SESSION 2h
+					;
 				"#
 				)
 				.as_str(),
@@ -2492,13 +2650,88 @@ mod tests {
 			);
 		}
 
+		// Test with correct "iss" and "aud" claims, with multiple audiences
+		{
+			let secret = "jwt_secret";
+			let key = EncodingKey::from_secret(secret.as_ref());
+			let claims = Claims {
+				iss: Some("surrealdb-test".to_string()),
+				aud: Some(Audience::Multiple(vec![
+					"invalid".to_string(),
+					"surrealdb-test".to_string(),
+				])),
+				iat: Some(Utc::now().timestamp()),
+				nbf: Some(Utc::now().timestamp()),
+				exp: Some((Utc::now() + Duration::hours(1)).timestamp()),
+				ns: Some("test".to_string()),
+				ac: Some("user".to_string()),
+				..Claims::default()
+			};
+
+			let ds = Datastore::new("memory").await.unwrap();
+			let sess = Session::owner().with_ns("test");
+			ds.execute(
+				format!(
+					r#"
+					DEFINE ACCESS user ON NAMESPACE TYPE JWT
+				        ALGORITHM HS512 KEY '{secret}'
+						AUTHENTICATE {{
+							IF $token.iss != "surrealdb-test" {{ THROW "Invalid token issuer" }};
+							IF type::is::array($token.aud) {{
+								IF "surrealdb-test" NOT IN $token.aud {{ THROW "Invalid token audience array" }}
+							}} ELSE {{
+								IF $token.aud IS NOT "surrealdb-test" {{ THROW "Invalid token audience string" }}
+							}};
+						}}
+						DURATION FOR SESSION 2h
+    				;
+				"#
+				)
+				.as_str(),
+				&sess,
+				None,
+			)
+			.await
+			.unwrap();
+
+			// Prepare the claims object
+			let mut claims = claims.clone();
+			claims.roles = None;
+			// Create the token
+			let enc = encode(&HEADER, &claims, &key).unwrap();
+			// Signin with the token
+			let mut sess = Session::default();
+			let res = token(&ds, &mut sess, &enc).await;
+
+			assert!(res.is_ok(), "Failed to signin with token: {:?}", res);
+			assert_eq!(sess.ns, Some("test".to_string()));
+			assert_eq!(sess.db, None);
+			assert_eq!(sess.ac, Some("user".to_string()));
+			assert!(sess.au.is_ns());
+			assert_eq!(sess.au.level().ns(), Some("test"));
+			assert_eq!(sess.au.level().db(), None);
+			// Record users should not have roles
+			assert!(sess.au.has_role(&Role::Viewer), "Auth user expected to have Viewer role");
+			assert!(!sess.au.has_role(&Role::Editor), "Auth user expected to not have Editor role");
+			assert!(!sess.au.has_role(&Role::Owner), "Auth user expected to not have Owner role");
+			// Expiration should match the defined duration
+			let exp = sess.exp.unwrap();
+			// Expiration should match the current time plus session duration with some margin
+			let min_exp = (Utc::now() + Duration::hours(2) - Duration::seconds(10)).timestamp();
+			let max_exp = (Utc::now() + Duration::hours(2) + Duration::seconds(10)).timestamp();
+			assert!(
+				exp > min_exp && exp < max_exp,
+				"Session expiration is expected to follow the defined duration"
+			);
+		}
+
 		// Test with correct "iss" claim but incorrect "aud" claim
 		{
 			let secret = "jwt_secret";
 			let key = EncodingKey::from_secret(secret.as_ref());
 			let claims = Claims {
 				iss: Some("surrealdb-test".to_string()),
-				aud: Some("invalid".to_string()),
+				aud: Some(Audience::Single("invalid".to_string())),
 				iat: Some(Utc::now().timestamp()),
 				nbf: Some(Utc::now().timestamp()),
 				exp: Some((Utc::now() + Duration::hours(1)).timestamp()),
@@ -2516,9 +2749,13 @@ mod tests {
  				        ALGORITHM HS512 KEY '{secret}'
     					AUTHENTICATE {{
 							IF $token.iss != "surrealdb-test" {{ THROW "Invalid token issuer" }};
-							IF $token.aud != "surrealdb-test" {{ THROW "Invalid token audience" }};
+							IF type::is::array($token.aud) {{
+								IF "surrealdb-test" NOT IN $token.aud {{ THROW "Invalid token audience array" }}
+							}} ELSE {{
+								IF $token.aud IS NOT "surrealdb-test" {{ THROW "Invalid token audience string" }}
+							}};
 						}}
-    					DURATION FOR SESSION 2h
+						DURATION FOR SESSION 2h
     				;
 				"#
 				)
@@ -2539,9 +2776,71 @@ mod tests {
 			let res = token(&ds, &mut sess, &enc).await;
 
 			match res {
-				Err(Error::Thrown(e)) if e == "Invalid token audience" => {} // ok
+				Err(Error::Thrown(e)) if e == "Invalid token audience string" => {} // ok
 				res => panic!(
 				    "Expected authentication to failed due to invalid token audience, but instead received: {:?}",
+					res
+				),
+			}
+		}
+
+		// Test with correct "iss" claim but incorrect "aud" claim, with multiple audiences
+		{
+			let secret = "jwt_secret";
+			let key = EncodingKey::from_secret(secret.as_ref());
+			let claims = Claims {
+				iss: Some("surrealdb-test".to_string()),
+				aud: Some(Audience::Multiple(vec![
+					"surrealdb-test-different".to_string(),
+					"invalid".to_string(),
+				])),
+				iat: Some(Utc::now().timestamp()),
+				nbf: Some(Utc::now().timestamp()),
+				exp: Some((Utc::now() + Duration::hours(1)).timestamp()),
+				ns: Some("test".to_string()),
+				ac: Some("user".to_string()),
+				..Claims::default()
+			};
+
+			let ds = Datastore::new("memory").await.unwrap();
+			let sess = Session::owner().with_ns("test");
+			ds.execute(
+				format!(
+					r#"
+					DEFINE ACCESS user ON NAMESPACE TYPE JWT
+				        ALGORITHM HS512 KEY '{secret}'
+						AUTHENTICATE {{
+							IF $token.iss != "surrealdb-test" {{ THROW "Invalid token issuer" }};
+							IF type::is::array($token.aud) {{
+								IF "surrealdb-test" NOT IN $token.aud {{ THROW "Invalid token audience array" }}
+							}} ELSE {{
+								IF $token.aud IS NOT "surrealdb-test" {{ THROW "Invalid token audience string" }}
+							}};
+						}}
+						DURATION FOR SESSION 2h
+					;
+				"#
+				)
+				.as_str(),
+				&sess,
+				None,
+			)
+			.await
+			.unwrap();
+
+			// Prepare the claims object
+			let mut claims = claims.clone();
+			claims.roles = None;
+			// Create the token
+			let enc = encode(&HEADER, &claims, &key).unwrap();
+			// Signin with the token
+			let mut sess = Session::default();
+			let res = token(&ds, &mut sess, &enc).await;
+
+			match res {
+				Err(Error::Thrown(e)) if e == "Invalid token audience array" => {} // ok
+				res => panic!(
+				    "Expected authentication to failed due to invalid token audience array, but instead received: {:?}",
 					res
 				),
 			}
@@ -2554,7 +2853,7 @@ mod tests {
 			let key = EncodingKey::from_secret(secret.as_ref());
 			let claims = Claims {
 				iss: Some("surrealdb-test".to_string()),
-				aud: Some("invalid".to_string()),
+				aud: Some(Audience::Single("invalid".to_string())),
 				iat: Some(Utc::now().timestamp()),
 				nbf: Some(Utc::now().timestamp()),
 				exp: Some((Utc::now() + Duration::hours(1)).timestamp()),
@@ -2572,7 +2871,11 @@ mod tests {
  				        ALGORITHM HS512 KEY '{secret}'
     					AUTHENTICATE {{
 							IF $token.iss != "surrealdb-test" {{ RETURN "FAIL" }};
-							IF $token.aud != "surrealdb-test" {{ RETURN "FAIL" }};
+							IF type::is::array($token.aud) {{
+								IF "surrealdb-test" NOT IN $token.aud {{ RETURN "FAIL" }}
+							}} ELSE {{
+								IF $token.aud IS NOT "surrealdb-test" {{ RETURN "FAIL" }}
+							}};
 						}}
     					DURATION FOR SESSION 2h
     				;
@@ -2612,7 +2915,7 @@ mod tests {
 			let key = EncodingKey::from_secret(secret.as_ref());
 			let claims = Claims {
 				iss: Some("surrealdb-test".to_string()),
-				aud: Some("surrealdb-test".to_string()),
+				aud: Some(Audience::Single("surrealdb-test".to_string())),
 				iat: Some(Utc::now().timestamp()),
 				nbf: Some(Utc::now().timestamp()),
 				exp: Some((Utc::now() + Duration::hours(1)).timestamp()),
@@ -2629,7 +2932,11 @@ mod tests {
  				        ALGORITHM HS512 KEY '{secret}'
     					AUTHENTICATE {{
 							IF $token.iss != "surrealdb-test" {{ THROW "Invalid token issuer" }};
-							IF $token.aud != "surrealdb-test" {{ THROW "Invalid token audience" }};
+							IF type::is::array($token.aud) {{
+								IF "surrealdb-test" NOT IN $token.aud {{ THROW "Invalid token audience array" }}
+							}} ELSE {{
+								IF $token.aud IS NOT "surrealdb-test" {{ THROW "Invalid token audience string" }}
+							}};
 						}}
     					DURATION FOR SESSION 2h
     				;
@@ -2671,13 +2978,87 @@ mod tests {
 			);
 		}
 
+		// Test with correct "iss" and "aud" claims, with multiple audiences
+		{
+			let secret = "jwt_secret";
+			let key = EncodingKey::from_secret(secret.as_ref());
+			let claims = Claims {
+				iss: Some("surrealdb-test".to_string()),
+				aud: Some(Audience::Multiple(vec![
+					"invalid".to_string(),
+					"surrealdb-test".to_string(),
+				])),
+				iat: Some(Utc::now().timestamp()),
+				nbf: Some(Utc::now().timestamp()),
+				exp: Some((Utc::now() + Duration::hours(1)).timestamp()),
+				ac: Some("user".to_string()),
+				..Claims::default()
+			};
+
+			let ds = Datastore::new("memory").await.unwrap();
+			let sess = Session::owner();
+			ds.execute(
+				format!(
+					r#"
+					DEFINE ACCESS user ON ROOT TYPE JWT
+				        ALGORITHM HS512 KEY '{secret}'
+						AUTHENTICATE {{
+							IF $token.iss != "surrealdb-test" {{ THROW "Invalid token issuer" }};
+							IF type::is::array($token.aud) {{
+								IF "surrealdb-test" NOT IN $token.aud {{ THROW "Invalid token audience array" }}
+							}} ELSE {{
+								IF $token.aud IS NOT "surrealdb-test" {{ THROW "Invalid token audience string" }}
+							}};
+						}}
+						DURATION FOR SESSION 2h
+					;
+				"#
+				)
+				.as_str(),
+				&sess,
+				None,
+			)
+			.await
+			.unwrap();
+
+			// Prepare the claims object
+			let mut claims = claims.clone();
+			claims.roles = None;
+			// Create the token
+			let enc = encode(&HEADER, &claims, &key).unwrap();
+			// Signin with the token
+			let mut sess = Session::default();
+			let res = token(&ds, &mut sess, &enc).await;
+
+			assert!(res.is_ok(), "Failed to signin with token: {:?}", res);
+			assert_eq!(sess.ns, None);
+			assert_eq!(sess.db, None);
+			assert_eq!(sess.ac, Some("user".to_string()));
+			assert!(sess.au.is_root());
+			assert_eq!(sess.au.level().ns(), None);
+			assert_eq!(sess.au.level().db(), None);
+			// Record users should not have roles
+			assert!(sess.au.has_role(&Role::Viewer), "Auth user expected to have Viewer role");
+			assert!(!sess.au.has_role(&Role::Editor), "Auth user expected to not have Editor role");
+			assert!(!sess.au.has_role(&Role::Owner), "Auth user expected to not have Owner role");
+			// Expiration should match the defined duration
+			let exp = sess.exp.unwrap();
+			// Expiration should match the current time plus session duration with some margin
+			let min_exp = (Utc::now() + Duration::hours(2) - Duration::seconds(10)).timestamp();
+			let max_exp = (Utc::now() + Duration::hours(2) + Duration::seconds(10)).timestamp();
+			assert!(
+				exp > min_exp && exp < max_exp,
+				"Session expiration is expected to follow the defined duration"
+			);
+		}
+
 		// Test with correct "iss" claim but incorrect "aud" claim
 		{
 			let secret = "jwt_secret";
 			let key = EncodingKey::from_secret(secret.as_ref());
 			let claims = Claims {
 				iss: Some("surrealdb-test".to_string()),
-				aud: Some("invalid".to_string()),
+				aud: Some(Audience::Single("invalid".to_string())),
 				iat: Some(Utc::now().timestamp()),
 				nbf: Some(Utc::now().timestamp()),
 				exp: Some((Utc::now() + Duration::hours(1)).timestamp()),
@@ -2694,7 +3075,11 @@ mod tests {
  				        ALGORITHM HS512 KEY '{secret}'
     					AUTHENTICATE {{
 							IF $token.iss != "surrealdb-test" {{ THROW "Invalid token issuer" }};
-							IF $token.aud != "surrealdb-test" {{ THROW "Invalid token audience" }};
+							IF type::is::array($token.aud) {{
+								IF "surrealdb-test" NOT IN $token.aud {{ THROW "Invalid token audience array" }}
+							}} ELSE {{
+								IF $token.aud IS NOT "surrealdb-test" {{ THROW "Invalid token audience string" }}
+							}};
 						}}
     					DURATION FOR SESSION 2h
     				;
@@ -2717,9 +3102,69 @@ mod tests {
 			let res = token(&ds, &mut sess, &enc).await;
 
 			match res {
-				Err(Error::Thrown(e)) if e == "Invalid token audience" => {} // ok
+				Err(Error::Thrown(e)) if e == "Invalid token audience string" => {} // ok
 				res => panic!(
 				    "Expected authentication to failed due to invalid token audience, but instead received: {:?}",
+					res
+				),
+			}
+		}
+
+		// Test with correct "iss" claim but incorrect "aud" claim, with multiple audiences
+		{
+			let secret = "jwt_secret";
+			let key = EncodingKey::from_secret(secret.as_ref());
+			let claims = Claims {
+				iss: Some("surrealdb-test".to_string()),
+				aud: Some(Audience::Multiple(vec![
+					"surrealdb-test-different".to_string(),
+					"invalid".to_string(),
+				])),
+				iat: Some(Utc::now().timestamp()),
+				nbf: Some(Utc::now().timestamp()),
+				exp: Some((Utc::now() + Duration::hours(1)).timestamp()),
+				ac: Some("user".to_string()),
+				..Claims::default()
+			};
+
+			let ds = Datastore::new("memory").await.unwrap();
+			let sess = Session::owner();
+			ds.execute(
+				format!(
+					r#"
+					DEFINE ACCESS user ON ROOT TYPE JWT
+				        ALGORITHM HS512 KEY '{secret}'
+						AUTHENTICATE {{
+							IF $token.iss != "surrealdb-test" {{ THROW "Invalid token issuer" }};
+							IF type::is::array($token.aud) {{
+								IF "surrealdb-test" NOT IN $token.aud {{ THROW "Invalid token audience array" }}
+							}} ELSE {{
+								IF $token.aud IS NOT "surrealdb-test" {{ THROW "Invalid token audience string" }}
+							}};
+						}}
+						DURATION FOR SESSION 2h
+				"#
+				)
+				.as_str(),
+				&sess,
+				None,
+			)
+			.await
+			.unwrap();
+
+			// Prepare the claims object
+			let mut claims = claims.clone();
+			claims.roles = None;
+			// Create the token
+			let enc = encode(&HEADER, &claims, &key).unwrap();
+			// Signin with the token
+			let mut sess = Session::default();
+			let res = token(&ds, &mut sess, &enc).await;
+
+			match res {
+				Err(Error::Thrown(e)) if e == "Invalid token audience array" => {} // ok
+				res => panic!(
+				    "Expected authentication to failed due to invalid token audience array, but instead received: {:?}",
 					res
 				),
 			}
@@ -2732,7 +3177,7 @@ mod tests {
 			let key = EncodingKey::from_secret(secret.as_ref());
 			let claims = Claims {
 				iss: Some("surrealdb-test".to_string()),
-				aud: Some("invalid".to_string()),
+				aud: Some(Audience::Single("invalid".to_string())),
 				iat: Some(Utc::now().timestamp()),
 				nbf: Some(Utc::now().timestamp()),
 				exp: Some((Utc::now() + Duration::hours(1)).timestamp()),
@@ -2749,7 +3194,11 @@ mod tests {
  				        ALGORITHM HS512 KEY '{secret}'
     					AUTHENTICATE {{
 							IF $token.iss != "surrealdb-test" {{ RETURN "FAIL" }};
-							IF $token.aud != "surrealdb-test" {{ RETURN "FAIL" }};
+							IF type::is::array($token.aud) {{
+								IF "surrealdb-test" NOT IN $token.aud {{ RETURN "FAIL" }}
+							}} ELSE {{
+								IF $token.aud IS NOT "surrealdb-test" {{ RETURN "FAIL" }}
+							}};
 						}}
     					DURATION FOR SESSION 2h
     				;

@@ -12,6 +12,7 @@ pub struct Package;
 impl_module_def!(
 	Package,
 	"crypto",
+	"blake3" => run,
 	"md5" => run,
 	"sha1" => run,
 	"sha256" => run,

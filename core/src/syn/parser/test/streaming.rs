@@ -150,6 +150,7 @@ fn statements() -> Vec<Statement> {
 			))),
 			timeout: Some(Timeout(Duration(std::time::Duration::from_secs(1)))),
 			parallel: true,
+			version: None,
 		}),
 		Statement::Define(DefineStatement::Namespace(DefineNamespaceStatement {
 			id: None,
@@ -198,6 +199,7 @@ fn statements() -> Vec<Statement> {
 			permissions: Permission::Full,
 			if_not_exists: false,
 			overwrite: false,
+			returns: None,
 		})),
 		Statement::Define(DefineStatement::Access(DefineAccessStatement {
 			name: Ident("a".to_string()),
@@ -278,7 +280,7 @@ fn statements() -> Vec<Statement> {
 			comment: None,
 			if_not_exists: false,
 			overwrite: false,
-			kind: TableType::Any,
+			kind: TableType::Normal,
 		})),
 		Statement::Define(DefineStatement::Event(DefineEventStatement {
 			name: Ident("event".to_owned()),
@@ -342,6 +344,7 @@ fn statements() -> Vec<Statement> {
 			comment: None,
 			if_not_exists: false,
 			overwrite: false,
+			concurrently: false,
 		})),
 		Statement::Define(DefineStatement::Index(DefineIndexStatement {
 			name: Ident("index".to_owned()),
@@ -351,6 +354,7 @@ fn statements() -> Vec<Statement> {
 			comment: None,
 			if_not_exists: false,
 			overwrite: false,
+			concurrently: false,
 		})),
 		Statement::Define(DefineStatement::Index(DefineIndexStatement {
 			name: Ident("index".to_owned()),
@@ -369,6 +373,7 @@ fn statements() -> Vec<Statement> {
 			comment: None,
 			if_not_exists: false,
 			overwrite: false,
+			concurrently: false,
 		})),
 		Statement::Define(DefineStatement::Analyzer(DefineAnalyzerStatement {
 			name: Ident("ana".to_owned()),
@@ -406,7 +411,7 @@ fn statements() -> Vec<Statement> {
 					dir: Dir::Out,
 					from: Thing {
 						tb: "a".to_owned(),
-						id: Id::String("b".to_owned()),
+						id: Id::from("b"),
 					},
 					what: Tables::default(),
 				}))),
@@ -515,7 +520,7 @@ fn statements() -> Vec<Statement> {
 			}])),
 			limit: Some(Limit(Value::Thing(Thing {
 				tb: "a".to_owned(),
-				id: Id::String("b".to_owned()),
+				id: Id::from("b"),
 			}))),
 			start: Some(Start(Value::Object(Object(
 				[("a".to_owned(), Value::Bool(true))].into_iter().collect(),
@@ -533,6 +538,7 @@ fn statements() -> Vec<Statement> {
 		Statement::Set(SetStatement {
 			name: "param".to_owned(),
 			what: Value::Number(Number::Int(1)),
+			kind: None,
 		}),
 		Statement::Show(ShowStatement {
 			table: Some(Table("foo".to_owned())),
@@ -602,6 +608,7 @@ fn statements() -> Vec<Statement> {
 				),
 			])),
 			output: Some(Output::After),
+			version: None,
 			timeout: None,
 			parallel: false,
 			relation: false,
@@ -620,7 +627,7 @@ fn statements() -> Vec<Statement> {
 			only: true,
 			kind: Value::Thing(Thing {
 				tb: "a".to_owned(),
-				id: Id::String("b".to_owned()),
+				id: Id::from("b"),
 			}),
 			from: Value::Array(Array(vec![
 				Value::Number(Number::Int(1)),
@@ -633,6 +640,7 @@ fn statements() -> Vec<Statement> {
 				output: None,
 				timeout: None,
 				parallel: false,
+				version: None,
 			}))),
 			uniq: true,
 			data: Some(Data::SetExpression(vec![(

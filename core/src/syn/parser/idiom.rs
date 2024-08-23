@@ -135,6 +135,10 @@ impl Parser<'_> {
 		let mut res = start;
 		loop {
 			match self.peek_kind() {
+				t!("?") => {
+					self.pop_peek();
+					res.push(Part::Optional);
+				}
 				t!("...") => {
 					self.pop_peek();
 					res.push(Part::Flatten);
@@ -908,7 +912,7 @@ mod tests {
 			Value::from(Idiom(vec![
 				Part::Start(Value::Thing(Thing {
 					tb: "test".to_owned(),
-					id: Id::Number(1),
+					id: Id::from(1),
 				})),
 				Part::from("foo"),
 			]))
@@ -924,7 +928,7 @@ mod tests {
 			Value::from(Idiom(vec![
 				Part::Start(Value::Thing(Thing {
 					tb: "test".to_owned(),
-					id: Id::Number(1),
+					id: Id::from(1),
 				})),
 				Part::Value(Value::Strand(Strand("foo".to_owned()))),
 			]))
@@ -940,7 +944,7 @@ mod tests {
 			Value::from(Idiom(vec![
 				Part::Start(Value::Thing(Thing {
 					tb: "test".to_owned(),
-					id: Id::Number(1),
+					id: Id::from(1),
 				})),
 				Part::All
 			]))

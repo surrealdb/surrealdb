@@ -80,7 +80,7 @@ impl From<InnerQueryExecutor> for QueryExecutor {
 }
 
 pub(super) enum IteratorEntry {
-	Single(Arc<Expression>, IndexOption),
+	Single(Option<Arc<Expression>>, IndexOption),
 	Range(HashSet<Arc<Expression>>, IndexRef, RangeValue, RangeValue),
 }
 
@@ -105,7 +105,7 @@ impl InnerQueryExecutor {
 	#[allow(clippy::mutable_key_type)]
 	pub(super) async fn new(
 		stk: &mut Stk,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		opt: &Options,
 		table: &Table,
 		im: IndexesMap,
@@ -222,8 +222,11 @@ impl InnerQueryExecutor {
 								Entry::Vacant(e) => {
 									let hnsw = ctx
 										.get_index_stores()
-										.get_index_hnsw(opt, idx_def, p)
+										.get_index_hnsw(ctx, opt, idx_def, p)
 										.await?;
+									// Ensure the local HNSW index is up to date with the KVS
+									hnsw.write().await.check_state(&ctx.tx()).await?;
+									// Now we can execute the request
 									let entry = HnswEntry::new(
 										stk,
 										ctx,
@@ -276,10 +279,10 @@ impl QueryExecutor {
 	pub(crate) async fn knn(
 		&self,
 		stk: &mut Stk,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		opt: &Options,
 		thg: &Thing,
-		doc: Option<&CursorDoc<'_>>,
+		doc: Option<&CursorDoc>,
 		exp: &Expression,
 	) -> Result<Value, Error> {
 		if let Some(IterationStage::Iterate(e)) = ctx.get_iteration_stage() {
@@ -316,7 +319,7 @@ impl QueryExecutor {
 	/// Returns `true` if the expression is matching the current iterator.
 	pub(crate) fn is_iterator_expression(&self, irf: IteratorRef, exp: &Expression) -> bool {
 		match self.0.it_entries.get(irf as usize) {
-			Some(IteratorEntry::Single(e, ..)) => exp.eq(e.as_ref()),
+			Some(IteratorEntry::Single(Some(e), ..)) => exp.eq(e.as_ref()),
 			Some(IteratorEntry::Range(es, ..)) => es.contains(exp),
 			_ => false,
 		}
@@ -402,6 +405,19 @@ impl QueryExecutor {
 				let index_join = Box::new(IndexJoinThingIterator::new(irf, opt, ix, iterators)?);
 				Some(ThingIterator::IndexJoin(index_join))
 			}
+			IndexOperator::Order(asc) => {
+				if *asc {
+					Some(ThingIterator::IndexRange(IndexRangeThingIterator::full_range(
+						irf,
+						opt.ns()?,
+						opt.db()?,
+						&ix.what,
+						&ix.name,
+					)))
+				} else {
+					None
+				}
+			}
 			_ => None,
 		})
 	}
@@ -469,6 +485,19 @@ impl QueryExecutor {
 				let unique_join = Box::new(UniqueJoinThingIterator::new(irf, opt, ix, iterators)?);
 				Some(ThingIterator::UniqueJoin(unique_join))
 			}
+			IndexOperator::Order(asc) => {
+				if *asc {
+					Some(ThingIterator::UniqueRange(UniqueRangeThingIterator::full_range(
+						irf,
+						opt.ns()?,
+						opt.db()?,
+						&ix.what,
+						&ix.name,
+					)))
+				} else {
+					None
+				}
+			}
 			_ => None,
 		})
 	}
@@ -478,7 +507,7 @@ impl QueryExecutor {
 		irf: IteratorRef,
 		io: IndexOption,
 	) -> Result<Option<ThingIterator>, Error> {
-		if let Some(IteratorEntry::Single(exp, ..)) = self.0.it_entries.get(irf as usize) {
+		if let Some(IteratorEntry::Single(Some(exp), ..)) = self.0.it_entries.get(irf as usize) {
 			if let Matches(_, _) = io.op() {
 				if let Some(fti) = self.0.ft_map.get(&io.ix_ref()) {
 					if let Some(fte) = self.0.exp_entries.get(exp) {
@@ -493,7 +522,7 @@ impl QueryExecutor {
 	}
 
 	fn new_mtree_index_knn_iterator(&self, irf: IteratorRef) -> Option<ThingIterator> {
-		if let Some(IteratorEntry::Single(exp, ..)) = self.0.it_entries.get(irf as usize) {
+		if let Some(IteratorEntry::Single(Some(exp), ..)) = self.0.it_entries.get(irf as usize) {
 			if let Some(mte) = self.0.mt_entries.get(exp) {
 				let it = KnnIterator::new(irf, mte.res.clone());
 				return Some(ThingIterator::Knn(it));
@@ -503,7 +532,7 @@ impl QueryExecutor {
 	}
 
 	fn new_hnsw_index_ann_iterator(&self, irf: IteratorRef) -> Option<ThingIterator> {
-		if let Some(IteratorEntry::Single(exp, ..)) = self.0.it_entries.get(irf as usize) {
+		if let Some(IteratorEntry::Single(Some(exp), ..)) = self.0.it_entries.get(irf as usize) {
 			if let Some(he) = self.0.hnsw_entries.get(exp) {
 				let it = KnnIterator::new(irf, he.res.clone());
 				return Some(ThingIterator::Knn(it));
@@ -535,7 +564,7 @@ impl QueryExecutor {
 	pub(crate) async fn matches(
 		&self,
 		stk: &mut Stk,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		opt: &Options,
 		thg: &Thing,
 		exp: &Expression,
@@ -559,7 +588,7 @@ impl QueryExecutor {
 
 	async fn matches_with_doc_id(
 		&self,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		thg: &Thing,
 		ft: &FtEntry,
 	) -> Result<bool, Error> {
@@ -592,14 +621,14 @@ impl QueryExecutor {
 	async fn matches_with_value(
 		&self,
 		stk: &mut Stk,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		opt: &Options,
 		ft: &FtEntry,
 		l: Value,
 		r: Value,
 	) -> Result<bool, Error> {
 		// If the query terms contains terms that are unknown in the index
-		// of if there is not terms in the query
+		// of if there are no terms in the query
 		// we are sure that it does not match any document
 		if !ft.0.query_terms_set.is_matchable() {
 			return Ok(false);
@@ -607,6 +636,7 @@ impl QueryExecutor {
 		let v = match ft.0.index_option.id_pos() {
 			IdiomPosition::Left => r,
 			IdiomPosition::Right => l,
+			IdiomPosition::None => return Ok(false),
 		};
 		let terms = ft.0.terms.read().await;
 		// Extract the terms set from the record
@@ -634,7 +664,7 @@ impl QueryExecutor {
 
 	pub(crate) async fn highlight(
 		&self,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		thg: &Thing,
 		hlp: HighlightParams,
 		doc: &Value,
@@ -651,7 +681,7 @@ impl QueryExecutor {
 
 	pub(crate) async fn offsets(
 		&self,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		thg: &Thing,
 		match_ref: Value,
 		partial: bool,
@@ -666,10 +696,10 @@ impl QueryExecutor {
 
 	pub(crate) async fn score(
 		&self,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		match_ref: &Value,
 		rid: &Thing,
-		ir: Option<&IteratorRecord>,
+		ir: Option<&Arc<IteratorRecord>>,
 	) -> Result<Value, Error> {
 		if let Some(e) = self.get_ft_entry(match_ref) {
 			if let Some(scorer) = &e.0.scorer {
@@ -714,7 +744,7 @@ struct Inner {
 impl FtEntry {
 	async fn new(
 		stk: &mut Stk,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		opt: &Options,
 		ft: &FtIndex,
 		io: IndexOption,
@@ -749,7 +779,7 @@ pub(super) struct MtEntry {
 impl MtEntry {
 	async fn new(
 		stk: &mut Stk,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		opt: &Options,
 		mt: &MTreeIndex,
 		o: &[Number],
@@ -777,7 +807,7 @@ impl HnswEntry {
 	#[allow(clippy::too_many_arguments)]
 	async fn new(
 		stk: &mut Stk,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		opt: &Options,
 		h: SharedHnswIndex,
 		v: &[Number],
@@ -788,11 +818,13 @@ impl HnswEntry {
 		let cond_checker = if let Some(cond) = cond {
 			HnswConditionChecker::new_cond(ctx, opt, cond)
 		} else {
-			HnswConditionChecker::default()
+			HnswConditionChecker::new()
 		};
-		let h = h.read().await;
-		let res = h.knn_search(v, n as usize, ef as usize, stk, cond_checker).await?;
-		drop(h);
+		let res = h
+			.read()
+			.await
+			.knn_search(&ctx.tx(), stk, v, n as usize, ef as usize, cond_checker)
+			.await?;
 		Ok(Self {
 			res,
 		})

@@ -15,7 +15,7 @@ impl Value {
 	pub(crate) async fn fetch(
 		&mut self,
 		stk: &mut Stk,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		opt: &Options,
 		path: &[Part],
 	) -> Result<(), Error> {
@@ -77,7 +77,7 @@ impl Value {
 					Part::Where(w) => {
 						let path = path.next();
 						for v in v.iter_mut() {
-							let cur = v.into();
+							let cur = v.clone().into();
 							if w.compute(stk, ctx, opt, Some(&cur)).await?.is_truthy() {
 								stk.run(|stk| v.fetch(stk, ctx, opt, path)).await?;
 							}

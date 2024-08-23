@@ -27,6 +27,7 @@ pub mod rand;
 pub mod script;
 pub mod search;
 pub mod session;
+pub mod shared;
 pub mod sleep;
 pub mod string;
 pub mod time;
@@ -37,9 +38,9 @@ pub mod vector;
 /// Attempts to run any function
 pub async fn run(
 	stk: &mut Stk,
-	ctx: &Context<'_>,
+	ctx: &Context,
 	opt: &Options,
-	doc: Option<&CursorDoc<'_>>,
+	doc: Option<&CursorDoc>,
 	name: &str,
 	args: Vec<Value>,
 ) -> Result<Value, Error> {
@@ -52,8 +53,9 @@ pub async fn run(
 		|| name.starts_with("crypto::bcrypt")
 		|| name.starts_with("crypto::pbkdf2")
 		|| name.starts_with("crypto::scrypt")
+		|| name.starts_with("array::map")
 	{
-		stk.run(|stk| asynchronous(stk, ctx, Some(opt), doc, name, args)).await
+		stk.run(|stk| asynchronous(stk, ctx, opt, doc, name, args)).await
 	} else {
 		synchronous(ctx, doc, name, args)
 	}
@@ -74,7 +76,7 @@ macro_rules! dispatch {
 					$($wrapper)*(|| $($function_path)::+($($ctx_arg,)* args))()$(.$await)*
 				},)+
 				_ => {
-					return Err($crate::err::Error::InvalidFunction{
+					Err($crate::err::Error::InvalidFunction{
 						name: String::from($name),
 						message: $message.to_string()
 					})
@@ -86,8 +88,8 @@ macro_rules! dispatch {
 
 /// Attempts to run any synchronous function.
 pub fn synchronous(
-	ctx: &Context<'_>,
-	doc: Option<&CursorDoc<'_>>,
+	ctx: &Context,
+	doc: Option<&CursorDoc>,
 	name: &str,
 	args: Vec<Value>,
 ) -> Result<Value, Error> {
@@ -110,6 +112,7 @@ pub fn synchronous(
 		"array::concat" => array::concat,
 		"array::difference" => array::difference,
 		"array::distinct" => array::distinct,
+		"array::fill" => array::fill,
 		"array::filter_index" => array::filter_index,
 		"array::find_index" => array::find_index,
 		"array::first" => array::first,
@@ -117,6 +120,7 @@ pub fn synchronous(
 		"array::group" => array::group,
 		"array::insert" => array::insert,
 		"array::intersect" => array::intersect,
+		"array::is_empty" => array::is_empty,
 		"array::join" => array::join,
 		"array::last" => array::last,
 		"array::len" => array::len,
@@ -129,11 +133,14 @@ pub fn synchronous(
 		"array::pop" => array::pop,
 		"array::prepend" => array::prepend,
 		"array::push" => array::push,
+		"array::range" => array::range,
 		"array::remove" => array::remove,
+		"array::repeat" => array::repeat,
 		"array::reverse" => array::reverse,
 		"array::shuffle" => array::shuffle,
 		"array::slice" => array::slice,
 		"array::sort" => array::sort,
+		"array::swap" => array::swap,
 		"array::transpose" => array::transpose,
 		"array::union" => array::union,
 		"array::sort::asc" => array::sort::asc,
@@ -144,6 +151,7 @@ pub fn synchronous(
 		//
 		"count" => count::count,
 		//
+		"crypto::blake3" => crypto::blake3,
 		"crypto::md5" => crypto::md5,
 		"crypto::sha1" => crypto::sha1,
 		"crypto::sha256" => crypto::sha256,
@@ -344,6 +352,7 @@ pub fn synchronous(
 		"time::from::secs" => time::from::secs,
 		"time::from::unix" => time::from::unix,
 		//
+		"type::array" => r#type::array,
 		"type::bool" => r#type::bool,
 		"type::bytes" => r#type::bytes,
 		"type::datetime" => r#type::datetime,
@@ -393,6 +402,7 @@ pub fn synchronous(
 		"vector::multiply" => vector::multiply,
 		"vector::normalize" => vector::normalize,
 		"vector::project" => vector::project,
+		"vector::scale" => vector::scale,
 		"vector::subtract" => vector::subtract,
 		"vector::distance::chebyshev" => vector::distance::chebyshev,
 		"vector::distance::euclidean" => vector::distance::euclidean,
@@ -409,9 +419,11 @@ pub fn synchronous(
 }
 
 /// Attempts to run any synchronous function.
-pub fn idiom(
-	ctx: &Context<'_>,
-	doc: Option<&CursorDoc<'_>>,
+pub async fn idiom(
+	stk: &mut Stk,
+	ctx: &Context,
+	opt: &Options,
+	doc: Option<&CursorDoc>,
 	value: Value,
 	name: &str,
 	args: Vec<Value>,
@@ -438,6 +450,7 @@ pub fn idiom(
 				"concat" => array::concat,
 				"difference" => array::difference,
 				"distinct" => array::distinct,
+				"fill" => array::fill,
 				"filter_index" => array::filter_index,
 				"find_index" => array::find_index,
 				"first" => array::first,
@@ -445,6 +458,7 @@ pub fn idiom(
 				"group" => array::group,
 				"insert" => array::insert,
 				"intersect" => array::intersect,
+				"is_empty" => array::is_empty,
 				"join" => array::join,
 				"last" => array::last,
 				"len" => array::len,
@@ -452,6 +466,7 @@ pub fn idiom(
 				"logical_or" => array::logical_or,
 				"logical_xor" => array::logical_xor,
 				"matches" => array::matches,
+				"map" => array::map((stk, ctx, opt, doc)).await,
 				"max" => array::max,
 				"min" => array::min,
 				"pop" => array::pop,
@@ -462,6 +477,7 @@ pub fn idiom(
 				"shuffle" => array::shuffle,
 				"slice" => array::slice,
 				"sort" => array::sort,
+				"swap" => array::swap,
 				"transpose" => array::transpose,
 				"union" => array::union,
 				"sort_asc" => array::sort::asc,
@@ -477,6 +493,7 @@ pub fn idiom(
 				"vector_multiply" => vector::multiply,
 				"vector_normalize" => vector::normalize,
 				"vector_project" => vector::project,
+				"vector_scale" => vector::scale,
 				"vector_subtract" => vector::subtract,
 				"vector_distance_chebyshev" => vector::distance::chebyshev,
 				"vector_distance_euclidean" => vector::distance::euclidean,
@@ -671,6 +688,7 @@ pub fn idiom(
 				"is_string" => r#type::is::string,
 				"is_uuid" => r#type::is::uuid,
 				//
+				"to_array" => r#type::array,
 				"to_bool" => r#type::bool,
 				"to_bytes" => r#type::bytes,
 				"to_datetime" => r#type::datetime,
@@ -681,9 +699,14 @@ pub fn idiom(
 				"to_int" => r#type::int,
 				"to_number" => r#type::number,
 				"to_point" => r#type::point,
+				"to_range" => r#type::range,
 				"to_record" => r#type::record,
 				"to_string" => r#type::string,
 				"to_uuid" => r#type::uuid,
+				//
+				"repeat" => array::repeat,
+				//
+				"chain" => shared::chain((stk, ctx, opt, doc)).await,
 			)
 		}
 		v => v,
@@ -693,9 +716,9 @@ pub fn idiom(
 /// Attempts to run any asynchronous function.
 pub async fn asynchronous(
 	stk: &mut Stk,
-	ctx: &Context<'_>,
-	opt: Option<&Options>,
-	doc: Option<&CursorDoc<'_>>,
+	ctx: &Context,
+	opt: &Options,
+	doc: Option<&CursorDoc>,
 	name: &str,
 	args: Vec<Value>,
 ) -> Result<Value, Error> {
@@ -719,6 +742,8 @@ pub async fn asynchronous(
 		name,
 		args,
 		"no such builtin function found",
+		"array::map" => array::map((stk, ctx, opt, doc)).await,
+		//
 		"crypto::argon2::compare" => (cpu_intensive) crypto::argon2::cmp.await,
 		"crypto::argon2::generate" => (cpu_intensive) crypto::argon2::gen.await,
 		"crypto::bcrypt::compare" => (cpu_intensive) crypto::bcrypt::cmp.await,
@@ -735,24 +760,24 @@ pub async fn asynchronous(
 		"http::patch" => http::patch(ctx).await,
 		"http::delete" => http::delete(ctx).await,
 		//
-		"search::analyze" => search::analyze((stk,ctx, opt)).await,
+		"search::analyze" => search::analyze((stk,ctx, Some(opt))).await,
 		"search::score" => search::score((ctx, doc)).await,
 		"search::highlight" => search::highlight((ctx, doc)).await,
 		"search::offsets" => search::offsets((ctx, doc)).await,
 		//
 		"sleep" => sleep::sleep(ctx).await,
 		//
-		"type::field" => r#type::field((stk,ctx, opt, doc)).await,
-		"type::fields" => r#type::fields((stk,ctx, opt, doc)).await,
+		"type::field" => r#type::field((stk,ctx, Some(opt), doc)).await,
+		"type::fields" => r#type::fields((stk,ctx, Some(opt), doc)).await,
 	)
 }
 
 fn get_execution_context<'a>(
-	ctx: &'a Context<'_>,
-	doc: Option<&'a CursorDoc<'_>>,
-) -> Option<(&'a QueryExecutor, &'a CursorDoc<'a>, &'a Thing)> {
+	ctx: &'a Context,
+	doc: Option<&'a CursorDoc>,
+) -> Option<(&'a QueryExecutor, &'a CursorDoc, &'a Thing)> {
 	if let Some(doc) = doc {
-		if let Some(thg) = doc.rid {
+		if let Some(thg) = &doc.rid {
 			if let Some(pla) = ctx.get_query_planner() {
 				if let Some(exe) = pla.get_query_executor(&thg.tb) {
 					return Some((exe, doc, thg));
@@ -773,6 +798,9 @@ mod tests {
 
 	#[tokio::test]
 	async fn implementations_are_present() {
+		#[cfg(all(feature = "scripting", feature = "kv-mem"))]
+		let excluded_from_scripting = &["array::map"];
+
 		// Accumulate and display all problems at once to avoid a test -> fix -> test -> fix cycle.
 		let mut problems = Vec::new();
 
@@ -780,7 +808,7 @@ mod tests {
 		let fnc_mod = include_str!("mod.rs");
 
 		// Patch out idiom methods
-		let re = Regex::new(r"(?ms)pub fn idiom\(.*}\n+///").unwrap();
+		let re = Regex::new(r"(?ms)pub async fn idiom\(.*}\n+///").unwrap();
 		let fnc_no_idiom = re.replace(fnc_mod, "");
 
 		for line in fnc_no_idiom.lines() {
@@ -823,6 +851,10 @@ mod tests {
 			{
 				use crate::sql::Value;
 
+				if excluded_from_scripting.contains(&name) {
+					continue;
+				}
+
 				let name = name.replace("::", ".");
 				let sql =
 					format!("RETURN function() {{ return typeof surrealdb.functions.{name}; }}");
@@ -846,7 +878,7 @@ mod tests {
 			for problem in problems {
 				eprintln!(" - {problem}");
 			}
-			panic!("ensure functions can be parsed in lib/src/sql/function.rs and are exported to JS in lib/src/fnc/script/modules/surrealdb");
+			panic!("ensure functions can be parsed in core/src/sql/function.rs and are exported to JS in core/src/fnc/script/modules/surrealdb");
 		}
 	}
 }

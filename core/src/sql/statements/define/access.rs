@@ -48,6 +48,10 @@ impl DefineAccessStatement {
 				ac.jwt = ac.jwt.redacted();
 				AccessType::Record(ac)
 			}
+			AccessType::Bearer(mut ac) => {
+				ac.jwt = ac.jwt.redacted();
+				AccessType::Bearer(ac)
+			}
 		};
 		das
 	}
@@ -57,9 +61,9 @@ impl DefineAccessStatement {
 	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		opt: &Options,
-		_doc: Option<&CursorDoc<'_>>,
+		_doc: Option<&CursorDoc>,
 	) -> Result<Value, Error> {
 		// Allowed to run?
 		opt.is_allowed(Action::Edit, ResourceKind::Actor, &self.base)?;
@@ -74,7 +78,7 @@ impl DefineAccessStatement {
 						return Ok(Value::None);
 					} else if !self.overwrite {
 						return Err(Error::AccessRootAlreadyExists {
-							value: self.name.to_string(),
+							ac: self.name.to_string(),
 						});
 					}
 				}
@@ -88,6 +92,7 @@ impl DefineAccessStatement {
 						overwrite: false,
 						..self.clone()
 					},
+					None,
 				)
 				.await?;
 				// Clear the cache
@@ -104,7 +109,7 @@ impl DefineAccessStatement {
 						return Ok(Value::None);
 					} else if !self.overwrite {
 						return Err(Error::AccessNsAlreadyExists {
-							value: self.name.to_string(),
+							ac: self.name.to_string(),
 							ns: opt.ns()?.into(),
 						});
 					}
@@ -120,6 +125,7 @@ impl DefineAccessStatement {
 						overwrite: false,
 						..self.clone()
 					},
+					None,
 				)
 				.await?;
 				// Clear the cache
@@ -136,7 +142,7 @@ impl DefineAccessStatement {
 						return Ok(Value::None);
 					} else if !self.overwrite {
 						return Err(Error::AccessDbAlreadyExists {
-							value: self.name.to_string(),
+							ac: self.name.to_string(),
 							ns: opt.ns()?.into(),
 							db: opt.db()?.into(),
 						});
@@ -154,6 +160,7 @@ impl DefineAccessStatement {
 						overwrite: false,
 						..self.clone()
 					},
+					None,
 				)
 				.await?;
 				// Clear the cache

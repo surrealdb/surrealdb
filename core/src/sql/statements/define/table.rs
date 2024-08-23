@@ -45,9 +45,9 @@ impl DefineTableStatement {
 	pub(crate) async fn compute(
 		&self,
 		stk: &mut Stk,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		opt: &Options,
-		doc: Option<&CursorDoc<'_>>,
+		doc: Option<&CursorDoc>,
 	) -> Result<Value, Error> {
 		// Allowed to run?
 		opt.is_allowed(Action::Edit, ResourceKind::Table, &Base::Db)?;
@@ -78,7 +78,7 @@ impl DefineTableStatement {
 			overwrite: false,
 			..self.clone()
 		};
-		txn.set(key, &dt).await?;
+		txn.set(key, &dt, None).await?;
 		// Add table relational fields
 		self.add_in_out_fields(&txn, opt).await?;
 		// Clear the cache
@@ -96,7 +96,7 @@ impl DefineTableStatement {
 			for v in view.what.0.iter() {
 				// Save the view config
 				let key = crate::key::table::ft::new(opt.ns()?, opt.db()?, v, &self.name);
-				txn.set(key, self).await?;
+				txn.set(key, self, None).await?;
 			}
 			// Force queries to run
 			let opt = &opt.new_with_force(Force::Table(Arc::new([dt])));
@@ -147,6 +147,7 @@ impl DefineTableStatement {
 						kind: Some(val),
 						..Default::default()
 					},
+					None,
 				)
 				.await?;
 			}
@@ -162,6 +163,7 @@ impl DefineTableStatement {
 						kind: Some(val),
 						..Default::default()
 					},
+					None,
 				)
 				.await?;
 			}

@@ -7,33 +7,33 @@ async fn multiwriter_same_keys_conflict() {
 	let (ds, _) = new_ds(node_id, clock).await;
 	// Insert an initial key
 	let mut tx = ds.transaction(Write, Optimistic).await.unwrap().inner();
-	tx.set("test", "some text").await.unwrap();
+	tx.set("test", "some text", None).await.unwrap();
 	tx.commit().await.unwrap();
 	// Create a writeable transaction
 	let mut tx1 = ds.transaction(Write, Optimistic).await.unwrap().inner();
-	tx1.set("test", "other text 1").await.unwrap();
+	tx1.set("test", "other text 1", None).await.unwrap();
 	// Create a writeable transaction
 	let mut tx2 = ds.transaction(Write, Optimistic).await.unwrap().inner();
-	tx2.set("test", "other text 2").await.unwrap();
+	tx2.set("test", "other text 2", None).await.unwrap();
 	// Create a writeable transaction
 	let mut tx3 = ds.transaction(Write, Optimistic).await.unwrap().inner();
-	tx3.set("test", "other text 3").await.unwrap();
+	tx3.set("test", "other text 3", None).await.unwrap();
 	// Cancel both writeable transactions
 	assert!(tx1.commit().await.is_ok());
 	assert!(tx2.commit().await.is_err());
 	assert!(tx3.commit().await.is_err());
 	// Check that the key was updated ok
 	let mut tx = ds.transaction(Read, Optimistic).await.unwrap().inner();
-	let val = tx.get("test").await.unwrap().unwrap();
+	let val = tx.get("test", None).await.unwrap().unwrap();
 	assert_eq!(val, b"other text 1");
 	tx.cancel().await.unwrap();
 	// Create a writeable transaction
 	let mut tx = ds.transaction(Write, Optimistic).await.unwrap().inner();
-	tx.set("test", "original text").await.unwrap();
+	tx.set("test", "original text", None).await.unwrap();
 	tx.commit().await.unwrap();
 	// Check that the key was updated ok
 	let mut tx = ds.transaction(Read, Optimistic).await.unwrap().inner();
-	let val = tx.get("test").await.unwrap().unwrap();
+	let val = tx.get("test", None).await.unwrap().unwrap();
 	assert_eq!(val, b"original text");
 	tx.cancel().await.unwrap();
 }

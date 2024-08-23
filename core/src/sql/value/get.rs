@@ -16,6 +16,7 @@ use crate::sql::paths::ID;
 use crate::sql::statements::select::SelectStatement;
 use crate::sql::thing::Thing;
 use crate::sql::value::{Value, Values};
+use crate::sql::Function;
 use reblessive::tree::Stk;
 
 impl Value {
@@ -25,9 +26,9 @@ impl Value {
 	pub(crate) async fn get(
 		&self,
 		stk: &mut Stk,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		opt: &Options,
-		doc: Option<&CursorDoc<'_>>,
+		doc: Option<&CursorDoc>,
 		path: &[Part],
 	) -> Result<Self, Error> {
 		// Limit recursion depth.
@@ -59,7 +60,11 @@ impl Value {
 						stk.run(|stk| obj.get(stk, ctx, opt, doc, path)).await
 					}
 					Part::Method(name, args) => {
-						let v = idiom(ctx, doc, v.clone().into(), name, args.clone())?;
+						let v = stk
+							.run(|stk| {
+								idiom(stk, ctx, opt, doc, v.clone().into(), name, args.clone())
+							})
+							.await?;
 						stk.run(|stk| v.get(stk, ctx, opt, doc, path.next())).await
 					}
 					// Otherwise return none
@@ -101,29 +106,37 @@ impl Value {
 							stk.run(|stk| v.get(stk, ctx, opt, doc, path.next())).await
 						}
 						Some(v) => stk.run(|stk| v.get(stk, ctx, opt, doc, path.next())).await,
-						None => Ok(Value::None),
+						None => {
+							stk.run(|stk| Value::None.get(stk, ctx, opt, doc, path.next())).await
+						}
 					},
 					Part::Graph(_) => match v.rid() {
 						Some(v) => {
 							let v = Value::Thing(v);
 							stk.run(|stk| v.get(stk, ctx, opt, doc, path)).await
 						}
-						None => Ok(Value::None),
+						None => {
+							stk.run(|stk| Value::None.get(stk, ctx, opt, doc, path.next())).await
+						}
 					},
 					Part::Field(f) => match v.get(f.as_str()) {
 						Some(v) => stk.run(|stk| v.get(stk, ctx, opt, doc, path.next())).await,
-						None => Ok(Value::None),
+						None => {
+							stk.run(|stk| Value::None.get(stk, ctx, opt, doc, path.next())).await
+						}
 					},
 					Part::Index(i) => match v.get(&i.to_string()) {
 						Some(v) => stk.run(|stk| v.get(stk, ctx, opt, doc, path.next())).await,
-						None => Ok(Value::None),
+						None => {
+							stk.run(|stk| Value::None.get(stk, ctx, opt, doc, path.next())).await
+						}
 					},
 					Part::Value(x) => match stk.run(|stk| x.compute(stk, ctx, opt, doc)).await? {
 						Value::Strand(f) => match v.get(f.as_str()) {
 							Some(v) => stk.run(|stk| v.get(stk, ctx, opt, doc, path.next())).await,
 							None => Ok(Value::None),
 						},
-						_ => Ok(Value::None),
+						_ => stk.run(|stk| Value::None.get(stk, ctx, opt, doc, path.next())).await,
 					},
 					Part::All => stk.run(|stk| self.get(stk, ctx, opt, doc, path.next())).await,
 					Part::Destructure(p) => {
@@ -140,8 +153,32 @@ impl Value {
 						stk.run(|stk| obj.get(stk, ctx, opt, doc, path.next())).await
 					}
 					Part::Method(name, args) => {
-						let v = idiom(ctx, doc, v.clone().into(), name, args.clone())?;
-						stk.run(|stk| v.get(stk, ctx, opt, doc, path.next())).await
+						let res = stk
+							.run(|stk| {
+								idiom(stk, ctx, opt, doc, v.clone().into(), name, args.clone())
+							})
+							.await;
+						let res = match &res {
+							Ok(_) => res,
+							Err(Error::InvalidFunction {
+								..
+							}) => match v.get(name) {
+								Some(v) => {
+									let fnc = Function::Anonymous(v.clone(), args.clone());
+									match stk.run(|stk| fnc.compute(stk, ctx, opt, doc)).await {
+										Ok(v) => Ok(v),
+										Err(Error::InvalidFunction {
+											..
+										}) => res,
+										e => e,
+									}
+								}
+								None => res,
+							},
+							_ => res,
+						}?;
+
+						stk.run(|stk| res.get(stk, ctx, opt, doc, path.next())).await
 					}
 					_ => Ok(Value::None),
 				},
@@ -160,20 +197,26 @@ impl Value {
 					}
 					Part::First => match v.first() {
 						Some(v) => stk.run(|stk| v.get(stk, ctx, opt, doc, path.next())).await,
-						None => Ok(Value::None),
+						None => {
+							stk.run(|stk| Value::None.get(stk, ctx, opt, doc, path.next())).await
+						}
 					},
 					Part::Last => match v.last() {
 						Some(v) => stk.run(|stk| v.get(stk, ctx, opt, doc, path.next())).await,
-						None => Ok(Value::None),
+						None => {
+							stk.run(|stk| Value::None.get(stk, ctx, opt, doc, path.next())).await
+						}
 					},
 					Part::Index(i) => match v.get(i.to_usize()) {
 						Some(v) => stk.run(|stk| v.get(stk, ctx, opt, doc, path.next())).await,
-						None => Ok(Value::None),
+						None => {
+							stk.run(|stk| Value::None.get(stk, ctx, opt, doc, path.next())).await
+						}
 					},
 					Part::Where(w) => {
 						let mut a = Vec::new();
 						for v in v.iter() {
-							let cur = v.into();
+							let cur = v.clone().into();
 							if stk
 								.run(|stk| w.compute(stk, ctx, opt, Some(&cur)))
 								.await?
@@ -190,10 +233,14 @@ impl Value {
 							Some(v) => stk.run(|stk| v.get(stk, ctx, opt, doc, path.next())).await,
 							None => Ok(Value::None),
 						},
-						_ => Ok(Value::None),
+						_ => stk.run(|stk| Value::None.get(stk, ctx, opt, doc, path.next())).await,
 					},
 					Part::Method(name, args) => {
-						let v = idiom(ctx, doc, v.clone().into(), name, args.clone())?;
+						let v = stk
+							.run(|stk| {
+								idiom(stk, ctx, opt, doc, v.clone().into(), name, args.clone())
+							})
+							.await?;
 						stk.run(|stk| v.get(stk, ctx, opt, doc, path.next())).await
 					}
 					_ => stk
@@ -281,7 +328,19 @@ impl Value {
 								}
 							}
 							Part::Method(name, args) => {
-								let v = idiom(ctx, doc, v.clone().into(), name, args.clone())?;
+								let v = stk
+									.run(|stk| {
+										idiom(
+											stk,
+											ctx,
+											opt,
+											doc,
+											v.clone().into(),
+											name,
+											args.clone(),
+										)
+									})
+									.await?;
 								stk.run(|stk| v.get(stk, ctx, opt, doc, path.next())).await
 							}
 							// This is a remote field expression
@@ -300,11 +359,22 @@ impl Value {
 				}
 				v => {
 					match p {
+						Part::Optional => match &self {
+							Value::None => Ok(Value::None),
+							_ => {
+								stk.run(|stk| {
+									Value::None.get(stk, ctx, opt, doc, path.next_method())
+								})
+								.await
+							}
+						},
 						Part::Flatten => {
 							stk.run(|stk| v.get(stk, ctx, opt, None, path.next())).await
 						}
 						Part::Method(name, args) => {
-							let v = idiom(ctx, doc, v.clone(), name, args.clone())?;
+							let v = stk
+								.run(|stk| idiom(stk, ctx, opt, doc, v.clone(), name, args.clone()))
+								.await?;
 							stk.run(|stk| v.get(stk, ctx, opt, doc, path.next())).await
 						}
 						// Only continue processing the path from the point that it contains a method
@@ -513,7 +583,7 @@ mod tests {
 		let doc = Value::parse("{ name: 'Tobie', something: [{ age: 34 }, { age: 36 }] }");
 		let idi = Idiom::parse("test.something[WHERE age > 35]");
 		let val = Value::parse("{ test: <future> { { something: something } } }");
-		let cur = (&doc).into();
+		let cur = doc.into();
 		let mut stack = reblessive::tree::TreeStack::new();
 		let res =
 			stack.enter(|stk| val.get(stk, &ctx, &opt, Some(&cur), &idi)).finish().await.unwrap();

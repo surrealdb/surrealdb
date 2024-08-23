@@ -1,9 +1,11 @@
 use super::tr::Transactor;
 use super::tx::Transaction;
+use super::version::Version;
 use crate::cf;
-use crate::ctx::Context;
+use crate::ctx::MutableContext;
 #[cfg(feature = "jwks")]
 use crate::dbs::capabilities::NetTarget;
+use crate::dbs::node::Timestamp;
 use crate::dbs::{
 	Attach, Capabilities, Executor, Notification, Options, Response, Session, Variables,
 };
@@ -15,6 +17,8 @@ use crate::idx::trees::store::IndexStores;
 use crate::kvs::clock::SizedClock;
 #[allow(unused_imports)]
 use crate::kvs::clock::SystemClock;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::kvs::index::IndexBuilder;
 use crate::kvs::{LockType, LockType::*, TransactionType, TransactionType::*};
 use crate::sql::{statements::DefineUserStatement, Base, Query, Value};
 use crate::syn;
@@ -55,8 +59,7 @@ const INITIAL_USER_ROLE: &str = "owner";
 #[allow(dead_code)]
 #[non_exhaustive]
 pub struct Datastore {
-	// The inner datastore type
-	inner: Inner,
+	transaction_factory: TransactionFactory,
 	// The unique id of this datastore, used in notifications
 	id: Uuid,
 	// Whether this datastore runs in strict mode by default
@@ -71,10 +74,11 @@ pub struct Datastore {
 	capabilities: Capabilities,
 	// Whether this datastore enables live query notifications to subscribers
 	pub(super) notification_channel: Option<(Sender<Notification>, Receiver<Notification>)>,
-	// Clock for tracking time. It is read only and accessible to all transactions. It is behind a mutex as tests may write to it.
-	pub(super) clock: Arc<SizedClock>,
 	// The index store cache
 	index_stores: IndexStores,
+	// The index asynchronous builder
+	#[cfg(not(target_arch = "wasm32"))]
+	index_builder: IndexBuilder,
 	#[cfg(feature = "jwks")]
 	// The JWKS object cache
 	jwks_cache: Arc<RwLock<JwksCache>>,
@@ -89,8 +93,80 @@ pub struct Datastore {
 	temporary_directory: Option<Arc<PathBuf>>,
 }
 
+#[derive(Clone)]
+pub(super) struct TransactionFactory {
+	// Clock for tracking time. It is read only and accessible to all transactions. It is behind a mutex as tests may write to it.
+	clock: Arc<SizedClock>,
+	// The inner datastore type
+	flavor: Arc<DatastoreFlavor>,
+}
+
+impl TransactionFactory {
+	#[allow(unreachable_code)]
+	pub async fn transaction(
+		&self,
+		write: TransactionType,
+		lock: LockType,
+	) -> Result<Transaction, Error> {
+		// Specify if the transaction is writeable
+		#[allow(unused_variables)]
+		let write = match write {
+			Read => false,
+			Write => true,
+		};
+		// Specify if the transaction is lockable
+		#[allow(unused_variables)]
+		let lock = match lock {
+			Pessimistic => true,
+			Optimistic => false,
+		};
+		// Create a new transaction on the datastore
+		#[allow(unused_variables)]
+		let inner = match self.flavor.as_ref() {
+			#[cfg(feature = "kv-mem")]
+			DatastoreFlavor::Mem(v) => {
+				let tx = v.transaction(write, lock).await?;
+				super::tr::Inner::Mem(tx)
+			}
+			#[cfg(feature = "kv-rocksdb")]
+			DatastoreFlavor::RocksDB(v) => {
+				let tx = v.transaction(write, lock).await?;
+				super::tr::Inner::RocksDB(tx)
+			}
+			#[cfg(feature = "kv-indxdb")]
+			DatastoreFlavor::IndxDB(v) => {
+				let tx = v.transaction(write, lock).await?;
+				super::tr::Inner::IndxDB(tx)
+			}
+			#[cfg(feature = "kv-tikv")]
+			DatastoreFlavor::TiKV(v) => {
+				let tx = v.transaction(write, lock).await?;
+				super::tr::Inner::TiKV(tx)
+			}
+			#[cfg(feature = "kv-fdb")]
+			DatastoreFlavor::FoundationDB(v) => {
+				let tx = v.transaction(write, lock).await?;
+				super::tr::Inner::FoundationDB(tx)
+			}
+			#[cfg(feature = "kv-surrealkv")]
+			DatastoreFlavor::SurrealKV(v) => {
+				let tx = v.transaction(write, lock).await?;
+				super::tr::Inner::SurrealKV(tx)
+			}
+			#[allow(unreachable_patterns)]
+			_ => unreachable!(),
+		};
+		Ok(Transaction::new(Transactor {
+			inner,
+			stash: super::stash::Stash::default(),
+			cf: cf::Writer::new(),
+			clock: self.clock.clone(),
+		}))
+	}
+}
+
 #[allow(clippy::large_enum_variant)]
-pub(super) enum Inner {
+pub(super) enum DatastoreFlavor {
 	#[cfg(feature = "kv-mem")]
 	Mem(super::mem::Datastore),
 	#[cfg(feature = "kv-rocksdb")]
@@ -108,19 +184,19 @@ pub(super) enum Inner {
 impl fmt::Display for Datastore {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		#![allow(unused_variables)]
-		match &self.inner {
+		match self.transaction_factory.flavor.as_ref() {
 			#[cfg(feature = "kv-mem")]
-			Inner::Mem(_) => write!(f, "memory"),
+			DatastoreFlavor::Mem(_) => write!(f, "memory"),
 			#[cfg(feature = "kv-rocksdb")]
-			Inner::RocksDB(_) => write!(f, "rocksdb"),
+			DatastoreFlavor::RocksDB(_) => write!(f, "rocksdb"),
 			#[cfg(feature = "kv-indxdb")]
-			Inner::IndxDB(_) => write!(f, "indxdb"),
+			DatastoreFlavor::IndxDB(_) => write!(f, "indxdb"),
 			#[cfg(feature = "kv-tikv")]
-			Inner::TiKV(_) => write!(f, "tikv"),
+			DatastoreFlavor::TiKV(_) => write!(f, "tikv"),
 			#[cfg(feature = "kv-fdb")]
-			Inner::FoundationDB(_) => write!(f, "fdb"),
+			DatastoreFlavor::FoundationDB(_) => write!(f, "fdb"),
 			#[cfg(feature = "kv-surrealkv")]
-			Inner::SurrealKV(_) => write!(f, "surrealkv"),
+			DatastoreFlavor::SurrealKV(_) => write!(f, "surrealkv"),
 			#[allow(unreachable_patterns)]
 			_ => unreachable!(),
 		}
@@ -149,7 +225,7 @@ impl Datastore {
 	/// # use surrealdb_core::err::Error;
 	/// # #[tokio::main]
 	/// # async fn main() -> Result<(), Error> {
-	/// let ds = Datastore::new("file://temp.db").await?;
+	/// let ds = Datastore::new("surrealkv://temp.skv").await?;
 	/// # Ok(())
 	/// # }
 	/// ```
@@ -165,8 +241,37 @@ impl Datastore {
 	/// # Ok(())
 	/// # }
 	/// ```
-	pub async fn new(path: &str) -> Result<Datastore, Error> {
+	pub async fn new(path: &str) -> Result<Self, Error> {
 		Self::new_with_clock(path, None).await
+	}
+
+	#[cfg(debug_assertions)]
+	/// Create a new datastore with the same persistent data (inner), with flushed cache.
+	/// Simulating a server restart
+	pub fn restart(self) -> Self {
+		Self {
+			id: self.id,
+			strict: self.strict,
+			auth_enabled: self.auth_enabled,
+			query_timeout: self.query_timeout,
+			transaction_timeout: self.transaction_timeout,
+			capabilities: self.capabilities,
+			notification_channel: self.notification_channel,
+			index_stores: Default::default(),
+			#[cfg(not(target_arch = "wasm32"))]
+			index_builder: IndexBuilder::new(self.transaction_factory.clone()),
+			#[cfg(feature = "jwks")]
+			jwks_cache: Arc::new(Default::default()),
+			#[cfg(any(
+				feature = "kv-mem",
+				feature = "kv-surrealkv",
+				feature = "kv-rocksdb",
+				feature = "kv-fdb",
+				feature = "kv-tikv",
+			))]
+			temporary_directory: self.temporary_directory,
+			transaction_factory: self.transaction_factory,
+		}
 	}
 
 	#[allow(unused_variables)]
@@ -175,13 +280,13 @@ impl Datastore {
 		clock: Option<Arc<SizedClock>>,
 	) -> Result<Datastore, Error> {
 		// Initiate the desired datastore
-		let (inner, clock): (Result<Inner, Error>, Arc<SizedClock>) = match path {
+		let (flavor, clock): (Result<DatastoreFlavor, Error>, Arc<SizedClock>) = match path {
 			// Initiate an in-memory datastore
 			"memory" => {
 				#[cfg(feature = "kv-mem")]
 				{
 					info!(target: TARGET, "Starting kvs store in {}", path);
-					let v = super::mem::Datastore::new().await.map(Inner::Mem);
+					let v = super::mem::Datastore::new().await.map(DatastoreFlavor::Mem);
 					let c = clock.unwrap_or_else(|| Arc::new(SizedClock::system()));
 					info!(target: TARGET, "Started kvs store in {}", path);
 					Ok((v, c))
@@ -194,9 +299,10 @@ impl Datastore {
 				#[cfg(feature = "kv-rocksdb")]
 				{
 					info!(target: TARGET, "Starting kvs store at {}", path);
+					warn!("file:// is deprecated, please use surrealkv:// or rocksdb://");
 					let s = s.trim_start_matches("file://");
 					let s = s.trim_start_matches("file:");
-					let v = super::rocksdb::Datastore::new(s).await.map(Inner::RocksDB);
+					let v = super::rocksdb::Datastore::new(s).await.map(DatastoreFlavor::RocksDB);
 					let c = clock.unwrap_or_else(|| Arc::new(SizedClock::system()));
 					info!(target: TARGET, "Started kvs store at {}", path);
 					Ok((v, c))
@@ -211,7 +317,7 @@ impl Datastore {
 					info!(target: TARGET, "Starting kvs store at {}", path);
 					let s = s.trim_start_matches("rocksdb://");
 					let s = s.trim_start_matches("rocksdb:");
-					let v = super::rocksdb::Datastore::new(s).await.map(Inner::RocksDB);
+					let v = super::rocksdb::Datastore::new(s).await.map(DatastoreFlavor::RocksDB);
 					let c = clock.unwrap_or_else(|| Arc::new(SizedClock::system()));
 					info!(target: TARGET, "Started kvs store at {}", path);
 					Ok((v, c))
@@ -226,7 +332,7 @@ impl Datastore {
 					info!(target: TARGET, "Starting kvs store at {}", path);
 					let s = s.trim_start_matches("indxdb://");
 					let s = s.trim_start_matches("indxdb:");
-					let v = super::indxdb::Datastore::new(s).await.map(Inner::IndxDB);
+					let v = super::indxdb::Datastore::new(s).await.map(DatastoreFlavor::IndxDB);
 					let c = clock.unwrap_or_else(|| Arc::new(SizedClock::system()));
 					info!(target: TARGET, "Started kvs store at {}", path);
 					Ok((v, c))
@@ -241,7 +347,7 @@ impl Datastore {
 					info!(target: TARGET, "Connecting to kvs store at {}", path);
 					let s = s.trim_start_matches("tikv://");
 					let s = s.trim_start_matches("tikv:");
-					let v = super::tikv::Datastore::new(s).await.map(Inner::TiKV);
+					let v = super::tikv::Datastore::new(s).await.map(DatastoreFlavor::TiKV);
 					let c = clock.unwrap_or_else(|| Arc::new(SizedClock::system()));
 					info!(target: TARGET, "Connected to kvs store at {}", path);
 					Ok((v, c))
@@ -256,7 +362,7 @@ impl Datastore {
 					info!(target: TARGET, "Connecting to kvs store at {}", path);
 					let s = s.trim_start_matches("fdb://");
 					let s = s.trim_start_matches("fdb:");
-					let v = super::fdb::Datastore::new(s).await.map(Inner::FoundationDB);
+					let v = super::fdb::Datastore::new(s).await.map(DatastoreFlavor::FoundationDB);
 					let c = clock.unwrap_or_else(|| Arc::new(SizedClock::system()));
 					info!(target: TARGET, "Connected to kvs store at {}", path);
 					Ok((v, c))
@@ -271,7 +377,8 @@ impl Datastore {
 					info!(target: TARGET, "Starting kvs store at {}", path);
 					let s = s.trim_start_matches("surrealkv://");
 					let s = s.trim_start_matches("surrealkv:");
-					let v = super::surrealkv::Datastore::new(s).await.map(Inner::SurrealKV);
+					let v =
+						super::surrealkv::Datastore::new(s).await.map(DatastoreFlavor::SurrealKV);
 					let c = clock.unwrap_or_else(|| Arc::new(SizedClock::system()));
 					info!(target: TARGET, "Started to kvs store at {}", path);
 					Ok((v, c))
@@ -286,27 +393,34 @@ impl Datastore {
 			}
 		}?;
 		// Set the properties on the datastore
-		inner.map(|inner| Self {
-			id: Uuid::new_v4(),
-			inner,
-			clock,
-			strict: false,
-			auth_enabled: false,
-			query_timeout: None,
-			transaction_timeout: None,
-			notification_channel: None,
-			capabilities: Capabilities::default(),
-			index_stores: IndexStores::default(),
-			#[cfg(feature = "jwks")]
-			jwks_cache: Arc::new(RwLock::new(JwksCache::new())),
-			#[cfg(any(
-				feature = "kv-mem",
-				feature = "kv-surrealkv",
-				feature = "kv-rocksdb",
-				feature = "kv-fdb",
-				feature = "kv-tikv",
-			))]
-			temporary_directory: None,
+		flavor.map(|flavor| {
+			let tf = TransactionFactory {
+				clock,
+				flavor: Arc::new(flavor),
+			};
+			Self {
+				id: Uuid::new_v4(),
+				transaction_factory: tf.clone(),
+				strict: false,
+				auth_enabled: false,
+				query_timeout: None,
+				transaction_timeout: None,
+				notification_channel: None,
+				capabilities: Capabilities::default(),
+				index_stores: IndexStores::default(),
+				#[cfg(not(target_arch = "wasm32"))]
+				index_builder: IndexBuilder::new(tf),
+				#[cfg(feature = "jwks")]
+				jwks_cache: Arc::new(RwLock::new(JwksCache::new())),
+				#[cfg(any(
+					feature = "kv-mem",
+					feature = "kv-surrealkv",
+					feature = "kv-rocksdb",
+					feature = "kv-fdb",
+					feature = "kv-tikv",
+				))]
+				temporary_directory: None,
+			}
 		})
 	}
 
@@ -389,15 +503,65 @@ impl Datastore {
 		&self.jwks_cache
 	}
 
+	pub(super) async fn clock_now(&self) -> Timestamp {
+		self.transaction_factory.clock.now().await
+	}
+
 	// Initialise the cluster and run bootstrap utilities
 	#[instrument(err, level = "trace", target = "surrealdb::core::kvs::ds", skip_all)]
-	pub async fn bootstrap(&self) -> Result<(), Error> {
-		// Insert this node in the cluster
-		self.insert_node(self.id).await?;
-		// Mark expired nodes as archived
-		self.expire_nodes().await?;
+	pub async fn check_version(&self) -> Result<Version, Error> {
+		// Start a new writeable transaction
+		let txn = self.transaction(Write, Pessimistic).await?.enclose();
+		// Create the key where the version is stored
+		let key = crate::key::version::new();
+		// Check if a version is already set in storage
+		let val = match catch!(txn, txn.get(key.clone(), None)) {
+			// There is a version set in the storage
+			Some(v) => {
+				// Attempt to decode the current stored version
+				let val = TryInto::<Version>::try_into(v);
+				// Check for errors, and cancel the transaction
+				match val {
+					// There was en error getting the version
+					Err(err) => {
+						// We didn't write anything, so just rollback
+						txn.cancel().await?;
+						// Return the error
+						return Err(err);
+					}
+					// We could decode the version correctly
+					Ok(val) => val,
+				}
+			}
+			// There is no version set in the storage
+			None => {
+				// Fetch any keys immediately following the version key
+				let rng = crate::key::version::proceeding();
+				let keys = catch!(txn, txn.keys(rng, 1));
+				// Check the storage if there are any other keys set
+				let val = if keys.is_empty() {
+					// There are no keys set in storage, so this is a new database
+					Version::latest()
+				} else {
+					// There were keys in storage, so this is an upgrade
+					Version::v1()
+				};
+				// Convert the version to binary
+				let bytes: Vec<u8> = val.into();
+				// Attempt to set the current version in storage
+				catch!(txn, txn.set(key, bytes, None));
+				// We set the version, so commit the transaction
+				catch!(txn, txn.commit());
+				// Return the current version
+				val
+			}
+		};
+		// Check we are running the latest version
+		if !val.is_latest() {
+			return Err(Error::OutdatedStorageVersion);
+		}
 		// Everything ok
-		Ok(())
+		Ok(val)
 	}
 
 	/// Setup the initial cluster access credentials
@@ -414,7 +578,9 @@ impl Datastore {
 			// Create and new root user definition
 			let stm = DefineUserStatement::from((Base::Root, user, pass, INITIAL_USER_ROLE));
 			let opt = Options::new().with_auth(Arc::new(Auth::for_root(Role::Owner)));
-			let ctx = Context::default().with_transaction(txn.clone());
+			let mut ctx = MutableContext::default();
+			ctx.set_transaction(txn.clone());
+			let ctx = ctx.freeze();
 			catch!(txn, stm.compute(&ctx, &opt, None));
 			// We added a user, so commit the transaction
 			txn.commit().await
@@ -425,6 +591,17 @@ impl Datastore {
 			// We didn't write anything, so just rollback
 			txn.cancel().await
 		}
+	}
+
+	// Initialise the cluster and run bootstrap utilities
+	#[instrument(err, level = "trace", target = "surrealdb::core::kvs::ds", skip_all)]
+	pub async fn bootstrap(&self) -> Result<(), Error> {
+		// Insert this node in the cluster
+		self.insert_node(self.id).await?;
+		// Mark expired nodes as archived
+		self.expire_nodes().await?;
+		// Everything ok
+		Ok(())
 	}
 
 	// tick is called periodically to perform maintenance tasks.
@@ -549,60 +726,7 @@ impl Datastore {
 		write: TransactionType,
 		lock: LockType,
 	) -> Result<Transaction, Error> {
-		// Specify if the transaction is writeable
-		#[allow(unused_variables)]
-		let write = match write {
-			Read => false,
-			Write => true,
-		};
-		// Specify if the transaction is lockable
-		#[allow(unused_variables)]
-		let lock = match lock {
-			Pessimistic => true,
-			Optimistic => false,
-		};
-		// Create a new transaction on the datastore
-		#[allow(unused_variables)]
-		let inner = match &self.inner {
-			#[cfg(feature = "kv-mem")]
-			Inner::Mem(v) => {
-				let tx = v.transaction(write, lock).await?;
-				super::tr::Inner::Mem(tx)
-			}
-			#[cfg(feature = "kv-rocksdb")]
-			Inner::RocksDB(v) => {
-				let tx = v.transaction(write, lock).await?;
-				super::tr::Inner::RocksDB(tx)
-			}
-			#[cfg(feature = "kv-indxdb")]
-			Inner::IndxDB(v) => {
-				let tx = v.transaction(write, lock).await?;
-				super::tr::Inner::IndxDB(tx)
-			}
-			#[cfg(feature = "kv-tikv")]
-			Inner::TiKV(v) => {
-				let tx = v.transaction(write, lock).await?;
-				super::tr::Inner::TiKV(tx)
-			}
-			#[cfg(feature = "kv-fdb")]
-			Inner::FoundationDB(v) => {
-				let tx = v.transaction(write, lock).await?;
-				super::tr::Inner::FoundationDB(tx)
-			}
-			#[cfg(feature = "kv-surrealkv")]
-			Inner::SurrealKV(v) => {
-				let tx = v.transaction(write, lock).await?;
-				super::tr::Inner::SurrealKV(tx)
-			}
-			#[allow(unreachable_patterns)]
-			_ => unreachable!(),
-		};
-		Ok(Transaction::new(Transactor {
-			inner,
-			stash: super::stash::Stash::default(),
-			cf: cf::Writer::new(),
-			clock: self.clock.clone(),
-		}))
+		self.transaction_factory.transaction(write, lock).await
 	}
 
 	/// Parse and execute an SQL query
@@ -684,10 +808,12 @@ impl Datastore {
 		// Create a new query executor
 		let mut exe = Executor::new(self);
 		// Create a default context
-		let mut ctx = Context::from_ds(
+		let mut ctx = MutableContext::from_ds(
 			self.query_timeout,
 			self.capabilities.clone(),
 			self.index_stores.clone(),
+			#[cfg(not(target_arch = "wasm32"))]
+			self.index_builder.clone(),
 			#[cfg(any(
 				feature = "kv-mem",
 				feature = "kv-surrealkv",
@@ -702,11 +828,11 @@ impl Datastore {
 			ctx.add_notifications(Some(&channel.0));
 		}
 		// Start an execution context
-		let ctx = sess.context(ctx);
+		sess.context(&mut ctx);
 		// Store the query variables
-		let ctx = vars.attach(ctx)?;
+		vars.attach(&mut ctx)?;
 		// Process all statements
-		exe.execute(ctx, opt, ast).await
+		exe.execute(ctx.freeze(), opt, ast).await
 	}
 
 	/// Ensure a SQL [`Value`] is fully computed
@@ -760,7 +886,7 @@ impl Datastore {
 			.with_strict(self.strict)
 			.with_auth_enabled(self.auth_enabled);
 		// Create a default context
-		let mut ctx = Context::default();
+		let mut ctx = MutableContext::default();
 		// Set context capabilities
 		ctx.add_capabilities(self.capabilities.clone());
 		// Set the global query timeout
@@ -772,13 +898,15 @@ impl Datastore {
 			ctx.add_notifications(Some(&channel.0));
 		}
 		// Start an execution context
-		let ctx = sess.context(ctx);
+		sess.context(&mut ctx);
 		// Store the query variables
-		let ctx = vars.attach(ctx)?;
+		vars.attach(&mut ctx)?;
 		// Start a new transaction
 		let txn = self.transaction(val.writeable().into(), Optimistic).await?.enclose();
 		// Store the transaction
-		let ctx = ctx.with_transaction(txn.clone());
+		ctx.set_transaction(txn.clone());
+		// Freeze the context
+		let ctx = ctx.freeze();
 		// Compute the value
 		let res = stack.enter(|stk| val.compute(stk, &ctx, &opt, None)).finish().await;
 		// Store any data
@@ -810,14 +938,14 @@ impl Datastore {
 	///     let ds = Datastore::new("memory").await?;
 	///     let ses = Session::owner();
 	///     let val = Value::Future(Box::new(Future::from(Value::Bool(true))));
-	///     let res = ds.evaluate(val, &ses, None).await?;
+	///     let res = ds.evaluate(&val, &ses, None).await?;
 	///     Ok(())
 	/// }
 	/// ```
 	#[instrument(level = "debug", target = "surrealdb::core::kvs::ds", skip_all)]
 	pub async fn evaluate(
 		&self,
-		val: Value,
+		val: &Value,
 		sess: &Session,
 		vars: Variables,
 	) -> Result<Value, Error> {
@@ -837,7 +965,7 @@ impl Datastore {
 			.with_strict(self.strict)
 			.with_auth_enabled(self.auth_enabled);
 		// Create a default context
-		let mut ctx = Context::default();
+		let mut ctx = MutableContext::default();
 		// Set context capabilities
 		ctx.add_capabilities(self.capabilities.clone());
 		// Set the global query timeout
@@ -849,13 +977,15 @@ impl Datastore {
 			ctx.add_notifications(Some(&channel.0));
 		}
 		// Start an execution context
-		let ctx = sess.context(ctx);
+		sess.context(&mut ctx);
 		// Store the query variables
-		let ctx = vars.attach(ctx)?;
+		vars.attach(&mut ctx)?;
 		// Start a new transaction
 		let txn = self.transaction(val.writeable().into(), Optimistic).await?.enclose();
 		// Store the transaction
-		let ctx = ctx.with_transaction(txn.clone());
+		ctx.set_transaction(txn.clone());
+		// Free the context
+		let ctx = ctx.freeze();
 		// Compute the value
 		let res = stack.enter(|stk| val.compute(stk, &ctx, &opt, None)).finish().await;
 		// Store any data
@@ -984,13 +1114,15 @@ mod test {
 			.with_futures(true);
 
 		// Create a default context
-		let mut ctx = Context::default();
+		let mut ctx = MutableContext::default();
 		// Set context capabilities
 		ctx.add_capabilities(dbs.capabilities.clone());
 		// Start a new transaction
 		let txn = dbs.transaction(val.writeable().into(), Optimistic).await?;
 		// Store the transaction
-		let ctx = ctx.with_transaction(txn.enclose());
+		ctx.set_transaction(txn.enclose());
+		// Freeze the context
+		let ctx = ctx.freeze();
 		// Compute the value
 		let mut stack = reblessive::tree::TreeStack::new();
 		let res = stack.enter(|stk| val.compute(stk, &ctx, &opt, None)).finish().await.unwrap();

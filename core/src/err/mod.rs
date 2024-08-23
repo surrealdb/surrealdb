@@ -5,7 +5,6 @@ use crate::sql::idiom::Idiom;
 use crate::sql::index::Distance;
 use crate::sql::thing::Thing;
 use crate::sql::value::Value;
-use crate::sql::TableType;
 use crate::syn::error::RenderedError as RenderedParserError;
 use crate::vs::Error as VersionstampError;
 use base64::DecodeError as Base64Error;
@@ -226,6 +225,14 @@ pub enum Error {
 	InvalidArguments {
 		name: String,
 		message: String,
+	},
+
+	/// The wrong quantity or magnitude of arguments was given for the specified function
+	#[error("There was a problem running the {name} function. Expected this function to return a value of type {check}, but found {value}")]
+	FunctionCheck {
+		name: String,
+		value: String,
+		check: String,
 	},
 
 	/// The URL is invalid
@@ -567,7 +574,7 @@ pub enum Error {
 	TableCheck {
 		thing: String,
 		relation: bool,
-		target_type: TableType,
+		target_type: String,
 	},
 
 	/// The specified field did not conform to the field type check
@@ -585,6 +592,14 @@ pub enum Error {
 		thing: String,
 		value: String,
 		field: Idiom,
+		check: String,
+	},
+
+	/// The specified value did not conform to the LET type check
+	#[error("Found {value} for param ${name}, but expected a {check}")]
+	SetCheck {
+		value: String,
+		name: String,
 		check: String,
 	},
 
@@ -917,6 +932,12 @@ pub enum Error {
 		db: String,
 	},
 
+	/// A database index entry for the specified table is already building
+	#[error("Database index `{index}` is currently building")]
+	IndexAlreadyBuilding {
+		index: String,
+	},
+
 	/// The session has expired either because the token used
 	/// to establish it has expired or because an expiration
 	/// was explicitly defined when establishing it
@@ -932,43 +953,67 @@ pub enum Error {
 	Serialization(String),
 
 	/// The requested root access method already exists
-	#[error("The root access method '{value}' already exists")]
+	#[error("The root access method '{ac}' already exists")]
 	AccessRootAlreadyExists {
-		value: String,
+		ac: String,
 	},
 
 	/// The requested namespace access method already exists
-	#[error("The access method '{value}' already exists in the namespace '{ns}'")]
+	#[error("The access method '{ac}' already exists in the namespace '{ns}'")]
 	AccessNsAlreadyExists {
-		value: String,
+		ac: String,
 		ns: String,
 	},
 
 	/// The requested database access method already exists
-	#[error("The access method '{value}' already exists in the database '{db}'")]
+	#[error("The access method '{ac}' already exists in the database '{db}'")]
 	AccessDbAlreadyExists {
-		value: String,
+		ac: String,
 		ns: String,
 		db: String,
 	},
 
 	/// The requested root access method does not exist
-	#[error("The root access method '{value}' does not exist")]
+	#[error("The root access method '{ac}' does not exist")]
 	AccessRootNotFound {
-		value: String,
+		ac: String,
+	},
+
+	/// The requested root access grant does not exist
+	#[error("The root access grant '{gr}' does not exist")]
+	AccessGrantRootNotFound {
+		ac: String,
+		gr: String,
 	},
 
 	/// The requested namespace access method does not exist
-	#[error("The access method '{value}' does not exist in the namespace '{ns}'")]
+	#[error("The access method '{ac}' does not exist in the namespace '{ns}'")]
 	AccessNsNotFound {
-		value: String,
+		ac: String,
+		ns: String,
+	},
+
+	/// The requested namespace access grant does not exist
+	#[error("The access grant '{gr}' does not exist in the namespace '{ns}'")]
+	AccessGrantNsNotFound {
+		ac: String,
+		gr: String,
 		ns: String,
 	},
 
 	/// The requested database access method does not exist
-	#[error("The access method '{value}' does not exist in the database '{db}'")]
+	#[error("The access method '{ac}' does not exist in the database '{db}'")]
 	AccessDbNotFound {
-		value: String,
+		ac: String,
+		ns: String,
+		db: String,
+	},
+
+	/// The requested database access grant does not exist
+	#[error("The access grant '{gr}' does not exist in the database '{db}'")]
+	AccessGrantDbNotFound {
+		ac: String,
+		gr: String,
 		ns: String,
 		db: String,
 	},
@@ -1001,6 +1046,18 @@ pub enum Error {
 	#[error("This record access method does not allow signin")]
 	AccessRecordNoSignin,
 
+	#[error("This bearer access method requires a key to be provided")]
+	AccessBearerMissingKey,
+
+	#[error("This bearer access grant has an invalid format")]
+	AccessGrantBearerInvalid,
+
+	#[error("This access grant has an invalid subject")]
+	AccessGrantInvalidSubject,
+
+	#[error("This access grant has been revoked")]
+	AccessGrantRevoked,
+
 	/// Found a table name for the record but this is not a valid table
 	#[error("Found {value} for the Record ID but this is not a valid table name")]
 	TbInvalid {
@@ -1019,6 +1076,31 @@ pub enum Error {
 	UnsupportedDestructure {
 		variant: String,
 	},
+
+	#[doc(hidden)]
+	#[error("The underlying datastore does not support versioned queries")]
+	UnsupportedVersionedQueries,
+
+	/// Found an unexpected value in a range
+	#[error("Expected a range value of '{expected}', but found '{found}'")]
+	InvalidRangeValue {
+		expected: String,
+		found: String,
+	},
+
+	/// Found an unexpected value in a range
+	#[error("The range cannot exceed a size of {max} for this operation")]
+	RangeTooBig {
+		max: usize,
+	},
+
+	/// There was an invalid storage version stored in the database
+	#[error("There was an invalid storage version stored in the database")]
+	InvalidStorageVersion,
+
+	/// There was an outdated storage version stored in the database
+	#[error("The data stored on disk is out-of-date with this version. Please follow the upgrade guides in the documentation")]
+	OutdatedStorageVersion,
 }
 
 impl From<Error> for String {
@@ -1150,5 +1232,34 @@ impl Serialize for Error {
 		S: serde::Serializer,
 	{
 		serializer.serialize_str(self.to_string().as_str())
+	}
+}
+impl Error {
+	pub fn set_check_from_coerce(self, name: String) -> Error {
+		match self {
+			Error::CoerceTo {
+				from,
+				into,
+			} => Error::SetCheck {
+				name,
+				value: from.to_string(),
+				check: into,
+			},
+			e => e,
+		}
+	}
+
+	pub fn function_check_from_coerce(self, name: impl Into<String>) -> Error {
+		match self {
+			Error::CoerceTo {
+				from,
+				into,
+			} => Error::FunctionCheck {
+				name: name.into(),
+				value: from.to_string(),
+				check: into,
+			},
+			e => e,
+		}
 	}
 }

@@ -1,4 +1,4 @@
-//! Stores a DEFINE ACCESS ON ROOT config definition
+//! Stores a DEFINE ACCESS ON ROOT configuration
 use crate::key::category::Categorise;
 use crate::key::category::Category;
 use derive::Key;
@@ -19,13 +19,13 @@ pub fn new(ac: &str) -> Ac<'_> {
 }
 
 pub fn prefix() -> Vec<u8> {
-	let mut k = super::all::new().encode().unwrap();
+	let mut k = crate::key::root::all::new().encode().unwrap();
 	k.extend_from_slice(&[b'!', b'a', b'c', 0x00]);
 	k
 }
 
 pub fn suffix() -> Vec<u8> {
-	let mut k = super::all::new().encode().unwrap();
+	let mut k = crate::key::root::all::new().encode().unwrap();
 	k.extend_from_slice(&[b'!', b'a', b'c', 0xff]);
 	k
 }

@@ -4,10 +4,10 @@ use crate::dbs::{Statement, Workable};
 use crate::doc::Document;
 use crate::err::Error;
 
-impl<'a> Document<'a> {
+impl Document {
 	pub async fn relation(
 		&mut self,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		opt: &Options,
 		stm: &Statement<'_>,
 	) -> Result<(), Error> {
@@ -20,7 +20,7 @@ impl<'a> Document<'a> {
 					return Err(Error::TableCheck {
 						thing: rid.to_string(),
 						relation: false,
-						target_type: tb.kind.clone(),
+						target_type: tb.kind.to_string(),
 					});
 				}
 			}
@@ -29,7 +29,7 @@ impl<'a> Document<'a> {
 					return Err(Error::TableCheck {
 						thing: rid.to_string(),
 						relation: false,
-						target_type: tb.kind.clone(),
+						target_type: tb.kind.to_string(),
 					});
 				}
 			}
@@ -38,7 +38,7 @@ impl<'a> Document<'a> {
 					return Err(Error::TableCheck {
 						thing: rid.to_string(),
 						relation: true,
-						target_type: tb.kind.clone(),
+						target_type: tb.kind.to_string(),
 					});
 				}
 			}
@@ -48,7 +48,7 @@ impl<'a> Document<'a> {
 						return Err(Error::TableCheck {
 							thing: rid.to_string(),
 							relation: true,
-							target_type: tb.kind.clone(),
+							target_type: tb.kind.to_string(),
 						});
 					}
 				}
@@ -57,7 +57,7 @@ impl<'a> Document<'a> {
 						return Err(Error::TableCheck {
 							thing: rid.to_string(),
 							relation: false,
-							target_type: tb.kind.clone(),
+							target_type: tb.kind.to_string(),
 						});
 					}
 				}

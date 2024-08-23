@@ -11,6 +11,7 @@ pub struct Package;
 impl_module_def!(
 	Package,
 	"type",
+	"array" => run,
 	"bool" => run,
 	"bytes" => run,
 	"datetime" => run,
