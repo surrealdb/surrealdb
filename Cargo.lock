@@ -4902,7 +4902,7 @@ dependencies = [
 
 [[package]]
 name = "revision"
-version = "0.8.0"
+version = "0.9.0"
 dependencies = [
  "chrono",
  "geo 0.26.0",
@@ -4928,7 +4928,7 @@ dependencies = [
 
 [[package]]
 name = "revision-derive"
-version = "0.8.0"
+version = "0.9.0"
 dependencies = [
  "proc-macro2",
  "quote",

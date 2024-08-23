@@ -103,14 +103,14 @@ reqwest = { version = "0.12.5", default-features = false, features = [
     "gzip",
     "http2",
 ] }
-revision = { version = "0.8.0", features = [
+revision = { version = "0.9.0", features = [
     "chrono",
     "geo",
     "roaring",
     "regex",
     "rust_decimal",
     "uuid",
-], path = "../revision" }
+] }
 rmpv = "1.0.1"
 rust_decimal = "1.36.0"
 rustyline = { version = "12.0.0", features = ["derive"] }
