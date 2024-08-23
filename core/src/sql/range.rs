@@ -223,30 +223,6 @@ fn to_i64(v: Value) -> Result<i64, Error> {
 #[non_exhaustive]
 pub struct OldRange {
 	pub tb: String,
-	pub beg: Bound<OldId>,
-	pub end: Bound<OldId>,
-}
-
-#[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize, Key, Hash)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
-pub enum OldId {
-	Number(i64),
-	String(String),
-	Array(Array),
-	Object(Object),
-	Generate(Gen),
-}
-
-impl From<OldId> for Id {
-	fn from(v: OldId) -> Self {
-		match v {
-			OldId::Number(n) => Self::Number(n),
-			OldId::String(s) => Self::String(s),
-			OldId::Array(a) => Self::Array(a),
-			OldId::Object(o) => Self::Object(o),
-			OldId::Generate(g) => Self::Generate(g),
-		}
-	}
+	pub beg: Bound<Id>,
+	pub end: Bound<Id>,
 }

@@ -148,16 +148,8 @@ impl Value {
 		Ok(Value::Thing(Thing {
 			tb: fields.0.tb,
 			id: Id::Range(Box::new(IdRange {
-				beg: match fields.0.beg {
-					Bound::Unbounded => Bound::Unbounded,
-					Bound::Excluded(id) => Bound::Excluded(id.into()),
-					Bound::Included(id) => Bound::Included(id.into()),
-				},
-				end: match fields.0.end {
-					Bound::Unbounded => Bound::Unbounded,
-					Bound::Excluded(id) => Bound::Excluded(id.into()),
-					Bound::Included(id) => Bound::Included(id.into()),
-				},
+				beg: fields.0.beg,
+				end: fields.0.end,
 			})),
 		}))
 	}
