@@ -42,7 +42,7 @@ impl<'a> Gr<'a> {
 	pub fn new(ac: &'a str, gr: &'a str) -> Self {
 		Self {
 			__: b'/',
-			_a: b'*',
+			_a: b'&',
 			ac,
 			_b: b'!',
 			_c: b'g',
@@ -63,7 +63,7 @@ mod tests {
 			"testgr",
 		);
 		let enc = Gr::encode(&val).unwrap();
-		assert_eq!(enc, b"/*testac\0!grtestgr\0");
+		assert_eq!(enc, b"/&testac\0!grtestgr\0");
 
 		let dec = Gr::decode(&enc).unwrap();
 		assert_eq!(val, dec);
@@ -72,12 +72,12 @@ mod tests {
 	#[test]
 	fn test_prefix() {
 		let val = super::prefix("testac");
-		assert_eq!(val, b"/*testac\0!gr\0");
+		assert_eq!(val, b"/&testac\0!gr\0");
 	}
 
 	#[test]
 	fn test_suffix() {
 		let val = super::suffix("testac");
-		assert_eq!(val, b"/*testac\0!gr\xff");
+		assert_eq!(val, b"/&testac\0!gr\xff");
 	}
 }
