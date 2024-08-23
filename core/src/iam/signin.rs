@@ -1716,7 +1716,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 					)
 					AUTHENTICATE (
 						-- If logging in with a company account, the session will be authenticated as the first owner
-						IF meta::tb($auth) = "company" {
+						IF record::tb($auth) = "company" {
 							RETURN SELECT VALUE owner FROM company WHERE id = $auth
 						}
 					)
