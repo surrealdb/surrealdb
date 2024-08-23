@@ -25,7 +25,7 @@ pub fn new<'a>(ns: &'a str, db: &'a str, tb: &'a str, id: &Id) -> Thing<'a> {
 
 pub fn prefix(ns: &str, db: &str, tb: &str) -> Vec<u8> {
 	let mut k = crate::key::table::all::new(ns, db, tb).encode().unwrap();
-	k.extend_from_slice(b"*");
+	k.extend_from_slice(b"*\x00");
 	k
 }
 
