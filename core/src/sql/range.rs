@@ -239,14 +239,14 @@ pub enum OldId {
 	Generate(Gen),
 }
 
-impl Into<Id> for OldId {
-	fn into(self) -> Id {
-		match self {
-			OldId::Number(n) => Id::Number(n),
-			OldId::String(s) => Id::String(s),
-			OldId::Array(a) => Id::Array(a),
-			OldId::Object(o) => Id::Object(o),
-			OldId::Generate(g) => Id::Generate(g),
+impl From<OldId> for Id {
+	fn from(v: OldId) -> Self {
+		match v {
+			OldId::Number(n) => Self::Number(n),
+			OldId::String(s) => Self::String(s),
+			OldId::Array(a) => Self::Array(a),
+			OldId::Object(o) => Self::Object(o),
+			OldId::Generate(g) => Self::Generate(g),
 		}
 	}
 }
