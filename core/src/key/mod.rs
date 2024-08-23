@@ -1,5 +1,7 @@
 //! How the keys are structured in the key value store
 ///
+/// crate::key::version                  !v
+///
 /// crate::key::root::all                /
 /// crate::key::root::ac                 /!{ac}
 /// crate::key::root::hb                 /!hb{ts}/{nd}
@@ -77,3 +79,4 @@ pub(crate) mod node;
 pub(crate) mod root;
 pub(crate) mod table;
 pub(crate) mod thing;
+pub(crate) mod version;
