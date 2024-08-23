@@ -10,6 +10,8 @@ pub(crate) trait Categorise {
 #[non_exhaustive]
 #[allow(unused)]
 pub enum Category {
+	/// crate::key::storage::version         /sv
+	Version,
 	/// crate::key::root::all                /
 	Root,
 	/// crate::key::root::access::ac         /!ac{ac}
@@ -154,6 +156,7 @@ pub enum Category {
 impl Display for Category {
 	fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
 		let name = match self {
+			Self::Version => "StorageVersion",
 			Self::Root => "Root",
 			Self::Access => "Access",
 			Self::AccessRoot => "AccessRoot",

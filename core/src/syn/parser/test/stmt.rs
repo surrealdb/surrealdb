@@ -1169,9 +1169,6 @@ fn parse_define_access_record() {
 							key: "foo".to_string(),
 						}),
 					},
-					// TODO(gguillemas): Field kept to gracefully handle breaking change.
-					// Remove when "revision" crate allows doing so.
-					authenticate: None
 				}),
 				authenticate: None,
 				duration: AccessDuration {
@@ -1210,9 +1207,6 @@ fn parse_define_access_record() {
 							key: "bar".to_string(),
 						}),
 					},
-					// TODO(gguillemas): Field kept to gracefully handle breaking change.
-					// Remove when "revision" crate allows doing so.
-					authenticate: None
 				}),
 				authenticate: None,
 				duration: AccessDuration {
@@ -1251,9 +1245,6 @@ fn parse_define_access_record() {
 							key: "bar".to_string(),
 						}),
 					},
-					// TODO(gguillemas): Field kept to gracefully handle breaking change.
-					// Remove when "revision" crate allows doing so.
-					authenticate: None
 				}),
 				authenticate: None,
 				duration: AccessDuration {
@@ -1323,9 +1314,6 @@ fn parse_define_access_record_with_jwt() {
 					}),
 					issue: None,
 				},
-				// TODO(gguillemas): Field kept to gracefully handle breaking change.
-				// Remove when "revision" crate allows doing so.
-				authenticate: None
 			}),
 			authenticate: None,
 			// Default durations.
@@ -1552,7 +1540,6 @@ fn parse_define_index() {
 			cols: Idioms(vec![Idiom(vec![Part::Field(Ident("a".to_owned()))]),]),
 			index: Index::MTree(MTreeParams {
 				dimension: 4,
-				_distance: Default::default(),
 				distance: Distance::Minkowski(Number::Int(5)),
 				capacity: 6,
 				doc_ids_order: 7,
@@ -1873,10 +1860,9 @@ SELECT bar as foo,[1,2],bar OMIT bar FROM ONLY a,1
 			start: Some(Start(Value::Object(Object(
 				[("a".to_owned(), Value::Bool(true))].into_iter().collect()
 			)))),
-			fetch: Some(Fetchs(vec![Fetch(
-				Idiom(vec![]),
-				Value::Idiom(Idiom(vec![Part::Field(Ident("foo".to_owned()))]))
-			)])),
+			fetch: Some(Fetchs(vec![Fetch(Value::Idiom(Idiom(vec![Part::Field(Ident(
+				"foo".to_owned()
+			))])))])),
 			version: Some(Version(Datetime(expected_datetime))),
 			timeout: None,
 			parallel: false,
@@ -2084,6 +2070,7 @@ fn parse_insert() {
 				),
 			])),
 			output: Some(Output::After),
+			version: None,
 			timeout: None,
 			parallel: false,
 			relation: false,
@@ -2140,14 +2127,11 @@ fn parse_live() {
 	assert_eq!(
 		stmt.fetch,
 		Some(Fetchs(vec![
-			Fetch(
-				Idiom(vec![]),
-				Value::Idiom(Idiom(vec![
-					Part::Field(Ident("a".to_owned())),
-					Part::Where(Value::Idiom(Idiom(vec![Part::Field(Ident("foo".to_owned()))]))),
-				]))
-			),
-			Fetch(Idiom(vec![]), Value::Idiom(Idiom(vec![Part::Field(Ident("b".to_owned()))]))),
+			Fetch(Value::Idiom(Idiom(vec![
+				Part::Field(Ident("a".to_owned())),
+				Part::Where(Value::Idiom(Idiom(vec![Part::Field(Ident("foo".to_owned()))]))),
+			]))),
+			Fetch(Value::Idiom(Idiom(vec![Part::Field(Ident("b".to_owned()))]))),
 		])),
 	)
 }
@@ -2171,10 +2155,9 @@ fn parse_return() {
 		res,
 		Statement::Output(OutputStatement {
 			what: Value::Idiom(Idiom(vec![Part::Field(Ident("RETRUN".to_owned()))])),
-			fetch: Some(Fetchs(vec![Fetch(
-				Idiom(vec![]),
-				Value::Idiom(Idiom(vec![Part::Field(Ident("RETURN".to_owned()).to_owned())]))
-			)])),
+			fetch: Some(Fetchs(vec![Fetch(Value::Idiom(Idiom(vec![Part::Field(
+				Ident("RETURN".to_owned()).to_owned()
+			)])))])),
 		}),
 	)
 }

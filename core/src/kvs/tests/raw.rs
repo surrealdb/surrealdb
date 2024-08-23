@@ -55,7 +55,7 @@ async fn set() {
 	let (ds, _) = new_ds(node_id, clock).await;
 	// Create a writeable transaction
 	let mut tx = ds.transaction(Write, Optimistic).await.unwrap().inner();
-	assert!(tx.set("test", "one").await.is_ok());
+	assert!(tx.set("test", "one", None).await.is_ok());
 	tx.commit().await.unwrap();
 	// Create a readonly transaction
 	let mut tx = ds.transaction(Read, Optimistic).await.unwrap().inner();
@@ -64,7 +64,7 @@ async fn set() {
 	tx.cancel().await.unwrap();
 	// Create a writeable transaction
 	let mut tx = ds.transaction(Write, Optimistic).await.unwrap().inner();
-	assert!(tx.set("test", "two").await.is_ok());
+	assert!(tx.set("test", "two", None).await.is_ok());
 	tx.commit().await.unwrap();
 	// Create a readonly transaction
 	let mut tx = ds.transaction(Read, Optimistic).await.unwrap().inner();

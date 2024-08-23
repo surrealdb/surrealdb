@@ -191,12 +191,12 @@ impl Transaction {
 
 	/// Insert or update a key in the datastore.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
-	pub async fn set<K, V>(&self, key: K, val: V) -> Result<(), Error>
+	pub async fn set<K, V>(&self, key: K, val: V, version: Option<u64>) -> Result<(), Error>
 	where
 		K: Into<Key> + Debug,
 		V: Into<Val> + Debug,
 	{
-		self.lock().await.set(key, val).await
+		self.lock().await.set(key, val, version).await
 	}
 
 	/// Insert a key if it doesn't exist in the datastore.
@@ -347,12 +347,12 @@ impl Transaction {
 	/// Retrieve all ROOT level accesses in a datastore.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
 	pub async fn all_root_accesses(&self) -> Result<Arc<[DefineAccessStatement]>, Error> {
-		let key = crate::key::root::access::ac::prefix();
+		let key = crate::key::root::ac::prefix();
 		let res = self.cache.get_value_or_guard_async(&key).await;
 		Ok(match res {
 			Ok(val) => val,
 			Err(cache) => {
-				let end = crate::key::root::access::ac::suffix();
+				let end = crate::key::root::ac::suffix();
 				let val = self.getr(key..end).await?;
 				let val = val.convert().into();
 				let val = Entry::Ras(Arc::clone(&val));
@@ -423,12 +423,12 @@ impl Transaction {
 	/// Retrieve all namespace access definitions for a specific namespace.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
 	pub async fn all_ns_accesses(&self, ns: &str) -> Result<Arc<[DefineAccessStatement]>, Error> {
-		let key = crate::key::namespace::access::ac::prefix(ns);
+		let key = crate::key::namespace::ac::prefix(ns);
 		let res = self.cache.get_value_or_guard_async(&key).await;
 		Ok(match res {
 			Ok(val) => val,
 			Err(cache) => {
-				let end = crate::key::namespace::access::ac::suffix(ns);
+				let end = crate::key::namespace::ac::suffix(ns);
 				let val = self.getr(key..end).await?;
 				let val = val.convert().into();
 				let val = Entry::Nas(Arc::clone(&val));
@@ -511,12 +511,12 @@ impl Transaction {
 		ns: &str,
 		db: &str,
 	) -> Result<Arc<[DefineAccessStatement]>, Error> {
-		let key = crate::key::database::access::ac::prefix(ns, db);
+		let key = crate::key::database::ac::prefix(ns, db);
 		let res = self.cache.get_value_or_guard_async(&key).await;
 		Ok(match res {
 			Ok(val) => val,
 			Err(cache) => {
-				let end = crate::key::database::access::ac::suffix(ns, db);
+				let end = crate::key::database::ac::suffix(ns, db);
 				let val = self.getr(key..end).await?;
 				let val = val.convert().into();
 				let val = Entry::Das(Arc::clone(&val));
@@ -825,7 +825,7 @@ impl Transaction {
 	/// Retrieve a specific root access definition.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
 	pub async fn get_root_access(&self, ra: &str) -> Result<Arc<DefineAccessStatement>, Error> {
-		let key = crate::key::root::access::ac::new(ra).encode()?;
+		let key = crate::key::root::ac::new(ra).encode()?;
 		let res = self.cache.get_value_or_guard_async(&key).await;
 		Ok(match res {
 			Ok(val) => val,
@@ -916,7 +916,7 @@ impl Transaction {
 		ns: &str,
 		na: &str,
 	) -> Result<Arc<DefineAccessStatement>, Error> {
-		let key = crate::key::namespace::access::ac::new(ns, na).encode()?;
+		let key = crate::key::namespace::ac::new(ns, na).encode()?;
 		let res = self.cache.get_value_or_guard_async(&key).await;
 		Ok(match res {
 			Ok(val) => val,
@@ -1017,7 +1017,7 @@ impl Transaction {
 		db: &str,
 		da: &str,
 	) -> Result<Arc<DefineAccessStatement>, Error> {
-		let key = crate::key::database::access::ac::new(ns, db, da).encode()?;
+		let key = crate::key::database::ac::new(ns, db, da).encode()?;
 		let res = self.cache.get_value_or_guard_async(&key).await;
 		Ok(match res {
 			Ok(val) => val,
@@ -1310,7 +1310,7 @@ impl Transaction {
 		let key = crate::key::thing::new(ns, db, tb, id);
 		let enc = crate::key::thing::new(ns, db, tb, id).encode()?;
 		// Set the value in the datastore
-		self.set(&key, &val).await?;
+		self.set(&key, &val, None).await?;
 		// Set the value in the cache
 		self.cache.insert(enc, Entry::Val(Arc::new(val)));
 		// Return nothing

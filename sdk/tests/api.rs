@@ -537,6 +537,50 @@ mod api_integration {
 			assert!(response.is_none());
 		}
 
+		#[test_log::test(tokio::test)]
+		async fn insert_with_version() {
+			let (permit, db) = new_db().await;
+			db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
+			drop(permit);
+
+			// Create a record in the past.
+			let _ = db
+				.query("INSERT INTO user { id: user:john, name: 'John' } VERSION d'2024-08-19T08:00:00Z'")
+				.await
+				.unwrap()
+				.check()
+				.unwrap();
+
+			// Without VERSION, SELECT should return the record.
+			let mut response = db.query("SELECT * FROM user:john").await.unwrap().check().unwrap();
+			let Some(name): Option<String> = response.take("name").unwrap() else {
+				panic!("query returned no record");
+			};
+			assert_eq!(name, "John");
+
+			// SELECT with the VERSION set to the creation timestamp or later should return the record.
+			let mut response = db
+				.query("SELECT * FROM user:john VERSION d'2024-08-19T08:00:00Z'")
+				.await
+				.unwrap()
+				.check()
+				.unwrap();
+			let Some(name): Option<String> = response.take("name").unwrap() else {
+				panic!("query returned no record");
+			};
+			assert_eq!(name, "John");
+
+			// SELECT with the VERSION set before the creation timestamp should return nothing.
+			let mut response = db
+				.query("SELECT * FROM user:john VERSION d'2024-08-19T07:00:00Z'")
+				.await
+				.unwrap()
+				.check()
+				.unwrap();
+			let response: Option<String> = response.take("name").unwrap();
+			assert!(response.is_none());
+		}
+
 		include!("api/mod.rs");
 		include!("api/live.rs");
 		include!("api/backup.rs");
