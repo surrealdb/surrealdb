@@ -1,9 +1,7 @@
 //! How the keys are structured in the key value store
 ///
 /// crate::key::root::all                /
-/// crate::key::root::access::all        /*{ac}
-/// crate::key::root::access::ac         /!ac{ac}
-/// crate::key::root::access::gr         /*{ac}!gr{gr}
+/// crate::key::root::ac                 /!{ac}
 /// crate::key::root::hb                 /!hb{ts}/{nd}
 /// crate::key::root::nd                 /!nd{nd}
 /// crate::key::root::ni                 /!ni
@@ -13,19 +11,21 @@
 /// crate::key::node::all                /${nd}
 /// crate::key::node::lq                 /${nd}!lq{lq}{ns}{db}
 ///
+/// crate::key::root::access::all        /&{ac}
+/// crate::key::root::access::gr         /&{ac}!gr{gr}
+///
 /// crate::key::namespace::all           /*{ns}
-/// crate::key::namespace::access::all   /*{ns}*{ac}
-/// crate::key::namespace::access::ac    /*{ns}!ac{ac}
-/// crate::key::namespace::access::gr    /*{ns}*{ac}!gr{gr}
+/// crate::key::namespace::ac            /*{ns}!{ac}
 /// crate::key::namespace::db            /*{ns}!db{db}
 /// crate::key::namespace::di            /+{ns id}!di
 /// crate::key::namespace::lg            /*{ns}!lg{lg}
 /// crate::key::namespace::us            /*{ns}!us{us}
 ///
+/// crate::key::namespace::access::all   /*{ns}&{ac}
+/// crate::key::namespace::access::gr    /*{ns}&{ac}!gr{gr}
+///
 /// crate::key::database::all            /*{ns}*{db}
-/// crate::key::database::access::all    /*{ns}*{db}*{ac}
-/// crate::key::database::access::ac     /*{ns}*{db}!ac{ac}
-/// crate::key::database::access::gr     /*{ns}*{db}*{ac}!gr{gr}
+/// crate::key::database::ac             /*{ns}*{db}!{ac}
 /// crate::key::database::az             /*{ns}*{db}!az{az}
 /// crate::key::database::fc             /*{ns}*{db}!fn{fc}
 /// crate::key::database::ml             /*{ns}*{db}!ml{ml}{vn}
@@ -35,6 +35,9 @@
 /// crate::key::database::ts             /*{ns}*{db}!ts{ts}
 /// crate::key::database::us             /*{ns}*{db}!us{us}
 /// crate::key::database::vs             /*{ns}*{db}!vs
+///
+/// crate::key::database::access::all    /*{ns}*{db}&{ac}
+/// crate::key::database::access::gr     /*{ns}*{db}&{ac}!gr{gr}
 ///
 /// crate::key::table::all               /*{ns}*{db}*{tb}
 /// crate::key::table::ev                /*{ns}*{db}*{tb}!ev{ev}

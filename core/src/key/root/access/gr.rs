@@ -42,7 +42,7 @@ impl<'a> Gr<'a> {
 	pub fn new(ac: &'a str, gr: &'a str) -> Self {
 		Self {
 			__: b'/',
-			_a: b'*',
+			_a: b'&',
 			ac,
 			_b: b'!',
 			_c: b'g',
@@ -63,7 +63,7 @@ mod tests {
 			"testgr",
 		);
 		let enc = Gr::encode(&val).unwrap();
-		assert_eq!(enc, b"/*testac\0!grtestgr\0");
+		assert_eq!(enc, b"/&testac\0!grtestgr\0");
 
 		let dec = Gr::decode(&enc).unwrap();
 		assert_eq!(val, dec);

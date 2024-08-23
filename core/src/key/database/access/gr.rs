@@ -50,7 +50,7 @@ impl<'a> Gr<'a> {
 			ns,
 			_b: b'*',
 			db,
-			_c: b'*',
+			_c: b'&',
 			ac,
 			_d: b'!',
 			_e: b'g',
@@ -73,7 +73,7 @@ mod tests {
 			"testgr",
 		);
 		let enc = Gr::encode(&val).unwrap();
-		assert_eq!(enc, b"/*testns\0*testdb\0*testac\0!grtestgr\0");
+		assert_eq!(enc, b"/*testns\0*testdb\0&testac\0!grtestgr\0");
 
 		let dec = Gr::decode(&enc).unwrap();
 		assert_eq!(val, dec);
@@ -82,12 +82,12 @@ mod tests {
 	#[test]
 	fn test_prefix() {
 		let val = super::prefix("testns", "testdb", "testac");
-		assert_eq!(val, b"/*testns\0*testdb\0*testac\0!gr\0");
+		assert_eq!(val, b"/*testns\0*testdb\0&testac\0!gr\0");
 	}
 
 	#[test]
 	fn test_suffix() {
 		let val = super::suffix("testns", "testdb", "testac");
-		assert_eq!(val, b"/*testns\0*testdb\0*testac\0!gr\xff");
+		assert_eq!(val, b"/*testns\0*testdb\0&testac\0!gr\xff");
 	}
 }
