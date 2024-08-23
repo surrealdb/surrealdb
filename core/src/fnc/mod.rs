@@ -18,12 +18,12 @@ pub mod encoding;
 pub mod geo;
 pub mod http;
 pub mod math;
-pub mod meta;
 pub mod not;
 pub mod object;
 pub mod operate;
 pub mod parse;
 pub mod rand;
+pub mod record;
 pub mod script;
 pub mod search;
 pub mod session;
@@ -228,10 +228,6 @@ pub fn synchronous(
 		"math::trimean" => math::trimean,
 		"math::variance" => math::variance,
 		//
-		"meta::id" => meta::id,
-		"meta::table" => meta::tb,
-		"meta::tb" => meta::tb,
-		//
 		"not" => not::not,
 		//
 		"object::entries" => object::entries,
@@ -262,6 +258,10 @@ pub fn synchronous(
 		"rand::uuid::v4" => rand::uuid::v4,
 		"rand::uuid::v7" => rand::uuid::v7,
 		"rand::uuid" => rand::uuid,
+		//
+		"record::id" => record::id,
+		"record::table" => record::tb,
+		"record::tb" => record::tb,
 		//
 		"session::ac" => session::ac(ctx),
 		"session::db" => session::db(ctx),
@@ -550,9 +550,9 @@ pub async fn idiom(
 				name,
 				args.clone(),
 				"no such method found for the record type",
-				"id" => meta::id,
-				"table" => meta::tb,
-				"tb" => meta::tb,
+				"id" => record::id,
+				"table" => record::tb,
+				"tb" => record::tb,
 			)
 		}
 		Value::Object(_) => {

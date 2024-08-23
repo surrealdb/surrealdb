@@ -6,7 +6,7 @@ pub struct Package;
 
 impl_module_def!(
 	Package,
-	"meta",
+	"record",
 	"id" => run,
 	"table" => run,
 	"tb" => run

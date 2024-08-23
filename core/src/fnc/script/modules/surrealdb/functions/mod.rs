@@ -16,10 +16,10 @@ mod encoding;
 mod geo;
 mod http;
 mod math;
-mod meta;
 mod object;
 mod parse;
 mod rand;
+mod record;
 mod search;
 mod session;
 mod string;
@@ -42,12 +42,11 @@ impl_module_def!(
 	"geo" => (geo::Package),
 	"http" => (http::Package),
 	"math" => (math::Package),
-	"meta" => (meta::Package),
-	"object" => (object::Package),
 	"not" => run,
+	"object" => (object::Package),
 	"parse" => (parse::Package),
 	"rand" => (rand::Package),
-	"array" => (array::Package),
+	"record" => (record::Package),
 	"search" => (search::Package),
 	"session" => (session::Package),
 	"sleep" => fut Async,
