@@ -1,6 +1,8 @@
+use super::{Datastore, LockType, TransactionType};
 use crate::err::Error;
+use std::sync::Arc;
 
-mod patches;
+mod fixes;
 
 #[derive(Copy, Debug, Clone)]
 pub struct Version(u16);
@@ -56,5 +58,38 @@ impl Version {
 	/// Check if we are running the latest version
 	pub fn is_latest(&self) -> bool {
 		self.0 == Self::LATEST
+	}
+	/// Fix
+	pub async fn fix(&self, ds: Arc<Datastore>) -> Result<(), Error> {
+		macro_rules! apply_fix {
+			($name:ident) => {{
+				let tx =
+					Arc::new(ds.transaction(TransactionType::Write, LockType::Pessimistic).await?);
+				match fixes::$name(tx.clone()).await {
+					Ok(_) => {
+						tx.commit().await?;
+					}
+					Err(e) => {
+						tx.cancel().await?;
+						return Err(e);
+					}
+				};
+			}};
+		}
+
+		for v in self.0..Version::LATEST {
+			println!("Applying fixes for version: {}", v);
+			match v {
+				1 => {
+					println!("Applying v1_to_2_id_uuid");
+					apply_fix!(v1_to_2_id_uuid)
+				}
+				_ => {}
+			}
+		}
+
+		println!("Setting new storage version");
+		ds.set_version_latest().await?;
+		Ok(())
 	}
 }

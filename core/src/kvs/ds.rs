@@ -532,17 +532,23 @@ impl Datastore {
 			Some(v) => {
 				// Attempt to decode the current stored version
 				let val = TryInto::<Version>::try_into(v);
+				println!("val: {:?}", val);
 				// Check for errors, and cancel the transaction
 				match val {
 					// There was en error getting the version
 					Err(err) => {
 						// We didn't write anything, so just rollback
-						txn.cancel().await?;
+						catch!(txn, txn.cancel());
 						// Return the error
 						return Err(err);
 					}
 					// We could decode the version correctly
-					Ok(val) => val,
+					Ok(val) => {
+						// We didn't write anything, so just rollback
+						catch!(txn, txn.cancel());
+						// Return the current version
+						val
+					}
 				}
 			}
 			// There is no version set in the storage
@@ -570,6 +576,23 @@ impl Datastore {
 		};
 		// Everything ok
 		Ok(val)
+	}
+
+	pub async fn set_version_latest(&self) -> Result<(), Error> {
+		// Start a new writeable transaction
+		let txn = self.transaction(Write, Pessimistic).await?.enclose();
+		// Create the key where the version is stored
+		let key = crate::key::version::new();
+		// Set the latest version in storage
+		let val = Version::latest();
+		// Convert the version to binary
+		let bytes: Vec<u8> = val.into();
+		// Attempt to set the current version in storage
+		catch!(txn, txn.set(key, bytes, None));
+		// We set the version, so commit the transaction
+		catch!(txn, txn.commit());
+		// Everything ok
+		Ok(())
 	}
 
 	/// Setup the initial cluster access credentials

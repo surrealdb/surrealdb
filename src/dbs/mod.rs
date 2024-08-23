@@ -257,6 +257,10 @@ pub async fn fix(path: String) -> Result<(), Error> {
 	let dbs = Arc::new(Datastore::new(&path).await?);
 	// Ensure the storage version is up-to-date to prevent corruption
 	let version = dbs.get_version().await?;
+	// Apply fixes
+	version.fix(dbs).await?;
+	// Log success
+	println!("Database fixes applied successfully.");
 	// All ok
 	Ok(())
 }
