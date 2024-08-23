@@ -9,9 +9,9 @@ on:
       - Cargo.lock
       - Cargo.toml
       - core/Cargo.toml
-      - lib/Cargo.toml
+      - sdk/Cargo.toml
       - build.rs
-      - lib/build.rs
+      - sdk/build.rs
       - supply-chain/audits.toml
       - supply-chain/config.toml
       - supply-chain/imports.lock
@@ -24,9 +24,9 @@ on:
       - Cargo.lock
       - Cargo.toml
       - core/Cargo.toml
-      - lib/Cargo.toml
+      - sdk/Cargo.toml
       - build.rs
-      - lib/build.rs
+      - sdk/build.rs
       - supply-chain/audits.toml
       - supply-chain/config.toml
       - supply-chain/imports.lock
