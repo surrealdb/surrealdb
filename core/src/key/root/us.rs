@@ -20,13 +20,13 @@ pub fn new(user: &str) -> Us<'_> {
 
 pub fn prefix() -> Vec<u8> {
 	let mut k = super::all::new().encode().unwrap();
-	k.extend_from_slice(&[b'!', b'u', b's', 0x00]);
+	k.extend_from_slice(b"!us\x00");
 	k
 }
 
 pub fn suffix() -> Vec<u8> {
 	let mut k = super::all::new().encode().unwrap();
-	k.extend_from_slice(&[b'!', b'u', b's', 0xff]);
+	k.extend_from_slice(b"!us\xff");
 	k
 }
 

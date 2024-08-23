@@ -25,13 +25,13 @@ pub fn new<'a>(ns: &'a str, db: &'a str, tb: &'a str, id: &Id) -> Thing<'a> {
 
 pub fn prefix(ns: &str, db: &str, tb: &str) -> Vec<u8> {
 	let mut k = crate::key::table::all::new(ns, db, tb).encode().unwrap();
-	k.extend_from_slice(&[b'*', 0x00]);
+	k.extend_from_slice(b"*");
 	k
 }
 
 pub fn suffix(ns: &str, db: &str, tb: &str) -> Vec<u8> {
 	let mut k = crate::key::table::all::new(ns, db, tb).encode().unwrap();
-	k.extend_from_slice(&[b'*', 0xff]);
+	k.extend_from_slice(b"*\xff");
 	k
 }
 

@@ -30,13 +30,13 @@ pub fn new(nd: Uuid, lq: Uuid) -> Lq {
 
 pub fn prefix(nd: Uuid) -> Vec<u8> {
 	let mut k = super::all::new(nd).encode().unwrap();
-	k.extend_from_slice(&[b'!', b'l', b'q', 0x00]);
+	k.extend_from_slice(b"!lq\x00");
 	k
 }
 
 pub fn suffix(nd: Uuid) -> Vec<u8> {
 	let mut k = super::all::new(nd).encode().unwrap();
-	k.extend_from_slice(&[b'!', b'l', b'q', 0xff]);
+	k.extend_from_slice(b"!lq\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\x00");
 	k
 }
 

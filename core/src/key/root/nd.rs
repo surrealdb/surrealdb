@@ -24,13 +24,13 @@ pub fn new(nd: Uuid) -> Nd {
 
 pub fn prefix() -> Vec<u8> {
 	let mut k = crate::key::root::all::new().encode().unwrap();
-	k.extend_from_slice(&[b'!', b'n', b'd', 0x00]);
+	k.extend_from_slice(b"!nd\x00");
 	k
 }
 
 pub fn suffix() -> Vec<u8> {
 	let mut k = crate::key::root::all::new().encode().unwrap();
-	k.extend_from_slice(&[b'!', b'n', b'd', 0xff]);
+	k.extend_from_slice(b"!nd\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\x00");
 	k
 }
 

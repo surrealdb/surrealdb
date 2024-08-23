@@ -26,13 +26,13 @@ pub fn new<'a>(ns: &'a str, db: &'a str, ac: &'a str, gr: &'a str) -> Gr<'a> {
 
 pub fn prefix(ns: &str, db: &str, ac: &str) -> Vec<u8> {
 	let mut k = super::all::new(ns, db, ac).encode().unwrap();
-	k.extend_from_slice(&[b'!', b'g', b'r', 0x00]);
+	k.extend_from_slice(b"!gr\x00");
 	k
 }
 
 pub fn suffix(ns: &str, db: &str, ac: &str) -> Vec<u8> {
 	let mut k = super::all::new(ns, db, ac).encode().unwrap();
-	k.extend_from_slice(&[b'!', b'g', b'r', 0xff]);
+	k.extend_from_slice(b"!gr\xff");
 	k
 }
 
