@@ -739,14 +739,8 @@ impl Datastore {
 			.into());
 		}
 		// Create a new query options
-		let opt = Options::default()
-			.with_id(self.id)
-			.with_ns(sess.ns())
-			.with_db(sess.db())
-			.with_live(sess.live())
-			.with_auth(sess.au.clone())
-			.with_strict(self.strict)
-			.with_auth_enabled(self.auth_enabled);
+		let opt = self.make_opts(sess);
+
 		// Create a new query executor
 		let mut exe = Executor::new(self);
 		// Create a default context
@@ -898,14 +892,7 @@ impl Datastore {
 		// Create a new memory stack
 		let mut stack = TreeStack::new();
 		// Create a new query options
-		let opt = Options::default()
-			.with_id(self.id)
-			.with_ns(sess.ns())
-			.with_db(sess.db())
-			.with_live(sess.live())
-			.with_auth(sess.au.clone())
-			.with_strict(self.strict)
-			.with_auth_enabled(self.auth_enabled);
+		let opt = self.make_opts(sess);
 		// Create a default context
 		let mut ctx = MutableContext::default();
 		// Set context capabilities
@@ -1014,6 +1001,17 @@ impl Datastore {
 		}
 		// All ok
 		Ok(())
+	}
+
+	pub fn make_opts(&self, sess: &Session) -> Options {
+		Options::default()
+			.with_id(self.id)
+			.with_ns(sess.ns())
+			.with_db(sess.db())
+			.with_live(sess.live())
+			.with_auth(sess.au.clone())
+			.with_strict(self.strict)
+			.with_auth_enabled(self.auth_enabled)
 	}
 }
 
