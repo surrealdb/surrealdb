@@ -191,12 +191,12 @@ impl Transaction {
 
 	/// Insert or update a key in the datastore.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
-	pub async fn set<K, V>(&self, key: K, val: V) -> Result<(), Error>
+	pub async fn set<K, V>(&self, key: K, val: V, version: Option<u64>) -> Result<(), Error>
 	where
 		K: Into<Key> + Debug,
 		V: Into<Val> + Debug,
 	{
-		self.lock().await.set(key, val).await
+		self.lock().await.set(key, val, version).await
 	}
 
 	/// Insert a key if it doesn't exist in the datastore.
@@ -1310,7 +1310,7 @@ impl Transaction {
 		let key = crate::key::thing::new(ns, db, tb, id);
 		let enc = crate::key::thing::new(ns, db, tb, id).encode()?;
 		// Set the value in the datastore
-		self.set(&key, &val).await?;
+		self.set(&key, &val, None).await?;
 		// Set the value in the cache
 		self.cache.insert(enc, Entry::Val(Arc::new(val)));
 		// Return nothing

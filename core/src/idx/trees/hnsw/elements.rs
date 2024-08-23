@@ -55,7 +55,7 @@ impl HnswElements {
 	) -> Result<SharedVector, Error> {
 		let key = self.ikb.new_he_key(id);
 		let val = VersionedStore::try_into(ser_vec)?;
-		tx.set(key, val).await?;
+		tx.set(key, val, None).await?;
 		let pt: SharedVector = vec.into();
 		self.elements.insert(id, pt.clone());
 		Ok(pt)
