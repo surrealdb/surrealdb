@@ -175,7 +175,7 @@ impl MTreeIndex {
 		let mut mtree = self.mtree.write().await;
 		if let Some(new_cache) = self.store.finish(tx).await? {
 			mtree.state.generation += 1;
-			tx.set(self.state_key.clone(), VersionedStore::try_into(&mtree.state)?).await?;
+			tx.set(self.state_key.clone(), VersionedStore::try_into(&mtree.state)?, None).await?;
 			self.ixs.advance_store_mtree(new_cache);
 		}
 		drop(mtree);

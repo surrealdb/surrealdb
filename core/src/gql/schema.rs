@@ -4,6 +4,7 @@ use std::sync::Arc;
 
 use crate::dbs::Session;
 use crate::kvs::Datastore;
+use crate::sql::kind::Literal;
 use crate::sql::statements::{DefineFieldStatement, SelectStatement};
 use crate::sql::Kind;
 use crate::sql::{self, Table};
@@ -590,15 +591,49 @@ fn kind_to_type(kind: Kind, types: &mut Vec<Type>) -> Result<TypeRef, GqlError> 
 			}
 			kind_to_type(non_op_ty, types)?
 		}
-		Kind::Either(ts) => {
+		Kind::Either(ks) => {
+			let (ls, others): (Vec<Kind>, Vec<Kind>) =
+				ks.into_iter().partition(|k| matches!(k, Kind::Literal(Literal::String(_))));
+
+			let enum_ty = if ls.len() > 0 {
+				let vals: Vec<String> = ls
+					.into_iter()
+					.map(|l| {
+						let Kind::Literal(Literal::String(out)) = l else {
+							unreachable!(
+								"just checked that this is a Kind::Literal(Literal::String(_))"
+							);
+						};
+						out.0
+					})
+					.collect();
+
+				let mut tmp = Enum::new(vals.join("_or_"));
+				tmp = tmp.items(vals);
+
+				let enum_ty = tmp.type_name().to_string();
+
+				types.push(Type::Enum(tmp));
+				if others.len() == 0 {
+					return Ok(TypeRef::named(enum_ty));
+				}
+				Some(enum_ty)
+			} else {
+				None
+			};
+
 			let pos_names: Result<Vec<TypeRef>, GqlError> =
-				ts.into_iter().map(|k| kind_to_type(k, types)).collect();
+				others.into_iter().map(|k| kind_to_type(k, types)).collect();
 			let pos_names: Vec<String> = pos_names?.into_iter().map(|tr| tr.to_string()).collect();
 			let ty_name = pos_names.join("_or_");
 
 			let mut tmp_union = Union::new(ty_name.clone());
 			for n in pos_names {
 				tmp_union = tmp_union.possible_type(n);
+			}
+
+			if let Some(ty) = enum_ty {
+				tmp_union = tmp_union.possible_type(ty);
 			}
 
 			types.push(Type::Union(tmp_union));
@@ -608,6 +643,8 @@ fn kind_to_type(kind: Kind, types: &mut Vec<Type>) -> Result<TypeRef, GqlError> 
 		Kind::Array(k, _) => TypeRef::List(Box::new(kind_to_type(*k, types)?)),
 		Kind::Function(_, _) => return Err(schema_error("Kind::Function is not yet supported")),
 		Kind::Range => return Err(schema_error("Kind::Range is not yet supported")),
+		// TODO(raphaeldarley): check if union is of literals and generate enum
+		// generate custom scalar from other literals?
 		Kind::Literal(_) => return Err(schema_error("Kind::Literal is not yet supported")),
 	};
 

@@ -87,7 +87,7 @@ impl Postings {
 	pub(super) async fn finish(&mut self, tx: &Transaction) -> Result<(), Error> {
 		if let Some(new_cache) = self.store.finish(tx).await? {
 			let state = self.btree.inc_generation();
-			tx.set(self.state_key.clone(), VersionedStore::try_into(state)?).await?;
+			tx.set(self.state_key.clone(), VersionedStore::try_into(state)?, None).await?;
 			self.ixs.advance_cache_btree_trie(new_cache);
 		}
 		Ok(())

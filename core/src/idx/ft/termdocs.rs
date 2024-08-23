@@ -31,7 +31,7 @@ impl TermDocs {
 			let key = self.index_key_base.new_bc_key(term_id);
 			let mut val = Vec::new();
 			docs.serialize_into(&mut val)?;
-			tx.set(key, val).await?;
+			tx.set(key, val, None).await?;
 		}
 		Ok(())
 	}
@@ -65,7 +65,7 @@ impl TermDocs {
 				} else {
 					let mut val = Vec::new();
 					docs.serialize_into(&mut val)?;
-					tx.set(key, val).await?;
+					tx.set(key, val, None).await?;
 				}
 			}
 			Ok(docs.len())

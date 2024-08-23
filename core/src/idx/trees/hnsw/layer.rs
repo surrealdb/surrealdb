@@ -372,7 +372,7 @@ where
 		let old_chunks_len = mem::replace(&mut st.chunks, chunks.len() as u32);
 		for (i, chunk) in chunks.enumerate() {
 			let key = self.ikb.new_hl_key(self.level, i as u32);
-			tx.set(key, chunk).await?;
+			tx.set(key, chunk, None).await?;
 		}
 		// Delete larger chunks if they exists
 		for i in st.chunks..old_chunks_len {

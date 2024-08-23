@@ -71,7 +71,11 @@ impl fmt::Display for Closure {
 			if i > 0 {
 				f.write_str(", ")?;
 			}
-			write!(f, "${name}: {kind}")?;
+			write!(f, "${name}: ")?;
+			match kind {
+				k @ Kind::Either(_) => write!(f, "<{}>", k)?,
+				k => write!(f, "{}", k)?,
+			}
 		}
 		f.write_str("|")?;
 		if let Some(returns) = &self.returns {

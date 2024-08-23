@@ -608,6 +608,7 @@ fn statements() -> Vec<Statement> {
 				),
 			])),
 			output: Some(Output::After),
+			version: None,
 			timeout: None,
 			parallel: false,
 			relation: false,
