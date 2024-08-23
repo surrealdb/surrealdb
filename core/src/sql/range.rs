@@ -1,3 +1,4 @@
+use super::Id;
 use crate::cnf::GENERATION_ALLOCATION_LIMIT;
 use crate::ctx::Context;
 use crate::dbs::Options;
@@ -5,7 +6,6 @@ use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::sql::{Number, Subquery, Value};
 use crate::syn;
-use derive::Key;
 use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -13,9 +13,6 @@ use std::cmp::Ordering;
 use std::fmt;
 use std::ops::Bound;
 use std::str::FromStr;
-
-use super::id::Gen;
-use super::{Array, Id, Object};
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Range";
 
