@@ -5,6 +5,7 @@ mod import;
 mod isready;
 mod ml;
 mod sql;
+mod fix;
 mod start;
 #[cfg(test)]
 mod test;

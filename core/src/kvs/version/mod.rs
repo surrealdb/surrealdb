@@ -1,5 +1,7 @@
 use crate::err::Error;
 
+mod patches;
+
 #[derive(Copy, Debug, Clone)]
 pub struct Version(u16);
 

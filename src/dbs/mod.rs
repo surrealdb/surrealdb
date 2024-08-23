@@ -2,6 +2,7 @@ use crate::cli::CF;
 use crate::err::Error;
 use clap::Args;
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::time::Duration;
 use surrealdb::dbs::capabilities::{Capabilities, FuncTarget, NetTarget, Targets};
 use surrealdb::kvs::Datastore;
@@ -249,6 +250,15 @@ pub async fn init(
 	dbs.bootstrap().await?;
 	// All ok
 	Ok(dbs)
+}
+
+pub async fn fix(path: String) -> Result<(), Error> {
+	// Parse and setup the desired kv datastore
+	let dbs = Arc::new(Datastore::new(&path).await?);
+	// Ensure the storage version is up-to-date to prevent corruption
+	let version = dbs.get_version().await?;
+	// All ok
+	Ok(())
 }
 
 #[cfg(test)]
