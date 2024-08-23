@@ -28,9 +28,9 @@ impl<'a> Access<'a> {
 	pub fn new(ns: &'a str, ac: &'a str) -> Self {
 		Self {
 			__: b'/',
-			_a: b'&',
+			_a: b'*',
 			ns,
-			_b: b'*',
+			_b: b'&',
 			ac,
 		}
 	}

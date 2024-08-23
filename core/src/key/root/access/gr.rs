@@ -72,12 +72,12 @@ mod tests {
 	#[test]
 	fn test_prefix() {
 		let val = super::prefix("testac");
-		assert_eq!(val, b"/*testac\0!gr\0");
+		assert_eq!(val, b"/&testac\0!gr\0");
 	}
 
 	#[test]
 	fn test_suffix() {
 		let val = super::suffix("testac");
-		assert_eq!(val, b"/*testac\0!gr\xff");
+		assert_eq!(val, b"/&testac\0!gr\xff");
 	}
 }
