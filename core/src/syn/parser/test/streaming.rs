@@ -214,9 +214,6 @@ fn statements() -> Vec<Statement> {
 					}),
 					issue: None,
 				},
-				// TODO(gguillemas): Field kept to gracefully handle breaking change.
-				// Remove when "revision" crate allows doing so.
-				authenticate: None,
 			}),
 			authenticate: None,
 			// Default durations.

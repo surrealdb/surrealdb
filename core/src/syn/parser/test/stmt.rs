@@ -1169,9 +1169,6 @@ fn parse_define_access_record() {
 							key: "foo".to_string(),
 						}),
 					},
-					// TODO(gguillemas): Field kept to gracefully handle breaking change.
-					// Remove when "revision" crate allows doing so.
-					authenticate: None
 				}),
 				authenticate: None,
 				duration: AccessDuration {
@@ -1210,9 +1207,6 @@ fn parse_define_access_record() {
 							key: "bar".to_string(),
 						}),
 					},
-					// TODO(gguillemas): Field kept to gracefully handle breaking change.
-					// Remove when "revision" crate allows doing so.
-					authenticate: None
 				}),
 				authenticate: None,
 				duration: AccessDuration {
@@ -1251,9 +1245,6 @@ fn parse_define_access_record() {
 							key: "bar".to_string(),
 						}),
 					},
-					// TODO(gguillemas): Field kept to gracefully handle breaking change.
-					// Remove when "revision" crate allows doing so.
-					authenticate: None
 				}),
 				authenticate: None,
 				duration: AccessDuration {
@@ -1323,9 +1314,6 @@ fn parse_define_access_record_with_jwt() {
 					}),
 					issue: None,
 				},
-				// TODO(gguillemas): Field kept to gracefully handle breaking change.
-				// Remove when "revision" crate allows doing so.
-				authenticate: None
 			}),
 			authenticate: None,
 			// Default durations.
