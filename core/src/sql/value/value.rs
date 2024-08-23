@@ -6,6 +6,7 @@ use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::fnc::util::string::fuzzy::Fuzzy;
 use crate::sql::id::range::IdRange;
+use crate::sql::kind::Literal;
 use crate::sql::statements::info::InfoStructure;
 use crate::sql::Closure;
 use crate::sql::{
@@ -599,6 +600,7 @@ impl From<Id> for Value {
 		match v {
 			Id::Number(v) => v.into(),
 			Id::String(v) => v.into(),
+			Id::Uuid(v) => v.into(),
 			Id::Array(v) => v.into(),
 			Id::Object(v) => v.into(),
 			Id::Generate(v) => match v {
@@ -1337,6 +1339,7 @@ impl Value {
 					into: kind.to_string(),
 				})
 			}
+			Kind::Literal(lit) => self.coerce_to_literal(lit),
 		};
 		// Check for any conversion errors
 		match res {
@@ -1428,6 +1431,18 @@ impl Value {
 				from: self,
 				into: "f64".into(),
 			}),
+		}
+	}
+
+	/// Try to coerce this value to a Literal, returns a `Value` with the coerced value
+	pub(crate) fn coerce_to_literal(self, literal: &Literal) -> Result<Value, Error> {
+		if literal.validate_value(&self) {
+			Ok(self)
+		} else {
+			Err(Error::CoerceTo {
+				from: self,
+				into: literal.to_string(),
+			})
 		}
 	}
 
@@ -1920,6 +1935,7 @@ impl Value {
 					into: kind.to_string(),
 				})
 			}
+			Kind::Literal(lit) => self.convert_to_literal(lit),
 		};
 		// Check for any conversion errors
 		match res {
@@ -1935,6 +1951,18 @@ impl Value {
 			Err(e) => Err(e),
 			// Everything converted ok
 			Ok(v) => Ok(v),
+		}
+	}
+
+	/// Try to convert this value to a Literal, returns a `Value` with the coerced value
+	pub(crate) fn convert_to_literal(self, literal: &Literal) -> Result<Value, Error> {
+		if literal.validate_value(&self) {
+			Ok(self)
+		} else {
+			Err(Error::ConvertTo {
+				from: self,
+				into: literal.to_string(),
+			})
 		}
 	}
 

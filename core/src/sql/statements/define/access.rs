@@ -92,6 +92,7 @@ impl DefineAccessStatement {
 						overwrite: false,
 						..self.clone()
 					},
+					None,
 				)
 				.await?;
 				// Clear the cache
@@ -124,6 +125,7 @@ impl DefineAccessStatement {
 						overwrite: false,
 						..self.clone()
 					},
+					None,
 				)
 				.await?;
 				// Clear the cache
@@ -158,6 +160,7 @@ impl DefineAccessStatement {
 						overwrite: false,
 						..self.clone()
 					},
+					None,
 				)
 				.await?;
 				// Clear the cache

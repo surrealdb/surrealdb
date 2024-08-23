@@ -580,11 +580,11 @@ mod tests {
 
 		let mut tx = ds.transaction(Write, Optimistic).await.unwrap().inner();
 		let ns_root = crate::key::root::ns::new(NS);
-		tx.put(&ns_root, dns).await.unwrap();
+		tx.put(&ns_root, dns, None).await.unwrap();
 		let db_root = crate::key::namespace::db::new(NS, DB);
-		tx.put(&db_root, ddb).await.unwrap();
+		tx.put(&db_root, ddb, None).await.unwrap();
 		let tb_root = crate::key::database::tb::new(NS, DB, TB);
-		tx.put(&tb_root, dtb.clone()).await.unwrap();
+		tx.put(&tb_root, dtb.clone(), None).await.unwrap();
 		tx.commit().await.unwrap();
 		ds
 	}

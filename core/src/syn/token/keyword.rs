@@ -75,6 +75,7 @@ keyword! {
 	Event => "EVENT",
 	Else => "ELSE",
 	End => "END",
+	Enforced => "ENFORCED",
 	Exists => "EXISTS",
 	Explain => "EXPLAIN",
 	ExtendCandidates => "EXTEND_CANDIDATES",

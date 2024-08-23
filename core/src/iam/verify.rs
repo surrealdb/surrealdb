@@ -1467,7 +1467,7 @@ mod tests {
 		// Test with generic user identifier
 		//
 		{
-			let resource_id = "user:⟨2k9qnabxuxh8k4d5gfto⟩".to_string();
+			let resource_id = "user:2k9qnabxuxh8k4d5gfto".to_string();
 			// Prepare the claims object
 			let mut claims = claims.clone();
 			claims.id = Some(resource_id.clone());

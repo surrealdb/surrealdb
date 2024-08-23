@@ -27,7 +27,7 @@ impl Datastore {
 		let key = crate::key::root::nd::Nd::new(id);
 		let now = self.clock_now().await;
 		let val = Node::new(id, now, false);
-		match run!(txn, txn.put(key, val)) {
+		match run!(txn, txn.put(key, val, None)) {
 			Err(Error::TxKeyAlreadyExists) => Err(Error::ClAlreadyExists {
 				value: id.to_string(),
 			}),
@@ -51,7 +51,7 @@ impl Datastore {
 		let key = crate::key::root::nd::new(id);
 		let now = self.clock_now().await;
 		let val = Node::new(id, now, false);
-		run!(txn, txn.set(key, val))
+		run!(txn, txn.set(key, val, None))
 	}
 
 	/// Deletes a node from the cluster.
@@ -70,7 +70,7 @@ impl Datastore {
 		let key = crate::key::root::nd::new(id);
 		let val = txn.get_node(id).await?;
 		let val = val.as_ref().archive();
-		run!(txn, txn.set(key, val))
+		run!(txn, txn.set(key, val, None))
 	}
 
 	/// Expires nodes which have timedout from the cluster.
@@ -100,7 +100,7 @@ impl Datastore {
 					// Get the key for the node entry
 					let key = crate::key::root::nd::new(nd.id);
 					// Update the node entry
-					catch!(txn, txn.set(key, val));
+					catch!(txn, txn.set(key, val, None));
 				}
 			}
 		}

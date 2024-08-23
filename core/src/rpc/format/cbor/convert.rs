@@ -11,6 +11,7 @@ use crate::sql::id::range::IdRange;
 use crate::sql::Array;
 use crate::sql::Datetime;
 use crate::sql::Duration;
+use crate::sql::Future;
 use crate::sql::Geometry;
 use crate::sql::Id;
 use crate::sql::Number;
@@ -35,6 +36,7 @@ const TAG_STRING_DECIMAL: u64 = 10;
 const TAG_CUSTOM_DATETIME: u64 = 12;
 const TAG_STRING_DURATION: u64 = 13;
 const TAG_CUSTOM_DURATION: u64 = 14;
+const TAG_FUTURE: u64 = 15;
 
 // Ranges
 const TAG_RANGE: u64 = 49;
@@ -114,13 +116,7 @@ impl TryFrom<Cbor> for Value {
 						_ => Err("Expected a CBOR text data type"),
 					},
 					// A byte string uuid
-					TAG_SPEC_UUID => match *v {
-						Data::Bytes(v) if v.len() == 16 => match v.as_slice().try_into() {
-							Ok(v) => Ok(Value::Uuid(Uuid::from(uuid::Uuid::from_bytes(v)))),
-							Err(_) => Err("Expected a CBOR byte array with 16 elements"),
-						},
-						_ => Err("Expected a CBOR byte array with 16 elements"),
-					},
+					TAG_SPEC_UUID => v.deref().to_owned().try_into().map(Value::Uuid),
 					// A literal decimal
 					TAG_STRING_DECIMAL => match *v {
 						Data::Text(v) => match Decimal::from_str(v.as_str()) {
@@ -193,6 +189,14 @@ impl TryFrom<Cbor> for Value {
 					},
 					// A range
 					TAG_RANGE => Ok(Value::Range(Box::new(Range::try_from(*v)?))),
+					TAG_FUTURE => match *v {
+						Data::Text(v) => {
+							let block = crate::syn::block(format!("{{{v}}}").as_str())
+								.map_err(|_| "Failed to parse block")?;
+							Ok(Value::Future(Box::new(Future(block))))
+						}
+						_ => Err("Expected a CBOR text data type"),
+					},
 					TAG_GEOMETRY_POINT => match *v {
 						Data::Array(mut v) if v.len() == 2 => {
 							let x = Value::try_from(Cbor(v.remove(0)))?;
@@ -383,6 +387,7 @@ impl TryFrom<Value> for Cbor {
 					match v.id {
 						Id::Number(v) => Data::Integer(v.into()),
 						Id::String(v) => Data::Text(v),
+						Id::Uuid(v) => Cbor::try_from(Value::from(v))?.0,
 						Id::Array(v) => Cbor::try_from(Value::from(v))?.0,
 						Id::Object(v) => Cbor::try_from(Value::from(v))?.0,
 						Id::Generate(_) => {
@@ -395,6 +400,10 @@ impl TryFrom<Value> for Cbor {
 			Value::Table(v) => Ok(Cbor(Data::Tag(TAG_TABLE, Box::new(Data::Text(v.0))))),
 			Value::Geometry(v) => Ok(Cbor(encode_geometry(v)?)),
 			Value::Range(v) => Ok(Cbor(Data::try_from(*v)?)),
+			Value::Future(v) => {
+				let bin = Data::Text(format!("{}", (*v).0));
+				Ok(Cbor(Data::Tag(TAG_FUTURE, Box::new(bin))))
+			}
 			// We shouldn't reach here
 			_ => Err("Found unsupported SurrealQL value being encoded into a CBOR value"),
 		}
@@ -550,6 +559,8 @@ impl TryFrom<Data> for Id {
 			Data::Array(v) => Ok(Id::Array(v.try_into()?)),
 			Data::Map(v) => Ok(Id::Object(v.try_into()?)),
 			Data::Tag(TAG_RANGE, v) => Ok(Id::Range(Box::new(IdRange::try_from(*v)?))),
+			Data::Tag(TAG_STRING_UUID, v) => v.deref().to_owned().try_into().map(Id::Uuid),
+			Data::Tag(TAG_SPEC_UUID, v) => v.deref().to_owned().try_into().map(Id::Uuid),
 			_ => Err("Expected a CBOR integer, text, array or map"),
 		}
 	}
@@ -564,6 +575,9 @@ impl TryFrom<Id> for Data {
 			Id::Array(v) => Ok(Cbor::try_from(Value::from(v))?.0),
 			Id::Object(v) => Ok(Cbor::try_from(Value::from(v))?.0),
 			Id::Range(v) => Ok(Data::Tag(TAG_RANGE, Box::new(v.deref().to_owned().try_into()?))),
+			Id::Uuid(v) => {
+				Ok(Data::Tag(TAG_SPEC_UUID, Box::new(Data::Bytes(v.into_bytes().into()))))
+			}
 			Id::Generate(_) => Err("Cannot encode an ungenerated Record ID into CBOR"),
 		}
 	}
@@ -588,5 +602,18 @@ impl TryFrom<Vec<(Data, Data)>> for Object {
 				})
 				.collect::<Result<BTreeMap<String, Value>, &str>>()?,
 		))
+	}
+}
+
+impl TryFrom<Data> for Uuid {
+	type Error = &'static str;
+	fn try_from(val: Data) -> Result<Self, &'static str> {
+		match val {
+			Data::Bytes(v) if v.len() == 16 => match v.as_slice().try_into() {
+				Ok(v) => Ok(Uuid::from(uuid::Uuid::from_bytes(v))),
+				Err(_) => Err("Expected a CBOR byte array with 16 elements"),
+			},
+			_ => Err("Expected a CBOR byte array with 16 elements"),
+		}
 	}
 }

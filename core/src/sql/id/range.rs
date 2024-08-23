@@ -14,7 +14,6 @@ use std::{cmp::Ordering, fmt, ops::Bound};
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
 pub struct IdRange {
 	pub beg: Bound<Id>,
 	pub end: Bound<Id>,
