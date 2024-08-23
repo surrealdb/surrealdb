@@ -549,7 +549,7 @@ impl Datastore {
 				// Convert the version to binary
 				let bytes: Vec<u8> = val.into();
 				// Attempt to set the current version in storage
-				catch!(txn, txn.set(key, bytes));
+				catch!(txn, txn.set(key, bytes, None));
 				// We set the version, so commit the transaction
 				catch!(txn, txn.commit());
 				// Return the current version
