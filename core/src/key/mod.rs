@@ -3,7 +3,7 @@
 /// crate::key::version                  !v
 ///
 /// crate::key::root::all                /
-/// crate::key::root::ac                 /!{ac}
+/// crate::key::root::ac                 /!ac{ac}
 /// crate::key::root::hb                 /!hb{ts}/{nd}
 /// crate::key::root::nd                 /!nd{nd}
 /// crate::key::root::ni                 /!ni
@@ -17,7 +17,7 @@
 /// crate::key::root::access::gr         /&{ac}!gr{gr}
 ///
 /// crate::key::namespace::all           /*{ns}
-/// crate::key::namespace::ac            /*{ns}!{ac}
+/// crate::key::namespace::ac            /*{ns}!ac{ac}
 /// crate::key::namespace::db            /*{ns}!db{db}
 /// crate::key::namespace::di            /+{ns id}!di
 /// crate::key::namespace::lg            /*{ns}!lg{lg}
@@ -27,7 +27,7 @@
 /// crate::key::namespace::access::gr    /*{ns}&{ac}!gr{gr}
 ///
 /// crate::key::database::all            /*{ns}*{db}
-/// crate::key::database::ac             /*{ns}*{db}!{ac}
+/// crate::key::database::ac             /*{ns}*{db}!ac{ac}
 /// crate::key::database::az             /*{ns}*{db}!az{az}
 /// crate::key::database::fc             /*{ns}*{db}!fn{fc}
 /// crate::key::database::ml             /*{ns}*{db}!ml{ml}{vn}
