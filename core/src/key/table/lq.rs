@@ -38,7 +38,7 @@ pub fn prefix(ns: &str, db: &str, tb: &str) -> Vec<u8> {
 
 pub fn suffix(ns: &str, db: &str, tb: &str) -> Vec<u8> {
 	let mut k = super::all::new(ns, db, tb).encode().unwrap();
-	k.extend_from_slice(b"!lq\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\x00");
+	k.extend_from_slice(b"!lq\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\x00");
 	k
 }
 
@@ -93,6 +93,6 @@ mod tests {
 	#[test]
 	fn suffix() {
 		let val = super::suffix("testns", "testdb", "testtb");
-		assert_eq!(val, b"/*testns\x00*testdb\x00*testtb\x00!lq\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\x00")
+		assert_eq!(val, b"/*testns\x00*testdb\x00*testtb\x00!lq\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\x00")
 	}
 }
