@@ -275,6 +275,7 @@
 "rand::uuid("
 "record"
 "record::"
+"record::exists("
 "record::id("
 "record::table("
 "record::tb("

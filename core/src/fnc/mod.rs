@@ -54,6 +54,7 @@ pub async fn run(
 		|| name.starts_with("crypto::pbkdf2")
 		|| name.starts_with("crypto::scrypt")
 		|| name.starts_with("array::map")
+		|| name.starts_with("record::exists")
 	{
 		stk.run(|stk| asynchronous(stk, ctx, opt, doc, name, args)).await
 	} else {
@@ -760,15 +761,17 @@ pub async fn asynchronous(
 		"http::patch" => http::patch(ctx).await,
 		"http::delete" => http::delete(ctx).await,
 		//
-		"search::analyze" => search::analyze((stk,ctx, Some(opt))).await,
+		"record::exists" => record::exists((stk, ctx, Some(opt), doc)).await,
+		//
+		"search::analyze" => search::analyze((stk, ctx, Some(opt))).await,
 		"search::score" => search::score((ctx, doc)).await,
 		"search::highlight" => search::highlight((ctx, doc)).await,
 		"search::offsets" => search::offsets((ctx, doc)).await,
 		//
 		"sleep" => sleep::sleep(ctx).await,
 		//
-		"type::field" => r#type::field((stk,ctx, Some(opt), doc)).await,
-		"type::fields" => r#type::fields((stk,ctx, Some(opt), doc)).await,
+		"type::field" => r#type::field((stk, ctx, Some(opt), doc)).await,
+		"type::fields" => r#type::fields((stk, ctx, Some(opt), doc)).await,
 	)
 }
 
