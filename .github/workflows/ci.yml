@@ -16,7 +16,7 @@ concurrency:
   # Use github.ref on other branches, so it's unique per branch
   group: ${{ github.workflow }}-${{ github.ref == 'refs/heads/main' && github.run_id || github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
-  
+
 defaults:
   run:
     shell: bash
@@ -647,7 +647,7 @@ jobs:
           ps auxf
 
   fdb-engine-7-3:
-    name: FoundationDB engine
+    name: FoundationDB engine 7.3
     runs-on: ubuntu-latest
     steps:
       - name: Install stable toolchain
