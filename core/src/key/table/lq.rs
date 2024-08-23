@@ -93,6 +93,6 @@ mod tests {
 	#[test]
 	fn suffix() {
 		let val = super::suffix("testns", "testdb", "testtb");
-		assert_eq!(val, b"/*testns\x00*testdb\x00*testtb\x00!lq\xff")
+		assert_eq!(val, b"/*testns\x00*testdb\x00*testtb\x00!lq\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\x00")
 	}
 }

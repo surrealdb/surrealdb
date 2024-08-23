@@ -72,6 +72,6 @@ mod tests {
 	#[test]
 	fn test_suffix() {
 		let val = super::suffix();
-		assert_eq!(val, b"/!nd\xff")
+		assert_eq!(val, b"/!nd\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\x00")
 	}
 }
