@@ -110,7 +110,7 @@ revision = { version = "0.8.0", features = [
     "regex",
     "rust_decimal",
     "uuid",
-] }
+], path = "../revision" }
 rmpv = "1.0.1"
 rust_decimal = "1.36.0"
 rustyline = { version = "12.0.0", features = ["derive"] }

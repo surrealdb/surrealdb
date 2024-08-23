@@ -7,7 +7,7 @@ use std::str;
 
 use super::fmt::{is_pretty, pretty_indent};
 
-#[revisioned(revision = 3)]
+#[revisioned(revision = 2)]
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]

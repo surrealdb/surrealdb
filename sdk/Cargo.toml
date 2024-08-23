@@ -88,7 +88,7 @@ revision = { version = "0.8.0", features = [
     "regex",
     "rust_decimal",
     "uuid",
-] }
+], path = "../../revision" }
 rust_decimal = { version = "1.36.0", features = ["maths", "serde-str"] }
 rustls = { version = "0.23.12", default-features = false, features = [
     "ring",
