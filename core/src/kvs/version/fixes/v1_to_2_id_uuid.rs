@@ -29,7 +29,7 @@ pub async fn v1_to_2_id_uuid(tx: Arc<Transaction>) -> Result<(), Error> {
 				// Resulting in a threshold of 2 (as a u8), used down below.
 				//
 				let pos = 11 + ns.as_bytes().len() + db.as_bytes().len() + tb.as_bytes().len();
-				let threshold = 2 as u8;
+				let threshold = 2_u8;
 
 				'inner: loop {
 					let ids = tx.keys(beg.clone()..end.clone(), 1000).await?;

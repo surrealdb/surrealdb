@@ -81,11 +81,8 @@ impl Version {
 		// We iterate through each version from the current to the latest
 		// and apply the fixes for each version
 		for v in self.0..Version::LATEST {
-			match v {
-				1 => {
-					apply_fix!(v1_to_2_id_uuid)
-				}
-				_ => {}
+			if v == 1 {
+				apply_fix!(v1_to_2_id_uuid);
 			}
 		}
 
