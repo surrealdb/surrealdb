@@ -542,8 +542,8 @@ pub async fn idiom(
 				"bearing" => geo::bearing,
 				"centroid" => geo::centroid,
 				"distance" => geo::distance,
-				"hash::decode" => geo::hash::decode,
-				"hash::encode" => geo::hash::encode,
+				"hash_decode" => geo::hash::decode,
+				"hash_encode" => geo::hash::encode,
 			)
 		}
 		Value::Thing(_) => {
@@ -618,12 +618,12 @@ pub async fn idiom(
 				"semver_major" => string::semver::major,
 				"semver_minor" => string::semver::minor,
 				"semver_patch" => string::semver::patch,
-				"semver_inc::major" => string::semver::inc::major,
-				"semver_inc::minor" => string::semver::inc::minor,
-				"semver_inc::patch" => string::semver::inc::patch,
-				"semver_set::major" => string::semver::set::major,
-				"semver_set::minor" => string::semver::set::minor,
-				"semver_set::patch" => string::semver::set::patch,
+				"semver_inc_major" => string::semver::inc::major,
+				"semver_inc_minor" => string::semver::inc::minor,
+				"semver_inc_patch" => string::semver::inc::patch,
+				"semver_set_major" => string::semver::set::major,
+				"semver_set_minor" => string::semver::set::minor,
+				"semver_set_patch" => string::semver::set::patch,
 			)
 		}
 		Value::Datetime(_) => {
