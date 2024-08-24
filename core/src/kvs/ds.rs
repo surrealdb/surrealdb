@@ -532,7 +532,6 @@ impl Datastore {
 			Some(v) => {
 				// Attempt to decode the current stored version
 				let val = TryInto::<Version>::try_into(v);
-				println!("val: {:?}", val);
 				// Check for errors, and cancel the transaction
 				match val {
 					// There was en error getting the version

@@ -61,35 +61,50 @@ impl Version {
 	}
 	/// Fix
 	pub async fn fix(&self, ds: Arc<Datastore>) -> Result<(), Error> {
+		// Create a new transaction
+		let tx = Arc::new(ds.transaction(TransactionType::Write, LockType::Pessimistic).await?);
+
+		// Easy shortcut to apply a fix
 		macro_rules! apply_fix {
 			($name:ident) => {{
-				let tx =
-					Arc::new(ds.transaction(TransactionType::Write, LockType::Pessimistic).await?);
 				match fixes::$name(tx.clone()).await {
-					Ok(_) => {
-						tx.commit().await?;
-					}
+					// Fail early and cancel transaction if the fix failed
 					Err(e) => {
 						tx.cancel().await?;
 						return Err(e);
 					}
+					_ => {}
 				};
 			}};
 		}
 
+		// We iterate through each version from the current to the latest
+		// and apply the fixes for each version
 		for v in self.0..Version::LATEST {
-			println!("Applying fixes for version: {}", v);
 			match v {
 				1 => {
-					println!("Applying v1_to_2_id_uuid");
 					apply_fix!(v1_to_2_id_uuid)
 				}
 				_ => {}
 			}
 		}
 
-		println!("Setting new storage version");
-		ds.set_version_latest().await?;
-		Ok(())
+		// All fixes applied, let's update the storage version
+		// Create the key where the version is stored
+		let key = crate::key::version::new();
+		// Set the latest version in storage
+		let val = Version::latest();
+		// Convert the version to binary
+		let bytes: Vec<u8> = val.into();
+		// Attempt to set the current version in storage
+		tx.set(key, bytes, None).await?;
+
+		// Commit the transaction
+		//
+		// We commit all fixes and the storage version update in one transaction,
+		// because we never want to leave storage in a broken state where half of
+		// the fixes are applied and the storage version is not updated.
+		//
+		tx.commit().await
 	}
 }

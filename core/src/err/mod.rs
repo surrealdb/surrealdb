@@ -1099,7 +1099,7 @@ pub enum Error {
 	InvalidStorageVersion,
 
 	/// There was an outdated storage version stored in the database
-	#[error("The data stored on disk is out-of-date with this version. Please follow the upgrade guides in the documentation")]
+	#[error("The data stored on disk is out-of-date with this version. Please take a backup, and use the `surreal fix` command to upgrade the storage version.")]
 	OutdatedStorageVersion,
 }
 
