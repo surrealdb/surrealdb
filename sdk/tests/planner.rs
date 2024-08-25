@@ -2597,7 +2597,7 @@ async fn select_from_standard_index_ascending() -> Result<(), Error> {
 	let mut t = Test::new(sql).await?;
 	t.skip_ok(7)?;
 	//
-	t.expect_vals(&vec![
+	t.expect_vals(&[
 		"[
 			{
 				detail: {
@@ -2704,7 +2704,7 @@ async fn select_from_unique_index_ascending() -> Result<(), Error> {
 	let mut t = Test::new(sql).await?;
 	t.skip_ok(7)?;
 	//
-	t.expect_vals(&vec![
+	t.expect_vals(&[
 		"[
 			{
 				detail: {
