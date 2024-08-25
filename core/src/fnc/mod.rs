@@ -551,6 +551,7 @@ pub async fn idiom(
 				name,
 				args.clone(),
 				"no such method found for the record type",
+				"exists" => record::exists((stk, ctx, Some(opt), doc)).await,
 				"id" => record::id,
 				"table" => record::tb,
 				"tb" => record::tb,
