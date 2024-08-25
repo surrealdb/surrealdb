@@ -33,6 +33,7 @@ pub mod string;
 pub mod time;
 pub mod r#type;
 pub mod util;
+pub mod value;
 pub mod vector;
 
 /// Attempts to run any function
@@ -394,6 +395,9 @@ pub fn synchronous(
 		"type::is::string" => r#type::is::string,
 		"type::is::uuid" => r#type::is::uuid,
 		//
+		"value::diff" => value::diff,
+		"value::patch" => value::patch,
+		//
 		"vector::add" => vector::add,
 		"vector::angle" => vector::angle,
 		"vector::cross" => vector::cross,
@@ -666,6 +670,7 @@ pub async fn idiom(
 				name,
 				args,
 				message,
+				//
 				"is_array" => r#type::is::array,
 				"is_bool" => r#type::is::bool,
 				"is_bytes" => r#type::is::bytes,
@@ -705,6 +710,9 @@ pub async fn idiom(
 				"to_record" => r#type::record,
 				"to_string" => r#type::string,
 				"to_uuid" => r#type::uuid,
+				//
+				"diff" => value::diff,
+				"patch" => value::patch,
 				//
 				"repeat" => array::repeat,
 				//

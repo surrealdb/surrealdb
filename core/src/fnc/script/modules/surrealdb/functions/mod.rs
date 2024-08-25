@@ -25,6 +25,7 @@ mod session;
 mod string;
 mod time;
 mod r#type;
+mod value;
 mod vector;
 
 #[non_exhaustive]
@@ -53,6 +54,7 @@ impl_module_def!(
 	"string" => (string::Package),
 	"time" => (time::Package),
 	"type" => (r#type::Package),
+	"value" => (value::Package),
 	"vector" => (vector::Package)
 );
 

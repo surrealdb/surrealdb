@@ -405,6 +405,9 @@ pub(crate) static PATHS: phf::Map<UniCase<&'static str>, PathKind> = phf_map! {
 		UniCase::ascii("type::is::string") => PathKind::Function,
 		UniCase::ascii("type::is::uuid") => PathKind::Function,
 		//
+		UniCase::ascii("value::diff") => PathKind::Function,
+		UniCase::ascii("value::patch") => PathKind::Function,
+		//
 		UniCase::ascii("vector::add") => PathKind::Function,
 		UniCase::ascii("vector::angle") => PathKind::Function,
 		UniCase::ascii("vector::cross") => PathKind::Function,

@@ -5571,6 +5571,66 @@ async fn function_type_range() -> Result<(), Error> {
 	Ok(())
 }
 
+// --------------------------------------------------
+// value
+// --------------------------------------------------
+
+#[tokio::test]
+async fn function_value_diff() -> Result<(), Error> {
+	let sql = r#"
+		RETURN value::diff({ a: 1, b: 2 }, { c: 3, b: 2 });
+	"#;
+	let mut test = Test::new(sql).await?;
+	//
+	let tmp = test.next()?.result?;
+	let val = Value::parse(
+		r#"
+		[
+			{
+				op: 'remove',
+				path: '/a'
+			},
+			{
+				op: 'add',
+				path: '/c',
+				value: 3
+			}
+		]
+	"#,
+	);
+	assert_eq!(tmp, val);
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn function_value_patch() -> Result<(), Error> {
+	let sql = r#"
+		RETURN value::patch({ a: 1, b: 2 }, [
+			{
+				op: 'remove',
+				path: '/a'
+			},
+			{
+				op: 'add',
+				path: '/c',
+				value: 3
+			}
+		]);
+	"#;
+	let mut test = Test::new(sql).await?;
+	//
+	let tmp = test.next()?.result?;
+	let val = Value::parse("{ b: 2, c: 3 }");
+	assert_eq!(tmp, val);
+	//
+	Ok(())
+}
+
+// --------------------------------------------------
+// vector
+// --------------------------------------------------
+
 #[tokio::test]
 async fn function_vector_add() -> Result<(), Error> {
 	test_queries(
