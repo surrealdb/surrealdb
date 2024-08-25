@@ -18,12 +18,12 @@ pub mod encoding;
 pub mod geo;
 pub mod http;
 pub mod math;
-pub mod meta;
 pub mod not;
 pub mod object;
 pub mod operate;
 pub mod parse;
 pub mod rand;
+pub mod record;
 pub mod script;
 pub mod search;
 pub mod session;
@@ -54,6 +54,7 @@ pub async fn run(
 		|| name.starts_with("crypto::pbkdf2")
 		|| name.starts_with("crypto::scrypt")
 		|| name.starts_with("array::map")
+		|| name.starts_with("record::exists")
 	{
 		stk.run(|stk| asynchronous(stk, ctx, opt, doc, name, args)).await
 	} else {
@@ -228,10 +229,6 @@ pub fn synchronous(
 		"math::trimean" => math::trimean,
 		"math::variance" => math::variance,
 		//
-		"meta::id" => meta::id,
-		"meta::table" => meta::tb,
-		"meta::tb" => meta::tb,
-		//
 		"not" => not::not,
 		//
 		"object::entries" => object::entries,
@@ -262,6 +259,10 @@ pub fn synchronous(
 		"rand::uuid::v4" => rand::uuid::v4,
 		"rand::uuid::v7" => rand::uuid::v7,
 		"rand::uuid" => rand::uuid,
+		//
+		"record::id" => record::id,
+		"record::table" => record::tb,
+		"record::tb" => record::tb,
 		//
 		"session::ac" => session::ac(ctx),
 		"session::db" => session::db(ctx),
@@ -550,9 +551,10 @@ pub async fn idiom(
 				name,
 				args.clone(),
 				"no such method found for the record type",
-				"id" => meta::id,
-				"table" => meta::tb,
-				"tb" => meta::tb,
+				"exists" => record::exists((stk, ctx, Some(opt), doc)).await,
+				"id" => record::id,
+				"table" => record::tb,
+				"tb" => record::tb,
 			)
 		}
 		Value::Object(_) => {
@@ -760,15 +762,17 @@ pub async fn asynchronous(
 		"http::patch" => http::patch(ctx).await,
 		"http::delete" => http::delete(ctx).await,
 		//
-		"search::analyze" => search::analyze((stk,ctx, Some(opt))).await,
+		"record::exists" => record::exists((stk, ctx, Some(opt), doc)).await,
+		//
+		"search::analyze" => search::analyze((stk, ctx, Some(opt))).await,
 		"search::score" => search::score((ctx, doc)).await,
 		"search::highlight" => search::highlight((ctx, doc)).await,
 		"search::offsets" => search::offsets((ctx, doc)).await,
 		//
 		"sleep" => sleep::sleep(ctx).await,
 		//
-		"type::field" => r#type::field((stk,ctx, Some(opt), doc)).await,
-		"type::fields" => r#type::fields((stk,ctx, Some(opt), doc)).await,
+		"type::field" => r#type::field((stk, ctx, Some(opt), doc)).await,
+		"type::fields" => r#type::fields((stk, ctx, Some(opt), doc)).await,
 	)
 }
 

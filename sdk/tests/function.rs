@@ -2667,38 +2667,6 @@ async fn function_math_variance() -> Result<(), Error> {
 }
 
 // --------------------------------------------------
-// meta
-// --------------------------------------------------
-
-#[tokio::test]
-async fn function_parse_meta_id() -> Result<(), Error> {
-	let sql = r#"
-		RETURN meta::id(r"person:tobie");
-	"#;
-	let mut test = Test::new(sql).await?;
-	//
-	let tmp = test.next()?.result?;
-	let val = Value::from("tobie");
-	assert_eq!(tmp, val);
-	//
-	Ok(())
-}
-
-#[tokio::test]
-async fn function_parse_meta_table() -> Result<(), Error> {
-	let sql = r#"
-		RETURN meta::table(r"person:tobie");
-	"#;
-	let mut test = Test::new(sql).await?;
-	//
-	let tmp = test.next()?.result?;
-	let val = Value::from("person");
-	assert_eq!(tmp, val);
-	//
-	Ok(())
-}
-
-// --------------------------------------------------
 // object
 // --------------------------------------------------
 
@@ -3233,6 +3201,61 @@ async fn function_rand_uuid_v7_from_datetime() -> Result<(), Error> {
 	//
 	let tmp = test.next()?.result?;
 	assert_eq!(tmp, Value::parse("[2, 3]"));
+	//
+	Ok(())
+}
+
+// --------------------------------------------------
+// record
+// --------------------------------------------------
+
+#[tokio::test]
+async fn function_parse_record_exists() -> Result<(), Error> {
+	let sql = r#"
+		RETURN record::exists(r"person:tobie");
+		CREATE ONLY person:tobie;
+		RETURN record::exists(r"person:tobie");
+	"#;
+	let mut test = Test::new(sql).await?;
+	//
+	let tmp = test.next()?.result?;
+	let val = Value::from(false);
+	assert_eq!(tmp, val);
+	//
+	let tmp = test.next()?.result?;
+	assert!(tmp.is_object());
+	//
+	let tmp = test.next()?.result?;
+	let val = Value::from(true);
+	assert_eq!(tmp, val);
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn function_parse_record_id() -> Result<(), Error> {
+	let sql = r#"
+		RETURN record::id(r"person:tobie");
+	"#;
+	let mut test = Test::new(sql).await?;
+	//
+	let tmp = test.next()?.result?;
+	let val = Value::from("tobie");
+	assert_eq!(tmp, val);
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn function_parse_record_table() -> Result<(), Error> {
+	let sql = r#"
+		RETURN record::table(r"person:tobie");
+	"#;
+	let mut test = Test::new(sql).await?;
+	//
+	let tmp = test.next()?.result?;
+	let val = Value::from("person");
+	assert_eq!(tmp, val);
 	//
 	Ok(())
 }
