@@ -63,6 +63,8 @@ pub async fn run(
 		|| name.eq("record::exists")
 		|| name.eq("type::field")
 		|| name.eq("type::fields")
+		|| name.eq("value::diff")
+		|| name.eq("value::patch")
 		|| name.starts_with("http")
 		|| name.starts_with("search")
 	{
@@ -401,9 +403,6 @@ pub fn synchronous(
 		"type::is::string" => r#type::is::string,
 		"type::is::uuid" => r#type::is::uuid,
 		//
-		"value::diff" => value::diff,
-		"value::patch" => value::patch,
-		//
 		"vector::add" => vector::add,
 		"vector::angle" => vector::angle,
 		"vector::cross" => vector::cross,
@@ -498,6 +497,9 @@ pub async fn asynchronous(
 		//
 		"type::field" => r#type::field((stk, ctx, Some(opt), doc)).await,
 		"type::fields" => r#type::fields((stk, ctx, Some(opt), doc)).await,
+		//
+		"value::diff" => value::diff((stk, ctx, Some(opt), doc)).await,
+		"value::patch" => value::patch((stk, ctx, Some(opt), doc)).await,
 	)
 }
 
@@ -803,12 +805,12 @@ pub async fn idiom(
 				"to_string" => r#type::string,
 				"to_uuid" => r#type::uuid,
 				//
-				"diff" => value::diff,
-				"patch" => value::patch,
+				"diff" => value::diff((stk, ctx, Some(opt), doc)).await,
+				"patch" => value::patch((stk, ctx, Some(opt), doc)).await,
 				//
 				"repeat" => array::repeat,
 				//
-				"chain" => value::chain((stk, ctx, opt, doc)).await,
+				"chain" => value::chain((stk, ctx, Some(opt), doc)).await,
 			)
 		}
 		v => v,
