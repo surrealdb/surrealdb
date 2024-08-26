@@ -2317,6 +2317,7 @@ impl Value {
 		match self {
 			// Arrays are allowed
 			Value::Array(v) => Ok(v),
+			// Ranges convert to an array
 			Value::Range(r) => {
 				let range: std::ops::Range<i64> = r.deref().to_owned().try_into()?;
 				Ok(range.into_iter().map(Value::from).collect::<Vec<Value>>().into())
@@ -2332,6 +2333,8 @@ impl Value {
 	/// Try to convert this value to a `Range`
 	pub(crate) fn convert_to_range(self) -> Result<Range, Error> {
 		match self {
+			// Ranges are allowed
+			Value::Range(r) => Ok(*r),
 			// Arrays with two elements are allowed
 			Value::Array(v) if v.len() == 2 => {
 				let mut v = v;
@@ -2340,7 +2343,6 @@ impl Value {
 					end: Bound::Excluded(v.remove(0)),
 				})
 			}
-			Value::Range(r) => Ok(*r),
 			// Anything else raises an error
 			_ => Err(Error::ConvertTo {
 				from: self,

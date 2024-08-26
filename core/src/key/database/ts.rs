@@ -27,15 +27,15 @@ pub fn new<'a>(ns: &'a str, db: &'a str, ts: u64) -> Ts<'a> {
 
 /// Returns the prefix for the whole database timestamps
 pub fn prefix(ns: &str, db: &str) -> Vec<u8> {
-	let mut k = crate::key::database::all::new(ns, db).encode().unwrap();
-	k.extend_from_slice(b"!ts");
+	let mut k = super::all::new(ns, db).encode().unwrap();
+	k.extend_from_slice(b"!ts\x00");
 	k
 }
 
 /// Returns the prefix for the whole database timestamps
 pub fn suffix(ns: &str, db: &str) -> Vec<u8> {
-	let mut k = prefix(ns, db);
-	k.extend_from_slice(&[0xff]);
+	let mut k = super::all::new(ns, db).encode().unwrap();
+	k.extend_from_slice(b"!ts\xff");
 	k
 }
 

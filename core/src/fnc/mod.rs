@@ -18,12 +18,12 @@ pub mod encoding;
 pub mod geo;
 pub mod http;
 pub mod math;
-pub mod meta;
 pub mod not;
 pub mod object;
 pub mod operate;
 pub mod parse;
 pub mod rand;
+pub mod record;
 pub mod script;
 pub mod search;
 pub mod session;
@@ -33,6 +33,7 @@ pub mod string;
 pub mod time;
 pub mod r#type;
 pub mod util;
+pub mod value;
 pub mod vector;
 
 /// Attempts to run any function
@@ -54,6 +55,7 @@ pub async fn run(
 		|| name.starts_with("crypto::pbkdf2")
 		|| name.starts_with("crypto::scrypt")
 		|| name.starts_with("array::map")
+		|| name.starts_with("record::exists")
 	{
 		stk.run(|stk| asynchronous(stk, ctx, opt, doc, name, args)).await
 	} else {
@@ -228,10 +230,6 @@ pub fn synchronous(
 		"math::trimean" => math::trimean,
 		"math::variance" => math::variance,
 		//
-		"meta::id" => meta::id,
-		"meta::table" => meta::tb,
-		"meta::tb" => meta::tb,
-		//
 		"not" => not::not,
 		//
 		"object::entries" => object::entries,
@@ -262,6 +260,10 @@ pub fn synchronous(
 		"rand::uuid::v4" => rand::uuid::v4,
 		"rand::uuid::v7" => rand::uuid::v7,
 		"rand::uuid" => rand::uuid,
+		//
+		"record::id" => record::id,
+		"record::table" => record::tb,
+		"record::tb" => record::tb,
 		//
 		"session::ac" => session::ac(ctx),
 		"session::db" => session::db(ctx),
@@ -392,6 +394,9 @@ pub fn synchronous(
 		"type::is::record" => r#type::is::record,
 		"type::is::string" => r#type::is::string,
 		"type::is::uuid" => r#type::is::uuid,
+		//
+		"value::diff" => value::diff,
+		"value::patch" => value::patch,
 		//
 		"vector::add" => vector::add,
 		"vector::angle" => vector::angle,
@@ -541,8 +546,8 @@ pub async fn idiom(
 				"bearing" => geo::bearing,
 				"centroid" => geo::centroid,
 				"distance" => geo::distance,
-				"hash::decode" => geo::hash::decode,
-				"hash::encode" => geo::hash::encode,
+				"hash_decode" => geo::hash::decode,
+				"hash_encode" => geo::hash::encode,
 			)
 		}
 		Value::Thing(_) => {
@@ -550,9 +555,10 @@ pub async fn idiom(
 				name,
 				args.clone(),
 				"no such method found for the record type",
-				"id" => meta::id,
-				"table" => meta::tb,
-				"tb" => meta::tb,
+				"exists" => record::exists((stk, ctx, Some(opt), doc)).await,
+				"id" => record::id,
+				"table" => record::tb,
+				"tb" => record::tb,
 			)
 		}
 		Value::Object(_) => {
@@ -616,12 +622,12 @@ pub async fn idiom(
 				"semver_major" => string::semver::major,
 				"semver_minor" => string::semver::minor,
 				"semver_patch" => string::semver::patch,
-				"semver_inc::major" => string::semver::inc::major,
-				"semver_inc::minor" => string::semver::inc::minor,
-				"semver_inc::patch" => string::semver::inc::patch,
-				"semver_set::major" => string::semver::set::major,
-				"semver_set::minor" => string::semver::set::minor,
-				"semver_set::patch" => string::semver::set::patch,
+				"semver_inc_major" => string::semver::inc::major,
+				"semver_inc_minor" => string::semver::inc::minor,
+				"semver_inc_patch" => string::semver::inc::patch,
+				"semver_set_major" => string::semver::set::major,
+				"semver_set_minor" => string::semver::set::minor,
+				"semver_set_patch" => string::semver::set::patch,
 			)
 		}
 		Value::Datetime(_) => {
@@ -629,24 +635,24 @@ pub async fn idiom(
 				name,
 				args.clone(),
 				"no such method found for the datetime type",
-				"time_ceil" => time::ceil,
-				"time_day" => time::day,
-				"time_floor" => time::floor,
-				"time_format" => time::format,
-				"time_group" => time::group,
-				"time_hour" => time::hour,
-				"time_minute" => time::minute,
-				"time_month" => time::month,
-				"time_nano" => time::nano,
-				"time_micros" => time::micros,
-				"time_millis" => time::millis,
-				"time_round" => time::round,
-				"time_second" => time::second,
-				"time_unix" => time::unix,
-				"time_wday" => time::wday,
-				"time_week" => time::week,
-				"time_yday" => time::yday,
-				"time_year" => time::year,
+				"ceil" => time::ceil,
+				"day" => time::day,
+				"floor" => time::floor,
+				"format" => time::format,
+				"group" => time::group,
+				"hour" => time::hour,
+				"micros" => time::micros,
+				"millis" => time::millis,
+				"minute" => time::minute,
+				"month" => time::month,
+				"nano" => time::nano,
+				"round" => time::round,
+				"second" => time::second,
+				"unix" => time::unix,
+				"wday" => time::wday,
+				"week" => time::week,
+				"yday" => time::yday,
+				"year" => time::year,
 			)
 		}
 		_ => Err(Error::InvalidFunction {
@@ -664,6 +670,7 @@ pub async fn idiom(
 				name,
 				args,
 				message,
+				//
 				"is_array" => r#type::is::array,
 				"is_bool" => r#type::is::bool,
 				"is_bytes" => r#type::is::bytes,
@@ -703,6 +710,9 @@ pub async fn idiom(
 				"to_record" => r#type::record,
 				"to_string" => r#type::string,
 				"to_uuid" => r#type::uuid,
+				//
+				"diff" => value::diff,
+				"patch" => value::patch,
 				//
 				"repeat" => array::repeat,
 				//
@@ -760,15 +770,17 @@ pub async fn asynchronous(
 		"http::patch" => http::patch(ctx).await,
 		"http::delete" => http::delete(ctx).await,
 		//
-		"search::analyze" => search::analyze((stk,ctx, Some(opt))).await,
+		"record::exists" => record::exists((stk, ctx, Some(opt), doc)).await,
+		//
+		"search::analyze" => search::analyze((stk, ctx, Some(opt))).await,
 		"search::score" => search::score((ctx, doc)).await,
 		"search::highlight" => search::highlight((ctx, doc)).await,
 		"search::offsets" => search::offsets((ctx, doc)).await,
 		//
 		"sleep" => sleep::sleep(ctx).await,
 		//
-		"type::field" => r#type::field((stk,ctx, Some(opt), doc)).await,
-		"type::fields" => r#type::fields((stk,ctx, Some(opt), doc)).await,
+		"type::field" => r#type::field((stk, ctx, Some(opt), doc)).await,
+		"type::fields" => r#type::fields((stk, ctx, Some(opt), doc)).await,
 	)
 }
 
