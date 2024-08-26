@@ -31,34 +31,34 @@ pub async fn v1_to_2_id_uuid(tx: Arc<Transaction>) -> Result<(), Error> {
 				let pos = 11 + ns.as_bytes().len() + db.as_bytes().len() + tb.as_bytes().len();
 				let threshold = 2_u8;
 
-				'inner: loop {
-					let ids = tx.keys(beg.clone()..end.clone(), 1000).await?;
-					if ids.is_empty() {
-						break 'inner;
+				'scan: loop {
+					let keys = tx.keys(beg.clone()..end.clone(), 1000).await?;
+					if keys.is_empty() {
+						break 'scan;
 					}
 
 					// We suffix the last id with a null byte, to prevent scanning it twice (which would result in an infinite loop)
-					beg = ids.last().unwrap().clone();
+					beg = keys.last().unwrap().clone();
 					beg.extend_from_slice(&[b'\0']);
 
-					for id in ids.iter() {
+					for key in keys.iter() {
 						// Check if the id is affected
-						if id.get(pos).is_some_and(|b| b >= &threshold) {
+						if key.get(pos).is_some_and(|b| b >= &threshold) {
 							// This ID needs fixing, add to queue
-							queue.push(id.to_owned());
+							queue.push(key.to_owned());
 						}
 					}
 				}
 
-				for id in queue.iter() {
+				for key in queue.iter() {
 					// Bump the enum entry by 1
-					let mut fixed = id.clone();
+					let mut fixed = key.clone();
 					// This is safe, because we previously obtained the byte from the original id
 					unsafe { *fixed.get_unchecked_mut(pos) += 1 };
 					// Get the value for the old key. We can unwrap the option, as we know that the key exists in the KV store
-					let val = tx.get(id.clone().to_owned(), None).await?.unwrap();
+					let val = tx.get(key.clone().to_owned(), None).await?.unwrap();
 					// Delete the old key
-					tx.del(id.to_owned()).await?;
+					tx.del(key.to_owned()).await?;
 					// Set the fixed key
 					tx.set(fixed, val, None).await?;
 				}

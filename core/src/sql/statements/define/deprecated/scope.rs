@@ -1,4 +1,9 @@
-use crate::sql::{Duration, Ident, Strand, Value};
+use crate::sql::{
+	access::AccessDuration,
+	access_type::{JwtAccessIssue, JwtAccessVerify, JwtAccessVerifyKey},
+	statements::DefineAccessStatement,
+	AccessType, Algorithm, Base, Duration, Ident, JwtAccess, RecordAccess, Strand, Value,
+};
 use derive::Store;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -16,4 +21,36 @@ pub struct DefineScopeStatement {
 	pub comment: Option<Strand>,
 	#[revision(start = 2)]
 	pub if_not_exists: bool,
+}
+
+impl Into<DefineAccessStatement> for DefineScopeStatement {
+	fn into(self) -> DefineAccessStatement {
+		DefineAccessStatement {
+			name: self.name,
+			base: Base::Db,
+			comment: self.comment,
+			if_not_exists: self.if_not_exists,
+			kind: AccessType::Record(RecordAccess {
+				signup: self.signup,
+				signin: self.signin,
+				jwt: JwtAccess {
+					issue: Some(JwtAccessIssue {
+						alg: Algorithm::Hs512,
+						key: self.code.clone(),
+					}),
+					verify: JwtAccessVerify::Key(JwtAccessVerifyKey {
+						alg: Algorithm::Hs512,
+						key: self.code,
+					}),
+				},
+			}),
+			// unused fields
+			authenticate: None,
+			duration: AccessDuration {
+				session: self.session,
+				..AccessDuration::default()
+			},
+			overwrite: false,
+		}
+	}
 }

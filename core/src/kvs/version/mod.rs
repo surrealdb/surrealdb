@@ -83,6 +83,7 @@ impl Version {
 		for v in self.0..Version::LATEST {
 			if v == 1 {
 				apply_fix!(v1_to_2_id_uuid);
+				apply_fix!(v1_to_2_migrate_to_access);
 			}
 		}
 
