@@ -1182,7 +1182,7 @@ async fn changefeed() {
 	let CoreValue::Object(a) = a.clone() else {
 		unreachable!()
 	};
-	let CoreValue::Number(_versionstamp1) = a.get("versionstamp").clone().unwrap() else {
+	let CoreValue::Number(_versionstamp1) = a.get("versionstamp").unwrap() else {
 		unreachable!()
 	};
 	let changes = a.get("changes").unwrap().clone().to_owned();
