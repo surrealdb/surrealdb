@@ -14,6 +14,7 @@ use axum::Router;
 use axum_extra::TypedHeader;
 use bytes::Bytes;
 use futures::{SinkExt, StreamExt};
+use surrealdb::dbs::capabilities::RouteTarget;
 use surrealdb::dbs::Session;
 use tower_http::limit::RequestBodyLimitLayer;
 
@@ -41,6 +42,10 @@ async fn post_handler(
 ) -> Result<impl IntoResponse, impl IntoResponse> {
 	// Get a database reference
 	let db = &state.datastore;
+	// Check if capabilities allow querying the requested HTTP route
+	if !db.allows_http_route(&RouteTarget::Sql) {
+		return Err(Error::OperationForbidden);
+	}
 	// Convert the received sql query
 	let sql = bytes_to_utf8(&sql)?;
 	// Execute the received sql query

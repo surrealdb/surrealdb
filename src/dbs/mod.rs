@@ -3,7 +3,9 @@ use crate::err::Error;
 use clap::Args;
 use std::path::PathBuf;
 use std::time::Duration;
-use surrealdb::dbs::capabilities::{Capabilities, FuncTarget, MethodTarget, NetTarget, Targets};
+use surrealdb::dbs::capabilities::{
+	Capabilities, FuncTarget, MethodTarget, NetTarget, RouteTarget, Targets,
+};
 use surrealdb::kvs::Datastore;
 
 #[derive(Args, Debug)]
@@ -90,6 +92,15 @@ Targets must be in the form of <host>[:<port>], <ipv4|ipv6>[/<mask>]. For exampl
 	#[arg(value_parser = super::cli::validator::method_targets)]
 	allow_rpc: Option<Targets<MethodTarget>>,
 
+	#[arg(
+		help = "Allow all HTTP routes to be requested. Optionally, you can provide a comma-separated list of HTTP routes to allow"
+	)]
+	#[arg(env = "SURREAL_CAPS_ALLOW_HTTP", long, conflicts_with = "allow_all")]
+	// If the arg is provided without value, then assume it's "", which gets parsed into Targets::All
+	#[arg(default_missing_value_os = "", num_args = 0..)]
+	#[arg(value_parser = super::cli::validator::route_targets)]
+	allow_http: Option<Targets<RouteTarget>>,
+
 	//
 	// Deny
 	//
@@ -143,6 +154,15 @@ Targets must be in the form of <host>[:<port>], <ipv4|ipv6>[/<mask>]. For exampl
 	#[arg(default_missing_value_os = "", num_args = 0..)]
 	#[arg(value_parser = super::cli::validator::method_targets)]
 	deny_rpc: Option<Targets<MethodTarget>>,
+
+	#[arg(
+		help = "Deny all HTTP routes from being requested. Optionally, you can provide a comma-separated list of HTTP routes to deny"
+	)]
+	#[arg(env = "SURREAL_CAPS_DENY_HTTP", long, conflicts_with = "deny_all")]
+	// If the arg is provided without value, then assume it's "", which gets parsed into Targets::All
+	#[arg(default_missing_value_os = "", num_args = 0..)]
+	#[arg(value_parser = super::cli::validator::route_targets)]
+	deny_http: Option<Targets<RouteTarget>>,
 }
 
 impl DbsCapabilities {
@@ -199,6 +219,19 @@ impl DbsCapabilities {
 		self.allow_rpc.clone().unwrap_or(Targets::None)
 	}
 
+	fn get_allow_http(&self) -> Targets<RouteTarget> {
+		if self.deny_all || matches!(self.deny_http, Some(Targets::All)) {
+			return Targets::None;
+		}
+
+		if self.allow_all {
+			return Targets::All;
+		}
+
+		// If allow_http was not provided and allow_all is false, then don't allow anything (Targets::None)
+		self.allow_http.clone().unwrap_or(Targets::None)
+	}
+
 	fn get_deny_funcs(&self) -> Targets<FuncTarget> {
 		if self.deny_all {
 			return Targets::All;
@@ -225,6 +258,15 @@ impl DbsCapabilities {
 		// If deny_rpc was not provided and deny_all is false, then don't deny anything (Targets::None)
 		self.deny_rpc.clone().unwrap_or(Targets::None)
 	}
+
+	fn get_deny_http(&self) -> Targets<RouteTarget> {
+		if self.deny_all {
+			return Targets::All;
+		}
+
+		// If deny_http was not provided and deny_all is false, then don't deny anything (Targets::None)
+		self.deny_http.clone().unwrap_or(Targets::None)
+	}
 }
 
 impl From<DbsCapabilities> for Capabilities {
@@ -238,6 +280,8 @@ impl From<DbsCapabilities> for Capabilities {
 			.without_network_targets(caps.get_deny_net())
 			.with_rpc_methods(caps.get_allow_rpc())
 			.without_rpc_methods(caps.get_deny_rpc())
+			.with_http_routes(caps.get_allow_http())
+			.without_http_routes(caps.get_deny_http())
 	}
 }
 

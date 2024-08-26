@@ -5,7 +5,7 @@ use std::{
 	time::Duration,
 };
 
-use surrealdb::dbs::capabilities::{FuncTarget, MethodTarget, NetTarget, Targets};
+use surrealdb::dbs::capabilities::{FuncTarget, MethodTarget, NetTarget, RouteTarget, Targets};
 
 pub(crate) mod parser;
 
@@ -114,6 +114,20 @@ pub(crate) fn method_targets(value: &str) -> Result<Targets<MethodTarget>, Strin
 
 	for target in value.split(',').filter(|s| !s.is_empty()) {
 		result.insert(MethodTarget::from_str(target).map_err(|e| e.to_string())?);
+	}
+
+	Ok(Targets::Some(result))
+}
+
+pub(crate) fn route_targets(value: &str) -> Result<Targets<RouteTarget>, String> {
+	if ["*", ""].contains(&value) {
+		return Ok(Targets::All);
+	}
+
+	let mut result = HashSet::new();
+
+	for target in value.split(',').filter(|s| !s.is_empty()) {
+		result.insert(RouteTarget::from_str(target).map_err(|e| e.to_string())?);
 	}
 
 	Ok(Targets::Some(result))

@@ -215,7 +215,7 @@ pub struct ParseMethodTargetError;
 impl std::error::Error for ParseMethodTargetError {}
 impl fmt::Display for ParseMethodTargetError {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-		write!(f, "The provided method target is not a valid method")
+		write!(f, "The provided method target is not a valid RPC method")
 	}
 }
 
@@ -228,6 +228,81 @@ impl std::str::FromStr for MethodTarget {
 			method => Ok(MethodTarget {
 				method,
 			}),
+		}
+	}
+}
+
+#[derive(Debug, Clone, Hash, Eq, PartialEq)]
+#[non_exhaustive]
+pub enum RouteTarget {
+	Status,
+	Health,
+	Export,
+	Import,
+	Rpc,
+	Version,
+	Sync,
+	Sql,
+	Signin,
+	Signup,
+	Key,
+	Ml,
+}
+
+// impl display
+impl fmt::Display for RouteTarget {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		match self {
+			RouteTarget::Status => write!(f, "status"),
+			RouteTarget::Health => write!(f, "health"),
+			RouteTarget::Export => write!(f, "export"),
+			RouteTarget::Import => write!(f, "import"),
+			RouteTarget::Rpc => write!(f, "rpc"),
+			RouteTarget::Version => write!(f, "version"),
+			RouteTarget::Sync => write!(f, "sync"),
+			RouteTarget::Sql => write!(f, "sql"),
+			RouteTarget::Signin => write!(f, "signin"),
+			RouteTarget::Signup => write!(f, "signup"),
+			RouteTarget::Key => write!(f, "key"),
+			RouteTarget::Ml => write!(f, "ml"),
+		}
+	}
+}
+
+impl Target for RouteTarget {
+	fn matches(&self, elem: &Self) -> bool {
+		*self == *elem
+	}
+}
+
+#[derive(Debug)]
+pub struct ParseRouteTargetError;
+
+impl std::error::Error for ParseRouteTargetError {}
+impl fmt::Display for ParseRouteTargetError {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		write!(f, "The provided route target is not a valid HTTP route")
+	}
+}
+
+impl std::str::FromStr for RouteTarget {
+	type Err = ParseRouteTargetError;
+
+	fn from_str(s: &str) -> Result<Self, Self::Err> {
+		match s {
+			"status" => Ok(RouteTarget::Status),
+			"health" => Ok(RouteTarget::Health),
+			"import" => Ok(RouteTarget::Import),
+			"export" => Ok(RouteTarget::Export),
+			"rpc" => Ok(RouteTarget::Rpc),
+			"version" => Ok(RouteTarget::Version),
+			"sync" => Ok(RouteTarget::Sync),
+			"sql" => Ok(RouteTarget::Sql),
+			"signin" => Ok(RouteTarget::Signin),
+			"signup" => Ok(RouteTarget::Signup),
+			"key" => Ok(RouteTarget::Key),
+			"ml" => Ok(RouteTarget::Ml),
+			_ => Err(ParseRouteTargetError),
 		}
 	}
 }
@@ -281,14 +356,16 @@ pub struct Capabilities {
 	deny_net: Arc<Targets<NetTarget>>,
 	allow_rpc: Arc<Targets<MethodTarget>>,
 	deny_rpc: Arc<Targets<MethodTarget>>,
+	allow_http: Arc<Targets<RouteTarget>>,
+	deny_http: Arc<Targets<RouteTarget>>,
 }
 
 impl fmt::Display for Capabilities {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		write!(
             f,
-            "scripting={}, guest_access={}, live_query_notifications={}, allow_funcs={}, deny_funcs={}, allow_net={}, deny_net={}, allow_rpc={}, deny_rpc={}",
-            self.scripting, self.guest_access, self.live_query_notifications, self.allow_funcs, self.deny_funcs, self.allow_net, self.deny_net, self.allow_rpc, self.deny_rpc,
+            "scripting={}, guest_access={}, live_query_notifications={}, allow_funcs={}, deny_funcs={}, allow_net={}, deny_net={}, allow_rpc={}, deny_rpc={}, allow_http={}, deny_http={}",
+            self.scripting, self.guest_access, self.live_query_notifications, self.allow_funcs, self.deny_funcs, self.allow_net, self.deny_net, self.allow_rpc, self.deny_rpc, self.allow_http, self.deny_http,
         )
 	}
 }
@@ -306,6 +383,8 @@ impl Default for Capabilities {
 			deny_net: Arc::new(Targets::None),
 			allow_rpc: Arc::new(Targets::All),
 			deny_rpc: Arc::new(Targets::None),
+			allow_http: Arc::new(Targets::All),
+			deny_http: Arc::new(Targets::None),
 		}
 	}
 }
@@ -323,6 +402,8 @@ impl Capabilities {
 			deny_net: Arc::new(Targets::None),
 			allow_rpc: Arc::new(Targets::All),
 			deny_rpc: Arc::new(Targets::None),
+			allow_http: Arc::new(Targets::All),
+			deny_http: Arc::new(Targets::None),
 		}
 	}
 
@@ -338,6 +419,8 @@ impl Capabilities {
 			deny_net: Arc::new(Targets::None),
 			allow_rpc: Arc::new(Targets::None),
 			deny_rpc: Arc::new(Targets::None),
+			allow_http: Arc::new(Targets::None),
+			deny_http: Arc::new(Targets::None),
 		}
 	}
 
@@ -386,6 +469,16 @@ impl Capabilities {
 		self
 	}
 
+	pub fn with_http_routes(mut self, allow_http: Targets<RouteTarget>) -> Self {
+		self.allow_http = Arc::new(allow_http);
+		self
+	}
+
+	pub fn without_http_routes(mut self, deny_http: Targets<RouteTarget>) -> Self {
+		self.deny_http = Arc::new(deny_http);
+		self
+	}
+
 	pub fn allows_scripting(&self) -> bool {
 		self.scripting
 	}
@@ -415,6 +508,10 @@ impl Capabilities {
 
 	pub fn allows_rpc_method(&self, target: &MethodTarget) -> bool {
 		self.allow_rpc.matches(target) && !self.deny_rpc.matches(target)
+	}
+
+	pub fn allows_http_route(&self, target: &RouteTarget) -> bool {
+		self.allow_http.matches(target) && !self.deny_http.matches(target)
 	}
 }
 
@@ -775,6 +872,53 @@ mod tests {
 			assert!(caps.allows_rpc_method(&MethodTarget::from_str("update").unwrap()));
 			assert!(!caps.allows_rpc_method(&MethodTarget::from_str("query").unwrap()));
 			assert!(!caps.allows_rpc_method(&MethodTarget::from_str("run").unwrap()));
+		}
+
+		// When all HTTP routes are allowed
+		{
+			let caps = Capabilities::default()
+				.with_http_routes(Targets::<RouteTarget>::All)
+				.without_http_routes(Targets::<RouteTarget>::None);
+			assert!(caps.allows_http_route(&RouteTarget::from_str("version").unwrap()));
+			assert!(caps.allows_http_route(&RouteTarget::from_str("export").unwrap()));
+			assert!(caps.allows_http_route(&RouteTarget::from_str("sql").unwrap()));
+		}
+
+		// When all HTTP routes are allowed and denied at the same time
+		{
+			let caps = Capabilities::default()
+				.with_http_routes(Targets::<RouteTarget>::All)
+				.without_http_routes(Targets::<RouteTarget>::All);
+			assert!(!caps.allows_http_route(&RouteTarget::from_str("version").unwrap()));
+			assert!(!caps.allows_http_route(&RouteTarget::from_str("export").unwrap()));
+			assert!(!caps.allows_http_route(&RouteTarget::from_str("sql").unwrap()));
+		}
+
+		// When some HTTP rotues are allowed and some are denied, deny overrides the allow rules
+		{
+			let caps = Capabilities::default()
+				.with_http_routes(Targets::<RouteTarget>::Some(
+					[
+						RouteTarget::from_str("version").unwrap(),
+						RouteTarget::from_str("import").unwrap(),
+						RouteTarget::from_str("export").unwrap(),
+						RouteTarget::from_str("key").unwrap(),
+						RouteTarget::from_str("sql").unwrap(),
+						RouteTarget::from_str("rpc").unwrap(),
+					]
+					.into(),
+				))
+				.without_http_routes(Targets::<RouteTarget>::Some(
+					[RouteTarget::from_str("sql").unwrap(), RouteTarget::from_str("rpc").unwrap()]
+						.into(),
+				));
+
+			assert!(caps.allows_http_route(&RouteTarget::from_str("version").unwrap()));
+			assert!(caps.allows_http_route(&RouteTarget::from_str("import").unwrap()));
+			assert!(caps.allows_http_route(&RouteTarget::from_str("export").unwrap()));
+			assert!(caps.allows_http_route(&RouteTarget::from_str("key").unwrap()));
+			assert!(!caps.allows_http_route(&RouteTarget::from_str("sql").unwrap()));
+			assert!(!caps.allows_http_route(&RouteTarget::from_str("rpc").unwrap()));
 		}
 	}
 }

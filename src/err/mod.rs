@@ -70,6 +70,9 @@ pub enum Error {
 	/// Statement has been deprecated
 	#[error("{0}")]
 	Other(String),
+
+	#[error("The operation is forbidden")]
+	OperationForbidden,
 }
 
 impl From<Error> for String {
@@ -177,7 +180,7 @@ impl IntoResponse for Error {
 					information: Some(err.to_string()),
 				})
 			),
-			err @ Error::Db(SurrealError::Db(SurrealDbError::IamError(SurrealIamError::NotAllowed { .. }))) => (
+			err @ Error::OperationForbidden | err @ Error::Db(SurrealError::Db(SurrealDbError::IamError(SurrealIamError::NotAllowed { .. }))) => (
 				StatusCode::FORBIDDEN,
 				Json(Message {
 					code: StatusCode::FORBIDDEN.as_u16(),
