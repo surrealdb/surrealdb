@@ -61,48 +61,49 @@ impl Version {
 	}
 	/// Fix
 	pub async fn fix(&self, ds: Arc<Datastore>) -> Result<(), Error> {
-		// Create a new transaction
-		let tx = Arc::new(ds.transaction(TransactionType::Write, LockType::Pessimistic).await?);
-
-		// Easy shortcut to apply a fix
-		macro_rules! apply_fix {
-			($name:ident) => {{
-				match fixes::$name(tx.clone()).await {
-					// Fail early and cancel transaction if the fix failed
-					Err(e) => {
-						tx.cancel().await?;
-						return Err(e);
-					}
-					_ => {}
-				};
-			}};
-		}
-
 		// We iterate through each version from the current to the latest
-		// and apply the fixes for each version
-		for v in self.0..Version::LATEST {
-			if v == 1 {
-				apply_fix!(v1_to_2_id_uuid);
-				apply_fix!(v1_to_2_migrate_to_access);
-			}
-		}
-
-		// All fixes applied, let's update the storage version
-		// Create the key where the version is stored
-		let key = crate::key::version::new();
-		// Set the latest version in storage
-		let val = Version::latest();
-		// Convert the version to binary
-		let bytes: Vec<u8> = val.into();
-		// Attempt to set the current version in storage
-		tx.set(key, bytes, None).await?;
-
-		// Commit the transaction
+		// and apply the fixes for each version. We update storage version
+		// and commit changes each iteration, to keep transactions as small
+		// as possible.
 		//
 		// We commit all fixes and the storage version update in one transaction,
 		// because we never want to leave storage in a broken state where half of
 		// the fixes are applied and the storage version is not updated.
 		//
-		tx.commit().await
+		for v in self.0..Version::LATEST {
+			// Create a new transaction
+			let tx = Arc::new(ds.transaction(TransactionType::Write, LockType::Pessimistic).await?);
+
+			// Easy shortcut to apply a fix
+			macro_rules! apply_fix {
+				($name:ident) => {{
+					match fixes::$name(tx.clone()).await {
+						// Fail early and cancel transaction if the fix failed
+						Err(e) => {
+							tx.cancel().await?;
+							return Err(e);
+						}
+						_ => {}
+					};
+				}};
+			}
+
+			// Apply fixes based on the current version
+			if v == 1 {
+				apply_fix!(v1_to_2_id_uuid);
+				apply_fix!(v1_to_2_migrate_to_access);
+			}
+
+			// Obtain storage version key and value
+			let key = crate::key::version::new();
+			let val: Vec<u8> = Version::from(v + 1).into();
+			// Attempt to set the current version in storage
+			tx.set(key, val, None).await?;
+
+			// Commit the transaction
+			tx.commit().await?;
+		}
+
+		Ok(())
 	}
 }
