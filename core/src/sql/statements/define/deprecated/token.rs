@@ -22,18 +22,18 @@ pub struct DefineTokenStatement {
 	pub if_not_exists: bool,
 }
 
-impl Into<DefineAccessStatement> for DefineTokenStatement {
-	fn into(self) -> DefineAccessStatement {
+impl From<DefineTokenStatement> for DefineAccessStatement {
+	fn from(tk: DefineTokenStatement) -> DefineAccessStatement {
 		DefineAccessStatement {
-			name: self.name,
-			base: self.base,
-			comment: self.comment,
-			if_not_exists: self.if_not_exists,
+			name: tk.name,
+			base: tk.base,
+			comment: tk.comment,
+			if_not_exists: tk.if_not_exists,
 			kind: AccessType::Jwt(JwtAccess {
 				issue: None,
 				verify: JwtAccessVerify::Key(JwtAccessVerifyKey {
-					alg: self.kind,
-					key: self.code,
+					alg: tk.kind,
+					key: tk.code,
 				}),
 			}),
 			// unused fields

@@ -23,31 +23,31 @@ pub struct DefineScopeStatement {
 	pub if_not_exists: bool,
 }
 
-impl Into<DefineAccessStatement> for DefineScopeStatement {
-	fn into(self) -> DefineAccessStatement {
+impl From<DefineScopeStatement> for DefineAccessStatement {
+	fn from(sc: DefineScopeStatement) -> DefineAccessStatement {
 		DefineAccessStatement {
-			name: self.name,
+			name: sc.name,
 			base: Base::Db,
-			comment: self.comment,
-			if_not_exists: self.if_not_exists,
+			comment: sc.comment,
+			if_not_exists: sc.if_not_exists,
 			kind: AccessType::Record(RecordAccess {
-				signup: self.signup,
-				signin: self.signin,
+				signup: sc.signup,
+				signin: sc.signin,
 				jwt: JwtAccess {
 					issue: Some(JwtAccessIssue {
 						alg: Algorithm::Hs512,
-						key: self.code.clone(),
+						key: sc.code.clone(),
 					}),
 					verify: JwtAccessVerify::Key(JwtAccessVerifyKey {
 						alg: Algorithm::Hs512,
-						key: self.code,
+						key: sc.code,
 					}),
 				},
 			}),
 			// unused fields
 			authenticate: None,
 			duration: AccessDuration {
-				session: self.session,
+				session: sc.session,
 				..AccessDuration::default()
 			},
 			overwrite: false,
