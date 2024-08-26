@@ -3,6 +3,7 @@ use super::tx::Transaction;
 use super::version::Version;
 use crate::cf;
 use crate::ctx::MutableContext;
+use crate::dbs::capabilities::MethodTarget;
 #[cfg(feature = "jwks")]
 use crate::dbs::capabilities::NetTarget;
 use crate::dbs::node::Timestamp;
@@ -490,6 +491,11 @@ impl Datastore {
 
 	pub fn id(&self) -> Uuid {
 		self.id
+	}
+
+	/// Does the datastore allow excecuting an RPC method?
+	pub(crate) fn allows_rpc_method(&self, method_target: &MethodTarget) -> bool {
+		self.capabilities.allows_rpc_method(method_target)
 	}
 
 	/// Does the datastore allow connections to a network target?
