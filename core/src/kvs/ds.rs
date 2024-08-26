@@ -577,23 +577,6 @@ impl Datastore {
 		Ok(val)
 	}
 
-	pub async fn set_version_latest(&self) -> Result<(), Error> {
-		// Start a new writeable transaction
-		let txn = self.transaction(Write, Pessimistic).await?.enclose();
-		// Create the key where the version is stored
-		let key = crate::key::version::new();
-		// Set the latest version in storage
-		let val = Version::latest();
-		// Convert the version to binary
-		let bytes: Vec<u8> = val.into();
-		// Attempt to set the current version in storage
-		catch!(txn, txn.set(key, bytes, None));
-		// We set the version, so commit the transaction
-		catch!(txn, txn.commit());
-		// Everything ok
-		Ok(())
-	}
-
 	/// Setup the initial cluster access credentials
 	#[instrument(err, level = "trace", target = "surrealdb::core::kvs::ds", skip_all)]
 	pub async fn initialise_credentials(&self, user: &str, pass: &str) -> Result<(), Error> {
