@@ -3,36 +3,33 @@
 use std::collections::HashSet;
 
 use surrealdb_core::dbs::capabilities::{
-	Capabilities as CoreCapabilities, FuncTarget, MethodTarget, NetTarget, ParseFuncTargetError,
-	ParseNetTargetError, RouteTarget, Targets,
+	Capabilities as CoreCapabilities, FuncTarget, NetTarget, ParseFuncTargetError,
+	ParseNetTargetError, Targets,
 };
 
-/// Capabilities are used to limit what a user can do to the system.
+/// Capabilities are used to limit what users are allowed to do using queries.
 ///
-/// Capabilities are split into 4 categories:
-/// - Scripting: Whether or not the user can execute scripts
-/// - Guest access: Whether or not a non-authenticated user can execute queries on the system when authentication is enabled.
-/// - Functions: Whether or not the user can execute certain functions
-/// - Network: Whether or not the user can access certain network addresses
-/// - RPC: Whether or not the user can call certain RPC methods
-/// - HTTP: Whether or not the user can request certain HTTP routes
+/// Capabilities in this context refers to query capabilities, which are:
+/// - Scripting: Whether or not users can execute scripts
+/// - Guest access: Whether or not non-authenticated users can execute queries on the system when authentication is enabled.
+/// - Functions: Whether or not users can execute certain functions
+/// - Network: Whether or not users can access certain network addresses
 ///
 /// Capabilities are configured globally. By default, capabilities are configured as:
 /// - Scripting: false
 /// - Guest access: false
 /// - Functions: All functions are allowed
 /// - Network: No network address is allowed nor denied, hence all network addresses are denied unless explicitly allowed
-/// - RPC: All methods are allowed
-/// - HTTP: All routes are allowed
 ///
 /// The capabilities are defined using allow/deny lists for fine-grained control.
 ///
 /// # Filtering functions and net-targets.
 ///
-/// The filtering of targets related to network, functions, RPC methods and HTTP routes is done with an allow/deny list.
+/// The filtering of net targets and functions is done with an allow/deny list.
 /// These list can either match everything, nothing or a given list.
 ///
-/// For a target to be allowed, it must match the allow-list and not match the deny-list. This means that if for
+/// By default every function and net-target is disallowed. For a function or net target to be
+/// allowed it must match the allow-list and not match the deny-list. This means that if for
 /// example a function is both in the allow-list and in the deny-list it will be disallowed.
 ///
 /// With the combination of both these lists you can filter subgroups. For example:
@@ -98,10 +95,6 @@ pub struct Capabilities {
 	deny_funcs: Targets<FuncTarget>,
 	allow_net: Targets<NetTarget>,
 	deny_net: Targets<NetTarget>,
-	allow_rpc: Targets<MethodTarget>,
-	deny_rpc: Targets<MethodTarget>,
-	allow_http: Targets<RouteTarget>,
-	deny_http: Targets<RouteTarget>,
 }
 
 impl Default for Capabilities {
@@ -113,7 +106,7 @@ impl Default for Capabilities {
 impl Capabilities {
 	/// Create a builder with default capabilities enabled.
 	///
-	/// Default capabilities enables live query notifications and all (non-scripting) functions, RPC methods and HTTP endpoints.
+	/// Default capabilities enables live query notifications and all (non-scripting) functions.
 	pub fn new() -> Self {
 		Capabilities {
 			cap: CoreCapabilities::default(),
@@ -121,10 +114,6 @@ impl Capabilities {
 			deny_funcs: Targets::None,
 			allow_net: Targets::None,
 			deny_net: Targets::None,
-			allow_rpc: Targets::All,
-			deny_rpc: Targets::None,
-			allow_http: Targets::All,
-			deny_http: Targets::None,
 		}
 	}
 
@@ -136,10 +125,6 @@ impl Capabilities {
 			deny_funcs: Targets::None,
 			allow_net: Targets::All,
 			deny_net: Targets::None,
-			allow_rpc: Targets::All,
-			deny_rpc: Targets::None,
-			allow_http: Targets::All,
-			deny_http: Targets::None,
 		}
 	}
 
@@ -151,10 +136,6 @@ impl Capabilities {
 			deny_funcs: Targets::None,
 			allow_net: Targets::None,
 			deny_net: Targets::None,
-			allow_rpc: Targets::None,
-			deny_rpc: Targets::None,
-			allow_http: Targets::None,
-			deny_http: Targets::None,
 		}
 	}
 

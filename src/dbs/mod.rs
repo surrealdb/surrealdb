@@ -40,16 +40,16 @@ struct DbsCapabilities {
 	//
 	// Allow
 	//
-	#[arg(help = "Allow all capabilities")]
+	#[arg(help = "Allow all query capabilities")]
 	#[arg(env = "SURREAL_CAPS_ALLOW_ALL", short = 'A', long, conflicts_with = "deny_all")]
 	allow_all: bool,
 
 	#[cfg(feature = "scripting")]
-	#[arg(help = "Allow execution of embedded scripting functions")]
+	#[arg(help = "Allow execution of embedded scripting functions. This is a query capability")]
 	#[arg(env = "SURREAL_CAPS_ALLOW_SCRIPT", long, conflicts_with = "allow_all")]
 	allow_scripting: bool,
 
-	#[arg(help = "Allow guest users to execute queries")]
+	#[arg(help = "Allow guest users to execute queries. This is a query capability")]
 	#[arg(env = "SURREAL_CAPS_ALLOW_GUESTS", long, conflicts_with = "allow_all")]
 	allow_guests: bool,
 
@@ -59,6 +59,7 @@ struct DbsCapabilities {
 Function names must be in the form <family>[::<name>]. For example:
  - 'http' or 'http::*' -> Include all functions in the 'http' family
  - 'http::get' -> Include only the 'get' function in the 'http' family
+This is a query capability
 "#
 	)]
 	#[arg(env = "SURREAL_CAPS_ALLOW_FUNC", long, conflicts_with = "allow_all")]
@@ -75,6 +76,7 @@ Targets must be in the form of <host>[:<port>], <ipv4|ipv6>[/<mask>]. For exampl
  - 'surrealdb.com', '127.0.0.1' or 'fd00::1' -> Match outbound connections to these hosts on any port
  - 'surrealdb.com:80', '127.0.0.1:80' or 'fd00::1:80' -> Match outbound connections to these hosts on port 80
  - '10.0.0.0/8' or 'fd00::/8' -> Match outbound connections to any host in these networks
+This is a query capability
 "#
 	)]
 	#[arg(env = "SURREAL_CAPS_ALLOW_NET", long, conflicts_with = "allow_all")]
@@ -84,7 +86,7 @@ Targets must be in the form of <host>[:<port>], <ipv4|ipv6>[/<mask>]. For exampl
 	allow_net: Option<Targets<NetTarget>>,
 
 	#[arg(
-		help = "Allow all RPC methods to be called. Optionally, you can provide a comma-separated list of RPC methods to allow"
+		help = "Allow all RPC methods to be called. Optionally, you can provide a comma-separated list of RPC methods to allow. This is a server capability"
 	)]
 	#[arg(env = "SURREAL_CAPS_ALLOW_RPC", long, conflicts_with = "allow_all")]
 	// If the arg is provided without value, then assume it's "", which gets parsed into Targets::All
@@ -94,7 +96,7 @@ Targets must be in the form of <host>[:<port>], <ipv4|ipv6>[/<mask>]. For exampl
 	allow_rpc: Option<Targets<MethodTarget>>,
 
 	#[arg(
-		help = "Allow all HTTP routes to be requested. Optionally, you can provide a comma-separated list of HTTP routes to allow"
+		help = "Allow all HTTP routes to be requested. Optionally, you can provide a comma-separated list of HTTP routes to allow. This is a server capability"
 	)]
 	#[arg(env = "SURREAL_CAPS_ALLOW_HTTP", long, conflicts_with = "allow_all")]
 	// If the arg is provided without value, then assume it's "", which gets parsed into Targets::All
@@ -106,16 +108,16 @@ Targets must be in the form of <host>[:<port>], <ipv4|ipv6>[/<mask>]. For exampl
 	//
 	// Deny
 	//
-	#[arg(help = "Deny all capabilities")]
+	#[arg(help = "Deny all query capabilities")]
 	#[arg(env = "SURREAL_CAPS_DENY_ALL", short = 'D', long, conflicts_with = "allow_all")]
 	deny_all: bool,
 
 	#[cfg(feature = "scripting")]
-	#[arg(help = "Deny execution of embedded scripting functions")]
+	#[arg(help = "Deny execution of embedded scripting functions. This is a query capability")]
 	#[arg(env = "SURREAL_CAPS_DENY_SCRIPT", long, conflicts_with = "deny_all")]
 	deny_scripting: bool,
 
-	#[arg(help = "Deny guest users to execute queries")]
+	#[arg(help = "Deny guest users to execute queries. This is a query capability")]
 	#[arg(env = "SURREAL_CAPS_DENY_GUESTS", long, conflicts_with = "deny_all")]
 	deny_guests: bool,
 
@@ -125,6 +127,7 @@ Targets must be in the form of <host>[:<port>], <ipv4|ipv6>[/<mask>]. For exampl
 Function names must be in the form <family>[::<name>]. For example:
  - 'http' or 'http::*' -> Include all functions in the 'http' family
  - 'http::get' -> Include only the 'get' function in the 'http' family
+This is a query capability
 "#
 	)]
 	#[arg(env = "SURREAL_CAPS_DENY_FUNC", long, conflicts_with = "deny_all")]
@@ -140,6 +143,7 @@ Targets must be in the form of <host>[:<port>], <ipv4|ipv6>[/<mask>]. For exampl
  - 'surrealdb.com', '127.0.0.1' or 'fd00::1' -> Match outbound connections to these hosts on any port
  - 'surrealdb.com:80', '127.0.0.1:80' or 'fd00::1:80' -> Match outbound connections to these hosts on port 80
  - '10.0.0.0/8' or 'fd00::/8' -> Match outbound connections to any host in these networks
+This is a query capability
 "#
 	)]
 	#[arg(env = "SURREAL_CAPS_DENY_NET", long, conflicts_with = "deny_all")]
@@ -149,7 +153,7 @@ Targets must be in the form of <host>[:<port>], <ipv4|ipv6>[/<mask>]. For exampl
 	deny_net: Option<Targets<NetTarget>>,
 
 	#[arg(
-		help = "Deny all RPC methods from being called. Optionally, you can provide a comma-separated list of RPC methods to deny"
+		help = "Deny all RPC methods from being called. Optionally, you can provide a comma-separated list of RPC methods to deny. This is a server capability"
 	)]
 	#[arg(env = "SURREAL_CAPS_DENY_RPC", long)]
 	// If the arg is provided without value, then assume it's "", which gets parsed into Targets::All
@@ -158,7 +162,7 @@ Targets must be in the form of <host>[:<port>], <ipv4|ipv6>[/<mask>]. For exampl
 	deny_rpc: Option<Targets<MethodTarget>>,
 
 	#[arg(
-		help = "Deny all HTTP routes from being requested. Optionally, you can provide a comma-separated list of HTTP routes to deny"
+		help = "Deny all HTTP routes from being requested. Optionally, you can provide a comma-separated list of HTTP routes to deny. This is a server capability"
 	)]
 	#[arg(env = "SURREAL_CAPS_DENY_HTTP", long)]
 	// If the arg is provided without value, then assume it's "", which gets parsed into Targets::All
@@ -209,7 +213,8 @@ impl DbsCapabilities {
 	}
 
 	fn get_allow_rpc(&self) -> Targets<MethodTarget> {
-		// To prevent unexpected behavior as well as breaking changes, deny_all does not disable the RPC API
+		// Server capabilities must be specifically disabled
+		// The deny_all option does not disable the RPC API
 		if matches!(self.deny_rpc, Some(Targets::All)) {
 			return Targets::None;
 		}
@@ -223,7 +228,8 @@ impl DbsCapabilities {
 	}
 
 	fn get_allow_http(&self) -> Targets<RouteTarget> {
-		// To prevent unexpected behavior as well as breaking changes, deny_all does not disable the HTTP REST API
+		// Server capabilities must be specifically disabled
+		// The deny_all option does not disable the HTTP REST API
 		if matches!(self.deny_http, Some(Targets::All)) {
 			return Targets::None;
 		}

@@ -350,10 +350,14 @@ pub struct Capabilities {
 	guest_access: bool,
 	live_query_notifications: bool,
 
+	// Query capabilities
+	// These capabilities limit what SurrealQL queries allow
 	allow_funcs: Arc<Targets<FuncTarget>>,
 	deny_funcs: Arc<Targets<FuncTarget>>,
 	allow_net: Arc<Targets<NetTarget>>,
 	deny_net: Arc<Targets<NetTarget>>,
+	// Server capabilities
+	// These capabilities limit what the SurrealDB server allows
 	allow_rpc: Arc<Targets<MethodTarget>>,
 	deny_rpc: Arc<Targets<MethodTarget>>,
 	allow_http: Arc<Targets<RouteTarget>>,
