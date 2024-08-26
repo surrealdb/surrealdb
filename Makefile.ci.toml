@@ -208,7 +208,6 @@ script = """
 
 [tasks.start-tikv]
 category = "CI - SERVICES"
-env = { SURREAL_LINK = "https://github.com/surrealdb/surrealdb/releases/download/v1.2.0/surreal-v1.2.0.linux-amd64.tgz" }
 script = """
     #!/bin/bash -ex
     ${HOME}/.tiup/bin/tiup install pd tikv playground
