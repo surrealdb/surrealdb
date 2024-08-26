@@ -1,5 +1,7 @@
+use super::fut;
 use super::run;
 use crate::fnc::script::modules::impl_module_def;
+use js::prelude::Async;
 
 mod sort;
 #[non_exhaustive]
@@ -9,8 +11,8 @@ impl_module_def!(
 	Package,
 	"array",
 	"add" => run,
-	"all" => run,
-	"any" => run,
+	"all" => fut Async,
+	"any" => fut Async,
 	"at" => run,
 	"append" => run,
 	"boolean_and" => run,
@@ -24,11 +26,15 @@ impl_module_def!(
 	"difference" => run,
 	"distinct" => run,
 	"fill" => run,
-	"filter_index" => run,
-	"find_index" => run,
+	"filter" => fut Async,
+	"filter_index" => fut Async,
+	"find" => fut Async,
+	"find_index" => fut Async,
 	"first" => run,
 	"flatten" => run,
 	"group" => run,
+	"includes" => fut Async,
+	"index_of" => fut Async,
 	"insert" => run,
 	"intersect" => run,
 	"is_empty" => run,
@@ -39,6 +45,7 @@ impl_module_def!(
 	"logical_and" => run,
 	"logical_or" => run,
 	"logical_xor" => run,
+	"map" => fut Async,
 	"matches" => run,
 	"max" => run,
 	"min" => run,
