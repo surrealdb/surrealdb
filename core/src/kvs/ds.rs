@@ -537,14 +537,14 @@ impl Datastore {
 					// There was en error getting the version
 					Err(err) => {
 						// We didn't write anything, so just rollback
-						catch!(txn, txn.cancel());
+						txn.cancel().await?;
 						// Return the error
 						return Err(err);
 					}
 					// We could decode the version correctly
 					Ok(val) => {
 						// We didn't write anything, so just rollback
-						catch!(txn, txn.cancel());
+						txn.cancel().await?;
 						// Return the current version
 						val
 					}
