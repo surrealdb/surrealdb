@@ -3,9 +3,9 @@ use super::tx::Transaction;
 use super::version::Version;
 use crate::cf;
 use crate::ctx::MutableContext;
-use crate::dbs::capabilities::{MethodTarget, RouteTarget};
 #[cfg(feature = "jwks")]
 use crate::dbs::capabilities::NetTarget;
+use crate::dbs::capabilities::{MethodTarget, RouteTarget};
 use crate::dbs::node::Timestamp;
 use crate::dbs::{
 	Attach, Capabilities, Executor, Notification, Options, Response, Session, Variables,
