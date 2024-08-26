@@ -92,7 +92,7 @@ impl Parser<'_> {
 				| TokenKind::NumberSuffix(NumberSuffix::Float) => {
 					cur = self.pop_peek();
 				}
-				TokenKind::Language(_) | TokenKind::Keyword(_) => {
+				TokenKind::Language(_) | TokenKind::Keyword(_) | TokenKind::VectorType(_) => {
 					// there are some keywords and languages keywords which could be part of the
 					// hex section.
 					if !self.span_bytes(next.span).iter().all(|x| x.is_ascii_hexdigit()) {
@@ -166,6 +166,7 @@ mod test {
 		assert_uuid_parses("d0531951-20ec-4575-bb68-3e6b49d813fa");
 		assert_uuid_parses("e0531951-20ec-4575-bb68-3e6b49d813fa");
 		assert_uuid_parses("a0531951-20ec-4575-bb68-3e6b49d813fa");
+		assert_uuid_parses("b98839b9-0471-4dbb-aae0-14780e848f32");
 	}
 
 	#[test]
