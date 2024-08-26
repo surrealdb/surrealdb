@@ -260,7 +260,7 @@ pub async fn fix(path: String) -> Result<(), Error> {
 	// Apply fixes
 	version.fix(dbs).await?;
 	// Log success
-	println!("Database fixes applied successfully.");
+	println!("Database storage version was updated successfully. Please carefully read back logs to see if any manual changes need to be applied");
 	// All ok
 	Ok(())
 }
