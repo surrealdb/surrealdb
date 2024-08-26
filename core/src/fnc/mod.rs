@@ -56,10 +56,6 @@ pub async fn run(
 		|| name.eq("array::index_of")
 		|| name.eq("array::map")
 		|| name.eq("array::some")
-		|| name.eq("crypto::argon2")
-		|| name.eq("crypto::bcrypt")
-		|| name.eq("crypto::pbkdf2")
-		|| name.eq("crypto::scrypt")
 		|| name.eq("record::exists")
 		|| name.eq("type::field")
 		|| name.eq("type::fields")
@@ -67,6 +63,10 @@ pub async fn run(
 		|| name.eq("value::patch")
 		|| name.starts_with("http")
 		|| name.starts_with("search")
+		|| name.starts_with("crypto::argon2")
+		|| name.starts_with("crypto::bcrypt")
+		|| name.starts_with("crypto::pbkdf2")
+		|| name.starts_with("crypto::scrypt")
 	{
 		stk.run(|stk| asynchronous(stk, ctx, opt, doc, name, args)).await
 	} else {
