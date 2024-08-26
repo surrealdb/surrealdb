@@ -189,6 +189,8 @@ async fn migrate_sc_tokens(
 	let name = ac.name.clone();
 	// Find all tokens on the namespace level
 	// 0xb1 = ±
+	// Inserting the string manually does not add a null byte at the end of the string.
+	// Hence, in the third `extend_from_slice`, we add the null byte manually, followed by the token key prefix
 	let mut beg = crate::key::database::all::new(ns, db).encode()?;
 	beg.extend_from_slice(&[0xb1]);
 	beg.extend_from_slice(name.as_bytes());
@@ -253,6 +255,10 @@ fn merge_ac_and_tk(ac: DefineAccessStatement, tk: DefineTokenStatement) -> Defin
 			});
 			AccessType::Record(ak)
 		}
+
+		// We can not reach this code, because the code which invokes this
+		// method only passes record accesses, which we previously constructed
+		// based on old scope definitions.
 		_ => unreachable!("Unexpected access kind"),
 	};
 	ac
