@@ -30,7 +30,7 @@ impl_module_def!(
 	"slice" => run,
 	"slug" => run,
 	"split" => run,
-	"startsWith" => run,
+	"starts_with" => run,
 	"trim" => run,
 	"uppercase" => run,
 	"words" => run,

@@ -295,7 +295,7 @@ pub fn synchronous(
 		"string::slice" => string::slice,
 		"string::slug" => string::slug,
 		"string::split" => string::split,
-		"string::startsWith" => string::starts_with,
+		"string::starts_with" => string::starts_with,
 		"string::trim" => string::trim,
 		"string::uppercase" => string::uppercase,
 		"string::words" => string::words,
