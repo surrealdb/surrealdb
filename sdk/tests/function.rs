@@ -306,22 +306,50 @@ async fn function_array_fill() -> Result<(), Error> {
 }
 
 #[tokio::test]
+async fn function_array_filter() -> Result<(), Error> {
+	let sql = r#"
+		RETURN array::filter([5, 7, 9], |$v| $v > 6);
+		RETURN array::filter(["hello_world", "goodbye world", "hello wombat", "goodbye world"], |$v| $v CONTAINS 'hello');
+		RETURN array::filter(["nothing here"], |$v| $v == 3);
+	"#;
+	let desired_responses = ["[7, 9]", "['hello_world', 'hello wombat']", "[]"];
+	test_queries(sql, &desired_responses).await?;
+	Ok(())
+}
+
+#[tokio::test]
 async fn function_array_filter_index() -> Result<(), Error> {
-	let sql = r#"RETURN array::filter_index([0, 1, 2], 1);
-RETURN array::filter_index([0, 0, 2], 0);
-RETURN array::filter_index(["hello_world", "hello world", "hello wombat", "hello world"], "hello world");
-RETURN array::filter_index(["nothing here"], 0);"#;
+	let sql = r#"
+		RETURN array::filter_index([0, 1, 2], 1);
+		RETURN array::filter_index([0, 0, 2], 0);
+		RETURN array::filter_index(["hello_world", "hello world", "hello wombat", "hello world"], "hello world");
+		RETURN array::filter_index(["nothing here"], 0);
+	"#;
 	let desired_responses = ["[1]", "[0, 1]", "[1, 3]", "[]"];
 	test_queries(sql, &desired_responses).await?;
 	Ok(())
 }
 
 #[tokio::test]
+async fn function_array_find() -> Result<(), Error> {
+	let sql = r#"
+		RETURN array::find([5, 7, 9], |$v| $v >= 6);
+		RETURN array::find(["hello world", null, true], |$v| $v != NULL);
+		RETURN array::find([0, 1, 2], |$v| $v > 5);
+	"#;
+	let desired_responses = ["7", "'hello world'", "NONE"];
+	test_queries(sql, &desired_responses).await?;
+	Ok(())
+}
+
+#[tokio::test]
 async fn function_array_find_index() -> Result<(), Error> {
-	let sql = r#"RETURN array::find_index([5, 6, 7], 7);
-RETURN array::find_index(["hello world", null, true], null);
-RETURN array::find_index([0, 1, 2], 3);"#;
-	let desired_responses = ["2", "1", "null"];
+	let sql = r#"
+		RETURN array::find_index([5, 6, 7], 7);
+		RETURN array::find_index(["hello world", null, true], null);
+		RETURN array::find_index([0, 1, 2], 3);
+	"#;
+	let desired_responses = ["2", "1", "NONE"];
 	test_queries(sql, &desired_responses).await?;
 	Ok(())
 }
@@ -3375,9 +3403,9 @@ async fn function_string_contains() -> Result<(), Error> {
 #[tokio::test]
 async fn function_string_ends_with() -> Result<(), Error> {
 	let sql = r#"
-		RETURN string::endsWith("", "");
-		RETURN string::endsWith("", "test");
-		RETURN string::endsWith("this is a test", "test");
+		RETURN string::ends_with("", "");
+		RETURN string::ends_with("", "test");
+		RETURN string::ends_with("this is a test", "test");
 	"#;
 	let mut test = Test::new(sql).await?;
 	//
@@ -4187,9 +4215,9 @@ async fn function_string_split() -> Result<(), Error> {
 #[tokio::test]
 async fn function_string_starts_with() -> Result<(), Error> {
 	let sql = r#"
-		RETURN string::startsWith("", "");
-		RETURN string::startsWith("", "test");
-		RETURN string::startsWith("test this string", "test");
+		RETURN string::starts_with("", "");
+		RETURN string::starts_with("", "test");
+		RETURN string::starts_with("test this string", "test");
 	"#;
 	let mut test = Test::new(sql).await?;
 	//
