@@ -284,7 +284,7 @@ pub fn synchronous(
 		//
 		"string::concat" => string::concat,
 		"string::contains" => string::contains,
-		"string::endsWith" => string::ends_with,
+		"string::ends_with" => string::ends_with,
 		"string::join" => string::join,
 		"string::len" => string::len,
 		"string::lowercase" => string::lowercase,

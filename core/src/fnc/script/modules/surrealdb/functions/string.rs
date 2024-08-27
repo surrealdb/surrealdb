@@ -16,7 +16,7 @@ impl_module_def!(
 	"concat" => run,
 	"contains" => run,
 	"distance" => (distance::Package),
-	"endsWith" => run,
+	"ends_with" => run,
 	"html" => (html::Package),
 	"is" => (is::Package),
 	"join" => run,
