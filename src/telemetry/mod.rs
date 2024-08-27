@@ -3,7 +3,6 @@ pub mod metrics;
 pub mod traces;
 
 use crate::cli::validator::parser::env_filter::CustomEnvFilter;
-use once_cell::sync::Lazy;
 use opentelemetry::metrics::MetricsError;
 use opentelemetry::Context;
 use opentelemetry::KeyValue;
@@ -11,6 +10,7 @@ use opentelemetry_sdk::resource::{
 	EnvResourceDetector, SdkProvidedResourceDetector, TelemetryResourceDetector,
 };
 use opentelemetry_sdk::Resource;
+use std::sync::LazyLock;
 use std::time::Duration;
 use tracing::{Level, Subscriber};
 use tracing_subscriber::filter::ParseError;
@@ -18,7 +18,7 @@ use tracing_subscriber::prelude::*;
 use tracing_subscriber::util::SubscriberInitExt;
 use tracing_subscriber::EnvFilter;
 
-pub static OTEL_DEFAULT_RESOURCE: Lazy<Resource> = Lazy::new(|| {
+pub static OTEL_DEFAULT_RESOURCE: LazyLock<Resource> = LazyLock::new(|| {
 	let res = Resource::from_detectors(
 		Duration::from_secs(5),
 		vec![

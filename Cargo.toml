@@ -80,7 +80,6 @@ http = "1.1.0"
 http-body = "1.0.0"
 http-body-util = "0.1.1"
 hyper = "1.2.0"
-once_cell = "1.18.0"
 
 tracing = "0.1"
 tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }

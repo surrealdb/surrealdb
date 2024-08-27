@@ -1,4 +1,4 @@
-use once_cell::sync::Lazy;
+use std::sync::LazyLock;
 use std::time::Duration;
 use surrealdb::{lazy_env_parse, lazy_env_parse_or_else};
 
@@ -32,19 +32,19 @@ pub const APP_ENDPOINT: &str = "https://surrealdb.com/app";
 pub const WEBSOCKET_PING_FREQUENCY: Duration = Duration::from_secs(5);
 
 /// What is the maximum WebSocket frame size (defaults to 16 MiB)
-pub static WEBSOCKET_MAX_FRAME_SIZE: Lazy<usize> =
+pub static WEBSOCKET_MAX_FRAME_SIZE: LazyLock<usize> =
 	lazy_env_parse!("SURREAL_WEBSOCKET_MAX_FRAME_SIZE", usize, 16 << 20);
 
 /// What is the maximum WebSocket message size (defaults to 128 MiB)
-pub static WEBSOCKET_MAX_MESSAGE_SIZE: Lazy<usize> =
+pub static WEBSOCKET_MAX_MESSAGE_SIZE: LazyLock<usize> =
 	lazy_env_parse!("SURREAL_WEBSOCKET_MAX_MESSAGE_SIZE", usize, 128 << 20);
 
 /// How many concurrent tasks can be handled on each WebSocket (defaults to 24)
-pub static WEBSOCKET_MAX_CONCURRENT_REQUESTS: Lazy<usize> =
+pub static WEBSOCKET_MAX_CONCURRENT_REQUESTS: LazyLock<usize> =
 	lazy_env_parse!("SURREAL_WEBSOCKET_MAX_CONCURRENT_REQUESTS", usize, 24);
 
 /// What is the runtime thread memory stack size (defaults to 10MiB)
-pub static RUNTIME_STACK_SIZE: Lazy<usize> =
+pub static RUNTIME_STACK_SIZE: LazyLock<usize> =
 	lazy_env_parse_or_else!("SURREAL_RUNTIME_STACK_SIZE", usize, |_| {
 		// Stack frames are generally larger in debug mode.
 		if cfg!(debug_assertions) {
@@ -55,17 +55,18 @@ pub static RUNTIME_STACK_SIZE: Lazy<usize> =
 	});
 
 /// How many threads which can be started for blocking operations (defaults to 512)
-pub static RUNTIME_MAX_BLOCKING_THREADS: Lazy<usize> =
+pub static RUNTIME_MAX_BLOCKING_THREADS: LazyLock<usize> =
 	lazy_env_parse!("SURREAL_RUNTIME_MAX_BLOCKING_THREADS", usize, 512);
 
 /// The version identifier of this build
-pub static PKG_VERSION: Lazy<String> = Lazy::new(|| match option_env!("SURREAL_BUILD_METADATA") {
-	Some(metadata) if !metadata.trim().is_empty() => {
-		let version = env!("CARGO_PKG_VERSION");
-		format!("{version}+{metadata}")
-	}
-	_ => env!("CARGO_PKG_VERSION").to_owned(),
-});
+pub static PKG_VERSION: LazyLock<String> =
+	LazyLock::new(|| match option_env!("SURREAL_BUILD_METADATA") {
+		Some(metadata) if !metadata.trim().is_empty() => {
+			let version = env!("CARGO_PKG_VERSION");
+			format!("{version}+{metadata}")
+		}
+		_ => env!("CARGO_PKG_VERSION").to_owned(),
+	});
 
-pub static GRAPHQL_ENABLE: Lazy<bool> =
+pub static GRAPHQL_ENABLE: LazyLock<bool> =
 	lazy_env_parse!("SURREAL_EXPERIMENTAL_GRAPHQL", bool, false);

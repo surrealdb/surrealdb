@@ -3,11 +3,11 @@ use crate::rpc::format::msgpack::Pack;
 use crate::rpc::RpcError;
 use crate::sql::Part;
 use crate::sql::{Array, Value};
-use once_cell::sync::Lazy;
+use std::sync::LazyLock;
 
-pub static ID: Lazy<[Part; 1]> = Lazy::new(|| [Part::from("id")]);
-pub static METHOD: Lazy<[Part; 1]> = Lazy::new(|| [Part::from("method")]);
-pub static PARAMS: Lazy<[Part; 1]> = Lazy::new(|| [Part::from("params")]);
+pub static ID: LazyLock<[Part; 1]> = LazyLock::new(|| [Part::from("id")]);
+pub static METHOD: LazyLock<[Part; 1]> = LazyLock::new(|| [Part::from("method")]);
+pub static PARAMS: LazyLock<[Part; 1]> = LazyLock::new(|| [Part::from("params")]);
 
 #[derive(Debug)]
 pub struct Request {

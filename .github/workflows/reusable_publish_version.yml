@@ -37,7 +37,7 @@ on:
       rust_version:
         required: false
         type: string
-        default: "1.77.1"
+        default: "1.80.1"
         description: "The Rust version to use for building binaries"
       onnx_version:
         required: false
@@ -223,7 +223,7 @@ jobs:
 
   test:
     name: Test
-    needs: [ prepare-vars ]
+    needs: [prepare-vars]
     runs-on: ubuntu-latest-16-cores
     steps:
       - name: Install stable toolchain
@@ -268,7 +268,7 @@ jobs:
 
   lint:
     name: Lint
-    needs: [ prepare-vars ]
+    needs: [prepare-vars]
     runs-on: ubuntu-latest
     steps:
       - name: Checkout sources
@@ -301,7 +301,7 @@ jobs:
   docker-builder:
     name: Prepare docker builder
     runs-on: ubuntu-latest
-    needs: [ prepare-vars ]
+    needs: [prepare-vars]
     outputs:
       name: ${{ steps.image.outputs.name }}
       tag: ${{ steps.image.outputs.tag }}
@@ -353,7 +353,7 @@ jobs:
 
   build:
     name: Build ${{ matrix.arch }} binary
-    needs: [ prepare-vars, docker-builder ]
+    needs: [prepare-vars, docker-builder]
     strategy:
       fail-fast: false
       matrix:
@@ -414,7 +414,7 @@ jobs:
 
           # Linux amd64
           - arch: x86_64-unknown-linux-gnu
-            runner: [ "self-hosted", "amd64", "builder" ]
+            runner: ["self-hosted", "amd64", "builder"]
             file: surreal-${{ needs.prepare-vars.outputs.name }}.linux-amd64
             build-step: |
               # Build
@@ -450,7 +450,7 @@ jobs:
 
           # Linux arm64
           - arch: aarch64-unknown-linux-gnu
-            runner: [ "self-hosted", "arm64", "builder" ]
+            runner: ["self-hosted", "arm64", "builder"]
             file: surreal-${{ needs.prepare-vars.outputs.name }}.linux-arm64
             build-step: |
               set -x
@@ -597,7 +597,7 @@ jobs:
 
   publish:
     name: Publish crate and artifacts binaries
-    needs: [ prepare-vars, test, lint, build ]
+    needs: [prepare-vars, test, lint, build]
     if: ${{ inputs.publish }}
     environment: ${{ inputs.environment }}
     runs-on: ubuntu-latest
@@ -758,7 +758,7 @@ jobs:
 
   docker:
     name: Docker images
-    needs: [ prepare-vars, publish ]
+    needs: [prepare-vars, publish]
     uses: ./.github/workflows/reusable_docker.yml
     with:
       git-ref: ${{ needs.prepare-vars.outputs.git-ref }}
@@ -770,7 +770,7 @@ jobs:
 
   package-macos:
     name: Package and publish macOS universal binary
-    needs: [ prepare-vars, publish ]
+    needs: [prepare-vars, publish]
     runs-on: macos-latest
     env:
       FILE: surreal-${{ needs.prepare-vars.outputs.name }}.darwin-universal
@@ -810,7 +810,7 @@ jobs:
   propagate:
     name: Propagate binaries to all regions
     if: ${{ inputs.publish }}
-    needs: [ publish, package-macos ]
+    needs: [publish, package-macos]
     runs-on: ubuntu-latest
     steps:
       - name: Configure AWS

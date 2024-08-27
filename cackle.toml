@@ -263,9 +263,6 @@ allow_unsafe = true
 [pkg.futures-core]
 allow_unsafe = true
 
-[pkg.once_cell]
-allow_unsafe = true
-
 [pkg.serde]
 build.allow_apis = ["process"]
 allow_unsafe = true

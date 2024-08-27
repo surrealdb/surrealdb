@@ -80,7 +80,7 @@ jobs:
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: 1.79.0
+          toolchain: 1.80.1
           components: rustfmt
 
       - name: Checkout sources
@@ -273,7 +273,7 @@ jobs:
 
   test:
     name: Test workspace
-    runs-on: [ "self-hosted", "arm64", "builder" ]
+    runs-on: ["self-hosted", "arm64", "builder"]
     steps:
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
