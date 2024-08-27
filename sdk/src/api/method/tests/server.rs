@@ -100,6 +100,15 @@ pub(super) fn mock(route_rx: Receiver<Route>) {
 					}
 					_ => Ok(DbResponse::Other(to_core_value(User::default()).unwrap())),
 				},
+				Command::InsertRelation {
+					data,
+					..
+				} => match data {
+					CoreValue::Array(..) => {
+						Ok(DbResponse::Other(CoreValue::Array(Default::default())))
+					}
+					_ => Ok(DbResponse::Other(to_core_value(User::default()).unwrap())),
+				},
 				Command::Run {
 					..
 				} => Ok(DbResponse::Other(CoreValue::None)),
