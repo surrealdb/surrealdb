@@ -7,6 +7,7 @@ use crate::err::Error;
 use crate::fnc::util::string::fuzzy::Fuzzy;
 use crate::sql::id::range::IdRange;
 use crate::sql::kind::Literal;
+use crate::sql::range::OldRange;
 use crate::sql::statements::info::InfoStructure;
 use crate::sql::Closure;
 use crate::sql::{
@@ -82,7 +83,7 @@ impl From<&Tables> for Values {
 	}
 }
 
-#[revisioned(revision = 1)]
+#[revisioned(revision = 2)]
 #[derive(Clone, Debug, Default, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[serde(rename = "$surrealdb::private::sql::Value")]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
@@ -123,6 +124,9 @@ pub enum Value {
 	Regex(Regex),
 	Cast(Box<Cast>),
 	Block(Box<Block>),
+	#[revision(end = 2, convert_fn = "convert_old_range", fields_name = "OldValueRangeFields")]
+	Range(OldRange),
+	#[revision(start = 2)]
 	Range(Box<Range>),
 	Edges(Box<Edges>),
 	Future(Box<Future>),
@@ -134,6 +138,21 @@ pub enum Value {
 	Model(Box<Model>),
 	Closure(Box<Closure>),
 	// Add new variants here
+}
+
+impl Value {
+	fn convert_old_range(
+		fields: OldValueRangeFields,
+		_revision: u16,
+	) -> Result<Self, revision::Error> {
+		Ok(Value::Thing(Thing {
+			tb: fields.0.tb,
+			id: Id::Range(Box::new(IdRange {
+				beg: fields.0.beg,
+				end: fields.0.end,
+			})),
+		}))
+	}
 }
 
 impl Eq for Value {}
@@ -2298,6 +2317,7 @@ impl Value {
 		match self {
 			// Arrays are allowed
 			Value::Array(v) => Ok(v),
+			// Ranges convert to an array
 			Value::Range(r) => {
 				let range: std::ops::Range<i64> = r.deref().to_owned().try_into()?;
 				Ok(range.into_iter().map(Value::from).collect::<Vec<Value>>().into())
@@ -2313,6 +2333,8 @@ impl Value {
 	/// Try to convert this value to a `Range`
 	pub(crate) fn convert_to_range(self) -> Result<Range, Error> {
 		match self {
+			// Ranges are allowed
+			Value::Range(r) => Ok(*r),
 			// Arrays with two elements are allowed
 			Value::Array(v) if v.len() == 2 => {
 				let mut v = v;
@@ -2321,7 +2343,6 @@ impl Value {
 					end: Bound::Excluded(v.remove(0)),
 				})
 			}
-			Value::Range(r) => Ok(*r),
 			// Anything else raises an error
 			_ => Err(Error::ConvertTo {
 				from: self,
