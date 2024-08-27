@@ -348,7 +348,7 @@ impl<T: Target + Hash + Eq + PartialEq + fmt::Display> fmt::Display for Targets<
 pub struct Capabilities {
 	// Query capabilities
 	// These capabilities limit what SurrealQL queries allow
-	// Query capabilities are exposed through in the library
+	// Query capabilities are exposed through the library
 	scripting: bool,
 	guest_access: bool,
 	live_query_notifications: bool,
