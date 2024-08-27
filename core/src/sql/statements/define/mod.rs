@@ -25,17 +25,16 @@ pub use param::DefineParamStatement;
 pub use table::DefineTableStatement;
 pub use user::DefineUserStatement;
 
-use deprecated::scope::DefineScopeStatement;
-use deprecated::token::DefineTokenStatement;
+#[doc(hidden)]
+pub use deprecated::scope::DefineScopeStatement;
+#[doc(hidden)]
+pub use deprecated::token::DefineTokenStatement;
 
+use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::sql::access::AccessDuration;
-use crate::sql::access_type::{JwtAccessIssue, JwtAccessVerify, JwtAccessVerifyKey};
 use crate::sql::value::Value;
-use crate::sql::{Algorithm, Base, JwtAccess, RecordAccess};
-use crate::{ctx::Context, sql::AccessType};
 use derive::Store;
 use reblessive::tree::Stk;
 use revision::revisioned;
@@ -80,56 +79,14 @@ impl DefineStatement {
 		fields: DefineTokenStatementFields,
 		_revision: u16,
 	) -> Result<Self, revision::Error> {
-		Ok(DefineStatement::Access(DefineAccessStatement {
-			name: fields.0.name,
-			base: fields.0.base,
-			comment: fields.0.comment,
-			if_not_exists: fields.0.if_not_exists,
-			kind: AccessType::Jwt(JwtAccess {
-				issue: None,
-				verify: JwtAccessVerify::Key(JwtAccessVerifyKey {
-					alg: fields.0.kind,
-					key: fields.0.code,
-				}),
-			}),
-			// unused fields
-			authenticate: None,
-			duration: AccessDuration::default(),
-			overwrite: false,
-		}))
+		Ok(DefineStatement::Access(fields.0.into()))
 	}
 
 	fn convert_scope_to_access(
 		fields: DefineScopeStatementFields,
 		_revision: u16,
 	) -> Result<Self, revision::Error> {
-		Ok(DefineStatement::Access(DefineAccessStatement {
-			name: fields.0.name,
-			base: Base::Db,
-			comment: fields.0.comment,
-			if_not_exists: fields.0.if_not_exists,
-			kind: AccessType::Record(RecordAccess {
-				signup: fields.0.signup,
-				signin: fields.0.signin,
-				jwt: JwtAccess {
-					issue: Some(JwtAccessIssue {
-						alg: Algorithm::Hs512,
-						key: fields.0.code.clone(),
-					}),
-					verify: JwtAccessVerify::Key(JwtAccessVerifyKey {
-						alg: Algorithm::Hs512,
-						key: fields.0.code,
-					}),
-				},
-			}),
-			// unused fields
-			authenticate: None,
-			duration: AccessDuration {
-				session: fields.0.session,
-				..AccessDuration::default()
-			},
-			overwrite: false,
-		}))
+		Ok(DefineStatement::Access(fields.0.into()))
 	}
 }
 

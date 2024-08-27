@@ -73,6 +73,10 @@ pub(crate) async fn run_router(
 
 	let kvs = match Datastore::new(endpoint).await {
 		Ok(kvs) => {
+			if let Err(error) = kvs.check_version().await {
+				let _ = conn_tx.send(Err(error.into())).await;
+				return;
+			};
 			if let Err(error) = kvs.bootstrap().await {
 				let _ = conn_tx.send(Err(error.into())).await;
 				return;
