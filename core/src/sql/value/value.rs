@@ -500,6 +500,12 @@ impl From<Vec<f32>> for Value {
 	}
 }
 
+impl From<Vec<usize>> for Value {
+	fn from(v: Vec<usize>) -> Self {
+		Value::Array(Array::from(v))
+	}
+}
+
 impl From<Vec<Value>> for Value {
 	fn from(v: Vec<Value>) -> Self {
 		Value::Array(Array::from(v))
@@ -1055,6 +1061,11 @@ impl Value {
 	/// Check if this Value is a Thing
 	pub fn is_record(&self) -> bool {
 		matches!(self, Value::Thing(_))
+	}
+
+	/// Check if this Value is a Closure
+	pub fn is_closure(&self) -> bool {
+		matches!(self, Value::Closure(_))
 	}
 
 	/// Check if this Value is a Thing, and belongs to a certain table
