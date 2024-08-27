@@ -805,12 +805,11 @@ pub async fn idiom(
 				"to_string" => r#type::string,
 				"to_uuid" => r#type::uuid,
 				//
+				"chain" => value::chain((stk, ctx, Some(opt), doc)).await,
 				"diff" => value::diff((stk, ctx, Some(opt), doc)).await,
 				"patch" => value::patch((stk, ctx, Some(opt), doc)).await,
 				//
 				"repeat" => array::repeat,
-				//
-				"chain" => value::chain((stk, ctx, Some(opt), doc)).await,
 			)
 		}
 		v => v,
@@ -843,7 +842,6 @@ mod tests {
 
 	#[tokio::test]
 	async fn implementations_are_present() {
-		#[cfg(all(feature = "scripting", feature = "kv-mem"))]
 		// Accumulate and display all problems at once to avoid a test -> fix -> test -> fix cycle.
 		let mut problems = Vec::new();
 
@@ -851,7 +849,7 @@ mod tests {
 		let fnc_mod = include_str!("mod.rs");
 
 		// Patch out idiom methods
-		let re = Regex::new(r"(?ms)pub async fn idiom\(.*}\n+///").unwrap();
+		let re = Regex::new(r"(?ms)pub async fn idiom\(.*}").unwrap();
 		let fnc_no_idiom = re.replace(fnc_mod, "");
 
 		for line in fnc_no_idiom.lines() {
