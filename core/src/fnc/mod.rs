@@ -672,7 +672,7 @@ pub async fn idiom(
 				//
 				"concat" => string::concat,
 				"contains" => string::contains,
-				"endsWith" => string::ends_with,
+				"ends_with" => string::ends_with,
 				"join" => string::join,
 				"len" => string::len,
 				"lowercase" => string::lowercase,
@@ -683,7 +683,7 @@ pub async fn idiom(
 				"slice" => string::slice,
 				"slug" => string::slug,
 				"split" => string::split,
-				"startsWith" => string::starts_with,
+				"starts_with" => string::starts_with,
 				"trim" => string::trim,
 				"uppercase" => string::uppercase,
 				"words" => string::words,

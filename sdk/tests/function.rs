@@ -3403,9 +3403,9 @@ async fn function_string_contains() -> Result<(), Error> {
 #[tokio::test]
 async fn function_string_ends_with() -> Result<(), Error> {
 	let sql = r#"
-		RETURN string::endsWith("", "");
-		RETURN string::endsWith("", "test");
-		RETURN string::endsWith("this is a test", "test");
+		RETURN string::ends_with("", "");
+		RETURN string::ends_with("", "test");
+		RETURN string::ends_with("this is a test", "test");
 	"#;
 	let mut test = Test::new(sql).await?;
 	//
@@ -4215,9 +4215,9 @@ async fn function_string_split() -> Result<(), Error> {
 #[tokio::test]
 async fn function_string_starts_with() -> Result<(), Error> {
 	let sql = r#"
-		RETURN string::startsWith("", "");
-		RETURN string::startsWith("", "test");
-		RETURN string::startsWith("test this string", "test");
+		RETURN string::starts_with("", "");
+		RETURN string::starts_with("", "test");
+		RETURN string::starts_with("test this string", "test");
 	"#;
 	let mut test = Test::new(sql).await?;
 	//
