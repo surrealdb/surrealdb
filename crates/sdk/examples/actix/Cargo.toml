@@ -4,6 +4,10 @@ version = "0.1.0"
 edition = "2021"
 publish = false
 
+[workspace]
+members = ["."]
+
+
 [dependencies]
 actix-web = { version = "4.4.0", features = ["macros"] }
 once_cell = "1.18.0"

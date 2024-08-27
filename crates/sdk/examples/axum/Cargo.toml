@@ -4,6 +4,9 @@ version = "0.1.0"
 edition = "2021"
 publish = false
 
+[workspace]
+members = ["."]
+
 [dependencies]
 axum = "0.7.2"
 serde = { version = "1.0.193", features = ["derive"] }
