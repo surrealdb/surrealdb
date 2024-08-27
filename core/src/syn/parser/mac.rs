@@ -138,6 +138,7 @@ macro_rules! expected_whitespace {
 }
 
 #[cfg(test)]
+#[doc(hidden)]
 #[macro_export]
 macro_rules! test_parse {
 	($func:ident$( ( $($e:expr),* $(,)? ))? , $t:expr) => {{
@@ -147,6 +148,7 @@ macro_rules! test_parse {
 	}};
 }
 
+#[doc(hidden)]
 #[macro_export]
 macro_rules! enter_object_recursion {
 	($name:ident = $this:expr => { $($t:tt)* }) => {{
