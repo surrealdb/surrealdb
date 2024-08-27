@@ -92,7 +92,7 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Check fuzzers
-        run: cargo build --manifest-path crates/sdk/fuzz/Cargo.toml
+        run: cargo build --manifest-path crates/fuzz/Cargo.toml
 
       - name: Check OSS-Fuzz
         uses: google/oss-fuzz/infra/cifuzz/actions/build_fuzzers@master
