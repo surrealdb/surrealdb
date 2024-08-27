@@ -242,7 +242,7 @@ impl Datastore {
 							// Check that the node for this query is archived
 							if expired.contains(&stm.node) {
 								// Get the key for this node live query
-								let tlq = catch!(txn, crate::key::table::lq::Lq::decode(k));
+								let tlq = sync_catch!(txn, crate::key::table::lq::Lq::decode(k));
 								// Get the key for this table live query
 								let nlq = crate::key::node::lq::new(nid, lid);
 								// Delete the node live query

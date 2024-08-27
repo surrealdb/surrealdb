@@ -46,6 +46,18 @@ macro_rules! catch {
 		}
 	};
 }
+/// Same as above for synchronous functions
+macro_rules! sync_catch {
+	($txn:ident, $default:expr) => {
+		match $default {
+			Err(e) => {
+				let _ = $txn.cancel().await;
+				return Err(e);
+			}
+			Ok(v) => v,
+		}
+	};
+}
 
 /// Runs a method on a transaction, ensuring that the transaction
 /// is cancelled and rolled back if the initial function fails, or
