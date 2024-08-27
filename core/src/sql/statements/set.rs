@@ -65,3 +65,17 @@ impl fmt::Display for SetStatement {
 		Ok(())
 	}
 }
+
+#[cfg(test)]
+mod tests {
+	use crate::syn::parse;
+
+	#[test]
+	fn check_type() {
+		let query = parse("LET $param = 5").unwrap();
+		assert_eq!(format!("{}", query), "LET $param = 5;");
+
+		let query = parse("LET $param: number = 5").unwrap();
+		assert_eq!(format!("{}", query), "LET $param: number = 5;");
+	}
+}
