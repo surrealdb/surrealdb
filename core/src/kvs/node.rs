@@ -237,12 +237,12 @@ impl Datastore {
 						for (k, v) in res.values.iter() {
 							// Decode the LIVE query statement
 							let stm: LiveStatement = v.into();
-							// Get the key for this node live query
-							let tlq = crate::key::table::lq::Lq::decode(k)?;
 							// Get the node id and the live query id
 							let (nid, lid) = (stm.node.0, stm.id.0);
 							// Check that the node for this query is archived
 							if expired.contains(&stm.node) {
+								// Get the key for this node live query
+								let tlq = catch!(txn, crate::key::table::lq::Lq::decode(k));
 								// Get the key for this table live query
 								let nlq = crate::key::node::lq::new(nid, lid);
 								// Delete the node live query
