@@ -37,18 +37,6 @@ macro_rules! get_cfg {
 /// a transaction in an uncommitted state without rolling back.
 macro_rules! catch {
 	($txn:ident, $default:expr) => {
-		match $default.await {
-			Err(e) => {
-				let _ = $txn.cancel().await;
-				return Err(e);
-			}
-			Ok(v) => v,
-		}
-	};
-}
-/// Same as above for synchronous functions
-macro_rules! sync_catch {
-	($txn:ident, $default:expr) => {
 		match $default {
 			Err(e) => {
 				let _ = $txn.cancel().await;
