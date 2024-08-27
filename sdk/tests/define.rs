@@ -1119,7 +1119,7 @@ async fn define_statement_search_index() -> Result<(), Error> {
 	check_path(&tmp, &["doc_ids", "keys_count"], |v| assert_eq!(v, Value::from(2)));
 	check_path(&tmp, &["doc_ids", "max_depth"], |v| assert_eq!(v, Value::from(1)));
 	check_path(&tmp, &["doc_ids", "nodes_count"], |v| assert_eq!(v, Value::from(1)));
-	check_path(&tmp, &["doc_ids", "total_size"], |v| assert_eq!(v, Value::from(63)));
+	check_path(&tmp, &["doc_ids", "total_size"], |v| assert_eq!(v, Value::from(62)));
 
 	check_path(&tmp, &["doc_lengths", "keys_count"], |v| assert_eq!(v, Value::from(2)));
 	check_path(&tmp, &["doc_lengths", "max_depth"], |v| assert_eq!(v, Value::from(1)));

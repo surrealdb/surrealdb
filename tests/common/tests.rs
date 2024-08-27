@@ -1854,6 +1854,21 @@ async fn session_id_defined_both() {
 }
 
 #[test(tokio::test)]
+async fn session_id_invalid() {
+	// Setup database server
+	let (addr, mut server) = common::start_server_with_defaults().await.unwrap();
+	// We specify a request identifier via a specific SurrealDB header
+	let mut headers = HeaderMap::new();
+	headers.insert("surreal-id", HeaderValue::from_static("123")); // Not a valid UUIDv4
+	// Connect to WebSocket
+	let socket = Socket::connect_with_headers(&addr, SERVER, FORMAT, headers).await;
+	assert!(socket.is_err(), "unexpected success using connecting with invalid id header");
+
+	// Test passed
+	server.finish().unwrap();
+}
+
+#[test(tokio::test)]
 async fn session_id_undefined() {
 	// Setup database server
 	let (addr, mut server) = common::start_server_with_defaults().await.unwrap();

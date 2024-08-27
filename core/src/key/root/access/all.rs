@@ -26,7 +26,7 @@ impl<'a> Access<'a> {
 	pub fn new(ac: &'a str) -> Self {
 		Self {
 			__: b'/',
-			_a: b'*',
+			_a: b'&',
 			ac,
 		}
 	}
@@ -42,7 +42,7 @@ mod tests {
 			"testac",
 		);
 		let enc = Access::encode(&val).unwrap();
-		assert_eq!(enc, b"/*testac\0");
+		assert_eq!(enc, b"/&testac\0");
 
 		let dec = Access::decode(&enc).unwrap();
 		assert_eq!(val, dec);

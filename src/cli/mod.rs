@@ -1,6 +1,7 @@
 pub(crate) mod abstraction;
 mod config;
 mod export;
+mod fix;
 mod import;
 mod isready;
 mod ml;
@@ -22,6 +23,7 @@ use crate::env::RELEASE;
 use clap::{Parser, Subcommand};
 pub use config::CF;
 use export::ExportCommandArguments;
+use fix::FixCommandArguments;
 use import::ImportCommandArguments;
 use isready::IsReadyCommandArguments;
 use ml::MlCommand;
@@ -89,6 +91,8 @@ enum Commands {
 	IsReady(IsReadyCommandArguments),
 	#[command(about = "Validate SurrealQL query files")]
 	Validate(ValidateCommandArguments),
+	#[command(about = "Fix database storage issues")]
+	Fix(FixCommandArguments),
 }
 
 pub async fn init() -> ExitCode {
@@ -132,6 +136,7 @@ pub async fn init() -> ExitCode {
 		Commands::Ml(args) => ml::init(args).await,
 		Commands::IsReady(args) => isready::init(args).await,
 		Commands::Validate(args) => validate::init(args).await,
+		Commands::Fix(args) => fix::init(args).await,
 	};
 	// Save the flamegraph and profile
 	#[cfg(feature = "performance-profiler")]

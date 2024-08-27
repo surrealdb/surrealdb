@@ -214,9 +214,6 @@ fn statements() -> Vec<Statement> {
 					}),
 					issue: None,
 				},
-				// TODO(gguillemas): Field kept to gracefully handle breaking change.
-				// Remove when "revision" crate allows doing so.
-				authenticate: None,
 			}),
 			authenticate: None,
 			// Default durations.
@@ -363,7 +360,6 @@ fn statements() -> Vec<Statement> {
 			index: Index::MTree(MTreeParams {
 				dimension: 4,
 				distance: Distance::Minkowski(Number::Int(5)),
-				_distance: Default::default(),
 				capacity: 6,
 				doc_ids_order: 7,
 				doc_ids_cache: 8,
@@ -525,10 +521,9 @@ fn statements() -> Vec<Statement> {
 			start: Some(Start(Value::Object(Object(
 				[("a".to_owned(), Value::Bool(true))].into_iter().collect(),
 			)))),
-			fetch: Some(Fetchs(vec![Fetch(
-				Idiom(vec![]),
-				Value::Idiom(Idiom(vec![Part::Field(Ident("foo".to_owned()))])),
-			)])),
+			fetch: Some(Fetchs(vec![Fetch(Value::Idiom(Idiom(vec![Part::Field(Ident(
+				"foo".to_owned(),
+			))])))])),
 			version: Some(Version(Datetime(expected_datetime))),
 			timeout: None,
 			parallel: false,
@@ -618,10 +613,9 @@ fn statements() -> Vec<Statement> {
 		}),
 		Statement::Output(OutputStatement {
 			what: Value::Idiom(Idiom(vec![Part::Field(Ident("RETRUN".to_owned()))])),
-			fetch: Some(Fetchs(vec![Fetch(
-				Idiom(vec![]),
-				Value::Idiom(Idiom(vec![Part::Field(Ident("RETURN".to_owned()).to_owned())])),
-			)])),
+			fetch: Some(Fetchs(vec![Fetch(Value::Idiom(Idiom(vec![Part::Field(
+				Ident("RETURN".to_owned()).to_owned(),
+			)])))])),
 		}),
 		Statement::Relate(RelateStatement {
 			only: true,

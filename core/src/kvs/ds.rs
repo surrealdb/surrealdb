@@ -510,6 +510,18 @@ impl Datastore {
 	// Initialise the cluster and run bootstrap utilities
 	#[instrument(err, level = "trace", target = "surrealdb::core::kvs::ds", skip_all)]
 	pub async fn check_version(&self) -> Result<Version, Error> {
+		let version = self.get_version().await?;
+		// Check we are running the latest version
+		if !version.is_latest() {
+			return Err(Error::OutdatedStorageVersion);
+		}
+		// Everything ok
+		Ok(version)
+	}
+
+	// Initialise the cluster and run bootstrap utilities
+	#[instrument(err, level = "trace", target = "surrealdb::core::kvs::ds", skip_all)]
+	pub async fn get_version(&self) -> Result<Version, Error> {
 		// Start a new writeable transaction
 		let txn = self.transaction(Write, Pessimistic).await?.enclose();
 		// Create the key where the version is stored
@@ -530,7 +542,12 @@ impl Datastore {
 						return Err(err);
 					}
 					// We could decode the version correctly
-					Ok(val) => val,
+					Ok(val) => {
+						// We didn't write anything, so just rollback
+						txn.cancel().await?;
+						// Return the current version
+						val
+					}
 				}
 			}
 			// There is no version set in the storage
@@ -556,10 +573,6 @@ impl Datastore {
 				val
 			}
 		};
-		// Check we are running the latest version
-		if !val.is_latest() {
-			return Err(Error::OutdatedStorageVersion);
-		}
 		// Everything ok
 		Ok(val)
 	}
