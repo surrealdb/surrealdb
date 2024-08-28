@@ -75,6 +75,7 @@ pub enum ParseErrorKind {
 	InvalidUuidPart {
 		len: usize,
 	},
+	InvalidUUID(uuid::Error),
 	InvalidDatetimePart {
 		len: usize,
 	},
@@ -334,6 +335,15 @@ impl ParseError {
 				let text = format!(
 					"Uuid hex section not the correct length, needs to be {len} characters"
 				);
+				let locations = Location::range_of_span(source, at);
+				let snippet = Snippet::from_source_location_range(source, locations, None);
+				RenderedError {
+					text,
+					snippets: vec![snippet],
+				}
+			}
+			ParseErrorKind::InvalidUUID(ref error) => {
+				let text = format!("failed to parse uuid, {error}");
 				let locations = Location::range_of_span(source, at);
 				let snippet = Snippet::from_source_location_range(source, locations, None);
 				RenderedError {

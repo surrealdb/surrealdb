@@ -5,7 +5,7 @@ use crate::{
 			mac::{expected_whitespace, unexpected},
 			ParseError, ParseErrorKind, ParseResult, Parser,
 		},
-		token::{t, DurationSuffix, NumberSuffix, TokenKind, VectorTypeKind},
+		token::t,
 	},
 };
 
@@ -22,27 +22,10 @@ impl Parser<'_> {
 
 		self.pop_peek();
 
-		// number of bytes is 4-2-2-2-6
+		// ensure there are no tokens in the buffer
+		self.backup_after(quote_token.span);
 
-		let mut uuid_buffer = [0u8; 16];
-
-		self.eat_uuid_hex(&mut uuid_buffer[0..4])?;
-
-		expected_whitespace!(self, t!("-"));
-
-		self.eat_uuid_hex(&mut uuid_buffer[4..6])?;
-
-		expected_whitespace!(self, t!("-"));
-
-		self.eat_uuid_hex(&mut uuid_buffer[6..8])?;
-
-		expected_whitespace!(self, t!("-"));
-
-		self.eat_uuid_hex(&mut uuid_buffer[8..10])?;
-
-		expected_whitespace!(self, t!("-"));
-
-		self.eat_uuid_hex(&mut uuid_buffer[10..16])?;
+		let digits_bytes = self.lexer.reader.by_ref().take(36).collect::<Vec<_>>();
 
 		if double {
 			expected_whitespace!(self, t!("\""));
@@ -50,96 +33,14 @@ impl Parser<'_> {
 			expected_whitespace!(self, t!("'"));
 		}
 
-		Ok(Uuid(uuid::Uuid::from_bytes(uuid_buffer)))
-	}
+		let span = self.lexer.current_span();
 
-	/// Eats a uuid hex section, enough to fill the given buffer with bytes.
-	fn eat_uuid_hex(&mut self, buffer: &mut [u8]) -> ParseResult<()> {
-		// A function to covert a hex digit to its number representation.
-		fn ascii_to_hex(b: u8) -> Option<u8> {
-			if b.is_ascii_digit() {
-				return Some(b - b'0');
-			}
+		// mark last_offset as the end of the uuid
+		self.lexer.backup_after(span);
 
-			if (b'a'..=b'f').contains(&b) {
-				return Some(b - (b'a' - 10));
-			}
-
-			if (b'A'..=b'F').contains(&b) {
-				return Some(b - (b'A' - 10));
-			}
-
-			None
-		}
-		// the amounts of character required is twice the buffer len.
-		// since every character is half a byte.
-		let required_len = buffer.len() * 2;
-
-		// The next token should be digits or an identifier
-		// If it is digits an identifier might be after it.
-		let start_token = self.peek_whitespace();
-		let mut cur = start_token;
-		loop {
-			let next = self.peek_whitespace();
-			match next.kind {
-				TokenKind::Identifier => {
-					cur = self.pop_peek();
-					break;
-				}
-				TokenKind::Exponent
-				| TokenKind::Digits
-				| TokenKind::DurationSuffix(DurationSuffix::Day)
-				| TokenKind::NumberSuffix(NumberSuffix::Float) => {
-					cur = self.pop_peek();
-				}
-				TokenKind::Language(_)
-				| TokenKind::Keyword(_)
-				| TokenKind::VectorType(VectorTypeKind::F64 | VectorTypeKind::F32) => {
-					// there are some keywords and languages keywords which could be part of the
-					// hex section.
-					if !self.span_bytes(next.span).iter().all(|x| x.is_ascii_hexdigit()) {
-						unexpected!(self, TokenKind::Identifier, "UUID hex digits");
-					}
-					cur = self.pop_peek();
-					break;
-				}
-				t!("-") | t!("\"") | t!("'") => break,
-				_ => unexpected!(self, TokenKind::Identifier, "UUID hex digits"),
-			}
-		}
-
-		// Get the span that covered all eaten tokens.
-		let digits_span = start_token.span.covers(cur.span);
-		let digits_bytes = self.span_str(digits_span).as_bytes();
-
-		// for error handling, the incorrect hex character should be returned first, before
-		// returning the not correct length for segment error even if both are valid.
-		if !digits_bytes.iter().all(|x| x.is_ascii_hexdigit()) {
-			return Err(ParseError::new(
-				ParseErrorKind::Unexpected {
-					found: TokenKind::Strand,
-					expected: "UUID hex digits",
-				},
-				digits_span,
-			));
-		}
-
-		if digits_bytes.len() != required_len {
-			return Err(ParseError::new(
-				ParseErrorKind::InvalidUuidPart {
-					len: required_len,
-				},
-				digits_span,
-			));
-		}
-
-		// write into the buffer
-		for (i, b) in buffer.iter_mut().enumerate() {
-			*b = ascii_to_hex(digits_bytes[i * 2]).unwrap() << 4
-				| ascii_to_hex(digits_bytes[i * 2 + 1]).unwrap();
-		}
-
-		Ok(())
+		uuid::Uuid::try_parse_ascii(digits_bytes.as_slice())
+			.map(|t| Uuid(t))
+			.map_err(|e| ParseError::new(ParseErrorKind::InvalidUUID(e), span))
 	}
 }
 
@@ -169,6 +70,7 @@ mod test {
 		assert_uuid_parses("e0531951-20ec-4575-bb68-3e6b49d813fa");
 		assert_uuid_parses("a0531951-20ec-4575-bb68-3e6b49d813fa");
 		assert_uuid_parses("b98839b9-0471-4dbb-aae0-14780e848f32");
+		assert_uuid_parses("5a7297d9-c07d-4444-b936-2d984533987d");
 	}
 
 	#[test]

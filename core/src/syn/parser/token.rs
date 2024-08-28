@@ -80,7 +80,7 @@ impl Parser<'_> {
 		Ok(self.next())
 	}
 
-	/// Glues the next token together, returning its value, doesnt consume the token.
+	/// Glues next tokens together, returning the value, doesn't consume the token.
 	pub fn glue(&mut self) -> ParseResult<Token> {
 		let token = self.peek();
 		match token.kind {

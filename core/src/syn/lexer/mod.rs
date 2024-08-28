@@ -72,9 +72,9 @@ pub struct Lexer<'a> {
 	scratch: String,
 
 	// below are a collection of storage for values produced by tokens.
-	// For performance reasons we wan't to keep the tokens as small as possible.
-	// As only some tokens have an additional value associated with them we don't store that value
-	// in the token itself but, instead, in the lexer ensureing a smaller size for each individual
+	// For performance reasons we want to keep the tokens as small as possible.
+	// As only some tokens have an additional value associated with them, we don't store that value
+	// in the token itself but, instead, in the lexer ensuring a smaller size for each individual
 	// token.
 	//
 	// This does result in some additional state to keep track of as peeking a token while a token
