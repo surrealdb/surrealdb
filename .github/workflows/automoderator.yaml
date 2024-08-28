@@ -58,7 +58,7 @@ jobs:
 
             // Append edition notice to the body
             updatedBody = updatedBody + '\n\n' +
-              '**NOTICE**: This comment has been automatically edited by SurrealDB ' +
+              '**NOTICE**: This comment has been automatically edited by a bot ' +
               'to redact some links in order to protect users from potentially malicious content. ' +
               'Please, let us know if you believe this action may have been a mistake.'
 
