@@ -306,22 +306,50 @@ async fn function_array_fill() -> Result<(), Error> {
 }
 
 #[tokio::test]
+async fn function_array_filter() -> Result<(), Error> {
+	let sql = r#"
+		RETURN array::filter([5, 7, 9], |$v| $v > 6);
+		RETURN array::filter(["hello_world", "goodbye world", "hello wombat", "goodbye world"], |$v| $v CONTAINS 'hello');
+		RETURN array::filter(["nothing here"], |$v| $v == 3);
+	"#;
+	let desired_responses = ["[7, 9]", "['hello_world', 'hello wombat']", "[]"];
+	test_queries(sql, &desired_responses).await?;
+	Ok(())
+}
+
+#[tokio::test]
 async fn function_array_filter_index() -> Result<(), Error> {
-	let sql = r#"RETURN array::filter_index([0, 1, 2], 1);
-RETURN array::filter_index([0, 0, 2], 0);
-RETURN array::filter_index(["hello_world", "hello world", "hello wombat", "hello world"], "hello world");
-RETURN array::filter_index(["nothing here"], 0);"#;
+	let sql = r#"
+		RETURN array::filter_index([0, 1, 2], 1);
+		RETURN array::filter_index([0, 0, 2], 0);
+		RETURN array::filter_index(["hello_world", "hello world", "hello wombat", "hello world"], "hello world");
+		RETURN array::filter_index(["nothing here"], 0);
+	"#;
 	let desired_responses = ["[1]", "[0, 1]", "[1, 3]", "[]"];
 	test_queries(sql, &desired_responses).await?;
 	Ok(())
 }
 
 #[tokio::test]
+async fn function_array_find() -> Result<(), Error> {
+	let sql = r#"
+		RETURN array::find([5, 7, 9], |$v| $v >= 6);
+		RETURN array::find(["hello world", null, true], |$v| $v != NULL);
+		RETURN array::find([0, 1, 2], |$v| $v > 5);
+	"#;
+	let desired_responses = ["7", "'hello world'", "NONE"];
+	test_queries(sql, &desired_responses).await?;
+	Ok(())
+}
+
+#[tokio::test]
 async fn function_array_find_index() -> Result<(), Error> {
-	let sql = r#"RETURN array::find_index([5, 6, 7], 7);
-RETURN array::find_index(["hello world", null, true], null);
-RETURN array::find_index([0, 1, 2], 3);"#;
-	let desired_responses = ["2", "1", "null"];
+	let sql = r#"
+		RETURN array::find_index([5, 6, 7], 7);
+		RETURN array::find_index(["hello world", null, true], null);
+		RETURN array::find_index([0, 1, 2], 3);
+	"#;
+	let desired_responses = ["2", "1", "NONE"];
 	test_queries(sql, &desired_responses).await?;
 	Ok(())
 }
@@ -2667,38 +2695,6 @@ async fn function_math_variance() -> Result<(), Error> {
 }
 
 // --------------------------------------------------
-// meta
-// --------------------------------------------------
-
-#[tokio::test]
-async fn function_parse_meta_id() -> Result<(), Error> {
-	let sql = r#"
-		RETURN meta::id(r"person:tobie");
-	"#;
-	let mut test = Test::new(sql).await?;
-	//
-	let tmp = test.next()?.result?;
-	let val = Value::from("tobie");
-	assert_eq!(tmp, val);
-	//
-	Ok(())
-}
-
-#[tokio::test]
-async fn function_parse_meta_table() -> Result<(), Error> {
-	let sql = r#"
-		RETURN meta::table(r"person:tobie");
-	"#;
-	let mut test = Test::new(sql).await?;
-	//
-	let tmp = test.next()?.result?;
-	let val = Value::from("person");
-	assert_eq!(tmp, val);
-	//
-	Ok(())
-}
-
-// --------------------------------------------------
 // object
 // --------------------------------------------------
 
@@ -3238,6 +3234,61 @@ async fn function_rand_uuid_v7_from_datetime() -> Result<(), Error> {
 }
 
 // --------------------------------------------------
+// record
+// --------------------------------------------------
+
+#[tokio::test]
+async fn function_record_exists() -> Result<(), Error> {
+	let sql = r#"
+		RETURN record::exists(r"person:tobie");
+		CREATE ONLY person:tobie;
+		RETURN record::exists(r"person:tobie");
+	"#;
+	let mut test = Test::new(sql).await?;
+	//
+	let tmp = test.next()?.result?;
+	let val = Value::from(false);
+	assert_eq!(tmp, val);
+	//
+	let tmp = test.next()?.result?;
+	assert!(tmp.is_object());
+	//
+	let tmp = test.next()?.result?;
+	let val = Value::from(true);
+	assert_eq!(tmp, val);
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn function_record_id() -> Result<(), Error> {
+	let sql = r#"
+		RETURN record::id(r"person:tobie");
+	"#;
+	let mut test = Test::new(sql).await?;
+	//
+	let tmp = test.next()?.result?;
+	let val = Value::from("tobie");
+	assert_eq!(tmp, val);
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn function_record_table() -> Result<(), Error> {
+	let sql = r#"
+		RETURN record::table(r"person:tobie");
+	"#;
+	let mut test = Test::new(sql).await?;
+	//
+	let tmp = test.next()?.result?;
+	let val = Value::from("person");
+	assert_eq!(tmp, val);
+	//
+	Ok(())
+}
+
+// --------------------------------------------------
 // string
 // --------------------------------------------------
 
@@ -3352,9 +3403,9 @@ async fn function_string_contains() -> Result<(), Error> {
 #[tokio::test]
 async fn function_string_ends_with() -> Result<(), Error> {
 	let sql = r#"
-		RETURN string::endsWith("", "");
-		RETURN string::endsWith("", "test");
-		RETURN string::endsWith("this is a test", "test");
+		RETURN string::ends_with("", "");
+		RETURN string::ends_with("", "test");
+		RETURN string::ends_with("this is a test", "test");
 	"#;
 	let mut test = Test::new(sql).await?;
 	//
@@ -3479,7 +3530,7 @@ async fn function_search_analyzer_invalid_function_name() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn function_encode_html() -> Result<(), Error> {
+async fn function_string_html_encode() -> Result<(), Error> {
 	let sql = r#"
 		RETURN string::html::encode("<div>Hello world!</div>");
 	"#;
@@ -3493,7 +3544,7 @@ async fn function_encode_html() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn function_sanitize_html() -> Result<(), Error> {
+async fn function_string_html_sanitize() -> Result<(), Error> {
 	let sql = r#"
 		RETURN string::html::sanitize("XSS<script>attack</script>");
 	"#;
@@ -3507,7 +3558,7 @@ async fn function_sanitize_html() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn function_parse_is_alphanum() -> Result<(), Error> {
+async fn function_string_is_alphanum() -> Result<(), Error> {
 	let sql = r#"
 		RETURN string::is::alphanum("abcdefg123");
 		RETURN string::is::alphanum("this is a test!");
@@ -3526,7 +3577,7 @@ async fn function_parse_is_alphanum() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn function_parse_is_alpha() -> Result<(), Error> {
+async fn function_string_is_alpha() -> Result<(), Error> {
 	let sql = r#"
 		RETURN string::is::alpha("abcdefg");
 		RETURN string::is::alpha("this is a test!");
@@ -3545,7 +3596,7 @@ async fn function_parse_is_alpha() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn function_parse_is_ascii() -> Result<(), Error> {
+async fn function_string_is_ascii() -> Result<(), Error> {
 	let sql = r#"
 		RETURN string::is::ascii("abcdefg123");
 		RETURN string::is::ascii("this is a test 😀");
@@ -3564,7 +3615,7 @@ async fn function_parse_is_ascii() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn function_parse_is_datetime() -> Result<(), Error> {
+async fn function_string_is_datetime() -> Result<(), Error> {
 	let sql = r#"
 		RETURN string::is::datetime("2015-09-05 23:56:04", "%Y-%m-%d %H:%M:%S");
 		RETURN string::is::datetime("2012-06-22 23:56:04", "%T");
@@ -3583,7 +3634,7 @@ async fn function_parse_is_datetime() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn function_parse_is_domain() -> Result<(), Error> {
+async fn function_string_is_domain() -> Result<(), Error> {
 	let sql = r#"
 		RETURN string::is::domain("surrealdb.com");
 		RETURN string::is::domain("this is a test!");
@@ -3602,7 +3653,7 @@ async fn function_parse_is_domain() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn function_parse_is_email() -> Result<(), Error> {
+async fn function_string_is_email() -> Result<(), Error> {
 	let sql = r#"
 		RETURN string::is::email("info@surrealdb.com");
 		RETURN string::is::email("this is a test!");
@@ -3621,7 +3672,7 @@ async fn function_parse_is_email() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn function_parse_is_hexadecimal() -> Result<(), Error> {
+async fn function_string_is_hexadecimal() -> Result<(), Error> {
 	let sql = r#"
 		RETURN string::is::hexadecimal("ff009e");
 		RETURN string::is::hexadecimal("this is a test!");
@@ -3640,7 +3691,7 @@ async fn function_parse_is_hexadecimal() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn function_parse_is_ip() -> Result<(), Error> {
+async fn function_string_is_ip() -> Result<(), Error> {
 	let sql = r#"
 		RETURN string::is::ip("127.0.0.1");
 		RETURN string::is::ip("127.0.0");
@@ -3659,7 +3710,7 @@ async fn function_parse_is_ip() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn function_parse_is_ipv4() -> Result<(), Error> {
+async fn function_string_is_ipv4() -> Result<(), Error> {
 	let sql = r#"
 		RETURN string::is::ipv4("127.0.0.1");
 		RETURN string::is::ipv4("127.0.0");
@@ -3678,7 +3729,7 @@ async fn function_parse_is_ipv4() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn function_parse_is_ipv6() -> Result<(), Error> {
+async fn function_string_is_ipv6() -> Result<(), Error> {
 	let sql = r#"
 		RETURN string::is::ipv6("::1");
 		RETURN string::is::ipv6("200t:db8::");
@@ -3697,7 +3748,7 @@ async fn function_parse_is_ipv6() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn function_parse_is_latitude() -> Result<(), Error> {
+async fn function_string_is_latitude() -> Result<(), Error> {
 	let sql = r#"
 		RETURN string::is::latitude("51.509865");
 		RETURN string::is::latitude("this is a test!");
@@ -3716,7 +3767,7 @@ async fn function_parse_is_latitude() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn function_parse_is_longitude() -> Result<(), Error> {
+async fn function_string_is_longitude() -> Result<(), Error> {
 	let sql = r#"
 		RETURN string::is::longitude("-90.136439");
 		RETURN string::is::longitude("this is a test!");
@@ -3735,7 +3786,7 @@ async fn function_parse_is_longitude() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn function_parse_is_numeric() -> Result<(), Error> {
+async fn function_string_is_numeric() -> Result<(), Error> {
 	let sql = r#"
 		RETURN string::is::numeric("13136439");
 		RETURN string::is::numeric("this is a test!");
@@ -3754,7 +3805,7 @@ async fn function_parse_is_numeric() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn function_parse_is_semver() -> Result<(), Error> {
+async fn function_string_is_semver() -> Result<(), Error> {
 	let sql = r#"
 		RETURN string::is::semver("1.0.0-rc.1");
 		RETURN string::is::semver("this is a test!");
@@ -3773,7 +3824,7 @@ async fn function_parse_is_semver() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn function_parse_is_url() -> Result<(), Error> {
+async fn function_string_is_url() -> Result<(), Error> {
 	let sql = r#"
 		RETURN string::is::url("https://surrealdb.com/docs");
 		RETURN string::is::url("this is a test!");
@@ -3792,7 +3843,7 @@ async fn function_parse_is_url() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn function_parse_is_uuid() -> Result<(), Error> {
+async fn function_string_is_uuid() -> Result<(), Error> {
 	let sql = r#"
 		RETURN string::is::uuid("e72bee20-f49b-11ec-b939-0242ac120002");
 		RETURN string::is::uuid("this is a test!");
@@ -3811,7 +3862,7 @@ async fn function_parse_is_uuid() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn function_parse_is_record() -> Result<(), Error> {
+async fn function_string_is_record() -> Result<(), Error> {
 	let sql = r#"
 		RETURN string::is::record("test:123");
 		RETURN string::is::record("invalid record id!");
@@ -4164,9 +4215,9 @@ async fn function_string_split() -> Result<(), Error> {
 #[tokio::test]
 async fn function_string_starts_with() -> Result<(), Error> {
 	let sql = r#"
-		RETURN string::startsWith("", "");
-		RETURN string::startsWith("", "test");
-		RETURN string::startsWith("test this string", "test");
+		RETURN string::starts_with("", "");
+		RETURN string::starts_with("", "test");
+		RETURN string::starts_with("test this string", "test");
 	"#;
 	let mut test = Test::new(sql).await?;
 	//
@@ -5547,6 +5598,66 @@ async fn function_type_range() -> Result<(), Error> {
 	//
 	Ok(())
 }
+
+// --------------------------------------------------
+// value
+// --------------------------------------------------
+
+#[tokio::test]
+async fn function_value_diff() -> Result<(), Error> {
+	let sql = r#"
+		RETURN value::diff({ a: 1, b: 2 }, { c: 3, b: 2 });
+	"#;
+	let mut test = Test::new(sql).await?;
+	//
+	let tmp = test.next()?.result?;
+	let val = Value::parse(
+		r#"
+		[
+			{
+				op: 'remove',
+				path: '/a'
+			},
+			{
+				op: 'add',
+				path: '/c',
+				value: 3
+			}
+		]
+	"#,
+	);
+	assert_eq!(tmp, val);
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn function_value_patch() -> Result<(), Error> {
+	let sql = r#"
+		RETURN value::patch({ a: 1, b: 2 }, [
+			{
+				op: 'remove',
+				path: '/a'
+			},
+			{
+				op: 'add',
+				path: '/c',
+				value: 3
+			}
+		]);
+	"#;
+	let mut test = Test::new(sql).await?;
+	//
+	let tmp = test.next()?.result?;
+	let val = Value::parse("{ b: 2, c: 3 }");
+	assert_eq!(tmp, val);
+	//
+	Ok(())
+}
+
+// --------------------------------------------------
+// vector
+// --------------------------------------------------
 
 #[tokio::test]
 async fn function_vector_add() -> Result<(), Error> {

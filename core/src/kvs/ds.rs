@@ -510,12 +510,24 @@ impl Datastore {
 	// Initialise the cluster and run bootstrap utilities
 	#[instrument(err, level = "trace", target = "surrealdb::core::kvs::ds", skip_all)]
 	pub async fn check_version(&self) -> Result<Version, Error> {
+		let version = self.get_version().await?;
+		// Check we are running the latest version
+		if !version.is_latest() {
+			return Err(Error::OutdatedStorageVersion);
+		}
+		// Everything ok
+		Ok(version)
+	}
+
+	// Initialise the cluster and run bootstrap utilities
+	#[instrument(err, level = "trace", target = "surrealdb::core::kvs::ds", skip_all)]
+	pub async fn get_version(&self) -> Result<Version, Error> {
 		// Start a new writeable transaction
 		let txn = self.transaction(Write, Pessimistic).await?.enclose();
 		// Create the key where the version is stored
 		let key = crate::key::version::new();
 		// Check if a version is already set in storage
-		let val = match catch!(txn, txn.get(key.clone(), None)) {
+		let val = match catch!(txn, txn.get(key.clone(), None).await) {
 			// There is a version set in the storage
 			Some(v) => {
 				// Attempt to decode the current stored version
@@ -530,14 +542,19 @@ impl Datastore {
 						return Err(err);
 					}
 					// We could decode the version correctly
-					Ok(val) => val,
+					Ok(val) => {
+						// We didn't write anything, so just rollback
+						txn.cancel().await?;
+						// Return the current version
+						val
+					}
 				}
 			}
 			// There is no version set in the storage
 			None => {
 				// Fetch any keys immediately following the version key
 				let rng = crate::key::version::proceeding();
-				let keys = catch!(txn, txn.keys(rng, 1));
+				let keys = catch!(txn, txn.keys(rng, 1).await);
 				// Check the storage if there are any other keys set
 				let val = if keys.is_empty() {
 					// There are no keys set in storage, so this is a new database
@@ -549,17 +566,13 @@ impl Datastore {
 				// Convert the version to binary
 				let bytes: Vec<u8> = val.into();
 				// Attempt to set the current version in storage
-				catch!(txn, txn.set(key, bytes, None));
+				catch!(txn, txn.set(key, bytes, None).await);
 				// We set the version, so commit the transaction
-				catch!(txn, txn.commit());
+				catch!(txn, txn.commit().await);
 				// Return the current version
 				val
 			}
 		};
-		// Check we are running the latest version
-		if !val.is_latest() {
-			return Err(Error::OutdatedStorageVersion);
-		}
 		// Everything ok
 		Ok(val)
 	}
@@ -570,7 +583,7 @@ impl Datastore {
 		// Start a new writeable transaction
 		let txn = self.transaction(Write, Optimistic).await?.enclose();
 		// Fetch the root users from the storage
-		let users = catch!(txn, txn.all_root_users());
+		let users = catch!(txn, txn.all_root_users().await);
 		// Process credentials, depending on existing users
 		if users.is_empty() {
 			// Display information in the logs
@@ -581,7 +594,7 @@ impl Datastore {
 			let mut ctx = MutableContext::default();
 			ctx.set_transaction(txn.clone());
 			let ctx = ctx.freeze();
-			catch!(txn, stm.compute(&ctx, &opt, None));
+			catch!(txn, stm.compute(&ctx, &opt, None).await);
 			// We added a user, so commit the transaction
 			txn.commit().await
 		} else {

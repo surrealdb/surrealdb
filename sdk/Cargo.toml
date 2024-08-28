@@ -3,7 +3,7 @@ name = "surrealdb"
 publish = true
 edition = "2021"
 version = "2.0.0"
-rust-version = "1.77.0"
+rust-version = "1.80.0"
 readme = "CARGO.md"
 authors = ["Tobie Morgan Hitchcock <tobie@surrealdb.com>"]
 description = "A scalable, distributed, collaborative, document-graph database, for the realtime web"
@@ -81,7 +81,7 @@ indexmap = { version = "2.1.0", features = ["serde"] }
 native-tls = { version = "0.2.11", optional = true }
 once_cell = "1.18.0"
 path-clean = "1.0.1"
-revision = { version = "0.8.0", features = [
+revision = { version = "0.9.0", features = [
     "chrono",
     "geo",
     "roaring",

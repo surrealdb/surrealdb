@@ -1,5 +1,5 @@
 //! The different options and types for use in API functions
-use dmp::Diff;
+
 use serde::Serialize;
 
 pub mod auth;
@@ -126,10 +126,10 @@ impl PatchOp {
 	}
 
 	/// Changes a value
-	pub fn change(path: &str, diff: Diff) -> Self {
+	pub fn change(path: &str, diff: String) -> Self {
 		Self(Serializer::new().serialize(UnitOp::Change {
 			path,
-			value: diff.text,
+			value: diff,
 		}))
 	}
 }

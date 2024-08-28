@@ -457,7 +457,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 					)
 					AUTHENTICATE (
 						-- Simple example increasing the record identifier by one
-					    SELECT * FROM type::thing('user', meta::id($auth) + 1)
+					    SELECT * FROM type::thing('user', record::id($auth) + 1)
 					)
 					DURATION FOR SESSION 2h
 				;
@@ -537,7 +537,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 					)
 					AUTHENTICATE (
 						-- If logging in with a company account, the session will be authenticated as the first owner
-						IF meta::tb($auth) = "company" {
+						IF record::tb($auth) = "company" {
 							RETURN SELECT VALUE owner FROM company WHERE id = $auth
 						}
 					)
