@@ -129,6 +129,41 @@ impl<'a> Lexer<'a> {
 		self.finish_token(TokenKind::Regex)
 	}
 
+	// re-lexes quote into a uuid token
+	pub fn relex_uuid(&mut self, token: Token) -> Token {
+		let double = match token.kind {
+			t!("u\"") => true,
+			t!("u'") => false,
+			_ => return self.invalid_token(Error::ExpectedEnd('u')),
+		};
+
+		self.last_offset = token.span.offset;
+		for i in 0..36 {
+			match self.reader.next() {
+				Some(b'-') if i == 8 || i == 13 || i == 18 || i == 23 => {}
+				Some(_) if i == 8 || i == 13 || i == 18 || i == 23 => {
+					return self.invalid_token(Error::ExpectedEnd('-'));
+				}
+				Some(b) => {
+					if !b.is_ascii_hexdigit() {
+						return self.invalid_token(Error::UnexpectedCharacter(b as char));
+					}
+				}
+				None => return self.invalid_token(Error::UnexpectedEof),
+			}
+		}
+
+		if double && self.reader.next() != Some(b'"') {
+			return self.invalid_token(Error::ExpectedEnd('"'));
+		}
+
+		if !double && self.reader.next() != Some(b'\'') {
+			return self.invalid_token(Error::ExpectedEnd('\''));
+		}
+
+		self.finish_token(TokenKind::Uuid)
+	}
+
 	/// Lex the next token, starting from the given byte.
 	pub fn lex_ascii(&mut self, byte: u8) -> Token {
 		let kind = match byte {

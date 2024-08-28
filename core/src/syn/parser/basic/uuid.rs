@@ -1,3 +1,4 @@
+use crate::syn::token::TokenKind;
 use crate::{
 	sql::Uuid,
 	syn::{
@@ -12,35 +13,33 @@ use crate::{
 impl Parser<'_> {
 	/// Parses a uuid strand.
 	pub fn parse_uuid(&mut self) -> ParseResult<Uuid> {
-		let quote_token = self.peek();
+		match self.peek().kind {
+			t!("u\"") | t!("u'") => {
+				let pop = self.pop_peek();
+				assert!(!self.has_peek());
+				let token = self.lexer.relex_uuid(pop);
 
-		let double = match quote_token.kind {
-			t!("u\"") => true,
-			t!("u'") => false,
+				match token.kind {
+					TokenKind::Uuid => {}
+					TokenKind::Invalid => {
+						let e = self.lexer.error.take().unwrap();
+						return Err(ParseError::new(ParseErrorKind::InvalidToken(e), token.span));
+					}
+					_ => unreachable!(),
+				}
+
+				let mut span = token.span;
+
+				// remove prefix (u") and suffix (")
+				span.offset += 2;
+				span.len -= 3;
+
+				uuid::Uuid::try_parse_ascii(self.span_bytes(span))
+					.map(|t| Uuid(t))
+					.map_err(|e| ParseError::new(ParseErrorKind::InvalidUuid(e), span))
+			}
 			x => unexpected!(self, x, "a uuid"),
-		};
-
-		self.pop_peek();
-
-		// ensure there are no tokens in the buffer
-		self.backup_after(quote_token.span);
-
-		let digits_bytes = self.lexer.reader.by_ref().take(36).collect::<Vec<_>>();
-
-		if double {
-			expected_whitespace!(self, t!("\""));
-		} else {
-			expected_whitespace!(self, t!("'"));
 		}
-
-		let span = self.lexer.current_span();
-
-		// mark last_offset as the end of the uuid
-		self.lexer.backup_after(span);
-
-		uuid::Uuid::try_parse_ascii(digits_bytes.as_slice())
-			.map(|t| Uuid(t))
-			.map_err(|e| ParseError::new(ParseErrorKind::InvalidUUID(e), span))
 	}
 }
 
