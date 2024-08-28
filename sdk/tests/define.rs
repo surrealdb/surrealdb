@@ -11,6 +11,7 @@ use surrealdb::err::Error;
 use surrealdb::iam::Role;
 use surrealdb::sql::Idiom;
 use surrealdb::sql::{Part, Value};
+use surrealdb_core::cnf::NORMAL_FETCH_SIZE;
 
 #[tokio::test]
 async fn define_statement_namespace() -> Result<(), Error> {
@@ -688,15 +689,19 @@ async fn define_statement_index_single() -> Result<(), Error> {
 #[tokio::test]
 async fn define_statement_index_concurrently() -> Result<(), Error> {
 	let sql = "
-		CREATE user:1 SET email = 'test@surrealdb.com';
-		CREATE user:2 SET email = 'test@surrealdb.com';
+		CREATE user:1 SET email = 'testA@surrealdb.com';
+		CREATE user:2 SET email = 'testA@surrealdb.com';
+		CREATE user:3 SET email = 'testB@surrealdb.com';
 		DEFINE INDEX test ON user FIELDS email CONCURRENTLY;
 		SLEEP 1s;
 		INFO FOR TABLE user;
 		INFO FOR INDEX test ON user;
+		SELECT * FROM user WHERE email = 'testA@surrealdb.com' EXPLAIN;
+		SELECT * FROM user WHERE email = 'testA@surrealdb.com';
+		SELECT * FROM user WHERE email = 'testB@surrealdb.com';
 	";
 	let mut t = Test::new(sql).await?;
-	t.skip_ok(4)?;
+	t.skip_ok(5)?;
 	t.expect_val(
 		"{
 			events: {},
@@ -713,7 +718,64 @@ async fn define_statement_index_concurrently() -> Result<(), Error> {
 			building: { status: 'built' }
 		}",
 	)?;
+	t.expect_val(
+		" [
+				{
+					detail: {
+						plan: {
+							index: 'test',
+							operator: '=',
+							value: 'testA@surrealdb.com'
+						},
+						table: 'user'
+					},
+					operation: 'Iterate Index'
+				},
+				{
+					detail: {
+						type: 'Memory'
+					},
+					operation: 'Collector'
+				}
+			]",
+	)?;
+	t.expect_val(
+		"[
+				{
+					email: 'testA@surrealdb.com',
+					id: user:1
+				},
+				{
+					email: 'testA@surrealdb.com',
+					id: user:2
+				}
+			]",
+	)?;
+	t.expect_val(
+		"[
+				{
+					email: 'testB@surrealdb.com',
+					id: user:3
+				}
+			]",
+	)?;
+	Ok(())
+}
 
+#[tokio::test]
+async fn define_statement_index_concurrently_building() -> Result<(), Error> {
+	let session = Session::owner().with_ns("test").with_db("test");
+	let ds = new_ds().await?;
+	for i in 0..*NORMAL_FETCH_SIZE * 3 {
+		let mut responses = ds
+			.execute(
+				&format!("CREATE user:{i} SET email = 'test{i}@surrealdb.com';"),
+				&session,
+				None,
+			)
+			.await?;
+		skip_ok(&mut responses, 1)?;
+	}
 	Ok(())
 }
 
