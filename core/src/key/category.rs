@@ -134,6 +134,8 @@ pub enum Category {
 	IndexHnswThings,
 	/// crate::key::index::hv                /*{ns}*{db}*{tb}+{ix}!hv{vec}
 	IndexHnswVec,
+	/// crate::key::index::ia                /*{ns}*{db}*{tb}+{ix}!ia{id}
+	IndexAppendings,
 	/// crate::key::index                    /*{ns}*{db}*{tb}+{ix}*{fd}{id}
 	Index,
 	///
@@ -209,6 +211,7 @@ impl Display for Category {
 			Self::IndexHnswDocIds => "IndexHnswDocIds",
 			Self::IndexHnswThings => "IndexHnswThings",
 			Self::IndexHnswVec => "IndexHnswVec",
+			Self::IndexAppendings => "IndexAppendings",
 			Self::Index => "Index",
 			Self::ChangeFeed => "ChangeFeed",
 			Self::Thing => "Thing",
