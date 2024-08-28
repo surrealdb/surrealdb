@@ -125,8 +125,8 @@ async fn live_select_record_id() {
 			tokio::time::timeout(LQ_TIMEOUT, users.next()).await.unwrap().unwrap().unwrap();
 		// It should be updated
 		assert_eq!(notification.action, Action::Update);
-		// Session id should be present but be None because we didn't set it
-		assert!(notification.session.is_none());
+		// Session id should be present because it is auto generated
+		assert!(notification.session.is_some());
 
 		// Delete the record
 		let _: Option<ApiRecordId> = db.delete(&notification.data.id).await.unwrap();
