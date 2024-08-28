@@ -278,6 +278,8 @@ impl<'a> IndexOperation<'a> {
 		n: Option<Vec<Value>>,
 		rid: &'a Thing,
 	) -> Self {
+		println!("INDEX OPERATION: {} {:?} {:?}", rid, o, n);
+		info!("INDEX OPERATION: {} {:?} {:?}", rid, o, n);
 		Self {
 			opt,
 			ix,

@@ -5,6 +5,7 @@ use crate::doc::{CursorDoc, Document};
 use crate::err::Error;
 use crate::idx::index::IndexOperation;
 use crate::key::index::ia::Ia;
+use crate::key::index::ip::Ip;
 use crate::key::thing;
 use crate::kvs::ds::TransactionFactory;
 use crate::kvs::LockType::Optimistic;
@@ -152,6 +153,11 @@ struct Appending {
 	id: Id,
 }
 
+#[revisioned(revision = 1)]
+#[derive(Serialize, Deserialize, Store, Debug)]
+#[non_exhaustive]
+struct Previous(Vec<Value>);
+
 #[derive(Default)]
 struct QueueSequences {
 	/// The index of the next appending to be indexed
@@ -240,13 +246,18 @@ impl Building {
 				return Ok(ConsumeResult::Ignored(old_values, new_values));
 			}
 		}
+
+		let tx = ctx.tx();
 		let a = Appending {
 			old_values,
 			new_values,
 			id: rid.id.clone(),
 		};
-		let ia = self.new_ia_key(queue.add_update())?;
-		ctx.tx().set(ia, a, None).await?;
+		// Get the idx of this appended record from the sequence
+		let idx = queue.add_update();
+		// Store the appending
+		let ia = self.new_ia_key(idx)?;
+		tx.set(ia, a, None).await?;
 		Ok(ConsumeResult::Enqueued)
 	}
 
@@ -254,6 +265,12 @@ impl Building {
 		let ns = self.opt.ns()?;
 		let db = self.opt.db()?;
 		Ok(Ia::new(ns, db, &self.ix.what, &self.ix.name, i))
+	}
+
+	fn new_ip_key(&self, id: Id) -> Result<Ip, Error> {
+		let ns = self.opt.ns()?;
+		let db = self.opt.db()?;
+		Ok(Ip::new(ns, db, &self.ix.what, &self.ix.name, id))
 	}
 
 	async fn new_read_tx(&self) -> Result<Transaction, Error> {
@@ -309,8 +326,18 @@ impl Building {
 				);
 
 				// Index the record
-				let mut io = IndexOperation::new(&ctx, &self.opt, &self.ix, None, opt_values, &rid);
+				let mut io =
+					IndexOperation::new(&ctx, &self.opt, &self.ix, None, opt_values.clone(), &rid);
 				catch!(tx, stack.enter(|stk| io.compute(stk)).finish().await);
+
+				// Store the new value from the index perspective,
+				// so that upcoming appending records can get the correct old value
+				let ip = self.new_ip_key(rid.id.clone())?;
+				if let Some(v) = opt_values {
+					info!("STORE IP {} {:?}", rid.id, v);
+					catch!(tx, tx.set(ip, Previous(v), None).await);
+				}
+				// Increment the count and update the status
 				count += 1;
 				self.set_status(BuildingStatus::InitialIndexing(count)).await;
 			}
@@ -339,8 +366,16 @@ impl Building {
 			for i in range {
 				let ia = self.new_ia_key(i)?;
 				if let Some(v) = catch!(tx, tx.get(ia.clone(), None).await) {
-					tx.del(ia).await?;
-					let a: Appending = v.into();
+					catch!(tx, tx.del(ia).await);
+					let mut a: Appending = v.into();
+					let ip = catch!(tx, self.new_ip_key(a.id.clone()));
+					let ix_old_value = catch!(tx, tx.get(ip.clone(), None).await);
+					if let Some(ix_old_value) = ix_old_value {
+						let p: Previous = ix_old_value.into();
+						a.old_values = Some(p.0);
+						catch!(tx, tx.del(ip).await);
+					}
+					let a = a; // Not mutable anymore
 					let rid = Thing::from((self.tb.clone(), a.id));
 					info!("Update RID: {rid} {:?} {:?}", a.old_values, a.new_values);
 					let mut io = IndexOperation::new(

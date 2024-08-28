@@ -31,6 +31,7 @@ impl<'a> IndexOperation<'a> {
 		n: Option<Vec<Value>>,
 		rid: &'a Thing,
 	) -> Self {
+		info!("INDEX OPERATION: {} {:?} {:?}", rid, o, n);
 		Self {
 			ctx,
 			opt,
