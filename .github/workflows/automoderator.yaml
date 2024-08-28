@@ -9,7 +9,7 @@ permissions:
 
 jobs:
   automoderator:
-    runs-on: ["runner-arm64-small"]
+    runs-on: ["ubuntu-latest"]
     steps:
     - name: Redact Suspicious Links
       # This step contains code from "Comment-Filter", licensed under MIT by Martin Leduc
