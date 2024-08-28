@@ -2,10 +2,7 @@ use crate::syn::token::TokenKind;
 use crate::{
 	sql::Uuid,
 	syn::{
-		parser::{
-			mac::{expected_whitespace, unexpected},
-			ParseError, ParseErrorKind, ParseResult, Parser,
-		},
+		parser::{mac::unexpected, ParseError, ParseErrorKind, ParseResult, Parser},
 		token::t,
 	},
 };

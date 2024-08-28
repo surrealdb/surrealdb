@@ -87,7 +87,6 @@ pub struct Lexer<'a> {
 	pub string: Option<String>,
 	pub duration: Option<Duration>,
 	pub datetime: Option<DateTime<Utc>>,
-	pub uuid: Option<Uuid>,
 	pub error: Option<Error>,
 }
 
@@ -106,7 +105,6 @@ impl<'a> Lexer<'a> {
 			error: None,
 			duration: None,
 			datetime: None,
-			uuid: None,
 		}
 	}
 
@@ -137,7 +135,6 @@ impl<'a> Lexer<'a> {
 			error: self.error,
 			duration: self.duration,
 			datetime: self.datetime,
-			uuid: self.uuid,
 		}
 	}
 
