@@ -339,6 +339,7 @@ async fn router_handle_response(
 										query_id: *notification.id,
 										action: Action::from_core(notification.action),
 										data: notification.result,
+										session: notification.session,
 									};
 									if sender.send(notification).await.is_err() {
 										state.live_queries.remove(&live_query_id);

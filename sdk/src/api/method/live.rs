@@ -207,6 +207,7 @@ impl futures::Stream for Stream<Value> {
 				query_id: notification.query_id,
 				action: notification.action,
 				data: Value::from_inner(notification.data),
+				session: notification.session,
 			};
 			Poll::Ready(Some(r))
 		}

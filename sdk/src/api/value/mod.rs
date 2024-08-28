@@ -348,12 +348,13 @@ impl Action {
 /// Live queries return a stream of notifications. The notification contains an `action` that triggered the change in the database record and `data` itself.
 /// For deletions the data is the record before it was deleted. For everything else, it's the newly created record or updated record depending on whether
 /// the action is create or update.
-#[derive(Debug, Clone, Copy, Eq, PartialEq, Ord, PartialOrd, Hash)]
+#[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
 #[non_exhaustive]
 pub struct Notification<R> {
 	pub query_id: Uuid,
 	pub action: Action,
 	pub data: R,
+	pub session: Option<String>,
 }
 
 impl Notification<CoreValue> {
@@ -366,6 +367,7 @@ impl Notification<CoreValue> {
 			query_id: self.query_id,
 			action: self.action,
 			data,
+			session: self.session,
 		})
 	}
 }
