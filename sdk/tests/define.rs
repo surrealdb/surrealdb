@@ -1,17 +1,20 @@
 mod parse;
+
 use parse::Parse;
 
 mod helpers;
 use helpers::*;
 
 use std::collections::HashMap;
-
+use std::time::{Duration, SystemTime};
 use surrealdb::dbs::Session;
 use surrealdb::err::Error;
 use surrealdb::iam::Role;
 use surrealdb::sql::Idiom;
 use surrealdb::sql::{Part, Value};
-use surrealdb_core::cnf::NORMAL_FETCH_SIZE;
+use surrealdb_core::cnf::{INDEXING_BATCH_SIZE, NORMAL_FETCH_SIZE};
+use test_log::test;
+use tracing::info;
 
 #[tokio::test]
 async fn define_statement_namespace() -> Result<(), Error> {
@@ -762,11 +765,14 @@ async fn define_statement_index_concurrently() -> Result<(), Error> {
 	Ok(())
 }
 
-#[tokio::test]
-async fn define_statement_index_concurrently_building() -> Result<(), Error> {
+#[test(tokio::test)]
+async fn define_statement_index_concurrently_building_status() -> Result<(), Error> {
 	let session = Session::owner().with_ns("test").with_db("test");
 	let ds = new_ds().await?;
-	for i in 0..*NORMAL_FETCH_SIZE * 3 {
+	// Populate initial records
+	let initial_count = *INDEXING_BATCH_SIZE * 3 / 2;
+	info!("Populate: {}", initial_count);
+	for i in 0..initial_count {
 		let mut responses = ds
 			.execute(
 				&format!("CREATE user:{i} SET email = 'test{i}@surrealdb.com';"),
@@ -775,6 +781,74 @@ async fn define_statement_index_concurrently_building() -> Result<(), Error> {
 			)
 			.await?;
 		skip_ok(&mut responses, 1)?;
+	}
+	// Create the index concurrently
+	info!("Indexing starts");
+	let mut r =
+		ds.execute("DEFINE INDEX test ON user FIELDS email CONCURRENTLY", &session, None).await?;
+	skip_ok(&mut r, 1)?;
+	//
+	let mut appending_count = *NORMAL_FETCH_SIZE * 3 / 2;
+	info!("Appending: {}", appending_count);
+	// Loop until the index is built
+	let now = SystemTime::now();
+	let mut initial_count = None;
+	let mut updates_count = None;
+	loop {
+		if now.elapsed().map_err(|e| Error::Internal(e.to_string()))?.gt(&Duration::from_secs(20)) {
+			panic!("Time out");
+		}
+		if appending_count > 0 {
+			let mut responses = ds
+				.execute(
+					&format!("UPDATE user:{appending_count} SET email = 'new{appending_count}@surrealdb.com';"),
+					&session,
+					None,
+				)
+				.await?;
+			skip_ok(&mut responses, 1)?;
+			appending_count -= 1;
+		}
+		let mut r = ds.execute("INFO FOR INDEX test ON user", &session, None).await?;
+		let tmp = r.remove(0).result?;
+		if let Value::Object(o) = &tmp {
+			if let Some(b) = o.get("building") {
+				if let Value::Object(b) = b {
+					if let Some(v) = b.get("status") {
+						if Value::from("started").eq(v) {
+							continue;
+						}
+						let new_count = b.get("count").cloned();
+						if Value::from("initial").eq(v) {
+							if new_count != initial_count {
+								assert!(new_count > initial_count, "{new_count:?}");
+								info!("New initial count: {:?}", new_count);
+								initial_count = new_count;
+							}
+							continue;
+						}
+						if Value::from("updates").eq(v) {
+							if new_count != updates_count {
+								assert!(new_count > updates_count, "{new_count:?}");
+								info!("New updates count: {:?}", new_count);
+								updates_count = new_count;
+							}
+							continue;
+						}
+						let val = Value::parse(
+							"{
+										building: {
+											status: 'built'
+										}
+									}",
+						);
+						assert_eq!(format!("{tmp:#}"), format!("{val:#}"));
+						break;
+					}
+				}
+			}
+		}
+		panic!("Unexpected value {tmp:#}");
 	}
 	Ok(())
 }

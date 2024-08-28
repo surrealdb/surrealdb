@@ -280,7 +280,8 @@ impl Building {
 		let mut count = 0;
 		while let Some(rng) = next {
 			// Get the next batch of records
-			let batch = self.new_read_tx().await?.batch(rng, *INDEXING_BATCH_SIZE, true).await?;
+			let tx = self.new_read_tx().await?;
+			let batch = catch!(tx, tx.batch(rng, *INDEXING_BATCH_SIZE, true).await);
 			// Set the next scan range
 			next = batch.next;
 			// Check there are records
@@ -289,6 +290,7 @@ impl Building {
 			}
 			// Create a new context with a write transaction
 			let ctx = self.new_write_tx_ctx().await?;
+			let tx = ctx.tx();
 			// Index the records
 			for (k, v) in batch.values.into_iter() {
 				let key: thing::Thing = (&k).into();
@@ -296,13 +298,19 @@ impl Building {
 				let val: Value = (&v).into();
 				let rid: Arc<Thing> = Thing::from((key.tb, key.id)).into();
 				let doc = CursorDoc::new(Some(rid.clone()), None, val);
-				let opt_values = stack
-					.enter(|stk| Document::build_opt_values(stk, &ctx, &self.opt, &self.ix, &doc))
-					.finish()
-					.await?;
+				let opt_values = catch!(
+					tx,
+					stack
+						.enter(|stk| Document::build_opt_values(
+							stk, &ctx, &self.opt, &self.ix, &doc
+						))
+						.finish()
+						.await
+				);
+
 				// Index the record
 				let mut io = IndexOperation::new(&ctx, &self.opt, &self.ix, None, opt_values, &rid);
-				stack.enter(|stk| io.compute(stk)).finish().await?;
+				catch!(tx, stack.enter(|stk| io.compute(stk)).finish().await);
 				count += 1;
 				self.set_status(BuildingStatus::InitialIndexing(count)).await;
 			}
@@ -330,10 +338,11 @@ impl Building {
 			let next_to_index = range.end;
 			for i in range {
 				let ia = self.new_ia_key(i)?;
-				if let Some(v) = tx.get(ia.clone(), None).await? {
+				if let Some(v) = catch!(tx, tx.get(ia.clone(), None).await) {
 					tx.del(ia).await?;
 					let a: Appending = v.into();
 					let rid = Thing::from((self.tb.clone(), a.id));
+					info!("Update RID: {rid} {:?} {:?}", a.old_values, a.new_values);
 					let mut io = IndexOperation::new(
 						&ctx,
 						&self.opt,
@@ -342,7 +351,7 @@ impl Building {
 						a.new_values,
 						&rid,
 					);
-					stack.enter(|stk| io.compute(stk)).finish().await?;
+					catch!(tx, stack.enter(|stk| io.compute(stk)).finish().await);
 					count += 1;
 					self.set_status(BuildingStatus::UpdatesIndexing(count)).await;
 				}
