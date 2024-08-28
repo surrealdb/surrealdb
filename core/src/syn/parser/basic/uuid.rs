@@ -5,7 +5,7 @@ use crate::{
 			mac::{expected_whitespace, unexpected},
 			ParseError, ParseErrorKind, ParseResult, Parser,
 		},
-		token::{t, DurationSuffix, NumberSuffix, TokenKind},
+		token::{t, DurationSuffix, NumberSuffix, TokenKind, VectorTypeKind},
 	},
 };
 
@@ -92,7 +92,9 @@ impl Parser<'_> {
 				| TokenKind::NumberSuffix(NumberSuffix::Float) => {
 					cur = self.pop_peek();
 				}
-				TokenKind::Language(_) | TokenKind::Keyword(_) | TokenKind::VectorType(_) => {
+				TokenKind::Language(_)
+				| TokenKind::Keyword(_)
+				| TokenKind::VectorType(VectorTypeKind::F64 | VectorTypeKind::F32) => {
 					// there are some keywords and languages keywords which could be part of the
 					// hex section.
 					if !self.span_bytes(next.span).iter().all(|x| x.is_ascii_hexdigit()) {
