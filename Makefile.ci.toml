@@ -210,15 +210,20 @@ script = """
 category = "CI - SERVICES"
 script = """
     #!/bin/bash -ex
+	echo "Installing TiKV playground..."
     ${HOME}/.tiup/bin/tiup install pd tikv playground
+	echo "Cleaning TiKV playground..."
+	${HOME}/.tiup/bin/tiup clean --all
+	echo "Starting TiKV playground..."
 	nohup ${HOME}/.tiup/bin/tiup playground --mode tikv-slim --kv 1 --pd 1 --db 0 --ticdc 0 --tiflash 0 --without-monitor > /tmp/tiup.log &
 	set +e
 	tries=0
-	echo "Waiting for tiup playground to be ready..."
+	echo "Waiting for TiKV playground to be ready..."
 	while [[ $tries -lt 10 ]]; do
+		sleep 5
+		echo "Displaying playground status..."
 		if ! ${HOME}/.tiup/bin/tiup playground display >/dev/null; then
 			tries=$((tries + 1));
-			sleep 5;
 			continue
 		fi
 		exit 0;

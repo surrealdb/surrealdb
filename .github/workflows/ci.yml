@@ -273,7 +273,7 @@ jobs:
 
   test:
     name: Test workspace
-    runs-on: [ "self-hosted", "arm64", "builder" ]
+    runs-on: [ runner-arm64-2xlarge ]
     steps:
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
