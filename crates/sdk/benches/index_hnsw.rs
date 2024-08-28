@@ -27,8 +27,8 @@ const M0: u8 = 48;
 
 const DIMENSION: u16 = 20;
 
-const INGESTING_SOURCE: &str = "../tests/data/hnsw-random-9000-20-euclidean.gz";
-const QUERYING_SOURCE: &str = "../tests/data/hnsw-random-5000-20-euclidean.gz";
+const INGESTING_SOURCE: &str = "../../tests/data/hnsw-random-9000-20-euclidean.gz";
+const QUERYING_SOURCE: &str = "../../tests/data/hnsw-random-5000-20-euclidean.gz";
 
 fn bench_hnsw_no_db(c: &mut Criterion) {
 	const GROUP_NAME: &str = "hnsw_no_db";
