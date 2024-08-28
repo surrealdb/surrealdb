@@ -32,7 +32,7 @@ impl Parser<'_> {
 				span.len -= 3;
 
 				uuid::Uuid::try_parse_ascii(self.span_bytes(span))
-					.map(|t| Uuid(t))
+					.map(Uuid)
 					.map_err(|e| ParseError::new(ParseErrorKind::InvalidUuid(e), span))
 			}
 			x => unexpected!(self, x, "a uuid"),

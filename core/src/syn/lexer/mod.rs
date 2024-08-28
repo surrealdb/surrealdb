@@ -17,7 +17,6 @@ mod unicode;
 mod test;
 
 pub use reader::{BytesReader, CharError};
-use uuid::Uuid;
 
 use crate::syn::token::{Span, Token, TokenKind};
 
