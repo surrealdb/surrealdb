@@ -9,7 +9,7 @@ permissions:
 
 jobs:
   automoderator:
-    runs-on: ubuntu-latest
+    runs-on: ["runner-arm64-medium"]
     steps:
     # This stage contains code from "Comment-Filter", licensed under MIT by Martin Leduc
     # Source: https://github.com/DecimalTurn/Comment-Filter/blob/v0.1.0/LICENSE
