@@ -1,0 +1,74 @@
+name: Automatically Moderate Github Comments
+
+on:
+  issue_comment:
+    types: [created, edited]
+
+permissions:
+  issues: write
+
+jobs:
+  automoderator:
+    runs-on: ubuntu-latest
+    steps:
+    # This stage contains code from "Comment-Filter", licensed under MIT by Martin Leduc
+    # Source: https://github.com/DecimalTurn/Comment-Filter/blob/v0.1.0/LICENSE
+    - name: Redact Malicious Messages
+      uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
+      with:
+        script: |
+          const comment = context.payload.comment
+          const { owner, repo } = context.repo
+
+          console.log('Repository owner:', owner)
+          console.log('Repository name:', repo)
+          console.log('Comment body:', comment.body)
+
+          // Array of regex patterns and their replacements
+          const regexReplacements = [
+            // File Sharing
+            {
+              pattern: /(www\.)?(box|dropbox|mediafire|sugarsync|tresorit|hightail|opentext|sharefile|citrixsharefile|icloud|onedrive|1drv)\.com\/[^\s\)]+/g,
+              replacement: '[REDACTED]'
+            },
+            // Google Drive
+            {
+              pattern: /drive\.google\.com\/[^\s\)]+/g,
+              replacement: '[REDACTED]'
+            },
+            // Link Shorteners
+            {
+              pattern: /(www\.)?(bit\.ly|t\.co|tinyurl\.com|goo\.gl|ow\.ly|buff\.ly|is\.gd|soo\.gd|t2mio|bl\.ink|clck\.ru|shorte\.st|cutt\.ly|v\.gd|qr\.ae|rb\.gy|rebrand\.ly|tr\.im|shorturl\.at|lnkd\.in)\/[^\s\)]+/g,
+              replacement: '[REDACTED]'
+            },
+          ];
+
+          // Iterate through each regex and replace matches in the comment body
+          let updatedBody = comment.body;
+          regexReplacements.forEach(({ pattern, replacement }) => {
+            if (pattern.test(updatedBody)) {
+              console.log(`Pattern found: ${pattern}`);
+              updatedBody = updatedBody.replace(pattern, replacement);
+            }
+          });
+
+          // If the comment body was updated, edit the comment
+          if (updatedBody !== comment.body) {
+            console.log('Updated comment body:', updatedBody);
+
+            // Append edition notice to the body
+            updatedBody = updatedBody + '\n\n' +
+              '**NOTICE**: This comment has been automatically edited by SurrealDB ' +
+              'to redact some links in order to protect users from potentially malicious content. ' +
+              'Please, let us know if you believe this action may have been a mistake.'
+
+            // Edit the comment with the updated body
+            await github.rest.issues.updateComment({
+              owner: owner,
+              repo: repo,
+              comment_id: comment.id,
+              body: updatedBody
+            });
+          } else {
+            console.log('No suspicious links found.')
+          }
