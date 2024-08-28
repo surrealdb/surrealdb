@@ -89,7 +89,7 @@ impl Document {
 				lqctx.add_value("before", initial);
 				// We include session id into notifications
 				let session_id = match sess.pick(ID.as_ref()) {
-					Value::Strand(v) => Some(v.to_string()),
+					Value::Strand(v) => Some(v.to_raw()),
 					_ => None,
 				};
 				// We need to create a new options which we will

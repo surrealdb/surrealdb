@@ -1862,7 +1862,7 @@ async fn session_id_invalid() {
 	// We specify a request identifier via a specific SurrealDB header
 	let mut headers = HeaderMap::new();
 	headers.insert("surreal-id", HeaderValue::from_static("123")); // Not a valid UUIDv4
-	// Connect to WebSocket
+															   // Connect to WebSocket
 	let socket = Socket::connect_with_headers(&addr, SERVER, FORMAT, headers).await;
 	assert!(socket.is_err(), "unexpected success using connecting with invalid id header");
 

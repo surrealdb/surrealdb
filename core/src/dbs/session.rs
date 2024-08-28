@@ -58,6 +58,12 @@ impl Session {
 		self
 	}
 
+	/// Set the current connection ID
+	pub fn with_id(mut self, id: &str) -> Session {
+		self.id = Some(id.to_owned());
+		self
+	}
+
 	/// Retrieves the selected namespace
 	pub(crate) fn ns(&self) -> Option<Arc<str>> {
 		self.ns.as_deref().map(Into::into)
