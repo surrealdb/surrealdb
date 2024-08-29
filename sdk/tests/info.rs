@@ -646,7 +646,7 @@ async fn function_info_structure() {
 	let ses = Session::owner().with_ns("ns").with_db("db");
 
 	let mut res = dbs.execute(sql, &ses, None).await.unwrap();
-	assert_eq!(res.len(), 8);
+	assert_eq!(res.len(), 2);
 
 	let out = res.pop().unwrap().output();
 	assert!(out.is_ok(), "Unexpected error: {:?}", out);
