@@ -795,10 +795,10 @@ async fn define_statement_index_concurrently_building_status() -> Result<(), Err
 	let mut initial_count = None;
 	let mut updates_count = None;
 	// While the concurrent indexing is running, we update and delete records
+	let time_out = Duration::from_secs(120);
 	loop {
-		if now.elapsed().map_err(|e| Error::Internal(e.to_string()))?.gt(&Duration::from_secs(120))
-		{
-			panic!("Time out");
+		if now.elapsed().map_err(|e| Error::Internal(e.to_string()))?.gt(&time_out) {
+			panic!("Time-out {time_out:?}");
 		}
 		if appending_count > 0 {
 			let sql = if appending_count % 2 != 0 {
