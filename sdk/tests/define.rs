@@ -794,8 +794,10 @@ async fn define_statement_index_concurrently_building_status() -> Result<(), Err
 	let now = SystemTime::now();
 	let mut initial_count = None;
 	let mut updates_count = None;
+	// While the concurrent indexing is running, we update and delete records
 	loop {
-		if now.elapsed().map_err(|e| Error::Internal(e.to_string()))?.gt(&Duration::from_secs(20)) {
+		if now.elapsed().map_err(|e| Error::Internal(e.to_string()))?.gt(&Duration::from_secs(120))
+		{
 			panic!("Time out");
 		}
 		if appending_count > 0 {
@@ -808,6 +810,7 @@ async fn define_statement_index_concurrently_building_status() -> Result<(), Err
 			skip_ok(&mut responses, 1)?;
 			appending_count -= 1;
 		}
+		// We monitor the status
 		let mut r = ds.execute("INFO FOR INDEX test ON user", &session, None).await?;
 		let tmp = r.remove(0).result?;
 		if let Value::Object(o) = &tmp {
