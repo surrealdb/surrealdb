@@ -278,7 +278,8 @@ async fn relate_enforced() -> Result<(), Error> {
 	//
 	t.expect_val("[{ id: edge:1, in: a:1, out: a:2 }]")?;
 	//
-	let info = Value::parse("{
+	let info = Value::parse(
+		"{
 	accesses: {},
 	analyzers: {},
 	functions: {},
@@ -289,7 +290,8 @@ async fn relate_enforced() -> Result<(), Error> {
 		edge: 'DEFINE TABLE edge TYPE RELATION ENFORCED SCHEMALESS PERMISSIONS NONE'
 	},
 	users: {}
-	}");
+	}",
+	);
 	t.expect_value(info)?;
 	Ok(())
 }
