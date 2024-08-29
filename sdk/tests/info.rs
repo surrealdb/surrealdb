@@ -639,8 +639,8 @@ async fn access_info_redacted_structure() {
 #[tokio::test]
 async fn function_info_structure() {
 	let sql = r#"
-        DEFINE FUNCTION fn::example($name: string) -> string { RETURN "Hello, " + $name + "!"; }
-        INFO FOR DB STRUCTURE
+        DEFINE FUNCTION fn::example($name: string) -> string { RETURN "Hello, " + $name + "!"; };
+        INFO FOR DB STRUCTURE;
     "#;
 	let dbs = new_ds().await.unwrap();
 	let ses = Session::owner().with_ns("ns").with_db("db");
