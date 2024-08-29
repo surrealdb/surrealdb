@@ -117,6 +117,7 @@ impl InfoStructure for DefineFunctionStatement {
 			"block".to_string() => self.block.structure(),
 			"permissions".to_string() => self.permissions.structure(),
 			"comment".to_string(), if let Some(v) = self.comment => v.into(),
+			"returns".to_string(), if let Some(v) = self.returns => v.structure(),
 		})
 	}
 }
