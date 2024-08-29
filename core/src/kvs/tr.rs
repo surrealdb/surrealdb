@@ -352,7 +352,7 @@ impl Transactor {
 	{
 		let beg: Key = rng.start.into();
 		let end: Key = rng.end.into();
-		if beg >= end {
+		if beg > end {
 			return Ok(vec![]);
 		}
 		expand_inner!(&mut self.inner, v => { v.scan(beg..end, limit, version).await })
