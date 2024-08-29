@@ -58,6 +58,7 @@ impl InfoStructure for TableType {
 					tables.into_iter().map(|t| t.0).collect::<Vec<_>>().into(),
 				"out".to_string(), if let Some(Kind::Record(tables)) = rel.to =>
 					tables.into_iter().map(|t| t.0).collect::<Vec<_>>().into(),
+				"enforced".to_string() => rel.enforced.into()
 			}),
 		}
 	}
