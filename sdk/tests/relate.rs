@@ -265,6 +265,7 @@ async fn relate_enforced() -> Result<(), Error> {
 		RELATE a:1->edge:1->a:2;
 		CREATE a:1, a:2;
 		RELATE a:1->edge:1->a:2;
+		INFO FOR DB;
 	";
 
 	let mut t = Test::new(sql).await?;
@@ -277,5 +278,18 @@ async fn relate_enforced() -> Result<(), Error> {
 	//
 	t.expect_val("[{ id: edge:1, in: a:1, out: a:2 }]")?;
 	//
+	let info = Value::parse("{
+	accesses: {},
+	analyzers: {},
+	functions: {},
+	models: {},
+	params: {},
+	tables: {
+		a: 'DEFINE TABLE a TYPE ANY SCHEMALESS PERMISSIONS NONE',
+		edge: 'DEFINE TABLE edge TYPE RELATION ENFORCED SCHEMALESS PERMISSIONS NONE'
+	},
+	users: {}
+	}");
+	t.expect_value(info)?;
 	Ok(())
 }

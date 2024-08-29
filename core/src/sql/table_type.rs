@@ -31,6 +31,9 @@ impl Display for TableType {
 				if let Some(kind) = &rel.to {
 					write!(f, " OUT {kind}")?;
 				}
+				if rel.enforced {
+					write!(f, " ENFORCED")?;
+				}
 			}
 			TableType::Any => {
 				f.write_str(" ANY")?;
