@@ -699,33 +699,14 @@ mod tests {
 	use chrono::Duration;
 	use jsonwebtoken::{encode, EncodingKey};
 
+	struct TestLevel {
+		level: &'static str,
+		ns: Option<&'static str>,
+		db: Option<&'static str>,
+	}
+
 	#[tokio::test]
 	async fn test_basic() {
-		#[derive(Debug)]
-		struct TestLevel {
-			level: &'static str,
-			ns: Option<&'static str>,
-			db: Option<&'static str>,
-		}
-
-		let test_levels = vec![
-			TestLevel {
-				level: "ROOT",
-				ns: None,
-				db: None,
-			},
-			TestLevel {
-				level: "NS",
-				ns: Some("test"),
-				db: None,
-			},
-			TestLevel {
-				level: "DB",
-				ns: Some("test"),
-				db: Some("test"),
-			},
-		];
-
 		#[derive(Debug)]
 		struct TestCase {
 			title: &'static str,
@@ -756,6 +737,24 @@ mod tests {
 				roles: vec![],
 				expiration: None,
 				expect_ok: false,
+			},
+		];
+
+		let test_levels = vec![
+			TestLevel {
+				level: "ROOT",
+				ns: None,
+				db: None,
+			},
+			TestLevel {
+				level: "NS",
+				ns: Some("test"),
+				db: None,
+			},
+			TestLevel {
+				level: "DB",
+				ns: Some("test"),
+				db: Some("test"),
 			},
 		];
 
@@ -846,31 +845,6 @@ mod tests {
 	#[tokio::test]
 	async fn test_token() {
 		#[derive(Debug)]
-		struct TestLevel {
-			level: &'static str,
-			ns: Option<&'static str>,
-			db: Option<&'static str>,
-		}
-
-		let test_levels = vec![
-			TestLevel {
-				level: "ROOT",
-				ns: None,
-				db: None,
-			},
-			TestLevel {
-				level: "NS",
-				ns: Some("test"),
-				db: None,
-			},
-			TestLevel {
-				level: "DB",
-				ns: Some("test"),
-				db: Some("test"),
-			},
-		];
-
-		#[derive(Debug)]
 		struct TestCase {
 			title: &'static str,
 			roles: Option<Vec<&'static str>>,
@@ -900,6 +874,24 @@ mod tests {
 				key: "invalid",
 				expect_roles: vec![],
 				expect_error: true,
+			},
+		];
+
+		let test_levels = vec![
+			TestLevel {
+				level: "ROOT",
+				ns: None,
+				db: None,
+			},
+			TestLevel {
+				level: "NS",
+				ns: Some("test"),
+				db: None,
+			},
+			TestLevel {
+				level: "DB",
+				ns: Some("test"),
+				db: Some("test"),
 			},
 		];
 
@@ -985,7 +977,7 @@ mod tests {
 	}
 
 	#[tokio::test]
-	async fn test_token_db_record() {
+	async fn test_token_record() {
 		let secret = "jwt_secret";
 		let key = EncodingKey::from_secret(secret.as_ref());
 		let claims = Claims {
@@ -1273,7 +1265,7 @@ mod tests {
 	}
 
 	#[tokio::test]
-	async fn test_token_db_record_custom_claims() {
+	async fn test_token_record_custom_claims() {
 		use std::collections::HashMap;
 
 		let secret = "jwt_secret";
@@ -1391,7 +1383,7 @@ mod tests {
 
 	#[cfg(feature = "jwks")]
 	#[tokio::test]
-	async fn test_token_db_record_jwks() {
+	async fn test_token_record_jwks() {
 		use crate::dbs::capabilities::{Capabilities, NetTarget, Targets};
 		use base64::{engine::general_purpose::STANDARD_NO_PAD, Engine};
 		use jsonwebtoken::jwk::{Jwk, JwkSet};
@@ -1647,7 +1639,191 @@ mod tests {
 	}
 
 	#[tokio::test]
-	async fn test_token_db_record_and_authenticate_clause() {
+	async fn test_token_authenticate_clause() {
+		#[derive(Debug)]
+		struct TestCase {
+			title: &'static str,
+			iss_claim: Option<&'static str>,
+			aud_claim: Option<Audience>,
+			error_statement: &'static str,
+			expected_error: Option<Error>,
+		}
+
+		let test_cases = vec![
+			TestCase {
+				title: "with correct 'iss' and 'aud' claims",
+				iss_claim: Some("surrealdb-test"),
+				aud_claim: Some(Audience::Single("surrealdb-test".to_string())),
+				error_statement: "THROW",
+				expected_error: None,
+			},
+			TestCase {
+				title: "with correct 'iss' and 'aud' claims, multiple audiences",
+				iss_claim: Some("surrealdb-test"),
+				aud_claim: Some(Audience::Multiple(vec![
+					"invalid".to_string(),
+					"surrealdb-test".to_string(),
+				])),
+				error_statement: "THROW",
+				expected_error: None,
+			},
+			TestCase {
+				title: "with correct 'iss' claim but invalid 'aud' claim",
+				iss_claim: Some("surrealdb-test"),
+				aud_claim: Some(Audience::Single("invalid".to_string())),
+				error_statement: "THROW",
+				expected_error: Some(Error::Thrown("Invalid token audience string".to_string())),
+			},
+			TestCase {
+				title: "with correct 'iss' claim but invalid 'aud' claim, multiple audiences",
+				iss_claim: Some("surrealdb-test"),
+				aud_claim: Some(Audience::Multiple(vec![
+					"invalid".to_string(),
+					"surrealdb-test-different".to_string(),
+				])),
+				error_statement: "THROW",
+				expected_error: Some(Error::Thrown("Invalid token audience array".to_string())),
+			},
+			TestCase {
+				title: "with correct 'iss' claim but invalid 'aud' claim, generic error",
+				iss_claim: Some("surrealdb-test"),
+				aud_claim: Some(Audience::Single("invalid".to_string())),
+				error_statement: "RETURN",
+				expected_error: Some(Error::InvalidAuth),
+			},
+		];
+
+		let test_levels = vec![
+			TestLevel {
+				level: "ROOT",
+				ns: None,
+				db: None,
+			},
+			TestLevel {
+				level: "NS",
+				ns: Some("test"),
+				db: None,
+			},
+			TestLevel {
+				level: "DB",
+				ns: Some("test"),
+				db: Some("test"),
+			},
+		];
+
+		let secret = "secret";
+		let key = EncodingKey::from_secret(secret.as_ref());
+		let claims = Claims {
+			iat: Some(Utc::now().timestamp()),
+			nbf: Some(Utc::now().timestamp()),
+			exp: Some((Utc::now() + Duration::hours(1)).timestamp()),
+			ac: Some("user".to_string()),
+			..Claims::default()
+		};
+
+		let ds = Datastore::new("memory").await.unwrap();
+		let sess = Session::owner().with_ns("test").with_db("test");
+
+		for level in &test_levels {
+			for case in &test_cases {
+				println!("Test case: {} level {}", level.level, case.title);
+
+				ds.execute(
+					format!(
+						r#"
+						REMOVE ACCESS IF EXISTS user ON {0};
+						DEFINE ACCESS user ON {0} TYPE JWT
+							ALGORITHM HS512 KEY '{1}'
+							AUTHENTICATE {{
+								IF $token.iss != "surrealdb-test" {{ {2} "Invalid token issuer" }};
+								IF type::is::array($token.aud) {{
+									IF "surrealdb-test" NOT IN $token.aud {{ {2} "Invalid token audience array" }}
+								}} ELSE {{
+									IF $token.aud IS NOT "surrealdb-test" {{ {2} "Invalid token audience string" }}
+								}};
+							}}
+							DURATION FOR SESSION 2h
+						;
+					"#,
+						level.level, secret, case.error_statement,
+					)
+					.as_str(),
+					&sess,
+					None,
+				)
+				.await
+				.unwrap();
+
+				// Prepare the claims object
+				let mut claims = claims.clone();
+				claims.ns = level.ns.map(|s| s.to_string());
+				claims.db = level.db.map(|s| s.to_string());
+				claims.iss = case.iss_claim.map(|s| s.to_string());
+				claims.aud = case.aud_claim.clone();
+
+				// Create the token
+				let enc = encode(&HEADER, &claims, &key).unwrap();
+
+				// Signin with the token
+				let mut sess = Session::default();
+				let res = token(&ds, &mut sess, &enc).await;
+
+				if let Some(expected_err) = &case.expected_error {
+					assert!(res.is_err(), "Unexpected success for case: {:?}", case);
+					let err = res.unwrap_err();
+					match (expected_err, &err) {
+						(Error::InvalidAuth, Error::InvalidAuth) => {}
+						(Error::Thrown(expected_msg), Error::Thrown(msg))
+							if expected_msg == msg => {}
+						_ => panic!("Unexpected error for case: {:?}, got: {:?}", case, err),
+					}
+				} else {
+					assert!(res.is_ok(), "Failed to sign in with token for case: {:?}", case);
+					assert_eq!(sess.ns, level.ns.map(|s| s.to_string()));
+					assert_eq!(sess.db, level.db.map(|s| s.to_string()));
+					assert_eq!(sess.ac, Some("user".to_string()));
+					assert_eq!(sess.au.id(), "user");
+
+					// Check auth level
+					match level.level {
+						"ROOT" => assert!(sess.au.is_root()),
+						"NS" => assert!(sess.au.is_ns()),
+						"DB" => assert!(sess.au.is_db()),
+						_ => panic!("Unsupported level"),
+					}
+
+					// Check roles
+					assert!(
+						sess.au.has_role(&Role::Viewer),
+						"Auth user expected to have Viewer role"
+					);
+					assert!(
+						!sess.au.has_role(&Role::Editor),
+						"Auth user expected to not have Editor role"
+					);
+					assert!(
+						!sess.au.has_role(&Role::Owner),
+						"Auth user expected to not have Owner role"
+					);
+
+					// Check expiration
+					let exp = sess.exp.unwrap();
+					let min_exp =
+						(Utc::now() + Duration::hours(2) - Duration::seconds(10)).timestamp();
+					let max_exp =
+						(Utc::now() + Duration::hours(2) + Duration::seconds(10)).timestamp();
+					assert!(
+						exp > min_exp && exp < max_exp,
+						"Session expiration is expected to match the defined duration in case: {:?}",
+						case
+					);
+				}
+			}
+		}
+	}
+
+	#[tokio::test]
+	async fn test_token_record_and_authenticate_clause() {
 		// Test with an "id" claim
 		{
 			let secret = "jwt_secret";
@@ -1914,197 +2090,6 @@ mod tests {
 					"Expected authentication to generally fail, but instead received: {:?}",
 					res
 				),
-			}
-		}
-	}
-
-	#[tokio::test]
-	async fn test_token_authenticate_clause() {
-		#[derive(Debug)]
-		struct TestLevel {
-			level: &'static str,
-			ns: Option<&'static str>,
-			db: Option<&'static str>,
-		}
-
-		let test_levels = vec![
-			TestLevel {
-				level: "ROOT",
-				ns: None,
-				db: None,
-			},
-			TestLevel {
-				level: "NS",
-				ns: Some("test"),
-				db: None,
-			},
-			TestLevel {
-				level: "DB",
-				ns: Some("test"),
-				db: Some("test"),
-			},
-		];
-
-		#[derive(Debug)]
-		struct TestCase {
-			title: &'static str,
-			iss_claim: Option<&'static str>,
-			aud_claim: Option<Audience>,
-			error_statement: &'static str,
-			expected_error: Option<Error>,
-		}
-
-		let test_cases = vec![
-			TestCase {
-				title: "with correct 'iss' and 'aud' claims",
-				iss_claim: Some("surrealdb-test"),
-				aud_claim: Some(Audience::Single("surrealdb-test".to_string())),
-				error_statement: "THROW",
-				expected_error: None,
-			},
-			TestCase {
-				title: "with correct 'iss' and 'aud' claims, multiple audiences",
-				iss_claim: Some("surrealdb-test"),
-				aud_claim: Some(Audience::Multiple(vec![
-					"invalid".to_string(),
-					"surrealdb-test".to_string(),
-				])),
-				error_statement: "THROW",
-				expected_error: None,
-			},
-			TestCase {
-				title: "with correct 'iss' claim but invalid 'aud' claim",
-				iss_claim: Some("surrealdb-test"),
-				aud_claim: Some(Audience::Single("invalid".to_string())),
-				error_statement: "THROW",
-				expected_error: Some(Error::Thrown("Invalid token audience string".to_string())),
-			},
-			TestCase {
-				title: "with correct 'iss' claim but invalid 'aud' claim, multiple audiences",
-				iss_claim: Some("surrealdb-test"),
-				aud_claim: Some(Audience::Multiple(vec![
-					"invalid".to_string(),
-					"surrealdb-test-different".to_string(),
-				])),
-				error_statement: "THROW",
-				expected_error: Some(Error::Thrown("Invalid token audience array".to_string())),
-			},
-			TestCase {
-				title: "with correct 'iss' claim but invalid 'aud' claim, generic error",
-				iss_claim: Some("surrealdb-test"),
-				aud_claim: Some(Audience::Single("invalid".to_string())),
-				error_statement: "RETURN",
-				expected_error: Some(Error::InvalidAuth),
-			},
-		];
-
-		let secret = "secret";
-		let key = EncodingKey::from_secret(secret.as_ref());
-		let claims = Claims {
-			iat: Some(Utc::now().timestamp()),
-			nbf: Some(Utc::now().timestamp()),
-			exp: Some((Utc::now() + Duration::hours(1)).timestamp()),
-			ac: Some("user".to_string()),
-			..Claims::default()
-		};
-
-		let ds = Datastore::new("memory").await.unwrap();
-		let sess = Session::owner().with_ns("test").with_db("test");
-
-		for level in &test_levels {
-			for case in &test_cases {
-				println!("Test case: {} level {}", level.level, case.title);
-
-				ds.execute(
-					format!(
-						r#"
-						REMOVE ACCESS IF EXISTS user ON {0};
-						DEFINE ACCESS user ON {0} TYPE JWT
-							ALGORITHM HS512 KEY '{1}'
-							AUTHENTICATE {{
-								IF $token.iss != "surrealdb-test" {{ {2} "Invalid token issuer" }};
-								IF type::is::array($token.aud) {{
-									IF "surrealdb-test" NOT IN $token.aud {{ {2} "Invalid token audience array" }}
-								}} ELSE {{
-									IF $token.aud IS NOT "surrealdb-test" {{ {2} "Invalid token audience string" }}
-								}};
-							}}
-							DURATION FOR SESSION 2h
-						;
-					"#,
-						level.level, secret, case.error_statement,
-					)
-					.as_str(),
-					&sess,
-					None,
-				)
-				.await
-				.unwrap();
-
-				// Prepare the claims object
-				let mut claims = claims.clone();
-				claims.ns = level.ns.map(|s| s.to_string());
-				claims.db = level.db.map(|s| s.to_string());
-				claims.iss = case.iss_claim.map(|s| s.to_string());
-				claims.aud = case.aud_claim.clone();
-
-				// Create the token
-				let enc = encode(&HEADER, &claims, &key).unwrap();
-
-				// Signin with the token
-				let mut sess = Session::default();
-				let res = token(&ds, &mut sess, &enc).await;
-
-				if let Some(expected_err) = &case.expected_error {
-					assert!(res.is_err(), "Unexpected success for case: {:?}", case);
-					let err = res.unwrap_err();
-					match (expected_err, &err) {
-						(Error::InvalidAuth, Error::InvalidAuth) => {}
-						(Error::Thrown(expected_msg), Error::Thrown(msg))
-							if expected_msg == msg => {}
-						_ => panic!("Unexpected error for case: {:?}, got: {:?}", case, err),
-					}
-				} else {
-					assert!(res.is_ok(), "Failed to sign in with token for case: {:?}", case);
-					assert_eq!(sess.ns, level.ns.map(|s| s.to_string()));
-					assert_eq!(sess.db, level.db.map(|s| s.to_string()));
-					assert_eq!(sess.ac, Some("user".to_string()));
-					assert_eq!(sess.au.id(), "user");
-
-					// Check auth level
-					match level.level {
-						"ROOT" => assert!(sess.au.is_root()),
-						"NS" => assert!(sess.au.is_ns()),
-						"DB" => assert!(sess.au.is_db()),
-						_ => panic!("Unsupported level"),
-					}
-
-					// Check roles
-					assert!(
-						sess.au.has_role(&Role::Viewer),
-						"Auth user expected to have Viewer role"
-					);
-					assert!(
-						!sess.au.has_role(&Role::Editor),
-						"Auth user expected to not have Editor role"
-					);
-					assert!(
-						!sess.au.has_role(&Role::Owner),
-						"Auth user expected to not have Owner role"
-					);
-
-					// Check expiration
-					let exp = sess.exp.unwrap();
-					let min_exp =
-						(Utc::now() + Duration::hours(2) - Duration::seconds(10)).timestamp();
-					let max_exp =
-						(Utc::now() + Duration::hours(2) + Duration::seconds(10)).timestamp();
-					assert!(
-						exp > min_exp && exp < max_exp,
-						"Session expiration is expected to match the defined duration in case: {:?}",
-						case
-					);
-				}
 			}
 		}
 	}
