@@ -799,13 +799,12 @@ async fn define_statement_index_concurrently_building_status() -> Result<(), Err
 			panic!("Time out");
 		}
 		if appending_count > 0 {
-			let mut responses = ds
-				.execute(
-					&format!("UPDATE user:{appending_count} SET email = 'new{appending_count}@surrealdb.com';"),
-					&session,
-					None,
-				)
-				.await?;
+			let sql = if appending_count % 2 != 0 {
+				format!("UPDATE user:{appending_count} SET email = 'new{appending_count}@surrealdb.com';")
+			} else {
+				format!("DELETE user:{appending_count}")
+			};
+			let mut responses = ds.execute(&sql, &session, None).await?;
 			skip_ok(&mut responses, 1)?;
 			appending_count -= 1;
 		}

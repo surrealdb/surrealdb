@@ -9,7 +9,7 @@ use crate::key::index::ip::Ip;
 use crate::key::thing;
 use crate::kvs::ds::TransactionFactory;
 use crate::kvs::LockType::Optimistic;
-use crate::kvs::{Transaction, TransactionType};
+use crate::kvs::{Key, Transaction, TransactionType, Val};
 use crate::sql::statements::DefineIndexStatement;
 use crate::sql::{Id, Object, Thing, Value};
 use dashmap::mapref::entry::Entry;
@@ -156,7 +156,7 @@ struct Appending {
 #[revisioned(revision = 1)]
 #[derive(Serialize, Deserialize, Store, Debug)]
 #[non_exhaustive]
-struct Previous(Vec<Value>);
+struct PrimaryAppending(u32);
 
 #[derive(Default)]
 struct QueueSequences {
@@ -258,6 +258,12 @@ impl Building {
 		// Store the appending
 		let ia = self.new_ia_key(idx)?;
 		tx.set(ia, a, None).await?;
+		// Do we already have a primary appending?
+		let ip = self.new_ip_key(rid.id.clone())?;
+		if tx.get(ip.clone(), None).await?.is_none() {
+			// If not we set it
+			tx.set(ip, PrimaryAppending(idx), None).await?;
+		}
 		Ok(ConsumeResult::Enqueued)
 	}
 
@@ -285,8 +291,7 @@ impl Building {
 	}
 
 	async fn compute(&self) -> Result<(), Error> {
-		let mut stack = TreeStack::new();
-
+		// Set the initial status
 		self.set_status(BuildingStatus::InitialIndexing(0)).await;
 		// First iteration, we index every keys
 		let ns = self.opt.ns()?;
@@ -299,49 +304,21 @@ impl Building {
 			// Get the next batch of records
 			let tx = self.new_read_tx().await?;
 			let batch = catch!(tx, tx.batch(rng, *INDEXING_BATCH_SIZE, true).await);
+			// We can release the read transaction
+			drop(tx);
 			// Set the next scan range
 			next = batch.next;
 			// Check there are records
 			if batch.values.is_empty() {
+				// If not, we are with the initial indexing
 				break;
 			}
 			// Create a new context with a write transaction
 			let ctx = self.new_write_tx_ctx().await?;
 			let tx = ctx.tx();
-			// Index the records
-			for (k, v) in batch.values.into_iter() {
-				let key: thing::Thing = (&k).into();
-				// Parse the value
-				let val: Value = (&v).into();
-				let rid: Arc<Thing> = Thing::from((key.tb, key.id)).into();
-				let doc = CursorDoc::new(Some(rid.clone()), None, val);
-				let opt_values = catch!(
-					tx,
-					stack
-						.enter(|stk| Document::build_opt_values(
-							stk, &ctx, &self.opt, &self.ix, &doc
-						))
-						.finish()
-						.await
-				);
-
-				// Index the record
-				let mut io =
-					IndexOperation::new(&ctx, &self.opt, &self.ix, None, opt_values.clone(), &rid);
-				catch!(tx, stack.enter(|stk| io.compute(stk)).finish().await);
-
-				// Store the new value from the index perspective,
-				// so that upcoming appending records can get the correct old value
-				let ip = self.new_ip_key(rid.id.clone())?;
-				if let Some(v) = opt_values {
-					info!("STORE IP {} {:?}", rid.id, v);
-					catch!(tx, tx.set(ip, Previous(v), None).await);
-				}
-				// Increment the count and update the status
-				count += 1;
-				self.set_status(BuildingStatus::InitialIndexing(count)).await;
-			}
-			ctx.tx().commit().await?;
+			// Index the batch
+			catch!(tx, self.index_initial_batch(&ctx, &tx, batch.values, &mut count).await);
+			tx.commit().await?;
 		}
 		// Second iteration, we index/remove any records that has been added or removed since the initial indexing
 		self.set_status(BuildingStatus::UpdatesIndexing(0)).await;
@@ -359,40 +336,93 @@ impl Building {
 			if range.is_empty() {
 				continue;
 			}
+			let next_to_index = range.end;
+
 			// Create a new context with a write transaction
 			let ctx = self.new_write_tx_ctx().await?;
 			let tx = ctx.tx();
-			let next_to_index = range.end;
-			for i in range {
-				let ia = self.new_ia_key(i)?;
-				if let Some(v) = catch!(tx, tx.get(ia.clone(), None).await) {
-					catch!(tx, tx.del(ia).await);
-					let mut a: Appending = v.into();
-					let ip = catch!(tx, self.new_ip_key(a.id.clone()));
-					let ix_old_value = catch!(tx, tx.get(ip.clone(), None).await);
-					if let Some(ix_old_value) = ix_old_value {
-						let p: Previous = ix_old_value.into();
-						a.old_values = Some(p.0);
-						catch!(tx, tx.del(ip).await);
-					}
-					let a = a; // Not mutable anymore
-					let rid = Thing::from((self.tb.clone(), a.id));
-					info!("Update RID: {rid} {:?} {:?}", a.old_values, a.new_values);
-					let mut io = IndexOperation::new(
-						&ctx,
-						&self.opt,
-						&self.ix,
-						a.old_values,
-						a.new_values,
-						&rid,
-					);
-					catch!(tx, stack.enter(|stk| io.compute(stk)).finish().await);
-					count += 1;
-					self.set_status(BuildingStatus::UpdatesIndexing(count)).await;
-				}
-			}
+			catch!(tx, self.index_appending_range(&ctx, &tx, range, &mut count).await);
 			tx.commit().await?;
 			queue.set_to_index(next_to_index);
+		}
+		Ok(())
+	}
+
+	async fn index_initial_batch(
+		&self,
+		ctx: &Context,
+		tx: &Transaction,
+		values: Vec<(Key, Val)>,
+		count: &mut usize,
+	) -> Result<(), Error> {
+		let mut stack = TreeStack::new();
+		// Index the records
+		for (k, v) in values.into_iter() {
+			let key: thing::Thing = (&k).into();
+			// Parse the value
+			let val: Value = (&v).into();
+			let rid: Arc<Thing> = Thing::from((key.tb, key.id)).into();
+
+			let opt_values;
+
+			// Do we already have an appended value?
+			let ip = self.new_ip_key(rid.id.clone())?;
+			if let Some(v) = tx.get(ip, None).await? {
+				// Then we take the old value of the appending value as the initial indexing value
+				let pa: PrimaryAppending = v.into();
+				let ia = self.new_ia_key(pa.0)?;
+				let v = tx
+					.get(ia, None)
+					.await?
+					.ok_or_else(|| Error::CorruptedIndex("Appending record is missing"))?;
+				let a: Appending = v.into();
+				opt_values = a.old_values;
+			} else {
+				// Otherwise, we normally proceed to the indexing
+				let doc = CursorDoc::new(Some(rid.clone()), None, val);
+				opt_values = stack
+					.enter(|stk| Document::build_opt_values(stk, ctx, &self.opt, &self.ix, &doc))
+					.finish()
+					.await?;
+			}
+
+			// Index the record
+			let mut io =
+				IndexOperation::new(ctx, &self.opt, &self.ix, None, opt_values.clone(), &rid);
+			stack.enter(|stk| io.compute(stk)).finish().await?;
+
+			// Increment the count and update the status
+			*count += 1;
+			self.set_status(BuildingStatus::InitialIndexing(*count)).await;
+		}
+		Ok(())
+	}
+
+	async fn index_appending_range(
+		&self,
+		ctx: &Context,
+		tx: &Transaction,
+		range: Range<u32>,
+		count: &mut usize,
+	) -> Result<(), Error> {
+		let mut stack = TreeStack::new();
+		for i in range {
+			let ia = self.new_ia_key(i)?;
+			if let Some(v) = tx.get(ia.clone(), None).await? {
+				tx.del(ia).await?;
+				let a: Appending = v.into();
+				let rid = Thing::from((self.tb.clone(), a.id));
+				let mut io =
+					IndexOperation::new(ctx, &self.opt, &self.ix, a.old_values, a.new_values, &rid);
+				stack.enter(|stk| io.compute(stk)).finish().await?;
+
+				// We can delete the ip record if any
+				let ip = self.new_ip_key(rid.id)?;
+				tx.del(ip).await?;
+
+				*count += 1;
+				self.set_status(BuildingStatus::UpdatesIndexing(*count)).await;
+			}
 		}
 		Ok(())
 	}
