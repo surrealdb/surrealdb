@@ -110,7 +110,7 @@ impl Parser<'_> {
 				}
 				t!("..") => {
 					bail!("Unexpected token `{}` expected and idiom",t!(".."),
-						@self.last_span() => "Did yoo maybe intent to use the flatten operator `...`");
+						@self.last_span() => "Did you maybe intent to use the flatten operator `...`");
 				}
 				_ => break,
 			}
@@ -169,7 +169,7 @@ impl Parser<'_> {
 				}
 				t!("..") => {
 					bail!("Unexpected token `{}` expected and idiom",t!(".."),
-						@self.last_span() => "Did yoo maybe intent to use the flatten operator `...`");
+						@self.last_span() => "Did you maybe intent to use the flatten operator `...`");
 				}
 				_ => break,
 			}
@@ -312,7 +312,8 @@ impl Parser<'_> {
 	}
 	/// Parse the part after the `[` in a idiom
 	pub async fn parse_bracket_part(&mut self, ctx: &mut Stk, start: Span) -> ParseResult<Part> {
-		let res = match self.peek_kind() {
+		let peek = self.peek();
+		let res = match peek.kind {
 			t!("*") => {
 				self.pop_peek();
 				Part::All
@@ -326,9 +327,9 @@ impl Parser<'_> {
 			}
 			t!("-") => {
 				if let TokenKind::Digits = self.peek_whitespace_token_at(1).kind {
-					unexpected!(self, self.peek(),"$, * or a number", => "An index can't be negative.");
+					unexpected!(self, peek,"$, * or a number", => "An index can't be negative.");
 				}
-				unexpected!(self, self.peek(), "$, * or a number");
+				unexpected!(self, peek, "$, * or a number");
 			}
 			t!("?") | t!("WHERE") => {
 				self.pop_peek();
@@ -371,7 +372,8 @@ impl Parser<'_> {
 				}
 				t!("[") => {
 					self.pop_peek();
-					let res = match self.peek_kind() {
+					let peek = self.peek();
+					let res = match peek.kind {
 						t!("*") => {
 							self.pop_peek();
 							Part::All
@@ -390,9 +392,9 @@ impl Parser<'_> {
 								let span = self.recent_span().covers(peek_digit.span);
 								bail!("Unexpected token `-` expected $, *, or a number", @span => "an index can't be negative");
 							}
-							unexpected!(self, self.peek(), "$, * or a number");
+							unexpected!(self, peek, "$, * or a number");
 						}
-						_ => unexpected!(self, token, "$, * or a number"),
+						_ => unexpected!(self, peek, "$, * or a number"),
 					};
 					self.expect_closing_delimiter(t!("]"), token.span)?;
 					res

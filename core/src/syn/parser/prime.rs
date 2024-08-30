@@ -104,11 +104,13 @@ impl Parser<'_> {
 				Ok(self.try_parse_inline(ctx, &value).await?.unwrap_or(value))
 			}
 			x => {
-				if Self::tokenkind_can_start_ident(x) {
+				if !Self::tokenkind_can_start_ident(x) {
 					unexpected!(self, peek, "a value")
 				}
 
+				// Combine possible multiple tokens into a single one. before scanning past it.
 				let span = self.glue()?.span;
+
 				let peek = self.peek_token_at(1);
 				match peek.kind {
 					t!("::") | t!("(") => {
@@ -372,7 +374,7 @@ impl Parser<'_> {
 			_ => {
 				self.glue()?;
 
-				let peek = self.peek_token_at(1);
+				let peek = dbg!(self.peek_token_at(1));
 				match peek.kind {
 					t!("::") | t!("(") => {
 						self.pop_peek();
