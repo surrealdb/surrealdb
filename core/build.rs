@@ -13,4 +13,9 @@ fn main() {
 		println!("cargo:rustc-cfg=storage");
 		println!("cargo::rustc-check-cfg=cfg(storage)");
 	}
+
+	// check to see if directory exists
+	let surrealcs_path = "../../surrealcs/client";
+	if !std::path::Path::new("").exists() {
+	}
 }

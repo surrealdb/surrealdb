@@ -205,3 +205,7 @@ unexpected_cfgs = { level = "warn", check-cfg = ['cfg(surrealdb_unstable)'] }
 
 [lib]
 name = "surrealdb_core"
+
+
+[build-dependencies]
+core-dockpack = "0.1.0"
