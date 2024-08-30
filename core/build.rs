@@ -39,6 +39,7 @@ pub fn unpack_files_from_image(image: &str, directory: &str) -> Result<String, S
 
 
 fn main() {
+	println!("starting build.rs");
 	if cfg!(target_arch = "wasm32") {
 		println!("cargo:rustc-cfg=wasm");
 		println!("cargo::rustc-check-cfg=cfg(wasm)");
@@ -69,4 +70,5 @@ fn main() {
 			}
 		}
 	}
+	println!("finished build.rs");
 }
