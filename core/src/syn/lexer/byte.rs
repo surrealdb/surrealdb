@@ -100,35 +100,6 @@ impl<'a> Lexer<'a> {
 		}
 	}
 
-	// re-lexes a `/` token to a regex token.
-	pub fn relex_regex(&mut self, token: Token) -> Token {
-		debug_assert_eq!(token.kind, t!("/"));
-		debug_assert_eq!(token.span.offset + 1, self.last_offset);
-		debug_assert_eq!(token.span.len, 1);
-
-		self.last_offset = token.span.offset;
-		loop {
-			match self.reader.next() {
-				Some(b'\\') => {
-					if let Some(b'/') = self.reader.peek() {
-						self.reader.next();
-					}
-				}
-				Some(b'/') => break,
-				Some(x) => {
-					if !x.is_ascii() {
-						if let Err(e) = self.reader.complete_char(x) {
-							return self.invalid_token(e.into());
-						}
-					}
-				}
-				None => return self.invalid_token(Error::UnexpectedEof),
-			}
-		}
-
-		self.finish_token(TokenKind::Regex)
-	}
-
 	/// Lex the next token, starting from the given byte.
 	pub fn lex_ascii(&mut self, byte: u8) -> Token {
 		let kind = match byte {

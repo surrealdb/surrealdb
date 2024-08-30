@@ -6,13 +6,13 @@ use thiserror::Error;
 mod byte;
 mod char;
 mod ident;
-mod js;
 pub mod keywords;
 mod number;
 mod reader;
 mod strand;
 mod unicode;
 
+mod compound;
 #[cfg(test)]
 mod test;
 
@@ -186,16 +186,19 @@ impl<'a> Lexer<'a> {
 		}
 	}
 
+	fn advance_span(&mut self) -> Span {
+		let span = self.current_span();
+		self.last_offset = self.reader.offset() as u32;
+		span
+	}
+
 	/// Builds a token from an TokenKind.
 	///
 	/// Attaches a span to the token and returns, updates the new offset.
 	fn finish_token(&mut self, kind: TokenKind) -> Token {
-		let span = self.current_span();
-		// We make sure that the source is no longer then u32::MAX so this can't overflow.
-		self.last_offset = self.reader.offset() as u32;
 		Token {
 			kind,
-			span,
+			span: self.advance_span(),
 		}
 	}
 
@@ -247,6 +250,18 @@ impl<'a> Lexer<'a> {
 		} else {
 			false
 		}
+	}
+
+	/// Returns the string for a given span of the source.
+	/// Will panic if the given span was not valid for the source, or invalid utf8
+	pub fn span_str(&self, span: Span) -> &'a str {
+		std::str::from_utf8(self.span_bytes(span)).expect("invalid span segment for source")
+	}
+
+	/// Returns the string for a given span of the source.
+	/// Will panic if the given span was not valid for the source, or invalid utf8
+	pub fn span_bytes(&self, span: Span) -> &'a [u8] {
+		self.reader.span(span)
 	}
 }
 

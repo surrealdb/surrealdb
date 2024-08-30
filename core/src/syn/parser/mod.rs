@@ -55,7 +55,8 @@ use self::token_buffer::TokenBuffer;
 use crate::{
 	sql,
 	syn::{
-		lexer::{Error as LexError, Lexer},
+		error::{bail, SyntaxError},
+		lexer::Lexer,
 		token::{t, Span, Token, TokenKind},
 	},
 };
@@ -63,7 +64,6 @@ use reblessive::Stk;
 
 mod basic;
 mod builtin;
-mod error;
 mod expression;
 mod function;
 mod idiom;
@@ -77,32 +77,27 @@ mod thing;
 mod token;
 mod token_buffer;
 
+pub(crate) use mac::{
+	enter_object_recursion, enter_query_recursion, expected_whitespace, unexpected,
+};
+
 #[cfg(test)]
 pub mod test;
 
-pub use error::{IntErrorKind, ParseError, ParseErrorKind};
-
 /// The result returned by most parser function.
-pub type ParseResult<T> = Result<T, ParseError>;
+pub type ParseResult<T> = Result<T, SyntaxError>;
 
 /// A result of trying to parse a possibly partial query.
 #[derive(Debug)]
 #[non_exhaustive]
 pub enum PartialResult<T> {
-	/// The parser couldn't be sure that it has finished a full value.
-	Pending {
-		/// The value that was parsed.
-		/// This will not always be an error, if optional keywords after the end of a statement
-		/// where missing this will still parse that statement in full.
-		possible_value: Result<T, ParseError>,
-		/// number of bytes used for parsing the above statement.
+	MoreData,
+	Ok {
+		value: T,
 		used: usize,
 	},
-	/// The parser is sure that it doesn't need more data to return either an error or a value.
-	Ready {
-		/// The value the parser is sure the query should return.
-		value: Result<T, ParseError>,
-		/// number of bytes used
+	Err {
+		err: SyntaxError,
 		used: usize,
 	},
 }
@@ -337,29 +332,14 @@ impl<'a> Parser<'a> {
 		self.token_buffer.push_front(token);
 	}
 
-	/// Returns the string for a given span of the source.
-	/// Will panic if the given span was not valid for the source, or invalid utf8
-	fn span_str(&self, span: Span) -> &'a str {
-		std::str::from_utf8(self.span_bytes(span)).expect("invalid span segment for source")
-	}
-
-	/// Returns the string for a given span of the source.
-	/// Will panic if the given span was not valid for the source, or invalid utf8
-	fn span_bytes(&self, span: Span) -> &'a [u8] {
-		self.lexer.reader.span(span)
-	}
-
 	/// Checks if the next token is of the given kind. If it isn't it returns a UnclosedDelimiter
 	/// error.
 	fn expect_closing_delimiter(&mut self, kind: TokenKind, should_close: Span) -> ParseResult<()> {
 		if !self.eat(kind) {
-			return Err(ParseError::new(
-				ParseErrorKind::UnclosedDelimiter {
-					expected: kind,
-					should_close,
-				},
-				self.recent_span(),
-			));
+			bail!("Unexpected token, expected delimiter `{kind}`",
+				@self.recent_span(),
+				@should_close => "expected this delimiter to close"
+			);
 		}
 		Ok(())
 	}
@@ -394,59 +374,26 @@ impl<'a> Parser<'a> {
 		while self.eat(t!(";")) {}
 
 		let res = ctx.run(|ctx| self.parse_stmt(ctx)).await;
-		match res {
-			Err(ParseError {
-				kind: ParseErrorKind::UnexpectedEof {
-					..
-				},
-				..
-			})
-			| Err(ParseError {
-				kind: ParseErrorKind::InvalidToken(LexError::UnexpectedEof),
-				..
-			}) => {
-				return PartialResult::Pending {
-					possible_value: res,
+		let v = match res {
+			Err(e) => {
+				if e.is_data_pending() {
+					return PartialResult::MoreData;
+				}
+				return PartialResult::Err {
+					err: e,
 					used: self.lexer.reader.offset(),
 				};
 			}
-			Err(ParseError {
-				kind: ParseErrorKind::Unexpected {
-					..
-				},
-				at,
-				..
-			}) => {
-				// Ensure the we are sure that the last token was fully parsed.
-				self.backup_after(at);
-				let peek = self.peek_whitespace();
-				if peek.kind != TokenKind::Eof && peek.kind != TokenKind::WhiteSpace {
-					// if there is a next token or we ate whitespace after the eof we can be sure
-					// that the error is not the result of a token only being partially present.
-					return PartialResult::Ready {
-						value: res,
-						used: self.lexer.reader.offset(),
-					};
-				}
-			}
-			_ => {}
+			Ok(x) => x,
 		};
 
-		let colon = self.next();
-		if colon.kind != t!(";") {
-			return PartialResult::Pending {
-				possible_value: res,
+		if self.eat(t!(";")) {
+			return PartialResult::Ok {
+				value: v,
 				used: self.lexer.reader.offset(),
 			};
 		}
 
-		// Might have peeked more tokens past the final ";" so backup to after the semi-colon.
-		self.backup_after(colon.span);
-		let used = self.lexer.reader.offset();
-
-		PartialResult::Ready {
-			value: res,
-			used,
-		}
+		PartialResult::MoreData
 	}
 }

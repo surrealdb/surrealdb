@@ -5,17 +5,17 @@ use reblessive::Stk;
 
 use super::{ParseResult, Parser};
 use crate::{
-	enter_object_recursion, enter_query_recursion,
 	sql::{
 		Array, Closure, Dir, Function, Geometry, Ident, Idiom, Kind, Mock, Number, Param, Part,
 		Range, Script, Strand, Subquery, Table, Value,
 	},
 	syn::{
+		error::bail,
 		parser::{
+			enter_object_recursion, enter_query_recursion,
 			mac::{expected, expected_whitespace, unexpected},
-			ParseError, ParseErrorKind,
 		},
-		token::{t, DurationSuffix, Span, TokenKind},
+		token::{self, t, DurationSuffix, Span, TokenKind},
 	},
 };
 
@@ -24,7 +24,8 @@ impl Parser<'_> {
 	///
 	/// What's are values which are more restricted in what expressions they can contain.
 	pub async fn parse_what_primary(&mut self, ctx: &mut Stk) -> ParseResult<Value> {
-		match self.peek_kind() {
+		let peek = self.peek();
+		match peek.kind {
 			t!("..") => Ok(self.try_parse_range(ctx, None).await?.unwrap()),
 			t!("r\"") => {
 				self.pop_peek();
@@ -103,13 +104,13 @@ impl Parser<'_> {
 				Ok(self.try_parse_inline(ctx, &value).await?.unwrap_or(value))
 			}
 			x => {
-				if !self.peek_can_start_ident() {
-					unexpected!(self, x, "a value")
+				if Self::tokenkind_can_start_ident(x) {
+					unexpected!(self, peek, "a value")
 				}
 
 				let span = self.glue()?.span;
-
-				match self.peek_token_at(1).kind {
+				let peek = self.peek_token_at(1);
+				match peek.kind {
 					t!("::") | t!("(") => {
 						self.pop_peek();
 						self.parse_builtin(ctx, span).await
@@ -122,7 +123,7 @@ impl Parser<'_> {
 						if x.has_data() {
 							// x had data and possibly overwrote the data from token, This is
 							// always an invalid production so just return error.
-							unexpected!(self, x, "a value");
+							unexpected!(self, peek, "a value");
 						} else {
 							Ok(Value::Table(self.next_token_value()?))
 						}
@@ -215,7 +216,7 @@ impl Parser<'_> {
 		match token.kind {
 			TokenKind::Number(_) => self.next_token_value().map(Value::Number),
 			TokenKind::Duration => self.next_token_value().map(Value::Duration),
-			x => unexpected!(self, x, "a value"),
+			_ => unexpected!(self, token, "a value"),
 		}
 	}
 
@@ -371,7 +372,8 @@ impl Parser<'_> {
 			_ => {
 				self.glue()?;
 
-				match self.peek_token_at(1).kind {
+				let peek = self.peek_token_at(1);
+				match peek.kind {
 					t!("::") | t!("(") => {
 						self.pop_peek();
 						self.parse_builtin(ctx, token.span).await?
@@ -382,7 +384,7 @@ impl Parser<'_> {
 					}
 					x => {
 						if x.has_data() {
-							unexpected!(self, x, "a value");
+							unexpected!(self, peek, "a value");
 						} else if self.table_as_field {
 							Value::Idiom(Idiom(vec![Part::Field(self.next_token_value()?)]))
 						} else {
@@ -607,29 +609,13 @@ impl Parser<'_> {
 					// eat ','
 					self.next();
 
-					match number {
-						Number::Decimal(_) => {
-							return Err(ParseError::new(
-								ParseErrorKind::UnexpectedExplain {
-									found: TokenKind::Digits,
-									expected: "a non-decimal, non-nan number",
-									explain: "coordinate numbers can't be NaN or a decimal",
-								},
-								number_token.span,
-							));
-						}
-						Number::Float(x) if x.is_nan() => {
-							return Err(ParseError::new(
-								ParseErrorKind::UnexpectedExplain {
-									found: TokenKind::Digits,
-									expected: "a non-decimal, non-nan number",
-									explain: "coordinate numbers can't be NaN or a decimal",
-								},
-								number_token.span,
-							));
-						}
-						_ => {}
+					if matches!(number, Number::Decimal(_))
+						|| matches!(number, Number::Float(x) if x.is_nan())
+					{
+						bail!("Unexpected token `dec` expecte a non-decimal, non-number",
+								@number_token.span => "Coordinate numbers can't be NaN or a decimal");
 					}
+
 					let x = number.as_float();
 					let y = self.next_token_value::<f64>()?;
 					self.expect_closing_delimiter(t!(")"), start)?;
@@ -644,19 +630,13 @@ impl Parser<'_> {
 				Subquery::Value(value)
 			}
 		};
-		if self.peek_kind() != t!(")") && Self::starts_disallowed_subquery_statement(peek.kind) {
+		let token = self.peek();
+		if token.kind != t!(")") && Self::starts_disallowed_subquery_statement(peek.kind) {
 			if let Subquery::Value(Value::Idiom(Idiom(ref idiom))) = res {
 				if idiom.len() == 1 {
-					// we parsed a single idiom and the next token was a dissallowed statement so
-					// it is likely that the used meant to use an invalid statement.
-					return Err(ParseError::new(
-						ParseErrorKind::DisallowedStatement {
-							found: self.peek_kind(),
-							expected: t!(")"),
-							disallowed: peek.span,
-						},
-						self.recent_span(),
-					));
+					bail!("Unexpected token `{}` expected `)`",peek.kind,
+						@token.span,
+						@peek.span => "This is a reserved keyword here and can't be an identifier");
 				}
 			}
 		}
@@ -737,20 +717,15 @@ impl Parser<'_> {
 			}
 		};
 		if let Some(start) = start {
-			if self.peek_kind() != t!(")") && Self::starts_disallowed_subquery_statement(peek.kind)
-			{
+			let token = self.peek();
+			if token.kind != t!(")") && Self::starts_disallowed_subquery_statement(peek.kind) {
 				if let Subquery::Value(Value::Idiom(Idiom(ref idiom))) = res {
 					if idiom.len() == 1 {
 						// we parsed a single idiom and the next token was a dissallowed statement so
 						// it is likely that the used meant to use an invalid statement.
-						return Err(ParseError::new(
-							ParseErrorKind::DisallowedStatement {
-								found: self.peek_kind(),
-								expected: t!(")"),
-								disallowed: peek.span,
-							},
-							self.recent_span(),
-						));
+						bail!("Unexpected token `{}` expected `)`",peek.kind,
+							@token.span,
+							@peek.span => "This is a reserved keyword here and can't be an identifier");
 					}
 				}
 			}
@@ -764,13 +739,17 @@ impl Parser<'_> {
 		matches!(
 			kind,
 			t!("ANALYZE")
-				| t!("BEGIN") | t!("BREAK")
-				| t!("CANCEL") | t!("COMMIT")
-				| t!("CONTINUE") | t!("FOR")
-				| t!("INFO") | t!("KILL")
-				| t!("LIVE") | t!("OPTION")
+				| t!("BEGIN")
+				| t!("BREAK")
+				| t!("CANCEL")
+				| t!("COMMIT")
+				| t!("CONTINUE")
+				| t!("FOR") | t!("INFO")
+				| t!("KILL") | t!("LIVE")
+				| t!("OPTION")
 				| t!("LET") | t!("SHOW")
-				| t!("SLEEP") | t!("THROW")
+				| t!("SLEEP")
+				| t!("THROW")
 				| t!("USE")
 		)
 	}
@@ -806,12 +785,10 @@ impl Parser<'_> {
 				break;
 			}
 		}
-		expected!(self, t!("{"));
-		let body = self
-			.lexer
-			.lex_js_function_body()
-			.map_err(|(e, span)| ParseError::new(ParseErrorKind::InvalidToken(e), span))?;
-		Ok(Function::Script(Script(body), args))
+		let token = expected!(self, t!("{"));
+		let span = self.lexer.lex_compound::<token::JavaScript>(token)?.span;
+		let body = self.lexer.span_str(span);
+		Ok(Function::Script(Script(body.to_string()), args))
 	}
 
 	/// Parse a simple singular value
@@ -892,9 +869,9 @@ impl Parser<'_> {
 			}
 			_ => {
 				self.glue()?;
-				let x = self.peek_token_at(1).kind;
-				if x.has_data() {
-					unexpected!(self, x, "a value");
+				let peek = self.peek_token_at(1);
+				if peek.kind.has_data() {
+					unexpected!(self, peek, "a value");
 				} else if self.table_as_field {
 					Value::Idiom(Idiom(vec![Part::Field(self.next_token_value()?)]))
 				} else {
@@ -911,15 +888,17 @@ impl Parser<'_> {
 			t,
 			t!("NONE")
 				| t!("NULL") | t!("true")
-				| t!("false") | t!("r\"")
-				| t!("r'") | t!("d\"")
-				| t!("d'") | t!("u\"")
-				| t!("u'") | t!("\"")
-				| t!("'") | t!("+")
-				| t!("-") | TokenKind::Number(_)
+				| t!("false")
+				| t!("r\"") | t!("r'")
+				| t!("d\"") | t!("d'")
+				| t!("u\"") | t!("u'")
+				| t!("\"") | t!("'")
+				| t!("+") | t!("-")
+				| TokenKind::Number(_)
 				| TokenKind::Digits
 				| TokenKind::Duration
-				| TokenKind::NaN | t!("$param")
+				| TokenKind::NaN
+				| t!("$param")
 				| t!("[") | t!("{")
 				| t!("(") | TokenKind::Keyword(_)
 				| TokenKind::Language(_)
@@ -933,10 +912,14 @@ impl Parser<'_> {
 				| TokenKind::DurationSuffix(
 					// All except Micro unicode
 					DurationSuffix::Nano
-						| DurationSuffix::Micro | DurationSuffix::Milli
-						| DurationSuffix::Second | DurationSuffix::Minute
-						| DurationSuffix::Hour | DurationSuffix::Day
-						| DurationSuffix::Week | DurationSuffix::Year
+						| DurationSuffix::Micro
+						| DurationSuffix::Milli
+						| DurationSuffix::Second
+						| DurationSuffix::Minute
+						| DurationSuffix::Hour
+						| DurationSuffix::Day
+						| DurationSuffix::Week
+						| DurationSuffix::Year
 				)
 		)
 	}

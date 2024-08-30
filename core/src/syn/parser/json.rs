@@ -50,7 +50,7 @@ impl Parser<'_> {
 				match peek.kind {
 					TokenKind::Duration => Ok(Value::Duration(self.next_token_value()?)),
 					TokenKind::Number(_) => Ok(Value::Number(self.next_token_value()?)),
-					x => unexpected!(self, x, "a number"),
+					_ => unexpected!(self, peek, "a number"),
 				}
 			}
 			_ => {

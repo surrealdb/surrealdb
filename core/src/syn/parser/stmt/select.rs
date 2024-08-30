@@ -7,13 +7,14 @@ use crate::{
 	},
 	syn::{
 		parser::{
-			error::MissingKind,
 			mac::{expected, unexpected},
 			ParseResult, Parser,
 		},
 		token::{t, Span},
 	},
 };
+
+use super::parts::MissingKind;
 
 impl Parser<'_> {
 	pub(crate) async fn parse_select_stmt(
@@ -86,7 +87,8 @@ impl Parser<'_> {
 		if !self.eat(t!("WITH")) {
 			return Ok(None);
 		}
-		let with = match self.next().kind {
+		let next = self.next();
+		let with = match next.kind {
 			t!("NOINDEX") => With::NoIndex,
 			t!("NO") => {
 				expected!(self, t!("INDEX"));
@@ -99,7 +101,7 @@ impl Parser<'_> {
 				}
 				With::Index(index)
 			}
-			x => unexpected!(self, x, "`NO`, `NOINDEX` or `INDEX`"),
+			_ => unexpected!(self, next, "`NO`, `NOINDEX` or `INDEX`"),
 		};
 		Ok(Some(with))
 	}
