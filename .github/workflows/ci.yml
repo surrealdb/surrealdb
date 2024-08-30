@@ -47,6 +47,7 @@ jobs:
         run: |
           cargo install dockpack
           dockpack --image surrealdb/surrealcs-client:latest --directory ../surrealcs
+          mv ../surrealcs/surrealdb_surrealcs-client/* ../surrealcs/
 
       - name: Check format
         run: cargo make ci-format
@@ -74,11 +75,12 @@ jobs:
 
       - name: Install cargo-make
         run: cargo install --debug --locked cargo-make
-      
+
       - name: Install cargo-dockpack
         run: |
           cargo install dockpack
           dockpack --image surrealdb/surrealcs-client:latest --directory ../surrealcs
+          mv ../surrealcs/surrealdb_surrealcs-client/* ../surrealcs/
 
       - name: Check workspace
         run: cargo make ci-check
@@ -137,6 +139,7 @@ jobs:
         run: |
           cargo install dockpack
           dockpack --image surrealdb/surrealcs-client:latest --directory ../surrealcs
+          mv ../surrealcs/surrealdb_surrealcs-client/* ../surrealcs/
 
       - name: Check wasm
         run: cargo make ci-check-wasm
@@ -170,6 +173,7 @@ jobs:
         run: |
           cargo install dockpack
           dockpack --image surrealdb/surrealcs-client:latest --directory ../surrealcs
+          mv ../surrealcs/surrealdb_surrealcs-client/* ../surrealcs/
 
       - name: Run clippy
         run: cargo make ci-clippy
@@ -194,13 +198,6 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get -y update
-          cargo install dockpack
-          dockpack --image surrealdb/surrealcs-client:latest --directory ../surrealcs
-
-      - name: Install cargo-dockpack
-        run: |
-          cargo install dockpack
-          dockpack --image surrealdb/surrealcs-client:latest --directory ../surrealcs
 
       - name: Install cargo-make
         run: cargo install --debug --locked cargo-make
@@ -209,6 +206,7 @@ jobs:
         run: |
           cargo install dockpack
           dockpack --image surrealdb/surrealcs-client:latest --directory ../surrealcs
+          mv ../surrealcs/surrealdb_surrealcs-client/* ../surrealcs/
 
       - name: Run CLI integration tests
         run: cargo make ci-cli-integration
@@ -250,6 +248,7 @@ jobs:
         run: |
           cargo install dockpack
           dockpack --image surrealdb/surrealcs-client:latest --directory ../surrealcs
+          mv ../surrealcs/surrealdb_surrealcs-client/* ../surrealcs/
 
       - name: Run HTTP integration tests
         run: cargo make ci-http-integration
@@ -282,6 +281,7 @@ jobs:
         run: |
           cargo install dockpack
           dockpack --image surrealdb/surrealcs-client:latest --directory ../surrealcs
+          mv ../surrealcs/surrealdb_surrealcs-client/* ../surrealcs/
 
       - name: Run WS integration tests
         run: cargo make ci-ws-integration
@@ -314,6 +314,7 @@ jobs:
         run: |
           cargo install dockpack
           dockpack --image surrealdb/surrealcs-client:latest --directory ../surrealcs
+          mv ../surrealcs/surrealdb_surrealcs-client/* ../surrealcs/
 
       - name: Run ML integration tests
         run: cargo make ci-ml-integration
@@ -349,6 +350,7 @@ jobs:
         run: |
           cargo install dockpack
           dockpack --image surrealdb/surrealcs-client:latest --directory ../surrealcs
+          mv ../surrealcs/surrealdb_surrealcs-client/* ../surrealcs/
 
       - name: Test workspace + coverage
         run: cargo make ci-workspace-coverage
@@ -419,6 +421,7 @@ jobs:
         run: |
           cargo install dockpack
           dockpack --image surrealdb/surrealcs-client:latest --directory ../surrealcs
+          mv ../surrealcs/surrealdb_surrealcs-client/* ../surrealcs/
 
       - name: Test ws engine
         run: cargo make ci-api-integration-ws
@@ -454,11 +457,12 @@ jobs:
 
       - name: Install cargo-make
         run: cargo install --debug --locked cargo-make
-      
+
       - name: Install cargo-dockpack
         run: |
           cargo install dockpack
           dockpack --image surrealdb/surrealcs-client:latest --directory ../surrealcs
+          mv ../surrealcs/surrealdb_surrealcs-client/* ../surrealcs/
 
       - name: Test http engine
         run: cargo make ci-api-integration-http
@@ -499,6 +503,7 @@ jobs:
         run: |
           cargo install dockpack
           dockpack --image surrealdb/surrealcs-client:latest --directory ../surrealcs
+          mv ../surrealcs/surrealdb_surrealcs-client/* ../surrealcs/
 
       - name: Test any engine
         run: cargo make ci-api-integration-any
@@ -535,6 +540,7 @@ jobs:
         run: |
           cargo install dockpack
           dockpack --image surrealdb/surrealcs-client:latest --directory ../surrealcs
+          mv ../surrealcs/surrealdb_surrealcs-client/* ../surrealcs/
 
       - name: Test mem engine
         run: cargo make ci-api-integration-mem
@@ -571,6 +577,7 @@ jobs:
         run: |
           cargo install dockpack
           dockpack --image surrealdb/surrealcs-client:latest --directory ../surrealcs
+          mv ../surrealcs/surrealdb_surrealcs-client/* ../surrealcs/
 
       - name: Test file engine
         run: cargo make ci-api-integration-file
@@ -607,6 +614,7 @@ jobs:
         run: |
           cargo install dockpack
           dockpack --image surrealdb/surrealcs-client:latest --directory ../surrealcs
+          mv ../surrealcs/surrealdb_surrealcs-client/* ../surrealcs/
 
       - name: Test rocksdb engine
         run: cargo make ci-api-integration-rocksdb
@@ -643,6 +651,7 @@ jobs:
         run: |
           cargo install dockpack
           dockpack --image surrealdb/surrealcs-client:latest --directory ../surrealcs
+          mv ../surrealcs/surrealdb_surrealcs-client/* ../surrealcs/
 
       - name: Test surrealkv engine
         run: cargo make ci-api-integration-surrealkv
@@ -690,6 +699,7 @@ jobs:
         run: |
           cargo install dockpack
           dockpack --image surrealdb/surrealcs-client:latest --directory ../surrealcs
+          mv ../surrealcs/surrealdb_surrealcs-client/* ../surrealcs/
 
       - name: Test tikv engine
         run: cargo make ci-api-integration-tikv
@@ -726,6 +736,7 @@ jobs:
         run: |
           cargo install dockpack
           dockpack --image surrealdb/surrealcs-client:latest --directory ../surrealcs
+          mv ../surrealcs/surrealdb_surrealcs-client/* ../surrealcs/
 
       - name: Setup FoundationDB
         uses: foundationdb-rs/foundationdb-actions-install@v.2.2.0
@@ -767,6 +778,7 @@ jobs:
         run: |
           cargo install dockpack
           dockpack --image surrealdb/surrealcs-client:latest --directory ../surrealcs
+          mv ../surrealcs/surrealdb_surrealcs-client/* ../surrealcs/
 
       - name: Setup FoundationDB
         uses: foundationdb-rs/foundationdb-actions-install@v.2.2.0
@@ -808,6 +820,7 @@ jobs:
         run: |
           cargo install dockpack
           dockpack --image surrealdb/surrealcs-client:latest --directory ../surrealcs
+          mv ../surrealcs/surrealdb_surrealcs-client/* ../surrealcs/
 
       - name: Test upgrade
         # Allow breaking changes until v2 stabilises
