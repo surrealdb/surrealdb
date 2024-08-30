@@ -167,9 +167,9 @@ impl<'a> Lexer<'a> {
 									if char == '⟩' {
 										self.scratch.push(char);
 									}
-									error!("Invalid escape character `{x}` for identifier, valid characters are `⟩`, `\\`, ```, `/`, `b`, `f`, `n`, `r`, or `t`", @self.current_span());
+									error!("Invalid escape character `{x}` for identifier, valid characters are `⟩`, `\\`, ```, `/`, `b`, `f`, `n`, `r`, or `t`", @self.current_span())
 								} else {
-									error!("Invalid escape character `{x}` for identifier, valid characters are `\\`, ```, `/`, `b`, `f`, `n`, `r`, or `t`", @self.current_span());
+									error!("Invalid escape character `{x}` for identifier, valid characters are `\\`, ```, `/`, `b`, `f`, `n`, `r`, or `t`", @self.current_span())
 								};
 								return Err(error);
 							}

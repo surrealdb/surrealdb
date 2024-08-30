@@ -74,11 +74,15 @@ impl<'a> Lexer<'a> {
 							b't' => {
 								self.scratch.push(chars::TAB);
 							}
-							x => {
-								let char = self.reader.convert_to_char(x);
-								let err = error!("Invalid escape character `{char}`, valid characters are `\\`, `'`, `\"`, `/`, `b`, `f`, `n`, `r`, or `t`", @self.current_span());
-								return self.invalid_token(err);
-							}
+							x => match self.reader.convert_to_char(x) {
+								Ok(char) => {
+									let err = error!("Invalid escape character `{char}`, valid characters are `\\`, `'`, `\"`, `/`, `b`, `f`, `n`, `r`, or `t`", @self.current_span());
+									return self.invalid_token(err);
+								}
+								Err(e) => {
+									return self.invalid_token(e.into());
+								}
+							},
 						}
 					}
 					x => self.scratch.push(x as char),

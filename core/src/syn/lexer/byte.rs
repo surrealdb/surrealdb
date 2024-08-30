@@ -249,7 +249,7 @@ impl<'a> Lexer<'a> {
 				Some(b'*') => {
 					self.reader.next();
 					// A `*/` could be missing which would be invalid.
-					if let Err(e) = self.eat_multi_line_comment()? {
+					if let Err(e) = self.eat_multi_line_comment() {
 						return self.invalid_token(e);
 					}
 					TokenKind::WhiteSpace
@@ -303,7 +303,7 @@ impl<'a> Lexer<'a> {
 					self.reader.next();
 					match self.reader.complete_char(x) {
 						Ok('⟨') => return self.lex_surrounded_param(false),
-						Err(e) => return e.into(),
+						Err(e) => return self.invalid_token(e.into()),
 						_ => {
 							self.reader.backup(backup);
 							t!("$")
