@@ -4,7 +4,7 @@
 ///
 /// # Example
 ///
-/// ```
+/// ```ignore
 /// let text = "As we all know 1+1 is 3.";
 /// if text.contains("3"){
 ///     let span = Span::empty(); // just imagine there is an actual span here.
