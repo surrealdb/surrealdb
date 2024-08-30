@@ -1,7 +1,6 @@
 use std::time::Duration;
 
 use chrono::{DateTime, Utc};
-use thiserror::Error;
 
 mod byte;
 mod char;
@@ -19,35 +18,10 @@ mod test;
 pub use reader::{BytesReader, CharError};
 use uuid::Uuid;
 
-use crate::syn::token::{Span, Token, TokenKind};
-
-/// A error returned by the lexer when an invalid token is encountered.
-///
-/// Can be retrieved from the `Lexer::error` field whenever it returned a [`TokenKind::Invalid`]
-/// token.
-#[derive(Error, Debug)]
-#[non_exhaustive]
-pub enum Error {
-	#[error("Lexer encountered unexpected character {0:?}")]
-	UnexpectedCharacter(char),
-	#[error("invalid escape character {0:?}")]
-	InvalidEscapeCharacter(char),
-	#[error("Lexer encountered unexpected end of source characters")]
-	UnexpectedEof,
-	#[error("source was not valid utf-8")]
-	InvalidUtf8,
-	#[error("expected next character to be '{0}'")]
-	ExpectedEnd(char),
-}
-
-impl From<CharError> for Error {
-	fn from(value: CharError) -> Self {
-		match value {
-			CharError::Eof => Self::UnexpectedEof,
-			CharError::Unicode => Self::InvalidUtf8,
-		}
-	}
-}
+use crate::syn::{
+	error::SyntaxError,
+	token::{Span, Token, TokenKind},
+};
 
 /// The SurrealQL lexer.
 /// Takes a slice of bytes and turns it into tokens. The lexer is designed with possible invalid utf-8
@@ -88,7 +62,7 @@ pub struct Lexer<'a> {
 	pub duration: Option<Duration>,
 	pub datetime: Option<DateTime<Utc>>,
 	pub uuid: Option<Uuid>,
-	pub error: Option<Error>,
+	pub error: Option<SyntaxError>,
 }
 
 impl<'a> Lexer<'a> {
@@ -170,7 +144,7 @@ impl<'a> Lexer<'a> {
 	}
 
 	/// Return an invalid token.
-	fn invalid_token(&mut self, error: Error) -> Token {
+	fn invalid_token(&mut self, error: SyntaxError) -> Token {
 		self.error = Some(error);
 		self.finish_token(TokenKind::Invalid)
 	}

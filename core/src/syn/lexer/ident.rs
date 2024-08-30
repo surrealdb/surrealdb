@@ -3,7 +3,8 @@ use std::mem;
 use unicase::UniCase;
 
 use crate::syn::{
-	lexer::{keywords::KEYWORDS, Error, Lexer},
+	error::{error, SyntaxError},
+	lexer::{keywords::KEYWORDS, Lexer},
 	token::{Token, TokenKind},
 };
 
@@ -100,7 +101,7 @@ impl<'a> Lexer<'a> {
 	}
 
 	/// Lex an ident surrounded either by `⟨⟩` or `\`\``
-	pub fn lex_surrounded_ident_err(&mut self, is_backtick: bool) -> Result<(), Error> {
+	pub fn lex_surrounded_ident_err(&mut self, is_backtick: bool) -> Result<(), SyntaxError> {
 		loop {
 			let Some(x) = self.reader.next() else {
 				let end_char = if is_backtick {
@@ -108,7 +109,8 @@ impl<'a> Lexer<'a> {
 				} else {
 					'⟩'
 				};
-				return Err(Error::ExpectedEnd(end_char));
+				let error = error!("Unexpected end of file, expected identifier to end with `{end_char}`", @self.current_span());
+				return Err(error.with_data_pending());
 			};
 			if x.is_ascii() {
 				match x {
@@ -118,7 +120,8 @@ impl<'a> Lexer<'a> {
 					}
 					b'\0' => {
 						// null bytes not allowed
-						return Err(Error::UnexpectedCharacter('\0'));
+						let err = error!("Invalid null byte in source, null bytes are not valid SurrealQL characters",@self.current_span());
+						return Err(err);
 					}
 					b'\\' if is_backtick => {
 						// handle escape sequences.
@@ -130,7 +133,8 @@ impl<'a> Lexer<'a> {
 							} else {
 								'⟩'
 							};
-							return Err(Error::ExpectedEnd(end_char));
+							let error = error!("Unexpected end of file, expected identifier to end with `{end_char}`", @self.current_span());
+							return Err(error.with_data_pending());
 						};
 						match next {
 							b'\\' => {
@@ -158,12 +162,16 @@ impl<'a> Lexer<'a> {
 								self.scratch.push(chars::TAB);
 							}
 							_ => {
-								let char = if x.is_ascii() {
-									x as char
+								let char = self.reader.convert_to_char(x)?;
+								let error = if !is_backtick {
+									if char == '⟩' {
+										self.scratch.push(char);
+									}
+									error!("Invalid escape character `{x}` for identifier, valid characters are `⟩`, `\\`, ```, `/`, `b`, `f`, `n`, `r`, or `t`", @self.current_span());
 								} else {
-									self.reader.complete_char(x)?
+									error!("Invalid escape character `{x}` for identifier, valid characters are `\\`, ```, `/`, `b`, `f`, `n`, `r`, or `t`", @self.current_span());
 								};
-								return Err(Error::InvalidEscapeCharacter(char));
+								return Err(error);
 							}
 						}
 					}
