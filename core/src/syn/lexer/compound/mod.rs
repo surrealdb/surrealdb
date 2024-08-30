@@ -1,13 +1,11 @@
-use regex::Regex;
-
-mod js;
-
+use crate::sql::Regex;
 use crate::syn::{
 	error::{bail, error, SyntaxError},
+	lexer::Lexer,
 	token::{t, CompoundToken, Span, Token, TokenKind},
 };
 
-use super::Lexer;
+mod js;
 
 pub trait CompoundValue: Sized {
 	/// The token which indicates the start of this compound token.

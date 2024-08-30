@@ -125,7 +125,7 @@ impl TokenValue for Regex {
 		match peek.kind {
 			t!("/") => {
 				let pop = parser.pop_peek();
-				Ok(Regex(parser.lexer.lex_compound(pop)?.value))
+				Ok(parser.lexer.lex_compound(pop)?.value)
 			}
 			_ => unexpected!(parser, peek, "a regex"),
 		}
