@@ -47,6 +47,7 @@ pub static RESERVED_KEYWORD: phf::Set<UniCase<&'static str>> = phf_set! {
 	UniCase::ascii("TRUE"),
 	UniCase::ascii("FALSE"),
 	UniCase::ascii("WHERE"),
+	UniCase::ascii("TABLE"),
 };
 
 pub fn could_be_reserved(s: &str) -> bool {
