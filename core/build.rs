@@ -55,7 +55,7 @@ fn main() {
 		println!("cargo::rustc-check-cfg=cfg(storage)");
 
 		if cfg!(feature = "kv-surrealcs") {
-			let surrealcs_path = "../../surrealcs/";
+			let surrealcs_path = "../surrealcs/";
 
 			// check to see if the directory exists
 			if !std::path::Path::new(surrealcs_path).exists() {
