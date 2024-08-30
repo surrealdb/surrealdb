@@ -1522,6 +1522,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "core-dockpack"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "14ebd21ed03943af4a8e4084338766ebdde97209b413c3270bf5d2ae53e85e34"
+dependencies = [
+ "flate2",
+ "serde_json",
+ "tar",
+]
+
+[[package]]
 name = "core-foundation"
 version = "0.9.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6137,7 +6148,6 @@ dependencies = [
 [[package]]
 name = "surrealcs"
 version = "0.1.0"
-source = "git+https://github.com/surrealdb/surrealcs.git#f03e07e8689d140588f83f4e9e37c01c41b8e162"
 dependencies = [
  "bincode",
  "bytes",
@@ -6157,7 +6167,6 @@ dependencies = [
 [[package]]
 name = "surrealcs-kernel"
 version = "0.1.0"
-source = "git+https://github.com/surrealdb/surrealcs.git#f03e07e8689d140588f83f4e9e37c01c41b8e162"
 dependencies = [
  "bincode",
  "chrono",
@@ -6264,6 +6273,7 @@ dependencies = [
  "cedar-policy",
  "chrono",
  "ciborium",
+ "core-dockpack",
  "criterion",
  "dashmap",
  "deunicode",
