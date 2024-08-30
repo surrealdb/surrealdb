@@ -103,7 +103,6 @@ pub enum PartialResult<T> {
 }
 
 /// The SurrealQL parser.
-#[non_exhaustive]
 pub struct Parser<'a> {
 	lexer: Lexer<'a>,
 	last_span: Span,
@@ -376,7 +375,10 @@ impl<'a> Parser<'a> {
 		let res = ctx.run(|ctx| self.parse_stmt(ctx)).await;
 		let v = match res {
 			Err(e) => {
-				if e.is_data_pending() {
+				let peek = self.peek_whitespace_token_at(1);
+				if e.is_data_pending()
+					|| matches!(peek.kind, TokenKind::Eof | TokenKind::WhiteSpace)
+				{
 					return PartialResult::MoreData;
 				}
 				return PartialResult::Err {

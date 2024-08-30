@@ -123,6 +123,8 @@ impl Parser<'_> {
 					}
 					x => {
 						if x.has_data() {
+							// Consume the first identifier to ensure streaming works correctly.
+							self.pop_peek();
 							// x had data and possibly overwrote the data from token, This is
 							// always an invalid production so just return error.
 							unexpected!(self, peek, "a value");
@@ -386,6 +388,8 @@ impl Parser<'_> {
 					}
 					x => {
 						if x.has_data() {
+							// Pop the first identifier token so that streaming works correctly.
+							self.pop_peek();
 							unexpected!(self, peek, "a value");
 						} else if self.table_as_field {
 							Value::Idiom(Idiom(vec![Part::Field(self.next_token_value()?)]))
@@ -741,13 +745,17 @@ impl Parser<'_> {
 		matches!(
 			kind,
 			t!("ANALYZE")
-				| t!("BEGIN") | t!("BREAK")
-				| t!("CANCEL") | t!("COMMIT")
-				| t!("CONTINUE") | t!("FOR")
-				| t!("INFO") | t!("KILL")
-				| t!("LIVE") | t!("OPTION")
+				| t!("BEGIN")
+				| t!("BREAK")
+				| t!("CANCEL")
+				| t!("COMMIT")
+				| t!("CONTINUE")
+				| t!("FOR") | t!("INFO")
+				| t!("KILL") | t!("LIVE")
+				| t!("OPTION")
 				| t!("LET") | t!("SHOW")
-				| t!("SLEEP") | t!("THROW")
+				| t!("SLEEP")
+				| t!("THROW")
 				| t!("USE")
 		)
 	}
@@ -784,7 +792,10 @@ impl Parser<'_> {
 			}
 		}
 		let token = expected!(self, t!("{"));
-		let span = self.lexer.lex_compound::<token::JavaScript>(token)?.span;
+		let mut span = self.lexer.lex_compound::<token::JavaScript>(token)?.span;
+		// remove the starting `{` and ending `}`.
+		span.offset += 1;
+		span.len -= 2;
 		let body = self.lexer.span_str(span);
 		Ok(Function::Script(Script(body.to_string()), args))
 	}
@@ -886,15 +897,17 @@ impl Parser<'_> {
 			t,
 			t!("NONE")
 				| t!("NULL") | t!("true")
-				| t!("false") | t!("r\"")
-				| t!("r'") | t!("d\"")
-				| t!("d'") | t!("u\"")
-				| t!("u'") | t!("\"")
-				| t!("'") | t!("+")
-				| t!("-") | TokenKind::Number(_)
+				| t!("false")
+				| t!("r\"") | t!("r'")
+				| t!("d\"") | t!("d'")
+				| t!("u\"") | t!("u'")
+				| t!("\"") | t!("'")
+				| t!("+") | t!("-")
+				| TokenKind::Number(_)
 				| TokenKind::Digits
 				| TokenKind::Duration
-				| TokenKind::NaN | t!("$param")
+				| TokenKind::NaN
+				| t!("$param")
 				| t!("[") | t!("{")
 				| t!("(") | TokenKind::Keyword(_)
 				| TokenKind::Language(_)
@@ -908,10 +921,14 @@ impl Parser<'_> {
 				| TokenKind::DurationSuffix(
 					// All except Micro unicode
 					DurationSuffix::Nano
-						| DurationSuffix::Micro | DurationSuffix::Milli
-						| DurationSuffix::Second | DurationSuffix::Minute
-						| DurationSuffix::Hour | DurationSuffix::Day
-						| DurationSuffix::Week | DurationSuffix::Year
+						| DurationSuffix::Micro
+						| DurationSuffix::Milli
+						| DurationSuffix::Second
+						| DurationSuffix::Minute
+						| DurationSuffix::Hour
+						| DurationSuffix::Day
+						| DurationSuffix::Week
+						| DurationSuffix::Year
 				)
 		)
 	}
