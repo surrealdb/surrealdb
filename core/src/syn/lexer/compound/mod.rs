@@ -76,7 +76,7 @@ impl CompoundValue for Regex {
 		inner_span.len -= 2;
 
 		let str = lexer.span_str(inner_span);
-		let regex = Regex::new(str).map_err(|e| error!("Invalid regex: {e}", @span))?;
+		let regex = str.parse().map_err(|e| error!("Invalid regex: {e}", @span))?;
 		Ok(CompoundToken {
 			value: regex,
 			span,
