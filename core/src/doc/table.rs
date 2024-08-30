@@ -459,8 +459,12 @@ impl Document {
 						exprs: vec![(
 							Value::Expression(Box::new(Expression::Binary {
 								l: Value::Idiom(key.clone()),
-								o: Operator::MoreThan,
-								r: val.clone(),
+								o: Operator::And,
+								r: Value::Expression(Box::new(Expression::Binary {
+									l: Value::Idiom(key.clone()),
+									o: Operator::MoreThan,
+									r: val.clone(),
+								})),
 							})),
 							val,
 						)],
@@ -506,8 +510,12 @@ impl Document {
 						exprs: vec![(
 							Value::Expression(Box::new(Expression::Binary {
 								l: Value::Idiom(key.clone()),
-								o: Operator::LessThan,
-								r: val.clone(),
+								o: Operator::And,
+								r: Value::Expression(Box::new(Expression::Binary {
+									l: Value::Idiom(key.clone()),
+									o: Operator::LessThan,
+									r: val.clone(),
+								})),
 							})),
 							val,
 						)],
