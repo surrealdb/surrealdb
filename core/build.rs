@@ -55,14 +55,17 @@ fn main() {
 		println!("cargo::rustc-check-cfg=cfg(storage)");
 
 		if cfg!(feature = "kv-surrealcs") {
-			let surrealcs_path = "../surrealcs/";
+			println!("kv-surrealcs triggered");
+			let surrealcs_path = "../../surrealcs/";
 
 			// check to see if the directory exists
 			if !std::path::Path::new(surrealcs_path).exists() {
+				println!("Unpacking surrealcs-client Docker image");
 				unpack_files_from_image(
 					"surrealdb/surrealcs-client:latest", 
 					surrealcs_path
 				).unwrap();
+				println!("Unpacked surrealcs-client Docker image");
 			}
 		}
 	}
