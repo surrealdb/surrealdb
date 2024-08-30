@@ -1,4 +1,4 @@
-use crate::cnf::FUNCTION_ALLOCATION_LIMIT;
+use crate::cnf::GENERATION_ALLOCATION_LIMIT;
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
@@ -18,17 +18,16 @@ use crate::sql::array::Windows;
 use crate::sql::value::Value;
 use crate::sql::Closure;
 use crate::sql::Function;
-
 use rand::prelude::SliceRandom;
 use reblessive::tree::Stk;
 use std::mem::size_of_val;
 
 /// Returns an error if an array of this length is too much to allocate.
 fn limit(name: &str, n: usize) -> Result<(), Error> {
-	if n > *FUNCTION_ALLOCATION_LIMIT {
+	if n > *GENERATION_ALLOCATION_LIMIT {
 		Err(Error::InvalidArguments {
 			name: name.to_owned(),
-			message: format!("Output must not exceed {} bytes.", *FUNCTION_ALLOCATION_LIMIT),
+			message: format!("Output must not exceed {} bytes.", *GENERATION_ALLOCATION_LIMIT),
 		})
 	} else {
 		Ok(())
@@ -54,12 +53,56 @@ pub fn add((mut array, value): (Array, Value)) -> Result<Value, Error> {
 	}
 }
 
-pub fn all((array,): (Array,)) -> Result<Value, Error> {
-	Ok(array.iter().all(Value::is_truthy).into())
+pub async fn all(
+	(stk, ctx, opt, doc): (&mut Stk, &Context, Option<&Options>, Option<&CursorDoc>),
+	(array, check): (Array, Option<Value>),
+) -> Result<Value, Error> {
+	Ok(match check {
+		Some(closure) if closure.is_closure() => {
+			if let Some(opt) = opt {
+				for val in array.iter() {
+					let arg = val.compute(stk, ctx, opt, doc).await?;
+					let fnc = Function::Anonymous(closure.clone(), vec![arg]);
+					if fnc.compute(stk, ctx, opt, doc).await?.is_truthy() {
+						continue;
+					} else {
+						return Ok(Value::Bool(false));
+					}
+				}
+				Value::Bool(true)
+			} else {
+				Value::None
+			}
+		}
+		Some(value) => array.iter().all(|v: &Value| *v == value).into(),
+		None => array.iter().all(Value::is_truthy).into(),
+	})
 }
 
-pub fn any((array,): (Array,)) -> Result<Value, Error> {
-	Ok(array.iter().any(Value::is_truthy).into())
+pub async fn any(
+	(stk, ctx, opt, doc): (&mut Stk, &Context, Option<&Options>, Option<&CursorDoc>),
+	(array, check): (Array, Option<Value>),
+) -> Result<Value, Error> {
+	Ok(match check {
+		Some(closure) if closure.is_closure() => {
+			if let Some(opt) = opt {
+				for val in array.iter() {
+					let arg = val.compute(stk, ctx, opt, doc).await?;
+					let fnc = Function::Anonymous(closure.clone(), vec![arg]);
+					if fnc.compute(stk, ctx, opt, doc).await?.is_truthy() {
+						return Ok(Value::Bool(true));
+					} else {
+						continue;
+					}
+				}
+				Value::Bool(false)
+			} else {
+				Value::None
+			}
+		}
+		Some(value) => array.iter().any(|v: &Value| *v == value).into(),
+		None => array.iter().any(Value::is_truthy).into(),
+	})
 }
 
 pub fn append((mut array, value): (Array, Value)) -> Result<Value, Error> {
@@ -194,27 +237,119 @@ pub fn fill(
 	Ok(array.into())
 }
 
-pub fn filter_index((array, value): (Array, Value)) -> Result<Value, Error> {
-	Ok(array
-		.iter()
-		.enumerate()
-		.filter_map(|(i, v)| {
-			if *v == value {
-				Some(Value::from(i))
+pub async fn filter(
+	(stk, ctx, opt, doc): (&mut Stk, &Context, Option<&Options>, Option<&CursorDoc>),
+	(array, check): (Array, Value),
+) -> Result<Value, Error> {
+	Ok(match check {
+		closure if closure.is_closure() => {
+			if let Some(opt) = opt {
+				let mut res = Vec::with_capacity(array.len());
+				for val in array.iter() {
+					let arg = val.compute(stk, ctx, opt, doc).await?;
+					let fnc = Function::Anonymous(closure.clone(), vec![arg.clone()]);
+					if fnc.compute(stk, ctx, opt, doc).await?.is_truthy() {
+						res.push(arg)
+					}
+				}
+				Value::from(res)
 			} else {
-				None
+				Value::None
 			}
-		})
-		.collect::<Vec<_>>()
-		.into())
+		}
+		value => array.into_iter().filter(|v: &Value| *v == value).collect::<Vec<_>>().into(),
+	})
 }
 
-pub fn find_index((array, value): (Array, Value)) -> Result<Value, Error> {
-	Ok(array
-		.iter()
-		.enumerate()
-		.find(|(_i, v)| **v == value)
-		.map_or(Value::Null, |(i, _v)| i.into()))
+pub async fn filter_index(
+	(stk, ctx, opt, doc): (&mut Stk, &Context, Option<&Options>, Option<&CursorDoc>),
+	(array, value): (Array, Value),
+) -> Result<Value, Error> {
+	Ok(match value {
+		closure if closure.is_closure() => {
+			if let Some(opt) = opt {
+				let mut res = Vec::with_capacity(array.len());
+				for (i, val) in array.iter().enumerate() {
+					let arg = val.compute(stk, ctx, opt, doc).await?;
+					let fnc = Function::Anonymous(closure.clone(), vec![arg, i.into()]);
+					if fnc.compute(stk, ctx, opt, doc).await?.is_truthy() {
+						res.push(i);
+					}
+				}
+				Value::from(res)
+			} else {
+				Value::None
+			}
+		}
+		value => array
+			.iter()
+			.enumerate()
+			.filter_map(|(i, v)| {
+				if *v == value {
+					Some(Value::from(i))
+				} else {
+					None
+				}
+			})
+			.collect::<Vec<_>>()
+			.into(),
+	})
+}
+
+pub async fn find(
+	(stk, ctx, opt, doc): (&mut Stk, &Context, Option<&Options>, Option<&CursorDoc>),
+	(array, value): (Array, Value),
+) -> Result<Value, Error> {
+	Ok(match value {
+		closure if closure.is_closure() => {
+			if let Some(opt) = opt {
+				for val in array.iter() {
+					let arg = val.compute(stk, ctx, opt, doc).await?;
+					let fnc = Function::Anonymous(closure.clone(), vec![arg.clone()]);
+					if fnc.compute(stk, ctx, opt, doc).await?.is_truthy() {
+						return Ok(arg);
+					}
+				}
+				Value::None
+			} else {
+				Value::None
+			}
+		}
+		value => array.into_iter().find(|v: &Value| *v == value).into(),
+	})
+}
+
+pub async fn find_index(
+	(stk, ctx, opt, doc): (&mut Stk, &Context, Option<&Options>, Option<&CursorDoc>),
+	(array, value): (Array, Value),
+) -> Result<Value, Error> {
+	Ok(match value {
+		closure if closure.is_closure() => {
+			if let Some(opt) = opt {
+				for (i, val) in array.iter().enumerate() {
+					let arg = val.compute(stk, ctx, opt, doc).await?;
+					let fnc = Function::Anonymous(closure.clone(), vec![arg, i.into()]);
+					if fnc.compute(stk, ctx, opt, doc).await?.is_truthy() {
+						return Ok(i.into());
+					}
+				}
+				Value::None
+			} else {
+				Value::None
+			}
+		}
+		value => array
+			.iter()
+			.enumerate()
+			.find_map(|(i, v)| {
+				if *v == value {
+					Some(Value::from(i))
+				} else {
+					None
+				}
+			})
+			.into(),
+	})
 }
 
 pub fn first((array,): (Array,)) -> Result<Value, Error> {
@@ -353,17 +488,20 @@ pub fn logical_xor((lh, rh): (Array, Array)) -> Result<Value, Error> {
 }
 
 pub async fn map(
-	(stk, ctx, opt, doc): (&mut Stk, &Context, &Options, Option<&CursorDoc>),
+	(stk, ctx, opt, doc): (&mut Stk, &Context, Option<&Options>, Option<&CursorDoc>),
 	(array, mapper): (Array, Closure),
 ) -> Result<Value, Error> {
-	let mut array = array;
-	for i in 0..array.len() {
-		let v = array.get(i).unwrap();
-		let fnc = Function::Anonymous(mapper.clone().into(), vec![v.to_owned(), i.into()]);
-		array[i] = fnc.compute(stk, ctx, opt, doc).await?;
+	if let Some(opt) = opt {
+		let mut res = Vec::with_capacity(array.len());
+		for (i, val) in array.into_iter().enumerate() {
+			let arg = val.compute(stk, ctx, opt, doc).await?;
+			let fnc = Function::Anonymous(mapper.clone().into(), vec![arg, i.into()]);
+			res.push(fnc.compute(stk, ctx, opt, doc).await?);
+		}
+		Ok(res.into())
+	} else {
+		Ok(Value::None)
 	}
-
-	Ok(array.into())
 }
 
 pub fn matches((array, compare_val): (Array, Value)) -> Result<Value, Error> {

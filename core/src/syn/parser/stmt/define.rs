@@ -646,6 +646,8 @@ impl Parser<'_> {
 			..Default::default()
 		};
 
+		let mut kind: Option<TableType> = None;
+
 		loop {
 			match self.peek_kind() {
 				t!("COMMENT") => {
@@ -661,15 +663,15 @@ impl Parser<'_> {
 					match self.peek_kind() {
 						t!("NORMAL") => {
 							self.pop_peek();
-							res.kind = TableType::Normal;
+							kind = Some(TableType::Normal);
 						}
 						t!("RELATION") => {
 							self.pop_peek();
-							res.kind = TableType::Relation(self.parse_relation_schema()?);
+							kind = Some(TableType::Relation(self.parse_relation_schema()?));
 						}
 						t!("ANY") => {
 							self.pop_peek();
-							res.kind = TableType::Any;
+							kind = Some(TableType::Any);
 						}
 						x => unexpected!(self, x, "`NORMAL`, `RELATION`, or `ANY`"),
 					}
@@ -681,6 +683,9 @@ impl Parser<'_> {
 				t!("SCHEMAFULL") => {
 					self.pop_peek();
 					res.full = true;
+					if kind.is_none() {
+						kind = Some(TableType::Normal);
+					}
 				}
 				t!("PERMISSIONS") => {
 					self.pop_peek();
@@ -706,6 +711,10 @@ impl Parser<'_> {
 				}
 				_ => break,
 			}
+		}
+
+		if let Some(kind) = kind {
+			res.kind = kind;
 		}
 
 		Ok(res)
@@ -1070,6 +1079,10 @@ impl Parser<'_> {
 						keep_pruned_connections,
 					));
 				}
+				t!("CONCURRENTLY") => {
+					self.pop_peek();
+					res.concurrently = true;
+				}
 				t!("COMMENT") => {
 					self.pop_peek();
 					res.comment = Some(self.next_token_value()?);
@@ -1195,6 +1208,7 @@ impl Parser<'_> {
 		let mut res = table_type::Relation {
 			from: None,
 			to: None,
+			enforced: false,
 		};
 		loop {
 			match self.peek_kind() {
@@ -1210,6 +1224,9 @@ impl Parser<'_> {
 				}
 				_ => break,
 			}
+		}
+		if self.eat(t!("ENFORCED")) {
+			res.enforced = true;
 		}
 		Ok(res)
 	}

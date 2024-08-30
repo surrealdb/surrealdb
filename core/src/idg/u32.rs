@@ -124,7 +124,7 @@ mod tests {
 
 	async fn finish(txn: Transaction, mut d: U32) -> Result<(), Error> {
 		if let Some((key, val)) = d.finish() {
-			txn.set(key, val).await?;
+			txn.set(key, val, None).await?;
 		}
 		txn.commit().await
 	}

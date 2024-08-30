@@ -31,6 +31,9 @@ impl Display for TableType {
 				if let Some(kind) = &rel.to {
 					write!(f, " OUT {kind}")?;
 				}
+				if rel.enforced {
+					write!(f, " ENFORCED")?;
+				}
 			}
 			TableType::Any => {
 				f.write_str(" ANY")?;
@@ -55,16 +58,19 @@ impl InfoStructure for TableType {
 					tables.into_iter().map(|t| t.0).collect::<Vec<_>>().into(),
 				"out".to_string(), if let Some(Kind::Record(tables)) = rel.to =>
 					tables.into_iter().map(|t| t.0).collect::<Vec<_>>().into(),
+				"enforced".to_string() => rel.enforced.into()
 			}),
 		}
 	}
 }
 
-#[revisioned(revision = 1)]
+#[revisioned(revision = 2)]
 #[derive(Debug, Default, Serialize, Deserialize, Hash, Clone, Eq, PartialEq, PartialOrd)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub struct Relation {
 	pub from: Option<Kind>,
 	pub to: Option<Kind>,
+	#[revision(start = 2)]
+	pub enforced: bool,
 }

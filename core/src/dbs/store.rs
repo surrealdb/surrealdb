@@ -19,16 +19,20 @@ impl MemoryCollector {
 		self.0.len()
 	}
 
-	pub(super) fn start_limit(&mut self, start: Option<&usize>, limit: Option<&usize>) {
+	pub(super) fn start_limit(&mut self, start: Option<u32>, limit: Option<u32>) {
 		match (start, limit) {
-			(Some(&start), Some(&limit)) => {
-				self.0 = mem::take(&mut self.0).into_iter().skip(start).take(limit).collect()
+			(Some(start), Some(limit)) => {
+				self.0 = mem::take(&mut self.0)
+					.into_iter()
+					.skip(start as usize)
+					.take(limit as usize)
+					.collect()
 			}
-			(Some(&start), None) => {
-				self.0 = mem::take(&mut self.0).into_iter().skip(start).collect()
+			(Some(start), None) => {
+				self.0 = mem::take(&mut self.0).into_iter().skip(start as usize).collect()
 			}
-			(None, Some(&limit)) => {
-				self.0 = mem::take(&mut self.0).into_iter().take(limit).collect()
+			(None, Some(limit)) => {
+				self.0 = mem::take(&mut self.0).into_iter().take(limit as usize).collect()
 			}
 			(None, None) => {}
 		}
@@ -125,15 +129,15 @@ pub(super) mod file_store {
 			self.len
 		}
 
-		pub(in crate::dbs) fn start_limit(&mut self, start: Option<&usize>, limit: Option<&usize>) {
-			self.paging.start = start.cloned();
-			self.paging.limit = limit.cloned();
+		pub(in crate::dbs) fn start_limit(&mut self, start: Option<u32>, limit: Option<u32>) {
+			self.paging.start = start;
+			self.paging.limit = limit;
 		}
 
 		pub(in crate::dbs) fn take_vec(&mut self) -> Result<Vec<Value>, Error> {
 			self.check_reader()?;
 			if let Some(mut reader) = self.reader.take() {
-				if let Some((start, num)) = self.paging.get_start_num(reader.len) {
+				if let Some((start, num)) = self.paging.get_start_num(reader.len as u32) {
 					if let Some(orders) = self.orders.take() {
 						return self.sort_and_take_vec(reader, orders, start, num);
 					}
@@ -147,8 +151,8 @@ pub(super) mod file_store {
 			&mut self,
 			reader: FileReader,
 			orders: Orders,
-			start: usize,
-			num: usize,
+			start: u32,
+			num: u32,
 		) -> Result<Vec<Value>, Error> {
 			let sort_dir = self.dir.path().join(Self::SORT_DIRECTORY_NAME);
 			fs::create_dir(&sort_dir)?;
@@ -161,7 +165,7 @@ pub(super) mod file_store {
 
 			let sorted = sorter.sort_by(reader, |a, b| orders.compare(a, b))?;
 			let iter = sorted.map(Result::unwrap);
-			let r: Vec<Value> = iter.skip(start).take(num).collect();
+			let r: Vec<Value> = iter.skip(start as usize).take(num as usize).collect();
 			Ok(r)
 		}
 		pub(in crate::dbs) fn explain(&self, exp: &mut Explanation) {
@@ -260,20 +264,22 @@ pub(super) mod file_store {
 			Ok(u)
 		}
 
-		fn take_vec(&mut self, start: usize, num: usize) -> Result<Vec<Value>, Error> {
+		fn take_vec(&mut self, start: u32, num: u32) -> Result<Vec<Value>, Error> {
 			let mut iter = FileRecordsIterator::new(self.records.clone(), self.len);
 			if start > 0 {
 				// Get the start offset of the first record
 				let mut index = OpenOptions::new().read(true).open(&self.index)?;
-				index.seek(SeekFrom::Start(((start - 1) * FileCollector::USIZE_SIZE) as u64))?;
+				index.seek(SeekFrom::Start(
+					((start as usize - 1) * FileCollector::USIZE_SIZE) as u64,
+				))?;
 				let start_offset = Self::read_usize(&mut index)?;
 
 				// Set records to the position of the first record
-				iter.seek(start_offset, start)?;
+				iter.seek(start_offset, start as usize)?;
 			}
 
 			// Collect the records
-			let mut res = Vec::with_capacity(num);
+			let mut res = Vec::with_capacity(num as usize);
 			for _ in 0..num {
 				debug!("READ");
 				if let Some(val) = iter.next() {
@@ -357,12 +363,12 @@ pub(super) mod file_store {
 
 	#[derive(Default)]
 	struct FilePaging {
-		start: Option<usize>,
-		limit: Option<usize>,
+		start: Option<u32>,
+		limit: Option<u32>,
 	}
 
 	impl FilePaging {
-		fn get_start_num(&self, len: usize) -> Option<(usize, usize)> {
+		fn get_start_num(&self, len: u32) -> Option<(u32, u32)> {
 			let start = self.start.unwrap_or(0);
 			if start >= len {
 				return None;

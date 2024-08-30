@@ -388,7 +388,6 @@ mod tests {
 	#[test]
 	fn range() {
 		let range = Box::new(Range {
-			tb: "foo".to_owned(),
 			beg: Bound::Included("foo".into()),
 			end: Bound::Unbounded,
 		});

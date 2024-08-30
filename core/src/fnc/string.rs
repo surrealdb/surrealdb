@@ -1,4 +1,4 @@
-use crate::cnf::FUNCTION_ALLOCATION_LIMIT;
+use crate::cnf::GENERATION_ALLOCATION_LIMIT;
 use crate::err::Error;
 use crate::fnc::util::string;
 use crate::sql::value::Value;
@@ -6,10 +6,10 @@ use crate::sql::Regex;
 
 /// Returns `true` if a string of this length is too much to allocate.
 fn limit(name: &str, n: usize) -> Result<(), Error> {
-	if n > *FUNCTION_ALLOCATION_LIMIT {
+	if n > *GENERATION_ALLOCATION_LIMIT {
 		Err(Error::InvalidArguments {
 			name: name.to_owned(),
-			message: format!("Output must not exceed {} bytes.", *FUNCTION_ALLOCATION_LIMIT),
+			message: format!("Output must not exceed {} bytes.", *GENERATION_ALLOCATION_LIMIT),
 		})
 	} else {
 		Ok(())
@@ -69,24 +69,25 @@ pub fn matches((val, regex): (String, Regex)) -> Result<Value, Error> {
 	Ok(regex.0.is_match(&val).into())
 }
 
-pub fn replace((val, old_or_regexp, new): (String, Value, String)) -> Result<Value, Error> {
-	match old_or_regexp {
-		Value::Strand(old) => {
-			if new.len() > old.len() {
-				let increase = new.len() - old.len();
+pub fn replace((val, search, replace): (String, Value, String)) -> Result<Value, Error> {
+	match search {
+		Value::Strand(search) => {
+			if replace.len() > search.len() {
+				let increase = replace.len() - search.len();
 				limit(
 					"string::replace",
-					val.len().saturating_add(val.matches(&old.0).count().saturating_mul(increase)),
+					val.len()
+						.saturating_add(val.matches(&search.0).count().saturating_mul(increase)),
 				)?;
 			}
-			Ok(val.replace(&old.0, &new).into())
+			Ok(val.replace(&search.0, &replace).into())
 		}
-		Value::Regex(r) => Ok(r.0.replace_all(&val, new).into_owned().into()),
+		Value::Regex(search) => Ok(search.0.replace_all(&val, replace).into_owned().into()),
 		_ => Err(Error::InvalidArguments {
 			name: "string::replace".to_string(),
 			message: format!(
 				"Argument 2 was the wrong type. Expected a string but found {}",
-				old_or_regexp
+				search
 			),
 		}),
 	}

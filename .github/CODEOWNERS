@@ -20,13 +20,13 @@ Makefile.* @surrealdb/ci
 Cargo.lock @surrealdb/security
 Cargo.toml @surrealdb/security
 core/Cargo.toml @surrealdb/security
-lib/Cargo.toml @surrealdb/security
+sdk/Cargo.toml @surrealdb/security
 cackle.toml @surrealdb/security
 supply-chain/* @surrealdb/security
 deny.toml @surrealdb/security
 
 # Code for fuzzing configuration
-/lib/fuzz/ @surrealdb/security
+/sdk/fuzz/ @surrealdb/security
 SECURITY.md @surrealdb/security
 
 # Code and tests for indexing

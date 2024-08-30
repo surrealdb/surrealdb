@@ -1,12 +1,15 @@
 pub mod docids;
 pub(crate) mod ft;
+pub(crate) mod index;
 pub mod planner;
 pub mod trees;
 
 use crate::err::Error;
 use crate::idx::docids::DocId;
 use crate::idx::ft::terms::TermId;
+use crate::idx::trees::hnsw::ElementId;
 use crate::idx::trees::store::NodeId;
+use crate::idx::trees::vector::SerializedVector;
 use crate::key::index::bc::Bc;
 use crate::key::index::bd::Bd;
 use crate::key::index::bf::Bf;
@@ -18,9 +21,16 @@ use crate::key::index::bp::Bp;
 use crate::key::index::bs::Bs;
 use crate::key::index::bt::Bt;
 use crate::key::index::bu::Bu;
+use crate::key::index::hd::Hd;
+use crate::key::index::he::He;
+use crate::key::index::hi::Hi;
+use crate::key::index::hl::Hl;
+use crate::key::index::hs::Hs;
+use crate::key::index::hv::Hv;
 use crate::key::index::vm::Vm;
 use crate::kvs::{Key, Val};
 use crate::sql::statements::DefineIndexStatement;
+use crate::sql::{Id, Thing};
 use revision::Revisioned;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
@@ -174,6 +184,72 @@ impl IndexKeyBase {
 		.into()
 	}
 
+	fn new_hd_key(&self, doc_id: Option<DocId>) -> Key {
+		Hd::new(
+			self.inner.ns.as_str(),
+			self.inner.db.as_str(),
+			self.inner.tb.as_str(),
+			self.inner.ix.as_str(),
+			doc_id,
+		)
+		.into()
+	}
+
+	fn new_he_key(&self, element_id: ElementId) -> Key {
+		He::new(
+			self.inner.ns.as_str(),
+			self.inner.db.as_str(),
+			self.inner.tb.as_str(),
+			self.inner.ix.as_str(),
+			element_id,
+		)
+		.into()
+	}
+
+	fn new_hi_key(&self, id: Id) -> Key {
+		Hi::new(
+			self.inner.ns.as_str(),
+			self.inner.db.as_str(),
+			self.inner.tb.as_str(),
+			self.inner.ix.as_str(),
+			id,
+		)
+		.into()
+	}
+
+	fn new_hl_key(&self, layer: u16, chunk: u32) -> Key {
+		Hl::new(
+			self.inner.ns.as_str(),
+			self.inner.db.as_str(),
+			self.inner.tb.as_str(),
+			self.inner.ix.as_str(),
+			layer,
+			chunk,
+		)
+		.into()
+	}
+
+	fn new_hv_key(&self, vec: Arc<SerializedVector>) -> Key {
+		Hv::new(
+			self.inner.ns.as_str(),
+			self.inner.db.as_str(),
+			self.inner.tb.as_str(),
+			self.inner.ix.as_str(),
+			vec,
+		)
+		.into()
+	}
+
+	fn new_hs_key(&self) -> Key {
+		Hs::new(
+			self.inner.ns.as_str(),
+			self.inner.db.as_str(),
+			self.inner.tb.as_str(),
+			self.inner.ix.as_str(),
+		)
+		.into()
+	}
+
 	fn new_vm_key(&self, node_id: Option<NodeId>) -> Key {
 		Vm::new(
 			self.inner.ns.as_str(),
@@ -187,17 +263,19 @@ impl IndexKeyBase {
 }
 
 /// This trait provides `Revision` based default implementations for serialization/deserialization
-trait VersionedSerdeState
+trait VersionedStore
 where
 	Self: Sized + Serialize + DeserializeOwned + Revisioned,
 {
-	fn try_to_val(&self) -> Result<Val, Error> {
+	fn try_into(&self) -> Result<Val, Error> {
 		let mut val = Vec::new();
 		self.serialize_revisioned(&mut val)?;
 		Ok(val)
 	}
 
-	fn try_from_val(val: Val) -> Result<Self, Error> {
+	fn try_from(val: Val) -> Result<Self, Error> {
 		Ok(Self::deserialize_revisioned(&mut val.as_slice())?)
 	}
 }
+
+impl VersionedStore for Thing {}
