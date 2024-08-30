@@ -76,7 +76,7 @@ impl<'a> Lexer<'a> {
 							}
 							x => {
 								let char = self.reader.convert_to_char(x);
-								let err = error!("Invalid escape character `{x}`, valid characters are `\\`, `'`, `\"`, `/`, `b`, `f`, `n`, `r`, or `t`", @self.current_span());
+								let err = error!("Invalid escape character `{char}`, valid characters are `\\`, `'`, `\"`, `/`, `b`, `f`, `n`, `r`, or `t`", @self.current_span());
 								return self.invalid_token(err);
 							}
 						}

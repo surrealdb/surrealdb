@@ -12,8 +12,7 @@ macro_rules! unexpected {
 		let __found: $crate::syn::token::Token = $found;
 		match __found.kind{
 			$crate::syn::token::TokenKind::Invalid => {
-				let error = $parser.lexer.error.take().unwrap();
-				$crate::syn::error::bail!("Invalid token: {}",error, @__found.span $( $($t)* )?)
+				return Err($parser.lexer.error.take().unwrap());
 			}
 			$crate::syn::token::TokenKind::Eof => {
 				let error = $crate::syn::error::error!("Unexpected end of file, expected {}",$expected, @__found.span $( $($t)* )?);
