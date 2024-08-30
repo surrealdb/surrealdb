@@ -4,6 +4,7 @@ use core_dockpack::{
     unpacking
 };
 use std::path::PathBuf;
+use std::env;
 
 
 /// Unpacks the files from a Docker image into a directory.
@@ -40,6 +41,8 @@ pub fn unpack_files_from_image(image: &str, directory: &str) -> Result<String, S
 
 fn main() {
 	println!("starting build.rs");
+	let surrealcs_path = "../../testing_package/";
+
 	if cfg!(target_arch = "wasm32") {
 		println!("cargo:rustc-cfg=wasm");
 		println!("cargo::rustc-check-cfg=cfg(wasm)");
@@ -55,21 +58,21 @@ fn main() {
 		println!("cargo:rustc-cfg=storage");
 		println!("cargo::rustc-check-cfg=cfg(storage)");
 
-		if cfg!(feature = "kv-surrealcs") {
-			println!("kv-surrealcs triggered");
-			let surrealcs_path = "../../surrealcs/";
+		// if cfg!(feature = "kv-surrealcs") {
+		// 	println!("kv-surrealcs triggered");
+		// 	let surrealcs_path = "../../surrealcs/";
 
-			// check to see if the directory exists
-			if !std::path::Path::new(surrealcs_path).exists() {
-				println!("Unpacking surrealcs-client Docker image");
-				unpack_files_from_image(
-					// "surrealdb/surrealcs-client:latest", 
-					"maxwellflitton/nan-five",
-					surrealcs_path
-				).unwrap();
-				println!("Unpacked surrealcs-client Docker image");
-			}
-		}
+		// 	// check to see if the directory exists
+		// 	if !std::path::Path::new(surrealcs_path).exists() {
+		// 		println!("Unpacking surrealcs-client Docker image");
+		// 		unpack_files_from_image(
+		// 			// "surrealdb/surrealcs-client:latest", 
+		// 			"maxwellflitton/nan-five",
+		// 			surrealcs_path
+		// 		).unwrap();
+		// 		println!("Unpacked surrealcs-client Docker image");
+		// 	}
+		// }
 	}
 	println!("finished build.rs");
 }
