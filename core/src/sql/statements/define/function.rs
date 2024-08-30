@@ -90,6 +90,9 @@ impl fmt::Display for DefineFunctionStatement {
 			write!(f, "${name}: {kind}")?;
 		}
 		f.write_str(") ")?;
+		if let Some(ref v) = self.returns {
+			write!(f, "-> {v} ")?;
+		}
 		Display::fmt(&self.block, f)?;
 		if let Some(ref v) = self.comment {
 			write!(f, " COMMENT {v}")?
