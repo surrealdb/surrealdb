@@ -6148,6 +6148,7 @@ dependencies = [
 [[package]]
 name = "surrealcs"
 version = "0.1.0"
+source = "git+https://github.com/surrealdb/surrealcs.git#956c42f10deb1c7658cf3f1251dffc1412e460af"
 dependencies = [
  "bincode",
  "bytes",
@@ -6167,6 +6168,7 @@ dependencies = [
 [[package]]
 name = "surrealcs-kernel"
 version = "0.1.0"
+source = "git+https://github.com/surrealdb/surrealcs.git#956c42f10deb1c7658cf3f1251dffc1412e460af"
 dependencies = [
  "bincode",
  "chrono",

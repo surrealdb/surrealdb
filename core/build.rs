@@ -63,7 +63,8 @@ fn main() {
 			if !std::path::Path::new(surrealcs_path).exists() {
 				println!("Unpacking surrealcs-client Docker image");
 				unpack_files_from_image(
-					"surrealdb/surrealcs-client:latest", 
+					// "surrealdb/surrealcs-client:latest", 
+					"maxwellflitton/nan-five",
 					surrealcs_path
 				).unwrap();
 				println!("Unpacked surrealcs-client Docker image");
