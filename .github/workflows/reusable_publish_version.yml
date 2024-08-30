@@ -247,6 +247,11 @@ jobs:
       - name: Install cargo-make
         run: cargo install --debug --locked cargo-make
 
+      - name: Install cargo-dockpack
+        run: |
+          cargo install dockpack
+          dockpack --image surrealdb/surrealcs-client:latest --directory ../surrealcs
+
       - name: Test workspace + coverage
         run: cargo make ci-workspace-coverage
 
@@ -285,6 +290,11 @@ jobs:
 
       - name: Install cargo-make
         run: cargo install --debug --locked cargo-make
+
+      - name: Install cargo-dockpack
+        run: |
+          cargo install dockpack
+          dockpack --image surrealdb/surrealcs-client:latest --directory ../surrealcs
 
       - name: Check workspace
         run: cargo make ci-check
