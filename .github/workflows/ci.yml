@@ -177,6 +177,11 @@ jobs:
           cargo install dockpack
           dockpack --image surrealdb/surrealcs-client:latest --directory ../surrealcs
 
+      - name: Install cargo-dockpack
+        run: |
+          cargo install dockpack
+          dockpack --image surrealdb/surrealcs-client:latest --directory ../surrealcs
+
       - name: Install cargo-make
         run: cargo install --debug --locked cargo-make
 
