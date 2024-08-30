@@ -148,8 +148,7 @@ sha2 = "0.10.8"
 snap = "1.1.0"
 storekey = "0.5.0"
 subtle = "2.6"
-surrealcs = { version = "0.1.0", optional = true, path = "../../surrealcs/surrealdb_surrealcs-client/client" }
-# surrealcs = { optional = true, git = "https://github.com/surrealdb/surrealcs.git" }
+surrealcs = { version = "0.1.0", optional = true, path = "../../surrealcs/client" }
 surrealkv = { version = "0.3.4", optional = true }
 surrealml = { version = "0.1.1", optional = true, package = "surrealml-core" }
 tempfile = { version = "3.10.1", optional = true }

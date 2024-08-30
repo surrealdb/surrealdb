@@ -3601,10 +3601,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e5ce46fe64a9d73be07dcbe690a38ce1b293be448fd8ce1e6c1b8062c9f72c6a"
 
 [[package]]
-name = "nan-one"
-version = "0.1.0"
-
-[[package]]
 name = "nanoid"
 version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6152,7 +6148,6 @@ dependencies = [
 [[package]]
 name = "surrealcs"
 version = "0.1.0"
-source = "git+https://github.com/surrealdb/surrealcs.git#956c42f10deb1c7658cf3f1251dffc1412e460af"
 dependencies = [
  "bincode",
  "bytes",
@@ -6172,7 +6167,6 @@ dependencies = [
 [[package]]
 name = "surrealcs-kernel"
 version = "0.1.0"
-source = "git+https://github.com/surrealdb/surrealcs.git#956c42f10deb1c7658cf3f1251dffc1412e460af"
 dependencies = [
  "bincode",
  "chrono",
@@ -6301,7 +6295,6 @@ dependencies = [
  "lexicmp",
  "linfa-linalg",
  "md-5",
- "nan-one",
  "nanoid",
  "ndarray",
  "ndarray-stats",
