@@ -6155,7 +6155,6 @@ dependencies = [
  "async-channel 1.9.0",
  "async-executor",
  "async-graphql",
- "async-recursion 1.1.0",
  "base64 0.21.7",
  "bcrypt",
  "bincode",

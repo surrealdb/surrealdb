@@ -456,6 +456,7 @@ impl TokenKind {
 				| TokenKind::Language(_)
 				| TokenKind::Algorithm(_)
 				| TokenKind::DatetimeChars(_)
+				| TokenKind::VectorType(_)
 				| TokenKind::Distance(_),
 		)
 	}

@@ -37,7 +37,7 @@ macro_rules! get_cfg {
 /// a transaction in an uncommitted state without rolling back.
 macro_rules! catch {
 	($txn:ident, $default:expr) => {
-		match $default.await {
+		match $default {
 			Err(e) => {
 				let _ = $txn.cancel().await;
 				return Err(e);

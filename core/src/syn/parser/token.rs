@@ -87,6 +87,7 @@ impl Parser<'_> {
 			TokenKind::Exponent
 			| TokenKind::NumberSuffix(_)
 			| TokenKind::DurationSuffix(_)
+			| TokenKind::VectorType(_)
 			| TokenKind::DatetimeChars(_) => self.glue_ident(false),
 			TokenKind::Digits => self.glue_numeric(),
 			t!("\"") | t!("'") => {
@@ -128,7 +129,7 @@ impl Parser<'_> {
 
 				self.span_str(start.span).to_owned()
 			}
-			TokenKind::DatetimeChars(_) => {
+			TokenKind::DatetimeChars(_) | TokenKind::VectorType(_) => {
 				self.pop_peek();
 
 				self.span_str(start.span).to_owned()

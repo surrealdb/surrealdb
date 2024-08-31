@@ -611,6 +611,25 @@ async fn router(
 			let value = take(one, response).await?;
 			Ok(DbResponse::Other(value))
 		}
+		Command::InsertRelation {
+			what,
+			data,
+		} => {
+			let mut query = Query::default();
+			let one = !data.is_array();
+			let statement = {
+				let mut stmt = InsertStatement::default();
+				stmt.into = what.map(|w| Table(w).into_core().into());
+				stmt.data = Data::SingleExpression(data);
+				stmt.output = Some(Output::After);
+				stmt.relation = true;
+				stmt
+			};
+			query.0 .0 = vec![Statement::Insert(statement)];
+			let response = kvs.process(query, &*session, Some(vars.clone())).await?;
+			let value = take(one, response).await?;
+			Ok(DbResponse::Other(value))
+		}
 		Command::Patch {
 			what,
 			data,

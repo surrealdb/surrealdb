@@ -49,6 +49,18 @@ macro_rules! transparent_wrapper{
 			pub fn into_inner(self) -> $inner{
 				self.0
 			}
+
+			#[doc(hidden)]
+			#[allow(dead_code)]
+			pub fn into_inner_ref(&self) -> &$inner{
+				&self.0
+			}
+
+			#[doc(hidden)]
+			#[allow(dead_code)]
+			pub fn into_inner_mut(&mut self) -> &mut $inner{
+				&mut self.0
+			}
 		}
 
 		impl std::fmt::Display for $name{
