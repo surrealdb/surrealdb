@@ -680,14 +680,6 @@ version = "0.14.7"
 criteria = "safe-to-deploy"
 
 [[exemptions.geo]]
-version = "0.26.0"
-criteria = "safe-to-deploy"
-
-[[exemptions.geo]]
-version = "0.27.0"
-criteria = "safe-to-deploy"
-
-[[exemptions.geo]]
 version = "0.28.0"
 criteria = "safe-to-deploy"
 
@@ -1316,7 +1308,7 @@ version = "0.4.5"
 criteria = "safe-to-deploy"
 
 [[exemptions.regex]]
-version = "1.10.4"
+version = "1.10.6"
 criteria = "safe-to-deploy"
 
 [[exemptions.regex-automata]]
@@ -1328,11 +1320,7 @@ version = "0.4.6"
 criteria = "safe-to-deploy"
 
 [[exemptions.regex-syntax]]
-version = "0.6.29"
-criteria = "safe-to-deploy"
-
-[[exemptions.regex-syntax]]
-version = "0.8.3"
+version = "0.8.4"
 criteria = "safe-to-deploy"
 
 [[exemptions.relative-path]]
@@ -1380,7 +1368,7 @@ version = "1.0.1"
 criteria = "safe-to-deploy"
 
 [[exemptions.roaring]]
-version = "0.10.3"
+version = "0.10.6"
 criteria = "safe-to-deploy"
 
 [[exemptions.robust]]
@@ -1884,7 +1872,7 @@ version = "0.7.6"
 criteria = "safe-to-deploy"
 
 [[exemptions.uuid]]
-version = "1.8.0"
+version = "1.10.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.vswhom]]
