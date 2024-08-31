@@ -313,7 +313,7 @@ async fn update_with_object_array_string_field_names() -> Result<(), Error> {
 				field: {
 					key: 'value'
 				},
-				id: person:one
+				id: person:two
 			}
 		]",
 	);
