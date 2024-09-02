@@ -138,6 +138,8 @@ pub enum Category {
 	IndexAppendings,
 	/// crate::key::index::ip                /*{ns}*{db}*{tb}+{ix}!ip{id}
 	IndexPrimaryAppending,
+	/// crate::key::index::is                /*{ns}*{db}*{tb}+{ix}!is
+	IndexBuildingStatus,
 	/// crate::key::index                    /*{ns}*{db}*{tb}+{ix}*{fd}{id}
 	Index,
 	///
@@ -215,6 +217,7 @@ impl Display for Category {
 			Self::IndexHnswVec => "IndexHnswVec",
 			Self::IndexAppendings => "IndexAppendings",
 			Self::IndexPrimaryAppending => "IndexPrimaryAppending",
+			Self::IndexBuildingStatus => "IndexBuildingStatus",
 			Self::Index => "Index",
 			Self::ChangeFeed => "ChangeFeed",
 			Self::Thing => "Thing",
