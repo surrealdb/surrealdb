@@ -1,8 +1,8 @@
 use super::batch::Batch;
 use super::tr::Check;
-use super::Convert;
 use super::Key;
 use super::Val;
+use super::{BuildingStatus, Convert};
 use crate::cnf::NORMAL_FETCH_SIZE;
 use crate::cnf::TRANSACTION_CACHE_SIZE;
 use crate::dbs::node::Node;
@@ -1262,6 +1262,28 @@ impl Transaction {
 					value: ix.to_owned(),
 				})?;
 				let val: DefineIndexStatement = val.into();
+				let val = Entry::Any(Arc::new(val));
+				let _ = cache.insert(val.clone());
+				val
+			}
+		}
+		.into_type())
+	}
+
+	pub async fn get_index_status(
+		&self,
+		ns: &str,
+		db: &str,
+		tb: &str,
+		ix: &str,
+	) -> Result<Arc<Option<BuildingStatus>>, Error> {
+		let key = crate::key::index::is::Is::new(ns, db, tb, ix).encode()?;
+		let res = self.cache.get_value_or_guard_async(&key).await;
+		Ok(match res {
+			Ok(val) => val,
+			Err(cache) => {
+				let val = self.get(key, None).await?;
+				let val: Option<BuildingStatus> = val.map(|v| v.into());
 				let val = Entry::Any(Arc::new(val));
 				let _ = cache.insert(val.clone());
 				val

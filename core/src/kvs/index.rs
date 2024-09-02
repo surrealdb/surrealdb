@@ -6,12 +6,13 @@ use crate::err::Error;
 use crate::idx::index::IndexOperation;
 use crate::key::index::ia::Ia;
 use crate::key::index::ip::Ip;
+use crate::key::index::is::Is;
 use crate::key::thing;
 use crate::kvs::ds::TransactionFactory;
 use crate::kvs::LockType::Optimistic;
 use crate::kvs::{Key, Transaction, TransactionType, Val};
 use crate::sql::statements::DefineIndexStatement;
-use crate::sql::{Id, Object, Thing, Value};
+use crate::sql::{Datetime, Id, Object, Thing, Value};
 use dashmap::mapref::entry::Entry;
 use dashmap::DashMap;
 use derive::Store;
@@ -23,13 +24,27 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 use tokio::task;
 use tokio::task::JoinHandle;
+use uuid::Uuid;
 
-#[derive(Clone)]
-pub(crate) enum BuildingStatus {
+#[revisioned(revision = 1)]
+#[derive(Serialize, Deserialize, Store, Debug)]
+#[non_exhaustive]
+pub(crate) struct BuildingStatus {
+	// The ID of the node leading the build of the index
+	owner: Uuid,
+	started: Datetime,
+	ended: Option<Datetime>,
+	stage: BuildingStage,
+}
+
+#[revisioned(revision = 1)]
+#[derive(Serialize, Deserialize, Store, Debug)]
+#[non_exhaustive]
+pub(crate) enum BuildingStage {
 	Started,
 	InitialIndexing(usize),
 	UpdatesIndexing(usize),
-	Error(Arc<Error>),
+	Error(Error),
 	Built,
 }
 
@@ -40,7 +55,7 @@ pub(crate) enum ConsumeResult {
 	Ignored(Option<Vec<Value>>, Option<Vec<Value>>),
 }
 
-impl BuildingStatus {
+impl BuildingStage {
 	fn is_error(&self) -> bool {
 		matches!(self, Self::Error(_))
 	}
@@ -50,26 +65,31 @@ impl BuildingStatus {
 	}
 }
 
-impl From<BuildingStatus> for Value {
-	fn from(st: BuildingStatus) -> Self {
+impl From<&BuildingStatus> for Value {
+	fn from(st: &BuildingStatus) -> Self {
 		let mut o = Object::default();
-		let s = match st {
-			BuildingStatus::Started => "started",
-			BuildingStatus::InitialIndexing(count) => {
+		let s = match &st.stage {
+			BuildingStage::Started => "started",
+			BuildingStage::InitialIndexing(count) => {
 				o.insert("count".to_string(), count.into());
 				"initial"
 			}
-			BuildingStatus::UpdatesIndexing(count) => {
+			BuildingStage::UpdatesIndexing(count) => {
 				o.insert("count".to_string(), count.into());
 				"updates"
 			}
-			BuildingStatus::Error(error) => {
+			BuildingStage::Error(error) => {
 				o.insert("error".to_string(), error.to_string().into());
 				"error"
 			}
-			BuildingStatus::Built => "built",
+			BuildingStage::Built => "built",
 		};
-		o.insert("status".to_string(), s.into());
+		o.insert("stage".to_string(), s.into());
+		o.insert("owner".to_string(), st.owner.into());
+		o.insert("started".to_string(), st.started.clone().into());
+		if let Some(ended) = &st.ended {
+			o.insert("ended".to_string(), ended.clone().into());
+		}
 		o.into()
 	}
 }
@@ -90,7 +110,7 @@ impl IndexBuilder {
 		}
 	}
 
-	pub(crate) fn build(
+	pub(crate) async fn build(
 		&self,
 		ctx: &Context,
 		opt: Options,
@@ -109,9 +129,12 @@ impl IndexBuilder {
 				// No index is currently building, we can start building it
 				let building = Arc::new(Building::new(ctx, self.tf.clone(), opt, e.key().clone())?);
 				let b = building.clone();
+				let tx = ctx.tx();
+				// Set the initial status
+				self.set_status(tx, BuildingStatus::InitialIndexing(0)).await;
 				let jh = task::spawn(async move {
 					if let Err(err) = b.compute().await {
-						b.set_status(BuildingStatus::Error(err.into())).await;
+						warn!(err);
 					}
 				});
 				e.insert((building, jh));
@@ -133,14 +156,6 @@ impl IndexBuilder {
 			return b.maybe_consume(ctx, old_values, new_values, rid).await;
 		}
 		Ok(ConsumeResult::Ignored(old_values, new_values))
-	}
-
-	pub(crate) async fn get_status(&self, ix: &DefineIndexStatement) -> Option<BuildingStatus> {
-		if let Some(a) = self.indexes.get(ix) {
-			Some(a.value().0.status.lock().await.clone())
-		} else {
-			None
-		}
 	}
 }
 
@@ -222,11 +237,16 @@ impl Building {
 		})
 	}
 
-	async fn set_status(&self, status: BuildingStatus) {
+	async fn set_status(&self, tx: &Transaction, stage: BuildingStage) -> Result<(), Error> {
 		let mut s = self.status.lock().await;
 		// We want to keep only the first error
-		if !s.is_error() {
-			*s = status;
+		if !stage.is_error() {
+			let is = Is::new(self.opt.ns()?, self.opt.db()?, &self.tb, &self.ix.name);
+			let status = BuildingStatus {
+				owner: self.owner,
+				stage,
+			};
+			tx.set(is) * s = status;
 		}
 	}
 
@@ -291,8 +311,16 @@ impl Building {
 	}
 
 	async fn compute(&self) -> Result<(), Error> {
-		// Set the initial status
-		self.set_status(BuildingStatus::InitialIndexing(0)).await;
+		if let Err(err) = self.unchecked_compute() {
+			let ctx = self.new_write_tx_ctx().await?;
+			let tx = ctx.tx();
+			catch!(tx, self.set_status(&tx, BuildingStage::Error(err.into()).await));
+			tx.commit().await?;
+		}
+		Ok(())
+	}
+
+	async fn unchecked_compute(&self) -> Result<(), Error> {
 		// First iteration, we index every keys
 		let ns = self.opt.ns()?;
 		let db = self.opt.db()?;

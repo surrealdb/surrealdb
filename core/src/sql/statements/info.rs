@@ -284,16 +284,13 @@ impl InfoStatement {
 				opt.is_allowed(Action::View, ResourceKind::Actor, &Base::Db)?;
 				// Get the transaction
 				let txn = ctx.tx();
-				// Output
-				#[cfg(not(target_arch = "wasm32"))]
-				if let Some(ib) = ctx.get_index_builder() {
-					// Obtain the index
-					let res = txn.get_tb_index(opt.ns()?, opt.db()?, table, index).await?;
-					if let Some(status) = ib.get_status(&res).await {
-						let mut out = Object::default();
-						out.insert("building".to_string(), status.into());
-						return Ok(out.into());
-					}
+				// Get the index status if any
+				let s = txn.get_index_status(opt.ns()?, opt.db()?, table, index).await?;
+				if let Some(s) = s.as_ref() {
+					// Output
+					let mut out = Object::default();
+					out.insert("building".to_string(), s.into());
+					return Ok(out.into());
 				}
 				Ok(Object::default().into())
 			}
