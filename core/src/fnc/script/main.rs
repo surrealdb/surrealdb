@@ -6,6 +6,8 @@ use super::modules::loader;
 use super::modules::resolver;
 use super::modules::surrealdb::query::QueryContext;
 use super::modules::surrealdb::query::QUERY_DATA_PROP_NAME;
+use crate::cnf::SCRIPTING_MAX_MEMORY_LIMIT;
+use crate::cnf::SCRIPTING_MAX_STACK_SIZE;
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
@@ -60,9 +62,9 @@ pub async fn run(
 	// Create a JavaScript context
 	let run = js::AsyncRuntime::new().unwrap();
 	// Explicitly set max stack size to 256 KiB
-	run.set_max_stack_size(262_144).await;
+	run.set_max_stack_size(*SCRIPTING_MAX_STACK_SIZE).await;
 	// Explicitly set max memory size to 2 MB
-	run.set_memory_limit(2_000_000).await;
+	run.set_memory_limit(*SCRIPTING_MAX_MEMORY_LIMIT).await;
 	// Ensure scripts are cancelled with context
 	let cancellation = context.cancellation();
 	let handler = Box::new(move || cancellation.is_done());
