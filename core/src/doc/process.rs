@@ -74,7 +74,12 @@ impl Document {
 			// Send back the result
 			return res;
 		}
-		// We should never get here
-		unreachable!()
+		// We shouldn't really reach this part, but if we
+		// did it was probably due to the fact that we
+		// encountered two Err::RetryWithId errors due to
+		// two separtate UNIQUE index definitions, and it
+		// wasn't possible to detect which record was the
+		// correct one to be updated
+		Err(Error::Unreachable("Internal error"))
 	}
 }
