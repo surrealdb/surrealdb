@@ -13,8 +13,8 @@ use crate::idx::planner::checker::{HnswConditionChecker, MTreeConditionChecker};
 use crate::idx::planner::iterators::{
 	IndexEqualThingIterator, IndexJoinThingIterator, IndexRangeThingIterator,
 	IndexUnionThingIterator, IteratorRecord, IteratorRef, KnnIterator, KnnIteratorResult,
-	MatchesThingIterator, ThingIterator, UniqueEqualThingIterator, UniqueJoinThingIterator,
-	UniqueRangeThingIterator, UniqueUnionThingIterator,
+	MatchesThingIterator, MultipleIterators, ThingIterator, UniqueEqualThingIterator,
+	UniqueJoinThingIterator, UniqueRangeThingIterator, UniqueUnionThingIterator,
 };
 use crate::idx::planner::knn::{KnnBruteForceResult, KnnPriorityList};
 use crate::idx::planner::plan::IndexOperator::Matches;
@@ -28,7 +28,9 @@ use crate::kvs::{Key, TransactionType};
 use crate::sql::index::{Distance, Index};
 use crate::sql::statements::DefineIndexStatement;
 use crate::sql::{Cond, Expression, Idiom, Number, Object, Table, Thing, Value};
+use num_traits::{FromPrimitive, ToPrimitive};
 use reblessive::tree::Stk;
+use rust_decimal::Decimal;
 use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::Arc;
@@ -388,14 +390,30 @@ impl QueryExecutor {
 	) -> Result<Option<ThingIterator>, Error> {
 		Ok(match io.op() {
 			IndexOperator::Equality(value) | IndexOperator::Exactness(value) => {
-				Some(ThingIterator::IndexEqual(IndexEqualThingIterator::new(
-					irf,
-					opt.ns()?,
-					opt.db()?,
-					&ix.what,
-					&ix.name,
-					value,
-				)))
+				if let Value::Number(n) = value.as_ref() {
+					let values = Self::declines_number(n);
+					if values.len() == 1 {
+						Some(ThingIterator::IndexEqual(IndexEqualThingIterator::new(
+							irf,
+							opt.ns()?,
+							opt.db()?,
+							&ix.what,
+							&ix.name,
+							&values[0],
+						)))
+					} else {
+						Some(Self::new_multiple_index_equal_iterators(irf, opt, ix, values)?)
+					}
+				} else {
+					Some(ThingIterator::IndexEqual(IndexEqualThingIterator::new(
+						irf,
+						opt.ns()?,
+						opt.db()?,
+						&ix.what,
+						&ix.name,
+						value,
+					)))
+				}
 			}
 			IndexOperator::Union(value) => Some(ThingIterator::IndexUnion(
 				IndexUnionThingIterator::new(irf, opt.ns()?, opt.db()?, &ix.what, &ix.name, value),
@@ -420,6 +438,61 @@ impl QueryExecutor {
 			}
 			_ => None,
 		})
+	}
+
+	/// This function takes a reference to a `Number` enum and returns a vector of `Value` enum.
+	/// The `Number` enum can be either an `Int`, `Float`, or `Decimal`.
+	/// The function first initializes an empty vector with a capacity of 3 to store the converted values.
+	/// It then matches on the input number and performs the appropriate conversions.
+	/// For `Int`, it pushes the original `Int` value, the equivalent `Float` value, and if possible, the equivalent `Decimal` value.
+	/// For `Float`, it pushes the original `Float` value, the truncated `Int` value if it is a whole number, and if possible, the equivalent `Decimal` value.
+	/// For `Decimal`, it pushes the equivalent `Int` value if it is representable as an `i64`, and the equivalent `Float` value if it is representable as an `f64`.
+	/// Finally, it returns the vector of converted values.
+	fn declines_number(n: &Number) -> Vec<Value> {
+		let mut values = Vec::with_capacity(3);
+		match n {
+			Number::Int(i) => {
+				values.push(Number::Int(*i).into());
+				values.push(Number::Float(*i as f64).into());
+				if let Some(d) = Decimal::from_i64(*i) {
+					values.push(Number::Decimal(d).into());
+				}
+			}
+			Number::Float(f) => {
+				values.push(Number::Float(*f).into());
+				if f.trunc().eq(f) {
+					values.push(Number::Int(*f as i64).into());
+				}
+				if let Some(d) = Decimal::from_f64(*f) {
+					values.push(Number::Decimal(d).into());
+				}
+			}
+			Number::Decimal(d) => {
+				if let Some(i) = d.to_i64() {
+					values.push(Number::Int(i).into());
+				}
+				if let Some(f) = d.to_f64() {
+					values.push(Number::Float(f).into());
+				}
+			}
+		};
+		values
+	}
+	fn new_multiple_index_equal_iterators(
+		irf: IteratorRef,
+		opt: &Options,
+		ix: &DefineIndexStatement,
+		values: Vec<Value>,
+	) -> Result<ThingIterator, Error> {
+		let mut iterators = VecDeque::with_capacity(values.len());
+		let ns = opt.ns()?;
+		let db = opt.db()?;
+		for value in values {
+			iterators.push_back(ThingIterator::IndexEqual(IndexEqualThingIterator::new(
+				irf, ns, db, &ix.what, &ix.name, &value,
+			)));
+		}
+		Ok(ThingIterator::Multiples(Box::new(MultipleIterators::new(iterators))))
 	}
 
 	fn new_range_iterator(

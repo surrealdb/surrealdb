@@ -718,8 +718,6 @@ async fn define_statement_index_single() -> Result<(), Error> {
 #[tokio::test]
 async fn define_statement_index_float_values() -> Result<(), Error> {
 	let sql = "
-		DEFINE TABLE test SCHEMAFULL;
-		DEFINE FIELD number ON TABLE test TYPE number;
 		DEFINE INDEX index ON TABLE test COLUMNS number;
 		CREATE test:number CONTENT {
 			number: 0
@@ -733,12 +731,14 @@ async fn define_statement_index_float_values() -> Result<(), Error> {
 		CREATE test:coercion CONTENT {
 			number: '0'.to_int()
 		};
-		SELECT * FROM test WITH NOINDEX WHERE number = 0;
-		SELECT * FROM test WHERE number = 0;
+		SELECT * FROM test WITH NOINDEX WHERE number = 0 ORDER BY id;
+		SELECT * FROM test WHERE number = 0 ORDER BY id;
+		SELECT * FROM test WHERE number = 0.0 ORDER BY id;
+		SELECT * FROM test WHERE number = 0.0dec ORDER BY id;
 	";
 	let mut t = Test::new(sql).await?;
-	t.skip_ok(7)?;
-	for _ in 0..2 {
+	t.skip_ok(5)?;
+	for _ in 0..4 {
 		t.expect_val(
 			"[
 				{
