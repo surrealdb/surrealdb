@@ -1,6 +1,7 @@
 mod access;
 mod analyzer;
 mod database;
+mod deprecated;
 mod event;
 mod field;
 mod function;
@@ -24,6 +25,11 @@ pub use param::DefineParamStatement;
 pub use table::DefineTableStatement;
 pub use user::DefineUserStatement;
 
+#[doc(hidden)]
+pub use deprecated::scope::DefineScopeStatement;
+#[doc(hidden)]
+pub use deprecated::token::DefineTokenStatement;
+
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
@@ -35,7 +41,7 @@ use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display};
 
-#[revisioned(revision = 1)]
+#[revisioned(revision = 2)]
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
@@ -44,6 +50,18 @@ pub enum DefineStatement {
 	Database(DefineDatabaseStatement),
 	Function(DefineFunctionStatement),
 	Analyzer(DefineAnalyzerStatement),
+	#[revision(
+		end = 2,
+		convert_fn = "convert_token_to_access",
+		fields_name = "DefineTokenStatementFields"
+	)]
+	Token(DefineTokenStatement),
+	#[revision(
+		end = 2,
+		convert_fn = "convert_scope_to_access",
+		fields_name = "DefineScopeStatementFields"
+	)]
+	Scope(DefineScopeStatement),
 	Param(DefineParamStatement),
 	Table(DefineTableStatement),
 	Event(DefineEventStatement),
@@ -51,7 +69,25 @@ pub enum DefineStatement {
 	Index(DefineIndexStatement),
 	User(DefineUserStatement),
 	Model(DefineModelStatement),
+	#[revision(start = 2)]
 	Access(DefineAccessStatement),
+}
+
+// Revision implementations
+impl DefineStatement {
+	fn convert_token_to_access(
+		fields: DefineTokenStatementFields,
+		_revision: u16,
+	) -> Result<Self, revision::Error> {
+		Ok(DefineStatement::Access(fields.0.into()))
+	}
+
+	fn convert_scope_to_access(
+		fields: DefineScopeStatementFields,
+		_revision: u16,
+	) -> Result<Self, revision::Error> {
+		Ok(DefineStatement::Access(fields.0.into()))
+	}
 }
 
 impl DefineStatement {
@@ -63,9 +99,9 @@ impl DefineStatement {
 	pub(crate) async fn compute(
 		&self,
 		stk: &mut Stk,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		opt: &Options,
-		doc: Option<&CursorDoc<'_>>,
+		doc: Option<&CursorDoc>,
 	) -> Result<Value, Error> {
 		match self {
 			Self::Namespace(ref v) => v.compute(ctx, opt, doc).await,
@@ -116,6 +152,6 @@ mod tests {
 			..Default::default()
 		});
 		let enc: Vec<u8> = stm.into();
-		assert_eq!(12, enc.len());
+		assert_eq!(13, enc.len());
 	}
 }

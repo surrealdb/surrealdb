@@ -1,17 +1,18 @@
-use crate::ctx::Context;
+use crate::ctx::{Context, MutableContext};
 use crate::dbs::{Iterable, Iterator, Options, Statement};
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::idx::planner::QueryPlanner;
 use crate::sql::{
-	Cond, Explain, Fetchs, Field, Fields, Groups, Idioms, Limit, Orders, Splits, Start, Timeout,
-	Value, Values, Version, With,
+	Cond, Explain, Fetchs, Field, Fields, Groups, Id, Idioms, Limit, Orders, Splits, Start,
+	Timeout, Value, Values, Version, With,
 };
 use derive::Store;
 use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
+use std::sync::Arc;
 
 #[revisioned(revision = 3)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
@@ -61,21 +62,32 @@ impl SelectStatement {
 	pub(crate) async fn compute(
 		&self,
 		stk: &mut Stk,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		opt: &Options,
-		doc: Option<&CursorDoc<'_>>,
+		doc: Option<&CursorDoc>,
 	) -> Result<Value, Error> {
 		// Valid options?
 		opt.valid_for_db()?;
+		// Assign the statement
+		let stm = Statement::from(self);
 		// Create a new iterator
 		let mut i = Iterator::new();
-		// Ensure futures are stored
-		let opt = &opt.new_with_futures(false).with_projections(true);
+		// Ensure futures are stored and the version is set if specified
+		let version = self.version.as_ref().map(|v| v.to_u64());
+		let opt =
+			Arc::new(opt.new_with_futures(false).with_projections(true).with_version(version));
 		// Get a query planner
-		let mut planner = QueryPlanner::new(opt, &self.with, &self.cond);
+		let mut planner = QueryPlanner::new(
+			opt.clone(),
+			self.with.as_ref().cloned().map(|w| w.into()),
+			self.cond.as_ref().cloned().map(|c| c.into()),
+			self.order.as_ref().cloned().map(|o| o.into()),
+		);
+		// Extract the limit
+		let limit = i.setup_limit(stk, ctx, &opt, &stm).await?;
 		// Used for ONLY: is the limit 1?
-		let limit_is_one_or_zero = match &self.limit {
-			Some(l) => l.process(stk, ctx, opt, doc).await? <= 1,
+		let limit_is_one_or_zero = match limit {
+			Some(l) => l <= 1,
 			_ => false,
 		};
 		// Fail for multiple targets without a limit
@@ -84,23 +96,18 @@ impl SelectStatement {
 		}
 		// Loop over the select targets
 		for w in self.what.0.iter() {
-			let v = w.compute(stk, ctx, opt, doc).await?;
+			let v = w.compute(stk, ctx, &opt, doc).await?;
 			match v {
 				Value::Table(t) => {
 					if self.only && !limit_is_one_or_zero {
 						return Err(Error::SingleOnlyOutput);
 					}
-
 					planner.add_iterables(stk, ctx, t, &mut i).await?;
 				}
-				Value::Thing(v) => i.ingest(Iterable::Thing(v)),
-				Value::Range(v) => {
-					if self.only && !limit_is_one_or_zero {
-						return Err(Error::SingleOnlyOutput);
-					}
-
-					i.ingest(Iterable::Range(*v))
-				}
+				Value::Thing(v) => match &v.id {
+					Id::Range(r) => i.ingest(Iterable::TableRange(v.tb, *r.to_owned())),
+					_ => i.ingest(Iterable::Thing(v)),
+				},
 				Value::Edges(v) => {
 					if self.only && !limit_is_one_or_zero {
 						return Err(Error::SingleOnlyOutput);
@@ -142,15 +149,14 @@ impl SelectStatement {
 			};
 		}
 		// Create a new context
-		let mut ctx = Context::new(ctx);
-		// Assign the statement
-		let stm = Statement::from(self);
+		let mut ctx = MutableContext::new(ctx);
 		// Add query executors if any
 		if planner.has_executors() {
-			ctx.set_query_planner(&planner);
+			ctx.set_query_planner(planner);
 		}
+		let ctx = ctx.freeze();
 		// Output the results
-		match i.output(stk, &ctx, opt, &stm).await? {
+		match i.output(stk, &ctx, &opt, &stm).await? {
 			// This is a single record result
 			Value::Array(mut a) if self.only => match a.len() {
 				// There were no results

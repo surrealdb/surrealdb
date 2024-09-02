@@ -87,6 +87,7 @@ impl Parser<'_> {
 			TokenKind::Exponent
 			| TokenKind::NumberSuffix(_)
 			| TokenKind::DurationSuffix(_)
+			| TokenKind::VectorType(_)
 			| TokenKind::DatetimeChars(_) => self.glue_ident(false),
 			TokenKind::Digits => self.glue_numeric(),
 			t!("\"") | t!("'") => {
@@ -124,6 +125,11 @@ impl Parser<'_> {
 				self.span_str(start.span).to_owned()
 			}
 			TokenKind::DurationSuffix(x) if x.can_be_ident() => {
+				self.pop_peek();
+
+				self.span_str(start.span).to_owned()
+			}
+			TokenKind::DatetimeChars(_) | TokenKind::VectorType(_) => {
 				self.pop_peek();
 
 				self.span_str(start.span).to_owned()
@@ -168,7 +174,7 @@ impl Parser<'_> {
 					break;
 				}
 				// These tokens might have some more parts following them
-				TokenKind::Exponent => {
+				TokenKind::Exponent | TokenKind::DatetimeChars(_) | TokenKind::Digits => {
 					self.pop_peek();
 					let str = self.span_str(p.span);
 					token_buffer.push_str(str);
@@ -181,12 +187,6 @@ impl Parser<'_> {
 						return Err(ParseError::new(ParseErrorKind::InvalidIdent, p.span));
 					}
 					token_buffer.push_str(suffix.as_str());
-					prev = p;
-				}
-				TokenKind::Digits => {
-					self.pop_peek();
-					let str = self.span_str(p.span);
-					token_buffer.push_str(str);
 					prev = p;
 				}
 				_ => break,

@@ -4,14 +4,14 @@ use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::sql::paths::IN;
 use crate::sql::paths::OUT;
-use crate::sql::{Data, Id, Output, Table, Thing, Timeout, Value};
+use crate::sql::{Data, Id, Output, Table, Thing, Timeout, Value, Version};
 use derive::Store;
 use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
-#[revisioned(revision = 2)]
+#[revisioned(revision = 3)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
@@ -25,6 +25,8 @@ pub struct InsertStatement {
 	pub parallel: bool,
 	#[revision(start = 2)]
 	pub relation: bool,
+	#[revision(start = 3)]
+	pub version: Option<Version>,
 }
 
 impl InsertStatement {
@@ -36,16 +38,18 @@ impl InsertStatement {
 	pub(crate) async fn compute(
 		&self,
 		stk: &mut Stk,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		opt: &Options,
-		doc: Option<&CursorDoc<'_>>,
+		doc: Option<&CursorDoc>,
 	) -> Result<Value, Error> {
 		// Valid options?
 		opt.valid_for_db()?;
 		// Create a new iterator
 		let mut i = Iterator::new();
+		// Propagate the version to the underlying datastore
+		let version = self.version.as_ref().map(|v| v.to_u64());
 		// Ensure futures are stored
-		let opt = &opt.new_with_futures(false).with_projections(false);
+		let opt = &opt.new_with_futures(false).with_projections(false).with_version(version);
 		// Parse the INTO expression
 		let into = match &self.into {
 			None => None,
@@ -127,6 +131,9 @@ impl fmt::Display for InsertStatement {
 			write!(f, " {v}")?
 		}
 		if let Some(ref v) = self.output {
+			write!(f, " {v}")?
+		}
+		if let Some(ref v) = self.version {
 			write!(f, " {v}")?
 		}
 		if let Some(ref v) = self.timeout {

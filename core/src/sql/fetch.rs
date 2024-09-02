@@ -55,7 +55,7 @@ pub struct Fetch(
 
 impl Fetch {
 	fn convert_fetch_idiom(&mut self, _revision: u16, old: Idiom) -> Result<(), revision::Error> {
-		self.1 = if old.is_empty() {
+		self.0 = if old.is_empty() {
 			Value::None
 		} else {
 			Value::Idiom(old)
@@ -66,7 +66,7 @@ impl Fetch {
 	pub(crate) async fn compute(
 		&self,
 		stk: &mut Stk,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		opt: &Options,
 		idioms: &mut Vec<Idiom>,
 	) -> Result<(), Error> {
@@ -77,7 +77,7 @@ impl Fetch {
 				value: v,
 			}),
 		};
-		match &self.1 {
+		match &self.0 {
 			Value::Idiom(idiom) => {
 				idioms.push(idiom.to_owned());
 				Ok(())
@@ -135,20 +135,20 @@ impl Fetch {
 
 impl From<Value> for Fetch {
 	fn from(value: Value) -> Self {
-		Self(Idiom(vec![]), value)
+		Self(value)
 	}
 }
 
 impl Deref for Fetch {
 	type Target = Value;
 	fn deref(&self) -> &Self::Target {
-		&self.1
+		&self.0
 	}
 }
 
 impl Display for Fetch {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-		Display::fmt(&self.1, f)
+		Display::fmt(&self.0, f)
 	}
 }
 

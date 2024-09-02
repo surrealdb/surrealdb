@@ -1,5 +1,3 @@
-use std::ops::Bound;
-
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
@@ -7,12 +5,20 @@ use crate::err::Error;
 use crate::sql::table::Table;
 use crate::sql::thing::Thing;
 use crate::sql::value::Value;
-use crate::sql::{Id, Range, Strand};
+use crate::sql::{Kind, Strand};
 use crate::syn;
 use reblessive::tree::Stk;
 
+pub fn array((val,): (Value,)) -> Result<Value, Error> {
+	val.convert_to_array().map(Value::from)
+}
+
 pub fn bool((val,): (Value,)) -> Result<Value, Error> {
 	val.convert_to_bool().map(Value::from)
+}
+
+pub fn bytes((val,): (Value,)) -> Result<Value, Error> {
+	val.convert_to_bytes().map(Value::from)
 }
 
 pub fn datetime((val,): (Value,)) -> Result<Value, Error> {
@@ -28,7 +34,7 @@ pub fn duration((val,): (Value,)) -> Result<Value, Error> {
 }
 
 pub async fn field(
-	(stk, ctx, opt, doc): (&mut Stk, &Context<'_>, Option<&Options>, Option<&CursorDoc<'_>>),
+	(stk, ctx, opt, doc): (&mut Stk, &Context, Option<&Options>, Option<&CursorDoc>),
 	(val,): (String,),
 ) -> Result<Value, Error> {
 	match opt {
@@ -46,7 +52,7 @@ pub async fn field(
 }
 
 pub async fn fields(
-	(stk, ctx, opt, doc): (&mut Stk, &Context<'_>, Option<&Options>, Option<&CursorDoc<'_>>),
+	(stk, ctx, opt, doc): (&mut Stk, &Context, Option<&Options>, Option<&CursorDoc>),
 	(val,): (Vec<String>,),
 ) -> Result<Value, Error> {
 	match opt {
@@ -71,6 +77,10 @@ pub fn float((val,): (Value,)) -> Result<Value, Error> {
 	val.convert_to_float().map(Value::from)
 }
 
+pub fn geometry((val,): (Value,)) -> Result<Value, Error> {
+	val.convert_to_geometry().map(Value::from)
+}
+
 pub fn int((val,): (Value,)) -> Result<Value, Error> {
 	val.convert_to_int().map(Value::from)
 }
@@ -81,6 +91,28 @@ pub fn number((val,): (Value,)) -> Result<Value, Error> {
 
 pub fn point((val,): (Value,)) -> Result<Value, Error> {
 	val.convert_to_point().map(Value::from)
+}
+
+pub fn range((val,): (Value,)) -> Result<Value, Error> {
+	val.convert_to_range().map(Value::from)
+}
+
+pub fn record((rid, tb): (Value, Option<Value>)) -> Result<Value, Error> {
+	match tb {
+		Some(Value::Strand(Strand(tb)) | Value::Table(Table(tb))) if tb.is_empty() => {
+			Err(Error::TbInvalid {
+				value: tb,
+			})
+		}
+		Some(Value::Strand(Strand(tb)) | Value::Table(Table(tb))) => {
+			rid.convert_to(&Kind::Record(vec![tb.into()]))
+		}
+		Some(_) => Err(Error::InvalidArguments {
+			name: "type::record".into(),
+			message: "The second argument must be a table name or a string.".into(),
+		}),
+		None => rid.convert_to(&Kind::Record(vec![])),
+	}
 }
 
 pub fn string((val,): (Value,)) -> Result<Value, Error> {
@@ -134,91 +166,8 @@ pub fn thing((arg1, arg2): (Value, Option<Value>)) -> Result<Value, Error> {
 	}
 }
 
-pub fn range(args: Vec<Value>) -> Result<Value, Error> {
-	if args.len() > 4 || args.is_empty() {
-		return Err(Error::InvalidArguments {
-			name: "type::range".to_owned(),
-			message: "Expected atleast 1 and at most 4 arguments".to_owned(),
-		});
-	}
-	let mut args = args.into_iter();
-
-	// Unwrap will never trigger since length is checked above.
-	let id = args.next().unwrap().as_string();
-	let start = args.next().and_then(|x| match x {
-		Value::Thing(v) => Some(v.id),
-		Value::Array(v) => Some(v.into()),
-		Value::Object(v) => Some(v.into()),
-		Value::Number(v) => Some(v.into()),
-		Value::Null | Value::None => None,
-		v => Some(Id::from(v.as_string())),
-	});
-	let end = args.next().and_then(|x| match x {
-		Value::Thing(v) => Some(v.id),
-		Value::Array(v) => Some(v.into()),
-		Value::Object(v) => Some(v.into()),
-		Value::Number(v) => Some(v.into()),
-		Value::Null | Value::None => None,
-		v => Some(Id::from(v.as_string())),
-	});
-	let (begin, end) = if let Some(x) = args.next() {
-		let Value::Object(x) = x else {
-			return Err(Error::ConvertTo {
-				from: x,
-				into: "object".to_owned(),
-			});
-		};
-		let begin = if let Some(x) = x.get("begin") {
-			let start = start.ok_or_else(|| Error::InvalidArguments {
-				name: "type::range".to_string(),
-				message: "Can't define an inclusion for begin if there is no begin bound"
-					.to_string(),
-			})?;
-			match x {
-				Value::Strand(Strand(x)) if x == "included" => Bound::Included(start),
-				Value::Strand(Strand(x)) if x == "excluded" => Bound::Excluded(start),
-				x => {
-					return Err(Error::ConvertTo {
-						from: x.clone(),
-						into: r#""included" | "excluded""#.to_owned(),
-					})
-				}
-			}
-		} else {
-			start.map(Bound::Included).unwrap_or(Bound::Unbounded)
-		};
-		let end = if let Some(x) = x.get("end") {
-			let end = end.ok_or_else(|| Error::InvalidArguments {
-				name: "type::range".to_string(),
-				message: "Can't define an inclusion for end if there is no end bound".to_string(),
-			})?;
-			match x {
-				Value::Strand(Strand(x)) if x == "included" => Bound::Included(end),
-				Value::Strand(Strand(x)) if x == "excluded" => Bound::Excluded(end),
-				x => {
-					return Err(Error::ConvertTo {
-						from: x.clone(),
-						into: r#""included" | "excluded""#.to_owned(),
-					})
-				}
-			}
-		} else {
-			end.map(Bound::Excluded).unwrap_or(Bound::Unbounded)
-		};
-		(begin, end)
-	} else {
-		(
-			start.map(Bound::Included).unwrap_or(Bound::Unbounded),
-			end.map(Bound::Excluded).unwrap_or(Bound::Unbounded),
-		)
-	};
-
-	Ok(Range {
-		tb: id,
-		beg: begin,
-		end,
-	}
-	.into())
+pub fn uuid((val,): (Value,)) -> Result<Value, Error> {
+	val.convert_to_uuid().map(Value::from)
 }
 
 pub mod is {

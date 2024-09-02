@@ -24,6 +24,7 @@ mod scanner;
 mod stash;
 mod tr;
 mod tx;
+mod version;
 
 mod fdb;
 mod indxdb;
@@ -34,10 +35,14 @@ mod surrealcs;
 mod surrealkv;
 mod tikv;
 
+#[cfg(not(target_arch = "wasm32"))]
+mod index;
 #[cfg(test)]
 mod tests;
 
 pub use self::ds::*;
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) use self::index::*;
 pub use self::kv::*;
 pub use self::live::*;
 pub use self::tr::*;

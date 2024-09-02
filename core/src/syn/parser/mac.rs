@@ -138,15 +138,17 @@ macro_rules! expected_whitespace {
 }
 
 #[cfg(test)]
+#[doc(hidden)]
 #[macro_export]
 macro_rules! test_parse {
-	($func:ident$( ( $($e:expr),* $(,)? ))? , $t:literal) => {{
+	($func:ident$( ( $($e:expr),* $(,)? ))? , $t:expr) => {{
 		let mut parser = $crate::syn::parser::Parser::new($t.as_bytes());
 		let mut stack = reblessive::Stack::new();
 		stack.enter(|ctx| parser.$func(ctx,$($($e),*)*)).finish()
 	}};
 }
 
+#[doc(hidden)]
 #[macro_export]
 macro_rules! enter_object_recursion {
 	($name:ident = $this:expr => { $($t:tt)* }) => {{

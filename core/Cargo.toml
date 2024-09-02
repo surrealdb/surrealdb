@@ -3,8 +3,8 @@ name = "surrealdb-core"
 publish = true
 edition = "2021"
 version = "2.0.0"
-rust-version = "1.77.0"
-readme = "../lib/CARGO.md"
+rust-version = "1.80.0"
+readme = "../sdk/CARGO.md"
 authors = ["Tobie Morgan Hitchcock <tobie@surrealdb.com>"]
 description = "A scalable, distributed, collaborative, document-graph database, for the realtime web"
 repository = "https://github.com/surrealdb/surrealdb"
@@ -58,15 +58,19 @@ ammonia = "4.0.0"
 arbitrary = { version = "1.3.2", features = ["derive"], optional = true }
 argon2 = "0.5.2"
 ascii = { version = "0.3.2", package = "any_ascii" }
-async-recursion = "1.0.5"
+async-graphql = { version = "7.0.7", default-features = false, features = [
+    "dynamic-schema",
+] }
 base64 = "0.21.5"
 bcrypt = "0.15.0"
+blake3 = "1.5.3"
 bincode = "1.3.3"
 bytes = "1.5.0"
-ciborium = "0.2.1"
+castaway = "0.2.3"
 cedar-policy = "2.4.2"
 channel = { version = "1.9.0", package = "async-channel" }
 chrono = { version = "0.4.31", features = ["serde"] }
+ciborium = "0.2.1"
 dashmap = "5.5.3"
 derive = { version = "0.12.0", package = "surrealdb-derive" }
 deunicode = "1.4.1"
@@ -96,16 +100,15 @@ js = { version = "0.6.2", package = "rquickjs", features = [
     "properties",
     "rust-alloc",
 ], optional = true }
-jsonwebtoken = { version = "8.3.0-surreal.1", package = "surrealdb-jsonwebtoken" }
+jsonwebtoken = "9.3.0"
 lexicmp = "0.1.0"
 linfa-linalg = "=0.1.0"
 md-5 = "0.10.6"
 nanoid = "0.4.0"
 ndarray = { version = "=0.15.6" }
 ndarray-stats = "=0.5.1"
-num-traits = "0.2.18"
-nom = { version = "7.1.3", features = ["alloc"] }
 num_cpus = "1.16.0"
+num-traits = "0.2.18"
 object_store = { version = "0.10.2", optional = false }
 once_cell = "1.18.0"
 pbkdf2 = { version = "0.12.2", features = ["simple"] }
@@ -117,27 +120,36 @@ rand = "0.8.5"
 reblessive = { version = "0.4.0", features = ["tree"] }
 regex = "1.10.2"
 regex-syntax = { version = "0.8.2", optional = true, features = ["arbitrary"] }
-reqwest = { version = "0.11.22", default-features = false, features = [
+reqwest = { version = "0.12.5", default-features = false, features = [
     "json",
     "stream",
     "multipart",
 ], optional = true }
-revision = { version = "0.8.0", features = ["chrono", "geo", "roaring", "regex", "rust_decimal", "uuid"] }
+revision = { version = "0.9.0", features = [
+    "chrono",
+    "geo",
+    "roaring",
+    "regex",
+    "rust_decimal",
+    "uuid",
+] }
 rmpv = "1.0.1"
 roaring = { version = "0.10.2", features = ["serde"] }
 rocksdb = { version = "0.21.0", features = ["lz4", "snappy"], optional = true }
-rust_decimal = { version = "1.33.1", features = ["maths", "serde-str"] }
+rust_decimal = { version = "1.36.0", features = ["maths", "serde-str"] }
 rust-stemmers = "1.2.0"
 scrypt = "0.11.0"
 semver = { version = "1.0.20", features = ["serde"] }
 serde = { version = "1.0.193", features = ["derive"] }
 serde_json = "1.0.108"
+serde-content = "0.1.0"
 sha1 = "0.10.6"
 sha2 = "0.10.8"
 snap = "1.1.0"
 storekey = "0.5.0"
-surrealcs = { version = "0.1.0", optional = true }
-surrealkv = { version = "0.3.0", optional = true }
+subtle = "2.6"
+surrealcs = { version = "0.1.0", optional = true, path = "../../surrealcs/client" }
+surrealkv = { version = "0.3.4", optional = true }
 surrealml = { version = "0.1.1", optional = true, package = "surrealml-core" }
 tempfile = { version = "3.10.1", optional = true }
 thiserror = "1.0.50"
@@ -159,7 +171,7 @@ test-log = { version = "0.2.13", features = ["trace"] }
 time = { version = "0.3.36", features = ["serde"] }
 tokio = { version = "1.34.0", features = ["macros", "sync", "rt-multi-thread"] }
 tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }
-wiremock = "0.5.22"
+wiremock = "0.6.0"
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 pharos = "0.5.3"
@@ -185,8 +197,15 @@ tokio = { version = "1.34.0", default-features = false, features = [
     "time",
     "sync",
 ] }
-tokio-tungstenite = { version = "0.20.1", optional = true }
+tokio-tungstenite = { version = "0.21.0", optional = true }
 uuid = { version = "1.6.1", features = ["serde", "v4", "v7"] }
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(surrealdb_unstable)'] }
 
 [lib]
 name = "surrealdb_core"
+
+
+[build-dependencies]
+core-dockpack = "0.1.0"

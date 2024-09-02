@@ -26,10 +26,17 @@ pub(super) struct Scanner<'a> {
 	future: Option<Pin<Box<dyn Future<Output = Output> + 'a>>>,
 	/// Whether this stream should try to fetch more
 	exhausted: bool,
+	/// Version as timestamp, 0 means latest.
+	version: Option<u64>,
 }
 
 impl<'a> Scanner<'a> {
-	pub fn new(store: &'a Transaction, batch: u32, range: Range<Key>) -> Self {
+	pub fn new(
+		store: &'a Transaction,
+		batch: u32,
+		range: Range<Key>,
+		version: Option<u64>,
+	) -> Self {
 		Scanner {
 			store,
 			batch,
@@ -37,6 +44,7 @@ impl<'a> Scanner<'a> {
 			future: None,
 			results: VecDeque::new(),
 			exhausted: false,
+			version,
 		}
 	}
 }
@@ -45,7 +53,7 @@ impl<'a> Stream for Scanner<'a> {
 	type Item = Result<(Key, Val), Error>;
 	fn poll_next(
 		mut self: Pin<&mut Self>,
-		cx: &mut Context<'_>,
+		cx: &mut Context,
 	) -> Poll<Option<Result<(Key, Val), Error>>> {
 		// If we have results, return the first one
 		if let Some(v) = self.results.pop_front() {
@@ -62,7 +70,7 @@ impl<'a> Stream for Scanner<'a> {
 			// Clone the range to use when scanning
 			let range = self.range.clone();
 			// Prepare a future to scan for results
-			self.future = Some(Box::pin(self.store.scan(range, num)));
+			self.future = Some(Box::pin(self.store.scan(range, num, self.version)));
 		}
 		// Try to resolve the future
 		match self.future.as_mut().unwrap().poll_unpin(cx) {

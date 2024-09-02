@@ -2,7 +2,9 @@ use crate::dbs::capabilities::NetTarget;
 use crate::err::Error;
 use crate::kvs::Datastore;
 use chrono::{DateTime, Duration, Utc};
-use jsonwebtoken::jwk::{AlgorithmParameters::*, Jwk, JwkSet, KeyOperations, PublicKeyUse};
+use jsonwebtoken::jwk::{
+	AlgorithmParameters::*, Jwk, JwkSet, KeyAlgorithm, KeyOperations, PublicKeyUse,
+};
 use jsonwebtoken::{Algorithm::*, DecodingKey, Validation};
 use once_cell::sync::Lazy;
 use reqwest::{Client, Url};
@@ -114,8 +116,25 @@ pub(super) async fn config(
 	// When missing, tokens must be validated using only the required key type parameter
 	// This is discouraged, as it requires relying on the algorithm specified in the token
 	// Source: https://datatracker.ietf.org/doc/html/rfc7517#section-4.4
-	let alg = match jwk.common.algorithm {
-		Some(alg) => alg,
+	let alg = match jwk.common.key_algorithm {
+		Some(alg) => match alg {
+			KeyAlgorithm::HS256 => HS256,
+			KeyAlgorithm::HS384 => HS384,
+			KeyAlgorithm::HS512 => HS512,
+			KeyAlgorithm::EdDSA => EdDSA,
+			KeyAlgorithm::ES256 => ES256,
+			KeyAlgorithm::ES384 => ES384,
+			KeyAlgorithm::PS256 => PS256,
+			KeyAlgorithm::PS384 => PS384,
+			KeyAlgorithm::PS512 => PS512,
+			KeyAlgorithm::RS256 => RS256,
+			KeyAlgorithm::RS384 => RS384,
+			KeyAlgorithm::RS512 => RS512,
+			_ => {
+				warn!("Unspported value for parameter 'alg' in JWK object: '{:?}'", alg);
+				return Err(Error::InvalidAuth); // Return opaque error
+			}
+		},
 		// If not specified, use the algorithm provided in the token header
 		// It is critical that the JWT library prevents the "none" algorithm from being used
 		// Reference: https://auth0.com/blog/critical-vulnerabilities-in-json-web-token-libraries/#Meet-the--None--Algorithm
@@ -184,7 +203,17 @@ pub(super) async fn config(
 
 	// Return verification configuration if a decoding key can be retrieved from the JWK object
 	match DecodingKey::from_jwk(&jwk) {
-		Ok(dec) => Ok((dec, Validation::new(alg))),
+		Ok(dec) => {
+			let mut val = Validation::new(alg);
+
+			// TODO(gguillemas): This keeps the existing behavior as of SurrealDB 2.0.0-alpha.9.
+			// Up to that point, a fork of the "jsonwebtoken" crate in version 8.3.0 was being used.
+			// Now that the audience claim is validated by default, we could allow users to leverage this.
+			// This will most likely involve defining an audience string via "DEFINE ACCESS ... TYPE JWT".
+			val.validate_aud = false;
+
+			Ok((dec, val))
+		}
 		Err(err) => {
 			warn!("Failed to retrieve decoding key from JWK object: '{}'", err);
 			Err(Error::InvalidAuth) // Return opaque error
@@ -342,7 +371,7 @@ mod tests {
 			common: jsonwebtoken::jwk::CommonParameters {
 				public_key_use: Some(jsonwebtoken::jwk::PublicKeyUse::Signature),
 				key_operations: None,
-				algorithm: Some(jsonwebtoken::Algorithm::RS256),
+				key_algorithm: Some(KeyAlgorithm::RS256),
 				key_id: Some("test_1".to_string()),
 				x509_url: None,
 				x509_chain: Some(vec![
@@ -363,7 +392,7 @@ mod tests {
 			common: jsonwebtoken::jwk::CommonParameters {
 				public_key_use: Some(jsonwebtoken::jwk::PublicKeyUse::Signature),
 				key_operations: None,
-				algorithm: Some(jsonwebtoken::Algorithm::RS256),
+				key_algorithm: Some(KeyAlgorithm::RS256),
 				key_id: Some("test_2".to_string()),
 				x509_url: None,
 				x509_chain: Some(vec![
@@ -629,7 +658,7 @@ mod tests {
 			)),
 		);
 		let mut jwks = DEFAULT_JWKS.clone();
-		jwks.keys[0].common.algorithm = None;
+		jwks.keys[0].common.key_algorithm = None;
 
 		let jwks_path = format!("{}/jwks.json", random_path());
 		let mock_server = MockServer::start().await;
@@ -667,7 +696,7 @@ mod tests {
 			)),
 		);
 		let mut jwks = DEFAULT_JWKS.clone();
-		jwks.keys[0].common.algorithm = None;
+		jwks.keys[0].common.key_algorithm = None;
 
 		let jwks_path = format!("{}/jwks.json", random_path());
 		let mock_server = MockServer::start().await;
@@ -690,6 +719,39 @@ mod tests {
 		assert!(
 			res.is_err(),
 			"Unexpected success validating token signed with algorithm that does not match the defined key type"
+		);
+	}
+
+	#[tokio::test]
+	async fn test_unsupported_algorithm() {
+		let ds = Datastore::new("memory").await.unwrap().with_capabilities(
+			Capabilities::default().with_network_targets(Targets::<NetTarget>::Some(
+				[NetTarget::from_str("127.0.0.1").unwrap()].into(),
+			)),
+		);
+		let mut jwks = DEFAULT_JWKS.clone();
+		jwks.keys[0].common.key_algorithm = Some(KeyAlgorithm::RSA_OAEP_256);
+
+		let jwks_path = format!("{}/jwks.json", random_path());
+		let mock_server = MockServer::start().await;
+		let response = ResponseTemplate::new(200).set_body_json(jwks);
+		Mock::given(method("GET"))
+			.and(path(&jwks_path))
+			.respond_with(response)
+			.mount(&mock_server)
+			.await;
+		let url = mock_server.uri();
+
+		let res = config(
+			&ds,
+			"test_1",
+			&format!("{}/{}", &url, &jwks_path),
+			jsonwebtoken::Algorithm::RS256,
+		)
+		.await;
+		assert!(
+			res.is_err(),
+			"Unexpected success validating token with key specifies an unsupported algorithm"
 		);
 	}
 

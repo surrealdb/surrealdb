@@ -41,11 +41,13 @@ pub struct Options {
 	/// Should we process field queries?
 	pub import: bool,
 	/// Should we process function futures?
-	pub futures: bool,
+	pub futures: Futures,
 	/// Should we process variable field projections?
 	pub projections: bool,
 	/// The channel over which we send notifications
 	pub sender: Option<Sender<Notification>>,
+	/// Version as nanosecond timestamp passed down to Datastore
+	pub version: Option<u64>,
 }
 
 #[derive(Clone, Debug)]
@@ -55,6 +57,13 @@ pub enum Force {
 	None,
 	Table(Arc<[DefineTableStatement]>),
 	Index(Arc<[DefineIndexStatement]>),
+}
+
+#[derive(Clone, Debug)]
+pub enum Futures {
+	Disabled,
+	Enabled,
+	Never,
 }
 
 impl Default for Options {
@@ -76,11 +85,12 @@ impl Options {
 			force: Force::None,
 			strict: false,
 			import: false,
-			futures: false,
+			futures: Futures::Disabled,
 			projections: false,
 			auth_enabled: true,
 			sender: None,
 			auth: Arc::new(Auth::default()),
+			version: None,
 		}
 	}
 
@@ -186,7 +196,20 @@ impl Options {
 
 	/// Specify if we should process futures
 	pub fn with_futures(mut self, futures: bool) -> Self {
-		self.futures = futures;
+		if matches!(self.futures, Futures::Never) {
+			return self;
+		}
+
+		self.futures = match futures {
+			true => Futures::Enabled,
+			false => Futures::Disabled,
+		};
+		self
+	}
+
+	/// Specify if we should never process futures
+	pub fn with_futures_never(mut self) -> Self {
+		self.futures = Futures::Never;
 		self
 	}
 
@@ -202,6 +225,12 @@ impl Options {
 		self
 	}
 
+	// Set the version
+	pub fn with_version(mut self, version: Option<u64>) -> Self {
+		self.version = version;
+		self
+	}
+
 	// --------------------------------------------------
 
 	/// Create a new Options object for a subquery
@@ -212,6 +241,7 @@ impl Options {
 			ns: self.ns.clone(),
 			db: self.db.clone(),
 			force: self.force.clone(),
+			futures: self.futures.clone(),
 			perms,
 			..*self
 		}
@@ -224,6 +254,7 @@ impl Options {
 			auth: self.auth.clone(),
 			ns: self.ns.clone(),
 			db: self.db.clone(),
+			futures: self.futures.clone(),
 			force,
 			..*self
 		}
@@ -237,6 +268,7 @@ impl Options {
 			ns: self.ns.clone(),
 			db: self.db.clone(),
 			force: self.force.clone(),
+			futures: self.futures.clone(),
 			strict,
 			..*self
 		}
@@ -250,6 +282,7 @@ impl Options {
 			ns: self.ns.clone(),
 			db: self.db.clone(),
 			force: self.force.clone(),
+			futures: self.futures.clone(),
 			import,
 			..*self
 		}
@@ -263,7 +296,13 @@ impl Options {
 			ns: self.ns.clone(),
 			db: self.db.clone(),
 			force: self.force.clone(),
-			futures,
+			futures: match self.futures {
+				Futures::Never => Futures::Never,
+				_ => match futures {
+					true => Futures::Enabled,
+					false => Futures::Disabled,
+				},
+			},
 			..*self
 		}
 	}
@@ -276,6 +315,7 @@ impl Options {
 			ns: self.ns.clone(),
 			db: self.db.clone(),
 			force: self.force.clone(),
+			futures: self.futures.clone(),
 			projections,
 			..*self
 		}
@@ -288,6 +328,7 @@ impl Options {
 			ns: self.ns.clone(),
 			db: self.db.clone(),
 			force: self.force.clone(),
+			futures: self.futures.clone(),
 			sender: Some(sender),
 			..*self
 		}
@@ -317,6 +358,7 @@ impl Options {
 			ns: self.ns.clone(),
 			db: self.db.clone(),
 			force: self.force.clone(),
+			futures: self.futures.clone(),
 			dive: self.dive - cost as u32,
 			..*self
 		})
@@ -501,5 +543,22 @@ mod tests {
 				.is_allowed(Action::View, ResourceKind::Any, &Base::Db)
 				.unwrap();
 		}
+	}
+
+	#[test]
+	pub fn execute_futures() {
+		let mut opts = Options::default().with_futures(false);
+
+		// Futures should be disabled
+		assert!(matches!(opts.futures, Futures::Disabled));
+
+		// Allow setting to true
+		opts = opts.with_futures(true);
+		assert!(matches!(opts.futures, Futures::Enabled));
+
+		// Set to never and disallow setting to true
+		opts = opts.with_futures_never();
+		opts = opts.with_futures(true);
+		assert!(matches!(opts.futures, Futures::Never));
 	}
 }

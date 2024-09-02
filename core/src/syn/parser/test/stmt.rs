@@ -11,11 +11,13 @@ use crate::{
 		index::{Distance, HnswParams, MTreeParams, SearchParams, VectorType},
 		language::Language,
 		statements::{
+			access,
+			access::{AccessStatementGrant, AccessStatementList, AccessStatementRevoke},
 			analyze::AnalyzeStatement,
 			show::{ShowSince, ShowStatement},
 			sleep::SleepStatement,
-			BeginStatement, BreakStatement, CancelStatement, CommitStatement, ContinueStatement,
-			CreateStatement, DefineAccessStatement, DefineAnalyzerStatement,
+			AccessStatement, BeginStatement, BreakStatement, CancelStatement, CommitStatement,
+			ContinueStatement, CreateStatement, DefineAccessStatement, DefineAnalyzerStatement,
 			DefineDatabaseStatement, DefineEventStatement, DefineFieldStatement,
 			DefineFunctionStatement, DefineIndexStatement, DefineNamespaceStatement,
 			DefineParamStatement, DefineStatement, DefineTableStatement, DeleteStatement,
@@ -117,6 +119,7 @@ fn parse_create() {
 			))),
 			timeout: Some(Timeout(Duration(std::time::Duration::from_secs(1)))),
 			parallel: true,
+			version: None,
 		}),
 	);
 }
@@ -131,6 +134,7 @@ fn parse_define_namespace() {
 			name: Ident("a".to_string()),
 			comment: Some(Strand("test".to_string())),
 			if_not_exists: false,
+			overwrite: false,
 		}))
 	);
 
@@ -142,6 +146,7 @@ fn parse_define_namespace() {
 			name: Ident("a".to_string()),
 			comment: None,
 			if_not_exists: false,
+			overwrite: false,
 		}))
 	)
 }
@@ -162,6 +167,7 @@ fn parse_define_database() {
 				store_diff: true,
 			}),
 			if_not_exists: false,
+			overwrite: false,
 		}))
 	);
 
@@ -174,6 +180,7 @@ fn parse_define_database() {
 			comment: None,
 			changefeed: None,
 			if_not_exists: false,
+			overwrite: false,
 		}))
 	)
 }
@@ -204,6 +211,8 @@ fn parse_define_function() {
 			comment: Some(Strand("test".to_string())),
 			permissions: Permission::Full,
 			if_not_exists: false,
+			overwrite: false,
+			returns: None,
 		}))
 	)
 }
@@ -375,6 +384,7 @@ fn parse_define_token() {
 			},
 			comment: Some(Strand("bar".to_string())),
 			if_not_exists: false,
+			overwrite: false,
 		})),
 	)
 }
@@ -451,6 +461,7 @@ fn parse_define_token_jwks() {
 			},
 			comment: Some(Strand("bar".to_string())),
 			if_not_exists: false,
+			overwrite: false,
 		})),
 	)
 }
@@ -577,6 +588,7 @@ fn parse_define_access_jwt_key() {
 				},
 				comment: Some(Strand("bar".to_string())),
 				if_not_exists: false,
+				overwrite: false,
 			})),
 		)
 	}
@@ -611,6 +623,7 @@ fn parse_define_access_jwt_key() {
 				},
 				comment: None,
 				if_not_exists: false,
+				overwrite: false,
 			})),
 		)
 	}
@@ -645,6 +658,7 @@ fn parse_define_access_jwt_key() {
 				},
 				comment: None,
 				if_not_exists: false,
+				overwrite: false,
 			})),
 		)
 	}
@@ -679,6 +693,7 @@ fn parse_define_access_jwt_key() {
 				},
 				comment: None,
 				if_not_exists: false,
+				overwrite: false,
 			})),
 		)
 	}
@@ -712,6 +727,7 @@ fn parse_define_access_jwt_key() {
 				},
 				comment: None,
 				if_not_exists: false,
+				overwrite: false,
 			})),
 		)
 	}
@@ -746,6 +762,7 @@ fn parse_define_access_jwt_key() {
 				},
 				comment: None,
 				if_not_exists: false,
+				overwrite: false,
 			})),
 		)
 	}
@@ -825,6 +842,7 @@ fn parse_define_access_jwt_key() {
 				},
 				comment: Some(Strand("bar".to_string())),
 				if_not_exists: false,
+				overwrite: false,
 			})),
 		)
 	}
@@ -856,6 +874,7 @@ fn parse_define_access_jwt_key() {
 				},
 				comment: Some(Strand("bar".to_string())),
 				if_not_exists: false,
+				overwrite: false,
 			})),
 		)
 	}
@@ -890,6 +909,7 @@ fn parse_define_access_jwt_jwks() {
 				},
 				comment: Some(Strand("bar".to_string())),
 				if_not_exists: false,
+				overwrite: false,
 			})),
 		)
 	}
@@ -923,6 +943,7 @@ fn parse_define_access_jwt_jwks() {
 				},
 				comment: None,
 				if_not_exists: false,
+				overwrite: false,
 			})),
 		)
 	}
@@ -955,6 +976,7 @@ fn parse_define_access_jwt_jwks() {
 				},
 				comment: None,
 				if_not_exists: false,
+				overwrite: false,
 			})),
 		)
 	}
@@ -988,6 +1010,7 @@ fn parse_define_access_jwt_jwks() {
 				},
 				comment: None,
 				if_not_exists: false,
+				overwrite: false,
 			})),
 		)
 	}
@@ -1020,6 +1043,7 @@ fn parse_define_access_jwt_jwks() {
 				},
 				comment: None,
 				if_not_exists: false,
+				overwrite: false,
 			})),
 		)
 	}
@@ -1145,9 +1169,6 @@ fn parse_define_access_record() {
 							key: "foo".to_string(),
 						}),
 					},
-					// TODO(gguillemas): Field kept to gracefully handle breaking change.
-					// Remove when "revision" crate allows doing so.
-					authenticate: None
 				}),
 				authenticate: None,
 				duration: AccessDuration {
@@ -1157,6 +1178,7 @@ fn parse_define_access_record() {
 				},
 				comment: None,
 				if_not_exists: false,
+				overwrite: false,
 			})),
 		);
 	}
@@ -1185,9 +1207,6 @@ fn parse_define_access_record() {
 							key: "bar".to_string(),
 						}),
 					},
-					// TODO(gguillemas): Field kept to gracefully handle breaking change.
-					// Remove when "revision" crate allows doing so.
-					authenticate: None
 				}),
 				authenticate: None,
 				duration: AccessDuration {
@@ -1197,6 +1216,7 @@ fn parse_define_access_record() {
 				},
 				comment: None,
 				if_not_exists: false,
+				overwrite: false,
 			})),
 		);
 	}
@@ -1225,9 +1245,6 @@ fn parse_define_access_record() {
 							key: "bar".to_string(),
 						}),
 					},
-					// TODO(gguillemas): Field kept to gracefully handle breaking change.
-					// Remove when "revision" crate allows doing so.
-					authenticate: None
 				}),
 				authenticate: None,
 				duration: AccessDuration {
@@ -1237,6 +1254,7 @@ fn parse_define_access_record() {
 				},
 				comment: None,
 				if_not_exists: false,
+				overwrite: false,
 			})),
 		);
 	}
@@ -1296,9 +1314,6 @@ fn parse_define_access_record_with_jwt() {
 					}),
 					issue: None,
 				},
-				// TODO(gguillemas): Field kept to gracefully handle breaking change.
-				// Remove when "revision" crate allows doing so.
-				authenticate: None
 			}),
 			authenticate: None,
 			// Default durations.
@@ -1309,6 +1324,7 @@ fn parse_define_access_record_with_jwt() {
 			},
 			comment: Some(Strand("bar".to_string())),
 			if_not_exists: false,
+			overwrite: false,
 		})),
 	)
 }
@@ -1334,6 +1350,7 @@ fn parse_define_param() {
 			comment: None,
 			permissions: Permission::Specific(Value::Null),
 			if_not_exists: false,
+			overwrite: false,
 		}))
 	);
 }
@@ -1381,7 +1398,8 @@ fn parse_define_table() {
 			}),
 			comment: None,
 			if_not_exists: false,
-			kind: TableType::Any,
+			overwrite: false,
+			kind: TableType::Normal,
 		}))
 	);
 }
@@ -1401,6 +1419,7 @@ fn parse_define_event() {
 			then: Values(vec![Value::Null, Value::None]),
 			comment: None,
 			if_not_exists: false,
+			overwrite: false,
 		}))
 	)
 }
@@ -1439,6 +1458,7 @@ fn parse_define_field() {
 			},
 			comment: None,
 			if_not_exists: false,
+			overwrite: false,
 		}))
 	)
 }
@@ -1487,6 +1507,8 @@ fn parse_define_index() {
 			}),
 			comment: None,
 			if_not_exists: false,
+			overwrite: false,
+			concurrently: false
 		}))
 	);
 
@@ -1502,6 +1524,8 @@ fn parse_define_index() {
 			index: Index::Uniq,
 			comment: None,
 			if_not_exists: false,
+			overwrite: false,
+			concurrently: false
 		}))
 	);
 
@@ -1516,7 +1540,6 @@ fn parse_define_index() {
 			cols: Idioms(vec![Idiom(vec![Part::Field(Ident("a".to_owned()))]),]),
 			index: Index::MTree(MTreeParams {
 				dimension: 4,
-				_distance: Default::default(),
 				distance: Distance::Minkowski(Number::Int(5)),
 				capacity: 6,
 				doc_ids_order: 7,
@@ -1526,6 +1549,8 @@ fn parse_define_index() {
 			}),
 			comment: None,
 			if_not_exists: false,
+			overwrite: false,
+			concurrently: false
 		}))
 	);
 
@@ -1551,6 +1576,8 @@ fn parse_define_index() {
 			}),
 			comment: None,
 			if_not_exists: false,
+			overwrite: false,
+			concurrently: false
 		}))
 	);
 }
@@ -1583,6 +1610,7 @@ fn parse_define_analyzer() {
 			comment: None,
 			function: Some(Ident("foo::bar".to_string())),
 			if_not_exists: false,
+			overwrite: false,
 		})),
 	)
 }
@@ -1624,7 +1652,7 @@ fn parse_delete_2() {
 					dir: Dir::Out,
 					from: Thing {
 						tb: "a".to_owned(),
-						id: Id::String("b".to_owned()),
+						id: Id::from("b"),
 					},
 					what: Tables::default(),
 				}))),
@@ -1827,15 +1855,14 @@ SELECT bar as foo,[1,2],bar OMIT bar FROM ONLY a,1
 			}])),
 			limit: Some(Limit(Value::Thing(Thing {
 				tb: "a".to_owned(),
-				id: Id::String("b".to_owned()),
+				id: Id::from("b"),
 			}))),
 			start: Some(Start(Value::Object(Object(
 				[("a".to_owned(), Value::Bool(true))].into_iter().collect()
 			)))),
-			fetch: Some(Fetchs(vec![Fetch(
-				Idiom(vec![]),
-				Value::Idiom(Idiom(vec![Part::Field(Ident("foo".to_owned()))]))
-			)])),
+			fetch: Some(Fetchs(vec![Fetch(Value::Idiom(Idiom(vec![Part::Field(Ident(
+				"foo".to_owned()
+			))])))])),
 			version: Some(Version(Datetime(expected_datetime))),
 			timeout: None,
 			parallel: false,
@@ -1852,7 +1879,8 @@ fn parse_let() {
 		res,
 		Statement::Set(SetStatement {
 			name: "param".to_owned(),
-			what: Value::Number(Number::Int(1))
+			what: Value::Number(Number::Int(1)),
+			kind: None,
 		})
 	);
 
@@ -1861,7 +1889,8 @@ fn parse_let() {
 		res,
 		Statement::Set(SetStatement {
 			name: "param".to_owned(),
-			what: Value::Number(Number::Int(1))
+			what: Value::Number(Number::Int(1)),
+			kind: None,
 		})
 	);
 }
@@ -2041,6 +2070,7 @@ fn parse_insert() {
 				),
 			])),
 			output: Some(Output::After),
+			version: None,
 			timeout: None,
 			parallel: false,
 			relation: false,
@@ -2097,14 +2127,11 @@ fn parse_live() {
 	assert_eq!(
 		stmt.fetch,
 		Some(Fetchs(vec![
-			Fetch(
-				Idiom(vec![]),
-				Value::Idiom(Idiom(vec![
-					Part::Field(Ident("a".to_owned())),
-					Part::Where(Value::Idiom(Idiom(vec![Part::Field(Ident("foo".to_owned()))]))),
-				]))
-			),
-			Fetch(Idiom(vec![]), Value::Idiom(Idiom(vec![Part::Field(Ident("b".to_owned()))]))),
+			Fetch(Value::Idiom(Idiom(vec![
+				Part::Field(Ident("a".to_owned())),
+				Part::Where(Value::Idiom(Idiom(vec![Part::Field(Ident("foo".to_owned()))]))),
+			]))),
+			Fetch(Value::Idiom(Idiom(vec![Part::Field(Ident("b".to_owned()))]))),
 		])),
 	)
 }
@@ -2128,10 +2155,9 @@ fn parse_return() {
 		res,
 		Statement::Output(OutputStatement {
 			what: Value::Idiom(Idiom(vec![Part::Field(Ident("RETRUN".to_owned()))])),
-			fetch: Some(Fetchs(vec![Fetch(
-				Idiom(vec![]),
-				Value::Idiom(Idiom(vec![Part::Field(Ident("RETURN".to_owned()).to_owned())]))
-			)])),
+			fetch: Some(Fetchs(vec![Fetch(Value::Idiom(Idiom(vec![Part::Field(
+				Ident("RETURN".to_owned()).to_owned()
+			)])))])),
 		}),
 	)
 }
@@ -2149,7 +2175,7 @@ fn parse_relate() {
 			only: true,
 			kind: Value::Thing(Thing {
 				tb: "a".to_owned(),
-				id: Id::String("b".to_owned()),
+				id: Id::from("b"),
 			}),
 			from: Value::Array(Array(vec![
 				Value::Number(Number::Int(1)),
@@ -2162,6 +2188,7 @@ fn parse_relate() {
 				output: None,
 				timeout: None,
 				parallel: false,
+				version: None,
 			}))),
 			uniq: true,
 			data: Some(Data::SetExpression(vec![(
@@ -2384,5 +2411,43 @@ fn parse_upsert() {
 			timeout: Some(Timeout(Duration(std::time::Duration::from_secs(1)))),
 			parallel: true,
 		})
+	);
+}
+
+#[test]
+fn parse_access_grant() {
+	let res = test_parse!(parse_stmt, r#"ACCESS a ON NAMESPACE GRANT FOR USER b"#).unwrap();
+	assert_eq!(
+		res,
+		Statement::Access(AccessStatement::Grant(AccessStatementGrant {
+			ac: Ident("a".to_string()),
+			base: Some(Base::Ns),
+			subject: Some(access::Subject::User(Ident("b".to_string()))),
+		}))
+	);
+}
+
+#[test]
+fn parse_access_revoke() {
+	let res = test_parse!(parse_stmt, r#"ACCESS a ON DATABASE REVOKE b"#).unwrap();
+	assert_eq!(
+		res,
+		Statement::Access(AccessStatement::Revoke(AccessStatementRevoke {
+			ac: Ident("a".to_string()),
+			base: Some(Base::Db),
+			gr: Ident("b".to_string()),
+		}))
+	);
+}
+
+#[test]
+fn parse_access_list() {
+	let res = test_parse!(parse_stmt, r#"ACCESS a LIST"#).unwrap();
+	assert_eq!(
+		res,
+		Statement::Access(AccessStatement::List(AccessStatementList {
+			ac: Ident("a".to_string()),
+			base: None,
+		}))
 	);
 }

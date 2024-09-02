@@ -21,7 +21,7 @@ pub struct RemoveAccessStatement {
 
 impl RemoveAccessStatement {
 	/// Process this type returning a computed simple Value
-	pub(crate) async fn compute(&self, ctx: &Context<'_>, opt: &Options) -> Result<Value, Error> {
+	pub(crate) async fn compute(&self, ctx: &Context, opt: &Options) -> Result<Value, Error> {
 		let future = async {
 			// Allowed to run?
 			opt.is_allowed(Action::Edit, ResourceKind::Actor, &self.base)?;
@@ -35,6 +35,9 @@ impl RemoveAccessStatement {
 					// Delete the definition
 					let key = crate::key::root::ac::new(&ac.name);
 					txn.del(key).await?;
+					// Delete any associated data including access grants.
+					let key = crate::key::root::access::all::new(&ac.name);
+					txn.delp(key).await?;
 					// Clear the cache
 					txn.clear();
 					// Ok all good
@@ -48,6 +51,9 @@ impl RemoveAccessStatement {
 					// Delete the definition
 					let key = crate::key::namespace::ac::new(opt.ns()?, &ac.name);
 					txn.del(key).await?;
+					// Delete any associated data including access grants.
+					let key = crate::key::namespace::access::all::new(opt.ns()?, &ac.name);
+					txn.delp(key).await?;
 					// Clear the cache
 					txn.clear();
 					// Ok all good
@@ -61,6 +67,10 @@ impl RemoveAccessStatement {
 					// Delete the definition
 					let key = crate::key::database::ac::new(opt.ns()?, opt.db()?, &ac.name);
 					txn.del(key).await?;
+					// Delete any associated data including access grants.
+					let key =
+						crate::key::database::access::all::new(opt.ns()?, opt.db()?, &ac.name);
+					txn.delp(key).await?;
 					// Clear the cache
 					txn.clear();
 					// Ok all good

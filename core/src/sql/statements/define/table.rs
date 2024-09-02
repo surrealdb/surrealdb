@@ -20,7 +20,7 @@ use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Write};
 use std::sync::Arc;
 
-#[revisioned(revision = 3)]
+#[revisioned(revision = 4)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
@@ -37,15 +37,17 @@ pub struct DefineTableStatement {
 	pub if_not_exists: bool,
 	#[revision(start = 3)]
 	pub kind: TableType,
+	#[revision(start = 4)]
+	pub overwrite: bool,
 }
 
 impl DefineTableStatement {
 	pub(crate) async fn compute(
 		&self,
 		stk: &mut Stk,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		opt: &Options,
-		doc: Option<&CursorDoc<'_>>,
+		doc: Option<&CursorDoc>,
 	) -> Result<Value, Error> {
 		// Allowed to run?
 		opt.is_allowed(Action::Edit, ResourceKind::Table, &Base::Db)?;
@@ -55,7 +57,7 @@ impl DefineTableStatement {
 		if txn.get_tb(opt.ns()?, opt.db()?, &self.name).await.is_ok() {
 			if self.if_not_exists {
 				return Ok(Value::None);
-			} else {
+			} else if !self.overwrite {
 				return Err(Error::TbAlreadyExists {
 					value: self.name.to_string(),
 				});
@@ -73,9 +75,10 @@ impl DefineTableStatement {
 			},
 			// Don't persist the `IF NOT EXISTS` clause to schema
 			if_not_exists: false,
+			overwrite: false,
 			..self.clone()
 		};
-		txn.set(key, &dt).await?;
+		txn.set(key, &dt, None).await?;
 		// Add table relational fields
 		self.add_in_out_fields(&txn, opt).await?;
 		// Clear the cache
@@ -93,7 +96,7 @@ impl DefineTableStatement {
 			for v in view.what.0.iter() {
 				// Save the view config
 				let key = crate::key::table::ft::new(opt.ns()?, opt.db()?, v, &self.name);
-				txn.set(key, self).await?;
+				txn.set(key, self, None).await?;
 			}
 			// Force queries to run
 			let opt = &opt.new_with_force(Force::Table(Arc::new([dt])));
@@ -144,6 +147,7 @@ impl DefineTableStatement {
 						kind: Some(val),
 						..Default::default()
 					},
+					None,
 				)
 				.await?;
 			}
@@ -159,6 +163,7 @@ impl DefineTableStatement {
 						kind: Some(val),
 						..Default::default()
 					},
+					None,
 				)
 				.await?;
 			}
@@ -172,6 +177,9 @@ impl Display for DefineTableStatement {
 		write!(f, "DEFINE TABLE")?;
 		if self.if_not_exists {
 			write!(f, " IF NOT EXISTS")?
+		}
+		if self.overwrite {
+			write!(f, " OVERWRITE")?
 		}
 		write!(f, " {}", self.name)?;
 		write!(f, " TYPE")?;
@@ -194,6 +202,9 @@ impl Display for DefineTableStatement {
 						" OUT {}",
 						kind.iter().map(|t| t.0.as_str()).collect::<Vec<_>>().join(" | ")
 					)?;
+				}
+				if rel.enforced {
+					write!(f, " ENFORCED")?;
 				}
 			}
 			TableType::Any => {

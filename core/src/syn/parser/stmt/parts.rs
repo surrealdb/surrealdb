@@ -205,8 +205,9 @@ impl Parser<'_> {
 		})
 	}
 
-	pub fn try_parse_group(
+	pub async fn try_parse_group(
 		&mut self,
+		ctx: &mut Stk,
 		fields: &Fields,
 		fields_span: Span,
 	) -> ParseResult<Option<Groups>> {
@@ -223,7 +224,7 @@ impl Parser<'_> {
 		let has_all = fields.contains(&Field::All);
 
 		let before = self.peek().span;
-		let group = self.parse_basic_idiom()?;
+		let group = self.parse_basic_idiom(ctx).await?;
 		let group_span = before.covers(self.last_span());
 		if !has_all {
 			Self::check_idiom(MissingKind::Group, fields, fields_span, &group, group_span)?;
@@ -232,7 +233,7 @@ impl Parser<'_> {
 		let mut groups = Groups(vec![Group(group)]);
 		while self.eat(t!(",")) {
 			let before = self.peek().span;
-			let group = self.parse_basic_idiom()?;
+			let group = self.parse_basic_idiom(ctx).await?;
 			let group_span = before.covers(self.last_span());
 			if !has_all {
 				Self::check_idiom(MissingKind::Group, fields, fields_span, &group, group_span)?;
@@ -406,7 +407,7 @@ impl Parser<'_> {
 		}
 
 		let cond = self.try_parse_condition(stk).await?;
-		let group = self.try_parse_group(&fields, fields_span)?;
+		let group = self.try_parse_group(stk, &fields, fields_span).await?;
 
 		Ok(View {
 			expr: fields,

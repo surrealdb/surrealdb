@@ -10,6 +10,7 @@ use crate::vs::Versionstamp;
 use std::fmt::Debug;
 use std::ops::Range;
 
+#[allow(dead_code)] // not used when non of the storage backends are enabled.
 pub trait Transaction {
 	/// Specify how we should handle unclosed transactions.
 	///
@@ -54,18 +55,18 @@ pub trait Transaction {
 		K: Into<Key> + Sprintable + Debug;
 
 	/// Fetch a key from the datastore.
-	async fn get<K>(&mut self, key: K) -> Result<Option<Val>, Error>
+	async fn get<K>(&mut self, key: K, version: Option<u64>) -> Result<Option<Val>, Error>
 	where
 		K: Into<Key> + Sprintable + Debug;
 
 	/// Insert or update a key in the datastore.
-	async fn set<K, V>(&mut self, key: K, val: V) -> Result<(), Error>
+	async fn set<K, V>(&mut self, key: K, val: V, version: Option<u64>) -> Result<(), Error>
 	where
 		K: Into<Key> + Sprintable + Debug,
 		V: Into<Val> + Debug;
 
 	/// Insert a key if it doesn't exist in the datastore.
-	async fn put<K, V>(&mut self, key: K, val: V) -> Result<(), Error>
+	async fn put<K, V>(&mut self, key: K, val: V, version: Option<u64>) -> Result<(), Error>
 	where
 		K: Into<Key> + Sprintable + Debug,
 		V: Into<Val> + Debug;
@@ -97,7 +98,12 @@ pub trait Transaction {
 	/// Retrieve a specific range of keys from the datastore.
 	///
 	/// This function fetches the full range of key-value pairs, in a single request to the underlying datastore.
-	async fn scan<K>(&mut self, rng: Range<K>, limit: u32) -> Result<Vec<(Key, Val)>, Error>
+	async fn scan<K>(
+		&mut self,
+		rng: Range<K>,
+		limit: u32,
+		version: Option<u64>,
+	) -> Result<Vec<(Key, Val)>, Error>
 	where
 		K: Into<Key> + Sprintable + Debug;
 
@@ -116,7 +122,7 @@ pub trait Transaction {
 		// Continue with function logic
 		let mut out = Vec::with_capacity(keys.len());
 		for key in keys.into_iter() {
-			if let Some(val) = self.get(key).await? {
+			if let Some(val) = self.get(key, None).await? {
 				out.push(val);
 			} else {
 				out.push(vec![]);
@@ -239,7 +245,7 @@ pub trait Transaction {
 		let end: Key = rng.end.into();
 		// Scan for the next batch
 		let res = if values {
-			self.scan(beg..end.clone(), batch).await?
+			self.scan(beg..end.clone(), batch, None).await?
 		} else {
 			self.keys(beg..end.clone(), batch)
 				.await?
@@ -288,7 +294,7 @@ pub trait Transaction {
 		// Calculate the version key
 		let key = key.into();
 		// Calculate the version number
-		let ver = match self.get(key.as_slice()).await? {
+		let ver = match self.get(key.as_slice(), None).await? {
 			Some(prev) => {
 				let res: Result<[u8; 10], Error> = match prev.as_slice().try_into() {
 					Ok(ba) => Ok(ba),
@@ -301,7 +307,7 @@ pub trait Transaction {
 		// Convert the timestamp to a versionstamp
 		let verbytes = crate::vs::u64_to_versionstamp(ver);
 		// Store the timestamp to prevent other transactions from committing
-		self.set(key.as_slice(), verbytes.to_vec()).await?;
+		self.set(key.as_slice(), verbytes.to_vec(), None).await?;
 		// Return the uint64 representation of the timestamp as the result
 		Ok(verbytes)
 	}
@@ -332,6 +338,6 @@ pub trait Transaction {
 		let mut k: Vec<u8> = prefix.into();
 		k.append(&mut ts.to_vec());
 		k.append(&mut suffix.into());
-		self.set(k, val).await
+		self.set(k, val, None).await
 	}
 }

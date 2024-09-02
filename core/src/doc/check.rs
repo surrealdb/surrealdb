@@ -6,11 +6,11 @@ use crate::err::Error;
 use crate::sql::Cond;
 use reblessive::tree::Stk;
 
-impl<'a> Document<'a> {
+impl Document {
 	pub async fn check(
 		&self,
 		stk: &mut Stk,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		opt: &Options,
 		stm: &Statement<'_>,
 	) -> Result<(), Error> {
@@ -19,10 +19,10 @@ impl<'a> Document<'a> {
 
 	pub(crate) async fn check_cond(
 		stk: &mut Stk,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		opt: &Options,
 		cond: Option<&Cond>,
-		doc: &CursorDoc<'_>,
+		doc: &CursorDoc,
 	) -> Result<(), Error> {
 		// Check where condition
 		if let Some(cond) = cond {

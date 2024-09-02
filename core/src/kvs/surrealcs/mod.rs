@@ -5,47 +5,32 @@ use crate::key::debug::Sprintable;
 use crate::kvs::Check;
 use crate::kvs::Key;
 use crate::kvs::Val;
-use crate::vs::Versionstamp;
 use futures::lock::Mutex;
+use std::fmt::Debug;
 use std::ops::Range;
-use std::pin::Pin;
 use std::sync::Arc;
-use surrealcs_client::router::create_connection;
-use surrealcs_client::transactions::interface::bridge::BridgeHandle;
-use surrealcs_client::transactions::interface::interface::{
+use surrealcs::kernel::messages::server::interface::ServerTransactionMessage;
+use surrealcs::kernel::messages::server::kv_operations::*;
+use surrealcs::router::create_connection_pool;
+use surrealcs::transactions::interface::bridge::BridgeHandle;
+use surrealcs::transactions::interface::interface::{
 	Any as AnyState, Transaction as SurrealCSTransaction,
 };
-use surrealcs_kernel::messages::server::message::{
-	KeyValueOperationType::{self, *},
-	Transaction as TransactionMessage,
-};
-
-/// simplifies code for mapping an error
-macro_rules! safe_eject {
-	($op: expr) => {
-		$op.map_err(|e| Error::Ds(e.to_string()))
-	};
-}
 
 /// The main struct that is used to interact with the database.
-///
-/// # Fields
-/// * `db`: the database handle
 #[derive(Clone)]
 #[non_exhaustive]
-pub struct Datastore {
-	db: Pin<Arc<SurrealCSTransaction<AnyState>>>,
-}
+pub struct Datastore {}
 
 #[non_exhaustive]
 pub struct Transaction {
-	// is the transaction complete?
+	/// Is the transaction complete?
 	done: bool,
-	// is the transaction writable
+	/// Is the transaction writeable?
 	write: bool,
-	// Should we check unhandled transactions
+	/// Should we check unhandled transactions?
 	check: Check,
-	// Whether the transaction has been started
+	/// Has the transaction been started?
 	started: bool,
 	/// The underlying datastore transaction
 	inner: Arc<Mutex<SurrealCSTransaction<AnyState>>>,
@@ -84,15 +69,8 @@ impl Drop for Transaction {
 impl Datastore {
 	/// Open a new database
 	pub(crate) async fn new(path: &str) -> Result<Datastore, Error> {
-		let num = num_cpus::get();
-		for _ in 0..num {
-			let _ = create_connection(path).await.unwrap();
-		}
-		let transaction = SurrealCSTransaction::new().await.unwrap();
-		let transaction = transaction.into_any();
-		Ok(Datastore {
-			db: Pin::new(Arc::new(transaction)),
-		})
+		create_connection_pool(path, None).await.unwrap();
+		Ok(Datastore {})
 	}
 
 	/// Starts a new transaction.
@@ -103,7 +81,8 @@ impl Datastore {
 	/// # Returns
 	/// the transaction
 	pub(crate) async fn transaction(&self, write: bool, _: bool) -> Result<Transaction, Error> {
-		let transaction = safe_eject!(SurrealCSTransaction::new().await)?;
+		let transaction = SurrealCSTransaction::new().await;
+		let transaction = transaction.map_err(|e| Error::Ds(e.to_string()))?;
 		let transaction = transaction.into_any();
 		Ok(Transaction {
 			done: false,
@@ -125,26 +104,22 @@ impl Transaction {
 	/// the response from the server
 	async fn send_message(
 		&mut self,
-		message: TransactionMessage,
-	) -> Result<TransactionMessage, Error> {
+		message: ServerTransactionMessage,
+	) -> Result<ServerTransactionMessage, Error> {
 		let mut transaction = self.inner.lock().await;
-
-		// This is the lazy evaluation, the transaction isn't registered with the SurrealCS server
-		// unless we actually start a transaction
-		match self.started {
-			// Create a transaction actor for the first transaction
-			false => {
-				// let message = safe_eject!(&transaction.begin(message).await)?;
-				let message = safe_eject!(transaction.begin::<BridgeHandle>(message).await)?;
-				self.started = true;
-				Ok(message)
-			}
-			// already started to hitting up an existing actor
-			true => {
-				let message = safe_eject!(transaction.send::<BridgeHandle>(message).await)?;
-				Ok(message)
-			}
-		}
+		// Check to see if this transaction is started
+		let started = self.started;
+		// For any future calls, this transaction is started
+		self.started = true;
+		// If this is the first message to SurrealCS then
+		// we need to start a transaction, by creating the
+		// actor, and send the message with the request.
+		let response = match started {
+			false => transaction.begin::<BridgeHandle>(message).await,
+			true => transaction.send::<BridgeHandle>(message).await,
+		};
+		// Return the result
+		response.map_err(|e| Error::Tx(e.to_string()))
 	}
 }
 
@@ -167,8 +142,16 @@ impl super::api::Transaction for Transaction {
 	/// Cancels the transaction.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self))]
 	async fn cancel(&mut self) -> Result<(), Error> {
+		// Check to see if transaction is closed
+		if self.done {
+			return Err(Error::TxFinished);
+		}
+		// Mark this transaction as done
+		self.done = true;
+		// Cancel this transaction
 		let mut transaction = self.inner.lock().await;
-		let _ = safe_eject!(transaction.rollback::<BridgeHandle>().await)?;
+		transaction.rollback::<BridgeHandle>().await.map_err(|e| Error::Tx(e.to_string()))?;
+		// Continue
 		Ok(())
 	}
 
@@ -187,7 +170,7 @@ impl super::api::Transaction for Transaction {
 		self.done = true;
 		// Commit the transaction
 		let mut transaction = self.inner.lock().await;
-		let _ = safe_eject!(transaction.empty_commit::<BridgeHandle>().await)?;
+		transaction.empty_commit::<BridgeHandle>().await.map_err(|e| Error::Tx(e.to_string()))?;
 		// Continue
 		Ok(())
 	}
@@ -203,15 +186,20 @@ impl super::api::Transaction for Transaction {
 			return Err(Error::TxFinished);
 		}
 		// Check the key
-		let message = TransactionMessage::new(key.into(), Get);
-		let response = self.send_message(message).await?;
+		let message = ServerTransactionMessage::Exists(MessageExists {
+			key: key.into(),
+		});
+		let response = match self.send_message(message).await? {
+			ServerTransactionMessage::ResponseExists(v) => v,
+			_ => return Err(Error::Tx("Received an invalid response".to_string())),
+		};
 		// Return result
-		Ok(response.value.is_some())
+		Ok(response)
 	}
 
 	/// Fetch a key from the database
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
-	async fn get<K>(&mut self, key: K) -> Result<Option<Val>, Error>
+	async fn get<K>(&mut self, key: K, version: Option<u64>) -> Result<Option<Val>, Error>
 	where
 		K: Into<Key> + Sprintable + Debug,
 	{
@@ -220,15 +208,20 @@ impl super::api::Transaction for Transaction {
 			return Err(Error::TxFinished);
 		}
 		// Fetch the value from the database.
-		let message = TransactionMessage::new(key.into(), Get);
-		let response = self.send_message(message).await?;
+		let message = ServerTransactionMessage::Get(MessageGet {
+			key: key.into(),
+		});
+		let response = match self.send_message(message).await? {
+			ServerTransactionMessage::ResponseGet(v) => v,
+			_ => return Err(Error::Tx("Received an invalid response".to_string())),
+		};
 		// Return result
 		Ok(response.value)
 	}
 
 	/// Insert or update a key in the database
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
-	async fn set<K, V>(&mut self, key: K, val: V) -> Result<(), Error>
+	async fn set<K, V>(&mut self, key: K, val: V, version: Option<u64>) -> Result<(), Error>
 	where
 		K: Into<Key> + Sprintable + Debug,
 		V: Into<Val> + Debug,
@@ -242,15 +235,18 @@ impl super::api::Transaction for Transaction {
 			return Err(Error::TxReadonly);
 		}
 		// Set the key
-		let message = TransactionMessage::new(key.into(), Set).with_value(val.into());
-		let _ = self.send_message(message).await?;
+		let message = ServerTransactionMessage::Set(MessageSet {
+			key: key.into(),
+			value: val.into(),
+		});
+		self.send_message(message).await?;
 		// Return result
 		Ok(())
 	}
 
 	/// Insert a key if it doesn't exist in the database
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
-	async fn put<K, V>(&mut self, key: K, val: V) -> Result<(), Error>
+	async fn put<K, V>(&mut self, key: K, val: V, version: Option<u64>) -> Result<(), Error>
 	where
 		K: Into<Key> + Sprintable + Debug,
 		V: Into<Val> + Debug,
@@ -264,8 +260,11 @@ impl super::api::Transaction for Transaction {
 			return Err(Error::TxReadonly);
 		}
 		// Put the key
-		let message = TransactionMessage::new(key.into(), Put).with_value(val.into());
-		let _ = self.send_message(message).await?;
+		let message = ServerTransactionMessage::Put(MessagePut {
+			key: key.into(),
+			value: val.into(),
+		});
+		self.send_message(message).await?;
 		// Return result
 		Ok(())
 	}
@@ -288,10 +287,13 @@ impl super::api::Transaction for Transaction {
 		// Get the arguments
 		let chk = chk.map(Into::into);
 		// Set the key if valid
-		let message = TransactionMessage::new(key.into(), Putc)
-			.with_value(val.into())
-			.with_expected_value(chk);
-		let _ = self.send_message(message).await?;
+		let message = ServerTransactionMessage::Putc(MessagePutc {
+			key: key.into(),
+			value: val.into(),
+			expected_value: chk,
+		});
+		self.send_message(message).await?;
+		// Return result
 		Ok(())
 	}
 
@@ -310,8 +312,10 @@ impl super::api::Transaction for Transaction {
 			return Err(Error::TxReadonly);
 		}
 		// Remove the key
-		let message = TransactionMessage::new(key.into(), Delete);
-		let _ = self.send_message(message).await?;
+		let message = ServerTransactionMessage::Del(MessageDel {
+			key: key.into(),
+		});
+		self.send_message(message).await?;
 		// Return result
 		Ok(())
 	}
@@ -334,8 +338,35 @@ impl super::api::Transaction for Transaction {
 		// Get the arguments
 		let chk = chk.map(Into::into);
 		// Delete the key if valid
-		let message = TransactionMessage::new(key.into(), Delc).with_expected_value(chk);
-		let _ = self.send_message(message).await?;
+		let message = ServerTransactionMessage::Delc(MessageDelc {
+			key: key.into(),
+			expected_value: chk,
+		});
+		self.send_message(message).await?;
+		// Return result
+		Ok(())
+	}
+
+	/// Delete a range of keys from the database.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.sprint()))]
+	async fn delr<K>(&mut self, rng: Range<K>) -> Result<(), Error>
+	where
+		K: Into<Key> + Sprintable + Debug,
+	{
+		// Check to see if transaction is closed
+		if self.done {
+			return Err(Error::TxFinished);
+		}
+		// Check to see if transaction is writable
+		if !self.write {
+			return Err(Error::TxReadonly);
+		}
+		// Delete the scan range
+		let message = ServerTransactionMessage::Delr(MessageDelr {
+			begin: rng.start.into(),
+			finish: rng.end.into(),
+		});
+		self.send_message(message).await?;
 		// Return result
 		Ok(())
 	}
@@ -351,34 +382,27 @@ impl super::api::Transaction for Transaction {
 			return Err(Error::TxFinished);
 		}
 		// Retrieve the scan range
-		let message = TransactionMessage {
-			key: "placeholder".to_string().into_bytes(),
-			value: None,
-			expected_value: None,
-			begin: Some(rng.start.into()),
-			finish: Some(rng.end.into()),
-			values: None,
-			kv_operation_type: KeyValueOperationType::Keys,
-			limit: Some(limit),
-			keys: None,
+		let message = ServerTransactionMessage::Keys(MessageKeys {
+			begin: rng.start.into(),
+			finish: rng.end.into(),
+			limit,
+		});
+		let response = match self.send_message(message).await? {
+			ServerTransactionMessage::ResponseKeys(v) => v,
+			_ => return Err(Error::Tx("Received an invalid response".to_string())),
 		};
-		let response = self.send_message(message).await?;
 		// Return result
-		match response.keys {
-			Some(keys) => {
-				let mut result = Vec::new();
-				for key in keys {
-					result.push(key.into());
-				}
-				Ok(result)
-			}
-			None => Ok(vec![]),
-		}
+		Ok(response.keys)
 	}
 
 	/// Retrieves a range of key-value pairs from the database.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.sprint()))]
-	async fn scan<K>(&mut self, rng: Range<K>, limit: u32) -> Result<Vec<(Key, Val)>, Error>
+	async fn scan<K>(
+		&mut self,
+		rng: Range<K>,
+		limit: u32,
+		version: Option<u64>,
+	) -> Result<Vec<(Key, Val)>, Error>
 	where
 		K: Into<Key> + Sprintable + Debug,
 	{
@@ -387,28 +411,16 @@ impl super::api::Transaction for Transaction {
 			return Err(Error::TxFinished);
 		}
 		// Retrieve the scan range
-		let message = TransactionMessage {
-			key: "placeholder".to_string().into_bytes(),
-			value: None,
-			expected_value: None,
-			begin: Some(rng.start.into()),
-			finish: Some(rng.end.into()),
-			values: None,
-			kv_operation_type: KeyValueOperationType::Scan,
-			limit: Some(limit),
-			keys: None,
+		let message = ServerTransactionMessage::Scan(MessageScan {
+			begin: rng.start.into(),
+			finish: rng.end.into(),
+			limit,
+		});
+		let response = match self.send_message(message).await? {
+			ServerTransactionMessage::ResponseScan(v) => v,
+			_ => return Err(Error::Tx("Received an invalid response".to_string())),
 		};
-		let response = self.send_message(message).await?;
 		// Return result
-		match response.values {
-			Some(values) => {
-				let mut result = Vec::new();
-				for (key, val) in values {
-					result.push((key.into(), val.into()));
-				}
-				Ok(result)
-			}
-			None => Ok(vec![]),
-		}
+		Ok(response.values)
 	}
 }
