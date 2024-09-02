@@ -547,6 +547,7 @@ async fn router(
 				stmt.what = resource_to_values(what);
 				stmt.data = data.map(Data::ContentExpression);
 				stmt.output = Some(Output::After);
+				stmt.only = true;
 				stmt
 			};
 			query.0 .0 = vec![Statement::Create(statement)];
