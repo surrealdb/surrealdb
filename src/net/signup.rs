@@ -1,21 +1,20 @@
+use super::headers::Accept;
+use super::AppState;
+use crate::cnf::HTTP_MAX_SIGNIN_BODY_SIZE;
 use crate::err::Error;
 use crate::net::input::bytes_to_utf8;
 use crate::net::output;
 use axum::extract::DefaultBodyLimit;
 use axum::response::IntoResponse;
 use axum::routing::options;
-use axum::{Extension, Router};
+use axum::Extension;
+use axum::Router;
 use axum_extra::TypedHeader;
 use bytes::Bytes;
 use serde::Serialize;
 use surrealdb::dbs::Session;
 use surrealdb::sql::Value;
 use tower_http::limit::RequestBodyLimitLayer;
-
-use super::headers::Accept;
-use super::AppState;
-
-const MAX: usize = 1024; // 1 KiB
 
 #[derive(Serialize)]
 struct Success {
@@ -41,7 +40,7 @@ where
 	Router::new()
 		.route("/signup", options(|| async {}).post(handler))
 		.route_layer(DefaultBodyLimit::disable())
-		.layer(RequestBodyLimitLayer::new(MAX))
+		.layer(RequestBodyLimitLayer::new(*HTTP_MAX_SIGNIN_BODY_SIZE))
 }
 
 async fn handler(
