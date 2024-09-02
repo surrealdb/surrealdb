@@ -580,7 +580,8 @@ async fn insert_relation_table() {
 	let (permit, db) = new_db().await;
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
 	drop(permit);
-	let tmp: Result<Vec<ApiRecordId>, _> = db.insert("likes").relation("{}".parse::<Value>().unwrap()).await;
+	let tmp: Result<Vec<ApiRecordId>, _> =
+		db.insert("likes").relation("{}".parse::<Value>().unwrap()).await;
 	tmp.unwrap_err();
 	let val = "{in: person:a, out: thing:a}".parse::<Value>().unwrap();
 	let _: Vec<ApiRecordId> = db.insert("likes").relation(val).await.unwrap();
@@ -1452,4 +1453,24 @@ async fn run() {
 
 	let tmp: i32 = db.run("fn::baz").await.unwrap();
 	assert_eq!(tmp, 7);
+}
+
+#[test_log::test(tokio::test)]
+async fn multi_take() {
+	let (permit, db) = new_db().await;
+	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
+	drop(permit);
+
+	db.query("INSERT INTO user {name: 'John', address: 'USA'};").await.unwrap();
+	db.query("INSERT INTO user {name: 'Adam', address: 'UK'};").await.unwrap();
+
+	let mut response = db.query("SELECT * FROM user").await.unwrap();
+
+	let mut names: Vec<String> = response.take("name").unwrap();
+	names.sort();
+	assert_eq!(names, vec!["Adam".to_owned(), "John".to_owned()]);
+
+	let mut addresses: Vec<String> = response.take("address").unwrap();
+	addresses.sort();
+	assert_eq!(addresses, vec!["UK".to_owned(), "USA".to_owned()]);
 }

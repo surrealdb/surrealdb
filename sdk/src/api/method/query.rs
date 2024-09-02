@@ -917,6 +917,31 @@ mod tests {
 	}
 
 	#[test]
+	fn take_key_multi() {
+		let article = Article {
+			title: "Lorem Ipsum".to_owned(),
+			body: "Lorem Ipsum Lorem Ipsum".to_owned(),
+		};
+		let value = to_value(article.clone()).unwrap();
+
+		let mut response = Response {
+			results: to_map(vec![Ok(value.clone().into_inner())]),
+			..Response::new()
+		};
+		let title: Vec<String> = response.take("title").unwrap();
+		assert_eq!(title, vec![article.title.clone()]);
+		let body: Vec<String> = response.take("body").unwrap();
+		assert_eq!(body, vec![article.body]);
+
+		let mut response = Response {
+			results: to_map(vec![Ok(value.clone().into_inner())]),
+			..Response::new()
+		};
+		let vec: Vec<String> = response.take("title").unwrap();
+		assert_eq!(vec, vec![article.title]);
+	}
+
+	#[test]
 	fn take_partial_records() {
 		let mut response = Response {
 			results: to_map(vec![Ok(vec![true, false].into())]),
