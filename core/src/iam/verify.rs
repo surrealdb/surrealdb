@@ -953,13 +953,23 @@ mod tests {
 					assert_eq!(sess.db, level.db.map(|s| s.to_string()));
 					assert_eq!(sess.au.id(), "token");
 
-					for role in &case.expect_roles {
-						assert!(
-							sess.au.has_role(role),
-							"Auth user expected to have role {:?} in case: {:?}",
-							role,
-							case
-						);
+					// Ensure that the session has all expected roles and none of the others
+					for role in &AVAILABLE_ROLES {
+						if case.expect_roles.contains(role) {
+							assert!(
+								sess.au.has_role(role),
+								"Auth user expected to have role {:?} in case: {:?}",
+								role,
+								case
+							);
+						} else {
+							assert!(
+								!sess.au.has_role(role),
+								"Auth user not expected to have role {:?} in case: {:?}",
+								role,
+								case
+							);
+						}
 					}
 
 					// Ensure that the expiration is set correctly
