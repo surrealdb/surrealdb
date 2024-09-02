@@ -792,8 +792,6 @@ mod tests {
 					level.level, roles_clause, duration_clause,
 				);
 
-				println!("{}", define_user_query);
-
 				ds.execute(&define_user_query, &sess, None).await.unwrap();
 
 				let mut sess = Session {
@@ -817,7 +815,7 @@ mod tests {
 					}
 
 					// Check roles
-					for role in &[Role::Viewer, Role::Editor, Role::Owner] {
+					for role in &AVAILABLE_ROLES {
 						let has_role = sess.au.has_role(role);
 						let should_have_role = case.roles.contains(role);
 						assert_eq!(has_role, should_have_role, "Role {:?} check failed", role);
@@ -953,23 +951,11 @@ mod tests {
 					assert_eq!(sess.db, level.db.map(|s| s.to_string()));
 					assert_eq!(sess.au.id(), "token");
 
-					// Ensure that the session has all expected roles and none of the others
+					// Check roles
 					for role in &AVAILABLE_ROLES {
-						if case.expect_roles.contains(role) {
-							assert!(
-								sess.au.has_role(role),
-								"Auth user expected to have role {:?} in case: {:?}",
-								role,
-								case
-							);
-						} else {
-							assert!(
-								!sess.au.has_role(role),
-								"Auth user not expected to have role {:?} in case: {:?}",
-								role,
-								case
-							);
-						}
+						let has_role = sess.au.has_role(role);
+						let should_have_role = case.expect_roles.contains(role);
+						assert_eq!(has_role, should_have_role, "Role {:?} check failed", role);
 					}
 
 					// Ensure that the expiration is set correctly
