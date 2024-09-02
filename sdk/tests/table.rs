@@ -54,7 +54,15 @@ async fn define_foreign_table() -> Result<(), Error> {
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse("[{ id: person:one, age: 39, score: 70 }]");
+	let val = Value::parse(
+		"[
+			{
+				age: 39,
+				id: person:one,
+				score: 70,
+			}
+		]",
+	);
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;

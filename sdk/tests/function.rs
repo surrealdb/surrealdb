@@ -6340,17 +6340,20 @@ pub async fn function_http_disabled() -> Result<(), Error> {
 #[tokio::test]
 async fn function_custom_optional_args() -> Result<(), Error> {
 	let sql = r#"
+		DEFINE FUNCTION fn::any_arg($a: any) { $a || 'test' };
 		DEFINE FUNCTION fn::zero_arg() { [] };
 		DEFINE FUNCTION fn::one_arg($a: bool) { [$a] };
 		DEFINE FUNCTION fn::last_option($a: bool, $b: option<bool>) { [$a, $b] };
 		DEFINE FUNCTION fn::middle_option($a: bool, $b: option<bool>, $c: bool) { [$a, $b, $c] };
 
+		RETURN fn::any_arg();
 		RETURN fn::zero_arg();
 		RETURN fn::one_arg();
 		RETURN fn::last_option();
 		RETURN fn::middle_option();
 
 		RETURN fn::zero_arg(true);
+		RETURN fn::any_arg('other');
 		RETURN fn::one_arg(true);
 		RETURN fn::last_option(true);
 		RETURN fn::last_option(true, false);
@@ -6373,6 +6376,14 @@ async fn function_custom_optional_args() -> Result<(), Error> {
 	//
 	let tmp = test.next()?.result?;
 	let val = Value::None;
+	assert_eq!(tmp, val);
+	//
+	let tmp = test.next()?.result?;
+	let val = Value::None;
+	assert_eq!(tmp, val);
+	//
+	let tmp = test.next()?.result?;
+	let val = Value::parse("'test'");
 	assert_eq!(tmp, val);
 	//
 	let tmp = test.next()?.result?;
@@ -6414,6 +6425,10 @@ async fn function_custom_optional_args() -> Result<(), Error> {
 		}) if name == "fn::zero_arg" && message == "The function expects 0 arguments." => (),
 		_ => panic!("{}", error),
 	}
+	//
+	let tmp = test.next()?.result?;
+	let val = Value::parse("'other'");
+	assert_eq!(tmp, val);
 	//
 	let tmp = test.next()?.result?;
 	let val = Value::parse("[true]");
