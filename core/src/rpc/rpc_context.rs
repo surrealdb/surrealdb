@@ -376,7 +376,7 @@ pub trait RpcContext {
 			return Err(RpcError::InvalidParams);
 		};
 		// Return a single result?
-		let one = what.is_thing_single();
+		let one = what.is_thing_single() || data.is_object();
 		// Specify the SQL query string
 		let sql = if data.is_none_or_null() {
 			"CREATE $what RETURN AFTER"
