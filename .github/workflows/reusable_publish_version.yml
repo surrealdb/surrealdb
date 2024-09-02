@@ -250,7 +250,7 @@ jobs:
       - name: Install cargo-dockpack
         run: |
           cargo install dockpack
-          dockpack pull --i surrealdb/surrealcs-client:latest --d ../surrealcs
+          dockpack pull -i surrealdb/surrealcs-client:latest -d ../surrealcs
 
       - name: Test workspace + coverage
         run: cargo make ci-workspace-coverage
@@ -294,7 +294,7 @@ jobs:
       - name: Install cargo-dockpack
         run: |
           cargo install dockpack
-          dockpack pull --i surrealdb/surrealcs-client:latest --d ../surrealcs
+          dockpack pull -i surrealdb/surrealcs-client:latest -d ../surrealcs
 
       - name: Check workspace
         run: cargo make ci-check
