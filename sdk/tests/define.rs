@@ -344,6 +344,32 @@ async fn define_statement_event() -> Result<(), Error> {
 	Ok(())
 }
 
+// Confirms that a DEFINE EVENT with no WHERE clause will produce WHEN true
+#[tokio::test]
+async fn define_statement_event_no_when_clause() -> Result<(), Error> {
+	let sql = "
+		DEFINE EVENT some_event ON TABLE user THEN {};
+		INFO FOR TABLE user;
+	";
+	let mut t = Test::new(sql).await?;
+	//
+	t.skip_ok(1)?;
+	let val = Value::parse(
+		"{
+	events: {
+		some_event: 'DEFINE EVENT some_event ON user WHEN true THEN {  }'
+	},
+	fields: {},
+	indexes: {},
+	lives: {},
+	tables: {}
+}",
+	);
+	t.expect_value(val)?;
+	//
+	Ok(())
+}
+
 #[tokio::test]
 async fn define_statement_event_when_event() -> Result<(), Error> {
 	let sql = "
