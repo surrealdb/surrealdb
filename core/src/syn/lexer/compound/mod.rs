@@ -60,7 +60,9 @@ impl CompoundValue for Regex {
 				}
 				None => {
 					let span = lexer.advance_span();
-					bail!("Failed to lex regex, unexpected eof", @span);
+					return Err(
+						error!("Failed to lex regex, unexpected eof", @span).with_data_pending()
+					);
 				}
 			}
 		}
