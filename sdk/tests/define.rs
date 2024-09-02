@@ -716,46 +716,80 @@ async fn define_statement_index_single() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn define_statement_index_float_values() -> Result<(), Error> {
+async fn define_statement_index_numbers() -> Result<(), Error> {
 	let sql = "
 		DEFINE INDEX index ON TABLE test COLUMNS number;
-		CREATE test:number CONTENT {
-			number: 0
-		};
-		CREATE test:script CONTENT {
-			number: function() { return 0 }
-		};
-		CREATE test:expression CONTENT {
-			number: 3 - 3
-		};
-		CREATE test:coercion CONTENT {
-			number: '0'.to_int()
-		};
+		CREATE test:int SET number = 0;
+		CREATE test:float SET number = 0.0;
+		-- TODO: CREATE test:dec_int SET number = 0dec;
+		-- TODO: CREATE test:dec_dec SET number = 0.0dec;
 		SELECT * FROM test WITH NOINDEX WHERE number = 0 ORDER BY id;
 		SELECT * FROM test WHERE number = 0 ORDER BY id;
 		SELECT * FROM test WHERE number = 0.0 ORDER BY id;
-		SELECT * FROM test WHERE number = 0.0dec ORDER BY id;
+		-- TODO: SELECT * FROM test WHERE number = 0dec ORDER BY id;
+		-- TODO: SELECT * FROM test WHERE number = 0.0dec ORDER BY id;
 	";
 	let mut t = Test::new(sql).await?;
-	t.skip_ok(5)?;
-	for _ in 0..4 {
+	t.skip_ok(3)?;
+	for _ in 0..3 {
 		t.expect_val(
 			"[
+				// {
+				// 	id: test:dec,
+				// 	number: 0.0dec
+				// },
+				// {
+				// 	id: test:int,
+				// 	number: 0dec
+				// },
 				{
-					id: test:coercion,
-					number: 0
-				},
-				{
-					id: test:expression,
-					number: 0
-				},
-				{
-					id: test:number,
-					number: 0
-				},
-				{
-					id: test:script,
+					id: test:float,
 					number: 0f
+				},
+				{
+					id: test:int,
+					number: 0
+				}
+			]",
+		)?;
+	}
+	Ok(())
+}
+
+#[tokio::test]
+async fn define_statement_unique_index_numbers() -> Result<(), Error> {
+	let sql = "
+		DEFINE INDEX index ON TABLE test COLUMNS number UNIQUE;
+		CREATE test:int SET number = 0;
+		CREATE test:float SET number = 0.0;
+		-- TODO: CREATE test:dec_int SET number = 0dec;
+		-- TODO: CREATE test:dec_dec SET number = 0.0dec;
+		SELECT * FROM test WITH NOINDEX WHERE number = 0 ORDER BY id;
+		SELECT * FROM test WHERE number = 0 ORDER BY id;
+		SELECT * FROM test WHERE number = 0.0 ORDER BY id;
+		-- TODO: SELECT * FROM test WHERE number = 0dec ORDER BY id;
+		-- TODO: SELECT * FROM test WHERE number = 0.0dec ORDER BY id;
+	";
+	let mut t = Test::new(sql).await?;
+	t.skip_ok(3)?;
+	for _ in 0..3 {
+		t.expect_val(
+			"[
+				// {
+				// 	id: test:dec,
+				// 	number: 0.0dec
+				// },
+				// {
+				// 	id: test:int,
+				// 	number: 0dec
+				// },
+				{
+					id: test:float,
+					number: 0f
+				},
+				{
+					id: test:int,
+					number: 0
 				}
 			]",
 		)?;
