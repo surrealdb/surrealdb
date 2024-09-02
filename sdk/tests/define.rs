@@ -716,6 +716,54 @@ async fn define_statement_index_single() -> Result<(), Error> {
 }
 
 #[tokio::test]
+async fn define_statement_index_float_values() -> Result<(), Error> {
+	let sql = "
+		DEFINE TABLE test SCHEMAFULL;
+		DEFINE FIELD number ON TABLE test TYPE number;
+		DEFINE INDEX index ON TABLE test COLUMNS number;
+		CREATE test:number CONTENT {
+			number: 0
+		};
+		CREATE test:script CONTENT {
+			number: function() { return 0 }
+		};
+		CREATE test:expression CONTENT {
+			number: 3 - 3
+		};
+		CREATE test:coercion CONTENT {
+			number: '0'.to_int()
+		};
+		SELECT * FROM test WITH NOINDEX WHERE number = 0;
+		SELECT * FROM test WHERE number = 0;
+	";
+	let mut t = Test::new(sql).await?;
+	t.skip_ok(7)?;
+	for _ in 0..2 {
+		t.expect_val(
+			"[
+				{
+					id: test:coercion,
+					number: 0
+				},
+				{
+					id: test:expression,
+					number: 0
+				},
+				{
+					id: test:number,
+					number: 0
+				},
+				{
+					id: test:script,
+					number: 0f
+				}
+			]",
+		)?;
+	}
+	Ok(())
+}
+
+#[tokio::test]
 async fn define_statement_index_concurrently() -> Result<(), Error> {
 	let sql = "
 		CREATE user:1 SET email = 'testA@surrealdb.com';
