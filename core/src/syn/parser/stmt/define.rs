@@ -3,6 +3,7 @@ use reblessive::Stk;
 use crate::cnf::EXPERIMENTAL_BEARER_ACCESS;
 use crate::sql::access_type::JwtAccessVerify;
 use crate::sql::index::HnswParams;
+use crate::sql::Value;
 use crate::{
 	sql::{
 		access_type,
@@ -738,6 +739,7 @@ impl Parser<'_> {
 		let mut res = DefineEventStatement {
 			name,
 			what,
+			when: Value::Bool(true),
 			if_not_exists,
 			overwrite,
 			..Default::default()
