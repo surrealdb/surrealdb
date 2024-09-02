@@ -705,6 +705,8 @@ mod tests {
 		db: Option<&'static str>,
 	}
 
+	const AVAILABLE_ROLES: [Role; 3] = [Role::Viewer, Role::Editor, Role::Owner];
+
 	#[tokio::test]
 	async fn test_basic() {
 		#[derive(Debug)]
@@ -978,8 +980,87 @@ mod tests {
 
 	#[tokio::test]
 	async fn test_token_record() {
-		let secret = "jwt_secret";
-		let key = EncodingKey::from_secret(secret.as_ref());
+		#[derive(Debug)]
+		struct TestCase {
+			title: &'static str,
+			ids: Vec<&'static str>,
+			roles: Option<Vec<&'static str>>,
+			key: &'static str,
+			expect_error: bool,
+		}
+
+		let test_cases = vec![
+			TestCase {
+				title: "with no roles",
+				ids: vec!["user:test"],
+				roles: None,
+				key: "secret",
+				expect_error: false,
+			},
+			TestCase {
+				title: "with roles",
+				ids: vec!["user:test"],
+				roles: Some(vec!["editor", "owner"]),
+				key: "secret",
+				expect_error: false,
+			},
+			TestCase {
+				title: "with invalid token signature",
+				ids: vec!["user:test"],
+				roles: None,
+				key: "invalid",
+				expect_error: true,
+			},
+			TestCase {
+				title: "with invalid id",
+				ids: vec!["invalid"],
+				roles: None,
+				key: "invalid",
+				expect_error: true,
+			},
+			TestCase {
+				title: "with generic id",
+				ids: vec!["user:2k9qnabxuxh8k4d5gfto"],
+				roles: None,
+				key: "secret",
+				expect_error: false,
+			},
+			TestCase {
+				title: "with numeric ids",
+				ids: vec!["user:1", "user:2", "user:100", "user:10000000"],
+				roles: None,
+				key: "secret",
+				expect_error: false,
+			},
+			TestCase {
+				title: "with alphanumeric ids",
+				ids: vec!["user:username", "user:username1", "user:username10", "user:username100"],
+				roles: None,
+				key: "secret",
+				expect_error: false,
+			},
+			TestCase {
+				title: "with ids including special characters",
+				ids: vec![
+					"user:⟨user.name⟩",
+					"user:⟨user.name1⟩",
+					"user:⟨user.name10⟩",
+					"user:⟨user.name100⟩",
+				],
+				roles: None,
+				key: "secret",
+				expect_error: false,
+			},
+			TestCase {
+				title: "with UUID ids",
+				ids: vec!["user:⟨83149446-95f5-4c0d-9f42-136e7b272456⟩"],
+				roles: None,
+				key: "secret",
+				expect_error: false,
+			},
+		];
+
+		let secret = "secret";
 		let claims = Claims {
 			iss: Some("surrealdb-test".to_string()),
 			iat: Some(Utc::now().timestamp()),
@@ -988,7 +1069,6 @@ mod tests {
 			ns: Some("test".to_string()),
 			db: Some("test".to_string()),
 			ac: Some("token".to_string()),
-			id: Some("user:test".to_string()),
 			..Claims::default()
 		};
 
@@ -1011,256 +1091,55 @@ mod tests {
 		.await
 		.unwrap();
 
-		//
-		// Test without roles defined
-		// Roles should be ignored in record access
-		//
-		{
-			// Prepare the claims object
-			let mut claims = claims.clone();
-			claims.roles = None;
-			// Create the token
-			let enc = encode(&HEADER, &claims, &key).unwrap();
-			// Signin with the token
-			let mut sess = Session::default();
-			let res = token(&ds, &mut sess, &enc).await;
+		for case in &test_cases {
+			println!("Test case: {}", case.title);
 
-			assert!(res.is_ok(), "Failed to signin with token: {:?}", res);
-			assert_eq!(sess.ns, Some("test".to_string()));
-			assert_eq!(sess.db, Some("test".to_string()));
-			assert_eq!(sess.ac, Some("token".to_string()));
-			assert_eq!(sess.au.id(), "user:test");
-			assert!(sess.au.is_record());
-			assert_eq!(sess.au.level().ns(), Some("test"));
-			assert_eq!(sess.au.level().db(), Some("test"));
-			assert!(!sess.au.has_role(&Role::Viewer), "Auth user expected to not have Viewer role");
-			assert!(!sess.au.has_role(&Role::Editor), "Auth user expected to not have Editor role");
-			assert!(!sess.au.has_role(&Role::Owner), "Auth user expected to not have Owner role");
-			// Session expiration has been set explicitly
-			let exp = sess.exp.unwrap();
-			// Expiration should match the current time plus session duration with some margin
-			let min_exp = (Utc::now() + Duration::days(30) - Duration::seconds(10)).timestamp();
-			let max_exp = (Utc::now() + Duration::days(30) + Duration::seconds(10)).timestamp();
-			assert!(
-				exp > min_exp && exp < max_exp,
-				"Session expiration is expected to match the defined duration"
-			);
-		}
-
-		//
-		// Test with roles defined
-		// Roles should be ignored in record access
-		//
-		{
-			// Prepare the claims object
-			let mut claims = claims.clone();
-			claims.roles = Some(vec!["editor".to_string(), "owner".to_string()]);
-			// Create the token
-			let enc = encode(&HEADER, &claims, &key).unwrap();
-			// Signin with the token
-			let mut sess = Session::default();
-			let res = token(&ds, &mut sess, &enc).await;
-
-			assert!(res.is_ok(), "Failed to signin with token: {:?}", res);
-			assert_eq!(sess.ns, Some("test".to_string()));
-			assert_eq!(sess.db, Some("test".to_string()));
-			assert_eq!(sess.ac, Some("token".to_string()));
-			assert_eq!(sess.au.id(), "user:test");
-			assert!(sess.au.is_record());
-			assert_eq!(sess.au.level().ns(), Some("test"));
-			assert_eq!(sess.au.level().db(), Some("test"));
-			assert!(!sess.au.has_role(&Role::Viewer), "Auth user expected to not have Viewer role");
-			assert!(!sess.au.has_role(&Role::Editor), "Auth user expected to not have Editor role");
-			assert!(!sess.au.has_role(&Role::Owner), "Auth user expected to not have Owner role");
-			// Session expiration has been set explicitly
-			let exp = sess.exp.unwrap();
-			// Expiration should match the current time plus session duration with some margin
-			let min_exp = (Utc::now() + Duration::days(30) - Duration::seconds(10)).timestamp();
-			let max_exp = (Utc::now() + Duration::days(30) + Duration::seconds(10)).timestamp();
-			assert!(
-				exp > min_exp && exp < max_exp,
-				"Session expiration is expected to match the defined duration"
-			);
-		}
-
-		//
-		// Test with invalid signature
-		//
-		{
-			// Prepare the claims object
-			let claims = claims.clone();
-			// Create the token
-			let key = EncodingKey::from_secret("invalid".as_ref());
-			let enc = encode(&HEADER, &claims, &key).unwrap();
-			// Signin with the token
-			let mut sess = Session::default();
-			let res = token(&ds, &mut sess, &enc).await;
-
-			assert!(res.is_err(), "Unexpected success signing in with token: {:?}", res);
-		}
-
-		//
-		// Test with valid token invalid access method
-		//
-		{
-			// Prepare the claims object
-			let mut claims = claims.clone();
-			claims.ac = Some("invalid".to_string());
-			// Create the token
-			let enc = encode(&HEADER, &claims, &key).unwrap();
-			// Signin with the token
-			let mut sess = Session::default();
-			let res = token(&ds, &mut sess, &enc).await;
-
-			assert!(res.is_err(), "Unexpected success signing in with token: {:?}", res);
-		}
-
-		//
-		// Test with invalid id
-		//
-		{
-			// Prepare the claims object
-			let mut claims = claims.clone();
-			claims.id = Some("##_INVALID_##".to_string());
-			// Create the token
-			let enc = encode(&HEADER, &claims, &key).unwrap();
-			// Signin with the token
-			let mut sess = Session::default();
-			let res = token(&ds, &mut sess, &enc).await;
-
-			assert!(res.is_err(), "Unexpected success signing in with token: {:?}", res);
-		}
-
-		//
-		// Test with generic user identifier
-		//
-		{
-			let resource_id = "user:2k9qnabxuxh8k4d5gfto".to_string();
-			// Prepare the claims object
-			let mut claims = claims.clone();
-			claims.id = Some(resource_id.clone());
-			// Create the token
-			let enc = encode(&HEADER, &claims, &key).unwrap();
-			// Signin with the token
-			let mut sess = Session::default();
-			let res = token(&ds, &mut sess, &enc).await;
-
-			assert!(res.is_ok(), "Failed to signin with token: {:?}", res);
-			assert_eq!(sess.ns, Some("test".to_string()));
-			assert_eq!(sess.db, Some("test".to_string()));
-			assert_eq!(sess.ac, Some("token".to_string()));
-			assert_eq!(sess.au.id(), resource_id);
-			assert!(sess.au.is_record());
-			let user_id = syn::thing(&resource_id).unwrap();
-			assert_eq!(sess.rd, Some(Value::from(user_id)));
-		}
-
-		//
-		// Test with custom user numeric identifiers of varying sizes
-		//
-		{
-			let ids = ["1", "2", "100", "10000000"];
-			for id in ids.iter() {
-				let resource_id = format!("user:{id}");
+			for id in &case.ids {
 				// Prepare the claims object
 				let mut claims = claims.clone();
-				claims.id = Some(resource_id.clone());
+				claims.id = Some(id.to_string());
+				claims.roles =
+					case.roles.clone().map(|roles| roles.into_iter().map(String::from).collect());
+
 				// Create the token
+				let key = EncodingKey::from_secret(case.key.as_ref());
 				let enc = encode(&HEADER, &claims, &key).unwrap();
-				// Signin with the token
+
+				// Authenticate with the token
 				let mut sess = Session::default();
 				let res = token(&ds, &mut sess, &enc).await;
 
-				assert!(res.is_ok(), "Failed to signin with token: {:?}", res);
-				assert_eq!(sess.ns, Some("test".to_string()));
-				assert_eq!(sess.db, Some("test".to_string()));
-				assert_eq!(sess.ac, Some("token".to_string()));
-				assert_eq!(sess.au.id(), resource_id);
-				assert!(sess.au.is_record());
-				let user_id = syn::thing(&resource_id).unwrap();
-				assert_eq!(sess.rd, Some(Value::from(user_id)));
+				if case.expect_error {
+					assert!(res.is_err(), "Unexpected success for case: {:?}", case);
+				} else {
+					assert!(res.is_ok(), "Failed to sign in with token for case: {:?}", case);
+					assert_eq!(sess.ns, Some("test".to_string()));
+					assert_eq!(sess.db, Some("test".to_string()));
+					assert_eq!(sess.au.id(), *id);
+
+					// Ensure record users do not have roles
+					for role in &AVAILABLE_ROLES {
+						assert!(
+							!sess.au.has_role(role),
+							"Auth user expected to not have role {:?} in case: {:?}",
+							role,
+							case
+						);
+					}
+
+					// Ensure that the expiration is set correctly
+					let exp = sess.exp.unwrap();
+					let min_exp =
+						(Utc::now() + Duration::days(30) - Duration::seconds(10)).timestamp();
+					let max_exp =
+						(Utc::now() + Duration::days(30) + Duration::seconds(10)).timestamp();
+					assert!(
+						exp > min_exp && exp < max_exp,
+						"Session expiration is expected to match the defined duration in case: {:?}",
+						case
+					);
+				}
 			}
-		}
-
-		//
-		// Test with custom user string identifiers of varying lengths
-		//
-		{
-			let ids = ["username", "username1", "username10", "username100"];
-			for id in ids.iter() {
-				let resource_id = format!("user:{id}");
-				// Prepare the claims object
-				let mut claims = claims.clone();
-				claims.id = Some(resource_id.clone());
-				// Create the token
-				let enc = encode(&HEADER, &claims, &key).unwrap();
-				// Signin with the token
-				let mut sess = Session::default();
-				let res = token(&ds, &mut sess, &enc).await;
-
-				assert!(res.is_ok(), "Failed to signin with token: {:?}", res);
-				assert_eq!(sess.ns, Some("test".to_string()));
-				assert_eq!(sess.db, Some("test".to_string()));
-				assert_eq!(sess.ac, Some("token".to_string()));
-				assert_eq!(sess.au.id(), resource_id);
-				assert!(sess.au.is_record());
-				let user_id = syn::thing(&resource_id).unwrap();
-				assert_eq!(sess.rd, Some(Value::from(user_id)));
-			}
-		}
-
-		//
-		// Test with custom user string identifiers of varying lengths with special characters
-		//
-		{
-			let ids = ["user.name", "user.name1", "user.name10", "user.name100"];
-			for id in ids.iter() {
-				// Enclose special characters in "⟨brackets⟩"
-				let resource_id = format!("user:⟨{id}⟩");
-				// Prepare the claims object
-				let mut claims = claims.clone();
-				claims.id = Some(resource_id.clone());
-				// Create the token
-				let enc = encode(&HEADER, &claims, &key).unwrap();
-				// Signin with the token
-				let mut sess = Session::default();
-				let res = token(&ds, &mut sess, &enc).await;
-
-				assert!(res.is_ok(), "Failed to signin with token: {:?}", res);
-				assert_eq!(sess.ns, Some("test".to_string()));
-				assert_eq!(sess.db, Some("test".to_string()));
-				assert_eq!(sess.ac, Some("token".to_string()));
-				assert_eq!(sess.au.id(), resource_id);
-				assert!(sess.au.is_record());
-				let user_id = syn::thing(&resource_id).unwrap();
-				assert_eq!(sess.rd, Some(Value::from(user_id)));
-			}
-		}
-
-		//
-		// Test with custom UUID user identifier
-		//
-		{
-			let id = "83149446-95f5-4c0d-9f42-136e7b272456";
-			// Enclose special characters in "⟨brackets⟩"
-			let resource_id = format!("user:⟨{id}⟩");
-			// Prepare the claims object
-			let mut claims = claims.clone();
-			claims.id = Some(resource_id.clone());
-			// Create the token
-			let enc = encode(&HEADER, &claims, &key).unwrap();
-			// Signin with the token
-			let mut sess = Session::default();
-			let res = token(&ds, &mut sess, &enc).await;
-
-			assert!(res.is_ok(), "Failed to signin with token: {:?}", res);
-			assert_eq!(sess.ns, Some("test".to_string()));
-			assert_eq!(sess.db, Some("test".to_string()));
-			assert_eq!(sess.ac, Some("token".to_string()));
-			assert_eq!(sess.au.id(), resource_id);
-			assert!(sess.au.is_record());
-			let user_id = syn::thing(&resource_id).unwrap();
-			assert_eq!(sess.rd, Some(Value::from(user_id)));
 		}
 	}
 
