@@ -652,7 +652,7 @@ async fn function_info_structure() {
 	assert!(out.is_ok(), "Unexpected error: {:?}", out);
 
 	let out_expected =
-		r#"[{ accesses: [], analyzers: [], functions: [{ args: [['name', 'string']], block: "{ RETURN 'Hello, ' + $name + '!'; }", name: 'example', permissions: true, returns: 'string' }], models: [], params: [], tables: [], users: [] }]"#.to_string();
+		r#"{ accesses: [], analyzers: [], functions: [{ args: [['name', 'string']], block: "{ RETURN 'Hello, ' + $name + '!'; }", name: 'example', permissions: true, returns: 'string' }], models: [], params: [], tables: [], users: [] }"#.to_string();
 	let out_str = out.unwrap().to_string();
 	assert_eq!(
 		out_str, out_expected,
