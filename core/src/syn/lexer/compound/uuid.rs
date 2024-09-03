@@ -23,14 +23,12 @@ impl CompoundValue for Uuid {
 				Some(x) if i == 8 || i == 13 || i == 18 || i == 23 => {
 					let char = lexer.reader.convert_to_char(x)?;
 					let span = lexer.advance_span();
-					bail!("Invalid UUID, found `{char} at position {i} but expected `-`", @span);
+					bail!("Invalid UUID, found `{char}` but expected `-`", @span);
 				}
 				Some(x) => {
 					if !x.is_ascii_hexdigit() {
-						if let Err(e) = lexer.reader.complete_char(x) {
-							let span = lexer.advance_span();
-							bail!("Invalid token: {e}", @span);
-						}
+						let span = lexer.advance_span();
+						bail!("Unexpected characters in UUID token, expected hex digits", @span);
 					}
 				}
 				None => {
@@ -52,7 +50,7 @@ impl CompoundValue for Uuid {
 		if closing != quote {
 			let span = lexer.advance_span();
 			let char = lexer.reader.convert_to_char(closing)?;
-			bail!("UUID should end with `{quote}` but found `{char}`", @span);
+			bail!("UUID should end with `{}` but found `{char}`", quote as char, @span);
 		}
 
 		let mut span = lexer.advance_span();
