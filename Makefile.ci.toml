@@ -48,7 +48,7 @@ args = ["test", "--locked", "--features", "storage-mem,ml", "--workspace", "--te
 [tasks.ci-graphql-integration]
 category = "GRAPHQL - INTEGRATION TESTS"
 command = "cargo"
-env = { RUST_BACKTRACE = 1, RUST_LOG = { value = "cli_integration::common=debug", condition = { env_not_set = ["RUST_LOG"] } }, SURREAL_EXPERIMENTAL_GRAPHQL = "true" }
+env = { RUST_BACKTRACE = 1, RUST_LOG = { value = "cli_integration::common=debug", condition = { env_not_set = ["RUST_LOG"] } }, SURREAL_EXPERIMENTAL_GRAPHQL = "true", RUSTFLAGS = "--cfg surrealdb_unstable" }
 args = ["test", "--locked", "--features", "storage-mem", "--workspace", "--test", "graphql_integration", "--", "graphql_integration", "--nocapture"]
 
 [tasks.ci-test-workspace]
