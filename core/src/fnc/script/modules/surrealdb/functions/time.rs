@@ -15,6 +15,7 @@ impl_module_def!(
 	"format" => run,
 	"group" => run,
 	"hour" => run,
+	"is_leap_year" => run,
 	"max" => run,
 	"min" => run,
 	"mins" => run,
