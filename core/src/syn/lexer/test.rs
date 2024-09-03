@@ -10,7 +10,7 @@ macro_rules! test_case(
 				let span = std::str::from_utf8(lexer.reader.span(next.span)).unwrap_or("invalid utf8");
 				if let TokenKind::Invalid = next.kind{
 					let error = lexer.error.take().unwrap();
-					assert_eq!(next.kind, $token, "{} = {}:{} => {}",span, i, stringify!($token), error);
+					assert_eq!(next.kind, $token, "{} = {}:{} => {:?}",span, i, stringify!($token), error);
 				}else{
 					assert_eq!(next.kind, $token, "{} = {}:{}", span, i, stringify!($token));
 				}
