@@ -1057,6 +1057,7 @@ mod tests {
 		assert_uuid_parses("e0531951-20ec-4575-bb68-3e6b49d813fa");
 		assert_uuid_parses("a0531951-20ec-4575-bb68-3e6b49d813fa");
 		assert_uuid_parses("b98839b9-0471-4dbb-aae0-14780e848f32");
+		assert_uuid_parses("5a7297d9-c07d-4444-b936-21984533987d");
 	}
 
 	#[test]
