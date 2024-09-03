@@ -179,7 +179,7 @@ impl MutableContext {
 	pub(crate) fn unfreeze(ctx: Context) -> Result<MutableContext, Error> {
 		match Arc::try_unwrap(ctx) {
 			Ok(inner) => Ok(inner),
-			Err(_) => Err(Error::Unreachable("Context::unfreeze")),
+			Err(_) => Err(fail!("Tried to unfreeze a non-existent Context")),
 		}
 	}
 

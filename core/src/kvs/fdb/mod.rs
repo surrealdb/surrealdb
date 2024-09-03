@@ -188,11 +188,7 @@ impl super::api::Transaction for Transaction {
 		// Cancel this transaction
 		match self.inner.take() {
 			Some(inner) => inner.cancel().reset(),
-			None => {
-				return Err(Error::Unreachable(
-					"Unable to take and cancel an already taken FoundationDB transaction",
-				))
-			}
+			None => return Err(fail!("Unable to cancel an already taken transaction")),
 		};
 		// Continue
 		Ok(())
@@ -214,11 +210,7 @@ impl super::api::Transaction for Transaction {
 		// Commit this transaction
 		match self.inner.take() {
 			Some(inner) => inner.commit().await?,
-			None => {
-				return Err(Error::Unreachable(
-					"Unable to take and commit an already taken FoundationDB transaction",
-				))
-			}
+			None => return Err(fail!("Unable to commit an already taken transaction")),
 		};
 		// Continue
 		Ok(())
