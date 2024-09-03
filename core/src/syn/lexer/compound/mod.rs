@@ -2,17 +2,18 @@ use crate::sql::Regex;
 use crate::syn::{
 	error::{bail, error, SyntaxError},
 	lexer::Lexer,
-	token::{t, CompoundToken, Span, Token, TokenKind},
+	token::{t, CompoundToken, Token, TokenKind},
 };
 
 mod js;
+mod uuid;
 
 pub trait CompoundValue: Sized {
 	/// The token which indicates the start of this compound token.
-	const START: TokenKind;
+	const START: &'static [TokenKind];
 
 	/// Lex the start of this span to a more complex type of token.
-	fn relex(lexer: &mut Lexer, start_span: Span) -> Result<CompoundToken<Self>, SyntaxError>;
+	fn relex(lexer: &mut Lexer, start_token: Token) -> Result<CompoundToken<Self>, SyntaxError>;
 }
 
 impl<'a> Lexer<'a> {
@@ -20,29 +21,28 @@ impl<'a> Lexer<'a> {
 		&mut self,
 		start: Token,
 	) -> Result<CompoundToken<T>, SyntaxError> {
-		assert_eq!(
-			start.kind,
-			T::START,
+		assert!(
+			T::START.contains(&start.kind),
 			"Invalid start of compound token, expected {} got {}",
-			T::START,
+			T::START.iter().map(|x| x.to_string()).collect::<Vec<_>>().join(", "),
 			start.kind
 		);
 		assert_eq!(
-			start.span.offset + 1,
+			start.span.offset + start.span.len,
 			self.last_offset,
 			"Tried to parse compound when lexer already ate past the  start token"
 		);
 
 		self.last_offset = start.span.offset;
 
-		T::relex(self, start.span)
+		T::relex(self, start)
 	}
 }
 
 impl CompoundValue for Regex {
-	const START: TokenKind = t!("/");
+	const START: &'static [TokenKind] = &[t!("/")];
 	// re-lexes a `/` token to a regex token.
-	fn relex(lexer: &mut Lexer, _: Span) -> Result<CompoundToken<Regex>, SyntaxError> {
+	fn relex(lexer: &mut Lexer, _: Token) -> Result<CompoundToken<Regex>, SyntaxError> {
 		loop {
 			match lexer.reader.next() {
 				Some(b'\\') => {

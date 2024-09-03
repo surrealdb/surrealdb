@@ -927,6 +927,8 @@ impl Parser<'_> {
 #[cfg(test)]
 mod tests {
 	use super::*;
+	use crate::sql::Uuid;
+	use crate::syn::parser::basic::TokenValue;
 	use crate::syn::Parse;
 
 	#[test]
@@ -1029,5 +1031,56 @@ mod tests {
 		let sql = "$__hello";
 		let out = Value::parse(sql);
 		assert_eq!("$__hello", format!("{}", out));
+	}
+
+	#[test]
+	fn uuid_parsing() {
+		fn assert_uuid_parses(s: &str) {
+			let uuid_str = format!("u'{s}'");
+			let out = Value::parse(&uuid_str);
+			let Value::Uuid(uuid) = out else {
+				panic!()
+			};
+			assert_eq!(uuid, s.parse().unwrap());
+		}
+
+		assert_uuid_parses("0531956f-20ec-4575-bb68-3e6b49d813fa");
+		assert_uuid_parses("0531956d-20ec-4575-bb68-3e6b49d813fa");
+		assert_uuid_parses("0531956e-20ec-4575-bb68-3e6b49d813fa");
+		assert_uuid_parses("0531956a-20ec-4575-bb68-3e6b49d813fa");
+		assert_uuid_parses("053195f1-20ec-4575-bb68-3e6b49d813fa");
+		assert_uuid_parses("053195d1-20ec-4575-bb68-3e6b49d813fa");
+		assert_uuid_parses("053195e1-20ec-4575-bb68-3e6b49d813fa");
+		assert_uuid_parses("053195a1-20ec-4575-bb68-3e6b49d813fa");
+		assert_uuid_parses("f0531951-20ec-4575-bb68-3e6b49d813fa");
+		assert_uuid_parses("d0531951-20ec-4575-bb68-3e6b49d813fa");
+		assert_uuid_parses("e0531951-20ec-4575-bb68-3e6b49d813fa");
+		assert_uuid_parses("a0531951-20ec-4575-bb68-3e6b49d813fa");
+		assert_uuid_parses("b98839b9-0471-4dbb-aae0-14780e848f32");
+	}
+
+	#[test]
+	fn test_uuid_characters() {
+		let hex_characters =
+			[b'0', b'a', b'b', b'c', b'd', b'e', b'f', b'A', b'B', b'C', b'D', b'E', b'F'];
+
+		let mut uuid_string: Vec<u8> = "u'0531956f-20ec-4575-bb68-3e6b49d813fa'".to_string().into();
+
+		fn assert_uuid_parses(s: &[u8]) {
+			let mut parser = Parser::new(s);
+			Uuid::from_token(&mut parser).unwrap();
+		}
+
+		for i in hex_characters.iter() {
+			for j in hex_characters.iter() {
+				for k in hex_characters.iter() {
+					uuid_string[3] = *i;
+					uuid_string[4] = *j;
+					uuid_string[5] = *k;
+
+					assert_uuid_parses(&uuid_string)
+				}
+			}
+		}
 	}
 }

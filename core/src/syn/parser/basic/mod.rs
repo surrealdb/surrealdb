@@ -8,7 +8,6 @@ use crate::{
 
 mod datetime;
 mod number;
-mod uuid;
 
 /// A trait for parsing single tokens with a specific value.
 pub trait TokenValue: Sized {
@@ -115,7 +114,14 @@ impl TokenValue for Strand {
 
 impl TokenValue for Uuid {
 	fn from_token(parser: &mut Parser<'_>) -> ParseResult<Self> {
-		parser.parse_uuid()
+		let peek = parser.peek();
+		match peek.kind {
+			t!("u\"") | t!("u'") => {
+				let pop = parser.pop_peek();
+				Ok(parser.lexer.lex_compound(pop)?.value)
+			}
+			_ => unexpected!(parser, peek, "a UUID"),
+		}
 	}
 }
 

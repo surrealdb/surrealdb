@@ -383,7 +383,6 @@ pub enum TokenKind {
 	/// Not produced by the lexer but only the result of token gluing.
 	Strand,
 	Regex,
-	Uuid,
 	/// A parameter like `$name`.
 	Parameter,
 	Identifier,
@@ -522,7 +521,6 @@ impl TokenKind {
 			TokenKind::DatetimeChars(_) => "an identifier",
 			TokenKind::Exponent => "an identifier",
 			TokenKind::NumberSuffix(_) => "an identifier",
-			TokenKind::Uuid => "a uuid",
 		}
 	}
 }

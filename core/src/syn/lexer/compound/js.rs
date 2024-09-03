@@ -1,15 +1,15 @@
+use super::{CompoundValue, Lexer};
+use crate::syn::token::Token;
 use crate::syn::{
 	error::{MessageKind, SyntaxError},
 	lexer::unicode::chars::JS_LINE_TERIMATORS,
 	token::{t, CompoundToken, JavaScript, Span, TokenKind},
 };
 
-use super::{CompoundValue, Lexer};
-
 impl CompoundValue for JavaScript {
-	const START: TokenKind = t!("{");
+	const START: &'static [TokenKind] = &[t!("{")];
 
-	fn relex(lexer: &mut Lexer, _: Span) -> Result<CompoundToken<Self>, SyntaxError> {
+	fn relex(lexer: &mut Lexer, _: Token) -> Result<CompoundToken<Self>, SyntaxError> {
 		let span = lex_js_function_body_inner(lexer)?;
 		Ok(CompoundToken {
 			value: JavaScript,
