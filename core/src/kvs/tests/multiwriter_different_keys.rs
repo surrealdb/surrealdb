@@ -7,17 +7,17 @@ async fn multiwriter_different_keys() {
 	let (ds, _) = new_ds(node_id, clock).await;
 	// Insert an initial key
 	let mut tx = ds.transaction(Write, Optimistic).await.unwrap().inner();
-	tx.set("test", "some text").await.unwrap();
+	tx.set("test", "some text", None).await.unwrap();
 	tx.commit().await.unwrap();
 	// Create a writeable transaction
 	let mut tx1 = ds.transaction(Write, Optimistic).await.unwrap().inner();
-	tx1.set("test1", "other text 1").await.unwrap();
+	tx1.set("test1", "other text 1", None).await.unwrap();
 	// Create a writeable transaction
 	let mut tx2 = ds.transaction(Write, Optimistic).await.unwrap().inner();
-	tx2.set("test2", "other text 2").await.unwrap();
+	tx2.set("test2", "other text 2", None).await.unwrap();
 	// Create a writeable transaction
 	let mut tx3 = ds.transaction(Write, Optimistic).await.unwrap().inner();
-	tx3.set("test3", "other text 3").await.unwrap();
+	tx3.set("test3", "other text 3", None).await.unwrap();
 	// Cancel both writeable transactions
 	tx1.commit().await.unwrap();
 	tx2.commit().await.unwrap();

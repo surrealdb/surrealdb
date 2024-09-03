@@ -247,24 +247,24 @@ impl Transactor {
 
 	/// Insert or update a key in the datastore.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
-	pub async fn set<K, V>(&mut self, key: K, val: V) -> Result<(), Error>
+	pub async fn set<K, V>(&mut self, key: K, val: V, version: Option<u64>) -> Result<(), Error>
 	where
 		K: Into<Key> + Debug,
 		V: Into<Val> + Debug,
 	{
 		let key = key.into();
-		expand_inner!(&mut self.inner, v => { v.set(key, val).await })
+		expand_inner!(&mut self.inner, v => { v.set(key, val, version).await })
 	}
 
 	/// Insert a key if it doesn't exist in the datastore.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
-	pub async fn put<K, V>(&mut self, key: K, val: V) -> Result<(), Error>
+	pub async fn put<K, V>(&mut self, key: K, val: V, version: Option<u64>) -> Result<(), Error>
 	where
 		K: Into<Key> + Debug,
 		V: Into<Val> + Debug,
 	{
 		let key = key.into();
-		expand_inner!(&mut self.inner, v => { v.put(key, val).await })
+		expand_inner!(&mut self.inner, v => { v.put(key, val, version).await })
 	}
 
 	/// Update a key in the datastore if the current value matches a condition.
@@ -352,6 +352,9 @@ impl Transactor {
 	{
 		let beg: Key = rng.start.into();
 		let end: Key = rng.end.into();
+		if beg > end {
+			return Ok(vec![]);
+		}
 		expand_inner!(&mut self.inner, v => { v.scan(beg..end, limit, version).await })
 	}
 
@@ -468,7 +471,7 @@ impl Transactor {
 		let nid = seq.get_next_id();
 		self.stash.set(key, seq.clone());
 		let (k, v) = seq.finish().unwrap();
-		self.set(k, v).await?;
+		self.set(k, v, None).await?;
 		Ok(nid)
 	}
 
@@ -479,7 +482,7 @@ impl Transactor {
 		let nid = seq.get_next_id();
 		self.stash.set(key, seq.clone());
 		let (k, v) = seq.finish().unwrap();
-		self.set(k, v).await?;
+		self.set(k, v, None).await?;
 		Ok(nid)
 	}
 
@@ -490,7 +493,7 @@ impl Transactor {
 		let nid = seq.get_next_id();
 		self.stash.set(key, seq.clone());
 		let (k, v) = seq.finish().unwrap();
-		self.set(k, v).await?;
+		self.set(k, v, None).await?;
 		Ok(nid)
 	}
 
@@ -502,7 +505,7 @@ impl Transactor {
 		seq.remove_id(ns);
 		self.stash.set(key, seq.clone());
 		let (k, v) = seq.finish().unwrap();
-		self.set(k, v).await?;
+		self.set(k, v, None).await?;
 		Ok(())
 	}
 
@@ -514,7 +517,7 @@ impl Transactor {
 		seq.remove_id(db);
 		self.stash.set(key, seq.clone());
 		let (k, v) = seq.finish().unwrap();
-		self.set(k, v).await?;
+		self.set(k, v, None).await?;
 		Ok(())
 	}
 
@@ -526,7 +529,7 @@ impl Transactor {
 		seq.remove_id(tb);
 		self.stash.set(key, seq.clone());
 		let (k, v) = seq.finish().unwrap();
-		self.set(k, v).await?;
+		self.set(k, v, None).await?;
 		Ok(())
 	}
 
@@ -599,7 +602,7 @@ impl Transactor {
 				));
 			}
 		}
-		self.set(ts_key, vst).await?;
+		self.set(ts_key, vst, None).await?;
 		Ok(vst)
 	}
 

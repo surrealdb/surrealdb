@@ -73,7 +73,7 @@ impl Document {
 	) -> Result<(), Error> {
 		#[cfg(not(target_arch = "wasm32"))]
 		let (o, n) = if let Some(ib) = ctx.get_index_builder() {
-			match ib.consume(ix, o, n, rid).await? {
+			match ib.consume(ctx, ix, o, n, rid).await? {
 				// The index builder consumed the value, which means it is currently building the index asynchronously,
 				// we don't index the document and let the index builder do it later.
 				ConsumeResult::Enqueued => return Ok(()),

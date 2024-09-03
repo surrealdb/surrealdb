@@ -161,7 +161,7 @@ impl TreeNodeProvider {
 	{
 		let val = node.n.try_into_val()?;
 		node.size = val.len() as u32;
-		tx.set(node.key.clone(), val).await?;
+		tx.set(node.key.clone(), val, None).await?;
 		Ok(())
 	}
 }

@@ -76,6 +76,7 @@ impl DefineFieldStatement {
 				overwrite: false,
 				..self.clone()
 			},
+			None,
 		)
 		.await?;
 
@@ -113,7 +114,7 @@ impl DefineFieldStatement {
 					}
 				};
 
-				txn.set(key, statement).await?;
+				txn.set(key, statement, None).await?;
 
 				if let Some(new_kind) = new_kind {
 					cur_kind = new_kind;
@@ -146,7 +147,7 @@ impl DefineFieldStatement {
 							}),
 							..tb.as_ref().to_owned()
 						};
-						txn.set(key, val).await?;
+						txn.set(key, val, None).await?;
 					}
 				}
 			}
@@ -175,7 +176,7 @@ impl DefineFieldStatement {
 							}),
 							..tb.as_ref().to_owned()
 						};
-						txn.set(key, val).await?;
+						txn.set(key, val, None).await?;
 					}
 				}
 			}

@@ -13,6 +13,7 @@ use surrealdb::{
 	iam::verify::{basic, token},
 };
 use tower_http::auth::AsyncAuthorizeRequest;
+use uuid::Uuid;
 
 use crate::err::Error;
 
@@ -81,8 +82,21 @@ async fn check_auth(parts: &mut Parts) -> Result<Session, Error> {
 		None
 	};
 
-	// Extract the session id from the headers.
-	let id = parse_typed_header::<SurrealId>(parts.extract::<TypedHeader<SurrealId>>().await)?;
+	// Extract the session id from the headers or generate a new one.
+	let id = match parse_typed_header::<SurrealId>(parts.extract::<TypedHeader<SurrealId>>().await)?
+	{
+		Some(id) => {
+			// Attempt to parse the request id as a UUID.
+			match Uuid::try_parse(&id) {
+				// The specified request id was a valid UUID.
+				Ok(id) => Some(id.to_string()),
+				// The specified request id was not a valid UUID.
+				Err(_) => return Err(Error::Request),
+			}
+		}
+		// No request id was specified, create a new id.
+		None => Some(Uuid::new_v4().to_string()),
+	};
 
 	// Extract the namespace from the headers.
 	let ns = parse_typed_header::<SurrealNamespace>(

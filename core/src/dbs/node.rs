@@ -62,16 +62,16 @@ impl Node {
 		}
 	}
 	// Sets the default gc value for old nodes
-	fn default_id(_revision: u16) -> Uuid {
-		Uuid::default()
+	fn default_id(_revision: u16) -> Result<Uuid, Error> {
+		Ok(Uuid::default())
 	}
 	// Sets the default gc value for old nodes
-	fn default_hb(_revision: u16) -> Timestamp {
-		Timestamp::default()
+	fn default_hb(_revision: u16) -> Result<Timestamp, Error> {
+		Ok(Timestamp::default())
 	}
 	// Sets the default gc value for old nodes
-	fn default_gc(_revision: u16) -> bool {
-		true
+	fn default_gc(_revision: u16) -> Result<bool, Error> {
+		Ok(true)
 	}
 	// Sets the default gc value for old nodes
 	fn convert_name(&mut self, _revision: u16, value: String) -> Result<(), Error> {

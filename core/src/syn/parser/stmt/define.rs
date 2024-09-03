@@ -3,6 +3,7 @@ use reblessive::Stk;
 use crate::cnf::EXPERIMENTAL_BEARER_ACCESS;
 use crate::sql::access_type::JwtAccessVerify;
 use crate::sql::index::HnswParams;
+use crate::sql::Value;
 use crate::{
 	sql::{
 		access_type,
@@ -738,6 +739,7 @@ impl Parser<'_> {
 		let mut res = DefineEventStatement {
 			name,
 			what,
+			when: Value::Bool(true),
 			if_not_exists,
 			overwrite,
 			..Default::default()
@@ -1208,6 +1210,7 @@ impl Parser<'_> {
 		let mut res = table_type::Relation {
 			from: None,
 			to: None,
+			enforced: false,
 		};
 		loop {
 			match self.peek_kind() {
@@ -1223,6 +1226,9 @@ impl Parser<'_> {
 				}
 				_ => break,
 			}
+		}
+		if self.eat(t!("ENFORCED")) {
+			res.enforced = true;
 		}
 		Ok(res)
 	}

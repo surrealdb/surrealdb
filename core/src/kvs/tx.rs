@@ -191,22 +191,22 @@ impl Transaction {
 
 	/// Insert or update a key in the datastore.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
-	pub async fn set<K, V>(&self, key: K, val: V) -> Result<(), Error>
+	pub async fn set<K, V>(&self, key: K, val: V, version: Option<u64>) -> Result<(), Error>
 	where
 		K: Into<Key> + Debug,
 		V: Into<Val> + Debug,
 	{
-		self.lock().await.set(key, val).await
+		self.lock().await.set(key, val, version).await
 	}
 
 	/// Insert a key if it doesn't exist in the datastore.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
-	pub async fn put<K, V>(&self, key: K, val: V) -> Result<(), Error>
+	pub async fn put<K, V>(&self, key: K, val: V, version: Option<u64>) -> Result<(), Error>
 	where
 		K: Into<Key> + Debug,
 		V: Into<Val> + Debug,
 	{
-		self.lock().await.put(key, val).await
+		self.lock().await.put(key, val, version).await
 	}
 
 	/// Update a key in the datastore if the current value matches a condition.
@@ -347,12 +347,12 @@ impl Transaction {
 	/// Retrieve all ROOT level accesses in a datastore.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
 	pub async fn all_root_accesses(&self) -> Result<Arc<[DefineAccessStatement]>, Error> {
-		let key = crate::key::root::access::ac::prefix();
+		let key = crate::key::root::ac::prefix();
 		let res = self.cache.get_value_or_guard_async(&key).await;
 		Ok(match res {
 			Ok(val) => val,
 			Err(cache) => {
-				let end = crate::key::root::access::ac::suffix();
+				let end = crate::key::root::ac::suffix();
 				let val = self.getr(key..end).await?;
 				let val = val.convert().into();
 				let val = Entry::Ras(Arc::clone(&val));
@@ -423,12 +423,12 @@ impl Transaction {
 	/// Retrieve all namespace access definitions for a specific namespace.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
 	pub async fn all_ns_accesses(&self, ns: &str) -> Result<Arc<[DefineAccessStatement]>, Error> {
-		let key = crate::key::namespace::access::ac::prefix(ns);
+		let key = crate::key::namespace::ac::prefix(ns);
 		let res = self.cache.get_value_or_guard_async(&key).await;
 		Ok(match res {
 			Ok(val) => val,
 			Err(cache) => {
-				let end = crate::key::namespace::access::ac::suffix(ns);
+				let end = crate::key::namespace::ac::suffix(ns);
 				let val = self.getr(key..end).await?;
 				let val = val.convert().into();
 				let val = Entry::Nas(Arc::clone(&val));
@@ -511,12 +511,12 @@ impl Transaction {
 		ns: &str,
 		db: &str,
 	) -> Result<Arc<[DefineAccessStatement]>, Error> {
-		let key = crate::key::database::access::ac::prefix(ns, db);
+		let key = crate::key::database::ac::prefix(ns, db);
 		let res = self.cache.get_value_or_guard_async(&key).await;
 		Ok(match res {
 			Ok(val) => val,
 			Err(cache) => {
-				let end = crate::key::database::access::ac::suffix(ns, db);
+				let end = crate::key::database::ac::suffix(ns, db);
 				let val = self.getr(key..end).await?;
 				let val = val.convert().into();
 				let val = Entry::Das(Arc::clone(&val));
@@ -790,7 +790,7 @@ impl Transaction {
 		Ok(match res {
 			Ok(val) => val,
 			Err(cache) => {
-				let val = self.get(key, None).await?.ok_or(Error::NdNotFound {
+				let val = self.get(key, None).await?.ok_or_else(|| Error::NdNotFound {
 					value: id.to_string(),
 				})?;
 				let val: Node = val.into();
@@ -810,7 +810,7 @@ impl Transaction {
 		Ok(match res {
 			Ok(val) => val,
 			Err(cache) => {
-				let val = self.get(key, None).await?.ok_or(Error::UserRootNotFound {
+				let val = self.get(key, None).await?.ok_or_else(|| Error::UserRootNotFound {
 					value: us.to_owned(),
 				})?;
 				let val: DefineUserStatement = val.into();
@@ -825,12 +825,12 @@ impl Transaction {
 	/// Retrieve a specific root access definition.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
 	pub async fn get_root_access(&self, ra: &str) -> Result<Arc<DefineAccessStatement>, Error> {
-		let key = crate::key::root::access::ac::new(ra).encode()?;
+		let key = crate::key::root::ac::new(ra).encode()?;
 		let res = self.cache.get_value_or_guard_async(&key).await;
 		Ok(match res {
 			Ok(val) => val,
 			Err(cache) => {
-				let val = self.get(key, None).await?.ok_or(Error::AccessRootNotFound {
+				let val = self.get(key, None).await?.ok_or_else(|| Error::AccessRootNotFound {
 					ac: ra.to_owned(),
 				})?;
 				let val: DefineAccessStatement = val.into();
@@ -854,10 +854,11 @@ impl Transaction {
 		Ok(match res {
 			Ok(val) => val,
 			Err(cache) => {
-				let val = self.get(key, None).await?.ok_or(Error::AccessGrantRootNotFound {
-					ac: ac.to_owned(),
-					gr: gr.to_owned(),
-				})?;
+				let val =
+					self.get(key, None).await?.ok_or_else(|| Error::AccessGrantRootNotFound {
+						ac: ac.to_owned(),
+						gr: gr.to_owned(),
+					})?;
 				let val: AccessGrant = val.into();
 				let val = Entry::Any(Arc::new(val));
 				let _ = cache.insert(val.clone());
@@ -875,7 +876,7 @@ impl Transaction {
 		Ok(match res {
 			Ok(val) => val,
 			Err(cache) => {
-				let val = self.get(key, None).await?.ok_or(Error::NsNotFound {
+				let val = self.get(key, None).await?.ok_or_else(|| Error::NsNotFound {
 					value: ns.to_owned(),
 				})?;
 				let val: DefineNamespaceStatement = val.into();
@@ -895,7 +896,7 @@ impl Transaction {
 		Ok(match res {
 			Ok(val) => val,
 			Err(cache) => {
-				let val = self.get(key, None).await?.ok_or(Error::UserNsNotFound {
+				let val = self.get(key, None).await?.ok_or_else(|| Error::UserNsNotFound {
 					value: us.to_owned(),
 					ns: ns.to_owned(),
 				})?;
@@ -915,12 +916,12 @@ impl Transaction {
 		ns: &str,
 		na: &str,
 	) -> Result<Arc<DefineAccessStatement>, Error> {
-		let key = crate::key::namespace::access::ac::new(ns, na).encode()?;
+		let key = crate::key::namespace::ac::new(ns, na).encode()?;
 		let res = self.cache.get_value_or_guard_async(&key).await;
 		Ok(match res {
 			Ok(val) => val,
 			Err(cache) => {
-				let val = self.get(key, None).await?.ok_or(Error::AccessNsNotFound {
+				let val = self.get(key, None).await?.ok_or_else(|| Error::AccessNsNotFound {
 					ac: na.to_owned(),
 					ns: ns.to_owned(),
 				})?;
@@ -946,11 +947,12 @@ impl Transaction {
 		Ok(match res {
 			Ok(val) => val,
 			Err(cache) => {
-				let val = self.get(key, None).await?.ok_or(Error::AccessGrantNsNotFound {
-					ac: ac.to_owned(),
-					gr: gr.to_owned(),
-					ns: ns.to_owned(),
-				})?;
+				let val =
+					self.get(key, None).await?.ok_or_else(|| Error::AccessGrantNsNotFound {
+						ac: ac.to_owned(),
+						gr: gr.to_owned(),
+						ns: ns.to_owned(),
+					})?;
 				let val: AccessGrant = val.into();
 				let val = Entry::Any(Arc::new(val));
 				let _ = cache.insert(val.clone());
@@ -968,7 +970,7 @@ impl Transaction {
 		Ok(match res {
 			Ok(val) => val,
 			Err(cache) => {
-				let val = self.get(key, None).await?.ok_or(Error::DbNotFound {
+				let val = self.get(key, None).await?.ok_or_else(|| Error::DbNotFound {
 					value: db.to_owned(),
 				})?;
 				let val: DefineDatabaseStatement = val.into();
@@ -993,7 +995,7 @@ impl Transaction {
 		Ok(match res {
 			Ok(val) => val,
 			Err(cache) => {
-				let val = self.get(key, None).await?.ok_or(Error::UserDbNotFound {
+				let val = self.get(key, None).await?.ok_or_else(|| Error::UserDbNotFound {
 					value: us.to_owned(),
 					ns: ns.to_owned(),
 					db: db.to_owned(),
@@ -1015,12 +1017,12 @@ impl Transaction {
 		db: &str,
 		da: &str,
 	) -> Result<Arc<DefineAccessStatement>, Error> {
-		let key = crate::key::database::access::ac::new(ns, db, da).encode()?;
+		let key = crate::key::database::ac::new(ns, db, da).encode()?;
 		let res = self.cache.get_value_or_guard_async(&key).await;
 		Ok(match res {
 			Ok(val) => val,
 			Err(cache) => {
-				let val = self.get(key, None).await?.ok_or(Error::AccessDbNotFound {
+				let val = self.get(key, None).await?.ok_or_else(|| Error::AccessDbNotFound {
 					ac: da.to_owned(),
 					ns: ns.to_owned(),
 					db: db.to_owned(),
@@ -1048,12 +1050,13 @@ impl Transaction {
 		Ok(match res {
 			Ok(val) => val,
 			Err(cache) => {
-				let val = self.get(key, None).await?.ok_or(Error::AccessGrantDbNotFound {
-					ac: ac.to_owned(),
-					gr: gr.to_owned(),
-					ns: ns.to_owned(),
-					db: db.to_owned(),
-				})?;
+				let val =
+					self.get(key, None).await?.ok_or_else(|| Error::AccessGrantDbNotFound {
+						ac: ac.to_owned(),
+						gr: gr.to_owned(),
+						ns: ns.to_owned(),
+						db: db.to_owned(),
+					})?;
 				let val: AccessGrant = val.into();
 				let val = Entry::Any(Arc::new(val));
 				let _ = cache.insert(val.clone());
@@ -1077,7 +1080,7 @@ impl Transaction {
 		Ok(match res {
 			Ok(val) => val,
 			Err(cache) => {
-				let val = self.get(key, None).await?.ok_or(Error::MlNotFound {
+				let val = self.get(key, None).await?.ok_or_else(|| Error::MlNotFound {
 					value: format!("{ml}<{vn}>"),
 				})?;
 				let val: DefineModelStatement = val.into();
@@ -1102,7 +1105,7 @@ impl Transaction {
 		Ok(match res {
 			Ok(val) => val,
 			Err(cache) => {
-				let val = self.get(key, None).await?.ok_or(Error::AzNotFound {
+				let val = self.get(key, None).await?.ok_or_else(|| Error::AzNotFound {
 					value: az.to_owned(),
 				})?;
 				let val: DefineAnalyzerStatement = val.into();
@@ -1127,7 +1130,7 @@ impl Transaction {
 		Ok(match res {
 			Ok(val) => val,
 			Err(cache) => {
-				let val = self.get(key, None).await?.ok_or(Error::FcNotFound {
+				let val = self.get(key, None).await?.ok_or_else(|| Error::FcNotFound {
 					value: fc.to_owned(),
 				})?;
 				let val: DefineFunctionStatement = val.into();
@@ -1152,7 +1155,7 @@ impl Transaction {
 		Ok(match res {
 			Ok(val) => val,
 			Err(cache) => {
-				let val = self.get(key, None).await?.ok_or(Error::PaNotFound {
+				let val = self.get(key, None).await?.ok_or_else(|| Error::PaNotFound {
 					value: pa.to_owned(),
 				})?;
 				let val: DefineParamStatement = val.into();
@@ -1177,7 +1180,7 @@ impl Transaction {
 		Ok(match res {
 			Ok(val) => val,
 			Err(cache) => {
-				let val = self.get(key, None).await?.ok_or(Error::TbNotFound {
+				let val = self.get(key, None).await?.ok_or_else(|| Error::TbNotFound {
 					value: tb.to_owned(),
 				})?;
 				let val: DefineTableStatement = val.into();
@@ -1203,7 +1206,7 @@ impl Transaction {
 		Ok(match res {
 			Ok(val) => val,
 			Err(cache) => {
-				let val = self.get(key, None).await?.ok_or(Error::EvNotFound {
+				let val = self.get(key, None).await?.ok_or_else(|| Error::EvNotFound {
 					value: ev.to_owned(),
 				})?;
 				let val: DefineEventStatement = val.into();
@@ -1229,7 +1232,7 @@ impl Transaction {
 		Ok(match res {
 			Ok(val) => val,
 			Err(cache) => {
-				let val = self.get(key, None).await?.ok_or(Error::FdNotFound {
+				let val = self.get(key, None).await?.ok_or_else(|| Error::FdNotFound {
 					value: fd.to_owned(),
 				})?;
 				let val: DefineFieldStatement = val.into();
@@ -1255,7 +1258,7 @@ impl Transaction {
 		Ok(match res {
 			Ok(val) => val,
 			Err(cache) => {
-				let val = self.get(key, None).await?.ok_or(Error::IxNotFound {
+				let val = self.get(key, None).await?.ok_or_else(|| Error::IxNotFound {
 					value: ix.to_owned(),
 				})?;
 				let val: DefineIndexStatement = val.into();
@@ -1307,7 +1310,7 @@ impl Transaction {
 		let key = crate::key::thing::new(ns, db, tb, id);
 		let enc = crate::key::thing::new(ns, db, tb, id).encode()?;
 		// Set the value in the datastore
-		self.set(&key, &val).await?;
+		self.set(&key, &val, None).await?;
 		// Set the value in the cache
 		self.cache.insert(enc, Entry::Val(Arc::new(val)));
 		// Return nothing
@@ -1445,7 +1448,7 @@ impl Transaction {
 			// The entry is not in the cache
 			Err(cache) => {
 				// Try to fetch the value from the datastore
-				let res = self.get(&key, None).await?.ok_or(Error::NsNotFound {
+				let res = self.get(&key, None).await?.ok_or_else(|| Error::NsNotFound {
 					value: ns.to_owned(),
 				});
 				// Check whether the value exists in the datastore
@@ -1459,7 +1462,7 @@ impl Transaction {
 							..Default::default()
 						};
 						let val = {
-							self.put(&key, &val).await?;
+							self.put(&key, &val, None).await?;
 							Entry::Any(Arc::new(val))
 						};
 						let _ = cache.insert(val.clone());
@@ -1498,7 +1501,7 @@ impl Transaction {
 			// The entry is not in the cache
 			Err(cache) => {
 				// Try to fetch the value from the datastore
-				let res = self.get(&key, None).await?.ok_or(Error::DbNotFound {
+				let res = self.get(&key, None).await?.ok_or_else(|| Error::DbNotFound {
 					value: db.to_owned(),
 				});
 				// Check whether the value exists in the datastore
@@ -1517,7 +1520,7 @@ impl Transaction {
 							..Default::default()
 						};
 						let val = {
-							self.put(&key, &val).await?;
+							self.put(&key, &val, None).await?;
 							Entry::Any(Arc::new(val))
 						};
 						let _ = cache.insert(val.clone());
@@ -1566,7 +1569,7 @@ impl Transaction {
 			// The entry is not in the cache
 			Err(cache) => {
 				// Try to fetch the value from the datastore
-				let res = self.get(&key, None).await?.ok_or(Error::TbNotFound {
+				let res = self.get(&key, None).await?.ok_or_else(|| Error::TbNotFound {
 					value: tb.to_owned(),
 				});
 				// Check whether the value exists in the datastore
@@ -1586,7 +1589,7 @@ impl Transaction {
 							..Default::default()
 						};
 						let val = {
-							self.put(&key, &val).await?;
+							self.put(&key, &val, None).await?;
 							Entry::Any(Arc::new(val))
 						};
 						let _ = cache.insert(val.clone());

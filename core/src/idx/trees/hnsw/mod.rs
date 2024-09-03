@@ -273,7 +273,7 @@ where
 
 	async fn save_state(&self, tx: &Transaction) -> Result<(), Error> {
 		let val: Val = VersionedStore::try_into(&self.state)?;
-		tx.set(self.state_key.clone(), val).await?;
+		tx.set(self.state_key.clone(), val, None).await?;
 		Ok(())
 	}
 

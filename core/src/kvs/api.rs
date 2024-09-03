@@ -60,13 +60,13 @@ pub trait Transaction {
 		K: Into<Key> + Sprintable + Debug;
 
 	/// Insert or update a key in the datastore.
-	async fn set<K, V>(&mut self, key: K, val: V) -> Result<(), Error>
+	async fn set<K, V>(&mut self, key: K, val: V, version: Option<u64>) -> Result<(), Error>
 	where
 		K: Into<Key> + Sprintable + Debug,
 		V: Into<Val> + Debug;
 
 	/// Insert a key if it doesn't exist in the datastore.
-	async fn put<K, V>(&mut self, key: K, val: V) -> Result<(), Error>
+	async fn put<K, V>(&mut self, key: K, val: V, version: Option<u64>) -> Result<(), Error>
 	where
 		K: Into<Key> + Sprintable + Debug,
 		V: Into<Val> + Debug;
@@ -307,7 +307,7 @@ pub trait Transaction {
 		// Convert the timestamp to a versionstamp
 		let verbytes = crate::vs::u64_to_versionstamp(ver);
 		// Store the timestamp to prevent other transactions from committing
-		self.set(key.as_slice(), verbytes.to_vec()).await?;
+		self.set(key.as_slice(), verbytes.to_vec(), None).await?;
 		// Return the uint64 representation of the timestamp as the result
 		Ok(verbytes)
 	}
@@ -338,6 +338,6 @@ pub trait Transaction {
 		let mut k: Vec<u8> = prefix.into();
 		k.append(&mut ts.to_vec());
 		k.append(&mut suffix.into());
-		self.set(k, val).await
+		self.set(k, val, None).await
 	}
 }

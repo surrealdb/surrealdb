@@ -458,9 +458,17 @@ impl Document {
 					Value::Subquery(Box::new(Subquery::Ifelse(IfelseStatement {
 						exprs: vec![(
 							Value::Expression(Box::new(Expression::Binary {
-								l: Value::Idiom(key.clone()),
-								o: Operator::MoreThan,
-								r: val.clone(),
+								l: Value::Expression(Box::new(Expression::Binary {
+									l: Value::Idiom(key.clone()),
+									o: Operator::Exact,
+									r: Value::None,
+								})),
+								o: Operator::Or,
+								r: Value::Expression(Box::new(Expression::Binary {
+									l: Value::Idiom(key.clone()),
+									o: Operator::MoreThan,
+									r: val.clone(),
+								})),
 							})),
 							val,
 						)],
@@ -505,9 +513,17 @@ impl Document {
 					Value::Subquery(Box::new(Subquery::Ifelse(IfelseStatement {
 						exprs: vec![(
 							Value::Expression(Box::new(Expression::Binary {
-								l: Value::Idiom(key.clone()),
-								o: Operator::LessThan,
-								r: val.clone(),
+								l: Value::Expression(Box::new(Expression::Binary {
+									l: Value::Idiom(key.clone()),
+									o: Operator::Exact,
+									r: Value::None,
+								})),
+								o: Operator::Or,
+								r: Value::Expression(Box::new(Expression::Binary {
+									l: Value::Idiom(key.clone()),
+									o: Operator::LessThan,
+									r: val.clone(),
+								})),
 							})),
 							val,
 						)],

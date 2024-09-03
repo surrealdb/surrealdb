@@ -28,13 +28,15 @@ pub enum Gen {
 	Uuid,
 }
 
-#[revisioned(revision = 1)]
+#[revisioned(revision = 2)]
 #[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize, Key, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub enum Id {
 	Number(i64),
 	String(String),
+	#[revision(start = 2)]
+	Uuid(Uuid),
 	Array(Array),
 	Object(Object),
 	Generate(Gen),
@@ -79,7 +81,7 @@ impl From<Object> for Id {
 
 impl From<Uuid> for Id {
 	fn from(v: Uuid) -> Self {
-		Self::String(v.to_raw())
+		Self::Uuid(v)
 	}
 }
 
@@ -188,13 +190,14 @@ impl Id {
 	}
 	/// Generate a new random UUID
 	pub fn uuid() -> Self {
-		Self::String(Uuid::new_v7().to_raw())
+		Self::Uuid(Uuid::new_v7())
 	}
 	/// Convert the Id to a raw String
 	pub fn to_raw(&self) -> String {
 		match self {
 			Self::Number(v) => v.to_string(),
 			Self::String(v) => v.to_string(),
+			Self::Uuid(v) => v.to_string(),
 			Self::Array(v) => v.to_string(),
 			Self::Object(v) => v.to_string(),
 			Self::Generate(v) => match v {
@@ -212,6 +215,7 @@ impl Display for Id {
 		match self {
 			Self::Number(v) => Display::fmt(v, f),
 			Self::String(v) => Display::fmt(&escape_rid(v), f),
+			Self::Uuid(v) => Display::fmt(v, f),
 			Self::Array(v) => Display::fmt(v, f),
 			Self::Object(v) => Display::fmt(v, f),
 			Self::Generate(v) => match v {
@@ -236,6 +240,7 @@ impl Id {
 		match self {
 			Id::Number(v) => Ok(Id::Number(*v)),
 			Id::String(v) => Ok(Id::String(v.clone())),
+			Id::Uuid(v) => Ok(Id::Uuid(*v)),
 			Id::Array(v) => match v.compute(stk, ctx, opt, doc).await? {
 				Value::Array(v) => Ok(Id::Array(v)),
 				_ => unreachable!(),
