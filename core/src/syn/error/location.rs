@@ -1,4 +1,4 @@
-use super::token::Span;
+use crate::syn::token::Span;
 use std::ops::Range;
 
 /// A human readable location inside a string.

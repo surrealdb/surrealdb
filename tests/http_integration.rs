@@ -348,6 +348,29 @@ mod http_integration {
 			let body = res.text().await.unwrap();
 			assert!(body.contains("00000000-0000-0000-0000-000000000000"), "body: {body}");
 		}
+
+		// Request with invalid header, should fail
+		{
+			// Prepare HTTP client with header
+			let mut headers = reqwest::header::HeaderMap::new();
+			let ns = Ulid::new().to_string();
+			let db = Ulid::new().to_string();
+			headers.insert("surreal-ns", ns.parse().unwrap());
+			headers.insert("surreal-db", db.parse().unwrap());
+			headers.insert(
+				"surreal-id",
+				HeaderValue::from_static("123"), // Not a valid UUIDv4
+			);
+			headers.insert(header::ACCEPT, "application/json".parse().unwrap());
+			let client = reqwest::Client::builder()
+				.connect_timeout(Duration::from_millis(10))
+				.default_headers(headers)
+				.build()
+				.unwrap();
+
+			let res = client.post(url).body("SELECT VALUE id FROM $session").send().await.unwrap();
+			assert_eq!(res.status(), 401);
+		}
 	}
 
 	#[test(tokio::test)]

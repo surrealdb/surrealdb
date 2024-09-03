@@ -1997,7 +1997,7 @@ mod tests {
  				        WITH JWT ALGORITHM HS512 KEY '{secret}'
     					AUTHENTICATE (
 							-- Simple example increasing the record identifier by one
-							SELECT * FROM type::thing('user', meta::id($auth) + 1)
+							SELECT * FROM type::thing('user', record::id($auth) + 1)
     					)
     					DURATION FOR SESSION 2h
     				;

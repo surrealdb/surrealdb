@@ -1,12 +1,11 @@
 use crate::syn::{
+	error::{bail, error, SyntaxError},
 	lexer::{
 		unicode::{byte, chars},
-		Error, Lexer,
+		Lexer,
 	},
 	token::{t, DatetimeChars, Token, TokenKind},
 };
-
-use super::CharError;
 
 impl<'a> Lexer<'a> {
 	/// Eats a single line comment.
@@ -46,14 +45,15 @@ impl<'a> Lexer<'a> {
 	}
 
 	/// Eats a multi line comment and returns an error if `*/` would be missing.
-	pub fn eat_multi_line_comment(&mut self) -> Result<(), Error> {
+	pub fn eat_multi_line_comment(&mut self) -> Result<(), SyntaxError> {
+		let start_span = self.current_span();
 		loop {
 			let Some(byte) = self.reader.next() else {
-				return Err(Error::UnexpectedEof);
+				bail!("Unexpected end of file, expected multi-line comment to end.", @start_span => "Comment starts here.");
 			};
 			if let b'*' = byte {
 				let Some(byte) = self.reader.peek() else {
-					return Err(Error::UnexpectedEof);
+					bail!("Unexpected end of file, expected multi-line comment to end.", @start_span => "Comment starts here.");
 				};
 				if b'/' == byte {
 					self.reader.next();
@@ -100,35 +100,6 @@ impl<'a> Lexer<'a> {
 		}
 	}
 
-	// re-lexes a `/` token to a regex token.
-	pub fn relex_regex(&mut self, token: Token) -> Token {
-		debug_assert_eq!(token.kind, t!("/"));
-		debug_assert_eq!(token.span.offset + 1, self.last_offset);
-		debug_assert_eq!(token.span.len, 1);
-
-		self.last_offset = token.span.offset;
-		loop {
-			match self.reader.next() {
-				Some(b'\\') => {
-					if let Some(b'/') = self.reader.peek() {
-						self.reader.next();
-					}
-				}
-				Some(b'/') => break,
-				Some(x) => {
-					if !x.is_ascii() {
-						if let Err(e) = self.reader.complete_char(x) {
-							return self.invalid_token(e.into());
-						}
-					}
-				}
-				None => return self.invalid_token(Error::UnexpectedEof),
-			}
-		}
-
-		self.finish_token(TokenKind::Regex)
-	}
-
 	/// Lex the next token, starting from the given byte.
 	pub fn lex_ascii(&mut self, byte: u8) -> Token {
 		let kind = match byte {
@@ -162,7 +133,10 @@ impl<'a> Lexer<'a> {
 					self.reader.next();
 					t!("&&")
 				}
-				_ => return self.invalid_token(Error::ExpectedEnd('&')),
+				_ => {
+					let error = error!("Invalid token `&`, single `&` are not a valid token, did you mean `&&`?",@self.current_span());
+					return self.invalid_token(error);
+				}
 			},
 			b'.' => match self.reader.peek() {
 				Some(b'.') => {
@@ -263,7 +237,10 @@ impl<'a> Lexer<'a> {
 							self.reader.next();
 							t!("+?=")
 						}
-						_ => return self.invalid_token(Error::ExpectedEnd('=')),
+						_ => {
+							let error = error!("Invalid token `+?` did you maybe mean `+?=` ?", @self.current_span());
+							return self.invalid_token(error);
+						}
 					}
 				}
 				_ => t!("+"),
@@ -326,8 +303,7 @@ impl<'a> Lexer<'a> {
 					self.reader.next();
 					match self.reader.complete_char(x) {
 						Ok('⟨') => return self.lex_surrounded_param(false),
-						Err(CharError::Eof) => return self.invalid_token(Error::InvalidUtf8),
-						Err(CharError::Unicode) => return self.invalid_token(Error::InvalidUtf8),
+						Err(e) => return self.invalid_token(e.into()),
 						_ => {
 							self.reader.backup(backup);
 							t!("$")
@@ -513,7 +489,10 @@ impl<'a> Lexer<'a> {
 				return self.lex_ident_from_next_byte(byte);
 			}
 			//b'0'..=b'9' => return self.lex_number(byte),
-			x => return self.invalid_token(Error::UnexpectedCharacter(x as char)),
+			x => {
+				let err = error!("Invalid token `{}`", x as char, @self.current_span());
+				return self.invalid_token(err);
+			}
 		};
 
 		self.finish_token(kind)

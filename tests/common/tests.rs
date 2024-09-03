@@ -1,6 +1,6 @@
 use super::common::{self, Format, Socket, DB, NS, PASS, USER};
-use http::header::{HeaderMap, HeaderValue};
 use assert_fs::TempDir;
+use http::header::{HeaderMap, HeaderValue};
 use serde_json::json;
 use std::future::Future;
 use std::pin::Pin;
@@ -380,10 +380,9 @@ async fn create() -> Result<(), Box<dyn std::error::Error>> {
 		)
 		.await?;
 	assert!(res.is_object(), "result: {res:?}");
-	assert!(res["result"].is_array(), "result: {res:?}");
-	let res = res["result"].as_array().unwrap();
-	assert_eq!(res.len(), 1, "result: {res:?}");
-	assert_eq!(res[0]["value"], "bar", "result: {res:?}");
+	assert!(res["result"].is_object(), "result: {res:?}");
+	let res = res["result"].as_object().unwrap();
+	assert_eq!(res["value"], "bar", "result: {res:?}");
 	// Verify the data was created
 	let res = socket.send_message_query("SELECT * FROM tester").await?;
 	assert!(res[0]["result"].is_array(), "result: {res:?}");
@@ -1848,6 +1847,21 @@ async fn session_id_defined_both() {
 	// The specific header should be used
 	let expected = json!(["00000000-0000-0000-0000-000000000000"]);
 	assert_eq!(res.remove(0)["result"], expected);
+
+	// Test passed
+	server.finish().unwrap();
+}
+
+#[test(tokio::test)]
+async fn session_id_invalid() {
+	// Setup database server
+	let (addr, mut server) = common::start_server_with_defaults().await.unwrap();
+	// We specify a request identifier via a specific SurrealDB header
+	let mut headers = HeaderMap::new();
+	headers.insert("surreal-id", HeaderValue::from_static("123")); // Not a valid UUIDv4
+	// Connect to WebSocket
+	let socket = Socket::connect_with_headers(&addr, SERVER, FORMAT, headers).await;
+	assert!(socket.is_err(), "unexpected success using connecting with invalid id header");
 
 	// Test passed
 	server.finish().unwrap();

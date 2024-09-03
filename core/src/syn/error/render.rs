@@ -1,19 +1,31 @@
-use std::{fmt, ops::Range};
+//! Module for rendering errors onto source code.
 
-use super::common::Location;
+use std::{cmp::Ordering, fmt, ops::Range};
+
+use super::{Location, MessageKind};
 
 #[derive(Clone, Debug)]
 #[non_exhaustive]
 pub struct RenderedError {
-	pub text: String,
+	pub errors: Vec<String>,
 	pub snippets: Vec<Snippet>,
 }
 
 impl fmt::Display for RenderedError {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-		writeln!(f, "{}", self.text)?;
-		for s in self.snippets.iter() {
-			writeln!(f, "{}", s)?;
+		match self.errors.len().cmp(&1) {
+			Ordering::Equal => writeln!(f, "{}", self.errors[0])?,
+			Ordering::Greater => {
+				writeln!(f, "- {}", self.errors[0])?;
+				writeln!(f, "caused by:")?;
+				for e in &self.errors[2..] {
+					writeln!(f, "    - {}", e)?
+				}
+			}
+			Ordering::Less => {}
+		}
+		for s in &self.snippets {
+			writeln!(f, "{s}")?;
 		}
 		Ok(())
 	}
@@ -21,7 +33,6 @@ impl fmt::Display for RenderedError {
 
 /// Whether the snippet was truncated.
 #[derive(Clone, Copy, Eq, PartialEq, Debug)]
-#[non_exhaustive]
 pub enum Truncation {
 	/// The snippet wasn't truncated
 	None,
@@ -35,7 +46,6 @@ pub enum Truncation {
 
 /// A piece of the source code with a location and an optional explanation.
 #[derive(Clone, Debug)]
-#[non_exhaustive]
 pub struct Snippet {
 	/// The part of the original source code,
 	source: String,
@@ -48,7 +58,11 @@ pub struct Snippet {
 	/// The amount of characters that are part of area to be pointed to.
 	length: usize,
 	/// A possible explanation for this snippet.
-	explain: Option<String>,
+	label: Option<String>,
+	/// The kind of snippet,
+	// Unused for now but could in the future be used to color snippets.
+	#[allow(dead_code)]
+	kind: MessageKind,
 }
 
 impl Snippet {
@@ -61,6 +75,7 @@ impl Snippet {
 		source: &str,
 		location: Location,
 		explain: Option<&'static str>,
+		kind: MessageKind,
 	) -> Self {
 		let line = source.split('\n').nth(location.line - 1).unwrap();
 		let (line, truncation, offset) = Self::truncate_line(line, location.column - 1);
@@ -71,14 +86,16 @@ impl Snippet {
 			location,
 			offset,
 			length: 1,
-			explain: explain.map(|x| x.into()),
+			label: explain.map(|x| x.into()),
+			kind,
 		}
 	}
 
 	pub fn from_source_location_range(
 		source: &str,
 		location: Range<Location>,
-		explain: Option<&'static str>,
+		explain: Option<&str>,
+		kind: MessageKind,
 	) -> Self {
 		let line = source.split('\n').nth(location.start.line - 1).unwrap();
 		let (line, truncation, offset) = Self::truncate_line(line, location.start.column - 1);
@@ -93,7 +110,8 @@ impl Snippet {
 			location: location.start,
 			offset,
 			length,
-			explain: explain.map(|x| x.into()),
+			label: explain.map(|x| x.into()),
+			kind,
 		}
 	}
 
@@ -189,7 +207,7 @@ impl fmt::Display for Snippet {
 			write!(f, "^")?;
 		}
 		write!(f, " ")?;
-		if let Some(ref explain) = self.explain {
+		if let Some(ref explain) = self.label {
 			write!(f, "{explain}")?;
 		}
 		Ok(())
@@ -199,7 +217,7 @@ impl fmt::Display for Snippet {
 #[cfg(test)]
 mod test {
 	use super::{RenderedError, Snippet, Truncation};
-	use crate::syn::common::Location;
+	use crate::syn::error::{Location, MessageKind};
 
 	#[test]
 	fn truncate_whitespace() {
@@ -209,7 +227,7 @@ mod test {
 
 		let location = Location::of_in(error, source);
 
-		let snippet = Snippet::from_source_location(source, location, None);
+		let snippet = Snippet::from_source_location(source, location, None, MessageKind::Error);
 		assert_eq!(snippet.truncation, Truncation::None);
 		assert_eq!(snippet.offset, 0);
 		assert_eq!(snippet.source.as_str(), "$");
@@ -223,7 +241,7 @@ mod test {
 
 		let location = Location::of_in(error, source);
 
-		let snippet = Snippet::from_source_location(source, location, None);
+		let snippet = Snippet::from_source_location(source, location, None, MessageKind::Error);
 		assert_eq!(snippet.truncation, Truncation::Start);
 		assert_eq!(snippet.offset, 10);
 		assert_eq!(snippet.source.as_str(), "aaaaaaaaa $");
@@ -237,7 +255,7 @@ mod test {
 
 		let location = Location::of_in(error, source);
 
-		let snippet = Snippet::from_source_location(source, location, None);
+		let snippet = Snippet::from_source_location(source, location, None, MessageKind::Error);
 		assert_eq!(snippet.truncation, Truncation::End);
 		assert_eq!(snippet.offset, 2);
 		assert_eq!(
@@ -254,7 +272,7 @@ mod test {
 
 		let location = Location::of_in(error, source);
 
-		let snippet = Snippet::from_source_location(source, location, None);
+		let snippet = Snippet::from_source_location(source, location, None, MessageKind::Error);
 		assert_eq!(snippet.truncation, Truncation::Both);
 		assert_eq!(snippet.offset, 10);
 		assert_eq!(
@@ -266,7 +284,7 @@ mod test {
 	#[test]
 	fn render() {
 		let error = RenderedError {
-			text: "some_error".to_string(),
+			errors: vec!["some_error".to_string()],
 			snippets: vec![Snippet {
 				source: "hallo error".to_owned(),
 				truncation: Truncation::Both,
@@ -276,7 +294,8 @@ mod test {
 				},
 				offset: 6,
 				length: 5,
-				explain: Some("this is wrong".to_owned()),
+				label: Some("this is wrong".to_owned()),
+				kind: MessageKind::Error,
 			}],
 		};
 
