@@ -1,106 +1,43 @@
-/// A macro for requiring a certain token to be next, returning an error otherwise..
+/// A macro for returning an error when a unexpected token was found.
+///
+/// This macro handles a variety of situations, including errors related to invalid tokens and
+/// unexpected `EOF` or whitespace.
+///
+/// This macro takes a reference to the parser, the token which was unexpected and a expression
+/// which explains what should be expected instead.
+///
+/// This macro attaches the span from the token as an error span to the error.
 macro_rules! unexpected {
-	(@ $span:expr, $parser:expr, $found:expr, $expected:expr $(=> $explain:expr)?) => {{
-		unexpected!(@@withSpan, $span, $parser,$found, $expected $(=> $explain)?)
-	}};
-
-	($parser:expr, $found:expr, $expected:expr $(=> $explain:expr)?) => {{
-		let span = $parser.recent_span();
-		unexpected!(@@withSpan, span, $parser,$found, $expected $(=> $explain)?)
-	}};
-
-	(@@withSpan, $span:expr, $parser:expr, $found:expr, $expected:expr) => {
-		match $found {
+	($parser:expr, $found:expr, $expected:expr $(, @$span:expr)? $(, $($t:tt)* )?) => {{
+		let __found: $crate::syn::token::Token = $found;
+		match __found.kind{
 			$crate::syn::token::TokenKind::Invalid => {
-				let error = $parser.lexer.error.take().unwrap();
-				return Err($crate::syn::parser::ParseError::new(
-					$crate::syn::parser::ParseErrorKind::InvalidToken(error),
-					$span
-				));
+				return Err($parser.lexer.error.take().unwrap());
 			}
 			$crate::syn::token::TokenKind::Eof => {
-				let expected = $expected;
-				return Err($crate::syn::parser::ParseError::new(
-					$crate::syn::parser::ParseErrorKind::UnexpectedEof {
-						expected,
-					},
-					$span
-				));
+				let error = $crate::syn::error::error!("Unexpected end of file, expected {}",$expected, @__found.span $( $($t)* )?);
+				return Err(error.with_data_pending())
+			}
+			$crate::syn::token::TokenKind::WhiteSpace => {
+				$crate::syn::error::bail!("Unexpected whitespace, expected token {} to continue",$expected,  @__found.span$( $($t)* )?)
 			}
 			x => {
-				let expected = $expected;
-				return Err($crate::syn::parser::ParseError::new(
-					$crate::syn::parser::ParseErrorKind::Unexpected {
-						found: x,
-						expected,
-					},
-					$span
-				));
+				$crate::syn::error::bail!("Unexpected token {}, expected {}",x,$expected, @__found.span$( $($t)* )?)
 			}
 		}
-	};
+	}};
 
-	(@@withSpan, $span:expr, $parser:expr, $found:expr, $expected:expr => $explain:expr) => {
-		match $found {
-			$crate::syn::token::TokenKind::Invalid => {
-				let error = $parser.lexer.error.take().unwrap();
-				return Err($crate::syn::parser::ParseError::new(
-					$crate::syn::parser::ParseErrorKind::InvalidToken(error),
-					$span
-				));
-			}
-			$crate::syn::token::TokenKind::Eof => {
-				let expected = $expected;
-				return Err($crate::syn::parser::ParseError::new(
-					$crate::syn::parser::ParseErrorKind::UnexpectedEof {
-						expected,
-					},
-					$span
-				));
-			}
-			x => {
-				let expected = $expected;
-				return Err($crate::syn::parser::ParseError::new(
-					$crate::syn::parser::ParseErrorKind::UnexpectedExplain {
-						found: x,
-						expected,
-						explain: $explain,
-					},
-					$span
-				));
-			}
-		}
-	};
 }
 
-/// A macro for indicating that the parser encountered an token which it didn't expect.
+/// A macro for asserting that the next token should be of the given type, returns the token if
+/// this is the case otherwise it returns an error.
 macro_rules! expected {
 	($parser:expr, $($kind:tt)*) => {{
-		let token = $parser.next();
-		match token.kind {
-			$($kind)* => token,
-			$crate::syn::parser::TokenKind::Invalid => {
-				let error = $parser.lexer.error.take().unwrap();
-				return Err($crate::syn::parser::ParseError::new(
-					$crate::syn::parser::ParseErrorKind::InvalidToken(error),
-					$parser.recent_span(),
-				));
-			}
-			x => {
-				let expected = $($kind)*.as_str();
-				let kind = if let $crate::syn::token::TokenKind::Eof = x {
-					$crate::syn::parser::ParseErrorKind::UnexpectedEof {
-						expected,
-					}
-				} else {
-					$crate::syn::parser::ParseErrorKind::Unexpected {
-						found: x,
-						expected,
-					}
-				};
-
-				return Err($crate::syn::parser::ParseError::new(kind, $parser.last_span()));
-			}
+		let token: crate::syn::token::Token = $parser.next();
+		if let $($kind)* = token.kind{
+			token
+		}else{
+			$crate::syn::parser::unexpected!($parser,token, $($kind)*)
 		}
 	}};
 }
@@ -108,38 +45,16 @@ macro_rules! expected {
 /// A macro for indicating that the parser encountered an token which it didn't expect.
 macro_rules! expected_whitespace {
 	($parser:expr, $($kind:tt)*) => {{
-		let token = $parser.next_whitespace();
-		match token.kind {
-			$($kind)* => token,
-			$crate::syn::parser::TokenKind::Invalid => {
-				let error = $parser.lexer.error.take().unwrap();
-				return Err($crate::syn::parser::ParseError::new(
-					$crate::syn::parser::ParseErrorKind::InvalidToken(error),
-					$parser.recent_span(),
-				));
-			}
-			x => {
-				let expected = $($kind)*.as_str();
-				let kind = if let $crate::syn::token::TokenKind::Eof = x {
-					$crate::syn::parser::ParseErrorKind::UnexpectedEof {
-						expected,
-					}
-				} else {
-					$crate::syn::parser::ParseErrorKind::Unexpected {
-						found: x,
-						expected,
-					}
-				};
-
-				return Err($crate::syn::parser::ParseError::new(kind, $parser.last_span()));
-			}
+		let token: crate::syn::token::Token = $parser.next_whitespace();
+		if let $($kind)* = token.kind{
+			token
+		}else{
+			$crate::syn::parser::unexpected!($parser,token, $($kind)*)
 		}
 	}};
 }
 
 #[cfg(test)]
-#[doc(hidden)]
-#[macro_export]
 macro_rules! test_parse {
 	($func:ident$( ( $($e:expr),* $(,)? ))? , $t:expr) => {{
 		let mut parser = $crate::syn::parser::Parser::new($t.as_bytes());
@@ -148,15 +63,11 @@ macro_rules! test_parse {
 	}};
 }
 
-#[doc(hidden)]
-#[macro_export]
 macro_rules! enter_object_recursion {
 	($name:ident = $this:expr => { $($t:tt)* }) => {{
 		if $this.object_recursion == 0 {
-			return Err($crate::syn::parser::ParseError::new(
-				$crate::syn::parser::ParseErrorKind::ExceededObjectDepthLimit,
-				$this.last_span(),
-			));
+			return Err($crate::syn::parser::SyntaxError::new("Exceeded query recursion depth limit")
+				.with_span($this.last_span(), $crate::syn::error::MessageKind::Error))
 		}
 		struct Dropper<'a, 'b>(&'a mut $crate::syn::parser::Parser<'b>);
 		impl Drop for Dropper<'_, '_> {
@@ -186,14 +97,11 @@ macro_rules! enter_object_recursion {
 	}};
 }
 
-#[macro_export]
 macro_rules! enter_query_recursion {
 	($name:ident = $this:expr => { $($t:tt)* }) => {{
 		if $this.query_recursion == 0 {
-			return Err($crate::syn::parser::ParseError::new(
-				$crate::syn::parser::ParseErrorKind::ExceededQueryDepthLimit,
-				$this.last_span(),
-			));
+			return Err($crate::syn::parser::SyntaxError::new("Exceeded query recursion depth limit")
+				.with_span($this.last_span(), $crate::syn::error::MessageKind::Error))
 		}
 		struct Dropper<'a, 'b>(&'a mut $crate::syn::parser::Parser<'b>);
 		impl Drop for Dropper<'_, '_> {
@@ -224,9 +132,11 @@ macro_rules! enter_query_recursion {
 	}};
 }
 
-pub(super) use expected;
-pub(super) use expected_whitespace;
-pub(super) use unexpected;
+pub(crate) use enter_object_recursion;
+pub(crate) use enter_query_recursion;
+pub(crate) use expected;
+pub(crate) use expected_whitespace;
+pub(crate) use unexpected;
 
 #[cfg(test)]
-pub(super) use test_parse;
+pub(crate) use test_parse;

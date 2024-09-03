@@ -75,7 +75,8 @@ impl Parser<'_> {
 			return Ok(Kind::Literal(literal));
 		}
 
-		match self.next().kind {
+		let next = self.next();
+		match next.kind {
 			t!("BOOL") => Ok(Kind::Bool),
 			t!("NULL") => Ok(Kind::Null),
 			t!("BYTES") => Ok(Kind::Bytes),
@@ -139,13 +140,14 @@ impl Parser<'_> {
 					Ok(Kind::Set(Box::new(Kind::Any), None))
 				}
 			}
-			x => unexpected!(self, x, "a kind name"),
+			_ => unexpected!(self, next, "a kind name"),
 		}
 	}
 
 	/// Parse the kind of gemoetry
 	fn parse_geometry_kind(&mut self) -> ParseResult<String> {
-		match self.next().kind {
+		let next = self.next();
+		match next.kind {
 			TokenKind::Keyword(
 				x @ (Keyword::Feature
 				| Keyword::Point
@@ -156,13 +158,14 @@ impl Parser<'_> {
 				| Keyword::MultiPolygon
 				| Keyword::Collection),
 			) => Ok(x.as_str().to_ascii_lowercase()),
-			x => unexpected!(self, x, "a geometry kind name"),
+			_ => unexpected!(self, next, "a geometry kind name"),
 		}
 	}
 
 	/// Parse a literal kind
 	async fn parse_literal_kind(&mut self, ctx: &mut Stk) -> ParseResult<Literal> {
-		match self.peek_kind() {
+		let peek = self.peek();
+		match peek.kind {
 			t!("'") | t!("\"") | TokenKind::Strand => {
 				let s = self.next_token_value::<Strand>()?;
 				Ok(Literal::String(s))
@@ -172,7 +175,7 @@ impl Parser<'_> {
 				match token.kind {
 					TokenKind::Number(_) => self.next_token_value().map(Literal::Number),
 					TokenKind::Duration => self.next_token_value().map(Literal::Duration),
-					x => unexpected!(self, x, "a value"),
+					_ => unexpected!(self, token, "a value"),
 				}
 			}
 			t!("{") => {
@@ -197,7 +200,7 @@ impl Parser<'_> {
 				}
 				Ok(Literal::Array(arr))
 			}
-			_ => unexpected!(self, self.peek().kind, "a literal kind"),
+			_ => unexpected!(self, peek, "a literal kind"),
 		}
 	}
 

@@ -30,7 +30,6 @@ kv-rocksdb = ["dep:rocksdb", "tokio/time", "dep:tempfile", "dep:ext-sort"]
 kv-tikv = ["dep:tikv", "tokio/time", "dep:tempfile", "dep:ext-sort"]
 kv-fdb = ["dep:foundationdb", "tokio/time", "dep:tempfile", "dep:ext-sort"]
 kv-surrealkv = ["dep:surrealkv", "tokio/time", "dep:tempfile", "dep:ext-sort"]
-kv-surrealcs = ["dep:surrealcs", "tokio/time", "dep:tempfile", "dep:ext-sort"]
 scripting = ["dep:js"]
 http = ["dep:reqwest"]
 ml = ["dep:surrealml"]
@@ -58,18 +57,16 @@ ammonia = "4.0.0"
 arbitrary = { version = "1.3.2", features = ["derive"], optional = true }
 argon2 = "0.5.2"
 ascii = { version = "0.3.2", package = "any_ascii" }
-async-graphql = { version = "7.0.7", default-features = false, features = [
-    "dynamic-schema",
-] }
+async-graphql = { version = "7.0.7", default-features = false, features = ["dynamic-schema"] }
 base64 = "0.21.5"
 bcrypt = "0.15.0"
-blake3 = "1.5.3"
 bincode = "1.3.3"
+blake3 = "1.5.3"
 bytes = "1.5.0"
 castaway = "0.2.3"
 cedar-policy = "2.4.2"
 channel = { version = "1.9.0", package = "async-channel" }
-chrono = { version = "0.4.31", features = ["serde"] }
+chrono = { version = "0.4.38", features = ["serde"] }
 ciborium = "0.2.1"
 dashmap = "5.5.3"
 derive = { version = "0.12.0", package = "surrealdb-derive" }
@@ -84,8 +81,8 @@ foundationdb = { version = "0.9.0", default-features = false, features = [
 fst = "0.4.7"
 futures = "0.3.29"
 fuzzy-matcher = "0.3.7"
-geo = { version = "0.27.0", features = ["use-serde"] }
-geo-types = { version = "0.7.12", features = ["arbitrary"] }
+geo = { version = "0.28.0", features = ["use-serde"] }
+geo-types = { version = "0.7.13", features = ["arbitrary"] }
 hex = { version = "0.4.3" }
 indxdb = { version = "0.5.0", optional = true }
 ipnet = "2.9.0"
@@ -118,14 +115,14 @@ quick_cache = "0.5.1"
 radix_trie = { version = "0.2.1", features = ["serde"] }
 rand = "0.8.5"
 reblessive = { version = "0.4.0", features = ["tree"] }
-regex = "1.10.2"
-regex-syntax = { version = "0.8.2", optional = true, features = ["arbitrary"] }
+regex = "1.10.6"
+regex-syntax = { version = "0.8.4", optional = true, features = ["arbitrary"] }
 reqwest = { version = "0.12.5", default-features = false, features = [
     "json",
     "stream",
     "multipart",
 ], optional = true }
-revision = { version = "0.9.0", features = [
+revision = { version = "0.10.0", features = [
     "chrono",
     "geo",
     "roaring",
@@ -134,25 +131,24 @@ revision = { version = "0.9.0", features = [
     "uuid",
 ] }
 rmpv = "1.0.1"
-roaring = { version = "0.10.2", features = ["serde"] }
+roaring = { version = "0.10.6", features = ["serde"] }
 rocksdb = { version = "0.21.0", features = ["lz4", "snappy"], optional = true }
 rust_decimal = { version = "1.36.0", features = ["maths", "serde-str"] }
 rust-stemmers = "1.2.0"
 scrypt = "0.11.0"
 semver = { version = "1.0.20", features = ["serde"] }
-serde = { version = "1.0.193", features = ["derive"] }
-serde_json = "1.0.108"
+serde = { version = "1.0.209", features = ["derive"] }
+serde_json = "1.0.127"
 serde-content = "0.1.0"
 sha1 = "0.10.6"
 sha2 = "0.10.8"
 snap = "1.1.0"
 storekey = "0.5.0"
 subtle = "2.6"
-surrealcs = { version = "0.1.0", optional = true }
 surrealkv = { version = "0.3.4", optional = true }
 surrealml = { version = "0.1.1", optional = true, package = "surrealml-core" }
 tempfile = { version = "3.10.1", optional = true }
-thiserror = "1.0.50"
+thiserror = "1.0.63"
 tikv = { version = "0.3.0-surreal.1", default-features = false, package = "surrealdb-tikv-client", optional = true }
 tracing = "0.1.40"
 trice = "0.4.0"
@@ -180,7 +176,7 @@ tokio = { version = "1.34.0", default-features = false, features = [
     "rt",
     "sync",
 ] }
-uuid = { version = "1.6.1", features = ["serde", "js", "v4", "v7"] }
+uuid = { version = "1.10.0", features = ["serde", "js", "v4", "v7"] }
 wasm-bindgen-futures = "0.4.39"
 wasmtimer = { version = "0.2.0", default-features = false, features = [
     "tokio",
@@ -198,7 +194,7 @@ tokio = { version = "1.34.0", default-features = false, features = [
     "sync",
 ] }
 tokio-tungstenite = { version = "0.21.0", optional = true }
-uuid = { version = "1.6.1", features = ["serde", "v4", "v7"] }
+uuid = { version = "1.10.0", features = ["serde", "v4", "v7"] }
 
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(surrealdb_unstable)'] }
