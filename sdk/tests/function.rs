@@ -4438,8 +4438,8 @@ async fn function_time_hour() -> Result<(), Error> {
 async fn function_time_is_leap_year() -> Result<(), Error> {
 	let sql = r#"
 		RETURN time::is_leap_year();
-		RETURN time::hour(d"1987-06-22T08:30:45Z");
-		RETURN time::hour(d"1988-06-22T08:30:45Z");
+		RETURN time::is_leap_year(d"1987-06-22T08:30:45Z");
+		RETURN time::is_leap_year(d"1988-06-22T08:30:45Z");
 		RETURN d'2024-09-03T02:33:15.349397Z'.is_leap_year();
 	"#;
 	let mut test = Test::new(sql).await?;
