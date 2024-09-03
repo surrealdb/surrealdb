@@ -1166,7 +1166,11 @@ impl Value {
 	}
 
 	pub fn is_single(&self) -> bool {
-		!matches!(self, Value::Array(a) if a.len() != 1)
+		match self {
+			Value::Object(_) => true,
+			t @ Value::Thing(_) => t.is_thing_single(),
+			_ => false,
+		}
 	}
 
 	// -----------------------------------
