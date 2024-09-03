@@ -118,6 +118,13 @@ pub fn hour((val,): (Option<Datetime>,)) -> Result<Value, Error> {
 	})
 }
 
+pub fn is_leap_year((val,): (Option<Datetime>,)) -> Result<Value, Error> {
+	Ok(match val {
+		Some(v) => v.naive_utc().date().leap_year().into(),
+		None => Datetime::default().naive_utc().date().leap_year().into(),
+	})
+}
+
 pub fn max((array,): (Vec<Datetime>,)) -> Result<Value, Error> {
 	Ok(match array.into_iter().max() {
 		Some(v) => v.into(),

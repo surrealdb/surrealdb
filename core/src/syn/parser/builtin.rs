@@ -346,6 +346,7 @@ pub(crate) static PATHS: phf::Map<UniCase<&'static str>, PathKind> = phf_map! {
 		UniCase::ascii("time::format") => PathKind::Function,
 		UniCase::ascii("time::group") => PathKind::Function,
 		UniCase::ascii("time::hour") => PathKind::Function,
+		UniCase::ascii("time::is_leap_year") => PathKind::Function,
 		UniCase::ascii("time::max") => PathKind::Function,
 		UniCase::ascii("time::micros") => PathKind::Function,
 		UniCase::ascii("time::millis") => PathKind::Function,
