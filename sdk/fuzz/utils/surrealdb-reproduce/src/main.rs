@@ -83,6 +83,8 @@ async fn main() {
 	let ses = Session::owner().with_ns("test").with_db("test");
 	if let Err(err) = ds.process(query, &ses, None).await {
 		println!("Failed to locally execute query object: {}", err);
+	} else {
+		println!("Query object was executed locally without issues!");
 	};
 }
 
