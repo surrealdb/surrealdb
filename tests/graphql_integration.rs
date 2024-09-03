@@ -160,11 +160,11 @@ mod graphql_integration {
 			assert_eq!(expected.to_string(), body)
 		}
 
-		// test order
+		// test filter
 		{
 			let res = client
 				.post(gql_url)
-				.body(json!({"query": r#"query{foo(order: {desc: val}){id}}"#}).to_string())
+				.body(json!({"query": r#"query{foo(filter: {val: {eq: 42}}){id}}"#}).to_string())
 				.send()
 				.await?;
 			assert_eq!(res.status(), 200);
@@ -172,9 +172,6 @@ mod graphql_integration {
 			let expected = json!({
 				"data": {
 					"foo": [
-						{
-							"id": "foo:2",
-						},
 						{
 							"id": "foo:1",
 						}
