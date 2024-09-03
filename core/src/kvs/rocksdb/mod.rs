@@ -188,7 +188,11 @@ impl super::api::Transaction for Transaction {
 		// Cancel this transaction
 		match self.inner.as_ref() {
 			Some(inner) => inner.rollback()?,
-			None => unreachable!(),
+			None => {
+				return Err(Error::Unreachable(
+					"Unable to take and cancel an already taken RocksDB transaction",
+				))
+			}
 		};
 		// Continue
 		Ok(())
@@ -210,7 +214,11 @@ impl super::api::Transaction for Transaction {
 		// Commit this transaction
 		match self.inner.take() {
 			Some(inner) => inner.commit()?,
-			None => unreachable!(),
+			None => {
+				return Err(Error::Unreachable(
+					"Unable to take and commit an already taken RocksDB transaction",
+				))
+			}
 		};
 		// Continue
 		Ok(())

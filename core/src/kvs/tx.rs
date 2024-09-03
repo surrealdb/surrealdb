@@ -322,7 +322,7 @@ impl Transaction {
 				val
 			}
 		}
-		.into_nds())
+		.try_into_nds()?)
 	}
 
 	/// Retrieve all ROOT level users in a datastore.
@@ -341,7 +341,7 @@ impl Transaction {
 				val
 			}
 		}
-		.into_rus())
+		.try_into_rus()?)
 	}
 
 	/// Retrieve all ROOT level accesses in a datastore.
@@ -360,7 +360,7 @@ impl Transaction {
 				val
 			}
 		}
-		.into_ras())
+		.try_into_ras()?)
 	}
 
 	/// Retrieve all root access grants in a datastore.
@@ -379,7 +379,7 @@ impl Transaction {
 				val
 			}
 		}
-		.into_rag())
+		.try_into_rag()?)
 	}
 
 	/// Retrieve all namespace definitions in a datastore.
@@ -398,7 +398,7 @@ impl Transaction {
 				val
 			}
 		}
-		.into_nss())
+		.try_into_nss()?)
 	}
 
 	/// Retrieve all namespace user definitions for a specific namespace.
@@ -417,7 +417,7 @@ impl Transaction {
 				val
 			}
 		}
-		.into_nus())
+		.try_into_nus()?)
 	}
 
 	/// Retrieve all namespace access definitions for a specific namespace.
@@ -436,7 +436,7 @@ impl Transaction {
 				val
 			}
 		}
-		.into_nas())
+		.try_into_nas()?)
 	}
 
 	/// Retrieve all namespace access grants for a specific namespace.
@@ -459,7 +459,7 @@ impl Transaction {
 				val
 			}
 		}
-		.into_nag())
+		.try_into_nag()?)
 	}
 
 	/// Retrieve all database definitions for a specific namespace.
@@ -478,7 +478,7 @@ impl Transaction {
 				val
 			}
 		}
-		.into_dbs())
+		.try_into_dbs()?)
 	}
 
 	/// Retrieve all database user definitions for a specific database.
@@ -501,7 +501,7 @@ impl Transaction {
 				val
 			}
 		}
-		.into_dus())
+		.try_into_dus()?)
 	}
 
 	/// Retrieve all database access definitions for a specific database.
@@ -524,7 +524,7 @@ impl Transaction {
 				val
 			}
 		}
-		.into_das())
+		.try_into_das()?)
 	}
 
 	/// Retrieve all database access grants for a specific database.
@@ -548,7 +548,7 @@ impl Transaction {
 				val
 			}
 		}
-		.into_dag())
+		.try_into_dag()?)
 	}
 
 	/// Retrieve all analyzer definitions for a specific database.
@@ -571,7 +571,7 @@ impl Transaction {
 				val
 			}
 		}
-		.into_azs())
+		.try_into_azs()?)
 	}
 
 	/// Retrieve all function definitions for a specific database.
@@ -594,7 +594,7 @@ impl Transaction {
 				val
 			}
 		}
-		.into_fcs())
+		.try_into_fcs()?)
 	}
 
 	/// Retrieve all param definitions for a specific database.
@@ -617,7 +617,7 @@ impl Transaction {
 				val
 			}
 		}
-		.into_pas())
+		.try_into_pas()?)
 	}
 
 	/// Retrieve all model definitions for a specific database.
@@ -640,7 +640,7 @@ impl Transaction {
 				val
 			}
 		}
-		.into_mls())
+		.try_into_mls()?)
 	}
 
 	/// Retrieve all table definitions for a specific database.
@@ -659,7 +659,7 @@ impl Transaction {
 				val
 			}
 		}
-		.into_tbs())
+		.try_into_tbs()?)
 	}
 
 	/// Retrieve all event definitions for a specific table.
@@ -683,7 +683,7 @@ impl Transaction {
 				val
 			}
 		}
-		.into_evs())
+		.try_into_evs()?)
 	}
 
 	/// Retrieve all field definitions for a specific table.
@@ -707,7 +707,7 @@ impl Transaction {
 				val
 			}
 		}
-		.into_fds())
+		.try_into_fds()?)
 	}
 
 	/// Retrieve all index definitions for a specific table.
@@ -731,7 +731,7 @@ impl Transaction {
 				val
 			}
 		}
-		.into_ixs())
+		.try_into_ixs()?)
 	}
 
 	/// Retrieve all view definitions for a specific table.
@@ -755,7 +755,7 @@ impl Transaction {
 				val
 			}
 		}
-		.into_fts())
+		.try_into_fts()?)
 	}
 
 	/// Retrieve all live definitions for a specific table.
@@ -779,7 +779,7 @@ impl Transaction {
 				val
 			}
 		}
-		.into_lvs())
+		.try_into_lvs()?)
 	}
 
 	/// Retrieve a specific namespace definition.
@@ -799,7 +799,7 @@ impl Transaction {
 				val
 			}
 		}
-		.into_type())
+		.try_into_type()?)
 	}
 
 	/// Retrieve a specific root user definition.
@@ -819,7 +819,7 @@ impl Transaction {
 				val
 			}
 		}
-		.into_type())
+		.try_into_type()?)
 	}
 
 	/// Retrieve a specific root access definition.
@@ -839,7 +839,7 @@ impl Transaction {
 				val
 			}
 		}
-		.into_type())
+		.try_into_type()?)
 	}
 
 	/// Retrieve a specific root access grant.
@@ -865,7 +865,7 @@ impl Transaction {
 				val
 			}
 		}
-		.into_type())
+		.try_into_type()?)
 	}
 
 	/// Retrieve a specific namespace definition.
@@ -885,7 +885,7 @@ impl Transaction {
 				val
 			}
 		}
-		.into_type())
+		.try_into_type()?)
 	}
 
 	/// Retrieve a specific namespace user definition.
@@ -906,7 +906,7 @@ impl Transaction {
 				val
 			}
 		}
-		.into_type())
+		.try_into_type()?)
 	}
 
 	/// Retrieve a specific namespace access definition.
@@ -931,7 +931,7 @@ impl Transaction {
 				val
 			}
 		}
-		.into_type())
+		.try_into_type()?)
 	}
 
 	/// Retrieve a specific namespace access grant.
@@ -959,7 +959,7 @@ impl Transaction {
 				val
 			}
 		}
-		.into_type())
+		.try_into_type()?)
 	}
 
 	/// Retrieve a specific database definition.
@@ -979,7 +979,7 @@ impl Transaction {
 				val
 			}
 		}
-		.into_type())
+		.try_into_type()?)
 	}
 
 	/// Retrieve a specific user definition from a database.
@@ -1006,7 +1006,7 @@ impl Transaction {
 				val
 			}
 		}
-		.into_type())
+		.try_into_type()?)
 	}
 
 	/// Retrieve a specific database access definition.
@@ -1033,7 +1033,7 @@ impl Transaction {
 				val
 			}
 		}
-		.into_type())
+		.try_into_type()?)
 	}
 
 	/// Retrieve a specific database access grant.
@@ -1063,7 +1063,7 @@ impl Transaction {
 				val
 			}
 		}
-		.into_type())
+		.try_into_type()?)
 	}
 
 	/// Retrieve a specific model definition from a database.
@@ -1089,7 +1089,7 @@ impl Transaction {
 				val
 			}
 		}
-		.into_type())
+		.try_into_type()?)
 	}
 
 	/// Retrieve a specific analyzer definition.
@@ -1114,7 +1114,7 @@ impl Transaction {
 				val
 			}
 		}
-		.into_type())
+		.try_into_type()?)
 	}
 
 	/// Retrieve a specific function definition from a database.
@@ -1139,7 +1139,7 @@ impl Transaction {
 				val
 			}
 		}
-		.into_type())
+		.try_into_type()?)
 	}
 
 	/// Retrieve a specific function definition from a database.
@@ -1164,7 +1164,7 @@ impl Transaction {
 				val
 			}
 		}
-		.into_type())
+		.try_into_type()?)
 	}
 
 	/// Retrieve a specific table definition.
@@ -1189,7 +1189,7 @@ impl Transaction {
 				val
 			}
 		}
-		.into_type())
+		.try_into_type()?)
 	}
 
 	/// Retrieve an event for a table.
@@ -1215,7 +1215,7 @@ impl Transaction {
 				val
 			}
 		}
-		.into_type())
+		.try_into_type()?)
 	}
 
 	/// Retrieve a field for a table.
@@ -1241,7 +1241,7 @@ impl Transaction {
 				val
 			}
 		}
-		.into_type())
+		.try_into_type()?)
 	}
 
 	/// Retrieve an index for a table.
@@ -1267,7 +1267,7 @@ impl Transaction {
 				val
 			}
 		}
-		.into_type())
+		.try_into_type()?)
 	}
 
 	/// Fetch a specific record value.
@@ -1283,14 +1283,14 @@ impl Transaction {
 		let res = self.cache.get_value_or_guard_async(&key).await;
 		match res {
 			// The entry is in the cache
-			Ok(val) => Ok(val.into_val()),
+			Ok(val) => val.try_into_val(),
 			// The entry is not in the cache
 			Err(cache) => match self.get(key, None).await? {
 				// The value exists in the datastore
 				Some(val) => {
 					let val = Entry::Val(Arc::new(val.into()));
 					let _ = cache.insert(val.clone());
-					Ok(val.into_val())
+					val.try_into_val()
 				}
 				// The value is not in the datastore
 				None => Ok(Arc::new(Value::None)),
@@ -1480,7 +1480,7 @@ impl Transaction {
 				}
 			}
 		}
-		.into_type())
+		.try_into_type()?)
 	}
 
 	/// Get or add a database with a default configuration, only if we are in dynamic mode.
@@ -1547,7 +1547,7 @@ impl Transaction {
 				}
 			}
 		}
-		.into_type())
+		.try_into_type()?)
 	}
 
 	/// Get or add a table with a default configuration, only if we are in dynamic mode.
@@ -1617,6 +1617,6 @@ impl Transaction {
 				}
 			}
 		}
-		.into_type())
+		.try_into_type()?)
 	}
 }

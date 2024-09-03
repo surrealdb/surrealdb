@@ -132,9 +132,7 @@ macro_rules! expand_inner {
 			#[cfg(feature = "kv-surrealcs")]
 			Inner::SurrealCS($arm) => $b,
 			#[allow(unreachable_patterns)]
-			_ => {
-				unreachable!();
-			}
+			_ => unreachable!(),
 		}
 	};
 }
