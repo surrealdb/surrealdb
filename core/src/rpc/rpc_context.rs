@@ -337,7 +337,7 @@ pub trait RpcContext {
 			return Err(RpcError::InvalidParams);
 		};
 
-		let one = data.is_thing_single();
+		let one = what.is_thing_single();
 
 		let mut res = match what {
 			Value::None | Value::Null => {
