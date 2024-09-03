@@ -360,6 +360,7 @@
 "time::format("
 "time::group("
 "time::hour("
+"time::is_leap_year("
 "time::max("
 "time::min("
 "time::minute("
