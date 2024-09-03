@@ -5,7 +5,6 @@ use crate::{
 	sql::{Block, Datetime, Duration, Idiom, Query, Range, Subquery, Thing, Value},
 };
 
-pub mod common;
 pub mod error;
 pub mod lexer;
 pub mod parser;
@@ -177,7 +176,8 @@ pub fn block(input: &str) -> Result<Block, Error> {
 	let mut parser = Parser::new(input.as_bytes());
 	let mut stack = Stack::new();
 
-	match parser.peek_kind() {
+	let token = parser.peek();
+	match token.kind {
 		t!("{") => {
 			let start = parser.pop_peek().span;
 			stack
@@ -187,14 +187,9 @@ pub fn block(input: &str) -> Result<Block, Error> {
 				.map_err(Error::InvalidQuery)
 		}
 		found => Err(Error::InvalidQuery(
-			crate::syn::parser::ParseError::new(
-				crate::syn::parser::ParseErrorKind::Unexpected {
-					expected: "{",
-					found,
-				},
-				parser.last_span(),
-			)
-			.render_on(input),
+			error::SyntaxError::new(format_args!("Unexpected token `{found}` expected `{{`"))
+				.with_span(token.span, error::MessageKind::Error)
+				.render_on(input),
 		)),
 	}
 }

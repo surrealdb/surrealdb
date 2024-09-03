@@ -739,28 +739,41 @@ fn test_streaming() {
 	let mut parser = Parser::new(&[]);
 	let mut stack = Stack::new();
 
-	for i in 0..source_bytes.len() {
+	for i in 0..(source_bytes.len() - 1) {
 		let partial_source = &source_bytes[source_start..i];
 		//let src = String::from_utf8_lossy(partial_source);
 		//println!("{}:{}", i, src);
 		parser = parser.change_source(partial_source);
 		parser.reset();
 		match stack.enter(|stk| parser.parse_partial_statement(stk)).finish() {
-			PartialResult::Pending {
-				..
-			} => {
-				continue;
-			}
-			PartialResult::Ready {
+			PartialResult::MoreData => continue,
+			PartialResult::Ok {
 				value,
 				used,
 			} => {
-				//println!("USED: {}", used);
-				let value = value.unwrap();
 				assert_eq!(value, expected[current_stmt]);
 				current_stmt += 1;
 				source_start += used;
 			}
+			PartialResult::Err {
+				err,
+				..
+			} => {
+				panic!("Streaming test returned an error: {}", err.render_on_bytes(partial_source))
+			}
+		}
+	}
+
+	let partial_source = &source_bytes[source_start..];
+	parser = parser.change_source(partial_source);
+	parser.reset();
+	match stack.enter(|stk| parser.parse_stmt(stk)).finish() {
+		Ok(value) => {
+			assert_eq!(value, expected[current_stmt]);
+			current_stmt += 1;
+		}
+		Err(e) => {
+			panic!("Streaming test returned an error: {}", e.render_on_bytes(partial_source))
 		}
 	}
 

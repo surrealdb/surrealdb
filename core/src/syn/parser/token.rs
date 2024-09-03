@@ -5,7 +5,8 @@ use crate::{
 		SECONDS_PER_DAY, SECONDS_PER_HOUR, SECONDS_PER_MINUTE, SECONDS_PER_WEEK, SECONDS_PER_YEAR,
 	},
 	syn::{
-		parser::{mac::unexpected, ParseError, ParseErrorKind, ParseResult, Parser},
+		error::{bail, error},
+		parser::{mac::unexpected, ParseResult, Parser},
 		token::{t, DurationSuffix, NumberKind, NumberSuffix, Token, TokenKind},
 	},
 };
@@ -65,11 +66,6 @@ impl Parser<'_> {
 	}
 
 	/// Returns if the peeked token can be a identifier.
-	pub fn peek_can_start_ident(&mut self) -> bool {
-		Self::tokenkind_can_start_ident(self.peek_kind())
-	}
-
-	/// Returns if the peeked token can be a identifier.
 	pub fn peek_continues_ident(&mut self) -> bool {
 		Self::tokenkind_can_start_ident(self.peek_kind())
 	}
@@ -94,7 +90,7 @@ impl Parser<'_> {
 				self.pop_peek();
 				let t = self.lexer.relex_strand(token);
 				let TokenKind::Strand = t.kind else {
-					unexpected!(self, t.kind, "a strand")
+					unexpected!(self, t, "a strand")
 				};
 				self.prepend_token(t);
 				Ok(t)
@@ -118,21 +114,21 @@ impl Parser<'_> {
 			TokenKind::Exponent | TokenKind::NumberSuffix(_) => {
 				self.pop_peek();
 
-				self.span_str(start.span).to_owned()
+				self.lexer.span_str(start.span).to_owned()
 			}
 			TokenKind::Digits if flexible => {
 				self.pop_peek();
-				self.span_str(start.span).to_owned()
+				self.lexer.span_str(start.span).to_owned()
 			}
 			TokenKind::DurationSuffix(x) if x.can_be_ident() => {
 				self.pop_peek();
 
-				self.span_str(start.span).to_owned()
+				self.lexer.span_str(start.span).to_owned()
 			}
 			TokenKind::DatetimeChars(_) | TokenKind::VectorType(_) => {
 				self.pop_peek();
 
-				self.span_str(start.span).to_owned()
+				self.lexer.span_str(start.span).to_owned()
 			}
 			_ => return Ok(start),
 		};
@@ -166,7 +162,7 @@ impl Parser<'_> {
 				| TokenKind::VectorType(_)
 				| TokenKind::NumberSuffix(_) => {
 					self.pop_peek();
-					let str = self.span_str(p.span);
+					let str = self.lexer.span_str(p.span);
 					token_buffer.push_str(str);
 
 					prev = p;
@@ -176,7 +172,7 @@ impl Parser<'_> {
 				// These tokens might have some more parts following them
 				TokenKind::Exponent | TokenKind::DatetimeChars(_) | TokenKind::Digits => {
 					self.pop_peek();
-					let str = self.span_str(p.span);
+					let str = self.lexer.span_str(p.span);
 					token_buffer.push_str(str);
 
 					prev = p;
@@ -184,7 +180,7 @@ impl Parser<'_> {
 				TokenKind::DurationSuffix(suffix) => {
 					self.pop_peek();
 					if !suffix.can_be_ident() {
-						return Err(ParseError::new(ParseErrorKind::InvalidIdent, p.span));
+						bail!("Invalid identifier containing non-ascii characters", @p.span);
 					}
 					token_buffer.push_str(suffix.as_str());
 					prev = p;
@@ -237,7 +233,7 @@ impl Parser<'_> {
 				let n = self.peek_whitespace();
 
 				if n.kind != TokenKind::Digits {
-					unexpected!(self, start.kind, "a number")
+					unexpected!(self, start, "a number")
 				}
 
 				self.pop_peek();
@@ -263,7 +259,7 @@ impl Parser<'_> {
 			self.pop_peek();
 			let next = self.peek_whitespace();
 			if next.kind != TokenKind::Digits {
-				unexpected!(self, next.kind, "digits after the dot");
+				unexpected!(self, next, "digits after the dot");
 			}
 			self.pop_peek();
 			kind = NumberKind::Float;
@@ -278,11 +274,11 @@ impl Parser<'_> {
 					self.pop_peek();
 					let exponent_token = self.peek_whitespace();
 					if exponent_token.kind != TokenKind::Digits {
-						unexpected!(self, exponent_token.kind, "digits after the exponent")
+						unexpected!(self, exponent_token, "digits after the exponent")
 					}
 				}
 				TokenKind::Digits => {}
-				x => unexpected!(self, x, "digits after the exponent"),
+				_ => unexpected!(self, exponent_token, "digits after the exponent"),
 			}
 			self.pop_peek();
 			kind = NumberKind::Float;
@@ -305,7 +301,7 @@ impl Parser<'_> {
 		// Check that no ident-like identifiers follow
 		let next = self.peek_whitespace();
 		if Self::tokenkind_continues_ident(next.kind) {
-			unexpected!(self, next.kind, "number to end")
+			unexpected!(self, next, "number to end")
 		}
 
 		let token = Token {
@@ -340,16 +336,15 @@ impl Parser<'_> {
 
 			let suffix = match p.kind {
 				TokenKind::DurationSuffix(x) => x,
-				x => unexpected!(self, x, "a duration suffix"),
+				_ => unexpected!(self, p, "a duration suffix"),
 			};
 
 			self.pop_peek();
 
-			let digits_str = self.span_str(cur.span);
+			let digits_str = self.lexer.span_str(cur.span);
 			let digits_value: u64 = digits_str
 				.parse()
-				.map_err(ParseErrorKind::InvalidInteger)
-				.map_err(|e| ParseError::new(e, p.span))?;
+				.map_err(|e| error!("Failed to parse duration digits: {e}",@cur.span))?;
 
 			let addition = match suffix {
 				DurationSuffix::Nano => StdDuration::from_nanos(digits_value),
@@ -362,35 +357,35 @@ impl Parser<'_> {
 					let minutes =
 						digits_value.checked_mul(SECONDS_PER_MINUTE).ok_or_else(|| {
 							let span = start.span.covers(p.span);
-							ParseError::new(ParseErrorKind::DurationOverflow, span)
+							error!("Invalid duration, value overflowed maximum allowed value", @span)
 						})?;
 					StdDuration::from_secs(minutes)
 				}
 				DurationSuffix::Hour => {
 					let hours = digits_value.checked_mul(SECONDS_PER_HOUR).ok_or_else(|| {
 						let span = start.span.covers(p.span);
-						ParseError::new(ParseErrorKind::DurationOverflow, span)
+						error!("Invalid duration, value overflowed maximum allowed value", @span)
 					})?;
 					StdDuration::from_secs(hours)
 				}
 				DurationSuffix::Day => {
 					let days = digits_value.checked_mul(SECONDS_PER_DAY).ok_or_else(|| {
 						let span = start.span.covers(p.span);
-						ParseError::new(ParseErrorKind::DurationOverflow, span)
+						error!("Invalid duration, value overflowed maximum allowed value", @span)
 					})?;
 					StdDuration::from_secs(days)
 				}
 				DurationSuffix::Week => {
 					let weeks = digits_value.checked_mul(SECONDS_PER_WEEK).ok_or_else(|| {
 						let span = start.span.covers(p.span);
-						ParseError::new(ParseErrorKind::DurationOverflow, span)
+						error!("Invalid duration, value overflowed maximum allowed value", @span)
 					})?;
 					StdDuration::from_secs(weeks)
 				}
 				DurationSuffix::Year => {
 					let years = digits_value.checked_mul(SECONDS_PER_YEAR).ok_or_else(|| {
 						let span = start.span.covers(p.span);
-						ParseError::new(ParseErrorKind::DurationOverflow, span)
+						error!("Invalid duration, value overflowed maximum allowed value", @span)
 					})?;
 					StdDuration::from_secs(years)
 				}
@@ -398,7 +393,7 @@ impl Parser<'_> {
 
 			duration = duration.checked_add(addition).ok_or_else(|| {
 				let span = start.span.covers(p.span);
-				ParseError::new(ParseErrorKind::DurationOverflow, span)
+				error!("Invalid duration, value overflowed maximum allowed value", @span)
 			})?;
 
 			match self.peek_whitespace().kind {
@@ -407,7 +402,7 @@ impl Parser<'_> {
 				}
 				x if Parser::tokenkind_continues_ident(x) => {
 					let span = start.span.covers(p.span);
-					unexpected!(@span, self, x, "a duration")
+					bail!("Invalid token, expected duration, but token contained invalid characters", @span)
 				}
 				_ => break,
 			}
@@ -442,7 +437,7 @@ impl Parser<'_> {
 				let digits_token = self.peek_whitespace();
 				if TokenKind::Digits != digits_token.kind {
 					let span = start.span.covers(digits_token.span);
-					unexpected!(@span, self,digits_token.kind, "a floating point number")
+					bail!("Unexpected token `{}` expected a floating point number",digits_token.kind,@span);
 				}
 				self.pop_peek();
 			}
@@ -465,7 +460,7 @@ impl Parser<'_> {
 			self.pop_peek();
 			let digits_token = self.peek_whitespace();
 			if TokenKind::Digits != digits_token.kind {
-				unexpected!(self, digits_token.kind, "a floating point number")
+				unexpected!(self, digits_token, "a floating point number")
 			}
 			self.pop_peek();
 		};
@@ -481,26 +476,27 @@ impl Parser<'_> {
 			}
 
 			if TokenKind::Digits != digits_token.kind {
-				unexpected!(self, digits_token.kind, "a floating point number")
+				unexpected!(self, digits_token, "a floating point number")
 			}
 			self.pop_peek();
 		}
 
 		// check for exponent
-		if let TokenKind::NumberSuffix(suffix) = self.peek_whitespace().kind {
+		let token = self.peek_whitespace();
+		if let TokenKind::NumberSuffix(suffix) = token.kind {
 			match suffix {
 				NumberSuffix::Float => {
 					self.pop_peek();
 				}
 				NumberSuffix::Decimal => {
-					unexpected!(self, t!("dec"), "a floating point number")
+					unexpected!(self, token, "a floating point number")
 				}
 			}
 		}
 
 		let t = self.peek_whitespace();
 		if Self::tokenkind_continues_ident(t.kind) {
-			unexpected!(self, t.kind, "a floating point number to end")
+			unexpected!(self, t, "a floating point number to end")
 		}
 
 		let span = start.span.covers(self.last_span());
