@@ -716,6 +716,88 @@ async fn define_statement_index_single() -> Result<(), Error> {
 }
 
 #[tokio::test]
+async fn define_statement_index_numbers() -> Result<(), Error> {
+	let sql = "
+		DEFINE INDEX index ON TABLE test COLUMNS number;
+		CREATE test:int SET number = 0;
+		CREATE test:float SET number = 0.0;
+		-- TODO: CREATE test:dec_int SET number = 0dec;
+		-- TODO: CREATE test:dec_dec SET number = 0.0dec;
+		SELECT * FROM test WITH NOINDEX WHERE number = 0 ORDER BY id;
+		SELECT * FROM test WHERE number = 0 ORDER BY id;
+		SELECT * FROM test WHERE number = 0.0 ORDER BY id;
+		-- TODO: SELECT * FROM test WHERE number = 0dec ORDER BY id;
+		-- TODO: SELECT * FROM test WHERE number = 0.0dec ORDER BY id;
+	";
+	let mut t = Test::new(sql).await?;
+	t.skip_ok(3)?;
+	for _ in 0..3 {
+		t.expect_val(
+			"[
+				// {
+				// 	id: test:dec,
+				// 	number: 0.0dec
+				// },
+				// {
+				// 	id: test:int,
+				// 	number: 0dec
+				// },
+				{
+					id: test:float,
+					number: 0f
+				},
+				{
+					id: test:int,
+					number: 0
+				}
+			]",
+		)?;
+	}
+	Ok(())
+}
+
+#[tokio::test]
+async fn define_statement_unique_index_numbers() -> Result<(), Error> {
+	let sql = "
+		DEFINE INDEX index ON TABLE test COLUMNS number UNIQUE;
+		CREATE test:int SET number = 0;
+		CREATE test:float SET number = 0.0;
+		-- TODO: CREATE test:dec_int SET number = 0dec;
+		-- TODO: CREATE test:dec_dec SET number = 0.0dec;
+		SELECT * FROM test WITH NOINDEX WHERE number = 0 ORDER BY id;
+		SELECT * FROM test WHERE number = 0 ORDER BY id;
+		SELECT * FROM test WHERE number = 0.0 ORDER BY id;
+		-- TODO: SELECT * FROM test WHERE number = 0dec ORDER BY id;
+		-- TODO: SELECT * FROM test WHERE number = 0.0dec ORDER BY id;
+	";
+	let mut t = Test::new(sql).await?;
+	t.skip_ok(3)?;
+	for _ in 0..3 {
+		t.expect_val(
+			"[
+				// {
+				// 	id: test:dec,
+				// 	number: 0.0dec
+				// },
+				// {
+				// 	id: test:int,
+				// 	number: 0dec
+				// },
+				{
+					id: test:float,
+					number: 0f
+				},
+				{
+					id: test:int,
+					number: 0
+				}
+			]",
+		)?;
+	}
+	Ok(())
+}
+
+#[tokio::test]
 async fn define_statement_index_concurrently() -> Result<(), Error> {
 	let sql = "
 		CREATE user:1 SET email = 'testA@surrealdb.com';
