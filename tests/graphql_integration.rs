@@ -75,7 +75,7 @@ mod graphql_integration {
 				.await?;
 			assert_eq!(res.status(), 200);
 			let body = res.text().await?;
-			let expected = json!([{
+			let expected = json!({
 				"data": {
 					"foo": [
 						{
@@ -88,7 +88,7 @@ mod graphql_integration {
 						}
 					]
 				}
-			}]);
+			});
 			assert_eq!(expected.to_string(), body)
 		}
 		Ok(())
