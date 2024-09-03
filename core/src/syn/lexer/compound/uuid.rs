@@ -25,6 +25,10 @@ impl CompoundValue for Uuid {
 					let span = lexer.advance_span();
 					bail!("Invalid UUID, found `{char}` but expected `-`", @span);
 				}
+				Some(b'"') | Some(b'\'') => {
+					let span = lexer.advance_span();
+					bail!("Unexpected end of UUID, expected to have 36 characters", @span);
+				}
 				Some(x) => {
 					if !x.is_ascii_hexdigit() {
 						let span = lexer.advance_span();
