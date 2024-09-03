@@ -282,6 +282,46 @@ async fn update_with_return_clause() -> Result<(), Error> {
 	Ok(())
 }
 
+#[tokio::test]
+async fn update_with_object_array_string_field_names() -> Result<(), Error> {
+	let sql = "
+		UPSERT person:one SET field.key = 'value';
+		UPSERT person:two SET field['key'] = 'value';
+	";
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 2);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
+			{
+				field: {
+					key: 'value'
+				},
+				id: person:one
+			}
+		]",
+	);
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
+			{
+				field: {
+					key: 'value'
+				},
+				id: person:two
+			}
+		]",
+	);
+	assert_eq!(tmp, val);
+	//
+	Ok(())
+}
+
 //
 // Permissions
 //

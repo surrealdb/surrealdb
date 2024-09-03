@@ -1,3 +1,6 @@
+use super::headers::Accept;
+use super::AppState;
+use crate::cnf::HTTP_MAX_SQL_BODY_SIZE;
 use crate::err::Error;
 use crate::net::input::bytes_to_utf8;
 use crate::net::output;
@@ -17,11 +20,6 @@ use futures::{SinkExt, StreamExt};
 use surrealdb::dbs::Session;
 use tower_http::limit::RequestBodyLimitLayer;
 
-use super::headers::Accept;
-use super::AppState;
-
-const MAX: usize = 1024 * 1024; // 1 MiB
-
 pub(super) fn router<S>() -> Router<S>
 where
 	S: Clone + Send + Sync + 'static,
@@ -29,7 +27,7 @@ where
 	Router::new()
 		.route("/sql", options(|| async {}).get(ws_handler).post(post_handler))
 		.route_layer(DefaultBodyLimit::disable())
-		.layer(RequestBodyLimitLayer::new(MAX))
+		.layer(RequestBodyLimitLayer::new(*HTTP_MAX_SQL_BODY_SIZE))
 }
 
 async fn post_handler(

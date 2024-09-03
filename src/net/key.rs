@@ -1,3 +1,6 @@
+use super::headers::Accept;
+use super::AppState;
+use crate::cnf::HTTP_MAX_KEY_BODY_SIZE;
 use crate::err::Error;
 use crate::net::input::bytes_to_utf8;
 use crate::net::output;
@@ -5,7 +8,8 @@ use crate::net::params::Params;
 use axum::extract::{DefaultBodyLimit, Path};
 use axum::response::IntoResponse;
 use axum::routing::options;
-use axum::{Extension, Router};
+use axum::Extension;
+use axum::Router;
 use axum_extra::extract::Query;
 use axum_extra::TypedHeader;
 use bytes::Bytes;
@@ -15,11 +19,6 @@ use surrealdb::dbs::Session;
 use surrealdb::iam::check::check_ns_db;
 use surrealdb::sql::Value;
 use tower_http::limit::RequestBodyLimitLayer;
-
-use super::headers::Accept;
-use super::AppState;
-
-const MAX: usize = 1024 * 16; // 16 KiB
 
 #[derive(Default, Deserialize, Debug, Clone)]
 struct QueryOptions {
@@ -43,7 +42,7 @@ where
 				.delete(delete_all),
 		)
 		.route_layer(DefaultBodyLimit::disable())
-		.layer(RequestBodyLimitLayer::new(MAX))
+		.layer(RequestBodyLimitLayer::new(*HTTP_MAX_KEY_BODY_SIZE))
 		.merge(
 			Router::new()
 				.route(
@@ -56,7 +55,7 @@ where
 						.delete(delete_one),
 				)
 				.route_layer(DefaultBodyLimit::disable())
-				.layer(RequestBodyLimitLayer::new(MAX)),
+				.layer(RequestBodyLimitLayer::new(*HTTP_MAX_KEY_BODY_SIZE)),
 		)
 }
 

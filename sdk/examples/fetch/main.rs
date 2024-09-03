@@ -88,7 +88,7 @@ async fn main() -> surrealdb::Result<()> {
 	let students: Vec<StudentClasses> = results.take(0)?;
 
 	// Use the result as you see fit. In this case we are simply pretty printing it.
-	dbg!(students);
+	println!("Students = {:?}", students);
 
 	Ok(())
 }

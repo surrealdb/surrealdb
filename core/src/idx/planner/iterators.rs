@@ -113,6 +113,7 @@ pub(crate) enum ThingIterator {
 	UniqueJoin(Box<UniqueJoinThingIterator>),
 	Matches(MatchesThingIterator),
 	Knn(KnnIterator),
+	Multiples(Box<MultipleIterators>),
 }
 
 impl ThingIterator {
@@ -133,6 +134,7 @@ impl ThingIterator {
 			Self::Knn(i) => i.next_batch(ctx, size).await,
 			Self::IndexJoin(i) => Box::pin(i.next_batch(ctx, txn, size)).await,
 			Self::UniqueJoin(i) => Box::pin(i.next_batch(ctx, txn, size)).await,
+			Self::Multiples(i) => Box::pin(i.next_batch(ctx, txn, size)).await,
 		}
 	}
 }
@@ -826,5 +828,44 @@ impl KnnIterator {
 			}
 		}
 		Ok(records)
+	}
+}
+
+pub(crate) struct MultipleIterators {
+	iterators: VecDeque<ThingIterator>,
+	current: Option<ThingIterator>,
+}
+
+impl MultipleIterators {
+	pub(super) fn new(iterators: VecDeque<ThingIterator>) -> Self {
+		Self {
+			iterators,
+			current: None,
+		}
+	}
+
+	async fn next_batch<B: IteratorBatch>(
+		&mut self,
+		ctx: &Context,
+		txn: &Transaction,
+		limit: u32,
+	) -> Result<B, Error> {
+		loop {
+			// Do we have an iterator
+			if let Some(i) = &mut self.current {
+				// If so, take the next batch
+				let b: B = i.next_batch(ctx, txn, limit).await?;
+				// Return the batch if it is not empty
+				if !b.is_empty() {
+					return Ok(b);
+				}
+			}
+			// Otherwise check if there is another iterator
+			self.current = self.iterators.pop_front();
+			if self.current.is_none() {
+				// If none, we are done
+				return Ok(B::empty());
+			}
+		}
 	}
 }

@@ -1,6 +1,6 @@
 //! Module specifying the token representation of the parser.
 
-use std::hash::Hash;
+use std::{fmt, hash::Hash};
 
 mod keyword;
 pub(crate) use keyword::keyword_t;
@@ -441,25 +441,18 @@ pub enum TokenKind {
 	NaN,
 }
 
+impl fmt::Display for TokenKind {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		f.write_str(self.as_str())
+	}
+}
+
 /// An assertion statically checking that the size of Tokenkind remains two bytes
 const _TOKEN_KIND_SIZE_ASSERT: [(); 2] = [(); std::mem::size_of::<TokenKind>()];
 
 impl TokenKind {
 	pub fn has_data(&self) -> bool {
 		matches!(self, TokenKind::Identifier | TokenKind::Duration)
-	}
-
-	pub fn can_be_identifier(&self) -> bool {
-		matches!(
-			self,
-			TokenKind::Identifier
-				| TokenKind::Keyword(_)
-				| TokenKind::Language(_)
-				| TokenKind::Algorithm(_)
-				| TokenKind::DatetimeChars(_)
-				| TokenKind::VectorType(_)
-				| TokenKind::Distance(_),
-		)
 	}
 
 	fn algorithm_as_str(alg: Algorithm) -> &'static str {
@@ -535,7 +528,6 @@ impl TokenKind {
 }
 
 #[derive(Clone, Copy, Eq, PartialEq, Hash, Debug)]
-#[non_exhaustive]
 pub struct Token {
 	pub kind: TokenKind,
 	pub span: Span,
@@ -567,3 +559,13 @@ impl Token {
 		self.span.follows_from(&other.span)
 	}
 }
+
+/// A token which is mad up of more complex inner parts.
+#[derive(Clone, Copy, Eq, PartialEq, Hash, Debug)]
+pub struct CompoundToken<T> {
+	pub value: T,
+	pub span: Span,
+}
+
+/// A compound token which lexes a javascript function body.
+pub struct JavaScript;

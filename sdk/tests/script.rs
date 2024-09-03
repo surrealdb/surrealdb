@@ -150,6 +150,12 @@ async fn script_function_types() -> Result<(), Error> {
 			manager = function() {
 				return new Record('user', 'joanna');
 			},
+			organisation = function() {
+				return new Record('organisation', {
+					alias: 'acme',
+					name: 'Acme Inc',
+				});
+			},
 			identifier = function() {
 				return new Uuid('03412258-988f-47cd-82db-549902cdaffe');
 			}
@@ -168,6 +174,7 @@ async fn script_function_types() -> Result<(), Error> {
 				created_at: d'1995-12-17T03:24:00Z',
 				next_signin: 1w2d6h,
 				manager: user:joanna,
+				organisation: organisation:{ alias: 'acme', name: 'Acme Inc' },
 				identifier: u'03412258-988f-47cd-82db-549902cdaffe',
 			}
 		]",

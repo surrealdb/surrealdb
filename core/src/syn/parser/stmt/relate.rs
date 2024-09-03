@@ -36,10 +36,11 @@ impl Parser<'_> {
 
 	pub async fn parse_relation(&mut self, stk: &mut Stk) -> ParseResult<(Value, Value, Value)> {
 		let first = self.parse_relate_value(stk).await?;
-		let is_o = match self.next().kind {
+		let next = self.next();
+		let is_o = match next.kind {
 			t!("->") => true,
 			t!("<-") => false,
-			x => unexpected!(self, x, "a relation arrow"),
+			_ => unexpected!(self, next, "a relation arrow"),
 		};
 		let kind = self.parse_relate_kind(stk).await?;
 		if is_o {

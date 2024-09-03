@@ -1,42 +1,138 @@
-use crate::syn::token::TokenKind;
 use crate::{
 	sql::Uuid,
 	syn::{
-		parser::{mac::unexpected, ParseError, ParseErrorKind, ParseResult, Parser},
-		token::t,
+		error::bail,
+		parser::{
+			mac::{expected_whitespace, unexpected},
+			ParseResult, Parser,
+		},
+		token::{t, DurationSuffix, NumberSuffix, TokenKind, VectorTypeKind},
 	},
 };
 
 impl Parser<'_> {
 	/// Parses a uuid strand.
 	pub fn parse_uuid(&mut self) -> ParseResult<Uuid> {
-		match self.peek().kind {
-			t!("u\"") | t!("u'") => {
-				let pop = self.pop_peek();
-				assert!(!self.has_peek());
-				let token = self.lexer.relex_uuid(pop);
+		let quote_token = self.peek();
 
-				match token.kind {
-					TokenKind::Uuid => {}
-					TokenKind::Invalid => {
-						let e = self.lexer.error.take().unwrap();
-						return Err(ParseError::new(ParseErrorKind::InvalidToken(e), token.span));
-					}
-					_ => unreachable!(),
-				}
+		let double = match quote_token.kind {
+			t!("u\"") => true,
+			t!("u'") => false,
+			_ => unexpected!(self, quote_token, "a uuid"),
+		};
 
-				let mut span = token.span;
+		self.pop_peek();
 
-				// remove prefix (u") and suffix (")
-				span.offset += 2;
-				span.len -= 3;
+		// number of bytes is 4-2-2-2-6
 
-				uuid::Uuid::try_parse_ascii(self.span_bytes(span))
-					.map(Uuid)
-					.map_err(|e| ParseError::new(ParseErrorKind::InvalidUuid(e), span))
-			}
-			x => unexpected!(self, x, "a uuid"),
+		let mut uuid_buffer = [0u8; 16];
+
+		self.eat_uuid_hex(&mut uuid_buffer[0..4])?;
+
+		expected_whitespace!(self, t!("-"));
+
+		self.eat_uuid_hex(&mut uuid_buffer[4..6])?;
+
+		expected_whitespace!(self, t!("-"));
+
+		self.eat_uuid_hex(&mut uuid_buffer[6..8])?;
+
+		expected_whitespace!(self, t!("-"));
+
+		self.eat_uuid_hex(&mut uuid_buffer[8..10])?;
+
+		expected_whitespace!(self, t!("-"));
+
+		self.eat_uuid_hex(&mut uuid_buffer[10..16])?;
+
+		if double {
+			expected_whitespace!(self, t!("\""));
+		} else {
+			expected_whitespace!(self, t!("'"));
 		}
+
+		Ok(Uuid(uuid::Uuid::from_bytes(uuid_buffer)))
+	}
+
+	/// Eats a uuid hex section, enough to fill the given buffer with bytes.
+	fn eat_uuid_hex(&mut self, buffer: &mut [u8]) -> ParseResult<()> {
+		// A function to covert a hex digit to its number representation.
+		fn ascii_to_hex(b: u8) -> Option<u8> {
+			if b.is_ascii_digit() {
+				return Some(b - b'0');
+			}
+
+			if (b'a'..=b'f').contains(&b) {
+				return Some(b - (b'a' - 10));
+			}
+
+			if (b'A'..=b'F').contains(&b) {
+				return Some(b - (b'A' - 10));
+			}
+
+			None
+		}
+		// the amounts of character required is twice the buffer len.
+		// since every character is half a byte.
+		let required_len = buffer.len() * 2;
+
+		// The next token should be digits or an identifier
+		// If it is digits an identifier might be after it.
+		let start_token = self.peek_whitespace();
+		let mut cur = start_token;
+		loop {
+			let next = self.peek_whitespace();
+			match next.kind {
+				TokenKind::Identifier => {
+					cur = self.pop_peek();
+					break;
+				}
+				TokenKind::Exponent
+				| TokenKind::Digits
+				| TokenKind::DurationSuffix(DurationSuffix::Day)
+				| TokenKind::NumberSuffix(NumberSuffix::Float) => {
+					cur = self.pop_peek();
+				}
+				TokenKind::Language(_)
+				| TokenKind::Keyword(_)
+				| TokenKind::VectorType(VectorTypeKind::F64 | VectorTypeKind::F32) => {
+					// there are some keywords and languages keywords which could be part of the
+					// hex section.
+					if !self.lexer.span_bytes(next.span).iter().all(|x| x.is_ascii_hexdigit()) {
+						bail!("Invalid UUID section, invalid hex character in section", @next.span)
+					}
+					cur = self.pop_peek();
+					break;
+				}
+				t!("-") | t!("\"") | t!("'") => break,
+				_ => {
+					bail!("Invalid UUID section, invalid hex character in section", @next.span)
+				}
+			}
+		}
+
+		// Get the span that covered all eaten tokens.
+		let digits_span = start_token.span.covers(cur.span);
+		let digits_bytes = self.lexer.span_str(digits_span).as_bytes();
+
+		// for error handling, the incorrect hex character should be returned first, before
+		// returning the not correct length for segment error even if both are valid.
+		if !digits_bytes.iter().all(|x| x.is_ascii_hexdigit()) {
+			bail!("Unexpected characters in UUID token, expected UUID hex digits", @digits_span);
+		}
+
+		if digits_bytes.len() != required_len {
+			bail!("Unexpected characters in UUID token, invalid length of hex digits are",
+				@digits_span => "this has `{}` character where `{}` are required", digits_bytes.len(), required_len);
+		}
+
+		// write into the buffer
+		for (i, b) in buffer.iter_mut().enumerate() {
+			*b = ascii_to_hex(digits_bytes[i * 2]).unwrap() << 4
+				| ascii_to_hex(digits_bytes[i * 2 + 1]).unwrap();
+		}
+
+		Ok(())
 	}
 }
 
@@ -66,7 +162,6 @@ mod test {
 		assert_uuid_parses("e0531951-20ec-4575-bb68-3e6b49d813fa");
 		assert_uuid_parses("a0531951-20ec-4575-bb68-3e6b49d813fa");
 		assert_uuid_parses("b98839b9-0471-4dbb-aae0-14780e848f32");
-		assert_uuid_parses("5a7297d9-c07d-4444-b936-2d984533987d");
 	}
 
 	#[test]

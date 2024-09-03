@@ -18,6 +18,7 @@ pub mod hl;
 pub mod hs;
 pub mod hv;
 pub mod ia;
+pub mod ip;
 pub mod vm;
 
 use crate::key::category::Categorise;
