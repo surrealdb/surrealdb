@@ -54,6 +54,12 @@ impl From<Vec<f64>> for Array {
 	}
 }
 
+impl From<Vec<usize>> for Array {
+	fn from(v: Vec<usize>) -> Self {
+		Self(v.into_iter().map(Value::from).collect())
+	}
+}
+
 impl From<Vec<&str>> for Array {
 	fn from(v: Vec<&str>) -> Self {
 		Self(v.into_iter().map(Value::from).collect())

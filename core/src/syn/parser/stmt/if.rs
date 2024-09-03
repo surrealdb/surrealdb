@@ -33,7 +33,7 @@ impl Parser<'_> {
 				res.exprs.push((condition, body.into()));
 				self.parse_bracketed_tail(ctx, &mut res).await?;
 			}
-			x => unexpected!(self, x, "THEN or '{'"),
+			_ => unexpected!(self, next, "THEN or '{'"),
 		}
 
 		Ok(res)
@@ -45,7 +45,8 @@ impl Parser<'_> {
 		res: &mut IfelseStatement,
 	) -> ParseResult<()> {
 		loop {
-			match self.next().kind {
+			let next = self.next();
+			match next.kind {
 				t!("END") => return Ok(()),
 				t!("ELSE") => {
 					if self.eat(t!("IF")) {
@@ -62,7 +63,7 @@ impl Parser<'_> {
 						return Ok(());
 					}
 				}
-				x => unexpected!(self, x, "if to end"),
+				_ => unexpected!(self, next, "if to end"),
 			}
 		}
 	}

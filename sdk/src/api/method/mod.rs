@@ -35,6 +35,7 @@ mod export;
 mod health;
 mod import;
 mod insert;
+mod insert_relation;
 mod invalidate;
 mod merge;
 mod patch;
@@ -761,10 +762,10 @@ where
 	/// # Examples
 	///
 	/// ```no_run
-	/// use serde::Serialize;
+	/// use serde::{Serialize, Deserialize};
 	/// use surrealdb::sql;
 	///
-	/// # #[derive(serde::Deserialize)]
+	/// # #[derive(Deserialize)]
 	/// # struct Person;
 	/// #
 	/// #[derive(Serialize)]
@@ -845,6 +846,50 @@ where
 	///         },
 	///     ])
 	///     .await?;
+	///
+	/// // Insert multiple records into different tables
+	/// #[derive(Serialize)]
+	/// struct WithId<'a> {
+	///     id: sql::Thing,
+	///     name: &'a str,
+	/// }
+	///
+	/// let people: Vec<Person> = db.insert(())
+	///     .content(vec![
+	///         WithId {
+	///             id: sql::thing("person:tobie")?,
+	///             name: "Tobie",
+	///         },
+	///         WithId {
+	///             id: sql::thing("company:surrealdb")?,
+	///             name: "SurrealDB",
+	///         },
+	///     ])
+	///     .await?;
+	///
+	///
+	/// // Insert relations
+	/// #[derive(Serialize, Deserialize)]
+	/// struct Founded {
+	///     #[serde(rename = "in")]
+	///     founder: sql::Thing,
+	///     #[serde(rename = "out")]
+	///     company: sql::Thing,
+	/// }
+	///
+	/// let founded: Vec<Founded> = db.insert("founded")
+	///     .relation(vec![
+	///         Founded {
+	///             founder: sql::thing("person:tobie")?,
+	///             company: sql::thing("company:surrealdb")?,
+	///         },
+	///         Founded {
+	///             founder: sql::thing("person:jaime")?,
+	///             company: sql::thing("company:surrealdb")?,
+	///         },
+	///     ])
+	///     .await?;
+	///
 	/// #
 	/// # Ok(())
 	/// # }

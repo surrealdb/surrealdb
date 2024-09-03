@@ -257,3 +257,41 @@ async fn schemafull_relate() -> Result<(), Error> {
 
 	Ok(())
 }
+
+#[tokio::test]
+async fn relate_enforced() -> Result<(), Error> {
+	let sql = "
+	    DEFINE TABLE edge TYPE RELATION ENFORCED;
+		RELATE a:1->edge:1->a:2;
+		CREATE a:1, a:2;
+		RELATE a:1->edge:1->a:2;
+		INFO FOR DB;
+	";
+
+	let mut t = Test::new(sql).await?;
+	//
+	t.skip_ok(1)?;
+	//
+	t.expect_error_func(|e| matches!(e, Error::IdNotFound { .. }))?;
+	//
+	t.expect_val("[{ id: a:1 }, { id: a:2 }]")?;
+	//
+	t.expect_val("[{ id: edge:1, in: a:1, out: a:2 }]")?;
+	//
+	let info = Value::parse(
+		"{
+	accesses: {},
+	analyzers: {},
+	functions: {},
+	models: {},
+	params: {},
+	tables: {
+		a: 'DEFINE TABLE a TYPE ANY SCHEMALESS PERMISSIONS NONE',
+		edge: 'DEFINE TABLE edge TYPE RELATION ENFORCED SCHEMALESS PERMISSIONS NONE'
+	},
+	users: {}
+	}",
+	);
+	t.expect_value(info)?;
+	Ok(())
+}

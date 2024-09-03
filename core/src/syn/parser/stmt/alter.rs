@@ -16,9 +16,10 @@ use crate::{
 
 impl Parser<'_> {
 	pub async fn parse_alter_stmt(&mut self, ctx: &mut Stk) -> ParseResult<AlterStatement> {
-		match self.next().kind {
+		let next = self.next();
+		match next.kind {
 			t!("TABLE") => self.parse_alter_table(ctx).await.map(AlterStatement::Table),
-			x => unexpected!(self, x, "a alter statement keyword"),
+			_ => unexpected!(self, next, "a alter statement keyword"),
 		}
 	}
 
@@ -56,7 +57,8 @@ impl Parser<'_> {
 				}
 				t!("TYPE") => {
 					self.pop_peek();
-					match self.peek_kind() {
+					let peek = self.peek();
+					match peek.kind {
 						t!("NORMAL") => {
 							self.pop_peek();
 							res.kind = Some(TableType::Normal);
@@ -69,7 +71,7 @@ impl Parser<'_> {
 							self.pop_peek();
 							res.kind = Some(TableType::Any);
 						}
-						x => unexpected!(self, x, "`NORMAL`, `RELATION`, or `ANY`"),
+						_ => unexpected!(self, peek, "`NORMAL`, `RELATION`, or `ANY`"),
 					}
 				}
 				t!("SCHEMALESS") => {

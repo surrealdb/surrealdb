@@ -214,9 +214,6 @@ fn statements() -> Vec<Statement> {
 					}),
 					issue: None,
 				},
-				// TODO(gguillemas): Field kept to gracefully handle breaking change.
-				// Remove when "revision" crate allows doing so.
-				authenticate: None,
 			}),
 			authenticate: None,
 			// Default durations.
@@ -363,7 +360,6 @@ fn statements() -> Vec<Statement> {
 			index: Index::MTree(MTreeParams {
 				dimension: 4,
 				distance: Distance::Minkowski(Number::Int(5)),
-				_distance: Default::default(),
 				capacity: 6,
 				doc_ids_order: 7,
 				doc_ids_cache: 8,
@@ -525,10 +521,9 @@ fn statements() -> Vec<Statement> {
 			start: Some(Start(Value::Object(Object(
 				[("a".to_owned(), Value::Bool(true))].into_iter().collect(),
 			)))),
-			fetch: Some(Fetchs(vec![Fetch(
-				Idiom(vec![]),
-				Value::Idiom(Idiom(vec![Part::Field(Ident("foo".to_owned()))])),
-			)])),
+			fetch: Some(Fetchs(vec![Fetch(Value::Idiom(Idiom(vec![Part::Field(Ident(
+				"foo".to_owned(),
+			))])))])),
 			version: Some(Version(Datetime(expected_datetime))),
 			timeout: None,
 			parallel: false,
@@ -608,6 +603,7 @@ fn statements() -> Vec<Statement> {
 				),
 			])),
 			output: Some(Output::After),
+			version: None,
 			timeout: None,
 			parallel: false,
 			relation: false,
@@ -617,10 +613,9 @@ fn statements() -> Vec<Statement> {
 		}),
 		Statement::Output(OutputStatement {
 			what: Value::Idiom(Idiom(vec![Part::Field(Ident("RETRUN".to_owned()))])),
-			fetch: Some(Fetchs(vec![Fetch(
-				Idiom(vec![]),
-				Value::Idiom(Idiom(vec![Part::Field(Ident("RETURN".to_owned()).to_owned())])),
-			)])),
+			fetch: Some(Fetchs(vec![Fetch(Value::Idiom(Idiom(vec![Part::Field(
+				Ident("RETURN".to_owned()).to_owned(),
+			)])))])),
 		}),
 		Statement::Relate(RelateStatement {
 			only: true,
@@ -744,28 +739,41 @@ fn test_streaming() {
 	let mut parser = Parser::new(&[]);
 	let mut stack = Stack::new();
 
-	for i in 0..source_bytes.len() {
+	for i in 0..(source_bytes.len() - 1) {
 		let partial_source = &source_bytes[source_start..i];
 		//let src = String::from_utf8_lossy(partial_source);
 		//println!("{}:{}", i, src);
 		parser = parser.change_source(partial_source);
 		parser.reset();
 		match stack.enter(|stk| parser.parse_partial_statement(stk)).finish() {
-			PartialResult::Pending {
-				..
-			} => {
-				continue;
-			}
-			PartialResult::Ready {
+			PartialResult::MoreData => continue,
+			PartialResult::Ok {
 				value,
 				used,
 			} => {
-				//println!("USED: {}", used);
-				let value = value.unwrap();
 				assert_eq!(value, expected[current_stmt]);
 				current_stmt += 1;
 				source_start += used;
 			}
+			PartialResult::Err {
+				err,
+				..
+			} => {
+				panic!("Streaming test returned an error: {}", err.render_on_bytes(partial_source))
+			}
+		}
+	}
+
+	let partial_source = &source_bytes[source_start..];
+	parser = parser.change_source(partial_source);
+	parser.reset();
+	match stack.enter(|stk| parser.parse_stmt(stk)).finish() {
+		Ok(value) => {
+			assert_eq!(value, expected[current_stmt]);
+			current_stmt += 1;
+		}
+		Err(e) => {
+			panic!("Streaming test returned an error: {}", e.render_on_bytes(partial_source))
 		}
 	}
 

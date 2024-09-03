@@ -20,13 +20,13 @@ pub fn new(ac: &str) -> Ac<'_> {
 
 pub fn prefix() -> Vec<u8> {
 	let mut k = crate::key::root::all::new().encode().unwrap();
-	k.extend_from_slice(&[b'!', b'a', b'c', 0x00]);
+	k.extend_from_slice(b"!ac\x00");
 	k
 }
 
 pub fn suffix() -> Vec<u8> {
 	let mut k = crate::key::root::all::new().encode().unwrap();
-	k.extend_from_slice(&[b'!', b'a', b'c', 0xff]);
+	k.extend_from_slice(b"!ac\xff");
 	k
 }
 

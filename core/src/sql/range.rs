@@ -1,3 +1,4 @@
+use super::Id;
 use crate::cnf::GENERATION_ALLOCATION_LIMIT;
 use crate::ctx::Context;
 use crate::dbs::Options;
@@ -12,8 +13,6 @@ use std::cmp::Ordering;
 use std::fmt;
 use std::ops::Bound;
 use std::str::FromStr;
-
-use super::Id;
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Range";
 
@@ -210,4 +209,17 @@ fn to_i64(v: Value) -> Result<i64, Error> {
 			found: v.kindof().to_string(),
 		}),
 	}
+}
+
+// Structs needed for revision convertion from old ranges
+
+#[revisioned(revision = 1)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
+#[serde(rename = "$surrealdb::private::sql::Range")]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
+#[non_exhaustive]
+pub struct OldRange {
+	pub tb: String,
+	pub beg: Bound<Id>,
+	pub end: Bound<Id>,
 }

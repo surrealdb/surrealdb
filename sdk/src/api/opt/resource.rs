@@ -4,7 +4,8 @@ use crate::{
 };
 use std::ops::{self, Bound};
 use surrealdb_core::sql::{
-	Edges as CoreEdges, IdRange as CoreIdRange, Table as CoreTable, Thing as CoreThing,
+	Edges as CoreEdges, Id as CoreId, IdRange as CoreIdRange, Table as CoreTable,
+	Thing as CoreThing,
 };
 
 #[cfg(any(feature = "protocol-ws", feature = "protocol-http"))]
@@ -74,6 +75,8 @@ pub enum Resource {
 	Edge(Edge),
 	/// A range of id's on a table.
 	Range(QueryRange),
+	/// Unspecified resource
+	Unspecified,
 }
 
 impl Resource {
@@ -86,6 +89,7 @@ impl Resource {
 			Resource::Array(_) => Err(Error::RangeOnArray.into()),
 			Resource::Edge(_) => Err(Error::RangeOnEdges.into()),
 			Resource::Range(_) => Err(Error::RangeOnRange.into()),
+			Resource::Unspecified => Err(Error::RangeOnUnspecified.into()),
 		}
 	}
 
@@ -98,6 +102,13 @@ impl Resource {
 			Resource::Array(x) => Value::array_to_core(x).into(),
 			Resource::Edge(x) => x.into_inner().into(),
 			Resource::Range(x) => x.into_inner().into(),
+			Resource::Unspecified => CoreValue::None,
+		}
+	}
+	pub fn is_single_recordid(&self) -> bool {
+		match self {
+			Resource::RecordId(rid) => !matches!(rid.into_inner_ref().id, CoreId::Range(_)),
+			_ => false,
 		}
 	}
 }
@@ -176,6 +187,12 @@ where
 	fn from((table, id): (T, I)) -> Self {
 		let record_id = RecordId::from_table_key(table, id);
 		Self::RecordId(record_id)
+	}
+}
+
+impl From<()> for Resource {
+	fn from(_value: ()) -> Self {
+		Self::Unspecified
 	}
 }
 
@@ -388,5 +405,11 @@ impl<R> IntoResource<Vec<R>> for &String {
 	fn into_resource(self) -> Result<Resource> {
 		no_colon(self)?;
 		Ok(self.into())
+	}
+}
+
+impl<R> IntoResource<Vec<R>> for () {
+	fn into_resource(self) -> Result<Resource> {
+		Ok(Resource::Unspecified)
 	}
 }
