@@ -39,10 +39,6 @@ members = [
     "sdk/examples/axum",
     "sdk/examples/rocket",
 ]
-# exclude = [
-#     "../surrealcs/client",
-#     "../surrealcs/kernel",
-# ]
 
 [profile.release]
 lto = true
