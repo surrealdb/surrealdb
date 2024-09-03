@@ -8,7 +8,8 @@ use std::{
 use crate::{
 	sql::Number,
 	syn::{
-		parser::{mac::unexpected, ParseError, ParseErrorKind, ParseResult, Parser},
+		error::error,
+		parser::{mac::unexpected, ParseResult, Parser},
 		token::{t, NumberKind, TokenKind},
 	},
 };
@@ -32,7 +33,7 @@ where
 	let mut peek = parser.peek();
 
 	if let t!("-") = peek.kind {
-		unexpected!(parser,t!("-"),"an integer" => "only positive integers are allowed here")
+		unexpected!(parser,peek,"an integer", => "only positive integers are allowed here")
 	}
 
 	if let t!("+") = peek.kind {
@@ -47,25 +48,24 @@ where
 			let p = parser.peek_whitespace();
 			match p.kind {
 				t!(".") => {
-					unexpected!(parser, p.kind, "an integer")
+					unexpected!(parser, p, "an integer")
 				}
 				t!("dec") => {
-					unexpected!(parser, p.kind, "an integer" => "decimal numbers not supported here")
+					unexpected!(parser, p, "an integer", => "decimal numbers not supported here")
 				}
 				x if Parser::tokenkind_continues_ident(x) => {
-					unexpected!(parser, p.kind, "an integer")
+					unexpected!(parser, p, "an integer")
 				}
 				_ => {}
 			}
 
 			// remove the possible "f" number suffix and any '_' characters
-			let res = prepare_number_str(parser.span_str(peek.span))
+			let res = prepare_number_str(parser.lexer.span_str(peek.span))
 				.parse()
-				.map_err(ParseErrorKind::InvalidInteger)
-				.map_err(|e| ParseError::new(e, peek.span))?;
+				.map_err(|e| error!("Failed to parse integer: {e}", @peek.span))?;
 			Ok(res)
 		}
-		x => unexpected!(parser, x, "an integer"),
+		_ => unexpected!(parser, peek, "an integer"),
 	}
 }
 
@@ -104,23 +104,22 @@ where
 	match peek.kind {
 		TokenKind::NaN => return Ok("NaN".parse().unwrap()),
 		TokenKind::Digits | t!("+") | t!("-") => {}
-		x => unexpected!(parser, x, "a floating point number"),
+		_ => unexpected!(parser, peek, "a floating point number"),
 	};
 	let float_token = parser.glue_float()?;
 	match float_token.kind {
 		TokenKind::Number(NumberKind::Float) => {
 			parser.pop_peek();
 		}
-		x => unexpected!(parser, x, "a floating point number"),
+		_ => unexpected!(parser, float_token, "a floating point number"),
 	};
 
-	let span = parser.span_str(float_token.span);
+	let span = parser.lexer.span_str(float_token.span);
 
 	// remove the possible "f" number suffix and any '_' characters
 	prepare_number_str(span.strip_suffix('f').unwrap_or(span))
 		.parse()
-		.map_err(ParseErrorKind::InvalidFloat)
-		.map_err(|e| ParseError::new(e, float_token.span))
+		.map_err(|e| error!("Failed to parser floating point number: {e}", @float_token.span))
 }
 
 impl TokenValue for f32 {
@@ -144,38 +143,37 @@ impl TokenValue for Number {
 				return Ok(Number::Float(f64::NAN));
 			}
 			TokenKind::Number(x) => x,
-			x => unexpected!(parser, x, "a number"),
+			_ => unexpected!(parser, number, "a number"),
 		};
 
 		parser.pop_peek();
-		let span = parser.span_str(number.span);
+		let span = parser.lexer.span_str(number.span);
 
 		match number_kind {
 			NumberKind::Decimal => {
 				let str = prepare_number_str(span.strip_suffix("dec").unwrap_or(span));
 				let decimal = if str.contains('e') {
-					Decimal::from_scientific(str.as_ref()).map_err(|e| {
-						ParseError::new(ParseErrorKind::InvalidDecimal(e), number.span)
-					})?
+					Decimal::from_scientific(str.as_ref())
+						.map_err(|e| error!("Failed to parser decimal: {e}", @number.span))?
 				} else {
-					Decimal::from_str(str.as_ref()).map_err(|e| {
-						ParseError::new(ParseErrorKind::InvalidDecimal(e), number.span)
-					})?
+					Decimal::from_str(str.as_ref())
+						.map_err(|e| error!("Failed to parser decimal: {e}", @number.span))?
 				};
 
 				Ok(Number::Decimal(decimal))
 			}
 			NumberKind::Float => {
-				let float = prepare_number_str(span.strip_suffix('f').unwrap_or(span))
-					.parse()
-					.map_err(|e| ParseError::new(ParseErrorKind::InvalidFloat(e), number.span))?;
+				let float =
+					prepare_number_str(span.strip_suffix('f').unwrap_or(span)).parse().map_err(
+						|e| error!("Failed to parser floating point number: {e}", @number.span),
+					)?;
 
 				Ok(Number::Float(float))
 			}
 			NumberKind::Integer => {
 				let integer = prepare_number_str(span.strip_suffix('f').unwrap_or(span))
 					.parse()
-					.map_err(|e| ParseError::new(ParseErrorKind::InvalidInteger(e), number.span))?;
+					.map_err(|e| error!("Failed to parse integer: {e}", @number.span))?;
 
 				Ok(Number::Int(integer))
 			}

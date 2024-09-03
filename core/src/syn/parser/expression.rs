@@ -3,11 +3,11 @@
 use reblessive::Stk;
 
 use super::mac::unexpected;
-use super::ParseError;
 use crate::sql::{value::TryNeg, Cast, Expression, Number, Operator, Value};
+use crate::syn::error::bail;
 use crate::syn::token::Token;
 use crate::syn::{
-	parser::{mac::expected, ParseErrorKind, ParseResult, Parser},
+	parser::{mac::expected, ParseResult, Parser},
 	token::{t, TokenKind},
 };
 
@@ -40,12 +40,13 @@ impl Parser<'_> {
 
 	/// Parse a assigner operator.
 	pub fn parse_assigner(&mut self) -> ParseResult<Operator> {
-		match self.next().kind {
+		let token = self.next();
+		match token.kind {
 			t!("=") => Ok(Operator::Equal),
 			t!("+=") => Ok(Operator::Inc),
 			t!("-=") => Ok(Operator::Dec),
 			t!("+?=") => Ok(Operator::Ext),
-			x => unexpected!(self, x, "an assign operator"),
+			_ => unexpected!(self, token, "an assign operator"),
 		}
 	}
 
@@ -202,25 +203,20 @@ impl Parser<'_> {
 	pub fn parse_knn(&mut self, token: Token) -> ParseResult<Operator> {
 		let amount = self.next_token_value()?;
 		let op = if self.eat(t!(",")) {
-			match self.peek_kind(){
+			let token = self.peek();
+			match token.kind {
 				TokenKind::Distance(ref k) => {
 					self.pop_peek();
 					let d = self.convert_distance(k).map(Some)?;
 					Operator::Knn(amount, d)
-				},
+				}
 				TokenKind::Digits | TokenKind::Number(_) => {
 					let ef = self.next_token_value()?;
 					Operator::Ann(amount, ef)
 				}
 				_ => {
-					return Err(ParseError::new(
-						ParseErrorKind::UnexpectedExplain {
-							found: token.kind,
-							expected: "a distance or an integer",
-							explain: "The NN operator accepts either a distance for brute force operation, or an EF value for approximate operations",
-						},
-						token.span,
-					))
+					bail!("Unexpected token {} expected a distance of an integer", token.kind,
+						@token.span => "The NN operator accepts either a distance or an EF value (integer)")
 				}
 			}
 		} else {
@@ -324,14 +320,8 @@ impl Parser<'_> {
 			let Some((l_bp, r_bp)) = Self::infix_binding_power(token.kind) else {
 				// explain that assignment operators can't be used in normal expressions.
 				if let t!("+=") | t!("*=") | t!("-=") | t!("+?=") = token.kind {
-					return Err(ParseError::new(
-							    ParseErrorKind::UnexpectedExplain {
-								    found: token.kind,
-								    expected: "an operator",
-								    explain: "assignement operator are only allowed in SET and DUPLICATE KEY UPDATE statements",
-							    },
-							    token.span,
-						    ));
+					unexpected!(self,token,"an operator",
+						=> "assignment operators are only allowed in SET and DUPLICATE KEY UPDATE clauses")
 				}
 				break;
 			};
