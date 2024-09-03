@@ -184,6 +184,9 @@ allow_proc_macro = true
 [pkg.axum-macros]
 allow_proc_macro = true
 
+[pkg.axum-extra]
+allow_apis = ["net"]
+
 [pkg.serde_with_macros]
 allow_proc_macro = true
 
