@@ -472,14 +472,14 @@ user-login = "tobiemh"
 user-name = "Tobie Morgan Hitchcock"
 
 [[publisher.surrealcs]]
-version = "0.1.0"
+version = "0.1.1"
 when = "2024-09-03"
 user-id = 145457
 user-login = "tobiemh"
 user-name = "Tobie Morgan Hitchcock"
 
 [[publisher.surrealcs-kernel]]
-version = "0.1.0"
+version = "0.1.1"
 when = "2024-09-03"
 user-id = 145457
 user-login = "tobiemh"
