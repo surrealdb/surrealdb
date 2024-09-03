@@ -40,6 +40,18 @@ user-id = 3618 # David Tolnay (dtolnay)
 start = "2019-07-23"
 end = "2025-08-06"
 
+[[trusted.bitcode]]
+criteria = "safe-to-deploy"
+user-id = 132446 # Finn Bear (finnbear)
+start = "2023-04-16"
+end = "2025-09-03"
+
+[[trusted.bitcode_derive]]
+criteria = "safe-to-deploy"
+user-id = 132446 # Finn Bear (finnbear)
+start = "2023-04-27"
+end = "2025-09-03"
+
 [[trusted.bstr]]
 criteria = "safe-to-deploy"
 user-id = 189 # Andrew Gallant (BurntSushi)
@@ -51,6 +63,18 @@ criteria = "safe-to-deploy"
 user-id = 189 # Andrew Gallant (BurntSushi)
 start = "2019-06-09"
 end = "2025-08-31"
+
+[[trusted.bytes]]
+criteria = "safe-to-deploy"
+user-id = 10
+start = "2019-03-06"
+end = "2025-09-03"
+
+[[trusted.bytes]]
+criteria = "safe-to-deploy"
+user-id = 6741 # Alice Ryhl (Darksonn)
+start = "2021-01-11"
+end = "2025-09-03"
 
 [[trusted.dmp]]
 criteria = "safe-to-deploy"
@@ -106,6 +130,12 @@ user-id = 359 # Sean McArthur (seanmonstar)
 start = "2019-04-05"
 end = "2025-08-06"
 
+[[trusted.http-body]]
+criteria = "safe-to-deploy"
+user-id = 10
+start = "2019-04-04"
+end = "2025-09-03"
+
 [[trusted.http-body-util]]
 criteria = "safe-to-deploy"
 user-id = 359 # Sean McArthur (seanmonstar)
@@ -154,6 +184,18 @@ user-id = 145457 # Tobie Morgan Hitchcock (tobiemh)
 start = "2023-03-26"
 end = "2025-01-24"
 
+[[trusted.loom]]
+criteria = "safe-to-deploy"
+user-id = 10
+start = "2019-08-08"
+end = "2025-09-03"
+
+[[trusted.loom]]
+criteria = "safe-to-deploy"
+user-id = 6741 # Alice Ryhl (Darksonn)
+start = "2021-04-12"
+end = "2025-09-03"
+
 [[trusted.memchr]]
 criteria = "safe-to-deploy"
 user-id = 189 # Andrew Gallant (BurntSushi)
@@ -170,6 +212,12 @@ end = "2025-08-06"
 criteria = "safe-to-deploy"
 user-id = 10
 start = "2019-05-15"
+end = "2025-09-03"
+
+[[trusted.nanoservices-utils]]
+criteria = "safe-to-deploy"
+user-id = 262632 # Maxwell Flitton (maxwellflitton)
+start = "2024-03-30"
 end = "2025-09-03"
 
 [[trusted.num_cpus]]
@@ -286,6 +334,12 @@ user-id = 3618 # David Tolnay (dtolnay)
 start = "2019-08-20"
 end = "2025-08-06"
 
+[[trusted.slab]]
+criteria = "safe-to-deploy"
+user-id = 6741 # Alice Ryhl (Darksonn)
+start = "2021-10-13"
+end = "2025-09-03"
+
 [[trusted.snap]]
 criteria = "safe-to-deploy"
 user-id = 189 # Andrew Gallant (BurntSushi)
@@ -363,6 +417,54 @@ criteria = "safe-to-deploy"
 user-id = 3618 # David Tolnay (dtolnay)
 start = "2019-03-01"
 end = "2025-08-06"
+
+[[trusted.tokio]]
+criteria = "safe-to-deploy"
+user-id = 10
+start = "2019-03-02"
+end = "2025-09-03"
+
+[[trusted.tokio]]
+criteria = "safe-to-deploy"
+user-id = 6741 # Alice Ryhl (Darksonn)
+start = "2020-12-25"
+end = "2025-09-03"
+
+[[trusted.tokio-macros]]
+criteria = "safe-to-deploy"
+user-id = 10
+start = "2019-04-24"
+end = "2025-09-03"
+
+[[trusted.tokio-macros]]
+criteria = "safe-to-deploy"
+user-id = 6741 # Alice Ryhl (Darksonn)
+start = "2020-10-26"
+end = "2025-09-03"
+
+[[trusted.tokio-util]]
+criteria = "safe-to-deploy"
+user-id = 10
+start = "2019-11-26"
+end = "2025-09-03"
+
+[[trusted.tokio-util]]
+criteria = "safe-to-deploy"
+user-id = 6741 # Alice Ryhl (Darksonn)
+start = "2021-01-12"
+end = "2025-09-03"
+
+[[trusted.tower]]
+criteria = "safe-to-deploy"
+user-id = 10
+start = "2019-04-27"
+end = "2025-09-03"
+
+[[trusted.tower-layer]]
+criteria = "safe-to-deploy"
+user-id = 10
+start = "2019-04-27"
+end = "2025-09-03"
 
 [[trusted.trice]]
 criteria = "safe-to-deploy"

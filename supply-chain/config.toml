@@ -327,10 +327,6 @@ criteria = "safe-to-deploy"
 version = "0.6.12"
 criteria = "safe-to-deploy"
 
-[[exemptions.bytes]]
-version = "1.7.1"
-criteria = "safe-to-deploy"
-
 [[exemptions.bytestring]]
 version = "1.3.1"
 criteria = "safe-to-deploy"
@@ -857,10 +853,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.lock_api]]
 version = "0.4.11"
-criteria = "safe-to-deploy"
-
-[[exemptions.loom]]
-version = "0.5.6"
 criteria = "safe-to-deploy"
 
 [[exemptions.lru]]
@@ -1495,10 +1487,6 @@ criteria = "safe-to-deploy"
 version = "0.3.11"
 criteria = "safe-to-deploy"
 
-[[exemptions.slab]]
-version = "0.4.9"
-criteria = "safe-to-deploy"
-
 [[exemptions.smallvec]]
 version = "1.13.2"
 criteria = "safe-to-deploy"
@@ -1647,16 +1635,8 @@ criteria = "safe-to-deploy"
 version = "1.2.1"
 criteria = "safe-to-deploy"
 
-[[exemptions.tokio]]
-version = "1.38.0"
-criteria = "safe-to-deploy"
-
 [[exemptions.tokio-io-timeout]]
 version = "1.2.0"
-criteria = "safe-to-deploy"
-
-[[exemptions.tokio-macros]]
-version = "2.3.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.tokio-rustls]]
@@ -1673,10 +1653,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.tokio-tungstenite]]
 version = "0.23.1"
-criteria = "safe-to-deploy"
-
-[[exemptions.tokio-util]]
-version = "0.7.11"
 criteria = "safe-to-deploy"
 
 [[exemptions.toml]]
