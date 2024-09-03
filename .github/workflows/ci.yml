@@ -312,7 +312,7 @@ jobs:
 
   graphql-integration:
     name: GraphQL integration
-    runs-on: [ runner-arm64-2xlarge ]
+    runs-on: ubuntu-latest
     steps:
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
