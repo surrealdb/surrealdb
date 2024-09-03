@@ -4,13 +4,11 @@ use super::{ParseResult, Parser};
 use crate::{
 	sql::{
 		id::{range::IdRange, Gen},
-		Id, Ident, Range, Thing, Value,
+		Id, Ident, Param, Range, Thing, Value,
 	},
 	syn::{
-		parser::{
-			mac::{expected, expected_whitespace, unexpected},
-			ParseError, ParseErrorKind,
-		},
+		error::bail,
+		parser::mac::{expected, expected_whitespace, unexpected},
 		token::{t, TokenKind},
 	},
 };
@@ -102,23 +100,19 @@ impl Parser<'_> {
 		} else {
 			let id = match beg {
 				Bound::Unbounded => {
-					if self.peek_whitespace().kind == t!("$param") {
-						return Err(ParseError::new(
-							ParseErrorKind::UnexpectedExplain {
-								found: t!("$param"),
-								expected: "a record-id id",
-								explain: "you can create a record-id from a param with the function 'type::thing'",
-							},
-							self.recent_span(),
-						));
+					let token = self.peek_whitespace();
+					if token.kind == t!("$param") {
+						let param = self.next_token_value::<Param>()?;
+						bail!("Unexpected token `$param` expected a record-id key",
+							@token.span => "Record-id's can be create from a param with `type::thing(\"{}\",{})`", ident,param);
 					}
 
-					// we haven't matched anythong so far so we still want any type of id.
-					unexpected!(self, self.peek_whitespace().kind, "a record-id id")
+					// we haven't matched anything so far so we still want any type of id.
+					unexpected!(self, token, "a record-id key")
 				}
 				Bound::Excluded(_) => {
 					// we have matched a bounded id but we don't see an range operator.
-					unexpected!(self, self.peek_whitespace().kind, "the range operator `..`")
+					unexpected!(self, self.peek_whitespace(), "the range operator `..`")
 				}
 				// We previously converted the `Id` value to `Value` so it's safe to unwrap here.
 				Bound::Included(v) => v,
@@ -209,7 +203,7 @@ impl Parser<'_> {
 				let digits_token = self.peek_whitespace();
 				match digits_token.kind {
 					TokenKind::Digits => {}
-					x => unexpected!(self, x, "an integer"),
+					_ => unexpected!(self, digits_token, "an integer"),
 				}
 
 				let next = self.peek_whitespace();
@@ -217,17 +211,17 @@ impl Parser<'_> {
 					t!(".") | TokenKind::Exponent | TokenKind::NumberSuffix(_) => {
 						// TODO(delskayn) explain that record-id's cant have matissas,
 						// exponents or a number suffix
-						unexpected!(self, next.kind, "an integer");
+						unexpected!(self, next, "an integer");
 					}
 					x if Self::tokenkind_continues_ident(x) => {
 						let span = token.span.covers(next.span);
-						unexpected!(@span, self, x, "an integer");
+						bail!("Unexpected token `{x}` expected an integer", @span);
 					}
 					// allowed
 					_ => {}
 				}
 
-				let digits_str = self.span_str(digits_token.span);
+				let digits_str = self.lexer.span_str(digits_token.span);
 				if let Ok(number) = digits_str.parse() {
 					Ok(Id::Number(number))
 				} else {
@@ -240,7 +234,7 @@ impl Parser<'_> {
 				let digits_token = self.peek_whitespace();
 				match digits_token.kind {
 					TokenKind::Digits => {}
-					x => unexpected!(self, x, "an integer"),
+					_ => unexpected!(self, digits_token, "an integer"),
 				}
 
 				let next = self.peek_whitespace();
@@ -248,17 +242,17 @@ impl Parser<'_> {
 					t!(".") | TokenKind::Exponent | TokenKind::NumberSuffix(_) => {
 						// TODO(delskayn) explain that record-id's cant have matissas,
 						// exponents or a number suffix
-						unexpected!(self, next.kind, "an integer");
+						unexpected!(self, next, "an integer");
 					}
 					x if Self::tokenkind_continues_ident(x) => {
 						let span = token.span.covers(next.span);
-						unexpected!(@span, self, x, "an integer");
+						bail!("Unexpected token `{x}` expected an integer", @span);
 					}
 					// allowed
 					_ => {}
 				}
 
-				let digits_str = self.span_str(digits_token.span);
+				let digits_str = self.lexer.span_str(digits_token.span);
 				if let Ok(number) = digits_str.parse::<u64>() {
 					// Parse to u64 and check if the value is equal to `-i64::MIN` via u64 as
 					// `-i64::MIN` doesn't fit in an i64
@@ -280,13 +274,13 @@ impl Parser<'_> {
 						self.pop_peek();
 						return Ok(Id::String(self.lexer.string.take().unwrap()));
 					} else {
-						unexpected!(self, glued.kind, "a record-id id")
+						unexpected!(self, glued, "a record-id id")
 					}
 				}
 
 				self.pop_peek();
 
-				let digits_str = self.span_str(token.span);
+				let digits_str = self.lexer.span_str(token.span);
 				if let Ok(number) = digits_str.parse::<i64>() {
 					Ok(Id::Number(number))
 				} else {
@@ -297,7 +291,7 @@ impl Parser<'_> {
 				self.lexer.duration = None;
 				let slice = self.lexer.reader.span(token.span);
 				if slice.iter().any(|x| *x > 0b0111_1111) {
-					unexpected!(self, token.kind, "a identifier");
+					unexpected!(self, token, "a identifier");
 				}
 				// Should be valid utf-8 as it was already parsed by the lexer
 				let text = String::from_utf8(slice.to_vec()).unwrap();

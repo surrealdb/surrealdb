@@ -5,10 +5,13 @@ use crate::{
 		part::DestructurePart, Dir, Edges, Field, Fields, Graph, Ident, Idiom, Part, Table, Tables,
 		Value,
 	},
-	syn::token::{t, Span, TokenKind},
+	syn::{
+		error::bail,
+		token::{t, Span, TokenKind},
+	},
 };
 
-use super::{mac::unexpected, ParseError, ParseErrorKind, ParseResult, Parser};
+use super::{mac::unexpected, ParseResult, Parser};
 
 impl Parser<'_> {
 	/// Parse fields of a selecting query: `foo, bar` in `SELECT foo, bar FROM baz`.
@@ -106,14 +109,8 @@ impl Parser<'_> {
 					res.push(Part::Graph(graph))
 				}
 				t!("..") => {
-					return Err(ParseError::new(
-						ParseErrorKind::UnexpectedExplain {
-							found: t!(".."),
-							expected: "an idiom",
-							explain: "Did you maybe mean the flatten operator `...`",
-						},
-						self.last_span(),
-					))
+					bail!("Unexpected token `{}` expected and idiom",t!(".."),
+						@self.last_span() => "Did you maybe intent to use the flatten operator `...`");
 				}
 				_ => break,
 			}
@@ -171,14 +168,8 @@ impl Parser<'_> {
 					}
 				}
 				t!("..") => {
-					return Err(ParseError::new(
-						ParseErrorKind::UnexpectedExplain {
-							found: t!(".."),
-							expected: "an idiom",
-							explain: "Did you maybe mean the flatten operator `...`",
-						},
-						self.last_span(),
-					))
+					bail!("Unexpected token `{}` expected and idiom",t!(".."),
+						@self.last_span() => "Did you maybe intent to use the flatten operator `...`");
 				}
 				_ => break,
 			}
@@ -301,13 +292,7 @@ impl Parser<'_> {
 						Part::All => DestructurePart::All(field),
 						Part::Destructure(v) => DestructurePart::Destructure(field, v),
 						_ => {
-							return Err(ParseError::new(
-								ParseErrorKind::Unexpected {
-									found,
-									expected: "a star or a destructuring",
-								},
-								self.last_span(),
-							))
+							bail!("Unexpected token `{}` expected a `*` or a destructuring", found, @self.last_span());
 						}
 					}
 				}
@@ -327,7 +312,8 @@ impl Parser<'_> {
 	}
 	/// Parse the part after the `[` in a idiom
 	pub async fn parse_bracket_part(&mut self, ctx: &mut Stk, start: Span) -> ParseResult<Part> {
-		let res = match self.peek_kind() {
+		let peek = self.peek();
+		let res = match peek.kind {
 			t!("*") => {
 				self.pop_peek();
 				Part::All
@@ -341,9 +327,9 @@ impl Parser<'_> {
 			}
 			t!("-") => {
 				if let TokenKind::Digits = self.peek_whitespace_token_at(1).kind {
-					unexpected!(self, t!("-"),"$, * or a number" => "an index can't be negative");
+					unexpected!(self, peek,"$, * or a number", => "An index can't be negative.");
 				}
-				unexpected!(self, t!("-"), "$, * or a number");
+				unexpected!(self, peek, "$, * or a number");
 			}
 			t!("?") | t!("WHERE") => {
 				self.pop_peek();
@@ -386,7 +372,8 @@ impl Parser<'_> {
 				}
 				t!("[") => {
 					self.pop_peek();
-					let res = match self.peek_kind() {
+					let peek = self.peek();
+					let res = match peek.kind {
 						t!("*") => {
 							self.pop_peek();
 							Part::All
@@ -403,11 +390,11 @@ impl Parser<'_> {
 							let peek_digit = self.peek_whitespace_token_at(1);
 							if let TokenKind::Digits = peek_digit.kind {
 								let span = self.recent_span().covers(peek_digit.span);
-								unexpected!(@ span, self, t!("-"),"$, * or a number" => "an index can't be negative");
+								bail!("Unexpected token `-` expected $, *, or a number", @span => "an index can't be negative");
 							}
-							unexpected!(self, t!("-"), "$, * or a number");
+							unexpected!(self, peek, "$, * or a number");
 						}
-						x => unexpected!(self, x, "$, * or a number"),
+						_ => unexpected!(self, peek, "$, * or a number"),
 					};
 					self.expect_closing_delimiter(t!("]"), token.span)?;
 					res
@@ -436,7 +423,8 @@ impl Parser<'_> {
 				}
 				t!("[") => {
 					self.pop_peek();
-					let res = match self.peek_kind() {
+					let token = self.peek();
+					let res = match token.kind {
 						t!("*") => {
 							self.pop_peek();
 							Part::All
@@ -449,11 +437,11 @@ impl Parser<'_> {
 							let peek_digit = self.peek_whitespace_token_at(1);
 							if let TokenKind::Digits = peek_digit.kind {
 								let span = self.recent_span().covers(peek_digit.span);
-								unexpected!(@ span, self, t!("-"),"$, * or a number" => "an index can't be negative");
+								bail!("Unexpected token `-` expected $, *, or a number", @span => "an index can't be negative");
 							}
-							unexpected!(self, t!("-"), "$, * or a number");
+							unexpected!(self, token, "$, * or a number");
 						}
-						x => unexpected!(self, x, "$, * or a number"),
+						_ => unexpected!(self, token, "$, * or a number"),
 					};
 					self.expect_closing_delimiter(t!("]"), token.span)?;
 					res
@@ -465,18 +453,12 @@ impl Parser<'_> {
 		}
 
 		if self.eat(t!("...")) {
-			let span = self.last_span();
-			parts.push(Part::Flatten);
-			if let t!(".") | t!("[") = self.peek_kind() {
-				return Err(ParseError::new(
-					ParseErrorKind::UnexpectedExplain {
-						found: t!("..."),
-						expected: "local idiom to end.",
-						explain: "Flattening can only be done at the end of a local idiom.",
-					},
-					span,
-				));
+			let token = self.peek();
+			if let t!(".") | t!("[") = token.kind {
+				bail!("Unexpected token `...` expected a local idiom to end.",
+					@token.span => "Flattening can only be done at the end of a local idiom")
 			}
+			parts.push(Part::Flatten);
 		}
 
 		Ok(Idiom(parts))
@@ -520,7 +502,8 @@ impl Parser<'_> {
 	/// Expects to just have eaten a direction (e.g. <-, <->, or ->) and be at the field like part
 	/// of the graph
 	pub async fn parse_graph(&mut self, ctx: &mut Stk, dir: Dir) -> ParseResult<Graph> {
-		match self.peek_kind() {
+		let token = self.peek();
+		match token.kind {
 			t!("?") => {
 				self.pop_peek();
 				Ok(Graph {
@@ -530,12 +513,13 @@ impl Parser<'_> {
 			}
 			t!("(") => {
 				let span = self.pop_peek().span;
-				let what = match self.peek_kind() {
+				let token = self.peek();
+				let what = match token.kind {
 					t!("?") => {
 						self.pop_peek();
 						Tables::default()
 					}
-					x if x.can_be_identifier() => {
+					x if Self::tokenkind_can_start_ident(x) => {
 						// The following function should always succeed here,
 						// returning an error here would be a bug, so unwrap.
 						let table = self.next_token_value().unwrap();
@@ -545,7 +529,7 @@ impl Parser<'_> {
 						}
 						tables
 					}
-					x => unexpected!(self, x, "`?` or an identifier"),
+					_ => unexpected!(self, token, "`?` or an identifier"),
 				};
 
 				let cond = self.try_parse_condition(ctx).await?;
@@ -566,7 +550,7 @@ impl Parser<'_> {
 					..Default::default()
 				})
 			}
-			x if x.can_be_identifier() => {
+			x if Self::tokenkind_can_start_ident(x) => {
 				// The following function should always succeed here,
 				// returning an error here would be a bug, so unwrap.
 				let table = self.next_token_value().unwrap();
@@ -577,7 +561,7 @@ impl Parser<'_> {
 					..Default::default()
 				})
 			}
-			x => unexpected!(self, x, "`?`, `(` or an identifier"),
+			_ => unexpected!(self, token, "`?`, `(` or an identifier"),
 		}
 	}
 }

@@ -635,3 +635,27 @@ async fn access_info_redacted_structure() {
 		);
 	}
 }
+
+#[tokio::test]
+async fn function_info_structure() {
+	let sql = r#"
+        DEFINE FUNCTION fn::example($name: string) -> string { RETURN "Hello, " + $name + "!"; };
+        INFO FOR DB STRUCTURE;
+    "#;
+	let dbs = new_ds().await.unwrap();
+	let ses = Session::owner().with_ns("ns").with_db("db");
+
+	let mut res = dbs.execute(sql, &ses, None).await.unwrap();
+	assert_eq!(res.len(), 2);
+
+	let out = res.pop().unwrap().output();
+	assert!(out.is_ok(), "Unexpected error: {:?}", out);
+
+	let out_expected =
+		r#"{ accesses: [], analyzers: [], functions: [{ args: [['name', 'string']], block: "{ RETURN 'Hello, ' + $name + '!'; }", name: 'example', permissions: true, returns: 'string' }], models: [], params: [], tables: [], users: [] }"#.to_string();
+	let out_str = out.unwrap().to_string();
+	assert_eq!(
+		out_str, out_expected,
+		"Output '{out_str}' doesn't match expected output '{out_expected}'",
+	);
+}
