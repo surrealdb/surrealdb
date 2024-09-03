@@ -91,6 +91,99 @@ mod graphql_integration {
 			});
 			assert_eq!(expected.to_string(), body)
 		}
+
+		// test limit
+		{
+			let res = client
+				.post(gql_url)
+				.body(json!({"query": r#"query{foo(limit: 1){id, val}}"#}).to_string())
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200);
+			let body = res.text().await?;
+			let expected = json!({
+				"data": {
+					"foo": [
+						{
+							"id": "foo:1",
+							"val": 42
+						}
+					]
+				}
+			});
+			assert_eq!(expected.to_string(), body)
+		}
+
+		// test start
+		{
+			let res = client
+				.post(gql_url)
+				.body(json!({"query": r#"query{foo(start: 1){id, val}}"#}).to_string())
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200);
+			let body = res.text().await?;
+			let expected = json!({
+				"data": {
+					"foo": [
+						{
+							"id": "foo:2",
+							"val": 43
+						}
+					]
+				}
+			});
+			assert_eq!(expected.to_string(), body)
+		}
+
+		// test order
+		{
+			let res = client
+				.post(gql_url)
+				.body(json!({"query": r#"query{foo(order: {desc: val}){id}}"#}).to_string())
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200);
+			let body = res.text().await?;
+			let expected = json!({
+				"data": {
+					"foo": [
+						{
+							"id": "foo:2",
+						},
+						{
+							"id": "foo:1",
+						}
+					]
+				}
+			});
+			assert_eq!(expected.to_string(), body)
+		}
+
+		// test order
+		{
+			let res = client
+				.post(gql_url)
+				.body(json!({"query": r#"query{foo(order: {desc: val}){id}}"#}).to_string())
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200);
+			let body = res.text().await?;
+			let expected = json!({
+				"data": {
+					"foo": [
+						{
+							"id": "foo:2",
+						},
+						{
+							"id": "foo:1",
+						}
+					]
+				}
+			});
+			assert_eq!(expected.to_string(), body)
+		}
+
 		Ok(())
 	}
 }
