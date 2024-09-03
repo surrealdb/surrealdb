@@ -36,6 +36,10 @@ pub static HTTP_MAX_ML_BODY_SIZE: Lazy<usize> =
 pub static HTTP_MAX_SQL_BODY_SIZE: Lazy<usize> =
 	lazy_env_parse!("SURREAL_HTTP_MAX_SQL_BODY_SIZE", usize, 1 << 20);
 
+/// The maximum HTTP body size of the HTTP /rpc endpoint (defaults to 4 MiB)
+pub static HTTP_MAX_RPC_BODY_SIZE: Lazy<usize> =
+	lazy_env_parse!("SURREAL_HTTP_MAX_RPC_BODY_SIZE", usize, 4 << 20);
+
 /// The maximum HTTP body size of the HTTP /key endpoints (defaults to 16 KiB)
 pub static HTTP_MAX_KEY_BODY_SIZE: Lazy<usize> =
 	lazy_env_parse!("SURREAL_HTTP_MAX_KEY_BODY_SIZE", usize, 16 << 10);
