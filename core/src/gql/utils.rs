@@ -42,6 +42,8 @@ use crate::dbs::Session;
 use crate::kvs::Datastore;
 use crate::kvs::LockType;
 use crate::kvs::TransactionType;
+use crate::sql::statements::SelectStatement;
+use crate::sql::Statement;
 use crate::sql::{Thing, Value as SqlValue};
 
 use super::error::GqlError;
@@ -51,11 +53,16 @@ pub async fn get_record(
 	sess: &Session,
 	rid: &Thing,
 ) -> Result<SqlValue, GqlError> {
-	let opt = kvs.make_opts(sess);
-	let tx = kvs.transaction(TransactionType::Read, LockType::Optimistic).await?;
-	Ok(tx
-		.get_record(sess.ns.as_ref().unwrap(), sess.db.as_ref().unwrap(), &rid.tb, &rid.id)
-		.await?
-		.as_ref()
-		.to_owned())
+	let stmt: Statement = SelectStatement {
+		what: SqlValue::Thing(rid.clone()).into(),
+		..Default::default()
+	};
+	let res = kvs.process(stmt.into(), sess, Default::default()).await?;
+	// let opt = kvs.make_opts(sess);
+	// let tx = kvs.transaction(TransactionType::Read, LockType::Optimistic).await?;
+	// Ok(tx
+	// 	.get_record(sess.ns.as_ref().unwrap(), sess.db.as_ref().unwrap(), &rid.tb, &rid.id)
+	// 	.await?
+	// 	.as_ref()
+	// 	.to_owned())
 }
