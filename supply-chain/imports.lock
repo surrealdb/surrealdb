@@ -367,13 +367,6 @@ user-login = "BurntSushi"
 user-name = "Andrew Gallant"
 
 [[publisher.reqwest]]
-version = "0.12.5"
-when = "2024-06-17"
-user-id = 359
-user-login = "seanmonstar"
-user-name = "Sean McArthur"
-
-[[publisher.reqwest]]
 version = "0.12.7"
 when = "2024-08-19"
 user-id = 359

@@ -1,20 +1,7 @@
 
 # cargo-vet audits file
 
-[[audits.quick_cache]]
-who = "Emmanuel Keller <emmanuel.keller@surrealdb.com>"
-criteria = "safe-to-deploy"
-version = "0.5.1"
-
-[[audits.rustls]]
-who = "Tobie Morgan Hitchcock <tobie@surrealdb.com>"
-criteria = "safe-to-deploy"
-delta = "0.21.10 -> 0.21.11"
-
-[[audits.rustls]]
-who = "Tobie Morgan Hitchcock <tobie@surrealdb.com>"
-criteria = "safe-to-deploy"
-delta = "0.22.3 -> 0.22.4"
+[audits]
 
 [[trusted.addr]]
 criteria = "safe-to-deploy"
