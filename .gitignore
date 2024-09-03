@@ -41,7 +41,6 @@ Temporary Items
 /lib/target/
 /tests/sdk/*/Cargo.lock
 /tests/sdk/*/target
-surrealcs/
 
 .idea/
 .vscode/
