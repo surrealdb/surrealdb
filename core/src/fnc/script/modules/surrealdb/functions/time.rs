@@ -2,6 +2,7 @@ use super::run;
 use crate::fnc::script::modules::impl_module_def;
 
 mod from;
+mod is;
 
 #[non_exhaustive]
 pub struct Package;
@@ -15,7 +16,6 @@ impl_module_def!(
 	"format" => run,
 	"group" => run,
 	"hour" => run,
-	"is_leap_year" => run,
 	"max" => run,
 	"min" => run,
 	"mins" => run,
@@ -34,5 +34,6 @@ impl_module_def!(
 	"week" => run,
 	"yday" => run,
 	"year" => run,
-	"from" => (from::Package)
+	"from" => (from::Package),
+	"is" => (is::Package)
 );
