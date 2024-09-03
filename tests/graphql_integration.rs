@@ -1,13 +1,5 @@
 mod common;
 
-#[cfg(not(surrealdb_unstable))]
-mod graphql_integration {
-	#[test]
-	fn fail() {
-		panic!("graphql requires the surrealdb_unstable flag")
-	}
-}
-
 #[cfg(surrealdb_unstable)]
 mod graphql_integration {
 	use std::time::Duration;

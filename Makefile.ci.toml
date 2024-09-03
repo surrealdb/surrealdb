@@ -90,12 +90,6 @@ env = { _TEST_FEATURES = "storage-rocksdb" }
 category = "CI - DATABASE UPGRADE TESTS"
 run_task = { name = ["test-database-upgrade"], fork = true }
 
-
-# [tasks.ci-graphql-integration]
-# env = { RUSTFLAGS = "--cfg surrealdb_unstable", _TEST_FEATURES = "memory" }
-# category = "CI - INTEGRATION TESTS"
-# run_task = { name = ["start-surrealdb", "stop-surrealdb"] }
-
 #
 # Tests private tasks
 #
