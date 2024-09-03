@@ -34,6 +34,12 @@ use crate::kvs::TransactionType;
 use crate::sql::Object as SqlObject;
 use crate::sql::Value as SqlValue;
 
+type ErasedRecord = SqlObject;
+
+fn field_val_erase_owned(val: ErasedRecord) -> FieldValue<'static> {
+	FieldValue::owned_any(val)
+}
+
 macro_rules! limit_input {
 	() => {
 		InputValue::new("limit", TypeRef::named(TypeRef::INT))
@@ -228,7 +234,12 @@ pub async fn generate_schema(
 						let out: Result<Vec<FieldValue>, SqlValue> = res_vec
 							.0
 							.into_iter()
-							.map(|v| v.try_as_object().map(FieldValue::owned_any))
+							.map(|v| {
+								v.try_as_object().map(|o| {
+									let erased: ErasedRecord = o;
+									field_val_erase_owned(erased)
+								})
+							})
 							.collect();
 
 						match out {
@@ -276,7 +287,10 @@ pub async fn generate_schema(
 							};
 
 							match get_record(kvs, &sess2, &thing).await? {
-								SqlValue::Object(o) => Ok(Some(FieldValue::owned_any(o))),
+								SqlValue::Object(o) => {
+									let erased: ErasedRecord = o;
+									Ok(Some(field_val_erase_owned(erased)))
+								}
 								_ => Ok(None),
 							}
 						}
@@ -360,7 +374,7 @@ pub async fn generate_schema(
 
 					match get_record(kvs, &sess3, &thing).await? {
 						SqlValue::Object(o) => {
-							let out = FieldValue::owned_any(o).with_type(thing.tb.to_string());
+							let out = field_val_erase_owned(o).with_type(thing.tb.to_string());
 
 							Ok(Some(out))
 						}
@@ -473,7 +487,7 @@ fn make_table_field_resolver(
 
 				let record: &SqlObject = ctx
 					.parent_value
-					.downcast_ref::<SqlObject>()
+					.downcast_ref::<ErasedRecord>()
 					.ok_or_else(|| internal_error("failed to downcast"))?;
 
 				let Some(val) = record.get(fd_name.as_str()) else {
@@ -484,7 +498,8 @@ fn make_table_field_resolver(
 					SqlValue::Thing(rid)if fd_name != "id" => match get_record(kvs, &sess_field, rid).await?
 						{
 							SqlValue::Object(o) => {
-							    let mut tmp = FieldValue::owned_any(o);
+								let erased: ErasedRecord = o;
+							    let mut tmp = field_val_erase_owned(erased);
 
 								match field_kind {
 									Some(Kind::Record(ts)) if ts.len() != 1 => {tmp = tmp.with_type(rid.tb.clone())}
