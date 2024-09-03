@@ -375,6 +375,7 @@ pub trait RpcContext {
 		let Ok((what, data)) = params.needs_one_or_two() else {
 			return Err(RpcError::InvalidParams);
 		};
+		let what = what.could_be_table();
 		// Return a single result?
 		let one = what.is_thing_single() || what.is_table();
 		// Specify the SQL query string
@@ -385,7 +386,7 @@ pub trait RpcContext {
 		};
 		// Specify the query parameters
 		let var = Some(map! {
-			String::from("what") => what.could_be_table(),
+			String::from("what") => what,
 			String::from("data") => data,
 			=> &self.vars()
 		});
