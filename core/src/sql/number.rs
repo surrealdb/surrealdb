@@ -667,8 +667,27 @@ macro_rules! impl_simple_try_op {
 impl_simple_try_op!(TryAdd, try_add, add, checked_add);
 impl_simple_try_op!(TrySub, try_sub, sub, checked_sub);
 impl_simple_try_op!(TryMul, try_mul, mul, checked_mul);
-impl_simple_try_op!(TryDiv, try_div, div, checked_div);
 impl_simple_try_op!(TryRem, try_rem, rem, checked_rem);
+
+impl TryDiv for Number {
+	type Output = Self;
+	fn try_div(self, other: Self) -> Result<Self, Error> {
+		Ok(match (self, other) {
+			(Number::Int(v), Number::Int(w)) => Number::Float((v as f64).div(w as f64)),
+			(Number::Float(v), Number::Float(w)) => Number::Float(v.div(w)),
+			(Number::Decimal(v), Number::Decimal(w)) => Number::Decimal(
+				v.checked_div(w).ok_or_else(|| Error::TryDiv(v.to_string(), w.to_string()))?,
+			),
+			(Number::Int(v), Number::Float(w)) => Number::Float((v as f64).div(w)),
+			(Number::Float(v), Number::Int(w)) => Number::Float(v.div(w as f64)),
+			(v, w) => Number::Decimal(
+				v.to_decimal()
+					.checked_div(w.to_decimal())
+					.ok_or_else(|| Error::TryDiv(v.to_string(), w.to_string()))?,
+			),
+		})
+	}
+}
 
 impl TryPow for Number {
 	type Output = Self;
