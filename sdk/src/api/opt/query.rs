@@ -403,7 +403,7 @@ where
 				Err(error) => {
 					let error = mem::replace(error, Error::ConnectionUninitialised.into());
 					response.results.swap_remove(&index);
-					return Err(error);
+					Err(error)
 				}
 			},
 			None => Ok(vec![]),
