@@ -107,10 +107,7 @@ impl Resource {
 	}
 	pub fn is_single_recordid(&self) -> bool {
 		match self {
-			Resource::RecordId(rid) => match rid.into_inner_ref().id {
-				CoreId::Range(_) => false,
-				_ => true,
-			},
+			Resource::RecordId(rid) => !matches!(rid.into_inner_ref().id, CoreId::Range(_)),
 			_ => false,
 		}
 	}
