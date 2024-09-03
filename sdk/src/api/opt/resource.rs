@@ -4,7 +4,8 @@ use crate::{
 };
 use std::ops::{self, Bound};
 use surrealdb_core::sql::{
-	Edges as CoreEdges, IdRange as CoreIdRange, Table as CoreTable, Thing as CoreThing,
+	Edges as CoreEdges, Id as CoreId, IdRange as CoreIdRange, Table as CoreTable,
+	Thing as CoreThing,
 };
 
 #[cfg(any(feature = "protocol-ws", feature = "protocol-http"))]
@@ -102,6 +103,15 @@ impl Resource {
 			Resource::Edge(x) => x.into_inner().into(),
 			Resource::Range(x) => x.into_inner().into(),
 			Resource::Unspecified => CoreValue::None,
+		}
+	}
+	pub fn is_single_recordid(&self) -> bool {
+		match self {
+			Resource::RecordId(rid) => match rid.into_inner_ref().id {
+				CoreId::Range(_) => false,
+				_ => true,
+			},
+			_ => false,
 		}
 	}
 }

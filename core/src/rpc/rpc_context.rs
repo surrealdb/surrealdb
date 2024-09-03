@@ -337,7 +337,7 @@ pub trait RpcContext {
 			return Err(RpcError::InvalidParams);
 		};
 
-		let one = data.is_single();
+		let one = data.is_thing_single();
 
 		let mut res = match what {
 			Value::None | Value::Null => {
@@ -376,7 +376,7 @@ pub trait RpcContext {
 			return Err(RpcError::InvalidParams);
 		};
 		// Return a single result?
-		let one = what.is_thing_single() || data.is_object();
+		let one = what.is_thing_single() || what.is_table();
 		// Specify the SQL query string
 		let sql = if data.is_none_or_null() {
 			"CREATE $what RETURN AFTER"
@@ -540,7 +540,7 @@ pub trait RpcContext {
 			return Err(RpcError::InvalidParams);
 		};
 		// Return a single result?
-		let one = kind.is_thing_single();
+		let one = from.is_single() && to.is_single();
 		// Specify the SQL query string
 		let sql = if data.is_none_or_null() {
 			"RELATE $from->$kind->$to"
