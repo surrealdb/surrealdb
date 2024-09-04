@@ -809,8 +809,9 @@ impl Datastore {
 			}
 			.into());
 		}
+
 		// Create a new query options
-		let opt = self.make_opts(sess);
+		let opt = self.setup_options(sess);
 
 		// Create a new query executor
 		let mut exe = Executor::new(self);
@@ -884,14 +885,7 @@ impl Datastore {
 		// Create a new memory stack
 		let mut stack = TreeStack::new();
 		// Create a new query options
-		let opt = Options::default()
-			.with_id(self.id)
-			.with_ns(sess.ns())
-			.with_db(sess.db())
-			.with_live(sess.live())
-			.with_auth(sess.au.clone())
-			.with_strict(self.strict)
-			.with_auth_enabled(self.auth_enabled);
+		let opt = self.setup_options(sess);
 		// Create a default context
 		let mut ctx = MutableContext::default();
 		// Set context capabilities
@@ -963,7 +957,7 @@ impl Datastore {
 		// Create a new memory stack
 		let mut stack = TreeStack::new();
 		// Create a new query options
-		let opt = self.make_opts(sess);
+		let opt = self.setup_options(sess);
 		// Create a default context
 		let mut ctx = MutableContext::default();
 		// Set context capabilities
@@ -1074,7 +1068,7 @@ impl Datastore {
 		Ok(())
 	}
 
-	pub fn make_opts(&self, sess: &Session) -> Options {
+	pub fn setup_options(&self, sess: &Session) -> Options {
 		Options::default()
 			.with_id(self.id)
 			.with_ns(sess.ns())
@@ -1084,6 +1078,24 @@ impl Datastore {
 			.with_strict(self.strict)
 			.with_auth_enabled(self.auth_enabled)
 	}
+
+	// pub fn setup_auth(&self, sess: &Session) -> Result<(), Error> {
+	// 	// Check if the session has expired
+	// 	if sess.expired() {
+	// 		return Err(Error::ExpiredSession);
+	// 	}
+	// 	// Check if anonymous actors can execute queries when auth is enabled
+	// 	// TODO(sgirones): Check this as part of the authorisation layer
+	// 	if self.auth_enabled && sess.au.is_anon() && !self.capabilities.allows_guest_access() {
+	// 		return Err(IamError::NotAllowed {
+	// 			actor: "anonymous".to_string(),
+	// 			action: "process".to_string(),
+	// 			resource: "query".to_string(),
+	// 		}
+	// 		.into());
+	// 	}
+	// 	Ok(())
+	// }
 }
 
 #[cfg(test)]
