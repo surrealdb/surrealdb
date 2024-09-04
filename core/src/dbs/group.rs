@@ -330,7 +330,6 @@ impl Aggregator {
 			OptimisedAggregate::MathMean => {
 				if let Some((v, i)) = self.math_mean.take() {
 					v.try_float_div(i.into()).unwrap_or(f64::NAN.into())
-
 				} else {
 					Value::None
 				}
