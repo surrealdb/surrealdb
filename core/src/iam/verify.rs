@@ -807,6 +807,8 @@ mod tests {
 					assert_eq!(sess.au.id(), "user");
 
 					// Check auth level
+					assert_eq!(sess.au.level().ns(), level.ns);
+					assert_eq!(sess.au.level().db(), level.db);
 					match level.level {
 						"ROOT" => assert!(sess.au.is_root()),
 						"NS" => assert!(sess.au.is_ns()),
@@ -1660,6 +1662,8 @@ mod tests {
 					assert_eq!(sess.au.id(), "user");
 
 					// Check auth level
+					assert_eq!(sess.au.level().ns(), level.ns);
+					assert_eq!(sess.au.level().db(), level.db);
 					match level.level {
 						"ROOT" => assert!(sess.au.is_root()),
 						"NS" => assert!(sess.au.is_ns()),
