@@ -742,17 +742,7 @@ impl TryFloatDiv for Number {
 					v.checked_div(w).ok_or_else(|| Error::TryDiv(v.to_string(), w.to_string()))?,
 				)
 			}
-			(Number::Float(v), Number::Float(w)) => Number::Float(v.div(w)),
-			(Number::Decimal(v), Number::Decimal(w)) => Number::Decimal(
-				v.checked_div(w).ok_or_else(|| Error::TryDiv(v.to_string(), w.to_string()))?,
-			),
-			(Number::Int(v), Number::Float(w)) => Number::Float((v as f64).div(w)),
-			(Number::Float(v), Number::Int(w)) => Number::Float(v.div(w as f64)),
-			(v, w) => Number::Decimal(
-				v.to_decimal()
-					.checked_div(w.to_decimal())
-					.ok_or_else(|| Error::TryDiv(v.to_string(), w.to_string()))?,
-			),
+			(v, w) => v.try_div(w)?,
 		})
 	}
 }
