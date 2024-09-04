@@ -184,6 +184,9 @@ allow_proc_macro = true
 [pkg.axum-macros]
 allow_proc_macro = true
 
+[pkg.axum-extra]
+allow_apis = ["net"]
+
 [pkg.serde_with_macros]
 allow_proc_macro = true
 
@@ -437,6 +440,7 @@ allow_unsafe = true
 
 [pkg.futures-util]
 allow_unsafe = true
+allow_apis = ["net"]
 
 [pkg.indexmap]
 allow_unsafe = true
@@ -1161,7 +1165,7 @@ allow_unsafe = true
 [pkg.static_assertions_next]
 allow_unsafe = true
 
-[pkg.surrealdb-async-graphql-axum]
+[pkg.async-graphql-axum]
 allow_apis = ["net"]
 
 [pkg.futures-timer]

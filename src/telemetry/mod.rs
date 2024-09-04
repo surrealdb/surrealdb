@@ -109,12 +109,12 @@ pub fn filter_from_value(v: &str) -> Result<EnvFilter, ParseError> {
 		"info" => Ok(EnvFilter::default().add_directive(Level::INFO.into())),
 		// Otherwise, let's show debugs and above
 		"debug" => EnvFilter::builder()
-			.parse("warn,surreal=debug,surrealdb=debug,surrealdb::core::kvs=debug"),
+			.parse("warn,surreal=debug,surrealdb=debug,surrealcs=warn,surrealdb::core::kvs=debug"),
 		// Specify the log level for each code area
 		"trace" => EnvFilter::builder()
-			.parse("warn,surreal=trace,surrealdb=trace,surrealdb::core::kvs=debug"),
+			.parse("warn,surreal=trace,surrealdb=trace,surrealcs=warn,surrealdb::core::kvs=debug"),
 		// Check if we should show all surreal logs
-		"full" => EnvFilter::builder().parse("debug,surreal=trace,surrealdb=trace"),
+		"full" => EnvFilter::builder().parse("debug,surreal=trace,surrealdb=trace,surrealcs=debug"),
 		// Check if we should show all module logs
 		"all" => Ok(EnvFilter::default().add_directive(Level::TRACE.into())),
 		// Let's try to parse the custom log level
