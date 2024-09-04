@@ -80,7 +80,7 @@ pub async fn generate_schema(
 	let tx = kvs.transaction(TransactionType::Read, LockType::Optimistic).await?;
 	let ns = session.ns.as_ref().ok_or(GqlError::UnpecifiedNamespace)?;
 	let db = session.db.as_ref().ok_or(GqlError::UnpecifiedDatabase)?;
-	let tbs = tx.all_tb(ns, db).await?;
+	let tbs = tx.all_tb(ns, db, None).await?;
 	let mut query = Object::new("Query");
 	let mut types: Vec<Type> = Vec::new();
 
@@ -114,7 +114,7 @@ pub async fn generate_schema(
 		types.push(Type::InputObject(filter_id()));
 
 		let sess1 = session.to_owned();
-		let fds = tx.all_tb_fields(ns, db, &tb.name.0).await?;
+		let fds = tx.all_tb_fields(ns, db, &tb.name.0, None).await?;
 		let fds1 = fds.clone();
 		let kvs1 = datastore.clone();
 

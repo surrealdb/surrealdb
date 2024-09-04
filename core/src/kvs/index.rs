@@ -303,7 +303,7 @@ impl Building {
 		while let Some(rng) = next {
 			// Get the next batch of records
 			let tx = self.new_read_tx().await?;
-			let batch = catch!(tx, tx.batch(rng, *INDEXING_BATCH_SIZE, true).await);
+			let batch = catch!(tx, tx.batch(rng, *INDEXING_BATCH_SIZE, true, None).await);
 			// We can release the read transaction
 			drop(tx);
 			// Set the next scan range

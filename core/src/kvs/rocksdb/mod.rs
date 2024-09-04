@@ -238,7 +238,7 @@ impl super::api::Transaction for Transaction {
 	where
 		K: Into<Key> + Sprintable + Debug,
 	{
-		// RocksDB does not support verisoned queries.
+		// RocksDB does not support versioned queries.
 		if version.is_some() {
 			return Err(Error::UnsupportedVersionedQueries);
 		}
@@ -286,7 +286,7 @@ impl super::api::Transaction for Transaction {
 		K: Into<Key> + Sprintable + Debug,
 		V: Into<Val> + Debug,
 	{
-		// RocksDB does not support verisoned queries.
+		// RocksDB does not support versioned queries.
 		if version.is_some() {
 			return Err(Error::UnsupportedVersionedQueries);
 		}
@@ -454,7 +454,7 @@ impl super::api::Transaction for Transaction {
 	where
 		K: Into<Key> + Sprintable + Debug,
 	{
-		// RocksDB does not support verisoned queries.
+		// RocksDB does not support versioned queries.
 		if version.is_some() {
 			return Err(Error::UnsupportedVersionedQueries);
 		}

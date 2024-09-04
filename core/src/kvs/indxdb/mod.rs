@@ -161,7 +161,7 @@ impl super::api::Transaction for Transaction {
 	where
 		K: Into<Key> + Sprintable + Debug,
 	{
-		// IndexDB does not support verisoned queries.
+		// IndexDB does not support versioned queries.
 		if version.is_some() {
 			return Err(Error::UnsupportedVersionedQueries);
 		}
@@ -183,7 +183,7 @@ impl super::api::Transaction for Transaction {
 		K: Into<Key> + Sprintable + Debug,
 		V: Into<Val> + Debug,
 	{
-		// IndexDB does not support verisoned queries.
+		// IndexDB does not support versioned queries.
 		if version.is_some() {
 			return Err(Error::UnsupportedVersionedQueries);
 		}
@@ -209,7 +209,7 @@ impl super::api::Transaction for Transaction {
 		K: Into<Key> + Sprintable + Debug,
 		V: Into<Val> + Debug,
 	{
-		// IndexDB does not support verisoned queries.
+		// IndexDB does not support versioned queries.
 		if version.is_some() {
 			return Err(Error::UnsupportedVersionedQueries);
 		}
@@ -322,7 +322,7 @@ impl super::api::Transaction for Transaction {
 	where
 		K: Into<Key> + Sprintable + Debug,
 	{
-		// IndexDB does not support verisoned queries.
+		// IndexDB does not support versioned queries.
 		if version.is_some() {
 			return Err(Error::UnsupportedVersionedQueries);
 		}
