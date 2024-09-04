@@ -441,7 +441,7 @@ async fn create_record_no_id() {
 	let (permit, db) = new_db().await;
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
 	drop(permit);
-	let _: Vec<ApiRecordId> = db.create("user").await.unwrap();
+	let _: Option<ApiRecordId> = db.create("user").await.unwrap();
 	let _: Value = db.create(Resource::from("user")).await.unwrap();
 }
 
@@ -460,7 +460,7 @@ async fn create_record_no_id_with_content() {
 	let (permit, db) = new_db().await;
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
 	drop(permit);
-	let _: Vec<ApiRecordId> = db
+	let _: Option<ApiRecordId> = db
 		.create("user")
 		.content(Record {
 			name: "John Doe".to_owned(),
@@ -599,8 +599,8 @@ async fn select_table() {
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
 	drop(permit);
 	let table = "user";
-	let _: Vec<ApiRecordId> = db.create(table).await.unwrap();
-	let _: Vec<ApiRecordId> = db.create(table).await.unwrap();
+	let _: Option<ApiRecordId> = db.create(table).await.unwrap();
+	let _: Option<ApiRecordId> = db.create(table).await.unwrap();
 	let _: Value = db.create(Resource::from(table)).await.unwrap();
 	let users: Vec<ApiRecordId> = db.select(table).await.unwrap();
 	assert_eq!(users.len(), 3);
@@ -827,8 +827,8 @@ async fn update_table() {
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
 	drop(permit);
 	let table = "user";
-	let _: Vec<ApiRecordId> = db.create(table).await.unwrap();
-	let _: Vec<ApiRecordId> = db.create(table).await.unwrap();
+	let _: Option<ApiRecordId> = db.create(table).await.unwrap();
+	let _: Option<ApiRecordId> = db.create(table).await.unwrap();
 	let _: Value = db.update(Resource::from(table)).await.unwrap();
 	let users: Vec<ApiRecordId> = db.update(table).await.unwrap();
 	assert_eq!(users.len(), 2);
@@ -1072,9 +1072,9 @@ async fn delete_table() {
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
 	drop(permit);
 	let table = "user";
-	let _: Vec<ApiRecordId> = db.create(table).await.unwrap();
-	let _: Vec<ApiRecordId> = db.create(table).await.unwrap();
-	let _: Vec<ApiRecordId> = db.create(table).await.unwrap();
+	let _: Option<ApiRecordId> = db.create(table).await.unwrap();
+	let _: Option<ApiRecordId> = db.create(table).await.unwrap();
+	let _: Option<ApiRecordId> = db.create(table).await.unwrap();
 	let users: Vec<ApiRecordId> = db.select(table).await.unwrap();
 	assert_eq!(users.len(), 3);
 	let users: Vec<ApiRecordId> = db.delete(table).await.unwrap();
