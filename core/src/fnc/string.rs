@@ -69,24 +69,25 @@ pub fn matches((val, regex): (String, Regex)) -> Result<Value, Error> {
 	Ok(regex.0.is_match(&val).into())
 }
 
-pub fn replace((val, old_or_regexp, new): (String, Value, String)) -> Result<Value, Error> {
-	match old_or_regexp {
-		Value::Strand(old) => {
-			if new.len() > old.len() {
-				let increase = new.len() - old.len();
+pub fn replace((val, search, replace): (String, Value, String)) -> Result<Value, Error> {
+	match search {
+		Value::Strand(search) => {
+			if replace.len() > search.len() {
+				let increase = replace.len() - search.len();
 				limit(
 					"string::replace",
-					val.len().saturating_add(val.matches(&old.0).count().saturating_mul(increase)),
+					val.len()
+						.saturating_add(val.matches(&search.0).count().saturating_mul(increase)),
 				)?;
 			}
-			Ok(val.replace(&old.0, &new).into())
+			Ok(val.replace(&search.0, &replace).into())
 		}
-		Value::Regex(r) => Ok(r.0.replace_all(&val, new).into_owned().into()),
+		Value::Regex(search) => Ok(search.0.replace_all(&val, replace).into_owned().into()),
 		_ => Err(Error::InvalidArguments {
 			name: "string::replace".to_string(),
 			message: format!(
 				"Argument 2 was the wrong type. Expected a string but found {}",
-				old_or_regexp
+				search
 			),
 		}),
 	}

@@ -26,7 +26,7 @@ use crate::{
 		Connect, Response as QueryResponse, Result, Surreal,
 	},
 	method::Stats,
-	opt::{IntoEndpoint, Resource as ApiResource, Table},
+	opt::{IntoEndpoint, Table},
 	value::Notification,
 };
 use channel::Sender;
@@ -559,7 +559,7 @@ async fn router(
 			data,
 		} => {
 			let mut query = Query::default();
-			let one = matches!(what, ApiResource::RecordId(_));
+			let one = what.is_single_recordid();
 			let statement = {
 				let mut stmt = UpsertStatement::default();
 				stmt.what = resource_to_values(what);
@@ -578,7 +578,7 @@ async fn router(
 			data,
 		} => {
 			let mut query = Query::default();
-			let one = matches!(what, ApiResource::RecordId(_));
+			let one = what.is_single_recordid();
 			let statement = {
 				let mut stmt = UpdateStatement::default();
 				stmt.what = resource_to_values(what);
@@ -611,12 +611,31 @@ async fn router(
 			let value = take(one, response).await?;
 			Ok(DbResponse::Other(value))
 		}
+		Command::InsertRelation {
+			what,
+			data,
+		} => {
+			let mut query = Query::default();
+			let one = !data.is_array();
+			let statement = {
+				let mut stmt = InsertStatement::default();
+				stmt.into = what.map(|w| Table(w).into_core().into());
+				stmt.data = Data::SingleExpression(data);
+				stmt.output = Some(Output::After);
+				stmt.relation = true;
+				stmt
+			};
+			query.0 .0 = vec![Statement::Insert(statement)];
+			let response = kvs.process(query, &*session, Some(vars.clone())).await?;
+			let value = take(one, response).await?;
+			Ok(DbResponse::Other(value))
+		}
 		Command::Patch {
 			what,
 			data,
 		} => {
 			let mut query = Query::default();
-			let one = matches!(what, ApiResource::RecordId(_));
+			let one = what.is_single_recordid();
 			let statement = {
 				let mut stmt = UpdateStatement::default();
 				stmt.what = resource_to_values(what);
@@ -635,7 +654,7 @@ async fn router(
 			data,
 		} => {
 			let mut query = Query::default();
-			let one = matches!(what, ApiResource::RecordId(_));
+			let one = what.is_single_recordid();
 			let statement = {
 				let mut stmt = UpdateStatement::default();
 				stmt.what = resource_to_values(what);
@@ -653,7 +672,7 @@ async fn router(
 			what,
 		} => {
 			let mut query = Query::default();
-			let one = matches!(what, ApiResource::RecordId(_));
+			let one = what.is_single_recordid();
 			let statement = {
 				let mut stmt = SelectStatement::default();
 				stmt.what = resource_to_values(what);
@@ -670,7 +689,7 @@ async fn router(
 			what,
 		} => {
 			let mut query = Query::default();
-			let one = matches!(what, ApiResource::RecordId(_));
+			let one = what.is_single_recordid();
 			let statement = {
 				let mut stmt = DeleteStatement::default();
 				stmt.what = resource_to_values(what);

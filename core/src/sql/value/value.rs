@@ -500,6 +500,12 @@ impl From<Vec<f32>> for Value {
 	}
 }
 
+impl From<Vec<usize>> for Value {
+	fn from(v: Vec<usize>) -> Self {
+		Value::Array(Array::from(v))
+	}
+}
+
 impl From<Vec<Value>> for Value {
 	fn from(v: Vec<Value>) -> Self {
 		Value::Array(Array::from(v))
@@ -1057,6 +1063,11 @@ impl Value {
 		matches!(self, Value::Thing(_))
 	}
 
+	/// Check if this Value is a Closure
+	pub fn is_closure(&self) -> bool {
+		matches!(self, Value::Closure(_))
+	}
+
 	/// Check if this Value is a Thing, and belongs to a certain table
 	pub fn is_record_of_table(&self, table: String) -> bool {
 		match self {
@@ -1150,6 +1161,14 @@ impl Value {
 			Value::Geometry(Geometry::Collection(_)) => {
 				types.iter().any(|t| matches!(t.as_str(), "feature" | "collection"))
 			}
+			_ => false,
+		}
+	}
+
+	pub fn is_single(&self) -> bool {
+		match self {
+			Value::Object(_) => true,
+			t @ Value::Thing(_) => t.is_thing_single(),
 			_ => false,
 		}
 	}

@@ -39,6 +39,14 @@ pub static MAX_STREAM_BATCH_SIZE: Lazy<u32> =
 pub static INDEXING_BATCH_SIZE: Lazy<u32> =
 	lazy_env_parse!("SURREAL_INDEXING_BATCH_SIZE", u32, 250);
 
+/// The maximum stack size of the JavaScript function runtime (defaults to 256 KiB)
+pub static SCRIPTING_MAX_STACK_SIZE: Lazy<usize> =
+	lazy_env_parse!("SURREAL_SCRIPTING_MAX_STACK_SIZE", usize, 256 * 1024);
+
+/// The maximum memory limit of the JavaScript function runtime (defaults to 2 MiB).
+pub static SCRIPTING_MAX_MEMORY_LIMIT: Lazy<usize> =
+	lazy_env_parse!("SURREAL_SCRIPTING_MAX_MEMORY_LIMIT", usize, 2 << 20);
+
 /// Forward all signup/signin/authenticate query errors to a client performing authentication. Do not use in production.
 pub static INSECURE_FORWARD_ACCESS_ERRORS: Lazy<bool> =
 	lazy_env_parse!("SURREAL_INSECURE_FORWARD_ACCESS_ERRORS", bool, false);
@@ -51,10 +59,10 @@ pub static INSECURE_FORWARD_ACCESS_ERRORS: Lazy<bool> =
 	feature = "kv-tikv",
 ))]
 /// Specifies the buffer limit for external sorting.
-/// If the environment variable is not present or cannot be parsed, a default value of 50,000 is used.
 pub static EXTERNAL_SORTING_BUFFER_LIMIT: Lazy<usize> =
 	lazy_env_parse!("SURREAL_EXTERNAL_SORTING_BUFFER_LIMIT", usize, 50_000);
 
+/// Specifies whether GraphQL querying and schema definition is enabled.
 pub static GRAPHQL_ENABLE: Lazy<bool> =
 	lazy_env_parse!("SURREAL_EXPERIMENTAL_GRAPHQL", bool, false);
 
@@ -63,7 +71,8 @@ pub static GRAPHQL_ENABLE: Lazy<bool> =
 #[cfg(not(test))]
 pub static EXPERIMENTAL_BEARER_ACCESS: Lazy<bool> =
 	lazy_env_parse!("SURREAL_EXPERIMENTAL_BEARER_ACCESS", bool, false);
-// Run tests with bearer access enabled as it introduces new functionality that needs to be tested.
+
+/// Run tests with bearer access enabled as it introduces new functionality that needs to be tested.
 #[cfg(test)]
 pub static EXPERIMENTAL_BEARER_ACCESS: Lazy<bool> = Lazy::new(|| true);
 
