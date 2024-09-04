@@ -9,6 +9,7 @@ fn main() {
 		feature = "kv-tikv",
 		feature = "kv-rocksdb",
 		feature = "kv-surrealkv",
+		feature = "kv-surrealcs",
 	)) {
 		println!("cargo:rustc-cfg=storage");
 		println!("cargo::rustc-check-cfg=cfg(storage)");

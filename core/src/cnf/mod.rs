@@ -57,6 +57,7 @@ pub static INSECURE_FORWARD_ACCESS_ERRORS: Lazy<bool> =
 	feature = "kv-rocksdb",
 	feature = "kv-fdb",
 	feature = "kv-tikv",
+	feature = "kv-surrealcs",
 ))]
 /// Specifies the buffer limit for external sorting.
 pub static EXTERNAL_SORTING_BUFFER_LIMIT: Lazy<usize> =
