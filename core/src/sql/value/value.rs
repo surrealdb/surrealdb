@@ -3031,6 +3031,23 @@ impl TryDiv for Value {
 
 // ------------------------------
 
+pub(crate) trait TryFloatDiv<Rhs = Self> {
+	type Output;
+	fn try_float_div(self, v: Self) -> Result<Self::Output, Error>;
+}
+
+impl TryFloatDiv for Value {
+	type Output = Self;
+	fn try_float_div(self, other: Self) -> Result<Self::Output, Error> {
+		Ok(match (self, other) {
+			(Self::Number(v), Self::Number(w)) => Self::Number(v.try_float_div(w)?),
+			(v, w) => return Err(Error::TryDiv(v.to_raw_string(), w.to_raw_string())),
+		})
+	}
+}
+
+// ------------------------------
+
 pub(crate) trait TryRem<Rhs = Self> {
 	type Output;
 	fn try_rem(self, v: Self) -> Result<Self::Output, Error>;
