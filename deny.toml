@@ -106,12 +106,20 @@ name = "surrealdb"
 allow = ["BUSL-1.1"]
 
 [[licenses.exceptions]]
+name = "surrealcs"
+allow = ["BUSL-1.1"]
+
+[[licenses.exceptions]]
 name = "surrealdb-core"
 allow = ["BUSL-1.1"]
 
 [[licenses.exceptions]]
 name = "surrealml-core"
 allow = ["Apache-2.0"]
+
+[[licenses.exceptions]]
+name = "surrealcs-kernel"
+allow = ["BUSL-1.1"]
 
 [[licenses.exceptions]]
 name = "unicode-ident"

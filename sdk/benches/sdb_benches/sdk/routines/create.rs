@@ -33,7 +33,7 @@ impl super::Routine for Create {
 				let data = data.clone();
 
 				tasks.spawn(async move {
-					let res: Vec<Record> = criterion::black_box(
+					let res: Option<Record> = criterion::black_box(
 						client
 							.create(table_name)
 							.content(data)
@@ -41,12 +41,7 @@ impl super::Routine for Create {
 							.expect("[run] record creation failed"),
 					);
 
-					assert_eq!(
-						res.len(),
-						1,
-						"[run] expected record creation to return 1 record, got {}",
-						res.len()
-					);
+					res.expect("[run] record creation should return a result");
 				});
 			}
 

@@ -56,7 +56,7 @@ async fn main() -> surrealdb::Result<()> {
 	db.use_ns("namespace").use_db("database").await?;
 
 	// Create a dance class and store the result
-	let classes: Vec<DanceClass> = db
+	let classes: Option<DanceClass> = db
 		.create(DANCE)
 		.content(DanceClass {
 			id: Thing::from((DANCE, Id::rand())),
