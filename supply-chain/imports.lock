@@ -436,13 +436,6 @@ user-id = 145457
 user-login = "tobiemh"
 user-name = "Tobie Morgan Hitchcock"
 
-[[publisher.surrealdb-async-graphql-axum]]
-version = "7.0.7-surrealdb.1"
-when = "2024-08-07"
-user-id = 145457
-user-login = "tobiemh"
-user-name = "Tobie Morgan Hitchcock"
-
 [[publisher.surrealdb-core]]
 version = "2.0.0-alpha.2"
 when = "2024-01-31"

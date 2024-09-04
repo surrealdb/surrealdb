@@ -1164,6 +1164,9 @@ allow_unsafe = true
 [pkg.surrealdb-async-graphql-axum]
 allow_apis = ["net"]
 
+[pkg.futures-timer]
+allow_unsafe = true
+
 [pkg.castaway]
 allow_unsafe = true
 
