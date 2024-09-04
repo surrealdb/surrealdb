@@ -155,10 +155,6 @@ criteria = "safe-to-deploy"
 version = "3.0.0"
 criteria = "safe-to-deploy"
 
-[[exemptions.ascii_utils]]
-version = "0.9.3"
-criteria = "safe-to-deploy"
-
 [[exemptions.assert_fs]]
 version = "1.1.1"
 criteria = "safe-to-run"
@@ -180,19 +176,23 @@ version = "1.9.1"
 criteria = "safe-to-deploy"
 
 [[exemptions.async-graphql]]
-version = "7.0.7"
+version = "7.0.9"
+criteria = "safe-to-deploy"
+
+[[exemptions.async-graphql-axum]]
+version = "7.0.9"
 criteria = "safe-to-deploy"
 
 [[exemptions.async-graphql-derive]]
-version = "7.0.7"
+version = "7.0.9"
 criteria = "safe-to-deploy"
 
 [[exemptions.async-graphql-parser]]
-version = "7.0.7"
+version = "7.0.9"
 criteria = "safe-to-deploy"
 
 [[exemptions.async-graphql-value]]
-version = "7.0.7"
+version = "7.0.9"
 criteria = "safe-to-deploy"
 
 [[exemptions.async-lock]]
@@ -567,10 +567,6 @@ criteria = "safe-to-deploy"
 version = "0.4.0"
 criteria = "safe-to-deploy"
 
-[[exemptions.fast_chemail]]
-version = "0.9.6"
-criteria = "safe-to-deploy"
-
 [[exemptions.figment]]
 version = "0.10.15"
 criteria = "safe-to-deploy"
@@ -635,6 +631,10 @@ criteria = "safe-to-deploy"
 version = "0.3.30"
 criteria = "safe-to-deploy"
 
+[[exemptions.futures-timer]]
+version = "3.0.3"
+criteria = "safe-to-deploy"
+
 [[exemptions.futures-util]]
 version = "0.3.30"
 criteria = "safe-to-deploy"
@@ -685,10 +685,6 @@ criteria = "safe-to-run"
 
 [[exemptions.half]]
 version = "2.3.1"
-criteria = "safe-to-deploy"
-
-[[exemptions.handlebars]]
-version = "5.1.2"
 criteria = "safe-to-deploy"
 
 [[exemptions.hash32]]
@@ -1052,18 +1048,6 @@ version = "3.0.3"
 criteria = "safe-to-deploy"
 
 [[exemptions.pest]]
-version = "2.7.11"
-criteria = "safe-to-deploy"
-
-[[exemptions.pest_derive]]
-version = "2.7.11"
-criteria = "safe-to-deploy"
-
-[[exemptions.pest_generator]]
-version = "2.7.11"
-criteria = "safe-to-deploy"
-
-[[exemptions.pest_meta]]
 version = "2.7.11"
 criteria = "safe-to-deploy"
 

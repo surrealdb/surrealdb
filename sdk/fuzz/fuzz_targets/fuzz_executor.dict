@@ -362,6 +362,7 @@
 "time::format("
 "time::group("
 "time::hour("
+"time::is::leap_year("
 "time::max("
 "time::min("
 "time::minute("

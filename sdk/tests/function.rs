@@ -4435,6 +4435,34 @@ async fn function_time_hour() -> Result<(), Error> {
 }
 
 #[tokio::test]
+async fn function_time_is_leap_year() -> Result<(), Error> {
+	let sql = r#"
+		RETURN time::is::leap_year();
+		RETURN time::is::leap_year(d"1987-06-22T08:30:45Z");
+		RETURN time::is::leap_year(d"1988-06-22T08:30:45Z");
+		RETURN d'2024-09-03T02:33:15.349397Z'.is_leap_year();
+	"#;
+	let mut test = Test::new(sql).await?;
+	//
+	let tmp = test.next()?.result?;
+	assert!(tmp.is_bool());
+	//
+	let tmp = test.next()?.result?;
+	let val = Value::from(false);
+	assert_eq!(tmp, val);
+	//
+	let tmp = test.next()?.result?;
+	let val = Value::from(true);
+	assert_eq!(tmp, val);
+	//
+	let tmp = test.next()?.result?;
+	let val = Value::from(true);
+	assert_eq!(tmp, val);
+	//
+	Ok(())
+}
+
+#[tokio::test]
 async fn function_time_min() -> Result<(), Error> {
 	let sql = r#"
 		RETURN time::min([d"1987-06-22T08:30:45Z", d"1988-06-22T08:30:45Z"]);
