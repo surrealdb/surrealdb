@@ -83,18 +83,68 @@ where
 	Client: Connection,
 	R: DeserializeOwned,
 {
-	type Output = Result<Vec<R>>;
+	type Output = Result<Option<R>>;
 	type IntoFuture = BoxFuture<'r, Self::Output>;
 
-	into_future! {execute_vec}
+	into_future! {execute_opt}
 }
 
-impl<'r, C, R> Create<'r, C, R>
+impl<'r, C> Create<'r, C, Value>
 where
 	C: Connection,
 {
 	/// Sets content of a record
-	pub fn content<D>(self, data: D) -> Content<'r, C, R>
+	pub fn content<D>(self, data: D) -> Content<'r, C, Value>
+	where
+		D: Serialize + 'static,
+	{
+		Content::from_closure(self.client, || {
+			let content = to_core_value(data)?;
+
+			let data = match content {
+				CoreValue::None | CoreValue::Null => None,
+				content => Some(content),
+			};
+
+			Ok(Command::Create {
+				what: self.resource?,
+				data,
+			})
+		})
+	}
+}
+
+impl<'r, C, R> Create<'r, C, Option<R>>
+where
+	C: Connection,
+{
+	/// Sets content of a record
+	pub fn content<D>(self, data: D) -> Content<'r, C, Option<R>>
+	where
+		D: Serialize + 'static,
+	{
+		Content::from_closure(self.client, || {
+			let content = to_core_value(data)?;
+
+			let data = match content {
+				CoreValue::None | CoreValue::Null => None,
+				content => Some(content),
+			};
+
+			Ok(Command::Create {
+				what: self.resource?,
+				data,
+			})
+		})
+	}
+}
+
+impl<'r, C, R> Create<'r, C, Vec<R>>
+where
+	C: Connection,
+{
+	/// Sets content of a record
+	pub fn content<D>(self, data: D) -> Content<'r, C, Option<R>>
 	where
 		D: Serialize + 'static,
 	{
