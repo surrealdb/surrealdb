@@ -1,4 +1,6 @@
 use async_graphql::{dynamic::indexmap::IndexMap, Name, Value as GqlValue};
+use futures::TryFutureExt;
+use reblessive::Stk;
 use reblessive::TreeStack;
 pub(crate) trait GqlValueUtils {
 	fn as_i64(&self) -> Option<i64>;
@@ -39,6 +41,7 @@ impl GqlValueUtils for GqlValue {
 	}
 }
 
+use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::dbs::Session;
 use crate::kvs::Datastore;
@@ -55,6 +58,7 @@ use super::error::GqlError;
 pub struct GQLTx {
 	tx: Transaction,
 	opt: Options,
+	ctx: Context,
 }
 
 impl GQLTx {
@@ -63,12 +67,18 @@ impl GQLTx {
 
 		Ok(GQLTx {
 			tx,
+			ctx: todo!(),
 			opt: kvs.setup_options(sess),
 		})
 	}
 
-	pub async fn get_record(&self) -> Result<SqlValue, GqlError> {
-		SqlValue::get(&self, TreeStack::new(), ctx, opt, doc, path)
+	pub async fn get_record(&self, rid: Thing) -> Result<SqlValue, GqlError> {
+		let mut stack = TreeStack::new();
+		stack
+			.enter(|stk| SqlValue::Thing(rid).get(stk, &self.ctx, &self.opt, None, todo!()))
+			.finish()
+			.await
+			.map_err(Into::into)
 	}
 }
 
