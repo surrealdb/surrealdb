@@ -57,6 +57,25 @@ impl SetStatement {
 
 impl fmt::Display for SetStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "LET ${} = {}", self.name, self.what)
+		write!(f, "LET ${}", self.name)?;
+		if let Some(ref kind) = self.kind {
+			write!(f, ": {}", kind)?;
+		}
+		write!(f, " = {}", self.what)?;
+		Ok(())
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use crate::syn::parse;
+
+	#[test]
+	fn check_type() {
+		let query = parse("LET $param = 5").unwrap();
+		assert_eq!(format!("{}", query), "LET $param = 5;");
+
+		let query = parse("LET $param: number = 5").unwrap();
+		assert_eq!(format!("{}", query), "LET $param: number = 5;");
 	}
 }

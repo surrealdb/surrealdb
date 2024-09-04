@@ -275,6 +275,7 @@ impl Function {
 				// Check for any final optional arguments
 				val.args.iter().rev().for_each(|(_, kind)| match kind {
 					Kind::Option(_) if min_args_len == 0 => {}
+					Kind::Any if min_args_len == 0 => {}
 					_ => min_args_len += 1,
 				});
 				// Check the necessary arguments are passed

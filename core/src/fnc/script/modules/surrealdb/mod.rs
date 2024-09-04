@@ -1,31 +1,10 @@
-use crate::sql::{value as parse_value, Value as SurValue};
-use js::class::OwnedBorrow;
-use js::prelude::Coerced;
-use js::Exception;
 use js::{module::ModuleDef, Class, Ctx, Function, Module, Result, String as JsString, Value};
-use reblessive::tree::Stk;
-
-use self::query::{QueryContext, QUERY_DATA_PROP_NAME};
 
 mod functions;
 pub mod query;
 
 #[non_exhaustive]
 pub struct Package;
-
-#[js::function]
-async fn value(ctx: Ctx<'_>, value: Coerced<String>) -> Result<SurValue> {
-	let value = parse_value(&value.0).map_err(|e| Exception::throw_type(&ctx, &e.to_string()))?;
-	let this = ctx.globals().get::<_, OwnedBorrow<QueryContext>>(QUERY_DATA_PROP_NAME)?;
-	let value = Stk::enter_run(|stk| async {
-		value
-			.compute(stk, this.context, this.opt, this.doc)
-			.await
-			.map_err(|e| Exception::throw_message(&ctx, &e.to_string()))
-	})
-	.await?;
-	Ok(value)
-}
 
 impl ModuleDef for Package {
 	fn declare(decls: &js::module::Declarations) -> js::Result<()> {
@@ -52,7 +31,7 @@ impl ModuleDef for Package {
 		exports.export("query", query_func.clone())?;
 		default.set("query", query_func)?;
 
-		let value_func = Function::new(ctx.clone(), js_value)?.with_name("value")?;
+		let value_func = Function::new(ctx.clone(), query::js_query)?.with_name("value")?;
 		exports.export("value", value_func.clone())?;
 		default.set("value", value_func)?;
 

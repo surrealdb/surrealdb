@@ -1,7 +1,9 @@
+use std::collections::BTreeMap;
+
 use reblessive::Stk;
 
 use crate::{
-	sql::Kind,
+	sql::{kind::Literal, Kind, Strand},
 	syn::{
 		parser::mac::expected,
 		token::{t, Keyword, Span, TokenKind},
@@ -68,7 +70,13 @@ impl Parser<'_> {
 
 	/// Parse a single kind which is not any, option, or either.
 	async fn parse_concrete_kind(&mut self, ctx: &mut Stk) -> ParseResult<Kind> {
-		match self.next().kind {
+		if Self::token_can_be_literal_kind(self.peek_kind()) {
+			let literal = self.parse_literal_kind(ctx).await?;
+			return Ok(Kind::Literal(literal));
+		}
+
+		let next = self.next();
+		match next.kind {
 			t!("BOOL") => Ok(Kind::Bool),
 			t!("NULL") => Ok(Kind::Null),
 			t!("BYTES") => Ok(Kind::Bytes),
@@ -82,6 +90,7 @@ impl Parser<'_> {
 			t!("POINT") => Ok(Kind::Point),
 			t!("STRING") => Ok(Kind::String),
 			t!("UUID") => Ok(Kind::Uuid),
+			t!("RANGE") => Ok(Kind::Range),
 			t!("FUNCTION") => Ok(Kind::Function(Default::default(), Default::default())),
 			t!("RECORD") => {
 				let span = self.peek().span;
@@ -131,13 +140,14 @@ impl Parser<'_> {
 					Ok(Kind::Set(Box::new(Kind::Any), None))
 				}
 			}
-			x => unexpected!(self, x, "a kind name"),
+			_ => unexpected!(self, next, "a kind name"),
 		}
 	}
 
 	/// Parse the kind of gemoetry
 	fn parse_geometry_kind(&mut self) -> ParseResult<String> {
-		match self.next().kind {
+		let next = self.next();
+		match next.kind {
 			TokenKind::Keyword(
 				x @ (Keyword::Feature
 				| Keyword::Point
@@ -148,8 +158,63 @@ impl Parser<'_> {
 				| Keyword::MultiPolygon
 				| Keyword::Collection),
 			) => Ok(x.as_str().to_ascii_lowercase()),
-			x => unexpected!(self, x, "a geometry kind name"),
+			_ => unexpected!(self, next, "a geometry kind name"),
 		}
+	}
+
+	/// Parse a literal kind
+	async fn parse_literal_kind(&mut self, ctx: &mut Stk) -> ParseResult<Literal> {
+		let peek = self.peek();
+		match peek.kind {
+			t!("'") | t!("\"") | TokenKind::Strand => {
+				let s = self.next_token_value::<Strand>()?;
+				Ok(Literal::String(s))
+			}
+			t!("+") | t!("-") | TokenKind::Number(_) | TokenKind::Digits | TokenKind::Duration => {
+				let token = self.glue_numeric()?;
+				match token.kind {
+					TokenKind::Number(_) => self.next_token_value().map(Literal::Number),
+					TokenKind::Duration => self.next_token_value().map(Literal::Duration),
+					_ => unexpected!(self, token, "a value"),
+				}
+			}
+			t!("{") => {
+				self.pop_peek();
+				let mut obj = BTreeMap::new();
+				while !self.eat(t!("}")) {
+					let key = self.parse_object_key()?;
+					expected!(self, t!(":"));
+					let kind = ctx.run(|ctx| self.parse_inner_kind(ctx)).await?;
+					obj.insert(key, kind);
+					self.eat(t!(","));
+				}
+				Ok(Literal::Object(obj))
+			}
+			t!("[") => {
+				self.pop_peek();
+				let mut arr = Vec::new();
+				while !self.eat(t!("]")) {
+					let kind = ctx.run(|ctx| self.parse_inner_kind(ctx)).await?;
+					arr.push(kind);
+					self.eat(t!(","));
+				}
+				Ok(Literal::Array(arr))
+			}
+			_ => unexpected!(self, peek, "a literal kind"),
+		}
+	}
+
+	fn token_can_be_literal_kind(t: TokenKind) -> bool {
+		matches!(
+			t,
+			t!("'")
+				| t!("\"") | TokenKind::Strand
+				| t!("+") | t!("-")
+				| TokenKind::Number(_)
+				| TokenKind::Digits
+				| TokenKind::Duration
+				| t!("{") | t!("[")
+		)
 	}
 }
 

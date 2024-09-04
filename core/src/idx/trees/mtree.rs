@@ -22,7 +22,7 @@ use crate::idx::trees::store::{
 	IndexStores, NodeId, StoredNode, TreeNode, TreeNodeProvider, TreeStore,
 };
 use crate::idx::trees::vector::{SharedVector, Vector};
-use crate::idx::{IndexKeyBase, VersionedSerdeState};
+use crate::idx::{IndexKeyBase, VersionedStore};
 use crate::kvs::{Key, Transaction, TransactionType, Val};
 use crate::sql::index::{Distance, MTreeParams, VectorType};
 use crate::sql::{Number, Object, Thing, Value};
@@ -58,7 +58,7 @@ impl MTreeIndex {
 		));
 		let state_key = ikb.new_vm_key(None);
 		let state: MState = if let Some(val) = txn.get(state_key.clone(), None).await? {
-			MState::try_from_val(val)?
+			VersionedStore::try_from(val)?
 		} else {
 			MState::new(p.capacity)
 		};
@@ -175,7 +175,7 @@ impl MTreeIndex {
 		let mut mtree = self.mtree.write().await;
 		if let Some(new_cache) = self.store.finish(tx).await? {
 			mtree.state.generation += 1;
-			tx.set(self.state_key.clone(), mtree.state.try_to_val()?).await?;
+			tx.set(self.state_key.clone(), VersionedStore::try_into(&mtree.state)?, None).await?;
 			self.ixs.advance_store_mtree(new_cache);
 		}
 		drop(mtree);
@@ -246,7 +246,7 @@ impl MTree {
 								}
 							}
 							if !docs.is_empty() {
-								let evicted_docs = res.add(d, &docs);
+								let evicted_docs = res.add(d, docs);
 								chk.expires(evicted_docs);
 							}
 						}
@@ -1468,7 +1468,7 @@ impl ObjectProperties {
 	}
 }
 
-impl VersionedSerdeState for MState {}
+impl VersionedStore for MState {}
 
 #[cfg(test)]
 mod tests {

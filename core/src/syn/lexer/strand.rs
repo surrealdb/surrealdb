@@ -2,9 +2,12 @@
 
 use std::mem;
 
-use crate::syn::token::{QouteKind, Token, TokenKind};
+use crate::syn::{
+	error::error,
+	token::{QouteKind, Token, TokenKind},
+};
 
-use super::{unicode::chars, Error, Lexer};
+use super::{unicode::chars, Lexer};
 
 impl<'a> Lexer<'a> {
 	/// Lex a plain strand with either single or double quotes.
@@ -34,7 +37,8 @@ impl<'a> Lexer<'a> {
 						return self.finish_token(TokenKind::Strand);
 					}
 					b'\0' => {
-						return self.invalid_token(Error::UnexpectedCharacter('\0'));
+						let err = error!("Invalid null byte in source, null bytes are not valid SurrealQL characters",@self.current_span());
+						return self.invalid_token(err);
 					}
 					b'\\' => {
 						// Handle escape sequences.
@@ -70,17 +74,20 @@ impl<'a> Lexer<'a> {
 							b't' => {
 								self.scratch.push(chars::TAB);
 							}
-							x => {
-								let char = if x.is_ascii() {
-									x as char
-								} else {
-									match self.reader.complete_char(x) {
-										Ok(x) => x,
-										Err(e) => return self.invalid_token(e.into()),
-									}
-								};
-								return self.invalid_token(Error::InvalidEscapeCharacter(char));
-							}
+							x => match self.reader.convert_to_char(x) {
+								Ok(char) => {
+									let valid_escape = if is_double {
+										'"'
+									} else {
+										'\''
+									};
+									let err = error!("Invalid escape character `{char}`, valid characters are `\\`, `{valid_escape}`, `/`, `b`, `f`, `n`, `r`, or `t`", @self.current_span());
+									return self.invalid_token(err);
+								}
+								Err(e) => {
+									return self.invalid_token(e.into());
+								}
+							},
 						}
 					}
 					x => self.scratch.push(x as char),

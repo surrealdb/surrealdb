@@ -83,7 +83,7 @@ impl DefineAccessStatement {
 					}
 				}
 				// Process the statement
-				let key = crate::key::root::access::ac::new(&self.name);
+				let key = crate::key::root::ac::new(&self.name);
 				txn.set(
 					key,
 					DefineAccessStatement {
@@ -92,6 +92,7 @@ impl DefineAccessStatement {
 						overwrite: false,
 						..self.clone()
 					},
+					None,
 				)
 				.await?;
 				// Clear the cache
@@ -114,7 +115,7 @@ impl DefineAccessStatement {
 					}
 				}
 				// Process the statement
-				let key = crate::key::namespace::access::ac::new(opt.ns()?, &self.name);
+				let key = crate::key::namespace::ac::new(opt.ns()?, &self.name);
 				txn.get_or_add_ns(opt.ns()?, opt.strict).await?;
 				txn.set(
 					key,
@@ -124,6 +125,7 @@ impl DefineAccessStatement {
 						overwrite: false,
 						..self.clone()
 					},
+					None,
 				)
 				.await?;
 				// Clear the cache
@@ -147,7 +149,7 @@ impl DefineAccessStatement {
 					}
 				}
 				// Process the statement
-				let key = crate::key::database::access::ac::new(opt.ns()?, opt.db()?, &self.name);
+				let key = crate::key::database::ac::new(opt.ns()?, opt.db()?, &self.name);
 				txn.get_or_add_ns(opt.ns()?, opt.strict).await?;
 				txn.get_or_add_db(opt.ns()?, opt.db()?, opt.strict).await?;
 				txn.set(
@@ -158,6 +160,7 @@ impl DefineAccessStatement {
 						overwrite: false,
 						..self.clone()
 					},
+					None,
 				)
 				.await?;
 				// Clear the cache

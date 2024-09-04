@@ -1,11 +1,14 @@
 mod auth;
 pub mod client_ip;
 mod export;
+#[cfg(surrealdb_unstable)]
+mod gql;
 pub(crate) mod headers;
 mod health;
 mod import;
 mod input;
 mod key;
+mod ml;
 pub(crate) mod output;
 mod params;
 mod rpc;
@@ -17,11 +20,8 @@ mod sync;
 mod tracer;
 mod version;
 
-#[cfg(feature = "ml")]
-mod ml;
-
 use crate::cli::CF;
-use crate::cnf;
+use crate::cnf::{self, GRAPHQL_ENABLE};
 use crate::err::Error;
 use crate::net::signals::graceful_shutdown;
 use crate::rpc::{notifications, RpcState};
@@ -59,9 +59,9 @@ const LOG: &str = "surrealdb::net";
 /// AppState is used to share data between routes.
 ///
 #[derive(Clone)]
-struct AppState {
-	client_ip: client_ip::ClientIp,
-	datastore: Arc<Datastore>,
+pub struct AppState {
+	pub client_ip: client_ip::ClientIp,
+	pub datastore: Arc<Datastore>,
 }
 
 pub async fn init(ds: Arc<Datastore>, ct: CancellationToken) -> Result<(), Error> {
@@ -171,10 +171,23 @@ pub async fn init(ds: Arc<Datastore>, ct: CancellationToken) -> Result<(), Error
 		.merge(sql::router())
 		.merge(signin::router())
 		.merge(signup::router())
-		.merge(key::router());
+		.merge(key::router())
+		.merge(ml::router());
 
-	#[cfg(feature = "ml")]
-	let axum_app = axum_app.merge(ml::router());
+	let axum_app = if *GRAPHQL_ENABLE {
+		#[cfg(surrealdb_unstable)]
+		{
+			warn!("❌🔒IMPORTANT: GraphQL is a pre-release feature with known security flaws. This is not recommended for production use.🔒❌");
+			axum_app.merge(gql::router(ds.clone()).await)
+		}
+		#[cfg(not(surrealdb_unstable))]
+		{
+			warn!("GraphQL is a pre-release feature and only available on builds with the surrealdb_unstable flag");
+			axum_app
+		}
+	} else {
+		axum_app
+	};
 
 	let axum_app = axum_app.layer(service);
 

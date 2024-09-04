@@ -161,7 +161,7 @@ impl TreeNodeProvider {
 	{
 		let val = node.n.try_into_val()?;
 		node.size = val.len() as u32;
-		tx.set(node.key.clone(), val).await?;
+		tx.set(node.key.clone(), val, None).await?;
 		Ok(())
 	}
 }
@@ -278,12 +278,13 @@ impl IndexStores {
 
 	pub(crate) async fn get_index_hnsw(
 		&self,
+		ctx: &Context,
 		opt: &Options,
 		ix: &DefineIndexStatement,
 		p: &HnswParams,
 	) -> Result<SharedHnswIndex, Error> {
 		let ikb = IndexKeyBase::new(opt.ns()?, opt.db()?, ix)?;
-		Ok(self.0.hnsw_indexes.get(&ikb, p).await)
+		self.0.hnsw_indexes.get(ctx, &ix.what, &ikb, p).await
 	}
 
 	pub(crate) async fn index_removed(

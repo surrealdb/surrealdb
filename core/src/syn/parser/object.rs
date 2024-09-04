@@ -4,10 +4,10 @@ use geo_types::{LineString, MultiLineString, MultiPoint, MultiPolygon, Point, Po
 use reblessive::Stk;
 
 use crate::{
-	enter_object_recursion,
 	sql::{Block, Geometry, Number, Object, Strand, Value},
 	syn::{
-		parser::{mac::expected, ParseError, ParseErrorKind, ParseResult, Parser},
+		error::bail,
+		parser::{enter_object_recursion, mac::expected, ParseResult, Parser},
 		token::{t, Span, TokenKind},
 	},
 };
@@ -476,13 +476,10 @@ impl Parser<'_> {
 		if !self.eat(t!("}")) {
 			// the object didn't end, either an error or not a geometry.
 			if !comma {
-				return Err(ParseError::new(
-					ParseErrorKind::UnclosedDelimiter {
-						expected: t!("}"),
-						should_close: start,
-					},
-					self.last_span(),
-				));
+				bail!("Unexpected token, expected delimiter `}}`",
+					@self.recent_span(),
+					@start => "expected this delimiter to close"
+				);
 			}
 
 			return self
@@ -637,7 +634,7 @@ impl Parser<'_> {
 	/// # Parser State
 	/// Expects the starting `{` to have already been eaten and its span to be handed to this
 	/// functions as the `start` parameter.
-	pub(super) async fn parse_block(&mut self, ctx: &mut Stk, start: Span) -> ParseResult<Block> {
+	pub async fn parse_block(&mut self, ctx: &mut Stk, start: Span) -> ParseResult<Block> {
 		let mut statements = Vec::new();
 		loop {
 			while self.eat(t!(";")) {}
@@ -692,7 +689,7 @@ impl Parser<'_> {
 				let number = self.next_token_value::<Number>()?.to_string();
 				Ok(number)
 			}
-			x => unexpected!(self, x, "an object key"),
+			_ => unexpected!(self, token, "an object key"),
 		}
 	}
 }

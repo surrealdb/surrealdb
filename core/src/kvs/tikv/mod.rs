@@ -205,11 +205,16 @@ impl super::api::Transaction for Transaction {
 
 	/// Insert or update a key in the database
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
-	async fn set<K, V>(&mut self, key: K, val: V) -> Result<(), Error>
+	async fn set<K, V>(&mut self, key: K, val: V, version: Option<u64>) -> Result<(), Error>
 	where
 		K: Into<Key> + Sprintable + Debug,
 		V: Into<Val> + Debug,
 	{
+		// TiKV does not support verisoned queries.
+		if version.is_some() {
+			return Err(Error::UnsupportedVersionedQueries);
+		}
+
 		// Check to see if transaction is closed
 		if self.done {
 			return Err(Error::TxFinished);
@@ -226,11 +231,16 @@ impl super::api::Transaction for Transaction {
 
 	/// Insert a key if it doesn't exist in the database
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
-	async fn put<K, V>(&mut self, key: K, val: V) -> Result<(), Error>
+	async fn put<K, V>(&mut self, key: K, val: V, version: Option<u64>) -> Result<(), Error>
 	where
 		K: Into<Key> + Sprintable + Debug,
 		V: Into<Val> + Debug,
 	{
+		// TiKV does not support verisoned queries.
+		if version.is_some() {
+			return Err(Error::UnsupportedVersionedQueries);
+		}
+
 		// Check to see if transaction is closed
 		if self.done {
 			return Err(Error::TxFinished);
@@ -384,7 +394,7 @@ impl super::api::Transaction for Transaction {
 	where
 		K: Into<Key> + Sprintable + Debug,
 	{
-		// TiKV does not support verisoned queries.
+		// TiKV does not support versioned queries.
 		if version.is_some() {
 			return Err(Error::UnsupportedVersionedQueries);
 		}
@@ -432,7 +442,7 @@ impl super::api::Transaction for Transaction {
 		// Convert the timestamp to a versionstamp
 		let verbytes = crate::vs::u64_to_versionstamp(ver);
 		// Store the timestamp to prevent other transactions from committing
-		self.set(key.as_slice(), verbytes.to_vec()).await?;
+		self.set(key.as_slice(), verbytes.to_vec(), None).await?;
 		// Return the uint64 representation of the timestamp as the result
 		Ok(verbytes)
 	}

@@ -304,8 +304,6 @@ pub struct RecordAccess {
 	pub signup: Option<Value>,
 	pub signin: Option<Value>,
 	pub jwt: JwtAccess,
-	// TODO(gguillemas): Field kept to gracefully handle breaking change.
-	// Remove when "revision" crate allows doing so.
 	#[revision(start = 2, end = 3, convert_fn = "authenticate_revision")]
 	pub authenticate: Option<Value>,
 }
@@ -330,9 +328,6 @@ impl Default for RecordAccess {
 			jwt: JwtAccess {
 				..Default::default()
 			},
-			// TODO(gguillemas): Field kept to gracefully handle breaking change.
-			// Remove when "revision" crate allows doing so.
-			authenticate: None,
 		}
 	}
 }

@@ -26,7 +26,7 @@ impl Offsets {
 	) -> Result<(), Error> {
 		let key = self.index_key_base.new_bo_key(doc_id, term_id);
 		let val: Val = offsets.try_into()?;
-		tx.set(key, val).await?;
+		tx.set(key, val, None).await?;
 		Ok(())
 	}
 

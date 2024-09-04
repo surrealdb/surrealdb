@@ -10,7 +10,8 @@ use crate::idx::planner::IterationStage;
 use crate::key::{graph, thing};
 use crate::kvs::Transaction;
 use crate::sql::dir::Dir;
-use crate::sql::{Edges, Range, Table, Thing, Value};
+use crate::sql::id::range::IdRange;
+use crate::sql::{Edges, Table, Thing, Value};
 #[cfg(not(target_arch = "wasm32"))]
 use channel::Sender;
 use futures::StreamExt;
@@ -123,7 +124,9 @@ impl<'a> Processor<'a> {
 				Iterable::Value(v) => self.process_value(stk, ctx, opt, stm, v).await?,
 				Iterable::Thing(v) => self.process_thing(stk, ctx, opt, stm, v).await?,
 				Iterable::Defer(v) => self.process_defer(stk, ctx, opt, stm, v).await?,
-				Iterable::Range(v) => self.process_range(stk, ctx, opt, stm, v).await?,
+				Iterable::TableRange(tb, v) => {
+					self.process_range(stk, ctx, opt, stm, tb, v).await?
+				}
 				Iterable::Edges(e) => self.process_edge(stk, ctx, opt, stm, e).await?,
 				Iterable::Table(v) => {
 					if let Some(qp) = ctx.get_query_planner() {
@@ -343,28 +346,29 @@ impl<'a> Processor<'a> {
 		ctx: &Context,
 		opt: &Options,
 		stm: &Statement<'_>,
-		v: Range,
+		tb: String,
+		r: IdRange,
 	) -> Result<(), Error> {
 		// Get the transaction
 		let txn = ctx.tx();
 		// Check that the table exists
-		txn.check_ns_db_tb(opt.ns()?, opt.db()?, &v.tb, opt.strict).await?;
+		txn.check_ns_db_tb(opt.ns()?, opt.db()?, &tb, opt.strict).await?;
 		// Prepare the range start key
-		let beg = match &v.beg {
-			Bound::Unbounded => thing::prefix(opt.ns()?, opt.db()?, &v.tb),
-			Bound::Included(id) => thing::new(opt.ns()?, opt.db()?, &v.tb, id).encode().unwrap(),
-			Bound::Excluded(id) => {
-				let mut key = thing::new(opt.ns()?, opt.db()?, &v.tb, id).encode().unwrap();
+		let beg = match &r.beg {
+			Bound::Unbounded => thing::prefix(opt.ns()?, opt.db()?, &tb),
+			Bound::Included(v) => thing::new(opt.ns()?, opt.db()?, &tb, v).encode().unwrap(),
+			Bound::Excluded(v) => {
+				let mut key = thing::new(opt.ns()?, opt.db()?, &tb, v).encode().unwrap();
 				key.push(0x00);
 				key
 			}
 		};
 		// Prepare the range end key
-		let end = match &v.end {
-			Bound::Unbounded => thing::suffix(opt.ns()?, opt.db()?, &v.tb),
-			Bound::Excluded(id) => thing::new(opt.ns()?, opt.db()?, &v.tb, id).encode().unwrap(),
-			Bound::Included(id) => {
-				let mut key = thing::new(opt.ns()?, opt.db()?, &v.tb, id).encode().unwrap();
+		let end = match &r.end {
+			Bound::Unbounded => thing::suffix(opt.ns()?, opt.db()?, &tb),
+			Bound::Excluded(v) => thing::new(opt.ns()?, opt.db()?, &tb, v).encode().unwrap(),
+			Bound::Included(v) => {
+				let mut key = thing::new(opt.ns()?, opt.db()?, &tb, v).encode().unwrap();
 				key.push(0x00);
 				key
 			}

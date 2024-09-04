@@ -10,6 +10,8 @@ pub(crate) trait Categorise {
 #[non_exhaustive]
 #[allow(unused)]
 pub enum Category {
+	/// crate::key::storage::version         /sv
+	Version,
 	/// crate::key::root::all                /
 	Root,
 	/// crate::key::root::access::ac         /!ac{ac}
@@ -124,6 +126,18 @@ pub enum Category {
 	IndexBTreeNodeTerms,
 	/// crate::key::index::bu                /*{ns}*{db}*{tb}+{ix}!bu{id}
 	IndexTerms,
+	/// crate::key::index::he                /*{ns}*{db}*{tb}+{ix}!he{id}
+	IndexHnswElements,
+	/// crate::key::index::hd                /*{ns}*{db}*{tb}+{ix}!hd{id}
+	IndexHnswDocIds,
+	/// crate::key::index::hi               /*{ns}*{db}*{tb}+{ix}!hi{id}
+	IndexHnswThings,
+	/// crate::key::index::hv                /*{ns}*{db}*{tb}+{ix}!hv{vec}
+	IndexHnswVec,
+	/// crate::key::index::ia                /*{ns}*{db}*{tb}+{ix}!ia{id}
+	IndexAppendings,
+	/// crate::key::index::ip                /*{ns}*{db}*{tb}+{ix}!ip{id}
+	IndexPrimaryAppending,
 	/// crate::key::index                    /*{ns}*{db}*{tb}+{ix}*{fd}{id}
 	Index,
 	///
@@ -146,6 +160,7 @@ pub enum Category {
 impl Display for Category {
 	fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
 		let name = match self {
+			Self::Version => "StorageVersion",
 			Self::Root => "Root",
 			Self::Access => "Access",
 			Self::AccessRoot => "AccessRoot",
@@ -194,6 +209,12 @@ impl Display for Category {
 			Self::IndexFullTextState => "IndexFullTextState",
 			Self::IndexBTreeNodeTerms => "IndexBTreeNodeTerms",
 			Self::IndexTerms => "IndexTerms",
+			Self::IndexHnswElements => "IndexHnswElements",
+			Self::IndexHnswDocIds => "IndexHnswDocIds",
+			Self::IndexHnswThings => "IndexHnswThings",
+			Self::IndexHnswVec => "IndexHnswVec",
+			Self::IndexAppendings => "IndexAppendings",
+			Self::IndexPrimaryAppending => "IndexPrimaryAppending",
 			Self::Index => "Index",
 			Self::ChangeFeed => "ChangeFeed",
 			Self::Thing => "Thing",

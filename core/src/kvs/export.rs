@@ -126,13 +126,6 @@ impl Transaction {
 						chn.send(bytes!("")).await?;
 					}
 				}
-				// Start transaction
-				chn.send(bytes!("-- ------------------------------")).await?;
-				chn.send(bytes!("-- TRANSACTION")).await?;
-				chn.send(bytes!("-- ------------------------------")).await?;
-				chn.send(bytes!("")).await?;
-				chn.send(bytes!("BEGIN TRANSACTION;")).await?;
-				chn.send(bytes!("")).await?;
 				// Records to be exported, categorised by the type of INSERT statement
 				let mut records_normal: Vec<String> =
 					Vec::with_capacity(*EXPORT_BATCH_SIZE as usize);
@@ -193,13 +186,6 @@ impl Transaction {
 					}
 					chn.send(bytes!("")).await?;
 				}
-				// Commit transaction
-				chn.send(bytes!("-- ------------------------------")).await?;
-				chn.send(bytes!("-- TRANSACTION")).await?;
-				chn.send(bytes!("-- ------------------------------")).await?;
-				chn.send(bytes!("")).await?;
-				chn.send(bytes!("COMMIT TRANSACTION;")).await?;
-				chn.send(bytes!("")).await?;
 			}
 		}
 		// Everything exported

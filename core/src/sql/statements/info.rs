@@ -11,56 +11,31 @@ use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::sync::Arc;
 
-#[revisioned(revision = 2)]
+#[revisioned(revision = 4)]
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub enum InfoStatement {
-	#[revision(end = 2, convert_fn = "root_migrate")]
-	Root,
-	#[revision(start = 2)]
-	Root(bool),
-	#[revision(end = 2, convert_fn = "ns_migrate")]
-	Ns,
-	#[revision(start = 2)]
-	Ns(bool),
-	#[revision(end = 2, convert_fn = "db_migrate")]
-	Db,
-	#[revision(start = 2)]
-	Db(bool),
-	#[revision(end = 2, convert_fn = "tb_migrate")]
-	Tb(Ident),
-	#[revision(start = 2)]
-	Tb(Ident, bool),
-	#[revision(end = 2, convert_fn = "user_migrate")]
-	User(Ident, Option<Base>),
-	#[revision(start = 2)]
-	User(Ident, Option<Base>, bool),
-}
+	// revision discriminant override accounting for previous behavior when adding variants and
+	// removing not at the end of the enum definition.
+	#[revision(override(revision = 2, discriminant = 1), override(revision = 3, discriminant = 1))]
+	Root(#[revision(start = 2)] bool),
 
-impl InfoStatement {
-	fn root_migrate(_revision: u16, _: ()) -> Result<Self, revision::Error> {
-		Ok(Self::Root(false))
-	}
+	#[revision(override(revision = 2, discriminant = 3), override(revision = 3, discriminant = 3))]
+	Ns(#[revision(start = 2)] bool),
 
-	fn ns_migrate(_revision: u16, _: ()) -> Result<Self, revision::Error> {
-		Ok(Self::Ns(false))
-	}
+	#[revision(override(revision = 2, discriminant = 5), override(revision = 3, discriminant = 5))]
+	Db(#[revision(start = 2)] bool),
 
-	fn db_migrate(_revision: u16, _: ()) -> Result<Self, revision::Error> {
-		Ok(Self::Db(false))
-	}
+	#[revision(override(revision = 2, discriminant = 7), override(revision = 3, discriminant = 7))]
+	Tb(Ident, #[revision(start = 2)] bool),
 
-	fn tb_migrate(_revision: u16, n: (Ident,)) -> Result<Self, revision::Error> {
-		Ok(Self::Tb(n.0, false))
-	}
+	#[revision(override(revision = 2, discriminant = 9), override(revision = 3, discriminant = 9))]
+	User(Ident, Option<Base>, #[revision(start = 2)] bool),
 
-	fn user_migrate(
-		_revision: u16,
-		(i, b): (Ident, Option<Base>),
-	) -> Result<Self, revision::Error> {
-		Ok(Self::User(i, b, false))
-	}
+	#[revision(start = 3)]
+	#[revision(override(revision = 3, discriminant = 10))]
+	Index(Ident, Ident, bool),
 }
 
 impl InfoStatement {
@@ -304,6 +279,24 @@ impl InfoStatement {
 					false => Value::from(res.to_string()),
 				})
 			}
+			InfoStatement::Index(index, table, _structured) => {
+				// Allowed to run?
+				opt.is_allowed(Action::View, ResourceKind::Actor, &Base::Db)?;
+				// Get the transaction
+				let txn = ctx.tx();
+				// Output
+				#[cfg(not(target_arch = "wasm32"))]
+				if let Some(ib) = ctx.get_index_builder() {
+					// Obtain the index
+					let res = txn.get_tb_index(opt.ns()?, opt.db()?, table, index).await?;
+					if let Some(status) = ib.get_status(&res).await {
+						let mut out = Object::default();
+						out.insert("building".to_string(), status.into());
+						return Ok(out.into());
+					}
+				}
+				Ok(Object::default().into())
+			}
 		}
 	}
 }
@@ -327,6 +320,8 @@ impl fmt::Display for InfoStatement {
 				Some(ref b) => write!(f, "INFO FOR USER {u} ON {b} STRUCTURE"),
 				None => write!(f, "INFO FOR USER {u} STRUCTURE"),
 			},
+			Self::Index(ref i, ref t, false) => write!(f, "INFO FOR INDEX {i} ON {t}"),
+			Self::Index(ref i, ref t, true) => write!(f, "INFO FOR INDEX {i} ON {t} STRUCTURE"),
 		}
 	}
 }
@@ -343,6 +338,7 @@ impl InfoStatement {
 			InfoStatement::Db(_) => InfoStatement::Db(true),
 			InfoStatement::Tb(t, _) => InfoStatement::Tb(t, true),
 			InfoStatement::User(u, b, _) => InfoStatement::User(u, b, true),
+			InfoStatement::Index(i, t, _) => InfoStatement::Index(i, t, true),
 		}
 	}
 }
