@@ -6,10 +6,10 @@ use crate::dbs::Session;
 use crate::kvs::Datastore;
 use crate::sql::kind::Literal;
 use crate::sql::statements::{DefineFieldStatement, SelectStatement};
-use crate::sql::Kind;
 use crate::sql::{self, Table};
 use crate::sql::{Cond, Fields};
 use crate::sql::{Expression, Geometry};
+use crate::sql::{Idiom, Kind};
 use crate::sql::{Statement, Thing};
 use async_graphql::dynamic::{Enum, FieldValue, ResolverContext, Type, Union};
 use async_graphql::dynamic::{Field, Interface};
@@ -29,13 +29,14 @@ use super::ext::IntoExt;
 use super::ext::ValidatorExt;
 use crate::gql::error::{internal_error, schema_error, type_error};
 use crate::gql::ext::TryAsExt;
-use crate::gql::utils::{get_record, GqlValueUtils};
+use crate::gql::utils::{GQLTx, GqlValueUtils};
 use crate::kvs::LockType;
 use crate::kvs::TransactionType;
 use crate::sql::Object as SqlObject;
 use crate::sql::Value as SqlValue;
 
-type ErasedRecord = SqlObject;
+// type ErasedRecord = SqlObject;
+type ErasedRecord = (GQLTx, Thing);
 
 fn field_val_erase_owned(val: ErasedRecord) -> FieldValue<'static> {
 	FieldValue::owned_any(val)
@@ -81,7 +82,7 @@ pub async fn generate_schema(
 	datastore: &Arc<Datastore>,
 	session: &Session,
 ) -> Result<Schema, GqlError> {
-	let kvs = datastore.as_ref();
+	let kvs = datastore;
 	let tx = kvs.transaction(TransactionType::Read, LockType::Optimistic).await?;
 	let ns = session.ns.as_ref().expect("missing ns should have been caught");
 	let db = session.db.as_ref().expect("missing db should have been caught");
@@ -129,11 +130,11 @@ pub async fn generate_schema(
 				TypeRef::named_nn_list_nn(tb.name.to_string()),
 				move |ctx| {
 					let tb_name = first_tb_name.clone();
-					let sess1 = sess1.clone();
-					let fds1 = fds1.clone();
-					let kvs1 = kvs1.clone();
+					// let sess1 = sess1.clone();
+					// let fds1 = fds1.clone();
+					// let kvs1 = kvs1.clone();
 					FieldFuture::new(async move {
-						let kvs = kvs1.as_ref();
+						let gtx = GQLTx::new(&kvs1, &sess1).await?;
 
 						let args = ctx.args.as_index_map();
 						trace!("received request with args: {args:?}");
@@ -201,7 +202,13 @@ pub async fn generate_schema(
 						let ast = Statement::Select({
 							SelectStatement {
 								what: vec![SqlValue::Table(tb_name.intox())].into(),
-								expr: Fields::all(),
+								expr: Fields(
+									vec![sql::Field::Single {
+										expr: SqlValue::Idiom(Idiom::from("id")),
+										alias: None,
+									}],
+									false,
+								),
 								order: orders.map(IntoExt::intox),
 								cond,
 								limit,
@@ -212,16 +219,7 @@ pub async fn generate_schema(
 
 						trace!("generated query ast: {ast:?}");
 
-						let query = ast.into();
-						trace!("generated query: {}", query);
-
-						let res = kvs.process(query, &sess1, Default::default()).await?;
-						debug_assert_eq!(res.len(), 1);
-						let res = res
-							.into_iter()
-							.next()
-							.expect("response vector should have exactly one value")
-							.result?;
+						let res = gtx.process_stmt(ast).await?;
 
 						let res_vec =
 							match res {
@@ -236,11 +234,17 @@ pub async fn generate_schema(
 							.0
 							.into_iter()
 							.map(|v| {
-								v.try_as_object().map(|o| {
-									let erased: ErasedRecord = o;
+								v.try_as_thing().map(|t| {
+									let erased: ErasedRecord = (gtx.clone(), t);
 									field_val_erase_owned(erased)
 								})
 							})
+							// .map(|v| {
+							// 	v.try_as_object().map(|o| {
+							// 		let erased: ErasedRecord = o;
+							// 		field_val_erase_owned(erased)
+							// 	})
+							// })
 							.collect();
 
 						match out {
@@ -266,11 +270,11 @@ pub async fn generate_schema(
 				TypeRef::named(tb.name.to_string()),
 				move |ctx| {
 					let tb_name = second_tb_name.clone();
-					let kvs2 = kvs2.clone();
+					// let kvs2 = kvs2.clone();
 					FieldFuture::new({
 						let sess2 = sess2.clone();
 						async move {
-							let kvs = kvs2.as_ref();
+							let gtx = GQLTx::new(&kvs2, &sess2).await?;
 
 							let args = ctx.args.as_index_map();
 							let id = match args.get("id").and_then(GqlValueUtils::as_string) {
@@ -287,7 +291,7 @@ pub async fn generate_schema(
 								Err(_) => Thing::from((tb_name, id)),
 							};
 
-							match get_record(kvs, &sess2, &thing).await? {
+							match gtx.get_record(thing).await? {
 								SqlValue::Object(o) => {
 									let erased: ErasedRecord = o;
 									Ok(Some(field_val_erase_owned(erased)))

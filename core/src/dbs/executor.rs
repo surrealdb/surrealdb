@@ -28,9 +28,9 @@ use trice::Instant;
 use wasm_bindgen_futures::spawn_local as spawn;
 
 pub(crate) struct Executor<'a> {
-	err: bool,
-	kvs: &'a Datastore,
-	txn: Option<Arc<Transaction>>,
+	pub(crate) err: bool,
+	pub(crate) kvs: &'a Datastore,
+	pub(crate) txn: Option<Arc<Transaction>>,
 }
 
 impl<'a> Executor<'a> {
@@ -42,8 +42,8 @@ impl<'a> Executor<'a> {
 		}
 	}
 
-	fn txn(&self) -> Arc<Transaction> {
-		self.txn.clone().expect("unreachable: txn was None after successful begin")
+	fn txn(&self) -> Result<Arc<Transaction>, Error> {
+		self.txn.clone().ok_or(Error::Unreachable("txn was None after successful begin"))
 	}
 
 	/// # Return
@@ -303,7 +303,7 @@ impl<'a> Executor<'a> {
 						false => {
 							// ctx.set_transaction(txn)
 							let mut c = MutableContext::unfreeze(ctx)?;
-							c.set_transaction(self.txn());
+							c.set_transaction(self.txn()?);
 							ctx = c.freeze();
 							// Check the statement
 							match stack
@@ -373,7 +373,7 @@ impl<'a> Executor<'a> {
 										if let Err(err) = ctx.add_timeout(timeout) {
 											Err(err)
 										} else {
-											ctx.set_transaction(self.txn());
+											ctx.set_transaction(self.txn()?);
 											let c = ctx.freeze();
 											// Process the statement
 											let res = stack
@@ -390,7 +390,7 @@ impl<'a> Executor<'a> {
 									}
 									// There is no timeout clause
 									None => {
-										ctx.set_transaction(self.txn());
+										ctx.set_transaction(self.txn()?);
 										let c = ctx.freeze();
 										let r = stack
 											.enter(|stk| stm.compute(stk, &c, &opt, None))

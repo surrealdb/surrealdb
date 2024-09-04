@@ -845,26 +845,7 @@ impl Datastore {
 		// Create a new query executor
 		let mut exe = Executor::new(self);
 		// Create a default context
-		let mut ctx = MutableContext::from_ds(
-			self.query_timeout,
-			self.capabilities.clone(),
-			self.index_stores.clone(),
-			#[cfg(not(target_arch = "wasm32"))]
-			self.index_builder.clone(),
-			#[cfg(any(
-				feature = "kv-mem",
-				feature = "kv-surrealkv",
-				feature = "kv-rocksdb",
-				feature = "kv-fdb",
-				feature = "kv-tikv",
-				feature = "kv-surrealcs",
-			))]
-			self.temporary_directory.clone(),
-		)?;
-		// Setup the notification channel
-		if let Some(channel) = &self.notification_channel {
-			ctx.add_notifications(Some(&channel.0));
-		}
+		let mut ctx = self.setup_ctx()?;
 		// Start an execution context
 		sess.context(&mut ctx);
 		// Store the query variables
@@ -1107,6 +1088,29 @@ impl Datastore {
 			.with_auth(sess.au.clone())
 			.with_strict(self.strict)
 			.with_auth_enabled(self.auth_enabled)
+	}
+	pub fn setup_ctx(&self) -> Result<MutableContext, Error> {
+		let mut ctx = MutableContext::from_ds(
+			self.query_timeout,
+			self.capabilities.clone(),
+			self.index_stores.clone(),
+			#[cfg(not(target_arch = "wasm32"))]
+			self.index_builder.clone(),
+			#[cfg(any(
+				feature = "kv-mem",
+				feature = "kv-surrealkv",
+				feature = "kv-rocksdb",
+				feature = "kv-fdb",
+				feature = "kv-tikv",
+				feature = "kv-surrealcs",
+			))]
+			self.temporary_directory.clone(),
+		)?;
+		// Setup the notification channel
+		if let Some(channel) = &self.notification_channel {
+			ctx.add_notifications(Some(&channel.0));
+		}
+		Ok(ctx)
 	}
 
 	// pub fn setup_auth(&self, sess: &Session) -> Result<(), Error> {
