@@ -1553,2038 +1553,1016 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 	}
 
 	#[tokio::test]
-	async fn test_signin_bearer_for_user_db() {
-		// Test with correct bearer key
-		{
-			let ds = Datastore::new("memory").await.unwrap();
-			let sess = Session::owner().with_ns("test").with_db("test");
-			let res = ds
-				.execute(
-					r#"
-				DEFINE ACCESS api ON DATABASE TYPE BEARER DURATION FOR SESSION 2h;
-				DEFINE USER tobie ON DATABASE ROLES EDITOR;
-				ACCESS api GRANT FOR USER tobie;
-				"#,
-					&sess,
-					None,
-				)
-				.await
-				.unwrap();
+	async fn test_signin_bearer_for_user() {
+		let test_levels = vec![
+			TestLevel {
+				level: "ROOT",
+				ns: None,
+				db: None,
+			},
+			TestLevel {
+				level: "NS",
+				ns: Some("test"),
+				db: None,
+			},
+			TestLevel {
+				level: "DB",
+				ns: Some("test"),
+				db: Some("test"),
+			},
+		];
 
-			// Get the bearer key from grant.
-			let result = if let Ok(res) = &res.last().unwrap().result {
-				res.clone()
-			} else {
-				panic!("Unable to retrieve bearer key grant");
-			};
-			let grant = result
-				.coerce_to_object()
-				.unwrap()
-				.get("grant")
-				.unwrap()
-				.clone()
-				.coerce_to_object()
-				.unwrap();
-			let key = grant.get("key").unwrap().clone().as_string();
+		for level in &test_levels {
+			println!("Test level: {}", level.level);
 
-			// Signin with the bearer key
-			let mut sess = Session {
-				ns: Some("test".to_string()),
-				db: Some("test".to_string()),
-				..Default::default()
-			};
-			let mut vars: HashMap<&str, Value> = HashMap::new();
-			vars.insert("key", key.into());
-			let res = db_access(
-				&ds,
-				&mut sess,
-				"test".to_string(),
-				"test".to_string(),
-				"api".to_string(),
-				vars.into(),
-			)
-			.await;
+			// Test with correct bearer key
+			{
+				let ds = Datastore::new("memory").await.unwrap();
+				let sess = Session::owner().with_ns("test").with_db("test");
+				let res = ds
+					.execute(
+						&format!(
+							r#"
+					DEFINE ACCESS api ON {} TYPE BEARER DURATION FOR SESSION 2h;
+					DEFINE USER tobie ON {} ROLES EDITOR;
+					ACCESS api ON {} GRANT FOR USER tobie;
+					"#,
+							level.level, level.level, level.level
+						),
+						&sess,
+						None,
+					)
+					.await
+					.unwrap();
 
-			assert!(res.is_ok(), "Failed to signin with bearer key: {:?}", res);
-			assert_eq!(sess.ns, Some("test".to_string()));
-			assert_eq!(sess.db, Some("test".to_string()));
-			assert!(sess.au.is_db());
-			assert_eq!(sess.au.level().ns(), Some("test"));
-			assert_eq!(sess.au.level().db(), Some("test"));
-			// Record users should not have roles
-			assert!(!sess.au.has_role(&Role::Viewer), "Auth user expected to not have Viewer role");
-			assert!(sess.au.has_role(&Role::Editor), "Auth user expected to have Editor role");
-			assert!(!sess.au.has_role(&Role::Owner), "Auth user expected to not have Owner role");
-			// Expiration should match the defined duration
-			let exp = sess.exp.unwrap();
-			// Expiration should match the current time plus session duration with some margin
-			let min_exp = (Utc::now() + Duration::hours(2) - Duration::seconds(10)).timestamp();
-			let max_exp = (Utc::now() + Duration::hours(2) + Duration::seconds(10)).timestamp();
-			assert!(
-				exp > min_exp && exp < max_exp,
-				"Session expiration is expected to follow the defined duration"
-			);
-		}
+				// Get the bearer key from grant
+				let result = if let Ok(res) = &res.last().unwrap().result {
+					res.clone()
+				} else {
+					panic!("Unable to retrieve bearer key grant");
+				};
+				let grant = result
+					.coerce_to_object()
+					.unwrap()
+					.get("grant")
+					.unwrap()
+					.clone()
+					.coerce_to_object()
+					.unwrap();
+				let key = grant.get("key").unwrap().clone().as_string();
 
-		// Test with correct bearer key and AUTHENTICATE clause succeeding
-		{
-			let ds = Datastore::new("memory").await.unwrap();
-			let sess = Session::owner().with_ns("test").with_db("test");
-			let res = ds
-				.execute(
-					r#"
-				DEFINE ACCESS api ON DATABASE TYPE BEARER
-					AUTHENTICATE {{
-						RETURN NONE
-					}}
-					DURATION FOR SESSION 2h
-				;
-				DEFINE USER tobie ON DATABASE ROLES EDITOR;
-				ACCESS api GRANT FOR USER tobie;
-				"#,
-					&sess,
-					None,
-				)
-				.await
-				.unwrap();
+				// Sign in with the bearer key
+				let mut sess = Session {
+					ns: level.ns.map(String::from),
+					db: level.db.map(String::from),
+					..Default::default()
+				};
+				let mut vars: HashMap<&str, Value> = HashMap::new();
+				vars.insert("key", key.into());
+				let res = match level.level {
+					"DB" => {
+						db_access(
+							&ds,
+							&mut sess,
+							level.ns.unwrap().to_string(),
+							level.db.unwrap().to_string(),
+							"api".to_string(),
+							vars.into(),
+						)
+						.await
+					}
+					"NS" => {
+						ns_access(
+							&ds,
+							&mut sess,
+							level.ns.unwrap().to_string(),
+							"api".to_string(),
+							vars.into(),
+						)
+						.await
+					}
+					"ROOT" => root_access(&ds, &mut sess, "api".to_string(), vars.into()).await,
+					_ => panic!("Unsupported level"),
+				};
 
-			// Get the bearer key from grant.
-			let result = if let Ok(res) = &res.last().unwrap().result {
-				res.clone()
-			} else {
-				panic!("Unable to retrieve bearer key grant");
-			};
-			let grant = result
-				.coerce_to_object()
-				.unwrap()
-				.get("grant")
-				.unwrap()
-				.clone()
-				.coerce_to_object()
-				.unwrap();
-			let key = grant.get("key").unwrap().clone().as_string();
+				assert!(res.is_ok(), "Failed to sign in with bearer key: {:?}", res);
+				assert_eq!(sess.ns, level.ns.map(|s| s.to_string()));
+				assert_eq!(sess.db, level.db.map(|s| s.to_string()));
 
-			// Signin with the bearer key
-			let mut sess = Session {
-				db: Some("test".to_string()),
-				ns: Some("test".to_string()),
-				..Default::default()
-			};
-			let mut vars: HashMap<&str, Value> = HashMap::new();
-			vars.insert("key", key.into());
-			let res = db_access(
-				&ds,
-				&mut sess,
-				"test".to_string(),
-				"test".to_string(),
-				"api".to_string(),
-				vars.into(),
-			)
-			.await;
-
-			assert!(res.is_ok(), "Failed to signin with bearer key: {:?}", res);
-			assert_eq!(sess.ns, Some("test".to_string()));
-			assert_eq!(sess.db, Some("test".to_string()));
-			assert!(sess.au.is_db());
-			assert_eq!(sess.au.level().ns(), Some("test"));
-			assert_eq!(sess.au.level().db(), Some("test"));
-			// Record users should not have roles
-			assert!(!sess.au.has_role(&Role::Viewer), "Auth user expected to not have Viewer role");
-			assert!(sess.au.has_role(&Role::Editor), "Auth user expected to have Editor role");
-			assert!(!sess.au.has_role(&Role::Owner), "Auth user expected to not have Owner role");
-			// Expiration should match the defined duration
-			let exp = sess.exp.unwrap();
-			// Expiration should match the current time plus session duration with some margin
-			let min_exp = (Utc::now() + Duration::hours(2) - Duration::seconds(10)).timestamp();
-			let max_exp = (Utc::now() + Duration::hours(2) + Duration::seconds(10)).timestamp();
-			assert!(
-				exp > min_exp && exp < max_exp,
-				"Session expiration is expected to follow the defined duration"
-			);
-		}
-
-		// Test with correct bearer key and AUTHENTICATE clause failing
-		{
-			let ds = Datastore::new("memory").await.unwrap();
-			let sess = Session::owner().with_ns("test").with_db("test");
-			let res = ds
-				.execute(
-					r#"
-				DEFINE ACCESS api ON DATABASE TYPE BEARER
-					AUTHENTICATE {{
-						THROW "Test authentication error";
-					}}
-					DURATION FOR SESSION 2h
-				;
-				DEFINE USER tobie ON DATABASE ROLES EDITOR;
-				ACCESS api GRANT FOR USER tobie;
-				"#,
-					&sess,
-					None,
-				)
-				.await
-				.unwrap();
-
-			// Get the bearer key from grant.
-			let result = if let Ok(res) = &res.last().unwrap().result {
-				res.clone()
-			} else {
-				panic!("Unable to retrieve bearer key grant");
-			};
-			let grant = result
-				.coerce_to_object()
-				.unwrap()
-				.get("grant")
-				.unwrap()
-				.clone()
-				.coerce_to_object()
-				.unwrap();
-			let key = grant.get("key").unwrap().clone().as_string();
-
-			// Signin with the bearer key
-			let mut sess = Session {
-				db: Some("test".to_string()),
-				ns: Some("test".to_string()),
-				..Default::default()
-			};
-			let mut vars: HashMap<&str, Value> = HashMap::new();
-			vars.insert("key", key.into());
-			let res = db_access(
-				&ds,
-				&mut sess,
-				"test".to_string(),
-				"test".to_string(),
-				"api".to_string(),
-				vars.into(),
-			)
-			.await;
-
-			match res {
-				Err(Error::Thrown(e)) => {
-					assert_eq!(e, "Test authentication error")
+				// Check auth level
+				match level.level {
+					"ROOT" => assert!(sess.au.is_root()),
+					"NS" => assert!(sess.au.is_ns()),
+					"DB" => assert!(sess.au.is_db()),
+					_ => panic!("Unsupported level"),
 				}
-				res => panic!(
-					"Expected a thrown authentication error, but instead received: {:?}",
-					res
-				),
+				assert_eq!(sess.au.level().ns(), level.ns);
+				assert_eq!(sess.au.level().db(), level.db);
+
+				// Check roles
+				assert!(
+					!sess.au.has_role(&Role::Viewer),
+					"Auth user expected to not have Viewer role"
+				);
+				assert!(
+					// User is defined with this role only
+					sess.au.has_role(&Role::Editor),
+					"Auth user expected to have Editor role"
+				);
+				assert!(
+					!sess.au.has_role(&Role::Owner),
+					"Auth user expected to not have Owner role"
+				);
+
+				// Check expiration
+				let exp = sess.exp.unwrap();
+				let min_exp = (Utc::now() + Duration::hours(2) - Duration::seconds(10)).timestamp();
+				let max_exp = (Utc::now() + Duration::hours(2) + Duration::seconds(10)).timestamp();
+				assert!(
+					exp > min_exp && exp < max_exp,
+					"Session expiration is expected to match the defined duration",
+				);
 			}
-		}
 
-		// Test with expired grant
-		{
-			let ds = Datastore::new("memory").await.unwrap();
-			let sess = Session::owner().with_ns("test").with_db("test");
-			let res = ds
-				.execute(
-					r#"
-				DEFINE ACCESS api ON DATABASE TYPE BEARER DURATION FOR GRANT 1s FOR SESSION 2h;
-				DEFINE USER tobie ON DATABASE ROLES EDITOR;
-				ACCESS api GRANT FOR USER tobie;
-				"#,
-					&sess,
-					None,
-				)
-				.await
-				.unwrap();
+			// Test with correct bearer key and AUTHENTICATE clause succeeding
+			{
+				let ds = Datastore::new("memory").await.unwrap();
+				let sess = Session::owner().with_ns("test").with_db("test");
+				let res = ds
+					.execute(
+						&format!(
+							r#"
+					DEFINE ACCESS api ON {} TYPE BEARER
+						AUTHENTICATE {{
+							RETURN NONE
+						}}
+						DURATION FOR SESSION 2h
+					;
+					DEFINE USER tobie ON {} ROLES EDITOR;
+					ACCESS api ON {} GRANT FOR USER tobie;
+					"#,
+							level.level, level.level, level.level
+						),
+						&sess,
+						None,
+					)
+					.await
+					.unwrap();
 
-			// Get the bearer key from grant.
-			let result = if let Ok(res) = &res.last().unwrap().result {
-				res.clone()
-			} else {
-				panic!("Unable to retrieve bearer key grant");
-			};
-			let grant = result
-				.coerce_to_object()
-				.unwrap()
-				.get("grant")
-				.unwrap()
-				.clone()
-				.coerce_to_object()
-				.unwrap();
-			let key = grant.get("key").unwrap().clone().as_string();
+				// Get the bearer key from grant
+				let result = if let Ok(res) = &res.last().unwrap().result {
+					res.clone()
+				} else {
+					panic!("Unable to retrieve bearer key grant");
+				};
+				let grant = result
+					.coerce_to_object()
+					.unwrap()
+					.get("grant")
+					.unwrap()
+					.clone()
+					.coerce_to_object()
+					.unwrap();
+				let key = grant.get("key").unwrap().clone().as_string();
 
-			// Wait for the grant to expire
-			std::thread::sleep(Duration::seconds(2).to_std().unwrap());
+				// Sign in with the bearer key
+				let mut sess = Session {
+					ns: level.ns.map(String::from),
+					db: level.db.map(String::from),
+					..Default::default()
+				};
+				let mut vars: HashMap<&str, Value> = HashMap::new();
+				vars.insert("key", key.into());
+				let res = match level.level {
+					"DB" => {
+						db_access(
+							&ds,
+							&mut sess,
+							level.ns.unwrap().to_string(),
+							level.db.unwrap().to_string(),
+							"api".to_string(),
+							vars.into(),
+						)
+						.await
+					}
+					"NS" => {
+						ns_access(
+							&ds,
+							&mut sess,
+							level.ns.unwrap().to_string(),
+							"api".to_string(),
+							vars.into(),
+						)
+						.await
+					}
+					"ROOT" => root_access(&ds, &mut sess, "api".to_string(), vars.into()).await,
+					_ => panic!("Unsupported level"),
+				};
 
-			// Signin with the bearer key
-			let mut sess = Session {
-				ns: Some("test".to_string()),
-				db: Some("test".to_string()),
-				..Default::default()
-			};
-			let mut vars: HashMap<&str, Value> = HashMap::new();
-			vars.insert("key", key.into());
-			let res = db_access(
-				&ds,
-				&mut sess,
-				"test".to_string(),
-				"test".to_string(),
-				"api".to_string(),
-				vars.into(),
-			)
-			.await;
+				assert!(res.is_ok(), "Failed to sign in with bearer key: {:?}", res);
+				assert_eq!(sess.ns, level.ns.map(|s| s.to_string()));
+				assert_eq!(sess.db, level.db.map(|s| s.to_string()));
 
-			match res {
-				Err(Error::InvalidAuth) => {} // ok
-				res => panic!(
-					"Expected a generic authentication error, but instead received: {:?}",
-					res
-				),
-			}
-		}
-
-		// Test with revoked grant
-		{
-			let ds = Datastore::new("memory").await.unwrap();
-			let sess = Session::owner().with_ns("test").with_db("test");
-			let res = ds
-				.execute(
-					r#"
-				DEFINE ACCESS api ON DATABASE TYPE BEARER DURATION FOR GRANT 1s FOR SESSION 2h;
-				DEFINE USER tobie ON DATABASE ROLES EDITOR;
-				ACCESS api GRANT FOR USER tobie;
-				"#,
-					&sess,
-					None,
-				)
-				.await
-				.unwrap();
-
-			// Get the bearer key from grant.
-			let result = if let Ok(res) = &res.last().unwrap().result {
-				res.clone()
-			} else {
-				panic!("Unable to retrieve bearer key grant");
-			};
-			let grant = result
-				.coerce_to_object()
-				.unwrap()
-				.get("grant")
-				.unwrap()
-				.clone()
-				.coerce_to_object()
-				.unwrap();
-			let key = grant.get("key").unwrap().clone().as_string();
-
-			// Get grant identifier from key
-			let kid = key.split("-").collect::<Vec<&str>>()[2];
-
-			// Revoke grant
-			ds.execute(
-				&format!(
-					r#"
-				ACCESS api REVOKE `{kid}`;
-				"#
-				),
-				&sess,
-				None,
-			)
-			.await
-			.unwrap();
-
-			// Signin with the bearer key
-			let mut sess = Session {
-				ns: Some("test".to_string()),
-				db: Some("test".to_string()),
-				..Default::default()
-			};
-			let mut vars: HashMap<&str, Value> = HashMap::new();
-			vars.insert("key", key.into());
-			let res = db_access(
-				&ds,
-				&mut sess,
-				"test".to_string(),
-				"test".to_string(),
-				"api".to_string(),
-				vars.into(),
-			)
-			.await;
-
-			match res {
-				Err(Error::InvalidAuth) => {} // ok
-				res => panic!(
-					"Expected a generic authentication error, but instead received: {:?}",
-					res
-				),
-			}
-		}
-
-		// Test with removed access method
-		{
-			let ds = Datastore::new("memory").await.unwrap();
-			let sess = Session::owner().with_ns("test").with_db("test");
-			let res = ds
-				.execute(
-					r#"
-				DEFINE ACCESS api ON DATABASE TYPE BEARER DURATION FOR GRANT 1s FOR SESSION 2h;
-				DEFINE USER tobie ON DATABASE ROLES EDITOR;
-				ACCESS api GRANT FOR USER tobie;
-				"#,
-					&sess,
-					None,
-				)
-				.await
-				.unwrap();
-
-			// Get the bearer key from grant.
-			let result = if let Ok(res) = &res.last().unwrap().result {
-				res.clone()
-			} else {
-				panic!("Unable to retrieve bearer key grant");
-			};
-			let grant = result
-				.coerce_to_object()
-				.unwrap()
-				.get("grant")
-				.unwrap()
-				.clone()
-				.coerce_to_object()
-				.unwrap();
-			let key = grant.get("key").unwrap().clone().as_string();
-
-			// Remove bearer access method
-			ds.execute("REMOVE ACCESS api ON DATABASE", &sess, None).await.unwrap();
-
-			// Signin with the bearer key
-			let mut sess = Session {
-				ns: Some("test".to_string()),
-				db: Some("test".to_string()),
-				..Default::default()
-			};
-			let mut vars: HashMap<&str, Value> = HashMap::new();
-			vars.insert("key", key.into());
-			let res = db_access(
-				&ds,
-				&mut sess,
-				"test".to_string(),
-				"test".to_string(),
-				"api".to_string(),
-				vars.into(),
-			)
-			.await;
-
-			match res {
-				Err(Error::AccessNotFound) => {} // ok
-				res => panic!(
-					"Expected an access method not found error, but instead received: {:?}",
-					res
-				),
-			}
-		}
-
-		// Test with missing key
-		{
-			let ds = Datastore::new("memory").await.unwrap();
-			let sess = Session::owner().with_ns("test").with_db("test");
-			let res = ds
-				.execute(
-					r#"
-				DEFINE ACCESS api ON DATABASE TYPE BEARER DURATION FOR SESSION 2h;
-				DEFINE USER tobie ON DATABASE ROLES EDITOR;
-				ACCESS api GRANT FOR USER tobie;
-				"#,
-					&sess,
-					None,
-				)
-				.await
-				.unwrap();
-
-			// Get the bearer key from grant.
-			let result = if let Ok(res) = &res.last().unwrap().result {
-				res.clone()
-			} else {
-				panic!("Unable to retrieve bearer key grant");
-			};
-			let grant = result
-				.coerce_to_object()
-				.unwrap()
-				.get("grant")
-				.unwrap()
-				.clone()
-				.coerce_to_object()
-				.unwrap();
-			let _key = grant.get("key").unwrap().clone().as_string();
-
-			// Signin with the bearer key
-			let mut sess = Session {
-				ns: Some("test".to_string()),
-				db: Some("test".to_string()),
-				..Default::default()
-			};
-
-			// The key parameter is not inserted:
-			let vars: HashMap<&str, Value> = HashMap::new();
-			// vars.insert("key", key.into());
-
-			let res = db_access(
-				&ds,
-				&mut sess,
-				"test".to_string(),
-				"test".to_string(),
-				"api".to_string(),
-				vars.into(),
-			)
-			.await;
-
-			match res {
-				Err(Error::AccessBearerMissingKey) => {} // ok
-				res => panic!(
-					"Expected a missing key authentication error, but instead received: {:?}",
-					res
-				),
-			}
-		}
-
-		// Test with incorrect bearer key prefix part
-		{
-			let ds = Datastore::new("memory").await.unwrap();
-			let sess = Session::owner().with_ns("test").with_db("test");
-			let res = ds
-				.execute(
-					r#"
-				DEFINE ACCESS api ON DATABASE TYPE BEARER DURATION FOR SESSION 2h;
-				DEFINE USER tobie ON DATABASE ROLES EDITOR;
-				ACCESS api GRANT FOR USER tobie;
-				"#,
-					&sess,
-					None,
-				)
-				.await
-				.unwrap();
-
-			// Get the bearer key from grant.
-			let result = if let Ok(res) = &res.last().unwrap().result {
-				res.clone()
-			} else {
-				panic!("Unable to retrieve bearer key grant");
-			};
-			let grant = result
-				.coerce_to_object()
-				.unwrap()
-				.get("grant")
-				.unwrap()
-				.clone()
-				.coerce_to_object()
-				.unwrap();
-			let valid_key = grant.get("key").unwrap().clone().as_string();
-
-			// Replace a character from the key prefix
-			let mut invalid_key: Vec<char> = valid_key.chars().collect();
-			invalid_key[access::GRANT_BEARER_PREFIX.len() - 2] = '_';
-			let key: String = invalid_key.into_iter().collect();
-
-			// Signin with the bearer key
-			let mut sess = Session {
-				ns: Some("test".to_string()),
-				db: Some("test".to_string()),
-				..Default::default()
-			};
-			let mut vars: HashMap<&str, Value> = HashMap::new();
-			vars.insert("key", key.into());
-			let res = db_access(
-				&ds,
-				&mut sess,
-				"test".to_string(),
-				"test".to_string(),
-				"api".to_string(),
-				vars.into(),
-			)
-			.await;
-
-			match res {
-				Err(Error::AccessGrantBearerInvalid) => {} // ok
-				res => panic!(
-					"Expected an invalid key authentication error, but instead received: {:?}",
-					res
-				),
-			}
-		}
-
-		// Test with incorrect bearer key length
-		{
-			let ds = Datastore::new("memory").await.unwrap();
-			let sess = Session::owner().with_ns("test").with_db("test");
-			let res = ds
-				.execute(
-					r#"
-				DEFINE ACCESS api ON DATABASE TYPE BEARER DURATION FOR SESSION 2h;
-				DEFINE USER tobie ON DATABASE ROLES EDITOR;
-				ACCESS api GRANT FOR USER tobie;
-				"#,
-					&sess,
-					None,
-				)
-				.await
-				.unwrap();
-
-			// Get the bearer key from grant.
-			let result = if let Ok(res) = &res.last().unwrap().result {
-				res.clone()
-			} else {
-				panic!("Unable to retrieve bearer key grant");
-			};
-			let grant = result
-				.coerce_to_object()
-				.unwrap()
-				.get("grant")
-				.unwrap()
-				.clone()
-				.coerce_to_object()
-				.unwrap();
-			let valid_key = grant.get("key").unwrap().clone().as_string();
-
-			// Remove a character from the bearer key
-			let mut invalid_key: Vec<char> = valid_key.chars().collect();
-			invalid_key.truncate(access::GRANT_BEARER_LENGTH - 1);
-			let key: String = invalid_key.into_iter().collect();
-
-			// Signin with the bearer key
-			let mut sess = Session {
-				ns: Some("test".to_string()),
-				db: Some("test".to_string()),
-				..Default::default()
-			};
-			let mut vars: HashMap<&str, Value> = HashMap::new();
-			vars.insert("key", key.into());
-			let res = db_access(
-				&ds,
-				&mut sess,
-				"test".to_string(),
-				"test".to_string(),
-				"api".to_string(),
-				vars.into(),
-			)
-			.await;
-
-			match res {
-				Err(Error::AccessGrantBearerInvalid) => {} // ok
-				res => panic!(
-					"Expected an invalid key authentication error, but instead received: {:?}",
-					res
-				),
-			}
-		}
-
-		// Test with incorrect bearer key identifier part
-		{
-			let ds = Datastore::new("memory").await.unwrap();
-			let sess = Session::owner().with_ns("test").with_db("test");
-			let res = ds
-				.execute(
-					r#"
-				DEFINE ACCESS api ON DATABASE TYPE BEARER DURATION FOR SESSION 2h;
-				DEFINE USER tobie ON DATABASE ROLES EDITOR;
-				ACCESS api GRANT FOR USER tobie;
-				"#,
-					&sess,
-					None,
-				)
-				.await
-				.unwrap();
-
-			// Get the bearer key from grant.
-			let result = if let Ok(res) = &res.last().unwrap().result {
-				res.clone()
-			} else {
-				panic!("Unable to retrieve bearer key grant");
-			};
-			let grant = result
-				.coerce_to_object()
-				.unwrap()
-				.get("grant")
-				.unwrap()
-				.clone()
-				.coerce_to_object()
-				.unwrap();
-			let valid_key = grant.get("key").unwrap().clone().as_string();
-
-			// Replace a character from the key identifier
-			let mut invalid_key: Vec<char> = valid_key.chars().collect();
-			invalid_key[access::GRANT_BEARER_PREFIX.len() + 2] = '_';
-			let key: String = invalid_key.into_iter().collect();
-
-			// Signin with the bearer key
-			let mut sess = Session {
-				ns: Some("test".to_string()),
-				db: Some("test".to_string()),
-				..Default::default()
-			};
-			let mut vars: HashMap<&str, Value> = HashMap::new();
-			vars.insert("key", key.into());
-			let res = db_access(
-				&ds,
-				&mut sess,
-				"test".to_string(),
-				"test".to_string(),
-				"api".to_string(),
-				vars.into(),
-			)
-			.await;
-
-			match res {
-				Err(Error::InvalidAuth) => {} // ok
-				res => panic!(
-					"Expected a generic authentication error, but instead received: {:?}",
-					res
-				),
-			}
-		}
-
-		// Test with incorrect bearer key value
-		{
-			let ds = Datastore::new("memory").await.unwrap();
-			let sess = Session::owner().with_ns("test").with_db("test");
-			let res = ds
-				.execute(
-					r#"
-				DEFINE ACCESS api ON DATABASE TYPE BEARER DURATION FOR SESSION 2h;
-				DEFINE USER tobie ON DATABASE ROLES EDITOR;
-				ACCESS api GRANT FOR USER tobie;
-				"#,
-					&sess,
-					None,
-				)
-				.await
-				.unwrap();
-
-			// Get the bearer key from grant.
-			let result = if let Ok(res) = &res.last().unwrap().result {
-				res.clone()
-			} else {
-				panic!("Unable to retrieve bearer key grant");
-			};
-			let grant = result
-				.coerce_to_object()
-				.unwrap()
-				.get("grant")
-				.unwrap()
-				.clone()
-				.coerce_to_object()
-				.unwrap();
-			let valid_key = grant.get("key").unwrap().clone().as_string();
-
-			// Replace a character from the key value
-			let mut invalid_key: Vec<char> = valid_key.chars().collect();
-			invalid_key
-				[access::GRANT_BEARER_PREFIX.len() + 1 + access::GRANT_BEARER_ID_LENGTH + 2] = '_';
-			let key: String = invalid_key.into_iter().collect();
-
-			// Signin with the bearer key
-			let mut sess = Session {
-				ns: Some("test".to_string()),
-				db: Some("test".to_string()),
-				..Default::default()
-			};
-			let mut vars: HashMap<&str, Value> = HashMap::new();
-			vars.insert("key", key.into());
-			let res = db_access(
-				&ds,
-				&mut sess,
-				"test".to_string(),
-				"test".to_string(),
-				"api".to_string(),
-				vars.into(),
-			)
-			.await;
-
-			match res {
-				Err(Error::InvalidAuth) => {} // ok
-				res => panic!(
-					"Expected a generic authentication error, but instead received: {:?}",
-					res
-				),
-			}
-		}
-	}
-
-	#[tokio::test]
-	async fn test_signin_bearer_for_user_ns() {
-		// Test with correct bearer key
-		{
-			let ds = Datastore::new("memory").await.unwrap();
-			let sess = Session::owner().with_ns("test");
-			let res = ds
-				.execute(
-					r#"
-				DEFINE ACCESS api ON NAMESPACE TYPE BEARER DURATION FOR SESSION 2h;
-				DEFINE USER tobie ON NAMESPACE ROLES EDITOR;
-				ACCESS api GRANT FOR USER tobie;
-				"#,
-					&sess,
-					None,
-				)
-				.await
-				.unwrap();
-
-			// Get the bearer key from grant.
-			let result = if let Ok(res) = &res.last().unwrap().result {
-				res.clone()
-			} else {
-				panic!("Unable to retrieve bearer key grant");
-			};
-			let grant = result
-				.coerce_to_object()
-				.unwrap()
-				.get("grant")
-				.unwrap()
-				.clone()
-				.coerce_to_object()
-				.unwrap();
-			let key = grant.get("key").unwrap().clone().as_string();
-
-			// Signin with the bearer key
-			let mut sess = Session {
-				ns: Some("test".to_string()),
-				..Default::default()
-			};
-			let mut vars: HashMap<&str, Value> = HashMap::new();
-			vars.insert("key", key.into());
-			let res =
-				ns_access(&ds, &mut sess, "test".to_string(), "api".to_string(), vars.into()).await;
-
-			assert!(res.is_ok(), "Failed to signin with bearer key: {:?}", res);
-			assert_eq!(sess.ns, Some("test".to_string()));
-			assert_eq!(sess.db, None);
-			assert!(sess.au.is_ns());
-			assert_eq!(sess.au.level().ns(), Some("test"));
-			assert_eq!(sess.au.level().db(), None);
-			// Record users should not have roles
-			assert!(!sess.au.has_role(&Role::Viewer), "Auth user expected to not have Viewer role");
-			assert!(sess.au.has_role(&Role::Editor), "Auth user expected to have Editor role");
-			assert!(!sess.au.has_role(&Role::Owner), "Auth user expected to not have Owner role");
-			// Expiration should match the defined duration
-			let exp = sess.exp.unwrap();
-			// Expiration should match the current time plus session duration with some margin
-			let min_exp = (Utc::now() + Duration::hours(2) - Duration::seconds(10)).timestamp();
-			let max_exp = (Utc::now() + Duration::hours(2) + Duration::seconds(10)).timestamp();
-			assert!(
-				exp > min_exp && exp < max_exp,
-				"Session expiration is expected to follow the defined duration"
-			);
-		}
-
-		// Test with correct bearer key and AUTHENTICATE clause succeeding
-		{
-			let ds = Datastore::new("memory").await.unwrap();
-			let sess = Session::owner().with_ns("test");
-			let res = ds
-				.execute(
-					r#"
-				DEFINE ACCESS api ON NAMESPACE TYPE BEARER
-					AUTHENTICATE {{
-						RETURN NONE
-					}}
-					DURATION FOR SESSION 2h
-				;
-				DEFINE USER tobie ON NAMESPACE ROLES EDITOR;
-				ACCESS api GRANT FOR USER tobie;
-				"#,
-					&sess,
-					None,
-				)
-				.await
-				.unwrap();
-
-			// Get the bearer key from grant.
-			let result = if let Ok(res) = &res.last().unwrap().result {
-				res.clone()
-			} else {
-				panic!("Unable to retrieve bearer key grant");
-			};
-			let grant = result
-				.coerce_to_object()
-				.unwrap()
-				.get("grant")
-				.unwrap()
-				.clone()
-				.coerce_to_object()
-				.unwrap();
-			let key = grant.get("key").unwrap().clone().as_string();
-
-			// Signin with the bearer key
-			let mut sess = Session {
-				ns: Some("test".to_string()),
-				..Default::default()
-			};
-			let mut vars: HashMap<&str, Value> = HashMap::new();
-			vars.insert("key", key.into());
-			let res =
-				ns_access(&ds, &mut sess, "test".to_string(), "api".to_string(), vars.into()).await;
-
-			assert!(res.is_ok(), "Failed to signin with bearer key: {:?}", res);
-			assert_eq!(sess.ns, Some("test".to_string()));
-			assert_eq!(sess.db, None);
-			assert!(sess.au.is_ns());
-			assert_eq!(sess.au.level().ns(), Some("test"));
-			assert_eq!(sess.au.level().db(), None);
-			// Record users should not have roles
-			assert!(!sess.au.has_role(&Role::Viewer), "Auth user expected to not have Viewer role");
-			assert!(sess.au.has_role(&Role::Editor), "Auth user expected to have Editor role");
-			assert!(!sess.au.has_role(&Role::Owner), "Auth user expected to not have Owner role");
-			// Expiration should match the defined duration
-			let exp = sess.exp.unwrap();
-			// Expiration should match the current time plus session duration with some margin
-			let min_exp = (Utc::now() + Duration::hours(2) - Duration::seconds(10)).timestamp();
-			let max_exp = (Utc::now() + Duration::hours(2) + Duration::seconds(10)).timestamp();
-			assert!(
-				exp > min_exp && exp < max_exp,
-				"Session expiration is expected to follow the defined duration"
-			);
-		}
-
-		// Test with correct bearer key and AUTHENTICATE clause failing
-		{
-			let ds = Datastore::new("memory").await.unwrap();
-			let sess = Session::owner().with_ns("test");
-			let res = ds
-				.execute(
-					r#"
-				DEFINE ACCESS api ON NAMESPACE TYPE BEARER
-					AUTHENTICATE {{
-						THROW "Test authentication error";
-					}}
-					DURATION FOR SESSION 2h
-				;
-				DEFINE USER tobie ON NAMESPACE ROLES EDITOR;
-				ACCESS api GRANT FOR USER tobie;
-				"#,
-					&sess,
-					None,
-				)
-				.await
-				.unwrap();
-
-			// Get the bearer key from grant.
-			let result = if let Ok(res) = &res.last().unwrap().result {
-				res.clone()
-			} else {
-				panic!("Unable to retrieve bearer key grant");
-			};
-			let grant = result
-				.coerce_to_object()
-				.unwrap()
-				.get("grant")
-				.unwrap()
-				.clone()
-				.coerce_to_object()
-				.unwrap();
-			let key = grant.get("key").unwrap().clone().as_string();
-
-			// Signin with the bearer key
-			let mut sess = Session {
-				ns: Some("test".to_string()),
-				..Default::default()
-			};
-			let mut vars: HashMap<&str, Value> = HashMap::new();
-			vars.insert("key", key.into());
-			let res =
-				ns_access(&ds, &mut sess, "test".to_string(), "api".to_string(), vars.into()).await;
-
-			match res {
-				Err(Error::Thrown(e)) => {
-					assert_eq!(e, "Test authentication error")
+				// Check auth level
+				match level.level {
+					"ROOT" => assert!(sess.au.is_root()),
+					"NS" => assert!(sess.au.is_ns()),
+					"DB" => assert!(sess.au.is_db()),
+					_ => panic!("Unsupported level"),
 				}
-				res => panic!(
-					"Expected a thrown authentication error, but instead received: {:?}",
-					res
-				),
+				assert_eq!(sess.au.level().ns(), level.ns);
+				assert_eq!(sess.au.level().db(), level.db);
+
+				// Check roles
+				assert!(
+					!sess.au.has_role(&Role::Viewer),
+					"Auth user expected to not have Viewer role"
+				);
+				assert!(
+					// User is defined with this role only
+					sess.au.has_role(&Role::Editor),
+					"Auth user expected to have Editor role"
+				);
+				assert!(
+					!sess.au.has_role(&Role::Owner),
+					"Auth user expected to not have Owner role"
+				);
+
+				// Check expiration
+				let exp = sess.exp.unwrap();
+				let min_exp = (Utc::now() + Duration::hours(2) - Duration::seconds(10)).timestamp();
+				let max_exp = (Utc::now() + Duration::hours(2) + Duration::seconds(10)).timestamp();
+				assert!(
+					exp > min_exp && exp < max_exp,
+					"Session expiration is expected to match the defined duration",
+				);
 			}
-		}
 
-		// Test with expired grant
-		{
-			let ds = Datastore::new("memory").await.unwrap();
-			let sess = Session::owner().with_ns("test");
-			let res = ds
-				.execute(
-					r#"
-				DEFINE ACCESS api ON NAMESPACE TYPE BEARER DURATION FOR GRANT 1s FOR SESSION 2h;
-				DEFINE USER tobie ON NAMESPACE ROLES EDITOR;
-				ACCESS api GRANT FOR USER tobie;
-				"#,
-					&sess,
-					None,
-				)
-				.await
-				.unwrap();
+			// Test with correct bearer key and AUTHENTICATE clause failing
+			{
+				let ds = Datastore::new("memory").await.unwrap();
+				let sess = Session::owner().with_ns("test").with_db("test");
+				let res = ds
+					.execute(
+						&format!(
+							r#"
+					DEFINE ACCESS api ON {} TYPE BEARER
+						AUTHENTICATE {{
+							THROW "Test authentication error";
+						}}
+						DURATION FOR SESSION 2h
+					;
+					DEFINE USER tobie ON {} ROLES EDITOR;
+					ACCESS api ON {} GRANT FOR USER tobie;
+					"#,
+							level.level, level.level, level.level,
+						),
+						&sess,
+						None,
+					)
+					.await
+					.unwrap();
 
-			// Get the bearer key from grant.
-			let result = if let Ok(res) = &res.last().unwrap().result {
-				res.clone()
-			} else {
-				panic!("Unable to retrieve bearer key grant");
-			};
-			let grant = result
-				.coerce_to_object()
-				.unwrap()
-				.get("grant")
-				.unwrap()
-				.clone()
-				.coerce_to_object()
-				.unwrap();
-			let key = grant.get("key").unwrap().clone().as_string();
+				// Get the bearer key from grant
+				let result = if let Ok(res) = &res.last().unwrap().result {
+					res.clone()
+				} else {
+					panic!("Unable to retrieve bearer key grant");
+				};
+				let grant = result
+					.coerce_to_object()
+					.unwrap()
+					.get("grant")
+					.unwrap()
+					.clone()
+					.coerce_to_object()
+					.unwrap();
+				let key = grant.get("key").unwrap().clone().as_string();
 
-			// Wait for the grant to expire
-			std::thread::sleep(Duration::seconds(2).to_std().unwrap());
+				// Sign in with the bearer key
+				let mut sess = Session {
+					ns: level.ns.map(String::from),
+					db: level.db.map(String::from),
+					..Default::default()
+				};
+				let mut vars: HashMap<&str, Value> = HashMap::new();
+				vars.insert("key", key.into());
+				let res = match level.level {
+					"DB" => {
+						db_access(
+							&ds,
+							&mut sess,
+							level.ns.unwrap().to_string(),
+							level.db.unwrap().to_string(),
+							"api".to_string(),
+							vars.into(),
+						)
+						.await
+					}
+					"NS" => {
+						ns_access(
+							&ds,
+							&mut sess,
+							level.ns.unwrap().to_string(),
+							"api".to_string(),
+							vars.into(),
+						)
+						.await
+					}
+					"ROOT" => root_access(&ds, &mut sess, "api".to_string(), vars.into()).await,
+					_ => panic!("Unsupported level"),
+				};
 
-			// Signin with the bearer key
-			let mut sess = Session {
-				ns: Some("test".to_string()),
-				..Default::default()
-			};
-			let mut vars: HashMap<&str, Value> = HashMap::new();
-			vars.insert("key", key.into());
-			let res =
-				ns_access(&ds, &mut sess, "test".to_string(), "api".to_string(), vars.into()).await;
-
-			match res {
-				Err(Error::InvalidAuth) => {} // ok
-				res => panic!(
-					"Expected a generic authentication error, but instead received: {:?}",
-					res
-				),
-			}
-		}
-
-		// Test with revoked grant
-		{
-			let ds = Datastore::new("memory").await.unwrap();
-			let sess = Session::owner().with_ns("test");
-			let res = ds
-				.execute(
-					r#"
-				DEFINE ACCESS api ON NAMESPACE TYPE BEARER DURATION FOR GRANT 1s FOR SESSION 2h;
-				DEFINE USER tobie ON NAMESPACE ROLES EDITOR;
-				ACCESS api GRANT FOR USER tobie;
-				"#,
-					&sess,
-					None,
-				)
-				.await
-				.unwrap();
-
-			// Get the bearer key from grant.
-			let result = if let Ok(res) = &res.last().unwrap().result {
-				res.clone()
-			} else {
-				panic!("Unable to retrieve bearer key grant");
-			};
-			let grant = result
-				.coerce_to_object()
-				.unwrap()
-				.get("grant")
-				.unwrap()
-				.clone()
-				.coerce_to_object()
-				.unwrap();
-			let key = grant.get("key").unwrap().clone().as_string();
-
-			// Get grant identifier from key
-			let kid = key.split("-").collect::<Vec<&str>>()[2];
-
-			// Revoke grant
-			ds.execute(
-				&format!(
-					r#"
-				ACCESS api REVOKE `{kid}`;
-				"#
-				),
-				&sess,
-				None,
-			)
-			.await
-			.unwrap();
-
-			// Signin with the bearer key
-			let mut sess = Session {
-				ns: Some("test".to_string()),
-				..Default::default()
-			};
-			let mut vars: HashMap<&str, Value> = HashMap::new();
-			vars.insert("key", key.into());
-			let res =
-				ns_access(&ds, &mut sess, "test".to_string(), "api".to_string(), vars.into()).await;
-
-			match res {
-				Err(Error::InvalidAuth) => {} // ok
-				res => panic!(
-					"Expected a generic authentication error, but instead received: {:?}",
-					res
-				),
-			}
-		}
-
-		// Test with removed access method
-		{
-			let ds = Datastore::new("memory").await.unwrap();
-			let sess = Session::owner().with_ns("test");
-			let res = ds
-				.execute(
-					r#"
-				DEFINE ACCESS api ON NAMESPACE TYPE BEARER DURATION FOR GRANT 1s FOR SESSION 2h;
-				DEFINE USER tobie ON NAMESPACE ROLES EDITOR;
-				ACCESS api GRANT FOR USER tobie;
-				"#,
-					&sess,
-					None,
-				)
-				.await
-				.unwrap();
-
-			// Get the bearer key from grant.
-			let result = if let Ok(res) = &res.last().unwrap().result {
-				res.clone()
-			} else {
-				panic!("Unable to retrieve bearer key grant");
-			};
-			let grant = result
-				.coerce_to_object()
-				.unwrap()
-				.get("grant")
-				.unwrap()
-				.clone()
-				.coerce_to_object()
-				.unwrap();
-			let key = grant.get("key").unwrap().clone().as_string();
-
-			// Remove bearer access method
-			ds.execute("REMOVE ACCESS api ON NAMESPACE", &sess, None).await.unwrap();
-
-			// Signin with the bearer key
-			let mut sess = Session {
-				ns: Some("test".to_string()),
-				..Default::default()
-			};
-			let mut vars: HashMap<&str, Value> = HashMap::new();
-			vars.insert("key", key.into());
-			let res =
-				ns_access(&ds, &mut sess, "test".to_string(), "api".to_string(), vars.into()).await;
-
-			match res {
-				Err(Error::AccessNotFound) => {} // ok
-				res => panic!(
-					"Expected an access method not found error, but instead received: {:?}",
-					res
-				),
-			}
-		}
-
-		// Test with missing key
-		{
-			let ds = Datastore::new("memory").await.unwrap();
-			let sess = Session::owner().with_ns("test");
-			let res = ds
-				.execute(
-					r#"
-				DEFINE ACCESS api ON NAMESPACE TYPE BEARER DURATION FOR SESSION 2h;
-				DEFINE USER tobie ON NAMESPACE ROLES EDITOR;
-				ACCESS api GRANT FOR USER tobie;
-				"#,
-					&sess,
-					None,
-				)
-				.await
-				.unwrap();
-
-			// Get the bearer key from grant.
-			let result = if let Ok(res) = &res.last().unwrap().result {
-				res.clone()
-			} else {
-				panic!("Unable to retrieve bearer key grant");
-			};
-			let grant = result
-				.coerce_to_object()
-				.unwrap()
-				.get("grant")
-				.unwrap()
-				.clone()
-				.coerce_to_object()
-				.unwrap();
-			let _key = grant.get("key").unwrap().clone().as_string();
-
-			// Signin with the bearer key
-			let mut sess = Session {
-				ns: Some("test".to_string()),
-				..Default::default()
-			};
-
-			// The key parameter is not inserted:
-			let vars: HashMap<&str, Value> = HashMap::new();
-			// vars.insert("key", key.into());
-
-			let res =
-				ns_access(&ds, &mut sess, "test".to_string(), "api".to_string(), vars.into()).await;
-
-			match res {
-				Err(Error::AccessBearerMissingKey) => {} // ok
-				res => panic!(
-					"Expected a missing key authentication error, but instead received: {:?}",
-					res
-				),
-			}
-		}
-
-		// Test with incorrect bearer key prefix part
-		{
-			let ds = Datastore::new("memory").await.unwrap();
-			let sess = Session::owner().with_ns("test");
-			let res = ds
-				.execute(
-					r#"
-				DEFINE ACCESS api ON NAMESPACE TYPE BEARER DURATION FOR SESSION 2h;
-				DEFINE USER tobie ON NAMESPACE ROLES EDITOR;
-				ACCESS api GRANT FOR USER tobie;
-				"#,
-					&sess,
-					None,
-				)
-				.await
-				.unwrap();
-
-			// Get the bearer key from grant.
-			let result = if let Ok(res) = &res.last().unwrap().result {
-				res.clone()
-			} else {
-				panic!("Unable to retrieve bearer key grant");
-			};
-			let grant = result
-				.coerce_to_object()
-				.unwrap()
-				.get("grant")
-				.unwrap()
-				.clone()
-				.coerce_to_object()
-				.unwrap();
-			let valid_key = grant.get("key").unwrap().clone().as_string();
-
-			// Replace a character from the key prefix
-			let mut invalid_key: Vec<char> = valid_key.chars().collect();
-			invalid_key[access::GRANT_BEARER_PREFIX.len() - 2] = '_';
-			let key: String = invalid_key.into_iter().collect();
-
-			// Signin with the bearer key
-			let mut sess = Session {
-				ns: Some("test".to_string()),
-				..Default::default()
-			};
-			let mut vars: HashMap<&str, Value> = HashMap::new();
-			vars.insert("key", key.into());
-			let res =
-				ns_access(&ds, &mut sess, "test".to_string(), "api".to_string(), vars.into()).await;
-
-			match res {
-				Err(Error::AccessGrantBearerInvalid) => {} // ok
-				res => panic!(
-					"Expected an invalid key authentication error, but instead received: {:?}",
-					res
-				),
-			}
-		}
-
-		// Test with incorrect bearer key length
-		{
-			let ds = Datastore::new("memory").await.unwrap();
-			let sess = Session::owner().with_ns("test");
-			let res = ds
-				.execute(
-					r#"
-				DEFINE ACCESS api ON NAMESPACE TYPE BEARER DURATION FOR SESSION 2h;
-				DEFINE USER tobie ON NAMESPACE ROLES EDITOR;
-				ACCESS api GRANT FOR USER tobie;
-				"#,
-					&sess,
-					None,
-				)
-				.await
-				.unwrap();
-
-			// Get the bearer key from grant.
-			let result = if let Ok(res) = &res.last().unwrap().result {
-				res.clone()
-			} else {
-				panic!("Unable to retrieve bearer key grant");
-			};
-			let grant = result
-				.coerce_to_object()
-				.unwrap()
-				.get("grant")
-				.unwrap()
-				.clone()
-				.coerce_to_object()
-				.unwrap();
-			let valid_key = grant.get("key").unwrap().clone().as_string();
-
-			// Remove a character from the bearer key
-			let mut invalid_key: Vec<char> = valid_key.chars().collect();
-			invalid_key.truncate(access::GRANT_BEARER_LENGTH - 1);
-			let key: String = invalid_key.into_iter().collect();
-
-			// Signin with the bearer key
-			let mut sess = Session {
-				ns: Some("test".to_string()),
-				..Default::default()
-			};
-			let mut vars: HashMap<&str, Value> = HashMap::new();
-			vars.insert("key", key.into());
-			let res =
-				ns_access(&ds, &mut sess, "test".to_string(), "api".to_string(), vars.into()).await;
-
-			match res {
-				Err(Error::AccessGrantBearerInvalid) => {} // ok
-				res => panic!(
-					"Expected an invalid key authentication error, but instead received: {:?}",
-					res
-				),
-			}
-		}
-
-		// Test with incorrect bearer key identifier part
-		{
-			let ds = Datastore::new("memory").await.unwrap();
-			let sess = Session::owner().with_ns("test");
-			let res = ds
-				.execute(
-					r#"
-				DEFINE ACCESS api ON NAMESPACE TYPE BEARER DURATION FOR SESSION 2h;
-				DEFINE USER tobie ON NAMESPACE ROLES EDITOR;
-				ACCESS api GRANT FOR USER tobie;
-				"#,
-					&sess,
-					None,
-				)
-				.await
-				.unwrap();
-
-			// Get the bearer key from grant.
-			let result = if let Ok(res) = &res.last().unwrap().result {
-				res.clone()
-			} else {
-				panic!("Unable to retrieve bearer key grant");
-			};
-			let grant = result
-				.coerce_to_object()
-				.unwrap()
-				.get("grant")
-				.unwrap()
-				.clone()
-				.coerce_to_object()
-				.unwrap();
-			let valid_key = grant.get("key").unwrap().clone().as_string();
-
-			// Replace a character from the key identifier
-			let mut invalid_key: Vec<char> = valid_key.chars().collect();
-			invalid_key[access::GRANT_BEARER_PREFIX.len() + 2] = '_';
-			let key: String = invalid_key.into_iter().collect();
-
-			// Signin with the bearer key
-			let mut sess = Session {
-				ns: Some("test".to_string()),
-				..Default::default()
-			};
-			let mut vars: HashMap<&str, Value> = HashMap::new();
-			vars.insert("key", key.into());
-			let res =
-				ns_access(&ds, &mut sess, "test".to_string(), "api".to_string(), vars.into()).await;
-
-			match res {
-				Err(Error::InvalidAuth) => {} // ok
-				res => panic!(
-					"Expected a generic authentication error, but instead received: {:?}",
-					res
-				),
-			}
-		}
-
-		// Test with incorrect bearer key value
-		{
-			let ds = Datastore::new("memory").await.unwrap();
-			let sess = Session::owner().with_ns("test");
-			let res = ds
-				.execute(
-					r#"
-				DEFINE ACCESS api ON NAMESPACE TYPE BEARER DURATION FOR SESSION 2h;
-				DEFINE USER tobie ON NAMESPACE ROLES EDITOR;
-				ACCESS api GRANT FOR USER tobie;
-				"#,
-					&sess,
-					None,
-				)
-				.await
-				.unwrap();
-
-			// Get the bearer key from grant.
-			let result = if let Ok(res) = &res.last().unwrap().result {
-				res.clone()
-			} else {
-				panic!("Unable to retrieve bearer key grant");
-			};
-			let grant = result
-				.coerce_to_object()
-				.unwrap()
-				.get("grant")
-				.unwrap()
-				.clone()
-				.coerce_to_object()
-				.unwrap();
-			let valid_key = grant.get("key").unwrap().clone().as_string();
-
-			// Replace a character from the key value
-			let mut invalid_key: Vec<char> = valid_key.chars().collect();
-			invalid_key
-				[access::GRANT_BEARER_PREFIX.len() + 1 + access::GRANT_BEARER_ID_LENGTH + 2] = '_';
-			let key: String = invalid_key.into_iter().collect();
-
-			// Signin with the bearer key
-			let mut sess = Session {
-				ns: Some("test".to_string()),
-				..Default::default()
-			};
-			let mut vars: HashMap<&str, Value> = HashMap::new();
-			vars.insert("key", key.into());
-			let res =
-				ns_access(&ds, &mut sess, "test".to_string(), "api".to_string(), vars.into()).await;
-
-			match res {
-				Err(Error::InvalidAuth) => {} // ok
-				res => panic!(
-					"Expected a generic authentication error, but instead received: {:?}",
-					res
-				),
-			}
-		}
-	}
-
-	#[tokio::test]
-	async fn test_signin_bearer_for_user_root() {
-		// Test with correct bearer key
-		{
-			let ds = Datastore::new("memory").await.unwrap();
-			let sess = Session::owner();
-			let res = ds
-				.execute(
-					r#"
-				DEFINE ACCESS api ON ROOT TYPE BEARER DURATION FOR SESSION 2h;
-				DEFINE USER tobie ON ROOT ROLES EDITOR;
-				ACCESS api GRANT FOR USER tobie;
-				"#,
-					&sess,
-					None,
-				)
-				.await
-				.unwrap();
-
-			// Get the bearer key from grant.
-			let result = if let Ok(res) = &res.last().unwrap().result {
-				res.clone()
-			} else {
-				panic!("Unable to retrieve bearer key grant");
-			};
-			let grant = result
-				.coerce_to_object()
-				.unwrap()
-				.get("grant")
-				.unwrap()
-				.clone()
-				.coerce_to_object()
-				.unwrap();
-			let key = grant.get("key").unwrap().clone().as_string();
-
-			// Signin with the bearer key
-			let mut sess = Session {
-				..Default::default()
-			};
-			let mut vars: HashMap<&str, Value> = HashMap::new();
-			vars.insert("key", key.into());
-			let res = root_access(&ds, &mut sess, "api".to_string(), vars.into()).await;
-
-			assert!(res.is_ok(), "Failed to signin with bearer key: {:?}", res);
-			assert_eq!(sess.ns, None);
-			assert_eq!(sess.db, None);
-			assert!(sess.au.is_root());
-			assert_eq!(sess.au.level().ns(), None);
-			assert_eq!(sess.au.level().db(), None);
-			// Record users should not have roles
-			assert!(!sess.au.has_role(&Role::Viewer), "Auth user expected to not have Viewer role");
-			assert!(sess.au.has_role(&Role::Editor), "Auth user expected to have Editor role");
-			assert!(!sess.au.has_role(&Role::Owner), "Auth user expected to not have Owner role");
-			// Expiration should match the defined duration
-			let exp = sess.exp.unwrap();
-			// Expiration should match the current time plus session duration with some margin
-			let min_exp = (Utc::now() + Duration::hours(2) - Duration::seconds(10)).timestamp();
-			let max_exp = (Utc::now() + Duration::hours(2) + Duration::seconds(10)).timestamp();
-			assert!(
-				exp > min_exp && exp < max_exp,
-				"Session expiration is expected to follow the defined duration"
-			);
-		}
-
-		// Test with correct bearer key and AUTHENTICATE clause succeeding
-		{
-			let ds = Datastore::new("memory").await.unwrap();
-			let sess = Session::owner();
-			let res = ds
-				.execute(
-					r#"
-				DEFINE ACCESS api ON ROOT TYPE BEARER
-					AUTHENTICATE {{
-						RETURN NONE
-					}}
-					DURATION FOR SESSION 2h
-				;
-				DEFINE USER tobie ON ROOT ROLES EDITOR;
-				ACCESS api GRANT FOR USER tobie;
-				"#,
-					&sess,
-					None,
-				)
-				.await
-				.unwrap();
-
-			// Get the bearer key from grant.
-			let result = if let Ok(res) = &res.last().unwrap().result {
-				res.clone()
-			} else {
-				panic!("Unable to retrieve bearer key grant");
-			};
-			let grant = result
-				.coerce_to_object()
-				.unwrap()
-				.get("grant")
-				.unwrap()
-				.clone()
-				.coerce_to_object()
-				.unwrap();
-			let key = grant.get("key").unwrap().clone().as_string();
-
-			// Signin with the bearer key
-			let mut sess = Session {
-				..Default::default()
-			};
-			let mut vars: HashMap<&str, Value> = HashMap::new();
-			vars.insert("key", key.into());
-			let res = root_access(&ds, &mut sess, "api".to_string(), vars.into()).await;
-
-			assert!(res.is_ok(), "Failed to signin with bearer key: {:?}", res);
-			assert_eq!(sess.ns, None);
-			assert_eq!(sess.db, None);
-			assert!(sess.au.is_root());
-			assert_eq!(sess.au.level().ns(), None);
-			assert_eq!(sess.au.level().db(), None);
-			// Record users should not have roles
-			assert!(!sess.au.has_role(&Role::Viewer), "Auth user expected to not have Viewer role");
-			assert!(sess.au.has_role(&Role::Editor), "Auth user expected to have Editor role");
-			assert!(!sess.au.has_role(&Role::Owner), "Auth user expected to not have Owner role");
-			// Expiration should match the defined duration
-			let exp = sess.exp.unwrap();
-			// Expiration should match the current time plus session duration with some margin
-			let min_exp = (Utc::now() + Duration::hours(2) - Duration::seconds(10)).timestamp();
-			let max_exp = (Utc::now() + Duration::hours(2) + Duration::seconds(10)).timestamp();
-			assert!(
-				exp > min_exp && exp < max_exp,
-				"Session expiration is expected to follow the defined duration"
-			);
-		}
-
-		// Test with correct bearer key and AUTHENTICATE clause failing
-		{
-			let ds = Datastore::new("memory").await.unwrap();
-			let sess = Session::owner();
-			let res = ds
-				.execute(
-					r#"
-				DEFINE ACCESS api ON ROOT TYPE BEARER
-					AUTHENTICATE {{
-						THROW "Test authentication error";
-					}}
-					DURATION FOR SESSION 2h
-				;
-				DEFINE USER tobie ON ROOT ROLES EDITOR;
-				ACCESS api GRANT FOR USER tobie;
-				"#,
-					&sess,
-					None,
-				)
-				.await
-				.unwrap();
-
-			// Get the bearer key from grant.
-			let result = if let Ok(res) = &res.last().unwrap().result {
-				res.clone()
-			} else {
-				panic!("Unable to retrieve bearer key grant");
-			};
-			let grant = result
-				.coerce_to_object()
-				.unwrap()
-				.get("grant")
-				.unwrap()
-				.clone()
-				.coerce_to_object()
-				.unwrap();
-			let key = grant.get("key").unwrap().clone().as_string();
-
-			// Signin with the bearer key
-			let mut sess = Session {
-				..Default::default()
-			};
-			let mut vars: HashMap<&str, Value> = HashMap::new();
-			vars.insert("key", key.into());
-			let res = root_access(&ds, &mut sess, "api".to_string(), vars.into()).await;
-
-			match res {
-				Err(Error::Thrown(e)) => {
-					assert_eq!(e, "Test authentication error")
+				match res {
+					Err(Error::Thrown(e)) => {
+						assert_eq!(e, "Test authentication error")
+					}
+					res => panic!(
+						"Expected a thrown authentication error, but instead received: {:?}",
+						res
+					),
 				}
-				res => panic!(
-					"Expected a thrown authentication error, but instead received: {:?}",
-					res
-				),
 			}
-		}
 
-		// Test with expired grant
-		{
-			let ds = Datastore::new("memory").await.unwrap();
-			let sess = Session::owner();
-			let res = ds
-				.execute(
-					r#"
-				DEFINE ACCESS api ON ROOT TYPE BEARER DURATION FOR GRANT 1s FOR SESSION 2h;
-				DEFINE USER tobie ON ROOT ROLES EDITOR;
-				ACCESS api GRANT FOR USER tobie;
-				"#,
+			// Test with expired grant
+			{
+				let ds = Datastore::new("memory").await.unwrap();
+				let sess = Session::owner().with_ns("test").with_db("test");
+				let res = ds
+					.execute(
+						&format!(
+							r#"
+					DEFINE ACCESS api ON {} TYPE BEARER DURATION FOR GRANT 1s FOR SESSION 2h;
+					DEFINE USER tobie ON {} ROLES EDITOR;
+					ACCESS api ON {} GRANT FOR USER tobie;
+					"#,
+							level.level, level.level, level.level
+						),
+						&sess,
+						None,
+					)
+					.await
+					.unwrap();
+
+				// Get the bearer key from grant
+				let result = if let Ok(res) = &res.last().unwrap().result {
+					res.clone()
+				} else {
+					panic!("Unable to retrieve bearer key grant");
+				};
+				let grant = result
+					.coerce_to_object()
+					.unwrap()
+					.get("grant")
+					.unwrap()
+					.clone()
+					.coerce_to_object()
+					.unwrap();
+				let key = grant.get("key").unwrap().clone().as_string();
+
+				// Wait for the grant to expire
+				std::thread::sleep(Duration::seconds(2).to_std().unwrap());
+
+				// Sign in with the bearer key
+				let mut sess = Session {
+					ns: level.ns.map(String::from),
+					db: level.db.map(String::from),
+					..Default::default()
+				};
+				let mut vars: HashMap<&str, Value> = HashMap::new();
+				vars.insert("key", key.into());
+				let res = match level.level {
+					"DB" => {
+						db_access(
+							&ds,
+							&mut sess,
+							level.ns.unwrap().to_string(),
+							level.db.unwrap().to_string(),
+							"api".to_string(),
+							vars.into(),
+						)
+						.await
+					}
+					"NS" => {
+						ns_access(
+							&ds,
+							&mut sess,
+							level.ns.unwrap().to_string(),
+							"api".to_string(),
+							vars.into(),
+						)
+						.await
+					}
+					"ROOT" => root_access(&ds, &mut sess, "api".to_string(), vars.into()).await,
+					_ => panic!("Unsupported level"),
+				};
+
+				match res {
+					Err(Error::InvalidAuth) => {} // ok
+					res => panic!(
+						"Expected a generic authentication error, but instead received: {:?}",
+						res
+					),
+				}
+			}
+
+			// Test with revoked grant
+			{
+				let ds = Datastore::new("memory").await.unwrap();
+				let sess = Session::owner().with_ns("test").with_db("test");
+				let res = ds
+					.execute(
+						&format!(
+							r#"
+					DEFINE ACCESS api ON {} TYPE BEARER DURATION FOR GRANT 1s FOR SESSION 2h;
+					DEFINE USER tobie ON {} ROLES EDITOR;
+					ACCESS api ON {} GRANT FOR USER tobie;
+					"#,
+							level.level, level.level, level.level
+						),
+						&sess,
+						None,
+					)
+					.await
+					.unwrap();
+
+				// Get the bearer key from grant
+				let result = if let Ok(res) = &res.last().unwrap().result {
+					res.clone()
+				} else {
+					panic!("Unable to retrieve bearer key grant");
+				};
+				let grant = result
+					.coerce_to_object()
+					.unwrap()
+					.get("grant")
+					.unwrap()
+					.clone()
+					.coerce_to_object()
+					.unwrap();
+				let key = grant.get("key").unwrap().clone().as_string();
+
+				// Get grant identifier from key
+				let kid = key.split("-").collect::<Vec<&str>>()[2];
+
+				// Revoke grant
+				ds.execute(
+					&format!(
+						r#"
+					ACCESS api ON {} REVOKE `{kid}`;
+					"#,
+						level.level
+					),
 					&sess,
 					None,
 				)
 				.await
 				.unwrap();
 
-			// Get the bearer key from grant.
-			let result = if let Ok(res) = &res.last().unwrap().result {
-				res.clone()
-			} else {
-				panic!("Unable to retrieve bearer key grant");
-			};
-			let grant = result
-				.coerce_to_object()
-				.unwrap()
-				.get("grant")
-				.unwrap()
-				.clone()
-				.coerce_to_object()
-				.unwrap();
-			let key = grant.get("key").unwrap().clone().as_string();
+				// Sign in with the bearer key
+				let mut sess = Session {
+					ns: level.ns.map(String::from),
+					db: level.db.map(String::from),
+					..Default::default()
+				};
+				let mut vars: HashMap<&str, Value> = HashMap::new();
+				vars.insert("key", key.into());
+				let res = match level.level {
+					"DB" => {
+						db_access(
+							&ds,
+							&mut sess,
+							level.ns.unwrap().to_string(),
+							level.db.unwrap().to_string(),
+							"api".to_string(),
+							vars.into(),
+						)
+						.await
+					}
+					"NS" => {
+						ns_access(
+							&ds,
+							&mut sess,
+							level.ns.unwrap().to_string(),
+							"api".to_string(),
+							vars.into(),
+						)
+						.await
+					}
+					"ROOT" => root_access(&ds, &mut sess, "api".to_string(), vars.into()).await,
+					_ => panic!("Unsupported level"),
+				};
 
-			// Wait for the grant to expire
-			std::thread::sleep(Duration::seconds(2).to_std().unwrap());
-
-			// Signin with the bearer key
-			let mut sess = Session {
-				..Default::default()
-			};
-			let mut vars: HashMap<&str, Value> = HashMap::new();
-			vars.insert("key", key.into());
-			let res = root_access(&ds, &mut sess, "api".to_string(), vars.into()).await;
-
-			match res {
-				Err(Error::InvalidAuth) => {} // ok
-				res => panic!(
-					"Expected a generic authentication error, but instead received: {:?}",
-					res
-				),
+				match res {
+					Err(Error::InvalidAuth) => {} // ok
+					res => panic!(
+						"Expected a generic authentication error, but instead received: {:?}",
+						res
+					),
+				}
 			}
-		}
 
-		// Test with revoked grant
-		{
-			let ds = Datastore::new("memory").await.unwrap();
-			let sess = Session::owner();
-			let res = ds
-				.execute(
-					r#"
-				DEFINE ACCESS api ON ROOT TYPE BEARER DURATION FOR GRANT 1s FOR SESSION 2h;
-				DEFINE USER tobie ON ROOT ROLES EDITOR;
-				ACCESS api GRANT FOR USER tobie;
-				"#,
-					&sess,
-					None,
-				)
-				.await
-				.unwrap();
+			// Test with removed access method
+			{
+				let ds = Datastore::new("memory").await.unwrap();
+				let sess = Session::owner().with_ns("test").with_db("test");
+				let res = ds
+					.execute(
+						&format!(
+							r#"
+					DEFINE ACCESS api ON {} TYPE BEARER DURATION FOR GRANT 1s FOR SESSION 2h;
+					DEFINE USER tobie ON {} ROLES EDITOR;
+					ACCESS api ON {} GRANT FOR USER tobie;
+					"#,
+							level.level, level.level, level.level
+						),
+						&sess,
+						None,
+					)
+					.await
+					.unwrap();
 
-			// Get the bearer key from grant.
-			let result = if let Ok(res) = &res.last().unwrap().result {
-				res.clone()
-			} else {
-				panic!("Unable to retrieve bearer key grant");
-			};
-			let grant = result
-				.coerce_to_object()
-				.unwrap()
-				.get("grant")
-				.unwrap()
-				.clone()
-				.coerce_to_object()
-				.unwrap();
-			let key = grant.get("key").unwrap().clone().as_string();
+				// Get the bearer key from grant
+				let result = if let Ok(res) = &res.last().unwrap().result {
+					res.clone()
+				} else {
+					panic!("Unable to retrieve bearer key grant");
+				};
+				let grant = result
+					.coerce_to_object()
+					.unwrap()
+					.get("grant")
+					.unwrap()
+					.clone()
+					.coerce_to_object()
+					.unwrap();
+				let key = grant.get("key").unwrap().clone().as_string();
 
-			// Get grant identifier from key
-			let kid = key.split("-").collect::<Vec<&str>>()[2];
+				// Remove bearer access method
+				ds.execute(format!("REMOVE ACCESS api ON {}", level.level).as_str(), &sess, None)
+					.await
+					.unwrap();
 
-			// Revoke grant
-			ds.execute(
-				&format!(
-					r#"
-				ACCESS api REVOKE `{kid}`;
-				"#
-				),
-				&sess,
-				None,
-			)
-			.await
-			.unwrap();
+				// Sign in with the bearer key
+				let mut sess = Session {
+					ns: level.ns.map(String::from),
+					db: level.db.map(String::from),
+					..Default::default()
+				};
+				let mut vars: HashMap<&str, Value> = HashMap::new();
+				vars.insert("key", key.into());
+				let res = match level.level {
+					"DB" => {
+						db_access(
+							&ds,
+							&mut sess,
+							level.ns.unwrap().to_string(),
+							level.db.unwrap().to_string(),
+							"api".to_string(),
+							vars.into(),
+						)
+						.await
+					}
+					"NS" => {
+						ns_access(
+							&ds,
+							&mut sess,
+							level.ns.unwrap().to_string(),
+							"api".to_string(),
+							vars.into(),
+						)
+						.await
+					}
+					"ROOT" => root_access(&ds, &mut sess, "api".to_string(), vars.into()).await,
+					_ => panic!("Unsupported level"),
+				};
 
-			// Signin with the bearer key
-			let mut sess = Session {
-				..Default::default()
-			};
-			let mut vars: HashMap<&str, Value> = HashMap::new();
-			vars.insert("key", key.into());
-			let res = root_access(&ds, &mut sess, "api".to_string(), vars.into()).await;
-
-			match res {
-				Err(Error::InvalidAuth) => {} // ok
-				res => panic!(
-					"Expected a generic authentication error, but instead received: {:?}",
-					res
-				),
+				match res {
+					Err(Error::AccessNotFound) => {} // ok
+					res => panic!(
+						"Expected an access method not found error, but instead received: {:?}",
+						res
+					),
+				}
 			}
-		}
 
-		// Test with removed access method
-		{
-			let ds = Datastore::new("memory").await.unwrap();
-			let sess = Session::owner();
-			let res = ds
-				.execute(
-					r#"
-				DEFINE ACCESS api ON ROOT TYPE BEARER DURATION FOR GRANT 1s FOR SESSION 2h;
-				DEFINE USER tobie ON ROOT ROLES EDITOR;
-				ACCESS api GRANT FOR USER tobie;
-				"#,
-					&sess,
-					None,
-				)
-				.await
-				.unwrap();
+			// Test with missing key
+			{
+				let ds = Datastore::new("memory").await.unwrap();
+				let sess = Session::owner().with_ns("test").with_db("test");
+				let res = ds
+					.execute(
+						&format!(
+							r#"
+					DEFINE ACCESS api ON {} TYPE BEARER DURATION FOR SESSION 2h;
+					DEFINE USER tobie ON {} ROLES EDITOR;
+					ACCESS api ON {} GRANT FOR USER tobie;
+					"#,
+							level.level, level.level, level.level
+						),
+						&sess,
+						None,
+					)
+					.await
+					.unwrap();
 
-			// Get the bearer key from grant.
-			let result = if let Ok(res) = &res.last().unwrap().result {
-				res.clone()
-			} else {
-				panic!("Unable to retrieve bearer key grant");
-			};
-			let grant = result
-				.coerce_to_object()
-				.unwrap()
-				.get("grant")
-				.unwrap()
-				.clone()
-				.coerce_to_object()
-				.unwrap();
-			let key = grant.get("key").unwrap().clone().as_string();
+				// Get the bearer key from grant
+				let result = if let Ok(res) = &res.last().unwrap().result {
+					res.clone()
+				} else {
+					panic!("Unable to retrieve bearer key grant");
+				};
+				let grant = result
+					.coerce_to_object()
+					.unwrap()
+					.get("grant")
+					.unwrap()
+					.clone()
+					.coerce_to_object()
+					.unwrap();
+				let _key = grant.get("key").unwrap().clone().as_string();
 
-			// Remove bearer access method
-			ds.execute("REMOVE ACCESS api ON ROOT", &sess, None).await.unwrap();
+				// Sign in with the bearer key
+				let mut sess = Session {
+					ns: level.ns.map(String::from),
+					db: level.db.map(String::from),
+					..Default::default()
+				};
 
-			// Signin with the bearer key
-			let mut sess = Session {
-				..Default::default()
-			};
-			let mut vars: HashMap<&str, Value> = HashMap::new();
-			vars.insert("key", key.into());
-			let res = root_access(&ds, &mut sess, "api".to_string(), vars.into()).await;
+				// The key parameter is not inserted:
+				let vars: HashMap<&str, Value> = HashMap::new();
+				// vars.insert("key", key.into());
 
-			match res {
-				Err(Error::AccessNotFound) => {} // ok
-				res => panic!(
-					"Expected an access method not found error, but instead received: {:?}",
-					res
-				),
+				let res = match level.level {
+					"DB" => {
+						db_access(
+							&ds,
+							&mut sess,
+							level.ns.unwrap().to_string(),
+							level.db.unwrap().to_string(),
+							"api".to_string(),
+							vars.into(),
+						)
+						.await
+					}
+					"NS" => {
+						ns_access(
+							&ds,
+							&mut sess,
+							level.ns.unwrap().to_string(),
+							"api".to_string(),
+							vars.into(),
+						)
+						.await
+					}
+					"ROOT" => root_access(&ds, &mut sess, "api".to_string(), vars.into()).await,
+					_ => panic!("Unsupported level"),
+				};
+
+				match res {
+					Err(Error::AccessBearerMissingKey) => {} // ok
+					res => panic!(
+						"Expected a missing key authentication error, but instead received: {:?}",
+						res
+					),
+				}
 			}
-		}
 
-		// Test with missing key
-		{
-			let ds = Datastore::new("memory").await.unwrap();
-			let sess = Session::owner();
-			let res = ds
-				.execute(
-					r#"
-				DEFINE ACCESS api ON ROOT TYPE BEARER DURATION FOR SESSION 2h;
-				DEFINE USER tobie ON ROOT ROLES EDITOR;
-				ACCESS api GRANT FOR USER tobie;
-				"#,
-					&sess,
-					None,
-				)
-				.await
-				.unwrap();
+			// Test with incorrect bearer key prefix part
+			{
+				let ds = Datastore::new("memory").await.unwrap();
+				let sess = Session::owner().with_ns("test").with_db("test");
+				let res = ds
+					.execute(
+						&format!(
+							r#"
+					DEFINE ACCESS api ON {} TYPE BEARER DURATION FOR SESSION 2h;
+					DEFINE USER tobie ON {} ROLES EDITOR;
+					ACCESS api ON {} GRANT FOR USER tobie;
+					"#,
+							level.level, level.level, level.level
+						),
+						&sess,
+						None,
+					)
+					.await
+					.unwrap();
 
-			// Get the bearer key from grant.
-			let result = if let Ok(res) = &res.last().unwrap().result {
-				res.clone()
-			} else {
-				panic!("Unable to retrieve bearer key grant");
-			};
-			let grant = result
-				.coerce_to_object()
-				.unwrap()
-				.get("grant")
-				.unwrap()
-				.clone()
-				.coerce_to_object()
-				.unwrap();
-			let _key = grant.get("key").unwrap().clone().as_string();
+				// Get the bearer key from grant
+				let result = if let Ok(res) = &res.last().unwrap().result {
+					res.clone()
+				} else {
+					panic!("Unable to retrieve bearer key grant");
+				};
+				let grant = result
+					.coerce_to_object()
+					.unwrap()
+					.get("grant")
+					.unwrap()
+					.clone()
+					.coerce_to_object()
+					.unwrap();
+				let valid_key = grant.get("key").unwrap().clone().as_string();
 
-			// Signin with the bearer key
-			let mut sess = Session {
-				..Default::default()
-			};
+				// Replace a character from the key prefix
+				let mut invalid_key: Vec<char> = valid_key.chars().collect();
+				invalid_key[access::GRANT_BEARER_PREFIX.len() - 2] = '_';
+				let key: String = invalid_key.into_iter().collect();
 
-			// The key parameter is not inserted:
-			let vars: HashMap<&str, Value> = HashMap::new();
-			// vars.insert("key", key.into());
+				// Sign in with the bearer key
+				let mut sess = Session {
+					ns: level.ns.map(String::from),
+					db: level.db.map(String::from),
+					..Default::default()
+				};
+				let mut vars: HashMap<&str, Value> = HashMap::new();
+				vars.insert("key", key.into());
+				let res = match level.level {
+					"DB" => {
+						db_access(
+							&ds,
+							&mut sess,
+							level.ns.unwrap().to_string(),
+							level.db.unwrap().to_string(),
+							"api".to_string(),
+							vars.into(),
+						)
+						.await
+					}
+					"NS" => {
+						ns_access(
+							&ds,
+							&mut sess,
+							level.ns.unwrap().to_string(),
+							"api".to_string(),
+							vars.into(),
+						)
+						.await
+					}
+					"ROOT" => root_access(&ds, &mut sess, "api".to_string(), vars.into()).await,
+					_ => panic!("Unsupported level"),
+				};
 
-			let res = root_access(&ds, &mut sess, "api".to_string(), vars.into()).await;
-
-			match res {
-				Err(Error::AccessBearerMissingKey) => {} // ok
-				res => panic!(
-					"Expected a missing key authentication error, but instead received: {:?}",
-					res
-				),
+				match res {
+					Err(Error::AccessGrantBearerInvalid) => {} // ok
+					res => panic!(
+						"Expected an invalid key authentication error, but instead received: {:?}",
+						res
+					),
+				}
 			}
-		}
 
-		// Test with incorrect bearer key prefix part
-		{
-			let ds = Datastore::new("memory").await.unwrap();
-			let sess = Session::owner();
-			let res = ds
-				.execute(
-					r#"
-				DEFINE ACCESS api ON ROOT TYPE BEARER DURATION FOR SESSION 2h;
-				DEFINE USER tobie ON ROOT ROLES EDITOR;
-				ACCESS api GRANT FOR USER tobie;
-				"#,
-					&sess,
-					None,
-				)
-				.await
-				.unwrap();
+			// Test with incorrect bearer key length
+			{
+				let ds = Datastore::new("memory").await.unwrap();
+				let sess = Session::owner().with_ns("test").with_db("test");
+				let res = ds
+					.execute(
+						&format!(
+							r#"
+					DEFINE ACCESS api ON {} TYPE BEARER DURATION FOR SESSION 2h;
+					DEFINE USER tobie ON {} ROLES EDITOR;
+					ACCESS api ON {} GRANT FOR USER tobie;
+					"#,
+							level.level, level.level, level.level
+						),
+						&sess,
+						None,
+					)
+					.await
+					.unwrap();
 
-			// Get the bearer key from grant.
-			let result = if let Ok(res) = &res.last().unwrap().result {
-				res.clone()
-			} else {
-				panic!("Unable to retrieve bearer key grant");
-			};
-			let grant = result
-				.coerce_to_object()
-				.unwrap()
-				.get("grant")
-				.unwrap()
-				.clone()
-				.coerce_to_object()
-				.unwrap();
-			let valid_key = grant.get("key").unwrap().clone().as_string();
+				// Get the bearer key from grant
+				let result = if let Ok(res) = &res.last().unwrap().result {
+					res.clone()
+				} else {
+					panic!("Unable to retrieve bearer key grant");
+				};
+				let grant = result
+					.coerce_to_object()
+					.unwrap()
+					.get("grant")
+					.unwrap()
+					.clone()
+					.coerce_to_object()
+					.unwrap();
+				let valid_key = grant.get("key").unwrap().clone().as_string();
 
-			// Replace a character from the key prefix
-			let mut invalid_key: Vec<char> = valid_key.chars().collect();
-			invalid_key[access::GRANT_BEARER_PREFIX.len() - 2] = '_';
-			let key: String = invalid_key.into_iter().collect();
+				// Remove a character from the bearer key
+				let mut invalid_key: Vec<char> = valid_key.chars().collect();
+				invalid_key.truncate(access::GRANT_BEARER_LENGTH - 1);
+				let key: String = invalid_key.into_iter().collect();
 
-			// Signin with the bearer key
-			let mut sess = Session {
-				..Default::default()
-			};
-			let mut vars: HashMap<&str, Value> = HashMap::new();
-			vars.insert("key", key.into());
-			let res = root_access(&ds, &mut sess, "api".to_string(), vars.into()).await;
+				// Sign in with the bearer key
+				let mut sess = Session {
+					ns: level.ns.map(String::from),
+					db: level.db.map(String::from),
+					..Default::default()
+				};
+				let mut vars: HashMap<&str, Value> = HashMap::new();
+				vars.insert("key", key.into());
+				let res = match level.level {
+					"DB" => {
+						db_access(
+							&ds,
+							&mut sess,
+							level.ns.unwrap().to_string(),
+							level.db.unwrap().to_string(),
+							"api".to_string(),
+							vars.into(),
+						)
+						.await
+					}
+					"NS" => {
+						ns_access(
+							&ds,
+							&mut sess,
+							level.ns.unwrap().to_string(),
+							"api".to_string(),
+							vars.into(),
+						)
+						.await
+					}
+					"ROOT" => root_access(&ds, &mut sess, "api".to_string(), vars.into()).await,
+					_ => panic!("Unsupported level"),
+				};
 
-			match res {
-				Err(Error::AccessGrantBearerInvalid) => {} // ok
-				res => panic!(
-					"Expected an invalid key authentication error, but instead received: {:?}",
-					res
-				),
+				match res {
+					Err(Error::AccessGrantBearerInvalid) => {} // ok
+					res => panic!(
+						"Expected an invalid key authentication error, but instead received: {:?}",
+						res
+					),
+				}
 			}
-		}
 
-		// Test with incorrect bearer key length
-		{
-			let ds = Datastore::new("memory").await.unwrap();
-			let sess = Session::owner();
-			let res = ds
-				.execute(
-					r#"
-				DEFINE ACCESS api ON ROOT TYPE BEARER DURATION FOR SESSION 2h;
-				DEFINE USER tobie ON ROOT ROLES EDITOR;
-				ACCESS api GRANT FOR USER tobie;
-				"#,
-					&sess,
-					None,
-				)
-				.await
-				.unwrap();
+			// Test with incorrect bearer key identifier part
+			{
+				let ds = Datastore::new("memory").await.unwrap();
+				let sess = Session::owner().with_ns("test").with_db("test");
+				let res = ds
+					.execute(
+						&format!(
+							r#"
+					DEFINE ACCESS api ON {} TYPE BEARER DURATION FOR SESSION 2h;
+					DEFINE USER tobie ON {} ROLES EDITOR;
+					ACCESS api ON {} GRANT FOR USER tobie;
+					"#,
+							level.level, level.level, level.level
+						),
+						&sess,
+						None,
+					)
+					.await
+					.unwrap();
 
-			// Get the bearer key from grant.
-			let result = if let Ok(res) = &res.last().unwrap().result {
-				res.clone()
-			} else {
-				panic!("Unable to retrieve bearer key grant");
-			};
-			let grant = result
-				.coerce_to_object()
-				.unwrap()
-				.get("grant")
-				.unwrap()
-				.clone()
-				.coerce_to_object()
-				.unwrap();
-			let valid_key = grant.get("key").unwrap().clone().as_string();
+				// Get the bearer key from grant
+				let result = if let Ok(res) = &res.last().unwrap().result {
+					res.clone()
+				} else {
+					panic!("Unable to retrieve bearer key grant");
+				};
+				let grant = result
+					.coerce_to_object()
+					.unwrap()
+					.get("grant")
+					.unwrap()
+					.clone()
+					.coerce_to_object()
+					.unwrap();
+				let valid_key = grant.get("key").unwrap().clone().as_string();
 
-			// Remove a character from the bearer key
-			let mut invalid_key: Vec<char> = valid_key.chars().collect();
-			invalid_key.truncate(access::GRANT_BEARER_LENGTH - 1);
-			let key: String = invalid_key.into_iter().collect();
+				// Replace a character from the key identifier
+				let mut invalid_key: Vec<char> = valid_key.chars().collect();
+				invalid_key[access::GRANT_BEARER_PREFIX.len() + 2] = '_';
+				let key: String = invalid_key.into_iter().collect();
 
-			// Signin with the bearer key
-			let mut sess = Session {
-				..Default::default()
-			};
-			let mut vars: HashMap<&str, Value> = HashMap::new();
-			vars.insert("key", key.into());
-			let res = root_access(&ds, &mut sess, "api".to_string(), vars.into()).await;
+				// Sign in with the bearer key
+				let mut sess = Session {
+					ns: level.ns.map(String::from),
+					db: level.db.map(String::from),
+					..Default::default()
+				};
+				let mut vars: HashMap<&str, Value> = HashMap::new();
+				vars.insert("key", key.into());
+				let res = match level.level {
+					"DB" => {
+						db_access(
+							&ds,
+							&mut sess,
+							level.ns.unwrap().to_string(),
+							level.db.unwrap().to_string(),
+							"api".to_string(),
+							vars.into(),
+						)
+						.await
+					}
+					"NS" => {
+						ns_access(
+							&ds,
+							&mut sess,
+							level.ns.unwrap().to_string(),
+							"api".to_string(),
+							vars.into(),
+						)
+						.await
+					}
+					"ROOT" => root_access(&ds, &mut sess, "api".to_string(), vars.into()).await,
+					_ => panic!("Unsupported level"),
+				};
 
-			match res {
-				Err(Error::AccessGrantBearerInvalid) => {} // ok
-				res => panic!(
-					"Expected an invalid key authentication error, but instead received: {:?}",
-					res
-				),
+				match res {
+					Err(Error::InvalidAuth) => {} // ok
+					res => panic!(
+						"Expected a generic authentication error, but instead received: {:?}",
+						res
+					),
+				}
 			}
-		}
 
-		// Test with incorrect bearer key identifier part
-		{
-			let ds = Datastore::new("memory").await.unwrap();
-			let sess = Session::owner();
-			let res = ds
-				.execute(
-					r#"
-				DEFINE ACCESS api ON ROOT TYPE BEARER DURATION FOR SESSION 2h;
-				DEFINE USER tobie ON ROOT ROLES EDITOR;
-				ACCESS api GRANT FOR USER tobie;
-				"#,
-					&sess,
-					None,
-				)
-				.await
-				.unwrap();
+			// Test with incorrect bearer key value
+			{
+				let ds = Datastore::new("memory").await.unwrap();
+				let sess = Session::owner().with_ns("test").with_db("test");
+				let res = ds
+					.execute(
+						&format!(
+							r#"
+					DEFINE ACCESS api ON {} TYPE BEARER DURATION FOR SESSION 2h;
+					DEFINE USER tobie ON {} ROLES EDITOR;
+					ACCESS api ON {} GRANT FOR USER tobie;
+					"#,
+							level.level, level.level, level.level
+						),
+						&sess,
+						None,
+					)
+					.await
+					.unwrap();
 
-			// Get the bearer key from grant.
-			let result = if let Ok(res) = &res.last().unwrap().result {
-				res.clone()
-			} else {
-				panic!("Unable to retrieve bearer key grant");
-			};
-			let grant = result
-				.coerce_to_object()
-				.unwrap()
-				.get("grant")
-				.unwrap()
-				.clone()
-				.coerce_to_object()
-				.unwrap();
-			let valid_key = grant.get("key").unwrap().clone().as_string();
+				// Get the bearer key from grant
+				let result = if let Ok(res) = &res.last().unwrap().result {
+					res.clone()
+				} else {
+					panic!("Unable to retrieve bearer key grant");
+				};
+				let grant = result
+					.coerce_to_object()
+					.unwrap()
+					.get("grant")
+					.unwrap()
+					.clone()
+					.coerce_to_object()
+					.unwrap();
+				let valid_key = grant.get("key").unwrap().clone().as_string();
 
-			// Replace a character from the key identifier
-			let mut invalid_key: Vec<char> = valid_key.chars().collect();
-			invalid_key[access::GRANT_BEARER_PREFIX.len() + 2] = '_';
-			let key: String = invalid_key.into_iter().collect();
+				// Replace a character from the key value
+				let mut invalid_key: Vec<char> = valid_key.chars().collect();
+				invalid_key
+					[access::GRANT_BEARER_PREFIX.len() + 1 + access::GRANT_BEARER_ID_LENGTH + 2] = '_';
+				let key: String = invalid_key.into_iter().collect();
 
-			// Signin with the bearer key
-			let mut sess = Session {
-				..Default::default()
-			};
-			let mut vars: HashMap<&str, Value> = HashMap::new();
-			vars.insert("key", key.into());
-			let res = root_access(&ds, &mut sess, "api".to_string(), vars.into()).await;
+				// Sign in with the bearer key
+				let mut sess = Session {
+					ns: level.ns.map(String::from),
+					db: level.db.map(String::from),
+					..Default::default()
+				};
+				let mut vars: HashMap<&str, Value> = HashMap::new();
+				vars.insert("key", key.into());
+				let res = match level.level {
+					"DB" => {
+						db_access(
+							&ds,
+							&mut sess,
+							level.ns.unwrap().to_string(),
+							level.db.unwrap().to_string(),
+							"api".to_string(),
+							vars.into(),
+						)
+						.await
+					}
+					"NS" => {
+						ns_access(
+							&ds,
+							&mut sess,
+							level.ns.unwrap().to_string(),
+							"api".to_string(),
+							vars.into(),
+						)
+						.await
+					}
+					"ROOT" => root_access(&ds, &mut sess, "api".to_string(), vars.into()).await,
+					_ => panic!("Unsupported level"),
+				};
 
-			match res {
-				Err(Error::InvalidAuth) => {} // ok
-				res => panic!(
-					"Expected a generic authentication error, but instead received: {:?}",
-					res
-				),
-			}
-		}
-
-		// Test with incorrect bearer key value
-		{
-			let ds = Datastore::new("memory").await.unwrap();
-			let sess = Session::owner();
-			let res = ds
-				.execute(
-					r#"
-				DEFINE ACCESS api ON ROOT TYPE BEARER DURATION FOR SESSION 2h;
-				DEFINE USER tobie ON ROOT ROLES EDITOR;
-				ACCESS api GRANT FOR USER tobie;
-				"#,
-					&sess,
-					None,
-				)
-				.await
-				.unwrap();
-
-			// Get the bearer key from grant.
-			let result = if let Ok(res) = &res.last().unwrap().result {
-				res.clone()
-			} else {
-				panic!("Unable to retrieve bearer key grant");
-			};
-			let grant = result
-				.coerce_to_object()
-				.unwrap()
-				.get("grant")
-				.unwrap()
-				.clone()
-				.coerce_to_object()
-				.unwrap();
-			let valid_key = grant.get("key").unwrap().clone().as_string();
-
-			// Replace a character from the key value
-			let mut invalid_key: Vec<char> = valid_key.chars().collect();
-			invalid_key
-				[access::GRANT_BEARER_PREFIX.len() + 1 + access::GRANT_BEARER_ID_LENGTH + 2] = '_';
-			let key: String = invalid_key.into_iter().collect();
-
-			// Signin with the bearer key
-			let mut sess = Session {
-				..Default::default()
-			};
-			let mut vars: HashMap<&str, Value> = HashMap::new();
-			vars.insert("key", key.into());
-			let res = root_access(&ds, &mut sess, "api".to_string(), vars.into()).await;
-
-			match res {
-				Err(Error::InvalidAuth) => {} // ok
-				res => panic!(
-					"Expected a generic authentication error, but instead received: {:?}",
-					res
-				),
+				match res {
+					Err(Error::InvalidAuth) => {} // ok
+					res => panic!(
+						"Expected a generic authentication error, but instead received: {:?}",
+						res
+					),
+				}
 			}
 		}
 	}
