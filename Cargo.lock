@@ -1785,7 +1785,7 @@ dependencies = [
  "darling",
  "proc-macro2",
  "quote",
- "syn 2.0.58",
+ "syn 2.0.77",
 ]
 
 [[package]]
@@ -1795,7 +1795,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "206868b8242f27cecce124c19fd88157fbd0dd334df2587f36417bafbc85097b"
 dependencies = [
  "derive_builder_core",
- "syn 2.0.58",
+ "syn 2.0.77",
 ]
 
 [[package]]
