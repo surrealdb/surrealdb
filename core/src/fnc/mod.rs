@@ -361,6 +361,7 @@ pub fn synchronous(
 		"time::from::millis" => time::from::millis,
 		"time::from::secs" => time::from::secs,
 		"time::from::unix" => time::from::unix,
+		"time::is::leap_year" => time::is::leap_year,
 		//
 		"type::array" => r#type::array,
 		"type::bool" => r#type::bool,
@@ -735,6 +736,7 @@ pub async fn idiom(
 				"format" => time::format,
 				"group" => time::group,
 				"hour" => time::hour,
+				"is_leap_year" => time::is::leap_year,
 				"micros" => time::micros,
 				"millis" => time::millis,
 				"minute" => time::minute,
