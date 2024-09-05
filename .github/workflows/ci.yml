@@ -242,7 +242,7 @@ jobs:
 
   ml-support:
     name: ML integration tests
-    runs-on: [runner-arm64-large]
+    runs-on: ubuntu-latest
     steps:
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -257,16 +257,15 @@ jobs:
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
+      - name: Install dependencies
+        run: |
+          sudo apt-get -y update
+
       - name: Install cargo-make
         run: cargo install --debug --locked cargo-make
 
       - name: Run ML integration tests
         run: cargo make ci-ml-integration
-
-      - name: Debug
-        if: failure()
-        run: |
-          sleep 1200
 
   test:
     name: Test workspace
