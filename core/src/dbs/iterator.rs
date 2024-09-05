@@ -301,14 +301,7 @@ impl Iterator {
 		self.setup_start(stk, &cancel_ctx, opt, stm).await?;
 		// Prepare the results with possible optimisations on groups
 		self.results = self.results.prepare(
-			#[cfg(any(
-				feature = "kv-mem",
-				feature = "kv-surrealkv",
-				feature = "kv-rocksdb",
-				feature = "kv-fdb",
-				feature = "kv-tikv",
-				feature = "kv-surrealcs",
-			))]
+			#[cfg(storage)]
 			ctx,
 			stm,
 		)?;

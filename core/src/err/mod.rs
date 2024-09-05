@@ -9,14 +9,7 @@ use crate::syn::error::RenderedError as RenderedParserError;
 use crate::vs::Error as VersionstampError;
 use base64::DecodeError as Base64Error;
 use bincode::Error as BincodeError;
-#[cfg(any(
-	feature = "kv-mem",
-	feature = "kv-surrealkv",
-	feature = "kv-rocksdb",
-	feature = "kv-fdb",
-	feature = "kv-tikv",
-	feature = "kv-surrealcs",
-))]
+#[cfg(storage)]
 use ext_sort::SortError;
 use fst::Error as FstError;
 use jsonwebtoken::errors::Error as JWTError;
@@ -1209,14 +1202,7 @@ impl From<reqwest::Error> for Error {
 	}
 }
 
-#[cfg(any(
-	feature = "kv-mem",
-	feature = "kv-surrealkv",
-	feature = "kv-rocksdb",
-	feature = "kv-fdb",
-	feature = "kv-tikv",
-	feature = "kv-surrealcs",
-))]
+#[cfg(storage)]
 impl<S, D, I> From<SortError<S, D, I>> for Error
 where
 	S: std::error::Error,
