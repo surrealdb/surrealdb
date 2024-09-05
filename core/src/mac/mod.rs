@@ -119,6 +119,13 @@ macro_rules! lazy_env_parse_or_else {
 	};
 }
 
+#[macro_export]
+macro_rules! err_unreachable {
+	($msg: literal) => {
+		crate::err::Error::Unreachable(concat!(file!(), ":", line!(), ": ", $msg))
+	};
+}
+
 #[cfg(test)]
 macro_rules! async_defer{
 	(let $bind:ident = ($capture:expr) defer { $($d:tt)* } after { $($t:tt)* }) => {
@@ -203,6 +210,8 @@ macro_rules! async_defer{
 
 #[cfg(test)]
 mod test {
+	use crate::err::Error;
+
 	#[tokio::test]
 	async fn async_defer_basic() {
 		let mut counter = 0;
@@ -240,5 +249,13 @@ mod test {
 			panic!("this panic should be caught")
 		})
 		.await;
+	}
+
+	#[test]
+	fn err_unreachable() {
+		let Error::Unreachable(msg) = err_unreachable!("unreachable") else {
+			panic!()
+		};
+		assert_eq!("core/src/mac/mod.rs:256: unreachable", msg);
 	}
 }
