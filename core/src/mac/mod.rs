@@ -122,7 +122,7 @@ macro_rules! lazy_env_parse_or_else {
 #[macro_export]
 macro_rules! err_unreachable {
 	($msg: literal) => {
-		crate::err::Error::Unreachable(concat!(file!(), ":", line!(), ": ", $msg))
+		$crate::err::Error::Unreachable(concat!(file!(), ":", line!(), ": ", $msg))
 	};
 }
 
