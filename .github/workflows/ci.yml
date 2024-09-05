@@ -242,7 +242,7 @@ jobs:
 
   ml-support:
     name: ML integration tests
-    runs-on: [runner-arm64-medium]
+    runs-on: [runner-arm64-large]
     steps:
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -262,6 +262,11 @@ jobs:
 
       - name: Run ML integration tests
         run: cargo make ci-ml-integration
+
+      - name: Debug
+        if: failure()
+        run: |
+          sleep 1200
 
   test:
     name: Test workspace
