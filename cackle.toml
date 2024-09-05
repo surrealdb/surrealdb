@@ -442,6 +442,7 @@ allow_unsafe = true
 
 [pkg.futures-util]
 allow_unsafe = true
+allow_apis = ["net"]
 
 [pkg.indexmap]
 allow_unsafe = true
