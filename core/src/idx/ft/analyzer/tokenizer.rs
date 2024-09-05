@@ -4,6 +4,7 @@ use crate::idx::ft::analyzer::filter::{Filter, FilterResult, Term};
 use crate::idx::ft::offsets::{Offset, Position};
 use crate::sql::tokenizer::Tokenizer as SqlTokenizer;
 use crate::sql::Value;
+use jieba_rs::Jieba;
 
 pub(in crate::idx) struct Tokens {
 	/// The input string
@@ -207,47 +208,82 @@ impl Tokenizer {
 	}
 
 	pub(super) fn tokenize(t: &[SqlTokenizer], i: String) -> Tokens {
-		let mut w = Tokenizer::new(t);
-		let mut last_char_pos = 0;
-		let mut last_byte_pos = 0;
-		let mut current_char_pos = 0;
-		let mut current_byte_pos = 0;
-		let mut t = Vec::new();
-		for c in i.chars() {
-			let char_len = c.len_utf8() as Position;
-			let is_valid = Self::is_valid(c);
-			let should_split = w.should_split(c);
-			if should_split || !is_valid {
-				// The last pos may be more advanced due to the is_valid process
-				if last_char_pos < current_char_pos {
-					t.push(Token::Ref {
-						chars: (last_char_pos, last_char_pos, current_char_pos),
-						bytes: (last_byte_pos, current_byte_pos),
-						len: current_char_pos - last_char_pos,
-					});
-				}
-				last_char_pos = current_char_pos;
-				last_byte_pos = current_byte_pos;
-				// If the character is not valid for indexing (space, control...)
-				// Then we increase the last position to the next character
-				if !is_valid {
-					last_char_pos += 1;
-					last_byte_pos += char_len;
-				}
+		let mut tokens = Vec::new();
+		let mut have_jieba = false;
+		let mut other_splitters = Vec::new();
+
+		for tokenizer in t {
+			match tokenizer {
+				SqlTokenizer::Jieba => have_jieba = true,
+				_ => other_splitters.push(tokenizer.clone()),
 			}
-			current_char_pos += 1;
-			current_byte_pos += char_len;
 		}
-		if current_char_pos != last_char_pos {
-			t.push(Token::Ref {
-				chars: (last_char_pos, last_char_pos, current_char_pos),
-				bytes: (last_byte_pos, current_byte_pos),
-				len: current_char_pos - last_char_pos,
-			});
+
+		if have_jieba {
+			// 使用Jieba分词
+			let jieba = Jieba::new();
+			let jieba_tokens = jieba.cut(&i, false);
+
+			// 将Jieba的分词结果转换为Token
+			let mut char_pos = 0;
+			let mut byte_pos = 0;
+			for jieba_token in jieba_tokens {
+				let token_len = jieba_token.chars().count() as u32;
+				let byte_len = jieba_token.len() as Position;
+				tokens.push(Token::String {
+					chars: (char_pos, char_pos + token_len, char_pos + token_len),
+					bytes: (byte_pos, byte_pos + byte_len),
+					term: jieba_token.to_string(),
+					len: token_len,
+				});
+				char_pos += token_len;
+				byte_pos += byte_len;
+			}
 		}
+
+		if !other_splitters.is_empty() {
+			let mut tokenizer = Tokenizer::new(&other_splitters);
+			let mut last_char_pos = 0;
+			let mut last_byte_pos = 0;
+			let mut current_char_pos = 0;
+			let mut current_byte_pos = 0;
+
+			for c in i.chars() {
+				let char_len = c.len_utf8() as Position;
+				let is_valid = Tokenizer::is_valid(c);
+				let should_split = tokenizer.should_split(c);
+
+				if should_split || !is_valid {
+					if last_char_pos < current_char_pos {
+						tokens.push(Token::Ref {
+							chars: (last_char_pos, last_char_pos, current_char_pos),
+							bytes: (last_byte_pos, current_byte_pos),
+							len: current_char_pos - last_char_pos,
+						});
+					}
+					last_char_pos = current_char_pos;
+					last_byte_pos = current_byte_pos;
+					if !is_valid {
+						last_char_pos += 1;
+						last_byte_pos += char_len;
+					}
+				}
+				current_char_pos += 1;
+				current_byte_pos += char_len;
+			}
+
+			if current_char_pos != last_char_pos {
+				tokens.push(Token::Ref {
+					chars: (last_char_pos, last_char_pos, current_char_pos),
+					bytes: (last_byte_pos, current_byte_pos),
+					len: current_char_pos - last_char_pos,
+				});
+			}
+		}
+
 		Tokens {
 			i,
-			t,
+			t: tokens,
 		}
 	}
 }
@@ -273,6 +309,7 @@ impl Splitter {
 			SqlTokenizer::Camel => self.camel_state(c),
 			SqlTokenizer::Class => self.class_state(c),
 			SqlTokenizer::Punct => self.punct_state(c),
+			SqlTokenizer::Jieba => false,
 		}
 	}
 
@@ -348,6 +385,71 @@ mod tests {
 			&[
 				"abc", "12345", "xyz", "dl", "1809", "item", "123456", "978", "-", "3", "-", "16",
 				"-", "148410", "-", "0", "1", "hgcm", "82633", "a", "123456",
+			],
+		)
+		.await;
+	}
+
+	#[tokio::test]
+	async fn test_tokenize_chinese() {
+		test_analyzer(
+			"ANALYZER test TOKENIZERS jieba FILTERS lowercase",
+			"一幅怀旧风格的肖像画，一个穿着蓝色头巾和黄色围巾的人物，背景为深色。",
+			&[
+				"一幅",
+				"怀旧",
+				"风格",
+				"的",
+				"肖像画",
+				"，",
+				"一个",
+				"穿着",
+				"蓝色",
+				"头巾",
+				"和",
+				"黄色",
+				"围巾",
+				"的",
+				"人物",
+				"，",
+				"背景",
+				"为",
+				"深色",
+				"。",
+			],
+		)
+		.await;
+	}
+
+	#[tokio::test]
+	async fn test_tokenize_chinese_with_blank() {
+		test_analyzer(
+			"ANALYZER test TOKENIZERS jieba,blank FILTERS lowercase",
+			"一幅怀旧风格的肖像画，一个穿着蓝色头巾和黄色围巾的人物，背景为深色。",
+			&[
+				"一幅",
+				"怀旧",
+				"风格",
+				"的",
+				"肖像画",
+				"，",
+				"一个",
+				"穿着",
+				"蓝色",
+				"头巾",
+				"和",
+				"黄色",
+				"围巾",
+				"的",
+				"人物",
+				"，",
+				"背景",
+				"为",
+				"深色",
+				"。",
+				"一幅怀旧风格的肖像画",
+				"一个穿着蓝色头巾和黄色围巾的人物",
+				"背景为深色",
 			],
 		)
 		.await;
