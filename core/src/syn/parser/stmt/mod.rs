@@ -1,7 +1,6 @@
 use reblessive::Stk;
 
 use crate::cnf::EXPERIMENTAL_BEARER_ACCESS;
-use crate::enter_query_recursion;
 use crate::sql::block::Entry;
 use crate::sql::statements::rebuild::{RebuildIndexStatement, RebuildStatement};
 use crate::sql::statements::show::{ShowSince, ShowStatement};
@@ -13,7 +12,7 @@ use crate::sql::statements::{
 	KillStatement, LiveStatement, OptionStatement, SetStatement, ThrowStatement,
 };
 use crate::sql::{Fields, Ident, Param};
-use crate::syn::parser::{ParseError, ParseErrorKind};
+use crate::syn::parser::enter_query_recursion;
 use crate::syn::token::{t, TokenKind};
 use crate::{
 	sql::{
@@ -61,17 +60,10 @@ impl Parser<'_> {
 							break;
 						}
 
-						if Self::token_kind_starts_statement(self.peek_kind()) {
+						let token = self.peek();
+						if Self::token_kind_starts_statement(token.kind) {
 							// user likely forgot a semicolon.
-							return Err(ParseError::new(
-								ParseErrorKind::UnexpectedExplain {
-									found: self.peek_kind(),
-									expected: "the query to end",
-									explain:
-										"maybe forgot a semicolon after the previous statement?",
-								},
-								self.recent_span(),
-							));
+							unexpected!(self,token,"the query to end", => "maybe forgot a semicolon  after the previous statement?");
 						}
 
 						expected!(self, t!("eof"));
@@ -118,7 +110,7 @@ impl Parser<'_> {
 				if !*EXPERIMENTAL_BEARER_ACCESS {
 					unexpected!(
 						self,
-						t!("ACCESS"),
+						token,
 						"the experimental bearer access feature to be enabled"
 					);
 				}
@@ -385,7 +377,8 @@ impl Parser<'_> {
 	fn parse_access(&mut self) -> ParseResult<AccessStatement> {
 		let ac = self.next_token_value()?;
 		let base = self.eat(t!("ON")).then(|| self.parse_base(false)).transpose()?;
-		match self.peek_kind() {
+		let peek = self.peek();
+		match peek.kind {
 			t!("GRANT") => {
 				self.pop_peek();
 				// TODO(gguillemas): Implement rest of the syntax.
@@ -416,7 +409,7 @@ impl Parser<'_> {
 				}))
 			}
 			// TODO(gguillemas): Implement rest of the statements.
-			x => unexpected!(self, x, "an implemented statement"),
+			_ => unexpected!(self, peek, "an implemented statement"),
 		}
 	}
 
@@ -469,7 +462,8 @@ impl Parser<'_> {
 	/// # Parser State
 	/// Expects `USE` to already be consumed.
 	fn parse_use_stmt(&mut self) -> ParseResult<UseStatement> {
-		let (ns, db) = match self.peek_kind() {
+		let peek = self.peek();
+		let (ns, db) = match peek.kind {
 			t!("NAMESPACE") | t!("ns") => {
 				self.pop_peek();
 				let ns = self.next_token_value::<Ident>()?.0;
@@ -485,7 +479,7 @@ impl Parser<'_> {
 				let db = self.next_token_value::<Ident>()?;
 				(None, Some(db.0))
 			}
-			x => unexpected!(self, x, "either DATABASE or NAMESPACE"),
+			_ => unexpected!(self, peek, "either DATABASE or NAMESPACE"),
 		};
 
 		Ok(UseStatement {
@@ -518,7 +512,8 @@ impl Parser<'_> {
 	/// Expects `INFO` to already be consumed.
 	pub(crate) fn parse_info_stmt(&mut self) -> ParseResult<InfoStatement> {
 		expected!(self, t!("FOR"));
-		let mut stmt = match self.next().kind {
+		let next = self.next();
+		let mut stmt = match next.kind {
 			t!("ROOT") => InfoStatement::Root(false),
 			t!("NAMESPACE") | t!("ns") => InfoStatement::Ns(false),
 			t!("DATABASE") => InfoStatement::Db(false),
@@ -531,7 +526,14 @@ impl Parser<'_> {
 				let base = self.eat(t!("ON")).then(|| self.parse_base(false)).transpose()?;
 				InfoStatement::User(ident, base, false)
 			}
-			x => unexpected!(self, x, "an info target"),
+			t!("INDEX") => {
+				let index = self.next_token_value()?;
+				expected!(self, t!("ON"));
+				self.eat(t!("TABLE"));
+				let table = self.next_token_value()?;
+				InfoStatement::Index(index, table, false)
+			}
+			_ => unexpected!(self, next, "an info target"),
 		};
 
 		if self.peek_kind() == t!("STRUCTURE") {
@@ -546,10 +548,11 @@ impl Parser<'_> {
 	/// # Parser State
 	/// Expects `KILL` to already be consumed.
 	pub(crate) fn parse_kill_stmt(&mut self) -> ParseResult<KillStatement> {
-		let id = match self.peek_kind() {
+		let peek = self.peek();
+		let id = match peek.kind {
 			t!("u\"") | t!("u'") => self.next_token_value().map(Value::Uuid)?,
 			t!("$param") => self.next_token_value().map(Value::Param)?,
-			x => unexpected!(self, x, "a UUID or a parameter"),
+			_ => unexpected!(self, peek, "a UUID or a parameter"),
 		};
 		Ok(KillStatement {
 			id,
@@ -588,10 +591,11 @@ impl Parser<'_> {
 	pub(crate) fn parse_option_stmt(&mut self) -> ParseResult<OptionStatement> {
 		let name = self.next_token_value()?;
 		let what = if self.eat(t!("=")) {
-			match self.next().kind {
+			let next = self.next();
+			match next.kind {
 				t!("true") => true,
 				t!("false") => false,
-				x => unexpected!(self, x, "either 'true' or 'false'"),
+				_ => unexpected!(self, next, "either 'true' or 'false'"),
 			}
 		} else {
 			true
@@ -603,7 +607,8 @@ impl Parser<'_> {
 	}
 
 	pub fn parse_rebuild_stmt(&mut self) -> ParseResult<RebuildStatement> {
-		let res = match self.next().kind {
+		let next = self.next();
+		let res = match next.kind {
 			t!("INDEX") => {
 				let if_exists = if self.eat(t!("IF")) {
 					expected!(self, t!("EXISTS"));
@@ -622,7 +627,7 @@ impl Parser<'_> {
 					if_exists,
 				})
 			}
-			x => unexpected!(self, x, "a rebuild statement keyword"),
+			_ => unexpected!(self, next, "a rebuild statement keyword"),
 		};
 		Ok(res)
 	}
@@ -676,13 +681,14 @@ impl Parser<'_> {
 		expected!(self, t!("CHANGES"));
 		expected!(self, t!("FOR"));
 
-		let table = match self.next().kind {
+		let next = self.next();
+		let table = match next.kind {
 			t!("TABLE") => {
 				let table = self.next_token_value()?;
 				Some(table)
 			}
 			t!("DATABASE") => None,
-			x => unexpected!(self, x, "`TABLE` or `DATABASE`"),
+			_ => unexpected!(self, next, "`TABLE` or `DATABASE`"),
 		};
 
 		expected!(self, t!("SINCE"));
@@ -693,7 +699,7 @@ impl Parser<'_> {
 				ShowSince::Versionstamp(self.next_token_value()?)
 			}
 			t!("d\"") | t!("d'") => ShowSince::Timestamp(self.next_token_value()?),
-			x => unexpected!(self, x, "a version stamp or a date-time"),
+			_ => unexpected!(self, next, "a version stamp or a date-time"),
 		};
 
 		let limit = self.eat(t!("LIMIT")).then(|| self.next_token_value()).transpose()?;

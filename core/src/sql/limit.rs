@@ -19,13 +19,21 @@ impl Limit {
 	pub(crate) async fn process(
 		&self,
 		stk: &mut Stk,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		opt: &Options,
-		doc: Option<&CursorDoc<'_>>,
-	) -> Result<usize, Error> {
+		doc: Option<&CursorDoc>,
+	) -> Result<u32, Error> {
 		match self.0.compute(stk, ctx, opt, doc).await {
 			// This is a valid limiting number
-			Ok(Value::Number(Number::Int(v))) if v >= 0 => Ok(v as usize),
+			Ok(Value::Number(Number::Int(v))) if v >= 0 => {
+				if v > u32::MAX as i64 {
+					Err(Error::InvalidLimit {
+						value: v.to_string(),
+					})
+				} else {
+					Ok(v as u32)
+				}
+			}
 			// An invalid value was specified
 			Ok(v) => Err(Error::InvalidLimit {
 				value: v.as_string(),

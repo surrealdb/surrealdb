@@ -24,13 +24,13 @@ pub fn new<'a>(ns: &'a str, db: &'a str, tb: &'a str) -> Az<'a> {
 
 pub fn prefix(ns: &str, db: &str) -> Vec<u8> {
 	let mut k = super::all::new(ns, db).encode().unwrap();
-	k.extend_from_slice(&[b'!', b'a', b'z', 0x00]);
+	k.extend_from_slice(b"!az\x00");
 	k
 }
 
 pub fn suffix(ns: &str, db: &str) -> Vec<u8> {
 	let mut k = super::all::new(ns, db).encode().unwrap();
-	k.extend_from_slice(&[b'!', b'a', b'z', 0xff]);
+	k.extend_from_slice(b"!az\xff");
 	k
 }
 

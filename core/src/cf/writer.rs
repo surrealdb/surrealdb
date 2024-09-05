@@ -1,11 +1,10 @@
-use std::borrow::Cow;
 use std::collections::HashMap;
 
 use crate::cf::{TableMutation, TableMutations};
+use crate::doc::CursorValue;
 use crate::kvs::Key;
 use crate::sql::statements::DefineTableStatement;
 use crate::sql::thing::Thing;
-use crate::sql::value::Value;
 use crate::sql::Idiom;
 
 // PreparedWrite is a tuple of (versionstamp key, key prefix, key suffix, serialized table mutations).
@@ -71,18 +70,18 @@ impl Writer {
 		db: &str,
 		tb: &str,
 		id: Thing,
-		previous: Cow<'_, Value>,
-		current: Cow<'_, Value>,
+		previous: CursorValue,
+		current: CursorValue,
 		store_difference: bool,
 	) {
-		if current.is_some() {
+		if current.as_ref().is_some() {
 			self.buf.push(
 				ns.to_string(),
 				db.to_string(),
 				tb.to_string(),
 				match store_difference {
 					true => {
-						if previous.is_none() {
+						if previous.as_ref().is_none() {
 							TableMutation::Set(id, current.into_owned())
 						} else {
 							// We intentionally record the patches in reverse (current -> previous)
@@ -147,7 +146,6 @@ impl Writer {
 
 #[cfg(test)]
 mod tests {
-	use std::borrow::Cow;
 	use std::time::Duration;
 
 	use crate::cf::{ChangeSet, DatabaseMutation, TableMutation, TableMutations};
@@ -188,17 +186,17 @@ mod tests {
 		let mut tx1 = ds.transaction(Write, Optimistic).await.unwrap().inner();
 		let thing_a = Thing {
 			tb: TB.to_owned(),
-			id: Id::String("A".to_string()),
+			id: Id::from("A"),
 		};
-		let value_a: super::Value = "a".into();
-		let previous = Cow::from(Value::None);
+		let value_a: Value = "a".into();
+		let previous = Value::None;
 		tx1.record_change(
 			NS,
 			DB,
 			TB,
 			&thing_a,
-			previous.clone(),
-			Cow::Borrowed(&value_a),
+			previous.clone().into(),
+			value_a.into(),
 			DONT_STORE_PREVIOUS,
 		);
 		tx1.complete_changes(true).await.unwrap();
@@ -207,7 +205,7 @@ mod tests {
 		let mut tx2 = ds.transaction(Write, Optimistic).await.unwrap().inner();
 		let thing_c = Thing {
 			tb: TB.to_owned(),
-			id: Id::String("C".to_string()),
+			id: Id::from("C"),
 		};
 		let value_c: Value = "c".into();
 		tx2.record_change(
@@ -215,8 +213,8 @@ mod tests {
 			DB,
 			TB,
 			&thing_c,
-			previous.clone(),
-			Cow::Borrowed(&value_c),
+			previous.clone().into(),
+			value_c.into(),
 			DONT_STORE_PREVIOUS,
 		);
 		tx2.complete_changes(true).await.unwrap();
@@ -225,7 +223,7 @@ mod tests {
 		let mut tx3 = ds.transaction(Write, Optimistic).await.unwrap().inner();
 		let thing_b = Thing {
 			tb: TB.to_owned(),
-			id: Id::String("B".to_string()),
+			id: Id::from("B"),
 		};
 		let value_b: Value = "b".into();
 		tx3.record_change(
@@ -233,13 +231,13 @@ mod tests {
 			DB,
 			TB,
 			&thing_b,
-			previous.clone(),
-			Cow::Borrowed(&value_b),
+			previous.clone().into(),
+			value_b.into(),
 			DONT_STORE_PREVIOUS,
 		);
 		let thing_c2 = Thing {
 			tb: TB.to_owned(),
-			id: Id::String("C".to_string()),
+			id: Id::from("C"),
 		};
 		let value_c2: Value = "c2".into();
 		tx3.record_change(
@@ -247,8 +245,8 @@ mod tests {
 			DB,
 			TB,
 			&thing_c2,
-			previous.clone(),
-			Cow::Borrowed(&value_c2),
+			previous.clone().into(),
+			value_c2.into(),
 			DONT_STORE_PREVIOUS,
 		);
 		tx3.complete_changes(true).await.unwrap();
@@ -436,7 +434,7 @@ mod tests {
 		ds.tick_at(ts.0.timestamp().try_into().unwrap()).await.unwrap();
 		let thing = Thing {
 			tb: TB.to_owned(),
-			id: Id::String("A".to_string()),
+			id: Id::from("A"),
 		};
 		let ses = Session::owner().with_ns(NS).with_db(DB);
 		let res =
@@ -533,17 +531,17 @@ mod tests {
 	async fn record_change_feed_entry(tx: Transaction, id: String) -> Thing {
 		let thing = Thing {
 			tb: TB.to_owned(),
-			id: Id::String(id),
+			id: Id::from(id),
 		};
 		let value_a: Value = "a".into();
-		let previous = Cow::from(Value::None);
+		let previous = Value::None.into();
 		tx.lock().await.record_change(
 			NS,
 			DB,
 			TB,
 			&thing,
-			previous.clone(),
-			Cow::Borrowed(&value_a),
+			previous,
+			value_a.into(),
 			DONT_STORE_PREVIOUS,
 		);
 		tx.lock().await.complete_changes(true).await.unwrap();
@@ -582,11 +580,11 @@ mod tests {
 
 		let mut tx = ds.transaction(Write, Optimistic).await.unwrap().inner();
 		let ns_root = crate::key::root::ns::new(NS);
-		tx.put(&ns_root, dns).await.unwrap();
+		tx.put(&ns_root, dns, None).await.unwrap();
 		let db_root = crate::key::namespace::db::new(NS, DB);
-		tx.put(&db_root, ddb).await.unwrap();
+		tx.put(&db_root, ddb, None).await.unwrap();
 		let tb_root = crate::key::database::tb::new(NS, DB, TB);
-		tx.put(&tb_root, dtb.clone()).await.unwrap();
+		tx.put(&tb_root, dtb.clone(), None).await.unwrap();
 		tx.commit().await.unwrap();
 		ds
 	}

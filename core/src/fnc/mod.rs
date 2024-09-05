@@ -18,12 +18,12 @@ pub mod encoding;
 pub mod geo;
 pub mod http;
 pub mod math;
-pub mod meta;
 pub mod not;
 pub mod object;
 pub mod operate;
 pub mod parse;
 pub mod rand;
+pub mod record;
 pub mod script;
 pub mod search;
 pub mod session;
@@ -32,28 +32,43 @@ pub mod string;
 pub mod time;
 pub mod r#type;
 pub mod util;
+pub mod value;
 pub mod vector;
 
 /// Attempts to run any function
 pub async fn run(
 	stk: &mut Stk,
-	ctx: &Context<'_>,
+	ctx: &Context,
 	opt: &Options,
-	doc: Option<&CursorDoc<'_>>,
+	doc: Option<&CursorDoc>,
 	name: &str,
 	args: Vec<Value>,
 ) -> Result<Value, Error> {
 	if name.eq("sleep")
-		|| name.starts_with("search")
+		|| name.eq("array::all")
+		|| name.eq("array::any")
+		|| name.eq("array::every")
+		|| name.eq("array::filter_index")
+		|| name.eq("array::filter")
+		|| name.eq("array::find_index")
+		|| name.eq("array::find")
+		|| name.eq("array::includes")
+		|| name.eq("array::index_of")
+		|| name.eq("array::map")
+		|| name.eq("array::some")
+		|| name.eq("record::exists")
+		|| name.eq("type::field")
+		|| name.eq("type::fields")
+		|| name.eq("value::diff")
+		|| name.eq("value::patch")
 		|| name.starts_with("http")
-		|| name.starts_with("type::field")
-		|| name.starts_with("type::fields")
+		|| name.starts_with("search")
 		|| name.starts_with("crypto::argon2")
 		|| name.starts_with("crypto::bcrypt")
 		|| name.starts_with("crypto::pbkdf2")
 		|| name.starts_with("crypto::scrypt")
 	{
-		stk.run(|stk| asynchronous(stk, ctx, Some(opt), doc, name, args)).await
+		stk.run(|stk| asynchronous(stk, ctx, opt, doc, name, args)).await
 	} else {
 		synchronous(ctx, doc, name, args)
 	}
@@ -86,8 +101,8 @@ macro_rules! dispatch {
 
 /// Attempts to run any synchronous function.
 pub fn synchronous(
-	ctx: &Context<'_>,
-	doc: Option<&CursorDoc<'_>>,
+	ctx: &Context,
+	doc: Option<&CursorDoc>,
 	name: &str,
 	args: Vec<Value>,
 ) -> Result<Value, Error> {
@@ -95,9 +110,8 @@ pub fn synchronous(
 		name,
 		args,
 		"no such builtin function found",
+		//
 		"array::add" => array::add,
-		"array::all" => array::all,
-		"array::any" => array::any,
 		"array::append" => array::append,
 		"array::at" => array::at,
 		"array::boolean_and" => array::boolean_and,
@@ -110,13 +124,13 @@ pub fn synchronous(
 		"array::concat" => array::concat,
 		"array::difference" => array::difference,
 		"array::distinct" => array::distinct,
-		"array::filter_index" => array::filter_index,
-		"array::find_index" => array::find_index,
+		"array::fill" => array::fill,
 		"array::first" => array::first,
 		"array::flatten" => array::flatten,
 		"array::group" => array::group,
 		"array::insert" => array::insert,
 		"array::intersect" => array::intersect,
+		"array::is_empty" => array::is_empty,
 		"array::join" => array::join,
 		"array::last" => array::last,
 		"array::len" => array::len,
@@ -129,11 +143,14 @@ pub fn synchronous(
 		"array::pop" => array::pop,
 		"array::prepend" => array::prepend,
 		"array::push" => array::push,
+		"array::range" => array::range,
 		"array::remove" => array::remove,
+		"array::repeat" => array::repeat,
 		"array::reverse" => array::reverse,
 		"array::shuffle" => array::shuffle,
 		"array::slice" => array::slice,
 		"array::sort" => array::sort,
+		"array::swap" => array::swap,
 		"array::transpose" => array::transpose,
 		"array::union" => array::union,
 		"array::sort::asc" => array::sort::asc,
@@ -144,6 +161,7 @@ pub fn synchronous(
 		//
 		"count" => count::count,
 		//
+		"crypto::blake3" => crypto::blake3,
 		"crypto::md5" => crypto::md5,
 		"crypto::sha1" => crypto::sha1,
 		"crypto::sha256" => crypto::sha256,
@@ -220,10 +238,6 @@ pub fn synchronous(
 		"math::trimean" => math::trimean,
 		"math::variance" => math::variance,
 		//
-		"meta::id" => meta::id,
-		"meta::table" => meta::tb,
-		"meta::tb" => meta::tb,
-		//
 		"not" => not::not,
 		//
 		"object::entries" => object::entries,
@@ -255,6 +269,10 @@ pub fn synchronous(
 		"rand::uuid::v7" => rand::uuid::v7,
 		"rand::uuid" => rand::uuid,
 		//
+		"record::id" => record::id,
+		"record::table" => record::tb,
+		"record::tb" => record::tb,
+		//
 		"session::ac" => session::ac(ctx),
 		"session::db" => session::db(ctx),
 		"session::id" => session::id(ctx),
@@ -266,7 +284,7 @@ pub fn synchronous(
 		//
 		"string::concat" => string::concat,
 		"string::contains" => string::contains,
-		"string::endsWith" => string::ends_with,
+		"string::ends_with" => string::ends_with,
 		"string::join" => string::join,
 		"string::len" => string::len,
 		"string::lowercase" => string::lowercase,
@@ -277,7 +295,7 @@ pub fn synchronous(
 		"string::slice" => string::slice,
 		"string::slug" => string::slug,
 		"string::split" => string::split,
-		"string::startsWith" => string::starts_with,
+		"string::starts_with" => string::starts_with,
 		"string::trim" => string::trim,
 		"string::uppercase" => string::uppercase,
 		"string::words" => string::words,
@@ -343,7 +361,9 @@ pub fn synchronous(
 		"time::from::millis" => time::from::millis,
 		"time::from::secs" => time::from::secs,
 		"time::from::unix" => time::from::unix,
+		"time::is::leap_year" => time::is::leap_year,
 		//
+		"type::array" => r#type::array,
 		"type::bool" => r#type::bool,
 		"type::bytes" => r#type::bytes,
 		"type::datetime" => r#type::datetime,
@@ -393,6 +413,7 @@ pub fn synchronous(
 		"vector::multiply" => vector::multiply,
 		"vector::normalize" => vector::normalize,
 		"vector::project" => vector::project,
+		"vector::scale" => vector::scale,
 		"vector::subtract" => vector::subtract,
 		"vector::distance::chebyshev" => vector::distance::chebyshev,
 		"vector::distance::euclidean" => vector::distance::euclidean,
@@ -408,10 +429,87 @@ pub fn synchronous(
 	)
 }
 
+/// Attempts to run any asynchronous function.
+pub async fn asynchronous(
+	stk: &mut Stk,
+	ctx: &Context,
+	opt: &Options,
+	doc: Option<&CursorDoc>,
+	name: &str,
+	args: Vec<Value>,
+) -> Result<Value, Error> {
+	// Wrappers return a function as opposed to a value so that the dispatch! method can always
+	// perform a function call.
+	#[cfg(not(target_arch = "wasm32"))]
+	fn cpu_intensive<R: Send + 'static>(
+		function: impl FnOnce() -> R + Send + 'static,
+	) -> impl FnOnce() -> executor::Task<R> {
+		|| crate::exe::spawn(async move { function() })
+	}
+
+	#[cfg(target_arch = "wasm32")]
+	fn cpu_intensive<R: Send + 'static>(
+		function: impl FnOnce() -> R + Send + 'static,
+	) -> impl FnOnce() -> std::future::Ready<R> {
+		|| std::future::ready(function())
+	}
+
+	dispatch!(
+		name,
+		args,
+		"no such builtin function found",
+		//
+		"array::all" => array::all((stk, ctx, Some(opt), doc)).await,
+		"array::any" => array::any((stk, ctx, Some(opt), doc)).await,
+		"array::every" => array::all((stk, ctx, Some(opt), doc)).await,
+		"array::filter" => array::filter((stk, ctx, Some(opt), doc)).await,
+		"array::filter_index" => array::filter_index((stk, ctx, Some(opt), doc)).await,
+		"array::find" => array::find((stk, ctx, Some(opt), doc)).await,
+		"array::find_index" => array::find_index((stk, ctx, Some(opt), doc)).await,
+		"array::includes" => array::any((stk, ctx, Some(opt), doc)).await,
+		"array::index_of" => array::find_index((stk, ctx, Some(opt), doc)).await,
+		"array::map" => array::map((stk, ctx, Some(opt), doc)).await,
+		"array::some" => array::any((stk, ctx, Some(opt), doc)).await,
+		//
+		"crypto::argon2::compare" => (cpu_intensive) crypto::argon2::cmp.await,
+		"crypto::argon2::generate" => (cpu_intensive) crypto::argon2::gen.await,
+		"crypto::bcrypt::compare" => (cpu_intensive) crypto::bcrypt::cmp.await,
+		"crypto::bcrypt::generate" => (cpu_intensive) crypto::bcrypt::gen.await,
+		"crypto::pbkdf2::compare" => (cpu_intensive) crypto::pbkdf2::cmp.await,
+		"crypto::pbkdf2::generate" => (cpu_intensive) crypto::pbkdf2::gen.await,
+		"crypto::scrypt::compare" => (cpu_intensive) crypto::scrypt::cmp.await,
+		"crypto::scrypt::generate" => (cpu_intensive) crypto::scrypt::gen.await,
+		//
+		"http::head" => http::head(ctx).await,
+		"http::get" => http::get(ctx).await,
+		"http::put" => http::put(ctx).await,
+		"http::post" =>  http::post(ctx).await,
+		"http::patch" => http::patch(ctx).await,
+		"http::delete" => http::delete(ctx).await,
+		//
+		"record::exists" => record::exists((stk, ctx, Some(opt), doc)).await,
+		//
+		"search::analyze" => search::analyze((stk, ctx, Some(opt))).await,
+		"search::score" => search::score((ctx, doc)).await,
+		"search::highlight" => search::highlight((ctx, doc)).await,
+		"search::offsets" => search::offsets((ctx, doc)).await,
+		//
+		"sleep" => sleep::sleep(ctx).await,
+		//
+		"type::field" => r#type::field((stk, ctx, Some(opt), doc)).await,
+		"type::fields" => r#type::fields((stk, ctx, Some(opt), doc)).await,
+		//
+		"value::diff" => value::diff((stk, ctx, Some(opt), doc)).await,
+		"value::patch" => value::patch((stk, ctx, Some(opt), doc)).await,
+	)
+}
+
 /// Attempts to run any synchronous function.
-pub fn idiom(
-	ctx: &Context<'_>,
-	doc: Option<&CursorDoc<'_>>,
+pub async fn idiom(
+	stk: &mut Stk,
+	ctx: &Context,
+	opt: &Options,
+	doc: Option<&CursorDoc>,
 	value: Value,
 	name: &str,
 	args: Vec<Value>,
@@ -423,9 +521,10 @@ pub fn idiom(
 				name,
 				args.clone(),
 				"no such method found for the array type",
+				//
 				"add" => array::add,
-				"all" => array::all,
-				"any" => array::any,
+				"all" => array::all((stk, ctx, Some(opt), doc)).await,
+				"any" => array::any((stk, ctx, Some(opt), doc)).await,
 				"append" => array::append,
 				"at" => array::at,
 				"boolean_and" => array::boolean_and,
@@ -438,13 +537,20 @@ pub fn idiom(
 				"concat" => array::concat,
 				"difference" => array::difference,
 				"distinct" => array::distinct,
-				"filter_index" => array::filter_index,
-				"find_index" => array::find_index,
+				"every" => array::all((stk, ctx, Some(opt), doc)).await,
+				"fill" => array::fill,
+				"filter" => array::filter((stk, ctx, Some(opt), doc)).await,
+				"filter_index" => array::filter_index((stk, ctx, Some(opt), doc)).await,
+				"find" => array::find((stk, ctx, Some(opt), doc)).await,
+				"find_index" => array::find_index((stk, ctx, Some(opt), doc)).await,
 				"first" => array::first,
 				"flatten" => array::flatten,
 				"group" => array::group,
+				"includes" => array::any((stk, ctx, Some(opt), doc)).await,
+				"index_of" => array::find_index((stk, ctx, Some(opt), doc)).await,
 				"insert" => array::insert,
 				"intersect" => array::intersect,
+				"is_empty" => array::is_empty,
 				"join" => array::join,
 				"last" => array::last,
 				"len" => array::len,
@@ -452,6 +558,7 @@ pub fn idiom(
 				"logical_or" => array::logical_or,
 				"logical_xor" => array::logical_xor,
 				"matches" => array::matches,
+				"map" => array::map((stk, ctx, Some(opt), doc)).await,
 				"max" => array::max,
 				"min" => array::min,
 				"pop" => array::pop,
@@ -461,7 +568,9 @@ pub fn idiom(
 				"reverse" => array::reverse,
 				"shuffle" => array::shuffle,
 				"slice" => array::slice,
+				"some" => array::any((stk, ctx, Some(opt), doc)).await,
 				"sort" => array::sort,
+				"swap" => array::swap,
 				"transpose" => array::transpose,
 				"union" => array::union,
 				"sort_asc" => array::sort::asc,
@@ -477,6 +586,7 @@ pub fn idiom(
 				"vector_multiply" => vector::multiply,
 				"vector_normalize" => vector::normalize,
 				"vector_project" => vector::project,
+				"vector_scale" => vector::scale,
 				"vector_subtract" => vector::subtract,
 				"vector_distance_chebyshev" => vector::distance::chebyshev,
 				"vector_distance_euclidean" => vector::distance::euclidean,
@@ -496,6 +606,7 @@ pub fn idiom(
 				name,
 				args.clone(),
 				"no such method found for the bytes type",
+				//
 				"len" => bytes::len,
 			)
 		}
@@ -504,6 +615,7 @@ pub fn idiom(
 				name,
 				args.clone(),
 				"no such method found for the duration type",
+				//
 				"days" => duration::days,
 				"hours" => duration::hours,
 				"micros" => duration::micros,
@@ -520,12 +632,13 @@ pub fn idiom(
 				name,
 				args.clone(),
 				"no such method found for the geometry type",
+				//
 				"area" => geo::area,
 				"bearing" => geo::bearing,
 				"centroid" => geo::centroid,
 				"distance" => geo::distance,
-				"hash::decode" => geo::hash::decode,
-				"hash::encode" => geo::hash::encode,
+				"hash_decode" => geo::hash::decode,
+				"hash_encode" => geo::hash::encode,
 			)
 		}
 		Value::Thing(_) => {
@@ -533,9 +646,11 @@ pub fn idiom(
 				name,
 				args.clone(),
 				"no such method found for the record type",
-				"id" => meta::id,
-				"table" => meta::tb,
-				"tb" => meta::tb,
+				//
+				"exists" => record::exists((stk, ctx, Some(opt), doc)).await,
+				"id" => record::id,
+				"table" => record::tb,
+				"tb" => record::tb,
 			)
 		}
 		Value::Object(_) => {
@@ -543,6 +658,7 @@ pub fn idiom(
 				name,
 				args.clone(),
 				"no such method found for the object type",
+				//
 				"entries" => object::entries,
 				"keys" => object::keys,
 				"len" => object::len,
@@ -554,9 +670,10 @@ pub fn idiom(
 				name,
 				args.clone(),
 				"no such method found for the string type",
+				//
 				"concat" => string::concat,
 				"contains" => string::contains,
-				"endsWith" => string::ends_with,
+				"ends_with" => string::ends_with,
 				"join" => string::join,
 				"len" => string::len,
 				"lowercase" => string::lowercase,
@@ -567,7 +684,7 @@ pub fn idiom(
 				"slice" => string::slice,
 				"slug" => string::slug,
 				"split" => string::split,
-				"startsWith" => string::starts_with,
+				"starts_with" => string::starts_with,
 				"trim" => string::trim,
 				"uppercase" => string::uppercase,
 				"words" => string::words,
@@ -599,12 +716,12 @@ pub fn idiom(
 				"semver_major" => string::semver::major,
 				"semver_minor" => string::semver::minor,
 				"semver_patch" => string::semver::patch,
-				"semver_inc::major" => string::semver::inc::major,
-				"semver_inc::minor" => string::semver::inc::minor,
-				"semver_inc::patch" => string::semver::inc::patch,
-				"semver_set::major" => string::semver::set::major,
-				"semver_set::minor" => string::semver::set::minor,
-				"semver_set::patch" => string::semver::set::patch,
+				"semver_inc_major" => string::semver::inc::major,
+				"semver_inc_minor" => string::semver::inc::minor,
+				"semver_inc_patch" => string::semver::inc::patch,
+				"semver_set_major" => string::semver::set::major,
+				"semver_set_minor" => string::semver::set::minor,
+				"semver_set_patch" => string::semver::set::patch,
 			)
 		}
 		Value::Datetime(_) => {
@@ -612,24 +729,26 @@ pub fn idiom(
 				name,
 				args.clone(),
 				"no such method found for the datetime type",
-				"time_ceil" => time::ceil,
-				"time_day" => time::day,
-				"time_floor" => time::floor,
-				"time_format" => time::format,
-				"time_group" => time::group,
-				"time_hour" => time::hour,
-				"time_minute" => time::minute,
-				"time_month" => time::month,
-				"time_nano" => time::nano,
-				"time_micros" => time::micros,
-				"time_millis" => time::millis,
-				"time_round" => time::round,
-				"time_second" => time::second,
-				"time_unix" => time::unix,
-				"time_wday" => time::wday,
-				"time_week" => time::week,
-				"time_yday" => time::yday,
-				"time_year" => time::year,
+				//
+				"ceil" => time::ceil,
+				"day" => time::day,
+				"floor" => time::floor,
+				"format" => time::format,
+				"group" => time::group,
+				"hour" => time::hour,
+				"is_leap_year" => time::is::leap_year,
+				"micros" => time::micros,
+				"millis" => time::millis,
+				"minute" => time::minute,
+				"month" => time::month,
+				"nano" => time::nano,
+				"round" => time::round,
+				"second" => time::second,
+				"unix" => time::unix,
+				"wday" => time::wday,
+				"week" => time::week,
+				"yday" => time::yday,
+				"year" => time::year,
 			)
 		}
 		_ => Err(Error::InvalidFunction {
@@ -647,6 +766,7 @@ pub fn idiom(
 				name,
 				args,
 				message,
+				//
 				"is_array" => r#type::is::array,
 				"is_bool" => r#type::is::bool,
 				"is_bytes" => r#type::is::bytes,
@@ -671,6 +791,7 @@ pub fn idiom(
 				"is_string" => r#type::is::string,
 				"is_uuid" => r#type::is::uuid,
 				//
+				"to_array" => r#type::array,
 				"to_bool" => r#type::bool,
 				"to_bytes" => r#type::bytes,
 				"to_datetime" => r#type::datetime,
@@ -681,78 +802,28 @@ pub fn idiom(
 				"to_int" => r#type::int,
 				"to_number" => r#type::number,
 				"to_point" => r#type::point,
+				"to_range" => r#type::range,
 				"to_record" => r#type::record,
 				"to_string" => r#type::string,
 				"to_uuid" => r#type::uuid,
+				//
+				"chain" => value::chain((stk, ctx, Some(opt), doc)).await,
+				"diff" => value::diff((stk, ctx, Some(opt), doc)).await,
+				"patch" => value::patch((stk, ctx, Some(opt), doc)).await,
+				//
+				"repeat" => array::repeat,
 			)
 		}
 		v => v,
 	}
 }
 
-/// Attempts to run any asynchronous function.
-pub async fn asynchronous(
-	stk: &mut Stk,
-	ctx: &Context<'_>,
-	opt: Option<&Options>,
-	doc: Option<&CursorDoc<'_>>,
-	name: &str,
-	args: Vec<Value>,
-) -> Result<Value, Error> {
-	// Wrappers return a function as opposed to a value so that the dispatch! method can always
-	// perform a function call.
-	#[cfg(not(target_arch = "wasm32"))]
-	fn cpu_intensive<R: Send + 'static>(
-		function: impl FnOnce() -> R + Send + 'static,
-	) -> impl FnOnce() -> executor::Task<R> {
-		|| crate::exe::spawn(async move { function() })
-	}
-
-	#[cfg(target_arch = "wasm32")]
-	fn cpu_intensive<R: Send + 'static>(
-		function: impl FnOnce() -> R + Send + 'static,
-	) -> impl FnOnce() -> std::future::Ready<R> {
-		|| std::future::ready(function())
-	}
-
-	dispatch!(
-		name,
-		args,
-		"no such builtin function found",
-		"crypto::argon2::compare" => (cpu_intensive) crypto::argon2::cmp.await,
-		"crypto::argon2::generate" => (cpu_intensive) crypto::argon2::gen.await,
-		"crypto::bcrypt::compare" => (cpu_intensive) crypto::bcrypt::cmp.await,
-		"crypto::bcrypt::generate" => (cpu_intensive) crypto::bcrypt::gen.await,
-		"crypto::pbkdf2::compare" => (cpu_intensive) crypto::pbkdf2::cmp.await,
-		"crypto::pbkdf2::generate" => (cpu_intensive) crypto::pbkdf2::gen.await,
-		"crypto::scrypt::compare" => (cpu_intensive) crypto::scrypt::cmp.await,
-		"crypto::scrypt::generate" => (cpu_intensive) crypto::scrypt::gen.await,
-		//
-		"http::head" => http::head(ctx).await,
-		"http::get" => http::get(ctx).await,
-		"http::put" => http::put(ctx).await,
-		"http::post" =>  http::post(ctx).await,
-		"http::patch" => http::patch(ctx).await,
-		"http::delete" => http::delete(ctx).await,
-		//
-		"search::analyze" => search::analyze((stk,ctx, opt)).await,
-		"search::score" => search::score((ctx, doc)).await,
-		"search::highlight" => search::highlight((ctx, doc)).await,
-		"search::offsets" => search::offsets((ctx, doc)).await,
-		//
-		"sleep" => sleep::sleep(ctx).await,
-		//
-		"type::field" => r#type::field((stk,ctx, opt, doc)).await,
-		"type::fields" => r#type::fields((stk,ctx, opt, doc)).await,
-	)
-}
-
 fn get_execution_context<'a>(
-	ctx: &'a Context<'_>,
-	doc: Option<&'a CursorDoc<'_>>,
-) -> Option<(&'a QueryExecutor, &'a CursorDoc<'a>, &'a Thing)> {
+	ctx: &'a Context,
+	doc: Option<&'a CursorDoc>,
+) -> Option<(&'a QueryExecutor, &'a CursorDoc, &'a Thing)> {
 	if let Some(doc) = doc {
-		if let Some(thg) = doc.rid {
+		if let Some(thg) = &doc.rid {
 			if let Some(pla) = ctx.get_query_planner() {
 				if let Some(exe) = pla.get_query_executor(&thg.tb) {
 					return Some((exe, doc, thg));
@@ -780,7 +851,7 @@ mod tests {
 		let fnc_mod = include_str!("mod.rs");
 
 		// Patch out idiom methods
-		let re = Regex::new(r"(?ms)pub fn idiom\(.*}\n+///").unwrap();
+		let re = Regex::new(r"(?ms)pub async fn idiom\(.*}").unwrap();
 		let fnc_no_idiom = re.replace(fnc_mod, "");
 
 		for line in fnc_no_idiom.lines() {
@@ -846,7 +917,7 @@ mod tests {
 			for problem in problems {
 				eprintln!(" - {problem}");
 			}
-			panic!("ensure functions can be parsed in lib/src/sql/function.rs and are exported to JS in lib/src/fnc/script/modules/surrealdb");
+			panic!("ensure functions can be parsed in core/src/sql/function.rs and are exported to JS in core/src/fnc/script/modules/surrealdb");
 		}
 	}
 }

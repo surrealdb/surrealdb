@@ -7,6 +7,8 @@ use crate::idx::ft::FtIndex;
 use crate::idx::trees::mtree::MTreeIndex;
 use crate::idx::IndexKeyBase;
 use crate::key;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::kvs::ConsumeResult;
 use crate::kvs::TransactionType;
 use crate::sql::array::Array;
 use crate::sql::index::{HnswParams, Index, MTreeParams, SearchParams};
@@ -14,11 +16,11 @@ use crate::sql::statements::DefineIndexStatement;
 use crate::sql::{Part, Thing, Value};
 use reblessive::tree::Stk;
 
-impl<'a> Document<'a> {
+impl Document {
 	pub async fn index(
 		&self,
 		stk: &mut Stk,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		opt: &Options,
 		_stm: &Statement<'_>,
 	) -> Result<(), Error> {
@@ -27,7 +29,9 @@ impl<'a> Document<'a> {
 		// Collect indexes or skip
 		let ixs = match &opt.force {
 			Force::Index(ix)
-				if ix.first().is_some_and(|ix| self.id.is_some_and(|id| ix.what.0 == id.tb)) =>
+				if ix
+					.first()
+					.is_some_and(|ix| self.id.as_ref().is_some_and(|id| ix.what.0 == id.tb)) =>
 			{
 				ix.clone()
 			}
@@ -44,51 +48,77 @@ impl<'a> Document<'a> {
 		// Loop through all index statements
 		for ix in ixs.iter() {
 			// Calculate old values
-			let o = build_opt_values(stk, ctx, opt, ix, &self.initial).await?;
+			let o = Self::build_opt_values(stk, ctx, opt, ix, &self.initial).await?;
 
 			// Calculate new values
-			let n = build_opt_values(stk, ctx, opt, ix, &self.current).await?;
+			let n = Self::build_opt_values(stk, ctx, opt, ix, &self.current).await?;
 
 			// Update the index entries
 			if targeted_force || o != n {
-				// Store all the variable and parameters required by the index operation
-				let mut ic = IndexOperation::new(opt, ix, o, n, rid);
-
-				// Index operation dispatching
-				match &ix.index {
-					Index::Uniq => ic.index_unique(ctx).await?,
-					Index::Idx => ic.index_non_unique(ctx).await?,
-					Index::Search(p) => ic.index_full_text(stk, ctx, p).await?,
-					Index::MTree(p) => ic.index_mtree(stk, ctx, p).await?,
-					Index::Hnsw(p) => ic.index_hnsw(ctx, p).await?,
-				};
+				Self::one_index(stk, ctx, opt, ix, o, n, rid).await?;
 			}
 		}
 		// Carry on
 		Ok(())
 	}
-}
 
-/// Extract from the given document, the values required by the index and put then in an array.
-/// Eg. IF the index is composed of the columns `name` and `instrument`
-/// Given this doc: { "id": 1, "instrument":"piano", "name":"Tobie" }
-/// It will return: ["Tobie", "piano"]
-async fn build_opt_values(
-	stk: &mut Stk,
-	ctx: &Context<'_>,
-	opt: &Options,
-	ix: &DefineIndexStatement,
-	doc: &CursorDoc<'_>,
-) -> Result<Option<Vec<Value>>, Error> {
-	if !doc.doc.is_some() {
-		return Ok(None);
+	async fn one_index(
+		stk: &mut Stk,
+		ctx: &Context,
+		opt: &Options,
+		ix: &DefineIndexStatement,
+		o: Option<Vec<Value>>,
+		n: Option<Vec<Value>>,
+		rid: &Thing,
+	) -> Result<(), Error> {
+		#[cfg(not(target_arch = "wasm32"))]
+		let (o, n) = if let Some(ib) = ctx.get_index_builder() {
+			match ib.consume(ctx, ix, o, n, rid).await? {
+				// The index builder consumed the value, which means it is currently building the index asynchronously,
+				// we don't index the document and let the index builder do it later.
+				ConsumeResult::Enqueued => return Ok(()),
+				// The index builder is done, the index has been built, we can proceed normally
+				ConsumeResult::Ignored(o, n) => (o, n),
+			}
+		} else {
+			(o, n)
+		};
+
+		// Store all the variable and parameters required by the index operation
+		let mut ic = IndexOperation::new(opt, ix, o, n, rid);
+
+		// Index operation dispatching
+		match &ix.index {
+			Index::Uniq => ic.index_unique(ctx).await?,
+			Index::Idx => ic.index_non_unique(ctx).await?,
+			Index::Search(p) => ic.index_full_text(stk, ctx, p).await?,
+			Index::MTree(p) => ic.index_mtree(stk, ctx, p).await?,
+			Index::Hnsw(p) => ic.index_hnsw(ctx, p).await?,
+		}
+		Ok(())
 	}
-	let mut o = Vec::with_capacity(ix.cols.len());
-	for i in ix.cols.iter() {
-		let v = i.compute(stk, ctx, opt, Some(doc)).await?;
-		o.push(v);
+
+	/// Extract from the given document, the values required by the index and put then in an array.
+	/// Eg. IF the index is composed of the columns `name` and `instrument`
+	/// Given this doc: { "id": 1, "instrument":"piano", "name":"Tobie" }
+	/// It will return: ["Tobie", "piano"]
+	pub(crate) async fn build_opt_values(
+		stk: &mut Stk,
+		ctx: &Context,
+		opt: &Options,
+		ix: &DefineIndexStatement,
+		doc: &CursorDoc,
+	) -> Result<Option<Vec<Value>>, Error> {
+		if !doc.doc.as_ref().is_some() {
+			return Ok(None);
+		}
+		let mut o = Vec::with_capacity(ix.cols.len());
+		for i in ix.cols.iter() {
+			let v = i.compute(stk, ctx, opt, Some(doc)).await?;
+			o.push(v);
+		}
+		Ok(Some(o))
 	}
-	Ok(Some(o))
 }
 
 /// Extract from the given document, the values required by the index and put then in an array.
@@ -279,7 +309,7 @@ impl<'a> IndexOperation<'a> {
 		))
 	}
 
-	async fn index_unique(&mut self, ctx: &Context<'_>) -> Result<(), Error> {
+	async fn index_unique(&mut self, ctx: &Context) -> Result<(), Error> {
 		// Get the transaction
 		let txn = ctx.tx();
 		// Lock the transaction
@@ -304,7 +334,7 @@ impl<'a> IndexOperation<'a> {
 					let key = self.get_unique_index_key(&n)?;
 					if txn.putc(key, self.rid, None).await.is_err() {
 						let key = self.get_unique_index_key(&n)?;
-						let val = txn.get(key).await?.unwrap();
+						let val = txn.get(key, None).await?.unwrap();
 						let rid: Thing = val.into();
 						return self.err_index_exists(rid, n);
 					}
@@ -314,7 +344,7 @@ impl<'a> IndexOperation<'a> {
 		Ok(())
 	}
 
-	async fn index_non_unique(&mut self, ctx: &Context<'_>) -> Result<(), Error> {
+	async fn index_non_unique(&mut self, ctx: &Context) -> Result<(), Error> {
 		// Get the transaction
 		let txn = ctx.tx();
 		// Lock the transaction
@@ -338,7 +368,7 @@ impl<'a> IndexOperation<'a> {
 				let key = self.get_non_unique_index_key(&n)?;
 				if txn.putc(key, self.rid, None).await.is_err() {
 					let key = self.get_non_unique_index_key(&n)?;
-					let val = txn.get(key).await?.unwrap();
+					let val = txn.get(key, None).await?.unwrap();
 					let rid: Thing = val.into();
 					return self.err_index_exists(rid, n);
 				}
@@ -361,7 +391,7 @@ impl<'a> IndexOperation<'a> {
 	async fn index_full_text(
 		&mut self,
 		stk: &mut Stk,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		p: &SearchParams,
 	) -> Result<(), Error> {
 		let ikb = IndexKeyBase::new(self.opt.ns()?, self.opt.db()?, self.ix)?;
@@ -379,7 +409,7 @@ impl<'a> IndexOperation<'a> {
 	async fn index_mtree(
 		&mut self,
 		stk: &mut Stk,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		p: &MTreeParams,
 	) -> Result<(), Error> {
 		let txn = ctx.tx();
@@ -397,16 +427,16 @@ impl<'a> IndexOperation<'a> {
 		mt.finish(&txn).await
 	}
 
-	async fn index_hnsw(&mut self, ctx: &Context<'_>, p: &HnswParams) -> Result<(), Error> {
-		let hnsw = ctx.get_index_stores().get_index_hnsw(self.opt, self.ix, p).await?;
+	async fn index_hnsw(&mut self, ctx: &Context, p: &HnswParams) -> Result<(), Error> {
+		let hnsw = ctx.get_index_stores().get_index_hnsw(ctx, self.opt, self.ix, p).await?;
 		let mut hnsw = hnsw.write().await;
 		// Delete the old index data
 		if let Some(o) = self.o.take() {
-			hnsw.remove_document(self.rid, &o)?;
+			hnsw.remove_document(&ctx.tx(), self.rid.id.clone(), &o).await?;
 		}
 		// Create the new index data
 		if let Some(n) = self.n.take() {
-			hnsw.index_document(self.rid, &n)?;
+			hnsw.index_document(&ctx.tx(), self.rid.id.clone(), &n).await?;
 		}
 		Ok(())
 	}

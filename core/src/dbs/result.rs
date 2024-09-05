@@ -1,13 +1,7 @@
 use crate::ctx::Context;
 use crate::dbs::group::GroupsCollector;
 use crate::dbs::plan::Explanation;
-#[cfg(any(
-	feature = "kv-mem",
-	feature = "kv-surrealkv",
-	feature = "kv-rocksdb",
-	feature = "kv-fdb",
-	feature = "kv-tikv",
-))]
+#[cfg(storage)]
 use crate::dbs::store::file_store::FileCollector;
 use crate::dbs::store::MemoryCollector;
 use crate::dbs::{Options, Statement};
@@ -18,13 +12,7 @@ use reblessive::tree::Stk;
 pub(super) enum Results {
 	None,
 	Memory(MemoryCollector),
-	#[cfg(any(
-		feature = "kv-mem",
-		feature = "kv-surrealkv",
-		feature = "kv-rocksdb",
-		feature = "kv-fdb",
-		feature = "kv-tikv",
-	))]
+	#[cfg(storage)]
 	File(Box<FileCollector>),
 	Groups(GroupsCollector),
 }
@@ -32,26 +20,13 @@ pub(super) enum Results {
 impl Results {
 	pub(super) fn prepare(
 		&mut self,
-		#[cfg(any(
-			feature = "kv-mem",
-			feature = "kv-surrealkv",
-			feature = "kv-rocksdb",
-			feature = "kv-fdb",
-			feature = "kv-tikv",
-		))]
-		ctx: &Context<'_>,
+		#[cfg(storage)] ctx: &Context,
 		stm: &Statement<'_>,
 	) -> Result<Self, Error> {
 		if stm.expr().is_some() && stm.group().is_some() {
 			return Ok(Self::Groups(GroupsCollector::new(stm)));
 		}
-		#[cfg(any(
-			feature = "kv-mem",
-			feature = "kv-surrealkv",
-			feature = "kv-rocksdb",
-			feature = "kv-fdb",
-			feature = "kv-tikv",
-		))]
+		#[cfg(storage)]
 		if stm.tempfiles() {
 			if let Some(temp_dir) = ctx.temporary_directory() {
 				return Ok(Self::File(Box::new(FileCollector::new(temp_dir)?)));
@@ -63,7 +38,7 @@ impl Results {
 	pub(super) async fn push(
 		&mut self,
 		stk: &mut Stk,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		opt: &Options,
 		stm: &Statement<'_>,
 		val: Value,
@@ -73,13 +48,7 @@ impl Results {
 			Self::Memory(s) => {
 				s.push(val);
 			}
-			#[cfg(any(
-				feature = "kv-mem",
-				feature = "kv-surrealkv",
-				feature = "kv-rocksdb",
-				feature = "kv-fdb",
-				feature = "kv-tikv",
-			))]
+			#[cfg(storage)]
 			Self::File(e) => {
 				e.push(val)?;
 			}
@@ -93,29 +62,17 @@ impl Results {
 	pub(super) fn sort(&mut self, orders: &Orders) {
 		match self {
 			Self::Memory(m) => m.sort(orders),
-			#[cfg(any(
-				feature = "kv-mem",
-				feature = "kv-surrealkv",
-				feature = "kv-rocksdb",
-				feature = "kv-fdb",
-				feature = "kv-tikv",
-			))]
+			#[cfg(storage)]
 			Self::File(f) => f.sort(orders),
 			_ => {}
 		}
 	}
 
-	pub(super) fn start_limit(&mut self, start: Option<&usize>, limit: Option<&usize>) {
+	pub(super) fn start_limit(&mut self, start: Option<u32>, limit: Option<u32>) {
 		match self {
 			Self::None => {}
 			Self::Memory(m) => m.start_limit(start, limit),
-			#[cfg(any(
-				feature = "kv-mem",
-				feature = "kv-surrealkv",
-				feature = "kv-rocksdb",
-				feature = "kv-fdb",
-				feature = "kv-tikv",
-			))]
+			#[cfg(storage)]
 			Self::File(f) => f.start_limit(start, limit),
 			Self::Groups(_) => {}
 		}
@@ -125,13 +82,7 @@ impl Results {
 		match self {
 			Self::None => 0,
 			Self::Memory(s) => s.len(),
-			#[cfg(any(
-				feature = "kv-mem",
-				feature = "kv-surrealkv",
-				feature = "kv-rocksdb",
-				feature = "kv-fdb",
-				feature = "kv-tikv",
-			))]
+			#[cfg(storage)]
 			Self::File(e) => e.len(),
 			Self::Groups(g) => g.len(),
 		}
@@ -140,13 +91,7 @@ impl Results {
 	pub(super) fn take(&mut self) -> Result<Vec<Value>, Error> {
 		Ok(match self {
 			Self::Memory(m) => m.take_vec(),
-			#[cfg(any(
-				feature = "kv-mem",
-				feature = "kv-surrealkv",
-				feature = "kv-rocksdb",
-				feature = "kv-fdb",
-				feature = "kv-tikv",
-			))]
+			#[cfg(storage)]
 			Self::File(f) => f.take_vec()?,
 			_ => vec![],
 		})
@@ -158,13 +103,7 @@ impl Results {
 			Self::Memory(s) => {
 				s.explain(exp);
 			}
-			#[cfg(any(
-				feature = "kv-mem",
-				feature = "kv-surrealkv",
-				feature = "kv-rocksdb",
-				feature = "kv-fdb",
-				feature = "kv-tikv",
-			))]
+			#[cfg(storage)]
 			Self::File(e) => {
 				e.explain(exp);
 			}

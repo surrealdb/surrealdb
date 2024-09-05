@@ -4,11 +4,7 @@
 
 [common]
 version = 2
-import_std = [
-    "fs",
-    "net",
-    "process",
-]
+import_std = ["fs", "net", "process"]
 features = ["default"]
 build_flags = ["--tests"]
 
@@ -16,14 +12,8 @@ build_flags = ["--tests"]
 kind = "Bubblewrap"
 
 [api.fs]
-include = [
-    "rustix::fs",
-    "tokio::fs",
-]
-exclude = [
-    "std::path::Path",
-    "std::path::PathBuf",
-]
+include = ["rustix::fs", "tokio::fs"]
+exclude = ["std::path::Path", "std::path::PathBuf"]
 
 [api.net]
 include = [
@@ -39,18 +29,14 @@ include = [
     "tracing",
     "tracing_core",
 ]
-exclude = [
-    "hashbrown::map",
-]
+exclude = ["hashbrown::map"]
 
 #
 # Crates Linking to Libraries
 #
 
 [pkg.ring]
-build.allow_apis = [
-    "process",
-]
+build.allow_apis = ["process"]
 build.allow_build_instructions = [
     "cargo:rustc-env=RING_CORE_PREFIX=*",
     "cargo:rustc-link-lib=static=ring",
@@ -61,19 +47,13 @@ build.allow_build_instructions = [
     "cargo:rustc-link-search=native=*",
 ]
 allow_unsafe = true
-allow_apis = [
-    "fs",
-]
+allow_apis = ["fs"]
 
 [pkg.walkdir]
-allow_apis = [
-    "fs",
-]
+allow_apis = ["fs"]
 
 [pkg.zstd-sys]
-build.allow_apis = [
-    "fs",
-]
+build.allow_apis = ["fs"]
 build.allow_build_instructions = [
     "cargo:include=*",
     "cargo:root=*",
@@ -82,10 +62,7 @@ build.allow_build_instructions = [
 ]
 
 [pkg.libz-sys]
-build.allow_apis = [
-    "fs",
-    "process",
-]
+build.allow_apis = ["fs", "process"]
 build.allow_build_instructions = [
     "cargo:include=*",
     "cargo:root=*",
@@ -95,9 +72,7 @@ build.allow_build_instructions = [
 allow_unsafe = true
 
 [pkg.bzip2-sys]
-build.allow_apis = [
-    "fs",
-]
+build.allow_apis = ["fs"]
 build.allow_build_instructions = [
     "cargo:include=*",
     "cargo:root=*",
@@ -106,9 +81,7 @@ build.allow_build_instructions = [
 ]
 
 [pkg.lz4-sys]
-build.allow_apis = [
-    "fs",
-]
+build.allow_apis = ["fs"]
 build.allow_build_instructions = [
     "cargo:include=*",
     "cargo:root=*",
@@ -125,10 +98,7 @@ build.allow_build_instructions = [
 ]
 
 [pkg.rquickjs-sys]
-build.allow_apis = [
-    "fs",
-    "process",
-]
+build.allow_apis = ["fs", "process"]
 build.allow_build_instructions = [
     "cargo:rustc-link-lib=static=quickjs",
     "cargo:rustc-link-search=native=*",
@@ -145,13 +115,8 @@ build.allow_build_instructions = [
 [pkg.librocksdb-sys]
 allow_unsafe = true
 build.sandbox.allow_network = true
-build.sandbox.make_writable = [
-    "target",
-]
-build.allow_apis = [
-    "fs",
-    "process",
-]
+build.sandbox.make_writable = ["target"]
+build.allow_apis = ["fs", "process"]
 build.allow_build_instructions = [
     "cargo:rustc-link-lib=static=rocksdb",
     "cargo:rustc-link-search=native=*",
@@ -219,14 +184,14 @@ allow_proc_macro = true
 [pkg.axum-macros]
 allow_proc_macro = true
 
+[pkg.axum-extra]
+allow_apis = ["net"]
+
 [pkg.serde_with_macros]
 allow_proc_macro = true
 
 [pkg.async-trait]
 allow_proc_macro = true
-build.allow_apis = [
-    "process",
-]
 allow_unsafe = true
 
 [pkg.clap_derive]
@@ -250,10 +215,7 @@ allow_unsafe = true
 
 [pkg.rustversion]
 allow_proc_macro = true
-build.allow_apis = [
-    "fs",
-    "process",
-]
+build.allow_apis = ["fs", "process"]
 
 [pkg.bytecheck_derive]
 allow_proc_macro = true
@@ -263,9 +225,7 @@ allow_proc_macro = true
 
 [pkg.rquickjs-macro]
 allow_proc_macro = true
-allow_apis = [
-    "fs",
-]
+allow_apis = ["fs"]
 allow_unsafe = true
 
 [pkg.async-stream-impl]
@@ -283,9 +243,7 @@ allow_proc_macro = true
 
 [pkg.paste]
 allow_proc_macro = true
-build.allow_apis = [
-    "process",
-]
+build.allow_apis = ["process"]
 
 [pkg.surrealdb-derive]
 allow_proc_macro = true
@@ -312,24 +270,16 @@ allow_unsafe = true
 allow_unsafe = true
 
 [pkg.serde]
-build.allow_apis = [
-    "process",
-]
+build.allow_apis = ["process"]
 allow_unsafe = true
-allow_apis = [
-    "fs",
-]
+allow_apis = ["fs"]
 
 [pkg.proc-macro2]
-build.allow_apis = [
-    "process",
-]
+build.allow_apis = ["process"]
 allow_unsafe = true
 
 [pkg.libc]
-build.allow_apis = [
-    "process",
-]
+build.allow_apis = ["process"]
 allow_unsafe = true
 
 [pkg.memchr]
@@ -342,18 +292,13 @@ allow_unsafe = true
 allow_unsafe = true
 
 [pkg.autocfg]
-from.build.allow_apis = [
-    "fs",
-    "process",
-]
+from.build.allow_apis = ["fs", "process"]
 
 [pkg.scopeguard]
 allow_unsafe = true
 
 [pkg.version_check]
-from.build.allow_apis = [
-    "process",
-]
+from.build.allow_apis = ["process"]
 
 [pkg.zerocopy]
 allow_unsafe = true
@@ -390,46 +335,32 @@ allow_unsafe = true
 
 [pkg.jobserver]
 allow_unsafe = true
-from.build.allow_apis = [
-    "fs",
-]
+from.build.allow_apis = ["fs"]
 
 [pkg.getrandom]
 allow_unsafe = true
 
 [pkg.syn]
 allow_unsafe = true
-build.allow_apis = [
-    "process",
-]
+build.allow_apis = ["process"]
 
 [pkg.mio]
 allow_unsafe = true
-allow_apis = [
-    "fs",
-    "net",
-]
+allow_apis = ["fs", "net"]
 
 [pkg.num_cpus]
 allow_unsafe = true
-allow_apis = [
-    "fs",
-]
+allow_apis = ["fs"]
 
 [pkg.socket2]
 allow_unsafe = true
-allow_apis = [
-    "net",
-]
+allow_apis = ["net"]
 
 [pkg.signal-hook-registry]
 allow_unsafe = true
 
 [pkg.rustix]
-build.allow_apis = [
-    "fs",
-    "process",
-]
+build.allow_apis = ["fs", "process"]
 allow_unsafe = true
 
 [pkg.tracing-core]
@@ -442,30 +373,19 @@ allow_unsafe = true
 allow_unsafe = true
 
 [pkg.thiserror]
-build.allow_apis = [
-    "process",
-]
-build.allow_build_instructions = [
-    "cargo:rustc-check-cfg=*",
-]
-allow_apis = [
-    "fs",
-]
+build.allow_apis = ["process"]
+build.allow_build_instructions = ["cargo:rustc-check-cfg=*"]
+allow_apis = ["fs"]
 
 [pkg.ahash]
 allow_unsafe = true
 
 [pkg.cc]
 allow_unsafe = true
-from.build.allow_apis = [
-    "fs",
-    "process",
-]
+from.build.allow_apis = ["fs", "process"]
 
 [pkg.typenum]
-build.allow_apis = [
-    "fs",
-]
+build.allow_apis = ["fs"]
 
 [pkg.rand_core]
 allow_unsafe = true
@@ -484,16 +404,11 @@ allow_unsafe = true
 
 [pkg.tracing]
 allow_unsafe = true
-allow_apis = [
-    "net",
-]
+allow_apis = ["net"]
 
 [pkg.tokio]
 allow_unsafe = true
-allow_apis = [
-    "net",
-    "process",
-]
+allow_apis = ["net", "process"]
 
 [pkg.regex-automata]
 allow_unsafe = true
@@ -506,10 +421,7 @@ allow_unsafe = true
 
 [pkg.clang-sys]
 allow_unsafe = true
-from.build.allow_apis = [
-    "fs",
-    "process",
-]
+from.build.allow_apis = ["fs", "process"]
 
 [pkg.http]
 allow_unsafe = true
@@ -528,12 +440,11 @@ allow_unsafe = true
 
 [pkg.futures-util]
 allow_unsafe = true
+allow_apis = ["net"]
 
 [pkg.indexmap]
 allow_unsafe = true
-allow_apis = [
-    "net",
-]
+allow_apis = ["net"]
 
 [pkg.httparse]
 allow_unsafe = true
@@ -552,9 +463,7 @@ allow_unsafe = true
 
 [pkg.tokio-util]
 allow_unsafe = true
-allow_apis = [
-    "net",
-]
+allow_apis = ["net"]
 
 [pkg.nom]
 allow_unsafe = true
@@ -567,9 +476,7 @@ allow_unsafe = true
 
 [pkg.prettyplease]
 allow_unsafe = true
-build.allow_build_instructions = [
-    "cargo:VERSION=*",
-]
+build.allow_build_instructions = ["cargo:VERSION=*"]
 
 [pkg.lazycell]
 allow_unsafe = true
@@ -596,9 +503,7 @@ allow_unsafe = true
 allow_unsafe = true
 
 [pkg.semver]
-build.allow_apis = [
-    "process",
-]
+build.allow_apis = ["process"]
 allow_unsafe = true
 
 [pkg.unicode-bidi]
@@ -609,32 +514,22 @@ allow_unsafe = true
 
 [pkg.bindgen]
 allow_unsafe = true
-from.build.allow_apis = [
-    "fs",
-    "process",
-]
+from.build.allow_apis = ["fs", "process"]
 
 [pkg.pkg-config]
-from.build.allow_apis = [
-    "fs",
-    "process",
-]
+from.build.allow_apis = ["fs", "process"]
 
 [pkg.parking_lot_core]
 allow_unsafe = true
 
 [pkg.wasm-bindgen-shared]
-build.allow_build_instructions = [
-    "cargo:rustc-env=SCHEMA_FILE_HASH=*",
-]
+build.allow_build_instructions = ["cargo:rustc-env=SCHEMA_FILE_HASH=*"]
 
 [pkg.dirs-sys-next]
 allow_unsafe = true
 
 [pkg.crunchy]
-build.allow_apis = [
-    "fs",
-]
+build.allow_apis = ["fs"]
 
 [pkg.is-terminal]
 allow_unsafe = true
@@ -646,9 +541,7 @@ allow_unsafe = true
 allow_unsafe = true
 
 [pkg.anyhow]
-build.allow_apis = [
-    "process",
-]
+build.allow_apis = ["process"]
 allow_unsafe = true
 
 [pkg.siphasher]
@@ -658,18 +551,14 @@ allow_unsafe = true
 allow_unsafe = true
 
 [pkg.rustc_version]
-from.build.allow_apis = [
-    "process",
-]
+from.build.allow_apis = ["process"]
 
 [pkg.concurrent-queue]
 allow_unsafe = true
 
 [pkg.h2]
 allow_unsafe = true
-allow_apis = [
-    "net",
-]
+allow_apis = ["net"]
 
 [pkg.fixedbitset]
 allow_unsafe = true
@@ -729,22 +618,15 @@ allow_unsafe = true
 allow_unsafe = true
 
 [pkg.crc32fast]
-build.allow_apis = [
-    "process",
-]
+build.allow_apis = ["process"]
 allow_unsafe = true
 
 [pkg.heapless]
 allow_unsafe = true
-build.allow_apis = [
-    "fs",
-    "process",
-]
+build.allow_apis = ["fs", "process"]
 
 [pkg.vcpkg]
-from.build.allow_apis = [
-    "fs",
-]
+from.build.allow_apis = ["fs"]
 
 [pkg.inout]
 allow_unsafe = true
@@ -754,9 +636,7 @@ allow_unsafe = true
 
 [pkg.tokio-stream]
 allow_unsafe = true
-from.test.allow_apis = [
-    "net",
-]
+from.test.allow_apis = ["net"]
 
 [pkg.deranged]
 allow_unsafe = true
@@ -764,14 +644,10 @@ allow_unsafe = true
 
 [pkg.same-file]
 allow_unsafe = true
-allow_apis = [
-    "fs",
-]
+allow_apis = ["fs"]
 
 [pkg.doc-comment]
-build.allow_apis = [
-    "process",
-]
+build.allow_apis = ["process"]
 
 [pkg.itertools]
 allow_unsafe = true
@@ -784,9 +660,7 @@ allow_unsafe = true
 
 [pkg.hyper]
 allow_unsafe = true
-allow_apis = [
-    "net",
-]
+allow_apis = ["net"]
 
 [pkg.brotli-decompressor]
 allow_unsafe = true
@@ -798,9 +672,7 @@ allow_unsafe = true
 allow_unsafe = true
 
 [pkg.num-bigint]
-build.allow_apis = [
-    "fs",
-]
+build.allow_apis = ["fs"]
 allow_unsafe = true
 
 [pkg.utf8parse]
@@ -826,14 +698,10 @@ allow_unsafe = true
 
 
 [pkg.glob]
-allow_apis = [
-    "fs",
-]
+allow_apis = ["fs"]
 
 [pkg.which]
-from.build.allow_apis = [
-    "fs",
-]
+from.build.allow_apis = ["fs"]
 
 [pkg.geo-types]
 allow_unsafe = true
@@ -857,32 +725,22 @@ allow_unsafe = true
 allow_unsafe = true
 
 [pkg.mime_guess]
-build.allow_apis = [
-    "fs",
-]
+build.allow_apis = ["fs"]
 
 [pkg.term]
-from.build.allow_apis = [
-    "fs",
-]
+from.build.allow_apis = ["fs"]
 
 [pkg.lalrpop]
-from.build.allow_apis = [
-    "fs",
-]
+from.build.allow_apis = ["fs"]
 
 [pkg.smol_str]
 allow_unsafe = true
 
 [pkg.rust_decimal]
-build.allow_apis = [
-    "fs",
-]
+build.allow_apis = ["fs"]
 
 [pkg.ref-cast]
-build.allow_apis = [
-    "process",
-]
+build.allow_apis = ["process"]
 allow_unsafe = true
 
 [pkg.atomic]
@@ -890,9 +748,7 @@ allow_unsafe = true
 
 [pkg.iana-time-zone]
 allow_unsafe = true
-allow_apis = [
-    "fs",
-]
+allow_apis = ["fs"]
 
 [pkg.bitmaps]
 allow_unsafe = true
@@ -908,6 +764,7 @@ allow_unsafe = true
 
 [pkg.async-stream]
 allow_unsafe = true
+allow_apis = ["net"]
 
 [pkg.prost]
 allow_unsafe = true
@@ -923,9 +780,7 @@ allow_unsafe = true
 
 [pkg.chrono]
 allow_unsafe = true
-allow_apis = [
-    "fs",
-]
+allow_apis = ["fs"]
 
 [pkg.anstyle-parse]
 allow_unsafe = true
@@ -947,9 +802,7 @@ allow_unsafe = true
 
 [pkg.tracing-log]
 allow_unsafe = true
-allow_apis = [
-    "net",
-]
+allow_apis = ["net"]
 
 [pkg.arrayvec]
 allow_unsafe = true
@@ -958,9 +811,7 @@ allow_unsafe = true
 allow_unsafe = true
 
 [pkg.fst]
-build.allow_apis = [
-    "fs",
-]
+build.allow_apis = ["fs"]
 
 [pkg.anstyle-query]
 allow_unsafe = true
@@ -969,9 +820,7 @@ allow_unsafe = true
 allow_unsafe = true
 
 [pkg.snap]
-build.allow_apis = [
-    "fs",
-]
+build.allow_apis = ["fs"]
 allow_unsafe = true
 
 [pkg.arc-swap]
@@ -991,9 +840,7 @@ allow_unsafe = true
 
 [pkg.tracing-subscriber]
 allow_unsafe = true
-allow_apis = [
-    "net",
-]
+allow_apis = ["net"]
 
 [pkg.imbl]
 allow_unsafe = true
@@ -1003,9 +850,7 @@ allow_unsafe = true
 
 [pkg.hyper-util]
 allow_unsafe = true
-allow_apis = [
-    "net",
-]
+allow_apis = ["net"]
 
 [pkg.terminal_size]
 allow_unsafe = true
@@ -1048,19 +893,11 @@ allow_unsafe = true
 
 [pkg.quick_cache]
 allow_unsafe = true
-allow_apis = [
-    "net",
-]
+allow_apis = ["net"]
 
 [pkg.surreal]
-allow_apis = [
-    "fs",
-    "net",
-    "process",
-]
-build.allow_build_instructions = [
-    "cargo:rustc-env=*",
-]
+allow_apis = ["fs", "net", "process"]
+build.allow_build_instructions = ["cargo:rustc-env=*"]
 
 [pkg.surreal.build.sandbox]
 allow_network = true
@@ -1091,18 +928,14 @@ allow_unsafe = true
 
 [pkg.tracing-opentelemetry]
 allow_unsafe = true
-allow_apis = [
-    "net",
-]
+allow_apis = ["net"]
 
 [pkg.predicates]
 allow_unsafe = true
 
 [pkg.rustyline]
 allow_unsafe = true
-allow_apis = [
-    "fs",
-]
+allow_apis = ["fs"]
 
 [pkg.zstd-safe]
 allow_unsafe = true
@@ -1124,116 +957,73 @@ allow_unsafe = true
 
 [pkg.reqwest]
 allow_unsafe = true
-allow_apis = [
-    "fs",
-    "net",
-]
+allow_apis = ["fs", "net"]
 
 [pkg.proc-macro-crate]
-allow_apis = [
-    "fs",
-]
+allow_apis = ["fs", "process"]
 
 [pkg.tonic]
 allow_unsafe = true
-allow_apis = [
-    "net",
-]
+allow_apis = ["net"]
 
 [pkg.rocksdb]
 allow_unsafe = true
-allow_apis = [
-    "fs",
-]
+allow_apis = ["fs"]
 
 [pkg.surrealdb]
-allow_apis = [
-    "fs",
-]
-build.allow_build_instructions = [
-    "cargo::rustc-check-cfg=*",
-]
+allow_unsafe = true
+allow_apis = ["fs"]
+build.allow_build_instructions = ["cargo::rustc-check-cfg=*"]
 
 [pkg.surrealdb-core]
 allow_unsafe = true
-allow_apis = [
-    "net",
-    "fs",
-]
+allow_apis = ["net", "fs"]
 build.allow_build_instructions = [
+    "cargo:rustc-cfg=*",
     "cargo::rustc-check-cfg=*",
 ]
 
 [pkg.assert_fs]
-from.test.allow_apis = [
-    "fs",
-]
+from.test.allow_apis = ["fs"]
 
 [pkg.tempfile]
-allow_apis = [
-    "fs",
-]
+allow_apis = ["fs"]
 
 [pkg.object_store]
-allow_apis = [
-    "fs",
-]
+allow_apis = ["fs"]
 
 [pkg.hyper-rustls]
-allow_apis = [
-    "net",
-]
+allow_apis = ["net"]
 
 [pkg.wiremock]
-from.test.allow_apis = [
-    "net",
-]
+from.test.allow_apis = ["net"]
 
 [pkg.tokio-tungstenite]
-allow_apis = [
-    "net",
-]
+allow_apis = ["net"]
 
 [pkg.path-clean]
-allow_apis = [
-    "fs",
-]
+allow_apis = ["fs"]
 
 [pkg.axum-server]
-allow_apis = [
-    "fs",
-    "net",
-]
+allow_apis = ["fs", "net"]
 
 [pkg.clap_builder]
-allow_apis = [
-    "fs",
-]
+allow_apis = ["fs"]
 
 [pkg.axum]
-allow_apis = [
-    "net",
-]
+allow_apis = ["net"]
 
 [pkg.tower]
-allow_apis = [
-    "net",
-]
+allow_apis = ["net"]
 
 [pkg.opentelemetry_sdk]
-allow_apis = [
-    "net",
-]
+allow_apis = ["net"]
 
 [pkg.tower-http]
-allow_apis = [
-    "net",
-]
+allow_apis = ["net"]
 
 [pkg.axum-core]
-allow_apis = [
-    "net",
-]
+allow_apis = ["net"]
 
 [pkg.cpp_demangle]
 allow_unsafe = true
@@ -1283,6 +1073,27 @@ allow_unsafe = true
 [pkg.pprof]
 allow_unsafe = true
 
+[pkg.pest_derive]
+allow_proc_macro = true
+
+[pkg.pest]
+allow_unsafe = true
+
+[pkg.pest_generator]
+allow_apis = ["fs"]
+
+[pkg.async-graphql-derive]
+allow_proc_macro = true
+
+[pkg.strum_macros]
+allow_proc_macro = true
+
+[pkg.async-graphql]
+allow_apis = ["fs", "net"]
+
+[pkg.multer]
+allow_apis = ["net"]
+
 # examples
 [pkg.pear_codegen]
 allow_proc_macro = true
@@ -1294,9 +1105,7 @@ allow_proc_macro = true
 allow_proc_macro = true
 
 [pkg.ext-sort]
-allow_apis = [
-    "fs",
-]
+allow_apis = ["fs"]
 
 [pkg.phf_macros]
 allow_proc_macro = true
@@ -1329,17 +1138,13 @@ allow_unsafe = true
 allow_unsafe = true
 
 [pkg.html5ever]
-build.allow_apis = [
-    "fs",
-]
+build.allow_apis = ["fs"]
 
 [pkg.futf]
 allow_unsafe = true
 
 [pkg.markup5ever]
-build.allow_apis = [
-    "fs",
-]
+build.allow_apis = ["fs"]
 allow_unsafe = true
 
 [pkg.tendril]
@@ -1349,9 +1154,7 @@ allow_unsafe = true
 allow_unsafe = true
 
 [pkg.surrealkv]
-allow_apis = [
-    "fs",
-]
+allow_apis = ["fs"]
 
 [pkg.atomic-waker]
 allow_unsafe = true
@@ -1359,5 +1162,29 @@ allow_unsafe = true
 [pkg.rustls-pki-types]
 allow_unsafe = true
 
+[pkg.static_assertions_next]
+allow_unsafe = true
+
+[pkg.async-graphql-axum]
+allow_apis = ["net"]
+
+[pkg.futures-timer]
+allow_unsafe = true
+
 [pkg.castaway]
+allow_unsafe = true
+
+[pkg.blake3]
+build.allow_apis = ["fs"]
+build.allow_build_instructions = [
+    "cargo:rustc-link-lib=static=blake3_avx512_assembly",
+    "cargo:rustc-link-lib=static=blake3_sse2_sse41_avx2_assembly",
+    "cargo:rustc-link-search=native=*",
+]
+allow_unsafe = true
+
+[pkg.arrayref]
+allow_unsafe = true
+
+[pkg.constant_time_eq]
 allow_unsafe = true

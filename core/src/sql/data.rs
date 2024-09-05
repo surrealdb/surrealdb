@@ -38,23 +38,23 @@ impl Data {
 	pub(crate) async fn rid(
 		&self,
 		stk: &mut Stk,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		opt: &Options,
 	) -> Result<Option<Value>, Error> {
 		match self {
 			Self::MergeExpression(v) => match v {
 				Value::Param(v) => Ok(v.compute(stk, ctx, opt, None).await?.rid().some()),
-				Value::Object(_) => Ok(v.rid().some()),
+				Value::Object(_) => Ok(v.rid().compute(stk, ctx, opt, None).await?.some()),
 				_ => Ok(None),
 			},
 			Self::ReplaceExpression(v) => match v {
 				Value::Param(v) => Ok(v.compute(stk, ctx, opt, None).await?.rid().some()),
-				Value::Object(_) => Ok(v.rid().some()),
+				Value::Object(_) => Ok(v.rid().compute(stk, ctx, opt, None).await?.some()),
 				_ => Ok(None),
 			},
 			Self::ContentExpression(v) => match v {
 				Value::Param(v) => Ok(v.compute(stk, ctx, opt, None).await?.rid().some()),
-				Value::Object(_) => Ok(v.rid().some()),
+				Value::Object(_) => Ok(v.rid().compute(stk, ctx, opt, None).await?.some()),
 				_ => Ok(None),
 			},
 			Self::SetExpression(v) => match v.iter().find(|f| f.0.is_id()) {

@@ -117,14 +117,14 @@ mod tests {
 	async fn get_ids(ds: &Datastore) -> (Transaction, U32) {
 		let txn = ds.transaction(Write, Optimistic).await.unwrap();
 		let key = "foo";
-		let v = txn.get(key).await.unwrap();
+		let v = txn.get(key, None).await.unwrap();
 		let d = U32::new(key.into(), v).await.unwrap();
 		(txn, d)
 	}
 
 	async fn finish(txn: Transaction, mut d: U32) -> Result<(), Error> {
 		if let Some((key, val)) = d.finish() {
-			txn.set(key, val).await?;
+			txn.set(key, val, None).await?;
 		}
 		txn.commit().await
 	}

@@ -2,6 +2,7 @@ use crate::cli::CF;
 use crate::err::Error;
 use clap::Args;
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::time::Duration;
 use surrealdb::dbs::capabilities::{Capabilities, FuncTarget, NetTarget, Targets};
 use surrealdb::kvs::Datastore;
@@ -239,6 +240,8 @@ pub async fn init(
 		.with_auth_enabled(!unauthenticated)
 		.with_temporary_directory(temporary_directory)
 		.with_capabilities(capabilities);
+	// Ensure the storage version is up-to-date to prevent corruption
+	dbs.check_version().await?;
 	// Setup initial server auth credentials
 	if let (Some(user), Some(pass)) = (opt.user.as_ref(), opt.pass.as_ref()) {
 		dbs.initialise_credentials(user, pass).await?;
@@ -247,6 +250,19 @@ pub async fn init(
 	dbs.bootstrap().await?;
 	// All ok
 	Ok(dbs)
+}
+
+pub async fn fix(path: String) -> Result<(), Error> {
+	// Parse and setup the desired kv datastore
+	let dbs = Arc::new(Datastore::new(&path).await?);
+	// Ensure the storage version is up-to-date to prevent corruption
+	let version = dbs.get_version().await?;
+	// Apply fixes
+	version.fix(dbs).await?;
+	// Log success
+	println!("Database storage version was updated successfully. Please carefully read back logs to see if any manual changes need to be applied");
+	// All ok
+	Ok(())
 }
 
 #[cfg(test)]

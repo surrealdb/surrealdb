@@ -84,6 +84,10 @@ impl Datastore {
 		} else {
 			TransactionOptions::new_optimistic()
 		};
+		// Use async commit to determine transaction state earlier
+		opt = opt.use_async_commit();
+		// Try to use one-phase commit if writing to only one region
+		opt = opt.try_one_pc();
 		// Set the behaviour when dropping an unfinished transaction
 		opt = opt.drop_check(CheckLevel::Warn);
 		// Set this transaction as read only if possible
@@ -184,10 +188,15 @@ impl super::api::Transaction for Transaction {
 
 	/// Fetch a key from the database
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
-	async fn get<K>(&mut self, key: K) -> Result<Option<Val>, Error>
+	async fn get<K>(&mut self, key: K, version: Option<u64>) -> Result<Option<Val>, Error>
 	where
 		K: Into<Key> + Sprintable + Debug,
 	{
+		// TiKV does not support verisoned queries.
+		if version.is_some() {
+			return Err(Error::UnsupportedVersionedQueries);
+		}
+
 		// Check to see if transaction is closed
 		if self.done {
 			return Err(Error::TxFinished);
@@ -200,11 +209,16 @@ impl super::api::Transaction for Transaction {
 
 	/// Insert or update a key in the database
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
-	async fn set<K, V>(&mut self, key: K, val: V) -> Result<(), Error>
+	async fn set<K, V>(&mut self, key: K, val: V, version: Option<u64>) -> Result<(), Error>
 	where
 		K: Into<Key> + Sprintable + Debug,
 		V: Into<Val> + Debug,
 	{
+		// TiKV does not support verisoned queries.
+		if version.is_some() {
+			return Err(Error::UnsupportedVersionedQueries);
+		}
+
 		// Check to see if transaction is closed
 		if self.done {
 			return Err(Error::TxFinished);
@@ -221,11 +235,16 @@ impl super::api::Transaction for Transaction {
 
 	/// Insert a key if it doesn't exist in the database
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
-	async fn put<K, V>(&mut self, key: K, val: V) -> Result<(), Error>
+	async fn put<K, V>(&mut self, key: K, val: V, version: Option<u64>) -> Result<(), Error>
 	where
 		K: Into<Key> + Sprintable + Debug,
 		V: Into<Val> + Debug,
 	{
+		// TiKV does not support verisoned queries.
+		if version.is_some() {
+			return Err(Error::UnsupportedVersionedQueries);
+		}
+
 		// Check to see if transaction is closed
 		if self.done {
 			return Err(Error::TxFinished);
@@ -379,7 +398,7 @@ impl super::api::Transaction for Transaction {
 	where
 		K: Into<Key> + Sprintable + Debug,
 	{
-		// TiKV does not support verisoned queries.
+		// TiKV does not support versioned queries.
 		if version.is_some() {
 			return Err(Error::UnsupportedVersionedQueries);
 		}
@@ -414,7 +433,7 @@ impl super::api::Transaction for Transaction {
 		// Get the transaction version
 		let ver = self.inner.current_timestamp().await?.version();
 		// Calculate the previous version value
-		if let Some(prev) = self.get(key.as_slice()).await? {
+		if let Some(prev) = self.get(key.as_slice(), None).await? {
 			let res: Result<[u8; 10], Error> = match prev.as_slice().try_into() {
 				Ok(ba) => Ok(ba),
 				Err(e) => Err(Error::Tx(e.to_string())),
@@ -427,7 +446,7 @@ impl super::api::Transaction for Transaction {
 		// Convert the timestamp to a versionstamp
 		let verbytes = crate::vs::u64_to_versionstamp(ver);
 		// Store the timestamp to prevent other transactions from committing
-		self.set(key.as_slice(), verbytes.to_vec()).await?;
+		self.set(key.as_slice(), verbytes.to_vec(), None).await?;
 		// Return the uint64 representation of the timestamp as the result
 		Ok(verbytes)
 	}

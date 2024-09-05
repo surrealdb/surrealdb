@@ -1,9 +1,9 @@
-use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::sql::block::Block;
 use crate::sql::value::Value;
+use crate::{ctx::Context, dbs::Futures};
 use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -29,14 +29,14 @@ impl Future {
 	pub(crate) async fn compute(
 		&self,
 		stk: &mut Stk,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		opt: &Options,
-		doc: Option<&CursorDoc<'_>>,
+		doc: Option<&CursorDoc>,
 	) -> Result<Value, Error> {
 		// Process the future if enabled
 		match opt.futures {
-			true => stk.run(|stk| self.0.compute(stk, ctx, opt, doc)).await?.ok(),
-			false => Ok(self.clone().into()),
+			Futures::Enabled => stk.run(|stk| self.0.compute(stk, ctx, opt, doc)).await?.ok(),
+			_ => Ok(self.clone().into()),
 		}
 	}
 }

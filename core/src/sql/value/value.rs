@@ -5,6 +5,9 @@ use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::fnc::util::string::fuzzy::Fuzzy;
+use crate::sql::id::range::IdRange;
+use crate::sql::kind::Literal;
+use crate::sql::range::OldRange;
 use crate::sql::statements::info::InfoStructure;
 use crate::sql::Closure;
 use crate::sql::{
@@ -28,7 +31,7 @@ use std::cmp::Ordering;
 use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::fmt::{self, Display, Formatter, Write};
-use std::ops::Deref;
+use std::ops::{Bound, Deref};
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Value";
 
@@ -37,6 +40,15 @@ pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Value";
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub struct Values(pub Vec<Value>);
+
+impl<V> From<V> for Values
+where
+	V: Into<Vec<Value>>,
+{
+	fn from(value: V) -> Self {
+		Self(value.into())
+	}
+}
 
 impl Deref for Values {
 	type Target = Vec<Value>;
@@ -71,7 +83,7 @@ impl From<&Tables> for Values {
 	}
 }
 
-#[revisioned(revision = 1)]
+#[revisioned(revision = 2)]
 #[derive(Clone, Debug, Default, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[serde(rename = "$surrealdb::private::sql::Value")]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
@@ -112,6 +124,9 @@ pub enum Value {
 	Regex(Regex),
 	Cast(Box<Cast>),
 	Block(Box<Block>),
+	#[revision(end = 2, convert_fn = "convert_old_range", fields_name = "OldValueRangeFields")]
+	Range(OldRange),
+	#[revision(start = 2)]
 	Range(Box<Range>),
 	Edges(Box<Edges>),
 	Future(Box<Future>),
@@ -123,6 +138,21 @@ pub enum Value {
 	Model(Box<Model>),
 	Closure(Box<Closure>),
 	// Add new variants here
+}
+
+impl Value {
+	fn convert_old_range(
+		fields: OldValueRangeFields,
+		_revision: u16,
+	) -> Result<Self, revision::Error> {
+		Ok(Value::Thing(Thing {
+			tb: fields.0.tb,
+			id: Id::Range(Box::new(IdRange {
+				beg: fields.0.beg,
+				end: fields.0.end,
+			})),
+		}))
+	}
 }
 
 impl Eq for Value {}
@@ -251,6 +281,12 @@ impl From<Block> for Value {
 impl From<Range> for Value {
 	fn from(v: Range) -> Self {
 		Value::Range(Box::new(v))
+	}
+}
+
+impl From<Box<Range>> for Value {
+	fn from(v: Box<Range>) -> Self {
+		Value::Range(v)
 	}
 }
 
@@ -458,6 +494,18 @@ impl From<Vec<i32>> for Value {
 	}
 }
 
+impl From<Vec<f32>> for Value {
+	fn from(v: Vec<f32>) -> Self {
+		Value::Array(Array::from(v))
+	}
+}
+
+impl From<Vec<usize>> for Value {
+	fn from(v: Vec<usize>) -> Self {
+		Value::Array(Array::from(v))
+	}
+}
+
 impl From<Vec<Value>> for Value {
 	fn from(v: Vec<Value>) -> Self {
 		Value::Array(Array::from(v))
@@ -551,11 +599,33 @@ impl From<Option<Datetime>> for Value {
 	}
 }
 
+impl From<IdRange> for Value {
+	fn from(v: IdRange) -> Self {
+		let beg = match v.beg {
+			Bound::Included(beg) => Bound::Included(Value::from(beg)),
+			Bound::Excluded(beg) => Bound::Excluded(Value::from(beg)),
+			Bound::Unbounded => Bound::Unbounded,
+		};
+
+		let end = match v.end {
+			Bound::Included(end) => Bound::Included(Value::from(end)),
+			Bound::Excluded(end) => Bound::Excluded(Value::from(end)),
+			Bound::Unbounded => Bound::Unbounded,
+		};
+
+		Value::Range(Box::new(Range {
+			beg,
+			end,
+		}))
+	}
+}
+
 impl From<Id> for Value {
 	fn from(v: Id) -> Self {
 		match v {
 			Id::Number(v) => v.into(),
 			Id::String(v) => v.into(),
+			Id::Uuid(v) => v.into(),
 			Id::Array(v) => v.into(),
 			Id::Object(v) => v.into(),
 			Id::Generate(v) => match v {
@@ -563,6 +633,7 @@ impl From<Id> for Value {
 				Gen::Ulid => Id::ulid().into(),
 				Gen::Uuid => Id::uuid().into(),
 			},
+			Id::Range(v) => v.deref().to_owned().into(),
 		}
 	}
 }
@@ -908,6 +979,25 @@ impl Value {
 		matches!(self, Value::Thing(_))
 	}
 
+	/// Check if this Value is a single Thing
+	pub fn is_thing_single(&self) -> bool {
+		match self {
+			Value::Thing(t) => !matches!(t.id, Id::Range(_)),
+			_ => false,
+		}
+	}
+
+	/// Check if this Value is a single Thing
+	pub fn is_thing_range(&self) -> bool {
+		matches!(
+			self,
+			Value::Thing(Thing {
+				id: Id::Range(_),
+				..
+			})
+		)
+	}
+
 	/// Check if this Value is a Mock
 	pub fn is_mock(&self) -> bool {
 		matches!(self, Value::Mock(_))
@@ -971,6 +1061,11 @@ impl Value {
 	/// Check if this Value is a Thing
 	pub fn is_record(&self) -> bool {
 		matches!(self, Value::Thing(_))
+	}
+
+	/// Check if this Value is a Closure
+	pub fn is_closure(&self) -> bool {
+		matches!(self, Value::Closure(_))
 	}
 
 	/// Check if this Value is a Thing, and belongs to a certain table
@@ -1066,6 +1161,14 @@ impl Value {
 			Value::Geometry(Geometry::Collection(_)) => {
 				types.iter().any(|t| matches!(t.as_str(), "feature" | "collection"))
 			}
+			_ => false,
+		}
+	}
+
+	pub fn is_single(&self) -> bool {
+		match self {
+			Value::Object(_) => true,
+			t @ Value::Thing(_) => t.is_thing_single(),
 			_ => false,
 		}
 	}
@@ -1208,6 +1311,7 @@ impl Value {
 			Self::Geometry(Geometry::MultiPolygon(_)) => "geometry<multipolygon>",
 			Self::Geometry(Geometry::Collection(_)) => "geometry<collection>",
 			Self::Bytes(_) => "bytes",
+			Self::Range(_) => "range",
 			_ => "incorrect type",
 		}
 	}
@@ -1234,6 +1338,7 @@ impl Value {
 			Kind::Point => self.coerce_to_point().map(Value::from),
 			Kind::Bytes => self.coerce_to_bytes().map(Value::from),
 			Kind::Uuid => self.coerce_to_uuid().map(Value::from),
+			Kind::Range => self.coerce_to_range().map(Value::from),
 			Kind::Function(_, _) => self.coerce_to_function().map(Value::from),
 			Kind::Set(t, l) => match l {
 				Some(l) => self.coerce_to_set_type_len(t, l).map(Value::from),
@@ -1272,6 +1377,7 @@ impl Value {
 					into: kind.to_string(),
 				})
 			}
+			Kind::Literal(lit) => self.coerce_to_literal(lit),
 		};
 		// Check for any conversion errors
 		match res {
@@ -1363,6 +1469,18 @@ impl Value {
 				from: self,
 				into: "f64".into(),
 			}),
+		}
+	}
+
+	/// Try to coerce this value to a Literal, returns a `Value` with the coerced value
+	pub(crate) fn coerce_to_literal(self, literal: &Literal) -> Result<Value, Error> {
+		if literal.validate_value(&self) {
+			Ok(self)
+		} else {
+			Err(Error::CoerceTo {
+				from: self,
+				into: literal.to_string(),
+			})
 		}
 	}
 
@@ -1628,6 +1746,19 @@ impl Value {
 		}
 	}
 
+	/// Try to coerce this value to a `Range`
+	pub(crate) fn coerce_to_range(self) -> Result<Range, Error> {
+		match self {
+			// Ranges are allowed
+			Value::Range(v) => Ok(*v),
+			// Anything else raises an error
+			_ => Err(Error::CoerceTo {
+				from: self,
+				into: "range".into(),
+			}),
+		}
+	}
+
 	/// Try to coerce this value to an `Geometry` point
 	pub(crate) fn coerce_to_point(self) -> Result<Geometry, Error> {
 		match self {
@@ -1803,6 +1934,7 @@ impl Value {
 			Kind::Point => self.convert_to_point().map(Value::from),
 			Kind::Bytes => self.convert_to_bytes().map(Value::from),
 			Kind::Uuid => self.convert_to_uuid().map(Value::from),
+			Kind::Range => self.convert_to_range().map(Value::from),
 			Kind::Function(_, _) => self.convert_to_function().map(Value::from),
 			Kind::Set(t, l) => match l {
 				Some(l) => self.convert_to_set_type_len(t, l).map(Value::from),
@@ -1841,6 +1973,7 @@ impl Value {
 					into: kind.to_string(),
 				})
 			}
+			Kind::Literal(lit) => self.convert_to_literal(lit),
 		};
 		// Check for any conversion errors
 		match res {
@@ -1856,6 +1989,18 @@ impl Value {
 			Err(e) => Err(e),
 			// Everything converted ok
 			Ok(v) => Ok(v),
+		}
+	}
+
+	/// Try to convert this value to a Literal, returns a `Value` with the coerced value
+	pub(crate) fn convert_to_literal(self, literal: &Literal) -> Result<Value, Error> {
+		if literal.validate_value(&self) {
+			Ok(self)
+		} else {
+			Err(Error::ConvertTo {
+				from: self,
+				into: literal.to_string(),
+			})
 		}
 	}
 
@@ -2191,10 +2336,36 @@ impl Value {
 		match self {
 			// Arrays are allowed
 			Value::Array(v) => Ok(v),
+			// Ranges convert to an array
+			Value::Range(r) => {
+				let range: std::ops::Range<i64> = r.deref().to_owned().try_into()?;
+				Ok(range.into_iter().map(Value::from).collect::<Vec<Value>>().into())
+			}
 			// Anything else raises an error
 			_ => Err(Error::ConvertTo {
 				from: self,
 				into: "array".into(),
+			}),
+		}
+	}
+
+	/// Try to convert this value to a `Range`
+	pub(crate) fn convert_to_range(self) -> Result<Range, Error> {
+		match self {
+			// Ranges are allowed
+			Value::Range(r) => Ok(*r),
+			// Arrays with two elements are allowed
+			Value::Array(v) if v.len() == 2 => {
+				let mut v = v;
+				Ok(Range {
+					beg: Bound::Included(v.remove(0)),
+					end: Bound::Excluded(v.remove(0)),
+				})
+			}
+			// Anything else raises an error
+			_ => Err(Error::ConvertTo {
+				from: self,
+				into: "range".into(),
 			}),
 		}
 	}
@@ -2573,6 +2744,19 @@ impl Value {
 				Value::Geometry(w) => v.contains(w),
 				_ => false,
 			},
+			Value::Range(r) => {
+				let beg = match &r.beg {
+					Bound::Unbounded => true,
+					Bound::Included(beg) => beg.le(other),
+					Bound::Excluded(beg) => beg.lt(other),
+				};
+
+				beg && match &r.end {
+					Bound::Unbounded => true,
+					Bound::Included(end) => end.ge(other),
+					Bound::Excluded(end) => end.gt(other),
+				}
+			}
 			_ => false,
 		}
 	}
@@ -2638,6 +2822,25 @@ impl Value {
 			(Value::Strand(a), Value::Strand(b)) => Some(lexicmp::natural_lexical_cmp(a, b)),
 			_ => self.partial_cmp(other),
 		}
+	}
+
+	pub fn can_be_range_bound(&self) -> bool {
+		matches!(
+			self,
+			Value::None
+				| Value::Null | Value::Array(_)
+				| Value::Block(_)
+				| Value::Bool(_) | Value::Datetime(_)
+				| Value::Duration(_)
+				| Value::Geometry(_)
+				| Value::Number(_)
+				| Value::Object(_)
+				| Value::Param(_)
+				| Value::Strand(_)
+				| Value::Subquery(_)
+				| Value::Table(_)
+				| Value::Uuid(_)
+		)
 	}
 }
 
@@ -2708,9 +2911,9 @@ impl Value {
 	pub(crate) async fn compute_unbordered(
 		&self,
 		stk: &mut Stk,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		opt: &Options,
-		doc: Option<&CursorDoc<'_>>,
+		doc: Option<&CursorDoc>,
 	) -> Result<Value, Error> {
 		// Prevent infinite recursion due to casting, expressions, etc.
 		let opt = &opt.dive(1)?;
@@ -2737,9 +2940,9 @@ impl Value {
 	pub(crate) async fn compute(
 		&self,
 		stk: &mut Stk,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		opt: &Options,
-		doc: Option<&CursorDoc<'_>>,
+		doc: Option<&CursorDoc>,
 	) -> Result<Value, Error> {
 		match self.compute_unbordered(stk, ctx, opt, doc).await {
 			Err(Error::Return {
@@ -2821,6 +3024,23 @@ impl TryDiv for Value {
 	fn try_div(self, other: Self) -> Result<Self, Error> {
 		Ok(match (self, other) {
 			(Self::Number(v), Self::Number(w)) => Self::Number(v.try_div(w)?),
+			(v, w) => return Err(Error::TryDiv(v.to_raw_string(), w.to_raw_string())),
+		})
+	}
+}
+
+// ------------------------------
+
+pub(crate) trait TryFloatDiv<Rhs = Self> {
+	type Output;
+	fn try_float_div(self, v: Self) -> Result<Self::Output, Error>;
+}
+
+impl TryFloatDiv for Value {
+	type Output = Self;
+	fn try_float_div(self, other: Self) -> Result<Self::Output, Error> {
+		Ok(match (self, other) {
+			(Self::Number(v), Self::Number(w)) => Self::Number(v.try_float_div(w)?),
 			(v, w) => return Err(Error::TryDiv(v.to_raw_string(), w.to_raw_string())),
 		})
 	}
@@ -3004,5 +3224,19 @@ mod tests {
 		let enc: Vec<u8> = val.into();
 		let dec: Value = enc.into();
 		assert_eq!(res, dec);
+	}
+
+	#[test]
+	fn test_value_from_vec_i32() {
+		let vector: Vec<i32> = vec![1, 2, 3, 4, 5, 6];
+		let value = Value::from(vector);
+		assert!(matches!(value, Value::Array(Array(_))));
+	}
+
+	#[test]
+	fn test_value_from_vec_f32() {
+		let vector: Vec<f32> = vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0];
+		let value = Value::from(vector);
+		assert!(matches!(value, Value::Array(Array(_))));
 	}
 }

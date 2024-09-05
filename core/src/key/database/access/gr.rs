@@ -26,13 +26,13 @@ pub fn new<'a>(ns: &'a str, db: &'a str, ac: &'a str, gr: &'a str) -> Gr<'a> {
 
 pub fn prefix(ns: &str, db: &str, ac: &str) -> Vec<u8> {
 	let mut k = super::all::new(ns, db, ac).encode().unwrap();
-	k.extend_from_slice(&[b'!', b'g', b'r', 0x00]);
+	k.extend_from_slice(b"!gr\x00");
 	k
 }
 
 pub fn suffix(ns: &str, db: &str, ac: &str) -> Vec<u8> {
 	let mut k = super::all::new(ns, db, ac).encode().unwrap();
-	k.extend_from_slice(&[b'!', b'g', b'r', 0xff]);
+	k.extend_from_slice(b"!gr\xff");
 	k
 }
 
@@ -50,7 +50,7 @@ impl<'a> Gr<'a> {
 			ns,
 			_b: b'*',
 			db,
-			_c: b'*',
+			_c: b'&',
 			ac,
 			_d: b'!',
 			_e: b'g',
@@ -73,7 +73,7 @@ mod tests {
 			"testgr",
 		);
 		let enc = Gr::encode(&val).unwrap();
-		assert_eq!(enc, b"/*testns\0*testdb\0*testac\0!grtestgr\0");
+		assert_eq!(enc, b"/*testns\0*testdb\0&testac\0!grtestgr\0");
 
 		let dec = Gr::decode(&enc).unwrap();
 		assert_eq!(val, dec);
@@ -82,12 +82,12 @@ mod tests {
 	#[test]
 	fn test_prefix() {
 		let val = super::prefix("testns", "testdb", "testac");
-		assert_eq!(val, b"/*testns\0*testdb\0*testac\0!gr\0");
+		assert_eq!(val, b"/*testns\0*testdb\0&testac\0!gr\0");
 	}
 
 	#[test]
 	fn test_suffix() {
 		let val = super::suffix("testns", "testdb", "testac");
-		assert_eq!(val, b"/*testns\0*testdb\0*testac\0!gr\xff");
+		assert_eq!(val, b"/*testns\0*testdb\0&testac\0!gr\xff");
 	}
 }

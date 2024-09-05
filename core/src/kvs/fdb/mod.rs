@@ -14,10 +14,10 @@ use foundationdb::Database;
 use foundationdb::RangeOption;
 use foundationdb::Transaction as Tx;
 use futures::StreamExt;
-use once_cell::sync::Lazy;
 use std::fmt::Debug;
 use std::ops::Range;
 use std::sync::Arc;
+use std::sync::LazyLock;
 
 const TIMESTAMP: [u8; 10] = [0x00; 10];
 
@@ -91,8 +91,8 @@ impl Datastore {
 	/// for more information on cluster connection files.
 	pub(crate) async fn new(path: &str) -> Result<Datastore, Error> {
 		// Initialize the FoundationDB Client API
-		static FDBNET: Lazy<Arc<foundationdb::api::NetworkAutoStop>> =
-			Lazy::new(|| Arc::new(unsafe { foundationdb::boot() }));
+		static FDBNET: LazyLock<Arc<foundationdb::api::NetworkAutoStop>> =
+			LazyLock::new(|| Arc::new(unsafe { foundationdb::boot() }));
 		// Store the network cancellation handle
 		let _fdbnet = (*FDBNET).clone();
 		// Configure and setup the database
@@ -234,10 +234,15 @@ impl super::api::Transaction for Transaction {
 
 	/// Fetch a key from the database
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
-	async fn get<K>(&mut self, key: K) -> Result<Option<Val>, Error>
+	async fn get<K>(&mut self, key: K, version: Option<u64>) -> Result<Option<Val>, Error>
 	where
 		K: Into<Key> + Sprintable + Debug,
 	{
+		// FDB does not support verisoned queries.
+		if version.is_some() {
+			return Err(Error::UnsupportedVersionedQueries);
+		}
+
 		// Check to see if transaction is closed
 		if self.done {
 			return Err(Error::TxFinished);
@@ -256,11 +261,16 @@ impl super::api::Transaction for Transaction {
 
 	/// Inserts or update a key in the database
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
-	async fn set<K, V>(&mut self, key: K, val: V) -> Result<(), Error>
+	async fn set<K, V>(&mut self, key: K, val: V, version: Option<u64>) -> Result<(), Error>
 	where
 		K: Into<Key> + Sprintable + Debug,
 		V: Into<Val> + Debug,
 	{
+		// FDB does not support verisoned queries.
+		if version.is_some() {
+			return Err(Error::UnsupportedVersionedQueries);
+		}
+
 		// Check to see if transaction is closed
 		if self.done {
 			return Err(Error::TxFinished);
@@ -277,11 +287,16 @@ impl super::api::Transaction for Transaction {
 
 	/// Insert a key if it doesn't exist in the database
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
-	async fn put<K, V>(&mut self, key: K, val: V) -> Result<(), Error>
+	async fn put<K, V>(&mut self, key: K, val: V, version: Option<u64>) -> Result<(), Error>
 	where
 		K: Into<Key> + Sprintable + Debug,
 		V: Into<Val> + Debug,
 	{
+		// FDB does not support verisoned queries.
+		if version.is_some() {
+			return Err(Error::UnsupportedVersionedQueries);
+		}
+
 		// Check to see if transaction is closed
 		if self.done {
 			return Err(Error::TxFinished);

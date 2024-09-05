@@ -2,10 +2,9 @@
 
 use crate::{
 	err::Error,
-	sql::{Datetime, Duration, Idiom, Query, Range, Subquery, Thing, Value},
+	sql::{Block, Datetime, Duration, Idiom, Query, Range, Subquery, Thing, Value},
 };
 
-pub mod common;
 pub mod error;
 pub mod lexer;
 pub mod parser;
@@ -21,6 +20,7 @@ mod test;
 
 use parser::Parser;
 use reblessive::Stack;
+use token::t;
 
 /// Takes a string and returns if it could be a reserved keyword in certain contexts.
 pub fn could_be_reserved_keyword(s: &str) -> bool {
@@ -167,4 +167,29 @@ pub fn thing(input: &str) -> Result<Thing, Error> {
 		.finish()
 		.map_err(|e| e.render_on(input))
 		.map_err(Error::InvalidQuery)
+}
+
+/// Parse a block, expects the value to be wrapped in `{}`.
+pub fn block(input: &str) -> Result<Block, Error> {
+	debug!("parsing block, input = {input}");
+
+	let mut parser = Parser::new(input.as_bytes());
+	let mut stack = Stack::new();
+
+	let token = parser.peek();
+	match token.kind {
+		t!("{") => {
+			let start = parser.pop_peek().span;
+			stack
+				.enter(|stk| parser.parse_block(stk, start))
+				.finish()
+				.map_err(|e| e.render_on(input))
+				.map_err(Error::InvalidQuery)
+		}
+		found => Err(Error::InvalidQuery(
+			error::SyntaxError::new(format_args!("Unexpected token `{found}` expected `{{`"))
+				.with_span(token.span, error::MessageKind::Error)
+				.render_on(input),
+		)),
+	}
 }

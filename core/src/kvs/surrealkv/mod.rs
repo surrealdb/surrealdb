@@ -159,7 +159,7 @@ impl super::api::Transaction for Transaction {
 
 	/// Fetch a key from the database
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
-	async fn get<K>(&mut self, key: K) -> Result<Option<Val>, Error>
+	async fn get<K>(&mut self, key: K, version: Option<u64>) -> Result<Option<Val>, Error>
 	where
 		K: Into<Key> + Sprintable + Debug,
 	{
@@ -167,15 +167,20 @@ impl super::api::Transaction for Transaction {
 		if self.done {
 			return Err(Error::TxFinished);
 		}
+
 		// Fetch the value from the database.
-		let res = self.inner.get(&key.into())?;
+		let res = match version {
+			Some(ts) => self.inner.get_at_ts(&key.into(), ts)?,
+			None => self.inner.get(&key.into())?,
+		};
+
 		// Return result
 		Ok(res)
 	}
 
 	/// Insert or update a key in the database
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
-	async fn set<K, V>(&mut self, key: K, val: V) -> Result<(), Error>
+	async fn set<K, V>(&mut self, key: K, val: V, version: Option<u64>) -> Result<(), Error>
 	where
 		K: Into<Key> + Sprintable + Debug,
 		V: Into<Val> + Debug,
@@ -189,14 +194,17 @@ impl super::api::Transaction for Transaction {
 			return Err(Error::TxReadonly);
 		}
 		// Set the key
-		self.inner.set(&key.into(), &val.into())?;
+		match version {
+			Some(ts) => self.inner.set_at_ts(&key.into(), &val.into(), ts)?,
+			None => self.inner.set(&key.into(), &val.into())?,
+		}
 		// Return result
 		Ok(())
 	}
 
 	/// Insert a key if it doesn't exist in the database
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
-	async fn put<K, V>(&mut self, key: K, val: V) -> Result<(), Error>
+	async fn put<K, V>(&mut self, key: K, val: V, version: Option<u64>) -> Result<(), Error>
 	where
 		K: Into<Key> + Sprintable + Debug,
 		V: Into<Val> + Debug,
@@ -213,10 +221,14 @@ impl super::api::Transaction for Transaction {
 		let key = key.into();
 		let val = val.into();
 		// Set the key if empty
-		match self.inner.get(&key)? {
-			None => self.inner.set(&key, &val)?,
-			_ => return Err(Error::TxKeyAlreadyExists),
-		};
+		if let Some(ts) = version {
+			self.inner.set_at_ts(&key, &val, ts)?;
+		} else {
+			match self.inner.get(&key)? {
+				None => self.inner.set(&key, &val)?,
+				_ => return Err(Error::TxKeyAlreadyExists),
+			};
+		}
 		// Return result
 		Ok(())
 	}

@@ -30,9 +30,9 @@ pub struct DefineAnalyzerStatement {
 impl DefineAnalyzerStatement {
 	pub(crate) async fn compute(
 		&self,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		opt: &Options,
-		_doc: Option<&CursorDoc<'_>>,
+		_doc: Option<&CursorDoc>,
 	) -> Result<Value, Error> {
 		// Allowed to run?
 		opt.is_allowed(Action::Edit, ResourceKind::Analyzer, &Base::Db)?;
@@ -60,6 +60,7 @@ impl DefineAnalyzerStatement {
 				overwrite: false,
 				..self.clone()
 			},
+			None,
 		)
 		.await?;
 		// Clear the cache

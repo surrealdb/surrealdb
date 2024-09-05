@@ -58,9 +58,9 @@ impl Model {
 	pub(crate) async fn compute(
 		&self,
 		stk: &mut Stk,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		opt: &Options,
-		doc: Option<&CursorDoc<'_>>,
+		doc: Option<&CursorDoc>,
 	) -> Result<Value, Error> {
 		// Ensure futures are run
 		let opt = &opt.new_with_futures(true);
@@ -129,7 +129,7 @@ impl Model {
 				// Get the model file as bytes
 				let bytes = crate::obs::get(&path).await?;
 				// Run the compute in a blocking task
-				let outcome = tokio::task::spawn_blocking(move || {
+				let outcome: Vec<f32> = tokio::task::spawn_blocking(move || {
 					let mut file = SurMlFile::from_bytes(bytes).map_err(|err: SurrealError| {
 						Error::ModelComputation(err.message.to_string())
 					})?;
@@ -143,7 +143,7 @@ impl Model {
 				.await
 				.unwrap()?;
 				// Convert the output to a value
-				Ok(outcome[0].into())
+				Ok(outcome.into())
 			}
 			// Perform raw compute
 			Value::Number(v) => {
@@ -157,7 +157,7 @@ impl Model {
 				// Convert the argument to a tensor
 				let tensor = ndarray::arr1::<f32>(&[args]).into_dyn();
 				// Run the compute in a blocking task
-				let outcome = tokio::task::spawn_blocking(move || {
+				let outcome: Vec<f32> = tokio::task::spawn_blocking(move || {
 					let mut file = SurMlFile::from_bytes(bytes).map_err(|err: SurrealError| {
 						Error::ModelComputation(err.message.to_string())
 					})?;
@@ -171,7 +171,7 @@ impl Model {
 				.await
 				.unwrap()?;
 				// Convert the output to a value
-				Ok(outcome[0].into())
+				Ok(outcome.into())
 			}
 			// Perform raw compute
 			Value::Array(v) => {
@@ -189,7 +189,7 @@ impl Model {
 				// Convert the argument to a tensor
 				let tensor = ndarray::arr1::<f32>(&args).into_dyn();
 				// Run the compute in a blocking task
-				let outcome = tokio::task::spawn_blocking(move || {
+				let outcome: Vec<f32> = tokio::task::spawn_blocking(move || {
 					let mut file = SurMlFile::from_bytes(bytes).map_err(|err: SurrealError| {
 						Error::ModelComputation(err.message.to_string())
 					})?;
@@ -203,7 +203,7 @@ impl Model {
 				.await
 				.unwrap()?;
 				// Convert the output to a value
-				Ok(outcome[0].into())
+				Ok(outcome.into())
 			}
 			//
 			_ => Err(Error::InvalidArguments {
@@ -217,9 +217,9 @@ impl Model {
 	pub(crate) async fn compute(
 		&self,
 		_stk: &mut Stk,
-		_ctx: &Context<'_>,
+		_ctx: &Context,
 		_opt: &Options,
-		_doc: Option<&CursorDoc<'_>>,
+		_doc: Option<&CursorDoc>,
 	) -> Result<Value, Error> {
 		Err(Error::InvalidModel {
 			message: String::from("Machine learning computation is not enabled."),

@@ -10,6 +10,13 @@ on:
   pull_request:
   merge_group:
 
+concurrency:
+  # Use github.run_id on main branch
+  # Use github.event.pull_request.number on pull requests, so it's unique per pull request
+  # Use github.ref on other branches, so it's unique per branch
+  group: ${{ github.workflow }}-${{ github.ref == 'refs/heads/main' && github.run_id || github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 defaults:
   run:
     shell: bash
@@ -73,7 +80,7 @@ jobs:
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: 1.79.0
+          toolchain: 1.80.1
           components: rustfmt
 
       - name: Checkout sources
@@ -85,7 +92,7 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Check fuzzers
-        run: cargo build --manifest-path lib/fuzz/Cargo.toml
+        run: cargo build --manifest-path sdk/fuzz/Cargo.toml
 
       - name: Check OSS-Fuzz
         uses: google/oss-fuzz/infra/cifuzz/actions/build_fuzzers@master
@@ -210,33 +217,6 @@ jobs:
       - name: Run HTTP integration tests
         run: cargo make ci-http-integration
 
-  ml-support:
-    name: ML integration tests
-    runs-on: ubuntu-latest
-    steps:
-      - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          toolchain: stable
-
-      - name: Checkout sources
-        uses: actions/checkout@v4
-
-      - name: Setup cache
-        uses: Swatinem/rust-cache@v2
-        with:
-          save-if: ${{ github.ref == 'refs/heads/main' }}
-
-      - name: Install dependencies
-        run: |
-          sudo apt-get -y update
-
-      - name: Install cargo-make
-        run: cargo install --debug --locked cargo-make
-
-      - name: Run ML integration tests
-        run: cargo make ci-ml-integration
-
   ws-server:
     name: WebSocket integration tests
     runs-on: ubuntu-latest
@@ -264,9 +244,36 @@ jobs:
       - name: Run WS integration tests
         run: cargo make ci-ws-integration
 
+  ml-support:
+    name: ML integration tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+
+      - name: Checkout sources
+        uses: actions/checkout@v4
+
+      - name: Setup cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get -y update
+
+      - name: Install cargo-make
+        run: cargo install --debug --locked cargo-make
+
+      - name: Run ML integration tests
+        run: cargo make ci-ml-integration
+
   test:
     name: Test workspace
-    runs-on: [ "self-hosted", "arm64", "builder" ]
+    runs-on: [ runner-arm64-2xlarge ]
     steps:
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -302,6 +309,33 @@ jobs:
           name: code-coverage-report
           path: target/llvm-cov/html/
           retention-days: 5
+
+  graphql-integration:
+    name: GraphQL integration
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+
+      - name: Checkout sources
+        uses: actions/checkout@v4
+
+      - name: Setup cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get -y update
+
+      - name: Install cargo-make
+        run: cargo install --debug --locked cargo-make
+
+      - name: run graphql integration test
+        run: cargo make ci-graphql-integration
 
   test-sdk-build:
     name: Test SDK build
@@ -366,7 +400,6 @@ jobs:
           free -m
           df -h
           ps auxf
-          cat /tmp/surrealdb.log || true
 
   http-engine:
     name: HTTP engine
@@ -402,7 +435,6 @@ jobs:
           free -m
           df -h
           ps auxf
-          cat /tmp/surrealdb.log || true
 
   any-engine:
     name: Any engine
@@ -438,7 +470,6 @@ jobs:
           free -m
           df -h
           ps auxf
-          cat /tmp/surrealdb.log || true
 
   mem-engine:
     name: Memory engine
@@ -463,6 +494,14 @@ jobs:
       - name: Test mem engine
         run: cargo make ci-api-integration-mem
 
+      - name: Debug info
+        if: always()
+        run: |
+          set -x
+          free -m
+          df -h
+          ps auxf
+
   file-engine:
     name: File engine
     runs-on: ubuntu-latest
@@ -486,6 +525,14 @@ jobs:
       - name: Test file engine
         run: cargo make ci-api-integration-file
 
+      - name: Debug info
+        if: always()
+        run: |
+          set -x
+          free -m
+          df -h
+          ps auxf
+
   rocksdb-engine:
     name: RocksDB engine
     runs-on: ubuntu-latest
@@ -508,6 +555,45 @@ jobs:
 
       - name: Test rocksdb engine
         run: cargo make ci-api-integration-rocksdb
+
+      - name: Debug info
+        if: always()
+        run: |
+          set -x
+          free -m
+          df -h
+          ps auxf
+
+  surrealkv-engine:
+    name: SurrealKV engine
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+
+      - name: Checkout sources
+        uses: actions/checkout@v4
+
+      - name: Setup cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Install cargo-make
+        run: cargo install --debug --locked cargo-make
+
+      - name: Test surrealkv engine
+        run: cargo make ci-api-integration-surrealkv
+
+      - name: Debug info
+        if: always()
+        run: |
+          set -x
+          free -m
+          df -h
+          ps auxf
 
   tikv-engine:
     name: TiKV engine
@@ -550,10 +636,9 @@ jobs:
           free -m
           df -h
           ps auxf
-          cat /tmp/surrealdb.log || true
 
-  fdb-engine:
-    name: FoundationDB engine
+  fdb-engine-7-1:
+    name: FoundationDB engine 7.1
     runs-on: ubuntu-latest
     steps:
       - name: Install stable toolchain
@@ -580,14 +665,6 @@ jobs:
       - name: Test fdb engine
         run: cargo make ci-api-integration-fdb-7_1
 
-      - name: Setup FoundationDB
-        uses: foundationdb-rs/foundationdb-actions-install@v.2.2.0
-        with:
-          version: "7.3.47"
-
-      - name: Test fdb engine
-        run: cargo make ci-api-integration-fdb-7_3
-
       - name: Debug info
         if: always()
         run: |
@@ -595,10 +672,9 @@ jobs:
           free -m
           df -h
           ps auxf
-          cat /tmp/surrealdb.log || true
 
-  surrealkv-engine:
-    name: SurrealKV engine
+  fdb-engine-7-3:
+    name: FoundationDB engine 7.3
     runs-on: ubuntu-latest
     steps:
       - name: Install stable toolchain
@@ -617,8 +693,13 @@ jobs:
       - name: Install cargo-make
         run: cargo install --debug --locked cargo-make
 
-      - name: Test surrealkv engine
-        run: cargo make ci-api-integration-surrealkv
+      - name: Setup FoundationDB
+        uses: foundationdb-rs/foundationdb-actions-install@v.2.2.0
+        with:
+          version: "7.3.47"
+
+      - name: Test fdb engine
+        run: cargo make ci-api-integration-fdb-7_3
 
       - name: Debug info
         if: always()
@@ -627,7 +708,6 @@ jobs:
           free -m
           df -h
           ps auxf
-          cat /tmp/surrealdb.log || true
 
   db-upgrade:
     name: Database Upgrade from previous versions

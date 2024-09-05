@@ -1,7 +1,7 @@
 //! Stores a record document
 use crate::key::category::Categorise;
 use crate::key::category::Category;
-use crate::sql::id::Id;
+use crate::sql::Id;
 use derive::Key;
 use serde::{Deserialize, Serialize};
 
@@ -25,13 +25,13 @@ pub fn new<'a>(ns: &'a str, db: &'a str, tb: &'a str, id: &Id) -> Thing<'a> {
 
 pub fn prefix(ns: &str, db: &str, tb: &str) -> Vec<u8> {
 	let mut k = crate::key::table::all::new(ns, db, tb).encode().unwrap();
-	k.extend_from_slice(&[b'*', 0x00]);
+	k.extend_from_slice(b"*\x00");
 	k
 }
 
 pub fn suffix(ns: &str, db: &str, tb: &str) -> Vec<u8> {
 	let mut k = crate::key::table::all::new(ns, db, tb).encode().unwrap();
-	k.extend_from_slice(&[b'*', 0xff]);
+	k.extend_from_slice(b"*\xff");
 	k
 }
 
@@ -86,7 +86,7 @@ mod tests {
 		let id1 = thing.id;
 		let val = Thing::new("testns", "testdb", "testtb", id1);
 		let enc = Thing::encode(&val).unwrap();
-		assert_eq!(enc, b"/*testns\0*testdb\0*testtb\0*\0\0\0\x02\0\0\0\x04test\0\x01");
+		assert_eq!(enc, b"/*testns\0*testdb\0*testtb\0*\0\0\0\x03\0\0\0\x04test\0\x01");
 
 		let dec = Thing::decode(&enc).unwrap();
 		assert_eq!(val, dec);
@@ -96,7 +96,7 @@ mod tests {
 		let id2 = thing.id;
 		let val = Thing::new("testns", "testdb", "testtb", id2);
 		let enc = Thing::encode(&val).unwrap();
-		assert_eq!(enc, b"/*testns\0*testdb\0*testtb\0*\0\0\0\x02\0\0\0\x07\0\0\0\0\0\0\0\x10\xf8\xe2\x38\xf2\xe7\x34\x47\xb8\x9a\x16\x47\x6b\x29\x1b\xd7\x8a\x01");
+		assert_eq!(enc, b"/*testns\0*testdb\0*testtb\0*\0\0\0\x03\0\0\0\x07\0\0\0\0\0\0\0\x10\xf8\xe2\x38\xf2\xe7\x34\x47\xb8\x9a\x16\x47\x6b\x29\x1b\xd7\x8a\x01");
 
 		let dec = Thing::decode(&enc).unwrap();
 		assert_eq!(val, dec);

@@ -1,10 +1,10 @@
+use super::{Ident, Kind};
+use crate::ctx::MutableContext;
 use crate::{ctx::Context, dbs::Options, doc::CursorDoc, err::Error, sql::value::Value};
 use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
-
-use super::{Ident, Kind};
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Closure";
 
@@ -23,12 +23,12 @@ impl Closure {
 	pub(crate) async fn compute(
 		&self,
 		stk: &mut Stk,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		opt: &Options,
-		doc: Option<&CursorDoc<'_>>,
+		doc: Option<&CursorDoc>,
 		args: Vec<Value>,
 	) -> Result<Value, Error> {
-		let mut ctx = Context::new_isolated(ctx);
+		let mut ctx = MutableContext::new_isolated(ctx);
 		for (i, (name, kind)) in self.args.iter().enumerate() {
 			match (kind, args.get(i)) {
 				(Kind::Option(_), None) => continue,
@@ -40,7 +40,7 @@ impl Closure {
 				}
 				(kind, Some(val)) => {
 					if let Ok(val) = val.to_owned().coerce_to(kind) {
-						ctx.add_value(name.to_string(), val);
+						ctx.add_value(name.to_string(), val.into());
 					} else {
 						return Err(Error::InvalidArguments {
 							name: "ANONYMOUS".to_string(),
@@ -54,6 +54,7 @@ impl Closure {
 			}
 		}
 
+		let ctx = ctx.freeze();
 		let result = self.body.compute(stk, &ctx, opt, doc).await?;
 		if let Some(returns) = &self.returns {
 			result.coerce_to(returns).map_err(|e| e.function_check_from_coerce("ANONYMOUS"))
@@ -70,7 +71,11 @@ impl fmt::Display for Closure {
 			if i > 0 {
 				f.write_str(", ")?;
 			}
-			write!(f, "${name}: {kind}")?;
+			write!(f, "${name}: ")?;
+			match kind {
+				k @ Kind::Either(_) => write!(f, "<{}>", k)?,
+				k => write!(f, "{}", k)?,
+			}
 		}
 		f.write_str("|")?;
 		if let Some(returns) = &self.returns {

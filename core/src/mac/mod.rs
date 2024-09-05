@@ -37,7 +37,7 @@ macro_rules! get_cfg {
 /// a transaction in an uncommitted state without rolling back.
 macro_rules! catch {
 	($txn:ident, $default:expr) => {
-		match $default.await {
+		match $default {
 			Err(e) => {
 				let _ = $txn.cancel().await;
 				return Err(e);
@@ -55,7 +55,7 @@ macro_rules! catch {
 /// transaction in an uncommitted state without rolling back.
 macro_rules! run {
 	($txn:ident, $default:expr) => {
-		match $default.await {
+		match $default {
 			Err(e) => {
 				let _ = $txn.cancel().await;
 				Err(e)
@@ -83,12 +83,12 @@ macro_rules! run {
 ///
 /// # Return Value
 ///
-/// A lazy static variable of type `once_cell::sync::Lazy`, which holds the parsed value
+/// A lazy static variable of type `std::sync::LazyLock`, which holds the parsed value
 /// from the environment variable or the default value.
 #[macro_export]
 macro_rules! lazy_env_parse {
 	($key:expr, $t:ty, $default:expr) => {
-		once_cell::sync::Lazy::new(|| {
+		std::sync::LazyLock::new(|| {
 			std::env::var($key)
 				.and_then(|s| Ok(s.parse::<$t>().unwrap_or($default)))
 				.unwrap_or($default)
@@ -111,7 +111,7 @@ macro_rules! lazy_env_parse {
 #[macro_export]
 macro_rules! lazy_env_parse_or_else {
 	($key:expr, $t:ty, $default:expr) => {
-		once_cell::sync::Lazy::new(|| {
+		std::sync::LazyLock::new(|| {
 			std::env::var($key)
 				.and_then(|s| Ok(s.parse::<$t>().unwrap_or_else($default)))
 				.unwrap_or_else($default)
@@ -188,7 +188,7 @@ macro_rules! async_defer{
 		{
 			type Output = ::std::thread::Result<R>;
 
-			fn poll(self: ::std::pin::Pin<&mut Self>, cx: &mut ::std::task::Context<'_>) -> ::std::task::Poll<Self::Output>{
+			fn poll(self: ::std::pin::Pin<&mut Self>, cx: &mut ::std::task::Context) -> ::std::task::Poll<Self::Output>{
 				let pin = unsafe{ self.map_unchecked_mut(|x| &mut x.0) };
 				match ::std::panic::catch_unwind(::std::panic::AssertUnwindSafe(||{
 					pin.poll(cx)

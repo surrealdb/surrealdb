@@ -119,6 +119,7 @@ fn parse_create() {
 			))),
 			timeout: Some(Timeout(Duration(std::time::Duration::from_secs(1)))),
 			parallel: true,
+			version: None,
 		}),
 	);
 }
@@ -1168,9 +1169,6 @@ fn parse_define_access_record() {
 							key: "foo".to_string(),
 						}),
 					},
-					// TODO(gguillemas): Field kept to gracefully handle breaking change.
-					// Remove when "revision" crate allows doing so.
-					authenticate: None
 				}),
 				authenticate: None,
 				duration: AccessDuration {
@@ -1209,9 +1207,6 @@ fn parse_define_access_record() {
 							key: "bar".to_string(),
 						}),
 					},
-					// TODO(gguillemas): Field kept to gracefully handle breaking change.
-					// Remove when "revision" crate allows doing so.
-					authenticate: None
 				}),
 				authenticate: None,
 				duration: AccessDuration {
@@ -1250,9 +1245,6 @@ fn parse_define_access_record() {
 							key: "bar".to_string(),
 						}),
 					},
-					// TODO(gguillemas): Field kept to gracefully handle breaking change.
-					// Remove when "revision" crate allows doing so.
-					authenticate: None
 				}),
 				authenticate: None,
 				duration: AccessDuration {
@@ -1322,9 +1314,6 @@ fn parse_define_access_record_with_jwt() {
 					}),
 					issue: None,
 				},
-				// TODO(gguillemas): Field kept to gracefully handle breaking change.
-				// Remove when "revision" crate allows doing so.
-				authenticate: None
 			}),
 			authenticate: None,
 			// Default durations.
@@ -1410,7 +1399,7 @@ fn parse_define_table() {
 			comment: None,
 			if_not_exists: false,
 			overwrite: false,
-			kind: TableType::Any,
+			kind: TableType::Normal,
 		}))
 	);
 }
@@ -1519,6 +1508,7 @@ fn parse_define_index() {
 			comment: None,
 			if_not_exists: false,
 			overwrite: false,
+			concurrently: false
 		}))
 	);
 
@@ -1535,6 +1525,7 @@ fn parse_define_index() {
 			comment: None,
 			if_not_exists: false,
 			overwrite: false,
+			concurrently: false
 		}))
 	);
 
@@ -1549,7 +1540,6 @@ fn parse_define_index() {
 			cols: Idioms(vec![Idiom(vec![Part::Field(Ident("a".to_owned()))]),]),
 			index: Index::MTree(MTreeParams {
 				dimension: 4,
-				_distance: Default::default(),
 				distance: Distance::Minkowski(Number::Int(5)),
 				capacity: 6,
 				doc_ids_order: 7,
@@ -1560,6 +1550,7 @@ fn parse_define_index() {
 			comment: None,
 			if_not_exists: false,
 			overwrite: false,
+			concurrently: false
 		}))
 	);
 
@@ -1586,6 +1577,7 @@ fn parse_define_index() {
 			comment: None,
 			if_not_exists: false,
 			overwrite: false,
+			concurrently: false
 		}))
 	);
 }
@@ -1660,7 +1652,7 @@ fn parse_delete_2() {
 					dir: Dir::Out,
 					from: Thing {
 						tb: "a".to_owned(),
-						id: Id::String("b".to_owned()),
+						id: Id::from("b"),
 					},
 					what: Tables::default(),
 				}))),
@@ -1863,15 +1855,14 @@ SELECT bar as foo,[1,2],bar OMIT bar FROM ONLY a,1
 			}])),
 			limit: Some(Limit(Value::Thing(Thing {
 				tb: "a".to_owned(),
-				id: Id::String("b".to_owned()),
+				id: Id::from("b"),
 			}))),
 			start: Some(Start(Value::Object(Object(
 				[("a".to_owned(), Value::Bool(true))].into_iter().collect()
 			)))),
-			fetch: Some(Fetchs(vec![Fetch(
-				Idiom(vec![]),
-				Value::Idiom(Idiom(vec![Part::Field(Ident("foo".to_owned()))]))
-			)])),
+			fetch: Some(Fetchs(vec![Fetch(Value::Idiom(Idiom(vec![Part::Field(Ident(
+				"foo".to_owned()
+			))])))])),
 			version: Some(Version(Datetime(expected_datetime))),
 			timeout: None,
 			parallel: false,
@@ -2079,6 +2070,7 @@ fn parse_insert() {
 				),
 			])),
 			output: Some(Output::After),
+			version: None,
 			timeout: None,
 			parallel: false,
 			relation: false,
@@ -2135,14 +2127,11 @@ fn parse_live() {
 	assert_eq!(
 		stmt.fetch,
 		Some(Fetchs(vec![
-			Fetch(
-				Idiom(vec![]),
-				Value::Idiom(Idiom(vec![
-					Part::Field(Ident("a".to_owned())),
-					Part::Where(Value::Idiom(Idiom(vec![Part::Field(Ident("foo".to_owned()))]))),
-				]))
-			),
-			Fetch(Idiom(vec![]), Value::Idiom(Idiom(vec![Part::Field(Ident("b".to_owned()))]))),
+			Fetch(Value::Idiom(Idiom(vec![
+				Part::Field(Ident("a".to_owned())),
+				Part::Where(Value::Idiom(Idiom(vec![Part::Field(Ident("foo".to_owned()))]))),
+			]))),
+			Fetch(Value::Idiom(Idiom(vec![Part::Field(Ident("b".to_owned()))]))),
 		])),
 	)
 }
@@ -2166,10 +2155,9 @@ fn parse_return() {
 		res,
 		Statement::Output(OutputStatement {
 			what: Value::Idiom(Idiom(vec![Part::Field(Ident("RETRUN".to_owned()))])),
-			fetch: Some(Fetchs(vec![Fetch(
-				Idiom(vec![]),
-				Value::Idiom(Idiom(vec![Part::Field(Ident("RETURN".to_owned()).to_owned())]))
-			)])),
+			fetch: Some(Fetchs(vec![Fetch(Value::Idiom(Idiom(vec![Part::Field(
+				Ident("RETURN".to_owned()).to_owned()
+			)])))])),
 		}),
 	)
 }
@@ -2187,7 +2175,7 @@ fn parse_relate() {
 			only: true,
 			kind: Value::Thing(Thing {
 				tb: "a".to_owned(),
-				id: Id::String("b".to_owned()),
+				id: Id::from("b"),
 			}),
 			from: Value::Array(Array(vec![
 				Value::Number(Number::Int(1)),
@@ -2200,6 +2188,7 @@ fn parse_relate() {
 				output: None,
 				timeout: None,
 				parallel: false,
+				version: None,
 			}))),
 			uniq: true,
 			data: Some(Data::SetExpression(vec![(

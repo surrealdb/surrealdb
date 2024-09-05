@@ -12,6 +12,7 @@ use crate::sql::statements::DefineIndexStatement;
 use crate::sql::{Array, Ident, Thing, Value};
 use radix_trie::Trie;
 use std::collections::VecDeque;
+use std::sync::Arc;
 
 pub(crate) type IteratorRef = u16;
 
@@ -112,12 +113,13 @@ pub(crate) enum ThingIterator {
 	UniqueJoin(Box<UniqueJoinThingIterator>),
 	Matches(MatchesThingIterator),
 	Knn(KnnIterator),
+	Multiples(Box<MultipleIterators>),
 }
 
 impl ThingIterator {
 	pub(crate) async fn next_batch<B: IteratorBatch>(
 		&mut self,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		txn: &Transaction,
 		size: u32,
 	) -> Result<B, Error> {
@@ -132,11 +134,12 @@ impl ThingIterator {
 			Self::Knn(i) => i.next_batch(ctx, size).await,
 			Self::IndexJoin(i) => Box::pin(i.next_batch(ctx, txn, size)).await,
 			Self::UniqueJoin(i) => Box::pin(i.next_batch(ctx, txn, size)).await,
+			Self::Multiples(i) => Box::pin(i.next_batch(ctx, txn, size)).await,
 		}
 	}
 }
 
-pub(crate) type CollectorRecord = (Thing, IteratorRecord, Option<Value>);
+pub(crate) type CollectorRecord = (Arc<Thing>, IteratorRecord, Option<Arc<Value>>);
 
 pub(crate) struct IndexEqualThingIterator {
 	irf: IteratorRef,
@@ -179,7 +182,7 @@ impl IndexEqualThingIterator {
 			*beg = key;
 		}
 		let mut records = B::with_capacity(res.len());
-		res.into_iter().for_each(|(_, val)| records.add((val.into(), irf.into(), None)));
+		res.into_iter().for_each(|(_, val)| records.add((Arc::new(val.into()), irf.into(), None)));
 		Ok(records)
 	}
 
@@ -259,6 +262,20 @@ impl IndexRangeThingIterator {
 		}
 	}
 
+	pub(super) fn full_range(
+		irf: IteratorRef,
+		ns: &str,
+		db: &str,
+		ix_what: &Ident,
+		ix_name: &Ident,
+	) -> Self {
+		let full_range = RangeValue {
+			value: Value::None,
+			inclusive: true,
+		};
+		Self::new(irf, ns, db, ix_what, ix_name, &full_range, &full_range)
+	}
+
 	fn compute_beg(
 		ns: &str,
 		db: &str,
@@ -310,7 +327,7 @@ impl IndexRangeThingIterator {
 		let mut records = B::with_capacity(res.len());
 		res.into_iter()
 			.filter(|(k, _)| self.r.matches(k))
-			.for_each(|(_, v)| records.add((v.into(), self.irf.into(), None)));
+			.for_each(|(_, v)| records.add((Arc::new(v.into()), self.irf.into(), None)));
 		Ok(records)
 	}
 }
@@ -328,10 +345,10 @@ impl IndexUnionThingIterator {
 		db: &str,
 		ix_what: &Ident,
 		ix_name: &Ident,
-		a: &Array,
+		a: &Value,
 	) -> Self {
 		// We create a VecDeque to hold the prefix keys (begin and end) for each value in the array.
-		let mut values: VecDeque<(Vec<u8>, Vec<u8>)> =
+		let mut values: VecDeque<(Vec<u8>, Vec<u8>)> = if let Value::Array(a) = a {
 			a.0.iter()
 				.map(|v| {
 					let a = Array::from(v.clone());
@@ -339,7 +356,10 @@ impl IndexUnionThingIterator {
 					let end = Index::prefix_ids_end(ns, db, ix_what, ix_name, &a);
 					(beg, end)
 				})
-				.collect();
+				.collect()
+		} else {
+			VecDeque::with_capacity(0)
+		};
 		let current = values.pop_front();
 		Self {
 			irf,
@@ -350,7 +370,7 @@ impl IndexUnionThingIterator {
 
 	async fn next_batch<B: IteratorBatch>(
 		&mut self,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		tx: &Transaction,
 		limit: u32,
 	) -> Result<B, Error> {
@@ -404,7 +424,7 @@ impl JoinThingIterator {
 impl JoinThingIterator {
 	async fn next_current_remote_batch(
 		&mut self,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		tx: &Transaction,
 		limit: u32,
 	) -> Result<bool, Error> {
@@ -425,7 +445,7 @@ impl JoinThingIterator {
 
 	async fn next_current_local<F>(
 		&mut self,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		tx: &Transaction,
 		limit: u32,
 		new_iter: F,
@@ -435,8 +455,8 @@ impl JoinThingIterator {
 	{
 		while !ctx.is_done() {
 			while let Some((thing, _, _)) = self.current_remote_batch.pop_front() {
-				let k: Key = (&thing).into();
-				let value = Value::from(thing);
+				let k: Key = thing.as_ref().into();
+				let value = Value::from(thing.as_ref().clone());
 				if self.distinct.insert(k, true).is_none() {
 					self.current_local =
 						Some(new_iter(&self.ns, &self.db, &self.ix_what, &self.ix_name, value));
@@ -452,7 +472,7 @@ impl JoinThingIterator {
 
 	async fn next_batch<F, B: IteratorBatch>(
 		&mut self,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		tx: &Transaction,
 		limit: u32,
 		new_iter: F,
@@ -489,7 +509,7 @@ impl IndexJoinThingIterator {
 
 	async fn next_batch<B: IteratorBatch>(
 		&mut self,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		tx: &Transaction,
 		limit: u32,
 	) -> Result<B, Error> {
@@ -525,8 +545,9 @@ impl UniqueEqualThingIterator {
 
 	async fn next_batch<B: IteratorBatch>(&mut self, tx: &Transaction) -> Result<B, Error> {
 		if let Some(key) = self.key.take() {
-			if let Some(val) = tx.get(key).await? {
-				let record = (val.into(), self.irf.into(), None);
+			if let Some(val) = tx.get(key, None).await? {
+				let rid: Thing = val.into();
+				let record = (rid.into(), self.irf.into(), None);
 				return Ok(B::from_one(record));
 			}
 		}
@@ -557,6 +578,20 @@ impl UniqueRangeThingIterator {
 			r: RangeScan::new(beg, from.inclusive, end, to.inclusive),
 			done: false,
 		}
+	}
+
+	pub(super) fn full_range(
+		irf: IteratorRef,
+		ns: &str,
+		db: &str,
+		ix_what: &Ident,
+		ix_name: &Ident,
+	) -> Self {
+		let full_range = RangeValue {
+			value: Value::None,
+			inclusive: true,
+		};
+		Self::new(irf, ns, db, ix_what, ix_name, &full_range, &full_range)
 	}
 
 	fn compute_beg(
@@ -609,13 +644,15 @@ impl UniqueRangeThingIterator {
 				return Ok(records);
 			}
 			if self.r.matches(&k) {
-				records.add((v.into(), self.irf.into(), None));
+				let rid: Thing = v.into();
+				records.add((rid.into(), self.irf.into(), None));
 			}
 		}
 		let end = self.r.end.clone();
 		if self.r.matches(&end) {
-			if let Some(v) = tx.get(end).await? {
-				records.add((v.into(), self.irf.into(), None));
+			if let Some(v) = tx.get(end, None).await? {
+				let rid: Thing = v.into();
+				records.add((rid.into(), self.irf.into(), None));
 			}
 		}
 		self.done = true;
@@ -633,17 +670,20 @@ impl UniqueUnionThingIterator {
 		irf: IteratorRef,
 		opt: &Options,
 		ix: &DefineIndexStatement,
-		a: &Array,
+		a: &Value,
 	) -> Result<Self, Error> {
 		// We create a VecDeque to hold the key for each value in the array.
-		let keys: VecDeque<Key> =
+		let keys: VecDeque<Key> = if let Value::Array(a) = a {
 			a.0.iter()
 				.map(|v| -> Result<Key, Error> {
 					let a = Array::from(v.clone());
 					let key = Index::new(opt.ns()?, opt.db()?, &ix.what, &ix.name, &a, None).into();
 					Ok(key)
 				})
-				.collect::<Result<VecDeque<Key>, Error>>()?;
+				.collect::<Result<VecDeque<Key>, Error>>()?
+		} else {
+			VecDeque::with_capacity(0)
+		};
 		Ok(Self {
 			irf,
 			keys,
@@ -652,7 +692,7 @@ impl UniqueUnionThingIterator {
 
 	async fn next_batch<B: IteratorBatch>(
 		&mut self,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		tx: &Transaction,
 		limit: u32,
 	) -> Result<B, Error> {
@@ -662,8 +702,9 @@ impl UniqueUnionThingIterator {
 			if ctx.is_done() {
 				break;
 			}
-			if let Some(val) = tx.get(key).await? {
-				results.add((val.into(), self.irf.into(), None));
+			if let Some(val) = tx.get(key, None).await? {
+				let rid: Thing = val.into();
+				results.add((rid.into(), self.irf.into(), None));
 				if results.len() >= limit {
 					break;
 				}
@@ -687,7 +728,7 @@ impl UniqueJoinThingIterator {
 
 	async fn next_batch<B: IteratorBatch>(
 		&mut self,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		tx: &Transaction,
 		limit: u32,
 	) -> Result<B, Error> {
@@ -726,7 +767,7 @@ impl MatchesThingIterator {
 
 	async fn next_batch<B: IteratorBatch>(
 		&mut self,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		tx: &Transaction,
 		limit: u32,
 	) -> Result<B, Error> {
@@ -740,7 +781,7 @@ impl MatchesThingIterator {
 						doc_id: Some(doc_id),
 						dist: None,
 					};
-					records.add((thg, ir, None));
+					records.add((thg.into(), ir, None));
 					self.hits_left -= 1;
 				} else {
 					break;
@@ -753,7 +794,7 @@ impl MatchesThingIterator {
 	}
 }
 
-pub(crate) type KnnIteratorResult = (Thing, f64, Option<Value>);
+pub(crate) type KnnIteratorResult = (Arc<Thing>, f64, Option<Arc<Value>>);
 
 pub(crate) struct KnnIterator {
 	irf: IteratorRef,
@@ -769,7 +810,7 @@ impl KnnIterator {
 	}
 	async fn next_batch<B: IteratorBatch>(
 		&mut self,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		limit: u32,
 	) -> Result<B, Error> {
 		let limit = limit as usize;
@@ -787,5 +828,44 @@ impl KnnIterator {
 			}
 		}
 		Ok(records)
+	}
+}
+
+pub(crate) struct MultipleIterators {
+	iterators: VecDeque<ThingIterator>,
+	current: Option<ThingIterator>,
+}
+
+impl MultipleIterators {
+	pub(super) fn new(iterators: VecDeque<ThingIterator>) -> Self {
+		Self {
+			iterators,
+			current: None,
+		}
+	}
+
+	async fn next_batch<B: IteratorBatch>(
+		&mut self,
+		ctx: &Context,
+		txn: &Transaction,
+		limit: u32,
+	) -> Result<B, Error> {
+		loop {
+			// Do we have an iterator
+			if let Some(i) = &mut self.current {
+				// If so, take the next batch
+				let b: B = i.next_batch(ctx, txn, limit).await?;
+				// Return the batch if it is not empty
+				if !b.is_empty() {
+					return Ok(b);
+				}
+			}
+			// Otherwise check if there is another iterator
+			self.current = self.iterators.pop_front();
+			if self.current.is_none() {
+				// If none, we are done
+				return Ok(B::empty());
+			}
+		}
 	}
 }

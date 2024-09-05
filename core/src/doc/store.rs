@@ -4,10 +4,10 @@ use crate::dbs::Statement;
 use crate::doc::Document;
 use crate::err::Error;
 
-impl<'a> Document<'a> {
+impl Document {
 	pub async fn store(
 		&self,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		opt: &Options,
 		stm: &Statement<'_>,
 	) -> Result<(), Error> {
@@ -28,7 +28,7 @@ impl<'a> Document<'a> {
 		// Match the statement type
 		match stm {
 			// This is a CREATE statement so try to insert the key
-			Statement::Create(_) => match txn.put(key, self).await {
+			Statement::Create(_) => match txn.put(key, self, opt.version).await {
 				// The key already exists, so return an error
 				Err(Error::TxKeyAlreadyExists) => Err(Error::RecordExists {
 					thing: rid.to_string(),
@@ -38,8 +38,10 @@ impl<'a> Document<'a> {
 				// Record creation worked fine
 				Ok(v) => Ok(v),
 			},
+			// INSERT can be versioned
+			Statement::Insert(_) => txn.set(key, self, opt.version).await,
 			// This is not a CREATE statement, so update the key
-			_ => txn.set(key, self).await,
+			_ => txn.set(key, self, None).await,
 		}?;
 		// Carry on
 		Ok(())

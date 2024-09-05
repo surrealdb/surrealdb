@@ -14,7 +14,7 @@ impl Value {
 	pub(crate) async fn set(
 		&mut self,
 		stk: &mut Stk,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		opt: &Options,
 		path: &[Part],
 		val: Value,
@@ -65,7 +65,7 @@ impl Value {
 							_ => {
 								let mut obj = Value::base();
 								stk.run(|stk| obj.set(stk, ctx, opt, path.next(), val)).await?;
-								v.insert(f.to_string(), obj);
+								v.insert(f.to_raw(), obj);
 								Ok(())
 							}
 						},
@@ -105,7 +105,7 @@ impl Value {
 							let mut p = Vec::new();
 							// Store the elements and positions to update
 							for (i, o) in v.iter_mut().enumerate() {
-								let cur = o.into();
+								let cur = o.clone().into();
 								if w.compute(stk, ctx, opt, Some(&cur)).await?.is_truthy() {
 									a.push(o.clone());
 									p.push(i);
@@ -124,7 +124,7 @@ impl Value {
 						_ => {
 							let path = path.next();
 							for v in v.iter_mut() {
-								let cur = v.into();
+								let cur = v.clone().into();
 								if w.compute(stk, ctx, opt, Some(&cur)).await?.is_truthy() {
 									stk.run(|stk| v.set(stk, ctx, opt, path, val.clone())).await?;
 								}
@@ -151,6 +151,11 @@ impl Value {
 						Ok(())
 					}
 				},
+				// Current value at path is a record
+				Value::Thing(_) => {
+					*self = Value::base();
+					stk.run(|stk| self.set(stk, ctx, opt, path, val)).await
+				}
 				// Current value at path is empty
 				Value::Null => {
 					*self = Value::base();

@@ -8,12 +8,13 @@ use crate::err::Error;
 use crate::sql::value::Value;
 use channel::Sender;
 use reblessive::tree::Stk;
+use std::sync::Arc;
 
-impl<'a> Document<'a> {
+impl Document {
 	#[allow(dead_code)]
 	pub(crate) async fn compute(
 		stk: &mut Stk,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		opt: &Options,
 		stm: &Statement<'_>,
 		chn: Sender<Result<Value, Error>>,
@@ -32,7 +33,7 @@ impl<'a> Document<'a> {
 				Operable::Relatable(f, v, w, o) => (v, Workable::Relate(f, w, o)),
 			};
 			// Setup a new document
-			let mut doc = Document::new(pro.rid.as_ref(), pro.ir.as_ref(), &ins.0, ins.1);
+			let mut doc = Document::new(pro.rid, pro.ir, ins.0, ins.1);
 			// Process the statement
 			let res = match stm {
 				Statement::Select(_) => doc.select(stk, ctx, opt, stm).await,
@@ -52,14 +53,14 @@ impl<'a> Document<'a> {
 				Err(Error::RetryWithId(v)) => {
 					// Fetch the data from the store
 					let key = crate::key::thing::new(opt.ns()?, opt.db()?, &v.tb, &v.id);
-					let val = ctx.tx().get(key).await?;
+					let val = ctx.tx().get(key, None).await?;
 					// Parse the data from the store
-					let val = match val {
+					let val = Arc::new(match val {
 						Some(v) => Value::from(v),
 						None => Value::None,
-					};
+					});
 					pro = Processed {
-						rid: Some(v),
+						rid: Some(Arc::new(v)),
 						ir: None,
 						val: match doc.extras {
 							Workable::Normal => Operable::Value(val),
@@ -79,9 +80,16 @@ impl<'a> Document<'a> {
 			// Send back the result
 			let _ = chn.send(res).await;
 			// Break the loop
-			break;
+			return Ok(());
 		}
-		// Everything went ok
+		// We shouldn't really reach this part, but if we
+		// did it was probably due to the fact that we
+		// encountered two Err::RetryWithId errors due to
+		// two separtate UNIQUE index definitions, and it
+		// wasn't possible to detect which record was the
+		// correct one to be updated
+		let _ = chn.send(Err(Error::Unreachable("Internal error"))).await;
+		// Break the loop
 		Ok(())
 	}
 }
