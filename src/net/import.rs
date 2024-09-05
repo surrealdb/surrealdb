@@ -1,5 +1,6 @@
 use super::headers::Accept;
 use super::AppState;
+use crate::cnf::HTTP_MAX_IMPORT_BODY_SIZE;
 use crate::err::Error;
 use crate::net::input::bytes_to_utf8;
 use crate::net::output;
@@ -15,8 +16,6 @@ use surrealdb::iam::Action::Edit;
 use surrealdb::iam::ResourceKind::Any;
 use tower_http::limit::RequestBodyLimitLayer;
 
-const MAX: usize = 1024 * 1024 * 1024 * 4; // 4 GiB
-
 pub(super) fn router<S>() -> Router<S>
 where
 	S: Clone + Send + Sync + 'static,
@@ -24,7 +23,7 @@ where
 	Router::new()
 		.route("/import", post(handler))
 		.route_layer(DefaultBodyLimit::disable())
-		.layer(RequestBodyLimitLayer::new(MAX))
+		.layer(RequestBodyLimitLayer::new(*HTTP_MAX_IMPORT_BODY_SIZE))
 }
 
 async fn handler(

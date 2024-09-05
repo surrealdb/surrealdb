@@ -2,9 +2,10 @@ use super::{ParseResult, Parser};
 use crate::{
 	sql::{Constant, Function, Value},
 	syn::{
+		error::MessageKind,
 		parser::{
 			mac::{expected, unexpected},
-			ParseError, ParseErrorKind,
+			SyntaxError,
 		},
 		token::{t, Span},
 	},
@@ -367,6 +368,7 @@ pub(crate) static PATHS: phf::Map<UniCase<&'static str>, PathKind> = phf_map! {
 		UniCase::ascii("time::from::nanos") => PathKind::Function,
 		UniCase::ascii("time::from::secs") => PathKind::Function,
 		UniCase::ascii("time::from::unix") => PathKind::Function,
+		UniCase::ascii("time::is::leap_year") => PathKind::Function,
 		//
 		UniCase::ascii("type::array") => PathKind::Function,
 		UniCase::ascii("type::bool") => PathKind::Function,
@@ -466,15 +468,15 @@ impl Parser<'_> {
 		let mut last_span = start;
 		while self.eat(t!("::")) {
 			let t = self.glue_ident(false)?;
-			if !t.kind.can_be_identifier() {
-				unexpected!(self, t.kind, "an identifier")
+			if !Self::tokenkind_can_start_ident(t.kind) {
+				unexpected!(self, t, "an identifier")
 			}
 			self.pop_peek();
 			last_span = self.last_span();
 		}
 
 		let span = start.covers(last_span);
-		let str = self.span_str(span);
+		let str = self.lexer.span_str(span);
 
 		match PATHS.get_entry(&UniCase::ascii(str)) {
 			Some((_, PathKind::Constant(x))) => Ok(Value::Constant(x.clone())),
@@ -497,23 +499,20 @@ impl Parser<'_> {
 					})
 					.map(|x| x.into_inner());
 
-				if cut_off == MAX_LEVENSTHEIN_CUT_OFF {
-					// couldn't find a value which lowered the cut off,
-					// any suggestion probably will be nonsensical so don't give any.
-					return Err(ParseError::new(
-						ParseErrorKind::InvalidPath {
-							possibly: None,
-						},
-						span,
-					));
+				if let Some(possibly) = possibly {
+					// If we couldn't find a value which lowered the cut off,
+					// any suggestion probably will be nonsensical so give an suggestion when the
+					// the cut_off was lowered.
+					if cut_off < MAX_LEVENSTHEIN_CUT_OFF {
+						return Err(SyntaxError::new(format_args!(
+							"Invalid function/constant path, did you maybe mean `{possibly}`"
+						))
+						.with_span(span, MessageKind::Error));
+					}
 				}
 
-				Err(ParseError::new(
-					ParseErrorKind::InvalidPath {
-						possibly,
-					},
-					span,
-				))
+				Err(SyntaxError::new("Invalid function/constant path")
+					.with_span(span, MessageKind::Error))
 			}
 		}
 	}

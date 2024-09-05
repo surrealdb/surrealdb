@@ -35,18 +35,21 @@ pub(crate) enum Iterable {
 	Index(Table, IteratorRef),
 }
 
+#[derive(Debug)]
 pub(crate) struct Processed {
 	pub(crate) rid: Option<Arc<Thing>>,
 	pub(crate) ir: Option<Arc<IteratorRecord>>,
 	pub(crate) val: Operable,
 }
 
+#[derive(Debug)]
 pub(crate) enum Operable {
 	Value(Arc<Value>),
 	Mergeable(Arc<Value>, Arc<Value>),
 	Relatable(Thing, Arc<Value>, Thing, Option<Arc<Value>>),
 }
 
+#[derive(Debug)]
 pub(crate) enum Workable {
 	Normal,
 	Insert(Arc<Value>),
@@ -304,6 +307,7 @@ impl Iterator {
 				feature = "kv-rocksdb",
 				feature = "kv-fdb",
 				feature = "kv-tikv",
+				feature = "kv-surrealcs",
 			))]
 			ctx,
 			stm,

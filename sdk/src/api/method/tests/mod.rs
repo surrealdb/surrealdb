@@ -111,9 +111,9 @@ async fn api() {
 		.unwrap();
 
 	// create
-	let _: Vec<User> = DB.create(USER).await.unwrap();
+	let _: Option<User> = DB.create(USER).await.unwrap();
 	let _: Option<User> = DB.create((USER, "john")).await.unwrap();
-	let _: Vec<User> = DB.create(USER).content(User::default()).await.unwrap();
+	let _: Option<User> = DB.create(USER).content(User::default()).await.unwrap();
 	let _: Option<User> = DB.create((USER, "john")).content(User::default()).await.unwrap();
 
 	// select

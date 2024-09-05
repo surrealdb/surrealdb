@@ -3,10 +3,8 @@ use reblessive::Stk;
 use crate::{
 	sql::{Function, Ident, Model, Value},
 	syn::{
-		parser::{
-			mac::{expected, expected_whitespace, unexpected},
-			ParseError, ParseErrorKind,
-		},
+		error::error,
+		parser::mac::{expected, expected_whitespace, unexpected},
 		token::{t, TokenKind},
 	},
 };
@@ -62,36 +60,36 @@ impl Parser<'_> {
 
 		let token = self.next();
 		let major: u32 = match token.kind {
-			TokenKind::Digits => std::str::from_utf8(self.lexer.reader.span(token.span))
-				.unwrap()
+			TokenKind::Digits => self
+				.lexer
+				.span_str(token.span)
 				.parse()
-				.map_err(ParseErrorKind::InvalidInteger)
-				.map_err(|e| ParseError::new(e, token.span))?,
-			x => unexpected!(self, x, "an integer"),
+				.map_err(|e| error!("Failed to parse model version: {e}", @token.span))?,
+			_ => unexpected!(self, token, "an integer"),
 		};
 
 		expected_whitespace!(self, t!("."));
 
 		let token = self.next_whitespace();
 		let minor: u32 = match token.kind {
-			TokenKind::Digits => std::str::from_utf8(self.lexer.reader.span(token.span))
-				.unwrap()
+			TokenKind::Digits => self
+				.lexer
+				.span_str(token.span)
 				.parse()
-				.map_err(ParseErrorKind::InvalidInteger)
-				.map_err(|e| ParseError::new(e, token.span))?,
-			x => unexpected!(self, x, "an integer"),
+				.map_err(|e| error!("Failed to parse model version: {e}", @token.span))?,
+			_ => unexpected!(self, token, "an integer"),
 		};
 
 		expected_whitespace!(self, t!("."));
 
 		let token = self.next_whitespace();
 		let patch: u32 = match token.kind {
-			TokenKind::Digits => std::str::from_utf8(self.lexer.reader.span(token.span))
-				.unwrap()
+			TokenKind::Digits => self
+				.lexer
+				.span_str(token.span)
 				.parse()
-				.map_err(ParseErrorKind::InvalidInteger)
-				.map_err(|e| ParseError::new(e, token.span))?,
-			x => unexpected!(self, x, "an integer"),
+				.map_err(|e| error!("Failed to parse model version: {e}", @token.span))?,
+			_ => unexpected!(self, token, "an integer"),
 		};
 
 		self.expect_closing_delimiter(t!(">"), start)?;

@@ -733,7 +733,7 @@ where
 	/// db.use_ns("namespace").use_db("database").await?;
 	///
 	/// // Create a record with a random ID
-	/// let person: Vec<Person> = db.create("person").await?;
+	/// let person: Option<Person> = db.create("person").await?;
 	///
 	/// // Create a record with a specific ID
 	/// let record: Option<Person> = db.create(("person", "tobie"))

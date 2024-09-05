@@ -388,29 +388,29 @@ impl Document {
 					Value::Function(f) if f.is_rolling() => match f.name() {
 						Some("count") => {
 							let val = f.compute(stk, ctx, opt, Some(fdc.doc)).await?;
-							self.chg(&mut set_ops, &mut del_ops, &fdc.act, idiom, val);
+							self.chg(&mut set_ops, &mut del_ops, &fdc.act, idiom, val)?;
 						}
 						Some("math::sum") => {
 							let val = f.args()[0].compute(stk, ctx, opt, Some(fdc.doc)).await?;
-							self.chg(&mut set_ops, &mut del_ops, &fdc.act, idiom, val);
+							self.chg(&mut set_ops, &mut del_ops, &fdc.act, idiom, val)?;
 						}
 						Some("math::min") | Some("time::min") => {
 							let val = f.args()[0].compute(stk, ctx, opt, Some(fdc.doc)).await?;
-							self.min(&mut set_ops, &mut del_ops, fdc, field, idiom, val);
+							self.min(&mut set_ops, &mut del_ops, fdc, field, idiom, val)?;
 						}
 						Some("math::max") | Some("time::max") => {
 							let val = f.args()[0].compute(stk, ctx, opt, Some(fdc.doc)).await?;
-							self.max(&mut set_ops, &mut del_ops, fdc, field, idiom, val);
+							self.max(&mut set_ops, &mut del_ops, fdc, field, idiom, val)?;
 						}
 						Some("math::mean") => {
 							let val = f.args()[0].compute(stk, ctx, opt, Some(fdc.doc)).await?;
-							self.mean(&mut set_ops, &mut del_ops, &fdc.act, idiom, val);
+							self.mean(&mut set_ops, &mut del_ops, &fdc.act, idiom, val)?;
 						}
 						_ => unreachable!(),
 					},
 					_ => {
 						let val = expr.compute(stk, ctx, opt, Some(fdc.doc)).await?;
-						self.set(&mut set_ops, idiom, val);
+						self.set(&mut set_ops, idiom, val)?;
 					}
 				}
 			}
@@ -419,11 +419,19 @@ impl Document {
 	}
 
 	/// Set the field in the foreign table
-	fn set(&self, ops: &mut Ops, key: Idiom, val: Value) {
+	fn set(&self, ops: &mut Ops, key: Idiom, val: Value) -> Result<(), Error> {
 		ops.push((key, Operator::Equal, val));
+		Ok(())
 	}
 	/// Increment or decrement the field in the foreign table
-	fn chg(&self, set_ops: &mut Ops, del_ops: &mut Ops, act: &FieldAction, key: Idiom, val: Value) {
+	fn chg(
+		&self,
+		set_ops: &mut Ops,
+		del_ops: &mut Ops,
+		act: &FieldAction,
+		key: Idiom,
+		val: Value,
+	) -> Result<(), Error> {
 		match act {
 			FieldAction::Add => {
 				set_ops.push((key.clone(), Operator::Inc, val));
@@ -434,6 +442,7 @@ impl Document {
 				del_ops.push((key, Operator::Equal, Value::from(0)));
 			}
 		}
+		Ok(())
 	}
 
 	/// Set the new minimum value for the field in the foreign table
@@ -445,7 +454,7 @@ impl Document {
 		field: &Field,
 		key: Idiom,
 		val: Value,
-	) {
+	) -> Result<(), Error> {
 		// Key for the value count
 		let mut key_c = Idiom::from(vec![Part::from("__")]);
 		key_c.0.push(Part::from(key.to_hash()));
@@ -458,9 +467,17 @@ impl Document {
 					Value::Subquery(Box::new(Subquery::Ifelse(IfelseStatement {
 						exprs: vec![(
 							Value::Expression(Box::new(Expression::Binary {
-								l: Value::Idiom(key.clone()),
-								o: Operator::MoreThan,
-								r: val.clone(),
+								l: Value::Expression(Box::new(Expression::Binary {
+									l: Value::Idiom(key.clone()),
+									o: Operator::Exact,
+									r: Value::None,
+								})),
+								o: Operator::Or,
+								r: Value::Expression(Box::new(Expression::Binary {
+									l: Value::Idiom(key.clone()),
+									o: Operator::MoreThan,
+									r: val.clone(),
+								})),
 							})),
 							val,
 						)],
@@ -481,6 +498,7 @@ impl Document {
 				del_ops.push((key_c, Operator::Equal, Value::from(0)));
 			}
 		}
+		Ok(())
 	}
 	/// Set the new maximum value for the field in the foreign table
 	fn max(
@@ -491,7 +509,7 @@ impl Document {
 		field: &Field,
 		key: Idiom,
 		val: Value,
-	) {
+	) -> Result<(), Error> {
 		// Key for the value count
 		let mut key_c = Idiom::from(vec![Part::from("__")]);
 		key_c.0.push(Part::from(key.to_hash()));
@@ -505,9 +523,17 @@ impl Document {
 					Value::Subquery(Box::new(Subquery::Ifelse(IfelseStatement {
 						exprs: vec![(
 							Value::Expression(Box::new(Expression::Binary {
-								l: Value::Idiom(key.clone()),
-								o: Operator::LessThan,
-								r: val.clone(),
+								l: Value::Expression(Box::new(Expression::Binary {
+									l: Value::Idiom(key.clone()),
+									o: Operator::Exact,
+									r: Value::None,
+								})),
+								o: Operator::Or,
+								r: Value::Expression(Box::new(Expression::Binary {
+									l: Value::Idiom(key.clone()),
+									o: Operator::LessThan,
+									r: val.clone(),
+								})),
 							})),
 							val,
 						)],
@@ -528,6 +554,85 @@ impl Document {
 				del_ops.push((key_c, Operator::Equal, Value::from(0)));
 			}
 		}
+		Ok(())
+	}
+
+	/// Set the new average value for the field in the foreign table
+	fn mean(
+		&self,
+		set_ops: &mut Ops,
+		del_ops: &mut Ops,
+		act: &FieldAction,
+		key: Idiom,
+		val: Value,
+	) -> Result<(), Error> {
+		// Key for the value count
+		let mut key_c = Idiom::from(vec![Part::from("__")]);
+		key_c.0.push(Part::from(key.to_hash()));
+		key_c.0.push(Part::from("c"));
+		//
+		set_ops.push((
+			key.clone(),
+			Operator::Equal,
+			Value::Expression(Box::new(Expression::Binary {
+				l: Value::Subquery(Box::new(Subquery::Value(Value::Expression(Box::new(
+					Expression::Binary {
+						l: Value::Subquery(Box::new(Subquery::Value(Value::Expression(Box::new(
+							Expression::Binary {
+								l: Value::Subquery(Box::new(Subquery::Value(Value::Expression(
+									Box::new(Expression::Binary {
+										l: Value::Idiom(key),
+										o: Operator::Nco,
+										r: Value::Number(Number::Int(0)),
+									}),
+								)))),
+								o: Operator::Mul,
+								r: Value::Subquery(Box::new(Subquery::Value(Value::Expression(
+									Box::new(Expression::Binary {
+										l: Value::Idiom(key_c.clone()),
+										o: Operator::Nco,
+										r: Value::Number(Number::Int(0)),
+									}),
+								)))),
+							},
+						))))),
+						o: match act {
+							FieldAction::Sub => Operator::Sub,
+							FieldAction::Add => Operator::Add,
+						},
+						r: val.convert_to_decimal()?.into(),
+					},
+				))))),
+				o: Operator::Div,
+				r: Value::Subquery(Box::new(Subquery::Value(Value::Expression(Box::new(
+					Expression::Binary {
+						l: Value::Subquery(Box::new(Subquery::Value(Value::Expression(Box::new(
+							Expression::Binary {
+								l: Value::Idiom(key_c.clone()),
+								o: Operator::Nco,
+								r: Value::Number(Number::Int(0)),
+							},
+						))))),
+						o: match act {
+							FieldAction::Sub => Operator::Sub,
+							FieldAction::Add => Operator::Add,
+						},
+						r: Value::from(1),
+					},
+				))))),
+			})),
+		));
+		match act {
+			//  Increment the number of values
+			FieldAction::Add => set_ops.push((key_c, Operator::Inc, Value::from(1))),
+			FieldAction::Sub => {
+				//  Decrement the number of values
+				set_ops.push((key_c.clone(), Operator::Dec, Value::from(1)));
+				// Add a purge condition (delete record if the number of values is 0)
+				del_ops.push((key_c, Operator::Equal, Value::from(0)));
+			}
+		}
+		Ok(())
 	}
 
 	/// Recomputes the value for one group
@@ -597,82 +702,5 @@ impl Document {
 			)],
 			close: Some(Value::Idiom(key.clone())),
 		})))
-	}
-
-	/// Set the new average value for the field in the foreign table
-	fn mean(
-		&self,
-		set_ops: &mut Ops,
-		del_ops: &mut Ops,
-		act: &FieldAction,
-		key: Idiom,
-		val: Value,
-	) {
-		// Key for the value count
-		let mut key_c = Idiom::from(vec![Part::from("__")]);
-		key_c.0.push(Part::from(key.to_hash()));
-		key_c.0.push(Part::from("c"));
-		//
-		set_ops.push((
-			key.clone(),
-			Operator::Equal,
-			Value::Expression(Box::new(Expression::Binary {
-				l: Value::Subquery(Box::new(Subquery::Value(Value::Expression(Box::new(
-					Expression::Binary {
-						l: Value::Subquery(Box::new(Subquery::Value(Value::Expression(Box::new(
-							Expression::Binary {
-								l: Value::Subquery(Box::new(Subquery::Value(Value::Expression(
-									Box::new(Expression::Binary {
-										l: Value::Idiom(key),
-										o: Operator::Nco,
-										r: Value::Number(Number::Int(0)),
-									}),
-								)))),
-								o: Operator::Mul,
-								r: Value::Subquery(Box::new(Subquery::Value(Value::Expression(
-									Box::new(Expression::Binary {
-										l: Value::Idiom(key_c.clone()),
-										o: Operator::Nco,
-										r: Value::Number(Number::Int(0)),
-									}),
-								)))),
-							},
-						))))),
-						o: match act {
-							FieldAction::Sub => Operator::Sub,
-							FieldAction::Add => Operator::Add,
-						},
-						r: val,
-					},
-				))))),
-				o: Operator::Div,
-				r: Value::Subquery(Box::new(Subquery::Value(Value::Expression(Box::new(
-					Expression::Binary {
-						l: Value::Subquery(Box::new(Subquery::Value(Value::Expression(Box::new(
-							Expression::Binary {
-								l: Value::Idiom(key_c.clone()),
-								o: Operator::Nco,
-								r: Value::Number(Number::Int(0)),
-							},
-						))))),
-						o: match act {
-							FieldAction::Sub => Operator::Sub,
-							FieldAction::Add => Operator::Add,
-						},
-						r: Value::from(1),
-					},
-				))))),
-			})),
-		));
-		match act {
-			//  Increment the number of values
-			FieldAction::Add => set_ops.push((key_c, Operator::Inc, Value::from(1))),
-			FieldAction::Sub => {
-				//  Decrement the number of values
-				set_ops.push((key_c.clone(), Operator::Dec, Value::from(1)));
-				// Add a purge condition (delete record if the number of values is 0)
-				del_ops.push((key_c, Operator::Equal, Value::from(0)));
-			}
-		}
 	}
 }

@@ -344,6 +344,32 @@ async fn define_statement_event() -> Result<(), Error> {
 	Ok(())
 }
 
+// Confirms that a DEFINE EVENT with no WHERE clause will produce WHEN true
+#[tokio::test]
+async fn define_statement_event_no_when_clause() -> Result<(), Error> {
+	let sql = "
+		DEFINE EVENT some_event ON TABLE user THEN {};
+		INFO FOR TABLE user;
+	";
+	let mut t = Test::new(sql).await?;
+	//
+	t.skip_ok(1)?;
+	let val = Value::parse(
+		"{
+	events: {
+		some_event: 'DEFINE EVENT some_event ON user WHEN true THEN {  }'
+	},
+	fields: {},
+	indexes: {},
+	lives: {},
+	tables: {}
+}",
+	);
+	t.expect_value(val)?;
+	//
+	Ok(())
+}
+
 #[tokio::test]
 async fn define_statement_event_when_event() -> Result<(), Error> {
 	let sql = "
@@ -690,6 +716,88 @@ async fn define_statement_index_single() -> Result<(), Error> {
 }
 
 #[tokio::test]
+async fn define_statement_index_numbers() -> Result<(), Error> {
+	let sql = "
+		DEFINE INDEX index ON TABLE test COLUMNS number;
+		CREATE test:int SET number = 0;
+		CREATE test:float SET number = 0.0;
+		-- TODO: CREATE test:dec_int SET number = 0dec;
+		-- TODO: CREATE test:dec_dec SET number = 0.0dec;
+		SELECT * FROM test WITH NOINDEX WHERE number = 0 ORDER BY id;
+		SELECT * FROM test WHERE number = 0 ORDER BY id;
+		SELECT * FROM test WHERE number = 0.0 ORDER BY id;
+		-- TODO: SELECT * FROM test WHERE number = 0dec ORDER BY id;
+		-- TODO: SELECT * FROM test WHERE number = 0.0dec ORDER BY id;
+	";
+	let mut t = Test::new(sql).await?;
+	t.skip_ok(3)?;
+	for _ in 0..3 {
+		t.expect_val(
+			"[
+				// {
+				// 	id: test:dec,
+				// 	number: 0.0dec
+				// },
+				// {
+				// 	id: test:int,
+				// 	number: 0dec
+				// },
+				{
+					id: test:float,
+					number: 0f
+				},
+				{
+					id: test:int,
+					number: 0
+				}
+			]",
+		)?;
+	}
+	Ok(())
+}
+
+#[tokio::test]
+async fn define_statement_unique_index_numbers() -> Result<(), Error> {
+	let sql = "
+		DEFINE INDEX index ON TABLE test COLUMNS number UNIQUE;
+		CREATE test:int SET number = 0;
+		CREATE test:float SET number = 0.0;
+		-- TODO: CREATE test:dec_int SET number = 0dec;
+		-- TODO: CREATE test:dec_dec SET number = 0.0dec;
+		SELECT * FROM test WITH NOINDEX WHERE number = 0 ORDER BY id;
+		SELECT * FROM test WHERE number = 0 ORDER BY id;
+		SELECT * FROM test WHERE number = 0.0 ORDER BY id;
+		-- TODO: SELECT * FROM test WHERE number = 0dec ORDER BY id;
+		-- TODO: SELECT * FROM test WHERE number = 0.0dec ORDER BY id;
+	";
+	let mut t = Test::new(sql).await?;
+	t.skip_ok(3)?;
+	for _ in 0..3 {
+		t.expect_val(
+			"[
+				// {
+				// 	id: test:dec,
+				// 	number: 0.0dec
+				// },
+				// {
+				// 	id: test:int,
+				// 	number: 0dec
+				// },
+				{
+					id: test:float,
+					number: 0f
+				},
+				{
+					id: test:int,
+					number: 0
+				}
+			]",
+		)?;
+	}
+	Ok(())
+}
+
+#[tokio::test]
 async fn define_statement_index_concurrently() -> Result<(), Error> {
 	let sql = "
 		CREATE user:1 SET email = 'testA@surrealdb.com';
@@ -814,39 +922,37 @@ async fn define_statement_index_concurrently_building_status() -> Result<(), Err
 		let mut r = ds.execute("INFO FOR INDEX test ON user", &session, None).await?;
 		let tmp = r.remove(0).result?;
 		if let Value::Object(o) = &tmp {
-			if let Some(b) = o.get("building") {
-				if let Value::Object(b) = b {
-					if let Some(v) = b.get("status") {
-						if Value::from("started").eq(v) {
-							continue;
+			if let Some(Value::Object(b)) = o.get("building") {
+				if let Some(v) = b.get("status") {
+					if Value::from("started").eq(v) {
+						continue;
+					}
+					let new_count = b.get("count").cloned();
+					if Value::from("initial").eq(v) {
+						if new_count != initial_count {
+							assert!(new_count > initial_count, "{new_count:?}");
+							info!("New initial count: {:?}", new_count);
+							initial_count = new_count;
 						}
-						let new_count = b.get("count").cloned();
-						if Value::from("initial").eq(v) {
-							if new_count != initial_count {
-								assert!(new_count > initial_count, "{new_count:?}");
-								info!("New initial count: {:?}", new_count);
-								initial_count = new_count;
-							}
-							continue;
+						continue;
+					}
+					if Value::from("updates").eq(v) {
+						if new_count != updates_count {
+							assert!(new_count > updates_count, "{new_count:?}");
+							info!("New updates count: {:?}", new_count);
+							updates_count = new_count;
 						}
-						if Value::from("updates").eq(v) {
-							if new_count != updates_count {
-								assert!(new_count > updates_count, "{new_count:?}");
-								info!("New updates count: {:?}", new_count);
-								updates_count = new_count;
-							}
-							continue;
-						}
-						let val = Value::parse(
-							"{
+						continue;
+					}
+					let val = Value::parse(
+						"{
 										building: {
 											status: 'built'
 										}
 									}",
-						);
-						assert_eq!(format!("{tmp:#}"), format!("{val:#}"));
-						break;
-					}
+					);
+					assert_eq!(format!("{tmp:#}"), format!("{val:#}"));
+					break;
 				}
 			}
 		}

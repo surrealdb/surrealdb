@@ -1,4 +1,4 @@
-use super::value::{TryAdd, TryDiv, TryMul, TryNeg, TryPow, TryRem, TrySub};
+use super::value::{TryAdd, TryDiv, TryFloatDiv, TryMul, TryNeg, TryPow, TryRem, TrySub};
 use crate::err::Error;
 use crate::fnc::util::math::ToFloat;
 use crate::sql::strand::Strand;
@@ -729,6 +729,24 @@ impl TryNeg for Number {
 	}
 }
 
+impl TryFloatDiv for Number {
+	type Output = Self;
+	fn try_float_div(self, other: Self) -> Result<Self, Error> {
+		Ok(match (self, other) {
+			(Number::Int(v), Number::Int(w)) => {
+				let quotient = (v as f64).div(w as f64);
+				if quotient.fract() != 0.0 {
+					return Ok(Number::Float(quotient));
+				}
+				Number::Int(
+					v.checked_div(w).ok_or_else(|| Error::TryDiv(v.to_string(), w.to_string()))?,
+				)
+			}
+			(v, w) => v.try_div(w)?,
+		})
+	}
+}
+
 impl ops::Add for Number {
 	type Output = Self;
 	fn add(self, other: Self) -> Self {
@@ -910,5 +928,22 @@ impl Sort for Vec<Number> {
 impl ToFloat for Number {
 	fn to_float(&self) -> f64 {
 		self.to_float()
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use super::Number;
+	use super::TryFloatDiv;
+	#[test]
+	fn test_try_float_div() {
+		let (sum_one, count_one) = (Number::Int(5), Number::Int(2));
+		assert_eq!(sum_one.try_float_div(count_one).unwrap(), Number::Float(2.5));
+
+		let (sum_two, count_two) = (Number::Int(10), Number::Int(5));
+		assert_eq!(sum_two.try_float_div(count_two).unwrap(), Number::Int(2));
+
+		let (sum_three, count_three) = (Number::Float(6.3), Number::Int(3));
+		assert_eq!(sum_three.try_float_div(count_three).unwrap(), Number::Float(2.1));
 	}
 }

@@ -3,6 +3,7 @@
 use reblessive::Stk;
 
 use crate::sql::Fetch;
+use crate::syn::error::bail;
 use crate::{
 	sql::{
 		changefeed::ChangeFeed,
@@ -12,13 +13,18 @@ use crate::{
 	},
 	syn::{
 		parser::{
-			error::MissingKind,
 			mac::{expected, unexpected},
-			ParseError, ParseErrorKind, ParseResult, Parser,
+			ParseResult, Parser,
 		},
 		token::{t, DistanceKind, Span, TokenKind, VectorTypeKind},
 	},
 };
+
+pub(crate) enum MissingKind {
+	Split,
+	Order,
+	Group,
+}
 
 impl Parser<'_> {
 	/// Parses a data production if the next token is a data keyword.
@@ -153,7 +159,7 @@ impl Parser<'_> {
 		Ok(Some(Cond(v)))
 	}
 
-	pub fn check_idiom<'a>(
+	pub(crate) fn check_idiom<'a>(
 		kind: MissingKind,
 		fields: &'a Fields,
 		field_span: Span,
@@ -193,16 +199,33 @@ impl Parser<'_> {
 			}
 		}
 
-		found.ok_or_else(|| {
-			ParseError::new(
-				ParseErrorKind::MissingField {
-					field: field_span,
-					idiom: idiom.to_string(),
-					kind,
-				},
-				idiom_span,
-			)
-		})
+		let Some(found) = found else {
+			match kind {
+				MissingKind::Split => {
+					bail!(
+						"Missing split idiom `{idiom}` in statement selection",
+						@idiom_span,
+						@field_span => "Idiom missing here",
+					)
+				}
+				MissingKind::Order => {
+					bail!(
+						"Missing order idiom `{idiom}` in statement selection",
+						@idiom_span,
+						@field_span => "Idiom missing here",
+					)
+				}
+				MissingKind::Group => {
+					bail!(
+						"Missing group idiom `{idiom}` in statement selection",
+						@idiom_span,
+						@field_span => "Idiom missing here",
+					)
+				}
+			};
+		};
+
+		Ok(found)
 	}
 
 	pub async fn try_parse_group(
@@ -253,7 +276,8 @@ impl Parser<'_> {
 		stk: &mut Stk,
 		permissive: bool,
 	) -> ParseResult<Permissions> {
-		match self.next().kind {
+		let next = self.next();
+		match next.kind {
 			t!("NONE") => Ok(Permissions::none()),
 			t!("FULL") => Ok(Permissions::full()),
 			t!("FOR") => {
@@ -270,7 +294,7 @@ impl Parser<'_> {
 				}
 				Ok(permission)
 			}
-			x => unexpected!(self, x, "'NONE', 'FULL' or 'FOR'"),
+			_ => unexpected!(self, next, "'NONE', 'FULL' or 'FOR'"),
 		}
 	}
 
@@ -291,7 +315,8 @@ impl Parser<'_> {
 		let mut delete = false;
 
 		loop {
-			match self.next().kind {
+			let next = self.next();
+			match next.kind {
 				t!("SELECT") => {
 					select = true;
 				}
@@ -304,7 +329,7 @@ impl Parser<'_> {
 				t!("DELETE") => {
 					delete = true;
 				}
-				x => unexpected!(self, x, "'SELECT', 'CREATE', 'UPDATE' or 'DELETE'"),
+				_ => unexpected!(self, next, "'SELECT', 'CREATE', 'UPDATE' or 'DELETE'"),
 			}
 			if !self.eat(t!(",")) {
 				break;
@@ -334,11 +359,12 @@ impl Parser<'_> {
 	///
 	/// Expects the parser to just have eaten either `SELECT`, `CREATE`, `UPDATE` or `DELETE`.
 	pub async fn parse_permission_value(&mut self, stk: &mut Stk) -> ParseResult<Permission> {
-		match self.next().kind {
+		let next = self.next();
+		match next.kind {
 			t!("NONE") => Ok(Permission::None),
 			t!("FULL") => Ok(Permission::Full),
 			t!("WHERE") => Ok(Permission::Specific(self.parse_value_field(stk).await?)),
-			x => unexpected!(self, x, "'NONE', 'FULL', or 'WHERE'"),
+			_ => unexpected!(self, next, "'NONE', 'FULL', or 'WHERE'"),
 		}
 	}
 
@@ -350,22 +376,23 @@ impl Parser<'_> {
 	/// # Parser state
 	/// Expects the next keyword to be a base.
 	pub fn parse_base(&mut self, scope_allowed: bool) -> ParseResult<Base> {
-		match self.next().kind {
+		let next = self.next();
+		match next.kind {
 			t!("NAMESPACE") | t!("ns") => Ok(Base::Ns),
 			t!("DATABASE") => Ok(Base::Db),
 			t!("ROOT") => Ok(Base::Root),
 			t!("SCOPE") => {
 				if !scope_allowed {
-					unexpected!(self, t!("SCOPE"), "a scope is not allowed here");
+					unexpected!(self, next, "a scope is not allowed here");
 				}
 				let name = self.next_token_value()?;
 				Ok(Base::Sc(name))
 			}
-			x => {
+			_ => {
 				if scope_allowed {
-					unexpected!(self, x, "'NAMEPSPACE', 'DATABASE', 'ROOT' or 'SCOPE'")
+					unexpected!(self, next, "'NAMEPSPACE', 'DATABASE', 'ROOT' or 'SCOPE'")
 				} else {
-					unexpected!(self, x, "'NAMEPSPACE', 'DATABASE' or 'ROOT'")
+					unexpected!(self, next, "'NAMEPSPACE', 'DATABASE' or 'ROOT'")
 				}
 			}
 		}
@@ -436,14 +463,16 @@ impl Parser<'_> {
 	}
 
 	pub fn parse_distance(&mut self) -> ParseResult<Distance> {
-		match self.next().kind {
+		let next = self.next();
+		match next.kind {
 			TokenKind::Distance(k) => self.convert_distance(&k),
-			x => unexpected!(self, x, "a distance measure"),
+			_ => unexpected!(self, next, "a distance measure"),
 		}
 	}
 
 	pub fn parse_vector_type(&mut self) -> ParseResult<VectorType> {
-		match self.next().kind {
+		let next = self.next();
+		match next.kind {
 			TokenKind::VectorType(x) => Ok(match x {
 				VectorTypeKind::F64 => VectorType::F64,
 				VectorTypeKind::F32 => VectorType::F32,
@@ -451,7 +480,7 @@ impl Parser<'_> {
 				VectorTypeKind::I32 => VectorType::I32,
 				VectorTypeKind::I16 => VectorType::I16,
 			}),
-			x => unexpected!(self, x, "a vector type"),
+			_ => unexpected!(self, next, "a vector type"),
 		}
 	}
 
