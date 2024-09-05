@@ -197,14 +197,7 @@ impl MutableContext {
 			index_stores: parent.index_stores.clone(),
 			#[cfg(not(target_arch = "wasm32"))]
 			index_builder: parent.index_builder.clone(),
-			//TODO: is there a reason these shouldn't include kv-surrealcs
-			#[cfg(any(
-				feature = "kv-mem",
-				feature = "kv-surrealkv",
-				feature = "kv-rocksdb",
-				feature = "kv-fdb",
-				feature = "kv-tikv",
-			))]
+			#[cfg(storage)]
 			temporary_directory: parent.temporary_directory.clone(),
 			transaction: parent.transaction.clone(),
 			isolated: true,
@@ -226,13 +219,7 @@ impl MutableContext {
 			index_stores: from.index_stores.clone(),
 			#[cfg(not(target_arch = "wasm32"))]
 			index_builder: from.index_builder.clone(),
-			#[cfg(any(
-				feature = "kv-mem",
-				feature = "kv-surrealkv",
-				feature = "kv-rocksdb",
-				feature = "kv-fdb",
-				feature = "kv-tikv",
-			))]
+			#[cfg(storage)]
 			temporary_directory: from.temporary_directory.clone(),
 			transaction: None,
 			isolated: false,
