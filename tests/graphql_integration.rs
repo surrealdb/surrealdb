@@ -10,7 +10,7 @@ mod graphql_integration {
 	use surrealdb::headers::{AUTH_DB, AUTH_NS};
 	use surrealdb::sql;
 	use test_log::test;
-	use tracing::debug;
+	use tracing::{debug, error};
 	use ulid::Ulid;
 
 	use crate::common::{PASS, USER};
@@ -217,7 +217,7 @@ mod graphql_integration {
 					DURATION FOR SESSION 60s, FOR TOKEN 1d;
 
                     DEFINE TABLE foo SCHEMAFUL PERMISSIONS FOR select WHERE $auth.email = email;
-                    DEFINE FIELD user ON foo TYPE string;
+                    DEFINE FIELD email ON foo TYPE string;
                     DEFINE FIELD val ON foo TYPE int;
                     CREATE foo:1 set val = 42, email = "user@email.com";
                     CREATE foo:2 set val = 43, email = "other@email.com";
@@ -226,8 +226,8 @@ mod graphql_integration {
 				.send()
 				.await?;
 			assert_eq!(res.status(), 200);
-			// let body = res.text().await?;
-			// panic!("{body:?}")
+			let body = res.text().await?;
+			debug!(?body);
 		}
 
 		// check works with root
@@ -267,7 +267,7 @@ mod graphql_integration {
 
 			let res = client
 				.post(gql_url)
-				.basic_auth(USER, Some(PASS))
+				.bearer_auth(token)
 				.body(json!({"query": r#"query{foo{id, val}}"#}).to_string())
 				.send()
 				.await?;
