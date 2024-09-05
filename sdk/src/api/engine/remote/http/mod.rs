@@ -68,12 +68,12 @@ impl Surreal<Client> {
 	/// # Examples
 	///
 	/// ```no_run
-	/// use once_cell::sync::Lazy;
+	/// use std::sync::LazyLock;
 	/// use surrealdb::Surreal;
 	/// use surrealdb::engine::remote::http::Client;
 	/// use surrealdb::engine::remote::http::Http;
 	///
-	/// static DB: Lazy<Surreal<Client>> = Lazy::new(Surreal::init);
+	/// static DB: LazyLock<Surreal<Client>> = LazyLock::new(Surreal::init);
 	///
 	/// # #[tokio::main]
 	/// # async fn main() -> surrealdb::Result<()> {
