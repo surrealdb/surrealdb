@@ -1112,24 +1112,6 @@ impl Datastore {
 		}
 		Ok(ctx)
 	}
-
-	// pub fn setup_auth(&self, sess: &Session) -> Result<(), Error> {
-	// 	// Check if the session has expired
-	// 	if sess.expired() {
-	// 		return Err(Error::ExpiredSession);
-	// 	}
-	// 	// Check if anonymous actors can execute queries when auth is enabled
-	// 	// TODO(sgirones): Check this as part of the authorisation layer
-	// 	if self.auth_enabled && sess.au.is_anon() && !self.capabilities.allows_guest_access() {
-	// 		return Err(IamError::NotAllowed {
-	// 			actor: "anonymous".to_string(),
-	// 			action: "process".to_string(),
-	// 			resource: "query".to_string(),
-	// 		}
-	// 		.into());
-	// 	}
-	// 	Ok(())
-	// }
 }
 
 #[cfg(test)]
