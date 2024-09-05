@@ -259,13 +259,7 @@ impl Datastore {
 			index_builder: IndexBuilder::new(self.transaction_factory.clone()),
 			#[cfg(feature = "jwks")]
 			jwks_cache: Arc::new(Default::default()),
-			#[cfg(any(
-				feature = "kv-mem",
-				feature = "kv-surrealkv",
-				feature = "kv-rocksdb",
-				feature = "kv-fdb",
-				feature = "kv-tikv",
-			))]
+			#[cfg(storage)]
 			temporary_directory: self.temporary_directory,
 			transaction_factory: self.transaction_factory,
 		}
