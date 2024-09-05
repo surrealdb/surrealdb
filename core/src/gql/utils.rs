@@ -61,6 +61,8 @@ pub struct GQLTx {
 
 impl GQLTx {
 	pub async fn new(kvs: &Arc<Datastore>, sess: &Session) -> Result<Self, GqlError> {
+		kvs.check_auth(sess)?;
+
 		let tx = kvs.transaction(TransactionType::Read, LockType::Optimistic).await?;
 		let tx = Arc::new(tx);
 		let mut ctx = kvs.setup_ctx()?;
