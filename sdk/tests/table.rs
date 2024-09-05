@@ -29,11 +29,13 @@ async fn define_foreign_table() -> Result<(), Error> {
 		SELECT * FROM person_by_age;
 		UPSERT person:two SET age = 39, score = 91;
 		SELECT * FROM person_by_age;
+		UPSERT person:two SET age = 39, score = 'test';
+		SELECT * FROM person_by_age;
 	";
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
-	assert_eq!(res.len(), 9);
+	assert_eq!(res.len(), 11);
 	//
 	let tmp = res.remove(0).result;
 	assert!(tmp.is_ok());
@@ -120,6 +122,25 @@ async fn define_foreign_table() -> Result<(), Error> {
 		]",
 	);
 	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
+			{
+				age: 39,
+				average: 81.5,
+				count: 2,
+				id: person_by_age:[39],
+				max: 91,
+				min: 72,
+				total: 78
+			}
+		]",
+	);
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result.unwrap_err();
+	assert!(matches!(tmp, Error::InvalidAggregation { .. }));
 	//
 	let tmp = res.remove(0).result?;
 	let val = Value::parse(

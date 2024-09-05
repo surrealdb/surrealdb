@@ -229,6 +229,14 @@ pub enum Error {
 	},
 
 	/// The wrong quantity or magnitude of arguments was given for the specified function
+	#[error("Incorrect arguments for aggregate function {name}() on table '{table}'. {message}")]
+	InvalidAggregation {
+		name: String,
+		table: String,
+		message: String,
+	},
+
+	/// The wrong quantity or magnitude of arguments was given for the specified function
 	#[error("There was a problem running the {name} function. Expected this function to return a value of type {check}, but found {value}")]
 	FunctionCheck {
 		name: String,
