@@ -222,17 +222,25 @@ pub async fn start_server_gql_without_auth() -> Result<(String, Child), Box<dyn 
 	.await
 }
 
-pub async fn start_server_without_rpc(methods: Vec<String>) -> Result<(String, Child), Box<dyn Error>> {
+pub async fn start_server_without_rpc(
+	methods: Vec<&str>,
+) -> Result<(String, Child), Box<dyn Error>> {
 	start_server(StartServerArguments {
 		args: format!("--deny-rpc {}", methods.join(",")),
+		// Auth disabled to ensure unauthorized errors are due to capabilities
+		auth: false,
 		..Default::default()
 	})
 	.await
 }
 
-pub async fn start_server_without_http(routes: Vec<String>) -> Result<(String, Child), Box<dyn Error>> {
+pub async fn start_server_without_http(
+	routes: Vec<&str>,
+) -> Result<(String, Child), Box<dyn Error>> {
 	start_server(StartServerArguments {
 		args: format!("--deny-http {}", routes.join(",")),
+		// Auth disabled to ensure unauthorized errors are due to capabilities
+		auth: false,
 		..Default::default()
 	})
 	.await
