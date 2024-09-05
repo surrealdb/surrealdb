@@ -1,53 +1,27 @@
 use std::time::Duration;
 
 use chrono::{DateTime, Utc};
-use thiserror::Error;
 
 mod byte;
 mod char;
 mod ident;
-mod js;
 pub mod keywords;
 mod number;
 mod reader;
 mod strand;
 mod unicode;
 
+mod compound;
 #[cfg(test)]
 mod test;
 
 pub use reader::{BytesReader, CharError};
 use uuid::Uuid;
 
-use crate::syn::token::{Span, Token, TokenKind};
-
-/// A error returned by the lexer when an invalid token is encountered.
-///
-/// Can be retrieved from the `Lexer::error` field whenever it returned a [`TokenKind::Invalid`]
-/// token.
-#[derive(Error, Debug)]
-#[non_exhaustive]
-pub enum Error {
-	#[error("Lexer encountered unexpected character {0:?}")]
-	UnexpectedCharacter(char),
-	#[error("invalid escape character {0:?}")]
-	InvalidEscapeCharacter(char),
-	#[error("Lexer encountered unexpected end of source characters")]
-	UnexpectedEof,
-	#[error("source was not valid utf-8")]
-	InvalidUtf8,
-	#[error("expected next character to be '{0}'")]
-	ExpectedEnd(char),
-}
-
-impl From<CharError> for Error {
-	fn from(value: CharError) -> Self {
-		match value {
-			CharError::Eof => Self::UnexpectedEof,
-			CharError::Unicode => Self::InvalidUtf8,
-		}
-	}
-}
+use crate::syn::{
+	error::SyntaxError,
+	token::{Span, Token, TokenKind},
+};
 
 /// The SurrealQL lexer.
 /// Takes a slice of bytes and turns it into tokens. The lexer is designed with possible invalid utf-8
@@ -88,7 +62,7 @@ pub struct Lexer<'a> {
 	pub duration: Option<Duration>,
 	pub datetime: Option<DateTime<Utc>>,
 	pub uuid: Option<Uuid>,
-	pub error: Option<Error>,
+	pub error: Option<SyntaxError>,
 }
 
 impl<'a> Lexer<'a> {
@@ -170,7 +144,7 @@ impl<'a> Lexer<'a> {
 	}
 
 	/// Return an invalid token.
-	fn invalid_token(&mut self, error: Error) -> Token {
+	fn invalid_token(&mut self, error: SyntaxError) -> Token {
 		self.error = Some(error);
 		self.finish_token(TokenKind::Invalid)
 	}
@@ -186,16 +160,19 @@ impl<'a> Lexer<'a> {
 		}
 	}
 
+	fn advance_span(&mut self) -> Span {
+		let span = self.current_span();
+		self.last_offset = self.reader.offset() as u32;
+		span
+	}
+
 	/// Builds a token from an TokenKind.
 	///
 	/// Attaches a span to the token and returns, updates the new offset.
 	fn finish_token(&mut self, kind: TokenKind) -> Token {
-		let span = self.current_span();
-		// We make sure that the source is no longer then u32::MAX so this can't overflow.
-		self.last_offset = self.reader.offset() as u32;
 		Token {
 			kind,
-			span,
+			span: self.advance_span(),
 		}
 	}
 
@@ -247,6 +224,18 @@ impl<'a> Lexer<'a> {
 		} else {
 			false
 		}
+	}
+
+	/// Returns the string for a given span of the source.
+	/// Will panic if the given span was not valid for the source, or invalid utf8
+	pub fn span_str(&self, span: Span) -> &'a str {
+		std::str::from_utf8(self.span_bytes(span)).expect("invalid span segment for source")
+	}
+
+	/// Returns the string for a given span of the source.
+	/// Will panic if the given span was not valid for the source, or invalid utf8
+	pub fn span_bytes(&self, span: Span) -> &'a [u8] {
+		self.reader.span(span)
 	}
 }
 

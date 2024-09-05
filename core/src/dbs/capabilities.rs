@@ -498,13 +498,6 @@ impl Capabilities {
 		self.live_query_notifications
 	}
 
-	// function is public API so we can't remove it, but you should prefer allows_function_name
-	pub fn allows_function(&self, target: &FuncTarget) -> bool {
-		self.allow_funcs.matches(target) && !self.deny_funcs.matches(target)
-	}
-
-	// doc hidden so we don't extend api in the library.
-	#[doc(hidden)]
 	pub fn allows_function_name(&self, target: &str) -> bool {
 		self.allow_funcs.matches(target) && !self.deny_funcs.matches(target)
 	}
@@ -804,8 +797,8 @@ mod tests {
 			let caps = Capabilities::default()
 				.with_functions(Targets::<FuncTarget>::All)
 				.without_functions(Targets::<FuncTarget>::None);
-			assert!(caps.allows_function(&FuncTarget::from_str("http::get").unwrap()));
-			assert!(caps.allows_function(&FuncTarget::from_str("http::post").unwrap()));
+			assert!(caps.allows_function_name("http::get"));
+			assert!(caps.allows_function_name("http::post"));
 		}
 
 		// When all funcs are allowed and denied at the same time
@@ -813,8 +806,8 @@ mod tests {
 			let caps = Capabilities::default()
 				.with_functions(Targets::<FuncTarget>::All)
 				.without_functions(Targets::<FuncTarget>::All);
-			assert!(!caps.allows_function(&FuncTarget::from_str("http::get").unwrap()));
-			assert!(!caps.allows_function(&FuncTarget::from_str("http::post").unwrap()));
+			assert!(!caps.allows_function_name("http::get"));
+			assert!(!caps.allows_function_name("http::post"));
 		}
 
 		// When some funcs are allowed and some are denied, deny overrides the allow rules
@@ -826,9 +819,9 @@ mod tests {
 				.without_functions(Targets::<FuncTarget>::Some(
 					[FuncTarget::from_str("http::post").unwrap()].into(),
 				));
-			assert!(caps.allows_function(&FuncTarget::from_str("http::get").unwrap()));
-			assert!(caps.allows_function(&FuncTarget::from_str("http::put").unwrap()));
-			assert!(!caps.allows_function(&FuncTarget::from_str("http::post").unwrap()));
+			assert!(caps.allows_function_name("http::get"));
+			assert!(caps.allows_function_name("http::put"));
+			assert!(!caps.allows_function_name("http::post"));
 		}
 
 		// When all RPC methods are allowed

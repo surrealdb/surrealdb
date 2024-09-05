@@ -203,6 +203,9 @@ impl Display for DefineTableStatement {
 						kind.iter().map(|t| t.0.as_str()).collect::<Vec<_>>().join(" | ")
 					)?;
 				}
+				if rel.enforced {
+					write!(f, " ENFORCED")?;
+				}
 			}
 			TableType::Any => {
 				f.write_str(" ANY")?;

@@ -441,7 +441,7 @@ async fn create_record_no_id() {
 	let (permit, db) = new_db().await;
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
 	drop(permit);
-	let _: Vec<ApiRecordId> = db.create("user").await.unwrap();
+	let _: Option<ApiRecordId> = db.create("user").await.unwrap();
 	let _: Value = db.create(Resource::from("user")).await.unwrap();
 }
 
@@ -460,7 +460,7 @@ async fn create_record_no_id_with_content() {
 	let (permit, db) = new_db().await;
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
 	drop(permit);
-	let _: Vec<ApiRecordId> = db
+	let _: Option<ApiRecordId> = db
 		.create("user")
 		.content(Record {
 			name: "John Doe".to_owned(),
@@ -576,13 +576,31 @@ async fn insert_unspecified() {
 }
 
 #[test_log::test(tokio::test)]
+async fn insert_relation_table() {
+	let (permit, db) = new_db().await;
+	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
+	drop(permit);
+	let tmp: Result<Vec<ApiRecordId>, _> =
+		db.insert("likes").relation("{}".parse::<Value>().unwrap()).await;
+	tmp.unwrap_err();
+	let val = "{in: person:a, out: thing:a}".parse::<Value>().unwrap();
+	let _: Vec<ApiRecordId> = db.insert("likes").relation(val).await.unwrap();
+
+	let vals = 
+		"[{in: person:b, out: thing:a}, {id: likes:2, in: person:a, out: thing:a}, {id: hates:3, in: person:a, out: thing:a}]"
+		.parse::<Value>()
+	.unwrap();
+	let _: Vec<ApiRecordId> = db.insert("likes").relation(vals).await.unwrap();
+}
+
+#[test_log::test(tokio::test)]
 async fn select_table() {
 	let (permit, db) = new_db().await;
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
 	drop(permit);
 	let table = "user";
-	let _: Vec<ApiRecordId> = db.create(table).await.unwrap();
-	let _: Vec<ApiRecordId> = db.create(table).await.unwrap();
+	let _: Option<ApiRecordId> = db.create(table).await.unwrap();
+	let _: Option<ApiRecordId> = db.create(table).await.unwrap();
 	let _: Value = db.create(Resource::from(table)).await.unwrap();
 	let users: Vec<ApiRecordId> = db.select(table).await.unwrap();
 	assert_eq!(users.len(), 3);
@@ -809,8 +827,8 @@ async fn update_table() {
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
 	drop(permit);
 	let table = "user";
-	let _: Vec<ApiRecordId> = db.create(table).await.unwrap();
-	let _: Vec<ApiRecordId> = db.create(table).await.unwrap();
+	let _: Option<ApiRecordId> = db.create(table).await.unwrap();
+	let _: Option<ApiRecordId> = db.create(table).await.unwrap();
 	let _: Value = db.update(Resource::from(table)).await.unwrap();
 	let users: Vec<ApiRecordId> = db.update(table).await.unwrap();
 	assert_eq!(users.len(), 2);
@@ -1054,9 +1072,9 @@ async fn delete_table() {
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
 	drop(permit);
 	let table = "user";
-	let _: Vec<ApiRecordId> = db.create(table).await.unwrap();
-	let _: Vec<ApiRecordId> = db.create(table).await.unwrap();
-	let _: Vec<ApiRecordId> = db.create(table).await.unwrap();
+	let _: Option<ApiRecordId> = db.create(table).await.unwrap();
+	let _: Option<ApiRecordId> = db.create(table).await.unwrap();
+	let _: Option<ApiRecordId> = db.create(table).await.unwrap();
 	let users: Vec<ApiRecordId> = db.select(table).await.unwrap();
 	assert_eq!(users.len(), 3);
 	let users: Vec<ApiRecordId> = db.delete(table).await.unwrap();
@@ -1435,4 +1453,24 @@ async fn run() {
 
 	let tmp: i32 = db.run("fn::baz").await.unwrap();
 	assert_eq!(tmp, 7);
+}
+
+#[test_log::test(tokio::test)]
+async fn multi_take() {
+	let (permit, db) = new_db().await;
+	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
+	drop(permit);
+
+	db.query("INSERT INTO user {name: 'John', address: 'USA'};").await.unwrap();
+	db.query("INSERT INTO user {name: 'Adam', address: 'UK'};").await.unwrap();
+
+	let mut response = db.query("SELECT * FROM user").await.unwrap();
+
+	let mut names: Vec<String> = response.take("name").unwrap();
+	names.sort();
+	assert_eq!(names, vec!["Adam".to_owned(), "John".to_owned()]);
+
+	let mut addresses: Vec<String> = response.take("address").unwrap();
+	addresses.sort();
+	assert_eq!(addresses, vec!["UK".to_owned(), "USA".to_owned()]);
 }

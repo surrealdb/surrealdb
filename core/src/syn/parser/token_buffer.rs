@@ -1,6 +1,5 @@
 use crate::syn::token::Token;
 
-#[non_exhaustive]
 pub struct TokenBuffer<const S: usize> {
 	buffer: [Token; S],
 	write: u8,

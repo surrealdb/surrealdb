@@ -1,6 +1,6 @@
 use super::common::{self, Format, Socket, DB, NS, PASS, USER};
-use http::header::{HeaderMap, HeaderValue};
 use assert_fs::TempDir;
+use http::header::{HeaderMap, HeaderValue};
 use serde_json::json;
 use std::future::Future;
 use std::pin::Pin;
@@ -380,10 +380,9 @@ async fn create() -> Result<(), Box<dyn std::error::Error>> {
 		)
 		.await?;
 	assert!(res.is_object(), "result: {res:?}");
-	assert!(res["result"].is_array(), "result: {res:?}");
-	let res = res["result"].as_array().unwrap();
-	assert_eq!(res.len(), 1, "result: {res:?}");
-	assert_eq!(res[0]["value"], "bar", "result: {res:?}");
+	assert!(res["result"].is_object(), "result: {res:?}");
+	let res = res["result"].as_object().unwrap();
+	assert_eq!(res["value"], "bar", "result: {res:?}");
 	// Verify the data was created
 	let res = socket.send_message_query("SELECT * FROM tester").await?;
 	assert!(res[0]["result"].is_array(), "result: {res:?}");

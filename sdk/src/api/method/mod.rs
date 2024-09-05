@@ -35,6 +35,7 @@ mod export;
 mod health;
 mod import;
 mod insert;
+mod insert_relation;
 mod invalidate;
 mod merge;
 mod patch;
@@ -732,7 +733,7 @@ where
 	/// db.use_ns("namespace").use_db("database").await?;
 	///
 	/// // Create a record with a random ID
-	/// let person: Vec<Person> = db.create("person").await?;
+	/// let person: Option<Person> = db.create("person").await?;
 	///
 	/// // Create a record with a specific ID
 	/// let record: Option<Person> = db.create(("person", "tobie"))
@@ -761,10 +762,10 @@ where
 	/// # Examples
 	///
 	/// ```no_run
-	/// use serde::Serialize;
+	/// use serde::{Serialize, Deserialize};
 	/// use surrealdb::sql;
 	///
-	/// # #[derive(serde::Deserialize)]
+	/// # #[derive(Deserialize)]
 	/// # struct Person;
 	/// #
 	/// #[derive(Serialize)]
@@ -862,6 +863,29 @@ where
 	///         WithId {
 	///             id: sql::thing("company:surrealdb")?,
 	///             name: "SurrealDB",
+	///         },
+	///     ])
+	///     .await?;
+	///
+	///
+	/// // Insert relations
+	/// #[derive(Serialize, Deserialize)]
+	/// struct Founded {
+	///     #[serde(rename = "in")]
+	///     founder: sql::Thing,
+	///     #[serde(rename = "out")]
+	///     company: sql::Thing,
+	/// }
+	///
+	/// let founded: Vec<Founded> = db.insert("founded")
+	///     .relation(vec![
+	///         Founded {
+	///             founder: sql::thing("person:tobie")?,
+	///             company: sql::thing("company:surrealdb")?,
+	///         },
+	///         Founded {
+	///             founder: sql::thing("person:jaime")?,
+	///             company: sql::thing("company:surrealdb")?,
 	///         },
 	///     ])
 	///     .await?;

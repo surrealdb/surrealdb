@@ -1,28 +1,38 @@
 //! This file defines the endpoints for the ML API for importing and exporting SurrealML models.
 use super::AppState;
+use crate::cnf::HTTP_MAX_ML_BODY_SIZE;
 use crate::err::Error;
+#[cfg(feature = "ml")]
 use crate::net::output;
 use axum::body::Body;
 use axum::extract::{DefaultBodyLimit, Path};
 use axum::response::IntoResponse;
+#[cfg(feature = "ml")]
 use axum::response::Response;
 use axum::routing::{get, post};
 use axum::Extension;
 use axum::Router;
+#[cfg(feature = "ml")]
 use bytes::Bytes;
+#[cfg(feature = "ml")]
 use futures_util::StreamExt;
+#[cfg(feature = "ml")]
 use http::StatusCode;
 use surrealdb::dbs::capabilities::RouteTarget;
 use surrealdb::dbs::Session;
+#[cfg(feature = "ml")]
 use surrealdb::iam::check::check_ns_db;
+#[cfg(feature = "ml")]
 use surrealdb::iam::Action::{Edit, View};
+#[cfg(feature = "ml")]
 use surrealdb::iam::ResourceKind::Model;
+#[cfg(feature = "ml")]
 use surrealdb::kvs::{LockType::Optimistic, TransactionType::Read};
+#[cfg(feature = "ml")]
 use surrealdb::ml::storage::surml_file::SurMlFile;
+#[cfg(feature = "ml")]
 use surrealdb::sql::statements::{DefineModelStatement, DefineStatement};
 use tower_http::limit::RequestBodyLimitLayer;
-
-const MAX: usize = 1024 * 1024 * 1024 * 4; // 4 GiB
 
 /// The router definition for the ML API endpoints.
 pub(super) fn router<S>() -> Router<S>
@@ -33,10 +43,11 @@ where
 		.route("/ml/import", post(import))
 		.route("/ml/export/:name/:version", get(export))
 		.route_layer(DefaultBodyLimit::disable())
-		.layer(RequestBodyLimitLayer::new(MAX))
+		.layer(RequestBodyLimitLayer::new(*HTTP_MAX_ML_BODY_SIZE))
 }
 
 /// This endpoint allows the user to import a model into the database.
+#[cfg(feature = "ml")]
 async fn import(
 	Extension(state): Extension<AppState>,
 	Extension(session): Extension<Session>,
@@ -94,6 +105,7 @@ async fn import(
 }
 
 /// This endpoint allows the user to export a model from the database.
+#[cfg(feature = "ml")]
 async fn export(
 	Extension(state): Extension<AppState>,
 	Extension(session): Extension<Session>,
@@ -128,4 +140,24 @@ async fn export(
 	});
 	// Return the streamed body
 	Ok(Response::builder().status(StatusCode::OK).body(body).unwrap())
+}
+
+/// This endpoint allows the user to import a model into the database.
+#[cfg(not(feature = "ml"))]
+async fn import(
+	Extension(_): Extension<AppState>,
+	Extension(_): Extension<Session>,
+	_: Body,
+) -> Result<(), impl IntoResponse> {
+	Err(Error::Request)
+}
+
+/// This endpoint allows the user to export a model from the database.
+#[cfg(not(feature = "ml"))]
+async fn export(
+	Extension(_): Extension<AppState>,
+	Extension(_): Extension<Session>,
+	Path((_, _)): Path<(String, String)>,
+) -> Result<(), impl IntoResponse> {
+	Err(Error::Request)
 }

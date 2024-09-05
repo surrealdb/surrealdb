@@ -23,11 +23,11 @@ async fn define_foreign_table() -> Result<(), Error> {
 			GROUP BY age
 		;
 		INFO FOR TABLE person;
-		UPSERT person:one SET age = 39, score = 70;
+		UPSERT person:one SET age = 39, score = 72;
 		SELECT * FROM person_by_age;
-		UPSERT person:two SET age = 39, score = 80;
+		UPSERT person:two SET age = 39, score = 83;
 		SELECT * FROM person_by_age;
-		UPSERT person:two SET age = 39, score = 90;
+		UPSERT person:two SET age = 39, score = 91;
 		SELECT * FROM person_by_age;
 	";
 	let dbs = new_ds().await?;
@@ -54,7 +54,15 @@ async fn define_foreign_table() -> Result<(), Error> {
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse("[{ id: person:one, age: 39, score: 70 }]");
+	let val = Value::parse(
+		"[
+			{
+				age: 39,
+				id: person:one,
+				score: 72,
+			}
+		]",
+	);
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
@@ -62,11 +70,11 @@ async fn define_foreign_table() -> Result<(), Error> {
 		"[
 			{
 				age: 39,
-				average: 70,
+				average: 72,
 				count: 1,
 				id: person_by_age:[39],
-				max: 70,
-				min: 70,
+				max: 72,
+				min: 72,
 				total: 39
 			}
 		]",
@@ -74,7 +82,15 @@ async fn define_foreign_table() -> Result<(), Error> {
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse("[{ id: person:two, age: 39, score: 80 }]");
+	let val = Value::parse(
+		"[
+			{
+				age: 39,
+				id: person:two,
+				score: 83,
+			}
+		]",
+	);
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
@@ -82,11 +98,11 @@ async fn define_foreign_table() -> Result<(), Error> {
 		"[
 			{
 				age: 39,
-				average: 75,
+				average: 77.5,
 				count: 2,
 				id: person_by_age:[39],
-				max: 80,
-				min: 70,
+				max: 83,
+				min: 72,
 				total: 78
 			}
 		]",
@@ -94,7 +110,15 @@ async fn define_foreign_table() -> Result<(), Error> {
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse("[{ id: person:two, age: 39, score: 90 }]");
+	let val = Value::parse(
+		"[
+			{
+				age: 39,
+				id: person:two,
+				score: 91,
+			}
+		]",
+	);
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
@@ -102,11 +126,11 @@ async fn define_foreign_table() -> Result<(), Error> {
 		"[
 			{
 				age: 39,
-				average: 80,
+				average: 81.5,
 				count: 2,
 				id: person_by_age:[39],
-				max: 90,
-				min: 70,
+				max: 91,
+				min: 72,
 				total: 78
 			}
 		]",

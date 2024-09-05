@@ -26,7 +26,7 @@ use crate::{
 		Connect, Response as QueryResponse, Result, Surreal,
 	},
 	method::Stats,
-	opt::{IntoEndpoint, Resource as ApiResource, Table},
+	opt::{IntoEndpoint, Table},
 	value::Notification,
 };
 use channel::Sender;
@@ -356,6 +356,42 @@ pub struct FDb;
 #[derive(Debug)]
 pub struct SurrealKV;
 
+/// SurrealCS database
+///
+/// # Examples
+///
+/// Instantiating a SurrealCS-backed instance
+///
+/// ```no_run
+/// # #[tokio::main]
+/// # async fn main() -> surrealdb::Result<()> {
+/// use surrealdb::Surreal;
+/// use surrealdb::engine::local::SurrealCS;
+///
+/// let db = Surreal::new::<SurrealCS>("path/to/database-folder").await?;
+/// # Ok(())
+/// # }
+/// ```
+///
+/// Instantiating a SurrealCS-backed strict instance
+///
+/// ```no_run
+/// # #[tokio::main]
+/// # async fn main() -> surrealdb::Result<()> {
+/// use surrealdb::opt::Config;
+/// use surrealdb::Surreal;
+/// use surrealdb::engine::local::SurrealCS;
+///
+/// let config = Config::default().strict();
+/// let db = Surreal::new::<SurrealCS>(("path/to/database-folder", config)).await?;
+/// # Ok(())
+/// # }
+/// ```
+#[cfg(feature = "kv-surrealcs")]
+#[cfg_attr(docsrs, doc(cfg(feature = "kv-surrealcs")))]
+#[derive(Debug)]
+pub struct SurrealCS;
+
 /// An embedded database
 #[derive(Debug, Clone)]
 pub struct Db(());
@@ -559,7 +595,7 @@ async fn router(
 			data,
 		} => {
 			let mut query = Query::default();
-			let one = matches!(what, ApiResource::RecordId(_));
+			let one = what.is_single_recordid();
 			let statement = {
 				let mut stmt = UpsertStatement::default();
 				stmt.what = resource_to_values(what);
@@ -578,7 +614,7 @@ async fn router(
 			data,
 		} => {
 			let mut query = Query::default();
-			let one = matches!(what, ApiResource::RecordId(_));
+			let one = what.is_single_recordid();
 			let statement = {
 				let mut stmt = UpdateStatement::default();
 				stmt.what = resource_to_values(what);
@@ -611,12 +647,31 @@ async fn router(
 			let value = take(one, response).await?;
 			Ok(DbResponse::Other(value))
 		}
+		Command::InsertRelation {
+			what,
+			data,
+		} => {
+			let mut query = Query::default();
+			let one = !data.is_array();
+			let statement = {
+				let mut stmt = InsertStatement::default();
+				stmt.into = what.map(|w| Table(w).into_core().into());
+				stmt.data = Data::SingleExpression(data);
+				stmt.output = Some(Output::After);
+				stmt.relation = true;
+				stmt
+			};
+			query.0 .0 = vec![Statement::Insert(statement)];
+			let response = kvs.process(query, &*session, Some(vars.clone())).await?;
+			let value = take(one, response).await?;
+			Ok(DbResponse::Other(value))
+		}
 		Command::Patch {
 			what,
 			data,
 		} => {
 			let mut query = Query::default();
-			let one = matches!(what, ApiResource::RecordId(_));
+			let one = what.is_single_recordid();
 			let statement = {
 				let mut stmt = UpdateStatement::default();
 				stmt.what = resource_to_values(what);
@@ -635,7 +690,7 @@ async fn router(
 			data,
 		} => {
 			let mut query = Query::default();
-			let one = matches!(what, ApiResource::RecordId(_));
+			let one = what.is_single_recordid();
 			let statement = {
 				let mut stmt = UpdateStatement::default();
 				stmt.what = resource_to_values(what);
@@ -653,7 +708,7 @@ async fn router(
 			what,
 		} => {
 			let mut query = Query::default();
-			let one = matches!(what, ApiResource::RecordId(_));
+			let one = what.is_single_recordid();
 			let statement = {
 				let mut stmt = SelectStatement::default();
 				stmt.what = resource_to_values(what);
@@ -670,7 +725,7 @@ async fn router(
 			what,
 		} => {
 			let mut query = Query::default();
-			let one = matches!(what, ApiResource::RecordId(_));
+			let one = what.is_single_recordid();
 			let statement = {
 				let mut stmt = DeleteStatement::default();
 				stmt.what = resource_to_values(what);

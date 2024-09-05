@@ -183,7 +183,7 @@ impl Capabilities {
 	}
 
 	/// Set the deny list to deny all functions
-	pub fn with_deny_all_function(mut self) -> Self {
+	pub fn with_deny_all_functions(mut self) -> Self {
 		self.deny_all_functions();
 		self
 	}
@@ -309,7 +309,7 @@ impl Capabilities {
 	}
 
 	/// Set the deny list to deny all net targets
-	pub fn with_deny_all_net_target(mut self) -> Self {
+	pub fn with_deny_all_net_targets(mut self) -> Self {
 		self.deny_all_net_targets();
 		self
 	}

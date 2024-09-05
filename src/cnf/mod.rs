@@ -28,6 +28,34 @@ pub const PKG_NAME: &str = "surrealdb";
 /// The public endpoint for the administration interface
 pub const APP_ENDPOINT: &str = "https://surrealdb.com/app";
 
+/// The maximum HTTP body size of the HTTP /ml endpoints (defaults to 4 GiB)
+pub static HTTP_MAX_ML_BODY_SIZE: Lazy<usize> =
+	lazy_env_parse!("SURREAL_HTTP_MAX_ML_BODY_SIZE", usize, 4 << 30);
+
+/// The maximum HTTP body size of the HTTP /sql endpoint (defaults to 1 MiB)
+pub static HTTP_MAX_SQL_BODY_SIZE: Lazy<usize> =
+	lazy_env_parse!("SURREAL_HTTP_MAX_SQL_BODY_SIZE", usize, 1 << 20);
+
+/// The maximum HTTP body size of the HTTP /rpc endpoint (defaults to 4 MiB)
+pub static HTTP_MAX_RPC_BODY_SIZE: Lazy<usize> =
+	lazy_env_parse!("SURREAL_HTTP_MAX_RPC_BODY_SIZE", usize, 4 << 20);
+
+/// The maximum HTTP body size of the HTTP /key endpoints (defaults to 16 KiB)
+pub static HTTP_MAX_KEY_BODY_SIZE: Lazy<usize> =
+	lazy_env_parse!("SURREAL_HTTP_MAX_KEY_BODY_SIZE", usize, 16 << 10);
+
+/// The maximum HTTP body size of the HTTP /signup endpoint (defaults to 1 KiB)
+pub static HTTP_MAX_SIGNUP_BODY_SIZE: Lazy<usize> =
+	lazy_env_parse!("SURREAL_HTTP_MAX_SIGNUP_BODY_SIZE", usize, 1 << 10);
+
+/// The maximum HTTP body size of the HTTP /signin endpoint (defaults to 1 KiB)
+pub static HTTP_MAX_SIGNIN_BODY_SIZE: Lazy<usize> =
+	lazy_env_parse!("SURREAL_HTTP_MAX_SIGNIN_BODY_SIZE", usize, 1 << 10);
+
+/// The maximum HTTP body size of the HTTP /import endpoint (defaults to 4 GiB)
+pub static HTTP_MAX_IMPORT_BODY_SIZE: Lazy<usize> =
+	lazy_env_parse!("SURREAL_HTTP_MAX_IMPORT_BODY_SIZE", usize, 4 << 30);
+
 /// Specifies the frequency with which ping messages should be sent to the client
 pub const WEBSOCKET_PING_FREQUENCY: Duration = Duration::from_secs(5);
 

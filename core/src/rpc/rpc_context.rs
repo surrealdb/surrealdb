@@ -75,6 +75,9 @@ pub trait RpcContext {
 			Method::Relate => self.relate(params).await.map(Into::into).map_err(Into::into),
 			Method::Run => self.run(params).await.map(Into::into).map_err(Into::into),
 			Method::GraphQL => self.graphql(params).await.map(Into::into).map_err(Into::into),
+			Method::InsertRelation => {
+				self.insert_relation(params).await.map(Into::into).map_err(Into::into)
+			}
 			Method::Unknown => Err(RpcError::MethodNotFound),
 		}
 	}
@@ -103,6 +106,9 @@ pub trait RpcContext {
 			Method::Relate => self.relate(params).await.map(Into::into).map_err(Into::into),
 			Method::Run => self.run(params).await.map(Into::into).map_err(Into::into),
 			Method::GraphQL => self.graphql(params).await.map(Into::into).map_err(Into::into),
+			Method::InsertRelation => {
+				self.insert_relation(params).await.map(Into::into).map_err(Into::into)
+			}
 			Method::Unknown => Err(RpcError::MethodNotFound),
 			_ => Err(RpcError::MethodNotFound),
 		}
@@ -340,6 +346,41 @@ pub trait RpcContext {
 		Ok(res.into())
 	}
 
+	async fn insert_relation(&self, params: Array) -> Result<impl Into<Data>, RpcError> {
+		let Ok((what, data)) = params.needs_two() else {
+			return Err(RpcError::InvalidParams);
+		};
+
+		let one = what.is_thing_single();
+
+		let mut res = match what {
+			Value::None | Value::Null => {
+				let sql = "INSERT RELATION $data RETURN AFTER";
+				let vars = Some(map! {
+					String::from("data") => data,
+					=> &self.vars()
+				});
+				self.kvs().execute(sql, self.session(), vars).await?
+			}
+			Value::Table(_) | Value::Strand(_) => {
+				let sql = "INSERT RELATION INTO $what $data RETURN AFTER";
+				let vars = Some(map! {
+						String::from("data") => data,
+				String::from("what") => what.could_be_table(),
+						=> &self.vars()
+					});
+				self.kvs().execute(sql, self.session(), vars).await?
+			}
+			_ => return Err(RpcError::InvalidParams),
+		};
+
+		let res = match one {
+			true => res.remove(0).result?.first(),
+			false => res.remove(0).result?,
+		};
+		Ok(res)
+	}
+
 	// ------------------------------
 	// Methods for creating
 	// ------------------------------
@@ -348,8 +389,9 @@ pub trait RpcContext {
 		let Ok((what, data)) = params.needs_one_or_two() else {
 			return Err(RpcError::InvalidParams);
 		};
+		let what = what.could_be_table();
 		// Return a single result?
-		let one = what.is_thing_single();
+		let one = what.is_thing_single() || what.is_table();
 		// Specify the SQL query string
 		let sql = if data.is_none_or_null() {
 			"CREATE $what RETURN AFTER"
@@ -358,7 +400,7 @@ pub trait RpcContext {
 		};
 		// Specify the query parameters
 		let var = Some(map! {
-			String::from("what") => what.could_be_table(),
+			String::from("what") => what,
 			String::from("data") => data,
 			=> &self.vars()
 		});
@@ -513,7 +555,7 @@ pub trait RpcContext {
 			return Err(RpcError::InvalidParams);
 		};
 		// Return a single result?
-		let one = kind.is_thing_single();
+		let one = from.is_single() && to.is_single();
 		// Specify the SQL query string
 		let sql = if data.is_none_or_null() {
 			"RELATE $from->$kind->$to"

@@ -22,6 +22,7 @@ use std::fmt::{self, Debug};
 	feature = "kv-rocksdb",
 	feature = "kv-fdb",
 	feature = "kv-tikv",
+	feature = "kv-surrealcs",
 ))]
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -76,6 +77,7 @@ pub struct MutableContext {
 		feature = "kv-rocksdb",
 		feature = "kv-fdb",
 		feature = "kv-tikv",
+		feature = "kv-surrealcs",
 	))]
 	// The temporary directory
 	temporary_directory: Option<Arc<PathBuf>>,
@@ -122,6 +124,7 @@ impl MutableContext {
 			feature = "kv-rocksdb",
 			feature = "kv-fdb",
 			feature = "kv-tikv",
+			feature = "kv-surrealcs",
 		))]
 		temporary_directory: Option<Arc<PathBuf>>,
 	) -> Result<MutableContext, Error> {
@@ -144,6 +147,7 @@ impl MutableContext {
 				feature = "kv-rocksdb",
 				feature = "kv-fdb",
 				feature = "kv-tikv",
+				feature = "kv-surrealcs",
 			))]
 			temporary_directory,
 			transaction: None,
@@ -175,6 +179,7 @@ impl MutableContext {
 				feature = "kv-rocksdb",
 				feature = "kv-fdb",
 				feature = "kv-tikv",
+				feature = "kv-surrealcs",
 			))]
 			temporary_directory: None,
 			transaction: None,
@@ -202,6 +207,7 @@ impl MutableContext {
 				feature = "kv-rocksdb",
 				feature = "kv-fdb",
 				feature = "kv-tikv",
+				feature = "kv-surrealcs",
 			))]
 			temporary_directory: parent.temporary_directory.clone(),
 			transaction: parent.transaction.clone(),
@@ -409,6 +415,7 @@ impl MutableContext {
 		feature = "kv-rocksdb",
 		feature = "kv-fdb",
 		feature = "kv-tikv",
+		feature = "kv-surrealcs",
 	))]
 	/// Return the location of the temporary directory if any
 	pub fn temporary_directory(&self) -> Option<&Arc<PathBuf>> {

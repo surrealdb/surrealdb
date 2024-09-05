@@ -5,10 +5,8 @@ use chrono::{FixedOffset, NaiveDate, NaiveDateTime, NaiveTime, Offset, TimeZone,
 use crate::{
 	sql::Datetime,
 	syn::{
-		parser::{
-			mac::{expected_whitespace, unexpected},
-			ParseError, ParseErrorKind, ParseResult, Parser,
-		},
+		error::{bail, error},
+		parser::{expected_whitespace, unexpected, ParseResult, Parser},
 		token::{t, DatetimeChars, TokenKind},
 	},
 };
@@ -19,7 +17,7 @@ impl Parser<'_> {
 		let double = match start.kind {
 			t!("d\"") => true,
 			t!("d'") => false,
-			x => unexpected!(self, x, "a datetime"),
+			x => bail!("Expected a datetime found {}",x, @start.span),
 		};
 
 		self.pop_peek();
@@ -58,8 +56,9 @@ impl Parser<'_> {
 			year as i32
 		};
 
-		let date = NaiveDate::from_ymd_opt(year, month as u32, day as u32)
-			.ok_or_else(|| ParseError::new(ParseErrorKind::InvalidDatetimeDate, date_span))?;
+		let date = NaiveDate::from_ymd_opt(year, month as u32, day as u32).ok_or_else(
+			|| error!("Invalid DateTime date: date outside of valid range", @date_span),
+		)?;
 
 		if !self.eat(TokenKind::DatetimeChars(DatetimeChars::T)) {
 			let time = NaiveTime::default();
@@ -81,13 +80,11 @@ impl Parser<'_> {
 
 		let nanos = if self.eat_whitespace(t!(".")) {
 			let digits_token = expected_whitespace!(self, TokenKind::Digits);
-			let slice = self.span_bytes(digits_token.span);
+			let slice = self.lexer.span_bytes(digits_token.span);
 
 			if slice.len() > 9 {
-				return Err(ParseError::new(
-					ParseErrorKind::TooManyNanosecondsDatetime,
-					digits_token.span,
-				));
+				bail!("Invalid DateTime nanoseconds, too many nanosecond digits",
+					@digits_token.span => "This section contains more then 9 digits");
 			}
 
 			let mut number = 0u32;
@@ -110,9 +107,10 @@ impl Parser<'_> {
 
 		let time_span = start_time.covers(self.last_span());
 
-		let time =
-			NaiveTime::from_hms_nano_opt(hour as u32, minute as u32, second as u32, nanos)
-				.ok_or_else(|| ParseError::new(ParseErrorKind::InvalidDatetimeTime, time_span))?;
+		let time = NaiveTime::from_hms_nano_opt(hour as u32, minute as u32, second as u32, nanos)
+			.ok_or_else(
+			|| error!("Invalid DateTime time: time outside of valid range", @time_span),
+		)?;
 
 		let peek = self.peek_whitespace();
 		let timezone = match peek.kind {
@@ -122,7 +120,7 @@ impl Parser<'_> {
 				self.pop_peek();
 				Utc.fix()
 			}
-			x => unexpected!(self, x, "`Z` or a timezone"),
+			_ => unexpected!(self, peek, "`Z` or a timezone"),
 		};
 
 		let date_time = NaiveDateTime::new(date, time);
@@ -160,17 +158,13 @@ impl Parser<'_> {
 		let t = self.peek_whitespace();
 		match t.kind {
 			TokenKind::Digits => {}
-			x => unexpected!(self, x, "datetime digits"),
+			_ => unexpected!(self, t, "datetime digits"),
 		}
 
-		let digits_str = self.span_str(t.span);
+		let digits_str = self.lexer.span_str(t.span);
 		if digits_str.len() != len {
-			return Err(ParseError::new(
-				ParseErrorKind::InvalidDatetimePart {
-					len,
-				},
-				t.span,
-			));
+			bail!("Datetime digits section not the correct length, needs to be {len} characters",
+				@t.span => "This section has a length of {}", digits_str.len());
 		}
 
 		self.pop_peek();
@@ -179,12 +173,7 @@ impl Parser<'_> {
 		let value = digits_str.parse().unwrap();
 
 		if !range.contains(&value) {
-			return Err(ParseError::new(
-				ParseErrorKind::OutrangeDatetimePart {
-					range,
-				},
-				t.span,
-			));
+			bail!("Datetime digits section outside of valid range of {}..={}", range.start(),range.end(), @t.span);
 		}
 
 		Ok(value)

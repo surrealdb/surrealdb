@@ -239,6 +239,18 @@ pub fn year((val,): (Option<Datetime>,)) -> Result<Value, Error> {
 	})
 }
 
+pub mod is {
+	use crate::err::Error;
+	use crate::sql::{Datetime, Value};
+
+	pub fn leap_year((val,): (Option<Datetime>,)) -> Result<Value, Error> {
+		Ok(match val {
+			Some(v) => v.naive_utc().date().leap_year().into(),
+			None => Datetime::default().naive_utc().date().leap_year().into(),
+		})
+	}
+}
+
 pub mod from {
 
 	use crate::err::Error;

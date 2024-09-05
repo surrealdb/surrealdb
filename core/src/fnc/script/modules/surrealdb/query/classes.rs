@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use crate::sql::{self, subquery::Subquery, Value as SurValue};
+use crate::sql::{self, Value as SurValue};
 
 use js::{
 	class::Trace,
@@ -13,7 +13,7 @@ use js::{
 #[non_exhaustive]
 pub struct Query {
 	#[qjs(skip_trace)]
-	pub(crate) query: Subquery,
+	pub(crate) query: SurValue,
 	#[qjs(skip_trace)]
 	pub(crate) vars: Option<BTreeMap<String, SurValue>>,
 }
@@ -96,7 +96,7 @@ impl<'js> FromJs<'js> for QueryVariables {
 impl Query {
 	#[qjs(constructor)]
 	pub fn new(ctx: Ctx<'_>, text: String, variables: Opt<QueryVariables>) -> Result<Self> {
-		let query = sql::subquery(&text).map_err(|e| {
+		let query = sql::value(&text).map_err(|e| {
 			let error_text = format!("{}", e);
 			Exception::throw_type(&ctx, &error_text)
 		})?;
