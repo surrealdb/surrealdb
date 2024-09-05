@@ -55,7 +55,7 @@ macro_rules! catch {
 /// transaction in an uncommitted state without rolling back.
 macro_rules! run {
 	($txn:ident, $default:expr) => {
-		match $default.await {
+		match $default {
 			Err(e) => {
 				let _ = $txn.cancel().await;
 				Err(e)

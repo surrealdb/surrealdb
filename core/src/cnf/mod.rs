@@ -52,14 +52,7 @@ pub static SCRIPTING_MAX_MEMORY_LIMIT: LazyLock<usize> =
 pub static INSECURE_FORWARD_ACCESS_ERRORS: LazyLock<bool> =
 	lazy_env_parse!("SURREAL_INSECURE_FORWARD_ACCESS_ERRORS", bool, false);
 
-#[cfg(any(
-	feature = "kv-mem",
-	feature = "kv-surrealkv",
-	feature = "kv-rocksdb",
-	feature = "kv-fdb",
-	feature = "kv-tikv",
-	feature = "kv-surrealcs",
-))]
+#[cfg(storage)]
 /// Specifies the buffer limit for external sorting.
 pub static EXTERNAL_SORTING_BUFFER_LIMIT: LazyLock<usize> =
 	lazy_env_parse!("SURREAL_EXTERNAL_SORTING_BUFFER_LIMIT", usize, 50_000);
