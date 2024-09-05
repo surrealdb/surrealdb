@@ -456,6 +456,7 @@ impl<'a> Executor<'a> {
 					_ => QueryType::Other,
 				},
 			};
+			error!(?res);
 			// Output the response
 			if self.txn.is_some() {
 				if is_stm_output || has_returned {
