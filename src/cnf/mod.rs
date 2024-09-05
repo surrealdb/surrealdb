@@ -48,11 +48,11 @@ pub static HTTP_MAX_KEY_BODY_SIZE: Lazy<usize> =
 pub static HTTP_MAX_SIGNUP_BODY_SIZE: Lazy<usize> =
 	lazy_env_parse!("SURREAL_HTTP_MAX_SIGNUP_BODY_SIZE", usize, 1 << 10);
 
-/// The maximum HTTP body size of the HTTP /key endpoints (defaults to 1 KiB)
+/// The maximum HTTP body size of the HTTP /signin endpoint (defaults to 1 KiB)
 pub static HTTP_MAX_SIGNIN_BODY_SIZE: Lazy<usize> =
 	lazy_env_parse!("SURREAL_HTTP_MAX_SIGNIN_BODY_SIZE", usize, 1 << 10);
 
-/// The maximum HTTP body size of the HTTP /key endpoints (defaults to 4 GiB)
+/// The maximum HTTP body size of the HTTP /import endpoint (defaults to 4 GiB)
 pub static HTTP_MAX_IMPORT_BODY_SIZE: Lazy<usize> =
 	lazy_env_parse!("SURREAL_HTTP_MAX_IMPORT_BODY_SIZE", usize, 4 << 30);
 
