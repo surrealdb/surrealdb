@@ -763,6 +763,7 @@ allow_unsafe = true
 
 [pkg.async-stream]
 allow_unsafe = true
+allow_apis = ["net"]
 
 [pkg.prost]
 allow_unsafe = true
@@ -1081,10 +1082,11 @@ allow_proc_macro = true
 allow_proc_macro = true
 
 [pkg.async-graphql]
+allow_apis = ["fs", "net"]
 
 [pkg.multer]
+allow_apis = ["net"]
 
-# examples
 [pkg.pear_codegen]
 allow_proc_macro = true
 
@@ -1156,6 +1158,7 @@ allow_unsafe = true
 allow_unsafe = true
 
 [pkg.async-graphql-axum]
+allow_apis = ["net"]
 
 [pkg.futures-timer]
 allow_unsafe = true
