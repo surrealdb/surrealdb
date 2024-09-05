@@ -28,9 +28,9 @@ use trice::Instant;
 use wasm_bindgen_futures::spawn_local as spawn;
 
 pub(crate) struct Executor<'a> {
-	pub(crate) err: bool,
-	pub(crate) kvs: &'a Datastore,
-	pub(crate) txn: Option<Arc<Transaction>>,
+	err: bool,
+	kvs: &'a Datastore,
+	txn: Option<Arc<Transaction>>,
 }
 
 impl<'a> Executor<'a> {
@@ -456,7 +456,6 @@ impl<'a> Executor<'a> {
 					_ => QueryType::Other,
 				},
 			};
-			error!(?res);
 			// Output the response
 			if self.txn.is_some() {
 				if is_stm_output || has_returned {

@@ -155,10 +155,4 @@ impl TryAsExt for SqlValue {
 			v => Err(v),
 		}
 	}
-	// fn try_as_object(self) -> Result<SqlObject, Self> {
-	// 	match self {
-	// 		SqlValue::Object(o) => Ok(o),
-	// 		v => Err(v),
-	// 	}
-	// }
 }

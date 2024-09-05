@@ -34,7 +34,6 @@ use crate::kvs::LockType;
 use crate::kvs::TransactionType;
 use crate::sql::Value as SqlValue;
 
-// type ErasedRecord = SqlObject;
 type ErasedRecord = (GQLTx, Thing);
 
 fn field_val_erase_owned(val: ErasedRecord) -> FieldValue<'static> {
@@ -198,6 +197,7 @@ pub async fn generate_schema(
 
 						trace!("parsed filter: {cond:?}");
 
+						// SELECT VALUE id FROM ...
 						let ast = Statement::Select({
 							SelectStatement {
 								what: vec![SqlValue::Table(tb_name.intox())].into(),
@@ -206,7 +206,7 @@ pub async fn generate_schema(
 										expr: SqlValue::Idiom(Idiom::from("id")),
 										alias: None,
 									}],
-									// this means value
+									// this means the `value` keyword
 									true,
 								),
 								order: orders.map(IntoExt::intox),
@@ -239,12 +239,6 @@ pub async fn generate_schema(
 									field_val_erase_owned(erased)
 								})
 							})
-							// .map(|v| {
-							// 	v.try_as_object().map(|o| {
-							// 		let erased: ErasedRecord = o;
-							// 		field_val_erase_owned(erased)
-							// 	})
-							// })
 							.collect();
 
 						match out {
@@ -375,7 +369,7 @@ pub async fn generate_schema(
 						Err(_) => return Err(resolver_error(format!("invalid id: {id}")).into()),
 					};
 
-					match gtx.get_record(thing).await? {
+					match gtx.get_record_field(thing, "id").await? {
 						SqlValue::Thing(t) => {
 							let ty = t.tb.to_string();
 							let out = field_val_erase_owned((gtx, t)).with_type(ty);
@@ -470,34 +464,21 @@ pub async fn generate_schema(
 }
 
 fn make_table_field_resolver(
-	// kvs: &Arc<Datastore>,
-	// sess: &Session,
 	fd_name: impl Into<String>,
 	kind: Option<Kind>,
 ) -> impl for<'a> Fn(ResolverContext<'a>) -> FieldFuture<'a> + Send + Sync + 'static {
 	let fd_name = fd_name.into();
-	// let sess_field = Arc::new(sess.to_owned());
-	// let kvs_field = kvs.clone();
 	move |ctx: ResolverContext| {
-		// let sess_field = sess_field.clone();
 		let fd_name = fd_name.clone();
-		// let kvs_field = kvs_field.clone();
 		let field_kind = kind.clone();
 		FieldFuture::new({
-			// let kvs_field = kvs_field.clone();
 			async move {
-				// let kvs = kvs_field.as_ref();
-
 				let (ref gtx, ref rid) = ctx
 					.parent_value
 					.downcast_ref::<ErasedRecord>()
 					.ok_or_else(|| internal_error("failed to downcast"))?;
 
 				let val = gtx.get_record_field(rid.clone(), fd_name.as_str()).await?;
-
-				// let Some(val) = record.get(fd_name.as_str()) else {
-				// 	return Ok(None);
-				// };
 
 				let out = match val {
 					SqlValue::Thing(rid) if fd_name != "id" => {
@@ -510,21 +491,6 @@ fn make_table_field_resolver(
 						}
 						Ok(Some(tmp))
 					}
-					// match get_record(kvs, &sess_field, rid).await?
-					// 	{
-					// 		SqlValue::Object(o) => {
-					// 			let erased: ErasedRecord = o;
-					// 		    let mut tmp = field_val_erase_owned(erased);
-
-					// 			match field_kind {
-					// 				Some(Kind::Record(ts)) if ts.len() != 1 => {tmp = tmp.with_type(rid.tb.clone())}
-					// 				_ => {}
-					// 			}
-
-					// 			Ok(Some(tmp))
-					// 		}
-					// 		v => Err(resolver_error(format!("expected object, but found (referential integrity might be broken): {v:?}")).into()),
-					// 	}
 					SqlValue::None | SqlValue::Null => Ok(None),
 					v => {
 						match field_kind {
