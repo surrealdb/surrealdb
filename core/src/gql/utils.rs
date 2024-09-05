@@ -76,17 +76,6 @@ impl GQLTx {
 		})
 	}
 
-	pub async fn get_record(&self, rid: Thing) -> Result<SqlValue, GqlError> {
-		let mut stack = TreeStack::new();
-		let part = [Part::All];
-		let value = SqlValue::Thing(rid);
-		stack
-			.enter(|stk| value.get(stk, &self.ctx, &self.opt, None, &part))
-			.finish()
-			.await
-			.map_err(Into::into)
-	}
-
 	pub async fn get_record_field(
 		&self,
 		rid: Thing,

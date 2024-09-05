@@ -320,7 +320,7 @@ mod graphql_integration {
 
                     DEFINE TABLE foo SCHEMAFUL PERMISSIONS FULL;
                     DEFINE FIELD email ON foo TYPE string;
-                    DEFINE FIELD val ON foo TYPE int;
+                    DEFINE FIELD val ON foo TYPE int PERMISSIONS FOR select WHERE email = $auth.email;
                     CREATE foo:1 set val = 42, email = "user@email.com";
                     CREATE foo:2 set val = 43, email = "other@email.com";
                 "#,
