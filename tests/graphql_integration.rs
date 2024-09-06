@@ -7,10 +7,8 @@ mod graphql_integration {
 	use http::header;
 	use reqwest::Client;
 	use serde_json::json;
-	use surrealdb::headers::{AUTH_DB, AUTH_NS};
-	use surrealdb::sql;
 	use test_log::test;
-	use tracing::{debug, error};
+	use tracing::debug;
 	use ulid::Ulid;
 
 	use crate::common::{PASS, USER};
