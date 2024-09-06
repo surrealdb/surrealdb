@@ -1827,7 +1827,8 @@ mod http_integration {
 				common::start_server_without_http_without_wait(routes).await.unwrap();
 			// The "is-ready" command uses the disallowed endpoints
 			// We must wait for server startup rudimentarily
-			time::sleep(time::Duration::from_millis(1000)).await;
+			// If this introduces flakiness, drop checking RPC
+			time::sleep(time::Duration::from_millis(5000)).await;
 
 			// Prepare HTTP client without header
 			let mut headers = reqwest::header::HeaderMap::new();
