@@ -18,6 +18,7 @@ use bytes::Bytes;
 use futures_util::StreamExt;
 #[cfg(feature = "ml")]
 use http::StatusCode;
+#[cfg(feature = "ml")]
 use surrealdb::dbs::capabilities::RouteTarget;
 use surrealdb::dbs::Session;
 #[cfg(feature = "ml")]
