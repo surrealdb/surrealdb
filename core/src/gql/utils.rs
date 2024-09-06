@@ -44,6 +44,8 @@ impl GqlValueUtils for GqlValue {
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::dbs::Session;
+use crate::err::Error;
+use crate::iam::Error as IamError;
 use crate::kvs::Datastore;
 use crate::kvs::LockType;
 use crate::kvs::TransactionType;
@@ -62,6 +64,13 @@ pub struct GQLTx {
 impl GQLTx {
 	pub async fn new(kvs: &Arc<Datastore>, sess: &Session) -> Result<Self, GqlError> {
 		kvs.check_auth(sess)?;
+		kvs.check_anon(sess).map_err(|_| {
+			Error::IamError(IamError::NotAllowed {
+				actor: "anonymous".to_string(),
+				action: "process".to_string(),
+				resource: "graphql".to_string(),
+			})
+		})?;
 
 		let tx = kvs.transaction(TransactionType::Read, LockType::Optimistic).await?;
 		let tx = Arc::new(tx);
