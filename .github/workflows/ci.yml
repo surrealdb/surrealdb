@@ -128,7 +128,7 @@ jobs:
 
   clippy:
     name: Check clippy
-    runs-on: ubuntu-latest
+    runs-on: [runner-arm64-large]
     steps:
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -143,10 +143,6 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
-
-      - name: Install dependencies
-        run: |
-          sudo apt-get -y update
 
       - name: Install cargo-make
         run: cargo install --debug --locked cargo-make
@@ -273,7 +269,7 @@ jobs:
 
   test:
     name: Test workspace
-    runs-on: [ runner-arm64-2xlarge ]
+    runs-on: [runner-arm64-2xlarge]
     steps:
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
