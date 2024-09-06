@@ -794,7 +794,6 @@ impl Datastore {
 		if sess.expired() {
 			return Err(Error::ExpiredSession);
 		}
-		self.check_auth(sess)?;
 		// Check if anonymous actors can execute queries when auth is enabled
 		// TODO(sgirones): Check this as part of the authorisation layer
 		self.check_anon(sess).map_err(|_| IamError::NotAllowed {
@@ -847,7 +846,6 @@ impl Datastore {
 		if sess.expired() {
 			return Err(Error::ExpiredSession);
 		}
-		self.check_auth(sess)?;
 		// Check if anonymous actors can compute values when auth is enabled
 		// TODO(sgirones): Check this as part of the authorisation layer
 		self.check_anon(sess).map_err(|_| IamError::NotAllowed {
@@ -1069,11 +1067,7 @@ impl Datastore {
 		Ok(ctx)
 	}
 
-	/// future top level auth checks
-	pub fn check_auth(&self, _sess: &Session) -> Result<(), Error> {
-		Ok(())
-	}
-
+	/// check for disallowed anonymous users
 	pub fn check_anon(&self, sess: &Session) -> Result<(), ()> {
 		if self.auth_enabled && sess.au.is_anon() && !self.capabilities.allows_guest_access() {
 			Err(())

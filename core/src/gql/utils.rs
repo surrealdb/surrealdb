@@ -63,7 +63,6 @@ pub struct GQLTx {
 
 impl GQLTx {
 	pub async fn new(kvs: &Arc<Datastore>, sess: &Session) -> Result<Self, GqlError> {
-		kvs.check_auth(sess)?;
 		kvs.check_anon(sess).map_err(|_| {
 			Error::IamError(IamError::NotAllowed {
 				actor: "anonymous".to_string(),
