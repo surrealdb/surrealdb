@@ -37,8 +37,8 @@ use super::headers::Accept;
 use super::headers::ContentType;
 use super::AppState;
 
-use surrealdb::rpc::rpc_context::RpcContext;
 use surrealdb::dbs::capabilities::RouteTarget;
+use surrealdb::rpc::rpc_context::RpcContext;
 
 pub(super) fn router() -> Router<Arc<RpcState>> {
 	Router::new()

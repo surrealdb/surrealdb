@@ -1752,40 +1752,51 @@ mod http_integration {
 			let base_url = &format!("http://{addr}");
 
 			// Check that denied routes are disallowed
-			let res = client.post(format!("{base_url}/sql")).basic_auth(USER, Some(PASS)).send().await.unwrap();
+			let res = client
+				.post(format!("{base_url}/sql"))
+				.basic_auth(USER, Some(PASS))
+				.send()
+				.await
+				.unwrap();
 			assert_eq!(res.status(), 403, "body: {}", res.text().await.unwrap());
-			let res =
-				client.post(format!("{base_url}/import")).basic_auth(USER, Some(PASS)).send().await.unwrap();
+			let res = client
+				.post(format!("{base_url}/import"))
+				.basic_auth(USER, Some(PASS))
+				.send()
+				.await
+				.unwrap();
 			assert_eq!(res.status(), 403, "body: {}", res.text().await.unwrap());
-			let res =
-				client.get(format!("{base_url}/export")).basic_auth(USER, Some(PASS)).send().await.unwrap();
+			let res = client
+				.get(format!("{base_url}/export"))
+				.basic_auth(USER, Some(PASS))
+				.send()
+				.await
+				.unwrap();
 			assert_eq!(res.status(), 403, "body: {}", res.text().await.unwrap());
 
 			// Check that other routes are allowed
 			// GET
-			for route in
-				vec!["status", "health", "version", "sync", "ml/export/test/1.0.0"]
-			{
+			for route in vec!["status", "health", "version", "sync", "ml/export/test/1.0.0"] {
 				println!("Testing \"/{route}\" route...");
 
 				let res = client
 					.get(format!("{base_url}/{route}"))
 					.basic_auth(USER, Some(PASS))
 					.send()
-					.await.unwrap();
+					.await
+					.unwrap();
 				assert_ne!(res.status(), 403, "body: {}", res.text().await.unwrap());
 			}
 			// POST
-			for route in
-				vec!["signin", "signup", "key/test", "ml/import"]
-			{
+			for route in vec!["signin", "signup", "key/test", "ml/import"] {
 				println!("Testing \"/{route}\" route...");
 
 				let res = client
 					.post(format!("{base_url}/{route}"))
 					.basic_auth(USER, Some(PASS))
 					.send()
-					.await.unwrap();
+					.await
+					.unwrap();
 				assert_ne!(res.status(), 403, "body: {}", res.text().await.unwrap());
 			}
 			// WebSocket
@@ -1797,16 +1808,18 @@ mod http_integration {
 				.header(header::SEC_WEBSOCKET_VERSION, "13")
 				.header(header::SEC_WEBSOCKET_KEY, "dGhlIHNhbXBsZSBub25jZQ==")
 				.send()
-				.await.unwrap()
+				.await
+				.unwrap()
 				.upgrade()
-				.await.unwrap();
+				.await
+				.unwrap();
 		}
 
 		// Deny all
 		{
 			let routes = vec![
-				"health", "export", "import", "version", "rpc", "sync", "sql", "signin",
-				"signup", "key", "ml",
+				"health", "export", "import", "version", "rpc", "sync", "sql", "signin", "signup",
+				"key", "ml",
 			];
 
 			// Start server disallowing all routes
@@ -1832,29 +1845,27 @@ mod http_integration {
 
 			// Check that denied routes are disallowed
 			// GET
-			for route in
-				vec!["health", "version", "sync", "export", "ml/export/test/1.0.0"]
-			{
+			for route in vec!["health", "version", "sync", "export", "ml/export/test/1.0.0"] {
 				println!("Testing \"/{route}\" route...");
 
 				let res = client
 					.get(format!("{base_url}/{route}"))
 					.basic_auth(USER, Some(PASS))
 					.send()
-					.await.unwrap();
+					.await
+					.unwrap();
 				assert_eq!(res.status(), 403, "body: {}", res.text().await.unwrap());
 			}
 			// POST
-			for route in
-				vec!["sql", "signin", "signup", "key/test", "import", "ml/import"]
-			{
+			for route in vec!["sql", "signin", "signup", "key/test", "import", "ml/import"] {
 				println!("Testing \"/{route}\" route...");
 
 				let res = client
 					.post(format!("{base_url}/{route}"))
 					.basic_auth(USER, Some(PASS))
 					.send()
-					.await.unwrap();
+					.await
+					.unwrap();
 				assert_eq!(res.status(), 403, "body: {}", res.text().await.unwrap());
 			}
 			// WebSocket
@@ -1866,7 +1877,8 @@ mod http_integration {
 				.header(header::SEC_WEBSOCKET_VERSION, "13")
 				.header(header::SEC_WEBSOCKET_KEY, "dGhlIHNhbXBsZSBub25jZQ==")
 				.send()
-				.await.unwrap()
+				.await
+				.unwrap()
 				.upgrade()
 				.await;
 			assert!(res.is_err(), "Request to \"/rpc\" endpoint unexpectedly succeeded")
