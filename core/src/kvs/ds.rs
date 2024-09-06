@@ -1068,9 +1068,13 @@ impl Datastore {
 	}
 
 	/// check for disallowed anonymous users
-	pub fn check_anon(&self, sess: &Session) -> Result<(), ()> {
+	pub fn check_anon(&self, sess: &Session) -> Result<(), IamError> {
 		if self.auth_enabled && sess.au.is_anon() && !self.capabilities.allows_guest_access() {
-			Err(())
+			Err(IamError::NotAllowed {
+				actor: "anonymous".to_string(),
+				action: String::new(),
+				resource: String::new(),
+			})
 		} else {
 			Ok(())
 		}
