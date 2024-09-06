@@ -37,6 +37,7 @@ mod tikv;
 
 #[cfg(not(target_arch = "wasm32"))]
 mod index;
+mod savepoint;
 #[cfg(test)]
 mod tests;
 

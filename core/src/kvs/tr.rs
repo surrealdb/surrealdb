@@ -11,6 +11,7 @@ use crate::idg::u32::U32;
 use crate::key::debug::Sprintable;
 use crate::kvs::batch::Batch;
 use crate::kvs::clock::SizedClock;
+use crate::kvs::savepoint::SavePoints;
 use crate::kvs::stash::Stash;
 use crate::sql;
 use crate::sql::thing::Thing;
@@ -70,6 +71,7 @@ pub struct Transactor {
 	pub(super) stash: Stash,
 	pub(super) cf: cf::Writer,
 	pub(super) clock: Arc<SizedClock>,
+	pub(super) save_points: SavePoints,
 }
 
 #[allow(clippy::large_enum_variant)]
@@ -259,6 +261,9 @@ impl Transactor {
 		V: Into<Val> + Debug,
 	{
 		let key = key.into();
+		if self.save_points.is_some() {
+			self.save_point_update_key(&key, version).await?;
+		}
 		expand_inner!(&mut self.inner, v => { v.set(key, val, version).await })
 	}
 
@@ -270,6 +275,9 @@ impl Transactor {
 		V: Into<Val> + Debug,
 	{
 		let key = key.into();
+		if self.save_points.is_some() {
+			self.save_point_update_key(&key, version).await?;
+		}
 		expand_inner!(&mut self.inner, v => { v.put(key, val, version).await })
 	}
 
@@ -281,6 +289,9 @@ impl Transactor {
 		V: Into<Val> + Debug,
 	{
 		let key = key.into();
+		if self.save_points.is_some() {
+			self.save_point_update_key(&key, None).await?;
+		}
 		expand_inner!(&mut self.inner, v => { v.putc(key, val, chk).await })
 	}
 
@@ -291,6 +302,9 @@ impl Transactor {
 		K: Into<Key> + Debug,
 	{
 		let key = key.into();
+		if self.save_points.is_some() {
+			self.save_point_update_key(&key, None).await?;
+		}
 		expand_inner!(&mut self.inner, v => { v.del(key).await })
 	}
 
@@ -302,6 +316,9 @@ impl Transactor {
 		V: Into<Val> + Debug,
 	{
 		let key = key.into();
+		if self.save_points.is_some() {
+			self.save_point_update_key(&key, None).await?;
+		}
 		expand_inner!(&mut self.inner, v => { v.delc(key, chk).await })
 	}
 
@@ -315,7 +332,11 @@ impl Transactor {
 	{
 		let beg: Key = rng.start.into();
 		let end: Key = rng.end.into();
-		expand_inner!(&mut self.inner, v => { v.delr(beg..end).await })
+		let range = beg..end;
+		if self.save_points.is_some() {
+			self.save_point_update_keyr(range.clone()).await?;
+		}
+		expand_inner!(&mut self.inner, v => { v.delr(range).await })
 	}
 
 	/// Delete a prefixed range of keys from the datastore.
@@ -327,6 +348,9 @@ impl Transactor {
 		K: Into<Key> + Debug,
 	{
 		let key: Key = key.into();
+		if self.save_points.is_some() {
+			self.save_point_update_keyp(&key).await?;
+		}
 		expand_inner!(&mut self.inner, v => { v.delp(key).await })
 	}
 

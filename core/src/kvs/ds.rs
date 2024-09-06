@@ -19,6 +19,7 @@ use crate::kvs::clock::SizedClock;
 use crate::kvs::clock::SystemClock;
 #[cfg(not(target_arch = "wasm32"))]
 use crate::kvs::index::IndexBuilder;
+use crate::kvs::savepoint::SavePoints;
 use crate::kvs::{LockType, LockType::*, TransactionType, TransactionType::*};
 use crate::sql::{statements::DefineUserStatement, Base, Query, Value};
 use crate::syn;
@@ -154,6 +155,7 @@ impl TransactionFactory {
 			stash: super::stash::Stash::default(),
 			cf: cf::Writer::new(),
 			clock: self.clock.clone(),
+			save_points: SavePoints::default(),
 		}))
 	}
 }
