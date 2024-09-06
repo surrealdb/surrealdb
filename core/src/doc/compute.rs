@@ -85,7 +85,7 @@ impl Document {
 		// We shouldn't really reach this part, but if we
 		// did it was probably due to the fact that we
 		// encountered two Err::RetryWithId errors due to
-		// two separtate UNIQUE index definitions, and it
+		// two separate UNIQUE index definitions, and it
 		// wasn't possible to detect which record was the
 		// correct one to be updated
 		let _ = chn.send(Err(Error::Unreachable("Internal error"))).await;

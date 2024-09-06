@@ -28,6 +28,8 @@ impl Document {
 			};
 			// Setup a new document
 			let mut doc = Document::new(pro.rid, pro.ir, ins.0, ins.1);
+			// Create a save point so we can rollback any upcoming changes
+			let savepoint_id = ctx.tx().lock().await.new_save_point();
 			// Process the statement
 			let res = match stm {
 				Statement::Select(_) => doc.select(stk, ctx, opt, stm).await,
@@ -45,6 +47,8 @@ impl Document {
 				// retry this request using a new ID, so
 				// we load the new record, and reprocess
 				Err(Error::RetryWithId(v)) => {
+					// We roll back any change following the save point
+					ctx.tx().lock().await.rollback_save_point(savepoint_id).await?;
 					// Fetch the data from the store
 					let key = crate::key::thing::new(opt.ns()?, opt.db()?, &v.tb, &v.id);
 					let val = ctx.tx().get(key, None).await?;
@@ -69,7 +73,10 @@ impl Document {
 				// pass that error through and return an error
 				Err(e) => Err(e),
 				// Otherwise the record creation succeeded
-				Ok(v) => Ok(v),
+				Ok(v) => {
+					ctx.tx().lock().await.release_save_point(savepoint_id)?;
+					Ok(v)
+				}
 			};
 			// Send back the result
 			return res;
