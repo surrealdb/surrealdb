@@ -3,7 +3,7 @@ name = "surrealdb-core"
 publish = true
 edition = "2021"
 version = "2.0.0"
-rust-version = "1.80.0"
+rust-version = "1.80.1"
 readme = "../sdk/CARGO.md"
 authors = ["Tobie Morgan Hitchcock <tobie@surrealdb.com>"]
 description = "A scalable, distributed, collaborative, document-graph database, for the realtime web"
@@ -108,7 +108,6 @@ ndarray-stats = "=0.5.1"
 num_cpus = "1.16.0"
 num-traits = "0.2.18"
 object_store = { version = "0.10.2", optional = false }
-once_cell = "1.18.0"
 pbkdf2 = { version = "0.12.2", features = ["simple"] }
 phf = { version = "0.11.2", features = ["macros", "unicase"] }
 pin-project-lite = "0.2.13"

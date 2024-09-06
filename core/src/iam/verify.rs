@@ -11,9 +11,9 @@ use crate::syn;
 use argon2::{Argon2, PasswordHash, PasswordVerifier};
 use chrono::Utc;
 use jsonwebtoken::{decode, DecodingKey, Validation};
-use once_cell::sync::Lazy;
 use std::str::{self, FromStr};
 use std::sync::Arc;
+use std::sync::LazyLock;
 
 fn config(alg: Algorithm, key: &[u8]) -> Result<(DecodingKey, Validation), Error> {
 	let (dec, mut val) = match alg {
@@ -67,9 +67,9 @@ fn config(alg: Algorithm, key: &[u8]) -> Result<(DecodingKey, Validation), Error
 	Ok((dec, val))
 }
 
-static KEY: Lazy<DecodingKey> = Lazy::new(|| DecodingKey::from_secret(&[]));
+static KEY: LazyLock<DecodingKey> = LazyLock::new(|| DecodingKey::from_secret(&[]));
 
-static DUD: Lazy<Validation> = Lazy::new(|| {
+static DUD: LazyLock<Validation> = LazyLock::new(|| {
 	let mut validation = Validation::new(jsonwebtoken::Algorithm::HS256);
 	validation.insecure_disable_signature_validation();
 	validation.validate_nbf = false;

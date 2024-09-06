@@ -390,21 +390,101 @@ impl Document {
 							let val = f.compute(stk, ctx, opt, Some(fdc.doc)).await?;
 							self.chg(&mut set_ops, &mut del_ops, &fdc.act, idiom, val)?;
 						}
-						Some("math::sum") => {
+						Some(name) if name == "time::min" => {
 							let val = f.args()[0].compute(stk, ctx, opt, Some(fdc.doc)).await?;
+							let val = match val {
+								val @ Value::Datetime(_) => val,
+								val => {
+									return Err(Error::InvalidAggregation {
+										name: name.to_string(),
+										table: fdc.ft.name.to_raw(),
+										message: format!(
+											"This function expects a datetime but found {val}"
+										),
+									})
+								}
+							};
+							self.min(&mut set_ops, &mut del_ops, fdc, field, idiom, val);
+						}
+						Some(name) if name == "time::max" => {
+							let val = f.args()[0].compute(stk, ctx, opt, Some(fdc.doc)).await?;
+							let val = match val {
+								val @ Value::Datetime(_) => val,
+								val => {
+									return Err(Error::InvalidAggregation {
+										name: name.to_string(),
+										table: fdc.ft.name.to_raw(),
+										message: format!(
+											"This function expects a datetime but found {val}"
+										),
+									})
+								}
+							};
+							self.max(&mut set_ops, &mut del_ops, fdc, field, idiom, val);
+						}
+						Some(name) if name == "math::sum" => {
+							let val = f.args()[0].compute(stk, ctx, opt, Some(fdc.doc)).await?;
+							let val = match val {
+								val @ Value::Number(_) => val,
+								val => {
+									return Err(Error::InvalidAggregation {
+										name: name.to_string(),
+										table: fdc.ft.name.to_raw(),
+										message: format!(
+											"This function expects a number but found {val}"
+										),
+									})
+								}
+							};
 							self.chg(&mut set_ops, &mut del_ops, &fdc.act, idiom, val)?;
 						}
-						Some("math::min") | Some("time::min") => {
+						Some(name) if name == "math::min" => {
 							let val = f.args()[0].compute(stk, ctx, opt, Some(fdc.doc)).await?;
-							self.min(&mut set_ops, &mut del_ops, fdc, field, idiom, val)?;
+							let val = match val {
+								val @ Value::Number(_) => val,
+								val => {
+									return Err(Error::InvalidAggregation {
+										name: name.to_string(),
+										table: fdc.ft.name.to_raw(),
+										message: format!(
+											"This function expects a number but found {val}"
+										),
+									})
+								}
+							};
+							self.min(&mut set_ops, &mut del_ops, fdc, field, idiom, val);
 						}
-						Some("math::max") | Some("time::max") => {
+						Some(name) if name == "math::max" => {
 							let val = f.args()[0].compute(stk, ctx, opt, Some(fdc.doc)).await?;
-							self.max(&mut set_ops, &mut del_ops, fdc, field, idiom, val)?;
+							let val = match val {
+								val @ Value::Number(_) => val,
+								val => {
+									return Err(Error::InvalidAggregation {
+										name: name.to_string(),
+										table: fdc.ft.name.to_raw(),
+										message: format!(
+											"This function expects a number but found {val}"
+										),
+									})
+								}
+							};
+							self.max(&mut set_ops, &mut del_ops, fdc, field, idiom, val);
 						}
-						Some("math::mean") => {
+						Some(name) if name == "math::mean" => {
 							let val = f.args()[0].compute(stk, ctx, opt, Some(fdc.doc)).await?;
-							self.mean(&mut set_ops, &mut del_ops, &fdc.act, idiom, val)?;
+							let val = match val {
+								val @ Value::Number(_) => val.coerce_to_decimal()?.into(),
+								val => {
+									return Err(Error::InvalidAggregation {
+										name: name.to_string(),
+										table: fdc.ft.name.to_raw(),
+										message: format!(
+											"This function expects a number but found {val}"
+										),
+									})
+								}
+							};
+							self.mean(&mut set_ops, &mut del_ops, &fdc.act, idiom, val);
 						}
 						_ => unreachable!(),
 					},
@@ -454,7 +534,7 @@ impl Document {
 		field: &Field,
 		key: Idiom,
 		val: Value,
-	) -> Result<(), Error> {
+	) {
 		// Key for the value count
 		let mut key_c = Idiom::from(vec![Part::from("__")]);
 		key_c.0.push(Part::from(key.to_hash()));
@@ -498,7 +578,6 @@ impl Document {
 				del_ops.push((key_c, Operator::Equal, Value::from(0)));
 			}
 		}
-		Ok(())
 	}
 	/// Set the new maximum value for the field in the foreign table
 	fn max(
@@ -509,7 +588,7 @@ impl Document {
 		field: &Field,
 		key: Idiom,
 		val: Value,
-	) -> Result<(), Error> {
+	) {
 		// Key for the value count
 		let mut key_c = Idiom::from(vec![Part::from("__")]);
 		key_c.0.push(Part::from(key.to_hash()));
@@ -554,7 +633,6 @@ impl Document {
 				del_ops.push((key_c, Operator::Equal, Value::from(0)));
 			}
 		}
-		Ok(())
 	}
 
 	/// Set the new average value for the field in the foreign table
@@ -565,7 +643,7 @@ impl Document {
 		act: &FieldAction,
 		key: Idiom,
 		val: Value,
-	) -> Result<(), Error> {
+	) {
 		// Key for the value count
 		let mut key_c = Idiom::from(vec![Part::from("__")]);
 		key_c.0.push(Part::from(key.to_hash()));
@@ -600,7 +678,7 @@ impl Document {
 							FieldAction::Sub => Operator::Sub,
 							FieldAction::Add => Operator::Add,
 						},
-						r: val.convert_to_decimal()?.into(),
+						r: val,
 					},
 				))))),
 				o: Operator::Div,
@@ -632,7 +710,6 @@ impl Document {
 				del_ops.push((key_c, Operator::Equal, Value::from(0)));
 			}
 		}
-		Ok(())
 	}
 
 	/// Recomputes the value for one group

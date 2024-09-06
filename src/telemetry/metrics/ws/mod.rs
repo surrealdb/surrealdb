@@ -1,16 +1,16 @@
 use std::time::Instant;
 
-use once_cell::sync::Lazy;
 use opentelemetry::metrics::Meter;
 use opentelemetry::{global, KeyValue};
 use opentelemetry::{
 	metrics::{Histogram, MetricsError, UpDownCounter},
 	Context as TelemetryContext,
 };
+use std::sync::LazyLock;
 
-static METER: Lazy<Meter> = Lazy::new(|| global::meter("surrealdb.rpc"));
+static METER: LazyLock<Meter> = LazyLock::new(|| global::meter("surrealdb.rpc"));
 
-pub static RPC_SERVER_DURATION: Lazy<Histogram<u64>> = Lazy::new(|| {
+pub static RPC_SERVER_DURATION: LazyLock<Histogram<u64>> = LazyLock::new(|| {
 	METER
 		.u64_histogram("rpc.server.duration")
 		.with_description("Measures duration of inbound RPC requests in milliseconds.")
@@ -18,14 +18,14 @@ pub static RPC_SERVER_DURATION: Lazy<Histogram<u64>> = Lazy::new(|| {
 		.init()
 });
 
-pub static RPC_SERVER_ACTIVE_CONNECTIONS: Lazy<UpDownCounter<i64>> = Lazy::new(|| {
+pub static RPC_SERVER_ACTIVE_CONNECTIONS: LazyLock<UpDownCounter<i64>> = LazyLock::new(|| {
 	METER
 		.i64_up_down_counter("rpc.server.active_connections")
 		.with_description("The number of active WebSocket connections.")
 		.init()
 });
 
-pub static RPC_SERVER_REQUEST_SIZE: Lazy<Histogram<u64>> = Lazy::new(|| {
+pub static RPC_SERVER_REQUEST_SIZE: LazyLock<Histogram<u64>> = LazyLock::new(|| {
 	METER
 		.u64_histogram("rpc.server.request.size")
 		.with_description("Measures the size of HTTP request messages.")
@@ -33,7 +33,7 @@ pub static RPC_SERVER_REQUEST_SIZE: Lazy<Histogram<u64>> = Lazy::new(|| {
 		.init()
 });
 
-pub static RPC_SERVER_RESPONSE_SIZE: Lazy<Histogram<u64>> = Lazy::new(|| {
+pub static RPC_SERVER_RESPONSE_SIZE: LazyLock<Histogram<u64>> = LazyLock::new(|| {
 	METER
 		.u64_histogram("rpc.server.response.size")
 		.with_description("Measures the size of HTTP response messages.")

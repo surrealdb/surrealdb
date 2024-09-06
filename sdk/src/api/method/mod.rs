@@ -132,7 +132,7 @@ where
 	/// Using a static, compile-time scheme
 	///
 	/// ```no_run
-	/// use once_cell::sync::Lazy;
+	/// use std::sync::LazyLock;
 	/// use serde::{Serialize, Deserialize};
 	/// use surrealdb::Surreal;
 	/// use surrealdb::opt::auth::Root;
@@ -140,7 +140,7 @@ where
 	/// use surrealdb::engine::remote::ws::Client;
 	///
 	/// // Creates a new static instance of the client
-	/// static DB: Lazy<Surreal<Client>> = Lazy::new(Surreal::init);
+	/// static DB: LazyLock<Surreal<Client>> = LazyLock::new(Surreal::init);
 	///
 	/// #[derive(Serialize, Deserialize)]
 	/// struct Person {
@@ -174,14 +174,14 @@ where
 	/// Using a dynamic, run-time scheme
 	///
 	/// ```no_run
-	/// use once_cell::sync::Lazy;
+	/// use std::sync::LazyLock;
 	/// use serde::{Serialize, Deserialize};
 	/// use surrealdb::Surreal;
 	/// use surrealdb::engine::any::Any;
 	/// use surrealdb::opt::auth::Root;
 	///
 	/// // Creates a new static instance of the client
-	/// static DB: Lazy<Surreal<Any>> = Lazy::new(Surreal::init);
+	/// static DB: LazyLock<Surreal<Any>> = LazyLock::new(Surreal::init);
 	///
 	/// #[derive(Serialize, Deserialize)]
 	/// struct Person {

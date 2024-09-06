@@ -283,17 +283,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "async-recursion"
-version = "1.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "30c5ef0ede93efbf733c1a727f3b6b5a1060bbedd5600183e66f6e4be4af0ec5"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 2.0.58",
-]
-
-[[package]]
 name = "async-stream"
 version = "0.3.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3011,7 +3000,6 @@ dependencies = [
  "futures",
  "geo 0.27.0",
  "indexmap 2.2.6",
- "once_cell",
  "path-clean",
  "pharos",
  "reblessive",
@@ -3047,7 +3035,6 @@ dependencies = [
  "async-channel",
  "async-executor",
  "async-graphql",
- "async-recursion",
  "base64 0.21.7",
  "bcrypt",
  "bincode",
@@ -3079,7 +3066,6 @@ dependencies = [
  "num-traits",
  "num_cpus",
  "object_store",
- "once_cell",
  "pbkdf2",
  "pharos",
  "phf",
