@@ -814,39 +814,37 @@ async fn define_statement_index_concurrently_building_status() -> Result<(), Err
 		let mut r = ds.execute("INFO FOR INDEX test ON user", &session, None).await?;
 		let tmp = r.remove(0).result?;
 		if let Value::Object(o) = &tmp {
-			if let Some(b) = o.get("building") {
-				if let Value::Object(b) = b {
-					if let Some(v) = b.get("status") {
-						if Value::from("started").eq(v) {
-							continue;
+			if let Some(Value::Object(b)) = o.get("building") {
+				if let Some(v) = b.get("status") {
+					if Value::from("started").eq(v) {
+						continue;
+					}
+					let new_count = b.get("count").cloned();
+					if Value::from("initial").eq(v) {
+						if new_count != initial_count {
+							assert!(new_count > initial_count, "{new_count:?}");
+							info!("New initial count: {:?}", new_count);
+							initial_count = new_count;
 						}
-						let new_count = b.get("count").cloned();
-						if Value::from("initial").eq(v) {
-							if new_count != initial_count {
-								assert!(new_count > initial_count, "{new_count:?}");
-								info!("New initial count: {:?}", new_count);
-								initial_count = new_count;
-							}
-							continue;
+						continue;
+					}
+					if Value::from("updates").eq(v) {
+						if new_count != updates_count {
+							assert!(new_count > updates_count, "{new_count:?}");
+							info!("New updates count: {:?}", new_count);
+							updates_count = new_count;
 						}
-						if Value::from("updates").eq(v) {
-							if new_count != updates_count {
-								assert!(new_count > updates_count, "{new_count:?}");
-								info!("New updates count: {:?}", new_count);
-								updates_count = new_count;
-							}
-							continue;
-						}
-						let val = Value::parse(
-							"{
+						continue;
+					}
+					let val = Value::parse(
+						"{
 										building: {
 											status: 'built'
 										}
 									}",
-						);
-						assert_eq!(format!("{tmp:#}"), format!("{val:#}"));
-						break;
-					}
+					);
+					assert_eq!(format!("{tmp:#}"), format!("{val:#}"));
+					break;
 				}
 			}
 		}
