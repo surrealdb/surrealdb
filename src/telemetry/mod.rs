@@ -3,7 +3,6 @@ pub mod metrics;
 pub mod traces;
 
 use crate::cli::validator::parser::env_filter::CustomEnvFilter;
-use once_cell::sync::Lazy;
 use opentelemetry::metrics::MetricsError;
 use opentelemetry::Context;
 use opentelemetry::KeyValue;
@@ -11,6 +10,7 @@ use opentelemetry_sdk::resource::{
 	EnvResourceDetector, SdkProvidedResourceDetector, TelemetryResourceDetector,
 };
 use opentelemetry_sdk::Resource;
+use std::sync::LazyLock;
 use std::time::Duration;
 use tracing::{Level, Subscriber};
 use tracing_subscriber::filter::ParseError;
@@ -18,7 +18,7 @@ use tracing_subscriber::prelude::*;
 use tracing_subscriber::util::SubscriberInitExt;
 use tracing_subscriber::EnvFilter;
 
-pub static OTEL_DEFAULT_RESOURCE: Lazy<Resource> = Lazy::new(|| {
+pub static OTEL_DEFAULT_RESOURCE: LazyLock<Resource> = LazyLock::new(|| {
 	let res = Resource::from_detectors(
 		Duration::from_secs(5),
 		vec![
@@ -109,12 +109,12 @@ pub fn filter_from_value(v: &str) -> Result<EnvFilter, ParseError> {
 		"info" => Ok(EnvFilter::default().add_directive(Level::INFO.into())),
 		// Otherwise, let's show debugs and above
 		"debug" => EnvFilter::builder()
-			.parse("warn,surreal=debug,surrealdb=debug,surrealdb::core::kvs=debug"),
+			.parse("warn,surreal=debug,surrealdb=debug,surrealcs=warn,surrealdb::core::kvs=debug"),
 		// Specify the log level for each code area
 		"trace" => EnvFilter::builder()
-			.parse("warn,surreal=trace,surrealdb=trace,surrealdb::core::kvs=debug"),
+			.parse("warn,surreal=trace,surrealdb=trace,surrealcs=warn,surrealdb::core::kvs=debug"),
 		// Check if we should show all surreal logs
-		"full" => EnvFilter::builder().parse("debug,surreal=trace,surrealdb=trace"),
+		"full" => EnvFilter::builder().parse("debug,surreal=trace,surrealdb=trace,surrealcs=debug"),
 		// Check if we should show all module logs
 		"all" => Ok(EnvFilter::default().add_directive(Level::TRACE.into())),
 		// Let's try to parse the custom log level

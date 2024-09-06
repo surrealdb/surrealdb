@@ -4,7 +4,7 @@ use crate::dbs::store::MemoryCollector;
 use crate::dbs::{Options, Statement};
 use crate::err::Error;
 use crate::sql::function::OptimisedAggregate;
-use crate::sql::value::{TryAdd, TryDiv, Value};
+use crate::sql::value::{TryAdd, TryFloatDiv, Value};
 use crate::sql::{Array, Field, Function, Idiom};
 use reblessive::tree::Stk;
 use std::borrow::Cow;
@@ -329,7 +329,7 @@ impl Aggregator {
 			OptimisedAggregate::MathSum => self.math_sum.take().unwrap_or(Value::None),
 			OptimisedAggregate::MathMean => {
 				if let Some((v, i)) = self.math_mean.take() {
-					v.try_div(i.into()).unwrap_or(f64::NAN.into())
+					v.try_float_div(i.into()).unwrap_or(f64::NAN.into())
 				} else {
 					Value::None
 				}

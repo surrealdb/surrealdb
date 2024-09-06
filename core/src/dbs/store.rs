@@ -53,13 +53,7 @@ impl From<Vec<Value>> for MemoryCollector {
 	}
 }
 
-#[cfg(any(
-	feature = "kv-mem",
-	feature = "kv-surrealkv",
-	feature = "kv-rocksdb",
-	feature = "kv-fdb",
-	feature = "kv-tikv",
-))]
+#[cfg(storage)]
 pub(super) mod file_store {
 	use crate::cnf::EXTERNAL_SORTING_BUFFER_LIMIT;
 	use crate::dbs::plan::Explanation;

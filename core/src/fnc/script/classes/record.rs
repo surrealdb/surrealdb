@@ -21,6 +21,7 @@ impl Record {
 					Value::Array(v) => v.into(),
 					Value::Object(v) => v.into(),
 					Value::Number(v) => v.into(),
+					Value::Uuid(v) => v.into(),
 					v => v.as_string().into(),
 				},
 			},
@@ -33,8 +34,8 @@ impl Record {
 	}
 
 	#[qjs(get)]
-	pub fn id(&self) -> String {
-		self.value.id.to_raw()
+	pub fn id(&self) -> Value {
+		self.value.id.clone().into()
 	}
 	// Compare two Record instances
 	pub fn is(a: &Record, b: &Record) -> bool {

@@ -365,6 +365,7 @@ pub(crate) static PATHS: phf::Map<UniCase<&'static str>, PathKind> = phf_map! {
 		UniCase::ascii("time::from::nanos") => PathKind::Function,
 		UniCase::ascii("time::from::secs") => PathKind::Function,
 		UniCase::ascii("time::from::unix") => PathKind::Function,
+		UniCase::ascii("time::is::leap_year") => PathKind::Function,
 		//
 		UniCase::ascii("type::array") => PathKind::Function,
 		UniCase::ascii("type::bool") => PathKind::Function,
@@ -473,8 +474,6 @@ impl Parser<'_> {
 
 		let span = start.covers(last_span);
 		let str = self.lexer.span_str(span);
-
-		dbg!(str);
 
 		match PATHS.get_entry(&UniCase::ascii(str)) {
 			Some((_, PathKind::Constant(x))) => Ok(Value::Constant(x.clone())),

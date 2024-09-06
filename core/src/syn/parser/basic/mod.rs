@@ -126,7 +126,7 @@ impl TokenValue for Strand {
 				let v = parser.lexer.lex_compound(token, compound::strand)?.value;
 				Ok(Strand(v))
 			}
-			_ => unexpected!(parser, token, "a datetime"),
+			_ => unexpected!(parser, token, "a strand"),
 		}
 	}
 }
@@ -145,7 +145,7 @@ impl TokenValue for Uuid {
 				let v = parser.lexer.lex_compound(token, compound::uuid)?.value;
 				Ok(Uuid(v))
 			}
-			_ => unexpected!(parser, token, "a datetime"),
+			_ => unexpected!(parser, token, "a uuid"),
 		}
 	}
 }

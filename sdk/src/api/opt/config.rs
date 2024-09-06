@@ -1,11 +1,5 @@
 use crate::opt::capabilities::Capabilities;
-#[cfg(any(
-	feature = "kv-mem",
-	feature = "kv-surrealkv",
-	feature = "kv-rocksdb",
-	feature = "kv-fdb",
-	feature = "kv-tikv",
-))]
+#[cfg(storage)]
 use std::path::PathBuf;
 use std::time::Duration;
 use surrealdb_core::{dbs::Capabilities as CoreCapabilities, iam::Level};
@@ -26,13 +20,7 @@ pub struct Config {
 	pub(crate) password: String,
 	pub(crate) tick_interval: Option<Duration>,
 	pub(crate) capabilities: CoreCapabilities,
-	#[cfg(any(
-		feature = "kv-mem",
-		feature = "kv-surrealkv",
-		feature = "kv-rocksdb",
-		feature = "kv-fdb",
-		feature = "kv-tikv",
-	))]
+	#[cfg(storage)]
 	pub(crate) temporary_directory: Option<PathBuf>,
 }
 
@@ -122,13 +110,7 @@ impl Config {
 		self
 	}
 
-	#[cfg(any(
-		feature = "kv-mem",
-		feature = "kv-surrealkv",
-		feature = "kv-rocksdb",
-		feature = "kv-fdb",
-		feature = "kv-tikv",
-	))]
+	#[cfg(storage)]
 	pub fn temporary_directory(mut self, path: Option<PathBuf>) -> Self {
 		self.temporary_directory = path;
 		self

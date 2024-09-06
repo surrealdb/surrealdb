@@ -344,6 +344,32 @@ async fn define_statement_event() -> Result<(), Error> {
 	Ok(())
 }
 
+// Confirms that a DEFINE EVENT with no WHERE clause will produce WHEN true
+#[tokio::test]
+async fn define_statement_event_no_when_clause() -> Result<(), Error> {
+	let sql = "
+		DEFINE EVENT some_event ON TABLE user THEN {};
+		INFO FOR TABLE user;
+	";
+	let mut t = Test::new(sql).await?;
+	//
+	t.skip_ok(1)?;
+	let val = Value::parse(
+		"{
+	events: {
+		some_event: 'DEFINE EVENT some_event ON user WHEN true THEN {  }'
+	},
+	fields: {},
+	indexes: {},
+	lives: {},
+	tables: {}
+}",
+	);
+	t.expect_value(val)?;
+	//
+	Ok(())
+}
+
 #[tokio::test]
 async fn define_statement_event_when_event() -> Result<(), Error> {
 	let sql = "
@@ -686,6 +712,88 @@ async fn define_statement_index_single() -> Result<(), Error> {
 		"[{ id: user:1, email: 'test@surrealdb.com' }]",
 		"[{ id: user:2, email: 'test@surrealdb.com' }]",
 	])?;
+	Ok(())
+}
+
+#[tokio::test]
+async fn define_statement_index_numbers() -> Result<(), Error> {
+	let sql = "
+		DEFINE INDEX index ON TABLE test COLUMNS number;
+		CREATE test:int SET number = 0;
+		CREATE test:float SET number = 0.0;
+		-- TODO: CREATE test:dec_int SET number = 0dec;
+		-- TODO: CREATE test:dec_dec SET number = 0.0dec;
+		SELECT * FROM test WITH NOINDEX WHERE number = 0 ORDER BY id;
+		SELECT * FROM test WHERE number = 0 ORDER BY id;
+		SELECT * FROM test WHERE number = 0.0 ORDER BY id;
+		-- TODO: SELECT * FROM test WHERE number = 0dec ORDER BY id;
+		-- TODO: SELECT * FROM test WHERE number = 0.0dec ORDER BY id;
+	";
+	let mut t = Test::new(sql).await?;
+	t.skip_ok(3)?;
+	for _ in 0..3 {
+		t.expect_val(
+			"[
+				// {
+				// 	id: test:dec,
+				// 	number: 0.0dec
+				// },
+				// {
+				// 	id: test:int,
+				// 	number: 0dec
+				// },
+				{
+					id: test:float,
+					number: 0f
+				},
+				{
+					id: test:int,
+					number: 0
+				}
+			]",
+		)?;
+	}
+	Ok(())
+}
+
+#[tokio::test]
+async fn define_statement_unique_index_numbers() -> Result<(), Error> {
+	let sql = "
+		DEFINE INDEX index ON TABLE test COLUMNS number UNIQUE;
+		CREATE test:int SET number = 0;
+		CREATE test:float SET number = 0.0;
+		-- TODO: CREATE test:dec_int SET number = 0dec;
+		-- TODO: CREATE test:dec_dec SET number = 0.0dec;
+		SELECT * FROM test WITH NOINDEX WHERE number = 0 ORDER BY id;
+		SELECT * FROM test WHERE number = 0 ORDER BY id;
+		SELECT * FROM test WHERE number = 0.0 ORDER BY id;
+		-- TODO: SELECT * FROM test WHERE number = 0dec ORDER BY id;
+		-- TODO: SELECT * FROM test WHERE number = 0.0dec ORDER BY id;
+	";
+	let mut t = Test::new(sql).await?;
+	t.skip_ok(3)?;
+	for _ in 0..3 {
+		t.expect_val(
+			"[
+				// {
+				// 	id: test:dec,
+				// 	number: 0.0dec
+				// },
+				// {
+				// 	id: test:int,
+				// 	number: 0dec
+				// },
+				{
+					id: test:float,
+					number: 0f
+				},
+				{
+					id: test:int,
+					number: 0
+				}
+			]",
+		)?;
+	}
 	Ok(())
 }
 

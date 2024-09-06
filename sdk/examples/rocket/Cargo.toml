@@ -4,10 +4,8 @@ version = "0.1.0"
 edition = "2021"
 publish = false
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
-
 [dependencies]
-rocket = { version = "0.5.0", features = ["json"] }
+rocket = { version = "0.5.1", features = ["json"] }
 surrealdb = { path = "../..", features = ["kv-mem"]}
-serde_json = "1.0"
-thiserror = "1.0.50"
+serde_json = "1.0.127"
+thiserror = "1.0.63"

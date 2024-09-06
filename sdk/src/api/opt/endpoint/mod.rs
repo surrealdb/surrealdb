@@ -11,6 +11,8 @@ mod indxdb;
 mod mem;
 #[cfg(feature = "kv-rocksdb")]
 mod rocksdb;
+#[cfg(feature = "kv-surrealcs")]
+mod surrealcs;
 #[cfg(feature = "kv-surrealkv")]
 mod surrealkv;
 #[cfg(feature = "kv-tikv")]
@@ -131,6 +133,7 @@ pub enum EndpointKind {
 	TiKv,
 	Unsupported(String),
 	SurrealKV,
+	SurrealCS,
 }
 
 impl From<&str> for EndpointKind {
@@ -148,6 +151,7 @@ impl From<&str> for EndpointKind {
 			"rocksdb" => Self::RocksDb,
 			"tikv" => Self::TiKv,
 			"surrealkv" => Self::SurrealKV,
+			"surrealcs" => Self::SurrealCS,
 			_ => Self::Unsupported(s.to_owned()),
 		}
 	}
