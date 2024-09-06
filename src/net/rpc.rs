@@ -4,15 +4,16 @@ use std::sync::Arc;
 
 use super::headers::SurrealId;
 use crate::cnf;
+use crate::cnf::HTTP_MAX_RPC_BODY_SIZE;
 use crate::err::Error;
 use crate::rpc::connection::Connection;
 use crate::rpc::format::HttpFormat;
 use crate::rpc::post_context::PostRpcContext;
 use crate::rpc::response::IntoRpcResponse;
 use crate::rpc::RpcState;
+use axum::extract::DefaultBodyLimit;
 use axum::extract::State;
-use axum::routing::get;
-use axum::routing::post;
+use axum::routing::options;
 use axum::{
 	extract::ws::{WebSocket, WebSocketUpgrade},
 	response::IntoResponse,
@@ -28,6 +29,7 @@ use surrealdb::kvs::Datastore;
 use surrealdb::rpc::format::Format;
 use surrealdb::rpc::format::PROTOCOLS;
 use surrealdb::rpc::method::Method;
+use tower_http::limit::RequestBodyLimitLayer;
 use tower_http::request_id::RequestId;
 use uuid::Uuid;
 
@@ -38,7 +40,10 @@ use super::AppState;
 use surrealdb::rpc::rpc_context::RpcContext;
 
 pub(super) fn router() -> Router<Arc<RpcState>> {
-	Router::new().route("/rpc", get(get_handler)).route("/rpc", post(post_handler))
+	Router::new()
+		.route("/rpc", options(|| async {}).get(get_handler).post(post_handler))
+		.route_layer(DefaultBodyLimit::disable())
+		.layer(RequestBodyLimitLayer::new(*HTTP_MAX_RPC_BODY_SIZE))
 }
 
 async fn get_handler(

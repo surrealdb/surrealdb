@@ -39,7 +39,7 @@ pub async fn v1_to_2_id_uuid(tx: Arc<Transaction>) -> Result<(), Error> {
 
 					// We suffix the last id with a null byte, to prevent scanning it twice (which would result in an infinite loop)
 					beg.clone_from(keys.last().unwrap());
-					beg.extend_from_slice(&[b'\0']);
+					beg.extend_from_slice(b"\0");
 
 					for key in keys.iter() {
 						// Check if the id is affected

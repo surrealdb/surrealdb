@@ -26,7 +26,7 @@ use crate::{
 		Connect, Response as QueryResponse, Result, Surreal,
 	},
 	method::Stats,
-	opt::{IntoEndpoint, Resource as ApiResource, Table},
+	opt::{IntoEndpoint, Table},
 	value::Notification,
 };
 use channel::Sender;
@@ -92,12 +92,12 @@ const DEFAULT_TICK_INTERVAL: Duration = Duration::from_secs(10);
 /// Instantiating a global instance
 ///
 /// ```
-/// use once_cell::sync::Lazy;
+/// use std::sync::LazyLock;
 /// use surrealdb::{Result, Surreal};
 /// use surrealdb::engine::local::Db;
 /// use surrealdb::engine::local::Mem;
 ///
-/// static DB: Lazy<Surreal<Db>> = Lazy::new(Surreal::init);
+/// static DB: LazyLock<Surreal<Db>> = LazyLock::new(Surreal::init);
 ///
 /// #[tokio::main]
 /// async fn main() -> Result<()> {
@@ -356,6 +356,42 @@ pub struct FDb;
 #[derive(Debug)]
 pub struct SurrealKV;
 
+/// SurrealCS database
+///
+/// # Examples
+///
+/// Instantiating a SurrealCS-backed instance
+///
+/// ```no_run
+/// # #[tokio::main]
+/// # async fn main() -> surrealdb::Result<()> {
+/// use surrealdb::Surreal;
+/// use surrealdb::engine::local::SurrealCS;
+///
+/// let db = Surreal::new::<SurrealCS>("path/to/database-folder").await?;
+/// # Ok(())
+/// # }
+/// ```
+///
+/// Instantiating a SurrealCS-backed strict instance
+///
+/// ```no_run
+/// # #[tokio::main]
+/// # async fn main() -> surrealdb::Result<()> {
+/// use surrealdb::opt::Config;
+/// use surrealdb::Surreal;
+/// use surrealdb::engine::local::SurrealCS;
+///
+/// let config = Config::default().strict();
+/// let db = Surreal::new::<SurrealCS>(("path/to/database-folder", config)).await?;
+/// # Ok(())
+/// # }
+/// ```
+#[cfg(feature = "kv-surrealcs")]
+#[cfg_attr(docsrs, doc(cfg(feature = "kv-surrealcs")))]
+#[derive(Debug)]
+pub struct SurrealCS;
+
 /// An embedded database
 #[derive(Debug, Clone)]
 pub struct Db(());
@@ -559,7 +595,7 @@ async fn router(
 			data,
 		} => {
 			let mut query = Query::default();
-			let one = matches!(what, ApiResource::RecordId(_));
+			let one = what.is_single_recordid();
 			let statement = {
 				let mut stmt = UpsertStatement::default();
 				stmt.what = resource_to_values(what);
@@ -578,7 +614,7 @@ async fn router(
 			data,
 		} => {
 			let mut query = Query::default();
-			let one = matches!(what, ApiResource::RecordId(_));
+			let one = what.is_single_recordid();
 			let statement = {
 				let mut stmt = UpdateStatement::default();
 				stmt.what = resource_to_values(what);
@@ -635,7 +671,7 @@ async fn router(
 			data,
 		} => {
 			let mut query = Query::default();
-			let one = matches!(what, ApiResource::RecordId(_));
+			let one = what.is_single_recordid();
 			let statement = {
 				let mut stmt = UpdateStatement::default();
 				stmt.what = resource_to_values(what);
@@ -654,7 +690,7 @@ async fn router(
 			data,
 		} => {
 			let mut query = Query::default();
-			let one = matches!(what, ApiResource::RecordId(_));
+			let one = what.is_single_recordid();
 			let statement = {
 				let mut stmt = UpdateStatement::default();
 				stmt.what = resource_to_values(what);
@@ -672,7 +708,7 @@ async fn router(
 			what,
 		} => {
 			let mut query = Query::default();
-			let one = matches!(what, ApiResource::RecordId(_));
+			let one = what.is_single_recordid();
 			let statement = {
 				let mut stmt = SelectStatement::default();
 				stmt.what = resource_to_values(what);
@@ -689,7 +725,7 @@ async fn router(
 			what,
 		} => {
 			let mut query = Query::default();
-			let one = matches!(what, ApiResource::RecordId(_));
+			let one = what.is_single_recordid();
 			let statement = {
 				let mut stmt = DeleteStatement::default();
 				stmt.what = resource_to_values(what);

@@ -1,7 +1,6 @@
 #[allow(unused_imports, dead_code)]
 mod api_integration {
 	use chrono::DateTime;
-	use once_cell::sync::Lazy;
 	use semver::Version;
 	use serde::Deserialize;
 	use serde::Serialize;
@@ -10,6 +9,7 @@ mod api_integration {
 	use std::borrow::Cow;
 	use std::ops::Bound;
 	use std::sync::Arc;
+	use std::sync::LazyLock;
 	use std::sync::Mutex;
 	use std::time::Duration;
 	use surrealdb::error::Api as ApiError;

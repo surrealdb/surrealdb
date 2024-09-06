@@ -108,13 +108,7 @@ pub(crate) async fn run_router(
 		.with_transaction_timeout(address.config.transaction_timeout)
 		.with_capabilities(address.config.capabilities);
 
-	#[cfg(any(
-		feature = "kv-mem",
-		feature = "kv-surrealkv",
-		feature = "kv-rocksdb",
-		feature = "kv-fdb",
-		feature = "kv-tikv",
-	))]
+	#[cfg(storage)]
 	let kvs = kvs.with_temporary_directory(address.config.temporary_directory);
 
 	let kvs = Arc::new(kvs);

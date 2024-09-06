@@ -9,13 +9,7 @@ use crate::syn::error::RenderedError as RenderedParserError;
 use crate::vs::Error as VersionstampError;
 use base64::DecodeError as Base64Error;
 use bincode::Error as BincodeError;
-#[cfg(any(
-	feature = "kv-mem",
-	feature = "kv-surrealkv",
-	feature = "kv-rocksdb",
-	feature = "kv-fdb",
-	feature = "kv-tikv",
-))]
+#[cfg(storage)]
 use ext_sort::SortError;
 use fst::Error as FstError;
 use jsonwebtoken::errors::Error as JWTError;
@@ -224,6 +218,14 @@ pub enum Error {
 	#[error("Incorrect arguments for function {name}(). {message}")]
 	InvalidArguments {
 		name: String,
+		message: String,
+	},
+
+	/// The wrong quantity or magnitude of arguments was given for the specified function
+	#[error("Incorrect arguments for aggregate function {name}() on table '{table}'. {message}")]
+	InvalidAggregation {
+		name: String,
+		table: String,
 		message: String,
 	},
 
@@ -1208,13 +1210,7 @@ impl From<reqwest::Error> for Error {
 	}
 }
 
-#[cfg(any(
-	feature = "kv-mem",
-	feature = "kv-surrealkv",
-	feature = "kv-rocksdb",
-	feature = "kv-fdb",
-	feature = "kv-tikv",
-))]
+#[cfg(storage)]
 impl<S, D, I> From<SortError<S, D, I>> for Error
 where
 	S: std::error::Error,

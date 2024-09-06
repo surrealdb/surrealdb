@@ -377,34 +377,37 @@ where
 {
 	fn query_result(self, response: &mut QueryResponse) -> Result<Vec<T>> {
 		let (index, key) = self;
-		let mut response = match response.results.get_mut(&index) {
+		match response.results.get_mut(&index) {
 			Some((_, result)) => match result {
 				Ok(val) => match val {
-					CoreValue::Array(vec) => mem::take(&mut vec.0),
+					CoreValue::Array(vec) => {
+						let mut responses = Vec::with_capacity(vec.len());
+						for value in vec.iter_mut() {
+							if let CoreValue::Object(object) = value {
+								if let Some(value) = object.remove(key) {
+									responses.push(value);
+								}
+							}
+						}
+						from_core_value(responses.into()).map_err(Into::into)
+					}
 					val => {
-						let val = mem::take(val);
-						vec![val]
+						if let CoreValue::Object(object) = val {
+							if let Some(value) = object.remove(key) {
+								return from_core_value(vec![value].into()).map_err(Into::into);
+							}
+						}
+						Ok(vec![])
 					}
 				},
 				Err(error) => {
 					let error = mem::replace(error, Error::ConnectionUninitialised.into());
 					response.results.swap_remove(&index);
-					return Err(error);
+					Err(error)
 				}
 			},
-			None => {
-				return Ok(vec![]);
-			}
-		};
-		let mut vec = Vec::with_capacity(response.len());
-		for value in response.iter_mut() {
-			if let CoreValue::Object(object) = value {
-				if let Some(value) = object.remove(key) {
-					vec.push(value);
-				}
-			}
+			None => Ok(vec![]),
 		}
-		from_core_value(vec.into()).map_err(Into::into)
 	}
 
 	fn stats(&self, response: &QueryResponse) -> Option<Stats> {

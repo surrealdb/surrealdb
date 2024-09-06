@@ -8,6 +8,7 @@ mod health;
 mod import;
 mod input;
 mod key;
+mod ml;
 pub(crate) mod output;
 mod params;
 mod rpc;
@@ -18,9 +19,6 @@ mod sql;
 mod sync;
 mod tracer;
 mod version;
-
-#[cfg(feature = "ml")]
-mod ml;
 
 use crate::cli::CF;
 use crate::cnf::{self, GRAPHQL_ENABLE};
@@ -173,7 +171,8 @@ pub async fn init(ds: Arc<Datastore>, ct: CancellationToken) -> Result<(), Error
 		.merge(sql::router())
 		.merge(signin::router())
 		.merge(signup::router())
-		.merge(key::router());
+		.merge(key::router())
+		.merge(ml::router());
 
 	let axum_app = if *GRAPHQL_ENABLE {
 		#[cfg(surrealdb_unstable)]
@@ -189,9 +188,6 @@ pub async fn init(ds: Arc<Datastore>, ct: CancellationToken) -> Result<(), Error
 	} else {
 		axum_app
 	};
-
-	#[cfg(feature = "ml")]
-	let axum_app = axum_app.merge(ml::router());
 
 	let axum_app = axum_app.layer(service);
 

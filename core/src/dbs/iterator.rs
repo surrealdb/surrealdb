@@ -35,18 +35,21 @@ pub(crate) enum Iterable {
 	Index(Table, IteratorRef),
 }
 
+#[derive(Debug)]
 pub(crate) struct Processed {
 	pub(crate) rid: Option<Arc<Thing>>,
 	pub(crate) ir: Option<Arc<IteratorRecord>>,
 	pub(crate) val: Operable,
 }
 
+#[derive(Debug)]
 pub(crate) enum Operable {
 	Value(Arc<Value>),
 	Mergeable(Arc<Value>, Arc<Value>),
 	Relatable(Thing, Arc<Value>, Thing, Option<Arc<Value>>),
 }
 
+#[derive(Debug)]
 pub(crate) enum Workable {
 	Normal,
 	Insert(Arc<Value>),
@@ -298,13 +301,7 @@ impl Iterator {
 		self.setup_start(stk, &cancel_ctx, opt, stm).await?;
 		// Prepare the results with possible optimisations on groups
 		self.results = self.results.prepare(
-			#[cfg(any(
-				feature = "kv-mem",
-				feature = "kv-surrealkv",
-				feature = "kv-rocksdb",
-				feature = "kv-fdb",
-				feature = "kv-tikv",
-			))]
+			#[cfg(storage)]
 			ctx,
 			stm,
 		)?;
