@@ -9,7 +9,7 @@ pub(crate) type SavePoint = HashMap<Key, Option<(Arc<Val>, Option<u64>)>>;
 
 impl Transactor {
 	pub(crate) fn new_save_point(&mut self) -> SavePointId {
-		self.save_points.new()
+		self.save_points.new_save_point()
 	}
 
 	pub(crate) async fn rollback_save_point(&mut self, id: SavePointId) -> Result<(), Error> {
@@ -55,7 +55,7 @@ pub(crate) struct SavePoints {
 }
 
 impl SavePoints {
-	pub(super) fn new(&mut self) -> SavePointId {
+	pub(super) fn new_save_point(&mut self) -> SavePointId {
 		if let Some(c) = self.current.take() {
 			self.stack.push_back(c);
 		}
