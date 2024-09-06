@@ -51,7 +51,7 @@ async fn migrate_ns_tokens(tx: Arc<Transaction>, ns: &str) -> Result<(), Error> 
 
 		// We suffix the last id with a null byte, to prevent scanning it twice (which would result in an infinite loop)
 		beg.clone_from(keys.last().unwrap());
-		beg.extend_from_slice(&[b"\0"]);
+		beg.extend_from_slice(b"\0");
 
 		// Assign to queue
 		queue.append(&mut keys);
@@ -97,7 +97,7 @@ async fn migrate_db_tokens(tx: Arc<Transaction>, ns: &str, db: &str) -> Result<(
 
 		// We suffix the last id with a null byte, to prevent scanning it twice (which would result in an infinite loop)
 		beg.clone_from(keys.last().unwrap());
-		beg.extend_from_slice(&[b"\0"]);
+		beg.extend_from_slice(b"\0");
 
 		// Assign to queue
 		queue.append(&mut keys);
@@ -147,7 +147,7 @@ async fn collect_db_scope_keys(
 
 		// We suffix the last id with a null byte, to prevent scanning it twice (which would result in an infinite loop)
 		beg.clone_from(keys.last().unwrap());
-		beg.extend_from_slice(&[b"\0"]);
+		beg.extend_from_slice(b"\0");
 
 		// Assign to queue
 		queue.append(&mut keys);
@@ -212,7 +212,7 @@ async fn migrate_sc_tokens(
 
 		// We suffix the last id with a null byte, to prevent scanning it twice (which would result in an infinite loop)
 		beg.clone_from(keys.last().unwrap());
-		beg.extend_from_slice(&[b"\0"]);
+		beg.extend_from_slice(b"\0");
 
 		// Assign to queue
 		queue.append(&mut keys);
