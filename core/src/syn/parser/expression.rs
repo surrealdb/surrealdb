@@ -302,7 +302,8 @@ impl Parser<'_> {
 				| Operator::NotLike
 				| Operator::AllLike
 				| Operator::AnyLike
-				| Operator::Like | Operator::Contain
+				| Operator::Like
+				| Operator::Contain
 				| Operator::NotContain
 				| Operator::NotInside
 				| Operator::ContainAll
