@@ -1737,7 +1737,7 @@ mod http_integration {
 			let (addr, _server) =
 				common::start_server_without_http(vec!["sql", "export", "import"]).await.unwrap();
 
-			// Prepare HTTP client without header
+			// Prepare HTTP client
 			let mut headers = reqwest::header::HeaderMap::new();
 			let ns = Ulid::new().to_string();
 			let db = Ulid::new().to_string();
@@ -1814,23 +1814,16 @@ mod http_integration {
 				.await
 				.unwrap();
 		}
-
 		// Deny all
 		{
-			let routes = vec![
-				"health", "export", "import", "version", "rpc", "sync", "sql", "signin", "signup",
-				"key", "ml",
-			];
+			// All endpoints except for RPC
+			let routes =
+				vec!["export", "import", "version", "sync", "sql", "signin", "signup", "key", "ml"];
 
 			// Start server disallowing all routes
-			let (addr, _server) =
-				common::start_server_without_http_without_wait(routes).await.unwrap();
-			// The "is-ready" command uses the disallowed endpoints
-			// We must wait for server startup rudimentarily
-			// If this introduces flakiness, drop checking RPC
-			time::sleep(time::Duration::from_millis(5000)).await;
+			let (addr, _server) = common::start_server_without_http(routes).await.unwrap();
 
-			// Prepare HTTP client without header
+			// Prepare HTTP client
 			let mut headers = reqwest::header::HeaderMap::new();
 			let ns = Ulid::new().to_string();
 			let db = Ulid::new().to_string();
@@ -1846,7 +1839,7 @@ mod http_integration {
 
 			// Check that denied routes are disallowed
 			// GET
-			for route in vec!["health", "version", "sync", "export", "ml/export/test/1.0.0"] {
+			for route in vec!["version", "sync", "export", "ml/export/test/1.0.0"] {
 				println!("Testing \"/{route}\" route...");
 
 				let res = client
@@ -1870,6 +1863,56 @@ mod http_integration {
 				assert_eq!(res.status(), 403, "body: {}", res.text().await.unwrap());
 			}
 			// WebSocket
+			println!("Testing \"/rpc\" route...");
+			client
+				.get(format!("{base_url}/rpc"))
+				.header(header::CONNECTION, "Upgrade")
+				.header(header::UPGRADE, "websocket")
+				.header(header::SEC_WEBSOCKET_VERSION, "13")
+				.header(header::SEC_WEBSOCKET_KEY, "dGhlIHNhbXBsZSBub25jZQ==")
+				.send()
+				.await
+				.unwrap()
+				.upgrade()
+				.await
+				.unwrap();
+		}
+		// Deny RPC and health endpoints
+		{
+			// Start server disallowing the RPC and health routes
+			let (addr, _server) =
+				common::start_server_without_http_without_wait(vec!["rpc", "health"])
+					.await
+					.unwrap();
+			// The "is-ready" command uses the RPC and health routes
+			// We must wait for server startup rudimentarily
+			// If this introduces flakiness, drop this test case
+			time::sleep(time::Duration::from_millis(5000)).await;
+
+			// Prepare HTTP client
+			let mut headers = reqwest::header::HeaderMap::new();
+			let ns = Ulid::new().to_string();
+			let db = Ulid::new().to_string();
+			headers.insert("surreal-ns", ns.parse().unwrap());
+			headers.insert("surreal-db", db.parse().unwrap());
+			headers.insert(header::ACCEPT, "application/json".parse().unwrap());
+			let client = reqwest::Client::builder()
+				.connect_timeout(Duration::from_millis(10))
+				.default_headers(headers)
+				.build()
+				.unwrap();
+			let base_url = &format!("http://{addr}");
+
+			// Check that health requests are disallowed
+			let res = client
+				.get(format!("{base_url}/health"))
+				.basic_auth(USER, Some(PASS))
+				.send()
+				.await
+				.unwrap();
+			assert_eq!(res.status(), 403, "body: {}", res.text().await.unwrap());
+
+			// Check that RPC requests are disallowed
 			println!("Testing \"/rpc\" route...");
 			let res = client
 				.get(format!("{base_url}/rpc"))
