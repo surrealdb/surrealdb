@@ -745,13 +745,17 @@ impl Parser<'_> {
 		matches!(
 			kind,
 			t!("ANALYZE")
-				| t!("BEGIN") | t!("BREAK")
-				| t!("CANCEL") | t!("COMMIT")
-				| t!("CONTINUE") | t!("FOR")
-				| t!("INFO") | t!("KILL")
-				| t!("LIVE") | t!("OPTION")
+				| t!("BEGIN")
+				| t!("BREAK")
+				| t!("CANCEL")
+				| t!("COMMIT")
+				| t!("CONTINUE")
+				| t!("FOR") | t!("INFO")
+				| t!("KILL") | t!("LIVE")
+				| t!("OPTION")
 				| t!("LET") | t!("SHOW")
-				| t!("SLEEP") | t!("THROW")
+				| t!("SLEEP")
+				| t!("THROW")
 				| t!("USE")
 		)
 	}
@@ -893,15 +897,17 @@ impl Parser<'_> {
 			t,
 			t!("NONE")
 				| t!("NULL") | t!("true")
-				| t!("false") | t!("r\"")
-				| t!("r'") | t!("d\"")
-				| t!("d'") | t!("u\"")
-				| t!("u'") | t!("\"")
-				| t!("'") | t!("+")
-				| t!("-") | TokenKind::Number(_)
+				| t!("false")
+				| t!("r\"") | t!("r'")
+				| t!("d\"") | t!("d'")
+				| t!("u\"") | t!("u'")
+				| t!("\"") | t!("'")
+				| t!("+") | t!("-")
+				| TokenKind::Number(_)
 				| TokenKind::Digits
 				| TokenKind::Duration
-				| TokenKind::NaN | t!("$param")
+				| TokenKind::NaN
+				| t!("$param")
 				| t!("[") | t!("{")
 				| t!("(") | TokenKind::Keyword(_)
 				| TokenKind::Language(_)
@@ -915,10 +921,14 @@ impl Parser<'_> {
 				| TokenKind::DurationSuffix(
 					// All except Micro unicode
 					DurationSuffix::Nano
-						| DurationSuffix::Micro | DurationSuffix::Milli
-						| DurationSuffix::Second | DurationSuffix::Minute
-						| DurationSuffix::Hour | DurationSuffix::Day
-						| DurationSuffix::Week | DurationSuffix::Year
+						| DurationSuffix::Micro
+						| DurationSuffix::Milli
+						| DurationSuffix::Second
+						| DurationSuffix::Minute
+						| DurationSuffix::Hour
+						| DurationSuffix::Day
+						| DurationSuffix::Week
+						| DurationSuffix::Year
 				)
 		)
 	}
