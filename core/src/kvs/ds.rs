@@ -28,14 +28,7 @@ use channel::{Receiver, Sender};
 use futures::Future;
 use reblessive::TreeStack;
 use std::fmt;
-#[cfg(any(
-	feature = "kv-mem",
-	feature = "kv-surrealkv",
-	feature = "kv-rocksdb",
-	feature = "kv-fdb",
-	feature = "kv-tikv",
-	feature = "kv-surrealcs",
-))]
+#[cfg(storage)]
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
@@ -84,14 +77,7 @@ pub struct Datastore {
 	#[cfg(feature = "jwks")]
 	// The JWKS object cache
 	jwks_cache: Arc<RwLock<JwksCache>>,
-	#[cfg(any(
-		feature = "kv-mem",
-		feature = "kv-surrealkv",
-		feature = "kv-rocksdb",
-		feature = "kv-fdb",
-		feature = "kv-tikv",
-		feature = "kv-surrealcs",
-	))]
+	#[cfg(storage)]
 	// The temporary directory
 	temporary_directory: Option<Arc<PathBuf>>,
 }
@@ -274,13 +260,7 @@ impl Datastore {
 			index_builder: IndexBuilder::new(self.transaction_factory.clone()),
 			#[cfg(feature = "jwks")]
 			jwks_cache: Arc::new(Default::default()),
-			#[cfg(any(
-				feature = "kv-mem",
-				feature = "kv-surrealkv",
-				feature = "kv-rocksdb",
-				feature = "kv-fdb",
-				feature = "kv-tikv",
-			))]
+			#[cfg(storage)]
 			temporary_directory: self.temporary_directory,
 			transaction_factory: self.transaction_factory,
 		}
@@ -440,14 +420,7 @@ impl Datastore {
 				index_builder: IndexBuilder::new(tf),
 				#[cfg(feature = "jwks")]
 				jwks_cache: Arc::new(RwLock::new(JwksCache::new())),
-				#[cfg(any(
-					feature = "kv-mem",
-					feature = "kv-surrealkv",
-					feature = "kv-rocksdb",
-					feature = "kv-fdb",
-					feature = "kv-tikv",
-					feature = "kv-surrealcs",
-				))]
+				#[cfg(storage)]
 				temporary_directory: None,
 			}
 		})
@@ -495,14 +468,7 @@ impl Datastore {
 		self
 	}
 
-	#[cfg(any(
-		feature = "kv-mem",
-		feature = "kv-surrealkv",
-		feature = "kv-rocksdb",
-		feature = "kv-fdb",
-		feature = "kv-tikv",
-		feature = "kv-surrealcs",
-	))]
+	#[cfg(storage)]
 	/// Set a temporary directory for ordering of large result sets
 	pub fn with_temporary_directory(mut self, path: Option<PathBuf>) -> Self {
 		self.temporary_directory = path.map(Arc::new);
@@ -869,14 +835,7 @@ impl Datastore {
 			self.index_stores.clone(),
 			#[cfg(not(target_arch = "wasm32"))]
 			self.index_builder.clone(),
-			#[cfg(any(
-				feature = "kv-mem",
-				feature = "kv-surrealkv",
-				feature = "kv-rocksdb",
-				feature = "kv-fdb",
-				feature = "kv-tikv",
-				feature = "kv-surrealcs",
-			))]
+			#[cfg(storage)]
 			self.temporary_directory.clone(),
 		)?;
 		// Setup the notification channel

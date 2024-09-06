@@ -1,7 +1,7 @@
 use cedar_policy::Schema;
-use once_cell::sync::Lazy;
+use std::sync::LazyLock;
 
-pub static DEFAULT_CEDAR_SCHEMA: Lazy<serde_json::Value> = Lazy::new(|| {
+pub static DEFAULT_CEDAR_SCHEMA: LazyLock<serde_json::Value> = LazyLock::new(|| {
 	serde_json::json!(
 		{
 			"": {

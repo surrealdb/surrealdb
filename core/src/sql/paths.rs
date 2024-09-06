@@ -1,30 +1,30 @@
 use crate::sql::part::Part;
-use once_cell::sync::Lazy;
+use std::sync::LazyLock;
 
 pub const OBJ_PATH_ACCESS: &str = "ac";
 pub const OBJ_PATH_AUTH: &str = "rd";
 pub const OBJ_PATH_TOKEN: &str = "tk";
 
-pub static ID: Lazy<[Part; 1]> = Lazy::new(|| [Part::from("id")]);
+pub static ID: LazyLock<[Part; 1]> = LazyLock::new(|| [Part::from("id")]);
 
-pub static IP: Lazy<[Part; 1]> = Lazy::new(|| [Part::from("ip")]);
+pub static IP: LazyLock<[Part; 1]> = LazyLock::new(|| [Part::from("ip")]);
 
-pub static NS: Lazy<[Part; 1]> = Lazy::new(|| [Part::from("ns")]);
+pub static NS: LazyLock<[Part; 1]> = LazyLock::new(|| [Part::from("ns")]);
 
-pub static DB: Lazy<[Part; 1]> = Lazy::new(|| [Part::from("db")]);
+pub static DB: LazyLock<[Part; 1]> = LazyLock::new(|| [Part::from("db")]);
 
-pub static AC: Lazy<[Part; 1]> = Lazy::new(|| [Part::from(OBJ_PATH_ACCESS)]);
+pub static AC: LazyLock<[Part; 1]> = LazyLock::new(|| [Part::from(OBJ_PATH_ACCESS)]);
 
-pub static RD: Lazy<[Part; 1]> = Lazy::new(|| [Part::from(OBJ_PATH_AUTH)]);
+pub static RD: LazyLock<[Part; 1]> = LazyLock::new(|| [Part::from(OBJ_PATH_AUTH)]);
 
-pub static OR: Lazy<[Part; 1]> = Lazy::new(|| [Part::from("or")]);
+pub static OR: LazyLock<[Part; 1]> = LazyLock::new(|| [Part::from("or")]);
 
-pub static TK: Lazy<[Part; 1]> = Lazy::new(|| [Part::from(OBJ_PATH_TOKEN)]);
+pub static TK: LazyLock<[Part; 1]> = LazyLock::new(|| [Part::from(OBJ_PATH_TOKEN)]);
 
-pub static IN: Lazy<[Part; 1]> = Lazy::new(|| [Part::from("in")]);
+pub static IN: LazyLock<[Part; 1]> = LazyLock::new(|| [Part::from("in")]);
 
-pub static OUT: Lazy<[Part; 1]> = Lazy::new(|| [Part::from("out")]);
+pub static OUT: LazyLock<[Part; 1]> = LazyLock::new(|| [Part::from("out")]);
 
-pub static META: Lazy<[Part; 1]> = Lazy::new(|| [Part::from("__")]);
+pub static META: LazyLock<[Part; 1]> = LazyLock::new(|| [Part::from("__")]);
 
-pub static EDGE: Lazy<[Part; 1]> = Lazy::new(|| [Part::from("__")]);
+pub static EDGE: LazyLock<[Part; 1]> = LazyLock::new(|| [Part::from("__")]);

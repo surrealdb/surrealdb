@@ -92,12 +92,12 @@ const DEFAULT_TICK_INTERVAL: Duration = Duration::from_secs(10);
 /// Instantiating a global instance
 ///
 /// ```
-/// use once_cell::sync::Lazy;
+/// use std::sync::LazyLock;
 /// use surrealdb::{Result, Surreal};
 /// use surrealdb::engine::local::Db;
 /// use surrealdb::engine::local::Mem;
 ///
-/// static DB: Lazy<Surreal<Db>> = Lazy::new(Surreal::init);
+/// static DB: LazyLock<Surreal<Db>> = LazyLock::new(Surreal::init);
 ///
 /// #[tokio::main]
 /// async fn main() -> Result<()> {
