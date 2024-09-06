@@ -8,11 +8,7 @@ use crate::syn::{
 	token::{Token, TokenKind},
 };
 
-use super::unicode::chars;
-
-fn is_identifier_continue(x: u8) -> bool {
-	matches!(x, b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'_')
-}
+use super::unicode::{chars, is_identifier_continue};
 
 impl<'a> Lexer<'a> {
 	/// Lex a parameter in the form of `$[a-zA-Z0-9_]*`

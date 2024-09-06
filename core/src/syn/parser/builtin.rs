@@ -3,10 +3,7 @@ use crate::{
 	sql::{Constant, Function, Value},
 	syn::{
 		error::MessageKind,
-		parser::{
-			mac::{expected, unexpected},
-			SyntaxError,
-		},
+		parser::{mac::expected, unexpected, SyntaxError},
 		token::{t, Span},
 	},
 };
@@ -466,9 +463,9 @@ impl Parser<'_> {
 	pub async fn parse_builtin(&mut self, stk: &mut Stk, start: Span) -> ParseResult<Value> {
 		let mut last_span = start;
 		while self.eat(t!("::")) {
-			let t = self.glue_ident(false)?;
-			if !Self::tokenkind_can_start_ident(t.kind) {
-				unexpected!(self, t, "an identifier")
+			let peek = self.peek();
+			if !Self::kind_is_identifier(peek.kind) {
+				unexpected!(self, peek, "an identifier")
 			}
 			self.pop_peek();
 			last_span = self.last_span();
@@ -476,6 +473,8 @@ impl Parser<'_> {
 
 		let span = start.covers(last_span);
 		let str = self.lexer.span_str(span);
+
+		dbg!(str);
 
 		match PATHS.get_entry(&UniCase::ascii(str)) {
 			Some((_, PathKind::Constant(x))) => Ok(Value::Constant(x.clone())),

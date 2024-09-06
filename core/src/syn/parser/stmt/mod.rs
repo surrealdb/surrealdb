@@ -12,6 +12,7 @@ use crate::sql::statements::{
 	KillStatement, LiveStatement, OptionStatement, SetStatement, ThrowStatement,
 };
 use crate::sql::{Fields, Ident, Param};
+use crate::syn::lexer::compound;
 use crate::syn::parser::enter_query_recursion;
 use crate::syn::token::{t, TokenKind};
 use crate::{
@@ -61,7 +62,7 @@ impl Parser<'_> {
 						}
 
 						let token = self.peek();
-						if Self::token_kind_starts_statement(token.kind) {
+						if Self::kind_starts_statement(token.kind) {
 							// user likely forgot a semicolon.
 							unexpected!(self,token,"the query to end", => "maybe forgot a semicolon  after the previous statement?");
 						}
@@ -72,28 +73,6 @@ impl Parser<'_> {
 			}
 		}
 		Ok(Statements(res))
-	}
-
-	fn token_kind_starts_statement(kind: TokenKind) -> bool {
-		matches!(
-			kind,
-			t!("ACCESS")
-				| t!("ALTER") | t!("ANALYZE")
-				| t!("BEGIN") | t!("BREAK")
-				| t!("CANCEL") | t!("COMMIT")
-				| t!("CONTINUE") | t!("CREATE")
-				| t!("DEFINE") | t!("DELETE")
-				| t!("FOR") | t!("IF")
-				| t!("INFO") | t!("INSERT")
-				| t!("KILL") | t!("LIVE")
-				| t!("OPTION") | t!("REBUILD")
-				| t!("RETURN") | t!("RELATE")
-				| t!("REMOVE") | t!("SELECT")
-				| t!("LET") | t!("SHOW")
-				| t!("SLEEP") | t!("THROW")
-				| t!("UPDATE") | t!("UPSERT")
-				| t!("USE")
-		)
 	}
 
 	pub(super) async fn parse_stmt(&mut self, ctx: &mut Stk) -> ParseResult<Statement> {
@@ -464,7 +443,7 @@ impl Parser<'_> {
 	fn parse_use_stmt(&mut self) -> ParseResult<UseStatement> {
 		let peek = self.peek();
 		let (ns, db) = match peek.kind {
-			t!("NAMESPACE") | t!("ns") => {
+			t!("NAMESPACE") => {
 				self.pop_peek();
 				let ns = self.next_token_value::<Ident>()?.0;
 				let db = self
@@ -495,7 +474,7 @@ impl Parser<'_> {
 	pub async fn parse_for_stmt(&mut self, stk: &mut Stk) -> ParseResult<ForeachStatement> {
 		let param = self.next_token_value()?;
 		expected!(self, t!("IN"));
-		let range = stk.run(|stk| self.parse_value(stk)).await?;
+		let range = stk.run(|stk| self.parse_value_class(stk)).await?;
 
 		let span = expected!(self, t!("{")).span;
 		let block = self.parse_block(stk, span).await?;
@@ -515,7 +494,7 @@ impl Parser<'_> {
 		let next = self.next();
 		let mut stmt = match next.kind {
 			t!("ROOT") => InfoStatement::Root(false),
-			t!("NAMESPACE") | t!("ns") => InfoStatement::Ns(false),
+			t!("NAMESPACE") => InfoStatement::Ns(false),
 			t!("DATABASE") => InfoStatement::Db(false),
 			t!("TABLE") => {
 				let ident = self.next_token_value()?;
@@ -665,7 +644,7 @@ impl Parser<'_> {
 			None
 		};
 		expected!(self, t!("="));
-		let what = self.parse_value(ctx).await?;
+		let what = self.parse_value_class(ctx).await?;
 		Ok(SetStatement {
 			name,
 			what,
@@ -695,8 +674,13 @@ impl Parser<'_> {
 
 		let next = self.peek();
 		let since = match next.kind {
-			TokenKind::Digits | TokenKind::Number(_) => {
-				ShowSince::Versionstamp(self.next_token_value()?)
+			TokenKind::Digits => {
+				self.pop_peek();
+				let int = self.lexer.lex_compound(next, compound::integer)?.value;
+				ShowSince::Versionstamp(int)
+			}
+			TokenKind::Glued(_) => {
+				panic!("A glued number token would truncate the timestamp so no gluing is allowed before this production.");
 			}
 			t!("d\"") | t!("d'") => ShowSince::Timestamp(self.next_token_value()?),
 			_ => unexpected!(self, next, "a version stamp or a date-time"),

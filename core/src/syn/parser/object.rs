@@ -8,7 +8,7 @@ use crate::{
 	syn::{
 		error::bail,
 		parser::{enter_object_recursion, mac::expected, ParseResult, Parser},
-		token::{t, Span, TokenKind},
+		token::{t, Glued, Span, TokenKind},
 	},
 };
 
@@ -30,11 +30,8 @@ impl Parser<'_> {
 			})
 		}
 
-		// glue possible complex tokens.
-		self.glue()?;
-
 		// Now check first if it can be an object.
-		if self.peek_token_at(1).kind == t!(":") {
+		if self.glue_and_peek1()?.kind == t!(":") {
 			enter_object_recursion!(this = self => {
 			   return this.parse_object_or_geometry(ctx, start).await;
 			})
@@ -663,13 +660,9 @@ impl Parser<'_> {
 
 	/// Parses the key of an object, i.e. `field` in the object `{ field: 1 }`.
 	pub fn parse_object_key(&mut self) -> ParseResult<String> {
-		let token = self.glue()?;
+		let token = self.peek();
 		match token.kind {
-			TokenKind::Keyword(_)
-			| TokenKind::Language(_)
-			| TokenKind::Algorithm(_)
-			| TokenKind::Distance(_)
-			| TokenKind::VectorType(_) => {
+			x if Self::kind_is_keyword_like(x) => {
 				self.pop_peek();
 				let str = self.lexer.reader.span(token.span);
 				// Lexer should ensure that the token is valid utf-8
@@ -681,11 +674,11 @@ impl Parser<'_> {
 				let str = self.lexer.string.take().unwrap();
 				Ok(str)
 			}
-			t!("\"") | t!("'") | TokenKind::Strand => {
+			t!("\"") | t!("'") | TokenKind::Glued(Glued::Strand) => {
 				let str = self.next_token_value::<Strand>()?.0;
 				Ok(str)
 			}
-			TokenKind::Digits | TokenKind::Number(_) => {
+			TokenKind::Digits | TokenKind::Glued(Glued::Number) => {
 				let number = self.next_token_value::<Number>()?.to_string();
 				Ok(number)
 			}

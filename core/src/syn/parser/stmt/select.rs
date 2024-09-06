@@ -35,9 +35,9 @@ impl Parser<'_> {
 
 		let only = self.eat(t!("ONLY"));
 
-		let mut what = vec![stk.run(|ctx| self.parse_value(ctx)).await?];
+		let mut what = vec![stk.run(|ctx| self.parse_value_class(ctx)).await?];
 		while self.eat(t!(",")) {
-			what.push(stk.run(|ctx| self.parse_value(ctx)).await?);
+			what.push(stk.run(|ctx| self.parse_value_class(ctx)).await?);
 		}
 		let what = Values(what);
 
@@ -217,7 +217,7 @@ impl Parser<'_> {
 			return Ok(None);
 		}
 		self.eat(t!("BY"));
-		let value = ctx.run(|ctx| self.parse_value(ctx)).await?;
+		let value = ctx.run(|ctx| self.parse_value_class(ctx)).await?;
 		Ok(Some(Limit(value)))
 	}
 
@@ -226,7 +226,7 @@ impl Parser<'_> {
 			return Ok(None);
 		}
 		self.eat(t!("AT"));
-		let value = ctx.run(|ctx| self.parse_value(ctx)).await?;
+		let value = ctx.run(|ctx| self.parse_value_class(ctx)).await?;
 		Ok(Some(Start(value)))
 	}
 

@@ -18,6 +18,7 @@ pub trait Parse<T> {
 #[cfg(test)]
 mod test;
 
+use lexer::{compound, Lexer};
 use parser::Parser;
 use reblessive::Stack;
 use token::t;
@@ -70,7 +71,7 @@ pub fn value_legacy_strand(input: &str) -> Result<Value, Error> {
 	let mut stack = Stack::new();
 	parser.allow_legacy_strand(true);
 	stack
-		.enter(|stk| parser.parse_value(stk))
+		.enter(|stk| parser.parse_value_field(stk))
 		.finish()
 		.map_err(|e| e.render_on(input))
 		.map_err(Error::InvalidQuery)
@@ -131,8 +132,9 @@ pub fn idiom(input: &str) -> Result<Idiom, Error> {
 /// Parse a datetime without enclosing delimiters from a string.
 pub fn datetime_raw(input: &str) -> Result<Datetime, Error> {
 	debug!("parsing datetime, input = {input}");
-	let mut parser = Parser::new(input.as_bytes());
-	parser.parse_inner_datetime().map_err(|e| e.render_on(input)).map_err(Error::InvalidQuery)
+	let mut lexer = Lexer::new(input.as_bytes());
+	let res = compound::datetime_inner(&mut lexer);
+	res.map(Datetime).map_err(|e| e.render_on(input)).map_err(Error::InvalidQuery)
 }
 
 /// Parse a duration from a string.

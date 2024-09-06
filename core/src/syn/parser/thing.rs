@@ -8,8 +8,9 @@ use crate::{
 	},
 	syn::{
 		error::bail,
+		lexer::compound,
 		parser::mac::{expected, expected_whitespace, unexpected},
-		token::{t, TokenKind},
+		token::{t, Glued, TokenKind},
 	},
 };
 use std::{cmp::Ordering, ops::Bound};
@@ -28,14 +29,6 @@ impl Parser<'_> {
 		Ok(thing)
 	}
 
-	fn kind_cast_start_id(kind: TokenKind) -> bool {
-		Self::tokenkind_can_start_ident(kind)
-			|| matches!(
-				kind,
-				TokenKind::Digits | t!("{") | t!("[") | t!("+") | t!("-") | t!("u'") | t!("u\"")
-			)
-	}
-
 	pub async fn parse_thing_or_range(
 		&mut self,
 		stk: &mut Stk,
@@ -49,7 +42,7 @@ impl Parser<'_> {
 			let end = if self.eat_whitespace(t!("=")) {
 				let id = stk.run(|stk| self.parse_id(stk)).await?;
 				Bound::Included(id)
-			} else if Self::kind_cast_start_id(self.peek_whitespace().kind) {
+			} else if Self::kind_starts_record_id_key(self.peek_whitespace().kind) {
 				let id = stk.run(|stk| self.parse_id(stk)).await?;
 				Bound::Excluded(id)
 			} else {
@@ -65,7 +58,7 @@ impl Parser<'_> {
 		}
 
 		// Didn't eat range yet so we need to parse the id.
-		let beg = if Self::kind_cast_start_id(self.peek_whitespace().kind) {
+		let beg = if Self::kind_starts_record_id_key(self.peek_whitespace().kind) {
 			let v = stk.run(|stk| self.parse_id(stk)).await?;
 
 			// check for exclusive
@@ -84,7 +77,7 @@ impl Parser<'_> {
 			let end = if self.eat_whitespace(t!("=")) {
 				let id = stk.run(|stk| self.parse_id(stk)).await?;
 				Bound::Included(id)
-			} else if Self::kind_cast_start_id(self.peek_whitespace().kind) {
+			} else if Self::kind_starts_record_id_key(self.peek_whitespace().kind) {
 				let id = stk.run(|stk| self.parse_id(stk)).await?;
 				Bound::Excluded(id)
 			} else {
@@ -127,8 +120,8 @@ impl Parser<'_> {
 	/// Parse an range
 	pub async fn parse_range(&mut self, ctx: &mut Stk) -> ParseResult<Range> {
 		// Check for beginning id
-		let beg = if Self::tokenkind_can_start_ident(self.peek_whitespace().kind) {
-			let v = ctx.run(|ctx| self.parse_value(ctx)).await?;
+		let beg = if Self::kind_is_identifier(self.peek_whitespace().kind) {
+			let v = ctx.run(|ctx| self.parse_value_class(ctx)).await?;
 
 			if self.eat_whitespace(t!(">")) {
 				Bound::Excluded(v)
@@ -144,8 +137,8 @@ impl Parser<'_> {
 		let inclusive = self.eat_whitespace(t!("="));
 
 		// parse ending id.
-		let end = if Self::tokenkind_can_start_ident(self.peek_whitespace().kind) {
-			let v = ctx.run(|ctx| self.parse_value(ctx)).await?;
+		let end = if Self::kind_is_identifier(self.peek_whitespace().kind) {
+			let v = ctx.run(|ctx| self.parse_value_class(ctx)).await?;
 			if inclusive {
 				Bound::Included(v)
 			} else {
@@ -208,12 +201,12 @@ impl Parser<'_> {
 
 				let next = self.peek_whitespace();
 				match next.kind {
-					t!(".") | TokenKind::Exponent | TokenKind::NumberSuffix(_) => {
+					t!(".") => {
 						// TODO(delskayn) explain that record-id's cant have matissas,
 						// exponents or a number suffix
-						unexpected!(self, next, "an integer");
+						unexpected!(self, next, "an integer", => "Numeric Record-id keys can only be integers");
 					}
-					x if Self::tokenkind_continues_ident(x) => {
+					x if Self::kind_is_identifier(x) => {
 						let span = token.span.covers(next.span);
 						bail!("Unexpected token `{x}` expected an integer", @span);
 					}
@@ -230,51 +223,27 @@ impl Parser<'_> {
 			}
 			t!("-") => {
 				self.pop_peek();
-				// starting with a + so it must be a number
-				let digits_token = self.peek_whitespace();
-				match digits_token.kind {
-					TokenKind::Digits => {}
-					_ => unexpected!(self, digits_token, "an integer"),
-				}
-
-				let next = self.peek_whitespace();
-				match next.kind {
-					t!(".") | TokenKind::Exponent | TokenKind::NumberSuffix(_) => {
-						// TODO(delskayn) explain that record-id's cant have matissas,
-						// exponents or a number suffix
-						unexpected!(self, next, "an integer");
-					}
-					x if Self::tokenkind_continues_ident(x) => {
-						let span = token.span.covers(next.span);
-						bail!("Unexpected token `{x}` expected an integer", @span);
-					}
-					// allowed
-					_ => {}
-				}
-
-				let digits_str = self.lexer.span_str(digits_token.span);
-				if let Ok(number) = digits_str.parse::<u64>() {
+				let token = expected!(self, TokenKind::Digits);
+				if let Ok(number) = self.lexer.lex_compound(token, compound::integer::<u64>) {
 					// Parse to u64 and check if the value is equal to `-i64::MIN` via u64 as
 					// `-i64::MIN` doesn't fit in an i64
-					match number.cmp(&((i64::MAX as u64) + 1)) {
-						Ordering::Less => Ok(Id::Number(-(number as i64))),
+					match number.value.cmp(&((i64::MAX as u64) + 1)) {
+						Ordering::Less => Ok(Id::Number(-(number.value as i64))),
 						Ordering::Equal => Ok(Id::Number(i64::MIN)),
-						Ordering::Greater => Ok(Id::String(format!("-{}", digits_str))),
+						Ordering::Greater => {
+							Ok(Id::String(format!("-{}", self.lexer.span_str(number.span))))
+						}
 					}
 				} else {
-					Ok(Id::String(format!("-{}", digits_str)))
+					Ok(Id::String(format!("-{}", self.lexer.span_str(token.span))))
 				}
 			}
 			TokenKind::Digits => {
-				let next = self.peek_whitespace_token_at(1);
-
-				if Self::tokenkind_can_start_ident(next.kind) {
-					let glued = self.glue_ident(self.flexible_record_id)?;
-					if let TokenKind::Identifier = glued.kind {
-						self.pop_peek();
-						return Ok(Id::String(self.lexer.string.take().unwrap()));
-					} else {
-						unexpected!(self, glued, "a record-id id")
+				if self.flexible_record_id {
+					let next = self.peek_whitespace1();
+					if Self::kind_is_identifier(next.kind) {
+						let ident = self.parse_flexible_ident()?.0;
+						return Ok(Id::String(ident));
 					}
 				}
 
@@ -287,7 +256,7 @@ impl Parser<'_> {
 					Ok(Id::String(digits_str.to_owned()))
 				}
 			}
-			TokenKind::Duration if self.flexible_record_id => {
+			TokenKind::Glued(Glued::Duration) if self.flexible_record_id => {
 				self.lexer.duration = None;
 				let slice = self.lexer.reader.span(token.span);
 				if slice.iter().any(|x| *x > 0b0111_1111) {
@@ -317,8 +286,11 @@ impl Parser<'_> {
 				Ok(Id::Generate(Gen::Rand))
 			}
 			_ => {
-				self.glue_ident(self.flexible_record_id)?;
-				let ident = self.next_token_value::<Ident>()?.0;
+				let ident = if self.flexible_record_id {
+					self.parse_flexible_ident()?.0
+				} else {
+					self.next_token_value::<Ident>()?.0
+				};
 				Ok(Id::String(ident))
 			}
 		}

@@ -28,20 +28,6 @@ impl<'a> Lexer<'a> {
 			'⊄' => t!("⊄"),
 			'×' => t!("×"),
 			'÷' => t!("÷"),
-			'µ' => {
-				let Some(b's') = self.reader.peek() else {
-					let err = error!("Invalid token `µ` expected token to be followed by `s`", @self.current_span());
-					return self.invalid_token(err);
-				};
-				self.reader.next();
-
-				if self.reader.peek().map(|x| x.is_ascii_alphabetic()).unwrap_or(false) {
-					let err = error!("Invalid token `µ` expected token to be followed by `s`", @self.current_span());
-					return self.invalid_token(err);
-				}
-
-				t!("µs")
-			}
 			x => {
 				let err = error!("Invalid token `{x}`", @self.current_span());
 				return self.invalid_token(err);

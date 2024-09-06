@@ -256,47 +256,6 @@ impl VectorTypeKind {
 	}
 }
 
-#[derive(Clone, Copy, Eq, PartialEq, Hash, Debug)]
-pub enum DurationSuffix {
-	Nano,
-	Micro,
-	MicroUnicode,
-	Milli,
-	Second,
-	Minute,
-	Hour,
-	Day,
-	Week,
-	Year,
-}
-
-impl DurationSuffix {
-	pub fn can_be_ident(&self) -> bool {
-		!matches!(self, DurationSuffix::MicroUnicode)
-	}
-
-	pub fn as_str(&self) -> &'static str {
-		match self {
-			DurationSuffix::Nano => "ns",
-			DurationSuffix::Micro => "us",
-			DurationSuffix::MicroUnicode => "µs",
-			DurationSuffix::Milli => "ms",
-			DurationSuffix::Second => "s",
-			DurationSuffix::Minute => "m",
-			DurationSuffix::Hour => "h",
-			DurationSuffix::Day => "d",
-			DurationSuffix::Week => "w",
-			DurationSuffix::Year => "y",
-		}
-	}
-}
-
-#[derive(Clone, Copy, Eq, PartialEq, Hash, Debug)]
-pub enum NumberSuffix {
-	Float,
-	Decimal,
-}
-
 impl Algorithm {
 	pub fn as_str(&self) -> &'static str {
 		match self {
@@ -349,16 +308,24 @@ impl QouteKind {
 }
 
 #[derive(Clone, Copy, Eq, PartialEq, Hash, Debug)]
-pub enum NumberKind {
-	Decimal,
-	Float,
-	Integer,
+pub enum Glued {
+	Number,
+	Duration,
+	Strand,
+	Datetime,
+	Uuid,
 }
 
-#[derive(Clone, Copy, Eq, PartialEq, Hash, Debug)]
-pub enum DatetimeChars {
-	T,
-	Z,
+impl Glued {
+	fn as_str(&self) -> &'static str {
+		match self {
+			Glued::Number => "a number",
+			Glued::Strand => "a strand",
+			Glued::Uuid => "a uuid",
+			Glued::Datetime => "a datetime",
+			Glued::Duration => "a duration",
+		}
+	}
 }
 
 /// The type of token
@@ -376,13 +343,6 @@ pub enum TokenKind {
 	CloseDelim(Delim),
 	/// a token denoting the opening of a string, i.e. `r"`
 	Qoute(QouteKind),
-	/// Not produced by the lexer but only the result of token gluing.
-	Number(NumberKind),
-	/// Not produced by the lexer but only the result of token gluing.
-	Duration,
-	/// Not produced by the lexer but only the result of token gluing.
-	Strand,
-	Regex,
 	/// A parameter like `$name`.
 	Parameter,
 	Identifier,
@@ -398,10 +358,6 @@ pub enum TokenKind {
 	Dollar,
 	/// `->`
 	ArrowRight,
-	/// `<-`
-	ArrowLeft,
-	/// `<->`
-	BiArrow,
 	/// '/'
 	ForwardSlash,
 	/// `.`
@@ -422,22 +378,17 @@ pub enum TokenKind {
 	Vert,
 	/// `@`
 	At,
-	/// A token which could not be properly lexed.
-	Invalid,
 	/// A token which indicates the end of the file.
 	Eof,
 	/// A token consiting of one or more ascii digits.
 	Digits,
-	/// A identifier like token which matches a duration suffix.
-	DurationSuffix(DurationSuffix),
-	/// A part of a datetime like token which matches a duration suffix.
-	DatetimeChars(DatetimeChars),
-	/// A identifier like token which matches an exponent.
-	Exponent,
-	/// A identifier like token which matches an number suffix.
-	NumberSuffix(NumberSuffix),
 	/// The Not-A-Number number token.
 	NaN,
+	/// A token which is a compound token which has been glued together and then put back into the
+	/// token buffer. This is required for some places where we need to look past possible compound tokens.
+	Glued(Glued),
+	/// A token which could not be properly lexed.
+	Invalid,
 }
 
 impl fmt::Display for TokenKind {
@@ -451,7 +402,7 @@ const _TOKEN_KIND_SIZE_ASSERT: [(); 2] = [(); std::mem::size_of::<TokenKind>()];
 
 impl TokenKind {
 	pub fn has_data(&self) -> bool {
-		matches!(self, TokenKind::Identifier | TokenKind::Duration)
+		matches!(self, TokenKind::Identifier | TokenKind::Glued(_))
 	}
 
 	fn algorithm_as_str(alg: Algorithm) -> &'static str {
@@ -486,20 +437,14 @@ impl TokenKind {
 			TokenKind::CloseDelim(Delim::Paren) => ")",
 			TokenKind::CloseDelim(Delim::Brace) => "}",
 			TokenKind::CloseDelim(Delim::Bracket) => "]",
-			TokenKind::DurationSuffix(x) => x.as_str(),
-			TokenKind::Strand => "a strand",
 			TokenKind::Parameter => "a parameter",
-			TokenKind::Number(_) => "a number",
 			TokenKind::Identifier => "an identifier",
-			TokenKind::Regex => "a regex",
 			TokenKind::LeftChefron => "<",
 			TokenKind::RightChefron => ">",
 			TokenKind::Star => "*",
 			TokenKind::Dollar => "$",
 			TokenKind::Question => "?",
 			TokenKind::ArrowRight => "->",
-			TokenKind::ArrowLeft => "<-",
-			TokenKind::BiArrow => "<->",
 			TokenKind::ForwardSlash => "/",
 			TokenKind::Dot => ".",
 			TokenKind::DotDot => "..",
@@ -514,13 +459,10 @@ impl TokenKind {
 			TokenKind::Eof => "Eof",
 			TokenKind::WhiteSpace => "whitespace",
 			TokenKind::Qoute(x) => x.as_str(),
-			TokenKind::Duration => "a duration",
 			TokenKind::Digits => "a number",
 			TokenKind::NaN => "NaN",
+			TokenKind::Glued(x) => x.as_str(),
 			// below are small broken up tokens which are most of the time identifiers.
-			TokenKind::DatetimeChars(_) => "an identifier",
-			TokenKind::Exponent => "an identifier",
-			TokenKind::NumberSuffix(_) => "an identifier",
 		}
 	}
 }
@@ -557,13 +499,3 @@ impl Token {
 		self.span.follows_from(&other.span)
 	}
 }
-
-/// A token which is mad up of more complex inner parts.
-#[derive(Clone, Copy, Eq, PartialEq, Hash, Debug)]
-pub struct CompoundToken<T> {
-	pub value: T,
-	pub span: Span,
-}
-
-/// A compound token which lexes a javascript function body.
-pub struct JavaScript;

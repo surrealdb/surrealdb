@@ -4,14 +4,12 @@ use chrono::{DateTime, Utc};
 
 mod byte;
 mod char;
+pub mod compound;
 mod ident;
 pub mod keywords;
-mod number;
 mod reader;
-mod strand;
 mod unicode;
 
-mod compound;
 #[cfg(test)]
 mod test;
 
@@ -19,7 +17,7 @@ pub use reader::{BytesReader, CharError};
 use uuid::Uuid;
 
 use crate::syn::{
-	error::SyntaxError,
+	error::{bail, SyntaxError},
 	token::{Span, Token, TokenKind},
 };
 
@@ -160,6 +158,15 @@ impl<'a> Lexer<'a> {
 		}
 	}
 
+	pub fn span_since(&self, offset: usize) -> Span {
+		let new_offset = self.reader.offset() as u32;
+		let len = new_offset - offset as u32;
+		Span {
+			offset: offset as u32,
+			len,
+		}
+	}
+
 	fn advance_span(&mut self) -> Span {
 		let span = self.current_span();
 		self.last_offset = self.reader.offset() as u32;
@@ -223,6 +230,30 @@ impl<'a> Lexer<'a> {
 			true
 		} else {
 			false
+		}
+	}
+
+	pub fn expect(&mut self, c: char) -> Result<(), SyntaxError> {
+		match self.reader.peek() {
+			Some(x) => {
+				let offset = self.reader.offset() as u32;
+				self.reader.next();
+				let char = self.reader.convert_to_char(x)?;
+				if char == c {
+					return Ok(());
+				}
+				let len = self.reader.offset() as u32 - offset;
+				bail!(
+					"Unexpected character `{char}` expected `{c}`",
+					@Span {
+						offset,
+						len
+					}
+				)
+			}
+			None => {
+				bail!("Unexpected end of file, expected character `{c}`", @self.current_span())
+			}
 		}
 	}
 

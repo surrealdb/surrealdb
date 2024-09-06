@@ -39,18 +39,18 @@ impl Parser<'_> {
 				expected!(self, t!("VALUES"));
 
 				let start = expected!(self, t!("(")).span;
-				let mut values = vec![ctx.run(|ctx| self.parse_value(ctx)).await?];
+				let mut values = vec![ctx.run(|ctx| self.parse_value_class(ctx)).await?];
 				while self.eat(t!(",")) {
-					values.push(ctx.run(|ctx| self.parse_value(ctx)).await?);
+					values.push(ctx.run(|ctx| self.parse_value_class(ctx)).await?);
 				}
 				self.expect_closing_delimiter(t!(")"), start)?;
 
 				let mut values = vec![values];
 				while self.eat(t!(",")) {
 					let start = expected!(self, t!("(")).span;
-					let mut inner_values = vec![ctx.run(|ctx| self.parse_value(ctx)).await?];
+					let mut inner_values = vec![ctx.run(|ctx| self.parse_value_class(ctx)).await?];
 					while self.eat(t!(",")) {
-						inner_values.push(ctx.run(|ctx| self.parse_value(ctx)).await?);
+						inner_values.push(ctx.run(|ctx| self.parse_value_class(ctx)).await?);
 					}
 					values.push(inner_values);
 					self.expect_closing_delimiter(t!(")"), start)?;
@@ -64,7 +64,7 @@ impl Parser<'_> {
 				)
 			}
 			_ => {
-				let value = ctx.run(|ctx| self.parse_value(ctx)).await?;
+				let value = ctx.run(|ctx| self.parse_value_class(ctx)).await?;
 				Data::SingleExpression(value)
 			}
 		};
@@ -97,13 +97,13 @@ impl Parser<'_> {
 		expected!(self, t!("UPDATE"));
 		let l = self.parse_plain_idiom(ctx).await?;
 		let o = self.parse_assigner()?;
-		let r = ctx.run(|ctx| self.parse_value(ctx)).await?;
+		let r = ctx.run(|ctx| self.parse_value_class(ctx)).await?;
 		let mut data = vec![(l, o, r)];
 
 		while self.eat(t!(",")) {
 			let l = self.parse_plain_idiom(ctx).await?;
 			let o = self.parse_assigner()?;
-			let r = ctx.run(|ctx| self.parse_value(ctx)).await?;
+			let r = ctx.run(|ctx| self.parse_value_class(ctx)).await?;
 			data.push((l, o, r))
 		}
 

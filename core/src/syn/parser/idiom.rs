@@ -7,13 +7,21 @@ use crate::{
 	},
 	syn::{
 		error::bail,
-		token::{t, Span, TokenKind},
+		token::{t, Glued, Span, TokenKind},
 	},
 };
 
 use super::{mac::unexpected, ParseResult, Parser};
 
 impl Parser<'_> {
+	pub fn peek_continues_idiom(&mut self) -> bool {
+		let peek = self.peek().kind;
+		if matches!(peek, t!("->") | t!("[") | t!(".") | t!("...")) {
+			return true;
+		}
+		peek == t!("<") && self.peek1().kind == t!("-")
+	}
+
 	/// Parse fields of a selecting query: `foo, bar` in `SELECT foo, bar FROM baz`.
 	///
 	/// # Parser State
@@ -98,15 +106,21 @@ impl Parser<'_> {
 					let graph = stk.run(|stk| self.parse_graph(stk, Dir::Out)).await?;
 					res.push(Part::Graph(graph))
 				}
-				t!("<->") => {
-					self.pop_peek();
-					let graph = stk.run(|stk| self.parse_graph(stk, Dir::Both)).await?;
-					res.push(Part::Graph(graph))
-				}
-				t!("<-") => {
-					self.pop_peek();
-					let graph = stk.run(|stk| self.parse_graph(stk, Dir::In)).await?;
-					res.push(Part::Graph(graph))
+				t!("<") => {
+					let peek = self.peek_whitespace1();
+					if peek.kind == t!("-") {
+						self.pop_peek();
+						self.pop_peek();
+						let graph = stk.run(|stk| self.parse_graph(stk, Dir::In)).await?;
+						res.push(Part::Graph(graph))
+					} else if peek.kind == t!("->") {
+						self.pop_peek();
+						self.pop_peek();
+						let graph = stk.run(|stk| self.parse_graph(stk, Dir::Both)).await?;
+						res.push(Part::Graph(graph))
+					} else {
+						break;
+					}
 				}
 				t!("..") => {
 					bail!("Unexpected token `{}` expected and idiom",t!(".."),
@@ -155,16 +169,22 @@ impl Parser<'_> {
 						return Ok(x);
 					}
 				}
-				t!("<->") => {
-					self.pop_peek();
-					if let Some(x) = self.parse_graph_idiom(ctx, &mut res, Dir::Both).await? {
-						return Ok(x);
-					}
-				}
-				t!("<-") => {
-					self.pop_peek();
-					if let Some(x) = self.parse_graph_idiom(ctx, &mut res, Dir::In).await? {
-						return Ok(x);
+				t!("<") => {
+					let peek = self.peek_whitespace1();
+					if peek.kind == t!("-") {
+						self.pop_peek();
+						self.pop_peek();
+
+						if let Some(x) = self.parse_graph_idiom(ctx, &mut res, Dir::In).await? {
+							return Ok(x);
+						}
+					} else if peek.kind == t!("->") {
+						self.pop_peek();
+						self.pop_peek();
+
+						if let Some(x) = self.parse_graph_idiom(ctx, &mut res, Dir::Both).await? {
+							return Ok(x);
+						}
 					}
 				}
 				t!("..") => {
@@ -198,7 +218,7 @@ impl Parser<'_> {
 					};
 					let value = Value::Edges(Box::new(edge));
 
-					if !Self::continues_idiom(self.peek_kind()) {
+					if !self.peek_continues_idiom() {
 						return Ok(Some(value));
 					}
 					res[0] = Part::Start(value);
@@ -213,11 +233,6 @@ impl Parser<'_> {
 		Ok(None)
 	}
 
-	/// Returns if the token kind could continua an idiom
-	pub fn continues_idiom(kind: TokenKind) -> bool {
-		matches!(kind, t!("->") | t!("<->") | t!("<-") | t!("[") | t!(".") | t!("..."))
-	}
-
 	/// Parse a idiom which can only start with a graph or an identifier.
 	/// Other expressions are not allowed as start of this idiom
 	pub async fn parse_plain_idiom(&mut self, ctx: &mut Stk) -> ParseResult<Idiom> {
@@ -227,14 +242,15 @@ impl Parser<'_> {
 				let graph = ctx.run(|ctx| self.parse_graph(ctx, Dir::Out)).await?;
 				Part::Graph(graph)
 			}
-			t!("<->") => {
-				self.pop_peek();
-				let graph = ctx.run(|ctx| self.parse_graph(ctx, Dir::Both)).await?;
-				Part::Graph(graph)
-			}
-			t!("<-") => {
-				self.pop_peek();
-				let graph = ctx.run(|ctx| self.parse_graph(ctx, Dir::In)).await?;
+			t!("<") => {
+				let t = self.pop_peek();
+				let graph = if self.eat_whitespace(t!("-")) {
+					ctx.run(|ctx| self.parse_graph(ctx, Dir::In)).await?
+				} else if self.eat_whitespace(t!("->")) {
+					ctx.run(|ctx| self.parse_graph(ctx, Dir::Both)).await?
+				} else {
+					unexpected!(self, t, "either `<-` `<->` or `->`")
+				};
 				Part::Graph(graph)
 			}
 			_ => Part::Field(self.next_token_value()?),
@@ -322,11 +338,11 @@ impl Parser<'_> {
 				self.pop_peek();
 				Part::Last
 			}
-			t!("+") | TokenKind::Digits | TokenKind::Number(_) => {
+			t!("+") | TokenKind::Digits | TokenKind::Glued(Glued::Number) => {
 				Part::Index(self.next_token_value()?)
 			}
 			t!("-") => {
-				if let TokenKind::Digits = self.peek_whitespace_token_at(1).kind {
+				if let TokenKind::Digits = self.peek_whitespace1().kind {
 					unexpected!(self, peek,"$, * or a number", => "An index can't be negative.");
 				}
 				unexpected!(self, peek, "$, * or a number");
@@ -382,12 +398,12 @@ impl Parser<'_> {
 							self.pop_peek();
 							Part::Last
 						}
-						TokenKind::Digits | t!("+") | TokenKind::Number(_) => {
+						TokenKind::Digits | t!("+") | TokenKind::Glued(Glued::Number) => {
 							let number = self.next_token_value()?;
 							Part::Index(number)
 						}
 						t!("-") => {
-							let peek_digit = self.peek_whitespace_token_at(1);
+							let peek_digit = self.peek_whitespace1();
 							if let TokenKind::Digits = peek_digit.kind {
 								let span = self.recent_span().covers(peek_digit.span);
 								bail!("Unexpected token `-` expected $, *, or a number", @span => "an index can't be negative");
@@ -429,12 +445,12 @@ impl Parser<'_> {
 							self.pop_peek();
 							Part::All
 						}
-						TokenKind::Digits | t!("+") | TokenKind::Number(_) => {
+						TokenKind::Digits | t!("+") | TokenKind::Glued(Glued::Number) => {
 							let number = self.next_token_value()?;
 							Part::Index(number)
 						}
 						t!("-") => {
-							let peek_digit = self.peek_whitespace_token_at(1);
+							let peek_digit = self.peek_whitespace1();
 							if let TokenKind::Digits = peek_digit.kind {
 								let span = self.recent_span().covers(peek_digit.span);
 								bail!("Unexpected token `-` expected $, *, or a number", @span => "an index can't be negative");
@@ -482,7 +498,7 @@ impl Parser<'_> {
 	/// Expects to be at the start of a what value
 	pub async fn parse_what_value(&mut self, ctx: &mut Stk) -> ParseResult<Value> {
 		let start = self.parse_what_primary(ctx).await?;
-		if start.can_start_idiom() && Self::continues_idiom(self.peek_kind()) {
+		if start.can_start_idiom() && self.peek_continues_idiom() {
 			let start = match start {
 				Value::Table(Table(x)) => vec![Part::Field(Ident(x))],
 				Value::Idiom(Idiom(x)) => x,
@@ -519,7 +535,7 @@ impl Parser<'_> {
 						self.pop_peek();
 						Tables::default()
 					}
-					x if Self::tokenkind_can_start_ident(x) => {
+					x if Self::kind_is_identifier(x) => {
 						// The following function should always succeed here,
 						// returning an error here would be a bug, so unwrap.
 						let table = self.next_token_value().unwrap();
@@ -550,7 +566,7 @@ impl Parser<'_> {
 					..Default::default()
 				})
 			}
-			x if Self::tokenkind_can_start_ident(x) => {
+			x if Self::kind_is_identifier(x) => {
 				// The following function should always succeed here,
 				// returning an error here would be a bug, so unwrap.
 				let table = self.next_token_value().unwrap();

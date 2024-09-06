@@ -37,7 +37,7 @@ impl Parser<'_> {
 				loop {
 					let idiom = self.parse_plain_idiom(ctx).await?;
 					let operator = self.parse_assigner()?;
-					let value = ctx.run(|ctx| self.parse_value(ctx)).await?;
+					let value = ctx.run(|ctx| self.parse_value_class(ctx)).await?;
 					set_list.push((idiom, operator, value));
 					if !self.eat(t!(",")) {
 						break;
@@ -52,19 +52,19 @@ impl Parser<'_> {
 			}
 			t!("PATCH") => {
 				self.pop_peek();
-				Data::PatchExpression(ctx.run(|ctx| self.parse_value(ctx)).await?)
+				Data::PatchExpression(ctx.run(|ctx| self.parse_value_class(ctx)).await?)
 			}
 			t!("MERGE") => {
 				self.pop_peek();
-				Data::MergeExpression(ctx.run(|ctx| self.parse_value(ctx)).await?)
+				Data::MergeExpression(ctx.run(|ctx| self.parse_value_class(ctx)).await?)
 			}
 			t!("REPLACE") => {
 				self.pop_peek();
-				Data::ReplaceExpression(ctx.run(|ctx| self.parse_value(ctx)).await?)
+				Data::ReplaceExpression(ctx.run(|ctx| self.parse_value_class(ctx)).await?)
 			}
 			t!("CONTENT") => {
 				self.pop_peek();
-				Data::ContentExpression(ctx.run(|ctx| self.parse_value(ctx)).await?)
+				Data::ContentExpression(ctx.run(|ctx| self.parse_value_class(ctx)).await?)
 			}
 			_ => return Ok(None),
 		};
@@ -378,7 +378,7 @@ impl Parser<'_> {
 	pub fn parse_base(&mut self, scope_allowed: bool) -> ParseResult<Base> {
 		let next = self.next();
 		match next.kind {
-			t!("NAMESPACE") | t!("ns") => Ok(Base::Ns),
+			t!("NAMESPACE") => Ok(Base::Ns),
 			t!("DATABASE") => Ok(Base::Db),
 			t!("ROOT") => Ok(Base::Root),
 			t!("SCOPE") => {
@@ -444,28 +444,26 @@ impl Parser<'_> {
 		})
 	}
 
-	pub fn convert_distance(&mut self, k: &DistanceKind) -> ParseResult<Distance> {
-		let dist = match k {
-			DistanceKind::Chebyshev => Distance::Chebyshev,
-			DistanceKind::Cosine => Distance::Cosine,
-			DistanceKind::Euclidean => Distance::Euclidean,
-			DistanceKind::Manhattan => Distance::Manhattan,
-			DistanceKind::Hamming => Distance::Hamming,
-			DistanceKind::Jaccard => Distance::Jaccard,
-
-			DistanceKind::Minkowski => {
-				let distance = self.next_token_value()?;
-				Distance::Minkowski(distance)
-			}
-			DistanceKind::Pearson => Distance::Pearson,
-		};
-		Ok(dist)
-	}
-
 	pub fn parse_distance(&mut self) -> ParseResult<Distance> {
 		let next = self.next();
 		match next.kind {
-			TokenKind::Distance(k) => self.convert_distance(&k),
+			TokenKind::Distance(k) => {
+				let dist = match k {
+					DistanceKind::Chebyshev => Distance::Chebyshev,
+					DistanceKind::Cosine => Distance::Cosine,
+					DistanceKind::Euclidean => Distance::Euclidean,
+					DistanceKind::Manhattan => Distance::Manhattan,
+					DistanceKind::Hamming => Distance::Hamming,
+					DistanceKind::Jaccard => Distance::Jaccard,
+
+					DistanceKind::Minkowski => {
+						let distance = self.next_token_value()?;
+						Distance::Minkowski(distance)
+					}
+					DistanceKind::Pearson => Distance::Pearson,
+				};
+				Ok(dist)
+			}
 			_ => unexpected!(self, next, "a distance measure"),
 		}
 	}

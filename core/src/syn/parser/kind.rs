@@ -3,10 +3,11 @@ use std::collections::BTreeMap;
 use reblessive::Stk;
 
 use crate::{
-	sql::{kind::Literal, Kind, Strand},
+	sql::{kind::Literal, Duration, Kind, Strand},
 	syn::{
+		lexer::compound,
 		parser::mac::expected,
-		token::{t, Keyword, Span, TokenKind},
+		token::{t, Glued, Keyword, Span, TokenKind},
 	},
 };
 
@@ -166,17 +167,22 @@ impl Parser<'_> {
 	async fn parse_literal_kind(&mut self, ctx: &mut Stk) -> ParseResult<Literal> {
 		let peek = self.peek();
 		match peek.kind {
-			t!("'") | t!("\"") | TokenKind::Strand => {
+			t!("'") | t!("\"") | TokenKind::Glued(Glued::Strand) => {
 				let s = self.next_token_value::<Strand>()?;
 				Ok(Literal::String(s))
 			}
-			t!("+") | t!("-") | TokenKind::Number(_) | TokenKind::Digits | TokenKind::Duration => {
-				let token = self.glue_numeric()?;
-				match token.kind {
-					TokenKind::Number(_) => self.next_token_value().map(Literal::Number),
-					TokenKind::Duration => self.next_token_value().map(Literal::Duration),
-					_ => unexpected!(self, token, "a value"),
-				}
+			t!("+") | t!("-") | TokenKind::Glued(Glued::Number) => {
+				self.next_token_value().map(Literal::Number)
+			}
+			TokenKind::Glued(Glued::Duration) => self.next_token_value().map(Literal::Duration),
+			TokenKind::Digits => {
+				self.pop_peek();
+				let compound = self.lexer.lex_compound(peek, compound::numeric)?;
+				let v = match compound.value {
+					compound::Numeric::Number(x) => Literal::Number(x),
+					compound::Numeric::Duration(x) => Literal::Duration(Duration(x)),
+				};
+				Ok(v)
 			}
 			t!("{") => {
 				self.pop_peek();
@@ -208,11 +214,9 @@ impl Parser<'_> {
 		matches!(
 			t,
 			t!("'")
-				| t!("\"") | TokenKind::Strand
-				| t!("+") | t!("-")
-				| TokenKind::Number(_)
+				| t!("\"") | t!("+")
+				| t!("-") | TokenKind::Glued(Glued::Duration | Glued::Strand | Glued::Number)
 				| TokenKind::Digits
-				| TokenKind::Duration
 				| t!("{") | t!("[")
 		)
 	}

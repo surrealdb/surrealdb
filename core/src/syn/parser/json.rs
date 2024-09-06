@@ -3,14 +3,15 @@ use std::collections::BTreeMap;
 use reblessive::Stk;
 
 use crate::{
-	sql::{Array, Ident, Object, Strand, Value},
+	sql::{Array, Duration, Ident, Object, Strand, Value},
 	syn::{
-		parser::mac::expected,
-		token::{t, QouteKind, Span, TokenKind},
+		lexer::compound::{self, Numeric},
+		parser::mac::{expected, pop_glued},
+		token::{t, Glued, QouteKind, Span, TokenKind},
 	},
 };
 
-use super::{mac::unexpected, ParseResult, Parser};
+use super::{ParseResult, Parser};
 
 impl Parser<'_> {
 	pub async fn parse_json(&mut self, ctx: &mut Stk) -> ParseResult<Value> {
@@ -45,13 +46,21 @@ impl Parser<'_> {
 				}
 				Ok(Value::Strand(strand))
 			}
-			TokenKind::Digits | TokenKind::Number(_) => {
-				let peek = self.glue()?;
-				match peek.kind {
-					TokenKind::Duration => Ok(Value::Duration(self.next_token_value()?)),
-					TokenKind::Number(_) => Ok(Value::Number(self.next_token_value()?)),
-					_ => unexpected!(self, peek, "a number"),
+			TokenKind::Digits => {
+				self.pop_peek();
+				let compound = self.lexer.lex_compound(token, compound::numeric)?;
+				match compound.value {
+					Numeric::Duration(x) => Ok(Value::Duration(Duration(x))),
+					Numeric::Number(x) => Ok(Value::Number(x)),
 				}
+			}
+			TokenKind::Glued(Glued::Strand) => {
+				let glued = pop_glued!(self, Strand);
+				Ok(Value::Strand(glued))
+			}
+			TokenKind::Glued(Glued::Duration) => {
+				let glued = pop_glued!(self, Duration);
+				Ok(Value::Duration(glued))
 			}
 			_ => {
 				let ident = self.next_token_value::<Ident>()?.0;
