@@ -262,7 +262,7 @@ impl Transactor {
 	{
 		let key = key.into();
 		if self.save_points.is_some() {
-			self.save_point_update_key(&key, version).await?;
+			self.save_point_set(&key, version).await?;
 		}
 		expand_inner!(&mut self.inner, v => { v.set(key, val, version).await })
 	}
@@ -276,7 +276,7 @@ impl Transactor {
 	{
 		let key = key.into();
 		if self.save_points.is_some() {
-			self.save_point_update_key(&key, version).await?;
+			self.save_point_put(&key, version).await?;
 		}
 		expand_inner!(&mut self.inner, v => { v.put(key, val, version).await })
 	}
@@ -290,7 +290,7 @@ impl Transactor {
 	{
 		let key = key.into();
 		if self.save_points.is_some() {
-			self.save_point_update_key(&key, None).await?;
+			self.save_point_put(&key, None).await?;
 		}
 		expand_inner!(&mut self.inner, v => { v.putc(key, val, chk).await })
 	}
@@ -303,7 +303,7 @@ impl Transactor {
 	{
 		let key = key.into();
 		if self.save_points.is_some() {
-			self.save_point_update_key(&key, None).await?;
+			self.save_point_del(&key, None).await?;
 		}
 		expand_inner!(&mut self.inner, v => { v.del(key).await })
 	}
@@ -317,7 +317,7 @@ impl Transactor {
 	{
 		let key = key.into();
 		if self.save_points.is_some() {
-			self.save_point_update_key(&key, None).await?;
+			self.save_point_del(&key, None).await?;
 		}
 		expand_inner!(&mut self.inner, v => { v.delc(key, chk).await })
 	}
@@ -334,7 +334,7 @@ impl Transactor {
 		let end: Key = rng.end.into();
 		let range = beg..end;
 		if self.save_points.is_some() {
-			self.save_point_update_keyr(range.clone()).await?;
+			self.save_point_delr(range.clone()).await?;
 		}
 		expand_inner!(&mut self.inner, v => { v.delr(range).await })
 	}
@@ -349,7 +349,7 @@ impl Transactor {
 	{
 		let key: Key = key.into();
 		if self.save_points.is_some() {
-			self.save_point_update_keyp(&key).await?;
+			self.save_point_delp(&key).await?;
 		}
 		expand_inner!(&mut self.inner, v => { v.delp(key).await })
 	}

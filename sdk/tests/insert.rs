@@ -153,17 +153,29 @@ async fn insert_statement_with_unique_index_and_duplicate() -> Result<(), Error>
         DEFINE INDEX b ON pokemon FIELDS b UNIQUE;
         INSERT INTO pokemon (id, b) VALUES (1, 'b');
         INSERT INTO pokemon (id, a, b) VALUES (2, 'a', 'b');
-        INSERT INTO pokemon (id, a, b) VALUES (2, 'a', 'b');
- 		INSERT INTO pokemon (id, a, b) VALUES (2, 'a', 'b') PARALLEL;
-        INSERT INTO pokemon (id, a, b) VALUES (2, 'a', 'b') PARALLEL;
+		INSERT INTO pokemon (id, a, b) VALUES (2, 'a', 'b');
 	";
 	let mut t = Test::new(sql).await?;
-	t.skip_ok(3)?;
-	for _ in 0..2 {
-		t.expect_error("The key being inserted already exists")?;
-	}
-	// PARALLEL actually returns OK
+	t.expect_size(5)?;
 	t.skip_ok(2)?;
+	for _ in 0..3 {
+		t.expect_val(
+			"[
+				{
+					b: 'b',
+					id: pokemon:1
+				}
+			]",
+		)?;
+		t.expect_val(
+			"[
+				{
+					b: 'b',
+					id: pokemon:1
+				}
+			]",
+		)?;
+	}
 	Ok(())
 }
 
