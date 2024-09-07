@@ -89,3 +89,7 @@ pub mod hash {
 		}
 	}
 }
+
+pub fn is_geography((arg,): (Geometry,)) -> Result<Value, Error> {
+	Ok(arg.is_geography().into())
+}

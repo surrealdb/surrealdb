@@ -231,6 +231,7 @@
 "hash"
 "geo::hash::decode("
 "geo::hash::encode("
+"geo::is_geography("
 "http"
 "http::"
 "http::head("

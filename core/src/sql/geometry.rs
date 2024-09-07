@@ -5,7 +5,7 @@ use crate::sql::fmt::Fmt;
 use crate::sql::value::Value;
 use geo::algorithm::contains::Contains;
 use geo::algorithm::intersects::Intersects;
-use geo::{Coord, LineString, Point, Polygon};
+use geo::{Coord, LineString, LinesIter, Point, Polygon};
 use geo_types::{MultiLineString, MultiPoint, MultiPolygon};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -58,6 +58,22 @@ impl Geometry {
 	/// Check if this is a MultiPolygon
 	pub fn is_multipolygon(&self) -> bool {
 		matches!(self, Self::MultiPolygon(_))
+	}
+	/// Check if this Value is a Geometry, with the following geography constraints:
+	/// * -90 <= lat <= 90
+	/// * -180 <= long <= 180
+	pub fn is_geography(&self) -> bool {
+		match self {
+			Geometry::Point((long, lat)) => {
+				-90.0 <= lat && lat <= 90.0 && -180.0 <= long && long <= 180.0
+			}
+			Geometry::Line(points) => points.lines_iter().all(|p| p.is_geography()),
+			Geometry::Polygon(polygon) => polygon.lines_iter().all(|l| l.is_geography()),
+			Geometry::MultiPoint(points) => points.iter().all(|p| p.is_geography()),
+			Geometry::MultiLine(lines) => lines.iter().all(|l| l.is_geography()),
+			Geometry::MultiPolygon(polygons) => polygons.iter().all(|p| p.is_geography()),
+			Geometry::Collection(geometries) => geometries.iter().all(|g| g.is_geography()),
+		}
 	}
 	/// Check if this is not a Collection
 	pub fn is_geometry(&self) -> bool {
