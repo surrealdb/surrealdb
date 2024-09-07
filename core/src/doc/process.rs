@@ -19,7 +19,8 @@ impl Document {
 		mut pro: Processed,
 	) -> Result<Value, Error> {
 		// Loop over maximum two times
-		for _ in 0..2 {
+		for i in 0..2 {
+			println!("PROCESS {stm} {i}");
 			// Setup a new workable
 			let ins = match pro.val {
 				Operable::Value(v) => (v, Workable::Normal),

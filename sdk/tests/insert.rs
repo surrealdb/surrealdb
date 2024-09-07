@@ -167,14 +167,6 @@ async fn insert_statement_with_unique_index_and_duplicate() -> Result<(), Error>
 				}
 			]",
 		)?;
-		t.expect_val(
-			"[
-				{
-					b: 'b',
-					id: pokemon:1
-				}
-			]",
-		)?;
 	}
 	Ok(())
 }

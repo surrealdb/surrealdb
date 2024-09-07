@@ -261,10 +261,16 @@ impl Transactor {
 		V: Into<Val> + Debug,
 	{
 		let key = key.into();
-		if self.save_points.is_some() {
-			self.save_point_set(&key, version).await?;
+		let prep = if self.save_points.is_some() {
+			self.save_point_set(&key, version).await?
+		} else {
+			None
+		};
+		expand_inner!(&mut self.inner, v => { v.set(key, val, version).await })?;
+		if let Some(prep) = prep {
+			self.save_point_save(prep);
 		}
-		expand_inner!(&mut self.inner, v => { v.set(key, val, version).await })
+		Ok(())
 	}
 
 	/// Insert a key if it doesn't exist in the datastore.
@@ -275,10 +281,16 @@ impl Transactor {
 		V: Into<Val> + Debug,
 	{
 		let key = key.into();
-		if self.save_points.is_some() {
-			self.save_point_put(&key, version).await?;
+		let prep = if self.save_points.is_some() {
+			self.save_point_put(&key, version).await?
+		} else {
+			None
+		};
+		expand_inner!(&mut self.inner, v => { v.put(key, val, version).await })?;
+		if let Some(prep) = prep {
+			self.save_point_save(prep);
 		}
-		expand_inner!(&mut self.inner, v => { v.put(key, val, version).await })
+		Ok(())
 	}
 
 	/// Update a key in the datastore if the current value matches a condition.
@@ -289,10 +301,16 @@ impl Transactor {
 		V: Into<Val> + Debug,
 	{
 		let key = key.into();
-		if self.save_points.is_some() {
-			self.save_point_put(&key, None).await?;
+		let prep = if self.save_points.is_some() {
+			self.save_point_put(&key, None).await?
+		} else {
+			None
+		};
+		expand_inner!(&mut self.inner, v => { v.putc(key, val, chk).await })?;
+		if let Some(prep) = prep {
+			self.save_point_save(prep);
 		}
-		expand_inner!(&mut self.inner, v => { v.putc(key, val, chk).await })
+		Ok(())
 	}
 
 	/// Delete a key from the datastore.
@@ -302,10 +320,16 @@ impl Transactor {
 		K: Into<Key> + Debug,
 	{
 		let key = key.into();
-		if self.save_points.is_some() {
-			self.save_point_del(&key, None).await?;
+		let prep = if self.save_points.is_some() {
+			self.save_point_del(&key, None).await?
+		} else {
+			None
+		};
+		expand_inner!(&mut self.inner, v => { v.del(key).await })?;
+		if let Some(prep) = prep {
+			self.save_point_save(prep);
 		}
-		expand_inner!(&mut self.inner, v => { v.del(key).await })
+		Ok(())
 	}
 
 	/// Delete a key from the datastore if the current value matches a condition.
@@ -316,10 +340,16 @@ impl Transactor {
 		V: Into<Val> + Debug,
 	{
 		let key = key.into();
-		if self.save_points.is_some() {
-			self.save_point_del(&key, None).await?;
+		let prep = if self.save_points.is_some() {
+			self.save_point_del(&key, None).await?
+		} else {
+			None
+		};
+		expand_inner!(&mut self.inner, v => { v.delc(key, chk).await })?;
+		if let Some(prep) = prep {
+			self.save_point_save(prep);
 		}
-		expand_inner!(&mut self.inner, v => { v.delc(key, chk).await })
+		Ok(())
 	}
 
 	/// Delete a range of keys from the datastore.
@@ -333,10 +363,16 @@ impl Transactor {
 		let beg: Key = rng.start.into();
 		let end: Key = rng.end.into();
 		let range = beg..end;
-		if self.save_points.is_some() {
-			self.save_point_delr(range.clone()).await?;
+		let prep = if self.save_points.is_some() {
+			self.save_point_delr(range.clone()).await?
+		} else {
+			None
+		};
+		expand_inner!(&mut self.inner, v => { v.delr(range).await })?;
+		if let Some(prep) = prep {
+			self.save_point_save(prep);
 		}
-		expand_inner!(&mut self.inner, v => { v.delr(range).await })
+		Ok(())
 	}
 
 	/// Delete a prefixed range of keys from the datastore.
@@ -348,10 +384,16 @@ impl Transactor {
 		K: Into<Key> + Debug,
 	{
 		let key: Key = key.into();
-		if self.save_points.is_some() {
-			self.save_point_delp(&key).await?;
+		let prep = if self.save_points.is_some() {
+			self.save_point_delp(&key).await?
+		} else {
+			None
+		};
+		expand_inner!(&mut self.inner, v => { v.delp(key).await })?;
+		if let Some(prep) = prep {
+			self.save_point_save(prep);
 		}
-		expand_inner!(&mut self.inner, v => { v.delp(key).await })
+		Ok(())
 	}
 
 	/// Retrieve a specific range of keys from the datastore.
