@@ -152,20 +152,33 @@ async fn insert_statement_with_unique_index_and_duplicate() -> Result<(), Error>
         DEFINE INDEX a ON pokemon FIELDS a UNIQUE;
         DEFINE INDEX b ON pokemon FIELDS b UNIQUE;
         INSERT INTO pokemon (id, b) VALUES (1, 'b');
-        INSERT INTO pokemon (id, a, b) VALUES (2, 'a', 'b');
+      	INSERT INTO pokemon (id, a, b) VALUES (2, 'a', 'b');
 		INSERT INTO pokemon (id, a, b) VALUES (2, 'a', 'b');
         INSERT INTO pokemon (id, a, b) VALUES (2, 'a', 'b') PARALLEL;
         INSERT INTO pokemon (id, a, b) VALUES (2, 'a', 'b') PARALLEL;
+	  	INSERT INTO pokemon (id, a, b) VALUES (2, 'a', 'b') ON DUPLICATE KEY UPDATE something = 'else';
+		SELECT * FROM pokemon;
 	";
 	let mut t = Test::new(sql).await?;
-	t.expect_size(7)?;
+	t.expect_size(9)?;
 	t.skip_ok(2)?;
 	for _ in 0..5 {
 		t.expect_val(
 			"[
 				{
 					b: 'b',
-					id: pokemon:1
+					id: pokemon:1,
+				}
+			]",
+		)?;
+	}
+	for _ in 0..2 {
+		t.expect_val(
+			"[
+				{
+					b: 'b',
+					id: pokemon:1,
+					something: 'else'
 				}
 			]",
 		)?;

@@ -35,17 +35,25 @@ impl Transactor {
 		let s = self.save_points.pop(id)?;
 		println!("ROLLBACK id: {id} - keys: {} keys", s.len());
 		for (key, saved_value) in s {
-			if let Some(val) = saved_value.saved_val {
-				match saved_value.last_operation {
-					SaveOperation::Set | SaveOperation::Put => {
-						self.set(key, val, saved_value.saved_version).await?;
-					}
-					SaveOperation::Del => {
-						self.put(key, val, saved_value.saved_version).await?;
+			match saved_value.last_operation {
+				SaveOperation::Set | SaveOperation::Put => {
+					if let Some(initial_value) = saved_value.saved_val {
+						// If the last operation was a SET or PUT
+						// then we just have set back the key to its initial value
+						self.set(key, initial_value, saved_value.saved_version).await?;
+					} else {
+						// If the last operation on this key was not a DEL operation,
+						// then we have to delete the key
+						self.del(key).await?;
 					}
 				}
-			} else if !matches!(saved_value.last_operation, SaveOperation::Del) {
-				self.del(key).await?;
+				SaveOperation::Del => {
+					if let Some(initial_value) = saved_value.saved_val {
+						// If the last operation was a DEL,
+						// then we have to put back the initial value
+						self.put(key, initial_value, saved_value.saved_version).await?;
+					}
+				}
 			}
 		}
 		Ok(())
