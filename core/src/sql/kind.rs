@@ -57,12 +57,12 @@ impl Kind {
 		matches!(self, Kind::Record(_))
 	}
 
-	// Returns true if this type is a record
+	// Returns true if this type is an option
 	pub(crate) fn is_option(&self) -> bool {
 		matches!(self, Kind::Option(_))
 	}
 
-	// Returns true if this type is a record
+	// Returns true if this type is a literal
 	pub(crate) fn is_literal_nested(&self) -> bool {
 		if matches!(self, Kind::Literal(_)) {
 			return true;
@@ -77,6 +77,73 @@ impl Kind {
 		}
 
 		false
+	}
+
+	// Returns true if this type is a literal
+	pub(crate) fn to_discriminated(&self) -> Option<Kind> {
+		match self {
+			Kind::Either(nested) => {
+				if nested.iter().all(|k| matches!(k, Kind::Literal(Literal::Object(_)))) {
+					if let Some(Kind::Literal(Literal::Object(first))) = nested.first() {
+						let mut key: Option<String> = None;
+
+						'key: for k in first.keys() {
+							let mut kinds: Vec<Kind> = Vec::new();
+							for item in nested[1..].iter() {
+								if let Kind::Literal(Literal::Object(obj)) = item {
+									if let Some(kind) = obj.get(k) {
+										match kind {
+											Kind::Literal(l)
+												if kinds.contains(&l.to_kind())
+													|| kinds
+														.contains(&Kind::Literal(l.to_owned())) =>
+											{
+												continue 'key;
+											}
+											kind if kinds.contains(kind) => {
+												continue 'key;
+											}
+											kind => {
+												kinds.push(kind.to_owned());
+											}
+										}
+									} else {
+										continue 'key;
+									}
+								} else {
+									unreachable!(
+										"Previously checked all items are literal objects"
+									);
+								}
+							}
+
+							key = Some(k.clone());
+						}
+
+						if let Some(key) = key {
+							return Some(Kind::Literal(Literal::DiscriminatedObject(
+								key.clone(),
+								nested
+									.iter()
+									.map(|k| {
+										if let Kind::Literal(Literal::Object(o)) = k {
+											o.to_owned()
+										} else {
+											unreachable!(
+												"Previously checked all items are literal objects"
+											);
+										}
+									})
+									.collect(),
+							)));
+						}
+					}
+				}
+
+				None
+			}
+			_ => None,
+		}
 	}
 
 	// return the kind of the contained value.
@@ -191,6 +258,7 @@ pub enum Literal {
 	Duration(Duration),
 	Array(Vec<Kind>),
 	Object(BTreeMap<String, Kind>),
+	DiscriminatedObject(String, Vec<BTreeMap<String, Kind>>),
 }
 
 impl Literal {
@@ -209,6 +277,7 @@ impl Literal {
 				Kind::Array(Box::new(Kind::Any), None)
 			}
 			Self::Object(_) => Kind::Object,
+			Self::DiscriminatedObject(_, _) => Kind::Object,
 		}
 	}
 
@@ -266,6 +335,34 @@ impl Literal {
 				}
 				_ => false,
 			},
+			Self::DiscriminatedObject(key, discriminants) => match value {
+				Value::Object(x) => {
+					let value = x.get(key).unwrap_or(&Value::None);
+					if let Some(o) = discriminants
+						.iter()
+						.find(|o| value.to_owned().coerce_to(o.get(key).unwrap()).is_ok())
+					{
+						if o.len() < x.len() {
+							return false;
+						}
+
+						for (k, v) in o.iter() {
+							if let Some(value) = x.get(k) {
+								if value.to_owned().coerce_to(v).is_err() {
+									return false;
+								}
+							} else if !v.is_option() {
+								return false;
+							}
+						}
+
+						true
+					} else {
+						false
+					}
+				}
+				_ => false,
+			},
 		}
 	}
 }
@@ -310,6 +407,40 @@ impl Display for Literal {
 				} else {
 					f.write_str(" }")
 				}
+			}
+			Literal::DiscriminatedObject(_, discriminants) => {
+				let mut f = Pretty::from(f);
+
+				for (i, o) in discriminants.into_iter().enumerate() {
+					if i > 0 {
+						f.write_str(" | ")?;
+					}
+
+					if is_pretty() {
+						f.write_char('{')?;
+					} else {
+						f.write_str("{ ")?;
+					}
+					if !o.is_empty() {
+						let indent = pretty_indent();
+						write!(
+							f,
+							"{}",
+							Fmt::pretty_comma_separated(o.iter().map(|args| Fmt::new(
+								args,
+								|(k, v), f| write!(f, "{}: {}", escape_key(k), v)
+							)),)
+						)?;
+						drop(indent);
+					}
+					if is_pretty() {
+						f.write_char('}')?;
+					} else {
+						f.write_str(" }")?;
+					}
+				}
+
+				Ok(())
 			}
 		}
 	}

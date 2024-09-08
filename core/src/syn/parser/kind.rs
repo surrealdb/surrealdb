@@ -34,7 +34,9 @@ impl Parser<'_> {
 					while self.eat(t!("|")) {
 						kind.push(ctx.run(|ctx| self.parse_concrete_kind(ctx)).await?);
 					}
-					Ok(Kind::Either(kind))
+					let kind = Kind::Either(kind);
+					let kind = kind.to_discriminated().unwrap_or(kind);
+					Ok(kind)
 				} else {
 					Ok(first)
 				}
@@ -59,7 +61,9 @@ impl Parser<'_> {
 					while self.eat(t!("|")) {
 						kind.push(ctx.run(|ctx| self.parse_concrete_kind(ctx)).await?);
 					}
-					first = Kind::Either(kind);
+
+					let kind = Kind::Either(kind);
+					first = kind.to_discriminated().unwrap_or(kind);
 				}
 				self.expect_closing_delimiter(t!(">"), delim)?;
 				Ok(Kind::Option(Box::new(first)))
