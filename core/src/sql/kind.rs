@@ -57,6 +57,11 @@ impl Kind {
 		matches!(self, Kind::Record(_))
 	}
 
+	// Returns true if this type is a record
+	pub(crate) fn is_option(&self) -> bool {
+		matches!(self, Kind::Option(_))
+	}
+
 	// return the kind of the contained value.
 	//
 	// For example: for `array<number>` or `set<number>` this returns `number`.
@@ -226,7 +231,7 @@ impl Literal {
 			},
 			Self::Object(o) => match value {
 				Value::Object(x) => {
-					if o.len() != x.len() {
+					if o.len() < x.len() {
 						return false;
 					}
 
@@ -235,7 +240,7 @@ impl Literal {
 							if value.to_owned().coerce_to(v).is_err() {
 								return false;
 							}
-						} else {
+						} else if !v.is_option() {
 							return false;
 						}
 					}
