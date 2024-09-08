@@ -62,6 +62,23 @@ impl Kind {
 		matches!(self, Kind::Option(_))
 	}
 
+	// Returns true if this type is a record
+	pub(crate) fn is_literal_nested(&self) -> bool {
+		if matches!(self, Kind::Literal(_)) {
+			return true;
+		}
+
+		if let Kind::Option(x) = self {
+			return x.is_literal_nested();
+		}
+
+		if let Kind::Either(x) = self {
+			return x.iter().any(|x| x.is_literal_nested());
+		}
+
+		false
+	}
+
 	// return the kind of the contained value.
 	//
 	// For example: for `array<number>` or `set<number>` this returns `number`.
