@@ -412,7 +412,7 @@ impl Display for Literal {
 			Literal::DiscriminatedObject(_, discriminants) => {
 				let mut f = Pretty::from(f);
 
-				for (i, o) in discriminants.into_iter().enumerate() {
+				for (i, o) in discriminants.iter().enumerate() {
 					if i > 0 {
 						f.write_str(" | ")?;
 					}
