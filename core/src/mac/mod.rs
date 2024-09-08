@@ -1,3 +1,10 @@
+/// Throws an unreachable error with location details
+macro_rules! fail {
+	($msg: literal) => {
+		$crate::err::Error::Unreachable(concat!(file!(), ":", line!(), ": ", $msg))
+	};
+}
+
 /// Converts some text into a new line byte string
 macro_rules! bytes {
 	($expression:expr) => {
@@ -116,13 +123,6 @@ macro_rules! lazy_env_parse_or_else {
 				.and_then(|s| Ok(s.parse::<$t>().unwrap_or_else($default)))
 				.unwrap_or_else($default)
 		})
-	};
-}
-
-#[macro_export]
-macro_rules! err_unreachable {
-	($msg: literal) => {
-		$crate::err::Error::Unreachable(concat!(file!(), ":", line!(), ": ", $msg))
 	};
 }
 
@@ -252,10 +252,10 @@ mod test {
 	}
 
 	#[test]
-	fn err_unreachable() {
-		let Error::Unreachable(msg) = err_unreachable!("unreachable") else {
+	fn fail() {
+		let Error::Unreachable(msg) = fail!("Reached unreachable code") else {
 			panic!()
 		};
-		assert_eq!("core/src/mac/mod.rs:256: unreachable", msg);
+		assert_eq!("core/src/mac/mod.rs:256: Reached unreachable code", msg);
 	}
 }
