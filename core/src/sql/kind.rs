@@ -118,6 +118,7 @@ impl Kind {
 							}
 
 							key = Some(k.clone());
+							break;
 						}
 
 						if let Some(key) = key {
