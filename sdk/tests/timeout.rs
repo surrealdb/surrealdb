@@ -19,7 +19,7 @@ async fn statement_timeouts() -> Result<(), Error> {
 	let error = "The query was not executed because it exceeded the timeout";
 	Test::new(sql)
 		.await?
-		.expect_val("{ id: person:test, test: true }")?
+		.expect_val("{ id: person:ok, test: true }")?
 		.expect_error(error)?
 		.expect_error(error)?
 		.expect_error(error)?
