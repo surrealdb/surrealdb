@@ -187,6 +187,31 @@ impl<'a> Graph<'a> {
 			fk: fk.id.to_owned(),
 		}
 	}
+
+	pub fn new_from_id(
+		ns: &'a str,
+		db: &'a str,
+		tb: &'a str,
+		id: Id,
+		eg: Dir,
+		ft: &'a str,
+		fk: Id,
+	) -> Self {
+		Self {
+			__: b'/',
+			_a: b'*',
+			ns,
+			_b: b'*',
+			db,
+			_c: b'*',
+			tb,
+			_d: b'~',
+			id,
+			eg,
+			ft,
+			fk,
+		}
+	}
 }
 
 #[cfg(test)]
