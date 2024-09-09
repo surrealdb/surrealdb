@@ -56,7 +56,7 @@ impl SavePoints {
 			self.current = self.stack.pop_back();
 			Ok(c)
 		} else {
-			Err(Error::Unreachable("No current SavePoint"))
+			Err(fail!("No current SavePoint"))
 		}
 	}
 
