@@ -62,6 +62,14 @@ impl Kind {
 		matches!(self, Kind::Option(_))
 	}
 
+	// Returns the kind in case of a literal, otherwise returns the kind itself
+	fn to_kind(&self) -> Self {
+		match self {
+			Kind::Literal(l) => l.to_kind(),
+			k => k.to_owned(),
+		}
+	}
+
 	// Returns true if this type is a literal
 	pub(crate) fn is_literal_nested(&self) -> bool {
 		if matches!(self, Kind::Literal(_)) {
@@ -87,8 +95,8 @@ impl Kind {
 					if let Some(Kind::Literal(Literal::Object(first))) = nested.first() {
 						let mut key: Option<String> = None;
 
-						'key: for k in first.keys() {
-							let mut kinds: Vec<Kind> = Vec::new();
+						'key: for (k, v) in first.iter() {
+							let mut kinds: Vec<Kind> = vec![v.to_owned()];
 							for item in nested[1..].iter() {
 								if let Kind::Literal(Literal::Object(obj)) = item {
 									if let Some(kind) = obj.get(k) {
@@ -100,7 +108,11 @@ impl Kind {
 											{
 												continue 'key;
 											}
-											kind if kinds.contains(kind) => {
+											kind if kinds
+												.iter()
+												.find(|k| *kind == k.to_kind())
+												.is_some() =>
+											{
 												continue 'key;
 											}
 											kind => {

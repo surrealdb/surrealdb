@@ -487,4 +487,55 @@ mod tests {
 		assert_eq!("set<float, 10>", format!("{}", out));
 		assert_eq!(out, Kind::Set(Box::new(Kind::Float), Some(10)));
 	}
+
+	#[test]
+	fn kind_discriminated_object() {
+		let sql = "{ status: 'ok', data: object } | { status: 'error', message: string }";
+		let res = kind(sql);
+		let out = res.unwrap();
+		assert_eq!(
+			"{ data: object, status: 'ok' } | { message: string, status: 'error' }",
+			format!("{}", out)
+		);
+		assert_eq!(
+			out,
+			Kind::Literal(Literal::DiscriminatedObject(
+				"status".to_string(),
+				vec![
+					map! {
+						"status".to_string() => Kind::Literal(Literal::String("ok".into())),
+						"data".to_string() => Kind::Object,
+					},
+					map! {
+						"status".to_string() => Kind::Literal(Literal::String("error".into())),
+						"message".to_string() => Kind::String,
+					},
+				]
+			))
+		);
+	}
+
+	#[test]
+	fn kind_union_literal_object() {
+		let sql = "{ status: 'ok', data: object } | { status: string, message: string }";
+		let res = kind(sql);
+		let out = res.unwrap();
+		assert_eq!(
+			"{ data: object, status: 'ok' } | { message: string, status: string }",
+			format!("{}", out)
+		);
+		assert_eq!(
+			out,
+			Kind::Either(vec![
+				Kind::Literal(Literal::Object(map! {
+					"status".to_string() => Kind::Literal(Literal::String("ok".into())),
+					"data".to_string() => Kind::Object,
+				})),
+				Kind::Literal(Literal::Object(map! {
+					"status".to_string() => Kind::String,
+					"message".to_string() => Kind::String,
+				})),
+			])
+		);
+	}
 }
