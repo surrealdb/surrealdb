@@ -74,8 +74,14 @@ jobs:
       - name: Check workspace on stable
         run: cargo +stable make ci-check
 
+      - name: Check workspace release on stable
+        run: cargo +stable make ci-check-release
+
       - name: Check workspace on MSRV
         run: cargo +1.80.1 make ci-check
+
+      - name: Check workspace release on MSRV
+        run: cargo +1.80.1 make ci-check-release
 
   check-fuzzing:
     name: Check fuzzing
