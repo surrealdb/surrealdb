@@ -77,8 +77,8 @@ pub async fn generate_schema(
 ) -> Result<Schema, GqlError> {
 	let kvs = datastore.as_ref();
 	let tx = kvs.transaction(TransactionType::Read, LockType::Optimistic).await?;
-	let ns = session.ns.as_ref().expect("missing ns should have been caught");
-	let db = session.db.as_ref().expect("missing db should have been caught");
+	let ns = session.ns.as_ref().ok_or(GqlError::UnpecifiedNamespace)?;
+	let db = session.db.as_ref().ok_or(GqlError::UnpecifiedDatabase)?;
 	let tbs = tx.all_tb(ns, db).await?;
 	let mut query = Object::new("Query");
 	let mut types: Vec<Type> = Vec::new();
