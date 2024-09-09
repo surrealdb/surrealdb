@@ -71,7 +71,7 @@ jobs:
       - name: Check workspace
         run: cargo make ci-check
 
-      - name: Check workspace
+      - name: Check workspace release
         run: cargo make ci-check-release
 
   check-msrv:
