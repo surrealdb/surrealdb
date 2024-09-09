@@ -2,8 +2,7 @@
 
 use crate::err::Error;
 use crate::key::debug::Sprintable;
-use crate::kvs::api::SavePoint;
-use crate::kvs::savepoint::SavePoints;
+use crate::kvs::savepoint::{SaveOperation, SavePointImpl, SavePoints};
 use crate::kvs::Check;
 use crate::kvs::Key;
 use crate::kvs::Val;
@@ -198,10 +197,22 @@ impl super::api::Transaction for Transaction {
 		if !self.write {
 			return Err(Error::TxReadonly);
 		}
+		// Extract the key
+		let key = key.into();
+		// Prepare the savepoint if any
+		let prep = if self.save_points.is_some() {
+			self.save_point_prepare(&key, version, SaveOperation::Set).await?
+		} else {
+			None
+		};
 		// Set the key
 		match version {
-			Some(ts) => self.inner.set_at_ts(&key.into(), &val.into(), ts)?,
-			None => self.inner.set(&key.into(), &val.into())?,
+			Some(ts) => self.inner.set_at_ts(&key, &val.into(), ts)?,
+			None => self.inner.set(&key, &val.into())?,
+		}
+		// Confirm the save point
+		if let Some(prep) = prep {
+			self.save_points.save(prep);
 		}
 		// Return result
 		Ok(())
@@ -225,6 +236,12 @@ impl super::api::Transaction for Transaction {
 		// Get the arguments
 		let key = key.into();
 		let val = val.into();
+		// Hydrate the savepoint if any
+		let prep = if self.save_points.is_some() {
+			self.save_point_prepare(&key, version, SaveOperation::Put).await?
+		} else {
+			None
+		};
 		// Set the key if empty
 		if let Some(ts) = version {
 			self.inner.set_at_ts(&key, &val, ts)?;
@@ -233,6 +250,10 @@ impl super::api::Transaction for Transaction {
 				None => self.inner.set(&key, &val)?,
 				_ => return Err(Error::TxKeyAlreadyExists),
 			};
+		}
+		// Confirm the save point
+		if let Some(prep) = prep {
+			self.save_points.save(prep);
 		}
 		// Return result
 		Ok(())
@@ -257,12 +278,22 @@ impl super::api::Transaction for Transaction {
 		let key = key.into();
 		let val = val.into();
 		let chk = chk.map(Into::into);
+		// Hydrate the savepoint if any
+		let prep = if self.save_points.is_some() {
+			self.save_point_prepare(&key, None, SaveOperation::Put).await?
+		} else {
+			None
+		};
 		// Set the key if valid
 		match (self.inner.get(&key)?, chk) {
 			(Some(v), Some(w)) if v == w => self.inner.set(&key, &val)?,
 			(None, None) => self.inner.set(&key, &val)?,
 			_ => return Err(Error::TxConditionNotMet),
 		};
+		// Confirm the save point
+		if let Some(prep) = prep {
+			self.save_points.save(prep);
+		}
 		// Return result
 		Ok(())
 	}
@@ -281,8 +312,20 @@ impl super::api::Transaction for Transaction {
 		if !self.write {
 			return Err(Error::TxReadonly);
 		}
+		// Extract the key
+		let key = key.into();
+		// Hydrate the savepoint if any
+		let prep = if self.save_points.is_some() {
+			self.save_point_prepare(&key, None, SaveOperation::Del).await?
+		} else {
+			None
+		};
 		// Remove the key
-		self.inner.delete(&key.into())?;
+		self.inner.delete(&key)?;
+		// Confirm the save point
+		if let Some(prep) = prep {
+			self.save_points.save(prep);
+		}
 		// Return result
 		Ok(())
 	}
@@ -305,12 +348,22 @@ impl super::api::Transaction for Transaction {
 		// Get the arguments
 		let key = key.into();
 		let chk = chk.map(Into::into);
+		// Hydrate the savepoint if any
+		let prep = if self.save_points.is_some() {
+			self.save_point_prepare(&key, None, SaveOperation::Del).await?
+		} else {
+			None
+		};
 		// Delete the key if valid
 		match (self.inner.get(&key)?, chk) {
 			(Some(v), Some(w)) if v == w => self.inner.delete(&key)?,
 			(None, None) => self.inner.delete(&key)?,
 			_ => return Err(Error::TxConditionNotMet),
 		};
+		// Confirm the save point
+		if let Some(prep) = prep {
+			self.save_points.save(prep);
+		}
 		// Return result
 		Ok(())
 	}
@@ -371,7 +424,7 @@ impl super::api::Transaction for Transaction {
 	}
 }
 
-impl SavePoint for Transaction {
+impl SavePointImpl for Transaction {
 	fn get_save_points(&mut self) -> &mut SavePoints {
 		&mut self.save_points
 	}
