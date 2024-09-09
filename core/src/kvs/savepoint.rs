@@ -109,3 +109,39 @@ impl SavePoints {
 		Ok(())
 	}
 }
+
+pub(super) trait SavePointImpl: Transaction + Sized {
+	fn get_save_points(&mut self) -> &mut SavePoints;
+
+	fn new_save_point(&mut self) {
+		self.get_save_points().new_save_point()
+	}
+
+	async fn rollback_to_save_point(&mut self) -> Result<(), Error> {
+		let sp = self.get_save_points().pop()?;
+		SavePoints::rollback(sp, self).await
+	}
+
+	fn release_last_save_point(&mut self) -> Result<(), Error> {
+		self.get_save_points().pop()?;
+		Ok(())
+	}
+
+	async fn save_point_prepare(
+		&mut self,
+		key: &Key,
+		version: Option<u64>,
+		op: SaveOperation,
+	) -> Result<Option<SavePrepare>, Error> {
+		let is_saved_key = self.get_save_points().is_saved_key(key);
+		let r = match is_saved_key {
+			None => None,
+			Some(true) => Some(SavePrepare::AlreadyPresent(key.clone(), op)),
+			Some(false) => {
+				let val = self.get(key.clone(), version).await?;
+				Some(SavePrepare::NewKey(key.clone(), SavedValue::new(val, version, op)))
+			}
+		};
+		Ok(r)
+	}
+}

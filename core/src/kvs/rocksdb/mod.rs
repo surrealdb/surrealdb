@@ -4,8 +4,6 @@ mod cnf;
 
 use crate::err::Error;
 use crate::key::debug::Sprintable;
-use crate::kvs::api::SavePoint;
-use crate::kvs::savepoint::SavePoints;
 use crate::kvs::Check;
 use crate::kvs::Key;
 use crate::kvs::Val;
@@ -41,8 +39,6 @@ pub struct Transaction {
 	// the memory is kept alive. This pointer must
 	// be declared last, so that it is dropped last.
 	_db: Pin<Arc<OptimisticTransactionDB>>,
-	/// The save point implementation
-	save_points: SavePoints,
 }
 
 impl Drop for Transaction {
@@ -160,7 +156,6 @@ impl Datastore {
 			inner: Some(inner),
 			ro,
 			_db: self.db.clone(),
-			save_points: Default::default(),
 		})
 	}
 }
@@ -508,8 +503,24 @@ impl super::api::Transaction for Transaction {
 	}
 }
 
-impl SavePoint for Transaction {
-	fn get_save_points(&mut self) -> &mut SavePoints {
-		&mut self.save_points
+impl Transaction {
+	pub(crate) fn new_save_point(&mut self) {
+		// Get the transaction
+		let inner = self.inner.as_ref().unwrap();
+		// Set the save point
+		inner.set_savepoint();
+	}
+
+	pub(crate) async fn rollback_to_save_point(&mut self) -> Result<(), Error> {
+		// Get the transaction
+		let inner = self.inner.as_ref().unwrap();
+		// Rollback
+		inner.rollback_to_savepoint()?;
+		//
+		Ok(())
+	}
+
+	pub(crate) fn release_last_save_point(&mut self) -> Result<(), Error> {
+		Ok(())
 	}
 }

@@ -9,9 +9,17 @@ use crate::err::Error;
 use crate::idg::u32::U32;
 #[cfg(debug_assertions)]
 use crate::key::debug::Sprintable;
-use crate::kvs::api::SavePoint;
 use crate::kvs::batch::Batch;
 use crate::kvs::clock::SizedClock;
+#[cfg(any(
+	feature = "kv-mem",
+	feature = "kv-tikv",
+	feature = "kv-fdb",
+	feature = "kv-indxdb",
+	feature = "kv-surrealkv",
+	feature = "kv-surrealcs",
+))]
+use crate::kvs::savepoint::SavePointImpl;
 use crate::kvs::stash::Stash;
 use crate::sql;
 use crate::sql::thing::Thing;
