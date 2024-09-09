@@ -52,8 +52,9 @@ jobs:
     steps:
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
-        with:
-          toolchain: stable
+
+      - name: Install MSRV toolchain
+        uses: dtolnay/rust-toolchain@1.80.1
 
       - name: Checkout sources
         uses: actions/checkout@v4
@@ -70,8 +71,11 @@ jobs:
       - name: Install cargo-make
         run: cargo install --debug --locked cargo-make
 
-      - name: Check workspace
-        run: cargo make ci-check
+      - name: Check workspace on stable
+        run: cargo +stable make ci-check
+
+      - name: Check workspace on MSRV
+        run: cargo +1.80.1 make ci-check
 
   check-fuzzing:
     name: Check fuzzing
