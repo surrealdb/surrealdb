@@ -42,7 +42,7 @@ impl Parser<'_> {
 				self.glued_value = GluedValue::Strand(Strand(value.value));
 				self.prepend_token(Token {
 					span: value.span,
-					kind: TokenKind::Glued(Glued::Duration),
+					kind: TokenKind::Glued(Glued::Strand),
 				});
 				return Ok(self.peek1());
 			}
@@ -52,7 +52,7 @@ impl Parser<'_> {
 				self.glued_value = GluedValue::Datetime(Datetime(value.value));
 				self.prepend_token(Token {
 					span: value.span,
-					kind: TokenKind::Glued(Glued::Duration),
+					kind: TokenKind::Glued(Glued::Datetime),
 				});
 			}
 			t!("u\"") | t!("u'") => {

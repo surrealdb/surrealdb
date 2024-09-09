@@ -33,8 +33,12 @@ impl Parser<'_> {
 				self.pop_peek();
 				Ok(Value::Thing(self.parse_record_string(ctx, false).await?))
 			}
-			t!("d\"") | t!("d'") => Ok(Value::Datetime(self.next_token_value()?)),
-			t!("u\"") | t!("u'") => Ok(Value::Uuid(self.next_token_value()?)),
+			t!("d\"") | t!("d'") | TokenKind::Glued(Glued::Datetime) => {
+				Ok(Value::Datetime(self.next_token_value()?))
+			}
+			t!("u\"") | t!("u'") | TokenKind::Glued(Glued::Uuid) => {
+				Ok(Value::Uuid(self.next_token_value()?))
+			}
 			t!("$param") => {
 				let value = Value::Param(self.next_token_value()?);
 				let value = self.try_parse_inline(ctx, &value).await?.unwrap_or(value);
@@ -213,8 +217,12 @@ impl Parser<'_> {
 				self.pop_peek();
 				Value::Thing(self.parse_record_string(ctx, false).await?)
 			}
-			t!("d\"") | t!("d'") => Value::Datetime(self.next_token_value()?),
-			t!("u\"") | t!("u'") => Value::Uuid(self.next_token_value()?),
+			t!("d\"") | t!("d'") | TokenKind::Glued(Glued::Datetime) => {
+				Value::Datetime(self.next_token_value()?)
+			}
+			t!("u\"") | t!("u'") | TokenKind::Glued(Glued::Uuid) => {
+				Value::Uuid(self.next_token_value()?)
+			}
 			t!("'") | t!("\"") | TokenKind::Glued(Glued::Strand) => {
 				let s = self.next_token_value::<Strand>()?;
 				if self.legacy_strands {

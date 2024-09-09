@@ -33,6 +33,7 @@ pub struct Diagnostic {
 /// A parsing error.
 #[derive(Debug)]
 pub struct SyntaxError {
+	backtrace: std::backtrace::Backtrace,
 	diagnostic: Box<Diagnostic>,
 	data_pending: bool,
 }
@@ -49,6 +50,7 @@ impl SyntaxError {
 		};
 
 		Self {
+			backtrace: std::backtrace::Backtrace::force_capture(),
 			diagnostic: Box::new(diagnostic),
 			data_pending: false,
 		}
@@ -104,6 +106,7 @@ impl SyntaxError {
 	}
 
 	pub fn render_on(&self, source: &str) -> RenderedError {
+		eprintln!("{}", self.backtrace);
 		let mut res = RenderedError {
 			errors: Vec::new(),
 			snippets: Vec::new(),

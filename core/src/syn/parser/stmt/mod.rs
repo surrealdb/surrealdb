@@ -14,7 +14,7 @@ use crate::sql::statements::{
 use crate::sql::{Fields, Ident, Param};
 use crate::syn::lexer::compound;
 use crate::syn::parser::enter_query_recursion;
-use crate::syn::token::{t, TokenKind};
+use crate::syn::token::{t, Glued, TokenKind};
 use crate::{
 	sql::{
 		statements::{
@@ -529,7 +529,9 @@ impl Parser<'_> {
 	pub(super) fn parse_kill_stmt(&mut self) -> ParseResult<KillStatement> {
 		let peek = self.peek();
 		let id = match peek.kind {
-			t!("u\"") | t!("u'") => self.next_token_value().map(Value::Uuid)?,
+			t!("u\"") | t!("u'") | TokenKind::Glued(Glued::Uuid) => {
+				self.next_token_value().map(Value::Uuid)?
+			}
 			t!("$param") => self.next_token_value().map(Value::Param)?,
 			_ => unexpected!(self, peek, "a UUID or a parameter"),
 		};
@@ -679,10 +681,12 @@ impl Parser<'_> {
 				let int = self.lexer.lex_compound(next, compound::integer)?.value;
 				ShowSince::Versionstamp(int)
 			}
+			t!("d\"") | t!("d'") => ShowSince::Timestamp(self.next_token_value()?),
 			TokenKind::Glued(_) => {
+				// This panic can be upheld within this function, just make sure you don't call
+				// glue here and the `next()` before this peek should eat any glued value.
 				panic!("A glued number token would truncate the timestamp so no gluing is allowed before this production.");
 			}
-			t!("d\"") | t!("d'") => ShowSince::Timestamp(self.next_token_value()?),
 			_ => unexpected!(self, next, "a version stamp or a date-time"),
 		};
 

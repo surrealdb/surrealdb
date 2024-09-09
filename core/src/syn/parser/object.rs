@@ -49,7 +49,7 @@ impl Parser<'_> {
 	) -> ParseResult<Value> {
 		expected!(self, t!(":"));
 		// for it to be geometry the next value must be a strand like.
-		let (t!("\"") | t!("'")) = self.peek_kind() else {
+		let (t!("\"") | t!("'") | TokenKind::Glued(Glued::Strand)) = self.peek_kind() else {
 			return self
 				.parse_object_from_key(ctx, key, BTreeMap::new(), start)
 				.await

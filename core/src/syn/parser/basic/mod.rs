@@ -78,11 +78,7 @@ impl TokenValue for Duration {
 	fn from_token(parser: &mut Parser<'_>) -> ParseResult<Self> {
 		let token = parser.peek();
 		match token.kind {
-			TokenKind::Glued(token::Glued::Duration) => {
-				let x = pop_glued!(parser, Duration);
-				parser.pop_peek();
-				Ok(x)
-			}
+			TokenKind::Glued(token::Glued::Duration) => Ok(pop_glued!(parser, Duration)),
 			TokenKind::Digits => {
 				parser.pop_peek();
 				let v = parser.lexer.lex_compound(token, compound::duration)?.value;
@@ -97,11 +93,7 @@ impl TokenValue for Datetime {
 	fn from_token(parser: &mut Parser<'_>) -> ParseResult<Self> {
 		let token = parser.peek();
 		match token.kind {
-			TokenKind::Glued(token::Glued::Datetime) => {
-				let x = pop_glued!(parser, Datetime);
-				parser.pop_peek();
-				Ok(x)
-			}
+			TokenKind::Glued(token::Glued::Datetime) => Ok(pop_glued!(parser, Datetime)),
 			t!("d\"") | t!("d'") => {
 				parser.pop_peek();
 				let v = parser.lexer.lex_compound(token, compound::datetime)?.value;
@@ -116,11 +108,7 @@ impl TokenValue for Strand {
 	fn from_token(parser: &mut Parser<'_>) -> ParseResult<Self> {
 		let token = parser.peek();
 		match token.kind {
-			TokenKind::Glued(token::Glued::Strand) => {
-				let x = pop_glued!(parser, Strand);
-				parser.pop_peek();
-				Ok(x)
-			}
+			TokenKind::Glued(token::Glued::Strand) => Ok(pop_glued!(parser, Strand)),
 			t!("\"") | t!("'") => {
 				parser.pop_peek();
 				let v = parser.lexer.lex_compound(token, compound::strand)?.value;
@@ -135,11 +123,7 @@ impl TokenValue for Uuid {
 	fn from_token(parser: &mut Parser<'_>) -> ParseResult<Self> {
 		let token = parser.peek();
 		match token.kind {
-			TokenKind::Glued(token::Glued::Uuid) => {
-				let x = pop_glued!(parser, Uuid);
-				parser.pop_peek();
-				Ok(x)
-			}
+			TokenKind::Glued(token::Glued::Uuid) => Ok(pop_glued!(parser, Uuid)),
 			t!("u\"") | t!("u'") => {
 				parser.pop_peek();
 				let v = parser.lexer.lex_compound(token, compound::uuid)?.value;
