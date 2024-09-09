@@ -70,6 +70,37 @@ jobs:
       - name: Check workspace
         run: cargo make ci-check
 
+      - name: Check workspace release
+        run: cargo make ci-check-release
+
+  check-msrv:
+    name: Check workspace MSRV
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install MSRV toolchain
+        uses: dtolnay/rust-toolchain@1.80.1
+
+      - name: Checkout sources
+        uses: actions/checkout@v4
+
+      - name: Setup cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get -y update
+
+      - name: Install cargo-make
+        run: cargo install --debug --locked cargo-make
+
+      - name: Check workspace on MSRV
+        run: cargo make ci-check
+
+      - name: Check workspace release on MSRV
+        run: cargo make ci-check-release
+
   check-fuzzing:
     name: Check fuzzing
     runs-on: ubuntu-latest
