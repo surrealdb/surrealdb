@@ -87,41 +87,41 @@ impl Kind {
 		false
 	}
 
-	// Returns true if this type is a literal
+	/// Returns Some if this type can be converted into a discriminated object, None otherwise
 	pub(crate) fn to_discriminated(&self) -> Option<Kind> {
 		match self {
 			Kind::Either(nested) => {
-				if nested.iter().all(|k| matches!(k, Kind::Literal(Literal::Object(_)))) {
-					if let Some(Kind::Literal(Literal::Object(first))) = nested.first() {
+				if let Some(nested) = nested
+					.iter()
+					.map(|k| match k {
+						Kind::Literal(Literal::Object(o)) => Some(o),
+						_ => None,
+					})
+					.collect::<Option<Vec<&BTreeMap<String, Kind>>>>()
+				{
+					if let Some(first) = nested.first() {
 						let mut key: Option<String> = None;
 
 						'key: for (k, v) in first.iter() {
 							let mut kinds: Vec<Kind> = vec![v.to_owned()];
 							for item in nested[1..].iter() {
-								if let Kind::Literal(Literal::Object(obj)) = item {
-									if let Some(kind) = obj.get(k) {
-										match kind {
-											Kind::Literal(l)
-												if kinds.contains(&l.to_kind())
-													|| kinds
-														.contains(&Kind::Literal(l.to_owned())) =>
-											{
-												continue 'key;
-											}
-											kind if kinds.iter().any(|k| *kind == k.to_kind()) => {
-												continue 'key;
-											}
-											kind => {
-												kinds.push(kind.to_owned());
-											}
+								if let Some(kind) = item.get(k) {
+									match kind {
+										Kind::Literal(l)
+											if kinds.contains(&l.to_kind())
+												|| kinds.contains(&Kind::Literal(l.to_owned())) =>
+										{
+											continue 'key;
 										}
-									} else {
-										continue 'key;
+										kind if kinds.iter().any(|k| *kind == k.to_kind()) => {
+											continue 'key;
+										}
+										kind => {
+											kinds.push(kind.to_owned());
+										}
 									}
 								} else {
-									unreachable!(
-										"Previously checked all items are literal objects"
-									);
+									continue 'key;
 								}
 							}
 
@@ -132,18 +132,7 @@ impl Kind {
 						if let Some(key) = key {
 							return Some(Kind::Literal(Literal::DiscriminatedObject(
 								key.clone(),
-								nested
-									.iter()
-									.map(|k| {
-										if let Kind::Literal(Literal::Object(o)) = k {
-											o.to_owned()
-										} else {
-											unreachable!(
-												"Previously checked all items are literal objects"
-											);
-										}
-									})
-									.collect(),
+								nested.into_iter().map(|o| o.to_owned()).collect(),
 							)));
 						}
 					}

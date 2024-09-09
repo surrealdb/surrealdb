@@ -311,7 +311,7 @@ async fn literal_typing() -> Result<(), Error> {
 		}",
 	)?;
 	t.expect_error(
-		"Found { a: 3, b: \"bar\", c: \"forbidden\" } for field `obj`, with record `test:3`, but expected a { a: int, b: option<string> }",
+		"Found { a: 3, b: 'bar', c: 'forbidden' } for field `obj`, with record `test:3`, but expected a { a: int, b: option<string> }",
 	)?;
 	//
 	Ok(())
