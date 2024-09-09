@@ -4,6 +4,8 @@ mod cnf;
 
 use crate::err::Error;
 use crate::key::debug::Sprintable;
+use crate::kvs::api::SavePoint;
+use crate::kvs::savepoint::SavePoints;
 use crate::kvs::Check;
 use crate::kvs::Key;
 use crate::kvs::Val;
@@ -48,6 +50,8 @@ pub struct Transaction {
 	check: Check,
 	/// The underlying datastore transaction
 	inner: Option<Tx>,
+	/// The save point implementation
+	save_points: SavePoints,
 }
 
 impl Drop for Transaction {
@@ -138,6 +142,7 @@ impl Datastore {
 				check,
 				write,
 				inner: Some(inner),
+				save_points: Default::default(),
 			}),
 			Err(e) => Err(Error::Tx(e.to_string())),
 		}
@@ -557,5 +562,11 @@ impl super::api::Transaction for Transaction {
 		self.inner.as_ref().unwrap().atomic_op(&key, &val, MutationType::SetVersionstampedKey);
 		// Return result
 		Ok(())
+	}
+}
+
+impl SavePoint for Transaction {
+	fn get_save_points(&mut self) -> &mut SavePoints {
+		&mut self.save_points
 	}
 }

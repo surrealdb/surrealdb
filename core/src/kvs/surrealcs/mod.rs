@@ -2,6 +2,8 @@
 
 use crate::err::Error;
 use crate::key::debug::Sprintable;
+use crate::kvs::api::SavePoint;
+use crate::kvs::savepoint::SavePoints;
 use crate::kvs::Check;
 use crate::kvs::Key;
 use crate::kvs::Val;
@@ -34,6 +36,8 @@ pub struct Transaction {
 	started: bool,
 	/// The underlying datastore transaction
 	inner: Arc<Mutex<SurrealCSTransaction<AnyState>>>,
+	/// The save point implementation
+	save_points: SavePoints,
 }
 
 impl Drop for Transaction {
@@ -90,6 +94,7 @@ impl Datastore {
 			write,
 			started: false,
 			inner: Arc::new(Mutex::new(transaction)),
+			save_points: Default::default(),
 		})
 	}
 }
@@ -422,5 +427,11 @@ impl super::api::Transaction for Transaction {
 		};
 		// Return result
 		Ok(response.values)
+	}
+}
+
+impl SavePoint for Transaction {
+	fn get_save_points(&mut self) -> &mut SavePoints {
+		&mut self.save_points
 	}
 }

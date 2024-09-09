@@ -2,6 +2,8 @@
 
 use crate::err::Error;
 use crate::key::debug::Sprintable;
+use crate::kvs::api::SavePoint;
+use crate::kvs::savepoint::SavePoints;
 use crate::kvs::Check;
 use crate::kvs::Key;
 use crate::kvs::Val;
@@ -34,6 +36,8 @@ pub struct Transaction {
 	// the memory is kept alive. This pointer must
 	// be declared last, so that it is dropped last.
 	db: Pin<Arc<tikv::TransactionClient>>,
+	/// The save point implementation
+	save_points: SavePoints,
 }
 
 impl Drop for Transaction {
@@ -107,6 +111,7 @@ impl Datastore {
 				write,
 				inner,
 				db: self.db.clone(),
+				save_points: Default::default(),
 			}),
 			Err(e) => Err(Error::Tx(e.to_string())),
 		}
@@ -449,5 +454,11 @@ impl super::api::Transaction for Transaction {
 		self.set(key.as_slice(), verbytes.to_vec(), None).await?;
 		// Return the uint64 representation of the timestamp as the result
 		Ok(verbytes)
+	}
+}
+
+impl SavePoint for Transaction {
+	fn get_save_points(&mut self) -> &mut SavePoints {
+		&mut self.save_points
 	}
 }

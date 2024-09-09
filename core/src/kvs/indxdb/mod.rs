@@ -2,6 +2,8 @@
 
 use crate::err::Error;
 use crate::key::debug::Sprintable;
+use crate::kvs::api::SavePoint;
+use crate::kvs::savepoint::SavePoints;
 use crate::kvs::Check;
 use crate::kvs::Key;
 use crate::kvs::Val;
@@ -23,6 +25,8 @@ pub struct Transaction {
 	check: Check,
 	/// The underlying datastore transaction
 	inner: indxdb::Tx,
+	/// The save point implementation
+	save_points: SavePoints,
 }
 
 impl Drop for Transaction {
@@ -336,5 +340,11 @@ impl super::api::Transaction for Transaction {
 		let res = self.inner.scan(rng, limit).await?;
 		// Return result
 		Ok(res)
+	}
+}
+
+impl SavePoint for Transaction {
+	fn get_save_points(&mut self) -> &mut SavePoints {
+		&mut self.save_points
 	}
 }

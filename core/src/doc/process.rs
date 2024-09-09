@@ -30,10 +30,11 @@ impl Document {
 			// Setup a new document
 			let mut doc = Document::new(pro.rid, pro.ir, ins.0, ins.1);
 			// Optionally create a save point so we can roll back any upcoming changes
-			let savepoint_id = if !stm.is_select() {
-				Some(ctx.tx().lock().await.new_save_point())
+			let is_save_point = if !stm.is_select() {
+				ctx.tx().lock().await.new_save_point();
+				true
 			} else {
-				None
+				false
 			};
 			// Process the statement
 			let res = match stm {
@@ -53,8 +54,8 @@ impl Document {
 				// we load the new record, and reprocess
 				Err(Error::RetryWithId(v)) => {
 					// We roll back any change following the save point
-					if let Some(savepoint_id) = savepoint_id {
-						ctx.tx().lock().await.rollback_save_point(savepoint_id).await?;
+					if is_save_point {
+						ctx.tx().lock().await.rollback_to_save_point().await?;
 					}
 					// Fetch the data from the store
 					let key = crate::key::thing::new(opt.ns()?, opt.db()?, &v.tb, &v.id);
@@ -80,16 +81,16 @@ impl Document {
 				// pass that error through and return an error
 				Err(e) => {
 					// We roll back any change following the save point
-					if let Some(savepoint_id) = savepoint_id {
-						ctx.tx().lock().await.rollback_save_point(savepoint_id).await?;
+					if is_save_point {
+						ctx.tx().lock().await.rollback_to_save_point().await?;
 					}
 					Err(e)
 				}
 				// Otherwise the record creation succeeded
 				Ok(v) => {
 					// The statement is successful, we can release the savepoint
-					if let Some(savepoint_id) = savepoint_id {
-						ctx.tx().lock().await.release_save_point(savepoint_id)?;
+					if is_save_point {
+						ctx.tx().lock().await.release_last_save_point()?;
 					}
 					Ok(v)
 				}

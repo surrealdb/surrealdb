@@ -9,9 +9,9 @@ use crate::err::Error;
 use crate::idg::u32::U32;
 #[cfg(debug_assertions)]
 use crate::key::debug::Sprintable;
+use crate::kvs::api::SavePoint;
 use crate::kvs::batch::Batch;
 use crate::kvs::clock::SizedClock;
-use crate::kvs::savepoint::SavePoints;
 use crate::kvs::stash::Stash;
 use crate::sql;
 use crate::sql::thing::Thing;
@@ -71,7 +71,6 @@ pub struct Transactor {
 	pub(super) stash: Stash,
 	pub(super) cf: cf::Writer,
 	pub(super) clock: Arc<SizedClock>,
-	pub(super) save_points: SavePoints,
 }
 
 #[allow(clippy::large_enum_variant)]
@@ -261,16 +260,7 @@ impl Transactor {
 		V: Into<Val> + Debug,
 	{
 		let key = key.into();
-		let prep = if self.save_points.is_some() {
-			self.save_point_set(&key, version).await?
-		} else {
-			None
-		};
-		expand_inner!(&mut self.inner, v => { v.set(key, val, version).await })?;
-		if let Some(prep) = prep {
-			self.save_point_save(prep);
-		}
-		Ok(())
+		expand_inner!(&mut self.inner, v => { v.set(key, val, version).await })
 	}
 
 	/// Insert a key if it doesn't exist in the datastore.
@@ -281,16 +271,7 @@ impl Transactor {
 		V: Into<Val> + Debug,
 	{
 		let key = key.into();
-		let prep = if self.save_points.is_some() {
-			self.save_point_put(&key, version).await?
-		} else {
-			None
-		};
-		expand_inner!(&mut self.inner, v => { v.put(key, val, version).await })?;
-		if let Some(prep) = prep {
-			self.save_point_save(prep);
-		}
-		Ok(())
+		expand_inner!(&mut self.inner, v => { v.put(key, val, version).await })
 	}
 
 	/// Update a key in the datastore if the current value matches a condition.
@@ -301,16 +282,7 @@ impl Transactor {
 		V: Into<Val> + Debug,
 	{
 		let key = key.into();
-		let prep = if self.save_points.is_some() {
-			self.save_point_put(&key, None).await?
-		} else {
-			None
-		};
-		expand_inner!(&mut self.inner, v => { v.putc(key, val, chk).await })?;
-		if let Some(prep) = prep {
-			self.save_point_save(prep);
-		}
-		Ok(())
+		expand_inner!(&mut self.inner, v => { v.putc(key, val, chk).await })
 	}
 
 	/// Delete a key from the datastore.
@@ -320,16 +292,7 @@ impl Transactor {
 		K: Into<Key> + Debug,
 	{
 		let key = key.into();
-		let prep = if self.save_points.is_some() {
-			self.save_point_del(&key, None).await?
-		} else {
-			None
-		};
-		expand_inner!(&mut self.inner, v => { v.del(key).await })?;
-		if let Some(prep) = prep {
-			self.save_point_save(prep);
-		}
-		Ok(())
+		expand_inner!(&mut self.inner, v => { v.del(key).await })
 	}
 
 	/// Delete a key from the datastore if the current value matches a condition.
@@ -340,16 +303,7 @@ impl Transactor {
 		V: Into<Val> + Debug,
 	{
 		let key = key.into();
-		let prep = if self.save_points.is_some() {
-			self.save_point_del(&key, None).await?
-		} else {
-			None
-		};
-		expand_inner!(&mut self.inner, v => { v.delc(key, chk).await })?;
-		if let Some(prep) = prep {
-			self.save_point_save(prep);
-		}
-		Ok(())
+		expand_inner!(&mut self.inner, v => { v.delc(key, chk).await })
 	}
 
 	/// Delete a range of keys from the datastore.
@@ -362,17 +316,7 @@ impl Transactor {
 	{
 		let beg: Key = rng.start.into();
 		let end: Key = rng.end.into();
-		let range = beg..end;
-		let prep = if self.save_points.is_some() {
-			self.save_point_delr(range.clone()).await?
-		} else {
-			None
-		};
-		expand_inner!(&mut self.inner, v => { v.delr(range).await })?;
-		if let Some(prep) = prep {
-			self.save_point_save(prep);
-		}
-		Ok(())
+		expand_inner!(&mut self.inner, v => { v.delr(beg..end).await })
 	}
 
 	/// Delete a prefixed range of keys from the datastore.
@@ -384,16 +328,7 @@ impl Transactor {
 		K: Into<Key> + Debug,
 	{
 		let key: Key = key.into();
-		let prep = if self.save_points.is_some() {
-			self.save_point_delp(&key).await?
-		} else {
-			None
-		};
-		expand_inner!(&mut self.inner, v => { v.delp(key).await })?;
-		if let Some(prep) = prep {
-			self.save_point_save(prep);
-		}
-		Ok(())
+		expand_inner!(&mut self.inner, v => { v.delp(key).await })
 	}
 
 	/// Retrieve a specific range of keys from the datastore.
@@ -700,5 +635,17 @@ impl Transactor {
 			}
 		}
 		Ok(None)
+	}
+
+	pub(crate) fn new_save_point(&mut self) {
+		expand_inner!(&mut self.inner, v => { v.new_save_point() })
+	}
+
+	pub(crate) async fn rollback_to_save_point(&mut self) -> Result<(), Error> {
+		expand_inner!(&mut self.inner, v => { v.rollback_to_save_point().await })
+	}
+
+	pub(crate) fn release_last_save_point(&mut self) -> Result<(), Error> {
+		expand_inner!(&mut self.inner, v => { v.release_last_save_point() })
 	}
 }
