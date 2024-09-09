@@ -281,3 +281,38 @@ async fn strict_typing_none_null() -> Result<(), Error> {
 	//
 	Ok(())
 }
+
+#[tokio::test]
+async fn strict_typing_optional_object() -> Result<(), Error> {
+	let sql = "
+        DEFINE TABLE test SCHEMAFULL;
+        DEFINE FIELD obj ON test TYPE option<object>;
+        DEFINE FIELD obj.a ON test TYPE string;
+
+        CREATE ONLY test:1;
+        CREATE ONLY test:2 SET obj = {};
+        CREATE ONLY test:3 SET obj = { a: 'abc' };
+	";
+	let mut t = Test::new(sql).await?;
+	//
+	t.skip_ok(3)?;
+	//
+	t.expect_val(
+		"{
+            id: test:1,
+        }",
+	)?;
+	//
+	t.expect_error("Found NONE for field `obj.a`, with record `test:2`, but expected a string")?;
+	//
+	t.expect_val(
+		"{
+            id: test:3,
+            obj: {
+                a: 'abc',
+            },
+        }",
+	)?;
+	//
+	Ok(())
+}

@@ -153,6 +153,10 @@ impl Idiom {
 			self.0.truncate(self.len() - 1);
 		}
 	}
+
+	pub(crate) fn starts_with(&self, other: &[Part]) -> bool {
+		self.0.starts_with(other)
+	}
 }
 
 impl Idiom {
