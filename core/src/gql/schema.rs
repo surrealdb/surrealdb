@@ -26,6 +26,7 @@ use serde_json::Number;
 
 use super::error::{resolver_error, GqlError};
 use super::ext::IntoExt;
+#[cfg(debug_assertions)]
 use super::ext::ValidatorExt;
 use crate::gql::error::{internal_error, schema_error, type_error};
 use crate::gql::ext::TryAsExt;
