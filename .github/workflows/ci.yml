@@ -108,7 +108,6 @@ jobs:
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: 1.80.1
           components: rustfmt
 
       - name: Checkout sources
