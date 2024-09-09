@@ -4,8 +4,7 @@ mod cnf;
 
 use crate::err::Error;
 use crate::key::debug::Sprintable;
-use crate::kvs::api::SavePoint;
-use crate::kvs::savepoint::SavePoints;
+use crate::kvs::savepoint::{SavePointImpl, SavePoints};
 use crate::kvs::Check;
 use crate::kvs::Key;
 use crate::kvs::Val;
@@ -565,7 +564,7 @@ impl super::api::Transaction for Transaction {
 	}
 }
 
-impl SavePoint for Transaction {
+impl SavePointImpl for Transaction {
 	fn get_save_points(&mut self) -> &mut SavePoints {
 		&mut self.save_points
 	}
