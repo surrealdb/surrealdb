@@ -2,7 +2,7 @@
 
 use crate::err::Error;
 use crate::key::debug::Sprintable;
-use crate::kvs::savepoint::{SavePointImpl, SavePoints};
+use crate::kvs::savepoint::{SaveOperation, SavePointImpl, SavePoints};
 use crate::kvs::Check;
 use crate::kvs::Key;
 use crate::kvs::Val;
@@ -238,12 +238,24 @@ impl super::api::Transaction for Transaction {
 		if !self.write {
 			return Err(Error::TxReadonly);
 		}
+		// Extract the key
+		let key = key.into();
+		// Prepare the savepoint if any
+		let prep = if self.save_points.is_some() {
+			self.save_point_prepare(&key, version, SaveOperation::Set).await?
+		} else {
+			None
+		};
 		// Set the key
 		let message = ServerTransactionMessage::Set(MessageSet {
-			key: key.into(),
+			key,
 			value: val.into(),
 		});
 		self.send_message(message).await?;
+		// Confirm the save point
+		if let Some(prep) = prep {
+			self.save_points.save(prep);
+		}
 		// Return result
 		Ok(())
 	}
@@ -263,12 +275,24 @@ impl super::api::Transaction for Transaction {
 		if !self.write {
 			return Err(Error::TxReadonly);
 		}
+		// Extract the key
+		let key = key.into();
+		// Hydrate the savepoint if any
+		let prep = if self.save_points.is_some() {
+			self.save_point_prepare(&key, version, SaveOperation::Put).await?
+		} else {
+			None
+		};
 		// Put the key
 		let message = ServerTransactionMessage::Put(MessagePut {
-			key: key.into(),
+			key,
 			value: val.into(),
 		});
 		self.send_message(message).await?;
+		// Confirm the save point
+		if let Some(prep) = prep {
+			self.save_points.save(prep);
+		}
 		// Return result
 		Ok(())
 	}
@@ -290,13 +314,25 @@ impl super::api::Transaction for Transaction {
 		}
 		// Get the arguments
 		let chk = chk.map(Into::into);
+		// Extract the key
+		let key = key.into();
+		// Hydrate the savepoint if any
+		let prep = if self.save_points.is_some() {
+			self.save_point_prepare(&key, None, SaveOperation::Put).await?
+		} else {
+			None
+		};
 		// Set the key if valid
 		let message = ServerTransactionMessage::Putc(MessagePutc {
-			key: key.into(),
+			key,
 			value: val.into(),
 			expected_value: chk,
 		});
 		self.send_message(message).await?;
+		// Confirm the save point
+		if let Some(prep) = prep {
+			self.save_points.save(prep);
+		}
 		// Return result
 		Ok(())
 	}
@@ -315,11 +351,23 @@ impl super::api::Transaction for Transaction {
 		if !self.write {
 			return Err(Error::TxReadonly);
 		}
+		// Extract the key
+		let key = key.into();
+		// Hydrate the savepoint if any
+		let prep = if self.save_points.is_some() {
+			self.save_point_prepare(&key, None, SaveOperation::Del).await?
+		} else {
+			None
+		};
 		// Remove the key
 		let message = ServerTransactionMessage::Del(MessageDel {
-			key: key.into(),
+			key,
 		});
 		self.send_message(message).await?;
+		// Confirm the save point
+		if let Some(prep) = prep {
+			self.save_points.save(prep);
+		}
 		// Return result
 		Ok(())
 	}
@@ -341,12 +389,24 @@ impl super::api::Transaction for Transaction {
 		}
 		// Get the arguments
 		let chk = chk.map(Into::into);
+		// Extract the key
+		let key = key.into();
+		// Hydrate the savepoint if any
+		let prep = if self.save_points.is_some() {
+			self.save_point_prepare(&key, None, SaveOperation::Del).await?
+		} else {
+			None
+		};
 		// Delete the key if valid
 		let message = ServerTransactionMessage::Delc(MessageDelc {
-			key: key.into(),
+			key,
 			expected_value: chk,
 		});
 		self.send_message(message).await?;
+		// Confirm the save point
+		if let Some(prep) = prep {
+			self.save_points.save(prep);
+		}
 		// Return result
 		Ok(())
 	}
@@ -391,6 +451,7 @@ impl super::api::Transaction for Transaction {
 			finish: rng.end.into(),
 			limit,
 		});
+		// TODO: Check if save point needs to be implemented here
 		let response = match self.send_message(message).await? {
 			ServerTransactionMessage::ResponseKeys(v) => v,
 			_ => return Err(Error::Tx("Received an invalid response".to_string())),
