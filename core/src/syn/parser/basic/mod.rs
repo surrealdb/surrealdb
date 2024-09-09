@@ -222,8 +222,8 @@ mod test {
 
 			assert_eq!(
 				r,
-				sql::Query(sql::Statements(vec![sql::Statement::Value(sql::Value::Idiom(
-					sql::Idiom(vec![sql::Part::Field(sql::Ident(ident.to_string()))])
+				sql::Query(sql::Statements(vec![sql::Statement::Value(sql::Value::Table(
+					sql::Table(ident.to_string())
 				))]))
 			)
 		}

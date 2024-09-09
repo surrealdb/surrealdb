@@ -340,7 +340,7 @@ impl Parser<'_> {
 	///
 	/// # Parser state
 	/// Expects the starting `[` to already be eaten and its span passed as an argument.
-	pub(super) async fn parse_array(&mut self, ctx: &mut Stk, start: Span) -> ParseResult<Array> {
+	pub(crate) async fn parse_array(&mut self, ctx: &mut Stk, start: Span) -> ParseResult<Array> {
 		let mut values = Vec::new();
 		enter_object_recursion!(this = self => {
 			loop {
@@ -349,7 +349,6 @@ impl Parser<'_> {
 				}
 
 				let value = ctx.run(|ctx| this.parse_value_inherit(ctx)).await?;
-				dbg!(this.lexer.current_span());
 				values.push(value);
 
 				if !this.eat(t!(",")) {
@@ -726,8 +725,8 @@ impl Parser<'_> {
 
 #[cfg(test)]
 mod tests {
-	use super::syn::Parse;
 	use super::*;
+	use crate::syn::Parse;
 
 	#[test]
 	fn subquery_expression_statement() {

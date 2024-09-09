@@ -90,7 +90,7 @@ pub fn parse_continue() {
 fn parse_create() {
 	let res = test_parse!(
 		parse_stmt,
-		"CREATE ONLY foo SET bar = 3, foo +?= 4 RETURN VALUE foo AS bar TIMEOUT 1s PARALLEL"
+		"CREATE ONLY foo SET bar = 3, foo +?= baz RETURN VALUE foo AS bar TIMEOUT 1s PARALLEL"
 	)
 	.unwrap();
 	assert_eq!(
@@ -107,7 +107,7 @@ fn parse_create() {
 				(
 					Idiom(vec![Part::Field(Ident("foo".to_owned()))]),
 					Operator::Ext,
-					Value::Number(Number::Int(4))
+					Value::Idiom(Idiom(vec![Part::Field(Ident("baz".to_owned()))]))
 				),
 			])),
 			output: Some(Output::Fields(Fields(
@@ -205,7 +205,7 @@ fn parse_define_function() {
 				(Ident("b".to_string()), Kind::Array(Box::new(Kind::Bool), Some(3)))
 			],
 			block: Block(vec![Entry::Output(OutputStatement {
-				what: Value::Idiom(Idiom(vec![Part::Field(Ident("a".to_string()))])),
+				what: Value::Table(Table("a".to_string())),
 				fetch: None,
 			})]),
 			comment: Some(Strand("test".to_string())),
@@ -1709,16 +1709,10 @@ fn parse_if() {
 		res,
 		Statement::Ifelse(IfelseStatement {
 			exprs: vec![
-				(
-					Value::Idiom(Idiom(vec![Part::Field(Ident("foo".to_owned()))])),
-					Value::Idiom(Idiom(vec![Part::Field(Ident("bar".to_owned()))]))
-				),
-				(
-					Value::Idiom(Idiom(vec![Part::Field(Ident("faz".to_owned()))])),
-					Value::Idiom(Idiom(vec![Part::Field(Ident("baz".to_owned()))]))
-				)
+				(Value::Table(Table("foo".to_owned())), Value::Table(Table("bar".to_owned()))),
+				(Value::Table(Table("faz".to_owned())), Value::Table(Table("baz".to_owned())))
 			],
-			close: Some(Value::Idiom(Idiom(vec![Part::Field(Ident("baq".to_owned()))])))
+			close: Some(Value::Table(Table("baq".to_owned())))
 		})
 	)
 }
@@ -1732,20 +1726,20 @@ fn parse_if_block() {
 		Statement::Ifelse(IfelseStatement {
 			exprs: vec![
 				(
-					Value::Idiom(Idiom(vec![Part::Field(Ident("foo".to_owned()))])),
-					Value::Block(Box::new(Block(vec![Entry::Value(Value::Idiom(Idiom(vec![
-						Part::Field(Ident("bar".to_owned()))
-					])))]))),
+					Value::Table(Table("foo".to_owned())),
+					Value::Block(Box::new(Block(vec![Entry::Value(Value::Table(Table(
+						"bar".to_owned()
+					)),)]))),
 				),
 				(
-					Value::Idiom(Idiom(vec![Part::Field(Ident("faz".to_owned()))])),
-					Value::Block(Box::new(Block(vec![Entry::Value(Value::Idiom(Idiom(vec![
-						Part::Field(Ident("baz".to_owned()))
-					])))]))),
+					Value::Table(Table("faz".to_owned())),
+					Value::Block(Box::new(Block(vec![Entry::Value(Value::Table(Table(
+						"baz".to_owned()
+					)),)]))),
 				)
 			],
-			close: Some(Value::Block(Box::new(Block(vec![Entry::Value(Value::Idiom(Idiom(
-				vec![Part::Field(Ident("baq".to_owned()))]
+			close: Some(Value::Block(Box::new(Block(vec![Entry::Value(Value::Table(Table(
+				"baq".to_owned()
 			)))])))),
 		})
 	)
@@ -2084,18 +2078,19 @@ fn parse_insert_select() {
 	assert_eq!(
 		res,
 		Statement::Insert(InsertStatement {
-			into: Some(Value::Param(Param(Ident("foo".to_owned())))),
+			into: Some(Value::Table(Table("bar".to_owned()))),
 			data: Data::SingleExpression(Value::Subquery(Box::new(Subquery::Select(
 				SelectStatement {
 					expr: Fields(
-						vec![Value::Idiom(Idiom(vec![Part::Field(Ident("foo".to_string()))]))],
+						vec![Field::Single {
+							expr: Value::Idiom(Idiom(vec![Part::Field(Ident("foo".to_string()))])),
+							alias: None
+						}],
 						false
 					),
-					omit: (),
-					only: (),
-					what: Values(vec![Value::Idiom(Idiom(vec![Part::Field(Ident(
-						"baz".to_string()
-					))]))]),
+					omit: None,
+					only: false,
+					what: Values(vec![Value::Table(Table("baz".to_string()))]),
 					with: None,
 					cond: None,
 					split: None,
@@ -2198,7 +2193,7 @@ fn parse_return() {
 	assert_eq!(
 		res,
 		Statement::Output(OutputStatement {
-			what: Value::Idiom(Idiom(vec![Part::Field(Ident("RETRUN".to_owned()))])),
+			what: Value::Table(Table("RETRUN".to_owned())),
 			fetch: Some(Fetchs(vec![Fetch(Value::Idiom(Idiom(vec![Part::Field(
 				Ident("RETURN".to_owned()).to_owned()
 			)])))])),

@@ -53,7 +53,7 @@ impl Parser<'_> {
 	/// A generic loose ident like `foo` in for example `foo.bar` can be two different values
 	/// depending on context: a table or a field the current document. This function parses loose
 	/// idents as a field, see [`parse_value`] for parsing loose idents as table
-	pub(super) async fn parse_value_field(&mut self, ctx: &mut Stk) -> ParseResult<Value> {
+	pub(crate) async fn parse_value_field(&mut self, ctx: &mut Stk) -> ParseResult<Value> {
 		let old = self.table_as_field;
 		self.table_as_field = true;
 		let res = self.pratt_parse_expr(ctx, BindingPower::Base).await;
@@ -65,7 +65,7 @@ impl Parser<'_> {
 	///
 	/// Inherits how loose identifiers are parsed from it's caller.
 	pub(super) async fn parse_value_inherit(&mut self, ctx: &mut Stk) -> ParseResult<Value> {
-		self.pratt_parse_expr(ctx, BindingPower::Base).await;
+		self.pratt_parse_expr(ctx, BindingPower::Base).await
 	}
 
 	/// Parse a assigner operator.

@@ -119,7 +119,7 @@ pub struct Parser<'a> {
 	last_span: Span,
 	token_buffer: TokenBuffer<4>,
 	glued_value: GluedValue,
-	table_as_field: bool,
+	pub(crate) table_as_field: bool,
 	legacy_strands: bool,
 	flexible_record_id: bool,
 	object_recursion: usize,
@@ -360,7 +360,7 @@ impl<'a> Parser<'a> {
 	/// Checks if the next token is of the given kind. If it isn't it returns a UnclosedDelimiter
 	/// error.
 	fn expect_closing_delimiter(&mut self, kind: TokenKind, should_close: Span) -> ParseResult<()> {
-		let peek = dbg!(self.peek());
+		let peek = self.peek();
 		if peek.kind != kind {
 			bail!("Unexpected token `{}` expected delimiter `{kind}`",
 				peek.kind,

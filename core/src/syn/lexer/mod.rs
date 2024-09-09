@@ -1,7 +1,3 @@
-use std::time::Duration;
-
-use chrono::{DateTime, Utc};
-
 mod byte;
 mod char;
 pub mod compound;
@@ -14,7 +10,6 @@ mod unicode;
 mod test;
 
 pub use reader::{BytesReader, CharError};
-use uuid::Uuid;
 
 use crate::syn::{
 	error::{bail, SyntaxError},

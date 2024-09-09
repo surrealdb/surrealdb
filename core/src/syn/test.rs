@@ -9,7 +9,7 @@ use crate::syn::token::{t, TokenKind};
 
 impl Parse<Self> for Value {
 	fn parse(val: &str) -> Self {
-		super::value(val).inspect_err(|e| eprintln!("{e}")).unwrap()
+		super::value_field(val).inspect_err(|e| eprintln!("{e}")).unwrap()
 	}
 }
 
@@ -59,7 +59,7 @@ impl Parse<Self> for Expression {
 		let mut parser = Parser::new(val.as_bytes());
 		let mut stack = Stack::new();
 		let value = stack
-			.enter(|ctx| parser.parse_value_field(ctx))
+			.enter(|ctx| parser.parse_value_table(ctx))
 			.finish()
 			.map_err(|e| e.render_on(val))
 			.unwrap();

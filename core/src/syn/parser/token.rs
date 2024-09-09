@@ -73,6 +73,7 @@ impl Parser<'_> {
 			)
 	}
 
+	/* Might be used later for error reporting
 	pub(super) fn kind_starts_subquery(kind: TokenKind) -> bool {
 		matches!(
 			kind,
@@ -110,4 +111,5 @@ impl Parser<'_> {
 				| TokenKind::Identifier
 		) || Self::kind_starts_subquery(kind)
 	}
+	*/
 }

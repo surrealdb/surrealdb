@@ -357,7 +357,7 @@ impl Parser<'_> {
 			}
 			t!("?") | t!("WHERE") => {
 				self.pop_peek();
-				let value = ctx.run(|ctx| self.parse_value_inherit(ctx)).await?;
+				let value = ctx.run(|ctx| self.parse_value_field(ctx)).await?;
 				Part::Where(value)
 			}
 			t!("$param") => Part::Value(Value::Param(self.next_token_value()?)),
@@ -368,18 +368,6 @@ impl Parser<'_> {
 			}
 		};
 		self.expect_closing_delimiter(t!("]"), start)?;
-		Ok(res)
-	}
-
-	/// Parse a list of basic idioms seperated by a ','
-	pub(super) async fn parse_basic_idiom_list(
-		&mut self,
-		ctx: &mut Stk,
-	) -> ParseResult<Vec<Idiom>> {
-		let mut res = vec![self.parse_basic_idiom(ctx).await?];
-		while self.eat(t!(",")) {
-			res.push(self.parse_basic_idiom(ctx).await?);
-		}
 		Ok(res)
 	}
 
@@ -595,7 +583,7 @@ impl Parser<'_> {
 
 #[cfg(test)]
 mod tests {
-	use crate::sql::{Expression, Id, Number, Object, Param, Strand, Thing};
+	use crate::sql::{Expression, Id, Number, Object, Operator, Param, Strand, Thing};
 	use crate::syn::Parse;
 
 	use super::*;
@@ -737,7 +725,11 @@ mod tests {
 			Value::from(Idiom(vec![
 				Part::from("test"),
 				Part::from("temp"),
-				Part::Where(Value::from(Expression::parse("test = true"))),
+				Part::Where(Value::Expression(Box::new(Expression::Binary {
+					l: Value::Idiom(Idiom(vec![Part::Field(Ident("test".to_string()))])),
+					o: Operator::Equal,
+					r: Value::Bool(true)
+				}))),
 				Part::from("text")
 			]))
 		);
@@ -753,7 +745,11 @@ mod tests {
 			Value::from(Idiom(vec![
 				Part::from("test"),
 				Part::from("temp"),
-				Part::Where(Value::from(Expression::parse("test = true"))),
+				Part::Where(Value::Expression(Box::new(Expression::Binary {
+					l: Value::Idiom(Idiom(vec![Part::Field(Ident("test".to_string()))])),
+					o: Operator::Equal,
+					r: Value::Bool(true)
+				}))),
 				Part::from("text")
 			]))
 		);
@@ -895,7 +891,11 @@ mod tests {
 			out,
 			Value::from(Idiom(vec![
 				Part::Start(Value::from(Object::default())),
-				Part::Where(Value::from(Expression::parse("test = true")))
+				Part::Where(Value::Expression(Box::new(Expression::Binary {
+					l: Value::Idiom(Idiom(vec![Part::Field(Ident("test".to_string()))])),
+					o: Operator::Equal,
+					r: Value::Bool(true)
+				}))),
 			]))
 		);
 	}
@@ -909,7 +909,11 @@ mod tests {
 			out,
 			Value::from(Idiom(vec![
 				Part::Start(Value::from(Object::default())),
-				Part::Where(Value::from(Expression::parse("test = true")))
+				Part::Where(Value::Expression(Box::new(Expression::Binary {
+					l: Value::Idiom(Idiom(vec![Part::Field(Ident("test".to_string()))])),
+					o: Operator::Equal,
+					r: Value::Bool(true)
+				}))),
 			]))
 		);
 	}

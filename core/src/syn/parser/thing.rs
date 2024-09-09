@@ -261,14 +261,21 @@ impl Parser<'_> {
 				}
 			}
 			TokenKind::Glued(Glued::Duration) if self.flexible_record_id => {
-				self.lexer.duration = None;
 				let slice = self.lexer.reader.span(token.span);
-				if slice.iter().any(|x| *x > 0b0111_1111) {
+				if slice.iter().any(|x| !x.is_ascii()) {
 					unexpected!(self, token, "a identifier");
 				}
 				// Should be valid utf-8 as it was already parsed by the lexer
 				let text = String::from_utf8(slice.to_vec()).unwrap();
 				Ok(Id::String(text))
+			}
+			TokenKind::Glued(_) => {
+				// If we glue before a parsing a record id, for example 123s456z would return an error as it is
+				// an invalid duration, however it is a valid flexible record id identifier.
+				// So calling glue before using that token to create a record id is not allowed.
+				panic!(
+					"Glueing tokens used in parsing a record id would result in inproper parsing"
+				)
 			}
 			t!("ULID") => {
 				self.pop_peek();

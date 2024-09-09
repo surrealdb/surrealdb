@@ -689,8 +689,8 @@ impl Parser<'_> {
 
 #[cfg(test)]
 mod test {
-	use super::syn::Parse;
 	use super::*;
+	use crate::syn::Parse;
 
 	#[test]
 	fn block_value() {

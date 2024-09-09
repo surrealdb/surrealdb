@@ -85,7 +85,7 @@ impl TokenValue for f64 {
 
 impl TokenValue for Number {
 	fn from_token(parser: &mut Parser<'_>) -> ParseResult<Self> {
-		let token = dbg!(parser.peek());
+		let token = parser.peek();
 		match token.kind {
 			TokenKind::Glued(token::Glued::Number) => {
 				parser.pop_peek();
@@ -115,10 +115,8 @@ impl TokenValue for Number {
 				}
 			}
 			t!("+") | t!("-") | TokenKind::Digits => {
-				dbg!(parser.pop_peek());
-				let res = Ok(dbg!(parser.lexer.lex_compound(token, compound::number))?.value);
-				dbg!(parser.lexer.current_span());
-				res
+				parser.pop_peek();
+				Ok((parser.lexer.lex_compound(token, compound::number))?.value)
 			}
 			_ => unexpected!(parser, token, "a number"),
 		}

@@ -65,6 +65,21 @@ pub fn value(input: &str) -> Result<Value, Error> {
 }
 
 /// Parses a SurrealQL [`Value`].
+#[cfg(test)]
+#[instrument(level = "debug", name = "parser", skip_all, fields(length = input.len()))]
+pub(crate) fn value_field(input: &str) -> Result<Value, Error> {
+	debug!("parsing value, input = {input}");
+	let mut parser = Parser::new(input.as_bytes());
+	let mut stack = Stack::new();
+	stack
+		.enter(|stk| parser.parse_value_field(stk))
+		.finish()
+		.and_then(|e| parser.assert_finished().map(|_| e))
+		.map_err(|e| e.render_on(input))
+		.map_err(Error::InvalidQuery)
+}
+
+/// Parses a SurrealQL [`Value`].
 #[instrument(level = "debug", name = "parser", skip_all, fields(length = input.len()))]
 pub fn value_legacy_strand(input: &str) -> Result<Value, Error> {
 	debug!("parsing value with legacy strings, input = {input}");
@@ -88,8 +103,8 @@ pub fn json(input: &str) -> Result<Value, Error> {
 	stack
 		.enter(|stk| parser.parse_json(stk))
 		.finish()
-		.map_err(|e| e.render_on(input))
 		.and_then(|e| parser.assert_finished().map(|_| e))
+		.map_err(|e| e.render_on(input))
 		.map_err(Error::InvalidQuery)
 }
 
@@ -103,8 +118,8 @@ pub fn json_legacy_strand(input: &str) -> Result<Value, Error> {
 	stack
 		.enter(|stk| parser.parse_json(stk))
 		.finish()
-		.map_err(|e| e.render_on(input))
 		.and_then(|e| parser.assert_finished().map(|_| e))
+		.map_err(|e| e.render_on(input))
 		.map_err(Error::InvalidQuery)
 }
 /// Parses a SurrealQL Subquery [`Subquery`]
@@ -126,6 +141,7 @@ pub fn subquery(input: &str) -> Result<Subquery, Error> {
 pub fn idiom(input: &str) -> Result<Idiom, Error> {
 	debug!("parsing idiom, input = {input}");
 	let mut parser = Parser::new(input.as_bytes());
+	parser.table_as_field = true;
 	let mut stack = Stack::new();
 	stack
 		.enter(|stk| parser.parse_plain_idiom(stk))
@@ -141,7 +157,7 @@ pub fn datetime_raw(input: &str) -> Result<Datetime, Error> {
 	let mut lexer = Lexer::new(input.as_bytes());
 	let res = compound::datetime_inner(&mut lexer);
 	if let Err(e) = lexer.assert_finished() {
-		return Err(e.render_on(input));
+		return Err(Error::InvalidQuery(e.render_on(input)));
 	}
 	res.map(Datetime).map_err(|e| e.render_on(input)).map_err(Error::InvalidQuery)
 }
