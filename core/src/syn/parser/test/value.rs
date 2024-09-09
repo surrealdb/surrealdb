@@ -20,6 +20,11 @@ fn parse_like_operator() {
 }
 
 #[test]
+fn parse_range_operator() {
+	test_parse!(parse_value_table, "1..2").unwrap();
+}
+
+#[test]
 fn parse_large_depth_object() {
 	let mut text = String::new();
 	let start = r#" { foo: "#;

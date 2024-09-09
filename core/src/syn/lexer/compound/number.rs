@@ -107,7 +107,7 @@ pub fn number_kind(lexer: &mut Lexer, start: Token) -> Result<NumberKind, Syntax
 	let mut kind = NumberKind::Integer;
 
 	let before_mantissa = lexer.reader.offset();
-	if lexer.eat(b'.') {
+	if lexer.reader.peek1() != Some(b'.') && lexer.eat(b'.') {
 		eat_digits1(lexer, before_mantissa)?;
 		kind = NumberKind::Float;
 	}
