@@ -111,20 +111,13 @@ impl Method {
 		matches!(
 			self,
 			Method::Ping
-				| Method::Info
-				| Method::Select
-				| Method::Insert
-				| Method::Create
-				| Method::Update
-				| Method::Upsert
-				| Method::Merge
-				| Method::Patch
-				| Method::Delete
-				| Method::Version
-				| Method::Query
-				| Method::Relate
-				| Method::Run
-				| Method::GraphQL
+				| Method::Info | Method::Select
+				| Method::Insert | Method::Create
+				| Method::Update | Method::Upsert
+				| Method::Merge | Method::Patch
+				| Method::Delete | Method::Version
+				| Method::Query | Method::Relate
+				| Method::Run | Method::GraphQL
 				| Method::InsertRelation
 				| Method::Unknown
 		)

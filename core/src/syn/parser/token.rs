@@ -30,14 +30,10 @@ impl Parser<'_> {
 				| TokenKind::DurationSuffix(
 					// All except Micro unicode
 					DurationSuffix::Nano
-						| DurationSuffix::Micro
-						| DurationSuffix::Milli
-						| DurationSuffix::Second
-						| DurationSuffix::Minute
-						| DurationSuffix::Hour
-						| DurationSuffix::Day
-						| DurationSuffix::Week
-						| DurationSuffix::Year
+						| DurationSuffix::Micro | DurationSuffix::Milli
+						| DurationSuffix::Second | DurationSuffix::Minute
+						| DurationSuffix::Hour | DurationSuffix::Day
+						| DurationSuffix::Week | DurationSuffix::Year
 				)
 		)
 	}
@@ -55,18 +51,17 @@ impl Parser<'_> {
 				| TokenKind::DatetimeChars(_)
 				| TokenKind::Exponent
 				| TokenKind::NumberSuffix(_)
-				| TokenKind::NaN
-				| TokenKind::DurationSuffix(
-					// All except Micro unicode
-					DurationSuffix::Nano
-						| DurationSuffix::Micro
-						| DurationSuffix::Milli
-						| DurationSuffix::Second
-						| DurationSuffix::Minute
-						| DurationSuffix::Hour
-						| DurationSuffix::Day
-						| DurationSuffix::Week
-				)
+				| TokenKind::NaN | TokenKind::DurationSuffix(
+				// All except Micro unicode
+				DurationSuffix::Nano
+					| DurationSuffix::Micro
+					| DurationSuffix::Milli
+					| DurationSuffix::Second
+					| DurationSuffix::Minute
+					| DurationSuffix::Hour
+					| DurationSuffix::Day
+					| DurationSuffix::Week
+			)
 		)
 	}
 
