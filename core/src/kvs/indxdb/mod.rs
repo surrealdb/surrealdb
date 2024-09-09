@@ -83,6 +83,7 @@ impl Datastore {
 				check,
 				write,
 				inner,
+				save_points: Default::default(),
 			}),
 			Err(e) => Err(Error::Tx(e.to_string())),
 		}
