@@ -366,7 +366,6 @@ pub trait SavePoint: Transaction + Sized {
 		version: Option<u64>,
 		op: SaveOperation,
 	) -> Result<Option<SavePrepare>, Error> {
-		println!("PREPARE {op:?} {key:?}");
 		let is_saved_key = self.get_save_points().is_saved_key(key);
 		let r = match is_saved_key {
 			None => None,

@@ -77,6 +77,7 @@ impl Document {
 					// Go to top of loop
 					continue;
 				}
+				Err(Error::Ignore) => Err(Error::Ignore),
 				// If any other error was received, then let's
 				// pass that error through and return an error
 				Err(e) => {

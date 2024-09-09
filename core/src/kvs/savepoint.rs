@@ -45,7 +45,6 @@ impl SavePoints {
 			self.stack.push_back(c);
 		}
 		self.current = Some(SavePoint::default());
-		println!("NEW SAVE POINT {}", self.stack.len());
 	}
 
 	pub(super) fn is_some(&self) -> bool {
@@ -55,7 +54,6 @@ impl SavePoints {
 	pub(super) fn pop(&mut self) -> Result<SavePoint, Error> {
 		if let Some(c) = self.current.take() {
 			self.current = self.stack.pop_back();
-			println!("POP {}", self.stack.len());
 			Ok(c)
 		} else {
 			Err(Error::Unreachable("No current SavePoint"))
@@ -79,9 +77,6 @@ impl SavePoints {
 					current.insert(key, sv);
 				}
 			}
-			println!("SAVED KEYS: {}", current.len());
-		} else {
-			println!("SAVED KEYS NONE");
 		}
 	}
 
@@ -89,7 +84,6 @@ impl SavePoints {
 	where
 		T: Transaction,
 	{
-		println!("ROLLBACK - keys: {} keys", sp.len());
 		for (key, saved_value) in sp {
 			match saved_value.last_operation {
 				SaveOperation::Set | SaveOperation::Put => {
