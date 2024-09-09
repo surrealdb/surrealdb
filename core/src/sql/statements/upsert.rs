@@ -47,7 +47,7 @@ impl UpsertStatement {
 		// Check if there is a timeout
 		let ctx = match self.timeout.as_ref() {
 			Some(timeout) => {
-				let mut ctx = MutableContext::new(&ctx);
+				let mut ctx = MutableContext::new(ctx);
 				ctx.add_timeout(*timeout.0)?;
 				ctx.freeze()
 			}
