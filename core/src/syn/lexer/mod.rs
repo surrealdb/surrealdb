@@ -36,7 +36,7 @@ use crate::syn::{
 #[non_exhaustive]
 pub struct Lexer<'a> {
 	/// The reader for reading the source bytes.
-	pub reader: BytesReader<'a>,
+	pub(super) reader: BytesReader<'a>,
 	/// The one past the last character of the previous token.
 	last_offset: u32,
 	/// A buffer used to build the value of tokens which can't be read straight from the source.
@@ -56,11 +56,8 @@ pub struct Lexer<'a> {
 	// The parser can, depending on position in syntax, decide to parse a number in a variety of
 	// different precisions or formats. The only way to support all is to delay parsing the
 	// actual number value to when the parser can decide on a format.
-	pub string: Option<String>,
-	pub duration: Option<Duration>,
-	pub datetime: Option<DateTime<Utc>>,
-	pub uuid: Option<Uuid>,
-	pub error: Option<SyntaxError>,
+	pub(super) string: Option<String>,
+	pub(super) error: Option<SyntaxError>,
 }
 
 impl<'a> Lexer<'a> {
@@ -76,9 +73,6 @@ impl<'a> Lexer<'a> {
 			scratch: String::new(),
 			string: None,
 			error: None,
-			duration: None,
-			datetime: None,
-			uuid: None,
 		}
 	}
 
@@ -107,9 +101,6 @@ impl<'a> Lexer<'a> {
 			scratch: self.scratch,
 			string: self.string,
 			error: self.error,
-			duration: self.duration,
-			datetime: self.datetime,
-			uuid: self.uuid,
 		}
 	}
 
@@ -148,7 +139,7 @@ impl<'a> Lexer<'a> {
 	}
 
 	// Returns the span for the current token being lexed.
-	pub fn current_span(&self) -> Span {
+	pub(crate) fn current_span(&self) -> Span {
 		// We make sure that the source is no longer then u32::MAX so this can't overflow.
 		let new_offset = self.reader.offset() as u32;
 		let len = new_offset - self.last_offset;
@@ -158,7 +149,7 @@ impl<'a> Lexer<'a> {
 		}
 	}
 
-	pub fn span_since(&self, offset: usize) -> Span {
+	pub(crate) fn span_since(&self, offset: usize) -> Span {
 		let new_offset = self.reader.offset() as u32;
 		let len = new_offset - offset as u32;
 		Span {
@@ -188,7 +179,7 @@ impl<'a> Lexer<'a> {
 	/// # Warning
 	/// Moving the lexer into a state where the next byte is within a multibyte character will
 	/// result in spurious errors.
-	pub fn backup_before(&mut self, span: Span) {
+	pub(crate) fn backup_before(&mut self, span: Span) {
 		self.reader.backup(span.offset as usize);
 		self.last_offset = span.offset;
 	}
@@ -198,7 +189,7 @@ impl<'a> Lexer<'a> {
 	/// # Warning
 	/// Moving the lexer into a state where the next byte is within a multibyte character will
 	/// result in spurious errors.
-	pub fn backup_after(&mut self, span: Span) {
+	pub(crate) fn backup_after(&mut self, span: Span) {
 		let offset = span.offset + span.len;
 		self.reader.backup(offset as usize);
 		self.last_offset = offset;
@@ -208,7 +199,7 @@ impl<'a> Lexer<'a> {
 	/// Otherwise returns false.
 	///
 	/// Also returns false if there is no next character.
-	pub fn eat(&mut self, byte: u8) -> bool {
+	fn eat(&mut self, byte: u8) -> bool {
 		if self.reader.peek() == Some(byte) {
 			self.reader.next();
 			true
@@ -221,7 +212,7 @@ impl<'a> Lexer<'a> {
 	/// and returns true. Otherwise returns false.
 	///
 	/// Also returns false if there is no next character.
-	pub fn eat_when<F: FnOnce(u8) -> bool>(&mut self, f: F) -> bool {
+	fn eat_when<F: FnOnce(u8) -> bool>(&mut self, f: F) -> bool {
 		let Some(x) = self.reader.peek() else {
 			return false;
 		};
@@ -233,7 +224,7 @@ impl<'a> Lexer<'a> {
 		}
 	}
 
-	pub fn expect(&mut self, c: char) -> Result<(), SyntaxError> {
+	fn expect(&mut self, c: char) -> Result<(), SyntaxError> {
 		match self.reader.peek() {
 			Some(x) => {
 				let offset = self.reader.offset() as u32;
@@ -267,6 +258,20 @@ impl<'a> Lexer<'a> {
 	/// Will panic if the given span was not valid for the source, or invalid utf8
 	pub fn span_bytes(&self, span: Span) -> &'a [u8] {
 		self.reader.span(span)
+	}
+
+	/// Returns an error if not all bytes were consumed.
+	pub fn assert_finished(&self) -> Result<(), SyntaxError> {
+		if !self.reader.is_empty() {
+			let offset = self.reader.offset() as u32;
+			let len = self.reader.remaining().len() as u32;
+			let span = Span {
+				offset,
+				len,
+			};
+			bail!("Trailing characters", @span)
+		}
+		Ok(())
 	}
 }
 

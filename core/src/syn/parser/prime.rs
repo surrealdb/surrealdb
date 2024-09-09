@@ -22,7 +22,7 @@ impl Parser<'_> {
 	/// Parse a what primary.
 	///
 	/// What's are values which are more restricted in what expressions they can contain.
-	pub async fn parse_what_primary(&mut self, ctx: &mut Stk) -> ParseResult<Value> {
+	pub(super) async fn parse_what_primary(&mut self, ctx: &mut Stk) -> ParseResult<Value> {
 		let token = self.peek();
 		match token.kind {
 			t!("r\"") => {
@@ -64,7 +64,7 @@ impl Parser<'_> {
 				expected!(self, t!(">"));
 				let start = expected!(self, t!("{")).span;
 				let block = self.parse_block(ctx, start).await?;
-				Ok(Value::Future(Box::new(crate::sql::Future(block))))
+				Ok(Value::Future(Box::new(super::sql::Future(block))))
 			}
 			t!("|") => {
 				let start = self.pop_peek().span;
@@ -111,7 +111,7 @@ impl Parser<'_> {
 		}
 	}
 
-	pub async fn try_parse_inline(
+	pub(super) async fn try_parse_inline(
 		&mut self,
 		ctx: &mut Stk,
 		subject: &Value,
@@ -124,7 +124,7 @@ impl Parser<'_> {
 					break;
 				}
 
-				let arg = ctx.run(|ctx| self.parse_value_field(ctx)).await?;
+				let arg = ctx.run(|ctx| self.parse_value_inherit(ctx)).await?;
 				args.push(arg);
 
 				if !self.eat(t!(",")) {
@@ -141,7 +141,7 @@ impl Parser<'_> {
 		}
 	}
 
-	pub fn parse_number_like_prime(&mut self) -> ParseResult<Value> {
+	pub(super) fn parse_number_like_prime(&mut self) -> ParseResult<Value> {
 		let token = self.peek();
 		match token.kind {
 			TokenKind::Glued(Glued::Duration) => {
@@ -165,7 +165,7 @@ impl Parser<'_> {
 	}
 
 	/// Parse an expressions
-	pub async fn parse_idiom_expression(&mut self, ctx: &mut Stk) -> ParseResult<Value> {
+	pub(super) async fn parse_idiom_expression(&mut self, ctx: &mut Stk) -> ParseResult<Value> {
 		let token = self.peek();
 		let value = match token.kind {
 			t!("NONE") => {
@@ -200,7 +200,7 @@ impl Parser<'_> {
 					self.expect_closing_delimiter(t!(">"), token.span)?;
 					let next = expected!(self, t!("{")).span;
 					let block = self.parse_block(ctx, next).await?;
-					Value::Future(Box::new(crate::sql::Future(block)))
+					Value::Future(Box::new(super::sql::Future(block)))
 				} else {
 					unexpected!(self, token, "expected either a `<-` or a future")
 				}
@@ -340,7 +340,7 @@ impl Parser<'_> {
 	///
 	/// # Parser state
 	/// Expects the starting `[` to already be eaten and its span passed as an argument.
-	pub async fn parse_array(&mut self, ctx: &mut Stk, start: Span) -> ParseResult<Array> {
+	pub(super) async fn parse_array(&mut self, ctx: &mut Stk, start: Span) -> ParseResult<Array> {
 		let mut values = Vec::new();
 		enter_object_recursion!(this = self => {
 			loop {
@@ -348,7 +348,7 @@ impl Parser<'_> {
 					break;
 				}
 
-				let value = ctx.run(|ctx| this.parse_value_field(ctx)).await?;
+				let value = ctx.run(|ctx| this.parse_value_inherit(ctx)).await?;
 				dbg!(this.lexer.current_span());
 				values.push(value);
 
@@ -366,7 +366,7 @@ impl Parser<'_> {
 	///
 	/// # Parser State
 	/// Expects the starting `|` already be eaten and its span passed as an argument.
-	pub fn parse_mock(&mut self, start: Span) -> ParseResult<Mock> {
+	pub(super) fn parse_mock(&mut self, start: Span) -> ParseResult<Mock> {
 		let name = self.next_token_value::<Ident>()?.0;
 		expected!(self, t!(":"));
 		let from = self.next_token_value()?;
@@ -379,7 +379,7 @@ impl Parser<'_> {
 		}
 	}
 
-	pub async fn parse_closure_or_mock(
+	pub(super) async fn parse_closure_or_mock(
 		&mut self,
 		ctx: &mut Stk,
 		start: Span,
@@ -390,7 +390,7 @@ impl Parser<'_> {
 		}
 	}
 
-	pub async fn parse_closure(&mut self, ctx: &mut Stk, start: Span) -> ParseResult<Value> {
+	pub(super) async fn parse_closure(&mut self, ctx: &mut Stk, start: Span) -> ParseResult<Value> {
 		let mut args = Vec::new();
 		loop {
 			if self.eat(t!("|")) {
@@ -420,7 +420,7 @@ impl Parser<'_> {
 		self.parse_closure_after_args(ctx, args).await
 	}
 
-	pub async fn parse_closure_after_args(
+	pub(super) async fn parse_closure_after_args(
 		&mut self,
 		ctx: &mut Stk,
 		args: Vec<(Ident, Kind)>,
@@ -431,7 +431,7 @@ impl Parser<'_> {
 			let body = Value::Block(Box::new(ctx.run(|ctx| self.parse_block(ctx, start)).await?));
 			(returns, body)
 		} else {
-			let body = ctx.run(|ctx| self.parse_value_class(ctx)).await?;
+			let body = ctx.run(|ctx| self.parse_value_inherit(ctx)).await?;
 			(None, body)
 		};
 
@@ -460,7 +460,7 @@ impl Parser<'_> {
 		}
 	}
 
-	pub async fn parse_inner_subquery_or_coordinate(
+	pub(super) async fn parse_inner_subquery_or_coordinate(
 		&mut self,
 		ctx: &mut Stk,
 		start: Span,
@@ -546,12 +546,12 @@ impl Parser<'_> {
 					self.expect_closing_delimiter(t!(")"), start)?;
 					return Ok(Value::Geometry(Geometry::Point(Point::from((x, y)))));
 				} else {
-					let value = ctx.run(|ctx| self.parse_value_field(ctx)).await?;
+					let value = ctx.run(|ctx| self.parse_value_inherit(ctx)).await?;
 					Subquery::Value(value)
 				}
 			}
 			_ => {
-				let value = ctx.run(|ctx| self.parse_value_field(ctx)).await?;
+				let value = ctx.run(|ctx| self.parse_value_inherit(ctx)).await?;
 				Subquery::Value(value)
 			}
 		};
@@ -569,7 +569,7 @@ impl Parser<'_> {
 		Ok(Value::Subquery(Box::new(res)))
 	}
 
-	pub async fn parse_inner_subquery(
+	pub(super) async fn parse_inner_subquery(
 		&mut self,
 		ctx: &mut Stk,
 		start: Option<Span>,
@@ -637,7 +637,7 @@ impl Parser<'_> {
 				Subquery::Rebuild(stmt)
 			}
 			_ => {
-				let value = ctx.run(|ctx| self.parse_value_field(ctx)).await?;
+				let value = ctx.run(|ctx| self.parse_value_inherit(ctx)).await?;
 				Subquery::Value(value)
 			}
 		};
@@ -681,7 +681,11 @@ impl Parser<'_> {
 
 	/// Parses a strand with legacy rules, parsing to a record id, datetime or uuid if the string
 	/// matches.
-	pub async fn reparse_legacy_strand(&mut self, ctx: &mut Stk, text: &str) -> Option<Value> {
+	pub(super) async fn reparse_legacy_strand(
+		&mut self,
+		ctx: &mut Stk,
+		text: &str,
+	) -> Option<Value> {
 		if let Ok(x) = Parser::new(text.as_bytes()).parse_thing(ctx).await {
 			return Some(Value::Thing(x));
 		}
@@ -702,7 +706,7 @@ impl Parser<'_> {
 				break;
 			}
 
-			let arg = ctx.run(|ctx| self.parse_value_field(ctx)).await?;
+			let arg = ctx.run(|ctx| self.parse_value_inherit(ctx)).await?;
 			args.push(arg);
 
 			if !self.eat(t!(",")) {
@@ -722,8 +726,8 @@ impl Parser<'_> {
 
 #[cfg(test)]
 mod tests {
+	use super::syn::Parse;
 	use super::*;
-	use crate::syn::Parse;
 
 	#[test]
 	fn subquery_expression_statement() {

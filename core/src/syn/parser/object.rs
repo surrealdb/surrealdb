@@ -149,7 +149,7 @@ impl Parser<'_> {
 
 				expected!(self, t!(":"));
 
-				let value = ctx.run(|ctx| self.parse_value_field(ctx)).await?;
+				let value = ctx.run(|ctx| self.parse_value_inherit(ctx)).await?;
 
 				// check for an object end, if it doesn't end it is not a geometry.
 				if !self.eat(t!(",")) {
@@ -226,7 +226,7 @@ impl Parser<'_> {
 
 		// found coordinates field, next must be a coordinates value but we don't know
 		// which until we match type.
-		let value = ctx.run(|ctx| self.parse_value_field(ctx)).await?;
+		let value = ctx.run(|ctx| self.parse_value_inherit(ctx)).await?;
 
 		if !self.eat(t!(",")) {
 			// no comma object must end early.
@@ -336,7 +336,7 @@ impl Parser<'_> {
 		// 'geometries' key can only happen in a GeometryCollection, so try to parse that.
 		expected!(self, t!(":"));
 
-		let value = ctx.run(|ctx| self.parse_value_field(ctx)).await?;
+		let value = ctx.run(|ctx| self.parse_value_inherit(ctx)).await?;
 
 		// if the object ends here, it is not a geometry.
 		if !self.eat(t!(",")) || self.peek_kind() == t!("}") {
@@ -468,7 +468,7 @@ impl Parser<'_> {
 				.map(Value::Object);
 		}
 		expected!(self, t!(":"));
-		let value = ctx.run(|ctx| self.parse_value_field(ctx)).await?;
+		let value = ctx.run(|ctx| self.parse_value_inherit(ctx)).await?;
 		let comma = self.eat(t!(","));
 		if !self.eat(t!("}")) {
 			// the object didn't end, either an error or not a geometry.
@@ -583,7 +583,7 @@ impl Parser<'_> {
 		mut map: BTreeMap<String, Value>,
 		start: Span,
 	) -> ParseResult<Object> {
-		let v = ctx.run(|ctx| self.parse_value_field(ctx)).await?;
+		let v = ctx.run(|ctx| self.parse_value_inherit(ctx)).await?;
 		map.insert(key, v);
 		if !self.eat(t!(",")) {
 			self.expect_closing_delimiter(t!("}"), start)?;
@@ -654,12 +654,12 @@ impl Parser<'_> {
 	async fn parse_object_entry(&mut self, ctx: &mut Stk) -> ParseResult<(String, Value)> {
 		let text = self.parse_object_key()?;
 		expected!(self, t!(":"));
-		let value = ctx.run(|ctx| self.parse_value_field(ctx)).await?;
+		let value = ctx.run(|ctx| self.parse_value_inherit(ctx)).await?;
 		Ok((text, value))
 	}
 
 	/// Parses the key of an object, i.e. `field` in the object `{ field: 1 }`.
-	pub fn parse_object_key(&mut self) -> ParseResult<String> {
+	pub(super) fn parse_object_key(&mut self) -> ParseResult<String> {
 		let token = self.peek();
 		match token.kind {
 			x if Self::kind_is_keyword_like(x) => {
@@ -689,8 +689,8 @@ impl Parser<'_> {
 
 #[cfg(test)]
 mod test {
+	use super::syn::Parse;
 	use super::*;
-	use crate::syn::Parse;
 
 	#[test]
 	fn block_value() {

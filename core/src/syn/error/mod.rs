@@ -1,5 +1,5 @@
 use crate::syn::token::Span;
-use std::{backtrace::Backtrace, fmt::Display};
+use std::fmt::Display;
 
 mod location;
 mod mac;
@@ -33,7 +33,6 @@ pub struct Diagnostic {
 /// A parsing error.
 #[derive(Debug)]
 pub struct SyntaxError {
-	backtrace: std::backtrace::Backtrace,
 	diagnostic: Box<Diagnostic>,
 	data_pending: bool,
 }
@@ -50,7 +49,6 @@ impl SyntaxError {
 		};
 
 		Self {
-			backtrace: Backtrace::force_capture(),
 			diagnostic: Box::new(diagnostic),
 			data_pending: false,
 		}
@@ -106,7 +104,6 @@ impl SyntaxError {
 	}
 
 	pub fn render_on(&self, source: &str) -> RenderedError {
-		println!("{}", &self.backtrace);
 		let mut res = RenderedError {
 			errors: Vec::new(),
 			snippets: Vec::new(),

@@ -12,7 +12,7 @@ use super::mac::pop_glued;
 mod number;
 
 /// A trait for parsing single tokens with a specific value.
-pub trait TokenValue: Sized {
+pub(crate) trait TokenValue: Sized {
 	fn from_token(parser: &mut Parser<'_>) -> ParseResult<Self>;
 }
 
@@ -166,11 +166,11 @@ impl TokenValue for Regex {
 
 impl Parser<'_> {
 	/// Parse a token value from the next token in the parser.
-	pub fn next_token_value<V: TokenValue>(&mut self) -> ParseResult<V> {
+	pub(crate) fn next_token_value<V: TokenValue>(&mut self) -> ParseResult<V> {
 		V::from_token(self)
 	}
 
-	pub fn parse_flexible_ident(&mut self) -> ParseResult<Ident> {
+	pub(crate) fn parse_flexible_ident(&mut self) -> ParseResult<Ident> {
 		let token = self.next();
 		match token.kind {
 			TokenKind::Digits => {

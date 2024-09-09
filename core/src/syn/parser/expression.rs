@@ -40,7 +40,7 @@ impl Parser<'_> {
 	/// A generic loose ident like `foo` in for example `foo.bar` can be two different values
 	/// depending on context: a table or a field the current document. This function parses loose
 	/// idents as a table, see [`parse_value_field`] for parsing loose idents as fields
-	pub async fn parse_value_class(&mut self, ctx: &mut Stk) -> ParseResult<Value> {
+	pub async fn parse_value_table(&mut self, ctx: &mut Stk) -> ParseResult<Value> {
 		let old = self.table_as_field;
 		self.table_as_field = false;
 		let res = self.pratt_parse_expr(ctx, BindingPower::Base).await;
@@ -53,7 +53,7 @@ impl Parser<'_> {
 	/// A generic loose ident like `foo` in for example `foo.bar` can be two different values
 	/// depending on context: a table or a field the current document. This function parses loose
 	/// idents as a field, see [`parse_value`] for parsing loose idents as table
-	pub async fn parse_value_field(&mut self, ctx: &mut Stk) -> ParseResult<Value> {
+	pub(super) async fn parse_value_field(&mut self, ctx: &mut Stk) -> ParseResult<Value> {
 		let old = self.table_as_field;
 		self.table_as_field = true;
 		let res = self.pratt_parse_expr(ctx, BindingPower::Base).await;
@@ -61,8 +61,15 @@ impl Parser<'_> {
 		res
 	}
 
+	/// Parsers a generic value.
+	///
+	/// Inherits how loose identifiers are parsed from it's caller.
+	pub(super) async fn parse_value_inherit(&mut self, ctx: &mut Stk) -> ParseResult<Value> {
+		self.pratt_parse_expr(ctx, BindingPower::Base).await;
+	}
+
 	/// Parse a assigner operator.
-	pub fn parse_assigner(&mut self) -> ParseResult<Operator> {
+	pub(super) fn parse_assigner(&mut self) -> ParseResult<Operator> {
 		let token = self.next();
 		match token.kind {
 			t!("=") => Ok(Operator::Equal),
@@ -260,7 +267,7 @@ impl Parser<'_> {
 		}
 	}
 
-	pub fn parse_knn(&mut self, token: Token) -> ParseResult<Operator> {
+	pub(super) fn parse_knn(&mut self, token: Token) -> ParseResult<Operator> {
 		let amount = self.next_token_value()?;
 		let op = if self.eat(t!(",")) {
 			let token = self.peek();

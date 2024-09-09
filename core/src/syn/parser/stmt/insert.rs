@@ -1,8 +1,9 @@
 use reblessive::Stk;
 
 use crate::{
-	sql::{statements::InsertStatement, Data, Value},
+	sql::{statements::InsertStatement, subquery, Data, Idiom, Subquery, Value},
 	syn::{
+		error::bail,
 		parser::{mac::expected, ParseResult, Parser},
 		token::t,
 	},
@@ -39,18 +40,18 @@ impl Parser<'_> {
 				expected!(self, t!("VALUES"));
 
 				let start = expected!(self, t!("(")).span;
-				let mut values = vec![ctx.run(|ctx| self.parse_value_class(ctx)).await?];
+				let mut values = vec![ctx.run(|ctx| self.parse_value_table(ctx)).await?];
 				while self.eat(t!(",")) {
-					values.push(ctx.run(|ctx| self.parse_value_class(ctx)).await?);
+					values.push(ctx.run(|ctx| self.parse_value_table(ctx)).await?);
 				}
 				self.expect_closing_delimiter(t!(")"), start)?;
 
 				let mut values = vec![values];
 				while self.eat(t!(",")) {
 					let start = expected!(self, t!("(")).span;
-					let mut inner_values = vec![ctx.run(|ctx| self.parse_value_class(ctx)).await?];
+					let mut inner_values = vec![ctx.run(|ctx| self.parse_value_table(ctx)).await?];
 					while self.eat(t!(",")) {
-						inner_values.push(ctx.run(|ctx| self.parse_value_class(ctx)).await?);
+						inner_values.push(ctx.run(|ctx| self.parse_value_table(ctx)).await?);
 					}
 					values.push(inner_values);
 					self.expect_closing_delimiter(t!(")"), start)?;
@@ -64,7 +65,7 @@ impl Parser<'_> {
 				)
 			}
 			_ => {
-				let value = ctx.run(|ctx| self.parse_value_class(ctx)).await?;
+				let value = ctx.run(|ctx| self.parse_value_table(ctx)).await?;
 				Data::SingleExpression(value)
 			}
 		};
@@ -91,19 +92,117 @@ impl Parser<'_> {
 		})
 	}
 
+	fn extract_idiom(subquery: Subquery) -> Option<Idiom> {
+		let Subquery::Value(Value::Idiom(idiom)) = subquery else {
+			return None;
+		};
+
+		Some(idiom)
+	}
+
+	async fn parse_insert_values(&mut self, ctx: &mut Stk) -> ParseResult<Data> {
+		let token = self.peek();
+		// not a `(` so it cant be `(a,b) VALUES (c,d)`
+		if token.kind != t!("(") {
+			let value = ctx.run(|ctx| self.parse_value_table(ctx)).await?;
+			return Data::SingleExpression(value);
+		}
+
+		// might still be a subquery `(select foo from ...`
+		self.pop_peek();
+		let before = self.peek().span;
+		let subquery = self.parse_inner_subquery(ctx, None)?;
+		let subquery_span = before.covers(self.last_span());
+
+		let mut idioms = Vec::new();
+		let select_span = if !self.eat(t(",")) {
+			// not a comma so it might be a single (a) VALUES (b) or a subquery
+			self.expect_closing_delimiter(t!(")"), token.span)?;
+			let select_span = token.span.covers(self.last_span());
+
+			if !self.eat(t!("VALUES")) {
+				// found a subquery
+				return Ok(Data::SingleExpression(Value::Subquery(subquery)));
+			}
+
+			// found an values expression, so subquery must be an idiom
+			let Some(idiom) = Self::extract_idiom(subquery) else {
+				bail!("Invalid value, expected an idiom in INSERT VALUES statement.",
+					@subquery_span => "Here only idioms are allowed")
+			};
+
+			idioms.push(idiom);
+			select_span
+		} else {
+			// found an values expression, so subquery must be an idiom
+			let Some(idiom) = Self::extract_idiom(subquery) else {
+				bail!("Invalid value, expected an idiom in INSERT VALUES statement.",
+					@subquery_span => "Here only idioms are allowed")
+			};
+
+			idioms.push(idiom);
+
+			loop {
+				idioms.push(self.parse_plain_idiom(ctx).await?);
+
+				if !self.eat(t!(",")) {
+					break;
+				}
+			}
+
+			self.expect_closing_delimiter(t!(")"), token.span)?;
+			token.span.covers(self.last_span())
+		};
+
+		expected!(self, t!("VALUES"));
+		let mut insertions = Vec::new();
+		loop {
+			let mut values = Vec::new();
+			let start = expected!(self, t!("(")).span;
+			loop {
+				values.push(self.parse_value_table(ctx).await?);
+
+				if !self.eat(t!(",")) {
+					break;
+				}
+			}
+
+			self.expect_closing_delimiter(t!(")"), start)?;
+			let span = start.covers(self.last_span());
+
+			if values.len() != idioms.len() {
+				bail!("Invalid numbers of values to insert, found {} value(s) but selector requires {} value(s).",
+					values.len(), idioms.len(),
+					@span,
+					@select_span => "This selector has {} field(s)",idioms.len()
+				);
+			}
+
+			insertions.push(values);
+
+			if !self.eat(t!(",")) {
+				break;
+			}
+		}
+
+		Ok(Data::ValuesExpression(
+			insertions.into_iter().map(|row| idioms.iter().cloned().zip(row).collect()).collect(),
+		))
+	}
+
 	async fn parse_insert_update(&mut self, ctx: &mut Stk) -> ParseResult<Data> {
 		expected!(self, t!("DUPLICATE"));
 		expected!(self, t!("KEY"));
 		expected!(self, t!("UPDATE"));
 		let l = self.parse_plain_idiom(ctx).await?;
 		let o = self.parse_assigner()?;
-		let r = ctx.run(|ctx| self.parse_value_class(ctx)).await?;
+		let r = ctx.run(|ctx| self.parse_value_field(ctx)).await?;
 		let mut data = vec![(l, o, r)];
 
 		while self.eat(t!(",")) {
 			let l = self.parse_plain_idiom(ctx).await?;
 			let o = self.parse_assigner()?;
-			let r = ctx.run(|ctx| self.parse_value_class(ctx)).await?;
+			let r = ctx.run(|ctx| self.parse_value_field(ctx)).await?;
 			data.push((l, o, r))
 		}
 

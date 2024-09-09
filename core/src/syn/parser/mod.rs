@@ -277,7 +277,7 @@ impl<'a> Parser<'a> {
 
 	/// Returns the next n'th token without consuming it.
 	/// `peek_token_at(0)` is equivalent to `peek`.
-	pub fn peek_token_at(&mut self, at: u8) -> Token {
+	pub(crate) fn peek_token_at(&mut self, at: u8) -> Token {
 		for _ in self.token_buffer.len()..=at {
 			let r = loop {
 				let r = self.lexer.next_token();
@@ -317,6 +317,10 @@ impl<'a> Parser<'a> {
 	///  returns the token of the last consumed token.
 	pub fn last_span(&mut self) -> Span {
 		self.last_span
+	}
+
+	pub fn assert_finished(&self) -> ParseResult<()> {
+		self.lexer.assert_finished()
 	}
 
 	/// Eat the next token if it is of the given kind.

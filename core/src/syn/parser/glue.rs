@@ -12,7 +12,7 @@ use super::{GluedValue, ParseResult, Parser};
 
 impl Parser<'_> {
 	/// Glues the next token and returns the token after.
-	pub fn glue_and_peek1(&mut self) -> ParseResult<Token> {
+	pub(super) fn glue_and_peek1(&mut self) -> ParseResult<Token> {
 		let token = self.peek();
 		match token.kind {
 			TokenKind::Glued(_) => return Ok(self.peek1()),

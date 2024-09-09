@@ -4,7 +4,7 @@ use super::Parser;
 
 impl Parser<'_> {
 	/// Returns true if the next token can start a statement.
-	pub fn kind_starts_statement(kind: TokenKind) -> bool {
+	pub(super) fn kind_starts_statement(kind: TokenKind) -> bool {
 		matches!(
 			kind,
 			t!("ACCESS")
@@ -37,7 +37,7 @@ impl Parser<'_> {
 	}
 
 	/// Returns if a token kind can start an identifier.
-	pub fn kind_is_keyword_like(t: TokenKind) -> bool {
+	pub(super) fn kind_is_keyword_like(t: TokenKind) -> bool {
 		matches!(
 			t,
 			TokenKind::Keyword(_)
@@ -49,7 +49,7 @@ impl Parser<'_> {
 	}
 
 	/// Returns if a token kind can start an identifier.
-	pub fn kind_is_identifier(t: TokenKind) -> bool {
+	pub(super) fn kind_is_identifier(t: TokenKind) -> bool {
 		matches!(
 			t,
 			TokenKind::Keyword(_)
@@ -61,7 +61,7 @@ impl Parser<'_> {
 		)
 	}
 
-	pub fn kind_starts_record_id_key(kind: TokenKind) -> bool {
+	pub(super) fn kind_starts_record_id_key(kind: TokenKind) -> bool {
 		Self::kind_is_identifier(kind)
 			|| matches!(
 				kind,
@@ -73,7 +73,7 @@ impl Parser<'_> {
 			)
 	}
 
-	pub fn kind_starts_subquery(kind: TokenKind) -> bool {
+	pub(super) fn kind_starts_subquery(kind: TokenKind) -> bool {
 		matches!(
 			kind,
 			t!("RETURN")
@@ -90,7 +90,7 @@ impl Parser<'_> {
 		)
 	}
 
-	pub fn kind_starts_prime_value(kind: TokenKind) -> bool {
+	pub(super) fn kind_starts_prime_value(kind: TokenKind) -> bool {
 		matches!(
 			kind,
 			t!("+")

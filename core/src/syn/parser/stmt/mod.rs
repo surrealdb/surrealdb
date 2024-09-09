@@ -43,7 +43,7 @@ mod update;
 mod upsert;
 
 impl Parser<'_> {
-	pub async fn parse_stmt_list(&mut self, ctx: &mut Stk) -> ParseResult<Statements> {
+	pub(super) async fn parse_stmt_list(&mut self, ctx: &mut Stk) -> ParseResult<Statements> {
 		let mut res = Vec::new();
 		loop {
 			match self.peek_kind() {
@@ -214,7 +214,7 @@ impl Parser<'_> {
 			}
 			_ => {
 				// TODO: Provide information about keywords.
-				let value = ctx.run(|ctx| self.parse_value_field(ctx)).await?;
+				let value = ctx.run(|ctx| self.parse_value_table(ctx)).await?;
 				Ok(Self::refine_stmt_value(value))
 			}
 		}
@@ -303,7 +303,7 @@ impl Parser<'_> {
 			}
 			_ => {
 				// TODO: Provide information about keywords.
-				let v = ctx.run(|ctx| self.parse_value_field(ctx)).await?;
+				let v = ctx.run(|ctx| self.parse_value_inherit(ctx)).await?;
 				Ok(Self::refine_entry_value(v))
 			}
 		}
@@ -471,10 +471,10 @@ impl Parser<'_> {
 	///
 	/// # Parser State
 	/// Expects `FOR` to already be consumed.
-	pub async fn parse_for_stmt(&mut self, stk: &mut Stk) -> ParseResult<ForeachStatement> {
+	pub(super) async fn parse_for_stmt(&mut self, stk: &mut Stk) -> ParseResult<ForeachStatement> {
 		let param = self.next_token_value()?;
 		expected!(self, t!("IN"));
-		let range = stk.run(|stk| self.parse_value_class(stk)).await?;
+		let range = stk.run(|stk| self.parse_value_inherit(stk)).await?;
 
 		let span = expected!(self, t!("{")).span;
 		let block = self.parse_block(stk, span).await?;
@@ -489,7 +489,7 @@ impl Parser<'_> {
 	///
 	/// # Parser State
 	/// Expects `INFO` to already be consumed.
-	pub(crate) fn parse_info_stmt(&mut self) -> ParseResult<InfoStatement> {
+	pub(super) fn parse_info_stmt(&mut self) -> ParseResult<InfoStatement> {
 		expected!(self, t!("FOR"));
 		let next = self.next();
 		let mut stmt = match next.kind {
@@ -526,7 +526,7 @@ impl Parser<'_> {
 	///
 	/// # Parser State
 	/// Expects `KILL` to already be consumed.
-	pub(crate) fn parse_kill_stmt(&mut self) -> ParseResult<KillStatement> {
+	pub(super) fn parse_kill_stmt(&mut self) -> ParseResult<KillStatement> {
 		let peek = self.peek();
 		let id = match peek.kind {
 			t!("u\"") | t!("u'") => self.next_token_value().map(Value::Uuid)?,
@@ -542,7 +542,7 @@ impl Parser<'_> {
 	///
 	/// # Parser State
 	/// Expects `LIVE` to already be consumed.
-	pub(crate) async fn parse_live_stmt(&mut self, stk: &mut Stk) -> ParseResult<LiveStatement> {
+	pub(super) async fn parse_live_stmt(&mut self, stk: &mut Stk) -> ParseResult<LiveStatement> {
 		expected!(self, t!("SELECT"));
 
 		let expr = match self.peek_kind() {
@@ -567,7 +567,7 @@ impl Parser<'_> {
 	///
 	/// # Parser State
 	/// Expects `OPTION` to already be consumed.
-	pub(crate) fn parse_option_stmt(&mut self) -> ParseResult<OptionStatement> {
+	pub(super) fn parse_option_stmt(&mut self) -> ParseResult<OptionStatement> {
 		let name = self.next_token_value()?;
 		let what = if self.eat(t!("=")) {
 			let next = self.next();
@@ -585,7 +585,7 @@ impl Parser<'_> {
 		})
 	}
 
-	pub fn parse_rebuild_stmt(&mut self) -> ParseResult<RebuildStatement> {
+	pub(super) fn parse_rebuild_stmt(&mut self) -> ParseResult<RebuildStatement> {
 		let next = self.next();
 		let res = match next.kind {
 			t!("INDEX") => {
@@ -615,11 +615,11 @@ impl Parser<'_> {
 	///
 	/// # Parser State
 	/// Expects `RETURN` to already be consumed.
-	pub(crate) async fn parse_return_stmt(
+	pub(super) async fn parse_return_stmt(
 		&mut self,
 		ctx: &mut Stk,
 	) -> ParseResult<OutputStatement> {
-		let what = ctx.run(|ctx| self.parse_value_field(ctx)).await?;
+		let what = ctx.run(|ctx| self.parse_value_inherit(ctx)).await?;
 		let fetch = self.try_parse_fetch(ctx).await?;
 		Ok(OutputStatement {
 			what,
@@ -636,7 +636,7 @@ impl Parser<'_> {
 	///
 	/// # Parser State
 	/// Expects `LET` to already be consumed.
-	pub(crate) async fn parse_let_stmt(&mut self, ctx: &mut Stk) -> ParseResult<SetStatement> {
+	pub(super) async fn parse_let_stmt(&mut self, ctx: &mut Stk) -> ParseResult<SetStatement> {
 		let name = self.next_token_value::<Param>()?.0 .0;
 		let kind = if self.eat(t!(":")) {
 			Some(self.parse_inner_kind(ctx).await?)
@@ -644,7 +644,7 @@ impl Parser<'_> {
 			None
 		};
 		expected!(self, t!("="));
-		let what = self.parse_value_class(ctx).await?;
+		let what = self.parse_value_inherit(ctx).await?;
 		Ok(SetStatement {
 			name,
 			what,
@@ -656,7 +656,7 @@ impl Parser<'_> {
 	///
 	/// # Parser State
 	/// Expects `SHOW` to already be consumed.
-	pub(crate) fn parse_show_stmt(&mut self) -> ParseResult<ShowStatement> {
+	pub(super) fn parse_show_stmt(&mut self) -> ParseResult<ShowStatement> {
 		expected!(self, t!("CHANGES"));
 		expected!(self, t!("FOR"));
 
@@ -699,7 +699,7 @@ impl Parser<'_> {
 	///
 	/// # Parser State
 	/// Expects `SLEEP` to already be consumed.
-	pub(crate) fn parse_sleep_stmt(&mut self) -> ParseResult<SleepStatement> {
+	pub(super) fn parse_sleep_stmt(&mut self) -> ParseResult<SleepStatement> {
 		let duration = self.next_token_value()?;
 		Ok(SleepStatement {
 			duration,
@@ -710,8 +710,8 @@ impl Parser<'_> {
 	///
 	/// # Parser State
 	/// Expects `THROW` to already be consumed.
-	pub(crate) async fn parse_throw_stmt(&mut self, ctx: &mut Stk) -> ParseResult<ThrowStatement> {
-		let error = self.parse_value_field(ctx).await?;
+	pub(super) async fn parse_throw_stmt(&mut self, ctx: &mut Stk) -> ParseResult<ThrowStatement> {
+		let error = self.parse_value_inherit(ctx).await?;
 		Ok(ThrowStatement {
 			error,
 		})

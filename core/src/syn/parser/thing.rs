@@ -16,7 +16,11 @@ use crate::{
 use std::{cmp::Ordering, ops::Bound};
 
 impl Parser<'_> {
-	pub async fn parse_record_string(&mut self, ctx: &mut Stk, double: bool) -> ParseResult<Thing> {
+	pub(crate) async fn parse_record_string(
+		&mut self,
+		ctx: &mut Stk,
+		double: bool,
+	) -> ParseResult<Thing> {
 		let thing = self.parse_thing(ctx).await?;
 
 		debug_assert!(self.last_span().is_followed_by(&self.peek_whitespace().span));
@@ -29,7 +33,7 @@ impl Parser<'_> {
 		Ok(thing)
 	}
 
-	pub async fn parse_thing_or_range(
+	pub(crate) async fn parse_thing_or_range(
 		&mut self,
 		stk: &mut Stk,
 		ident: String,
@@ -118,10 +122,10 @@ impl Parser<'_> {
 	}
 
 	/// Parse an range
-	pub async fn parse_range(&mut self, ctx: &mut Stk) -> ParseResult<Range> {
+	pub(crate) async fn parse_range(&mut self, ctx: &mut Stk) -> ParseResult<Range> {
 		// Check for beginning id
 		let beg = if Self::kind_is_identifier(self.peek_whitespace().kind) {
-			let v = ctx.run(|ctx| self.parse_value_class(ctx)).await?;
+			let v = ctx.run(|ctx| self.parse_value_table(ctx)).await?;
 
 			if self.eat_whitespace(t!(">")) {
 				Bound::Excluded(v)
@@ -138,7 +142,7 @@ impl Parser<'_> {
 
 		// parse ending id.
 		let end = if Self::kind_is_identifier(self.peek_whitespace().kind) {
-			let v = ctx.run(|ctx| self.parse_value_class(ctx)).await?;
+			let v = ctx.run(|ctx| self.parse_value_table(ctx)).await?;
 			if inclusive {
 				Bound::Included(v)
 			} else {
@@ -154,12 +158,12 @@ impl Parser<'_> {
 		})
 	}
 
-	pub async fn parse_thing(&mut self, ctx: &mut Stk) -> ParseResult<Thing> {
+	pub(crate) async fn parse_thing(&mut self, ctx: &mut Stk) -> ParseResult<Thing> {
 		let ident = self.next_token_value::<Ident>()?.0;
 		self.parse_thing_from_ident(ctx, ident).await
 	}
 
-	pub async fn parse_thing_from_ident(
+	pub(crate) async fn parse_thing_from_ident(
 		&mut self,
 		ctx: &mut Stk,
 		ident: String,
@@ -174,7 +178,7 @@ impl Parser<'_> {
 		})
 	}
 
-	pub async fn parse_id(&mut self, stk: &mut Stk) -> ParseResult<Id> {
+	pub(crate) async fn parse_id(&mut self, stk: &mut Stk) -> ParseResult<Id> {
 		let token = self.peek_whitespace();
 		match token.kind {
 			t!("u'") | t!("u\"") => Ok(Id::Uuid(self.next_token_value()?)),

@@ -2079,6 +2079,50 @@ fn parse_insert() {
 }
 
 #[test]
+fn parse_insert_select() {
+	let res = test_parse!(parse_stmt, r#"INSERT IGNORE INTO bar (select foo from baz)"#).unwrap();
+	assert_eq!(
+		res,
+		Statement::Insert(InsertStatement {
+			into: Some(Value::Param(Param(Ident("foo".to_owned())))),
+			data: Data::SingleExpression(Value::Subquery(Box::new(Subquery::Select(
+				SelectStatement {
+					expr: Fields(
+						vec![Value::Idiom(Idiom(vec![Part::Field(Ident("foo".to_string()))]))],
+						false
+					),
+					omit: (),
+					only: (),
+					what: Values(vec![Value::Idiom(Idiom(vec![Part::Field(Ident(
+						"baz".to_string()
+					))]))]),
+					with: None,
+					cond: None,
+					split: None,
+					group: None,
+					order: None,
+					limit: None,
+					start: None,
+					fetch: None,
+					version: None,
+					timeout: None,
+					parallel: false,
+					explain: None,
+					tempfiles: false
+				}
+			)))),
+			ignore: true,
+			update: None,
+			output: None,
+			version: None,
+			timeout: None,
+			parallel: false,
+			relation: false,
+		}),
+	)
+}
+
+#[test]
 fn parse_kill() {
 	let res = test_parse!(parse_stmt, r#"KILL $param"#).unwrap();
 	assert_eq!(

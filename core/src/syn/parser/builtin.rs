@@ -461,7 +461,7 @@ pub(crate) static PATHS: phf::Map<UniCase<&'static str>, PathKind> = phf_map! {
 
 impl Parser<'_> {
 	/// Parse a builtin path.
-	pub async fn parse_builtin(&mut self, stk: &mut Stk, start: Span) -> ParseResult<Value> {
+	pub(super) async fn parse_builtin(&mut self, stk: &mut Stk, start: Span) -> ParseResult<Value> {
 		let mut last_span = start;
 		while self.eat(t!("::")) {
 			let peek = self.peek();
@@ -515,7 +515,7 @@ impl Parser<'_> {
 	}
 
 	/// Parse a call to a builtin function.
-	pub async fn parse_builtin_function(
+	pub(super) async fn parse_builtin_function(
 		&mut self,
 		stk: &mut Stk,
 		name: String,
@@ -527,7 +527,7 @@ impl Parser<'_> {
 				break;
 			}
 
-			let arg = stk.run(|ctx| self.parse_value_field(ctx)).await?;
+			let arg = stk.run(|ctx| self.parse_value_inherit(ctx)).await?;
 			args.push(arg);
 
 			if !self.eat(t!(",")) {

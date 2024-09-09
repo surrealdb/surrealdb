@@ -9,7 +9,7 @@ use crate::syn::{
 
 impl<'a> Lexer<'a> {
 	/// Eats a single line comment.
-	pub fn eat_single_line_comment(&mut self) {
+	pub(super) fn eat_single_line_comment(&mut self) {
 		loop {
 			let Some(byte) = self.reader.next() else {
 				break;
@@ -45,7 +45,7 @@ impl<'a> Lexer<'a> {
 	}
 
 	/// Eats a multi line comment and returns an error if `*/` would be missing.
-	pub fn eat_multi_line_comment(&mut self) -> Result<(), SyntaxError> {
+	pub(super) fn eat_multi_line_comment(&mut self) -> Result<(), SyntaxError> {
 		let start_span = self.current_span();
 		loop {
 			let Some(byte) = self.reader.next() else {
@@ -64,7 +64,7 @@ impl<'a> Lexer<'a> {
 	}
 
 	/// Eat whitespace like spaces tables and new-lines.
-	pub fn eat_whitespace(&mut self) {
+	pub(super) fn eat_whitespace(&mut self) {
 		loop {
 			let Some(byte) = self.reader.peek() else {
 				return;
@@ -101,7 +101,7 @@ impl<'a> Lexer<'a> {
 	}
 
 	/// Lex digits tokens
-	pub fn lex_digits(&mut self) -> Token {
+	pub(super) fn lex_digits(&mut self) -> Token {
 		while let Some(b'0'..=b'9' | b'_') = self.reader.peek() {
 			self.reader.next();
 		}
@@ -110,7 +110,7 @@ impl<'a> Lexer<'a> {
 	}
 
 	/// Lex the next token, starting from the given byte.
-	pub fn lex_ascii(&mut self, byte: u8) -> Token {
+	pub(super) fn lex_ascii(&mut self, byte: u8) -> Token {
 		let kind = match byte {
 			b'{' => t!("{"),
 			b'}' => t!("}"),
