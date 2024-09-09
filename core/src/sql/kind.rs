@@ -70,7 +70,7 @@ impl Kind {
 		}
 	}
 
-	// Returns true if this type is a literal
+	// Returns true if this type is a literal, or contains a literal
 	pub(crate) fn is_literal_nested(&self) -> bool {
 		if matches!(self, Kind::Literal(_)) {
 			return true;
