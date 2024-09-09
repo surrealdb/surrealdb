@@ -88,7 +88,7 @@ impl Document {
 		// two separtate UNIQUE index definitions, and it
 		// wasn't possible to detect which record was the
 		// correct one to be updated
-		let _ = chn.send(Err(Error::Unreachable("Internal error"))).await;
+		let _ = chn.send(Err(fail!("Internal error"))).await;
 		// Break the loop
 		Ok(())
 	}
