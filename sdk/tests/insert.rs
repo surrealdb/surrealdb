@@ -147,7 +147,7 @@ async fn insert_statement_on_duplicate_key() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn insert_statement_with_unique_index_and_duplicate() -> Result<(), Error> {
+async fn insert_with_savepoint() -> Result<(), Error> {
 	let sql = "
         DEFINE INDEX a ON pokemon FIELDS a UNIQUE;
         DEFINE INDEX b ON pokemon FIELDS b UNIQUE;
