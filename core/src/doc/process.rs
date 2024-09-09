@@ -103,6 +103,6 @@ impl Document {
 		// two separate UNIQUE index definitions, and it
 		// wasn't possible to detect which record was the
 		// correct one to be updated
-		Err(Error::Unreachable("Internal error"))
+		Err(fail!("Internal error"))
 	}
 }
