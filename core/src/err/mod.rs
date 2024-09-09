@@ -48,7 +48,7 @@ pub enum Error {
 
 	/// The database encountered unreachable logic
 	#[error("The database encountered unreachable logic: {0}")]
-	Unreachable(&'static str),
+	Unreachable(String),
 
 	/// Statement has been deprecated
 	#[error("{0}")]

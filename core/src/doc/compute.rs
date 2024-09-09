@@ -50,7 +50,7 @@ impl Document {
 				Statement::Relate(_) => doc.relate(stk, ctx, opt, stm).await,
 				Statement::Delete(_) => doc.delete(stk, ctx, opt, stm).await,
 				Statement::Insert(_) => doc.insert(stk, ctx, opt, stm).await,
-				_ => unreachable!(),
+				_ => return Err(fail!("Unexpected statement type")),
 			};
 			// Check the result
 			let res = match res {

@@ -4,17 +4,12 @@ mod common;
 mod graphql_integration {
 	use std::time::Duration;
 
-	use assert_fs::assert;
-	use http::header::HeaderValue;
-	use http::{header, Method};
-	use reqwest::Client;
+	use http::header;
 	use serde_json::json;
-	use surrealdb::headers::{AUTH_DB, AUTH_NS};
-	use surrealdb::sql;
 	use test_log::test;
 	use ulid::Ulid;
 
-	use super::common::{self, StartServerArguments, PASS, USER};
+	use super::common;
 
 	#[test(tokio::test)]
 	async fn basic() -> Result<(), Box<dyn std::error::Error>> {

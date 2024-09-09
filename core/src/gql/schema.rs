@@ -26,6 +26,7 @@ use serde_json::Number;
 
 use super::error::{resolver_error, GqlError};
 use super::ext::IntoExt;
+#[cfg(debug_assertions)]
 use super::ext::ValidatorExt;
 use crate::gql::error::{internal_error, schema_error, type_error};
 use crate::gql::ext::TryAsExt;
@@ -77,8 +78,8 @@ pub async fn generate_schema(
 ) -> Result<Schema, GqlError> {
 	let kvs = datastore.as_ref();
 	let tx = kvs.transaction(TransactionType::Read, LockType::Optimistic).await?;
-	let ns = session.ns.as_ref().expect("missing ns should have been caught");
-	let db = session.db.as_ref().expect("missing db should have been caught");
+	let ns = session.ns.as_ref().ok_or(GqlError::UnpecifiedNamespace)?;
+	let db = session.db.as_ref().ok_or(GqlError::UnpecifiedDatabase)?;
 	let tbs = tx.all_tb(ns, db).await?;
 	let mut query = Object::new("Query");
 	let mut types: Vec<Type> = Vec::new();
