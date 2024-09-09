@@ -108,11 +108,7 @@ impl Kind {
 											{
 												continue 'key;
 											}
-											kind if kinds
-												.iter()
-												.find(|k| *kind == k.to_kind())
-												.is_some() =>
-											{
+											kind if kinds.iter().any(|k| *kind == k.to_kind()) => {
 												continue 'key;
 											}
 											kind => {
