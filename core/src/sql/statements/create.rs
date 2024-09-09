@@ -1,4 +1,4 @@
-use crate::ctx::Context;
+use crate::ctx::{Context, MutableContext};
 use crate::dbs::{Iterator, Options, Statement};
 use crate::doc::CursorDoc;
 use crate::err::Error;
@@ -55,10 +55,19 @@ impl CreateStatement {
 		let version = self.version.as_ref().map(|v| v.to_u64());
 		// Ensure futures are stored
 		let opt = &opt.new_with_futures(false).with_version(version);
+		// Check if there is a timeout
+		let ctx = match self.timeout.as_ref() {
+			Some(timeout) => {
+				let mut ctx = MutableContext::new(&ctx);
+				ctx.add_timeout(*timeout.0)?;
+				ctx.freeze()
+			}
+			None => ctx.clone(),
+		};
 		// Loop over the create targets
 		for w in self.what.0.iter() {
-			let v = w.compute(stk, ctx, opt, doc).await?;
-			i.prepare(stk, ctx, opt, &stm, v).await.map_err(|e| match e {
+			let v = w.compute(stk, &ctx, opt, doc).await?;
+			i.prepare(stk, &ctx, opt, &stm, v).await.map_err(|e| match e {
 				Error::InvalidStatementTarget {
 					value: v,
 				} => Error::CreateStatement {
@@ -67,8 +76,14 @@ impl CreateStatement {
 				e => e,
 			})?;
 		}
+		// Process the statement
+		let res = i.output(stk, &ctx, opt, &stm).await?;
+		// Catch statement timeout
+		if ctx.is_timedout() {
+			return Err(Error::QueryTimedout);
+		}
 		// Output the results
-		match i.output(stk, ctx, opt, &stm).await? {
+		match res {
 			// This is a single record result
 			Value::Array(mut a) if self.only => match a.len() {
 				// There was exactly one result

@@ -1,4 +1,4 @@
-use crate::ctx::Context;
+use crate::ctx::{Context, MutableContext};
 use crate::dbs::{Iterable, Iterator, Options, Statement};
 use crate::doc::CursorDoc;
 use crate::err::Error;
@@ -50,10 +50,19 @@ impl InsertStatement {
 		let version = self.version.as_ref().map(|v| v.to_u64());
 		// Ensure futures are stored
 		let opt = &opt.new_with_futures(false).with_projections(false).with_version(version);
+		// Check if there is a timeout
+		let ctx = match self.timeout.as_ref() {
+			Some(timeout) => {
+				let mut ctx = MutableContext::new(&ctx);
+				ctx.add_timeout(*timeout.0)?;
+				ctx.freeze()
+			}
+			None => ctx.clone(),
+		};
 		// Parse the INTO expression
 		let into = match &self.into {
 			None => None,
-			Some(into) => match into.compute(stk, ctx, opt, doc).await? {
+			Some(into) => match into.compute(stk, &ctx, opt, doc).await? {
 				Value::Table(into) => Some(into),
 				v => {
 					return Err(Error::InsertStatement {
@@ -71,8 +80,8 @@ impl InsertStatement {
 					let mut o = Value::base();
 					// Set each field from the expression
 					for (k, v) in v.iter() {
-						let v = v.compute(stk, ctx, opt, None).await?;
-						o.set(stk, ctx, opt, k, v).await?;
+						let v = v.compute(stk, &ctx, opt, None).await?;
+						o.set(stk, &ctx, opt, k, v).await?;
 					}
 					// Specify the new table record id
 					let id = gen_id(&o, &into)?;
@@ -82,7 +91,7 @@ impl InsertStatement {
 			}
 			// Check if this is a modern statement
 			Data::SingleExpression(v) => {
-				let v = v.compute(stk, ctx, opt, doc).await?;
+				let v = v.compute(stk, &ctx, opt, doc).await?;
 				match v {
 					Value::Array(v) => {
 						for v in v {
@@ -109,8 +118,14 @@ impl InsertStatement {
 		}
 		// Assign the statement
 		let stm = Statement::from(self);
+		// Process the statement
+		let res = i.output(stk, &ctx, opt, &stm).await?;
+		// Catch statement timeout
+		if ctx.is_timedout() {
+			return Err(Error::QueryTimedout);
+		}
 		// Output the results
-		i.output(stk, ctx, opt, &stm).await
+		Ok(res)
 	}
 }
 
