@@ -188,7 +188,7 @@ impl super::api::Transaction for Transaction {
 		// Cancel this transaction
 		match self.inner.take() {
 			Some(inner) => inner.cancel().reset(),
-			None => unreachable!(),
+			None => return Err(fail!("Unable to cancel an already taken transaction")),
 		};
 		// Continue
 		Ok(())
@@ -210,7 +210,7 @@ impl super::api::Transaction for Transaction {
 		// Commit this transaction
 		match self.inner.take() {
 			Some(inner) => inner.commit().await?,
-			None => unreachable!(),
+			None => return Err(fail!("Unable to commit an already taken transaction")),
 		};
 		// Continue
 		Ok(())

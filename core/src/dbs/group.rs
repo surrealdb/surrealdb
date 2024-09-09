@@ -140,7 +140,7 @@ impl GroupsCollector {
 										let x = if matches!(a, OptimisedAggregate::None) {
 											// The aggregation is not optimised, let's compute it with the values
 											let vals = agr.take();
-											f.aggregate(vals).compute(stk, ctx, opt, None).await?
+											f.aggregate(vals)?.compute(stk, ctx, opt, None).await?
 										} else {
 											// The aggregation is optimised, just get the value
 											agr.compute(a)?
@@ -264,7 +264,7 @@ impl Aggregator {
 			*c += 1;
 		}
 		if let Some((ref f, ref mut c)) = self.count_function {
-			if f.aggregate(val.clone()).compute(stk, ctx, opt, None).await?.is_truthy() {
+			if f.aggregate(val.clone())?.compute(stk, ctx, opt, None).await?.is_truthy() {
 				*c += 1;
 			}
 		}

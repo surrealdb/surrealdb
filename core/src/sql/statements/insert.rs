@@ -105,7 +105,7 @@ impl InsertStatement {
 					}
 				}
 			}
-			_ => unreachable!(),
+			v => return Err(fail!("Unknown data clause type in INSERT statement: {v:?}")),
 		}
 		// Assign the statement
 		let stm = Statement::from(self);

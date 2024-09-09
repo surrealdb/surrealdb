@@ -1,7 +1,7 @@
 /// Throws an unreachable error with location details
 macro_rules! fail {
-	($msg: literal) => {
-		$crate::err::Error::Unreachable(concat!(file!(), ":", line!(), ": ", $msg))
+	($($arg:tt)+) => {
+		$crate::err::Error::Unreachable(format!("{}:{}: {}", file!(), line!(), std::format_args!($($arg)+)))
 	};
 }
 
@@ -252,10 +252,18 @@ mod test {
 	}
 
 	#[test]
-	fn fail() {
+	fn fail_literal() {
 		let Error::Unreachable(msg) = fail!("Reached unreachable code") else {
 			panic!()
 		};
 		assert_eq!("core/src/mac/mod.rs:256: Reached unreachable code", msg);
+	}
+
+	#[test]
+	fn fail_arguments() {
+		let Error::Unreachable(msg) = fail!("Found {} but expected {}", "test", "other") else {
+			panic!()
+		};
+		assert_eq!("core/src/mac/mod.rs:264: Found test but expected other", msg);
 	}
 }
