@@ -257,11 +257,17 @@ impl<'a> Executor<'a> {
 				}
 				// Begin a new transaction
 				Statement::Begin(_) => {
+					if opt.import {
+						continue;
+					}
 					self.begin(Write).await;
 					continue;
 				}
 				// Cancel a running transaction
 				Statement::Cancel(_) => {
+					if opt.import {
+						continue;
+					}
 					self.cancel(true).await;
 					self.clear(&ctx, recv.clone()).await;
 					buf = buf.into_iter().map(|v| self.buf_cancel(v)).collect();
@@ -272,6 +278,9 @@ impl<'a> Executor<'a> {
 				}
 				// Commit a running transaction
 				Statement::Commit(_) => {
+					if opt.import {
+						continue;
+					}
 					let commit_error = self.commit(true).await.err();
 					buf = buf.into_iter().map(|v| self.buf_commit(v, &commit_error)).collect();
 					self.flush(&ctx, recv.clone()).await;
