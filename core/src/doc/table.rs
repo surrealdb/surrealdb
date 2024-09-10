@@ -404,7 +404,7 @@ impl Document {
 									})
 								}
 							};
-							self.min(&mut set_ops, &mut del_ops, fdc, field, idiom, val);
+							self.min(&mut set_ops, &mut del_ops, fdc, field, idiom, val)?;
 						}
 						Some(name) if name == "time::max" => {
 							let val = f.args()[0].compute(stk, ctx, opt, Some(fdc.doc)).await?;
@@ -420,7 +420,7 @@ impl Document {
 									})
 								}
 							};
-							self.max(&mut set_ops, &mut del_ops, fdc, field, idiom, val);
+							self.max(&mut set_ops, &mut del_ops, fdc, field, idiom, val)?;
 						}
 						Some(name) if name == "math::sum" => {
 							let val = f.args()[0].compute(stk, ctx, opt, Some(fdc.doc)).await?;
@@ -452,7 +452,7 @@ impl Document {
 									})
 								}
 							};
-							self.min(&mut set_ops, &mut del_ops, fdc, field, idiom, val);
+							self.min(&mut set_ops, &mut del_ops, fdc, field, idiom, val)?;
 						}
 						Some(name) if name == "math::max" => {
 							let val = f.args()[0].compute(stk, ctx, opt, Some(fdc.doc)).await?;
@@ -468,7 +468,7 @@ impl Document {
 									})
 								}
 							};
-							self.max(&mut set_ops, &mut del_ops, fdc, field, idiom, val);
+							self.max(&mut set_ops, &mut del_ops, fdc, field, idiom, val)?;
 						}
 						Some(name) if name == "math::mean" => {
 							let val = f.args()[0].compute(stk, ctx, opt, Some(fdc.doc)).await?;
@@ -484,9 +484,9 @@ impl Document {
 									})
 								}
 							};
-							self.mean(&mut set_ops, &mut del_ops, &fdc.act, idiom, val);
+							self.mean(&mut set_ops, &mut del_ops, &fdc.act, idiom, val)?;
 						}
-						_ => unreachable!(),
+						f => return Err(fail!("Unexpected function {f:?} encountered")),
 					},
 					_ => {
 						let val = expr.compute(stk, ctx, opt, Some(fdc.doc)).await?;
@@ -501,6 +501,7 @@ impl Document {
 	/// Set the field in the foreign table
 	fn set(&self, ops: &mut Ops, key: Idiom, val: Value) -> Result<(), Error> {
 		ops.push((key, Operator::Equal, val));
+		// Everything ok
 		Ok(())
 	}
 	/// Increment or decrement the field in the foreign table
@@ -522,6 +523,7 @@ impl Document {
 				del_ops.push((key, Operator::Equal, Value::from(0)));
 			}
 		}
+		// Everything ok
 		Ok(())
 	}
 
@@ -534,7 +536,7 @@ impl Document {
 		field: &Field,
 		key: Idiom,
 		val: Value,
-	) {
+	) -> Result<(), Error> {
 		// Key for the value count
 		let mut key_c = Idiom::from(vec![Part::from("__")]);
 		key_c.0.push(Part::from(key.to_hash()));
@@ -570,7 +572,7 @@ impl Document {
 				// If it is equal to the previous MIN value,
 				// as we can't know what was the previous MIN value,
 				// we have to recompute it
-				let subquery = Self::one_group_query(fdc, field, &key, val);
+				let subquery = Self::one_group_query(fdc, field, &key, val)?;
 				set_ops.push((key.clone(), Operator::Equal, subquery));
 				//  Decrement the number of values
 				set_ops.push((key_c.clone(), Operator::Dec, Value::from(1)));
@@ -578,6 +580,8 @@ impl Document {
 				del_ops.push((key_c, Operator::Equal, Value::from(0)));
 			}
 		}
+		// Everything ok
+		Ok(())
 	}
 	/// Set the new maximum value for the field in the foreign table
 	fn max(
@@ -588,7 +592,7 @@ impl Document {
 		field: &Field,
 		key: Idiom,
 		val: Value,
-	) {
+	) -> Result<(), Error> {
 		// Key for the value count
 		let mut key_c = Idiom::from(vec![Part::from("__")]);
 		key_c.0.push(Part::from(key.to_hash()));
@@ -625,7 +629,7 @@ impl Document {
 				// If it is equal to the previous MAX value,
 				// as we can't know what was the previous MAX value,
 				// we have to recompute the MAX
-				let subquery = Self::one_group_query(fdc, field, &key, val);
+				let subquery = Self::one_group_query(fdc, field, &key, val)?;
 				set_ops.push((key.clone(), Operator::Equal, subquery));
 				//  Decrement the number of values
 				set_ops.push((key_c.clone(), Operator::Dec, Value::from(1)));
@@ -633,6 +637,8 @@ impl Document {
 				del_ops.push((key_c, Operator::Equal, Value::from(0)));
 			}
 		}
+		// Everything ok
+		Ok(())
 	}
 
 	/// Set the new average value for the field in the foreign table
@@ -643,7 +649,7 @@ impl Document {
 		act: &FieldAction,
 		key: Idiom,
 		val: Value,
-	) {
+	) -> Result<(), Error> {
 		// Key for the value count
 		let mut key_c = Idiom::from(vec![Part::from("__")]);
 		key_c.0.push(Part::from(key.to_hash()));
@@ -710,10 +716,17 @@ impl Document {
 				del_ops.push((key_c, Operator::Equal, Value::from(0)));
 			}
 		}
+		// Everything ok
+		Ok(())
 	}
 
 	/// Recomputes the value for one group
-	fn one_group_query(fdc: &FieldDataContext, field: &Field, key: &Idiom, val: Value) -> Value {
+	fn one_group_query(
+		fdc: &FieldDataContext,
+		field: &Field,
+		key: &Idiom,
+		val: Value,
+	) -> Result<Value, Error> {
 		// Build the condition merging the optional user provided condition and the group
 		let mut iter = fdc.groups.0.iter().enumerate();
 		let cond = if let Some((i, g)) = iter.next() {
@@ -763,12 +776,12 @@ impl Document {
 				..
 			} => match alias.0.first() {
 				Some(Part::Field(ident)) => ident.clone(),
-				_ => unreachable!(),
+				p => return Err(fail!("Unexpected ident type encountered: {p:?}")),
 			},
-			_ => unreachable!(),
+			f => return Err(fail!("Unexpected field type encountered: {f:?}")),
 		};
 		let compute_query = Value::Idiom(Idiom(vec![Part::Start(array_first), Part::Field(ident)]));
-		Value::Subquery(Box::new(Subquery::Ifelse(IfelseStatement {
+		Ok(Value::Subquery(Box::new(Subquery::Ifelse(IfelseStatement {
 			exprs: vec![(
 				Value::Expression(Box::new(Expression::Binary {
 					l: Value::Idiom(key.clone()),
@@ -778,6 +791,6 @@ impl Document {
 				compute_query,
 			)],
 			close: Some(Value::Idiom(key.clone())),
-		})))
+		}))))
 	}
 }

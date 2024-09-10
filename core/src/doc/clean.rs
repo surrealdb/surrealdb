@@ -23,7 +23,7 @@ impl Document {
 			// Loop through all field statements
 			for fd in self.fd(ctx, opt).await?.iter() {
 				// Is this a schemaless field?
-				match fd.flex {
+				match fd.flex || fd.kind.as_ref().is_some_and(|k| k.is_literal_nested()) {
 					false => {
 						// Loop over this field in the document
 						for k in self.current.doc.as_ref().each(&fd.name).into_iter() {

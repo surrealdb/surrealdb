@@ -48,7 +48,7 @@ where
 		{
 			self.out.insert(node_id);
 			if self.removed.contains_key(&node_id) {
-				return Err(Error::Unreachable("TreeTransactionWrite::get_node_mut"));
+				return Err(fail!("TreeTransactionWrite::get_node_mut"));
 			}
 		}
 		if let Some(n) = self.nodes.remove(&node_id) {
@@ -68,7 +68,7 @@ where
 			self.cached.remove(&node.id);
 		}
 		if self.removed.contains_key(&node.id) {
-			return Err(Error::Unreachable("TreeTransactionWrite::set_node(2)"));
+			return Err(fail!("TreeTransactionWrite::set_node(2)"));
 		}
 		self.nodes.insert(node.id, node);
 		Ok(())
@@ -85,7 +85,7 @@ where
 		#[cfg(debug_assertions)]
 		{
 			if self.nodes.contains_key(&node_id) {
-				return Err(Error::Unreachable("TreeTransactionWrite::remove_node"));
+				return Err(fail!("TreeTransactionWrite::remove_node"));
 			}
 			self.out.remove(&node_id);
 		}
@@ -99,7 +99,7 @@ where
 		#[cfg(debug_assertions)]
 		{
 			if !self.out.is_empty() {
-				return Err(Error::Unreachable("TreeTransactionWrite::finish(1)"));
+				return Err(fail!("TreeTransactionWrite::finish(1)"));
 			}
 		}
 		if self.updated.is_empty() && self.removed.is_empty() {
@@ -116,7 +116,7 @@ where
 				// Update the cache with updated entries.
 				new_cache.set_node(node).await;
 			} else {
-				return Err(Error::Unreachable("TreeTransactionWrite::finish(2)"));
+				return Err(fail!("TreeTransactionWrite::finish(2)"));
 			}
 		}
 		let removed = mem::take(&mut self.removed);

@@ -11,6 +11,7 @@ authors = ["Tobie Morgan Hitchcock <tobie@surrealdb.com>"]
 default = [
     "storage-mem",
     "storage-surrealkv",
+    "storage-surrealcs",
     "storage-rocksdb",
     "scripting",
     "http",
@@ -206,5 +207,6 @@ license-file = ["LICENSE", "4"]
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = [
     'cfg(docker)',
+    'cfg(storage)',
     'cfg(surrealdb_unstable)',
 ] }

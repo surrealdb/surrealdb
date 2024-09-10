@@ -67,7 +67,7 @@
 ///
 /// crate::key::thing                    /*{ns}*{db}*{tb}*{id}
 ///
-/// crate::key::graph                    /*{ns}*{db}*{tb}~{id}{eg}{fk}
+/// crate::key::graph                    /*{ns}*{db}*{tb}~{id}{eg}{ft}{fk}
 ///
 pub(crate) mod category;
 pub(crate) mod change;
