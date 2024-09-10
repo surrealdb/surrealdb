@@ -540,7 +540,7 @@ impl Parser<'_> {
 				break;
 			};
 
-			if bp < min_bp {
+			if bp <= min_bp {
 				break;
 			}
 
@@ -634,6 +634,23 @@ mod test {
 		let sql = "-(5) + 5";
 		let out = Value::parse(sql);
 		assert_eq!(sql, format!("{}", out));
+	}
+
+	#[test]
+	fn expression_left_associative() {
+		let sql = "1 - 1 - 1";
+		let out = Value::parse(sql);
+		let one = Value::Number(Number::Int(1));
+		let expected = Value::Expression(Box::new(Expression::Binary {
+			l: Value::Expression(Box::new(Expression::Binary {
+				l: one.clone(),
+				o: Operator::Sub,
+				r: one.clone(),
+			})),
+			o: Operator::Sub,
+			r: one,
+		}));
+		assert_eq!(expected, out);
 	}
 
 	#[test]
