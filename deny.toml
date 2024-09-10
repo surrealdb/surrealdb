@@ -66,6 +66,9 @@ ignore = [
 	# of "jsonwebtoken", is replaced by the upstream version which no
 	# longer uses the affected "rsa" crate.
 	"RUSTSEC-2023-0071",
+
+	# SurrealDB does not accept credentials for fetching remote objects.
+	"RUSTSEC-2024-0358",
 ]
 
 # --------------------------------------------------
