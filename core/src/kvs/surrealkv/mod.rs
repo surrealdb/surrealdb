@@ -2,7 +2,7 @@
 
 use crate::err::Error;
 use crate::key::debug::Sprintable;
-use crate::kvs::savepoint::{SaveOperation, SavePointImpl, SavePoints};
+use crate::kvs::savepoint::{SaveOperation, SavePointImpl, SavePoints, SavePrepare};
 use crate::kvs::Check;
 use crate::kvs::Key;
 use crate::kvs::Val;
@@ -246,10 +246,18 @@ impl super::api::Transaction for Transaction {
 		if let Some(ts) = version {
 			self.inner.set_at_ts(&key, &val, ts)?;
 		} else {
-			match self.inner.get(&key)? {
-				None => self.inner.set(&key, &val)?,
-				_ => return Err(Error::TxKeyAlreadyExists),
+			// Does the key exists?
+			let key_exists = if let Some(SavePrepare::NewKey(_, sv)) = &prep {
+				sv.get_val().is_some()
+			} else {
+				self.inner.get(&key)?.is_some()
 			};
+			// If the key exist we return an error
+			if key_exists {
+				return Err(Error::TxKeyAlreadyExists);
+			}
+			// Set the key/value
+			self.inner.set(&key, &val)?;
 		}
 		// Confirm the save point
 		if let Some(prep) = prep {
