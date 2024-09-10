@@ -19,7 +19,6 @@ use axum::{
 	response::IntoResponse,
 	Extension, Router,
 };
-use axum_extra::headers::ContentType;
 use axum_extra::headers::Header;
 use axum_extra::TypedHeader;
 use bytes::Bytes;
@@ -35,6 +34,7 @@ use tower_http::request_id::RequestId;
 use uuid::Uuid;
 
 use super::headers::Accept;
+use super::headers::ContentType;
 use super::AppState;
 
 use surrealdb::rpc::rpc_context::RpcContext;
@@ -54,10 +54,8 @@ async fn get_handler(
 	State(rpc_state): State<Arc<RpcState>>,
 	headers: HeaderMap,
 ) -> Result<impl IntoResponse, impl IntoResponse> {
-	error!(?headers);
-
 	if headers.get(SEC_WEBSOCKET_PROTOCOL).is_none() {
-		return Err(Error::InvalidHeader(SEC_WEBSOCKET_PROTOCOL, "Missing".to_string()));
+		warn!("Recieved upgrade with unspecified protocol, protocol inference is deprecated, please upgrade clients to set the sec-websocket-protocol header");
 	}
 
 	// Check if there is a connection id header specified

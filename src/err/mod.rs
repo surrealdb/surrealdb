@@ -2,7 +2,6 @@ use crate::cli::abstraction::auth::Error as SurrealAuthError;
 use axum::response::{IntoResponse, Response};
 use axum::Error as AxumError;
 use axum::Json;
-use axum_extra::typed_header::TypedHeaderRejection;
 use base64::DecodeError as Base64Error;
 use http::{HeaderName, StatusCode};
 use reqwest::Error as ReqwestError;

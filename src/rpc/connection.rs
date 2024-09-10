@@ -285,7 +285,7 @@ impl Connection {
 	/// Handle individual WebSocket messages
 	async fn handle_message(rpc: Arc<RwLock<Connection>>, msg: Message, chn: Sender<Message>) {
 		// Get the current output format
-		let fmt = rpc.read().await.format;
+		let mut fmt = rpc.read().await.format;
 		// Prepare Span and Otel context
 		let span = span_for_request(&rpc.read().await.id);
 		// Acquire concurrent request rate limiter
@@ -293,10 +293,20 @@ impl Connection {
 		// Calculate the length of the message
 		let len = match msg {
 			Message::Text(ref msg) => {
+				// If no format was specified, default to JSON
+				if fmt.is_none() {
+					fmt = Format::Json;
+					rpc.write().await.format = fmt;
+				}
 				// Retrieve the length of the message
 				msg.len()
 			}
 			Message::Binary(ref msg) => {
+				// If no format was specified, default to Bincode
+				if fmt.is_none() {
+					fmt = Format::Bincode;
+					rpc.write().await.format = fmt;
+				}
 				// Retrieve the length of the message
 				msg.len()
 			}
