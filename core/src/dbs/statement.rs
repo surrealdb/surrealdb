@@ -271,6 +271,7 @@ impl<'a> Statement<'a> {
 				| Statement::Insert(_)
 				| Statement::Upsert(_)
 				| Statement::Update(_)
+				| Statement::Relate(_)
 		)
 	}
 }
