@@ -57,12 +57,12 @@ impl Kind {
 		matches!(self, Kind::Record(_))
 	}
 
-	// Returns true if this type is an option
+	/// Returns true if this type is optional
 	pub(crate) fn can_be_none(&self) -> bool {
 		matches!(self, Kind::Option(_) | Kind::Any)
 	}
 
-	// Returns the kind in case of a literal, otherwise returns the kind itself
+	/// Returns the kind in case of a literal, otherwise returns the kind itself
 	fn to_kind(&self) -> Self {
 		match self {
 			Kind::Literal(l) => l.to_kind(),
@@ -70,7 +70,7 @@ impl Kind {
 		}
 	}
 
-	// Returns true if this type is a literal, or contains a literal
+	/// Returns true if this type is a literal, or contains a literal
 	pub(crate) fn is_literal_nested(&self) -> bool {
 		if matches!(self, Kind::Literal(_)) {
 			return true;

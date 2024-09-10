@@ -334,8 +334,8 @@ async fn strict_typing_optional_object() -> Result<(), Error> {
 	//
 	t.expect_val(
 		"{
-      id: test:1,
-    }",
+            id: test:1,
+        }",
 	)?;
 	//
 	t.expect_error("Found NONE for field `obj.a`, with record `test:2`, but expected a string")?;
