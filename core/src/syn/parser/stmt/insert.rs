@@ -118,10 +118,12 @@ impl Parser<'_> {
 			}
 
 			self.expect_closing_delimiter(t!(")"), token.span)?;
+
+			expected!(self, t!("VALUES"));
+
 			token.span.covers(self.last_span())
 		};
 
-		expected!(self, t!("VALUES"));
 		let mut insertions = Vec::new();
 		loop {
 			let mut values = Vec::new();
