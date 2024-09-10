@@ -74,7 +74,6 @@ impl Parser<'_> {
 			)
 	}
 
-	/* Might be used later for error reporting
 	pub(super) fn kind_starts_subquery(kind: TokenKind) -> bool {
 		matches!(
 			kind,
@@ -96,11 +95,11 @@ impl Parser<'_> {
 		matches!(
 			kind,
 			t!("+")
-				| t!("u'") | t!("u\"")
-				| t!("d'") | t!("d\"")
-				| t!("r'") | t!("r\"")
-				| t!("'") | t!("\"")
-				| TokenKind::Digits
+				| t!("-") | t!("u'")
+				| t!("u\"") | t!("d'")
+				| t!("d\"") | t!("r'")
+				| t!("r\"") | t!("'")
+				| t!("\"") | TokenKind::Digits
 				| TokenKind::NaN
 				| t!("true") | t!("false")
 				| t!("fn") | t!("ml")
@@ -109,8 +108,11 @@ impl Parser<'_> {
 				| t!("||") | t!("<")
 				| t!("$param")
 				| t!("..") | TokenKind::Glued(_)
-				| TokenKind::Identifier
 		) || Self::kind_starts_subquery(kind)
+			|| Self::kind_is_identifier(kind)
 	}
-	*/
+
+	pub(super) fn kind_starts_expression(kind: TokenKind) -> bool {
+		matches!(kind, t!("..") | t!("<") | t!("->")) | Self::kind_starts_prime_value(kind)
+	}
 }

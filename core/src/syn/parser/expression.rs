@@ -442,7 +442,7 @@ impl Parser<'_> {
 					@peek.span => "Whitespace between a range and it's operands is dissallowed")
 			}
 			ctx.run(|ctx| self.pratt_parse_expr(ctx, BindingPower::Range)).await?
-		} else if peek.kind != TokenKind::WhiteSpace {
+		} else if Self::kind_starts_expression(peek.kind) {
 			ctx.run(|ctx| self.pratt_parse_expr(ctx, BindingPower::Range)).await?
 		} else {
 			return Ok(Value::Range(Box::new(Range {
@@ -488,7 +488,7 @@ impl Parser<'_> {
 					@peek.span => "Whitespace between a range and it's operands is dissallowed")
 			}
 			ctx.run(|ctx| self.pratt_parse_expr(ctx, BindingPower::Range)).await?
-		} else if peek.kind != TokenKind::WhiteSpace {
+		} else if Self::kind_starts_expression(peek.kind) {
 			ctx.run(|ctx| self.pratt_parse_expr(ctx, BindingPower::Range)).await?
 		} else {
 			return Ok(Value::Range(Box::new(Range {
