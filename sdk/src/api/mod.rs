@@ -131,7 +131,6 @@ mod conn;
 use self::conn::Router;
 use self::err::Error;
 use self::opt::Endpoint;
-use self::opt::EndpointKind;
 use self::opt::WaitFor;
 
 pub use method::query::Response;
@@ -205,20 +204,8 @@ where
 
 	fn into_future(self) -> Self::IntoFuture {
 		Box::pin(async move {
-			let mut endpoint = self.address?;
-			let endpoint_kind = EndpointKind::from(endpoint.url.scheme());
-			let mut client = Client::connect(endpoint.clone(), self.capacity).await?;
-			if endpoint_kind.is_remote() {
-				let mut version = client.version().await?;
-				// we would like to be able to connect to pre-releases too
-				version.pre = Default::default();
-				client.check_server_version(&version).await?;
-				if version >= REVISION_SUPPORTED_SERVER_VERSION && endpoint_kind.is_ws() {
-					// Switch to revision based serialisation
-					endpoint.supports_revision = true;
-					client = Client::connect(endpoint, self.capacity).await?;
-				}
-			}
+			let endpoint = self.address?;
+			let client = Client::connect(endpoint, self.capacity).await?;
 			// Both ends of the channel are still alive at this point
 			client.waiter.0.send(Some(WaitFor::Connection)).ok();
 			Ok(client)
@@ -239,20 +226,8 @@ where
 			if self.router.get().is_some() {
 				return Err(Error::AlreadyConnected.into());
 			}
-			let mut endpoint = self.address?;
-			let endpoint_kind = EndpointKind::from(endpoint.url.scheme());
-			let mut client = Client::connect(endpoint.clone(), self.capacity).await?;
-			if endpoint_kind.is_remote() {
-				let mut version = client.version().await?;
-				// we would like to be able to connect to pre-releases too
-				version.pre = Default::default();
-				client.check_server_version(&version).await?;
-				if version >= REVISION_SUPPORTED_SERVER_VERSION && endpoint_kind.is_ws() {
-					// Switch to revision based serialisation
-					endpoint.supports_revision = true;
-					client = Client::connect(endpoint, self.capacity).await?;
-				}
-			}
+			let endpoint = self.address?;
+			let client = Client::connect(endpoint.clone(), self.capacity).await?;
 			let cell =
 				Arc::into_inner(client.router).expect("new connection to have no references");
 			let router = cell.into_inner().expect("router to be set");

@@ -76,11 +76,9 @@ pub(crate) async fn connect(
 ) -> Result<WebSocketStream<MaybeTlsStream<TcpStream>>> {
 	let mut request = (&endpoint.url).into_client_request()?;
 
-	if endpoint.supports_revision {
-		request
-			.headers_mut()
-			.insert(SEC_WEBSOCKET_PROTOCOL, HeaderValue::from_static(super::REVISION_HEADER));
-	}
+	request
+		.headers_mut()
+		.insert(SEC_WEBSOCKET_PROTOCOL, HeaderValue::from_static(super::REVISION_HEADER));
 
 	#[cfg(any(feature = "native-tls", feature = "rustls"))]
 	let (socket, _) = tokio_tungstenite::connect_async_tls_with_config(
@@ -148,7 +146,7 @@ async fn router_handle_route(
 		response,
 	}: Route,
 	state: &mut RouterState,
-	endpoint: &Endpoint,
+	_endpoint: &Endpoint,
 ) -> HandleResult {
 	let RequestData {
 		id,
@@ -239,7 +237,7 @@ async fn router_handle_route(
 			return HandleResult::Ok;
 		};
 		trace!("Request {:?}", request);
-		let payload = serialize(&request, endpoint.supports_revision).unwrap();
+		let payload = serialize(&request, true).unwrap();
 		Message::Binary(payload)
 	};
 
@@ -265,9 +263,9 @@ async fn router_handle_route(
 async fn router_handle_response(
 	response: Message,
 	state: &mut RouterState,
-	endpoint: &Endpoint,
+	_endpoint: &Endpoint,
 ) -> HandleResult {
-	match Response::try_from(&response, endpoint.supports_revision) {
+	match Response::try_from(&response) {
 		Ok(option) => {
 			// We are only interested in responses that are not empty
 			if let Some(response) = option {
@@ -348,9 +346,7 @@ async fn router_handle_response(
 											}
 											.into_router_request(None)
 											.unwrap();
-											let value =
-												serialize(&request, endpoint.supports_revision)
-													.unwrap();
+											let value = serialize(&request, true).unwrap();
 											Message::Binary(value)
 										};
 										if let Err(error) = state.sink.send(kill).await {
@@ -378,7 +374,7 @@ async fn router_handle_response(
 			if let Message::Binary(binary) = response {
 				if let Ok(ErrorResponse {
 					id,
-				}) = deserialize(&binary, endpoint.supports_revision)
+				}) = deserialize(&binary, true)
 				{
 					// Return an error if an ID was returned
 					if let Some(Ok(id)) = id.map(CoreValue::coerce_to_i64) {
@@ -417,7 +413,7 @@ async fn router_reconnect(
 						.into_router_request(None)
 						.expect("replay commands should always convert to route requests");
 
-					let message = serialize(&request, endpoint.supports_revision).unwrap();
+					let message = serialize(&request, true).unwrap();
 
 					if let Err(error) = state.sink.send(Message::Binary(message)).await {
 						trace!("{error}");
@@ -433,7 +429,7 @@ async fn router_reconnect(
 					.into_router_request(None)
 					.unwrap();
 					trace!("Request {:?}", request);
-					let payload = serialize(&request, endpoint.supports_revision).unwrap();
+					let payload = serialize(&request, true).unwrap();
 					if let Err(error) = state.sink.send(Message::Binary(payload)).await {
 						trace!("{error}");
 						time::sleep(time::Duration::from_secs(1)).await;
@@ -461,7 +457,7 @@ pub(crate) async fn run_router(
 ) {
 	let ping = {
 		let request = Command::Health.into_router_request(None).unwrap();
-		let value = serialize(&request, endpoint.supports_revision).unwrap();
+		let value = serialize(&request, true).unwrap();
 		Message::Binary(value)
 	};
 
@@ -589,21 +585,19 @@ pub(crate) async fn run_router(
 }
 
 impl Response {
-	fn try_from(message: &Message, supports_revision: bool) -> Result<Option<Self>> {
+	fn try_from(message: &Message) -> Result<Option<Self>> {
 		match message {
 			Message::Text(text) => {
 				trace!("Received an unexpected text message; {text}");
 				Ok(None)
 			}
-			Message::Binary(binary) => {
-				deserialize(binary, supports_revision).map(Some).map_err(|error| {
-					Error::ResponseFromBinary {
-						binary: binary.clone(),
-						error: bincode::ErrorKind::Custom(error.to_string()).into(),
-					}
-					.into()
-				})
-			}
+			Message::Binary(binary) => deserialize(binary, true).map(Some).map_err(|error| {
+				Error::ResponseFromBinary {
+					binary: binary.clone(),
+					error: bincode::ErrorKind::Custom(error.to_string()).into(),
+				}
+				.into()
+			}),
 			Message::Ping(..) => {
 				trace!("Received a ping from the server");
 				Ok(None)
