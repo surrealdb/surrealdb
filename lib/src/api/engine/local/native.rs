@@ -234,6 +234,6 @@ pub(crate) fn router(
 				error!("Error sending shutdown signal to task: {}", e);
 			}
 		}
-		tasks.resolve().await.unwrap();
+		tasks.resolve().await.ok();
 	});
 }
