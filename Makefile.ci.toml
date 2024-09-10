@@ -7,6 +7,11 @@ category = "CI - CHECK"
 command = "cargo"
 args = ["check", "--locked", "--workspace"]
 
+[tasks.ci-check-release]
+category = "CI - CHECK"
+command = "cargo"
+args = ["check", "--release", "--locked", "--workspace"]
+
 [tasks.ci-check-wasm]
 category = "CI - CHECK"
 command = "cargo"

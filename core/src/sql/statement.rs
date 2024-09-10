@@ -145,7 +145,7 @@ impl Statement {
 			Self::Upsert(v) => v.writeable(),
 			Self::Update(v) => v.writeable(),
 			Self::Use(_) => false,
-			_ => unreachable!(),
+			_ => false,
 		}
 	}
 	/// Process this type returning a computed simple Value
@@ -188,7 +188,7 @@ impl Statement {
 				// Process the output value
 				v.compute_unbordered(stk, ctx, opt, doc).await
 			}
-			_ => unreachable!(),
+			_ => Err(fail!("Unexpected statement type encountered: {self:?}")),
 		}
 	}
 }

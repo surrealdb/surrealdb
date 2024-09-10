@@ -5,15 +5,12 @@ mod graphql_integration {
 	use std::time::Duration;
 
 	use http::header;
-	use reqwest::Client;
 	use serde_json::json;
 	use test_log::test;
 	use tracing::debug;
 	use ulid::Ulid;
 
-	use crate::common::{PASS, USER};
-
-	use super::common::{self};
+	use super::common;
 
 	#[test(tokio::test)]
 	async fn basic() -> Result<(), Box<dyn std::error::Error>> {

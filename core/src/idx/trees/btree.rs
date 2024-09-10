@@ -571,7 +571,7 @@ where
 								if let Some(root_id) = self.state.root {
 									// Delete the old root node
 									if root_id != node.id {
-										return Err(Error::Unreachable("BTree::delete"));
+										return Err(fail!("BTree::delete"));
 									}
 								}
 								store.remove_node(node.id, node.key).await?;
@@ -684,7 +684,7 @@ where
 				}
 				BTreeNode::Leaf(k) => {
 					let (key, payload) =
-						k.get_last_key().ok_or(Error::Unreachable("BTree::find_highest(1)"))?;
+						k.get_last_key().ok_or_else(|| fail!("BTree::find_highest(1)"))?;
 					#[cfg(debug_assertions)]
 					debug!("Find highest: {} - node: {}", String::from_utf8_lossy(&key), node);
 					store.set_node(node, false).await?;
@@ -692,7 +692,7 @@ where
 				}
 			}
 		}
-		Err(Error::Unreachable("BTree::find_highest(2)"))
+		Err(fail!("BTree::find_highest(2)"))
 	}
 
 	async fn find_lowest(
@@ -712,7 +712,7 @@ where
 				}
 				BTreeNode::Leaf(k) => {
 					let (key, payload) =
-						k.get_first_key().ok_or(Error::Unreachable("BTree::find_lowest(1)"))?;
+						k.get_first_key().ok_or_else(|| fail!("BTree::find_lowest(1)"))?;
 					#[cfg(debug_assertions)]
 					debug!("Find lowest: {} - node: {}", String::from_utf8_lossy(&key), node.id);
 					store.set_node(node, false).await?;
@@ -720,7 +720,7 @@ where
 				}
 			}
 		}
-		Err(Error::Unreachable("BTree::find_lowest(2)"))
+		Err(fail!("BTree::find_lowest(2)"))
 	}
 
 	async fn deleted_traversal(

@@ -1,9 +1,6 @@
-use std::mem;
-
 use crate::sql::{
 	statements::UseStatement, Cond, Ident, Idiom, Limit, Order, Orders, Part, Start, Table, Value,
 };
-use async_graphql::dynamic::Scalar;
 
 pub trait IntoExt<T> {
 	fn intox(self) -> T;
@@ -121,6 +118,7 @@ where
 	}
 }
 
+#[cfg(debug_assertions)]
 pub trait ValidatorExt {
 	fn add_validator(
 		&mut self,
@@ -128,13 +126,16 @@ pub trait ValidatorExt {
 	) -> &mut Self;
 }
 
+#[cfg(debug_assertions)]
+use async_graphql::dynamic::Scalar;
+#[cfg(debug_assertions)]
 impl ValidatorExt for Scalar {
 	fn add_validator(
 		&mut self,
 		validator: impl Fn(&async_graphql::Value) -> bool + Send + Sync + 'static,
 	) -> &mut Self {
 		let mut tmp = Scalar::new("");
-		mem::swap(self, &mut tmp);
+		std::mem::swap(self, &mut tmp);
 		*self = tmp.validator(validator);
 		self
 	}

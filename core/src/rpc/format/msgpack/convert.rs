@@ -114,8 +114,6 @@ impl TryFrom<Value> for Pack {
 				Number::Decimal(v) => {
 					Ok(Pack(Data::Ext(TAG_DECIMAL, v.to_string().as_bytes().to_vec())))
 				}
-				#[allow(unreachable_patterns)]
-				_ => unreachable!(),
 			},
 			Value::Strand(v) => Ok(Pack(Data::String(v.0.into()))),
 			Value::Duration(v) => Ok(Pack(Data::Ext(TAG_DURATION, v.to_raw().as_bytes().to_vec()))),
