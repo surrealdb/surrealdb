@@ -11,6 +11,15 @@ use crate::idg::u32::U32;
 use crate::key::debug::Sprintable;
 use crate::kvs::batch::Batch;
 use crate::kvs::clock::SizedClock;
+#[cfg(any(
+	feature = "kv-mem",
+	feature = "kv-tikv",
+	feature = "kv-fdb",
+	feature = "kv-indxdb",
+	feature = "kv-surrealkv",
+	feature = "kv-surrealcs",
+))]
+use crate::kvs::savepoint::SavePointImpl;
 use crate::kvs::stash::Stash;
 use crate::sql;
 use crate::sql::thing::Thing;
@@ -632,5 +641,17 @@ impl Transactor {
 			}
 		}
 		Ok(None)
+	}
+
+	pub(crate) fn new_save_point(&mut self) {
+		expand_inner!(&mut self.inner, v => { v.new_save_point() })
+	}
+
+	pub(crate) async fn rollback_to_save_point(&mut self) -> Result<(), Error> {
+		expand_inner!(&mut self.inner, v => { v.rollback_to_save_point().await })
+	}
+
+	pub(crate) fn release_last_save_point(&mut self) -> Result<(), Error> {
+		expand_inner!(&mut self.inner, v => { v.release_last_save_point() })
 	}
 }
