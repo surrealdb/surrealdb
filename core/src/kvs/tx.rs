@@ -141,11 +141,15 @@ impl Transaction {
 	///
 	/// This function fetches key-value pairs from the underlying datastore in grouped batches.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
-	pub async fn getr<K>(&self, rng: Range<K>) -> Result<Vec<(Key, Val)>, Error>
+	pub async fn getr<K>(
+		&self,
+		rng: Range<K>,
+		version: Option<u64>,
+	) -> Result<Vec<(Key, Val)>, Error>
 	where
 		K: Into<Key> + Debug,
 	{
-		self.lock().await.getr(rng).await
+		self.lock().await.getr(rng, version).await
 	}
 
 	/// Delete a key from the datastore.
@@ -250,11 +254,17 @@ impl Transaction {
 	///
 	/// This function fetches the key-value pairs in batches, with multiple requests to the underlying datastore.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
-	pub async fn batch<K>(&self, rng: Range<K>, batch: u32, values: bool) -> Result<Batch, Error>
+	pub async fn batch<K>(
+		&self,
+		rng: Range<K>,
+		batch: u32,
+		values: bool,
+		version: Option<u64>,
+	) -> Result<Batch, Error>
 	where
 		K: Into<Key> + Debug,
 	{
-		self.lock().await.batch(rng, batch, values).await
+		self.lock().await.batch(rng, batch, values, version).await
 	}
 
 	/// Retrieve a stream over a specific range of keys in the datastore.
@@ -315,7 +325,7 @@ impl Transaction {
 			Ok(val) => val,
 			Err(cache) => {
 				let end = crate::key::root::nd::suffix();
-				let val = self.getr(key..end).await?;
+				let val = self.getr(key..end, None).await?;
 				let val = val.convert().into();
 				let val = Entry::Nds(Arc::clone(&val));
 				let _ = cache.insert(val.clone());
@@ -334,7 +344,7 @@ impl Transaction {
 			Ok(val) => val,
 			Err(cache) => {
 				let end = crate::key::root::us::suffix();
-				let val = self.getr(key..end).await?;
+				let val = self.getr(key..end, None).await?;
 				let val = val.convert().into();
 				let val = Entry::Rus(Arc::clone(&val));
 				let _ = cache.insert(val.clone());
@@ -353,7 +363,7 @@ impl Transaction {
 			Ok(val) => val,
 			Err(cache) => {
 				let end = crate::key::root::ac::suffix();
-				let val = self.getr(key..end).await?;
+				let val = self.getr(key..end, None).await?;
 				let val = val.convert().into();
 				let val = Entry::Ras(Arc::clone(&val));
 				let _ = cache.insert(val.clone());
@@ -372,7 +382,7 @@ impl Transaction {
 			Ok(val) => val,
 			Err(cache) => {
 				let end = crate::key::root::access::gr::suffix(ra);
-				let val = self.getr(key..end).await?;
+				let val = self.getr(key..end, None).await?;
 				let val = val.convert().into();
 				let val = Entry::Rag(Arc::clone(&val));
 				let _ = cache.insert(val.clone());
@@ -391,7 +401,7 @@ impl Transaction {
 			Ok(val) => val,
 			Err(cache) => {
 				let end = crate::key::root::ns::suffix();
-				let val = self.getr(key..end).await?;
+				let val = self.getr(key..end, None).await?;
 				let val = val.convert().into();
 				let val = Entry::Nss(Arc::clone(&val));
 				let _ = cache.insert(val.clone());
@@ -410,7 +420,7 @@ impl Transaction {
 			Ok(val) => val,
 			Err(cache) => {
 				let end = crate::key::namespace::us::suffix(ns);
-				let val = self.getr(key..end).await?;
+				let val = self.getr(key..end, None).await?;
 				let val = val.convert().into();
 				let val = Entry::Nus(Arc::clone(&val));
 				let _ = cache.insert(val.clone());
@@ -429,7 +439,7 @@ impl Transaction {
 			Ok(val) => val,
 			Err(cache) => {
 				let end = crate::key::namespace::ac::suffix(ns);
-				let val = self.getr(key..end).await?;
+				let val = self.getr(key..end, None).await?;
 				let val = val.convert().into();
 				let val = Entry::Nas(Arc::clone(&val));
 				let _ = cache.insert(val.clone());
@@ -452,7 +462,7 @@ impl Transaction {
 			Ok(val) => val,
 			Err(cache) => {
 				let end = crate::key::namespace::access::gr::suffix(ns, na);
-				let val = self.getr(key..end).await?;
+				let val = self.getr(key..end, None).await?;
 				let val = val.convert().into();
 				let val = Entry::Nag(Arc::clone(&val));
 				let _ = cache.insert(val.clone());
@@ -471,7 +481,7 @@ impl Transaction {
 			Ok(val) => val,
 			Err(cache) => {
 				let end = crate::key::namespace::db::suffix(ns);
-				let val = self.getr(key..end).await?;
+				let val = self.getr(key..end, None).await?;
 				let val = val.convert().into();
 				let val = Entry::Dbs(Arc::clone(&val));
 				let _ = cache.insert(val.clone());
@@ -494,7 +504,7 @@ impl Transaction {
 			Ok(val) => val,
 			Err(cache) => {
 				let end = crate::key::database::us::suffix(ns, db);
-				let val = self.getr(key..end).await?;
+				let val = self.getr(key..end, None).await?;
 				let val = val.convert().into();
 				let val = Entry::Dus(Arc::clone(&val));
 				let _ = cache.insert(val.clone());
@@ -517,7 +527,7 @@ impl Transaction {
 			Ok(val) => val,
 			Err(cache) => {
 				let end = crate::key::database::ac::suffix(ns, db);
-				let val = self.getr(key..end).await?;
+				let val = self.getr(key..end, None).await?;
 				let val = val.convert().into();
 				let val = Entry::Das(Arc::clone(&val));
 				let _ = cache.insert(val.clone());
@@ -541,7 +551,7 @@ impl Transaction {
 			Ok(val) => val,
 			Err(cache) => {
 				let end = crate::key::database::access::gr::suffix(ns, db, da);
-				let val = self.getr(key..end).await?;
+				let val = self.getr(key..end, None).await?;
 				let val = val.convert().into();
 				let val = Entry::Dag(Arc::clone(&val));
 				let _ = cache.insert(val.clone());
@@ -564,7 +574,7 @@ impl Transaction {
 			Ok(val) => val,
 			Err(cache) => {
 				let end = crate::key::database::az::suffix(ns, db);
-				let val = self.getr(key..end).await?;
+				let val = self.getr(key..end, None).await?;
 				let val = val.convert().into();
 				let val = Entry::Azs(Arc::clone(&val));
 				let _ = cache.insert(val.clone());
@@ -587,7 +597,7 @@ impl Transaction {
 			Ok(val) => val,
 			Err(cache) => {
 				let end = crate::key::database::fc::suffix(ns, db);
-				let val = self.getr(key..end).await?;
+				let val = self.getr(key..end, None).await?;
 				let val = val.convert().into();
 				let val = Entry::Fcs(Arc::clone(&val));
 				let _ = cache.insert(val.clone());
@@ -610,7 +620,7 @@ impl Transaction {
 			Ok(val) => val,
 			Err(cache) => {
 				let end = crate::key::database::pa::suffix(ns, db);
-				let val = self.getr(key..end).await?;
+				let val = self.getr(key..end, None).await?;
 				let val = val.convert().into();
 				let val = Entry::Pas(Arc::clone(&val));
 				let _ = cache.insert(val.clone());
@@ -633,7 +643,7 @@ impl Transaction {
 			Ok(val) => val,
 			Err(cache) => {
 				let end = crate::key::database::ml::suffix(ns, db);
-				let val = self.getr(key..end).await?;
+				let val = self.getr(key..end, None).await?;
 				let val = val.convert().into();
 				let val = Entry::Mls(Arc::clone(&val));
 				let _ = cache.insert(val.clone());
@@ -645,14 +655,19 @@ impl Transaction {
 
 	/// Retrieve all table definitions for a specific database.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
-	pub async fn all_tb(&self, ns: &str, db: &str) -> Result<Arc<[DefineTableStatement]>, Error> {
+	pub async fn all_tb(
+		&self,
+		ns: &str,
+		db: &str,
+		version: Option<u64>,
+	) -> Result<Arc<[DefineTableStatement]>, Error> {
 		let key = crate::key::database::tb::prefix(ns, db);
 		let res = self.cache.get_value_or_guard_async(&key).await;
 		match res {
 			Ok(val) => val,
 			Err(cache) => {
 				let end = crate::key::database::tb::suffix(ns, db);
-				let val = self.getr(key..end).await?;
+				let val = self.getr(key..end, version).await?;
 				let val = val.convert().into();
 				let val = Entry::Tbs(Arc::clone(&val));
 				let _ = cache.insert(val.clone());
@@ -676,7 +691,7 @@ impl Transaction {
 			Ok(val) => val,
 			Err(cache) => {
 				let end = crate::key::table::ev::suffix(ns, db, tb);
-				let val = self.getr(key..end).await?;
+				let val = self.getr(key..end, None).await?;
 				let val = val.convert().into();
 				let val = Entry::Evs(Arc::clone(&val));
 				let _ = cache.insert(val.clone());
@@ -693,6 +708,7 @@ impl Transaction {
 		ns: &str,
 		db: &str,
 		tb: &str,
+		version: Option<u64>,
 	) -> Result<Arc<[DefineFieldStatement]>, Error> {
 		let key = crate::key::table::fd::prefix(ns, db, tb);
 		let res = self.cache.get_value_or_guard_async(&key).await;
@@ -700,7 +716,7 @@ impl Transaction {
 			Ok(val) => val,
 			Err(cache) => {
 				let end = crate::key::table::fd::suffix(ns, db, tb);
-				let val = self.getr(key..end).await?;
+				let val = self.getr(key..end, version).await?;
 				let val = val.convert().into();
 				let val = Entry::Fds(Arc::clone(&val));
 				let _ = cache.insert(val.clone());
@@ -724,7 +740,7 @@ impl Transaction {
 			Ok(val) => val,
 			Err(cache) => {
 				let end = crate::key::table::ix::suffix(ns, db, tb);
-				let val = self.getr(key..end).await?;
+				let val = self.getr(key..end, None).await?;
 				let val = val.convert().into();
 				let val = Entry::Ixs(Arc::clone(&val));
 				let _ = cache.insert(val.clone());
@@ -748,7 +764,7 @@ impl Transaction {
 			Ok(val) => val,
 			Err(cache) => {
 				let end = crate::key::table::ft::suffix(ns, db, tb);
-				let val = self.getr(key..end).await?;
+				let val = self.getr(key..end, None).await?;
 				let val = val.convert().into();
 				let val = Entry::Fts(Arc::clone(&val));
 				let _ = cache.insert(val.clone());
@@ -772,7 +788,7 @@ impl Transaction {
 			Ok(val) => val,
 			Err(cache) => {
 				let end = crate::key::table::lq::suffix(ns, db, tb);
-				let val = self.getr(key..end).await?;
+				let val = self.getr(key..end, None).await?;
 				let val = val.convert().into();
 				let val = Entry::Lvs(Arc::clone(&val));
 				let _ = cache.insert(val.clone());

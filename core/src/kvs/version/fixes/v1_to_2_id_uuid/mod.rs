@@ -9,7 +9,7 @@ pub async fn v1_to_2_id_uuid(tx: Arc<Transaction>) -> Result<(), Error> {
 		let ns = ns.name.as_str();
 		for db in tx.all_db(ns).await?.iter() {
 			let db = db.name.as_str();
-			for tb in tx.all_tb(ns, db).await?.iter() {
+			for tb in tx.all_tb(ns, db, None).await?.iter() {
 				let tb = tb.name.as_str();
 				migrate_tb_records(tx.clone(), ns, db, tb).await?;
 				migrate_tb_edges(tx.clone(), ns, db, tb).await?;
