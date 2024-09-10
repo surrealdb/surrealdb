@@ -36,7 +36,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Echo github obj
-        run: echo ${{ github }}
+        run: echo ${{ github  }}
       - uses: actions/checkout@v4
       - uses: cachix/install-nix-action@v26
       - uses: cachix/cachix-action@v14
