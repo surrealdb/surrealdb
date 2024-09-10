@@ -156,7 +156,23 @@ impl Statement {
 		opt: &Options,
 		doc: Option<&CursorDoc>,
 	) -> Result<Value, Error> {
-		match self {
+		let stm = match (opt.import, self) {
+			// All exports in SurrealDB 1.x are done with `UPDATE`, but
+			// because `UPDATE` works different in SurrealDB 2.x, we need
+			// to convert these statements into `UPSERT` statements.
+			(true, Self::Update(stm)) => &Statement::Upsert(UpsertStatement {
+				only: stm.only,
+				what: stm.what.to_owned(),
+				data: stm.data.to_owned(),
+				cond: stm.cond.to_owned(),
+				output: stm.output.to_owned(),
+				timeout: stm.timeout.to_owned(),
+				parallel: stm.parallel,
+			}),
+			(_, stm) => stm,
+		};
+
+		match stm {
 			Self::Access(v) => v.compute(ctx, opt, doc).await,
 			Self::Alter(v) => v.compute(stk, ctx, opt, doc).await,
 			Self::Analyze(v) => v.compute(ctx, opt, doc).await,
