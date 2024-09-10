@@ -4,7 +4,7 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::iam::{Action, ResourceKind};
+use crate::iam::{Action, ConfigKind, ResourceKind};
 use crate::sql::fmt::{pretty_indent, Fmt, Pretty};
 use crate::sql::statements::info::InfoStructure;
 use crate::sql::{Base, Ident, Strand, Value};

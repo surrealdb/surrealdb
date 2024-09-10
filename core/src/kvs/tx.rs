@@ -1207,6 +1207,31 @@ impl Transaction {
 		.try_into_type()
 	}
 
+	/// Retrieve a specific config definition from a database.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
+	pub async fn get_db_config(
+		&self,
+		ns: &str,
+		db: &str,
+		cg: &str,
+	) -> Result<Arc<DefineConfigStatement>, Error> {
+		let key = crate::key::database::cg::new(ns, db, cg).encode()?;
+		let res = self.cache.get_value_or_guard_async(&key).await;
+		match res {
+			Ok(val) => val,
+			Err(cache) => {
+				let val = self.get(key, None).await?.ok_or_else(|| Error::CgNotFound {
+					value: cg.to_owned(),
+				})?;
+				let val: DefineConfigStatement = val.into();
+				let val = Entry::Any(Arc::new(val));
+				let _ = cache.insert(val.clone());
+				val
+			}
+		}
+		.try_into_type()
+	}
+
 	/// Retrieve a specific table definition.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
 	pub async fn get_tb(
