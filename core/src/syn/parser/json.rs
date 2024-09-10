@@ -7,7 +7,7 @@ use crate::{
 	syn::{
 		lexer::compound::{self, Numeric},
 		parser::mac::{expected, pop_glued},
-		token::{t, Glued, QouteKind, Span, TokenKind},
+		token::{t, Glued, Span, TokenKind},
 	},
 };
 
@@ -37,7 +37,7 @@ impl Parser<'_> {
 				self.pop_peek();
 				self.parse_json_array(ctx, token.span).await.map(Value::Array)
 			}
-			TokenKind::Qoute(QouteKind::Plain | QouteKind::PlainDouble) => {
+			t!("\"") | t!("'") => {
 				let strand: Strand = self.next_token_value()?;
 				if self.legacy_strands {
 					if let Some(x) = self.reparse_legacy_strand(ctx, &strand.0).await {
@@ -46,7 +46,7 @@ impl Parser<'_> {
 				}
 				Ok(Value::Strand(strand))
 			}
-			TokenKind::Digits => {
+			t!("-") | t!("+") | TokenKind::Digits => {
 				self.pop_peek();
 				let compound = self.lexer.lex_compound(token, compound::numeric)?;
 				match compound.value {
