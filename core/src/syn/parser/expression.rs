@@ -396,6 +396,7 @@ impl Parser<'_> {
 
 			t!(">") => {
 				if self.peek_whitespace().kind == t!("..") {
+					self.pop_peek();
 					return self.parse_infix_range(ctx, true, lhs).await;
 				}
 				Operator::MoreThan
