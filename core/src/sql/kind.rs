@@ -58,8 +58,8 @@ impl Kind {
 	}
 
 	// Returns true if this type is an option
-	pub(crate) fn is_option(&self) -> bool {
-		matches!(self, Kind::Option(_))
+	pub(crate) fn can_be_none(&self) -> bool {
+		matches!(self, Kind::Option(_) | Kind::Any)
 	}
 
 	// Returns the kind in case of a literal, otherwise returns the kind itself
@@ -324,7 +324,7 @@ impl Literal {
 							if value.to_owned().coerce_to(v).is_err() {
 								return false;
 							}
-						} else if !v.is_option() {
+						} else if !v.can_be_none() {
 							return false;
 						}
 					}
@@ -349,7 +349,7 @@ impl Literal {
 								if value.to_owned().coerce_to(v).is_err() {
 									return false;
 								}
-							} else if !v.is_option() {
+							} else if !v.can_be_none() {
 								return false;
 							}
 						}
