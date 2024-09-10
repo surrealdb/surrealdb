@@ -40,7 +40,7 @@ kv-fdb-7_1 = ["foundationdb/fdb-7_1", "kv-fdb", "dep:tempfile", "dep:ext-sort"]
 kv-surrealkv = ["dep:surrealkv", "tokio/time", "dep:tempfile", "dep:ext-sort"]
 scripting = ["dep:js"]
 http = ["dep:reqwest"]
-ml = ["dep:surrealml-core1"]
+ml = ["dep:surrealml-core"]
 jwks = ["dep:reqwest"]
 arbitrary = [
     "dep:arbitrary",
@@ -144,7 +144,7 @@ sha2 = "0.10.8"
 snap = "1.1.0"
 speedb = { version = "0.0.4", features = ["lz4", "snappy"], optional = true }
 storekey = "0.5.0"
-surrealml-core1 = { version = "0.1.1", optional = true, package = "surrealml-core" }
+surrealml-core = { version = "0.1.1", optional = true }
 surrealkv = { version = "0.1.5", optional = true }
 tempfile = { version = "3.10.1", optional = true }
 thiserror = "1.0.50"
