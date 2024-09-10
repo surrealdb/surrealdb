@@ -45,5 +45,6 @@ pub fn regex(lexer: &mut Lexer, start: Token) -> Result<Regex, SyntaxError> {
 
 	let span = lexer.current_span();
 	let regex = lexer.scratch.parse().map_err(|e| error!("Invalid regex: {e}", @span))?;
+	lexer.scratch.clear();
 	Ok(regex)
 }
