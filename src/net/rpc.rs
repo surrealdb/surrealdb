@@ -23,7 +23,6 @@ use axum_extra::headers::Header;
 use axum_extra::TypedHeader;
 use bytes::Bytes;
 use http::HeaderMap;
-use http::HeaderValue;
 use surrealdb::dbs::Session;
 use surrealdb::kvs::Datastore;
 use surrealdb::rpc::format::Format;
@@ -119,9 +118,9 @@ async fn handle_socket(
 	id: Uuid,
 ) {
 	// Check if there is a WebSocket protocol specified
-	let format = match ws.protocol().map(HeaderValue::to_str) {
+	let format = match ws.protocol().map(|h| h.to_str().ok()).flatten() {
 		// Any selected protocol will always be a valie value
-		Some(protocol) => protocol.unwrap().into(),
+		Some(protocol) => protocol.into(),
 		// No protocol format was specified
 		_ => Format::None,
 	};
