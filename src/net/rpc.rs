@@ -19,9 +19,11 @@ use axum::{
 	response::IntoResponse,
 	Extension, Router,
 };
+use axum_extra::headers::ContentType;
 use axum_extra::headers::Header;
 use axum_extra::TypedHeader;
 use bytes::Bytes;
+use http::header::SEC_WEBSOCKET_PROTOCOL;
 use http::HeaderMap;
 use surrealdb::dbs::Session;
 use surrealdb::kvs::Datastore;
@@ -33,7 +35,6 @@ use tower_http::request_id::RequestId;
 use uuid::Uuid;
 
 use super::headers::Accept;
-use super::headers::ContentType;
 use super::AppState;
 
 use surrealdb::rpc::rpc_context::RpcContext;
@@ -53,6 +54,12 @@ async fn get_handler(
 	State(rpc_state): State<Arc<RpcState>>,
 	headers: HeaderMap,
 ) -> Result<impl IntoResponse, impl IntoResponse> {
+	error!(?headers);
+
+	if headers.get(SEC_WEBSOCKET_PROTOCOL).is_none() {
+		return Err(Error::InvalidHeader(SEC_WEBSOCKET_PROTOCOL, "Missing".to_string()));
+	}
+
 	// Check if there is a connection id header specified
 	let id = match headers.get(SurrealId::name()) {
 		// Use the specific SurrealDB id header when provided
@@ -118,7 +125,7 @@ async fn handle_socket(
 	id: Uuid,
 ) {
 	// Check if there is a WebSocket protocol specified
-	let format = match ws.protocol().map(|h| h.to_str().ok()).flatten() {
+	let format = match ws.protocol().and_then(|h| h.to_str().ok()) {
 		// Any selected protocol will always be a valie value
 		Some(protocol) => protocol.into(),
 		// No protocol format was specified
