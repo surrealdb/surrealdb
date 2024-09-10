@@ -237,13 +237,17 @@ impl Transactor {
 	///
 	/// This function fetches all matching key-value pairs from the underlying datastore in grouped batches.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
-	pub async fn getr<K>(&mut self, rng: Range<K>) -> Result<Vec<(Key, Val)>, Error>
+	pub async fn getr<K>(
+		&mut self,
+		rng: Range<K>,
+		version: Option<u64>,
+	) -> Result<Vec<(Key, Val)>, Error>
 	where
 		K: Into<Key> + Debug,
 	{
 		let beg: Key = rng.start.into();
 		let end: Key = rng.end.into();
-		expand_inner!(&mut self.inner, v => { v.getr(beg..end).await })
+		expand_inner!(&mut self.inner, v => { v.getr(beg..end, version).await })
 	}
 
 	/// Retrieve a specific prefixed range of keys from the datastore.
@@ -380,13 +384,14 @@ impl Transactor {
 		rng: Range<K>,
 		batch: u32,
 		values: bool,
+		version: Option<u64>,
 	) -> Result<Batch, Error>
 	where
 		K: Into<Key> + Debug,
 	{
 		let beg: Key = rng.start.into();
 		let end: Key = rng.end.into();
-		expand_inner!(&mut self.inner, v => { v.batch(beg..end, batch, values).await })
+		expand_inner!(&mut self.inner, v => { v.batch(beg..end, batch, values, version).await })
 	}
 
 	/// Obtain a new change timestamp for a key
@@ -596,7 +601,7 @@ impl Transactor {
 		let ts_key = crate::key::database::ts::new(ns, db, ts);
 		let begin = ts_key.encode()?;
 		let end = crate::key::database::ts::suffix(ns, db);
-		let ts_pairs: Vec<(Vec<u8>, Vec<u8>)> = self.getr(begin..end).await?;
+		let ts_pairs: Vec<(Vec<u8>, Vec<u8>)> = self.getr(begin..end, None).await?;
 		let latest_ts_pair = ts_pairs.last();
 		if let Some((k, _)) = latest_ts_pair {
 			#[cfg(debug_assertions)]
@@ -629,7 +634,7 @@ impl Transactor {
 		let start = crate::key::database::ts::prefix(ns, db);
 		let ts_key = crate::key::database::ts::new(ns, db, ts + 1);
 		let end = ts_key.encode()?;
-		let ts_pairs = self.getr(start..end).await?;
+		let ts_pairs = self.getr(start..end, None).await?;
 		let latest_ts_pair = ts_pairs.last();
 		if let Some((_, v)) = latest_ts_pair {
 			if v.len() == 10 {

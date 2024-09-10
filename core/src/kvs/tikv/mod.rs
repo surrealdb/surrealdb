@@ -256,7 +256,7 @@ impl super::api::Transaction for Transaction {
 		K: Into<Key> + Sprintable + Debug,
 		V: Into<Val> + Debug,
 	{
-		// TiKV does not support verisoned queries.
+		// TiKV does not support versioned queries.
 		if version.is_some() {
 			return Err(Error::UnsupportedVersionedQueries);
 		}

@@ -526,10 +526,10 @@ impl Parser<'_> {
 		let mut stmt = match next.kind {
 			t!("ROOT") => InfoStatement::Root(false),
 			t!("NAMESPACE") | t!("ns") => InfoStatement::Ns(false),
-			t!("DATABASE") => InfoStatement::Db(false),
+			t!("DATABASE") => InfoStatement::Db(false, None),
 			t!("TABLE") => {
 				let ident = self.next_token_value()?;
-				InfoStatement::Tb(ident, false)
+				InfoStatement::Tb(ident, false, None)
 			}
 			t!("USER") => {
 				let ident = self.next_token_value()?;
@@ -545,6 +545,10 @@ impl Parser<'_> {
 			}
 			_ => unexpected!(self, next, "an info target"),
 		};
+
+		if let Some(version) = self.try_parse_version()? {
+			stmt = stmt.versionize(version);
+		}
 
 		if self.peek_kind() == t!("STRUCTURE") {
 			self.pop_peek();

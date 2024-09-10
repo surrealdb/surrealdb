@@ -158,7 +158,7 @@ impl super::api::Transaction for Transaction {
 	where
 		K: Into<Key> + Sprintable + Debug,
 	{
-		// MemDB does not support verisoned queries.
+		// MemDB does not support versioned queries.
 		if version.is_some() {
 			return Err(Error::UnsupportedVersionedQueries);
 		}
@@ -218,7 +218,7 @@ impl super::api::Transaction for Transaction {
 		K: Into<Key> + Sprintable + Debug,
 		V: Into<Val> + Debug,
 	{
-		// MemDB does not support verisoned queries.
+		// MemDB does not support versioned queries.
 		if version.is_some() {
 			return Err(Error::UnsupportedVersionedQueries);
 		}

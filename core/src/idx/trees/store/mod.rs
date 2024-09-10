@@ -311,7 +311,7 @@ impl IndexStores {
 		ns: &str,
 		db: &str,
 	) -> Result<(), Error> {
-		for tb in tx.all_tb(ns, db).await?.iter() {
+		for tb in tx.all_tb(ns, db, None).await?.iter() {
 			self.table_removed(tx, ns, db, &tb.name).await?;
 		}
 		Ok(())
