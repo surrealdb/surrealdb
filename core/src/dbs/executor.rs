@@ -43,7 +43,7 @@ impl<'a> Executor<'a> {
 	}
 
 	fn txn(&self) -> Result<Arc<Transaction>, Error> {
-		self.txn.clone().ok_or(Error::Unreachable("txn was None after successful begin"))
+		self.txn.clone().ok_or_els(|| fail!("txn was None after successful begin"))
 	}
 
 	/// # Return
