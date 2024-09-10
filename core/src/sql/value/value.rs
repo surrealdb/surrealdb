@@ -2828,9 +2828,11 @@ impl Value {
 		matches!(
 			self,
 			Value::None
-				| Value::Null | Value::Array(_)
+				| Value::Null
+				| Value::Array(_)
 				| Value::Block(_)
-				| Value::Bool(_) | Value::Datetime(_)
+				| Value::Bool(_)
+				| Value::Datetime(_)
 				| Value::Duration(_)
 				| Value::Geometry(_)
 				| Value::Number(_)
