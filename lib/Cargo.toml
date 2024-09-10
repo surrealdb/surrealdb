@@ -2,7 +2,7 @@
 name = "surrealdb"
 publish = false
 edition = "2021"
-version = "1.5.1"
+version = "1.5.2"
 rust-version = "1.70.0"
 readme = "CARGO.md"
 authors = ["Tobie Morgan Hitchcock <tobie@surrealdb.com>"]
