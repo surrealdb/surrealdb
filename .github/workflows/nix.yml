@@ -35,6 +35,8 @@ jobs:
     if: ${{ github.ref == 'refs/heads/main' }} || ${{ github.event.label.name == 'nix' }}
     runs-on: ubuntu-latest
     steps:
+      - name: Echo github obj
+        run: echo ${{ toJson(github) }}
       - uses: actions/checkout@v4
       - uses: cachix/install-nix-action@v26
       - uses: cachix/cachix-action@v14
