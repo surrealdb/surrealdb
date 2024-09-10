@@ -24,6 +24,7 @@ use uuid::Uuid;
 pub(crate) const PATH: &str = "rpc";
 const PING_INTERVAL: Duration = Duration::from_secs(5);
 const REVISION_HEADER: &str = "revision";
+const BINCODE_HEADER: &str = "bincode";
 
 enum RequestEffect {
 	/// Completing this request sets a variable to a give value.
