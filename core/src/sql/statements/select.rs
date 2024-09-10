@@ -94,15 +94,24 @@ impl SelectStatement {
 		if self.only && !limit_is_one_or_zero && self.what.0.len() > 1 {
 			return Err(Error::SingleOnlyOutput);
 		}
+		// Check if there is a timeout
+		let ctx = match self.timeout.as_ref() {
+			Some(timeout) => {
+				let mut ctx = MutableContext::new(ctx);
+				ctx.add_timeout(*timeout.0)?;
+				ctx.freeze()
+			}
+			None => ctx.clone(),
+		};
 		// Loop over the select targets
 		for w in self.what.0.iter() {
-			let v = w.compute(stk, ctx, &opt, doc).await?;
+			let v = w.compute(stk, &ctx, &opt, doc).await?;
 			match v {
 				Value::Table(t) => {
 					if self.only && !limit_is_one_or_zero {
 						return Err(Error::SingleOnlyOutput);
 					}
-					planner.add_iterables(stk, ctx, t, &mut i).await?;
+					planner.add_iterables(stk, &ctx, t, &mut i).await?;
 				}
 				Value::Thing(v) => match &v.id {
 					Id::Range(r) => i.ingest(Iterable::TableRange(v.tb, *r.to_owned())),
@@ -132,7 +141,7 @@ impl SelectStatement {
 					for v in v {
 						match v {
 							Value::Table(t) => {
-								planner.add_iterables(stk, ctx, t, &mut i).await?;
+								planner.add_iterables(stk, &ctx, t, &mut i).await?;
 							}
 							Value::Thing(v) => i.ingest(Iterable::Thing(v)),
 							Value::Edges(v) => i.ingest(Iterable::Edges(*v)),
@@ -149,14 +158,20 @@ impl SelectStatement {
 			};
 		}
 		// Create a new context
-		let mut ctx = MutableContext::new(ctx);
+		let mut ctx = MutableContext::new(&ctx);
 		// Add query executors if any
 		if planner.has_executors() {
 			ctx.set_query_planner(planner);
 		}
 		let ctx = ctx.freeze();
+		// Process the statement
+		let res = i.output(stk, &ctx, &opt, &stm).await?;
+		// Catch statement timeout
+		if ctx.is_timedout() {
+			return Err(Error::QueryTimedout);
+		}
 		// Output the results
-		match i.output(stk, &ctx, &opt, &stm).await? {
+		match res {
 			// This is a single record result
 			Value::Array(mut a) if self.only => match a.len() {
 				// There were no results
