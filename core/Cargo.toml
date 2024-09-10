@@ -198,7 +198,10 @@ tokio-tungstenite = { version = "0.21.0", optional = true }
 uuid = { version = "1.10.0", features = ["serde", "v4", "v7"] }
 
 [lints.rust]
-unexpected_cfgs = { level = "warn", check-cfg = ['cfg(surrealdb_unstable)'] }
+unexpected_cfgs = { level = "warn", check-cfg = [
+    'cfg(storage)',
+    'cfg(surrealdb_unstable)',
+] }
 
 [lib]
 name = "surrealdb_core"

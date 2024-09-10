@@ -91,7 +91,7 @@ impl Transaction {
 		}
 		// Output TABLES
 		{
-			let tbs = self.all_tb(ns, db).await?;
+			let tbs = self.all_tb(ns, db, None).await?;
 			if !tbs.is_empty() {
 				for tb in tbs.iter() {
 					// Output TABLE
@@ -102,7 +102,7 @@ impl Transaction {
 					chn.send(bytes!(format!("{tb};"))).await?;
 					chn.send(bytes!("")).await?;
 					// Output FIELDS
-					let fds = self.all_tb_fields(ns, db, &tb.name).await?;
+					let fds = self.all_tb_fields(ns, db, &tb.name, None).await?;
 					if !fds.is_empty() {
 						for fd in fds.iter() {
 							chn.send(bytes!(format!("{fd};"))).await?;
@@ -144,7 +144,7 @@ impl Transaction {
 					let mut next = Some(beg..end);
 					while let Some(rng) = next {
 						// Get the next batch of records
-						let batch = self.batch(rng, *EXPORT_BATCH_SIZE, true).await?;
+						let batch = self.batch(rng, *EXPORT_BATCH_SIZE, true, None).await?;
 						// Set the next scan range
 						next = batch.next;
 						// Check there are records

@@ -1760,7 +1760,7 @@ fn parse_info() {
 	assert_eq!(res, Statement::Info(InfoStatement::Ns(false)));
 
 	let res = test_parse!(parse_stmt, "INFO FOR TABLE table").unwrap();
-	assert_eq!(res, Statement::Info(InfoStatement::Tb(Ident("table".to_owned()), false)));
+	assert_eq!(res, Statement::Info(InfoStatement::Tb(Ident("table".to_owned()), false, None)));
 
 	let res = test_parse!(parse_stmt, "INFO FOR USER user").unwrap();
 	assert_eq!(res, Statement::Info(InfoStatement::User(Ident("user".to_owned()), None, false)));
