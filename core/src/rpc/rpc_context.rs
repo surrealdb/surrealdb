@@ -104,7 +104,8 @@ pub trait RpcContext {
 		let Ok(Value::Object(v)) = params.needs_one() else {
 			return Err(RpcError::InvalidParams);
 		};
-		let mut tmp_session = self.session().clone();
+		let mut tmp_session = std::mem::take(self.session_mut());
+
 		let out: Result<Value, RpcError> =
 			crate::iam::signup::signup(self.kvs(), &mut tmp_session, v)
 				.await
@@ -119,7 +120,7 @@ pub trait RpcContext {
 		let Ok(Value::Object(v)) = params.needs_one() else {
 			return Err(RpcError::InvalidParams);
 		};
-		let mut tmp_session = self.session().clone();
+		let mut tmp_session = std::mem::take(self.session_mut());
 		let out: Result<Value, RpcError> =
 			crate::iam::signin::signin(self.kvs(), &mut tmp_session, v)
 				.await

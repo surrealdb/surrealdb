@@ -935,6 +935,9 @@ pub enum Error {
 	/// An error related to live query occurred
 	#[error("Failed to process Live Query: {0}")]
 	LiveQueryError(LiveQueryCause),
+
+	#[error("Found a non-computed value where they are not allowed")]
+	NonComputed,
 }
 
 impl From<Error> for String {

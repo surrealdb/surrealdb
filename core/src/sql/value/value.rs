@@ -2619,6 +2619,20 @@ impl InfoStructure for Value {
 }
 
 impl Value {
+	/// Validate that a Value is computed or contains only computed Values
+	pub fn validate_computed(&self) -> Result<(), Error> {
+		use Value::*;
+		match self {
+			None | Null | Bool(_) | Number(_) | Strand(_) | Duration(_) | Datetime(_) | Uuid(_)
+			| Geometry(_) | Bytes(_) | Thing(_) => Ok(()),
+			Array(a) => a.validate_computed(),
+			Object(o) => o.validate_computed(),
+			_ => Err(Error::NonComputed),
+		}
+	}
+}
+
+impl Value {
 	/// Check if we require a writeable transaction
 	pub(crate) fn writeable(&self) -> bool {
 		match self {
