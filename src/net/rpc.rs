@@ -58,7 +58,9 @@ async fn get_handler(
 	if headers.get(SEC_WEBSOCKET_PROTOCOL).is_none() {
 		warn!("A connection was made without a specified protocol.");
 		warn!("Automatic inference of the protocol format is deprecated in SurrealDB 2.0 and will be removed in SurrealDB 3.0.");
-		warn!("Please upgrade any client to ensure that the connection format is specified correctly");
+		warn!(
+			"Please upgrade any client to ensure that the connection format is specified correctly"
+		);
 	}
 
 	// Check if there is a connection id header specified
