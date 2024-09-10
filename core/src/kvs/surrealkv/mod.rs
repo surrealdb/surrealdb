@@ -292,8 +292,14 @@ impl super::api::Transaction for Transaction {
 		} else {
 			None
 		};
+		// Does the key exists?
+		let current_val = if let Some(SavePrepare::NewKey(_, sv)) = &prep {
+			sv.get_val().cloned()
+		} else {
+			self.inner.get(&key)?
+		};
 		// Set the key if valid
-		match (self.inner.get(&key)?, chk) {
+		match (current_val, chk) {
 			(Some(v), Some(w)) if v == w => self.inner.set(&key, &val)?,
 			(None, None) => self.inner.set(&key, &val)?,
 			_ => return Err(Error::TxConditionNotMet),
@@ -362,8 +368,14 @@ impl super::api::Transaction for Transaction {
 		} else {
 			None
 		};
+		// Does the key exists?
+		let current_val = if let Some(SavePrepare::NewKey(_, sv)) = &prep {
+			sv.get_val().cloned()
+		} else {
+			self.inner.get(&key)?
+		};
 		// Delete the key if valid
-		match (self.inner.get(&key)?, chk) {
+		match (current_val, chk) {
 			(Some(v), Some(w)) if v == w => self.inner.delete(&key)?,
 			(None, None) => self.inner.delete(&key)?,
 			_ => return Err(Error::TxConditionNotMet),
