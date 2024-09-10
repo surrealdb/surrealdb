@@ -54,8 +54,11 @@ async fn get_handler(
 	State(rpc_state): State<Arc<RpcState>>,
 	headers: HeaderMap,
 ) -> Result<impl IntoResponse, impl IntoResponse> {
+	// Check that a valid header has been specified
 	if headers.get(SEC_WEBSOCKET_PROTOCOL).is_none() {
-		warn!("Recieved upgrade with unspecified protocol, protocol inference is deprecated, please upgrade clients to set the sec-websocket-protocol header");
+		warn!("A connection was made without a specified protocol.");
+		warn!("Automatic inference of the protocol format is deprecated in SurrealDB 2.0 and will be removed in SurrealDB 3.0.");
+		warn!("Please upgrade any client to ensure that the connection format is specified correctly");
 	}
 
 	// Check if there is a connection id header specified
