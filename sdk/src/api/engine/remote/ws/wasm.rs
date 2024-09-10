@@ -211,7 +211,7 @@ async fn router_handle_response(
 	state: &mut RouterState,
 	endpoint: &Endpoint,
 ) -> HandleResult {
-	match Response::try_from(&response, true) {
+	match Response::try_from(&response) {
 		Ok(option) => {
 			// We are only interested in responses that are not empty
 			if let Some(response) = option {
