@@ -17,6 +17,8 @@ pub async fn signup(
 	session: &mut Session,
 	vars: Object,
 ) -> Result<Option<String>, Error> {
+	// Check vars contains only computed values
+	vars.validate_computed()?;
 	// Parse the specified variables
 	let ns = vars.get("NS").or_else(|| vars.get("ns"));
 	let db = vars.get("DB").or_else(|| vars.get("db"));

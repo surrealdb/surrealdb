@@ -793,6 +793,9 @@ pub enum Error {
 	/// The session has an invalid expiration
 	#[error("The session has an invalid expiration")]
 	InvalidSessionExpiration,
+
+	#[error("Found a non-computed value where they are not allowed")]
+	NonComputed,
 }
 
 impl From<Error> for String {

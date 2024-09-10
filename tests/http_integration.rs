@@ -8,6 +8,7 @@ mod http_integration {
 	use reqwest::Client;
 	use serde_json::json;
 	use surrealdb::headers::{AUTH_DB, AUTH_NS};
+	use surrealdb::sql::{self, Query, Statements};
 	use test_log::test;
 	use ulid::Ulid;
 
