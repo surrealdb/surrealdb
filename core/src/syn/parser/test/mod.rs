@@ -3,6 +3,7 @@ use crate::{
 	syn::parser::mac::test_parse,
 };
 
+mod json;
 mod limit;
 mod stmt;
 mod streaming;
