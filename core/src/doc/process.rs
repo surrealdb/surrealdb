@@ -29,7 +29,7 @@ impl Document {
 			// Setup a new document
 			let mut doc = Document::new(pro.rid, pro.ir, ins.0, ins.1);
 			// Optionally create a save point so we can roll back any upcoming changes
-			let is_save_point = if !stm.is_select() {
+			let is_save_point = if stm.requires_save_point() {
 				ctx.tx().lock().await.new_save_point();
 				true
 			} else {
