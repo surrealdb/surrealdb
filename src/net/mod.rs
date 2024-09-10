@@ -29,14 +29,16 @@ use crate::telemetry::metrics::HttpMetricsLayer;
 use axum::response::Redirect;
 use axum::routing::get;
 use axum::{middleware, Router};
-use axum_server::tls_rustls::RustlsConfig;
-use axum_server::Handle;
+use axum_server::tls_rustls::{RustlsAcceptor, RustlsConfig};
+use axum_server::{Handle, Server};
 use http::header;
+use std::cmp::PartialEq;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
 use surrealdb::headers::{AUTH_DB, AUTH_NS, DB, ID, NS};
 use surrealdb::kvs::Datastore;
+use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 use tower::ServiceBuilder;
 use tower_http::add_extension::AddExtensionLayer;
@@ -64,7 +66,31 @@ pub struct AppState {
 	pub datastore: Arc<Datastore>,
 }
 
-pub async fn init(ds: Arc<Datastore>, ct: CancellationToken) -> Result<(), Error> {
+#[derive(PartialEq)]
+pub enum StartupMode {
+	// start server in normal mode
+	Normal,
+	// Start the server in test mode. The server will run, but it won't listen to
+	// any incoming connections. As a result, the server will shut down shortly after starting.
+	Test,
+}
+
+impl TryFrom<String> for StartupMode {
+	type Error = &'static str;
+
+	fn try_from(s: String) -> Result<Self, Self::Error> {
+		if s == "test" {
+			return Ok(StartupMode::Test);
+		}
+		return Ok(StartupMode::Normal);
+	}
+}
+
+pub async fn init(
+	ds: Arc<Datastore>,
+	ct: CancellationToken,
+	startup_mode: StartupMode,
+) -> Result<(), Error> {
 	// Get local copy of options
 	let opt = CF.get().unwrap();
 
@@ -211,26 +237,94 @@ pub async fn init(ds: Arc<Datastore>, ct: CancellationToken) -> Result<(), Error
 		let server = axum_server::bind_rustls(opt.bind, tls);
 		// Log the server startup to the CLI
 		info!(target: LOG, "Started web server on {}", &opt.bind);
-		// Start the server and listen for connections
-		server
-			.handle(handle)
-			.serve(axum_app.into_make_service_with_connect_info::<SocketAddr>())
+
+		ServerWrapper::new_tls(server, handle, axum_app, shutdown_handler, startup_mode)
+			.start()
 			.await?;
 	} else {
 		// Setup the Axum server
 		let server = axum_server::bind(opt.bind);
 		// Log the server startup to the CLI
 		info!(target: LOG, "Started web server on {}", &opt.bind);
-		// Start the server and listen for connections
-		server
-			.handle(handle)
-			.serve(axum_app.into_make_service_with_connect_info::<SocketAddr>())
-			.await?;
+
+		ServerWrapper::new(server, handle, axum_app, shutdown_handler, startup_mode).start().await?
 	};
-	// Wait for the shutdown to finish
-	let _ = shutdown_handler.await;
+
 	// Log the server shutdown to the CLI
 	info!(target: LOG, "Web server stopped. Bye!");
 
 	Ok(())
+}
+
+struct ServerWrapper {
+	server: Option<Server>,
+	tls_server: Option<Server<RustlsAcceptor>>,
+	handle: Handle,
+	axum_app: Router,
+	shutdown_handler: JoinHandle<()>,
+	startup_mode: StartupMode,
+}
+
+impl ServerWrapper {
+	fn new(
+		server: Server,
+		handle: Handle,
+		axum_app: Router,
+		shutdown_handler: JoinHandle<()>,
+		startup_mode: StartupMode,
+	) -> Self {
+		return Self {
+			server: Some(server),
+			tls_server: None,
+			handle,
+			axum_app,
+			shutdown_handler,
+			startup_mode,
+		};
+	}
+
+	fn new_tls(
+		tls_server: Server<RustlsAcceptor>,
+		handle: Handle,
+		axum_app: Router,
+		shutdown_handler: JoinHandle<()>,
+		startup_mode: StartupMode,
+	) -> Self {
+		return Self {
+			server: None,
+			tls_server: Some(tls_server),
+			handle,
+			axum_app,
+			shutdown_handler,
+			startup_mode,
+		};
+	}
+
+	async fn start(self) -> Result<(), Error> {
+		if StartupMode::Test == self.startup_mode {
+			info!(target: LOG, "Server started in TEST mode");
+			return Ok(());
+		}
+
+		if let Some(_) = &self.server {
+			// Start the server and listen for connections
+			self.server
+				.unwrap()
+				.handle(self.handle)
+				.serve(self.axum_app.into_make_service_with_connect_info::<SocketAddr>())
+				.await?;
+		} else {
+			// Start the server and listen for connections
+			self.tls_server
+				.unwrap()
+				.handle(self.handle)
+				.serve(self.axum_app.into_make_service_with_connect_info::<SocketAddr>())
+				.await?;
+		}
+
+		// Wait for the shutdown to finish
+		let _ = self.shutdown_handler.await;
+
+		return Ok(());
+	}
 }

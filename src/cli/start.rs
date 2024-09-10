@@ -1,12 +1,11 @@
 use super::config::{Config, CF};
 use crate::cli::validator::parser::env_filter::CustomEnvFilter;
 use crate::cli::validator::parser::env_filter::CustomEnvFilterParser;
-use crate::cnf::LOGO;
 use crate::dbs;
 use crate::dbs::StartCommandDbsOptions;
 use crate::env;
 use crate::err::Error;
-use crate::net::{self, client_ip::ClientIp};
+use crate::net::{self, client_ip::ClientIp, StartupMode};
 use clap::Args;
 use std::net::SocketAddr;
 use std::path::PathBuf;
@@ -219,8 +218,15 @@ pub async fn init(
 	let datastore = Arc::new(dbs::init(dbs).await?);
 	// Start the node agent
 	let nodetasks = tasks::init(datastore.clone(), canceller.clone(), &CF.get().unwrap().engine);
-	// Start the web server
-	net::init(datastore.clone(), canceller.clone()).await?;
+
+	if let Ok(startup_mode_env_value) = std::env::var("STARTUP_MODE") {
+		// Start the web server in one of the StartupModes
+		net::init(datastore.clone(), canceller.clone(), StartupMode::try_from(startup_mode_env_value).unwrap()).await?;
+	} else {
+		// Start the web server as usual
+		net::init(datastore.clone(), canceller.clone(), StartupMode::Normal).await?;
+	}
+
 	// Shutdown and stop closed tasks
 	canceller.cancel();
 	// Wait for background tasks to finish
