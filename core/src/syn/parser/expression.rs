@@ -86,12 +86,8 @@ impl Parser<'_> {
 	/// more like to operate directly on it's neighbours. Example `*` has a higher binding power
 	/// than `-` resulting in 1 - 2 * 3 being parsed as 1 - (2 * 3).
 	///
-	/// This returns two numbers: the binding power of the left neighbour and the right neighbour.
-	/// If the left number is lower then the right it is left associative: i.e. '1 op 2 op 3' will
-	/// be parsed as '(1 op 2) op 3'. If the right number is lower the operator is right
-	/// associative: i.e. '1 op 2 op 3' will be parsed as '1 op (2 op 3)'. For example: `+=` is
-	/// right associative so `a += b += 3` will be parsed as `a += (b += 3)` while `+` is left
-	/// associative and will be parsed as `(a + b) + c`.
+	/// All operators in SurrealQL which are parsed by the functions in this module are left
+	/// associative or have no defined associativity.
 	fn infix_binding_power(&mut self, token: TokenKind) -> Option<BindingPower> {
 		// TODO: Look at ordering of operators.
 		match token {
@@ -411,11 +407,11 @@ impl Parser<'_> {
 		let before = self.recent_span();
 		let rhs = ctx.run(|ctx| self.pratt_parse_expr(ctx, min_bp)).await?;
 
-		if Self::operator_is_relation(&operator) && Self::expression_is_relation(&rhs) {
+		if Self::operator_is_relation(&operator) && Self::expression_is_relation(&lhs) {
 			let span = before.covers(self.recent_span());
 			// 1 >= 2 >= 3 has no defined associativity and is often a mistake.
 			bail!("Chaining relational operators have no defined associativity.",
-				@span => "Use parens, '()', to specify which expression must be evaluated first")
+				@span => "Use parens, '()', to specify which operator must be evaluated first")
 		}
 
 		Ok(Value::Expression(Box::new(Expression::Binary {
@@ -455,11 +451,11 @@ impl Parser<'_> {
 			})));
 		};
 
-		if matches!(rhs, Value::Range(_)) {
+		if matches!(lhs, Value::Range(_)) {
 			let span = before.covers(self.recent_span());
-			// a..b..c is ambigous, so throw an error
+			// a..b..c is ambiguous, so throw an error
 			bail!("Chaining range operators has no specified associativity",
-				@span => "use parens, '()', to specify which expression must be evaluated first")
+				@span => "use parens, '()', to specify which operator must be evaluated first")
 		}
 
 		Ok(Value::Range(Box::new(Range {
@@ -499,9 +495,9 @@ impl Parser<'_> {
 
 		if matches!(rhs, Value::Range(_)) {
 			let span = before.covers(self.recent_span());
-			// a..b..c is ambigous, so throw an error
+			// a..b..c is ambiguous, so throw an error
 			bail!("Chaining range operators has no specified associativity",
-						@span => "use parens, '()', to specify which expression must be evaluated first")
+						@span => "use parens, '()', to specify which operator must be evaluated first")
 		}
 
 		let range = Range {
