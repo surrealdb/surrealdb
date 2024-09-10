@@ -25,45 +25,13 @@ impl DefineConfigStatement {
 	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
-		ctx: &Context<'_>,
+		ctx: &Context,
 		opt: &Options,
-		_doc: Option<&CursorDoc<'_>>,
+		doc: Option<&CursorDoc>,
 	) -> Result<Value, Error> {
-		// Allowed to run?
-		opt.is_allowed(Action::Edit, ResourceKind::Namespace, &Base::Root)?;
-		// Fetch the transaction
-		let txn = ctx.tx();
-		// Check if the definition exists
-		// if txn.get_ns(&self.name).await.is_ok() {
-		// 	if self.if_not_exists {
-		// 		return Ok(Value::None);
-		// 	} else if !self.overwrite {
-		// 		return Err(Error::NsAlreadyExists {
-		// 			value: self.name.to_string(),
-		// 		});
-		// 	}
-		// }
-		// // Process the statement
-		// let key = crate::key::root::ns::new(&self.name);
-		// txn.set(
-		// 	key,
-		// 	DefineNamespaceStatement {
-		// 		id: if self.id.is_none() {
-		// 			Some(txn.lock().await.get_next_ns_id().await?)
-		// 		} else {
-		// 			None
-		// 		},
-		// 		// Don't persist the `IF NOT EXISTS` clause to schema
-		// 		if_not_exists: false,
-		// 		overwrite: false,
-		// 		..self.clone()
-		// 	},
-		// )
-		// .await?;
-		// Clear the cache
-		txn.clear();
-		// Ok all good
-		Ok(Value::None)
+		match self {
+			DefineConfigStatement::GraphQL(g) => g.compute(ctx, opt, doc),
+		}
 	}
 }
 

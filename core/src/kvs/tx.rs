@@ -667,14 +667,14 @@ impl Transaction {
 			Ok(val) => val,
 			Err(cache) => {
 				let end = crate::key::database::cg::suffix(ns, db);
-				let val = self.getr(key..end).await?;
+				let val = self.getr(key..end, None).await?;
 				let val = val.convert().into();
 				let val = Entry::Cgs(Arc::clone(&val));
 				let _ = cache.insert(val.clone());
 				val
 			}
 		}
-		.into_cgs())
+		.try_into_cgs()?)
 	}
 
 	/// Retrieve all table definitions for a specific database.
