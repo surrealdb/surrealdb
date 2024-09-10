@@ -46,28 +46,28 @@ use crate::api::Surreal;
 use crate::dbs::Notification;
 use crate::dbs::Response;
 use crate::dbs::Session;
-#[cfg(any(feature = "ml", feature = "ml2"))]
+#[cfg(feature = "ml")]
 #[cfg(not(target_arch = "wasm32"))]
 use crate::iam::check::check_ns_db;
-#[cfg(any(feature = "ml", feature = "ml2"))]
+#[cfg(feature = "ml")]
 #[cfg(not(target_arch = "wasm32"))]
 use crate::iam::Action;
-#[cfg(any(feature = "ml", feature = "ml2"))]
+#[cfg(feature = "ml")]
 #[cfg(not(target_arch = "wasm32"))]
 use crate::iam::ResourceKind;
 use crate::kvs::Datastore;
-#[cfg(any(feature = "ml", feature = "ml2"))]
+#[cfg(feature = "ml")]
 #[cfg(not(target_arch = "wasm32"))]
 use crate::kvs::{LockType, TransactionType};
 use crate::method::Stats;
-#[cfg(any(feature = "ml", feature = "ml2"))]
+#[cfg(feature = "ml")]
 #[cfg(not(target_arch = "wasm32"))]
 use crate::ml::storage::surml_file::SurMlFile;
 use crate::opt::IntoEndpoint;
-#[cfg(any(feature = "ml", feature = "ml2"))]
+#[cfg(feature = "ml")]
 #[cfg(not(target_arch = "wasm32"))]
 use crate::sql::statements::DefineModelStatement;
-#[cfg(any(feature = "ml", feature = "ml2"))]
+#[cfg(feature = "ml")]
 #[cfg(not(target_arch = "wasm32"))]
 use crate::sql::statements::DefineStatement;
 use crate::sql::statements::KillStatement;
@@ -79,7 +79,7 @@ use crate::sql::Strand;
 use crate::sql::Uuid;
 use crate::sql::Value;
 use channel::Sender;
-#[cfg(any(feature = "ml", feature = "ml2"))]
+#[cfg(feature = "ml")]
 #[cfg(not(target_arch = "wasm32"))]
 use futures::StreamExt;
 use indexmap::IndexMap;
@@ -445,7 +445,7 @@ async fn export(
 	ml_config: Option<MlConfig>,
 ) -> Result<()> {
 	match ml_config {
-		#[cfg(any(feature = "ml", feature = "ml2"))]
+		#[cfg(feature = "ml")]
 		Some(MlConfig::Export {
 			name,
 			version,
@@ -707,7 +707,7 @@ async fn router(
 				}
 			};
 			let responses = match param.ml_config {
-				#[cfg(any(feature = "ml", feature = "ml2"))]
+				#[cfg(feature = "ml")]
 				Some(MlConfig::Import) => {
 					// Ensure a NS and DB are set
 					let (nsv, dbv) = check_ns_db(session)?;

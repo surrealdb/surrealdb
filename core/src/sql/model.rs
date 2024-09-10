@@ -8,22 +8,22 @@ use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
-#[cfg(any(feature = "ml", feature = "ml2"))]
+#[cfg(feature = "ml")]
 use crate::iam::Action;
-#[cfg(any(feature = "ml", feature = "ml2"))]
+#[cfg(feature = "ml")]
 use crate::ml::errors::error::SurrealError;
-#[cfg(any(feature = "ml", feature = "ml2"))]
+#[cfg(feature = "ml")]
 use crate::ml::execution::compute::ModelComputation;
-#[cfg(any(feature = "ml", feature = "ml2"))]
+#[cfg(feature = "ml")]
 use crate::ml::storage::surml_file::SurMlFile;
-#[cfg(any(feature = "ml", feature = "ml2"))]
+#[cfg(feature = "ml")]
 use crate::sql::Permission;
-#[cfg(any(feature = "ml", feature = "ml2"))]
+#[cfg(feature = "ml")]
 use futures::future::try_join_all;
-#[cfg(any(feature = "ml", feature = "ml2"))]
+#[cfg(feature = "ml")]
 use std::collections::HashMap;
 
-#[cfg(any(feature = "ml", feature = "ml2"))]
+#[cfg(feature = "ml")]
 const ARGUMENTS: &str = "The model expects 1 argument. The argument can be either a number, an object, or an array of numbers.";
 
 #[revisioned(revision = 1)]
@@ -49,7 +49,7 @@ impl fmt::Display for Model {
 }
 
 impl Model {
-	#[cfg(any(feature = "ml", feature = "ml2"))]
+	#[cfg(feature = "ml")]
 	pub(crate) async fn compute(
 		&self,
 		ctx: &Context<'_>,
@@ -210,7 +210,7 @@ impl Model {
 		}
 	}
 
-	#[cfg(not(any(feature = "ml", feature = "ml2")))]
+	#[cfg(not(feature = "ml"))]
 	pub(crate) async fn compute(
 		&self,
 		_ctx: &Context<'_>,

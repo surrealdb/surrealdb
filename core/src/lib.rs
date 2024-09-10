@@ -34,7 +34,7 @@ pub mod idx;
 pub mod key;
 #[doc(hidden)]
 pub mod kvs;
-#[cfg(any(feature = "ml", feature = "ml2", feature = "jwks"))]
+#[cfg(any(feature = "ml", feature = "jwks"))]
 #[doc(hidden)]
 pub mod obs;
 pub mod options;
@@ -50,12 +50,7 @@ pub mod channel {
 	pub use channel::Sender;
 }
 
-#[cfg(all(feature = "ml", not(feature = "ml2")))]
+#[cfg(feature = "ml")]
 #[cfg(not(target_arch = "wasm32"))]
 #[doc(hidden)]
-pub use surrealml_core1 as ml;
-
-#[cfg(feature = "ml2")]
-#[cfg(not(target_arch = "wasm32"))]
-#[doc(hidden)]
-pub use surrealml_core2 as ml;
+pub use surrealml_core as ml;

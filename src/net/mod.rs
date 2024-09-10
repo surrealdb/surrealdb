@@ -17,7 +17,7 @@ mod sync;
 mod tracer;
 mod version;
 
-#[cfg(any(feature = "ml", feature = "ml2"))]
+#[cfg(feature = "ml")]
 mod ml;
 
 use crate::cli::CF;
@@ -166,7 +166,7 @@ pub async fn init(ct: CancellationToken) -> Result<(), Error> {
 		.merge(signup::router())
 		.merge(key::router());
 
-	#[cfg(any(feature = "ml", feature = "ml2"))]
+	#[cfg(feature = "ml")]
 	let axum_app = axum_app.merge(ml::router());
 
 	let axum_app = axum_app.layer(service);
