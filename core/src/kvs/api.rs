@@ -268,11 +268,13 @@ pub trait Transaction {
 					}),
 					values: res,
 				}),
-				// We have checked the length above,
-				// so there is guaranteed to always
-				// be a last item in the vector.
-				// This is therefore unreachable.
-				None => unreachable!(),
+				// We have checked the length above, so
+				// there should be a last item in the
+				// vector, so we shouldn't arrive here
+				None => Ok(Batch {
+					next: None,
+					values: res,
+				}),
 			}
 		}
 	}

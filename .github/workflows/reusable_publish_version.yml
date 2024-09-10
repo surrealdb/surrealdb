@@ -37,7 +37,7 @@ on:
       rust_version:
         required: false
         type: string
-        default: "1.80.1"
+        default: "stable"
         description: "The Rust version to use for building binaries"
       onnx_version:
         required: false
@@ -72,7 +72,7 @@ jobs:
       build-metadata: ${{ steps.outputs.outputs.build-metadata }}
     steps:
       - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@master
         with:
           toolchain: ${{ inputs.rust_version }}
 
@@ -227,7 +227,7 @@ jobs:
     runs-on: ubuntu-latest-16-cores
     steps:
       - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@master
         with:
           toolchain: ${{ inputs.rust_version }}
 
@@ -277,7 +277,7 @@ jobs:
           ref: ${{ needs.prepare-vars.outputs.git-ref }}
 
       - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@master
         with:
           toolchain: ${{ inputs.rust_version }}
           targets: wasm32-unknown-unknown
@@ -523,7 +523,7 @@ jobs:
         run: git checkout -b binary
 
       - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@master
         with:
           toolchain: ${{ inputs.rust_version }}
           targets: ${{ matrix.arch }}
@@ -608,7 +608,7 @@ jobs:
           ref: ${{ needs.prepare-vars.outputs.git-ref }}
 
       - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@master
         with:
           toolchain: ${{ inputs.rust_version }}
 

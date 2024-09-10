@@ -48,7 +48,7 @@ impl Document {
 				Data::SetExpression(x) => {
 					for x in x.iter() {
 						let v = x.2.compute(stk, ctx, opt, Some(&self.current)).await?;
-						match x.1 {
+						match &x.1 {
 							Operator::Equal => match v {
 								Value::None => {
 									self.current.doc.to_mut().del(stk, ctx, opt, &x.0).await?
@@ -64,7 +64,9 @@ impl Document {
 							Operator::Ext => {
 								self.current.doc.to_mut().extend(stk, ctx, opt, &x.0, v).await?
 							}
-							_ => unreachable!(),
+							o => {
+								return Err(fail!("Unexpected operator in SET clause: {o:?}"));
+							}
 						}
 					}
 				}
@@ -83,7 +85,7 @@ impl Document {
 					// Process ON DUPLICATE KEY clause
 					for x in x.iter() {
 						let v = x.2.compute(stk, &ctx, opt, Some(&self.current)).await?;
-						match x.1 {
+						match &x.1 {
 							Operator::Equal => match v {
 								Value::None => {
 									self.current.doc.to_mut().del(stk, &ctx, opt, &x.0).await?
@@ -99,11 +101,13 @@ impl Document {
 							Operator::Ext => {
 								self.current.doc.to_mut().extend(stk, &ctx, opt, &x.0, v).await?
 							}
-							_ => unreachable!(),
+							o => {
+								return Err(fail!("Unexpected operator in UPDATE clause: {o:?}"));
+							}
 						}
 					}
 				}
-				_ => unreachable!(),
+				x => return Err(fail!("Unexpected data clause type: {x:?}")),
 			};
 		};
 		// Set default field values

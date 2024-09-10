@@ -37,7 +37,7 @@ impl Document {
 				Statement::Relate(_) => doc.relate(stk, ctx, opt, stm).await,
 				Statement::Delete(_) => doc.delete(stk, ctx, opt, stm).await,
 				Statement::Insert(_) => doc.insert(stk, ctx, opt, stm).await,
-				_ => unreachable!(),
+				stm => return Err(fail!("Unexpected statement type: {stm:?}")),
 			};
 			// Check the result
 			let res = match res {
@@ -80,6 +80,6 @@ impl Document {
 		// two separtate UNIQUE index definitions, and it
 		// wasn't possible to detect which record was the
 		// correct one to be updated
-		Err(Error::Unreachable("Internal error"))
+		Err(fail!("Internal error"))
 	}
 }
