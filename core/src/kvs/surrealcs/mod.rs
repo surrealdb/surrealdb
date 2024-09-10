@@ -74,7 +74,9 @@ impl Datastore {
 	pub(crate) async fn new(path: &str) -> Result<Datastore, Error> {
 		match create_connection_pool(path, None).await {
 			Ok(_) => Ok(Datastore {}),
-			Err(_) => Err(Error::Ds("error connecting to surrealcs".to_string())),
+			Err(_) => {
+				Err(Error::Ds("Cannot connect to the `surrealcs` storage engine".to_string()))
+			}
 		}
 	}
 
