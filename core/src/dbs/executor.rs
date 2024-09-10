@@ -364,42 +364,17 @@ impl<'a> Executor<'a> {
 							true => Err(Error::TxFailure),
 							// The transaction began successfully
 							false => {
+								// Create a new context for this statement
 								let mut ctx = MutableContext::new(&ctx);
+								// Set the transaction on the context
+								ctx.set_transaction(self.txn());
+								let c = ctx.freeze();
 								// Process the statement
-								let res = match stm.timeout() {
-									// There is a timeout clause
-									Some(timeout) => {
-										// Set statement timeout or propagate the error
-										if let Err(err) = ctx.add_timeout(timeout) {
-											Err(err)
-										} else {
-											ctx.set_transaction(self.txn());
-											let c = ctx.freeze();
-											// Process the statement
-											let res = stack
-												.enter(|stk| stm.compute(stk, &c, &opt, None))
-												.finish()
-												.await;
-											ctx = MutableContext::unfreeze(c)?;
-											// Catch statement timeout
-											match ctx.is_timedout() {
-												true => Err(Error::QueryTimedout),
-												false => res,
-											}
-										}
-									}
-									// There is no timeout clause
-									None => {
-										ctx.set_transaction(self.txn());
-										let c = ctx.freeze();
-										let r = stack
-											.enter(|stk| stm.compute(stk, &c, &opt, None))
-											.finish()
-											.await;
-										ctx = MutableContext::unfreeze(c)?;
-										r
-									}
-								};
+								let res = stack
+									.enter(|stk| stm.compute(stk, &c, &opt, None))
+									.finish()
+									.await;
+								ctx = MutableContext::unfreeze(c)?;
 								// Check if this is a RETURN statement
 								let can_return =
 									matches!(stm, Statement::Output(_) | Statement::Value(_));
