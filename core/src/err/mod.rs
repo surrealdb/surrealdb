@@ -1103,6 +1103,9 @@ pub enum Error {
 	/// There was an outdated storage version stored in the database
 	#[error("The data stored on disk is out-of-date with this version. Please follow the upgrade guides in the documentation")]
 	OutdatedStorageVersion,
+
+	#[error("Found a non-computed value where they are not allowed")]
+	NonComputed,
 }
 
 impl From<Error> for String {

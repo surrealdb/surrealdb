@@ -115,6 +115,20 @@ impl Range {
 			},
 		})))
 	}
+
+	/// Validate that a Range contains only computed Values
+	pub fn validate_computed(&self) -> Result<(), Error> {
+		match &self.beg {
+			Bound::Included(ref v) | Bound::Excluded(ref v) => v.validate_computed()?,
+			Bound::Unbounded => {}
+		}
+		match &self.end {
+			Bound::Included(ref v) | Bound::Excluded(ref v) => v.validate_computed()?,
+			Bound::Unbounded => {}
+		}
+
+		Ok(())
+	}
 }
 
 impl PartialOrd for Range {
