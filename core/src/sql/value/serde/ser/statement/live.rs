@@ -1,5 +1,6 @@
 use crate::err::Error;
 use crate::iam::Auth;
+use crate::sql::statements::live::MaybeSession;
 use crate::sql::statements::LiveStatement;
 use crate::sql::value::serde::ser;
 use crate::sql::Cond;
@@ -107,6 +108,7 @@ impl serde::ser::SerializeStruct for SerializeLiveStatement {
 			archived: self.archived,
 			session: None,
 			auth: None,
+			session_id: MaybeSession::default(),
 		})
 	}
 }
