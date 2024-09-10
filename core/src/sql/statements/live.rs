@@ -180,7 +180,7 @@ mod tests {
 
 		// Create a new transaction and verify that there are no tables defined.
 		let tx = dbs.transaction(Write, Optimistic).await.unwrap();
-		let table_occurrences = &*(tx.all_tb(ns, db).await.unwrap());
+		let table_occurrences = &*(tx.all_tb(ns, db, None).await.unwrap());
 		assert!(table_occurrences.is_empty());
 		tx.cancel().await.unwrap();
 
@@ -196,7 +196,7 @@ mod tests {
 
 		// Verify that the table definition has been created.
 		let tx = dbs.transaction(Write, Optimistic).await.unwrap();
-		let table_occurrences = &*(tx.all_tb(ns, db).await.unwrap());
+		let table_occurrences = &*(tx.all_tb(ns, db, None).await.unwrap());
 		assert_eq!(table_occurrences.len(), 1);
 		assert_eq!(table_occurrences[0].name.0, tb);
 		tx.cancel().await.unwrap();
@@ -218,7 +218,7 @@ mod tests {
 
 		// Create a new transaction to verify that the same table was used.
 		let tx = dbs.transaction(Write, Optimistic).await.unwrap();
-		let table_occurrences = &*(tx.all_tb(ns, db).await.unwrap());
+		let table_occurrences = &*(tx.all_tb(ns, db, None).await.unwrap());
 		assert_eq!(table_occurrences.len(), 1);
 		assert_eq!(table_occurrences[0].name.0, tb);
 		tx.cancel().await.unwrap();
@@ -250,7 +250,7 @@ mod tests {
 
 		// Create a new transaction and verify that there are no tables defined.
 		let tx = dbs.transaction(Write, Optimistic).await.unwrap();
-		let table_occurrences = &*(tx.all_tb(ns, db).await.unwrap());
+		let table_occurrences = &*(tx.all_tb(ns, db, None).await.unwrap());
 		assert!(table_occurrences.is_empty());
 		tx.cancel().await.unwrap();
 
@@ -260,7 +260,7 @@ mod tests {
 
 		// Create a new transaction and confirm that a new table is created.
 		let tx = dbs.transaction(Write, Optimistic).await.unwrap();
-		let table_occurrences = &*(tx.all_tb(ns, db).await.unwrap());
+		let table_occurrences = &*(tx.all_tb(ns, db, None).await.unwrap());
 		assert_eq!(table_occurrences.len(), 1);
 		assert_eq!(table_occurrences[0].name.0, tb);
 		tx.cancel().await.unwrap();
@@ -271,7 +271,7 @@ mod tests {
 
 		// Verify that the old table definition was used.
 		let tx = dbs.transaction(Write, Optimistic).await.unwrap();
-		let table_occurrences = &*(tx.all_tb(ns, db).await.unwrap());
+		let table_occurrences = &*(tx.all_tb(ns, db, None).await.unwrap());
 		assert_eq!(table_occurrences.len(), 1);
 		assert_eq!(table_occurrences[0].name.0, tb);
 		tx.cancel().await.unwrap();

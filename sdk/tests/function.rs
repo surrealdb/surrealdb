@@ -2256,7 +2256,9 @@ async fn function_math_mean() -> Result<(), Error> {
 	let sql = r#"
 		RETURN math::mean([]);
 		RETURN math::mean([101, 213, 202]);
-		RETURN math::mean([101.5, 213.5, 202.5]);
+		RETURN math::mean([101, 213, 203]);
+		RETURN math::mean([101, 213, 203.4]);
+		RETURN math::mean([101.5, 213.5, 206.5]);
 	"#;
 	let mut test = Test::new(sql).await?;
 	//
@@ -2268,7 +2270,15 @@ async fn function_math_mean() -> Result<(), Error> {
 	assert_eq!(tmp, val);
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::from(172.5);
+	let val = Value::from(172.33333333333334);
+	assert_eq!(tmp, val);
+	//
+	let tmp = test.next()?.result?;
+	let val = Value::from(172.46666666666667);
+	assert_eq!(tmp, val);
+	//
+	let tmp = test.next()?.result?;
+	let val = Value::from(173.83333333333334);
 	assert_eq!(tmp, val);
 	//
 	Ok(())

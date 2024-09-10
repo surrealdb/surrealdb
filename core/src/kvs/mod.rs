@@ -31,11 +31,21 @@ mod indxdb;
 mod kv;
 mod mem;
 mod rocksdb;
+mod surrealcs;
 mod surrealkv;
 mod tikv;
 
 #[cfg(not(target_arch = "wasm32"))]
 mod index;
+#[cfg(any(
+	feature = "kv-mem",
+	feature = "kv-tikv",
+	feature = "kv-fdb",
+	feature = "kv-indxdb",
+	feature = "kv-surrealkv",
+	feature = "kv-surrealcs",
+))]
+mod savepoint;
 #[cfg(test)]
 mod tests;
 

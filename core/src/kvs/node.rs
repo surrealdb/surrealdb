@@ -27,7 +27,7 @@ impl Datastore {
 		let key = crate::key::root::nd::Nd::new(id);
 		let now = self.clock_now().await;
 		let val = Node::new(id, now, false);
-		match run!(txn, txn.put(key, val, None)) {
+		match run!(txn, txn.put(key, val, None).await) {
 			Err(Error::TxKeyAlreadyExists) => Err(Error::ClAlreadyExists {
 				value: id.to_string(),
 			}),
@@ -51,7 +51,7 @@ impl Datastore {
 		let key = crate::key::root::nd::new(id);
 		let now = self.clock_now().await;
 		let val = Node::new(id, now, false);
-		run!(txn, txn.set(key, val, None))
+		run!(txn, txn.set(key, val, None).await)
 	}
 
 	/// Deletes a node from the cluster.
@@ -70,7 +70,7 @@ impl Datastore {
 		let key = crate::key::root::nd::new(id);
 		let val = txn.get_node(id).await?;
 		let val = val.as_ref().archive();
-		run!(txn, txn.set(key, val, None))
+		run!(txn, txn.set(key, val, None).await)
 	}
 
 	/// Expires nodes which have timedout from the cluster.
@@ -137,7 +137,7 @@ impl Datastore {
 				let end = crate::key::node::lq::suffix(*id);
 				let mut next = Some(beg..end);
 				while let Some(rng) = next {
-					let res = catch!(txn, txn.batch(rng, *NORMAL_FETCH_SIZE, true).await);
+					let res = catch!(txn, txn.batch(rng, *NORMAL_FETCH_SIZE, true, None).await);
 					next = res.next;
 					for (k, v) in res.values.iter() {
 						// Decode the data for this live query
@@ -220,7 +220,7 @@ impl Datastore {
 				// Fetch all tables
 				let tbs = {
 					let txn = self.transaction(Read, Optimistic).await?;
-					catch!(txn, txn.all_tb(&ns.name, &db.name).await)
+					catch!(txn, txn.all_tb(&ns.name, &db.name, None).await)
 				};
 				// Loop over all tables
 				for tb in tbs.iter() {
@@ -232,7 +232,7 @@ impl Datastore {
 					let end = crate::key::table::lq::suffix(&ns.name, &db.name, &tb.name);
 					let mut next = Some(beg..end);
 					while let Some(rng) = next {
-						let res = catch!(txn, txn.batch(rng, *NORMAL_FETCH_SIZE, true).await);
+						let res = catch!(txn, txn.batch(rng, *NORMAL_FETCH_SIZE, true, None).await);
 						next = res.next;
 						for (k, v) in res.values.iter() {
 							// Decode the LIVE query statement

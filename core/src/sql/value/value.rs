@@ -2828,9 +2828,11 @@ impl Value {
 		matches!(
 			self,
 			Value::None
-				| Value::Null | Value::Array(_)
+				| Value::Null
+				| Value::Array(_)
 				| Value::Block(_)
-				| Value::Bool(_) | Value::Datetime(_)
+				| Value::Bool(_)
+				| Value::Datetime(_)
 				| Value::Duration(_)
 				| Value::Geometry(_)
 				| Value::Number(_)
@@ -2885,6 +2887,21 @@ impl fmt::Display for Value {
 impl InfoStructure for Value {
 	fn structure(self) -> Value {
 		self.to_string().into()
+	}
+}
+
+impl Value {
+	/// Validate that a Value is computed or contains only computed Values
+	pub fn validate_computed(&self) -> Result<(), Error> {
+		use Value::*;
+		match self {
+			None | Null | Bool(_) | Number(_) | Strand(_) | Duration(_) | Datetime(_) | Uuid(_)
+			| Geometry(_) | Bytes(_) | Thing(_) => Ok(()),
+			Array(a) => a.validate_computed(),
+			Object(o) => o.validate_computed(),
+			Range(r) => r.validate_computed(),
+			_ => Err(Error::NonComputed),
+		}
 	}
 }
 
@@ -3024,6 +3041,23 @@ impl TryDiv for Value {
 	fn try_div(self, other: Self) -> Result<Self, Error> {
 		Ok(match (self, other) {
 			(Self::Number(v), Self::Number(w)) => Self::Number(v.try_div(w)?),
+			(v, w) => return Err(Error::TryDiv(v.to_raw_string(), w.to_raw_string())),
+		})
+	}
+}
+
+// ------------------------------
+
+pub(crate) trait TryFloatDiv<Rhs = Self> {
+	type Output;
+	fn try_float_div(self, v: Self) -> Result<Self::Output, Error>;
+}
+
+impl TryFloatDiv for Value {
+	type Output = Self;
+	fn try_float_div(self, other: Self) -> Result<Self::Output, Error> {
+		Ok(match (self, other) {
+			(Self::Number(v), Self::Number(w)) => Self::Number(v.try_float_div(w)?),
 			(v, w) => return Err(Error::TryDiv(v.to_raw_string(), w.to_raw_string())),
 		})
 	}

@@ -78,20 +78,30 @@ impl Parser<'_> {
 		matches!(
 			kind,
 			t!("ACCESS")
-				| t!("ALTER") | t!("ANALYZE")
-				| t!("BEGIN") | t!("BREAK")
-				| t!("CANCEL") | t!("COMMIT")
-				| t!("CONTINUE") | t!("CREATE")
-				| t!("DEFINE") | t!("DELETE")
+				| t!("ALTER")
+				| t!("ANALYZE")
+				| t!("BEGIN")
+				| t!("BREAK")
+				| t!("CANCEL")
+				| t!("COMMIT")
+				| t!("CONTINUE")
+				| t!("CREATE")
+				| t!("DEFINE")
+				| t!("DELETE")
 				| t!("FOR") | t!("IF")
 				| t!("INFO") | t!("INSERT")
 				| t!("KILL") | t!("LIVE")
-				| t!("OPTION") | t!("REBUILD")
-				| t!("RETURN") | t!("RELATE")
-				| t!("REMOVE") | t!("SELECT")
+				| t!("OPTION")
+				| t!("REBUILD")
+				| t!("RETURN")
+				| t!("RELATE")
+				| t!("REMOVE")
+				| t!("SELECT")
 				| t!("LET") | t!("SHOW")
-				| t!("SLEEP") | t!("THROW")
-				| t!("UPDATE") | t!("UPSERT")
+				| t!("SLEEP")
+				| t!("THROW")
+				| t!("UPDATE")
+				| t!("UPSERT")
 				| t!("USE")
 		)
 	}
@@ -516,10 +526,10 @@ impl Parser<'_> {
 		let mut stmt = match next.kind {
 			t!("ROOT") => InfoStatement::Root(false),
 			t!("NAMESPACE") | t!("ns") => InfoStatement::Ns(false),
-			t!("DATABASE") => InfoStatement::Db(false),
+			t!("DATABASE") => InfoStatement::Db(false, None),
 			t!("TABLE") => {
 				let ident = self.next_token_value()?;
-				InfoStatement::Tb(ident, false)
+				InfoStatement::Tb(ident, false, None)
 			}
 			t!("USER") => {
 				let ident = self.next_token_value()?;
@@ -535,6 +545,10 @@ impl Parser<'_> {
 			}
 			_ => unexpected!(self, next, "an info target"),
 		};
+
+		if let Some(version) = self.try_parse_version()? {
+			stmt = stmt.versionize(version);
+		}
 
 		if self.peek_kind() == t!("STRUCTURE") {
 			self.pop_peek();

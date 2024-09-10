@@ -21,6 +21,8 @@ use subtle::ConstantTimeEq;
 use uuid::Uuid;
 
 pub async fn signin(kvs: &Datastore, session: &mut Session, vars: Object) -> Result<String, Error> {
+	// Check vars contains only computed values
+	vars.validate_computed()?;
 	// Parse the specified variables
 	let ns = vars.get("NS").or_else(|| vars.get("ns"));
 	let db = vars.get("DB").or_else(|| vars.get("db"));

@@ -441,7 +441,7 @@ async fn create_record_no_id() {
 	let (permit, db) = new_db().await;
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
 	drop(permit);
-	let _: Vec<ApiRecordId> = db.create("user").await.unwrap();
+	let _: Option<ApiRecordId> = db.create("user").await.unwrap();
 	let _: Value = db.create(Resource::from("user")).await.unwrap();
 }
 
@@ -460,7 +460,7 @@ async fn create_record_no_id_with_content() {
 	let (permit, db) = new_db().await;
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
 	drop(permit);
-	let _: Vec<ApiRecordId> = db
+	let _: Option<ApiRecordId> = db
 		.create("user")
 		.content(Record {
 			name: "John Doe".to_owned(),
@@ -593,14 +593,105 @@ async fn insert_relation_table() {
 	let _: Vec<ApiRecordId> = db.insert("likes").relation(vals).await.unwrap();
 }
 
+
+#[tokio::test]
+async fn insert_with_savepoint() -> Result<(), surrealdb_core::err::Error> {
+	let (permit, db) = new_db().await;
+	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
+	drop(permit);
+	let sqls =  vec![
+		("DEFINE INDEX a ON pokemon FIELDS a UNIQUE", "None"),
+		("DEFINE INDEX b ON pokemon FIELDS b UNIQUE", "None"),
+		(
+			"INSERT INTO pokemon (id, b) VALUES (1, 'b')",
+			"[
+				{
+					b: 'b',
+					id: pokemon:1
+				}
+			]"
+		),
+		(
+			"INSERT INTO pokemon (id, a, b) VALUES (2, 'a', 'b')",
+			"[
+				{
+					b: 'b',
+					id: pokemon:1
+				}
+			]"
+		),
+		(
+			"INSERT INTO pokemon (id, a, b) VALUES (2, 'a', 'b')",
+		 	"[
+				{
+					b: 'b',
+					id: pokemon:1
+				}
+			]"
+		),
+		(
+			"INSERT INTO pokemon (id, a, b) VALUES (2, 'a', 'b') PARALLEL",
+			"[
+				{
+					b: 'b',
+					id: pokemon:1
+				}
+			]"
+		),
+		(
+			"INSERT INTO pokemon (id, a, b) VALUES (2, 'a', 'b') PARALLEL",
+			"[
+				{
+					b: 'b',
+					id: pokemon:1
+				}
+			]"
+		),
+		(
+			"INSERT INTO pokemon (id, a, b) VALUES (2, 'a', 'b') ON DUPLICATE KEY UPDATE something = 'else'",
+			"[
+				{
+					b: 'b',
+					id: pokemon:1,
+					something: 'else'
+				}
+			]"
+		),
+		(
+			"SELECT * FROM pokemon;",
+			 "[
+				{
+					b: 'b',
+					id: pokemon:1,
+					something: 'else'
+				}
+			]"
+		)
+	];
+
+	let check_fetch = |mut response: Response, expected: &str| {
+		let val: Value = response.take(0).unwrap();
+		let exp: Value = expected.parse().unwrap();
+		assert_eq!(format!("{val:#}"), format!("{exp:#}"));
+	};
+
+	for (sql, expected) in sqls {
+		let res = db.query(sql).await.unwrap().check().unwrap();
+		check_fetch(res, expected);
+	}
+
+	Ok(())
+}
+
+
 #[test_log::test(tokio::test)]
 async fn select_table() {
 	let (permit, db) = new_db().await;
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
 	drop(permit);
 	let table = "user";
-	let _: Vec<ApiRecordId> = db.create(table).await.unwrap();
-	let _: Vec<ApiRecordId> = db.create(table).await.unwrap();
+	let _: Option<ApiRecordId> = db.create(table).await.unwrap();
+	let _: Option<ApiRecordId> = db.create(table).await.unwrap();
 	let _: Value = db.create(Resource::from(table)).await.unwrap();
 	let users: Vec<ApiRecordId> = db.select(table).await.unwrap();
 	assert_eq!(users.len(), 3);
@@ -827,8 +918,8 @@ async fn update_table() {
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
 	drop(permit);
 	let table = "user";
-	let _: Vec<ApiRecordId> = db.create(table).await.unwrap();
-	let _: Vec<ApiRecordId> = db.create(table).await.unwrap();
+	let _: Option<ApiRecordId> = db.create(table).await.unwrap();
+	let _: Option<ApiRecordId> = db.create(table).await.unwrap();
 	let _: Value = db.update(Resource::from(table)).await.unwrap();
 	let users: Vec<ApiRecordId> = db.update(table).await.unwrap();
 	assert_eq!(users.len(), 2);
@@ -1072,9 +1163,9 @@ async fn delete_table() {
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
 	drop(permit);
 	let table = "user";
-	let _: Vec<ApiRecordId> = db.create(table).await.unwrap();
-	let _: Vec<ApiRecordId> = db.create(table).await.unwrap();
-	let _: Vec<ApiRecordId> = db.create(table).await.unwrap();
+	let _: Option<ApiRecordId> = db.create(table).await.unwrap();
+	let _: Option<ApiRecordId> = db.create(table).await.unwrap();
+	let _: Option<ApiRecordId> = db.create(table).await.unwrap();
 	let users: Vec<ApiRecordId> = db.select(table).await.unwrap();
 	assert_eq!(users.len(), 3);
 	let users: Vec<ApiRecordId> = db.delete(table).await.unwrap();

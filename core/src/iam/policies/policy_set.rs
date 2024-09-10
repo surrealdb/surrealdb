@@ -1,9 +1,9 @@
 use std::str::FromStr;
 
 use cedar_policy::PolicySet;
-use once_cell::sync::Lazy;
+use std::sync::LazyLock;
 
-pub static POLICY_SET: Lazy<PolicySet> = Lazy::new(|| {
+pub static POLICY_SET: LazyLock<PolicySet> = LazyLock::new(|| {
 	PolicySet::from_str(
     r#"
     // All roles can view all resources on the same level hierarchy or below
