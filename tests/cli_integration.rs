@@ -11,6 +11,7 @@ mod cli_integration {
 	use jsonwebtoken::{encode, Algorithm, EncodingKey, Header};
 	use serde::{Deserialize, Serialize};
 	use serde_json::json;
+	use std::collections::HashMap;
 	use std::fs::File;
 	use std::time;
 	use std::time::Duration;
@@ -244,18 +245,18 @@ mod cli_integration {
 
 	#[test(tokio::test)]
 	async fn start_tls() {
-		let (_, server) = common::start_server(StartServerArguments {
+		let (_, mut server) = common::start_server(StartServerArguments {
 			tls: true,
 			wait_is_ready: false,
+			vars: Some(HashMap::from([("SHUTDOWN_AFTER".to_string(), "5000".to_string())])),
 			..Default::default()
 		})
 		.await
 		.unwrap();
 
-		std::thread::sleep(std::time::Duration::from_millis(5000));
-		let output = server.kill().output().err().unwrap();
+		let output = server.output().unwrap();
 
-		// Test the crt/key args but the keys are self signed so don't actually connect.
+		// Test the crt/key args but the keys are self-signed so don't actually connect.
 		assert!(output.contains("Started web server"), "couldn't start web server: {output}");
 	}
 

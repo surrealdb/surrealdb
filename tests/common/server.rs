@@ -247,6 +247,7 @@ pub async fn start_server(
 	let path = path.unwrap_or("memory".to_string());
 
 	let mut extra_args = args.clone();
+
 	if tls {
 		// Test the crt/key args but the keys are self signed so don't actually connect.
 		let crt_path = tmp_file("crt.crt");

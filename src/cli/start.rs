@@ -44,7 +44,9 @@ pub struct StartCommandArguments {
 		help = "The interval at which to run node agent tick (including garbage collection)",
 		help_heading = "Database"
 	)]
-	#[arg(env = "SURREAL_TICK_INTERVAL", long = "tick-interval", value_parser = super::validator::duration)]
+	#[arg(
+        env = "SURREAL_TICK_INTERVAL", long = "tick-interval", value_parser = super::validator::duration
+    )]
 	#[arg(default_value = "10s")]
 	tick_interval: Duration,
 
@@ -184,18 +186,32 @@ pub async fn init(
 		crt,
 		key,
 	});
+
 	// This is the cancellation token propagated down to
 	// all the async functions that needs to be stopped gracefully.
 	let ct = CancellationToken::new();
 	// Initiate environment
 	env::init().await?;
+
 	// Start the datastore
 	let ds = Arc::new(dbs::init(dbs).await?);
+
 	// Start the node agent
 	let (tasks, task_chans) =
 		start_tasks(&config::CF.get().unwrap().engine.unwrap_or_default(), ds.clone());
-	// Start the web server
-	net::init(ds, ct.clone()).await?;
+
+	if let Ok(delay_in_ms) = std::env::var("SHUTDOWN_AFTER") {
+		// Start the web server and shutdown after the initial delay specified by 'SHUTDOWN_AFTER'
+		let _ = tokio::time::timeout(
+			Duration::from_millis(delay_in_ms.parse::<u64>().unwrap()),
+			net::init(ds, ct.clone()),
+		)
+		.await;
+	} else {
+		// Start the web server
+		net::init(ds, ct.clone()).await?;
+	}
+
 	// Shutdown and stop closed tasks
 	task_chans.into_iter().for_each(|chan| {
 		if chan.send(()).is_err() {
@@ -204,6 +220,7 @@ pub async fn init(
 	});
 	ct.cancel();
 	tasks.resolve().await?;
+
 	// All ok
 	Ok(())
 }
