@@ -265,6 +265,12 @@ impl<'a> Statement<'a> {
 
 	#[inline]
 	pub fn requires_save_point(&self) -> bool {
-		matches!(self, Statement::Create(_) | Statement::Insert(_) | Statement::Upsert(_))
+		matches!(
+			self,
+			Statement::Create(_)
+				| Statement::Insert(_)
+				| Statement::Upsert(_)
+				| Statement::Update(_)
+		)
 	}
 }
