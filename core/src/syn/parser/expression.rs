@@ -18,10 +18,9 @@ use crate::syn::{
 ///
 /// If a binding power is higher the operator is more likely to directly operate on it's
 /// neighbours.
-#[derive(Clone, Copy, Eq, PartialEq, Ord, PartialOrd)]
+#[derive(Debug, Clone, Copy, Eq, PartialEq, Ord, PartialOrd)]
 pub enum BindingPower {
 	Base,
-	Range,
 	Or,
 	And,
 	Equality,
@@ -29,9 +28,10 @@ pub enum BindingPower {
 	AddSub,
 	MulDiv,
 	Power,
+	Cast,
+	Range,
 	Nullish,
 	Unary,
-	Cast,
 }
 
 impl Parser<'_> {
@@ -127,6 +127,8 @@ impl Parser<'_> {
 				}
 				Some(BindingPower::Relation)
 			}
+
+			t!("..") => Some(BindingPower::Range),
 
 			t!("<=")
 			| t!(">=")
@@ -428,7 +430,6 @@ impl Parser<'_> {
 		exclusive: bool,
 		lhs: Value,
 	) -> ParseResult<Value> {
-		expected_whitespace!(self, t!(".."));
 		let inclusive = self.eat_whitespace(t!("="));
 
 		let before = self.recent_span();
