@@ -184,6 +184,11 @@ fn scientific_number() {
 }
 
 #[test]
+fn datetime_error() {
+	test_parse!(parse_value_table, r#" d"2001-01-01T01:01:01.9999999999" "#).unwrap_err();
+}
+
+#[test]
 fn empty_string() {
 	test_parse!(parse_value_table, "").unwrap_err();
 }

@@ -78,6 +78,11 @@ pub fn datetime_inner(lexer: &mut Lexer) -> Result<DateTime<Utc>, SyntaxError> {
 			if !d.is_ascii_digit() {
 				break;
 			}
+
+			if count == 9 {
+				bail!("Invalid datetime nanoseconds, expected no more then 9 digits", @lexer.span_since(nanos_start))
+			}
+
 			lexer.reader.next();
 			number *= 10;
 			number += (d - b'0') as u32;
@@ -86,11 +91,6 @@ pub fn datetime_inner(lexer: &mut Lexer) -> Result<DateTime<Utc>, SyntaxError> {
 
 		if count == 0 {
 			bail!("Invalid datetime nanoseconds, expected at least a single digit", @lexer.span_since(nanos_start))
-		}
-
-		if count > 9 {
-			bail!("Invalid datetime nanoseconds, expected no more then 9 digits",
-				@lexer.span_since(nanos_start) => "Found {count} digits");
 		}
 
 		// if digits are missing they count as 0's
