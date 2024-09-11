@@ -85,7 +85,7 @@ pub fn datetime_inner(lexer: &mut Lexer) -> Result<DateTime<Utc>, SyntaxError> {
 		}
 
 		if count == 0 {
-			bail!("Invalid datetime nanoseconds, expected atleast a single digit", @lexer.span_since(nanos_start))
+			bail!("Invalid datetime nanoseconds, expected at least a single digit", @lexer.span_since(nanos_start))
 		}
 
 		if count > 9 {
