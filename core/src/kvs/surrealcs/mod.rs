@@ -72,8 +72,12 @@ impl Drop for Transaction {
 impl Datastore {
 	/// Open a new database
 	pub(crate) async fn new(path: &str) -> Result<Datastore, Error> {
-		create_connection_pool(path, None).await.unwrap();
-		Ok(Datastore {})
+		match create_connection_pool(path, None).await {
+			Ok(_) => Ok(Datastore {}),
+			Err(_) => {
+				Err(Error::Ds("Cannot connect to the `surrealcs` storage engine".to_string()))
+			}
+		}
 	}
 
 	/// Starts a new transaction.
