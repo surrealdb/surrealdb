@@ -6,7 +6,7 @@ use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::iam::{Action, ConfigKind, ResourceKind};
 use crate::sql::statements::info::InfoStructure;
-use crate::sql::{Base, Ident, Strand, Value};
+use crate::sql::{Base, Value};
 use derive::Store;
 use graphql::GraphQLConfig;
 use revision::revisioned;

@@ -3,7 +3,6 @@ use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::iam::Action;
-use crate::iam::ConfigKind;
 use crate::iam::ResourceKind;
 use crate::sql::{Base, Ident, Object, Value, Version};
 use derive::Store;

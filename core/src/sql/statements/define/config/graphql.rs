@@ -1,15 +1,8 @@
 use std::fmt::{self, Display, Write};
 
-use crate::ctx::Context;
-use crate::dbs::Options;
-use crate::doc::CursorDoc;
-use crate::err::Error;
-use crate::fnc::array::map;
-use crate::iam::{Action, ConfigKind, ResourceKind};
-use crate::kvs::Val;
 use crate::sql::fmt::{pretty_indent, Fmt, Pretty};
 use crate::sql::statements::info::InfoStructure;
-use crate::sql::{Base, Ident, Strand, Value};
+use crate::sql::{Ident, Value};
 use derive::Store;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
