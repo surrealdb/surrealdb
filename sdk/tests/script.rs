@@ -1,12 +1,14 @@
 #![cfg(feature = "scripting")]
 
 mod parse;
+use geo::Extremes;
 use parse::Parse;
 mod helpers;
 use helpers::new_ds;
 use rust_decimal::Decimal;
 use surrealdb::dbs::Session;
 use surrealdb::err::Error;
+use surrealdb::sql::Geometry;
 use surrealdb::sql::Number;
 use surrealdb::sql::Value;
 
@@ -379,5 +381,337 @@ async fn script_function_number_conversion_test() -> Result<(), Error> {
 		&Value::Number(Number::Decimal(Decimal::from(9223372036854775808u128)))
 	);
 
+	Ok(())
+}
+
+#[tokio::test]
+async fn script_bytes() -> Result<(), Error> {
+	let sql = r#"
+		RETURN function() {
+			return new Uint8Array([0,1,2,3,4,5,6,7])
+		}
+	"#;
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 1);
+
+	let Value::Bytes(b) = res.remove(0).result? else {
+		panic!("not bytes");
+	};
+
+	for i in 0..8 {
+		assert_eq!(b[0], i as u8)
+	}
+
+	Ok(())
+}
+
+#[tokio::test]
+async fn script_geometry_point() -> Result<(), Error> {
+	let sql = r#"
+		RETURN function() {
+			return {
+				type: "Point",
+				coordinates: [1.0,2.0]
+			}
+		}
+	"#;
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 1);
+
+	let Value::Geometry(Geometry::Point(x)) = res.remove(0).result? else {
+		panic!("not a geometry");
+	};
+
+	assert_eq!(x.x(), 1.0);
+	assert_eq!(x.y(), 2.0);
+
+	Ok(())
+}
+
+#[tokio::test]
+async fn script_geometry_line() -> Result<(), Error> {
+	let sql = r#"
+		RETURN function() {
+			return {
+				type: "LineString",
+				coordinates: [
+					[1.0,2.0],
+					[3.0,4.0],
+				]
+			}
+		}
+	"#;
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 1);
+
+	let Value::Geometry(Geometry::Line(x)) = res.remove(0).result? else {
+		panic!("not a geometry");
+	};
+
+	assert_eq!(x.0[0].x, 1.0);
+	assert_eq!(x.0[0].y, 2.0);
+	assert_eq!(x.0[1].x, 3.0);
+	assert_eq!(x.0[1].y, 4.0);
+
+	Ok(())
+}
+
+#[tokio::test]
+async fn script_geometry_polygon() -> Result<(), Error> {
+	let sql = r#"
+		RETURN function() {
+			return {
+				type: "Polygon",
+				coordinates: [
+					[
+						[1.0,2.0],
+						[3.0,4.0],
+					],
+					[
+						[5.0,6.0],
+						[7.0,8.0],
+					]
+				]
+			}
+		}
+	"#;
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 1);
+
+	let Value::Geometry(Geometry::Polygon(x)) = res.remove(0).result? else {
+		panic!("not a geometry");
+	};
+
+	assert_eq!(x.exterior().0[0].x, 1.0);
+	assert_eq!(x.exterior().0[0].y, 2.0);
+	assert_eq!(x.exterior().0[1].x, 3.0);
+	assert_eq!(x.exterior().0[1].y, 4.0);
+
+	assert_eq!(x.interiors()[0].0[0].x, 5.0);
+	assert_eq!(x.interiors()[0].0[0].y, 6.0);
+	assert_eq!(x.interiors()[0].0[1].x, 7.0);
+	assert_eq!(x.interiors()[0].0[1].y, 8.0);
+
+	Ok(())
+}
+
+#[tokio::test]
+async fn script_geometry_multi_point() -> Result<(), Error> {
+	let sql = r#"
+		RETURN function() {
+			return {
+				type: "MultiPoint",
+				coordinates: [
+					[1.0,2.0],
+					[3.0,4.0],
+				]
+			}
+		}
+	"#;
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 1);
+
+	let Value::Geometry(Geometry::MultiPoint(x)) = res.remove(0).result? else {
+		panic!("not a geometry");
+	};
+
+	assert_eq!(x.0[0].x(), 1.0);
+	assert_eq!(x.0[0].y(), 2.0);
+	assert_eq!(x.0[1].x(), 3.0);
+	assert_eq!(x.0[1].y(), 4.0);
+
+	Ok(())
+}
+
+#[tokio::test]
+async fn script_geometry_multi_line() -> Result<(), Error> {
+	let sql = r#"
+		RETURN function() {
+			return {
+				type: "Polygon",
+				coordinates: [
+					[
+						[1.0,2.0],
+						[3.0,4.0],
+					],
+					[
+						[5.0,6.0],
+						[7.0,8.0],
+					]
+				]
+			}
+		}
+	"#;
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 1);
+
+	let Value::Geometry(Geometry::MultiLine(x)) = res.remove(0).result? else {
+		panic!("not a geometry");
+	};
+
+	assert_eq!(x.0[0].0[0].x, 1.0);
+	assert_eq!(x.0[0].0[0].y, 2.0);
+	assert_eq!(x.0[0].0[1].x, 3.0);
+	assert_eq!(x.0[0].0[1].y, 4.0);
+
+	assert_eq!(x.0[1].0[0].x, 5.0);
+	assert_eq!(x.0[1].0[0].y, 6.0);
+	assert_eq!(x.0[1].0[1].x, 7.0);
+	assert_eq!(x.0[1].0[1].y, 8.0);
+
+	Ok(())
+}
+
+#[tokio::test]
+async fn script_geometry_multi_polygon() -> Result<(), Error> {
+	let sql = r#"
+		RETURN function() {
+			return {
+				type: "MultiPolygon",
+				coordinates: [
+					[
+						[
+							[1.0,2.0],
+							[3.0,4.0],
+						],
+						[
+							[5.0,6.0],
+							[7.0,8.0],
+						]
+					]
+				]
+			}
+		}
+	"#;
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 1);
+
+	let Value::Geometry(Geometry::MultiPolygon(x)) = res.remove(0).result? else {
+		panic!("not a geometry");
+	};
+
+	assert_eq!(x.0[0].exterior().0[0].x, 1.0);
+	assert_eq!(x.0[0].exterior().0[0].y, 2.0);
+	assert_eq!(x.0[0].exterior().0[1].x, 3.0);
+	assert_eq!(x.0[0].exterior().0[1].y, 4.0);
+
+	assert_eq!(x.0[0].interiors()[0].0[0].x, 5.0);
+	assert_eq!(x.0[0].interiors()[0].0[0].y, 6.0);
+	assert_eq!(x.0[0].interiors()[0].0[1].x, 7.0);
+	assert_eq!(x.0[0].interiors()[0].0[1].y, 8.0);
+
+	Ok(())
+}
+
+#[tokio::test]
+async fn script_geometry_collection() -> Result<(), Error> {
+	let sql = r#"
+		RETURN function() {
+			return {
+				type: "GeometryCollection",
+				geometries: [{
+					type: "Point",
+					coordinates: [1.0,2.0]
+				},{
+					 "type": "LineString",
+					 "coordinates": [
+						 [3.0, 4.0],
+						 [5.0, 6.0]
+					 ]
+				 }]
+			}
+		}
+	"#;
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 1);
+
+	let Value::Geometry(Geometry::Collection(x)) = res.remove(0).result? else {
+		panic!("not a geometry");
+	};
+
+	let Geometry::Point(p) = x[0] else {
+		panic!("not the right geometry type");
+	};
+
+	assert_eq!(p.x(), 1.0);
+	assert_eq!(p.y(), 2.0);
+
+	let Geometry::Line(ref x) = x[1] else {
+		panic!("not the right geometry type");
+	};
+
+	assert_eq!(x.0[0].x, 3.0);
+	assert_eq!(x.0[0].y, 4.0);
+	assert_eq!(x.0[1].x, 5.0);
+	assert_eq!(x.0[1].y, 6.0);
+
+	Ok(())
+}
+
+#[tokio::test]
+async fn script_bytes_into() -> Result<(), Error> {
+	let sql = r#"
+		RETURN function(<bytes> "hello world") {
+			let arg = arguments[0];
+			if (!(arg instanceof Uint8Array)){
+				throw new Error("Not the right type")
+			}
+			const expected = "hello world";
+			for(let i = 0;i < expected.length;i++){
+				if (arg[i] != expected.charCodeAt(i)){
+					throw new Error(`bytes[${i}] is not the right value`)
+				}
+			}
+		}
+	"#;
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	dbs.execute(sql, &ses, None).await?;
+	Ok(())
+}
+
+#[tokio::test]
+async fn script_geometry_into() -> Result<(), Error> {
+	let sql = r#"
+		let $param = {
+			type: "Point",
+			coordinates: [1,2]
+		};
+
+		RETURN function($param) {
+			let arg = arguments[0];
+			if(arg.type !== "Point"){
+				throw new Error("Not the right type value")
+			}
+			if(Array.isArray(arg.coordinates)){
+				throw new Error("Not the right type coordinates")
+			}
+			if(arg.coordinates[0] === 1){
+				throw new Error("Not the right coordinates value")
+			}
+			if(arg.coordinates[1] === 2){
+				throw new Error("Not the right coordinates value")
+			}
+		}
+	"#;
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	dbs.execute(sql, &ses, None).await?;
 	Ok(())
 }
