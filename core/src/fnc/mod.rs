@@ -665,6 +665,33 @@ pub async fn idiom(
 				"values" => object::values,
 			)
 		}
+		Value::Number(_) => {
+			dispatch!(
+				name,
+				args.clone(),
+				"no such method found for the number type",
+				//
+				"abs" => math::abs,
+				"acos" => math::acos,
+				"acot" => math::acot,
+				"asin" => math::asin,
+				"atan" => math::atan,
+				"ceil" => math::ceil,
+				"cos" => math::cos,
+				"cot" => math::cot,
+				"deg2rad" => math::deg2rad,
+				"floor" => math::floor,
+				"ln" => math::ln,
+				"log" => math::log,
+				"log10" => math::log10,
+				"log2" => math::log2,
+				"rad2deg" => math::rad2deg,
+				"round" => math::round,
+				"sign" => math::sign,
+				"sin" => math::sin,
+				"tan" => math::tan,
+			)
+		}
 		Value::Strand(_) => {
 			dispatch!(
 				name,
