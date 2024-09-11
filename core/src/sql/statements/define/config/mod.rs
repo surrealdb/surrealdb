@@ -67,7 +67,17 @@ impl DefineConfigStatement {
 	}
 }
 
-impl ConfigKind {}
+impl ConfigInner {
+	pub fn name(&self) -> String {
+		ConfigKind::from(self).to_string()
+	}
+}
+
+impl From<ConfigInner> for ConfigKind {
+	fn from(value: ConfigInner) -> Self {
+		value.into()
+	}
+}
 
 impl From<&ConfigInner> for ConfigKind {
 	fn from(value: &ConfigInner) -> Self {
@@ -77,19 +87,30 @@ impl From<&ConfigInner> for ConfigKind {
 	}
 }
 
-// impl InfoStructure for DefineNamespaceStatement {
-// 	fn structure(self) -> Value {
-// 		Value::from(map! {
-// 			"name".to_string() => self.name.structure(),
-// 			"comment".to_string(), if let Some(v) = self.comment => v.into(),
-// 		})
-// 	}
-// }
+impl InfoStructure for DefineConfigStatement {
+	fn structure(self) -> Value {
+		match self.inner {
+			ConfigInner::GraphQL(v) => Value::from(map!(
+				"graphql" => v.structure()
+			)),
+		}
+	}
+}
 
 impl Display for DefineConfigStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		match self {
-			Self::GraphQL(v) => Display::fmt(v, f),
+		write!(f, "DEFINE CONFIG")?;
+		if self.if_not_exists {
+			write!(f, " IF NOT EXISTS")?
 		}
+		if self.overwrite {
+			write!(f, " OVERWRITE")?
+		}
+
+		match &self.inner {
+			ConfigInner::GraphQL(v) => Display::fmt(v, f)?,
+		}
+
+		Ok(())
 	}
 }

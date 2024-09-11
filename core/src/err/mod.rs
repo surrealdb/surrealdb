@@ -372,7 +372,7 @@ pub enum Error {
 	},
 
 	/// The requested config does not exist
-	#[error("The param '${value}' does not exist")]
+	#[error("The config for {value} does not exist")]
 	CgNotFound {
 		value: String,
 	},
@@ -902,7 +902,7 @@ pub enum Error {
 	},
 
 	/// The requested config already exists
-	#[error("The param '${value}' already exists")]
+	#[error("The config for {value} already exists")]
 	CgAlreadyExists {
 		value: String,
 	},

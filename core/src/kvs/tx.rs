@@ -656,7 +656,7 @@ impl Transaction {
 
 	/// Retrieve all model definitions for a specific database.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
-	pub async fn all_db_config(
+	pub async fn all_db_configs(
 		&self,
 		ns: &str,
 		db: &str,

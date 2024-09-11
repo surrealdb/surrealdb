@@ -4,8 +4,8 @@ use crate::cnf::EXPERIMENTAL_BEARER_ACCESS;
 use crate::sql::access_type::JwtAccessVerify;
 use crate::sql::index::HnswParams;
 use crate::sql::statements::define::config::graphql::GraphQLConfig;
+use crate::sql::statements::define::config::ConfigInner;
 use crate::sql::statements::define::DefineConfigStatement;
-use crate::sql::Idiom;
 use crate::sql::Value;
 use crate::{
 	sql::{
@@ -1227,10 +1227,19 @@ impl Parser<'_> {
 			(false, false)
 		};
 
-		match self.peek_kind() {
-			t!("GRAPHQL") => self.parse_graphql_config().await.map(DefineConfigStatement::GraphQL),
+		let inner = match self.peek_kind() {
+			t!("GRAPHQL") => {
+				self.pop_peek();
+				self.parse_graphql_config().await.map(ConfigInner::GraphQL)?
+			}
 			_ => todo!(),
-		}
+		};
+
+		Ok(DefineConfigStatement {
+			inner,
+			if_not_exists,
+			overwrite,
+		})
 	}
 
 	pub async fn parse_graphql_config(&mut self) -> ParseResult<GraphQLConfig> {
@@ -1240,6 +1249,22 @@ impl Parser<'_> {
 		let mut tmp_fncs = Option::<FunctionsConfig>::None;
 		loop {
 			match self.peek_kind() {
+				t!("NONE") => {
+					if tmp_tables.is_some() || tmp_fncs.is_some() {
+						todo!()
+					}
+					self.pop_peek();
+					tmp_tables = Some(TablesConfig::None);
+					tmp_fncs = Some(FunctionsConfig::None);
+				}
+				t!("AUTO") => {
+					if tmp_tables.is_some() || tmp_fncs.is_some() {
+						todo!()
+					}
+					self.pop_peek();
+					tmp_tables = Some(TablesConfig::Auto);
+					tmp_fncs = Some(FunctionsConfig::Auto);
+				}
 				t!("TABLES") => {
 					if tmp_tables.is_some() {
 						todo!()

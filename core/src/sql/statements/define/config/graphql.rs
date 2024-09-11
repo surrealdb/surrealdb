@@ -4,7 +4,9 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
+use crate::fnc::array::map;
 use crate::iam::{Action, ConfigKind, ResourceKind};
+use crate::kvs::Val;
 use crate::sql::fmt::{pretty_indent, Fmt, Pretty};
 use crate::sql::statements::info::InfoStructure;
 use crate::sql::{Base, Ident, Strand, Value};
@@ -56,21 +58,10 @@ pub enum FunctionsConfig {
 
 impl Display for GraphQLConfig {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "DEFINE CONFIG GRAPHQL")?;
+		write!(f, " GRAPHQL")?;
 
 		write!(f, " TABLES {}", self.tables)?;
 		write!(f, " FUNCTIONS {}", self.functions)?;
-
-		// if self.if_not_exists {
-		// 	write!(f, " IF NOT EXISTS")?
-		// }
-		// if self.overwrite {
-		// 	write!(f, " OVERWRITE")?
-		// }
-		// write!(f, " {}", self.name)?;
-		// if let Some(ref v) = self.comment {
-		// 	write!(f, " COMMENT {v}")?
-		// }
 		Ok(())
 	}
 }
@@ -133,5 +124,53 @@ impl Display for FunctionsConfig {
 		}
 
 		Ok(())
+	}
+}
+
+impl InfoStructure for GraphQLConfig {
+	fn structure(self) -> Value {
+		Value::from(map!(
+			"tables" => self.tables.structure(),
+			"functions" => self.functions.structure(),
+		))
+	}
+}
+
+impl InfoStructure for TablesConfig {
+	fn structure(self) -> Value {
+		match self {
+			TablesConfig::None => Value::None,
+			TablesConfig::Auto => Value::Strand("AUTO".into()),
+			TablesConfig::Include(ts) => Value::from(map!(
+				"include" => Value::Array(ts.into_iter().map(InfoStructure::structure).collect()),
+			)),
+			TablesConfig::Exclude(ts) => Value::from(map!(
+				"exclude" => Value::Array(ts.into_iter().map(InfoStructure::structure).collect()),
+			)),
+		}
+	}
+}
+
+impl InfoStructure for TableConfig {
+	fn structure(self) -> Value {
+		Value::from(map!(
+			"name" => Value::from(self.name),
+			"fields" => Value::Array(self.fields.into_iter().map(Value::from).collect())
+		))
+	}
+}
+
+impl InfoStructure for FunctionsConfig {
+	fn structure(self) -> Value {
+		match self {
+			FunctionsConfig::None => Value::None,
+			FunctionsConfig::Auto => Value::Strand("AUTO".into()),
+			FunctionsConfig::Include(fs) => Value::from(map!(
+				"include" => Value::Array(fs.into_iter().map(|i| Value::from(i.to_raw())).collect()),
+			)),
+			FunctionsConfig::Exclude(fs) => Value::from(map!(
+				"exclude" => Value::Array(fs.into_iter().map(|i| Value::from(i.to_raw())).collect()),
+			)),
+		}
 	}
 }
