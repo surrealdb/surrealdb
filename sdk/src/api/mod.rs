@@ -142,7 +142,7 @@ pub type Result<T> = std::result::Result<T, crate::Error>;
 // Channel for waiters
 type Waiter = (watch::Sender<Option<WaitFor>>, watch::Receiver<Option<WaitFor>>);
 
-const SUPPORTED_VERSIONS: (&str, &str) = (">=1.0.0, <3.0.0", "20230701.55918b7c");
+const SUPPORTED_VERSIONS: (&str, &str) = (">=1.2.0, <3.0.0", "20230701.55918b7c");
 
 /// Connection trait implemented by supported engines
 pub trait Connection: conn::Connection {}
