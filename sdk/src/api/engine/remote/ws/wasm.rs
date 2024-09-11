@@ -408,7 +408,7 @@ pub(crate) async fn run_router(
 	conn_tx: Sender<Result<()>>,
 	route_rx: Receiver<Route>,
 ) {
-	WsMeta::connect(&endpoint.url, vec![super::REVISION_HEADER]).await;
+	let connect = WsMeta::connect(&endpoint.url, vec![super::REVISION_HEADER]).await;
 	let (mut ws, socket) = match connect {
 		Ok(pair) => pair,
 		Err(error) => {
