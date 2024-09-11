@@ -80,7 +80,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Install cargo-deny
-        run: cargo install --debug --locked cargo-deny@0.14.11
+        run: cargo install --debug cargo-deny@0.14.11
 
       - name: Install cargo-vet
         run: cargo install --debug --locked cargo-vet

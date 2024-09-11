@@ -5,33 +5,7 @@ use crate::sql::Kind;
 use crate::sql::Value;
 use ser::Serializer as _;
 use serde::ser::Error as _;
-use serde::ser::Impossible;
 use serde::ser::Serialize;
-
-pub(super) struct Serializer;
-
-impl ser::Serializer for Serializer {
-	type Ok = Cast;
-	type Error = Error;
-
-	type SerializeSeq = Impossible<Cast, Error>;
-	type SerializeTuple = Impossible<Cast, Error>;
-	type SerializeTupleStruct = SerializeCast;
-	type SerializeTupleVariant = Impossible<Cast, Error>;
-	type SerializeMap = Impossible<Cast, Error>;
-	type SerializeStruct = Impossible<Cast, Error>;
-	type SerializeStructVariant = Impossible<Cast, Error>;
-
-	const EXPECTED: &'static str = "an struct `Cast`";
-
-	fn serialize_tuple_struct(
-		self,
-		_name: &'static str,
-		_len: usize,
-	) -> Result<Self::SerializeTupleStruct, Error> {
-		Ok(SerializeCast::default())
-	}
-}
 
 #[derive(Default)]
 pub(super) struct SerializeCast {
@@ -68,18 +42,5 @@ impl serde::ser::SerializeTupleStruct for SerializeCast {
 			(Some(kind), Some(value)) => Ok(Cast(kind, value)),
 			_ => Err(Error::custom("`Cast` missing required value(s)")),
 		}
-	}
-}
-
-#[cfg(test)]
-mod tests {
-	use super::*;
-	use serde::Serialize;
-
-	#[test]
-	fn cast() {
-		let cast = Cast(Default::default(), Default::default());
-		let serialized = cast.serialize(Serializer.wrap()).unwrap();
-		assert_eq!(cast, serialized);
 	}
 }

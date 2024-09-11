@@ -158,6 +158,11 @@ tokio = { version = "1.34.0", default-features = false, features = [
 tokio-tungstenite = { version = "0.20.1", optional = true }
 uuid = { version = "1.6.1", features = ["serde", "v4", "v7"] }
 
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = [
+    'cfg(surrealdb_unstable)',
+] }
+
 [lib]
 name = "surrealdb" # Needed for the nightly crate as we will be renaming it
 bench = false
