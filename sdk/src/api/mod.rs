@@ -131,6 +131,7 @@ mod conn;
 use self::conn::Router;
 use self::err::Error;
 use self::opt::Endpoint;
+use self::opt::EndpointKind;
 use self::opt::WaitFor;
 
 pub use method::query::Response;
@@ -142,7 +143,6 @@ pub type Result<T> = std::result::Result<T, crate::Error>;
 type Waiter = (watch::Sender<Option<WaitFor>>, watch::Receiver<Option<WaitFor>>);
 
 const SUPPORTED_VERSIONS: (&str, &str) = (">=1.0.0, <3.0.0", "20230701.55918b7c");
-const REVISION_SUPPORTED_SERVER_VERSION: Version = Version::new(1, 2, 0);
 
 /// Connection trait implemented by supported engines
 pub trait Connection: conn::Connection {}
@@ -205,7 +205,19 @@ where
 	fn into_future(self) -> Self::IntoFuture {
 		Box::pin(async move {
 			let endpoint = self.address?;
+			let endpoint_kind = EndpointKind::from(endpoint.url.scheme());
 			let client = Client::connect(endpoint, self.capacity).await?;
+			if endpoint_kind.is_remote() {
+				match client.version().await {
+					Ok(mut version) => {
+						// we would like to be able to connect to pre-releases too
+						version.pre = Default::default();
+						client.check_server_version(&version).await?;
+					}
+					// TODO(raphaeldarley) don't error if Method Not allowed
+					Err(e) => return Err(e),
+				}
+			}
 			// Both ends of the channel are still alive at this point
 			client.waiter.0.send(Some(WaitFor::Connection)).ok();
 			Ok(client)
@@ -227,7 +239,19 @@ where
 				return Err(Error::AlreadyConnected.into());
 			}
 			let endpoint = self.address?;
-			let client = Client::connect(endpoint.clone(), self.capacity).await?;
+			let endpoint_kind = EndpointKind::from(endpoint.url.scheme());
+			let client = Client::connect(endpoint, self.capacity).await?;
+			if endpoint_kind.is_remote() {
+				match client.version().await {
+					Ok(mut version) => {
+						// we would like to be able to connect to pre-releases too
+						version.pre = Default::default();
+						client.check_server_version(&version).await?;
+					}
+					// TODO(raphaeldarley) don't error if Method Not allowed
+					Err(e) => return Err(e),
+				}
+			}
 			let cell =
 				Arc::into_inner(client.router).expect("new connection to have no references");
 			let router = cell.into_inner().expect("router to be set");
