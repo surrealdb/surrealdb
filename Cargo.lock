@@ -5990,9 +5990,9 @@ dependencies = [
 
 [[package]]
 name = "surrealcs"
-version = "0.2.0"
+version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "64b197080e41cda8f0bd4823468f7d6e1f96d34198153bbbd4d6f413f970ff18"
+checksum = "9a77651296e07271c28b82ff9eb12ce7e834565d1b7f4607241f41b82d343fbe"
 dependencies = [
  "bincode",
  "bytes",
@@ -6011,9 +6011,9 @@ dependencies = [
 
 [[package]]
 name = "surrealcs-kernel"
-version = "0.2.0"
+version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b206ae7754a97c0a0cb79a2a15d7ba7610fca16efd2d358cee85f9b06c039911"
+checksum = "b47d835a86fe1080acbeb24352dbce92e4019f84bf28fe76c16d25b477eef032"
 dependencies = [
  "bincode",
  "chrono",
