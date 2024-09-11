@@ -146,7 +146,6 @@ async fn router_handle_route(
 		response,
 	}: Route,
 	state: &mut RouterState,
-	_endpoint: &Endpoint,
 ) -> HandleResult {
 	let RequestData {
 		id,
@@ -260,11 +259,7 @@ async fn router_handle_route(
 	HandleResult::Ok
 }
 
-async fn router_handle_response(
-	response: Message,
-	state: &mut RouterState,
-	_endpoint: &Endpoint,
-) -> HandleResult {
+async fn router_handle_response(response: Message, state: &mut RouterState) -> HandleResult {
 	match Response::try_from(&response) {
 		Ok(option) => {
 			// We are only interested in responses that are not empty
@@ -495,7 +490,7 @@ pub(crate) async fn run_router(
 						break 'router;
 					};
 
-					match router_handle_route(response, &mut state, &endpoint).await {
+					match router_handle_route(response, &mut state).await {
 						HandleResult::Ok => {},
 						HandleResult::Disconnected => {
 							router_reconnect(
@@ -527,7 +522,7 @@ pub(crate) async fn run_router(
 					state.last_activity = Instant::now();
 					match result {
 						Ok(message) => {
-							match router_handle_response(message, &mut state, &endpoint).await {
+							match router_handle_response(message, &mut state).await {
 								HandleResult::Ok => continue,
 								HandleResult::Disconnected => {
 									router_reconnect(
