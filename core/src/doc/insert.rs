@@ -66,10 +66,10 @@ impl Document {
 		self.clean(stk, ctx, opt, stm).await?;
 		// Check if allowed
 		self.allow(stk, ctx, opt, stm).await?;
-		// Store record data
-		self.store(ctx, opt, stm).await?;
 		// Store index data
 		self.index(stk, ctx, opt, stm).await?;
+		// Store record data
+		self.store(ctx, opt, stm).await?;
 		// Run table queries
 		self.table(stk, ctx, opt, stm).await?;
 		// Run lives queries
@@ -102,10 +102,10 @@ impl Document {
 		self.clean(stk, ctx, opt, stm).await?;
 		// Check if allowed
 		self.allow(stk, ctx, opt, stm).await?;
-		// Store record data
-		self.store(ctx, opt, stm).await?;
 		// Store index data
 		self.index(stk, ctx, opt, stm).await?;
+		// Store record data
+		self.store(ctx, opt, stm).await?;
 		// Run table queries
 		self.table(stk, ctx, opt, stm).await?;
 		// Run lives queries

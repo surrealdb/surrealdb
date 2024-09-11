@@ -262,16 +262,4 @@ impl<'a> Statement<'a> {
 			_ => None,
 		}
 	}
-
-	#[inline]
-	pub fn requires_save_point(&self) -> bool {
-		matches!(
-			self,
-			Statement::Create(_)
-				| Statement::Insert(_)
-				| Statement::Upsert(_)
-				| Statement::Update(_)
-				| Statement::Relate(_)
-		)
-	}
 }
