@@ -62,7 +62,7 @@ pub fn datetime_inner(lexer: &mut Lexer) -> Result<DateTime<Utc>, SyntaxError> {
 
 	let hour = parse_datetime_digits(lexer, 2, 0..=24)?;
 	lexer.expect(':')?;
-	let minute = parse_datetime_digits(lexer, 2, 0..=60)?;
+	let minute = parse_datetime_digits(lexer, 2, 0..=59)?;
 	lexer.expect(':')?;
 	let second = parse_datetime_digits(lexer, 2, 0..=60)?;
 
