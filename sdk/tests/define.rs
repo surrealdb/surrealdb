@@ -798,6 +798,47 @@ async fn define_statement_unique_index_numbers() -> Result<(), Error> {
 }
 
 #[tokio::test]
+async fn define_statement_index_mixed_numbers_range() -> Result<(), Error> {
+	let sql = "
+		DEFINE INDEX index ON TABLE test COLUMNS number;
+		CREATE test:int0 SET number = 0;
+		CREATE test:float0 SET number = 0.5;
+		CREATE test:int1 SET number = 1;
+		CREATE test:float1 SET number = 1.5;
+		SELECT * FROM test WITH NOINDEX WHERE number > 0 AND number < 2 ORDER BY id;
+		SELECT * FROM test WHERE number > 0 AND number < 2 ORDER BY id;
+		SELECT * FROM test WITH NOINDEX WHERE number > 0.1 AND number < 1.5 ORDER BY id;
+		SELECT * FROM test WHERE number > 0.1 AND number < 1.5 ORDER BY id;
+		SELECT * FROM test WITH NOINDEX WHERE number > 0.1 AND number < 2 ORDER BY id;
+		SELECT * FROM test WHERE number > 0.1 AND number < 2 ORDER BY id;
+		SELECT * FROM test WITH NOINDEX WHERE number > 0 AND number < 1.5 ORDER BY id;
+		SELECT * FROM test WHERE number > 0 AND number < 1.5 ORDER BY id;
+	";
+	let mut t = Test::new(sql).await?;
+	t.expect_size(13)?;
+	t.skip_ok(5)?;
+	for _ in 0..2 {
+		t.expect_val(
+			"[
+					{
+						id: test:float0,
+						number: 0.5f
+					},
+					{
+						id: test:float1,
+						number: 1.5f
+					},
+					{
+						id: test:int1,
+						number: 1
+					}
+				]",
+		)?;
+	}
+	Ok(())
+}
+
+#[tokio::test]
 async fn define_statement_index_concurrently() -> Result<(), Error> {
 	let sql = "
 		CREATE user:1 SET email = 'testA@surrealdb.com';
