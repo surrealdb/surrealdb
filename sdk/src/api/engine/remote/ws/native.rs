@@ -80,6 +80,10 @@ pub(crate) async fn connect(
 		request
 			.headers_mut()
 			.insert(SEC_WEBSOCKET_PROTOCOL, HeaderValue::from_static(super::REVISION_HEADER));
+	} else {
+		request
+			.headers_mut()
+			.insert(SEC_WEBSOCKET_PROTOCOL, HeaderValue::from_static(super::BINCODE_HEADER));
 	}
 
 	#[cfg(any(feature = "native-tls", feature = "rustls"))]

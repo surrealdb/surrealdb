@@ -22,8 +22,8 @@ use axum::{
 use axum_extra::headers::Header;
 use axum_extra::TypedHeader;
 use bytes::Bytes;
+use http::header::SEC_WEBSOCKET_PROTOCOL;
 use http::HeaderMap;
-use http::HeaderValue;
 use surrealdb::dbs::Session;
 use surrealdb::kvs::Datastore;
 use surrealdb::rpc::format::Format;
@@ -54,6 +54,13 @@ async fn get_handler(
 	State(rpc_state): State<Arc<RpcState>>,
 	headers: HeaderMap,
 ) -> Result<impl IntoResponse, impl IntoResponse> {
+	// Check that a valid header has been specified
+	if headers.get(SEC_WEBSOCKET_PROTOCOL).is_none() {
+		warn!("A connection was made without a specified protocol.");
+		warn!("Automatic inference of the protocol format is deprecated in SurrealDB 2.0 and will be removed in SurrealDB 3.0.");
+		warn!("Please upgrade any client to ensure that the connection format is specified.");
+	}
+
 	// Check if there is a connection id header specified
 	let id = match headers.get(SurrealId::name()) {
 		// Use the specific SurrealDB id header when provided
@@ -119,9 +126,9 @@ async fn handle_socket(
 	id: Uuid,
 ) {
 	// Check if there is a WebSocket protocol specified
-	let format = match ws.protocol().map(HeaderValue::to_str) {
+	let format = match ws.protocol().and_then(|h| h.to_str().ok()) {
 		// Any selected protocol will always be a valie value
-		Some(protocol) => protocol.unwrap().into(),
+		Some(protocol) => protocol.into(),
 		// No protocol format was specified
 		_ => Format::None,
 	};
