@@ -401,7 +401,7 @@ async fn script_bytes() -> Result<(), Error> {
 	};
 
 	for i in 0..8 {
-		assert_eq!(b[0], i as u8)
+		assert_eq!(b[i], i as u8)
 	}
 
 	Ok(())
@@ -538,7 +538,7 @@ async fn script_geometry_multi_line() -> Result<(), Error> {
 	let sql = r#"
 		RETURN function() {
 			return {
-				type: "Polygon",
+				type: "MultiLineString",
 				coordinates: [
 					[
 						[1.0,2.0],
@@ -600,8 +600,9 @@ async fn script_geometry_multi_polygon() -> Result<(), Error> {
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 1);
 
-	let Value::Geometry(Geometry::MultiPolygon(x)) = res.remove(0).result? else {
-		panic!("not a geometry");
+	let v = res.remove(0).result?;
+	let Value::Geometry(Geometry::MultiPolygon(x)) = v else {
+		panic!("{:?} is not the right geometry", v);
 	};
 
 	assert_eq!(x.0[0].exterior().0[0].x, 1.0);
