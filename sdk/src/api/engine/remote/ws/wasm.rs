@@ -347,7 +347,7 @@ async fn router_reconnect(
 ) {
 	loop {
 		trace!("Reconnecting...");
-		WsMeta::connect(&endpoint.url, vec![super::REVISION_HEADER]).await;
+		let connect = WsMeta::connect(&endpoint.url, vec![super::REVISION_HEADER]).await;
 		match connect {
 			Ok((mut meta, stream)) => {
 				let (new_sink, new_stream) = stream.split();
