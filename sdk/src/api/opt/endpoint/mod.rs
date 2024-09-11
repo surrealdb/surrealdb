@@ -163,10 +163,6 @@ impl EndpointKind {
 		)
 	}
 
-	pub(crate) fn is_ws(&self) -> bool {
-		matches!(self, EndpointKind::Ws | EndpointKind::Wss)
-	}
-
 	pub fn is_local(&self) -> bool {
 		!self.is_remote()
 	}
