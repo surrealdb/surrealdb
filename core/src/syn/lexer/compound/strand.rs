@@ -79,6 +79,7 @@ pub fn strand(lexer: &mut Lexer, start: Token) -> Result<String, SyntaxError> {
 								bail!("Invalid escape character `{char}`, valid characters are `\\`, `{valid_escape}`, `/`, `b`, `f`, `n`, `r`, or `t`", @lexer.current_span());
 							}
 							Err(e) => {
+								lexer.scratch.clear();
 								return Err(e.into());
 							}
 						},
@@ -89,7 +90,10 @@ pub fn strand(lexer: &mut Lexer, start: Token) -> Result<String, SyntaxError> {
 		} else {
 			match lexer.reader.complete_char(x) {
 				Ok(x) => lexer.scratch.push(x),
-				Err(e) => return Err(e.into()),
+				Err(e) => {
+					lexer.scratch.clear();
+					return Err(e.into());
+				}
 			}
 		}
 	}
