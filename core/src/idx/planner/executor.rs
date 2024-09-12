@@ -2,7 +2,6 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::fnc::util::math::ToFloat;
 use crate::idx::docids::DocIds;
 use crate::idx::ft::analyzer::{Analyzer, TermsList, TermsSet};
 use crate::idx::ft::highlighter::HighlightParams;
@@ -474,7 +473,6 @@ impl QueryExecutor {
 		let oi;
 		let of;
 		let od;
-		let mut values = Vec::with_capacity(3);
 		match n {
 			Number::Int(i) => {
 				oi = Some(*i);
@@ -489,7 +487,7 @@ impl QueryExecutor {
 			Number::Decimal(d) => {
 				oi = d.to_i64();
 				of = d.to_f64();
-				od = Some(d);
+				od = Some(*d);
 			}
 		};
 		(oi, of, od)
@@ -503,30 +501,72 @@ impl QueryExecutor {
 			}
 		});
 		let mut values = Vec::with_capacity(3);
-		if oi {
-			values.push(Number::Int(oi).into());
+		if let Some(i) = oi {
+			values.push(Number::Int(i).into());
 		}
-		if of {
-			values.push(of.into());
+		if let Some(f) = of {
+			values.push(Number::Float(f).into());
 		}
-		if od {
-			values.push(od.into());
+		if let Some(d) = od {
+			values.push(Number::Decimal(d).into());
 		}
 		values
 	}
 
-	fn get_lo_range_number_variants(n: &Number) -> Vec<Value> {
+	fn get_range_number_from_variants(n: &Number) -> (Option<i64>, Option<f64>, Option<Decimal>) {
 		Self::get_number_variants(n, |f| f.floor().to_i64())
 	}
 
-	fn get_hi_range_number_variants(n: &Number) -> Vec<Value> {
+	fn get_range_number_to_variants(n: &Number) -> (Option<i64>, Option<f64>, Option<Decimal>) {
 		Self::get_number_variants(n, |f| f.ceil().to_i64())
 	}
 
 	fn get_range_number_variants(
-		from: RangeValue,
-		to: RangeValue,
+		from: &Number,
+		from_inc: bool,
+		to: &Number,
+		to_inc: bool,
 	) -> Vec<(RangeValue, RangeValue)> {
+		let (from_i, from_f, from_d) = Self::get_range_number_from_variants(from);
+		let (to_i, to_f, to_d) = Self::get_range_number_to_variants(to);
+		let mut vec = Vec::with_capacity(3);
+		if let (Some(from), Some(to)) = (from_i, to_i) {
+			vec.push((
+				RangeValue {
+					value: Number::Int(from).into(),
+					inclusive: from_inc,
+				},
+				RangeValue {
+					value: Number::Int(to).into(),
+					inclusive: to_inc,
+				},
+			));
+		}
+		if let (Some(from), Some(to)) = (from_f, to_f) {
+			vec.push((
+				RangeValue {
+					value: Number::Float(from).into(),
+					inclusive: from_inc,
+				},
+				RangeValue {
+					value: Number::Float(to).into(),
+					inclusive: to_inc,
+				},
+			));
+		}
+		if let (Some(from), Some(to)) = (from_d, to_d) {
+			vec.push((
+				RangeValue {
+					value: Number::Decimal(from).into(),
+					inclusive: from_inc,
+				},
+				RangeValue {
+					value: Number::Decimal(to).into(),
+					inclusive: to_inc,
+				},
+			));
+		}
+		vec
 	}
 
 	fn new_range_iterator(
@@ -539,11 +579,25 @@ impl QueryExecutor {
 		if let Some(ix) = self.get_index_def(ir) {
 			match ix.index {
 				Index::Idx => {
-					let ranges = Self::get_range_number_variants(from, to);
-					if ranges.len() == 1 {
-						Some(Self::new_index_range_iterator(ir, opt, ix, ranges[0])?)
+					return if let (Value::Number(from_n), Value::Number(to_n)) =
+						(&from.value, &to.value)
+					{
+						let ranges = Self::get_range_number_variants(
+							from_n,
+							from.inclusive,
+							to_n,
+							to.inclusive,
+						);
+						if ranges.len() == 1 {
+							let range = &ranges[0];
+							Ok(Some(Self::new_index_range_iterator(
+								ir, opt, ix, &range.0, &range.1,
+							)?))
+						} else {
+							Ok(Some(Self::new_multiple_index_range_iterator(ir, opt, ix, &ranges)?))
+						}
 					} else {
-						Some(Self::new_multiple_index_range_iterator(ir, opt, ix, ranges)?)
+						Ok(Some(Self::new_index_range_iterator(ir, opt, ix, from, to)?))
 					}
 				}
 				Index::Uniq => {
@@ -563,11 +617,12 @@ impl QueryExecutor {
 		Ok(None)
 	}
 
-	async fn new_index_range_iterator(
+	fn new_index_range_iterator(
 		ir: IndexRef,
 		opt: &Options,
 		ix: &DefineIndexStatement,
-		range: &(RangeValue, RangeValue),
+		from: &RangeValue,
+		to: &RangeValue,
 	) -> Result<ThingIterator, Error> {
 		Ok(ThingIterator::IndexRange(IndexRangeThingIterator::new(
 			ir,
@@ -575,12 +630,12 @@ impl QueryExecutor {
 			opt.db()?,
 			&ix.what,
 			&ix.name,
-			&range.0,
-			&range.1,
+			from,
+			to,
 		)))
 	}
 
-	async fn new_multiple_index_range_iterator(
+	fn new_multiple_index_range_iterator(
 		ir: IndexRef,
 		opt: &Options,
 		ix: &DefineIndexStatement,
@@ -588,7 +643,7 @@ impl QueryExecutor {
 	) -> Result<ThingIterator, Error> {
 		let mut iterators = VecDeque::with_capacity(ranges.len());
 		for range in ranges {
-			iterators.push_back(Self::new_index_range_iterator(ir, opt, ix, range)?);
+			iterators.push_back(Self::new_index_range_iterator(ir, opt, ix, &range.0, &range.1)?);
 		}
 		Ok(ThingIterator::Multiples(Box::new(MultipleIterators::new(iterators))))
 	}
