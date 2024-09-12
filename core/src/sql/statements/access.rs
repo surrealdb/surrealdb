@@ -394,7 +394,7 @@ async fn compute_grant(
 							// If the grant is being created for a user, the user must exist.
 							txn.get_db_user(opt.ns()?, opt.db()?, user).await?;
 						}
-						Some(Subject::Record(rid)) => {
+						Some(Subject::Record(_)) => {
 							// Grant subject must match access method subject.
 							if !matches!(&at.subject, BearerAccessSubject::Record) {
 								return Err(Error::AccessGrantInvalidSubject);
