@@ -2004,4 +2004,5 @@ mod http_integration {
 				.await;
 			assert!(res.is_err(), "Request to \"/rpc\" endpoint unexpectedly succeeded")
 		}
+	}
 }
