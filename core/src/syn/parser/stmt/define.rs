@@ -347,6 +347,7 @@ impl Parser<'_> {
 							res.kind = AccessType::Record(ac);
 						}
 						t!("BEARER") => {
+							self.pop_peek();
 							// TODO(gguillemas): Remove this once bearer access is no longer experimental.
 							if !*EXPERIMENTAL_BEARER_ACCESS {
 								unexpected!(
@@ -355,10 +356,24 @@ impl Parser<'_> {
 									"the experimental bearer access feature to be enabled"
 								);
 							}
-							self.pop_peek();
+
 							let mut ac = access_type::BearerAccess {
 								..Default::default()
 							};
+
+							expected!(self, t!("FOR"));
+							match self.peek_kind() {
+								t!("USER") => {
+									self.pop_peek();
+									ac.subject = access_type::BearerAccessSubject::User;
+								}
+								t!("RECORD") => {
+									self.pop_peek();
+									ac.subject = access_type::BearerAccessSubject::Record;
+								}
+								_ => unexpected!(self, peek, "either USER or RECORD"),
+							}
+
 							if self.eat(t!("WITH")) {
 								expected!(self, t!("JWT"));
 								ac.jwt = self.parse_jwt()?;
