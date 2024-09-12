@@ -34,8 +34,6 @@ pub struct Endpoint {
 	#[doc(hidden)]
 	pub path: String,
 	pub(crate) config: Config,
-	// Whether or not the remote server supports revision based serialisation
-	pub(crate) supports_revision: bool,
 }
 
 impl Endpoint {
@@ -44,7 +42,6 @@ impl Endpoint {
 			url,
 			path: String::new(),
 			config: Default::default(),
-			supports_revision: false,
 		}
 	}
 
@@ -164,10 +161,6 @@ impl EndpointKind {
 			self,
 			EndpointKind::Http | EndpointKind::Https | EndpointKind::Ws | EndpointKind::Wss
 		)
-	}
-
-	pub(crate) fn is_ws(&self) -> bool {
-		matches!(self, EndpointKind::Ws | EndpointKind::Wss)
 	}
 
 	pub fn is_local(&self) -> bool {

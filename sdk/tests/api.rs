@@ -581,6 +581,72 @@ mod api_integration {
 			assert!(response.is_none());
 		}
 
+		#[test_log::test(tokio::test)]
+		async fn info_for_db_with_versioned_tables() {
+			let (permit, db) = new_db().await;
+			db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
+			drop(permit);
+
+			// Record the timestamp before creating a testing table.
+			let ts_before_create = chrono::Utc::now().to_rfc3339();
+
+			// Create the testing table.
+			let _ = db.query("DEFINE TABLE person").await.unwrap().check().unwrap();
+
+			// Record the timestamp after creating the testing table.
+			let ts_after_create = chrono::Utc::now().to_rfc3339();
+
+			// Check that historical query shows no table before it was created.
+			let q = format!("INFO FOR DB VERSION d'{}'", ts_before_create);
+			let mut response = db.query(q).await.unwrap().check().unwrap();
+			let info = response.take::<Value>(0).unwrap().to_string();
+			assert!(info.contains("tables: {  }"));
+
+			// Now check that the table shows up later.
+			let q = format!("INFO FOR DB VERSION d'{}'", ts_after_create);
+			let mut response = db.query(q).await.unwrap().check().unwrap();
+			let info = response.take::<Value>(0).unwrap().to_string();
+			assert!(info.contains(
+				"tables: { person: 'DEFINE TABLE person TYPE ANY SCHEMALESS PERMISSIONS NONE' }"
+			));
+		}
+
+		#[test_log::test(tokio::test)]
+		async fn info_for_table_with_versioned_fields() {
+			let (permit, db) = new_db().await;
+			db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
+			drop(permit);
+
+			// Create the testing table.
+			let _ = db.query("DEFINE TABLE person").await.unwrap().check().unwrap();
+
+			// Record the timestamp before creating a field.
+			let ts_before_field = chrono::Utc::now().to_rfc3339();
+			let _ = db
+				.query("DEFINE FIELD firstName ON TABLE person TYPE string")
+				.await
+				.unwrap()
+				.check()
+				.unwrap();
+
+			// Record the timestamp after creating the field.
+			let ts_after_field = chrono::Utc::now().to_rfc3339();
+
+			// Check that historical query shows no field before it was created.
+			let q = format!("INFO FOR TABLE person VERSION d'{}'", ts_before_field);
+			let mut response = db.query(q).await.unwrap().check().unwrap();
+			let info = response.take::<Value>(0).unwrap().to_string();
+			assert!(info.contains("fields: {  }"));
+
+			// Now check that the field shows up later.
+			let q = format!("INFO FOR TABLE person VERSION d'{}'", ts_after_field);
+			let mut response = db.query(q).await.unwrap().check().unwrap();
+			let info = response.take::<Value>(0).unwrap().to_string();
+			assert!(info.contains(
+				"fields: { firstName: 'DEFINE FIELD firstName ON person TYPE string PERMISSIONS FULL' }"
+			));
+		}
+
 		include!("api/mod.rs");
 		include!("api/live.rs");
 		include!("api/backup.rs");

@@ -816,7 +816,7 @@ pub trait RpcContext {
 		let res = match query {
 			Value::Query(sql) => self.kvs().process(sql, self.session(), vars).await?,
 			Value::Strand(sql) => self.kvs().execute(&sql, self.session(), vars).await?,
-			_ => unreachable!(),
+			_ => return Err(fail!("Unexpected query type: {query:?}").into()),
 		};
 
 		// Post-process hooks for web layer

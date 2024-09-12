@@ -2,6 +2,7 @@
 
 use crate::err::Error;
 use crate::key::debug::Sprintable;
+use crate::kvs::savepoint::{SaveOperation, SavePointImpl, SavePoints};
 use crate::kvs::Check;
 use crate::kvs::Key;
 use crate::kvs::Val;
@@ -34,6 +35,8 @@ pub struct Transaction {
 	started: bool,
 	/// The underlying datastore transaction
 	inner: Arc<Mutex<SurrealCSTransaction<AnyState>>>,
+	/// The save point implementation
+	save_points: SavePoints,
 }
 
 impl Drop for Transaction {
@@ -69,8 +72,12 @@ impl Drop for Transaction {
 impl Datastore {
 	/// Open a new database
 	pub(crate) async fn new(path: &str) -> Result<Datastore, Error> {
-		create_connection_pool(path, None).await.unwrap();
-		Ok(Datastore {})
+		match create_connection_pool(path, None).await {
+			Ok(_) => Ok(Datastore {}),
+			Err(_) => {
+				Err(Error::Ds("Cannot connect to the `surrealcs` storage engine".to_string()))
+			}
+		}
 	}
 
 	/// Starts a new transaction.
@@ -90,6 +97,7 @@ impl Datastore {
 			write,
 			started: false,
 			inner: Arc::new(Mutex::new(transaction)),
+			save_points: Default::default(),
 		})
 	}
 }
@@ -234,12 +242,24 @@ impl super::api::Transaction for Transaction {
 		if !self.write {
 			return Err(Error::TxReadonly);
 		}
+		// Extract the key
+		let key = key.into();
+		// Prepare the savepoint if any
+		let prep = if self.save_points.is_some() {
+			self.save_point_prepare(&key, version, SaveOperation::Set).await?
+		} else {
+			None
+		};
 		// Set the key
 		let message = ServerTransactionMessage::Set(MessageSet {
-			key: key.into(),
+			key,
 			value: val.into(),
 		});
 		self.send_message(message).await?;
+		// Confirm the save point
+		if let Some(prep) = prep {
+			self.save_points.save(prep);
+		}
 		// Return result
 		Ok(())
 	}
@@ -259,12 +279,24 @@ impl super::api::Transaction for Transaction {
 		if !self.write {
 			return Err(Error::TxReadonly);
 		}
+		// Extract the key
+		let key = key.into();
+		// Hydrate the savepoint if any
+		let prep = if self.save_points.is_some() {
+			self.save_point_prepare(&key, version, SaveOperation::Put).await?
+		} else {
+			None
+		};
 		// Put the key
 		let message = ServerTransactionMessage::Put(MessagePut {
-			key: key.into(),
+			key,
 			value: val.into(),
 		});
 		self.send_message(message).await?;
+		// Confirm the save point
+		if let Some(prep) = prep {
+			self.save_points.save(prep);
+		}
 		// Return result
 		Ok(())
 	}
@@ -286,13 +318,25 @@ impl super::api::Transaction for Transaction {
 		}
 		// Get the arguments
 		let chk = chk.map(Into::into);
+		// Extract the key
+		let key = key.into();
+		// Hydrate the savepoint if any
+		let prep = if self.save_points.is_some() {
+			self.save_point_prepare(&key, None, SaveOperation::Put).await?
+		} else {
+			None
+		};
 		// Set the key if valid
 		let message = ServerTransactionMessage::Putc(MessagePutc {
-			key: key.into(),
+			key,
 			value: val.into(),
 			expected_value: chk,
 		});
 		self.send_message(message).await?;
+		// Confirm the save point
+		if let Some(prep) = prep {
+			self.save_points.save(prep);
+		}
 		// Return result
 		Ok(())
 	}
@@ -311,11 +355,23 @@ impl super::api::Transaction for Transaction {
 		if !self.write {
 			return Err(Error::TxReadonly);
 		}
+		// Extract the key
+		let key = key.into();
+		// Hydrate the savepoint if any
+		let prep = if self.save_points.is_some() {
+			self.save_point_prepare(&key, None, SaveOperation::Del).await?
+		} else {
+			None
+		};
 		// Remove the key
 		let message = ServerTransactionMessage::Del(MessageDel {
-			key: key.into(),
+			key,
 		});
 		self.send_message(message).await?;
+		// Confirm the save point
+		if let Some(prep) = prep {
+			self.save_points.save(prep);
+		}
 		// Return result
 		Ok(())
 	}
@@ -337,12 +393,24 @@ impl super::api::Transaction for Transaction {
 		}
 		// Get the arguments
 		let chk = chk.map(Into::into);
+		// Extract the key
+		let key = key.into();
+		// Hydrate the savepoint if any
+		let prep = if self.save_points.is_some() {
+			self.save_point_prepare(&key, None, SaveOperation::Del).await?
+		} else {
+			None
+		};
 		// Delete the key if valid
 		let message = ServerTransactionMessage::Delc(MessageDelc {
-			key: key.into(),
+			key,
 			expected_value: chk,
 		});
 		self.send_message(message).await?;
+		// Confirm the save point
+		if let Some(prep) = prep {
+			self.save_points.save(prep);
+		}
 		// Return result
 		Ok(())
 	}
@@ -387,6 +455,7 @@ impl super::api::Transaction for Transaction {
 			finish: rng.end.into(),
 			limit,
 		});
+		// TODO: Check if save point needs to be implemented here
 		let response = match self.send_message(message).await? {
 			ServerTransactionMessage::ResponseKeys(v) => v,
 			_ => return Err(Error::Tx("Received an invalid response".to_string())),
@@ -422,5 +491,11 @@ impl super::api::Transaction for Transaction {
 		};
 		// Return result
 		Ok(response.values)
+	}
+}
+
+impl SavePointImpl for Transaction {
+	fn get_save_points(&mut self) -> &mut SavePoints {
+		&mut self.save_points
 	}
 }

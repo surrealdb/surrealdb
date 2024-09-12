@@ -34,7 +34,7 @@ pub async fn gc_ns(tx: &Transaction, ts: u64, ns: &str) -> Result<(), Error> {
 		#[cfg(debug_assertions)]
 		trace!("Performing garbage collection on {ns}:{db} for timestamp {ts}");
 		// Fetch all tables
-		let tbs = tx.all_tb(ns, &db.name).await?;
+		let tbs = tx.all_tb(ns, &db.name, None).await?;
 		// Get the database changefeed expiration
 		let db_cf_expiry = db.changefeed.map(|v| v.expiry.as_secs()).unwrap_or_default();
 		// Get the maximum table changefeed expiration

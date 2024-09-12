@@ -1,3 +1,10 @@
+/// Throws an unreachable error with location details
+macro_rules! fail {
+	($($arg:tt)+) => {
+		$crate::err::Error::Unreachable(format!("{}:{}: {}", file!(), line!(), std::format_args!($($arg)+)))
+	};
+}
+
 /// Converts some text into a new line byte string
 macro_rules! bytes {
 	($expression:expr) => {
@@ -203,6 +210,8 @@ macro_rules! async_defer{
 
 #[cfg(test)]
 mod test {
+	use crate::err::Error;
+
 	#[tokio::test]
 	async fn async_defer_basic() {
 		let mut counter = 0;
@@ -240,5 +249,21 @@ mod test {
 			panic!("this panic should be caught")
 		})
 		.await;
+	}
+
+	#[test]
+	fn fail_literal() {
+		let Error::Unreachable(msg) = fail!("Reached unreachable code") else {
+			panic!()
+		};
+		assert_eq!("core/src/mac/mod.rs:256: Reached unreachable code", msg);
+	}
+
+	#[test]
+	fn fail_arguments() {
+		let Error::Unreachable(msg) = fail!("Found {} but expected {}", "test", "other") else {
+			panic!()
+		};
+		assert_eq!("core/src/mac/mod.rs:264: Found test but expected other", msg);
 	}
 }
