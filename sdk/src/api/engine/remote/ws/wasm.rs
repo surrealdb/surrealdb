@@ -183,7 +183,7 @@ async fn router_handle_request(
 			return HandleResult::Ok;
 		};
 		trace!("Request {:?}", req);
-		let payload = serialize(&req, endpoint.supports_revision).unwrap();
+		let payload = serialize(&req, true).unwrap();
 		Message::Binary(payload)
 	};
 
@@ -211,7 +211,7 @@ async fn router_handle_response(
 	state: &mut RouterState,
 	endpoint: &Endpoint,
 ) -> HandleResult {
-	match Response::try_from(&response, endpoint.supports_revision) {
+	match Response::try_from(&response) {
 		Ok(option) => {
 			// We are only interested in responses that are not empty
 			if let Some(response) = option {
@@ -290,8 +290,7 @@ async fn router_handle_response(
 											uuid: live_query_id.0,
 										}
 										.into_router_request(None);
-										let value = serialize(&request, endpoint.supports_revision)
-											.unwrap();
+										let value = serialize(&request, true).unwrap();
 										Message::Binary(value)
 									};
 									if let Err(error) = state.sink.send(kill).await {
@@ -320,7 +319,7 @@ async fn router_handle_response(
 			if let Message::Binary(binary) = response {
 				if let Ok(Response {
 					id,
-				}) = deserialize(&mut &binary[..], endpoint.supports_revision)
+				}) = deserialize(&mut &binary[..], true)
 				{
 					// Return an error if an ID was returned
 					if let Some(Ok(id)) = id.map(CoreValue::coerce_to_i64) {
@@ -348,10 +347,7 @@ async fn router_reconnect(
 ) {
 	loop {
 		trace!("Reconnecting...");
-		let connect = match endpoint.supports_revision {
-			true => WsMeta::connect(&endpoint.url, vec![super::REVISION_HEADER]).await,
-			false => WsMeta::connect(&endpoint.url, None).await,
-		};
+		let connect = WsMeta::connect(&endpoint.url, vec![super::REVISION_HEADER]).await;
 		match connect {
 			Ok((mut meta, stream)) => {
 				let (new_sink, new_stream) = stream.split();
@@ -373,7 +369,7 @@ async fn router_reconnect(
 				};
 				for (_, message) in &state.replay {
 					let message = message.clone().into_router_request(None);
-					let message = serialize(&message, endpoint.supports_revision).unwrap();
+					let message = serialize(&message, true).unwrap();
 
 					if let Err(error) = state.sink.send(Message::Binary(message)).await {
 						trace!("{error}");
@@ -412,10 +408,7 @@ pub(crate) async fn run_router(
 	conn_tx: Sender<Result<()>>,
 	route_rx: Receiver<Route>,
 ) {
-	let connect = match endpoint.supports_revision {
-		true => WsMeta::connect(&endpoint.url, vec![super::REVISION_HEADER]).await,
-		false => WsMeta::connect(&endpoint.url, None).await,
-	};
+	let connect = WsMeta::connect(&endpoint.url, vec![super::REVISION_HEADER]).await;
 	let (mut ws, socket) = match connect {
 		Ok(pair) => pair,
 		Err(error) => {
@@ -444,7 +437,7 @@ pub(crate) async fn run_router(
 		let mut request = BTreeMap::new();
 		request.insert("method".to_owned(), "ping".into());
 		let value = CoreValue::from(request);
-		let value = serialize(&value, endpoint.supports_revision).unwrap();
+		let value = serialize(&value, true).unwrap();
 		Message::Binary(value)
 	};
 
@@ -536,14 +529,14 @@ pub(crate) async fn run_router(
 }
 
 impl Response {
-	fn try_from(message: &Message, supports_revision: bool) -> Result<Option<Self>> {
+	fn try_from(message: &Message) -> Result<Option<Self>> {
 		match message {
 			Message::Text(text) => {
 				trace!("Received an unexpected text message; {text}");
 				Ok(None)
 			}
 			Message::Binary(binary) => {
-				deserialize(&mut &binary[..], supports_revision).map(Some).map_err(|error| {
+				deserialize(&mut &binary[..], true).map(Some).map_err(|error| {
 					Error::ResponseFromBinary {
 						binary: binary.clone(),
 						error: bincode::ErrorKind::Custom(error.to_string()).into(),
