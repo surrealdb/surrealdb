@@ -409,19 +409,9 @@ impl QueryExecutor {
 				let index_join = Box::new(IndexJoinThingIterator::new(irf, opt, ix, iterators)?);
 				Some(ThingIterator::IndexJoin(index_join))
 			}
-			IndexOperator::Order(asc) => {
-				if *asc {
-					Some(ThingIterator::IndexRange(IndexRangeThingIterator::full_range(
-						irf,
-						opt.ns()?,
-						opt.db()?,
-						&ix.what,
-						&ix.name,
-					)))
-				} else {
-					None
-				}
-			}
+			IndexOperator::Order => Some(ThingIterator::IndexRange(
+				IndexRangeThingIterator::full_range(irf, opt.ns()?, opt.db()?, &ix.what, &ix.name),
+			)),
 			_ => None,
 		})
 	}
@@ -561,19 +551,9 @@ impl QueryExecutor {
 				let unique_join = Box::new(UniqueJoinThingIterator::new(irf, opt, ix, iterators)?);
 				Some(ThingIterator::UniqueJoin(unique_join))
 			}
-			IndexOperator::Order(asc) => {
-				if *asc {
-					Some(ThingIterator::UniqueRange(UniqueRangeThingIterator::full_range(
-						irf,
-						opt.ns()?,
-						opt.db()?,
-						&ix.what,
-						&ix.name,
-					)))
-				} else {
-					None
-				}
-			}
+			IndexOperator::Order => Some(ThingIterator::UniqueRange(
+				UniqueRangeThingIterator::full_range(irf, opt.ns()?, opt.db()?, &ix.what, &ix.name),
+			)),
 			_ => None,
 		})
 	}
