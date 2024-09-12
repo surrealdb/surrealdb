@@ -15,7 +15,7 @@ impl Parser<'_> {
 	/// Parse a custom function function call
 	///
 	/// Expects `fn` to already be called.
-	pub async fn parse_custom_function(&mut self, ctx: &mut Stk) -> ParseResult<Function> {
+	pub(super) async fn parse_custom_function(&mut self, ctx: &mut Stk) -> ParseResult<Function> {
 		expected!(self, t!("::"));
 		let mut name = self.next_token_value::<Ident>()?.0;
 		while self.eat(t!("::")) {
@@ -27,7 +27,7 @@ impl Parser<'_> {
 		Ok(Function::Custom(name, args))
 	}
 
-	pub async fn parse_function_args(&mut self, ctx: &mut Stk) -> ParseResult<Vec<Value>> {
+	pub(super) async fn parse_function_args(&mut self, ctx: &mut Stk) -> ParseResult<Vec<Value>> {
 		let start = self.last_span();
 		let mut args = Vec::new();
 		loop {
@@ -35,7 +35,7 @@ impl Parser<'_> {
 				break;
 			}
 
-			let arg = ctx.run(|ctx| self.parse_value_field(ctx)).await?;
+			let arg = ctx.run(|ctx| self.parse_value_inherit(ctx)).await?;
 			args.push(arg);
 
 			if !self.eat(t!(",")) {
@@ -49,7 +49,7 @@ impl Parser<'_> {
 	/// Parse a model invocation
 	///
 	/// Expects `ml` to already be called.
-	pub async fn parse_model(&mut self, ctx: &mut Stk) -> ParseResult<Model> {
+	pub(super) async fn parse_model(&mut self, ctx: &mut Stk) -> ParseResult<Model> {
 		expected!(self, t!("::"));
 		let mut name = self.next_token_value::<Ident>()?.0;
 		while self.eat(t!("::")) {
@@ -101,7 +101,7 @@ impl Parser<'_> {
 				break;
 			}
 
-			let arg = ctx.run(|ctx| self.parse_value_field(ctx)).await?;
+			let arg = ctx.run(|ctx| self.parse_value_inherit(ctx)).await?;
 			args.push(arg);
 
 			if !self.eat(t!(",")) {
