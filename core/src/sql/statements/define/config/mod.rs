@@ -71,6 +71,13 @@ impl ConfigInner {
 	pub fn name(&self) -> String {
 		ConfigKind::from(self).to_string()
 	}
+
+	pub fn try_into_graphql(self) -> Result<GraphQLConfig, Error> {
+		match self {
+			ConfigInner::GraphQL(g) => Ok(g),
+			c => Err(fail!("found {c} when a graphql config was expected")),
+		}
+	}
 }
 
 impl From<ConfigInner> for ConfigKind {
@@ -107,10 +114,14 @@ impl Display for DefineConfigStatement {
 			write!(f, " OVERWRITE")?
 		}
 
-		match &self.inner {
-			ConfigInner::GraphQL(v) => Display::fmt(v, f)?,
-		}
-
 		Ok(())
+	}
+}
+
+impl Display for ConfigInner {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		match &self {
+			ConfigInner::GraphQL(v) => Display::fmt(v, f),
+		}
 	}
 }

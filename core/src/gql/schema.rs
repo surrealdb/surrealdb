@@ -5,6 +5,8 @@ use std::sync::Arc;
 use crate::dbs::Session;
 use crate::kvs::Datastore;
 use crate::sql::kind::Literal;
+use crate::sql::statements::define::config::graphql::TablesConfig;
+use crate::sql::statements::define::config::ConfigInner;
 use crate::sql::statements::{DefineFieldStatement, SelectStatement};
 use crate::sql::Kind;
 use crate::sql::{self, Table};
@@ -80,7 +82,19 @@ pub async fn generate_schema(
 	let tx = kvs.transaction(TransactionType::Read, LockType::Optimistic).await?;
 	let ns = session.ns.as_ref().ok_or(GqlError::UnpecifiedNamespace)?;
 	let db = session.db.as_ref().ok_or(GqlError::UnpecifiedDatabase)?;
+
+	let cg = tx.get_db_config(ns, db, "graphql").await?;
+	let config = cg.inner.clone().try_into_graphql()?;
+
 	let tbs = tx.all_tb(ns, db, None).await?;
+
+	match config.tables {
+		TablesConfig::None => ,
+		TablesConfig::Auto => todo!(),
+		TablesConfig::Include(_) => todo!(),
+		TablesConfig::Exclude(_) => todo!(),
+	}
+
 	let mut query = Object::new("Query");
 	let mut types: Vec<Type> = Vec::new();
 
