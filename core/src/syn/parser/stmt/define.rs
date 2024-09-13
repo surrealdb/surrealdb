@@ -59,7 +59,7 @@ impl Parser<'_> {
 			}
 			t!("ANALYZER") => self.parse_define_analyzer().map(DefineStatement::Analyzer),
 			t!("ACCESS") => self.parse_define_access(ctx).await.map(DefineStatement::Access),
-			t!("CONFIG") => self.parse_define_config().await.map(DefineStatement::Config),
+			t!("CONFIG") => self.parse_define_config().map(DefineStatement::Config),
 			_ => unexpected!(self, next, "a define statement keyword"),
 		}
 	}
