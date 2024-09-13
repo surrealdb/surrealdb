@@ -22,7 +22,7 @@ macro_rules! unexpected {
 				$crate::syn::error::bail!("Unexpected whitespace, expected token {} to continue",$expected,  @__found.span$( $($t)* )?)
 			}
 			x => {
-				$crate::syn::error::bail!("Unexpected token {}, expected {}",x,$expected, @__found.span$( $($t)* )?)
+				$crate::syn::error::bail!("Unexpected token `{}`, expected {}",x,$expected, @__found.span$( $($t)* )?)
 			}
 		}
 	}};
