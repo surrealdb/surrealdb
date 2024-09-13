@@ -63,7 +63,6 @@ Function names must be in the form <family>[::<name>]. For example:
 	#[arg(env = "SURREAL_CAPS_ALLOW_FUNC", long)]
 	// If the arg is provided without value, then assume it's "", which gets parsed into Targets::All
 	#[arg(default_missing_value_os = "", num_args = 0..)]
-	#[arg(default_value_os = "")] // Allow all functions by default
 	#[arg(value_parser = super::cli::validator::func_targets)]
 	allow_funcs: Option<Targets<FuncTarget>>,
 
@@ -179,8 +178,8 @@ impl DbsCapabilities {
 		}
 
 		// If there are no high level denies and no global allow, we allow the provided functions
-		// If nothing was provided and there is no global allow, then don't allow anything (Targets::None)
-		self.allow_funcs.clone().unwrap_or(Targets::None)
+		// If nothing was provided and there is no global allow, we allow functions by default (Targets::All)
+		self.allow_funcs.clone().unwrap_or(Targets::All) // Functions are enabled by default for the server
 	}
 
 	fn get_allow_net(&self) -> Targets<NetTarget> {
