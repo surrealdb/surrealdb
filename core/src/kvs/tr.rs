@@ -648,7 +648,7 @@ impl Transactor {
 		Ok(None)
 	}
 
-	pub(crate) fn new_save_point(&mut self) {
+	pub(crate) async fn new_save_point(&mut self) {
 		expand_inner!(&mut self.inner, v => { v.new_save_point() })
 	}
 
@@ -656,7 +656,7 @@ impl Transactor {
 		expand_inner!(&mut self.inner, v => { v.rollback_to_save_point().await })
 	}
 
-	pub(crate) fn release_last_save_point(&mut self) -> Result<(), Error> {
+	pub(crate) async fn release_last_save_point(&mut self) -> Result<(), Error> {
 		expand_inner!(&mut self.inner, v => { v.release_last_save_point() })
 	}
 }

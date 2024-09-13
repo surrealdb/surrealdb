@@ -1,5 +1,9 @@
 //! Unicode related utilities.
 
+pub fn is_identifier_continue(x: u8) -> bool {
+	matches!(x, b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'_')
+}
+
 /// Character constants
 pub mod chars {
 	// Character tabulation

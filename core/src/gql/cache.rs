@@ -38,6 +38,24 @@ impl Invalidator for Pessimistic {
 	}
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct Optimistic;
+impl Invalidator for Optimistic {
+	type MetaData = ();
+
+	fn is_valid(_datastore: &Datastore, _session: &Session, _meta: &Self::MetaData) -> bool {
+		true
+	}
+
+	async fn generate(
+		datastore: &Arc<Datastore>,
+		session: &Session,
+	) -> Result<(Schema, Self::MetaData), GqlError> {
+		let schema = generate_schema(datastore, session).await?;
+		Ok((schema, ()))
+	}
+}
+
 #[derive(Clone)]
 pub struct SchemaCache<I: Invalidator = Pessimistic> {
 	#[allow(clippy::type_complexity)]
