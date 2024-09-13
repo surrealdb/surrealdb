@@ -30,7 +30,7 @@ async fn idiom_index_call() -> Result<(), Error> {
 		};
 		RETURN [1,2,3,4][fn::foo()];
 	"#;
-	Test::new(sql).await?.expect_val("None")?.expect_val("3");
+	Test::new(sql).await?.expect_val("None")?.expect_val("3")?;
 	Ok(())
 }
 
