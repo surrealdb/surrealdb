@@ -352,7 +352,7 @@ impl Parser<'_> {
 				Part::Where(value)
 			}
 			_ => {
-				let value = self.parse_value_inherit(ctx).await?;
+				let value = ctx.run(|ctx| self.parse_value_inherit(ctx)).await?;
 				Part::Value(value)
 			}
 		};
