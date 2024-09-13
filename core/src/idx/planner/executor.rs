@@ -69,7 +69,7 @@ pub(super) struct InnerQueryExecutor {
 	mr_entries: HashMap<MatchRef, FtEntry>,
 	exp_entries: HashMap<Arc<Expression>, FtEntry>,
 	it_entries: Vec<IteratorEntry>,
-	index_definitions: Vec<DefineIndexStatement>,
+	index_definitions: Vec<Arc<DefineIndexStatement>>,
 	mt_entries: HashMap<Arc<Expression>, MtEntry>,
 	hnsw_entries: HashMap<Arc<Expression>, HnswEntry>,
 	knn_bruteforce_entries: HashMap<Arc<Expression>, KnnBruteForceEntry>,
@@ -87,7 +87,7 @@ pub(super) enum IteratorEntry {
 }
 
 impl IteratorEntry {
-	pub(super) fn explain(&self, ix_def: &[DefineIndexStatement]) -> Value {
+	pub(super) fn explain(&self, ix_def: &[Arc<DefineIndexStatement>]) -> Value {
 		match self {
 			Self::Single(_, io) => io.explain(ix_def),
 			Self::Range(_, ir, from, to) => {
@@ -329,7 +329,7 @@ impl QueryExecutor {
 
 	pub(crate) fn explain(&self, itr: IteratorRef) -> Value {
 		match self.0.it_entries.get(itr as usize) {
-			Some(ie) => ie.explain(self.0.index_definitions.as_slice()),
+			Some(ie) => ie.explain(&self.0.index_definitions),
 			None => Value::None,
 		}
 	}
@@ -368,7 +368,7 @@ impl QueryExecutor {
 	) -> Result<Option<ThingIterator>, Error> {
 		if let Some(ix) = self.get_index_def(io.ix_ref()) {
 			match ix.index {
-				Index::Idx => Ok(self.new_index_iterator(opt, irf, ix, io.clone()).await?),
+				Index::Idx => Ok(self.new_index_iterator(opt, irf, ix.clone(), io.clone()).await?),
 				Index::Uniq => Ok(self.new_unique_index_iterator(opt, irf, ix, io.clone()).await?),
 				Index::Search {
 					..
@@ -385,7 +385,7 @@ impl QueryExecutor {
 		&self,
 		opt: &Options,
 		irf: IteratorRef,
-		ix: &DefineIndexStatement,
+		ix: Arc<DefineIndexStatement>,
 		io: IndexOption,
 	) -> Result<Option<ThingIterator>, Error> {
 		Ok(match io.op() {
@@ -393,16 +393,16 @@ impl QueryExecutor {
 				if let Value::Number(n) = value.as_ref() {
 					let values = Self::get_number_variants(n);
 					if values.len() == 1 {
-						Some(Self::new_index_equal_iterator(irf, opt, ix, &values[0])?)
+						Some(Self::new_index_equal_iterator(irf, opt, &ix, &values[0])?)
 					} else {
-						Some(Self::new_multiple_index_equal_iterators(irf, opt, ix, values)?)
+						Some(Self::new_multiple_index_equal_iterators(irf, opt, &ix, values)?)
 					}
 				} else {
-					Some(Self::new_index_equal_iterator(irf, opt, ix, value)?)
+					Some(Self::new_index_equal_iterator(irf, opt, &ix, value)?)
 				}
 			}
 			IndexOperator::Union(value) => Some(ThingIterator::IndexUnion(
-				IndexUnionThingIterator::new(irf, opt.ns()?, opt.db()?, &ix.what, &ix.name, value),
+				IndexUnionThingIterator::new(irf, opt.ns()?, opt.db()?, &ix, value),
 			)),
 			IndexOperator::Join(ios) => {
 				let iterators = self.build_iterators(opt, irf, ios).await?;
@@ -426,8 +426,7 @@ impl QueryExecutor {
 			irf,
 			opt.ns()?,
 			opt.db()?,
-			&ix.what,
-			&ix.name,
+			ix,
 			value,
 		)))
 	}
@@ -527,7 +526,7 @@ impl QueryExecutor {
 		&self,
 		opt: &Options,
 		irf: IteratorRef,
-		ix: &DefineIndexStatement,
+		ix: &Arc<DefineIndexStatement>,
 		io: IndexOption,
 	) -> Result<Option<ThingIterator>, Error> {
 		Ok(match io.op() {
@@ -548,11 +547,12 @@ impl QueryExecutor {
 			)),
 			IndexOperator::Join(ios) => {
 				let iterators = self.build_iterators(opt, irf, ios).await?;
-				let unique_join = Box::new(UniqueJoinThingIterator::new(irf, opt, ix, iterators)?);
+				let unique_join =
+					Box::new(UniqueJoinThingIterator::new(irf, opt, ix.clone(), iterators)?);
 				Some(ThingIterator::UniqueJoin(unique_join))
 			}
 			IndexOperator::Order => Some(ThingIterator::UniqueRange(
-				UniqueRangeThingIterator::full_range(irf, opt.ns()?, opt.db()?, &ix.what, &ix.name),
+				UniqueRangeThingIterator::full_range(irf, opt.ns()?, opt.db()?, ix),
 			)),
 			_ => None,
 		})
@@ -564,14 +564,23 @@ impl QueryExecutor {
 		ix: &DefineIndexStatement,
 		value: &Value,
 	) -> Result<ThingIterator, Error> {
-		Ok(ThingIterator::UniqueEqual(UniqueEqualThingIterator::new(
-			irf,
-			opt.ns()?,
-			opt.db()?,
-			&ix.what,
-			&ix.name,
-			value,
-		)))
+		if ix.cols.len() > 1 {
+			Ok(ThingIterator::IndexEqual(IndexEqualThingIterator::new(
+				irf,
+				opt.ns()?,
+				opt.db()?,
+				ix,
+				value,
+			)))
+		} else {
+			Ok(ThingIterator::UniqueEqual(UniqueEqualThingIterator::new(
+				irf,
+				opt.ns()?,
+				opt.db()?,
+				ix,
+				value,
+			)))
+		}
 	}
 
 	fn new_multiple_unique_equal_iterators(
@@ -641,7 +650,7 @@ impl QueryExecutor {
 		Ok(iterators)
 	}
 
-	fn get_index_def(&self, ir: IndexRef) -> Option<&DefineIndexStatement> {
+	fn get_index_def(&self, ir: IndexRef) -> Option<&Arc<DefineIndexStatement>> {
 		self.0.index_definitions.get(ir as usize)
 	}
 
