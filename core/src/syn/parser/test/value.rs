@@ -188,14 +188,14 @@ fn scientific_number() {
 fn number_method() {
 	let res = test_parse!(parse_value_table, r#" 9.7e-5.sin()"#).unwrap();
 	let expected = Value::Idiom(Idiom(vec![
-		Part::Value(Value::Number(Number::Float(9.7e-5))),
+		Part::Start(Value::Number(Number::Float(9.7e-5))),
 		Part::Method("sin".to_string(), vec![]),
 	]));
 	assert_eq!(res, expected);
 
 	let res = test_parse!(parse_value_table, r#" 1.sin()"#).unwrap();
 	let expected = Value::Idiom(Idiom(vec![
-		Part::Value(Value::Number(Number::Int(1))),
+		Part::Start(Value::Number(Number::Int(1))),
 		Part::Method("sin".to_string(), vec![]),
 	]));
 	assert_eq!(res, expected);
