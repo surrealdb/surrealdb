@@ -58,7 +58,7 @@ impl Parser<'_> {
 			}
 			t!("ANALYZER") => self.parse_define_analyzer().map(DefineStatement::Analyzer),
 			t!("ACCESS") => self.parse_define_access(ctx).await.map(DefineStatement::Access),
-			t!("CONFIG") => self.parse_define_config().await.map(DefineStatement::Config),
+			t!("CONFIG") => self.parse_define_config(ctx).await.map(DefineStatement::Config),
 			_ => unexpected!(self, next, "a define statement keyword"),
 		}
 	}
@@ -1216,7 +1216,10 @@ impl Parser<'_> {
 		Ok(res)
 	}
 
-	pub async fn parse_define_config(&mut self) -> ParseResult<DefineConfigStatement> {
+	pub async fn parse_define_config(
+		&mut self,
+		ctx: &mut Stk,
+	) -> ParseResult<DefineConfigStatement> {
 		let (if_not_exists, overwrite) = if self.eat(t!("IF")) {
 			expected!(self, t!("NOT"));
 			expected!(self, t!("EXISTS"));
@@ -1227,12 +1230,13 @@ impl Parser<'_> {
 			(false, false)
 		};
 
-		let inner = match self.peek_kind() {
+		let next = self.next();
+		let inner = match next.kind {
 			t!("GRAPHQL") => {
 				self.pop_peek();
-				self.parse_graphql_config().await.map(ConfigInner::GraphQL)?
+				self.parse_graphql_config(ctx).await.map(ConfigInner::GraphQL)?
 			}
-			_ => todo!(),
+			_ => unexpected!(self, next, "a type of config"),
 		};
 
 		Ok(DefineConfigStatement {
@@ -1242,67 +1246,76 @@ impl Parser<'_> {
 		})
 	}
 
-	pub async fn parse_graphql_config(&mut self) -> ParseResult<GraphQLConfig> {
+	pub async fn parse_graphql_config(&mut self, ctx: &mut Stk) -> ParseResult<GraphQLConfig> {
 		use graphql::*;
-		// let mut tmp = GraphQLConfig::default();
 		let mut tmp_tables = Option::<TablesConfig>::None;
 		let mut tmp_fncs = Option::<FunctionsConfig>::None;
 		loop {
 			match self.peek_kind() {
 				t!("NONE") => {
-					if tmp_tables.is_some() || tmp_fncs.is_some() {
-						todo!()
-					}
 					self.pop_peek();
 					tmp_tables = Some(TablesConfig::None);
 					tmp_fncs = Some(FunctionsConfig::None);
 				}
 				t!("AUTO") => {
-					if tmp_tables.is_some() || tmp_fncs.is_some() {
-						todo!()
-					}
 					self.pop_peek();
 					tmp_tables = Some(TablesConfig::Auto);
 					tmp_fncs = Some(FunctionsConfig::Auto);
 				}
 				t!("TABLES") => {
-					if tmp_tables.is_some() {
-						todo!()
-					}
 					self.pop_peek();
 
-					match self.peek_kind() {
-						t!("INCLUDE") => {}
-						t!("EXCLUDE") => {}
+					let next = self.next();
+					match next.kind {
+						t!("INCLUDE") => match ctx.run(|ctx| self.parse_value(ctx)).await? {
+							Value::Array(a) => {
+								match a
+									.into_iter()
+									.map(|v| TableConfig::try_from(v))
+									.collect::<Result<Vec<TableConfig>, _>>()
+								{
+									Ok(v) => tmp_tables = Some(TablesConfig::Include(v)),
+									Err(v) => todo!("found {v} expected "),
+								}
+							}
+							v => todo!("found {v} expected tables"),
+						},
+						t!("EXCLUDE") => match ctx.run(|ctx| self.parse_value(ctx)).await? {
+							Value::Array(a) => {
+								match a
+									.into_iter()
+									.map(|v| TableConfig::try_from(v))
+									.collect::<Result<Vec<TableConfig>, _>>()
+								{
+									Ok(v) => tmp_tables = Some(TablesConfig::Exclude(v)),
+									Err(v) => todo!("found {v} expected "),
+								}
+							}
+							v => todo!("found {v} expected tables"),
+						},
 						t!("NONE") => {
-							self.pop_peek();
 							tmp_tables = Some(TablesConfig::None);
 						}
 						t!("AUTO") => {
-							self.pop_peek();
 							tmp_tables = Some(TablesConfig::Auto);
 						}
-						_ => todo!(),
+						_ => unexpected!(self, next, "`NONE`, `AUTO`, `INCLUDE` or `EXCLUDE`"),
 					}
 				}
 				t!("FUNCTIONS") => {
-					if tmp_fncs.is_some() {
-						todo!()
-					}
 					self.pop_peek();
 
-					match self.peek_kind() {
+					let next = self.next();
+					match next.kind {
 						t!("INCLUDE") => {}
 						t!("EXCLUDE") => {}
 						t!("NONE") => {
-							self.pop_peek();
 							tmp_fncs = Some(FunctionsConfig::None);
 						}
 						t!("AUTO") => {
-							self.pop_peek();
 							tmp_fncs = Some(FunctionsConfig::Auto);
 						}
-						_ => todo!(),
+						_ => unexpected!(self, next, "`NONE`, `AUTO`, `INCLUDE` or `EXCLUDE`"),
 					}
 				}
 				_ => break,

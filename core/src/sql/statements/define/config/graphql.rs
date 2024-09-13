@@ -2,7 +2,7 @@ use std::fmt::{self, Display, Write};
 
 use crate::sql::fmt::{pretty_indent, Fmt, Pretty};
 use crate::sql::statements::info::InfoStructure;
-use crate::sql::{Ident, Value};
+use crate::sql::{Ident, Part, Value};
 use derive::Store;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -33,8 +33,7 @@ pub enum TablesConfig {
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub struct TableConfig {
-	name: String,
-	fields: Vec<String>,
+	pub name: String,
 }
 
 #[revisioned(revision = 1)]
@@ -70,7 +69,6 @@ impl Display for TablesConfig {
 				if !cs.is_empty() {
 					let indent = pretty_indent();
 					write!(f, "{}", Fmt::pretty_comma_separated(cs.as_slice()))?;
-					write!(f, "todo")?;
 					drop(indent);
 				}
 				f.write_char(']')?;
@@ -82,9 +80,42 @@ impl Display for TablesConfig {
 	}
 }
 
+impl From<String> for TableConfig {
+	fn from(value: String) -> Self {
+		Self {
+			name: value,
+		}
+	}
+}
+
+pub fn val_to_ident(val: Value) -> Result<Ident, Value> {
+	match val {
+		Value::Strand(s) => Ok(s.0.into()),
+		Value::Table(n) => Ok(n.0.into()),
+		Value::Idiom(ref i) => match &i[..] {
+			[Part::Field(n)] => Ok(n.to_raw().into()),
+			_ => Err(val),
+		},
+		_ => Err(val),
+	}
+}
+
+impl TryFrom<Value> for TableConfig {
+	type Error = Value;
+
+	fn try_from(value: Value) -> Result<Self, Self::Error> {
+		match value {
+			v @ Value::Strand(_) | v @ Value::Table(_) | v @ Value::Idiom(_) => {
+				val_to_ident(v).map(|i| i.0.into())
+			}
+			_ => Err(value),
+		}
+	}
+}
+
 impl Display for TableConfig {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "todo")?;
+		write!(f, "{}", self.name)?;
 		Ok(())
 	}
 }
@@ -148,7 +179,6 @@ impl InfoStructure for TableConfig {
 	fn structure(self) -> Value {
 		Value::from(map!(
 			"name" => Value::from(self.name),
-			"fields" => Value::Array(self.fields.into_iter().map(Value::from).collect())
 		))
 	}
 }

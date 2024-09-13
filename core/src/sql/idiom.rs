@@ -14,7 +14,7 @@ use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Formatter};
-use std::ops::Deref;
+use std::ops::{Deref, DerefMut};
 use std::str;
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Idiom";

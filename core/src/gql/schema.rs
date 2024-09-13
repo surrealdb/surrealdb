@@ -6,7 +6,6 @@ use crate::dbs::Session;
 use crate::kvs::Datastore;
 use crate::sql::kind::Literal;
 use crate::sql::statements::define::config::graphql::TablesConfig;
-use crate::sql::statements::define::config::ConfigInner;
 use crate::sql::statements::{DefineFieldStatement, SelectStatement};
 use crate::sql::Kind;
 use crate::sql::{self, Table};
@@ -31,7 +30,7 @@ use super::ext::IntoExt;
 #[cfg(debug_assertions)]
 use super::ext::ValidatorExt;
 use crate::gql::error::{internal_error, schema_error, type_error};
-use crate::gql::ext::TryAsExt;
+use crate::gql::ext::{NamedContainer, TryAsExt};
 use crate::gql::utils::{get_record, GqlValueUtils};
 use crate::kvs::LockType;
 use crate::kvs::TransactionType;
@@ -83,17 +82,26 @@ pub async fn generate_schema(
 	let ns = session.ns.as_ref().ok_or(GqlError::UnpecifiedNamespace)?;
 	let db = session.db.as_ref().ok_or(GqlError::UnpecifiedDatabase)?;
 
-	let cg = tx.get_db_config(ns, db, "graphql").await?;
+	let cg = tx.get_db_config(ns, db, "graphql").await.map_err(|e| match e {
+		crate::err::Error::CgNotFound {
+			..
+		} => GqlError::NotConfigured,
+		e => e.into(),
+	})?;
 	let config = cg.inner.clone().try_into_graphql()?;
 
 	let tbs = tx.all_tb(ns, db, None).await?;
 
-	match config.tables {
-		TablesConfig::None => ,
-		TablesConfig::Auto => todo!(),
-		TablesConfig::Include(_) => todo!(),
-		TablesConfig::Exclude(_) => todo!(),
-	}
+	let tbs = match config.tables {
+		TablesConfig::None => return Err(GqlError::NotConfigured),
+		TablesConfig::Auto => tbs,
+		TablesConfig::Include(inc) => {
+			tbs.iter().filter(|t| inc.contains_name(&t.name)).cloned().collect()
+		}
+		TablesConfig::Exclude(exc) => {
+			tbs.iter().filter(|t| !exc.contains_name(&t.name)).cloned().collect()
+		}
+	};
 
 	let mut query = Object::new("Query");
 	let mut types: Vec<Type> = Vec::new();

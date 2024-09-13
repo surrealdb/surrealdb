@@ -75,6 +75,7 @@ impl ConfigInner {
 	pub fn try_into_graphql(self) -> Result<GraphQLConfig, Error> {
 		match self {
 			ConfigInner::GraphQL(g) => Ok(g),
+			#[allow(unreachable_patterns)]
 			c => Err(fail!("found {c} when a graphql config was expected")),
 		}
 	}
