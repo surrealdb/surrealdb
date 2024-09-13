@@ -83,7 +83,7 @@ impl ConfigInner {
 
 impl From<ConfigInner> for ConfigKind {
 	fn from(value: ConfigInner) -> Self {
-		value.into()
+		(&value).into()
 	}
 }
 

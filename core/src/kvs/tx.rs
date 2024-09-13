@@ -663,7 +663,7 @@ impl Transaction {
 	) -> Result<Arc<[DefineConfigStatement]>, Error> {
 		let key = crate::key::database::cg::prefix(ns, db);
 		let res = self.cache.get_value_or_guard_async(&key).await;
-		Ok(match res {
+		match res {
 			Ok(val) => val,
 			Err(cache) => {
 				let end = crate::key::database::cg::suffix(ns, db);
@@ -674,7 +674,7 @@ impl Transaction {
 				val
 			}
 		}
-		.try_into_cgs()?)
+		.try_into_cgs()
 	}
 
 	/// Retrieve all table definitions for a specific database.

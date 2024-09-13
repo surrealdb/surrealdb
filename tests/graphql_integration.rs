@@ -1,14 +1,8 @@
-use std::collections::{BTreeSet, HashSet};
-
 mod common;
 
 #[cfg(surrealdb_unstable)]
 mod graphql_integration {
-	use std::{
-		collections::{BTreeMap, BTreeSet},
-		str::FromStr,
-		time::Duration,
-	};
+	use std::{str::FromStr, time::Duration};
 
 	macro_rules! assert_equal_arrs {
 		($lhs: expr, $rhs: expr) => {
