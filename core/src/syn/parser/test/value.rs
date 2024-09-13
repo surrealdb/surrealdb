@@ -4,7 +4,8 @@ use reblessive::Stack;
 
 use crate::{
 	sql::{
-		Array, Constant, Id, Number, Object, Query, Statement, Statements, Strand, Thing, Value,
+		Array, Constant, Id, Idiom, Number, Object, Part, Query, Statement, Statements, Strand,
+		Thing, Value,
 	},
 	syn::parser::{mac::test_parse, Parser},
 };
@@ -181,6 +182,23 @@ fn scientific_number() {
 	let res = test_parse!(parse_value_table, r#" 9.7e-5"#).unwrap();
 	assert!(matches!(res, Value::Number(Number::Float(_))));
 	assert_eq!(res.to_string(), "0.000097f")
+}
+
+#[test]
+fn number_method() {
+	let res = test_parse!(parse_value_table, r#" 9.7e-5.sin()"#).unwrap();
+	let expected = Value::Idiom(Idiom(vec![
+		Part::Value(Value::Number(Number::Float(9.7e-5))),
+		Part::Method("sin".to_string(), vec![]),
+	]));
+	assert_eq!(res, expected);
+
+	let res = test_parse!(parse_value_table, r#" 1.sin()"#).unwrap();
+	let expected = Value::Idiom(Idiom(vec![
+		Part::Value(Value::Number(Number::Int(1))),
+		Part::Method("sin".to_string(), vec![]),
+	]));
+	assert_eq!(res, expected);
 }
 
 #[test]
