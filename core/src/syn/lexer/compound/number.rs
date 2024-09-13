@@ -107,8 +107,8 @@ pub fn number_kind(lexer: &mut Lexer, start: Token) -> Result<NumberKind, Syntax
 	let mut kind = NumberKind::Integer;
 
 	let before_mantissa = lexer.reader.offset();
-	// need to test for digit.. which is a range not a floating point number.
-	if lexer.reader.peek1() != Some(b'.') && lexer.eat(b'.') {
+	// need to test for digit.. or digit.foo
+	if lexer.reader.peek1().map(|x| x.is_ascii_digit()).unwrap_or(false) && lexer.eat(b'.') {
 		eat_digits1(lexer, before_mantissa)?;
 		kind = NumberKind::Float;
 	}
