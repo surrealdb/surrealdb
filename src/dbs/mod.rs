@@ -226,7 +226,7 @@ impl DbsCapabilities {
 	}
 
 	fn get_deny_all(&self) -> bool {
-		return self.deny_all;
+		self.deny_all
 	}
 }
 
