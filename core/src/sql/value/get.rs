@@ -1,4 +1,5 @@
 use std::collections::BTreeMap;
+use std::ops::Bound;
 
 use crate::cnf::MAX_COMPUTATION_DEPTH;
 use crate::ctx::Context;
@@ -233,6 +234,28 @@ impl Value {
 							Some(v) => stk.run(|stk| v.get(stk, ctx, opt, doc, path.next())).await,
 							None => Ok(Value::None),
 						},
+						Value::Range(r) => {
+							let end = match r.end {
+								Bound::Included(x) => v.get(..=x.coerce_to_u64()? as usize),
+								Bound::Excluded(x) => v.get(..x.coerce_to_u64()? as usize),
+								Bound::Unbounded => Some(v.as_slice()),
+							};
+							let Some(end) = end else {
+								return Ok(Value::None);
+							};
+							let range = match r.beg {
+								Bound::Included(x) => end.get((x.coerce_to_u64()? as usize)..),
+								Bound::Excluded(x) => {
+									end.get((x.coerce_to_u64()? as usize).saturating_add(1)..)
+								}
+								Bound::Unbounded => Some(end),
+							};
+							if let Some(range) = range {
+								Ok(range.to_vec().into())
+							} else {
+								Ok(Value::None)
+							}
+						}
 						_ => stk.run(|stk| Value::None.get(stk, ctx, opt, doc, path.next())).await,
 					},
 					Part::Method(name, args) => {

@@ -27,7 +27,7 @@ async fn idiom_index_call() -> Result<(), Error> {
 	let sql = r#"
 		DEFINE FUNCTION fn::foo() {
 			return 1 + 1;
-		}
+		};
 		[1,2,3,4][fn::foo()];
 	"#;
 	Test::new(sql).await?.expect_val("3")?;
