@@ -145,18 +145,18 @@ impl ValidatorExt for Scalar {
 	}
 }
 
-use crate::sql::Object as SqlObject;
+use crate::sql::Thing as SqlThing;
 use crate::sql::Value as SqlValue;
 
 pub trait TryAsExt {
-	fn try_as_object(self) -> Result<SqlObject, Self>
+	fn try_as_thing(self) -> Result<SqlThing, Self>
 	where
 		Self: Sized;
 }
 impl TryAsExt for SqlValue {
-	fn try_as_object(self) -> Result<SqlObject, Self> {
+	fn try_as_thing(self) -> Result<SqlThing, Self> {
 		match self {
-			SqlValue::Object(o) => Ok(o),
+			SqlValue::Thing(t) => Ok(t),
 			v => Err(v),
 		}
 	}

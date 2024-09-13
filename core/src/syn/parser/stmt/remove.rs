@@ -23,7 +23,7 @@ impl Parser<'_> {
 	pub async fn parse_remove_stmt(&mut self, ctx: &mut Stk) -> ParseResult<RemoveStatement> {
 		let next = self.next();
 		let res = match next.kind {
-			t!("NAMESPACE") | t!("ns") => {
+			t!("NAMESPACE") => {
 				let if_exists = if self.eat(t!("IF")) {
 					expected!(self, t!("EXISTS"));
 					true
