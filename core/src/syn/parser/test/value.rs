@@ -1,17 +1,41 @@
 use std::collections::BTreeMap;
 
+use md5::digest::typenum::Exp;
 use reblessive::Stack;
 
 use crate::{
 	sql::{
-		Array, Constant, Id, Number, Object, Query, Statement, Statements, Strand, Thing, Value,
+		Array, Constant, Expression, Geometry, Id, Number, Object, Operator, Part, Query,
+		Statement, Statements, Strand, Table, Thing, Value,
 	},
 	syn::parser::{mac::test_parse, Parser},
 };
 
 #[test]
+fn parse_index_expression() {
+	let value = test_parse!(parse_value_table, "a[1 + 1]").unwrap();
+	let Value::Idiom(x) = value else {
+		panic!("not the right value type");
+	};
+	assert_eq!(x.0[0], Part::Value(Value::Table(Table("a".to_string()))));
+	assert_eq!(
+		x.0[1],
+		Part::Value(Value::Expression(Box::new(Expression::Binary {
+			l: Value::Number(Number::Int(1)),
+			o: Operator::Add,
+			r: Value::Number(Number::Int(1)),
+		})))
+	)
+}
+
+#[test]
 fn parse_coordinate() {
-	test_parse!(parse_value_table, "(1.88, -18.0)").unwrap();
+	let coord = test_parse!(parse_value_table, "(1.88, -18.0)").unwrap();
+	let Value::Geometry(Geometry::Point(x)) = coord else {
+		panic!("not the right value");
+	};
+	assert_eq!(x.x(), 1.88);
+	assert_eq!(x.y(), -18.0);
 }
 
 #[test]

@@ -346,25 +346,14 @@ impl Parser<'_> {
 				self.pop_peek();
 				Part::Last
 			}
-			t!("+") | TokenKind::Digits | TokenKind::Glued(Glued::Number) => {
-				Part::Index(self.next_token_value()?)
-			}
-			t!("-") => {
-				if let TokenKind::Digits = self.peek_whitespace1().kind {
-					unexpected!(self, peek,"$, * or a number", => "An index can't be negative.");
-				}
-				unexpected!(self, peek, "$, * or a number");
-			}
 			t!("?") | t!("WHERE") => {
 				self.pop_peek();
 				let value = ctx.run(|ctx| self.parse_value_field(ctx)).await?;
 				Part::Where(value)
 			}
-			t!("$param") => Part::Value(Value::Param(self.next_token_value()?)),
-			TokenKind::Qoute(_x) => Part::Value(Value::Strand(self.next_token_value()?)),
 			_ => {
-				let idiom = self.parse_basic_idiom(ctx).await?;
-				Part::Value(Value::Idiom(idiom))
+				let value = self.parse_value_inherit(ctx).await?;
+				Part::Value(value)
 			}
 		};
 		self.expect_closing_delimiter(t!("]"), start)?;
