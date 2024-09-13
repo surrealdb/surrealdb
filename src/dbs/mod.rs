@@ -215,13 +215,21 @@ impl DbsCapabilities {
 	fn get_deny_funcs(&self) -> Targets<FuncTarget> {
 		// Allowed functions already consider a global deny and a general deny for functions
 		// On top of what is allowed, we only deny what is specifically denied
-		self.deny_funcs.clone().unwrap_or(Targets::None)
+		match &self.deny_funcs {
+			Some(Targets::Some(_)) => return self.deny_funcs.clone().unwrap_or(Targets::None),
+			Some(_) => return Targets::None,
+			None => return Targets::None,
+		}
 	}
 
 	fn get_deny_net(&self) -> Targets<NetTarget> {
 		// Allowed networks already consider a global deny and a general deny for networks
 		// On top of what is allowed, we only deny what is specifically denied
-		self.deny_net.clone().unwrap_or(Targets::None)
+		match &self.deny_net {
+			Some(Targets::Some(_)) => return self.deny_net.clone().unwrap_or(Targets::None),
+			Some(_) => return Targets::None,
+			None => return Targets::None,
+		}
 	}
 
 	fn get_deny_all(&self) -> bool {

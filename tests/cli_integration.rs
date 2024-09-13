@@ -1250,6 +1250,129 @@ mod cli_integration {
 			server.finish().unwrap();
 		}
 
+		info!("* When functions are disabled generally, but enabled for a specific family");
+		{
+			let (addr, mut server) = common::start_server(StartServerArguments {
+				args: "--deny-funcs --allow-funcs string::len".to_owned(),
+				..Default::default()
+			})
+			.await
+			.unwrap();
+
+			let cmd = format!(
+				"sql --conn ws://{addr} -u root -p root --ns {throwaway} --db {throwaway} --multi",
+				throwaway = Ulid::new()
+			);
+
+			let query = format!("RETURN string::len('123');\n\n");
+			let output = common::run(&cmd).input(&query).output().unwrap();
+			assert!(output.contains("[3]"), "unexpected output: {output:?}");
+
+			server.finish().unwrap();
+		}
+
+		info!("* When capabilities are disabled globally, but functions are enabled generally");
+		{
+			let (addr, mut server) = common::start_server(StartServerArguments {
+				args: "--deny-all --allow-funcs".to_owned(),
+				..Default::default()
+			})
+			.await
+			.unwrap();
+
+			let cmd = format!(
+				"sql --conn ws://{addr} -u root -p root --ns {throwaway} --db {throwaway} --multi",
+				throwaway = Ulid::new()
+			);
+
+			let query = format!("RETURN string::len('123');\n\n");
+			let output = common::run(&cmd).input(&query).output().unwrap();
+			assert!(output.contains("[3]"), "unexpected output: {output:?}");
+
+			server.finish().unwrap();
+		}
+
+		info!("* When capabilities are disabled globally, but a function family is enabled specifically");
+		{
+			let (addr, mut server) = common::start_server(StartServerArguments {
+				args: "--deny-all --allow-funcs string::len".to_owned(),
+				..Default::default()
+			})
+			.await
+			.unwrap();
+
+			let cmd = format!(
+				"sql --conn ws://{addr} -u root -p root --ns {throwaway} --db {throwaway} --multi",
+				throwaway = Ulid::new()
+			);
+
+			let query = format!("RETURN string::len('123');\n\n");
+			let output = common::run(&cmd).input(&query).output().unwrap();
+			assert!(output.contains("[3]"), "unexpected output: {output:?}");
+
+			server.finish().unwrap();
+		}
+
+		info!("* When net is disabled generally, but enabled for a specific address");
+		{
+			let (addr, mut server) = common::start_server(StartServerArguments {
+				args: "--deny-net --allow-net 127.0.0.1 --allow-funcs http::get".to_owned(),
+				..Default::default()
+			})
+			.await
+			.unwrap();
+
+			let cmd = format!(
+				"sql --conn ws://{addr} -u root -p root --ns {throwaway} --db {throwaway} --multi",
+				throwaway = Ulid::new()
+			);
+
+			let query = format!("RETURN http::get('http://{addr}/version');\n\n");
+			let output = common::run(&cmd).input(&query).output().unwrap();
+			assert!(output.contains("['surrealdb-"), "unexpected output: {output:?}");
+			server.finish().unwrap();
+		}
+
+		info!("* When capabilities are disabled globally, but net is enabled generally");
+		{
+			let (addr, mut server) = common::start_server(StartServerArguments {
+				args: "--deny-all --allow-net --allow-funcs http::get".to_owned(),
+				..Default::default()
+			})
+			.await
+			.unwrap();
+
+			let cmd = format!(
+				"sql --conn ws://{addr} -u root -p root --ns {throwaway} --db {throwaway} --multi",
+				throwaway = Ulid::new()
+			);
+
+			let query = format!("RETURN http::get('http://{addr}/version');\n\n");
+			let output = common::run(&cmd).input(&query).output().unwrap();
+			assert!(output.contains("['surrealdb-"), "unexpected output: {output:?}");
+			server.finish().unwrap();
+		}
+
+		info!("* When capabilities are disabled globally, but net is enabled specifically");
+		{
+			let (addr, mut server) = common::start_server(StartServerArguments {
+				args: "--deny-all --allow-net 127.0.0.1 --allow-funcs http::get".to_owned(),
+				..Default::default()
+			})
+			.await
+			.unwrap();
+
+			let cmd = format!(
+				"sql --conn ws://{addr} -u root -p root --ns {throwaway} --db {throwaway} --multi",
+				throwaway = Ulid::new()
+			);
+
+			let query = format!("RETURN http::get('http://{addr}/version');\n\n");
+			let output = common::run(&cmd).input(&query).output().unwrap();
+			assert!(output.contains("['surrealdb-"), "unexpected output: {output:?}");
+			server.finish().unwrap();
+		}
+
 		info!("* When net is denied and function is enabled");
 		{
 			let (addr, mut server) = common::start_server(StartServerArguments {
@@ -1301,6 +1424,29 @@ mod cli_integration {
 		{
 			let (addr, mut server) = common::start_server(StartServerArguments {
 				args: "--deny-funcs http".to_owned(),
+				..Default::default()
+			})
+			.await
+			.unwrap();
+
+			let cmd = format!(
+				"sql --conn ws://{addr} -u root -p root --ns {throwaway} --db {throwaway} --multi",
+				throwaway = Ulid::new()
+			);
+
+			let query = "RETURN http::get('https://surrealdb.com');\n\n";
+			let output = common::run(&cmd).input(query).output().unwrap();
+			assert!(
+				output.contains("Function 'http::get' is not allowed"),
+				"unexpected output: {output:?}"
+			);
+			server.finish().unwrap();
+		}
+
+		info!("* When a function family is denied and a subset is allowed");
+		{
+			let (addr, mut server) = common::start_server(StartServerArguments {
+				args: "--deny-funcs http --allow-funcs http::get".to_owned(),
 				..Default::default()
 			})
 			.await
