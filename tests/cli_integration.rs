@@ -1264,7 +1264,7 @@ mod cli_integration {
 				throwaway = Ulid::new()
 			);
 
-			let query = format!("RETURN string::len('123');\n\n");
+			let query = "RETURN string::len('123');\n\n".to_string();
 			let output = common::run(&cmd).input(&query).output().unwrap();
 			assert!(output.contains("[3]"), "unexpected output: {output:?}");
 
@@ -1285,7 +1285,7 @@ mod cli_integration {
 				throwaway = Ulid::new()
 			);
 
-			let query = format!("RETURN string::len('123');\n\n");
+			let query = "RETURN string::len('123');\n\n".to_string();
 			let output = common::run(&cmd).input(&query).output().unwrap();
 			assert!(output.contains("[3]"), "unexpected output: {output:?}");
 
@@ -1306,7 +1306,7 @@ mod cli_integration {
 				throwaway = Ulid::new()
 			);
 
-			let query = format!("RETURN string::len('123');\n\n");
+			let query = "RETURN string::len('123');\n\n".to_string();
 			let output = common::run(&cmd).input(&query).output().unwrap();
 			assert!(output.contains("[3]"), "unexpected output: {output:?}");
 

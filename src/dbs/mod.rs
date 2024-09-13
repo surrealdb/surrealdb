@@ -216,9 +216,9 @@ impl DbsCapabilities {
 		// Allowed functions already consider a global deny and a general deny for functions
 		// On top of what is allowed, we only deny what is specifically denied
 		match &self.deny_funcs {
-			Some(Targets::Some(_)) => return self.deny_funcs.clone().unwrap_or(Targets::None),
-			Some(_) => return Targets::None,
-			None => return Targets::None,
+			Some(Targets::Some(_)) => self.deny_funcs.clone().unwrap_or(Targets::None),
+			Some(_) => Targets::None,
+			None => Targets::None,
 		}
 	}
 
@@ -226,9 +226,9 @@ impl DbsCapabilities {
 		// Allowed networks already consider a global deny and a general deny for networks
 		// On top of what is allowed, we only deny what is specifically denied
 		match &self.deny_net {
-			Some(Targets::Some(_)) => return self.deny_net.clone().unwrap_or(Targets::None),
-			Some(_) => return Targets::None,
-			None => return Targets::None,
+			Some(Targets::Some(_)) => self.deny_net.clone().unwrap_or(Targets::None),
+			Some(_) => Targets::None,
+			None => Targets::None,
 		}
 	}
 
