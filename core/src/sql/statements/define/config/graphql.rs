@@ -65,13 +65,12 @@ impl Display for TablesConfig {
 			TablesConfig::None => write!(f, "NONE")?,
 			TablesConfig::Include(cs) => {
 				let mut f = Pretty::from(f);
-				write!(f, "INCLUDE [")?;
+				write!(f, "INCLUDE ")?;
 				if !cs.is_empty() {
 					let indent = pretty_indent();
 					write!(f, "{}", Fmt::pretty_comma_separated(cs.as_slice()))?;
 					drop(indent);
 				}
-				f.write_char(']')?;
 			}
 			TablesConfig::Exclude(_) => todo!(),
 		}

@@ -10,12 +10,18 @@ mod graphql_integration {
 		time::Duration,
 	};
 
+	macro_rules! assert_equal_arrs {
+		($lhs: expr, $rhs: expr) => {
+			let lhs = $lhs.as_array().unwrap().iter().collect::<std::collections::HashSet<_>>();
+			let rhs = $rhs.as_array().unwrap().iter().collect::<std::collections::HashSet<_>>();
+			assert_eq!(lhs, rhs)
+		};
+	}
+
 	use http::header;
 	use serde_json::json;
 	use test_log::test;
 	use ulid::Ulid;
-
-	use crate::assert_equal_arrs;
 
 	use super::common;
 
@@ -272,7 +278,7 @@ mod graphql_integration {
 					}
 				]
 			);
-			assert_equal_arrs(fields, &expected_fields);
+			assert_equal_arrs!(fields, &expected_fields);
 		}
 
 		{
@@ -280,7 +286,7 @@ mod graphql_integration {
 				.post(sql_url)
 				.body(
 					r#"
-                    DEFINE CONFIG GRAPHQL TABLES INCLUDE [foo];
+                    DEFINE CONFIG OVERWRITE GRAPHQL TABLES INCLUDE foo;
                 "#,
 				)
 				.send()
@@ -311,15 +317,9 @@ mod graphql_integration {
 					}
 				]
 			);
-			assert_equal_arrs(fields, &expected_fields);
+			assert_equal_arrs!(fields, &expected_fields);
 		}
 
 		Ok(())
 	}
-}
-
-fn assert_equal_arrs(lhs: &serde_json::Value, rhs: &serde_json::Value) {
-	let lhs = lhs.as_array().unwrap().iter().collect::<HashSet<_>>();
-	let rhs = rhs.as_array().unwrap().iter().collect::<HashSet<_>>();
-	assert_eq!(lhs, rhs)
 }

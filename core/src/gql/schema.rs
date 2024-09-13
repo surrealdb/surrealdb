@@ -92,16 +92,23 @@ pub async fn generate_schema(
 
 	let tbs = tx.all_tb(ns, db, None).await?;
 
+	error!(?tbs);
+
+	error!(?config);
+
 	let tbs = match config.tables {
 		TablesConfig::None => return Err(GqlError::NotConfigured),
 		TablesConfig::Auto => tbs,
 		TablesConfig::Include(inc) => {
+			error!(?inc);
 			tbs.iter().filter(|t| inc.contains_name(&t.name)).cloned().collect()
 		}
 		TablesConfig::Exclude(exc) => {
 			tbs.iter().filter(|t| !exc.contains_name(&t.name)).cloned().collect()
 		}
 	};
+
+	error!(?tbs);
 
 	let mut query = Object::new("Query");
 	let mut types: Vec<Type> = Vec::new();

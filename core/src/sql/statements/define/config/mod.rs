@@ -115,6 +115,8 @@ impl Display for DefineConfigStatement {
 			write!(f, " OVERWRITE")?
 		}
 
+		write!(f, "{}", self.inner)?;
+
 		Ok(())
 	}
 }

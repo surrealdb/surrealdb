@@ -3,7 +3,7 @@ use reblessive::Stk;
 use crate::cnf::EXPERIMENTAL_BEARER_ACCESS;
 use crate::sql::access_type::JwtAccessVerify;
 use crate::sql::index::HnswParams;
-use crate::sql::statements::define::config::graphql::GraphQLConfig;
+use crate::sql::statements::define::config::graphql::{GraphQLConfig, TableConfig};
 use crate::sql::statements::define::config::ConfigInner;
 use crate::sql::statements::define::DefineConfigStatement;
 use crate::sql::Value;
@@ -1232,10 +1232,7 @@ impl Parser<'_> {
 
 		let next = self.next();
 		let inner = match next.kind {
-			t!("GRAPHQL") => {
-				self.pop_peek();
-				self.parse_graphql_config(ctx).await.map(ConfigInner::GraphQL)?
-			}
+			t!("GRAPHQL") => self.parse_graphql_config(ctx).await.map(ConfigInner::GraphQL)?,
 			_ => unexpected!(self, next, "a type of config"),
 		};
 
@@ -1247,7 +1244,7 @@ impl Parser<'_> {
 	}
 
 	pub async fn parse_graphql_config(&mut self, ctx: &mut Stk) -> ParseResult<GraphQLConfig> {
-		use graphql::*;
+		use graphql::{FunctionsConfig, TableConfig, TablesConfig};
 		let mut tmp_tables = Option::<TablesConfig>::None;
 		let mut tmp_fncs = Option::<FunctionsConfig>::None;
 		loop {
@@ -1267,32 +1264,14 @@ impl Parser<'_> {
 
 					let next = self.next();
 					match next.kind {
-						t!("INCLUDE") => match ctx.run(|ctx| self.parse_value(ctx)).await? {
-							Value::Array(a) => {
-								match a
-									.into_iter()
-									.map(|v| TableConfig::try_from(v))
-									.collect::<Result<Vec<TableConfig>, _>>()
-								{
-									Ok(v) => tmp_tables = Some(TablesConfig::Include(v)),
-									Err(v) => todo!("found {v} expected "),
-								}
-							}
-							v => todo!("found {v} expected tables"),
-						},
-						t!("EXCLUDE") => match ctx.run(|ctx| self.parse_value(ctx)).await? {
-							Value::Array(a) => {
-								match a
-									.into_iter()
-									.map(|v| TableConfig::try_from(v))
-									.collect::<Result<Vec<TableConfig>, _>>()
-								{
-									Ok(v) => tmp_tables = Some(TablesConfig::Exclude(v)),
-									Err(v) => todo!("found {v} expected "),
-								}
-							}
-							v => todo!("found {v} expected tables"),
-						},
+						t!("INCLUDE") => {
+							tmp_tables =
+								Some(TablesConfig::Include(self.parse_graphql_table_configs()?))
+						}
+						t!("EXCLUDE") => {
+							tmp_tables =
+								Some(TablesConfig::Include(self.parse_graphql_table_configs()?))
+						}
 						t!("NONE") => {
 							tmp_tables = Some(TablesConfig::None);
 						}
@@ -1328,8 +1307,24 @@ impl Parser<'_> {
 		})
 	}
 
-	pub fn parse_ident_array(&mut self) -> ParseResult<Vec<Ident>> {
-		Ok(vec![])
+	pub fn parse_graphql_table_configs(&mut self) -> ParseResult<Vec<graphql::TableConfig>> {
+		let mut acc = vec![];
+		loop {
+			match self.peek_kind() {
+				TokenKind::Identifier => {
+					let name: Ident = self.next_token_value()?;
+					acc.push(TableConfig {
+						name: name.0,
+					});
+				}
+				_ => unexpected!(self, self.next(), "a table config"),
+			}
+			match self.peek_kind() {
+				t!(",") => continue,
+				_ => break,
+			}
+		}
+		Ok(acc)
 	}
 
 	pub fn parse_relation_schema(&mut self) -> ParseResult<table_type::Relation> {
