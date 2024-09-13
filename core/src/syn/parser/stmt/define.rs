@@ -59,7 +59,7 @@ impl Parser<'_> {
 			}
 			t!("ANALYZER") => self.parse_define_analyzer().map(DefineStatement::Analyzer),
 			t!("ACCESS") => self.parse_define_access(ctx).await.map(DefineStatement::Access),
-			t!("CONFIG") => self.parse_define_config(ctx).await.map(DefineStatement::Config),
+			t!("CONFIG") => self.parse_define_config().await.map(DefineStatement::Config),
 			_ => unexpected!(self, next, "a define statement keyword"),
 		}
 	}
@@ -1217,10 +1217,7 @@ impl Parser<'_> {
 		Ok(res)
 	}
 
-	pub async fn parse_define_config(
-		&mut self,
-		ctx: &mut Stk,
-	) -> ParseResult<DefineConfigStatement> {
+	pub fn parse_define_config(&mut self) -> ParseResult<DefineConfigStatement> {
 		let (if_not_exists, overwrite) = if self.eat(t!("IF")) {
 			expected!(self, t!("NOT"));
 			expected!(self, t!("EXISTS"));
@@ -1233,7 +1230,7 @@ impl Parser<'_> {
 
 		let next = self.next();
 		let inner = match next.kind {
-			t!("GRAPHQL") => self.parse_graphql_config(ctx).await.map(ConfigInner::GraphQL)?,
+			t!("GRAPHQL") => self.parse_graphql_config().map(ConfigInner::GraphQL)?,
 			_ => unexpected!(self, next, "a type of config"),
 		};
 
@@ -1244,8 +1241,8 @@ impl Parser<'_> {
 		})
 	}
 
-	pub async fn parse_graphql_config(&mut self, ctx: &mut Stk) -> ParseResult<GraphQLConfig> {
-		use graphql::{FunctionsConfig, TableConfig, TablesConfig};
+	fn parse_graphql_config(&mut self) -> ParseResult<GraphQLConfig> {
+		use graphql::{FunctionsConfig, TablesConfig};
 		let mut tmp_tables = Option::<TablesConfig>::None;
 		let mut tmp_fncs = Option::<FunctionsConfig>::None;
 		loop {
@@ -1308,11 +1305,11 @@ impl Parser<'_> {
 		})
 	}
 
-	pub fn parse_graphql_table_configs(&mut self) -> ParseResult<Vec<graphql::TableConfig>> {
+	fn parse_graphql_table_configs(&mut self) -> ParseResult<Vec<graphql::TableConfig>> {
 		let mut acc = vec![];
 		loop {
 			match self.peek_kind() {
-				TokenKind::Identifier => {
+				x if Self::kind_is_identifier(x) => {
 					let name: Ident = self.next_token_value()?;
 					acc.push(TableConfig {
 						name: name.0,
@@ -1320,9 +1317,8 @@ impl Parser<'_> {
 				}
 				_ => unexpected!(self, self.next(), "a table config"),
 			}
-			match self.peek_kind() {
-				t!(",") => continue,
-				_ => break,
+			if !self.eat(t!(",")) {
+				break;
 			}
 		}
 		Ok(acc)
