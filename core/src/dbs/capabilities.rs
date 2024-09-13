@@ -192,13 +192,13 @@ impl std::str::FromStr for NetTarget {
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 #[non_exhaustive]
-pub enum Targets<T: Hash + Eq + PartialEq> {
+pub enum Targets<T: Hash + Clone + Eq + PartialEq> {
 	None,
 	Some(HashSet<T>),
 	All,
 }
 
-impl<T: Hash + Eq + PartialEq + fmt::Debug + fmt::Display> Targets<T> {
+impl<T: Hash + Clone + Eq + PartialEq + fmt::Debug + fmt::Display> Targets<T> {
 	fn matches<S>(&self, elem: &S) -> bool
 	where
 		S: ?Sized,
@@ -210,9 +210,33 @@ impl<T: Hash + Eq + PartialEq + fmt::Debug + fmt::Display> Targets<T> {
 			Self::Some(targets) => targets.iter().any(|t| t.matches(elem)),
 		}
 	}
+
+	fn add(&self, elem: T) -> Targets<T> {
+		match self {
+			// If all targets are already added, we don't need to do anything for allows
+			// For denies, we want to add it specifically, which is handled outside of this method
+			// This match arm should only be reached when allowing a specific target
+			Self::All => Self::All,
+			// If no targets are added, we add the provided target
+			// This works the same for allows and denies
+			Self::None => {
+				let mut targets = HashSet::new();
+				targets.insert(elem);
+				Self::Some(targets)
+			}
+			// If some targets are addedd, we add the provided target
+			// This works the same for allows and denies
+			// TODO(PR): Consider checking if none already match
+			Self::Some(targets) => {
+				let mut new = targets.clone();
+				new.insert(elem);
+				Self::Some(new)
+			}
+		}
+	}
 }
 
-impl<T: Target + Hash + Eq + PartialEq + fmt::Display> fmt::Display for Targets<T> {
+impl<T: Target + Hash + Clone + Eq + PartialEq + fmt::Display> fmt::Display for Targets<T> {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		match self {
 			Self::None => write!(f, "none"),
@@ -323,6 +347,59 @@ impl Capabilities {
 
 	pub fn without_network_targets(mut self, deny_net: Targets<NetTarget>) -> Self {
 		self.deny_net = Arc::new(deny_net);
+		self
+	}
+
+	pub fn allow_network_target(mut self, target: NetTarget) -> Self {
+		// We check if the target is generically denied or explicitly denied
+		// If it is not denied, we add it to allowed
+		// If it is generically denied, we add it to allowed
+		// If it is explicitly denied, we DO NOT add it to allowed
+		match *self.deny_net {
+			Targets::Some(_) => {
+				if self.deny_net.matches(&target) {
+					// If already explicitly denied, it cannot be allowed
+					// TODO(PR): Print warning
+					return self;
+				}
+			}
+			Targets::All => {
+				// If generically denied, an allow can overwrite it
+				// We are no longer denying all, we rely on the default deny policy
+				self.deny_net = Arc::new(Targets::None);
+			}
+			Targets::None => {}
+		}
+
+		// We add the specific targets provided to the allowed list
+		self.allow_net = Arc::new(self.allow_net.add(target));
+		self
+	}
+
+	pub fn deny_network_target(mut self, target: NetTarget) -> Self {
+		// We check if we are already generically or explicitly denying the target
+		// If it is not denied, we add it to denied
+		// If it is generically denied, we add it to denied, as explicit denies have priority
+		// If it is explicitly denied, we DO NOT add it to denied, as it already is
+		match *self.deny_net {
+			Targets::Some(_) => {
+				// If already explicitly denied, we do not need to do anything
+				// If not already explicitly denied, we add it to denied
+				if !self.deny_net.matches(&target) {
+					self.deny_net = Arc::new(self.deny_net.add(target));
+				}
+			}
+			Targets::All => {
+				// If generically denied, we add it to denied
+				// We are no longer denying all, we rely on the default deny policy
+				self.deny_net = Arc::new(Targets::<NetTarget>::Some([target].into()));
+			}
+			Targets::None => {
+				// If nothing is denied, we add it to denied
+				self.deny_net = Arc::new(Targets::<NetTarget>::Some([target].into()));
+			}
+		};
+
 		self
 	}
 
@@ -638,6 +715,124 @@ mod tests {
 			assert!(caps.allows_function_name("http::get"));
 			assert!(caps.allows_function_name("http::put"));
 			assert!(!caps.allows_function_name("http::post"));
+		}
+	}
+
+	#[test]
+	fn test_capabilities_with_order() {
+		// Allow only one address
+		{
+			let caps = Capabilities::default()
+				.allow_network_target(NetTarget::from_str("192.168.1.1").unwrap());
+
+			// Only that specific address is allowed
+			assert!(caps.allows_network_target(&NetTarget::from_str("192.168.1.1").unwrap()));
+			assert!(!caps.allows_network_target(&NetTarget::from_str("192.168.1.2").unwrap()));
+			assert!(!caps.allows_network_target(&NetTarget::from_str("192.168.1.100").unwrap()));
+		}
+		// Allow a subnet, deny a subset of it
+		{
+			let caps = Capabilities::default()
+				.allow_network_target(NetTarget::from_str("192.168.1.1/24").unwrap())
+				.deny_network_target(NetTarget::from_str("192.168.1.1/28").unwrap());
+
+			// The subset of the allowed subnet is denied, the rest of the subnet is allowed
+			assert!(caps.allows_network_target(&NetTarget::from_str("192.168.1.100").unwrap()));
+			assert!(caps.allows_network_target(&NetTarget::from_str("192.168.1.200").unwrap()));
+			assert!(!caps.allows_network_target(&NetTarget::from_str("192.168.1.1").unwrap()));
+			assert!(!caps.allows_network_target(&NetTarget::from_str("192.168.1.15").unwrap()));
+		}
+		// Allow a subnet, deny a subset of it, then allow a superset of it
+		{
+			let caps = Capabilities::default()
+				.allow_network_target(NetTarget::from_str("192.168.1.1/28").unwrap())
+				.deny_network_target(NetTarget::from_str("192.168.1.1/30").unwrap())
+				.allow_network_target(NetTarget::from_str("192.168.1.1/24").unwrap());
+
+			// The superset of the allowed subnet is allowed, except for the subset that is denied
+			assert!(caps.allows_network_target(&NetTarget::from_str("192.168.1.4").unwrap()));
+			assert!(caps.allows_network_target(&NetTarget::from_str("192.168.1.100").unwrap()));
+			assert!(caps.allows_network_target(&NetTarget::from_str("192.168.1.200").unwrap()));
+			assert!(!caps.allows_network_target(&NetTarget::from_str("192.168.1.1").unwrap()));
+			assert!(!caps.allows_network_target(&NetTarget::from_str("192.168.1.2").unwrap()));
+			assert!(!caps.allows_network_target(&NetTarget::from_str("192.168.1.3").unwrap()));
+		}
+		// Deny only one address
+		{
+			let caps = Capabilities::default()
+				.deny_network_target(NetTarget::from_str("192.168.1.1").unwrap());
+
+			// Every address is disallowed, including that one
+			assert!(!caps.allows_network_target(&NetTarget::from_str("192.168.1.1").unwrap()));
+			assert!(!caps.allows_network_target(&NetTarget::from_str("192.168.1.100").unwrap()));
+			assert!(!caps.allows_network_target(&NetTarget::from_str("192.168.1.200").unwrap()));
+		}
+		// Deny a subnet, allow a subset of it
+		{
+			let caps = Capabilities::default()
+				.deny_network_target(NetTarget::from_str("192.168.1.1/24").unwrap())
+				.allow_network_target(NetTarget::from_str("192.168.1.1/28").unwrap());
+
+			// Every address is disallowed, including the allowed subset of the denied subnet
+			assert!(!caps.allows_network_target(&NetTarget::from_str("192.168.1.100").unwrap()));
+			assert!(!caps.allows_network_target(&NetTarget::from_str("192.168.1.200").unwrap()));
+			assert!(!caps.allows_network_target(&NetTarget::from_str("192.168.1.1").unwrap()));
+			assert!(!caps.allows_network_target(&NetTarget::from_str("192.168.1.15").unwrap()));
+		}
+		// Deny a subnet, allow a subset of it, then deny a superset of it
+		{
+			let caps = Capabilities::default()
+				.deny_network_target(NetTarget::from_str("192.168.1.1/28").unwrap())
+				.allow_network_target(NetTarget::from_str("192.168.1.1/30").unwrap())
+				.deny_network_target(NetTarget::from_str("192.168.1.1/24").unwrap());
+
+			// Every address is disallowed, including the allowed subset of the denied subnets
+			assert!(!caps.allows_network_target(&NetTarget::from_str("192.168.1.4").unwrap()));
+			assert!(!caps.allows_network_target(&NetTarget::from_str("192.168.1.100").unwrap()));
+			assert!(!caps.allows_network_target(&NetTarget::from_str("192.168.1.200").unwrap()));
+			assert!(!caps.allows_network_target(&NetTarget::from_str("192.168.1.1").unwrap()));
+			assert!(!caps.allows_network_target(&NetTarget::from_str("192.168.1.2").unwrap()));
+			assert!(!caps.allows_network_target(&NetTarget::from_str("192.168.1.3").unwrap()));
+		}
+		// Deny all networks, then allow a single address
+		{
+			let caps = Capabilities::none()
+				.allow_network_target(NetTarget::from_str("192.168.1.1").unwrap());
+
+			// Only that specific address is allowed
+			assert!(caps.allows_network_target(&NetTarget::from_str("192.168.1.1").unwrap()));
+			assert!(!caps.allows_network_target(&NetTarget::from_str("192.168.1.2").unwrap()));
+			assert!(!caps.allows_network_target(&NetTarget::from_str("192.168.1.100").unwrap()));
+		}
+		// Allow all networks, then deny a single address
+		{
+			let caps = Capabilities::all()
+				.deny_network_target(NetTarget::from_str("192.168.1.1").unwrap());
+
+			// Only that specific address is denied
+			assert!(!caps.allows_network_target(&NetTarget::from_str("192.168.1.1").unwrap()));
+			assert!(caps.allows_network_target(&NetTarget::from_str("192.168.1.2").unwrap()));
+			assert!(caps.allows_network_target(&NetTarget::from_str("192.168.1.100").unwrap()));
+		}
+		// Deny all networks, then deny a single address
+		{
+			let caps = Capabilities::none()
+				.deny_network_target(NetTarget::from_str("192.168.1.1").unwrap());
+
+			// Every network is disallowed
+			assert!(!caps.allows_network_target(&NetTarget::from_str("192.168.1.1").unwrap()));
+			assert!(!caps.allows_network_target(&NetTarget::from_str("192.168.1.2").unwrap()));
+			assert!(!caps.allows_network_target(&NetTarget::from_str("192.168.1.100").unwrap()));
+		}
+		// Allow all networks, then allow a single address
+		{
+			let caps = Capabilities::all()
+				.allow_network_target(NetTarget::from_str("192.168.1.1").unwrap());
+
+			// Every network is allowed
+			assert!(caps.allows_network_target(&NetTarget::from_str("192.168.1.1").unwrap()));
+			assert!(caps.allows_network_target(&NetTarget::from_str("192.168.1.2").unwrap()));
+			assert!(caps.allows_network_target(&NetTarget::from_str("192.168.1.100").unwrap()));
 		}
 	}
 }
