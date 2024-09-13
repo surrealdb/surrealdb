@@ -28,8 +28,30 @@ async fn idiom_index_call() -> Result<(), Error> {
 		DEFINE FUNCTION fn::foo() {
 			return 1 + 1;
 		};
-		[1,2,3,4][fn::foo()];
+		RETURN [1,2,3,4][fn::foo()];
 	"#;
 	Test::new(sql).await?.expect_val("3")?;
+	Ok(())
+}
+
+#[tokio::test]
+async fn idiom_index_range() -> Result<(), Error> {
+	let sql = r#"
+		[1,2,3,4][1..2];
+		[1,2,3,4][1..=2];
+		[1,2,3,4][1>..=2];
+		[1,2,3,4][1>..];
+		[1,2,3,4][..2];
+		[1,2,3,4][..=2];
+	"#;
+	Test::new(sql)
+		.await?
+		.expect_val("[2]")?
+		.expect_val("[2,3]")?
+		.expect_val("[3]")?
+		.expect_val("[3,4]")?
+		.expect_val("[2,3,4]")?
+		.expect_val("[1,2]")?
+		.expect_val("[1,2,3]")?;
 	Ok(())
 }
