@@ -344,7 +344,7 @@ impl Test {
 	/// Expect the given value to be equals to the next response.
 	#[allow(dead_code)]
 	pub fn expect_val(&mut self, val: &str) -> Result<&mut Self, Error> {
-		self.expect_value(value(val).unwrap())
+		self.expect_value(value(val)?)
 	}
 
 	#[allow(dead_code)]

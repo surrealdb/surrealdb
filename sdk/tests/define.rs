@@ -797,29 +797,61 @@ async fn define_statement_unique_index_numbers() -> Result<(), Error> {
 	Ok(())
 }
 
-#[tokio::test]
-async fn define_statement_index_mixed_numbers_range() -> Result<(), Error> {
-	let sql = "
-		DEFINE INDEX index ON TABLE test COLUMNS number;
+fn check_range(t: &mut Test, result: &str, explain: &str) -> Result<(), Error> {
+	for _ in 0..2 {
+		t.expect_val(result)?;
+	}
+	t.expect_val(explain)?;
+	Ok(())
+}
+
+async fn define_statement_mixed_numbers_range(unique: bool) -> Result<(), Error> {
+	let sql = format!(
+		"
+		DEFINE INDEX index ON TABLE test COLUMNS number {};
 		CREATE test:int0 SET number = 0;
 		CREATE test:float0 SET number = 0.5;
 		CREATE test:int1 SET number = 1;
 		CREATE test:float1 SET number = 1.5;
+		CREATE test:int2 SET number = 2;
 		SELECT * FROM test WITH NOINDEX WHERE number > 0 AND number < 2 ORDER BY id;
 		SELECT * FROM test WHERE number > 0 AND number < 2 ORDER BY id;
-		SELECT * FROM test WITH NOINDEX WHERE number > 0.1 AND number < 1.5 ORDER BY id;
-		SELECT * FROM test WHERE number > 0.1 AND number < 1.5 ORDER BY id;
+		SELECT * FROM test WHERE number > 0 AND number < 2 ORDER BY id EXPLAIN;
 		SELECT * FROM test WITH NOINDEX WHERE number > 0.1 AND number < 2 ORDER BY id;
 		SELECT * FROM test WHERE number > 0.1 AND number < 2 ORDER BY id;
+		SELECT * FROM test WHERE number > 0.1 AND number < 2 ORDER BY id EXPLAIN;
+		SELECT * FROM test WITH NOINDEX WHERE number > 0.1 AND number < 1.5 ORDER BY id;
+		SELECT * FROM test WHERE number > 0.1 AND number < 1.5 ORDER BY id;
+		SELECT * FROM test WHERE number > 0.1 AND number < 1.5 ORDER BY id EXPLAIN;
 		SELECT * FROM test WITH NOINDEX WHERE number > 0 AND number < 1.5 ORDER BY id;
 		SELECT * FROM test WHERE number > 0 AND number < 1.5 ORDER BY id;
-	";
-	let mut t = Test::new(sql).await?;
-	t.expect_size(13)?;
-	t.skip_ok(5)?;
-	for _ in 0..2 {
-		t.expect_val(
-			"[
+		SELECT * FROM test WHERE number > 0 AND number < 1.5 ORDER BY id EXPLAIN;
+		SELECT * FROM test WITH NOINDEX WHERE number > 0.1 ORDER BY id;
+		SELECT * FROM test WHERE number > 0.1 ORDER BY id;
+		SELECT * FROM test WHERE number > 0.1 ORDER BY id EXPLAIN;
+		SELECT * FROM test WITH NOINDEX WHERE number > 0 ORDER BY id;
+		SELECT * FROM test WHERE number > 0 ORDER BY id;
+		SELECT * FROM test WHERE number > 0 ORDER BY id EXPLAIN;
+		SELECT * FROM test WITH NOINDEX WHERE number < 2 ORDER BY id;
+		SELECT * FROM test WHERE number < 2 ORDER BY id;
+		SELECT * FROM test WHERE number < 2 ORDER BY id EXPLAIN;
+		SELECT * FROM test WITH NOINDEX WHERE number < 1.9 ORDER BY id;
+		SELECT * FROM test WHERE number < 1.9 ORDER BY id;
+		SELECT * FROM test WHERE number < 1.9 ORDER BY id EXPLAIN;
+		",
+		if unique {
+			"UNIQUE"
+		} else {
+			""
+		}
+	);
+	let mut t = Test::new(&sql).await?;
+	t.expect_size(30)?;
+	t.skip_ok(6)?;
+	// number > 0 AND number < 2
+	check_range(
+		&mut t,
+		"[
 					{
 						id: test:float0,
 						number: 0.5f
@@ -833,9 +865,353 @@ async fn define_statement_index_mixed_numbers_range() -> Result<(), Error> {
 						number: 1
 					}
 				]",
-		)?;
-	}
+		"[
+					{
+						detail: {
+							plan: {
+								from: {
+									inclusive: false,
+									value: 0
+								},
+								index: 'index',
+								to: {
+									inclusive: false,
+									value: 2
+								}
+							},
+							table: 'test'
+						},
+						operation: 'Iterate Index'
+					},
+					{
+						detail: {
+							type: 'Memory'
+						},
+						operation: 'Collector'
+					}
+				]",
+	)?;
+	// number > 0.1 AND number < 2
+	check_range(
+		&mut t,
+		"[
+					{
+						id: test:float0,
+						number: 0.5f
+					},
+					{
+						id: test:float1,
+						number: 1.5f
+					},
+					{
+						id: test:int1,
+						number: 1
+					}
+				]",
+		"[
+					{
+						detail: {
+							plan: {
+								from: {
+									inclusive: false,
+									value: 0.1f
+								},
+								index: 'index',
+								to: {
+									inclusive: false,
+									value: 2
+								}
+							},
+							table: 'test'
+						},
+						operation: 'Iterate Index'
+					},
+					{
+						detail: {
+							type: 'Memory'
+						},
+						operation: 'Collector'
+					}
+				]",
+	)?;
+	// number > 0.1 AND number < 1.5
+	check_range(
+		&mut t,
+		"[
+					{
+						id: test:float0,
+						number: 0.5f
+					},
+					{
+						id: test:int1,
+						number: 1
+					}
+				]",
+		"[
+					{
+						detail: {
+							plan: {
+								from: {
+									inclusive: false,
+									value: 0.1f
+								},
+								index: 'index',
+								to: {
+									inclusive: false,
+									value: 1.5f
+								}
+							},
+							table: 'test'
+						},
+						operation: 'Iterate Index'
+					},
+					{
+						detail: {
+							type: 'Memory'
+						},
+						operation: 'Collector'
+					}
+				]",
+	)?;
+	// number > 0 AND number < 1.5
+	check_range(
+		&mut t,
+		"[
+					{
+						id: test:float0,
+						number: 0.5f
+					},
+					{
+						id: test:int1,
+						number: 1
+					}
+				]",
+		"[
+					{
+						detail: {
+							plan: {
+								from: {
+									inclusive: false,
+									value: 0
+								},
+								index: 'index',
+								to: {
+									inclusive: false,
+									value: 1.5f
+								}
+							},
+							table: 'test'
+						},
+						operation: 'Iterate Index'
+					},
+					{
+						detail: {
+							type: 'Memory'
+						},
+						operation: 'Collector'
+					}
+				]",
+	)?;
+	// number > 0.1
+	check_range(
+		&mut t,
+		"[
+					{
+						id: test:float0,
+						number: 0.5f
+					},
+					{
+						id: test:float1,
+						number: 1.5f
+					},
+					{
+						id: test:int1,
+						number: 1
+					},
+					{
+						id: test:int2,
+						number: 2
+					}
+				]",
+		"[
+					{
+						detail: {
+							plan: {
+								from: {
+									inclusive: false,
+									value: 0.1f
+								},
+								index: 'index',
+								to: {
+									inclusive: false,
+									value: NONE
+								}
+							},
+							table: 'test'
+						},
+						operation: 'Iterate Index'
+					},
+					{
+						detail: {
+							type: 'Memory'
+						},
+						operation: 'Collector'
+					}
+				]",
+	)?;
+	// number > 0
+	check_range(
+		&mut t,
+		"[
+					{
+						id: test:float0,
+						number: 0.5f
+					},
+					{
+						id: test:float1,
+						number: 1.5f
+					},
+					{
+						id: test:int1,
+						number: 1
+					},
+					{
+						id: test:int2,
+						number: 2
+					}
+				]",
+		"[
+					{
+						detail: {
+							plan: {
+								from: {
+									inclusive: false,
+									value: 0
+								},
+								index: 'index',
+								to: {
+									inclusive: false,
+									value: NONE
+								}
+							},
+							table: 'test'
+						},
+						operation: 'Iterate Index'
+					},
+					{
+						detail: {
+							type: 'Memory'
+						},
+						operation: 'Collector'
+					}
+				]",
+	)?;
+	// number < 2
+	check_range(
+		&mut t,
+		"[
+					{
+						id: test:float0,
+						number: 0.5f
+					},
+					{
+						id: test:float1,
+						number: 1.5f
+					},
+					{
+						id: test:int0,
+						number: 0
+					},
+					{
+						id: test:int1,
+						number: 1
+					}
+				]",
+		"[
+					{
+						detail: {
+							plan: {
+								from: {
+									inclusive: false,
+									value: NONE
+								},
+								index: 'index',
+								to: {
+									inclusive: false,
+									value: 2
+								}
+							},
+							table: 'test'
+						},
+						operation: 'Iterate Index'
+					},
+					{
+						detail: {
+							type: 'Memory'
+						},
+						operation: 'Collector'
+					}
+				]",
+	)?;
+	// number < 1.9
+	check_range(
+		&mut t,
+		"[
+					{
+						id: test:float0,
+						number: 0.5f
+					},
+					{
+						id: test:float1,
+						number: 1.5f
+					},
+					{
+						id: test:int0,
+						number: 0
+					},
+					{
+						id: test:int1,
+						number: 1
+					}
+				]",
+		"[
+					{
+						detail: {
+							plan: {
+								from: {
+									inclusive: false,
+									value: NONE
+								},
+								index: 'index',
+								to: {
+									inclusive: false,
+									value: 1.9f
+								}
+							},
+							table: 'test'
+						},
+						operation: 'Iterate Index'
+					},
+					{
+						detail: {
+							type: 'Memory'
+						},
+						operation: 'Collector'
+					}
+				]",
+	)?;
+	//
 	Ok(())
+}
+
+#[tokio::test]
+async fn define_statement_index_mixed_numbers_range() -> Result<(), Error> {
+	define_statement_mixed_numbers_range(false).await
+}
+
+#[tokio::test]
+async fn define_statement_unique_mixed_numbers_range() -> Result<(), Error> {
+	define_statement_mixed_numbers_range(true).await
 }
 
 #[tokio::test]
