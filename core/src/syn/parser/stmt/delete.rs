@@ -9,7 +9,10 @@ use crate::{
 };
 
 impl Parser<'_> {
-	pub async fn parse_delete_stmt(&mut self, ctx: &mut Stk) -> ParseResult<DeleteStatement> {
+	pub(crate) async fn parse_delete_stmt(
+		&mut self,
+		ctx: &mut Stk,
+	) -> ParseResult<DeleteStatement> {
 		self.eat(t!("FROM"));
 		let only = self.eat(t!("ONLY"));
 		let what = Values(self.parse_what_list(ctx).await?);

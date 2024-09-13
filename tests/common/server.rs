@@ -218,6 +218,17 @@ pub async fn start_server_with_temporary_directory(
 	.await
 }
 
+pub async fn start_server_gql() -> Result<(String, Child), Box<dyn Error>> {
+	start_server(StartServerArguments {
+		vars: Some(HashMap::from([(
+			"SURREAL_EXPERIMENTAL_GRAPHQL".to_string(),
+			"true".to_string(),
+		)])),
+		..Default::default()
+	})
+	.await
+}
+
 pub async fn start_server_gql_without_auth() -> Result<(String, Child), Box<dyn Error>> {
 	start_server(StartServerArguments {
 		auth: false,

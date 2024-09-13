@@ -95,6 +95,14 @@ impl SyntaxError {
 		self
 	}
 
+	pub fn with_cause<T: Display>(mut self, t: T) -> Self {
+		self.diagnostic = Box::new(Diagnostic {
+			kind: DiagnosticKind::Cause(t.to_string()),
+			next: Some(self.diagnostic),
+		});
+		self
+	}
+
 	pub fn render_on(&self, source: &str) -> RenderedError {
 		let mut res = RenderedError {
 			errors: Vec::new(),

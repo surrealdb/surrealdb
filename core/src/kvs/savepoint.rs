@@ -26,6 +26,10 @@ impl SavedValue {
 			last_operation: op,
 		}
 	}
+
+	pub(super) fn get_val(&self) -> Option<&Val> {
+		self.saved_val.as_ref()
+	}
 }
 
 pub(super) enum SavePrepare {
