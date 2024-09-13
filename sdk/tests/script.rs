@@ -1,7 +1,6 @@
 #![cfg(feature = "scripting")]
 
 mod parse;
-use geo::Extremes;
 use parse::Parse;
 mod helpers;
 use helpers::new_ds;

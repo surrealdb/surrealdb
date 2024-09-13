@@ -79,6 +79,7 @@ impl Parser<'_> {
 			t!("RETURN")
 			| t!("SELECT")
 			| t!("CREATE")
+			| t!("INSERT")
 			| t!("UPSERT")
 			| t!("UPDATE")
 			| t!("DELETE")
@@ -499,6 +500,11 @@ impl Parser<'_> {
 				let stmt = ctx.run(|ctx| self.parse_create_stmt(ctx)).await?;
 				Subquery::Create(stmt)
 			}
+			t!("INSERT") => {
+				self.pop_peek();
+				let stmt = ctx.run(|ctx| self.parse_insert_stmt(ctx)).await?;
+				Subquery::Insert(stmt)
+			}
 			t!("UPSERT") => {
 				self.pop_peek();
 				let stmt = ctx.run(|ctx| self.parse_upsert_stmt(ctx)).await?;
@@ -608,6 +614,11 @@ impl Parser<'_> {
 				let stmt = ctx.run(|ctx| self.parse_create_stmt(ctx)).await?;
 				Subquery::Create(stmt)
 			}
+			t!("INSERT") => {
+				self.pop_peek();
+				let stmt = ctx.run(|ctx| self.parse_insert_stmt(ctx)).await?;
+				Subquery::Insert(stmt)
+			}
 			t!("UPSERT") => {
 				self.pop_peek();
 				let stmt = ctx.run(|ctx| self.parse_upsert_stmt(ctx)).await?;
@@ -665,25 +676,6 @@ impl Parser<'_> {
 			self.expect_closing_delimiter(t!(")"), start)?;
 		}
 		Ok(res)
-	}
-
-	fn starts_disallowed_subquery_statement(kind: TokenKind) -> bool {
-		matches!(
-			kind,
-			t!("ANALYZE")
-				| t!("BEGIN")
-				| t!("BREAK")
-				| t!("CANCEL")
-				| t!("COMMIT")
-				| t!("CONTINUE")
-				| t!("FOR") | t!("INFO")
-				| t!("KILL") | t!("LIVE")
-				| t!("OPTION")
-				| t!("LET") | t!("SHOW")
-				| t!("SLEEP")
-				| t!("THROW")
-				| t!("USE")
-		)
 	}
 
 	/// Parses a strand with legacy rules, parsing to a record id, datetime or uuid if the string
@@ -772,6 +764,13 @@ mod tests {
 		let sql = "(REMOVE EVENT foo_event ON foo)";
 		let out = Value::parse(sql);
 		assert_eq!("(REMOVE EVENT foo_event ON foo)", format!("{}", out))
+	}
+
+	#[test]
+	fn subquery_insert_statment() {
+		let sql = "(INSERT INTO test [])";
+		let out = Value::parse(sql);
+		assert_eq!("(INSERT INTO test [])", format!("{}", out))
 	}
 
 	#[test]
