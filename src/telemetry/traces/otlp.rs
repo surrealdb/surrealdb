@@ -1,11 +1,6 @@
 use opentelemetry::trace::TraceError;
-// use opentelemetry::{
-// 	trace::{Span, SpanBuilder, Tracer as _, TracerProvider as _},
-// 	Context,
-// };
 use opentelemetry_otlp::SpanExporterBuilder;
 use opentelemetry_sdk::trace::{Config, TracerProvider};
-// use tracing_subscriber::prelude::*;
 
 use crate::telemetry::OTEL_DEFAULT_RESOURCE;
 

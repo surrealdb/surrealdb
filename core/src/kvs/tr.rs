@@ -30,6 +30,8 @@ use std::fmt::Debug;
 use std::ops::Range;
 use std::sync::Arc;
 
+const TARGET: &str = "surrealdb::core::kvs::tr";
+
 /// Used to determine the behaviour when a transaction is not closed correctly
 #[derive(Debug, Default)]
 pub enum Check {
@@ -589,6 +591,7 @@ impl Transactor {
 		let vst = self.get_timestamp(key).await?;
 		#[cfg(debug_assertions)]
 		trace!(
+			target: TARGET,
 			"Setting timestamp {} for versionstamp {:?} in ns: {}, db: {}",
 			ts,
 			crate::vs::conv::versionstamp_to_u64(&vst),
@@ -606,6 +609,7 @@ impl Transactor {
 		if let Some((k, _)) = latest_ts_pair {
 			#[cfg(debug_assertions)]
 			trace!(
+				target: TARGET,
 				"There already was a greater committed timestamp {} in ns: {}, db: {} found: {}",
 				ts,
 				ns,
