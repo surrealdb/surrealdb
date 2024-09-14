@@ -84,7 +84,7 @@ Targets must be in the form of <host>[:<port>], <ipv4|ipv6>[/<mask>]. For exampl
 	//
 	// Deny
 	//
-	#[arg(help = "Deny all capabilities except for capabilities that are specifically allowed")]
+	#[arg(help = "Deny all capabilities except for those that are specifically allowed")]
 	#[arg(env = "SURREAL_CAPS_DENY_ALL", short = 'D', long, conflicts_with = "allow_all")]
 	deny_all: bool,
 
@@ -99,7 +99,7 @@ Targets must be in the form of <host>[:<port>], <ipv4|ipv6>[/<mask>]. For exampl
 
 	#[arg(
 		help = "Deny execution of all functions except for functions that are specifically allowed. Alternatively, you can provide a comma-separated list of function names to deny",
-		long_help = r#"Deny execution of functions except for functions that are specifically allowed. Alternatively, you can provide a comma-separated list of function names to deny.
+		long_help = r#"Deny execution of all functions except for functions that are specifically allowed. Alternatively, you can provide a comma-separated list of function names to deny.
 Specifically allowed functions and function families prevail over a general denial of function execution.
 Function names must be in the form <family>[::<name>]. For example:
  - 'http' or 'http::*' -> Include all functions in the 'http' family
@@ -113,8 +113,8 @@ Function names must be in the form <family>[::<name>]. For example:
 	deny_funcs: Option<Targets<FuncTarget>>,
 
 	#[arg(
-		help = "Deny all outbound network access except for networks that are specifically allowed. Alternatively, you can provide a comma-separated list of network targets to deny",
-		long_help = r#"Deny all outbound network access except for networks that are specifically allowed. Alternatively, you can provide a comma-separated list of network targets to deny.
+		help = "Deny all outbound network access except for network targets that are specifically allowed. Alternatively, you can provide a comma-separated list of network targets to deny",
+		long_help = r#"Deny all outbound network access except for network targets that are specifically allowed. Alternatively, you can provide a comma-separated list of network targets to deny.
 Specifically allowed network targets prevail over a general denial of network access.
 Targets must be in the form of <host>[:<port>], <ipv4|ipv6>[/<mask>]. For example:
  - 'surrealdb.com', '127.0.0.1' or 'fd00::1' -> Match outbound connections to these hosts on any port
