@@ -163,6 +163,7 @@ pub(crate) async fn run_router(
 						query_id: notification.id.0,
 						action: Action::from_core(notification.action),
 						data: notification.result,
+						session: notification.session,
 					};
 
 					if sender.send(notification).await.is_err() {

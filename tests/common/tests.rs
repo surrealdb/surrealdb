@@ -1812,7 +1812,8 @@ async fn session_id_defined_generic() {
 	let (addr, mut server) = common::start_server_with_defaults().await.unwrap();
 	// We specify a request identifier via a generic header
 	let mut headers = HeaderMap::new();
-	headers.insert("x-request-id", HeaderValue::from_static("00000000-0000-0000-0000-000000000000"));
+	headers
+		.insert("x-request-id", HeaderValue::from_static("00000000-0000-0000-0000-000000000000"));
 	// Connect to WebSocket
 	let mut socket = Socket::connect_with_headers(&addr, SERVER, FORMAT, headers).await.unwrap();
 	// Authenticate the connection
@@ -1835,7 +1836,8 @@ async fn session_id_defined_both() {
 	// We specify a request identifier via both headers
 	let mut headers = HeaderMap::new();
 	headers.insert("surreal-id", HeaderValue::from_static("00000000-0000-0000-0000-000000000000"));
-	headers.insert("x-request-id", HeaderValue::from_static("aaaaaaaa-aaaa-0000-0000-000000000000"));
+	headers
+		.insert("x-request-id", HeaderValue::from_static("aaaaaaaa-aaaa-0000-0000-000000000000"));
 	// Connect to WebSocket
 	let mut socket = Socket::connect_with_headers(&addr, SERVER, FORMAT, headers).await.unwrap();
 	// Authenticate the connection
@@ -1859,7 +1861,7 @@ async fn session_id_invalid() {
 	// We specify a request identifier via a specific SurrealDB header
 	let mut headers = HeaderMap::new();
 	headers.insert("surreal-id", HeaderValue::from_static("123")); // Not a valid UUIDv4
-	// Connect to WebSocket
+															   // Connect to WebSocket
 	let socket = Socket::connect_with_headers(&addr, SERVER, FORMAT, headers).await;
 	assert!(socket.is_err(), "unexpected success using connecting with invalid id header");
 

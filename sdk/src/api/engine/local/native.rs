@@ -161,7 +161,8 @@ pub(crate) async fn run_router(
 				let notification = Notification{
 					query_id: *notification.id,
 					action: Action::from_core(notification.action),
-					data: notification.result
+					data: notification.result,
+					session: notification.session
 				};
 
 				let id = notification.query_id;

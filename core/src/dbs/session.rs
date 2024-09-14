@@ -17,7 +17,7 @@ pub struct Session {
 	pub ip: Option<String>,
 	/// The current connection origin
 	pub or: Option<String>,
-	/// The current connection ID
+	/// The current user-defined connection ID
 	pub id: Option<String>,
 	/// The currently selected namespace
 	pub ns: Option<String>,
@@ -55,6 +55,12 @@ impl Session {
 	// Set the realtime functionality of the session
 	pub fn with_rt(mut self, rt: bool) -> Session {
 		self.rt = rt;
+		self
+	}
+
+	/// Set the current connection ID
+	pub fn with_id(mut self, id: &str) -> Session {
+		self.id = Some(id.to_owned());
 		self
 	}
 

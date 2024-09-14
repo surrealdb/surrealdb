@@ -6,10 +6,10 @@ use crate::dbs::Statement;
 use crate::doc::CursorDoc;
 use crate::doc::Document;
 use crate::err::Error;
-use crate::sql::paths::AC;
 use crate::sql::paths::META;
 use crate::sql::paths::RD;
 use crate::sql::paths::TK;
+use crate::sql::paths::{AC, ID};
 use crate::sql::permission::Permission;
 use crate::sql::Value;
 use reblessive::tree::Stk;
@@ -87,6 +87,11 @@ impl Document {
 				lqctx.add_value("value", current.clone());
 				lqctx.add_value("after", current);
 				lqctx.add_value("before", initial);
+				// We include session id into notifications
+				let session_id = match sess.pick(ID.as_ref()) {
+					Value::Strand(v) => Some(v.to_raw()),
+					_ => None,
+				};
 				// We need to create a new options which we will
 				// use for processing this LIVE query statement.
 				// This ensures that we are using the auth data
@@ -116,10 +121,10 @@ impl Document {
 				if stm.is_delete() {
 					// Send a DELETE notification
 					if opt.id()? == lv.node.0 {
-						chn.send(Notification {
-							id: lv.id,
-							action: Action::Delete,
-							result: {
+						chn.send(Notification::new(
+							lv.id,
+							Action::Delete,
+							{
 								// Ensure futures are run
 								let lqopt: &Options = &lqopt.new_with_futures(true);
 								// Output the full document before any changes were applied
@@ -130,7 +135,8 @@ impl Document {
 								// Output result
 								value
 							},
-						})
+							session_id,
+						))
 						.await?;
 					} else {
 						// TODO: Send to message broker
@@ -138,11 +144,12 @@ impl Document {
 				} else if self.is_new() {
 					// Send a CREATE notification
 					if opt.id()? == lv.node.0 {
-						chn.send(Notification {
-							id: lv.id,
-							action: Action::Create,
-							result: self.pluck(stk, &lqctx, &lqopt, &lq).await?,
-						})
+						chn.send(Notification::new(
+							lv.id,
+							Action::Create,
+							self.pluck(stk, &lqctx, &lqopt, &lq).await?,
+							session_id,
+						))
 						.await?;
 					} else {
 						// TODO: Send to message broker
@@ -150,11 +157,12 @@ impl Document {
 				} else {
 					// Send a UPDATE notification
 					if opt.id()? == lv.node.0 {
-						chn.send(Notification {
-							id: lv.id,
-							action: Action::Update,
-							result: self.pluck(stk, &lqctx, &lqopt, &lq).await?,
-						})
+						chn.send(Notification::new(
+							lv.id,
+							Action::Update,
+							self.pluck(stk, &lqctx, &lqopt, &lq).await?,
+							session_id,
+						))
 						.await?;
 					} else {
 						// TODO: Send to message broker
