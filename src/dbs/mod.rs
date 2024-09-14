@@ -45,11 +45,11 @@ struct DbsCapabilities {
 
 	#[cfg(feature = "scripting")]
 	#[arg(help = "Allow execution of embedded scripting functions")]
-	#[arg(env = "SURREAL_CAPS_ALLOW_SCRIPT", long, conflicts_with = "allow_all")]
+	#[arg(env = "SURREAL_CAPS_ALLOW_SCRIPT", long, conflicts_with_all = ["allow_all", "deny_scripting"])]
 	allow_scripting: bool,
 
 	#[arg(help = "Allow guest users to execute queries")]
-	#[arg(env = "SURREAL_CAPS_ALLOW_GUESTS", long, conflicts_with = "allow_all")]
+	#[arg(env = "SURREAL_CAPS_ALLOW_GUESTS", long, conflicts_with_all = ["allow_all", "deny_guests"])]
 	allow_guests: bool,
 
 	#[arg(
@@ -90,11 +90,11 @@ Targets must be in the form of <host>[:<port>], <ipv4|ipv6>[/<mask>]. For exampl
 
 	#[cfg(feature = "scripting")]
 	#[arg(help = "Deny execution of embedded scripting functions")]
-	#[arg(env = "SURREAL_CAPS_DENY_SCRIPT", long, conflicts_with = "deny_all")]
+	#[arg(env = "SURREAL_CAPS_DENY_SCRIPT", long, conflicts_with_all = ["deny_all", "allow_scripting"])]
 	deny_scripting: bool,
 
 	#[arg(help = "Deny guest users to execute queries")]
-	#[arg(env = "SURREAL_CAPS_DENY_GUESTS", long, conflicts_with = "deny_all")]
+	#[arg(env = "SURREAL_CAPS_DENY_GUESTS", long, conflicts_with_all = ["deny_all", "allow_guests"])]
 	deny_guests: bool,
 
 	#[arg(
@@ -133,10 +133,8 @@ impl DbsCapabilities {
 	#[cfg(feature = "scripting")]
 	fn get_scripting(&self) -> bool {
 		// Even if there was a global deny, we allow if there is a specific allow for scripting
-		// If there is both an allow and a deny for scripting, we deny scripting
-		// If there is both a global allow and deny, we deny scripting
-		(self.allow_scripting && !self.deny_scripting)
-			|| (self.allow_all && !self.deny_all && !self.deny_scripting)
+		// Even if there is a global allow, we deny if there is a specific deny for scripting
+		self.allow_scripting || (self.allow_all && !self.deny_scripting)
 	}
 
 	#[cfg(not(feature = "scripting"))]
@@ -146,10 +144,8 @@ impl DbsCapabilities {
 
 	fn get_allow_guests(&self) -> bool {
 		// Even if there was a global deny, we allow if there is a specific allow for guests
-		// If there is both an allow and a deny for guests, we deny guests
-		// If there is both a global allow and deny, we deny guests
-		(self.allow_guests && !self.deny_guests)
-			|| (self.allow_all && !self.deny_all && !self.deny_guests)
+		// Even if there is a global allow, we deny if there is a specific deny for guests
+		self.allow_guests || (self.allow_all && !self.deny_guests)
 	}
 
 	fn get_allow_funcs(&self) -> Targets<FuncTarget> {
@@ -216,7 +212,7 @@ impl DbsCapabilities {
 		// Allowed functions already consider a global deny and a general deny for functions
 		// On top of what is explicitly allowed, we deny what is specifically denied
 		match &self.deny_funcs {
-			Some(Targets::Some(_)) => self.deny_funcs.clone().unwrap_or(Targets::None),
+			Some(Targets::Some(_)) => self.deny_funcs.clone().unwrap(), // We already checked for Some
 			Some(_) => Targets::None,
 			None => Targets::None,
 		}
@@ -226,7 +222,7 @@ impl DbsCapabilities {
 		// Allowed networks already consider a global deny and a general deny for networks
 		// On top of what is explicitly allowed, we deny what is specifically denied
 		match &self.deny_net {
-			Some(Targets::Some(_)) => self.deny_net.clone().unwrap_or(Targets::None),
+			Some(Targets::Some(_)) => self.deny_net.clone().unwrap(), // We already checked for Some
 			Some(_) => Targets::None,
 			None => Targets::None,
 		}
