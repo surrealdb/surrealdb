@@ -156,17 +156,17 @@ impl DbsCapabilities {
 		// If there was a global deny, we allow if there is a general allow or some specific allows for functions
 		if self.deny_all {
 			match &self.allow_funcs {
-				Some(Targets::Some(_)) => return self.allow_funcs.clone().unwrap_or(Targets::None),
+				Some(Targets::Some(_)) => return self.allow_funcs.clone().unwrap(), // We already checked for Some
 				Some(Targets::All) => return Targets::All,
 				Some(_) => return Targets::None,
 				None => return Targets::None,
 			}
 		}
 
-		// If there was a general allow for functions, we allow if there are specific allows for functions
+		// If there was a general deny for functions, we allow if there are specific allows for functions
 		if let Some(Targets::All) = self.deny_funcs {
 			match &self.allow_funcs {
-				Some(Targets::Some(_)) => return self.allow_funcs.clone().unwrap_or(Targets::None),
+				Some(Targets::Some(_)) => return self.allow_funcs.clone().unwrap(), // We already checked for Some
 				Some(_) => return Targets::None,
 				None => return Targets::None,
 			}
@@ -177,8 +177,8 @@ impl DbsCapabilities {
 			return Targets::All;
 		}
 
-		// If there are no high level denies and no global allow, we allow the provided functions
-		// If nothing was provided and there is no global allow, we allow functions by default (Targets::All)
+		// If there are no high level, we allow the provided functions
+		// If nothing was provided, we allow functions by default (Targets::All)
 		self.allow_funcs.clone().unwrap_or(Targets::All) // Functions are enabled by default for the server
 	}
 
@@ -186,17 +186,17 @@ impl DbsCapabilities {
 		// If there was a global deny, we allow if there is a general allow or some specific allows for networks
 		if self.deny_all {
 			match &self.allow_net {
-				Some(Targets::Some(_)) => return self.allow_net.clone().unwrap_or(Targets::None),
+				Some(Targets::Some(_)) => return self.allow_net.clone().unwrap(), // We already checked for Some
 				Some(Targets::All) => return Targets::All,
 				Some(_) => return Targets::None,
 				None => return Targets::None,
 			}
 		}
 
-		// If there was a general allow for networks, we allow if there are specific allows for networks
+		// If there was a general deny for networks, we allow if there are specific allows for networks
 		if let Some(Targets::All) = self.deny_net {
 			match &self.allow_net {
-				Some(Targets::Some(_)) => return self.allow_net.clone().unwrap_or(Targets::None),
+				Some(Targets::Some(_)) => return self.allow_net.clone().unwrap(), // We already checked for Some
 				Some(_) => return Targets::None,
 				None => return Targets::None,
 			}
@@ -207,14 +207,14 @@ impl DbsCapabilities {
 			return Targets::All;
 		}
 
-		// If there are no high level denies and no global allow, we allow the provided networks
-		// If nothing was provided and there is no global allow, then don't allow anything (Targets::None)
+		// If there are no high level denies, we allow the provided networks
+		// If nothing was provided, we do not allow network by default (Targets::None)
 		self.allow_net.clone().unwrap_or(Targets::None)
 	}
 
 	fn get_deny_funcs(&self) -> Targets<FuncTarget> {
 		// Allowed functions already consider a global deny and a general deny for functions
-		// On top of what is allowed, we only deny what is specifically denied
+		// On top of what is explicitly allowed, we deny what is specifically denied
 		match &self.deny_funcs {
 			Some(Targets::Some(_)) => self.deny_funcs.clone().unwrap_or(Targets::None),
 			Some(_) => Targets::None,
@@ -224,7 +224,7 @@ impl DbsCapabilities {
 
 	fn get_deny_net(&self) -> Targets<NetTarget> {
 		// Allowed networks already consider a global deny and a general deny for networks
-		// On top of what is allowed, we only deny what is specifically denied
+		// On top of what is explicitly allowed, we deny what is specifically denied
 		match &self.deny_net {
 			Some(Targets::Some(_)) => self.deny_net.clone().unwrap_or(Targets::None),
 			Some(_) => Targets::None,
