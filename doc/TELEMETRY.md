@@ -8,7 +8,7 @@ For local development, you can start the observability stack defined in `dev/doc
 
 ```
 $ docker-compose -f dev/docker/compose.yaml up -d
-$ SURREAL_TRACING_TRACER=otlp OTEL_EXPORTER_OTLP_ENDPOINT="http://localhost:4317" surreal start
+$ SURREAL_TELEMETRY_PROVIDER=otlp OTEL_EXPORTER_OTLP_ENDPOINT="http://localhost:4317" surreal start
 ```
 
 Now you can use the SurrealDB server and see the telemetry data opening this URL in the browser: http://localhost:3000

@@ -41,13 +41,11 @@ pub static HTTP_SERVER_RESPONSE_SIZE: LazyLock<Histogram<u64>> = LazyLock::new(|
 
 fn observe_active_request(value: i64, tracker: &HttpCallMetricTracker) -> Result<(), MetricsError> {
 	let attrs = tracker.active_req_attrs();
-
 	HTTP_SERVER_ACTIVE_REQUESTS.add(value, &attrs);
 	Ok(())
 }
 
 fn record_request_duration(tracker: &HttpCallMetricTracker) {
-	// Record the duration of the request.
 	HTTP_SERVER_DURATION
 		.record(tracker.duration().as_millis() as u64, &tracker.request_duration_attrs());
 }

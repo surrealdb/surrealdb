@@ -919,7 +919,7 @@ fn gql_to_sql_kind(val: &GqlValue, kind: Kind) -> Result<SqlValue, GqlError> {
 			_ => Err(type_error(kind, val)),
 		},
 		Kind::Datetime => match val {
-			GqlValue::String(s) => match syn::datetime_raw(s) {
+			GqlValue::String(s) => match syn::datetime(s) {
 				Ok(dt) => Ok(dt.into()),
 				Err(_) => Err(type_error(kind, val)),
 			},
