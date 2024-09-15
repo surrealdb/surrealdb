@@ -15,7 +15,7 @@ use crate::{
 };
 
 impl Parser<'_> {
-	pub async fn parse_alter_stmt(&mut self, ctx: &mut Stk) -> ParseResult<AlterStatement> {
+	pub(crate) async fn parse_alter_stmt(&mut self, ctx: &mut Stk) -> ParseResult<AlterStatement> {
 		let next = self.next();
 		match next.kind {
 			t!("TABLE") => self.parse_alter_table(ctx).await.map(AlterStatement::Table),
@@ -23,7 +23,10 @@ impl Parser<'_> {
 		}
 	}
 
-	pub async fn parse_alter_table(&mut self, ctx: &mut Stk) -> ParseResult<AlterTableStatement> {
+	pub(crate) async fn parse_alter_table(
+		&mut self,
+		ctx: &mut Stk,
+	) -> ParseResult<AlterTableStatement> {
 		let if_exists = if self.eat(t!("IF")) {
 			expected!(self, t!("EXISTS"));
 			true

@@ -3,10 +3,11 @@ use std::collections::BTreeMap;
 use reblessive::Stk;
 
 use crate::{
-	sql::{kind::Literal, Kind, Strand},
+	sql::{kind::Literal, Duration, Kind, Strand},
 	syn::{
+		lexer::compound,
 		parser::mac::expected,
-		token::{t, Keyword, Span, TokenKind},
+		token::{t, Glued, Keyword, Span, TokenKind},
 	},
 };
 
@@ -17,14 +18,14 @@ impl Parser<'_> {
 	///
 	/// # Parser State
 	/// expects the first `<` to already be eaten
-	pub async fn parse_kind(&mut self, ctx: &mut Stk, delim: Span) -> ParseResult<Kind> {
+	pub(super) async fn parse_kind(&mut self, ctx: &mut Stk, delim: Span) -> ParseResult<Kind> {
 		let kind = self.parse_inner_kind(ctx).await?;
 		self.expect_closing_delimiter(t!(">"), delim)?;
 		Ok(kind)
 	}
 
 	/// Parse an inner kind, a kind without enclosing `<` `>`.
-	pub async fn parse_inner_kind(&mut self, ctx: &mut Stk) -> ParseResult<Kind> {
+	pub(super) async fn parse_inner_kind(&mut self, ctx: &mut Stk) -> ParseResult<Kind> {
 		match self.parse_inner_single_kind(ctx).await? {
 			Kind::Any => Ok(Kind::Any),
 			Kind::Option(k) => Ok(Kind::Option(k)),
@@ -34,7 +35,9 @@ impl Parser<'_> {
 					while self.eat(t!("|")) {
 						kind.push(ctx.run(|ctx| self.parse_concrete_kind(ctx)).await?);
 					}
-					Ok(Kind::Either(kind))
+					let kind = Kind::Either(kind);
+					let kind = kind.to_discriminated().unwrap_or(kind);
+					Ok(kind)
 				} else {
 					Ok(first)
 				}
@@ -43,7 +46,7 @@ impl Parser<'_> {
 	}
 
 	/// Parse a single inner kind, a kind without enclosing `<` `>`.
-	pub async fn parse_inner_single_kind(&mut self, ctx: &mut Stk) -> ParseResult<Kind> {
+	pub(super) async fn parse_inner_single_kind(&mut self, ctx: &mut Stk) -> ParseResult<Kind> {
 		match self.peek_kind() {
 			t!("ANY") => {
 				self.pop_peek();
@@ -59,7 +62,9 @@ impl Parser<'_> {
 					while self.eat(t!("|")) {
 						kind.push(ctx.run(|ctx| self.parse_concrete_kind(ctx)).await?);
 					}
-					first = Kind::Either(kind);
+
+					let kind = Kind::Either(kind);
+					first = kind.to_discriminated().unwrap_or(kind);
 				}
 				self.expect_closing_delimiter(t!(">"), delim)?;
 				Ok(Kind::Option(Box::new(first)))
@@ -166,17 +171,22 @@ impl Parser<'_> {
 	async fn parse_literal_kind(&mut self, ctx: &mut Stk) -> ParseResult<Literal> {
 		let peek = self.peek();
 		match peek.kind {
-			t!("'") | t!("\"") | TokenKind::Strand => {
+			t!("'") | t!("\"") | TokenKind::Glued(Glued::Strand) => {
 				let s = self.next_token_value::<Strand>()?;
 				Ok(Literal::String(s))
 			}
-			t!("+") | t!("-") | TokenKind::Number(_) | TokenKind::Digits | TokenKind::Duration => {
-				let token = self.glue_numeric()?;
-				match token.kind {
-					TokenKind::Number(_) => self.next_token_value().map(Literal::Number),
-					TokenKind::Duration => self.next_token_value().map(Literal::Duration),
-					_ => unexpected!(self, token, "a value"),
-				}
+			t!("+") | t!("-") | TokenKind::Glued(Glued::Number) => {
+				self.next_token_value().map(Literal::Number)
+			}
+			TokenKind::Glued(Glued::Duration) => self.next_token_value().map(Literal::Duration),
+			TokenKind::Digits => {
+				self.pop_peek();
+				let compound = self.lexer.lex_compound(peek, compound::numeric)?;
+				let v = match compound.value {
+					compound::Numeric::Number(x) => Literal::Number(x),
+					compound::Numeric::Duration(x) => Literal::Duration(Duration(x)),
+				};
+				Ok(v)
 			}
 			t!("{") => {
 				self.pop_peek();
@@ -208,11 +218,9 @@ impl Parser<'_> {
 		matches!(
 			t,
 			t!("'")
-				| t!("\"") | TokenKind::Strand
-				| t!("+") | t!("-")
-				| TokenKind::Number(_)
+				| t!("\"") | t!("+")
+				| t!("-") | TokenKind::Glued(Glued::Duration | Glued::Strand | Glued::Number)
 				| TokenKind::Digits
-				| TokenKind::Duration
 				| t!("{") | t!("[")
 		)
 	}
@@ -482,5 +490,56 @@ mod tests {
 		let out = res.unwrap();
 		assert_eq!("set<float, 10>", format!("{}", out));
 		assert_eq!(out, Kind::Set(Box::new(Kind::Float), Some(10)));
+	}
+
+	#[test]
+	fn kind_discriminated_object() {
+		let sql = "{ status: 'ok', data: object } | { status: 'error', message: string }";
+		let res = kind(sql);
+		let out = res.unwrap();
+		assert_eq!(
+			"{ data: object, status: 'ok' } | { message: string, status: 'error' }",
+			format!("{}", out)
+		);
+		assert_eq!(
+			out,
+			Kind::Literal(Literal::DiscriminatedObject(
+				"status".to_string(),
+				vec![
+					map! {
+						"status".to_string() => Kind::Literal(Literal::String("ok".into())),
+						"data".to_string() => Kind::Object,
+					},
+					map! {
+						"status".to_string() => Kind::Literal(Literal::String("error".into())),
+						"message".to_string() => Kind::String,
+					},
+				]
+			))
+		);
+	}
+
+	#[test]
+	fn kind_union_literal_object() {
+		let sql = "{ status: 'ok', data: object } | { status: string, message: string }";
+		let res = kind(sql);
+		let out = res.unwrap();
+		assert_eq!(
+			"{ data: object, status: 'ok' } | { message: string, status: string }",
+			format!("{}", out)
+		);
+		assert_eq!(
+			out,
+			Kind::Either(vec![
+				Kind::Literal(Literal::Object(map! {
+					"status".to_string() => Kind::Literal(Literal::String("ok".into())),
+					"data".to_string() => Kind::Object,
+				})),
+				Kind::Literal(Literal::Object(map! {
+					"status".to_string() => Kind::String,
+					"message".to_string() => Kind::String,
+				})),
+			])
+		);
 	}
 }

@@ -207,5 +207,6 @@ license-file = ["LICENSE", "4"]
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = [
     'cfg(docker)',
+    'cfg(storage)',
     'cfg(surrealdb_unstable)',
 ] }

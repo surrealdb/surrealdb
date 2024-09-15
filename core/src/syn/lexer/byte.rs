@@ -4,12 +4,12 @@ use crate::syn::{
 		unicode::{byte, chars},
 		Lexer,
 	},
-	token::{t, DatetimeChars, Token, TokenKind},
+	token::{t, Token, TokenKind},
 };
 
 impl<'a> Lexer<'a> {
 	/// Eats a single line comment.
-	pub fn eat_single_line_comment(&mut self) {
+	pub(super) fn eat_single_line_comment(&mut self) {
 		loop {
 			let Some(byte) = self.reader.next() else {
 				break;
@@ -45,7 +45,7 @@ impl<'a> Lexer<'a> {
 	}
 
 	/// Eats a multi line comment and returns an error if `*/` would be missing.
-	pub fn eat_multi_line_comment(&mut self) -> Result<(), SyntaxError> {
+	pub(super) fn eat_multi_line_comment(&mut self) -> Result<(), SyntaxError> {
 		let start_span = self.current_span();
 		loop {
 			let Some(byte) = self.reader.next() else {
@@ -64,7 +64,7 @@ impl<'a> Lexer<'a> {
 	}
 
 	/// Eat whitespace like spaces tables and new-lines.
-	pub fn eat_whitespace(&mut self) {
+	pub(super) fn eat_whitespace(&mut self) {
 		loop {
 			let Some(byte) = self.reader.peek() else {
 				return;
@@ -100,8 +100,17 @@ impl<'a> Lexer<'a> {
 		}
 	}
 
+	/// Lex digits tokens
+	pub(super) fn lex_digits(&mut self) -> Token {
+		while let Some(b'0'..=b'9' | b'_') = self.reader.peek() {
+			self.reader.next();
+		}
+
+		self.finish_token(TokenKind::Digits)
+	}
+
 	/// Lex the next token, starting from the given byte.
-	pub fn lex_ascii(&mut self, byte: u8) -> Token {
+	pub(super) fn lex_ascii(&mut self, byte: u8) -> Token {
 		let kind = match byte {
 			b'{' => t!("{"),
 			b'}' => t!("}"),
@@ -189,16 +198,6 @@ impl<'a> Lexer<'a> {
 				Some(b'|') => {
 					self.reader.next();
 					t!("<|")
-				}
-				Some(b'-') => {
-					self.reader.next();
-					match self.reader.peek() {
-						Some(b'>') => {
-							self.reader.next();
-							t!("<->")
-						}
-						_ => t!("<-"),
-					}
 				}
 				_ => t!("<"),
 			},
@@ -328,73 +327,8 @@ impl<'a> Lexer<'a> {
 					self.reader.next();
 					t!("d'")
 				}
-				Some(b'e') => {
-					self.reader.next();
-
-					let Some(b'c') = self.reader.peek() else {
-						self.scratch.push('d');
-						return self.lex_ident_from_next_byte(b'e');
-					};
-
-					self.reader.next();
-
-					if self.reader.peek().map(|x| x.is_ascii_alphanumeric()).unwrap_or(false) {
-						self.scratch.push('d');
-						self.scratch.push('e');
-						return self.lex_ident_from_next_byte(b'c');
-					}
-
-					t!("dec")
-				}
-				Some(x) if !x.is_ascii_alphabetic() => {
-					t!("d")
-				}
-				None => {
-					t!("d")
-				}
 				_ => {
 					return self.lex_ident_from_next_byte(b'd');
-				}
-			},
-			b'f' => match self.reader.peek() {
-				Some(x) if !x.is_ascii_alphanumeric() => {
-					t!("f")
-				}
-				None => t!("f"),
-				_ => {
-					return self.lex_ident_from_next_byte(b'f');
-				}
-			},
-			b'n' => match self.reader.peek() {
-				Some(b's') => {
-					self.reader.next();
-					if self.reader.peek().map(|x| x.is_ascii_alphabetic()).unwrap_or(false) {
-						self.scratch.push('n');
-						return self.lex_ident_from_next_byte(b's');
-					}
-					t!("ns")
-				}
-				_ => {
-					return self.lex_ident_from_next_byte(b'n');
-				}
-			},
-			b'm' => match self.reader.peek() {
-				Some(b's') => {
-					self.reader.next();
-					if self.reader.peek().map(|x| x.is_ascii_alphabetic()).unwrap_or(false) {
-						self.scratch.push('m');
-						return self.lex_ident_from_next_byte(b's');
-					}
-					t!("ms")
-				}
-				Some(x) if !x.is_ascii_alphabetic() => {
-					t!("m")
-				}
-				None => {
-					t!("m")
-				}
-				_ => {
-					return self.lex_ident_from_next_byte(b'm');
 				}
 			},
 			b's' => match self.reader.peek() {
@@ -406,32 +340,10 @@ impl<'a> Lexer<'a> {
 					self.reader.next();
 					t!("'")
 				}
-				Some(x) if x.is_ascii_alphabetic() => {
+				_ => {
 					return self.lex_ident_from_next_byte(b's');
 				}
-				_ => t!("s"),
 			},
-			b'h' => {
-				if self.reader.peek().map(|x| x.is_ascii_alphabetic()).unwrap_or(false) {
-					return self.lex_ident_from_next_byte(b'h');
-				} else {
-					t!("h")
-				}
-			}
-			b'w' => {
-				if self.reader.peek().map(|x| x.is_ascii_alphabetic()).unwrap_or(false) {
-					return self.lex_ident_from_next_byte(b'w');
-				} else {
-					t!("w")
-				}
-			}
-			b'y' => {
-				if self.reader.peek().map(|x| x.is_ascii_alphabetic()).unwrap_or(false) {
-					return self.lex_ident_from_next_byte(b'y');
-				} else {
-					t!("y")
-				}
-			}
 			b'u' => match self.reader.peek() {
 				Some(b'"') => {
 					self.reader.next();
@@ -440,14 +352,6 @@ impl<'a> Lexer<'a> {
 				Some(b'\'') => {
 					self.reader.next();
 					t!("u'")
-				}
-				Some(b's') => {
-					self.reader.next();
-					if self.reader.peek().map(|x| x.is_ascii_alphabetic()).unwrap_or(false) {
-						self.scratch.push('u');
-						return self.lex_ident_from_next_byte(b's');
-					}
-					t!("us")
 				}
 				_ => {
 					return self.lex_ident_from_next_byte(b'u');
@@ -466,24 +370,6 @@ impl<'a> Lexer<'a> {
 					return self.lex_ident_from_next_byte(b'r');
 				}
 			},
-			b'Z' => match self.reader.peek() {
-				Some(x) if x.is_ascii_alphabetic() => {
-					return self.lex_ident_from_next_byte(b'Z');
-				}
-				_ => TokenKind::DatetimeChars(DatetimeChars::Z),
-			},
-			b'T' => match self.reader.peek() {
-				Some(x) if x.is_ascii_alphabetic() => {
-					return self.lex_ident_from_next_byte(b'T');
-				}
-				_ => TokenKind::DatetimeChars(DatetimeChars::T),
-			},
-			b'e' => {
-				return self.lex_exponent(b'e');
-			}
-			b'E' => {
-				return self.lex_exponent(b'E');
-			}
 			b'0'..=b'9' => return self.lex_digits(),
 			b'a'..=b'z' | b'A'..=b'Z' | b'_' => {
 				return self.lex_ident_from_next_byte(byte);

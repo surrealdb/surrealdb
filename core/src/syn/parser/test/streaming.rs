@@ -192,7 +192,7 @@ fn statements() -> Vec<Statement> {
 				(Ident("b".to_string()), Kind::Array(Box::new(Kind::Bool), Some(3))),
 			],
 			block: Block(vec![Entry::Output(OutputStatement {
-				what: Value::Idiom(Idiom(vec![Part::Field(Ident("a".to_string()))])),
+				what: Value::Table(Table("a".to_string())),
 				fetch: None,
 			})]),
 			comment: Some(Strand("test".to_string())),
@@ -440,34 +440,28 @@ fn statements() -> Vec<Statement> {
 		}),
 		Statement::Ifelse(IfelseStatement {
 			exprs: vec![
-				(
-					Value::Idiom(Idiom(vec![Part::Field(Ident("foo".to_owned()))])),
-					Value::Idiom(Idiom(vec![Part::Field(Ident("bar".to_owned()))])),
-				),
-				(
-					Value::Idiom(Idiom(vec![Part::Field(Ident("faz".to_owned()))])),
-					Value::Idiom(Idiom(vec![Part::Field(Ident("baz".to_owned()))])),
-				),
+				(Value::Table(Table("foo".to_owned())), Value::Table(Table("bar".to_owned()))),
+				(Value::Table(Table("faz".to_owned())), Value::Table(Table("baz".to_owned()))),
 			],
-			close: Some(Value::Idiom(Idiom(vec![Part::Field(Ident("baq".to_owned()))]))),
+			close: Some(Value::Table(Table("baq".to_owned()))),
 		}),
 		Statement::Ifelse(IfelseStatement {
 			exprs: vec![
 				(
-					Value::Idiom(Idiom(vec![Part::Field(Ident("foo".to_owned()))])),
-					Value::Block(Box::new(Block(vec![Entry::Value(Value::Idiom(Idiom(vec![
-						Part::Field(Ident("bar".to_owned())),
-					])))]))),
+					Value::Table(Table("foo".to_owned())),
+					Value::Block(Box::new(Block(vec![Entry::Value(Value::Table(Table(
+						"bar".to_owned(),
+					)))]))),
 				),
 				(
-					Value::Idiom(Idiom(vec![Part::Field(Ident("faz".to_owned()))])),
-					Value::Block(Box::new(Block(vec![Entry::Value(Value::Idiom(Idiom(vec![
-						Part::Field(Ident("baz".to_owned())),
-					])))]))),
+					Value::Table(Table("faz".to_owned())),
+					Value::Block(Box::new(Block(vec![Entry::Value(Value::Table(Table(
+						"baz".to_owned(),
+					)))]))),
 				),
 			],
-			close: Some(Value::Block(Box::new(Block(vec![Entry::Value(Value::Idiom(Idiom(
-				vec![Part::Field(Ident("baq".to_owned()))],
+			close: Some(Value::Block(Box::new(Block(vec![Entry::Value(Value::Table(Table(
+				"baq".to_owned(),
 			)))])))),
 		}),
 		Statement::Info(InfoStatement::Root(false)),
@@ -612,7 +606,7 @@ fn statements() -> Vec<Statement> {
 			id: Value::Uuid(Uuid(uuid::uuid!("e72bee20-f49b-11ec-b939-0242ac120002"))),
 		}),
 		Statement::Output(OutputStatement {
-			what: Value::Idiom(Idiom(vec![Part::Field(Ident("RETRUN".to_owned()))])),
+			what: Value::Table(Table("RETRUN".to_owned())),
 			fetch: Some(Fetchs(vec![Fetch(Value::Idiom(Idiom(vec![Part::Field(
 				Ident("RETURN".to_owned()).to_owned(),
 			)])))])),

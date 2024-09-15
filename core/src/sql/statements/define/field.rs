@@ -81,7 +81,7 @@ impl DefineFieldStatement {
 		.await?;
 
 		// find existing field definitions.
-		let fields = txn.all_tb_fields(ns, db, &self.what).await.ok();
+		let fields = txn.all_tb_fields(ns, db, &self.what, None).await.ok();
 
 		// Process possible recursive_definitions.
 		if let Some(mut cur_kind) = self.kind.as_ref().and_then(|x| x.inner_kind()) {

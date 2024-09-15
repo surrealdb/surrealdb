@@ -137,7 +137,7 @@ impl fmt::Display for Part {
 // ------------------------------
 
 pub trait Next<'a> {
-	fn next(&'a self) -> &[Part];
+	fn next(&'a self) -> &'a [Part];
 }
 
 impl<'a> Next<'a> for &'a [Part] {
@@ -152,7 +152,7 @@ impl<'a> Next<'a> for &'a [Part] {
 // ------------------------------
 
 pub trait NextMethod<'a> {
-	fn next_method(&'a self) -> &[Part];
+	fn next_method(&'a self) -> &'a [Part];
 }
 
 impl<'a> NextMethod<'a> for &'a [Part] {

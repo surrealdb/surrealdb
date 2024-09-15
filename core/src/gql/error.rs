@@ -13,6 +13,10 @@ pub enum GqlError {
 	SchemaError(String),
 	#[error("Error resolving request: {0}")]
 	ResolverError(String),
+	#[error("No Namespace specified")]
+	UnpecifiedNamespace,
+	#[error("No Database specified")]
+	UnpecifiedDatabase,
 	#[error("Internal Error: {0}")]
 	InternalError(String),
 	#[error("Error converting value: {val} to type: {target}")]

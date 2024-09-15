@@ -281,3 +281,73 @@ async fn strict_typing_none_null() -> Result<(), Error> {
 	//
 	Ok(())
 }
+
+#[tokio::test]
+async fn literal_typing() -> Result<(), Error> {
+	let sql = "
+		DEFINE TABLE test SCHEMAFULL;
+		DEFINE FIELD obj ON test TYPE {
+		    a: int,
+		    b: option<string>
+		};
+
+		CREATE ONLY test:1 SET obj = { a: 1 };
+		CREATE ONLY test:2 SET obj = { a: 2, b: 'foo' };
+		CREATE ONLY test:3 SET obj = { a: 3, b: 'bar', c: 'forbidden' };
+	";
+	let mut t = Test::new(sql).await?;
+	//
+	t.skip_ok(2)?;
+	t.expect_val(
+		"{
+			id: test:1,
+			obj: { a: 1 },
+		}",
+	)?;
+	t.expect_val(
+		"{
+			id: test:2,
+			obj: { a: 2, b: 'foo' },
+		}",
+	)?;
+	t.expect_error(
+		"Found { a: 3, b: 'bar', c: 'forbidden' } for field `obj`, with record `test:3`, but expected a { a: int, b: option<string> }",
+	)?;
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn strict_typing_optional_object() -> Result<(), Error> {
+	let sql = "
+        DEFINE TABLE test SCHEMAFULL;
+        DEFINE FIELD obj ON test TYPE option<object>;
+        DEFINE FIELD obj.a ON test TYPE string;
+
+        CREATE ONLY test:1;
+        CREATE ONLY test:2 SET obj = {};
+        CREATE ONLY test:3 SET obj = { a: 'abc' };
+	";
+	let mut t = Test::new(sql).await?;
+	//
+	t.skip_ok(3)?;
+	//
+	t.expect_val(
+		"{
+            id: test:1,
+        }",
+	)?;
+	//
+	t.expect_error("Found NONE for field `obj.a`, with record `test:2`, but expected a string")?;
+	//
+	t.expect_val(
+		"{
+            id: test:3,
+            obj: {
+                a: 'abc',
+            },
+        }",
+	)?;
+	//
+	Ok(())
+}

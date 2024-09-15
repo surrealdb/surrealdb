@@ -681,6 +681,8 @@ impl Datastore {
 			for db in dbs {
 				let db = db.name.as_str();
 				// TODO(SUR-341): This is incorrect, it's a [ns,db] to vs pair
+				// It's safe for now, as it is unused but either the signature must change
+				// to include {(ns, db): (ts, vs)} mapping, or we don't return it
 				vs = Some(tx.lock().await.set_timestamp_for_versionstamp(ts, ns, db).await?);
 			}
 		}
@@ -796,39 +798,19 @@ impl Datastore {
 		}
 		// Check if anonymous actors can execute queries when auth is enabled
 		// TODO(sgirones): Check this as part of the authorisation layer
-		if self.auth_enabled && sess.au.is_anon() && !self.capabilities.allows_guest_access() {
-			return Err(IamError::NotAllowed {
-				actor: "anonymous".to_string(),
-				action: "process".to_string(),
-				resource: "query".to_string(),
-			}
-			.into());
-		}
+		self.check_anon(sess).map_err(|_| IamError::NotAllowed {
+			actor: "anonymous".to_string(),
+			action: "process".to_string(),
+			resource: "query".to_string(),
+		})?;
+
 		// Create a new query options
-		let opt = Options::default()
-			.with_id(self.id)
-			.with_ns(sess.ns())
-			.with_db(sess.db())
-			.with_live(sess.live())
-			.with_auth(sess.au.clone())
-			.with_strict(self.strict)
-			.with_auth_enabled(self.auth_enabled);
+		let opt = self.setup_options(sess);
+
 		// Create a new query executor
 		let mut exe = Executor::new(self);
 		// Create a default context
-		let mut ctx = MutableContext::from_ds(
-			self.query_timeout,
-			self.capabilities.clone(),
-			self.index_stores.clone(),
-			#[cfg(not(target_arch = "wasm32"))]
-			self.index_builder.clone(),
-			#[cfg(storage)]
-			self.temporary_directory.clone(),
-		)?;
-		// Setup the notification channel
-		if let Some(channel) = &self.notification_channel {
-			ctx.add_notifications(Some(&channel.0));
-		}
+		let mut ctx = self.setup_ctx()?;
 		// Start an execution context
 		sess.context(&mut ctx);
 		// Store the query variables
@@ -868,25 +850,16 @@ impl Datastore {
 		}
 		// Check if anonymous actors can compute values when auth is enabled
 		// TODO(sgirones): Check this as part of the authorisation layer
-		if sess.au.is_anon() && self.auth_enabled && !self.capabilities.allows_guest_access() {
-			return Err(IamError::NotAllowed {
-				actor: "anonymous".to_string(),
-				action: "compute".to_string(),
-				resource: "value".to_string(),
-			}
-			.into());
-		}
+		self.check_anon(sess).map_err(|_| IamError::NotAllowed {
+			actor: "anonymous".to_string(),
+			action: "compute".to_string(),
+			resource: "value".to_string(),
+		})?;
+
 		// Create a new memory stack
 		let mut stack = TreeStack::new();
 		// Create a new query options
-		let opt = Options::default()
-			.with_id(self.id)
-			.with_ns(sess.ns())
-			.with_db(sess.db())
-			.with_live(sess.live())
-			.with_auth(sess.au.clone())
-			.with_strict(self.strict)
-			.with_auth_enabled(self.auth_enabled);
+		let opt = self.setup_options(sess);
 		// Create a default context
 		let mut ctx = MutableContext::default();
 		// Set context capabilities
@@ -958,14 +931,7 @@ impl Datastore {
 		// Create a new memory stack
 		let mut stack = TreeStack::new();
 		// Create a new query options
-		let opt = Options::default()
-			.with_id(self.id)
-			.with_ns(sess.ns())
-			.with_db(sess.db())
-			.with_live(sess.live())
-			.with_auth(sess.au.clone())
-			.with_strict(self.strict)
-			.with_auth_enabled(self.auth_enabled);
+		let opt = self.setup_options(sess);
 		// Create a default context
 		let mut ctx = MutableContext::default();
 		// Set context capabilities
@@ -1074,6 +1040,46 @@ impl Datastore {
 		}
 		// All ok
 		Ok(())
+	}
+
+	pub fn setup_options(&self, sess: &Session) -> Options {
+		Options::default()
+			.with_id(self.id)
+			.with_ns(sess.ns())
+			.with_db(sess.db())
+			.with_live(sess.live())
+			.with_auth(sess.au.clone())
+			.with_strict(self.strict)
+			.with_auth_enabled(self.auth_enabled)
+	}
+	pub fn setup_ctx(&self) -> Result<MutableContext, Error> {
+		let mut ctx = MutableContext::from_ds(
+			self.query_timeout,
+			self.capabilities.clone(),
+			self.index_stores.clone(),
+			#[cfg(not(target_arch = "wasm32"))]
+			self.index_builder.clone(),
+			#[cfg(storage)]
+			self.temporary_directory.clone(),
+		)?;
+		// Setup the notification channel
+		if let Some(channel) = &self.notification_channel {
+			ctx.add_notifications(Some(&channel.0));
+		}
+		Ok(ctx)
+	}
+
+	/// check for disallowed anonymous users
+	pub fn check_anon(&self, sess: &Session) -> Result<(), IamError> {
+		if self.auth_enabled && sess.au.is_anon() && !self.capabilities.allows_guest_access() {
+			Err(IamError::NotAllowed {
+				actor: "anonymous".to_string(),
+				action: String::new(),
+				resource: String::new(),
+			})
+		} else {
+			Ok(())
+		}
 	}
 }
 

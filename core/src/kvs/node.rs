@@ -137,7 +137,7 @@ impl Datastore {
 				let end = crate::key::node::lq::suffix(*id);
 				let mut next = Some(beg..end);
 				while let Some(rng) = next {
-					let res = catch!(txn, txn.batch(rng, *NORMAL_FETCH_SIZE, true).await);
+					let res = catch!(txn, txn.batch(rng, *NORMAL_FETCH_SIZE, true, None).await);
 					next = res.next;
 					for (k, v) in res.values.iter() {
 						// Decode the data for this live query
@@ -220,7 +220,7 @@ impl Datastore {
 				// Fetch all tables
 				let tbs = {
 					let txn = self.transaction(Read, Optimistic).await?;
-					catch!(txn, txn.all_tb(&ns.name, &db.name).await)
+					catch!(txn, txn.all_tb(&ns.name, &db.name, None).await)
 				};
 				// Loop over all tables
 				for tb in tbs.iter() {
@@ -232,7 +232,7 @@ impl Datastore {
 					let end = crate::key::table::lq::suffix(&ns.name, &db.name, &tb.name);
 					let mut next = Some(beg..end);
 					while let Some(rng) = next {
-						let res = catch!(txn, txn.batch(rng, *NORMAL_FETCH_SIZE, true).await);
+						let res = catch!(txn, txn.batch(rng, *NORMAL_FETCH_SIZE, true, None).await);
 						next = res.next;
 						for (k, v) in res.values.iter() {
 							// Decode the LIVE query statement

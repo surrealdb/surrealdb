@@ -136,14 +136,14 @@ impl<'a> TreeBuilder<'a> {
 
 	async fn eval_order(&mut self) -> Result<(), Error> {
 		if let Some(o) = self.first_order {
-			if !o.random {
+			if !o.random && o.direction {
 				if let Node::IndexedField(id, irf) = self.resolve_idiom(&o.order).await? {
 					if let Some(ix_ref) = irf.first().cloned() {
 						self.index_map.order_limit = Some(IndexOption::new(
 							ix_ref,
 							id,
 							IdiomPosition::None,
-							IndexOperator::Order(o.direction),
+							IndexOperator::Order,
 						));
 					}
 				}
@@ -594,7 +594,7 @@ struct SchemaCache {
 impl SchemaCache {
 	async fn new(opt: &Options, table: &Table, tx: &Transaction) -> Result<Self, Error> {
 		let indexes = tx.all_tb_indexes(opt.ns()?, opt.db()?, table).await?;
-		let fields = tx.all_tb_fields(opt.ns()?, opt.db()?, table).await?;
+		let fields = tx.all_tb_fields(opt.ns()?, opt.db()?, table, None).await?;
 		Ok(Self {
 			indexes,
 			fields,

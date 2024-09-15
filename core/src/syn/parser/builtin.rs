@@ -3,10 +3,7 @@ use crate::{
 	sql::{Constant, Function, Value},
 	syn::{
 		error::MessageKind,
-		parser::{
-			mac::{expected, unexpected},
-			SyntaxError,
-		},
+		parser::{mac::expected, unexpected, SyntaxError},
 		token::{t, Span},
 	},
 };
@@ -465,12 +462,12 @@ pub(crate) static PATHS: phf::Map<UniCase<&'static str>, PathKind> = phf_map! {
 
 impl Parser<'_> {
 	/// Parse a builtin path.
-	pub async fn parse_builtin(&mut self, stk: &mut Stk, start: Span) -> ParseResult<Value> {
+	pub(super) async fn parse_builtin(&mut self, stk: &mut Stk, start: Span) -> ParseResult<Value> {
 		let mut last_span = start;
 		while self.eat(t!("::")) {
-			let t = self.glue_ident(false)?;
-			if !Self::tokenkind_can_start_ident(t.kind) {
-				unexpected!(self, t, "an identifier")
+			let peek = self.peek();
+			if !Self::kind_is_identifier(peek.kind) {
+				unexpected!(self, peek, "an identifier")
 			}
 			self.pop_peek();
 			last_span = self.last_span();
@@ -519,7 +516,7 @@ impl Parser<'_> {
 	}
 
 	/// Parse a call to a builtin function.
-	pub async fn parse_builtin_function(
+	pub(super) async fn parse_builtin_function(
 		&mut self,
 		stk: &mut Stk,
 		name: String,
@@ -531,7 +528,7 @@ impl Parser<'_> {
 				break;
 			}
 
-			let arg = stk.run(|ctx| self.parse_value_field(ctx)).await?;
+			let arg = stk.run(|ctx| self.parse_value_inherit(ctx)).await?;
 			args.push(arg);
 
 			if !self.eat(t!(",")) {
