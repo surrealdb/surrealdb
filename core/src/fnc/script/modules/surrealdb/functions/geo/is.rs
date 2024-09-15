@@ -7,5 +7,5 @@ pub struct Package;
 impl_module_def!(
 	Package,
 	"geo::is",
-	"valid" => run,
+	"valid" => run
 );
