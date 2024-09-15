@@ -31,10 +31,10 @@ impl Display for Action {
 pub struct Notification {
 	/// The id of the LIVE query to which this notification belongs
 	pub id: Uuid,
-	/// The id of the document to which this notification has been made
-	pub recid: Value,
 	/// The CREATE / UPDATE / DELETE action which caused this notification
 	pub action: Action,
+	/// The id of the document to which this notification has been made
+	pub record: Value,
 	/// The resulting notification content, usually the altered record content
 	pub result: Value,
 }
@@ -44,7 +44,7 @@ impl Display for Notification {
 		let obj: Object = map! {
 			"id".to_string() => self.id.to_string().into(),
 			"action".to_string() => self.action.to_string().into(),
-			"recid".to_string() => self.recid.clone(),
+			"record".to_string() => self.record.clone(),
 			"result".to_string() => self.result.clone(),
 		}
 		.into();
@@ -54,10 +54,11 @@ impl Display for Notification {
 
 impl Notification {
 	/// Construct a new notification
-	pub const fn new(id: Uuid, action: Action, result: Value) -> Self {
+	pub const fn new(id: Uuid, action: Action, record: Value, result: Value) -> Self {
 		Self {
 			id,
 			action,
+			record,
 			result,
 		}
 	}
@@ -66,6 +67,6 @@ impl Notification {
 #[cfg(test)]
 impl FuzzyEq for Notification {
 	fn fuzzy_eq(&self, other: &Self) -> bool {
-		self.action == other.action && self.result == other.result
+		self.action == other.action && self.record == other.record && self.result == other.result
 	}
 }
