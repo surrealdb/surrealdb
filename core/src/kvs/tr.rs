@@ -7,7 +7,6 @@ use crate::dbs::node::Timestamp;
 use crate::doc::CursorValue;
 use crate::err::Error;
 use crate::idg::u32::U32;
-#[cfg(debug_assertions)]
 use crate::key::debug::Sprintable;
 use crate::kvs::batch::Batch;
 use crate::kvs::clock::SizedClock;
@@ -615,7 +614,6 @@ impl Transactor {
 		// on other concurrent transactions that can write to the ts_key or the keys after it.
 		let key = crate::key::database::vs::new(ns, db);
 		let vst = self.get_timestamp(key).await?;
-		#[cfg(debug_assertions)]
 		trace!(
 			target: TARGET,
 			"Setting timestamp {} for versionstamp {:?} in ns: {}, db: {}",
@@ -633,7 +631,6 @@ impl Transactor {
 		let ts_pairs: Vec<(Vec<u8>, Vec<u8>)> = self.getr(begin..end, None).await?;
 		let latest_ts_pair = ts_pairs.last();
 		if let Some((k, _)) = latest_ts_pair {
-			#[cfg(debug_assertions)]
 			trace!(
 				target: TARGET,
 				"There already was a greater committed timestamp {} in ns: {}, db: {} found: {}",
