@@ -64,7 +64,6 @@ pub fn start_tasks(opt: &EngineOptions, dbs: Arc<Datastore>) -> (Tasks, [oneshot
 // This function needs to be called before after the dbs::init and before the net::init functions.
 // It needs to be before net::init because the net::init function blocks until the web server stops.
 fn init(opt: &EngineOptions, dbs: Arc<Datastore>) -> (FutureTask, oneshot::Sender<()>) {
-	let _init = surrealdb_core::dbs::LoggingLifecycle::new("node agent initialisation".to_string());
 	let tick_interval = opt.tick_interval;
 
 	trace!("Ticker interval is {:?}", tick_interval);
@@ -77,7 +76,6 @@ fn init(opt: &EngineOptions, dbs: Arc<Datastore>) -> (FutureTask, oneshot::Sende
 	let (tx, mut rx) = oneshot::channel();
 
 	let _fut = spawn_future(async move {
-		let _lifecycle = surrealdb_core::dbs::LoggingLifecycle::new("heartbeat task".to_string());
 		let mut ticker = interval_ticker(tick_interval).await;
 
 		loop {
