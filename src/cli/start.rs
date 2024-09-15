@@ -8,13 +8,14 @@ use crate::dbs::StartCommandDbsOptions;
 use crate::env;
 use crate::err::Error;
 use crate::net::{self, client_ip::ClientIp};
-use crate::node;
 use clap::Args;
-use opentelemetry::Context as TelemetryContext;
 use std::net::SocketAddr;
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::time::Duration;
 use surrealdb::engine::any::IntoEndpoint;
+use surrealdb::engine::tasks::start_tasks;
+use surrealdb::options::EngineOptions;
 use tokio_util::sync::CancellationToken;
 
 #[derive(Args, Debug)]
@@ -38,7 +39,9 @@ pub struct StartCommandArguments {
 	#[arg(value_parser = super::validator::key_valid)]
 	#[arg(hide = true)] // Not currently in use
 	key: Option<String>,
-
+	//
+	// Tasks
+	//
 	#[arg(
 		help = "The interval at which to run node agent tick (including garbage collection)",
 		help_heading = "Database"
@@ -46,7 +49,6 @@ pub struct StartCommandArguments {
 	#[arg(env = "SURREAL_TICK_INTERVAL", long = "tick-interval", value_parser = super::validator::duration)]
 	#[arg(default_value = "10s")]
 	tick_interval: Duration,
-
 	//
 	// Authentication
 	//
@@ -74,14 +76,12 @@ pub struct StartCommandArguments {
 		requires = "username"
 	)]
 	password: Option<String>,
-
 	//
 	// Datastore connection
 	//
 	#[command(next_help_heading = "Datastore connection")]
 	#[command(flatten)]
 	kvs: Option<StartCommandRemoteTlsOptions>,
-
 	//
 	// HTTP Server
 	//
@@ -92,11 +92,14 @@ pub struct StartCommandArguments {
 	#[arg(env = "SURREAL_CLIENT_IP", long)]
 	#[arg(default_value = "socket", value_enum)]
 	client_ip: ClientIp,
-	#[arg(help = "The hostname or ip address to listen for connections on")]
+	#[arg(help = "The hostname or IP address to listen for connections on")]
 	#[arg(env = "SURREAL_BIND", short = 'b', long = "bind")]
-	#[arg(default_value = "0.0.0.0:8000")]
+	#[arg(default_value = "127.0.0.1:8000")]
 	listen_addresses: Vec<SocketAddr>,
-
+	#[arg(help = "Whether to suppress the server name and version headers")]
+	#[arg(env = "SURREAL_NO_IDENTIFICATION_HEADERS", long)]
+	#[arg(default_value_t = false)]
+	no_identification_headers: bool,
 	//
 	// Database options
 	//
@@ -142,18 +145,14 @@ pub async fn init(
 		log,
 		tick_interval,
 		no_banner,
+		no_identification_headers,
 		..
 	}: StartCommandArguments,
 ) -> Result<(), Error> {
 	// Initialize opentelemetry and logging
-	crate::telemetry::builder().with_filter(log).init();
-	// Start metrics subsystem
-	crate::telemetry::metrics::init(&TelemetryContext::current())
-		.expect("failed to initialize metrics");
-
-	// Check if a banner should be outputted
+	crate::telemetry::builder().with_filter(log).init()?;
+	// Check if we should output a banner
 	if !no_banner {
-		// Output SurrealDB logo
 		println!("{LOGO}");
 	}
 	// Clean the path
@@ -163,35 +162,44 @@ pub async fn init(
 	} else {
 		endpoint.path
 	};
-	// Setup the cli options
+	// Extract the certificate and key
+	let (crt, key) = if let Some(val) = web {
+		(val.web_crt, val.web_key)
+	} else {
+		(None, None)
+	};
+	// Setup the command-line options
 	let _ = config::CF.set(Config {
 		bind: listen_addresses.first().cloned().unwrap(),
 		client_ip,
 		path,
 		user,
 		pass,
-		tick_interval,
-		crt: web.as_ref().and_then(|x| x.web_crt.clone()),
-		key: web.as_ref().and_then(|x| x.web_key.clone()),
+		no_identification_headers,
+		engine: Some(EngineOptions::default().with_tick_interval(tick_interval)),
+		crt,
+		key,
 	});
 	// This is the cancellation token propagated down to
 	// all the async functions that needs to be stopped gracefully.
 	let ct = CancellationToken::new();
 	// Initiate environment
 	env::init().await?;
-	// Start the kvs server
-	dbs::init(dbs).await?;
+	// Start the datastore
+	let ds = Arc::new(dbs::init(dbs).await?);
 	// Start the node agent
-	#[cfg(feature = "has-storage")]
-	let nd = node::init(ct.clone());
+	let (tasks, task_chans) =
+		start_tasks(&config::CF.get().unwrap().engine.unwrap_or_default(), ds.clone());
 	// Start the web server
-	net::init(ct).await?;
-	// Wait for the node agent to stop
-	#[cfg(feature = "has-storage")]
-	if let Err(e) = nd.await {
-		error!("Node agent failed while running: {}", e);
-		return Err(Error::NodeAgent);
-	}
+	net::init(ds, ct.clone()).await?;
+	// Shutdown and stop closed tasks
+	task_chans.into_iter().for_each(|chan| {
+		if chan.send(()).is_err() {
+			error!("Failed to send shutdown signal to task");
+		}
+	});
+	ct.cancel();
+	tasks.resolve().await?;
 	// All ok
 	Ok(())
 }

@@ -2,13 +2,13 @@ use axum::async_trait;
 use axum::extract::ConnectInfo;
 use axum::extract::FromRef;
 use axum::extract::FromRequestParts;
+use axum::extract::Request;
 use axum::middleware::Next;
 use axum::response::Response;
 use axum::Extension;
 use axum::RequestPartsExt;
 use clap::ValueEnum;
 use http::request::Parts;
-use http::Request;
 use http::StatusCode;
 use std::net::SocketAddr;
 
@@ -27,9 +27,11 @@ pub enum ClientIp {
 	CfConnectingIp,
 	/// Fly.io client IP
 	#[clap(name = "Fly-Client-IP")]
+	#[allow(clippy::enum_variant_names)]
 	FlyClientIp,
 	/// Akamai, Cloudflare true client IP
 	#[clap(name = "True-Client-IP")]
+	#[allow(clippy::enum_variant_names)]
 	TrueClientIP,
 	/// Nginx real IP
 	#[clap(name = "X-Real-IP")]
@@ -67,6 +69,7 @@ impl ClientIp {
 	}
 }
 
+#[derive(Clone)]
 pub(super) struct ExtractClientIP(pub Option<String>);
 
 #[async_trait]
@@ -114,13 +117,10 @@ where
 	}
 }
 
-pub(super) async fn client_ip_middleware<B>(
-	request: Request<B>,
-	next: Next<B>,
-) -> Result<Response, StatusCode>
-where
-	B: Send,
-{
+pub(super) async fn client_ip_middleware(
+	request: Request,
+	next: Next,
+) -> Result<Response, StatusCode> {
 	let (mut parts, body) = request.into_parts();
 
 	if let Ok(Extension(state)) = parts.extract::<Extension<AppState>>().await {

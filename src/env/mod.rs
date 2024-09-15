@@ -1,17 +1,15 @@
 use crate::cnf::PKG_VERSION;
-#[cfg(feature = "has-storage")]
 use crate::err::Error;
+use std::sync::LazyLock;
 use surrealdb::env::{arch, os};
 
-#[cfg(feature = "has-storage")]
+/// Stores the current release identifier
+pub static RELEASE: LazyLock<String> =
+	LazyLock::new(|| format!("{} for {} on {}", *PKG_VERSION, os(), arch()));
+
 pub async fn init() -> Result<(), Error> {
 	// Log version
-	info!("Running {}", release());
+	info!("Running {}", *RELEASE);
 	// All ok
 	Ok(())
-}
-
-/// Get the current release identifier
-pub fn release() -> String {
-	format!("{} for {} on {}", *PKG_VERSION, os(), arch())
 }

@@ -1,0 +1,12 @@
+[package]
+name = "axum-example"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+axum = "0.7.5"
+serde = { version = "1.0.209", features = ["derive"] }
+surrealdb = { path = "../.." ,features = ["kv-mem"]}
+thiserror = "1.0.63"
+tokio = { version = "1.40.0", features = ["macros", "rt-multi-thread"] }

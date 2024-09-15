@@ -13,21 +13,18 @@
 #[macro_use]
 extern crate tracing;
 
-#[cfg(feature = "has-storage")]
 #[macro_use]
 mod mac;
 
 mod cli;
 mod cnf;
-#[cfg(feature = "has-storage")]
 mod dbs;
 mod env;
 mod err;
-#[cfg(feature = "has-storage")]
+#[cfg(surrealdb_unstable)]
+mod gql;
+mod mem;
 mod net;
-#[cfg(feature = "has-storage")]
-mod node;
-#[cfg(feature = "has-storage")]
 mod rpc;
 mod telemetry;
 
@@ -41,15 +38,12 @@ fn main() -> ExitCode {
 
 /// Rust's default thread stack size of 2MiB doesn't allow sufficient recursion depth.
 fn with_enough_stack<T>(fut: impl Future<Output = T> + Send) -> T {
-	let stack_size = 10 * 1024 * 1024;
-
-	// Stack frames are generally larger in debug mode.
-	#[cfg(debug_assertions)]
-	let stack_size = stack_size * 2;
-
+	// Start a Tokio runtime with custom configuration
 	tokio::runtime::Builder::new_multi_thread()
 		.enable_all()
-		.thread_stack_size(stack_size)
+		.max_blocking_threads(*cnf::RUNTIME_MAX_BLOCKING_THREADS)
+		.thread_stack_size(*cnf::RUNTIME_STACK_SIZE)
+		.thread_name("surrealdb-worker")
 		.build()
 		.unwrap()
 		.block_on(fut)

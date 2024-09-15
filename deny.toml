@@ -1,0 +1,153 @@
+# See all available configuration options at:
+# https://embarkstudios.github.io/cargo-deny/index.html
+
+# --------------------------------------------------
+# General
+# --------------------------------------------------
+
+# If true, metadata will be collected with `--all-features`
+all-features = true
+# If true, metadata will be collected with `--no-default-features`
+no-default-features = true
+
+# --------------------------------------------------
+# BANS
+# --------------------------------------------------
+
+[bans]
+# The graph highlighting used when creating dotgraphs for crates.
+highlight = "all"
+# The lint level for when a crate version requirement is set to `*`.
+wildcards = "deny"
+# Lint level for when multiple versions of the same crate are detected.
+multiple-versions = "allow"
+# The default lint level for `default` features for workspace crates.
+workspace-default-features = "allow"
+# The default lint level for `default` features for external crates.
+external-default-features = "allow"
+
+# --------------------------------------------------
+# SOURCES
+# --------------------------------------------------
+
+[sources]
+# What to do when encountering a repository from a host not in the allow list.
+unknown-git = "deny"
+# What to do when encountering a crate from a registry not in the allow list.
+unknown-registry = "deny"
+# List of URLs for allowed crate registries. Defaults to the crates.io index
+# if not specified. If it is specified but empty, no registries are allowed.
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+# List of URLs for allowed Git repositories
+allow-git = []
+
+# --------------------------------------------------
+# ADVISORIES
+# --------------------------------------------------
+
+[advisories]
+# The url(s) of the advisory databases to use.
+db-urls = ["https://github.com/rustsec/advisory-db"]
+# The path where the advisory database is cloned/fetched into.
+db-path = "~/.cargo/advisory-db"
+# The lint level for security vulnerabilities.
+vulnerability = "deny"
+# The lint level for crates which are unmaintained.
+unmaintained = "warn"
+# The lint level for crates that have been yanked.
+yanked = "warn"
+# The lint level for crates with security notices.
+notice = "warn"
+# Threshold for security vulnerabilities: None, Low, Medium, High, Critical.
+severity-threshold = "None"
+# A list of security advisory identifiers to ignore.
+ignore = []
+
+# --------------------------------------------------
+# LICENSES
+# --------------------------------------------------
+
+[licenses]
+# Deny licenses which are not listed here explicitly.
+default = "deny"
+# Lint level for licenses which are considered copyleft.
+copyleft = "warn"
+# Deny source code which does not have a license specified.
+unlicensed = "deny"
+# List of explicitly allowed licenses from https://spdx.org/licenses
+allow = [
+	"MIT",
+	"ISC",
+	"Zlib",
+	"BSL-1.0",
+	"CC0-1.0",
+	"MPL-2.0",
+	"Apache-2.0",
+	"BSD-2-Clause",
+	"BSD-3-Clause",
+	"BSD-2-Clause",
+	"Unlicense",
+]
+# The confidence threshold for detecting a license from license text.
+confidence-threshold = 0.95
+
+# Allow specific licenses on a per-crate basis, instead of globally.
+
+[[licenses.exceptions]]
+name = "ring"
+allow = ["OpenSSL"]
+
+[[licenses.exceptions]]
+name = "surreal"
+allow = ["BUSL-1.1"]
+
+[[licenses.exceptions]]
+name = "surrealdb"
+allow = ["BUSL-1.1"]
+
+[[licenses.exceptions]]
+name = "surrealcs"
+allow = ["BUSL-1.1"]
+
+[[licenses.exceptions]]
+name = "surrealdb-core"
+allow = ["BUSL-1.1"]
+
+[[licenses.exceptions]]
+name = "surrealml-core"
+allow = ["Apache-2.0"]
+
+[[licenses.exceptions]]
+name = "surrealcs-kernel"
+allow = ["BUSL-1.1"]
+
+[[licenses.exceptions]]
+name = "unicode-ident"
+allow = ["Unicode-DFS-2016"]
+
+# Specify overrides for crates where licenses are hard to guess.
+
+[[licenses.clarify]]
+name = "surreal"
+expression = "BUSL-1.1"
+license-files = []
+
+[[licenses.clarify]]
+name = "surrealdb"
+expression = "BUSL-1.1"
+license-files = []
+
+[[licenses.clarify]]
+name = "surrealdb-core"
+expression = "BUSL-1.1"
+license-files = []
+
+[[licenses.clarify]]
+name = "surrealml-core"
+expression = "Apache-2.0"
+license-files = []
+
+[[licenses.clarify]]
+name = "ring"
+expression = "MIT AND ISC AND OpenSSL"
+license-files = [{ path = "LICENSE", hash = 0xbd0eed23 }]

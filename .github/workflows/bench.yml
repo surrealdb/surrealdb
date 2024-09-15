@@ -5,49 +5,215 @@ on:
   push:
     branches:
       - main
-  pull_request:
+
+concurrency:
+  # Use github.run_id on main branch
+  # Use github.event.pull_request.number on pull requests, so it's unique per pull request
+  # Use github.ref on other branches, so it's unique per branch
+  group: ${{ github.workflow }}-${{ github.ref == 'refs/heads/main' && github.run_id || github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 defaults:
   run:
     shell: bash
 
+#
+# The bench jobs will:
+# 1. Run the benchmark and save the results as a baseline named "current"
+# 2. Download the following baselines from S3
+#    - The latest baseline from the main branch
+#    - The latest baseline from the current branch
+# 3. Compare the current benchmark results vs the baselines
+# 4. Save the comparison as an artifact
+# 5. Upload the current benchmark results as a new baseline and update the latest baseline for the current branch
+#
+
 jobs:
-  bench:
-    name: Bench library
-    runs-on: ubuntu-latest
+  common:
+    name: Bench common
+    runs-on:
+      - self-hosted
+      - benches
+    timeout-minutes: 60
     steps:
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
         with:
-          toolchain: 1.71.1
+          aws-region: us-east-1
 
       - name: Install dependencies
         run: |
           sudo apt-get -qq -y update
-          cargo install --quiet critcmp
-
-      - name: Checkout baseline
-        uses: actions/checkout@v3
-        with:
-          ref: ${{ github.base_ref }}
-
-      - name: Install cargo-make
-        run: cargo install --debug cargo-make
-
-      - name: Benchmark baseline
-        run: cargo make bench-baseline
+          sudo apt-get -qq -y install clang curl
+          cargo install --quiet --locked critcmp cargo-make
 
       - name: Checkout changes
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
-      - name: Benchmark changes
-        run: cargo make bench-changes
+      - name: Run benchmark
+        run: |
+          cargo make ci-bench -- --save-baseline current
 
-      - name: Benchmark results
-        run: cargo make bench-compare
+      - name: Copy results from AWS S3 bucket
+        run: |
+          BRANCH_NAME=$(echo ${{ github.head_ref || github.ref_name }} | sed 's/[^a-zA-Z0-9]/-/g')
+
+          aws s3 sync s3://${{ secrets.AWS_S3_GITHUB_ACTIONS_BUCKET_NAME }}/bench-results/${{ github.job }}/main/latest bench-results-main || true
+          aws s3 sync s3://${{ secrets.AWS_S3_GITHUB_ACTIONS_BUCKET_NAME }}/bench-results/${{ github.job }}/$BRANCH_NAME/latest bench-results-previous || true
+
+      - name: Compare current benchmark results vs baseline
+        run: |
+          mkdir -p bench-results
+          critcmp current bench-results-main/${{ matrix.target }}.json bench-results-previous/${{ matrix.target }}.json | tee bench-results/${{ github.job }}-comparison.txt
+
+          # Create a summary of the comparison
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+          cat bench-results/${{ github.job }}-comparison.txt >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
 
       - name: Save results as artifact
-        uses: actions/upload-artifact@v1
+        uses: actions/upload-artifact@v4
         with:
-          name: Benchmark Results
-          path: benchmark_results
+          name: ${{ github.job }}-comparison.txt
+          path: bench-results/${{ github.job }}-comparison.txt
+
+      - name: Copy results to AWS S3 bucket
+        run: |
+          BRANCH_NAME=$(echo ${{ github.head_ref || github.ref_name }} | sed 's/[^a-zA-Z0-9]/-/g')
+
+          cargo make ci-bench -- --load-baseline current --save-baseline previous
+          critcmp --export previous > bench-results/${{ matrix.target }}.json
+
+          aws s3 sync bench-results s3://${{ secrets.AWS_S3_GITHUB_ACTIONS_BUCKET_NAME }}/bench-results/${{ github.job }}/$BRANCH_NAME/${{ github.run_id }}
+          aws s3 sync bench-results s3://${{ secrets.AWS_S3_GITHUB_ACTIONS_BUCKET_NAME }}/bench-results/${{ github.job }}/$BRANCH_NAME/latest
+
+  engines:
+    name: Benchmark engines
+    runs-on:
+      - self-hosted
+      - benches
+    timeout-minutes: 60
+    permissions:
+      id-token: write
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: "lib-mem"
+            features: "kv-mem"
+          - target: "lib-rocksdb"
+            features: "kv-rocksdb"
+          - target: "lib-surrealkv"
+            features: "kv-surrealkv"
+          - target: "sdk-mem"
+            features: "kv-mem"
+          - target: "sdk-rocksdb"
+            features: "kv-rocksdb"
+          - target: "sdk-surrealkv"
+            features: "kv-surrealkv"
+          # This one fails because the server consumes too much memory and the kernel kills it. I tried with instances up to 16GB of RAM.
+          # - target: "sdk-ws"
+          #   features: "protocol-ws"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Setup cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-region: us-east-1
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get -qq -y update
+          sudo apt-get -qq -y install clang curl
+          cargo install --quiet --locked critcmp cargo-make
+
+      # Install FoundationDB if needed
+      - name: Setup FoundationDB
+        uses: foundationdb-rs/foundationdb-actions-install@v.2.2.0
+        if: ${{ matrix.target == 'lib-fdb' || matrix.target == 'sdk-fdb' }}
+        with:
+          version: "7.1.61"
+
+      # Run SurrealDB in the background if needed
+      - name: Build and start SurrealDB
+        if: ${{ matrix.target == 'sdk-ws' }}
+        run: |
+          cargo make build
+
+          # Kill any potential previous instance of the server. The runner may be reused.
+          pkill -9 surreal || true
+          ./target/release/surreal start 2>&1 >surrealdb.log &
+
+          set +e
+          echo "Waiting for surreal to be ready..."
+          tries=0
+          while [[ $tries < 5 ]]; do
+            ./target/release/surreal is-ready 2>/dev/null && echo "Ready!" && exit 0 || sleep 1
+            tries=$((tries + 1))
+          done
+
+          echo "#####"
+          echo "SurrealDB server failed to start!"
+          echo "#####"
+          cat surrealdb.log
+          exit 1
+
+      - name: Run benchmark
+        env:
+          BENCH_FEATURES: "${{ matrix.features }}"
+          BENCH_DURATION: 60
+          BENCH_WORKER_THREADS: 2
+        run: |
+          cargo make bench-${{ matrix.target }} -- --save-baseline current
+
+          # Kill surreal server if it's running
+          pkill -9 surreal || true
+
+      - name: Copy results from AWS S3 bucket
+        run: |
+          BRANCH_NAME=$(echo ${{ github.head_ref || github.ref_name }} | sed 's/[^a-zA-Z0-9]/-/g')
+
+          aws s3 sync s3://${{ secrets.AWS_S3_GITHUB_ACTIONS_BUCKET_NAME }}/bench-results/${{ github.job }}/main/latest bench-results-main || true
+          aws s3 sync s3://${{ secrets.AWS_S3_GITHUB_ACTIONS_BUCKET_NAME }}/bench-results/${{ github.job }}/$BRANCH_NAME/latest bench-results-previous || true
+
+      - name: Compare current benchmark results vs baseline
+        run: |
+          mkdir -p bench-results
+          critcmp current bench-results-main/${{ matrix.target }}.json bench-results-previous/${{ matrix.target }}.json | tee bench-results/${{ matrix.target }}-comparison.txt
+
+          # Create a summary of the comparison
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+          cat bench-results/${{ matrix.target }}-comparison.txt >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+
+      - name: Save results as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.target }}-comparison.txt
+          path: bench-results/${{ matrix.target }}-comparison.txt
+
+      - name: Copy results to AWS S3 bucket
+        env:
+          BENCH_FEATURES: "${{ matrix.features }}"
+        run: |
+          BRANCH_NAME=$(echo ${{ github.head_ref || github.ref_name }} | sed 's/[^a-zA-Z0-9]/-/g')
+
+          cargo make bench-${{ matrix.target }} -- --load-baseline current --save-baseline previous
+          critcmp --export previous > bench-results/${{ matrix.target }}.json
+
+          aws s3 sync bench-results s3://${{ secrets.AWS_S3_GITHUB_ACTIONS_BUCKET_NAME }}/bench-results/${{ github.job }}/$BRANCH_NAME/${{ github.run_id }}
+          aws s3 sync bench-results s3://${{ secrets.AWS_S3_GITHUB_ACTIONS_BUCKET_NAME }}/bench-results/${{ github.job }}/$BRANCH_NAME/latest

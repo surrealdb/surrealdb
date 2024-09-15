@@ -2,26 +2,44 @@
 name = "surreal"
 publish = false
 edition = "2021"
-version = "1.0.0"
+version = "2.0.0"
 license-file = "LICENSE"
 authors = ["Tobie Morgan Hitchcock <tobie@surrealdb.com>"]
 
 [features]
 # Public features
-default = ["storage-mem", "storage-rocksdb", "scripting", "http"]
-storage-mem = ["surrealdb/kv-mem", "has-storage"]
-storage-rocksdb = ["surrealdb/kv-rocksdb", "has-storage"]
-storage-speedb = ["surrealdb/kv-speedb", "has-storage"]
-storage-tikv = ["surrealdb/kv-tikv", "has-storage"]
-storage-fdb = ["surrealdb/kv-fdb-7_1", "has-storage"]
+default = [
+    "storage-mem",
+    "storage-surrealkv",
+    "storage-surrealcs",
+    "storage-rocksdb",
+    "scripting",
+    "http",
+]
+storage-mem = ["surrealdb/kv-mem"]
+storage-rocksdb = ["surrealdb/kv-rocksdb"]
+storage-tikv = ["surrealdb/kv-tikv"]
+storage-fdb = ["surrealdb/kv-fdb"]
+storage-surrealkv = ["surrealdb/kv-surrealkv"]
+storage-surrealcs = ["surrealdb/kv-surrealcs"]
 scripting = ["surrealdb/scripting"]
 http = ["surrealdb/http"]
 http-compression = []
-# Private features
-has-storage = []
+ml = ["surrealdb/ml"]
+jwks = ["surrealdb/jwks"]
+performance-profiler = ["dep:pprof"]
+# Special features
+storage-fdb-7_1 = ["surrealdb/kv-fdb-7_1"]
+storage-fdb-7_3 = ["surrealdb/kv-fdb-7_3"]
 
 [workspace]
-members = ["lib", "lib/examples/actix", "lib/examples/axum"]
+members = [
+    "core",
+    "sdk",
+    "sdk/examples/actix",
+    "sdk/examples/axum",
+    "sdk/examples/rocket",
+]
 
 [profile.release]
 lto = true
@@ -33,62 +51,135 @@ codegen-units = 1
 [profile.bench]
 strip = false
 
+[profile.make]
+inherits = "dev"
+
 [dependencies]
-argon2 = "0.5.1"
-axum = { version = "0.6.20", features = ["tracing", "ws", "headers"] }
-axum-client-ip = "0.4.1"
-axum-extra = { version = "0.7.7", features = ["query", "typed-routing"] }
-axum-server = { version = "0.5.1", features = ["tls-rustls"] }
-base64 = "0.21.2"
-bytes = "1.4.0"
-clap = { version = "4.3.21", features = ["env", "derive", "wrap_help", "unicode"] }
-futures = "0.3.28"
-futures-util = "0.3.28"
+argon2 = "0.5.2"
+async-graphql = { version = "7.0.9", default-features = false }
+async-graphql-axum = { version = "7.0.9" }
+axum = { version = "0.7.5", features = ["tracing", "ws"] }
+axum-extra = { version = "0.9.3", features = [
+    "query",
+    "typed-routing",
+    "typed-header",
+] }
+axum-server = { version = "0.7.1", features = ["tls-rustls-no-provider"] }
+base64 = "0.21.5"
+bytes = "1.5.0"
+chrono = "0.4.38"
+ciborium = "0.2.1"
+clap = { version = "4.4.11", features = [
+    "env",
+    "derive",
+    "wrap_help",
+    "unicode",
+] }
+futures = "0.3.30"
+futures-util = "0.3.30"
+geo = "0.28.0"
+geo-types = "0.7.13"
 glob = "0.3.1"
-http = "0.2.9"
-http-body = "0.4.5"
-hyper = "0.14.27"
-ipnet = "2.8.0"
-once_cell = "1.18.0"
-opentelemetry = { version = "0.19", features = ["rt-tokio"] }
-opentelemetry-otlp = { version = "0.12.0", features = ["metrics"] }
-pin-project-lite = "0.2.12"
+http = "1.1.0"
+http-body = "1.0.0"
+http-body-util = "0.1.1"
+hyper = "1.4.1"
+opentelemetry = { version = "0.24" }
+opentelemetry_sdk = { version = "0.24", features = ["rt-tokio"] }
+opentelemetry-otlp = { version = "0.17.0", features = ["metrics"] }
+pin-project-lite = "0.2.13"
+pprof = { version = "0.13.0", features = [
+    "flamegraph",
+    "prost-codec",
+], optional = true }
 rand = "0.8.5"
-reqwest = { version = "0.11.18", default-features = false, features = ["blocking", "gzip"] }
-rustyline = { version = "11.0.0", features = ["derive"] }
-serde = { version = "1.0.183", features = ["derive"] }
-serde_cbor = "0.11.2"
-serde_json = "1.0.104"
+reqwest = { version = "0.12.7", default-features = false, features = [
+    "blocking",
+    "gzip",
+    "http2",
+] }
+revision = { version = "0.10.0", features = [
+    "chrono",
+    "geo",
+    "roaring",
+    "regex",
+    "rust_decimal",
+    "uuid",
+] }
+rmpv = "1.0.1"
+rust_decimal = "1.36.0"
+rustyline = { version = "12.0.0", features = ["derive"] }
+semver = "1.0.20"
+serde = { version = "1.0.209", features = ["derive"] }
+serde_json = "1.0.127"
 serde_pack = { version = "1.1.2", package = "rmp-serde" }
-surrealdb = { path = "lib", features = ["protocol-http", "protocol-ws", "rustls"] }
-tempfile = "3.7.1"
-thiserror = "1.0.44"
-tokio = { version = "1.31.0", features = ["macros", "signal"] }
-tokio-util = { version = "0.7.8", features = ["io"] }
+surrealdb = { version = "2", path = "sdk", features = [
+    "protocol-http",
+    "protocol-ws",
+    "rustls",
+] }
+surrealdb-core = { version = "2", path = "core" }
+tempfile = "3.8.1"
+thiserror = "1.0.63"
+tokio = { version = "1.40.0", features = ["macros", "signal"] }
+tokio-stream = "0.1"
+tokio-tungstenite = "0.23.1"
+tokio-util = { version = "0.7.11", features = ["io"] }
 tower = "0.4.13"
-tower-http = { version = "0.4.3", features = ["trace", "sensitive-headers", "auth", "request-id", "util", "catch-panic", "cors", "set-header", "limit", "add-extension", "compression-full"] }
+tower-http = { version = "0.5.2", features = [
+    "trace",
+    "sensitive-headers",
+    "auth",
+    "request-id",
+    "util",
+    "catch-panic",
+    "cors",
+    "set-header",
+    "limit",
+    "add-extension",
+    "compression-full",
+] }
+tower-service = "0.3.3"
 tracing = "0.1"
-tracing-futures = { version = "0.2.5", features = ["tokio"], default-features = false }
-tracing-opentelemetry = "0.19.0"
-tracing-subscriber = { version = "0.3.17", features = ["env-filter"] }
+tracing-opentelemetry = "0.25.0"
+tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }
 urlencoding = "2.1.3"
-uuid = { version = "1.4.1", features = ["serde", "js", "v4", "v7"] }
+uuid = { version = "1.10.0", features = ["serde", "js", "v4", "v7"] }
 
 [target.'cfg(unix)'.dependencies]
-nix = "0.26.2"
+nix = { version = "0.27.1", features = ["user"] }
+
+[target.'cfg(unix)'.dev-dependencies]
+nix = { version = "0.27.1", features = ["signal", "user"] }
+
+[target.'cfg(any(target_os = "linux", target_os = "macos", target_os = "ios"))'.dependencies]
+mimalloc = { version = "0.1.39", default-features = false }
+
+[target.'cfg(any(target_os = "android", target_os = "freebsd", target_os = "netbsd", target_os = "openbsd"))'.dependencies]
+jemallocator = "0.5.4"
 
 [dev-dependencies]
 assert_fs = "1.0.13"
-env_logger = "0.10.0"
-opentelemetry-proto = { version = "0.2.0", features = ["gen-tonic", "traces", "metrics", "logs"] }
-rcgen = "0.10.0"
+chrono = "0.4.38"
+env_logger = "0.10.1"
+jsonwebtoken = "9.3.0"
+opentelemetry-proto = { version = "0.7.0", features = [
+    "gen-tonic",
+    "metrics",
+    "logs",
+] }
+rcgen = "0.11.3"
 serial_test = "2.0.0"
-temp-env = { version = "0.3.4", features = ["async_closure"] }
-test-log = { version = "0.2.12", features = ["trace"] }
+temp-env = { version = "0.3.6", features = ["async_closure"] }
+test-log = { version = "0.2.13", features = ["trace"] }
 tokio-stream = { version = "0.1", features = ["net"] }
-tokio-tungstenite = { version = "0.18.0" }
-tonic = "0.8.3"
-wiremock = "0.5.19"
+tokio-tungstenite = { version = "0.23.1" }
+tonic = "0.12.1"
+ulid = "1.1.0"
+wiremock = "0.6.0"
+
+[build-dependencies]
+semver = "1.0.20"
 
 [package.metadata.deb]
 maintainer-scripts = "pkg/deb/"
@@ -99,8 +190,23 @@ depends = "$auto"
 section = "utility"
 priority = "optional"
 assets = [
-    ["target/release/surreal", "usr/share/surrealdb/surreal", "755"],
-    ["pkg/deb/README", "usr/share/surrealdb/README", "644"],
+    [
+        "target/release/surreal",
+        "usr/share/surrealdb/surreal",
+        "755",
+    ],
+    [
+        "pkg/deb/README",
+        "usr/share/surrealdb/README",
+        "644",
+    ],
 ]
 extended-description = "A scalable, distributed, collaborative, document-graph database, for the realtime web."
 license-file = ["LICENSE", "4"]
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = [
+    'cfg(docker)',
+    'cfg(storage)',
+    'cfg(surrealdb_unstable)',
+] }

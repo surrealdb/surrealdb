@@ -1,12 +1,12 @@
+use crate::cli::abstraction::auth::Error as SurrealAuthError;
 use axum::response::{IntoResponse, Response};
+use axum::Error as AxumError;
 use axum::Json;
 use base64::DecodeError as Base64Error;
-use http::StatusCode;
+use http::{HeaderName, StatusCode};
+use opentelemetry::global::Error as OpentelemetryError;
 use reqwest::Error as ReqwestError;
 use serde::Serialize;
-use serde_cbor::error::Error as CborError;
-use serde_json::error::Error as JsonError;
-use serde_pack::encode::Error as PackError;
 use std::io::Error as IoError;
 use std::string::FromUtf8Error as Utf8Error;
 use surrealdb::error::Db as SurrealDbError;
@@ -37,26 +37,39 @@ pub enum Error {
 	#[error("The operation is unsupported")]
 	OperationUnsupported,
 
+	#[error("There was a problem parsing the header {0}: {1}")]
+	InvalidHeader(HeaderName, String),
+
 	#[error("There was a problem with the database: {0}")]
 	Db(#[from] SurrealError),
 
 	#[error("Couldn't open the specified file: {0}")]
 	Io(#[from] IoError),
 
-	#[error("There was an error serializing to JSON: {0}")]
-	Json(#[from] JsonError),
+	#[error("There was an error with the network: {0}")]
+	Axum(#[from] AxumError),
 
-	#[error("There was an error serializing to CBOR: {0}")]
-	Cbor(#[from] CborError),
+	#[error("There was an error with JSON serialization: {0}")]
+	Json(String),
 
-	#[error("There was an error serializing to MessagePack: {0}")]
-	Pack(#[from] PackError),
+	#[error("There was an error with CBOR serialization: {0}")]
+	Cbor(String),
+
+	#[error("There was an error with MessagePack serialization: {0}")]
+	Pack(String),
 
 	#[error("There was an error with the remote request: {0}")]
 	Remote(#[from] ReqwestError),
 
-	#[error("There was an error with the node agent")]
-	NodeAgent,
+	#[error("There was an error with auth: {0}")]
+	Auth(#[from] SurrealAuthError),
+
+	#[error("There was an error with opentelemetry: {0}")]
+	Otel(#[from] OpentelemetryError),
+
+	/// Statement has been deprecated
+	#[error("{0}")]
+	Other(String),
 }
 
 impl From<Error> for String {
@@ -77,12 +90,77 @@ impl From<Utf8Error> for Error {
 	}
 }
 
+impl From<serde_json::Error> for Error {
+	fn from(e: serde_json::Error) -> Error {
+		Error::Json(e.to_string())
+	}
+}
+
+impl From<serde_pack::encode::Error> for Error {
+	fn from(e: serde_pack::encode::Error) -> Error {
+		Error::Pack(e.to_string())
+	}
+}
+
+impl From<serde_pack::decode::Error> for Error {
+	fn from(e: serde_pack::decode::Error) -> Error {
+		Error::Pack(e.to_string())
+	}
+}
+
+impl From<ciborium::value::Error> for Error {
+	fn from(e: ciborium::value::Error) -> Error {
+		Error::Cbor(format!("{e}"))
+	}
+}
+
+impl From<opentelemetry::logs::LogError> for Error {
+	fn from(e: opentelemetry::logs::LogError) -> Error {
+		Error::Otel(OpentelemetryError::Log(e))
+	}
+}
+
+impl From<opentelemetry::trace::TraceError> for Error {
+	fn from(e: opentelemetry::trace::TraceError) -> Error {
+		Error::Otel(OpentelemetryError::Trace(e))
+	}
+}
+
+impl From<opentelemetry::metrics::MetricsError> for Error {
+	fn from(e: opentelemetry::metrics::MetricsError) -> Error {
+		Error::Otel(OpentelemetryError::Metric(e))
+	}
+}
+
+impl<T: std::fmt::Debug> From<ciborium::de::Error<T>> for Error {
+	fn from(e: ciborium::de::Error<T>) -> Error {
+		Error::Cbor(format!("{e}"))
+	}
+}
+
+impl<T: std::fmt::Debug> From<ciborium::ser::Error<T>> for Error {
+	fn from(e: ciborium::ser::Error<T>) -> Error {
+		Error::Cbor(format!("{e}"))
+	}
+}
+
 impl From<surrealdb::error::Db> for Error {
 	fn from(error: surrealdb::error::Db) -> Error {
 		if matches!(error, surrealdb::error::Db::InvalidAuth) {
 			return Error::InvalidAuth;
 		}
 		Error::Db(error.into())
+	}
+}
+
+impl From<surrealdb::rpc::RpcError> for Error {
+	fn from(value: surrealdb::rpc::RpcError) -> Self {
+		use surrealdb::rpc::RpcError;
+		match value {
+			RpcError::InternalError(e) => Error::Db(surrealdb::Error::Db(e)),
+			RpcError::Thrown(e) => Error::Other(e),
+			_ => Error::Other(value.to_string()),
+		}
 	}
 }
 

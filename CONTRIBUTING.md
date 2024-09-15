@@ -4,7 +4,7 @@ We would &nbsp;<img width="15" src="./img/love.svg">&nbsp; for you to contribute
 
 ## How to start
 
-If you are worried or don’t know where to start, check out our next section explaining what kind of help we could use and where can you get involved. You can ask us a question on [GitHub discussions](https://github.com/surrealdb/surrealdb/discussions), or by tweeting [@tobiemh](https://twitter.com/tobiemh) or [@surrealdb](https://twitter.com/surrealdb) on Twitter. Alternatively chat with the [SurrealDB team on Discord](https://surrealdb.com/discord).
+If you are worried or don’t know where to start, check out our next section explaining what kind of help we could use and where can you get involved. You can ask us a question on [GitHub Discussions](https://github.com/surrealdb/surrealdb/discussions), or the [SurrealDB Discord Server](https://surrealdb.com/discord). Alternatively, you can message us on any channel in the [SurrealDB Community](https://surrealdb.com/community)!
 
 ## Code of conduct
 
@@ -18,7 +18,7 @@ SurrealDB uses [`rustfmt`](https://github.com/rust-lang/rustfmt) to ensure that 
 rustup component add rustfmt
 ```
 
-## Getting started from source
+## Getting started from the source
 
 To set up a working **development environment**, you can either [use the Nix package manager](pkg/nix#readme) or you can [install dependencies manually](doc/BUILDING.md#building-surrealdb) and ensure that you have `rustup` installed, and fork the project git repository.
 
@@ -44,7 +44,7 @@ To listen to code changes as you develop, use the following command:
 cargo watch -x 'run --no-default-features --features storage-mem,http,scripting -- start --log trace --user root --pass root memory'
 ```
 
-SurrealDB runs by default on port 8000. To change the default port, use the following command:
+By default, SurrealDB runs locally on port 8000. To change the default listening address or port, use the following command:
 
 ```bash
 cargo run --no-default-features --features storage-mem,http,scripting -- start --log trace --user root --pass root --bind 0.0.0.0:9000 memory
@@ -64,7 +64,7 @@ cargo build --release
 
 ## Scalability and Performance
 
-SurrealDB is designed to be fast, and to scale. It is built to work in both a single-node setup, and as a distributed cluster. In distributed mode, SurrealDB builds upon [TiKV](https://tikv.org). Please keep in mind that SurrealDB is designed to be run in different environments, with different configurations, and at differing scales.
+SurrealDB is designed to be fast and to scale. It is built to work in both a single-node setup and as a distributed cluster. In distributed mode, SurrealDB builds upon [TiKV](https://tikv.org). Please keep in mind that SurrealDB is designed to be run in different environments, with different configurations, and at differing scales.
 
 When contributing code, please take into account the following considerations:
 
@@ -91,17 +91,19 @@ Please avoid introducing new dependencies to SurrealDB without consulting the te
 
 ## Introducing new features
 
-We would &nbsp;<img width="15" src="./img/love.svg">&nbsp; you to contribute to SurrealDB, but we would also like to make sure SurrealDB is as great as possible and loyal to its vision and mission statement. For us to find the right balance, please open a question on [GitHub discussions](https://github.com/surrealdb/surrealdb/discussions) with any ideas before introducing a new pull request. This will allow the SurrealDB community to have sufficient discussion about the new feature value and how it fits in the product roadmap and vision.
+We would &nbsp;<img width="15" alt="Love" src="https://github.com/surrealdb/surrealdb/blob/main/img/love.svg?raw=true">&nbsp; for you to contribute to SurrealDB, but we would also like to make sure SurrealDB is as great as possible and loyal to its vision and mission statement. For us to find the right balance, please open a question on [GitHub discussions](https://github.com/surrealdb/surrealdb/discussions) with any ideas before creating a [**GitHub Issue**](https://github.com/surrealdb/surrealdb/issues). This will allow the SurrealDB community to have sufficient discussion about the new feature value and how it fits in the product roadmap and vision, before introducing a new pull request.
 
 This is also important for the SurrealDB lead developers to be able to give technical input and different emphasis regarding the feature design and architecture. Some bigger features might need to go through our [RFC process](https://github.com/surrealdb/rfcs).
 
+
 ## Submitting a pull request
 
-Branch naming convention is as following 
+The **branch name** is your first opportunity to give your task context.
+Branch naming convention is as follows 
 
 `TYPE-ISSUE_ID-DESCRIPTION`
 
-For example:
+It is recommended to combine the relevant [**GitHub Issue**](https://github.com/surrealdb/surrealdb/issues) with a short description that describes the task resolved in this branch. If you don't have GitHub issue for your PR, then you may avoid the prefix, but keep in mind that more likely you have to create the issue first. For example:
 ```
 bugfix-548-ensure-queries-execute-sequentially
 ```
@@ -114,9 +116,46 @@ Where `TYPE` can be one of the following:
 - **docs** - documentation only changes
 - **ci** - changes related to CI system
 
-For the initial start, fork the project and use git clone command to download the repository to your computer. A standard procedure for working on an issue would be to:
+### Commit your changes
 
-1. Clone the `surrealdb` repository and download to your computer.
+- Write a descriptive **summary**: The first line of your commit message should be a concise summary of the changes you are making. It should be no more than 50 characters and should describe the change in a way that is easy to understand.
+
+- Provide more **details** in the body: The body of the commit message should provide more details about the changes you are making. Explain the problem you are solving, the changes you are making, and the reasoning behind those changes.
+
+- Use the **commit history** in your favour: Small and self-contained commits allow the reviewer to see exactly how you solved the problem. By reading the commit history of the PR, the reviewer can already understand what they'll be reviewing, even before seeing a single line of code.
+
+### Create a pull request
+
+- The **title** of your pull request should be clear and descriptive. It should summarize the changes you are making in a concise manner.
+
+- Provide a detailed **description** of the changes you are making. Explain the reasoning behind the changes, the problem it solves, and the impact it may have on the codebase. Keep in mind that a reviewer was not working on your task, so you should explain why you wrote the code the way you did.
+
+- Describe the scene and provide everything that will help to understand the background and a context for the reviewers by adding related GitHub issues to the description, and links to the related PRs, projects or third-party documentation. If there are any potential drawbacks or trade-offs to your changes, be sure to mention them too.
+
+- Be sure to **request reviews** from the appropriate people. This might include the project maintainers, other contributors, or anyone else who is familiar with the codebase and can provide valuable feedback. You can also join our [Weekly Developer Office Hours](https://github.com/orgs/surrealdb/discussions/2118) to chat with the maintainers who will review your code! 
+
+### Getting a better review
+
+- [**Draft pull requests**](https://github.blog/2019-02-14-introducing-draft-pull-requests/) allow you to create a pull request that is still a work in progress and not ready for review. This is useful when you want to share your changes with others but aren't quite ready to merge them or request immediate feedback.    
+https://github.blog/2019-02-14-introducing-draft-pull-requests/
+
+- Once your pull request has been reviewed, be sure to **respond** to any feedback you receive. This might involve making additional changes to your code, addressing questions or concerns, or simply thanking reviewers for their feedback.  
+
+- By using the [**re-request review** feature](https://github.blog/changelog/2019-02-21-re-request-review-on-a-pull-request/), you can prompt the reviewer to take another look at your changes and provide feedback if necessary.  
+
+- The [**CODEOWNERS** file](https://github.com/surrealdb/surrealdb/blob/main/.github/CODEOWNERS) in GitHub allows you to specify who is responsible for code in a specific part of your repository. You can use this file to automatically assign pull requests to the appropriate people or teams and to ensure that the right people are notified when changes are made to certain files or directories.  
+
+### Finalize the change
+
+- We are actively using **threads** to allow for more detailed and targeted discussions about specific parts of the pull request. A resolved thread means that the conversation has been addressed and the issue has been resolved. Reviewers are responsible for resolving the comment and not the author. The author can simply add a reply comment that the change has been done or decline a request.
+
+- When your pull request is approved, our team will be sure to **merge it responsibly**. This might involve running additional tests or checks, ensuring that the codebase is still functional.
+
+### Summary
+
+To summarize, fork the project and use the `git clone` command to download the repository to your computer. A standard procedure for working on an issue would be to:
+
+1. Clone the `surrealdb` repository and download it to your computer.
     ```bash
     git clone https://github.com/surrealdb/surrealdb
     ```
@@ -132,7 +171,7 @@ For the initial start, fork the project and use git clone command to download th
     git pull
     ```
 
-3. Create new branch from `main` like: `bugfix-548-ensure-queries-execute-sequentially`:
+3. Create a new branch from `main` like: `bugfix-548-ensure-queries-execute-sequentially`:
     ```bash
     git checkout -b "[the name of your branch]"
     ```
@@ -155,7 +194,7 @@ For the initial start, fork the project and use git clone command to download th
 
 7. Submit your changes for review, by going to your repository on GitHub and clicking the `Compare & pull request` button.
 
-8. Ensure that you have entered a commit message which details about the changes, and what the pull request is for.
+8. Ensure that you have entered a commit message which details the changes, and what the pull request is for.
 
 9. Now submit the pull request by clicking the `Create pull request` button.
 
@@ -177,15 +216,15 @@ Presenting at meetups and conferences about your SurrealDB projects. Your unique
 
 ### Feedback, bugs, and ideas
 
-Sending feedback is a great way for us to understand your different use cases of SurrealDB better. If you want to share your experience with SurrealDB, or if you want to discuss any ideas, you can start a discussion on [GitHub discussions](https://github.com/surrealdb/surrealdb/discussions), chat with the [SurrealDB team on Discord](https://surrealdb.com/discord), or you can tweet [@tobiemh](https://twitter.com/tobiemh) or [@surrealdb](https://twitter.com/surrealdb) on Twitter. If you have any issues, or have found a bug, then feel free to create an issue on [GitHub issues](https://github.com/surrealdb/surrealdb/issues).
+Sending feedback is a great way for us to understand your different use cases of SurrealDB better. If you want to share your experience with SurrealDB, or if you want to discuss any ideas, you can start a discussion on [GitHub discussions](https://github.com/surrealdb/surrealdb/discussions), chat with the [SurrealDB team on Discord](https://surrealdb.com/discord), or you can tweet [@tobiemh](https://twitter.com/tobiemh) or [@surrealdb](https://twitter.com/surrealdb) on Twitter. If you have any issues or have found a bug, then feel free to create an issue on [GitHub issues](https://github.com/surrealdb/surrealdb/issues).
 
 ### Documentation improvements
 
-Submitting documentation updates, enhancements, designs, or bug fixes, and fixing any spelling or grammar errors will be very much appreciated.
+Submitting [documentation](https://surrealdb.com/docs) updates, enhancements, designs, or bug fixes, and fixing any spelling or grammar errors will be very much appreciated.
 
 ### Joining our community
 
-Join our growing community around the world, for help, ideas, and discussions regarding SurrealDB.
+Join the growing [SurrealDB Community](https://surrealdb.com/community) around the world, for help, ideas, and discussions regarding SurrealDB.
 
 - View our official [Blog](https://surrealdb.com/blog)
 - Follow us on [Twitter](https://twitter.com/surrealdb)

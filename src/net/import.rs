@@ -1,4 +1,6 @@
-use crate::dbs::DB;
+use super::headers::Accept;
+use super::AppState;
+use crate::cnf::HTTP_MAX_IMPORT_BODY_SIZE;
 use crate::err::Error;
 use crate::net::input::bytes_to_utf8;
 use crate::net::output;
@@ -7,49 +9,46 @@ use axum::response::IntoResponse;
 use axum::routing::post;
 use axum::Extension;
 use axum::Router;
-use axum::TypedHeader;
+use axum_extra::TypedHeader;
 use bytes::Bytes;
-use http_body::Body as HttpBody;
 use surrealdb::dbs::Session;
+use surrealdb::iam::Action::Edit;
+use surrealdb::iam::ResourceKind::Any;
 use tower_http::limit::RequestBodyLimitLayer;
 
-use super::headers::Accept;
-
-const MAX: usize = 1024 * 1024 * 1024 * 4; // 4 GiB
-
-pub(super) fn router<S, B>() -> Router<S, B>
+pub(super) fn router<S>() -> Router<S>
 where
-	B: HttpBody + Send + 'static,
-	B::Data: Send,
-	B::Error: std::error::Error + Send + Sync + 'static,
 	S: Clone + Send + Sync + 'static,
 {
 	Router::new()
 		.route("/import", post(handler))
 		.route_layer(DefaultBodyLimit::disable())
-		.layer(RequestBodyLimitLayer::new(MAX))
+		.layer(RequestBodyLimitLayer::new(*HTTP_MAX_IMPORT_BODY_SIZE))
 }
 
 async fn handler(
+	Extension(state): Extension<AppState>,
 	Extension(session): Extension<Session>,
-	maybe_output: Option<TypedHeader<Accept>>,
+	accept: Option<TypedHeader<Accept>>,
 	sql: Bytes,
 ) -> Result<impl IntoResponse, impl IntoResponse> {
 	// Get the datastore reference
-	let db = DB.get().unwrap();
+	let db = &state.datastore;
 	// Convert the body to a byte slice
 	let sql = bytes_to_utf8(&sql)?;
+	// Check the permissions level
+	db.check(&session, Edit, Any.on_level(session.au.level().to_owned()))?;
 	// Execute the sql query in the database
 	match db.import(sql, &session).await {
-		Ok(res) => match maybe_output.as_deref() {
+		Ok(res) => match accept.as_deref() {
 			// Simple serialization
 			Some(Accept::ApplicationJson) => Ok(output::json(&output::simplify(res))),
 			Some(Accept::ApplicationCbor) => Ok(output::cbor(&output::simplify(res))),
 			Some(Accept::ApplicationPack) => Ok(output::pack(&output::simplify(res))),
-			// Internal serialization
-			Some(Accept::Surrealdb) => Ok(output::full(&res)),
 			// Return nothing
 			Some(Accept::ApplicationOctetStream) => Ok(output::none()),
+			// Internal serialization
+			Some(Accept::Surrealdb) => Ok(output::full(&res)),
 			// An incorrect content-type was requested
 			_ => Err(Error::InvalidType),
 		},

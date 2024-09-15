@@ -27,24 +27,34 @@ Temporary Items
 
 **/*.rs.bk
 *.db
+*.skv
 *.sw?
+*.skv
 
 # -----------------------------------
 # Folders
 # -----------------------------------
 
 /target/
+/lib/cache/
+/lib/store/
 /lib/target/
+/tests/sdk/*/Cargo.lock
+/tests/sdk/*/target
+
 .idea/
 .vscode/
 /result
 /bin/
-/docker/
 /.direnv/
 
 # -----------------------------------
 # Specific
 # -----------------------------------
 
+/cache/
+/store/
 surreal
 history.txt
+/doc/tla/states/
+

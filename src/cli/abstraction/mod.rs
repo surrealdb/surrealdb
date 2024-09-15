@@ -1,3 +1,6 @@
+pub(crate) mod auth;
+
+use auth::CredentialsLevel;
 use clap::Args;
 
 #[derive(Args, Debug)]
@@ -20,6 +23,18 @@ pub(crate) struct AuthArguments {
 		requires = "username"
 	)]
 	pub(crate) password: Option<String>,
+	#[arg(help = "Authentication token in JWT format to use when connecting")]
+	#[arg(
+		env = "SURREAL_TOKEN",
+		short = 't',
+		long = "token",
+		conflicts_with_all = ["username", "password", "auth_level"],
+	)]
+	pub(crate) token: Option<String>,
+	#[arg(help = "Authentication level to use when connecting")]
+	#[arg(env = "SURREAL_AUTH_LEVEL", long = "auth-level", default_value = "root")]
+	#[arg(value_parser = super::validator::parser::creds_level::CredentialsLevelParser::new())]
+	pub(crate) auth_level: CredentialsLevel,
 }
 
 #[derive(Args, Debug)]
@@ -33,11 +48,11 @@ pub struct DatabaseSelectionArguments {
 }
 
 #[derive(Args, Debug)]
-pub struct DatabaseSelectionOptionalArguments {
-	#[arg(help = "The namespace selected for the operation")]
+pub struct LevelSelectionArguments {
+	#[arg(help = "The selected namespace")]
 	#[arg(env = "SURREAL_NAMESPACE", long = "namespace", visible_alias = "ns")]
 	pub(crate) namespace: Option<String>,
-	#[arg(help = "The database selected for the operation")]
+	#[arg(help = "The selected database")]
 	#[arg(
 		env = "SURREAL_DATABASE",
 		long = "database",

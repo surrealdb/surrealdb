@@ -1,0 +1,68 @@
+use super::fut;
+use super::run;
+use crate::fnc::script::modules::impl_module_def;
+use js::prelude::Async;
+
+mod sort;
+#[non_exhaustive]
+pub struct Package;
+
+impl_module_def!(
+	Package,
+	"array",
+	"add" => run,
+	"all" => fut Async,
+	"any" => fut Async,
+	"at" => run,
+	"append" => run,
+	"boolean_and" => run,
+	"boolean_not" => run,
+	"boolean_or" => run,
+	"boolean_xor" => run,
+	"clump" => run,
+	"combine" => run,
+	"complement" => run,
+	"concat" => run,
+	"difference" => run,
+	"distinct" => run,
+	"every" => fut Async,
+	"fill" => run,
+	"filter" => fut Async,
+	"filter_index" => fut Async,
+	"find" => fut Async,
+	"find_index" => fut Async,
+	"first" => run,
+	"flatten" => run,
+	"group" => run,
+	"includes" => fut Async,
+	"index_of" => fut Async,
+	"insert" => run,
+	"intersect" => run,
+	"is_empty" => run,
+	"join" => run,
+	"knn" => run,
+	"last" => run,
+	"len" => run,
+	"logical_and" => run,
+	"logical_or" => run,
+	"logical_xor" => run,
+	"map" => fut Async,
+	"matches" => run,
+	"max" => run,
+	"min" => run,
+	"pop" => run,
+	"push" => run,
+	"prepend" => run,
+	"range" => run,
+	"remove" => run,
+	"repeat" => run,
+	"reverse" => run,
+	"shuffle" => run,
+	"slice" => run,
+	"some" => fut Async,
+	"sort" => (sort::Package),
+	"swap" => run,
+	"transpose" => run,
+	"union" => run,
+	"windows" => run
+);

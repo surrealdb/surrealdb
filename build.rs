@@ -1,3 +1,4 @@
+use semver::BuildMetadata;
 use std::process::Command;
 use std::{env, str};
 
@@ -5,8 +6,9 @@ const BUILD_METADATA: &str = "SURREAL_BUILD_METADATA";
 
 fn main() {
 	println!("cargo:rerun-if-env-changed={BUILD_METADATA}");
-	println!("cargo:rerun-if-changed=lib");
+	println!("cargo:rerun-if-changed=sdk");
 	println!("cargo:rerun-if-changed=src");
+	println!("cargo:rerun-if-changed=build.rs");
 	println!("cargo:rerun-if-changed=Cargo.toml");
 	println!("cargo:rerun-if-changed=Cargo.lock");
 	if let Some(metadata) = build_metadata() {
@@ -15,8 +17,12 @@ fn main() {
 }
 
 fn build_metadata() -> Option<String> {
-	if let Ok(metadata) = env::var(BUILD_METADATA) {
-		return Some(metadata);
+	if let Ok(input) = env::var(BUILD_METADATA) {
+		let metadata = input.trim();
+		if let Err(error) = BuildMetadata::new(metadata) {
+			panic!("invalid build metadata `{input}`: {error}");
+		}
+		return Some(metadata.to_owned());
 	}
 	let date = git()
 		.args(["show", "--no-patch", "--format=%ad", "--date=format:%Y%m%d"])

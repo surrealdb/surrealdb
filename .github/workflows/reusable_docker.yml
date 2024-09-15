@@ -1,0 +1,150 @@
+on:
+  workflow_call:
+    inputs:
+      git-ref:
+        required: true
+        type: string
+        description: "The github ref to checkout for building the Docker images."
+      tag-prefix:
+        required: true
+        type: string
+        description: "The prefix of the Docker image tag. i.e. 'nightly' for 'surrealdb/surrealdb:nightly-dev'."
+      build:
+        required: false
+        type: boolean
+        default: true
+        description: "Build the Docker images."
+      push:
+        required: false
+        type: boolean
+        default: false
+        description: "Publish the Docker images."
+      latest:
+        required: false
+        type: boolean
+        default: false
+        description: "Update the latest tag of the Docker image."
+    secrets:
+      DOCKER_USER:
+        required: false
+      DOCKER_PASS:
+        required: false
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  prepare:
+    name: Prepare steps
+    runs-on: ubuntu-latest
+    outputs:
+      tag-prefix: ${{ steps.tag-prefix.outputs.tag-prefix }}
+      matrix: ${{ steps.set-matrix.outputs.matrix }}
+    steps:
+      - name: Sanitize tag name
+        id: tag-prefix
+        run: |
+          echo "tag-prefix=$(echo '${{ inputs.tag-prefix }}' | sed 's/[^a-zA-Z0-9_.-]/-/g' | tr '[:upper:]' '[:lower:]')" >> $GITHUB_OUTPUT
+
+      # Define matrix here so we don't need to search for it when making changes
+      - name: Set matrix
+        id: set-matrix
+        env:
+          MATRIX: |
+            include:
+              # Prod image
+              - &base_image
+                name: Prod image
+                build-target: prod-ci
+              # Dev image
+              - <<: *base_image
+                name: Dev image
+                build-target: dev-ci
+                tag-suffix: -dev
+
+        run: |
+          echo '${{ env.MATRIX }}' > matrix.yaml
+          echo "matrix=$(yq -o json -I=0 matrix.yaml)" >> $GITHUB_OUTPUT
+
+  docker:
+    name: Build ${{ matrix.name }} (${{ matrix.build-target }})
+    runs-on: ubuntu-latest
+    needs: prepare
+    if: ${{ inputs.build }}
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.prepare.outputs.matrix) }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Build Docker image (amd64)
+        uses: docker/build-push-action@v5
+        id: build-amd64
+        with:
+          context: artifacts
+          load: true
+          platforms: linux/amd64
+          file: docker/Dockerfile
+          target: ${{ matrix.build-target }}
+          tags: surrealdb-local:amd64
+          build-args: |
+            ARTIFACT_PREFIX=surreal-${{ inputs.tag-prefix }}
+
+      - name: Build Docker image (arm64)
+        uses: docker/build-push-action@v5
+        id: build-arm64
+        with:
+          context: artifacts
+          load: true
+          platforms: linux/arm64
+          file: docker/Dockerfile
+          target: ${{ matrix.build-target }}
+          tags: surrealdb-local:arm64
+          build-args: |
+            ARTIFACT_PREFIX=surreal-${{ inputs.tag-prefix }}
+
+      - name: Test the Docker image
+        run: docker run --platform linux/amd64 --rm surrealdb-local:amd64 version
+
+      - name: Configure DockerHub
+        uses: docker/login-action@v3
+        if: ${{ inputs.push }}
+        with:
+          username: ${{ secrets.DOCKER_USER }}
+          password: ${{ secrets.DOCKER_PASS }}
+
+      - name: Push to DockerHub
+        uses: docker/build-push-action@v5
+        if: ${{ inputs.push }}
+        with:
+          context: artifacts
+          push: true
+          platforms: linux/amd64,linux/arm64
+          file: docker/Dockerfile
+          target: ${{ matrix.build-target }}
+          tags: surrealdb/surrealdb:${{ inputs.tag-prefix }}${{ matrix.tag-suffix }}
+          build-args: |
+            ARTIFACT_PREFIX=surreal-${{ inputs.tag-prefix }}
+
+      - name: Push to DockerHub (latest)
+        uses: docker/build-push-action@v5
+        if: ${{ inputs.push && inputs.latest }}
+        with:
+          context: artifacts
+          push: true
+          platforms: linux/amd64,linux/arm64
+          file: docker/Dockerfile
+          target: ${{ matrix.build-target }}
+          tags: surrealdb/surrealdb:latest${{ matrix.tag-suffix }}
+          build-args: |
+            ARTIFACT_PREFIX=surreal-${{ inputs.tag-prefix }}

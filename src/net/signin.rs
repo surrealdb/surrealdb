@@ -1,4 +1,6 @@
-use crate::dbs::DB;
+use super::headers::Accept;
+use super::AppState;
+use crate::cnf::HTTP_MAX_SIGNUP_BODY_SIZE;
 use crate::err::Error;
 use crate::net::input::bytes_to_utf8;
 use crate::net::output;
@@ -7,17 +9,12 @@ use axum::response::IntoResponse;
 use axum::routing::options;
 use axum::Extension;
 use axum::Router;
-use axum::TypedHeader;
+use axum_extra::TypedHeader;
 use bytes::Bytes;
-use http_body::Body as HttpBody;
 use serde::Serialize;
 use surrealdb::dbs::Session;
 use surrealdb::sql::Value;
 use tower_http::limit::RequestBodyLimitLayer;
-
-use super::headers::Accept;
-
-const MAX: usize = 1024; // 1 KiB
 
 #[derive(Serialize)]
 struct Success {
@@ -27,35 +24,33 @@ struct Success {
 }
 
 impl Success {
-	fn new(token: Option<String>) -> Success {
+	fn new(token: String) -> Success {
 		Success {
-			token,
+			token: Some(token),
 			code: 200,
 			details: String::from("Authentication succeeded"),
 		}
 	}
 }
 
-pub(super) fn router<S, B>() -> Router<S, B>
+pub(super) fn router<S>() -> Router<S>
 where
-	B: HttpBody + Send + 'static,
-	B::Data: Send,
-	B::Error: std::error::Error + Send + Sync + 'static,
 	S: Clone + Send + Sync + 'static,
 {
 	Router::new()
 		.route("/signin", options(|| async {}).post(handler))
 		.route_layer(DefaultBodyLimit::disable())
-		.layer(RequestBodyLimitLayer::new(MAX))
+		.layer(RequestBodyLimitLayer::new(*HTTP_MAX_SIGNUP_BODY_SIZE))
 }
 
 async fn handler(
+	Extension(state): Extension<AppState>,
 	Extension(mut session): Extension<Session>,
-	maybe_output: Option<TypedHeader<Accept>>,
+	accept: Option<TypedHeader<Accept>>,
 	body: Bytes,
 ) -> Result<impl IntoResponse, impl IntoResponse> {
 	// Get a database reference
-	let kvs = DB.get().unwrap();
+	let kvs = &state.datastore;
 	// Convert the HTTP body into text
 	let data = bytes_to_utf8(&body)?;
 	// Parse the provided data as JSON
@@ -65,15 +60,15 @@ async fn handler(
 			match surrealdb::iam::signin::signin(kvs, &mut session, vars).await.map_err(Error::from)
 			{
 				// Authentication was successful
-				Ok(v) => match maybe_output.as_deref() {
+				Ok(v) => match accept.as_deref() {
 					// Simple serialization
 					Some(Accept::ApplicationJson) => Ok(output::json(&Success::new(v))),
 					Some(Accept::ApplicationCbor) => Ok(output::cbor(&Success::new(v))),
 					Some(Accept::ApplicationPack) => Ok(output::pack(&Success::new(v))),
+					// Text serialization
+					Some(Accept::TextPlain) => Ok(output::text(v)),
 					// Internal serialization
 					Some(Accept::Surrealdb) => Ok(output::full(&Success::new(v))),
-					// Text serialization
-					Some(Accept::TextPlain) => Ok(output::text(v.unwrap_or_default())),
 					// Return nothing
 					None => Ok(output::none()),
 					// An incorrect content-type was requested

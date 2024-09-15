@@ -39,8 +39,9 @@ pub fn cbor<T>(val: &T) -> Output
 where
 	T: Serialize,
 {
-	match serde_cbor::to_vec(val) {
-		Ok(v) => Output::Cbor(v),
+	let mut out = Vec::new();
+	match ciborium::into_writer(&val, &mut out) {
+		Ok(_) => Output::Cbor(out),
 		Err(_) => Output::Fail,
 	}
 }
@@ -66,7 +67,7 @@ where
 }
 
 /// Convert and simplify the value into JSON
-pub fn simplify<T: Serialize>(v: T) -> Json {
+pub fn simplify<T: Serialize + 'static>(v: T) -> Json {
 	sql::to_value(v).unwrap().into()
 }
 

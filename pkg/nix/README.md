@@ -4,7 +4,7 @@ According to [Wikipedia]
 
 > Nix is a cross-platform package manager that utilizes a purely functional deployment model where software is installed into unique directories generated through cryptographic hashes. It is also the name of the tool's programming language. A package's hash takes into account the dependencies, which is claimed to eliminate dependency hell. This package management model advertises more reliable, reproducible, and portable packages.
 
-SurrealDB has support for the Nix package manager. It makes it easier to build the project from source and setting up development environments.
+SurrealDB has support for the Nix package manager. It makes it easier to build the project from source and to set up development environments.
 
 ## Table of Contents
 
@@ -63,7 +63,7 @@ If you want to develop using Nix or you want to build binaries native to your pl
 
 ### Activating support for Nix Flakes (recommended)
 
-Nix Flakes are an upcoming feature of the Nix package manager. Officially, they are still considered experimental and, as such, are not enabled by default. However, they are already widely adopted by the Nix community. SurrealDB supports Nix both with and without support for Flakes.
+Nix Flakes are an upcoming feature of the Nix package manager. Officially they are still considered experimental and, as such, are not enabled by default. However, they are already widely adopted by the Nix community. SurrealDB supports Nix both with and without support for Flakes.
 
 To enable support for Flakes, edit either `~/.config/nix/nix.conf` or `/etc/nix/nix.conf` and add:
 
@@ -102,7 +102,7 @@ nix profile install github:surrealdb/surrealdb
 You can target a specific branch, tag or commit by appending it to above commands separated by `/`. For example
 
 ```
-nix run github:surrealdb/surrealdb/v1.0.0-beta.9
+nix run github:surrealdb/surrealdb/v1.0.0
 ```
 
 If you just want to build the binary, without running it, you can use `nix build` instead of `nix run`. You will then find the binary in `result/bin`.

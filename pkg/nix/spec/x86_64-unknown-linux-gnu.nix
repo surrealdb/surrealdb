@@ -4,7 +4,7 @@
   inherit target;
 
   features = with util.features;
-    [ default storage-tikv ]
+    [ storage-mem storage-rocksdb scripting http storage-tikv ]
     ++ pkgs.lib.lists.optional (util.fdbSupported pkgs.fdbPackages)
     [ storage-fdb ];
 

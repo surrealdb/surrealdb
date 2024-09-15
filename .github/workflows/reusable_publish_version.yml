@@ -1,0 +1,828 @@
+on:
+  workflow_call:
+    inputs:
+      environment:
+        required: true
+        type: string
+        description: "The name of this release environment. It can be 'nightly', 'alpha', 'beta' or 'stable'"
+      git-ref:
+        required: true
+        type: string
+        description: "The git ref of this release version. All 'actions/checkout' steps will use it"
+      patch:
+        required: false
+        type: string
+        default: "1"
+        description: "The patch release of this alpha release"
+      bump-version:
+        required: false
+        type: boolean
+        default: false
+        description: "Bump the version of the current beta if this is not the initial one"
+      latest:
+        required: false
+        type: boolean
+        default: false
+        description: "Consider this release as the latest one and update the Docker image tag and the binary pointer for the installers"
+      publish:
+        required: false
+        type: boolean
+        default: false
+        description: "Whether to publish this release"
+      create-release:
+        required: false
+        type: boolean
+        default: false
+        description: "Create a GitHub release"
+      rust_version:
+        required: false
+        type: string
+        default: "stable"
+        description: "The Rust version to use for building binaries"
+      onnx_version:
+        required: false
+        type: string
+        default: "1.16.3"
+        description: "The ONNX library version"
+      extra-features:
+        required: false
+        type: string
+        default: "ml"
+        description: "Extra features enabled in the binary"
+    secrets:
+      AWS_CI_ACCESS_KEY_ID:
+        description: "AWS access key ID"
+      AWS_CI_SECRET_ACCESS_KEY:
+        description: "AWS secret access key"
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  RUSTFLAGS: "--cfg surrealdb_unstable"
+
+jobs:
+  prepare-vars:
+    name: Prepare vars
+    runs-on: ubuntu-latest
+    outputs:
+      git-ref: ${{ steps.outputs.outputs.git-ref }}
+      name: ${{ steps.outputs.outputs.name }}
+      build-metadata: ${{ steps.outputs.outputs.build-metadata }}
+    steps:
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ inputs.rust_version }}
+
+      - name: Checkout sources
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.git-ref }}
+
+      - name: Install a TOML parser
+        run: |
+          curl -L https://github.com/tamasfe/taplo/releases/download/0.8.1/taplo-full-linux-x86_64.gz | gunzip - > taplo
+          chmod +x taplo
+          sudo mv taplo /usr/bin/taplo
+
+      - name: Configure git
+        run: |
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git config user.name "github-actions[bot]"
+          git config --add --bool push.autoSetupRemote true
+
+      - name: Patch release version
+        if: ${{ inputs.environment == 'stable' }}
+        run: |
+          set -x
+
+          currentVersion=$(taplo get -f Cargo.toml "package.version")
+
+          if [[ $currentVersion == *"-beta"* ]]; then
+            git push origin --delete releases/stable || true
+            git checkout -b releases/stable
+            major=$(echo $currentVersion | tr "." "\n" | sed -n 1p)
+            minor=$(echo $currentVersion | tr "." "\n" | sed -n 2p)
+            version=${major}.${minor}.0
+
+            # Bump the crate version
+            sed -i "s#^version = \".*\"#version = \"${version}\"#" Cargo.toml
+            sed -i "s#^version = \".*\"#version = \"${version}\"#" sdk/Cargo.toml
+            sed -i "s#^version = \".*\"#version = \"2.0.0-${version}\"#" core/Cargo.toml
+
+            # Update dependency versions
+            sed -i "s#surrealdb = { version = \"=${currentVersion}\"#surrealdb = { version = \"${major}\"#" Cargo.toml
+            sed -i "s#surrealdb-core2 = { version = \"=2.0.0-${currentVersion}\"#surrealdb-core2 = { version = \"=2.0.0-${version}\"#" sdk/Cargo.toml
+
+            # Update Cargo.lock without updating dependency versions
+            cargo check --no-default-features --features storage-mem
+
+            # Commit changes
+            git commit -am "Prepare v${version} release"
+          else
+            version=${currentVersion}
+          fi
+
+          # Create the tag
+          git tag -a v${version} -m "Release ${version}" || true
+
+      - name: Create or patch beta branch
+        if: ${{ inputs.environment == 'beta' }}
+        run: |
+          set -x
+
+          currentVersion=$(taplo get -f Cargo.toml "package.version")
+
+          if [[ $currentVersion == *"-beta"* ]]; then
+            if [[ "${{ inputs.bump-version }}" == "true" ]]; then
+              major=$(echo $currentVersion | tr "." "\n" | sed -n 1p)
+              minor=$(echo $currentVersion | tr "." "\n" | sed -n 2p)
+              patchAndMeta=$(echo $currentVersion | tr "." "\n" | sed -n 3p)
+              betaNum=$(echo $currentVersion | tr "." "\n" | sed -n 4p)
+              betaVersion=${major}.${minor}.${patchAndMeta}.$(($betaNum + 1))
+            else
+              betaVersion=$currentVersion
+            fi
+
+            # Update dependency versions
+            sed -i "s#surrealdb = { version = \"=${currentVersion}\"#surrealdb = { version = \"=${betaVersion}\"#" Cargo.toml
+            sed -i "s#surrealdb-core2 = { version = \"=2.0.0-${currentVersion}\"#surrealdb-core2 = { version = \"=2.0.0-${betaVersion}\"#" sdk/Cargo.toml
+          else
+            git checkout -b releases/beta
+            major=$(echo $currentVersion | tr "." "\n" | sed -n 1p)
+            minor=$(echo $currentVersion | tr "." "\n" | sed -n 2p)
+            betaVersion=${major}.${minor}.0-beta.1
+
+            # Update dependency versions
+            sed -i "s#surrealdb = { version = \"${major}\"#surrealdb = { version = \"=${betaVersion}\"#" Cargo.toml
+            sed -i "s#surrealdb-core2 = { version = \"=2.0.0-${currentVersion}\"#surrealdb-core2 = { version = \"=2.0.0-${betaVersion}\"#" sdk/Cargo.toml
+          fi
+
+          # Bump the crate version
+          sed -i "s#^version = \".*\"#version = \"${betaVersion}\"#" Cargo.toml
+          sed -i "s#^version = \".*\"#version = \"${betaVersion}\"#" sdk/Cargo.toml
+          sed -i "s#^version = \".*\"#version = \"2.0.0-${betaVersion}\"#" core/Cargo.toml
+
+          # Update Cargo.lock without updating dependency versions
+          cargo check --no-default-features --features storage-mem
+
+          # Commit changes
+          git commit -am "Prepare v${betaVersion} release" || true
+
+          # Create the tag
+          git tag -a v${betaVersion} -m "Release ${betaVersion}" || true
+
+      - name: Create or patch alpha branch
+        if: ${{ inputs.environment == 'alpha' }}
+        run: |
+          set -x
+
+          currentVersion=$(taplo get -f Cargo.toml "package.version")
+
+          # Create the tag
+          alphaVersion=${currentVersion}-${{ inputs.environment }}.${{ inputs.patch }}
+          git tag -a v${alphaVersion} -m "Release ${alphaVersion}" || true
+
+      - name: Push changes
+        if: ${{ inputs.publish && (inputs.environment == 'beta' || inputs.environment == 'stable') }}
+        run: git push
+
+      - name: Push tag
+        if: ${{ inputs.publish && (inputs.environment == 'alpha' || inputs.environment == 'beta' || inputs.environment == 'stable') }}
+        run: git push --tags || true
+
+      - name: Set outputs
+        id: outputs
+        run: |
+          set -x
+
+          version=$(taplo get -f Cargo.toml "package.version")
+
+          if [[ "${{ inputs.environment }}" == "alpha" ]]; then
+            version=${version}-${{ inputs.environment }}.${{ inputs.patch }}
+          fi
+
+          if [[ "${{ inputs.publish }}" == "true" && ("${{ inputs.environment }}" == "alpha" || "${{ inputs.environment }}" == "beta" || "${{ inputs.environment }}" == "stable")  ]]; then
+            echo "git-ref=v${version}" >> $GITHUB_OUTPUT
+          else
+            echo "git-ref=${{ inputs.git-ref }}" >> $GITHUB_OUTPUT
+          fi
+
+          if [[ "${{ inputs.environment }}" == "nightly" ]]; then
+            echo "name=${{ inputs.environment }}" >> $GITHUB_OUTPUT
+
+            date=$(git show --no-patch --format=%ad --date=format:%Y%m%d)
+            rev=$(git rev-parse --short HEAD)
+            echo "build-metadata=${date}.${rev}" >> $GITHUB_OUTPUT
+          else
+            echo "name=v${version}" >> $GITHUB_OUTPUT
+            echo "build-metadata=" >> $GITHUB_OUTPUT
+          fi
+
+  test:
+    name: Test
+    needs: [ prepare-vars ]
+    runs-on: ubuntu-latest-16-cores
+    steps:
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ inputs.rust_version }}
+
+      - name: Checkout sources
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare-vars.outputs.git-ref }}
+
+      - name: Setup cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ needs.prepare-vars.outputs.git-ref == 'main' }}
+
+      - name: Install cargo-llvm-cov
+        uses: taiki-e/install-action@cargo-llvm-cov
+
+      - name: Install cargo-make
+        run: cargo install --debug --locked cargo-make
+
+      - name: Test workspace + coverage
+        run: cargo make ci-workspace-coverage
+
+      - name: Debug info
+        if: always()
+        run: |
+          set -x
+          free -m
+          df -h
+          ps auxf
+          cat /tmp/surrealdb.log || true
+
+      - name: Upload coverage report
+        uses: actions/upload-artifact@v4
+        with:
+          name: code-coverage-report
+          path: target/llvm-cov/html/
+          retention-days: 5
+
+  lint:
+    name: Lint
+    needs: [ prepare-vars ]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare-vars.outputs.git-ref }}
+
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ inputs.rust_version }}
+          targets: wasm32-unknown-unknown
+          components: rustfmt, clippy
+
+      - name: Install cargo-make
+        run: cargo install --debug --locked cargo-make
+
+      - name: Check workspace
+        run: cargo make ci-check
+
+      - name: Check format
+        run: cargo make ci-format
+
+      - name: Check wasm
+        run: cargo make ci-check-wasm
+
+      - name: Check clippy
+        run: cargo make ci-clippy
+
+  docker-builder:
+    name: Prepare docker builder
+    runs-on: ubuntu-latest
+    needs: [ prepare-vars ]
+    outputs:
+      name: ${{ steps.image.outputs.name }}
+      tag: ${{ steps.image.outputs.tag }}
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v4
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_CI_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_CI_SECRET_ACCESS_KEY }}
+          aws-region: us-east-1
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Prepare docker image name
+        id: image
+        run: |
+          set -x
+
+          # Use the github branch name so we can use modified builders on custom branches
+          tag=$(echo ${{ github.ref_name }} | sed -e 's/[^a-zA-Z0-9]/-/g')
+
+          echo "name=${{ steps.login-ecr.outputs.registry }}/surrealdb-builder" >> $GITHUB_OUTPUT
+          echo "tag=${tag}" >> $GITHUB_OUTPUT
+
+      - name: Build & Push builder image
+        uses: docker/build-push-action@v5
+        id: build
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          file: ./docker/Dockerfile
+          target: builder
+          cache-from: |
+            type=registry,ref=${{ steps.image.outputs.name }}:${{ steps.image.outputs.tag }}
+            type=registry,ref=${{ steps.image.outputs.name }}:main
+          cache-to: type=inline
+          push: true
+          tags: ${{ steps.image.outputs.name }}:${{ steps.image.outputs.tag }}
+          build-args: |
+            RUST_VERSION=${{ inputs.rust_version }}
+
+  build:
+    name: Build ${{ matrix.arch }} binary
+    needs: [ prepare-vars, docker-builder ]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # MacOS amd64
+          - arch: x86_64-apple-darwin
+            runner: macos-latest-large
+            file: surreal-${{ needs.prepare-vars.outputs.name }}.darwin-amd64
+            build-step: |
+              set -x
+
+              # Prepare deps
+              brew install protobuf
+
+              # Build
+              features=storage-tikv,http-compression,jwks,${{ inputs.extra-features }}
+
+              # Download libonnxruntime's static library and tell ORT crate to use it
+              mkdir /tmp/onnxruntime
+              curl -sSL https://github.com/surrealdb/onnxruntime-build/releases/download/v${{ inputs.onnx_version }}/onnxruntime-osx-x86_64-static_lib-${{ inputs.onnx_version }}.tgz | \
+                tar -xz -C /tmp/onnxruntime/
+              export ORT_STRATEGY=system ORT_LIB_LOCATION=/tmp/onnxruntime/lib
+
+              cargo build --features $features --release --locked --target x86_64-apple-darwin
+
+              # Package
+              cp target/x86_64-apple-darwin/release/surreal surreal
+              ./surreal version
+              tar -zcvf surreal-${{ needs.prepare-vars.outputs.name }}.darwin-amd64.tgz surreal
+              echo $(shasum -a 256 surreal-${{ needs.prepare-vars.outputs.name }}.darwin-amd64.tgz | cut -f1 -d' ') > surreal-${{ needs.prepare-vars.outputs.name }}.darwin-amd64.txt
+
+          # MacOS arm64
+          - arch: aarch64-apple-darwin
+            runner: macos-latest-xlarge
+            file: surreal-${{ needs.prepare-vars.outputs.name }}.darwin-arm64
+            build-step: |
+              set -x
+
+              # Prepare deps
+              brew install protobuf
+
+              # Build
+              features=storage-tikv,http-compression,jwks,${{ inputs.extra-features }}
+
+              # Download libonnxruntime's static library and tell ORT crate to use it
+              mkdir /tmp/onnxruntime
+              curl -sSL https://github.com/surrealdb/onnxruntime-build/releases/download/v${{ inputs.onnx_version }}/onnxruntime-osx-arm64-static_lib-${{ inputs.onnx_version }}.tgz | \
+                tar -xz -C /tmp/onnxruntime/
+              export ORT_STRATEGY=system ORT_LIB_LOCATION=/tmp/onnxruntime/lib
+
+              cargo build --features $features --release --locked --target aarch64-apple-darwin
+
+              # Package
+              cp target/aarch64-apple-darwin/release/surreal surreal
+              ./surreal version
+              tar -zcvf surreal-${{ needs.prepare-vars.outputs.name }}.darwin-arm64.tgz surreal
+              echo $(shasum -a 256 surreal-${{ needs.prepare-vars.outputs.name }}.darwin-arm64.tgz | cut -f1 -d' ') > surreal-${{ needs.prepare-vars.outputs.name }}.darwin-arm64.txt
+
+          # Linux amd64
+          - arch: x86_64-unknown-linux-gnu
+            runner: [ "self-hosted", "amd64", "builder" ]
+            file: surreal-${{ needs.prepare-vars.outputs.name }}.linux-amd64
+            build-step: |
+              # Build
+              features=storage-tikv,http-compression,jwks,${{ inputs.extra-features }}
+
+              # Download libonnxruntime's static library and tell ORT crate to use it
+              tmpdir=$(mktemp -d)
+              curl -sSL https://github.com/surrealdb/onnxruntime-build/releases/download/v${{ inputs.onnx_version }}/onnxruntime-linux-x64-static_lib-${{ inputs.onnx_version }}.tgz | \
+                tar -xz -C $tmpdir
+              export ORT_STRATEGY=system ORT_LIB_LOCATION=$tmpdir/lib
+
+              docker run \
+                --rm -t \
+                --pull always \
+                -v $(pwd):/surrealdb \
+                -e SURREAL_BUILD_METADATA=$SURREAL_BUILD_METADATA \
+                -e RUSTFLAGS="${RUSTFLAGS}" \
+                -e ORT_STRATEGY=$ORT_STRATEGY \
+                -e ORT_LIB_LOCATION=$ORT_LIB_LOCATION \
+                -v $ORT_LIB_LOCATION:$ORT_LIB_LOCATION \
+                ${{ needs.docker-builder.outputs.name }}:${{ needs.docker-builder.outputs.tag }} \
+                  --target x86_64-unknown-linux-gnu --features ${features} --release --locked
+
+              # Package
+              cp target/x86_64-unknown-linux-gnu/release/surreal surreal
+              tar -zcvf surreal-${{ needs.prepare-vars.outputs.name }}.linux-amd64.tgz surreal
+              echo $(shasum -a 256 surreal-${{ needs.prepare-vars.outputs.name }}.linux-amd64.tgz | cut -f1 -d' ') > surreal-${{ needs.prepare-vars.outputs.name }}.linux-amd64.txt
+
+              # Verify the binary is compatible with various Linux distributions
+              docker run --platform linux/amd64 --rm -t -v ./target/x86_64-unknown-linux-gnu/release/surreal:/surreal ubuntu:20.04 /surreal version
+              docker run --platform linux/amd64 --rm -t -v ./target/x86_64-unknown-linux-gnu/release/surreal:/surreal rockylinux:8 /surreal version
+              docker run --platform linux/amd64 --rm -t -v ./target/x86_64-unknown-linux-gnu/release/surreal:/surreal debian:11 /surreal version
+
+          # Linux arm64
+          - arch: aarch64-unknown-linux-gnu
+            runner: [ "self-hosted", "arm64", "builder" ]
+            file: surreal-${{ needs.prepare-vars.outputs.name }}.linux-arm64
+            build-step: |
+              set -x
+
+              # Build
+              features=storage-tikv,http-compression,jwks,${{ inputs.extra-features }}
+
+              # Download libonnxruntime's static library and tell ORT crate to use it
+              tmpdir=$(mktemp -d)
+              curl -sSL https://github.com/surrealdb/onnxruntime-build/releases/download/v${{ inputs.onnx_version }}/onnxruntime-linux-aarch64-static_lib-${{ inputs.onnx_version }}.tgz | \
+                tar -xz -C $tmpdir
+              export ORT_STRATEGY=system ORT_LIB_LOCATION=$tmpdir/lib
+
+              docker run \
+                --rm -t \
+                --pull always \
+                -v $(pwd):/surrealdb \
+                -e SURREAL_BUILD_METADATA=$SURREAL_BUILD_METADATA \
+                -e RUSTFLAGS="${RUSTFLAGS}" \
+                -e ORT_STRATEGY=$ORT_STRATEGY \
+                -e ORT_LIB_LOCATION=$ORT_LIB_LOCATION \
+                -v $ORT_LIB_LOCATION:$ORT_LIB_LOCATION \
+                ${{ needs.docker-builder.outputs.name }}:${{ needs.docker-builder.outputs.tag }} \
+                  --target aarch64-unknown-linux-gnu --features ${features} --release --locked
+
+              # Package
+              cp target/aarch64-unknown-linux-gnu/release/surreal surreal
+              tar -zcvf surreal-${{ needs.prepare-vars.outputs.name }}.linux-arm64.tgz surreal
+              echo $(shasum -a 256 surreal-${{ needs.prepare-vars.outputs.name }}.linux-arm64.tgz | cut -f1 -d' ') > surreal-${{ needs.prepare-vars.outputs.name }}.linux-arm64.txt
+
+              # Verify the binary is compatible with various Linux distributions
+              docker run --platform linux/arm64 --rm -t -v ./target/aarch64-unknown-linux-gnu/release/surreal:/surreal ubuntu:20.04 /surreal version
+              docker run --platform linux/arm64 --rm -t -v ./target/aarch64-unknown-linux-gnu/release/surreal:/surreal rockylinux:8 /surreal version
+              docker run --platform linux/arm64 --rm -t -v ./target/aarch64-unknown-linux-gnu/release/surreal:/surreal debian:11 /surreal version
+
+          # Windows amd64
+          - arch: x86_64-pc-windows-msvc
+            runner: windows-latest
+            file: surreal-${{ needs.prepare-vars.outputs.name }}.windows-amd64
+            build-step: |
+              set -x
+
+              # Prepare deps
+              vcpkg integrate install
+
+              # Build
+              features=storage-tikv,http-compression,jwks,${{ inputs.extra-features }}
+
+              # Download libonnxruntime's static library and tell ORT crate to use it
+              tmp_dir=$(mktemp -d)
+              curl -sSL https://github.com/surrealdb/onnxruntime-build/releases/download/v${{ inputs.onnx_version }}/onnxruntime-win-x64-static_lib-${{ inputs.onnx_version }}.zip -o $tmp_dir/onnxruntime.zip
+              unzip -d $tmp_dir $tmp_dir/onnxruntime.zip
+              export ORT_STRATEGY=system ORT_LIB_LOCATION=$tmp_dir/lib
+
+              cargo build --features $features --release --locked --target x86_64-pc-windows-msvc
+
+              # Package
+              ./target/x86_64-pc-windows-msvc/release/surreal.exe version
+              cp target/x86_64-pc-windows-msvc/release/surreal.exe surreal-${{ needs.prepare-vars.outputs.name }}.windows-amd64.exe
+              echo $(shasum -a 256 surreal-${{ needs.prepare-vars.outputs.name }}.windows-amd64.exe | cut -f1 -d' ') > surreal-${{ needs.prepare-vars.outputs.name }}.windows-amd64.txt
+
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare-vars.outputs.git-ref }}
+
+      - name: Create a temporary branch
+        run: git checkout -b binary
+
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ inputs.rust_version }}
+          targets: ${{ matrix.arch }}
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        if: ${{ matrix.arch == 'x86_64-unknown-linux-gnu' || matrix.arch == 'aarch64-unknown-linux-gnu' }}
+        with:
+          aws-access-key-id: ${{ secrets.AWS_CI_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_CI_SECRET_ACCESS_KEY }}
+          aws-region: us-east-1
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        if: ${{ matrix.arch == 'x86_64-unknown-linux-gnu' || matrix.arch == 'aarch64-unknown-linux-gnu' }}
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Output package versions
+        run: |
+          set -x
+          set +e
+          go version ; cargo version ; rustc --version ; cmake --version ; gcc --version ; g++ --version ; perl -v
+
+      - name: Patch alpha crate version
+        if: ${{ inputs.environment == 'alpha' }}
+        run: |
+          set -x
+
+          version=2.0.0-${{ inputs.environment }}.${{ inputs.patch }}
+
+          if [[ "${{ matrix.arch }}" == *apple-darwin ]]; then
+            brew install gnu-sed
+
+            if [[ "${{ matrix.arch }}" == "aarch64-apple-darwin" ]]; then
+              export PATH="/opt/homebrew/opt/gnu-sed/libexec/gnubin:$PATH"
+            else
+              export PATH="/usr/local/opt/gnu-sed/libexec/gnubin:$PATH"
+            fi
+          fi
+
+          # Update the version to a nightly one
+          sed -i "s#^version = \".*\"#version = \"${version}\"#" Cargo.toml
+          sed -i "s#^version = \".*\"#version = \"${version}\"#" sdk/Cargo.toml
+          sed -i "s#^version = \".*\"#version = \"${version}\"#" core/Cargo.toml
+          sed -i "s#surrealdb = { version = \"2\"#surrealdb = { version = \"=${version}\"#" Cargo.toml
+          sed -i "s#surrealdb-core = { version = \"2\"#surrealdb-core = { version = \"=${version}\"#" sdk/Cargo.toml
+
+          # Update Cargo.lock without updating dependency versions
+          cargo check --no-default-features --features storage-mem
+
+          # Temporarily commit patches
+          # These should not be pushed back to the repo
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git config user.name "github-actions[bot]"
+          git commit -am "Version patches"
+
+      - name: Build step
+        env:
+          SURREAL_BUILD_METADATA: ${{ needs.prepare-vars.outputs.build-metadata }}
+        run: ${{ matrix.build-step }}
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.file }}
+          path: |
+            surreal
+            ${{ matrix.file }}.tgz
+            ${{ matrix.file }}.txt
+            ${{ matrix.file }}.exe
+
+  publish:
+    name: Publish crate and artifacts binaries
+    needs: [ prepare-vars, test, lint, build ]
+    if: ${{ inputs.publish }}
+    environment: ${{ inputs.environment }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare-vars.outputs.git-ref }}
+
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ inputs.rust_version }}
+
+      - name: Install release-plz
+        run: |
+          curl -L https://github.com/MarcoIeni/release-plz/releases/download/release-plz-v0.3.30/release-plz-x86_64-unknown-linux-gnu.tar.gz | sudo tar -xz -C /usr/bin
+          sudo chmod +x /usr/bin/release-plz
+
+      - name: Install a TOML parser
+        if: ${{ inputs.environment != 'stable' }}
+        run: |
+          curl -L https://github.com/tamasfe/taplo/releases/download/0.8.1/taplo-full-linux-x86_64.gz | gunzip - > taplo
+          chmod +x taplo
+          sudo mv taplo /usr/bin/taplo
+
+      - name: Create a temporary branch
+        run: git checkout -b crate
+
+      - name: Configure release-plz
+        run: |
+          cat << EOF > /tmp/release-plz.toml
+          [workspace]
+          changelog_update = false
+          git_release_enable = false
+          semver_check = false
+          git_tag_enable = false
+          EOF
+
+      - name: Patch beta crate version
+        if: ${{ inputs.environment == 'beta' }}
+        run: |
+          set -x
+
+          # Derive crate version
+          currentVersion=$(taplo get -f Cargo.toml "package.version")
+          major=$(echo $currentVersion | tr "." "\n" | sed -n 1p)
+          minor=$(echo $currentVersion | tr "." "\n" | sed -n 2p)
+          betaNum=$(echo $currentVersion | tr "." "\n" | sed -n 4p)
+          version=${major}.${minor}.$(($betaNum - 1))
+
+          # Update crate version
+          sed -i "s#^version = \".*\"#version = \"${version}\"#" sdk/Cargo.toml
+          sed -i "s#^version = \".*\"#version = \"2.0.0-${version}\"#" core/Cargo.toml
+          sed -i "s#surrealdb-core2 = { version = \"=2.0.0-${currentVersion}\"#surrealdb-core2 = { version = \"=2.0.0-${version}\"#" sdk/Cargo.toml
+
+      - name: Patch alpha crate version
+        if: ${{ inputs.environment == 'alpha' }}
+        run: |
+          set -x
+
+          version=2.0.$((${{ inputs.patch }} - 1))
+
+          # Update the version to a nightly one
+          sed -i "s#^version = \".*\"#version = \"${version}\"#" sdk/Cargo.toml
+          sed -i "s#^version = \".*\"#version = \"${version}\"#" core/Cargo.toml
+          sed -i "s#surrealdb-core = { version = \"2\"#surrealdb-core = { version = \"=${version}\"#" sdk/Cargo.toml
+
+      - name: Patch nightly crate version
+        if: ${{ inputs.environment == 'nightly' }}
+        run: |
+          set -x
+
+          # Get the date of the last commit
+          date=$(git show --no-patch --format=%ad --date=format:%Y%m%d)
+
+          # Derive crate version
+          currentVersion=$(taplo get -f Cargo.toml "package.version")
+          major=$(echo $currentVersion | tr "." "\n" | sed -n 1p)
+          minor=$(echo $currentVersion | tr "." "\n" | sed -n 2p)
+          # This sets the nightly version to something like `1.3.20231117`
+          version=${major}.${minor}.${date}
+
+          # Update the version to a nightly one
+          sed -i "s#^version = \".*\"#version = \"${version}\"#" sdk/Cargo.toml
+          sed -i "s#^version = \".*\"#version = \"${version}\"#" core/Cargo.toml
+          sed -i "s#surrealdb-core = { version = \"${major}\"#surrealdb-core = { version = \"=${version}\"#" sdk/Cargo.toml
+
+      - name: Patch crate name and description
+        if: ${{ inputs.environment != 'stable' }}
+        run: |
+          set -x
+
+          # Patch crate name
+          sed -i "0,/surrealdb/s//surrealdb-${{ inputs.environment }}/" sdk/Cargo.toml
+          sed -i "0,/surrealdb-core/s//surrealdb-core-${{ inputs.environment }}/" core/Cargo.toml
+
+          # Patch sdk dependency
+          sed -i "s#path = \"\.\./core\", package = \"surrealdb-core\"#path = \"../core\", package = \"surrealdb-core-${{ inputs.environment }}\"#" sdk/Cargo.toml
+
+          # Patch the description
+          sed -i "s#^description = \".*\"#description = \"A ${{ inputs.environment }} release of the surrealdb crate\"#" sdk/Cargo.toml
+          sed -i "s#^description = \".*\"#description = \"A ${{ inputs.environment }} release of the surrealdb-core crate\"#" core/Cargo.toml
+
+          # Temporarily commit patches
+          # These should not be pushed back to the repo
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git config user.name "github-actions[bot]"
+          git commit -am "Name and version patches"
+
+      - name: Publish the crate
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        run: release-plz release --config /tmp/release-plz.toml
+
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        if: ${{ inputs.create-release }}
+        with:
+          name: "Release ${{ needs.prepare-vars.outputs.git-ref }}"
+          tag_name: ${{ needs.prepare-vars.outputs.git-ref }}
+          prerelease: ${{ inputs.environment != 'stable' }}
+          fail_on_unmatched_files: true
+          files: |
+            LICENSE
+            artifacts/surreal-${{ needs.prepare-vars.outputs.git-ref }}.*/*.tgz
+            artifacts/surreal-${{ needs.prepare-vars.outputs.git-ref }}.*/*.exe
+
+      - name: Configure AWS
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-region: us-east-2
+          aws-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
+          aws-secret-access-key: ${{ secrets.AMAZON_SECRET_KEY }}
+
+      - name: Set latest release version
+        if: ${{ inputs.create-release && inputs.latest }}
+        run: |
+          echo ${{ needs.prepare-vars.outputs.git-ref }} > latest.txt
+          aws s3 cp --cache-control 'no-store' latest.txt s3://download.surrealdb.com/latest.txt
+
+      - name: Set latest alpha or beta version
+        if: ${{ inputs.publish && (inputs.environment == 'alpha' || inputs.environment == 'beta') }}
+        run: |
+          echo ${{ needs.prepare-vars.outputs.git-ref }} > ${{ inputs.environment }}.txt
+          aws s3 cp --cache-control 'no-store' ${{ inputs.environment }}.txt s3://download.surrealdb.com/${{ inputs.environment }}.txt
+
+      - name: Publish binaries
+        run: |
+          for file in artifacts/**/*.{tgz,txt,exe}; do
+            aws s3 cp --cache-control 'no-store' $file s3://download.surrealdb.com/${{ needs.prepare-vars.outputs.name }}/
+          done
+
+  docker:
+    name: Docker images
+    needs: [ prepare-vars, publish ]
+    uses: ./.github/workflows/reusable_docker.yml
+    with:
+      git-ref: ${{ needs.prepare-vars.outputs.git-ref }}
+      tag-prefix: ${{ needs.prepare-vars.outputs.name }}
+      latest: ${{ inputs.latest }}
+      build: true
+      push: true
+    secrets: inherit
+
+  package-macos:
+    name: Package and publish macOS universal binary
+    needs: [ prepare-vars, publish ]
+    runs-on: macos-latest
+    env:
+      FILE: surreal-${{ needs.prepare-vars.outputs.name }}.darwin-universal
+    steps:
+      - name: Download amd64 binary
+        uses: actions/download-artifact@v4
+        with:
+          name: surreal-${{ needs.prepare-vars.outputs.name }}.darwin-amd64
+          path: amd64
+
+      - name: Download arm64 binary
+        uses: actions/download-artifact@v4
+        with:
+          name: surreal-${{ needs.prepare-vars.outputs.name }}.darwin-arm64
+          path: arm64
+
+      - name: Configure AWS
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-region: us-east-2
+          aws-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
+          aws-secret-access-key: ${{ secrets.AMAZON_SECRET_KEY }}
+
+      - name: Package universal MacOS binary
+        run: |
+          lipo -create -output surreal amd64/surreal arm64/surreal
+          chmod +x surreal
+          tar -zcvf $FILE.tgz surreal
+          echo $(shasum -a 256 $FILE.tgz | cut -f1 -d' ') > $FILE.txt
+
+      - name: Publish universal MacOS binary
+        if: ${{ inputs.publish }}
+        run: |
+          aws s3 cp --cache-control 'no-store' $FILE.tgz s3://download.surrealdb.com/${{ needs.prepare-vars.outputs.name }}/
+          aws s3 cp --cache-control 'no-store' $FILE.txt s3://download.surrealdb.com/${{ needs.prepare-vars.outputs.name }}/
+
+  propagate:
+    name: Propagate binaries to all regions
+    if: ${{ inputs.publish }}
+    needs: [ publish, package-macos ]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Configure AWS
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-region: us-east-2
+          aws-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
+          aws-secret-access-key: ${{ secrets.AMAZON_SECRET_KEY }}
+
+      - name: Distribute binaries
+        run: |
+          regions=("af-south-1" "ap-east-1" "ap-south-1" "ap-southeast-1" "ap-southeast-2" "ca-central-1" "eu-central-1" "eu-west-2" "me-south-1" "sa-east-1" "us-west-2")
+          for region in ${regions[@]}; do
+              aws s3 sync --delete --storage-class INTELLIGENT_TIERING --source-region eu-west-2 --region ${region} s3://download.surrealdb.com s3://download.${region}.surrealdb.com
+          done

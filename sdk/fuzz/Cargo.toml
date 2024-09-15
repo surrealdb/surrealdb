@@ -1,0 +1,44 @@
+[package]
+name = "surrealdb-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = { version= "0.4.7", features = ["arbitrary-derive"] }
+arbitrary = { version = "1.3.2", features = ["derive"] }
+futures = "0.3.29"
+tokio = "1.33.0"
+
+[dependencies.surrealdb]
+path = ".."
+features = ["kv-mem", "arbitrary"]
+default-features = false
+
+# Prevent this from interfering with workspaces
+[workspace]
+members = ["."]
+
+[profile.release]
+debug = 1
+
+[[bin]]
+name = "fuzz_sql_parser"
+path = "fuzz_targets/fuzz_sql_parser.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "fuzz_executor"
+path = "fuzz_targets/fuzz_executor.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "fuzz_structured_executor"
+path = "fuzz_targets/fuzz_structured_executor.rs"
+test = false
+doc = false

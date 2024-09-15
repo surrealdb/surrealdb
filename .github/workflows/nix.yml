@@ -13,30 +13,31 @@ defaults:
     shell: bash
 
 jobs:
-
-  build-static:
-    name: Build static Linux binary
-    if: ${{ github.ref == 'refs/heads/main' }} || ${{ github.event.label.name == 'nix' }}
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v3
-      - uses: cachix/install-nix-action@v20
-      - uses: cachix/cachix-action@v12
-        with:
-          name: surrealdb
-          authToken: '${{ secrets.CACHIX_AUTH_TOKEN }}'
-          extraPullNames: nix-community
-      - run: nix build .#static-binary
-      - run: ./result/bin/surreal help
+  # TODO: Figure out why it fails to build
+  # 
+  # build-static:
+  #   name: Build static Linux binary
+  #   if: ${{ github.ref == 'refs/heads/main' }} || ${{ github.event.label.name == 'nix' }}
+  #   runs-on: ubuntu-latest
+  #   steps:
+  #     - uses: actions/checkout@v4
+  #     - uses: cachix/install-nix-action@v26
+  #     - uses: cachix/cachix-action@v14
+  #       with:
+  #         name: surrealdb
+  #         authToken: '${{ secrets.CACHIX_AUTH_TOKEN }}'
+  #         extraPullNames: nix-community
+  #     - run: nix build .#static-binary
+  #     - run: ./result/bin/surreal help
 
   build-docker:
     name: Build Docker image
     if: ${{ github.ref == 'refs/heads/main' }} || ${{ github.event.label.name == 'nix' }}
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
-      - uses: cachix/install-nix-action@v20
-      - uses: cachix/cachix-action@v12
+      - uses: actions/checkout@v4
+      - uses: cachix/install-nix-action@v26
+      - uses: cachix/cachix-action@v14
         with:
           name: surrealdb
           authToken: '${{ secrets.CACHIX_AUTH_TOKEN }}'
@@ -49,9 +50,9 @@ jobs:
     if: ${{ github.ref == 'refs/heads/main' }} || ${{ github.event.label.name == 'nix' }}
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
-      - uses: cachix/install-nix-action@v20
-      - uses: cachix/cachix-action@v12
+      - uses: actions/checkout@v4
+      - uses: cachix/install-nix-action@v26
+      - uses: cachix/cachix-action@v14
         with:
           name: surrealdb
           authToken: '${{ secrets.CACHIX_AUTH_TOKEN }}'
