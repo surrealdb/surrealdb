@@ -1,10 +1,13 @@
 use rand::{thread_rng, Rng};
+use std::collections::btree_set::Iter;
+use std::collections::HashMap;
 use std::error::Error;
 use std::fs::File;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::{Command, ExitStatus, Stdio};
 use std::{env, fs};
 use tokio::time;
+use tokio_stream::StreamExt;
 use tracing::{debug, error, info};
 
 pub const USER: &str = "root";
@@ -33,8 +36,13 @@ impl Child {
 		self
 	}
 
-	pub fn finish(mut self) {
-		self.inner.take().unwrap().kill().unwrap();
+	pub fn finish(&mut self) -> Result<&mut Self, String> {
+		let a = self
+			.inner
+			.as_mut()
+			.map(|child| child.kill().map_err(|e| format!("failed to kill: {e}")))
+			.unwrap_or(Err("no inner".to_string()));
+		a.map(|_ok| self)
 	}
 
 	pub fn send_signal(&self, signal: nix::sys::signal::Signal) -> nix::Result<()> {
@@ -58,8 +66,8 @@ impl Child {
 
 	/// Read the child's stdout concatenated with its stderr. Returns Ok if the child
 	/// returns successfully, Err otherwise.
-	pub fn output(mut self) -> Result<String, String> {
-		let status = self.inner.take().unwrap().wait().unwrap();
+	pub fn output(&mut self) -> Result<String, String> {
+		let status = self.inner.as_mut().map(|child| child.wait().unwrap()).unwrap();
 
 		let mut buf = self.stdout();
 		buf.push_str(&self.stderr());
@@ -79,17 +87,21 @@ impl Drop for Child {
 			let _ = inner.kill();
 			let stdout =
 				std::fs::read_to_string(&self.stdout_path).expect("Failed to read the stdout file");
-			println!("Server STDOUT: \n{}", stdout);
+			println!("Server STDOUT: \n{stdout}");
 			let stderr =
 				std::fs::read_to_string(&self.stderr_path).expect("Failed to read the stderr file");
-			println!("Server STDERR: \n{}", stderr);
+			println!("Server STDERR: \n{stderr}");
 		}
 		let _ = std::fs::remove_file(&self.stdout_path);
 		let _ = std::fs::remove_file(&self.stderr_path);
 	}
 }
 
-pub fn run_internal<P: AsRef<Path>>(args: &str, current_dir: Option<P>) -> Child {
+pub fn run_internal<P: AsRef<Path>>(
+	args: &str,
+	current_dir: Option<P>,
+	vars: Option<HashMap<String, String>>,
+) -> Child {
 	let mut path = std::env::current_exe().unwrap();
 	assert!(path.pop());
 	if path.ends_with("deps") {
@@ -112,6 +124,9 @@ pub fn run_internal<P: AsRef<Path>>(args: &str, current_dir: Option<P>) -> Child
 	let stderr = Stdio::from(File::create(&stderr_path).unwrap());
 
 	cmd.env_clear();
+	if let Some(v) = vars {
+		cmd.envs(v);
+	}
 	cmd.stdin(Stdio::piped());
 	cmd.stdout(stdout);
 	cmd.stderr(stderr);
@@ -126,12 +141,12 @@ pub fn run_internal<P: AsRef<Path>>(args: &str, current_dir: Option<P>) -> Child
 
 /// Run the CLI with the given args
 pub fn run(args: &str) -> Child {
-	run_internal::<String>(args, None)
+	run_internal::<String>(args, None, None)
 }
 
 /// Run the CLI with the given args inside a temporary directory
 pub fn run_in_dir<P: AsRef<Path>>(args: &str, current_dir: P) -> Child {
-	run_internal(args, Some(current_dir))
+	run_internal(args, Some(current_dir), None)
 }
 
 pub fn tmp_file(name: &str) -> String {
@@ -140,23 +155,27 @@ pub fn tmp_file(name: &str) -> String {
 }
 
 pub struct StartServerArguments {
+	pub path: Option<String>,
 	pub auth: bool,
 	pub tls: bool,
 	pub wait_is_ready: bool,
-	pub enable_auth_level: bool,
 	pub tick_interval: time::Duration,
+	pub temporary_directory: Option<String>,
 	pub args: String,
+	pub vars: Option<HashMap<String, String>>,
 }
 
 impl Default for StartServerArguments {
 	fn default() -> Self {
 		Self {
+			path: None,
 			auth: true,
 			tls: false,
 			wait_is_ready: true,
-			enable_auth_level: false,
 			tick_interval: time::Duration::new(1, 0),
-			args: "--allow-all".to_string(),
+			temporary_directory: None,
+			args: "".to_string(),
+			vars: None,
 		}
 	}
 }
@@ -169,9 +188,17 @@ pub async fn start_server_without_auth() -> Result<(String, Child), Box<dyn Erro
 	.await
 }
 
-pub async fn start_server_with_auth_level() -> Result<(String, Child), Box<dyn Error>> {
+pub async fn start_server_with_functions() -> Result<(String, Child), Box<dyn Error>> {
 	start_server(StartServerArguments {
-		enable_auth_level: true,
+		args: "--allow-funcs".to_string(),
+		..Default::default()
+	})
+	.await
+}
+
+pub async fn start_server_with_guests() -> Result<(String, Child), Box<dyn Error>> {
+	start_server(StartServerArguments {
+		args: "--allow-guests".to_string(),
 		..Default::default()
 	})
 	.await
@@ -181,17 +208,54 @@ pub async fn start_server_with_defaults() -> Result<(String, Child), Box<dyn Err
 	start_server(StartServerArguments::default()).await
 }
 
+pub async fn start_server_with_temporary_directory(
+	path: &str,
+) -> Result<(String, Child), Box<dyn Error>> {
+	start_server(StartServerArguments {
+		temporary_directory: Some(path.to_string()),
+		..Default::default()
+	})
+	.await
+}
+
+pub async fn start_server_gql() -> Result<(String, Child), Box<dyn Error>> {
+	start_server(StartServerArguments {
+		vars: Some(HashMap::from([(
+			"SURREAL_EXPERIMENTAL_GRAPHQL".to_string(),
+			"true".to_string(),
+		)])),
+		..Default::default()
+	})
+	.await
+}
+
+pub async fn start_server_gql_without_auth() -> Result<(String, Child), Box<dyn Error>> {
+	start_server(StartServerArguments {
+		auth: false,
+		vars: Some(HashMap::from([(
+			"SURREAL_EXPERIMENTAL_GRAPHQL".to_string(),
+			"true".to_string(),
+		)])),
+		..Default::default()
+	})
+	.await
+}
+
 pub async fn start_server(
 	StartServerArguments {
+		path,
 		auth,
 		tls,
 		wait_is_ready,
-		enable_auth_level,
 		tick_interval,
+		temporary_directory,
 		args,
+		vars,
 	}: StartServerArguments,
 ) -> Result<(String, Child), Box<dyn Error>> {
 	let mut rng = thread_rng();
+
+	let path = path.unwrap_or("memory".to_string());
 
 	let mut extra_args = args.clone();
 	if tls {
@@ -206,12 +270,8 @@ pub async fn start_server(
 		extra_args.push_str(format!(" --web-crt {crt_path} --web-key {key_path}").as_str());
 	}
 
-	if auth {
-		extra_args.push_str(" --auth");
-	}
-
-	if enable_auth_level {
-		extra_args.push_str(" --auth-level-enabled");
+	if !auth {
+		extra_args.push_str(" --unauthenticated");
 	}
 
 	if !tick_interval.is_zero() {
@@ -219,16 +279,20 @@ pub async fn start_server(
 		extra_args.push_str(format!(" --tick-interval {sec}s").as_str());
 	}
 
+	if let Some(path) = temporary_directory {
+		extra_args.push_str(format!(" --temporary-directory {path}").as_str());
+	}
+
 	'retry: for _ in 0..3 {
 		let port: u16 = rng.gen_range(13000..24000);
 		let addr = format!("127.0.0.1:{port}");
 
-		let start_args = format!("start --bind {addr} memory --no-banner --log trace --user {USER} --pass {PASS} {extra_args}");
+		let start_args = format!("start --bind {addr} {path} --no-banner --log trace --user {USER} --pass {PASS} {extra_args}");
 
 		info!("starting server with args: {start_args}");
 
 		// Configure where the logs go when running the test
-		let server = run_internal::<String>(&start_args, None);
+		let server = run_internal::<String>(&start_args, None, vars.clone());
 
 		if !wait_is_ready {
 			return Ok((addr, server));

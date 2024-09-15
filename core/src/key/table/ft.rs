@@ -1,10 +1,11 @@
-use crate::key::error::KeyCategory;
-use crate::key::key_req::KeyRequirements;
-/// Stores a DEFINE TABLE AS config definition
+//! Stores a DEFINE TABLE AS config definition
+use crate::key::category::Categorise;
+use crate::key::category::Category;
 use derive::Key;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Key)]
+#[non_exhaustive]
 pub struct Ft<'a> {
 	__: u8,
 	_a: u8,
@@ -25,19 +26,19 @@ pub fn new<'a>(ns: &'a str, db: &'a str, tb: &'a str, ft: &'a str) -> Ft<'a> {
 
 pub fn prefix(ns: &str, db: &str, tb: &str) -> Vec<u8> {
 	let mut k = super::all::new(ns, db, tb).encode().unwrap();
-	k.extend_from_slice(&[b'!', b'f', b't', 0x00]);
+	k.extend_from_slice(b"!ft\x00");
 	k
 }
 
 pub fn suffix(ns: &str, db: &str, tb: &str) -> Vec<u8> {
 	let mut k = super::all::new(ns, db, tb).encode().unwrap();
-	k.extend_from_slice(&[b'!', b'f', b't', 0xff]);
+	k.extend_from_slice(b"!ft\xff");
 	k
 }
 
-impl KeyRequirements for Ft<'_> {
-	fn key_category(&self) -> KeyCategory {
-		KeyCategory::TableView
+impl Categorise for Ft<'_> {
+	fn categorise(&self) -> Category {
+		Category::TableView
 	}
 }
 

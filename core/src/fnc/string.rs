@@ -1,3 +1,4 @@
+use crate::cnf::GENERATION_ALLOCATION_LIMIT;
 use crate::err::Error;
 use crate::fnc::util::string;
 use crate::sql::value::Value;
@@ -5,11 +6,10 @@ use crate::sql::Regex;
 
 /// Returns `true` if a string of this length is too much to allocate.
 fn limit(name: &str, n: usize) -> Result<(), Error> {
-	const LIMIT: usize = 2usize.pow(20);
-	if n > LIMIT {
+	if n > *GENERATION_ALLOCATION_LIMIT {
 		Err(Error::InvalidArguments {
 			name: name.to_owned(),
-			message: format!("Output must not exceed {LIMIT} bytes."),
+			message: format!("Output must not exceed {} bytes.", *GENERATION_ALLOCATION_LIMIT),
 		})
 	} else {
 		Ok(())
@@ -69,24 +69,25 @@ pub fn matches((val, regex): (String, Regex)) -> Result<Value, Error> {
 	Ok(regex.0.is_match(&val).into())
 }
 
-pub fn replace((val, old_or_regexp, new): (String, Value, String)) -> Result<Value, Error> {
-	match old_or_regexp {
-		Value::Strand(old) => {
-			if new.len() > old.len() {
-				let increase = new.len() - old.len();
+pub fn replace((val, search, replace): (String, Value, String)) -> Result<Value, Error> {
+	match search {
+		Value::Strand(search) => {
+			if replace.len() > search.len() {
+				let increase = replace.len() - search.len();
 				limit(
 					"string::replace",
-					val.len().saturating_add(val.matches(&old.0).count().saturating_mul(increase)),
+					val.len()
+						.saturating_add(val.matches(&search.0).count().saturating_mul(increase)),
 				)?;
 			}
-			Ok(val.replace(&old.0, &new).into())
+			Ok(val.replace(&search.0, &replace).into())
 		}
-		Value::Regex(r) => Ok(r.0.replace_all(&val, new).into_owned().into()),
+		Value::Regex(search) => Ok(search.0.replace_all(&val, replace).into_owned().into()),
 		_ => Err(Error::InvalidArguments {
 			name: "string::replace".to_string(),
 			message: format!(
 				"Argument 2 was the wrong type. Expected a string but found {}",
-				old_or_regexp
+				search
 			),
 		}),
 	}
@@ -167,19 +168,34 @@ pub mod distance {
 	}
 }
 
+pub mod html {
+	use crate::err::Error;
+	use crate::sql::value::Value;
+
+	pub fn encode((arg,): (String,)) -> Result<Value, Error> {
+		Ok(ammonia::clean_text(&arg).into())
+	}
+
+	pub fn sanitize((arg,): (String,)) -> Result<Value, Error> {
+		Ok(ammonia::clean(&arg).into())
+	}
+}
+
 pub mod is {
 	use crate::err::Error;
 	use crate::sql::value::Value;
+	use crate::sql::{Datetime, Thing};
 	use chrono::NaiveDateTime;
-	use once_cell::sync::Lazy;
 	use regex::Regex;
 	use semver::Version;
 	use std::char;
+	use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+	use std::sync::LazyLock;
 	use url::Url;
 	use uuid::Uuid;
 
-	#[rustfmt::skip] static LATITUDE_RE: Lazy<Regex> = Lazy::new(|| Regex::new("^[-+]?([1-8]?\\d(\\.\\d+)?|90(\\.0+)?)$").unwrap());
-	#[rustfmt::skip] static LONGITUDE_RE: Lazy<Regex> = Lazy::new(|| Regex::new("^[-+]?([1-8]?\\d(\\.\\d+)?|90(\\.0+)?)$").unwrap());
+	#[rustfmt::skip] static LATITUDE_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new("^[-+]?([1-8]?\\d(\\.\\d+)?|90(\\.0+)?)$").unwrap());
+	#[rustfmt::skip] static LONGITUDE_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new("^[-+]?(180(\\.0+)?|((1[0-7]\\d)|([1-9]?\\d))(\\.\\d+)?)$").unwrap());
 
 	pub fn alphanum((arg,): (String,)) -> Result<Value, Error> {
 		Ok(arg.chars().all(char::is_alphanumeric).into())
@@ -193,8 +209,11 @@ pub mod is {
 		Ok(arg.is_ascii().into())
 	}
 
-	pub fn datetime((arg, fmt): (String, String)) -> Result<Value, Error> {
-		Ok(NaiveDateTime::parse_from_str(&arg, &fmt).is_ok().into())
+	pub fn datetime((arg, fmt): (String, Option<String>)) -> Result<Value, Error> {
+		Ok(match fmt {
+			Some(fmt) => NaiveDateTime::parse_from_str(&arg, &fmt).is_ok().into(),
+			None => Datetime::try_from(arg.as_ref()).is_ok().into(),
+		})
 	}
 
 	pub fn domain((arg,): (String,)) -> Result<Value, Error> {
@@ -207,6 +226,18 @@ pub mod is {
 
 	pub fn hexadecimal((arg,): (String,)) -> Result<Value, Error> {
 		Ok(arg.chars().all(|x| char::is_ascii_hexdigit(&x)).into())
+	}
+
+	pub fn ip((arg,): (String,)) -> Result<Value, Error> {
+		Ok(arg.parse::<IpAddr>().is_ok().into())
+	}
+
+	pub fn ipv4((arg,): (String,)) -> Result<Value, Error> {
+		Ok(arg.parse::<Ipv4Addr>().is_ok().into())
+	}
+
+	pub fn ipv6((arg,): (String,)) -> Result<Value, Error> {
+		Ok(arg.parse::<Ipv6Addr>().is_ok().into())
 	}
 
 	pub fn latitude((arg,): (String,)) -> Result<Value, Error> {
@@ -229,13 +260,29 @@ pub mod is {
 		Ok(Url::parse(&arg).is_ok().into())
 	}
 
-	pub fn uuid((arg,): (Value,)) -> Result<Value, Error> {
-		Ok(match arg {
-			Value::Strand(v) => Uuid::parse_str(v.as_string().as_str()).is_ok(),
-			Value::Uuid(_) => true,
+	pub fn uuid((arg,): (String,)) -> Result<Value, Error> {
+		Ok(Uuid::parse_str(arg.as_ref()).is_ok().into())
+	}
+
+	pub fn record((arg, tb): (String, Option<Value>)) -> Result<Value, Error> {
+		let res = match Thing::try_from(arg) {
+			Ok(t) => match tb {
+				Some(Value::Strand(tb)) => t.tb == *tb,
+				Some(Value::Table(tb)) => t.tb == tb.0,
+				Some(_) => {
+					return Err(Error::InvalidArguments {
+						name: "string::is::record()".into(),
+						message:
+							"Expected an optional string or table type for the second argument"
+								.into(),
+					})
+				}
+				None => true,
+			},
 			_ => false,
-		}
-		.into())
+		};
+
+		Ok(res.into())
 	}
 }
 
@@ -510,6 +557,33 @@ mod tests {
 	}
 
 	#[test]
+	fn is_ip() {
+		let value = super::is::ip((String::from("127.0.0.1"),)).unwrap();
+		assert_eq!(value, Value::Bool(true));
+
+		let value = super::is::ip((String::from("127.0.0"),)).unwrap();
+		assert_eq!(value, Value::Bool(false));
+	}
+
+	#[test]
+	fn is_ipv4() {
+		let value = super::is::ipv4((String::from("127.0.0.1"),)).unwrap();
+		assert_eq!(value, Value::Bool(true));
+
+		let value = super::is::ipv4((String::from("127.0.0"),)).unwrap();
+		assert_eq!(value, Value::Bool(false));
+	}
+
+	#[test]
+	fn is_ipv6() {
+		let value = super::is::ipv6((String::from("::1"),)).unwrap();
+		assert_eq!(value, Value::Bool(true));
+
+		let value = super::is::ipv6((String::from("200t:db8::"),)).unwrap();
+		assert_eq!(value, Value::Bool(false));
+	}
+
+	#[test]
 	fn is_latitude() {
 		let value = super::is::latitude((String::from("-0.118092"),)).unwrap();
 		assert_eq!(value, Value::Bool(true));
@@ -520,8 +594,23 @@ mod tests {
 
 	#[test]
 	fn is_longitude() {
-		let value = super::is::longitude((String::from("51.509865"),)).unwrap();
+		let value = super::is::longitude((String::from("91.509865"),)).unwrap();
 		assert_eq!(value, Value::Bool(true));
+
+		let value = super::is::longitude((String::from("-91.509865"),)).unwrap();
+		assert_eq!(value, Value::Bool(true));
+
+		let value = super::is::longitude((String::from("-180.00000"),)).unwrap();
+		assert_eq!(value, Value::Bool(true));
+
+		let value = super::is::longitude((String::from("-180.00001"),)).unwrap();
+		assert_eq!(value, Value::Bool(false));
+
+		let value = super::is::longitude((String::from("180.00000"),)).unwrap();
+		assert_eq!(value, Value::Bool(true));
+
+		let value = super::is::longitude((String::from("180.00001"),)).unwrap();
+		assert_eq!(value, Value::Bool(false));
 
 		let value = super::is::longitude((String::from("12345"),)).unwrap();
 		assert_eq!(value, Value::Bool(false));
@@ -547,13 +636,31 @@ mod tests {
 
 	#[test]
 	fn is_uuid() {
-		let input = (String::from("123e4567-e89b-12d3-a456-426614174000").into(),);
+		let input = (String::from("123e4567-e89b-12d3-a456-426614174000"),);
 		let value = super::is::uuid(input).unwrap();
 		assert_eq!(value, Value::Bool(true));
 
-		let input = (String::from("foo-bar").into(),);
+		let input = (String::from("foo-bar"),);
 		let value = super::is::uuid(input).unwrap();
 		assert_eq!(value, Value::Bool(false));
+	}
+
+	#[test]
+	fn html_encode() {
+		let value = super::html::encode((String::from("<div>Hello world!</div>"),)).unwrap();
+		assert_eq!(value, Value::Strand("&lt;div&gt;Hello&#32;world!&lt;&#47;div&gt;".into()));
+
+		let value = super::html::encode((String::from("SurrealDB"),)).unwrap();
+		assert_eq!(value, Value::Strand("SurrealDB".into()));
+	}
+
+	#[test]
+	fn html_sanitize() {
+		let value = super::html::sanitize((String::from("<div>Hello world!</div>"),)).unwrap();
+		assert_eq!(value, Value::Strand("<div>Hello world!</div>".into()));
+
+		let value = super::html::sanitize((String::from("XSS<script>attack</script>"),)).unwrap();
+		assert_eq!(value, Value::Strand("XSS".into()));
 	}
 
 	#[test]

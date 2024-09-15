@@ -7,16 +7,17 @@ use std::{
 use cedar_policy::{Entity, EntityTypeName, EntityUid, RestrictedExpression};
 use serde::{Deserialize, Serialize};
 
+#[revisioned(revision = 1)]
 #[derive(Clone, Default, Debug, Eq, PartialEq, PartialOrd, Deserialize, Serialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[revisioned(revision = 1)]
+#[non_exhaustive]
 pub enum Level {
 	#[default]
 	No,
 	Root,
 	Namespace(String),
 	Database(String, String),
-	Scope(String, String, String),
+	Record(String, String, String),
 }
 
 impl std::fmt::Display for Level {
@@ -26,7 +27,7 @@ impl std::fmt::Display for Level {
 			Level::Root => write!(f, "/"),
 			Level::Namespace(ns) => write!(f, "/ns:{ns}/"),
 			Level::Database(ns, db) => write!(f, "/ns:{ns}/db:{db}/"),
-			Level::Scope(ns, db, scope) => write!(f, "/ns:{ns}/db:{db}/scope:{scope}/"),
+			Level::Record(ns, db, id) => write!(f, "/ns:{ns}/db:{db}/id:{id}/"),
 		}
 	}
 }
@@ -38,7 +39,7 @@ impl Level {
 			Level::Root => "Root",
 			Level::Namespace(_) => "Namespace",
 			Level::Database(_, _) => "Database",
-			Level::Scope(_, _, _) => "Scope",
+			Level::Record(_, _, _) => "Record",
 		}
 	}
 
@@ -46,7 +47,7 @@ impl Level {
 		match self {
 			Level::Namespace(ns) => Some(ns),
 			Level::Database(ns, _) => Some(ns),
-			Level::Scope(ns, _, _) => Some(ns),
+			Level::Record(ns, _, _) => Some(ns),
 			_ => None,
 		}
 	}
@@ -54,14 +55,14 @@ impl Level {
 	pub fn db(&self) -> Option<&str> {
 		match self {
 			Level::Database(_, db) => Some(db),
-			Level::Scope(_, db, _) => Some(db),
+			Level::Record(_, db, _) => Some(db),
 			_ => None,
 		}
 	}
 
-	pub fn scope(&self) -> Option<&str> {
+	pub fn id(&self) -> Option<&str> {
 		match self {
-			Level::Scope(_, _, scope) => Some(scope),
+			Level::Record(_, _, id) => Some(id),
 			_ => None,
 		}
 	}
@@ -72,7 +73,7 @@ impl Level {
 			Level::Root => None,
 			Level::Namespace(_) => Some(Level::Root),
 			Level::Database(ns, _) => Some(Level::Namespace(ns.to_owned())),
-			Level::Scope(ns, db, _) => Some(Level::Database(ns.to_owned(), db.to_owned())),
+			Level::Record(ns, db, _) => Some(Level::Database(ns.to_owned(), db.to_owned())),
 		}
 	}
 
@@ -89,8 +90,8 @@ impl Level {
 			attrs.insert("db".into(), RestrictedExpression::new_string(db.to_owned()));
 		}
 
-		if let Some(scope) = self.scope() {
-			attrs.insert("scope".into(), RestrictedExpression::new_string(scope.to_owned()));
+		if let Some(id) = self.id() {
+			attrs.insert("id".into(), RestrictedExpression::new_string(id.to_owned()));
 		}
 
 		attrs
@@ -138,8 +139,8 @@ impl From<(&str, &str)> for Level {
 }
 
 impl From<(&str, &str, &str)> for Level {
-	fn from((ns, db, sc): (&str, &str, &str)) -> Self {
-		Level::Scope(ns.to_owned(), db.to_owned(), sc.to_owned())
+	fn from((ns, db, id): (&str, &str, &str)) -> Self {
+		Level::Record(ns.to_owned(), db.to_owned(), id.to_owned())
 	}
 }
 
@@ -149,7 +150,7 @@ impl From<(Option<&str>, Option<&str>, Option<&str>)> for Level {
 			(None, None, None) => ().into(),
 			(Some(ns), None, None) => (ns,).into(),
 			(Some(ns), Some(db), None) => (ns, db).into(),
-			(Some(ns), Some(db), Some(scope)) => (ns, db, scope).into(),
+			(Some(ns), Some(db), Some(id)) => (ns, db, id).into(),
 			_ => Level::No,
 		}
 	}

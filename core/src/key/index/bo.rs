@@ -1,12 +1,13 @@
 //! Stores the offsets
 use crate::idx::docids::DocId;
 use crate::idx::ft::terms::TermId;
-use crate::key::error::KeyCategory;
-use crate::key::key_req::KeyRequirements;
+use crate::key::category::Categorise;
+use crate::key::category::Category;
 use derive::Key;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Key)]
+#[non_exhaustive]
 pub struct Bo<'a> {
 	__: u8,
 	_a: u8,
@@ -24,9 +25,9 @@ pub struct Bo<'a> {
 	pub term_id: TermId,
 }
 
-impl KeyRequirements for Bo<'_> {
-	fn key_category(&self) -> KeyCategory {
-		KeyCategory::IndexOffset
+impl Categorise for Bo<'_> {
+	fn categorise(&self) -> Category {
+		Category::IndexOffset
 	}
 }
 

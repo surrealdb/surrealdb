@@ -11,16 +11,23 @@ pub mod bp;
 pub mod bs;
 pub mod bt;
 pub mod bu;
+pub mod hd;
+pub mod he;
+pub mod hi;
+pub mod hl;
+pub mod hs;
+pub mod hv;
+pub mod ia;
+pub mod ip;
 pub mod vm;
 
-use crate::key::error::KeyCategory;
-use crate::key::key_req::KeyRequirements;
+use crate::key::category::Categorise;
+use crate::key::category::Category;
 use crate::sql::array::Array;
 use crate::sql::id::Id;
 use derive::Key;
 use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
-use std::ops::Range;
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Key)]
 struct Prefix<'a> {
@@ -87,6 +94,7 @@ impl<'a> PrefixIds<'a> {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Key)]
+#[non_exhaustive]
 pub struct Index<'a> {
 	__: u8,
 	_a: u8,
@@ -102,9 +110,9 @@ pub struct Index<'a> {
 	pub id: Option<Cow<'a, Id>>,
 }
 
-impl KeyRequirements for Index<'_> {
-	fn key_category(&self) -> KeyCategory {
-		KeyCategory::Index
+impl Categorise for Index<'_> {
+	fn categorise(&self) -> Category {
+		Category::Index
 	}
 }
 
@@ -147,10 +155,6 @@ impl<'a> Index<'a> {
 		let mut beg = Self::prefix(ns, db, tb, ix);
 		beg.extend_from_slice(&[0xff]);
 		beg
-	}
-
-	pub fn range(ns: &str, db: &str, tb: &str, ix: &str) -> Range<Vec<u8>> {
-		Self::prefix_beg(ns, db, tb, ix)..Self::prefix_end(ns, db, tb, ix)
 	}
 
 	fn prefix_ids(ns: &str, db: &str, tb: &str, ix: &str, fd: &Array) -> Vec<u8> {

@@ -1,10 +1,11 @@
 //! Stores the key prefix for all keys
-use crate::key::error::KeyCategory;
-use crate::key::key_req::KeyRequirements;
+use crate::key::category::Categorise;
+use crate::key::category::Category;
 use derive::Key;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Key)]
+#[non_exhaustive]
 pub struct Kv {
 	__: u8,
 }
@@ -19,9 +20,9 @@ impl Default for Kv {
 	}
 }
 
-impl KeyRequirements for Kv {
-	fn key_category(&self) -> KeyCategory {
-		KeyCategory::Root
+impl Categorise for Kv {
+	fn categorise(&self) -> Category {
+		Category::Root
 	}
 }
 

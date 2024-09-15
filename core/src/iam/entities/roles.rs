@@ -6,9 +6,10 @@ use serde::{Deserialize, Serialize};
 use std::str::FromStr;
 
 // In the future, we will allow for custom roles. For now, provide predefined roles.
+#[revisioned(revision = 1)]
 #[derive(Hash, Clone, Default, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[revisioned(revision = 1)]
+#[non_exhaustive]
 pub enum Role {
 	#[default]
 	Viewer,

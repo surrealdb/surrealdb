@@ -1,11 +1,12 @@
 //! Stores the next and available freed IDs for documents
-use crate::key::error::KeyCategory;
-use crate::key::key_req::KeyRequirements;
+use crate::key::category::Categorise;
+use crate::key::category::Category;
 use derive::Key;
 use serde::{Deserialize, Serialize};
 
 // Table ID generator
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Key)]
+#[non_exhaustive]
 pub struct Ti {
 	__: u8,
 	_a: u8,
@@ -21,9 +22,9 @@ pub fn new(ns: u32, db: u32) -> Ti {
 	Ti::new(ns, db)
 }
 
-impl KeyRequirements for Ti {
-	fn key_category(&self) -> KeyCategory {
-		KeyCategory::DatabaseTableIdentifier
+impl Categorise for Ti {
+	fn categorise(&self) -> Category {
+		Category::DatabaseTableIdentifier
 	}
 }
 

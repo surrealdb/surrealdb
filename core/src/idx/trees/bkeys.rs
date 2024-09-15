@@ -32,6 +32,7 @@ pub trait BKeys: Default + Debug + Display + Sized {
 	fn compile(&mut self) {}
 }
 
+#[non_exhaustive]
 pub struct SplitKeys<BK>
 where
 	BK: BKeys,
@@ -44,6 +45,7 @@ where
 }
 
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct FstKeys {
 	i: Inner,
 }
@@ -101,7 +103,7 @@ impl BKeys for FstKeys {
 	}
 
 	fn collect_with_prefix(&self, _prefix_key: &Key) -> Result<VecDeque<(Key, Payload)>, Error> {
-		Err(Error::Unreachable("BKeys/FSTKeys::collect_with_prefix"))
+		Err(fail!("BKeys/FSTKeys::collect_with_prefix"))
 	}
 
 	fn insert(&mut self, key: Key, payload: Payload) -> Option<Payload> {
@@ -157,7 +159,7 @@ impl BKeys for FstKeys {
 				median_payload: s.median_payload,
 			})
 		} else {
-			Err(Error::Unreachable("BKeys/FSTKeys::split_keys"))
+			Err(fail!("BKeys/FSTKeys::split_keys"))
 		}
 	}
 
@@ -285,6 +287,7 @@ impl Display for FstKeys {
 }
 
 #[derive(Default, Debug, Clone)]
+#[non_exhaustive]
 pub struct TrieKeys {
 	keys: Trie<Key, Payload>,
 }
@@ -374,7 +377,7 @@ impl BKeys for TrieKeys {
 		let (median_key, median_payload) = if let Some((k, v)) = s.next() {
 			(k.clone(), *v)
 		} else {
-			return Err(Error::Unreachable("BKeys/TrieKeys::split_keys"));
+			return Err(fail!("BKeys/TrieKeys::split_keys"));
 		};
 		let mut right = Trie::default();
 		for (key, val) in s {

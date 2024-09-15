@@ -3,7 +3,10 @@ use crate::sql::array::Array;
 use crate::sql::datetime::Datetime;
 use crate::sql::object::Object;
 use crate::sql::value::Value;
+use crate::sql::Bytes;
+use crate::sql::Geometry;
 use crate::sql::Id;
+use crate::sql::Strand;
 use chrono::{TimeZone, Utc};
 use js::prelude::This;
 use js::Coerced;
@@ -19,6 +22,60 @@ fn check_nul(s: &str) -> Result<(), Error> {
 		Err(Error::InvalidString(std::ffi::CString::new(s).unwrap_err()))
 	} else {
 		Ok(())
+	}
+}
+
+fn try_object_to_geom(object: &Object) -> Option<Geometry> {
+	if object.len() != 2 {
+		return None;
+	}
+
+	let Some(Value::Strand(Strand(key))) = object.get("type") else {
+		return None;
+	};
+
+	match key.as_str() {
+		"Point" => {
+			object.get("coordinates").and_then(Geometry::array_to_point).map(Geometry::Point)
+		}
+		"LineString" => {
+			object.get("coordinates").and_then(Geometry::array_to_line).map(Geometry::Line)
+		}
+		"Polygon" => {
+			object.get("coordinates").and_then(Geometry::array_to_polygon).map(Geometry::Polygon)
+		}
+		"MultiPoint" => object
+			.get("coordinates")
+			.and_then(Geometry::array_to_multipoint)
+			.map(Geometry::MultiPoint),
+		"MultiLineString" => object
+			.get("coordinates")
+			.and_then(Geometry::array_to_multiline)
+			.map(Geometry::MultiLine),
+		"MultiPolygon" => {
+			return object
+				.get("coordinates")
+				.and_then(Geometry::array_to_multipolygon)
+				.map(Geometry::MultiPolygon)
+		}
+		"GeometryCollection" => {
+			let Some(Value::Array(x)) = object.get("geometries") else {
+				return None;
+			};
+
+			let mut res = Vec::with_capacity(x.len());
+
+			for x in x.iter() {
+				let Value::Geometry(x) = x else {
+					return None;
+				};
+				res.push(x.clone());
+			}
+
+			Some(Geometry::Collection(res))
+		}
+
+		_ => None,
 	}
 }
 
@@ -89,6 +146,19 @@ impl<'js> FromJs<'js> for Value {
 						None => Ok(Value::None),
 					};
 				}
+
+				if let Some(v) = v.as_typed_array::<u8>() {
+					let Some(data) = v.as_bytes() else {
+						return Err(Error::new_from_js_message(
+							"Uint8Array",
+							"Bytes",
+							"Uint8Array data was consumed.",
+						));
+					};
+
+					return Ok(Value::Bytes(Bytes(data.to_vec())));
+				}
+
 				// Check to see if this object is a date
 				let date: js::Object = ctx.globals().get(js::atom::PredefinedAtom::Date)?;
 				if (v).is_instance_of(&date) {
@@ -97,6 +167,7 @@ impl<'js> FromJs<'js> for Value {
 					let d = Utc.timestamp_millis_opt(m).unwrap();
 					return Ok(Datetime::from(d).into());
 				}
+
 				// Check to see if this object is an array
 				if let Some(v) = v.as_array() {
 					let mut x = Array::with_capacity(v.len());
@@ -107,6 +178,7 @@ impl<'js> FromJs<'js> for Value {
 					}
 					return Ok(x.into());
 				}
+
 				// Check to see if this object is a function
 				if v.as_function().is_some() {
 					return Ok(Value::None);
@@ -120,6 +192,11 @@ impl<'js> FromJs<'js> for Value {
 					let v = Value::from_js(ctx, v)?;
 					x.insert(k, v);
 				}
+
+				if let Some(x) = try_object_to_geom(&x) {
+					return Ok(x.into());
+				}
+
 				Ok(x.into())
 			}
 			_ => Ok(Value::Null),

@@ -1,10 +1,11 @@
 //! Stores the key prefix for all keys under a table
-use crate::key::error::KeyCategory;
-use crate::key::key_req::KeyRequirements;
+use crate::key::category::Categorise;
+use crate::key::category::Category;
 use derive::Key;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Key)]
+#[non_exhaustive]
 pub struct Table<'a> {
 	__: u8,
 	_a: u8,
@@ -19,9 +20,9 @@ pub fn new<'a>(ns: &'a str, db: &'a str, tb: &'a str) -> Table<'a> {
 	Table::new(ns, db, tb)
 }
 
-impl KeyRequirements for Table<'_> {
-	fn key_category(&self) -> KeyCategory {
-		KeyCategory::TableRoot
+impl Categorise for Table<'_> {
+	fn categorise(&self) -> Category {
+		Category::TableRoot
 	}
 }
 

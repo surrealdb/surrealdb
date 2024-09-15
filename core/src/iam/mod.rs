@@ -7,6 +7,7 @@ pub mod base;
 pub mod check;
 pub mod clear;
 pub mod entities;
+pub mod issue;
 #[cfg(feature = "jwks")]
 pub mod jwks;
 pub mod policies;
@@ -19,6 +20,7 @@ pub use self::auth::*;
 pub use self::entities::*;
 
 #[derive(Error, Debug)]
+#[non_exhaustive]
 pub enum Error {
 	#[error("Invalid role '{0}'")]
 	InvalidRole(String),

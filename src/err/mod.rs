@@ -1,5 +1,4 @@
 use crate::cli::abstraction::auth::Error as SurrealAuthError;
-use axum::extract::rejection::TypedHeaderRejection;
 use axum::response::{IntoResponse, Response};
 use axum::Error as AxumError;
 use axum::Json;
@@ -38,7 +37,7 @@ pub enum Error {
 	OperationUnsupported,
 
 	#[error("There was a problem parsing the header {0}: {1}")]
-	InvalidHeader(HeaderName, TypedHeaderRejection),
+	InvalidHeader(HeaderName, String),
 
 	#[error("There was a problem with the database: {0}")]
 	Db(#[from] SurrealError),
@@ -132,6 +131,17 @@ impl From<surrealdb::error::Db> for Error {
 			return Error::InvalidAuth;
 		}
 		Error::Db(error.into())
+	}
+}
+
+impl From<surrealdb::rpc::RpcError> for Error {
+	fn from(value: surrealdb::rpc::RpcError) -> Self {
+		use surrealdb::rpc::RpcError;
+		match value {
+			RpcError::InternalError(e) => Error::Db(surrealdb::Error::Db(e)),
+			RpcError::Thrown(e) => Error::Other(e),
+			_ => Error::Other(value.to_string()),
+		}
 	}
 }
 

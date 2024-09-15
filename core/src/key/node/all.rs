@@ -1,11 +1,12 @@
 //! Stores the key prefix for all nodes
-use crate::key::error::KeyCategory;
-use crate::key::key_req::KeyRequirements;
+use crate::key::category::Categorise;
+use crate::key::category::Category;
 use derive::Key;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Key)]
+#[non_exhaustive]
 pub struct All {
 	__: u8,
 	_a: u8,
@@ -17,9 +18,9 @@ pub fn new(nd: Uuid) -> All {
 	All::new(nd)
 }
 
-impl KeyRequirements for All {
-	fn key_category(&self) -> KeyCategory {
-		KeyCategory::NodeRoot
+impl Categorise for All {
+	fn categorise(&self) -> Category {
+		Category::NodeRoot
 	}
 }
 

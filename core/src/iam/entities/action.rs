@@ -6,6 +6,7 @@ use crate::dbs::Statement;
 
 // TODO(sgirones): For now keep it simple. In the future, we will allow for custom roles and policies using a more exhaustive list of actions and resources.
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd)]
+#[non_exhaustive]
 pub enum Action {
 	View,
 	Edit,
@@ -48,10 +49,12 @@ impl From<&Statement<'_>> for Action {
 			Statement::Select(_) => Action::View,
 			Statement::Show(_) => Action::View,
 			Statement::Create(_) => Action::Edit,
+			Statement::Upsert(_) => Action::Edit,
 			Statement::Update(_) => Action::Edit,
 			Statement::Relate(_) => Action::Edit,
 			Statement::Delete(_) => Action::Edit,
 			Statement::Insert(_) => Action::Edit,
+			Statement::Access(_) => Action::Edit,
 		}
 	}
 }

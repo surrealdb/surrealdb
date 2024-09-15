@@ -1,10 +1,11 @@
-use crate::key::error::KeyCategory;
-use crate::key::key_req::KeyRequirements;
-/// Stores a DEFINE INDEX config definition
+//! Stores a DEFINE INDEX config definition
+use crate::key::category::Categorise;
+use crate::key::category::Category;
 use derive::Key;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Ord, Serialize, Deserialize, Key)]
+#[non_exhaustive]
 pub struct Ix<'a> {
 	__: u8,
 	_a: u8,
@@ -25,19 +26,19 @@ pub fn new<'a>(ns: &'a str, db: &'a str, tb: &'a str, ix: &'a str) -> Ix<'a> {
 
 pub fn prefix(ns: &str, db: &str, tb: &str) -> Vec<u8> {
 	let mut k = super::all::new(ns, db, tb).encode().unwrap();
-	k.extend_from_slice(&[b'!', b'i', b'x', 0x00]);
+	k.extend_from_slice(b"!ix\x00");
 	k
 }
 
 pub fn suffix(ns: &str, db: &str, tb: &str) -> Vec<u8> {
 	let mut k = super::all::new(ns, db, tb).encode().unwrap();
-	k.extend_from_slice(&[b'!', b'i', b'x', 0xff]);
+	k.extend_from_slice(b"!ix\xff");
 	k
 }
 
-impl KeyRequirements for Ix<'_> {
-	fn key_category(&self) -> KeyCategory {
-		KeyCategory::IndexDefinition
+impl Categorise for Ix<'_> {
+	fn categorise(&self) -> Category {
+		Category::IndexDefinition
 	}
 }
 

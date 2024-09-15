@@ -12,6 +12,7 @@ pub(crate) type Id = u32;
 // This doesn't do any variable-length encoding, so it's not as space efficient as it could be.
 // It is used to generate ids for any SurrealDB objects that need aliases (e.g. namespaces, databases, tables, indexes, etc.)
 #[derive(Clone)]
+#[non_exhaustive]
 pub struct U32 {
 	state_key: Key,
 	available_ids: Option<RoaringBitmap>,
@@ -114,18 +115,18 @@ mod tests {
 	use crate::kvs::{Datastore, LockType::*, Transaction, TransactionType::*};
 
 	async fn get_ids(ds: &Datastore) -> (Transaction, U32) {
-		let mut tx = ds.transaction(Write, Optimistic).await.unwrap();
+		let txn = ds.transaction(Write, Optimistic).await.unwrap();
 		let key = "foo";
-		let v = tx.get(key).await.unwrap();
+		let v = txn.get(key, None).await.unwrap();
 		let d = U32::new(key.into(), v).await.unwrap();
-		(tx, d)
+		(txn, d)
 	}
 
-	async fn finish(mut tx: Transaction, mut d: U32) -> Result<(), Error> {
+	async fn finish(txn: Transaction, mut d: U32) -> Result<(), Error> {
 		if let Some((key, val)) = d.finish() {
-			tx.set(key, val).await?;
+			txn.set(key, val, None).await?;
 		}
-		tx.commit().await
+		txn.commit().await
 	}
 
 	#[tokio::test]

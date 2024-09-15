@@ -23,8 +23,8 @@ pub static FFLAGS: FFlags = FFlags {
 };
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
-#[non_exhaustive]
 #[allow(dead_code)]
+#[non_exhaustive]
 pub struct FFlags {
 	pub change_feed_live_queries: FFlagEnabledStatus,
 }
@@ -33,6 +33,7 @@ pub struct FFlags {
 /// All the fields are here as information for people investigating the feature flag.
 #[allow(dead_code)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
+#[non_exhaustive]
 pub struct FFlagEnabledStatus {
 	pub(crate) enabled_release: bool,
 	pub(crate) enabled_debug: bool,

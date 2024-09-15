@@ -3,10 +3,11 @@ use js::{
 	prelude::{Coerced, Opt},
 	Ctx, Exception, FromJs, Result, Value,
 };
+use reblessive::tree::Stk;
 
 use crate::{
 	ctx::Context,
-	dbs::{Attach, Options, Transaction},
+	dbs::{Attach, Options},
 	doc::CursorDoc,
 	sql::Value as SurValue,
 };
@@ -14,16 +15,17 @@ use crate::{
 #[allow(clippy::module_inception)]
 mod classes;
 
+use crate::ctx::MutableContext;
 pub use classes::Query;
 
 pub const QUERY_DATA_PROP_NAME: &str = "__query_context__";
 
 /// A class to carry the data to run subqueries.
+#[non_exhaustive]
 pub struct QueryContext<'js> {
-	pub context: &'js Context<'js>,
+	pub context: &'js Context,
 	pub opt: &'js Options,
-	pub txn: &'js Transaction,
-	pub doc: Option<&'js CursorDoc<'js>>,
+	pub doc: Option<&'js CursorDoc>,
 }
 
 impl<'js> Trace<'js> for QueryContext<'js> {
@@ -66,20 +68,19 @@ pub async fn query<'js>(
 		&**borrow_store.insert(borrow)
 	} else {
 		let Coerced(query_text) = Coerced::<String>::from_js(&ctx, query)?;
-		query_store.insert(classes::Query::new(ctx.clone(), query_text, variables)?)
+		query_store.insert(Query::new(ctx.clone(), query_text, variables)?)
 	};
 
-	let context = Context::new(this.context);
-	let context = query
+	let mut context = MutableContext::new(this.context);
+	query
 		.clone()
 		.vars
-		.attach(context)
+		.attach(&mut context)
 		.map_err(|e| Exception::throw_message(&ctx, &e.to_string()))?;
+	let context = context.freeze();
 
-	let value = query
-		.query
-		.compute(&context, this.opt, this.txn, this.doc)
+	let value = Stk::enter_run(|stk| query.query.compute(stk, &context, this.opt, this.doc))
 		.await
 		.map_err(|e| Exception::throw_message(&ctx, &e.to_string()))?;
-	Result::Ok(value)
+	Ok(value)
 }

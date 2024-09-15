@@ -2,13 +2,21 @@ use crate::sql::json;
 use crate::sql::Object;
 use crate::sql::Value;
 use jsonwebtoken::{Algorithm, Header};
-use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::sync::LazyLock;
 
-pub static HEADER: Lazy<Header> = Lazy::new(|| Header::new(Algorithm::HS512));
+pub static HEADER: LazyLock<Header> = LazyLock::new(|| Header::new(Algorithm::HS512));
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(untagged)]
+pub enum Audience {
+	Single(String),
+	Multiple(Vec<String>),
+}
 
 #[derive(Debug, Default, Serialize, Deserialize, Clone)]
+#[non_exhaustive]
 pub struct Claims {
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub iat: Option<i64>,
@@ -18,6 +26,12 @@ pub struct Claims {
 	pub exp: Option<i64>,
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub iss: Option<String>,
+	#[serde(skip_serializing_if = "Option::is_none")]
+	pub sub: Option<String>,
+	#[serde(skip_serializing_if = "Option::is_none")]
+	pub aud: Option<Audience>,
+	#[serde(skip_serializing_if = "Option::is_none")]
+	pub jti: Option<String>,
 	#[serde(alias = "ns")]
 	#[serde(alias = "NS")]
 	#[serde(rename = "NS")]
@@ -32,20 +46,13 @@ pub struct Claims {
 	#[serde(alias = "https://surrealdb.com/database")]
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub db: Option<String>,
-	#[serde(alias = "sc")]
-	#[serde(alias = "SC")]
-	#[serde(rename = "SC")]
-	#[serde(alias = "https://surrealdb.com/sc")]
-	#[serde(alias = "https://surrealdb.com/scope")]
+	#[serde(alias = "ac")]
+	#[serde(alias = "AC")]
+	#[serde(rename = "AC")]
+	#[serde(alias = "https://surrealdb.com/ac")]
+	#[serde(alias = "https://surrealdb.com/access")]
 	#[serde(skip_serializing_if = "Option::is_none")]
-	pub sc: Option<String>,
-	#[serde(alias = "tk")]
-	#[serde(alias = "TK")]
-	#[serde(rename = "TK")]
-	#[serde(alias = "https://surrealdb.com/tk")]
-	#[serde(alias = "https://surrealdb.com/token")]
-	#[serde(skip_serializing_if = "Option::is_none")]
-	pub tk: Option<String>,
+	pub ac: Option<String>,
 	#[serde(alias = "id")]
 	#[serde(alias = "ID")]
 	#[serde(rename = "ID")]
@@ -74,6 +81,17 @@ impl From<Claims> for Value {
 		if let Some(iss) = v.iss {
 			out.insert("iss".to_string(), iss.into());
 		}
+		// Add sub field if set
+		if let Some(sub) = v.sub {
+			out.insert("sub".to_string(), sub.into());
+		}
+		// Add aud field if set
+		if let Some(aud) = v.aud {
+			match aud {
+				Audience::Single(v) => out.insert("aud".to_string(), v.into()),
+				Audience::Multiple(v) => out.insert("aud".to_string(), v.into()),
+			};
+		}
 		// Add iat field if set
 		if let Some(iat) = v.iat {
 			out.insert("iat".to_string(), iat.into());
@@ -86,6 +104,10 @@ impl From<Claims> for Value {
 		if let Some(exp) = v.exp {
 			out.insert("exp".to_string(), exp.into());
 		}
+		// Add jti field if set
+		if let Some(jti) = v.jti {
+			out.insert("jti".to_string(), jti.into());
+		}
 		// Add NS field if set
 		if let Some(ns) = v.ns {
 			out.insert("NS".to_string(), ns.into());
@@ -94,13 +116,9 @@ impl From<Claims> for Value {
 		if let Some(db) = v.db {
 			out.insert("DB".to_string(), db.into());
 		}
-		// Add SC field if set
-		if let Some(sc) = v.sc {
-			out.insert("SC".to_string(), sc.into());
-		}
-		// Add TK field if set
-		if let Some(tk) = v.tk {
-			out.insert("TK".to_string(), tk.into());
+		// Add AC field if set
+		if let Some(ac) = v.ac {
+			out.insert("AC".to_string(), ac.into());
 		}
 		// Add ID field if set
 		if let Some(id) = v.id {
@@ -129,7 +147,89 @@ impl From<Claims> for Value {
 						continue;
 					}
 				};
-				out.insert(claim, claim_value);
+				out.insert(claim.to_owned(), claim_value);
+			}
+		}
+		// Return value
+		out.into()
+	}
+}
+
+impl From<&Claims> for Value {
+	fn from(v: &Claims) -> Value {
+		// Set default value
+		let mut out = Object::default();
+		// Add iss field if set
+		if let Some(iss) = &v.iss {
+			out.insert("iss".to_string(), iss.clone().into());
+		}
+		// Add sub field if set
+		if let Some(sub) = &v.sub {
+			out.insert("sub".to_string(), sub.clone().into());
+		}
+		// Add aud field if set
+		if let Some(aud) = &v.aud {
+			match aud {
+				Audience::Single(v) => out.insert("aud".to_string(), v.clone().into()),
+				Audience::Multiple(v) => out.insert("aud".to_string(), v.clone().into()),
+			};
+		}
+		// Add iat field if set
+		if let Some(iat) = v.iat {
+			out.insert("iat".to_string(), iat.into());
+		}
+		// Add nbf field if set
+		if let Some(nbf) = v.nbf {
+			out.insert("nbf".to_string(), nbf.into());
+		}
+		// Add exp field if set
+		if let Some(exp) = v.exp {
+			out.insert("exp".to_string(), exp.into());
+		}
+		// Add jti field if set
+		if let Some(jti) = &v.jti {
+			out.insert("jti".to_string(), jti.clone().into());
+		}
+		// Add NS field if set
+		if let Some(ns) = &v.ns {
+			out.insert("NS".to_string(), ns.clone().into());
+		}
+		// Add DB field if set
+		if let Some(db) = &v.db {
+			out.insert("DB".to_string(), db.clone().into());
+		}
+		// Add AC field if set
+		if let Some(ac) = &v.ac {
+			out.insert("AC".to_string(), ac.clone().into());
+		}
+		// Add ID field if set
+		if let Some(id) = &v.id {
+			out.insert("ID".to_string(), id.clone().into());
+		}
+		// Add RL field if set
+		if let Some(role) = &v.roles {
+			out.insert("RL".to_string(), role.clone().into());
+		}
+		// Add custom claims if set
+		if let Some(custom_claims) = &v.custom_claims {
+			for (claim, value) in custom_claims {
+				// Serialize the raw JSON string representing the claim value
+				let claim_json = match serde_json::to_string(&value) {
+					Ok(claim_json) => claim_json,
+					Err(err) => {
+						debug!("Failed to serialize token claim '{}': {}", claim, err);
+						continue;
+					}
+				};
+				// Parse that JSON string into the corresponding SurrealQL value
+				let claim_value = match json(&claim_json) {
+					Ok(claim_value) => claim_value,
+					Err(err) => {
+						debug!("Failed to parse token claim '{}': {}", claim, err);
+						continue;
+					}
+				};
+				out.insert(claim.to_owned(), claim_value);
 			}
 		}
 		// Return value

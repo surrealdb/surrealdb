@@ -1,6 +1,6 @@
 //! Stores database timestamps
-use crate::key::error::KeyCategory;
-use crate::key::key_req::KeyRequirements;
+use crate::key::category::Categorise;
+use crate::key::category::Category;
 use derive::Key;
 use serde::{Deserialize, Serialize};
 
@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 // Each Ts key is suffixed by a timestamp.
 // The value is the versionstamp that corresponds to the timestamp.
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Key)]
+#[non_exhaustive]
 pub struct Ts<'a> {
 	__: u8,
 	_a: u8,
@@ -26,21 +27,21 @@ pub fn new<'a>(ns: &'a str, db: &'a str, ts: u64) -> Ts<'a> {
 
 /// Returns the prefix for the whole database timestamps
 pub fn prefix(ns: &str, db: &str) -> Vec<u8> {
-	let mut k = crate::key::database::all::new(ns, db).encode().unwrap();
-	k.extend_from_slice(&[b'!', b't', b's']);
+	let mut k = super::all::new(ns, db).encode().unwrap();
+	k.extend_from_slice(b"!ts\x00");
 	k
 }
 
 /// Returns the prefix for the whole database timestamps
 pub fn suffix(ns: &str, db: &str) -> Vec<u8> {
-	let mut k = prefix(ns, db);
-	k.extend_from_slice(&[0xff]);
+	let mut k = super::all::new(ns, db).encode().unwrap();
+	k.extend_from_slice(b"!ts\xff");
 	k
 }
 
-impl KeyRequirements for Ts<'_> {
-	fn key_category(&self) -> KeyCategory {
-		KeyCategory::DatabaseTimestamp
+impl Categorise for Ts<'_> {
+	fn categorise(&self) -> Category {
+		Category::DatabaseTimestamp
 	}
 }
 

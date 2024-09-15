@@ -1,6 +1,6 @@
 //! Stores a graph edge pointer
-use crate::key::error::KeyCategory;
-use crate::key::key_req::KeyRequirements;
+use crate::key::category::Categorise;
+use crate::key::category::Category;
 use crate::sql::dir::Dir;
 use crate::sql::id::Id;
 use crate::sql::thing::Thing;
@@ -101,6 +101,7 @@ impl<'a> PrefixFt<'a> {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Key)]
+#[non_exhaustive]
 pub struct Graph<'a> {
 	__: u8,
 	_a: u8,
@@ -163,9 +164,9 @@ pub fn ftsuffix(ns: &str, db: &str, tb: &str, id: &Id, eg: &Dir, ft: &str) -> Ve
 	k
 }
 
-impl KeyRequirements for Graph<'_> {
-	fn key_category(&self) -> KeyCategory {
-		KeyCategory::Graph
+impl Categorise for Graph<'_> {
+	fn categorise(&self) -> Category {
+		Category::Graph
 	}
 }
 
@@ -184,6 +185,31 @@ impl<'a> Graph<'a> {
 			eg,
 			ft: &fk.tb,
 			fk: fk.id.to_owned(),
+		}
+	}
+
+	pub fn new_from_id(
+		ns: &'a str,
+		db: &'a str,
+		tb: &'a str,
+		id: Id,
+		eg: Dir,
+		ft: &'a str,
+		fk: Id,
+	) -> Self {
+		Self {
+			__: b'/',
+			_a: b'*',
+			ns,
+			_b: b'*',
+			db,
+			_c: b'*',
+			tb,
+			_d: b'~',
+			id,
+			eg,
+			ft,
+			fk,
 		}
 	}
 }

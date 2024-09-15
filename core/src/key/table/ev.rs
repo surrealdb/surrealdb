@@ -1,10 +1,11 @@
-use crate::key::error::KeyCategory;
-use crate::key::key_req::KeyRequirements;
-/// Stores a DEFINE EVENT config definition
+//! Stores a DEFINE EVENT config definition
+use crate::key::category::Categorise;
+use crate::key::category::Category;
 use derive::Key;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Key)]
+#[non_exhaustive]
 pub struct Ev<'a> {
 	__: u8,
 	_a: u8,
@@ -25,19 +26,19 @@ pub fn new<'a>(ns: &'a str, db: &'a str, tb: &'a str, ev: &'a str) -> Ev<'a> {
 
 pub fn prefix(ns: &str, db: &str, tb: &str) -> Vec<u8> {
 	let mut k = super::all::new(ns, db, tb).encode().unwrap();
-	k.extend_from_slice(&[b'!', b'e', b'v', 0x00]);
+	k.extend_from_slice(b"!ev\x00");
 	k
 }
 
 pub fn suffix(ns: &str, db: &str, tb: &str) -> Vec<u8> {
 	let mut k = super::all::new(ns, db, tb).encode().unwrap();
-	k.extend_from_slice(&[b'!', b'e', b'v', 0xff]);
+	k.extend_from_slice(b"!ev\xff");
 	k
 }
 
-impl KeyRequirements for Ev<'_> {
-	fn key_category(&self) -> KeyCategory {
-		KeyCategory::TableEvent
+impl Categorise for Ev<'_> {
+	fn categorise(&self) -> Category {
+		Category::TableEvent
 	}
 }
 

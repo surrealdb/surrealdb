@@ -1,10 +1,11 @@
-use crate::key::error::KeyCategory;
-use crate::key::key_req::KeyRequirements;
-/// Stores a DEFINE FUNCTION config definition
+//! Stores a DEFINE FUNCTION config definition
+use crate::key::category::Categorise;
+use crate::key::category::Category;
 use derive::Key;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Key)]
+#[non_exhaustive]
 pub struct Fc<'a> {
 	__: u8,
 	_a: u8,
@@ -23,19 +24,19 @@ pub fn new<'a>(ns: &'a str, db: &'a str, fc: &'a str) -> Fc<'a> {
 
 pub fn prefix(ns: &str, db: &str) -> Vec<u8> {
 	let mut k = super::all::new(ns, db).encode().unwrap();
-	k.extend_from_slice(&[b'!', b'f', b'n', 0x00]);
+	k.extend_from_slice(b"!fn\x00");
 	k
 }
 
 pub fn suffix(ns: &str, db: &str) -> Vec<u8> {
 	let mut k = super::all::new(ns, db).encode().unwrap();
-	k.extend_from_slice(&[b'!', b'f', b'n', 0xff]);
+	k.extend_from_slice(b"!fn\xff");
 	k
 }
 
-impl KeyRequirements for Fc<'_> {
-	fn key_category(&self) -> KeyCategory {
-		KeyCategory::DatabaseFunction
+impl Categorise for Fc<'_> {
+	fn categorise(&self) -> Category {
+		Category::DatabaseFunction
 	}
 }
 

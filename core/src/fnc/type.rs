@@ -1,14 +1,24 @@
 use crate::ctx::Context;
-use crate::dbs::{Options, Transaction};
+use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::sql::table::Table;
 use crate::sql::thing::Thing;
 use crate::sql::value::Value;
+use crate::sql::{Kind, Strand};
 use crate::syn;
+use reblessive::tree::Stk;
+
+pub fn array((val,): (Value,)) -> Result<Value, Error> {
+	val.convert_to_array().map(Value::from)
+}
 
 pub fn bool((val,): (Value,)) -> Result<Value, Error> {
 	val.convert_to_bool().map(Value::from)
+}
+
+pub fn bytes((val,): (Value,)) -> Result<Value, Error> {
+	val.convert_to_bytes().map(Value::from)
 }
 
 pub fn datetime((val,): (Value,)) -> Result<Value, Error> {
@@ -24,21 +34,16 @@ pub fn duration((val,): (Value,)) -> Result<Value, Error> {
 }
 
 pub async fn field(
-	(ctx, opt, txn, doc): (
-		&Context<'_>,
-		Option<&Options>,
-		Option<&Transaction>,
-		Option<&CursorDoc<'_>>,
-	),
+	(stk, ctx, opt, doc): (&mut Stk, &Context, Option<&Options>, Option<&CursorDoc>),
 	(val,): (String,),
 ) -> Result<Value, Error> {
-	match (opt, txn) {
-		(Some(opt), Some(txn)) => {
+	match opt {
+		Some(opt) => {
 			// Parse the string as an Idiom
 			let idi = syn::idiom(&val)?;
 			// Return the Idiom or fetch the field
 			match opt.projections {
-				true => Ok(idi.compute(ctx, opt, txn, doc).await?),
+				true => Ok(idi.compute(stk, ctx, opt, doc).await?),
 				false => Ok(idi.into()),
 			}
 		}
@@ -47,23 +52,18 @@ pub async fn field(
 }
 
 pub async fn fields(
-	(ctx, opt, txn, doc): (
-		&Context<'_>,
-		Option<&Options>,
-		Option<&Transaction>,
-		Option<&CursorDoc<'_>>,
-	),
+	(stk, ctx, opt, doc): (&mut Stk, &Context, Option<&Options>, Option<&CursorDoc>),
 	(val,): (Vec<String>,),
 ) -> Result<Value, Error> {
-	match (opt, txn) {
-		(Some(opt), Some(txn)) => {
+	match opt {
+		Some(opt) => {
 			let mut args: Vec<Value> = Vec::with_capacity(val.len());
 			for v in val {
 				// Parse the string as an Idiom
 				let idi = syn::idiom(&v)?;
 				// Return the Idiom or fetch the field
 				match opt.projections {
-					true => args.push(idi.compute(ctx, opt, txn, doc).await?),
+					true => args.push(idi.compute(stk, ctx, opt, doc).await?),
 					false => args.push(idi.into()),
 				}
 			}
@@ -75,6 +75,10 @@ pub async fn fields(
 
 pub fn float((val,): (Value,)) -> Result<Value, Error> {
 	val.convert_to_float().map(Value::from)
+}
+
+pub fn geometry((val,): (Value,)) -> Result<Value, Error> {
+	val.convert_to_geometry().map(Value::from)
 }
 
 pub fn int((val,): (Value,)) -> Result<Value, Error> {
@@ -89,6 +93,28 @@ pub fn point((val,): (Value,)) -> Result<Value, Error> {
 	val.convert_to_point().map(Value::from)
 }
 
+pub fn range((val,): (Value,)) -> Result<Value, Error> {
+	val.convert_to_range().map(Value::from)
+}
+
+pub fn record((rid, tb): (Value, Option<Value>)) -> Result<Value, Error> {
+	match tb {
+		Some(Value::Strand(Strand(tb)) | Value::Table(Table(tb))) if tb.is_empty() => {
+			Err(Error::TbInvalid {
+				value: tb,
+			})
+		}
+		Some(Value::Strand(Strand(tb)) | Value::Table(Table(tb))) => {
+			rid.convert_to(&Kind::Record(vec![tb.into()]))
+		}
+		Some(_) => Err(Error::InvalidArguments {
+			name: "type::record".into(),
+			message: "The second argument must be a table name or a string.".into(),
+		}),
+		None => rid.convert_to(&Kind::Record(vec![])),
+	}
+}
+
 pub fn string((val,): (Value,)) -> Result<Value, Error> {
 	val.convert_to_strand().map(Value::from)
 }
@@ -101,8 +127,19 @@ pub fn table((val,): (Value,)) -> Result<Value, Error> {
 }
 
 pub fn thing((arg1, arg2): (Value, Option<Value>)) -> Result<Value, Error> {
-	Ok(if let Some(arg2) = arg2 {
-		Value::Thing(Thing {
+	match (arg1, arg2) {
+		// Empty table name
+		(Value::Strand(arg1), _) if arg1.is_empty() => Err(Error::TbInvalid {
+			value: arg1.as_string(),
+		}),
+
+		// Empty ID part
+		(_, Some(Value::Strand(arg2))) if arg2.is_empty() => Err(Error::IdInvalid {
+			value: arg2.as_string(),
+		}),
+
+		// Handle second argument
+		(arg1, Some(arg2)) => Ok(Value::Thing(Thing {
 			tb: arg1.as_string(),
 			id: match arg2 {
 				Value::Thing(v) => v.id,
@@ -111,9 +148,10 @@ pub fn thing((arg1, arg2): (Value, Option<Value>)) -> Result<Value, Error> {
 				Value::Number(v) => v.into(),
 				v => v.as_string().into(),
 			},
-		})
-	} else {
-		match arg1 {
+		})),
+
+		// No second argument passed
+		(arg1, _) => Ok(match arg1 {
 			Value::Thing(v) => Ok(v),
 			Value::Strand(v) => Thing::try_from(v.as_str()).map_err(move |_| Error::ConvertTo {
 				from: Value::Strand(v),
@@ -124,8 +162,12 @@ pub fn thing((arg1, arg2): (Value, Option<Value>)) -> Result<Value, Error> {
 				into: "record".into(),
 			}),
 		}?
-		.into()
-	})
+		.into()),
+	}
+}
+
+pub fn uuid((val,): (Value,)) -> Result<Value, Error> {
+	val.convert_to_uuid().map(Value::from)
 }
 
 pub mod is {
@@ -232,6 +274,7 @@ pub mod is {
 
 #[cfg(test)]
 mod tests {
+	use crate::err::Error;
 	use crate::sql::value::Value;
 
 	#[test]
@@ -241,5 +284,24 @@ mod tests {
 
 		let value = super::is::array(("test".into(),)).unwrap();
 		assert_eq!(value, Value::Bool(false));
+	}
+
+	#[test]
+	fn no_empty_thing() {
+		let value = super::thing(("".into(), None));
+		let _expected = Error::TbInvalid {
+			value: "".into(),
+		};
+		if !matches!(value, Err(_expected)) {
+			panic!("An empty thing tb part should result in an error");
+		}
+
+		let value = super::thing(("table".into(), Some("".into())));
+		let _expected = Error::IdInvalid {
+			value: "".into(),
+		};
+		if !matches!(value, Err(_expected)) {
+			panic!("An empty thing id part should result in an error");
+		}
 	}
 }

@@ -1,16 +1,20 @@
 #![cfg(feature = "kv-mem")]
 
 use crate::err::Error;
+use crate::key::debug::Sprintable;
+use crate::kvs::savepoint::{SaveOperation, SavePointImpl, SavePoints};
 use crate::kvs::Check;
 use crate::kvs::Key;
 use crate::kvs::Val;
-use crate::vs::{try_to_u64_be, u64_to_versionstamp, Versionstamp};
+use std::fmt::Debug;
 use std::ops::Range;
 
+#[non_exhaustive]
 pub struct Datastore {
 	db: echodb::Db<Key, Val>,
 }
 
+#[non_exhaustive]
 pub struct Transaction {
 	/// Is the transaction complete?
 	done: bool,
@@ -20,6 +24,8 @@ pub struct Transaction {
 	check: Check,
 	/// The underlying datastore transaction
 	inner: echodb::Tx<Key, Val>,
+	/// The save point implementation
+	save_points: SavePoints,
 }
 
 impl Drop for Transaction {
@@ -73,23 +79,32 @@ impl Datastore {
 				check,
 				write,
 				inner,
+				save_points: Default::default(),
 			}),
 			Err(e) => Err(Error::Tx(e.to_string())),
 		}
 	}
 }
 
-impl Transaction {
+impl super::api::Transaction for Transaction {
 	/// Behaviour if unclosed
-	pub(crate) fn check_level(&mut self, check: Check) {
+	fn check_level(&mut self, check: Check) {
 		self.check = check;
 	}
+
 	/// Check if closed
-	pub(crate) fn closed(&self) -> bool {
+	fn closed(&self) -> bool {
 		self.done
 	}
+
+	/// Check if writeable
+	fn writeable(&self) -> bool {
+		self.write
+	}
+
 	/// Cancel a transaction
-	pub(crate) fn cancel(&mut self) -> Result<(), Error> {
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self))]
+	async fn cancel(&mut self) -> Result<(), Error> {
 		// Check to see if transaction is closed
 		if self.done {
 			return Err(Error::TxFinished);
@@ -101,8 +116,10 @@ impl Transaction {
 		// Continue
 		Ok(())
 	}
+
 	/// Commit a transaction
-	pub(crate) fn commit(&mut self) -> Result<(), Error> {
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self))]
+	async fn commit(&mut self) -> Result<(), Error> {
 		// Check to see if transaction is closed
 		if self.done {
 			return Err(Error::TxFinished);
@@ -118,10 +135,12 @@ impl Transaction {
 		// Continue
 		Ok(())
 	}
+
 	/// Check if a key exists
-	pub(crate) fn exi<K>(&mut self, key: K) -> Result<bool, Error>
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
+	async fn exists<K>(&mut self, key: K) -> Result<bool, Error>
 	where
-		K: Into<Key>,
+		K: Into<Key> + Sprintable + Debug,
 	{
 		// Check to see if transaction is closed
 		if self.done {
@@ -132,11 +151,18 @@ impl Transaction {
 		// Return result
 		Ok(res)
 	}
+
 	/// Fetch a key from the database
-	pub(crate) fn get<K>(&mut self, key: K) -> Result<Option<Val>, Error>
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
+	async fn get<K>(&mut self, key: K, version: Option<u64>) -> Result<Option<Val>, Error>
 	where
-		K: Into<Key>,
+		K: Into<Key> + Sprintable + Debug,
 	{
+		// MemDB does not support versioned queries.
+		if version.is_some() {
+			return Err(Error::UnsupportedVersionedQueries);
+		}
+
 		// Check to see if transaction is closed
 		if self.done {
 			return Err(Error::TxFinished);
@@ -146,83 +172,19 @@ impl Transaction {
 		// Return result
 		Ok(res)
 	}
-	/// Obtain a new change timestamp for a key
-	/// which is replaced with the current timestamp when the transaction is committed.
-	/// NOTE: This should be called when composing the change feed entries for this transaction,
-	/// which should be done immediately before the transaction commit.
-	/// That is to keep other transactions commit delay(pessimistic) or conflict(optimistic) as less as possible.
-	#[allow(unused)]
-	pub(crate) fn get_timestamp<K>(&mut self, key: K) -> Result<Versionstamp, Error>
-	where
-		K: Into<Key>,
-	{
-		// Check to see if transaction is closed
-		if self.done {
-			return Err(Error::TxFinished);
-		}
-		// Write the timestamp to the "last-write-timestamp" key
-		// to ensure that no other transactions can commit with older timestamps.
-		let k: Key = key.into();
-		let prev = self.inner.get(k.clone())?;
-		let ver = match prev {
-			Some(prev) => {
-				let slice = prev.as_slice();
-				let res: Result<[u8; 10], Error> = match slice.try_into() {
-					Ok(ba) => Ok(ba),
-					Err(e) => Err(Error::Ds(e.to_string())),
-				};
-				let array = res?;
-				let prev = try_to_u64_be(array)?;
-				prev + 1
-			}
-			None => 1,
-		};
-
-		let verbytes = u64_to_versionstamp(ver);
-
-		self.inner.set(k, verbytes.to_vec())?;
-		// Return the uint64 representation of the timestamp as the result
-		Ok(verbytes)
-	}
-	/// Obtain a new key that is suffixed with the change timestamp
-	pub(crate) async fn get_versionstamped_key<K>(
-		&mut self,
-		ts_key: K,
-		prefix: K,
-		suffix: K,
-	) -> Result<Vec<u8>, Error>
-	where
-		K: Into<Key>,
-	{
-		// Check to see if transaction is closed
-		if self.done {
-			return Err(Error::TxFinished);
-		}
-		// Check to see if transaction is writable
-		if !self.write {
-			return Err(Error::TxReadonly);
-		}
-
-		let ts_key: Key = ts_key.into();
-		let prefix: Key = prefix.into();
-		let suffix: Key = suffix.into();
-
-		let ts = self.get_timestamp(ts_key.clone())?;
-		let mut k: Vec<u8> = prefix.clone();
-		k.append(&mut ts.to_vec());
-		k.append(&mut suffix.clone());
-
-		trace!("get_versionstamped_key; {ts_key:?} {prefix:?} {ts:?} {suffix:?} {k:?}",);
-
-		Ok(k)
-	}
 
 	/// Insert or update a key in the database
-	pub(crate) fn set<K, V>(&mut self, key: K, val: V) -> Result<(), Error>
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
+	async fn set<K, V>(&mut self, key: K, val: V, version: Option<u64>) -> Result<(), Error>
 	where
-		K: Into<Key>,
-		V: Into<Val>,
+		K: Into<Key> + Sprintable + Debug,
+		V: Into<Val> + Debug,
 	{
+		// MemDB does not support versioned queries.
+		if version.is_some() {
+			return Err(Error::UnsupportedVersionedQueries);
+		}
+
 		// Check to see if transaction is closed
 		if self.done {
 			return Err(Error::TxFinished);
@@ -231,17 +193,36 @@ impl Transaction {
 		if !self.write {
 			return Err(Error::TxReadonly);
 		}
+		// Extract the key
+		let key = key.into();
+		// Prepare the savepoint if any
+		let prep = if self.save_points.is_some() {
+			self.save_point_prepare(&key, version, SaveOperation::Set).await?
+		} else {
+			None
+		};
 		// Set the key
-		self.inner.set(key.into(), val.into())?;
+		self.inner.set(key, val.into())?;
+		// Confirm the save point
+		if let Some(prep) = prep {
+			self.save_points.save(prep);
+		}
 		// Return result
 		Ok(())
 	}
+
 	/// Insert a key if it doesn't exist in the database
-	pub(crate) fn put<K, V>(&mut self, key: K, val: V) -> Result<(), Error>
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
+	async fn put<K, V>(&mut self, key: K, val: V, version: Option<u64>) -> Result<(), Error>
 	where
-		K: Into<Key>,
-		V: Into<Val>,
+		K: Into<Key> + Sprintable + Debug,
+		V: Into<Val> + Debug,
 	{
+		// MemDB does not support versioned queries.
+		if version.is_some() {
+			return Err(Error::UnsupportedVersionedQueries);
+		}
+
 		// Check to see if transaction is closed
 		if self.done {
 			return Err(Error::TxFinished);
@@ -250,16 +231,30 @@ impl Transaction {
 		if !self.write {
 			return Err(Error::TxReadonly);
 		}
+		// Extract the key
+		let key = key.into();
+		// Hydrate the savepoint if any
+		let prep = if self.save_points.is_some() {
+			self.save_point_prepare(&key, version, SaveOperation::Put).await?
+		} else {
+			None
+		};
 		// Set the key
-		self.inner.put(key.into(), val.into())?;
+		self.inner.put(key, val.into())?;
+		// Confirm the save point
+		if let Some(prep) = prep {
+			self.save_points.save(prep);
+		}
 		// Return result
 		Ok(())
 	}
-	/// Insert a key if it doesn't exist in the database
-	pub(crate) fn putc<K, V>(&mut self, key: K, val: V, chk: Option<V>) -> Result<(), Error>
+
+	/// Insert a key if the current value matches a condition
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
+	async fn putc<K, V>(&mut self, key: K, val: V, chk: Option<V>) -> Result<(), Error>
 	where
-		K: Into<Key>,
-		V: Into<Val>,
+		K: Into<Key> + Sprintable + Debug,
+		V: Into<Val> + Debug,
 	{
 		// Check to see if transaction is closed
 		if self.done {
@@ -269,15 +264,29 @@ impl Transaction {
 		if !self.write {
 			return Err(Error::TxReadonly);
 		}
+		// Extract the key
+		let key = key.into();
+		// Hydrate the savepoint if any
+		let prep = if self.save_points.is_some() {
+			self.save_point_prepare(&key, None, SaveOperation::Put).await?
+		} else {
+			None
+		};
 		// Set the key
-		self.inner.putc(key.into(), val.into(), chk.map(Into::into))?;
+		self.inner.putc(key, val.into(), chk.map(Into::into))?;
+		// Confirm the save point
+		if let Some(prep) = prep {
+			self.save_points.save(prep);
+		}
 		// Return result
 		Ok(())
 	}
+
 	/// Delete a key
-	pub(crate) fn del<K>(&mut self, key: K) -> Result<(), Error>
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
+	async fn del<K>(&mut self, key: K) -> Result<(), Error>
 	where
-		K: Into<Key>,
+		K: Into<Key> + Sprintable + Debug,
 	{
 		// Check to see if transaction is closed
 		if self.done {
@@ -287,16 +296,30 @@ impl Transaction {
 		if !self.write {
 			return Err(Error::TxReadonly);
 		}
+		// Extract the key
+		let key = key.into();
+		// Hydrate the savepoint if any
+		let prep = if self.save_points.is_some() {
+			self.save_point_prepare(&key, None, SaveOperation::Del).await?
+		} else {
+			None
+		};
 		// Remove the key
-		self.inner.del(key.into())?;
+		self.inner.del(key)?;
+		// Confirm the save point
+		if let Some(prep) = prep {
+			self.save_points.save(prep);
+		}
 		// Return result
 		Ok(())
 	}
-	/// Delete a key
-	pub(crate) fn delc<K, V>(&mut self, key: K, chk: Option<V>) -> Result<(), Error>
+
+	/// Delete a key if the current value matches a condition
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
+	async fn delc<K, V>(&mut self, key: K, chk: Option<V>) -> Result<(), Error>
 	where
-		K: Into<Key>,
-		V: Into<Val>,
+		K: Into<Key> + Sprintable + Debug,
+		V: Into<Val> + Debug,
 	{
 		// Check to see if transaction is closed
 		if self.done {
@@ -306,15 +329,29 @@ impl Transaction {
 		if !self.write {
 			return Err(Error::TxReadonly);
 		}
+		// Extract the key
+		let key = key.into();
+		// Hydrate the savepoint if any
+		let prep = if self.save_points.is_some() {
+			self.save_point_prepare(&key, None, SaveOperation::Del).await?
+		} else {
+			None
+		};
 		// Remove the key
-		self.inner.delc(key.into(), chk.map(Into::into))?;
+		self.inner.delc(key, chk.map(Into::into))?;
+		// Confirm the save point
+		if let Some(prep) = prep {
+			self.save_points.save(prep);
+		}
 		// Return result
 		Ok(())
 	}
+
 	/// Retrieve a range of keys from the databases
-	pub(crate) fn scan<K>(&mut self, rng: Range<K>, limit: u32) -> Result<Vec<(Key, Val)>, Error>
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.sprint()))]
+	async fn keys<K>(&mut self, rng: Range<K>, limit: u32) -> Result<Vec<Key>, Error>
 	where
-		K: Into<Key>,
+		K: Into<Key> + Sprintable + Debug,
 	{
 		// Check to see if transaction is closed
 		if self.done {
@@ -326,8 +363,45 @@ impl Transaction {
 			end: rng.end.into(),
 		};
 		// Scan the keys
-		let res = self.inner.scan(rng, limit)?;
+		let res = self.inner.keys(rng, limit as usize)?;
 		// Return result
 		Ok(res)
+	}
+
+	/// Retrieve a range of keys from the databases
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.sprint()))]
+	async fn scan<K>(
+		&mut self,
+		rng: Range<K>,
+		limit: u32,
+		version: Option<u64>,
+	) -> Result<Vec<(Key, Val)>, Error>
+	where
+		K: Into<Key> + Sprintable + Debug,
+	{
+		// MemDB does not support versioned queries.
+		if version.is_some() {
+			return Err(Error::UnsupportedVersionedQueries);
+		}
+
+		// Check to see if transaction is closed
+		if self.done {
+			return Err(Error::TxFinished);
+		}
+		// Convert the range to bytes
+		let rng: Range<Key> = Range {
+			start: rng.start.into(),
+			end: rng.end.into(),
+		};
+		// Scan the keys
+		let res = self.inner.scan(rng, limit as usize)?;
+		// Return result
+		Ok(res)
+	}
+}
+
+impl SavePointImpl for Transaction {
+	fn get_save_points(&mut self) -> &mut SavePoints {
+		&mut self.save_points
 	}
 }

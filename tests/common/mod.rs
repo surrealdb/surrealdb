@@ -1,8 +1,11 @@
 #![allow(unused_imports)]
 #![allow(dead_code)]
 
+pub mod docker;
 pub mod error;
+pub mod expected;
 pub mod format;
+pub mod rest_client;
 pub mod server;
 pub mod socket;
 

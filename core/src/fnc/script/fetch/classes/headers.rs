@@ -11,6 +11,7 @@ use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
 
 #[derive(Clone, Trace)]
 #[js::class]
+#[non_exhaustive]
 pub struct Headers {
 	#[qjs(skip_trace)]
 	pub(crate) inner: HeaderMap,

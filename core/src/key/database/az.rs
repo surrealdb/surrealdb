@@ -1,10 +1,11 @@
 //! Stores a DEFINE ANALYZER config definition
-use crate::key::error::KeyCategory;
-use crate::key::key_req::KeyRequirements;
+use crate::key::category::Categorise;
+use crate::key::category::Category;
 use derive::Key;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Key)]
+#[non_exhaustive]
 pub struct Az<'a> {
 	__: u8,
 	_a: u8,
@@ -23,19 +24,19 @@ pub fn new<'a>(ns: &'a str, db: &'a str, tb: &'a str) -> Az<'a> {
 
 pub fn prefix(ns: &str, db: &str) -> Vec<u8> {
 	let mut k = super::all::new(ns, db).encode().unwrap();
-	k.extend_from_slice(&[b'!', b'a', b'z', 0x00]);
+	k.extend_from_slice(b"!az\x00");
 	k
 }
 
 pub fn suffix(ns: &str, db: &str) -> Vec<u8> {
 	let mut k = super::all::new(ns, db).encode().unwrap();
-	k.extend_from_slice(&[b'!', b'a', b'z', 0xff]);
+	k.extend_from_slice(b"!az\xff");
 	k
 }
 
-impl KeyRequirements for Az<'_> {
-	fn key_category(&self) -> KeyCategory {
-		KeyCategory::DatabaseAnalyzer
+impl Categorise for Az<'_> {
+	fn categorise(&self) -> Category {
+		Category::DatabaseAnalyzer
 	}
 }
 

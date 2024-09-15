@@ -6,11 +6,13 @@ mod bcrypt;
 mod pbkdf2;
 mod scrypt;
 
+#[non_exhaustive]
 pub struct Package;
 
 impl_module_def!(
 	Package,
 	"crypto",
+	"blake3" => run,
 	"md5" => run,
 	"sha1" => run,
 	"sha256" => run,

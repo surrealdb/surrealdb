@@ -1,24 +1,40 @@
 use crate::ctx::Context;
+use crate::dbs::Options;
 use crate::dbs::Statement;
-use crate::dbs::{Options, Transaction};
 use crate::doc::Document;
 use crate::err::Error;
 use crate::sql::permission::Permission;
+use reblessive::tree::Stk;
 
-impl<'a> Document<'a> {
+impl Document {
 	pub async fn allow(
 		&self,
-		ctx: &Context<'_>,
+		stk: &mut Stk,
+		ctx: &Context,
 		opt: &Options,
-		txn: &Transaction,
 		stm: &Statement<'_>,
 	) -> Result<(), Error> {
 		// Check if this record exists
 		if self.id.is_some() {
 			// Should we run permissions checks?
-			if opt.check_perms(stm.into()) {
+			if opt.check_perms(stm.into())? {
+				// Check that record authentication matches session
+				if opt.auth.is_record() {
+					let ns = opt.ns()?;
+					if opt.auth.level().ns() != Some(ns) {
+						return Err(Error::NsNotAllowed {
+							ns: ns.into(),
+						});
+					}
+					let db = opt.db()?;
+					if opt.auth.level().db() != Some(db) {
+						return Err(Error::DbNotAllowed {
+							db: db.into(),
+						});
+					}
+				}
 				// Get the table
-				let tb = self.tb(opt, txn).await?;
+				let tb = self.tb(ctx, opt).await?;
 				// Get the permission clause
 				let perms = if stm.is_delete() {
 					&tb.permissions.delete
@@ -39,9 +55,9 @@ impl<'a> Document<'a> {
 						// Process the PERMISSION clause
 						if !e
 							.compute(
+								stk,
 								ctx,
 								opt,
-								txn,
 								Some(match stm.is_delete() {
 									true => &self.initial,
 									false => &self.current,

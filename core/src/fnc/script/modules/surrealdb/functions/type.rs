@@ -5,12 +5,15 @@ use js::prelude::Async;
 
 mod is;
 
+#[non_exhaustive]
 pub struct Package;
 
 impl_module_def!(
 	Package,
 	"type",
+	"array" => run,
 	"bool" => run,
+	"bytes" => run,
 	"datetime" => run,
 	"decimal" => run,
 	"duration" => run,
@@ -24,5 +27,9 @@ impl_module_def!(
 	"regex" => run,
 	"string" => run,
 	"table" => run,
-	"thing" => run
+	"thing" => run,
+	"range" => run,
+	"record" => run,
+	"uuid" => run,
+	"geometry" => run
 );

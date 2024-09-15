@@ -1,12 +1,12 @@
 use crate::ctx::Context;
-use crate::dbs::{Options, Transaction};
+use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::idx::planner::executor::QueryExecutor;
-#[cfg(feature = "sql2")]
 use crate::sql::value::TryRem;
 use crate::sql::value::{TryAdd, TryDiv, TryMul, TryNeg, TryPow, TrySub, Value};
 use crate::sql::{Expression, Thing};
+use reblessive::tree::Stk;
 
 pub fn neg(a: Value) -> Result<Value, Error> {
 	a.try_neg()
@@ -57,10 +57,9 @@ pub fn mul(a: Value, b: Value) -> Result<Value, Error> {
 }
 
 pub fn div(a: Value, b: Value) -> Result<Value, Error> {
-	a.try_div(b)
+	Ok(a.try_div(b).unwrap_or(f64::NAN.into()))
 }
 
-#[cfg(feature = "sql2")]
 pub fn rem(a: Value, b: Value) -> Result<Value, Error> {
 	a.try_rem(b)
 }
@@ -176,13 +175,13 @@ enum ExecutorOption<'a> {
 }
 
 fn get_executor_and_thing<'a>(
-	ctx: &'a Context<'_>,
+	ctx: &'a Context,
 	doc: &'a CursorDoc,
 ) -> Option<(&'a QueryExecutor, &'a Thing)> {
-	if let Some(thg) = doc.rid {
+	if let Some(thg) = &doc.rid {
 		if let Some(exe) = ctx.get_query_executor() {
 			if exe.is_table(&thg.tb) {
-				return Some((exe, thg));
+				return Some((exe, thg.as_ref()));
 			}
 		}
 		if let Some(pla) = ctx.get_query_planner() {
@@ -195,14 +194,14 @@ fn get_executor_and_thing<'a>(
 }
 
 fn get_executor_option<'a>(
-	ctx: &'a Context<'_>,
-	doc: Option<&'a CursorDoc<'_>>,
+	ctx: &'a Context,
+	doc: Option<&'a CursorDoc>,
 	exp: &'a Expression,
 ) -> ExecutorOption<'a> {
 	if let Some(doc) = doc {
 		if let Some((exe, thg)) = get_executor_and_thing(ctx, doc) {
-			if let Some(ir) = doc.ir {
-				if exe.is_iterator_expression(ir, exp) {
+			if let Some(ir) = &doc.ir {
+				if exe.is_iterator_expression(ir.irf(), exp) {
 					return ExecutorOption::PreMatch;
 				}
 			}
@@ -213,29 +212,33 @@ fn get_executor_option<'a>(
 }
 
 pub(crate) async fn matches(
-	ctx: &Context<'_>,
-	txn: &Transaction,
-	doc: Option<&CursorDoc<'_>>,
+	stk: &mut Stk,
+	ctx: &Context,
+	opt: &Options,
+	doc: Option<&CursorDoc>,
 	exp: &Expression,
+	l: Value,
+	r: Value,
 ) -> Result<Value, Error> {
-	match get_executor_option(ctx, doc, exp) {
-		ExecutorOption::PreMatch => Ok(Value::Bool(true)),
-		ExecutorOption::None => Ok(Value::Bool(false)),
-		ExecutorOption::Execute(exe, thg) => exe.matches(txn, thg, exp).await,
-	}
+	let res = match get_executor_option(ctx, doc, exp) {
+		ExecutorOption::PreMatch => true,
+		ExecutorOption::None => false,
+		ExecutorOption::Execute(exe, thg) => exe.matches(stk, ctx, opt, thg, exp, l, r).await?,
+	};
+	Ok(res.into())
 }
 
 pub(crate) async fn knn(
-	ctx: &Context<'_>,
+	stk: &mut Stk,
+	ctx: &Context,
 	opt: &Options,
-	txn: &Transaction,
-	doc: Option<&CursorDoc<'_>>,
+	doc: Option<&CursorDoc>,
 	exp: &Expression,
 ) -> Result<Value, Error> {
 	match get_executor_option(ctx, doc, exp) {
 		ExecutorOption::PreMatch => Ok(Value::Bool(true)),
 		ExecutorOption::None => Ok(Value::Bool(false)),
-		ExecutorOption::Execute(exe, thg) => exe.knn(ctx, opt, txn, thg, doc, exp).await,
+		ExecutorOption::Execute(exe, thg) => exe.knn(stk, ctx, opt, thg, doc, exp).await,
 	}
 }
 

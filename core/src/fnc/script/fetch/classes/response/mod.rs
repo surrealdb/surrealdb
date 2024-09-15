@@ -8,6 +8,7 @@ use js::{class::Trace, prelude::Opt, ArrayBuffer, Class, Ctx, Exception, Result,
 
 #[allow(dead_code)]
 #[derive(Clone, Copy)]
+#[non_exhaustive]
 pub enum ResponseType {
 	Basic,
 	Cors,
@@ -29,6 +30,7 @@ use super::{Blob, Headers};
 #[allow(dead_code)]
 #[derive(Trace)]
 #[js::class]
+#[non_exhaustive]
 pub struct Response<'js> {
 	#[qjs(skip_trace)]
 	pub(crate) body: Body,
@@ -306,7 +308,7 @@ mod test {
 	#[tokio::test]
 	async fn basic_response_use() {
 		create_test_context!(ctx => {
-			ctx.eval::<Promise<()>,_>(r#"
+			ctx.eval::<Promise,_>(r#"
 				(async () => {
 					let resp = new Response();
 					assert(resp.bodyUsed);
@@ -367,7 +369,7 @@ mod test {
 
 
 				})()
-			"#).catch(&ctx).unwrap().await.catch(&ctx).unwrap();
+			"#).catch(&ctx).unwrap().into_future::<()>().await.catch(&ctx).unwrap();
 		})
 		.await;
 	}

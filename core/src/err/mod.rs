@@ -1,15 +1,16 @@
 use crate::iam::Error as IamError;
 use crate::idx::ft::MatchRef;
 use crate::idx::trees::vector::SharedVector;
-use crate::key::error::KeyCategory;
 use crate::sql::idiom::Idiom;
 use crate::sql::index::Distance;
 use crate::sql::thing::Thing;
 use crate::sql::value::Value;
 use crate::syn::error::RenderedError as RenderedParserError;
 use crate::vs::Error as VersionstampError;
-use base64_lib::DecodeError as Base64Error;
+use base64::DecodeError as Base64Error;
 use bincode::Error as BincodeError;
+#[cfg(storage)]
+use ext_sort::SortError;
 use fst::Error as FstError;
 use jsonwebtoken::errors::Error as JWTError;
 use object_store::Error as ObjectStoreError;
@@ -47,7 +48,7 @@ pub enum Error {
 
 	/// The database encountered unreachable logic
 	#[error("The database encountered unreachable logic: {0}")]
-	Unreachable(&'static str),
+	Unreachable(String),
 
 	/// Statement has been deprecated
 	#[error("{0}")]
@@ -83,7 +84,6 @@ pub enum Error {
 
 	/// The key being inserted in the transaction already exists
 	#[error("The key being inserted already exists")]
-	#[deprecated(note = "Use TxKeyAlreadyExistsCategory")]
 	TxKeyAlreadyExists,
 
 	/// The key exceeds a limit set by the KV store
@@ -159,6 +159,12 @@ pub enum Error {
 		field: String,
 	},
 
+	/// The FETCH clause accepts idioms, strings and fields.
+	#[error("Found {value} on FETCH CLAUSE, but FETCH expects an idiom, a string or fields")]
+	InvalidFetch {
+		value: Value,
+	},
+
 	#[error("Found '{field}' in SPLIT ON clause on line {line}, but field is not present in SELECT expression")]
 	InvalidSplit {
 		line: usize,
@@ -213,6 +219,22 @@ pub enum Error {
 	InvalidArguments {
 		name: String,
 		message: String,
+	},
+
+	/// The wrong quantity or magnitude of arguments was given for the specified function
+	#[error("Incorrect arguments for aggregate function {name}() on table '{table}'. {message}")]
+	InvalidAggregation {
+		name: String,
+		table: String,
+		message: String,
+	},
+
+	/// The wrong quantity or magnitude of arguments was given for the specified function
+	#[error("There was a problem running the {name} function. Expected this function to return a value of type {check}, but found {value}")]
+	FunctionCheck {
+		name: String,
+		value: String,
+		check: String,
 	},
 
 	/// The URL is invalid
@@ -289,12 +311,6 @@ pub enum Error {
 		value: String,
 	},
 
-	/// The requested namespace token does not exist
-	#[error("The namespace token '{value}' does not exist")]
-	NtNotFound {
-		value: String,
-	},
-
 	/// The requested namespace login does not exist
 	#[error("The namespace login '{value}' does not exist")]
 	NlNotFound {
@@ -307,15 +323,15 @@ pub enum Error {
 		value: String,
 	},
 
-	/// The requested database token does not exist
-	#[error("The database token '{value}' does not exist")]
-	DtNotFound {
-		value: String,
-	},
-
 	/// The requested database login does not exist
 	#[error("The database login '{value}' does not exist")]
 	DlNotFound {
+		value: String,
+	},
+
+	/// The requested event does not exist
+	#[error("The event '{value}' does not exist")]
+	EvNotFound {
 		value: String,
 	},
 
@@ -325,15 +341,15 @@ pub enum Error {
 		value: String,
 	},
 
-	/// The requested model does not exist
-	#[error("The model 'ml::{value}' does not exist")]
-	MlNotFound {
+	/// The requested field does not exist
+	#[error("The field '{value}' does not exist")]
+	FdNotFound {
 		value: String,
 	},
 
-	/// The requested scope does not exist
-	#[error("The scope '{value}' does not exist")]
-	ScNotFound {
+	/// The requested model does not exist
+	#[error("The model 'ml::{value}' does not exist")]
+	MlNotFound {
 		value: String,
 	},
 
@@ -346,12 +362,6 @@ pub enum Error {
 	// The cluster node does not exist
 	#[error("The node '{value}' does not exist")]
 	NdNotFound {
-		value: String,
-	},
-
-	/// The requested scope token does not exist
-	#[error("The scope token '{value}' does not exist")]
-	StNotFound {
 		value: String,
 	},
 
@@ -388,6 +398,12 @@ pub enum Error {
 	/// The requested analyzer does not exist
 	#[error("The index '{value}' does not exist")]
 	IxNotFound {
+		value: String,
+	},
+
+	/// The requested record does not exist
+	#[error("The record '{value}' does not exist")]
+	IdNotFound {
 		value: String,
 	},
 
@@ -435,6 +451,12 @@ pub enum Error {
 		value: String,
 	},
 
+	/// Can not execute UPSERT statement using the specified value
+	#[error("Can not execute UPSERT statement using value '{value}'")]
+	UpsertStatement {
+		value: String,
+	},
+
 	/// Can not execute UPDATE statement using the specified value
 	#[error("Can not execute UPDATE statement using value '{value}'")]
 	UpdateStatement {
@@ -447,6 +469,24 @@ pub enum Error {
 		value: String,
 	},
 
+	/// Can not execute RELATE statement using the specified value
+	#[error("Can not execute RELATE statement where property 'in' is '{value}'")]
+	RelateStatementIn {
+		value: String,
+	},
+
+	/// Can not execute RELATE statement using the specified value
+	#[error("Can not execute RELATE statement where property 'id' is '{value}'")]
+	RelateStatementId {
+		value: String,
+	},
+
+	/// Can not execute RELATE statement using the specified value
+	#[error("Can not execute RELATE statement where property 'out' is '{value}'")]
+	RelateStatementOut {
+		value: String,
+	},
+
 	/// Can not execute DELETE statement using the specified value
 	#[error("Can not execute DELETE statement using value '{value}'")]
 	DeleteStatement {
@@ -456,6 +496,24 @@ pub enum Error {
 	/// Can not execute INSERT statement using the specified value
 	#[error("Can not execute INSERT statement using value '{value}'")]
 	InsertStatement {
+		value: String,
+	},
+
+	/// Can not execute INSERT statement using the specified value
+	#[error("Can not execute INSERT statement where property 'in' is '{value}'")]
+	InsertStatementIn {
+		value: String,
+	},
+
+	/// Can not execute INSERT statement using the specified value
+	#[error("Can not execute INSERT statement where property 'id' is '{value}'")]
+	InsertStatementId {
+		value: String,
+	},
+
+	/// Can not execute INSERT statement using the specified value
+	#[error("Can not execute INSERT statement where property 'out' is '{value}'")]
+	InsertStatementOut {
 		value: String,
 	},
 
@@ -513,6 +571,14 @@ pub enum Error {
 		value: String,
 	},
 
+	/// The specified table is not configured for the type of record being added
+	#[error("Found record: `{thing}` which is {}a relation, but expected a {target_type}", if *relation { "not " } else { "" })]
+	TableCheck {
+		thing: String,
+		relation: bool,
+		target_type: String,
+	},
+
 	/// The specified field did not conform to the field type check
 	#[error("Found {value} for field `{field}`, with record `{thing}`, but expected a {check}")]
 	FieldCheck {
@@ -528,6 +594,14 @@ pub enum Error {
 		thing: String,
 		value: String,
 		field: Idiom,
+		check: String,
+	},
+
+	/// The specified value did not conform to the LET type check
+	#[error("Found {value} for param ${name}, but expected a {check}")]
+	SetCheck {
+		value: String,
+		name: String,
 		check: String,
 	},
 
@@ -734,15 +808,6 @@ pub enum Error {
 	#[error("The signin query failed")]
 	SigninQueryFailed,
 
-	#[error("This scope does not allow signup")]
-	ScopeNoSignup,
-
-	#[error("This scope does not allow signin")]
-	ScopeNoSignin,
-
-	#[error("The scope does not exist")]
-	NoScopeFound,
-
 	#[error("Username or Password was not provided")]
 	MissingUserOrPass,
 
@@ -772,13 +837,275 @@ pub enum Error {
 	#[error("Auth token is missing the '{0}' claim")]
 	MissingTokenClaim(String),
 
-	/// The key being inserted in the transaction already exists
-	#[error("The key being inserted already exists: {0}")]
-	TxKeyAlreadyExistsCategory(KeyCategory),
-
 	/// The db is running without an available storage engine
 	#[error("The db is running without an available storage engine")]
 	MissingStorageEngine,
+
+	/// The requested analyzer already exists
+	#[error("The analyzer '{value}' already exists")]
+	AzAlreadyExists {
+		value: String,
+	},
+
+	/// The requested database already exists
+	#[error("The database '{value}' already exists")]
+	DbAlreadyExists {
+		value: String,
+	},
+
+	/// The requested event already exists
+	#[error("The event '{value}' already exists")]
+	EvAlreadyExists {
+		value: String,
+	},
+
+	/// The requested field already exists
+	#[error("The field '{value}' already exists")]
+	FdAlreadyExists {
+		value: String,
+	},
+
+	/// The requested function already exists
+	#[error("The function 'fn::{value}' already exists")]
+	FcAlreadyExists {
+		value: String,
+	},
+
+	/// The requested index already exists
+	#[error("The index '{value}' already exists")]
+	IxAlreadyExists {
+		value: String,
+	},
+
+	/// The requested model already exists
+	#[error("The model '{value}' already exists")]
+	MlAlreadyExists {
+		value: String,
+	},
+
+	/// The requested namespace already exists
+	#[error("The namespace '{value}' already exists")]
+	NsAlreadyExists {
+		value: String,
+	},
+
+	/// The requested param already exists
+	#[error("The param '${value}' already exists")]
+	PaAlreadyExists {
+		value: String,
+	},
+
+	/// The requested table already exists
+	#[error("The table '{value}' already exists")]
+	TbAlreadyExists {
+		value: String,
+	},
+
+	/// The requested namespace token already exists
+	#[error("The namespace token '{value}' already exists")]
+	NtAlreadyExists {
+		value: String,
+	},
+
+	/// The requested database token already exists
+	#[error("The database token '{value}' already exists")]
+	DtAlreadyExists {
+		value: String,
+	},
+
+	/// The requested user already exists
+	#[error("The root user '{value}' already exists")]
+	UserRootAlreadyExists {
+		value: String,
+	},
+
+	/// The requested namespace user already exists
+	#[error("The user '{value}' already exists in the namespace '{ns}'")]
+	UserNsAlreadyExists {
+		value: String,
+		ns: String,
+	},
+
+	/// The requested database user already exists
+	#[error("The user '{value}' already exists in the database '{db}'")]
+	UserDbAlreadyExists {
+		value: String,
+		ns: String,
+		db: String,
+	},
+
+	/// A database index entry for the specified table is already building
+	#[error("Database index `{index}` is currently building")]
+	IndexAlreadyBuilding {
+		index: String,
+	},
+
+	/// The session has expired either because the token used
+	/// to establish it has expired or because an expiration
+	/// was explicitly defined when establishing it
+	#[error("The session has expired")]
+	ExpiredSession,
+
+	/// A node task has failed
+	#[error("A node task has failed: {0}")]
+	NodeAgent(&'static str),
+
+	/// The supplied type could not be serialiazed into `sql::Value`
+	#[error("Serialization error: {0}")]
+	Serialization(String),
+
+	/// The requested root access method already exists
+	#[error("The root access method '{ac}' already exists")]
+	AccessRootAlreadyExists {
+		ac: String,
+	},
+
+	/// The requested namespace access method already exists
+	#[error("The access method '{ac}' already exists in the namespace '{ns}'")]
+	AccessNsAlreadyExists {
+		ac: String,
+		ns: String,
+	},
+
+	/// The requested database access method already exists
+	#[error("The access method '{ac}' already exists in the database '{db}'")]
+	AccessDbAlreadyExists {
+		ac: String,
+		ns: String,
+		db: String,
+	},
+
+	/// The requested root access method does not exist
+	#[error("The root access method '{ac}' does not exist")]
+	AccessRootNotFound {
+		ac: String,
+	},
+
+	/// The requested root access grant does not exist
+	#[error("The root access grant '{gr}' does not exist")]
+	AccessGrantRootNotFound {
+		ac: String,
+		gr: String,
+	},
+
+	/// The requested namespace access method does not exist
+	#[error("The access method '{ac}' does not exist in the namespace '{ns}'")]
+	AccessNsNotFound {
+		ac: String,
+		ns: String,
+	},
+
+	/// The requested namespace access grant does not exist
+	#[error("The access grant '{gr}' does not exist in the namespace '{ns}'")]
+	AccessGrantNsNotFound {
+		ac: String,
+		gr: String,
+		ns: String,
+	},
+
+	/// The requested database access method does not exist
+	#[error("The access method '{ac}' does not exist in the database '{db}'")]
+	AccessDbNotFound {
+		ac: String,
+		ns: String,
+		db: String,
+	},
+
+	/// The requested database access grant does not exist
+	#[error("The access grant '{gr}' does not exist in the database '{db}'")]
+	AccessGrantDbNotFound {
+		ac: String,
+		gr: String,
+		ns: String,
+		db: String,
+	},
+
+	/// The access method cannot be defined on the requested level
+	#[error("The access method cannot be defined on the requested level")]
+	AccessLevelMismatch,
+
+	#[error("The access method cannot be used in the requested operation")]
+	AccessMethodMismatch,
+
+	#[error("The access method does not exist")]
+	AccessNotFound,
+
+	#[error("This access method has an invalid duration")]
+	AccessInvalidDuration,
+
+	#[error("This access method results in an invalid expiration")]
+	AccessInvalidExpiration,
+
+	#[error("The record access signup query failed")]
+	AccessRecordSignupQueryFailed,
+
+	#[error("The record access signin query failed")]
+	AccessRecordSigninQueryFailed,
+
+	#[error("This record access method does not allow signup")]
+	AccessRecordNoSignup,
+
+	#[error("This record access method does not allow signin")]
+	AccessRecordNoSignin,
+
+	#[error("This bearer access method requires a key to be provided")]
+	AccessBearerMissingKey,
+
+	#[error("This bearer access grant has an invalid format")]
+	AccessGrantBearerInvalid,
+
+	#[error("This access grant has an invalid subject")]
+	AccessGrantInvalidSubject,
+
+	#[error("This access grant has been revoked")]
+	AccessGrantRevoked,
+
+	/// Found a table name for the record but this is not a valid table
+	#[error("Found {value} for the Record ID but this is not a valid table name")]
+	TbInvalid {
+		value: String,
+	},
+
+	/// This error is used for breaking execution when a value is returned
+	#[doc(hidden)]
+	#[error("Return statement has been reached")]
+	Return {
+		value: Value,
+	},
+
+	/// A destructuring variant was used in a context where it is not supported
+	#[error("{variant} destructuring method is not supported here")]
+	UnsupportedDestructure {
+		variant: String,
+	},
+
+	#[doc(hidden)]
+	#[error("The underlying datastore does not support versioned queries")]
+	UnsupportedVersionedQueries,
+
+	/// Found an unexpected value in a range
+	#[error("Expected a range value of '{expected}', but found '{found}'")]
+	InvalidRangeValue {
+		expected: String,
+		found: String,
+	},
+
+	/// Found an unexpected value in a range
+	#[error("The range cannot exceed a size of {max} for this operation")]
+	RangeTooBig {
+		max: usize,
+	},
+
+	/// There was an invalid storage version stored in the database
+	#[error("There was an invalid storage version stored in the database")]
+	InvalidStorageVersion,
+
+	/// There was an outdated storage version stored in the database
+	#[error("The data stored on disk is out-of-date with this version. Please follow the upgrade guides in the documentation")]
+	OutdatedStorageVersion,
+
+	#[error("Found a non-computed value where they are not allowed")]
+	NonComputed,
 }
 
 impl From<Error> for String {
@@ -809,9 +1136,7 @@ impl From<regex::Error> for Error {
 impl From<echodb::err::Error> for Error {
 	fn from(e: echodb::err::Error) -> Error {
 		match e {
-			echodb::err::Error::KeyAlreadyExists => {
-				Error::TxKeyAlreadyExistsCategory(crate::key::error::KeyCategory::Unknown)
-			}
+			echodb::err::Error::KeyAlreadyExists => Error::TxKeyAlreadyExists,
 			echodb::err::Error::ValNotExpectedValue => Error::TxConditionNotMet,
 			_ => Error::Tx(e.to_string()),
 		}
@@ -822,9 +1147,7 @@ impl From<echodb::err::Error> for Error {
 impl From<indxdb::err::Error> for Error {
 	fn from(e: indxdb::err::Error) -> Error {
 		match e {
-			indxdb::err::Error::KeyAlreadyExists => {
-				Error::TxKeyAlreadyExistsCategory(crate::key::error::KeyCategory::Unknown)
-			}
+			indxdb::err::Error::KeyAlreadyExists => Error::TxKeyAlreadyExists,
 			indxdb::err::Error::ValNotExpectedValue => Error::TxConditionNotMet,
 			_ => Error::Tx(e.to_string()),
 		}
@@ -835,20 +1158,11 @@ impl From<indxdb::err::Error> for Error {
 impl From<tikv::Error> for Error {
 	fn from(e: tikv::Error) -> Error {
 		match e {
-			tikv::Error::DuplicateKeyInsertion => {
-				Error::TxKeyAlreadyExistsCategory(crate::key::error::KeyCategory::Unknown)
-			}
+			tikv::Error::DuplicateKeyInsertion => Error::TxKeyAlreadyExists,
 			tikv::Error::KeyError(ke) if ke.abort.contains("KeyTooLarge") => Error::TxKeyTooLarge,
 			tikv::Error::RegionError(re) if re.raft_entry_too_large.is_some() => Error::TxTooLarge,
 			_ => Error::Tx(e.to_string()),
 		}
-	}
-}
-
-#[cfg(feature = "kv-speedb")]
-impl From<speedb::Error> for Error {
-	fn from(e: speedb::Error) -> Error {
-		Error::Tx(e.to_string())
 	}
 }
 
@@ -862,6 +1176,20 @@ impl From<rocksdb::Error> for Error {
 #[cfg(feature = "kv-surrealkv")]
 impl From<surrealkv::Error> for Error {
 	fn from(e: surrealkv::Error) -> Error {
+		Error::Tx(e.to_string())
+	}
+}
+
+#[cfg(feature = "kv-fdb")]
+impl From<foundationdb::FdbError> for Error {
+	fn from(e: foundationdb::FdbError) -> Error {
+		Error::Ds(e.to_string())
+	}
+}
+
+#[cfg(feature = "kv-fdb")]
+impl From<foundationdb::TransactionCommitError> for Error {
+	fn from(e: foundationdb::TransactionCommitError) -> Error {
 		Error::Tx(e.to_string())
 	}
 }
@@ -885,11 +1213,52 @@ impl From<reqwest::Error> for Error {
 	}
 }
 
+#[cfg(storage)]
+impl<S, D, I> From<SortError<S, D, I>> for Error
+where
+	S: std::error::Error,
+	D: std::error::Error,
+	I: std::error::Error,
+{
+	fn from(e: SortError<S, D, I>) -> Error {
+		Error::Internal(e.to_string())
+	}
+}
+
 impl Serialize for Error {
 	fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
 	where
 		S: serde::Serializer,
 	{
 		serializer.serialize_str(self.to_string().as_str())
+	}
+}
+impl Error {
+	pub fn set_check_from_coerce(self, name: String) -> Error {
+		match self {
+			Error::CoerceTo {
+				from,
+				into,
+			} => Error::SetCheck {
+				name,
+				value: from.to_string(),
+				check: into,
+			},
+			e => e,
+		}
+	}
+
+	pub fn function_check_from_coerce(self, name: impl Into<String>) -> Error {
+		match self {
+			Error::CoerceTo {
+				from,
+				into,
+			} => Error::FunctionCheck {
+				name: name.into(),
+				value: from.to_string(),
+				check: into,
+			},
+			e => e,
+		}
 	}
 }

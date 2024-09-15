@@ -1,9 +1,11 @@
-use crate::key::error::KeyCategory;
-use crate::key::key_req::KeyRequirements;
+//! Stores a DEFINE USER ON ROOT config definition
+use crate::key::category::Categorise;
+use crate::key::category::Category;
 use derive::Key;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Key)]
+#[non_exhaustive]
 pub struct Us<'a> {
 	__: u8,
 	_a: u8,
@@ -18,19 +20,19 @@ pub fn new(user: &str) -> Us<'_> {
 
 pub fn prefix() -> Vec<u8> {
 	let mut k = super::all::new().encode().unwrap();
-	k.extend_from_slice(&[b'!', b'u', b's', 0x00]);
+	k.extend_from_slice(b"!us\x00");
 	k
 }
 
 pub fn suffix() -> Vec<u8> {
 	let mut k = super::all::new().encode().unwrap();
-	k.extend_from_slice(&[b'!', b'u', b's', 0xff]);
+	k.extend_from_slice(b"!us\xff");
 	k
 }
 
-impl KeyRequirements for Us<'_> {
-	fn key_category(&self) -> KeyCategory {
-		KeyCategory::User
+impl Categorise for Us<'_> {
+	fn categorise(&self) -> Category {
+		Category::User
 	}
 }
 

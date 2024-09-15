@@ -5,7 +5,7 @@ use crate::idx::ft::offsets::{Offset, Position};
 use crate::sql::tokenizer::Tokenizer as SqlTokenizer;
 use crate::sql::Value;
 
-pub(super) struct Tokens {
+pub(in crate::idx) struct Tokens {
 	/// The input string
 	i: String,
 	/// The final list of tokens
@@ -20,26 +20,21 @@ impl Tokens {
 		}
 	}
 
-	pub(super) fn get_token_string<'a>(&'a self, t: &'a Token) -> Result<&str, Error> {
+	pub(super) fn get_token_string<'a>(&'a self, t: &'a Token) -> Result<&'a str, Error> {
 		t.get_str(&self.i)
 	}
 
 	pub(super) fn filter(self, f: &Filter) -> Result<Tokens, Error> {
 		let mut tks = Vec::new();
-		let mut res = vec![];
-		for t in self.t {
-			if t.is_empty() {
+		for tk in self.t {
+			if tk.is_empty() {
 				continue;
 			}
-			let c = t.get_str(&self.i)?;
-			let r = f.apply_filter(c);
-			res.push((t, r));
-		}
-		for (tk, fr) in res {
-			match fr {
+			let c = tk.get_str(&self.i)?;
+			match f.apply_filter(c) {
 				FilterResult::Term(t) => match t {
 					Term::Unchanged => tks.push(tk),
-					Term::NewTerm(s) => tks.push(tk.new_token(s)),
+					Term::NewTerm(t, s) => tks.push(tk.new_token(t, s)),
 				},
 				FilterResult::Terms(ts) => {
 					let mut already_pushed = false;
@@ -51,7 +46,7 @@ impl Tokens {
 									already_pushed = true;
 								}
 							}
-							Term::NewTerm(s) => tks.push(tk.new_token(s)),
+							Term::NewTerm(t, s) => tks.push(tk.new_token(t, s)),
 						}
 					}
 				}
@@ -84,35 +79,41 @@ impl TryFrom<Tokens> for Value {
 #[derive(Clone, Debug, PartialOrd, PartialEq, Eq, Ord, Hash)]
 pub(super) enum Token {
 	Ref {
-		chars: (Position, Position),
+		chars: (Position, Position, Position),
 		bytes: (Position, Position),
+		len: u32,
 	},
 	String {
-		chars: (Position, Position),
+		chars: (Position, Position, Position),
 		bytes: (Position, Position),
 		term: String,
+		len: u32,
 	},
 }
 
 impl Token {
-	fn new_token(&self, term: String) -> Self {
+	fn new_token(&self, term: String, start: Position) -> Self {
+		let len = term.chars().count() as u32;
 		match self {
 			Token::Ref {
 				chars,
 				bytes,
+				..
 			} => Token::String {
-				chars: *chars,
+				chars: (chars.0, chars.1 + start, chars.2),
 				bytes: *bytes,
 				term,
+				len,
 			},
 			Token::String {
 				chars,
 				bytes,
 				..
 			} => Token::String {
-				chars: *chars,
+				chars: (chars.0, chars.1 + start, chars.2),
 				bytes: *bytes,
 				term,
+				len,
 			},
 		}
 	}
@@ -122,11 +123,11 @@ impl Token {
 			Token::Ref {
 				chars,
 				..
-			} => Offset::new(i, chars.0, chars.1),
+			} => Offset::new(i, chars.0, chars.1, chars.2),
 			Token::String {
 				chars,
 				..
-			} => Offset::new(i, chars.0, chars.1),
+			} => Offset::new(i, chars.0, chars.1, chars.2),
 		}
 	}
 
@@ -135,7 +136,7 @@ impl Token {
 			Token::Ref {
 				chars,
 				..
-			} => chars.0 == chars.1,
+			} => chars.0 == chars.2,
 			Token::String {
 				term,
 				..
@@ -143,7 +144,20 @@ impl Token {
 		}
 	}
 
-	pub(super) fn get_str<'a>(&'a self, i: &'a str) -> Result<&str, Error> {
+	pub(super) fn get_char_len(&self) -> u32 {
+		match self {
+			Token::Ref {
+				len,
+				..
+			} => *len,
+			Token::String {
+				len,
+				..
+			} => *len,
+		}
+	}
+
+	pub(super) fn get_str<'a>(&'a self, i: &'a str) -> Result<&'a str, Error> {
 		match self {
 			Token::Ref {
 				bytes,
@@ -157,7 +171,7 @@ impl Token {
 						"Unable to extract the token. The offset position ({s},{e}) is out of range ({l})."
 					)));
 				}
-				Ok(&i[(bytes.0 as usize)..(bytes.1 as usize)])
+				Ok(&i[s..e])
 			}
 			Token::String {
 				term,
@@ -207,8 +221,9 @@ impl Tokenizer {
 				// The last pos may be more advanced due to the is_valid process
 				if last_char_pos < current_char_pos {
 					t.push(Token::Ref {
-						chars: (last_char_pos, current_char_pos),
+						chars: (last_char_pos, last_char_pos, current_char_pos),
 						bytes: (last_byte_pos, current_byte_pos),
+						len: current_char_pos - last_char_pos,
 					});
 				}
 				last_char_pos = current_char_pos;
@@ -225,8 +240,9 @@ impl Tokenizer {
 		}
 		if current_char_pos != last_char_pos {
 			t.push(Token::Ref {
-				chars: (last_char_pos, current_char_pos),
+				chars: (last_char_pos, last_char_pos, current_char_pos),
 				bytes: (last_byte_pos, current_byte_pos),
+				len: current_char_pos - last_char_pos,
 			});
 		}
 		Tokens {

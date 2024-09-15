@@ -6,6 +6,10 @@ use sha1::Sha1;
 use sha2::Sha256;
 use sha2::Sha512;
 
+pub fn blake3((arg,): (String,)) -> Result<Value, Error> {
+	Ok(blake3::hash(arg.as_bytes()).to_string().into())
+}
+
 pub fn md5((arg,): (String,)) -> Result<Value, Error> {
 	let mut hasher = Md5::new();
 	hasher.update(arg.as_str());
@@ -116,7 +120,6 @@ pub mod bcrypt {
 	use crate::err::Error;
 	use crate::fnc::crypto::COST_ALLOWANCE;
 	use crate::sql::value::Value;
-	use bcrypt;
 	use bcrypt::HashParts;
 	use std::str::FromStr;
 

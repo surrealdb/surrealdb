@@ -1,10 +1,11 @@
 //! Stores a DEFINE NAMESPACE config definition
-use crate::key::error::KeyCategory;
-use crate::key::key_req::KeyRequirements;
+use crate::key::category::Categorise;
+use crate::key::category::Category;
 use derive::Key;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Key)]
+#[non_exhaustive]
 pub struct Ns<'a> {
 	__: u8,
 	_a: u8,
@@ -19,19 +20,19 @@ pub fn new(ns: &str) -> Ns<'_> {
 
 pub fn prefix() -> Vec<u8> {
 	let mut k = super::all::new().encode().unwrap();
-	k.extend_from_slice(&[b'!', b'n', b's', 0x00]);
+	k.extend_from_slice(b"!ns\x00");
 	k
 }
 
 pub fn suffix() -> Vec<u8> {
 	let mut k = super::all::new().encode().unwrap();
-	k.extend_from_slice(&[b'!', b'n', b's', 0xff]);
+	k.extend_from_slice(b"!ns\xff");
 	k
 }
 
-impl KeyRequirements for Ns<'_> {
-	fn key_category(&self) -> KeyCategory {
-		KeyCategory::Namespace
+impl Categorise for Ns<'_> {
+	fn categorise(&self) -> Category {
+		Category::Namespace
 	}
 }
 

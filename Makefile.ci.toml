@@ -1,23 +1,26 @@
 [tasks.ci-format]
 category = "CI - CHECK"
-dependencies = ["cargo-fmt", "cargo-fmt-unlinked"]
+dependencies = ["cargo-fmt"]
 
 [tasks.ci-check]
 category = "CI - CHECK"
 command = "cargo"
 args = ["check", "--locked", "--workspace"]
 
+[tasks.ci-check-release]
+category = "CI - CHECK"
+command = "cargo"
+args = ["check", "--release", "--locked", "--workspace"]
+
 [tasks.ci-check-wasm]
 category = "CI - CHECK"
 command = "cargo"
-env = { RUSTFLAGS = "--cfg surrealdb_unstable" }
 args = ["check", "--locked", "--package", "surrealdb", "--features", "protocol-ws,protocol-http,kv-mem,kv-indxdb,http,jwks", "--target", "wasm32-unknown-unknown"]
 
 [tasks.ci-clippy]
 category = "CI - CHECK"
 command = "cargo"
-env = { RUSTFLAGS = "--cfg surrealdb_unstable" }
-args = ["clippy", "--all-targets", "--features", "storage-mem,storage-rocksdb,storage-speedb,storage-tikv,storage-fdb,scripting,http,jwks", "--tests", "--benches", "--examples","--bins", "--", "-D", "warnings"]
+args = ["clippy", "--all-targets", "--features", "storage-mem,storage-surrealkv,storage-rocksdb,storage-tikv,storage-fdb,scripting,http,jwks,ml,storage-fdb-7_1", "--tests", "--benches", "--examples", "--bins", "--", "-D", "warnings"]
 
 #
 # Integration Tests
@@ -26,62 +29,71 @@ args = ["clippy", "--all-targets", "--features", "storage-mem,storage-rocksdb,st
 [tasks.ci-cli-integration]
 category = "CI - INTEGRATION TESTS"
 command = "cargo"
-env = { RUST_BACKTRACE=1, RUSTFLAGS = "--cfg surrealdb_unstable", RUST_LOG={ value = "cli_integration=debug", condition = { env_not_set = ["RUST_LOG"] } } }
-args = ["test", "--locked", "--no-default-features", "--features", "storage-mem,http,scripting,jwks", "--workspace", "--test", "cli_integration", "--", "cli_integration"]
+env = { RUST_BACKTRACE = 1, RUST_LOG = { value = "cli_integration=debug", condition = { env_not_set = ["RUST_LOG"] } } }
+args = ["test", "--locked", "--no-default-features", "--features", "storage-mem,storage-surrealkv,http,scripting,jwks", "--workspace", "--test", "cli_integration", "--", "cli_integration"]
 
 [tasks.ci-http-integration]
 category = "CI - INTEGRATION TESTS"
 command = "cargo"
-env = { RUST_BACKTRACE=1, RUSTFLAGS = "--cfg surrealdb_unstable", RUST_LOG={ value = "http_integration=debug", condition = { env_not_set = ["RUST_LOG"] } } }
+env = { RUST_BACKTRACE = 1, RUST_LOG = { value = "http_integration=debug", condition = { env_not_set = ["RUST_LOG"] } } }
 args = ["test", "--locked", "--no-default-features", "--features", "storage-mem,http-compression,jwks", "--workspace", "--test", "http_integration", "--", "http_integration"]
 
 [tasks.ci-ws-integration]
 category = "WS - INTEGRATION TESTS"
 command = "cargo"
-env = { RUST_BACKTRACE=1, RUSTFLAGS = "--cfg surrealdb_unstable", RUST_LOG={ value = "ws_integration=debug", condition = { env_not_set = ["RUST_LOG"] } } }
-args = ["test", "--locked", "--no-default-features", "--features", "storage-mem,sql2", "--workspace", "--test", "ws_integration", "--", "ws_integration"]
+env = { RUST_BACKTRACE = 1, RUST_LOG = { value = "ws_integration=debug", condition = { env_not_set = ["RUST_LOG"] } } }
+args = ["test", "--locked", "--no-default-features", "--features", "storage-mem", "--workspace", "--test", "ws_integration", "--", "ws_integration"]
 
 [tasks.ci-ml-integration]
 category = "ML - INTEGRATION TESTS"
 command = "cargo"
-env = { RUST_BACKTRACE=1, RUSTFLAGS = "--cfg surrealdb_unstable", RUST_LOG={ value = "cli_integration::common=debug", condition = { env_not_set = ["RUST_LOG"] } } }
-args = ["test", "--locked", "--features", "storage-mem,ml,sql2", "--workspace", "--test", "ml_integration", "--", "ml_integration", "--nocapture"]
+env = { RUST_BACKTRACE = 1, RUST_LOG = { value = "cli_integration::common=debug", condition = { env_not_set = ["RUST_LOG"] } } }
+args = ["test", "--locked", "--features", "storage-mem,ml", "--workspace", "--test", "ml_integration", "--", "ml_integration", "--nocapture"]
+
+[tasks.ci-graphql-integration]
+category = "GRAPHQL - INTEGRATION TESTS"
+command = "cargo"
+env = { RUST_BACKTRACE = 1, RUST_LOG = { value = "cli_integration::common=debug", condition = { env_not_set = ["RUST_LOG"] } }, SURREAL_EXPERIMENTAL_GRAPHQL = "true", RUSTFLAGS = "--cfg surrealdb_unstable" }
+args = ["test", "--locked", "--features", "storage-mem", "--workspace", "--test", "graphql_integration", "--", "graphql_integration", "--nocapture"]
+
+[tasks.ci-test-workspace]
+category = "CI - INTEGRATION TESTS"
+command = "cargo"
+args = [
+    "test", "--locked", "--no-default-features", "--features", "storage-mem,scripting,http,jwks", "--workspace", "--",
+    "--skip", "api_integration",
+    "--skip", "cli_integration",
+    "--skip", "http_integration",
+    "--skip", "ws_integration",
+    "--skip", "database_upgrade"
+]
 
 [tasks.ci-workspace-coverage]
 category = "CI - INTEGRATION TESTS"
 command = "cargo"
-env = { RUSTFLAGS = "--cfg surrealdb_unstable" }
 args = [
-	"llvm-cov", "--html", "--locked", "--no-default-features", "--features", "storage-mem,scripting,http,jwks", "--workspace", "--",
-	"--skip", "api_integration",
-	"--skip", "cli_integration",
-	"--skip", "http_integration",
-	"--skip", "ws_integration"
-]
-
-
-[tasks.test-experimental-parser]
-category = "CI - INTEGRATION TESTS"
-command = "cargo"
-env = { RUST_BACKTRACE=1, RUSTFLAGS = "--cfg surrealdb_unstable", RUSTDOCFLAGS="--cfg surrealdb_unstable" }
-args = [
-	"test", "--locked", "--no-default-features", "--features", "storage-mem,scripting,http,parser2", "--workspace", "--",
-	"--skip", "api_integration",
-	"--skip", "cli_integration",
-	"--skip", "http_integration",
-	"--skip", "ws_integration"
+    "llvm-cov", "--html", "--locked", "--no-default-features", "--features", "storage-mem,scripting,http,jwks", "--workspace", "--",
+    "--skip", "api_integration",
+    "--skip", "cli_integration",
+    "--skip", "http_integration",
+    "--skip", "ws_integration",
+    "--skip", "database_upgrade"
 ]
 
 [tasks.test-workspace-coverage-complete]
 category = "CI - INTEGRATION TESTS"
 command = "cargo"
-env = { RUSTFLAGS = "--cfg surrealdb_unstable" }
-args = ["llvm-cov", "--html", "--locked", "--no-default-features", "--features", "sql2,protocol-ws,protocol-http,kv-mem,kv-rocksdb", "--workspace"]
+args = ["llvm-cov", "--html", "--locked", "--no-default-features", "--features", "protocol-ws,protocol-http,kv-mem,kv-rocksdb", "--workspace"]
 
 [tasks.ci-workspace-coverage-complete]
 env = { _START_SURREALDB_PATH = "memory" }
 category = "CI - INTEGRATION TESTS"
 run_task = { name = ["start-surrealdb", "test-workspace-coverage-complete", "stop-surrealdb"], fork = true }
+
+[tasks.ci-database-upgrade]
+env = { _TEST_FEATURES = "storage-rocksdb" }
+category = "CI - DATABASE UPGRADE TESTS"
+run_task = { name = ["test-database-upgrade"], fork = true }
 
 #
 # Tests private tasks
@@ -90,20 +102,27 @@ run_task = { name = ["start-surrealdb", "test-workspace-coverage-complete", "sto
 [tasks.test-kvs]
 private = true
 command = "cargo"
-env = {RUST_BACKTRACE=1, RUSTFLAGS = "--cfg surrealdb_unstable" }
+env = { RUST_BACKTRACE = 1 }
 args = ["test", "--locked", "--package", "surrealdb", "--no-default-features", "--features", "${_TEST_FEATURES}", "--lib", "kvs"]
 
 
 [tasks.test-api-integration]
 private = true
 command = "cargo"
-env = {RUST_BACKTRACE=1, RUSTFLAGS = "--cfg surrealdb_unstable" }
+env = { RUST_BACKTRACE = 1 }
 args = ["test", "--locked", "--package", "surrealdb", "--no-default-features", "--features", "${_TEST_FEATURES}", "--test", "api", "api_integration::${_TEST_API_ENGINE}"]
 
 [tasks.ci-api-integration]
-env = {RUST_BACKTRACE=1, _START_SURREALDB_PATH = "memory", RUSTFLAGS = "--cfg surrealdb_unstable" }
+env = { RUST_BACKTRACE = 1, _START_SURREALDB_PATH = "memory" }
 private = true
 run_task = { name = ["start-surrealdb", "test-api-integration", "stop-surrealdb"], fork = true }
+
+[tasks.test-database-upgrade]
+private = true
+command = "cargo"
+env = { RUST_BACKTRACE = 1, RUST_LOG = "info", RUSTFLAGS = "--cfg docker" }
+args = ["test", "--locked", "--no-default-features", "--features", "${_TEST_FEATURES}", "--workspace", "--test", "database_upgrade", "--", "database_upgrade", "--show-output"]
+
 
 #
 # Integration tests with background services
@@ -116,7 +135,7 @@ run_task = "ci-api-integration"
 
 [tasks.ci-api-integration-ws]
 category = "CI - INTEGRATION TESTS"
-env = { _TEST_API_ENGINE = "ws", _TEST_FEATURES = "protocol-ws,sql2", RUSTFLAGS = "--cfg surrealdb_unstable" }
+env = { _TEST_API_ENGINE = "ws", _TEST_FEATURES = "protocol-ws" }
 run_task = "ci-api-integration"
 
 [tasks.ci-api-integration-any]
@@ -142,28 +161,24 @@ category = "CI - INTEGRATION TESTS"
 env = { _TEST_API_ENGINE = "rocksdb", _TEST_FEATURES = "kv-rocksdb" }
 run_task = { name = ["test-kvs", "test-api-integration"], fork = true, parallel = true }
 
-[tasks.ci-api-integration-speedb]
+[tasks.ci-api-integration-surrealkv]
 category = "CI - INTEGRATION TESTS"
-env = { _TEST_API_ENGINE = "speedb", _TEST_FEATURES = "kv-speedb" }
-run_task = { name = ["test-kvs", "test-api-integration"], fork = true, parallel = true }
-
-[tasks.ci-api-integration-fdb]
-category = "CI - INTEGRATION TESTS"
-env = { _TEST_API_ENGINE = "fdb", _TEST_FEATURES = "kv-fdb-7_1" }
-run_task = { name = ["test-kvs", "test-api-integration"], fork = true, parallel = false }
-
-[tasks.ci-api-integration-tikv-tests]
-category = "CI - INTEGRATION TESTS"
-env = { _TEST_API_ENGINE = "tikv", _TEST_FEATURES = "kv-tikv" }
+env = { _TEST_API_ENGINE = "surrealkv", _TEST_FEATURES = "kv-surrealkv" }
 run_task = { name = ["test-kvs", "test-api-integration"], fork = true, parallel = false }
 
 [tasks.ci-api-integration-tikv]
 category = "CI - INTEGRATION TESTS"
-run_task = { name = ["start-tikv", "ci-api-integration-tikv-tests", "stop-tikv"], fork = true }
+env = { _TEST_API_ENGINE = "tikv", _TEST_FEATURES = "kv-tikv" }
+run_task = { name = ["start-tikv", "test-kvs", "test-api-integration", "stop-tikv"], fork = true, parallel = false }
 
-[tasks.ci-api-integration-surrealkv]
+[tasks.ci-api-integration-fdb-7_1]
 category = "CI - INTEGRATION TESTS"
-env = { _TEST_API_ENGINE = "surrealkv", _TEST_FEATURES = "kv-surrealkv", RUSTFLAGS = "--cfg surrealdb_unstable" }
+env = { _TEST_API_ENGINE = "fdb", _TEST_FEATURES = "kv-fdb,kv-fdb-7_1" }
+run_task = { name = ["test-kvs", "test-api-integration"], fork = true, parallel = false }
+
+[tasks.ci-api-integration-fdb-7_3]
+category = "CI - INTEGRATION TESTS"
+env = { _TEST_API_ENGINE = "fdb", _TEST_FEATURES = "kv-fdb,kv-fdb-7_3" }
 run_task = { name = ["test-kvs", "test-api-integration"], fork = true, parallel = false }
 
 
@@ -203,52 +218,28 @@ script = """
 
 [tasks.start-tikv]
 category = "CI - SERVICES"
-env = { SURREAL_LINK="https://github.com/surrealdb/surrealdb/releases/download/v1.2.0/surreal-v1.2.0.linux-amd64.tgz" }
 script = """
     #!/bin/bash -ex
-
-	if [ ! -f "/tmp/test_surreal" ]; then
-		echo "Downloading surrealdb for startup test"
-		curl -L $SURREAL_LINK | tar -xzO > /tmp/test_surreal
-		chmod +x /tmp/test_surreal
-	fi
-
+	echo "Installing TiKV playground..."
     ${HOME}/.tiup/bin/tiup install pd tikv playground
-
-    playground_attempts=0
-    while [[ $playground_attempts -lt 5 ]]; do
-        nohup ${HOME}/.tiup/bin/tiup playground --mode tikv-slim --kv 1 --pd 1 --db 0 --ticdc 0 --tiflash 0 --without-monitor > /tmp/tiup.log &
-
-        echo $! > /tmp/tiup.pid
-
-        set +e
-        echo "Waiting for tiup playground to be ready..."
-        tries=0
-        while [[ $tries -lt 10 ]]; do
-                if  ! ${HOME}/.tiup/bin/tiup playground display >/dev/null; then
-					tries=$((tries + 1));
-					sleep 5;
-					continue
-				fi
-				if echo "create __tikv_test_thing" | /tmp/test_surreal sql --hide-welcome --endpoint tikv://127.0.0.1:2379 > /dev/null; then
-					echo "TIKV started correctly";
-					exit 0;
-				fi
-				sleep 5;
-                tries=$((tries + 1))
-        done
-        set -e
-
-        echo "ERROR: TiUP Playground is unhealthy! Try again..."
-		${HOME}/.tiup/bin/tiup clean --all
-
-
-        playground_attempts=$((playground_attempts + 1))
-    done
-
-    echo "PANIC: Couldn't start tiup playground! Here are the logs for the last attempt:"
+	echo "Cleaning TiKV playground..."
+	${HOME}/.tiup/bin/tiup clean --all
+	echo "Starting TiKV playground..."
+	nohup ${HOME}/.tiup/bin/tiup playground --mode tikv-slim --kv 1 --pd 1 --db 0 --ticdc 0 --tiflash 0 --without-monitor > /tmp/tiup.log &
+	set +e
+	tries=0
+	echo "Waiting for TiKV playground to be ready..."
+	while [[ $tries -lt 10 ]]; do
+		sleep 5
+		echo "Displaying playground status..."
+		if ! ${HOME}/.tiup/bin/tiup playground display >/dev/null; then
+			tries=$((tries + 1));
+			continue
+		fi
+		exit 0;
+	done
+	echo "PANIC: Couldn't start tiup playground! Here are the logs for the last attempt:"
     cat /tmp/tiup.log
-
     exit 1
 """
 
@@ -265,8 +256,7 @@ ${HOME}/.tiup/bin/tiup clean --all
 [tasks.build-surrealdb]
 category = "CI - BUILD"
 command = "cargo"
-env = { RUSTFLAGS = "--cfg surrealdb_unstable" }
-args = ["build", "--locked", "--no-default-features", "--features", "storage-mem,sql2"]
+args = ["build", "--locked", "--no-default-features", "--features", "storage-mem"]
 
 #
 # Benchmarks - Common
@@ -274,7 +264,6 @@ args = ["build", "--locked", "--no-default-features", "--features", "storage-mem
 [tasks.ci-bench]
 category = "CI - BENCHMARK"
 command = "cargo"
-env = { RUSTFLAGS = "--cfg surrealdb_unstable" }
 args = ["bench", "--quiet", "--package", "surrealdb", "--no-default-features", "--features", "kv-mem,scripting,http,jwks", "${@}"]
 
 #
@@ -285,14 +274,12 @@ BENCH_WORKER_THREADS = { value = "1", condition = { env_not_set = ["BENCH_WORKER
 BENCH_NUM_OPS = { value = "1000", condition = { env_not_set = ["BENCH_NUM_OPS"] } }
 BENCH_DURATION = { value = "30", condition = { env_not_set = ["BENCH_DURATION"] } }
 BENCH_SAMPLE_SIZE = { value = "10", condition = { env_not_set = ["BENCH_SAMPLE_SIZE"] } }
-BENCH_FEATURES = { value = "protocol-ws,kv-mem,kv-rocksdb,kv-fdb-7_1,kv-surrealkv", condition = { env_not_set = ["BENCH_FEATURES"] } }
-RUSTFLAGS = "--cfg surrealdb_unstable"
+BENCH_FEATURES = { value = "protocol-ws,kv-mem,kv-rocksdb,kv-surrealkv", condition = { env_not_set = ["BENCH_FEATURES"] } }
 
 [tasks.bench-target]
 private = true
 category = "CI - BENCHMARK - SurrealDB Target"
 command = "cargo"
-env = { RUSTFLAGS = "--cfg surrealdb_unstable" }
 args = ["bench", "--package", "surrealdb", "--bench", "sdb", "--no-default-features", "--features", "${BENCH_FEATURES}", "${@}"]
 
 [tasks.bench-lib-mem]
@@ -305,9 +292,9 @@ category = "CI - BENCHMARK - SurrealDB Target"
 env = { BENCH_DATASTORE_TARGET = "lib-rocksdb" }
 run_task = { name = ["bench-target"] }
 
-[tasks.bench-lib-fdb]
+[tasks.bench-lib-surrealkv]
 category = "CI - BENCHMARK - SurrealDB Target"
-env = { BENCH_DATASTORE_TARGET = "lib-fdb" }
+env = { BENCH_DATASTORE_TARGET = "lib-surrealkv" }
 run_task = { name = ["bench-target"] }
 
 [tasks.bench-sdk-mem]
@@ -320,17 +307,12 @@ category = "CI - BENCHMARK - SurrealDB Target"
 env = { BENCH_DATASTORE_TARGET = "sdk-rocksdb" }
 run_task = { name = ["bench-target"] }
 
-[tasks.bench-sdk-fdb]
+[tasks.bench-sdk-surrealkv]
 category = "CI - BENCHMARK - SurrealDB Target"
-env = { BENCH_DATASTORE_TARGET = "sdk-fdb" }
+env = { BENCH_DATASTORE_TARGET = "sdk-surrealkv" }
 run_task = { name = ["bench-target"] }
 
 [tasks.bench-sdk-ws]
 category = "CI - BENCHMARK - SurrealDB Target"
 env = { BENCH_DATASTORE_TARGET = "sdk-ws" }
-run_task = { name = ["bench-target"] }
-
-[tasks.bench-lib-surrealkv]
-category = "CI - BENCHMARK - SurrealDB Target"
-env = { BENCH_DATASTORE_TARGET = "lib-surrealkv" }
 run_task = { name = ["bench-target"] }

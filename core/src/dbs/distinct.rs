@@ -17,7 +17,7 @@ pub(crate) struct SyncDistinct {
 }
 
 impl SyncDistinct {
-	pub(super) fn new(ctx: &Context<'_>) -> Option<Self> {
+	pub(super) fn new(ctx: &Context) -> Option<Self> {
 		if let Some(pla) = ctx.get_query_planner() {
 			if pla.requires_distinct() {
 				return Some(Self::default());
@@ -27,7 +27,7 @@ impl SyncDistinct {
 	}
 
 	pub(super) fn check_already_processed(&mut self, pro: &Processed) -> bool {
-		if let Some(key) = pro.rid.as_ref().map(std::convert::Into::<Vec<u8>>::into) {
+		if let Some(key) = pro.rid.as_ref().map(|r| r.as_ref().into()) {
 			if self.processed.get(&key).is_some() {
 				true
 			} else {
@@ -48,7 +48,7 @@ pub(crate) struct AsyncDistinct {
 
 #[cfg(not(target_arch = "wasm32"))]
 impl AsyncDistinct {
-	pub(super) fn new(ctx: &Context<'_>) -> Option<Self> {
+	pub(super) fn new(ctx: &Context) -> Option<Self> {
 		if let Some(pla) = ctx.get_query_planner() {
 			if pla.requires_distinct() {
 				return Some(Self::default());

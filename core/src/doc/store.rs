@@ -1,38 +1,36 @@
 use crate::ctx::Context;
+use crate::dbs::Options;
 use crate::dbs::Statement;
-use crate::dbs::{Options, Transaction};
 use crate::doc::Document;
 use crate::err::Error;
-use crate::key::key_req::KeyRequirements;
 
-impl<'a> Document<'a> {
+impl Document {
 	pub async fn store(
 		&self,
-		_ctx: &Context<'_>,
+		ctx: &Context,
 		opt: &Options,
-		txn: &Transaction,
 		stm: &Statement<'_>,
 	) -> Result<(), Error> {
-		// Check if forced
-		if !opt.force && !self.changed() {
+		// Check if changed
+		if !self.changed() {
 			return Ok(());
 		}
 		// Check if the table is a view
-		if self.tb(opt, txn).await?.drop {
+		if self.tb(ctx, opt).await?.drop {
 			return Ok(());
 		}
-		// Claim transaction
-		let mut run = txn.lock().await;
+		// Get the transaction
+		let txn = ctx.tx();
 		// Get the record id
 		let rid = self.id.as_ref().unwrap();
 		// Store the record data
-		let key = crate::key::thing::new(opt.ns(), opt.db(), &rid.tb, &rid.id);
-		//
+		let key = crate::key::thing::new(opt.ns()?, opt.db()?, &rid.tb, &rid.id);
+		// Match the statement type
 		match stm {
 			// This is a CREATE statement so try to insert the key
-			Statement::Create(_) => match run.put(key.key_category(), key, self).await {
+			Statement::Create(_) => match txn.put(key, self, opt.version).await {
 				// The key already exists, so return an error
-				Err(Error::TxKeyAlreadyExistsCategory(_)) => Err(Error::RecordExists {
+				Err(Error::TxKeyAlreadyExists) => Err(Error::RecordExists {
 					thing: rid.to_string(),
 				}),
 				// Return any other received error
@@ -40,8 +38,10 @@ impl<'a> Document<'a> {
 				// Record creation worked fine
 				Ok(v) => Ok(v),
 			},
+			// INSERT can be versioned
+			Statement::Insert(_) => txn.set(key, self, opt.version).await,
 			// This is not a CREATE statement, so update the key
-			_ => run.set(key, self).await,
+			_ => txn.set(key, self, None).await,
 		}?;
 		// Carry on
 		Ok(())

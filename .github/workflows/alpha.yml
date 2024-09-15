@@ -1,0 +1,43 @@
+# This workflow triggers alpha releases
+
+name: Alpha release
+
+run-name: "Alpha release '${{ inputs.git-ref }}' (version: 2.0.0-alpha.${{ inputs.patch }}, publish: ${{ inputs.publish || github.event_name == 'schedule' }})"
+
+on:
+  workflow_dispatch:
+    inputs:
+      git-ref:
+        required: true
+        type: string
+        description: "The github ref of this alpha version (i.e. main, 1234567)"
+        default: main
+      patch:
+        required: true
+        type: string
+        description: "The patch of this alpha version (i.e. 1, 2)"
+      publish:
+        required: false
+        type: boolean
+        default: false
+        description: "Publish the alpha release"
+
+defaults:
+  run:
+    shell: bash
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Prepare alpha release
+    uses: ./.github/workflows/reusable_publish_version.yml
+    with:
+      environment: alpha
+      extra-features: storage-surrealkv,ml
+      git-ref: ${{ inputs.git-ref }}
+      patch: ${{ inputs.patch }}
+      publish: ${{ inputs.publish }}
+      create-release: ${{ inputs.publish }}
+    secrets: inherit

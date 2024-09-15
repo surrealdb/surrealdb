@@ -1,10 +1,11 @@
 //! Stores namespace ID generator state
-use crate::key::error::KeyCategory;
-use crate::key::key_req::KeyRequirements;
+use crate::key::category::Categorise;
+use crate::key::category::Category;
 use derive::Key;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Key)]
+#[non_exhaustive]
 pub struct Ni {
 	__: u8,
 	_a: u8,
@@ -18,9 +19,9 @@ impl Default for Ni {
 	}
 }
 
-impl KeyRequirements for Ni {
-	fn key_category(&self) -> KeyCategory {
-		KeyCategory::NamespaceIdentifier
+impl Categorise for Ni {
+	fn categorise(&self) -> Category {
+		Category::NamespaceIdentifier
 	}
 }
 

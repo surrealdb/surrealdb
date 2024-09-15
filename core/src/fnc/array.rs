@@ -1,3 +1,7 @@
+use crate::cnf::GENERATION_ALLOCATION_LIMIT;
+use crate::ctx::Context;
+use crate::dbs::Options;
+use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::sql::array::Array;
 use crate::sql::array::Clump;
@@ -10,7 +14,25 @@ use crate::sql::array::Matches;
 use crate::sql::array::Transpose;
 use crate::sql::array::Union;
 use crate::sql::array::Uniq;
+use crate::sql::array::Windows;
 use crate::sql::value::Value;
+use crate::sql::Closure;
+use crate::sql::Function;
+use rand::prelude::SliceRandom;
+use reblessive::tree::Stk;
+use std::mem::size_of_val;
+
+/// Returns an error if an array of this length is too much to allocate.
+fn limit(name: &str, n: usize) -> Result<(), Error> {
+	if n > *GENERATION_ALLOCATION_LIMIT {
+		Err(Error::InvalidArguments {
+			name: name.to_owned(),
+			message: format!("Output must not exceed {} bytes.", *GENERATION_ALLOCATION_LIMIT),
+		})
+	} else {
+		Ok(())
+	}
+}
 
 pub fn add((mut array, value): (Array, Value)) -> Result<Value, Error> {
 	match value {
@@ -31,12 +53,56 @@ pub fn add((mut array, value): (Array, Value)) -> Result<Value, Error> {
 	}
 }
 
-pub fn all((array,): (Array,)) -> Result<Value, Error> {
-	Ok(array.iter().all(Value::is_truthy).into())
+pub async fn all(
+	(stk, ctx, opt, doc): (&mut Stk, &Context, Option<&Options>, Option<&CursorDoc>),
+	(array, check): (Array, Option<Value>),
+) -> Result<Value, Error> {
+	Ok(match check {
+		Some(closure) if closure.is_closure() => {
+			if let Some(opt) = opt {
+				for val in array.iter() {
+					let arg = val.compute(stk, ctx, opt, doc).await?;
+					let fnc = Function::Anonymous(closure.clone(), vec![arg]);
+					if fnc.compute(stk, ctx, opt, doc).await?.is_truthy() {
+						continue;
+					} else {
+						return Ok(Value::Bool(false));
+					}
+				}
+				Value::Bool(true)
+			} else {
+				Value::None
+			}
+		}
+		Some(value) => array.iter().all(|v: &Value| *v == value).into(),
+		None => array.iter().all(Value::is_truthy).into(),
+	})
 }
 
-pub fn any((array,): (Array,)) -> Result<Value, Error> {
-	Ok(array.iter().any(Value::is_truthy).into())
+pub async fn any(
+	(stk, ctx, opt, doc): (&mut Stk, &Context, Option<&Options>, Option<&CursorDoc>),
+	(array, check): (Array, Option<Value>),
+) -> Result<Value, Error> {
+	Ok(match check {
+		Some(closure) if closure.is_closure() => {
+			if let Some(opt) = opt {
+				for val in array.iter() {
+					let arg = val.compute(stk, ctx, opt, doc).await?;
+					let fnc = Function::Anonymous(closure.clone(), vec![arg]);
+					if fnc.compute(stk, ctx, opt, doc).await?.is_truthy() {
+						return Ok(Value::Bool(true));
+					} else {
+						continue;
+					}
+				}
+				Value::Bool(false)
+			} else {
+				Value::None
+			}
+		}
+		Some(value) => array.iter().any(|v: &Value| *v == value).into(),
+		None => array.iter().any(Value::is_truthy).into(),
+	})
 }
 
 pub fn append((mut array, value): (Array, Value)) -> Result<Value, Error> {
@@ -97,7 +163,8 @@ pub fn boolean_xor((lh, rh): (Array, Array)) -> Result<Value, Error> {
 }
 
 pub fn clump((array, clump_size): (Array, i64)) -> Result<Value, Error> {
-	Ok(array.clump(clump_size as usize).into())
+	let clump_size = clump_size.max(0) as usize;
+	Ok(array.clump(clump_size)?.into())
 }
 
 pub fn combine((array, other): (Array, Array)) -> Result<Value, Error> {
@@ -131,27 +198,158 @@ pub fn distinct((array,): (Array,)) -> Result<Value, Error> {
 	Ok(array.uniq().into())
 }
 
-pub fn filter_index((array, value): (Array, Value)) -> Result<Value, Error> {
-	Ok(array
-		.iter()
-		.enumerate()
-		.filter_map(|(i, v)| {
-			if *v == value {
-				Some(Value::from(i))
-			} else {
-				None
+pub fn fill(
+	(mut array, value, start, end): (Array, Value, Option<isize>, Option<isize>),
+) -> Result<Value, Error> {
+	let min = 0;
+	let max = array.len();
+	let negative_max = -(max as isize);
+
+	let start = match start {
+		Some(start) if negative_max <= start && start < 0 => (start + max as isize) as usize,
+		Some(start) if start < negative_max => 0,
+		Some(start) => start as usize,
+		None => min,
+	};
+	let end = match end {
+		Some(end) if negative_max <= end && end < 0 => (end + max as isize) as usize,
+		Some(end) if end < negative_max => 0,
+		Some(end) => end as usize,
+		None => max,
+	};
+
+	if start == min && end >= max {
+		array.fill(value);
+	} else if end > start {
+		let end_minus_one = end - 1;
+
+		for i in start..end_minus_one {
+			if let Some(elem) = array.get_mut(i) {
+				*elem = value.clone();
 			}
-		})
-		.collect::<Vec<_>>()
-		.into())
+		}
+
+		if let Some(last_elem) = array.get_mut(end_minus_one) {
+			*last_elem = value;
+		}
+	}
+
+	Ok(array.into())
 }
 
-pub fn find_index((array, value): (Array, Value)) -> Result<Value, Error> {
-	Ok(array
-		.iter()
-		.enumerate()
-		.find(|(_i, v)| **v == value)
-		.map_or(Value::Null, |(i, _v)| i.into()))
+pub async fn filter(
+	(stk, ctx, opt, doc): (&mut Stk, &Context, Option<&Options>, Option<&CursorDoc>),
+	(array, check): (Array, Value),
+) -> Result<Value, Error> {
+	Ok(match check {
+		closure if closure.is_closure() => {
+			if let Some(opt) = opt {
+				let mut res = Vec::with_capacity(array.len());
+				for val in array.iter() {
+					let arg = val.compute(stk, ctx, opt, doc).await?;
+					let fnc = Function::Anonymous(closure.clone(), vec![arg.clone()]);
+					if fnc.compute(stk, ctx, opt, doc).await?.is_truthy() {
+						res.push(arg)
+					}
+				}
+				Value::from(res)
+			} else {
+				Value::None
+			}
+		}
+		value => array.into_iter().filter(|v: &Value| *v == value).collect::<Vec<_>>().into(),
+	})
+}
+
+pub async fn filter_index(
+	(stk, ctx, opt, doc): (&mut Stk, &Context, Option<&Options>, Option<&CursorDoc>),
+	(array, value): (Array, Value),
+) -> Result<Value, Error> {
+	Ok(match value {
+		closure if closure.is_closure() => {
+			if let Some(opt) = opt {
+				let mut res = Vec::with_capacity(array.len());
+				for (i, val) in array.iter().enumerate() {
+					let arg = val.compute(stk, ctx, opt, doc).await?;
+					let fnc = Function::Anonymous(closure.clone(), vec![arg, i.into()]);
+					if fnc.compute(stk, ctx, opt, doc).await?.is_truthy() {
+						res.push(i);
+					}
+				}
+				Value::from(res)
+			} else {
+				Value::None
+			}
+		}
+		value => array
+			.iter()
+			.enumerate()
+			.filter_map(|(i, v)| {
+				if *v == value {
+					Some(Value::from(i))
+				} else {
+					None
+				}
+			})
+			.collect::<Vec<_>>()
+			.into(),
+	})
+}
+
+pub async fn find(
+	(stk, ctx, opt, doc): (&mut Stk, &Context, Option<&Options>, Option<&CursorDoc>),
+	(array, value): (Array, Value),
+) -> Result<Value, Error> {
+	Ok(match value {
+		closure if closure.is_closure() => {
+			if let Some(opt) = opt {
+				for val in array.iter() {
+					let arg = val.compute(stk, ctx, opt, doc).await?;
+					let fnc = Function::Anonymous(closure.clone(), vec![arg.clone()]);
+					if fnc.compute(stk, ctx, opt, doc).await?.is_truthy() {
+						return Ok(arg);
+					}
+				}
+				Value::None
+			} else {
+				Value::None
+			}
+		}
+		value => array.into_iter().find(|v: &Value| *v == value).into(),
+	})
+}
+
+pub async fn find_index(
+	(stk, ctx, opt, doc): (&mut Stk, &Context, Option<&Options>, Option<&CursorDoc>),
+	(array, value): (Array, Value),
+) -> Result<Value, Error> {
+	Ok(match value {
+		closure if closure.is_closure() => {
+			if let Some(opt) = opt {
+				for (i, val) in array.iter().enumerate() {
+					let arg = val.compute(stk, ctx, opt, doc).await?;
+					let fnc = Function::Anonymous(closure.clone(), vec![arg, i.into()]);
+					if fnc.compute(stk, ctx, opt, doc).await?.is_truthy() {
+						return Ok(i.into());
+					}
+				}
+				Value::None
+			} else {
+				Value::None
+			}
+		}
+		value => array
+			.iter()
+			.enumerate()
+			.find_map(|(i, v)| {
+				if *v == value {
+					Some(Value::from(i))
+				} else {
+					None
+				}
+			})
+			.into(),
+	})
 }
 
 pub fn first((array,): (Array,)) -> Result<Value, Error> {
@@ -195,6 +393,10 @@ pub fn insert((mut array, value, index): (Array, Value, Option<i64>)) -> Result<
 
 pub fn intersect((array, other): (Array, Array)) -> Result<Value, Error> {
 	Ok(array.intersect(other).into())
+}
+
+pub fn is_empty((array,): (Array,)) -> Result<Value, Error> {
+	Ok(array.is_empty().into())
 }
 
 pub fn join((arr, sep): (Array, String)) -> Result<Value, Error> {
@@ -285,6 +487,23 @@ pub fn logical_xor((lh, rh): (Array, Array)) -> Result<Value, Error> {
 	Ok(result_arr.into())
 }
 
+pub async fn map(
+	(stk, ctx, opt, doc): (&mut Stk, &Context, Option<&Options>, Option<&CursorDoc>),
+	(array, mapper): (Array, Closure),
+) -> Result<Value, Error> {
+	if let Some(opt) = opt {
+		let mut res = Vec::with_capacity(array.len());
+		for (i, val) in array.into_iter().enumerate() {
+			let arg = val.compute(stk, ctx, opt, doc).await?;
+			let fnc = Function::Anonymous(mapper.clone().into(), vec![arg, i.into()]);
+			res.push(fnc.compute(stk, ctx, opt, doc).await?);
+		}
+		Ok(res.into())
+	} else {
+		Ok(Value::None)
+	}
+}
+
 pub fn matches((array, compare_val): (Array, Value)) -> Result<Value, Error> {
 	Ok(array.matches(compare_val).into())
 }
@@ -311,6 +530,26 @@ pub fn push((mut array, value): (Array, Value)) -> Result<Value, Error> {
 	Ok(array.into())
 }
 
+pub fn range((start, count): (i64, i64)) -> Result<Value, Error> {
+	if count < 0 {
+		return Err(Error::InvalidArguments {
+			name: String::from("array::range"),
+			message: format!(
+				"Argument 1 was the wrong type. Expected a positive number but found {count}"
+			),
+		});
+	}
+
+	if let Some(end) = start.checked_add(count - 1) {
+		Ok(Array((start..=end).map(Value::from).collect::<Vec<_>>()).into())
+	} else {
+		Err(Error::InvalidArguments {
+			name: String::from("array::range"),
+			message: String::from("The range overflowed the maximum value for an integer"),
+		})
+	}
+}
+
 pub fn remove((mut array, mut index): (Array, i64)) -> Result<Value, Error> {
 	// Negative index means start from the back
 	if index < 0 {
@@ -326,8 +565,19 @@ pub fn remove((mut array, mut index): (Array, i64)) -> Result<Value, Error> {
 	Ok(array.into())
 }
 
+pub fn repeat((value, count): (Value, usize)) -> Result<Value, Error> {
+	limit("array::repeat", size_of_val(&value).saturating_mul(count))?;
+	Ok(Array(std::iter::repeat(value).take(count).collect()).into())
+}
+
 pub fn reverse((mut array,): (Array,)) -> Result<Value, Error> {
 	array.reverse();
+	Ok(array.into())
+}
+
+pub fn shuffle((mut array,): (Array,)) -> Result<Value, Error> {
+	let mut rng = rand::thread_rng();
+	array.shuffle(&mut rng);
 	Ok(array.into())
 }
 
@@ -382,12 +632,48 @@ pub fn sort((mut array, order): (Array, Option<Value>)) -> Result<Value, Error> 
 	}
 }
 
+pub fn swap((mut array, from, to): (Array, isize, isize)) -> Result<Value, Error> {
+	let min = 0;
+	let max = array.len();
+	let negative_max = -(max as isize);
+
+	let from = match from {
+		from if from < negative_max || from >= max as isize => Err(Error::InvalidArguments {
+			name: String::from("array::swap"),
+			message: format!(
+				"Argument 1 is out of range. Expected a number between {negative_max} and {max}"
+			),
+		}),
+		from if negative_max <= from && from < min => Ok((from + max as isize) as usize),
+		from => Ok(from as usize),
+	}?;
+
+	let to = match to {
+		to if to < negative_max || to >= max as isize => Err(Error::InvalidArguments {
+			name: String::from("array::swap"),
+			message: format!(
+				"Argument 2 is out of range. Expected a number between {negative_max} and {max}"
+			),
+		}),
+		to if negative_max <= to && to < min => Ok((to + max as isize) as usize),
+		to => Ok(to as usize),
+	}?;
+
+	array.swap(from, to);
+	Ok(array.into())
+}
+
 pub fn transpose((array,): (Array,)) -> Result<Value, Error> {
 	Ok(array.transpose().into())
 }
 
 pub fn union((array, other): (Array, Array)) -> Result<Value, Error> {
 	Ok(array.union(other).into())
+}
+
+pub fn windows((array, window_size): (Array, i64)) -> Result<Value, Error> {
+	let window_size = window_size.max(0) as usize;
+	Ok(array.windows(window_size)?.into())
 }
 
 pub mod sort {
@@ -422,14 +708,14 @@ mod tests {
 			assert_eq!(slice((initial_values, beg, lim)).unwrap(), expected_values.into());
 		}
 
-		let array = &[b'a', b'b', b'c', b'd', b'e', b'f', b'g'];
+		let array = b"abcdefg";
 		test(array, None, None, array);
 		test(array, Some(2), None, &array[2..]);
 		test(array, Some(2), Some(3), &array[2..5]);
-		test(array, Some(2), Some(-1), &[b'c', b'd', b'e', b'f']);
-		test(array, Some(-2), None, &[b'f', b'g']);
-		test(array, Some(-4), Some(2), &[b'd', b'e']);
-		test(array, Some(-4), Some(-1), &[b'd', b'e', b'f']);
+		test(array, Some(2), Some(-1), b"cdef");
+		test(array, Some(-2), None, b"fg");
+		test(array, Some(-4), Some(2), b"de");
+		test(array, Some(-4), Some(-1), b"def");
 	}
 
 	#[test]

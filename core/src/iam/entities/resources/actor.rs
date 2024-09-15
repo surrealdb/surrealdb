@@ -8,14 +8,15 @@ use serde::{Deserialize, Serialize};
 
 use super::{Level, Resource, ResourceKind};
 use crate::iam::Role;
-use crate::sql::statements::{DefineTokenStatement, DefineUserStatement};
+use crate::sql::statements::{DefineAccessStatement, DefineUserStatement};
 
 //
 // User
 //
+#[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Hash, Serialize, Deserialize)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[revisioned(revision = 1)]
+#[non_exhaustive]
 pub struct Actor {
 	res: Resource,
 	roles: Vec<Role>,
@@ -123,8 +124,8 @@ impl std::convert::From<(&DefineUserStatement, Level)> for Actor {
 	}
 }
 
-impl std::convert::From<(&DefineTokenStatement, Level)> for Actor {
-	fn from(val: (&DefineTokenStatement, Level)) -> Self {
+impl std::convert::From<(&DefineAccessStatement, Level)> for Actor {
+	fn from(val: (&DefineAccessStatement, Level)) -> Self {
 		Self::new(val.0.name.to_string(), Vec::default(), val.1)
 	}
 }

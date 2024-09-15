@@ -1,0 +1,55 @@
+# Use this workflow to release the SQLv1 crate
+
+name: SQLv1 release
+
+run-name: "SQLv1 release (publish: ${{ inputs.publish }})"
+
+on:
+  workflow_dispatch:
+    inputs:
+      publish:
+        required: false
+        type: boolean
+        default: false
+        description: "Publish the release"
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  publish:
+    name: Publish crate
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v4
+        with:
+          ref: core-1.x
+
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install release-plz
+        run: |
+          curl -L https://github.com/MarcoIeni/release-plz/releases/download/release-plz-v0.3.30/release-plz-x86_64-unknown-linux-gnu.tar.gz | sudo tar -xz -C /usr/bin
+          sudo chmod +x /usr/bin/release-plz
+
+      - name: Configure release-plz
+        run: |
+          cat << EOF > /tmp/release-plz.toml
+          [workspace]
+          changelog_update = false
+          git_release_enable = false
+          semver_check = false
+          git_tag_enable = false
+          EOF
+
+      - name: Test publishing the crate
+        run: release-plz release --config /tmp/release-plz.toml --dry-run
+
+      - name: Publish the crate
+        if: ${{ inputs.publish }}
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        run: release-plz release --config /tmp/release-plz.toml

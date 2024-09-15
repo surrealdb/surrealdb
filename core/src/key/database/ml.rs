@@ -1,10 +1,11 @@
-/// Stores a DEFINE MODEL config definition
-use crate::key::error::KeyCategory;
-use crate::key::key_req::KeyRequirements;
+//! Stores a DEFINE MODEL config definition
+use crate::key::category::Categorise;
+use crate::key::category::Category;
 use derive::Key;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Key)]
+#[non_exhaustive]
 pub struct Ml<'a> {
 	__: u8,
 	_a: u8,
@@ -24,19 +25,19 @@ pub fn new<'a>(ns: &'a str, db: &'a str, ml: &'a str, vn: &'a str) -> Ml<'a> {
 
 pub fn prefix(ns: &str, db: &str) -> Vec<u8> {
 	let mut k = super::all::new(ns, db).encode().unwrap();
-	k.extend_from_slice(&[b'!', b'm', b'l', 0x00]);
+	k.extend_from_slice(b"!ml\x00");
 	k
 }
 
 pub fn suffix(ns: &str, db: &str) -> Vec<u8> {
 	let mut k = super::all::new(ns, db).encode().unwrap();
-	k.extend_from_slice(&[b'!', b'm', b'l', 0xff]);
+	k.extend_from_slice(b"!ml\xff");
 	k
 }
 
-impl KeyRequirements for Ml<'_> {
-	fn key_category(&self) -> KeyCategory {
-		KeyCategory::DatabaseModel
+impl Categorise for Ml<'_> {
+	fn categorise(&self) -> Category {
+		Category::DatabaseModel
 	}
 }
 

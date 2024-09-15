@@ -1,13 +1,53 @@
-/// Debug purposes only. It may be used in logs. Not for key handling in implementation code.
-use crate::kvs::Key;
+use std::ops::Range;
 
-/// Helpers for debugging keys
+pub trait Sprintable {
+	fn sprint(&self) -> String;
+}
 
-/// sprint_key converts a key to an escaped string.
-/// This is used for logging and debugging tests and should not be used in implementation code.
-pub fn sprint_key(key: &Key) -> String {
-	key.iter()
-		.flat_map(|&byte| std::ascii::escape_default(byte))
-		.map(|byte| byte as char)
-		.collect::<String>()
+impl Sprintable for &str {
+	fn sprint(&self) -> String {
+		self.to_string()
+	}
+}
+
+impl Sprintable for String {
+	fn sprint(&self) -> String {
+		self.to_string()
+	}
+}
+
+impl Sprintable for Vec<u8> {
+	fn sprint(&self) -> String {
+		self.iter()
+			.flat_map(|&byte| std::ascii::escape_default(byte))
+			.map(|byte| byte as char)
+			.collect::<String>()
+	}
+}
+
+impl Sprintable for &[u8] {
+	fn sprint(&self) -> String {
+		self.iter()
+			.flat_map(|&byte| std::ascii::escape_default(byte))
+			.map(|byte| byte as char)
+			.collect::<String>()
+	}
+}
+
+impl<T> Sprintable for Vec<T>
+where
+	T: Sprintable,
+{
+	fn sprint(&self) -> String {
+		self.iter().map(Sprintable::sprint).collect::<Vec<_>>().join(" + ")
+	}
+}
+
+impl<T> Sprintable for Range<T>
+where
+	T: Sprintable,
+{
+	fn sprint(&self) -> String {
+		format!("{}..{}", self.start.sprint(), self.end.sprint())
+	}
 }
