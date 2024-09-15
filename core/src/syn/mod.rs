@@ -5,7 +5,6 @@ use crate::{
 	sql::{Block, Datetime, Duration, Idiom, Query, Range, Subquery, Thing, Value},
 };
 
-pub mod common;
 pub mod error;
 pub mod lexer;
 pub mod parser;
@@ -19,6 +18,7 @@ pub trait Parse<T> {
 #[cfg(test)]
 mod test;
 
+use lexer::{compound, Lexer};
 use parser::Parser;
 use reblessive::Stack;
 use token::t;
@@ -57,8 +57,24 @@ pub fn value(input: &str) -> Result<Value, Error> {
 	let mut parser = Parser::new(input.as_bytes());
 	let mut stack = Stack::new();
 	stack
+		.enter(|stk| parser.parse_value_table(stk))
+		.finish()
+		.and_then(|e| parser.assert_finished().map(|_| e))
+		.map_err(|e| e.render_on(input))
+		.map_err(Error::InvalidQuery)
+}
+
+/// Parses a SurrealQL [`Value`].
+#[cfg(test)]
+#[instrument(level = "debug", name = "parser", skip_all, fields(length = input.len()))]
+pub(crate) fn value_field(input: &str) -> Result<Value, Error> {
+	debug!("parsing value, input = {input}");
+	let mut parser = Parser::new(input.as_bytes());
+	let mut stack = Stack::new();
+	stack
 		.enter(|stk| parser.parse_value_field(stk))
 		.finish()
+		.and_then(|e| parser.assert_finished().map(|_| e))
 		.map_err(|e| e.render_on(input))
 		.map_err(Error::InvalidQuery)
 }
@@ -71,8 +87,9 @@ pub fn value_legacy_strand(input: &str) -> Result<Value, Error> {
 	let mut stack = Stack::new();
 	parser.allow_legacy_strand(true);
 	stack
-		.enter(|stk| parser.parse_value(stk))
+		.enter(|stk| parser.parse_value_table(stk))
 		.finish()
+		.and_then(|e| parser.assert_finished().map(|_| e))
 		.map_err(|e| e.render_on(input))
 		.map_err(Error::InvalidQuery)
 }
@@ -86,6 +103,7 @@ pub fn json(input: &str) -> Result<Value, Error> {
 	stack
 		.enter(|stk| parser.parse_json(stk))
 		.finish()
+		.and_then(|e| parser.assert_finished().map(|_| e))
 		.map_err(|e| e.render_on(input))
 		.map_err(Error::InvalidQuery)
 }
@@ -100,6 +118,7 @@ pub fn json_legacy_strand(input: &str) -> Result<Value, Error> {
 	stack
 		.enter(|stk| parser.parse_json(stk))
 		.finish()
+		.and_then(|e| parser.assert_finished().map(|_| e))
 		.map_err(|e| e.render_on(input))
 		.map_err(Error::InvalidQuery)
 }
@@ -112,6 +131,7 @@ pub fn subquery(input: &str) -> Result<Subquery, Error> {
 	stack
 		.enter(|stk| parser.parse_full_subquery(stk))
 		.finish()
+		.and_then(|e| parser.assert_finished().map(|_| e))
 		.map_err(|e| e.render_on(input))
 		.map_err(Error::InvalidQuery)
 }
@@ -121,10 +141,12 @@ pub fn subquery(input: &str) -> Result<Subquery, Error> {
 pub fn idiom(input: &str) -> Result<Idiom, Error> {
 	debug!("parsing idiom, input = {input}");
 	let mut parser = Parser::new(input.as_bytes());
+	parser.table_as_field = true;
 	let mut stack = Stack::new();
 	stack
 		.enter(|stk| parser.parse_plain_idiom(stk))
 		.finish()
+		.and_then(|e| parser.assert_finished().map(|_| e))
 		.map_err(|e| e.render_on(input))
 		.map_err(Error::InvalidQuery)
 }
@@ -132,8 +154,12 @@ pub fn idiom(input: &str) -> Result<Idiom, Error> {
 /// Parse a datetime without enclosing delimiters from a string.
 pub fn datetime_raw(input: &str) -> Result<Datetime, Error> {
 	debug!("parsing datetime, input = {input}");
-	let mut parser = Parser::new(input.as_bytes());
-	parser.parse_inner_datetime().map_err(|e| e.render_on(input)).map_err(Error::InvalidQuery)
+	let mut lexer = Lexer::new(input.as_bytes());
+	let res = compound::datetime_inner(&mut lexer);
+	if let Err(e) = lexer.assert_finished() {
+		return Err(Error::InvalidQuery(e.render_on(input)));
+	}
+	res.map(Datetime).map_err(|e| e.render_on(input)).map_err(Error::InvalidQuery)
 }
 
 /// Parse a duration from a string.
@@ -142,6 +168,7 @@ pub fn duration(input: &str) -> Result<Duration, Error> {
 	let mut parser = Parser::new(input.as_bytes());
 	parser
 		.next_token_value::<Duration>()
+		.and_then(|e| parser.assert_finished().map(|_| e))
 		.map_err(|e| e.render_on(input))
 		.map_err(Error::InvalidQuery)
 }
@@ -154,6 +181,7 @@ pub fn range(input: &str) -> Result<Range, Error> {
 	stack
 		.enter(|stk| parser.parse_range(stk))
 		.finish()
+		.and_then(|e| parser.assert_finished().map(|_| e))
 		.map_err(|e| e.render_on(input))
 		.map_err(Error::InvalidQuery)
 }
@@ -166,6 +194,7 @@ pub fn thing(input: &str) -> Result<Thing, Error> {
 	stack
 		.enter(|stk| parser.parse_thing(stk))
 		.finish()
+		.and_then(|e| parser.assert_finished().map(|_| e))
 		.map_err(|e| e.render_on(input))
 		.map_err(Error::InvalidQuery)
 }
@@ -177,24 +206,21 @@ pub fn block(input: &str) -> Result<Block, Error> {
 	let mut parser = Parser::new(input.as_bytes());
 	let mut stack = Stack::new();
 
-	match parser.peek_kind() {
+	let token = parser.peek();
+	match token.kind {
 		t!("{") => {
 			let start = parser.pop_peek().span;
 			stack
 				.enter(|stk| parser.parse_block(stk, start))
 				.finish()
+				.and_then(|e| parser.assert_finished().map(|_| e))
 				.map_err(|e| e.render_on(input))
 				.map_err(Error::InvalidQuery)
 		}
 		found => Err(Error::InvalidQuery(
-			crate::syn::parser::ParseError::new(
-				crate::syn::parser::ParseErrorKind::Unexpected {
-					expected: "{",
-					found,
-				},
-				parser.last_span(),
-			)
-			.render_on(input),
+			error::SyntaxError::new(format_args!("Unexpected token `{found}` expected `{{`"))
+				.with_span(token.span, error::MessageKind::Error)
+				.render_on(input),
 		)),
 	}
 }

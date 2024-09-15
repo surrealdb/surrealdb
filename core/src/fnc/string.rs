@@ -69,24 +69,25 @@ pub fn matches((val, regex): (String, Regex)) -> Result<Value, Error> {
 	Ok(regex.0.is_match(&val).into())
 }
 
-pub fn replace((val, old_or_regexp, new): (String, Value, String)) -> Result<Value, Error> {
-	match old_or_regexp {
-		Value::Strand(old) => {
-			if new.len() > old.len() {
-				let increase = new.len() - old.len();
+pub fn replace((val, search, replace): (String, Value, String)) -> Result<Value, Error> {
+	match search {
+		Value::Strand(search) => {
+			if replace.len() > search.len() {
+				let increase = replace.len() - search.len();
 				limit(
 					"string::replace",
-					val.len().saturating_add(val.matches(&old.0).count().saturating_mul(increase)),
+					val.len()
+						.saturating_add(val.matches(&search.0).count().saturating_mul(increase)),
 				)?;
 			}
-			Ok(val.replace(&old.0, &new).into())
+			Ok(val.replace(&search.0, &replace).into())
 		}
-		Value::Regex(r) => Ok(r.0.replace_all(&val, new).into_owned().into()),
+		Value::Regex(search) => Ok(search.0.replace_all(&val, replace).into_owned().into()),
 		_ => Err(Error::InvalidArguments {
 			name: "string::replace".to_string(),
 			message: format!(
 				"Argument 2 was the wrong type. Expected a string but found {}",
-				old_or_regexp
+				search
 			),
 		}),
 	}
@@ -185,16 +186,16 @@ pub mod is {
 	use crate::sql::value::Value;
 	use crate::sql::{Datetime, Thing};
 	use chrono::NaiveDateTime;
-	use once_cell::sync::Lazy;
 	use regex::Regex;
 	use semver::Version;
 	use std::char;
 	use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+	use std::sync::LazyLock;
 	use url::Url;
 	use uuid::Uuid;
 
-	#[rustfmt::skip] static LATITUDE_RE: Lazy<Regex> = Lazy::new(|| Regex::new("^[-+]?([1-8]?\\d(\\.\\d+)?|90(\\.0+)?)$").unwrap());
-	#[rustfmt::skip] static LONGITUDE_RE: Lazy<Regex> = Lazy::new(|| Regex::new("^[-+]?(180(\\.0+)?|((1[0-7]\\d)|([1-9]?\\d))(\\.\\d+)?)$").unwrap());
+	#[rustfmt::skip] static LATITUDE_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new("^[-+]?([1-8]?\\d(\\.\\d+)?|90(\\.0+)?)$").unwrap());
+	#[rustfmt::skip] static LONGITUDE_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new("^[-+]?(180(\\.0+)?|((1[0-7]\\d)|([1-9]?\\d))(\\.\\d+)?)$").unwrap());
 
 	pub fn alphanum((arg,): (String,)) -> Result<Value, Error> {
 		Ok(arg.chars().all(char::is_alphanumeric).into())

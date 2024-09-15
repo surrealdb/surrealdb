@@ -35,6 +35,7 @@ mod export;
 mod health;
 mod import;
 mod insert;
+mod insert_relation;
 mod invalidate;
 mod merge;
 mod patch;
@@ -131,7 +132,7 @@ where
 	/// Using a static, compile-time scheme
 	///
 	/// ```no_run
-	/// use once_cell::sync::Lazy;
+	/// use std::sync::LazyLock;
 	/// use serde::{Serialize, Deserialize};
 	/// use surrealdb::Surreal;
 	/// use surrealdb::opt::auth::Root;
@@ -139,7 +140,7 @@ where
 	/// use surrealdb::engine::remote::ws::Client;
 	///
 	/// // Creates a new static instance of the client
-	/// static DB: Lazy<Surreal<Client>> = Lazy::new(Surreal::init);
+	/// static DB: LazyLock<Surreal<Client>> = LazyLock::new(Surreal::init);
 	///
 	/// #[derive(Serialize, Deserialize)]
 	/// struct Person {
@@ -173,14 +174,14 @@ where
 	/// Using a dynamic, run-time scheme
 	///
 	/// ```no_run
-	/// use once_cell::sync::Lazy;
+	/// use std::sync::LazyLock;
 	/// use serde::{Serialize, Deserialize};
 	/// use surrealdb::Surreal;
 	/// use surrealdb::engine::any::Any;
 	/// use surrealdb::opt::auth::Root;
 	///
 	/// // Creates a new static instance of the client
-	/// static DB: Lazy<Surreal<Any>> = Lazy::new(Surreal::init);
+	/// static DB: LazyLock<Surreal<Any>> = LazyLock::new(Surreal::init);
 	///
 	/// #[derive(Serialize, Deserialize)]
 	/// struct Person {
@@ -732,7 +733,7 @@ where
 	/// db.use_ns("namespace").use_db("database").await?;
 	///
 	/// // Create a record with a random ID
-	/// let person: Vec<Person> = db.create("person").await?;
+	/// let person: Option<Person> = db.create("person").await?;
 	///
 	/// // Create a record with a specific ID
 	/// let record: Option<Person> = db.create(("person", "tobie"))
@@ -761,10 +762,10 @@ where
 	/// # Examples
 	///
 	/// ```no_run
-	/// use serde::Serialize;
+	/// use serde::{Serialize, Deserialize};
 	/// use surrealdb::sql;
 	///
-	/// # #[derive(serde::Deserialize)]
+	/// # #[derive(Deserialize)]
 	/// # struct Person;
 	/// #
 	/// #[derive(Serialize)]
@@ -845,6 +846,50 @@ where
 	///         },
 	///     ])
 	///     .await?;
+	///
+	/// // Insert multiple records into different tables
+	/// #[derive(Serialize)]
+	/// struct WithId<'a> {
+	///     id: sql::Thing,
+	///     name: &'a str,
+	/// }
+	///
+	/// let people: Vec<Person> = db.insert(())
+	///     .content(vec![
+	///         WithId {
+	///             id: sql::thing("person:tobie")?,
+	///             name: "Tobie",
+	///         },
+	///         WithId {
+	///             id: sql::thing("company:surrealdb")?,
+	///             name: "SurrealDB",
+	///         },
+	///     ])
+	///     .await?;
+	///
+	///
+	/// // Insert relations
+	/// #[derive(Serialize, Deserialize)]
+	/// struct Founded {
+	///     #[serde(rename = "in")]
+	///     founder: sql::Thing,
+	///     #[serde(rename = "out")]
+	///     company: sql::Thing,
+	/// }
+	///
+	/// let founded: Vec<Founded> = db.insert("founded")
+	///     .relation(vec![
+	///         Founded {
+	///             founder: sql::thing("person:tobie")?,
+	///             company: sql::thing("company:surrealdb")?,
+	///         },
+	///         Founded {
+	///             founder: sql::thing("person:jaime")?,
+	///             company: sql::thing("company:surrealdb")?,
+	///         },
+	///     ])
+	///     .await?;
+	///
 	/// #
 	/// # Ok(())
 	/// # }

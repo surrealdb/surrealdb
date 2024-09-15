@@ -1,5 +1,6 @@
 use super::tr::Transactor;
 use super::tx::Transaction;
+use super::version::Version;
 use crate::cf;
 use crate::ctx::MutableContext;
 #[cfg(feature = "jwks")]
@@ -26,13 +27,7 @@ use channel::{Receiver, Sender};
 use futures::Future;
 use reblessive::TreeStack;
 use std::fmt;
-#[cfg(any(
-	feature = "kv-mem",
-	feature = "kv-surrealkv",
-	feature = "kv-rocksdb",
-	feature = "kv-fdb",
-	feature = "kv-tikv",
-))]
+#[cfg(storage)]
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
@@ -81,13 +76,7 @@ pub struct Datastore {
 	#[cfg(feature = "jwks")]
 	// The JWKS object cache
 	jwks_cache: Arc<RwLock<JwksCache>>,
-	#[cfg(any(
-		feature = "kv-mem",
-		feature = "kv-surrealkv",
-		feature = "kv-rocksdb",
-		feature = "kv-fdb",
-		feature = "kv-tikv",
-	))]
+	#[cfg(storage)]
 	// The temporary directory
 	temporary_directory: Option<Arc<PathBuf>>,
 }
@@ -152,6 +141,11 @@ impl TransactionFactory {
 				let tx = v.transaction(write, lock).await?;
 				super::tr::Inner::SurrealKV(tx)
 			}
+			#[cfg(feature = "kv-surrealcs")]
+			DatastoreFlavor::SurrealCS(v) => {
+				let tx = v.transaction(write, lock).await?;
+				super::tr::Inner::SurrealCS(tx)
+			}
 			#[allow(unreachable_patterns)]
 			_ => unreachable!(),
 		};
@@ -178,6 +172,8 @@ pub(super) enum DatastoreFlavor {
 	FoundationDB(super::fdb::Datastore),
 	#[cfg(feature = "kv-surrealkv")]
 	SurrealKV(super::surrealkv::Datastore),
+	#[cfg(feature = "kv-surrealcs")]
+	SurrealCS(super::surrealcs::Datastore),
 }
 
 impl fmt::Display for Datastore {
@@ -196,6 +192,8 @@ impl fmt::Display for Datastore {
 			DatastoreFlavor::FoundationDB(_) => write!(f, "fdb"),
 			#[cfg(feature = "kv-surrealkv")]
 			DatastoreFlavor::SurrealKV(_) => write!(f, "surrealkv"),
+			#[cfg(feature = "kv-surrealcs")]
+			DatastoreFlavor::SurrealCS(_) => write!(f, "surrealcs"),
 			#[allow(unreachable_patterns)]
 			_ => unreachable!(),
 		}
@@ -261,13 +259,7 @@ impl Datastore {
 			index_builder: IndexBuilder::new(self.transaction_factory.clone()),
 			#[cfg(feature = "jwks")]
 			jwks_cache: Arc::new(Default::default()),
-			#[cfg(any(
-				feature = "kv-mem",
-				feature = "kv-surrealkv",
-				feature = "kv-rocksdb",
-				feature = "kv-fdb",
-				feature = "kv-tikv",
-			))]
+			#[cfg(storage)]
 			temporary_directory: self.temporary_directory,
 			transaction_factory: self.transaction_factory,
 		}
@@ -324,6 +316,38 @@ impl Datastore {
 				#[cfg(not(feature = "kv-rocksdb"))]
                 return Err(Error::Ds("Cannot connect to the `rocksdb` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
 			}
+			// Parse and initiate a SurrealKV datastore
+			s if s.starts_with("surrealkv:") => {
+				#[cfg(feature = "kv-surrealkv")]
+				{
+					info!(target: TARGET, "Starting kvs store at {}", path);
+					let s = s.trim_start_matches("surrealkv://");
+					let s = s.trim_start_matches("surrealkv:");
+					let v =
+						super::surrealkv::Datastore::new(s).await.map(DatastoreFlavor::SurrealKV);
+					let c = clock.unwrap_or_else(|| Arc::new(SizedClock::system()));
+					info!(target: TARGET, "Started kvs store at {}", path);
+					Ok((v, c))
+				}
+				#[cfg(not(feature = "kv-surrealkv"))]
+                return Err(Error::Ds("Cannot connect to the `surrealkv` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
+			}
+			// Parse and initiate a SurrealCS datastore
+			s if s.starts_with("surrealcs:") => {
+				#[cfg(feature = "kv-surrealcs")]
+				{
+					info!(target: TARGET, "Starting kvs store at {}", path);
+					let s = s.trim_start_matches("surrealcs://");
+					let s = s.trim_start_matches("surrealcs:");
+					let v =
+						super::surrealcs::Datastore::new(s).await.map(DatastoreFlavor::SurrealCS);
+					let c = clock.unwrap_or_else(|| Arc::new(SizedClock::system()));
+					info!(target: TARGET, "Started kvs store at {}", path);
+					Ok((v, c))
+				}
+				#[cfg(not(feature = "kv-surrealcs"))]
+				return Err(Error::Ds("Cannot connect to the `surrealcs` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
+			}
 			// Parse and initiate an IndxDB database
 			s if s.starts_with("indxdb:") => {
 				#[cfg(feature = "kv-indxdb")]
@@ -369,22 +393,6 @@ impl Datastore {
 				#[cfg(not(feature = "kv-fdb"))]
                 return Err(Error::Ds("Cannot connect to the `foundationdb` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
 			}
-			// Parse and initiate a SurrealKV datastore
-			s if s.starts_with("surrealkv:") => {
-				#[cfg(feature = "kv-surrealkv")]
-				{
-					info!(target: TARGET, "Starting kvs store at {}", path);
-					let s = s.trim_start_matches("surrealkv://");
-					let s = s.trim_start_matches("surrealkv:");
-					let v =
-						super::surrealkv::Datastore::new(s).await.map(DatastoreFlavor::SurrealKV);
-					let c = clock.unwrap_or_else(|| Arc::new(SizedClock::system()));
-					info!(target: TARGET, "Started to kvs store at {}", path);
-					Ok((v, c))
-				}
-				#[cfg(not(feature = "kv-surrealkv"))]
-                return Err(Error::Ds("Cannot connect to the `surrealkv` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
-			}
 			// The datastore path is not valid
 			_ => {
 				info!(target: TARGET, "Unable to load the specified datastore {}", path);
@@ -411,13 +419,7 @@ impl Datastore {
 				index_builder: IndexBuilder::new(tf),
 				#[cfg(feature = "jwks")]
 				jwks_cache: Arc::new(RwLock::new(JwksCache::new())),
-				#[cfg(any(
-					feature = "kv-mem",
-					feature = "kv-surrealkv",
-					feature = "kv-rocksdb",
-					feature = "kv-fdb",
-					feature = "kv-tikv",
-				))]
+				#[cfg(storage)]
 				temporary_directory: None,
 			}
 		})
@@ -465,13 +467,7 @@ impl Datastore {
 		self
 	}
 
-	#[cfg(any(
-		feature = "kv-mem",
-		feature = "kv-surrealkv",
-		feature = "kv-rocksdb",
-		feature = "kv-fdb",
-		feature = "kv-tikv",
-	))]
+	#[cfg(storage)]
 	/// Set a temporary directory for ordering of large result sets
 	pub fn with_temporary_directory(mut self, path: Option<PathBuf>) -> Self {
 		self.temporary_directory = path.map(Arc::new);
@@ -508,13 +504,72 @@ impl Datastore {
 
 	// Initialise the cluster and run bootstrap utilities
 	#[instrument(err, level = "trace", target = "surrealdb::core::kvs::ds", skip_all)]
-	pub async fn bootstrap(&self) -> Result<(), Error> {
-		// Insert this node in the cluster
-		self.insert_node(self.id).await?;
-		// Mark expired nodes as archived
-		self.expire_nodes().await?;
+	pub async fn check_version(&self) -> Result<Version, Error> {
+		let version = self.get_version().await?;
+		// Check we are running the latest version
+		if !version.is_latest() {
+			return Err(Error::OutdatedStorageVersion);
+		}
 		// Everything ok
-		Ok(())
+		Ok(version)
+	}
+
+	// Initialise the cluster and run bootstrap utilities
+	#[instrument(err, level = "trace", target = "surrealdb::core::kvs::ds", skip_all)]
+	pub async fn get_version(&self) -> Result<Version, Error> {
+		// Start a new writeable transaction
+		let txn = self.transaction(Write, Pessimistic).await?.enclose();
+		// Create the key where the version is stored
+		let key = crate::key::version::new();
+		// Check if a version is already set in storage
+		let val = match catch!(txn, txn.get(key.clone(), None).await) {
+			// There is a version set in the storage
+			Some(v) => {
+				// Attempt to decode the current stored version
+				let val = TryInto::<Version>::try_into(v);
+				// Check for errors, and cancel the transaction
+				match val {
+					// There was en error getting the version
+					Err(err) => {
+						// We didn't write anything, so just rollback
+						txn.cancel().await?;
+						// Return the error
+						return Err(err);
+					}
+					// We could decode the version correctly
+					Ok(val) => {
+						// We didn't write anything, so just rollback
+						txn.cancel().await?;
+						// Return the current version
+						val
+					}
+				}
+			}
+			// There is no version set in the storage
+			None => {
+				// Fetch any keys immediately following the version key
+				let rng = crate::key::version::proceeding();
+				let keys = catch!(txn, txn.keys(rng, 1).await);
+				// Check the storage if there are any other keys set
+				let val = if keys.is_empty() {
+					// There are no keys set in storage, so this is a new database
+					Version::latest()
+				} else {
+					// There were keys in storage, so this is an upgrade
+					Version::v1()
+				};
+				// Convert the version to binary
+				let bytes: Vec<u8> = val.into();
+				// Attempt to set the current version in storage
+				catch!(txn, txn.set(key, bytes, None).await);
+				// We set the version, so commit the transaction
+				catch!(txn, txn.commit().await);
+				// Return the current version
+				val
+			}
+		};
+		// Everything ok
+		Ok(val)
 	}
 
 	/// Setup the initial cluster access credentials
@@ -523,7 +578,7 @@ impl Datastore {
 		// Start a new writeable transaction
 		let txn = self.transaction(Write, Optimistic).await?.enclose();
 		// Fetch the root users from the storage
-		let users = catch!(txn, txn.all_root_users());
+		let users = catch!(txn, txn.all_root_users().await);
 		// Process credentials, depending on existing users
 		if users.is_empty() {
 			// Display information in the logs
@@ -534,7 +589,7 @@ impl Datastore {
 			let mut ctx = MutableContext::default();
 			ctx.set_transaction(txn.clone());
 			let ctx = ctx.freeze();
-			catch!(txn, stm.compute(&ctx, &opt, None));
+			catch!(txn, stm.compute(&ctx, &opt, None).await);
 			// We added a user, so commit the transaction
 			txn.commit().await
 		} else {
@@ -544,6 +599,17 @@ impl Datastore {
 			// We didn't write anything, so just rollback
 			txn.cancel().await
 		}
+	}
+
+	// Initialise the cluster and run bootstrap utilities
+	#[instrument(err, level = "trace", target = "surrealdb::core::kvs::ds", skip_all)]
+	pub async fn bootstrap(&self) -> Result<(), Error> {
+		// Insert this node in the cluster
+		self.insert_node(self.id).await?;
+		// Mark expired nodes as archived
+		self.expire_nodes().await?;
+		// Everything ok
+		Ok(())
 	}
 
 	// tick is called periodically to perform maintenance tasks.
@@ -615,6 +681,8 @@ impl Datastore {
 			for db in dbs {
 				let db = db.name.as_str();
 				// TODO(SUR-341): This is incorrect, it's a [ns,db] to vs pair
+				// It's safe for now, as it is unused but either the signature must change
+				// to include {(ns, db): (ts, vs)} mapping, or we don't return it
 				vs = Some(tx.lock().await.set_timestamp_for_versionstamp(ts, ns, db).await?);
 			}
 		}
@@ -730,45 +798,19 @@ impl Datastore {
 		}
 		// Check if anonymous actors can execute queries when auth is enabled
 		// TODO(sgirones): Check this as part of the authorisation layer
-		if self.auth_enabled && sess.au.is_anon() && !self.capabilities.allows_guest_access() {
-			return Err(IamError::NotAllowed {
-				actor: "anonymous".to_string(),
-				action: "process".to_string(),
-				resource: "query".to_string(),
-			}
-			.into());
-		}
+		self.check_anon(sess).map_err(|_| IamError::NotAllowed {
+			actor: "anonymous".to_string(),
+			action: "process".to_string(),
+			resource: "query".to_string(),
+		})?;
+
 		// Create a new query options
-		let opt = Options::default()
-			.with_id(self.id)
-			.with_ns(sess.ns())
-			.with_db(sess.db())
-			.with_live(sess.live())
-			.with_auth(sess.au.clone())
-			.with_strict(self.strict)
-			.with_auth_enabled(self.auth_enabled);
+		let opt = self.setup_options(sess);
+
 		// Create a new query executor
 		let mut exe = Executor::new(self);
 		// Create a default context
-		let mut ctx = MutableContext::from_ds(
-			self.query_timeout,
-			self.capabilities.clone(),
-			self.index_stores.clone(),
-			#[cfg(not(target_arch = "wasm32"))]
-			self.index_builder.clone(),
-			#[cfg(any(
-				feature = "kv-mem",
-				feature = "kv-surrealkv",
-				feature = "kv-rocksdb",
-				feature = "kv-fdb",
-				feature = "kv-tikv",
-			))]
-			self.temporary_directory.clone(),
-		)?;
-		// Setup the notification channel
-		if let Some(channel) = &self.notification_channel {
-			ctx.add_notifications(Some(&channel.0));
-		}
+		let mut ctx = self.setup_ctx()?;
 		// Start an execution context
 		sess.context(&mut ctx);
 		// Store the query variables
@@ -808,25 +850,16 @@ impl Datastore {
 		}
 		// Check if anonymous actors can compute values when auth is enabled
 		// TODO(sgirones): Check this as part of the authorisation layer
-		if sess.au.is_anon() && self.auth_enabled && !self.capabilities.allows_guest_access() {
-			return Err(IamError::NotAllowed {
-				actor: "anonymous".to_string(),
-				action: "compute".to_string(),
-				resource: "value".to_string(),
-			}
-			.into());
-		}
+		self.check_anon(sess).map_err(|_| IamError::NotAllowed {
+			actor: "anonymous".to_string(),
+			action: "compute".to_string(),
+			resource: "value".to_string(),
+		})?;
+
 		// Create a new memory stack
 		let mut stack = TreeStack::new();
 		// Create a new query options
-		let opt = Options::default()
-			.with_id(self.id)
-			.with_ns(sess.ns())
-			.with_db(sess.db())
-			.with_live(sess.live())
-			.with_auth(sess.au.clone())
-			.with_strict(self.strict)
-			.with_auth_enabled(self.auth_enabled);
+		let opt = self.setup_options(sess);
 		// Create a default context
 		let mut ctx = MutableContext::default();
 		// Set context capabilities
@@ -898,14 +931,7 @@ impl Datastore {
 		// Create a new memory stack
 		let mut stack = TreeStack::new();
 		// Create a new query options
-		let opt = Options::default()
-			.with_id(self.id)
-			.with_ns(sess.ns())
-			.with_db(sess.db())
-			.with_live(sess.live())
-			.with_auth(sess.au.clone())
-			.with_strict(self.strict)
-			.with_auth_enabled(self.auth_enabled);
+		let opt = self.setup_options(sess);
 		// Create a default context
 		let mut ctx = MutableContext::default();
 		// Set context capabilities
@@ -1014,6 +1040,46 @@ impl Datastore {
 		}
 		// All ok
 		Ok(())
+	}
+
+	pub fn setup_options(&self, sess: &Session) -> Options {
+		Options::default()
+			.with_id(self.id)
+			.with_ns(sess.ns())
+			.with_db(sess.db())
+			.with_live(sess.live())
+			.with_auth(sess.au.clone())
+			.with_strict(self.strict)
+			.with_auth_enabled(self.auth_enabled)
+	}
+	pub fn setup_ctx(&self) -> Result<MutableContext, Error> {
+		let mut ctx = MutableContext::from_ds(
+			self.query_timeout,
+			self.capabilities.clone(),
+			self.index_stores.clone(),
+			#[cfg(not(target_arch = "wasm32"))]
+			self.index_builder.clone(),
+			#[cfg(storage)]
+			self.temporary_directory.clone(),
+		)?;
+		// Setup the notification channel
+		if let Some(channel) = &self.notification_channel {
+			ctx.add_notifications(Some(&channel.0));
+		}
+		Ok(ctx)
+	}
+
+	/// check for disallowed anonymous users
+	pub fn check_anon(&self, sess: &Session) -> Result<(), IamError> {
+		if self.auth_enabled && sess.au.is_anon() && !self.capabilities.allows_guest_access() {
+			Err(IamError::NotAllowed {
+				actor: "anonymous".to_string(),
+				action: String::new(),
+				resource: String::new(),
+			})
+		} else {
+			Ok(())
+		}
 	}
 }
 

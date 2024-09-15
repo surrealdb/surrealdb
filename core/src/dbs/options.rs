@@ -369,7 +369,7 @@ impl Options {
 	/// Get current Node ID
 	#[inline(always)]
 	pub fn id(&self) -> Result<Uuid, Error> {
-		self.id.ok_or(Error::Unreachable("No Node ID is specified"))
+		self.id.ok_or_else(|| fail!("No Node ID is specified"))
 	}
 
 	/// Get currently selected NS

@@ -11,6 +11,15 @@ use crate::idg::u32::U32;
 use crate::key::debug::Sprintable;
 use crate::kvs::batch::Batch;
 use crate::kvs::clock::SizedClock;
+#[cfg(any(
+	feature = "kv-mem",
+	feature = "kv-tikv",
+	feature = "kv-fdb",
+	feature = "kv-indxdb",
+	feature = "kv-surrealkv",
+	feature = "kv-surrealcs",
+))]
+use crate::kvs::savepoint::SavePointImpl;
 use crate::kvs::stash::Stash;
 use crate::sql;
 use crate::sql::thing::Thing;
@@ -86,6 +95,8 @@ pub(super) enum Inner {
 	FoundationDB(super::fdb::Transaction),
 	#[cfg(feature = "kv-surrealkv")]
 	SurrealKV(super::surrealkv::Transaction),
+	#[cfg(feature = "kv-surrealcs")]
+	SurrealCS(super::surrealcs::Transaction),
 }
 
 impl fmt::Display for Transactor {
@@ -104,6 +115,8 @@ impl fmt::Display for Transactor {
 			Inner::FoundationDB(_) => write!(f, "fdb"),
 			#[cfg(feature = "kv-surrealkv")]
 			Inner::SurrealKV(_) => write!(f, "surrealkv"),
+			#[cfg(feature = "kv-surrealcs")]
+			Inner::SurrealCS(_) => write!(f, "surrealcs"),
 			#[allow(unreachable_patterns)]
 			_ => unreachable!(),
 		}
@@ -125,10 +138,10 @@ macro_rules! expand_inner {
 			Inner::FoundationDB($arm) => $b,
 			#[cfg(feature = "kv-surrealkv")]
 			Inner::SurrealKV($arm) => $b,
+			#[cfg(feature = "kv-surrealcs")]
+			Inner::SurrealCS($arm) => $b,
 			#[allow(unreachable_patterns)]
-			_ => {
-				unreachable!();
-			}
+			_ => unreachable!(),
 		}
 	};
 }
@@ -224,13 +237,17 @@ impl Transactor {
 	///
 	/// This function fetches all matching key-value pairs from the underlying datastore in grouped batches.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
-	pub async fn getr<K>(&mut self, rng: Range<K>) -> Result<Vec<(Key, Val)>, Error>
+	pub async fn getr<K>(
+		&mut self,
+		rng: Range<K>,
+		version: Option<u64>,
+	) -> Result<Vec<(Key, Val)>, Error>
 	where
 		K: Into<Key> + Debug,
 	{
 		let beg: Key = rng.start.into();
 		let end: Key = rng.end.into();
-		expand_inner!(&mut self.inner, v => { v.getr(beg..end).await })
+		expand_inner!(&mut self.inner, v => { v.getr(beg..end, version).await })
 	}
 
 	/// Retrieve a specific prefixed range of keys from the datastore.
@@ -247,13 +264,13 @@ impl Transactor {
 
 	/// Insert or update a key in the datastore.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
-	pub async fn set<K, V>(&mut self, key: K, val: V) -> Result<(), Error>
+	pub async fn set<K, V>(&mut self, key: K, val: V, version: Option<u64>) -> Result<(), Error>
 	where
 		K: Into<Key> + Debug,
 		V: Into<Val> + Debug,
 	{
 		let key = key.into();
-		expand_inner!(&mut self.inner, v => { v.set(key, val).await })
+		expand_inner!(&mut self.inner, v => { v.set(key, val, version).await })
 	}
 
 	/// Insert a key if it doesn't exist in the datastore.
@@ -352,6 +369,9 @@ impl Transactor {
 	{
 		let beg: Key = rng.start.into();
 		let end: Key = rng.end.into();
+		if beg > end {
+			return Ok(vec![]);
+		}
 		expand_inner!(&mut self.inner, v => { v.scan(beg..end, limit, version).await })
 	}
 
@@ -364,13 +384,14 @@ impl Transactor {
 		rng: Range<K>,
 		batch: u32,
 		values: bool,
+		version: Option<u64>,
 	) -> Result<Batch, Error>
 	where
 		K: Into<Key> + Debug,
 	{
 		let beg: Key = rng.start.into();
 		let end: Key = rng.end.into();
-		expand_inner!(&mut self.inner, v => { v.batch(beg..end, batch, values).await })
+		expand_inner!(&mut self.inner, v => { v.batch(beg..end, batch, values, version).await })
 	}
 
 	/// Obtain a new change timestamp for a key
@@ -468,7 +489,7 @@ impl Transactor {
 		let nid = seq.get_next_id();
 		self.stash.set(key, seq.clone());
 		let (k, v) = seq.finish().unwrap();
-		self.set(k, v).await?;
+		self.set(k, v, None).await?;
 		Ok(nid)
 	}
 
@@ -479,7 +500,7 @@ impl Transactor {
 		let nid = seq.get_next_id();
 		self.stash.set(key, seq.clone());
 		let (k, v) = seq.finish().unwrap();
-		self.set(k, v).await?;
+		self.set(k, v, None).await?;
 		Ok(nid)
 	}
 
@@ -490,7 +511,7 @@ impl Transactor {
 		let nid = seq.get_next_id();
 		self.stash.set(key, seq.clone());
 		let (k, v) = seq.finish().unwrap();
-		self.set(k, v).await?;
+		self.set(k, v, None).await?;
 		Ok(nid)
 	}
 
@@ -502,7 +523,7 @@ impl Transactor {
 		seq.remove_id(ns);
 		self.stash.set(key, seq.clone());
 		let (k, v) = seq.finish().unwrap();
-		self.set(k, v).await?;
+		self.set(k, v, None).await?;
 		Ok(())
 	}
 
@@ -514,7 +535,7 @@ impl Transactor {
 		seq.remove_id(db);
 		self.stash.set(key, seq.clone());
 		let (k, v) = seq.finish().unwrap();
-		self.set(k, v).await?;
+		self.set(k, v, None).await?;
 		Ok(())
 	}
 
@@ -526,7 +547,7 @@ impl Transactor {
 		seq.remove_id(tb);
 		self.stash.set(key, seq.clone());
 		let (k, v) = seq.finish().unwrap();
-		self.set(k, v).await?;
+		self.set(k, v, None).await?;
 		Ok(())
 	}
 
@@ -577,10 +598,10 @@ impl Transactor {
 
 		// Ensure there are no keys after the ts_key
 		// Otherwise we can go back in time!
-		let ts_key = crate::key::database::ts::new(ns, db, ts);
+		let mut ts_key = crate::key::database::ts::new(ns, db, ts);
 		let begin = ts_key.encode()?;
 		let end = crate::key::database::ts::suffix(ns, db);
-		let ts_pairs: Vec<(Vec<u8>, Vec<u8>)> = self.getr(begin..end).await?;
+		let ts_pairs: Vec<(Vec<u8>, Vec<u8>)> = self.getr(begin..end, None).await?;
 		let latest_ts_pair = ts_pairs.last();
 		if let Some((k, _)) = latest_ts_pair {
 			#[cfg(debug_assertions)]
@@ -594,12 +615,11 @@ impl Transactor {
 			let k = crate::key::database::ts::Ts::decode(k)?;
 			let latest_ts = k.ts;
 			if latest_ts >= ts {
-				return Err(Error::Internal(
-					"ts is less than or equal to the latest ts".to_string(),
-				));
+				warn!("ts {ts} is less than the latest ts {latest_ts}");
+				ts_key = crate::key::database::ts::new(ns, db, latest_ts + 1);
 			}
 		}
-		self.set(ts_key, vst).await?;
+		self.set(ts_key, vst, None).await?;
 		Ok(vst)
 	}
 
@@ -608,12 +628,11 @@ impl Transactor {
 		ts: u64,
 		ns: &str,
 		db: &str,
-		_lock: bool,
 	) -> Result<Option<Versionstamp>, Error> {
 		let start = crate::key::database::ts::prefix(ns, db);
 		let ts_key = crate::key::database::ts::new(ns, db, ts + 1);
 		let end = ts_key.encode()?;
-		let ts_pairs = self.getr(start..end).await?;
+		let ts_pairs = self.getr(start..end, None).await?;
 		let latest_ts_pair = ts_pairs.last();
 		if let Some((_, v)) = latest_ts_pair {
 			if v.len() == 10 {
@@ -625,5 +644,17 @@ impl Transactor {
 			}
 		}
 		Ok(None)
+	}
+
+	pub(crate) async fn new_save_point(&mut self) {
+		expand_inner!(&mut self.inner, v => { v.new_save_point() })
+	}
+
+	pub(crate) async fn rollback_to_save_point(&mut self) -> Result<(), Error> {
+		expand_inner!(&mut self.inner, v => { v.rollback_to_save_point().await })
+	}
+
+	pub(crate) async fn release_last_save_point(&mut self) -> Result<(), Error> {
+		expand_inner!(&mut self.inner, v => { v.release_last_save_point() })
 	}
 }

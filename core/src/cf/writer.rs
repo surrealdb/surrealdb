@@ -401,8 +401,8 @@ mod tests {
 		.await;
 		ds.tick_at(10).await.unwrap();
 		let mut tx = ds.transaction(Write, Optimistic).await.unwrap().inner();
-		let vs1 = tx.get_versionstamp_from_timestamp(5, NS, DB, false).await.unwrap().unwrap();
-		let vs2 = tx.get_versionstamp_from_timestamp(10, NS, DB, false).await.unwrap().unwrap();
+		let vs1 = tx.get_versionstamp_from_timestamp(5, NS, DB).await.unwrap().unwrap();
+		let vs2 = tx.get_versionstamp_from_timestamp(10, NS, DB).await.unwrap().unwrap();
 		tx.cancel().await.unwrap();
 		let _id2 = record_change_feed_entry(
 			ds.transaction(Write, Optimistic).await.unwrap(),

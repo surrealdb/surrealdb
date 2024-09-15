@@ -60,7 +60,7 @@ pub trait Transaction {
 		K: Into<Key> + Sprintable + Debug;
 
 	/// Insert or update a key in the datastore.
-	async fn set<K, V>(&mut self, key: K, val: V) -> Result<(), Error>
+	async fn set<K, V>(&mut self, key: K, val: V, version: Option<u64>) -> Result<(), Error>
 	where
 		K: Into<Key> + Sprintable + Debug,
 		V: Into<Val> + Debug;
@@ -146,14 +146,18 @@ pub trait Transaction {
 		// Continue with function logic
 		let beg: Key = key.into();
 		let end: Key = beg.clone().add(0xff);
-		self.getr(beg..end).await
+		self.getr(beg..end, None).await
 	}
 
 	/// Retrieve a range of keys from the datastore.
 	///
 	/// This function fetches all matching key-value pairs from the underlying datastore in grouped batches.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.sprint()))]
-	async fn getr<K>(&mut self, rng: Range<K>) -> Result<Vec<(Key, Val)>, Error>
+	async fn getr<K>(
+		&mut self,
+		rng: Range<K>,
+		version: Option<u64>,
+	) -> Result<Vec<(Key, Val)>, Error>
 	where
 		K: Into<Key> + Sprintable + Debug,
 	{
@@ -167,7 +171,7 @@ pub trait Transaction {
 		let end: Key = rng.end.into();
 		let mut next = Some(beg..end);
 		while let Some(rng) = next {
-			let res = self.batch(rng, *NORMAL_FETCH_SIZE, true).await?;
+			let res = self.batch(rng, *NORMAL_FETCH_SIZE, true, version).await?;
 			next = res.next;
 			for v in res.values.into_iter() {
 				out.push(v);
@@ -219,7 +223,7 @@ pub trait Transaction {
 		let end: Key = rng.end.into();
 		let mut next = Some(beg..end);
 		while let Some(rng) = next {
-			let res = self.batch(rng, *NORMAL_FETCH_SIZE, false).await?;
+			let res = self.batch(rng, *NORMAL_FETCH_SIZE, false, None).await?;
 			next = res.next;
 			for (k, _) in res.values.into_iter() {
 				self.del(k).await?;
@@ -232,7 +236,13 @@ pub trait Transaction {
 	///
 	/// This function fetches keys or key-value pairs, in batches, with multiple requests to the underlying datastore.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.sprint()))]
-	async fn batch<K>(&mut self, rng: Range<K>, batch: u32, values: bool) -> Result<Batch, Error>
+	async fn batch<K>(
+		&mut self,
+		rng: Range<K>,
+		batch: u32,
+		values: bool,
+		version: Option<u64>,
+	) -> Result<Batch, Error>
 	where
 		K: Into<Key> + Sprintable + Debug,
 	{
@@ -245,7 +255,7 @@ pub trait Transaction {
 		let end: Key = rng.end.into();
 		// Scan for the next batch
 		let res = if values {
-			self.scan(beg..end.clone(), batch, None).await?
+			self.scan(beg..end.clone(), batch, version).await?
 		} else {
 			self.keys(beg..end.clone(), batch)
 				.await?
@@ -268,11 +278,13 @@ pub trait Transaction {
 					}),
 					values: res,
 				}),
-				// We have checked the length above,
-				// so there is guaranteed to always
-				// be a last item in the vector.
-				// This is therefore unreachable.
-				None => unreachable!(),
+				// We have checked the length above, so
+				// there should be a last item in the
+				// vector, so we shouldn't arrive here
+				None => Ok(Batch {
+					next: None,
+					values: res,
+				}),
 			}
 		}
 	}
@@ -307,7 +319,7 @@ pub trait Transaction {
 		// Convert the timestamp to a versionstamp
 		let verbytes = crate::vs::u64_to_versionstamp(ver);
 		// Store the timestamp to prevent other transactions from committing
-		self.set(key.as_slice(), verbytes.to_vec()).await?;
+		self.set(key.as_slice(), verbytes.to_vec(), None).await?;
 		// Return the uint64 representation of the timestamp as the result
 		Ok(verbytes)
 	}
@@ -338,6 +350,6 @@ pub trait Transaction {
 		let mut k: Vec<u8> = prefix.into();
 		k.append(&mut ts.to_vec());
 		k.append(&mut suffix.into());
-		self.set(k, val).await
+		self.set(k, val, None).await
 	}
 }

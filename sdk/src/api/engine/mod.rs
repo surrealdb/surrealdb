@@ -8,6 +8,7 @@ pub mod any;
 	feature = "kv-fdb",
 	feature = "kv-indxdb",
 	feature = "kv-surrealkv",
+	feature = "kv-surrealcs",
 ))]
 pub mod local;
 pub mod proto;
@@ -48,6 +49,7 @@ fn resource_to_values(r: Resource) -> CoreValues {
 		Resource::Array(x) => res.0 = Value::array_to_core(x),
 		Resource::Edge(x) => res.0 = vec![x.into_inner().into()],
 		Resource::Range(x) => res.0 = vec![x.into_inner().into()],
+		Resource::Unspecified => {}
 	}
 	res
 }

@@ -9,9 +9,9 @@ on:
       - Cargo.lock
       - Cargo.toml
       - core/Cargo.toml
-      - lib/Cargo.toml
+      - sdk/Cargo.toml
       - build.rs
-      - lib/build.rs
+      - sdk/build.rs
       - supply-chain/audits.toml
       - supply-chain/config.toml
       - supply-chain/imports.lock
@@ -24,15 +24,22 @@ on:
       - Cargo.lock
       - Cargo.toml
       - core/Cargo.toml
-      - lib/Cargo.toml
+      - sdk/Cargo.toml
       - build.rs
-      - lib/build.rs
+      - sdk/build.rs
       - supply-chain/audits.toml
       - supply-chain/config.toml
       - supply-chain/imports.lock
       - cackle.toml
       - .github/workflows/supply-chain.yml
   merge_group:
+
+concurrency:
+  # Use github.run_id on main branch
+  # Use github.event.pull_request.number on pull requests, so it's unique per pull request
+  # Use github.ref on other branches, so it's unique per branch
+  group: ${{ github.workflow }}-${{ github.ref == 'refs/heads/main' && github.run_id || github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 defaults:
   run:
@@ -46,7 +53,6 @@ jobs:
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: stable
           components: rustfmt
 
       - name: Checkout sources
@@ -70,7 +76,6 @@ jobs:
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: stable
           components: rustfmt
 
       - name: Checkout sources
@@ -94,7 +99,6 @@ jobs:
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: stable
           components: rustfmt
 
       - name: Checkout sources

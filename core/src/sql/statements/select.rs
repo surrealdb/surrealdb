@@ -68,38 +68,50 @@ impl SelectStatement {
 	) -> Result<Value, Error> {
 		// Valid options?
 		opt.valid_for_db()?;
+		// Assign the statement
+		let stm = Statement::from(self);
 		// Create a new iterator
 		let mut i = Iterator::new();
 		// Ensure futures are stored and the version is set if specified
 		let version = self.version.as_ref().map(|v| v.to_u64());
 		let opt =
 			Arc::new(opt.new_with_futures(false).with_projections(true).with_version(version));
-		//;
 		// Get a query planner
 		let mut planner = QueryPlanner::new(
 			opt.clone(),
 			self.with.as_ref().cloned().map(|w| w.into()),
 			self.cond.as_ref().cloned().map(|c| c.into()),
+			self.order.as_ref().cloned().map(|o| o.into()),
 		);
+		// Extract the limit
+		let limit = i.setup_limit(stk, ctx, &opt, &stm).await?;
 		// Used for ONLY: is the limit 1?
-		let limit_is_one_or_zero = match &self.limit {
-			Some(l) => l.process(stk, ctx, &opt, doc).await? <= 1,
+		let limit_is_one_or_zero = match limit {
+			Some(l) => l <= 1,
 			_ => false,
 		};
 		// Fail for multiple targets without a limit
 		if self.only && !limit_is_one_or_zero && self.what.0.len() > 1 {
 			return Err(Error::SingleOnlyOutput);
 		}
+		// Check if there is a timeout
+		let ctx = match self.timeout.as_ref() {
+			Some(timeout) => {
+				let mut ctx = MutableContext::new(ctx);
+				ctx.add_timeout(*timeout.0)?;
+				ctx.freeze()
+			}
+			None => ctx.clone(),
+		};
 		// Loop over the select targets
 		for w in self.what.0.iter() {
-			let v = w.compute(stk, ctx, &opt, doc).await?;
+			let v = w.compute(stk, &ctx, &opt, doc).await?;
 			match v {
 				Value::Table(t) => {
 					if self.only && !limit_is_one_or_zero {
 						return Err(Error::SingleOnlyOutput);
 					}
-
-					planner.add_iterables(stk, ctx, t, &mut i).await?;
+					planner.add_iterables(stk, &ctx, t, &mut i).await?;
 				}
 				Value::Thing(v) => match &v.id {
 					Id::Range(r) => i.ingest(Iterable::TableRange(v.tb, *r.to_owned())),
@@ -129,7 +141,7 @@ impl SelectStatement {
 					for v in v {
 						match v {
 							Value::Table(t) => {
-								planner.add_iterables(stk, ctx, t, &mut i).await?;
+								planner.add_iterables(stk, &ctx, t, &mut i).await?;
 							}
 							Value::Thing(v) => i.ingest(Iterable::Thing(v)),
 							Value::Edges(v) => i.ingest(Iterable::Edges(*v)),
@@ -146,16 +158,20 @@ impl SelectStatement {
 			};
 		}
 		// Create a new context
-		let mut ctx = MutableContext::new(ctx);
-		// Assign the statement
-		let stm = Statement::from(self);
+		let mut ctx = MutableContext::new(&ctx);
 		// Add query executors if any
 		if planner.has_executors() {
 			ctx.set_query_planner(planner);
 		}
 		let ctx = ctx.freeze();
+		// Process the statement
+		let res = i.output(stk, &ctx, &opt, &stm).await?;
+		// Catch statement timeout
+		if ctx.is_timedout() {
+			return Err(Error::QueryTimedout);
+		}
 		// Output the results
-		match i.output(stk, &ctx, &opt, &stm).await? {
+		match res {
 			// This is a single record result
 			Value::Array(mut a) if self.only => match a.len() {
 				// There were no results

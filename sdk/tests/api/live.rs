@@ -35,12 +35,12 @@ async fn live_select_table() {
 		let mut users = db.select(&table).live().await.unwrap();
 
 		// Create a record
-		let created: Vec<ApiRecordId> = db.create(table).await.unwrap();
+		let created: Option<ApiRecordId> = db.create(table).await.unwrap();
 		// Pull the notification
 		let notification: Notification<ApiRecordId> =
 			tokio::time::timeout(LQ_TIMEOUT, users.next()).await.unwrap().unwrap().unwrap();
 		// The returned record should match the created record
-		assert_eq!(created, vec![notification.data.clone()]);
+		assert_eq!(created, Some(notification.data.clone()));
 		// It should be newly created
 		assert_eq!(notification.action, Action::Create);
 
@@ -291,7 +291,7 @@ async fn live_select_query() {
 
 		// Create a record
 		info!("Creating record");
-		let created: Vec<ApiRecordId> = db.create(table).await.unwrap();
+		let created: Option<ApiRecordId> = db.create(table).await.unwrap();
 		// Pull the notification
 		let notifications = receive_all_pending_notifications(users.clone(), LQ_TIMEOUT).await;
 		// It should be newly created
@@ -302,7 +302,7 @@ async fn live_select_query() {
 			notifications
 		);
 		// The returned record should match the created record
-		assert_eq!(created, vec![notifications[0].data.clone()]);
+		assert_eq!(created, Some(notifications[0].data.clone()));
 
 		// Update the record
 		info!("Updating record");
@@ -368,12 +368,12 @@ async fn live_select_query() {
 			.unwrap();
 
 		// Create a record
-		let created: Vec<ApiRecordId> = db.create(table).await.unwrap();
+		let created: Option<ApiRecordId> = db.create(table).await.unwrap();
 		// Pull the notification
 		let notification: Notification<ApiRecordId> =
 			tokio::time::timeout(LQ_TIMEOUT, users.next()).await.unwrap().unwrap().unwrap();
 		// The returned record should match the created record
-		assert_eq!(created, vec![notification.data.clone()]);
+		assert_eq!(created, Some(notification.data.clone()));
 		// It should be newly created
 		assert_eq!(notification.action, Action::Create, "{:?}", notification);
 

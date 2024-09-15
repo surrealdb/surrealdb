@@ -55,7 +55,7 @@ async fn set() {
 	let (ds, _) = new_ds(node_id, clock).await;
 	// Create a writeable transaction
 	let mut tx = ds.transaction(Write, Optimistic).await.unwrap().inner();
-	assert!(tx.set("test", "one").await.is_ok());
+	assert!(tx.set("test", "one", None).await.is_ok());
 	tx.commit().await.unwrap();
 	// Create a readonly transaction
 	let mut tx = ds.transaction(Read, Optimistic).await.unwrap().inner();
@@ -64,7 +64,7 @@ async fn set() {
 	tx.cancel().await.unwrap();
 	// Create a writeable transaction
 	let mut tx = ds.transaction(Write, Optimistic).await.unwrap().inner();
-	assert!(tx.set("test", "two").await.is_ok());
+	assert!(tx.set("test", "two", None).await.is_ok());
 	tx.commit().await.unwrap();
 	// Create a readonly transaction
 	let mut tx = ds.transaction(Read, Optimistic).await.unwrap().inner();
@@ -297,7 +297,7 @@ async fn batch() {
 	tx.commit().await.unwrap();
 	// Create a readonly transaction
 	let mut tx = ds.transaction(Read, Optimistic).await.unwrap().inner();
-	let res = tx.batch("test1".as_bytes().."test9".as_bytes(), u32::MAX, true).await.unwrap();
+	let res = tx.batch("test1".as_bytes().."test9".as_bytes(), u32::MAX, true, None).await.unwrap();
 	let val = res.values;
 	assert_eq!(val.len(), 5);
 	assert_eq!(val[0].0, b"test1");
@@ -313,7 +313,7 @@ async fn batch() {
 	tx.cancel().await.unwrap();
 	// Create a readonly transaction
 	let mut tx = ds.transaction(Read, Optimistic).await.unwrap().inner();
-	let res = tx.batch("test2".as_bytes().."test4".as_bytes(), u32::MAX, true).await.unwrap();
+	let res = tx.batch("test2".as_bytes().."test4".as_bytes(), u32::MAX, true, None).await.unwrap();
 	let val = res.values;
 	assert_eq!(val.len(), 2);
 	assert_eq!(val[0].0, b"test2");
@@ -323,7 +323,7 @@ async fn batch() {
 	tx.cancel().await.unwrap();
 	// Create a readonly transaction
 	let mut tx = ds.transaction(Read, Optimistic).await.unwrap().inner();
-	let res = tx.batch("test2".as_bytes().."test4".as_bytes(), u32::MAX, true).await.unwrap();
+	let res = tx.batch("test2".as_bytes().."test4".as_bytes(), u32::MAX, true, None).await.unwrap();
 	let val = res.values;
 	assert_eq!(val.len(), 2);
 	assert_eq!(val[0].0, b"test2");

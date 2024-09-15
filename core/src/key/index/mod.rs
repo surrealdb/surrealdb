@@ -17,6 +17,8 @@ pub mod hi;
 pub mod hl;
 pub mod hs;
 pub mod hv;
+pub mod ia;
+pub mod ip;
 pub mod vm;
 
 use crate::key::category::Categorise;
@@ -26,7 +28,6 @@ use crate::sql::id::Id;
 use derive::Key;
 use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
-use std::ops::Range;
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Key)]
 struct Prefix<'a> {
@@ -154,10 +155,6 @@ impl<'a> Index<'a> {
 		let mut beg = Self::prefix(ns, db, tb, ix);
 		beg.extend_from_slice(&[0xff]);
 		beg
-	}
-
-	pub fn range(ns: &str, db: &str, tb: &str, ix: &str) -> Range<Vec<u8>> {
-		Self::prefix_beg(ns, db, tb, ix)..Self::prefix_end(ns, db, tb, ix)
 	}
 
 	fn prefix_ids(ns: &str, db: &str, tb: &str, ix: &str, fd: &Array) -> Vec<u8> {

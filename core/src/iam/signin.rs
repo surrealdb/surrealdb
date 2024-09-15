@@ -21,6 +21,8 @@ use subtle::ConstantTimeEq;
 use uuid::Uuid;
 
 pub async fn signin(kvs: &Datastore, session: &mut Session, vars: Object) -> Result<String, Error> {
+	// Check vars contains only computed values
+	vars.validate_computed()?;
 	// Parse the specified variables
 	let ns = vars.get("NS").or_else(|| vars.get("ns"));
 	let db = vars.get("DB").or_else(|| vars.get("db"));
@@ -1636,7 +1638,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 					)
 					AUTHENTICATE (
 						-- Simple example increasing the record identifier by one
-					    SELECT * FROM type::thing('user', meta::id($auth) + 1)
+					    SELECT * FROM type::thing('user', record::id($auth) + 1)
 					)
 					DURATION FOR SESSION 2h
 				;
@@ -1716,7 +1718,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 					)
 					AUTHENTICATE (
 						-- If logging in with a company account, the session will be authenticated as the first owner
-						IF meta::tb($auth) = "company" {
+						IF record::tb($auth) = "company" {
 							RETURN SELECT VALUE owner FROM company WHERE id = $auth
 						}
 					)

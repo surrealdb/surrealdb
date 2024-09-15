@@ -71,8 +71,6 @@ jobs:
 
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
-        with:
-          toolchain: stable
 
       - name: Install a TOML parser
         run: |
@@ -110,11 +108,11 @@ jobs:
 
           # Bump the crate version
           sed -i "s#^version = \".*\"#version = \"${{ steps.bump.outputs.version }}\"#" Cargo.toml
-          sed -i "s#^version = \".*\"#version = \"${{ steps.bump.outputs.version }}\"#" lib/Cargo.toml
+          sed -i "s#^version = \".*\"#version = \"${{ steps.bump.outputs.version }}\"#" sdk/Cargo.toml
           sed -i "s#^version = \".*\"#version = \"2.0.0-${{ steps.bump.outputs.version }}\"#" core/Cargo.toml
 
           # Update dependency versions
-          sed -i "s#surrealdb-core2 = { version = \".*\", default-features#surrealdb-core2 = { version = \"=2.0.0-${{ steps.bump.outputs.version }}\", default-features#" lib/Cargo.toml
+          sed -i "s#surrealdb-core2 = { version = \".*\", default-features#surrealdb-core2 = { version = \"=2.0.0-${{ steps.bump.outputs.version }}\", default-features#" sdk/Cargo.toml
 
           # Update Cargo.lock without updating dependency versions
           cargo check --no-default-features --features storage-mem

@@ -73,6 +73,10 @@ pub(crate) async fn run_router(
 
 	let kvs = match Datastore::new(endpoint).await {
 		Ok(kvs) => {
+			if let Err(error) = kvs.check_version().await {
+				let _ = conn_tx.send(Err(error.into())).await;
+				return;
+			};
 			if let Err(error) = kvs.bootstrap().await {
 				let _ = conn_tx.send(Err(error.into())).await;
 				return;
@@ -104,13 +108,7 @@ pub(crate) async fn run_router(
 		.with_transaction_timeout(address.config.transaction_timeout)
 		.with_capabilities(address.config.capabilities);
 
-	#[cfg(any(
-		feature = "kv-mem",
-		feature = "kv-surrealkv",
-		feature = "kv-rocksdb",
-		feature = "kv-fdb",
-		feature = "kv-tikv",
-	))]
+	#[cfg(storage)]
 	let kvs = kvs.with_temporary_directory(address.config.temporary_directory);
 
 	let kvs = Arc::new(kvs);

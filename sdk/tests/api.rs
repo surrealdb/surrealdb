@@ -1,7 +1,6 @@
 #[allow(unused_imports, dead_code)]
 mod api_integration {
 	use chrono::DateTime;
-	use once_cell::sync::Lazy;
 	use semver::Version;
 	use serde::Deserialize;
 	use serde::Serialize;
@@ -10,6 +9,7 @@ mod api_integration {
 	use std::borrow::Cow;
 	use std::ops::Bound;
 	use std::sync::Arc;
+	use std::sync::LazyLock;
 	use std::sync::Mutex;
 	use std::time::Duration;
 	use surrealdb::error::Api as ApiError;
@@ -535,6 +535,116 @@ mod api_integration {
 				.unwrap();
 			let response: Option<String> = response.take("name").unwrap();
 			assert!(response.is_none());
+		}
+
+		#[test_log::test(tokio::test)]
+		async fn insert_with_version() {
+			let (permit, db) = new_db().await;
+			db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
+			drop(permit);
+
+			// Create a record in the past.
+			let _ = db
+				.query("INSERT INTO user { id: user:john, name: 'John' } VERSION d'2024-08-19T08:00:00Z'")
+				.await
+				.unwrap()
+				.check()
+				.unwrap();
+
+			// Without VERSION, SELECT should return the record.
+			let mut response = db.query("SELECT * FROM user:john").await.unwrap().check().unwrap();
+			let Some(name): Option<String> = response.take("name").unwrap() else {
+				panic!("query returned no record");
+			};
+			assert_eq!(name, "John");
+
+			// SELECT with the VERSION set to the creation timestamp or later should return the record.
+			let mut response = db
+				.query("SELECT * FROM user:john VERSION d'2024-08-19T08:00:00Z'")
+				.await
+				.unwrap()
+				.check()
+				.unwrap();
+			let Some(name): Option<String> = response.take("name").unwrap() else {
+				panic!("query returned no record");
+			};
+			assert_eq!(name, "John");
+
+			// SELECT with the VERSION set before the creation timestamp should return nothing.
+			let mut response = db
+				.query("SELECT * FROM user:john VERSION d'2024-08-19T07:00:00Z'")
+				.await
+				.unwrap()
+				.check()
+				.unwrap();
+			let response: Option<String> = response.take("name").unwrap();
+			assert!(response.is_none());
+		}
+
+		#[test_log::test(tokio::test)]
+		async fn info_for_db_with_versioned_tables() {
+			let (permit, db) = new_db().await;
+			db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
+			drop(permit);
+
+			// Record the timestamp before creating a testing table.
+			let ts_before_create = chrono::Utc::now().to_rfc3339();
+
+			// Create the testing table.
+			let _ = db.query("DEFINE TABLE person").await.unwrap().check().unwrap();
+
+			// Record the timestamp after creating the testing table.
+			let ts_after_create = chrono::Utc::now().to_rfc3339();
+
+			// Check that historical query shows no table before it was created.
+			let q = format!("INFO FOR DB VERSION d'{}'", ts_before_create);
+			let mut response = db.query(q).await.unwrap().check().unwrap();
+			let info = response.take::<Value>(0).unwrap().to_string();
+			assert!(info.contains("tables: {  }"));
+
+			// Now check that the table shows up later.
+			let q = format!("INFO FOR DB VERSION d'{}'", ts_after_create);
+			let mut response = db.query(q).await.unwrap().check().unwrap();
+			let info = response.take::<Value>(0).unwrap().to_string();
+			assert!(info.contains(
+				"tables: { person: 'DEFINE TABLE person TYPE ANY SCHEMALESS PERMISSIONS NONE' }"
+			));
+		}
+
+		#[test_log::test(tokio::test)]
+		async fn info_for_table_with_versioned_fields() {
+			let (permit, db) = new_db().await;
+			db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
+			drop(permit);
+
+			// Create the testing table.
+			let _ = db.query("DEFINE TABLE person").await.unwrap().check().unwrap();
+
+			// Record the timestamp before creating a field.
+			let ts_before_field = chrono::Utc::now().to_rfc3339();
+			let _ = db
+				.query("DEFINE FIELD firstName ON TABLE person TYPE string")
+				.await
+				.unwrap()
+				.check()
+				.unwrap();
+
+			// Record the timestamp after creating the field.
+			let ts_after_field = chrono::Utc::now().to_rfc3339();
+
+			// Check that historical query shows no field before it was created.
+			let q = format!("INFO FOR TABLE person VERSION d'{}'", ts_before_field);
+			let mut response = db.query(q).await.unwrap().check().unwrap();
+			let info = response.take::<Value>(0).unwrap().to_string();
+			assert!(info.contains("fields: {  }"));
+
+			// Now check that the field shows up later.
+			let q = format!("INFO FOR TABLE person VERSION d'{}'", ts_after_field);
+			let mut response = db.query(q).await.unwrap().check().unwrap();
+			let info = response.take::<Value>(0).unwrap().to_string();
+			assert!(info.contains(
+				"fields: { firstName: 'DEFINE FIELD firstName ON person TYPE string PERMISSIONS FULL' }"
+			));
 		}
 
 		include!("api/mod.rs");

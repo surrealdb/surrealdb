@@ -43,7 +43,11 @@ pub(crate) enum Command {
 	},
 	Insert {
 		// inserts can only be on a table.
-		what: String,
+		what: Option<String>,
+		data: CoreValue,
+	},
+	InsertRelation {
+		what: Option<String>,
 		data: CoreValue,
 	},
 	Patch {
@@ -197,13 +201,40 @@ impl Command {
 				what,
 				data,
 			} => {
-				let mut table = CoreTable::default();
-				table.0 = what.clone();
-				let params = vec![CoreValue::from(what), data];
+				let table = match what {
+					Some(w) => {
+						let mut table = CoreTable::default();
+						table.0.clone_from(&w);
+						CoreValue::from(table)
+					}
+					None => CoreValue::None,
+				};
+
+				let params = vec![table, data];
 
 				RouterRequest {
 					id,
 					method: "insert",
+					params: Some(params.into()),
+				}
+			}
+			Command::InsertRelation {
+				what,
+				data,
+			} => {
+				let table = match what {
+					Some(w) => {
+						let mut tmp = CoreTable::default();
+						tmp.0 = w.clone();
+						CoreValue::from(tmp)
+					}
+					None => CoreValue::None,
+				};
+				let params = vec![table, data];
+
+				RouterRequest {
+					id,
+					method: "insert_relation",
 					params: Some(params.into()),
 				}
 			}

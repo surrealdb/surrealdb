@@ -28,13 +28,14 @@ pub enum Gen {
 	Uuid,
 }
 
-#[revisioned(revision = 1)]
+#[revisioned(revision = 2)]
 #[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize, Key, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub enum Id {
 	Number(i64),
 	String(String),
+	#[revision(start = 2)]
 	Uuid(Uuid),
 	Array(Array),
 	Object(Object),
@@ -242,11 +243,11 @@ impl Id {
 			Id::Uuid(v) => Ok(Id::Uuid(*v)),
 			Id::Array(v) => match v.compute(stk, ctx, opt, doc).await? {
 				Value::Array(v) => Ok(Id::Array(v)),
-				_ => unreachable!(),
+				v => Err(fail!("Expected a Value::Array but found {v:?}")),
 			},
 			Id::Object(v) => match v.compute(stk, ctx, opt, doc).await? {
 				Value::Object(v) => Ok(Id::Object(v)),
-				_ => unreachable!(),
+				v => Err(fail!("Expected a Value::Object but found {v:?}")),
 			},
 			Id::Generate(v) => match v {
 				Gen::Rand => Ok(Self::rand()),

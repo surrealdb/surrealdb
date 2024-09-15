@@ -84,7 +84,6 @@ impl MTreeParams {
 	) -> Self {
 		Self {
 			dimension,
-			_distance: Default::default(),
 			distance,
 			vector_type,
 			capacity,

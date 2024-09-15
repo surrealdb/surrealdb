@@ -11,6 +11,8 @@ mod indxdb;
 mod mem;
 #[cfg(feature = "kv-rocksdb")]
 mod rocksdb;
+#[cfg(feature = "kv-surrealcs")]
+mod surrealcs;
 #[cfg(feature = "kv-surrealkv")]
 mod surrealkv;
 #[cfg(feature = "kv-tikv")]
@@ -32,8 +34,6 @@ pub struct Endpoint {
 	#[doc(hidden)]
 	pub path: String,
 	pub(crate) config: Config,
-	// Whether or not the remote server supports revision based serialisation
-	pub(crate) supports_revision: bool,
 }
 
 impl Endpoint {
@@ -42,7 +42,6 @@ impl Endpoint {
 			url,
 			path: String::new(),
 			config: Default::default(),
-			supports_revision: false,
 		}
 	}
 
@@ -131,6 +130,7 @@ pub enum EndpointKind {
 	TiKv,
 	Unsupported(String),
 	SurrealKV,
+	SurrealCS,
 }
 
 impl From<&str> for EndpointKind {
@@ -148,6 +148,7 @@ impl From<&str> for EndpointKind {
 			"rocksdb" => Self::RocksDb,
 			"tikv" => Self::TiKv,
 			"surrealkv" => Self::SurrealKV,
+			"surrealcs" => Self::SurrealCS,
 			_ => Self::Unsupported(s.to_owned()),
 		}
 	}
@@ -160,10 +161,6 @@ impl EndpointKind {
 			self,
 			EndpointKind::Http | EndpointKind::Https | EndpointKind::Ws | EndpointKind::Wss
 		)
-	}
-
-	pub(crate) fn is_ws(&self) -> bool {
-		matches!(self, EndpointKind::Ws | EndpointKind::Wss)
 	}
 
 	pub fn is_local(&self) -> bool {

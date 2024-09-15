@@ -183,12 +183,6 @@ async fn select_where_brute_force_knn() -> Result<(), Error> {
 				},
 				{
 					detail: {
-						reason: 'NO INDEX FOUND'
-					},
-					operation: 'Fallback'
-				},
-				{
-					detail: {
 						type: 'Memory'
 					},
 					operation: 'Collector'
@@ -287,12 +281,6 @@ async fn select_where_hnsw_knn() -> Result<(), Error> {
 						table: 'pts'
 					},
 					operation: 'Iterate Table'
-				},
-				{
-					detail: {
-						reason: 'NO INDEX FOUND'
-					},
-					operation: 'Fallback'
 				},
 				{
 					detail: {
@@ -484,12 +472,6 @@ async fn select_bruteforce_knn_with_condition() -> Result<(), Error> {
 						table: 'pts'
 					},
 					operation: 'Iterate Table'
-				},
-				{
-					detail: {
-						reason: 'NO INDEX FOUND'
-					},
-					operation: 'Fallback'
 				},
 				{
 					detail: {

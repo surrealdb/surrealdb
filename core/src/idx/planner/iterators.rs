@@ -113,6 +113,7 @@ pub(crate) enum ThingIterator {
 	UniqueJoin(Box<UniqueJoinThingIterator>),
 	Matches(MatchesThingIterator),
 	Knn(KnnIterator),
+	Multiples(Box<MultipleIterators>),
 }
 
 impl ThingIterator {
@@ -133,6 +134,7 @@ impl ThingIterator {
 			Self::Knn(i) => i.next_batch(ctx, size).await,
 			Self::IndexJoin(i) => Box::pin(i.next_batch(ctx, txn, size)).await,
 			Self::UniqueJoin(i) => Box::pin(i.next_batch(ctx, txn, size)).await,
+			Self::Multiples(i) => Box::pin(i.next_batch(ctx, txn, size)).await,
 		}
 	}
 }
@@ -260,6 +262,20 @@ impl IndexRangeThingIterator {
 		}
 	}
 
+	pub(super) fn full_range(
+		irf: IteratorRef,
+		ns: &str,
+		db: &str,
+		ix_what: &Ident,
+		ix_name: &Ident,
+	) -> Self {
+		let full_range = RangeValue {
+			value: Value::None,
+			inclusive: true,
+		};
+		Self::new(irf, ns, db, ix_what, ix_name, &full_range, &full_range)
+	}
+
 	fn compute_beg(
 		ns: &str,
 		db: &str,
@@ -329,10 +345,10 @@ impl IndexUnionThingIterator {
 		db: &str,
 		ix_what: &Ident,
 		ix_name: &Ident,
-		a: &Array,
+		a: &Value,
 	) -> Self {
 		// We create a VecDeque to hold the prefix keys (begin and end) for each value in the array.
-		let mut values: VecDeque<(Vec<u8>, Vec<u8>)> =
+		let mut values: VecDeque<(Vec<u8>, Vec<u8>)> = if let Value::Array(a) = a {
 			a.0.iter()
 				.map(|v| {
 					let a = Array::from(v.clone());
@@ -340,7 +356,10 @@ impl IndexUnionThingIterator {
 					let end = Index::prefix_ids_end(ns, db, ix_what, ix_name, &a);
 					(beg, end)
 				})
-				.collect();
+				.collect()
+		} else {
+			VecDeque::with_capacity(0)
+		};
 		let current = values.pop_front();
 		Self {
 			irf,
@@ -561,6 +580,20 @@ impl UniqueRangeThingIterator {
 		}
 	}
 
+	pub(super) fn full_range(
+		irf: IteratorRef,
+		ns: &str,
+		db: &str,
+		ix_what: &Ident,
+		ix_name: &Ident,
+	) -> Self {
+		let full_range = RangeValue {
+			value: Value::None,
+			inclusive: true,
+		};
+		Self::new(irf, ns, db, ix_what, ix_name, &full_range, &full_range)
+	}
+
 	fn compute_beg(
 		ns: &str,
 		db: &str,
@@ -637,17 +670,20 @@ impl UniqueUnionThingIterator {
 		irf: IteratorRef,
 		opt: &Options,
 		ix: &DefineIndexStatement,
-		a: &Array,
+		a: &Value,
 	) -> Result<Self, Error> {
 		// We create a VecDeque to hold the key for each value in the array.
-		let keys: VecDeque<Key> =
+		let keys: VecDeque<Key> = if let Value::Array(a) = a {
 			a.0.iter()
 				.map(|v| -> Result<Key, Error> {
 					let a = Array::from(v.clone());
 					let key = Index::new(opt.ns()?, opt.db()?, &ix.what, &ix.name, &a, None).into();
 					Ok(key)
 				})
-				.collect::<Result<VecDeque<Key>, Error>>()?;
+				.collect::<Result<VecDeque<Key>, Error>>()?
+		} else {
+			VecDeque::with_capacity(0)
+		};
 		Ok(Self {
 			irf,
 			keys,
@@ -792,5 +828,44 @@ impl KnnIterator {
 			}
 		}
 		Ok(records)
+	}
+}
+
+pub(crate) struct MultipleIterators {
+	iterators: VecDeque<ThingIterator>,
+	current: Option<ThingIterator>,
+}
+
+impl MultipleIterators {
+	pub(super) fn new(iterators: VecDeque<ThingIterator>) -> Self {
+		Self {
+			iterators,
+			current: None,
+		}
+	}
+
+	async fn next_batch<B: IteratorBatch>(
+		&mut self,
+		ctx: &Context,
+		txn: &Transaction,
+		limit: u32,
+	) -> Result<B, Error> {
+		loop {
+			// Do we have an iterator
+			if let Some(i) = &mut self.current {
+				// If so, take the next batch
+				let b: B = i.next_batch(ctx, txn, limit).await?;
+				// Return the batch if it is not empty
+				if !b.is_empty() {
+					return Ok(b);
+				}
+			}
+			// Otherwise check if there is another iterator
+			self.current = self.iterators.pop_front();
+			if self.current.is_none() {
+				// If none, we are done
+				return Ok(B::empty());
+			}
+		}
 	}
 }

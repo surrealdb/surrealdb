@@ -15,6 +15,8 @@ use std::future::IntoFuture;
 use std::marker::PhantomData;
 use surrealdb_core::sql::{to_value as to_core_value, Object as CoreObject, Value as CoreValue};
 
+use super::insert_relation::InsertRelation;
+
 /// An insert future
 #[derive(Debug)]
 #[must_use = "futures do nothing unless you `.await` or poll them"]
@@ -62,9 +64,10 @@ macro_rules! into_future {
 					Resource::Range {
 						..
 					} => return Err(Error::InsertOnRange.into()),
+					Resource::Unspecified => return Err(Error::InsertOnUnspecified.into()),
 				};
 				let cmd = Command::Insert {
-					what: table.to_string(),
+					what: Some(table.to_string()),
 					data: data.into(),
 				};
 
@@ -121,7 +124,7 @@ where
 			let mut data = to_core_value(data)?;
 			match self.resource? {
 				Resource::Table(table) => Ok(Command::Insert {
-					what: table,
+					what: Some(table),
 					data,
 				}),
 				Resource::RecordId(thing) => {
@@ -137,11 +140,63 @@ where
 						}
 
 						Ok(Command::Insert {
-							what: thing.tb,
+							what: Some(thing.tb),
 							data,
 						})
 					}
 				}
+				Resource::Object(_) => Err(Error::InsertOnObject.into()),
+				Resource::Array(_) => Err(Error::InsertOnArray.into()),
+				Resource::Edge(_) => Err(Error::InsertOnEdges.into()),
+				Resource::Range(_) => Err(Error::InsertOnRange.into()),
+				Resource::Unspecified => Ok(Command::Insert {
+					what: None,
+					data,
+				}),
+			}
+		})
+	}
+}
+
+impl<'r, C, R> Insert<'r, C, R>
+where
+	C: Connection,
+	R: DeserializeOwned,
+{
+	/// Specifies the data to insert into the table
+	pub fn relation<D>(self, data: D) -> InsertRelation<'r, C, R>
+	where
+		D: Serialize + 'static,
+	{
+		InsertRelation::from_closure(self.client, || {
+			let mut data = to_core_value(data)?;
+			match self.resource? {
+				Resource::Table(table) => Ok(Command::InsertRelation {
+					what: Some(table),
+					data,
+				}),
+				Resource::RecordId(thing) => {
+					if data.is_array() {
+						Err(Error::InvalidParams(
+							"Tried to insert multiple records on a record ID".to_owned(),
+						)
+						.into())
+					} else {
+						let thing = thing.into_inner();
+						if let CoreValue::Object(ref mut x) = data {
+							x.insert("id".to_string(), thing.id.into());
+						}
+
+						Ok(Command::InsertRelation {
+							what: Some(thing.tb),
+							data,
+						})
+					}
+				}
+				Resource::Unspecified => Ok(Command::InsertRelation {
+					what: None,
+					data,
+				}),
 				Resource::Object(_) => Err(Error::InsertOnObject.into()),
 				Resource::Array(_) => Err(Error::InsertOnArray.into()),
 				Resource::Edge(_) => Err(Error::InsertOnEdges.into()),
