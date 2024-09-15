@@ -86,6 +86,10 @@ pub static RUNTIME_STACK_SIZE: LazyLock<usize> =
 pub static RUNTIME_MAX_BLOCKING_THREADS: LazyLock<usize> =
 	lazy_env_parse!("SURREAL_RUNTIME_MAX_BLOCKING_THREADS", usize, 512);
 
+/// How many threads which can be started for blocking operations (defaults to 512)
+pub static TELEMETRY_PROVIDER: LazyLock<String> =
+	lazy_env_parse!("SURREAL_TELEMETRY_PROVIDER", String, String::new());
+
 /// The version identifier of this build
 pub static PKG_VERSION: LazyLock<String> =
 	LazyLock::new(|| match option_env!("SURREAL_BUILD_METADATA") {
