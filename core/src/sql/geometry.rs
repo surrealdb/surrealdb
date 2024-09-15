@@ -5,7 +5,7 @@ use crate::sql::fmt::Fmt;
 use crate::sql::value::Value;
 use geo::algorithm::contains::Contains;
 use geo::algorithm::intersects::Intersects;
-use geo::{Coord, LineString, Point, Polygon};
+use geo::{Coord, LineString, LinesIter, Point, Polygon};
 use geo_types::{MultiLineString, MultiPoint, MultiPolygon};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -66,6 +66,48 @@ impl Geometry {
 	/// Check if this is a Collection
 	pub fn is_collection(&self) -> bool {
 		matches!(self, Self::Collection(_))
+	}
+	/// Check if this has valid latitude and longitude points:
+	/// * -90 <= lat <= 90
+	/// * -180 <= lng <= 180
+	pub fn is_valid(&self) -> bool {
+		match self {
+			Geometry::Point(p) => {
+				(-90.0..=90.0).contains(&p.0.y) && (-180.0..=180.0).contains(&p.0.x)
+			}
+			Geometry::MultiPoint(v) => v
+				.iter()
+				.all(|p| (-90.0..=90.0).contains(&p.0.y) && (-180.0..=180.0).contains(&p.0.x)),
+			Geometry::Line(v) => v.lines_iter().all(|l| {
+				(-90.0..=90.0).contains(&l.start.y)
+					&& (-180.0..=180.0).contains(&l.start.x)
+					&& (-90.0..=90.0).contains(&l.end.y)
+					&& (-180.0..=180.0).contains(&l.end.x)
+			}),
+			Geometry::Polygon(v) => v.lines_iter().all(|l| {
+				(-90.0..=90.0).contains(&l.start.y)
+					&& (-180.0..=180.0).contains(&l.start.x)
+					&& (-90.0..=90.0).contains(&l.end.y)
+					&& (-180.0..=180.0).contains(&l.end.x)
+			}),
+			Geometry::MultiLine(v) => v.iter().all(|l| {
+				l.lines_iter().all(|l| {
+					(-90.0..=90.0).contains(&l.start.y)
+						&& (-180.0..=180.0).contains(&l.start.x)
+						&& (-90.0..=90.0).contains(&l.end.y)
+						&& (-180.0..=180.0).contains(&l.end.x)
+				})
+			}),
+			Geometry::MultiPolygon(v) => v.iter().all(|p| {
+				p.lines_iter().all(|l| {
+					(-90.0..=90.0).contains(&l.start.y)
+						&& (-180.0..=180.0).contains(&l.start.x)
+						&& (-90.0..=90.0).contains(&l.end.y)
+						&& (-180.0..=180.0).contains(&l.end.x)
+				})
+			}),
+			Geometry::Collection(v) => v.iter().all(Geometry::is_valid),
+		}
 	}
 	/// Get the type of this Geometry as text
 	pub fn as_type(&self) -> &'static str {
