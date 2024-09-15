@@ -1903,13 +1903,13 @@ async fn function_parse_geo_hash_decode() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn function_geo_is_geography() -> Result<(), Error> {
+async fn function_geo_is_valid() -> Result<(), Error> {
 	let sql = r#"
-		RETURN geo::is_geography((-0.118092, 51.509865));
-		RETURN geo::is_geography((-181.0, 51.509865));
-		RETURN geo::is_geography((181.0, 51.509865));
-		RETURN geo::is_geography((-0.118092, -91.0));
-		RETURN geo::is_geography((-0.118092, 91.0));
+		RETURN geo::is::valid((-0.118092, 51.509865));
+		RETURN geo::is::valid((-181.0, 51.509865));
+		RETURN geo::is::valid((181.0, 51.509865));
+		RETURN geo::is::valid((-0.118092, -91.0));
+		RETURN geo::is::valid((-0.118092, 91.0));
 	"#;
 	let mut test = Test::new(sql).await?;
 	//

@@ -194,7 +194,7 @@ pub fn synchronous(
 		"geo::distance" => geo::distance,
 		"geo::hash::decode" => geo::hash::decode,
 		"geo::hash::encode" => geo::hash::encode,
-		"geo::is_geography" => geo::is_geography,
+		"geo::is::valid" => geo::is::valid,
 		//
 		"math::abs" => math::abs,
 		"math::acos" => math::acos,
@@ -640,7 +640,7 @@ pub async fn idiom(
 				"distance" => geo::distance,
 				"hash_decode" => geo::hash::decode,
 				"hash_encode" => geo::hash::encode,
-				"is_geography" => geo::is_geography,
+				"is_valid" => geo::is::valid,
 			)
 		}
 		Value::Thing(_) => {

@@ -59,22 +59,6 @@ impl Geometry {
 	pub fn is_multipolygon(&self) -> bool {
 		matches!(self, Self::MultiPolygon(_))
 	}
-	/// Check if this Value is a Geometry, with the following geography constraints:
-	/// * -90 <= lat <= 90
-	/// * -180 <= long <= 180
-	pub fn is_geography(&self) -> bool {
-		match self {
-			Geometry::Point((long, lat)) => {
-				-90.0 <= lat && lat <= 90.0 && -180.0 <= long && long <= 180.0
-			}
-			Geometry::Line(points) => points.lines_iter().all(|p| p.is_geography()),
-			Geometry::Polygon(polygon) => polygon.lines_iter().all(|l| l.is_geography()),
-			Geometry::MultiPoint(points) => points.iter().all(|p| p.is_geography()),
-			Geometry::MultiLine(lines) => lines.iter().all(|l| l.is_geography()),
-			Geometry::MultiPolygon(polygons) => polygons.iter().all(|p| p.is_geography()),
-			Geometry::Collection(geometries) => geometries.iter().all(|g| g.is_geography()),
-		}
-	}
 	/// Check if this is not a Collection
 	pub fn is_geometry(&self) -> bool {
 		!matches!(self, Self::Collection(_))
@@ -82,6 +66,48 @@ impl Geometry {
 	/// Check if this is a Collection
 	pub fn is_collection(&self) -> bool {
 		matches!(self, Self::Collection(_))
+	}
+	/// Check if this has valid latitude and longitude points:
+	/// * -90 <= lat <= 90
+	/// * -180 <= lng <= 180
+	pub fn is_valid(&self) -> bool {
+		match self {
+			Geometry::Point(p) => {
+				(-90.0..=90.0).contains(&p.0.y) && (-180.0..=180.0).contains(&p.0.x)
+			}
+			Geometry::MultiPoint(v) => v
+				.iter()
+				.all(|p| (-90.0..=90.0).contains(&p.0.y) && (-180.0..=180.0).contains(&p.0.x)),
+			Geometry::Line(v) => v.lines_iter().all(|l| {
+				(-90.0..=90.0).contains(&l.start.y)
+					&& (-180.0..=180.0).contains(&l.start.x)
+					&& (-90.0..=90.0).contains(&l.end.y)
+					&& (-180.0..=180.0).contains(&l.end.x)
+			}),
+			Geometry::Polygon(v) => v.lines_iter().all(|l| {
+				(-90.0..=90.0).contains(&l.start.y)
+					&& (-180.0..=180.0).contains(&l.start.x)
+					&& (-90.0..=90.0).contains(&l.end.y)
+					&& (-180.0..=180.0).contains(&l.end.x)
+			}),
+			Geometry::MultiLine(v) => v.iter().all(|l| {
+				l.lines_iter().all(|l| {
+					(-90.0..=90.0).contains(&l.start.y)
+						&& (-180.0..=180.0).contains(&l.start.x)
+						&& (-90.0..=90.0).contains(&l.end.y)
+						&& (-180.0..=180.0).contains(&l.end.x)
+				})
+			}),
+			Geometry::MultiPolygon(v) => v.iter().all(|p| {
+				p.lines_iter().all(|l| {
+					(-90.0..=90.0).contains(&l.start.y)
+						&& (-180.0..=180.0).contains(&l.start.x)
+						&& (-90.0..=90.0).contains(&l.end.y)
+						&& (-180.0..=180.0).contains(&l.end.x)
+				})
+			}),
+			Geometry::Collection(v) => v.iter().all(Geometry::is_valid),
+		}
 	}
 	/// Get the type of this Geometry as text
 	pub fn as_type(&self) -> &'static str {
