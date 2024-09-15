@@ -26,7 +26,7 @@ pub const DEBUG_BUILD_WARNING: &str = "\
 pub const PKG_NAME: &str = "surrealdb";
 
 /// The public endpoint for the administration interface
-pub const APP_ENDPOINT: &str = "https://surrealdb.com/app";
+pub const APP_ENDPOINT: &str = "https://surrealdb.com/surrealist";
 
 /// The maximum HTTP body size of the HTTP /ml endpoints (defaults to 4 GiB)
 pub static HTTP_MAX_ML_BODY_SIZE: LazyLock<usize> =
