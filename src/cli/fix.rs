@@ -26,9 +26,7 @@ pub async fn init(
 	}: FixCommandArguments,
 ) -> Result<(), Error> {
 	// Initialize opentelemetry and logging
-	crate::telemetry::builder().with_filter(log).init();
-	// Start metrics subsystem
-	crate::telemetry::metrics::init().expect("failed to initialize metrics");
+	crate::telemetry::builder().with_filter(log).init()?;
 	// Clean the path
 	let endpoint = path.into_endpoint()?;
 	let path = if endpoint.path.is_empty() {
