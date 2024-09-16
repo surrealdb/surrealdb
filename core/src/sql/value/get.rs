@@ -282,8 +282,8 @@ impl Value {
 								what: Values(vec![Value::from(val)]),
 								..SelectStatement::default()
 							};
-							let v = stk.run(|stk| stm.compute(stk, ctx, opt, None)).await?.first();
-							stk.run(|stk| v.get(stk, ctx, opt, None, path)).await
+							let v = stk.run(|stk| stm.compute(stk, ctx, opt, None)).await?.all();
+							stk.run(|stk| v.get(stk, ctx, opt, None, path)).await?.flatten().ok()
 						}
 					}
 				}
