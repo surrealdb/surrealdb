@@ -45,6 +45,7 @@ async fn define_alter_table() -> Result<(), Error> {
 		"{
 			accesses: {},
 			analyzers: {},
+			configs: {},
 			functions: {},
 			models: {},
 			params: {},
@@ -62,6 +63,7 @@ async fn define_alter_table() -> Result<(), Error> {
 		"{
 			accesses: {},
 			analyzers: {},
+			configs: {},
 			functions: {},
 			models: {},
 			params: {},
@@ -117,6 +119,7 @@ async fn define_alter_table_if_exists() -> Result<(), Error> {
 		"{
 			accesses: {},
 			analyzers: {},
+			configs: {},
 			functions: {},
 			models: {},
 			params: {},
