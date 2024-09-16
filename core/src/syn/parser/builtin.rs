@@ -458,6 +458,7 @@ pub(crate) static PATHS: phf::Map<UniCase<&'static str>, PathKind> = phf_map! {
 		UniCase::ascii("math::PI") => PathKind::Constant(Constant::MathPi),
 		UniCase::ascii("math::SQRT_2") => PathKind::Constant(Constant::MathSqrt2),
 		UniCase::ascii("math::TAU") => PathKind::Constant(Constant::MathTau),
+		UniCase::ascii("time::EPOCH") => PathKind::Constant(Constant::TimeEpoch)
 };
 
 impl Parser<'_> {

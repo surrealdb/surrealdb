@@ -144,6 +144,9 @@ fn constant_lowercase() {
 
 	let out = test_parse!(parse_value_table, r#" math::neg_inf "#).unwrap();
 	assert_eq!(out, Value::Constant(Constant::MathNegInf));
+
+	let out = test_parse!(parse_value_table, r#" time::epoch "#).unwrap();
+	assert_eq!(out, Value::Constant(Constant::TimeEpoch));
 }
 
 #[test]
@@ -156,6 +159,9 @@ fn constant_uppercase() {
 
 	let out = test_parse!(parse_value_table, r#" MATH::NEG_INF "#).unwrap();
 	assert_eq!(out, Value::Constant(Constant::MathNegInf));
+
+	let out = test_parse!(parse_value_table, r#" TIME::EPOCH "#).unwrap();
+	assert_eq!(out, Value::Constant(Constant::TimeEpoch));
 }
 
 #[test]
@@ -168,6 +174,9 @@ fn constant_mixedcase() {
 
 	let out = test_parse!(parse_value_table, r#" MaTh::Neg_Inf "#).unwrap();
 	assert_eq!(out, Value::Constant(Constant::MathNegInf));
+
+	let out = test_parse!(parse_value_table, r#" TiME::ePoCH "#).unwrap();
+	assert_eq!(out, Value::Constant(Constant::TimeEpoch));
 }
 
 #[test]
