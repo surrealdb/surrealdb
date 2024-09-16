@@ -428,11 +428,11 @@ impl MutableContext {
 				let target = &NetTarget::Host(host.to_owned(), url.port_or_known_default());
 				if !self.capabilities.allows_network_target(target) {
 					warn!(
-						"Capabilities denied outgoing network connection attempt, target: '{target}'",
+						"Capabilities denied outgoing network connection attempt, target: '{target}'"
 					);
 					return Err(Error::NetTargetNotAllowed(target.to_string()));
 				}
-				trace!("Capabilities allowed outgoing network connection, target: '{target}'",);
+				trace!("Capabilities allowed outgoing network connection, target: '{target}'");
 				Ok(())
 			}
 			_ => Err(Error::InvalidUrl(url.to_string())),
