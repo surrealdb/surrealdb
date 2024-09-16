@@ -1,3 +1,5 @@
+#![cfg(not(target_arch = "wasm32"))]
+
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::err::Error;
