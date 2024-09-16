@@ -94,7 +94,7 @@ impl PlanBuilder {
 	}
 
 	fn is_keys_only(p: &QueryPlannerParams) -> bool {
-		if !p.fields.is_count_only() {
+		if !p.fields.is_count_all_only() {
 			return false;
 		}
 		if p.cond.is_some() {

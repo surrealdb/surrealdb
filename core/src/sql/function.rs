@@ -181,8 +181,8 @@ impl Function {
 		}
 	}
 
-	pub(crate) fn is_count(&self) -> bool {
-		matches!(self, Self::Normal(f, _) if f == "count")
+	pub(crate) fn is_count_all(&self) -> bool {
+		matches!(self, Self::Normal(f, p) if f == "count" && p.is_empty() )
 	}
 }
 
