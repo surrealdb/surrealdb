@@ -1,6 +1,5 @@
 use crate::err::Error;
 use crate::key::change;
-#[cfg(debug_assertions)]
 use crate::key::debug::Sprintable;
 use crate::kvs::Transaction;
 use crate::vs;
@@ -9,30 +8,30 @@ use std::str;
 
 // gc_all_at deletes all change feed entries that become stale at the given timestamp.
 #[allow(unused)]
+#[instrument(level = "trace", target = "surrealdb::core::cfs", skip(tx))]
 pub async fn gc_all_at(tx: &Transaction, ts: u64) -> Result<(), Error> {
 	// Fetch all namespaces
 	let nss = tx.all_ns().await?;
 	// Loop over each namespace
 	for ns in nss.as_ref() {
 		// Trace for debugging
-		#[cfg(debug_assertions)]
-		trace!("Performing garbage collection on {ns} for timestamp {ts}");
+		trace!("Performing garbage collection on {} for timestamp {ts}", ns.name);
 		// Process the namespace
-		gc_ns(tx, ts, ns.name.as_str()).await?;
+		gc_ns(tx, ts, &ns.name).await?;
 	}
 	Ok(())
 }
 
 // gc_ns deletes all change feed entries in the given namespace that are older than the given watermark.
 #[allow(unused)]
+#[instrument(level = "trace", target = "surrealdb::core::cfs", skip(tx))]
 pub async fn gc_ns(tx: &Transaction, ts: u64, ns: &str) -> Result<(), Error> {
 	// Fetch all databases
 	let dbs = tx.all_db(ns).await?;
 	// Loop over each database
 	for db in dbs.as_ref() {
 		// Trace for debugging
-		#[cfg(debug_assertions)]
-		trace!("Performing garbage collection on {ns}:{db} for timestamp {ts}");
+		trace!("Performing garbage collection on {ns}:{} for timestamp {ts}", db.name);
 		// Fetch all tables
 		let tbs = tx.all_tb(ns, &db.name, None).await?;
 		// Get the database changefeed expiration
@@ -68,19 +67,14 @@ pub async fn gc_ns(tx: &Transaction, ts: u64, ns: &str) -> Result<(), Error> {
 }
 
 // gc_db deletes all change feed entries in the given database that are older than the given watermark.
-pub async fn gc_range(
-	tx: &Transaction,
-	ns: &str,
-	db: &str,
-	watermark: Versionstamp,
-) -> Result<(), Error> {
+#[instrument(level = "trace", target = "surrealdb::core::cfs", skip(tx))]
+pub async fn gc_range(tx: &Transaction, ns: &str, db: &str, vt: Versionstamp) -> Result<(), Error> {
 	// Calculate the range
 	let beg = change::prefix_ts(ns, db, vs::u64_to_versionstamp(0));
-	let end = change::prefix_ts(ns, db, watermark);
+	let end = change::prefix_ts(ns, db, vt);
 	// Trace for debugging
-	#[cfg(debug_assertions)]
 	trace!(
-		"Performing garbage collection on {ns}:{db} for watermark {watermark:?}, between {} and {}",
+		"Performing garbage collection on {ns}:{db} for watermark {vt:?}, between {} and {}",
 		beg.sprint(),
 		end.sprint()
 	);

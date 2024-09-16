@@ -15,6 +15,7 @@
 mod api;
 mod batch;
 mod cache;
+mod cf;
 mod clock;
 mod ds;
 mod export;

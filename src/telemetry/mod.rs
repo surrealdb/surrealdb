@@ -97,6 +97,8 @@ impl Builder {
 }
 
 pub fn shutdown() -> Result<(), Error> {
+	// Output information to logs
+	trace!("Shutting down telemetry service");
 	// Flush all telemetry data and block until done
 	opentelemetry::global::shutdown_tracer_provider();
 	// Everything ok
@@ -115,14 +117,17 @@ pub fn filter_from_value(v: &str) -> Result<EnvFilter, ParseError> {
 		// Otherwise, let's show info and above
 		"info" => Ok(EnvFilter::default().add_directive(Level::INFO.into())),
 		// Otherwise, let's show debugs and above
-		"debug" => EnvFilter::builder()
-			.parse("warn,surreal=debug,surrealdb=debug,surrealcs=warn,surrealdb::core::kvs=debug"),
+		"debug" => EnvFilter::builder().parse(
+			"warn,surreal=debug,surrealdb=debug,surrealcs=warn,surrealdb::core::kvs::tr=debug",
+		),
 		// Specify the log level for each code area
-		"trace" => EnvFilter::builder()
-			.parse("warn,surreal=trace,surrealdb=trace,surrealcs=warn,surrealdb::core::kvs=debug"),
+		"trace" => EnvFilter::builder().parse(
+			"warn,surreal=trace,surrealdb=trace,surrealcs=warn,surrealdb::core::kvs::tr=debug",
+		),
 		// Check if we should show all surreal logs
-		"full" => EnvFilter::builder()
-			.parse("debug,surreal=trace,surrealdb=trace,surrealcs=debug,surrealdb::core=trace"),
+		"full" => EnvFilter::builder().parse(
+			"debug,surreal=trace,surrealdb=trace,surrealcs=debug,surrealdb::core::kvs::tr=trace",
+		),
 		// Check if we should show all module logs
 		"all" => Ok(EnvFilter::default().add_directive(Level::TRACE.into())),
 		// Let's try to parse the custom log level

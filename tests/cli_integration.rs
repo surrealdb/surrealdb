@@ -22,10 +22,6 @@ mod cli_integration {
 
 	use super::common::{self, StartServerArguments, PASS, USER};
 
-	/// This depends on the interval configuration that we cannot yet inject
-	const ONE_PERIOD: Duration = Duration::new(10, 0);
-	const TWO_PERIODS: Duration = Duration::new(20, 0);
-
 	#[test]
 	fn version_command() {
 		assert!(common::run("version").output().is_ok());
@@ -878,7 +874,6 @@ mod cli_integration {
 			auth: false,
 			tls: false,
 			wait_is_ready: true,
-			tick_interval: ONE_PERIOD,
 			..Default::default()
 		})
 		.await
@@ -980,7 +975,7 @@ mod cli_integration {
 			}
 		};
 
-		sleep(TWO_PERIODS).await;
+		sleep(Duration::from_secs(20)).await;
 
 		info!("* Show changes after GC");
 		{

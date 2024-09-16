@@ -18,11 +18,9 @@ mod store;
 mod variables;
 
 pub mod capabilities;
-pub mod lifecycle;
 pub mod node;
 
 pub use self::capabilities::Capabilities;
-pub use self::lifecycle::*;
 pub use self::notification::*;
 pub use self::options::*;
 pub use self::response::*;
