@@ -39,7 +39,7 @@ struct DbsCapabilities {
 	//
 	// Allow
 	//
-	#[arg(help = "Allow all capabilities")]
+	#[arg(help = "Allow all capabilities except for those more specifically denied")]
 	#[arg(env = "SURREAL_CAPS_ALLOW_ALL", short = 'A', long, conflicts_with = "deny_all")]
 	allow_all: bool,
 
@@ -68,9 +68,9 @@ Function names must be in the form <family>[::<name>]. For example:
 	allow_funcs: Option<Targets<FuncTarget>>,
 
 	#[arg(
-		help = "Allow all outbound network access except for network targets that are specifically denied. Alternatively, you can provide a comma-separated list of network targets to allow",
-		long_help = r#"Allow all outbound network access except for network targets that are specifically denied. Alternatively, you can provide a comma-separated list of network targets to allow
-Specifically denied network targets prevail over any other allowed outbound network access.
+		help = "Allow all outbound network connections except for network targets that are specifically denied. Alternatively, you can provide a comma-separated list of network targets to allow",
+		long_help = r#"Allow all outbound network connections except for network targets that are specifically denied. Alternatively, you can provide a comma-separated list of network targets to allow
+Specifically denied network targets prevail over any other allowed outbound network connections.
 Targets must be in the form of <host>[:<port>], <ipv4|ipv6>[/<mask>]. For example:
  - 'surrealdb.com', '127.0.0.1' or 'fd00::1' -> Match outbound connections to these hosts on any port
  - 'surrealdb.com:80', '127.0.0.1:80' or 'fd00::1:80' -> Match outbound connections to these hosts on port 80
@@ -86,7 +86,7 @@ Targets must be in the form of <host>[:<port>], <ipv4|ipv6>[/<mask>]. For exampl
 	//
 	// Deny
 	//
-	#[arg(help = "Deny all capabilities except for those that are specifically allowed")]
+	#[arg(help = "Deny all capabilities except for those more specifically allowed")]
 	#[arg(env = "SURREAL_CAPS_DENY_ALL", short = 'D', long, conflicts_with = "allow_all")]
 	deny_all: bool,
 
@@ -115,9 +115,9 @@ Function names must be in the form <family>[::<name>]. For example:
 	deny_funcs: Option<Targets<FuncTarget>>,
 
 	#[arg(
-		help = "Deny all outbound network access except for network targets that are specifically allowed. Alternatively, you can provide a comma-separated list of network targets to deny",
-		long_help = r#"Deny all outbound network access except for network targets that are specifically allowed. Alternatively, you can provide a comma-separated list of network targets to deny.
-Specifically allowed network targets prevail over a general denial of network access.
+		help = "Deny all outbound network connections except for network targets that are specifically allowed. Alternatively, you can provide a comma-separated list of network targets to deny",
+		long_help = r#"Deny all outbound network connections except for network targets that are specifically allowed. Alternatively, you can provide a comma-separated list of network targets to deny.
+Specifically allowed network targets prevail over a general denial of outbound network connections.
 Targets must be in the form of <host>[:<port>], <ipv4|ipv6>[/<mask>]. For example:
  - 'surrealdb.com', '127.0.0.1' or 'fd00::1' -> Match outbound connections to these hosts on any port
  - 'surrealdb.com:80', '127.0.0.1:80' or 'fd00::1:80' -> Match outbound connections to these hosts on port 80
