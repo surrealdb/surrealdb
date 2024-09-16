@@ -627,7 +627,7 @@ async fn function_array_logical_xor() -> Result<(), Error> {
 	test_queries(
 		r#"
 		RETURN array::logical_xor([true, false, true, false], [true, true, false, false]);
-		RETURN array::logical_xor([1, 0, 1, 0], [true, true, false", false]);
+		RETURN array::logical_xor([1, 0, 1, 0], [true, true, false, false]);
 		RETURN array::logical_xor([0, 1], []);"#,
 		&["[false, true, true, false]", r#"[false, true, 1, 0]"#, "[0, 1]"],
 	)
