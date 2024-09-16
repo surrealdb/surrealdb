@@ -2,6 +2,7 @@ use super::run;
 use crate::fnc::script::modules::impl_module_def;
 
 mod hash;
+mod is;
 
 #[non_exhaustive]
 pub struct Package;
@@ -13,5 +14,6 @@ impl_module_def!(
 	"bearing" => run,
 	"centroid" => run,
 	"distance" => run,
-	"hash" => (hash::Package)
+	"hash" => (hash::Package),
+	"is" => (is::Package)
 );

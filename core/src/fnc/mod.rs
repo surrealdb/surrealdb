@@ -194,6 +194,7 @@ pub fn synchronous(
 		"geo::distance" => geo::distance,
 		"geo::hash::decode" => geo::hash::decode,
 		"geo::hash::encode" => geo::hash::encode,
+		"geo::is::valid" => geo::is::valid,
 		//
 		"math::abs" => math::abs,
 		"math::acos" => math::acos,
@@ -639,6 +640,7 @@ pub async fn idiom(
 				"distance" => geo::distance,
 				"hash_decode" => geo::hash::decode,
 				"hash_encode" => geo::hash::encode,
+				"is_valid" => geo::is::valid,
 			)
 		}
 		Value::Thing(_) => {
@@ -663,6 +665,33 @@ pub async fn idiom(
 				"keys" => object::keys,
 				"len" => object::len,
 				"values" => object::values,
+			)
+		}
+		Value::Number(_) => {
+			dispatch!(
+				name,
+				args.clone(),
+				"no such method found for the number type",
+				//
+				"abs" => math::abs,
+				"acos" => math::acos,
+				"acot" => math::acot,
+				"asin" => math::asin,
+				"atan" => math::atan,
+				"ceil" => math::ceil,
+				"cos" => math::cos,
+				"cot" => math::cot,
+				"deg2rad" => math::deg2rad,
+				"floor" => math::floor,
+				"ln" => math::ln,
+				"log" => math::log,
+				"log10" => math::log10,
+				"log2" => math::log2,
+				"rad2deg" => math::rad2deg,
+				"round" => math::round,
+				"sign" => math::sign,
+				"sin" => math::sin,
+				"tan" => math::tan,
 			)
 		}
 		Value::Strand(_) => {

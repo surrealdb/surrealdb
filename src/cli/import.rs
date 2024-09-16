@@ -39,10 +39,9 @@ pub async fn init(
 	}: ImportCommandArguments,
 ) -> Result<(), Error> {
 	// Initialize opentelemetry and logging
-	crate::telemetry::builder().with_log_level("info").init();
+	crate::telemetry::builder().with_log_level("info").init()?;
 	// Default datastore configuration for local engines
 	let config = Config::new().capabilities(Capabilities::all());
-
 	// If username and password are specified, and we are connecting to a remote SurrealDB server, then we need to authenticate.
 	// If we are connecting directly to a datastore (i.e. surrealkv://local.skv or tikv://...), then we don't need to authenticate because we use an embedded (local) SurrealDB instance with auth disabled.
 	let client = if username.is_some()

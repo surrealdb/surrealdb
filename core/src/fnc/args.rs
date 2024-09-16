@@ -1,7 +1,7 @@
 use crate::err::Error;
 use crate::sql::value::Value;
 use crate::sql::{
-	Array, Bytes, Closure, Datetime, Duration, Kind, Number, Object, Regex, Strand, Thing,
+	Array, Bytes, Closure, Datetime, Duration, Geometry, Kind, Number, Object, Regex, Strand, Thing,
 };
 use std::vec::IntoIter;
 
@@ -55,6 +55,12 @@ impl FromArg for Datetime {
 impl FromArg for Duration {
 	fn from_arg(arg: Value) -> Result<Self, Error> {
 		arg.coerce_to_duration()
+	}
+}
+
+impl FromArg for Geometry {
+	fn from_arg(arg: Value) -> Result<Self, Error> {
+		arg.coerce_to_geometry()
 	}
 }
 

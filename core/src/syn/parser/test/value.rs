@@ -4,19 +4,25 @@ use reblessive::Stack;
 
 use crate::{
 	sql::{
-		Array, Constant, Id, Number, Object, Query, Statement, Statements, Strand, Thing, Value,
+		Array, Constant, Id, Idiom, Number, Object, Part, Query, Statement, Statements, Strand,
+		Thing, Value,
 	},
 	syn::parser::{mac::test_parse, Parser},
 };
 
 #[test]
 fn parse_coordinate() {
-	test_parse!(parse_value, "(1.88, -18.0)").unwrap();
+	test_parse!(parse_value_table, "(1.88, -18.0)").unwrap();
 }
 
 #[test]
 fn parse_like_operator() {
-	test_parse!(parse_value, "a ~ b").unwrap();
+	test_parse!(parse_value_table, "a ~ b").unwrap();
+}
+
+#[test]
+fn parse_range_operator() {
+	test_parse!(parse_value_table, "1..2").unwrap();
 }
 
 #[test]
@@ -88,7 +94,7 @@ fn parse_large_depth_record_id() {
 
 #[test]
 fn parse_recursive_record_string() {
-	let res = test_parse!(parse_value, r#" r"a:[r"b:{c: r"d:1"}"]" "#).unwrap();
+	let res = test_parse!(parse_value_table, r#" r"a:[r"b:{c: r"d:1"}"]" "#).unwrap();
 	assert_eq!(
 		res,
 		Value::Thing(Thing {
@@ -109,7 +115,7 @@ fn parse_recursive_record_string() {
 
 #[test]
 fn parse_record_string_2() {
-	let res = test_parse!(parse_value, r#" r'a:["foo"]' "#).unwrap();
+	let res = test_parse!(parse_value_table, r#" r'a:["foo"]' "#).unwrap();
 	assert_eq!(
 		res,
 		Value::Thing(Thing {
@@ -121,64 +127,95 @@ fn parse_record_string_2() {
 
 #[test]
 fn parse_i64() {
-	let res = test_parse!(parse_value, r#" -9223372036854775808 "#).unwrap();
+	let res = test_parse!(parse_value_table, r#" -9223372036854775808 "#).unwrap();
 	assert_eq!(res, Value::Number(Number::Int(i64::MIN)));
 
-	let res = test_parse!(parse_value, r#" 9223372036854775807 "#).unwrap();
+	let res = test_parse!(parse_value_table, r#" 9223372036854775807 "#).unwrap();
 	assert_eq!(res, Value::Number(Number::Int(i64::MAX)));
 }
 
 #[test]
 fn constant_lowercase() {
-	let out = test_parse!(parse_value, r#" math::pi "#).unwrap();
+	let out = test_parse!(parse_value_table, r#" math::pi "#).unwrap();
 	assert_eq!(out, Value::Constant(Constant::MathPi));
 
-	let out = test_parse!(parse_value, r#" math::inf "#).unwrap();
+	let out = test_parse!(parse_value_table, r#" math::inf "#).unwrap();
 	assert_eq!(out, Value::Constant(Constant::MathInf));
 
-	let out = test_parse!(parse_value, r#" math::neg_inf "#).unwrap();
+	let out = test_parse!(parse_value_table, r#" math::neg_inf "#).unwrap();
 	assert_eq!(out, Value::Constant(Constant::MathNegInf));
+
+	let out = test_parse!(parse_value_table, r#" time::epoch "#).unwrap();
+	assert_eq!(out, Value::Constant(Constant::TimeEpoch));
 }
 
 #[test]
 fn constant_uppercase() {
-	let out = test_parse!(parse_value, r#" MATH::PI "#).unwrap();
+	let out = test_parse!(parse_value_table, r#" MATH::PI "#).unwrap();
 	assert_eq!(out, Value::Constant(Constant::MathPi));
 
-	let out = test_parse!(parse_value, r#" MATH::INF "#).unwrap();
+	let out = test_parse!(parse_value_table, r#" MATH::INF "#).unwrap();
 	assert_eq!(out, Value::Constant(Constant::MathInf));
 
-	let out = test_parse!(parse_value, r#" MATH::NEG_INF "#).unwrap();
+	let out = test_parse!(parse_value_table, r#" MATH::NEG_INF "#).unwrap();
 	assert_eq!(out, Value::Constant(Constant::MathNegInf));
+
+	let out = test_parse!(parse_value_table, r#" TIME::EPOCH "#).unwrap();
+	assert_eq!(out, Value::Constant(Constant::TimeEpoch));
 }
 
 #[test]
 fn constant_mixedcase() {
-	let out = test_parse!(parse_value, r#" MaTh::Pi "#).unwrap();
+	let out = test_parse!(parse_value_table, r#" MaTh::Pi "#).unwrap();
 	assert_eq!(out, Value::Constant(Constant::MathPi));
 
-	let out = test_parse!(parse_value, r#" MaTh::Inf "#).unwrap();
+	let out = test_parse!(parse_value_table, r#" MaTh::Inf "#).unwrap();
 	assert_eq!(out, Value::Constant(Constant::MathInf));
 
-	let out = test_parse!(parse_value, r#" MaTh::Neg_Inf "#).unwrap();
+	let out = test_parse!(parse_value_table, r#" MaTh::Neg_Inf "#).unwrap();
 	assert_eq!(out, Value::Constant(Constant::MathNegInf));
+
+	let out = test_parse!(parse_value_table, r#" TiME::ePoCH "#).unwrap();
+	assert_eq!(out, Value::Constant(Constant::TimeEpoch));
 }
 
 #[test]
 fn scientific_decimal() {
-	let res = test_parse!(parse_value, r#" 9.7e-7dec "#).unwrap();
+	let res = test_parse!(parse_value_table, r#" 9.7e-7dec "#).unwrap();
 	assert!(matches!(res, Value::Number(Number::Decimal(_))));
 	assert_eq!(res.to_string(), "0.00000097dec")
 }
 
 #[test]
 fn scientific_number() {
-	let res = test_parse!(parse_value, r#" 9.7e-5"#).unwrap();
+	let res = test_parse!(parse_value_table, r#" 9.7e-5"#).unwrap();
 	assert!(matches!(res, Value::Number(Number::Float(_))));
 	assert_eq!(res.to_string(), "0.000097f")
 }
 
 #[test]
+fn number_method() {
+	let res = test_parse!(parse_value_table, r#" 9.7e-5.sin()"#).unwrap();
+	let expected = Value::Idiom(Idiom(vec![
+		Part::Start(Value::Number(Number::Float(9.7e-5))),
+		Part::Method("sin".to_string(), vec![]),
+	]));
+	assert_eq!(res, expected);
+
+	let res = test_parse!(parse_value_table, r#" 1.sin()"#).unwrap();
+	let expected = Value::Idiom(Idiom(vec![
+		Part::Start(Value::Number(Number::Int(1))),
+		Part::Method("sin".to_string(), vec![]),
+	]));
+	assert_eq!(res, expected);
+}
+
+#[test]
+fn datetime_error() {
+	test_parse!(parse_value_table, r#" d"2001-01-01T01:01:01.9999999999" "#).unwrap_err();
+}
+
+#[test]
 fn empty_string() {
-	test_parse!(parse_value, "").unwrap_err();
+	test_parse!(parse_value_table, "").unwrap_err();
 }

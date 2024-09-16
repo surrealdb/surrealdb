@@ -416,6 +416,7 @@ async fn delete_filtered_live_notification() -> Result<(), Error> {
 		Notification::new(
 			live_id,
 			Action::Delete,
+			Value::Thing(Thing::from(("person", "test_true"))),
 			Value::parse(
 				"{
 					id: person:test_true,

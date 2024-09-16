@@ -39,7 +39,9 @@ pub struct StartCommandArguments {
 	#[arg(value_parser = super::validator::key_valid)]
 	#[arg(hide = true)] // Not currently in use
 	key: Option<String>,
-
+	//
+	// Tasks
+	//
 	#[arg(
 		help = "The interval at which to run node agent tick (including garbage collection)",
 		help_heading = "Database"
@@ -47,7 +49,6 @@ pub struct StartCommandArguments {
 	#[arg(env = "SURREAL_TICK_INTERVAL", long = "tick-interval", value_parser = super::validator::duration)]
 	#[arg(default_value = "10s")]
 	tick_interval: Duration,
-
 	//
 	// Authentication
 	//
@@ -75,14 +76,12 @@ pub struct StartCommandArguments {
 		requires = "username"
 	)]
 	password: Option<String>,
-
 	//
 	// Datastore connection
 	//
 	#[command(next_help_heading = "Datastore connection")]
 	#[command(flatten)]
 	kvs: Option<StartCommandRemoteTlsOptions>,
-
 	//
 	// HTTP Server
 	//
@@ -151,10 +150,7 @@ pub async fn init(
 	}: StartCommandArguments,
 ) -> Result<(), Error> {
 	// Initialize opentelemetry and logging
-	crate::telemetry::builder().with_filter(log).init();
-	// Start metrics subsystem
-	crate::telemetry::metrics::init().expect("failed to initialize metrics");
-
+	crate::telemetry::builder().with_filter(log).init()?;
 	// Check if we should output a banner
 	if !no_banner {
 		println!("{LOGO}");

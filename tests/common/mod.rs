@@ -24,7 +24,7 @@ pub fn is_notification(msg: &serde_json::Value) -> bool {
 			.as_object()
 			.unwrap()
 			.keys()
-			.all(|k| ["id", "action", "result"].contains(&k.as_str()))
+			.all(|k| ["id", "action", "record", "result"].contains(&k.as_str()))
 }
 
 /// Check if the given message is a notification from LQ and comes from the given LQ ID.

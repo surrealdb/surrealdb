@@ -31,12 +31,13 @@ use crate::{
 };
 
 impl Parser<'_> {
-	pub async fn parse_define_stmt(&mut self, ctx: &mut Stk) -> ParseResult<DefineStatement> {
+	pub(crate) async fn parse_define_stmt(
+		&mut self,
+		ctx: &mut Stk,
+	) -> ParseResult<DefineStatement> {
 		let next = self.next();
 		match next.kind {
-			t!("NAMESPACE") | t!("ns") => {
-				self.parse_define_namespace().map(DefineStatement::Namespace)
-			}
+			t!("NAMESPACE") => self.parse_define_namespace().map(DefineStatement::Namespace),
 			t!("DATABASE") => self.parse_define_database().map(DefineStatement::Database),
 			t!("FUNCTION") => self.parse_define_function(ctx).await.map(DefineStatement::Function),
 			t!("USER") => self.parse_define_user().map(DefineStatement::User),
@@ -59,7 +60,7 @@ impl Parser<'_> {
 		}
 	}
 
-	pub fn parse_define_namespace(&mut self) -> ParseResult<DefineNamespaceStatement> {
+	pub(crate) fn parse_define_namespace(&mut self) -> ParseResult<DefineNamespaceStatement> {
 		let (if_not_exists, overwrite) = self.parse_write_kind().to_bools();
 		let name = self.next_token_value()?;
 		let mut res = DefineNamespaceStatement {
@@ -290,12 +291,12 @@ impl Parser<'_> {
 									t!("SIGNUP") => {
 										self.pop_peek();
 										ac.signup =
-											Some(stk.run(|stk| self.parse_value(stk)).await?);
+											Some(stk.run(|stk| self.parse_value_table(stk)).await?);
 									}
 									t!("SIGNIN") => {
 										self.pop_peek();
 										ac.signin =
-											Some(stk.run(|stk| self.parse_value(stk)).await?);
+											Some(stk.run(|stk| self.parse_value_table(stk)).await?);
 									}
 									_ => break,
 								}
@@ -330,7 +331,7 @@ impl Parser<'_> {
 				}
 				t!("AUTHENTICATE") => {
 					self.pop_peek();
-					res.authenticate = Some(stk.run(|stk| self.parse_value(stk)).await?);
+					res.authenticate = Some(stk.run(|stk| self.parse_value_table(stk)).await?);
 				}
 				t!("DURATION") => {
 					self.pop_peek();
@@ -520,11 +521,11 @@ impl Parser<'_> {
 				}
 				t!("SIGNUP") => {
 					self.pop_peek();
-					ac.signup = Some(stk.run(|stk| self.parse_value(stk)).await?);
+					ac.signup = Some(stk.run(|stk| self.parse_value_table(stk)).await?);
 				}
 				t!("SIGNIN") => {
 					self.pop_peek();
-					ac.signin = Some(stk.run(|stk| self.parse_value(stk)).await?);
+					ac.signin = Some(stk.run(|stk| self.parse_value_table(stk)).await?);
 				}
 				_ => break,
 			}
@@ -550,7 +551,7 @@ impl Parser<'_> {
 			match self.peek_kind() {
 				t!("VALUE") => {
 					self.pop_peek();
-					res.value = ctx.run(|ctx| self.parse_value(ctx)).await?;
+					res.value = ctx.run(|ctx| self.parse_value_table(ctx)).await?;
 				}
 				t!("COMMENT") => {
 					self.pop_peek();
@@ -673,13 +674,13 @@ impl Parser<'_> {
 			match self.peek_kind() {
 				t!("WHEN") => {
 					self.pop_peek();
-					res.when = ctx.run(|ctx| self.parse_value(ctx)).await?;
+					res.when = ctx.run(|ctx| self.parse_value_table(ctx)).await?;
 				}
 				t!("THEN") => {
 					self.pop_peek();
-					res.then = Values(vec![ctx.run(|ctx| self.parse_value(ctx)).await?]);
+					res.then = Values(vec![ctx.run(|ctx| self.parse_value_table(ctx)).await?]);
 					while self.eat(t!(",")) {
-						res.then.0.push(ctx.run(|ctx| self.parse_value(ctx)).await?)
+						res.then.0.push(ctx.run(|ctx| self.parse_value_table(ctx)).await?)
 					}
 				}
 				t!("COMMENT") => {
@@ -724,15 +725,15 @@ impl Parser<'_> {
 				}
 				t!("VALUE") => {
 					self.pop_peek();
-					res.value = Some(ctx.run(|ctx| self.parse_value(ctx)).await?);
+					res.value = Some(ctx.run(|ctx| self.parse_value_field(ctx)).await?);
 				}
 				t!("ASSERT") => {
 					self.pop_peek();
-					res.assert = Some(ctx.run(|ctx| self.parse_value(ctx)).await?);
+					res.assert = Some(ctx.run(|ctx| self.parse_value_field(ctx)).await?);
 				}
 				t!("DEFAULT") => {
 					self.pop_peek();
-					res.default = Some(ctx.run(|ctx| self.parse_value(ctx)).await?);
+					res.default = Some(ctx.run(|ctx| self.parse_value_field(ctx)).await?);
 				}
 				t!("PERMISSIONS") => {
 					self.pop_peek();

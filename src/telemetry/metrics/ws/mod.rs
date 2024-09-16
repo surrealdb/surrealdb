@@ -57,7 +57,6 @@ pub fn on_disconnect() -> Result<(), MetricsError> {
 
 pub(super) fn observe_active_connection(value: i64) -> Result<(), MetricsError> {
 	let attrs = otel_common_attrs();
-
 	RPC_SERVER_ACTIVE_CONNECTIONS.add(value, &attrs);
 	Ok(())
 }

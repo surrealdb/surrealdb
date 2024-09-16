@@ -173,6 +173,11 @@ impl fmt::Display for Snippet {
 		for _ in 0..spacing {
 			f.write_str(" ")?;
 		}
+		writeln!(f, "--> [{}:{}]", self.location.line, self.location.column)?;
+
+		for _ in 0..spacing {
+			f.write_str(" ")?;
+		}
 		f.write_str(" |\n")?;
 		write!(f, "{:>spacing$} | ", self.location.line)?;
 		match self.truncation {
@@ -301,6 +306,7 @@ mod test {
 
 		let error_string = format!("{}", error);
 		let expected = r#"some_error
+ --> [4:10]
   |
 4 | ...hallo error...
   |          ^^^^^ this is wrong
