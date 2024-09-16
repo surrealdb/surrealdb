@@ -961,7 +961,7 @@ impl Value {
 			Value::Geometry(_) => true,
 			Value::Array(v) => !v.is_empty(),
 			Value::Object(v) => !v.is_empty(),
-			Value::Strand(v) => !v.is_empty(),
+			Value::Strand(v) => !v.is_empty() && !v.eq_ignore_ascii_case("false"),
 			Value::Number(v) => v.is_truthy(),
 			Value::Duration(v) => v.as_nanos() > 0,
 			Value::Datetime(v) => v.timestamp() > 0,
@@ -3164,7 +3164,7 @@ mod tests {
 		assert!(Value::from(1.1).is_truthy());
 		assert!(Value::from(-1.1).is_truthy());
 		assert!(Value::from("true").is_truthy());
-		assert!(Value::from("false").is_truthy());
+		assert!(!Value::from("false").is_truthy());
 		assert!(Value::from("falsey").is_truthy());
 		assert!(Value::from("something").is_truthy());
 		assert!(Value::from(Uuid::new()).is_truthy());

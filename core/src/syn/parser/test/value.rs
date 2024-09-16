@@ -4,8 +4,8 @@ use reblessive::Stack;
 
 use crate::{
 	sql::{
-		Array, Constant, Expression, Geometry, Id, Idiom, Number, Object, Operator, Part, Query,
-		Statement, Statements, Strand, Table, Thing, Value,
+		Array, Constant, Expression, Geometry, Id, Ident, Idiom, Number, Object, Operator, Part,
+		Query, Statement, Statements, Strand, Thing, Value,
 	},
 	syn::parser::{mac::test_parse, Parser},
 };
@@ -16,7 +16,7 @@ fn parse_index_expression() {
 	let Value::Idiom(x) = value else {
 		panic!("not the right value type");
 	};
-	assert_eq!(x.0[0], Part::Value(Value::Table(Table("a".to_string()))));
+	assert_eq!(x.0[0], Part::Field(Ident("a".to_string())));
 	assert_eq!(
 		x.0[1],
 		Part::Value(Value::Expression(Box::new(Expression::Binary {

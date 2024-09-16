@@ -117,6 +117,15 @@ impl Value {
 							this = x;
 						}
 						Value::Array(array) => {
+							if let Value::Range(x) = v {
+								let Some(range) = x.slice(array) else {
+									return Ok(());
+								};
+								let mut range = Value::Array(range.to_vec().into());
+								return stk
+									.run(|stk| range.fetch(stk, ctx, opt, iter.as_slice()))
+									.await;
+							}
 							let Some(x) = array.get_mut(v.coerce_to_u64()? as usize) else {
 								return Ok(());
 							};
@@ -202,7 +211,7 @@ impl Value {
 			prev = iter.as_slice();
 		}
 
-		// If we and up at the end with one of the following types we still need to compute it.
+		// If the final value is on of following types we still need to compute it.
 		match this {
 			Value::Array(v) => {
 				stk.scope(|scope| {

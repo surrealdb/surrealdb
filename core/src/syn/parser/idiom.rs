@@ -353,7 +353,11 @@ impl Parser<'_> {
 			}
 			_ => {
 				let value = ctx.run(|ctx| self.parse_value_inherit(ctx)).await?;
-				Part::Value(value)
+				if let Value::Number(x) = value {
+					Part::Index(x)
+				} else {
+					Part::Value(value)
+				}
 			}
 		};
 		self.expect_closing_delimiter(t!("]"), start)?;
