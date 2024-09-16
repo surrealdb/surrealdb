@@ -250,9 +250,10 @@ impl Fields {
 						_ => {
 							let expr = expr.compute(stk, ctx, opt, Some(doc)).await?;
 							// Check if this is a single VALUE field expression
-							match self.single().is_some() {
-								false => out.set(stk, ctx, opt, name.as_ref(), expr).await?,
-								true => out = expr,
+							if self.single().is_some() {
+								out = expr;
+							} else {
+								out.set(stk, ctx, opt, name.as_ref(), expr).await?;
 							}
 						}
 					}

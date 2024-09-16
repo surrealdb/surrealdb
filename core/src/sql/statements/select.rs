@@ -19,10 +19,12 @@ use std::sync::Arc;
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub struct SelectStatement {
+	/// The foo,bar part in SELECT foo,bar FROM baz.
 	pub expr: Fields,
 	pub omit: Option<Idioms>,
 	#[revision(start = 2)]
 	pub only: bool,
+	/// The baz part in SELECT foo,bar FROM baz.
 	pub what: Values,
 	pub with: Option<With>,
 	pub cond: Option<Cond>,
