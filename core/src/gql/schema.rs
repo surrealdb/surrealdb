@@ -674,7 +674,7 @@ fn filter_from_type(
 	filter_name: String,
 	types: &mut Vec<Type>,
 ) -> Result<InputObject, GqlError> {
-	let ty = match &kind {
+	let ty = match unwrap_kind(&kind) {
 		Kind::Record(ts) => match ts.len() {
 			1 => TypeRef::named(filter_name_from_table(
 				ts.first().expect("ts should have exactly one element").as_str(),
@@ -720,6 +720,13 @@ fn unwrap_type(ty: TypeRef) -> TypeRef {
 	match ty {
 		TypeRef::NonNull(t) => unwrap_type(*t),
 		_ => ty,
+	}
+}
+
+fn unwrap_kind(kind: &Kind) -> &Kind {
+	match kind {
+		Kind::Option(inner) => &inner,
+		_ => kind,
 	}
 }
 
