@@ -34,14 +34,14 @@ impl Range {
 					return None;
 				};
 				let x = x.to_usize();
-				s.get(..x)?
+				s.get(..=x)?
 			}
 			Bound::Excluded(ref x) => {
 				let Value::Number(ref x) = x else {
 					return None;
 				};
 				let x = x.to_usize();
-				s.get(..=x)?
+				s.get(..x)?
 			}
 			Bound::Unbounded => s,
 		};
