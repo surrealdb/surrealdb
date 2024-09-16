@@ -565,6 +565,9 @@ impl QueryExecutor {
 		value: &Value,
 	) -> Result<ThingIterator, Error> {
 		if ix.cols.len() > 1 {
+			// If the index is unique and the index is a composite index,
+			// then we have the opportunity to iterate on the first column of the index
+			// and consider it as a standard index (rather than a unique one)
 			Ok(ThingIterator::IndexEqual(IndexEqualThingIterator::new(
 				irf,
 				opt.ns()?,
