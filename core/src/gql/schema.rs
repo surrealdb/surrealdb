@@ -98,8 +98,16 @@ pub async fn generate_schema(
 
 		let table_orderable_name = format!("_orderable_{tb_name}");
 		let mut table_orderable = Enum::new(&table_orderable_name).item("id");
+		table_orderable = table_orderable.description(format!(
+			"Generated from `{}` the fields which a query can be ordered by",
+			tb.name
+		));
 		let table_order_name = format!("_order_{tb_name}");
 		let table_order = InputObject::new(&table_order_name)
+			.description(format!(
+				"Generated from `{}` an object representing a query ordering",
+				tb.name
+			))
 			.field(InputValue::new("asc", TypeRef::named(&table_orderable_name)))
 			.field(InputValue::new("desc", TypeRef::named(&table_orderable_name)))
 			.field(InputValue::new("then", TypeRef::named(&table_order_name)));
@@ -242,6 +250,7 @@ pub async fn generate_schema(
 					})
 				},
 			)
+			.description(format!("Generated from table `{}`{}\nallows querying a table with filters", tb.name, if let Some(ref c) = &tb.comment {format!("\n{c}")} else {"".to_string()}))
 			.argument(limit_input!())
 			.argument(start_input!())
 			.argument(InputValue::new("order", TypeRef::named(&table_order_name)))
@@ -285,6 +294,15 @@ pub async fn generate_schema(
 					})
 				},
 			)
+			.description(format!(
+				"Generated from table `{}`{}\nallows querying a single record in a table by id",
+				tb.name,
+				if let Some(ref c) = &tb.comment {
+					format!("\n{c}")
+				} else {
+					"".to_string()
+				}
+			))
 			.argument(id_input!()),
 		);
 
@@ -371,6 +389,7 @@ pub async fn generate_schema(
 				}
 			})
 		})
+		.description(format!("allows fetching arbitrary records"))
 		.argument(id_input!()),
 	);
 
