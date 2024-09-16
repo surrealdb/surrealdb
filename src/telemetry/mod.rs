@@ -97,6 +97,8 @@ impl Builder {
 }
 
 pub fn shutdown() -> Result<(), Error> {
+	// Output information to logs
+	trace!("Shutting down telemetry service");
 	// Flush all telemetry data and block until done
 	opentelemetry::global::shutdown_tracer_provider();
 	// Everything ok

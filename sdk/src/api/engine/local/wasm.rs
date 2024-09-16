@@ -190,9 +190,10 @@ pub(crate) async fn run_router(
 			}
 		}
 	}
-
 	// Shutdown and stop closed tasks
 	canceller.cancel();
 	// Wait for background tasks to finish
-	tasks.resolve().await.unwrap();
+	let _ = tasks.resolve().await;
+	// Delete this node from the cluster
+	let _ = kvs.delete_node(kvs.id()).await;
 }

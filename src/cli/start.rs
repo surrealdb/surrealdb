@@ -220,11 +220,13 @@ pub async fn init(
 	// Start the node agent
 	let nodetasks = tasks::init(datastore.clone(), canceller.clone(), &CF.get().unwrap().engine);
 	// Start the web server
-	net::init(datastore, canceller.clone()).await?;
+	net::init(datastore.clone(), canceller.clone()).await?;
 	// Shutdown and stop closed tasks
 	canceller.cancel();
 	// Wait for background tasks to finish
 	nodetasks.resolve().await?;
+	// Delete this node from the cluster
+	datastore.delete_node(datastore.id()).await?;
 	// All ok
 	Ok(())
 }
