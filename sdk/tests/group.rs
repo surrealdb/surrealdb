@@ -1,6 +1,7 @@
 mod parse;
 use parse::Parse;
 mod helpers;
+use crate::helpers::Test;
 use helpers::new_ds;
 use helpers::skip_ok;
 use surrealdb::dbs::Session;
@@ -743,16 +744,15 @@ async fn select_count_group_all() -> Result<(), Error> {
 		CREATE table CONTENT { bar: "world"};
 		SELECT COUNT() FROM table GROUP ALL EXPLAIN;
 		SELECT COUNT() FROM table GROUP ALL;
+		SELECT COUNT() FROM table EXPLAIN;
+		SELECT COUNT() FROM table;
 	"#;
-	let dbs = new_ds().await?;
-	let ses = Session::owner().with_ns("test").with_db("test");
-	let mut res = &mut dbs.execute(sql, &ses, None).await?;
-	assert_eq!(res.len(), 5);
+	let mut t = Test::new(sql).await?;
+	t.expect_size(7)?;
 	//
-	skip_ok(&mut res, 3)?;
+	t.skip_ok(3)?;
 	//
-	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	t.expect_val(
 		r#"[
 				{
 					detail: {
@@ -772,18 +772,45 @@ async fn select_count_group_all() -> Result<(), Error> {
 					operation: 'Collector'
 				}
 			]"#,
-	);
-	assert_eq!(format!("{tmp:#}"), format!("{val:#}"));
+	)?;
 	//
-	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	t.expect_val(
 		r#"[
 					{
 						count: 3
 					}
 				]"#,
-	);
-	assert_eq!(format!("{tmp:#}"), format!("{val:#}"));
+	)?;
 	//
+	t.expect_val(
+		r#"[
+					{
+						detail: {
+							table: 'table'
+						},
+						operation: 'Iterate Table Keys'
+					},
+					{
+						detail: {
+							type: 'Memory'
+						},
+						operation: 'Collector'
+					}
+				]"#,
+	)?;
+	//
+	t.expect_val(
+		r#"[
+				{
+					count: 1
+				},
+				{
+					count: 1
+				},
+				{
+					count: 1
+				}
+			]"#,
+	)?;
 	Ok(())
 }
