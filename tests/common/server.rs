@@ -159,7 +159,6 @@ pub struct StartServerArguments {
 	pub auth: bool,
 	pub tls: bool,
 	pub wait_is_ready: bool,
-	pub tick_interval: time::Duration,
 	pub temporary_directory: Option<String>,
 	pub args: String,
 	pub vars: Option<HashMap<String, String>>,
@@ -172,7 +171,6 @@ impl Default for StartServerArguments {
 			auth: true,
 			tls: false,
 			wait_is_ready: true,
-			tick_interval: time::Duration::new(1, 0),
 			temporary_directory: None,
 			args: "".to_string(),
 			vars: None,
@@ -247,7 +245,6 @@ pub async fn start_server(
 		auth,
 		tls,
 		wait_is_ready,
-		tick_interval,
 		temporary_directory,
 		args,
 		vars,
@@ -272,11 +269,6 @@ pub async fn start_server(
 
 	if !auth {
 		extra_args.push_str(" --unauthenticated");
-	}
-
-	if !tick_interval.is_zero() {
-		let sec = tick_interval.as_secs();
-		extra_args.push_str(format!(" --tick-interval {sec}s").as_str());
 	}
 
 	if let Some(path) = temporary_directory {
