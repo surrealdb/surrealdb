@@ -53,8 +53,9 @@ struct DbsCapabilities {
 	allow_guests: bool,
 
 	#[arg(
-		help = "Allow execution of all functions. Optionally, you can provide a comma-separated list of function names to allow",
-		long_help = r#"Allow execution of functions. Optionally, you can provide a comma-separated list of function names to allow.
+		help = "Allow execution of all functions except for functions that are specifically denied. Alternatively, you can provide a comma-separated list of function names to allow",
+		long_help = r#"Allow execution of all functions except for functions that are specifically denied. Alternatively, you can provide a comma-separated list of function names to allow
+Specifically denied functions and function families prevail over any other allowed function execution.
 Function names must be in the form <family>[::<name>]. For example:
  - 'http' or 'http::*' -> Include all functions in the 'http' family
  - 'http::get' -> Include only the 'get' function in the 'http' family
@@ -67,8 +68,9 @@ Function names must be in the form <family>[::<name>]. For example:
 	allow_funcs: Option<Targets<FuncTarget>>,
 
 	#[arg(
-		help = "Allow all outbound network access. Optionally, you can provide a comma-separated list of targets to allow",
-		long_help = r#"Allow all outbound network access. Optionally, you can provide a comma-separated list of targets to allow.
+		help = "Allow all outbound network access except for network targets that are specifically denied. Alternatively, you can provide a comma-separated list of network targets to allow",
+		long_help = r#"Allow all outbound network access except for network targets that are specifically denied. Alternatively, you can provide a comma-separated list of network targets to allow
+Specifically denied network targets prevail over any other allowed outbound network access.
 Targets must be in the form of <host>[:<port>], <ipv4|ipv6>[/<mask>]. For example:
  - 'surrealdb.com', '127.0.0.1' or 'fd00::1' -> Match outbound connections to these hosts on any port
  - 'surrealdb.com:80', '127.0.0.1:80' or 'fd00::1:80' -> Match outbound connections to these hosts on port 80
