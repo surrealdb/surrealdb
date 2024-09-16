@@ -105,6 +105,11 @@ impl PlanBuilder {
 				return false;
 			}
 		}
+		if let Some(p) = p.order {
+			if !p.is_empty() {
+				return false;
+			}
+		}
 		true
 	}
 
