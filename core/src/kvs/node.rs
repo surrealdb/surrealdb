@@ -123,7 +123,7 @@ impl Datastore {
 		Ok(())
 	}
 
-	/// Cleans up nodes which are no longer in this cluster.
+	/// Removes and cleans up nodes which are no longer in this cluster.
 	///
 	/// This function should be run periodically at an interval.
 	///
@@ -131,7 +131,7 @@ impl Datastore {
 	/// When a matching node is found, all node queries, and table queries are
 	/// garbage collected, before the node itself is completely deleted.
 	#[instrument(err, level = "trace", target = "surrealdb::core::kvs::node", skip(self))]
-	pub async fn cleanup_nodes(&self) -> Result<(), Error> {
+	pub async fn remove_nodes(&self) -> Result<(), Error> {
 		// Log when this method is run
 		trace!(target: TARGET, "Cleaning up archived nodes in the cluster");
 		// Fetch all of the archived nodes

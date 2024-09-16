@@ -14,7 +14,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 use surrealdb::engine::any::IntoEndpoint;
-use surrealdb::engine::tasks::start_tasks;
+use surrealdb::engine::tasks;
 use surrealdb::options::EngineOptions;
 use tokio_util::sync::CancellationToken;
 
@@ -180,26 +180,22 @@ pub async fn init(
 		crt,
 		key,
 	});
-	// This is the cancellation token propagated down to
-	// all the async functions that needs to be stopped gracefully.
-	let ct = CancellationToken::new();
+	// Get the options
+	let opt = &config::CF.get().unwrap().engine.unwrap_or_default();
 	// Initiate environment
 	env::init().await?;
+	// Create a token to cancel tasks
+	let canceller = CancellationToken::new();
 	// Start the datastore
-	let ds = Arc::new(dbs::init(dbs).await?);
+	let datastore = Arc::new(dbs::init(dbs).await?);
 	// Start the node agent
-	let (tasks, task_chans) =
-		start_tasks(&config::CF.get().unwrap().engine.unwrap_or_default(), ds.clone());
+	let nodetasks = tasks::init(datastore.clone(), canceller.clone(), &opt);
 	// Start the web server
-	net::init(ds, ct.clone()).await?;
+	net::init(datastore, canceller.clone()).await?;
 	// Shutdown and stop closed tasks
-	task_chans.into_iter().for_each(|chan| {
-		if chan.send(()).is_err() {
-			error!("Failed to send shutdown signal to task");
-		}
-	});
-	ct.cancel();
-	tasks.resolve().await?;
+	canceller.cancel();
+	// Wait for background tasks to finish
+	nodetasks.resolve().await?;
 	// All ok
 	Ok(())
 }

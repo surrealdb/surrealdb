@@ -88,7 +88,7 @@ async fn writing_ts_again_results_in_following_ts() {
 	assert_eq!(scanned[1].0, crate::key::database::ts::new("myns", "mydb", 1).encode().unwrap());
 
 	// Repeating tick
-	ds.tick_at(1).await.unwrap();
+	ds.changefeed_process_at(1).await.unwrap();
 
 	// Validate
 	let mut tx = ds.transaction(Write, Optimistic).await.unwrap().inner();

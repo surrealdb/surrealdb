@@ -36,7 +36,6 @@ use std::{
 	marker::PhantomData,
 	mem,
 	sync::Arc,
-	time::Duration,
 };
 use surrealdb_core::{
 	dbs::{Response, Session},
@@ -82,8 +81,6 @@ use super::resource_to_values;
 pub(crate) mod native;
 #[cfg(target_arch = "wasm32")]
 pub(crate) mod wasm;
-
-const DEFAULT_TICK_INTERVAL: Duration = Duration::from_secs(10);
 
 /// In-memory database
 ///
