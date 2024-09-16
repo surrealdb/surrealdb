@@ -424,19 +424,20 @@ impl MutableContext {
 	#[cfg(feature = "http")]
 	pub fn check_allowed_net(&self, target: &Url) -> Result<(), Error> {
 		match target.host() {
-			Some(host)
-				if self.capabilities.allows_network_target(&NetTarget::Host(
+			Some(host) => {
+				if !self.capabilities.allows_network_target(&NetTarget::Host(
 					host.to_owned(),
 					target.port_or_known_default(),
-				)) =>
-			{
-				trace!("Capabilities allowed outgoing network connection, target '{target}'");
+				)) {
+					warn!(
+						"Capabilities denied outgoing network connection attempt, target: '{host}'"
+					);
+					return Err(Error::NetTargetNotAllowed(target.to_string()));
+				}
+				trace!("Capabilities allowed outgoing network connection, target: '{host}'");
 				Ok(())
 			}
-			_ => {
-				warn!("Capabilities denied outgoing network connection attempt, target '{target}'");
-				Err(Error::NetTargetNotAllowed(target.to_string()))
-			}
+			_ => Err(Error::InvalidUrl(target.to_string())),
 		}
 	}
 }
