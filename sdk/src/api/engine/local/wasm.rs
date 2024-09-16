@@ -116,8 +116,17 @@ pub(crate) async fn run_router(
 	let canceller = CancellationToken::new();
 
 	let mut opt = EngineOptions::default();
-	if let Some(interval) = address.config.tick_interval {
-		opt.tick_interval = interval;
+	if let Some(interval) = address.config.node_membership_refresh_interval {
+		opt.node_membership_refresh_interval = interval;
+	}
+	if let Some(interval) = address.config.node_membership_check_interval {
+		opt.node_membership_check_interval = interval;
+	}
+	if let Some(interval) = address.config.node_membership_cleanup_interval {
+		opt.node_membership_cleanup_interval = interval;
+	}
+	if let Some(interval) = address.config.changefeed_gc_interval {
+		opt.changefeed_gc_interval = interval;
 	}
 	let tasks = tasks::init(kvs.clone(), canceller.clone(), &opt);
 

@@ -55,7 +55,7 @@ fn spawn_task_node_membership_refresh(
 	opts: &EngineOptions,
 ) -> Task {
 	// Get the delay interval from the config
-	let delay = opts.tick_interval;
+	let delay = opts.node_membership_refresh_interval;
 	// Spawn a future
 	Box::pin(spawn(async move {
 		// Log the interval frequency
@@ -87,7 +87,7 @@ fn spawn_task_node_membership_check(
 	opts: &EngineOptions,
 ) -> Task {
 	// Get the delay interval from the config
-	let delay = opts.tick_interval;
+	let delay = opts.node_membership_check_interval;
 	// Spawn a future
 	Box::pin(spawn(async move {
 		// Log the interval frequency
@@ -119,7 +119,7 @@ fn spawn_task_node_membership_cleanup(
 	opts: &EngineOptions,
 ) -> Task {
 	// Get the delay interval from the config
-	let delay = opts.tick_interval;
+	let delay = opts.node_membership_cleanup_interval;
 	// Spawn a future
 	Box::pin(spawn(async move {
 		// Log the interval frequency
@@ -151,7 +151,7 @@ fn spawn_task_changefeed_cleanup(
 	opts: &EngineOptions,
 ) -> Task {
 	// Get the delay interval from the config
-	let delay = opts.tick_interval;
+	let delay = opts.changefeed_gc_interval;
 	// Spawn a future
 	Box::pin(spawn(async move {
 		// Log the interval frequency

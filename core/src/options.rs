@@ -7,20 +7,38 @@ use std::time::Duration;
 #[doc(hidden)]
 #[non_exhaustive]
 pub struct EngineOptions {
-	pub tick_interval: Duration,
+	pub node_membership_refresh_interval: Duration,
+	pub node_membership_check_interval: Duration,
+	pub node_membership_cleanup_interval: Duration,
+	pub changefeed_gc_interval: Duration,
 }
 
 impl Default for EngineOptions {
 	fn default() -> Self {
 		Self {
-			tick_interval: Duration::from_secs(10),
+			node_membership_refresh_interval: Duration::from_secs(3),
+			node_membership_check_interval: Duration::from_secs(15),
+			node_membership_cleanup_interval: Duration::from_secs(300),
+			changefeed_gc_interval: Duration::from_secs(10),
 		}
 	}
 }
 
 impl EngineOptions {
-	pub fn with_tick_interval(mut self, tick_interval: Duration) -> Self {
-		self.tick_interval = tick_interval;
+	pub fn with_node_membership_refresh_interval(mut self, interval: Duration) -> Self {
+		self.node_membership_refresh_interval = interval;
+		self
+	}
+	pub fn with_node_membership_check_interval(mut self, interval: Duration) -> Self {
+		self.node_membership_check_interval = interval;
+		self
+	}
+	pub fn with_node_membership_cleanup_interval(mut self, interval: Duration) -> Self {
+		self.node_membership_cleanup_interval = interval;
+		self
+	}
+	pub fn with_changefeed_gc_interval(mut self, interval: Duration) -> Self {
+		self.changefeed_gc_interval = interval;
 		self
 	}
 }

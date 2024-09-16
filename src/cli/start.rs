@@ -176,7 +176,8 @@ pub async fn init(
 		user,
 		pass,
 		no_identification_headers,
-		engine: Some(EngineOptions::default().with_tick_interval(tick_interval)),
+		// engine: Some(EngineOptions::default().with_tick_interval(tick_interval)),
+		engine: Some(EngineOptions::default()),
 		crt,
 		key,
 	});
