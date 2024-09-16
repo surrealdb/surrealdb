@@ -24,7 +24,7 @@ impl Value {
 
 		// Loop over the path.
 		// If the we just need to select a sub section of a value we update this to point to the
-		// new subsection of the value. Otherwise we recurse into fetch and then immediatily
+		// new subsection of the value. Otherwise we call into fetch again and then immediately
 		// return.
 		// If we encounter a idiom application which does not make sense, like `(1).foo` just
 		// return Ok(())
@@ -60,8 +60,18 @@ impl Value {
 							.ok()?;
 						return Ok(());
 					}
-					Value::Array(_) => return Ok(()),
-					_ => break,
+					Value::Array(x) => {
+						// apply this path to every entry of the array.
+						stk.scope(|scope| {
+							let futs =
+								x.iter_mut().map(|v| scope.run(|stk| v.fetch(stk, ctx, opt, prev)));
+							try_join_all(futs)
+						})
+						.await?;
+						return Ok(());
+					}
+					// break her to be comp
+					_ => return Ok(()),
 				},
 				Part::Field(f) => match this {
 					Value::Object(o) => {
@@ -71,6 +81,7 @@ impl Value {
 						this = x;
 					}
 					Value::Array(x) => {
+						// apply this path to every entry of the array.
 						stk.scope(|scope| {
 							let futs =
 								x.iter_mut().map(|v| scope.run(|stk| v.fetch(stk, ctx, opt, prev)));
@@ -116,6 +127,7 @@ impl Value {
 				}
 				Part::Destructure(p) => match this {
 					Value::Array(x) => {
+						// apply this path to every entry of the array.
 						stk.scope(|scope| {
 							let futs =
 								x.iter_mut().map(|v| scope.run(|stk| v.fetch(stk, ctx, opt, prev)));
