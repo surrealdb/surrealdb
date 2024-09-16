@@ -279,8 +279,10 @@ fn check_capabilities_url(kvs: &Datastore, url: &str) -> Result<(), Error> {
 		}
 	};
 	if !kvs.allows_network_target(&target) {
+		warn!("Capabilities denied outgoing network connection attempt, target: '{target}'");
 		return Err(Error::InvalidUrl(url.to_string()));
 	}
+	trace!("Capabilities allowed outgoing network connection, target: '{target}'");
 
 	Ok(())
 }

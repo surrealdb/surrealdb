@@ -403,32 +403,39 @@ impl MutableContext {
 	#[allow(dead_code)]
 	pub fn check_allowed_scripting(&self) -> Result<(), Error> {
 		if !self.capabilities.allows_scripting() {
+			warn!("Capabilities denied scripting attempt");
 			return Err(Error::ScriptingNotAllowed);
 		}
+		trace!("Capabilities allowed scripting");
 		Ok(())
 	}
 
 	/// Check if a function is allowed
 	pub fn check_allowed_function(&self, target: &str) -> Result<(), Error> {
 		if !self.capabilities.allows_function_name(target) {
+			warn!("Capabilities denied function execution attempt, target: '{target}'");
 			return Err(Error::FunctionNotAllowed(target.to_string()));
 		}
+		trace!("Capabilities allowed function execution, target: '{target}'");
 		Ok(())
 	}
 
 	/// Check if a network target is allowed
 	#[cfg(feature = "http")]
-	pub fn check_allowed_net(&self, target: &Url) -> Result<(), Error> {
-		match target.host() {
-			Some(host)
-				if self.capabilities.allows_network_target(&NetTarget::Host(
-					host.to_owned(),
-					target.port_or_known_default(),
-				)) =>
-			{
+	pub fn check_allowed_net(&self, url: &Url) -> Result<(), Error> {
+		match url.host() {
+			Some(host) => {
+				let target = &NetTarget::Host(host.to_owned(), url.port_or_known_default());
+				if !self.capabilities.allows_network_target(target) {
+					warn!(
+						"Capabilities denied outgoing network connection attempt, target: '{target}'"
+					);
+					return Err(Error::NetTargetNotAllowed(target.to_string()));
+				}
+				trace!("Capabilities allowed outgoing network connection, target: '{target}'");
 				Ok(())
 			}
-			_ => Err(Error::NetTargetNotAllowed(target.to_string())),
+			_ => Err(Error::InvalidUrl(url.to_string())),
 		}
 	}
 }
