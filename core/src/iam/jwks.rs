@@ -225,10 +225,12 @@ pub(super) async fn config(
 // Attempts to find a relevant JWK object inside a JWKS object fetched from the remote location
 async fn find_jwk_from_url(kvs: &Datastore, url: &str, kid: &str) -> Result<Jwk, Error> {
 	// Check that the datastore capabilities allow connections to the URL host
-	if let Err(err) = check_capabilities_url(kvs, url) {
+	if let Err(err) = kvs.check_capabilities_url(kvs, url) {
+		warn!("Capabilities denied outgoing network connection attempt, target: '{url}'");
 		warn!("Network access to JWKS location is not allowed: '{}'", err);
 		return Err(Error::InvalidAuth); // Return opaque error
 	}
+	trace!("Capabilities allowed outgoing network connection, target: '{url}'");
 
 	// Retrieve JWKS cache
 	let cache = kvs.jwks_cache();
