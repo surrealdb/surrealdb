@@ -189,7 +189,7 @@ pub async fn init(
 	// Start the datastore
 	let datastore = Arc::new(dbs::init(dbs).await?);
 	// Start the node agent
-	let nodetasks = tasks::init(datastore.clone(), canceller.clone(), &opt);
+	let nodetasks = tasks::init(datastore.clone(), canceller.clone(), opt);
 	// Start the web server
 	net::init(datastore, canceller.clone()).await?;
 	// Shutdown and stop closed tasks

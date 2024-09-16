@@ -1,6 +1,5 @@
 use crate::err::Error;
 use crate::key::change;
-#[cfg(debug_assertions)]
 use crate::key::debug::Sprintable;
 use crate::kvs::Transaction;
 use crate::vs;
