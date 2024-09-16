@@ -273,7 +273,7 @@ pub async fn init(
 	}
 	// Warn about the impact of denying all capabilities
 	if capabilities.get_deny_all() {
-		warn!("⚠️ We recommend denying all capabilities by default. However, beware that any new capabilities will also be denied.");
+		warn!("You are denying all capabilities by default. Although this is recommended, beware that any new capabilities will also be denied.");
 	}
 	// Convert the capabilities
 	let capabilities = capabilities.into();
