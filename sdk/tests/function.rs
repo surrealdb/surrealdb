@@ -5569,7 +5569,7 @@ async fn function_type_table() -> Result<(), Error> {
 	let sql = r#"
 		RETURN type::table("person");
 		RETURN type::table("animal");
-		RETURN type::table("person:one);
+		RETURN type::table("person:one");
 	"#;
 	let mut test = Test::new(sql).await?;
 	//
