@@ -758,7 +758,7 @@ async fn select_count_group_all() -> Result<(), Error> {
 					detail: {
 						table: 'table'
 					},
-					operation: 'Iterate Keys'
+					operation: 'Iterate Table Keys'
 				},
 				{
 					detail: {

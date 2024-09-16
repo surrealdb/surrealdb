@@ -27,7 +27,7 @@ const TARGET: &str = "surrealdb::core::dbs";
 #[derive(Clone)]
 pub(crate) enum Iterable {
 	Value(Value),
-	Table(Table),
+	Table(Table, bool), // true = keys only
 	Thing(Thing),
 	TableRange(String, IdRange),
 	Edges(Edges),
@@ -126,7 +126,7 @@ impl Iterator {
 					}
 					_ => {
 						// Ingest the table for scanning
-						self.ingest(Iterable::Table(v))
+						self.ingest(Iterable::Table(v, false))
 					}
 				},
 				// There is no data clause so create a record id
@@ -137,7 +137,7 @@ impl Iterator {
 					}
 					_ => {
 						// Ingest the table for scanning
-						self.ingest(Iterable::Table(v))
+						self.ingest(Iterable::Table(v, false))
 					}
 				},
 			},

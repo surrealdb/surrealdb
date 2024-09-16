@@ -16,6 +16,7 @@ use crate::sql::{Edges, Table, Thing, Value};
 use channel::Sender;
 use futures::StreamExt;
 use reblessive::tree::Stk;
+use std::borrow::Cow;
 use std::ops::Bound;
 use std::vec;
 
@@ -55,7 +56,7 @@ impl Iterable {
 
 	fn iteration_stage_check(&self, ctx: &Context) -> bool {
 		match self {
-			Iterable::Table(tb) | Iterable::Index(tb, _) => {
+			Iterable::Table(tb, _) | Iterable::Index(tb, _) => {
 				if let Some(IterationStage::BuildKnn) = ctx.get_iteration_stage() {
 					if let Some(qp) = ctx.get_query_planner() {
 						if let Some(exe) = qp.get_query_executor(tb) {
@@ -111,6 +112,19 @@ impl<'a> Processor<'a> {
 		Ok(())
 	}
 
+	fn check_query_planner_context<'b>(ctx: &'b Context, table: &'b Table) -> Cow<'b, Context> {
+		if let Some(qp) = ctx.get_query_planner() {
+			if let Some(exe) = qp.get_query_executor(&table.0) {
+				// We set the query executor matching the current table in the Context
+				// Avoiding search in the hashmap of the query planner for each doc
+				let mut ctx = MutableContext::new(ctx);
+				ctx.set_query_executor(exe.clone());
+				return Cow::Owned(ctx.freeze());
+			}
+		}
+		Cow::Borrowed(ctx)
+	}
+
 	async fn process_iterable(
 		&mut self,
 		stk: &mut Stk,
@@ -128,18 +142,13 @@ impl<'a> Processor<'a> {
 					self.process_range(stk, ctx, opt, stm, tb, v).await?
 				}
 				Iterable::Edges(e) => self.process_edge(stk, ctx, opt, stm, e).await?,
-				Iterable::Table(v) => {
-					if let Some(qp) = ctx.get_query_planner() {
-						if let Some(exe) = qp.get_query_executor(&v.0) {
-							// We set the query executor matching the current table in the Context
-							// Avoiding search in the hashmap of the query planner for each doc
-							let mut ctx = MutableContext::new(ctx);
-							ctx.set_query_executor(exe.clone());
-							let ctx = ctx.freeze();
-							return self.process_table(stk, &ctx, opt, stm, &v).await;
-						}
+				Iterable::Table(v, keys_only) => {
+					let ctx = Self::check_query_planner_context(ctx, &v);
+					if keys_only {
+						self.process_table_keys(stk, &ctx, opt, stm, &v).await?
+					} else {
+						self.process_table(stk, &ctx, opt, stm, &v).await?
 					}
-					self.process_table(stk, ctx, opt, stm, &v).await?
 				}
 				Iterable::Index(t, irf) => {
 					if let Some(qp) = ctx.get_query_planner() {
@@ -333,6 +342,45 @@ impl<'a> Processor<'a> {
 				rid: Some(rid.into()),
 				ir: None,
 				val,
+			};
+			self.process(stk, ctx, opt, stm, pro).await?;
+		}
+		// Everything ok
+		Ok(())
+	}
+
+	async fn process_table_keys(
+		&mut self,
+		stk: &mut Stk,
+		ctx: &Context,
+		opt: &Options,
+		stm: &Statement<'_>,
+		v: &Table,
+	) -> Result<(), Error> {
+		// Get the transaction
+		let txn = ctx.tx();
+		// Check that the table exists
+		txn.check_ns_db_tb(opt.ns()?, opt.db()?, v, opt.strict).await?;
+		// Prepare the start and end keys
+		let beg = thing::prefix(opt.ns()?, opt.db()?, v);
+		let end = thing::suffix(opt.ns()?, opt.db()?, v);
+		// Create a new iterable range
+		let mut stream = txn.stream_keys(beg..end);
+		// Loop until no more entries
+		while let Some(res) = stream.next().await {
+			// Check if the context is finished
+			if ctx.is_done() {
+				break;
+			}
+			// Parse the data from the store
+			let k = res?;
+			let key: thing::Thing = (&k).into();
+			let rid = Thing::from((key.tb, key.id));
+			// Process the record
+			let pro = Processed {
+				rid: Some(rid.into()),
+				ir: None,
+				val: Operable::Value(Value::None.into()),
 			};
 			self.process(stk, ctx, opt, stm, pro).await?;
 		}

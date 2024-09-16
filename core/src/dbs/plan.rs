@@ -93,8 +93,13 @@ impl ExplainItem {
 				name: "Iterate Value".into(),
 				details: vec![("value", v.to_owned())],
 			},
-			Iterable::Table(t) => Self {
-				name: "Iterate Table".into(),
+			Iterable::Table(t, keys_only) => Self {
+				name: if *keys_only {
+					"Iterate Table"
+				} else {
+					"Iterate Table Keys"
+				}
+				.into(),
 				details: vec![("table", Value::from(t.0.to_owned()))],
 			},
 			Iterable::Thing(t) => Self {

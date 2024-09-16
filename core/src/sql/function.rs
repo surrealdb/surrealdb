@@ -180,6 +180,10 @@ impl Function {
 			_ => OptimisedAggregate::None,
 		}
 	}
+
+	pub(crate) fn is_count(&self) -> bool {
+		matches!(self, Self::Normal(f, _) if f == "count")
+	}
 }
 
 impl Function {
