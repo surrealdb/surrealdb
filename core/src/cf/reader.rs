@@ -1,6 +1,7 @@
 use crate::cf::{ChangeSet, DatabaseMutation, TableMutations};
 use crate::err::Error;
 use crate::key::change;
+#[cfg(debug_assertions)]
 use crate::key::debug::Sprintable;
 use crate::kvs::Transaction;
 use crate::sql::statements::show::ShowSince;
@@ -27,7 +28,7 @@ pub async fn read(
 		ShowSince::Versionstamp(x) => change::prefix_ts(ns, db, vs::u64_to_versionstamp(x)),
 		ShowSince::Timestamp(x) => {
 			let ts = x.0.timestamp() as u64;
-			let vs = tx.lock().await.get_versionstamp_from_timestamp(ts, ns, db, true).await?;
+			let vs = tx.lock().await.get_versionstamp_from_timestamp(ts, ns, db).await?;
 			match vs {
 				Some(vs) => change::prefix_ts(ns, db, vs),
 				None => {

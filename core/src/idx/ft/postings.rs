@@ -4,7 +4,7 @@ use crate::idx::ft::terms::TermId;
 use crate::idx::trees::bkeys::TrieKeys;
 use crate::idx::trees::btree::{BState, BStatistics, BTree, BTreeStore};
 use crate::idx::trees::store::{IndexStores, TreeNodeProvider};
-use crate::idx::{IndexKeyBase, VersionedSerdeState};
+use crate::idx::{IndexKeyBase, VersionedStore};
 use crate::kvs::{Key, Transaction, TransactionType};
 
 pub(super) type TermFrequency = u64;
@@ -28,7 +28,7 @@ impl Postings {
 	) -> Result<Self, Error> {
 		let state_key: Key = index_key_base.new_bp_key(None);
 		let state: BState = if let Some(val) = tx.get(state_key.clone(), None).await? {
-			BState::try_from_val(val)?
+			VersionedStore::try_from(val)?
 		} else {
 			BState::new(order)
 		};
@@ -87,7 +87,7 @@ impl Postings {
 	pub(super) async fn finish(&mut self, tx: &Transaction) -> Result<(), Error> {
 		if let Some(new_cache) = self.store.finish(tx).await? {
 			let state = self.btree.inc_generation();
-			tx.set(self.state_key.clone(), state.try_to_val()?).await?;
+			tx.set(self.state_key.clone(), VersionedStore::try_into(state)?, None).await?;
 			self.ixs.advance_cache_btree_trie(new_cache);
 		}
 		Ok(())

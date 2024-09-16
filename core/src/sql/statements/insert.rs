@@ -1,17 +1,17 @@
-use crate::ctx::Context;
+use crate::ctx::{Context, MutableContext};
 use crate::dbs::{Iterable, Iterator, Options, Statement};
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::sql::paths::IN;
 use crate::sql::paths::OUT;
-use crate::sql::{Data, Id, Output, Table, Thing, Timeout, Value};
+use crate::sql::{Data, Id, Output, Table, Thing, Timeout, Value, Version};
 use derive::Store;
 use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
-#[revisioned(revision = 2)]
+#[revisioned(revision = 3)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
@@ -25,6 +25,8 @@ pub struct InsertStatement {
 	pub parallel: bool,
 	#[revision(start = 2)]
 	pub relation: bool,
+	#[revision(start = 3)]
+	pub version: Option<Version>,
 }
 
 impl InsertStatement {
@@ -44,12 +46,23 @@ impl InsertStatement {
 		opt.valid_for_db()?;
 		// Create a new iterator
 		let mut i = Iterator::new();
+		// Propagate the version to the underlying datastore
+		let version = self.version.as_ref().map(|v| v.to_u64());
 		// Ensure futures are stored
-		let opt = &opt.new_with_futures(false).with_projections(false);
+		let opt = &opt.new_with_futures(false).with_projections(false).with_version(version);
+		// Check if there is a timeout
+		let ctx = match self.timeout.as_ref() {
+			Some(timeout) => {
+				let mut ctx = MutableContext::new(ctx);
+				ctx.add_timeout(*timeout.0)?;
+				ctx.freeze()
+			}
+			None => ctx.clone(),
+		};
 		// Parse the INTO expression
 		let into = match &self.into {
 			None => None,
-			Some(into) => match into.compute(stk, ctx, opt, doc).await? {
+			Some(into) => match into.compute(stk, &ctx, opt, doc).await? {
 				Value::Table(into) => Some(into),
 				v => {
 					return Err(Error::InsertStatement {
@@ -67,8 +80,8 @@ impl InsertStatement {
 					let mut o = Value::base();
 					// Set each field from the expression
 					for (k, v) in v.iter() {
-						let v = v.compute(stk, ctx, opt, None).await?;
-						o.set(stk, ctx, opt, k, v).await?;
+						let v = v.compute(stk, &ctx, opt, None).await?;
+						o.set(stk, &ctx, opt, k, v).await?;
 					}
 					// Specify the new table record id
 					let id = gen_id(&o, &into)?;
@@ -78,7 +91,7 @@ impl InsertStatement {
 			}
 			// Check if this is a modern statement
 			Data::SingleExpression(v) => {
-				let v = v.compute(stk, ctx, opt, doc).await?;
+				let v = v.compute(stk, &ctx, opt, doc).await?;
 				match v {
 					Value::Array(v) => {
 						for v in v {
@@ -101,12 +114,18 @@ impl InsertStatement {
 					}
 				}
 			}
-			_ => unreachable!(),
+			v => return Err(fail!("Unknown data clause type in INSERT statement: {v:?}")),
 		}
 		// Assign the statement
 		let stm = Statement::from(self);
+		// Process the statement
+		let res = i.output(stk, &ctx, opt, &stm).await?;
+		// Catch statement timeout
+		if ctx.is_timedout() {
+			return Err(Error::QueryTimedout);
+		}
 		// Output the results
-		i.output(stk, ctx, opt, &stm).await
+		Ok(res)
 	}
 }
 
@@ -122,11 +141,14 @@ impl fmt::Display for InsertStatement {
 		if let Some(into) = &self.into {
 			write!(f, " INTO {}", into)?;
 		}
-		write!(f, "{}", self.data)?;
+		write!(f, " {}", self.data)?;
 		if let Some(ref v) = self.update {
 			write!(f, " {v}")?
 		}
 		if let Some(ref v) = self.output {
+			write!(f, " {v}")?
+		}
+		if let Some(ref v) = self.version {
 			write!(f, " {v}")?
 		}
 		if let Some(ref v) = self.timeout {

@@ -14,7 +14,6 @@ pub struct ExportCommandArguments {
 	#[arg(default_value = "-")]
 	#[arg(index = 1)]
 	file: String,
-
 	#[command(flatten)]
 	conn: DatabaseConnectionArguments,
 	#[command(flatten)]
@@ -42,10 +41,10 @@ pub async fn init(
 	}: ExportCommandArguments,
 ) -> Result<(), Error> {
 	// Initialize opentelemetry and logging
-	crate::telemetry::builder().with_log_level("error").init();
+	crate::telemetry::builder().with_log_level("info").init()?;
 
 	// If username and password are specified, and we are connecting to a remote SurrealDB server, then we need to authenticate.
-	// If we are connecting directly to a datastore (i.e. file://local.db or tikv://...), then we don't need to authenticate because we use an embedded (local) SurrealDB instance with auth disabled.
+	// If we are connecting directly to a datastore (i.e. surrealkv://local.skv or tikv://...), then we don't need to authenticate because we use an embedded (local) SurrealDB instance with auth disabled.
 	let client = if username.is_some()
 		&& password.is_some()
 		&& !endpoint.clone().into_endpoint()?.parse_kind()?.is_local()

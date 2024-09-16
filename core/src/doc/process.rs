@@ -28,6 +28,13 @@ impl Document {
 			};
 			// Setup a new document
 			let mut doc = Document::new(pro.rid, pro.ir, ins.0, ins.1);
+			// Optionally create a save point so we can roll back any upcoming changes
+			let is_save_point = if !stm.is_select() {
+				ctx.tx().lock().await.new_save_point().await;
+				true
+			} else {
+				false
+			};
 			// Process the statement
 			let res = match stm {
 				Statement::Select(_) => doc.select(stk, ctx, opt, stm).await,
@@ -37,7 +44,7 @@ impl Document {
 				Statement::Relate(_) => doc.relate(stk, ctx, opt, stm).await,
 				Statement::Delete(_) => doc.delete(stk, ctx, opt, stm).await,
 				Statement::Insert(_) => doc.insert(stk, ctx, opt, stm).await,
-				_ => unreachable!(),
+				stm => return Err(fail!("Unexpected statement type: {stm:?}")),
 			};
 			// Check the result
 			let res = match res {
@@ -45,6 +52,10 @@ impl Document {
 				// retry this request using a new ID, so
 				// we load the new record, and reprocess
 				Err(Error::RetryWithId(v)) => {
+					// We roll back any change following the save point
+					if is_save_point {
+						ctx.tx().lock().await.rollback_to_save_point().await?;
+					}
 					// Fetch the data from the store
 					let key = crate::key::thing::new(opt.ns()?, opt.db()?, &v.tb, &v.id);
 					let val = ctx.tx().get(key, None).await?;
@@ -65,16 +76,34 @@ impl Document {
 					// Go to top of loop
 					continue;
 				}
+				Err(Error::Ignore) => Err(Error::Ignore),
 				// If any other error was received, then let's
 				// pass that error through and return an error
-				Err(e) => Err(e),
+				Err(e) => {
+					// We roll back any change following the save point
+					if is_save_point {
+						ctx.tx().lock().await.rollback_to_save_point().await?;
+					}
+					Err(e)
+				}
 				// Otherwise the record creation succeeded
-				Ok(v) => Ok(v),
+				Ok(v) => {
+					// The statement is successful, we can release the savepoint
+					if is_save_point {
+						ctx.tx().lock().await.release_last_save_point().await?;
+					}
+					Ok(v)
+				}
 			};
 			// Send back the result
 			return res;
 		}
-		// We should never get here
-		unreachable!()
+		// We shouldn't really reach this part, but if we
+		// did it was probably due to the fact that we
+		// encountered two Err::RetryWithId errors due to
+		// two separate UNIQUE index definitions, and it
+		// wasn't possible to detect which record was the
+		// correct one to be updated
+		Err(fail!("Internal error"))
 	}
 }

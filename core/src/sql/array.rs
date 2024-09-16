@@ -42,8 +42,20 @@ impl From<Vec<i32>> for Array {
 	}
 }
 
+impl From<Vec<f32>> for Array {
+	fn from(v: Vec<f32>) -> Self {
+		Self(v.into_iter().map(Value::from).collect())
+	}
+}
+
 impl From<Vec<f64>> for Array {
 	fn from(v: Vec<f64>) -> Self {
+		Self(v.into_iter().map(Value::from).collect())
+	}
+}
+
+impl From<Vec<usize>> for Array {
+	fn from(v: Vec<usize>) -> Self {
 		Self(v.into_iter().map(Value::from).collect())
 	}
 }
@@ -155,6 +167,11 @@ impl Array {
 
 	pub(crate) fn is_static(&self) -> bool {
 		self.iter().all(Value::is_static)
+	}
+
+	/// Validate that an Array contains only computed Values
+	pub fn validate_computed(&self) -> Result<(), Error> {
+		self.iter().try_for_each(|v| v.validate_computed())
 	}
 }
 

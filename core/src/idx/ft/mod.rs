@@ -21,7 +21,7 @@ use crate::idx::ft::termdocs::{TermDocs, TermsDocs};
 use crate::idx::ft::terms::{TermId, TermLen, Terms};
 use crate::idx::trees::btree::BStatistics;
 use crate::idx::trees::store::IndexStores;
-use crate::idx::{IndexKeyBase, VersionedSerdeState};
+use crate::idx::{IndexKeyBase, VersionedStore};
 use crate::kvs::Transaction;
 use crate::kvs::{Key, TransactionType};
 use crate::sql::index::SearchParams;
@@ -94,7 +94,7 @@ struct State {
 	doc_count: u64,
 }
 
-impl VersionedSerdeState for State {}
+impl VersionedStore for State {}
 
 impl FtIndex {
 	pub(crate) async fn new(
@@ -119,7 +119,7 @@ impl FtIndex {
 	) -> Result<Self, Error> {
 		let state_key: Key = index_key_base.new_bs_key();
 		let state: State = if let Some(val) = txn.get(state_key.clone(), None).await? {
-			State::try_from_val(val)?
+			VersionedStore::try_from(val)?
 		} else {
 			State::default()
 		};
@@ -334,7 +334,7 @@ impl FtIndex {
 		// Stores the term list for this doc_id
 		let mut val = Vec::new();
 		terms_ids.serialize_into(&mut val)?;
-		tx.set(term_ids_key, val).await?;
+		tx.set(term_ids_key, val, None).await?;
 
 		// Update the index state
 		self.state.total_docs_lengths += doc_length as u128;
@@ -343,7 +343,7 @@ impl FtIndex {
 		}
 
 		// Update the states
-		tx.set(self.state_key.clone(), self.state.try_to_val()?).await?;
+		tx.set(self.state_key.clone(), VersionedStore::try_into(&self.state)?, None).await?;
 		drop(tx);
 		Ok(())
 	}

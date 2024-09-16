@@ -52,7 +52,7 @@ where
 	) -> Result<StoredNode<N>, Error> {
 		match self {
 			Self::Write(w) => w.get_node_mut(tx, node_id).await,
-			_ => Err(Error::Unreachable("TreeStore::get_node_mut")),
+			_ => Err(fail!("TreeStore::get_node_mut")),
 		}
 	}
 
@@ -63,7 +63,7 @@ where
 	) -> Result<Arc<StoredNode<N>>, Error> {
 		match self {
 			Self::Read(r) => r.get_node(tx, node_id).await,
-			_ => Err(Error::Unreachable("TreeStore::get_node")),
+			_ => Err(fail!("TreeStore::get_node")),
 		}
 	}
 
@@ -77,7 +77,7 @@ where
 				let tx = ctx.tx();
 				r.get_node(&tx, node_id).await
 			}
-			_ => Err(Error::Unreachable("TreeStore::get_node_txn")),
+			_ => Err(fail!("TreeStore::get_node_txn")),
 		}
 	}
 
@@ -88,14 +88,14 @@ where
 	) -> Result<(), Error> {
 		match self {
 			Self::Write(w) => w.set_node(node, updated),
-			_ => Err(Error::Unreachable("TreeStore::set_node")),
+			_ => Err(fail!("TreeStore::set_node")),
 		}
 	}
 
 	pub(in crate::idx) fn new_node(&mut self, id: NodeId, node: N) -> Result<StoredNode<N>, Error> {
 		match self {
 			Self::Write(w) => Ok(w.new_node(id, node)),
-			_ => Err(Error::Unreachable("TreeStore::new_node")),
+			_ => Err(fail!("TreeStore::new_node")),
 		}
 	}
 
@@ -106,7 +106,7 @@ where
 	) -> Result<(), Error> {
 		match self {
 			Self::Write(w) => w.remove_node(node_id, node_key),
-			_ => Err(Error::Unreachable("TreeStore::remove_node")),
+			_ => Err(fail!("TreeStore::remove_node")),
 		}
 	}
 
@@ -161,7 +161,7 @@ impl TreeNodeProvider {
 	{
 		let val = node.n.try_into_val()?;
 		node.size = val.len() as u32;
-		tx.set(node.key.clone(), val).await?;
+		tx.set(node.key.clone(), val, None).await?;
 		Ok(())
 	}
 }
@@ -278,12 +278,13 @@ impl IndexStores {
 
 	pub(crate) async fn get_index_hnsw(
 		&self,
+		ctx: &Context,
 		opt: &Options,
 		ix: &DefineIndexStatement,
 		p: &HnswParams,
 	) -> Result<SharedHnswIndex, Error> {
 		let ikb = IndexKeyBase::new(opt.ns()?, opt.db()?, ix)?;
-		Ok(self.0.hnsw_indexes.get(&ikb, p).await)
+		self.0.hnsw_indexes.get(ctx, &ix.what, &ikb, p).await
 	}
 
 	pub(crate) async fn index_removed(
@@ -310,7 +311,7 @@ impl IndexStores {
 		ns: &str,
 		db: &str,
 	) -> Result<(), Error> {
-		for tb in tx.all_tb(ns, db).await?.iter() {
+		for tb in tx.all_tb(ns, db, None).await?.iter() {
 			self.table_removed(tx, ns, db, &tb.name).await?;
 		}
 		Ok(())

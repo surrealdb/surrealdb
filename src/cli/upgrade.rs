@@ -23,7 +23,7 @@ pub struct UpgradeCommandArguments {
 	/// Install the latest nightly version
 	#[arg(long, conflicts_with = "alpha", conflicts_with = "beta", conflicts_with = "version")]
 	nightly: bool,
-	/// Install the latest beta version
+	/// Install the latest alpha version
 	#[arg(long, conflicts_with = "nightly", conflicts_with = "beta", conflicts_with = "version")]
 	alpha: bool,
 	/// Install the latest beta version
@@ -88,7 +88,7 @@ pub(crate) fn parse_version(input: &str) -> Result<Version, Error> {
 
 pub async fn init(args: UpgradeCommandArguments) -> Result<(), Error> {
 	// Initialize opentelemetry and logging
-	crate::telemetry::builder().with_log_level("error").init();
+	crate::telemetry::builder().with_log_level("error").init()?;
 
 	// Upgrading overwrites the existing executable
 	let exe = std::env::current_exe()?;

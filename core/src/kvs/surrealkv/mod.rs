@@ -2,6 +2,7 @@
 
 use crate::err::Error;
 use crate::key::debug::Sprintable;
+use crate::kvs::savepoint::{SaveOperation, SavePointImpl, SavePoints, SavePrepare};
 use crate::kvs::Check;
 use crate::kvs::Key;
 use crate::kvs::Val;
@@ -26,6 +27,8 @@ pub struct Transaction {
 	check: Check,
 	/// The underlying datastore transaction
 	inner: Tx,
+	/// The save point implementation
+	save_points: SavePoints,
 }
 
 impl Drop for Transaction {
@@ -85,6 +88,7 @@ impl Datastore {
 				check,
 				write,
 				inner,
+				save_points: Default::default(),
 			}),
 			Err(e) => Err(Error::Tx(e.to_string())),
 		}
@@ -170,7 +174,7 @@ impl super::api::Transaction for Transaction {
 
 		// Fetch the value from the database.
 		let res = match version {
-			Some(ts) => Some(self.inner.get_at_ts(&key.into(), ts)?),
+			Some(ts) => self.inner.get_at_ts(&key.into(), ts)?,
 			None => self.inner.get(&key.into())?,
 		};
 
@@ -180,7 +184,7 @@ impl super::api::Transaction for Transaction {
 
 	/// Insert or update a key in the database
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
-	async fn set<K, V>(&mut self, key: K, val: V) -> Result<(), Error>
+	async fn set<K, V>(&mut self, key: K, val: V, version: Option<u64>) -> Result<(), Error>
 	where
 		K: Into<Key> + Sprintable + Debug,
 		V: Into<Val> + Debug,
@@ -193,15 +197,30 @@ impl super::api::Transaction for Transaction {
 		if !self.write {
 			return Err(Error::TxReadonly);
 		}
+		// Extract the key
+		let key = key.into();
+		// Prepare the savepoint if any
+		let prep = if self.save_points.is_some() {
+			self.save_point_prepare(&key, version, SaveOperation::Set).await?
+		} else {
+			None
+		};
 		// Set the key
-		self.inner.set(&key.into(), &val.into())?;
+		match version {
+			Some(ts) => self.inner.set_at_ts(&key, &val.into(), ts)?,
+			None => self.inner.set(&key, &val.into())?,
+		}
+		// Confirm the save point
+		if let Some(prep) = prep {
+			self.save_points.save(prep);
+		}
 		// Return result
 		Ok(())
 	}
 
 	/// Insert a key if it doesn't exist in the database
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
-	async fn put<K, V>(&mut self, key: K, val: V) -> Result<(), Error>
+	async fn put<K, V>(&mut self, key: K, val: V, version: Option<u64>) -> Result<(), Error>
 	where
 		K: Into<Key> + Sprintable + Debug,
 		V: Into<Val> + Debug,
@@ -217,11 +236,33 @@ impl super::api::Transaction for Transaction {
 		// Get the arguments
 		let key = key.into();
 		let val = val.into();
-		// Set the key if empty
-		match self.inner.get(&key)? {
-			None => self.inner.set(&key, &val)?,
-			_ => return Err(Error::TxKeyAlreadyExists),
+		// Hydrate the savepoint if any
+		let prep = if self.save_points.is_some() {
+			self.save_point_prepare(&key, version, SaveOperation::Put).await?
+		} else {
+			None
 		};
+		// Set the key if empty
+		if let Some(ts) = version {
+			self.inner.set_at_ts(&key, &val, ts)?;
+		} else {
+			// Does the key exists?
+			let key_exists = if let Some(SavePrepare::NewKey(_, sv)) = &prep {
+				sv.get_val().is_some()
+			} else {
+				self.inner.get(&key)?.is_some()
+			};
+			// If the key exist we return an error
+			if key_exists {
+				return Err(Error::TxKeyAlreadyExists);
+			}
+			// Set the key/value
+			self.inner.set(&key, &val)?;
+		}
+		// Confirm the save point
+		if let Some(prep) = prep {
+			self.save_points.save(prep);
+		}
 		// Return result
 		Ok(())
 	}
@@ -245,12 +286,28 @@ impl super::api::Transaction for Transaction {
 		let key = key.into();
 		let val = val.into();
 		let chk = chk.map(Into::into);
+		// Hydrate the savepoint if any
+		let prep = if self.save_points.is_some() {
+			self.save_point_prepare(&key, None, SaveOperation::Put).await?
+		} else {
+			None
+		};
+		// Does the key exists?
+		let current_val = if let Some(SavePrepare::NewKey(_, sv)) = &prep {
+			sv.get_val().cloned()
+		} else {
+			self.inner.get(&key)?
+		};
 		// Set the key if valid
-		match (self.inner.get(&key)?, chk) {
+		match (current_val, chk) {
 			(Some(v), Some(w)) if v == w => self.inner.set(&key, &val)?,
 			(None, None) => self.inner.set(&key, &val)?,
 			_ => return Err(Error::TxConditionNotMet),
 		};
+		// Confirm the save point
+		if let Some(prep) = prep {
+			self.save_points.save(prep);
+		}
 		// Return result
 		Ok(())
 	}
@@ -269,8 +326,20 @@ impl super::api::Transaction for Transaction {
 		if !self.write {
 			return Err(Error::TxReadonly);
 		}
+		// Extract the key
+		let key = key.into();
+		// Hydrate the savepoint if any
+		let prep = if self.save_points.is_some() {
+			self.save_point_prepare(&key, None, SaveOperation::Del).await?
+		} else {
+			None
+		};
 		// Remove the key
-		self.inner.delete(&key.into())?;
+		self.inner.delete(&key)?;
+		// Confirm the save point
+		if let Some(prep) = prep {
+			self.save_points.save(prep);
+		}
 		// Return result
 		Ok(())
 	}
@@ -293,12 +362,28 @@ impl super::api::Transaction for Transaction {
 		// Get the arguments
 		let key = key.into();
 		let chk = chk.map(Into::into);
+		// Hydrate the savepoint if any
+		let prep = if self.save_points.is_some() {
+			self.save_point_prepare(&key, None, SaveOperation::Del).await?
+		} else {
+			None
+		};
+		// Does the key exists?
+		let current_val = if let Some(SavePrepare::NewKey(_, sv)) = &prep {
+			sv.get_val().cloned()
+		} else {
+			self.inner.get(&key)?
+		};
 		// Delete the key if valid
-		match (self.inner.get(&key)?, chk) {
+		match (current_val, chk) {
 			(Some(v), Some(w)) if v == w => self.inner.delete(&key)?,
 			(None, None) => self.inner.delete(&key)?,
 			_ => return Err(Error::TxConditionNotMet),
 		};
+		// Confirm the save point
+		if let Some(prep) = prep {
+			self.save_points.save(prep);
+		}
 		// Return result
 		Ok(())
 	}
@@ -356,5 +441,11 @@ impl super::api::Transaction for Transaction {
 		};
 
 		Ok(res)
+	}
+}
+
+impl SavePointImpl for Transaction {
+	fn get_save_points(&mut self) -> &mut SavePoints {
+		&mut self.save_points
 	}
 }

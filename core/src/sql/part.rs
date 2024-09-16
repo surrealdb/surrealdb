@@ -25,6 +25,7 @@ pub enum Part {
 	Method(#[serde(with = "no_nul_bytes")] String, Vec<Value>),
 	#[revision(start = 2)]
 	Destructure(Vec<DestructurePart>),
+	Optional,
 }
 
 impl From<i32> for Part {
@@ -128,6 +129,7 @@ impl fmt::Display for Part {
 					f.write_str(" }")
 				}
 			}
+			Part::Optional => write!(f, "?"),
 		}
 	}
 }
@@ -135,7 +137,7 @@ impl fmt::Display for Part {
 // ------------------------------
 
 pub trait Next<'a> {
-	fn next(&'a self) -> &[Part];
+	fn next(&'a self) -> &'a [Part];
 }
 
 impl<'a> Next<'a> for &'a [Part] {
@@ -150,7 +152,7 @@ impl<'a> Next<'a> for &'a [Part] {
 // ------------------------------
 
 pub trait NextMethod<'a> {
-	fn next_method(&'a self) -> &[Part];
+	fn next_method(&'a self) -> &'a [Part];
 }
 
 impl<'a> NextMethod<'a> for &'a [Part] {

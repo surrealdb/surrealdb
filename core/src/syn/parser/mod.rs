@@ -35,27 +35,29 @@
 //! whitespace tokens which might have been skipped. Implementers must be carefull to not call a
 //! functions which requires whitespace tokens when they may already have been skipped.
 //!
-//! ## Token Gluing
+//! ## Compound tokens and token gluing.
 //!
-//! Tokens produces from the lexer are in some place more fine-grained then normal. Numbers,
-//! Identifiers and strand-like productions could be making up from multiple smaller tokens. A
-//! floating point number for example can be at most made up from a 3 digits token, a dot token,
-//! an exponent token and number suffix token and two `-` or `+` tokens. Whenever these tokens
-//! are required the parser calls a `glue_` method which will take the current peeked token and
-//! replace it with a more complex glued together token if possible.
+//! SurrealQL has a bunch of tokens which have complex rules for when they are allowed and the
+//! value they contain. Such tokens are named compound tokens, and examples include a javascript
+//! body, strand-like tokens, regex, numbers, etc.
 //!
-//! ## Use of reblessive
+//! These tokens need to be manually requested from the lexer with the [`Lexer::lex_compound`]
+//! function.
 //!
-//! This parser uses reblessive to be able to parse deep without overflowing the stack. This means
-//! that all functions which might recurse, i.e. in some paths can call themselves again, are async
-//! functions taking argument from reblessive to call recursive functions without using more stack
-//! with each depth.
-
+//! This manually request of tokens leads to a problems when used in conjunction with peeking. Take
+//! for instance the production `{ "foo": "bar"}`. `"foo"` is a compound token so when intially
+//! encountered the lexer only returns a `"` token and then that token needs to be collected into a
+//! the full strand token. However the parser needs to figure out if we are parsing an object
+//! or a block so it needs to look past the compound token to see if the next token is `:`. This is
+//! where gluing comes in. Calling `Parser::glue` checks if the next token could start a compound
+//! token and combines them into a single token. This can only be done in places where we know if
+//! we encountered a leading token of a compound token it will result in the 'default' compound token.
 use self::token_buffer::TokenBuffer;
 use crate::{
-	sql,
+	sql::{self, Datetime, Duration, Strand, Uuid},
 	syn::{
-		lexer::{Error as LexError, Lexer},
+		error::{bail, SyntaxError},
+		lexer::{compound::NumberKind, Lexer},
 		token::{t, Span, Token, TokenKind},
 	},
 };
@@ -63,9 +65,9 @@ use reblessive::Stk;
 
 mod basic;
 mod builtin;
-mod error;
 mod expression;
 mod function;
+mod glue;
 mod idiom;
 mod json;
 mod kind;
@@ -77,43 +79,47 @@ mod thing;
 mod token;
 mod token_buffer;
 
+pub(crate) use mac::{enter_object_recursion, enter_query_recursion, unexpected};
+
 #[cfg(test)]
 pub mod test;
 
-pub use error::{IntErrorKind, ParseError, ParseErrorKind};
-
 /// The result returned by most parser function.
-pub type ParseResult<T> = Result<T, ParseError>;
+pub type ParseResult<T> = Result<T, SyntaxError>;
 
 /// A result of trying to parse a possibly partial query.
 #[derive(Debug)]
 #[non_exhaustive]
 pub enum PartialResult<T> {
-	/// The parser couldn't be sure that it has finished a full value.
-	Pending {
-		/// The value that was parsed.
-		/// This will not always be an error, if optional keywords after the end of a statement
-		/// where missing this will still parse that statement in full.
-		possible_value: Result<T, ParseError>,
-		/// number of bytes used for parsing the above statement.
+	MoreData,
+	Ok {
+		value: T,
 		used: usize,
 	},
-	/// The parser is sure that it doesn't need more data to return either an error or a value.
-	Ready {
-		/// The value the parser is sure the query should return.
-		value: Result<T, ParseError>,
-		/// number of bytes used
+	Err {
+		err: SyntaxError,
 		used: usize,
 	},
 }
 
+#[derive(Default)]
+pub enum GluedValue {
+	Duration(Duration),
+	Datetime(Datetime),
+	Uuid(Uuid),
+	Number(NumberKind),
+	Strand(Strand),
+	#[default]
+	None,
+}
+
 /// The SurrealQL parser.
-#[non_exhaustive]
 pub struct Parser<'a> {
 	lexer: Lexer<'a>,
 	last_span: Span,
 	token_buffer: TokenBuffer<4>,
-	table_as_field: bool,
+	glued_value: GluedValue,
+	pub(crate) table_as_field: bool,
 	legacy_strands: bool,
 	flexible_record_id: bool,
 	object_recursion: usize,
@@ -127,6 +133,7 @@ impl<'a> Parser<'a> {
 			lexer: Lexer::new(source),
 			last_span: Span::empty(),
 			token_buffer: TokenBuffer::new(),
+			glued_value: GluedValue::None,
 			table_as_field: false,
 			legacy_strands: false,
 			flexible_record_id: true,
@@ -183,6 +190,7 @@ impl<'a> Parser<'a> {
 			lexer: self.lexer.change_source(source),
 			last_span: Span::empty(),
 			token_buffer: TokenBuffer::new(),
+			glued_value: GluedValue::None,
 			legacy_strands: self.legacy_strands,
 			flexible_record_id: self.flexible_record_id,
 			table_as_field: false,
@@ -269,7 +277,7 @@ impl<'a> Parser<'a> {
 
 	/// Returns the next n'th token without consuming it.
 	/// `peek_token_at(0)` is equivalent to `peek`.
-	pub fn peek_token_at(&mut self, at: u8) -> Token {
+	pub(crate) fn peek_token_at(&mut self, at: u8) -> Token {
 		for _ in self.token_buffer.len()..=at {
 			let r = loop {
 				let r = self.lexer.next_token();
@@ -282,6 +290,10 @@ impl<'a> Parser<'a> {
 		self.token_buffer.at(at).unwrap()
 	}
 
+	pub fn peek1(&mut self) -> Token {
+		self.peek_token_at(1)
+	}
+
 	/// Returns the next n'th token without consuming it.
 	/// `peek_token_at(0)` is equivalent to `peek`.
 	pub fn peek_whitespace_token_at(&mut self, at: u8) -> Token {
@@ -290,6 +302,10 @@ impl<'a> Parser<'a> {
 			self.token_buffer.push(r);
 		}
 		self.token_buffer.at(at).unwrap()
+	}
+
+	pub fn peek_whitespace1(&mut self) -> Token {
+		self.peek_whitespace_token_at(1)
 	}
 
 	/// Returns the span of the next token if it was already peeked, otherwise returns the token of
@@ -301,6 +317,10 @@ impl<'a> Parser<'a> {
 	///  returns the token of the last consumed token.
 	pub fn last_span(&mut self) -> Span {
 		self.last_span
+	}
+
+	pub fn assert_finished(&self) -> ParseResult<()> {
+		self.lexer.assert_finished()
 	}
 
 	/// Eat the next token if it is of the given kind.
@@ -337,30 +357,18 @@ impl<'a> Parser<'a> {
 		self.token_buffer.push_front(token);
 	}
 
-	/// Returns the string for a given span of the source.
-	/// Will panic if the given span was not valid for the source, or invalid utf8
-	fn span_str(&self, span: Span) -> &'a str {
-		std::str::from_utf8(self.span_bytes(span)).expect("invalid span segment for source")
-	}
-
-	/// Returns the string for a given span of the source.
-	/// Will panic if the given span was not valid for the source, or invalid utf8
-	fn span_bytes(&self, span: Span) -> &'a [u8] {
-		self.lexer.reader.span(span)
-	}
-
 	/// Checks if the next token is of the given kind. If it isn't it returns a UnclosedDelimiter
 	/// error.
 	fn expect_closing_delimiter(&mut self, kind: TokenKind, should_close: Span) -> ParseResult<()> {
-		if !self.eat(kind) {
-			return Err(ParseError::new(
-				ParseErrorKind::UnclosedDelimiter {
-					expected: kind,
-					should_close,
-				},
-				self.recent_span(),
-			));
+		let peek = self.peek();
+		if peek.kind != kind {
+			bail!("Unexpected token `{}` expected delimiter `{kind}`",
+				peek.kind,
+				@self.recent_span(),
+				@should_close => "expected this delimiter to close"
+			);
 		}
+		self.pop_peek();
 		Ok(())
 	}
 
@@ -394,59 +402,29 @@ impl<'a> Parser<'a> {
 		while self.eat(t!(";")) {}
 
 		let res = ctx.run(|ctx| self.parse_stmt(ctx)).await;
-		match res {
-			Err(ParseError {
-				kind: ParseErrorKind::UnexpectedEof {
-					..
-				},
-				..
-			})
-			| Err(ParseError {
-				kind: ParseErrorKind::InvalidToken(LexError::UnexpectedEof),
-				..
-			}) => {
-				return PartialResult::Pending {
-					possible_value: res,
+		let v = match res {
+			Err(e) => {
+				let peek = self.peek_whitespace1();
+				if e.is_data_pending()
+					|| matches!(peek.kind, TokenKind::Eof | TokenKind::WhiteSpace)
+				{
+					return PartialResult::MoreData;
+				}
+				return PartialResult::Err {
+					err: e,
 					used: self.lexer.reader.offset(),
 				};
 			}
-			Err(ParseError {
-				kind: ParseErrorKind::Unexpected {
-					..
-				},
-				at,
-				..
-			}) => {
-				// Ensure the we are sure that the last token was fully parsed.
-				self.backup_after(at);
-				let peek = self.peek_whitespace();
-				if peek.kind != TokenKind::Eof && peek.kind != TokenKind::WhiteSpace {
-					// if there is a next token or we ate whitespace after the eof we can be sure
-					// that the error is not the result of a token only being partially present.
-					return PartialResult::Ready {
-						value: res,
-						used: self.lexer.reader.offset(),
-					};
-				}
-			}
-			_ => {}
+			Ok(x) => x,
 		};
 
-		let colon = self.next();
-		if colon.kind != t!(";") {
-			return PartialResult::Pending {
-				possible_value: res,
+		if self.eat(t!(";")) {
+			return PartialResult::Ok {
+				value: v,
 				used: self.lexer.reader.offset(),
 			};
 		}
 
-		// Might have peeked more tokens past the final ";" so backup to after the semi-colon.
-		self.backup_after(colon.span);
-		let used = self.lexer.reader.offset();
-
-		PartialResult::Ready {
-			value: res,
-			used,
-		}
+		PartialResult::MoreData
 	}
 }

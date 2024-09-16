@@ -4,7 +4,7 @@ use crate::dbs::store::MemoryCollector;
 use crate::dbs::{Options, Statement};
 use crate::err::Error;
 use crate::sql::function::OptimisedAggregate;
-use crate::sql::value::{TryAdd, TryDiv, Value};
+use crate::sql::value::{TryAdd, TryFloatDiv, Value};
 use crate::sql::{Array, Field, Function, Idiom};
 use reblessive::tree::Stk;
 use std::borrow::Cow;
@@ -140,7 +140,7 @@ impl GroupsCollector {
 										let x = if matches!(a, OptimisedAggregate::None) {
 											// The aggregation is not optimised, let's compute it with the values
 											let vals = agr.take();
-											f.aggregate(vals).compute(stk, ctx, opt, None).await?
+											f.aggregate(vals)?.compute(stk, ctx, opt, None).await?
 										} else {
 											// The aggregation is optimised, just get the value
 											agr.compute(a)?
@@ -264,7 +264,7 @@ impl Aggregator {
 			*c += 1;
 		}
 		if let Some((ref f, ref mut c)) = self.count_function {
-			if f.aggregate(val.clone()).compute(stk, ctx, opt, None).await?.is_truthy() {
+			if f.aggregate(val.clone())?.compute(stk, ctx, opt, None).await?.is_truthy() {
 				*c += 1;
 			}
 		}
@@ -329,7 +329,7 @@ impl Aggregator {
 			OptimisedAggregate::MathSum => self.math_sum.take().unwrap_or(Value::None),
 			OptimisedAggregate::MathMean => {
 				if let Some((v, i)) = self.math_mean.take() {
-					v.try_div(i.into()).unwrap_or(f64::NAN.into())
+					v.try_float_div(i.into()).unwrap_or(f64::NAN.into())
 				} else {
 					Value::None
 				}

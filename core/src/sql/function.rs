@@ -79,7 +79,7 @@ impl Function {
 		}
 	}
 	/// Convert this function to an aggregate
-	pub fn aggregate(&self, val: Value) -> Self {
+	pub fn aggregate(&self, val: Value) -> Result<Self, Error> {
 		match self {
 			Self::Normal(n, a) => {
 				let mut a = a.to_owned();
@@ -90,9 +90,9 @@ impl Function {
 						a.insert(0, val);
 					}
 				}
-				Self::Normal(n.to_owned(), a)
+				Ok(Self::Normal(n.to_owned(), a))
 			}
-			_ => unreachable!(),
+			_ => Err(fail!("Encountered a non-aggregate function: {self:?}")),
 		}
 	}
 	/// Check if this function is a custom function
@@ -275,6 +275,7 @@ impl Function {
 				// Check for any final optional arguments
 				val.args.iter().rev().for_each(|(_, kind)| match kind {
 					Kind::Option(_) if min_args_len == 0 => {}
+					Kind::Any if min_args_len == 0 => {}
 					_ => min_args_len += 1,
 				});
 				// Check the necessary arguments are passed

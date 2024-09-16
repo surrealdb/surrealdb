@@ -28,7 +28,7 @@ impl Document {
 		// Match the statement type
 		match stm {
 			// This is a CREATE statement so try to insert the key
-			Statement::Create(_) => match txn.put(key, self).await {
+			Statement::Create(_) => match txn.put(key, self, opt.version).await {
 				// The key already exists, so return an error
 				Err(Error::TxKeyAlreadyExists) => Err(Error::RecordExists {
 					thing: rid.to_string(),
@@ -38,8 +38,10 @@ impl Document {
 				// Record creation worked fine
 				Ok(v) => Ok(v),
 			},
+			// INSERT can be versioned
+			Statement::Insert(_) => txn.set(key, self, opt.version).await,
 			// This is not a CREATE statement, so update the key
-			_ => txn.set(key, self).await,
+			_ => txn.set(key, self, None).await,
 		}?;
 		// Carry on
 		Ok(())

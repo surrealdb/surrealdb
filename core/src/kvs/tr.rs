@@ -1,3 +1,4 @@
+#[allow(unused_imports)] // not used when non of the storage backends are enabled.
 use super::api::Transaction;
 use super::Key;
 use super::Val;
@@ -9,6 +10,15 @@ use crate::idg::u32::U32;
 use crate::key::debug::Sprintable;
 use crate::kvs::batch::Batch;
 use crate::kvs::clock::SizedClock;
+#[cfg(any(
+	feature = "kv-mem",
+	feature = "kv-tikv",
+	feature = "kv-fdb",
+	feature = "kv-indxdb",
+	feature = "kv-surrealkv",
+	feature = "kv-surrealcs",
+))]
+use crate::kvs::savepoint::SavePointImpl;
 use crate::kvs::stash::Stash;
 use crate::sql;
 use crate::sql::thing::Thing;
@@ -18,6 +28,8 @@ use std::fmt;
 use std::fmt::Debug;
 use std::ops::Range;
 use std::sync::Arc;
+
+const TARGET: &str = "surrealdb::core::kvs::tr";
 
 /// Used to determine the behaviour when a transaction is not closed correctly
 #[derive(Debug, Default)]
@@ -84,6 +96,8 @@ pub(super) enum Inner {
 	FoundationDB(super::fdb::Transaction),
 	#[cfg(feature = "kv-surrealkv")]
 	SurrealKV(super::surrealkv::Transaction),
+	#[cfg(feature = "kv-surrealcs")]
+	SurrealCS(super::surrealcs::Transaction),
 }
 
 impl fmt::Display for Transactor {
@@ -102,6 +116,8 @@ impl fmt::Display for Transactor {
 			Inner::FoundationDB(_) => write!(f, "fdb"),
 			#[cfg(feature = "kv-surrealkv")]
 			Inner::SurrealKV(_) => write!(f, "surrealkv"),
+			#[cfg(feature = "kv-surrealcs")]
+			Inner::SurrealCS(_) => write!(f, "surrealcs"),
 			#[allow(unreachable_patterns)]
 			_ => unreachable!(),
 		}
@@ -123,6 +139,8 @@ macro_rules! expand_inner {
 			Inner::FoundationDB($arm) => $b,
 			#[cfg(feature = "kv-surrealkv")]
 			Inner::SurrealKV($arm) => $b,
+			#[cfg(feature = "kv-surrealcs")]
+			Inner::SurrealCS($arm) => $b,
 			#[allow(unreachable_patterns)]
 			_ => unreachable!(),
 		}
@@ -130,6 +148,18 @@ macro_rules! expand_inner {
 }
 
 impl Transactor {
+	// Allow unused_variables when no storage is enabled as none of the values are used then.
+	#![cfg_attr(
+		not(any(
+			feature = "kv-mem",
+			feature = "kv-rocksdb",
+			feature = "kv-indxdb",
+			feature = "kv-tikv",
+			feature = "kv-fdb",
+			feature = "kv-surrealkv",
+		)),
+		allow(unused_variables)
+	)]
 	// --------------------------------------------------
 	// Integral methods
 	// --------------------------------------------------
@@ -155,6 +185,7 @@ impl Transactor {
 	/// in a [`Error::TxFinished`] error.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
 	pub async fn closed(&self) -> bool {
+		trace!(target: TARGET, "Closed");
 		expand_inner!(&self.inner, v => { v.closed() })
 	}
 
@@ -163,6 +194,7 @@ impl Transactor {
 	/// This reverses all changes made within the transaction.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
 	pub async fn cancel(&mut self) -> Result<(), Error> {
+		trace!(target: TARGET, "Cancel");
 		expand_inner!(&mut self.inner, v => { v.cancel().await })
 	}
 
@@ -171,6 +203,7 @@ impl Transactor {
 	/// This attempts to commit all changes made within the transaction.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
 	pub async fn commit(&mut self) -> Result<(), Error> {
+		trace!(target: TARGET, "Commit");
 		expand_inner!(&mut self.inner, v => { v.commit().await })
 	}
 
@@ -181,6 +214,7 @@ impl Transactor {
 		K: Into<Key> + Debug,
 	{
 		let key = key.into();
+		trace!(target: TARGET, key = key.sprint(), "Exists");
 		expand_inner!(&mut self.inner, v => { v.exists(key).await })
 	}
 
@@ -191,6 +225,7 @@ impl Transactor {
 		K: Into<Key> + Debug,
 	{
 		let key = key.into();
+		trace!(target: TARGET, key = key.sprint(), version = version, "Get");
 		expand_inner!(&mut self.inner, v => { v.get(key, version).await })
 	}
 
@@ -201,6 +236,7 @@ impl Transactor {
 		K: Into<Key> + Debug,
 	{
 		let keys = keys.into_iter().map(Into::into).collect::<Vec<Key>>();
+		trace!(target: TARGET, keys = keys.sprint(), "GetM");
 		expand_inner!(&mut self.inner, v => { v.getm(keys).await })
 	}
 
@@ -208,13 +244,19 @@ impl Transactor {
 	///
 	/// This function fetches all matching key-value pairs from the underlying datastore in grouped batches.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
-	pub async fn getr<K>(&mut self, rng: Range<K>) -> Result<Vec<(Key, Val)>, Error>
+	pub async fn getr<K>(
+		&mut self,
+		rng: Range<K>,
+		version: Option<u64>,
+	) -> Result<Vec<(Key, Val)>, Error>
 	where
 		K: Into<Key> + Debug,
 	{
 		let beg: Key = rng.start.into();
 		let end: Key = rng.end.into();
-		expand_inner!(&mut self.inner, v => { v.getr(beg..end).await })
+		let rng = beg.as_slice()..end.as_slice();
+		trace!(target: TARGET, rng = rng.sprint(), version = version, "GetR");
+		expand_inner!(&mut self.inner, v => { v.getr(beg..end, version).await })
 	}
 
 	/// Retrieve a specific prefixed range of keys from the datastore.
@@ -226,29 +268,32 @@ impl Transactor {
 		K: Into<Key> + Debug,
 	{
 		let key: Key = key.into();
+		trace!(target: TARGET, key = key.sprint(), "GetP");
 		expand_inner!(&mut self.inner, v => { v.getp(key).await })
 	}
 
 	/// Insert or update a key in the datastore.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
-	pub async fn set<K, V>(&mut self, key: K, val: V) -> Result<(), Error>
+	pub async fn set<K, V>(&mut self, key: K, val: V, version: Option<u64>) -> Result<(), Error>
 	where
 		K: Into<Key> + Debug,
 		V: Into<Val> + Debug,
 	{
 		let key = key.into();
-		expand_inner!(&mut self.inner, v => { v.set(key, val).await })
+		trace!(target: TARGET, key = key.sprint(), version = version, "Set");
+		expand_inner!(&mut self.inner, v => { v.set(key, val, version).await })
 	}
 
 	/// Insert a key if it doesn't exist in the datastore.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
-	pub async fn put<K, V>(&mut self, key: K, val: V) -> Result<(), Error>
+	pub async fn put<K, V>(&mut self, key: K, val: V, version: Option<u64>) -> Result<(), Error>
 	where
 		K: Into<Key> + Debug,
 		V: Into<Val> + Debug,
 	{
 		let key = key.into();
-		expand_inner!(&mut self.inner, v => { v.put(key, val).await })
+		trace!(target: TARGET, key = key.sprint(), version = version, "Put");
+		expand_inner!(&mut self.inner, v => { v.put(key, val, version).await })
 	}
 
 	/// Update a key in the datastore if the current value matches a condition.
@@ -259,6 +304,7 @@ impl Transactor {
 		V: Into<Val> + Debug,
 	{
 		let key = key.into();
+		trace!(target: TARGET, key = key.sprint(), "PutC");
 		expand_inner!(&mut self.inner, v => { v.putc(key, val, chk).await })
 	}
 
@@ -269,6 +315,7 @@ impl Transactor {
 		K: Into<Key> + Debug,
 	{
 		let key = key.into();
+		trace!(target: TARGET, key = key.sprint(), "Del");
 		expand_inner!(&mut self.inner, v => { v.del(key).await })
 	}
 
@@ -280,6 +327,7 @@ impl Transactor {
 		V: Into<Val> + Debug,
 	{
 		let key = key.into();
+		trace!(target: TARGET, key = key.sprint(), "DelC");
 		expand_inner!(&mut self.inner, v => { v.delc(key, chk).await })
 	}
 
@@ -293,6 +341,8 @@ impl Transactor {
 	{
 		let beg: Key = rng.start.into();
 		let end: Key = rng.end.into();
+		let rng = beg.as_slice()..end.as_slice();
+		trace!(target: TARGET, rng = rng.sprint(), "DelR");
 		expand_inner!(&mut self.inner, v => { v.delr(beg..end).await })
 	}
 
@@ -305,6 +355,7 @@ impl Transactor {
 		K: Into<Key> + Debug,
 	{
 		let key: Key = key.into();
+		trace!(target: TARGET, key = key.sprint(), "DelP");
 		expand_inner!(&mut self.inner, v => { v.delp(key).await })
 	}
 
@@ -318,6 +369,11 @@ impl Transactor {
 	{
 		let beg: Key = rng.start.into();
 		let end: Key = rng.end.into();
+		let rng = beg.as_slice()..end.as_slice();
+		trace!(target: TARGET, rng = rng.sprint(), limit = limit, "Keys");
+		if beg > end {
+			return Ok(vec![]);
+		}
 		expand_inner!(&mut self.inner, v => { v.keys(beg..end, limit).await })
 	}
 
@@ -336,6 +392,11 @@ impl Transactor {
 	{
 		let beg: Key = rng.start.into();
 		let end: Key = rng.end.into();
+		let rng = beg.as_slice()..end.as_slice();
+		trace!(target: TARGET, rng = rng.sprint(), limit = limit, version = version, "Scan");
+		if beg > end {
+			return Ok(vec![]);
+		}
 		expand_inner!(&mut self.inner, v => { v.scan(beg..end, limit, version).await })
 	}
 
@@ -348,13 +409,16 @@ impl Transactor {
 		rng: Range<K>,
 		batch: u32,
 		values: bool,
+		version: Option<u64>,
 	) -> Result<Batch, Error>
 	where
 		K: Into<Key> + Debug,
 	{
 		let beg: Key = rng.start.into();
 		let end: Key = rng.end.into();
-		expand_inner!(&mut self.inner, v => { v.batch(beg..end, batch, values).await })
+		let rng = beg.as_slice()..end.as_slice();
+		trace!(target: TARGET, rng = rng.sprint(), values = values, version = version, "Batch");
+		expand_inner!(&mut self.inner, v => { v.batch(beg..end, batch, values, version).await })
 	}
 
 	/// Obtain a new change timestamp for a key
@@ -452,7 +516,7 @@ impl Transactor {
 		let nid = seq.get_next_id();
 		self.stash.set(key, seq.clone());
 		let (k, v) = seq.finish().unwrap();
-		self.set(k, v).await?;
+		self.set(k, v, None).await?;
 		Ok(nid)
 	}
 
@@ -463,7 +527,7 @@ impl Transactor {
 		let nid = seq.get_next_id();
 		self.stash.set(key, seq.clone());
 		let (k, v) = seq.finish().unwrap();
-		self.set(k, v).await?;
+		self.set(k, v, None).await?;
 		Ok(nid)
 	}
 
@@ -474,7 +538,7 @@ impl Transactor {
 		let nid = seq.get_next_id();
 		self.stash.set(key, seq.clone());
 		let (k, v) = seq.finish().unwrap();
-		self.set(k, v).await?;
+		self.set(k, v, None).await?;
 		Ok(nid)
 	}
 
@@ -486,7 +550,7 @@ impl Transactor {
 		seq.remove_id(ns);
 		self.stash.set(key, seq.clone());
 		let (k, v) = seq.finish().unwrap();
-		self.set(k, v).await?;
+		self.set(k, v, None).await?;
 		Ok(())
 	}
 
@@ -498,7 +562,7 @@ impl Transactor {
 		seq.remove_id(db);
 		self.stash.set(key, seq.clone());
 		let (k, v) = seq.finish().unwrap();
-		self.set(k, v).await?;
+		self.set(k, v, None).await?;
 		Ok(())
 	}
 
@@ -510,7 +574,7 @@ impl Transactor {
 		seq.remove_id(tb);
 		self.stash.set(key, seq.clone());
 		let (k, v) = seq.finish().unwrap();
-		self.set(k, v).await?;
+		self.set(k, v, None).await?;
 		Ok(())
 	}
 
@@ -550,8 +614,8 @@ impl Transactor {
 		// on other concurrent transactions that can write to the ts_key or the keys after it.
 		let key = crate::key::database::vs::new(ns, db);
 		let vst = self.get_timestamp(key).await?;
-		#[cfg(debug_assertions)]
 		trace!(
+			target: TARGET,
 			"Setting timestamp {} for versionstamp {:?} in ns: {}, db: {}",
 			ts,
 			crate::vs::conv::versionstamp_to_u64(&vst),
@@ -561,14 +625,14 @@ impl Transactor {
 
 		// Ensure there are no keys after the ts_key
 		// Otherwise we can go back in time!
-		let ts_key = crate::key::database::ts::new(ns, db, ts);
+		let mut ts_key = crate::key::database::ts::new(ns, db, ts);
 		let begin = ts_key.encode()?;
 		let end = crate::key::database::ts::suffix(ns, db);
-		let ts_pairs: Vec<(Vec<u8>, Vec<u8>)> = self.getr(begin..end).await?;
+		let ts_pairs: Vec<(Vec<u8>, Vec<u8>)> = self.getr(begin..end, None).await?;
 		let latest_ts_pair = ts_pairs.last();
 		if let Some((k, _)) = latest_ts_pair {
-			#[cfg(debug_assertions)]
 			trace!(
+				target: TARGET,
 				"There already was a greater committed timestamp {} in ns: {}, db: {} found: {}",
 				ts,
 				ns,
@@ -578,12 +642,11 @@ impl Transactor {
 			let k = crate::key::database::ts::Ts::decode(k)?;
 			let latest_ts = k.ts;
 			if latest_ts >= ts {
-				return Err(Error::Internal(
-					"ts is less than or equal to the latest ts".to_string(),
-				));
+				warn!("ts {ts} is less than the latest ts {latest_ts}");
+				ts_key = crate::key::database::ts::new(ns, db, latest_ts + 1);
 			}
 		}
-		self.set(ts_key, vst).await?;
+		self.set(ts_key, vst, None).await?;
 		Ok(vst)
 	}
 
@@ -592,12 +655,11 @@ impl Transactor {
 		ts: u64,
 		ns: &str,
 		db: &str,
-		_lock: bool,
 	) -> Result<Option<Versionstamp>, Error> {
 		let start = crate::key::database::ts::prefix(ns, db);
 		let ts_key = crate::key::database::ts::new(ns, db, ts + 1);
 		let end = ts_key.encode()?;
-		let ts_pairs = self.getr(start..end).await?;
+		let ts_pairs = self.getr(start..end, None).await?;
 		let latest_ts_pair = ts_pairs.last();
 		if let Some((_, v)) = latest_ts_pair {
 			if v.len() == 10 {
@@ -609,5 +671,17 @@ impl Transactor {
 			}
 		}
 		Ok(None)
+	}
+
+	pub(crate) async fn new_save_point(&mut self) {
+		expand_inner!(&mut self.inner, v => { v.new_save_point() })
+	}
+
+	pub(crate) async fn rollback_to_save_point(&mut self) -> Result<(), Error> {
+		expand_inner!(&mut self.inner, v => { v.rollback_to_save_point().await })
+	}
+
+	pub(crate) async fn release_last_save_point(&mut self) -> Result<(), Error> {
+		expand_inner!(&mut self.inner, v => { v.release_last_save_point() })
 	}
 }

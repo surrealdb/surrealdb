@@ -254,7 +254,7 @@ impl Document {
 		// Get the record id
 		let id = self.id.as_ref().unwrap();
 		// Get the field definitions
-		ctx.tx().all_tb_fields(opt.ns()?, opt.db()?, &id.tb).await
+		ctx.tx().all_tb_fields(opt.ns()?, opt.db()?, &id.tb, None).await
 	}
 	/// Get the indexes for this document
 	pub async fn ix(

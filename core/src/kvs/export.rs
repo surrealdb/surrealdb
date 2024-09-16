@@ -91,7 +91,7 @@ impl Transaction {
 		}
 		// Output TABLES
 		{
-			let tbs = self.all_tb(ns, db).await?;
+			let tbs = self.all_tb(ns, db, None).await?;
 			if !tbs.is_empty() {
 				for tb in tbs.iter() {
 					// Output TABLE
@@ -102,7 +102,7 @@ impl Transaction {
 					chn.send(bytes!(format!("{tb};"))).await?;
 					chn.send(bytes!("")).await?;
 					// Output FIELDS
-					let fds = self.all_tb_fields(ns, db, &tb.name).await?;
+					let fds = self.all_tb_fields(ns, db, &tb.name, None).await?;
 					if !fds.is_empty() {
 						for fd in fds.iter() {
 							chn.send(bytes!(format!("{fd};"))).await?;
@@ -126,13 +126,6 @@ impl Transaction {
 						chn.send(bytes!("")).await?;
 					}
 				}
-				// Start transaction
-				chn.send(bytes!("-- ------------------------------")).await?;
-				chn.send(bytes!("-- TRANSACTION")).await?;
-				chn.send(bytes!("-- ------------------------------")).await?;
-				chn.send(bytes!("")).await?;
-				chn.send(bytes!("BEGIN TRANSACTION;")).await?;
-				chn.send(bytes!("")).await?;
 				// Records to be exported, categorised by the type of INSERT statement
 				let mut records_normal: Vec<String> =
 					Vec::with_capacity(*EXPORT_BATCH_SIZE as usize);
@@ -151,7 +144,7 @@ impl Transaction {
 					let mut next = Some(beg..end);
 					while let Some(rng) = next {
 						// Get the next batch of records
-						let batch = self.batch(rng, *EXPORT_BATCH_SIZE, true).await?;
+						let batch = self.batch(rng, *EXPORT_BATCH_SIZE, true, None).await?;
 						// Set the next scan range
 						next = batch.next;
 						// Check there are records
@@ -193,13 +186,6 @@ impl Transaction {
 					}
 					chn.send(bytes!("")).await?;
 				}
-				// Commit transaction
-				chn.send(bytes!("-- ------------------------------")).await?;
-				chn.send(bytes!("-- TRANSACTION")).await?;
-				chn.send(bytes!("-- ------------------------------")).await?;
-				chn.send(bytes!("")).await?;
-				chn.send(bytes!("COMMIT TRANSACTION;")).await?;
-				chn.send(bytes!("")).await?;
 			}
 		}
 		// Everything exported

@@ -47,6 +47,7 @@ pub static RESERVED_KEYWORD: phf::Set<UniCase<&'static str>> = phf_set! {
 	UniCase::ascii("TRUE"),
 	UniCase::ascii("FALSE"),
 	UniCase::ascii("WHERE"),
+	UniCase::ascii("TABLE"),
 };
 
 pub fn could_be_reserved(s: &str) -> bool {
@@ -85,6 +86,7 @@ pub(crate) static KEYWORDS: phf::Map<UniCase<&'static str>, TokenKind> = phf_map
 	UniCase::ascii("CLASS") => TokenKind::Keyword(Keyword::Class),
 	UniCase::ascii("COMMENT") => TokenKind::Keyword(Keyword::Comment),
 	UniCase::ascii("COMMIT") => TokenKind::Keyword(Keyword::Commit),
+	UniCase::ascii("CONCURRENTLY") => TokenKind::Keyword(Keyword::Concurrently),
 	UniCase::ascii("CONTENT") => TokenKind::Keyword(Keyword::Content),
 	UniCase::ascii("CONTINUE") => TokenKind::Keyword(Keyword::Continue),
 	UniCase::ascii("CREATE") => TokenKind::Keyword(Keyword::Create),
@@ -110,6 +112,7 @@ pub(crate) static KEYWORDS: phf::Map<UniCase<&'static str>, TokenKind> = phf_map
 	UniCase::ascii("EVENT") => TokenKind::Keyword(Keyword::Event),
 	UniCase::ascii("ELSE") => TokenKind::Keyword(Keyword::Else),
 	UniCase::ascii("END") => TokenKind::Keyword(Keyword::End),
+	UniCase::ascii("ENFORCED") => TokenKind::Keyword(Keyword::Enforced),
 	UniCase::ascii("EXISTS") => TokenKind::Keyword(Keyword::Exists),
 	UniCase::ascii("EXPLAIN") => TokenKind::Keyword(Keyword::Explain),
 	UniCase::ascii("EXTEND_CANDIDATES") => TokenKind::Keyword(Keyword::ExtendCandidates),
@@ -182,6 +185,7 @@ pub(crate) static KEYWORDS: phf::Map<UniCase<&'static str>, TokenKind> = phf_map
 	UniCase::ascii("POSTINGS_ORDER") => TokenKind::Keyword(Keyword::PostingsOrder),
 	UniCase::ascii("PRUNE") => TokenKind::Keyword(Keyword::Prune),
 	UniCase::ascii("PUNCT") => TokenKind::Keyword(Keyword::Punct),
+	UniCase::ascii("RANGE") => TokenKind::Keyword(Keyword::Range),
 	UniCase::ascii("READONLY") => TokenKind::Keyword(Keyword::Readonly),
 	UniCase::ascii("RELATE") => TokenKind::Keyword(Keyword::Relate),
 	UniCase::ascii("RELATION") => TokenKind::Keyword(Keyword::Relation),

@@ -7,13 +7,14 @@ use crate::{
 	},
 	syn::{
 		parser::{
-			error::MissingKind,
 			mac::{expected, unexpected},
 			ParseResult, Parser,
 		},
 		token::{t, Span},
 	},
 };
+
+use super::parts::MissingKind;
 
 impl Parser<'_> {
 	pub(crate) async fn parse_select_stmt(
@@ -34,9 +35,9 @@ impl Parser<'_> {
 
 		let only = self.eat(t!("ONLY"));
 
-		let mut what = vec![stk.run(|ctx| self.parse_value(ctx)).await?];
+		let mut what = vec![stk.run(|ctx| self.parse_value_table(ctx)).await?];
 		while self.eat(t!(",")) {
-			what.push(stk.run(|ctx| self.parse_value(ctx)).await?);
+			what.push(stk.run(|ctx| self.parse_value_table(ctx)).await?);
 		}
 		let what = Values(what);
 
@@ -86,7 +87,8 @@ impl Parser<'_> {
 		if !self.eat(t!("WITH")) {
 			return Ok(None);
 		}
-		let with = match self.next().kind {
+		let next = self.next();
+		let with = match next.kind {
 			t!("NOINDEX") => With::NoIndex,
 			t!("NO") => {
 				expected!(self, t!("INDEX"));
@@ -99,7 +101,7 @@ impl Parser<'_> {
 				}
 				With::Index(index)
 			}
-			x => unexpected!(self, x, "`NO`, `NOINDEX` or `INDEX`"),
+			_ => unexpected!(self, next, "`NO`, `NOINDEX` or `INDEX`"),
 		};
 		Ok(Some(with))
 	}
@@ -215,7 +217,7 @@ impl Parser<'_> {
 			return Ok(None);
 		}
 		self.eat(t!("BY"));
-		let value = ctx.run(|ctx| self.parse_value(ctx)).await?;
+		let value = ctx.run(|ctx| self.parse_value_field(ctx)).await?;
 		Ok(Some(Limit(value)))
 	}
 
@@ -224,11 +226,11 @@ impl Parser<'_> {
 			return Ok(None);
 		}
 		self.eat(t!("AT"));
-		let value = ctx.run(|ctx| self.parse_value(ctx)).await?;
+		let value = ctx.run(|ctx| self.parse_value_field(ctx)).await?;
 		Ok(Some(Start(value)))
 	}
 
-	fn try_parse_version(&mut self) -> ParseResult<Option<Version>> {
+	pub(crate) fn try_parse_version(&mut self) -> ParseResult<Option<Version>> {
 		if !self.eat(t!("VERSION")) {
 			return Ok(None);
 		}

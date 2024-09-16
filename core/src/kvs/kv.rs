@@ -5,6 +5,7 @@ pub type Key = Vec<u8>;
 pub type Val = Vec<u8>;
 
 /// This trait appends an element to a collection, and allows chaining
+#[allow(dead_code)] // not used when non of the storage backends are enabled.
 pub(super) trait Add<T> {
 	fn add(self, v: T) -> Self;
 }

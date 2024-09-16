@@ -1,34 +1,36 @@
 use crate::{
 	sql::{language::Language, Datetime, Duration, Ident, Param, Regex, Strand, Table, Uuid},
 	syn::{
-		parser::{mac::unexpected, ParseError, ParseErrorKind, ParseResult, Parser},
-		token::{t, QouteKind, TokenKind},
+		lexer::compound,
+		parser::{mac::unexpected, ParseResult, Parser},
+		token::{self, t, TokenKind},
 	},
 };
 
-mod datetime;
+use super::mac::pop_glued;
+
 mod number;
-mod uuid;
 
 /// A trait for parsing single tokens with a specific value.
-pub trait TokenValue: Sized {
+pub(crate) trait TokenValue: Sized {
 	fn from_token(parser: &mut Parser<'_>) -> ParseResult<Self>;
 }
 
 impl TokenValue for Ident {
 	fn from_token(parser: &mut Parser<'_>) -> ParseResult<Self> {
-		match parser.glue_ident(false)?.kind {
+		let token = parser.peek();
+		match token.kind {
 			TokenKind::Identifier => {
 				parser.pop_peek();
 				let str = parser.lexer.string.take().unwrap();
 				Ok(Ident(str))
 			}
-			TokenKind::Keyword(_) | TokenKind::Language(_) | TokenKind::Algorithm(_) => {
+			x if Parser::kind_is_keyword_like(x) => {
 				let s = parser.pop_peek().span;
-				Ok(Ident(parser.span_str(s).to_owned()))
+				Ok(Ident(parser.lexer.span_str(s).to_owned()))
 			}
-			x => {
-				unexpected!(parser, x, "an identifier");
+			_ => {
+				unexpected!(parser, token, "an identifier");
 			}
 		}
 	}
@@ -42,7 +44,8 @@ impl TokenValue for Table {
 
 impl TokenValue for Language {
 	fn from_token(parser: &mut Parser<'_>) -> ParseResult<Self> {
-		match parser.peek_kind() {
+		let peek = parser.peek();
+		match peek.kind {
 			TokenKind::Language(x) => {
 				parser.pop_peek();
 				Ok(x)
@@ -52,39 +55,52 @@ impl TokenValue for Language {
 				parser.pop_peek();
 				Ok(Language::Norwegian)
 			}
-			x => unexpected!(parser, x, "a language"),
+			_ => unexpected!(parser, peek, "a language"),
 		}
 	}
 }
 
 impl TokenValue for Param {
 	fn from_token(parser: &mut Parser<'_>) -> ParseResult<Self> {
-		match parser.peek_kind() {
+		let peek = parser.peek();
+		match peek.kind {
 			TokenKind::Parameter => {
 				parser.pop_peek();
 				let param = parser.lexer.string.take().unwrap();
 				Ok(Param(Ident(param)))
 			}
-			x => unexpected!(parser, x, "a parameter"),
+			_ => unexpected!(parser, peek, "a parameter"),
 		}
 	}
 }
 
 impl TokenValue for Duration {
 	fn from_token(parser: &mut Parser<'_>) -> ParseResult<Self> {
-		match parser.glue_duration()?.kind {
-			TokenKind::Duration => {
+		let token = parser.peek();
+		match token.kind {
+			TokenKind::Glued(token::Glued::Duration) => Ok(pop_glued!(parser, Duration)),
+			TokenKind::Digits => {
 				parser.pop_peek();
-				Ok(Duration(parser.lexer.duration.unwrap()))
+				let v = parser.lexer.lex_compound(token, compound::duration)?.value;
+				Ok(Duration(v))
 			}
-			x => unexpected!(parser, x, "a duration"),
+			_ => unexpected!(parser, token, "a duration"),
 		}
 	}
 }
 
 impl TokenValue for Datetime {
 	fn from_token(parser: &mut Parser<'_>) -> ParseResult<Self> {
-		parser.parse_datetime()
+		let token = parser.peek();
+		match token.kind {
+			TokenKind::Glued(token::Glued::Datetime) => Ok(pop_glued!(parser, Datetime)),
+			t!("d\"") | t!("d'") => {
+				parser.pop_peek();
+				let v = parser.lexer.lex_compound(token, compound::datetime)?.value;
+				Ok(Datetime(v))
+			}
+			_ => unexpected!(parser, token, "a datetime"),
+		}
 	}
 }
 
@@ -92,57 +108,81 @@ impl TokenValue for Strand {
 	fn from_token(parser: &mut Parser<'_>) -> ParseResult<Self> {
 		let token = parser.peek();
 		match token.kind {
-			TokenKind::Qoute(QouteKind::Plain | QouteKind::PlainDouble) => {
+			TokenKind::Glued(token::Glued::Strand) => Ok(pop_glued!(parser, Strand)),
+			t!("\"") | t!("'") => {
 				parser.pop_peek();
-				let t = parser.lexer.relex_strand(token);
-				let TokenKind::Strand = t.kind else {
-					unexpected!(parser, t.kind, "a strand")
-				};
-				Ok(Strand(parser.lexer.string.take().unwrap()))
+				let v = parser.lexer.lex_compound(token, compound::strand)?.value;
+				Ok(Strand(v))
 			}
-			TokenKind::Strand => {
-				parser.pop_peek();
-				Ok(Strand(parser.lexer.string.take().unwrap()))
-			}
-			x => unexpected!(parser, x, "a strand"),
+			_ => unexpected!(parser, token, "a strand"),
 		}
 	}
 }
 
 impl TokenValue for Uuid {
 	fn from_token(parser: &mut Parser<'_>) -> ParseResult<Self> {
-		parser.parse_uuid()
+		let token = parser.peek();
+		match token.kind {
+			TokenKind::Glued(token::Glued::Uuid) => Ok(pop_glued!(parser, Uuid)),
+			t!("u\"") | t!("u'") => {
+				parser.pop_peek();
+				let v = parser.lexer.lex_compound(token, compound::uuid)?.value;
+				Ok(Uuid(v))
+			}
+			_ => unexpected!(parser, token, "a uuid"),
+		}
 	}
 }
 
 impl TokenValue for Regex {
 	fn from_token(parser: &mut Parser<'_>) -> ParseResult<Self> {
-		match parser.peek().kind {
+		let peek = parser.peek();
+		match peek.kind {
 			t!("/") => {
-				let pop = parser.pop_peek();
-				assert!(!parser.has_peek());
-				let token = parser.lexer.relex_regex(pop);
-				let mut span = token.span;
-
-				// remove the starting and ending `/` characters.
-				span.offset += 1;
-				span.len -= 2;
-
-				let regex = parser
-					.span_str(span)
-					.parse()
-					.map_err(|e| ParseError::new(ParseErrorKind::InvalidRegex(e), token.span))?;
-				Ok(regex)
+				parser.pop_peek();
+				let v = parser.lexer.lex_compound(peek, compound::regex)?.value;
+				Ok(Regex(v))
 			}
-			x => unexpected!(parser, x, "a regex"),
+			_ => unexpected!(parser, peek, "a regex"),
 		}
 	}
 }
 
 impl Parser<'_> {
 	/// Parse a token value from the next token in the parser.
-	pub fn next_token_value<V: TokenValue>(&mut self) -> ParseResult<V> {
+	pub(crate) fn next_token_value<V: TokenValue>(&mut self) -> ParseResult<V> {
 		V::from_token(self)
+	}
+
+	pub(crate) fn parse_flexible_ident(&mut self) -> ParseResult<Ident> {
+		let token = self.next();
+		match token.kind {
+			TokenKind::Digits => {
+				let peek = self.peek_whitespace();
+				let span = match peek.kind {
+					x if Self::kind_is_keyword_like(x) => {
+						self.pop_peek();
+						token.span.covers(peek.span)
+					}
+					TokenKind::Identifier => {
+						self.pop_peek();
+						token.span.covers(peek.span)
+					}
+					_ => token.span,
+				};
+				Ok(Ident(self.lexer.span_str(span).to_owned()))
+			}
+			TokenKind::Identifier => {
+				let str = self.lexer.string.take().unwrap();
+				Ok(Ident(str))
+			}
+			x if Self::kind_is_keyword_like(x) => {
+				Ok(Ident(self.lexer.span_str(token.span).to_owned()))
+			}
+			_ => {
+				unexpected!(self, token, "an identifier");
+			}
+		}
 	}
 }
 
@@ -166,8 +206,8 @@ mod test {
 
 			assert_eq!(
 				r,
-				sql::Query(sql::Statements(vec![sql::Statement::Value(sql::Value::Idiom(
-					sql::Idiom(vec![sql::Part::Field(sql::Ident(ident.to_string()))])
+				sql::Query(sql::Statements(vec![sql::Statement::Value(sql::Value::Table(
+					sql::Table(ident.to_string())
 				))]))
 			)
 		}

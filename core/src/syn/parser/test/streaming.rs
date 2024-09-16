@@ -150,6 +150,7 @@ fn statements() -> Vec<Statement> {
 			))),
 			timeout: Some(Timeout(Duration(std::time::Duration::from_secs(1)))),
 			parallel: true,
+			version: None,
 		}),
 		Statement::Define(DefineStatement::Namespace(DefineNamespaceStatement {
 			id: None,
@@ -191,7 +192,7 @@ fn statements() -> Vec<Statement> {
 				(Ident("b".to_string()), Kind::Array(Box::new(Kind::Bool), Some(3))),
 			],
 			block: Block(vec![Entry::Output(OutputStatement {
-				what: Value::Idiom(Idiom(vec![Part::Field(Ident("a".to_string()))])),
+				what: Value::Table(Table("a".to_string())),
 				fetch: None,
 			})]),
 			comment: Some(Strand("test".to_string())),
@@ -213,9 +214,6 @@ fn statements() -> Vec<Statement> {
 					}),
 					issue: None,
 				},
-				// TODO(gguillemas): Field kept to gracefully handle breaking change.
-				// Remove when "revision" crate allows doing so.
-				authenticate: None,
 			}),
 			authenticate: None,
 			// Default durations.
@@ -279,7 +277,7 @@ fn statements() -> Vec<Statement> {
 			comment: None,
 			if_not_exists: false,
 			overwrite: false,
-			kind: TableType::Any,
+			kind: TableType::Normal,
 		})),
 		Statement::Define(DefineStatement::Event(DefineEventStatement {
 			name: Ident("event".to_owned()),
@@ -343,6 +341,7 @@ fn statements() -> Vec<Statement> {
 			comment: None,
 			if_not_exists: false,
 			overwrite: false,
+			concurrently: false,
 		})),
 		Statement::Define(DefineStatement::Index(DefineIndexStatement {
 			name: Ident("index".to_owned()),
@@ -352,6 +351,7 @@ fn statements() -> Vec<Statement> {
 			comment: None,
 			if_not_exists: false,
 			overwrite: false,
+			concurrently: false,
 		})),
 		Statement::Define(DefineStatement::Index(DefineIndexStatement {
 			name: Ident("index".to_owned()),
@@ -360,7 +360,6 @@ fn statements() -> Vec<Statement> {
 			index: Index::MTree(MTreeParams {
 				dimension: 4,
 				distance: Distance::Minkowski(Number::Int(5)),
-				_distance: Default::default(),
 				capacity: 6,
 				doc_ids_order: 7,
 				doc_ids_cache: 8,
@@ -370,6 +369,7 @@ fn statements() -> Vec<Statement> {
 			comment: None,
 			if_not_exists: false,
 			overwrite: false,
+			concurrently: false,
 		})),
 		Statement::Define(DefineStatement::Analyzer(DefineAnalyzerStatement {
 			name: Ident("ana".to_owned()),
@@ -407,7 +407,7 @@ fn statements() -> Vec<Statement> {
 					dir: Dir::Out,
 					from: Thing {
 						tb: "a".to_owned(),
-						id: Id::String("b".to_owned()),
+						id: Id::from("b"),
 					},
 					what: Tables::default(),
 				}))),
@@ -440,34 +440,28 @@ fn statements() -> Vec<Statement> {
 		}),
 		Statement::Ifelse(IfelseStatement {
 			exprs: vec![
-				(
-					Value::Idiom(Idiom(vec![Part::Field(Ident("foo".to_owned()))])),
-					Value::Idiom(Idiom(vec![Part::Field(Ident("bar".to_owned()))])),
-				),
-				(
-					Value::Idiom(Idiom(vec![Part::Field(Ident("faz".to_owned()))])),
-					Value::Idiom(Idiom(vec![Part::Field(Ident("baz".to_owned()))])),
-				),
+				(Value::Table(Table("foo".to_owned())), Value::Table(Table("bar".to_owned()))),
+				(Value::Table(Table("faz".to_owned())), Value::Table(Table("baz".to_owned()))),
 			],
-			close: Some(Value::Idiom(Idiom(vec![Part::Field(Ident("baq".to_owned()))]))),
+			close: Some(Value::Table(Table("baq".to_owned()))),
 		}),
 		Statement::Ifelse(IfelseStatement {
 			exprs: vec![
 				(
-					Value::Idiom(Idiom(vec![Part::Field(Ident("foo".to_owned()))])),
-					Value::Block(Box::new(Block(vec![Entry::Value(Value::Idiom(Idiom(vec![
-						Part::Field(Ident("bar".to_owned())),
-					])))]))),
+					Value::Table(Table("foo".to_owned())),
+					Value::Block(Box::new(Block(vec![Entry::Value(Value::Table(Table(
+						"bar".to_owned(),
+					)))]))),
 				),
 				(
-					Value::Idiom(Idiom(vec![Part::Field(Ident("faz".to_owned()))])),
-					Value::Block(Box::new(Block(vec![Entry::Value(Value::Idiom(Idiom(vec![
-						Part::Field(Ident("baz".to_owned())),
-					])))]))),
+					Value::Table(Table("faz".to_owned())),
+					Value::Block(Box::new(Block(vec![Entry::Value(Value::Table(Table(
+						"baz".to_owned(),
+					)))]))),
 				),
 			],
-			close: Some(Value::Block(Box::new(Block(vec![Entry::Value(Value::Idiom(Idiom(
-				vec![Part::Field(Ident("baq".to_owned()))],
+			close: Some(Value::Block(Box::new(Block(vec![Entry::Value(Value::Table(Table(
+				"baq".to_owned(),
 			)))])))),
 		}),
 		Statement::Info(InfoStatement::Root(false)),
@@ -516,15 +510,14 @@ fn statements() -> Vec<Statement> {
 			}])),
 			limit: Some(Limit(Value::Thing(Thing {
 				tb: "a".to_owned(),
-				id: Id::String("b".to_owned()),
+				id: Id::from("b"),
 			}))),
 			start: Some(Start(Value::Object(Object(
 				[("a".to_owned(), Value::Bool(true))].into_iter().collect(),
 			)))),
-			fetch: Some(Fetchs(vec![Fetch(
-				Idiom(vec![]),
-				Value::Idiom(Idiom(vec![Part::Field(Ident("foo".to_owned()))])),
-			)])),
+			fetch: Some(Fetchs(vec![Fetch(Value::Idiom(Idiom(vec![Part::Field(Ident(
+				"foo".to_owned(),
+			))])))])),
 			version: Some(Version(Datetime(expected_datetime))),
 			timeout: None,
 			parallel: false,
@@ -604,6 +597,7 @@ fn statements() -> Vec<Statement> {
 				),
 			])),
 			output: Some(Output::After),
+			version: None,
 			timeout: None,
 			parallel: false,
 			relation: false,
@@ -612,17 +606,16 @@ fn statements() -> Vec<Statement> {
 			id: Value::Uuid(Uuid(uuid::uuid!("e72bee20-f49b-11ec-b939-0242ac120002"))),
 		}),
 		Statement::Output(OutputStatement {
-			what: Value::Idiom(Idiom(vec![Part::Field(Ident("RETRUN".to_owned()))])),
-			fetch: Some(Fetchs(vec![Fetch(
-				Idiom(vec![]),
-				Value::Idiom(Idiom(vec![Part::Field(Ident("RETURN".to_owned()).to_owned())])),
-			)])),
+			what: Value::Table(Table("RETRUN".to_owned())),
+			fetch: Some(Fetchs(vec![Fetch(Value::Idiom(Idiom(vec![Part::Field(
+				Ident("RETURN".to_owned()).to_owned(),
+			)])))])),
 		}),
 		Statement::Relate(RelateStatement {
 			only: true,
 			kind: Value::Thing(Thing {
 				tb: "a".to_owned(),
-				id: Id::String("b".to_owned()),
+				id: Id::from("b"),
 			}),
 			from: Value::Array(Array(vec![
 				Value::Number(Number::Int(1)),
@@ -635,6 +628,7 @@ fn statements() -> Vec<Statement> {
 				output: None,
 				timeout: None,
 				parallel: false,
+				version: None,
 			}))),
 			uniq: true,
 			data: Some(Data::SetExpression(vec![(
@@ -739,28 +733,41 @@ fn test_streaming() {
 	let mut parser = Parser::new(&[]);
 	let mut stack = Stack::new();
 
-	for i in 0..source_bytes.len() {
+	for i in 0..(source_bytes.len() - 1) {
 		let partial_source = &source_bytes[source_start..i];
 		//let src = String::from_utf8_lossy(partial_source);
 		//println!("{}:{}", i, src);
 		parser = parser.change_source(partial_source);
 		parser.reset();
 		match stack.enter(|stk| parser.parse_partial_statement(stk)).finish() {
-			PartialResult::Pending {
-				..
-			} => {
-				continue;
-			}
-			PartialResult::Ready {
+			PartialResult::MoreData => continue,
+			PartialResult::Ok {
 				value,
 				used,
 			} => {
-				//println!("USED: {}", used);
-				let value = value.unwrap();
 				assert_eq!(value, expected[current_stmt]);
 				current_stmt += 1;
 				source_start += used;
 			}
+			PartialResult::Err {
+				err,
+				..
+			} => {
+				panic!("Streaming test returned an error: {}", err.render_on_bytes(partial_source))
+			}
+		}
+	}
+
+	let partial_source = &source_bytes[source_start..];
+	parser = parser.change_source(partial_source);
+	parser.reset();
+	match stack.enter(|stk| parser.parse_stmt(stk)).finish() {
+		Ok(value) => {
+			assert_eq!(value, expected[current_stmt]);
+			current_stmt += 1;
+		}
+		Err(e) => {
+			panic!("Streaming test returned an error: {}", e.render_on_bytes(partial_source))
 		}
 	}
 

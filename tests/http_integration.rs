@@ -4,10 +4,12 @@ mod common;
 mod http_integration {
 	use std::time::Duration;
 
+	use http::header::HeaderValue;
 	use http::{header, Method};
 	use reqwest::Client;
 	use serde_json::json;
 	use surrealdb::headers::{AUTH_DB, AUTH_NS};
+	use surrealdb::sql;
 	use test_log::test;
 	use ulid::Ulid;
 
@@ -293,6 +295,83 @@ mod http_integration {
 	async fn client_ip_extractor() -> Result<(), Box<dyn std::error::Error>> {
 		// TODO: test the client IP extractor
 		Ok(())
+	}
+
+	#[test(tokio::test)]
+	async fn session_id() {
+		let (addr, _server) = common::start_server_with_guests().await.unwrap();
+		let url = &format!("http://{addr}/sql");
+
+		// Request without header, gives a randomly generated session identifier
+		{
+			// Prepare HTTP client without header
+			let mut headers = reqwest::header::HeaderMap::new();
+			let ns = Ulid::new().to_string();
+			let db = Ulid::new().to_string();
+			headers.insert("surreal-ns", ns.parse().unwrap());
+			headers.insert("surreal-db", db.parse().unwrap());
+			headers.insert(header::ACCEPT, "application/json".parse().unwrap());
+			let client = reqwest::Client::builder()
+				.connect_timeout(Duration::from_millis(10))
+				.default_headers(headers)
+				.build()
+				.unwrap();
+
+			let res = client.post(url).body("SELECT VALUE id FROM $session").send().await.unwrap();
+			assert_eq!(res.status(), 200);
+			let body = res.text().await.unwrap();
+			// Any randomly generated UUIDv4 will be in the format:
+			// xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx
+			assert!(body.contains("-4"), "body: {body}");
+		}
+
+		// Request with header, gives a the session identifier specified in the header
+		{
+			// Prepare HTTP client with header
+			let mut headers = reqwest::header::HeaderMap::new();
+			let ns = Ulid::new().to_string();
+			let db = Ulid::new().to_string();
+			headers.insert("surreal-ns", ns.parse().unwrap());
+			headers.insert("surreal-db", db.parse().unwrap());
+			headers.insert(
+				"surreal-id",
+				HeaderValue::from_static("00000000-0000-0000-0000-000000000000"),
+			);
+			headers.insert(header::ACCEPT, "application/json".parse().unwrap());
+			let client = reqwest::Client::builder()
+				.connect_timeout(Duration::from_millis(10))
+				.default_headers(headers)
+				.build()
+				.unwrap();
+
+			let res = client.post(url).body("SELECT VALUE id FROM $session").send().await.unwrap();
+			assert_eq!(res.status(), 200);
+			let body = res.text().await.unwrap();
+			assert!(body.contains("00000000-0000-0000-0000-000000000000"), "body: {body}");
+		}
+
+		// Request with invalid header, should fail
+		{
+			// Prepare HTTP client with header
+			let mut headers = reqwest::header::HeaderMap::new();
+			let ns = Ulid::new().to_string();
+			let db = Ulid::new().to_string();
+			headers.insert("surreal-ns", ns.parse().unwrap());
+			headers.insert("surreal-db", db.parse().unwrap());
+			headers.insert(
+				"surreal-id",
+				HeaderValue::from_static("123"), // Not a valid UUIDv4
+			);
+			headers.insert(header::ACCEPT, "application/json".parse().unwrap());
+			let client = reqwest::Client::builder()
+				.connect_timeout(Duration::from_millis(10))
+				.default_headers(headers)
+				.build()
+				.unwrap();
+
+			let res = client.post(url).body("SELECT VALUE id FROM $session").send().await.unwrap();
+			assert_eq!(res.status(), 401);
+		}
 	}
 
 	#[test(tokio::test)]
@@ -1645,6 +1724,82 @@ mod http_integration {
 			let res = client.get(base_url).basic_auth(USER, Some(PASS)).send().await?;
 			let body: serde_json::Value = serde_json::from_str(&res.text().await?).unwrap();
 			assert_eq!(body[0]["result"].as_array().unwrap().len(), 1, "body: {body}");
+		}
+
+		Ok(())
+	}
+
+	#[test(tokio::test)]
+	async fn signup_mal() -> Result<(), Box<dyn std::error::Error>> {
+		let (addr, _server) = common::start_server_with_defaults().await.unwrap();
+		let rpc_url = &format!("http://{addr}/rpc");
+
+		let ns = Ulid::new().to_string();
+		let db = Ulid::new().to_string();
+
+		// Prepare HTTP client
+		let mut headers = reqwest::header::HeaderMap::new();
+		headers.insert("surreal-ns", ns.parse()?);
+		headers.insert("surreal-db", db.parse()?);
+		headers.insert(header::ACCEPT, "application/surrealdb".parse()?);
+		headers.insert(header::CONTENT_TYPE, "application/surrealdb".parse()?);
+		let client = reqwest::Client::builder()
+			.connect_timeout(Duration::from_millis(10))
+			.default_headers(headers)
+			.build()?;
+
+		// Define a record access method
+		{
+			let res = client
+				.post(format!("http://{addr}/sql"))
+				.basic_auth(USER, Some(PASS))
+				.body(
+					r#"
+					DEFINE ACCESS user ON DATABASE TYPE RECORD
+						SIGNUP ( CREATE user SET email = $email, pass = crypto::argon2::generate($pass) )
+						SIGNIN ( SELECT * FROM user WHERE email = $email AND crypto::argon2::compare(pass, $pass) )
+						DURATION FOR SESSION 12h
+					;
+				"#,
+				)
+				.send()
+				.await?;
+			assert!(res.status().is_success(), "body: {}", res.text().await?);
+		}
+
+		{
+			let mut request = sql::Object::default();
+			request.insert("method".to_string(), "signup".into());
+
+			let stmt: sql::Statement = {
+				let mut tmp = sql::statements::CreateStatement::default();
+				let rid = sql::thing("foo:42").unwrap();
+				let mut tmp_values = sql::Values::default();
+				tmp_values.0 = vec![rid.into()];
+				tmp.what = tmp_values;
+				sql::Statement::Create(tmp)
+			};
+
+			let mut obj = sql::Object::default();
+			obj.insert("email".to_string(), sql::Value::Query(stmt.into()));
+			obj.insert("pass".to_string(), "foo".into());
+			request.insert(
+				"params".to_string(),
+				sql::Value::Array(vec![sql::Value::Object(obj)].into()),
+			);
+
+			let req: sql::Value = sql::Value::Object(request);
+
+			let req = sql::serde::serialize(&req).unwrap();
+
+			let res = client.post(rpc_url).body(req).send().await?;
+
+			let body = res.text().await?;
+
+			assert!(
+				body.contains("Found a non-computed value where they are not allowed"),
+				"{body:?}"
+			);
 		}
 
 		Ok(())

@@ -24,6 +24,8 @@ pub enum Method {
 	Query,
 	Relate,
 	Run,
+	GraphQL,
+	InsertRelation,
 }
 
 impl Method {
@@ -55,6 +57,8 @@ impl Method {
 			"query" => Self::Query,
 			"relate" => Self::Relate,
 			"run" => Self::Run,
+			"graphql" => Self::GraphQL,
+			"insert_relation" => Self::InsertRelation,
 			_ => Self::Unknown,
 		}
 	}
@@ -87,6 +91,8 @@ impl Method {
 			Self::Query => "query",
 			Self::Relate => "relate",
 			Self::Run => "run",
+			Self::GraphQL => "graphql",
+			Self::InsertRelation => "insert_relation",
 		}
 	}
 }
@@ -105,13 +111,22 @@ impl Method {
 		matches!(
 			self,
 			Method::Ping
-				| Method::Info | Method::Select
-				| Method::Insert | Method::Create
-				| Method::Update | Method::Upsert
-				| Method::Merge | Method::Patch
-				| Method::Delete | Method::Version
-				| Method::Query | Method::Relate
-				| Method::Run | Method::Unknown
+				| Method::Info
+				| Method::Select
+				| Method::Insert
+				| Method::Create
+				| Method::Update
+				| Method::Upsert
+				| Method::Merge
+				| Method::Patch
+				| Method::Delete
+				| Method::Version
+				| Method::Query
+				| Method::Relate
+				| Method::Run
+				| Method::GraphQL
+				| Method::InsertRelation
+				| Method::Unknown
 		)
 	}
 }

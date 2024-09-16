@@ -1,5 +1,6 @@
 use crate::err::Error;
 use crate::key::change;
+#[cfg(debug_assertions)]
 use crate::key::debug::Sprintable;
 use crate::kvs::Transaction;
 use crate::vs;
@@ -33,7 +34,7 @@ pub async fn gc_ns(tx: &Transaction, ts: u64, ns: &str) -> Result<(), Error> {
 		#[cfg(debug_assertions)]
 		trace!("Performing garbage collection on {ns}:{db} for timestamp {ts}");
 		// Fetch all tables
-		let tbs = tx.all_tb(ns, &db.name).await?;
+		let tbs = tx.all_tb(ns, &db.name, None).await?;
 		// Get the database changefeed expiration
 		let db_cf_expiry = db.changefeed.map(|v| v.expiry.as_secs()).unwrap_or_default();
 		// Get the maximum table changefeed expiration
@@ -56,11 +57,8 @@ pub async fn gc_ns(tx: &Transaction, ts: u64, ns: &str) -> Result<(), Error> {
 		// Calculate the watermark expiry window
 		let watermark_ts = ts - cf_expiry;
 		// Calculate the watermark versionstamp
-		let watermark_vs = tx
-			.lock()
-			.await
-			.get_versionstamp_from_timestamp(watermark_ts, ns, &db.name, true)
-			.await?;
+		let watermark_vs =
+			tx.lock().await.get_versionstamp_from_timestamp(watermark_ts, ns, &db.name).await?;
 		// If a versionstamp exists, then garbage collect
 		if let Some(watermark_vs) = watermark_vs {
 			gc_range(tx, ns, &db.name, watermark_vs).await?;

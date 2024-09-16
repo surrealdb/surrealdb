@@ -20,7 +20,7 @@ impl Tokens {
 		}
 	}
 
-	pub(super) fn get_token_string<'a>(&'a self, t: &'a Token) -> Result<&str, Error> {
+	pub(super) fn get_token_string<'a>(&'a self, t: &'a Token) -> Result<&'a str, Error> {
 		t.get_str(&self.i)
 	}
 
@@ -157,7 +157,7 @@ impl Token {
 		}
 	}
 
-	pub(super) fn get_str<'a>(&'a self, i: &'a str) -> Result<&str, Error> {
+	pub(super) fn get_str<'a>(&'a self, i: &'a str) -> Result<&'a str, Error> {
 		match self {
 			Token::Ref {
 				bytes,
