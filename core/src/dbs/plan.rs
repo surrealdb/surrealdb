@@ -95,9 +95,9 @@ impl ExplainItem {
 			},
 			Iterable::Table(t, keys_only) => Self {
 				name: if *keys_only {
-					"Iterate Table"
-				} else {
 					"Iterate Table Keys"
+				} else {
+					"Iterate Table"
 				}
 				.into(),
 				details: vec![("table", Value::from(t.0.to_owned()))],

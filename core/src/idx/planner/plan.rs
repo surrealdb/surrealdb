@@ -27,8 +27,6 @@ pub(super) struct PlanBuilder {
 	all_and: bool,
 	/// Is every expression backed by an index?
 	all_exp_with_index: bool,
-	/// Do we only count?
-	count_only: bool,
 }
 
 impl PlanBuilder {
@@ -46,11 +44,10 @@ impl PlanBuilder {
 			all_and_groups: Default::default(),
 			all_and: true,
 			all_exp_with_index: true,
-			count_only: params.fields.is_count_only(),
 		};
 
-		// If we only count, that there is no conditions and no aggregations, then we can only scan keys
-		let keys_only = b.count_only && params.cond.is_none() && params.group.is_none();
+		// If we only count and there are no conditions and no aggregations, then we can only scan keys
+		let keys_only = Self::is_keys_only(params);
 
 		if let Some(With::NoIndex) = params.with {
 			return Ok(Self::table_iterator(Some("WITH NOINDEX"), keys_only));
@@ -94,6 +91,21 @@ impl PlanBuilder {
 			return Ok(Plan::MultiIndex(b.non_range_indexes, ranges));
 		}
 		Ok(Self::table_iterator(None, keys_only))
+	}
+
+	fn is_keys_only(p: &QueryPlannerParams) -> bool {
+		if !p.fields.is_count_only() {
+			return false;
+		}
+		if p.cond.is_some() {
+			return false;
+		}
+		if let Some(g) = p.group {
+			if !g.is_empty() {
+				return false;
+			}
+		}
+		true
 	}
 
 	fn table_iterator(reason: Option<&str>, keys_only: bool) -> Plan {

@@ -380,7 +380,7 @@ impl<'a> Processor<'a> {
 			let pro = Processed {
 				rid: Some(rid.into()),
 				ir: None,
-				val: Operable::Value(Value::None.into()),
+				val: Operable::Value(Value::Null.into()),
 			};
 			self.process(stk, ctx, opt, stm, pro).await?;
 		}
