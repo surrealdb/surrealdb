@@ -1,6 +1,7 @@
 use crate::err::Error;
 use crate::idx::ft::MatchRef;
 use crate::idx::planner::tree::{GroupRef, IdiomCol, IdiomPosition, IndexRef, Node};
+use crate::idx::planner::QueryPlannerParams;
 use crate::sql::statements::DefineIndexStatement;
 use crate::sql::with::With;
 use crate::sql::{Array, Expression, Idiom, Number, Object};
@@ -31,13 +32,10 @@ pub(super) struct PlanBuilder {
 impl PlanBuilder {
 	pub(super) fn build(
 		root: Option<Node>,
-		with: Option<&With>,
+		params: &QueryPlannerParams,
 		with_indexes: Vec<IndexRef>,
 		order: Option<IndexOption>,
 	) -> Result<Plan, Error> {
-		if let Some(With::NoIndex) = with {
-			return Ok(Plan::TableIterator(Some("WITH NOINDEX".to_string())));
-		}
 		let mut b = PlanBuilder {
 			has_indexes: false,
 			non_range_indexes: Default::default(),
@@ -47,10 +45,18 @@ impl PlanBuilder {
 			all_and: true,
 			all_exp_with_index: true,
 		};
+
+		// If we only count and there are no conditions and no aggregations, then we can only scan keys
+		let keys_only = Self::is_keys_only(params);
+
+		if let Some(With::NoIndex) = params.with {
+			return Ok(Self::table_iterator(Some("WITH NOINDEX"), keys_only));
+		}
+
 		// Browse the AST and collect information
 		if let Some(root) = &root {
 			if let Err(e) = b.eval_node(root) {
-				return Ok(Plan::TableIterator(Some(e.to_string())));
+				return Ok(Self::table_iterator(Some(&e), keys_only));
 			}
 		}
 
@@ -84,7 +90,32 @@ impl PlanBuilder {
 			}
 			return Ok(Plan::MultiIndex(b.non_range_indexes, ranges));
 		}
-		Ok(Plan::TableIterator(None))
+		Ok(Self::table_iterator(None, keys_only))
+	}
+
+	fn is_keys_only(p: &QueryPlannerParams) -> bool {
+		if !p.fields.is_count_all_only() {
+			return false;
+		}
+		if p.cond.is_some() {
+			return false;
+		}
+		if let Some(g) = p.group {
+			if !g.is_empty() {
+				return false;
+			}
+		}
+		if let Some(p) = p.order {
+			if !p.is_empty() {
+				return false;
+			}
+		}
+		true
+	}
+
+	fn table_iterator(reason: Option<&str>, keys_only: bool) -> Plan {
+		let reason = reason.map(|s| s.to_string());
+		Plan::TableIterator(reason, keys_only)
 	}
 
 	// Check if we have an explicit list of index we can use
@@ -161,7 +192,7 @@ impl PlanBuilder {
 
 pub(super) enum Plan {
 	/// Table full scan
-	TableIterator(Option<String>),
+	TableIterator(Option<String>, bool),
 	/// Index scan filtered on records matching a given expression
 	SingleIndex(Option<Arc<Expression>>, IndexOption),
 	/// Union of filtered index scans

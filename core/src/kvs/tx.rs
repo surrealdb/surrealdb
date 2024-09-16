@@ -279,7 +279,7 @@ impl Transaction {
 	where
 		K: Into<Key> + Debug,
 	{
-		Scanner::new(
+		Scanner::<(Key, Val)>::new(
 			self,
 			*NORMAL_FETCH_SIZE,
 			Range {
@@ -287,6 +287,22 @@ impl Transaction {
 				end: rng.end.into(),
 			},
 			version,
+		)
+	}
+
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
+	pub fn stream_keys<K>(&self, rng: Range<K>) -> impl Stream<Item = Result<Key, Error>> + '_
+	where
+		K: Into<Key> + Debug,
+	{
+		Scanner::<Key>::new(
+			self,
+			*NORMAL_FETCH_SIZE,
+			Range {
+				start: rng.start.into(),
+				end: rng.end.into(),
+			},
+			None,
 		)
 	}
 
