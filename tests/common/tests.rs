@@ -7,6 +7,9 @@ use std::pin::Pin;
 use std::time::Duration;
 use test_log::test;
 
+const HDR_SURREAL: &str = "surreal-id";
+const HDR_REQUEST: &str = "x-request-id";
+
 #[test(tokio::test)]
 async fn ping() -> Result<(), Box<dyn std::error::Error>> {
 	// Setup database server
@@ -1730,7 +1733,7 @@ async fn relate_rpc() {
 	// test
 
 	let mut res = socket.send_message_query("RETURN foo:a->bar.val").await.unwrap();
-	let expected = json!(42);
+	let expected = json!([42]);
 	assert_eq!(res.remove(0)["result"], expected);
 
 	let mut res = socket.send_message_query("RETURN foo:a->bar->foo").await.unwrap();
@@ -1790,7 +1793,7 @@ async fn session_id_defined() {
 	let (addr, mut server) = common::start_server_with_defaults().await.unwrap();
 	// We specify a request identifier via a specific SurrealDB header
 	let mut headers = HeaderMap::new();
-	headers.insert("surreal-id", HeaderValue::from_static("00000000-0000-0000-0000-000000000000"));
+	headers.insert(HDR_SURREAL, HeaderValue::from_static("00000000-0000-0000-0000-000000000000"));
 	// Connect to WebSocket
 	let mut socket = Socket::connect_with_headers(&addr, SERVER, FORMAT, headers).await.unwrap();
 	// Authenticate the connection
@@ -1812,7 +1815,7 @@ async fn session_id_defined_generic() {
 	let (addr, mut server) = common::start_server_with_defaults().await.unwrap();
 	// We specify a request identifier via a generic header
 	let mut headers = HeaderMap::new();
-	headers.insert("x-request-id", HeaderValue::from_static("00000000-0000-0000-0000-000000000000"));
+	headers.insert(HDR_REQUEST, HeaderValue::from_static("00000000-0000-0000-0000-000000000000"));
 	// Connect to WebSocket
 	let mut socket = Socket::connect_with_headers(&addr, SERVER, FORMAT, headers).await.unwrap();
 	// Authenticate the connection
@@ -1834,8 +1837,8 @@ async fn session_id_defined_both() {
 	let (addr, mut server) = common::start_server_with_defaults().await.unwrap();
 	// We specify a request identifier via both headers
 	let mut headers = HeaderMap::new();
-	headers.insert("surreal-id", HeaderValue::from_static("00000000-0000-0000-0000-000000000000"));
-	headers.insert("x-request-id", HeaderValue::from_static("aaaaaaaa-aaaa-0000-0000-000000000000"));
+	headers.insert(HDR_SURREAL, HeaderValue::from_static("00000000-0000-0000-0000-000000000000"));
+	headers.insert(HDR_REQUEST, HeaderValue::from_static("aaaaaaaa-aaaa-0000-0000-000000000000"));
 	// Connect to WebSocket
 	let mut socket = Socket::connect_with_headers(&addr, SERVER, FORMAT, headers).await.unwrap();
 	// Authenticate the connection
@@ -1858,7 +1861,8 @@ async fn session_id_invalid() {
 	let (addr, mut server) = common::start_server_with_defaults().await.unwrap();
 	// We specify a request identifier via a specific SurrealDB header
 	let mut headers = HeaderMap::new();
-	headers.insert("surreal-id", HeaderValue::from_static("123")); // Not a valid UUIDv4
+	// Not a valid UUIDv4
+	headers.insert(HDR_SURREAL, HeaderValue::from_static("123"));
 	// Connect to WebSocket
 	let socket = Socket::connect_with_headers(&addr, SERVER, FORMAT, headers).await;
 	assert!(socket.is_err(), "unexpected success using connecting with invalid id header");
