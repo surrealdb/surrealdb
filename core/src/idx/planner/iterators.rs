@@ -152,13 +152,21 @@ impl IndexEqualThingIterator {
 		irf: IteratorRef,
 		ns: &str,
 		db: &str,
-		ix_what: &Ident,
-		ix_name: &Ident,
+		ix: &DefineIndexStatement,
 		v: &Value,
 	) -> Self {
 		let a = Array::from(v.clone());
-		let beg = Index::prefix_ids_beg(ns, db, ix_what, ix_name, &a);
-		let end = Index::prefix_ids_end(ns, db, ix_what, ix_name, &a);
+		let (beg, end) = if ix.cols.len() == 1 {
+			(
+				Index::prefix_ids_beg(ns, db, &ix.what, &ix.name, &a),
+				Index::prefix_ids_end(ns, db, &ix.what, &ix.name, &a),
+			)
+		} else {
+			(
+				Index::prefix_ids_composite_beg(ns, db, &ix.what, &ix.name, &a),
+				Index::prefix_ids_composite_end(ns, db, &ix.what, &ix.name, &a),
+			)
+		};
 		Self {
 			irf,
 			beg,
@@ -343,8 +351,7 @@ impl IndexUnionThingIterator {
 		irf: IteratorRef,
 		ns: &str,
 		db: &str,
-		ix_what: &Ident,
-		ix_name: &Ident,
+		ix: &DefineIndexStatement,
 		a: &Value,
 	) -> Self {
 		// We create a VecDeque to hold the prefix keys (begin and end) for each value in the array.
@@ -352,8 +359,8 @@ impl IndexUnionThingIterator {
 			a.0.iter()
 				.map(|v| {
 					let a = Array::from(v.clone());
-					let beg = Index::prefix_ids_beg(ns, db, ix_what, ix_name, &a);
-					let end = Index::prefix_ids_end(ns, db, ix_what, ix_name, &a);
+					let beg = Index::prefix_ids_beg(ns, db, &ix.what, &ix.name, &a);
+					let end = Index::prefix_ids_end(ns, db, &ix.what, &ix.name, &a);
 					(beg, end)
 				})
 				.collect()
@@ -392,8 +399,7 @@ impl IndexUnionThingIterator {
 struct JoinThingIterator {
 	ns: String,
 	db: String,
-	ix_what: Ident,
-	ix_name: Ident,
+	ix: Arc<DefineIndexStatement>,
 	remote_iterators: VecDeque<ThingIterator>,
 	current_remote: Option<ThingIterator>,
 	current_remote_batch: VecDeque<CollectorRecord>,
@@ -404,14 +410,13 @@ struct JoinThingIterator {
 impl JoinThingIterator {
 	pub(super) fn new(
 		opt: &Options,
-		ix: &DefineIndexStatement,
+		ix: Arc<DefineIndexStatement>,
 		remote_iterators: VecDeque<ThingIterator>,
 	) -> Result<Self, Error> {
 		Ok(Self {
 			ns: opt.ns()?.to_string(),
 			db: opt.db()?.to_string(),
-			ix_what: ix.what.clone(),
-			ix_name: ix.name.clone(),
+			ix,
 			current_remote: None,
 			current_remote_batch: VecDeque::with_capacity(1),
 			remote_iterators,
@@ -451,15 +456,14 @@ impl JoinThingIterator {
 		new_iter: F,
 	) -> Result<bool, Error>
 	where
-		F: Fn(&str, &str, &Ident, &Ident, Value) -> ThingIterator,
+		F: Fn(&str, &str, &DefineIndexStatement, Value) -> ThingIterator,
 	{
 		while !ctx.is_done() {
 			while let Some((thing, _, _)) = self.current_remote_batch.pop_front() {
 				let k: Key = thing.as_ref().into();
 				let value = Value::from(thing.as_ref().clone());
 				if self.distinct.insert(k, true).is_none() {
-					self.current_local =
-						Some(new_iter(&self.ns, &self.db, &self.ix_what, &self.ix_name, value));
+					self.current_local = Some(new_iter(&self.ns, &self.db, &self.ix, value));
 					return Ok(true);
 				}
 			}
@@ -478,7 +482,7 @@ impl JoinThingIterator {
 		new_iter: F,
 	) -> Result<B, Error>
 	where
-		F: Fn(&str, &str, &Ident, &Ident, Value) -> ThingIterator + Copy,
+		F: Fn(&str, &str, &DefineIndexStatement, Value) -> ThingIterator + Copy,
 	{
 		while !ctx.is_done() {
 			if let Some(current_local) = &mut self.current_local {
@@ -501,7 +505,7 @@ impl IndexJoinThingIterator {
 	pub(super) fn new(
 		irf: IteratorRef,
 		opt: &Options,
-		ix: &DefineIndexStatement,
+		ix: Arc<DefineIndexStatement>,
 		remote_iterators: VecDeque<ThingIterator>,
 	) -> Result<Self, Error> {
 		Ok(Self(irf, JoinThingIterator::new(opt, ix, remote_iterators)?))
@@ -513,8 +517,8 @@ impl IndexJoinThingIterator {
 		tx: &Transaction,
 		limit: u32,
 	) -> Result<B, Error> {
-		let new_iter = |ns: &str, db: &str, ix_what: &Ident, ix_name: &Ident, value: Value| {
-			let it = IndexEqualThingIterator::new(self.0, ns, db, ix_what, ix_name, &value);
+		let new_iter = |ns: &str, db: &str, ix: &DefineIndexStatement, value: Value| {
+			let it = IndexEqualThingIterator::new(self.0, ns, db, ix, &value);
 			ThingIterator::IndexEqual(it)
 		};
 		self.1.next_batch(ctx, tx, limit, new_iter).await
@@ -531,12 +535,11 @@ impl UniqueEqualThingIterator {
 		irf: IteratorRef,
 		ns: &str,
 		db: &str,
-		ix_what: &Ident,
-		ix_name: &Ident,
+		ix: &DefineIndexStatement,
 		v: &Value,
 	) -> Self {
 		let a = Array::from(v.to_owned());
-		let key = Index::new(ns, db, ix_what, ix_name, &a, None).into();
+		let key = Index::new(ns, db, &ix.what, &ix.name, &a, None).into();
 		Self {
 			irf,
 			key: Some(key),
@@ -584,14 +587,13 @@ impl UniqueRangeThingIterator {
 		irf: IteratorRef,
 		ns: &str,
 		db: &str,
-		ix_what: &Ident,
-		ix_name: &Ident,
+		ix: &DefineIndexStatement,
 	) -> Self {
 		let full_range = RangeValue {
 			value: Value::None,
 			inclusive: true,
 		};
-		Self::new(irf, ns, db, ix_what, ix_name, &full_range, &full_range)
+		Self::new(irf, ns, db, &ix.what, &ix.name, &full_range, &full_range)
 	}
 
 	fn compute_beg(
@@ -720,7 +722,7 @@ impl UniqueJoinThingIterator {
 	pub(super) fn new(
 		irf: IteratorRef,
 		opt: &Options,
-		ix: &DefineIndexStatement,
+		ix: Arc<DefineIndexStatement>,
 		remote_iterators: VecDeque<ThingIterator>,
 	) -> Result<Self, Error> {
 		Ok(Self(irf, JoinThingIterator::new(opt, ix, remote_iterators)?))
@@ -732,8 +734,8 @@ impl UniqueJoinThingIterator {
 		tx: &Transaction,
 		limit: u32,
 	) -> Result<B, Error> {
-		let new_iter = |ns: &str, db: &str, ix_what: &Ident, ix_name: &Ident, value: Value| {
-			let it = UniqueEqualThingIterator::new(self.0, ns, db, ix_what, ix_name, &value);
+		let new_iter = |ns: &str, db: &str, ix: &DefineIndexStatement, value: Value| {
+			let it = UniqueEqualThingIterator::new(self.0, ns, db, ix, &value);
 			ThingIterator::UniqueEqual(it)
 		};
 		self.1.next_batch(ctx, tx, limit, new_iter).await

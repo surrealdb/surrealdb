@@ -1,6 +1,6 @@
 use crate::err::Error;
 use crate::idx::ft::MatchRef;
-use crate::idx::planner::tree::{GroupRef, IdiomPosition, IndexRef, Node};
+use crate::idx::planner::tree::{GroupRef, IdiomCol, IdiomPosition, IndexRef, Node};
 use crate::idx::planner::QueryPlannerParams;
 use crate::sql::statements::DefineIndexStatement;
 use crate::sql::with::With;
@@ -188,8 +188,13 @@ pub(super) enum Plan {
 pub(super) struct IndexOption {
 	/// A reference to the index definition
 	ix_ref: IndexRef,
-	id: Idiom,
+	/// The idiom matching this index
+	id: Arc<Idiom>,
+	/// The index of the idiom in the index columns
+	id_col: IdiomCol,
+	/// The position of the idiom in the expression (Left or Right)
 	id_pos: IdiomPosition,
+	/// The index operator
 	op: Arc<IndexOperator>,
 }
 
@@ -209,13 +214,15 @@ pub(super) enum IndexOperator {
 impl IndexOption {
 	pub(super) fn new(
 		ix_ref: IndexRef,
-		id: Idiom,
+		id: Arc<Idiom>,
+		id_col: IdiomCol,
 		id_pos: IdiomPosition,
 		op: IndexOperator,
 	) -> Self {
 		Self {
 			ix_ref,
 			id,
+			id_col,
 			id_pos,
 			op: Arc::new(op),
 		}
@@ -250,7 +257,7 @@ impl IndexOption {
 		v.clone()
 	}
 
-	pub(crate) fn explain(&self, ix_def: &[DefineIndexStatement]) -> Value {
+	pub(crate) fn explain(&self, ix_def: &[Arc<DefineIndexStatement>]) -> Value {
 		let mut e = HashMap::new();
 		if let Some(ix) = ix_def.get(self.ix_ref as usize) {
 			e.insert("index", Value::from(ix.name.0.to_owned()));
@@ -466,14 +473,16 @@ mod tests {
 		let mut set = HashSet::new();
 		let io1 = IndexOption::new(
 			1,
-			Idiom::parse("test"),
+			Idiom::parse("test").into(),
+			0,
 			IdiomPosition::Right,
 			IndexOperator::Equality(Value::Array(Array::from(vec!["test"])).into()),
 		);
 
 		let io2 = IndexOption::new(
 			1,
-			Idiom::parse("test"),
+			Idiom::parse("test").into(),
+			0,
 			IdiomPosition::Right,
 			IndexOperator::Equality(Value::Array(Array::from(vec!["test"])).into()),
 		);
