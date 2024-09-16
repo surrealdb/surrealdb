@@ -389,7 +389,7 @@ pub async fn generate_schema(
 				}
 			})
 		})
-		.description(format!("allows fetching arbitrary records"))
+		.description("allows fetching arbitrary records".to_string())
 		.argument(id_input!()),
 	);
 
