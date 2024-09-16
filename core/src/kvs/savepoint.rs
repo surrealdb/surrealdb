@@ -27,6 +27,7 @@ impl SavedValue {
 		}
 	}
 
+	#[cfg(any(feature = "kv-surrealkv", feature = "kv-fdb", feature = "kv-tikv"))]
 	pub(super) fn get_val(&self) -> Option<&Val> {
 		self.saved_val.as_ref()
 	}
