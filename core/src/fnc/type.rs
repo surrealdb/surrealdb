@@ -122,6 +122,10 @@ pub fn string((val,): (Value,)) -> Result<Value, Error> {
 pub fn table((val,): (Value,)) -> Result<Value, Error> {
 	Ok(Value::Table(Table(match val {
 		Value::Thing(t) => t.tb,
+		Value::Strand(s) => match Thing::try_from(s.as_str()) {
+			Ok(record) => record.tb,
+			Err(_) => s.as_string(),
+		},
 		v => v.as_string(),
 	})))
 }

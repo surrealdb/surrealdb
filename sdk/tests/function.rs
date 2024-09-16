@@ -5569,6 +5569,7 @@ async fn function_type_table() -> Result<(), Error> {
 	let sql = r#"
 		RETURN type::table("person");
 		RETURN type::table("animal");
+		RETURN type::table("person:one);
 	"#;
 	let mut test = Test::new(sql).await?;
 	//
@@ -5578,6 +5579,10 @@ async fn function_type_table() -> Result<(), Error> {
 	//
 	let tmp = test.next()?.result?;
 	let val = Value::Table("animal".into());
+	assert_eq!(tmp, val);
+	//
+	let tmp = test.next()?.result?;
+	let val = Value::Table("person".into());
 	assert_eq!(tmp, val);
 	//
 	Ok(())
