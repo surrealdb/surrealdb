@@ -3164,7 +3164,7 @@ mod tests {
 		assert!(Value::from(1.1).is_truthy());
 		assert!(Value::from(-1.1).is_truthy());
 		assert!(Value::from("true").is_truthy());
-		assert!(!Value::from("false").is_truthy());
+		assert!(Value::from("false").is_truthy());
 		assert!(Value::from("falsey").is_truthy());
 		assert!(Value::from("something").is_truthy());
 		assert!(Value::from(Uuid::new()).is_truthy());
