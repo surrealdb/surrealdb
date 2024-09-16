@@ -17,11 +17,16 @@ use wasm_bindgen_futures::spawn_local as spawn;
 type Task = Pin<Box<dyn Future<Output = Result<(), tokio::task::JoinError>> + Send + 'static>>;
 
 #[cfg(target_arch = "wasm32")]
-type Task = Pin<Box<dyn Future<Output = ()> + 'static>>;
+type Task = Pin<Box<()>>;
 
 pub struct Tasks(Vec<Task>);
 
 impl Tasks {
+	#[cfg(target_arch = "wasm32")]
+	pub async fn resolve(self) -> Result<(), Error> {
+		Ok(())
+	}
+	#[cfg(not(target_arch = "wasm32"))]
 	pub async fn resolve(self) -> Result<(), Error> {
 		for task in self.0.into_iter() {
 			let _ = task.await;
