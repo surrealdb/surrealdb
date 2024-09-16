@@ -11,7 +11,6 @@ use futures::future::try_join_all;
 use reblessive::tree::Stk;
 
 impl Value {
-	/// Was marked recursive
 	pub(crate) async fn fetch(
 		&mut self,
 		stk: &mut Stk,
@@ -19,152 +18,201 @@ impl Value {
 		opt: &Options,
 		path: &[Part],
 	) -> Result<(), Error> {
-		match path.first() {
-			// Get the current path part
-			Some(p) => match self {
-				// Current path part is an object
-				Value::Object(v) => match p {
-					Part::Graph(_) => match v.rid() {
-						Some(v) => {
-							let mut v = Value::Thing(v);
-							stk.run(|stk| v.fetch(stk, ctx, opt, path.next())).await
+		let mut this = self;
+		let mut iter = path.iter();
+		let mut prev = path;
+
+		// Loop over the path.
+		// If the we just need to select a sub section of a value we update this to point to the
+		// new subsection of the value. Otherwise we recurse into fetch and then immediatily
+		// return.
+		// If we encounter a idiom application which does not make sense, like `(1).foo` just
+		// return Ok(())
+		while let Some(p) = iter.next() {
+			match p {
+				Part::Graph(g) => match this {
+					Value::Object(o) => {
+						let Some(v) = o.rid() else {
+							return Ok(());
+						};
+
+						let mut v = Value::Thing(v);
+						return stk.run(|stk| v.fetch(stk, ctx, opt, iter.as_slice())).await;
+					}
+					Value::Thing(x) => {
+						let stm = SelectStatement {
+							expr: Fields(vec![Field::All], false),
+							what: Values(vec![Value::from(Edges {
+								from: x.clone(),
+								dir: g.dir.clone(),
+								what: g.what.clone(),
+							})]),
+							cond: g.cond.clone(),
+							..SelectStatement::default()
+						};
+						*this = stm
+							.compute(stk, ctx, opt, None)
+							.await?
+							.all()
+							.get(stk, ctx, opt, None, path.next())
+							.await?
+							.flatten()
+							.ok()?;
+						return Ok(());
+					}
+					Value::Array(_) => return Ok(()),
+					_ => break,
+				},
+				Part::Field(f) => match this {
+					Value::Object(o) => {
+						let Some(x) = o.get_mut(f.0.as_str()) else {
+							return Ok(());
+						};
+						this = x;
+					}
+					Value::Array(x) => {
+						stk.scope(|scope| {
+							let futs =
+								x.iter_mut().map(|v| scope.run(|stk| v.fetch(stk, ctx, opt, prev)));
+							try_join_all(futs)
+						})
+						.await?;
+						return Ok(());
+					}
+					_ => break,
+				},
+				Part::Index(i) => match this {
+					Value::Object(v) => {
+						let Some(x) = v.get_mut(&i.to_string()) else {
+							return Ok(());
+						};
+						this = x;
+					}
+					Value::Array(v) => {
+						let Some(x) = v.get_mut(i.to_usize()) else {
+							return Ok(());
+						};
+						this = x;
+					}
+					_ => break,
+				},
+				Part::Value(v) => {
+					let v = v.compute(stk, ctx, opt, None).await?;
+					match this {
+						Value::Object(obj) => {
+							let Some(x) = obj.get_mut(v.coerce_to_string()?.as_str()) else {
+								return Ok(());
+							};
+							this = x;
 						}
-						None => Ok(()),
-					},
-					Part::Field(f) => match v.get_mut(f as &str) {
-						Some(v) => stk.run(|stk| v.fetch(stk, ctx, opt, path.next())).await,
-						None => Ok(()),
-					},
-					Part::Index(i) => match v.get_mut(&i.to_string()) {
-						Some(v) => stk.run(|stk| v.fetch(stk, ctx, opt, path.next())).await,
-						None => Ok(()),
-					},
-					Part::All => stk.run(|stk| self.fetch(stk, ctx, opt, path.next())).await,
-					Part::Destructure(p) => {
+						Value::Array(array) => {
+							let Some(x) = array.get_mut(v.coerce_to_u64()? as usize) else {
+								return Ok(());
+							};
+							this = x;
+						}
+						_ => return Ok(()),
+					}
+				}
+				Part::Destructure(p) => match this {
+					Value::Array(x) => {
+						stk.scope(|scope| {
+							let futs =
+								x.iter_mut().map(|v| scope.run(|stk| v.fetch(stk, ctx, opt, prev)));
+							try_join_all(futs)
+						})
+						.await?;
+					}
+					Value::Object(_) => {
 						for p in p.iter() {
-							let path = [(p.path().as_slice()), path].concat();
-							stk.run(|stk| self.fetch(stk, ctx, opt, &path)).await?;
+							let mut destructure_path = p.path();
+							destructure_path.extend_from_slice(path);
+							stk.run(|stk| this.fetch(stk, ctx, opt, &destructure_path)).await?;
+						}
+						return Ok(());
+					}
+					_ => return Ok(()),
+				},
+				Part::All => match this {
+					Value::Object(_) => {
+						continue;
+					}
+					Value::Array(x) => {
+						let next_path = iter.as_slice();
+						// no need to spawn all those futures if their is no more paths to
+						// calculate
+						if next_path.is_empty() {
+							break;
 						}
 
-						Ok(())
-					}
-					_ => Ok(()),
-				},
-				// Current path part is an array
-				Value::Array(v) => match p {
-					Part::All => {
-						let path = path.next();
 						stk.scope(|scope| {
-							let futs =
-								v.iter_mut().map(|v| scope.run(|stk| v.fetch(stk, ctx, opt, path)));
+							let futs = x
+								.iter_mut()
+								.map(|v| scope.run(|stk| v.fetch(stk, ctx, opt, next_path)));
 							try_join_all(futs)
 						})
 						.await?;
-						Ok(())
+						return Ok(());
 					}
-					Part::First => match v.first_mut() {
-						Some(v) => stk.run(|stk| v.fetch(stk, ctx, opt, path.next())).await,
-						None => Ok(()),
-					},
-					Part::Last => match v.last_mut() {
-						Some(v) => stk.run(|stk| v.fetch(stk, ctx, opt, path.next())).await,
-						None => Ok(()),
-					},
-					Part::Index(i) => match v.get_mut(i.to_usize()) {
-						Some(v) => stk.run(|stk| v.fetch(stk, ctx, opt, path.next())).await,
-						None => Ok(()),
-					},
-					Part::Where(w) => {
-						let path = path.next();
-						for v in v.iter_mut() {
-							let cur = v.clone().into();
-							if w.compute(stk, ctx, opt, Some(&cur)).await?.is_truthy() {
-								stk.run(|stk| v.fetch(stk, ctx, opt, path)).await?;
+					_ => break,
+				},
+				Part::First => match this {
+					Value::Array(x) => {
+						let Some(x) = x.first_mut() else {
+							return Ok(());
+						};
+						this = x;
+					}
+					_ => return Ok(()),
+				},
+				Part::Last => match this {
+					Value::Array(x) => {
+						let Some(x) = x.last_mut() else {
+							return Ok(());
+						};
+						this = x;
+					}
+					_ => return Ok(()),
+				},
+				Part::Where(w) => match this {
+					Value::Array(x) => {
+						for v in x.iter_mut() {
+							let doc = v.clone().into();
+							if w.compute(stk, ctx, opt, Some(&doc)).await?.is_truthy() {
+								stk.run(|stk| v.fetch(stk, ctx, opt, iter.as_slice())).await?;
 							}
 						}
-						Ok(())
 					}
-					_ => {
-						stk.scope(|scope| {
-							let futs =
-								v.iter_mut().map(|v| scope.run(|stk| v.fetch(stk, ctx, opt, path)));
-							try_join_all(futs)
-						})
-						.await?;
-						Ok(())
-					}
+					_ => return Ok(()),
 				},
-				// Current path part is a thing
-				Value::Thing(v) => {
-					// Clone the thing
-					let val = v.clone();
-					// Fetch the remote embedded record
-					match p {
-						// This is a graph traversal expression
-						Part::Graph(g) => {
-							let stm = SelectStatement {
-								expr: Fields(vec![Field::All], false),
-								what: Values(vec![Value::from(Edges {
-									from: val,
-									dir: g.dir.clone(),
-									what: g.what.clone(),
-								})]),
-								cond: g.cond.clone(),
-								..SelectStatement::default()
-							};
-							*self = stm
-								.compute(stk, ctx, opt, None)
-								.await?
-								.all()
-								.get(stk, ctx, opt, None, path.next())
-								.await?
-								.flatten()
-								.ok()?;
-							Ok(())
-						}
-						// This is a remote field expression
-						_ => {
-							let stm = SelectStatement {
-								expr: Fields(vec![Field::All], false),
-								what: Values(vec![Value::from(val)]),
-								..SelectStatement::default()
-							};
-							*self = stm.compute(stk, ctx, opt, None).await?.first();
-							Ok(())
-						}
-					}
-				}
-				// Ignore everything else
-				_ => Ok(()),
-			},
-			// No more parts so get the value
-			None => match self {
-				// Current path part is an array
-				Value::Array(v) => {
-					stk.scope(|scope| {
-						let futs =
-							v.iter_mut().map(|v| scope.run(|stk| v.fetch(stk, ctx, opt, path)));
-						try_join_all(futs)
-					})
-					.await?;
-					Ok(())
-				}
-				// Current path part is a thing
-				Value::Thing(v) => {
-					// Clone the thing
-					let val = v.clone();
-					// Fetch the remote embedded record
-					let stm = SelectStatement {
-						expr: Fields(vec![Field::All], false),
-						what: Values(vec![Value::from(val)]),
-						..SelectStatement::default()
-					};
-					*self = stm.compute(stk, ctx, opt, None).await?.first();
-					Ok(())
-				}
-				// Ignore everything else
-				_ => Ok(()),
-			},
+				_ => break,
+			}
+			prev = iter.as_slice();
+		}
+
+		// If we and up at the end with one of the following types we still need to compute it.
+		match this {
+			Value::Array(v) => {
+				stk.scope(|scope| {
+					let futs = v.iter_mut().map(|v| scope.run(|stk| v.fetch(stk, ctx, opt, path)));
+					try_join_all(futs)
+				})
+				.await?;
+				Ok(())
+			}
+			Value::Thing(v) => {
+				// Clone the thing
+				let val = v.clone();
+				// Fetch the remote embedded record
+				let stm = SelectStatement {
+					expr: Fields(vec![Field::All], false),
+					what: Values(vec![Value::from(val)]),
+					..SelectStatement::default()
+				};
+				*this = stm.compute(stk, ctx, opt, None).await?.first();
+				Ok(())
+			}
+			_ => Ok(()),
 		}
 	}
 }
