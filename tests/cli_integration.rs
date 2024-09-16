@@ -1153,7 +1153,7 @@ mod cli_integration {
 			let query = "RETURN http::get('http://127.0.0.1/');\n\n";
 			let output = common::run(&cmd).input(query).output().unwrap();
 			assert!(
-				output.contains("Access to network target 'http://127.0.0.1/' is not allowed"),
+				output.contains("Access to network target '127.0.0.1:80' is not allowed"),
 				"unexpected output: {output:?}"
 			);
 
@@ -1516,10 +1516,8 @@ mod cli_integration {
 			let query = format!("RETURN http::get('http://{addr}/version');\n\n");
 			let output = common::run(&cmd).input(&query).output().unwrap();
 			assert!(
-				output.contains(
-					format!("Access to network target 'http://{addr}/version' is not allowed")
-						.as_str()
-				),
+				output
+					.contains(format!("Access to network target '{addr}' is not allowed").as_str()),
 				"unexpected output: {output:?}"
 			);
 			server.finish().unwrap();
@@ -1542,10 +1540,8 @@ mod cli_integration {
 			let query = format!("RETURN http::get('http://{addr}/version');\n\n");
 			let output = common::run(&cmd).input(&query).output().unwrap();
 			assert!(
-				output.contains(
-					format!("Access to network target 'http://{addr}/version' is not allowed")
-						.as_str()
-				),
+				output
+					.contains(format!("Access to network target '{addr}' is not allowed").as_str()),
 				"unexpected output: {output:?}"
 			);
 			server.finish().unwrap();
@@ -1588,10 +1584,8 @@ mod cli_integration {
 			let query = format!("RETURN http::get('http://{addr}/version');\n\n");
 			let output = common::run(&cmd).input(&query).output().unwrap();
 			assert!(
-				output.contains(
-					format!("Access to network target 'http://{addr}/version' is not allowed")
-						.as_str()
-				),
+				output
+					.contains(format!("Access to network target '{addr}' is not allowed").as_str()),
 				"unexpected output: {output:?}"
 			);
 			server.finish().unwrap();
@@ -1636,10 +1630,8 @@ mod cli_integration {
 			let query = format!("RETURN http::get('http://{addr}/version');\n\n");
 			let output = common::run(&cmd).input(&query).output().unwrap();
 			assert!(
-				output.contains(
-					format!("Access to network target 'http://{addr}/version' is not allowed")
-						.as_str()
-				),
+				output
+					.contains(format!("Access to network target '{addr}' is not allowed").as_str()),
 				"unexpected output: {output:?}"
 			);
 			server.finish().unwrap();
@@ -1662,10 +1654,8 @@ mod cli_integration {
 			let query = format!("RETURN http::get('http://{addr}/version');\n\n");
 			let output = common::run(&cmd).input(&query).output().unwrap();
 			assert!(
-				output.contains(
-					format!("Access to network target 'http://{addr}/version' is not allowed")
-						.as_str()
-				),
+				output
+					.contains(format!("Access to network target '{addr}' is not allowed").as_str()),
 				"unexpected output: {output:?}"
 			);
 			server.finish().unwrap();

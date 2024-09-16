@@ -569,7 +569,7 @@ mod tests {
 				Session::owner(),
 				format!("RETURN http::get('{}')", server1.uri()),
 				false,
-				format!("Access to network target '{}/' is not allowed", server1.uri()),
+				format!("Access to network target '{}' is not allowed", server1.address()),
 			),
 			(
 				Datastore::new("memory").await.unwrap().with_capabilities(
@@ -589,7 +589,7 @@ mod tests {
 				Session::owner(),
 				"RETURN http::get('http://1.1.1.1')".to_string(),
 				false,
-				"Access to network target 'http://1.1.1.1/' is not allowed".to_string(),
+				"Access to network target '1.1.1.1:80' is not allowed".to_string(),
 			),
 			(
 				Datastore::new("memory").await.unwrap().with_capabilities(
