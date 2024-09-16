@@ -961,7 +961,7 @@ impl Value {
 			Value::Geometry(_) => true,
 			Value::Array(v) => !v.is_empty(),
 			Value::Object(v) => !v.is_empty(),
-			Value::Strand(v) => !v.is_empty() && !v.eq_ignore_ascii_case("false"),
+			Value::Strand(v) => !v.is_empty(),
 			Value::Number(v) => v.is_truthy(),
 			Value::Duration(v) => v.as_nanos() > 0,
 			Value::Datetime(v) => v.timestamp() > 0,
