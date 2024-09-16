@@ -81,6 +81,7 @@ async fn define_alter_table() -> Result<(), Error> {
 		"{
 			accesses: {},
 			analyzers: {},
+			configs: {},
 			functions: {},
 			models: {},
 			params: {},
