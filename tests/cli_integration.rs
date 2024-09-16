@@ -1473,7 +1473,7 @@ fn remove_debug_info(output: String) -> String {
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │                     !!! THIS IS A DEVELOPMENT BUILD !!!                     │
 │     Development builds are not intended for production use and include      │
-│    tooling and features that may affect the performance of the database.    |
+│    tooling and features that may affect the performance of the database.    │
 └─────────────────────────────────────────────────────────────────────────────┘
 ";
 	// The last line in the above is important

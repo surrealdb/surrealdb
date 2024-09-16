@@ -1,11 +1,10 @@
 use std::collections::BTreeMap;
 
-use md5::digest::typenum::Exp;
 use reblessive::Stack;
 
 use crate::{
 	sql::{
-		Array, Constant, Expression, Geometry, Id, Number, Object, Operator, Part, Query,
+		Array, Constant, Expression, Geometry, Id, Idiom, Number, Object, Operator, Part, Query,
 		Statement, Statements, Strand, Table, Thing, Value,
 	},
 	syn::parser::{mac::test_parse, Parser},
@@ -167,6 +166,9 @@ fn constant_lowercase() {
 
 	let out = test_parse!(parse_value_table, r#" math::neg_inf "#).unwrap();
 	assert_eq!(out, Value::Constant(Constant::MathNegInf));
+
+	let out = test_parse!(parse_value_table, r#" time::epoch "#).unwrap();
+	assert_eq!(out, Value::Constant(Constant::TimeEpoch));
 }
 
 #[test]
@@ -179,6 +181,9 @@ fn constant_uppercase() {
 
 	let out = test_parse!(parse_value_table, r#" MATH::NEG_INF "#).unwrap();
 	assert_eq!(out, Value::Constant(Constant::MathNegInf));
+
+	let out = test_parse!(parse_value_table, r#" TIME::EPOCH "#).unwrap();
+	assert_eq!(out, Value::Constant(Constant::TimeEpoch));
 }
 
 #[test]
@@ -191,6 +196,9 @@ fn constant_mixedcase() {
 
 	let out = test_parse!(parse_value_table, r#" MaTh::Neg_Inf "#).unwrap();
 	assert_eq!(out, Value::Constant(Constant::MathNegInf));
+
+	let out = test_parse!(parse_value_table, r#" TiME::ePoCH "#).unwrap();
+	assert_eq!(out, Value::Constant(Constant::TimeEpoch));
 }
 
 #[test]
@@ -205,6 +213,23 @@ fn scientific_number() {
 	let res = test_parse!(parse_value_table, r#" 9.7e-5"#).unwrap();
 	assert!(matches!(res, Value::Number(Number::Float(_))));
 	assert_eq!(res.to_string(), "0.000097f")
+}
+
+#[test]
+fn number_method() {
+	let res = test_parse!(parse_value_table, r#" 9.7e-5.sin()"#).unwrap();
+	let expected = Value::Idiom(Idiom(vec![
+		Part::Start(Value::Number(Number::Float(9.7e-5))),
+		Part::Method("sin".to_string(), vec![]),
+	]));
+	assert_eq!(res, expected);
+
+	let res = test_parse!(parse_value_table, r#" 1.sin()"#).unwrap();
+	let expected = Value::Idiom(Idiom(vec![
+		Part::Start(Value::Number(Number::Int(1))),
+		Part::Method("sin".to_string(), vec![]),
+	]));
+	assert_eq!(res, expected);
 }
 
 #[test]

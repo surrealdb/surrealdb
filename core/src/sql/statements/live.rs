@@ -162,6 +162,7 @@ mod tests {
 	use crate::kvs::Datastore;
 	use crate::kvs::LockType::Optimistic;
 	use crate::kvs::TransactionType::Write;
+	use crate::sql::Thing;
 	use crate::sql::Value;
 	use crate::syn::Parse;
 
@@ -202,15 +203,14 @@ mod tests {
 		tx.cancel().await.unwrap();
 
 		// Initiate a Create record
-		let create_statement = format!("CREATE {}:test_true SET condition = true", tb);
+		let create_statement = format!("CREATE {tb}:test_true SET condition = true");
 		let create_response = &mut dbs.execute(&create_statement, &ses, None).await.unwrap();
 		assert_eq!(create_response.len(), 1);
 		let expected_record = Value::parse(&format!(
 			"[{{
-				id: {}:test_true,
+				id: {tb}:test_true,
 				condition: true,
-			}}]",
-			tb
+			}}]"
 		));
 
 		let tmp = create_response.remove(0).result.unwrap();
@@ -231,12 +231,12 @@ mod tests {
 			Notification::new(
 				live_id,
 				Action::Create,
+				Value::Thing(Thing::from((tb, "test_true"))),
 				Value::parse(&format!(
 					"{{
-						id: {}:test_true,
+						id: {tb}:test_true,
 						condition: true,
-					}}",
-					tb
+					}}"
 				),),
 			)
 		);

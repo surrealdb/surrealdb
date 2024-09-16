@@ -57,11 +57,8 @@ pub async fn gc_ns(tx: &Transaction, ts: u64, ns: &str) -> Result<(), Error> {
 		// Calculate the watermark expiry window
 		let watermark_ts = ts - cf_expiry;
 		// Calculate the watermark versionstamp
-		let watermark_vs = tx
-			.lock()
-			.await
-			.get_versionstamp_from_timestamp(watermark_ts, ns, &db.name, true)
-			.await?;
+		let watermark_vs =
+			tx.lock().await.get_versionstamp_from_timestamp(watermark_ts, ns, &db.name).await?;
 		// If a versionstamp exists, then garbage collect
 		if let Some(watermark_vs) = watermark_vs {
 			gc_range(tx, ns, &db.name, watermark_vs).await?;

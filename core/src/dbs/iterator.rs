@@ -22,6 +22,8 @@ use reblessive::TreeStack;
 use std::mem;
 use std::sync::Arc;
 
+const TARGET: &str = "surrealdb::core::dbs";
+
 #[derive(Clone)]
 pub(crate) enum Iterable {
 	Value(Value),
@@ -290,7 +292,7 @@ impl Iterator {
 		stm: &Statement<'_>,
 	) -> Result<Value, Error> {
 		// Log the statement
-		trace!("Iterating: {}", stm);
+		trace!(target: TARGET, statement = %stm, "Iterating statement");
 		// Enable context override
 		let mut cancel_ctx = MutableContext::new(ctx);
 		self.run = cancel_ctx.add_cancel();
