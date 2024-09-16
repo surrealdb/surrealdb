@@ -310,13 +310,9 @@ pub async fn generate_schema(
 			table_orderable = table_orderable.item(fd_name.to_string());
 			let type_filter_name = format!("_filter_{}", unwrap_type(fd_type.clone()));
 
-			let type_filter = Type::InputObject(filter_from_type(
-				kind.clone(),
-				type_filter_name.clone(),
-				&mut types,
-			)?);
-			trace!("\n{type_filter:?}\n");
-			types.push(type_filter);
+			let _ = filter_from_type(kind.clone(), type_filter_name.clone(), &mut types)?;
+			// trace!("\n{type_filter:?}\n");
+			// types.push(type_filter);
 
 			table_filter = table_filter
 				.field(InputValue::new(fd.name.to_string(), TypeRef::named(type_filter_name)));
@@ -673,13 +669,21 @@ fn filter_from_type(
 	kind: Kind,
 	filter_name: String,
 	types: &mut Vec<Type>,
-) -> Result<InputObject, GqlError> {
+) -> Result<(), GqlError> {
 	let ty = match unwrap_kind(&kind) {
 		Kind::Record(ts) => match ts.len() {
-			1 => TypeRef::named(filter_name_from_table(
-				ts.first().expect("ts should have exactly one element").as_str(),
-			)),
-			_ => TypeRef::named(TypeRef::ID),
+			0 => TypeRef::named(TypeRef::ID),
+			// if this is a reference to a table included in the schema then the filter will be created elsewhere
+			1 => return Ok(()),
+			_ => {
+				let mut filter = InputObject::new(filter_name).oneof();
+
+				for t in ts {
+					filter = filter.field(field)
+				}
+
+				return Ok(());
+			}
 		},
 		k => unwrap_type(kind_to_type(k.clone(), types)?),
 	};
@@ -713,7 +717,9 @@ fn filter_from_type(
 		Kind::Range => {}
 		Kind::Literal(_) => {}
 	};
-	Ok(filter)
+	// Ok(filter)
+
+	Ok(())
 }
 
 fn unwrap_type(ty: TypeRef) -> TypeRef {
