@@ -599,10 +599,11 @@ async fn function_array_len() -> Result<(), Error> {
 #[tokio::test]
 async fn function_array_logical_and() -> Result<(), Error> {
 	test_queries(
-		r#"RETURN array::logical_and([true, false, true, false], [true, true, false, false]);
-RETURN array::logical_and([1, 0, 1, 0], ["true", "true", "false", "false"]);
-RETURN array::logical_and([0, 1], []);"#,
-		&["[true, false, false, false]", r#"[1, 0, "false", 0]"#, "[0, null]"],
+		r#"
+		RETURN array::logical_and([true, false, true, false], [true, true, false, false]);
+		RETURN array::logical_and([1, 0, 1, 0], [true, true, false, false]);
+		RETURN array::logical_and([0, 1], []);"#,
+		&["[true, false, false, false]", r#"[1, 0, false, 0]"#, "[0, null]"],
 	)
 	.await?;
 	Ok(())
@@ -611,10 +612,11 @@ RETURN array::logical_and([0, 1], []);"#,
 #[tokio::test]
 async fn function_array_logical_or() -> Result<(), Error> {
 	test_queries(
-		r#"RETURN array::logical_or([true, false, true, false], [true, true, false, false]);
-RETURN array::logical_or([1, 0, 1, 0], ["true", "true", "false", "false"]);
-RETURN array::logical_or([0, 1], []);"#,
-		&["[true, true, true, false]", r#"[1, "true", 1, 0]"#, "[0, 1]"],
+		r#"
+		RETURN array::logical_or([true, false, true, false], [true, true, false, false]);
+		RETURN array::logical_or([1, 0, 1, 0], [true, true, false, false]);
+		RETURN array::logical_or([0, 1], []);"#,
+		&["[true, true, true, false]", r#"[1, true, 1, 0]"#, "[0, 1]"],
 	)
 	.await?;
 	Ok(())
@@ -623,10 +625,11 @@ RETURN array::logical_or([0, 1], []);"#,
 #[tokio::test]
 async fn function_array_logical_xor() -> Result<(), Error> {
 	test_queries(
-		r#"RETURN array::logical_xor([true, false, true, false], [true, true, false, false]);
-RETURN array::logical_xor([1, 0, 1, 0], ["true", "true", "false", "false"]);
-RETURN array::logical_xor([0, 1], []);"#,
-		&["[false, true, true, false]", r#"[false, "true", 1, 0]"#, "[0, 1]"],
+		r#"
+		RETURN array::logical_xor([true, false, true, false], [true, true, false, false]);
+		RETURN array::logical_xor([1, 0, 1, 0], [true, true, false, false]);
+		RETURN array::logical_xor([0, 1], []);"#,
+		&["[false, true, true, false]", r#"[false, true, 1, 0]"#, "[0, 1]"],
 	)
 	.await?;
 	Ok(())
