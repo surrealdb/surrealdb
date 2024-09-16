@@ -1,5 +1,4 @@
-use super::config;
-use super::config::Config;
+use super::config::{Config, CF};
 use crate::cli::validator::parser::env_filter::CustomEnvFilter;
 use crate::cli::validator::parser::env_filter::CustomEnvFilterParser;
 use crate::cnf::LOGO;
@@ -43,12 +42,33 @@ pub struct StartCommandArguments {
 	// Tasks
 	//
 	#[arg(
-		help = "The interval at which to run node agent tick (including garbage collection)",
+		help = "The interval at which to refresh node registration information",
 		help_heading = "Database"
 	)]
-	#[arg(env = "SURREAL_TICK_INTERVAL", long = "tick-interval", value_parser = super::validator::duration)]
+	#[arg(env = "SURREAL_NODE_MEMBERSHIP_REFRESH_INTERVAL", long = "node-membership-refresh-interval", value_parser = super::validator::duration)]
+	#[arg(default_value = "3s")]
+	node_membership_refresh_interval: Duration,
+	#[arg(
+		help = "The interval at which process and archive inactive nodes",
+		help_heading = "Database"
+	)]
+	#[arg(env = "SURREAL_NODE_MEMBERSHIP_CHECK_INTERVAL", long = "node-membership-check-interval", value_parser = super::validator::duration)]
+	#[arg(default_value = "15s")]
+	node_membership_check_interval: Duration,
+	#[arg(
+		help = "The interval at which to process and cleanup archived nodes",
+		help_heading = "Database"
+	)]
+	#[arg(env = "SURREAL_NODE_MEMBERSHIP_CLEANUP_INTERVAL", long = "node-membership-cleanup-interval", value_parser = super::validator::duration)]
+	#[arg(default_value = "300s")]
+	node_membership_cleanup_interval: Duration,
+	#[arg(
+		help = "The interval at which to perform changefeed garbage collection",
+		help_heading = "Database"
+	)]
+	#[arg(env = "SURREAL_CHANGEFEED_GC_INTERVAL", long = "changefeed-gc-interval", value_parser = super::validator::duration)]
 	#[arg(default_value = "10s")]
-	tick_interval: Duration,
+	changefeed_gc_interval: Duration,
 	//
 	// Authentication
 	//
@@ -143,7 +163,10 @@ pub async fn init(
 		dbs,
 		web,
 		log,
-		tick_interval,
+		node_membership_refresh_interval,
+		node_membership_check_interval,
+		node_membership_cleanup_interval,
+		changefeed_gc_interval,
 		no_banner,
 		no_identification_headers,
 		..
@@ -168,21 +191,26 @@ pub async fn init(
 	} else {
 		(None, None)
 	};
-	// Setup the command-line options
-	let _ = config::CF.set(Config {
+	// Configure the engine
+	let engine = EngineOptions::default()
+		.with_node_membership_refresh_interval(node_membership_refresh_interval)
+		.with_node_membership_check_interval(node_membership_check_interval)
+		.with_node_membership_cleanup_interval(node_membership_cleanup_interval)
+		.with_changefeed_gc_interval(changefeed_gc_interval);
+	// Configure the config
+	let config = Config {
 		bind: listen_addresses.first().cloned().unwrap(),
 		client_ip,
 		path,
 		user,
 		pass,
 		no_identification_headers,
-		// engine: Some(EngineOptions::default().with_tick_interval(tick_interval)),
-		engine: Some(EngineOptions::default()),
+		engine,
 		crt,
 		key,
-	});
-	// Get the options
-	let opt = &config::CF.get().unwrap().engine.unwrap_or_default();
+	};
+	// Setup the command-line options
+	let _ = CF.set(config);
 	// Initiate environment
 	env::init().await?;
 	// Create a token to cancel tasks
@@ -190,7 +218,7 @@ pub async fn init(
 	// Start the datastore
 	let datastore = Arc::new(dbs::init(dbs).await?);
 	// Start the node agent
-	let nodetasks = tasks::init(datastore.clone(), canceller.clone(), opt);
+	let nodetasks = tasks::init(datastore.clone(), canceller.clone(), &CF.get().unwrap().engine);
 	// Start the web server
 	net::init(datastore, canceller.clone()).await?;
 	// Shutdown and stop closed tasks
