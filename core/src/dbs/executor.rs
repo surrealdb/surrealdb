@@ -27,6 +27,8 @@ use trice::Instant;
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen_futures::spawn_local as spawn;
 
+const TARGET: &str = "surrealdb::core::dbs";
+
 pub(crate) struct Executor<'a> {
 	err: bool,
 	kvs: &'a Datastore,
@@ -184,7 +186,7 @@ impl<'a> Executor<'a> {
 		Ok(ctx.freeze())
 	}
 
-	#[instrument(level = "debug", name = "executor", skip_all)]
+	#[instrument(level = "debug", name = "executor", target = "surrealdb::core::dbs", skip_all)]
 	pub async fn execute(
 		&mut self,
 		mut ctx: Context,
@@ -207,7 +209,7 @@ impl<'a> Executor<'a> {
 		// Process all statements in query
 		for stm in qry.into_iter() {
 			// Log the statement
-			debug!("Executing: {}", stm);
+			trace!(target: TARGET, statement = %stm, "Executing statement");
 			// Reset errors
 			if self.txn.is_none() {
 				self.err = false;

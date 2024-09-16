@@ -22,6 +22,8 @@ use reblessive::TreeStack;
 use std::mem;
 use std::sync::Arc;
 
+const TARGET: &str = "surrealdb::core::dbs";
+
 #[derive(Clone)]
 pub(crate) enum Iterable {
 	Value(Value),
@@ -290,7 +292,7 @@ impl Iterator {
 		stm: &Statement<'_>,
 	) -> Result<Value, Error> {
 		// Log the statement
-		trace!("Iterating: {}", stm);
+		trace!(target: TARGET, statement = %stm, "Iterating statement");
 		// Enable context override
 		let mut cancel_ctx = MutableContext::new(ctx);
 		self.run = cancel_ctx.add_cancel();
@@ -394,6 +396,7 @@ impl Iterator {
 	}
 
 	/// Check if the iteration can be limited per iterator
+	#[cfg(not(target_arch = "wasm32"))]
 	fn check_set_start_limit(&mut self, ctx: &Context, stm: &Statement<'_>) -> bool {
 		// If there are groups we can't
 		if stm.group().is_some() {
@@ -419,6 +422,7 @@ impl Iterator {
 		false
 	}
 
+	#[cfg(not(target_arch = "wasm32"))]
 	fn compute_start_limit(&mut self, ctx: &Context, stm: &Statement<'_>) {
 		if self.check_set_start_limit(ctx, stm) {
 			if let Some(l) = self.limit {

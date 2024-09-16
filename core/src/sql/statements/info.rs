@@ -291,6 +291,7 @@ impl InfoStatement {
 					false => Value::from(res.to_string()),
 				})
 			}
+			#[allow(unused_variables)]
 			InfoStatement::Index(index, table, _structured) => {
 				// Allowed to run?
 				opt.is_allowed(Action::View, ResourceKind::Actor, &Base::Db)?;

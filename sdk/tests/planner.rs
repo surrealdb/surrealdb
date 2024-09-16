@@ -2965,3 +2965,101 @@ async fn select_from_unique_index_descending() -> Result<(), Error> {
 	//
 	Ok(())
 }
+
+async fn select_composite_index(unique: bool) -> Result<(), Error> {
+	//
+	let sql = format!(
+		"
+		DEFINE INDEX t_idx ON TABLE t COLUMNS on, value {};
+		CREATE t:1 SET on = true, value = 1;
+		CREATE t:2 SET on = false, value = 1;
+		CREATE t:3 SET on = true, value = 2;
+		CREATE t:4 SET on = false, value = 2;
+		SELECT * FROM t WHERE on = true EXPLAIN;
+		SELECT * FROM t WHERE on = true;
+		SELECT * FROM t WHERE on = false AND value = 2 EXPLAIN;
+		SELECT * FROM t WHERE on = false AND value = 2;
+	",
+		if unique {
+			"UNIQUE"
+		} else {
+			""
+		}
+	);
+	let mut t = Test::new(&sql).await?;
+	//
+	t.expect_size(9)?;
+	t.skip_ok(5)?;
+	//
+	t.expect_vals(&[
+		"[
+			{
+				detail: {
+					plan: {
+							index: 't_idx',
+							operator: '=',
+							value: true
+					},
+					table: 't'
+				},
+				operation: 'Iterate Index'
+			},
+			{
+				detail: {
+					type: 'Memory'
+				},
+				operation: 'Collector'
+			}
+		]",
+		"[
+			{
+				id: t:1,
+				on: true,
+				value: 1
+			},
+			{
+				id: t:3,
+				on: true,
+				value: 2
+			}
+		]",
+		"[
+			{
+				detail: {
+					plan: {
+						index: 't_idx',
+						operator: '=',
+						value: false
+					},
+					table: 't'
+				},
+				operation: 'Iterate Index'
+			},
+			{
+				detail: {
+					type: 'Memory'
+				},
+				operation: 'Collector'
+			}
+		]",
+		"[
+			{
+				id: t:4,
+				on: false,
+				value: 2
+			}
+		]",
+	])?;
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn select_composite_standard_index() -> Result<(), Error> {
+	select_composite_index(false).await
+}
+
+#[tokio::test]
+async fn select_composite_unique_index() -> Result<(), Error> {
+	select_composite_index(true).await
+}
