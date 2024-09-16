@@ -1148,7 +1148,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 
 				let mut duration_clause = String::new();
 				if case.token_expiration.is_some() || case.session_expiration.is_some() {
-					duration_clause = format!("DURATION")
+					duration_clause = "DURATION".to_owned()
 				}
 				if let Some(duration) = case.token_expiration {
 					duration_clause =
