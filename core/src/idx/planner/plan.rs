@@ -329,7 +329,7 @@ impl IndexOption {
 	}
 }
 
-#[derive(Debug, Default, Eq, PartialEq, Hash)]
+#[derive(Debug, Clone, Default, Eq, PartialEq, Hash)]
 pub(super) struct RangeValue {
 	pub(super) value: Value,
 	pub(super) inclusive: bool,
