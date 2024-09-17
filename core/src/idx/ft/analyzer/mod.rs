@@ -278,13 +278,16 @@ impl Analyzer {
 				});
 			}
 		}
-		if let Some(t) = &self.az.tokenizers {
-			if !input.is_empty() {
-				let t = Tokenizer::tokenize(t, input);
-				return Filter::apply_filters(t, &self.filters, stage);
-			}
+		if input.is_empty() {
+			return Ok(Tokens::new(input));
 		}
-		Ok(Tokens::new(input))
+
+		let tokens = if let Some(t) = &self.az.tokenizers {
+			Tokenizer::tokenize(t, input)
+		} else {
+			Tokenizer::tokenize(&[], input)
+		};
+		Filter::apply_filters(tokens, &self.filters, stage)
 	}
 
 	/// Used for exposing the analyzer as the native function `search::analyze`
@@ -350,5 +353,10 @@ mod tests {
 	pub(super) async fn test_analyzer_tokens(def: &str, input: &str, expected: &[Token]) {
 		let tokens = get_analyzer_tokens(def, input).await;
 		assert_eq!(tokens.list(), expected);
+	}
+
+	#[tokio::test]
+	async fn test_no_tokenizer() {
+		test_analyzer("ANALYZER test FILTERS lowercase", "ab", &["ab"]).await;
 	}
 }
