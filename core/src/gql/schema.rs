@@ -84,8 +84,8 @@ pub async fn generate_schema(
 ) -> Result<Schema, GqlError> {
 	let kvs = datastore;
 	let tx = kvs.transaction(TransactionType::Read, LockType::Optimistic).await?;
-	let ns = session.ns.as_ref().ok_or(GqlError::UnpecifiedNamespace)?;
-	let db = session.db.as_ref().ok_or(GqlError::UnpecifiedDatabase)?;
+	let ns = session.ns.as_ref().ok_or(GqlError::UnspecifiedNamespace)?;
+	let db = session.db.as_ref().ok_or(GqlError::UnspecifiedDatabase)?;
 
 	let cg = tx.get_db_config(ns, db, "graphql").await.map_err(|e| match e {
 		crate::err::Error::CgNotFound {

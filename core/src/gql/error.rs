@@ -14,9 +14,9 @@ pub enum GqlError {
 	#[error("Error resolving request: {0}")]
 	ResolverError(String),
 	#[error("No Namespace specified")]
-	UnpecifiedNamespace,
+	UnspecifiedNamespace,
 	#[error("No Database specified")]
-	UnpecifiedDatabase,
+	UnspecifiedDatabase,
 	#[error("GraphQL has not been configured for this database")]
 	NotConfigured,
 	#[error("Internal Error: {0}")]
