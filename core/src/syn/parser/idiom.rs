@@ -185,6 +185,8 @@ impl Parser<'_> {
 						if let Some(x) = self.parse_graph_idiom(ctx, &mut res, Dir::Both).await? {
 							return Ok(x);
 						}
+					} else {
+						break;
 					}
 				}
 				t!("..") => {
