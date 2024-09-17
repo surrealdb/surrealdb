@@ -343,9 +343,6 @@ impl<T: Target + Hash + Eq + PartialEq + fmt::Display> fmt::Display for Targets<
 #[derive(Debug, Clone)]
 #[non_exhaustive]
 pub struct Capabilities {
-	// Query capabilities
-	// These capabilities limit what SurrealQL queries allow
-	// Query capabilities are exposed through the library
 	scripting: bool,
 	guest_access: bool,
 	live_query_notifications: bool,
@@ -354,10 +351,6 @@ pub struct Capabilities {
 	deny_funcs: Arc<Targets<FuncTarget>>,
 	allow_net: Arc<Targets<NetTarget>>,
 	deny_net: Arc<Targets<NetTarget>>,
-
-	// Server capabilities
-	// These capabilities limit what the SurrealDB server allows
-	// Server capabilities are not exposed through the library
 	allow_rpc: Arc<Targets<MethodTarget>>,
 	deny_rpc: Arc<Targets<MethodTarget>>,
 	allow_http: Arc<Targets<RouteTarget>>,

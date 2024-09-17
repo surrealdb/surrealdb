@@ -9,17 +9,21 @@ use surrealdb_core::dbs::capabilities::{
 
 /// Capabilities are used to limit what users are allowed to do using queries.
 ///
-/// Capabilities in this context refers to query capabilities, which are:
+/// Capabilities are split into categories:
 /// - Scripting: Whether or not users can execute scripts
-/// - Guest access: Whether or not non-authenticated users can execute queries on the system when authentication is enabled.
+/// - Guest access: Whether or not unauthenticated users can execute queries
 /// - Functions: Whether or not users can execute certain functions
-/// - Network: Whether or not users can access certain network addresses
+/// - Network: Whether or not users can connect to certain network addresses
+/// - RPC: Whether or not users can interface with certain RPC methods
+/// - HTTP: Whether or not users can interface with certain HTTP routes
 ///
 /// Capabilities are configured globally. By default, capabilities are configured as:
 /// - Scripting: false
 /// - Guest access: false
 /// - Functions: All functions are allowed
-/// - Network: No network address is allowed nor denied, hence all network addresses are denied unless explicitly allowed
+/// - Network: No network address is allowed, all are impliticly denied
+/// - RPC: All RPC methods are allowed
+/// - HTTP: All HTTP routes are allowed
 ///
 /// The capabilities are defined using allow/deny lists for fine-grained control.
 ///

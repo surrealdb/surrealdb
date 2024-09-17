@@ -1893,14 +1893,14 @@ async fn session_id_undefined() {
 
 #[test(tokio::test)]
 async fn rpc_capability() {
-	// Setup database server with some RPC methods denied via server capabilities
+	// Setup database server with some RPC methods denied
 	let (addr, mut server) = common::start_server_without_rpc(vec!["query", "info"]).await.unwrap();
 	// Connect to WebSocket
 	let mut socket = Socket::connect(&addr, SERVER, FORMAT).await.unwrap();
 	// Specify a namespace and database
 	socket.send_message_use(Some(NS), Some(DB)).await.unwrap();
 
-	// Test operations that SHOULD NOT with the provided server capabilities
+	// Test operations that SHOULD NOT with the provided capabilities
 	let operations_ko = vec![
 		socket.send_request("info", json!([])),
 		socket.send_request("query", json!(["SELECT * FROM 1"])),
@@ -1917,7 +1917,7 @@ async fn rpc_capability() {
 		);
 	}
 
-	// Test operations that SHOULD work with the provided server capabilities
+	// Test operations that SHOULD work with the provided capabilities
 	let operations_ok = vec![
 		socket.send_request("use", json!([NS, DB])),
 		socket.send_request("ping", json!([])),
