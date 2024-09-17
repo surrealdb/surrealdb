@@ -1,7 +1,7 @@
 mod parse;
 use parse::Parse;
 mod helpers;
-use crate::helpers::skip_ok;
+use crate::helpers::{skip_ok, Test};
 use helpers::new_ds;
 use surrealdb::dbs::Session;
 use surrealdb::err::Error;
@@ -702,5 +702,19 @@ async fn select_where_matches_mixing_indexes() -> Result<(), Error> {
 			]",
 	);
 	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+	Ok(())
+}
+
+#[tokio::test]
+async fn select_where_matches_analyser_without_tokenizer() -> Result<(), Error> {
+	let sql = r"
+		DEFINE ANALYZER az FILTERS lowercase,ngram(1,5);
+		CREATE t:1 SET text = 'ab';
+		DEFINE INDEX search_idx ON TABLE t COLUMNS text SEARCH ANALYZER az BM25 HIGHLIGHTS;
+		SELECT * FROM t WHERE text @@ 'a';";
+	let mut t = Test::new(sql).await?;
+	t.expect_size(4)?;
+	t.skip_ok(3)?;
+	t.expect_val("[{ id: t:1, text: 'ab' }]")?;
 	Ok(())
 }
