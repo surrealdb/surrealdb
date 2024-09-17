@@ -844,7 +844,7 @@ async fn field_definition_edge_permissions() -> Result<(), Error> {
 		DEFINE TABLE user SCHEMAFULL;
 		DEFINE TABLE business SCHEMAFULL;
 		DEFINE FIELD owner ON TABLE business TYPE record<user>;
-		DEFINE TABLE contact TYPE RELATION SCHEMAFULL PERMISSIONS FOR create WHERE in.owner.id = $auth.id;
+		DEFINE TABLE contact TYPE RELATION SCHEMAFULL PERMISSIONS FOR select, create WHERE in.owner.id = $auth.id;
 		INSERT INTO user (id, name) VALUES (user:one, 'John'), (user:two, 'Lucy');
 		INSERT INTO business (id, owner) VALUES (business:one, user:one), (business:two, user:two);
 	";
