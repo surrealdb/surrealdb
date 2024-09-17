@@ -23,20 +23,22 @@ fn main() {
 					continue;
 				};
 				while let Some(l) = lines.next() {
-					if !l.trim_start().starts_with(char::is_alphabetic) {
+					// pub, enum ,struct
+					if !l.trim_start().starts_with(&['p', 'e', 's']) {
 						continue;
 					} else {
 						let Some(mut name) = l
 							.split_whitespace()
-							.skip_while(|w| *w == "pub" || *w == "struct" || *w == "enum")
+							.skip_while(|w| *w != "struct" && *w != "enum")
+							.skip_while(|w| *w == "struct" || *w == "enum")
 							.next()
 						else {
-							panic!("foo: {l}")
+							panic!("foo: {l} {}", path.to_string_lossy())
 						};
 						if let Some(idx) = name.find('(') {
 							name = &name[0..idx];
 						}
-						rev_acc.insert(name.to_string(), rev);
+						rev_acc.insert(format!("{name}({})", path.to_string_lossy()), rev);
 						break;
 					}
 				}
