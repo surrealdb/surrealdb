@@ -29,6 +29,10 @@ pub static MAX_OBJECT_PARSING_DEPTH: LazyLock<u32> =
 pub static MAX_QUERY_PARSING_DEPTH: LazyLock<u32> =
 	lazy_env_parse!("SURREAL_MAX_QUERY_PARSING_DEPTH", u32, 20);
 
+/// Specifies the number of computed regexes which can be cached in the engine.
+pub static REGEX_CACHE_SIZE: LazyLock<usize> =
+	lazy_env_parse!("SURREAL_REGEX_CACHE_SIZE", usize, 1_000);
+
 /// Specifies the number of items which can be cached within a single transaction.
 pub static TRANSACTION_CACHE_SIZE: LazyLock<usize> =
 	lazy_env_parse!("SURREAL_TRANSACTION_CACHE_SIZE", usize, 10_000);

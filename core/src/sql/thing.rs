@@ -216,7 +216,11 @@ impl Thing {
 	pub fn to_raw(&self) -> String {
 		self.to_string()
 	}
-
+	/// Check if this Thing is a range
+	pub fn is_range(&self) -> bool {
+		matches!(self.id, Id::Range(_))
+	}
+	/// Check if this Thing is of a certain table type
 	pub fn is_record_type(&self, types: &[Table]) -> bool {
 		types.is_empty() || types.iter().any(|tb| tb.0 == self.tb)
 	}
