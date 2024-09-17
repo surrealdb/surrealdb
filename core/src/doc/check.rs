@@ -124,27 +124,11 @@ impl Document {
 						// The id is a match, so don't error
 						v if rid.id.is(&v) => (),
 						// The in field does not match
-						v => match v.convert_to_record() {
-							// This is a value which matches the id
-							Ok(v) if v.eq(&rid) => (),
-							// The value is a record but doesn't match
-							Ok(v) => {
-								return Err(Error::IdMismatch {
-									value: v.to_string(),
-								})
-							}
-							// The in field does not match at all
-							Err(Error::ConvertTo {
-								from,
-								..
-							}) => {
-								return Err(Error::IdMismatch {
-									value: from.to_string(),
-								})
-							}
-							// Return any other error
-							Err(e) => return Err(e),
-						},
+						v => {
+							return Err(Error::IdMismatch {
+								value: v.to_string(),
+							})
+						}
 					}
 				}
 			}
@@ -161,27 +145,11 @@ impl Document {
 						// The in is a match, so don't error
 						v if l.id.is(&v) => (),
 						// The in field does not match
-						v => match v.convert_to_record() {
-							// This is a value which matches the id
-							Ok(v) if v.eq(l) => (),
-							// The value is a record but doesn't match
-							Ok(v) => {
-								return Err(Error::InMismatch {
-									value: v.to_string(),
-								})
-							}
-							// The in field does not match at all
-							Err(Error::ConvertTo {
-								from,
-								..
-							}) => {
-								return Err(Error::InMismatch {
-									value: from.to_string(),
-								})
-							}
-							// Return any other error
-							Err(e) => return Err(e),
-						},
+						v => {
+							return Err(Error::InMismatch {
+								value: v.to_string(),
+							})
+						}
 					}
 				}
 				// Check that the 'out' field matches
@@ -192,27 +160,11 @@ impl Document {
 						// The out is a match, so don't error
 						v if r.id.is(&v) => (),
 						// The in field does not match
-						v => match v.convert_to_record() {
-							// This is a value which matches the id
-							Ok(v) if v.eq(r) => (),
-							// The value is a record but doesn't match
-							Ok(v) => {
-								return Err(Error::OutMismatch {
-									value: v.to_string(),
-								})
-							}
-							// The in field does not match at all
-							Err(Error::ConvertTo {
-								from,
-								..
-							}) => {
-								return Err(Error::OutMismatch {
-									value: from.to_string(),
-								})
-							}
-							// Return any other error
-							Err(e) => return Err(e),
-						},
+						v => {
+							return Err(Error::OutMismatch {
+								value: v.to_string(),
+							})
+						}
 					}
 				}
 			}
@@ -225,27 +177,11 @@ impl Document {
 					// The in is a match, so don't error
 					v if l.id.is(&v) => (),
 					// The in field does not match
-					v => match v.convert_to_record() {
-						// This is a value which matches the id
-						Ok(v) if v.eq(l) => (),
-						// The value is a record but doesn't match
-						Ok(v) => {
-							return Err(Error::InMismatch {
-								value: v.to_string(),
-							})
-						}
-						// The in field does not match at all
-						Err(Error::ConvertTo {
-							from,
-							..
-						}) => {
-							return Err(Error::InMismatch {
-								value: from.to_string(),
-							})
-						}
-						// Return any other error
-						Err(e) => return Err(e),
-					},
+					v => {
+						return Err(Error::InMismatch {
+							value: v.to_string(),
+						})
+					}
 				}
 				// Check that the 'out' field matches
 				match data.pick(&*OUT).compute(stk, ctx, opt, Some(&self.current)).await? {
@@ -254,27 +190,11 @@ impl Document {
 					// The out is a match, so don't error
 					v if l.id.is(&v) => (),
 					// The out field does not match
-					v => match v.convert_to_record() {
-						// This is a value which matches the id
-						Ok(v) if v.eq(l) => (),
-						// The value is a record but doesn't match
-						Ok(v) => {
-							return Err(Error::OutMismatch {
-								value: v.to_string(),
-							})
-						}
-						// The out field does not match at all
-						Err(Error::ConvertTo {
-							from,
-							..
-						}) => {
-							return Err(Error::OutMismatch {
-								value: from.to_string(),
-							})
-						}
-						// Return any other error
-						Err(e) => return Err(e),
-					},
+					v => {
+						return Err(Error::OutMismatch {
+							value: v.to_string(),
+						})
+					}
 				}
 			}
 		}
@@ -287,7 +207,7 @@ impl Document {
 	/// a table, or from an index can be filtered out
 	/// before being included within the query output.
 	pub async fn check_where_condition(
-		&self,
+		&mut self,
 		stk: &mut Stk,
 		ctx: &Context,
 		opt: &Options,
@@ -295,8 +215,10 @@ impl Document {
 	) -> Result<(), Error> {
 		// Check where condition
 		if let Some(cond) = stm.conds() {
+			// Process the current permitted
+			self.process_permitted_current(stk, ctx, opt).await?;
 			// Check if the expression is truthy
-			if !cond.compute(stk, ctx, opt, Some(&self.current)).await?.is_truthy() {
+			if !cond.compute(stk, ctx, opt, Some(&self.current_permitted)).await?.is_truthy() {
 				// Ignore this document
 				return Err(Error::Ignore);
 			}

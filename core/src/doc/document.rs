@@ -1,10 +1,12 @@
 use crate::ctx::Context;
+use crate::ctx::MutableContext;
 use crate::dbs::Options;
 use crate::dbs::Workable;
 use crate::err::Error;
 use crate::iam::Action;
 use crate::iam::ResourceKind;
 use crate::idx::planner::iterators::IteratorRecord;
+use crate::sql::permission::Permission;
 use crate::sql::statements::define::DefineEventStatement;
 use crate::sql::statements::define::DefineFieldStatement;
 use crate::sql::statements::define::DefineIndexStatement;
@@ -13,6 +15,7 @@ use crate::sql::statements::live::LiveStatement;
 use crate::sql::thing::Thing;
 use crate::sql::value::Value;
 use crate::sql::Base;
+use reblessive::tree::Stk;
 use std::fmt::{Debug, Formatter};
 use std::mem;
 use std::ops::Deref;
@@ -23,10 +26,12 @@ pub(crate) struct Document {
 	pub(super) extras: Workable,
 	pub(super) initial: CursorDoc,
 	pub(super) current: CursorDoc,
+	pub(super) initial_permitted: CursorDoc,
+	pub(super) current_permitted: CursorDoc,
 }
 
 #[non_exhaustive]
-#[cfg_attr(debug_assertions, derive(Debug))]
+#[derive(Clone, Debug)]
 pub struct CursorDoc {
 	pub(crate) rid: Option<Arc<Thing>>,
 	pub(crate) ir: Option<Arc<IteratorRecord>>,
@@ -34,8 +39,7 @@ pub struct CursorDoc {
 }
 
 #[non_exhaustive]
-#[cfg_attr(debug_assertions, derive(Debug))]
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub(crate) struct CursorValue {
 	mutable: Value,
 	read_only: Option<Arc<Value>>,
@@ -165,7 +169,9 @@ impl Document {
 			id: id.clone(),
 			extras,
 			current: CursorDoc::new(id.clone(), ir.clone(), val.clone()),
-			initial: CursorDoc::new(id, ir, val),
+			initial: CursorDoc::new(id.clone(), ir.clone(), val.clone()),
+			current_permitted: CursorDoc::new(id.clone(), ir.clone(), val.clone()),
+			initial_permitted: CursorDoc::new(id.clone(), ir.clone(), val.clone()),
 		}
 	}
 
@@ -179,6 +185,118 @@ impl Document {
 	#[allow(unused)]
 	pub(crate) fn initial_doc(&self) -> &Value {
 		&self.initial.doc
+	}
+
+	pub(crate) async fn process_permitted_current(
+		&mut self,
+		stk: &mut Stk,
+		ctx: &Context,
+		opt: &Options,
+	) -> Result<(), Error> {
+		// Clone the fully permitted documents
+		self.current_permitted = self.current.clone();
+		// Check if this record exists
+		if self.id.is_some() {
+			// Should we run permissions checks?
+			if opt.check_perms(Action::View)? {
+				// Loop through all field statements
+				for fd in self.fd(ctx, opt).await?.iter() {
+					//
+					let mut out = self
+						.current
+						.doc
+						.as_ref()
+						.compute(stk, ctx, opt, Some(&self.current))
+						.await?;
+					// Loop over each field in document
+					for k in out.each(&fd.name).iter() {
+						// Process the field permissions
+						match &fd.permissions.select {
+							Permission::Full => (),
+							Permission::None => out.del(stk, ctx, opt, k).await?,
+							Permission::Specific(e) => {
+								// Disable permissions
+								let opt = &opt.new_with_perms(false);
+								// Get the current value
+								let val = Arc::new(self.current.doc.as_ref().pick(k));
+								// Configure the context
+								let mut ctx = MutableContext::new(ctx);
+								ctx.add_value("value", val);
+								let ctx = ctx.freeze();
+								// Process the PERMISSION clause
+								if !e
+									.compute(stk, &ctx, opt, Some(&self.current))
+									.await?
+									.is_truthy()
+								{
+									out.del(stk, &ctx, opt, k).await?
+								}
+							}
+						}
+					}
+					// Update the permitted document
+					self.current_permitted.doc = out.into();
+				}
+			}
+		}
+		// Carry on
+		Ok(())
+	}
+
+	pub(crate) async fn process_permitted_initial(
+		&mut self,
+		stk: &mut Stk,
+		ctx: &Context,
+		opt: &Options,
+	) -> Result<(), Error> {
+		// Clone the fully permitted documents
+		self.initial_permitted = self.initial.clone();
+		// Check if this record exists
+		if self.id.is_some() {
+			// Should we run permissions checks?
+			if opt.check_perms(Action::View)? {
+				// Loop through all field statements
+				for fd in self.fd(ctx, opt).await?.iter() {
+					//
+					let mut out = self
+						.initial
+						.doc
+						.as_ref()
+						.compute(stk, ctx, opt, Some(&self.initial))
+						.await?;
+					// Loop over each field in document
+					for k in out.each(&fd.name).iter() {
+						// Process the field permissions
+						match &fd.permissions.select {
+							Permission::Full => (),
+							Permission::None => out.del(stk, ctx, opt, k).await?,
+							Permission::Specific(e) => {
+								// Disable permissions
+								let opt = &opt.new_with_perms(false);
+								// Get the current value
+								let val = Arc::new(self.initial.doc.as_ref().pick(k));
+								// Configure the context
+								let mut ctx = MutableContext::new(ctx);
+								ctx.add_value("value", val);
+								let ctx = ctx.freeze();
+								// Process the PERMISSION clause
+								if !e
+									.compute(stk, &ctx, opt, Some(&self.initial))
+									.await?
+									.is_truthy()
+								{
+									out.del(stk, &ctx, opt, k).await?
+								}
+							}
+						}
+					}
+					// Update the permitted document
+					self.initial_permitted.doc = out.into();
+				}
+			}
+		}
+		// Carry on
+		Ok(())
 	}
 }
 
