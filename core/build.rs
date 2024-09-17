@@ -22,13 +22,13 @@ fn main() {
 				else {
 					continue;
 				};
-				while let Some(l) = lines.next() {
+				for l in lines.by_ref() {
 					// pub, enum ,struct
-					if !l.trim_start().starts_with(&['p', 'e', 's']) {
+					if !l.trim_start().starts_with(['p', 'e', 's']) {
 						continue;
 					} else {
-						let Some(mut name) = l
-							.split_whitespace()
+						#[allow(clippy::skip_while_next)]
+						let Some(mut name) = l.split_whitespace()
 							.skip_while(|w| *w != "struct" && *w != "enum")
 							.skip_while(|w| *w == "struct" || *w == "enum")
 							.next()
