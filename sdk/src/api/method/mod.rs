@@ -92,6 +92,7 @@ pub use use_db::UseDb;
 pub use use_ns::UseNs;
 pub use version::Version;
 
+use super::opt::CreateResource;
 use super::opt::IntoResource;
 
 /// A alias for an often used type of future returned by async methods in this library.
@@ -749,7 +750,7 @@ where
 	/// # Ok(())
 	/// # }
 	/// ```
-	pub fn create<R>(&self, resource: impl IntoResource<R>) -> Create<C, R> {
+	pub fn create<R>(&self, resource: impl CreateResource<R>) -> Create<C, R> {
 		Create {
 			client: Cow::Borrowed(self),
 			resource: resource.into_resource(),
