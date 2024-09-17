@@ -140,9 +140,9 @@ impl<'a> Processor<'a> {
 				Iterable::Defer(v) => self.process_defer(stk, ctx, opt, stm, v).await?,
 				Iterable::TableRange(tb, v, keys_only) => {
 					if keys_only {
-						self.process_range_keys(stk, &ctx, opt, stm, &tb, v).await?
+						self.process_range_keys(stk, ctx, opt, stm, &tb, v).await?
 					} else {
-						self.process_range(stk, &ctx, opt, stm, &tb, v).await?
+						self.process_range(stk, ctx, opt, stm, &tb, v).await?
 					}
 				}
 				Iterable::Edges(e) => self.process_edge(stk, ctx, opt, stm, e).await?,
@@ -392,17 +392,12 @@ impl<'a> Processor<'a> {
 		Ok(())
 	}
 
-	async fn process_range(
-		&mut self,
-		stk: &mut Stk,
-		ctx: &Context,
+	async fn process_range_prepare(
+		txn: &Transaction,
 		opt: &Options,
-		stm: &Statement<'_>,
 		tb: &str,
 		r: IdRange,
-	) -> Result<(), Error> {
-		// Get the transaction
-		let txn = ctx.tx();
+	) -> Result<(Vec<u8>, Vec<u8>), Error> {
 		// Check that the table exists
 		txn.check_ns_db_tb(opt.ns()?, opt.db()?, tb, opt.strict).await?;
 		// Prepare the range start key
@@ -425,6 +420,22 @@ impl<'a> Processor<'a> {
 				key
 			}
 		};
+		Ok((beg, end))
+	}
+
+	async fn process_range(
+		&mut self,
+		stk: &mut Stk,
+		ctx: &Context,
+		opt: &Options,
+		stm: &Statement<'_>,
+		tb: &str,
+		r: IdRange,
+	) -> Result<(), Error> {
+		// Get the transaction
+		let txn = ctx.tx();
+		// Prepare
+		let (beg, end) = Self::process_range_prepare(&txn, opt, tb, r).await?;
 		// Create a new iterable range
 		let mut stream = txn.stream(beg..end, None);
 		// Loop until no more entries
@@ -463,28 +474,8 @@ impl<'a> Processor<'a> {
 	) -> Result<(), Error> {
 		// Get the transaction
 		let txn = ctx.tx();
-		// Check that the table exists
-		txn.check_ns_db_tb(opt.ns()?, opt.db()?, &tb, opt.strict).await?;
-		// Prepare the range start key
-		let beg = match &r.beg {
-			Bound::Unbounded => thing::prefix(opt.ns()?, opt.db()?, tb),
-			Bound::Included(v) => thing::new(opt.ns()?, opt.db()?, tb, v).encode().unwrap(),
-			Bound::Excluded(v) => {
-				let mut key = thing::new(opt.ns()?, opt.db()?, tb, v).encode().unwrap();
-				key.push(0x00);
-				key
-			}
-		};
-		// Prepare the range end key
-		let end = match &r.end {
-			Bound::Unbounded => thing::suffix(opt.ns()?, opt.db()?, &tb),
-			Bound::Excluded(v) => thing::new(opt.ns()?, opt.db()?, &tb, v).encode().unwrap(),
-			Bound::Included(v) => {
-				let mut key = thing::new(opt.ns()?, opt.db()?, &tb, v).encode().unwrap();
-				key.push(0x00);
-				key
-			}
-		};
+		// Prepare
+		let (beg, end) = Self::process_range_prepare(&txn, opt, tb, r).await?;
 		// Create a new iterable range
 		let mut stream = txn.stream_keys(beg..end);
 		// Loop until no more entries
@@ -496,7 +487,7 @@ impl<'a> Processor<'a> {
 			// Parse the data from the store
 			let k = res?;
 			let key: thing::Thing = (&k).into();
-			let val: Value = Value::Null.into();
+			let val = Value::Null;
 			let rid = Thing::from((key.tb, key.id));
 			// Create a new operable value
 			let val = Operable::Value(val.into());
