@@ -43,7 +43,6 @@ mod index;
 	feature = "kv-tikv",
 	feature = "kv-fdb",
 	feature = "kv-indxdb",
-	feature = "kv-surrealkv",
 	feature = "kv-surrealcs",
 ))]
 mod savepoint;
