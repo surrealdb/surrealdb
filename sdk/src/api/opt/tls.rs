@@ -1,4 +1,7 @@
 /// TLS Configuration
+///
+/// WARNING: `native-tls` and `rustls` are not stable yet. As we may need to upgrade those dependencies
+/// from time to time to keep up with their security fixes, this type is excluded from our stability guarantee.
 #[cfg(any(feature = "native-tls", feature = "rustls"))]
 #[cfg_attr(docsrs, doc(cfg(any(feature = "native-tls", feature = "rustls"))))]
 #[derive(Debug, Clone)]
