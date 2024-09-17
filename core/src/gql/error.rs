@@ -14,7 +14,7 @@ pub enum GqlError {
 	#[error("Error resolving request: {0}")]
 	ResolverError(String),
 	#[error("No Namespace specified")]
-	UnpecifiedNamespace,
+	UnspecifiedNamespace,
 	#[error("No Database specified")]
 	UnspecifiedDatabase,
 	#[error("Internal Error: {0}")]
