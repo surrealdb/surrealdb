@@ -410,17 +410,8 @@ impl<'a> TreeBuilder<'a> {
 				} else if let Some(id) = right.is_field() {
 					self.eval_bruteforce_knn(id, &left, &exp)?;
 				}
-				// Update `all_expressions_with_index`
 				if !is_bool {
-					if io.is_some() {
-						if self.all_expressions_with_index.is_none() {
-							self.all_expressions_with_index = Some(true);
-						}
-					} else {
-						if self.all_expressions_with_index != Some(false) {
-							self.all_expressions_with_index = Some(false);
-						}
-					}
+					self.check_all_expressions_with_index(io.as_ref());
 				}
 				let re = ResolvedExpression {
 					group,
@@ -454,6 +445,27 @@ impl<'a> TreeBuilder<'a> {
 			_ => {
 				self.all_and_groups.entry(gr).or_insert(true);
 				false
+			}
+		}
+	}
+
+	fn check_all_expressions_with_index(&mut self, io: Option<&IndexOption>) {
+		let is_io = if let Some(io) = io {
+			if let Some(wi) = &self.with_indexes {
+				wi.contains(&io.ix_ref())
+			} else {
+				true
+			}
+		} else {
+			false
+		};
+		if is_io {
+			if self.all_expressions_with_index.is_none() {
+				self.all_expressions_with_index = Some(true);
+			}
+		} else {
+			if self.all_expressions_with_index != Some(false) {
+				self.all_expressions_with_index = Some(false);
 			}
 		}
 	}
@@ -499,11 +511,6 @@ impl<'a> TreeBuilder<'a> {
 		p: IdiomPosition,
 	) -> Result<Option<IndexOption>, Error> {
 		for (irf, id_col) in irs.iter().filter(|(_, id_col)| 0.eq(id_col)) {
-			if let Some(wi) = &self.with_indexes {
-				if !wi.contains(irf) {
-					continue;
-				}
-			}
 			if let Some(ix) = self.index_map.definitions.get(*irf as usize) {
 				let op = match &ix.index {
 					Index::Idx => self.eval_index_operator(op, n, p),
