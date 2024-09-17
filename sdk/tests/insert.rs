@@ -149,16 +149,6 @@ async fn insert_statement_on_duplicate_key() -> Result<(), Error> {
 #[tokio::test]
 async fn insert_with_savepoint() -> Result<(), Error> {
 	let sql = "
-        DEFINE INDEX a ON pokemon FIELDS a UNIQUE;
-        DEFINE INDEX b ON pokemon FIELDS b UNIQUE;
-        INSERT INTO pokemon (id, b) VALUES (1, 'b');
-      	INSERT INTO pokemon (id, a, b) VALUES (2, 'a', 'b');
-		INSERT INTO pokemon (id, a, b) VALUES (2, 'a', 'b');
-        INSERT INTO pokemon (id, a, b) VALUES (2, 'a', 'b') PARALLEL;
-        INSERT INTO pokemon (id, a, b) VALUES (2, 'a', 'b') PARALLEL;
-	  	INSERT INTO pokemon (id, a, b) VALUES (2, 'a', 'b') ON DUPLICATE KEY UPDATE something = 'else';
-		SELECT * FROM pokemon;
-
 		DEFINE INDEX one ON pokemon FIELDS one UNIQUE;
 		DEFINE INDEX two ON pokemon FIELDS two UNIQUE;
 		-- This will INSERT a record with a specific id
@@ -190,7 +180,7 @@ async fn insert_with_savepoint() -> Result<(), Error> {
 		"[
 			{
 				id: pokemon:test,
-				two: 'two'
+				one: 'one'
 			}
 		]",
 	)?;
@@ -586,7 +576,14 @@ async fn insert_statement_unique_index() -> Result<(), Error> {
 	assert!(tmp.is_ok());
 	//
 	let tmp = res.remove(0).result;
-	assert!(tmp.is_ok());
+	match tmp {
+		Err(Error::IndexExists {
+			index,
+			value,
+			..
+		}) if index.eq("name") && value.eq("'SurrealDB'") => (),
+		found => panic!("Expected Err(Error::IndexExists), found '{:?}'", found),
+	}
 	//
 	let tmp = res.remove(0).result?;
 	let val = Value::parse("[ { count: 1 } ]");
