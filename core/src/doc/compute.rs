@@ -36,7 +36,7 @@ impl Document {
 			let mut doc = Document::new(pro.rid, pro.ir, ins.0, ins.1);
 			// Optionally create a save point so we can roll back any upcoming changes
 			let is_save_point = if !stm.is_select() {
-				ctx.tx().lock().await.new_save_point();
+				ctx.tx().lock().await.new_save_point().await;
 				true
 			} else {
 				false
@@ -96,7 +96,7 @@ impl Document {
 				Ok(v) => {
 					// The statement is successful, we can release the savepoint
 					if is_save_point {
-						ctx.tx().lock().await.release_last_save_point()?;
+						ctx.tx().lock().await.release_last_save_point().await?;
 					}
 					Ok(v)
 				}

@@ -1,4 +1,5 @@
 use super::classes;
+use crate::sql::geometry::Geometry;
 use crate::sql::number::Number;
 use crate::sql::value::Value;
 use js::Array;
@@ -7,9 +8,11 @@ use js::Class;
 use js::Ctx;
 use js::Error;
 use js::Exception;
+use js::FromIteratorJs as _;
 use js::IntoJs;
 use js::Null;
 use js::Object;
+use js::TypedArray;
 use js::Undefined;
 use rust_decimal::prelude::ToPrimitive;
 
@@ -106,7 +109,113 @@ impl<'js> IntoJs<'js> for &Value {
 				}
 				x.into_js(ctx)
 			}
+			Value::Bytes(ref v) => TypedArray::new_copy(ctx.clone(), v.0.as_slice())?.into_js(ctx),
+			Value::Geometry(ref v) => v.into_js(ctx),
 			_ => Undefined.into_js(ctx),
 		}
+	}
+}
+
+impl<'js> IntoJs<'js> for &Geometry {
+	fn into_js(self, ctx: &Ctx<'js>) -> js::Result<js::Value<'js>> {
+		let (ty, coords) = match self {
+			Geometry::Point(x) => {
+				("Point".into_js(ctx)?, Array::from_iter_js(ctx, [x.0.x, x.0.y])?)
+			}
+			Geometry::Line(x) => {
+				let array = Array::new(ctx.clone())?;
+				for (idx, c) in x.0.iter().enumerate() {
+					let coord = Array::from_iter_js(ctx, [c.x, c.y])?;
+					array.set(idx, coord)?;
+				}
+				("LineString".into_js(ctx)?, array)
+			}
+			Geometry::Polygon(x) => {
+				let coords = Array::new(ctx.clone())?;
+
+				let string = Array::new(ctx.clone())?;
+				for (idx, c) in x.exterior().0.iter().enumerate() {
+					let coord = Array::from_iter_js(ctx, [c.x, c.y])?;
+					string.set(idx, coord)?;
+				}
+
+				coords.set(0, string)?;
+
+				for (idx, int) in x.interiors().iter().enumerate() {
+					let string = Array::new(ctx.clone())?;
+					for (idx, c) in int.0.iter().enumerate() {
+						let coord = Array::from_iter_js(ctx, [c.x, c.y])?;
+						string.set(idx, coord)?;
+					}
+					coords.set(idx + 1, string)?;
+				}
+
+				("Polygon".into_js(ctx)?, coords)
+			}
+			Geometry::MultiPoint(x) => {
+				let array = Array::new(ctx.clone())?;
+				for (idx, c) in x.0.iter().enumerate() {
+					let coord = Array::from_iter_js(ctx, [c.x(), c.y()])?;
+					array.set(idx, coord)?;
+				}
+				("MultiPoint".into_js(ctx)?, array)
+			}
+			Geometry::MultiLine(x) => {
+				let lines = Array::new(ctx.clone())?;
+				for (idx, l) in x.0.iter().enumerate() {
+					let array = Array::new(ctx.clone())?;
+					for (idx, c) in l.0.iter().enumerate() {
+						let coord = Array::from_iter_js(ctx, [c.x, c.y])?;
+						array.set(idx, coord)?;
+					}
+					lines.set(idx, array)?
+				}
+				("MultiLineString".into_js(ctx)?, lines)
+			}
+			Geometry::MultiPolygon(x) => {
+				let polygons = Array::new(ctx.clone())?;
+
+				for (idx, p) in x.0.iter().enumerate() {
+					let coords = Array::new(ctx.clone())?;
+
+					let string = Array::new(ctx.clone())?;
+					for (idx, c) in p.exterior().0.iter().enumerate() {
+						let coord = Array::from_iter_js(ctx, [c.x, c.y])?;
+						string.set(idx, coord)?;
+					}
+
+					coords.set(0, string)?;
+
+					for (idx, int) in p.interiors().iter().enumerate() {
+						let string = Array::new(ctx.clone())?;
+						for (idx, c) in int.0.iter().enumerate() {
+							let coord = Array::from_iter_js(ctx, [c.x, c.y])?;
+							string.set(idx, coord)?;
+						}
+						coords.set(idx + 1, string)?;
+					}
+
+					polygons.set(idx, coords)?;
+				}
+				("MultiPolygon".into_js(ctx)?, polygons)
+			}
+			Geometry::Collection(x) => {
+				let geoms = Array::new(ctx.clone())?;
+
+				for (idx, g) in x.iter().enumerate() {
+					let g = g.into_js(ctx)?;
+					geoms.set(idx, g)?;
+				}
+
+				let object = Object::new(ctx.clone())?;
+				object.set("type", "GeometryCollection")?;
+				object.set("geometries", geoms)?;
+				return Ok(object.into_value());
+			}
+		};
+		let object = Object::new(ctx.clone())?;
+		object.set("type", ty)?;
+		object.set("coordinates", coords)?;
+		Ok(object.into_value())
 	}
 }

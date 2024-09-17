@@ -230,6 +230,7 @@
 "hash"
 "geo::hash::decode("
 "geo::hash::encode("
+"geo::is::valid("
 "http"
 "http::"
 "http::head("

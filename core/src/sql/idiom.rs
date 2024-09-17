@@ -116,9 +116,7 @@ impl Idiom {
 	pub(crate) fn simplify(&self) -> Idiom {
 		self.0
 			.iter()
-			.filter(|&p| {
-				matches!(p, Part::Field(_) | Part::Start(_) | Part::Value(_) | Part::Graph(_))
-			})
+			.filter(|&p| matches!(p, Part::Field(_) | Part::Start(_) | Part::Graph(_)))
 			.cloned()
 			.collect::<Vec<_>>()
 			.into()
@@ -153,7 +151,7 @@ impl Idiom {
 			self.0.truncate(self.len() - 1);
 		}
 	}
-
+	/// Check if this Idiom starts with a specific path part
 	pub(crate) fn starts_with(&self, other: &[Part]) -> bool {
 		self.0.starts_with(other)
 	}
