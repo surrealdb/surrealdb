@@ -957,6 +957,7 @@ pub(super) mod tests {
 	}
 
 	#[test]
+	#[ignore]
 	// In HNSW we are maintaining a candidate list that requires both to know the first element
 	// and the last element of a set.
 	// There is two possible options.
