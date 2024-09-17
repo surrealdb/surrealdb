@@ -1,35 +1,71 @@
 use crate::err::Error;
 use crate::sql::operation::Operation;
+use crate::sql::part::Part;
 use crate::sql::value::Value;
 
 impl Value {
 	pub(crate) fn patch(&mut self, ops: Value) -> Result<(), Error> {
-		// This value is for test operation, value itself shouldn't change until all operations done.
-		// If test operations fails, nothing in value will be changed.
-		let mut tmp_val = self.clone();
-
+		// Create a new object for testing and patching
+		let mut new = self.clone();
+		// Loop over the patch operations and apply them
 		for operation in ops.to_operations()?.into_iter() {
 			match operation {
+				// Add a value
 				Operation::Add {
 					path,
 					value,
-				} => match tmp_val.pick(&path) {
-					Value::Array(_) => tmp_val.inc(&path, value),
-					_ => tmp_val.put(&path, value),
-				},
+				} => {
+					// Split the last path part from the path
+					match path.split_last() {
+						// Check what the last path part is
+						Some((last, left)) => match last {
+							Part::Index(i) => match new.pick(left) {
+								Value::Array(mut v) => match v.len() > i.clone().as_usize() {
+									true => {
+										v.insert(i.clone().as_usize(), value);
+										new.put(left, Value::Array(v));
+									}
+									false => {
+										v.push(value);
+										new.put(left, Value::Array(v));
+									}
+								},
+								_ => new.put(left, value),
+							},
+							Part::Field(v) if v.is_dash() => match new.pick(left) {
+								Value::Array(mut v) => {
+									v.push(value);
+									new.put(left, Value::Array(v));
+								}
+								_ => new.put(left, value),
+							},
+							_ => match new.pick(&path) {
+								Value::Array(_) => new.inc(&path, value),
+								_ => new.put(&path, value),
+							},
+						},
+						None => match new.pick(&path) {
+							Value::Array(_) => new.inc(&path, value),
+							_ => new.put(&path, value),
+						},
+					}
+				}
+				// Remove a value at the specified path
 				Operation::Remove {
 					path,
-				} => tmp_val.cut(&path),
+				} => new.cut(&path),
+				// Replace a value at the specified path
 				Operation::Replace {
 					path,
 					value,
-				} => tmp_val.put(&path, value),
+				} => new.put(&path, value),
+				// Modify a string at the specified path
 				Operation::Change {
 					path,
 					value,
 				} => {
 					if let Value::Strand(p) = value {
-						if let Value::Strand(v) = tmp_val.pick(&path) {
+						if let Value::Strand(v) = new.pick(&path) {
 							let dmp = dmp::new();
 							let pch = dmp.patch_from_text(p.as_string()).map_err(|e| {
 								Error::InvalidPatch {
@@ -42,42 +78,45 @@ impl Value {
 								}
 							})?;
 							let txt = txt.into_iter().collect::<String>();
-							tmp_val.put(&path, Value::from(txt));
+							new.put(&path, Value::from(txt));
 						}
 					}
 				}
+				// Copy a value from one field to another
 				Operation::Copy {
 					path,
 					from,
 				} => {
-					let found_val = tmp_val.pick(&from);
-					tmp_val.put(&path, found_val);
+					let val = new.pick(&from);
+					new.put(&path, val);
 				}
+				// Move a value from one field to another
 				Operation::Move {
 					path,
 					from,
 				} => {
-					let found_val = tmp_val.pick(&from);
-					tmp_val.put(&path, found_val);
-					tmp_val.cut(&from);
+					let val = new.pick(&from);
+					new.put(&path, val);
+					new.cut(&from);
 				}
+				// Test whether a value matches another value
 				Operation::Test {
 					path,
 					value,
 				} => {
-					let found_val = tmp_val.pick(&path);
-
-					if value != found_val {
+					let val = new.pick(&path);
+					if value != val {
 						return Err(Error::PatchTest {
 							expected: value.to_string(),
-							got: found_val.to_string(),
+							got: val.to_string(),
 						});
 					}
 				}
 			}
 		}
-
-		*self = tmp_val;
+		// Set the document to the updated document
+		*self = new;
+		// Everything ok
 		Ok(())
 	}
 }
