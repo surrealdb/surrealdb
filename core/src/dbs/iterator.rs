@@ -51,11 +51,12 @@ pub(crate) enum Iterable {
 	Edges(Edges),
 	/// An iterable which needs to iterate over the records
 	/// in a table before processing each document. When the
-	/// second argument is true, we iterate over keys only.
+	/// 2nd argument is true, we iterate over keys only.
 	Table(Table, bool),
 	/// An iterable which fetches a specific range of records
 	/// from storage, used in range and time-series scenarios.
-	Range(String, IdRange),
+	/// When the 2nd argument is true, we iterate over keys only.
+	Range(String, IdRange, bool),
 	/// An iterable which fetches a record from storage, and
 	/// which has the specific value to update the record with.
 	/// This is used in INSERT statements, where each value
@@ -230,7 +231,7 @@ impl Iterator {
 		}
 		// Add the record to the iterator
 		if let (tb, Id::Range(v)) = (v.tb, v.id) {
-			self.ingest(Iterable::Range(tb, *v));
+			self.ingest(Iterable::Range(tb, *v, false));
 		}
 		// All ingested ok
 		Ok(())
