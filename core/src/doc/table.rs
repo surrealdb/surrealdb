@@ -47,7 +47,12 @@ struct FieldDataContext<'a> {
 }
 
 impl Document {
-	pub async fn table(
+	/// Processes any DEFINE TABLE AS clauses which
+	/// have been defined for the table which this
+	/// record belongs to. This functions loops
+	/// through the tables and processes them all
+	/// within the currently running transaction.
+	pub async fn process_table_views(
 		&self,
 		stk: &mut Stk,
 		ctx: &Context,
@@ -78,7 +83,7 @@ impl Document {
 		// Don't run permissions
 		let opt = &opt.new_with_perms(false);
 		// Get the record id
-		let rid = self.id.as_ref().unwrap();
+		let rid = self.id()?;
 		// Get the query action
 		let act = if stm.is_delete() {
 			Action::Delete

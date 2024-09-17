@@ -33,6 +33,10 @@ impl Cast {
 }
 
 impl Cast {
+	/// Check if we require a writeable transaction
+	pub(crate) fn writeable(&self) -> bool {
+		self.1.writeable()
+	}
 	/// Was marked recursively
 	pub(crate) async fn compute(
 		&self,

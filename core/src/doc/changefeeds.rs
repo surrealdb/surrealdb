@@ -5,7 +5,7 @@ use crate::doc::Document;
 use crate::err::Error;
 
 impl Document {
-	pub async fn changefeeds(
+	pub async fn process_changefeeds(
 		&self,
 		ctx: &Context,
 		opt: &Options,

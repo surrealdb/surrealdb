@@ -48,7 +48,6 @@ impl SetStatement {
 			}
 			// The user tried to set a protected variable
 			true => Err(Error::InvalidParam {
-				// Move the parameter name, as we no longer need it
 				name: self.name.to_owned(),
 			}),
 		}
