@@ -77,14 +77,14 @@ pub(crate) enum Iterable {
 pub(crate) enum Operable {
 	Value(Arc<Value>),
 	Mergeable(Arc<Value>, Arc<Value>, bool),
-	Relatable(Thing, Arc<Value>, Thing, Option<Arc<Value>>),
+	Relatable(Thing, Arc<Value>, Thing, Option<Arc<Value>>, bool),
 }
 
 #[derive(Debug)]
 pub(crate) enum Workable {
 	Normal,
 	Insert(Arc<Value>, bool),
-	Relate(Thing, Thing, Option<Arc<Value>>),
+	Relate(Thing, Thing, Option<Arc<Value>>, bool),
 }
 
 #[derive(Debug)]
@@ -97,7 +97,7 @@ pub(crate) struct Processed {
 impl Workable {
 	/// Check if this is the first iteration of an INSERT statement
 	pub(crate) fn is_insert_initial(&self) -> bool {
-		matches!(self, Self::Insert(_, false))
+		matches!(self, Self::Insert(_, false) | Self::Relate(_, _, _, false))
 	}
 	/// Check if this is an INSERT with a specific id field
 	pub(crate) fn is_insert_with_specific_id(&self) -> bool {

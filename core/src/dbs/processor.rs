@@ -314,7 +314,7 @@ impl<'a> Processor<'a> {
 			None => Value::None,
 		};
 		// Create a new operable value
-		let val = Operable::Relatable(f, x.into(), w, o.map(|v| v.into()));
+		let val = Operable::Relatable(f, x.into(), w, o.map(|v| v.into()), false);
 		// Process the document record
 		let pro = Processed {
 			rid: Some(v.into()),

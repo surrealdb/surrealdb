@@ -44,7 +44,7 @@ impl Document {
 		// Set default field values
 		self.current.doc.to_mut().def(&rid);
 		// This is a RELATE statement, so reset fields
-		if let Workable::Relate(l, r, _) = &self.extras {
+		if let Workable::Relate(l, r, _, _) = &self.extras {
 			// Mark that this is an edge node
 			self.current.doc.to_mut().put(&*EDGE, Value::Bool(true));
 			// If this document existed before, check the `in` field
@@ -115,7 +115,7 @@ impl Document {
 			self.current.doc.to_mut().merge(v)?;
 		}
 		// This is an INSERT RELATION statement
-		if let Workable::Relate(_, _, Some(v)) = &self.extras {
+		if let Workable::Relate(_, _, Some(v), _) = &self.extras {
 			let v = v.compute(stk, ctx, opt, Some(&self.current)).await?;
 			self.current.doc.to_mut().merge(v)?;
 		}
@@ -198,7 +198,7 @@ impl Document {
 					if let Workable::Insert(value, _) = &self.extras {
 						ctx.add_value("input", value.clone());
 					}
-					if let Workable::Relate(_, _, Some(value)) = &self.extras {
+					if let Workable::Relate(_, _, Some(value), _) = &self.extras {
 						ctx.add_value("input", value.clone());
 					}
 					// Freeze the context

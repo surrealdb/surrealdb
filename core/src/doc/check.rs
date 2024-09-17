@@ -56,7 +56,7 @@ impl Document {
 				}
 			}
 			Statement::Insert(_) => match self.extras {
-				Workable::Relate(_, _, _) => {
+				Workable::Relate(_, _, _, _) => {
 					if !tb.allows_relation() {
 						return Err(Error::TableCheck {
 							thing: self.id()?.to_string(),
@@ -150,7 +150,7 @@ impl Document {
 			}
 		}
 		// This is a RELATE statement
-		if let Workable::Relate(l, r, v) = &self.extras {
+		if let Workable::Relate(l, r, v, _) = &self.extras {
 			// This is a RELATE statement
 			if let Some(data) = stm.data() {
 				// Check that the 'in' field matches

@@ -32,7 +32,7 @@ impl Document {
 		// Get the record id
 		let rid = self.id()?;
 		// Store the record edges
-		if let Workable::Relate(l, r, _) = &self.extras {
+		if let Workable::Relate(l, r, _, _) = &self.extras {
 			// For enforced relations, ensure that the edges exist
 			if matches!(
 				tb.kind,

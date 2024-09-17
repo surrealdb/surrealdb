@@ -190,7 +190,7 @@ impl Document {
 
 	/// Check if document is being created
 	pub fn is_new(&self) -> bool {
-		self.initial.doc.as_ref().is_none() && self.current.doc.as_ref().is_some()
+		self.initial.doc.as_ref().is_none()
 	}
 
 	/// Retrieve the record id for this document
