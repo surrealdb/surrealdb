@@ -12,6 +12,10 @@ pub(super) async fn router<S>(ds: Arc<Datastore>) -> Router<S>
 where
 	S: Clone + Send + Sync + 'static,
 {
+	// Check if capabilities allow querying the requested HTTP route
+	if !ds.allows_http_route(&RouteTarget::GraphQL) {
+		return Err(Error::OperationForbidden);
+	}
 	let service = GraphQL::new(Pessimistic, ds);
 	Router::new().route("/graphql", post_service(service))
 }

@@ -157,7 +157,7 @@ pub struct ParseNetTargetError;
 impl std::error::Error for ParseNetTargetError {}
 impl fmt::Display for ParseNetTargetError {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-		write!(f, "The provided network target is not a valid host, ip address or ip network")
+		write!(f, "The provided network target is not a valid host name, IP address or CIDR block")
 	}
 }
 
@@ -246,6 +246,7 @@ pub enum RouteTarget {
 	Signup,
 	Key,
 	Ml,
+	GraphQL,
 }
 
 // impl display
@@ -263,6 +264,7 @@ impl fmt::Display for RouteTarget {
 			RouteTarget::Signup => write!(f, "signup"),
 			RouteTarget::Key => write!(f, "key"),
 			RouteTarget::Ml => write!(f, "ml"),
+			RouteTarget::GraphQL => write!(f, "graphql"),
 		}
 	}
 }
@@ -299,6 +301,7 @@ impl std::str::FromStr for RouteTarget {
 			"signup" => Ok(RouteTarget::Signup),
 			"key" => Ok(RouteTarget::Key),
 			"ml" => Ok(RouteTarget::Ml),
+			"graphql" => Ok(RouteTarget::GraphQL),
 			_ => Err(ParseRouteTargetError),
 		}
 	}
