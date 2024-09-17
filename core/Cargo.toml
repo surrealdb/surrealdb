@@ -170,6 +170,9 @@ tokio = { version = "1.40.0", features = ["macros", "sync", "rt-multi-thread"] }
 tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }
 wiremock = "0.6.0"
 
+[build-dependencies]
+walkdir = "2.5.0"
+
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 pharos = "0.5.3"
 ring = { version = "0.17.7", features = ["wasm32_unknown_unknown_js"] }

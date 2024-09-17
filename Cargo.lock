@@ -6178,6 +6178,7 @@ dependencies = [
  "unicase",
  "url",
  "uuid",
+ "walkdir",
  "wasm-bindgen-futures",
  "wasmtimer",
  "wiremock",
