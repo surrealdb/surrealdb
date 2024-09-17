@@ -679,7 +679,8 @@ fn filter_from_type(
 				let mut filter = InputObject::new(filter_name).oneof();
 
 				for t in ts {
-					filter = filter.field(field)
+					filter = filter
+						.field(InputValue::new(&t.0, TypeRef::named(filter_name_from_table(t))))
 				}
 
 				return Ok(());
