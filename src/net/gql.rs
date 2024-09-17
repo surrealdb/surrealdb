@@ -6,6 +6,7 @@ use axum::routing::post_service;
 use surrealdb::gql::cache::Pessimistic;
 use surrealdb::kvs::Datastore;
 
+use crate::err::Error;
 use crate::gql::GraphQL;
 
 pub(super) async fn router<S>(ds: Arc<Datastore>) -> Router<S>
