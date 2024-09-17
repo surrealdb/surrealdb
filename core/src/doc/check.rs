@@ -287,7 +287,7 @@ impl Document {
 	/// a table, or from an index can be filtered out
 	/// before being included within the query output.
 	pub async fn check_where_condition(
-		&self,
+		&mut self,
 		stk: &mut Stk,
 		ctx: &Context,
 		opt: &Options,
@@ -295,8 +295,10 @@ impl Document {
 	) -> Result<(), Error> {
 		// Check where condition
 		if let Some(cond) = stm.conds() {
+			// Process the current permitted
+			self.process_permitted_current(stk, ctx, opt).await?;
 			// Check if the expression is truthy
-			if !cond.compute(stk, ctx, opt, Some(&self.current)).await?.is_truthy() {
+			if !cond.compute(stk, ctx, opt, Some(&self.current_permitted)).await?.is_truthy() {
 				// Ignore this document
 				return Err(Error::Ignore);
 			}

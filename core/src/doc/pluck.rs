@@ -40,21 +40,37 @@ impl Document {
 						.into())
 				}
 				Output::After => {
+					// Process the initial permitted
+					self.process_permitted_current(stk, &ctx, opt).await?;
 					// Output the full document after all changes were applied
-					self.current.doc.as_ref().compute(stk, ctx, opt, Some(&self.current)).await
+					self.current
+						.doc
+						.as_ref()
+						.compute(stk, ctx, opt, Some(&self.current_permitted))
+						.await
 				}
 				Output::Before => {
+					// Process the initial permitted
+					self.process_permitted_initial(stk, &ctx, opt).await?;
 					// Output the full document before any changes were applied
-					self.initial.doc.as_ref().compute(stk, ctx, opt, Some(&self.initial)).await
+					self.initial
+						.doc
+						.as_ref()
+						.compute(stk, ctx, opt, Some(&self.initial_permitted))
+						.await
 				}
 				Output::Fields(v) => {
+					// Process the current permitted
+					self.process_permitted_current(stk, &ctx, opt).await?;
+					// Process the initial permitted
+					self.process_permitted_initial(stk, &ctx, opt).await?;
 					// Configure the context
 					let mut ctx = MutableContext::new(ctx);
-					ctx.add_value("after", self.current.doc.as_arc());
-					ctx.add_value("before", self.initial.doc.as_arc());
+					ctx.add_value("after", self.current_permitted.doc.as_arc());
+					ctx.add_value("before", self.initial_permitted.doc.as_arc());
 					let ctx = ctx.freeze();
 					// Output the specified fields
-					v.compute(stk, &ctx, opt, Some(&self.current), false).await
+					v.compute(stk, &ctx, opt, Some(&self.current_permitted), false).await
 				}
 			},
 			None => match stm {
