@@ -93,15 +93,6 @@ impl ExplainItem {
 				name: "Iterate Value".into(),
 				details: vec![("value", v.to_owned())],
 			},
-			Iterable::Table(t, keys_only) => Self {
-				name: if *keys_only {
-					"Iterate Table Keys"
-				} else {
-					"Iterate Table"
-				}
-				.into(),
-				details: vec![("table", Value::from(t.0.to_owned()))],
-			},
 			Iterable::Yield(t) => Self {
 				name: "Iterate Yield".into(),
 				details: vec![("table", Value::from(t.0.to_owned()))],
@@ -114,6 +105,19 @@ impl ExplainItem {
 				name: "Iterate Defer".into(),
 				details: vec![("thing", Value::Thing(t.to_owned()))],
 			},
+			Iterable::Edges(e) => Self {
+				name: "Iterate Edges".into(),
+				details: vec![("from", Value::Thing(e.from.to_owned()))],
+			},
+			Iterable::Table(t, keys_only) => Self {
+				name: if *keys_only {
+					"Iterate Table Keys"
+				} else {
+					"Iterate Table"
+				}
+				.into(),
+				details: vec![("table", Value::from(t.0.to_owned()))],
+			},
 			Iterable::Range(tb, r, keys_only) => Self {
 				name: if *keys_only {
 					"Iterate Range Keys"
@@ -122,10 +126,6 @@ impl ExplainItem {
 				}
 				.into(),
 				details: vec![("table", tb.to_owned().into()), ("range", r.to_owned().into())],
-			},
-			Iterable::Edges(e) => Self {
-				name: "Iterate Edges".into(),
-				details: vec![("from", Value::Thing(e.from.to_owned()))],
 			},
 			Iterable::Mergeable(t, v) => Self {
 				name: "Iterate Mergeable".into(),

@@ -159,7 +159,7 @@ impl Iterator {
 			Value::Object(v) => self.prepare_object(stm, v)?,
 			Value::Array(v) => self.prepare_array(stm, v)?,
 			Value::Thing(v) => match v.is_range() {
-				true => self.prepare_range(stm, v)?,
+				true => self.prepare_range(stm, v, false)?,
 				false => self.prepare_thing(stm, v)?,
 			},
 			v => {
@@ -222,7 +222,12 @@ impl Iterator {
 	}
 
 	/// Prepares a value for processing
-	pub(crate) fn prepare_range(&mut self, stm: &Statement<'_>, v: Thing) -> Result<(), Error> {
+	pub(crate) fn prepare_range(
+		&mut self,
+		stm: &Statement<'_>,
+		v: Thing,
+		keys: bool,
+	) -> Result<(), Error> {
 		// Check if this is a create statement
 		if stm.is_create() {
 			return Err(Error::InvalidStatementTarget {
@@ -231,7 +236,7 @@ impl Iterator {
 		}
 		// Add the record to the iterator
 		if let (tb, Id::Range(v)) = (v.tb, v.id) {
-			self.ingest(Iterable::Range(tb, *v, false));
+			self.ingest(Iterable::Range(tb, *v, keys));
 		}
 		// All ingested ok
 		Ok(())
@@ -267,7 +272,7 @@ impl Iterator {
 				Value::Edges(v) => self.prepare_edges(stm, *v)?,
 				Value::Object(v) => self.prepare_object(stm, v)?,
 				Value::Thing(v) => match v.is_range() {
-					true => self.prepare_range(stm, v)?,
+					true => self.prepare_range(stm, v, false)?,
 					false => self.prepare_thing(stm, v)?,
 				},
 				_ => {
