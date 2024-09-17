@@ -29,7 +29,7 @@ pub(crate) enum Iterable {
 	Value(Value),
 	Table(Table, bool), // true = keys only
 	Thing(Thing),
-	TableRange(String, IdRange),
+	TableRange(String, IdRange, bool), // true = keys_only
 	Edges(Edges),
 	Defer(Thing),
 	Mergeable(Thing, Value),
@@ -169,7 +169,7 @@ impl Iterator {
 								});
 							}
 							_ => {
-								self.ingest(Iterable::TableRange(v.tb, *r.to_owned()));
+								self.ingest(Iterable::TableRange(v.tb, *r.to_owned(), false));
 							}
 						};
 					}

@@ -110,8 +110,13 @@ impl ExplainItem {
 				name: "Iterate Defer".into(),
 				details: vec![("thing", Value::Thing(t.to_owned()))],
 			},
-			Iterable::TableRange(tb, r) => Self {
-				name: "Iterate Range".into(),
+			Iterable::TableRange(tb, r, keys_only) => Self {
+				name: if *keys_only {
+					"Iterate Range Keys"
+				} else {
+					"Iterate Range"
+				}
+				.into(),
 				details: vec![("table", tb.to_owned().into()), ("range", r.to_owned().into())],
 			},
 			Iterable::Edges(e) => Self {

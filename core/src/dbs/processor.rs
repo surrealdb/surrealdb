@@ -112,9 +112,9 @@ impl<'a> Processor<'a> {
 		Ok(())
 	}
 
-	fn check_query_planner_context<'b>(ctx: &'b Context, table: &'b Table) -> Cow<'b, Context> {
+	fn check_query_planner_context<'b>(ctx: &'b Context, table: &'b str) -> Cow<'b, Context> {
 		if let Some(qp) = ctx.get_query_planner() {
-			if let Some(exe) = qp.get_query_executor(&table.0) {
+			if let Some(exe) = qp.get_query_executor(table) {
 				// We set the query executor matching the current table in the Context
 				// Avoiding search in the hashmap of the query planner for each doc
 				let mut ctx = MutableContext::new(ctx);
@@ -138,8 +138,13 @@ impl<'a> Processor<'a> {
 				Iterable::Value(v) => self.process_value(stk, ctx, opt, stm, v).await?,
 				Iterable::Thing(v) => self.process_thing(stk, ctx, opt, stm, v).await?,
 				Iterable::Defer(v) => self.process_defer(stk, ctx, opt, stm, v).await?,
-				Iterable::TableRange(tb, v) => {
-					self.process_range(stk, ctx, opt, stm, tb, v).await?
+				Iterable::TableRange(tb, v, keys_only) => {
+					let ctx = Self::check_query_planner_context(ctx, &tb);
+					if keys_only {
+						self.process_range_keys(stk, &ctx, opt, stm, &tb, v).await?
+					} else {
+						self.process_range(stk, &ctx, opt, stm, &tb, v).await?
+					}
 				}
 				Iterable::Edges(e) => self.process_edge(stk, ctx, opt, stm, e).await?,
 				Iterable::Table(v, keys_only) => {
@@ -394,29 +399,29 @@ impl<'a> Processor<'a> {
 		ctx: &Context,
 		opt: &Options,
 		stm: &Statement<'_>,
-		tb: String,
+		tb: &str,
 		r: IdRange,
 	) -> Result<(), Error> {
 		// Get the transaction
 		let txn = ctx.tx();
 		// Check that the table exists
-		txn.check_ns_db_tb(opt.ns()?, opt.db()?, &tb, opt.strict).await?;
+		txn.check_ns_db_tb(opt.ns()?, opt.db()?, tb, opt.strict).await?;
 		// Prepare the range start key
 		let beg = match &r.beg {
-			Bound::Unbounded => thing::prefix(opt.ns()?, opt.db()?, &tb),
-			Bound::Included(v) => thing::new(opt.ns()?, opt.db()?, &tb, v).encode().unwrap(),
+			Bound::Unbounded => thing::prefix(opt.ns()?, opt.db()?, tb),
+			Bound::Included(v) => thing::new(opt.ns()?, opt.db()?, tb, v).encode().unwrap(),
 			Bound::Excluded(v) => {
-				let mut key = thing::new(opt.ns()?, opt.db()?, &tb, v).encode().unwrap();
+				let mut key = thing::new(opt.ns()?, opt.db()?, tb, v).encode().unwrap();
 				key.push(0x00);
 				key
 			}
 		};
 		// Prepare the range end key
 		let end = match &r.end {
-			Bound::Unbounded => thing::suffix(opt.ns()?, opt.db()?, &tb),
-			Bound::Excluded(v) => thing::new(opt.ns()?, opt.db()?, &tb, v).encode().unwrap(),
+			Bound::Unbounded => thing::suffix(opt.ns()?, opt.db()?, tb),
+			Bound::Excluded(v) => thing::new(opt.ns()?, opt.db()?, tb, v).encode().unwrap(),
 			Bound::Included(v) => {
-				let mut key = thing::new(opt.ns()?, opt.db()?, &tb, v).encode().unwrap();
+				let mut key = thing::new(opt.ns()?, opt.db()?, tb, v).encode().unwrap();
 				key.push(0x00);
 				key
 			}
@@ -433,6 +438,66 @@ impl<'a> Processor<'a> {
 			let (k, v) = res?;
 			let key: thing::Thing = (&k).into();
 			let val: Value = (&v).into();
+			let rid = Thing::from((key.tb, key.id));
+			// Create a new operable value
+			let val = Operable::Value(val.into());
+			// Process the record
+			let pro = Processed {
+				rid: Some(rid.into()),
+				ir: None,
+				val,
+			};
+			self.process(stk, ctx, opt, stm, pro).await?;
+		}
+		// Everything ok
+		Ok(())
+	}
+
+	async fn process_range_keys(
+		&mut self,
+		stk: &mut Stk,
+		ctx: &Context,
+		opt: &Options,
+		stm: &Statement<'_>,
+		tb: &str,
+		r: IdRange,
+	) -> Result<(), Error> {
+		// Get the transaction
+		let txn = ctx.tx();
+		// Check that the table exists
+		txn.check_ns_db_tb(opt.ns()?, opt.db()?, &tb, opt.strict).await?;
+		// Prepare the range start key
+		let beg = match &r.beg {
+			Bound::Unbounded => thing::prefix(opt.ns()?, opt.db()?, tb),
+			Bound::Included(v) => thing::new(opt.ns()?, opt.db()?, tb, v).encode().unwrap(),
+			Bound::Excluded(v) => {
+				let mut key = thing::new(opt.ns()?, opt.db()?, tb, v).encode().unwrap();
+				key.push(0x00);
+				key
+			}
+		};
+		// Prepare the range end key
+		let end = match &r.end {
+			Bound::Unbounded => thing::suffix(opt.ns()?, opt.db()?, &tb),
+			Bound::Excluded(v) => thing::new(opt.ns()?, opt.db()?, &tb, v).encode().unwrap(),
+			Bound::Included(v) => {
+				let mut key = thing::new(opt.ns()?, opt.db()?, &tb, v).encode().unwrap();
+				key.push(0x00);
+				key
+			}
+		};
+		// Create a new iterable range
+		let mut stream = txn.stream_keys(beg..end);
+		// Loop until no more entries
+		while let Some(res) = stream.next().await {
+			// Check if the context is finished
+			if ctx.is_done() {
+				break;
+			}
+			// Parse the data from the store
+			let k = res?;
+			let key: thing::Thing = (&k).into();
+			let val: Value = Value::Null.into();
 			let rid = Thing::from((key.tb, key.id));
 			// Create a new operable value
 			let val = Operable::Value(val.into());
