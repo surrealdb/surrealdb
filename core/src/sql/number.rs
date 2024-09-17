@@ -2,7 +2,7 @@ use super::value::{TryAdd, TryDiv, TryFloatDiv, TryMul, TryNeg, TryPow, TryRem, 
 use crate::err::Error;
 use crate::fnc::util::math::ToFloat;
 use crate::sql::strand::Strand;
-use crate::sql::Value;
+use crate::sql::{Order, Value};
 use revision::revisioned;
 use rust_decimal::prelude::*;
 use serde::{Deserialize, Serialize};
@@ -565,6 +565,8 @@ impl Number {
 
 impl Eq for Number {}
 
+const MAX_DECIMAL_IN_F64: f64 = 79228162514264337593543950336f64;
+
 impl Ord for Number {
 	fn cmp(&self, other: &Self) -> Ordering {
 		fn total_cmp_f64(a: f64, b: f64) -> Ordering {
@@ -589,10 +591,27 @@ impl Ord for Number {
 			(Number::Decimal(v), Number::Int(w)) => v.cmp(&Decimal::from(*w)),
 			// ------------------------------
 			(Number::Float(v), Number::Decimal(w)) => {
-				// `rust_decimal::Decimal` code comments indicate that `to_f64` is infallible
-				total_cmp_f64(*v, w.to_f64().unwrap())
+				if !v.is_finite() {
+					v.total_cmp(&0.0)
+				} else if *v >= MAX_DECIMAL_IN_F64 {
+					Ordering::Greater
+				} else if *v <= -MAX_DECIMAL_IN_F64 {
+					Ordering::Less
+				} else {
+					Decimal::cmp(&Decimal::from_f64(*v).expect("checked that float is finite"), &w)
+				}
 			}
-			(Number::Decimal(v), Number::Float(w)) => total_cmp_f64(v.to_f64().unwrap(), *w),
+			(Number::Decimal(v), Number::Float(w)) => {
+				if !w.is_finite() {
+					0.0f64.total_cmp(w)
+				} else if *w >= MAX_DECIMAL_IN_F64 {
+					Ordering::Less
+				} else if *w <= -MAX_DECIMAL_IN_F64 {
+					Ordering::Greater
+				} else {
+					v.cmp(&Decimal::from_f64(*w).expect("checked that float is finite"))
+				}
+			}
 		}
 	}
 }
