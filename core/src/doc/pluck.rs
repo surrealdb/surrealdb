@@ -31,19 +31,23 @@ impl Document {
 				Output::None => Err(Error::Ignore),
 				Output::Null => Ok(Value::Null),
 				Output::Diff => {
+					// Process the current permitted
+					self.process_permitted_current(stk, &ctx, opt).await?;
+					// Process the initial permitted
+					self.process_permitted_initial(stk, &ctx, opt).await?;
 					// Output a DIFF of any changes applied to the document
 					Ok(self
-						.initial
+						.initial_permitted
 						.doc
 						.as_ref()
-						.diff(self.current.doc.as_ref(), Idiom::default())
+						.diff(self.current_permitted.doc.as_ref(), Idiom::default())
 						.into())
 				}
 				Output::After => {
-					// Process the initial permitted
+					// Process the current permitted
 					self.process_permitted_current(stk, &ctx, opt).await?;
 					// Output the full document after all changes were applied
-					self.current
+					self.current_permitted
 						.doc
 						.as_ref()
 						.compute(stk, ctx, opt, Some(&self.current_permitted))
@@ -53,7 +57,7 @@ impl Document {
 					// Process the initial permitted
 					self.process_permitted_initial(stk, &ctx, opt).await?;
 					// Output the full document before any changes were applied
-					self.initial
+					self.initial_permitted
 						.doc
 						.as_ref()
 						.compute(stk, ctx, opt, Some(&self.initial_permitted))
@@ -84,22 +88,61 @@ impl Document {
 					_ => s.expr.compute(stk, ctx, opt, Some(&self.current), false).await,
 				},
 				Statement::Select(s) => {
-					s.expr.compute(stk, ctx, opt, Some(&self.current), s.group.is_some()).await
+					// Process the current permitted
+					self.process_permitted_current(stk, &ctx, opt).await?;
+					s.expr
+						.compute(stk, ctx, opt, Some(&self.current_permitted), s.group.is_some())
+						.await
 				}
 				Statement::Create(_) => {
-					self.current.doc.as_ref().compute(stk, ctx, opt, Some(&self.current)).await
+					// Process the current permitted
+					self.process_permitted_current(stk, &ctx, opt).await?;
+					// Process the document output
+					self.current_permitted
+						.doc
+						.as_ref()
+						.compute(stk, ctx, opt, Some(&self.current_permitted))
+						.await
 				}
 				Statement::Upsert(_) => {
-					self.current.doc.as_ref().compute(stk, ctx, opt, Some(&self.current)).await
+					// Process the current permitted
+					self.process_permitted_current(stk, &ctx, opt).await?;
+					// Process the document output
+					self.current_permitted
+						.doc
+						.as_ref()
+						.compute(stk, ctx, opt, Some(&self.current_permitted))
+						.await
 				}
 				Statement::Update(_) => {
-					self.current.doc.as_ref().compute(stk, ctx, opt, Some(&self.current)).await
+					// Process the current permitted
+					self.process_permitted_current(stk, &ctx, opt).await?;
+					// Process the document output
+					self.current_permitted
+						.doc
+						.as_ref()
+						.compute(stk, ctx, opt, Some(&self.current_permitted))
+						.await
 				}
 				Statement::Relate(_) => {
-					self.current.doc.as_ref().compute(stk, ctx, opt, Some(&self.current)).await
+					// Process the current permitted
+					self.process_permitted_current(stk, &ctx, opt).await?;
+					// Process the document output
+					self.current_permitted
+						.doc
+						.as_ref()
+						.compute(stk, ctx, opt, Some(&self.current_permitted))
+						.await
 				}
 				Statement::Insert(_) => {
-					self.current.doc.as_ref().compute(stk, ctx, opt, Some(&self.current)).await
+					// Process the current permitted
+					self.process_permitted_current(stk, &ctx, opt).await?;
+					// Process the document output
+					self.current_permitted
+						.doc
+						.as_ref()
+						.compute(stk, ctx, opt, Some(&self.current_permitted))
+						.await
 				}
 				_ => Err(Error::Ignore),
 			},
