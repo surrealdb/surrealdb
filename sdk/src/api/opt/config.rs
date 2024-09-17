@@ -86,6 +86,9 @@ impl Config {
 	}
 
 	/// Use Rustls to configure TLS connections
+	///
+	/// WARNING: `rustls` is not stable yet. As we may need to upgrade this dependency from time to time
+	/// to keep up with its security fixes, this method is excluded from our stability guarantee.
 	#[cfg(feature = "rustls")]
 	#[cfg_attr(docsrs, doc(cfg(feature = "rustls")))]
 	pub fn rustls(mut self, config: rustls::ClientConfig) -> Self {
@@ -94,6 +97,9 @@ impl Config {
 	}
 
 	/// Use native TLS to configure TLS connections
+	///
+	/// WARNING: `native-tls` is not stable yet. As we may need to upgrade this dependency from time to time
+	/// to keep up with its security fixes, this method is excluded from our stability guarantee.
 	#[cfg(feature = "native-tls")]
 	#[cfg_attr(docsrs, doc(cfg(feature = "native-tls")))]
 	pub fn native_tls(mut self, config: native_tls::TlsConnector) -> Self {

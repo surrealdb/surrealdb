@@ -1,6 +1,7 @@
 use super::Key;
 use crate::dbs::node::Node;
 use crate::err::Error;
+use crate::sql::statements::define::DefineConfigStatement;
 use crate::sql::statements::AccessGrant;
 use crate::sql::statements::DefineAccessStatement;
 use crate::sql::statements::DefineAnalyzerStatement;
@@ -81,6 +82,8 @@ pub(super) enum Entry {
 	Fts(Arc<[DefineTableStatement]>),
 	/// A slice of DefineModelStatement specified on a database.
 	Mls(Arc<[DefineModelStatement]>),
+	/// A slice of DefineConfigStatement specified on a database.
+	Cgs(Arc<[DefineConfigStatement]>),
 	/// A slice of DefineParamStatement specified on a database.
 	Pas(Arc<[DefineParamStatement]>),
 	/// A slice of DefineTableStatement specified on a database.
@@ -232,6 +235,14 @@ impl Entry {
 		match self {
 			Entry::Mls(v) => Ok(v),
 			_ => Err(fail!("Unable to convert type into Entry::Mls")),
+		}
+	}
+	/// Converts this cache entry into a slice of [`DefineConfigStatement`].
+	/// This panics if called on a cache entry that is not an [`Entry::Cgs`].
+	pub(super) fn try_into_cgs(self) -> Result<Arc<[DefineConfigStatement]>, Error> {
+		match self {
+			Entry::Cgs(v) => Ok(v),
+			_ => Err(fail!("Unable to convert type into Entry::Cgs")),
 		}
 	}
 	/// Converts this cache entry into a slice of [`DefineTableStatement`].

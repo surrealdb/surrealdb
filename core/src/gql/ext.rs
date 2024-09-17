@@ -1,3 +1,7 @@
+use std::ops::Deref;
+
+use crate::sql::statements::define::config::graphql::TableConfig;
+use crate::sql::statements::DefineTableStatement;
 use crate::sql::{
 	statements::UseStatement, Cond, Ident, Idiom, Limit, Order, Orders, Part, Start, Table, Value,
 };
@@ -155,5 +159,35 @@ impl TryAsExt for SqlValue {
 			SqlValue::Thing(t) => Ok(t),
 			v => Err(v),
 		}
+	}
+}
+
+pub trait Named {
+	fn name(&self) -> &str;
+}
+
+impl Named for DefineTableStatement {
+	fn name(&self) -> &str {
+		&self.name
+	}
+}
+
+impl Named for TableConfig {
+	fn name(&self) -> &str {
+		&self.name
+	}
+}
+
+pub trait NamedContainer {
+	fn contains_name(&self, name: &str) -> bool;
+}
+
+impl<I, N> NamedContainer for I
+where
+	I: Deref<Target = [N]>,
+	N: Named,
+{
+	fn contains_name(&self, name: &str) -> bool {
+		self.iter().any(|n| n.name() == name)
 	}
 }
