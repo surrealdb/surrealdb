@@ -19,25 +19,25 @@ impl Value {
 					match path.split_last() {
 						// Check what the last path part is
 						Some((last, left)) => match last {
-							Part::Index(i) => match new.pick(&left) {
+							Part::Index(i) => match new.pick(left) {
 								Value::Array(mut v) => match v.len() > i.clone().as_usize() {
 									true => {
 										v.insert(i.clone().as_usize(), value);
-										new.put(&left, Value::Array(v));
+										new.put(left, Value::Array(v));
 									}
 									false => {
 										v.push(value);
-										new.put(&left, Value::Array(v));
+										new.put(left, Value::Array(v));
 									}
 								},
-								_ => new.put(&left, value),
+								_ => new.put(left, value),
 							},
-							Part::Field(v) if v.is_dash() => match new.pick(&left) {
+							Part::Field(v) if v.is_dash() => match new.pick(left) {
 								Value::Array(mut v) => {
 									v.push(value);
-									new.put(&left, Value::Array(v));
+									new.put(left, Value::Array(v));
 								}
-								_ => new.put(&left, value),
+								_ => new.put(left, value),
 							},
 							_ => match new.pick(&path) {
 								Value::Array(_) => new.inc(&path, value),
