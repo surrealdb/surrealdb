@@ -3,6 +3,7 @@ use std::sync::Arc;
 
 use axum::routing::post_service;
 
+use surrealdb::dbs::capabilities::RouteTarget;
 use surrealdb::gql::cache::Pessimistic;
 use surrealdb::kvs::Datastore;
 
