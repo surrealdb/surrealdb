@@ -92,6 +92,7 @@ async fn define_statement_function() -> Result<(), Error> {
 		"{
 			accesses: {},
 			analyzers: {},
+			configs: {},
 			functions: { test: 'DEFINE FUNCTION fn::test($first: string, $last: string) { RETURN $first + $last; } PERMISSIONS FULL' },
 			models: {},
 			params: {},
@@ -123,6 +124,7 @@ async fn define_statement_table_drop() -> Result<(), Error> {
 		"{
 			accesses: {},
 			analyzers: {},
+			configs: {},
 			functions: {},
 			models: {},
 			params: {},
@@ -154,6 +156,7 @@ async fn define_statement_table_schemaless() -> Result<(), Error> {
 		"{
 			accesses: {},
 			analyzers: {},
+			configs: {},
 			functions: {},
 			models: {},
 			params: {},
@@ -180,6 +183,7 @@ async fn define_statement_table_schemafull() -> Result<(), Error> {
 		"{
 			accesses: {},
 			analyzers: {},
+			configs: {},
 			functions: {},
 			models: {},
 			params: {},
@@ -209,6 +213,7 @@ async fn define_statement_table_schemaful() -> Result<(), Error> {
 		"{
 			accesses: {},
 			analyzers: {},
+			configs: {},
 			functions: {},
 			models: {},
 			params: {},
@@ -248,6 +253,7 @@ async fn define_statement_table_foreigntable() -> Result<(), Error> {
 		"{
 			accesses: {},
 			analyzers: {},
+			configs: {},
 			functions: {},
 			models: {},
 			params: {},
@@ -280,6 +286,7 @@ async fn define_statement_table_foreigntable() -> Result<(), Error> {
 		"{
 			accesses: {},
 			analyzers: {},
+			configs: {},
 			functions: {},
 			models: {},
 			params: {},
@@ -1724,6 +1731,7 @@ async fn define_statement_analyzer() -> Result<(), Error> {
 				english: 'DEFINE ANALYZER english TOKENIZERS BLANK,CLASS FILTERS LOWERCASE,SNOWBALL(ENGLISH)',
 				htmlAnalyzer: 'DEFINE ANALYZER htmlAnalyzer FUNCTION fn::stripHtml TOKENIZERS BLANK,CLASS'
 			},
+			configs: {},
 			functions: {
 				stripHtml: "DEFINE FUNCTION fn::stripHtml($html: string) { RETURN string::replace($html, /<[^>]*>/, ''); } PERMISSIONS FULL"
 			},
@@ -2049,8 +2057,8 @@ async fn permissions_checks_define_function() {
 
 	// Define the expected results for the check statement when the test statement succeeded and when it failed
 	let check_results = [
-        vec!["{ accesses: {  }, analyzers: {  }, functions: { greet: \"DEFINE FUNCTION fn::greet() { RETURN 'Hello'; } PERMISSIONS FULL\" }, models: {  }, params: {  }, tables: {  }, users: {  } }"],
-		vec!["{ accesses: {  }, analyzers: {  }, functions: {  }, models: {  }, params: {  }, tables: {  }, users: {  } }"]
+        vec!["{ accesses: {  }, analyzers: {  }, configs: {  }, functions: { greet: \"DEFINE FUNCTION fn::greet() { RETURN 'Hello'; } PERMISSIONS FULL\" }, models: {  }, params: {  }, tables: {  }, users: {  } }"],
+		vec!["{ accesses: {  }, analyzers: {  }, configs: {  }, functions: {  }, models: {  }, params: {  }, tables: {  }, users: {  } }"]
     ];
 
 	let test_cases = [
@@ -2091,8 +2099,8 @@ async fn permissions_checks_define_analyzer() {
 
 	// Define the expected results for the check statement when the test statement succeeded and when it failed
 	let check_results = [
-        vec!["{ accesses: {  }, analyzers: { analyzer: 'DEFINE ANALYZER analyzer TOKENIZERS BLANK' }, functions: {  }, models: {  }, params: {  }, tables: {  }, users: {  } }"],
-		vec!["{ accesses: {  }, analyzers: {  }, functions: {  }, models: {  }, params: {  }, tables: {  }, users: {  } }"]
+        vec!["{ accesses: {  }, analyzers: { analyzer: 'DEFINE ANALYZER analyzer TOKENIZERS BLANK' }, configs: {  }, functions: {  }, models: {  }, params: {  }, tables: {  }, users: {  } }"],
+		vec!["{ accesses: {  }, analyzers: {  }, configs: {  }, functions: {  }, models: {  }, params: {  }, tables: {  }, users: {  } }"]
     ];
 
 	let test_cases = [
@@ -2217,8 +2225,8 @@ async fn permissions_checks_define_access_db() {
 
 	// Define the expected results for the check statement when the test statement succeeded and when it failed
 	let check_results = [
-        vec!["{ accesses: { access: \"DEFINE ACCESS access ON DATABASE TYPE JWT ALGORITHM HS512 KEY '[REDACTED]' WITH ISSUER KEY '[REDACTED]' DURATION FOR TOKEN 1h, FOR SESSION NONE\" }, analyzers: {  }, functions: {  }, models: {  }, params: {  }, tables: {  }, users: {  } }"],
-		vec!["{ accesses: {  }, analyzers: {  }, functions: {  }, models: {  }, params: {  }, tables: {  }, users: {  } }"]
+        vec!["{ accesses: { access: \"DEFINE ACCESS access ON DATABASE TYPE JWT ALGORITHM HS512 KEY '[REDACTED]' WITH ISSUER KEY '[REDACTED]' DURATION FOR TOKEN 1h, FOR SESSION NONE\" }, analyzers: {  }, configs: {  }, functions: {  }, models: {  }, params: {  }, tables: {  }, users: {  } }"],
+		vec!["{ accesses: {  }, analyzers: {  }, configs: {  }, functions: {  }, models: {  }, params: {  }, tables: {  }, users: {  } }"]
     ];
 
 	let test_cases = [
@@ -2343,8 +2351,8 @@ async fn permissions_checks_define_user_db() {
 
 	// Define the expected results for the check statement when the test statement succeeded and when it failed
 	let check_results = [
-        vec!["{ accesses: {  }, analyzers: {  }, functions: {  }, models: {  }, params: {  }, tables: {  }, users: { user: \"DEFINE USER user ON DATABASE PASSHASH 'secret' ROLES VIEWER DURATION FOR TOKEN 15m, FOR SESSION 6h\" } }"],
-		vec!["{ accesses: {  }, analyzers: {  }, functions: {  }, models: {  }, params: {  }, tables: {  }, users: {  } }"]
+        vec!["{ accesses: {  }, analyzers: {  }, configs: {  }, functions: {  }, models: {  }, params: {  }, tables: {  }, users: { user: \"DEFINE USER user ON DATABASE PASSHASH 'secret' ROLES VIEWER DURATION FOR TOKEN 15m, FOR SESSION 6h\" } }"],
+		vec!["{ accesses: {  }, analyzers: {  }, configs: {  }, functions: {  }, models: {  }, params: {  }, tables: {  }, users: {  } }"]
     ];
 
 	let test_cases = [
@@ -2385,8 +2393,8 @@ async fn permissions_checks_define_access_record() {
 
 	// Define the expected results for the check statement when the test statement succeeded and when it failed
 	let check_results = [
-        vec!["{ accesses: { account: \"DEFINE ACCESS account ON DATABASE TYPE RECORD WITH JWT ALGORITHM HS512 KEY '[REDACTED]' WITH ISSUER KEY '[REDACTED]' DURATION FOR TOKEN 15m, FOR SESSION 12h\" }, analyzers: {  }, functions: {  }, models: {  }, params: {  }, tables: {  }, users: {  } }"],
-		vec!["{ accesses: {  }, analyzers: {  }, functions: {  }, models: {  }, params: {  }, tables: {  }, users: {  } }"]
+        vec!["{ accesses: { account: \"DEFINE ACCESS account ON DATABASE TYPE RECORD WITH JWT ALGORITHM HS512 KEY '[REDACTED]' WITH ISSUER KEY '[REDACTED]' DURATION FOR TOKEN 15m, FOR SESSION 12h\" }, analyzers: {  }, configs: {  }, functions: {  }, models: {  }, params: {  }, tables: {  }, users: {  } }"],
+		vec!["{ accesses: {  }, analyzers: {  }, configs: {  }, functions: {  }, models: {  }, params: {  }, tables: {  }, users: {  } }"]
     ];
 
 	let test_cases = [
@@ -2427,8 +2435,8 @@ async fn permissions_checks_define_param() {
 
 	// Define the expected results for the check statement when the test statement succeeded and when it failed
 	let check_results = [
-        vec!["{ accesses: {  }, analyzers: {  }, functions: {  }, models: {  }, params: { param: \"DEFINE PARAM $param VALUE 'foo' PERMISSIONS FULL\" }, tables: {  }, users: {  } }"],
-		vec!["{ accesses: {  }, analyzers: {  }, functions: {  }, models: {  }, params: {  }, tables: {  }, users: {  } }"]
+        vec!["{ accesses: {  }, analyzers: {  }, configs: {  }, functions: {  }, models: {  }, params: { param: \"DEFINE PARAM $param VALUE 'foo' PERMISSIONS FULL\" }, tables: {  }, users: {  } }"],
+		vec!["{ accesses: {  }, analyzers: {  }, configs: {  }, functions: {  }, models: {  }, params: {  }, tables: {  }, users: {  } }"]
     ];
 
 	let test_cases = [
@@ -2466,8 +2474,8 @@ async fn permissions_checks_define_table() {
 
 	// Define the expected results for the check statement when the test statement succeeded and when it failed
 	let check_results = [
-        vec!["{ accesses: {  }, analyzers: {  }, functions: {  }, models: {  }, params: {  }, tables: { TB: 'DEFINE TABLE TB TYPE ANY SCHEMALESS PERMISSIONS NONE' }, users: {  } }"],
-		vec!["{ accesses: {  }, analyzers: {  }, functions: {  }, models: {  }, params: {  }, tables: {  }, users: {  } }"]
+        vec!["{ accesses: {  }, analyzers: {  }, configs: {  }, functions: {  }, models: {  }, params: {  }, tables: { TB: 'DEFINE TABLE TB TYPE ANY SCHEMALESS PERMISSIONS NONE' }, users: {  } }"],
+		vec!["{ accesses: {  }, analyzers: {  }, configs: {  }, functions: {  }, models: {  }, params: {  }, tables: {  }, users: {  } }"]
     ];
 
 	let test_cases = [
@@ -2653,6 +2661,7 @@ async fn define_statement_table_permissions() -> Result<(), Error> {
 		"{
 			accesses: {},
 			analyzers: {},
+ 			configs: {},
 			functions: {},
 			models: {},
 			params: {},
@@ -3057,6 +3066,7 @@ async fn define_table_relation_redefinition_info() -> Result<(), Error> {
 		"{
 			accesses: {},
 			analyzers: {},
+			configs: {},
 			functions: {},
 			models: {},
 			params: {},
@@ -3078,6 +3088,7 @@ async fn define_table_relation_redefinition_info() -> Result<(), Error> {
 		"{
 			accesses: {},
 			analyzers: {},
+			configs: {},
 			functions: {},
 			models: {},
 			params: {},
@@ -3099,6 +3110,7 @@ async fn define_table_relation_redefinition_info() -> Result<(), Error> {
 		"{
 			accesses: {},
 			analyzers: {},
+			configs: {},
 			functions: {},
 			models: {},
 			params: {},

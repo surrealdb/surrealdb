@@ -6226,9 +6226,9 @@ dependencies = [
 
 [[package]]
 name = "surrealkv"
-version = "0.3.4"
+version = "0.3.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7d5fe193207896e6eeb445b88b810830097a9940058174bbbe8ec5597b1f52e1"
+checksum = "40ac63abeb621f728a556d63004756b70ff6dd9b9805c4d8e2e26c16bbed6097"
 dependencies = [
  "ahash 0.8.11",
  "async-channel 2.2.0",
@@ -6240,7 +6240,6 @@ dependencies = [
  "parking_lot",
  "quick_cache 0.6.2",
  "revision 0.7.1",
- "sha2",
  "tokio",
  "vart",
 ]
