@@ -112,9 +112,9 @@ impl<'a> Processor<'a> {
 		Ok(())
 	}
 
-	fn check_query_planner_context<'b>(ctx: &'b Context, table: &'b str) -> Cow<'b, Context> {
+	fn check_query_planner_context<'b>(ctx: &'b Context, table: &'b Table) -> Cow<'b, Context> {
 		if let Some(qp) = ctx.get_query_planner() {
-			if let Some(exe) = qp.get_query_executor(table) {
+			if let Some(exe) = qp.get_query_executor(&table.0) {
 				// We set the query executor matching the current table in the Context
 				// Avoiding search in the hashmap of the query planner for each doc
 				let mut ctx = MutableContext::new(ctx);
@@ -139,7 +139,6 @@ impl<'a> Processor<'a> {
 				Iterable::Thing(v) => self.process_thing(stk, ctx, opt, stm, v).await?,
 				Iterable::Defer(v) => self.process_defer(stk, ctx, opt, stm, v).await?,
 				Iterable::TableRange(tb, v, keys_only) => {
-					let ctx = Self::check_query_planner_context(ctx, &tb);
 					if keys_only {
 						self.process_range_keys(stk, &ctx, opt, stm, &tb, v).await?
 					} else {

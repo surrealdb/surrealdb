@@ -47,7 +47,7 @@ impl PlanBuilder {
 		};
 
 		// If we only count and there are no conditions and no aggregations, then we can only scan keys
-		let keys_only = Self::is_keys_only(params);
+		let keys_only = params.is_keys_only();
 
 		if let Some(With::NoIndex) = params.with {
 			return Ok(Self::table_iterator(Some("WITH NOINDEX"), keys_only));
@@ -91,26 +91,6 @@ impl PlanBuilder {
 			return Ok(Plan::MultiIndex(b.non_range_indexes, ranges));
 		}
 		Ok(Self::table_iterator(None, keys_only))
-	}
-
-	fn is_keys_only(p: &QueryPlannerParams) -> bool {
-		if !p.fields.is_count_all_only() {
-			return false;
-		}
-		if p.cond.is_some() {
-			return false;
-		}
-		if let Some(g) = p.group {
-			if !g.is_empty() {
-				return false;
-			}
-		}
-		if let Some(p) = p.order {
-			if !p.is_empty() {
-				return false;
-			}
-		}
-		true
 	}
 
 	fn table_iterator(reason: Option<&str>, keys_only: bool) -> Plan {
