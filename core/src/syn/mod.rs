@@ -1,6 +1,7 @@
 //! Module containing the implementation of the surrealql tokens, lexer, and parser.
 
 use crate::{
+	cnf::{MAX_OBJECT_PARSING_DEPTH, MAX_QUERY_PARSING_DEPTH},
 	err::Error,
 	sql::{Block, Datetime, Duration, Idiom, Query, Range, Subquery, Thing, Value},
 };
@@ -43,7 +44,9 @@ pub fn could_be_reserved_keyword(s: &str) -> bool {
 #[instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len()))]
 pub fn parse(input: &str) -> Result<Query, Error> {
 	trace!(target: TARGET, "Parsing SurrealQL query");
-	let mut parser = Parser::new(input.as_bytes());
+	let mut parser = Parser::new(input.as_bytes())
+		.with_object_recursion_limit(*MAX_OBJECT_PARSING_DEPTH as usize)
+		.with_query_recursion_limit(*MAX_QUERY_PARSING_DEPTH as usize);
 	let mut stack = Stack::new();
 	stack
 		.enter(|stk| parser.parse_query(stk))
@@ -56,7 +59,9 @@ pub fn parse(input: &str) -> Result<Query, Error> {
 #[instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len()))]
 pub fn value(input: &str) -> Result<Value, Error> {
 	trace!(target: TARGET, "Parsing SurrealQL value");
-	let mut parser = Parser::new(input.as_bytes());
+	let mut parser = Parser::new(input.as_bytes())
+		.with_object_recursion_limit(*MAX_OBJECT_PARSING_DEPTH as usize)
+		.with_query_recursion_limit(*MAX_QUERY_PARSING_DEPTH as usize);
 	let mut stack = Stack::new();
 	stack
 		.enter(|stk| parser.parse_value_table(stk))
@@ -70,7 +75,9 @@ pub fn value(input: &str) -> Result<Value, Error> {
 #[instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len()))]
 pub fn json(input: &str) -> Result<Value, Error> {
 	trace!(target: TARGET, "Parsing inert JSON value");
-	let mut parser = Parser::new(input.as_bytes());
+	let mut parser = Parser::new(input.as_bytes())
+		.with_object_recursion_limit(*MAX_OBJECT_PARSING_DEPTH as usize)
+		.with_query_recursion_limit(*MAX_QUERY_PARSING_DEPTH as usize);
 	let mut stack = Stack::new();
 	stack
 		.enter(|stk| parser.parse_json(stk))
@@ -84,7 +91,9 @@ pub fn json(input: &str) -> Result<Value, Error> {
 #[instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len()))]
 pub fn subquery(input: &str) -> Result<Subquery, Error> {
 	trace!(target: TARGET, "Parsing SurrealQL subquery");
-	let mut parser = Parser::new(input.as_bytes());
+	let mut parser = Parser::new(input.as_bytes())
+		.with_object_recursion_limit(*MAX_OBJECT_PARSING_DEPTH as usize)
+		.with_query_recursion_limit(*MAX_QUERY_PARSING_DEPTH as usize);
 	let mut stack = Stack::new();
 	stack
 		.enter(|stk| parser.parse_full_subquery(stk))
@@ -98,7 +107,9 @@ pub fn subquery(input: &str) -> Result<Subquery, Error> {
 #[instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len()))]
 pub fn idiom(input: &str) -> Result<Idiom, Error> {
 	trace!(target: TARGET, "Parsing SurrealQL idiom");
-	let mut parser = Parser::new(input.as_bytes());
+	let mut parser = Parser::new(input.as_bytes())
+		.with_object_recursion_limit(*MAX_OBJECT_PARSING_DEPTH as usize)
+		.with_query_recursion_limit(*MAX_QUERY_PARSING_DEPTH as usize);
 	parser.table_as_field = true;
 	let mut stack = Stack::new();
 	stack
@@ -151,7 +162,9 @@ pub fn range(input: &str) -> Result<Range, Error> {
 #[instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len()))]
 pub fn thing(input: &str) -> Result<Thing, Error> {
 	trace!(target: TARGET, "Parsing SurrealQL thing");
-	let mut parser = Parser::new(input.as_bytes());
+	let mut parser = Parser::new(input.as_bytes())
+		.with_object_recursion_limit(*MAX_OBJECT_PARSING_DEPTH as usize)
+		.with_query_recursion_limit(*MAX_QUERY_PARSING_DEPTH as usize);
 	let mut stack = Stack::new();
 	stack
 		.enter(|stk| parser.parse_thing(stk))
@@ -165,7 +178,9 @@ pub fn thing(input: &str) -> Result<Thing, Error> {
 #[instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len()))]
 pub fn block(input: &str) -> Result<Block, Error> {
 	trace!(target: TARGET, "Parsing SurrealQL block");
-	let mut parser = Parser::new(input.as_bytes());
+	let mut parser = Parser::new(input.as_bytes())
+		.with_object_recursion_limit(*MAX_OBJECT_PARSING_DEPTH as usize)
+		.with_query_recursion_limit(*MAX_QUERY_PARSING_DEPTH as usize);
 	let mut stack = Stack::new();
 	let token = parser.peek();
 	match token.kind {
@@ -190,7 +205,9 @@ pub fn block(input: &str) -> Result<Block, Error> {
 #[instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len()))]
 pub fn value_legacy_strand(input: &str) -> Result<Value, Error> {
 	trace!(target: TARGET, "Parsing SurrealQL value, with legacy strings");
-	let mut parser = Parser::new(input.as_bytes());
+	let mut parser = Parser::new(input.as_bytes())
+		.with_object_recursion_limit(*MAX_OBJECT_PARSING_DEPTH as usize)
+		.with_query_recursion_limit(*MAX_QUERY_PARSING_DEPTH as usize);
 	let mut stack = Stack::new();
 	parser.allow_legacy_strand(true);
 	stack
@@ -205,7 +222,9 @@ pub fn value_legacy_strand(input: &str) -> Result<Value, Error> {
 #[instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len()))]
 pub fn json_legacy_strand(input: &str) -> Result<Value, Error> {
 	trace!(target: TARGET, "Parsing inert JSON value, with legacy strings");
-	let mut parser = Parser::new(input.as_bytes());
+	let mut parser = Parser::new(input.as_bytes())
+		.with_object_recursion_limit(*MAX_OBJECT_PARSING_DEPTH as usize)
+		.with_query_recursion_limit(*MAX_QUERY_PARSING_DEPTH as usize);
 	let mut stack = Stack::new();
 	parser.allow_legacy_strand(true);
 	stack
