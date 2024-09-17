@@ -48,6 +48,16 @@ fn glued_identifiers() {
 }
 
 #[test]
+fn less_then_idiom() {
+	let src = r#"
+		if ($param.foo < 2){
+			return 1
+		}
+	"#;
+	test_parse!(parse_query, src).unwrap();
+}
+
+#[test]
 fn escaped_params() {
 	let src = r#"LET $⟨R-_fYU8Wa31kg7tz0JI6Kme⟩ = 5;
 		RETURN  $⟨R-_fYU8Wa31kg7tz0JI6Kme⟩"#;
