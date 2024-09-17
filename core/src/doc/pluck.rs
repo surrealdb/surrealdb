@@ -55,9 +55,9 @@ impl Document {
 				Output::Null => Ok(Value::Null),
 				Output::Diff => {
 					// Process the current permitted
-					self.process_permitted_current(stk, &ctx, opt).await?;
+					self.process_permitted_current(stk, ctx, opt).await?;
 					// Process the initial permitted
-					self.process_permitted_initial(stk, &ctx, opt).await?;
+					self.process_permitted_initial(stk, ctx, opt).await?;
 					// Output a DIFF of any changes applied to the document
 					Ok(self
 						.initial_permitted
@@ -68,7 +68,7 @@ impl Document {
 				}
 				Output::After => {
 					// Process the current permitted
-					self.process_permitted_current(stk, &ctx, opt).await?;
+					self.process_permitted_current(stk, ctx, opt).await?;
 					// Output the full document after all changes were applied
 					self.current_permitted
 						.doc
@@ -78,7 +78,7 @@ impl Document {
 				}
 				Output::Before => {
 					// Process the initial permitted
-					self.process_permitted_initial(stk, &ctx, opt).await?;
+					self.process_permitted_initial(stk, ctx, opt).await?;
 					// Output the full document before any changes were applied
 					self.initial_permitted
 						.doc
@@ -88,9 +88,9 @@ impl Document {
 				}
 				Output::Fields(v) => {
 					// Process the current permitted
-					self.process_permitted_current(stk, &ctx, opt).await?;
+					self.process_permitted_current(stk, ctx, opt).await?;
 					// Process the initial permitted
-					self.process_permitted_initial(stk, &ctx, opt).await?;
+					self.process_permitted_initial(stk, ctx, opt).await?;
 					// Configure the context
 					let mut ctx = MutableContext::new(ctx);
 					ctx.add_value("after", self.current_permitted.doc.as_arc());
@@ -112,14 +112,14 @@ impl Document {
 				},
 				Statement::Select(s) => {
 					// Process the current permitted
-					self.process_permitted_current(stk, &ctx, opt).await?;
+					self.process_permitted_current(stk, ctx, opt).await?;
 					s.expr
 						.compute(stk, ctx, opt, Some(&self.current_permitted), s.group.is_some())
 						.await
 				}
 				Statement::Create(_) => {
 					// Process the current permitted
-					self.process_permitted_current(stk, &ctx, opt).await?;
+					self.process_permitted_current(stk, ctx, opt).await?;
 					// Process the document output
 					self.current_permitted
 						.doc
@@ -129,7 +129,7 @@ impl Document {
 				}
 				Statement::Upsert(_) => {
 					// Process the current permitted
-					self.process_permitted_current(stk, &ctx, opt).await?;
+					self.process_permitted_current(stk, ctx, opt).await?;
 					// Process the document output
 					self.current_permitted
 						.doc
@@ -139,7 +139,7 @@ impl Document {
 				}
 				Statement::Update(_) => {
 					// Process the current permitted
-					self.process_permitted_current(stk, &ctx, opt).await?;
+					self.process_permitted_current(stk, ctx, opt).await?;
 					// Process the document output
 					self.current_permitted
 						.doc
@@ -149,7 +149,7 @@ impl Document {
 				}
 				Statement::Relate(_) => {
 					// Process the current permitted
-					self.process_permitted_current(stk, &ctx, opt).await?;
+					self.process_permitted_current(stk, ctx, opt).await?;
 					// Process the document output
 					self.current_permitted
 						.doc
@@ -159,7 +159,7 @@ impl Document {
 				}
 				Statement::Insert(_) => {
 					// Process the current permitted
-					self.process_permitted_current(stk, &ctx, opt).await?;
+					self.process_permitted_current(stk, ctx, opt).await?;
 					// Process the document output
 					self.current_permitted
 						.doc
