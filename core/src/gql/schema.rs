@@ -676,7 +676,6 @@ fn kind_to_type(kind: Kind, types: &mut Vec<Type>) -> Result<TypeRef, GqlError> 
 		Kind::Array(k, _) => TypeRef::List(Box::new(kind_to_type(*k, types)?)),
 		Kind::Function(_, _) => return Err(schema_error("Kind::Function is not yet supported")),
 		Kind::Range => return Err(schema_error("Kind::Range is not yet supported")),
-		// TODO(raphaeldarley): check if union is of literals and generate enum
 		// generate custom scalar from other literals?
 		Kind::Literal(_) => return Err(schema_error("Kind::Literal is not yet supported")),
 	};
@@ -756,8 +755,7 @@ fn filter_from_type(
 		Kind::Range => {}
 		Kind::Literal(_) => {}
 	};
-	// Ok(filter)
-
+	types.push(Type::InputObject(filter));
 	Ok(())
 }
 
