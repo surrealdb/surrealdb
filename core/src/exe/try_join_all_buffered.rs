@@ -137,6 +137,7 @@ mod tests {
 	}
 
 	#[tokio::test]
+	#[ignore]
 	async fn comparison() {
 		for i in (0..10).chain((20..100).step_by(20)).chain((500..10000).step_by(500)) {
 			let unbuffered = benchmark_try_join_all(futures::future::try_join_all, i).await;

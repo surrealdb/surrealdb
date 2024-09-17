@@ -609,7 +609,6 @@ async fn version() -> Result<(), Box<dyn std::error::Error>> {
 
 // Validate that the WebSocket is able to process multiple queries concurrently
 #[test(tokio::test)]
-#[ignore]
 async fn concurrency() -> Result<(), Box<dyn std::error::Error>> {
 	// Setup database server
 	let (addr, mut server) = common::start_server_with_defaults().await.unwrap();
