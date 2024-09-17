@@ -33,7 +33,7 @@ fn main() {
 							.skip_while(|w| *w == "struct" || *w == "enum")
 							.next()
 						else {
-							panic!("foo: {l} {}", path.to_string_lossy())
+							break;
 						};
 						if let Some(idx) = name.find('(') {
 							name = &name[0..idx];
