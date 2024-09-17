@@ -25,6 +25,29 @@ impl Document {
 	) -> Result<Value, Error> {
 		// Ensure futures are run
 		let opt = &opt.new_with_futures(true);
+		// Check if this record exists
+		if self.id.is_some() {
+			// Should we run permissions checks?
+			if opt.check_perms(Action::View)? {
+				// Get the table for this document
+				let table = self.tb(ctx, opt).await?;
+				// Get the permissions for this table
+				let perms = &table.permissions.select;
+				// Process the table permissions
+				match perms {
+					Permission::None => return Err(Error::Ignore),
+					Permission::Full => (),
+					Permission::Specific(e) => {
+						// Disable permissions
+						let opt = &opt.new_with_perms(false);
+						// Process the PERMISSION clause
+						if !e.compute(stk, ctx, opt, Some(&self.current)).await?.is_truthy() {
+							return Err(Error::Ignore);
+						}
+					}
+				}
+			}
+		}
 		// Process the desired output
 		let mut out = match stm.output() {
 			Some(v) => match v {
