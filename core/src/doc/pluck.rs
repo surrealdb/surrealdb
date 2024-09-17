@@ -41,7 +41,19 @@ impl Document {
 						// Disable permissions
 						let opt = &opt.new_with_perms(false);
 						// Process the PERMISSION clause
-						if !e.compute(stk, ctx, opt, Some(&self.current)).await?.is_truthy() {
+						if !e
+							.compute(
+								stk,
+								ctx,
+								opt,
+								Some(match stm.is_delete() {
+									true => &self.initial,
+									false => &self.current,
+								}),
+							)
+							.await?
+							.is_truthy()
+						{
 							return Err(Error::Ignore);
 						}
 					}
