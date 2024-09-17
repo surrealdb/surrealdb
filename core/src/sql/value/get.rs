@@ -233,6 +233,21 @@ impl Value {
 							Some(v) => stk.run(|stk| v.get(stk, ctx, opt, doc, path.next())).await,
 							None => Ok(Value::None),
 						},
+						Value::Range(r) => {
+							if let Some(range) = r.slice(v.as_slice()) {
+								let path = path.next();
+								stk.scope(|scope| {
+									let futs = range
+										.iter()
+										.map(|v| scope.run(|stk| v.get(stk, ctx, opt, doc, path)));
+									try_join_all_buffered(futs)
+								})
+								.await
+								.map(Into::into)
+							} else {
+								Ok(Value::None)
+							}
+						}
 						_ => stk.run(|stk| Value::None.get(stk, ctx, opt, doc, path.next())).await,
 					},
 					Part::Method(name, args) => {
@@ -267,8 +282,8 @@ impl Value {
 								what: Values(vec![Value::from(val)]),
 								..SelectStatement::default()
 							};
-							let v = stk.run(|stk| stm.compute(stk, ctx, opt, None)).await?.first();
-							stk.run(|stk| v.get(stk, ctx, opt, None, path)).await
+							let v = stk.run(|stk| stm.compute(stk, ctx, opt, None)).await?.all();
+							stk.run(|stk| v.get(stk, ctx, opt, None, path)).await?.flatten().ok()
 						}
 					}
 				}

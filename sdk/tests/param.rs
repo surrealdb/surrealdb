@@ -28,6 +28,7 @@ async fn define_global_param() -> Result<(), Error> {
 		"{
 			accesses: {},
 			analyzers: {},
+			configs: {},
 			functions: {},
 			models: {},
 			params: { test: 'DEFINE PARAM $test VALUE 12345 PERMISSIONS FULL' },

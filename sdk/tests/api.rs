@@ -38,7 +38,6 @@ mod api_integration {
 	const NS: &str = "test-ns";
 	const ROOT_USER: &str = "root";
 	const ROOT_PASS: &str = "root";
-	const TICK_INTERVAL: Duration = Duration::from_secs(1);
 
 	#[derive(Debug, Serialize)]
 	struct Record {
@@ -187,10 +186,7 @@ mod api_integration {
 				username: ROOT_USER,
 				password: ROOT_PASS,
 			};
-			let config = Config::new()
-				.user(root)
-				.tick_interval(TICK_INTERVAL)
-				.capabilities(Capabilities::all());
+			let config = Config::new().user(root).capabilities(Capabilities::all());
 			let db = Surreal::new::<Mem>(config).await.unwrap();
 			db.signin(root).await.unwrap();
 			(permit, db)
@@ -284,10 +280,7 @@ mod api_integration {
 				username: ROOT_USER,
 				password: ROOT_PASS,
 			};
-			let config = Config::new()
-				.user(root)
-				.tick_interval(TICK_INTERVAL)
-				.capabilities(Capabilities::all());
+			let config = Config::new().user(root).capabilities(Capabilities::all());
 			#[allow(deprecated)]
 			let db = Surreal::new::<File>((path, config)).await.unwrap();
 			db.signin(root).await.unwrap();
@@ -320,10 +313,7 @@ mod api_integration {
 				username: ROOT_USER,
 				password: ROOT_PASS,
 			};
-			let config = Config::new()
-				.user(root)
-				.tick_interval(TICK_INTERVAL)
-				.capabilities(Capabilities::all());
+			let config = Config::new().user(root).capabilities(Capabilities::all());
 			let db = Surreal::new::<RocksDb>((path, config)).await.unwrap();
 			db.signin(root).await.unwrap();
 			(permit, db)
@@ -354,10 +344,7 @@ mod api_integration {
 				username: ROOT_USER,
 				password: ROOT_PASS,
 			};
-			let config = Config::new()
-				.user(root)
-				.tick_interval(TICK_INTERVAL)
-				.capabilities(Capabilities::all());
+			let config = Config::new().user(root).capabilities(Capabilities::all());
 			let db = Surreal::new::<TiKv>(("127.0.0.1:2379", config)).await.unwrap();
 			db.signin(root).await.unwrap();
 			(permit, db)
@@ -387,10 +374,7 @@ mod api_integration {
 				username: ROOT_USER,
 				password: ROOT_PASS,
 			};
-			let config = Config::new()
-				.user(root)
-				.tick_interval(TICK_INTERVAL)
-				.capabilities(Capabilities::all());
+			let config = Config::new().user(root).capabilities(Capabilities::all());
 			let path = "/etc/foundationdb/fdb.cluster";
 			surrealdb::engine::any::connect((format!("fdb://{path}"), config.clone()))
 				.await
@@ -418,10 +402,7 @@ mod api_integration {
 				username: ROOT_USER,
 				password: ROOT_PASS,
 			};
-			let config = Config::new()
-				.user(root)
-				.tick_interval(TICK_INTERVAL)
-				.capabilities(Capabilities::all());
+			let config = Config::new().user(root).capabilities(Capabilities::all());
 			let db = Surreal::new::<SurrealKV>((path, config)).await.unwrap();
 			db.signin(root).await.unwrap();
 			(permit, db)

@@ -14,18 +14,34 @@ use crate::idx::planner::iterators::IteratorRef;
 use crate::idx::planner::knn::KnnBruteForceResults;
 use crate::idx::planner::plan::{Plan, PlanBuilder};
 use crate::idx::planner::tree::Tree;
+use crate::sql::statements::SelectStatement;
 use crate::sql::with::With;
-use crate::sql::{Cond, Orders, Table};
+use crate::sql::{Cond, Fields, Groups, Orders, Table};
 use reblessive::tree::Stk;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU8, Ordering};
-use std::sync::Arc;
+
+pub(crate) struct QueryPlannerParams<'a> {
+	fields: &'a Fields,
+	with: Option<&'a With>,
+	order: Option<&'a Orders>,
+	cond: Option<&'a Cond>,
+	group: Option<&'a Groups>,
+}
+
+impl<'a> From<&'a SelectStatement> for QueryPlannerParams<'a> {
+	fn from(stmt: &'a SelectStatement) -> Self {
+		QueryPlannerParams {
+			fields: &stmt.expr,
+			with: stmt.with.as_ref(),
+			order: stmt.order.as_ref(),
+			cond: stmt.cond.as_ref(),
+			group: stmt.group.as_ref(),
+		}
+	}
+}
 
 pub(crate) struct QueryPlanner {
-	opt: Arc<Options>,
-	with: Option<Arc<With>>,
-	cond: Option<Arc<Cond>>,
-	order: Option<Arc<Orders>>,
 	/// There is one executor per table
 	executors: HashMap<String, QueryExecutor>,
 	requires_distinct: bool,
@@ -36,17 +52,8 @@ pub(crate) struct QueryPlanner {
 }
 
 impl QueryPlanner {
-	pub(crate) fn new(
-		opt: Arc<Options>,
-		with: Option<Arc<With>>,
-		cond: Option<Arc<Cond>>,
-		order: Option<Arc<Orders>>,
-	) -> Self {
+	pub(crate) fn new() -> Self {
 		Self {
-			opt,
-			with,
-			cond,
-			order,
 			executors: HashMap::default(),
 			requires_distinct: false,
 			fallbacks: vec![],
@@ -60,27 +67,22 @@ impl QueryPlanner {
 		&mut self,
 		stk: &mut Stk,
 		ctx: &Context,
+		opt: &Options,
 		t: Table,
+		params: &QueryPlannerParams<'_>,
 		it: &mut Iterator,
 	) -> Result<(), Error> {
 		let mut is_table_iterator = false;
-		let mut tree = Tree::build(
-			stk,
-			ctx,
-			&self.opt,
-			&t,
-			self.cond.as_ref().map(|w| w.as_ref()),
-			self.with.as_ref().map(|c| c.as_ref()),
-			self.order.as_ref().map(|o| o.as_ref()),
-		)
-		.await?;
+
+		let mut tree =
+			Tree::build(stk, ctx, opt, &t, params.cond, params.with, params.order).await?;
 
 		let is_knn = !tree.knn_expressions.is_empty();
 		let order = tree.index_map.order_limit.take();
 		let mut exe = InnerQueryExecutor::new(
 			stk,
 			ctx,
-			&self.opt,
+			opt,
 			&t,
 			tree.index_map,
 			tree.knn_expressions,
@@ -88,12 +90,7 @@ impl QueryPlanner {
 			tree.knn_condition,
 		)
 		.await?;
-		match PlanBuilder::build(
-			tree.root,
-			self.with.as_ref().map(|w| w.as_ref()),
-			tree.with_indexes,
-			order,
-		)? {
+		match PlanBuilder::build(tree.root, params, tree.with_indexes, order)? {
 			Plan::SingleIndex(exp, io) => {
 				if io.require_distinct() {
 					self.requires_distinct = true;
@@ -123,12 +120,12 @@ impl QueryPlanner {
 				let ir = exe.add_iterator(IteratorEntry::Range(rq.exps, ixn, rq.from, rq.to));
 				self.add(t.clone(), Some(ir), exe, it);
 			}
-			Plan::TableIterator(fallback) => {
-				if let Some(fallback) = fallback {
-					self.fallbacks.push(fallback);
+			Plan::TableIterator(reason, keys_only) => {
+				if let Some(reason) = reason {
+					self.fallbacks.push(reason);
 				}
 				self.add(t.clone(), None, exe, it);
-				it.ingest(Iterable::Table(t));
+				it.ingest(Iterable::Table(t, keys_only));
 				is_table_iterator = true;
 			}
 		}
@@ -168,6 +165,7 @@ impl QueryPlanner {
 		&self.fallbacks
 	}
 
+	#[cfg(not(target_arch = "wasm32"))]
 	pub(crate) fn is_order(&self, irf: &IteratorRef) -> bool {
 		self.orders.contains(irf)
 	}

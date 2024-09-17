@@ -5990,9 +5990,9 @@ dependencies = [
 
 [[package]]
 name = "surrealcs"
-version = "0.1.1"
+version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fc1566e270e18469068b7bc38ae65f7e8eb7677f11fa98930444d1942152807f"
+checksum = "457eb2adc59f9a9ba337e1fa3a6af63e09524e4adf01921b9d7079917cd7f694"
 dependencies = [
  "bincode",
  "bytes",
@@ -6011,9 +6011,9 @@ dependencies = [
 
 [[package]]
 name = "surrealcs-kernel"
-version = "0.1.1"
+version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5922a9627477b9dd2b207b6f5d59fbcff772057f321a615740af51f9cf8e3148"
+checksum = "f4a79da58bfc886b93a431a463f956184d4b0a9d3672833544a1b718ff86b0df"
 dependencies = [
  "bincode",
  "chrono",
@@ -6225,9 +6225,9 @@ dependencies = [
 
 [[package]]
 name = "surrealkv"
-version = "0.3.4"
+version = "0.3.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7d5fe193207896e6eeb445b88b810830097a9940058174bbbe8ec5597b1f52e1"
+checksum = "40ac63abeb621f728a556d63004756b70ff6dd9b9805c4d8e2e26c16bbed6097"
 dependencies = [
  "ahash 0.8.11",
  "async-channel 2.2.0",
@@ -6239,7 +6239,6 @@ dependencies = [
  "parking_lot",
  "quick_cache 0.6.2",
  "revision 0.7.1",
- "sha2",
  "tokio",
  "vart",
 ]

@@ -7,8 +7,11 @@ use std::fmt;
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub enum Dir {
+	/// `<-`
 	In,
+	/// `->`
 	Out,
+	/// `<->`
 	Both,
 }
 

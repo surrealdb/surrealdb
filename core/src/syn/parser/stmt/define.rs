@@ -3,6 +3,9 @@ use reblessive::Stk;
 use crate::cnf::EXPERIMENTAL_BEARER_ACCESS;
 use crate::sql::access_type::JwtAccessVerify;
 use crate::sql::index::HnswParams;
+use crate::sql::statements::define::config::graphql::{GraphQLConfig, TableConfig};
+use crate::sql::statements::define::config::ConfigInner;
+use crate::sql::statements::define::DefineConfigStatement;
 use crate::sql::Value;
 use crate::{
 	sql::{
@@ -11,10 +14,10 @@ use crate::{
 		filter::Filter,
 		index::{Distance, VectorType},
 		statements::{
-			DefineAccessStatement, DefineAnalyzerStatement, DefineDatabaseStatement,
-			DefineEventStatement, DefineFieldStatement, DefineFunctionStatement,
-			DefineIndexStatement, DefineNamespaceStatement, DefineParamStatement, DefineStatement,
-			DefineTableStatement, DefineUserStatement,
+			define::config::graphql, DefineAccessStatement, DefineAnalyzerStatement,
+			DefineDatabaseStatement, DefineEventStatement, DefineFieldStatement,
+			DefineFunctionStatement, DefineIndexStatement, DefineNamespaceStatement,
+			DefineParamStatement, DefineStatement, DefineTableStatement, DefineUserStatement,
 		},
 		table_type,
 		tokenizer::Tokenizer,
@@ -31,12 +34,13 @@ use crate::{
 };
 
 impl Parser<'_> {
-	pub async fn parse_define_stmt(&mut self, ctx: &mut Stk) -> ParseResult<DefineStatement> {
+	pub(crate) async fn parse_define_stmt(
+		&mut self,
+		ctx: &mut Stk,
+	) -> ParseResult<DefineStatement> {
 		let next = self.next();
 		match next.kind {
-			t!("NAMESPACE") | t!("ns") => {
-				self.parse_define_namespace().map(DefineStatement::Namespace)
-			}
+			t!("NAMESPACE") => self.parse_define_namespace().map(DefineStatement::Namespace),
 			t!("DATABASE") => self.parse_define_database().map(DefineStatement::Database),
 			t!("FUNCTION") => self.parse_define_function(ctx).await.map(DefineStatement::Function),
 			t!("USER") => self.parse_define_user().map(DefineStatement::User),
@@ -55,11 +59,12 @@ impl Parser<'_> {
 			}
 			t!("ANALYZER") => self.parse_define_analyzer().map(DefineStatement::Analyzer),
 			t!("ACCESS") => self.parse_define_access(ctx).await.map(DefineStatement::Access),
+			t!("CONFIG") => self.parse_define_config().map(DefineStatement::Config),
 			_ => unexpected!(self, next, "a define statement keyword"),
 		}
 	}
 
-	pub fn parse_define_namespace(&mut self) -> ParseResult<DefineNamespaceStatement> {
+	pub(crate) fn parse_define_namespace(&mut self) -> ParseResult<DefineNamespaceStatement> {
 		let (if_not_exists, overwrite) = if self.eat(t!("IF")) {
 			expected!(self, t!("NOT"));
 			expected!(self, t!("EXISTS"));
@@ -330,12 +335,12 @@ impl Parser<'_> {
 									t!("SIGNUP") => {
 										self.pop_peek();
 										ac.signup =
-											Some(stk.run(|stk| self.parse_value(stk)).await?);
+											Some(stk.run(|stk| self.parse_value_table(stk)).await?);
 									}
 									t!("SIGNIN") => {
 										self.pop_peek();
 										ac.signin =
-											Some(stk.run(|stk| self.parse_value(stk)).await?);
+											Some(stk.run(|stk| self.parse_value_table(stk)).await?);
 									}
 									_ => break,
 								}
@@ -370,7 +375,7 @@ impl Parser<'_> {
 				}
 				t!("AUTHENTICATE") => {
 					self.pop_peek();
-					res.authenticate = Some(stk.run(|stk| self.parse_value(stk)).await?);
+					res.authenticate = Some(stk.run(|stk| self.parse_value_table(stk)).await?);
 				}
 				t!("DURATION") => {
 					self.pop_peek();
@@ -576,11 +581,11 @@ impl Parser<'_> {
 				}
 				t!("SIGNUP") => {
 					self.pop_peek();
-					ac.signup = Some(stk.run(|stk| self.parse_value(stk)).await?);
+					ac.signup = Some(stk.run(|stk| self.parse_value_table(stk)).await?);
 				}
 				t!("SIGNIN") => {
 					self.pop_peek();
-					ac.signin = Some(stk.run(|stk| self.parse_value(stk)).await?);
+					ac.signin = Some(stk.run(|stk| self.parse_value_table(stk)).await?);
 				}
 				_ => break,
 			}
@@ -614,7 +619,7 @@ impl Parser<'_> {
 			match self.peek_kind() {
 				t!("VALUE") => {
 					self.pop_peek();
-					res.value = ctx.run(|ctx| self.parse_value(ctx)).await?;
+					res.value = ctx.run(|ctx| self.parse_value_table(ctx)).await?;
 				}
 				t!("COMMENT") => {
 					self.pop_peek();
@@ -753,13 +758,13 @@ impl Parser<'_> {
 			match self.peek_kind() {
 				t!("WHEN") => {
 					self.pop_peek();
-					res.when = ctx.run(|ctx| self.parse_value(ctx)).await?;
+					res.when = ctx.run(|ctx| self.parse_value_table(ctx)).await?;
 				}
 				t!("THEN") => {
 					self.pop_peek();
-					res.then = Values(vec![ctx.run(|ctx| self.parse_value(ctx)).await?]);
+					res.then = Values(vec![ctx.run(|ctx| self.parse_value_table(ctx)).await?]);
 					while self.eat(t!(",")) {
-						res.then.0.push(ctx.run(|ctx| self.parse_value(ctx)).await?)
+						res.then.0.push(ctx.run(|ctx| self.parse_value_table(ctx)).await?)
 					}
 				}
 				t!("COMMENT") => {
@@ -812,15 +817,15 @@ impl Parser<'_> {
 				}
 				t!("VALUE") => {
 					self.pop_peek();
-					res.value = Some(ctx.run(|ctx| self.parse_value(ctx)).await?);
+					res.value = Some(ctx.run(|ctx| self.parse_value_field(ctx)).await?);
 				}
 				t!("ASSERT") => {
 					self.pop_peek();
-					res.assert = Some(ctx.run(|ctx| self.parse_value(ctx)).await?);
+					res.assert = Some(ctx.run(|ctx| self.parse_value_field(ctx)).await?);
 				}
 				t!("DEFAULT") => {
 					self.pop_peek();
-					res.default = Some(ctx.run(|ctx| self.parse_value(ctx)).await?);
+					res.default = Some(ctx.run(|ctx| self.parse_value_field(ctx)).await?);
 				}
 				t!("PERMISSIONS") => {
 					self.pop_peek();
@@ -1210,6 +1215,113 @@ impl Parser<'_> {
 			}
 		}
 		Ok(res)
+	}
+
+	pub fn parse_define_config(&mut self) -> ParseResult<DefineConfigStatement> {
+		let (if_not_exists, overwrite) = if self.eat(t!("IF")) {
+			expected!(self, t!("NOT"));
+			expected!(self, t!("EXISTS"));
+			(true, false)
+		} else if self.eat(t!("OVERWRITE")) {
+			(false, true)
+		} else {
+			(false, false)
+		};
+
+		let next = self.next();
+		let inner = match next.kind {
+			t!("GRAPHQL") => self.parse_graphql_config().map(ConfigInner::GraphQL)?,
+			_ => unexpected!(self, next, "a type of config"),
+		};
+
+		Ok(DefineConfigStatement {
+			inner,
+			if_not_exists,
+			overwrite,
+		})
+	}
+
+	fn parse_graphql_config(&mut self) -> ParseResult<GraphQLConfig> {
+		use graphql::{FunctionsConfig, TablesConfig};
+		let mut tmp_tables = Option::<TablesConfig>::None;
+		let mut tmp_fncs = Option::<FunctionsConfig>::None;
+		loop {
+			match self.peek_kind() {
+				t!("NONE") => {
+					self.pop_peek();
+					tmp_tables = Some(TablesConfig::None);
+					tmp_fncs = Some(FunctionsConfig::None);
+				}
+				t!("AUTO") => {
+					self.pop_peek();
+					tmp_tables = Some(TablesConfig::Auto);
+					tmp_fncs = Some(FunctionsConfig::Auto);
+				}
+				t!("TABLES") => {
+					self.pop_peek();
+
+					let next = self.next();
+					match next.kind {
+						t!("INCLUDE") => {
+							tmp_tables =
+								Some(TablesConfig::Include(self.parse_graphql_table_configs()?))
+						}
+						t!("EXCLUDE") => {
+							tmp_tables =
+								Some(TablesConfig::Include(self.parse_graphql_table_configs()?))
+						}
+						t!("NONE") => {
+							tmp_tables = Some(TablesConfig::None);
+						}
+						t!("AUTO") => {
+							tmp_tables = Some(TablesConfig::Auto);
+						}
+						_ => unexpected!(self, next, "`NONE`, `AUTO`, `INCLUDE` or `EXCLUDE`"),
+					}
+				}
+				t!("FUNCTIONS") => {
+					self.pop_peek();
+
+					let next = self.next();
+					match next.kind {
+						t!("INCLUDE") => {}
+						t!("EXCLUDE") => {}
+						t!("NONE") => {
+							tmp_fncs = Some(FunctionsConfig::None);
+						}
+						t!("AUTO") => {
+							tmp_fncs = Some(FunctionsConfig::Auto);
+						}
+						_ => unexpected!(self, next, "`NONE`, `AUTO`, `INCLUDE` or `EXCLUDE`"),
+					}
+				}
+				_ => break,
+			}
+		}
+
+		Ok(GraphQLConfig {
+			tables: tmp_tables.unwrap_or_default(),
+			functions: tmp_fncs.unwrap_or_default(),
+		})
+	}
+
+	fn parse_graphql_table_configs(&mut self) -> ParseResult<Vec<graphql::TableConfig>> {
+		let mut acc = vec![];
+		loop {
+			match self.peek_kind() {
+				x if Self::kind_is_identifier(x) => {
+					let name: Ident = self.next_token_value()?;
+					acc.push(TableConfig {
+						name: name.0,
+					});
+				}
+				_ => unexpected!(self, self.next(), "a table config"),
+			}
+			if !self.eat(t!(",")) {
+				break;
+			}
+		}
+		Ok(acc)
 	}
 
 	pub fn parse_relation_schema(&mut self) -> ParseResult<table_type::Relation> {

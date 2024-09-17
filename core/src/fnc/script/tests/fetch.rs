@@ -196,7 +196,7 @@ async fn test_fetch_denied() {
 
 	assert!(
 		res.to_string()
-			.contains(&format!("Access to network target '{}/hello' is not allowed", server.uri())),
+			.contains(&format!("Access to network target '{}' is not allowed", server.address())),
 		"Unexpected result: {:?}",
 		res
 	);
