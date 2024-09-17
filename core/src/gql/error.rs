@@ -16,7 +16,7 @@ pub enum GqlError {
 	#[error("No Namespace specified")]
 	UnpecifiedNamespace,
 	#[error("No Database specified")]
-	UnpecifiedDatabase,
+	UnspecifiedDatabase,
 	#[error("Internal Error: {0}")]
 	InternalError(String),
 	#[error("Error converting value: {val} to type: {target}")]

@@ -84,7 +84,7 @@ pub async fn generate_schema(
 	let kvs = datastore;
 	let tx = kvs.transaction(TransactionType::Read, LockType::Optimistic).await?;
 	let ns = session.ns.as_ref().ok_or(GqlError::UnpecifiedNamespace)?;
-	let db = session.db.as_ref().ok_or(GqlError::UnpecifiedDatabase)?;
+	let db = session.db.as_ref().ok_or(GqlError::UnspecifiedDatabase)?;
 	let tbs = tx.all_tb(ns, db, None).await?;
 	let mut query = Object::new("Query");
 	let mut types: Vec<Type> = Vec::new();
