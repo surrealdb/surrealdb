@@ -11,6 +11,7 @@ use crate::kvs::cache::Entry;
 use crate::kvs::cache::EntryWeighter;
 use crate::kvs::scanner::Scanner;
 use crate::kvs::Transactor;
+use crate::sql::statements::define::DefineConfigStatement;
 use crate::sql::statements::AccessGrant;
 use crate::sql::statements::DefineAccessStatement;
 use crate::sql::statements::DefineAnalyzerStatement;
@@ -669,6 +670,29 @@ impl Transaction {
 		.try_into_mls()
 	}
 
+	/// Retrieve all model definitions for a specific database.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
+	pub async fn all_db_configs(
+		&self,
+		ns: &str,
+		db: &str,
+	) -> Result<Arc<[DefineConfigStatement]>, Error> {
+		let key = crate::key::database::cg::prefix(ns, db);
+		let res = self.cache.get_value_or_guard_async(&key).await;
+		match res {
+			Ok(val) => val,
+			Err(cache) => {
+				let end = crate::key::database::cg::suffix(ns, db);
+				let val = self.getr(key..end, None).await?;
+				let val = val.convert().into();
+				let val = Entry::Cgs(Arc::clone(&val));
+				let _ = cache.insert(val.clone());
+				val
+			}
+		}
+		.try_into_cgs()
+	}
+
 	/// Retrieve all table definitions for a specific database.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
 	pub async fn all_tb(
@@ -1191,6 +1215,31 @@ impl Transaction {
 					value: pa.to_owned(),
 				})?;
 				let val: DefineParamStatement = val.into();
+				let val = Entry::Any(Arc::new(val));
+				let _ = cache.insert(val.clone());
+				val
+			}
+		}
+		.try_into_type()
+	}
+
+	/// Retrieve a specific config definition from a database.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
+	pub async fn get_db_config(
+		&self,
+		ns: &str,
+		db: &str,
+		cg: &str,
+	) -> Result<Arc<DefineConfigStatement>, Error> {
+		let key = crate::key::database::cg::new(ns, db, cg).encode()?;
+		let res = self.cache.get_value_or_guard_async(&key).await;
+		match res {
+			Ok(val) => val,
+			Err(cache) => {
+				let val = self.get(key, None).await?.ok_or_else(|| Error::CgNotFound {
+					value: cg.to_owned(),
+				})?;
+				let val: DefineConfigStatement = val.into();
 				let val = Entry::Any(Arc::new(val));
 				let _ = cache.insert(val.clone());
 				val
