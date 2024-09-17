@@ -41,6 +41,25 @@ impl Fields {
 			_ => None,
 		}
 	}
+
+	/// Check if the fields are only about counting
+	pub(crate) fn is_count_all_only(&self) -> bool {
+		let mut is_count_only = false;
+		for field in &self.0 {
+			if let Field::Single {
+				expr: Value::Function(func),
+				..
+			} = field
+			{
+				if func.is_count_all() {
+					is_count_only = true;
+					continue;
+				}
+			}
+			return false;
+		}
+		is_count_only
+	}
 }
 
 impl Deref for Fields {
@@ -231,9 +250,10 @@ impl Fields {
 						_ => {
 							let expr = expr.compute(stk, ctx, opt, Some(doc)).await?;
 							// Check if this is a single VALUE field expression
-							match self.single().is_some() {
-								false => out.set(stk, ctx, opt, name.as_ref(), expr).await?,
-								true => out = expr,
+							if self.single().is_some() {
+								out = expr;
+							} else {
+								out.set(stk, ctx, opt, name.as_ref(), expr).await?;
 							}
 						}
 					}

@@ -2602,7 +2602,6 @@ async fn select_from_standard_index_ascending() -> Result<(), Error> {
 			{
 				detail: {
 					plan: {
-						ascending: true,
 						index: 'time',
 						operator: 'Order'
 					},
@@ -2639,7 +2638,6 @@ async fn select_from_standard_index_ascending() -> Result<(), Error> {
 			{
 				detail: {
 					plan: {
-						ascending: true,
 						index: 'time',
 						operator: 'Order'
 					},
@@ -2709,7 +2707,6 @@ async fn select_from_unique_index_ascending() -> Result<(), Error> {
 			{
 				detail: {
 					plan: {
-						ascending: true,
 						index: 'time',
 						operator: 'Order'
 					},
@@ -2742,7 +2739,6 @@ async fn select_from_unique_index_ascending() -> Result<(), Error> {
 			{
 				detail: {
 					plan: {
-						ascending: true,
 						index: 'time',
 						operator: 'Order'
 					},
@@ -2778,4 +2774,292 @@ async fn select_from_unique_index_ascending() -> Result<(), Error> {
 	])?;
 	//
 	Ok(())
+}
+
+#[tokio::test]
+async fn select_from_standard_index_descending() -> Result<(), Error> {
+	//
+	let sql = "
+		DEFINE INDEX time ON TABLE session COLUMNS time;
+		CREATE session:1 SET time = d'2024-07-01T01:00:00Z';
+		CREATE session:2 SET time = d'2024-06-30T23:00:00Z';
+		CREATE session:3 SET other = 'test';
+		CREATE session:4 SET time = null;
+		CREATE session:5 SET time = d'2024-07-01T02:00:00Z';
+		CREATE session:6 SET time = d'2024-06-30T23:30:00Z';
+		SELECT * FROM session ORDER BY time DESC LIMIT 4 EXPLAIN;
+		SELECT * FROM session ORDER BY time DESC LIMIT 4;
+		SELECT * FROM session ORDER BY time DESC EXPLAIN;
+		SELECT * FROM session ORDER BY time DESC;
+	";
+	let mut t = Test::new(sql).await?;
+	t.skip_ok(7)?;
+	//
+	t.expect_vals(&[
+		"[
+			{
+				detail: {
+					table: 'session'
+				},
+				operation: 'Iterate Table'
+			},
+			{
+				detail: {
+					type: 'Memory'
+				},
+				operation: 'Collector'
+			}
+		]",
+		"[
+			{
+				id: session:5,
+				time: d'2024-07-01T02:00:00Z'
+			},
+			{
+				id: session:1,
+				time: d'2024-07-01T01:00:00Z'
+			},
+			{
+				id: session:6,
+				time: d'2024-06-30T23:30:00Z'
+			},
+			{
+				id: session:2,
+				time: d'2024-06-30T23:00:00Z'
+			}
+		]",
+		"[
+			{
+				detail: {
+					table: 'session'
+				},
+				operation: 'Iterate Table'
+			},
+			{
+				detail: {
+					type: 'Memory'
+				},
+				operation: 'Collector'
+			}
+		]",
+		"[
+			{
+				id: session:5,
+				time: d'2024-07-01T02:00:00Z'
+			},
+			{
+				id: session:1,
+				time: d'2024-07-01T01:00:00Z'
+			},
+			{
+				id: session:6,
+				time: d'2024-06-30T23:30:00Z'
+			},
+			{
+				id: session:2,
+				time: d'2024-06-30T23:00:00Z'
+			},
+			{
+				id: session:4,
+				time: NULL
+			},
+			{
+				id: session:3,
+				other: 'test'
+			}
+		]",
+	])?;
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn select_from_unique_index_descending() -> Result<(), Error> {
+	//
+	let sql = "
+		DEFINE INDEX time ON TABLE session COLUMNS time UNIQUE;
+		CREATE session:1 SET time = d'2024-07-01T01:00:00Z';
+		CREATE session:2 SET time = d'2024-06-30T23:00:00Z';
+		CREATE session:3 SET other = 'test';
+		CREATE session:4 SET time = null;
+		CREATE session:5 SET time = d'2024-07-01T02:00:00Z';
+		CREATE session:6 SET time = d'2024-06-30T23:30:00Z';
+		SELECT * FROM session ORDER BY time DESC LIMIT 3 EXPLAIN;
+		SELECT * FROM session ORDER BY time DESC LIMIT 3;
+		SELECT * FROM session ORDER BY time DESC EXPLAIN;
+		SELECT * FROM session ORDER BY time DESC;
+	";
+	let mut t = Test::new(sql).await?;
+	t.skip_ok(7)?;
+	//
+	t.expect_vals(&[
+		"[
+			{
+				detail: {
+					table: 'session'
+				},
+				operation: 'Iterate Table'
+			},
+			{
+				detail: {
+					type: 'Memory'
+				},
+				operation: 'Collector'
+			}
+		]",
+		"[
+			{
+				id: session:5,
+				time: d'2024-07-01T02:00:00Z'
+			},
+			{
+				id: session:1,
+				time: d'2024-07-01T01:00:00Z'
+			},
+			{
+				id: session:6,
+				time: d'2024-06-30T23:30:00Z'
+			}
+		]",
+		"[
+			{
+				detail: {
+					table: 'session'
+				},
+				operation: 'Iterate Table'
+			},
+			{
+				detail: {
+					type: 'Memory'
+				},
+				operation: 'Collector'
+			}
+		]",
+		"[
+			{
+				id: session:5,
+				time: d'2024-07-01T02:00:00Z'
+			},
+			{
+				id: session:1,
+				time: d'2024-07-01T01:00:00Z'
+			},
+			{
+				id: session:6,
+				time: d'2024-06-30T23:30:00Z'
+			},
+			{
+				id: session:2,
+				time: d'2024-06-30T23:00:00Z'
+			},
+			{
+				id: session:4,
+				time: NULL
+			},
+			{
+				id: session:3,
+				other: 'test'
+			}
+		]",
+	])?;
+	//
+	Ok(())
+}
+
+async fn select_composite_index(unique: bool) -> Result<(), Error> {
+	//
+	let sql = format!(
+		"
+		DEFINE INDEX t_idx ON TABLE t COLUMNS on, value {};
+		CREATE t:1 SET on = true, value = 1;
+		CREATE t:2 SET on = false, value = 1;
+		CREATE t:3 SET on = true, value = 2;
+		CREATE t:4 SET on = false, value = 2;
+		SELECT * FROM t WHERE on = true EXPLAIN;
+		SELECT * FROM t WHERE on = true;
+		SELECT * FROM t WHERE on = false AND value = 2 EXPLAIN;
+		SELECT * FROM t WHERE on = false AND value = 2;
+	",
+		if unique {
+			"UNIQUE"
+		} else {
+			""
+		}
+	);
+	let mut t = Test::new(&sql).await?;
+	//
+	t.expect_size(9)?;
+	t.skip_ok(5)?;
+	//
+	t.expect_vals(&[
+		"[
+			{
+				detail: {
+					plan: {
+							index: 't_idx',
+							operator: '=',
+							value: true
+					},
+					table: 't'
+				},
+				operation: 'Iterate Index'
+			},
+			{
+				detail: {
+					type: 'Memory'
+				},
+				operation: 'Collector'
+			}
+		]",
+		"[
+			{
+				id: t:1,
+				on: true,
+				value: 1
+			},
+			{
+				id: t:3,
+				on: true,
+				value: 2
+			}
+		]",
+		"[
+			{
+				detail: {
+					plan: {
+						index: 't_idx',
+						operator: '=',
+						value: false
+					},
+					table: 't'
+				},
+				operation: 'Iterate Index'
+			},
+			{
+				detail: {
+					type: 'Memory'
+				},
+				operation: 'Collector'
+			}
+		]",
+		"[
+			{
+				id: t:4,
+				on: false,
+				value: 2
+			}
+		]",
+	])?;
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn select_composite_standard_index() -> Result<(), Error> {
+	select_composite_index(false).await
+}
+
+#[tokio::test]
+async fn select_composite_unique_index() -> Result<(), Error> {
+	select_composite_index(true).await
 }

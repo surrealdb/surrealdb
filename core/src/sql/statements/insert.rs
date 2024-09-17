@@ -141,7 +141,7 @@ impl fmt::Display for InsertStatement {
 		if let Some(into) = &self.into {
 			write!(f, " INTO {}", into)?;
 		}
-		write!(f, "{}", self.data)?;
+		write!(f, " {}", self.data)?;
 		if let Some(ref v) = self.update {
 			write!(f, " {v}")?
 		}

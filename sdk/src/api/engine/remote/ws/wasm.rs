@@ -92,7 +92,7 @@ async fn router_handle_request(
 		response,
 	}: Route,
 	state: &mut RouterState,
-	endpoint: &Endpoint,
+	_endpoint: &Endpoint,
 ) -> HandleResult {
 	let RequestData {
 		id,
@@ -209,7 +209,7 @@ async fn router_handle_request(
 async fn router_handle_response(
 	response: Message,
 	state: &mut RouterState,
-	endpoint: &Endpoint,
+	_endpoint: &Endpoint,
 ) -> HandleResult {
 	match Response::try_from(&response) {
 		Ok(option) => {

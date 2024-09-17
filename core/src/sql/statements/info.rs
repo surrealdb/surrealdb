@@ -151,6 +151,7 @@ impl InfoStatement {
 						"params".to_string() => process(txn.all_db_params(ns, db).await?),
 						"tables".to_string() => process(txn.all_tb(ns, db, version).await?),
 						"users".to_string() => process(txn.all_db_users(ns, db).await?),
+						"configs".to_string() => process(txn.all_db_configs(ns, db).await?),
 					}),
 					false => Value::from(map! {
 						"accesses".to_string() => {
@@ -199,6 +200,13 @@ impl InfoStatement {
 							let mut out = Object::default();
 							for v in txn.all_db_users(ns, db).await?.iter() {
 								out.insert(v.name.to_raw(), v.to_string().into());
+							}
+							out.into()
+						},
+						"configs".to_string() => {
+							let mut out = Object::default();
+							for v in txn.all_db_configs(ns, db).await?.iter() {
+								out.insert(v.inner.name(), v.to_string().into());
 							}
 							out.into()
 						},
@@ -283,6 +291,7 @@ impl InfoStatement {
 					false => Value::from(res.to_string()),
 				})
 			}
+			#[allow(unused_variables)]
 			InfoStatement::Index(index, table, _structured) => {
 				// Allowed to run?
 				opt.is_allowed(Action::View, ResourceKind::Actor, &Base::Db)?;

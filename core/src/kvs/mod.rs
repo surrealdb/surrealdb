@@ -15,6 +15,7 @@
 mod api;
 mod batch;
 mod cache;
+mod cf;
 mod clock;
 mod ds;
 mod export;
@@ -42,7 +43,6 @@ mod index;
 	feature = "kv-tikv",
 	feature = "kv-fdb",
 	feature = "kv-indxdb",
-	feature = "kv-surrealkv",
 	feature = "kv-surrealcs",
 ))]
 mod savepoint;

@@ -41,38 +41,39 @@ struct DbsCapabilities {
 	//
 	// Allow
 	//
-	#[arg(help = "Allow all query capabilities")]
+	#[arg(help = "Allow all capabilities except for those more specifically denied")]
 	#[arg(env = "SURREAL_CAPS_ALLOW_ALL", short = 'A', long, conflicts_with = "deny_all")]
 	allow_all: bool,
 
 	#[cfg(feature = "scripting")]
-	#[arg(help = "Allow execution of embedded scripting functions. This is a query capability")]
-	#[arg(env = "SURREAL_CAPS_ALLOW_SCRIPT", long, conflicts_with = "allow_all")]
+	#[arg(help = "Allow execution of embedded scripting functions")]
+	#[arg(env = "SURREAL_CAPS_ALLOW_SCRIPT", long, conflicts_with_all = ["allow_all", "deny_scripting"])]
 	allow_scripting: bool,
 
-	#[arg(help = "Allow guest users to execute queries. This is a query capability")]
-	#[arg(env = "SURREAL_CAPS_ALLOW_GUESTS", long, conflicts_with = "allow_all")]
+	#[arg(help = "Allow guest users to execute queries")]
+	#[arg(env = "SURREAL_CAPS_ALLOW_GUESTS", long, conflicts_with_all = ["allow_all", "deny_guests"])]
 	allow_guests: bool,
 
 	#[arg(
-		help = "Allow execution of all functions. Optionally, you can provide a comma-separated list of function names to allow",
-		long_help = r#"Allow execution of functions. Optionally, you can provide a comma-separated list of function names to allow.
+		help = "Allow execution of all functions except for functions that are specifically denied. Alternatively, you can provide a comma-separated list of function names to allow",
+		long_help = r#"Allow execution of all functions except for functions that are specifically denied. Alternatively, you can provide a comma-separated list of function names to allow
+Specifically denied functions and function families prevail over any other allowed function execution.
 Function names must be in the form <family>[::<name>]. For example:
  - 'http' or 'http::*' -> Include all functions in the 'http' family
  - 'http::get' -> Include only the 'get' function in the 'http' family
 This is a query capability
 "#
 	)]
-	#[arg(env = "SURREAL_CAPS_ALLOW_FUNC", long, conflicts_with = "allow_all")]
+	#[arg(env = "SURREAL_CAPS_ALLOW_FUNC", long)]
 	// If the arg is provided without value, then assume it's "", which gets parsed into Targets::All
 	#[arg(default_missing_value_os = "", num_args = 0..)]
-	#[arg(default_value_os = "")] // Allow all functions by default
 	#[arg(value_parser = super::cli::validator::func_targets)]
 	allow_funcs: Option<Targets<FuncTarget>>,
 
 	#[arg(
-		help = "Allow all outbound network access. Optionally, you can provide a comma-separated list of targets to allow",
-		long_help = r#"Allow all outbound network access. Optionally, you can provide a comma-separated list of targets to allow.
+		help = "Allow all outbound network connections except for network targets that are specifically denied. Alternatively, you can provide a comma-separated list of network targets to allow",
+		long_help = r#"Allow all outbound network connections except for network targets that are specifically denied. Alternatively, you can provide a comma-separated list of network targets to allow
+Specifically denied network targets prevail over any other allowed outbound network connections.
 Targets must be in the form of <host>[:<port>], <ipv4|ipv6>[/<mask>]. For example:
  - 'surrealdb.com', '127.0.0.1' or 'fd00::1' -> Match outbound connections to these hosts on any port
  - 'surrealdb.com:80', '127.0.0.1:80' or 'fd00::1:80' -> Match outbound connections to these hosts on port 80
@@ -80,7 +81,7 @@ Targets must be in the form of <host>[:<port>], <ipv4|ipv6>[/<mask>]. For exampl
 This is a query capability
 "#
 	)]
-	#[arg(env = "SURREAL_CAPS_ALLOW_NET", long, conflicts_with = "allow_all")]
+	#[arg(env = "SURREAL_CAPS_ALLOW_NET", long)]
 	// If the arg is provided without value, then assume it's "", which gets parsed into Targets::All
 	#[arg(default_missing_value_os = "", num_args = 0..)]
 	#[arg(value_parser = super::cli::validator::net_targets)]
@@ -109,37 +110,39 @@ This is a query capability
 	//
 	// Deny
 	//
-	#[arg(help = "Deny all query capabilities")]
+	#[arg(help = "Deny all capabilities except for those more specifically allowed")]
 	#[arg(env = "SURREAL_CAPS_DENY_ALL", short = 'D', long, conflicts_with = "allow_all")]
 	deny_all: bool,
 
 	#[cfg(feature = "scripting")]
-	#[arg(help = "Deny execution of embedded scripting functions. This is a query capability")]
-	#[arg(env = "SURREAL_CAPS_DENY_SCRIPT", long, conflicts_with = "deny_all")]
+	#[arg(help = "Deny execution of embedded scripting functions")]
+	#[arg(env = "SURREAL_CAPS_DENY_SCRIPT", long, conflicts_with_all = ["deny_all", "allow_scripting"])]
 	deny_scripting: bool,
 
-	#[arg(help = "Deny guest users to execute queries. This is a query capability")]
-	#[arg(env = "SURREAL_CAPS_DENY_GUESTS", long, conflicts_with = "deny_all")]
+	#[arg(help = "Deny guest users to execute queries")]
+	#[arg(env = "SURREAL_CAPS_DENY_GUESTS", long, conflicts_with_all = ["deny_all", "allow_guests"])]
 	deny_guests: bool,
 
 	#[arg(
-		help = "Deny execution of all functions. Optionally, you can provide a comma-separated list of function names to deny",
-		long_help = r#"Deny execution of functions. Optionally, you can provide a comma-separated list of function names to deny.
+		help = "Deny execution of all functions except for functions that are specifically allowed. Alternatively, you can provide a comma-separated list of function names to deny",
+		long_help = r#"Deny execution of all functions except for functions that are specifically allowed. Alternatively, you can provide a comma-separated list of function names to deny.
+Specifically allowed functions and function families prevail over a general denial of function execution.
 Function names must be in the form <family>[::<name>]. For example:
  - 'http' or 'http::*' -> Include all functions in the 'http' family
  - 'http::get' -> Include only the 'get' function in the 'http' family
 This is a query capability
 "#
 	)]
-	#[arg(env = "SURREAL_CAPS_DENY_FUNC", long, conflicts_with = "deny_all")]
+	#[arg(env = "SURREAL_CAPS_DENY_FUNC", long)]
 	// If the arg is provided without value, then assume it's "", which gets parsed into Targets::All
 	#[arg(default_missing_value_os = "", num_args = 0..)]
 	#[arg(value_parser = super::cli::validator::func_targets)]
 	deny_funcs: Option<Targets<FuncTarget>>,
 
 	#[arg(
-		help = "Deny all outbound network access. Optionally, you can provide a comma-separated list of targets to deny",
-		long_help = r#"Deny all outbound network access. Optionally, you can provide a comma-separated list of targets to deny.
+		help = "Deny all outbound network connections except for network targets that are specifically allowed. Alternatively, you can provide a comma-separated list of network targets to deny",
+		long_help = r#"Deny all outbound network connections except for network targets that are specifically allowed. Alternatively, you can provide a comma-separated list of network targets to deny.
+Specifically allowed network targets prevail over a general denial of outbound network connections.
 Targets must be in the form of <host>[:<port>], <ipv4|ipv6>[/<mask>]. For example:
  - 'surrealdb.com', '127.0.0.1' or 'fd00::1' -> Match outbound connections to these hosts on any port
  - 'surrealdb.com:80', '127.0.0.1:80' or 'fd00::1:80' -> Match outbound connections to these hosts on port 80
@@ -147,7 +150,7 @@ Targets must be in the form of <host>[:<port>], <ipv4|ipv6>[/<mask>]. For exampl
 This is a query capability
 "#
 	)]
-	#[arg(env = "SURREAL_CAPS_DENY_NET", long, conflicts_with = "deny_all")]
+	#[arg(env = "SURREAL_CAPS_DENY_NET", long)]
 	// If the arg is provided without value, then assume it's "", which gets parsed into Targets::All
 	#[arg(default_missing_value_os = "", num_args = 0..)]
 	#[arg(value_parser = super::cli::validator::net_targets)]
@@ -175,7 +178,9 @@ This is a query capability
 impl DbsCapabilities {
 	#[cfg(feature = "scripting")]
 	fn get_scripting(&self) -> bool {
-		(self.allow_all || self.allow_scripting) && !(self.deny_all || self.deny_scripting)
+		// Even if there was a global deny, we allow if there is a specific allow for scripting
+		// Even if there is a global allow, we deny if there is a specific deny for scripting
+		self.allow_scripting || (self.allow_all && !self.deny_scripting)
 	}
 
 	#[cfg(not(feature = "scripting"))]
@@ -184,32 +189,68 @@ impl DbsCapabilities {
 	}
 
 	fn get_allow_guests(&self) -> bool {
-		(self.allow_all || self.allow_guests) && !(self.deny_all || self.deny_guests)
+		// Even if there was a global deny, we allow if there is a specific allow for guests
+		// Even if there is a global allow, we deny if there is a specific deny for guests
+		self.allow_guests || (self.allow_all && !self.deny_guests)
 	}
 
 	fn get_allow_funcs(&self) -> Targets<FuncTarget> {
-		if self.deny_all || matches!(self.deny_funcs, Some(Targets::All)) {
-			return Targets::None;
+		// If there was a global deny, we allow if there is a general allow or some specific allows for functions
+		if self.deny_all {
+			match &self.allow_funcs {
+				Some(Targets::Some(_)) => return self.allow_funcs.clone().unwrap(), // We already checked for Some
+				Some(Targets::All) => return Targets::All,
+				Some(_) => return Targets::None,
+				None => return Targets::None,
+			}
 		}
 
+		// If there was a general deny for functions, we allow if there are specific allows for functions
+		if let Some(Targets::All) = self.deny_funcs {
+			match &self.allow_funcs {
+				Some(Targets::Some(_)) => return self.allow_funcs.clone().unwrap(), // We already checked for Some
+				Some(_) => return Targets::None,
+				None => return Targets::None,
+			}
+		}
+
+		// If there are no high level denies but there is a global allow, we allow functions
 		if self.allow_all {
 			return Targets::All;
 		}
 
-		// If allow_funcs was not provided and allow_all is false, then don't allow anything (Targets::None)
-		self.allow_funcs.clone().unwrap_or(Targets::None)
+		// If there are no high level, we allow the provided functions
+		// If nothing was provided, we allow functions by default (Targets::All)
+		self.allow_funcs.clone().unwrap_or(Targets::All) // Functions are enabled by default for the server
 	}
 
 	fn get_allow_net(&self) -> Targets<NetTarget> {
-		if self.deny_all || matches!(self.deny_net, Some(Targets::All)) {
-			return Targets::None;
+		// If there was a global deny, we allow if there is a general allow or some specific allows for networks
+		if self.deny_all {
+			match &self.allow_net {
+				Some(Targets::Some(_)) => return self.allow_net.clone().unwrap(), // We already checked for Some
+				Some(Targets::All) => return Targets::All,
+				Some(_) => return Targets::None,
+				None => return Targets::None,
+			}
 		}
 
+		// If there was a general deny for networks, we allow if there are specific allows for networks
+		if let Some(Targets::All) = self.deny_net {
+			match &self.allow_net {
+				Some(Targets::Some(_)) => return self.allow_net.clone().unwrap(), // We already checked for Some
+				Some(_) => return Targets::None,
+				None => return Targets::None,
+			}
+		}
+
+		// If there are no high level denies but there is a global allow, we allow networks
 		if self.allow_all {
 			return Targets::All;
 		}
 
-		// If allow_net was not provided and allow_all is false, then don't allow anything (Targets::None)
+		// If there are no high level denies, we allow the provided networks
+		// If nothing was provided, we do not allow network by default (Targets::None)
 		self.allow_net.clone().unwrap_or(Targets::None)
 	}
 
@@ -244,21 +285,27 @@ impl DbsCapabilities {
 	}
 
 	fn get_deny_funcs(&self) -> Targets<FuncTarget> {
-		if self.deny_all {
-			return Targets::All;
+		// Allowed functions already consider a global deny and a general deny for functions
+		// On top of what is explicitly allowed, we deny what is specifically denied
+		match &self.deny_funcs {
+			Some(Targets::Some(_)) => self.deny_funcs.clone().unwrap(), // We already checked for Some
+			Some(_) => Targets::None,
+			None => Targets::None,
 		}
-
-		// If deny_funcs was not provided and deny_all is false, then don't deny anything (Targets::None)
-		self.deny_funcs.clone().unwrap_or(Targets::None)
 	}
 
 	fn get_deny_net(&self) -> Targets<NetTarget> {
-		if self.deny_all {
-			return Targets::All;
+		// Allowed networks already consider a global deny and a general deny for networks
+		// On top of what is explicitly allowed, we deny what is specifically denied
+		match &self.deny_net {
+			Some(Targets::Some(_)) => self.deny_net.clone().unwrap(), // We already checked for Some
+			Some(_) => Targets::None,
+			None => Targets::None,
 		}
+	}
 
-		// If deny_net was not provided and deny_all is false, then don't deny anything (Targets::None)
-		self.deny_net.clone().unwrap_or(Targets::None)
+	fn get_deny_all(&self) -> bool {
+		self.deny_all
 	}
 
 	fn get_deny_rpc(&self) -> Targets<MethodTarget> {
@@ -302,8 +349,6 @@ pub async fn init(
 ) -> Result<Datastore, Error> {
 	// Get local copy of options
 	let opt = CF.get().unwrap();
-	// Convert the capabilities
-	let capabilities = capabilities.into();
 	// Log specified strict mode
 	debug!("Database strict mode is {strict_mode}");
 	// Log specified query timeout
@@ -318,6 +363,12 @@ pub async fn init(
 	if unauthenticated {
 		warn!("❌🔒 IMPORTANT: Authentication is disabled. This is not recommended for production use. 🔒❌");
 	}
+	// Warn about the impact of denying all capabilities
+	if capabilities.get_deny_all() {
+		warn!("You are denying all capabilities by default. Although this is recommended, beware that any new capabilities will also be denied.");
+	}
+	// Convert the capabilities
+	let capabilities = capabilities.into();
 	// Log the specified server capabilities
 	debug!("Server capabilities: {capabilities}");
 	// Parse and setup the desired kv datastore
@@ -610,7 +661,7 @@ mod tests {
 				Session::owner(),
 				format!("RETURN http::get('{}')", server1.uri()),
 				false,
-				format!("Access to network target '{}/' is not allowed", server1.uri()),
+				format!("Access to network target '{}' is not allowed", server1.address()),
 			),
 			(
 				Datastore::new("memory").await.unwrap().with_capabilities(
@@ -630,7 +681,7 @@ mod tests {
 				Session::owner(),
 				"RETURN http::get('http://1.1.1.1')".to_string(),
 				false,
-				"Access to network target 'http://1.1.1.1/' is not allowed".to_string(),
+				"Access to network target '1.1.1.1:80' is not allowed".to_string(),
 			),
 			(
 				Datastore::new("memory").await.unwrap().with_capabilities(

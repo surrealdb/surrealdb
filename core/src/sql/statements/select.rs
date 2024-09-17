@@ -19,10 +19,12 @@ use std::sync::Arc;
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub struct SelectStatement {
+	/// The foo,bar part in SELECT foo,bar FROM baz.
 	pub expr: Fields,
 	pub omit: Option<Idioms>,
 	#[revision(start = 2)]
 	pub only: bool,
+	/// The baz part in SELECT foo,bar FROM baz.
 	pub what: Values,
 	pub with: Option<With>,
 	pub cond: Option<Cond>,
@@ -76,13 +78,6 @@ impl SelectStatement {
 		let version = self.version.as_ref().map(|v| v.to_u64());
 		let opt =
 			Arc::new(opt.new_with_futures(false).with_projections(true).with_version(version));
-		// Get a query planner
-		let mut planner = QueryPlanner::new(
-			opt.clone(),
-			self.with.as_ref().cloned().map(|w| w.into()),
-			self.cond.as_ref().cloned().map(|c| c.into()),
-			self.order.as_ref().cloned().map(|o| o.into()),
-		);
 		// Extract the limit
 		let limit = i.setup_limit(stk, ctx, &opt, &stm).await?;
 		// Used for ONLY: is the limit 1?
@@ -103,6 +98,9 @@ impl SelectStatement {
 			}
 			None => ctx.clone(),
 		};
+		// Get a query planner
+		let mut planner = QueryPlanner::new();
+		let params = self.into();
 		// Loop over the select targets
 		for w in self.what.0.iter() {
 			let v = w.compute(stk, &ctx, &opt, doc).await?;
@@ -111,7 +109,7 @@ impl SelectStatement {
 					if self.only && !limit_is_one_or_zero {
 						return Err(Error::SingleOnlyOutput);
 					}
-					planner.add_iterables(stk, &ctx, t, &mut i).await?;
+					planner.add_iterables(stk, &ctx, &opt, t, &params, &mut i).await?;
 				}
 				Value::Thing(v) => match &v.id {
 					Id::Range(r) => i.ingest(Iterable::TableRange(v.tb, *r.to_owned())),
@@ -141,7 +139,7 @@ impl SelectStatement {
 					for v in v {
 						match v {
 							Value::Table(t) => {
-								planner.add_iterables(stk, &ctx, t, &mut i).await?;
+								planner.add_iterables(stk, &ctx, &opt, t, &params, &mut i).await?;
 							}
 							Value::Thing(v) => i.ingest(Iterable::Thing(v)),
 							Value::Edges(v) => i.ingest(Iterable::Edges(*v)),
