@@ -151,7 +151,7 @@ impl Idiom {
 			self.0.truncate(self.len() - 1);
 		}
 	}
-
+	/// Check if this Idiom starts with a specific path part
 	pub(crate) fn starts_with(&self, other: &[Part]) -> bool {
 		self.0.starts_with(other)
 	}
