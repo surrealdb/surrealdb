@@ -82,8 +82,13 @@ impl<I: Invalidator> SchemaCache<I> {
 		}
 	}
 	pub async fn get_schema(&self, session: &Session) -> Result<Schema, GqlError> {
+<<<<<<< HEAD
 		let ns = session.ns.as_ref().ok_or(GqlError::UnspecifiedNamespace)?;
 		let db = session.db.as_ref().ok_or(GqlError::UnspecifiedDatabase)?;
+=======
+		let ns = session.ns.as_ref().ok_or(GqlError::UnpecifiedNamespace)?;
+		let db = session.db.as_ref().ok_or(GqlError::UnpecifiedDatabase)?;
+>>>>>>> main
 		{
 			let guard = self.inner.read().await;
 			if let Some(cand) = guard.get(&(ns.to_owned(), db.to_owned())) {
