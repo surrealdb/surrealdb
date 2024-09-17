@@ -683,6 +683,8 @@ fn filter_from_type(
 						.field(InputValue::new(&t.0, TypeRef::named(filter_name_from_table(t))))
 				}
 
+				types.push(Type::InputObject(filter));
+
 				return Ok(());
 			}
 		},
