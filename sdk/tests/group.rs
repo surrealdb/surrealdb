@@ -814,3 +814,84 @@ async fn select_count_group_all() -> Result<(), Error> {
 	)?;
 	Ok(())
 }
+
+#[tokio::test]
+async fn select_count_range_keys_only() -> Result<(), Error> {
+	let sql = r#"
+		CREATE table:1 CONTENT { bar: "hello", foo: "Man"};
+		CREATE table:2 CONTENT { bar: "hello", foo: "World"};
+		CREATE table:3 CONTENT { bar: "world"};
+		SELECT COUNT() FROM table:1..4 GROUP ALL EXPLAIN;
+		SELECT COUNT() FROM table:1..4 GROUP ALL;
+		SELECT COUNT() FROM table:1..4 EXPLAIN;
+		SELECT COUNT() FROM table:1..4;
+	"#;
+	let mut t = Test::new(sql).await?;
+	t.expect_size(7)?;
+	//
+	t.skip_ok(3)?;
+	//
+	t.expect_val(
+		r#"[
+				{
+					detail: {
+						range: 1..4,
+						table: 'table'
+					},
+					operation: 'Iterate Range Keys'
+				},
+				{
+					detail: {
+						idioms: {
+							count: [
+								'count'
+							]
+						},
+						type: 'Group'
+					},
+					operation: 'Collector'
+				}
+			]"#,
+	)?;
+	//
+	t.expect_val(
+		r#"[
+					{
+						count: 3
+					}
+				]"#,
+	)?;
+	//
+	t.expect_val(
+		r#"[
+					{
+						detail: {
+							range: 1..4,
+							table: 'table'
+						},
+						operation: 'Iterate Range Keys'
+					},
+					{
+						detail: {
+							type: 'Memory'
+						},
+						operation: 'Collector'
+					}
+				]"#,
+	)?;
+	//
+	t.expect_val(
+		r#"[
+				{
+					count: 1
+				},
+				{
+					count: 1
+				},
+				{
+					count: 1
+				}
+			]"#,
+	)?;
+	Ok(())
+}
