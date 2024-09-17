@@ -4,7 +4,6 @@ use walkdir::WalkDir;
 fn main() {
 	let mut rev_acc = BTreeMap::new();
 	let mut files = Vec::new();
-	rev_acc.insert("foo".to_string(), 1usize);
 
 	for entry in WalkDir::new("src").into_iter().filter_map(Result::ok) {
 		let path = entry.path();
