@@ -214,7 +214,7 @@ impl Parser<'_> {
 			}
 			_ => {
 				// TODO: Provide information about keywords.
-				let value = ctx.run(|ctx| self.parse_value_table(ctx)).await?;
+				let value = ctx.run(|ctx| self.parse_value_field(ctx)).await?;
 				Ok(Self::refine_stmt_value(value))
 			}
 		}

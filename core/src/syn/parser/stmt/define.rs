@@ -335,12 +335,12 @@ impl Parser<'_> {
 									t!("SIGNUP") => {
 										self.pop_peek();
 										ac.signup =
-											Some(stk.run(|stk| self.parse_value_table(stk)).await?);
+											Some(stk.run(|stk| self.parse_value_field(stk)).await?);
 									}
 									t!("SIGNIN") => {
 										self.pop_peek();
 										ac.signin =
-											Some(stk.run(|stk| self.parse_value_table(stk)).await?);
+											Some(stk.run(|stk| self.parse_value_field(stk)).await?);
 									}
 									_ => break,
 								}
@@ -375,7 +375,7 @@ impl Parser<'_> {
 				}
 				t!("AUTHENTICATE") => {
 					self.pop_peek();
-					res.authenticate = Some(stk.run(|stk| self.parse_value_table(stk)).await?);
+					res.authenticate = Some(stk.run(|stk| self.parse_value_field(stk)).await?);
 				}
 				t!("DURATION") => {
 					self.pop_peek();
@@ -581,11 +581,11 @@ impl Parser<'_> {
 				}
 				t!("SIGNUP") => {
 					self.pop_peek();
-					ac.signup = Some(stk.run(|stk| self.parse_value_table(stk)).await?);
+					ac.signup = Some(stk.run(|stk| self.parse_value_field(stk)).await?);
 				}
 				t!("SIGNIN") => {
 					self.pop_peek();
-					ac.signin = Some(stk.run(|stk| self.parse_value_table(stk)).await?);
+					ac.signin = Some(stk.run(|stk| self.parse_value_field(stk)).await?);
 				}
 				_ => break,
 			}
@@ -619,7 +619,7 @@ impl Parser<'_> {
 			match self.peek_kind() {
 				t!("VALUE") => {
 					self.pop_peek();
-					res.value = ctx.run(|ctx| self.parse_value_table(ctx)).await?;
+					res.value = ctx.run(|ctx| self.parse_value_field(ctx)).await?;
 				}
 				t!("COMMENT") => {
 					self.pop_peek();
@@ -758,13 +758,13 @@ impl Parser<'_> {
 			match self.peek_kind() {
 				t!("WHEN") => {
 					self.pop_peek();
-					res.when = ctx.run(|ctx| self.parse_value_table(ctx)).await?;
+					res.when = ctx.run(|ctx| self.parse_value_field(ctx)).await?;
 				}
 				t!("THEN") => {
 					self.pop_peek();
-					res.then = Values(vec![ctx.run(|ctx| self.parse_value_table(ctx)).await?]);
+					res.then = Values(vec![ctx.run(|ctx| self.parse_value_field(ctx)).await?]);
 					while self.eat(t!(",")) {
-						res.then.0.push(ctx.run(|ctx| self.parse_value_table(ctx)).await?)
+						res.then.0.push(ctx.run(|ctx| self.parse_value_field(ctx)).await?)
 					}
 				}
 				t!("COMMENT") => {
