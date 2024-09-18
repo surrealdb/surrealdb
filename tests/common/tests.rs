@@ -343,10 +343,11 @@ async fn insert() -> Result<(), Box<dyn std::error::Error>> {
 		)
 		.await?;
 	assert!(res.is_object(), "result: {res:?}");
-	assert!(res["result"].is_object(), "result: {res:?}");
-	let res = res["result"].as_object().unwrap();
-	assert_eq!(res["name"], "foo", "result: {res:?}");
-	assert_eq!(res["value"], "bar", "result: {res:?}");
+	assert!(res["result"].is_array(), "result: {res:?}");
+	let res = res["result"].as_array().unwrap();
+	assert_eq!(res.len(), 1, "result: {res:?}");
+	assert_eq!(res[0]["name"], "foo", "result: {res:?}");
+	assert_eq!(res[0]["value"], "bar", "result: {res:?}");
 	// Send INSERT command trying to create multiple records
 	let res = socket
 		.send_request(
