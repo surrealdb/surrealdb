@@ -260,7 +260,7 @@ pub async fn db_access(
 						let tx = kvs.transaction(Read, Optimistic).await?;
 						// Fetch the specified user from storage.
 						let user = tx.get_db_user(&ns, &db, user).await.map_err(|e| {
-							debug!("Error while authenticating to database `{ns}/{db}`: {e}");
+							debug!("Error retrieving user for bearer access to database `{ns}/{db}`: {e}");
 							// Return opaque error to avoid leaking grant subject existence.
 							Error::InvalidAuth
 						})?;
@@ -453,11 +453,12 @@ pub async fn ns_access(
 						// Create a new readonly transaction.
 						let tx = kvs.transaction(Read, Optimistic).await?;
 						// Fetch the specified user from storage.
-						let user = tx.get_ns_user(&ns, user).await.map_err(|e| {
-							trace!("Error while authenticating to namespace `{ns}`: {e}");
-							// Return opaque error to avoid leaking grant subject existence.
-							Error::InvalidAuth
-						})?;
+						let user =
+							tx.get_ns_user(&ns, user).await.map_err(|e| {
+								debug!("Error retrieving user for bearer access to namespace `{ns}`: {e}");
+								// Return opaque error to avoid leaking grant subject existence.
+								Error::InvalidAuth
+							})?;
 						// Ensure that the transaction is cancelled.
 						tx.cancel().await?;
 						user.roles.clone()
@@ -617,7 +618,7 @@ pub async fn root_user(
 		}
 		// The password did not verify
 		Err(e) => {
-			debug!("Failed to verify signin credentials for user `{user}` on root: {e}");
+			debug!("Failed to verify signin credentials for user `{user}` in root: {e}");
 			Err(Error::InvalidAuth)
 		}
 	}
@@ -677,7 +678,7 @@ pub async fn root_access(
 						let tx = kvs.transaction(Read, Optimistic).await?;
 						// Fetch the specified user from storage.
 						let user = tx.get_root_user(user).await.map_err(|e| {
-							trace!("Error while authenticating to root: {e}");
+							debug!("Error retrieving user for bearer access to root: {e}");
 							// Return opaque error to avoid leaking grant subject existence.
 							Error::InvalidAuth
 						})?;

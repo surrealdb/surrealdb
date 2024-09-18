@@ -139,14 +139,14 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 	// Check if the auth token can be used
 	if let Some(nbf) = token_data.claims.nbf {
 		if nbf > Utc::now().timestamp() {
-			debug!("The 'nbf' field in the authentication token was invalid");
+			debug!("The 'nbf' field in the authentication token is invalid");
 			return Err(Error::InvalidAuth);
 		}
 	}
 	// Check if the auth token has expired
 	if let Some(exp) = token_data.claims.exp {
 		if exp < Utc::now().timestamp() {
-			debug!("The 'exp' field in the authentication token was invalid");
+			debug!("The 'exp' field in the authentication token is invalid");
 			return Err(Error::InvalidAuth);
 		}
 	}
@@ -580,7 +580,7 @@ pub async fn verify_root_creds(
 	let tx = ds.transaction(Read, Optimistic).await?;
 	// Fetch the specified user from storage
 	let user = tx.get_root_user(user).await.map_err(|e| {
-		debug!("Error retrieving user for authentication on root: {e}");
+		debug!("Error retrieving user for authentication to root: {e}");
 		Error::InvalidAuth
 	})?;
 	// Ensure that the transaction is cancelled
@@ -708,12 +708,10 @@ fn verify_token(token: &str, key: &DecodingKey, validation: &Validation) -> Resu
 		Err(err) => {
 			// Only transparently return certain token verification errors
 			match err.kind() {
-				jsonwebtoken::errors::ErrorKind::ExpiredSignature => {
-					return Err(Error::ExpiredToken)
-				}
+				jsonwebtoken::errors::ErrorKind::ExpiredSignature => Err(Error::ExpiredToken),
 				_ => {
-					debug!("Error verifying token: {err}");
-					return Err(Error::InvalidAuth);
+					debug!("Error verifying authentication token: {err}");
+					Err(Error::InvalidAuth)
 				}
 			}
 		}
