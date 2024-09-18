@@ -319,8 +319,12 @@ impl<'a> Parser<'a> {
 		self.last_span
 	}
 
-	pub fn assert_finished(&self) -> ParseResult<()> {
-		self.lexer.assert_finished()
+	pub fn assert_finished(&mut self) -> ParseResult<()> {
+		let p = self.peek();
+		if self.peek().kind == TokenKind::Eof {
+			bail!("Unexpected token `{}`, expected no more tokens",p.kind, @p.span);
+		}
+		Ok(())
 	}
 
 	/// Eat the next token if it is of the given kind.
