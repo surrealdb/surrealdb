@@ -116,7 +116,7 @@ impl Filter {
 
 	#[inline]
 	fn uppercase(c: &str) -> FilterResult {
-		Self::check_term(c, c.to_lowercase())
+		Self::check_term(c, c.to_uppercase())
 	}
 
 	#[inline]
@@ -831,6 +831,34 @@ mod tests {
 					chars: (5, 5, 10),
 					bytes: (6, 11),
 					term: "iacta".to_string(),
+					len: 5,
+				},
+				Token::Ref {
+					chars: (10, 10, 11),
+					bytes: (11, 12),
+					len: 1,
+				},
+			],
+		)
+		.await;
+	}
+
+	#[tokio::test]
+	async fn test_uppercase_tokens() {
+		test_analyzer_tokens(
+			"ANALYZER test TOKENIZERS blank,class FILTERS uppercase",
+			"Ālea IactA!",
+			&[
+				Token::String {
+					chars: (0, 0, 4),
+					bytes: (0, 5),
+					term: "ĀLEA".to_string(),
+					len: 4,
+				},
+				Token::String {
+					chars: (5, 5, 10),
+					bytes: (6, 11),
+					term: "IACTA".to_string(),
 					len: 5,
 				},
 				Token::Ref {

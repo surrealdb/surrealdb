@@ -75,6 +75,14 @@ impl Parser<'_> {
 		}
 	}
 	pub async fn parse_relate_value(&mut self, ctx: &mut Stk) -> ParseResult<Value> {
+		let old = self.table_as_field;
+		self.table_as_field = true;
+		let r = self.parse_relate_value_inner(ctx).await;
+		self.table_as_field = old;
+		r
+	}
+
+	async fn parse_relate_value_inner(&mut self, ctx: &mut Stk) -> ParseResult<Value> {
 		match self.peek_kind() {
 			t!("[") => {
 				let start = self.pop_peek().span;
