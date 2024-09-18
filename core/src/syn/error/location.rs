@@ -14,7 +14,7 @@ pub struct Location {
 
 /// Safety: b must be a substring of a.
 unsafe fn str_offset(a: &str, b: &str) -> usize {
-	b.as_ptr().offset_from(b) as usize
+	b.as_ptr().offset_from(b.as_ptr()) as usize
 }
 
 impl Location {
