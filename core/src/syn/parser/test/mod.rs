@@ -1,5 +1,5 @@
 use crate::{
-	sql::{self, Id, Statement, Thing, Value},
+	sql::{self, Id, Ident, Idiom, Part, Query, Statement, Statements, Thing, Value},
 	syn::parser::mac::test_parse,
 };
 
@@ -81,6 +81,20 @@ fn query_object() {
 	let src = r#"{"id":0,"method":"query","params":["SLEEP 30s"]}"#;
 
 	test_parse!(parse_query, src).inspect_err(|e| eprintln!("{}", e.render_on(src))).unwrap();
+}
+
+#[test]
+fn ident_is_field() {
+	let src = r#"foo"#;
+
+	let field =
+		test_parse!(parse_query, src).inspect_err(|e| eprintln!("{}", e.render_on(src))).unwrap();
+	assert_eq!(
+		field,
+		Query(Statements(vec![Statement::Value(Value::Idiom(Idiom(vec![Part::Field(Ident(
+			"foo".to_string()
+		))])))]))
+	);
 }
 
 #[test]

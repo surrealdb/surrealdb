@@ -64,7 +64,7 @@ pub fn value(input: &str) -> Result<Value, Error> {
 		.with_query_recursion_limit(*MAX_QUERY_PARSING_DEPTH as usize);
 	let mut stack = Stack::new();
 	stack
-		.enter(|stk| parser.parse_value_table(stk))
+		.enter(|stk| parser.parse_value_field(stk))
 		.finish()
 		.and_then(|e| parser.assert_finished().map(|_| e))
 		.map_err(|e| e.render_on(input))
@@ -211,7 +211,7 @@ pub fn value_legacy_strand(input: &str) -> Result<Value, Error> {
 	let mut stack = Stack::new();
 	parser.allow_legacy_strand(true);
 	stack
-		.enter(|stk| parser.parse_value_table(stk))
+		.enter(|stk| parser.parse_value_field(stk))
 		.finish()
 		.and_then(|e| parser.assert_finished().map(|_| e))
 		.map_err(|e| e.render_on(input))
