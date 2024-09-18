@@ -23,16 +23,20 @@ impl Location {
 			.lines()
 			.enumerate()
 			.last()
-			.map(|(idx, line)| (idx + 1, line.chars().count().min(1)))
+			.map(|(idx, line)| {
+				let idx = idx + 1;
+				let line_idx = line.chars().count().max(1);
+				(idx, line_idx)
+			})
 			.unwrap_or((0, 0));
 
-		return Self {
+		Self {
 			line,
 			column,
 		}..Self {
 			line,
 			column: column + 1,
-		};
+		}
 	}
 
 	pub fn range_of_span(source: &str, span: Span) -> Range<Self> {
@@ -67,7 +71,7 @@ impl Location {
 				let column = line
 					.char_indices()
 					.enumerate()
-					.find(|(_, (char_idx, _))| *char_idx <= column_offset)
+					.find(|(_, (char_idx, _))| *char_idx >= column_offset)
 					.map(|(l, _)| l)
 					.unwrap_or_else(|| {
 						// give up, just point to the end.
@@ -107,7 +111,7 @@ impl Location {
 				let column = line
 					.char_indices()
 					.enumerate()
-					.find(|(_, (char_idx, _))| *char_idx <= column_offset)
+					.find(|(_, (char_idx, _))| *char_idx >= column_offset)
 					.map(|(l, _)| l)
 					.unwrap_or_else(|| {
 						// give up, just point to the end.
