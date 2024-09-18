@@ -48,6 +48,12 @@ macro_rules! limit_input {
 	};
 }
 
+macro_rules! version_input {
+	() => {
+		InputValue::new("version", TypeRef::named("datetime"))
+	};
+}
+
 macro_rules! start_input {
 	() => {
 		InputValue::new("start", TypeRef::named(TypeRef::INT))
@@ -172,6 +178,8 @@ pub async fn generate_schema(
 
 						let limit = args.get("limit").and_then(|v| v.as_i64()).map(|l| l.intox());
 
+						let version = args.get("version");
+
 						let order = args.get("order");
 
 						let filter = args.get("filter");
@@ -244,6 +252,7 @@ pub async fn generate_schema(
 								cond,
 								limit,
 								start,
+								version,
 								..Default::default()
 							}
 						});
@@ -284,6 +293,7 @@ pub async fn generate_schema(
 			.description(format!("Generated from table `{}`{}\nallows querying a table with filters", tb.name, if let Some(ref c) = &tb.comment {format!("\n{c}")} else {"".to_string()}))
 			.argument(limit_input!())
 			.argument(start_input!())
+			.argument(version_input!())
 			.argument(InputValue::new("order", TypeRef::named(&table_order_name)))
 			.argument(InputValue::new("filter", TypeRef::named(&table_filter_name))),
 		);
