@@ -1155,8 +1155,20 @@ fn gql_to_sql_kind(val: &GqlValue, kind: Kind) -> Result<SqlValue, GqlError> {
 			},
 			_ => Err(type_error(kind, val)),
 		},
-		// TODO: add geometry
-		Kind::Geometry(_) => Err(resolver_error("Geometry is not yet supported")),
+		Kind::Geometry(_) => match val {
+			GqlValue::List(l) => match l.as_slice() {
+				// Point
+				[GqlValue::Number(x), GqlValue::Number(y)] => match (x.as_f64(), y.as_f64()) {
+					(Some(x), Some(y)) => Ok(SqlValue::Geometry(Geometry::Point((x, y).into()))),
+					_ => Err(type_error(kind, val)),
+				},
+				// MultiPoint
+				GqlValue::List(l2) => match l2.as_slice() {
+					_ => Err(type_error(kind, val)),
+				}
+ 			}
+			_ => Err(type_error(kind, val)),
+		},
 		Kind::Option(k) => match val {
 			GqlValue::Null => Ok(SqlValue::None),
 			v => gql_to_sql_kind(v, *k),
