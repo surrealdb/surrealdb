@@ -125,7 +125,7 @@ impl Parser<'_> {
 	pub(crate) async fn parse_range(&mut self, ctx: &mut Stk) -> ParseResult<Range> {
 		// Check for beginning id
 		let beg = if Self::kind_is_identifier(self.peek_whitespace().kind) {
-			let v = ctx.run(|ctx| self.parse_value_table(ctx)).await?;
+			let v = ctx.run(|ctx| self.parse_value_inherit(ctx)).await?;
 
 			if self.eat_whitespace(t!(">")) {
 				Bound::Excluded(v)
@@ -142,7 +142,7 @@ impl Parser<'_> {
 
 		// parse ending id.
 		let end = if Self::kind_is_identifier(self.peek_whitespace().kind) {
-			let v = ctx.run(|ctx| self.parse_value_table(ctx)).await?;
+			let v = ctx.run(|ctx| self.parse_value_inherit(ctx)).await?;
 			if inclusive {
 				Bound::Included(v)
 			} else {
