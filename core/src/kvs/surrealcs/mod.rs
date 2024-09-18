@@ -1,5 +1,7 @@
 #![cfg(feature = "kv-surrealcs")]
 
+mod cnf;
+
 use crate::err::Error;
 use crate::key::debug::Sprintable;
 use crate::kvs::savepoint::{SaveOperation, SavePointImpl, SavePoints};
@@ -72,7 +74,9 @@ impl Drop for Transaction {
 impl Datastore {
 	/// Open a new database
 	pub(crate) async fn new(path: &str) -> Result<Datastore, Error> {
-		match create_connection_pool(path, None).await {
+		match create_connection_pool(path, Some(*cnf::SURREALCS_CONNECTION_POOL_SIZE as usize))
+			.await
+		{
 			Ok(_) => Ok(Datastore {}),
 			Err(_) => {
 				Err(Error::Ds("Cannot connect to the `surrealcs` storage engine".to_string()))
