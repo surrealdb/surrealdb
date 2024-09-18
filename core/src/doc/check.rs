@@ -188,7 +188,7 @@ impl Document {
 					// The out field is a match, so don't error
 					Value::Thing(v) if v.eq(r) => (),
 					// The out is a match, so don't error
-					v if l.id.is(&v) => (),
+					v if r.id.is(&v) => (),
 					// The out field does not match
 					v => {
 						return Err(Error::OutMismatch {
