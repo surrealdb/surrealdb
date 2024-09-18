@@ -188,7 +188,7 @@ impl Parser<'_> {
 
 #[cfg(test)]
 mod test {
-	use crate::sql::{Ident, Idiom, Part};
+	use crate::sql::{Ident, Part};
 
 	#[test]
 	fn identifiers() {
@@ -207,8 +207,8 @@ mod test {
 
 			assert_eq!(
 				r,
-				sql::Query(sql::Statements(vec![sql::Statement::Value(sql::Value::Table(
-					sql::Idiom(Idiom(vec![Part::Field(Ident(ident.to_string()))]))
+				sql::Query(sql::Statements(vec![sql::Statement::Value(sql::Value::Idiom(
+					sql::Idiom(vec![Part::Field(Ident(ident.to_string()))])
 				))]))
 			)
 		}
