@@ -21,7 +21,7 @@ use async_graphql::dynamic::{Scalar, TypeRef};
 use async_graphql::indexmap::IndexMap;
 use async_graphql::Name;
 use async_graphql::Value as GqlValue;
-use geo::LinesIter;
+use geo::{CoordsIter, LinesIter};
 use rust_decimal::prelude::FromPrimitive;
 use rust_decimal::Decimal;
 use serde_json::Number;
@@ -597,8 +597,8 @@ pub fn sql_value_to_gql_value(v: SqlValue) -> Result<GqlValue, GqlError> {
 			Geometry::MultiPoint(multipoint) => GqlValue::List(multipoint.iter().map(| v |
 				sql_value_to_gql_value(v).unwrap()
 			).collect()),
-			Geometry::Polygon(polygon) => GqlValue::List(),
-			Geometry::MultiPolygon(_) => {},
+			Geometry::Polygon(polygon) => GqlValue::List(GqlValue::List(polygon.coords_iter().map(| v | GqlValue::List(GqlValue::Number(v.x), GqlValue::Number(v.y))))),
+			Geometry::MultiPolygon(multipolygon) => GqlValue::List(multipolygon.iter().map(| v | sql_value_to_gql_value(v).unwrap()).collect()),
 			Geometry::Collection(collection) => GqlValue::List(collection.iter().map(| v | sql_value_to_gql_value(v).unwrap()).collect())
 		},
 		SqlValue::Bytes(b) => GqlValue::Binary(b.into_inner().into()),
