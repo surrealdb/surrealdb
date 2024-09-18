@@ -21,6 +21,7 @@ use async_graphql::dynamic::{Scalar, TypeRef};
 use async_graphql::indexmap::IndexMap;
 use async_graphql::Name;
 use async_graphql::Value as GqlValue;
+use geo::LinesIter;
 use rust_decimal::prelude::FromPrimitive;
 use rust_decimal::Decimal;
 use serde_json::Number;
@@ -480,6 +481,14 @@ pub async fn generate_schema(
 		"https://datatracker.ietf.org/doc/html/rfc4122"
 	);
 
+	scalar_debug_validated!(schema, "GeometryPoint", Kind::Any, "Latitude and Longitude", "https://datatracker.ietf.org/doc/html/rfc7946#section-3.1.2");
+	scalar_debug_validated!(schema, "GeometryLineString", Kind::Any, "Geometric path", "https://datatracker.ietf.org/doc/html/rfc7946#section-3.1.4");
+	scalar_debug_validated!(schema, "GeometryPolygon", Kind::Any, "Geometric area", "https://datatracker.ietf.org/doc/html/rfc7946#section-3.1.6");
+	scalar_debug_validated!(schema, "GeometryMultiPoint", Kind::Any, "Multiple points", "https://datatracker.ietf.org/doc/html/rfc7946#section-3.1.3");
+	scalar_debug_validated!(schema, "GeometryMultiLineString", Kind::Any, "Multiple geometry lines", "https://datatracker.ietf.org/doc/html/rfc7946#section-3.1.5");
+	scalar_debug_validated!(schema, "GeometryMultiPolygon", Kind::Any, "Multiple geometric areas", "https://datatracker.ietf.org/doc/html/rfc7946#section-3.1.7");
+	scalar_debug_validated!(schema, "GeometryCollection", Kind::Any, "Multiple different geometry types", "https://datatracker.ietf.org/doc/html/rfc7946#section-3.1.8");
+
 	scalar_debug_validated!(schema, "decimal", Kind::Decimal);
 	scalar_debug_validated!(schema, "number", Kind::Number);
 	scalar_debug_validated!(schema, "null", Kind::Null);
@@ -575,12 +584,41 @@ pub fn sql_value_to_gql_value(v: SqlValue) -> Result<GqlValue, GqlError> {
 				.map(|(k, v)| (Name::new(k), sql_value_to_gql_value(v).unwrap()))
 				.collect(),
 		),
-		SqlValue::Geometry(_) => return Err(resolver_error("unimplemented: Geometry types")),
+		SqlValue::Geometry(kind) => match kind {
+			Geometry::Point(point) => GqlValue::List(GqlValue::Number(point.x), GqlValue::Number(point.y)),
+			Geometry::Line(line) => GqlValue::List(line.lines()
+				.map(| i_line |
+					GqlValue::List(GqlValue::Number(i_line.start), GqlValue::Number(i_line.end))
+				).collect()
+			),
+			Geometry::MultiLine(multiline) => GqlValue::List(multiline.iter().map(| v |
+				sql_value_to_gql_value(v).unwrap()
+			).collect()),
+			Geometry::MultiPoint(multipoint) => GqlValue::List(multipoint.iter().map(| v |
+				sql_value_to_gql_value(v).unwrap()
+			).collect()),
+			Geometry::Polygon(polygon) => GqlValue::List(),
+			Geometry::MultiPolygon(_) => {},
+			Geometry::Collection(collection) => GqlValue::List(collection.iter().map(| v | sql_value_to_gql_value(v).unwrap()).collect())
+		},
 		SqlValue::Bytes(b) => GqlValue::Binary(b.into_inner().into()),
 		SqlValue::Thing(t) => GqlValue::String(t.to_string()),
 		v => return Err(internal_error(format!("found unsupported value variant: {v:?}"))),
 	};
 	Ok(out)
+}
+
+fn geometry_union_type(types: &mut Vec<Type>) {
+	let mut geometry_union = Union::new("Geometry");
+	geometry_union.possible_type(TypeRef::named("GeometryPoint"));
+	geometry_union.possible_type(TypeRef::named("GeometryLineString"));
+	geometry_union.possible_type(TypeRef::named("GeometryPolygon"));
+	geometry_union.possible_type(TypeRef::named("GeometryMultiPoint"));
+	geometry_union.possible_type(TypeRef::named("GeometryMultiLineString"));
+	geometry_union.possible_type(TypeRef::named("GeometryMultiPolygon"));
+	geometry_union.possible_type(TypeRef::named("GeometryCollection"));
+
+	types.push(Type::Union(geometry_union));
 }
 
 fn kind_to_type(kind: Kind, types: &mut Vec<Type>) -> Result<TypeRef, GqlError> {
@@ -600,7 +638,7 @@ fn kind_to_type(kind: Kind, types: &mut Vec<Type>) -> Result<TypeRef, GqlError> 
 		Kind::Int => TypeRef::named(TypeRef::INT),
 		Kind::Number => TypeRef::named("number"),
 		Kind::Object => TypeRef::named("object"),
-		Kind::Point => return Err(schema_error("Kind::Point is not yet supported")),
+		Kind::Point => return Err(schema_error("Kind::Point is not yet supported, please use Geometry::Point")),
 		Kind::String => TypeRef::named(TypeRef::STRING),
 		Kind::Uuid => TypeRef::named("uuid"),
 		Kind::Record(mut r) => match r.len() {
@@ -620,7 +658,10 @@ fn kind_to_type(kind: Kind, types: &mut Vec<Type>) -> Result<TypeRef, GqlError> 
 				TypeRef::named(ty_name)
 			}
 		},
-		Kind::Geometry(_) => return Err(schema_error("Kind::Geometry is not yet supported")),
+		Kind::Geometry(g) => match g.len() {
+			0 => TypeRef::named("Geometry"),
+			_ => TypeRef::List(TypeRef::named("Geometry"))
+		},
 		Kind::Option(t) => {
 			let mut non_op_ty = *t;
 			while let Kind::Option(inner) = non_op_ty {
