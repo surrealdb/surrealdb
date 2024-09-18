@@ -321,7 +321,7 @@ impl<'a> Parser<'a> {
 
 	pub fn assert_finished(&mut self) -> ParseResult<()> {
 		let p = self.peek();
-		if self.peek().kind == TokenKind::Eof {
+		if self.peek().kind != TokenKind::Eof {
 			bail!("Unexpected token `{}`, expected no more tokens",p.kind, @p.span);
 		}
 		Ok(())

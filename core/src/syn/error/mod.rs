@@ -129,7 +129,7 @@ impl SyntaxError {
 				ref label,
 				ref kind,
 			} => {
-				let locations = dbg!(Location::range_of_span(source, dbg!(*span)));
+				let locations = Location::range_of_span(source, *span);
 				let snippet = Snippet::from_source_location_range(
 					source,
 					locations,
