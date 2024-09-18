@@ -300,7 +300,7 @@ pub trait RpcContext {
 			return Err(RpcError::InvalidParams);
 		};
 		// Return a single result?
-		let one = what.is_thing_single();
+		let one = matches!(data, Value::Object(_));
 		// Specify the SQL query string
 
 		let mut res = match what {
@@ -337,7 +337,7 @@ pub trait RpcContext {
 			return Err(RpcError::InvalidParams);
 		};
 
-		let one = what.is_thing_single();
+		let one = matches!(data, Value::Object(_));
 
 		let mut res = match what {
 			Value::None | Value::Null => {
