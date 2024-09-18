@@ -585,21 +585,45 @@ pub fn sql_value_to_gql_value(v: SqlValue) -> Result<GqlValue, GqlError> {
 				.collect(),
 		),
 		SqlValue::Geometry(kind) => match kind {
-			Geometry::Point(point) => GqlValue::List(GqlValue::Number(point.x), GqlValue::Number(point.y)),
-			Geometry::Line(line) => GqlValue::List(line.lines()
-				.map(| i_line |
-					GqlValue::List(GqlValue::Number(i_line.start), GqlValue::Number(i_line.end))
-				).collect()
+			Geometry::Point(point) => GqlValue::Object(
+				(Name::new("type"), GqlValue::String("Point")),
+				(Name::new("coordinates"), GqlValue::List(GqlValue::Number(point.x), GqlValue::Number(point.y)))
 			),
-			Geometry::MultiLine(multiline) => GqlValue::List(multiline.iter().map(| v |
-				sql_value_to_gql_value(v).unwrap()
-			).collect()),
-			Geometry::MultiPoint(multipoint) => GqlValue::List(multipoint.iter().map(| v |
-				sql_value_to_gql_value(v).unwrap()
-			).collect()),
-			Geometry::Polygon(polygon) => GqlValue::List(GqlValue::List(polygon.coords_iter().map(| v | GqlValue::List(GqlValue::Number(v.x), GqlValue::Number(v.y))))),
-			Geometry::MultiPolygon(multipolygon) => GqlValue::List(multipolygon.iter().map(| v | sql_value_to_gql_value(v).unwrap()).collect()),
-			Geometry::Collection(collection) => GqlValue::List(collection.iter().map(| v | sql_value_to_gql_value(v).unwrap()).collect())
+			Geometry::Line(line) => GqlValue::Object(
+				(Name::new("type"), GqlValue::String("LineString")),
+				(Name::new("coordinates"), GqlValue::List(line.lines()
+					.map(| i_line |
+						GqlValue::List(GqlValue::Number(i_line.start), GqlValue::Number(i_line.end))
+					).collect()
+				))
+			),
+			// todo remove recursion
+			Geometry::MultiLine(multiline) => GqlValue::Object(
+				(Name::new("type"), GqlValue::String("MultiLineString")),
+				(Name::new("coordinates"), GqlValue::List(multiline.iter().map(| v |
+					sql_value_to_gql_value(v).unwrap()
+				).collect()))
+			),
+			// todo remove recursion
+			Geometry::MultiPoint(multipoint) => GqlValue::Object(
+				(Name::new("type"), GqlValue::String("MultiPoint")),
+				(Name::new("coordinates"), GqlValue::List(multipoint.iter().map(| v |
+					sql_value_to_gql_value(v).unwrap()
+				).collect()))
+			),
+			Geometry::Polygon(polygon) => GqlValue::Object(
+				(Name::new("type"), GqlValue::String("Polygon")),
+				(Name::new("coordinates"), GqlValue::List(GqlValue::List(polygon.coords_iter().map(| v | GqlValue::List(GqlValue::Number(v.x), GqlValue::Number(v.y))))))
+			),
+			// todo remove recursion
+			Geometry::MultiPolygon(multipolygon) => GqlValue::Object(
+				(Name::new("type"), GqlValue::String("MultiPolygon")),
+				(Name::new("coordinates"), GqlValue::List(multipolygon.iter().map(| v | sql_value_to_gql_value(v).unwrap()).collect()))
+			),
+			Geometry::Collection(collection) => GqlValue::Object(
+				(Name::new("type"), GqlValue::String("GeometryCollection")),
+				(Name::new("geometries"),  GqlValue::List(collection.iter().map(| v | sql_value_to_gql_value(v).unwrap()).collect()))
+			)
 		},
 		SqlValue::Bytes(b) => GqlValue::Binary(b.into_inner().into()),
 		SqlValue::Thing(t) => GqlValue::String(t.to_string()),
