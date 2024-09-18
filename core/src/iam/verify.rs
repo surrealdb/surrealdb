@@ -580,7 +580,7 @@ pub async fn verify_root_creds(
 	let tx = ds.transaction(Read, Optimistic).await?;
 	// Fetch the specified user from storage
 	let user = tx.get_root_user(user).await.map_err(|e| {
-		debug!("Error while authenticating to root: {e}");
+		debug!("Error retrieving user for authentication on root: {e}");
 		Error::InvalidAuth
 	})?;
 	// Ensure that the transaction is cancelled
@@ -603,7 +603,7 @@ pub async fn verify_ns_creds(
 	let tx = ds.transaction(Read, Optimistic).await?;
 	// Fetch the specified user from storage
 	let user = tx.get_ns_user(ns, user).await.map_err(|e| {
-		debug!("Error while authenticating to namespace `{ns}`: {e}");
+		debug!("Error retrieving user for authentication to namespace `{ns}`: {e}");
 		Error::InvalidAuth
 	})?;
 	// Ensure that the transaction is cancelled
@@ -627,7 +627,7 @@ pub async fn verify_db_creds(
 	let tx = ds.transaction(Read, Optimistic).await?;
 	// Fetch the specified user from storage
 	let user = tx.get_db_user(ns, db, user).await.map_err(|e| {
-		debug!("Error while authenticating to database `{ns}/{db}`: {e}");
+		debug!("Error retrieving user for authentication to database `{ns}/{db}`: {e}");
 		Error::InvalidAuth
 	})?;
 	// Ensure that the transaction is cancelled
