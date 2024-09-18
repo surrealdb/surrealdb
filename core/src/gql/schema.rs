@@ -481,13 +481,13 @@ pub async fn generate_schema(
 		"https://datatracker.ietf.org/doc/html/rfc4122"
 	);
 
-	scalar_debug_validated!(schema, "GeometryPoint", Kind::Any, "Latitude and Longitude", "https://datatracker.ietf.org/doc/html/rfc7946#section-3.1.2");
-	scalar_debug_validated!(schema, "GeometryLineString", Kind::Any, "Geometric path", "https://datatracker.ietf.org/doc/html/rfc7946#section-3.1.4");
-	scalar_debug_validated!(schema, "GeometryPolygon", Kind::Any, "Geometric area", "https://datatracker.ietf.org/doc/html/rfc7946#section-3.1.6");
-	scalar_debug_validated!(schema, "GeometryMultiPoint", Kind::Any, "Multiple points", "https://datatracker.ietf.org/doc/html/rfc7946#section-3.1.3");
-	scalar_debug_validated!(schema, "GeometryMultiLineString", Kind::Any, "Multiple geometry lines", "https://datatracker.ietf.org/doc/html/rfc7946#section-3.1.5");
-	scalar_debug_validated!(schema, "GeometryMultiPolygon", Kind::Any, "Multiple geometric areas", "https://datatracker.ietf.org/doc/html/rfc7946#section-3.1.7");
-	scalar_debug_validated!(schema, "GeometryCollection", Kind::Any, "Multiple different geometry types", "https://datatracker.ietf.org/doc/html/rfc7946#section-3.1.8");
+	scalar_debug_validated!(schema, "GeometryPoint", Kind::Geometry(["point"]), "Latitude and Longitude", "https://datatracker.ietf.org/doc/html/rfc7946#section-3.1.2");
+	scalar_debug_validated!(schema, "GeometryLineString", Kind::Geometry(["linestring"]), "Geometric path", "https://datatracker.ietf.org/doc/html/rfc7946#section-3.1.4");
+	scalar_debug_validated!(schema, "GeometryPolygon", Kind::Geometry(["polygon"]), "Geometric area", "https://datatracker.ietf.org/doc/html/rfc7946#section-3.1.6");
+	scalar_debug_validated!(schema, "GeometryMultiPoint", Kind::Geometry(["multipoint"]), "Multiple points", "https://datatracker.ietf.org/doc/html/rfc7946#section-3.1.3");
+	scalar_debug_validated!(schema, "GeometryMultiLineString", Kind::Geometry(["multilinestring"]), "Multiple geometry lines", "https://datatracker.ietf.org/doc/html/rfc7946#section-3.1.5");
+	scalar_debug_validated!(schema, "GeometryMultiPolygon", Kind::Geometry(["multipolygon"]), "Multiple geometric areas", "https://datatracker.ietf.org/doc/html/rfc7946#section-3.1.7");
+	scalar_debug_validated!(schema, "GeometryCollection", Kind::Geometry(["collection"]), "Multiple different geometry types", "https://datatracker.ietf.org/doc/html/rfc7946#section-3.1.8");
 
 	scalar_debug_validated!(schema, "decimal", Kind::Decimal);
 	scalar_debug_validated!(schema, "number", Kind::Number);
