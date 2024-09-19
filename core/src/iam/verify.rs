@@ -1541,6 +1541,7 @@ mod tests {
 
 		match res {
 			Err(Error::ExpiredToken) => {} // ok
+			Err(err) => panic!("Unexpected error signing in with expired token: {:?}", err),
 			res => panic!("Unexpected success signing in with expired token: {:?}", res),
 		}
 	}
