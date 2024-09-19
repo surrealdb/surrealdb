@@ -172,9 +172,12 @@ pub trait RpcContext {
 			return Err(RpcError::InvalidParams);
 		};
 		let mut tmp_session = mem::take(self.session_mut());
-		crate::iam::verify::token(self.kvs(), &mut tmp_session, &token.0).await?;
+		let out: Result<(), RpcError> =
+			crate::iam::verify::token(self.kvs(), &mut tmp_session, &token.0)
+				.await
+				.map_err(Into::into);
 		*self.session_mut() = tmp_session;
-		Ok(Value::None.into())
+		out.map(|_| Value::None.into())
 	}
 
 	// ------------------------------
