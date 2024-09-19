@@ -7,7 +7,7 @@ use crate::kvs::Datastore;
 use crate::sql::kind::Literal;
 use crate::sql::statements::define::config::graphql::TablesConfig;
 use crate::sql::statements::{DefineFieldStatement, SelectStatement};
-use crate::sql::{self, AccessType, Base, Table, Value as SurrealValue};
+use crate::sql::{self, AccessType, Base, Table};
 use crate::sql::{Cond, Fields};
 use crate::sql::{Expression, Geometry};
 use crate::sql::{Idiom, Kind};
@@ -153,17 +153,13 @@ pub async fn generate_schema(
 						&& scope.base == Base::Db
 						&& scope.name == access.unwrap()
 					)
-					.expect("Could not find the requested scoped access");
-
-				let Ok(SurrealValue::Object(vals)) = args.iter().needs_one() else {
-					return Err("Invalid arguments provided for ACCESS");
-				};
+					.expect("Database does not have the requested access");
 
 				vals.insert("DB", auth_session.db);
 				vals.insert("NS", auth_session.ns);
 				vals.insert("AC", access.into());
 
-				let out: Object = crate::iam::signin::signin(auth, &mut auth_session, vals)
+				let out: Object = crate::iam::signin::signin(auth_kvs, &mut auth_session, arguments.into())
 					.await
 					.map(Into::into)
 					.map_err(Into::into);
