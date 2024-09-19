@@ -64,7 +64,7 @@ mod tests {
 	fn changed_remove() {
 		let old = Value::parse("{ test: true, other: 'test' }");
 		let now = Value::parse("{ test: true }");
-		let res = Value::parse("{ other: NONE }]");
+		let res = Value::parse("{ other: NONE }");
 		assert_eq!(res, old.changed(&now));
 	}
 

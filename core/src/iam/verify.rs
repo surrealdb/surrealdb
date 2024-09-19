@@ -120,7 +120,12 @@ pub async fn basic(
 			}
 			Err(err) => Err(err),
 		},
-		(None, Some(_)) => Err(Error::InvalidAuth),
+		(None, Some(db)) => {
+			debug!(
+				"Attempted basic authentication in database '{db}' without specifying a namespace"
+			);
+			Err(Error::InvalidAuth)
+		}
 	}
 }
 
@@ -134,15 +139,15 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 	// Check if the auth token can be used
 	if let Some(nbf) = token_data.claims.nbf {
 		if nbf > Utc::now().timestamp() {
-			trace!("The 'nbf' field in the authentication token was invalid");
+			debug!("Token verification failed due to the 'nbf' claim containing a future time");
 			return Err(Error::InvalidAuth);
 		}
 	}
 	// Check if the auth token has expired
 	if let Some(exp) = token_data.claims.exp {
 		if exp < Utc::now().timestamp() {
-			trace!("The 'exp' field in the authentication token was invalid");
-			return Err(Error::InvalidAuth);
+			debug!("Token verification failed due to the 'exp' claim containing a past time");
+			return Err(Error::ExpiredToken);
 		}
 	}
 	// Check the token authentication claims
@@ -183,7 +188,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 				_ => return Err(Error::AccessMethodMismatch),
 			};
 			// Verify the token
-			decode::<Claims>(token, &cf.0, &cf.1)?;
+			verify_token(token, &cf.0, &cf.1)?;
 			// AUTHENTICATE clause
 			if let Some(au) = &de.authenticate {
 				// Setup the system session for finding the signin record
@@ -244,7 +249,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 						_ => return Err(Error::AccessMethodMismatch),
 					}?;
 					// Verify the token
-					decode::<Claims>(token, &cf.0, &cf.1)?;
+					verify_token(token, &cf.0, &cf.1)?;
 					// AUTHENTICATE clause
 					if let Some(au) = &de.authenticate {
 						// Setup the system session for executing the clause
@@ -285,7 +290,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 				// The clause can make up for the missing "id" claim by resolving other claims to a specific record
 				AccessType::Record(at) => match &de.authenticate {
 					Some(au) => {
-						trace!("Access method `{}` is record access with authenticate clause", ac);
+						trace!("Access method `{}` is record access with AUTHENTICATE clause", ac);
 						let cf = match &at.jwt.verify {
 							JwtAccessVerify::Key(key) => config(key.alg, key.key.as_bytes()),
 							#[cfg(feature = "jwks")]
@@ -301,7 +306,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 						}?;
 
 						// Verify the token
-						decode::<Claims>(token, &cf.0, &cf.1)?;
+						verify_token(token, &cf.0, &cf.1)?;
 						// AUTHENTICATE clause
 						// Setup the system session for finding the signin record
 						let mut sess = Session::editor().with_ns(ns).with_db(db);
@@ -342,7 +347,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			let tx = kvs.transaction(Read, Optimistic).await?;
 			// Get the database user
 			let de = tx.get_db_user(ns, db, id).await.map_err(|e| {
-				trace!("Error while authenticating to database `{db}`: {e}");
+				debug!("Error while authenticating to database `{db}`: {e}");
 				Error::InvalidAuth
 			})?;
 			// Ensure that the transaction is cancelled
@@ -350,9 +355,9 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			// Check the algorithm
 			let cf = config(Algorithm::Hs512, de.code.as_bytes())?;
 			// Verify the token
-			decode::<Claims>(token, &cf.0, &cf.1)?;
+			verify_token(token, &cf.0, &cf.1)?;
 			// Log the success
-			debug!("Authenticated to database `{}` with user `{}`", db, id);
+			debug!("Authenticated to database `{}` with user `{}` using token", db, id);
 			// Set the session
 			session.tk = Some(value);
 			session.ns = Some(ns.to_owned());
@@ -397,7 +402,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 				_ => return Err(Error::AccessMethodMismatch),
 			}?;
 			// Verify the token
-			decode::<Claims>(token, &cf.0, &cf.1)?;
+			verify_token(token, &cf.0, &cf.1)?;
 			// AUTHENTICATE clause
 			if let Some(au) = &de.authenticate {
 				// Setup the system session for executing the clause
@@ -420,7 +425,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 					.collect::<Result<Vec<_>, _>>()?,
 			};
 			// Log the success
-			trace!("Authenticated to namespace `{}` with access method `{}`", ns, ac);
+			debug!("Authenticated to namespace `{}` with access method `{}`", ns, ac);
 			// Set the session
 			session.tk = Some(value);
 			session.ns = Some(ns.to_owned());
@@ -445,7 +450,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			let tx = kvs.transaction(Read, Optimistic).await?;
 			// Get the namespace user
 			let de = tx.get_ns_user(ns, id).await.map_err(|e| {
-				trace!("Error while authenticating to namespace `{ns}`: {e}");
+				debug!("Error while authenticating to namespace `{ns}`: {e}");
 				Error::InvalidAuth
 			})?;
 			// Ensure that the transaction is cancelled
@@ -453,9 +458,9 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			// Check the algorithm
 			let cf = config(Algorithm::Hs512, de.code.as_bytes())?;
 			// Verify the token
-			decode::<Claims>(token, &cf.0, &cf.1)?;
+			verify_token(token, &cf.0, &cf.1)?;
 			// Log the success
-			trace!("Authenticated to namespace `{}` with user `{}`", ns, id);
+			debug!("Authenticated to namespace `{}` with user `{}` using token", ns, id);
 			// Set the session
 			session.tk = Some(value);
 			session.ns = Some(ns.to_owned());
@@ -498,7 +503,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 				_ => return Err(Error::AccessMethodMismatch),
 			}?;
 			// Verify the token
-			decode::<Claims>(token, &cf.0, &cf.1)?;
+			verify_token(token, &cf.0, &cf.1)?;
 			// AUTHENTICATE clause
 			if let Some(au) = &de.authenticate {
 				// Setup the system session for executing the clause
@@ -521,7 +526,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 					.collect::<Result<Vec<_>, _>>()?,
 			};
 			// Log the success
-			trace!("Authenticated to root with access method `{}`", ac);
+			debug!("Authenticated to root with access method `{}`", ac);
 			// Set the session
 			session.tk = Some(value);
 			session.ac = Some(ac.to_owned());
@@ -540,7 +545,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			let tx = kvs.transaction(Read, Optimistic).await?;
 			// Get the namespace user
 			let de = tx.get_root_user(id).await.map_err(|e| {
-				trace!("Error while authenticating to root: {e}");
+				debug!("Error while authenticating to root: {e}");
 				Error::InvalidAuth
 			})?;
 			// Ensure that the transaction is cancelled
@@ -548,9 +553,9 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			// Check the algorithm
 			let cf = config(Algorithm::Hs512, de.code.as_bytes())?;
 			// Verify the token
-			decode::<Claims>(token, &cf.0, &cf.1)?;
+			verify_token(token, &cf.0, &cf.1)?;
 			// Log the success
-			trace!("Authenticated to root level with user `{}`", id);
+			debug!("Authenticated to root level with user `{}` using token", id);
 			// Set the session
 			session.tk = Some(value);
 			session.exp = expiration(de.duration.session)?;
@@ -575,7 +580,7 @@ pub async fn verify_root_creds(
 	let tx = ds.transaction(Read, Optimistic).await?;
 	// Fetch the specified user from storage
 	let user = tx.get_root_user(user).await.map_err(|e| {
-		trace!("Error while authenticating to root: {e}");
+		debug!("Error retrieving user for authentication to root: {e}");
 		Error::InvalidAuth
 	})?;
 	// Ensure that the transaction is cancelled
@@ -598,7 +603,7 @@ pub async fn verify_ns_creds(
 	let tx = ds.transaction(Read, Optimistic).await?;
 	// Fetch the specified user from storage
 	let user = tx.get_ns_user(ns, user).await.map_err(|e| {
-		trace!("Error while authenticating to namespace `{ns}`: {e}");
+		debug!("Error retrieving user for authentication to namespace `{ns}`: {e}");
 		Error::InvalidAuth
 	})?;
 	// Ensure that the transaction is cancelled
@@ -622,7 +627,7 @@ pub async fn verify_db_creds(
 	let tx = ds.transaction(Read, Optimistic).await?;
 	// Fetch the specified user from storage
 	let user = tx.get_db_user(ns, db, user).await.map_err(|e| {
-		trace!("Error while authenticating to database `{ns}/{db}`: {e}");
+		debug!("Error retrieving user for authentication to database `{ns}/{db}`: {e}");
 		Error::InvalidAuth
 	})?;
 	// Ensure that the transaction is cancelled
@@ -656,7 +661,10 @@ pub async fn authenticate_record(
 			// If the AUTHENTICATE clause returns a record, authentication continues with that record
 			Some(id) => Ok(id),
 			// If the AUTHENTICATE clause returns anything else, authentication fails generically
-			_ => Err(Error::InvalidAuth),
+			_ => {
+				debug!("Authentication attempt as record user rejected by AUTHENTICATE clause");
+				Err(Error::InvalidAuth)
+			}
 		},
 		Err(e) => match e {
 			// If the AUTHENTICATE clause throws a specific error, authentication fails with that error
@@ -679,7 +687,10 @@ pub async fn authenticate_generic(
 				// If the AUTHENTICATE clause returns nothing, authentication continues
 				Value::None => Ok(()),
 				// If the AUTHENTICATE clause returns anything else, authentication fails generically
-				_ => Err(Error::InvalidAuth),
+				_ => {
+					debug!("Authentication attempt as system user rejected by AUTHENTICATE clause");
+					Err(Error::InvalidAuth)
+				}
 			}
 		}
 		Err(e) => match e {
@@ -688,6 +699,22 @@ pub async fn authenticate_generic(
 			e if *INSECURE_FORWARD_ACCESS_ERRORS => Err(e),
 			_ => Err(Error::InvalidAuth),
 		},
+	}
+}
+
+fn verify_token(token: &str, key: &DecodingKey, validation: &Validation) -> Result<(), Error> {
+	match decode::<Claims>(token, key, validation) {
+		Ok(_) => Ok(()),
+		Err(err) => {
+			// Only transparently return certain token verification errors
+			match err.kind() {
+				jsonwebtoken::errors::ErrorKind::ExpiredSignature => Err(Error::ExpiredToken),
+				_ => {
+					debug!("Error verifying authentication token: {err}");
+					Err(Error::InvalidAuth)
+				}
+			}
+		}
 	}
 }
 
