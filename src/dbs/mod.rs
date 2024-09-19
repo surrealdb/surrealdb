@@ -88,7 +88,7 @@ Targets must be in the form of <host>[:<port>], <ipv4|ipv6>[/<mask>]. For exampl
 	#[arg(
 		help = "Allow all RPC methods to be called except for routes that are specifically denied. Alternatively, you can provide a comma-separated list of RPC methods to allow."
 	)]
-	#[arg(env = "SURREAL_CAPS_ALLOW_RPC", long, conflicts_with = "allow_all")]
+	#[arg(env = "SURREAL_CAPS_ALLOW_RPC", long)]
 	// If the arg is provided without value, then assume it's "", which gets parsed into Targets::All
 	#[arg(default_missing_value_os = "", num_args = 0..)]
 	#[arg(default_value_os = "")] // Allow all RPC methods by default
@@ -98,7 +98,7 @@ Targets must be in the form of <host>[:<port>], <ipv4|ipv6>[/<mask>]. For exampl
 	#[arg(
 		help = "Allow all HTTP routes to be requested except for routes that are specifically denied. Alternatively, you can provide a comma-separated list of HTTP routes to allow."
 	)]
-	#[arg(env = "SURREAL_CAPS_ALLOW_HTTP", long, conflicts_with = "allow_all")]
+	#[arg(env = "SURREAL_CAPS_ALLOW_HTTP", long)]
 	// If the arg is provided without value, then assume it's "", which gets parsed into Targets::All
 	#[arg(default_missing_value_os = "", num_args = 0..)]
 	#[arg(default_value_os = "")] // Allow all HTTP routes by default
