@@ -1506,6 +1506,25 @@ async fn session_reauthentication_expired() {
 }
 
 #[test(tokio::test)]
+async fn session_failed_reauthentication() {
+	// Setup database server without authentication
+	let (addr, mut server) = common::start_server_without_auth().await.unwrap();
+	// Connect to WebSocket
+	let mut socket = Socket::connect(&addr, SERVER, FORMAT).await.unwrap();
+	// Specify a namespace and database to use
+	socket.send_message_use(Some(NS), Some(DB)).await.unwrap();
+	// Check that we have are have a database and namespace selected
+	socket.send_message_query("INFO FOR DB").await.unwrap();
+	// Authenticate using an invalid token
+	socket.send_request("authenticate", json!(["invalid",])).await.unwrap();
+	// Check to see if we still have a namespace and database selected
+	let res = socket.send_message_query("INFO FOR DB").await.unwrap();
+	assert_eq!(res[0]["status"], "OK", "result: {res:?}");
+	// Test passed
+	server.finish().unwrap();
+}
+
+#[test(tokio::test)]
 async fn session_use_change_database() {
 	// Setup database server
 	let (addr, mut server) = common::start_server_with_defaults().await.unwrap();
