@@ -10,6 +10,11 @@ mod streaming;
 mod value;
 
 #[test]
+fn parse_large_test_file() {
+	test_parse!(parse_query, include_str!("../../../../test.surql")).unwrap();
+}
+
+#[test]
 fn multiple_semicolons() {
 	let res = test_parse!(parse_query, r#";;"#).unwrap();
 	let expected = sql::Query(sql::Statements(vec![]));
