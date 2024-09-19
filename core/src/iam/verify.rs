@@ -139,14 +139,14 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 	// Check if the auth token can be used
 	if let Some(nbf) = token_data.claims.nbf {
 		if nbf > Utc::now().timestamp() {
-			debug!("The 'nbf' field in the authentication token is invalid");
+			debug!("Token verification failed due to the 'nbf' claim containing a future time");
 			return Err(Error::InvalidAuth);
 		}
 	}
 	// Check if the auth token has expired
 	if let Some(exp) = token_data.claims.exp {
 		if exp < Utc::now().timestamp() {
-			debug!("The 'exp' field in the authentication token is invalid");
+			debug!("Token verification failed due to the 'exp' claim containing a past time");
 			return Err(Error::ExpiredToken);
 		}
 	}
