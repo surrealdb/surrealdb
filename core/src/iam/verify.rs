@@ -147,7 +147,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 	if let Some(exp) = token_data.claims.exp {
 		if exp < Utc::now().timestamp() {
 			debug!("The 'exp' field in the authentication token is invalid");
-			return Err(Error::InvalidAuth);
+			return Err(Error::ExpiredToken);
 		}
 	}
 	// Check the token authentication claims
@@ -357,7 +357,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			// Verify the token
 			verify_token(token, &cf.0, &cf.1)?;
 			// Log the success
-			debug!("Authenticated to database `{}` with user `{}`", db, id);
+			debug!("Authenticated to database `{}` with user `{}` using token", db, id);
 			// Set the session
 			session.tk = Some(value);
 			session.ns = Some(ns.to_owned());
@@ -460,7 +460,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			// Verify the token
 			verify_token(token, &cf.0, &cf.1)?;
 			// Log the success
-			debug!("Authenticated to namespace `{}` with user `{}`", ns, id);
+			debug!("Authenticated to namespace `{}` with user `{}` using token", ns, id);
 			// Set the session
 			session.tk = Some(value);
 			session.ns = Some(ns.to_owned());
@@ -555,7 +555,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			// Verify the token
 			verify_token(token, &cf.0, &cf.1)?;
 			// Log the success
-			debug!("Authenticated to root level with user `{}`", id);
+			debug!("Authenticated to root level with user `{}` using token", id);
 			// Set the session
 			session.tk = Some(value);
 			session.exp = expiration(de.duration.session)?;
