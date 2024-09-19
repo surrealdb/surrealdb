@@ -27,8 +27,13 @@ use token::t;
 const TARGET: &str = "surrealdb::core::syn";
 
 /// Takes a string and returns if it could be a reserved keyword in certain contexts.
-pub fn could_be_reserved_keyword(s: &str) -> bool {
+pub fn could_be_reserved_keyword_impl(s: &str) -> bool {
 	lexer::keywords::could_be_reserved(s)
+}
+
+// Wrapping function for `could_be_reserved_keyword(&str)` enables taking generic AsRef<str> as input
+pub fn could_be_reserved_keyword<S: AsRef<str>>(s: S) -> bool {
+	could_be_reserved_keyword_impl(s.as_ref())
 }
 
 /// Parses a SurrealQL [`Query`]
@@ -42,7 +47,7 @@ pub fn could_be_reserved_keyword(s: &str) -> bool {
 /// If you encounter this limit and believe that it should be increased,
 /// please [open an issue](https://github.com/surrealdb/surrealdb/issues)!
 #[instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len()))]
-pub fn parse(input: &str) -> Result<Query, Error> {
+pub fn parse_impl(input: &str) -> Result<Query, Error> {
 	trace!(target: TARGET, "Parsing SurrealQL query");
 	let mut parser = Parser::new(input.as_bytes())
 		.with_object_recursion_limit(*MAX_OBJECT_PARSING_DEPTH as usize)
@@ -55,9 +60,14 @@ pub fn parse(input: &str) -> Result<Query, Error> {
 		.map_err(Error::InvalidQuery)
 }
 
+// Wrapping function for `parse(&str)` enables taking generic AsRef<str> as input
+pub fn parse<S: AsRef<str>>(input: S) -> Result<Query, Error> {
+	parse_impl(input.as_ref())
+}
+
 /// Parses a SurrealQL [`Value`].
 #[instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len()))]
-pub fn value(input: &str) -> Result<Value, Error> {
+pub fn value_impl(input: &str) -> Result<Value, Error> {
 	trace!(target: TARGET, "Parsing SurrealQL value");
 	let mut parser = Parser::new(input.as_bytes())
 		.with_object_recursion_limit(*MAX_OBJECT_PARSING_DEPTH as usize)
@@ -71,9 +81,14 @@ pub fn value(input: &str) -> Result<Value, Error> {
 		.map_err(Error::InvalidQuery)
 }
 
+// Wrapping function for `value(&str)` enables taking generic AsRef<str> as input
+pub fn value<S: AsRef<str>>(input: S) -> Result<Value, Error> {
+	value_impl(input.as_ref())
+}
+
 /// Parses JSON into an inert SurrealQL [`Value`]
 #[instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len()))]
-pub fn json(input: &str) -> Result<Value, Error> {
+pub fn json_impl(input: &str) -> Result<Value, Error> {
 	trace!(target: TARGET, "Parsing inert JSON value");
 	let mut parser = Parser::new(input.as_bytes())
 		.with_object_recursion_limit(*MAX_OBJECT_PARSING_DEPTH as usize)
@@ -87,9 +102,14 @@ pub fn json(input: &str) -> Result<Value, Error> {
 		.map_err(Error::InvalidQuery)
 }
 
+// Wrapping function for `json(&str)` enables taking generic AsRef<str> as input
+pub fn json<S: AsRef<str>>(input: S) -> Result<Value, Error> {
+	json_impl(input.as_ref())
+}
+
 /// Parses a SurrealQL Subquery [`Subquery`]
 #[instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len()))]
-pub fn subquery(input: &str) -> Result<Subquery, Error> {
+pub fn subquery_impl(input: &str) -> Result<Subquery, Error> {
 	trace!(target: TARGET, "Parsing SurrealQL subquery");
 	let mut parser = Parser::new(input.as_bytes())
 		.with_object_recursion_limit(*MAX_OBJECT_PARSING_DEPTH as usize)
@@ -103,9 +123,14 @@ pub fn subquery(input: &str) -> Result<Subquery, Error> {
 		.map_err(Error::InvalidQuery)
 }
 
+// Wrapping function for `subquery(&str)` enables taking generic AsRef<str> as input
+pub fn subquery<S: AsRef<str>>(input: S) -> Result<Subquery, Error> {
+	subquery_impl(input.as_ref())
+}
+
 /// Parses a SurrealQL [`Idiom`]
 #[instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len()))]
-pub fn idiom(input: &str) -> Result<Idiom, Error> {
+pub fn idiom_impl(input: &str) -> Result<Idiom, Error> {
 	trace!(target: TARGET, "Parsing SurrealQL idiom");
 	let mut parser = Parser::new(input.as_bytes())
 		.with_object_recursion_limit(*MAX_OBJECT_PARSING_DEPTH as usize)
@@ -120,9 +145,14 @@ pub fn idiom(input: &str) -> Result<Idiom, Error> {
 		.map_err(Error::InvalidQuery)
 }
 
+// Wrapping function for `idiom(&str)` enables taking generic AsRef<str> as input
+pub fn idiom<S: AsRef<str>>(input: S) -> Result<Idiom, Error> {
+	idiom_impl(input.as_ref())
+}
+
 /// Parse a datetime without enclosing delimiters from a string.
 #[instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len()))]
-pub fn datetime(input: &str) -> Result<Datetime, Error> {
+pub fn datetime_impl(input: &str) -> Result<Datetime, Error> {
 	trace!(target: TARGET, "Parsing SurrealQL datetime");
 	let mut lexer = Lexer::new(input.as_bytes());
 	let res = compound::datetime_inner(&mut lexer);
@@ -132,9 +162,14 @@ pub fn datetime(input: &str) -> Result<Datetime, Error> {
 	res.map(Datetime).map_err(|e| e.render_on(input)).map_err(Error::InvalidQuery)
 }
 
+// Wrapping function for `datetime(&str)` enables taking generic AsRef<str> as input
+pub fn datetime<S: AsRef<str>>(input: S) -> Result<Datetime, Error> {
+	datetime_impl(input.as_ref())
+}
+
 /// Parse a duration from a string.
 #[instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len()))]
-pub fn duration(input: &str) -> Result<Duration, Error> {
+pub fn duration_impl(input: &str) -> Result<Duration, Error> {
 	trace!(target: TARGET, "Parsing SurrealQL duration");
 	let mut parser = Parser::new(input.as_bytes());
 	parser
@@ -144,9 +179,14 @@ pub fn duration(input: &str) -> Result<Duration, Error> {
 		.map_err(Error::InvalidQuery)
 }
 
+// Wrapping function for `duration(&str)` enables taking generic AsRef<str> as input
+pub fn duration<S: AsRef<str>>(input: S) -> Result<Duration, Error> {
+	duration_impl(input.as_ref())
+}
+
 /// Parse a range.
 #[instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len()))]
-pub fn range(input: &str) -> Result<Range, Error> {
+pub fn range_impl(input: &str) -> Result<Range, Error> {
 	trace!(target: TARGET, "Parsing SurrealQL range");
 	let mut parser = Parser::new(input.as_bytes());
 	let mut stack = Stack::new();
@@ -158,9 +198,14 @@ pub fn range(input: &str) -> Result<Range, Error> {
 		.map_err(Error::InvalidQuery)
 }
 
+// Wrapping function for `range(&str)` enables taking generic AsRef<str> as input
+pub fn range<S: AsRef<str>>(input: S) -> Result<Range, Error> {
+	range_impl(input.as_ref())
+}
+
 /// Parse a record id.
 #[instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len()))]
-pub fn thing(input: &str) -> Result<Thing, Error> {
+pub fn thing_impl(input: &str) -> Result<Thing, Error> {
 	trace!(target: TARGET, "Parsing SurrealQL thing");
 	let mut parser = Parser::new(input.as_bytes())
 		.with_object_recursion_limit(*MAX_OBJECT_PARSING_DEPTH as usize)
@@ -174,9 +219,14 @@ pub fn thing(input: &str) -> Result<Thing, Error> {
 		.map_err(Error::InvalidQuery)
 }
 
+// Wrapping function for `thing(&str)` enables taking generic AsRef<str> as input
+pub fn thing<S: AsRef<str>>(input: S) -> Result<Thing, Error> {
+	thing_impl(input.as_ref())
+}
+
 /// Parse a block, expects the value to be wrapped in `{}`.
 #[instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len()))]
-pub fn block(input: &str) -> Result<Block, Error> {
+pub fn block_impl(input: &str) -> Result<Block, Error> {
 	trace!(target: TARGET, "Parsing SurrealQL block");
 	let mut parser = Parser::new(input.as_bytes())
 		.with_object_recursion_limit(*MAX_OBJECT_PARSING_DEPTH as usize)
@@ -201,9 +251,14 @@ pub fn block(input: &str) -> Result<Block, Error> {
 	}
 }
 
+// Wrapping function for `block(&str)` enables taking generic AsRef<str> as input
+pub fn block<S: AsRef<str>>(input: S) -> Result<Block, Error> {
+	block_impl(input.as_ref())
+}
+
 /// Parses a SurrealQL [`Value`] and parses values within strings.
 #[instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len()))]
-pub fn value_legacy_strand(input: &str) -> Result<Value, Error> {
+pub fn value_legacy_strand_impl(input: &str) -> Result<Value, Error> {
 	trace!(target: TARGET, "Parsing SurrealQL value, with legacy strings");
 	let mut parser = Parser::new(input.as_bytes())
 		.with_object_recursion_limit(*MAX_OBJECT_PARSING_DEPTH as usize)
@@ -218,9 +273,14 @@ pub fn value_legacy_strand(input: &str) -> Result<Value, Error> {
 		.map_err(Error::InvalidQuery)
 }
 
+// Wrapping function for `value_legacy_strand(&str)` enables taking generic AsRef<str> as input
+pub fn value_legacy_strand<S: AsRef<str>>(input: S) -> Result<Value, Error> {
+	value_legacy_strand_impl(input.as_ref())
+}
+
 /// Parses JSON into an inert SurrealQL [`Value`] and parses values within strings.
 #[instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len()))]
-pub fn json_legacy_strand(input: &str) -> Result<Value, Error> {
+pub fn json_legacy_strand_impl(input: &str) -> Result<Value, Error> {
 	trace!(target: TARGET, "Parsing inert JSON value, with legacy strings");
 	let mut parser = Parser::new(input.as_bytes())
 		.with_object_recursion_limit(*MAX_OBJECT_PARSING_DEPTH as usize)
@@ -233,4 +293,9 @@ pub fn json_legacy_strand(input: &str) -> Result<Value, Error> {
 		.and_then(|e| parser.assert_finished().map(|_| e))
 		.map_err(|e| e.render_on(input))
 		.map_err(Error::InvalidQuery)
+}
+
+// Wrapping function for `json_legacy_strand(&str)` enables taking generic AsRef<str> as input
+pub fn json_legacy_strand<S: AsRef<str>>(input: S) -> Result<Value, Error> {
+	json_legacy_strand_impl(input.as_ref())
 }
