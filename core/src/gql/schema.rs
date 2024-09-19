@@ -117,20 +117,7 @@ pub async fn generate_schema(
 
 	trace!(ns, db, ?tbs, "generating schema");
 
-	// TODO: Update to a Union type of all access arguments from DefineAccessStatement
-	// let auth_union = Union::new("AccessArguments");
-	//
-	// for access in scopes.iter() {
-	// 	let mut access_type_obj = Object::new(format!("Access{}Arguments", access.name));
-	//
-	// 	let x = access.structure();
-	//
-	// 	auth_union.possible_type(access_type_obj);
-	// }
-
 	let access_response_type = Object::new("AccessResponse")
-		.field(Field::new("code", TypeRef::named_nn("number")))
-		.field(Field::new("details", TypeRef::named_nn(TypeRef::STRING)))
 		.field(Field::new("token", TypeRef::named_nn(TypeRef::STRING)));
 
 	let auth_kvs = datastore.clone();
@@ -150,8 +137,8 @@ pub async fn generate_schema(
 					.iter()
 					.find(| scope |
 						scope.kind == AccessType::Record
-						&& scope.base == Base::Db
-						&& scope.name == access.unwrap()
+							&& scope.base == Base::Db
+							&& scope.name == access.unwrap()
 					)
 					.expect("Database does not have the requested access");
 
@@ -163,15 +150,20 @@ pub async fn generate_schema(
 					.await
 					.map(Into::into)
 					.map_err(Into::into);
+
+				FieldFuture::new(async move {
+					Ok(Some(FieldValue::owned_any(access_response_type)
+						.with_type(TypeRef::named("AccessResponse"))))
+				})
 			}
 		)
-		.description("Sign in with scoped user access")
-		.argument(InputValue::new(
-			"access",
-			TypeRef::named_nn(TypeRef::STRING))
+			.description("Sign in with scoped user access")
+			.argument(InputValue::new(
+				"access",
+				TypeRef::named_nn(TypeRef::STRING))
 				.description("Name of the access for authentication")
-		)
-		.argument(InputValue::new("arguments", TypeRef::named_nn("object")))
+			)
+			.argument(InputValue::new("arguments", TypeRef::named_nn("object")))
 	);
 
 	mutation.field(
@@ -251,7 +243,7 @@ pub async fn generate_schema(
 									let desc = current.get("desc");
 									match (asc, desc) {
 										(Some(_), Some(_)) => {
-											return Err("Found both ASC and DESC in order".into());
+											return Err("Found both asc and desc in order".into());
 										}
 										(Some(GqlValue::Enum(a)), None) => {
 											orders.push(order!(asc, a.as_str()))
@@ -347,11 +339,11 @@ pub async fn generate_schema(
 					})
 				},
 			)
-			.description(format!("{}", if let Some(ref c) = &tb.comment { format!("{c}") } else { format!("Generated from table `{}`\nallows querying a table with filters", tb.name) }))
-			.argument(limit_input!())
-			.argument(start_input!())
-			.argument(InputValue::new("order", TypeRef::named(&table_order_name)))
-			.argument(InputValue::new("filter", TypeRef::named(&table_filter_name))),
+				.description(format!("Generated from table `{}`{}\nallows querying a table with filters", tb.name, if let Some(ref c) = &tb.comment {format!("\n{c}")} else {"".to_string()}))
+				.argument(limit_input!())
+				.argument(start_input!())
+				.argument(InputValue::new("order", TypeRef::named(&table_order_name)))
+				.argument(InputValue::new("filter", TypeRef::named(&table_filter_name))),
 		);
 
 		let sess2 = session.to_owned();
@@ -375,7 +367,7 @@ pub async fn generate_schema(
 									return Err(internal_error(
 										"Schema validation failed: No id found in _get_",
 									)
-									.into());
+										.into());
 								}
 							};
 							let thing = match id.clone().try_into() {
@@ -394,15 +386,16 @@ pub async fn generate_schema(
 					})
 				},
 			)
-			.description(format!(
-				"{}",
-				if let Some(ref c) = &tb.comment {
-					format!("{c}")
-				} else {
-					format!("Generated from table `{}`\nallows querying a single record in a table by ID", tb.name)
-				}
-			))
-			.argument(id_input!()),
+				.description(format!(
+					"Generated from table `{}`{}\nallows querying a single record in a table by id",
+					tb.name,
+					if let Some(ref c) = &tb.comment {
+						format!("\n{c}")
+					} else {
+						"".to_string()
+					}
+				))
+				.argument(id_input!()),
 		);
 
 		let mut table_ty_obj = Object::new(tb.name.to_string())
@@ -436,20 +429,11 @@ pub async fn generate_schema(
 			table_filter = table_filter
 				.field(InputValue::new(fd.name.to_string(), TypeRef::named(type_filter_name)));
 
-			table_ty_obj = table_ty_obj
-				.field(Field::new(
-					fd.name.to_string(),
-					fd_type,
-					make_table_field_resolver(fd_name.as_str(), fd.kind.clone()),
-				))
-				.description(format!(
-					"{}",
-					if let Some(ref c) = fd.comment {
-						format!("{c}")
-					} else {
-						"".to_string()
-					}
-				));
+			table_ty_obj = table_ty_obj.field(Field::new(
+				fd.name.to_string(),
+				fd_type,
+				make_table_field_resolver(fd_name.as_str(), fd.kind.clone()),
+			));
 		}
 
 		types.push(Type::Object(table_ty_obj));
@@ -475,7 +459,7 @@ pub async fn generate_schema(
 							return Err(internal_error(
 								"Schema validation failed: No id found in _get",
 							)
-							.into());
+								.into());
 						}
 					};
 
@@ -495,8 +479,8 @@ pub async fn generate_schema(
 				}
 			})
 		})
-		.description("Allows fetching arbitrary records".to_string())
-		.argument(id_input!()),
+			.description("allows fetching arbitrary records".to_string())
+			.argument(id_input!()),
 	);
 
 	trace!("current Query object for schema: {:?}", query);
@@ -550,7 +534,7 @@ pub async fn generate_schema(
 		schema,
 		"uuid",
 		Kind::Uuid,
-		"String encoded UUID",
+		"a string encoded uuid",
 		"https://datatracker.ietf.org/doc/html/rfc4122"
 	);
 
@@ -876,7 +860,7 @@ fn negate(filter: &GqlValue, fds: &[DefineFieldStatement]) -> Result<SqlValue, G
 		o: sql::Operator::Not,
 		v: inner_cond,
 	}
-	.into())
+		.into())
 }
 
 enum AggregateOp {
@@ -917,7 +901,7 @@ fn aggregate(
 			o: op.clone(),
 			r: cond,
 		}
-		.into();
+			.into();
 	}
 
 	Ok(cond)
