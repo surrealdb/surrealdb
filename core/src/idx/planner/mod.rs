@@ -112,7 +112,15 @@ impl QueryPlanner {
 			tree.knn_condition,
 		)
 		.await?;
-		match PlanBuilder::build(tree.root, params, tree.with_indexes, order)? {
+		match PlanBuilder::build(
+			tree.root,
+			params,
+			tree.with_indexes,
+			order,
+			tree.all_and_groups,
+			tree.all_and,
+			tree.all_expressions_with_index,
+		)? {
 			Plan::SingleIndex(exp, io) => {
 				if io.require_distinct() {
 					self.requires_distinct = true;
