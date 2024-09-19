@@ -77,7 +77,7 @@ mod graphql_integration {
 					r#"
                     DEFINE TABLE foo SCHEMAFUL;
                     DEFINE FIELD val ON foo TYPE int;
-                    CREATE foo:1 set val = 42;
+                    CREATE foo:1 set val = 42 VERSION d'2024-08-19T08:00:00Z';
                     CREATE foo:2 set val = 43;
                 "#,
 				)
@@ -109,6 +109,62 @@ mod graphql_integration {
 					]
 				}
 			});
+			assert_eq!(expected.to_string(), body)
+		}
+
+		// test (present) version
+		{
+			let res = client
+				.post(gql_url)
+				.body(json!({"query": r#"query(version: "2024-08-19T08:00:00Z"){foo{id, val}}"#}).to_string())
+				.send()
+				.await?;
+
+			assert_eq!((res.status(), 200));
+
+			let body = res.text().await?;
+
+			let expected = json!({
+				"data": {
+					"foo": [
+						{
+							"id": "foo:1",
+							"val": 42
+						},
+						{
+							"id": "foo:2",
+							"val": 43
+						}
+					]
+				}
+			});
+
+			assert_eq!(expected.to_string(), body)
+		}
+
+		// test (past) version
+		{
+			let res = client
+				.post(gql_url)
+				.body(json!({"query": r#"query{foo(version: "2024-08-19T07:00:00Z"){id, val}}"#}).to_string())
+				.send()
+				.await?;
+
+			assert_eq!((res.status(), 200));
+
+			let body = res.text().await?;
+
+			let expected = json!({
+				"data": {
+					"foo": [
+						{
+							"id": "foo:2",
+							"val": 43
+						}
+					]
+				}
+			});
+
 			assert_eq!(expected.to_string(), body)
 		}
 
