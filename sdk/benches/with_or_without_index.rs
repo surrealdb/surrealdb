@@ -17,12 +17,12 @@ fn bench_with_or_without_index(c: &mut Criterion) {
 	group.sample_size(10);
 	group.measurement_time(Duration::from_secs(15));
 
-	group.bench_function("without index", |b| {
+	group.bench_function("count/filter without index", |b| {
 		b.to_async(Runtime::new().unwrap())
 			.iter(|| run(&i, "SELECT count() FROM t WITH NOINDEX WHERE n > 7499 GROUP ALL", 7500))
 	});
 
-	group.bench_function("with index", |b| {
+	group.bench_function("count/filter with index", |b| {
 		b.to_async(Runtime::new().unwrap())
 			.iter(|| run(&i, "SELECT count() FROM t WHERE n > 7499 GROUP ALL", 7500))
 	});
