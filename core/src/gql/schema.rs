@@ -7,7 +7,7 @@ use crate::kvs::Datastore;
 use crate::sql::kind::Literal;
 use crate::sql::statements::define::config::graphql::TablesConfig;
 use crate::sql::statements::{DefineFieldStatement, SelectStatement};
-use crate::sql::{self, Table};
+use crate::sql::{self, AccessType, Base, Table};
 use crate::sql::{Cond, Fields};
 use crate::sql::{Expression, Geometry};
 use crate::sql::{Idiom, Kind};
@@ -34,6 +34,7 @@ use crate::gql::ext::{NamedContainer, TryAsExt};
 use crate::gql::utils::{GQLTx, GqlValueUtils};
 use crate::kvs::LockType;
 use crate::kvs::TransactionType;
+use crate::sql::statements::info::InfoStructure;
 use crate::sql::Value as SqlValue;
 
 type ErasedRecord = (GQLTx, Thing);
@@ -96,6 +97,7 @@ pub async fn generate_schema(
 	let config = cg.inner.clone().try_into_graphql()?;
 
 	let tbs = tx.all_tb(ns, db, None).await?;
+	let scopes = tx.all_db_accesses(ns, db).await?;
 
 	let tbs = match config.tables {
 		TablesConfig::None => return Err(GqlError::NotConfigured),
@@ -111,7 +113,72 @@ pub async fn generate_schema(
 	let mut query = Object::new("Query");
 	let mut types: Vec<Type> = Vec::new();
 
+	let mut mutation = Object::new("Mutation");
+
 	trace!(ns, db, ?tbs, "generating schema");
+
+	// TODO: Update to a Union type of all access arguments from DefineAccessStatement
+	// let auth_union = Union::new("AccessArguments");
+	//
+	// for access in scopes.iter() {
+	// 	let mut access_type_obj = Object::new(format!("Access{}Arguments", access.name));
+	//
+	// 	let x = access.structure();
+	//
+	// 	auth_union.possible_type(access_type_obj);
+	// }
+
+	let access_response_type = Object::new("AccessResponse")
+		.field(Field::new("code", TypeRef::named_nn("number")))
+		.field(Field::new("details", TypeRef::named_nn(TypeRef::STRING)))
+		.field(Field::new("token", TypeRef::named_nn(TypeRef::STRING)));
+
+	let auth_kvs = datastore.clone();
+	let auth_session = session.to_owned();
+
+	mutation.field(
+		Field::new(
+			"signIn",
+			TypeRef::named("AccessResponse"),
+			move | ctx: ResolverContext | {
+				let args = ctx.args.as_index_map();
+
+				let access = args.get("access");
+				let arguments = args.get("arguments");
+
+				let scope = scopes
+					.iter()
+					.find(| scope |
+						scope.kind == AccessType::Record
+						&& scope.base == Base::Db
+						&& scope.name == access.unwrap()
+					)
+					.expect("Could not find the requested scoped access");
+
+				let Ok(Value::Object(vals)) = args.iter().needs_one() else {
+					return Err("Invalid arguments provided for ACCESS");
+				};
+
+				// TODO: ensure vals passes `AC` for ACCESS
+				let out: Object = crate::iam::signin::signin(auth, &mut auth_session, vals)
+					.await
+					.map(Into::into)
+					.map_err(Into::into);
+			}
+		)
+		.description("Sign in with scoped user access")
+		.argument(InputValue::new(
+			"access",
+			TypeRef::named_nn(TypeRef::STRING))
+				.description("Name of the access for authentication")
+		)
+		.argument(InputValue::new("arguments", TypeRef::named_nn("object")))
+	);
+
+	mutation.field(
+		Field::new("signUp", TypeRef::named("AccessResponse"))
+			.description("Sign up for scoped user access")
+	);
 
 	if tbs.len() == 0 {
 		return Err(schema_error("no tables found in database"));
