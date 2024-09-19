@@ -128,19 +128,13 @@ pub async fn generate_schema(
 			"signIn",
 			TypeRef::named("AccessResponse"),
 			move | ctx: ResolverContext | {
+				// The session already has Access
+				if auth_session.ac.is_some() { return FieldValue::from(GqlValue::Null);  }
+
 				let args = ctx.args.as_index_map();
 
 				let access = args.get("access").expect("No access provided");
 				let arguments = args.get("arguments");
-
-				let scope = scopes
-					.iter()
-					.find(| scope |
-						scope.kind == AccessType::Record
-							&& scope.base == Base::Db
-							&& scope.name == access.unwrap()
-					)
-					.expect("Database does not have the requested access");
 
 				vals.insert("DB", auth_session.db);
 				vals.insert("NS", auth_session.ns);
@@ -152,7 +146,7 @@ pub async fn generate_schema(
 					.map_err(Into::into);
 
 				FieldFuture::new(async move {
-					Ok(Some(FieldValue::owned_any(access_response_type)
+					Ok(Some(FieldValue::owned_any(GqlValue::from(out))
 						.with_type(TypeRef::named("AccessResponse"))))
 				})
 			}
@@ -167,8 +161,15 @@ pub async fn generate_schema(
 	);
 
 	mutation.field(
-		Field::new("signUp", TypeRef::named("AccessResponse"))
-			.description("Sign up for scoped user access")
+		Field::new(
+			"signUp",
+			TypeRef::named("AccessResponse"),
+			move | ctx: ResolverContext | {
+				// The session already has Access
+				if auth_session.ac.is_some() { return FieldValue::from(GqlValue::Null);  }
+			}
+		)
+		.description("Sign up for scoped user access")
 	);
 
 	if tbs.len() == 0 {
