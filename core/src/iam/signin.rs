@@ -209,8 +209,14 @@ pub async fn db_access(
 								}
 								Err(e) => match e {
 									Error::Thrown(_) => Err(e),
-									e if *INSECURE_FORWARD_ACCESS_ERRORS => Err(e),
-									_ => Err(Error::AccessRecordSigninQueryFailed),
+									e => {
+										debug!("Record user signin query failed: {e}");
+										if *INSECURE_FORWARD_ACCESS_ERRORS {
+											Err(e)
+										} else {
+											Err(Error::AccessRecordSigninQueryFailed)
+										}
+									}
 								},
 							}
 						}
@@ -221,6 +227,9 @@ pub async fn db_access(
 					// TODO(gguillemas): Remove this once bearer access is no longer experimental.
 					if !*EXPERIMENTAL_BEARER_ACCESS {
 						// Return opaque error to avoid leaking the existence of the feature.
+						debug!(
+							"Error attempting to authenticate with disabled bearer access feature"
+						);
 						return Err(Error::InvalidAuth);
 					}
 					// Check if the bearer access method supports issuing tokens.
@@ -236,7 +245,10 @@ pub async fn db_access(
 					let gr = match tx.get_db_access_grant(&ns, &db, &ac, &kid).await {
 						Ok(gr) => gr,
 						// Return opaque error to avoid leaking existence of the grant.
-						_ => return Err(Error::InvalidAuth),
+						Err(e) => {
+							debug!("Error retrieving bearer access grant: {e}");
+							return Err(Error::InvalidAuth);
+						}
 					};
 					// Ensure that the transaction is cancelled.
 					tx.cancel().await?;
@@ -248,7 +260,7 @@ pub async fn db_access(
 						let tx = kvs.transaction(Read, Optimistic).await?;
 						// Fetch the specified user from storage.
 						let user = tx.get_db_user(&ns, &db, user).await.map_err(|e| {
-							trace!("Error while authenticating to database `{ns}/{db}`: {e}");
+							debug!("Error retrieving user for bearer access to database `{ns}/{db}`: {e}");
 							// Return opaque error to avoid leaking grant subject existence.
 							Error::InvalidAuth
 						})?;
@@ -363,7 +375,7 @@ pub async fn db_user(
 				..Claims::default()
 			};
 			// Log the authenticated database info
-			trace!("Signing in to database `{}`", db);
+			trace!("Signing in to database `{ns}/{db}`");
 			// Create the authentication token
 			let enc = encode(&HEADER, &val, &key);
 			// Set the authentication on the session
@@ -379,7 +391,11 @@ pub async fn db_user(
 				_ => Err(Error::TokenMakingFailed),
 			}
 		}
-		_ => Err(Error::InvalidAuth),
+		// The password did not verify
+		Err(e) => {
+			debug!("Failed to verify signin credentials for user `{user}` in database `{ns}/{db}`: {e}");
+			Err(Error::InvalidAuth)
+		}
 	}
 }
 
@@ -405,6 +421,9 @@ pub async fn ns_access(
 					// TODO(gguillemas): Remove this once bearer access is no longer experimental.
 					if !*EXPERIMENTAL_BEARER_ACCESS {
 						// Return opaque error to avoid leaking the existence of the feature.
+						debug!(
+							"Error attempting to authenticate with disabled bearer access feature"
+						);
 						return Err(Error::InvalidAuth);
 					}
 					// Check if the bearer access method supports issuing tokens.
@@ -420,7 +439,10 @@ pub async fn ns_access(
 					let gr = match tx.get_ns_access_grant(&ns, &ac, &kid).await {
 						Ok(gr) => gr,
 						// Return opaque error to avoid leaking existence of the grant.
-						_ => return Err(Error::InvalidAuth),
+						Err(e) => {
+							debug!("Error retrieving bearer access grant: {e}");
+							return Err(Error::InvalidAuth);
+						}
 					};
 					// Ensure that the transaction is cancelled.
 					tx.cancel().await?;
@@ -431,11 +453,12 @@ pub async fn ns_access(
 						// Create a new readonly transaction.
 						let tx = kvs.transaction(Read, Optimistic).await?;
 						// Fetch the specified user from storage.
-						let user = tx.get_ns_user(&ns, user).await.map_err(|e| {
-							trace!("Error while authenticating to namespace `{ns}`: {e}");
-							// Return opaque error to avoid leaking grant subject existence.
-							Error::InvalidAuth
-						})?;
+						let user =
+							tx.get_ns_user(&ns, user).await.map_err(|e| {
+								debug!("Error retrieving user for bearer access to namespace `{ns}`: {e}");
+								// Return opaque error to avoid leaking grant subject existence.
+								Error::InvalidAuth
+							})?;
 						// Ensure that the transaction is cancelled.
 						tx.cancel().await?;
 						user.roles.clone()
@@ -533,7 +556,7 @@ pub async fn ns_user(
 				..Claims::default()
 			};
 			// Log the authenticated namespace info
-			trace!("Signing in to namespace `{}`", ns);
+			trace!("Signing in to namespace `{ns}`");
 			// Create the authentication token
 			let enc = encode(&HEADER, &val, &key);
 			// Set the authentication on the session
@@ -549,7 +572,12 @@ pub async fn ns_user(
 			}
 		}
 		// The password did not verify
-		_ => Err(Error::InvalidAuth),
+		Err(e) => {
+			debug!(
+				"Failed to verify signin credentials for user `{user}` in namespace `{ns}`: {e}"
+			);
+			Err(Error::InvalidAuth)
+		}
 	}
 }
 
@@ -589,7 +617,10 @@ pub async fn root_user(
 			}
 		}
 		// The password did not verify
-		_ => Err(Error::InvalidAuth),
+		Err(e) => {
+			debug!("Failed to verify signin credentials for user `{user}` in root: {e}");
+			Err(Error::InvalidAuth)
+		}
 	}
 }
 
@@ -614,6 +645,9 @@ pub async fn root_access(
 					// TODO(gguillemas): Remove this once bearer access is no longer experimental.
 					if !*EXPERIMENTAL_BEARER_ACCESS {
 						// Return opaque error to avoid leaking the existence of the feature.
+						debug!(
+							"Error attempting to authenticate with disabled bearer access feature"
+						);
 						return Err(Error::InvalidAuth);
 					}
 					// Check if the bearer access method supports issuing tokens.
@@ -629,7 +663,10 @@ pub async fn root_access(
 					let gr = match tx.get_root_access_grant(&ac, &kid).await {
 						Ok(gr) => gr,
 						// Return opaque error to avoid leaking existence of the grant.
-						_ => return Err(Error::InvalidAuth),
+						Err(e) => {
+							debug!("Error retrieving bearer access grant: {e}");
+							return Err(Error::InvalidAuth);
+						}
 					};
 					// Ensure that the transaction is cancelled.
 					tx.cancel().await?;
@@ -641,7 +678,7 @@ pub async fn root_access(
 						let tx = kvs.transaction(Read, Optimistic).await?;
 						// Fetch the specified user from storage.
 						let user = tx.get_root_user(user).await.map_err(|e| {
-							trace!("Error while authenticating to root: {e}");
+							debug!("Error retrieving user for bearer access to root: {e}");
 							// Return opaque error to avoid leaking grant subject existence.
 							Error::InvalidAuth
 						})?;
@@ -753,10 +790,14 @@ pub fn verify_grant_bearer(gr: &Arc<AccessGrant>, key: String) -> Result<(), Err
 		(Some(exp), None) => {
 			if exp < &Datetime::default() {
 				// Return opaque error to avoid leaking revocation status.
+				debug!("Bearer access grant `{}` for method `{}` is expired", gr.id, gr.ac);
 				return Err(Error::InvalidAuth);
 			}
 		}
-		_ => return Err(Error::InvalidAuth),
+		(_, Some(_)) => {
+			debug!("Bearer access grant `{}` for method `{}` is revoked", gr.id, gr.ac);
+			return Err(Error::InvalidAuth);
+		}
 	}
 	// Check if the provided key matches the bearer key in the grant.
 	// We use time-constant comparison to prevent timing attacks.
@@ -765,6 +806,7 @@ pub fn verify_grant_bearer(gr: &Arc<AccessGrant>, key: String) -> Result<(), Err
 		let signin_key_bytes: &[u8] = key.as_bytes();
 		let ok: bool = grant_key_bytes.ct_eq(signin_key_bytes).into();
 		if !ok {
+			debug!("Bearer access grant `{}` for method `{}` is invalid", gr.id, gr.ac);
 			return Err(Error::InvalidAuth);
 		}
 	};
