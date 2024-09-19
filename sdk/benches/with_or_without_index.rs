@@ -13,18 +13,19 @@ fn bench_with_or_without_index(c: &mut Criterion) {
 	let i = rt.block_on(prepare_data());
 
 	let mut group = c.benchmark_group("with_or_without_index");
-	group.throughput(Throughput::Elements(7500));
+	group.throughput(Throughput::Elements(50_000));
 	group.sample_size(10);
 	group.measurement_time(Duration::from_secs(15));
 
 	group.bench_function("count/filter without index", |b| {
-		b.to_async(Runtime::new().unwrap())
-			.iter(|| run(&i, "SELECT count() FROM t WITH NOINDEX WHERE n > 7499 GROUP ALL", 7500))
+		b.to_async(Runtime::new().unwrap()).iter(|| {
+			run(&i, "SELECT count() FROM t WITH NOINDEX WHERE n > 49999 GROUP ALL", 50_000)
+		})
 	});
 
 	group.bench_function("count/filter with index", |b| {
 		b.to_async(Runtime::new().unwrap())
-			.iter(|| run(&i, "SELECT count() FROM t WHERE n > 7499 GROUP ALL", 7500))
+			.iter(|| run(&i, "SELECT count() FROM t WHERE n > 49999 GROUP ALL", 50_000))
 	});
 
 	group.finish();
@@ -46,18 +47,16 @@ async fn prepare_data() -> Input {
 	let dbs = Datastore::new(&path).await.unwrap().with_capabilities(
 		Capabilities::default().with_functions(Targets::<FuncTarget>::All).with_scripting(true),
 	);
+	//
 	let ses = Session::owner().with_ns("bench").with_db("bench");
-	let sql = r"
-		DEFINE INDEX idx ON TABLE t COLUMNS n;
-		FOR $i IN function() { return new Array(15000).fill(0).map((_, i)=>i) } {
-			CREATE t CONTENT { n: $i };
-		};"
-	.to_owned();
-	let res = &mut dbs.execute(&sql, &ses, None).await.unwrap();
-	assert_eq!(res.len(), 2);
-	for _ in 0..2 {
-		let r = res.remove(0);
-		assert!(r.result.is_ok(), "{r:?}");
+	let sql = "DEFINE INDEX idx ON TABLE t COLUMNS n";
+	let res = &mut dbs.execute(sql, &ses, None).await.unwrap();
+	assert!(res.remove(0).result.is_ok());
+	//
+	for i in 0..100_000 {
+		let sql = format!("CREATE t CONTENT {{ n: {i} }}");
+		let res = &mut dbs.execute(&sql, &ses, None).await.unwrap();
+		assert!(res.remove(0).result.is_ok());
 	}
 	Input {
 		dbs,
