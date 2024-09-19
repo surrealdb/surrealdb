@@ -1539,7 +1539,11 @@ mod tests {
 		let mut sess = Session::default();
 		let res = token(&ds, &mut sess, &enc).await;
 
-		assert!(res.is_err(), "Unexpected success signing in with expired token: {:?}", res);
+		match res {
+			Err(Error::ExpiredToken) => {} // ok
+			Err(err) => panic!("Unexpected error signing in with expired token: {:?}", err),
+			res => panic!("Unexpected success signing in with expired token: {:?}", res),
+		}
 	}
 
 	#[tokio::test]
