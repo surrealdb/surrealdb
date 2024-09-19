@@ -895,3 +895,126 @@ async fn select_count_range_keys_only() -> Result<(), Error> {
 	)?;
 	Ok(())
 }
+
+#[tokio::test]
+async fn select_count_index_keys_only() -> Result<(), Error> {
+	let sql = r#"
+		CREATE t:1 CONTENT { n: 1 };
+		CREATE t:2 CONTENT { n: 2 };
+		CREATE t:3 CONTENT { n: 3 };
+		DEFINE INDEX idx ON t;
+		DEFINE INDEX uniq ON t UNIQUE;
+		SELECT COUNT() FROM t WITH NOINDEX WHERE n > 1 GROUP ALL EXPLAIN;
+		SELECT COUNT() FROM t WITH NOINDEX WHERE n > 1 GROUP ALL;
+		SELECT COUNT() FROM t WITH INDEX idx WHERE n > 1 GROUP ALL EXPLAIN;
+		SELECT COUNT() FROM t WITH INDEX idx WHERE n > 1 GROUP ALL;
+		SELECT COUNT() FROM t WITH INDEX uniq WHERE n > 1 GROUP ALL EXPLAIN;
+		SELECT COUNT() FROM t WITH INDEX uniq WHERE n > 1 GROUP ALL;
+	"#;
+	let mut t = Test::new(sql).await?;
+	t.expect_size(11)?;
+	//
+	t.skip_ok(5)?;
+	//
+	t.expect_val(
+		r#"[
+			{
+				detail: {
+					table: 't'
+				},
+				operation: 'Iterate Table'
+			},
+			{
+				detail: {
+					reason: 'WITH NOINDEX'
+				},
+				operation: 'Fallback'
+			},
+			{
+				detail: {
+					idioms: {
+						count: [
+							'count'
+						]
+					},
+					type: 'Group'
+				},
+				operation: 'Collector'
+			}
+		]"#,
+	)?;
+	//
+	t.expect_val("[ { count: 2 }]")?;
+	//
+	t.expect_val(
+		r#"[
+			{
+				detail: {
+					table: 't'
+				},
+				operation: 'Iterate Table'
+			},
+			{
+				detail: {
+					plan: {
+						index: 'idx',
+						operator: '>',
+						value: 1
+					},
+					table: 't',
+				},
+				operation: 'Iterate Index'
+			},
+			{
+				detail: {
+					idioms: {
+						count: [
+							'count'
+						]
+					},
+					type: 'Group'
+				},
+				operation: 'Collector'
+			}
+		]"#,
+	)?;
+	//
+	t.expect_val("[ { count: 2 }]")?;
+	//
+	t.expect_val(
+		r#"[
+			{
+				detail: {
+					table: 't'
+				},
+				operation: 'Iterate Table'
+			},
+			{
+				detail: {
+					plan: {
+						index: 'uniq',
+						operator: '>',
+						value: 1
+					},
+					table: 't',
+				},
+				operation: 'Iterate Index'
+			},
+			{
+				detail: {
+					idioms: {
+						count: [
+							'count'
+						]
+					},
+					type: 'Group'
+				},
+				operation: 'Collector'
+			}
+		]"#,
+	)?;
+	//
+	t.expect_val("[ { count: 2 }]")?;
+	//
+	Ok(())
+}
