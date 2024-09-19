@@ -106,3 +106,9 @@ fn escaped_params_backtick() {
 	)
 	.unwrap();
 }
+
+#[test]
+fn parse_immediate_insert_subquery() {
+	let res =
+		test_parse!(parse_query, r#"LET $insert = INSERT INTO t (SELECT true FROM 1);"#).unwrap();
+}
