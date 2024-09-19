@@ -1,6 +1,7 @@
 use std::collections::BTreeMap;
 
 use reblessive::Stack;
+use rust_decimal::Decimal;
 
 use crate::{
 	sql::{
@@ -154,6 +155,12 @@ fn parse_i64() {
 
 	let res = test_parse!(parse_value_field, r#" 9223372036854775807 "#).unwrap();
 	assert_eq!(res, Value::Number(Number::Int(i64::MAX)));
+}
+
+#[test]
+fn parse_decimal() {
+	let res = test_parse!(parse_value_field, r#" 0dec "#).unwrap();
+	assert_eq!(res, Value::Number(Number::Decimal(Decimal::ZERO)));
 }
 
 #[test]
