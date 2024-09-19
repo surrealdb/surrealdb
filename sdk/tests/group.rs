@@ -902,8 +902,8 @@ async fn select_count_index_keys_only() -> Result<(), Error> {
 		CREATE t:1 CONTENT { n: 1 };
 		CREATE t:2 CONTENT { n: 2 };
 		CREATE t:3 CONTENT { n: 3 };
-		DEFINE INDEX idx ON t;
-		DEFINE INDEX uniq ON t UNIQUE;
+		DEFINE INDEX idx ON t FIELDS n;
+		DEFINE INDEX uniq ON t FIELDS n UNIQUE;
 		SELECT COUNT() FROM t WITH NOINDEX WHERE n > 1 GROUP ALL EXPLAIN;
 		SELECT COUNT() FROM t WITH NOINDEX WHERE n > 1 GROUP ALL;
 		SELECT COUNT() FROM t WITH INDEX idx WHERE n > 1 GROUP ALL EXPLAIN;
@@ -950,20 +950,20 @@ async fn select_count_index_keys_only() -> Result<(), Error> {
 		r#"[
 			{
 				detail: {
+					plan: {
+						from: {
+							inclusive: false,
+							value: 1
+						},
+						index: 'idx',
+						to: {
+							inclusive: false,
+							value: NONE
+						}
+					},
 					table: 't'
 				},
-				operation: 'Iterate Table'
-			},
-			{
-				detail: {
-					plan: {
-						index: 'idx',
-						operator: '>',
-						value: 1
-					},
-					table: 't',
-				},
-				operation: 'Iterate Index'
+				operation: 'Iterate Index Keys'
 			},
 			{
 				detail: {
@@ -985,20 +985,20 @@ async fn select_count_index_keys_only() -> Result<(), Error> {
 		r#"[
 			{
 				detail: {
+					plan: {
+						from: {
+							inclusive: false,
+							value: 1
+						},
+						index: 'uniq',
+						to: {
+							inclusive: false,
+							value: NONE
+						}
+					},
 					table: 't'
 				},
-				operation: 'Iterate Table'
-			},
-			{
-				detail: {
-					plan: {
-						index: 'uniq',
-						operator: '>',
-						value: 1
-					},
-					table: 't',
-				},
-				operation: 'Iterate Index'
+				operation: 'Iterate Index Keys'
 			},
 			{
 				detail: {
