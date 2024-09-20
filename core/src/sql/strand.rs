@@ -1,3 +1,4 @@
+use crate::err::Error;
 use crate::sql::escape::quote_plain_str;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -5,6 +6,8 @@ use std::fmt::{self, Display, Formatter};
 use std::ops::Deref;
 use std::ops::{self};
 use std::str;
+
+use super::value::TryAdd;
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Strand";
 
@@ -69,6 +72,18 @@ impl ops::Add for Strand {
 	fn add(mut self, other: Self) -> Self {
 		self.0.push_str(other.as_str());
 		self
+	}
+}
+
+impl TryAdd for Strand {
+	type Output = Self;
+	fn try_add(mut self, other: Self) -> Result<Self, Error> {
+		if self.0.try_reserve(other.len()).is_ok() {
+			self.0.push_str(other.as_str());
+			Ok(self)
+		} else {
+			Err(Error::ArithmeticOverflow(format!("{self} + {other}")))
+		}
 	}
 }
 

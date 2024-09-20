@@ -1149,6 +1149,10 @@ pub enum Error {
 
 	#[error("Found a non-computed value where they are not allowed")]
 	NonComputed,
+
+	/// Represents a failure in timestamp arithmetic related to database internals
+	#[error("Failed to compute: \"{0}\", but one or both operands are too big.")]
+	ArithmeticOverflow(String),
 }
 
 impl From<Error> for String {
