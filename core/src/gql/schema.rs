@@ -285,7 +285,7 @@ pub async fn generate_schema(
 									let desc = current.get("desc");
 									match (asc, desc) {
 										(Some(_), Some(_)) => {
-											return Err("Found both asc and desc in order".into());
+											return Err("Found both ASC and DESC in order".into());
 										}
 										(Some(GqlValue::Enum(a)), None) => {
 											orders.push(order!(asc, a.as_str()))
@@ -381,11 +381,11 @@ pub async fn generate_schema(
 					})
 				},
 			)
-				.description(format!("Generated from table `{}`{}\nallows querying a table with filters", tb.name, if let Some(ref c) = &tb.comment {format!("\n{c}")} else {"".to_string()}))
-				.argument(limit_input!())
-				.argument(start_input!())
-				.argument(InputValue::new("order", TypeRef::named(&table_order_name)))
-				.argument(InputValue::new("filter", TypeRef::named(&table_filter_name))),
+			.description(format!("{}", if let Some(ref c) = &tb.comment { format!("{c}") } else { format!("Generated from table `{}`\nallows querying a table with filters", tb.name) }))
+			.argument(limit_input!())
+			.argument(start_input!())
+			.argument(InputValue::new("order", TypeRef::named(&table_order_name)))
+			.argument(InputValue::new("filter", TypeRef::named(&table_filter_name))),
 		);
 
 		let sess2 = session.to_owned();
@@ -429,12 +429,11 @@ pub async fn generate_schema(
 				},
 			)
 				.description(format!(
-					"Generated from table `{}`{}\nallows querying a single record in a table by id",
-					tb.name,
+					"{}",
 					if let Some(ref c) = &tb.comment {
-						format!("\n{c}")
+						format!("{c}")
 					} else {
-						"".to_string()
+						format!("Generated from table `{}`\nallows querying a single record in a table by ID", tb.name)
 					}
 				))
 				.argument(id_input!()),
@@ -510,7 +509,7 @@ pub async fn generate_schema(
 							return Err(internal_error(
 								"Schema validation failed: No id found in _get",
 							)
-								.into());
+							.into());
 						}
 					};
 
@@ -530,8 +529,8 @@ pub async fn generate_schema(
 				}
 			})
 		})
-			.description("allows fetching arbitrary records".to_string())
-			.argument(id_input!()),
+		.description("Allows fetching arbitrary records".to_string())
+		.argument(id_input!()),
 	);
 
 	trace!("current Query object for schema: {:?}", query);
@@ -585,7 +584,7 @@ pub async fn generate_schema(
 		schema,
 		"uuid",
 		Kind::Uuid,
-		"a string encoded uuid",
+		"String encoded UUID",
 		"https://datatracker.ietf.org/doc/html/rfc4122"
 	);
 
@@ -911,7 +910,7 @@ fn negate(filter: &GqlValue, fds: &[DefineFieldStatement]) -> Result<SqlValue, G
 		o: sql::Operator::Not,
 		v: inner_cond,
 	}
-		.into())
+	.into())
 }
 
 enum AggregateOp {
@@ -952,7 +951,7 @@ fn aggregate(
 			o: op.clone(),
 			r: cond,
 		}
-			.into();
+		.into();
 	}
 
 	Ok(cond)
