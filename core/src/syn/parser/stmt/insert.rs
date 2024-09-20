@@ -129,7 +129,7 @@ impl Parser<'_> {
 			let mut values = Vec::new();
 			let start = expected!(self, t!("(")).span;
 			loop {
-				values.push(self.parse_value_table(ctx).await?);
+				values.push(self.parse_value_field(ctx).await?);
 
 				if !self.eat(t!(",")) {
 					break;

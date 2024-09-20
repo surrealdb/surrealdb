@@ -188,7 +188,7 @@ fn three_multi_index_query(with: &str, parallel: &str) -> String {
 		DEFINE INDEX uniq_name ON TABLE person COLUMNS name UNIQUE;
 		DEFINE INDEX idx_genre ON TABLE person COLUMNS genre;
 		SELECT name FROM person {with} WHERE name = 'Jaime' OR genre = 'm' OR company @@ 'surrealdb' {parallel};
-	    SELECT name FROM person {with} WHERE name = 'Jaime' OR genre = 'm' OR company @@ 'surrealdb' {parallel} EXPLAIN FULL;
+		SELECT name FROM person {with} WHERE name = 'Jaime' OR genre = 'm' OR company @@ 'surrealdb' {parallel} EXPLAIN FULL;
 		SELECT name FROM person {with} WHERE name = 'Jaime' AND genre = 'm' AND company @@ 'surrealdb' {parallel};
 	    SELECT name FROM person {with} WHERE name = 'Jaime' AND genre = 'm' AND company @@ 'surrealdb' {parallel} EXPLAIN FULL;")
 }
@@ -3062,4 +3062,36 @@ async fn select_composite_standard_index() -> Result<(), Error> {
 #[tokio::test]
 async fn select_composite_unique_index() -> Result<(), Error> {
 	select_composite_index(true).await
+}
+
+#[tokio::test]
+async fn select_where_index_boolean_behaviour() -> Result<(), Error> {
+	let sql = r"
+		DEFINE INDEX flagIndex ON TABLE test COLUMNS flag;
+		CREATE test:t CONTENT { flag:true };
+		CREATE test:f CONTENT { flag:false };
+		SELECT * FROM test;
+		SELECT * FROM test WITH NOINDEX WHERE (true OR flag=true);
+		SELECT * FROM test WITH NOINDEX WHERE (true OR flag==true);
+		SELECT * FROM test WHERE (true OR flag=true);
+		SELECT * FROM test WHERE (true OR flag==true);";
+	let mut t = Test::new(sql).await?;
+	t.expect_size(8)?;
+	t.skip_ok(3)?;
+	for i in 0..5 {
+		t.expect_val_info(
+			"[
+					{
+						flag: false,
+						id: test:f
+					},
+					{
+						flag: true,
+						id: test:t
+					}
+				]",
+			i,
+		)?;
+	}
+	Ok(())
 }

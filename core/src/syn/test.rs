@@ -69,7 +69,7 @@ impl Parse<Self> for Expression {
 		let mut parser = Parser::new(val.as_bytes());
 		let mut stack = Stack::new();
 		let value = stack
-			.enter(|ctx| parser.parse_value_table(ctx))
+			.enter(|ctx| parser.parse_value_field(ctx))
 			.finish()
 			.map_err(|e| e.render_on(val))
 			.unwrap();

@@ -20,10 +20,16 @@ use std::sync::Arc;
 pub(super) struct Tree {
 	pub(super) root: Option<Node>,
 	pub(super) index_map: IndexesMap,
-	pub(super) with_indexes: Vec<IndexRef>,
+	pub(super) with_indexes: Option<Vec<IndexRef>>,
 	pub(super) knn_expressions: KnnExpressions,
 	pub(super) knn_brute_force_expressions: KnnBruteForceExpressions,
 	pub(super) knn_condition: Option<Cond>,
+	/// Is every expression backed by an index?
+	pub(super) all_expressions_with_index: bool,
+	/// Does the whole query contains only AND relations?
+	pub(super) all_and: bool,
+	/// Does a group contains only AND relations?
+	pub(super) all_and_groups: HashMap<GroupRef, bool>,
 }
 
 impl Tree {
@@ -50,6 +56,10 @@ impl Tree {
 			knn_expressions: b.knn_expressions,
 			knn_brute_force_expressions: b.knn_brute_force_expressions,
 			knn_condition: b.knn_condition,
+			all_expressions_with_index: b.leaf_nodes_count > 0
+				&& b.leaf_nodes_with_index_count == b.leaf_nodes_count,
+			all_and: b.all_and.unwrap_or(true),
+			all_and_groups: b.all_and_groups,
 		})
 	}
 }
@@ -65,13 +75,17 @@ struct TreeBuilder<'a> {
 	resolved_expressions: HashMap<Arc<Expression>, ResolvedExpression>,
 	resolved_idioms: HashMap<Arc<Idiom>, Node>,
 	index_map: IndexesMap,
-	with_indexes: Vec<IndexRef>,
+	with_indexes: Option<Vec<IndexRef>>,
 	knn_brute_force_expressions: HashMap<Arc<Expression>, KnnBruteForceExpression>,
 	knn_expressions: KnnExpressions,
 	idioms_record_options: HashMap<Arc<Idiom>, RecordOptions>,
 	group_sequence: GroupRef,
 	root: Option<Node>,
 	knn_condition: Option<Cond>,
+	leaf_nodes_count: usize,
+	leaf_nodes_with_index_count: usize,
+	all_and: Option<bool>,
+	all_and_groups: HashMap<GroupRef, bool>,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
@@ -93,8 +107,8 @@ impl<'a> TreeBuilder<'a> {
 		orders: Option<&'a Orders>,
 	) -> Self {
 		let with_indexes = match with {
-			Some(With::Index(ixs)) => Vec::with_capacity(ixs.len()),
-			_ => vec![],
+			Some(With::Index(ixs)) => Some(Vec::with_capacity(ixs.len())),
+			_ => None,
 		};
 		let first_order = if let Some(o) = orders {
 			o.0.first()
@@ -119,6 +133,10 @@ impl<'a> TreeBuilder<'a> {
 			group_sequence: 0,
 			root: None,
 			knn_condition: None,
+			all_and: None,
+			all_and_groups: Default::default(),
+			leaf_nodes_count: 0,
+			leaf_nodes_with_index_count: 0,
 		}
 	}
 
@@ -188,7 +206,10 @@ impl<'a> TreeBuilder<'a> {
 			| Value::Param(_)
 			| Value::Null
 			| Value::None
-			| Value::Function(_) => Ok(Node::Computable),
+			| Value::Function(_) => {
+				self.leaf_nodes_count += 1;
+				Ok(Node::Computable)
+			}
 			Value::Array(a) => self.eval_array(stk, a).await,
 			Value::Subquery(s) => self.eval_subquery(stk, s).await,
 			_ => Ok(Node::Unsupported(format!("Unsupported value: {}", v))),
@@ -207,6 +228,7 @@ impl<'a> TreeBuilder<'a> {
 	}
 
 	async fn eval_array(&mut self, stk: &mut Stk, a: &Array) -> Result<Node, Error> {
+		self.leaf_nodes_count += 1;
 		let mut values = Vec::with_capacity(a.len());
 		for v in &a.0 {
 			values.push(stk.run(|stk| v.compute(stk, self.ctx, self.opt, None)).await?);
@@ -220,6 +242,7 @@ impl<'a> TreeBuilder<'a> {
 		group: GroupRef,
 		i: &Idiom,
 	) -> Result<Node, Error> {
+		self.leaf_nodes_count += 1;
 		// Check if the idiom has already been resolved
 		if let Some(node) = self.resolved_idioms.get(i).cloned() {
 			return Ok(node);
@@ -273,7 +296,11 @@ impl<'a> TreeBuilder<'a> {
 				let ixr = self.index_map.definitions.len() as IndexRef;
 				if let Some(With::Index(ixs)) = &self.with {
 					if ixs.contains(&ix.name.0) {
-						self.with_indexes.push(ixr);
+						if let Some(wi) = &mut self.with_indexes {
+							wi.push(ixr);
+						} else {
+							self.with_indexes = Some(vec![ixr]);
+						}
 					}
 				}
 				self.index_map.definitions.push(ix.clone().into());
@@ -343,7 +370,10 @@ impl<'a> TreeBuilder<'a> {
 		match e {
 			Expression::Unary {
 				..
-			} => Ok(Node::Unsupported("unary expressions not supported".to_string())),
+			} => {
+				self.leaf_nodes_count += 1;
+				Ok(Node::Unsupported("unary expressions not supported".to_string()))
+			}
 			Expression::Binary {
 				l,
 				o,
@@ -353,6 +383,7 @@ impl<'a> TreeBuilder<'a> {
 				if let Some(re) = self.resolved_expressions.get(e).cloned() {
 					return Ok(re.into());
 				}
+				self.check_boolean_operator(group, o);
 				let left = stk.run(|stk| self.eval_value(stk, group, l)).await?;
 				let right = stk.run(|stk| self.eval_value(stk, group, r)).await?;
 				// If both values are computable, then we can delegate the computation to the parent
@@ -362,9 +393,8 @@ impl<'a> TreeBuilder<'a> {
 				let exp = Arc::new(e.clone());
 				let left = Arc::new(self.compute(stk, l, left).await?);
 				let right = Arc::new(self.compute(stk, r, right).await?);
-				let mut io = None;
-				if let Some((id, local_irs, remote_irs)) = left.is_indexed_field() {
-					io = self.lookup_index_options(
+				let io = if let Some((id, local_irs, remote_irs)) = left.is_indexed_field() {
+					self.lookup_index_options(
 						o,
 						id,
 						&right,
@@ -372,9 +402,9 @@ impl<'a> TreeBuilder<'a> {
 						IdiomPosition::Left,
 						local_irs,
 						remote_irs,
-					)?;
+					)?
 				} else if let Some((id, local_irs, remote_irs)) = right.is_indexed_field() {
-					io = self.lookup_index_options(
+					self.lookup_index_options(
 						o,
 						id,
 						&left,
@@ -382,13 +412,16 @@ impl<'a> TreeBuilder<'a> {
 						IdiomPosition::Right,
 						local_irs,
 						remote_irs,
-					)?;
-				}
+					)?
+				} else {
+					None
+				};
 				if let Some(id) = left.is_field() {
 					self.eval_bruteforce_knn(id, &right, &exp)?;
 				} else if let Some(id) = right.is_field() {
 					self.eval_bruteforce_knn(id, &left, &exp)?;
 				}
+				self.check_leaf_node_with_index(io.as_ref());
 				let re = ResolvedExpression {
 					group,
 					exp: exp.clone(),
@@ -399,6 +432,37 @@ impl<'a> TreeBuilder<'a> {
 				self.resolved_expressions.insert(exp, re.clone());
 				Ok(re.into())
 			}
+		}
+	}
+
+	fn check_boolean_operator(&mut self, gr: GroupRef, op: &Operator) {
+		match op {
+			Operator::Neg | Operator::Or => {
+				if self.all_and != Some(false) {
+					self.all_and = Some(false);
+				}
+				self.all_and_groups.entry(gr).and_modify(|b| *b = false).or_insert(false);
+			}
+			Operator::And => {
+				if self.all_and.is_none() {
+					self.all_and = Some(true);
+				}
+				self.all_and_groups.entry(gr).or_insert(true);
+			}
+			_ => {
+				self.all_and_groups.entry(gr).or_insert(true);
+			}
+		}
+	}
+
+	fn check_leaf_node_with_index(&mut self, io: Option<&IndexOption>) {
+		if let Some(io) = io {
+			if let Some(wi) = &self.with_indexes {
+				if !wi.contains(&io.ix_ref()) {
+					return;
+				}
+			}
+			self.leaf_nodes_with_index_count += 2;
 		}
 	}
 
