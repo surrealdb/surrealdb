@@ -79,15 +79,12 @@ pub fn escape_ident(s: &str) -> Cow<'_, str> {
 
 #[inline]
 pub fn escape_normal<'a>(s: &'a str, l: char, r: char, e: &str) -> Cow<'a, str> {
-	// Loop over each character
-	for x in s.bytes() {
-		// Check if character is allowed
-		if !(x.is_ascii_alphanumeric() || x == b'_') {
-			return Cow::Owned(format!("{l}{}{r}", s.replace(r, e)));
-		}
+	// Is there no need to escape the value?
+	if s.bytes().all(|x| x.is_ascii_alphanumeric() || x == b'_') {
+		return Cow::Borrowed(s);
 	}
 	// Output the value
-	Cow::Borrowed(s)
+	Cow::Owned(format!("{l}{}{r}", s.replace(r, e)))
 }
 
 pub fn escape_reserved_keyword(s: &str) -> Option<String> {
