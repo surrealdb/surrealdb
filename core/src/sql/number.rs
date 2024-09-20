@@ -616,7 +616,7 @@ impl Ord for Number {
 				let l = *v as i128;
 				let r = *w as i128;
 				match l.cmp(&r) {
-					Ordering::Equal => w.fract().total_cmp(&0.0),
+					Ordering::Equal => 0.0f64.total_cmp(&w.fract()),
 					ordering => ordering,
 				}
 			}
