@@ -584,6 +584,17 @@ const DECIMAL_PRECISION_THREASHOLD: f64 = 1e-28;
 
 // Because of
 
+fn string_conv(value: f64) -> Option<Decimal> {
+	let string = value.to_string();
+	match Decimal::from_str_exact(&string) {
+		Ok(d) => Some(d),
+		Err(e) => match e {
+			rust_decimal::Error::Underflow => Some(Decimal::ZERO),
+			_ => None,
+		},
+	}
+}
+
 impl Ord for Number {
 	fn cmp(&self, other: &Self) -> Ordering {
 		fn total_cmp_f64(a: f64, b: f64) -> Ordering {
@@ -644,34 +655,70 @@ impl Ord for Number {
 			// 		v.cmp(&Decimal::from_f64(*w).expect("checked that float is finite"))
 			// 	}
 			// }
+			// (Number::Float(v), Number::Decimal(w)) => {
+			// 	if *v == 0.0 && w == &Decimal::ZERO {
+			// 		Ordering::Equal
+			// 	} else if v.abs() < DECIMAL_PRECISION_THREASHOLD {
+			// 		if v.is_positive() {
+			// 			if w > &Decimal::ZERO {
+			// 				Ordering::Less
+			// 			} else {
+			// 				Ordering::Greater
+			// 			}
+			// 		} else {
+			// 			if w < &Decimal::ZERO {
+			// 				Ordering::Greater
+			// 			} else {
+			// 				Ordering::Less
+			// 			}
+			// 		}
+			// 	} else {
+			// 		// TODO: remove the filter after https://github.com/paupino/rust-decimal/pull/678 is released
+			// 		if let Some(v) = Decimal::from_f64_retain(*v)
+			// 			.filter(|_| v.abs() < 79228162514264337593543950336.0)
+			// 		{
+			// 			Decimal::cmp(&v, &w) // in range
+			// 		} else if v.is_sign_positive() {
+			// 			Ordering::Greater // inf, +NaN, pos overflow
+			// 		} else {
+			// 			Ordering::Less // -inf, -NaN, neg overflow
+			// 		}
+			// 	}
+			// }
 			(Number::Float(v), Number::Decimal(w)) => {
-				if *v == 0.0 && w == &Decimal::ZERO {
-					Ordering::Equal
-				} else if v.abs() < DECIMAL_PRECISION_THREASHOLD {
-					if v.is_positive() {
-						if w > &Decimal::ZERO {
-							Ordering::Less
-						} else {
-							Ordering::Greater
-						}
-					} else {
-						if w < &Decimal::ZERO {
-							Ordering::Greater
-						} else {
-							Ordering::Less
-						}
+				if v > &Decimal::MAX
+					.to_f64()
+					.expect("Decimal::MAX should be able to be converted to f64")
+				{
+					Ordering::Greater
+				} else if v < &Decimal::MIN
+					.to_f64()
+					.expect("Decimal::MIN should be able to be converted to f64")
+				{
+					Ordering::Less
+				} else if let Some(vd) = Decimal::from_f64_retain(*v) {
+					// let can_be_eq = v.fract() == Decimal::ZERO && w.fract() == Decimal::ZERO;
+
+					match (vd.cmp(w), v.fract() == 0.0, w.fract() == Decimal::ZERO) {
+						// both non-integers so we order float first
+						(Ordering::Equal, false, false) => Ordering::Less,
+						// both have equal int parts, but w has larger magnitude
+						(Ordering::Equal, false, true) => match v.is_sign_positive() {
+							true => Ordering::Greater,
+							false => Ordering::Less,
+						},
+						(Ordering::Equal, true, false) => match v.is_sign_positive() {
+							true => Ordering::Less,
+							false => Ordering::Greater,
+						},
+						// Both are integers and equal
+						(Ordering::Equal, true, true) => Ordering::Equal,
+						(o @ Ordering::Less | o @ Ordering::Greater, _, _) => o,
 					}
+				} else if v.is_sign_positive() {
+					Ordering::Greater // inf, +NaN, pos overflow
 				} else {
-					// TODO: remove the filter after https://github.com/paupino/rust-decimal/pull/678 is released
-					if let Some(v) = Decimal::from_f64_retain(*v)
-						.filter(|_| v.abs() < 79228162514264337593543950336.0)
-					{
-						Decimal::cmp(&v, &w) // in range
-					} else if v.is_sign_positive() {
-						Ordering::Greater // inf, +NaN, pos overflow
-					} else {
-						Ordering::Less // -inf, -NaN, neg overflow
-					}
+					Ordering::Less // -inf, -NaN, neg overflow
 				}
 			}
 			(Number::Decimal(v), Number::Float(w)) => {
@@ -707,17 +754,45 @@ impl PartialEq for Number {
 			a.to_bits().eq(&b.to_bits()) || (a == 0.0 && b == 0.0)
 		}
 
+		fn int_float_eq(x: &i64, y: &f64) -> bool {
+			if y.fract() != 0.0 {
+				false
+			} else if y.abs() > i64::MAX as f64 {
+				false
+			} else {
+				*x == *y as i64
+			}
+		}
+
+		fn dec_float_eq(x: Decimal, y: f64) -> bool {
+			if y.fract() != 0.0 || x.fract() != Decimal::ZERO || !y.is_finite() {
+				false
+			} else if y.abs()
+				> Decimal::MAX.to_f64().expect("Decimal::MAX should be able to be converted to f64")
+			{
+				false
+			} else {
+				x == Decimal::from_f64(y).expect(
+					"a finite float less than Decimal::MAX with fract==0.0 should be a valid decimal",
+				)
+			}
+		}
+
 		match (self, other) {
 			(Number::Int(v), Number::Int(w)) => v.eq(w),
 			(Number::Float(v), Number::Float(w)) => total_eq_f64(*v, *w),
 			(Number::Decimal(v), Number::Decimal(w)) => v.eq(w),
 			// ------------------------------
+			// (Number::Int(v), Number::Float(w)) => int_float_eq(v, w),
+			// (Number::Float(v), Number::Int(w)) => int_float_eq(w, v),
 			(v @ Number::Int(_), w @ Number::Float(_)) => v.cmp(w) == Ordering::Equal,
 			(v @ Number::Float(_), w @ Number::Int(_)) => v.cmp(w) == Ordering::Equal,
 			// ------------------------------
 			(Number::Int(v), Number::Decimal(w)) => Decimal::from(*v).eq(w),
 			(Number::Decimal(v), Number::Int(w)) => v.eq(&Decimal::from(*w)),
 			// ------------------------------
+			// (Number::Float(v), Number::Decimal(w)) => dec_float_eq(*w, *v),
+			// (Number::Decimal(v), Number::Float(w)) => dec_float_eq(*v, *w),
 			(v @ Number::Float(_), w @ Number::Decimal(_)) => v.cmp(w) == Ordering::Equal,
 			(v @ Number::Decimal(_), w @ Number::Float(_)) => v.cmp(w) == Ordering::Equal,
 		}
@@ -1037,6 +1112,7 @@ mod tests {
 	fn test_try_float_div() {
 		let (sum_one, count_one) = (Number::Int(5), Number::Int(2));
 		assert_eq!(sum_one.try_float_div(count_one).unwrap(), Number::Float(2.5));
+		// i64::MIN
 
 		let (sum_two, count_two) = (Number::Int(10), Number::Int(5));
 		assert_eq!(sum_two.try_float_div(count_two).unwrap(), Number::Int(2));
