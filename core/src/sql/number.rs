@@ -18,7 +18,7 @@ use std::ops::{self, Add, Div, Mul, Neg, Rem, Sub};
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Number";
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Copy, Serialize, Deserialize)]
 #[serde(rename = "$surrealdb::private::sql::Number")]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
@@ -33,7 +33,9 @@ impl Debug for Number {
 	fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
 		match self {
 			Self::Int(arg0) => f.debug_tuple("Int").field(arg0).finish(),
-			Self::Float(arg0) => write!(f, "Float({arg0:.32})"),
+			Self::Float(arg0) => write!(f, "Float({arg0} | {arg0:?} | {:b})", unsafe {
+				std::mem::transmute_copy::<f64, u64>(arg0)
+			}),
 			Self::Decimal(arg0) => f.debug_tuple("Decimal").field(arg0).finish(),
 		}
 	}
@@ -576,7 +578,11 @@ impl Number {
 
 impl Eq for Number {}
 
-// const MAX_DECIMAL_IN_F64: f64 = 79228162514264337593543950336f64;
+// Lowest positive decimal is 0.0000000000000000000000000001 (10^-28)
+const DECIMAL_PRECISION_THREASHOLD: f64 = 1e-28;
+// const DECIMAL_MAX: f64 = 79228162514264337593543950336;
+
+// Because of
 
 impl Ord for Number {
 	fn cmp(&self, other: &Self) -> Ordering {
@@ -596,9 +602,9 @@ impl Ord for Number {
 			(Number::Decimal(v), Number::Decimal(w)) => v.cmp(w),
 			// ------------------------------
 			(Number::Int(v), Number::Float(w)) => {
-				if w > &(i64::MAX as f64) {
+				if w >= &(i64::MAX as f64) {
 					Ordering::Less
-				} else if w < &(i64::MIN as f64) {
+				} else if w <= &(i64::MIN as f64) {
 					Ordering::Greater
 				} else {
 					match (v.cmp(&(*w as i64)), w.fract() == 0.0, w.is_positive()) {
@@ -607,7 +613,7 @@ impl Ord for Number {
 						(Ordering::Equal, false, true) => Ordering::Less,
 						// eg -1 cmp -1.1 should be greater
 						(Ordering::Equal, false, false) => Ordering::Greater,
-						(c, false, _) => c,
+						(c @ Ordering::Greater | c @ Ordering::Less, false, _) => c,
 					}
 				}
 			}
@@ -639,12 +645,33 @@ impl Ord for Number {
 			// 	}
 			// }
 			(Number::Float(v), Number::Decimal(w)) => {
-				if let Some(v) = Decimal::from_f64_retain(*v) {
-					Decimal::cmp(&v, &w) // in range
-				} else if v.is_sign_positive() {
-					Ordering::Greater // inf, +NaN, pos overflow
+				if *v == 0.0 && w == &Decimal::ZERO {
+					Ordering::Equal
+				} else if v.abs() < DECIMAL_PRECISION_THREASHOLD {
+					if v.is_positive() {
+						if w > &Decimal::ZERO {
+							Ordering::Less
+						} else {
+							Ordering::Greater
+						}
+					} else {
+						if w < &Decimal::ZERO {
+							Ordering::Greater
+						} else {
+							Ordering::Less
+						}
+					}
 				} else {
-					Ordering::Less // -inf, -NaN, neg overflow
+					// TODO: remove the filter after https://github.com/paupino/rust-decimal/pull/678 is released
+					if let Some(v) = Decimal::from_f64_retain(*v)
+						.filter(|_| v.abs() < 79228162514264337593543950336.0)
+					{
+						Decimal::cmp(&v, &w) // in range
+					} else if v.is_sign_positive() {
+						Ordering::Greater // inf, +NaN, pos overflow
+					} else {
+						Ordering::Less // -inf, -NaN, neg overflow
+					}
 				}
 			}
 			(Number::Decimal(v), Number::Float(w)) => {
@@ -1031,6 +1058,8 @@ mod tests {
 
 	#[test]
 	fn ord_fuzz() {
+		// fails:
+		// Int(9223372036854775807) Float(9223372036854776000 | 9.223372036854776e18 | 100001111100000000000000000000000000000000000000000000000000000) Decimal(9223372036854775808)
 		fn random_number() -> Number {
 			let mut rng = thread_rng();
 			match rng.gen_range(0..3) {
@@ -1076,12 +1105,18 @@ mod tests {
 			}
 		}
 
-		fn assert_consistent(a: Number, b: Number, c: Number) {
+		fn assert_partial_ord(x: Number, y: Number) {
 			// PartialOrd requirements
-			assert_eq!(a == b, a.partial_cmp(&b) == Some(Ordering::Equal), "{a:?} {b:?}");
+			assert_eq!(x == y, x.partial_cmp(&y) == Some(Ordering::Equal), "{x:?} {y:?}");
 
 			// Ord consistent with PartialOrd
-			assert_eq!(a.partial_cmp(&b), Some(a.cmp(&b)), "{a:?} {b:?}");
+			assert_eq!(x.partial_cmp(&y), Some(x.cmp(&y)), "{x:?} {y:?}");
+		}
+
+		fn assert_consistent(a: Number, b: Number, c: Number) {
+			assert_partial_ord(a, b);
+			assert_partial_ord(b, c);
+			assert_partial_ord(c, a);
 
 			// Transitive property (without the fix, these can fail)
 			if a == b && b == c {
