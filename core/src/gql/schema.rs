@@ -152,12 +152,20 @@ pub async fn generate_schema(
 			}
 		)
 			.description("Sign in with scoped user access")
-			.argument(InputValue::new(
-				"access",
-				TypeRef::named_nn(TypeRef::STRING))
+			.argument(
+				InputValue::new(
+					"access",
+					TypeRef::named_nn(TypeRef::STRING)
+				)
 				.description("Name of the access for authentication")
 			)
-			.argument(InputValue::new("arguments", TypeRef::named_nn("object")))
+			.argument(
+				InputValue::new(
+					"arguments",
+					TypeRef::named_nn("object")
+				)
+				.description("Arguments to send to the Acess")
+			)
 	);
 
 	mutation.field(
@@ -167,9 +175,42 @@ pub async fn generate_schema(
 			move | ctx: ResolverContext | {
 				// The session already has Access
 				if auth_session.ac.is_some() { return FieldValue::from(GqlValue::Null);  }
+
+				let args = ctx.args.as_index_map();
+
+				let access = args.get("access").expect("No access provided");
+				let arguments = args.get("arguments");
+
+				vals.insert("DB", auth_session.db);
+				vals.insert("NS", auth_session.ns);
+				vals.insert("AC", access.into());
+
+				let out: Object = crate::iam::signup::signup(auth_kvs, &mut auth_session, arguments.into())
+					.await
+					.map(Into::into)
+					.map_err(Into::into);
+
+				FieldFuture::new(async move {
+					Ok(Some(FieldValue::owned_any(GqlValue::from(out))
+						.with_type(TypeRef::named("AccessResponse"))))
+				})
 			}
 		)
 		.description("Sign up for scoped user access")
+		.argument(
+			InputValue::new(
+				"access",
+				TypeRef::named_nn(TypeRef::STRING)
+			)
+			.description("Name of the access for authentication")
+		)
+		.argument(
+			InputValue::new(
+				"arguments",
+				TypeRef::named_nn("object")
+			)
+			.description("Arguments to send to the Acess")
+		)
 	);
 
 	if tbs.len() == 0 {
