@@ -471,11 +471,20 @@ pub async fn generate_schema(
 			table_filter = table_filter
 				.field(InputValue::new(fd.name.to_string(), TypeRef::named(type_filter_name)));
 
-			table_ty_obj = table_ty_obj.field(Field::new(
-				fd.name.to_string(),
-				fd_type,
-				make_table_field_resolver(fd_name.as_str(), fd.kind.clone()),
-			));
+			table_ty_obj = table_ty_obj
+				.field(Field::new(
+					fd.name.to_string(),
+					fd_type,
+					make_table_field_resolver(fd_name.as_str(), fd.kind.clone()),
+				))
+				.description(format!(
+					"{}",
+					if let Some(ref c) = fd.comment {
+						format!("{c}")
+					} else {
+						"".to_string()
+					}
+				));
 		}
 
 		types.push(Type::Object(table_ty_obj));
