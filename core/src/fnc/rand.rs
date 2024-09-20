@@ -3,7 +3,7 @@ use crate::err::Error;
 use crate::sql::uuid::Uuid;
 use crate::sql::value::Value;
 use crate::sql::Datetime;
-use chrono::{DateTime, TimeZone, Utc};
+use chrono::{TimeZone, Utc};
 use nanoid::nanoid;
 use rand::distributions::{Alphanumeric, DistString};
 use rand::prelude::IteratorRandom;
