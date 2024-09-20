@@ -1025,3 +1025,19 @@ async fn field_definition_flexible_array_any() -> Result<(), Error> {
 	)?;
 	Ok(())
 }
+
+#[tokio::test]
+async fn field_definition_on_global_update() -> Result<(), Error> {
+	let sql = "
+		DEFINE TABLE review TYPE RELATION IN person OUT product;
+		DEFINE TABLE avg_product_review AS SELECT count() AS number_of_reviews, math::mean(<float> rating) AS avg_review, ->product.id AS product_id, ->product.name AS product_name FROM review GROUP BY product_id, product_name;
+		DEFINE FIELD id ON avg_product_review TYPE record<avg_product_review>;
+		CREATE person:1 SET name = 'Foo';
+		CREATE product:1 SET name = 'T-Shirt';
+		RELATE person:1->review->product:1 SET rating=5, review_text = 'Top notch';
+		UPDATE review;
+	";
+	let mut t = Test::new(sql).await?;
+	t.skip_ok(7)?;
+	Ok(())
+}
