@@ -3503,24 +3503,17 @@ dependencies = [
 
 [[package]]
 name = "nanoservices-utils"
-version = "0.1.4"
+version = "0.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c6a95cdb2ba5dc6584099b1aac8da0a6f80e12ad5f9381a19d232c1fee714793"
+checksum = "63a4117f6ebfcfe84722ef283fd6e3bfcaa141718f3ff092343bb6cb98482e03"
 dependencies = [
- "actix-web",
- "bincode",
  "bitcode",
- "bytes",
  "chrono",
  "futures",
- "jsonwebtoken",
  "paste",
  "revision 0.7.1",
  "serde",
- "serde_json",
  "thiserror",
- "tokio",
- "tokio-util",
 ]
 
 [[package]]
@@ -5990,9 +5983,9 @@ dependencies = [
 
 [[package]]
 name = "surrealcs"
-version = "0.3.1"
+version = "0.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "457eb2adc59f9a9ba337e1fa3a6af63e09524e4adf01921b9d7079917cd7f694"
+checksum = "b28a50184a9a743ac180985d8b94ac4c93e4afaa0140f1057d3b11d4d36b9e8b"
 dependencies = [
  "bincode",
  "bytes",
@@ -6011,9 +6004,9 @@ dependencies = [
 
 [[package]]
 name = "surrealcs-kernel"
-version = "0.3.1"
+version = "0.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f4a79da58bfc886b93a431a463f956184d4b0a9d3672833544a1b718ff86b0df"
+checksum = "ab2a5ba4af373b48fa241a81676d0172fc92e563df217282c472252b90beafee"
 dependencies = [
  "bincode",
  "chrono",
