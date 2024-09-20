@@ -390,7 +390,7 @@ impl<'a> Executor<'a> {
 								let can_return = matches!(
 									stm,
 									Statement::Output(_)
-										| Statement::Value(_) | Statement::IfElse(_)
+										| Statement::Value(_) | Statement::Ifelse(_)
 										| Statement::Foreach(_)
 								);
 								// Catch global timeout
