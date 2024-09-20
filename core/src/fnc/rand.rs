@@ -155,7 +155,7 @@ pub fn ulid((timestamp,): (Option<Datetime>,)) -> Result<Value, Error> {
 	let ulid = match timestamp {
 		Some(timestamp) => {
 			#[cfg(target_arch = "wasm32")]
-			if timestamp.0 < wasmtimer::std::UNIX_EPOCH {
+			if timestamp.0 < chrono::DateTime::UNIX_EPOCH {
 				return Err(Error::InvalidArguments {
 					name: String::from("rand::ulid"),
 					message: format!(
@@ -176,7 +176,7 @@ pub fn uuid((timestamp,): (Option<Datetime>,)) -> Result<Value, Error> {
 	let uuid = match timestamp {
 		Some(timestamp) => {
 			#[cfg(target_arch = "wasm32")]
-			if timestamp.0 < wasmtimer::std::UNIX_EPOCH {
+			if timestamp.0 < chrono::DateTime::UNIX_EPOCH {
 				return Err(Error::InvalidArguments {
 					name: String::from("rand::ulid"),
 					message: format!(
@@ -207,7 +207,7 @@ pub mod uuid {
 		let uuid = match timestamp {
 			Some(timestamp) => {
 				#[cfg(target_arch = "wasm32")]
-				if timestamp.0 < wasmtimer::std::UNIX_EPOCH {
+				if timestamp.0 < chrono::DateTime::UNIX_EPOCH {
 					return Err(Error::InvalidArguments {
 						name: String::from("rand::ulid"),
 						message: format!(
