@@ -241,10 +241,10 @@ impl ops::Add for Duration {
 impl TryAdd for Duration {
 	type Output = Self;
 	fn try_add(self, other: Self) -> Result<Self, Error> {
-		match self.0.checked_add(other.0) {
-			Some(v) => Ok(Duration::from(v)),
-			None => Err(Error::ArithmeticOverflow(format!("{self} + {other}"))),
-		}
+		self.0
+			.checked_add(other.0)
+			.ok_or_else(|| Error::ArithmeticOverflow(format!("{self} + {other}")))
+			.map(Duration::from)
 	}
 }
 
@@ -261,10 +261,10 @@ impl<'a, 'b> ops::Add<&'b Duration> for &'a Duration {
 impl<'a, 'b> TryAdd<&'b Duration> for &'a Duration {
 	type Output = Duration;
 	fn try_add(self, other: &'b Duration) -> Result<Duration, Error> {
-		match self.0.checked_add(other.0) {
-			Some(v) => Ok(Duration::from(v)),
-			None => Err(Error::ArithmeticOverflow(format!("{self} + {other}"))),
-		}
+		self.0
+			.checked_add(other.0)
+			.ok_or_else(|| Error::ArithmeticOverflow(format!("{self} + {other}")))
+			.map(Duration::from)
 	}
 }
 
@@ -281,10 +281,10 @@ impl ops::Sub for Duration {
 impl TrySub for Duration {
 	type Output = Self;
 	fn try_sub(self, other: Self) -> Result<Self, Error> {
-		match self.0.checked_sub(other.0) {
-			Some(v) => Ok(Duration::from(v)),
-			None => Err(Error::ArithmeticOverflow(format!("{self} - {other}"))),
-		}
+		self.0
+			.checked_sub(other.0)
+			.ok_or_else(|| Error::ArithmeticOverflow(format!("{self} - {other}")))
+			.map(Duration::from)
 	}
 }
 
@@ -301,10 +301,10 @@ impl<'a, 'b> ops::Sub<&'b Duration> for &'a Duration {
 impl<'a, 'b> TrySub<&'b Duration> for &'a Duration {
 	type Output = Duration;
 	fn try_sub(self, other: &'b Duration) -> Result<Duration, Error> {
-		match self.0.checked_sub(other.0) {
-			Some(v) => Ok(Duration::from(v)),
-			None => Err(Error::ArithmeticOverflow(format!("{self} - {other}"))),
-		}
+		self.0
+			.checked_sub(other.0)
+			.ok_or_else(|| Error::ArithmeticOverflow(format!("{self} - {other}")))
+			.map(Duration::from)
 	}
 }
 

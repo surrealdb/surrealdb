@@ -114,9 +114,9 @@ impl ops::Sub<Self> for Datetime {
 impl TrySub for Datetime {
 	type Output = Duration;
 	fn try_sub(self, other: Self) -> Result<Duration, Error> {
-		match (self.0 - other.0).to_std() {
-			Ok(d) => Ok(Duration::from(d)),
-			Err(_) => Err(Error::ArithmeticOverflow(format!("{self} - {other}"))),
-		}
+		(self.0 - other.0)
+			.to_std()
+			.map_err(|_| Error::ArithmeticOverflow(format!("{self} - {other}")))
+			.map(Duration::from)
 	}
 }
