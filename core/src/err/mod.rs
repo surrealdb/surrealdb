@@ -1149,6 +1149,9 @@ pub enum Error {
 
 	#[error("Found a non-computed value where they are not allowed")]
 	NonComputed,
+
+	#[error("Size of query script exceeded maximum supported size of 4,294,967,295 bytes.")]
+	QueryTooLarge,
 }
 
 impl From<Error> for String {
