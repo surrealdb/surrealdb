@@ -613,19 +613,11 @@ impl Ord for Number {
 			(Number::Decimal(v), Number::Decimal(w)) => v.cmp(w),
 			// ------------------------------
 			(Number::Int(v), Number::Float(w)) => {
-				if w >= &(i64::MAX as f64) {
-					Ordering::Less
-				} else if w <= &(i64::MIN as f64) {
-					Ordering::Greater
-				} else {
-					match (v.cmp(&(*w as i64)), w.fract() == 0.0, w.is_positive()) {
-						(c, true, _) => c,
-						// eg 1 cmp 1.1 should be less
-						(Ordering::Equal, false, true) => Ordering::Less,
-						// eg -1 cmp -1.1 should be greater
-						(Ordering::Equal, false, false) => Ordering::Greater,
-						(c @ Ordering::Greater | c @ Ordering::Less, false, _) => c,
-					}
+				let l = *v as i128;
+				let r = *w as i128;
+				match l.cmp(&r) {
+					Ordering::Equal => w.fract().total_cmp(&0.0),
+					ordering => ordering,
 				}
 			}
 			(v @ Number::Float(_), w @ Number::Int(_)) => w.cmp(v).reverse(),
