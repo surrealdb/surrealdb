@@ -1151,7 +1151,7 @@ pub enum Error {
 	NonComputed,
 
 	/// Represents a failure in timestamp arithmetic related to database internals
-	#[error("Failed to compute: \"{0}\", but one or both operands are too big.")]
+	#[error("Failed to compute: \"{0}\", as the operation results in an overflow.")]
 	ArithmeticOverflow(String),
 }
 
