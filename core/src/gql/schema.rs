@@ -409,7 +409,7 @@ pub async fn generate_schema(
 									return Err(internal_error(
 										"Schema validation failed: No id found in _get_",
 									)
-										.into());
+									.into());
 								}
 							};
 							let thing = match id.clone().try_into() {
@@ -428,15 +428,15 @@ pub async fn generate_schema(
 					})
 				},
 			)
-				.description(format!(
-					"{}",
-					if let Some(ref c) = &tb.comment {
-						format!("{c}")
-					} else {
-						format!("Generated from table `{}`\nallows querying a single record in a table by ID", tb.name)
-					}
-				))
-				.argument(id_input!()),
+			.description(format!(
+				"{}",
+				if let Some(ref c) = &tb.comment {
+					format!("{c}")
+				} else {
+					format!("Generated from table `{}`\nallows querying a single record in a table by ID", tb.name)
+				}
+			))
+			.argument(id_input!()),
 		);
 
 		let mut table_ty_obj = Object::new(tb.name.to_string())
