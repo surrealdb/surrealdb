@@ -9,6 +9,8 @@ use rand::distributions::{Alphanumeric, DistString};
 use rand::prelude::IteratorRandom;
 use rand::Rng;
 use ulid::Ulid;
+#[cfg(target_arch = "wasm32")]
+use wasmtimer::std::UNIX_EPOCH;
 
 pub fn rand(_: ()) -> Result<Value, Error> {
 	Ok(rand::random::<f64>().into())
@@ -155,11 +157,11 @@ pub fn ulid((timestamp,): (Option<Datetime>,)) -> Result<Value, Error> {
 	let ulid = match timestamp {
 		Some(timestamp) => {
 			#[cfg(target_arch = "wasm32")]
-			if timestamp.0 < DateTime::UNIX_EPOCH {
+			if timestamp.0 < UNIX_EPOCH {
 				return Err(Error::InvalidArguments {
 					name: String::from("rand::ulid"),
 					message: format!(
-						"To generate a ULID from a datetime, it must be a time beyond EPOCH."
+						"To generate a ULID from a datetime, it must be a time beyond UNIX epoch."
 					),
 				});
 			}
@@ -176,11 +178,11 @@ pub fn uuid((timestamp,): (Option<Datetime>,)) -> Result<Value, Error> {
 	let uuid = match timestamp {
 		Some(timestamp) => {
 			#[cfg(target_arch = "wasm32")]
-			if timestamp.0 < DateTime::UNIX_EPOCH {
+			if timestamp.0 < UNIX_EPOCH {
 				return Err(Error::InvalidArguments {
 					name: String::from("rand::ulid"),
 					message: format!(
-						"To generate a ULID from a datetime, it must be a time beyond EPOCH."
+						"To generate a ULID from a datetime, it must be a time beyond UNIX epoch."
 					),
 				});
 			}
@@ -207,11 +209,11 @@ pub mod uuid {
 		let uuid = match timestamp {
 			Some(timestamp) => {
 				#[cfg(target_arch = "wasm32")]
-				if timestamp.0 < DateTime::UNIX_EPOCH {
+				if timestamp.0 < UNIX_EPOCH {
 					return Err(Error::InvalidArguments {
 						name: String::from("rand::ulid"),
 						message: format!(
-							"To generate a ULID from a datetime, it must be a time beyond EPOCH."
+							"To generate a ULID from a datetime, it must be a time beyond UNIX epoch."
 						),
 					});
 				}
