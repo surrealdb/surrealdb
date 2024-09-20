@@ -88,3 +88,14 @@ CREATE person CONTENT { foo:'bar'};
 "#;
 	parse(q).unwrap_err();
 }
+
+#[test]
+fn test_excessive_size() {
+	let mut q = String::new();
+	q.reserve_exact(u32::MAX as usize + 40);
+	for _ in 0..u32::MAX {
+		q.push(' ');
+	}
+	q.push_str("RETURN 1;");
+	parse(&q).unwrap_err();
+}
