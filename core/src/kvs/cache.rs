@@ -43,7 +43,7 @@ impl Weighter<Key, Entry> for EntryWeighter {
 	}
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 #[non_exhaustive]
 pub(super) enum Entry {
 	/// A cached entry of any type
@@ -96,6 +96,8 @@ pub(super) enum Entry {
 	Ixs(Arc<[DefineIndexStatement]>),
 	/// A slice of LiveStatement specified on a table.
 	Lvs(Arc<[LiveStatement]>),
+	/// A u32 representing a graph count.
+	Grc(Arc<u32>),
 }
 
 impl Entry {
@@ -299,6 +301,14 @@ impl Entry {
 		match self {
 			Entry::Val(v) => Ok(v),
 			_ => Err(fail!("Unable to convert type into Entry::Val")),
+		}
+	}
+	/// Converts this cache entry into a single [`u32`].
+	/// This panics if called on a cache entry that is not an [`Entry::Grc`].
+	pub(super) fn try_into_grc(self) -> Result<Arc<u32>, Error> {
+		match self {
+			Entry::Grc(v) => Ok(v),
+			_ => Err(fail!("Unable to convert type into Entry::Grc")),
 		}
 	}
 }

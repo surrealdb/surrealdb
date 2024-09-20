@@ -23,10 +23,12 @@ impl Document {
 		let txn = ctx.tx();
 		// Get the record id
 		let rid = self.id()?;
+		// Get the namespace and database
+		let (ns, db) = (opt.ns()?, opt.db()?);
 		// Store the record data
-		let key = crate::key::thing::new(opt.ns()?, opt.db()?, &rid.tb, &rid.id);
+		let key = crate::key::thing::new(ns, db, &rid.tb, &rid.id);
 		// Match the statement type
-		match stm {
+		let create_graph_count = match stm {
 			// This is a INSERT statement so try to insert the key.
 			// For INSERT statements we don't first check for the
 			// entry from the storage engine, so when we attempt
@@ -45,7 +47,7 @@ impl Document {
 					// Return any other received error
 					Err(e) => Err(e),
 					// Record creation worked fine
-					Ok(v) => Ok(v),
+					Ok(_) => Ok(true),
 				}
 			}
 			// This is a UPSERT statement so try to insert the key.
@@ -63,7 +65,7 @@ impl Document {
 					// Return any other received error
 					Err(e) => Err(e),
 					// Record creation worked fine
-					Ok(v) => Ok(v),
+					Ok(_) => Ok(true),
 				}
 			}
 			// This is a CREATE statement so try to insert the key.
@@ -81,12 +83,19 @@ impl Document {
 					// Return any other received error
 					Err(e) => Err(e),
 					// Record creation worked fine
-					Ok(v) => Ok(v),
+					Ok(_) => Ok(true),
 				}
 			}
 			// Let's update the stored value for the specified key
-			_ => txn.set(key, self, None).await,
+			_ => {
+				txn.set(key, self, None).await?;
+				Ok(false)
+			}
 		}?;
+		// Set initial graph count for new records
+		if create_graph_count {
+			txn.set_graph_count(ns, db, &rid.tb, &rid.id, 0).await?;
+		}
 		// Carry on
 		Ok(())
 	}

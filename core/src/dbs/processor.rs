@@ -537,22 +537,35 @@ impl<'a> Processor<'a> {
 		let db = opt.db()?;
 		let tb = &e.from.tb;
 		let id = &e.from.id;
+
+		// Get the transaction
+		let txn = ctx.tx();
+		// Check that the table exists
+		txn.check_ns_db_tb(ns, db, tb, opt.strict).await?;
+
+		// Get the graph count
+		let count = txn.get_graph_count(ns, db, tb, id).await?;
+		// println!("gc: {:?}", count);
+		if count.is_some_and(|v| *v == 0) {
+			return Ok(());
+		}
+
 		// Fetch start and end key pairs
 		let keys = match e.what.len() {
 			0 => match e.dir {
 				// /ns/db/tb/id
 				Dir::Both => {
-					vec![(graph::prefix(ns, db, tb, id), graph::suffix(ns, db, tb, id))]
+					vec![(graph::edge::prefix(ns, db, tb, id), graph::edge::suffix(ns, db, tb, id))]
 				}
 				// /ns/db/tb/id/IN
 				Dir::In => vec![(
-					graph::egprefix(ns, db, tb, id, &e.dir),
-					graph::egsuffix(ns, db, tb, id, &e.dir),
+					graph::edge::egprefix(ns, db, tb, id, &e.dir),
+					graph::edge::egsuffix(ns, db, tb, id, &e.dir),
 				)],
 				// /ns/db/tb/id/OUT
 				Dir::Out => vec![(
-					graph::egprefix(ns, db, tb, id, &e.dir),
-					graph::egsuffix(ns, db, tb, id, &e.dir),
+					graph::edge::egprefix(ns, db, tb, id, &e.dir),
+					graph::edge::egsuffix(ns, db, tb, id, &e.dir),
 				)],
 			},
 			_ => match e.dir {
@@ -563,8 +576,8 @@ impl<'a> Processor<'a> {
 					.map(|v| v.0.to_owned())
 					.map(|v| {
 						(
-							graph::ftprefix(ns, db, tb, id, &e.dir, &v),
-							graph::ftsuffix(ns, db, tb, id, &e.dir, &v),
+							graph::edge::ftprefix(ns, db, tb, id, &e.dir, &v),
+							graph::edge::ftsuffix(ns, db, tb, id, &e.dir, &v),
 						)
 					})
 					.collect::<Vec<_>>(),
@@ -575,8 +588,8 @@ impl<'a> Processor<'a> {
 					.map(|v| v.0.to_owned())
 					.map(|v| {
 						(
-							graph::ftprefix(ns, db, tb, id, &e.dir, &v),
-							graph::ftsuffix(ns, db, tb, id, &e.dir, &v),
+							graph::edge::ftprefix(ns, db, tb, id, &e.dir, &v),
+							graph::edge::ftsuffix(ns, db, tb, id, &e.dir, &v),
 						)
 					})
 					.collect::<Vec<_>>(),
@@ -588,22 +601,18 @@ impl<'a> Processor<'a> {
 					.flat_map(|v| {
 						vec![
 							(
-								graph::ftprefix(ns, db, tb, id, &Dir::In, &v),
-								graph::ftsuffix(ns, db, tb, id, &Dir::In, &v),
+								graph::edge::ftprefix(ns, db, tb, id, &Dir::In, &v),
+								graph::edge::ftsuffix(ns, db, tb, id, &Dir::In, &v),
 							),
 							(
-								graph::ftprefix(ns, db, tb, id, &Dir::Out, &v),
-								graph::ftsuffix(ns, db, tb, id, &Dir::Out, &v),
+								graph::edge::ftprefix(ns, db, tb, id, &Dir::Out, &v),
+								graph::edge::ftsuffix(ns, db, tb, id, &Dir::Out, &v),
 							),
 						]
 					})
 					.collect::<Vec<_>>(),
 			},
 		};
-		// Get the transaction
-		let txn = ctx.tx();
-		// Check that the table exists
-		txn.check_ns_db_tb(opt.ns()?, opt.db()?, tb, opt.strict).await?;
 		// Loop over the chosen edge types
 		for (beg, end) in keys.into_iter() {
 			// Create a new iterable range
@@ -617,7 +626,7 @@ impl<'a> Processor<'a> {
 				// Parse the key from the result
 				let key = res?.0;
 				// Parse the data from the store
-				let gra: graph::Graph = graph::Graph::decode(&key)?;
+				let gra: graph::edge::GraphEdge = graph::edge::GraphEdge::decode(&key)?;
 				// Fetch the data from the store
 				let key = thing::new(opt.ns()?, opt.db()?, gra.ft, &gra.fk);
 				let val = txn.get(key, None).await?;

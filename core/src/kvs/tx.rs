@@ -1700,4 +1700,118 @@ impl Transaction {
 		}
 		.try_into_type()
 	}
+
+	/// Get the graph count for a given graph.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
+	pub async fn get_graph_count(
+		&self,
+		ns: &str,
+		db: &str,
+		tb: &str,
+		id: &Id,
+	) -> Result<Option<Arc<u32>>, Error> {
+		let key = crate::key::graph::count::new(ns, db, tb, id);
+		let enc = crate::key::graph::count::new(ns, db, tb, id).encode()?;
+		let res = self.cache.get_value_or_guard_async(&enc).await;
+		match res {
+			Ok(val) => Ok(Some(val.try_into_grc()?)),
+			Err(cache) => match self.get(&key, None).await? {
+				Some(v) => match v.try_into() {
+					Ok(bin) => {
+						let val: Arc<u32> = Arc::new(u32::from_be_bytes(bin).into());
+						let ent = Entry::Grc(val.clone());
+						let _ = cache.insert(ent);
+						Ok(Some(val))
+					}
+					_ => return Err(Error::Unreachable("Failed to decode u32".to_string())),
+				},
+				None => Ok(None),
+			},
+		}
+	}
+
+	/// Set the graph count for a given graph.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
+	pub async fn set_graph_count(
+		&self,
+		ns: &str,
+		db: &str,
+		tb: &str,
+		id: &Id,
+		count: u32,
+	) -> Result<(), Error> {
+		let key = crate::key::graph::count::new(ns, db, tb, id);
+		let enc = crate::key::graph::count::new(ns, db, tb, id).encode()?;
+		// encode the value
+		let val = count.to_be_bytes().to_vec();
+		// Set the value in the datastore
+		self.set(&key, val, None).await?;
+		// Set the value in the cache
+		self.cache.insert(enc, Entry::Grc(Arc::new(count)));
+		// Return nothing
+		Ok(())
+	}
+
+	// /// Set the graph count for a given graph.
+	// #[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
+	// pub async fn del_graph_count(
+	// 	&self,
+	// 	ns: &str,
+	// 	db: &str,
+	// 	tb: &str,
+	// 	id: &Id,
+	// ) -> Result<(), Error> {
+	// 	let key = crate::key::graph::count::new(ns, db, tb, id);
+	// 	let enc = crate::key::graph::count::new(ns, db, tb, id).encode()?;
+	// 	// Set the value in the datastore
+	// 	self.del(&key).await?;
+	// 	// Set the value in the cache
+	// 	self.cache.remove(enc);
+	// 	// Return nothing
+	// 	Ok(())
+	// }
+
+	/// Set the graph count for a given graph, if it exists.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
+	pub async fn modify_graph_count(
+		&self,
+		ns: &str,
+		db: &str,
+		tb: &str,
+		id: &Id,
+		modifier: u32,
+	) -> Result<(), Error> {
+		let key = crate::key::graph::count::new(ns, db, tb, id);
+		let enc = crate::key::graph::count::new(ns, db, tb, id).encode()?;
+		let res = self.cache.get_value_or_guard_async(&enc).await;
+		let count = match res {
+			Ok(val) => Some(val.try_into_grc()?),
+			Err(cache) => match self.get(&key, None).await? {
+				Some(v) => match v.try_into() {
+					Ok(bin) => {
+						let val: Arc<u32> = Arc::new(u32::from_be_bytes(bin).into());
+						let ent = Entry::Grc(val.clone());
+						let _ = cache.insert(ent);
+						Some(val)
+					}
+					_ => return Err(Error::Unreachable("Failed to decode u32".to_string())),
+				},
+				None => None,
+			},
+		};
+
+		if let Some(count) = count {
+			// update the count
+			let count = *count + modifier;
+			// encode the value
+			let val = count.to_be_bytes().to_vec();
+			// Set the value in the datastore
+			self.set(&key, val, None).await?;
+			// Set the value in the cache
+			self.cache.insert(enc, Entry::Grc(Arc::new(count)));
+		}
+
+		// Return nothing
+		Ok(())
+	}
 }

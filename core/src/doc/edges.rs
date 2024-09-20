@@ -25,14 +25,16 @@ impl Document {
 		if tb.drop {
 			return Ok(());
 		}
-		// Get the transaction
-		let txn = ctx.tx();
-		// Lock the transaction
-		let mut txn = txn.lock().await;
 		// Get the record id
 		let rid = self.id()?;
 		// Store the record edges
 		if let Workable::Relate(l, r, _, _) = &self.extras {
+			// Get the transaction
+			let txn = ctx.tx();
+			// Lock the transaction
+			let mut txr = txn.lock().await;
+			// Get the namespace and database
+			let (ns, db) = (opt.ns()?, opt.db()?);
 			// For enforced relations, ensure that the edges exist
 			if matches!(
 				tb.kind,
@@ -59,17 +61,21 @@ impl Document {
 			// Get temporary edge references
 			let (ref o, ref i) = (Dir::Out, Dir::In);
 			// Store the left pointer edge
-			let key = crate::key::graph::new(opt.ns()?, opt.db()?, &l.tb, &l.id, o, &rid);
-			txn.set(key, vec![], None).await?;
+			let key = crate::key::graph::edge::new(ns, db, &l.tb, &l.id, o, &rid);
+			txr.set(key, vec![], None).await?;
 			// Store the left inner edge
-			let key = crate::key::graph::new(opt.ns()?, opt.db()?, &rid.tb, &rid.id, i, l);
-			txn.set(key, vec![], None).await?;
+			let key = crate::key::graph::edge::new(ns, db, &rid.tb, &rid.id, i, l);
+			txr.set(key, vec![], None).await?;
 			// Store the right inner edge
-			let key = crate::key::graph::new(opt.ns()?, opt.db()?, &rid.tb, &rid.id, o, r);
-			txn.set(key, vec![], None).await?;
+			let key = crate::key::graph::edge::new(ns, db, &rid.tb, &rid.id, o, r);
+			txr.set(key, vec![], None).await?;
 			// Store the right pointer edge
-			let key = crate::key::graph::new(opt.ns()?, opt.db()?, &r.tb, &r.id, i, &rid);
-			txn.set(key, vec![], None).await?;
+			let key = crate::key::graph::edge::new(ns, db, &r.tb, &r.id, i, &rid);
+			txr.set(key, vec![], None).await?;
+			// Drop the transaction
+			drop(txr);
+			// Modify the graphcount
+			txn.modify_graph_count(ns, db, &rid.tb, &rid.id, 1).await?;
 			// Store the edges on the record
 			self.current.doc.to_mut().put(&*EDGE, Value::Bool(true));
 			self.current.doc.to_mut().put(&*IN, l.clone().into());

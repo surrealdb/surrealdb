@@ -104,10 +104,10 @@ pub mod key {
 			}
 		}
 
-		pub fn fix(&self) -> Option<crate::key::graph::Graph> {
+		pub fn fix(&self) -> Option<crate::key::graph::edge::GraphEdge> {
 			let fixed = match (self.id.fix(), self.fk.fix()) {
 				(None, None) => return None,
-				(Some(id), None) => crate::key::graph::Graph::new_from_id(
+				(Some(id), None) => crate::key::graph::edge::GraphEdge::new_from_id(
 					self.ns,
 					self.db,
 					self.tb,
@@ -116,7 +116,7 @@ pub mod key {
 					self.ft,
 					NewId::from(self.fk.to_owned()),
 				),
-				(None, Some(fk)) => crate::key::graph::Graph::new_from_id(
+				(None, Some(fk)) => crate::key::graph::edge::GraphEdge::new_from_id(
 					self.ns,
 					self.db,
 					self.tb,
@@ -125,7 +125,7 @@ pub mod key {
 					self.ft,
 					fk,
 				),
-				(Some(id), Some(fk)) => crate::key::graph::Graph::new_from_id(
+				(Some(id), Some(fk)) => crate::key::graph::edge::GraphEdge::new_from_id(
 					self.ns,
 					self.db,
 					self.tb,

@@ -67,7 +67,9 @@
 ///
 /// crate::key::thing                    /*{ns}*{db}*{tb}*{id}
 ///
-/// crate::key::graph                    /*{ns}*{db}*{tb}~{id}{eg}{ft}{fk}
+/// crate::key::graph::all               /*{ns}*{db}*{tb}~{id}
+/// crate::key::graph::count             /*{ns}*{db}*{tb}~{id}!gc
+/// crate::key::graph::eg                /*{ns}*{db}*{tb}~{id}{eg}{ft}{fk}
 ///
 pub(crate) mod category;
 pub(crate) mod change;
