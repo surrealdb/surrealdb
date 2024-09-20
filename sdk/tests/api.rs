@@ -54,7 +54,7 @@ mod api_integration {
 		name: String,
 	}
 
-	#[derive(Debug, Clone, Deserialize, PartialEq, PartialOrd)]
+	#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, PartialOrd)]
 	struct RecordBuf {
 		id: RecordId,
 		name: String,
