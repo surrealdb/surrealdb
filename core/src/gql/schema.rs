@@ -22,7 +22,6 @@ use async_graphql::dynamic::{Scalar, TypeRef};
 use async_graphql::indexmap::IndexMap;
 use async_graphql::Name;
 use async_graphql::Value as GqlValue;
-use futures::executor::block_on;
 use rust_decimal::prelude::FromPrimitive;
 use rust_decimal::Decimal;
 use serde_json::Number;
@@ -147,7 +146,8 @@ pub async fn generate_schema<'request>(
 				vals.insert("AC".to_string(), access.clone());
 
 				let mut auth_sess = auth_session.clone();
-				let out = block_on(signin(&auth_kvs, &mut auth_sess, vals.into()))
+				let out = signin(&auth_kvs, &mut auth_sess, vals.into())
+					.await
 					.expect("Unauthorised authentication");
 
 				// The session already has Access
@@ -198,7 +198,8 @@ pub async fn generate_schema<'request>(
 					vals.insert("AC".to_string(), access.clone());
 
 					let mut auth_sess = auth_session.clone();
-					let out = block_on(signup(&auth_kvs, &mut auth_sess, vals.into()))
+					let out = signup(&auth_kvs, &mut auth_sess, vals.into())
+						.await
 						.expect("Unauthorised authentication")
 						.unwrap_or(String::from("NO TOKEN"));
 
