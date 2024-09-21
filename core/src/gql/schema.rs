@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::fmt::Display;
 use std::sync::Arc;
 
@@ -7,7 +7,7 @@ use crate::kvs::Datastore;
 use crate::sql::kind::Literal;
 use crate::sql::statements::define::config::graphql::TablesConfig;
 use crate::sql::statements::{DefineFieldStatement, SelectStatement};
-use crate::sql::{self, AccessType, Base, Table};
+use crate::sql::{self, Table};
 use crate::sql::{Cond, Fields};
 use crate::sql::{Expression, Geometry};
 use crate::sql::{Idiom, Kind};
@@ -18,6 +18,7 @@ use async_graphql::dynamic::{FieldFuture, InterfaceField};
 use async_graphql::dynamic::{InputObject, Object};
 use async_graphql::dynamic::{InputValue, Schema};
 use async_graphql::dynamic::{Scalar, TypeRef};
+// use async_graphql::futures_util::TryFutureExt;
 use async_graphql::indexmap::IndexMap;
 use async_graphql::Name;
 use async_graphql::Value as GqlValue;
@@ -34,7 +35,6 @@ use crate::gql::ext::{NamedContainer, TryAsExt};
 use crate::gql::utils::{GQLTx, GqlValueUtils};
 use crate::kvs::LockType;
 use crate::kvs::TransactionType;
-use crate::sql::statements::info::InfoStructure;
 use crate::sql::Value as SqlValue;
 
 type ErasedRecord = (GQLTx, Thing);
@@ -117,10 +117,10 @@ pub async fn generate_schema(
 
 	trace!(ns, db, ?tbs, "generating schema");
 
-	let access_response_type = Object::new("AccessResponse")
-		.field(Field::new("token", TypeRef::named_nn(TypeRef::STRING)));
+	let access_response_type = Interface::new("AccessResponse")
+		.field(InterfaceField::new("token", TypeRef::named_nn(TypeRef::STRING)));
 
-	let auth_kvs = datastore.clone();
+	let auth_kvs = &*datastore.clone();
 	let auth_session = session.to_owned();
 
 	mutation.field(
@@ -128,24 +128,38 @@ pub async fn generate_schema(
 			"signIn",
 			TypeRef::named("AccessResponse"),
 			move | ctx: ResolverContext | {
-				// The session already has Access
-				if auth_session.ac.is_some() { return FieldValue::from(GqlValue::Null);  }
-
 				let args = ctx.args.as_index_map();
 
-				let access = args.get("access").expect("No access provided");
+				let access = args.get("access")
+					.and_then(|v| Some(v.to_string()));
+
 				let arguments = args.get("arguments");
+
+				let vals = HashMap::new();
+
+				match arguments {
+					Some(GqlValue::Object(args_idx_map)) => {
+						args_idx_map.into_iter()
+							.map(| (key, value) | {
+								vals.insert(key.as_str(), Some(value.to_string()));
+							});
+					},
+					_ => {}
+				}
 
 				vals.insert("DB", auth_session.db);
 				vals.insert("NS", auth_session.ns);
 				vals.insert("AC", access.into());
 
-				let out: Object = crate::iam::signin::signin(auth_kvs, &mut auth_session, arguments.into())
-					.await
-					.map(Into::into)
-					.map_err(Into::into);
-
 				FieldFuture::new(async move {
+					// The session already has Access
+					if auth_session.ac.is_some() {
+						return Ok(Some(FieldValue::from(GqlValue::Null)));
+					}
+
+					let out = crate::iam::signin::signin(auth_kvs, &mut auth_session, vals.into())
+						.await;
+
 					Ok(Some(FieldValue::owned_any(GqlValue::from(out))
 						.with_type(TypeRef::named("AccessResponse"))))
 				})
@@ -164,54 +178,54 @@ pub async fn generate_schema(
 					"arguments",
 					TypeRef::named_nn("object")
 				)
-				.description("Arguments to send to the Acess")
+				.description("Arguments to send to the Access")
 			)
 	);
 
-	mutation.field(
-		Field::new(
-			"signUp",
-			TypeRef::named("AccessResponse"),
-			move | ctx: ResolverContext | {
-				// The session already has Access
-				if auth_session.ac.is_some() { return FieldValue::from(GqlValue::Null);  }
-
-				let args = ctx.args.as_index_map();
-
-				let access = args.get("access").expect("No access provided");
-				let arguments = args.get("arguments");
-
-				vals.insert("DB", auth_session.db);
-				vals.insert("NS", auth_session.ns);
-				vals.insert("AC", access.into());
-
-				let out: Object = crate::iam::signup::signup(auth_kvs, &mut auth_session, arguments.into())
-					.await
-					.map(Into::into)
-					.map_err(Into::into);
-
-				FieldFuture::new(async move {
-					Ok(Some(FieldValue::owned_any(GqlValue::from(out))
-						.with_type(TypeRef::named("AccessResponse"))))
-				})
-			}
-		)
-		.description("Sign up for scoped user access")
-		.argument(
-			InputValue::new(
-				"access",
-				TypeRef::named_nn(TypeRef::STRING)
-			)
-			.description("Name of the access for authentication")
-		)
-		.argument(
-			InputValue::new(
-				"arguments",
-				TypeRef::named_nn("object")
-			)
-			.description("Arguments to send to the Acess")
-		)
-	);
+	// mutation.field(
+	// 	Field::new(
+	// 		"signUp",
+	// 		TypeRef::named("AccessResponse"),
+	// 		move | ctx: ResolverContext | {
+	// 			// The session already has Access
+	// 			if auth_session.ac.is_some() { return FieldValue::from(GqlValue::Null);  }
+	//
+	// 			let args = ctx.args.as_index_map();
+	//
+	// 			let access = args.get("access").expect("No access provided");
+	// 			let arguments = args.get("arguments");
+	//
+	// 			vals.insert("DB", auth_session.db);
+	// 			vals.insert("NS", auth_session.ns);
+	// 			vals.insert("AC", access.into());
+	//
+	// 			let out: Object = crate::iam::signup::signup(auth_kvs, &mut auth_session, arguments.into())
+	// 				.await
+	// 				.map(Into::into)
+	// 				.map_err(Into::into);
+	//
+	// 			FieldFuture::new(async move {
+	// 				Ok(Some(FieldValue::owned_any(GqlValue::from(out))
+	// 					.with_type(TypeRef::named("AccessResponse"))))
+	// 			})
+	// 		}
+	// 	)
+	// 	.description("Sign up for scoped user access")
+	// 	.argument(
+	// 		InputValue::new(
+	// 			"access",
+	// 			TypeRef::named_nn(TypeRef::STRING)
+	// 		)
+	// 		.description("Name of the access for authentication")
+	// 	)
+	// 	.argument(
+	// 		InputValue::new(
+	// 			"arguments",
+	// 			TypeRef::named_nn("object")
+	// 		)
+	// 		.description("Arguments to send to the Acess")
+	// 	)
+	// );
 
 	if tbs.len() == 0 {
 		return Err(schema_error("no tables found in database"));
@@ -535,7 +549,10 @@ pub async fn generate_schema(
 
 	trace!("current Query object for schema: {:?}", query);
 
-	let mut schema = Schema::build("Query", None, None).register(query);
+	let mut schema = Schema::build("Query", Some("Mutation"), None)
+		.register(query)
+		.register(mutation);
+
 	for ty in types {
 		trace!("adding type: {ty:?}");
 		schema = schema.register(ty);
@@ -606,6 +623,7 @@ pub async fn generate_schema(
 		.field(InterfaceField::new("in", TypeRef::named_nn("record")))
 		.field(InterfaceField::new("out", TypeRef::named_nn("record")))
 		.implement("record");
+
 	schema = schema.register(relation_interface);
 
 	schema
