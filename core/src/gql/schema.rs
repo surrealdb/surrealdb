@@ -3,7 +3,7 @@ use std::fmt::Display;
 use std::sync::Arc;
 
 use crate::dbs::Session;
-use crate::iam::signin::signin;
+use crate::iam::{signin::signin, signup::signup};
 use crate::kvs::Datastore;
 use crate::sql::kind::Literal;
 use crate::sql::statements::define::config::graphql::TablesConfig;
@@ -121,13 +121,13 @@ pub async fn generate_schema<'request>(
 	// let access_response_type = Interface::new("AccessResponse")
 	// 	.field(InterfaceField::new("token", TypeRef::named_nn(TypeRef::STRING)));
 
-	let datastore_clone = datastore.clone();
-	let session_clone = session.clone();
+	let datastore_clone_1 = datastore.clone();
+	let session_clone_1 = session.clone();
 
 	mutation = mutation.field(
-		Field::new("signIn", TypeRef::named(TypeRef::STRING), move |ctx: ResolverContext| {
-			let auth_kvs = datastore_clone.clone();
-			let auth_session = session_clone.clone();
+		Field::new("signIn", TypeRef::named(TypeRef::STRING), move | ctx: ResolverContext | {
+			let auth_kvs = datastore_clone_1.clone();
+			let auth_session = session_clone_1.clone();
 			let args = ctx.args.as_index_map();
 
 			let access = args.get("access").and_then(|v| Some(v.to_string()));
@@ -169,50 +169,64 @@ pub async fn generate_schema<'request>(
 		),
 	);
 
-	// mutation.field(
-	// 	Field::new(
-	// 		"signUp",
-	// 		TypeRef::named("AccessResponse"),
-	// 		move | ctx: ResolverContext | {
-	// 			// The session already has Access
-	// 			if auth_session.ac.is_some() { return FieldValue::from(GqlValue::Null);  }
-	//
-	// 			let args = ctx.args.as_index_map();
-	//
-	// 			let access = args.get("access").expect("No access provided");
-	// 			let arguments = args.get("arguments");
-	//
-	// 			vals.insert("DB", auth_session.db);
-	// 			vals.insert("NS", auth_session.ns);
-	// 			vals.insert("AC", access.into());
-	//
-	// 			let out: Object = crate::iam::signup::signup(auth_kvs, &mut auth_session, arguments.into())
-	// 				.await
-	// 				.map(Into::into)
-	// 				.map_err(Into::into);
-	//
-	// 			FieldFuture::new(async move {
-	// 				Ok(Some(FieldValue::owned_any(GqlValue::from(out))
-	// 					.with_type(TypeRef::named("AccessResponse"))))
-	// 			})
-	// 		}
-	// 	)
-	// 	.description("Sign up for scoped user access")
-	// 	.argument(
-	// 		InputValue::new(
-	// 			"access",
-	// 			TypeRef::named_nn(TypeRef::STRING)
-	// 		)
-	// 		.description("Name of the access for authentication")
-	// 	)
-	// 	.argument(
-	// 		InputValue::new(
-	// 			"arguments",
-	// 			TypeRef::named_nn("object")
-	// 		)
-	// 		.description("Arguments to send to the Acess")
-	// 	)
-	// );
+	let datastore_clone_2 = datastore.clone();
+	let session_clone_2 = session.clone();
+
+	mutation = mutation.field(
+		Field::new(
+			"signUp",
+			TypeRef::named(TypeRef::STRING),
+			move | ctx: ResolverContext | {
+				let auth_kvs = datastore_clone_2.clone();
+				let auth_session = session_clone_2.clone();
+				let args = ctx.args.as_index_map();
+
+				let access = args.get("access").and_then(|v| Some(v.to_string()));
+				let arguments = args.get("arguments").cloned();
+
+				FieldFuture::new(async move {
+					let mut vals: HashMap<String, Option<String>> = HashMap::new();
+
+					if let Some(GqlValue::Object(args_idx_map)) = arguments {
+						for (key, value) in args_idx_map {
+							vals.insert(key.to_string(), Some(value.to_string()));
+						}
+					}
+
+					vals.insert("DB".to_string(), auth_session.db.clone());
+					vals.insert("NS".to_string(), auth_session.ns.clone());
+					vals.insert("AC".to_string(), access.clone());
+
+					let mut auth_sess = auth_session.clone();
+					let out = block_on(signup(&auth_kvs, &mut auth_sess, vals.into()))
+						.expect("Unauthorised authentication")
+						.unwrap_or(String::from("NO TOKEN"));
+
+					// The session already has Access
+					if auth_sess.ac.is_some() {
+						return Ok(Some(FieldValue::from(GqlValue::Null)));
+					}
+
+					Ok(Some(FieldValue::value(GqlValue::from(out))))
+				})
+			}
+		)
+		.description("Sign up for scoped user access")
+		.argument(
+			InputValue::new(
+				"access",
+				TypeRef::named_nn(TypeRef::STRING)
+			)
+			.description("Name of the access for authentication")
+		)
+		.argument(
+			InputValue::new(
+				"arguments",
+				TypeRef::named_nn("object")
+			)
+			.description("Arguments to send to the Access")
+		)
+	);
 
 	if tbs.len() == 0 {
 		return Err(schema_error("no tables found in database"));
