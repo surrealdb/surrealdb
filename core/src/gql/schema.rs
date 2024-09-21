@@ -3,6 +3,7 @@ use std::fmt::Display;
 use std::sync::Arc;
 
 use crate::dbs::Session;
+use crate::iam::signin::signin;
 use crate::kvs::Datastore;
 use crate::sql::kind::Literal;
 use crate::sql::statements::define::config::graphql::TablesConfig;
@@ -12,7 +13,6 @@ use crate::sql::{Cond, Fields};
 use crate::sql::{Expression, Geometry};
 use crate::sql::{Idiom, Kind};
 use crate::sql::{Statement, Thing};
-use crate::iam::{signin::signin};
 use async_graphql::dynamic::{Enum, FieldValue, ResolverContext, Type, Union};
 use async_graphql::dynamic::{Field, Interface};
 use async_graphql::dynamic::{FieldFuture, InterfaceField};
@@ -26,6 +26,7 @@ use futures::executor::block_on;
 use rust_decimal::prelude::FromPrimitive;
 use rust_decimal::Decimal;
 use serde_json::Number;
+use std::clone::Clone;
 
 use super::error::{resolver_error, GqlError};
 use super::ext::IntoExt;
@@ -112,46 +113,45 @@ pub async fn generate_schema<'request>(
 	};
 
 	let mut query = Object::new("Query");
-	let mut types: Vec<Type> = Vec::new();
-
 	let mut mutation = Object::new("Mutation");
+	let mut types: Vec<Type> = Vec::new();
 
 	trace!(ns, db, ?tbs, "generating schema");
 
 	// let access_response_type = Interface::new("AccessResponse")
 	// 	.field(InterfaceField::new("token", TypeRef::named_nn(TypeRef::STRING)));
 
+	let datastore_clone = datastore.clone();
+	let session_clone = session.clone();
+
 	mutation = mutation.field(
 		Field::new("signIn", TypeRef::named(TypeRef::STRING), move |ctx: ResolverContext| {
-			let auth_kvs = datastore.clone();
-			let auth_session = session.to_owned();
+			let auth_kvs = datastore_clone.clone();
+			let auth_session = session_clone.clone();
 			let args = ctx.args.as_index_map();
 
 			let access = args.get("access").and_then(|v| Some(v.to_string()));
-			let arguments = args.get("arguments");
-
-			let mut vals = HashMap::new();
-
-			match arguments {
-				Some(GqlValue::Object(args_idx_map)) => {
-					args_idx_map.into_iter().map(|(key, value)| {
-						vals.insert(key.as_str(), Some(value.to_string()));
-					});
-				}
-				_ => {}
-			}
-
-			vals.insert("DB", auth_session.db);
-			vals.insert("NS", auth_session.ns);
-			vals.insert("AC", access.into());
-
-			let mut auth_sess = session.to_owned();
-			let out = block_on(signin(&auth_kvs, &mut auth_sess, vals.into()))
-				.expect("Unauthorised authentication");
+			let arguments = args.get("arguments").cloned();
 
 			FieldFuture::new(async move {
+				let mut vals: HashMap<String, Option<String>> = HashMap::new();
+
+				if let Some(GqlValue::Object(args_idx_map)) = arguments {
+					for (key, value) in args_idx_map {
+						vals.insert(key.to_string(), Some(value.to_string()));
+					}
+				}
+
+				vals.insert("DB".to_string(), auth_session.db.clone());
+				vals.insert("NS".to_string(), auth_session.ns.clone());
+				vals.insert("AC".to_string(), access.clone());
+
+				let mut auth_sess = auth_session.clone();
+				let out = block_on(signin(&auth_kvs, &mut auth_sess, vals.into()))
+					.expect("Unauthorised authentication");
+
 				// The session already has Access
-				if session.clone().ac.is_some() {
+				if auth_sess.ac.is_some() {
 					return Ok(Some(FieldValue::from(GqlValue::Null)));
 				}
 
