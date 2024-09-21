@@ -56,6 +56,12 @@ impl From<HashMap<String, Option<String>>> for Object {
 	}
 }
 
+impl From<HashMap<String, String>> for Object {
+	fn from(v: HashMap<String, String>) -> Self {
+		Self(v.into_iter().map(|(key, val)| (key.to_string(), val.into())).collect())
+	}
+}
+
 impl From<Option<Self>> for Object {
 	fn from(v: Option<Self>) -> Self {
 		v.unwrap_or_default()

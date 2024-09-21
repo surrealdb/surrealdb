@@ -26,11 +26,8 @@ use rust_decimal::prelude::FromPrimitive;
 use rust_decimal::Decimal;
 use serde_json::Number;
 use std::clone::Clone;
-
 use super::error::{resolver_error, GqlError};
 use super::ext::IntoExt;
-#[cfg(debug_assertions)]
-use super::ext::ValidatorExt;
 use crate::gql::error::{internal_error, schema_error, type_error};
 use crate::gql::ext::{NamedContainer, TryAsExt};
 use crate::gql::utils::{GQLTx, GqlValueUtils};
@@ -129,21 +126,25 @@ pub async fn generate_schema<'request>(
 			let auth_session = session_clone_1.clone();
 			let args = ctx.args.as_index_map();
 
-			let access = args.get("access").and_then(|v| Some(v.to_string()));
+			let access = args.get("access").expect("Access unspecified").to_string();
 			let arguments = args.get("arguments").cloned();
 
 			FieldFuture::new(async move {
-				let mut vals: HashMap<String, Option<String>> = HashMap::new();
+				let mut vals: HashMap<String, String> = HashMap::new();
 
 				if let Some(GqlValue::Object(args_idx_map)) = arguments {
 					for (key, value) in args_idx_map {
-						vals.insert(key.to_string(), Some(value.to_string()));
+						vals.insert(key.to_string(), value.to_string());
 					}
 				}
 
-				vals.insert("DB".to_string(), auth_session.db.clone());
-				vals.insert("NS".to_string(), auth_session.ns.clone());
-				vals.insert("AC".to_string(), access.clone());
+				let auth_db = format!("{}", auth_session.db.clone().expect("Databases unspecified"));
+				let auth_ns = format!("{}", auth_session.ns.clone().expect("Namespace unspecified"));
+				let auth_ac = access.clone().trim_matches('"').to_string();
+
+				vals.insert("DB".to_string(), auth_db.clone());
+				vals.insert("NS".to_string(), auth_ns.clone());
+				vals.insert("AC".to_string(), auth_ac.clone());
 
 				let mut auth_sess = auth_session.clone();
 
@@ -155,7 +156,9 @@ pub async fn generate_schema<'request>(
 				signin(&auth_kvs, &mut auth_sess, vals.into())
 					.await
 					.map(| val | Some(FieldValue::value(GqlValue::from(val))))
-					.map_err(|_| { AsyncGraphQLError::new("Unauthorized authentication") })
+					.map_err(| err | { AsyncGraphQLError::new(
+						format!("signIn unsuccessful - {}", err))
+					})
 			})
 		})
 		.description("Sign in with scoped user access")
@@ -164,7 +167,7 @@ pub async fn generate_schema<'request>(
 				.description("Name of the access for authentication"),
 		)
 		.argument(
-			InputValue::new("arguments", TypeRef::named_nn("object"))
+			InputValue::new("arguments", TypeRef::named_nn("Object"))
 				.description("Arguments to send to the Access"),
 		),
 	);
@@ -178,21 +181,25 @@ pub async fn generate_schema<'request>(
 			let auth_session = session_clone_2.clone();
 			let args = ctx.args.as_index_map();
 
-			let access = args.get("access").and_then(|v| Some(v.to_string()));
+			let access = args.get("access").expect("Access unspecified").to_string();
 			let arguments = args.get("arguments").cloned();
 
 			FieldFuture::new(async move {
-				let mut vals: HashMap<String, Option<String>> = HashMap::new();
+				let mut vals: HashMap<String, String> = HashMap::new();
 
 				if let Some(GqlValue::Object(args_idx_map)) = arguments {
 					for (key, value) in args_idx_map {
-						vals.insert(key.to_string(), Some(value.to_string()));
+						vals.insert(key.to_string(), value.to_string());
 					}
 				}
 
-				vals.insert("DB".to_string(), auth_session.db.clone());
-				vals.insert("NS".to_string(), auth_session.ns.clone());
-				vals.insert("AC".to_string(), access.clone());
+				let auth_db = format!("{}", auth_session.db.clone().expect("Databases unspecified"));
+				let auth_ns = format!("{}", auth_session.ns.clone().expect("Namespace unspecified"));
+				let auth_ac = access.clone().trim_matches('"').to_string();
+
+				vals.insert("DB".to_string(), auth_db.clone());
+				vals.insert("NS".to_string(), auth_ns.clone());
+				vals.insert("AC".to_string(), auth_ac.clone());
 
 				let mut auth_sess = auth_session.clone();
 
@@ -208,7 +215,9 @@ pub async fn generate_schema<'request>(
 							GqlValue::from(val.unwrap_or(String::from("INVALID_TOKEN")))
 						)
 					))
-					.map_err(|_| { AsyncGraphQLError::new("signUp unsuccessful") })
+					.map_err(| err | { AsyncGraphQLError::new(
+						format!("signUp unsuccessful - {}", err))
+					})
 			})
 		})
 		.description("Sign up for scoped user access")
@@ -222,9 +231,8 @@ pub async fn generate_schema<'request>(
 		.argument(
 			InputValue::new(
 				"arguments",
-				TypeRef::named_nn("object")
-			)
-			.description("Arguments to send to the Access")
+				TypeRef::named_nn("Object")
+			).description("Arguments to send to the Access")
 		)
 	);
 
@@ -463,7 +471,7 @@ pub async fn generate_schema<'request>(
 					Some(Kind::Record(vec![Table::from(tb.name.to_string())])),
 				),
 			))
-			.implement("record");
+			.implement("Record");
 
 		for fd in fds.iter() {
 			let Some(ref kind) = fd.kind else {
@@ -510,7 +518,7 @@ pub async fn generate_schema<'request>(
 	let sess3 = session.to_owned();
 	let kvs3 = datastore.to_owned();
 	query = query.field(
-		Field::new("_get", TypeRef::named("record"), move |ctx| {
+		Field::new("_get", TypeRef::named("Record"), move |ctx| {
 			FieldFuture::new({
 				let sess3 = sess3.clone();
 				let kvs3 = kvs3.clone();
@@ -558,6 +566,12 @@ pub async fn generate_schema<'request>(
 		schema = schema.register(ty);
 	}
 
+	let obj_scalar = Scalar::new("Object")
+		.description("An arbitrary JSON Object")
+		.validator(| v | true);
+
+	schema = schema.register(obj_scalar);
+
 	macro_rules! scalar_debug_validated {
 		($schema:ident, $name:expr, $kind:expr) => {
 			scalar_debug_validated!(
@@ -581,48 +595,42 @@ pub async fn generate_schema<'request>(
 			)
 		};
 		($schema:ident, $name:expr, $kind:expr, $desc:expr, $url:expr) => {{
-			let new_type = Type::Scalar({
-				let mut tmp = Scalar::new($name);
-				if let Some(desc) = $desc {
-					tmp = tmp.description(desc);
-				}
-				if let Some(url) = $url {
-					tmp = tmp.specified_by_url(url);
-				}
-				#[cfg(debug_assertions)]
-				tmp.add_validator(|v| gql_to_sql_kind(v, $kind).is_ok());
-				tmp
-			});
-			$schema = $schema.register(new_type);
+			let scalar = Scalar::new($name)
+				.description(format!("{}", if let Some(desc) = $desc { desc } else { "" }))
+				.specified_by_url(format!("{}", if let Some(url) = $url { url } else { "" }))
+				.validator(|v| gql_to_sql_kind(v, $kind).is_ok());
+
+			$schema = $schema.register(scalar);
 		}};
 	}
 
 	scalar_debug_validated!(
 		schema,
-		"uuid",
+		"UUID",
 		Kind::Uuid,
 		"String encoded UUID",
 		"https://datatracker.ietf.org/doc/html/rfc4122"
 	);
 
-	scalar_debug_validated!(schema, "decimal", Kind::Decimal);
-	scalar_debug_validated!(schema, "number", Kind::Number);
+	scalar_debug_validated!(schema, "Decimal", Kind::Decimal);
+	scalar_debug_validated!(schema, "Number", Kind::Number);
 	scalar_debug_validated!(schema, "null", Kind::Null);
-	scalar_debug_validated!(schema, "datetime", Kind::Datetime);
-	scalar_debug_validated!(schema, "duration", Kind::Duration);
-	scalar_debug_validated!(schema, "object", Kind::Object);
-	scalar_debug_validated!(schema, "any", Kind::Any);
+	scalar_debug_validated!(schema, "DateTime", Kind::Datetime);
+	scalar_debug_validated!(schema, "Duration", Kind::Duration);
+	// scalar_debug_validated!(schema, "Object", Kind::Object);
+	scalar_debug_validated!(schema, "Any", Kind::Any);
 
-	let id_interface =
-		Interface::new("record").field(InterfaceField::new("id", TypeRef::named_nn(TypeRef::ID)));
+	let id_interface = Interface::new("Record")
+		.field(InterfaceField::new("id", TypeRef::named_nn(TypeRef::ID)));
+
 	schema = schema.register(id_interface);
 
 	// TODO: when used get: `Result::unwrap()` on an `Err` value: SchemaError("Field \"like.in\" is not sub-type of \"relation.in\"")
-	let relation_interface = Interface::new("relation")
+	let relation_interface = Interface::new("Relation")
 		.field(InterfaceField::new("id", TypeRef::named_nn(TypeRef::ID)))
-		.field(InterfaceField::new("in", TypeRef::named_nn("record")))
-		.field(InterfaceField::new("out", TypeRef::named_nn("record")))
-		.implement("record");
+		.field(InterfaceField::new("in", TypeRef::named_nn("Record")))
+		.field(InterfaceField::new("out", TypeRef::named_nn("Record")))
+		.implement("Record");
 
 	schema = schema.register(relation_interface);
 
@@ -715,22 +723,22 @@ fn kind_to_type(kind: Kind, types: &mut Vec<Type>) -> Result<TypeRef, GqlError> 
 		_ => (false, kind),
 	};
 	let out_ty = match match_kind {
-		Kind::Any => TypeRef::named("any"),
+		Kind::Any => TypeRef::named("Any"),
 		Kind::Null => TypeRef::named("null"),
 		Kind::Bool => TypeRef::named(TypeRef::BOOLEAN),
 		Kind::Bytes => TypeRef::named("bytes"),
-		Kind::Datetime => TypeRef::named("datetime"),
-		Kind::Decimal => TypeRef::named("decimal"),
-		Kind::Duration => TypeRef::named("duration"),
+		Kind::Datetime => TypeRef::named("DateTime"),
+		Kind::Decimal => TypeRef::named("Decimal"),
+		Kind::Duration => TypeRef::named("Duration"),
 		Kind::Float => TypeRef::named(TypeRef::FLOAT),
 		Kind::Int => TypeRef::named(TypeRef::INT),
-		Kind::Number => TypeRef::named("number"),
-		Kind::Object => TypeRef::named("object"),
+		Kind::Number => TypeRef::named("Number"),
+		Kind::Object => TypeRef::named("Object"),
 		Kind::Point => return Err(schema_error("Kind::Point is not yet supported")),
 		Kind::String => TypeRef::named(TypeRef::STRING),
-		Kind::Uuid => TypeRef::named("uuid"),
+		Kind::Uuid => TypeRef::named("UUID"),
 		Kind::Record(mut r) => match r.len() {
-			0 => TypeRef::named("record"),
+			0 => TypeRef::named("Record"),
 			1 => TypeRef::named(r.pop().unwrap().0),
 			_ => {
 				let names: Vec<String> = r.into_iter().map(|t| t.0).collect();
@@ -1200,6 +1208,7 @@ fn gql_to_sql_kind(val: &GqlValue, kind: Kind) -> Result<SqlValue, GqlError> {
 					.iter()
 					.map(|(k, v)| gql_to_sql_kind(v, Kind::Any).map(|sqlv| (k.to_string(), sqlv)))
 					.collect();
+
 				Ok(SqlValue::Object(out?.into()))
 			}
 			GqlValue::String(s) => match syn::value_legacy_strand(s.as_str()) {
