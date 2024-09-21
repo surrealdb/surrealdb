@@ -130,11 +130,11 @@ pub async fn generate_schema<'request>(
 			let arguments = args.get("arguments").cloned();
 
 			FieldFuture::new(async move {
-				let mut vals: HashMap<String, String> = HashMap::new();
+				let mut vals: HashMap<String, SqlValue> = HashMap::new();
 
 				if let Some(GqlValue::Object(args_idx_map)) = arguments {
 					for (key, value) in args_idx_map {
-						vals.insert(key.to_string(), value.to_string());
+						vals.insert(key.to_string(), SqlValue::from(value.to_string().trim_matches('"')));
 					}
 				}
 
@@ -142,9 +142,9 @@ pub async fn generate_schema<'request>(
 				let auth_ns = format!("{}", auth_session.ns.clone().expect("Namespace unspecified"));
 				let auth_ac = access.clone().trim_matches('"').to_string();
 
-				vals.insert("DB".to_string(), auth_db.clone());
-				vals.insert("NS".to_string(), auth_ns.clone());
-				vals.insert("AC".to_string(), auth_ac.clone());
+				vals.insert("DB".to_string(), auth_db.clone().into());
+				vals.insert("NS".to_string(), auth_ns.clone().into());
+				vals.insert("AC".to_string(), auth_ac.clone().into());
 
 				let mut auth_sess = auth_session.clone();
 
@@ -185,11 +185,11 @@ pub async fn generate_schema<'request>(
 			let arguments = args.get("arguments").cloned();
 
 			FieldFuture::new(async move {
-				let mut vals: HashMap<String, String> = HashMap::new();
+				let mut vals: HashMap<String, SqlValue> = HashMap::new();
 
 				if let Some(GqlValue::Object(args_idx_map)) = arguments {
 					for (key, value) in args_idx_map {
-						vals.insert(key.to_string(), value.to_string());
+						vals.insert(key.to_string(), SqlValue::from(value.to_string().trim_matches('"')));
 					}
 				}
 
@@ -197,9 +197,9 @@ pub async fn generate_schema<'request>(
 				let auth_ns = format!("{}", auth_session.ns.clone().expect("Namespace unspecified"));
 				let auth_ac = access.clone().trim_matches('"').to_string();
 
-				vals.insert("DB".to_string(), auth_db.clone());
-				vals.insert("NS".to_string(), auth_ns.clone());
-				vals.insert("AC".to_string(), auth_ac.clone());
+				vals.insert("DB".to_string(), auth_db.clone().into());
+				vals.insert("NS".to_string(), auth_ns.clone().into());
+				vals.insert("AC".to_string(), auth_ac.clone().into());
 
 				let mut auth_sess = auth_session.clone();
 

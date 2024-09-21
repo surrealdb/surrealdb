@@ -50,12 +50,6 @@ impl From<HashMap<String, Value>> for Object {
 	}
 }
 
-impl From<HashMap<String, Option<String>>> for Object {
-	fn from(v: HashMap<String, Option<String>>) -> Self {
-		Self(v.into_iter().map(|(key, val)| (key.to_string(), val.into())).collect())
-	}
-}
-
 impl From<HashMap<String, String>> for Object {
 	fn from(v: HashMap<String, String>) -> Self {
 		Self(v.into_iter().map(|(key, val)| (key.to_string(), val.into())).collect())
