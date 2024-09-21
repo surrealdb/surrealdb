@@ -80,9 +80,9 @@ fn filter_name_from_table(tb_name: impl Display) -> String {
 	format!("_filter_{tb_name}")
 }
 
-pub async fn generate_schema(
-	datastore: &Arc<Datastore>,
-	session: &Session,
+pub async fn generate_schema<'request>(
+	datastore: &'request Arc<Datastore>,
+	session: &'request Session,
 ) -> Result<Schema, GqlError> {
 	let kvs = datastore;
 	let tx = kvs.transaction(TransactionType::Read, LockType::Optimistic).await?;
