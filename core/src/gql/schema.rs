@@ -20,7 +20,7 @@ use async_graphql::dynamic::{InputObject, Object};
 use async_graphql::dynamic::{InputValue, Schema};
 use async_graphql::dynamic::{Scalar, TypeRef};
 use async_graphql::indexmap::IndexMap;
-use async_graphql::Name;
+use async_graphql::{Name, Error as AsyncGraphQLError};
 use async_graphql::Value as GqlValue;
 use rust_decimal::prelude::FromPrimitive;
 use rust_decimal::Decimal;
@@ -124,7 +124,7 @@ pub async fn generate_schema<'request>(
 	let session_clone_1 = session.clone();
 
 	mutation = mutation.field(
-		Field::new("signIn", TypeRef::named(TypeRef::STRING), move | ctx: ResolverContext | {
+		Field::new("signIn", TypeRef::named_nn(TypeRef::STRING), move | ctx: ResolverContext | {
 			let auth_kvs = datastore_clone_1.clone();
 			let auth_session = session_clone_1.clone();
 			let args = ctx.args.as_index_map();
@@ -146,16 +146,16 @@ pub async fn generate_schema<'request>(
 				vals.insert("AC".to_string(), access.clone());
 
 				let mut auth_sess = auth_session.clone();
-				let out = signin(&auth_kvs, &mut auth_sess, vals.into())
-					.await
-					.expect("Unauthorised authentication");
 
 				// The session already has Access
 				if auth_sess.ac.is_some() {
-					return Ok(Some(FieldValue::from(GqlValue::Null)));
+					AsyncGraphQLError::new("authentication is already present");
 				}
 
-				Ok(Some(FieldValue::value(GqlValue::from(out))))
+				signin(&auth_kvs, &mut auth_sess, vals.into())
+					.await
+					.map(| val | Some(FieldValue::value(GqlValue::from(val))))
+					.map_err(|_| { AsyncGraphQLError::new("Unauthorized authentication") })
 			})
 		})
 		.description("Sign in with scoped user access")
@@ -173,45 +173,44 @@ pub async fn generate_schema<'request>(
 	let session_clone_2 = session.clone();
 
 	mutation = mutation.field(
-		Field::new(
-			"signUp",
-			TypeRef::named(TypeRef::STRING),
-			move | ctx: ResolverContext | {
-				let auth_kvs = datastore_clone_2.clone();
-				let auth_session = session_clone_2.clone();
-				let args = ctx.args.as_index_map();
+		Field::new("signUp", TypeRef::named(TypeRef::STRING),move | ctx: ResolverContext | {
+			let auth_kvs = datastore_clone_2.clone();
+			let auth_session = session_clone_2.clone();
+			let args = ctx.args.as_index_map();
 
-				let access = args.get("access").and_then(|v| Some(v.to_string()));
-				let arguments = args.get("arguments").cloned();
+			let access = args.get("access").and_then(|v| Some(v.to_string()));
+			let arguments = args.get("arguments").cloned();
 
-				FieldFuture::new(async move {
-					let mut vals: HashMap<String, Option<String>> = HashMap::new();
+			FieldFuture::new(async move {
+				let mut vals: HashMap<String, Option<String>> = HashMap::new();
 
-					if let Some(GqlValue::Object(args_idx_map)) = arguments {
-						for (key, value) in args_idx_map {
-							vals.insert(key.to_string(), Some(value.to_string()));
-						}
+				if let Some(GqlValue::Object(args_idx_map)) = arguments {
+					for (key, value) in args_idx_map {
+						vals.insert(key.to_string(), Some(value.to_string()));
 					}
+				}
 
-					vals.insert("DB".to_string(), auth_session.db.clone());
-					vals.insert("NS".to_string(), auth_session.ns.clone());
-					vals.insert("AC".to_string(), access.clone());
+				vals.insert("DB".to_string(), auth_session.db.clone());
+				vals.insert("NS".to_string(), auth_session.ns.clone());
+				vals.insert("AC".to_string(), access.clone());
 
-					let mut auth_sess = auth_session.clone();
-					let out = signup(&auth_kvs, &mut auth_sess, vals.into())
-						.await
-						.expect("Unauthorised authentication")
-						.unwrap_or(String::from("NO TOKEN"));
+				let mut auth_sess = auth_session.clone();
 
-					// The session already has Access
-					if auth_sess.ac.is_some() {
-						return Ok(Some(FieldValue::from(GqlValue::Null)));
-					}
+				// The session already has Access
+				if auth_sess.ac.is_some() {
+					AsyncGraphQLError::new("authentication is already present");
+				}
 
-					Ok(Some(FieldValue::value(GqlValue::from(out))))
-				})
-			}
-		)
+				signup(&auth_kvs, &mut auth_sess, vals.into())
+					.await
+					.map(|val| Some(
+						FieldValue::value(
+							GqlValue::from(val.unwrap_or(String::from("INVALID_TOKEN")))
+						)
+					))
+					.map_err(|_| { AsyncGraphQLError::new("signUp unsuccessful") })
+			})
+		})
 		.description("Sign up for scoped user access")
 		.argument(
 			InputValue::new(
