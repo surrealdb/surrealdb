@@ -114,9 +114,6 @@ pub async fn generate_schema<'request>(
 
 	trace!(ns, db, ?tbs, "generating schema");
 
-	// let access_response_type = Interface::new("AccessResponse")
-	// 	.field(InterfaceField::new("token", TypeRef::named_nn(TypeRef::STRING)));
-
 	let datastore_clone_1 = datastore.clone();
 	let session_clone_1 = session.clone();
 
