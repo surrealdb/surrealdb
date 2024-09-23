@@ -739,6 +739,7 @@ pub async fn idiom(
 				"is_numeric" => string::is::numeric,
 				"is_semver" => string::is::semver,
 				"is_url" => string::is::url,
+				"is_ulid" => string::is::ulid,
 				"is_uuid" => string::is::uuid,
 				"is_record" => string::is::record,
 				"similarity_fuzzy" => string::similarity::fuzzy,
