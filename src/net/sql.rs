@@ -42,7 +42,8 @@ async fn post_handler(
 	let db = &state.datastore;
 	// Check if capabilities allow querying the requested HTTP route
 	if !db.allows_http_route(&RouteTarget::Sql) {
-		return Err(Error::OperationForbidden);
+		warn!("Capabilities denied HTTP route request attempt, target: '{}'", &RouteTarget::Sql);
+		return Err(Error::ForbiddenRoute(RouteTarget::Sql.to_string()));
 	}
 	// Convert the received sql query
 	let sql = bytes_to_utf8(&sql)?;

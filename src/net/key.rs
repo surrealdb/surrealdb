@@ -75,7 +75,8 @@ async fn select_all(
 	let db = &state.datastore;
 	// Check if capabilities allow querying the requested HTTP route
 	if !db.allows_http_route(&RouteTarget::Key) {
-		return Err(Error::OperationForbidden);
+		warn!("Capabilities denied HTTP route request attempt, target: '{}'", &RouteTarget::Key);
+		return Err(Error::ForbiddenRoute(RouteTarget::Key.to_string()));
 	}
 	// Ensure a NS and DB are set
 	let _ = check_ns_db(&session)?;
@@ -121,7 +122,8 @@ async fn create_all(
 	let db = &state.datastore;
 	// Check if capabilities allow querying the requested HTTP route
 	if !db.allows_http_route(&RouteTarget::Key) {
-		return Err(Error::OperationForbidden);
+		warn!("Capabilities denied HTTP route request attempt, target: '{}'", &RouteTarget::Key);
+		return Err(Error::ForbiddenRoute(RouteTarget::Key.to_string()));
 	}
 	// Ensure a NS and DB are set
 	let _ = check_ns_db(&session)?;
@@ -170,7 +172,8 @@ async fn update_all(
 	let db = &state.datastore;
 	// Check if capabilities allow querying the requested HTTP route
 	if !db.allows_http_route(&RouteTarget::Key) {
-		return Err(Error::OperationForbidden);
+		warn!("Capabilities denied HTTP route request attempt, target: '{}'", &RouteTarget::Key);
+		return Err(Error::ForbiddenRoute(RouteTarget::Key.to_string()));
 	}
 	// Ensure a NS and DB are set
 	let _ = check_ns_db(&session)?;
@@ -219,7 +222,8 @@ async fn modify_all(
 	let db = &state.datastore;
 	// Check if capabilities allow querying the requested HTTP route
 	if !db.allows_http_route(&RouteTarget::Key) {
-		return Err(Error::OperationForbidden);
+		warn!("Capabilities denied HTTP route request attempt, target: '{}'", &RouteTarget::Key);
+		return Err(Error::ForbiddenRoute(RouteTarget::Key.to_string()));
 	}
 	// Ensure a NS and DB are set
 	let _ = check_ns_db(&session)?;
@@ -267,7 +271,8 @@ async fn delete_all(
 	let db = &state.datastore;
 	// Check if capabilities allow querying the requested HTTP route
 	if !db.allows_http_route(&RouteTarget::Key) {
-		return Err(Error::OperationForbidden);
+		warn!("Capabilities denied HTTP route request attempt, target: '{}'", &RouteTarget::Key);
+		return Err(Error::ForbiddenRoute(RouteTarget::Key.to_string()));
 	}
 	// Ensure a NS and DB are set
 	let _ = check_ns_db(&session)?;
@@ -310,7 +315,8 @@ async fn select_one(
 	let db = &state.datastore;
 	// Check if capabilities allow querying the requested HTTP route
 	if !db.allows_http_route(&RouteTarget::Key) {
-		return Err(Error::OperationForbidden);
+		warn!("Capabilities denied HTTP route request attempt, target: '{}'", &RouteTarget::Key);
+		return Err(Error::ForbiddenRoute(RouteTarget::Key.to_string()));
 	}
 	// Ensure a NS and DB are set
 	let _ = check_ns_db(&session)?;
@@ -359,7 +365,8 @@ async fn create_one(
 	let db = &state.datastore;
 	// Check if capabilities allow querying the requested HTTP route
 	if !db.allows_http_route(&RouteTarget::Key) {
-		return Err(Error::OperationForbidden);
+		warn!("Capabilities denied HTTP route request attempt, target: '{}'", &RouteTarget::Key);
+		return Err(Error::ForbiddenRoute(RouteTarget::Key.to_string()));
 	}
 	// Ensure a NS and DB are set
 	let _ = check_ns_db(&session)?;
@@ -414,7 +421,8 @@ async fn update_one(
 	let db = &state.datastore;
 	// Check if capabilities allow querying the requested HTTP route
 	if !db.allows_http_route(&RouteTarget::Key) {
-		return Err(Error::OperationForbidden);
+		warn!("Capabilities denied HTTP route request attempt, target: '{}'", &RouteTarget::Key);
+		return Err(Error::ForbiddenRoute(RouteTarget::Key.to_string()));
 	}
 	// Ensure a NS and DB are set
 	let _ = check_ns_db(&session)?;
@@ -469,7 +477,8 @@ async fn modify_one(
 	let db = &state.datastore;
 	// Check if capabilities allow querying the requested HTTP route
 	if !db.allows_http_route(&RouteTarget::Key) {
-		return Err(Error::OperationForbidden);
+		warn!("Capabilities denied HTTP route request attempt, target: '{}'", &RouteTarget::Key);
+		return Err(Error::ForbiddenRoute(RouteTarget::Key.to_string()));
 	}
 	// Ensure a NS and DB are set
 	let _ = check_ns_db(&session)?;
@@ -522,7 +531,8 @@ async fn delete_one(
 	let db = &state.datastore;
 	// Check if capabilities allow querying the requested HTTP route
 	if !db.allows_http_route(&RouteTarget::Key) {
-		return Err(Error::OperationForbidden);
+		warn!("Capabilities denied HTTP route request attempt, target: '{}'", &RouteTarget::Key);
+		return Err(Error::ForbiddenRoute(RouteTarget::Key.to_string()));
 	}
 	// Ensure a NS and DB are set
 	let _ = check_ns_db(&session)?;

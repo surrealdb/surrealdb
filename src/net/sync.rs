@@ -20,7 +20,8 @@ async fn load(
 	let db = &state.datastore;
 	// Check if capabilities allow querying the requested HTTP route
 	if !db.allows_http_route(&RouteTarget::Sync) {
-		return Err(Error::OperationForbidden);
+		warn!("Capabilities denied HTTP route request attempt, target: '{}'", &RouteTarget::Sync);
+		return Err(Error::ForbiddenRoute(RouteTarget::Sync.to_string()));
 	}
 
 	Ok("Load")
@@ -33,7 +34,8 @@ async fn save(
 	let db = &state.datastore;
 	// Check if capabilities allow querying the requested HTTP route
 	if !db.allows_http_route(&RouteTarget::Sync) {
-		return Err(Error::OperationForbidden);
+		warn!("Capabilities denied HTTP route request attempt, target: '{}'", &RouteTarget::Sync);
+		return Err(Error::ForbiddenRoute(RouteTarget::Sync.to_string()));
 	}
 
 	Ok("Save")

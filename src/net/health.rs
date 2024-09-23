@@ -19,7 +19,8 @@ async fn handler(Extension(state): Extension<AppState>) -> impl IntoResponse {
 	let db = &state.datastore;
 	// Check if capabilities allow querying the requested HTTP route
 	if !db.allows_http_route(&RouteTarget::Health) {
-		return Err(Error::OperationForbidden);
+		warn!("Capabilities denied HTTP route request attempt, target: '{}'", &RouteTarget::Health);
+		return Err(Error::ForbiddenRoute(RouteTarget::Health.to_string()));
 	}
 	// Attempt to open a transaction
 	match db.transaction(Read, Optimistic).await {

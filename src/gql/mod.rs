@@ -70,7 +70,13 @@ where
 		Box::pin(async move {
 			// Check if capabilities allow querying the requested HTTP route
 			if !cache.datastore.allows_http_route(&RouteTarget::GraphQL) {
-				return Ok(SurrealError::OperationForbidden.into_response());
+				warn!(
+					"Capabilities denied HTTP route request attempt, target: '{}'",
+					&RouteTarget::GraphQL
+				);
+				return Ok(
+					SurrealError::ForbiddenRoute(RouteTarget::GraphQL.to_string()).into_response()
+				);
 			}
 
 			let session =

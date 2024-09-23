@@ -28,7 +28,8 @@ async fn handler(
 	let db = &state.datastore;
 	// Check if capabilities allow querying the requested HTTP route
 	if !db.allows_http_route(&RouteTarget::Export) {
-		return Err(Error::OperationForbidden);
+		warn!("Capabilities denied HTTP route request attempt, target: '{}'", &RouteTarget::Export);
+		return Err(Error::ForbiddenRoute(RouteTarget::Export.to_string()));
 	}
 	// Create a chunked response
 	let (chn, body_stream) = surrealdb::channel::bounded::<Result<Bytes, Error>>(1);

@@ -37,7 +37,8 @@ async fn handler(
 	let db = &state.datastore;
 	// Check if capabilities allow querying the requested HTTP route
 	if !db.allows_http_route(&RouteTarget::Import) {
-		return Err(Error::OperationForbidden);
+		warn!("Capabilities denied HTTP route request attempt, target: '{}'", &RouteTarget::Import);
+		return Err(Error::ForbiddenRoute(RouteTarget::Import.to_string()));
 	}
 	// Convert the body to a byte slice
 	let sql = bytes_to_utf8(&sql)?;

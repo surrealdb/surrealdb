@@ -22,7 +22,11 @@ async fn handler(
 	let db = &state.datastore;
 	// Check if capabilities allow querying the requested HTTP route
 	if !db.allows_http_route(&RouteTarget::Version) {
-		return Err(Error::OperationForbidden);
+		warn!(
+			"Capabilities denied HTTP route request attempt, target: '{}'",
+			&RouteTarget::Version
+		);
+		return Err(Error::ForbiddenRoute(RouteTarget::Version.to_string()));
 	}
 
 	Ok(format!("{PKG_NAME}-{}", *PKG_VERSION))

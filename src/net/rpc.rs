@@ -59,7 +59,8 @@ async fn get_handler(
 	let db = &state.datastore;
 	// Check if capabilities allow querying the requested HTTP route
 	if !db.allows_http_route(&RouteTarget::Rpc) {
-		return Err(Error::OperationForbidden);
+		warn!("Capabilities denied HTTP route request attempt, target: '{}'", &RouteTarget::Rpc);
+		return Err(Error::ForbiddenRoute(RouteTarget::Rpc.to_string()));
 	}
 	// Check that a valid header has been specified
 	if headers.get(SEC_WEBSOCKET_PROTOCOL).is_none() {
@@ -157,7 +158,8 @@ async fn post_handler(
 	let db = &state.datastore;
 	// Check if capabilities allow querying the requested HTTP route
 	if !db.allows_http_route(&RouteTarget::Rpc) {
-		return Err(Error::OperationForbidden);
+		warn!("Capabilities denied HTTP route request attempt, target: '{}'", &RouteTarget::Rpc);
+		return Err(Error::ForbiddenRoute(RouteTarget::Rpc.to_string()));
 	}
 	let fmt: Format = content_type.deref().into();
 	let out_fmt: Option<Format> = output.as_deref().map(Into::into);

@@ -45,6 +45,7 @@ pub trait RpcContext {
 		if !self.kvs().allows_rpc_method(&MethodTarget {
 			method: method.clone(),
 		}) {
+			warn!("Capabilities denied RPC method call attempt, target: '{}'", method.to_str());
 			return Err(RpcError::MethodNotAllowed);
 		}
 
@@ -87,6 +88,7 @@ pub trait RpcContext {
 		if !self.kvs().allows_rpc_method(&MethodTarget {
 			method: method.clone(),
 		}) {
+			warn!("Capabilities denied RPC method call attempt, target: '{}'", method.to_str());
 			return Err(RpcError::MethodNotAllowed);
 		}
 
