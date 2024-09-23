@@ -633,6 +633,12 @@ pub enum Error {
 		value: String,
 	},
 
+	/// Found a record id for the record but this is not a valid id
+	#[error("Found {value} for the incoming relation, but this is not a valid Record ID")]
+	InInvalid {
+		value: String,
+	},
+
 	/// Found a record id for the record but we are creating a specific record
 	#[error("Found {value} for the `in` field, but the value does not match the `in` record id")]
 	InMismatch {
@@ -642,6 +648,12 @@ pub enum Error {
 	/// Found a record id for the record but we are creating a specific record
 	#[error("Found {value} for the `in` field, which does not match the existing field value")]
 	InOverride {
+		value: String,
+	},
+
+	/// Found a record id for the record but this is not a valid id
+	#[error("Found {value} for the outgoing relation, but this is not a valid Record ID")]
+	OutInvalid {
 		value: String,
 	},
 
