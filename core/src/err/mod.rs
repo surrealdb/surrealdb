@@ -983,9 +983,11 @@ pub enum Error {
 		index: String,
 	},
 
-	/// The session has expired either because the token used
-	/// to establish it has expired or because an expiration
-	/// was explicitly defined when establishing it
+	/// The token has expired
+	#[error("The token has expired")]
+	ExpiredToken,
+
+	/// The session has expired
 	#[error("The session has expired")]
 	ExpiredSession,
 
@@ -1149,6 +1151,10 @@ pub enum Error {
 
 	#[error("Found a non-computed value where they are not allowed")]
 	NonComputed,
+
+	/// Represents a failure in timestamp arithmetic related to database internals
+	#[error("Failed to compute: \"{0}\", as the operation results in an overflow.")]
+	ArithmeticOverflow(String),
 }
 
 impl From<Error> for String {

@@ -134,7 +134,7 @@ impl<'a> Parser<'a> {
 			last_span: Span::empty(),
 			token_buffer: TokenBuffer::new(),
 			glued_value: GluedValue::None,
-			table_as_field: false,
+			table_as_field: true,
 			legacy_strands: false,
 			flexible_record_id: true,
 			object_recursion: 100,
@@ -180,7 +180,7 @@ impl<'a> Parser<'a> {
 	pub fn reset(&mut self) {
 		self.last_span = Span::empty();
 		self.token_buffer.clear();
-		self.table_as_field = false;
+		self.table_as_field = true;
 		self.lexer.reset();
 	}
 
@@ -319,8 +319,12 @@ impl<'a> Parser<'a> {
 		self.last_span
 	}
 
-	pub fn assert_finished(&self) -> ParseResult<()> {
-		self.lexer.assert_finished()
+	pub fn assert_finished(&mut self) -> ParseResult<()> {
+		let p = self.peek();
+		if self.peek().kind != TokenKind::Eof {
+			bail!("Unexpected token `{}`, expected no more tokens",p.kind, @p.span);
+		}
+		Ok(())
 	}
 
 	/// Eat the next token if it is of the given kind.

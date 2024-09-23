@@ -1,3 +1,5 @@
+use std::ops::Deref;
+
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
@@ -146,6 +148,7 @@ pub fn thing((arg1, arg2): (Value, Option<Value>)) -> Result<Value, Error> {
 				Value::Array(v) => v.into(),
 				Value::Object(v) => v.into(),
 				Value::Number(v) => v.into(),
+				Value::Range(v) => v.deref().to_owned().try_into()?,
 				v => v.as_string().into(),
 			},
 		})),

@@ -348,13 +348,44 @@ async fn insert() -> Result<(), Box<dyn std::error::Error>> {
 	assert_eq!(res.len(), 1, "result: {res:?}");
 	assert_eq!(res[0]["name"], "foo", "result: {res:?}");
 	assert_eq!(res[0]["value"], "bar", "result: {res:?}");
+	// Send INSERT command trying to create multiple records
+	let res = socket
+		.send_request(
+			"insert",
+			json!([
+				"tester",
+				[
+					{
+						"name": "foo",
+						"value": "bar",
+					},
+					{
+						"name": "foo",
+						"value": "bar",
+					}
+				]
+			]),
+		)
+		.await?;
+	assert!(res.is_object(), "result: {res:?}");
+	assert!(res["result"].is_array(), "result: {res:?}");
+	let res = res["result"].as_array().unwrap();
+	assert_eq!(res.len(), 2, "result: {res:?}");
+	assert_eq!(res[0]["name"], "foo", "result: {res:?}");
+	assert_eq!(res[0]["value"], "bar", "result: {res:?}");
+	assert_eq!(res[1]["name"], "foo", "result: {res:?}");
+	assert_eq!(res[1]["value"], "bar", "result: {res:?}");
 	// Verify the data was inserted and can be queried
 	let res = socket.send_message_query("SELECT * FROM tester").await?;
 	assert!(res[0]["result"].is_array(), "result: {res:?}");
 	let res = res[0]["result"].as_array().unwrap();
-	assert_eq!(res.len(), 1, "result: {res:?}");
+	assert_eq!(res.len(), 3, "result: {res:?}");
 	assert_eq!(res[0]["name"], "foo", "result: {res:?}");
 	assert_eq!(res[0]["value"], "bar", "result: {res:?}");
+	assert_eq!(res[1]["name"], "foo", "result: {res:?}");
+	assert_eq!(res[1]["value"], "bar", "result: {res:?}");
+	assert_eq!(res[2]["name"], "foo", "result: {res:?}");
+	assert_eq!(res[2]["value"], "bar", "result: {res:?}");
 	// Test passed
 	server.finish().unwrap();
 	Ok(())
@@ -1469,6 +1500,25 @@ async fn session_reauthentication_expired() {
 	socket.send_request("authenticate", json!([root_token,])).await.unwrap();
 	// Check that we have root access and the session is not expired
 	let res = socket.send_message_query("INFO FOR ROOT").await.unwrap();
+	assert_eq!(res[0]["status"], "OK", "result: {res:?}");
+	// Test passed
+	server.finish().unwrap();
+}
+
+#[test(tokio::test)]
+async fn session_failed_reauthentication() {
+	// Setup database server without authentication
+	let (addr, mut server) = common::start_server_without_auth().await.unwrap();
+	// Connect to WebSocket
+	let mut socket = Socket::connect(&addr, SERVER, FORMAT).await.unwrap();
+	// Specify a namespace and database to use
+	socket.send_message_use(Some(NS), Some(DB)).await.unwrap();
+	// Check that we have are have a database and namespace selected
+	socket.send_message_query("INFO FOR DB").await.unwrap();
+	// Authenticate using an invalid token
+	socket.send_request("authenticate", json!(["invalid",])).await.unwrap();
+	// Check to see if we still have a namespace and database selected
+	let res = socket.send_message_query("INFO FOR DB").await.unwrap();
 	assert_eq!(res[0]["status"], "OK", "result: {res:?}");
 	// Test passed
 	server.finish().unwrap();

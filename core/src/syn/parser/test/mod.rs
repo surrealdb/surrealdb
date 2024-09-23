@@ -1,5 +1,5 @@
 use crate::{
-	sql::{self, Id, Statement, Thing, Value},
+	sql::{self, Id, Ident, Idiom, Part, Query, Statement, Statements, Thing, Value},
 	syn::parser::mac::test_parse,
 };
 
@@ -8,6 +8,11 @@ mod limit;
 mod stmt;
 mod streaming;
 mod value;
+
+#[test]
+fn parse_large_test_file() {
+	test_parse!(parse_query, include_str!("../../../../test.surql")).unwrap();
+}
 
 #[test]
 fn multiple_semicolons() {
@@ -84,6 +89,20 @@ fn query_object() {
 }
 
 #[test]
+fn ident_is_field() {
+	let src = r#"foo"#;
+
+	let field =
+		test_parse!(parse_query, src).inspect_err(|e| eprintln!("{}", e.render_on(src))).unwrap();
+	assert_eq!(
+		field,
+		Query(Statements(vec![Statement::Value(Value::Idiom(Idiom(vec![Part::Field(Ident(
+			"foo".to_string()
+		))])))]))
+	);
+}
+
+#[test]
 fn escaped_params_backtick() {
 	test_parse!(
 		parse_query,
@@ -91,4 +110,9 @@ fn escaped_params_backtick() {
 		RETURN  $`R-_fYU8Wa31kg7tz0JI6Kme`"#
 	)
 	.unwrap();
+}
+
+#[test]
+fn parse_immediate_insert_subquery() {
+	test_parse!(parse_query, r#"LET $insert = INSERT INTO t (SELECT true FROM 1);"#).unwrap();
 }
