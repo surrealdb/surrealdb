@@ -180,6 +180,10 @@ impl super::api::Transaction for Transaction {
 	where
 		K: Into<Key> + Sprintable + Debug,
 	{
+		// TiKV does not support versioned queries.
+		if version.is_some() {
+			return Err(Error::UnsupportedVersionedQueries);
+		}
 		// Check to see if transaction is closed
 		if self.done {
 			return Err(Error::TxFinished);
@@ -200,7 +204,6 @@ impl super::api::Transaction for Transaction {
 		if version.is_some() {
 			return Err(Error::UnsupportedVersionedQueries);
 		}
-
 		// Check to see if transaction is closed
 		if self.done {
 			return Err(Error::TxFinished);
@@ -222,7 +225,6 @@ impl super::api::Transaction for Transaction {
 		if version.is_some() {
 			return Err(Error::UnsupportedVersionedQueries);
 		}
-
 		// Check to see if transaction is closed
 		if self.done {
 			return Err(Error::TxFinished);
@@ -260,7 +262,6 @@ impl super::api::Transaction for Transaction {
 		if version.is_some() {
 			return Err(Error::UnsupportedVersionedQueries);
 		}
-
 		// Check to see if transaction is closed
 		if self.done {
 			return Err(Error::TxFinished);
@@ -451,6 +452,10 @@ impl super::api::Transaction for Transaction {
 	where
 		K: Into<Key> + Sprintable + Debug,
 	{
+		// TiKV does not support versioned queries.
+		if version.is_some() {
+			return Err(Error::UnsupportedVersionedQueries);
+		}
 		// Check to see if transaction is closed
 		if self.done {
 			return Err(Error::TxFinished);
@@ -481,7 +486,6 @@ impl super::api::Transaction for Transaction {
 		if version.is_some() {
 			return Err(Error::UnsupportedVersionedQueries);
 		}
-
 		// Check to see if transaction is closed
 		if self.done {
 			return Err(Error::TxFinished);
