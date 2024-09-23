@@ -22,7 +22,7 @@ impl Value {
 							Part::Index(i) => match new.pick(left) {
 								Value::Array(mut v) => match v.len() > i.clone().as_usize() {
 									true => {
-										v.insert(i.clone().as_usize(), value);
+										v.insert((*i).as_usize(), value);
 										new.put(left, Value::Array(v));
 									}
 									false => {

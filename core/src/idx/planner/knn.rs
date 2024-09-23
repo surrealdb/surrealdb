@@ -87,12 +87,12 @@ impl Inner {
 			let dl = docs.len();
 			if dl > left {
 				for doc_id in docs.iter().take(left) {
-					result.insert(doc_id.clone(), dist.clone());
+					result.insert(doc_id.clone(), *dist);
 				}
 				break;
 			}
 			for doc_id in docs {
-				result.insert(doc_id.clone(), dist.clone());
+				result.insert(doc_id.clone(), *dist);
 			}
 			left -= dl;
 			// We don't expect anymore result, we can leave
