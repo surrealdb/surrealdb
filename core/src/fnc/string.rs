@@ -191,6 +191,7 @@ pub mod is {
 	use std::char;
 	use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 	use std::sync::LazyLock;
+	use ulid::Ulid;
 	use url::Url;
 	use uuid::Uuid;
 
@@ -262,6 +263,10 @@ pub mod is {
 
 	pub fn uuid((arg,): (String,)) -> Result<Value, Error> {
 		Ok(Uuid::parse_str(arg.as_ref()).is_ok().into())
+	}
+
+	pub fn ulid((arg,): (String,)) -> Result<Value, Error> {
+		Ok(Ulid::from_string(arg.as_ref()).is_ok().into())
 	}
 
 	pub fn record((arg, tb): (String, Option<Value>)) -> Result<Value, Error> {

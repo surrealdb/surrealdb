@@ -1,7 +1,8 @@
 use crate::err::Error;
 use crate::sql::value::Value;
 use crate::sql::{
-	Array, Bytes, Closure, Datetime, Duration, Geometry, Kind, Number, Object, Regex, Strand, Thing,
+	Array, Bytes, Closure, Datetime, Duration, Geometry, Kind, Number, Object, Regex, Strand,
+	Thing, Uuid,
 };
 use std::vec::IntoIter;
 
@@ -115,6 +116,12 @@ impl FromArg for isize {
 impl FromArg for usize {
 	fn from_arg(arg: Value) -> Result<Self, Error> {
 		Ok(arg.coerce_to_u64()? as usize)
+	}
+}
+
+impl FromArg for Uuid {
+	fn from_arg(arg: Value) -> Result<Self, Error> {
+		arg.coerce_to_uuid()
 	}
 }
 

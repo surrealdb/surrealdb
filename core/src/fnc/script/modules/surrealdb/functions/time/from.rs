@@ -11,5 +11,7 @@ impl_module_def!(
 	"micros" => run,
 	"millis" => run,
 	"secs" => run,
-	"unix" => run
+	"ulid" => run,
+	"unix" => run,
+	"uuid" => run
 );
