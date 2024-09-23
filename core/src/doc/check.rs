@@ -173,6 +173,12 @@ impl Document {
 				// Check that the 'in' field matches
 				if let Some(field) = data.pick(stk, ctx, opt, &*IN).await? {
 					match field {
+						// You cannot store a range id as the in field on a document
+						Value::Thing(v) if v.is_range() => {
+							return Err(Error::InInvalid {
+								value: v.to_string(),
+							})
+						}
 						// The in field is a match, so don't error
 						Value::Thing(v) if v.eq(l) => (),
 						// The in is a match, so don't error
@@ -188,6 +194,12 @@ impl Document {
 				// Check that the 'out' field matches
 				if let Some(field) = data.pick(stk, ctx, opt, &*OUT).await? {
 					match field {
+						// You cannot store a range id as the out field on a document
+						Value::Thing(v) if v.is_range() => {
+							return Err(Error::OutInvalid {
+								value: v.to_string(),
+							})
+						}
 						// The out field is a match, so don't error
 						Value::Thing(v) if v.eq(r) => (),
 						// The out is a match, so don't error
@@ -224,6 +236,12 @@ impl Document {
 				}
 				// Check that the 'in' field matches
 				match data.pick(&*IN).compute(stk, ctx, opt, Some(&self.current)).await? {
+					// You cannot store a range id as the in field on a document
+					Value::Thing(v) if v.is_range() => {
+						return Err(Error::InInvalid {
+							value: v.to_string(),
+						})
+					}
 					// The in field is a match, so don't error
 					Value::Thing(v) if v.eq(l) => (),
 					// The in is a match, so don't error
@@ -237,6 +255,12 @@ impl Document {
 				}
 				// Check that the 'out' field matches
 				match data.pick(&*OUT).compute(stk, ctx, opt, Some(&self.current)).await? {
+					// You cannot store a range id as the out field on a document
+					Value::Thing(v) if v.is_range() => {
+						return Err(Error::OutInvalid {
+							value: v.to_string(),
+						})
+					}
 					// The out field is a match, so don't error
 					Value::Thing(v) if v.eq(r) => (),
 					// The out is a match, so don't error
