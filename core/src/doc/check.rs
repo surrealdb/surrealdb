@@ -146,7 +146,7 @@ impl Document {
 			}
 		}
 		// This is a RELATE statement
-		if let Workable::Relate(l, r, v, _) = &self.extras {
+		else if let Workable::Relate(l, r, v, _) = &self.extras {
 			// This is a RELATE statement
 			if let Some(data) = stm.data() {
 				// Check that the 'id' field matches
@@ -162,6 +162,8 @@ impl Document {
 						Value::Thing(v) if v.eq(&rid) => (),
 						// The id is a match, so don't error
 						v if rid.id.is(&v) => (),
+						// There was no id field specified
+						v if v.is_none() => (),
 						// The id field does not match
 						v => {
 							return Err(Error::IdMismatch {
@@ -214,7 +216,7 @@ impl Document {
 				}
 			}
 			// This is a INSERT RELATION statement
-			if let Some(data) = v {
+			else if let Some(data) = v {
 				// Check that the 'id' field matches
 				match data.pick(&*ID).compute(stk, ctx, opt, Some(&self.current)).await? {
 					// You cannot store a range id as the id field on a document
@@ -227,6 +229,8 @@ impl Document {
 					Value::Thing(v) if v.eq(&rid) => (),
 					// The id is a match, so don't error
 					v if rid.id.is(&v) => (),
+					// There was no id field specified
+					v if v.is_none() => (),
 					// The id field does not match
 					v => {
 						return Err(Error::IdMismatch {
