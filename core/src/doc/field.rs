@@ -186,8 +186,10 @@ impl Document {
 						})?;
 						// If this is the `id` field, check the inner type
 						if fd.name.is_id() {
-							if let Value::Thing(id) = val.clone() {
-								let inner = Value::from(id.id);
+							if let Value::Thing(id) = &val {
+								// Get the value of the ID only
+								let inner = Value::from(id.clone().id);
+								// Check the type of the ID part
 								inner.coerce_to(kind).map_err(|e| match e {
 									// There was a conversion error
 									Error::CoerceTo {
@@ -248,8 +250,8 @@ impl Document {
 						})?;
 						// If this is the `id` field, check the inner type
 						if fd.name.is_id() {
-							if let Value::Thing(id) = val.clone() {
-								let inner = Value::from(id.id);
+							if let Value::Thing(id) = &val {
+								let inner = Value::from(id.clone().id);
 								inner.coerce_to(kind).map_err(|e| match e {
 									// There was a conversion error
 									Error::CoerceTo {
