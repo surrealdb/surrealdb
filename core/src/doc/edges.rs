@@ -47,14 +47,14 @@ impl Document {
 			) {
 				// Check that the `in` record exists
 				let key = crate::key::thing::new(ns, db, &l.tb, &l.id);
-				if !txn.exists(key).await? {
+				if !txn.exists(key, None).await? {
 					return Err(Error::IdNotFound {
 						value: l.to_string(),
 					});
 				}
 				// Check that the `out` record exists
 				let key = crate::key::thing::new(ns, db, &r.tb, &r.id);
-				if !txn.exists(key).await? {
+				if !txn.exists(key, None).await? {
 					return Err(Error::IdNotFound {
 						value: r.to_string(),
 					});

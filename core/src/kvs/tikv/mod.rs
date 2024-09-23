@@ -176,10 +176,14 @@ impl super::api::Transaction for Transaction {
 
 	/// Check if a key exists
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
-	async fn exists<K>(&mut self, key: K) -> Result<bool, Error>
+	async fn exists<K>(&mut self, key: K, version: Option<u64>) -> Result<bool, Error>
 	where
 		K: Into<Key> + Sprintable + Debug,
 	{
+		// TiKV does not support versioned queries.
+		if version.is_some() {
+			return Err(Error::UnsupportedVersionedQueries);
+		}
 		// Check to see if transaction is closed
 		if self.done {
 			return Err(Error::TxFinished);
@@ -200,7 +204,6 @@ impl super::api::Transaction for Transaction {
 		if version.is_some() {
 			return Err(Error::UnsupportedVersionedQueries);
 		}
-
 		// Check to see if transaction is closed
 		if self.done {
 			return Err(Error::TxFinished);
@@ -222,7 +225,6 @@ impl super::api::Transaction for Transaction {
 		if version.is_some() {
 			return Err(Error::UnsupportedVersionedQueries);
 		}
-
 		// Check to see if transaction is closed
 		if self.done {
 			return Err(Error::TxFinished);
@@ -260,7 +262,6 @@ impl super::api::Transaction for Transaction {
 		if version.is_some() {
 			return Err(Error::UnsupportedVersionedQueries);
 		}
-
 		// Check to see if transaction is closed
 		if self.done {
 			return Err(Error::TxFinished);
@@ -447,10 +448,19 @@ impl super::api::Transaction for Transaction {
 
 	/// Delete a range of keys from the database
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.sprint()))]
-	async fn keys<K>(&mut self, rng: Range<K>, limit: u32) -> Result<Vec<Key>, Error>
+	async fn keys<K>(
+		&mut self,
+		rng: Range<K>,
+		limit: u32,
+		version: Option<u64>,
+	) -> Result<Vec<Key>, Error>
 	where
 		K: Into<Key> + Sprintable + Debug,
 	{
+		// TiKV does not support versioned queries.
+		if version.is_some() {
+			return Err(Error::UnsupportedVersionedQueries);
+		}
 		// Check to see if transaction is closed
 		if self.done {
 			return Err(Error::TxFinished);
@@ -481,7 +491,6 @@ impl super::api::Transaction for Transaction {
 		if version.is_some() {
 			return Err(Error::UnsupportedVersionedQueries);
 		}
-
 		// Check to see if transaction is closed
 		if self.done {
 			return Err(Error::TxFinished);

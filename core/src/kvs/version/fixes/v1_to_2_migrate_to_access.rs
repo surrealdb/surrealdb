@@ -44,7 +44,7 @@ async fn migrate_ns_tokens(tx: Arc<Transaction>, ns: &str) -> Result<(), Error> 
 
 	// Scan the token definitions
 	'scan: loop {
-		let mut keys = tx.keys(beg.clone()..end.clone(), 1000).await?;
+		let mut keys = tx.keys(beg.clone()..end.clone(), 1000, None).await?;
 		if keys.is_empty() {
 			break 'scan;
 		}
@@ -90,7 +90,7 @@ async fn migrate_db_tokens(tx: Arc<Transaction>, ns: &str, db: &str) -> Result<(
 
 	// Scan the token definitions
 	'scan: loop {
-		let mut keys = tx.keys(beg.clone()..end.clone(), 1000).await?;
+		let mut keys = tx.keys(beg.clone()..end.clone(), 1000, None).await?;
 		if keys.is_empty() {
 			break 'scan;
 		}
@@ -140,7 +140,7 @@ async fn collect_db_scope_keys(
 
 	// Scan the token definitions
 	'scan: loop {
-		let mut keys = tx.keys(beg.clone()..end.clone(), 1000).await?;
+		let mut keys = tx.keys(beg.clone()..end.clone(), 1000, None).await?;
 		if keys.is_empty() {
 			break 'scan;
 		}
@@ -205,7 +205,7 @@ async fn migrate_sc_tokens(
 
 	// Scan the token definitions
 	'scan: loop {
-		let mut keys = tx.keys(beg.clone()..end.clone(), 1000).await?;
+		let mut keys = tx.keys(beg.clone()..end.clone(), 1000, None).await?;
 		if keys.is_empty() {
 			break 'scan;
 		}

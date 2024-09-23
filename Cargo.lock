@@ -3503,15 +3503,15 @@ dependencies = [
 
 [[package]]
 name = "nanoservices-utils"
-version = "0.1.5"
+version = "0.1.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "63a4117f6ebfcfe84722ef283fd6e3bfcaa141718f3ff092343bb6cb98482e03"
+checksum = "3c947dd523c885be700bf0ca6c46c83d6fd85a3673b49ca70cdd630493efd925"
 dependencies = [
  "bitcode",
  "chrono",
  "futures",
  "paste",
- "revision 0.7.1",
+ "revision 0.10.0",
  "serde",
  "thiserror",
 ]
@@ -5983,11 +5983,10 @@ dependencies = [
 
 [[package]]
 name = "surrealcs"
-version = "0.3.2"
+version = "0.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b28a50184a9a743ac180985d8b94ac4c93e4afaa0140f1057d3b11d4d36b9e8b"
+checksum = "134e46db1610c967ba2205d0cd28988086c7675661f1d2129a16225fece82f0a"
 dependencies = [
- "bincode",
  "bytes",
  "chrono",
  "futures",
@@ -6004,13 +6003,14 @@ dependencies = [
 
 [[package]]
 name = "surrealcs-kernel"
-version = "0.3.2"
+version = "0.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ab2a5ba4af373b48fa241a81676d0172fc92e563df217282c472252b90beafee"
+checksum = "723ea8fe7300e72a10d3f3e3e277fd1b08c011ed2f5acc6a8b528b9ec5d7c20d"
 dependencies = [
  "bincode",
  "chrono",
  "nanoservices-utils",
+ "revision 0.10.0",
  "serde",
  "tokio",
  "tracing",
