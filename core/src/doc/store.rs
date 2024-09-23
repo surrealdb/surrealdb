@@ -19,8 +19,6 @@ impl Document {
 		if self.tb(ctx, opt).await?.drop {
 			return Ok(());
 		}
-		// Get the transaction
-		let txn = ctx.tx();
 		// Get the record id
 		let rid = self.id()?;
 		// Store the record data
@@ -37,7 +35,7 @@ impl Document {
 			// set and update the key, without checking if the key
 			// already exists in the storage engine.
 			Statement::Insert(_) if self.extras.is_insert_initial() => {
-				match txn.put(key, self, opt.version).await {
+				match ctx.tx().put(key, self, opt.version).await {
 					// The key already exists, so return an error
 					Err(Error::TxKeyAlreadyExists) => Err(Error::RecordExists {
 						thing: rid.as_ref().to_owned(),
@@ -55,7 +53,7 @@ impl Document {
 			// key does not exist.  If the record value exists then we
 			// retry and attempt to update the record which exists.
 			Statement::Upsert(_) if self.is_new() => {
-				match txn.put(key, self, opt.version).await {
+				match ctx.tx().put(key, self, opt.version).await {
 					// The key already exists, so return an error
 					Err(Error::TxKeyAlreadyExists) => Err(Error::RecordExists {
 						thing: rid.as_ref().to_owned(),
@@ -73,7 +71,7 @@ impl Document {
 			// key does not exist. If it already exists, then we
 			// return an error, and the statement fails.
 			Statement::Create(_) => {
-				match txn.put(key, self, opt.version).await {
+				match ctx.tx().put(key, self, opt.version).await {
 					// The key already exists, so return an error
 					Err(Error::TxKeyAlreadyExists) => Err(Error::RecordExists {
 						thing: rid.as_ref().to_owned(),
@@ -85,7 +83,7 @@ impl Document {
 				}
 			}
 			// Let's update the stored value for the specified key
-			_ => txn.set(key, self, None).await,
+			_ => ctx.tx().set(key, self, None).await,
 		}?;
 		// Carry on
 		Ok(())
