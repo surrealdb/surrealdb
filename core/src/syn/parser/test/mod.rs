@@ -116,3 +116,8 @@ fn escaped_params_backtick() {
 fn parse_immediate_insert_subquery() {
 	test_parse!(parse_query, r#"LET $insert = INSERT INTO t (SELECT true FROM 1);"#).unwrap();
 }
+
+#[test]
+fn parse_inout_graph_select() {
+	test_parse!(parse_query, r#" SELECT ->likes<->person FROM person; "#).unwrap();
+}
