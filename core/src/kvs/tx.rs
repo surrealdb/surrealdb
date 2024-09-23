@@ -1608,7 +1608,7 @@ impl Transaction {
 						val
 					}
 					// Check to see that the hierarchy exists
-					Err(Error::TbNotFound {
+					Err(Error::DbNotFound {
 						value,
 					}) if strict => {
 						self.get_ns(ns).await?;
