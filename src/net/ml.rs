@@ -155,7 +155,8 @@ async fn import(
 	let db = &state.datastore;
 	// Check if capabilities allow querying the requested HTTP route
 	if !db.allows_http_route(&RouteTarget::Ml) {
-		return Err(Error::OperationForbidden);
+		warn!("Capabilities denied HTTP route request attempt, target: '{}'", &RouteTarget::Ml);
+		return Err(Error::ForbiddenRoute(RouteTarget::Ml.to_string()));
 	}
 	Err(Error::Request)
 }
@@ -171,7 +172,8 @@ async fn export(
 	let db = &state.datastore;
 	// Check if capabilities allow querying the requested HTTP route
 	if !db.allows_http_route(&RouteTarget::Ml) {
-		return Err(Error::OperationForbidden);
+		warn!("Capabilities denied HTTP route request attempt, target: '{}'", &RouteTarget::Ml);
+		return Err(Error::ForbiddenRoute(RouteTarget::Ml.to_string()));
 	}
 	Err(Error::Request)
 }
