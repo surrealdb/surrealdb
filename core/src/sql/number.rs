@@ -18,7 +18,7 @@ use std::ops::{self, Add, Div, Mul, Neg, Rem, Sub};
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Number";
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Copy, Serialize, Deserialize)]
+#[derive(Clone, Copy, Serialize, Deserialize, Debug)]
 #[serde(rename = "$surrealdb::private::sql::Number")]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
@@ -27,18 +27,6 @@ pub enum Number {
 	Float(f64),
 	Decimal(Decimal),
 	// Add new variants here
-}
-
-impl Debug for Number {
-	fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-		match self {
-			Self::Int(arg0) => f.debug_tuple("Int").field(arg0).finish(),
-			Self::Float(arg0) => write!(f, "Float({arg0} | {arg0:?} | {:b})", unsafe {
-				std::mem::transmute_copy::<f64, u64>(arg0)
-			}),
-			Self::Decimal(arg0) => f.debug_tuple("Decimal").field(arg0).finish(),
-		}
-	}
 }
 
 impl Default for Number {
@@ -578,23 +566,6 @@ impl Number {
 
 impl Eq for Number {}
 
-// Lowest positive decimal is 0.0000000000000000000000000001 (10^-28)
-const DECIMAL_PRECISION_THREASHOLD: f64 = 1e-28;
-// const DECIMAL_MAX: f64 = 79228162514264337593543950336;
-
-// Because of
-
-fn string_conv(value: f64) -> Option<Decimal> {
-	let string = value.to_string();
-	match Decimal::from_str_exact(&string) {
-		Ok(d) => Some(d),
-		Err(e) => match e {
-			rust_decimal::Error::Underflow => Some(Decimal::ZERO),
-			_ => None,
-		},
-	}
-}
-
 impl Ord for Number {
 	fn cmp(&self, other: &Self) -> Ordering {
 		fn total_cmp_f64(a: f64, b: f64) -> Ordering {
@@ -625,58 +596,6 @@ impl Ord for Number {
 			(Number::Int(v), Number::Decimal(w)) => Decimal::from(*v).cmp(w),
 			(Number::Decimal(v), Number::Int(w)) => v.cmp(&Decimal::from(*w)),
 			// ------------------------------
-			// (Number::Float(v), Number::Decimal(w)) => {
-			// 	if !v.is_finite() {
-			// 		v.total_cmp(&0.0)
-			// 	} else if *v >= MAX_DECIMAL_IN_F64 {
-			// 		Ordering::Greater
-			// 	} else if *v <= -MAX_DECIMAL_IN_F64 {
-			// 		Ordering::Less
-			// 	} else {
-			// 		Decimal::cmp(&Decimal::from_f64(*v).expect("checked that float is finite"), &w)
-			// 	}
-			// }
-			// (Number::Decimal(v), Number::Float(w)) => {
-			// 	if !w.is_finite() {
-			// 		0.0f64.total_cmp(w)
-			// 	} else if *w >= MAX_DECIMAL_IN_F64 {
-			// 		Ordering::Less
-			// 	} else if *w <= -MAX_DECIMAL_IN_F64 {
-			// 		Ordering::Greater
-			// 	} else {
-			// 		v.cmp(&Decimal::from_f64(*w).expect("checked that float is finite"))
-			// 	}
-			// }
-			// (Number::Float(v), Number::Decimal(w)) => {
-			// 	if *v == 0.0 && w == &Decimal::ZERO {
-			// 		Ordering::Equal
-			// 	} else if v.abs() < DECIMAL_PRECISION_THREASHOLD {
-			// 		if v.is_positive() {
-			// 			if w > &Decimal::ZERO {
-			// 				Ordering::Less
-			// 			} else {
-			// 				Ordering::Greater
-			// 			}
-			// 		} else {
-			// 			if w < &Decimal::ZERO {
-			// 				Ordering::Greater
-			// 			} else {
-			// 				Ordering::Less
-			// 			}
-			// 		}
-			// 	} else {
-			// 		// TODO: remove the filter after https://github.com/paupino/rust-decimal/pull/678 is released
-			// 		if let Some(v) = Decimal::from_f64_retain(*v)
-			// 			.filter(|_| v.abs() < 79228162514264337593543950336.0)
-			// 		{
-			// 			Decimal::cmp(&v, &w) // in range
-			// 		} else if v.is_sign_positive() {
-			// 			Ordering::Greater // inf, +NaN, pos overflow
-			// 		} else {
-			// 			Ordering::Less // -inf, -NaN, neg overflow
-			// 		}
-			// 	}
-			// }
 			(Number::Float(v), Number::Decimal(w)) => {
 				if v > &Decimal::MAX
 					.to_f64()
@@ -689,8 +608,6 @@ impl Ord for Number {
 				{
 					Ordering::Less
 				} else if let Some(vd) = Decimal::from_f64_retain(*v) {
-					// let can_be_eq = v.fract() == Decimal::ZERO && w.fract() == Decimal::ZERO;
-
 					match (vd.cmp(w), v.fract() == 0.0, w.fract() == Decimal::ZERO) {
 						// both non-integers so we order float first
 						(Ordering::Equal, false, false) => Ordering::Less,
@@ -746,45 +663,17 @@ impl PartialEq for Number {
 			a.to_bits().eq(&b.to_bits()) || (a == 0.0 && b == 0.0)
 		}
 
-		fn int_float_eq(x: &i64, y: &f64) -> bool {
-			if y.fract() != 0.0 {
-				false
-			} else if y.abs() > i64::MAX as f64 {
-				false
-			} else {
-				*x == *y as i64
-			}
-		}
-
-		fn dec_float_eq(x: Decimal, y: f64) -> bool {
-			if y.fract() != 0.0 || x.fract() != Decimal::ZERO || !y.is_finite() {
-				false
-			} else if y.abs()
-				> Decimal::MAX.to_f64().expect("Decimal::MAX should be able to be converted to f64")
-			{
-				false
-			} else {
-				x == Decimal::from_f64(y).expect(
-					"a finite float less than Decimal::MAX with fract==0.0 should be a valid decimal",
-				)
-			}
-		}
-
 		match (self, other) {
 			(Number::Int(v), Number::Int(w)) => v.eq(w),
 			(Number::Float(v), Number::Float(w)) => total_eq_f64(*v, *w),
 			(Number::Decimal(v), Number::Decimal(w)) => v.eq(w),
 			// ------------------------------
-			// (Number::Int(v), Number::Float(w)) => int_float_eq(v, w),
-			// (Number::Float(v), Number::Int(w)) => int_float_eq(w, v),
 			(v @ Number::Int(_), w @ Number::Float(_)) => v.cmp(w) == Ordering::Equal,
 			(v @ Number::Float(_), w @ Number::Int(_)) => v.cmp(w) == Ordering::Equal,
 			// ------------------------------
 			(Number::Int(v), Number::Decimal(w)) => Decimal::from(*v).eq(w),
 			(Number::Decimal(v), Number::Int(w)) => v.eq(&Decimal::from(*w)),
 			// ------------------------------
-			// (Number::Float(v), Number::Decimal(w)) => dec_float_eq(*w, *v),
-			// (Number::Decimal(v), Number::Float(w)) => dec_float_eq(*v, *w),
 			(v @ Number::Float(_), w @ Number::Decimal(_)) => v.cmp(w) == Ordering::Equal,
 			(v @ Number::Decimal(_), w @ Number::Float(_)) => v.cmp(w) == Ordering::Equal,
 		}
@@ -1094,6 +983,7 @@ impl ToFloat for Number {
 mod tests {
 	use std::cmp::Ordering;
 
+	use rand::seq::SliceRandom;
 	use rand::thread_rng;
 	use rand::Rng;
 	use rust_decimal::Decimal;
@@ -1113,21 +1003,28 @@ mod tests {
 		assert_eq!(sum_three.try_float_div(count_three).unwrap(), Number::Float(2.1));
 	}
 
-	// #[test]
-	// fn ord_test() {
-	// 	let c = Number::Float(1f64);
-	// 	let a = Number::Decimal(Decimal::from_str_exact("1.0000000000000000000000000001").unwrap());
-	// 	let b = Number::Decimal(Decimal::from_str_exact("1.0000000000000000000000000002").unwrap());
-	// 	let d = Number::Float(f64::NAN);
-	// 	let e = Number::Float(f64::INFINITY);
-	// 	let e = Number::Float(-f64::INFINITY);
-	// 	let d = Number::Float(-f64::NAN);
-	// }
+	#[test]
+	fn ord_test() {
+		let a = Number::Float(-f64::NAN);
+		let b = Number::Float(-f64::INFINITY);
+		let c = Number::Float(1f64);
+		let d = Number::Decimal(Decimal::from_str_exact("1.0000000000000000000000000002").unwrap());
+		let e = Number::Decimal(Decimal::from_str_exact("1.1").unwrap());
+		let f = Number::Float(1.1f64);
+		let g = Number::Float(1.5f64);
+		let h = Number::Decimal(Decimal::from_str_exact("1.5").unwrap());
+		let i = Number::Float(f64::INFINITY);
+		let j = Number::Float(f64::NAN);
+		let original = vec![a, b, c, d, e, f, g, h, i, j];
+		let mut copy = original.clone();
+		let mut rng = thread_rng();
+		copy.shuffle(&mut rng);
+		copy.sort();
+		assert_eq!(original, copy);
+	}
 
 	#[test]
 	fn ord_fuzz() {
-		// fails:
-		// Int(9223372036854775807) Float(9223372036854776000 | 9.223372036854776e18 | 100001111100000000000000000000000000000000000000000000000000000) Decimal(9223372036854775808)
 		fn random_number() -> Number {
 			let mut rng = thread_rng();
 			match rng.gen_range(0..3) {
