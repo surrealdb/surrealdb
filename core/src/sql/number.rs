@@ -631,14 +631,6 @@ impl Ord for Number {
 				}
 			}
 			(Number::Decimal(v), Number::Float(w)) => {
-				// if let Some(w) = Decimal::from_f64_retain(*w) {
-				// 	Decimal::cmp(&v, &w) // in range
-				// } else if w.is_sign_positive() {
-				// 	Ordering::Less // inf, +NaN, pos overflow
-				// } else {
-				// 	Ordering::Greater // -inf, -NaN, neg overflow
-				// }
-
 				Number::cmp(&Number::Float(*w), &Number::Decimal(*v)).reverse()
 			}
 		}
