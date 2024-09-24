@@ -7,14 +7,14 @@ dtrace:::BEGIN
     printf("Tracing... Hit Ctrl-C to end.\n");
 }
 
-pid$target::surreal*:entry
+pid$target::*surreal*:entry
 {
     self->entry_time = timestamp;
     self->v_entry_time = vtimestamp;
 }
 
 
-pid$target::surreal*:return
+pid$target::*surreal*:return
 {
     total_time = timestamp - self->entry_time;
     cpu_time = vtimestamp - self->v_entry_time;
