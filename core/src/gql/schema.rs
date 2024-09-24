@@ -84,8 +84,8 @@ pub async fn generate_schema(
 ) -> Result<Schema, GqlError> {
 	let kvs = datastore;
 	let tx = kvs.transaction(TransactionType::Read, LockType::Optimistic).await?;
-	let ns = session.ns.as_ref().ok_or(GqlError::UnpecifiedNamespace)?;
-	let db = session.db.as_ref().ok_or(GqlError::UnpecifiedDatabase)?;
+	let ns = session.ns.as_ref().ok_or(GqlError::UnspecifiedNamespace)?;
+	let db = session.db.as_ref().ok_or(GqlError::UnspecifiedDatabase)?;
 
 	let cg = tx.get_db_config(ns, db, "graphql").await.map_err(|e| match e {
 		crate::err::Error::CgNotFound {
@@ -185,7 +185,7 @@ pub async fn generate_schema(
 									let desc = current.get("desc");
 									match (asc, desc) {
 										(Some(_), Some(_)) => {
-											return Err("Found both asc and desc in order".into());
+											return Err("Found both ASC and DESC in order".into());
 										}
 										(Some(GqlValue::Enum(a)), None) => {
 											orders.push(order!(asc, a.as_str()))
@@ -281,7 +281,7 @@ pub async fn generate_schema(
 					})
 				},
 			)
-			.description(format!("Generated from table `{}`{}\nallows querying a table with filters", tb.name, if let Some(ref c) = &tb.comment {format!("\n{c}")} else {"".to_string()}))
+			.description(format!("{}", if let Some(ref c) = &tb.comment { format!("{c}") } else { format!("Generated from table `{}`\nallows querying a table with filters", tb.name) }))
 			.argument(limit_input!())
 			.argument(start_input!())
 			.argument(InputValue::new("order", TypeRef::named(&table_order_name)))
@@ -329,12 +329,11 @@ pub async fn generate_schema(
 				},
 			)
 			.description(format!(
-				"Generated from table `{}`{}\nallows querying a single record in a table by id",
-				tb.name,
+				"{}",
 				if let Some(ref c) = &tb.comment {
-					format!("\n{c}")
+					format!("{c}")
 				} else {
-					"".to_string()
+					format!("Generated from table `{}`\nallows querying a single record in a table by ID", tb.name)
 				}
 			))
 			.argument(id_input!()),
@@ -367,11 +366,20 @@ pub async fn generate_schema(
 			table_filter = table_filter
 				.field(InputValue::new(fd.name.to_string(), TypeRef::named(type_filter_name)));
 
-			table_ty_obj = table_ty_obj.field(Field::new(
-				fd.name.to_string(),
-				fd_type,
-				make_table_field_resolver(fd_name.as_str(), fd.kind.clone()),
-			));
+			table_ty_obj = table_ty_obj
+				.field(Field::new(
+					fd.name.to_string(),
+					fd_type,
+					make_table_field_resolver(fd_name.as_str(), fd.kind.clone()),
+				))
+				.description(format!(
+					"{}",
+					if let Some(ref c) = fd.comment {
+						format!("{c}")
+					} else {
+						"".to_string()
+					}
+				));
 		}
 
 		types.push(Type::Object(table_ty_obj));
@@ -417,7 +425,7 @@ pub async fn generate_schema(
 				}
 			})
 		})
-		.description("allows fetching arbitrary records".to_string())
+		.description("Allows fetching arbitrary records".to_string())
 		.argument(id_input!()),
 	);
 
@@ -472,7 +480,7 @@ pub async fn generate_schema(
 		schema,
 		"uuid",
 		Kind::Uuid,
-		"a string encoded uuid",
+		"String encoded UUID",
 		"https://datatracker.ietf.org/doc/html/rfc4122"
 	);
 

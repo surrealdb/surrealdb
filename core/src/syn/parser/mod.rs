@@ -7,21 +7,21 @@
 //! # Implementation Details
 //!
 //! There are a bunch of common patterns for which this module has some confinence functions.
-//! - Whenever only one token can be next you should use the [`expected!`] macro. This macro
+//! - Whenever only one token can be next you should use the `expected!` macro. This macro
 //!     ensures that the given token type is next and if not returns a parser error.
 //! - Whenever a limited set of tokens can be next it is common to match the token kind and then
-//!     have a catch all arm which calles the macro [`unexpected!`]. This macro will raise an parse
+//!     have a catch all arm which calles the macro `unexpected!`. This macro will raise an parse
 //!     error with information about the type of token it recieves and what it expected.
 //! - If a single token can be optionally next use [`Parser::eat`] this function returns a bool
 //!     depending on if the given tokenkind was eaten.
-//! - If a closing delimiting token is expected use [`Parser::expect_closing_delimiter`]. This
+//! - If a closing delimiting token is expected use `Parser::expect_closing_delimiter`. This
 //!     function will raise an error if the expected delimiter isn't the next token. This error will
 //!     also point to which delimiter the parser expected to be closed.
 //!
 //! ## Far Token Peek
 //!
 //! Occasionally the parser needs to check further ahead than peeking allows.
-//! This is done with the [`Parser::peek_token_at`] function. This function peeks a given number
+//! This is done with the `Parser::peek_token_at` function. This function peeks a given number
 //! of tokens further than normal up to 3 tokens further.
 //!
 //! ## WhiteSpace Tokens
@@ -134,7 +134,7 @@ impl<'a> Parser<'a> {
 			last_span: Span::empty(),
 			token_buffer: TokenBuffer::new(),
 			glued_value: GluedValue::None,
-			table_as_field: false,
+			table_as_field: true,
 			legacy_strands: false,
 			flexible_record_id: true,
 			object_recursion: 100,
@@ -180,7 +180,7 @@ impl<'a> Parser<'a> {
 	pub fn reset(&mut self) {
 		self.last_span = Span::empty();
 		self.token_buffer.clear();
-		self.table_as_field = false;
+		self.table_as_field = true;
 		self.lexer.reset();
 	}
 
@@ -319,8 +319,12 @@ impl<'a> Parser<'a> {
 		self.last_span
 	}
 
-	pub fn assert_finished(&self) -> ParseResult<()> {
-		self.lexer.assert_finished()
+	pub fn assert_finished(&mut self) -> ParseResult<()> {
+		let p = self.peek();
+		if self.peek().kind != TokenKind::Eof {
+			bail!("Unexpected token `{}`, expected no more tokens",p.kind, @p.span);
+		}
+		Ok(())
 	}
 
 	/// Eat the next token if it is of the given kind.

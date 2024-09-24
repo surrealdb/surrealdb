@@ -288,6 +288,7 @@ impl Parser<'_> {
 			t!("RETURN")
 			| t!("SELECT")
 			| t!("CREATE")
+			| t!("INSERT")
 			| t!("UPSERT")
 			| t!("UPDATE")
 			| t!("DELETE")

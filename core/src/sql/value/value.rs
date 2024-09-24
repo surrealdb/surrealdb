@@ -2909,6 +2909,7 @@ impl Value {
 	/// Check if we require a writeable transaction
 	pub(crate) fn writeable(&self) -> bool {
 		match self {
+			Value::Cast(v) => v.writeable(),
 			Value::Block(v) => v.writeable(),
 			Value::Idiom(v) => v.writeable(),
 			Value::Array(v) => v.iter().any(Value::writeable),
@@ -2923,8 +2924,21 @@ impl Value {
 		}
 	}
 	/// Process this type returning a computed simple Value
-	///
-	/// Is used recursively.
+	pub(crate) async fn compute(
+		&self,
+		stk: &mut Stk,
+		ctx: &Context,
+		opt: &Options,
+		doc: Option<&CursorDoc>,
+	) -> Result<Value, Error> {
+		match self.compute_unbordered(stk, ctx, opt, doc).await {
+			Err(Error::Return {
+				value,
+			}) => Ok(value),
+			res => res,
+		}
+	}
+	/// Process this type returning a computed simple Value, without catching errors
 	pub(crate) async fn compute_unbordered(
 		&self,
 		stk: &mut Stk,
@@ -2953,21 +2967,6 @@ impl Value {
 			_ => Ok(self.to_owned()),
 		}
 	}
-
-	pub(crate) async fn compute(
-		&self,
-		stk: &mut Stk,
-		ctx: &Context,
-		opt: &Options,
-		doc: Option<&CursorDoc>,
-	) -> Result<Value, Error> {
-		match self.compute_unbordered(stk, ctx, opt, doc).await {
-			Err(Error::Return {
-				value,
-			}) => Ok(value),
-			res => res,
-		}
-	}
 }
 
 // ------------------------------
@@ -2982,10 +2981,10 @@ impl TryAdd for Value {
 	fn try_add(self, other: Self) -> Result<Self, Error> {
 		Ok(match (self, other) {
 			(Self::Number(v), Self::Number(w)) => Self::Number(v.try_add(w)?),
-			(Self::Strand(v), Self::Strand(w)) => Self::Strand(v + w),
-			(Self::Datetime(v), Self::Duration(w)) => Self::Datetime(w + v),
-			(Self::Duration(v), Self::Datetime(w)) => Self::Datetime(v + w),
-			(Self::Duration(v), Self::Duration(w)) => Self::Duration(v + w),
+			(Self::Strand(v), Self::Strand(w)) => Self::Strand(v.try_add(w)?),
+			(Self::Datetime(v), Self::Duration(w)) => Self::Datetime(w.try_add(v)?),
+			(Self::Duration(v), Self::Datetime(w)) => Self::Datetime(v.try_add(w)?),
+			(Self::Duration(v), Self::Duration(w)) => Self::Duration(v.try_add(w)?),
 			(v, w) => return Err(Error::TryAdd(v.to_raw_string(), w.to_raw_string())),
 		})
 	}
@@ -2995,7 +2994,7 @@ impl TryAdd for Value {
 
 pub(crate) trait TrySub<Rhs = Self> {
 	type Output;
-	fn try_sub(self, v: Self) -> Result<Self::Output, Error>;
+	fn try_sub(self, v: Rhs) -> Result<Self::Output, Error>;
 }
 
 impl TrySub for Value {
@@ -3003,10 +3002,10 @@ impl TrySub for Value {
 	fn try_sub(self, other: Self) -> Result<Self, Error> {
 		Ok(match (self, other) {
 			(Self::Number(v), Self::Number(w)) => Self::Number(v.try_sub(w)?),
-			(Self::Datetime(v), Self::Datetime(w)) => Self::Duration(v - w),
-			(Self::Datetime(v), Self::Duration(w)) => Self::Datetime(w - v),
-			(Self::Duration(v), Self::Datetime(w)) => Self::Datetime(v - w),
-			(Self::Duration(v), Self::Duration(w)) => Self::Duration(v - w),
+			(Self::Datetime(v), Self::Datetime(w)) => Self::Duration(v.try_sub(w)?),
+			(Self::Datetime(v), Self::Duration(w)) => Self::Datetime(w.try_sub(v)?),
+			(Self::Duration(v), Self::Datetime(w)) => Self::Datetime(v.try_sub(w)?),
+			(Self::Duration(v), Self::Duration(w)) => Self::Duration(v.try_sub(w)?),
 			(v, w) => return Err(Error::TrySub(v.to_raw_string(), w.to_raw_string())),
 		})
 	}

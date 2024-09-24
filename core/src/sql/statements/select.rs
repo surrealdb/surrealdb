@@ -2,10 +2,10 @@ use crate::ctx::{Context, MutableContext};
 use crate::dbs::{Iterable, Iterator, Options, Statement};
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::idx::planner::QueryPlanner;
+use crate::idx::planner::{QueryPlanner, QueryPlannerParams};
 use crate::sql::{
-	Cond, Explain, Fetchs, Field, Fields, Groups, Id, Idioms, Limit, Orders, Splits, Start,
-	Timeout, Value, Values, Version, With,
+	Cond, Explain, Fetchs, Field, Fields, Groups, Idioms, Limit, Orders, Splits, Start, Timeout,
+	Value, Values, Version, With,
 };
 use derive::Store;
 use reblessive::tree::Stk;
@@ -100,54 +100,49 @@ impl SelectStatement {
 		};
 		// Get a query planner
 		let mut planner = QueryPlanner::new();
-		let params = self.into();
+		let params: QueryPlannerParams<'_> = self.into();
+		let keys = params.is_keys_only();
 		// Loop over the select targets
 		for w in self.what.0.iter() {
 			let v = w.compute(stk, &ctx, &opt, doc).await?;
 			match v {
+				Value::Thing(v) => match v.is_range() {
+					true => i.prepare_range(&stm, v, keys)?,
+					false => i.prepare_thing(&stm, v)?,
+				},
+				Value::Edges(v) => {
+					if self.only && !limit_is_one_or_zero {
+						return Err(Error::SingleOnlyOutput);
+					}
+					i.prepare_edges(&stm, *v)?;
+				}
+				Value::Mock(v) => {
+					if self.only && !limit_is_one_or_zero {
+						return Err(Error::SingleOnlyOutput);
+					}
+					i.prepare_mock(&stm, v)?;
+				}
 				Value::Table(t) => {
 					if self.only && !limit_is_one_or_zero {
 						return Err(Error::SingleOnlyOutput);
 					}
 					planner.add_iterables(stk, &ctx, &opt, t, &params, &mut i).await?;
 				}
-				Value::Thing(v) => match &v.id {
-					Id::Range(r) => i.ingest(Iterable::TableRange(v.tb, *r.to_owned())),
-					_ => i.ingest(Iterable::Thing(v)),
-				},
-				Value::Edges(v) => {
-					if self.only && !limit_is_one_or_zero {
-						return Err(Error::SingleOnlyOutput);
-					}
-
-					i.ingest(Iterable::Edges(*v))
-				}
-				Value::Mock(v) => {
-					if self.only && !limit_is_one_or_zero {
-						return Err(Error::SingleOnlyOutput);
-					}
-
-					for v in v {
-						i.ingest(Iterable::Thing(v));
-					}
-				}
 				Value::Array(v) => {
 					if self.only && !limit_is_one_or_zero {
 						return Err(Error::SingleOnlyOutput);
 					}
-
 					for v in v {
 						match v {
 							Value::Table(t) => {
 								planner.add_iterables(stk, &ctx, &opt, t, &params, &mut i).await?;
 							}
-							Value::Thing(v) => i.ingest(Iterable::Thing(v)),
-							Value::Edges(v) => i.ingest(Iterable::Edges(*v)),
-							Value::Mock(v) => {
-								for v in v {
-									i.ingest(Iterable::Thing(v));
-								}
-							}
+							Value::Mock(v) => i.prepare_mock(&stm, v)?,
+							Value::Edges(v) => i.prepare_edges(&stm, *v)?,
+							Value::Thing(v) => match v.is_range() {
+								true => i.prepare_range(&stm, v, keys)?,
+								false => i.prepare_thing(&stm, v)?,
+							},
 							_ => i.ingest(Iterable::Value(v)),
 						}
 					}

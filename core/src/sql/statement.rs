@@ -23,7 +23,6 @@ use serde::{Deserialize, Serialize};
 use std::{
 	fmt::{self, Display, Formatter, Write},
 	ops::Deref,
-	time::Duration,
 };
 
 #[revisioned(revision = 1)]
@@ -101,19 +100,6 @@ pub enum Statement {
 }
 
 impl Statement {
-	/// Get the statement timeout duration, if any
-	pub fn timeout(&self) -> Option<Duration> {
-		match self {
-			Self::Create(v) => v.timeout.as_ref().map(|v| *v.0),
-			Self::Delete(v) => v.timeout.as_ref().map(|v| *v.0),
-			Self::Insert(v) => v.timeout.as_ref().map(|v| *v.0),
-			Self::Relate(v) => v.timeout.as_ref().map(|v| *v.0),
-			Self::Select(v) => v.timeout.as_ref().map(|v| *v.0),
-			Self::Upsert(v) => v.timeout.as_ref().map(|v| *v.0),
-			Self::Update(v) => v.timeout.as_ref().map(|v| *v.0),
-			_ => None,
-		}
-	}
 	/// Check if we require a writeable transaction
 	pub(crate) fn writeable(&self) -> bool {
 		match self {

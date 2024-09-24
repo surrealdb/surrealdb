@@ -47,12 +47,12 @@ impl Default for Kind {
 }
 
 impl Kind {
-	// Returns true if this type is an `any`
+	/// Returns true if this type is an `any`
 	pub(crate) fn is_any(&self) -> bool {
 		matches!(self, Kind::Any)
 	}
 
-	// Returns true if this type is a record
+	/// Returns true if this type is a record
 	pub(crate) fn is_record(&self) -> bool {
 		matches!(self, Kind::Record(_))
 	}
@@ -144,7 +144,7 @@ impl Kind {
 		}
 	}
 
-	// return the kind of the contained value.
+	// Return the kind of the contained value.
 	//
 	// For example: for `array<number>` or `set<number>` this returns `number`.
 	// For `array<number> | set<float>` this returns `number | float`.

@@ -29,6 +29,28 @@ pub(crate) struct QueryPlannerParams<'a> {
 	group: Option<&'a Groups>,
 }
 
+impl<'a> QueryPlannerParams<'a> {
+	pub(crate) fn is_keys_only(&self) -> bool {
+		if !self.fields.is_count_all_only() {
+			return false;
+		}
+		if self.cond.is_some() {
+			return false;
+		}
+		if let Some(g) = self.group {
+			if !g.is_empty() {
+				return false;
+			}
+		}
+		if let Some(p) = self.order {
+			if !p.is_empty() {
+				return false;
+			}
+		}
+		true
+	}
+}
+
 impl<'a> From<&'a SelectStatement> for QueryPlannerParams<'a> {
 	fn from(stmt: &'a SelectStatement) -> Self {
 		QueryPlannerParams {
@@ -90,7 +112,15 @@ impl QueryPlanner {
 			tree.knn_condition,
 		)
 		.await?;
-		match PlanBuilder::build(tree.root, params, tree.with_indexes, order)? {
+		match PlanBuilder::build(
+			tree.root,
+			params,
+			tree.with_indexes,
+			order,
+			tree.all_and_groups,
+			tree.all_and,
+			tree.all_expressions_with_index,
+		)? {
 			Plan::SingleIndex(exp, io) => {
 				if io.require_distinct() {
 					self.requires_distinct = true;

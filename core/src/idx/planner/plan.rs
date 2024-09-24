@@ -17,37 +17,31 @@ pub(super) struct PlanBuilder {
 	has_indexes: bool,
 	/// List of expressions that are not ranges, backed by an index
 	non_range_indexes: Vec<(Arc<Expression>, IndexOption)>,
-	/// List of indexes involved in this plan
-	with_indexes: Vec<IndexRef>,
+	/// List of indexes allowed in this plan
+	with_indexes: Option<Vec<IndexRef>>,
 	/// Group each possible optimisations local to a SubQuery
 	groups: BTreeMap<GroupRef, Group>, // The order matters because we want the plan to be consistent across repeated queries.
-	/// Does a group contains only AND relations?
-	all_and_groups: HashMap<GroupRef, bool>,
-	/// Does the whole query contains only AND relations?
-	all_and: bool,
-	/// Is every expression backed by an index?
-	all_exp_with_index: bool,
 }
 
 impl PlanBuilder {
 	pub(super) fn build(
 		root: Option<Node>,
 		params: &QueryPlannerParams,
-		with_indexes: Vec<IndexRef>,
+		with_indexes: Option<Vec<IndexRef>>,
 		order: Option<IndexOption>,
+		all_and_groups: HashMap<GroupRef, bool>,
+		all_and: bool,
+		all_expressions_with_index: bool,
 	) -> Result<Plan, Error> {
 		let mut b = PlanBuilder {
 			has_indexes: false,
 			non_range_indexes: Default::default(),
 			groups: Default::default(),
 			with_indexes,
-			all_and_groups: Default::default(),
-			all_and: true,
-			all_exp_with_index: true,
 		};
 
 		// If we only count and there are no conditions and no aggregations, then we can only scan keys
-		let keys_only = Self::is_keys_only(params);
+		let keys_only = params.is_keys_only();
 
 		if let Some(With::NoIndex) = params.with {
 			return Ok(Self::table_iterator(Some("WITH NOINDEX"), keys_only));
@@ -61,7 +55,7 @@ impl PlanBuilder {
 		}
 
 		// If every boolean operator are AND then we can use the single index plan
-		if b.all_and {
+		if all_and {
 			// TODO: This is currently pretty arbitrary
 			// We take the "first" range query if one is available
 			if let Some((_, group)) = b.groups.into_iter().next() {
@@ -79,10 +73,10 @@ impl PlanBuilder {
 			}
 		}
 		// If every expression is backed by an index with can use the MultiIndex plan
-		else if b.all_exp_with_index {
+		else if all_expressions_with_index {
 			let mut ranges = Vec::with_capacity(b.groups.len());
-			for (depth, group) in b.groups {
-				if b.all_and_groups.get(&depth) == Some(&true) {
+			for (gr, group) in b.groups {
+				if all_and_groups.get(&gr) == Some(&true) {
 					group.take_union_ranges(&mut ranges);
 				} else {
 					group.take_intersect_ranges(&mut ranges);
@@ -93,26 +87,6 @@ impl PlanBuilder {
 		Ok(Self::table_iterator(None, keys_only))
 	}
 
-	fn is_keys_only(p: &QueryPlannerParams) -> bool {
-		if !p.fields.is_count_all_only() {
-			return false;
-		}
-		if p.cond.is_some() {
-			return false;
-		}
-		if let Some(g) = p.group {
-			if !g.is_empty() {
-				return false;
-			}
-		}
-		if let Some(p) = p.order {
-			if !p.is_empty() {
-				return false;
-			}
-		}
-		true
-	}
-
 	fn table_iterator(reason: Option<&str>, keys_only: bool) -> Plan {
 		let reason = reason.map(|s| s.to_string());
 		Plan::TableIterator(reason, keys_only)
@@ -120,9 +94,11 @@ impl PlanBuilder {
 
 	// Check if we have an explicit list of index we can use
 	fn filter_index_option(&self, io: Option<&IndexOption>) -> Option<IndexOption> {
-		if let Some(io) = &io {
-			if !self.with_indexes.is_empty() && !self.with_indexes.contains(&io.ix_ref()) {
-				return None;
+		if let Some(io) = io {
+			if let Some(wi) = &self.with_indexes {
+				if !wi.contains(&io.ix_ref()) {
+					return None;
+				}
 			}
 		}
 		io.cloned()
@@ -137,11 +113,8 @@ impl PlanBuilder {
 				right,
 				exp,
 			} => {
-				let is_bool = self.check_boolean_operator(*group, exp.operator());
 				if let Some(io) = self.filter_index_option(io.as_ref()) {
 					self.add_index_option(*group, exp.clone(), io);
-				} else if self.all_exp_with_index && !is_bool {
-					self.all_exp_with_index = false;
 				}
 				self.eval_node(left)?;
 				self.eval_node(right)?;
@@ -149,26 +122,6 @@ impl PlanBuilder {
 			}
 			Node::Unsupported(reason) => Err(reason.to_owned()),
 			_ => Ok(()),
-		}
-	}
-
-	fn check_boolean_operator(&mut self, gr: GroupRef, op: &Operator) -> bool {
-		match op {
-			Operator::Neg | Operator::Or => {
-				if self.all_and {
-					self.all_and = false;
-				}
-				self.all_and_groups.entry(gr).and_modify(|b| *b = false).or_insert(false);
-				true
-			}
-			Operator::And => {
-				self.all_and_groups.entry(gr).or_insert(true);
-				true
-			}
-			_ => {
-				self.all_and_groups.entry(gr).or_insert(true);
-				false
-			}
 		}
 	}
 

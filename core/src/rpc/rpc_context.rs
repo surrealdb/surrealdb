@@ -172,9 +172,12 @@ pub trait RpcContext {
 			return Err(RpcError::InvalidParams);
 		};
 		let mut tmp_session = mem::take(self.session_mut());
-		crate::iam::verify::token(self.kvs(), &mut tmp_session, &token.0).await?;
+		let out: Result<(), RpcError> =
+			crate::iam::verify::token(self.kvs(), &mut tmp_session, &token.0)
+				.await
+				.map_err(Into::into);
 		*self.session_mut() = tmp_session;
-		Ok(Value::None.into())
+		out.map(|_| Value::None.into())
 	}
 
 	// ------------------------------
@@ -299,8 +302,6 @@ pub trait RpcContext {
 		let Ok((what, data)) = params.needs_two() else {
 			return Err(RpcError::InvalidParams);
 		};
-		// Return a single result?
-		let one = what.is_thing_single();
 		// Specify the SQL query string
 
 		let mut res = match what {
@@ -323,11 +324,7 @@ pub trait RpcContext {
 			}
 		};
 
-		// Extract the first query result
-		let res = match one {
-			true => res.remove(0).result?.first(),
-			false => res.remove(0).result?,
-		};
+		let res = res.remove(0).result?;
 		// Return the result to the client
 		Ok(res.into())
 	}
@@ -336,8 +333,6 @@ pub trait RpcContext {
 		let Ok((what, data)) = params.needs_two() else {
 			return Err(RpcError::InvalidParams);
 		};
-
-		let one = what.is_thing_single();
 
 		let mut res = match what {
 			Value::None | Value::Null => {
@@ -360,10 +355,7 @@ pub trait RpcContext {
 			_ => return Err(RpcError::InvalidParams),
 		};
 
-		let res = match one {
-			true => res.remove(0).result?.first(),
-			false => res.remove(0).result?,
-		};
+		let res = res.remove(0).result?;
 		Ok(res)
 	}
 

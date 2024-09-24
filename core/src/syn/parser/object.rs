@@ -3,9 +3,10 @@ use std::collections::BTreeMap;
 use reblessive::Stk;
 
 use crate::{
-	sql::{Block, Geometry, Number, Object, Strand, Value},
+	sql::{Block, Geometry, Object, Strand, Value},
 	syn::{
 		error::bail,
+		lexer::compound,
 		parser::{enter_object_recursion, mac::expected, ParseResult, Parser},
 		token::{t, Glued, Span, TokenKind},
 	},
@@ -602,10 +603,8 @@ impl Parser<'_> {
 		match token.kind {
 			x if Self::kind_is_keyword_like(x) => {
 				self.pop_peek();
-				let str = self.lexer.reader.span(token.span);
-				// Lexer should ensure that the token is valid utf-8
-				let str = std::str::from_utf8(str).unwrap().to_owned();
-				Ok(str)
+				let str = self.lexer.span_str(token.span);
+				Ok(str.to_string())
 			}
 			TokenKind::Identifier => {
 				self.pop_peek();
@@ -616,9 +615,16 @@ impl Parser<'_> {
 				let str = self.next_token_value::<Strand>()?.0;
 				Ok(str)
 			}
-			TokenKind::Digits | TokenKind::Glued(Glued::Number) => {
-				let number = self.next_token_value::<Number>()?.to_string();
-				Ok(number)
+			TokenKind::Digits => {
+				self.pop_peek();
+				let span = self.lexer.lex_compound(token, compound::number)?.span;
+				let str = self.lexer.span_str(span);
+				Ok(str.to_string())
+			}
+			TokenKind::Glued(Glued::Number) => {
+				self.pop_peek();
+				let str = self.lexer.span_str(token.span);
+				Ok(str.to_string())
 			}
 			_ => unexpected!(self, token, "an object key"),
 		}

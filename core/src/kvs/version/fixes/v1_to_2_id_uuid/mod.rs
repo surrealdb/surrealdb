@@ -34,7 +34,7 @@ async fn migrate_tb_records(
 	let mut queue: Vec<Vec<u8>> = Vec::new();
 
 	'scan: loop {
-		let keys = tx.keys(beg.clone()..end.clone(), 1000).await?;
+		let keys = tx.keys(beg.clone()..end.clone(), 1000, None).await?;
 		if keys.is_empty() {
 			break 'scan;
 		}
@@ -80,7 +80,7 @@ async fn migrate_tb_edges(tx: Arc<Transaction>, ns: &str, db: &str, tb: &str) ->
 	let mut queue: Vec<Vec<u8>> = Vec::new();
 
 	'scan: loop {
-		let keys = tx.keys(beg.clone()..end.clone(), 1000).await?;
+		let keys = tx.keys(beg.clone()..end.clone(), 1000, None).await?;
 		if keys.is_empty() {
 			break 'scan;
 		}

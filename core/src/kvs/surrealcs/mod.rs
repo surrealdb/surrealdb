@@ -1,5 +1,7 @@
 #![cfg(feature = "kv-surrealcs")]
 
+mod cnf;
+
 use crate::err::Error;
 use crate::key::debug::Sprintable;
 use crate::kvs::savepoint::{SaveOperation, SavePointImpl, SavePoints};
@@ -12,6 +14,8 @@ use std::ops::Range;
 use std::sync::Arc;
 use surrealcs::kernel::messages::server::interface::ServerTransactionMessage;
 use surrealcs::kernel::messages::server::kv_operations::*;
+use surrealcs::kernel::utils::generic::check_condition_not_met;
+use surrealcs::kernel::utils::generic::check_key_already_exists;
 use surrealcs::router::create_connection_pool;
 use surrealcs::transactions::interface::bridge::BridgeHandle;
 use surrealcs::transactions::interface::interface::{
@@ -72,7 +76,7 @@ impl Drop for Transaction {
 impl Datastore {
 	/// Open a new database
 	pub(crate) async fn new(path: &str) -> Result<Datastore, Error> {
-		match create_connection_pool(path, None).await {
+		match create_connection_pool(path, Some(*cnf::SURREALCS_CONNECTION_POOL_SIZE)).await {
 			Ok(_) => Ok(Datastore {}),
 			Err(_) => {
 				Err(Error::Ds("Cannot connect to the `surrealcs` storage engine".to_string()))
@@ -89,7 +93,7 @@ impl Datastore {
 	/// the transaction
 	pub(crate) async fn transaction(&self, write: bool, _: bool) -> Result<Transaction, Error> {
 		let transaction = SurrealCSTransaction::new().await;
-		let transaction = transaction.map_err(|e| Error::Ds(e.to_string()))?;
+		let transaction = transaction.map_err(|e| Error::Tx(e.to_string()))?;
 		let transaction = transaction.into_any();
 		Ok(Transaction {
 			done: false,
@@ -127,7 +131,11 @@ impl Transaction {
 			true => transaction.send::<BridgeHandle>(message).await,
 		};
 		// Return the result
-		response.map_err(|e| Error::Tx(e.to_string()))
+		response.map_err(|e| match e {
+			e if check_key_already_exists(&e) => Error::TxKeyAlreadyExists,
+			e if check_condition_not_met(&e) => Error::TxConditionNotMet,
+			e => Error::Tx(e.to_string()),
+		})
 	}
 }
 
@@ -178,14 +186,14 @@ impl super::api::Transaction for Transaction {
 		self.done = true;
 		// Commit the transaction
 		let mut transaction = self.inner.lock().await;
-		transaction.empty_commit::<BridgeHandle>().await.map_err(|e| Error::Tx(e.to_string()))?;
+		transaction.commit::<BridgeHandle>().await.map_err(|e| Error::Tx(e.to_string()))?;
 		// Continue
 		Ok(())
 	}
 
 	/// Checks if a key exists in the database.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
-	async fn exists<K>(&mut self, key: K) -> Result<bool, Error>
+	async fn exists<K>(&mut self, key: K, version: Option<u64>) -> Result<bool, Error>
 	where
 		K: Into<Key> + Sprintable + Debug,
 	{
@@ -196,6 +204,7 @@ impl super::api::Transaction for Transaction {
 		// Check the key
 		let message = ServerTransactionMessage::Exists(MessageExists {
 			key: key.into(),
+			version,
 		});
 		let response = match self.send_message(message).await? {
 			ServerTransactionMessage::ResponseExists(v) => v,
@@ -218,6 +227,7 @@ impl super::api::Transaction for Transaction {
 		// Fetch the value from the database.
 		let message = ServerTransactionMessage::Get(MessageGet {
 			key: key.into(),
+			version,
 		});
 		let response = match self.send_message(message).await? {
 			ServerTransactionMessage::ResponseGet(v) => v,
@@ -254,6 +264,7 @@ impl super::api::Transaction for Transaction {
 		let message = ServerTransactionMessage::Set(MessageSet {
 			key,
 			value: val.into(),
+			version,
 		});
 		self.send_message(message).await?;
 		// Confirm the save point
@@ -291,6 +302,7 @@ impl super::api::Transaction for Transaction {
 		let message = ServerTransactionMessage::Put(MessagePut {
 			key,
 			value: val.into(),
+			version,
 		});
 		self.send_message(message).await?;
 		// Confirm the save point
@@ -441,7 +453,12 @@ impl super::api::Transaction for Transaction {
 
 	/// Retrieves a range of key-value pairs from the database.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.sprint()))]
-	async fn keys<K>(&mut self, rng: Range<K>, limit: u32) -> Result<Vec<Key>, Error>
+	async fn keys<K>(
+		&mut self,
+		rng: Range<K>,
+		limit: u32,
+		version: Option<u64>,
+	) -> Result<Vec<Key>, Error>
 	where
 		K: Into<Key> + Sprintable + Debug,
 	{
@@ -454,6 +471,7 @@ impl super::api::Transaction for Transaction {
 			begin: rng.start.into(),
 			finish: rng.end.into(),
 			limit,
+			version,
 		});
 		// TODO: Check if save point needs to be implemented here
 		let response = match self.send_message(message).await? {
@@ -484,6 +502,7 @@ impl super::api::Transaction for Transaction {
 			begin: rng.start.into(),
 			finish: rng.end.into(),
 			limit,
+			version,
 		});
 		let response = match self.send_message(message).await? {
 			ServerTransactionMessage::ResponseScan(v) => v,

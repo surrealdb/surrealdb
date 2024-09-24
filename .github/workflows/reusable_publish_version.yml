@@ -684,7 +684,7 @@ jobs:
           # Update the version to a nightly one
           sed -i "s#^version = \".*\"#version = \"${version}\"#" sdk/Cargo.toml
           sed -i "s#^version = \".*\"#version = \"${version}\"#" core/Cargo.toml
-          sed -i "s#surrealdb-core = { version = \"${major}\"#surrealdb-core = { version = \"=${version}\"#" sdk/Cargo.toml
+          sed -i "s#surrealdb-core = { version = \"=${currentVersion}\"#surrealdb-core = { version = \"=${version}\"#" sdk/Cargo.toml
 
       - name: Patch crate name and description
         if: ${{ inputs.environment != 'stable' }}

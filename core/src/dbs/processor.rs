@@ -136,12 +136,17 @@ impl<'a> Processor<'a> {
 		if ctx.is_ok() {
 			match iterable {
 				Iterable::Value(v) => self.process_value(stk, ctx, opt, stm, v).await?,
+				Iterable::Yield(v) => self.process_yield(stk, ctx, opt, stm, v).await?,
 				Iterable::Thing(v) => self.process_thing(stk, ctx, opt, stm, v).await?,
 				Iterable::Defer(v) => self.process_defer(stk, ctx, opt, stm, v).await?,
-				Iterable::TableRange(tb, v) => {
-					self.process_range(stk, ctx, opt, stm, tb, v).await?
+				Iterable::Edges(e) => self.process_edges(stk, ctx, opt, stm, e).await?,
+				Iterable::Range(tb, v, keys_only) => {
+					if keys_only {
+						self.process_range_keys(stk, ctx, opt, stm, &tb, v).await?
+					} else {
+						self.process_range(stk, ctx, opt, stm, &tb, v).await?
+					}
 				}
-				Iterable::Edges(e) => self.process_edge(stk, ctx, opt, stm, e).await?,
 				Iterable::Table(v, keys_only) => {
 					let ctx = Self::check_query_planner_context(ctx, &v);
 					if keys_only {
@@ -187,6 +192,36 @@ impl<'a> Processor<'a> {
 			rid: None,
 			ir: None,
 			val: Operable::Value(v.into()),
+		};
+		// Process the document record
+		self.process(stk, ctx, opt, stm, pro).await
+	}
+
+	async fn process_yield(
+		&mut self,
+		stk: &mut Stk,
+		ctx: &Context,
+		opt: &Options,
+		stm: &Statement<'_>,
+		v: Table,
+	) -> Result<(), Error> {
+		// Fetch the record id if specified
+		let v = match stm.data() {
+			// There is a data clause so fetch a record id
+			Some(data) => match data.rid(stk, ctx, opt).await? {
+				// Generate a new id from the id field
+				Some(id) => id.generate(&v, false)?,
+				// Generate a new random table id
+				None => v.generate(),
+			},
+			// There is no data clause so create a record id
+			None => v.generate(),
+		};
+		// Pass the value through
+		let pro = Processed {
+			rid: Some(v.into()),
+			ir: None,
+			val: Operable::Value(Value::None.into()),
 		};
 		// Process the document record
 		self.process(stk, ctx, opt, stm, pro).await
@@ -255,21 +290,11 @@ impl<'a> Processor<'a> {
 	) -> Result<(), Error> {
 		// Check that the table exists
 		ctx.tx().check_ns_db_tb(opt.ns()?, opt.db()?, &v.tb, opt.strict).await?;
-		// Fetch the data from the store
-		let key = thing::new(opt.ns()?, opt.db()?, &v.tb, &v.id);
-		let val = ctx.tx().get(key, None).await?;
-		// Parse the data from the store
-		let x = match val {
-			Some(v) => Value::from(v),
-			None => Value::None,
-		};
-		// Create a new operable value
-		let val = Operable::Mergeable(x.into(), o.into());
 		// Process the document record
 		let pro = Processed {
 			rid: Some(v.into()),
 			ir: None,
-			val,
+			val: Operable::Mergeable(Value::None.into(), o.into(), false),
 		};
 		self.process(stk, ctx, opt, stm, pro).await?;
 		// Everything ok
@@ -295,7 +320,7 @@ impl<'a> Processor<'a> {
 			None => Value::None,
 		};
 		// Create a new operable value
-		let val = Operable::Relatable(f, x.into(), w, o.map(|v| v.into()));
+		let val = Operable::Relatable(f, x.into(), w, o.map(|v| v.into()), false);
 		// Process the document record
 		let pro = Processed {
 			rid: Some(v.into()),
@@ -388,39 +413,50 @@ impl<'a> Processor<'a> {
 		Ok(())
 	}
 
-	async fn process_range(
-		&mut self,
-		stk: &mut Stk,
-		ctx: &Context,
+	async fn process_range_prepare(
+		txn: &Transaction,
 		opt: &Options,
-		stm: &Statement<'_>,
-		tb: String,
+		tb: &str,
 		r: IdRange,
-	) -> Result<(), Error> {
-		// Get the transaction
-		let txn = ctx.tx();
+	) -> Result<(Vec<u8>, Vec<u8>), Error> {
 		// Check that the table exists
-		txn.check_ns_db_tb(opt.ns()?, opt.db()?, &tb, opt.strict).await?;
+		txn.check_ns_db_tb(opt.ns()?, opt.db()?, tb, opt.strict).await?;
 		// Prepare the range start key
 		let beg = match &r.beg {
-			Bound::Unbounded => thing::prefix(opt.ns()?, opt.db()?, &tb),
-			Bound::Included(v) => thing::new(opt.ns()?, opt.db()?, &tb, v).encode().unwrap(),
+			Bound::Unbounded => thing::prefix(opt.ns()?, opt.db()?, tb),
+			Bound::Included(v) => thing::new(opt.ns()?, opt.db()?, tb, v).encode().unwrap(),
 			Bound::Excluded(v) => {
-				let mut key = thing::new(opt.ns()?, opt.db()?, &tb, v).encode().unwrap();
+				let mut key = thing::new(opt.ns()?, opt.db()?, tb, v).encode().unwrap();
 				key.push(0x00);
 				key
 			}
 		};
 		// Prepare the range end key
 		let end = match &r.end {
-			Bound::Unbounded => thing::suffix(opt.ns()?, opt.db()?, &tb),
-			Bound::Excluded(v) => thing::new(opt.ns()?, opt.db()?, &tb, v).encode().unwrap(),
+			Bound::Unbounded => thing::suffix(opt.ns()?, opt.db()?, tb),
+			Bound::Excluded(v) => thing::new(opt.ns()?, opt.db()?, tb, v).encode().unwrap(),
 			Bound::Included(v) => {
-				let mut key = thing::new(opt.ns()?, opt.db()?, &tb, v).encode().unwrap();
+				let mut key = thing::new(opt.ns()?, opt.db()?, tb, v).encode().unwrap();
 				key.push(0x00);
 				key
 			}
 		};
+		Ok((beg, end))
+	}
+
+	async fn process_range(
+		&mut self,
+		stk: &mut Stk,
+		ctx: &Context,
+		opt: &Options,
+		stm: &Statement<'_>,
+		tb: &str,
+		r: IdRange,
+	) -> Result<(), Error> {
+		// Get the transaction
+		let txn = ctx.tx();
+		// Prepare
+		let (beg, end) = Self::process_range_prepare(&txn, opt, tb, r).await?;
 		// Create a new iterable range
 		let mut stream = txn.stream(beg..end, None);
 		// Loop until no more entries
@@ -448,7 +484,47 @@ impl<'a> Processor<'a> {
 		Ok(())
 	}
 
-	async fn process_edge(
+	async fn process_range_keys(
+		&mut self,
+		stk: &mut Stk,
+		ctx: &Context,
+		opt: &Options,
+		stm: &Statement<'_>,
+		tb: &str,
+		r: IdRange,
+	) -> Result<(), Error> {
+		// Get the transaction
+		let txn = ctx.tx();
+		// Prepare
+		let (beg, end) = Self::process_range_prepare(&txn, opt, tb, r).await?;
+		// Create a new iterable range
+		let mut stream = txn.stream_keys(beg..end);
+		// Loop until no more entries
+		while let Some(res) = stream.next().await {
+			// Check if the context is finished
+			if ctx.is_done() {
+				break;
+			}
+			// Parse the data from the store
+			let k = res?;
+			let key: thing::Thing = (&k).into();
+			let val = Value::Null;
+			let rid = Thing::from((key.tb, key.id));
+			// Create a new operable value
+			let val = Operable::Value(val.into());
+			// Process the record
+			let pro = Processed {
+				rid: Some(rid.into()),
+				ir: None,
+				val,
+			};
+			self.process(stk, ctx, opt, stm, pro).await?;
+		}
+		// Everything ok
+		Ok(())
+	}
+
+	async fn process_edges(
 		&mut self,
 		stk: &mut Stk,
 		ctx: &Context,

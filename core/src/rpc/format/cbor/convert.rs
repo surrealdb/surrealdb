@@ -393,13 +393,13 @@ impl TryFrom<Value> for Cbor {
 						Id::Generate(_) => {
 							return Err("Cannot encode an ungenerated Record ID into CBOR")
 						}
-						Id::Range(v) => Data::try_from(*v)?,
+						Id::Range(v) => Data::Tag(TAG_RANGE, Box::new(Data::try_from(*v)?)),
 					},
 				])),
 			))),
 			Value::Table(v) => Ok(Cbor(Data::Tag(TAG_TABLE, Box::new(Data::Text(v.0))))),
 			Value::Geometry(v) => Ok(Cbor(encode_geometry(v)?)),
-			Value::Range(v) => Ok(Cbor(Data::try_from(*v)?)),
+			Value::Range(v) => Ok(Cbor(Data::Tag(TAG_RANGE, Box::new(Data::try_from(*v)?)))),
 			Value::Future(v) => {
 				let bin = Data::Text(format!("{}", (*v).0));
 				Ok(Cbor(Data::Tag(TAG_FUTURE, Box::new(bin))))

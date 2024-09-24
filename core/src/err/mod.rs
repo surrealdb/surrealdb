@@ -353,12 +353,6 @@ pub enum Error {
 		value: String,
 	},
 
-	// The cluster node already exists
-	#[error("The node '{value}' already exists")]
-	ClAlreadyExists {
-		value: String,
-	},
-
 	// The cluster node does not exist
 	#[error("The node '{value}' does not exist")]
 	NdNotFound {
@@ -566,7 +560,7 @@ pub enum Error {
 	/// A database entry for the specified record already exists
 	#[error("Database record `{thing}` already exists")]
 	RecordExists {
-		thing: String,
+		thing: Thing,
 	},
 
 	/// A database index entry for the specified record already exists
@@ -620,15 +614,58 @@ pub enum Error {
 		field: Idiom,
 	},
 
-	/// Found a record id for the record but we are creating a specific record
-	#[error("Found {value} for the id field, but a specific record has been specified")]
-	IdMismatch {
-		value: String,
+	/// The specified field on a SCHEMAFUL table was not defined
+	#[error("Found field '{field}', but no such field exists for table '{table}'")]
+	FieldUndefined {
+		table: String,
+		field: Idiom,
 	},
 
 	/// Found a record id for the record but this is not a valid id
 	#[error("Found {value} for the Record ID but this is not a valid id")]
 	IdInvalid {
+		value: String,
+	},
+
+	/// Found a record id for the record but we are creating a specific record
+	#[error("Found {value} for the `id` field, but a specific record has been specified")]
+	IdMismatch {
+		value: String,
+	},
+
+	/// Found a record id for the record but this is not a valid id
+	#[error("Found {value} for the incoming relation, but this is not a valid Record ID")]
+	InInvalid {
+		value: String,
+	},
+
+	/// Found a record id for the record but we are creating a specific record
+	#[error("Found {value} for the `in` field, but the value does not match the `in` record id")]
+	InMismatch {
+		value: String,
+	},
+
+	/// Found a record id for the record but we are creating a specific record
+	#[error("Found {value} for the `in` field, which does not match the existing field value")]
+	InOverride {
+		value: String,
+	},
+
+	/// Found a record id for the record but this is not a valid id
+	#[error("Found {value} for the outgoing relation, but this is not a valid Record ID")]
+	OutInvalid {
+		value: String,
+	},
+
+	/// Found a record id for the record but we are creating a specific record
+	#[error("Found {value} for the `out` field, but the value does not match the `out` record id")]
+	OutMismatch {
+		value: String,
+	},
+
+	/// Found a record id for the record but we are creating a specific record
+	#[error("Found {value} for the `out` field, which does not match the existing field value")]
+	OutOverride {
 		value: String,
 	},
 
@@ -847,6 +884,12 @@ pub enum Error {
 	#[error("The db is running without an available storage engine")]
 	MissingStorageEngine,
 
+	// The cluster node already exists
+	#[error("The node '{value}' already exists")]
+	ClAlreadyExists {
+		value: String,
+	},
+
 	/// The requested analyzer already exists
 	#[error("The analyzer '{value}' already exists")]
 	AzAlreadyExists {
@@ -952,9 +995,11 @@ pub enum Error {
 		index: String,
 	},
 
-	/// The session has expired either because the token used
-	/// to establish it has expired or because an expiration
-	/// was explicitly defined when establishing it
+	/// The token has expired
+	#[error("The token has expired")]
+	ExpiredToken,
+
+	/// The session has expired
 	#[error("The session has expired")]
 	ExpiredSession,
 
@@ -1118,6 +1163,10 @@ pub enum Error {
 
 	#[error("Found a non-computed value where they are not allowed")]
 	NonComputed,
+
+	/// Represents a failure in timestamp arithmetic related to database internals
+	#[error("Failed to compute: \"{0}\", as the operation results in an overflow.")]
+	ArithmeticOverflow(String),
 }
 
 impl From<Error> for String {

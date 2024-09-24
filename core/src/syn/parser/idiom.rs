@@ -19,7 +19,7 @@ impl Parser<'_> {
 		if matches!(peek, t!("->") | t!("[") | t!(".") | t!("...")) {
 			return true;
 		}
-		peek == t!("<") && self.peek1().kind == t!("-")
+		peek == t!("<") && matches!(self.peek1().kind, t!("-") | t!("->"))
 	}
 
 	/// Parse fields of a selecting query: `foo, bar` in `SELECT foo, bar FROM baz`.
@@ -185,6 +185,8 @@ impl Parser<'_> {
 						if let Some(x) = self.parse_graph_idiom(ctx, &mut res, Dir::Both).await? {
 							return Ok(x);
 						}
+					} else {
+						break;
 					}
 				}
 				t!("..") => {
