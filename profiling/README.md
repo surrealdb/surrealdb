@@ -18,7 +18,7 @@ cargo build --profile bench
 Start SurrealDB with profiling info.
 
 ```
-sudo profiling/profile.d -c "./target/release/surreal start -u root -p root" | rustfilt
+sudo profiling/profile.d -c "./target/release/surreal" | rustfilt
 ```
 
 ### 3. Stop profiling
