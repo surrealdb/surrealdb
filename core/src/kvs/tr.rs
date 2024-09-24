@@ -208,13 +208,13 @@ impl Transactor {
 
 	/// Check if a key exists in the datastore.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
-	pub async fn exists<K>(&mut self, key: K) -> Result<bool, Error>
+	pub async fn exists<K>(&mut self, key: K, version: Option<u64>) -> Result<bool, Error>
 	where
 		K: Into<Key> + Debug,
 	{
 		let key = key.into();
-		trace!(target: TARGET, key = key.sprint(), "Exists");
-		expand_inner!(&mut self.inner, v => { v.exists(key).await })
+		trace!(target: TARGET, key = key.sprint(), version = version, "Exists");
+		expand_inner!(&mut self.inner, v => { v.exists(key, version).await })
 	}
 
 	/// Fetch a key from the datastore.
@@ -362,18 +362,23 @@ impl Transactor {
 	///
 	/// This function fetches the full range of keys without values, in a single request to the underlying datastore.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
-	pub async fn keys<K>(&mut self, rng: Range<K>, limit: u32) -> Result<Vec<Key>, Error>
+	pub async fn keys<K>(
+		&mut self,
+		rng: Range<K>,
+		limit: u32,
+		version: Option<u64>,
+	) -> Result<Vec<Key>, Error>
 	where
 		K: Into<Key> + Debug,
 	{
 		let beg: Key = rng.start.into();
 		let end: Key = rng.end.into();
 		let rng = beg.as_slice()..end.as_slice();
-		trace!(target: TARGET, rng = rng.sprint(), limit = limit, "Keys");
+		trace!(target: TARGET, rng = rng.sprint(), limit = limit, version = version, "Keys");
 		if beg > end {
 			return Ok(vec![]);
 		}
-		expand_inner!(&mut self.inner, v => { v.keys(beg..end, limit).await })
+		expand_inner!(&mut self.inner, v => { v.keys(beg..end, limit, version).await })
 	}
 
 	/// Retrieve a specific range of keys from the datastore.

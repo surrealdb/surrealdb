@@ -39,6 +39,16 @@ fn parse_coordinate() {
 }
 
 #[test]
+fn parse_numeric_object_key() {
+	let v = test_parse!(parse_value_table, "{ 00: 0 }").unwrap();
+	let Value::Object(object) = v else {
+		panic!("not an object");
+	};
+	assert!(object.len() == 1);
+	assert_eq!(object.get("00").cloned(), Some(Value::Number(Number::Int(0))));
+}
+
+#[test]
 fn parse_like_operator() {
 	test_parse!(parse_value_field, "a ~ b").unwrap();
 }

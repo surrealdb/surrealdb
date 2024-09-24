@@ -2981,10 +2981,10 @@ impl TryAdd for Value {
 	fn try_add(self, other: Self) -> Result<Self, Error> {
 		Ok(match (self, other) {
 			(Self::Number(v), Self::Number(w)) => Self::Number(v.try_add(w)?),
-			(Self::Strand(v), Self::Strand(w)) => Self::Strand(v + w),
-			(Self::Datetime(v), Self::Duration(w)) => Self::Datetime(w + v),
-			(Self::Duration(v), Self::Datetime(w)) => Self::Datetime(v + w),
-			(Self::Duration(v), Self::Duration(w)) => Self::Duration(v + w),
+			(Self::Strand(v), Self::Strand(w)) => Self::Strand(v.try_add(w)?),
+			(Self::Datetime(v), Self::Duration(w)) => Self::Datetime(w.try_add(v)?),
+			(Self::Duration(v), Self::Datetime(w)) => Self::Datetime(v.try_add(w)?),
+			(Self::Duration(v), Self::Duration(w)) => Self::Duration(v.try_add(w)?),
 			(v, w) => return Err(Error::TryAdd(v.to_raw_string(), w.to_raw_string())),
 		})
 	}
@@ -2994,7 +2994,7 @@ impl TryAdd for Value {
 
 pub(crate) trait TrySub<Rhs = Self> {
 	type Output;
-	fn try_sub(self, v: Self) -> Result<Self::Output, Error>;
+	fn try_sub(self, v: Rhs) -> Result<Self::Output, Error>;
 }
 
 impl TrySub for Value {
@@ -3002,10 +3002,10 @@ impl TrySub for Value {
 	fn try_sub(self, other: Self) -> Result<Self, Error> {
 		Ok(match (self, other) {
 			(Self::Number(v), Self::Number(w)) => Self::Number(v.try_sub(w)?),
-			(Self::Datetime(v), Self::Datetime(w)) => Self::Duration(v - w),
-			(Self::Datetime(v), Self::Duration(w)) => Self::Datetime(w - v),
-			(Self::Duration(v), Self::Datetime(w)) => Self::Datetime(v - w),
-			(Self::Duration(v), Self::Duration(w)) => Self::Duration(v - w),
+			(Self::Datetime(v), Self::Datetime(w)) => Self::Duration(v.try_sub(w)?),
+			(Self::Datetime(v), Self::Duration(w)) => Self::Datetime(w.try_sub(v)?),
+			(Self::Duration(v), Self::Datetime(w)) => Self::Datetime(v.try_sub(w)?),
+			(Self::Duration(v), Self::Duration(w)) => Self::Duration(v.try_sub(w)?),
 			(v, w) => return Err(Error::TrySub(v.to_raw_string(), w.to_raw_string())),
 		})
 	}

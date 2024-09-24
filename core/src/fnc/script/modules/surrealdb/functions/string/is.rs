@@ -23,6 +23,7 @@ impl_module_def!(
 	"numeric" => run,
 	"semver" => run,
 	"url" => run,
+	"ulid" => run,
 	"uuid" => run,
 	"record" => run
 );

@@ -387,8 +387,12 @@ impl<'a> Executor<'a> {
 									.await;
 								ctx = MutableContext::unfreeze(c)?;
 								// Check if this is a RETURN statement
-								let can_return =
-									matches!(stm, Statement::Output(_) | Statement::Value(_));
+								let can_return = matches!(
+									stm,
+									Statement::Output(_)
+										| Statement::Value(_) | Statement::Ifelse(_)
+										| Statement::Foreach(_)
+								);
 								// Catch global timeout
 								let res = match ctx.is_timedout() {
 									true => Err(Error::QueryTimedout),
