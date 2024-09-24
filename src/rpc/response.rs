@@ -60,8 +60,7 @@ impl Response {
 		// Process the response for the format
 		let (len, msg) = match fmt.res_ws(self) {
 			Ok((l, m)) => (l, m),
-			Err(_) => {
-				let err: Failure = RpcError::Thrown("Serialisation Error".to_string()).into();
+			Err(err) => {
 				fmt.res_ws(failure(id, err)).expect("Serialising known thrown error should succeed")
 			}
 		};
