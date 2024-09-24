@@ -1810,9 +1810,15 @@ mod http_integration {
 		use tokio::time;
 		// Deny some
 		{
-			// Start server disallowing queries, exporting and importing
-			let (addr, _server) =
-				common::start_server_without_http(vec!["sql", "export", "import"]).await.unwrap();
+			// Start server disallowing routes for queries, exporting and importing
+			let (addr, _server) = common::start_server(StartServerArguments {
+				args: "--deny-http sql,export,import".to_string(),
+				// Auth disabled to ensure unauthorized errors are due to capabilities
+				auth: false,
+				..Default::default()
+			})
+			.await
+			.unwrap();
 
 			// Prepare HTTP client
 			let mut headers = reqwest::header::HeaderMap::new();
@@ -1893,12 +1899,15 @@ mod http_integration {
 		}
 		// Deny all
 		{
-			// All endpoints except for RPC
-			let routes =
-				vec!["export", "import", "version", "sync", "sql", "signin", "signup", "key", "ml"];
-
-			// Start server disallowing all routes
-			let (addr, _server) = common::start_server_without_http(routes).await.unwrap();
+			// Start server disallowing all routes except for RPC
+			let (addr, _server) = common::start_server(StartServerArguments {
+				args: "--deny-http --allow-http rpc".to_string(),
+				// Auth disabled to ensure unauthorized errors are due to capabilities
+				auth: false,
+				..Default::default()
+			})
+			.await
+			.unwrap();
 
 			// Prepare HTTP client
 			let mut headers = reqwest::header::HeaderMap::new();
@@ -1957,10 +1966,16 @@ mod http_integration {
 		// Deny RPC and health endpoints
 		{
 			// Start server disallowing the RPC and health routes
-			let (addr, _server) =
-				common::start_server_without_http_without_wait(vec!["rpc", "health"])
-					.await
-					.unwrap();
+			let (addr, _server) = common::start_server(StartServerArguments {
+				args: "--deny-http rpc,health".to_string(),
+				// Auth disabled to ensure unauthorized errors are due to capabilities
+				auth: false,
+				// Ready check disabled as healtcheck is disallowed
+				wait_is_ready: false,
+				..Default::default()
+			})
+			.await
+			.unwrap();
 			// The "is-ready" command uses the RPC and health routes
 			// We must wait for server startup rudimentarily
 			// If this introduces flakiness, drop this test case

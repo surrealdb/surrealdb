@@ -1,4 +1,4 @@
-use super::common::{self, Format, Socket, DB, NS, PASS, USER};
+use super::common::{self, Format, Socket, DB, NS, PASS, USER, StartServerArguments};
 use assert_fs::TempDir;
 use http::header::{HeaderMap, HeaderValue};
 use serde_json::json;
@@ -1893,105 +1893,226 @@ async fn session_id_undefined() {
 
 #[test(tokio::test)]
 async fn rpc_capability() {
-	// Setup database server with some RPC methods denied
-	let (addr, mut server) = common::start_server_without_rpc(vec!["query", "info"]).await.unwrap();
-	// Connect to WebSocket
-	let mut socket = Socket::connect(&addr, SERVER, FORMAT).await.unwrap();
-	// Specify a namespace and database
-	socket.send_message_use(Some(NS), Some(DB)).await.unwrap();
+	// Deny some
+	{
+		// Start server disallowing some RPC methods
+		let (addr, mut server) = common::start_server(StartServerArguments {
+			// Deny all routes except for RPC
+			args: "--deny-rpc info,query".to_string(),
+			// Auth disabled to ensure unauthorized errors are due to capabilities
+			auth: false,
+			..Default::default()
+		})
+		.await.unwrap();
+		// Connect to WebSocket
+		let mut socket = Socket::connect(&addr, SERVER, FORMAT).await.unwrap();
+		// Specify a namespace and database
+		socket.send_message_use(Some(NS), Some(DB)).await.unwrap();
 
-	// Test operations that SHOULD NOT with the provided capabilities
-	let operations_ko = vec![
-		socket.send_request("info", json!([])),
-		socket.send_request("query", json!(["SELECT * FROM 1"])),
-	];
-	for operation in operations_ko {
-		let res = operation.await;
-		assert!(res.is_ok(), "result: {res:?}");
-		let res = res.unwrap();
-		assert!(res.is_object(), "result: {res:?}");
-		let res = res.as_object().unwrap();
-		assert_eq!(
-			res["error"],
-			json!({"code": -32000, "message": "Method not allowed"})
-		);
-	}
+		// Test operations that SHOULD NOT with the provided capabilities
+		let operations_ko = vec![
+			socket.send_request("info", json!([])),
+			socket.send_request("query", json!(["SELECT * FROM 1"])),
+		];
+		for operation in operations_ko {
+			let res = operation.await;
+			assert!(res.is_ok(), "result: {res:?}");
+			let res = res.unwrap();
+			assert!(res.is_object(), "result: {res:?}");
+			let res = res.as_object().unwrap();
+			assert_eq!(
+				res["error"],
+				json!({"code": -32000, "message": "Method not allowed"})
+			);
+		}
 
-	// Test operations that SHOULD work with the provided capabilities
-	let operations_ok = vec![
-		socket.send_request("use", json!([NS, DB])),
-		socket.send_request("ping", json!([])),
-		socket.send_request("version", json!([])),
-		socket.send_request("let", json!(["let_var", "let_value",])),
-		socket.send_request("set", json!(["set_var", "set_value",])),
-		socket.send_request("select", json!(["tester",])),
-		socket.send_request(
-			"insert",
-			json!([
-				"tester",
-				{
-					"name": "foo",
-					"value": "bar",
-				}
-			]),
-		),
-		socket.send_request(
-			"create",
-			json!([
-				"tester",
-				{
-					"value": "bar",
-				}
-			]),
-		),
-		socket.send_request(
-			"update",
-			json!([
-				"tester",
-				{
-					"value": "bar",
-				}
-			]),
-		),
-		socket.send_request(
-			"merge",
-			json!([
-				"tester",
-				{
-					"value": "bar",
-				}
-			]),
-		),
-		socket.send_request(
-			"patch",
-			json!([
-				"tester:id",
-				[
+		// Test operations that SHOULD work with the provided capabilities
+		let operations_ok = vec![
+			socket.send_request("use", json!([NS, DB])),
+			socket.send_request("ping", json!([])),
+			socket.send_request("version", json!([])),
+			socket.send_request("let", json!(["let_var", "let_value",])),
+			socket.send_request("set", json!(["set_var", "set_value",])),
+			socket.send_request("select", json!(["tester",])),
+			socket.send_request(
+				"insert",
+				json!([
+					"tester",
 					{
-						"op": "add",
-						"path": "value",
-						"value": "bar"
-					},
-					{
-						"op": "remove",
-						"path": "name",
+						"name": "foo",
+						"value": "bar",
 					}
-				]
-			]),
-		),
-		socket.send_request("delete", json!(["tester"])),
-		socket.send_request("invalidate", json!([])),
-	];
-	for operation in operations_ok {
-		let res = operation.await;
-		assert!(res.is_ok(), "result: {res:?}");
-		let res = res.unwrap();
-		assert!(res.is_object(), "result: {res:?}");
-		let res = res.as_object().unwrap();
-		// Verify response contains no error
-		assert!(res.keys().all(|k| ["id", "result"].contains(&k.as_str())), "result: {res:?}");
-	}
+				]),
+			),
+			socket.send_request(
+				"create",
+				json!([
+					"tester",
+					{
+						"value": "bar",
+					}
+				]),
+			),
+			socket.send_request(
+				"update",
+				json!([
+					"tester",
+					{
+						"value": "bar",
+					}
+				]),
+			),
+			socket.send_request(
+				"merge",
+				json!([
+					"tester",
+					{
+						"value": "bar",
+					}
+				]),
+			),
+			socket.send_request(
+				"patch",
+				json!([
+					"tester:id",
+					[
+						{
+							"op": "add",
+							"path": "value",
+							"value": "bar"
+						},
+						{
+							"op": "remove",
+							"path": "name",
+						}
+					]
+				]),
+			),
+			socket.send_request("delete", json!(["tester"])),
+			socket.send_request("invalidate", json!([])),
+		];
+		for operation in operations_ok {
+			let res = operation.await;
+			assert!(res.is_ok(), "result: {res:?}");
+			let res = res.unwrap();
+			assert!(res.is_object(), "result: {res:?}");
+			let res = res.as_object().unwrap();
+			// Verify response contains no error
+			assert!(res.keys().all(|k| ["id", "result"].contains(&k.as_str())), "result: {res:?}");
+		}
 
-	// Test passed
-	server.finish().unwrap();
+		// Test passed
+		server.finish().unwrap();
+	}
+	// Deny all
+	{
+		// Start server disallowing all RPC methods except for version and use
+		let (addr, mut server) = common::start_server(StartServerArguments {
+			// Deny all routes except for RPC
+			args: "--deny-rpc --allow-rpc version,use".to_string(),
+			// Auth disabled to ensure unauthorized errors are due to capabilities
+			auth: false,
+			..Default::default()
+		})
+		.await.unwrap();
+		// Connect to WebSocket
+		let mut socket = Socket::connect(&addr, SERVER, FORMAT).await.unwrap();
+		// Specify a namespace and database
+		socket.send_message_use(Some(NS), Some(DB)).await.unwrap();
+
+		// Test operations that SHOULD NOT with the provided capabilities
+		let operations_ko = vec![
+			socket.send_request("query", json!(["SELECT * FROM 1"])),
+			socket.send_request("ping", json!([])),
+			socket.send_request("info", json!([])),
+			socket.send_request("let", json!(["let_var", "let_value",])),
+			socket.send_request("set", json!(["set_var", "set_value",])),
+			socket.send_request("select", json!(["tester",])),
+			socket.send_request(
+				"insert",
+				json!([
+					"tester",
+					{
+						"name": "foo",
+						"value": "bar",
+					}
+				]),
+			),
+			socket.send_request(
+				"create",
+				json!([
+					"tester",
+					{
+						"value": "bar",
+					}
+				]),
+			),
+			socket.send_request(
+				"update",
+				json!([
+					"tester",
+					{
+						"value": "bar",
+					}
+				]),
+			),
+			socket.send_request(
+				"merge",
+				json!([
+					"tester",
+					{
+						"value": "bar",
+					}
+				]),
+			),
+			socket.send_request(
+				"patch",
+				json!([
+					"tester:id",
+					[
+						{
+							"op": "add",
+							"path": "value",
+							"value": "bar"
+						},
+						{
+							"op": "remove",
+							"path": "name",
+						}
+					]
+				]),
+			),
+			socket.send_request("delete", json!(["tester"])),
+			socket.send_request("invalidate", json!([])),
+		];
+		for operation in operations_ko {
+			let res = operation.await;
+			assert!(res.is_ok(), "result: {res:?}");
+			let res = res.unwrap();
+			assert!(res.is_object(), "result: {res:?}");
+			let res = res.as_object().unwrap();
+			assert_eq!(
+				res["error"],
+				json!({"code": -32000, "message": "Method not allowed"})
+			);
+		}
+
+		// Test operations that SHOULD work with the provided capabilities
+		let operations_ok = vec![
+			socket.send_request("version", json!([])),
+			socket.send_request("use", json!([NS, DB])),
+		];
+		for operation in operations_ok {
+			let res = operation.await;
+			assert!(res.is_ok(), "result: {res:?}");
+			let res = res.unwrap();
+			assert!(res.is_object(), "result: {res:?}");
+			let res = res.as_object().unwrap();
+			// Verify response contains no error
+			assert!(res.keys().all(|k| ["id", "result"].contains(&k.as_str())), "result: {res:?}");
+		}
+
+		// Test passed
+		server.finish().unwrap();
+	}
 }
