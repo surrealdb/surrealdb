@@ -584,10 +584,28 @@ impl Ord for Number {
 			(Number::Decimal(v), Number::Decimal(w)) => v.cmp(w),
 			// ------------------------------
 			(Number::Int(v), Number::Float(w)) => {
+				// Cast int to i128 to avoid saturating.
 				let l = *v as i128;
+				// Cast the integer-part of the float to i128 to avoid saturating.
 				let r = *w as i128;
+				// Compare both integer parts.
 				match l.cmp(&r) {
-					Ordering::Equal => f64::default().total_cmp(&w.fract()),
+					// If the integer parts are equal then we need to do some extra checks...
+					Ordering::Equal => {
+						// The fractional part of an integer is zero.
+						let l = 0.0;
+						// Get the fractional part of the float.
+						let r = w.fract();
+						// Check if the fractional part is zero. If it is, treat the integer as equal to the
+						// float whether or not it is negative zero. We need to check this explicitly because
+						// `total_cmp` treats negative zero and positive zero as different numbers.
+						if l == r {
+							return Ordering::Equal;
+						}
+						// Finally use `total_cmp` to compare the mantissa.
+						l.total_cmp(&r)
+					}
+					// If the integer parts are not equal then we already know the correct ordering.
 					ordering => ordering,
 				}
 			}
