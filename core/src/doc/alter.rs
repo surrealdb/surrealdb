@@ -109,14 +109,16 @@ impl Document {
 		let rid = self.id()?;
 		// Set default field values
 		self.current.doc.to_mut().def(&rid);
+		// Process the current permitted
+		self.process_permitted_current(stk, ctx, opt).await?;
 		// This is an INSERT statement
 		if let Workable::Insert(v, _) = &self.extras {
-			let v = v.compute(stk, ctx, opt, Some(&self.current)).await?;
+			let v = v.compute(stk, ctx, opt, Some(&self.current_permitted)).await?;
 			self.current.doc.to_mut().merge(v)?;
 		}
 		// This is an INSERT RELATION statement
 		if let Workable::Relate(_, _, Some(v), _) = &self.extras {
-			let v = v.compute(stk, ctx, opt, Some(&self.current)).await?;
+			let v = v.compute(stk, ctx, opt, Some(&self.current_permitted)).await?;
 			self.current.doc.to_mut().merge(v)?;
 		}
 		// Set default field values
@@ -142,23 +144,25 @@ impl Document {
 		let rid = self.id()?;
 		// Set default field values
 		self.current.doc.to_mut().def(&rid);
+		// Process the current permitted
+		self.process_permitted_current(stk, ctx, opt).await?;
 		// The statement has a data clause
 		if let Some(v) = stm.data() {
 			match v {
 				Data::PatchExpression(data) => {
-					let data = data.compute(stk, ctx, opt, Some(&self.current)).await?;
+					let data = data.compute(stk, ctx, opt, Some(&self.current_permitted)).await?;
 					self.current.doc.to_mut().patch(data)?
 				}
 				Data::MergeExpression(data) => {
-					let data = data.compute(stk, ctx, opt, Some(&self.current)).await?;
+					let data = data.compute(stk, ctx, opt, Some(&self.current_permitted)).await?;
 					self.current.doc.to_mut().merge(data)?
 				}
 				Data::ReplaceExpression(data) => {
-					let data = data.compute(stk, ctx, opt, Some(&self.current)).await?;
+					let data = data.compute(stk, ctx, opt, Some(&self.current_permitted)).await?;
 					self.current.doc.to_mut().replace(data)?
 				}
 				Data::ContentExpression(data) => {
-					let data = data.compute(stk, ctx, opt, Some(&self.current)).await?;
+					let data = data.compute(stk, ctx, opt, Some(&self.current_permitted)).await?;
 					self.current.doc.to_mut().replace(data)?
 				}
 				Data::UnsetExpression(i) => {
@@ -168,7 +172,7 @@ impl Document {
 				}
 				Data::SetExpression(x) => {
 					for x in x.iter() {
-						let v = x.2.compute(stk, ctx, opt, Some(&self.current)).await?;
+						let v = x.2.compute(stk, ctx, opt, Some(&self.current_permitted)).await?;
 						match &x.1 {
 							Operator::Equal => match v {
 								Value::None => {
@@ -205,7 +209,7 @@ impl Document {
 					let ctx = ctx.freeze();
 					// Process ON DUPLICATE KEY clause
 					for x in x.iter() {
-						let v = x.2.compute(stk, &ctx, opt, Some(&self.current)).await?;
+						let v = x.2.compute(stk, &ctx, opt, Some(&self.current_permitted)).await?;
 						match &x.1 {
 							Operator::Equal => match v {
 								Value::None => {
