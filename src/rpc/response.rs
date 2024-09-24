@@ -10,7 +10,6 @@ use surrealdb::channel::Sender;
 use surrealdb::rpc::format::Format;
 use surrealdb::rpc::Data;
 use surrealdb::sql::Value;
-use surrealdb_core::rpc::RpcError;
 use tracing::Span;
 
 #[revisioned(revision = 1)]
