@@ -54,13 +54,15 @@ impl Response {
 			span.record("rpc.error_code", err.code);
 			span.record("rpc.error_message", err.message.as_ref());
 		}
+		// Cheaper to clone the id in case of a failure
+		// than to clone the entire response, which can be arbitrary size
+		let id = self.id.clone();
 		// Process the response for the format
 		let (len, msg) = match fmt.res_ws(self) {
 			Ok((l, m)) => (l, m),
 			Err(_) => {
 				let err: Failure = RpcError::Thrown("Serialisation Error".to_string()).into();
-				fmt.res_ws(failure(None, err))
-					.expect("Serialising known thrown error should succeed")
+				fmt.res_ws(failure(id, err)).expect("Serialising known thrown error should succeed")
 			}
 		};
 		// Send the message to the write channel
