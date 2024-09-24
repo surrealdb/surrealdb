@@ -1899,9 +1899,9 @@ mod http_integration {
 		}
 		// Deny all
 		{
-			// Start server disallowing all routes except for RPC
+			// Start server disallowing all routes except for RPC and health
 			let (addr, _server) = common::start_server(StartServerArguments {
-				args: "--deny-http --allow-http rpc".to_string(),
+				args: "--deny-http --allow-http rpc,health".to_string(),
 				// Auth disabled to ensure unauthorized errors are due to capabilities
 				auth: false,
 				..Default::default()
