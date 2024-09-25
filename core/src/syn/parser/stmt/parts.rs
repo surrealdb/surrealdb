@@ -274,22 +274,23 @@ impl Parser<'_> {
 	pub async fn parse_permission(
 		&mut self,
 		stk: &mut Stk,
-		permissive: bool,
+		field: bool,
 	) -> ParseResult<Permissions> {
 		let next = self.next();
 		match next.kind {
 			t!("NONE") => Ok(Permissions::none()),
 			t!("FULL") => Ok(Permissions::full()),
 			t!("FOR") => {
-				let mut permission = if permissive {
+				let mut permission = if field {
 					Permissions::full()
 				} else {
 					Permissions::none()
 				};
-				stk.run(|stk| self.parse_specific_permission(stk, &mut permission)).await?;
+				stk.run(|stk| self.parse_specific_permission(stk, &mut permission, field)).await?;
 				self.eat(t!(","));
 				while self.eat(t!("FOR")) {
-					stk.run(|stk| self.parse_specific_permission(stk, &mut permission)).await?;
+					stk.run(|stk| self.parse_specific_permission(stk, &mut permission, field))
+						.await?;
 					self.eat(t!(","));
 				}
 				Ok(permission)
@@ -308,6 +309,7 @@ impl Parser<'_> {
 		&mut self,
 		stk: &mut Stk,
 		permissions: &mut Permissions,
+		field: bool,
 	) -> ParseResult<()> {
 		let mut select = false;
 		let mut create = false;
@@ -326,9 +328,10 @@ impl Parser<'_> {
 				t!("UPDATE") => {
 					update = true;
 				}
-				t!("DELETE") => {
+				t!("DELETE") if !field => {
 					delete = true;
 				}
+				_ if field => unexpected!(self, next, "'SELECT', 'CREATE' or 'UPDATE'"),
 				_ => unexpected!(self, next, "'SELECT', 'CREATE', 'UPDATE' or 'DELETE'"),
 			}
 			if !self.eat(t!(",")) {
