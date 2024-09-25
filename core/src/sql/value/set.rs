@@ -98,7 +98,7 @@ impl Value {
 					Value::Object(obj) => match obj.entry(f.to_string()) {
 						Entry::Vacant(x) => {
 							let v = x.insert(Value::None);
-							return Self::assign(stk, ctx, opt, v, val, prev).await;
+							return Self::assign(stk, ctx, opt, v, val, iter.as_slice()).await;
 						}
 						Entry::Occupied(x) => {
 							place = x.into_mut();
@@ -126,7 +126,8 @@ impl Value {
 							match obj.entry(v) {
 								Entry::Vacant(x) => {
 									let v = x.insert(Value::None);
-									return Self::assign(stk, ctx, opt, v, val, prev).await;
+									return Self::assign(stk, ctx, opt, v, val, iter.as_slice())
+										.await;
 								}
 								Entry::Occupied(x) => {
 									place = x.into_mut();
@@ -255,6 +256,7 @@ impl Value {
 					let v = stk.run(|stk| x.compute(stk, ctx, opt, None)).await?;
 					match v {
 						Value::Strand(x) => x.0,
+						Value::Thing(x) => x.to_raw(),
 						Value::Number(x) => x.to_string(),
 						Value::Range(x) => x.to_string(),
 						_ => return Ok(()),
@@ -453,6 +455,39 @@ mod tests {
 		let res = Value::parse("{ test: { something: [{ age: 21 }, { age: 36 }] } }");
 		let mut stack = reblessive::TreeStack::new();
 		stack.enter(|stk| val.set(stk, &ctx, &opt, &idi, Value::from(21))).finish().await.unwrap();
+		assert_eq!(res, val);
+	}
+
+	#[tokio::test]
+	async fn set_object_with_new_nested_array_access_field() {
+		let (ctx, opt) = mock().await;
+		let idi = Idiom::parse("test.other['inner']");
+		let mut val = Value::parse("{ test: { something: [{ age: 34 }, { age: 36 }] } }");
+		let res = Value::parse("{ test: { other: { inner: true }, something: [{ age: 34 }, { age: 36 }] } }");
+		let mut stack = reblessive::TreeStack::new();
+		stack.enter(|stk| val.set(stk, &ctx, &opt, &idi, Value::from(true))).finish().await.unwrap();
+		assert_eq!(res, val);
+	}
+
+	#[tokio::test]
+	async fn set_object_with_new_nested_array_access_field_in_array() {
+		let (ctx, opt) = mock().await;
+		let idi = Idiom::parse("test.something.other['inner']");
+		let mut val = Value::parse("{ test: { something: [{ age: 34 }, { age: 36 }] } }");
+		let res = Value::parse("{ test: { something: [{ age: 34, other: { inner: true } }, { age: 36, other: { inner: true } }] } }");
+		let mut stack = reblessive::TreeStack::new();
+		stack.enter(|stk| val.set(stk, &ctx, &opt, &idi, Value::from(true))).finish().await.unwrap();
+		assert_eq!(res, val);
+	}
+
+	#[tokio::test]
+	async fn set_object_with_new_nested_array_access_field_in_array_with_thing() {
+		let (ctx, opt) = mock().await;
+		let idi = Idiom::parse("test.something.other[city:london]");
+		let mut val = Value::parse("{ test: { something: [{ age: 34 }, { age: 36 }] } }");
+		let res = Value::parse("{ test: { something: [{ age: 34, other: { 'city:london': true } }, { age: 36, other: { 'city:london': true } }] } }");
+		let mut stack = reblessive::TreeStack::new();
+		stack.enter(|stk| val.set(stk, &ctx, &opt, &idi, Value::from(true))).finish().await.unwrap();
 		assert_eq!(res, val);
 	}
 }

@@ -136,6 +136,10 @@ impl Value {
 							Some(v) => stk.run(|stk| v.get(stk, ctx, opt, doc, path.next())).await,
 							None => Ok(Value::None),
 						},
+						Value::Thing(t) => match v.get(&t.to_raw()) {
+							Some(v) => stk.run(|stk| v.get(stk, ctx, opt, doc, path.next())).await,
+							None => Ok(Value::None),
+						},
 						_ => stk.run(|stk| Value::None.get(stk, ctx, opt, doc, path.next())).await,
 					},
 					Part::All => stk.run(|stk| self.get(stk, ctx, opt, doc, path.next())).await,
@@ -608,5 +612,16 @@ mod tests {
 				"age".to_string() => Value::from(36),
 			})])
 		);
+	}
+
+	#[tokio::test]
+	async fn get_object_with_thing_based_key() {
+		let (ctx, opt) = mock().await;
+		let idi = Idiom::parse("test[city:london]");
+		let val =
+			Value::parse("{ test: { 'city:london': true, other: test:tobie, something: 123 } }");
+		let mut stack = reblessive::tree::TreeStack::new();
+		let res = stack.enter(|stk| val.get(stk, &ctx, &opt, None, &idi)).finish().await.unwrap();
+		assert_eq!(res, Value::from(true));
 	}
 }
