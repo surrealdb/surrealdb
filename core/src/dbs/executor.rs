@@ -17,8 +17,10 @@ use crate::sql::statement::Statement;
 use crate::sql::value::Value;
 use crate::sql::Base;
 use channel::Receiver;
-use futures::StreamExt;
+use futures::{Stream, StreamExt};
 use reblessive::TreeStack;
+use std::mem;
+use std::pin::pin;
 use std::sync::Arc;
 #[cfg(not(target_arch = "wasm32"))]
 use tokio::spawn;
@@ -28,6 +30,12 @@ use trice::Instant;
 use wasm_bindgen_futures::spawn_local as spawn;
 
 const TARGET: &str = "surrealdb::core::dbs";
+
+enum ControlFlow {
+	Continue,
+	Break,
+	Return,
+}
 
 pub(crate) struct Executor<'a> {
 	err: bool,
@@ -208,257 +216,335 @@ impl<'a> Executor<'a> {
 		let mut ff_txn = false;
 		// Process all statements in query
 		for stm in qry.into_iter() {
-			// Log the statement
-			trace!(target: TARGET, statement = %stm, "Executing statement");
-			// Reset errors
-			if self.txn.is_none() {
-				self.err = false;
-			}
-			// Get the statement start time
-			let now = Instant::now();
-			// Check if this is a LIVE statement
-			let is_stm_live = matches!(stm, Statement::Live(_));
-			// Check if this is a KILL statement
-			let is_stm_kill = matches!(stm, Statement::Kill(_));
-			// Check if this is a RETURN statement
-			let is_stm_output = matches!(stm, Statement::Output(_));
-			// Has this statement returned a value
-			let mut has_returned = false;
-			// Do we skip this statement?
-			if ff_txn && !matches!(stm, Statement::Commit(_) | Statement::Cancel(_)) {
-				debug!("Skipping statement due to fast forwarded transaction");
+			if ff_txn && !matches!(stm, Statement::Cancel(_) | Statement::Commit(_)) {
 				continue;
 			}
-			// Process a single statement
-			let res = match stm {
-				// Specify runtime options
-				Statement::Option(mut stm) => {
-					// Allowed to run?
-					opt.is_allowed(Action::Edit, ResourceKind::Option, &Base::Db)?;
-					// Convert to uppercase
-					stm.name.0.make_ascii_uppercase();
-					// Process the option
-					opt = match stm.name.0.as_str() {
-						"IMPORT" => opt.with_import(stm.what),
-						"FORCE" => opt.with_force(if stm.what {
-							Force::All
-						} else {
-							Force::None
-						}),
-						"FUTURES" => {
-							if stm.what {
-								opt.with_futures(true)
-							} else {
-								opt.with_futures_never()
-							}
-						}
-						_ => break,
-					};
-					// Continue
-					continue;
-				}
-				// Begin a new transaction
-				Statement::Begin(_) => {
-					if opt.import {
-						continue;
-					}
-					self.begin(Write).await;
-					continue;
-				}
-				// Cancel a running transaction
-				Statement::Cancel(_) => {
-					if opt.import {
-						continue;
-					}
-					self.cancel(true).await;
-					self.clear(&ctx, recv.clone()).await;
-					buf = buf.into_iter().map(|v| self.buf_cancel(v)).collect();
-					out.append(&mut buf);
-					debug_assert!(self.txn.is_none(), "cancel(true) should have unset txn");
-					self.txn = None;
-					continue;
-				}
-				// Commit a running transaction
-				Statement::Commit(_) => {
-					if opt.import {
-						continue;
-					}
-					let commit_error = self.commit(true).await.err();
-					buf = buf.into_iter().map(|v| self.buf_commit(v, &commit_error)).collect();
-					self.flush(&ctx, recv.clone()).await;
-					out.append(&mut buf);
-					debug_assert!(self.txn.is_none(), "commit(true) should have unset txn");
-					self.txn = None;
-					ff_txn = false;
-					continue;
-				}
-				// Switch to a different NS or DB
-				Statement::Use(stm) => {
-					if let Some(ref ns) = stm.ns {
-						ctx = self.set_ns(ctx, &mut opt, ns).await?;
-					}
-					if let Some(ref db) = stm.db {
-						ctx = self.set_db(ctx, &mut opt, db).await?;
-					}
-					Ok(Value::None)
-				}
-				// Process param definition statements
-				Statement::Set(stm) => {
-					// Create a transaction
-					let loc = self.begin(stm.writeable().into()).await;
-					// Check the transaction
-					match self.err {
-						// We failed to create a transaction
-						true => Err(Error::TxFailure),
-						// The transaction began successfully
-						false => {
-							// ctx.set_transaction(txn)
-							let mut c = MutableContext::unfreeze(ctx)?;
-							c.set_transaction(self.txn()?);
-							ctx = c.freeze();
-							// Check the statement
-							match stack
-								.enter(|stk| stm.compute(stk, &ctx, &opt, None))
-								.finish()
-								.await
-							{
-								Ok(val) => {
-									// Check if writeable
-									let writeable = stm.writeable();
-									// Set the parameter
-									let mut c = MutableContext::unfreeze(ctx)?;
-									c.add_value(stm.name, val.into());
-									ctx = c.freeze();
-									// Finalise transaction, returning nothing unless it couldn't commit
-									if writeable {
-										match self.commit(loc).await {
-											Err(e) => {
-												// Clear live query notifications
-												self.clear(&ctx, recv.clone()).await;
-												Err(Error::QueryNotExecutedDetail {
-													message: e.to_string(),
-												})
-											}
-											Ok(_) => {
-												// Flush live query notifications
-												self.flush(&ctx, recv.clone()).await;
-												Ok(Value::None)
-											}
-										}
-									} else {
-										self.cancel(loc).await;
-										self.clear(&ctx, recv.clone()).await;
-										Ok(Value::None)
-									}
-								}
-								Err(err) => {
-									// Cancel transaction
-									self.cancel(loc).await;
-									// Return error
-									Err(err)
-								}
-							}
-						}
-					}
-				}
-				// Process all other normal statements
-				_ => match self.err {
-					// This transaction has failed
-					true => Err(Error::QueryNotExecuted),
-					// Compute the statement normally
-					false => {
-						// Create a transaction
-						let loc = self.begin(stm.writeable().into()).await;
-						// Check the transaction
-						match self.err {
-							// We failed to create a transaction
-							true => Err(Error::TxFailure),
-							// The transaction began successfully
-							false => {
-								// Create a new context for this statement
-								let mut ctx = MutableContext::new(&ctx);
-								// Set the transaction on the context
-								ctx.set_transaction(self.txn()?);
-								let c = ctx.freeze();
-								// Process the statement
-								let res = stack
-									.enter(|stk| stm.compute(stk, &c, &opt, None))
-									.finish()
-									.await;
-								ctx = MutableContext::unfreeze(c)?;
-								// Check if this is a RETURN statement
-								let can_return = matches!(
-									stm,
-									Statement::Output(_)
-										| Statement::Value(_) | Statement::Ifelse(_)
-										| Statement::Foreach(_)
-								);
-								// Catch global timeout
-								let res = match ctx.is_timedout() {
-									true => Err(Error::QueryTimedout),
-									false => match res {
-										Err(Error::Return {
-											value,
-										}) if can_return => {
-											has_returned = true;
-											Ok(value)
-										}
-										res => res,
-									},
-								};
-								let ctx = ctx.freeze();
-								// Finalise transaction and return the result.
-								if res.is_ok() && stm.writeable() {
-									if let Err(e) = self.commit(loc).await {
-										// Clear live query notification details
-										self.clear(&ctx, recv.clone()).await;
-										// The commit failed
-										Err(Error::QueryNotExecutedDetail {
-											message: e.to_string(),
-										})
-									} else {
-										// Flush the live query change notifications
-										self.flush(&ctx, recv.clone()).await;
-										res
-									}
-								} else {
-									self.cancel(loc).await;
-									// Clear live query notification details
-									self.clear(&ctx, recv.clone()).await;
-									// Return an error
-									res
-								}
-							}
-						}
-					}
-				},
-			};
 
-			self.err = res.is_err();
-			// Produce the response
-			let res = Response {
-				// Get the statement end time
-				time: now.elapsed(),
-				result: res,
-				query_type: match (is_stm_live, is_stm_kill) {
-					(true, _) => QueryType::Live,
-					(_, true) => QueryType::Kill,
-					_ => QueryType::Other,
-				},
-			};
-			// Output the response
-			if self.txn.is_some() {
-				if is_stm_output || has_returned {
-					buf.clear();
+			ff_txn = false;
+
+			match self
+				.execute_statement(&mut stack, &mut ctx, &mut opt, &recv, &mut buf, &mut out, stm)
+				.await?
+			{
+				ControlFlow::Continue => {}
+				ControlFlow::Break => break,
+				ControlFlow::Return => {
 					ff_txn = true;
 				}
-				buf.push(res);
-			} else {
-				out.push(res)
 			}
 		}
 		// Return responses
 		Ok(out)
+	}
+
+	#[instrument(level = "debug", name = "executor", target = "surrealdb::core::dbs", skip_all)]
+	pub async fn execute_stream<S>(
+		&mut self,
+		mut ctx: Context,
+		opt: Options,
+		queries: S,
+	) -> Result<Vec<Response>, Error>
+	where
+		S: Stream<Item = Result<Statement, Error>>,
+	{
+		// The stack to run the executor in.
+		let mut stack = TreeStack::new();
+		// Create a notification channel
+		let (send, recv) = channel::unbounded();
+		// Set the notification channel
+		let mut opt = opt.new_with_sender(send);
+		// Initialise buffer of responses
+		let mut buf: Vec<Response> = vec![];
+		// Initialise array of responses
+		let mut out: Vec<Response> = vec![];
+		// Do we fast-forward a transaction?
+		// Set to true when we encounter a return statement in a transaction
+		let mut ff_txn = false;
+		// Process all statements in query
+
+		let mut queries = pin!(queries);
+
+		while let Some(stm) = queries.next().await {
+			let stm = stm?;
+
+			if ff_txn && !matches!(stm, Statement::Cancel(_) | Statement::Commit(_)) {
+				continue;
+			}
+
+			ff_txn = false;
+
+			match self
+				.execute_statement(&mut stack, &mut ctx, &mut opt, &recv, &mut buf, &mut out, stm)
+				.await?
+			{
+				ControlFlow::Continue => {}
+				ControlFlow::Break => break,
+				ControlFlow::Return => {
+					ff_txn = true;
+				}
+			}
+		}
+
+		// Return responses
+		Ok(out)
+	}
+
+	#[instrument(level = "debug", name = "executor", target = "surrealdb::core::dbs", skip_all)]
+	pub async fn execute_statement(
+		&mut self,
+		stack: &mut TreeStack,
+		ctx: &mut Context,
+		opt: &mut Options,
+		recv: &Receiver<Notification>,
+		buf: &mut Vec<Response>,
+		out: &mut Vec<Response>,
+		stm: Statement,
+	) -> Result<ControlFlow, Error> {
+		// Log the statement
+		trace!(target: TARGET, statement = %stm, "Executing statement");
+		// Reset errors
+		if self.txn.is_none() {
+			self.err = false;
+		}
+		// Get the statement start time
+		let now = Instant::now();
+
+		let query_type = match stm {
+			Statement::Live(_) => QueryType::Live,
+			Statement::Kill(_) => QueryType::Kill,
+			_ => QueryType::Other,
+		};
+		// Check if this is a RETURN statement
+		let is_stm_output = matches!(stm, Statement::Output(_));
+		// Has this statement returned a value
+		let mut has_returned = false;
+		// Process a single statement
+		let res = match stm {
+			// Specify runtime options
+			Statement::Option(mut stm) => {
+				// Allowed to run?
+				opt.is_allowed(Action::Edit, ResourceKind::Option, &Base::Db)?;
+				// Convert to uppercase
+				stm.name.0.make_ascii_uppercase();
+				// Process the option
+				match stm.name.0.as_str() {
+					"IMPORT" => {
+						opt.set_import(stm.what);
+					}
+					"FORCE" => {
+						let force = if stm.what {
+							Force::All
+						} else {
+							Force::None
+						};
+						opt.force = force;
+					}
+					"FUTURES" => {
+						if stm.what {
+							opt.set_futures(true);
+						} else {
+							opt.set_futures_never();
+						}
+					}
+					_ => return Ok(ControlFlow::Break),
+				};
+				// Continue
+				return Ok(ControlFlow::Continue);
+			}
+			// Begin a new transaction
+			Statement::Begin(_) => {
+				if opt.import {
+					return Ok(ControlFlow::Continue);
+				}
+				self.begin(Write).await;
+				return Ok(ControlFlow::Continue);
+			}
+			// Cancel a running transaction
+			Statement::Cancel(_) => {
+				if opt.import {
+					return Ok(ControlFlow::Continue);
+				}
+				self.cancel(true).await;
+				self.clear(ctx, recv.clone()).await;
+
+				let mut buf = mem::take(buf);
+				buf.iter_mut().for_each(|v| {
+					v.result = Err(Error::QueryCancelled);
+					v.query_type = QueryType::Other;
+				});
+				out.extend(buf);
+				debug_assert!(self.txn.is_none(), "cancel(true) should have unset txn");
+				return Ok(ControlFlow::Continue);
+			}
+			// Commit a running transaction
+			Statement::Commit(_) => {
+				if opt.import {
+					return Ok(ControlFlow::Continue);
+				}
+				let commit_error = self.commit(true).await.err();
+				*buf =
+					mem::take(buf).into_iter().map(|v| self.buf_commit(v, &commit_error)).collect();
+				self.flush(ctx, recv.clone()).await;
+				out.append(buf);
+				debug_assert!(self.txn.is_none(), "commit(true) should have unset txn");
+				return Ok(ControlFlow::Continue);
+			}
+			// Switch to a different NS or DB
+			Statement::Use(stm) => {
+				if let Some(ref ns) = stm.ns {
+					*ctx = self.set_ns(ctx.clone(), opt, ns).await?;
+				}
+				if let Some(ref db) = stm.db {
+					*ctx = self.set_db(ctx.clone(), opt, db).await?;
+				}
+				Ok(Value::None)
+			}
+			// Process param definition statements
+			Statement::Set(stm) => {
+				// Create a transaction
+				let loc = self.begin(stm.writeable().into()).await;
+				// Check the transaction
+				if self.err {
+					// We failed to create a transaction
+					return Err(Error::TxFailure);
+				}
+				// The transaction began successfully
+				// ctx.set_transaction(txn)
+				let mut c = MutableContext::unfreeze(ctx.clone())?;
+				c.set_transaction(self.txn()?);
+				*ctx = c.freeze();
+				// Check the statement
+				match stack.enter(|stk| stm.compute(stk, ctx, opt, None)).finish().await {
+					Ok(val) => {
+						// Check if writeable
+						let writeable = stm.writeable();
+						// Set the parameter
+						let mut c = MutableContext::unfreeze(ctx.clone())?;
+						c.add_value(stm.name, val.into());
+						*ctx = c.freeze();
+						// Finalise transaction, returning nothing unless it couldn't commit
+						if writeable {
+							match self.commit(loc).await {
+								Err(e) => {
+									// Clear live query notifications
+									self.clear(ctx, recv.clone()).await;
+									Err(Error::QueryNotExecutedDetail {
+										message: e.to_string(),
+									})
+								}
+								Ok(_) => {
+									// Flush live query notifications
+									self.flush(ctx, recv.clone()).await;
+									Ok(Value::None)
+								}
+							}
+						} else {
+							self.cancel(loc).await;
+							self.clear(ctx, recv.clone()).await;
+							Ok(Value::None)
+						}
+					}
+					Err(err) => {
+						// Cancel transaction
+						self.cancel(loc).await;
+						// Return error
+						Err(err)
+					}
+				}
+			}
+			// Process all other normal statements
+			_ => {
+				if self.err {
+					// This transaction has failed
+					return Err(Error::QueryNotExecuted);
+				}
+				// Compute the statement normally
+				// Create a transaction
+				let loc = self.begin(stm.writeable().into()).await;
+				// Check the transaction
+				if self.err {
+					// We failed to create a transaction
+					return Err(Error::TxFailure);
+				}
+
+				// The transaction began successfully
+				// Create a new context for this statement
+				let mut ctx = MutableContext::new(ctx);
+				// Set the transaction on the context
+				ctx.set_transaction(self.txn()?);
+				let c = ctx.freeze();
+				// Process the statement
+				let res = stack.enter(|stk| stm.compute(stk, &c, opt, None)).finish().await;
+				ctx = MutableContext::unfreeze(c)?;
+				// Check if this is a RETURN statement
+				let can_return = matches!(
+					stm,
+					Statement::Output(_)
+						| Statement::Value(_)
+						| Statement::Ifelse(_)
+						| Statement::Foreach(_)
+				);
+				// Catch global timeout
+				if ctx.is_timedout() {
+					return Err(Error::QueryTimedout);
+				}
+
+				let res = match res {
+					Err(Error::Return {
+						value,
+					}) if can_return => {
+						has_returned = true;
+						Ok(value)
+					}
+					res => res,
+				};
+
+				let ctx = ctx.freeze();
+				// Finalise transaction and return the result.
+				if res.is_ok() && stm.writeable() {
+					if let Err(e) = self.commit(loc).await {
+						// Clear live query notification details
+						self.clear(&ctx, recv.clone()).await;
+						// The commit failed
+						Err(Error::QueryNotExecutedDetail {
+							message: e.to_string(),
+						})
+					} else {
+						// Flush the live query change notifications
+						self.flush(&ctx, recv.clone()).await;
+						res
+					}
+				} else {
+					self.cancel(loc).await;
+					// Clear live query notification details
+					self.clear(&ctx, recv.clone()).await;
+					// Return an error
+					res
+				}
+			}
+		};
+
+		self.err = res.is_err();
+		// Produce the response
+		let res = Response {
+			// Get the statement end time
+			time: now.elapsed(),
+			result: res,
+			query_type,
+		};
+		// Output the response
+		if self.txn.is_some() {
+			if is_stm_output || has_returned {
+				buf.clear();
+				buf.push(res);
+				return Ok(ControlFlow::Return);
+			}
+			buf.push(res);
+		} else {
+			out.push(res)
+		}
+
+		Ok(ControlFlow::Continue)
 	}
 }
 

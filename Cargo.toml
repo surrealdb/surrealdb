@@ -31,6 +31,7 @@ performance-profiler = ["dep:pprof"]
 # Special features
 storage-fdb-7_1 = ["surrealdb/kv-fdb-7_1"]
 storage-fdb-7_3 = ["surrealdb/kv-fdb-7_3"]
+dhat-heap = ["dhat"] # Used for heap profiling.
 
 [workspace]
 members = [
@@ -145,6 +146,7 @@ tracing-opentelemetry = "0.25.0"
 tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }
 urlencoding = "2.1.3"
 uuid = { version = "1.10.0", features = ["serde", "js", "v4", "v7"] }
+dhat = { version = "0.3.3", optional = true }
 
 [target.'cfg(unix)'.dependencies]
 nix = { version = "0.27.1", features = ["user"] }

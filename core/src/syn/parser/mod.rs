@@ -92,6 +92,7 @@ pub type ParseResult<T> = Result<T, SyntaxError>;
 #[non_exhaustive]
 pub enum PartialResult<T> {
 	MoreData,
+	Empty,
 	Ok {
 		value: T,
 		used: usize,
@@ -401,15 +402,20 @@ impl<'a> Parser<'a> {
 	/// is operating on.
 	pub async fn parse_partial_statement(
 		&mut self,
+		complete: bool,
 		ctx: &mut Stk,
 	) -> PartialResult<sql::Statement> {
 		while self.eat(t!(";")) {}
+
+		if self.peek().kind == TokenKind::Eof {
+			return PartialResult::Empty;
+		}
 
 		let res = ctx.run(|ctx| self.parse_stmt(ctx)).await;
 		let v = match res {
 			Err(e) => {
 				let peek = self.peek_whitespace1();
-				if e.is_data_pending()
+				if !complete && e.is_data_pending()
 					|| matches!(peek.kind, TokenKind::Eof | TokenKind::WhiteSpace)
 				{
 					return PartialResult::MoreData;
@@ -422,7 +428,7 @@ impl<'a> Parser<'a> {
 			Ok(x) => x,
 		};
 
-		if self.eat(t!(";")) {
+		if complete || self.eat(t!(";")) {
 			return PartialResult::Ok {
 				value: v,
 				used: self.lexer.reader.offset(),

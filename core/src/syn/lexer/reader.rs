@@ -26,20 +26,11 @@ impl From<CharError> for SyntaxError {
 	}
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 #[non_exhaustive]
 pub struct BytesReader<'a> {
 	data: &'a [u8],
 	current: usize,
-}
-
-impl fmt::Debug for BytesReader<'_> {
-	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-		f.debug_struct("BytesReader")
-			.field("used", &self.used())
-			.field("remaining", &self.remaining())
-			.finish()
-	}
 }
 
 impl<'a> BytesReader<'a> {
@@ -48,16 +39,6 @@ impl<'a> BytesReader<'a> {
 			data: slice,
 			current: 0,
 		}
-	}
-
-	#[inline]
-	pub fn full(&self) -> &'a [u8] {
-		self.data
-	}
-
-	#[inline]
-	pub fn used(&self) -> &'a [u8] {
-		&self.data[..self.current]
 	}
 
 	#[inline]

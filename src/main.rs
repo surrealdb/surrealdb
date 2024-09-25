@@ -32,6 +32,9 @@ use std::future::Future;
 use std::process::ExitCode;
 
 fn main() -> ExitCode {
+	#[cfg(feature = "dhat-heap")]
+	let _profiler = dhat::Profiler::new_heap();
+
 	// Initiate the command line
 	with_enough_stack(cli::init())
 }
