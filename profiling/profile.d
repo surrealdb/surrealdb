@@ -1,11 +1,4 @@
-#!/usr/sbin/dtrace -s
-
 #pragma D option quiet
-
-dtrace:::BEGIN
-{
-    printf("Tracing... Hit Ctrl-C to end.\n");
-}
 
 pid$target::*surreal*:entry
 {
@@ -31,7 +24,7 @@ pid$target::*surreal*:return
 
 dtrace:::END
 {
-    printa("%s\t%@d\t%@d\t%@d\t%@d\t%@d\n",
+    printa("%s %@d %@d %@d %@d %@d\n",
         @average_cpu_times,
         @sum_cpu_times,
         @average_total_times,
