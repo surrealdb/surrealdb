@@ -7,9 +7,61 @@ use crate::sql::paths::OUT;
 use crate::sql::Value;
 use channel::Sender;
 
+#[derive(Clone, Debug)]
+pub struct Config {
+	pub users: bool,
+	pub accesses: bool,
+	pub params: bool,
+	pub functions: bool,
+	pub analyzers: bool,
+	pub tables: TableConfig,
+}
+
+impl Default for Config {
+	fn default() -> Config {
+		Config {
+			users: true,
+			accesses: true,
+			params: true,
+			functions: true,
+			analyzers: true,
+			tables: TableConfig::default(),
+		}
+	}
+}
+
+#[derive(Clone, Debug, Default)]
+pub enum TableConfig {
+	#[default]
+	All,
+	None,
+	Some(Vec<String>),
+}
+
+impl TableConfig {
+	/// Check if we should export tables
+	pub(crate) fn is_any(&self) -> bool {
+		matches!(self, Self::All | Self::Some(_))
+	}
+	// Check if we should export a specific table
+	pub(crate) fn includes(&self, table: &str) -> bool {
+		match self {
+			Self::All => true,
+			Self::None => false,
+			Self::Some(v) => v.iter().any(|v| v.eq(table)),
+		}
+	}
+}
+
 impl Transaction {
 	/// Writes the full database contents as binary SQL.
-	pub async fn export(&self, ns: &str, db: &str, chn: Sender<Vec<u8>>) -> Result<(), Error> {
+	pub async fn export(
+		&self,
+		ns: &str,
+		db: &str,
+		cfg: Config,
+		chn: Sender<Vec<u8>>,
+	) -> Result<(), Error> {
 		// Output OPTIONS
 		{
 			chn.send(bytes!("-- ------------------------------")).await?;
@@ -20,7 +72,7 @@ impl Transaction {
 			chn.send(bytes!("")).await?;
 		}
 		// Output USERS
-		{
+		if cfg.users {
 			let dus = self.all_db_users(ns, db).await?;
 			if !dus.is_empty() {
 				chn.send(bytes!("-- ------------------------------")).await?;
@@ -34,7 +86,7 @@ impl Transaction {
 			}
 		}
 		// Output ACCESSES
-		{
+		if cfg.accesses {
 			let dts = self.all_db_accesses(ns, db).await?;
 			if !dts.is_empty() {
 				chn.send(bytes!("-- ------------------------------")).await?;
@@ -48,7 +100,7 @@ impl Transaction {
 			}
 		}
 		// Output PARAMS
-		{
+		if cfg.params {
 			let pas = self.all_db_params(ns, db).await?;
 			if !pas.is_empty() {
 				chn.send(bytes!("-- ------------------------------")).await?;
@@ -62,7 +114,7 @@ impl Transaction {
 			}
 		}
 		// Output FUNCTIONS
-		{
+		if cfg.functions {
 			let fcs = self.all_db_functions(ns, db).await?;
 			if !fcs.is_empty() {
 				chn.send(bytes!("-- ------------------------------")).await?;
@@ -76,7 +128,7 @@ impl Transaction {
 			}
 		}
 		// Output ANALYZERS
-		{
+		if cfg.analyzers {
 			let azs = self.all_db_analyzers(ns, db).await?;
 			if !azs.is_empty() {
 				chn.send(bytes!("-- ------------------------------")).await?;
@@ -90,10 +142,14 @@ impl Transaction {
 			}
 		}
 		// Output TABLES
-		{
+		if cfg.tables.is_any() {
 			let tbs = self.all_tb(ns, db, None).await?;
 			if !tbs.is_empty() {
 				for tb in tbs.iter() {
+					// Check table
+					if !cfg.tables.includes(&tb.name) {
+						continue;
+					}
 					// Output TABLE
 					chn.send(bytes!("-- ------------------------------")).await?;
 					chn.send(bytes!(format!("-- TABLE: {}", tb.name))).await?;
