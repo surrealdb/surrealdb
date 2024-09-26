@@ -648,7 +648,7 @@ async fn function_array_map() -> Result<(), Error> {
 #[tokio::test]
 async fn function_array_fold() -> Result<(), Error> {
 	let sql = r#"
-		RETURN array::fold([1,2,3], |$n, $i| $n + $i);
+		RETURN array::fold([1,2,3], 0, |$n, $i| $n + $i);
 	"#;
 	//
 	Test::new(sql).await?.expect_val("6")?;
@@ -658,12 +658,18 @@ async fn function_array_fold() -> Result<(), Error> {
 	"#;
 	//
 	Test::new(sql).await?.expect_val("30")?;
-
+	//
 	let sql = r#"
 	"gnirts a tsuJ".split("").fold("", |$one, $two| $two + $one);
 	"#;
 	//
 	Test::new(sql).await?.expect_val("'Just a string'")?;
+
+	// The index can also be accessed in the same way as array::map
+	let sql = r#"
+	[10, 9, 8, 7, 6, 5, 4, 3, 2, 1].fold(0, |$one, $two, $three| $one + $two + $three);
+	"#;
+	Test::new(sql).await?.expect_val("100")?;
 	Ok(())
 }
 

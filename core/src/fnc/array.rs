@@ -370,8 +370,8 @@ pub async fn fold(
 ) -> Result<Value, Error> {
 	if let Some(opt) = opt {
 		let mut accum = init;
-		for x in array {
-			let fnc = Function::Anonymous(mapper.clone().into(), vec![accum, x]);
+		for (i, val) in array.into_iter().enumerate() {
+			let fnc = Function::Anonymous(mapper.clone().into(), vec![accum, val, i.into()]);
 			accum = fnc.compute(stk, ctx, opt, doc).await?;
 		}
 		Ok(accum)
