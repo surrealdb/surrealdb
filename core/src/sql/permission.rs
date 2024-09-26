@@ -73,6 +73,13 @@ impl Display for Permissions {
 		.into_iter()
 		.zip([&self.select, &self.create, &self.update, &self.delete])
 		{
+			// Alternate permissions display implementation ignores delete permission
+			// This display is used to show field permissions, where delete has no effect
+			// Displaying the permission would cause parsing errors during import
+			if f.alternate() && matches!(c, PermissionKind::Delete) {
+				continue;
+			}
+
 			if let Some((existing, _)) = lines.iter_mut().find(|(_, p)| *p == permission) {
 				existing.push(c);
 			} else {

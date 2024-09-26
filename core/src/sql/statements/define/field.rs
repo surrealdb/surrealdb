@@ -225,7 +225,7 @@ impl Display for DefineFieldStatement {
 			f.write_char(' ')?;
 			None
 		};
-		write!(f, "{}", self.permissions)?;
+		write!(f, "{:#}", self.permissions)?;
 		Ok(())
 	}
 }
