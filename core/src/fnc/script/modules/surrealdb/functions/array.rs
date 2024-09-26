@@ -32,6 +32,7 @@ impl_module_def!(
 	"find" => fut Async,
 	"find_index" => fut Async,
 	"first" => run,
+	"fold" => fut Async,
 	"flatten" => run,
 	"group" => run,
 	"includes" => fut Async,
