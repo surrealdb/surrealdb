@@ -52,6 +52,7 @@ pub async fn run(
 		|| name.eq("array::filter")
 		|| name.eq("array::find_index")
 		|| name.eq("array::find")
+		|| name.eq("array::fold")
 		|| name.eq("array::includes")
 		|| name.eq("array::index_of")
 		|| name.eq("array::map")
@@ -470,6 +471,7 @@ pub async fn asynchronous(
 		"array::filter_index" => array::filter_index((stk, ctx, Some(opt), doc)).await,
 		"array::find" => array::find((stk, ctx, Some(opt), doc)).await,
 		"array::find_index" => array::find_index((stk, ctx, Some(opt), doc)).await,
+		"array::fold" => array::fold((stk, ctx, Some(opt), doc)).await,
 		"array::includes" => array::any((stk, ctx, Some(opt), doc)).await,
 		"array::index_of" => array::find_index((stk, ctx, Some(opt), doc)).await,
 		"array::map" => array::map((stk, ctx, Some(opt), doc)).await,
@@ -548,6 +550,7 @@ pub async fn idiom(
 				"find" => array::find((stk, ctx, Some(opt), doc)).await,
 				"find_index" => array::find_index((stk, ctx, Some(opt), doc)).await,
 				"first" => array::first,
+				"fold" => array::fold((stk, ctx, Some(opt), doc)).await,
 				"flatten" => array::flatten,
 				"group" => array::group,
 				"includes" => array::any((stk, ctx, Some(opt), doc)).await,

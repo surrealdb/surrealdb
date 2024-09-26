@@ -364,6 +364,23 @@ pub fn flatten((array,): (Array,)) -> Result<Value, Error> {
 	Ok(array.flatten().into())
 }
 
+pub async fn fold(
+	(stk, ctx, opt, doc): (&mut Stk, &Context, Option<&Options>, Option<&CursorDoc>),
+	(array, init, mapper): (Array, Value, Closure),
+) -> Result<Value, Error> {
+	if let Some(opt) = opt {
+		let mut accum = init;
+		let mut iter = array.into_iter();
+		while let Some(x) = iter.next() {
+			let fnc = Function::Anonymous(mapper.clone().into(), vec![accum, x]);
+			accum = fnc.compute(stk, ctx, opt, doc).await?;
+		}
+		Ok(accum)
+	} else {
+		Ok(Value::None)
+	}
+}
+
 pub fn group((array,): (Array,)) -> Result<Value, Error> {
 	Ok(array.flatten().uniq().into())
 }
