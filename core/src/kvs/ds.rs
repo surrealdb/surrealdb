@@ -980,10 +980,12 @@ impl Datastore {
 		let (ns, db) = crate::iam::check::check_ns_db(sess)?;
 		// Create a new readonly transaction
 		let txn = self.transaction(Read, Optimistic).await?;
+		// Create a default export config
+		let cfg = super::export::Config::default();
 		// Return an async export job
 		Ok(async move {
 			// Process the export
-			txn.export(&ns, &db, chn).await?;
+			txn.export(&ns, &db, cfg, chn).await?;
 			// Everything ok
 			Ok(())
 		})
