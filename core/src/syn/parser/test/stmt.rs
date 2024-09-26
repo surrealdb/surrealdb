@@ -1471,13 +1471,34 @@ fn parse_define_field() {
 
 	// Invalid DELETE permission
 	{
+		// TODO(gguillemas): Providing the DELETE permission should return a parse error in 3.0.0.
+		// Currently, the DELETE permission is just ignored to maintain backward compatibility.
 		let res =
-			test_parse!(parse_stmt, r#"DEFINE FIELD foo ON TABLE bar PERMISSIONS FOR DELETE NONE"#);
-		assert!(
-			res.is_err(),
-			"Unexpected successful parsing of `DELETE` permission for a field: {:?}",
-			res
-		);
+			test_parse!(parse_stmt, r#"DEFINE FIELD foo ON TABLE bar PERMISSIONS FOR DELETE NONE"#)
+				.unwrap();
+
+		assert_eq!(
+			res,
+			Statement::Define(DefineStatement::Field(DefineFieldStatement {
+				name: Idiom(vec![Part::Field(Ident("foo".to_owned())),]),
+				what: Ident("bar".to_owned()),
+				flex: false,
+				kind: None,
+				readonly: false,
+				value: None,
+				assert: None,
+				default: None,
+				permissions: Permissions {
+					delete: Permission::Full,
+					update: Permission::Full,
+					create: Permission::Full,
+					select: Permission::Full,
+				},
+				comment: None,
+				if_not_exists: false,
+				overwrite: false,
+			}))
+		)
 	}
 }
 
