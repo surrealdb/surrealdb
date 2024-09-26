@@ -116,7 +116,10 @@ mod graphql_integration {
 		{
 			let res = client
 				.post(gql_url)
-				.body(json!({"query": r#"query(version: "2024-08-19T08:00:00Z"){foo{id, val}}"#}).to_string())
+				.body(
+					json!({"query": r#"query(version: "2024-08-19T08:00:00Z"){foo{id, val}}"#})
+						.to_string(),
+				)
 				.send()
 				.await?;
 
@@ -146,7 +149,10 @@ mod graphql_integration {
 		{
 			let res = client
 				.post(gql_url)
-				.body(json!({"query": r#"query{foo(version: "2024-08-19T07:00:00Z"){id, val}}"#}).to_string())
+				.body(
+					json!({"query": r#"query{foo(version: "2024-08-19T07:00:00Z"){id, val}}"#})
+						.to_string(),
+				)
 				.send()
 				.await?;
 
