@@ -578,33 +578,35 @@ impl Ord for Number {
 			}
 		}
 
+		// Pick the greater number depending on whether it's positive.
+		macro_rules! greater {
+			($f:ident) => {
+				if $f.is_sign_positive() {
+					Ordering::Greater
+				} else {
+					Ordering::Less
+				}
+			};
+		}
+
 		match (self, other) {
 			(Number::Int(v), Number::Int(w)) => v.cmp(w),
 			(Number::Float(v), Number::Float(w)) => total_cmp_f64(*v, *w),
 			(Number::Decimal(v), Number::Decimal(w)) => v.cmp(w),
 			// ------------------------------
 			(Number::Int(v), Number::Float(w)) => {
+				// If the float is not finite, we don't need to compare it to the integer.
+				if !w.is_finite() {
+					return greater!(w).reverse();
+				}
 				// Cast int to i128 to avoid saturating.
 				let l = *v as i128;
 				// Cast the integer-part of the float to i128 to avoid saturating.
 				let r = *w as i128;
 				// Compare both integer parts.
 				match l.cmp(&r) {
-					// If the integer parts are equal then we need to do some extra checks...
-					Ordering::Equal => {
-						// The fractional part of an integer is zero.
-						let l = 0.0;
-						// Get the fractional part of the float.
-						let r = w.fract();
-						// Check if the fractional part is zero. If it is, treat the integer as equal to the
-						// float whether or not it is negative zero. We need to check this explicitly because
-						// `total_cmp` treats negative zero and positive zero as different numbers.
-						if l == r {
-							return Ordering::Equal;
-						}
-						// Finally use `total_cmp` to compare the mantissa.
-						l.total_cmp(&r)
-					}
+					// If the integer parts are equal then we need to compare the mantissa.
+					Ordering::Equal => total_cmp_f64(0.0, w.fract()),
 					// If the integer parts are not equal then we already know the correct ordering.
 					ordering => ordering,
 				}
@@ -615,42 +617,102 @@ impl Ord for Number {
 			(Number::Decimal(v), Number::Int(w)) => v.cmp(&Decimal::from(*w)),
 			// ------------------------------
 			(Number::Float(v), Number::Decimal(w)) => {
-				if v > &Decimal::MAX
-					.to_f64()
-					.expect("Decimal::MAX should be able to be converted to f64")
-				{
-					Ordering::Greater
-				} else if v < &Decimal::MIN
-					.to_f64()
-					.expect("Decimal::MIN should be able to be converted to f64")
-				{
-					Ordering::Less
-				} else if let Some(vd) = Decimal::from_f64_retain(*v) {
-					match (vd.cmp(w), v.fract() == 0.0, w.fract() == Decimal::ZERO) {
-						// both non-integers so we order float first
-						(Ordering::Equal, false, false) => Ordering::Less,
-						// both have equal int parts, but w has larger magnitude
-						(Ordering::Equal, false, true) => match v.is_sign_positive() {
-							true => Ordering::Greater,
-							false => Ordering::Less,
-						},
-						(Ordering::Equal, true, false) => match v.is_sign_positive() {
-							true => Ordering::Less,
-							false => Ordering::Greater,
-						},
-						// Both are integers and equal
-						(Ordering::Equal, true, true) => Ordering::Equal,
-						(o @ Ordering::Less | o @ Ordering::Greater, _, _) => o,
+				// Compare fractional parts of the float and decimal.
+				macro_rules! compare_fractions {
+					($l:ident, $r:ident) => {
+						match ($l == 0.0, $r == Decimal::ZERO) {
+							// If both numbers are zero, these are equal.
+							(true, true) => {
+								return Ordering::Equal;
+							}
+							// If only the float is zero, check the decimal's sign.
+							(true, false) => {
+								return greater!($r).reverse();
+							}
+							// If only the decimal is zero, check the float's sign.
+							(false, true) => {
+								return greater!($l);
+							}
+							// If neither is zero, continue checking the rest of the digits.
+							(false, false) => {
+								continue;
+							}
+						}
+					};
+				}
+				// If the float is not finite, we don't need to compare it to the decimal
+				if !v.is_finite() {
+					return greater!(v);
+				}
+				// Cast int to i128 to avoid saturating.
+				let l = *v as i128;
+				// Cast the integer-part of the decimal to i128.
+				let Ok(r) = i128::try_from(*w) else {
+					return greater!(w).reverse();
+				};
+				// Compare both integer parts.
+				match l.cmp(&r) {
+					// If the integer parts are equal then we need to compare the fractional parts.
+					Ordering::Equal => {
+						// We can't compare the fractional parts of floats with decimals reliably.
+						// Instead, we need to compare them as integers. To do this, we need to
+						// multiply the fraction with a number large enough to move some digits
+						// to the integer part of the float or decimal. The number should fit in
+						// an f64 and be a multiple of 2. Since we may need to do this repeatedly
+						// it helps if the number is as big as possible to reduce the number of
+						// iterations needed.
+						const SAFE_MULTIPLIER: i64 = 9_007_199_254_740_000;
+						// Get the fractional part of the float.
+						let mut l = v.fract();
+						// Get the fractional part of the decimal.
+						let mut r = w.fract();
+						// Move the digits and compare them.
+						// This is very generous. For example, for our tests to pass we only need
+						// 3 iterations. This should be at least 6 to make sure we cover all
+						// possible decimals and floats.
+						for _ in 0..12 {
+							l *= SAFE_MULTIPLIER as f64;
+							r *= Decimal::new(SAFE_MULTIPLIER, 0);
+							// Cast the integer part of the decimal to i64. The fractions are always
+							// less than 1 so we know this will always be less than SAFE_MULTIPLIER.
+							match r.to_i64() {
+								Some(ref right) => match (l as i64).cmp(right) {
+									// If the integer parts are equal, we need to check the remaining
+									// fractional parts.
+									Ordering::Equal => {
+										// Drop the integer parts we already compared.
+										l = l.fract();
+										r = r.fract();
+										// Compare the fractional parts and decide whether to return
+										// or continue checking the next digits.
+										compare_fractions!(l, r);
+									}
+									ordering => {
+										// If the integer parts are not equal then we already know the
+										// correct ordering.
+										return ordering;
+									}
+								},
+								// This is technically unreachable. Reaching this part likely indicates
+								// a bug in `rust-decimal`'s `to_f64`'s implementation.
+								None => {
+									// We will assume the decimal is bigger or smaller depending on its
+									// sign.
+									return greater!(w).reverse();
+								}
+							}
+						}
+						// After our iterations, if we still haven't exhausted both fractions we will
+						// just treat them as equal. It should be impossible to reach this point after
+						// at least 6 iterations. We could use an infinite loop instead but this way
+						// we make sure the loop always exits.
+						Ordering::Equal
 					}
-				} else if v.is_sign_positive() {
-					Ordering::Greater // inf, +NaN, pos overflow
-				} else {
-					Ordering::Less // -inf, -NaN, neg overflow
+					// If the integer parts are not equal then we already know the correct ordering.
+					ordering => ordering,
 				}
 			}
-			(Number::Decimal(v), Number::Float(w)) => {
-				Number::cmp(&Number::Float(*w), &Number::Decimal(*v)).reverse()
-			}
+			(v @ Number::Decimal(..), w @ Number::Float(..)) => w.cmp(v).reverse(),
 		}
 	}
 }
