@@ -8,6 +8,7 @@ use rust_decimal::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
 use std::f64::consts::PI;
+use std::fmt::Debug;
 use std::fmt::{self, Display, Formatter};
 use std::hash;
 use std::iter::Product;
@@ -17,7 +18,7 @@ use std::ops::{self, Add, Div, Mul, Neg, Rem, Sub};
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Number";
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Copy, Serialize, Deserialize, Debug)]
 #[serde(rename = "$surrealdb::private::sql::Number")]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
@@ -168,7 +169,7 @@ impl TryFrom<&Number> for f32 {
 
 	fn try_from(n: &Number) -> Result<Self, Self::Error> {
 		n.to_float().to_f32().ok_or_else(|| Error::ConvertTo {
-			from: Value::Number(n.clone()),
+			from: Value::Number(*n),
 			into: "f32".to_string(),
 		})
 	}
@@ -186,7 +187,7 @@ impl TryFrom<&Number> for i32 {
 
 	fn try_from(n: &Number) -> Result<Self, Self::Error> {
 		n.to_int().to_i32().ok_or_else(|| Error::ConvertTo {
-			from: Value::Number(n.clone()),
+			from: Value::Number(*n),
 			into: "i32".to_string(),
 		})
 	}
@@ -197,7 +198,7 @@ impl TryFrom<&Number> for i16 {
 
 	fn try_from(n: &Number) -> Result<Self, Self::Error> {
 		n.to_int().to_i16().ok_or_else(|| Error::ConvertTo {
-			from: Value::Number(n.clone()),
+			from: Value::Number(*n),
 			into: "i16".to_string(),
 		})
 	}
@@ -582,17 +583,74 @@ impl Ord for Number {
 			(Number::Float(v), Number::Float(w)) => total_cmp_f64(*v, *w),
 			(Number::Decimal(v), Number::Decimal(w)) => v.cmp(w),
 			// ------------------------------
-			(Number::Int(v), Number::Float(w)) => total_cmp_f64(*v as f64, *w),
-			(Number::Float(v), Number::Int(w)) => total_cmp_f64(*v, *w as f64),
+			(Number::Int(v), Number::Float(w)) => {
+				// Cast int to i128 to avoid saturating.
+				let l = *v as i128;
+				// Cast the integer-part of the float to i128 to avoid saturating.
+				let r = *w as i128;
+				// Compare both integer parts.
+				match l.cmp(&r) {
+					// If the integer parts are equal then we need to do some extra checks...
+					Ordering::Equal => {
+						// The fractional part of an integer is zero.
+						let l = 0.0;
+						// Get the fractional part of the float.
+						let r = w.fract();
+						// Check if the fractional part is zero. If it is, treat the integer as equal to the
+						// float whether or not it is negative zero. We need to check this explicitly because
+						// `total_cmp` treats negative zero and positive zero as different numbers.
+						if l == r {
+							return Ordering::Equal;
+						}
+						// Finally use `total_cmp` to compare the mantissa.
+						l.total_cmp(&r)
+					}
+					// If the integer parts are not equal then we already know the correct ordering.
+					ordering => ordering,
+				}
+			}
+			(v @ Number::Float(_), w @ Number::Int(_)) => w.cmp(v).reverse(),
 			// ------------------------------
 			(Number::Int(v), Number::Decimal(w)) => Decimal::from(*v).cmp(w),
 			(Number::Decimal(v), Number::Int(w)) => v.cmp(&Decimal::from(*w)),
 			// ------------------------------
 			(Number::Float(v), Number::Decimal(w)) => {
-				// `rust_decimal::Decimal` code comments indicate that `to_f64` is infallible
-				total_cmp_f64(*v, w.to_f64().unwrap())
+				if v > &Decimal::MAX
+					.to_f64()
+					.expect("Decimal::MAX should be able to be converted to f64")
+				{
+					Ordering::Greater
+				} else if v < &Decimal::MIN
+					.to_f64()
+					.expect("Decimal::MIN should be able to be converted to f64")
+				{
+					Ordering::Less
+				} else if let Some(vd) = Decimal::from_f64_retain(*v) {
+					match (vd.cmp(w), v.fract() == 0.0, w.fract() == Decimal::ZERO) {
+						// both non-integers so we order float first
+						(Ordering::Equal, false, false) => Ordering::Less,
+						// both have equal int parts, but w has larger magnitude
+						(Ordering::Equal, false, true) => match v.is_sign_positive() {
+							true => Ordering::Greater,
+							false => Ordering::Less,
+						},
+						(Ordering::Equal, true, false) => match v.is_sign_positive() {
+							true => Ordering::Less,
+							false => Ordering::Greater,
+						},
+						// Both are integers and equal
+						(Ordering::Equal, true, true) => Ordering::Equal,
+						(o @ Ordering::Less | o @ Ordering::Greater, _, _) => o,
+					}
+				} else if v.is_sign_positive() {
+					Ordering::Greater // inf, +NaN, pos overflow
+				} else {
+					Ordering::Less // -inf, -NaN, neg overflow
+				}
 			}
-			(Number::Decimal(v), Number::Float(w)) => total_cmp_f64(v.to_f64().unwrap(), *w),
+			(Number::Decimal(v), Number::Float(w)) => {
+				Number::cmp(&Number::Float(*w), &Number::Decimal(*v)).reverse()
+			}
 		}
 	}
 }
@@ -620,14 +678,14 @@ impl PartialEq for Number {
 			(Number::Float(v), Number::Float(w)) => total_eq_f64(*v, *w),
 			(Number::Decimal(v), Number::Decimal(w)) => v.eq(w),
 			// ------------------------------
-			(Number::Int(v), Number::Float(w)) => total_eq_f64(*v as f64, *w),
-			(Number::Float(v), Number::Int(w)) => total_eq_f64(*v, *w as f64),
+			(v @ Number::Int(_), w @ Number::Float(_)) => v.cmp(w) == Ordering::Equal,
+			(v @ Number::Float(_), w @ Number::Int(_)) => v.cmp(w) == Ordering::Equal,
 			// ------------------------------
 			(Number::Int(v), Number::Decimal(w)) => Decimal::from(*v).eq(w),
 			(Number::Decimal(v), Number::Int(w)) => v.eq(&Decimal::from(*w)),
 			// ------------------------------
-			(Number::Float(v), Number::Decimal(w)) => total_eq_f64(*v, w.to_f64().unwrap()),
-			(Number::Decimal(v), Number::Float(w)) => total_eq_f64(v.to_f64().unwrap(), *w),
+			(v @ Number::Float(_), w @ Number::Decimal(_)) => v.cmp(w) == Ordering::Equal,
+			(v @ Number::Decimal(_), w @ Number::Float(_)) => v.cmp(w) == Ordering::Equal,
 		}
 	}
 }
@@ -933,17 +991,133 @@ impl ToFloat for Number {
 
 #[cfg(test)]
 mod tests {
+	use std::cmp::Ordering;
+
+	use rand::seq::SliceRandom;
+	use rand::thread_rng;
+	use rand::Rng;
+	use rust_decimal::Decimal;
+
 	use super::Number;
 	use super::TryFloatDiv;
 	#[test]
 	fn test_try_float_div() {
 		let (sum_one, count_one) = (Number::Int(5), Number::Int(2));
 		assert_eq!(sum_one.try_float_div(count_one).unwrap(), Number::Float(2.5));
+		// i64::MIN
 
 		let (sum_two, count_two) = (Number::Int(10), Number::Int(5));
 		assert_eq!(sum_two.try_float_div(count_two).unwrap(), Number::Int(2));
 
 		let (sum_three, count_three) = (Number::Float(6.3), Number::Int(3));
 		assert_eq!(sum_three.try_float_div(count_three).unwrap(), Number::Float(2.1));
+	}
+
+	#[test]
+	fn ord_test() {
+		let a = Number::Float(-f64::NAN);
+		let b = Number::Float(-f64::INFINITY);
+		let c = Number::Float(1f64);
+		let d = Number::Decimal(Decimal::from_str_exact("1.0000000000000000000000000002").unwrap());
+		let e = Number::Decimal(Decimal::from_str_exact("1.1").unwrap());
+		let f = Number::Float(1.1f64);
+		let g = Number::Float(1.5f64);
+		let h = Number::Decimal(Decimal::from_str_exact("1.5").unwrap());
+		let i = Number::Float(f64::INFINITY);
+		let j = Number::Float(f64::NAN);
+		let original = vec![a, b, c, d, e, f, g, h, i, j];
+		let mut copy = original.clone();
+		let mut rng = thread_rng();
+		copy.shuffle(&mut rng);
+		copy.sort();
+		assert_eq!(original, copy);
+	}
+
+	#[test]
+	fn ord_fuzz() {
+		fn random_number() -> Number {
+			let mut rng = thread_rng();
+			match rng.gen_range(0..3) {
+				0 => Number::Int(rng.gen()),
+				1 => Number::Float(f64::from_bits(rng.gen())),
+				_ => Number::Decimal(Number::Float(f64::from_bits(rng.gen())).as_decimal()),
+			}
+		}
+
+		// TODO: Use std library once stable https://doc.rust-lang.org/std/primitive.f64.html#method.next_down
+		fn next_down(n: f64) -> f64 {
+			const TINY_BITS: u64 = 0x1; // Smallest positive f64.
+			const CLEAR_SIGN_MASK: u64 = 0x7fff_ffff_ffff_ffff;
+
+			let bits = n.to_bits();
+			if n.is_nan() || bits == f64::INFINITY.to_bits() {
+				return n;
+			}
+
+			let abs = bits & CLEAR_SIGN_MASK;
+			let next_bits = if abs == 0 {
+				TINY_BITS
+			} else if bits == abs {
+				bits + 1
+			} else {
+				bits - 1
+			};
+			f64::from_bits(next_bits)
+		}
+
+		fn random_permutation(number: Number) -> Number {
+			let mut rng = thread_rng();
+			let value = match rng.gen_range(0..4) {
+				0 => number + Number::from(rng.gen::<f64>()),
+				1 if !matches!(number, Number::Int(i64::MIN)) => number * Number::from(-1),
+				2 => Number::Float(next_down(number.as_float())),
+				_ => number,
+			};
+			match rng.gen_range(0..3) {
+				0 => Number::Int(value.as_int()),
+				1 => Number::Float(value.as_float()),
+				_ => Number::Decimal(value.as_decimal()),
+			}
+		}
+
+		fn assert_partial_ord(x: Number, y: Number) {
+			// PartialOrd requirements
+			assert_eq!(x == y, x.partial_cmp(&y) == Some(Ordering::Equal), "{x:?} {y:?}");
+
+			// Ord consistent with PartialOrd
+			assert_eq!(x.partial_cmp(&y), Some(x.cmp(&y)), "{x:?} {y:?}");
+		}
+
+		fn assert_consistent(a: Number, b: Number, c: Number) {
+			assert_partial_ord(a, b);
+			assert_partial_ord(b, c);
+			assert_partial_ord(c, a);
+
+			// Transitive property (without the fix, these can fail)
+			if a == b && b == c {
+				assert_eq!(a, c, "{a:?} {b:?} {c:?}");
+			}
+			if a != b && b == c {
+				assert_ne!(a, c, "{a:?} {b:?} {c:?}");
+			}
+			if a < b && b < c {
+				assert!(a < c, "{a:?} {b:?} {c:?}");
+			}
+			if a > b && b > c {
+				assert!(a > c, "{a:?} {b:?} {c:?}");
+			}
+
+			// Duality
+			assert_eq!(a == b, b == a, "{a:?} {b:?}");
+			assert_eq!(a < b, b > a, "{a:?} {b:?}");
+		}
+
+		for _ in 0..100000 {
+			let base = random_number();
+			let a = random_permutation(base);
+			let b = random_permutation(a.clone());
+			let c = random_permutation(b.clone());
+			assert_consistent(a, b, c);
+		}
 	}
 }

@@ -63,6 +63,7 @@ impl Datastore {
 	pub(crate) async fn new(path: &str) -> Result<Datastore, Error> {
 		let mut opts = Options::new();
 		opts.dir = path.to_string().into();
+		opts.max_key_size = 10000;
 
 		match Store::new(opts) {
 			Ok(db) => Ok(Datastore {
@@ -143,7 +144,7 @@ impl super::api::Transaction for Transaction {
 
 	/// Checks if a key exists in the database.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
-	async fn exists<K>(&mut self, key: K) -> Result<bool, Error>
+	async fn exists<K>(&mut self, key: K, version: Option<u64>) -> Result<bool, Error>
 	where
 		K: Into<Key> + Sprintable + Debug,
 	{
@@ -312,7 +313,12 @@ impl super::api::Transaction for Transaction {
 
 	/// Retrieves a range of key-value pairs from the database.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.sprint()))]
-	async fn keys<K>(&mut self, rng: Range<K>, limit: u32) -> Result<Vec<Key>, Error>
+	async fn keys<K>(
+		&mut self,
+		rng: Range<K>,
+		limit: u32,
+		version: Option<u64>,
+	) -> Result<Vec<Key>, Error>
 	where
 		K: Into<Key> + Sprintable + Debug,
 	{
