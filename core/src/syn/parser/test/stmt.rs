@@ -1362,7 +1362,7 @@ fn parse_define_param() {
 #[test]
 fn parse_define_table() {
 	let res =
-		test_parse!(parse_stmt, r#"DEFINE TABLE name DROP SCHEMAFUL CHANGEFEED 1s INCLUDE ORIGINAL PERMISSIONS FOR SELECT WHERE a = 1 AS SELECT foo FROM bar GROUP BY foo"#)
+		test_parse!(parse_stmt, r#"DEFINE TABLE name DROP SCHEMAFUL CHANGEFEED 1s INCLUDE ORIGINAL PERMISSIONS FOR DELETE FULL, FOR SELECT WHERE a = 1 AS SELECT foo FROM bar GROUP BY foo"#)
 			.unwrap();
 
 	assert_eq!(
@@ -1394,7 +1394,7 @@ fn parse_define_table() {
 				))),
 				create: Permission::None,
 				update: Permission::None,
-				delete: Permission::None,
+				delete: Permission::Full,
 			},
 			changefeed: Some(ChangeFeed {
 				expiry: std::time::Duration::from_secs(1),
@@ -1430,41 +1430,55 @@ fn parse_define_event() {
 
 #[test]
 fn parse_define_field() {
-	let res = test_parse!(
-		parse_stmt,
-		r#"DEFINE FIELD foo.*[*]... ON TABLE bar FLEX TYPE option<number | array<record<foo>,10>> VALUE null ASSERT true DEFAULT false PERMISSIONS FOR DELETE, UPDATE NONE, FOR create WHERE true"#
-	).unwrap();
+	// General
+	{
+		let res = test_parse!(
+			parse_stmt,
+			r#"DEFINE FIELD foo.*[*]... ON TABLE bar FLEX TYPE option<number | array<record<foo>,10>> VALUE null ASSERT true DEFAULT false PERMISSIONS FOR UPDATE NONE, FOR CREATE WHERE true"#
+		).unwrap();
 
-	assert_eq!(
-		res,
-		Statement::Define(DefineStatement::Field(DefineFieldStatement {
-			name: Idiom(vec![
-				Part::Field(Ident("foo".to_owned())),
-				Part::All,
-				Part::All,
-				Part::Flatten,
-			]),
-			what: Ident("bar".to_owned()),
-			flex: true,
-			kind: Some(Kind::Option(Box::new(Kind::Either(vec![
-				Kind::Number,
-				Kind::Array(Box::new(Kind::Record(vec![Table("foo".to_owned())])), Some(10))
-			])))),
-			readonly: false,
-			value: Some(Value::Null),
-			assert: Some(Value::Bool(true)),
-			default: Some(Value::Bool(false)),
-			permissions: Permissions {
-				delete: Permission::None,
-				update: Permission::None,
-				create: Permission::Specific(Value::Bool(true)),
-				select: Permission::Full,
-			},
-			comment: None,
-			if_not_exists: false,
-			overwrite: false,
-		}))
-	)
+		assert_eq!(
+			res,
+			Statement::Define(DefineStatement::Field(DefineFieldStatement {
+				name: Idiom(vec![
+					Part::Field(Ident("foo".to_owned())),
+					Part::All,
+					Part::All,
+					Part::Flatten,
+				]),
+				what: Ident("bar".to_owned()),
+				flex: true,
+				kind: Some(Kind::Option(Box::new(Kind::Either(vec![
+					Kind::Number,
+					Kind::Array(Box::new(Kind::Record(vec![Table("foo".to_owned())])), Some(10))
+				])))),
+				readonly: false,
+				value: Some(Value::Null),
+				assert: Some(Value::Bool(true)),
+				default: Some(Value::Bool(false)),
+				permissions: Permissions {
+					delete: Permission::Full,
+					update: Permission::None,
+					create: Permission::Specific(Value::Bool(true)),
+					select: Permission::Full,
+				},
+				comment: None,
+				if_not_exists: false,
+				overwrite: false,
+			}))
+		)
+	}
+
+	// Invalid DELETE permission
+	{
+		let res =
+			test_parse!(parse_stmt, r#"DEFINE FIELD foo ON TABLE bar PERMISSIONS FOR DELETE NONE"#);
+		assert!(
+			res.is_err(),
+			"Unexpected successful parsing of `DELETE` permission for a field: {:?}",
+			res
+		);
+	}
 }
 
 #[test]
