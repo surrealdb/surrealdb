@@ -158,9 +158,14 @@ impl Parser<'_> {
 		})
 	}
 
-	pub(crate) async fn parse_thing(&mut self, ctx: &mut Stk) -> ParseResult<Thing> {
+	pub(crate) async fn parse_thing_with_range(&mut self, ctx: &mut Stk) -> ParseResult<Thing> {
 		let ident = self.next_token_value::<Ident>()?.0;
 		self.parse_thing_or_range(ctx, ident).await
+	}
+
+	pub(crate) async fn parse_thing(&mut self, ctx: &mut Stk) -> ParseResult<Thing> {
+		let ident = self.next_token_value::<Ident>()?.0;
+		self.parse_thing_from_ident(ctx, ident).await
 	}
 
 	pub(crate) async fn parse_thing_from_ident(
