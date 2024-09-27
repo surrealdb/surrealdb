@@ -219,6 +219,27 @@ pub fn thing(input: &str) -> Result<Thing, Error> {
 		.map_err(Error::InvalidQuery)
 }
 
+/// Parse a record id including ranges.
+#[instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len()))]
+pub fn thing_with_range(input: &str) -> Result<Thing, Error> {
+	trace!(target: TARGET, "Parsing SurrealQL thing");
+
+	if input.len() > u32::MAX as usize {
+		return Err(Error::QueryTooLarge);
+	}
+
+	let mut parser = Parser::new(input.as_bytes())
+		.with_object_recursion_limit(*MAX_OBJECT_PARSING_DEPTH as usize)
+		.with_query_recursion_limit(*MAX_QUERY_PARSING_DEPTH as usize);
+	let mut stack = Stack::new();
+	stack
+		.enter(|stk| parser.parse_thing_with_range(stk))
+		.finish()
+		.and_then(|e| parser.assert_finished().map(|_| e))
+		.map_err(|e| e.render_on(input))
+		.map_err(Error::InvalidQuery)
+}
+
 /// Parse a block, expects the value to be wrapped in `{}`.
 #[instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len()))]
 pub fn block(input: &str) -> Result<Block, Error> {
