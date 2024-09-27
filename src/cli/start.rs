@@ -1,6 +1,7 @@
 use super::config::{Config, CF};
 use crate::cli::validator::parser::env_filter::CustomEnvFilter;
 use crate::cli::validator::parser::env_filter::CustomEnvFilterParser;
+use crate::cnf::LOGO;
 use crate::dbs;
 use crate::dbs::StartCommandDbsOptions;
 use crate::env;
@@ -221,7 +222,12 @@ pub async fn init(
 
 	if let Ok(startup_mode_env_value) = std::env::var("STARTUP_MODE") {
 		// Start the web server in one of the StartupModes
-		net::init(datastore.clone(), canceller.clone(), StartupMode::try_from(startup_mode_env_value).unwrap()).await?;
+		net::init(
+			datastore.clone(),
+			canceller.clone(),
+			StartupMode::try_from(startup_mode_env_value).unwrap(),
+		)
+		.await?;
 	} else {
 		// Start the web server as usual
 		net::init(datastore.clone(), canceller.clone(), StartupMode::Normal).await?;
