@@ -668,6 +668,73 @@ async fn define_field_with_recursive_types() -> Result<(), Error> {
 }
 
 #[tokio::test]
+async fn define_statement_field_permissions() -> Result<(), Error> {
+	// Specific permissions
+	// Delete permission should be ignored
+	{
+		let sql = "
+			DEFINE FIELD test ON user PERMISSIONS FOR select, create, update, delete WHERE true;
+			INFO FOR TABLE user;
+		";
+		let mut t = Test::new(sql).await?;
+		//
+		t.skip_ok(1)?;
+		t.expect_val(
+			r#"{
+				events: {},
+				fields: { test: "DEFINE FIELD test ON user PERMISSIONS FOR select, create, update WHERE true" },
+				tables: {},
+				indexes: {},
+				lives: {},
+			}"#,
+		)?;
+	}
+	// Full permissions
+	// Delete none should still show as full permissions
+	{
+		let sql = "
+			DEFINE FIELD test ON user PERMISSIONS FOR delete NONE, FOR select, create, update FULL;
+			INFO FOR TABLE user;
+		";
+		let mut t = Test::new(sql).await?;
+		//
+		t.skip_ok(1)?;
+		t.expect_val(
+			r#"{
+				events: {},
+				fields: { test: "DEFINE FIELD test ON user PERMISSIONS FULL" },
+				tables: {},
+				indexes: {},
+				lives: {},
+			}"#,
+		)?;
+	}
+	// No permissions
+	// Delete full not be printed, as it is effectively full
+	// TODO(gguillemas): This should display simply as PERMISSIONS NONE in 3.0.0.
+	{
+		let sql = "
+			DEFINE FIELD test ON user PERMISSIONS FOR DELETE FULL, FOR SELECT, CREATE, UPDATE NONE;
+			INFO FOR TABLE user;
+		";
+		let mut t = Test::new(sql).await?;
+		//
+		t.skip_ok(1)?;
+		t.expect_val(
+			r#"{
+				events: {},
+				fields: { test: "DEFINE FIELD test ON user PERMISSIONS FOR select, create, update NONE" },
+				tables: {},
+				indexes: {},
+				lives: {},
+			}"#,
+		)?;
+	}
+
+	Ok(())
+}
+
+#[tokio::test]
 async fn define_statement_index_single_simple() -> Result<(), Error> {
 	let sql = "
 		CREATE user:1 SET age = 23;
