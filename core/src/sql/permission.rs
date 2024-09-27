@@ -75,7 +75,8 @@ impl Display for Permissions {
 		{
 			// Alternate permissions display implementation ignores delete permission
 			// This display is used to show field permissions, where delete has no effect
-			// Displaying the permission would cause parsing errors during import
+			// Displaying the permission could mislead users into thinking it has an effect
+			// Additionally, including the permission will cause a parsing error in 3.0.0
 			if f.alternate() && matches!(c, PermissionKind::Delete) {
 				continue;
 			}
@@ -126,6 +127,7 @@ impl InfoStructure for Permissions {
 			"select".to_string() => self.select.structure(),
 			"create".to_string() => self.create.structure(),
 			"update".to_string() => self.update.structure(),
+			// TODO(gguillemas): Do not show this value for fields in 3.0.0.
 			"delete".to_string() => self.delete.structure(),
 		})
 	}
