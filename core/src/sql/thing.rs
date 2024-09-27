@@ -247,3 +247,62 @@ impl Thing {
 		}))
 	}
 }
+
+#[cfg(test)]
+mod test {
+	use std::{ops::Bound, str::FromStr};
+
+	use crate::sql::{Array, Id, IdRange, Object, Value};
+
+	use super::Thing;
+
+	#[test]
+	fn from() {
+		{
+			let string = "foo:bar";
+			let thing = Thing {
+				tb: "foo".into(),
+				id: Id::String("bar".into()),
+			};
+			assert_eq!(thing, Thing::from_str(string).unwrap());
+		}
+		{
+			let string = "foo:1";
+			let thing = Thing {
+				tb: "foo".into(),
+				id: Id::Number(1),
+			};
+			assert_eq!(thing, Thing::from_str(string).unwrap());
+		}
+		{
+			let string = "foo:[1, 'bar']";
+			let thing = Thing {
+				tb: "foo".into(),
+				id: Id::Array(Array(vec![1i64.into(), "bar".into()])),
+			};
+			assert_eq!(thing, Thing::from_str(string).unwrap());
+		}
+		{
+			let string = "foo:{bar: 1}";
+			let thing = Thing {
+				tb: "foo".into(),
+				id: Id::Object(Object([("bar".to_string(), Value::from(1))].into_iter().collect())),
+			};
+			assert_eq!(thing, Thing::from_str(string).unwrap());
+		}
+		{
+			let string = "foo:1..=2";
+			let thing = Thing {
+				tb: "foo".into(),
+				id: Id::Range(Box::new(
+					IdRange::try_from((
+						Bound::Included(Id::Number(1)),
+						Bound::Included(Id::Number(2)),
+					))
+					.unwrap(),
+				)),
+			};
+			assert_eq!(thing, Thing::from_str(string).unwrap());
+		}
+	}
+}
