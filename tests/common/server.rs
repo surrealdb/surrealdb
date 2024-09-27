@@ -158,7 +158,7 @@ pub struct StartServerArguments {
 	pub path: Option<String>,
 	pub auth: bool,
 	pub tls: bool,
-	pub wait_is_ready: bool,
+	pub wait_till_ready: bool,
 	pub temporary_directory: Option<String>,
 	pub args: String,
 	pub vars: Option<HashMap<String, String>>,
@@ -170,7 +170,7 @@ impl Default for StartServerArguments {
 			path: None,
 			auth: true,
 			tls: false,
-			wait_is_ready: true,
+			wait_till_ready: true,
 			temporary_directory: None,
 			args: "".to_string(),
 			vars: None,
@@ -244,7 +244,7 @@ pub async fn start_server(
 		path,
 		auth,
 		tls,
-		wait_is_ready,
+		wait_till_ready,
 		temporary_directory,
 		args,
 		vars,
@@ -286,7 +286,7 @@ pub async fn start_server(
 		// Configure where the logs go when running the test
 		let server = run_internal::<String>(&start_args, None, vars.clone());
 
-		if !wait_is_ready {
+		if !wait_till_ready {
 			return Ok((addr, server));
 		}
 

@@ -243,7 +243,7 @@ mod cli_integration {
 	async fn start_tls() {
 		let (_, mut server) = common::start_server(StartServerArguments {
 			tls: true,
-			wait_is_ready: false,
+			wait_till_ready: false,
 			vars: Some(HashMap::from([("STARTUP_MODE".to_string(), "test".to_string())])),
 			..Default::default()
 		})
@@ -874,7 +874,7 @@ mod cli_integration {
 		let (addr, mut server) = common::start_server(StartServerArguments {
 			auth: false,
 			tls: false,
-			wait_is_ready: true,
+			wait_till_ready: true,
 			..Default::default()
 		})
 		.await
