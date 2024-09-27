@@ -225,6 +225,10 @@ impl Display for DefineFieldStatement {
 			f.write_char(' ')?;
 			None
 		};
+		// Alternate permissions display implementation ignores delete permission
+		// This display is used to show field permissions, where delete has no effect
+		// Displaying the permission could mislead users into thinking it has an effect
+		// Additionally, including the permission will cause a parsing error in 3.0.0
 		write!(f, "{:#}", self.permissions)?;
 		Ok(())
 	}
