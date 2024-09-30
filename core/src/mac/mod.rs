@@ -94,6 +94,13 @@ macro_rules! run {
 /// from the environment variable or the default value.
 #[macro_export]
 macro_rules! lazy_env_parse {
+	($key:expr, $t:ty) => {
+		std::sync::LazyLock::new(|| {
+			std::env::var($key)
+				.and_then(|s| Ok(s.parse::<$t>().unwrap_or_default()))
+				.unwrap_or_default()
+		})
+	};
 	($key:expr, $t:ty, $default:expr) => {
 		std::sync::LazyLock::new(|| {
 			std::env::var($key)
