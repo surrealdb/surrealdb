@@ -142,7 +142,7 @@ keyword! {
 	Permissions => "PERMISSIONS",
 	PostingsCache => "POSTINGS_CACHE",
 	PostingsOrder => "POSTINGS_ORDER",
-	Prune => "PRUNE",
+	Purge => "PURGE",
 	Punct => "PUNCT",
 	Range => "RANGE",
 	Readonly => "READONLY",

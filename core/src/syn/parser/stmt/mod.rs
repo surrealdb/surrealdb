@@ -7,7 +7,7 @@ use crate::sql::statements::show::{ShowSince, ShowStatement};
 use crate::sql::statements::sleep::SleepStatement;
 use crate::sql::statements::{
 	access::{
-		AccessStatement, AccessStatementGrant, AccessStatementList, AccessStatementPrune,
+		AccessStatement, AccessStatementGrant, AccessStatementList, AccessStatementPurge,
 		AccessStatementRevoke, Subject,
 	},
 	KillStatement, LiveStatement, OptionStatement, SetStatement, ThrowStatement,
@@ -443,7 +443,7 @@ impl Parser<'_> {
 					gr,
 				}))
 			}
-			t!("PRUNE") => {
+			t!("PURGE") => {
 				self.pop_peek();
 				let (expired, revoked) = match self.peek_kind() {
 					t!("EXPIRED") => {
@@ -460,14 +460,14 @@ impl Parser<'_> {
 					}
 					_ => unexpected!(self, peek, "one of EXPIRED, REVOKED or ALL"),
 				};
-				Ok(AccessStatement::Prune(AccessStatementPrune {
+				Ok(AccessStatement::Purge(AccessStatementPurge {
 					ac,
 					base,
 					expired,
 					revoked,
 				}))
 			}
-			_ => unexpected!(self, peek, "one of GRANT, LIST, REVOKE or PRUNE"),
+			_ => unexpected!(self, peek, "one of GRANT, LIST, REVOKE or PURGE"),
 		}
 	}
 

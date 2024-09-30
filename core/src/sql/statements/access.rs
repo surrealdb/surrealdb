@@ -36,7 +36,7 @@ pub enum AccessStatement {
 	Grant(AccessStatementGrant),   // Create access grant.
 	List(AccessStatementList),     // List access grants.
 	Revoke(AccessStatementRevoke), // Revoke access grant.
-	Prune(AccessStatementPrune),   // Prune access grants.
+	Purge(AccessStatementPurge),   // Purge access grants.
 }
 
 // TODO(gguillemas): Document once bearer access is no longer experimental.
@@ -80,7 +80,7 @@ pub struct AccessStatementRevoke {
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
-pub struct AccessStatementPrune {
+pub struct AccessStatementPurge {
 	pub ac: Ident,
 	pub base: Option<Base>,
 	pub expired: bool,
@@ -682,8 +682,8 @@ async fn compute_revoke(
 	}
 }
 
-async fn compute_prune(
-	stmt: &AccessStatementPrune,
+async fn compute_purge(
+	stmt: &AccessStatementPurge,
 	ctx: &Context,
 	opt: &Options,
 	_doc: Option<&CursorDoc>,
@@ -702,21 +702,21 @@ async fn compute_prune(
 			txn.clear();
 			// Check if the access method exists.
 			txn.get_root_access(&stmt.ac).await?;
-			// Get all grants to prune
+			// Get all grants to purge
 			let ac_str = stmt.ac.to_raw();
-			let mut pruned = Array::default();
+			let mut purged = Array::default();
 			for gr in txn.all_root_access_grants(&ac_str).await?.iter() {
-				// Determine if the grant should be pruned based on expiration or revocation.
-				let prune = (stmt.expired
+				// Determine if the grant should purged based on expiration or revocation.
+				let purge = (stmt.expired
 					&& gr.expiration.as_ref().map_or(false, |exp| exp < &Datetime::default()))
 					|| (stmt.revoked && gr.revocation.is_some());
 				// If it should, delete the grant and append the redacted version to the result.
-				if prune {
+				if purge {
 					txn.del(crate::key::root::access::gr::new(&ac_str, &gr.id.to_raw())).await?;
-					pruned = pruned + Value::Object(gr.redacted().to_owned().into());
+					purged = purged + Value::Object(gr.redacted().to_owned().into());
 				}
 			}
-			Ok(Value::Array(pruned))
+			Ok(Value::Array(purged))
 		}
 		Base::Ns => {
 			// Get the transaction
@@ -725,26 +725,26 @@ async fn compute_prune(
 			txn.clear();
 			// Check if the access method exists.
 			txn.get_ns_access(opt.ns()?, &stmt.ac).await?;
-			// Get all grants to prune
+			// Get all grants to purge
 			let ac_str = stmt.ac.to_raw();
-			let mut pruned = Array::default();
+			let mut purged = Array::default();
 			for gr in txn.all_ns_access_grants(opt.ns()?, &ac_str).await?.iter() {
-				// Determine if the grant should be pruned based on expiration or revocation.
-				let prune = (stmt.expired
+				// Determine if the grant should be purged based on expiration or revocation.
+				let purge = (stmt.expired
 					&& gr.expiration.as_ref().map_or(false, |exp| exp < &Datetime::default()))
 					|| (stmt.revoked && gr.revocation.is_some());
 				// If it should, delete the grant and append the redacted version to the result.
-				if prune {
+				if purge {
 					txn.del(crate::key::namespace::access::gr::new(
 						opt.ns()?,
 						&ac_str,
 						&gr.id.to_raw(),
 					))
 					.await?;
-					pruned = pruned + Value::Object(gr.redacted().to_owned().into());
+					purged = purged + Value::Object(gr.redacted().to_owned().into());
 				}
 			}
-			Ok(Value::Array(pruned))
+			Ok(Value::Array(purged))
 		}
 		Base::Db => {
 			// Get the transaction
@@ -753,16 +753,16 @@ async fn compute_prune(
 			txn.clear();
 			// Check if the access method exists.
 			txn.get_db_access(opt.ns()?, opt.db()?, &stmt.ac).await?;
-			// Get all grants to prune
+			// Get all grants to purge
 			let ac_str = stmt.ac.to_raw();
-			let mut pruned = Array::default();
+			let mut purged = Array::default();
 			for gr in txn.all_db_access_grants(opt.ns()?, opt.db()?, &ac_str).await?.iter() {
-				// Determine if the grant should be pruned based on expiration or revocation.
-				let prune = (stmt.expired
+				// Determine if the grant should be purged based on expiration or revocation.
+				let purge = (stmt.expired
 					&& gr.expiration.as_ref().map_or(false, |exp| exp < &Datetime::default()))
 					|| (stmt.revoked && gr.revocation.is_some());
 				// If it should, delete the grant and append the redacted version to the result.
-				if prune {
+				if purge {
 					txn.del(crate::key::database::access::gr::new(
 						opt.ns()?,
 						opt.db()?,
@@ -770,10 +770,10 @@ async fn compute_prune(
 						&gr.id.to_raw(),
 					))
 					.await?;
-					pruned = pruned + Value::Object(gr.redacted().to_owned().into());
+					purged = purged + Value::Object(gr.redacted().to_owned().into());
 				}
 			}
-			Ok(Value::Array(pruned))
+			Ok(Value::Array(purged))
 		}
 		_ => Err(Error::Unimplemented(
 			"Managing access methods outside of root, namespace and database levels".to_string(),
@@ -793,7 +793,7 @@ impl AccessStatement {
 			AccessStatement::Grant(stmt) => compute_grant(stmt, ctx, opt, _doc).await,
 			AccessStatement::List(stmt) => compute_list(stmt, ctx, opt, _doc).await,
 			AccessStatement::Revoke(stmt) => compute_revoke(stmt, ctx, opt, _doc).await,
-			AccessStatement::Prune(stmt) => compute_prune(stmt, ctx, opt, _doc).await,
+			AccessStatement::Purge(stmt) => compute_purge(stmt, ctx, opt, _doc).await,
 		}
 	}
 }
@@ -829,12 +829,12 @@ impl Display for AccessStatement {
 				};
 				Ok(())
 			}
-			Self::Prune(stmt) => {
+			Self::Purge(stmt) => {
 				write!(f, "ACCESS {}", stmt.ac)?;
 				if let Some(ref v) = stmt.base {
 					write!(f, " ON {v}")?;
 				}
-				write!(f, " PRUNE")?;
+				write!(f, " PURGE")?;
 				match (stmt.expired, stmt.revoked) {
 					(true, false) => write!(f, " EXPIRED")?,
 					(false, true) => write!(f, " REVOKED")?,
