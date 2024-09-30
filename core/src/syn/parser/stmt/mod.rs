@@ -460,11 +460,17 @@ impl Parser<'_> {
 					}
 					_ => unexpected!(self, peek, "one of EXPIRED, REVOKED or ALL"),
 				};
+				let since = if self.eat(t!("SINCE")) {
+					Some(self.next_token_value()?)
+				} else {
+					None
+				};
 				Ok(AccessStatement::Purge(AccessStatementPurge {
 					ac,
 					base,
 					expired,
 					revoked,
+					since,
 				}))
 			}
 			_ => unexpected!(self, peek, "one of GRANT, LIST, REVOKE or PURGE"),

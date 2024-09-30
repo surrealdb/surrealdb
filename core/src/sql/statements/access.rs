@@ -85,6 +85,7 @@ pub struct AccessStatementPurge {
 	pub base: Option<Base>,
 	pub expired: bool,
 	pub revoked: bool,
+	pub since: Option<Datetime>,
 }
 
 // TODO(gguillemas): Document once bearer access is no longer experimental.

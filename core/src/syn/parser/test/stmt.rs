@@ -2500,6 +2500,7 @@ fn parse_access_purge() {
 				base: Some(Base::Db),
 				expired: true,
 				revoked: true,
+				since: None,
 			}))
 		);
 	}
@@ -2513,6 +2514,7 @@ fn parse_access_purge() {
 				base: Some(Base::Db),
 				expired: true,
 				revoked: false,
+				since: None,
 			}))
 		);
 	}
@@ -2526,6 +2528,37 @@ fn parse_access_purge() {
 				base: Some(Base::Db),
 				expired: false,
 				revoked: true,
+				since: None,
+			}))
+		);
+	}
+	// Expired since datetime
+	{
+		let expected_datetime = Utc
+			.fix()
+			.from_local_datetime(
+				&NaiveDate::from_ymd_opt(2012, 4, 23)
+					.unwrap()
+					.and_hms_nano_opt(18, 25, 43, 51_100)
+					.unwrap(),
+			)
+			.earliest()
+			.unwrap()
+			.with_timezone(&Utc);
+
+		let res = test_parse!(
+			parse_stmt,
+			r#"ACCESS a ON DATABASE PURGE EXPIRED SINCE d"2012-04-23T18:25:43.0000511Z""#
+		)
+		.unwrap();
+		assert_eq!(
+			res,
+			Statement::Access(AccessStatement::Purge(AccessStatementPurge {
+				ac: Ident("a".to_string()),
+				base: Some(Base::Db),
+				expired: true,
+				revoked: false,
+				since: Some(Datetime(expected_datetime)),
 			}))
 		);
 	}
