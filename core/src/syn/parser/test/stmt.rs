@@ -12,7 +12,10 @@ use crate::{
 		language::Language,
 		statements::{
 			access,
-			access::{AccessStatementGrant, AccessStatementList, AccessStatementRevoke},
+			access::{
+				AccessStatementGrant, AccessStatementList, AccessStatementPurge,
+				AccessStatementRevoke,
+			},
 			analyze::AnalyzeStatement,
 			show::{ShowSince, ShowStatement},
 			sleep::SleepStatement,
@@ -2416,28 +2419,61 @@ fn parse_upsert() {
 
 #[test]
 fn parse_access_grant() {
-	let res = test_parse!(parse_stmt, r#"ACCESS a ON NAMESPACE GRANT FOR USER b"#).unwrap();
-	assert_eq!(
-		res,
-		Statement::Access(AccessStatement::Grant(AccessStatementGrant {
-			ac: Ident("a".to_string()),
-			base: Some(Base::Ns),
-			subject: Some(access::Subject::User(Ident("b".to_string()))),
-		}))
-	);
+	// User
+	{
+		let res = test_parse!(parse_stmt, r#"ACCESS a ON NAMESPACE GRANT FOR USER b"#).unwrap();
+		assert_eq!(
+			res,
+			Statement::Access(AccessStatement::Grant(AccessStatementGrant {
+				ac: Ident("a".to_string()),
+				base: Some(Base::Ns),
+				subject: Some(access::Subject::User(Ident("b".to_string()))),
+			}))
+		);
+	}
+	// Record
+	{
+		let res = test_parse!(parse_stmt, r#"ACCESS a ON NAMESPACE GRANT FOR RECORD b:c"#).unwrap();
+		assert_eq!(
+			res,
+			Statement::Access(AccessStatement::Grant(AccessStatementGrant {
+				ac: Ident("a".to_string()),
+				base: Some(Base::Ns),
+				subject: Some(access::Subject::Record(Thing {
+					tb: "b".to_owned(),
+					id: Id::from("c"),
+				},)),
+			}))
+		);
+	}
 }
 
 #[test]
 fn parse_access_revoke() {
-	let res = test_parse!(parse_stmt, r#"ACCESS a ON DATABASE REVOKE b"#).unwrap();
-	assert_eq!(
-		res,
-		Statement::Access(AccessStatement::Revoke(AccessStatementRevoke {
-			ac: Ident("a".to_string()),
-			base: Some(Base::Db),
-			gr: Ident("b".to_string()),
-		}))
-	);
+	// All
+	{
+		let res = test_parse!(parse_stmt, r#"ACCESS a ON DATABASE REVOKE ALL"#).unwrap();
+		assert_eq!(
+			res,
+			Statement::Access(AccessStatement::Revoke(AccessStatementRevoke {
+				ac: Ident("a".to_string()),
+				base: Some(Base::Db),
+				gr: None,
+			}))
+		);
+	}
+	// Grant
+	{
+		let res = test_parse!(parse_stmt, r#"ACCESS a ON DATABASE REVOKE GRANT b"#).unwrap();
+		assert_eq!(
+			res,
+			Statement::Access(AccessStatement::Revoke(AccessStatementRevoke {
+				ac: Ident("a".to_string()),
+				base: Some(Base::Db),
+				gr: Some(Ident("b".to_string())),
+			}))
+		);
+	}
 }
 
 #[test]
@@ -2450,4 +2486,47 @@ fn parse_access_list() {
 			base: None,
 		}))
 	);
+}
+
+#[test]
+fn parse_access_purge() {
+	// All
+	{
+		let res = test_parse!(parse_stmt, r#"ACCESS a ON DATABASE PURGE ALL"#).unwrap();
+		assert_eq!(
+			res,
+			Statement::Access(AccessStatement::Purge(AccessStatementPurge {
+				ac: Ident("a".to_string()),
+				base: Some(Base::Db),
+				expired: true,
+				revoked: true,
+			}))
+		);
+	}
+	// Expired
+	{
+		let res = test_parse!(parse_stmt, r#"ACCESS a ON DATABASE PURGE EXPIRED"#).unwrap();
+		assert_eq!(
+			res,
+			Statement::Access(AccessStatement::Purge(AccessStatementPurge {
+				ac: Ident("a".to_string()),
+				base: Some(Base::Db),
+				expired: true,
+				revoked: false,
+			}))
+		);
+	}
+	// Revoked
+	{
+		let res = test_parse!(parse_stmt, r#"ACCESS a ON DATABASE PURGE REVOKED"#).unwrap();
+		assert_eq!(
+			res,
+			Statement::Access(AccessStatement::Purge(AccessStatementPurge {
+				ac: Ident("a".to_string()),
+				base: Some(Base::Db),
+				expired: false,
+				revoked: true,
+			}))
+		);
+	}
 }
