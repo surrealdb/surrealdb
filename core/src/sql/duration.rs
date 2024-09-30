@@ -27,7 +27,7 @@ pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Duration";
 
 #[revisioned(revision = 1)]
 #[derive(
-    Clone, Copy, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash, Ord,
+	Clone, Copy, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash, Ord,
 )]
 #[serde(rename = "$surrealdb::private::sql::Duration")]
 #[non_exhaustive]
