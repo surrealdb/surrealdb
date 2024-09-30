@@ -464,11 +464,12 @@ async fn compute_list(
 			// Check if the access method exists.
 			txn.get_root_access(&stmt.ac).await?;
 			// Get the grants for the access method.
-			let mut grants = Array::default();
-			// Show redacted version of the access grants.
-			for v in txn.all_root_access_grants(&stmt.ac).await?.iter() {
-				grants = grants + Value::Object(v.redacted().to_owned().into());
-			}
+			let grants = txn
+				.all_root_access_grants(&stmt.ac)
+				.await?
+				.iter()
+				.map(|v| Value::Object(v.redacted().to_owned().into()))
+				.collect::<Array>();
 			Ok(Value::Array(grants))
 		}
 		Base::Ns => {
@@ -479,11 +480,12 @@ async fn compute_list(
 			// Check if the access method exists.
 			txn.get_ns_access(opt.ns()?, &stmt.ac).await?;
 			// Get the grants for the access method.
-			let mut grants = Array::default();
-			// Show redacted version of the access grants.
-			for v in txn.all_ns_access_grants(opt.ns()?, &stmt.ac).await?.iter() {
-				grants = grants + Value::Object(v.redacted().to_owned().into());
-			}
+			let grants = txn
+				.all_ns_access_grants(opt.ns()?, &stmt.ac)
+				.await?
+				.iter()
+				.map(|v| Value::Object(v.redacted().to_owned().into()))
+				.collect::<Array>();
 			Ok(Value::Array(grants))
 		}
 		Base::Db => {
@@ -494,11 +496,12 @@ async fn compute_list(
 			// Check if the access method exists.
 			txn.get_db_access(opt.ns()?, opt.db()?, &stmt.ac).await?;
 			// Get the grants for the access method.
-			let mut grants = Array::default();
-			// Show redacted version of the access grants.
-			for v in txn.all_db_access_grants(opt.ns()?, opt.db()?, &stmt.ac).await?.iter() {
-				grants = grants + Value::Object(v.redacted().to_owned().into());
-			}
+			let grants = txn
+				.all_db_access_grants(opt.ns()?, opt.db()?, &stmt.ac)
+				.await?
+				.iter()
+				.map(|v| Value::Object(v.redacted().to_owned().into()))
+				.collect::<Array>();
 			Ok(Value::Array(grants))
 		}
 		_ => Err(Error::Unimplemented(
