@@ -706,13 +706,11 @@ async fn compute_prune(
 			let ac_str = stmt.ac.to_raw();
 			let mut pruned = Array::default();
 			for gr in txn.all_root_access_grants(&ac_str).await?.iter() {
-				// Prune if grant is expired or revoked
-				let prune = match &gr.expiration {
-					Some(exp) => exp < &Datetime::default(),
-					None => gr.revocation.is_some(),
-				};
-
-				// Append pruned grant to array
+				// Determine if the grant should be pruned based on expiration or revocation.
+				let prune = (stmt.expired
+					&& gr.expiration.as_ref().map_or(false, |exp| exp < &Datetime::default()))
+					|| (stmt.revoked && gr.revocation.is_some());
+				// If it should, delete the grant and append the redacted version to the result.
 				if prune {
 					txn.del(crate::key::root::access::gr::new(&ac_str, &gr.id.to_raw())).await?;
 					pruned = pruned + Value::Object(gr.redacted().to_owned().into());
@@ -731,13 +729,11 @@ async fn compute_prune(
 			let ac_str = stmt.ac.to_raw();
 			let mut pruned = Array::default();
 			for gr in txn.all_ns_access_grants(opt.ns()?, &ac_str).await?.iter() {
-				// Prune if grant is expired or revoked
-				let prune = match &gr.expiration {
-					Some(exp) => exp < &Datetime::default(),
-					None => gr.revocation.is_some(),
-				};
-
-				// Append pruned grant to array
+				// Determine if the grant should be pruned based on expiration or revocation.
+				let prune = (stmt.expired
+					&& gr.expiration.as_ref().map_or(false, |exp| exp < &Datetime::default()))
+					|| (stmt.revoked && gr.revocation.is_some());
+				// If it should, delete the grant and append the redacted version to the result.
 				if prune {
 					txn.del(crate::key::namespace::access::gr::new(
 						opt.ns()?,
@@ -761,23 +757,11 @@ async fn compute_prune(
 			let ac_str = stmt.ac.to_raw();
 			let mut pruned = Array::default();
 			for gr in txn.all_db_access_grants(opt.ns()?, opt.db()?, &ac_str).await?.iter() {
-				let mut prune = false;
-
-				// If the prune includes expired grants
-				if stmt.expired {
-					// Prune if the expiration time has passed
-					if let Some(exp) = &gr.expiration {
-						prune = prune || exp < &Datetime::default()
-					}
-				}
-
-				// If the prune includes revoked grants
-				if stmt.revoked {
-					// Prune if a revocation time is set
-					prune = prune || gr.revocation.is_some()
-				}
-
-				// Append pruned grant to array
+				// Determine if the grant should be pruned based on expiration or revocation.
+				let prune = (stmt.expired
+					&& gr.expiration.as_ref().map_or(false, |exp| exp < &Datetime::default()))
+					|| (stmt.revoked && gr.revocation.is_some());
+				// If it should, delete the grant and append the redacted version to the result.
 				if prune {
 					txn.del(crate::key::database::access::gr::new(
 						opt.ns()?,
