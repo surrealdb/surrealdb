@@ -1164,6 +1164,8 @@ pub enum Error {
 	#[error("Found a non-computed value where they are not allowed")]
 	NonComputed,
 
+	#[error("Size of query script exceeded maximum supported size of 4,294,967,295 bytes.")]
+	QueryTooLarge,
 	/// Represents a failure in timestamp arithmetic related to database internals
 	#[error("Failed to compute: \"{0}\", as the operation results in an overflow.")]
 	ArithmeticOverflow(String),

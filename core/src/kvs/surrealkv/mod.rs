@@ -63,6 +63,7 @@ impl Datastore {
 	pub(crate) async fn new(path: &str) -> Result<Datastore, Error> {
 		let mut opts = Options::new();
 		opts.dir = path.to_string().into();
+		opts.max_key_size = 10000;
 
 		match Store::new(opts) {
 			Ok(db) => Ok(Datastore {

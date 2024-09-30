@@ -107,7 +107,7 @@ impl Parser<'_> {
 					}
 					t!(":") => {
 						let str = self.next_token_value::<Ident>()?.0;
-						self.parse_thing_or_range(ctx, str).await
+						self.parse_thing_or_range(ctx, str).await.map(Value::Thing)
 					}
 					_ => Ok(Value::Table(self.next_token_value()?)),
 				}
@@ -315,7 +315,7 @@ impl Parser<'_> {
 					}
 					t!(":") => {
 						let str = self.next_token_value::<Ident>()?.0;
-						self.parse_thing_or_range(ctx, str).await?
+						self.parse_thing_or_range(ctx, str).await?.into()
 					}
 					_ => {
 						if self.table_as_field {
