@@ -1236,7 +1236,7 @@ version = "0.11.3"
 criteria = "safe-to-run"
 
 [[exemptions.reblessive]]
-version = "0.4.0"
+version = "0.4.1"
 criteria = "safe-to-deploy"
 
 [[exemptions.redox_syscall]]
