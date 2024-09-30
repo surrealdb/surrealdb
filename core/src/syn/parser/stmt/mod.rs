@@ -425,7 +425,18 @@ impl Parser<'_> {
 			}
 			t!("REVOKE") => {
 				self.pop_peek();
-				let gr = self.next_token_value()?;
+				let gr = match self.peek_kind() {
+					t!("GRANT") => {
+						self.pop_peek();
+						Some(self.next_token_value()?)
+					}
+					t!("ALL") => {
+						self.pop_peek();
+						None
+					}
+					_ => unexpected!(self, peek, "either GRANT or ALL"),
+				};
+
 				Ok(AccessStatement::Revoke(AccessStatementRevoke {
 					ac,
 					base,

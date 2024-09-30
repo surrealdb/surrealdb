@@ -71,7 +71,7 @@ pub struct AccessStatementGrant {
 pub struct AccessStatementRevoke {
 	pub ac: Ident,
 	pub base: Option<Base>,
-	pub gr: Ident,
+	pub gr: Option<Ident>,
 }
 
 // TODO(gguillemas): Document once bearer access is no longer experimental.
@@ -527,18 +527,43 @@ async fn compute_revoke(
 			txn.clear();
 			// Check if the access method exists.
 			txn.get_root_access(&stmt.ac).await?;
-			// Get the grants to revoke
 			let ac_str = stmt.ac.to_raw();
-			let gr_str = stmt.gr.to_raw();
-			let mut gr = (*txn.get_root_access_grant(&ac_str, &gr_str).await?).clone();
-			if gr.revocation.is_some() {
-				return Err(Error::AccessGrantRevoked);
+			// Get the grants to revoke.
+			match &stmt.gr {
+				Some(gr) => {
+					let gr_str = gr.to_raw();
+					let mut gr = (*txn.get_root_access_grant(&ac_str, &gr_str).await?).clone();
+					if gr.revocation.is_some() {
+						return Err(Error::AccessGrantRevoked);
+					}
+					gr.revocation = Some(Datetime::default());
+					// Process the statement.
+					let key = crate::key::root::access::gr::new(&ac_str, &gr_str);
+					txn.set(key, &gr, None).await?;
+					Ok(Value::Object(gr.redacted().into()))
+				}
+				None => {
+					let grs = txn.all_root_access_grants(&ac_str).await?;
+					for gr in grs.iter() {
+						let mut gr = gr.clone();
+						if gr.revocation.is_some() {
+							continue;
+						}
+						gr.revocation = Some(Datetime::default());
+						// Process the statement.
+						let key = crate::key::root::access::gr::new(&ac_str, &gr.id);
+						txn.set(key, &gr, None).await?;
+					}
+					// Return all grants after revocation.
+					let grs = txn
+						.all_root_access_grants(&stmt.ac)
+						.await?
+						.iter()
+						.map(|v| Value::Object(v.redacted().to_owned().into()))
+						.collect::<Array>();
+					Ok(Value::Array(grs))
+				}
 			}
-			gr.revocation = Some(Datetime::default());
-			// Process the statement
-			let key = crate::key::root::access::gr::new(&ac_str, &gr_str);
-			txn.set(key, &gr, None).await?;
-			Ok(Value::Object(gr.redacted().into()))
 		}
 		Base::Ns => {
 			// Get the transaction
@@ -549,17 +574,45 @@ async fn compute_revoke(
 			txn.get_ns_access(opt.ns()?, &stmt.ac).await?;
 			// Get the grants to revoke
 			let ac_str = stmt.ac.to_raw();
-			let gr_str = stmt.gr.to_raw();
-			let mut gr = (*txn.get_ns_access_grant(opt.ns()?, &ac_str, &gr_str).await?).clone();
-			if gr.revocation.is_some() {
-				return Err(Error::AccessGrantRevoked);
+			// Get the grants to revoke.
+			match &stmt.gr {
+				Some(gr) => {
+					let gr_str = gr.to_raw();
+					let mut gr =
+						(*txn.get_ns_access_grant(opt.ns()?, &ac_str, &gr_str).await?).clone();
+					if gr.revocation.is_some() {
+						return Err(Error::AccessGrantRevoked);
+					}
+					gr.revocation = Some(Datetime::default());
+					// Process the statement
+					let key = crate::key::namespace::access::gr::new(opt.ns()?, &ac_str, &gr_str);
+					txn.get_or_add_ns(opt.ns()?, opt.strict).await?;
+					txn.set(key, &gr, None).await?;
+					Ok(Value::Object(gr.redacted().into()))
+				}
+				None => {
+					let grs = txn.all_root_access_grants(&ac_str).await?;
+					for gr in grs.iter() {
+						let mut gr = gr.clone();
+						if gr.revocation.is_some() {
+							continue;
+						}
+						gr.revocation = Some(Datetime::default());
+						// Process the statement.
+						let key =
+							crate::key::namespace::access::gr::new(opt.ns()?, &ac_str, &gr.id);
+						txn.set(key, &gr, None).await?;
+					}
+					// Return all grants after revocation.
+					let grs = txn
+						.all_ns_access_grants(opt.ns()?, &stmt.ac)
+						.await?
+						.iter()
+						.map(|v| Value::Object(v.redacted().to_owned().into()))
+						.collect::<Array>();
+					Ok(Value::Array(grs))
+				}
 			}
-			gr.revocation = Some(Datetime::default());
-			// Process the statement
-			let key = crate::key::namespace::access::gr::new(opt.ns()?, &ac_str, &gr_str);
-			txn.get_or_add_ns(opt.ns()?, opt.strict).await?;
-			txn.set(key, &gr, None).await?;
-			Ok(Value::Object(gr.redacted().into()))
 		}
 		Base::Db => {
 			// Get the transaction
@@ -570,19 +623,55 @@ async fn compute_revoke(
 			txn.get_db_access(opt.ns()?, opt.db()?, &stmt.ac).await?;
 			// Get the grants to revoke
 			let ac_str = stmt.ac.to_raw();
-			let gr_str = stmt.gr.to_raw();
-			let mut gr =
-				(*txn.get_db_access_grant(opt.ns()?, opt.db()?, &ac_str, &gr_str).await?).clone();
-			if gr.revocation.is_some() {
-				return Err(Error::AccessGrantRevoked);
+			match &stmt.gr {
+				Some(gr) => {
+					let gr_str = gr.to_raw();
+					let mut gr =
+						(*txn.get_db_access_grant(opt.ns()?, opt.db()?, &ac_str, &gr_str).await?)
+							.clone();
+					if gr.revocation.is_some() {
+						return Err(Error::AccessGrantRevoked);
+					}
+					gr.revocation = Some(Datetime::default());
+					// Process the statement
+					let key = crate::key::database::access::gr::new(
+						opt.ns()?,
+						opt.db()?,
+						&ac_str,
+						&gr_str,
+					);
+					txn.get_or_add_ns(opt.ns()?, opt.strict).await?;
+					txn.get_or_add_db(opt.ns()?, opt.db()?, opt.strict).await?;
+					txn.set(key, &gr, None).await?;
+					Ok(Value::Object(gr.redacted().into()))
+				}
+				None => {
+					let grs = txn.all_db_access_grants(opt.ns()?, opt.db()?, &ac_str).await?;
+					for gr in grs.iter() {
+						let mut gr = gr.clone();
+						if gr.revocation.is_some() {
+							continue;
+						}
+						gr.revocation = Some(Datetime::default());
+						// Process the statement.
+						let key = crate::key::database::access::gr::new(
+							opt.ns()?,
+							opt.db()?,
+							&ac_str,
+							&gr.id,
+						);
+						txn.set(key, &gr, None).await?;
+					}
+					// Return all grants after revocation.
+					let grs = txn
+						.all_db_access_grants(opt.ns()?, opt.db()?, &stmt.ac)
+						.await?
+						.iter()
+						.map(|v| Value::Object(v.redacted().to_owned().into()))
+						.collect::<Array>();
+					Ok(Value::Array(grs))
+				}
 			}
-			gr.revocation = Some(Datetime::default());
-			// Process the statement
-			let key = crate::key::database::access::gr::new(opt.ns()?, opt.db()?, &ac_str, &gr_str);
-			txn.get_or_add_ns(opt.ns()?, opt.strict).await?;
-			txn.get_or_add_db(opt.ns()?, opt.db()?, opt.strict).await?;
-			txn.set(key, &gr, None).await?;
-			Ok(Value::Object(gr.redacted().into()))
 		}
 		_ => Err(Error::Unimplemented(
 			"Managing access methods outside of root, namespace and database levels".to_string(),
@@ -730,7 +819,7 @@ impl Display for AccessStatement {
 				if let Some(ref v) = stmt.base {
 					write!(f, " ON {v}")?;
 				}
-				write!(f, "GRANT")?;
+				write!(f, " GRANT")?;
 				Ok(())
 			}
 			Self::List(stmt) => {
@@ -738,7 +827,7 @@ impl Display for AccessStatement {
 				if let Some(ref v) = stmt.base {
 					write!(f, " ON {v}")?;
 				}
-				write!(f, "LIST")?;
+				write!(f, " LIST")?;
 				Ok(())
 			}
 			Self::Revoke(stmt) => {
@@ -746,11 +835,19 @@ impl Display for AccessStatement {
 				if let Some(ref v) = stmt.base {
 					write!(f, " ON {v}")?;
 				}
-				write!(f, "REVOKE {}", stmt.gr)?;
+				write!(f, " REVOKE")?;
+				match &stmt.gr {
+					Some(gr) => write!(f, " GRANT {gr}")?,
+					None => write!(f, " ALL")?,
+				};
 				Ok(())
 			}
 			Self::Prune(stmt) => {
-				write!(f, "ACCESS {} PRUNE", stmt.ac)?;
+				write!(f, "ACCESS {}", stmt.ac)?;
+				if let Some(ref v) = stmt.base {
+					write!(f, " ON {v}")?;
+				}
+				write!(f, " PRUNE")?;
 				match (stmt.expired, stmt.revoked) {
 					(true, false) => write!(f, " EXPIRED")?,
 					(false, true) => write!(f, " REVOKED")?,
