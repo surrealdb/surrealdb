@@ -12,7 +12,7 @@ use crate::sql::statements::{
 	},
 	KillStatement, LiveStatement, OptionStatement, SetStatement, ThrowStatement,
 };
-use crate::sql::{Fields, Ident, Param};
+use crate::sql::{Duration, Fields, Ident, Param};
 use crate::syn::parser::enter_query_recursion;
 use crate::syn::token::{t, TokenKind};
 use crate::{
@@ -460,17 +460,17 @@ impl Parser<'_> {
 					}
 					_ => unexpected!(self, peek, "one of EXPIRED, REVOKED or ALL"),
 				};
-				let since = if self.eat(t!("SINCE")) {
-					Some(self.next_token_value()?)
+				let grace = if self.eat(t!("FOR")) {
+					self.next_token_value()?
 				} else {
-					None
+					Duration::default()
 				};
 				Ok(AccessStatement::Purge(AccessStatementPurge {
 					ac,
 					base,
 					expired,
 					revoked,
-					since,
+					grace,
 				}))
 			}
 			_ => unexpected!(self, peek, "one of GRANT, LIST, REVOKE or PURGE"),

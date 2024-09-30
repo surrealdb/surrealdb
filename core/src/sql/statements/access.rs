@@ -4,7 +4,9 @@ use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::iam::{Action, ResourceKind};
 use crate::sql::access_type::BearerAccessSubject;
-use crate::sql::{AccessType, Array, Base, Datetime, Ident, Object, Strand, Thing, Uuid, Value};
+use crate::sql::{
+	AccessType, Array, Base, Datetime, Duration, Ident, Object, Strand, Thing, Uuid, Value,
+};
 use derive::Store;
 use rand::Rng;
 use revision::revisioned;
@@ -85,7 +87,7 @@ pub struct AccessStatementPurge {
 	pub base: Option<Base>,
 	pub expired: bool,
 	pub revoked: bool,
-	pub since: Option<Datetime>,
+	pub grace: Duration,
 }
 
 // TODO(gguillemas): Document once bearer access is no longer experimental.
@@ -708,11 +710,20 @@ async fn compute_purge(
 			let mut purged = Array::default();
 			for gr in txn.all_root_access_grants(&ac_str).await?.iter() {
 				// Determine if the grant should purged based on expiration or revocation.
-				let purge = (stmt.expired
-					&& gr.expiration.as_ref().map_or(false, |exp| exp < &Datetime::default()))
-					|| (stmt.revoked && gr.revocation.is_some());
+				let now = Datetime::default();
+				// We can convert to unsigned integer as substraction is saturating.
+				// Expiration and revocation times should never exceed the current time.
+				// If for some reason they were, the grants will be purged.
+				let purge_expired = stmt.expired
+					&& gr.expiration.as_ref().map_or(false, |exp| {
+						(now.timestamp().saturating_sub(exp.timestamp()) as u64) > stmt.grace.secs()
+					});
+				let purge_revoked = stmt.revoked
+					&& gr.revocation.as_ref().map_or(false, |rev| {
+						(now.timestamp().saturating_sub(rev.timestamp()) as u64) > stmt.grace.secs()
+					});
 				// If it should, delete the grant and append the redacted version to the result.
-				if purge {
+				if purge_expired || purge_revoked {
 					txn.del(crate::key::root::access::gr::new(&ac_str, &gr.id.to_raw())).await?;
 					purged = purged + Value::Object(gr.redacted().to_owned().into());
 				}
@@ -730,12 +741,21 @@ async fn compute_purge(
 			let ac_str = stmt.ac.to_raw();
 			let mut purged = Array::default();
 			for gr in txn.all_ns_access_grants(opt.ns()?, &ac_str).await?.iter() {
-				// Determine if the grant should be purged based on expiration or revocation.
-				let purge = (stmt.expired
-					&& gr.expiration.as_ref().map_or(false, |exp| exp < &Datetime::default()))
-					|| (stmt.revoked && gr.revocation.is_some());
+				// Determine if the grant should purged based on expiration or revocation.
+				let now = Datetime::default();
+				// We can convert to unsigned integer as substraction is saturating.
+				// Expiration and revocation times should never exceed the current time.
+				// If for some reason they were, the grants will be purged.
+				let purge_expired = stmt.expired
+					&& gr.expiration.as_ref().map_or(false, |exp| {
+						(now.timestamp().saturating_sub(exp.timestamp()) as u64) > stmt.grace.secs()
+					});
+				let purge_revoked = stmt.revoked
+					&& gr.revocation.as_ref().map_or(false, |rev| {
+						(now.timestamp().saturating_sub(rev.timestamp()) as u64) > stmt.grace.secs()
+					});
 				// If it should, delete the grant and append the redacted version to the result.
-				if purge {
+				if purge_expired || purge_revoked {
 					txn.del(crate::key::namespace::access::gr::new(
 						opt.ns()?,
 						&ac_str,
@@ -758,12 +778,21 @@ async fn compute_purge(
 			let ac_str = stmt.ac.to_raw();
 			let mut purged = Array::default();
 			for gr in txn.all_db_access_grants(opt.ns()?, opt.db()?, &ac_str).await?.iter() {
-				// Determine if the grant should be purged based on expiration or revocation.
-				let purge = (stmt.expired
-					&& gr.expiration.as_ref().map_or(false, |exp| exp < &Datetime::default()))
-					|| (stmt.revoked && gr.revocation.is_some());
+				// Determine if the grant should purged based on expiration or revocation.
+				let now = Datetime::default();
+				// We can convert to unsigned integer as substraction is saturating.
+				// Expiration and revocation times should never exceed the current time.
+				// If for some reason they were, the grants will be purged.
+				let purge_expired = stmt.expired
+					&& gr.expiration.as_ref().map_or(false, |exp| {
+						(now.timestamp().saturating_sub(exp.timestamp()) as u64) > stmt.grace.secs()
+					});
+				let purge_revoked = stmt.revoked
+					&& gr.revocation.as_ref().map_or(false, |rev| {
+						(now.timestamp().saturating_sub(rev.timestamp()) as u64) > stmt.grace.secs()
+					});
 				// If it should, delete the grant and append the redacted version to the result.
-				if purge {
+				if purge_expired || purge_revoked {
 					txn.del(crate::key::database::access::gr::new(
 						opt.ns()?,
 						opt.db()?,
