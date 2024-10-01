@@ -1177,8 +1177,8 @@ mod tests {
 		for _ in 0..100000 {
 			let base = random_number();
 			let a = random_permutation(base);
-			let b = random_permutation(a.clone());
-			let c = random_permutation(b.clone());
+			let b = random_permutation(a);
+			let c = random_permutation(b);
 			assert_consistent(a, b, c);
 		}
 	}
