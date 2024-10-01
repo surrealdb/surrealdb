@@ -17,10 +17,11 @@ use std::fmt::{Display, Formatter};
 pub static GRANT_BEARER_PREFIX: &str = "surreal-bearer";
 // Keys and their identifiers are generated randomly from a 62-character pool.
 pub static GRANT_BEARER_CHARACTER_POOL: &[u8] =
-	b"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+	b"0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
 // The key identifier should not have collisions to prevent confusion.
 // However, collisions should be handled gracefully when issuing grants.
-// With 12 characters from the pool, the key identifier part has ~70 bits of entropy.
+// The first character of the key identifier will not be a digit to prevent parsing issues.
+// With 12 characters from the pool, one alphabetic, the key identifier part has ~68 bits of entropy.
 pub static GRANT_BEARER_ID_LENGTH: usize = 12;
 // With 24 characters from the pool, the key part has ~140 bits of entropy.
 pub static GRANT_BEARER_KEY_LENGTH: usize = 24;
@@ -226,8 +227,13 @@ pub struct GrantBearer {
 impl GrantBearer {
 	#[doc(hidden)]
 	pub fn new() -> Self {
-		let id = random_string(GRANT_BEARER_ID_LENGTH);
-		let secret = random_string(GRANT_BEARER_KEY_LENGTH);
+		let id = format!(
+			"{}{}",
+			// The pool for the first character of the key identifier excludes digits.
+			random_string(1, &GRANT_BEARER_CHARACTER_POOL[10..]),
+			random_string(GRANT_BEARER_ID_LENGTH - 1, GRANT_BEARER_CHARACTER_POOL)
+		);
+		let secret = random_string(GRANT_BEARER_KEY_LENGTH, GRANT_BEARER_CHARACTER_POOL);
 		Self {
 			id: id.clone().into(),
 			key: format!("{GRANT_BEARER_PREFIX}-{id}-{secret}").into(),
@@ -235,12 +241,12 @@ impl GrantBearer {
 	}
 }
 
-fn random_string(length: usize) -> String {
+fn random_string(length: usize, pool: &[u8]) -> String {
 	let mut rng = rand::thread_rng();
 	let string: String = (0..length)
 		.map(|_| {
-			let i = rng.gen_range(0..GRANT_BEARER_CHARACTER_POOL.len());
-			GRANT_BEARER_CHARACTER_POOL[i] as char
+			let i = rng.gen_range(0..pool.len());
+			pool[i] as char
 		})
 		.collect();
 	string
@@ -854,7 +860,7 @@ impl Display for AccessStatement {
 				}
 				write!(f, " REVOKE")?;
 				match &stmt.gr {
-					Some(gr) => write!(f, " GRANT {gr}")?,
+					Some(v) => write!(f, " GRANT {v}")?,
 					None => write!(f, " ALL")?,
 				};
 				Ok(())
@@ -872,6 +878,9 @@ impl Display for AccessStatement {
 					// This case should not parse
 					(false, false) => write!(f, " NONE")?,
 				};
+				if !stmt.grace.is_zero() {
+					write!(f, " SINCE {}", stmt.grace)?;
+				}
 				Ok(())
 			}
 		}

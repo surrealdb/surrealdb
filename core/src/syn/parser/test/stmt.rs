@@ -2532,7 +2532,7 @@ fn parse_access_purge() {
 			}))
 		);
 	}
-	// Expired since datetime
+	// Expired for 90 days
 	{
 		let res = test_parse!(parse_stmt, r#"ACCESS a ON DATABASE PURGE EXPIRED FOR 90d"#).unwrap();
 		assert_eq!(
