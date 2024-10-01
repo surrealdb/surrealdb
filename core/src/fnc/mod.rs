@@ -56,6 +56,7 @@ pub async fn run(
 		|| name.eq("array::index_of")
 		|| name.eq("array::map")
 		|| name.eq("array::some")
+		|| name.eq("meta::exists")
 		|| name.eq("record::exists")
 		|| name.eq("type::field")
 		|| name.eq("type::fields")
@@ -238,6 +239,10 @@ pub fn synchronous(
 		"math::top" => math::top,
 		"math::trimean" => math::trimean,
 		"math::variance" => math::variance,
+		//
+		"meta::id" => record::id,
+		"meta::table" => record::tb,
+		"meta::tb" => record::tb,
 		//
 		"not" => not::not,
 		//
@@ -490,6 +495,8 @@ pub async fn asynchronous(
 		"http::post" =>  http::post(ctx).await,
 		"http::patch" => http::patch(ctx).await,
 		"http::delete" => http::delete(ctx).await,
+		//
+		"meta::exists" => record::exists((stk, ctx, Some(opt), doc)).await,
 		//
 		"record::exists" => record::exists((stk, ctx, Some(opt), doc)).await,
 		//
