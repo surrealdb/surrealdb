@@ -134,7 +134,7 @@ revision = { version = "0.10.0", features = [
 ] }
 rmpv = "1.0.1"
 roaring = { version = "0.10.6", features = ["serde"] }
-rocksdb = { version = "0.21.0", features = ["lz4", "snappy"], optional = true }
+rocksdb = { version = "0.22.0", features = ["lz4", "snappy"], optional = true }
 rust_decimal = { version = "1.36.0", features = ["maths", "serde-str"] }
 rust-stemmers = "1.2.0"
 scrypt = "0.11.0"
