@@ -34,10 +34,10 @@ pub static ROCKSDB_COMPACTION_STYLE: LazyLock<String> =
 	lazy_env_parse!("SURREAL_ROCKSDB_COMPACTION_STYLE", String);
 
 pub static ROCKSDB_DELETION_FACTORY_WINDOW_SIZE: LazyLock<usize> =
-	lazy_env_parse!("SURREAL_ROCKSDB_MIN_BLOB_SIZE", usize, 1000);
+	lazy_env_parse!("SURREAL_ROCKSDB_DELETION_FACTORY_WINDOW_SIZE", usize, 1000);
 
 pub static ROCKSDB_DELETION_FACTORY_DELETE_COUNT: LazyLock<usize> =
-	lazy_env_parse!("SURREAL_ROCKSDB_MIN_BLOB_SIZE", usize, 50);
+	lazy_env_parse!("SURREAL_ROCKSDB_DELETION_FACTORY_DELETE_COUNT", usize, 50);
 
 pub static ROCKSDB_DELETION_FACTORY_RATIO: LazyLock<f64> =
-	lazy_env_parse!("SURREAL_ROCKSDB_MIN_BLOB_SIZE", f64, 0.5);
+	lazy_env_parse!("SURREAL_ROCKSDB_DELETION_FACTORY_RATIO", f64, 0.5);
