@@ -10,8 +10,8 @@ use crate::fnc::idiom;
 use crate::sql::edges::Edges;
 use crate::sql::field::{Field, Fields};
 use crate::sql::id::Id;
-use crate::sql::part::Part;
 use crate::sql::part::{Next, NextMethod};
+use crate::sql::part::{Part, Skip};
 use crate::sql::paths::ID;
 use crate::sql::statements::select::SelectStatement;
 use crate::sql::thing::Thing;
@@ -286,7 +286,7 @@ impl Value {
 							_ => mapped,
 						};
 
-						stk.run(|stk| mapped.get(stk, ctx, opt, doc, path.next())).await
+						stk.run(|stk| mapped.get(stk, ctx, opt, doc, path.skip(len))).await
 					}
 				},
 				// Current value at path is an edges
