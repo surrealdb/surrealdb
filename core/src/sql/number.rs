@@ -658,9 +658,16 @@ impl Ord for Number {
 						// Instead, we need to compare them as integers. To do this, we need to
 						// multiply the fraction with a number large enough to move some digits
 						// to the integer part of the float or decimal. The number should fit in
-						// an f64 and be a multiple of 2. Since we may need to do this repeatedly
-						// it helps if the number is as big as possible to reduce the number of
+						// 52 bits and be able to multiply f64 fractions between -1 and 1 without
+						// losing precision. Since we may need to do this repeatedly it helps if
+						// the number is as big as possible to reduce the number of
 						// iterations needed.
+						//
+						// This number is roughly 2 ^ 53 with the last digits truncated in order
+						// to make sure the fraction converges to 0 every time we multiply it.
+						// This is a magic number I found through my experiments so don't ask me
+						// the logic behind it :) Before changing this number, please make sure
+						// that the relevant tests aren't flaky after changing it.
 						const SAFE_MULTIPLIER: i64 = 9_007_199_254_740_000;
 						// Get the fractional part of the float.
 						let mut l = v.fract();
