@@ -126,7 +126,7 @@ async fn complex_strings() -> Result<(), Error> {
 #[tokio::test]
 async fn object_keys() -> Result<(), Error> {
 	let sql = r#"
-		RETURN object::from_entries([ ["3ds": 1 ] ])
+		RETURN object::from_entries([ ["3ds", 1 ] ])
 	"#;
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
