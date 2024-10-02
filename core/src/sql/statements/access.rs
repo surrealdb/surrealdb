@@ -270,175 +270,93 @@ async fn compute_grant(
 	};
 	// Allowed to run?
 	opt.is_allowed(Action::Edit, ResourceKind::Access, &base)?;
-	match base {
-		Base::Root => {
-			// Get the transaction
-			let txn = ctx.tx();
-			// Clear the cache
-			txn.clear();
-			// Read the access definition
-			let ac = txn.get_root_access(&stmt.ac.to_raw()).await?;
-			// Verify the access type
-			match &ac.kind {
-				AccessType::Jwt(_) => Err(Error::FeatureNotYetImplemented {
-					feature: "Grants for JWT on root".to_string(),
-				}),
-				AccessType::Bearer(at) => {
-					match &stmt.subject {
-						Some(Subject::User(user)) => {
-							// Grant subject must match access method subject.
-							if !matches!(&at.subject, BearerAccessSubject::User) {
-								return Err(Error::AccessGrantInvalidSubject);
-							}
-							// If the grant is being created for a user, the user must exist.
-							txn.get_root_user(user).await?;
-						}
-						Some(Subject::Record(_)) => {
-							// If the grant is being created for a record, a database must be selected.
-							return Err(Error::DbEmpty);
-						}
-						None => return Err(Error::AccessGrantInvalidSubject),
+	// Get the transaction.
+	let txn = ctx.tx();
+	// Clear the cache.
+	txn.clear();
+	// Read the access definition
+	let ac = match base {
+		Base::Root => txn.get_root_access(&stmt.ac.to_raw()).await?,
+		Base::Ns => txn.get_ns_access(opt.ns()?, &stmt.ac.to_raw()).await?,
+		Base::Db => txn.get_db_access(opt.ns()?, opt.db()?, &stmt.ac.to_raw()).await?,
+		_ => {
+			return Err(Error::Unimplemented(
+				"Managing access methods outside of root, namespace and database levels"
+					.to_string(),
+			))
+		}
+	};
+	// Verify the access type
+	match &ac.kind {
+		AccessType::Jwt(_) => Err(Error::FeatureNotYetImplemented {
+			feature: format!("Grants for JWT on {base}"),
+		}),
+		AccessType::Record(_) => Err(Error::FeatureNotYetImplemented {
+			feature: format!("Grants for record on {base}"),
+		}),
+		AccessType::Bearer(at) => {
+			match &stmt.subject {
+				Some(Subject::User(user)) => {
+					// Grant subject must match access method subject.
+					if !matches!(&at.subject, BearerAccessSubject::User) {
+						return Err(Error::AccessGrantInvalidSubject);
 					}
-					// Create a new bearer key.
-					let grant = GrantBearer::new();
-					let gr = AccessGrant {
-						ac: ac.name.clone(),
-						// Unique grant identifier.
-						// In the case of bearer grants, the key identifier.
-						id: grant.id.clone(),
-						// Current time.
-						creation: Datetime::default(),
-						// Current time plus grant duration. Only if set.
-						expiration: ac.duration.grant.map(|d| d + Datetime::default()),
-						// The grant is initially not revoked.
-						revocation: None,
-						// Subject associated with the grant.
-						subject: stmt.subject.to_owned(),
-						// The contents of the grant.
-						grant: Grant::Bearer(grant),
+					// If the grant is being created for a user, the user must exist.
+					match base {
+						Base::Root => txn.get_root_user(user).await?,
+						Base::Ns => txn.get_ns_user(opt.ns()?, user).await?,
+						Base::Db => txn.get_db_user(opt.ns()?, opt.db()?, user).await?,
+						_ => return Err(Error::Unimplemented(
+							"Managing access methods outside of root, namespace and database levels".to_string(),
+						)),
 					};
-					let ac_str = gr.ac.to_raw();
-					let gr_str = gr.id.to_raw();
-					// Process the statement
+				}
+				Some(Subject::Record(_)) => {
+					// If the grant is being created for a record, a database must be selected.
+					if !matches!(base, Base::Db) {
+						return Err(Error::DbEmpty);
+					}
+					// Grant subject must match access method subject.
+					if !matches!(&at.subject, BearerAccessSubject::Record) {
+						return Err(Error::AccessGrantInvalidSubject);
+					}
+					// A grant can be created for a record that does not exist yet.
+					// TODO(PR): Consider the impact of this decision.
+				}
+				None => return Err(Error::AccessGrantInvalidSubject),
+			};
+			// Create a new bearer key.
+			let grant = GrantBearer::new();
+			let gr = AccessGrant {
+				ac: ac.name.clone(),
+				// Unique grant identifier.
+				// In the case of bearer grants, the key identifier.
+				id: grant.id.clone(),
+				// Current time.
+				creation: Datetime::default(),
+				// Current time plus grant duration. Only if set.
+				expiration: ac.duration.grant.map(|d| d + Datetime::default()),
+				// The grant is initially not revoked.
+				revocation: None,
+				// Subject associated with the grant.
+				subject: stmt.subject.to_owned(),
+				// The contents of the grant.
+				grant: Grant::Bearer(grant),
+			};
+			let ac_str = gr.ac.to_raw();
+			let gr_str = gr.id.to_raw();
+			// Process the statement
+			match base {
+				Base::Root => {
 					let key = crate::key::root::access::gr::new(&ac_str, &gr_str);
 					txn.set(key, &gr, None).await?;
-					Ok(Value::Object(gr.into()))
 				}
-				_ => Err(Error::AccessMethodMismatch),
-			}
-		}
-		Base::Ns => {
-			// Get the transaction
-			let txn = ctx.tx();
-			// Clear the cache
-			txn.clear();
-			// Read the access definition
-			let ac = txn.get_ns_access(opt.ns()?, &stmt.ac.to_raw()).await?;
-			// Verify the access type
-			match &ac.kind {
-				AccessType::Jwt(_) => Err(Error::FeatureNotYetImplemented {
-					feature: "Grants for JWT on namespace".to_string(),
-				}),
-				AccessType::Bearer(at) => {
-					match &stmt.subject {
-						Some(Subject::User(user)) => {
-							// Grant subject must match access method subject.
-							if !matches!(&at.subject, BearerAccessSubject::User) {
-								return Err(Error::AccessGrantInvalidSubject);
-							}
-							// If the grant is being created for a user, the user must exist.
-							txn.get_ns_user(opt.ns()?, user).await?;
-						}
-						Some(Subject::Record(_)) => {
-							// If the grant is being created for a record, a database must be selected.
-							return Err(Error::DbEmpty);
-						}
-						None => return Err(Error::AccessGrantInvalidSubject),
-					}
-					// Create a new bearer key.
-					let grant = GrantBearer::new();
-					let gr = AccessGrant {
-						ac: ac.name.clone(),
-						// Unique grant identifier.
-						// In the case of bearer grants, the key identifier.
-						id: grant.id.clone(),
-						// Current time.
-						creation: Datetime::default(),
-						// Current time plus grant duration. Only if set.
-						expiration: ac.duration.grant.map(|d| d + Datetime::default()),
-						// The grant is initially not revoked.
-						revocation: None,
-						// Subject associated with the grant.
-						subject: stmt.subject.to_owned(),
-						// The contents of the grant.
-						grant: Grant::Bearer(grant),
-					};
-					let ac_str = gr.ac.to_raw();
-					let gr_str = gr.id.to_raw();
-					// Process the statement
+				Base::Ns => {
 					let key = crate::key::namespace::access::gr::new(opt.ns()?, &ac_str, &gr_str);
 					txn.get_or_add_ns(opt.ns()?, opt.strict).await?;
 					txn.set(key, &gr, None).await?;
-					Ok(Value::Object(gr.into()))
 				}
-				_ => Err(Error::AccessMethodMismatch),
-			}
-		}
-		Base::Db => {
-			// Get the transaction
-			let txn = ctx.tx();
-			// Clear the cache
-			txn.clear();
-			// Read the access definition
-			let ac = txn.get_db_access(opt.ns()?, opt.db()?, &stmt.ac.to_raw()).await?;
-			// Verify the access type
-			match &ac.kind {
-				AccessType::Jwt(_) => Err(Error::FeatureNotYetImplemented {
-					feature: "Grants for JWT on database".to_string(),
-				}),
-				AccessType::Record(_) => Err(Error::FeatureNotYetImplemented {
-					feature: "Grants for record on database".to_string(),
-				}),
-				AccessType::Bearer(at) => {
-					match &stmt.subject {
-						Some(Subject::User(user)) => {
-							// Grant subject must match access method subject.
-							if !matches!(&at.subject, BearerAccessSubject::User) {
-								return Err(Error::AccessGrantInvalidSubject);
-							}
-							// If the grant is being created for a user, the user must exist.
-							txn.get_db_user(opt.ns()?, opt.db()?, user).await?;
-						}
-						Some(Subject::Record(_)) => {
-							// Grant subject must match access method subject.
-							if !matches!(&at.subject, BearerAccessSubject::Record) {
-								return Err(Error::AccessGrantInvalidSubject);
-							}
-							// A grant can be created for a record that does not exist.
-						}
-						None => return Err(Error::AccessGrantInvalidSubject),
-					}
-					// Create a new bearer key.
-					let grant = GrantBearer::new();
-					let gr = AccessGrant {
-						ac: ac.name.clone(),
-						// Unique grant identifier.
-						// In the case of bearer grants, the key identifier.
-						id: grant.id.clone(),
-						// Current time.
-						creation: Datetime::default(),
-						// Current time plus grant duration. Only if set.
-						expiration: ac.duration.grant.map(|d| d + Datetime::default()),
-						// The grant is initially not revoked.
-						revocation: None,
-						// Subject associated with the grant.
-						subject: stmt.subject.clone(),
-						// The contents of the grant.
-						grant: Grant::Bearer(grant),
-					};
-					let ac_str = gr.ac.to_raw();
-					let gr_str = gr.id.to_raw();
-					// Process the statement
+				Base::Db => {
 					let key = crate::key::database::access::gr::new(
 						opt.ns()?,
 						opt.db()?,
@@ -448,13 +366,17 @@ async fn compute_grant(
 					txn.get_or_add_ns(opt.ns()?, opt.strict).await?;
 					txn.get_or_add_db(opt.ns()?, opt.db()?, opt.strict).await?;
 					txn.set(key, &gr, None).await?;
-					Ok(Value::Object(gr.into()))
 				}
-			}
+				_ => {
+					return Err(Error::Unimplemented(
+						"Managing access methods outside of root, namespace and database levels"
+							.to_string(),
+					))
+				}
+			};
+
+			Ok(Value::Object(gr.into()))
 		}
-		_ => Err(Error::Unimplemented(
-			"Managing access methods outside of root, namespace and database levels".to_string(),
-		)),
 	}
 }
 
@@ -470,59 +392,39 @@ async fn compute_show(
 	};
 	// Allowed to run?
 	opt.is_allowed(Action::View, ResourceKind::Access, &base)?;
+	// Get the transaction.
+	let txn = ctx.tx();
+	// Clear the cache.
+	txn.clear();
+	// Check if the access method exists.
 	match base {
-		Base::Root => {
-			// Get the transaction
-			let txn = ctx.tx();
-			// Clear the cache
-			txn.clear();
-			// Check if the access method exists.
-			txn.get_root_access(&stmt.ac).await?;
-			// Get the grants for the access method.
-			let grants = txn
-				.all_root_access_grants(&stmt.ac)
-				.await?
-				.iter()
-				.map(|v| Value::Object(v.redacted().to_owned().into()))
-				.collect::<Array>();
-			Ok(Value::Array(grants))
+		Base::Root => txn.get_root_access(&stmt.ac.to_raw()).await?,
+		Base::Ns => txn.get_ns_access(opt.ns()?, &stmt.ac.to_raw()).await?,
+		Base::Db => txn.get_db_access(opt.ns()?, opt.db()?, &stmt.ac.to_raw()).await?,
+		_ => {
+			return Err(Error::Unimplemented(
+				"Managing access methods outside of root, namespace and database levels"
+					.to_string(),
+			))
 		}
-		Base::Ns => {
-			// Get the transaction
-			let txn = ctx.tx();
-			// Clear the cache
-			txn.clear();
-			// Check if the access method exists.
-			txn.get_ns_access(opt.ns()?, &stmt.ac).await?;
-			// Get the grants for the access method.
-			let grants = txn
-				.all_ns_access_grants(opt.ns()?, &stmt.ac)
-				.await?
-				.iter()
-				.map(|v| Value::Object(v.redacted().to_owned().into()))
-				.collect::<Array>();
-			Ok(Value::Array(grants))
+	};
+	// Get the grants for the access method.
+	let grs = match base {
+		Base::Root => txn.all_root_access_grants(&stmt.ac).await?,
+		Base::Ns => txn.all_ns_access_grants(opt.ns()?, &stmt.ac).await?,
+		Base::Db => txn.all_db_access_grants(opt.ns()?, opt.db()?, &stmt.ac).await?,
+		_ => {
+			return Err(Error::Unimplemented(
+				"Managing access methods outside of root, namespace and database levels"
+					.to_string(),
+			))
 		}
-		Base::Db => {
-			// Get the transaction
-			let txn = ctx.tx();
-			// Clear the cache
-			txn.clear();
-			// Check if the access method exists.
-			txn.get_db_access(opt.ns()?, opt.db()?, &stmt.ac).await?;
-			// Get the grants for the access method.
-			let grants = txn
-				.all_db_access_grants(opt.ns()?, opt.db()?, &stmt.ac)
-				.await?
-				.iter()
-				.map(|v| Value::Object(v.redacted().to_owned().into()))
-				.collect::<Array>();
-			Ok(Value::Array(grants))
-		}
-		_ => Err(Error::Unimplemented(
-			"Managing access methods outside of root, namespace and database levels".to_string(),
-		)),
-	}
+	};
+	// Return the grants in redacted form.
+	let grants =
+		grs.iter().map(|v| Value::Object(v.redacted().to_owned().into())).collect::<Array>();
+
+	Ok(Value::Array(grants))
 }
 
 async fn compute_revoke(
@@ -537,163 +439,136 @@ async fn compute_revoke(
 	};
 	// Allowed to run?
 	opt.is_allowed(Action::Edit, ResourceKind::Access, &base)?;
+	// Get the transaction
+	let txn = ctx.tx();
+	// Clear the cache
+	txn.clear();
+	// Check if the access method exists.
 	match base {
-		Base::Root => {
-			// Get the transaction
-			let txn = ctx.tx();
-			// Clear the cache
-			txn.clear();
-			// Check if the access method exists.
-			txn.get_root_access(&stmt.ac).await?;
-			let ac_str = stmt.ac.to_raw();
-			// Get the grants to revoke.
-			match &stmt.gr {
-				Some(gr) => {
-					let gr_str = gr.to_raw();
-					let mut gr = (*txn.get_root_access_grant(&ac_str, &gr_str).await?).clone();
-					if gr.revocation.is_some() {
-						return Err(Error::AccessGrantRevoked);
-					}
-					gr.revocation = Some(Datetime::default());
-					// Process the statement.
-					let key = crate::key::root::access::gr::new(&ac_str, &gr_str);
-					txn.set(key, &gr, None).await?;
-					Ok(Value::Object(gr.redacted().into()))
-				}
-				None => {
-					let grs = txn.all_root_access_grants(&ac_str).await?;
-					for gr in grs.iter() {
-						let mut gr = gr.clone();
-						if gr.revocation.is_some() {
-							continue;
-						}
-						gr.revocation = Some(Datetime::default());
-						// Process the statement.
-						let key = crate::key::root::access::gr::new(&ac_str, &gr.id);
-						txn.set(key, &gr, None).await?;
-					}
-					// Return all grants after revocation.
-					let grs = txn
-						.all_root_access_grants(&stmt.ac)
-						.await?
-						.iter()
-						.map(|v| Value::Object(v.redacted().to_owned().into()))
-						.collect::<Array>();
-					Ok(Value::Array(grs))
-				}
-			}
+		Base::Root => txn.get_root_access(&stmt.ac.to_raw()).await?,
+		Base::Ns => txn.get_ns_access(opt.ns()?, &stmt.ac.to_raw()).await?,
+		Base::Db => txn.get_db_access(opt.ns()?, opt.db()?, &stmt.ac.to_raw()).await?,
+		_ => {
+			return Err(Error::Unimplemented(
+				"Managing access methods outside of root, namespace and database levels"
+					.to_string(),
+			))
 		}
-		Base::Ns => {
-			// Get the transaction
-			let txn = ctx.tx();
-			// Clear the cache
-			txn.clear();
-			// Check if the access method exists.
-			txn.get_ns_access(opt.ns()?, &stmt.ac).await?;
-			// Get the grants to revoke
-			let ac_str = stmt.ac.to_raw();
-			// Get the grants to revoke.
-			match &stmt.gr {
-				Some(gr) => {
-					let gr_str = gr.to_raw();
-					let mut gr =
-						(*txn.get_ns_access_grant(opt.ns()?, &ac_str, &gr_str).await?).clone();
-					if gr.revocation.is_some() {
-						return Err(Error::AccessGrantRevoked);
-					}
-					gr.revocation = Some(Datetime::default());
-					// Process the statement
-					let key = crate::key::namespace::access::gr::new(opt.ns()?, &ac_str, &gr_str);
+	};
+	// Get the grants to revoke.
+	match &stmt.gr {
+		Some(gr) => {
+			let mut grant = match base {
+				Base::Root => (*txn.get_root_access_grant(&stmt.ac, &gr).await?).clone(),
+				Base::Ns => (*txn.get_ns_access_grant(opt.ns()?, &stmt.ac, &gr).await?).clone(),
+				Base::Db => {
+					(*txn.get_db_access_grant(opt.ns()?, opt.db()?, &stmt.ac, &gr).await?).clone()
+				}
+				_ => {
+					return Err(Error::Unimplemented(
+						"Managing access methods outside of root, namespace and database levels"
+							.to_string(),
+					))
+				}
+			};
+			if grant.revocation.is_some() {
+				return Err(Error::AccessGrantRevoked);
+			}
+			grant.revocation = Some(Datetime::default());
+			// Process the statement.
+			match base {
+				Base::Root => {
+					let key = crate::key::root::access::gr::new(&stmt.ac, &gr);
+					txn.set(key, &grant, None).await?;
+				}
+				Base::Ns => {
+					let key = crate::key::namespace::access::gr::new(opt.ns()?, &stmt.ac, &gr);
 					txn.get_or_add_ns(opt.ns()?, opt.strict).await?;
-					txn.set(key, &gr, None).await?;
-					Ok(Value::Object(gr.redacted().into()))
+					txn.set(key, &grant, None).await?;
 				}
-				None => {
-					let grs = txn.all_root_access_grants(&ac_str).await?;
-					for gr in grs.iter() {
-						let mut gr = gr.clone();
-						if gr.revocation.is_some() {
-							continue;
-						}
-						gr.revocation = Some(Datetime::default());
-						// Process the statement.
-						let key =
-							crate::key::namespace::access::gr::new(opt.ns()?, &ac_str, &gr.id);
-						txn.set(key, &gr, None).await?;
-					}
-					// Return all grants after revocation.
-					let grs = txn
-						.all_ns_access_grants(opt.ns()?, &stmt.ac)
-						.await?
-						.iter()
-						.map(|v| Value::Object(v.redacted().to_owned().into()))
-						.collect::<Array>();
-					Ok(Value::Array(grs))
-				}
-			}
-		}
-		Base::Db => {
-			// Get the transaction
-			let txn = ctx.tx();
-			// Clear the cache
-			txn.clear();
-			// Check if the access method exists.
-			txn.get_db_access(opt.ns()?, opt.db()?, &stmt.ac).await?;
-			// Get the grants to revoke
-			let ac_str = stmt.ac.to_raw();
-			match &stmt.gr {
-				Some(gr) => {
-					let gr_str = gr.to_raw();
-					let mut gr =
-						(*txn.get_db_access_grant(opt.ns()?, opt.db()?, &ac_str, &gr_str).await?)
-							.clone();
-					if gr.revocation.is_some() {
-						return Err(Error::AccessGrantRevoked);
-					}
-					gr.revocation = Some(Datetime::default());
-					// Process the statement
-					let key = crate::key::database::access::gr::new(
-						opt.ns()?,
-						opt.db()?,
-						&ac_str,
-						&gr_str,
-					);
+				Base::Db => {
+					let key =
+						crate::key::database::access::gr::new(opt.ns()?, opt.db()?, &stmt.ac, &gr);
 					txn.get_or_add_ns(opt.ns()?, opt.strict).await?;
 					txn.get_or_add_db(opt.ns()?, opt.db()?, opt.strict).await?;
-					txn.set(key, &gr, None).await?;
-					Ok(Value::Object(gr.redacted().into()))
+					txn.set(key, &grant, None).await?;
 				}
-				None => {
-					let grs = txn.all_db_access_grants(opt.ns()?, opt.db()?, &ac_str).await?;
-					for gr in grs.iter() {
-						let mut gr = gr.clone();
-						if gr.revocation.is_some() {
-							continue;
-						}
-						gr.revocation = Some(Datetime::default());
-						// Process the statement.
+				_ => {
+					return Err(Error::Unimplemented(
+						"Managing access methods outside of root, namespace and database levels"
+							.to_string(),
+					))
+				}
+			};
+
+			Ok(Value::Object(grant.redacted().into()))
+		}
+		None => {
+			let grs =
+				match base {
+					Base::Root => txn.all_root_access_grants(&stmt.ac).await?,
+					Base::Ns => txn.all_ns_access_grants(opt.ns()?, &stmt.ac).await?,
+					Base::Db => txn.all_db_access_grants(opt.ns()?, opt.db()?, &stmt.ac).await?,
+					_ => return Err(Error::Unimplemented(
+						"Managing access methods outside of root, namespace and database levels"
+							.to_string(),
+					)),
+				};
+			for gr in grs.iter() {
+				let mut gr = gr.clone();
+				if gr.revocation.is_some() {
+					continue;
+				}
+				gr.revocation = Some(Datetime::default());
+				// Process the statement.
+				match base {
+					Base::Root => {
+						let key = crate::key::root::access::gr::new(&stmt.ac, &gr.id);
+						txn.set(key, &gr, None).await?;
+					}
+					Base::Ns => {
+						let key =
+							crate::key::namespace::access::gr::new(opt.ns()?, &stmt.ac, &gr.id);
+						txn.get_or_add_ns(opt.ns()?, opt.strict).await?;
+						txn.set(key, &gr, None).await?;
+					}
+					Base::Db => {
 						let key = crate::key::database::access::gr::new(
 							opt.ns()?,
 							opt.db()?,
-							&ac_str,
+							&stmt.ac,
 							&gr.id,
 						);
+						txn.get_or_add_ns(opt.ns()?, opt.strict).await?;
+						txn.get_or_add_db(opt.ns()?, opt.db()?, opt.strict).await?;
 						txn.set(key, &gr, None).await?;
 					}
-					// Return all grants after revocation.
-					let grs = txn
-						.all_db_access_grants(opt.ns()?, opt.db()?, &stmt.ac)
-						.await?
-						.iter()
-						.map(|v| Value::Object(v.redacted().to_owned().into()))
-						.collect::<Array>();
-					Ok(Value::Array(grs))
-				}
+					_ => return Err(Error::Unimplemented(
+						"Managing access methods outside of root, namespace and database levels"
+							.to_string(),
+					)),
+				};
 			}
+			// Get all grants after revocation.
+			// TODO(PR): Save them in a vector.
+			let grs =
+				match base {
+					Base::Root => txn.all_root_access_grants(&stmt.ac).await?,
+					Base::Ns => txn.all_ns_access_grants(opt.ns()?, &stmt.ac).await?,
+					Base::Db => txn.all_db_access_grants(opt.ns()?, opt.db()?, &stmt.ac).await?,
+					_ => return Err(Error::Unimplemented(
+						"Managing access methods outside of root, namespace and database levels"
+							.to_string(),
+					)),
+				};
+			// Return the grants in redacted form.
+			let grants = grs
+				.iter()
+				.map(|v| Value::Object(v.redacted().to_owned().into()))
+				.collect::<Array>();
+
+			Ok(Value::Array(grants))
 		}
-		_ => Err(Error::Unimplemented(
-			"Managing access methods outside of root, namespace and database levels".to_string(),
-		)),
 	}
 }
 
@@ -709,118 +584,84 @@ async fn compute_purge(
 	};
 	// Allowed to run?
 	opt.is_allowed(Action::Edit, ResourceKind::Access, &base)?;
+	// Get the transaction.
+	let txn = ctx.tx();
+	// Clear the cache.
+	txn.clear();
+	// Check if the access method exists.
 	match base {
-		Base::Root => {
-			// Get the transaction
-			let txn = ctx.tx();
-			// Clear the cache
-			txn.clear();
-			// Check if the access method exists.
-			txn.get_root_access(&stmt.ac).await?;
-			// Get all grants to purge
-			let ac_str = stmt.ac.to_raw();
-			let mut purged = Array::default();
-			for gr in txn.all_root_access_grants(&ac_str).await?.iter() {
-				// Determine if the grant should purged based on expiration or revocation.
-				let now = Datetime::default();
-				// We can convert to unsigned integer as substraction is saturating.
-				// Expiration and revocation times should never exceed the current time.
-				// If for some reason they were, the grants will be purged.
-				let purge_expired = stmt.expired
-					&& gr.expiration.as_ref().map_or(false, |exp| {
-						(now.timestamp().saturating_sub(exp.timestamp()) as u64) > stmt.grace.secs()
-					});
-				let purge_revoked = stmt.revoked
-					&& gr.revocation.as_ref().map_or(false, |rev| {
-						(now.timestamp().saturating_sub(rev.timestamp()) as u64) > stmt.grace.secs()
-					});
-				// If it should, delete the grant and append the redacted version to the result.
-				if purge_expired || purge_revoked {
-					txn.del(crate::key::root::access::gr::new(&ac_str, &gr.id.to_raw())).await?;
-					purged = purged + Value::Object(gr.redacted().to_owned().into());
-				}
-			}
-			Ok(Value::Array(purged))
+		Base::Root => txn.get_root_access(&stmt.ac.to_raw()).await?,
+		Base::Ns => txn.get_ns_access(opt.ns()?, &stmt.ac.to_raw()).await?,
+		Base::Db => txn.get_db_access(opt.ns()?, opt.db()?, &stmt.ac.to_raw()).await?,
+		_ => {
+			return Err(Error::Unimplemented(
+				"Managing access methods outside of root, namespace and database levels"
+					.to_string(),
+			))
 		}
-		Base::Ns => {
-			// Get the transaction
-			let txn = ctx.tx();
-			// Clear the cache
-			txn.clear();
-			// Check if the access method exists.
-			txn.get_ns_access(opt.ns()?, &stmt.ac).await?;
-			// Get all grants to purge
-			let ac_str = stmt.ac.to_raw();
-			let mut purged = Array::default();
-			for gr in txn.all_ns_access_grants(opt.ns()?, &ac_str).await?.iter() {
-				// Determine if the grant should purged based on expiration or revocation.
-				let now = Datetime::default();
-				// We can convert to unsigned integer as substraction is saturating.
-				// Expiration and revocation times should never exceed the current time.
-				// If for some reason they were, the grants will be purged.
-				let purge_expired = stmt.expired
-					&& gr.expiration.as_ref().map_or(false, |exp| {
-						(now.timestamp().saturating_sub(exp.timestamp()) as u64) > stmt.grace.secs()
-					});
-				let purge_revoked = stmt.revoked
-					&& gr.revocation.as_ref().map_or(false, |rev| {
-						(now.timestamp().saturating_sub(rev.timestamp()) as u64) > stmt.grace.secs()
-					});
-				// If it should, delete the grant and append the redacted version to the result.
-				if purge_expired || purge_revoked {
+	};
+	// Get all grants to purge.
+	let mut purged = Array::default();
+	let grs = match base {
+		Base::Root => txn.all_root_access_grants(&stmt.ac).await?,
+		Base::Ns => txn.all_ns_access_grants(opt.ns()?, &stmt.ac).await?,
+		Base::Db => txn.all_db_access_grants(opt.ns()?, opt.db()?, &stmt.ac).await?,
+		_ => {
+			return Err(Error::Unimplemented(
+				"Managing access methods outside of root, namespace and database levels"
+					.to_string(),
+			))
+		}
+	};
+	for gr in grs.iter() {
+		// Determine if the grant should purged based on expiration or revocation.
+		let now = Datetime::default();
+		// We can convert to unsigned integer as substraction is saturating.
+		// Expiration and revocation times should never exceed the current time.
+		// If for some reason they were, the grants will be purged.
+		let purge_expired = stmt.expired
+			&& gr.expiration.as_ref().map_or(false, |exp| {
+				(now.timestamp().saturating_sub(exp.timestamp()) as u64) > stmt.grace.secs()
+			});
+		let purge_revoked = stmt.revoked
+			&& gr.revocation.as_ref().map_or(false, |rev| {
+				(now.timestamp().saturating_sub(rev.timestamp()) as u64) > stmt.grace.secs()
+			});
+		// If it should, delete the grant and append the redacted version to the result.
+		if purge_expired || purge_revoked {
+			match base {
+				Base::Root => {
+					txn.del(crate::key::root::access::gr::new(&stmt.ac, &gr.id.to_raw())).await?
+				}
+				Base::Ns => {
 					txn.del(crate::key::namespace::access::gr::new(
 						opt.ns()?,
-						&ac_str,
+						&stmt.ac,
 						&gr.id.to_raw(),
 					))
-					.await?;
-					purged = purged + Value::Object(gr.redacted().to_owned().into());
+					.await?
 				}
-			}
-			Ok(Value::Array(purged))
-		}
-		Base::Db => {
-			// Get the transaction
-			let txn = ctx.tx();
-			// Clear the cache
-			txn.clear();
-			// Check if the access method exists.
-			txn.get_db_access(opt.ns()?, opt.db()?, &stmt.ac).await?;
-			// Get all grants to purge
-			let ac_str = stmt.ac.to_raw();
-			let mut purged = Array::default();
-			for gr in txn.all_db_access_grants(opt.ns()?, opt.db()?, &ac_str).await?.iter() {
-				// Determine if the grant should purged based on expiration or revocation.
-				let now = Datetime::default();
-				// We can convert to unsigned integer as substraction is saturating.
-				// Expiration and revocation times should never exceed the current time.
-				// If for some reason they were, the grants will be purged.
-				let purge_expired = stmt.expired
-					&& gr.expiration.as_ref().map_or(false, |exp| {
-						(now.timestamp().saturating_sub(exp.timestamp()) as u64) > stmt.grace.secs()
-					});
-				let purge_revoked = stmt.revoked
-					&& gr.revocation.as_ref().map_or(false, |rev| {
-						(now.timestamp().saturating_sub(rev.timestamp()) as u64) > stmt.grace.secs()
-					});
-				// If it should, delete the grant and append the redacted version to the result.
-				if purge_expired || purge_revoked {
+				Base::Db => {
 					txn.del(crate::key::database::access::gr::new(
 						opt.ns()?,
 						opt.db()?,
-						&ac_str,
+						&stmt.ac,
 						&gr.id.to_raw(),
 					))
-					.await?;
-					purged = purged + Value::Object(gr.redacted().to_owned().into());
+					.await?
 				}
-			}
-			Ok(Value::Array(purged))
+				_ => {
+					return Err(Error::Unimplemented(
+						"Managing access methods outside of root, namespace and database levels"
+							.to_string(),
+					))
+				}
+			};
+			purged = purged + Value::Object(gr.redacted().to_owned().into());
 		}
-		_ => Err(Error::Unimplemented(
-			"Managing access methods outside of root, namespace and database levels".to_string(),
-		)),
 	}
+
+	Ok(Value::Array(purged))
 }
 
 impl AccessStatement {
