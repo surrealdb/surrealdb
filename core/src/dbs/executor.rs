@@ -16,10 +16,10 @@ use crate::sql::query::Query;
 use crate::sql::statement::Statement;
 use crate::sql::value::Value;
 use crate::sql::Base;
+use async_graphql::Response;
 use channel::Receiver;
 use futures::{Stream, StreamExt};
 use reblessive::TreeStack;
-use std::mem;
 use std::pin::pin;
 use std::sync::Arc;
 #[cfg(not(target_arch = "wasm32"))]
@@ -31,10 +31,40 @@ use wasm_bindgen_futures::spawn_local as spawn;
 
 const TARGET: &str = "surrealdb::core::dbs";
 
+pub struct Executor2 {
+	err: bool,
+	txn: Option<Arc<Transaction>>,
+	stack: TreeStack,
+	results: Vec<Response>,
+	notification: Receiver<Notification>,
+}
+
+impl Executor2 {
+	pub fn new() -> Self {
+		Executor2 {
+			err: false,
+			txn: None,
+			stack: TreeStack::new(),
+			results: Vec::new(),
+			notification: Receiver::new(),
+		}
+	}
+}
+
 enum ControlFlow {
 	Continue,
 	Break,
 	Return,
+}
+
+pub struct ExecutionState {
+	stack: TreeStack,
+	/// A buffer for the results of a query.
+	results: Vec<Response>,
+	/// When the current running transaction started.
+	transaction_start: Option<usize>,
+
+	notifications: Receiver<Notification>,
 }
 
 pub(crate) struct Executor<'a> {
@@ -125,14 +155,6 @@ impl<'a> Executor<'a> {
 		}
 	}
 
-	fn buf_cancel(&self, v: Response) -> Response {
-		Response {
-			time: v.time,
-			result: Err(Error::QueryCancelled),
-			query_type: QueryType::Other,
-		}
-	}
-
 	fn buf_commit(&self, v: Response, commit_error: &Option<Error>) -> Response {
 		match &self.err {
 			true => Response {
@@ -201,16 +223,15 @@ impl<'a> Executor<'a> {
 		opt: Options,
 		qry: Query,
 	) -> Result<Vec<Response>, Error> {
-		// The stack to run the executor in.
-		let mut stack = TreeStack::new();
 		// Create a notification channel
 		let (send, recv) = channel::unbounded();
-		// Set the notification channel
-		let mut opt = opt.new_with_sender(send);
-		// Initialise buffer of responses
-		let mut buf: Vec<Response> = vec![];
-		// Initialise array of responses
-		let mut out: Vec<Response> = vec![];
+
+		let mut state = ExecutionState {
+			stack: TreeStack::new(),
+			notifications: recv,
+			results: Vec::new(),
+			pending_results: Vec::new(),
+		};
 		// Do we fast-forward a transaction?
 		// Set to true when we encounter a return statement in a transaction
 		let mut ff_txn = false;
@@ -222,10 +243,7 @@ impl<'a> Executor<'a> {
 
 			ff_txn = false;
 
-			match self
-				.execute_statement(&mut stack, &mut ctx, &mut opt, &recv, &mut buf, &mut out, stm)
-				.await?
-			{
+			match self.execute_statement(&mut ctx, &mut opt, &mut state, stm).await? {
 				ControlFlow::Continue => {}
 				ControlFlow::Break => break,
 				ControlFlow::Return => {
@@ -234,7 +252,7 @@ impl<'a> Executor<'a> {
 			}
 		}
 		// Return responses
-		Ok(out)
+		Ok(state.results)
 	}
 
 	#[instrument(level = "debug", name = "executor", target = "surrealdb::core::dbs", skip_all)]
@@ -247,20 +265,19 @@ impl<'a> Executor<'a> {
 	where
 		S: Stream<Item = Result<Statement, Error>>,
 	{
-		// The stack to run the executor in.
-		let mut stack = TreeStack::new();
 		// Create a notification channel
 		let (send, recv) = channel::unbounded();
+
+		let mut state = ExecutionState {
+			stack: TreeStack::new(),
+			notifications: recv,
+			results: Vec::new(),
+			transaction_start: None,
+		};
 		// Set the notification channel
-		let mut opt = opt.new_with_sender(send);
-		// Initialise buffer of responses
-		let mut buf: Vec<Response> = vec![];
-		// Initialise array of responses
-		let mut out: Vec<Response> = vec![];
 		// Do we fast-forward a transaction?
 		// Set to true when we encounter a return statement in a transaction
 		let mut ff_txn = false;
-		// Process all statements in query
 
 		let mut queries = pin!(queries);
 
@@ -273,10 +290,7 @@ impl<'a> Executor<'a> {
 
 			ff_txn = false;
 
-			match self
-				.execute_statement(&mut stack, &mut ctx, &mut opt, &recv, &mut buf, &mut out, stm)
-				.await?
-			{
+			match self.execute_statement(&mut ctx, &mut opt, &mut state, stm).await? {
 				ControlFlow::Continue => {}
 				ControlFlow::Break => break,
 				ControlFlow::Return => {
@@ -286,18 +300,15 @@ impl<'a> Executor<'a> {
 		}
 
 		// Return responses
-		Ok(out)
+		Ok(state.results)
 	}
 
 	#[instrument(level = "debug", name = "executor", target = "surrealdb::core::dbs", skip_all)]
 	pub async fn execute_statement(
 		&mut self,
-		stack: &mut TreeStack,
 		ctx: &mut Context,
 		opt: &mut Options,
-		recv: &Receiver<Notification>,
-		buf: &mut Vec<Response>,
-		out: &mut Vec<Response>,
+		state: &mut ExecutionState,
 		stm: Statement,
 	) -> Result<ControlFlow, Error> {
 		// Log the statement
@@ -357,6 +368,7 @@ impl<'a> Executor<'a> {
 					return Ok(ControlFlow::Continue);
 				}
 				self.begin(Write).await;
+				state.transaction_start = Some(state.results.len());
 				return Ok(ControlFlow::Continue);
 			}
 			// Cancel a running transaction
@@ -364,16 +376,21 @@ impl<'a> Executor<'a> {
 				if opt.import {
 					return Ok(ControlFlow::Continue);
 				}
-				self.cancel(true).await;
-				self.clear(ctx, recv.clone()).await;
 
-				let mut buf = mem::take(buf);
-				buf.iter_mut().for_each(|v| {
-					v.result = Err(Error::QueryCancelled);
-					v.query_type = QueryType::Other;
-				});
-				out.extend(buf);
+				let update_results =
+					state.transaction_start.take().and_then(|x| state.results.get_mut(x..));
+
+				self.cancel(true).await;
+				self.clear(ctx, state.notifications.clone()).await;
 				debug_assert!(self.txn.is_none(), "cancel(true) should have unset txn");
+
+				if let Some(update_results) = update_results {
+					for r in update_results {
+						r.result = Err(Error::QueryCancelled);
+						r.query_type = QueryType::Other;
+					}
+				}
+
 				return Ok(ControlFlow::Continue);
 			}
 			// Commit a running transaction
@@ -381,11 +398,39 @@ impl<'a> Executor<'a> {
 				if opt.import {
 					return Ok(ControlFlow::Continue);
 				}
-				let commit_error = self.commit(true).await.err();
-				*buf =
-					mem::take(buf).into_iter().map(|v| self.buf_commit(v, &commit_error)).collect();
-				self.flush(ctx, recv.clone()).await;
-				out.append(buf);
+				let update_results =
+					state.transaction_start.take().and_then(|x| state.results.get_mut(x..));
+
+				// Check for any error that happend during the transaction.
+				let error = if self.err {
+					self.cancel(true).await;
+					Err(None)
+				} else if let Err(error) = self.commit(true).await {
+					Err(Some(error.to_string()))
+				} else {
+					Ok(())
+				};
+
+				self.err = false;
+
+				// If an error happend we need to update the results to reflect that.
+				if let Err(commit_error) = error {
+					// if this is none there where no results to update.
+					if let Some(update_results) = update_results {
+						for r in update_results {
+							r.query_type = QueryType::Other;
+							if r.result.is_ok() {
+								r.result = match commit_error {
+									Some(x) => Err(Error::QueryNotExecutedDetail {
+										message: x.clone(),
+									}),
+									None => Err(Error::QueryNotExecuted),
+								};
+							}
+						}
+					}
+				}
+				self.flush(ctx, state.notifications.clone()).await;
 				debug_assert!(self.txn.is_none(), "commit(true) should have unset txn");
 				return Ok(ControlFlow::Continue);
 			}
@@ -414,7 +459,7 @@ impl<'a> Executor<'a> {
 				c.set_transaction(self.txn()?);
 				*ctx = c.freeze();
 				// Check the statement
-				match stack.enter(|stk| stm.compute(stk, ctx, opt, None)).finish().await {
+				match state.stack.enter(|stk| stm.compute(stk, ctx, opt, None)).finish().await {
 					Ok(val) => {
 						// Check if writeable
 						let writeable = stm.writeable();
@@ -427,20 +472,20 @@ impl<'a> Executor<'a> {
 							match self.commit(loc).await {
 								Err(e) => {
 									// Clear live query notifications
-									self.clear(ctx, recv.clone()).await;
+									self.clear(ctx, state.notifications.clone()).await;
 									Err(Error::QueryNotExecutedDetail {
 										message: e.to_string(),
 									})
 								}
 								Ok(_) => {
 									// Flush live query notifications
-									self.flush(ctx, recv.clone()).await;
+									self.flush(ctx, state.notifications.clone()).await;
 									Ok(Value::None)
 								}
 							}
 						} else {
 							self.cancel(loc).await;
-							self.clear(ctx, recv.clone()).await;
+							self.clear(ctx, state.notifications.clone()).await;
 							Ok(Value::None)
 						}
 					}
@@ -474,7 +519,7 @@ impl<'a> Executor<'a> {
 				ctx.set_transaction(self.txn()?);
 				let c = ctx.freeze();
 				// Process the statement
-				let res = stack.enter(|stk| stm.compute(stk, &c, opt, None)).finish().await;
+				let res = state.stack.enter(|stk| stm.compute(stk, &c, opt, None)).finish().await;
 				ctx = MutableContext::unfreeze(c)?;
 				// Check if this is a RETURN statement
 				let can_return = matches!(
@@ -504,20 +549,20 @@ impl<'a> Executor<'a> {
 				if res.is_ok() && stm.writeable() {
 					if let Err(e) = self.commit(loc).await {
 						// Clear live query notification details
-						self.clear(&ctx, recv.clone()).await;
+						self.clear(&ctx, state.notifications.clone()).await;
 						// The commit failed
 						Err(Error::QueryNotExecutedDetail {
 							message: e.to_string(),
 						})
 					} else {
 						// Flush the live query change notifications
-						self.flush(&ctx, recv.clone()).await;
+						self.flush(&ctx, state.notifications.clone()).await;
 						res
 					}
 				} else {
 					self.cancel(loc).await;
 					// Clear live query notification details
-					self.clear(&ctx, recv.clone()).await;
+					self.clear(&ctx, state.notifications.clone()).await;
 					// Return an error
 					res
 				}
@@ -532,11 +577,14 @@ impl<'a> Executor<'a> {
 			result: res,
 			query_type,
 		};
+
+		state.results.push(res);
+
 		// Output the response
-		if self.txn.is_some() {
+		if let Some(x) = state.transaction_start {
 			if is_stm_output || has_returned {
-				buf.clear();
-				buf.push(res);
+				state.results.truncate(x);
+				state.results.push(res);
 				return Ok(ControlFlow::Return);
 			}
 			buf.push(res);

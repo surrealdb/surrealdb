@@ -739,7 +739,7 @@ impl Datastore {
 	}
 
 	#[instrument(level = "debug", target = "surrealdb::core::kvs::ds", skip_all)]
-	pub async fn execute_stream<S>(
+	pub async fn execute_import<S>(
 		&self,
 		sess: &Session,
 		vars: Variables,
@@ -775,8 +775,8 @@ impl Datastore {
 		// Process all statements
 
 		let mut offset = 0;
-		/// A threshold of data in the buffer to avoid running the parser too many times with large
-		/// buffers.
+		// A threshold of data in the buffer to avoid running the parser too many times when the
+		// statements get too big.
 		let mut buffer_size_threshold = 4096;
 		let mut buffer = Vec::new();
 		let mut query = pin!(query);
@@ -842,9 +842,7 @@ impl Datastore {
 				offset = 0;
 			} else {
 				// we didn't use any of the data which means this buffer size is not sufficient.
-				dbg!("Buffer full but more data needed");
 				buffer_size_threshold = buffer_size_threshold.saturating_mul(2);
-				dbg!(buffer_size_threshold);
 			}
 		});
 
