@@ -398,12 +398,7 @@ impl Value {
 					match p {
 						Part::Optional => match &self {
 							Value::None => Ok(Value::None),
-							_ => {
-								stk.run(|stk| {
-									Value::None.get(stk, ctx, opt, doc, path.next_method())
-								})
-								.await
-							}
+							v => stk.run(|stk| v.get(stk, ctx, opt, doc, path.next())).await,
 						},
 						Part::Flatten => {
 							stk.run(|stk| v.get(stk, ctx, opt, None, path.next())).await
