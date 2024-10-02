@@ -135,7 +135,7 @@ jobs:
           if [[ "${{ inputs.environment }}" == "stable" ]]; then
             major=$(echo ${{ inputs.tag-prefix }} | tr "." "\n" | sed -n 1p)
             minor=$(echo ${{ inputs.tag-prefix }} | tr "." "\n" | sed -n 2p)
-            echo "tags=surrealdb/surrealdb:${major}.${minor}${{ matrix.tag-suffix }},surrealdb/surrealdb:${major}${{ matrix.tag-suffix }}"  >> $GITHUB_OUTPUT
+            echo "tags=surrealdb/surrealdb:${{ inputs.tag-prefix }}${{ matrix.tag-suffix }},surrealdb/surrealdb:${major}.${minor}${{ matrix.tag-suffix }},surrealdb/surrealdb:${major}${{ matrix.tag-suffix }}"  >> $GITHUB_OUTPUT
           else
             echo "tags=surrealdb/surrealdb:${{ inputs.tag-prefix }}${{ matrix.tag-suffix }}"  >> $GITHUB_OUTPUT
           fi
