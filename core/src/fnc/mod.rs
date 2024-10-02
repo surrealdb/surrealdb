@@ -239,6 +239,9 @@ pub fn synchronous(
 		"math::trimean" => math::trimean,
 		"math::variance" => math::variance,
 		//
+		"meta::id" => record::id,
+		"meta::tb" => record::tb,
+		//
 		"not" => not::not,
 		//
 		"object::entries" => object::entries,
