@@ -97,7 +97,7 @@ rustls = { version = "0.23.12", default-features = false, features = [
     "std",
     "tls12",
 ], optional = true }
-reblessive = { version = "0.4.0", features = ["tree"] }
+reblessive = { version = "0.4.1", features = ["tree"] }
 rustls-pki-types = { version = "1.7.0", features = ["web"] }
 semver = { version = "1.0.20", features = ["serde"] }
 serde = { version = "1.0.209", features = ["derive"] }
