@@ -787,6 +787,7 @@ jobs:
     needs: [ prepare-vars, publish ]
     uses: ./.github/workflows/reusable_docker.yml
     with:
+      environment: ${{ inputs.environment }}
       git-ref: ${{ needs.prepare-vars.outputs.git-ref }}
       tag-prefix: ${{ needs.prepare-vars.outputs.name }}
       latest: ${{ inputs.latest }}
