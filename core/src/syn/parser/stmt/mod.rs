@@ -7,8 +7,8 @@ use crate::sql::statements::show::{ShowSince, ShowStatement};
 use crate::sql::statements::sleep::SleepStatement;
 use crate::sql::statements::{
 	access::{
-		AccessStatement, AccessStatementGrant, AccessStatementList, AccessStatementPurge,
-		AccessStatementRevoke, Subject,
+		AccessStatement, AccessStatementGrant, AccessStatementPurge, AccessStatementRevoke,
+		AccessStatementShow, Subject,
 	},
 	KillStatement, LiveStatement, OptionStatement, SetStatement, ThrowStatement,
 };
@@ -415,10 +415,10 @@ impl Parser<'_> {
 					_ => unexpected!(self, peek, "either USER or RECORD"),
 				}
 			}
-			t!("LIST") => {
+			t!("SHOW") => {
 				self.pop_peek();
 				// TODO(gguillemas): Implement rest of the syntax.
-				Ok(AccessStatement::List(AccessStatementList {
+				Ok(AccessStatement::Show(AccessStatementShow {
 					ac,
 					base,
 				}))

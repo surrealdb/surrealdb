@@ -13,8 +13,8 @@ use crate::{
 		statements::{
 			access,
 			access::{
-				AccessStatementGrant, AccessStatementList, AccessStatementPurge,
-				AccessStatementRevoke,
+				AccessStatementGrant, AccessStatementPurge, AccessStatementRevoke,
+				AccessStatementShow,
 			},
 			analyze::AnalyzeStatement,
 			show::{ShowSince, ShowStatement},
@@ -2477,11 +2477,11 @@ fn parse_access_revoke() {
 }
 
 #[test]
-fn parse_access_list() {
-	let res = test_parse!(parse_stmt, r#"ACCESS a LIST"#).unwrap();
+fn parse_access_show() {
+	let res = test_parse!(parse_stmt, r#"ACCESS a SHOW"#).unwrap();
 	assert_eq!(
 		res,
-		Statement::Access(AccessStatement::List(AccessStatementList {
+		Statement::Access(AccessStatement::Show(AccessStatementShow {
 			ac: Ident("a".to_string()),
 			base: None,
 		}))

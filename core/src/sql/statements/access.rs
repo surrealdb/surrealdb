@@ -37,7 +37,7 @@ pub static GRANT_BEARER_LENGTH: usize =
 #[non_exhaustive]
 pub enum AccessStatement {
 	Grant(AccessStatementGrant),   // Create access grant.
-	List(AccessStatementList),     // List access grants.
+	Show(AccessStatementShow),     // Show access grants.
 	Revoke(AccessStatementRevoke), // Revoke access grant.
 	Purge(AccessStatementPurge),   // Purge access grants.
 }
@@ -48,9 +48,15 @@ pub enum AccessStatement {
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
-pub struct AccessStatementList {
+pub struct AccessStatementShow {
 	pub ac: Ident,
 	pub base: Option<Base>,
+	// pub expired: bool,
+	// pub revoked: bool,
+	// pub created_after: Option<Datetime>,
+	// pub created_before: Option<Datetime>,
+	// pub subject: Option<Subject>,
+	// pub id: Option<Ident>,
 }
 
 // TODO(gguillemas): Document once bearer access is no longer experimental.
@@ -452,8 +458,8 @@ async fn compute_grant(
 	}
 }
 
-async fn compute_list(
-	stmt: &AccessStatementList,
+async fn compute_show(
+	stmt: &AccessStatementShow,
 	ctx: &Context,
 	opt: &Options,
 	_doc: Option<&CursorDoc>,
@@ -827,7 +833,7 @@ impl AccessStatement {
 	) -> Result<Value, Error> {
 		match self {
 			AccessStatement::Grant(stmt) => compute_grant(stmt, ctx, opt, _doc).await,
-			AccessStatement::List(stmt) => compute_list(stmt, ctx, opt, _doc).await,
+			AccessStatement::Show(stmt) => compute_show(stmt, ctx, opt, _doc).await,
 			AccessStatement::Revoke(stmt) => compute_revoke(stmt, ctx, opt, _doc).await,
 			AccessStatement::Purge(stmt) => compute_purge(stmt, ctx, opt, _doc).await,
 		}
@@ -845,12 +851,12 @@ impl Display for AccessStatement {
 				write!(f, " GRANT")?;
 				Ok(())
 			}
-			Self::List(stmt) => {
+			Self::Show(stmt) => {
 				write!(f, "ACCESS {}", stmt.ac)?;
 				if let Some(ref v) = stmt.base {
 					write!(f, " ON {v}")?;
 				}
-				write!(f, " LIST")?;
+				write!(f, " SHOW")?;
 				Ok(())
 			}
 			Self::Revoke(stmt) => {

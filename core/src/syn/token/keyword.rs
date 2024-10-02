@@ -110,7 +110,6 @@ keyword! {
 	Kill => "KILL",
 	Let => "LET",
 	Limit => "LIMIT",
-	List => "LIST",
 	Live => "LIVE",
 	Lowercase => "LOWERCASE",
 	Lm => "LM",
