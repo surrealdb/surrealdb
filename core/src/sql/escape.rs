@@ -79,6 +79,12 @@ pub fn escape_ident(s: &str) -> Cow<'_, str> {
 
 #[inline]
 pub fn escape_normal<'a>(s: &'a str, l: char, r: char, e: &str) -> Cow<'a, str> {
+	if let Some(x) = s.bytes().next() {
+		if x.is_ascii_digit() {
+			return Cow::Owned(format!("{l}{}{r}", s.replace(r, e)));
+		}
+	}
+
 	// Is there no need to escape the value?
 	if s.bytes().all(|x| x.is_ascii_alphanumeric() || x == b'_') {
 		return Cow::Borrowed(s);
