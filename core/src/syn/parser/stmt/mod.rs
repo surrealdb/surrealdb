@@ -414,6 +414,7 @@ impl Parser<'_> {
 			}
 			t!("PURGE") => {
 				self.pop_peek();
+				// TODO(PR): Remove ALL and allow comma separation.
 				let (expired, revoked) = match self.peek_kind() {
 					t!("EXPIRED") => {
 						self.pop_peek();

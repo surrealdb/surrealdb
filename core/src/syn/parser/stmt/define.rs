@@ -367,6 +367,7 @@ impl Parser<'_> {
 							};
 
 							expected!(self, t!("FOR"));
+							// TODO(PR): Only accept for record at database level for now.
 							match self.peek_kind() {
 								t!("USER") => {
 									self.pop_peek();

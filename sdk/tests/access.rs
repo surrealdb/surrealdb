@@ -14,7 +14,7 @@ async fn access_bearer_database() {
 
 	let sql = "
 		-- Initial setup
-		DEFINE ACCESS api ON DATABASE TYPE BEARER;
+		DEFINE ACCESS api ON DATABASE TYPE BEARER FOR USER;
 		DEFINE USER tobie ON DATABASE PASSWORD 'secret' ROLES EDITOR;
 		INFO FOR DB;
 		-- Should succeed
@@ -22,15 +22,15 @@ async fn access_bearer_database() {
 		ACCESS api ON DATABASE GRANT FOR USER tobie;
 		ACCESS api GRANT FOR USER tobie;
 		ACCESS api GRANT FOR USER tobie;
-		ACCESS api ON DATABASE LIST;
-		ACCESS api LIST;
+		ACCESS api ON DATABASE SHOW;
+		ACCESS api SHOW;
 		-- Should fail
 		ACCESS invalid ON DATABASE GRANT FOR USER tobie;
 		ACCESS invalid GRANT FOR USER tobie;
 		ACCESS api ON DATABASE GRANT FOR USER invalid;
 		ACCESS api GRANT FOR USER invalid;
-		ACCESS invalid ON DATABASE LIST;
-		ACCESS invalid LIST;
+		ACCESS invalid ON DATABASE SHOW;
+		ACCESS invalid SHOW;
 	";
 	let dbs = new_ds().await.unwrap();
 	let ses = Session::owner().with_ns("test").with_db("test");
@@ -122,7 +122,7 @@ async fn access_bearer_namespace() {
 
 	let sql = "
 		-- Initial setup
-		DEFINE ACCESS api ON NAMESPACE TYPE BEARER;
+		DEFINE ACCESS api ON NAMESPACE TYPE BEARER FOR USER;
 		DEFINE USER tobie ON NAMESPACE PASSWORD 'secret' ROLES EDITOR;
 		INFO FOR NS;
 		-- Should succeed
@@ -130,15 +130,15 @@ async fn access_bearer_namespace() {
 		ACCESS api ON NAMESPACE GRANT FOR USER tobie;
 		ACCESS api GRANT FOR USER tobie;
 		ACCESS api GRANT FOR USER tobie;
-		ACCESS api ON NAMESPACE LIST;
-		ACCESS api LIST;
+		ACCESS api ON NAMESPACE SHOW;
+		ACCESS api SHOW;
 		-- Should fail
 		ACCESS invalid ON NAMESPACE GRANT FOR USER tobie;
 		ACCESS invalid GRANT FOR USER tobie;
 		ACCESS api ON NAMESPACE GRANT FOR USER invalid;
 		ACCESS api GRANT FOR USER invalid;
-		ACCESS invalid ON NAMESPACE LIST;
-		ACCESS invalid LIST;
+		ACCESS invalid ON NAMESPACE SHOW;
+		ACCESS invalid SHOW;
 	";
 	let dbs = new_ds().await.unwrap();
 	let ses = Session::owner().with_ns("test");
@@ -230,7 +230,7 @@ async fn access_bearer_root() {
 
 	let sql = "
 		-- Initial setup
-		DEFINE ACCESS api ON ROOT TYPE BEARER;
+		DEFINE ACCESS api ON ROOT TYPE BEARER FOR USER;
 		DEFINE USER tobie ON ROOT PASSWORD 'secret' ROLES EDITOR;
 		INFO FOR ROOT;
 		-- Should succeed
@@ -238,15 +238,15 @@ async fn access_bearer_root() {
 		ACCESS api ON ROOT GRANT FOR USER tobie;
 		ACCESS api GRANT FOR USER tobie;
 		ACCESS api GRANT FOR USER tobie;
-		ACCESS api ON ROOT LIST;
+		ACCESS api ON ROOT SHOW;
 		ACCESS api LIST;
 		-- Should fail
 		ACCESS invalid ON ROOT GRANT FOR USER tobie;
 		ACCESS invalid GRANT FOR USER tobie;
 		ACCESS api ON ROOT GRANT FOR USER invalid;
 		ACCESS api GRANT FOR USER invalid;
-		ACCESS invalid ON ROOT LIST;
-		ACCESS invalid LIST;
+		ACCESS invalid ON ROOT SHOW;
+		ACCESS invalid SHOW;
 	";
 	let dbs = new_ds().await.unwrap();
 	let ses = Session::owner();
@@ -327,7 +327,7 @@ async fn access_bearer_revoke_db() {
 
 	let sql = "
 		-- Initial setup
-		DEFINE ACCESS api ON DATABASE TYPE BEARER;
+		DEFINE ACCESS api ON DATABASE TYPE BEARER FOR USER;
 		DEFINE USER tobie ON DATABASE PASSWORD 'secret' ROLES EDITOR;
 		ACCESS api ON DATABASE GRANT FOR USER tobie;
 	";
@@ -344,12 +344,13 @@ async fn access_bearer_revoke_db() {
 				.unwrap();
 	let kid = re.captures(&tmp).unwrap().get(1).unwrap().as_str();
 	// Revoke bearer key
-	let res = &mut dbs.execute(&format!("ACCESS api REVOKE `{kid}`"), &ses, None).await.unwrap();
+	let res =
+		&mut dbs.execute(&format!("ACCESS api REVOKE GRANT {kid}"), &ses, None).await.unwrap();
 	let tmp = res.remove(0).result.unwrap().to_string();
 	let ok = Regex::new(r"\{ ac: 'api', .*, revocation: d'.*', .* \}").unwrap();
 	assert!(ok.is_match(&tmp), "Output '{}' doesn't match regex '{}'", tmp, ok);
 	// Attempt to revoke bearer key again
-	let res = &mut dbs.execute(&format!("ACCESS api REVOKE `{kid}`"), &ses, None).await.unwrap();
+	let res = &mut dbs.execute(&format!("ACCESS api REVOKE {kid}"), &ses, None).await.unwrap();
 	let tmp = res.remove(0).result.unwrap_err();
 	assert_eq!(tmp.to_string(), "This access grant has been revoked");
 }
@@ -361,7 +362,7 @@ async fn access_bearer_revoke_ns() {
 
 	let sql = "
 		-- Initial setup
-		DEFINE ACCESS api ON NAMESPACE TYPE BEARER;
+		DEFINE ACCESS api ON NAMESPACE TYPE BEARER FOR USER;
 		DEFINE USER tobie ON NAMESPACE PASSWORD 'secret' ROLES EDITOR;
 		ACCESS api ON NAMESPACE GRANT FOR USER tobie;
 	";
@@ -378,12 +379,14 @@ async fn access_bearer_revoke_ns() {
 				.unwrap();
 	let kid = re.captures(&tmp).unwrap().get(1).unwrap().as_str();
 	// Revoke bearer key
-	let res = &mut dbs.execute(&format!("ACCESS api REVOKE `{kid}`"), &ses, None).await.unwrap();
+	let res =
+		&mut dbs.execute(&format!("ACCESS api REVOKE GRANT {kid}"), &ses, None).await.unwrap();
 	let tmp = res.remove(0).result.unwrap().to_string();
 	let ok = Regex::new(r"\{ ac: 'api', .*, revocation: d'.*', .* \}").unwrap();
 	assert!(ok.is_match(&tmp), "Output '{}' doesn't match regex '{}'", tmp, ok);
 	// Attempt to revoke bearer key again
-	let res = &mut dbs.execute(&format!("ACCESS api REVOKE `{kid}`"), &ses, None).await.unwrap();
+	let res =
+		&mut dbs.execute(&format!("ACCESS api REVOKE GRANT {kid}"), &ses, None).await.unwrap();
 	let tmp = res.remove(0).result.unwrap_err();
 	assert_eq!(tmp.to_string(), "This access grant has been revoked");
 }
@@ -395,7 +398,7 @@ async fn access_bearer_revoke_root() {
 
 	let sql = "
 		-- Initial setup
-		DEFINE ACCESS api ON ROOT TYPE BEARER;
+		DEFINE ACCESS api ON ROOT TYPE BEARER FOR USER;
 		DEFINE USER tobie ON ROOT PASSWORD 'secret' ROLES EDITOR;
 		ACCESS api ON ROOT GRANT FOR USER tobie;
 	";
@@ -412,12 +415,13 @@ async fn access_bearer_revoke_root() {
 				.unwrap();
 	let kid = re.captures(&tmp).unwrap().get(1).unwrap().as_str();
 	// Revoke bearer key
-	let res = &mut dbs.execute(&format!("ACCESS api REVOKE `{kid}`"), &ses, None).await.unwrap();
+	let res =
+		&mut dbs.execute(&format!("ACCESS api REVOKE GRANT {kid}"), &ses, None).await.unwrap();
 	let tmp = res.remove(0).result.unwrap().to_string();
 	let ok = Regex::new(r"\{ ac: 'api', .*, revocation: d'.*', .* \}").unwrap();
 	assert!(ok.is_match(&tmp), "Output '{}' doesn't match regex '{}'", tmp, ok);
 	// Attempt to revoke bearer key again
-	let res = &mut dbs.execute(&format!("ACCESS api REVOKE `{kid}`"), &ses, None).await.unwrap();
+	let res = &mut dbs.execute(&format!("ACCESS api REVOKE {kid}"), &ses, None).await.unwrap();
 	let tmp = res.remove(0).result.unwrap_err();
 	assert_eq!(tmp.to_string(), "This access grant has been revoked");
 }
@@ -464,7 +468,7 @@ async fn permissions_access_grant_db() {
 		let sess_setup =
 			Session::for_level(("NS", "DB").into(), Role::Owner).with_ns("NS").with_db("DB");
 		let statement_setup =
-			"DEFINE ACCESS api ON DATABASE TYPE BEARER; DEFINE USER tobie ON DATABASE ROLES OWNER";
+			"DEFINE ACCESS api ON DATABASE TYPE BEARER FOR USER; DEFINE USER tobie ON DATABASE ROLES OWNER";
 
 		{
 			let ds = new_ds().await.unwrap().with_auth_enabled(true);
@@ -531,7 +535,7 @@ async fn permissions_access_grant_ns() {
 
 		let sess_setup =
 			Session::for_level(("NS",).into(), Role::Owner).with_ns("NS").with_db("DB");
-		let statement_setup = "DEFINE ACCESS api ON NAMESPACE TYPE BEARER; DEFINE USER tobie ON NAMESPACE ROLES OWNER";
+		let statement_setup = "DEFINE ACCESS api ON NAMESPACE TYPE BEARER FOR USER; DEFINE USER tobie ON NAMESPACE ROLES OWNER";
 
 		{
 			let ds = new_ds().await.unwrap().with_auth_enabled(true);
@@ -598,7 +602,7 @@ async fn permissions_access_grant_root() {
 
 		let sess_setup = Session::for_level(().into(), Role::Owner).with_ns("NS").with_db("DB");
 		let statement_setup =
-			"DEFINE ACCESS api ON ROOT TYPE BEARER; DEFINE USER tobie ON ROOT ROLES OWNER";
+			"DEFINE ACCESS api ON ROOT TYPE BEARER FOR USER; DEFINE USER tobie ON ROOT ROLES OWNER";
 
 		{
 			let ds = new_ds().await.unwrap().with_auth_enabled(true);

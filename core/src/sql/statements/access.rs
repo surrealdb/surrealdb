@@ -51,6 +51,7 @@ pub enum AccessStatement {
 pub struct AccessStatementShow {
 	pub ac: Ident,
 	pub base: Option<Base>,
+	// TODO(PR): Implement filters.
 	// pub expired: bool,
 	// pub revoked: bool,
 	// pub created_after: Option<Datetime>,
@@ -344,7 +345,8 @@ async fn compute_grant(
 				// The contents of the grant.
 				grant: Grant::Bearer(grant),
 			};
-			// Process the statement
+			// TODO(PR): Handle collisions.
+			// Process the statement.
 			match base {
 				Base::Root => {
 					let key = crate::key::root::access::gr::new(&gr.ac, &gr.id);
