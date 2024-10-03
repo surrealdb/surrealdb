@@ -1631,6 +1631,10 @@ criteria = "safe-to-deploy"
 version = "0.26.0"
 criteria = "safe-to-deploy"
 
+[[exemptions.tokio-stream]]
+version = "0.1.16"
+criteria = "safe-to-deploy"
+
 [[exemptions.tokio-tungstenite]]
 version = "0.21.0"
 criteria = "safe-to-deploy"
@@ -1664,7 +1668,7 @@ version = "0.10.2"
 criteria = "safe-to-deploy"
 
 [[exemptions.tonic]]
-version = "0.12.0"
+version = "0.12.3"
 criteria = "safe-to-deploy"
 
 [[exemptions.tower]]
