@@ -20,6 +20,7 @@
 //! useful is to only enable the in-memory engine (`kv-mem`) during development. Besides letting you not
 //! worry about those dependencies on your dev machine, it allows you to keep compile times low
 //! during development while allowing you to test your code fully.
+use crate::api::err::Error;
 use crate::{
 	api::{
 		conn::{Command, DbResponse, RequestData},
@@ -38,6 +39,7 @@ use std::{
 	mem,
 	sync::Arc,
 };
+use surrealdb_core::sql::Function;
 use surrealdb_core::{
 	dbs::{Response, Session},
 	iam,
@@ -50,32 +52,33 @@ use surrealdb_core::{
 		Data, Field, Output, Query, Statement, Value as CoreValue,
 	},
 };
-use tokio_util::io::ReaderStream;
 use uuid::Uuid;
 
-#[cfg(all(not(target_arch = "wasm32"), feature = "ml"))]
-use crate::api::conn::MlExportConfig;
-use crate::api::err::Error;
-#[cfg(all(not(target_arch = "wasm32"), feature = "ml"))]
-use futures::StreamExt;
 #[cfg(not(target_arch = "wasm32"))]
 use std::path::PathBuf;
 #[cfg(not(target_arch = "wasm32"))]
 use surrealdb_core::err::Error as CoreError;
-use surrealdb_core::sql::Function;
+#[cfg(not(target_arch = "wasm32"))]
+use tokio::{
+	fs::OpenOptions,
+	io::{self, AsyncWriteExt},
+};
+#[cfg(not(target_arch = "wasm32"))]
+use tokio_util::io::ReaderStream;
+
 #[cfg(feature = "ml")]
 use surrealdb_core::sql::Model;
+
+#[cfg(all(not(target_arch = "wasm32"), feature = "ml"))]
+use crate::api::conn::MlExportConfig;
+#[cfg(all(not(target_arch = "wasm32"), feature = "ml"))]
+use futures::StreamExt;
 #[cfg(all(not(target_arch = "wasm32"), feature = "ml"))]
 use surrealdb_core::{
 	iam::{check::check_ns_db, Action, ResourceKind},
 	kvs::{LockType, TransactionType},
 	ml::storage::surml_file::SurMlFile,
 	sql::statements::{DefineModelStatement, DefineStatement},
-};
-#[cfg(not(target_arch = "wasm32"))]
-use tokio::{
-	fs::OpenOptions,
-	io::{self, AsyncWriteExt},
 };
 
 use super::resource_to_values;
