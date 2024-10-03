@@ -76,9 +76,9 @@ async fn future_disabled() -> Result<(), Error> {
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
-	assert_eq!(res.len(), 1);
+	assert_eq!(res.len(), 2);
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(1).result?;
 	let val = Value::parse("<future> { 123 }");
 	assert_eq!(tmp, val);
 	//

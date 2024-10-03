@@ -550,6 +550,7 @@ impl Executor {
 			};
 
 			match stmt {
+				// handle option here because it doesn't produce a result.
 				Statement::Begin(_) => {
 					if let Err(e) = this.execute_begin_statement(kvs, stream.as_mut()).await {
 						this.results.push(Response {

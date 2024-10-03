@@ -31,8 +31,10 @@ use crate::{
 	value::Notification,
 };
 use channel::Sender;
-use futures::TryStreamExt;
+use futures::stream::poll_fn;
 use indexmap::IndexMap;
+use std::pin::pin;
+use std::task::{ready, Poll};
 use std::{
 	collections::{BTreeMap, HashMap},
 	marker::PhantomData,
@@ -52,19 +54,18 @@ use surrealdb_core::{
 		Data, Field, Output, Query, Statement, Value as CoreValue,
 	},
 };
+use tokio_util::bytes::BytesMut;
 use uuid::Uuid;
 
 #[cfg(not(target_arch = "wasm32"))]
-use std::path::PathBuf;
+use std::{future::Future, path::PathBuf};
 #[cfg(not(target_arch = "wasm32"))]
 use surrealdb_core::err::Error as CoreError;
 #[cfg(not(target_arch = "wasm32"))]
 use tokio::{
 	fs::OpenOptions,
-	io::{self, AsyncWriteExt},
+	io::{self, AsyncReadExt, AsyncWriteExt},
 };
-#[cfg(not(target_arch = "wasm32"))]
-use tokio_util::io::ReaderStream;
 
 #[cfg(feature = "ml")]
 use surrealdb_core::sql::Model;
@@ -928,7 +929,7 @@ async fn router(
 		Command::ImportFile {
 			path,
 		} => {
-			let file = match OpenOptions::new().read(true).open(&path).await {
+			let mut file = match OpenOptions::new().read(true).open(&path).await {
 				Ok(path) => path,
 				Err(error) => {
 					return Err(Error::FileOpen {
@@ -939,8 +940,29 @@ async fn router(
 				}
 			};
 
-			let stream =
-				ReaderStream::new(file).map_err(|error| CoreError::QueryStream(error.to_string()));
+			let mut file = pin!(file);
+			let mut buffer = BytesMut::with_capacity(4096);
+
+			let stream = poll_fn(|ctx| {
+				// Doing it this way optimizes allocation.
+				// It is highly likely that the buffer we return from this stream will be dropped
+				// between calls to this function.
+				// If this is the case than instead of allocating new memory the call to reserve
+				// will instead reclaim the existing used memory.
+				if buffer.capacity() == 0 {
+					buffer.reserve(4096);
+				}
+
+				let future = pin!(file.read_buf(&mut buffer));
+				match ready!(future.poll(ctx)) {
+					Ok(0) => Poll::Ready(None),
+					Ok(_) => Poll::Ready(Some(Ok(buffer.split().freeze()))),
+					Err(e) => {
+						let error = CoreError::QueryStream(e.to_string());
+						Poll::Ready(Some(Err(error)))
+					}
+				}
+			});
 
 			let responses = kvs.execute_import(&*session, Some(vars.clone()), stream).await?;
 

@@ -26,7 +26,6 @@ use crate::syn::parser::{Parser, PartialResult};
 use bytes::Bytes;
 use channel::{Receiver, Sender};
 use futures::{Future, Stream};
-use num_traits::SaturatingMul;
 use reblessive::{Stack, TreeStack};
 use std::fmt;
 #[cfg(storage)]
