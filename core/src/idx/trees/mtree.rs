@@ -87,7 +87,7 @@ impl MTreeIndex {
 		stk: &mut Stk,
 		txn: &Transaction,
 		rid: &Thing,
-		content: &Vec<Value>,
+		content: &[Value],
 	) -> Result<(), Error> {
 		// Resolve the doc_id
 		let mut doc_ids = self.doc_ids.write().await;
@@ -112,7 +112,7 @@ impl MTreeIndex {
 		stk: &mut Stk,
 		txn: &Transaction,
 		rid: &Thing,
-		content: &Vec<Value>,
+		content: &[Value],
 	) -> Result<(), Error> {
 		let mut doc_ids = self.doc_ids.write().await;
 		let doc_id = doc_ids.remove_doc(txn, rid.into()).await?;

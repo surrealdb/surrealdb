@@ -90,7 +90,7 @@ impl HnswIndex {
 		&mut self,
 		tx: &Transaction,
 		id: Id,
-		content: &Vec<Value>,
+		content: &[Value],
 	) -> Result<(), Error> {
 		// Ensure the layers are up-to-date
 		self.hnsw.check_state(tx).await?;
@@ -112,7 +112,7 @@ impl HnswIndex {
 		&mut self,
 		tx: &Transaction,
 		id: Id,
-		content: &Vec<Value>,
+		content: &[Value],
 	) -> Result<(), Error> {
 		if let Some(doc_id) = self.docs.remove(tx, id).await? {
 			// Ensure the layers are up-to-date
