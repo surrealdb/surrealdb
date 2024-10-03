@@ -96,7 +96,7 @@ impl MTreeIndex {
 		drop(doc_ids);
 		// Index the values
 		let mut mtree = self.mtree.write().await;
-		for v in content {
+		for v in content.iter().filter(|v| v.is_some()) {
 			// Extract the vector
 			let vector = Vector::try_from_value(self.vector_type, self.dim, v)?;
 			vector.check_dimension(self.dim)?;
@@ -120,7 +120,7 @@ impl MTreeIndex {
 		if let Some(doc_id) = doc_id {
 			// Lock the index
 			let mut mtree = self.mtree.write().await;
-			for v in content {
+			for v in content.iter().filter(|v| v.is_some()) {
 				// Extract the vector
 				let vector = Vector::try_from_value(self.vector_type, self.dim, v)?;
 				vector.check_dimension(self.dim)?;
