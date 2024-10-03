@@ -10,7 +10,7 @@ pub static ALLOC: jemallocator::Jemalloc = jemallocator::Jemalloc;
 #[global_allocator]
 pub static ALLOC: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
-#[cfg(all(target_os = "linux"))]
+#[cfg(target_os = "linux")]
 #[global_allocator]
 pub static ALLOC: mimalloc::MiMalloc = mimalloc::MiMalloc;
 

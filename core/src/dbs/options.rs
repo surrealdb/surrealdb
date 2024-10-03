@@ -10,7 +10,9 @@ use std::sync::Arc;
 use uuid::Uuid;
 
 /// An Options is passed around when processing a set of query
-/// statements. An Options contains specific information for how
+/// statements.
+///
+/// An Options contains specific information for how
 /// to process each particular statement, including the record
 /// version to retrieve, whether futures should be processed, and
 /// whether field/event/table queries should be processed (useful

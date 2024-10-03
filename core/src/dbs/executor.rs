@@ -98,6 +98,7 @@ impl Executor {
 		Ok(())
 	}
 
+	/// Executes a statement which needs a transaction with the supplied transaction.
 	#[instrument(level = "debug", name = "executor", target = "surrealdb::core::dbs", skip_all)]
 	async fn execute_transaction_statement(
 		&mut self,
@@ -106,20 +107,20 @@ impl Executor {
 	) -> Result<Value, Error> {
 		let res = match stmt {
 			Statement::Set(stm) => {
-				// The transaction began successfully
-				// ctx.set_transaction(txn)
+				// Avoid moving in and out of the context via Arc::get_mut
 				Arc::get_mut(&mut self.ctx)
 					.ok_or_else(|| fail!("Tried to unfreeze a Context with multiple references"))?
 					.set_transaction(txn);
-				// Check the statement
+				// Run the statement
 				match self
 					.stack
 					.enter(|stk| stm.compute(stk, &self.ctx, &self.opt, None))
 					.finish()
 					.await
 				{
+					// TODO: Maybe catch Error::Return?
+					// Currently unsure of if that should be handled here.
 					Ok(val) => {
-						// Check if writeable
 						// Set the parameter
 						Arc::get_mut(&mut self.ctx)
 							.ok_or_else(|| {
@@ -201,15 +202,25 @@ impl Executor {
 					| Err(Error::Return {
 						value,
 					}) => {
+						let mut lock = txn.lock().await;
+
 						// non-writable transactions might return an error on commit.
 						// So cancel them instead. This is fine since a non-writable transaction
 						// has nothing to commit anyway.
 						if !writeable {
-							let _ = txn.cancel().await;
+							let _ = lock.cancel().await;
 							return Ok(value);
 						}
 
-						if let Err(e) = txn.commit().await {
+						if let Err(e) = lock.complete_changes(false).await {
+							let _ = lock.cancel().await;
+
+							return Err(Error::QueryNotExecutedDetail {
+								message: e.to_string(),
+							});
+						}
+
+						if let Err(e) = lock.commit().await {
 							return Err(Error::QueryNotExecutedDetail {
 								message: e.to_string(),
 							});
@@ -387,7 +398,16 @@ impl Executor {
 					return Ok(());
 				}
 				Statement::Commit(_) => {
-					let Err(e) = txn.commit().await else {
+					let mut lock = txn.lock().await;
+
+					// complete_changes and then commit.
+					// If either error undo results.
+					let e = if let Err(e) = lock.complete_changes(false).await {
+						let _ = lock.cancel().await;
+						e
+					} else if let Err(e) = lock.commit().await {
+						e
+					} else {
 						// Successfully commited. everything is fine.
 
 						// flush notifications.
