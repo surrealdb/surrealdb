@@ -1,15 +1,14 @@
 use crate::ctx::reason::Reason;
-use crate::ctx::{Context, MutableContext};
+use crate::ctx::Context;
 use crate::dbs::response::Response;
 use crate::dbs::Force;
-use crate::dbs::Notification;
 use crate::dbs::Options;
 use crate::dbs::QueryType;
 use crate::err::Error;
 use crate::iam::Action;
 use crate::iam::ResourceKind;
+use crate::kvs::Datastore;
 use crate::kvs::TransactionType;
-use crate::kvs::{Datastore, LockType::*, TransactionType::*};
 use crate::kvs::{LockType, Transaction};
 use crate::sql::paths::DB;
 use crate::sql::paths::NS;
@@ -18,7 +17,6 @@ use crate::sql::statement::Statement;
 use crate::sql::statements::{OptionStatement, UseStatement};
 use crate::sql::value::Value;
 use crate::sql::Base;
-use channel::Receiver;
 use futures::{Stream, StreamExt};
 use reblessive::TreeStack;
 use std::pin::{pin, Pin};
@@ -34,7 +32,6 @@ use wasm_bindgen_futures::spawn_local as spawn;
 const TARGET: &str = "surrealdb::core::dbs";
 
 pub struct Executor {
-	err: bool,
 	stack: TreeStack,
 	results: Vec<Response>,
 	opt: Options,
@@ -44,7 +41,6 @@ pub struct Executor {
 impl Executor {
 	pub fn new(ctx: Context, opt: Options) -> Self {
 		Executor {
-			err: false,
 			stack: TreeStack::new(),
 			results: Vec::new(),
 			opt,
@@ -144,14 +140,7 @@ impl Executor {
 					.ok_or_else(|| fail!("Tried to unfreeze a Context with multiple references"))?
 					.set_transaction(txn);
 				// Process the statement
-				let res = self
-					.stack
-					.enter(|stk| stmt.compute(stk, &self.ctx, &self.opt, None))
-					.finish()
-					.await;
-				// Check if this is a RETURN statement
-
-				res
+				self.stack.enter(|stk| stmt.compute(stk, &self.ctx, &self.opt, None)).finish().await
 			}
 		};
 
@@ -212,6 +201,14 @@ impl Executor {
 					| Err(Error::Return {
 						value,
 					}) => {
+						// non-writable transactions might return an error on commit.
+						// So cancel them instead. This is fine since a non-writable transaction
+						// has nothing to commit anyway.
+						if !writeable {
+							let _ = txn.cancel().await;
+							return Ok(value);
+						}
+
 						if let Err(e) = txn.commit().await {
 							return Err(Error::QueryNotExecutedDetail {
 								message: e.to_string(),
@@ -244,7 +241,7 @@ impl Executor {
 		Ok(Value::None)
 	}
 
-	///
+	/// Execute the begin statement and all statements after which are within a transaction block.
 	async fn execute_begin_statement<S>(
 		&mut self,
 		kvs: &Datastore,
@@ -288,7 +285,44 @@ impl Executor {
 
 		// loop over the statements until we hit a cancel or a commit statement.
 		while let Some(stmt) = stream.next().await {
-			let stmt = stmt?;
+			let stmt = match stmt {
+				Ok(x) => x,
+				Err(e) => {
+					// make sure the transaction is properly canceled.
+					let _ = txn.cancel().await;
+					return Err(e);
+				}
+			};
+
+			// check for timeout and cancelation.
+			if let Some(done) = self.ctx.done() {
+				// a cancelation happend. Cancel the transaction, fast forward the remaining
+				// results and then return.
+				let _ = txn.cancel().await;
+
+				for res in &mut self.results[start_results..] {
+					res.query_type = QueryType::Other;
+					res.result = Err(Error::QueryCancelled);
+				}
+
+				while let Some(stmt) = stream.next().await {
+					let stmt = stmt?;
+					if let Statement::Cancel(_) | Statement::Commit(_) = stmt {
+						return Ok(());
+					}
+
+					self.results.push(Response {
+						time: Duration::ZERO,
+						result: Err(match done {
+							Reason::Timedout => Error::QueryTimedout,
+							Reason::Canceled => Error::QueryCancelled,
+						}),
+						query_type: QueryType::Other,
+					});
+				}
+
+				return Ok(());
+			}
 
 			trace!(target: TARGET, statement = %stmt, "Executing statement");
 
@@ -307,6 +341,39 @@ impl Executor {
 			let value = match stmt {
 				Statement::Option(stmt) => self.execute_option_statement(stmt).map(|_| Value::None),
 				Statement::Use(stmt) => self.execute_use_statement(stmt).map(|_| Value::None),
+				Statement::Begin(_) => {
+					let _ = txn.cancel().await;
+					// tried to begin a transaction within a transaction.
+					for res in &mut self.results[start_results..] {
+						res.query_type = QueryType::Other;
+						res.result = Err(Error::QueryCancelled);
+					}
+
+					self.results.push(Response {
+						time: Duration::ZERO,
+						result: Err(Error::QueryNotExecutedDetail {
+							message:
+								"Tried to start a transaction while another transaction was open"
+									.to_string(),
+						}),
+						query_type: QueryType::Other,
+					});
+
+					while let Some(stmt) = stream.next().await {
+						let stmt = stmt?;
+						if let Statement::Cancel(_) | Statement::Commit(_) = stmt {
+							return Ok(());
+						}
+
+						self.results.push(Response {
+							time: Duration::ZERO,
+							result: Err(Error::QueryNotExecuted),
+							query_type: QueryType::Other,
+						});
+					}
+
+					return Ok(());
+				}
 				Statement::Cancel(_) => {
 					let _ = txn.cancel().await;
 
@@ -365,6 +432,11 @@ impl Executor {
 							Ok(value)
 						}
 						Err(e) => {
+							for res in &mut self.results[start_results..] {
+								res.query_type = QueryType::Other;
+								res.result = Err(Error::QueryCancelled);
+							}
+
 							// statement return an error. Consume all the other statement until we hit a cancel or commit.
 							self.results.push(Response {
 								time: before.elapsed(),
