@@ -764,8 +764,6 @@ impl Datastore {
 		// Create a new query options
 		let opt = self.setup_options(sess);
 
-		// Create a new query executor
-		let mut exe = Executor::new(self);
 		// Create a default context
 		let mut ctx = self.setup_ctx()?;
 		// Start an execution context
@@ -846,7 +844,7 @@ impl Datastore {
 			}
 		});
 
-		exe.execute_stream(Arc::new(ctx), opt, stream).await
+		Executor::execute_stream(self, Arc::new(ctx), opt, stream).await
 	}
 
 	/// Execute a pre-parsed SQL query
@@ -888,8 +886,6 @@ impl Datastore {
 		// Create a new query options
 		let opt = self.setup_options(sess);
 
-		// Create a new query executor
-		let mut exe = Executor::new(self);
 		// Create a default context
 		let mut ctx = self.setup_ctx()?;
 		// Start an execution context
@@ -897,7 +893,7 @@ impl Datastore {
 		// Store the query variables
 		vars.attach(&mut ctx)?;
 		// Process all statements
-		exe.execute(ctx.freeze(), opt, ast).await
+		Executor::execute(self, ctx.freeze(), opt, ast).await
 	}
 
 	/// Ensure a SQL [`Value`] is fully computed
@@ -1094,7 +1090,7 @@ impl Datastore {
 			return Err(Error::ExpiredSession);
 		}
 		// Execute the SQL import
-		self.execute_stream(sess, None, stream).await
+		self.execute_import(sess, None, stream).await
 	}
 
 	/// Performs a full database export as SQL
