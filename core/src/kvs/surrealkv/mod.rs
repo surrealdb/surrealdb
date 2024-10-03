@@ -1,5 +1,7 @@
 #![cfg(feature = "kv-surrealkv")]
 
+mod cnf;
+
 use crate::err::Error;
 use crate::key::debug::Sprintable;
 use crate::kvs::Check;
@@ -63,6 +65,8 @@ impl Datastore {
 	pub(crate) async fn new(path: &str) -> Result<Datastore, Error> {
 		let mut opts = Options::new();
 		opts.dir = path.to_string().into();
+		opts.max_key_size = 10000;
+		opts.max_value_size = *cnf::SURREALKV_MAX_VALUE_SIZE;
 
 		match Store::new(opts) {
 			Ok(db) => Ok(Datastore {

@@ -76,6 +76,18 @@ impl Value {
 								_ => Ok(()),
 							},
 						},
+						Value::Thing(t) => match path.len() {
+							1 => {
+								v.remove(&t.to_raw());
+								Ok(())
+							}
+							_ => match v.get_mut(&t.to_raw()) {
+								Some(v) if v.is_some() => {
+									stk.run(|stk| v.del(stk, ctx, opt, path.next())).await
+								}
+								_ => Ok(()),
+							},
+						},
 						_ => Ok(()),
 					},
 					Part::Destructure(parts) => {
@@ -386,6 +398,19 @@ mod tests {
 			"{ test: { something: [{ name: 'A', age: 34 }, { name: 'B', age: 36 }] } }",
 		);
 		let res = Value::parse("{ test: { something: [{ name: 'B', age: 36 }] } }");
+		let mut stack = reblessive::TreeStack::new();
+		stack.enter(|stk| val.del(stk, &ctx, &opt, &idi)).finish().await.unwrap();
+		assert_eq!(res, val);
+	}
+
+	#[tokio::test]
+	async fn del_object_with_thing_based_key() {
+		let (ctx, opt) = mock().await;
+		let idi = Idiom::parse("test[city:london]");
+		let mut val = Value::parse(
+			"{ test: { 'city:london': true, something: [{ age: 34 }, { age: 36 }] } }",
+		);
+		let res = Value::parse("{ test: { something: [{ age: 34 }, { age: 36 }] } }");
 		let mut stack = reblessive::TreeStack::new();
 		stack.enter(|stk| val.del(stk, &ctx, &opt, &idi)).finish().await.unwrap();
 		assert_eq!(res, val);

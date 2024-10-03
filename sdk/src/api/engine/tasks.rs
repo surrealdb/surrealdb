@@ -1,5 +1,6 @@
 use crate::engine::IntervalStream;
 use crate::err::Error;
+#[cfg(not(target_arch = "wasm32"))]
 use core::future::Future;
 use futures::StreamExt;
 use std::pin::Pin;
@@ -19,7 +20,7 @@ type Task = Pin<Box<dyn Future<Output = Result<(), tokio::task::JoinError>> + Se
 #[cfg(target_arch = "wasm32")]
 type Task = Pin<Box<()>>;
 
-pub struct Tasks(Vec<Task>);
+pub struct Tasks(#[allow(dead_code)] Vec<Task>);
 
 impl Tasks {
 	#[cfg(target_arch = "wasm32")]
