@@ -4,7 +4,6 @@ use crate::syn::{
 	error::{error, SyntaxError},
 	token::Span,
 };
-use std::fmt;
 
 #[derive(Error, Debug)]
 #[non_exhaustive]

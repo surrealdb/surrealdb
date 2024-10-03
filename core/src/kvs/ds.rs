@@ -25,12 +25,10 @@ use crate::syn;
 use crate::syn::parser::{Parser, PartialResult};
 use bytes::Bytes;
 use channel::{Receiver, Sender};
-use chrono::offset;
 use futures::{Future, Stream};
 use num_traits::SaturatingMul;
 use reblessive::{Stack, TreeStack};
 use std::fmt;
-use std::future::ready;
 #[cfg(storage)]
 use std::path::PathBuf;
 use std::pin::pin;

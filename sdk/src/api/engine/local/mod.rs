@@ -30,14 +30,13 @@ use crate::{
 	value::Notification,
 };
 use channel::Sender;
-use futures::FutureExt;
+use futures::TryStreamExt;
 use indexmap::IndexMap;
 use std::{
 	collections::{BTreeMap, HashMap},
 	marker::PhantomData,
 	mem,
 	sync::Arc,
-	task::{ready, Poll},
 };
 use surrealdb_core::{
 	dbs::{Response, Session},
@@ -51,31 +50,32 @@ use surrealdb_core::{
 		Data, Field, Output, Query, Statement, Value as CoreValue,
 	},
 };
-use tokio_util::bytes::BytesMut;
+use tokio_util::io::ReaderStream;
 use uuid::Uuid;
-
-use crate::api::err::Error;
-#[cfg(not(target_arch = "wasm32"))]
-use std::path::PathBuf;
-use surrealdb_core::sql::Function;
-#[cfg(feature = "ml")]
-use surrealdb_core::sql::Model;
-#[cfg(not(target_arch = "wasm32"))]
-use tokio::{
-	fs::OpenOptions,
-	io::{self, AsyncReadExt, AsyncWriteExt},
-};
 
 #[cfg(all(not(target_arch = "wasm32"), feature = "ml"))]
 use crate::api::conn::MlExportConfig;
+use crate::api::err::Error;
 #[cfg(all(not(target_arch = "wasm32"), feature = "ml"))]
 use futures::StreamExt;
+#[cfg(not(target_arch = "wasm32"))]
+use std::path::PathBuf;
+#[cfg(not(target_arch = "wasm32"))]
+use surrealdb_core::err::Error as CoreError;
+use surrealdb_core::sql::Function;
+#[cfg(feature = "ml")]
+use surrealdb_core::sql::Model;
 #[cfg(all(not(target_arch = "wasm32"), feature = "ml"))]
 use surrealdb_core::{
 	iam::{check::check_ns_db, Action, ResourceKind},
 	kvs::{LockType, TransactionType},
 	ml::storage::surml_file::SurMlFile,
 	sql::statements::{DefineModelStatement, DefineStatement},
+};
+#[cfg(not(target_arch = "wasm32"))]
+use tokio::{
+	fs::OpenOptions,
+	io::{self, AsyncWriteExt},
 };
 
 use super::resource_to_values;
@@ -925,7 +925,7 @@ async fn router(
 		Command::ImportFile {
 			path,
 		} => {
-			let mut file = match OpenOptions::new().read(true).open(&path).await {
+			let file = match OpenOptions::new().read(true).open(&path).await {
 				Ok(path) => path,
 				Err(error) => {
 					return Err(Error::FileOpen {
@@ -935,32 +935,9 @@ async fn router(
 					.into());
 				}
 			};
-			let mut statements = String::new();
 
-			let mut buffer = BytesMut::new();
-			let mut future = None;
-			let stream = futures::stream::poll_fn(|ctx| {
-				let ready = ready!(future
-					.get_or_insert_with(|| { file.read_buf(&mut buffer) })
-					.poll_unpin(ctx));
-
-				match ready {
-					Ok(x) => {
-						if x == 0 {
-							return Poll::Ready(None);
-						}
-						future = None;
-						let buffer = std::mem::take(&mut buffer);
-						return Poll::Ready(Some(Ok(buffer)));
-					}
-					Err(e) => {
-						return Poll::Ready(Some(Err(Error::FileRead {
-							path,
-							error,
-						})))
-					}
-				}
-			});
+			let stream =
+				ReaderStream::new(file).map_err(|error| CoreError::QueryStream(error.to_string()));
 
 			let responses = kvs.execute_import(&*session, Some(vars.clone()), stream).await?;
 
