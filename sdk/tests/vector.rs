@@ -11,22 +11,20 @@ async fn select_where_mtree_knn() -> Result<(), Error> {
 	let sql = r"
 		CREATE pts:1 SET point = [1,2,3,4];
 		CREATE pts:2 SET point = [4,5,6,7];
-		CREATE pts:3 SET point = [8,9,10,11];
+		CREATE pts:3;
 		DEFINE INDEX mt_pts ON pts FIELDS point MTREE DIMENSION 4 TYPE F32;
+		UPDATE pts:3 SET point = [8,9,10,11];
 		LET $pt = [2,3,4,5];
 		SELECT id, vector::distance::knn() AS dist FROM pts WHERE point <|2|> $pt;
 		SELECT id FROM pts WHERE point <|2|> $pt EXPLAIN;
+		UPDATE pts:3 set point = NONE;
 	";
-	let dbs = new_ds().await?;
-	let ses = Session::owner().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(sql, &ses, None).await?;
-	assert_eq!(res.len(), 7);
+	let mut t = Test::new(sql).await?;
+	t.expect_size(9)?;
 	//
-	for _ in 0..5 {
-		let _ = res.remove(0).result?;
-	}
-	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	t.skip_ok(6)?;
+	//
+	t.expect_val(
 		"[
 			{
 				id: pts:1,
@@ -37,10 +35,9 @@ async fn select_where_mtree_knn() -> Result<(), Error> {
 				dist: 4f
 			}
 		]",
-	);
-	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
-	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	)?;
+	//
+	t.expect_val(
 		"[
 					{
 						detail: {
@@ -60,8 +57,9 @@ async fn select_where_mtree_knn() -> Result<(), Error> {
 						operation: 'Collector'
 					},
 			]",
-	);
-	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+	)?;
+	//
+	t.skip_ok(1)?;
 	Ok(())
 }
 
