@@ -3788,7 +3788,7 @@ dependencies = [
  "prost 0.13.1",
  "thiserror",
  "tokio",
- "tonic 0.12.1",
+ "tonic 0.12.3",
 ]
 
 [[package]]
@@ -3802,7 +3802,7 @@ dependencies = [
  "opentelemetry_sdk",
  "prost 0.13.1",
  "serde",
- "tonic 0.12.1",
+ "tonic 0.12.3",
 ]
 
 [[package]]
@@ -4354,7 +4354,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "18bec9b0adc4eba778b33684b7ba3e7137789434769ee3ce3930463ef904cfca"
 dependencies = [
  "anyhow",
- "itertools 0.13.0",
+ "itertools 0.10.5",
  "proc-macro2",
  "quote",
  "syn 2.0.77",
@@ -5941,7 +5941,7 @@ dependencies = [
  "tokio-stream",
  "tokio-tungstenite 0.23.1",
  "tokio-util",
- "tonic 0.12.1",
+ "tonic 0.12.3",
  "tower",
  "tower-http",
  "tower-service",
@@ -5957,8 +5957,6 @@ dependencies = [
 [[package]]
 name = "surrealcs"
 version = "0.4.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2190f96d274f6e5cf137b6f96389ea3733cc784dd6aec2174d9648ab87c37ae6"
 dependencies = [
  "bytes",
  "chrono",
@@ -5977,8 +5975,6 @@ dependencies = [
 [[package]]
 name = "surrealcs-kernel"
 version = "0.4.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cdb667b1f19485ad801d2cbcca5db5721add050b88526c7d788ebbd070a920b5"
 dependencies = [
  "bincode",
  "chrono",
@@ -6585,9 +6581,9 @@ dependencies = [
 
 [[package]]
 name = "tokio-stream"
-version = "0.1.15"
+version = "0.1.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "267ac89e0bec6e691e5813911606935d77c476ff49024f98abcea3e7b15e37af"
+checksum = "4f4e6ce100d0eb49a2734f8c0812bcd324cf357d21810932c5df6b96ef2b86f1"
 dependencies = [
  "futures-core",
  "pin-project-lite",
@@ -6726,9 +6722,9 @@ dependencies = [
 
 [[package]]
 name = "tonic"
-version = "0.12.1"
+version = "0.12.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "38659f4a91aba8598d27821589f5db7dddd94601e7a01b1e485a50e5484c7401"
+checksum = "877c5b330756d856ffcc4553ab34a5684481ade925ecc54bcd1bf02b1d0d4d52"
 dependencies = [
  "async-stream",
  "async-trait",
