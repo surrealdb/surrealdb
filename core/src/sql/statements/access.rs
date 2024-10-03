@@ -274,7 +274,7 @@ async fn compute_grant(
 	let txn = ctx.tx();
 	// Clear the cache.
 	txn.clear();
-	// Read the access definition
+	// Read the access definition.
 	let ac = match base {
 		Base::Root => txn.get_root_access(&stmt.ac).await?,
 		Base::Ns => txn.get_ns_access(opt.ns()?, &stmt.ac).await?,
@@ -286,7 +286,7 @@ async fn compute_grant(
 			))
 		}
 	};
-	// Verify the access type
+	// Verify the access type.
 	match &ac.kind {
 		AccessType::Jwt(_) => Err(Error::FeatureNotYetImplemented {
 			feature: format!("Grants for JWT on {base}"),
@@ -295,6 +295,7 @@ async fn compute_grant(
 			feature: format!("Grants for record on {base}"),
 		}),
 		AccessType::Bearer(at) => {
+			// TODO(PR): Move to `verify_grant_subject` function.
 			match &stmt.subject {
 				Some(Subject::User(user)) => {
 					// Grant subject must match access method subject.
@@ -453,10 +454,10 @@ async fn compute_revoke(
 	match &stmt.gr {
 		Some(gr) => {
 			let mut grant = match base {
-				Base::Root => (*txn.get_root_access_grant(&stmt.ac, &gr).await?).clone(),
-				Base::Ns => (*txn.get_ns_access_grant(opt.ns()?, &stmt.ac, &gr).await?).clone(),
+				Base::Root => (*txn.get_root_access_grant(&stmt.ac, gr).await?).clone(),
+				Base::Ns => (*txn.get_ns_access_grant(opt.ns()?, &stmt.ac, gr).await?).clone(),
 				Base::Db => {
-					(*txn.get_db_access_grant(opt.ns()?, opt.db()?, &stmt.ac, &gr).await?).clone()
+					(*txn.get_db_access_grant(opt.ns()?, opt.db()?, &stmt.ac, gr).await?).clone()
 				}
 				_ => {
 					return Err(Error::Unimplemented(
@@ -472,17 +473,17 @@ async fn compute_revoke(
 			// Process the statement.
 			match base {
 				Base::Root => {
-					let key = crate::key::root::access::gr::new(&stmt.ac, &gr);
+					let key = crate::key::root::access::gr::new(&stmt.ac, gr);
 					txn.set(key, &grant, None).await?;
 				}
 				Base::Ns => {
-					let key = crate::key::namespace::access::gr::new(opt.ns()?, &stmt.ac, &gr);
+					let key = crate::key::namespace::access::gr::new(opt.ns()?, &stmt.ac, gr);
 					txn.get_or_add_ns(opt.ns()?, opt.strict).await?;
 					txn.set(key, &grant, None).await?;
 				}
 				Base::Db => {
 					let key =
-						crate::key::database::access::gr::new(opt.ns()?, opt.db()?, &stmt.ac, &gr);
+						crate::key::database::access::gr::new(opt.ns()?, opt.db()?, &stmt.ac, gr);
 					txn.get_or_add_ns(opt.ns()?, opt.strict).await?;
 					txn.get_or_add_db(opt.ns()?, opt.db()?, opt.strict).await?;
 					txn.set(key, &grant, None).await?;

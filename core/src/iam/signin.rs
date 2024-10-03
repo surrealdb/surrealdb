@@ -1627,7 +1627,9 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 					.execute(
 						&format!(
 							r#"
-					DEFINE ACCESS api ON {} TYPE BEARER DURATION FOR SESSION 2h;
+					DEFINE ACCESS api ON {} TYPE BEARER FOR USER
+						DURATION FOR SESSION 2h
+					;
 					DEFINE USER tobie ON {} ROLES EDITOR;
 					ACCESS api ON {} GRANT FOR USER tobie;
 					"#,
@@ -1736,7 +1738,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 					.execute(
 						&format!(
 							r#"
-					DEFINE ACCESS api ON {} TYPE BEARER
+					DEFINE ACCESS api ON {} TYPE BEARER FOR USER
 						AUTHENTICATE {{
 							RETURN NONE
 						}}
@@ -1850,7 +1852,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 					.execute(
 						&format!(
 							r#"
-					DEFINE ACCESS api ON {} TYPE BEARER
+					DEFINE ACCESS api ON {} TYPE BEARER FOR USER
 						AUTHENTICATE {{
 							THROW "Test authentication error";
 						}}
@@ -1936,7 +1938,9 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 					.execute(
 						&format!(
 							r#"
-					DEFINE ACCESS api ON {} TYPE BEARER DURATION FOR GRANT 1s FOR SESSION 2h;
+					DEFINE ACCESS api ON {} TYPE BEARER FOR USER
+						DURATION FOR GRANT 1s FOR SESSION 2h
+					;
 					DEFINE USER tobie ON {} ROLES EDITOR;
 					ACCESS api ON {} GRANT FOR USER tobie;
 					"#,
@@ -2018,7 +2022,9 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 					.execute(
 						&format!(
 							r#"
-					DEFINE ACCESS api ON {} TYPE BEARER DURATION FOR GRANT 1s FOR SESSION 2h;
+					DEFINE ACCESS api ON {} TYPE BEARER FOR USER
+						DURATION FOR GRANT 1s FOR SESSION 2h
+					;
 					DEFINE USER tobie ON {} ROLES EDITOR;
 					ACCESS api ON {} GRANT FOR USER tobie;
 					"#,
@@ -2114,7 +2120,9 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 					.execute(
 						&format!(
 							r#"
-					DEFINE ACCESS api ON {} TYPE BEARER DURATION FOR GRANT 1s FOR SESSION 2h;
+					DEFINE ACCESS api ON {} TYPE BEARER FOR USER
+						DURATION FOR GRANT 1s FOR SESSION 2h
+					;
 					DEFINE USER tobie ON {} ROLES EDITOR;
 					ACCESS api ON {} GRANT FOR USER tobie;
 					"#,
@@ -2198,7 +2206,9 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 					.execute(
 						&format!(
 							r#"
-					DEFINE ACCESS api ON {} TYPE BEARER DURATION FOR SESSION 2h;
+					DEFINE ACCESS api ON {} TYPE BEARER FOR USER
+						DURATION FOR SESSION 2h
+					;
 					DEFINE USER tobie ON {} ROLES EDITOR;
 					ACCESS api ON {} GRANT FOR USER tobie;
 					"#,
@@ -2280,7 +2290,9 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 					.execute(
 						&format!(
 							r#"
-					DEFINE ACCESS api ON {} TYPE BEARER DURATION FOR SESSION 2h;
+					DEFINE ACCESS api ON {} TYPE BEARER FOR USER
+						DURATION FOR SESSION 2h
+					;
 					DEFINE USER tobie ON {} ROLES EDITOR;
 					ACCESS api ON {} GRANT FOR USER tobie;
 					"#,
@@ -2364,7 +2376,9 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 					.execute(
 						&format!(
 							r#"
-					DEFINE ACCESS api ON {} TYPE BEARER DURATION FOR SESSION 2h;
+					DEFINE ACCESS api ON {} TYPE BEARER FOR USER
+						DURATION FOR SESSION 2h
+					;
 					DEFINE USER tobie ON {} ROLES EDITOR;
 					ACCESS api ON {} GRANT FOR USER tobie;
 					"#,
@@ -2448,7 +2462,9 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 					.execute(
 						&format!(
 							r#"
-					DEFINE ACCESS api ON {} TYPE BEARER DURATION FOR SESSION 2h;
+					DEFINE ACCESS api ON {} TYPE BEARER FOR USER
+						DURATION FOR SESSION 2h
+					;
 					DEFINE USER tobie ON {} ROLES EDITOR;
 					ACCESS api ON {} GRANT FOR USER tobie;
 					"#,
@@ -2532,7 +2548,9 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 					.execute(
 						&format!(
 							r#"
-					DEFINE ACCESS api ON {} TYPE BEARER DURATION FOR SESSION 2h;
+					DEFINE ACCESS api ON {} TYPE BEARER FOR USER
+						DURATION FOR SESSION 2h
+					;
 					DEFINE USER tobie ON {} ROLES EDITOR;
 					ACCESS api ON {} GRANT FOR USER tobie;
 					"#,
