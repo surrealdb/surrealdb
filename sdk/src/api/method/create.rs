@@ -78,17 +78,6 @@ where
 	into_future! {execute_opt}
 }
 
-impl<'r, Client, R> IntoFuture for Create<'r, Client, Vec<R>>
-where
-	Client: Connection,
-	R: DeserializeOwned,
-{
-	type Output = Result<Option<R>>;
-	type IntoFuture = BoxFuture<'r, Self::Output>;
-
-	into_future! {execute_opt}
-}
-
 impl<'r, C> Create<'r, C, Value>
 where
 	C: Connection,
@@ -115,31 +104,6 @@ where
 }
 
 impl<'r, C, R> Create<'r, C, Option<R>>
-where
-	C: Connection,
-{
-	/// Sets content of a record
-	pub fn content<D>(self, data: D) -> Content<'r, C, Option<R>>
-	where
-		D: Serialize + 'static,
-	{
-		Content::from_closure(self.client, || {
-			let content = to_core_value(data)?;
-
-			let data = match content {
-				CoreValue::None | CoreValue::Null => None,
-				content => Some(content),
-			};
-
-			Ok(Command::Create {
-				what: self.resource?,
-				data,
-			})
-		})
-	}
-}
-
-impl<'r, C, R> Create<'r, C, Vec<R>>
 where
 	C: Connection,
 {

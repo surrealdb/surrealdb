@@ -173,6 +173,11 @@ impl fmt::Display for Snippet {
 		for _ in 0..spacing {
 			f.write_str(" ")?;
 		}
+		writeln!(f, "--> [{}:{}]", self.location.line, self.location.column)?;
+
+		for _ in 0..spacing {
+			f.write_str(" ")?;
+		}
 		f.write_str(" |\n")?;
 		write!(f, "{:>spacing$} | ", self.location.line)?;
 		match self.truncation {
@@ -217,17 +222,26 @@ impl fmt::Display for Snippet {
 #[cfg(test)]
 mod test {
 	use super::{RenderedError, Snippet, Truncation};
-	use crate::syn::error::{Location, MessageKind};
+	use crate::syn::{
+		error::{Location, MessageKind},
+		token::Span,
+	};
 
 	#[test]
 	fn truncate_whitespace() {
 		let source = "\n\n\n\t      $     \t";
 		let offset = source.char_indices().find(|(_, c)| *c == '$').unwrap().0;
-		let error = &source[offset..];
 
-		let location = Location::of_in(error, source);
+		let location = Location::range_of_span(
+			source,
+			Span {
+				offset: offset as u32,
+				len: 1,
+			},
+		);
 
-		let snippet = Snippet::from_source_location(source, location, None, MessageKind::Error);
+		let snippet =
+			Snippet::from_source_location(source, location.start, None, MessageKind::Error);
 		assert_eq!(snippet.truncation, Truncation::None);
 		assert_eq!(snippet.offset, 0);
 		assert_eq!(snippet.source.as_str(), "$");
@@ -237,11 +251,17 @@ mod test {
 	fn truncate_start() {
 		let source = "     aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa $     \t";
 		let offset = source.char_indices().find(|(_, c)| *c == '$').unwrap().0;
-		let error = &source[offset..];
 
-		let location = Location::of_in(error, source);
+		let location = Location::range_of_span(
+			source,
+			Span {
+				offset: offset as u32,
+				len: 1,
+			},
+		);
 
-		let snippet = Snippet::from_source_location(source, location, None, MessageKind::Error);
+		let snippet =
+			Snippet::from_source_location(source, location.start, None, MessageKind::Error);
 		assert_eq!(snippet.truncation, Truncation::Start);
 		assert_eq!(snippet.offset, 10);
 		assert_eq!(snippet.source.as_str(), "aaaaaaaaa $");
@@ -251,11 +271,17 @@ mod test {
 	fn truncate_end() {
 		let source = "\n\n  a $ aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa    \t";
 		let offset = source.char_indices().find(|(_, c)| *c == '$').unwrap().0;
-		let error = &source[offset..];
 
-		let location = Location::of_in(error, source);
+		let location = Location::range_of_span(
+			source,
+			Span {
+				offset: offset as u32,
+				len: 1,
+			},
+		);
 
-		let snippet = Snippet::from_source_location(source, location, None, MessageKind::Error);
+		let snippet =
+			Snippet::from_source_location(source, location.start, None, MessageKind::Error);
 		assert_eq!(snippet.truncation, Truncation::End);
 		assert_eq!(snippet.offset, 2);
 		assert_eq!(
@@ -268,11 +294,17 @@ mod test {
 	fn truncate_both() {
 		let source = "\n\n\n\n  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa $ aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa   \t";
 		let offset = source.char_indices().find(|(_, c)| *c == '$').unwrap().0;
-		let error = &source[offset..];
 
-		let location = Location::of_in(error, source);
+		let location = Location::range_of_span(
+			source,
+			Span {
+				offset: offset as u32,
+				len: 1,
+			},
+		);
 
-		let snippet = Snippet::from_source_location(source, location, None, MessageKind::Error);
+		let snippet =
+			Snippet::from_source_location(source, location.start, None, MessageKind::Error);
 		assert_eq!(snippet.truncation, Truncation::Both);
 		assert_eq!(snippet.offset, 10);
 		assert_eq!(
@@ -301,6 +333,7 @@ mod test {
 
 		let error_string = format!("{}", error);
 		let expected = r#"some_error
+ --> [4:10]
   |
 4 | ...hallo error...
   |          ^^^^^ this is wrong

@@ -38,6 +38,24 @@ impl Invalidator for Pessimistic {
 	}
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct Optimistic;
+impl Invalidator for Optimistic {
+	type MetaData = ();
+
+	fn is_valid(_datastore: &Datastore, _session: &Session, _meta: &Self::MetaData) -> bool {
+		true
+	}
+
+	async fn generate(
+		datastore: &Arc<Datastore>,
+		session: &Session,
+	) -> Result<(Schema, Self::MetaData), GqlError> {
+		let schema = generate_schema(datastore, session).await?;
+		Ok((schema, ()))
+	}
+}
+
 #[derive(Clone)]
 pub struct SchemaCache<I: Invalidator = Pessimistic> {
 	#[allow(clippy::type_complexity)]
@@ -64,8 +82,8 @@ impl<I: Invalidator> SchemaCache<I> {
 		}
 	}
 	pub async fn get_schema(&self, session: &Session) -> Result<Schema, GqlError> {
-		let ns = session.ns.as_ref().expect("missing ns should have been caught");
-		let db = session.db.as_ref().expect("missing db should have been caught");
+		let ns = session.ns.as_ref().ok_or(GqlError::UnspecifiedNamespace)?;
+		let db = session.db.as_ref().ok_or(GqlError::UnspecifiedDatabase)?;
 		{
 			let guard = self.inner.read().await;
 			if let Some(cand) = guard.get(&(ns.to_owned(), db.to_owned())) {

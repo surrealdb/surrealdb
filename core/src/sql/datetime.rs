@@ -1,3 +1,4 @@
+use crate::err::Error;
 use crate::sql::duration::Duration;
 use crate::sql::strand::Strand;
 use crate::syn;
@@ -11,6 +12,7 @@ use std::str;
 use std::str::FromStr;
 
 use super::escape::quote_str;
+use super::value::TrySub;
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Datetime";
 
@@ -62,7 +64,7 @@ impl TryFrom<Strand> for Datetime {
 impl TryFrom<&str> for Datetime {
 	type Error = ();
 	fn try_from(v: &str) -> Result<Self, Self::Error> {
-		match syn::datetime_raw(v) {
+		match syn::datetime(v) {
 			Ok(v) => Ok(v),
 			_ => Err(()),
 		}
@@ -106,5 +108,15 @@ impl ops::Sub<Self> for Datetime {
 			Ok(d) => Duration::from(d),
 			Err(_) => Duration::default(),
 		}
+	}
+}
+
+impl TrySub for Datetime {
+	type Output = Duration;
+	fn try_sub(self, other: Self) -> Result<Duration, Error> {
+		(self.0 - other.0)
+			.to_std()
+			.map_err(|_| Error::ArithmeticOverflow(format!("{self} - {other}")))
+			.map(Duration::from)
 	}
 }

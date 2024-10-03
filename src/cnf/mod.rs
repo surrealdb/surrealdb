@@ -19,14 +19,14 @@ pub const DEBUG_BUILD_WARNING: &str = "\
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │                     !!! THIS IS A DEVELOPMENT BUILD !!!                     │
 │     Development builds are not intended for production use and include      │
-│    tooling and features that may affect the performance of the database.    |
+│    tooling and features that may affect the performance of the database.    │
 └─────────────────────────────────────────────────────────────────────────────┘";
 
 /// The publicly visible name of the server
 pub const PKG_NAME: &str = "surrealdb";
 
 /// The public endpoint for the administration interface
-pub const APP_ENDPOINT: &str = "https://surrealdb.com/app";
+pub const APP_ENDPOINT: &str = "https://surrealdb.com/surrealist";
 
 /// The maximum HTTP body size of the HTTP /ml endpoints (defaults to 4 GiB)
 pub static HTTP_MAX_ML_BODY_SIZE: LazyLock<usize> =
@@ -85,6 +85,10 @@ pub static RUNTIME_STACK_SIZE: LazyLock<usize> =
 /// How many threads which can be started for blocking operations (defaults to 512)
 pub static RUNTIME_MAX_BLOCKING_THREADS: LazyLock<usize> =
 	lazy_env_parse!("SURREAL_RUNTIME_MAX_BLOCKING_THREADS", usize, 512);
+
+/// How many threads which can be started for blocking operations (defaults to 512)
+pub static TELEMETRY_PROVIDER: LazyLock<String> =
+	lazy_env_parse!("SURREAL_TELEMETRY_PROVIDER", String);
 
 /// The version identifier of this build
 pub static PKG_VERSION: LazyLock<String> =

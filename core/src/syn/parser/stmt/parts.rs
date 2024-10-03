@@ -37,7 +37,7 @@ impl Parser<'_> {
 				loop {
 					let idiom = self.parse_plain_idiom(ctx).await?;
 					let operator = self.parse_assigner()?;
-					let value = ctx.run(|ctx| self.parse_value(ctx)).await?;
+					let value = ctx.run(|ctx| self.parse_value_field(ctx)).await?;
 					set_list.push((idiom, operator, value));
 					if !self.eat(t!(",")) {
 						break;
@@ -52,19 +52,19 @@ impl Parser<'_> {
 			}
 			t!("PATCH") => {
 				self.pop_peek();
-				Data::PatchExpression(ctx.run(|ctx| self.parse_value(ctx)).await?)
+				Data::PatchExpression(ctx.run(|ctx| self.parse_value_field(ctx)).await?)
 			}
 			t!("MERGE") => {
 				self.pop_peek();
-				Data::MergeExpression(ctx.run(|ctx| self.parse_value(ctx)).await?)
+				Data::MergeExpression(ctx.run(|ctx| self.parse_value_field(ctx)).await?)
 			}
 			t!("REPLACE") => {
 				self.pop_peek();
-				Data::ReplaceExpression(ctx.run(|ctx| self.parse_value(ctx)).await?)
+				Data::ReplaceExpression(ctx.run(|ctx| self.parse_value_field(ctx)).await?)
 			}
 			t!("CONTENT") => {
 				self.pop_peek();
-				Data::ContentExpression(ctx.run(|ctx| self.parse_value(ctx)).await?)
+				Data::ContentExpression(ctx.run(|ctx| self.parse_value_field(ctx)).await?)
 			}
 			_ => return Ok(None),
 		};
@@ -274,22 +274,23 @@ impl Parser<'_> {
 	pub async fn parse_permission(
 		&mut self,
 		stk: &mut Stk,
-		permissive: bool,
+		field: bool,
 	) -> ParseResult<Permissions> {
 		let next = self.next();
 		match next.kind {
 			t!("NONE") => Ok(Permissions::none()),
 			t!("FULL") => Ok(Permissions::full()),
 			t!("FOR") => {
-				let mut permission = if permissive {
+				let mut permission = if field {
 					Permissions::full()
 				} else {
 					Permissions::none()
 				};
-				stk.run(|stk| self.parse_specific_permission(stk, &mut permission)).await?;
+				stk.run(|stk| self.parse_specific_permission(stk, &mut permission, field)).await?;
 				self.eat(t!(","));
 				while self.eat(t!("FOR")) {
-					stk.run(|stk| self.parse_specific_permission(stk, &mut permission)).await?;
+					stk.run(|stk| self.parse_specific_permission(stk, &mut permission, field))
+						.await?;
 					self.eat(t!(","));
 				}
 				Ok(permission)
@@ -308,6 +309,7 @@ impl Parser<'_> {
 		&mut self,
 		stk: &mut Stk,
 		permissions: &mut Permissions,
+		field: bool,
 	) -> ParseResult<()> {
 		let mut select = false;
 		let mut create = false;
@@ -327,8 +329,14 @@ impl Parser<'_> {
 					update = true;
 				}
 				t!("DELETE") => {
-					delete = true;
+					// TODO(gguillemas): Return a parse error instead of logging a warning in 3.0.0.
+					if field {
+						warn!("The DELETE permission has no effect on fields and is deprecated, but was found in a DEFINE FIELD statement.");
+					} else {
+						delete = true;
+					}
 				}
+				_ if field => unexpected!(self, next, "'SELECT', 'CREATE' or 'UPDATE'"),
 				_ => unexpected!(self, next, "'SELECT', 'CREATE', 'UPDATE' or 'DELETE'"),
 			}
 			if !self.eat(t!(",")) {
@@ -378,7 +386,7 @@ impl Parser<'_> {
 	pub fn parse_base(&mut self, scope_allowed: bool) -> ParseResult<Base> {
 		let next = self.next();
 		match next.kind {
-			t!("NAMESPACE") | t!("ns") => Ok(Base::Ns),
+			t!("NAMESPACE") => Ok(Base::Ns),
 			t!("DATABASE") => Ok(Base::Db),
 			t!("ROOT") => Ok(Base::Root),
 			t!("SCOPE") => {
@@ -444,28 +452,26 @@ impl Parser<'_> {
 		})
 	}
 
-	pub fn convert_distance(&mut self, k: &DistanceKind) -> ParseResult<Distance> {
-		let dist = match k {
-			DistanceKind::Chebyshev => Distance::Chebyshev,
-			DistanceKind::Cosine => Distance::Cosine,
-			DistanceKind::Euclidean => Distance::Euclidean,
-			DistanceKind::Manhattan => Distance::Manhattan,
-			DistanceKind::Hamming => Distance::Hamming,
-			DistanceKind::Jaccard => Distance::Jaccard,
-
-			DistanceKind::Minkowski => {
-				let distance = self.next_token_value()?;
-				Distance::Minkowski(distance)
-			}
-			DistanceKind::Pearson => Distance::Pearson,
-		};
-		Ok(dist)
-	}
-
 	pub fn parse_distance(&mut self) -> ParseResult<Distance> {
 		let next = self.next();
 		match next.kind {
-			TokenKind::Distance(k) => self.convert_distance(&k),
+			TokenKind::Distance(k) => {
+				let dist = match k {
+					DistanceKind::Chebyshev => Distance::Chebyshev,
+					DistanceKind::Cosine => Distance::Cosine,
+					DistanceKind::Euclidean => Distance::Euclidean,
+					DistanceKind::Manhattan => Distance::Manhattan,
+					DistanceKind::Hamming => Distance::Hamming,
+					DistanceKind::Jaccard => Distance::Jaccard,
+
+					DistanceKind::Minkowski => {
+						let distance = self.next_token_value()?;
+						Distance::Minkowski(distance)
+					}
+					DistanceKind::Pearson => Distance::Pearson,
+				};
+				Ok(dist)
+			}
 			_ => unexpected!(self, next, "a distance measure"),
 		}
 	}

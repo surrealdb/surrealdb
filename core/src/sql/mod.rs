@@ -117,6 +117,7 @@ pub use self::idiom::Idiom;
 pub use self::idiom::Idioms;
 pub use self::index::Index;
 pub use self::kind::Kind;
+pub use self::kind::Literal;
 pub use self::limit::Limit;
 pub use self::mock::Mock;
 pub use self::model::Model;

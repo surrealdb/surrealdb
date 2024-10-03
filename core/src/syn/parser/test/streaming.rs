@@ -31,6 +31,10 @@ use crate::{
 use chrono::{offset::TimeZone, NaiveDate, Offset, Utc};
 use reblessive::Stack;
 
+fn ident_field(name: &str) -> Value {
+	Value::Idiom(Idiom(vec![Part::Field(Ident(name.to_string()))]))
+}
+
 static SOURCE: &str = r#"
 	ANALYZE INDEX b on a;
 	BEGIN;
@@ -53,7 +57,7 @@ static SOURCE: &str = r#"
 	DEFINE PARAM $a VALUE { a: 1, "b": 3 } PERMISSIONS WHERE null;
 	DEFINE TABLE name DROP SCHEMAFUL CHANGEFEED 1s PERMISSIONS FOR SELECT WHERE a = 1 AS SELECT foo FROM bar GROUP BY foo;
 	DEFINE EVENT event ON TABLE table WHEN null THEN null,none;
-	DEFINE FIELD foo.*[*]... ON TABLE bar FLEX TYPE option<number | array<record<foo>,10>> VALUE null ASSERT true DEFAULT false PERMISSIONS FOR DELETE, UPDATE NONE, FOR create WHERE true;
+	DEFINE FIELD foo.*[*]... ON TABLE bar FLEX TYPE option<number | array<record<foo>,10>> VALUE null ASSERT true DEFAULT false PERMISSIONS FOR UPDATE NONE, FOR CREATE WHERE true;
 	DEFINE INDEX index ON TABLE table FIELDS a,b[*] SEARCH ANALYZER ana BM25 (0.1,0.2)
 			DOC_IDS_ORDER 1
 			DOC_LENGTHS_ORDER 2
@@ -192,7 +196,7 @@ fn statements() -> Vec<Statement> {
 				(Ident("b".to_string()), Kind::Array(Box::new(Kind::Bool), Some(3))),
 			],
 			block: Block(vec![Entry::Output(OutputStatement {
-				what: Value::Idiom(Idiom(vec![Part::Field(Ident("a".to_string()))])),
+				what: ident_field("a"),
 				fetch: None,
 			})]),
 			comment: Some(Strand("test".to_string())),
@@ -306,7 +310,7 @@ fn statements() -> Vec<Statement> {
 			assert: Some(Value::Bool(true)),
 			default: Some(Value::Bool(false)),
 			permissions: Permissions {
-				delete: Permission::None,
+				delete: Permission::Full,
 				update: Permission::None,
 				create: Permission::Specific(Value::Bool(true)),
 				select: Permission::Full,
@@ -440,35 +444,23 @@ fn statements() -> Vec<Statement> {
 		}),
 		Statement::Ifelse(IfelseStatement {
 			exprs: vec![
-				(
-					Value::Idiom(Idiom(vec![Part::Field(Ident("foo".to_owned()))])),
-					Value::Idiom(Idiom(vec![Part::Field(Ident("bar".to_owned()))])),
-				),
-				(
-					Value::Idiom(Idiom(vec![Part::Field(Ident("faz".to_owned()))])),
-					Value::Idiom(Idiom(vec![Part::Field(Ident("baz".to_owned()))])),
-				),
+				(ident_field("foo"), ident_field("bar")),
+				(ident_field("faz"), ident_field("baz")),
 			],
-			close: Some(Value::Idiom(Idiom(vec![Part::Field(Ident("baq".to_owned()))]))),
+			close: Some(ident_field("baq")),
 		}),
 		Statement::Ifelse(IfelseStatement {
 			exprs: vec![
 				(
-					Value::Idiom(Idiom(vec![Part::Field(Ident("foo".to_owned()))])),
-					Value::Block(Box::new(Block(vec![Entry::Value(Value::Idiom(Idiom(vec![
-						Part::Field(Ident("bar".to_owned())),
-					])))]))),
+					ident_field("foo"),
+					Value::Block(Box::new(Block(vec![Entry::Value(ident_field("bar"))]))),
 				),
 				(
-					Value::Idiom(Idiom(vec![Part::Field(Ident("faz".to_owned()))])),
-					Value::Block(Box::new(Block(vec![Entry::Value(Value::Idiom(Idiom(vec![
-						Part::Field(Ident("baz".to_owned())),
-					])))]))),
+					ident_field("faz"),
+					Value::Block(Box::new(Block(vec![Entry::Value(ident_field("baz"))]))),
 				),
 			],
-			close: Some(Value::Block(Box::new(Block(vec![Entry::Value(Value::Idiom(Idiom(
-				vec![Part::Field(Ident("baq".to_owned()))],
-			)))])))),
+			close: Some(Value::Block(Box::new(Block(vec![Entry::Value(ident_field("baq"))])))),
 		}),
 		Statement::Info(InfoStatement::Root(false)),
 		Statement::Info(InfoStatement::Ns(false)),
@@ -612,10 +604,8 @@ fn statements() -> Vec<Statement> {
 			id: Value::Uuid(Uuid(uuid::uuid!("e72bee20-f49b-11ec-b939-0242ac120002"))),
 		}),
 		Statement::Output(OutputStatement {
-			what: Value::Idiom(Idiom(vec![Part::Field(Ident("RETRUN".to_owned()))])),
-			fetch: Some(Fetchs(vec![Fetch(Value::Idiom(Idiom(vec![Part::Field(
-				Ident("RETURN".to_owned()).to_owned(),
-			)])))])),
+			what: ident_field("RETRUN"),
+			fetch: Some(Fetchs(vec![Fetch(ident_field("RETURN"))])),
 		}),
 		Statement::Relate(RelateStatement {
 			only: true,

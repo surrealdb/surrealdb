@@ -192,6 +192,18 @@ impl Id {
 	pub fn uuid() -> Self {
 		Self::Uuid(Uuid::new_v7())
 	}
+	/// Check if this Id matches a value
+	pub fn is(&self, val: &Value) -> bool {
+		match (self, val) {
+			(Self::Number(i), Value::Number(Number::Int(j))) if *i == *j => true,
+			(Self::String(i), Value::Strand(j)) if *i == j.0 => true,
+			(Self::Uuid(i), Value::Uuid(j)) if i == j => true,
+			(Self::Array(i), Value::Array(j)) if i == j => true,
+			(Self::Object(i), Value::Object(j)) if i == j => true,
+			(i, Value::Thing(t)) if i == &t.id => true,
+			_ => false,
+		}
+	}
 	/// Convert the Id to a raw String
 	pub fn to_raw(&self) -> String {
 		match self {

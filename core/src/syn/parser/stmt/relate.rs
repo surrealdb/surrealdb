@@ -4,7 +4,7 @@ use crate::{
 	sql::{statements::RelateStatement, Subquery, Value},
 	syn::{
 		parser::{
-			mac::{expected, unexpected},
+			mac::{expected, expected_whitespace, unexpected},
 			ParseResult, Parser,
 		},
 		token::t,
@@ -39,14 +39,18 @@ impl Parser<'_> {
 		let next = self.next();
 		let is_o = match next.kind {
 			t!("->") => true,
-			t!("<-") => false,
+			t!("<") => {
+				expected_whitespace!(self, t!("-"));
+				false
+			}
 			_ => unexpected!(self, next, "a relation arrow"),
 		};
 		let kind = self.parse_relate_kind(stk).await?;
 		if is_o {
-			expected!(self, t!("->"))
+			expected!(self, t!("->"));
 		} else {
-			expected!(self, t!("<-"))
+			expected!(self, t!("<"));
+			expected_whitespace!(self, t!("-"));
 		};
 		let second = self.parse_relate_value(stk).await?;
 		if is_o {
@@ -71,6 +75,14 @@ impl Parser<'_> {
 		}
 	}
 	pub async fn parse_relate_value(&mut self, ctx: &mut Stk) -> ParseResult<Value> {
+		let old = self.table_as_field;
+		self.table_as_field = true;
+		let r = self.parse_relate_value_inner(ctx).await;
+		self.table_as_field = old;
+		r
+	}
+
+	async fn parse_relate_value_inner(&mut self, ctx: &mut Stk) -> ParseResult<Value> {
 		match self.peek_kind() {
 			t!("[") => {
 				let start = self.pop_peek().span;
@@ -109,8 +121,7 @@ impl Parser<'_> {
 	}
 
 	pub async fn parse_thing_or_table(&mut self, ctx: &mut Stk) -> ParseResult<Value> {
-		self.glue()?;
-		if self.peek_token_at(1).kind == t!(":") {
+		if self.peek_whitespace1().kind == t!(":") {
 			self.parse_thing(ctx).await.map(Value::Thing)
 		} else {
 			self.next_token_value().map(Value::Table)

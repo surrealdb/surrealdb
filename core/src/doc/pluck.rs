@@ -25,36 +25,91 @@ impl Document {
 	) -> Result<Value, Error> {
 		// Ensure futures are run
 		let opt = &opt.new_with_futures(true);
+		// Check if this record exists
+		if self.id.is_some() {
+			// Should we run permissions checks?
+			if opt.check_perms(Action::View)? {
+				// Get the table for this document
+				let table = self.tb(ctx, opt).await?;
+				// Get the permissions for this table
+				let perms = &table.permissions.select;
+				// Process the table permissions
+				match perms {
+					Permission::None => return Err(Error::Ignore),
+					Permission::Full => (),
+					Permission::Specific(e) => {
+						// Disable permissions
+						let opt = &opt.new_with_perms(false);
+						// Process the PERMISSION clause
+						if !e
+							.compute(
+								stk,
+								ctx,
+								opt,
+								Some(match stm.is_delete() {
+									true => &self.initial,
+									false => &self.current,
+								}),
+							)
+							.await?
+							.is_truthy()
+						{
+							return Err(Error::Ignore);
+						}
+					}
+				}
+			}
+		}
 		// Process the desired output
 		let mut out = match stm.output() {
 			Some(v) => match v {
 				Output::None => Err(Error::Ignore),
 				Output::Null => Ok(Value::Null),
 				Output::Diff => {
+					// Process the current permitted
+					self.process_permitted_current(stk, ctx, opt).await?;
+					// Process the initial permitted
+					self.process_permitted_initial(stk, ctx, opt).await?;
 					// Output a DIFF of any changes applied to the document
 					Ok(self
-						.initial
+						.initial_permitted
 						.doc
 						.as_ref()
-						.diff(self.current.doc.as_ref(), Idiom::default())
+						.diff(self.current_permitted.doc.as_ref(), Idiom::default())
 						.into())
 				}
 				Output::After => {
+					// Process the current permitted
+					self.process_permitted_current(stk, ctx, opt).await?;
 					// Output the full document after all changes were applied
-					self.current.doc.as_ref().compute(stk, ctx, opt, Some(&self.current)).await
+					self.current_permitted
+						.doc
+						.as_ref()
+						.compute(stk, ctx, opt, Some(&self.current_permitted))
+						.await
 				}
 				Output::Before => {
+					// Process the initial permitted
+					self.process_permitted_initial(stk, ctx, opt).await?;
 					// Output the full document before any changes were applied
-					self.initial.doc.as_ref().compute(stk, ctx, opt, Some(&self.initial)).await
+					self.initial_permitted
+						.doc
+						.as_ref()
+						.compute(stk, ctx, opt, Some(&self.initial_permitted))
+						.await
 				}
 				Output::Fields(v) => {
+					// Process the current permitted
+					self.process_permitted_current(stk, ctx, opt).await?;
+					// Process the initial permitted
+					self.process_permitted_initial(stk, ctx, opt).await?;
 					// Configure the context
 					let mut ctx = MutableContext::new(ctx);
-					ctx.add_value("after", self.current.doc.as_arc());
-					ctx.add_value("before", self.initial.doc.as_arc());
+					ctx.add_value("after", self.current_permitted.doc.as_arc());
+					ctx.add_value("before", self.initial_permitted.doc.as_arc());
 					let ctx = ctx.freeze();
 					// Output the specified fields
-					v.compute(stk, &ctx, opt, Some(&self.current), false).await
+					v.compute(stk, &ctx, opt, Some(&self.current_permitted), false).await
 				}
 			},
 			None => match stm {
@@ -68,22 +123,61 @@ impl Document {
 					_ => s.expr.compute(stk, ctx, opt, Some(&self.current), false).await,
 				},
 				Statement::Select(s) => {
-					s.expr.compute(stk, ctx, opt, Some(&self.current), s.group.is_some()).await
+					// Process the current permitted
+					self.process_permitted_current(stk, ctx, opt).await?;
+					s.expr
+						.compute(stk, ctx, opt, Some(&self.current_permitted), s.group.is_some())
+						.await
 				}
 				Statement::Create(_) => {
-					self.current.doc.as_ref().compute(stk, ctx, opt, Some(&self.current)).await
+					// Process the current permitted
+					self.process_permitted_current(stk, ctx, opt).await?;
+					// Process the document output
+					self.current_permitted
+						.doc
+						.as_ref()
+						.compute(stk, ctx, opt, Some(&self.current_permitted))
+						.await
 				}
 				Statement::Upsert(_) => {
-					self.current.doc.as_ref().compute(stk, ctx, opt, Some(&self.current)).await
+					// Process the current permitted
+					self.process_permitted_current(stk, ctx, opt).await?;
+					// Process the document output
+					self.current_permitted
+						.doc
+						.as_ref()
+						.compute(stk, ctx, opt, Some(&self.current_permitted))
+						.await
 				}
 				Statement::Update(_) => {
-					self.current.doc.as_ref().compute(stk, ctx, opt, Some(&self.current)).await
+					// Process the current permitted
+					self.process_permitted_current(stk, ctx, opt).await?;
+					// Process the document output
+					self.current_permitted
+						.doc
+						.as_ref()
+						.compute(stk, ctx, opt, Some(&self.current_permitted))
+						.await
 				}
 				Statement::Relate(_) => {
-					self.current.doc.as_ref().compute(stk, ctx, opt, Some(&self.current)).await
+					// Process the current permitted
+					self.process_permitted_current(stk, ctx, opt).await?;
+					// Process the document output
+					self.current_permitted
+						.doc
+						.as_ref()
+						.compute(stk, ctx, opt, Some(&self.current_permitted))
+						.await
 				}
 				Statement::Insert(_) => {
-					self.current.doc.as_ref().compute(stk, ctx, opt, Some(&self.current)).await
+					// Process the current permitted
+					self.process_permitted_current(stk, ctx, opt).await?;
+					// Process the document output
+					self.current_permitted
+						.doc
+						.as_ref()
+						.compute(stk, ctx, opt, Some(&self.current_permitted))
+						.await
 				}
 				_ => Err(Error::Ignore),
 			},

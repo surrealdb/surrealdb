@@ -71,6 +71,32 @@ jobs:
       name: ${{ steps.outputs.outputs.name }}
       build-metadata: ${{ steps.outputs.outputs.build-metadata }}
     steps:
+      - name: Checkout 2.x sources
+        if: ${{ inputs.git-ref == 'patches/2.0' }}
+        uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Checkout beta sources
+        if: ${{ inputs.git-ref == 'releases/beta' }}
+        uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Create patch branch
+        if: ${{ inputs.git-ref == 'patches/2.0' }}
+        run: |
+          git push origin --delete patches/2.0 || true
+          git checkout -b patches/2.0
+          git push --set-upstream origin patches/2.0
+
+      - name: Create beta branch
+        if: ${{ inputs.git-ref == 'releases/beta' }}
+        run: |
+          git push origin --delete releases/beta || true
+          git checkout -b releases/beta
+          git push --set-upstream origin releases/beta
+
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@master
         with:
@@ -684,7 +710,7 @@ jobs:
           # Update the version to a nightly one
           sed -i "s#^version = \".*\"#version = \"${version}\"#" sdk/Cargo.toml
           sed -i "s#^version = \".*\"#version = \"${version}\"#" core/Cargo.toml
-          sed -i "s#surrealdb-core = { version = \"${major}\"#surrealdb-core = { version = \"=${version}\"#" sdk/Cargo.toml
+          sed -i "s#surrealdb-core = { version = \"=${currentVersion}\"#surrealdb-core = { version = \"=${version}\"#" sdk/Cargo.toml
 
       - name: Patch crate name and description
         if: ${{ inputs.environment != 'stable' }}
@@ -761,6 +787,7 @@ jobs:
     needs: [ prepare-vars, publish ]
     uses: ./.github/workflows/reusable_docker.yml
     with:
+      environment: ${{ inputs.environment }}
       git-ref: ${{ needs.prepare-vars.outputs.git-ref }}
       tag-prefix: ${{ needs.prepare-vars.outputs.name }}
       latest: ${{ inputs.latest }}

@@ -29,14 +29,14 @@ impl Document {
 			// Setup a new workable
 			let ins = match pro.val {
 				Operable::Value(v) => (v, Workable::Normal),
-				Operable::Mergeable(v, o) => (v, Workable::Insert(o)),
-				Operable::Relatable(f, v, w, o) => (v, Workable::Relate(f, w, o)),
+				Operable::Mergeable(v, o, u) => (v, Workable::Insert(o, u)),
+				Operable::Relatable(f, v, w, o, u) => (v, Workable::Relate(f, w, o, u)),
 			};
 			// Setup a new document
 			let mut doc = Document::new(pro.rid, pro.ir, ins.0, ins.1);
 			// Optionally create a save point so we can roll back any upcoming changes
-			let is_save_point = if !stm.is_select() {
-				ctx.tx().lock().await.new_save_point();
+			let is_save_point = if stm.is_retryable() {
+				ctx.tx().lock().await.new_save_point().await;
 				true
 			} else {
 				false
@@ -75,16 +75,16 @@ impl Document {
 						ir: None,
 						val: match doc.extras {
 							Workable::Normal => Operable::Value(val),
-							Workable::Insert(o) => Operable::Mergeable(val, o),
-							Workable::Relate(f, w, o) => Operable::Relatable(f, val, w, o),
+							Workable::Insert(o, _) => Operable::Mergeable(val, o, true),
+							Workable::Relate(f, w, o, _) => Operable::Relatable(f, val, w, o, true),
 						},
 					};
 					// Go to top of loop
 					continue;
 				}
+				// This record didn't match conditions, so skip
 				Err(Error::Ignore) => Err(Error::Ignore),
-				// If any other error was received, then let's
-				// pass that error through and return an error
+				// Pass other errors through and return the error
 				Err(e) => {
 					// We roll back any change following the save point
 					if is_save_point {
@@ -96,7 +96,7 @@ impl Document {
 				Ok(v) => {
 					// The statement is successful, we can release the savepoint
 					if is_save_point {
-						ctx.tx().lock().await.release_last_save_point()?;
+						ctx.tx().lock().await.release_last_save_point().await?;
 					}
 					Ok(v)
 				}

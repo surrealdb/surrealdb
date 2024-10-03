@@ -14,13 +14,10 @@ impl Document {
 		opt: &Options,
 		stm: &Statement<'_>,
 	) -> Result<Value, Error> {
-		// Check if record exists
-		self.empty(ctx, opt, stm).await?;
-		// Check where clause
-		self.check(stk, ctx, opt, stm).await?;
-		// Check if allowed
-		self.allow(stk, ctx, opt, stm).await?;
-		// Yield document
+		self.check_record_exists(ctx, opt, stm).await?;
+		self.check_permissions_quick(stk, ctx, opt, stm).await?;
+		self.check_where_condition(stk, ctx, opt, stm).await?;
+		self.check_permissions_table(stk, ctx, opt, stm).await?;
 		self.pluck(stk, ctx, opt, stm).await
 	}
 }

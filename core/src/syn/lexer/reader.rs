@@ -92,6 +92,11 @@ impl<'a> BytesReader<'a> {
 	}
 
 	#[inline]
+	pub fn peek1(&self) -> Option<u8> {
+		self.remaining().get(1).copied()
+	}
+
+	#[inline]
 	pub fn span(&self, span: Span) -> &'a [u8] {
 		&self.data[(span.offset as usize)..(span.offset as usize + span.len as usize)]
 	}

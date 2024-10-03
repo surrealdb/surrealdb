@@ -21,6 +21,18 @@ pub static MAX_CONCURRENT_TASKS: LazyLock<usize> =
 pub static MAX_COMPUTATION_DEPTH: LazyLock<u32> =
 	lazy_env_parse!("SURREAL_MAX_COMPUTATION_DEPTH", u32, 120);
 
+/// Specifies how deep the parser will parse nested objects and arrays in a query.
+pub static MAX_OBJECT_PARSING_DEPTH: LazyLock<u32> =
+	lazy_env_parse!("SURREAL_MAX_OBJECT_PARSING_DEPTH", u32, 100);
+
+/// Specifies how deep the parser will parse recursive queries (queries within queries).
+pub static MAX_QUERY_PARSING_DEPTH: LazyLock<u32> =
+	lazy_env_parse!("SURREAL_MAX_QUERY_PARSING_DEPTH", u32, 20);
+
+/// Specifies the number of computed regexes which can be cached in the engine.
+pub static REGEX_CACHE_SIZE: LazyLock<usize> =
+	lazy_env_parse!("SURREAL_REGEX_CACHE_SIZE", usize, 1_000);
+
 /// Specifies the number of items which can be cached within a single transaction.
 pub static TRANSACTION_CACHE_SIZE: LazyLock<usize> =
 	lazy_env_parse!("SURREAL_TRANSACTION_CACHE_SIZE", usize, 10_000);
@@ -61,8 +73,10 @@ pub static EXTERNAL_SORTING_BUFFER_LIMIT: LazyLock<usize> =
 pub static GRAPHQL_ENABLE: LazyLock<bool> =
 	lazy_env_parse!("SURREAL_EXPERIMENTAL_GRAPHQL", bool, false);
 
-/// Enable experimental bearer access and stateful access grant management. Still under active development.
-/// Using this experimental feature may introduce risks related to breaking changes and security issues.
+/// Enable experimental bearer access and stateful access grant management.
+///
+/// Still under active development. Using this experimental feature may introduce risks related
+/// to breaking changes and security issues.
 #[cfg(not(test))]
 pub static EXPERIMENTAL_BEARER_ACCESS: LazyLock<bool> =
 	lazy_env_parse!("SURREAL_EXPERIMENTAL_BEARER_ACCESS", bool, false);

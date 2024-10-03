@@ -16,7 +16,12 @@ use reblessive::tree::Stk;
 use std::sync::Arc;
 
 impl Document {
-	pub async fn lives(
+	/// Processes any LIVE SELECT statements which
+	/// have been defined for the table which this
+	/// record belongs to. This functions loops
+	/// through the live queries and processes them
+	/// all within the currently running transaction.
+	pub async fn process_table_lives(
 		&mut self,
 		stk: &mut Stk,
 		ctx: &Context,
@@ -47,6 +52,9 @@ impl Document {
 				} else {
 					Value::from("UPDATE")
 				};
+				// Get the record if of this docunent
+				let rid = self.id.as_ref().unwrap();
+				// Get the current and initial docs
 				let current = self.current.doc.as_arc();
 				let initial = self.initial.doc.as_arc();
 				// Check if this is a delete statement
@@ -119,6 +127,7 @@ impl Document {
 						chn.send(Notification {
 							id: lv.id,
 							action: Action::Delete,
+							record: Value::Thing(rid.as_ref().clone()),
 							result: {
 								// Ensure futures are run
 								let lqopt: &Options = &lqopt.new_with_futures(true);
@@ -141,6 +150,7 @@ impl Document {
 						chn.send(Notification {
 							id: lv.id,
 							action: Action::Create,
+							record: Value::Thing(rid.as_ref().clone()),
 							result: self.pluck(stk, &lqctx, &lqopt, &lq).await?,
 						})
 						.await?;
@@ -153,6 +163,7 @@ impl Document {
 						chn.send(Notification {
 							id: lv.id,
 							action: Action::Update,
+							record: Value::Thing(rid.as_ref().clone()),
 							result: self.pluck(stk, &lqctx, &lqopt, &lq).await?,
 						})
 						.await?;

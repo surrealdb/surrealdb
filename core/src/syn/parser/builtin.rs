@@ -3,10 +3,7 @@ use crate::{
 	sql::{Constant, Function, Value},
 	syn::{
 		error::MessageKind,
-		parser::{
-			mac::{expected, unexpected},
-			SyntaxError,
-		},
+		parser::{mac::expected, unexpected, SyntaxError},
 		token::{t, Span},
 	},
 };
@@ -185,6 +182,7 @@ pub(crate) static PATHS: phf::Map<UniCase<&'static str>, PathKind> = phf_map! {
 		UniCase::ascii("geo::distance") => PathKind::Function,
 		UniCase::ascii("geo::hash::decode") => PathKind::Function,
 		UniCase::ascii("geo::hash::encode") => PathKind::Function,
+		UniCase::ascii("geo::is::valid") => PathKind::Function,
 		//
 		UniCase::ascii("http::head") => PathKind::Function,
 		UniCase::ascii("http::get") => PathKind::Function,
@@ -235,6 +233,9 @@ pub(crate) static PATHS: phf::Map<UniCase<&'static str>, PathKind> = phf_map! {
 		UniCase::ascii("math::top") => PathKind::Function,
 		UniCase::ascii("math::trimean") => PathKind::Function,
 		UniCase::ascii("math::variance") => PathKind::Function,
+		//
+		UniCase::ascii("meta::id") => PathKind::Function,
+		UniCase::ascii("meta::tb") => PathKind::Function,
 		//
 		UniCase::ascii("not") => PathKind::Function,
 		//
@@ -324,6 +325,7 @@ pub(crate) static PATHS: phf::Map<UniCase<&'static str>, PathKind> = phf_map! {
 		UniCase::ascii("string::is::numeric") => PathKind::Function,
 		UniCase::ascii("string::is::semver") => PathKind::Function,
 		UniCase::ascii("string::is::url") => PathKind::Function,
+		UniCase::ascii("string::is::ulid") => PathKind::Function,
 		UniCase::ascii("string::is::uuid") => PathKind::Function,
 		UniCase::ascii("string::is::record") => PathKind::Function,
 		UniCase::ascii("string::semver::compare") => PathKind::Function,
@@ -367,7 +369,9 @@ pub(crate) static PATHS: phf::Map<UniCase<&'static str>, PathKind> = phf_map! {
 		UniCase::ascii("time::from::millis") => PathKind::Function,
 		UniCase::ascii("time::from::nanos") => PathKind::Function,
 		UniCase::ascii("time::from::secs") => PathKind::Function,
+		UniCase::ascii("time::from::ulid") => PathKind::Function,
 		UniCase::ascii("time::from::unix") => PathKind::Function,
+		UniCase::ascii("time::from::uuid") => PathKind::Function,
 		UniCase::ascii("time::is::leap_year") => PathKind::Function,
 		//
 		UniCase::ascii("type::array") => PathKind::Function,
@@ -460,16 +464,17 @@ pub(crate) static PATHS: phf::Map<UniCase<&'static str>, PathKind> = phf_map! {
 		UniCase::ascii("math::PI") => PathKind::Constant(Constant::MathPi),
 		UniCase::ascii("math::SQRT_2") => PathKind::Constant(Constant::MathSqrt2),
 		UniCase::ascii("math::TAU") => PathKind::Constant(Constant::MathTau),
+		UniCase::ascii("time::EPOCH") => PathKind::Constant(Constant::TimeEpoch)
 };
 
 impl Parser<'_> {
 	/// Parse a builtin path.
-	pub async fn parse_builtin(&mut self, stk: &mut Stk, start: Span) -> ParseResult<Value> {
+	pub(super) async fn parse_builtin(&mut self, stk: &mut Stk, start: Span) -> ParseResult<Value> {
 		let mut last_span = start;
 		while self.eat(t!("::")) {
-			let t = self.glue_ident(false)?;
-			if !Self::tokenkind_can_start_ident(t.kind) {
-				unexpected!(self, t, "an identifier")
+			let peek = self.peek();
+			if !Self::kind_is_identifier(peek.kind) {
+				unexpected!(self, peek, "an identifier")
 			}
 			self.pop_peek();
 			last_span = self.last_span();
@@ -518,7 +523,7 @@ impl Parser<'_> {
 	}
 
 	/// Parse a call to a builtin function.
-	pub async fn parse_builtin_function(
+	pub(super) async fn parse_builtin_function(
 		&mut self,
 		stk: &mut Stk,
 		name: String,
@@ -530,7 +535,7 @@ impl Parser<'_> {
 				break;
 			}
 
-			let arg = stk.run(|ctx| self.parse_value_field(ctx)).await?;
+			let arg = stk.run(|ctx| self.parse_value_inherit(ctx)).await?;
 			args.push(arg);
 
 			if !self.eat(t!(",")) {

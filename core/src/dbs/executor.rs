@@ -27,6 +27,8 @@ use trice::Instant;
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen_futures::spawn_local as spawn;
 
+const TARGET: &str = "surrealdb::core::dbs";
+
 pub(crate) struct Executor<'a> {
 	err: bool,
 	kvs: &'a Datastore,
@@ -42,8 +44,8 @@ impl<'a> Executor<'a> {
 		}
 	}
 
-	fn txn(&self) -> Arc<Transaction> {
-		self.txn.clone().expect("unreachable: txn was None after successful begin")
+	fn txn(&self) -> Result<Arc<Transaction>, Error> {
+		self.txn.clone().ok_or_else(|| fail!("txn was None after successful begin"))
 	}
 
 	/// # Return
@@ -184,7 +186,7 @@ impl<'a> Executor<'a> {
 		Ok(ctx.freeze())
 	}
 
-	#[instrument(level = "debug", name = "executor", skip_all)]
+	#[instrument(level = "debug", name = "executor", target = "surrealdb::core::dbs", skip_all)]
 	pub async fn execute(
 		&mut self,
 		mut ctx: Context,
@@ -207,7 +209,7 @@ impl<'a> Executor<'a> {
 		// Process all statements in query
 		for stm in qry.into_iter() {
 			// Log the statement
-			debug!("Executing: {}", stm);
+			trace!(target: TARGET, statement = %stm, "Executing statement");
 			// Reset errors
 			if self.txn.is_none() {
 				self.err = false;
@@ -257,17 +259,11 @@ impl<'a> Executor<'a> {
 				}
 				// Begin a new transaction
 				Statement::Begin(_) => {
-					if opt.import {
-						continue;
-					}
 					self.begin(Write).await;
 					continue;
 				}
 				// Cancel a running transaction
 				Statement::Cancel(_) => {
-					if opt.import {
-						continue;
-					}
 					self.cancel(true).await;
 					self.clear(&ctx, recv.clone()).await;
 					buf = buf.into_iter().map(|v| self.buf_cancel(v)).collect();
@@ -278,9 +274,6 @@ impl<'a> Executor<'a> {
 				}
 				// Commit a running transaction
 				Statement::Commit(_) => {
-					if opt.import {
-						continue;
-					}
 					let commit_error = self.commit(true).await.err();
 					buf = buf.into_iter().map(|v| self.buf_commit(v, &commit_error)).collect();
 					self.flush(&ctx, recv.clone()).await;
@@ -312,7 +305,7 @@ impl<'a> Executor<'a> {
 						false => {
 							// ctx.set_transaction(txn)
 							let mut c = MutableContext::unfreeze(ctx)?;
-							c.set_transaction(self.txn());
+							c.set_transaction(self.txn()?);
 							ctx = c.freeze();
 							// Check the statement
 							match stack
@@ -376,7 +369,7 @@ impl<'a> Executor<'a> {
 								// Create a new context for this statement
 								let mut ctx = MutableContext::new(&ctx);
 								// Set the transaction on the context
-								ctx.set_transaction(self.txn());
+								ctx.set_transaction(self.txn()?);
 								let c = ctx.freeze();
 								// Process the statement
 								let res = stack
@@ -385,8 +378,12 @@ impl<'a> Executor<'a> {
 									.await;
 								ctx = MutableContext::unfreeze(c)?;
 								// Check if this is a RETURN statement
-								let can_return =
-									matches!(stm, Statement::Output(_) | Statement::Value(_));
+								let can_return = matches!(
+									stm,
+									Statement::Output(_)
+										| Statement::Value(_) | Statement::Ifelse(_)
+										| Statement::Foreach(_)
+								);
 								// Catch global timeout
 								let res = match ctx.is_timedout() {
 									true => Err(Error::QueryTimedout),

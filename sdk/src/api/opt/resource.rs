@@ -315,6 +315,11 @@ pub trait IntoResource<Output> {
 	fn into_resource(self) -> Result<Resource>;
 }
 
+/// A trait for types which can be used as a resource selection for a query that returns an `Option`.
+pub trait CreateResource<Output> {
+	fn into_resource(self) -> Result<Resource>;
+}
+
 fn no_colon(a: &str) -> Result<()> {
 	if a.contains(':') {
 		return Err(Error::TableColonId {
@@ -324,6 +329,8 @@ fn no_colon(a: &str) -> Result<()> {
 	}
 	Ok(())
 }
+
+// IntoResource
 
 impl IntoResource<Value> for Resource {
 	fn into_resource(self) -> Result<Resource> {
@@ -411,5 +418,72 @@ impl<R> IntoResource<Vec<R>> for &String {
 impl<R> IntoResource<Vec<R>> for () {
 	fn into_resource(self) -> Result<Resource> {
 		Ok(Resource::Unspecified)
+	}
+}
+
+// CreateResource
+
+impl CreateResource<Value> for Resource {
+	fn into_resource(self) -> Result<Resource> {
+		Ok(self)
+	}
+}
+
+impl<R> CreateResource<Option<R>> for Object {
+	fn into_resource(self) -> Result<Resource> {
+		Ok(self.into())
+	}
+}
+
+impl<R> CreateResource<Option<R>> for RecordId {
+	fn into_resource(self) -> Result<Resource> {
+		Ok(self.into())
+	}
+}
+
+impl<R> CreateResource<Option<R>> for &RecordId {
+	fn into_resource(self) -> Result<Resource> {
+		Ok(self.clone().into())
+	}
+}
+
+impl<R, T, I> CreateResource<Option<R>> for (T, I)
+where
+	T: Into<String>,
+	I: Into<RecordIdKey>,
+{
+	fn into_resource(self) -> Result<Resource> {
+		Ok(self.into())
+	}
+}
+
+impl<T, R> CreateResource<Option<R>> for Table<T>
+where
+	T: Into<String>,
+{
+	fn into_resource(self) -> Result<Resource> {
+		let t = self.0.into();
+		Ok(t.into())
+	}
+}
+
+impl<R> CreateResource<Option<R>> for &str {
+	fn into_resource(self) -> Result<Resource> {
+		no_colon(self)?;
+		Ok(self.into())
+	}
+}
+
+impl<R> CreateResource<Option<R>> for String {
+	fn into_resource(self) -> Result<Resource> {
+		no_colon(&self)?;
+		Ok(self.into())
+	}
+}
+
+impl<R> CreateResource<Option<R>> for &String {
+	fn into_resource(self) -> Result<Resource> {
+		no_colon(self)?;
+		Ok(self.into())
 	}
 }

@@ -84,31 +84,46 @@ impl Datastore {
 	pub async fn expire_nodes(&self) -> Result<(), Error> {
 		// Log when this method is run
 		trace!(target: TARGET, "Archiving expired nodes in the cluster");
-		// Open transaction and fetch nodes
-		let txn = self.transaction(Write, Optimistic).await?;
-		let now = self.clock_now().await;
-		let nds = catch!(txn, txn.all_nodes().await);
-		for nd in nds.iter() {
-			// Check that the node is active
-			if nd.is_active() {
-				// Check if the node has expired
-				if nd.hb < now - Duration::from_secs(30) {
-					// Log the live query scanning
-					trace!(target: TARGET, id = %nd.id, "Archiving node in the cluster");
-					// Mark the node as archived
-					let val = nd.archive();
-					// Get the key for the node entry
-					let key = crate::key::root::nd::new(nd.id);
-					// Update the node entry
-					catch!(txn, txn.set(key, val, None).await);
-				}
+		// Fetch all of the inactive nodes
+		let inactive = {
+			let txn = self.transaction(Read, Optimistic).await?;
+			let nds = catch!(txn, txn.all_nodes().await);
+			let now = self.clock_now().await;
+			catch!(txn, txn.cancel().await);
+			// Filter the inactive nodes
+			nds.iter()
+				.filter_map(|n| {
+					// Check that the node is active and has expired
+					match n.is_active() && n.hb < now - Duration::from_secs(30) {
+						true => Some(n.to_owned()),
+						false => None,
+					}
+				})
+				.collect::<Vec<_>>()
+		};
+		// Check if there are inactive nodes
+		if !inactive.is_empty() {
+			// Open a writeable transaction
+			let txn = self.transaction(Write, Optimistic).await?;
+			// Archive the inactive nodes
+			for nd in inactive.iter() {
+				// Log the live query scanning
+				trace!(target: TARGET, id = %nd.id, "Archiving node in the cluster");
+				// Mark the node as archived
+				let val = nd.archive();
+				// Get the key for the node entry
+				let key = crate::key::root::nd::new(nd.id);
+				// Update the node entry
+				catch!(txn, txn.set(key, val, None).await);
 			}
+			// Commit the changes
+			catch!(txn, txn.commit().await);
 		}
-		// Commit the changes
-		txn.commit().await
+		// Everything was successful
+		Ok(())
 	}
 
-	/// Cleans up nodes which are no longer in this cluster.
+	/// Removes and cleans up nodes which are no longer in this cluster.
 	///
 	/// This function should be run periodically at an interval.
 	///
@@ -116,23 +131,25 @@ impl Datastore {
 	/// When a matching node is found, all node queries, and table queries are
 	/// garbage collected, before the node itself is completely deleted.
 	#[instrument(err, level = "trace", target = "surrealdb::core::kvs::node", skip(self))]
-	pub async fn cleanup_nodes(&self) -> Result<(), Error> {
+	pub async fn remove_nodes(&self) -> Result<(), Error> {
 		// Log when this method is run
 		trace!(target: TARGET, "Cleaning up archived nodes in the cluster");
-		// Fetch all of the expired nodes
-		let expired = {
+		// Fetch all of the archived nodes
+		let archived = {
 			let txn = self.transaction(Read, Optimistic).await?;
 			let nds = catch!(txn, txn.all_nodes().await);
+			catch!(txn, txn.cancel().await);
 			// Filter the archived nodes
 			nds.iter().filter_map(Node::archived).collect::<Vec<_>>()
 		};
-		// Delete the live queries
-		{
-			for id in expired.iter() {
+		// Loop over the archived nodes
+		for id in archived.iter() {
+			// Open a writeable transaction
+			let txn = self.transaction(Write, Optimistic).await?;
+			{
 				// Log the live query scanning
 				trace!(target: TARGET, id = %id, "Deleting live queries for node");
 				// Scan the live queries for this node
-				let txn = self.transaction(Write, Optimistic).await?;
 				let beg = crate::key::node::lq::prefix(*id);
 				let end = crate::key::node::lq::suffix(*id);
 				let mut next = Some(beg..end);
@@ -145,7 +162,7 @@ impl Datastore {
 						// Get the key for this node live query
 						let nlq = catch!(txn, crate::key::node::lq::Lq::decode(k));
 						// Check that the node for this query is archived
-						if expired.contains(&nlq.nd) {
+						if archived.contains(&nlq.nd) {
 							// Get the key for this table live query
 							let tlq = crate::key::table::lq::new(&val.ns, &val.db, &val.tb, nlq.lq);
 							// Delete the table live query
@@ -155,15 +172,8 @@ impl Datastore {
 						}
 					}
 				}
-				// Commit the changes
-				txn.commit().await?;
 			}
-		}
-		// Delete the expired nodes
-		{
-			let txn = self.transaction(Write, Optimistic).await?;
-			// Loop over the nodes and delete
-			for id in expired.iter() {
+			{
 				// Log the node deletion
 				trace!(target: TARGET, id = %id, "Deleting node from the cluster");
 				// Get the key for the node entry
@@ -172,7 +182,7 @@ impl Datastore {
 				catch!(txn, txn.del(key).await);
 			}
 			// Commit the changes
-			txn.commit().await?;
+			catch!(txn, txn.commit().await);
 		}
 		// Everything was successful
 		Ok(())
@@ -192,8 +202,8 @@ impl Datastore {
 	pub async fn garbage_collect(&self) -> Result<(), Error> {
 		// Log the node deletion
 		trace!(target: TARGET, "Garbage collecting all miscellaneous data");
-		// Fetch expired nodes
-		let expired = {
+		// Fetch archived nodes
+		let archived = {
 			let txn = self.transaction(Read, Optimistic).await?;
 			let nds = catch!(txn, txn.all_nodes().await);
 			// Filter the archived nodes
@@ -240,7 +250,7 @@ impl Datastore {
 							// Get the node id and the live query id
 							let (nid, lid) = (stm.node.0, stm.id.0);
 							// Check that the node for this query is archived
-							if expired.contains(&stm.node) {
+							if archived.contains(&stm.node) {
 								// Get the key for this node live query
 								let tlq = catch!(txn, crate::key::table::lq::Lq::decode(k));
 								// Get the key for this table live query

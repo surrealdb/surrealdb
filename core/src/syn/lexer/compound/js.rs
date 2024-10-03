@@ -1,25 +1,19 @@
 use crate::syn::{
 	error::{MessageKind, SyntaxError},
 	lexer::unicode::chars::JS_LINE_TERIMATORS,
-	token::{t, CompoundToken, JavaScript, Span, TokenKind},
+	token::{t, Token},
 };
 
-use super::{CompoundValue, Lexer};
+use super::Lexer;
 
-impl CompoundValue for JavaScript {
-	const START: TokenKind = t!("{");
-
-	fn relex(lexer: &mut Lexer, _: Span) -> Result<CompoundToken<Self>, SyntaxError> {
-		let span = lex_js_function_body_inner(lexer)?;
-		Ok(CompoundToken {
-			value: JavaScript,
-			span,
-		})
-	}
+pub fn javascript(lexer: &mut Lexer, start: Token) -> Result<(), SyntaxError> {
+	assert_eq!(start.kind, t!("{"), "Invalid start of JavaScript compound token");
+	lex_js_function_body_inner(lexer)?;
+	Ok(())
 }
 
 /// Lex the body of a js function.
-fn lex_js_function_body_inner(lexer: &mut Lexer) -> Result<Span, SyntaxError> {
+fn lex_js_function_body_inner(lexer: &mut Lexer) -> Result<(), SyntaxError> {
 	let mut block_depth = 1;
 	loop {
 		let Some(byte) = lexer.reader.next() else {
@@ -61,7 +55,7 @@ fn lex_js_function_body_inner(lexer: &mut Lexer) -> Result<Span, SyntaxError> {
 		}
 	}
 
-	Ok(lexer.advance_span())
+	Ok(())
 }
 
 /// lex a js string with the given delimiter.

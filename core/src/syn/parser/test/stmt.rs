@@ -44,6 +44,10 @@ use crate::{
 };
 use chrono::{offset::TimeZone, NaiveDate, Offset, Utc};
 
+fn ident_field(name: &str) -> Value {
+	Value::Idiom(Idiom(vec![Part::Field(Ident(name.to_string()))]))
+}
+
 #[test]
 pub fn parse_analyze() {
 	let res = test_parse!(parse_stmt, r#"ANALYZE INDEX b on a"#).unwrap();
@@ -93,7 +97,7 @@ pub fn parse_continue() {
 fn parse_create() {
 	let res = test_parse!(
 		parse_stmt,
-		"CREATE ONLY foo SET bar = 3, foo +?= 4 RETURN VALUE foo AS bar TIMEOUT 1s PARALLEL"
+		"CREATE ONLY foo SET bar = 3, foo +?= baz RETURN VALUE foo AS bar TIMEOUT 1s PARALLEL"
 	)
 	.unwrap();
 	assert_eq!(
@@ -110,7 +114,7 @@ fn parse_create() {
 				(
 					Idiom(vec![Part::Field(Ident("foo".to_owned()))]),
 					Operator::Ext,
-					Value::Number(Number::Int(4))
+					Value::Idiom(Idiom(vec![Part::Field(Ident("baz".to_owned()))]))
 				),
 			])),
 			output: Some(Output::Fields(Fields(
@@ -208,7 +212,7 @@ fn parse_define_function() {
 				(Ident("b".to_string()), Kind::Array(Box::new(Kind::Bool), Some(3)))
 			],
 			block: Block(vec![Entry::Output(OutputStatement {
-				what: Value::Idiom(Idiom(vec![Part::Field(Ident("a".to_string()))])),
+				what: ident_field("a"),
 				fetch: None,
 			})]),
 			comment: Some(Strand("test".to_string())),
@@ -1361,7 +1365,7 @@ fn parse_define_param() {
 #[test]
 fn parse_define_table() {
 	let res =
-		test_parse!(parse_stmt, r#"DEFINE TABLE name DROP SCHEMAFUL CHANGEFEED 1s INCLUDE ORIGINAL PERMISSIONS FOR SELECT WHERE a = 1 AS SELECT foo FROM bar GROUP BY foo"#)
+		test_parse!(parse_stmt, r#"DEFINE TABLE name DROP SCHEMAFUL CHANGEFEED 1s INCLUDE ORIGINAL PERMISSIONS FOR DELETE FULL, FOR SELECT WHERE a = 1 AS SELECT foo FROM bar GROUP BY foo"#)
 			.unwrap();
 
 	assert_eq!(
@@ -1393,7 +1397,7 @@ fn parse_define_table() {
 				))),
 				create: Permission::None,
 				update: Permission::None,
-				delete: Permission::None,
+				delete: Permission::Full,
 			},
 			changefeed: Some(ChangeFeed {
 				expiry: std::time::Duration::from_secs(1),
@@ -1429,41 +1433,76 @@ fn parse_define_event() {
 
 #[test]
 fn parse_define_field() {
-	let res = test_parse!(
-		parse_stmt,
-		r#"DEFINE FIELD foo.*[*]... ON TABLE bar FLEX TYPE option<number | array<record<foo>,10>> VALUE null ASSERT true DEFAULT false PERMISSIONS FOR DELETE, UPDATE NONE, FOR create WHERE true"#
-	).unwrap();
+	// General
+	{
+		let res = test_parse!(
+			parse_stmt,
+			r#"DEFINE FIELD foo.*[*]... ON TABLE bar FLEX TYPE option<number | array<record<foo>,10>> VALUE null ASSERT true DEFAULT false PERMISSIONS FOR UPDATE NONE, FOR CREATE WHERE true"#
+		).unwrap();
 
-	assert_eq!(
-		res,
-		Statement::Define(DefineStatement::Field(DefineFieldStatement {
-			name: Idiom(vec![
-				Part::Field(Ident("foo".to_owned())),
-				Part::All,
-				Part::All,
-				Part::Flatten,
-			]),
-			what: Ident("bar".to_owned()),
-			flex: true,
-			kind: Some(Kind::Option(Box::new(Kind::Either(vec![
-				Kind::Number,
-				Kind::Array(Box::new(Kind::Record(vec![Table("foo".to_owned())])), Some(10))
-			])))),
-			readonly: false,
-			value: Some(Value::Null),
-			assert: Some(Value::Bool(true)),
-			default: Some(Value::Bool(false)),
-			permissions: Permissions {
-				delete: Permission::None,
-				update: Permission::None,
-				create: Permission::Specific(Value::Bool(true)),
-				select: Permission::Full,
-			},
-			comment: None,
-			if_not_exists: false,
-			overwrite: false,
-		}))
-	)
+		assert_eq!(
+			res,
+			Statement::Define(DefineStatement::Field(DefineFieldStatement {
+				name: Idiom(vec![
+					Part::Field(Ident("foo".to_owned())),
+					Part::All,
+					Part::All,
+					Part::Flatten,
+				]),
+				what: Ident("bar".to_owned()),
+				flex: true,
+				kind: Some(Kind::Option(Box::new(Kind::Either(vec![
+					Kind::Number,
+					Kind::Array(Box::new(Kind::Record(vec![Table("foo".to_owned())])), Some(10))
+				])))),
+				readonly: false,
+				value: Some(Value::Null),
+				assert: Some(Value::Bool(true)),
+				default: Some(Value::Bool(false)),
+				permissions: Permissions {
+					delete: Permission::Full,
+					update: Permission::None,
+					create: Permission::Specific(Value::Bool(true)),
+					select: Permission::Full,
+				},
+				comment: None,
+				if_not_exists: false,
+				overwrite: false,
+			}))
+		)
+	}
+
+	// Invalid DELETE permission
+	{
+		// TODO(gguillemas): Providing the DELETE permission should return a parse error in 3.0.0.
+		// Currently, the DELETE permission is just ignored to maintain backward compatibility.
+		let res =
+			test_parse!(parse_stmt, r#"DEFINE FIELD foo ON TABLE bar PERMISSIONS FOR DELETE NONE"#)
+				.unwrap();
+
+		assert_eq!(
+			res,
+			Statement::Define(DefineStatement::Field(DefineFieldStatement {
+				name: Idiom(vec![Part::Field(Ident("foo".to_owned())),]),
+				what: Ident("bar".to_owned()),
+				flex: false,
+				kind: None,
+				readonly: false,
+				value: None,
+				assert: None,
+				default: None,
+				permissions: Permissions {
+					delete: Permission::Full,
+					update: Permission::Full,
+					create: Permission::Full,
+					select: Permission::Full,
+				},
+				comment: None,
+				if_not_exists: false,
+				overwrite: false,
+			}))
+		)
+	}
 }
 
 #[test]
@@ -1712,16 +1751,10 @@ fn parse_if() {
 		res,
 		Statement::Ifelse(IfelseStatement {
 			exprs: vec![
-				(
-					Value::Idiom(Idiom(vec![Part::Field(Ident("foo".to_owned()))])),
-					Value::Idiom(Idiom(vec![Part::Field(Ident("bar".to_owned()))]))
-				),
-				(
-					Value::Idiom(Idiom(vec![Part::Field(Ident("faz".to_owned()))])),
-					Value::Idiom(Idiom(vec![Part::Field(Ident("baz".to_owned()))]))
-				)
+				(ident_field("foo"), ident_field("bar")),
+				(ident_field("faz"), ident_field("baz")),
 			],
-			close: Some(Value::Idiom(Idiom(vec![Part::Field(Ident("baq".to_owned()))])))
+			close: Some(ident_field("baq"))
 		})
 	)
 }
@@ -1735,21 +1768,15 @@ fn parse_if_block() {
 		Statement::Ifelse(IfelseStatement {
 			exprs: vec![
 				(
-					Value::Idiom(Idiom(vec![Part::Field(Ident("foo".to_owned()))])),
-					Value::Block(Box::new(Block(vec![Entry::Value(Value::Idiom(Idiom(vec![
-						Part::Field(Ident("bar".to_owned()))
-					])))]))),
+					ident_field("foo"),
+					Value::Block(Box::new(Block(vec![Entry::Value(ident_field("bar"))]))),
 				),
 				(
-					Value::Idiom(Idiom(vec![Part::Field(Ident("faz".to_owned()))])),
-					Value::Block(Box::new(Block(vec![Entry::Value(Value::Idiom(Idiom(vec![
-						Part::Field(Ident("baz".to_owned()))
-					])))]))),
+					ident_field("faz"),
+					Value::Block(Box::new(Block(vec![Entry::Value(ident_field("baz"))]))),
 				)
 			],
-			close: Some(Value::Block(Box::new(Block(vec![Entry::Value(Value::Idiom(Idiom(
-				vec![Part::Field(Ident("baq".to_owned()))]
-			)))])))),
+			close: Some(Value::Block(Box::new(Block(vec![Entry::Value(ident_field("baq"))])))),
 		})
 	)
 }
@@ -2082,6 +2109,51 @@ fn parse_insert() {
 }
 
 #[test]
+fn parse_insert_select() {
+	let res = test_parse!(parse_stmt, r#"INSERT IGNORE INTO bar (select foo from baz)"#).unwrap();
+	assert_eq!(
+		res,
+		Statement::Insert(InsertStatement {
+			into: Some(Value::Table(Table("bar".to_owned()))),
+			data: Data::SingleExpression(Value::Subquery(Box::new(Subquery::Select(
+				SelectStatement {
+					expr: Fields(
+						vec![Field::Single {
+							expr: Value::Idiom(Idiom(vec![Part::Field(Ident("foo".to_string()))])),
+							alias: None
+						}],
+						false
+					),
+					omit: None,
+					only: false,
+					what: Values(vec![Value::Table(Table("baz".to_string()))]),
+					with: None,
+					cond: None,
+					split: None,
+					group: None,
+					order: None,
+					limit: None,
+					start: None,
+					fetch: None,
+					version: None,
+					timeout: None,
+					parallel: false,
+					explain: None,
+					tempfiles: false
+				}
+			)))),
+			ignore: true,
+			update: None,
+			output: None,
+			version: None,
+			timeout: None,
+			parallel: false,
+			relation: false,
+		}),
+	)
+}
+
+#[test]
 fn parse_kill() {
 	let res = test_parse!(parse_stmt, r#"KILL $param"#).unwrap();
 	assert_eq!(
@@ -2157,10 +2229,8 @@ fn parse_return() {
 	assert_eq!(
 		res,
 		Statement::Output(OutputStatement {
-			what: Value::Idiom(Idiom(vec![Part::Field(Ident("RETRUN".to_owned()))])),
-			fetch: Some(Fetchs(vec![Fetch(Value::Idiom(Idiom(vec![Part::Field(
-				Ident("RETURN".to_owned()).to_owned()
-			)])))])),
+			what: ident_field("RETRUN"),
+			fetch: Some(Fetchs(vec![Fetch(ident_field("RETURN"))]))
 		}),
 	)
 }

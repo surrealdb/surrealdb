@@ -11,6 +11,7 @@ use crate::kvs::cache::Entry;
 use crate::kvs::cache::EntryWeighter;
 use crate::kvs::scanner::Scanner;
 use crate::kvs::Transactor;
+use crate::sql::statements::define::DefineConfigStatement;
 use crate::sql::statements::AccessGrant;
 use crate::sql::statements::DefineAccessStatement;
 use crate::sql::statements::DefineAnalyzerStatement;
@@ -101,11 +102,11 @@ impl Transaction {
 
 	/// Check if a key exists in the datastore.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
-	pub async fn exists<K>(&self, key: K) -> Result<bool, Error>
+	pub async fn exists<K>(&self, key: K, version: Option<u64>) -> Result<bool, Error>
 	where
 		K: Into<Key> + Debug,
 	{
-		self.lock().await.exists(key).await
+		self.lock().await.exists(key, version).await
 	}
 
 	/// Fetch a key from the datastore.
@@ -227,11 +228,16 @@ impl Transaction {
 	///
 	/// This function fetches the full range of keys, in a single request to the underlying datastore.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
-	pub async fn keys<K>(&self, rng: Range<K>, limit: u32) -> Result<Vec<Key>, Error>
+	pub async fn keys<K>(
+		&self,
+		rng: Range<K>,
+		limit: u32,
+		version: Option<u64>,
+	) -> Result<Vec<Key>, Error>
 	where
 		K: Into<Key> + Debug,
 	{
-		self.lock().await.keys(rng, limit).await
+		self.lock().await.keys(rng, limit, version).await
 	}
 
 	/// Retrieve a specific range of keys from the datastore.
@@ -279,7 +285,7 @@ impl Transaction {
 	where
 		K: Into<Key> + Debug,
 	{
-		Scanner::new(
+		Scanner::<(Key, Val)>::new(
 			self,
 			*NORMAL_FETCH_SIZE,
 			Range {
@@ -287,6 +293,22 @@ impl Transaction {
 				end: rng.end.into(),
 			},
 			version,
+		)
+	}
+
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
+	pub fn stream_keys<K>(&self, rng: Range<K>) -> impl Stream<Item = Result<Key, Error>> + '_
+	where
+		K: Into<Key> + Debug,
+	{
+		Scanner::<Key>::new(
+			self,
+			*NORMAL_FETCH_SIZE,
+			Range {
+				start: rng.start.into(),
+				end: rng.end.into(),
+			},
+			None,
 		)
 	}
 
@@ -651,6 +673,29 @@ impl Transaction {
 			}
 		}
 		.try_into_mls()
+	}
+
+	/// Retrieve all model definitions for a specific database.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
+	pub async fn all_db_configs(
+		&self,
+		ns: &str,
+		db: &str,
+	) -> Result<Arc<[DefineConfigStatement]>, Error> {
+		let key = crate::key::database::cg::prefix(ns, db);
+		let res = self.cache.get_value_or_guard_async(&key).await;
+		match res {
+			Ok(val) => val,
+			Err(cache) => {
+				let end = crate::key::database::cg::suffix(ns, db);
+				let val = self.getr(key..end, None).await?;
+				let val = val.convert().into();
+				let val = Entry::Cgs(Arc::clone(&val));
+				let _ = cache.insert(val.clone());
+				val
+			}
+		}
+		.try_into_cgs()
 	}
 
 	/// Retrieve all table definitions for a specific database.
@@ -1183,6 +1228,31 @@ impl Transaction {
 		.try_into_type()
 	}
 
+	/// Retrieve a specific config definition from a database.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
+	pub async fn get_db_config(
+		&self,
+		ns: &str,
+		db: &str,
+		cg: &str,
+	) -> Result<Arc<DefineConfigStatement>, Error> {
+		let key = crate::key::database::cg::new(ns, db, cg).encode()?;
+		let res = self.cache.get_value_or_guard_async(&key).await;
+		match res {
+			Ok(val) => val,
+			Err(cache) => {
+				let val = self.get(key, None).await?.ok_or_else(|| Error::CgNotFound {
+					value: cg.to_owned(),
+				})?;
+				let val: DefineConfigStatement = val.into();
+				let val = Entry::Any(Arc::new(val));
+				let _ = cache.insert(val.clone());
+				val
+			}
+		}
+		.try_into_type()
+	}
+
 	/// Retrieve a specific table definition.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
 	pub async fn get_tb(
@@ -1543,7 +1613,7 @@ impl Transaction {
 						val
 					}
 					// Check to see that the hierarchy exists
-					Err(Error::TbNotFound {
+					Err(Error::DbNotFound {
 						value,
 					}) if strict => {
 						self.get_ns(ns).await?;

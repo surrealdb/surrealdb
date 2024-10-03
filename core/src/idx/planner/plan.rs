@@ -1,6 +1,7 @@
 use crate::err::Error;
 use crate::idx::ft::MatchRef;
-use crate::idx::planner::tree::{GroupRef, IdiomPosition, IndexRef, Node};
+use crate::idx::planner::tree::{GroupRef, IdiomCol, IdiomPosition, IndexRef, Node};
+use crate::idx::planner::QueryPlannerParams;
 use crate::sql::statements::DefineIndexStatement;
 use crate::sql::with::With;
 use crate::sql::{Array, Expression, Idiom, Number, Object};
@@ -16,46 +17,45 @@ pub(super) struct PlanBuilder {
 	has_indexes: bool,
 	/// List of expressions that are not ranges, backed by an index
 	non_range_indexes: Vec<(Arc<Expression>, IndexOption)>,
-	/// List of indexes involved in this plan
-	with_indexes: Vec<IndexRef>,
+	/// List of indexes allowed in this plan
+	with_indexes: Option<Vec<IndexRef>>,
 	/// Group each possible optimisations local to a SubQuery
 	groups: BTreeMap<GroupRef, Group>, // The order matters because we want the plan to be consistent across repeated queries.
-	/// Does a group contains only AND relations?
-	all_and_groups: HashMap<GroupRef, bool>,
-	/// Does the whole query contains only AND relations?
-	all_and: bool,
-	/// Is every expression backed by an index?
-	all_exp_with_index: bool,
 }
 
 impl PlanBuilder {
 	pub(super) fn build(
 		root: Option<Node>,
-		with: Option<&With>,
-		with_indexes: Vec<IndexRef>,
+		params: &QueryPlannerParams,
+		with_indexes: Option<Vec<IndexRef>>,
 		order: Option<IndexOption>,
+		all_and_groups: HashMap<GroupRef, bool>,
+		all_and: bool,
+		all_expressions_with_index: bool,
 	) -> Result<Plan, Error> {
-		if let Some(With::NoIndex) = with {
-			return Ok(Plan::TableIterator(Some("WITH NOINDEX".to_string())));
-		}
 		let mut b = PlanBuilder {
 			has_indexes: false,
 			non_range_indexes: Default::default(),
 			groups: Default::default(),
 			with_indexes,
-			all_and_groups: Default::default(),
-			all_and: true,
-			all_exp_with_index: true,
 		};
+
+		// If we only count and there are no conditions and no aggregations, then we can only scan keys
+		let keys_only = params.is_keys_only();
+
+		if let Some(With::NoIndex) = params.with {
+			return Ok(Self::table_iterator(Some("WITH NOINDEX"), keys_only));
+		}
+
 		// Browse the AST and collect information
 		if let Some(root) = &root {
 			if let Err(e) = b.eval_node(root) {
-				return Ok(Plan::TableIterator(Some(e.to_string())));
+				return Ok(Self::table_iterator(Some(&e), keys_only));
 			}
 		}
 
 		// If every boolean operator are AND then we can use the single index plan
-		if b.all_and {
+		if all_and {
 			// TODO: This is currently pretty arbitrary
 			// We take the "first" range query if one is available
 			if let Some((_, group)) = b.groups.into_iter().next() {
@@ -73,10 +73,10 @@ impl PlanBuilder {
 			}
 		}
 		// If every expression is backed by an index with can use the MultiIndex plan
-		else if b.all_exp_with_index {
+		else if all_expressions_with_index {
 			let mut ranges = Vec::with_capacity(b.groups.len());
-			for (depth, group) in b.groups {
-				if b.all_and_groups.get(&depth) == Some(&true) {
+			for (gr, group) in b.groups {
+				if all_and_groups.get(&gr) == Some(&true) {
 					group.take_union_ranges(&mut ranges);
 				} else {
 					group.take_intersect_ranges(&mut ranges);
@@ -84,14 +84,21 @@ impl PlanBuilder {
 			}
 			return Ok(Plan::MultiIndex(b.non_range_indexes, ranges));
 		}
-		Ok(Plan::TableIterator(None))
+		Ok(Self::table_iterator(None, keys_only))
+	}
+
+	fn table_iterator(reason: Option<&str>, keys_only: bool) -> Plan {
+		let reason = reason.map(|s| s.to_string());
+		Plan::TableIterator(reason, keys_only)
 	}
 
 	// Check if we have an explicit list of index we can use
 	fn filter_index_option(&self, io: Option<&IndexOption>) -> Option<IndexOption> {
-		if let Some(io) = &io {
-			if !self.with_indexes.is_empty() && !self.with_indexes.contains(&io.ix_ref()) {
-				return None;
+		if let Some(io) = io {
+			if let Some(wi) = &self.with_indexes {
+				if !wi.contains(&io.ix_ref()) {
+					return None;
+				}
 			}
 		}
 		io.cloned()
@@ -106,11 +113,8 @@ impl PlanBuilder {
 				right,
 				exp,
 			} => {
-				let is_bool = self.check_boolean_operator(*group, exp.operator());
 				if let Some(io) = self.filter_index_option(io.as_ref()) {
 					self.add_index_option(*group, exp.clone(), io);
-				} else if self.all_exp_with_index && !is_bool {
-					self.all_exp_with_index = false;
 				}
 				self.eval_node(left)?;
 				self.eval_node(right)?;
@@ -118,26 +122,6 @@ impl PlanBuilder {
 			}
 			Node::Unsupported(reason) => Err(reason.to_owned()),
 			_ => Ok(()),
-		}
-	}
-
-	fn check_boolean_operator(&mut self, gr: GroupRef, op: &Operator) -> bool {
-		match op {
-			Operator::Neg | Operator::Or => {
-				if self.all_and {
-					self.all_and = false;
-				}
-				self.all_and_groups.entry(gr).and_modify(|b| *b = false).or_insert(false);
-				true
-			}
-			Operator::And => {
-				self.all_and_groups.entry(gr).or_insert(true);
-				true
-			}
-			_ => {
-				self.all_and_groups.entry(gr).or_insert(true);
-				false
-			}
 		}
 	}
 
@@ -161,7 +145,7 @@ impl PlanBuilder {
 
 pub(super) enum Plan {
 	/// Table full scan
-	TableIterator(Option<String>),
+	TableIterator(Option<String>, bool),
 	/// Index scan filtered on records matching a given expression
 	SingleIndex(Option<Arc<Expression>>, IndexOption),
 	/// Union of filtered index scans
@@ -174,8 +158,13 @@ pub(super) enum Plan {
 pub(super) struct IndexOption {
 	/// A reference to the index definition
 	ix_ref: IndexRef,
-	id: Idiom,
+	/// The idiom matching this index
+	id: Arc<Idiom>,
+	/// The index of the idiom in the index columns
+	id_col: IdiomCol,
+	/// The position of the idiom in the expression (Left or Right)
 	id_pos: IdiomPosition,
+	/// The index operator
 	op: Arc<IndexOperator>,
 }
 
@@ -189,19 +178,21 @@ pub(super) enum IndexOperator {
 	Matches(String, Option<MatchRef>),
 	Knn(Arc<Vec<Number>>, u32),
 	Ann(Arc<Vec<Number>>, u32, u32),
-	Order(bool),
+	Order,
 }
 
 impl IndexOption {
 	pub(super) fn new(
 		ix_ref: IndexRef,
-		id: Idiom,
+		id: Arc<Idiom>,
+		id_col: IdiomCol,
 		id_pos: IdiomPosition,
 		op: IndexOperator,
 	) -> Self {
 		Self {
 			ix_ref,
 			id,
+			id_col,
 			id_pos,
 			op: Arc::new(op),
 		}
@@ -236,7 +227,7 @@ impl IndexOption {
 		v.clone()
 	}
 
-	pub(crate) fn explain(&self, ix_def: &[DefineIndexStatement]) -> Value {
+	pub(crate) fn explain(&self, ix_def: &[Arc<DefineIndexStatement>]) -> Value {
 		let mut e = HashMap::new();
 		if let Some(ix) = ix_def.get(self.ix_ref as usize) {
 			e.insert("index", Value::from(ix.name.0.to_owned()));
@@ -283,16 +274,15 @@ impl IndexOption {
 				e.insert("operator", op);
 				e.insert("value", val);
 			}
-			IndexOperator::Order(asc) => {
+			IndexOperator::Order => {
 				e.insert("operator", Value::from("Order"));
-				e.insert("ascending", Value::from(*asc));
 			}
 		};
 		Value::from(e)
 	}
 }
 
-#[derive(Debug, Default, Eq, PartialEq, Hash)]
+#[derive(Debug, Clone, Default, Eq, PartialEq, Hash)]
 pub(super) struct RangeValue {
 	pub(super) value: Value,
 	pub(super) inclusive: bool,
@@ -453,14 +443,16 @@ mod tests {
 		let mut set = HashSet::new();
 		let io1 = IndexOption::new(
 			1,
-			Idiom::parse("test"),
+			Idiom::parse("test").into(),
+			0,
 			IdiomPosition::Right,
 			IndexOperator::Equality(Value::Array(Array::from(vec!["test"])).into()),
 		);
 
 		let io2 = IndexOption::new(
 			1,
-			Idiom::parse("test"),
+			Idiom::parse("test").into(),
+			0,
 			IdiomPosition::Right,
 			IndexOperator::Equality(Value::Array(Array::from(vec!["test"])).into()),
 		);

@@ -3,8 +3,8 @@ pub mod metrics;
 pub mod traces;
 
 use crate::cli::validator::parser::env_filter::CustomEnvFilter;
-use opentelemetry::metrics::MetricsError;
-use opentelemetry::Context;
+use crate::err::Error;
+use opentelemetry::global;
 use opentelemetry::KeyValue;
 use opentelemetry_sdk::resource::{
 	EnvResourceDetector, SdkProvidedResourceDetector, TelemetryResourceDetector,
@@ -19,6 +19,7 @@ use tracing_subscriber::util::SubscriberInitExt;
 use tracing_subscriber::EnvFilter;
 
 pub static OTEL_DEFAULT_RESOURCE: LazyLock<Resource> = LazyLock::new(|| {
+	// Set the default otel metadata if available
 	let res = Resource::from_detectors(
 		Duration::from_secs(5),
 		vec![
@@ -30,7 +31,6 @@ pub static OTEL_DEFAULT_RESOURCE: LazyLock<Resource> = LazyLock::new(|| {
 			Box::new(TelemetryResourceDetector),
 		],
 	);
-
 	// If no external service.name is set, set it to surrealdb
 	if res.get("service.name".into()).unwrap_or("".into()).as_str() == "unknown_service" {
 		res.merge(&Resource::new([KeyValue::new("service.name", "surrealdb")]))
@@ -57,6 +57,20 @@ impl Default for Builder {
 }
 
 impl Builder {
+	/// Install the tracing dispatcher globally
+	pub fn init(self) -> Result<(), Error> {
+		// Setup logs, tracing, and metrics
+		self.build()?.init();
+		// Everything ok
+		Ok(())
+	}
+
+	/// Set the log filter on the builder
+	pub fn with_filter(mut self, filter: CustomEnvFilter) -> Self {
+		self.filter = filter;
+		self
+	}
+
 	/// Set the log level on the builder
 	pub fn with_log_level(mut self, log_level: &str) -> Self {
 		if let Ok(filter) = filter_from_value(log_level) {
@@ -65,35 +79,30 @@ impl Builder {
 		self
 	}
 
-	/// Set the filter on the builder
-	pub fn with_filter(mut self, filter: CustomEnvFilter) -> Self {
-		self.filter = filter;
-		self
-	}
-
-	/// Build a tracing dispatcher with the fmt subscriber (logs) and the chosen tracer subscriber
-	pub fn build(self) -> Box<dyn Subscriber + Send + Sync + 'static> {
+	/// Build a tracing dispatcher with the logs and tracer subscriber
+	pub fn build(&self) -> Result<Box<dyn Subscriber + Send + Sync + 'static>, Error> {
 		// Setup a registry for composing layers
 		let registry = tracing_subscriber::registry();
 		// Setup logging layer
-		let registry = registry.with(logs::new(self.filter.clone()));
+		let registry = registry.with(logs::new(self.filter.clone())?);
 		// Setup tracing layer
-		let registry = registry.with(traces::new(self.filter));
+		let registry = registry.with(traces::new(self.filter.clone())?);
+		// Setup the metrics layer
+		if let Some(provider) = metrics::init()? {
+			global::set_meter_provider(provider);
+		}
 		// Return the registry
-		Box::new(registry)
-	}
-
-	/// Install the tracing dispatcher globally
-	pub fn init(self) {
-		self.build().init();
+		Ok(Box::new(registry))
 	}
 }
 
-pub fn shutdown() -> Result<(), MetricsError> {
+pub fn shutdown() -> Result<(), Error> {
+	// Output information to logs
+	trace!("Shutting down telemetry service");
 	// Flush all telemetry data and block until done
 	opentelemetry::global::shutdown_tracer_provider();
-	// Shutdown the metrics provider fully
-	metrics::shutdown(&Context::current())
+	// Everything ok
+	Ok(())
 }
 
 /// Create an EnvFilter from the given value. If the value is not a valid log level, it will be treated as EnvFilter directives.
@@ -108,13 +117,17 @@ pub fn filter_from_value(v: &str) -> Result<EnvFilter, ParseError> {
 		// Otherwise, let's show info and above
 		"info" => Ok(EnvFilter::default().add_directive(Level::INFO.into())),
 		// Otherwise, let's show debugs and above
-		"debug" => EnvFilter::builder()
-			.parse("warn,surreal=debug,surrealdb=debug,surrealcs=warn,surrealdb::core::kvs=debug"),
+		"debug" => EnvFilter::builder().parse(
+			"warn,surreal=debug,surrealdb=debug,surrealcs=warn,surrealdb::core::kvs::tr=debug",
+		),
 		// Specify the log level for each code area
-		"trace" => EnvFilter::builder()
-			.parse("warn,surreal=trace,surrealdb=trace,surrealcs=warn,surrealdb::core::kvs=debug"),
+		"trace" => EnvFilter::builder().parse(
+			"warn,surreal=trace,surrealdb=trace,surrealcs=warn,surrealdb::core::kvs::tr=debug",
+		),
 		// Check if we should show all surreal logs
-		"full" => EnvFilter::builder().parse("debug,surreal=trace,surrealdb=trace,surrealcs=debug"),
+		"full" => EnvFilter::builder().parse(
+			"debug,surreal=trace,surrealdb=trace,surrealcs=debug,surrealdb::core::kvs::tr=trace",
+		),
 		// Check if we should show all module logs
 		"all" => Ok(EnvFilter::default().add_directive(Level::TRACE.into())),
 		// Let's try to parse the custom log level
@@ -139,11 +152,12 @@ mod tests {
 			let otlp_endpoint = format!("http://{addr}");
 			temp_env::with_vars(
 				vec![
-					("SURREAL_TRACING_TRACER", Some("otlp")),
+					("SURREAL_TELEMETRY_PROVIDER", Some("otlp")),
 					("OTEL_EXPORTER_OTLP_ENDPOINT", Some(otlp_endpoint.as_str())),
 				],
 				|| {
-					let _enter = telemetry::builder().with_log_level("info").build().set_default();
+					let _enter =
+						telemetry::builder().with_log_level("info").build().unwrap().set_default();
 
 					println!("Sending span...");
 
@@ -180,11 +194,12 @@ mod tests {
 			let otlp_endpoint = format!("http://{addr}");
 			temp_env::with_vars(
 				vec![
-					("SURREAL_TRACING_TRACER", Some("otlp")),
+					("SURREAL_TELEMETRY_PROVIDER", Some("otlp")),
 					("OTEL_EXPORTER_OTLP_ENDPOINT", Some(otlp_endpoint.as_str())),
 				],
 				|| {
-					let _enter = telemetry::builder().with_log_level("debug").build().set_default();
+					let _enter =
+						telemetry::builder().with_log_level("debug").build().unwrap().set_default();
 
 					println!("Sending spans...");
 

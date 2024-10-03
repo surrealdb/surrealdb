@@ -22,7 +22,7 @@ macro_rules! unexpected {
 				$crate::syn::error::bail!("Unexpected whitespace, expected token {} to continue",$expected,  @__found.span$( $($t)* )?)
 			}
 			x => {
-				$crate::syn::error::bail!("Unexpected token {}, expected {}",x,$expected, @__found.span$( $($t)* )?)
+				$crate::syn::error::bail!("Unexpected token `{}`, expected {}",x,$expected, @__found.span$( $($t)* )?)
 			}
 		}
 	}};
@@ -39,6 +39,25 @@ macro_rules! expected {
 		}else{
 			$crate::syn::parser::unexpected!($parser,token, $($kind)*)
 		}
+	}};
+}
+
+/// Pops the last token, checks if it is the desired glue value and then returns the value.
+/// This will panic if the token was not correct or the value was already eat, both of which the
+/// parser should make sure to uphold.
+macro_rules! pop_glued {
+	($parser:expr, $variant:ident) => {{
+		let token = $parser.pop_peek();
+		debug_assert!(matches!(
+			token.kind,
+			$crate::syn::token::TokenKind::Glued($crate::syn::token::Glued::$variant)
+		));
+		let $crate::syn::parser::GluedValue::$variant(x) =
+			::std::mem::take(&mut $parser.glued_value)
+		else {
+			panic!("Glued value was already taken, while the glue token still in the token buffer.")
+		};
+		x
 	}};
 }
 
@@ -136,6 +155,7 @@ pub(crate) use enter_object_recursion;
 pub(crate) use enter_query_recursion;
 pub(crate) use expected;
 pub(crate) use expected_whitespace;
+pub(crate) use pop_glued;
 pub(crate) use unexpected;
 
 #[cfg(test)]

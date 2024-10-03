@@ -5,7 +5,7 @@ use thiserror::Error;
 
 use crate::sql::Kind;
 
-#[derive(Debug, Error)]
+#[derive(Error, Debug)]
 pub enum GqlError {
 	#[error("Database error: {0}")]
 	DbError(crate::err::Error),
@@ -14,9 +14,11 @@ pub enum GqlError {
 	#[error("Error resolving request: {0}")]
 	ResolverError(String),
 	#[error("No Namespace specified")]
-	UnpecifiedNamespace,
+	UnspecifiedNamespace,
 	#[error("No Database specified")]
-	UnpecifiedDatabase,
+	UnspecifiedDatabase,
+	#[error("GraphQL has not been configured for this database")]
+	NotConfigured,
 	#[error("Internal Error: {0}")]
 	InternalError(String),
 	#[error("Error converting value: {val} to type: {target}")]

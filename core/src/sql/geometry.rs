@@ -5,7 +5,7 @@ use crate::sql::fmt::Fmt;
 use crate::sql::value::Value;
 use geo::algorithm::contains::Contains;
 use geo::algorithm::intersects::Intersects;
-use geo::{Coord, LineString, Point, Polygon};
+use geo::{Coord, LineString, LinesIter, Point, Polygon};
 use geo_types::{MultiLineString, MultiPoint, MultiPolygon};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -67,6 +67,48 @@ impl Geometry {
 	pub fn is_collection(&self) -> bool {
 		matches!(self, Self::Collection(_))
 	}
+	/// Check if this has valid latitude and longitude points:
+	/// * -90 <= lat <= 90
+	/// * -180 <= lng <= 180
+	pub fn is_valid(&self) -> bool {
+		match self {
+			Geometry::Point(p) => {
+				(-90.0..=90.0).contains(&p.0.y) && (-180.0..=180.0).contains(&p.0.x)
+			}
+			Geometry::MultiPoint(v) => v
+				.iter()
+				.all(|p| (-90.0..=90.0).contains(&p.0.y) && (-180.0..=180.0).contains(&p.0.x)),
+			Geometry::Line(v) => v.lines_iter().all(|l| {
+				(-90.0..=90.0).contains(&l.start.y)
+					&& (-180.0..=180.0).contains(&l.start.x)
+					&& (-90.0..=90.0).contains(&l.end.y)
+					&& (-180.0..=180.0).contains(&l.end.x)
+			}),
+			Geometry::Polygon(v) => v.lines_iter().all(|l| {
+				(-90.0..=90.0).contains(&l.start.y)
+					&& (-180.0..=180.0).contains(&l.start.x)
+					&& (-90.0..=90.0).contains(&l.end.y)
+					&& (-180.0..=180.0).contains(&l.end.x)
+			}),
+			Geometry::MultiLine(v) => v.iter().all(|l| {
+				l.lines_iter().all(|l| {
+					(-90.0..=90.0).contains(&l.start.y)
+						&& (-180.0..=180.0).contains(&l.start.x)
+						&& (-90.0..=90.0).contains(&l.end.y)
+						&& (-180.0..=180.0).contains(&l.end.x)
+				})
+			}),
+			Geometry::MultiPolygon(v) => v.iter().all(|p| {
+				p.lines_iter().all(|l| {
+					(-90.0..=90.0).contains(&l.start.y)
+						&& (-180.0..=180.0).contains(&l.start.x)
+						&& (-90.0..=90.0).contains(&l.end.y)
+						&& (-180.0..=180.0).contains(&l.end.x)
+				})
+			}),
+			Geometry::Collection(v) => v.iter().all(Geometry::is_valid),
+		}
+	}
 	/// Get the type of this Geometry as text
 	pub fn as_type(&self) -> &'static str {
 		match self {
@@ -119,6 +161,7 @@ impl Geometry {
 			Self::Collection(v) => collection(v),
 		}
 	}
+
 	/// Get the GeoJSON object representation for this geometry
 	pub fn as_object(&self) -> Object {
 		let mut obj = BTreeMap::<String, Value>::new();
@@ -133,6 +176,88 @@ impl Geometry {
 		);
 
 		obj.into()
+	}
+
+	/// Converts a surreal value to a MultiPolygon if the array matches to a MultiPolygon.
+	pub(crate) fn array_to_multipolygon(v: &Value) -> Option<MultiPolygon<f64>> {
+		let mut res = Vec::new();
+		let Value::Array(v) = v else {
+			return None;
+		};
+		for x in v.iter() {
+			res.push(Self::array_to_polygon(x)?);
+		}
+		Some(MultiPolygon::new(res))
+	}
+
+	/// Converts a surreal value to a MultiLine if the array matches to a MultiLine.
+	pub(crate) fn array_to_multiline(v: &Value) -> Option<MultiLineString<f64>> {
+		let mut res = Vec::new();
+		let Value::Array(v) = v else {
+			return None;
+		};
+		for x in v.iter() {
+			res.push(Self::array_to_line(x)?);
+		}
+		Some(MultiLineString::new(res))
+	}
+
+	/// Converts a surreal value to a MultiPoint if the array matches to a MultiPoint.
+	pub(crate) fn array_to_multipoint(v: &Value) -> Option<MultiPoint<f64>> {
+		let mut res = Vec::new();
+		let Value::Array(v) = v else {
+			return None;
+		};
+		for x in v.iter() {
+			res.push(Self::array_to_point(x)?);
+		}
+		Some(MultiPoint::new(res))
+	}
+
+	/// Converts a surreal value to a Polygon if the array matches to a Polygon.
+	pub(crate) fn array_to_polygon(v: &Value) -> Option<Polygon<f64>> {
+		let mut res = Vec::new();
+		let Value::Array(v) = v else {
+			return None;
+		};
+		if v.is_empty() {
+			return None;
+		}
+		let first = Self::array_to_line(&v[0])?;
+		for x in &v[1..] {
+			res.push(Self::array_to_line(x)?);
+		}
+		Some(Polygon::new(first, res))
+	}
+
+	/// Converts a surreal value to a LineString if the array matches to a LineString.
+	pub(crate) fn array_to_line(v: &Value) -> Option<LineString<f64>> {
+		let mut res = Vec::new();
+		let Value::Array(v) = v else {
+			return None;
+		};
+		for x in v.iter() {
+			res.push(Self::array_to_point(x)?);
+		}
+		Some(LineString::from(res))
+	}
+
+	/// Converts a surreal value to a Point if the array matches to a point.
+	pub(crate) fn array_to_point(v: &Value) -> Option<Point<f64>> {
+		let Value::Array(v) = v else {
+			return None;
+		};
+		if v.len() != 2 {
+			return None;
+		}
+		// FIXME: This truncates decimals and large integers into a f64.
+		let Value::Number(ref a) = v.0[0] else {
+			return None;
+		};
+		let Value::Number(ref b) = v.0[1] else {
+			return None;
+		};
+		Some(Point::from(((*a).try_into().ok()?, (*b).try_into().ok()?)))
 	}
 }
 

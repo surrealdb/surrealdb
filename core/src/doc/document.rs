@@ -1,10 +1,12 @@
 use crate::ctx::Context;
+use crate::ctx::MutableContext;
 use crate::dbs::Options;
 use crate::dbs::Workable;
 use crate::err::Error;
 use crate::iam::Action;
 use crate::iam::ResourceKind;
 use crate::idx::planner::iterators::IteratorRecord;
+use crate::sql::permission::Permission;
 use crate::sql::statements::define::DefineEventStatement;
 use crate::sql::statements::define::DefineFieldStatement;
 use crate::sql::statements::define::DefineIndexStatement;
@@ -13,6 +15,7 @@ use crate::sql::statements::live::LiveStatement;
 use crate::sql::thing::Thing;
 use crate::sql::value::Value;
 use crate::sql::Base;
+use reblessive::tree::Stk;
 use std::fmt::{Debug, Formatter};
 use std::mem;
 use std::ops::Deref;
@@ -23,10 +26,12 @@ pub(crate) struct Document {
 	pub(super) extras: Workable,
 	pub(super) initial: CursorDoc,
 	pub(super) current: CursorDoc,
+	pub(super) initial_permitted: CursorDoc,
+	pub(super) current_permitted: CursorDoc,
 }
 
 #[non_exhaustive]
-#[cfg_attr(debug_assertions, derive(Debug))]
+#[derive(Clone, Debug)]
 pub struct CursorDoc {
 	pub(crate) rid: Option<Arc<Thing>>,
 	pub(crate) ir: Option<Arc<IteratorRecord>>,
@@ -34,8 +39,7 @@ pub struct CursorDoc {
 }
 
 #[non_exhaustive]
-#[cfg_attr(debug_assertions, derive(Debug))]
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub(crate) struct CursorValue {
 	mutable: Value,
 	read_only: Option<Arc<Value>>,
@@ -79,7 +83,6 @@ impl CursorValue {
 
 impl Deref for CursorValue {
 	type Target = Value;
-
 	fn deref(&self) -> &Self::Target {
 		self.as_ref()
 	}
@@ -166,7 +169,9 @@ impl Document {
 			id: id.clone(),
 			extras,
 			current: CursorDoc::new(id.clone(), ir.clone(), val.clone()),
-			initial: CursorDoc::new(id, ir, val),
+			initial: CursorDoc::new(id.clone(), ir.clone(), val.clone()),
+			current_permitted: CursorDoc::new(id.clone(), ir.clone(), val.clone()),
+			initial_permitted: CursorDoc::new(id.clone(), ir.clone(), val.clone()),
 		}
 	}
 
@@ -181,6 +186,118 @@ impl Document {
 	pub(crate) fn initial_doc(&self) -> &Value {
 		&self.initial.doc
 	}
+
+	pub(crate) async fn process_permitted_current(
+		&mut self,
+		stk: &mut Stk,
+		ctx: &Context,
+		opt: &Options,
+	) -> Result<(), Error> {
+		// Clone the fully permitted documents
+		self.current_permitted = self.current.clone();
+		// Check if this record exists
+		if self.id.is_some() {
+			// Should we run permissions checks?
+			if opt.check_perms(Action::View)? {
+				// Loop through all field statements
+				for fd in self.fd(ctx, opt).await?.iter() {
+					//
+					let mut out = self
+						.current
+						.doc
+						.as_ref()
+						.compute(stk, ctx, opt, Some(&self.current))
+						.await?;
+					// Loop over each field in document
+					for k in out.each(&fd.name).iter() {
+						// Process the field permissions
+						match &fd.permissions.select {
+							Permission::Full => (),
+							Permission::None => out.del(stk, ctx, opt, k).await?,
+							Permission::Specific(e) => {
+								// Disable permissions
+								let opt = &opt.new_with_perms(false);
+								// Get the current value
+								let val = Arc::new(self.current.doc.as_ref().pick(k));
+								// Configure the context
+								let mut ctx = MutableContext::new(ctx);
+								ctx.add_value("value", val);
+								let ctx = ctx.freeze();
+								// Process the PERMISSION clause
+								if !e
+									.compute(stk, &ctx, opt, Some(&self.current))
+									.await?
+									.is_truthy()
+								{
+									out.del(stk, &ctx, opt, k).await?
+								}
+							}
+						}
+					}
+					// Update the permitted document
+					self.current_permitted.doc = out.into();
+				}
+			}
+		}
+		// Carry on
+		Ok(())
+	}
+
+	pub(crate) async fn process_permitted_initial(
+		&mut self,
+		stk: &mut Stk,
+		ctx: &Context,
+		opt: &Options,
+	) -> Result<(), Error> {
+		// Clone the fully permitted documents
+		self.initial_permitted = self.initial.clone();
+		// Check if this record exists
+		if self.id.is_some() {
+			// Should we run permissions checks?
+			if opt.check_perms(Action::View)? {
+				// Loop through all field statements
+				for fd in self.fd(ctx, opt).await?.iter() {
+					//
+					let mut out = self
+						.initial
+						.doc
+						.as_ref()
+						.compute(stk, ctx, opt, Some(&self.initial))
+						.await?;
+					// Loop over each field in document
+					for k in out.each(&fd.name).iter() {
+						// Process the field permissions
+						match &fd.permissions.select {
+							Permission::Full => (),
+							Permission::None => out.del(stk, ctx, opt, k).await?,
+							Permission::Specific(e) => {
+								// Disable permissions
+								let opt = &opt.new_with_perms(false);
+								// Get the current value
+								let val = Arc::new(self.initial.doc.as_ref().pick(k));
+								// Configure the context
+								let mut ctx = MutableContext::new(ctx);
+								ctx.add_value("value", val);
+								let ctx = ctx.freeze();
+								// Process the PERMISSION clause
+								if !e
+									.compute(stk, &ctx, opt, Some(&self.initial))
+									.await?
+									.is_truthy()
+								{
+									out.del(stk, &ctx, opt, k).await?
+								}
+							}
+						}
+					}
+					// Update the permitted document
+					self.initial_permitted.doc = out.into();
+				}
+			}
+		}
+		// Carry on
+		Ok(())
+	}
 }
 
 impl Document {
@@ -191,7 +308,15 @@ impl Document {
 
 	/// Check if document is being created
 	pub fn is_new(&self) -> bool {
-		self.initial.doc.as_ref().is_none() && self.current.doc.as_ref().is_some()
+		self.initial.doc.as_ref().is_none()
+	}
+
+	/// Retrieve the record id for this document
+	pub fn id(&self) -> Result<Arc<Thing>, Error> {
+		match self.id.as_ref() {
+			Some(id) => Ok(id.clone()),
+			_ => Err(fail!("Expected a document id to be present")),
+		}
 	}
 
 	/// Get the table for this document
@@ -203,9 +328,9 @@ impl Document {
 		// Get transaction
 		let txn = ctx.tx();
 		// Get the record id
-		let rid = self.id.as_ref().unwrap();
+		let id = self.id()?;
 		// Get the table definition
-		let tb = txn.get_tb(opt.ns()?, opt.db()?, &rid.tb).await;
+		let tb = txn.get_tb(opt.ns()?, opt.db()?, &id.tb).await;
 		// Return the table or attempt to define it
 		match tb {
 			// The table doesn't exist
@@ -215,7 +340,7 @@ impl Document {
 				// Allowed to run?
 				opt.is_allowed(Action::Edit, ResourceKind::Table, &Base::Db)?;
 				// We can create the table automatically
-				txn.ensure_ns_db_tb(opt.ns()?, opt.db()?, &rid.tb, opt.strict).await
+				txn.ensure_ns_db_tb(opt.ns()?, opt.db()?, &id.tb, opt.strict).await
 			}
 			// There was an error
 			Err(err) => Err(err),
@@ -230,7 +355,7 @@ impl Document {
 		opt: &Options,
 	) -> Result<Arc<[DefineTableStatement]>, Error> {
 		// Get the record id
-		let id = self.id.as_ref().unwrap();
+		let id = self.id()?;
 		// Get the table definitions
 		ctx.tx().all_tb_views(opt.ns()?, opt.db()?, &id.tb).await
 	}
@@ -241,7 +366,7 @@ impl Document {
 		opt: &Options,
 	) -> Result<Arc<[DefineEventStatement]>, Error> {
 		// Get the record id
-		let id = self.id.as_ref().unwrap();
+		let id = self.id()?;
 		// Get the event definitions
 		ctx.tx().all_tb_events(opt.ns()?, opt.db()?, &id.tb).await
 	}
@@ -252,7 +377,7 @@ impl Document {
 		opt: &Options,
 	) -> Result<Arc<[DefineFieldStatement]>, Error> {
 		// Get the record id
-		let id = self.id.as_ref().unwrap();
+		let id = self.id()?;
 		// Get the field definitions
 		ctx.tx().all_tb_fields(opt.ns()?, opt.db()?, &id.tb, None).await
 	}
@@ -263,14 +388,14 @@ impl Document {
 		opt: &Options,
 	) -> Result<Arc<[DefineIndexStatement]>, Error> {
 		// Get the record id
-		let id = self.id.as_ref().unwrap();
+		let id = self.id()?;
 		// Get the index definitions
 		ctx.tx().all_tb_indexes(opt.ns()?, opt.db()?, &id.tb).await
 	}
 	// Get the lives for this document
 	pub async fn lv(&self, ctx: &Context, opt: &Options) -> Result<Arc<[LiveStatement]>, Error> {
 		// Get the record id
-		let id = self.id.as_ref().unwrap();
+		let id = self.id()?;
 		// Get the table definition
 		ctx.tx().all_tb_lives(opt.ns()?, opt.db()?, &id.tb).await
 	}

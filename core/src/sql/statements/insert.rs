@@ -141,7 +141,7 @@ impl fmt::Display for InsertStatement {
 		if let Some(into) = &self.into {
 			write!(f, " INTO {}", into)?;
 		}
-		write!(f, "{}", self.data)?;
+		write!(f, " {}", self.data)?;
 		if let Some(ref v) = self.update {
 			write!(f, " {v}")?
 		}
@@ -165,7 +165,7 @@ fn iterable(id: Thing, v: Value, relation: bool) -> Result<Iterable, Error> {
 	match relation {
 		false => Ok(Iterable::Mergeable(id, v)),
 		true => {
-			let _in = match v.pick(&*IN) {
+			let f = match v.pick(&*IN) {
 				Value::Thing(v) => v,
 				v => {
 					return Err(Error::InsertStatementIn {
@@ -173,7 +173,7 @@ fn iterable(id: Thing, v: Value, relation: bool) -> Result<Iterable, Error> {
 					})
 				}
 			};
-			let out = match v.pick(&*OUT) {
+			let w = match v.pick(&*OUT) {
 				Value::Thing(v) => v,
 				v => {
 					return Err(Error::InsertStatementOut {
@@ -181,7 +181,7 @@ fn iterable(id: Thing, v: Value, relation: bool) -> Result<Iterable, Error> {
 					})
 				}
 			};
-			Ok(Iterable::Relatable(_in, id, out, Some(v)))
+			Ok(Iterable::Relatable(f, id, w, Some(v)))
 		}
 	}
 }
