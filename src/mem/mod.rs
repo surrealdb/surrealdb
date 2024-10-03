@@ -10,7 +10,7 @@ pub static ALLOC: jemallocator::Jemalloc = jemallocator::Jemalloc;
 #[global_allocator]
 pub static ALLOC: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
-#[cfg(all(target_os = "linux", not(feature = "dhat-heap")))]
+#[cfg(all(target_os = "linux"))]
 #[global_allocator]
 pub static ALLOC: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
@@ -25,7 +25,3 @@ pub static ALLOC: jemallocator::Jemalloc = jemallocator::Jemalloc;
 #[cfg(target_os = "openbsd")]
 #[global_allocator]
 pub static ALLOC: jemallocator::Jemalloc = jemallocator::Jemalloc;
-
-#[cfg(all(target_os = "linux", feature = "dhat-heap"))]
-#[global_allocator]
-pub static ALLOC: dhat::Alloc = dhat::Alloc;
