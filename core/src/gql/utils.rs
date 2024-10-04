@@ -45,11 +45,9 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::dbs::Session;
 use crate::err::Error;
-use crate::fnc;
 use crate::iam::Error as IamError;
 use crate::kvs::Datastore;
 use crate::kvs::LockType;
-use crate::kvs::Transaction;
 use crate::kvs::TransactionType;
 use crate::sql;
 use crate::sql::part::Part;
@@ -122,9 +120,5 @@ impl GQLTx {
 			.await?;
 
 		Ok(res)
-	}
-
-	pub fn tx(&self) -> Arc<Transaction> {
-		self.ctx.tx()
 	}
 }

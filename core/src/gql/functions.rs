@@ -1,35 +1,18 @@
-use std::fmt::Display;
 use std::sync::Arc;
 
+use super::schema::{gql_to_sql_kind, sql_value_to_gql_value};
+use super::GqlError;
 use crate::dbs::Session;
-use crate::gql::schema::{kind_to_type, unwrap_type};
-use crate::kvs::{Datastore, Transaction};
-use crate::sql::statements::{DefineFieldStatement, DefineFunctionStatement, SelectStatement};
-use crate::sql::{self, Table};
-use crate::sql::{Cond, Fields};
-use crate::sql::{Expression, Function};
-use crate::sql::{Idiom, Kind};
-use crate::sql::{Statement, Thing};
+use crate::gql::schema::kind_to_type;
+use crate::gql::utils::GQLTx;
+use crate::kvs::Datastore;
+use crate::sql::statements::DefineFunctionStatement;
+use crate::sql::Value as SqlValue;
 use async_graphql::dynamic::Field;
 use async_graphql::dynamic::FieldFuture;
 use async_graphql::dynamic::InputValue;
-use async_graphql::dynamic::TypeRef;
-use async_graphql::dynamic::{Enum, FieldValue, ResolverContext, Type};
-use async_graphql::dynamic::{InputObject, Object};
-use async_graphql::indexmap::IndexMap;
-use async_graphql::Name;
-use async_graphql::Value as GqlValue;
-
-use super::error::resolver_error;
-use super::ext::IntoExt;
-use super::schema::{gql_to_sql_kind, sql_value_to_gql_value};
-use super::GqlError;
-use crate::gql::error::internal_error;
-use crate::gql::ext::TryAsExt;
-use crate::gql::utils::{GQLTx, GqlValueUtils};
-use crate::sql::Value as SqlValue;
-
-use crate::sql::statements::DefineTableStatement;
+use async_graphql::dynamic::Object;
+use async_graphql::dynamic::Type;
 
 pub async fn process_fns(
 	fns: Arc<[DefineFunctionStatement]>,
