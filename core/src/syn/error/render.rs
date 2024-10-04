@@ -77,7 +77,7 @@ impl Snippet {
 		explain: Option<&'static str>,
 		kind: MessageKind,
 	) -> Self {
-		let n_len = if source.len() > 0 { 1 } else { 0 };
+		let n_len = source.len().max(1);
 		let line = source.split('\n').nth(location.line - n_len).unwrap();
 		let (line, truncation, offset) = Self::truncate_line(line, location.column - n_len);
 
@@ -98,7 +98,7 @@ impl Snippet {
 		explain: Option<&str>,
 		kind: MessageKind,
 	) -> Self {
-		let n_len = if source.len() > 0 { 1 } else { 0 };
+		let n_len = source.len().max(1);
 		let line = source.split('\n').nth(location.start.line - n_len).unwrap();
 		let (line, truncation, offset) = Self::truncate_line(line, location.start.column - n_len);
 		let length = if location.start.line == location.end.line {
