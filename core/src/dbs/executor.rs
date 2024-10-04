@@ -136,7 +136,6 @@ impl Executor {
 			// Process all other normal statements
 			stmt => {
 				// The transaction began successfully
-				// Create a new context for this statement
 				Arc::get_mut(&mut self.ctx)
 					.ok_or_else(|| fail!("Tried to unfreeze a Context with multiple references"))?
 					.set_transaction(txn);
@@ -164,7 +163,7 @@ impl Executor {
 		&mut self,
 		kvs: &Datastore,
 		stmt: Statement,
-	) -> Result<Value, Error> {
+	) -> Result<Option<Value>, Error> {
 		// Don't even try to run if the query should already be finished.
 		match self.ctx.done() {
 			None => {}
@@ -178,12 +177,8 @@ impl Executor {
 
 		match stmt {
 			// These statements don't need a transaction.
-			Statement::Option(stmt) => {
-				self.execute_option_statement(stmt)?;
-			}
-			Statement::Use(stmt) => {
-				self.execute_use_statement(stmt)?;
-			}
+			Statement::Option(stmt) => self.execute_option_statement(stmt).map(|_| None),
+			Statement::Use(stmt) => self.execute_use_statement(stmt).map(|_| Some(Value::None)),
 			stmt => {
 				let writeable = stmt.writeable();
 				let Ok(txn) = kvs.transaction(writeable.into(), LockType::Optimistic).await else {
@@ -209,7 +204,7 @@ impl Executor {
 						// has nothing to commit anyway.
 						if !writeable {
 							let _ = lock.cancel().await;
-							return Ok(value);
+							return Ok(Some(value));
 						}
 
 						if let Err(e) = lock.complete_changes(false).await {
@@ -240,7 +235,7 @@ impl Executor {
 							}
 						}
 
-						return Ok(value);
+						Ok(Some(value))
 					}
 					Err(e) => {
 						let _ = txn.cancel().await;
@@ -249,7 +244,6 @@ impl Executor {
 				}
 			}
 		}
-		Ok(Value::None)
 	}
 
 	/// Execute the begin statement and all statements after which are within a transaction block.
@@ -283,7 +277,7 @@ impl Executor {
 			return Ok(());
 		};
 
-		// Create a sender for this transaction.
+		// Create a sender for this transaction only if the context allows for notifications.
 		let receiver = self.ctx.has_notifications().then(|| {
 			let (send, recv) = channel::unbounded();
 			self.opt.sender = Some(send);
@@ -292,7 +286,6 @@ impl Executor {
 
 		let txn = Arc::new(txn);
 		let start_results = self.results.len();
-		let mut skip_remaining = false;
 
 		// loop over the statements until we hit a cancel or a commit statement.
 		while let Some(stmt) = stream.next().await {
@@ -332,15 +325,11 @@ impl Executor {
 					});
 				}
 
+				// Missing CANCEL/COMMIT statement, statement already canceled so nothing todo.
 				return Ok(());
 			}
 
 			trace!(target: TARGET, statement = %stmt, "Executing statement");
-
-			// Fast forward if we hit a return statement.
-			if skip_remaining && !matches!(stmt, Statement::Cancel(_) | Statement::Commit(_)) {
-				continue;
-			}
 
 			let query_type = match stmt {
 				Statement::Live(_) => QueryType::Live,
@@ -350,11 +339,10 @@ impl Executor {
 
 			let before = Instant::now();
 			let value = match stmt {
-				Statement::Option(stmt) => self.execute_option_statement(stmt).map(|_| Value::None),
-				Statement::Use(stmt) => self.execute_use_statement(stmt).map(|_| Value::None),
 				Statement::Begin(_) => {
 					let _ = txn.cancel().await;
 					// tried to begin a transaction within a transaction.
+
 					for res in &mut self.results[start_results..] {
 						res.query_type = QueryType::Other;
 						res.result = Err(Error::QueryCancelled);
@@ -370,6 +358,8 @@ impl Executor {
 						query_type: QueryType::Other,
 					});
 
+					self.opt.sender = None;
+
 					while let Some(stmt) = stream.next().await {
 						let stmt = stmt?;
 						if let Statement::Cancel(_) | Statement::Commit(_) = stmt {
@@ -383,11 +373,13 @@ impl Executor {
 						});
 					}
 
+					// Missing CANCEL/COMMIT statement, statement already canceled so nothing todo.
 					return Ok(());
 				}
 				Statement::Cancel(_) => {
 					let _ = txn.cancel().await;
 
+					// update the results indicating cancelation.
 					for res in &mut self.results[start_results..] {
 						res.query_type = QueryType::Other;
 						res.result = Err(Error::QueryCancelled);
@@ -439,17 +431,25 @@ impl Executor {
 
 					return Ok(());
 				}
+				Statement::Option(stmt) => match self.execute_option_statement(stmt) {
+					Ok(_) => {
+						// skip adding the value as executing an option statement doesn't produce
+						// results
+						continue;
+					}
+					Err(e) => Err(e),
+				},
+				Statement::Use(stmt) => self.execute_use_statement(stmt).map(|_| Value::None),
 				stmt => {
-					skip_remaining = matches!(stmt, Statement::Output(_));
+					let mut returns = matches!(stmt, Statement::Output(_));
 
-					match self.execute_transaction_statement(txn.clone(), stmt).await {
-						Ok(x) => Ok(x),
+					let value = match self.execute_transaction_statement(txn.clone(), stmt).await {
+						Ok(x) => x,
 						Err(Error::Return {
 							value,
 						}) => {
-							skip_remaining = true;
-							self.results.truncate(start_results);
-							Ok(value)
+							returns = true;
+							value
 						}
 						Err(e) => {
 							for res in &mut self.results[start_results..] {
@@ -466,6 +466,8 @@ impl Executor {
 
 							let _ = txn.cancel().await;
 
+							self.opt.sender = None;
+
 							while let Some(stmt) = stream.next().await {
 								let stmt = stmt?;
 								if let Statement::Cancel(_) | Statement::Commit(_) = stmt {
@@ -479,13 +481,35 @@ impl Executor {
 								});
 							}
 
-							self.opt.sender = None;
-
 							// ran out of statements before the transaction ended.
 							// Just break as we have nothing else we can do.
 							return Ok(());
 						}
+					};
+
+					if returns {
+						// if the value 'returns' then we remove all the results, skip the next
+						// statements and return
+						self.results.truncate(start_results);
+						self.results.push(Response {
+							time: before.elapsed(),
+							result: Ok(value),
+							query_type,
+						});
+
+						while let Some(stmt) = stream.next().await {
+							let stmt = stmt?;
+							if let Statement::Cancel(_) | Statement::Commit(_) = stmt {
+								return Ok(());
+							}
+						}
+
+						// ran out of statements before hitting CANCEL/COMMIT
+						// break and let the normal ran out of statements handle this case.
+						break;
 					}
+
+					Ok(value)
 				}
 			};
 
@@ -497,8 +521,7 @@ impl Executor {
 		}
 
 		// we ran out of query but we still have an open transaction.
-		// Be reserved and treat this essentially as a CANCEL statement.
-
+		// Be conservative and treat this essentially as a CANCEL statement.
 		let _ = txn.cancel().await;
 
 		for res in &mut self.results[start_results..] {
@@ -570,12 +593,14 @@ impl Executor {
 					};
 
 					let now = Instant::now();
-					let result = this.execute_bare_statement(kvs, stmt).await;
-					this.results.push(Response {
-						time: now.elapsed(),
-						result,
-						query_type,
-					});
+					let result = this.execute_bare_statement(kvs, stmt).await.transpose();
+					if let Some(result) = result {
+						this.results.push(Response {
+							time: now.elapsed(),
+							result,
+							query_type,
+						});
+					}
 				}
 			}
 		}
