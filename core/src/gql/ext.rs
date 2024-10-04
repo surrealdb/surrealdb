@@ -1,7 +1,7 @@
 use std::ops::Deref;
 
-use crate::sql::statements::define::config::graphql::TableConfig;
-use crate::sql::statements::DefineTableStatement;
+use crate::sql::statements::define::config::graphql::{FunctionsConfig, TableConfig};
+use crate::sql::statements::{DefineFunctionStatement, DefineTableStatement};
 use crate::sql::{
 	statements::UseStatement, Cond, Ident, Idiom, Limit, Order, Orders, Part, Start, Table, Value,
 };
@@ -175,6 +175,18 @@ impl Named for DefineTableStatement {
 impl Named for TableConfig {
 	fn name(&self) -> &str {
 		&self.name
+	}
+}
+
+impl Named for DefineFunctionStatement {
+	fn name(&self) -> &str {
+		&self.name
+	}
+}
+
+impl<T: AsRef<str>> Named for T {
+	fn name(&self) -> &str {
+		self.as_ref()
 	}
 }
 
