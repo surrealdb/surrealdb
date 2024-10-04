@@ -92,7 +92,10 @@ pub type ParseResult<T> = Result<T, SyntaxError>;
 #[non_exhaustive]
 pub enum PartialResult<T> {
 	MoreData,
-	Empty,
+	/// Parsing the source produced no reasonable value.
+	Empty {
+		used: usize,
+	},
 	Ok {
 		value: T,
 		used: usize,
@@ -408,7 +411,9 @@ impl<'a> Parser<'a> {
 		while self.eat(t!(";")) {}
 
 		if self.peek().kind == TokenKind::Eof {
-			return PartialResult::Empty;
+			return PartialResult::Empty {
+				used: self.lexer.reader.offset(),
+			};
 		}
 
 		let res = ctx.run(|ctx| self.parse_stmt(ctx)).await;

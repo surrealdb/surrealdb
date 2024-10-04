@@ -805,7 +805,10 @@ impl Datastore {
 			// if we get a statement or error return it.
 			match res {
 				PartialResult::MoreData => {}
-				PartialResult::Empty => {
+				PartialResult::Empty {
+					used,
+				} => {
+					offset += used;
 					if complete {
 						return Poll::Ready(None);
 					}

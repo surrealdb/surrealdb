@@ -197,7 +197,6 @@ tokio = { version = "1.40.0", default-features = false, features = [
     "sync",
 ] }
 tokio-tungstenite = { version = "0.21.0", optional = true }
-
 uuid = { version = "1.10.0", features = ["serde", "v4", "v7"] }
 
 [lints.rust]

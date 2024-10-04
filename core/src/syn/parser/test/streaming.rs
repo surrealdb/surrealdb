@@ -739,7 +739,9 @@ fn test_streaming() {
 			.enter(|stk| parser.parse_partial_statement(i == source_bytes.len(), stk))
 			.finish()
 		{
-			PartialResult::Empty => continue,
+			PartialResult::Empty {
+				..
+			} => continue,
 			PartialResult::MoreData => continue,
 			PartialResult::Ok {
 				value,
