@@ -239,7 +239,7 @@ impl Executor {
 					}
 					Err(e) => {
 						let _ = txn.cancel().await;
-						return Err(e);
+						Err(e)
 					}
 				}
 			}
@@ -286,6 +286,7 @@ impl Executor {
 
 		let txn = Arc::new(txn);
 		let start_results = self.results.len();
+		let mut skip_remaining = false;
 
 		// loop over the statements until we hit a cancel or a commit statement.
 		while let Some(stmt) = stream.next().await {
@@ -327,6 +328,10 @@ impl Executor {
 
 				// Missing CANCEL/COMMIT statement, statement already canceled so nothing todo.
 				return Ok(());
+			}
+
+			if skip_remaining && !matches!(stmt, Statement::Cancel(_) | Statement::Commit(_)) {
+				continue;
 			}
 
 			trace!(target: TARGET, statement = %stmt, "Executing statement");
@@ -441,15 +446,16 @@ impl Executor {
 				},
 				Statement::Use(stmt) => self.execute_use_statement(stmt).map(|_| Value::None),
 				stmt => {
-					let mut returns = matches!(stmt, Statement::Output(_));
+					skip_remaining = matches!(stmt, Statement::Output(_));
 
-					let value = match self.execute_transaction_statement(txn.clone(), stmt).await {
-						Ok(x) => x,
+					match self.execute_transaction_statement(txn.clone(), stmt).await {
+						Ok(x) => Ok(x),
 						Err(Error::Return {
 							value,
 						}) => {
-							returns = true;
-							value
+							skip_remaining = true;
+							self.results.truncate(start_results);
+							Ok(value)
 						}
 						Err(e) => {
 							for res in &mut self.results[start_results..] {
@@ -485,31 +491,7 @@ impl Executor {
 							// Just break as we have nothing else we can do.
 							return Ok(());
 						}
-					};
-
-					if returns {
-						// if the value 'returns' then we remove all the results, skip the next
-						// statements and return
-						self.results.truncate(start_results);
-						self.results.push(Response {
-							time: before.elapsed(),
-							result: Ok(value),
-							query_type,
-						});
-
-						while let Some(stmt) = stream.next().await {
-							let stmt = stmt?;
-							if let Statement::Cancel(_) | Statement::Commit(_) = stmt {
-								return Ok(());
-							}
-						}
-
-						// ran out of statements before hitting CANCEL/COMMIT
-						// break and let the normal ran out of statements handle this case.
-						break;
 					}
-
-					Ok(value)
 				}
 			};
 
