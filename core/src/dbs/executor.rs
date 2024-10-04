@@ -350,7 +350,7 @@ impl Executor {
 
 					for res in &mut self.results[start_results..] {
 						res.query_type = QueryType::Other;
-						res.result = Err(Error::QueryCancelled);
+						res.result = Err(Error::QueryNotExecuted);
 					}
 
 					self.results.push(Response {
@@ -459,7 +459,7 @@ impl Executor {
 						Err(e) => {
 							for res in &mut self.results[start_results..] {
 								res.query_type = QueryType::Other;
-								res.result = Err(Error::QueryCancelled);
+								res.result = Err(Error::QueryNotExecuted);
 							}
 
 							// statement return an error. Consume all the other statement until we hit a cancel or commit.
@@ -515,7 +515,9 @@ impl Executor {
 
 		for res in &mut self.results[start_results..] {
 			res.query_type = QueryType::Other;
-			res.result = Err(Error::QueryCancelled);
+			res.result = Err(Error::QueryNotExecutedDetail {
+				message: "Missing COMMIT statement".to_string(),
+			});
 		}
 
 		self.opt.sender = None;
