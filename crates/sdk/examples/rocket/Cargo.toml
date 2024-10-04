@@ -4,13 +4,10 @@ version = "0.1.0"
 edition = "2021"
 publish = false
 
-<<<<<<< HEAD:crates/sdk/examples/rocket/Cargo.toml
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 [workspace]
 members = ["."]
 
-=======
->>>>>>> upstream/main:sdk/examples/rocket/Cargo.toml
 [dependencies]
 rocket = { version = "0.5.1", features = ["json"] }
 surrealdb = { path = "../..", features = ["kv-mem"]}

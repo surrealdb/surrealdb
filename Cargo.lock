@@ -13,8 +13,6 @@ dependencies = [
 ]
 
 [[package]]
-<<<<<<< HEAD
-=======
 name = "actix-codec"
 version = "0.5.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -204,7 +202,6 @@ dependencies = [
 ]
 
 [[package]]
->>>>>>> upstream/main
 name = "addr"
 version = "0.15.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -701,21 +698,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c59bdb34bc650a32731b31bd8f0829cc15d24a708ee31559e0bb34f2bc320cba"
 
 [[package]]
-<<<<<<< HEAD
-name = "atomic-polyfill"
-version = "1.0.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8cf2bce30dfe09ef0bfaef228b9d414faaf7e563035494d7fe092dba54b300f4"
-dependencies = [
- "critical-section",
-=======
 name = "atomic"
 version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8d818003e740b63afc82337e3160717f4f63078720a810b7b903e70a5d1d2994"
 dependencies = [
  "bytemuck",
->>>>>>> upstream/main
 ]
 
 [[package]]
@@ -1701,8 +1689,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b6e854126756c496b8c81dec88f9a706b15b875c5849d4097a3854476b9fdf94"
 
 [[package]]
-<<<<<<< HEAD
-=======
 name = "devise"
 version = "0.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1736,7 +1722,6 @@ dependencies = [
 ]
 
 [[package]]
->>>>>>> upstream/main
 name = "difflib"
 version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3311,8 +3296,6 @@ dependencies = [
 ]
 
 [[package]]
-<<<<<<< HEAD
-=======
 name = "mio"
 version = "1.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3325,7 +3308,6 @@ dependencies = [
 ]
 
 [[package]]
->>>>>>> upstream/main
 name = "multer"
 version = "3.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3797,12 +3779,6 @@ dependencies = [
 ]
 
 [[package]]
-<<<<<<< HEAD
-name = "peeking_take_while"
-version = "0.1.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "19b17cddbe7ec3f8bc800887bab5e717348c95ea2ca0b1bf0837fb964dc67099"
-=======
 name = "pear"
 version = "0.2.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3824,7 +3800,6 @@ dependencies = [
  "quote",
  "syn 2.0.77",
 ]
->>>>>>> upstream/main
 
 [[package]]
 name = "pem"
@@ -4152,8 +4127,6 @@ dependencies = [
 ]
 
 [[package]]
-<<<<<<< HEAD
-=======
 name = "proc-macro2-diagnostics"
 version = "0.10.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4167,7 +4140,6 @@ dependencies = [
 ]
 
 [[package]]
->>>>>>> upstream/main
 name = "prometheus"
 version = "0.13.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4860,8 +4832,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cbf4a6aa5f6d6888f39e980649f3ad6b666acdce1d78e95b8a2cb076e687ae30"
 
 [[package]]
-<<<<<<< HEAD
-=======
 name = "rocket"
 version = "0.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4954,7 +4924,6 @@ dependencies = [
 ]
 
 [[package]]
->>>>>>> upstream/main
 name = "rocksdb"
 version = "0.22.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6381,13 +6350,8 @@ dependencies = [
  "backtrace",
  "bytes",
  "libc",
-<<<<<<< HEAD
- "mio",
- "num_cpus",
-=======
  "mio 1.0.2",
  "parking_lot",
->>>>>>> upstream/main
  "pin-project-lite",
  "signal-hook-registry",
  "socket2",
@@ -6944,10 +6908,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "81dfa00651efa65069b0b6b651f4aaa31ba9e3c3ce0137aaad053604ee7e0314"
 dependencies = [
  "arbitrary",
-<<<<<<< HEAD
- "atomic",
-=======
->>>>>>> upstream/main
  "getrandom 0.2.12",
  "serde",
  "wasm-bindgen",
@@ -7380,22 +7340,12 @@ dependencies = [
 ]
 
 [[package]]
-<<<<<<< HEAD
-name = "winreg"
-version = "0.52.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a277a57398d4bfa075df44f501a17cfdf8542d224f0d36095a2adc7aee4ef0a5"
-dependencies = [
- "cfg-if",
- "windows-sys 0.48.0",
-=======
 name = "winnow"
 version = "0.6.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "dffa400e67ed5a4dd237983829e66475f0a4a26938c4b04c21baede6262215b8"
 dependencies = [
  "memchr",
->>>>>>> upstream/main
 ]
 
 [[package]]
