@@ -10,8 +10,8 @@ use crate::fnc::idiom;
 use crate::sql::edges::Edges;
 use crate::sql::field::{Field, Fields};
 use crate::sql::id::Id;
-use crate::sql::part::Part;
 use crate::sql::part::{Next, NextMethod};
+use crate::sql::part::{Part, Skip};
 use crate::sql::paths::ID;
 use crate::sql::statements::select::SelectStatement;
 use crate::sql::thing::Thing;
@@ -262,14 +262,32 @@ impl Value {
 							.await?;
 						stk.run(|stk| v.get(stk, ctx, opt, doc, path.next())).await
 					}
-					_ => stk
-						.scope(|scope| {
-							let futs =
-								v.iter().map(|v| scope.run(|stk| v.get(stk, ctx, opt, doc, path)));
-							try_join_all_buffered(futs)
-						})
-						.await
-						.map(Into::into),
+					_ => {
+						let len = match path.get(1) {
+							// Say that we have a path like `[a:1].out.*`, then `.*`
+							// references `out` and not the resulting array of `[a:1].out`
+							Some(Part::All) => 2,
+							_ => 1,
+						};
+
+						let mapped = stk
+							.scope(|scope| {
+								let futs = v.iter().map(|v| {
+									scope.run(|stk| v.get(stk, ctx, opt, doc, &path[0..len]))
+								});
+								try_join_all_buffered(futs)
+							})
+							.await
+							.map(Value::from)?;
+
+						// If we are chaining graph parts, we need to make sure to flatten the result
+						let mapped = match (path.first(), path.get(1)) {
+							(Some(Part::Graph(_)), Some(Part::Graph(_))) => mapped.flatten(),
+							_ => mapped,
+						};
+
+						stk.run(|stk| mapped.get(stk, ctx, opt, doc, path.skip(len))).await
+					}
 				},
 				// Current value at path is an edges
 				Value::Edges(v) => {
@@ -380,12 +398,7 @@ impl Value {
 					match p {
 						Part::Optional => match &self {
 							Value::None => Ok(Value::None),
-							_ => {
-								stk.run(|stk| {
-									Value::None.get(stk, ctx, opt, doc, path.next_method())
-								})
-								.await
-							}
+							v => stk.run(|stk| v.get(stk, ctx, opt, doc, path.next())).await,
 						},
 						Part::Flatten => {
 							stk.run(|stk| v.get(stk, ctx, opt, None, path.next())).await
