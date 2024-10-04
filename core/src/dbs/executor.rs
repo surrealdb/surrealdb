@@ -448,13 +448,12 @@ impl Executor {
 				stmt => {
 					skip_remaining = matches!(stmt, Statement::Output(_));
 
-					match self.execute_transaction_statement(txn.clone(), stmt).await {
+					let r = match self.execute_transaction_statement(txn.clone(), stmt).await {
 						Ok(x) => Ok(x),
 						Err(Error::Return {
 							value,
 						}) => {
 							skip_remaining = true;
-							self.results.truncate(start_results);
 							Ok(value)
 						}
 						Err(e) => {
@@ -491,7 +490,15 @@ impl Executor {
 							// Just break as we have nothing else we can do.
 							return Ok(());
 						}
+					};
+
+					if skip_remaining {
+						// If we skip the next values due to return then we need to clear the other
+						// results.
+						self.results.truncate(start_results)
 					}
+
+					r
 				}
 			};
 
