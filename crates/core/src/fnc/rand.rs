@@ -153,7 +153,19 @@ pub fn time((range,): (Option<(i64, i64)>,)) -> Result<Value, Error> {
 
 pub fn ulid((timestamp,): (Option<Datetime>,)) -> Result<Value, Error> {
 	let ulid = match timestamp {
-		Some(timestamp) => Ulid::from_datetime(timestamp.0.into()),
+		Some(timestamp) => {
+			#[cfg(target_arch = "wasm32")]
+			if timestamp.0 < chrono::DateTime::UNIX_EPOCH {
+				return Err(Error::InvalidArguments {
+					name: String::from("rand::ulid"),
+					message: format!(
+						"To generate a ULID from a datetime, it must be a time beyond UNIX epoch."
+					),
+				});
+			}
+
+			Ulid::from_datetime(timestamp.0.into())
+		}
 		None => Ulid::new(),
 	};
 
@@ -162,7 +174,19 @@ pub fn ulid((timestamp,): (Option<Datetime>,)) -> Result<Value, Error> {
 
 pub fn uuid((timestamp,): (Option<Datetime>,)) -> Result<Value, Error> {
 	let uuid = match timestamp {
-		Some(timestamp) => Uuid::new_v7_from_datetime(timestamp),
+		Some(timestamp) => {
+			#[cfg(target_arch = "wasm32")]
+			if timestamp.0 < chrono::DateTime::UNIX_EPOCH {
+				return Err(Error::InvalidArguments {
+					name: String::from("rand::ulid"),
+					message: format!(
+						"To generate a ULID from a datetime, it must be a time beyond UNIX epoch."
+					),
+				});
+			}
+
+			Uuid::new_v7_from_datetime(timestamp)
+		}
 		None => Uuid::new(),
 	};
 	Ok(uuid.into())
@@ -181,7 +205,19 @@ pub mod uuid {
 
 	pub fn v7((timestamp,): (Option<Datetime>,)) -> Result<Value, Error> {
 		let uuid = match timestamp {
-			Some(timestamp) => Uuid::new_v7_from_datetime(timestamp),
+			Some(timestamp) => {
+				#[cfg(target_arch = "wasm32")]
+				if timestamp.0 < chrono::DateTime::UNIX_EPOCH {
+					return Err(Error::InvalidArguments {
+						name: String::from("rand::ulid"),
+						message: format!(
+							"To generate a ULID from a datetime, it must be a time beyond UNIX epoch."
+						),
+					});
+				}
+
+				Uuid::new_v7_from_datetime(timestamp)
+			}
 			None => Uuid::new(),
 		};
 		Ok(uuid.into())

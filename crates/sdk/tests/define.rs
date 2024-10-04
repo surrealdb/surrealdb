@@ -1,16 +1,20 @@
 mod parse;
+
 use parse::Parse;
 
 mod helpers;
 use helpers::*;
 
 use std::collections::HashMap;
-
+use std::time::{Duration, SystemTime};
 use surrealdb::dbs::Session;
 use surrealdb::err::Error;
 use surrealdb::iam::Role;
 use surrealdb::sql::Idiom;
 use surrealdb::sql::{Part, Value};
+use surrealdb_core::cnf::{INDEXING_BATCH_SIZE, NORMAL_FETCH_SIZE};
+use test_log::test;
+use tracing::info;
 
 #[tokio::test]
 async fn define_statement_namespace() -> Result<(), Error> {
@@ -88,6 +92,7 @@ async fn define_statement_function() -> Result<(), Error> {
 		"{
 			accesses: {},
 			analyzers: {},
+			configs: {},
 			functions: { test: 'DEFINE FUNCTION fn::test($first: string, $last: string) { RETURN $first + $last; } PERMISSIONS FULL' },
 			models: {},
 			params: {},
@@ -119,6 +124,7 @@ async fn define_statement_table_drop() -> Result<(), Error> {
 		"{
 			accesses: {},
 			analyzers: {},
+			configs: {},
 			functions: {},
 			models: {},
 			params: {},
@@ -150,6 +156,7 @@ async fn define_statement_table_schemaless() -> Result<(), Error> {
 		"{
 			accesses: {},
 			analyzers: {},
+			configs: {},
 			functions: {},
 			models: {},
 			params: {},
@@ -176,6 +183,7 @@ async fn define_statement_table_schemafull() -> Result<(), Error> {
 		"{
 			accesses: {},
 			analyzers: {},
+			configs: {},
 			functions: {},
 			models: {},
 			params: {},
@@ -205,6 +213,7 @@ async fn define_statement_table_schemaful() -> Result<(), Error> {
 		"{
 			accesses: {},
 			analyzers: {},
+			configs: {},
 			functions: {},
 			models: {},
 			params: {},
@@ -244,6 +253,7 @@ async fn define_statement_table_foreigntable() -> Result<(), Error> {
 		"{
 			accesses: {},
 			analyzers: {},
+			configs: {},
 			functions: {},
 			models: {},
 			params: {},
@@ -276,6 +286,7 @@ async fn define_statement_table_foreigntable() -> Result<(), Error> {
 		"{
 			accesses: {},
 			analyzers: {},
+			configs: {},
 			functions: {},
 			models: {},
 			params: {},
@@ -336,6 +347,32 @@ async fn define_statement_event() -> Result<(), Error> {
 			count: 3
 		}]",
 	)?;
+	//
+	Ok(())
+}
+
+// Confirms that a DEFINE EVENT with no WHERE clause will produce WHEN true
+#[tokio::test]
+async fn define_statement_event_no_when_clause() -> Result<(), Error> {
+	let sql = "
+		DEFINE EVENT some_event ON TABLE user THEN {};
+		INFO FOR TABLE user;
+	";
+	let mut t = Test::new(sql).await?;
+	//
+	t.skip_ok(1)?;
+	let val = Value::parse(
+		"{
+	events: {
+		some_event: 'DEFINE EVENT some_event ON user WHEN true THEN {  }'
+	},
+	fields: {},
+	indexes: {},
+	lives: {},
+	tables: {}
+}",
+	);
+	t.expect_value(val)?;
 	//
 	Ok(())
 }
@@ -619,7 +656,7 @@ async fn define_field_with_recursive_types() -> Result<(), Error> {
 			fields: {
 				"foo": "DEFINE FIELD foo ON bar TYPE array<float | array<bool>> | set<number> PERMISSIONS FULL",
 				"foo[*]": "DEFINE FIELD foo[*] ON bar TYPE float | array<bool> | number PERMISSIONS FULL",
-				"foo[*][*]": "DEFINE FIELD foo[*][*] ON bar TYPE bool PERMISSIONS FOR select, create, delete FULL, FOR update NONE"
+				"foo[*][*]": "DEFINE FIELD foo[*][*] ON bar TYPE bool PERMISSIONS FOR select, create FULL, FOR update NONE"
 			},
 			indexes: {},
 			lives: {},
@@ -627,6 +664,73 @@ async fn define_field_with_recursive_types() -> Result<(), Error> {
 		}"#,
 	);
 	assert_eq!(tmp, val);
+	Ok(())
+}
+
+#[tokio::test]
+async fn define_statement_field_permissions() -> Result<(), Error> {
+	// Specific permissions
+	// Delete permission should be ignored
+	{
+		let sql = "
+			DEFINE FIELD test ON user PERMISSIONS FOR select, create, update, delete WHERE true;
+			INFO FOR TABLE user;
+		";
+		let mut t = Test::new(sql).await?;
+		//
+		t.skip_ok(1)?;
+		t.expect_val(
+			r#"{
+				events: {},
+				fields: { test: "DEFINE FIELD test ON user PERMISSIONS FOR select, create, update WHERE true" },
+				tables: {},
+				indexes: {},
+				lives: {},
+			}"#,
+		)?;
+	}
+	// Full permissions
+	// Delete none should still show as full permissions
+	{
+		let sql = "
+			DEFINE FIELD test ON user PERMISSIONS FOR delete NONE, FOR select, create, update FULL;
+			INFO FOR TABLE user;
+		";
+		let mut t = Test::new(sql).await?;
+		//
+		t.skip_ok(1)?;
+		t.expect_val(
+			r#"{
+				events: {},
+				fields: { test: "DEFINE FIELD test ON user PERMISSIONS FULL" },
+				tables: {},
+				indexes: {},
+				lives: {},
+			}"#,
+		)?;
+	}
+	// No permissions
+	// Delete full not be printed, as it is effectively full
+	// TODO(gguillemas): This should display simply as PERMISSIONS NONE in 3.0.0.
+	{
+		let sql = "
+			DEFINE FIELD test ON user PERMISSIONS FOR DELETE FULL, FOR SELECT, CREATE, UPDATE NONE;
+			INFO FOR TABLE user;
+		";
+		let mut t = Test::new(sql).await?;
+		//
+		t.skip_ok(1)?;
+		t.expect_val(
+			r#"{
+				events: {},
+				fields: { test: "DEFINE FIELD test ON user PERMISSIONS FOR select, create, update NONE" },
+				tables: {},
+				indexes: {},
+				lives: {},
+			}"#,
+		)?;
+	}
+
 	Ok(())
 }
 
@@ -686,17 +790,520 @@ async fn define_statement_index_single() -> Result<(), Error> {
 }
 
 #[tokio::test]
+async fn define_statement_index_numbers() -> Result<(), Error> {
+	let sql = "
+		DEFINE INDEX index ON TABLE test COLUMNS number;
+		CREATE test:int SET number = 0;
+		CREATE test:float SET number = 0.0;
+		-- TODO: CREATE test:dec_int SET number = 0dec;
+		-- TODO: CREATE test:dec_dec SET number = 0.0dec;
+		SELECT * FROM test WITH NOINDEX WHERE number = 0 ORDER BY id;
+		SELECT * FROM test WHERE number = 0 ORDER BY id;
+		SELECT * FROM test WHERE number = 0.0 ORDER BY id;
+		-- TODO: SELECT * FROM test WHERE number = 0dec ORDER BY id;
+		-- TODO: SELECT * FROM test WHERE number = 0.0dec ORDER BY id;
+	";
+	let mut t = Test::new(sql).await?;
+	t.skip_ok(3)?;
+	for _ in 0..3 {
+		t.expect_val(
+			"[
+				// {
+				// 	id: test:dec,
+				// 	number: 0.0dec
+				// },
+				// {
+				// 	id: test:int,
+				// 	number: 0dec
+				// },
+				{
+					id: test:float,
+					number: 0f
+				},
+				{
+					id: test:int,
+					number: 0
+				}
+			]",
+		)?;
+	}
+	Ok(())
+}
+
+#[tokio::test]
+async fn define_statement_unique_index_numbers() -> Result<(), Error> {
+	let sql = "
+		DEFINE INDEX index ON TABLE test COLUMNS number UNIQUE;
+		CREATE test:int SET number = 0;
+		CREATE test:float SET number = 0.0;
+		-- TODO: CREATE test:dec_int SET number = 0dec;
+		-- TODO: CREATE test:dec_dec SET number = 0.0dec;
+		SELECT * FROM test WITH NOINDEX WHERE number = 0 ORDER BY id;
+		SELECT * FROM test WHERE number = 0 ORDER BY id;
+		SELECT * FROM test WHERE number = 0.0 ORDER BY id;
+		-- TODO: SELECT * FROM test WHERE number = 0dec ORDER BY id;
+		-- TODO: SELECT * FROM test WHERE number = 0.0dec ORDER BY id;
+	";
+	let mut t = Test::new(sql).await?;
+	t.skip_ok(3)?;
+	for _ in 0..3 {
+		t.expect_val(
+			"[
+				// {
+				// 	id: test:dec,
+				// 	number: 0.0dec
+				// },
+				// {
+				// 	id: test:int,
+				// 	number: 0dec
+				// },
+				{
+					id: test:float,
+					number: 0f
+				},
+				{
+					id: test:int,
+					number: 0
+				}
+			]",
+		)?;
+	}
+	Ok(())
+}
+
+fn check_range(t: &mut Test, result: &str, explain: &str) -> Result<(), Error> {
+	for _ in 0..2 {
+		t.expect_val(result)?;
+	}
+	t.expect_val(explain)?;
+	Ok(())
+}
+
+async fn define_statement_mixed_numbers_range(unique: bool) -> Result<(), Error> {
+	let sql = format!(
+		"
+		DEFINE INDEX index ON TABLE test COLUMNS number {};
+		CREATE test:int0 SET number = 0;
+		CREATE test:float0 SET number = 0.5;
+		CREATE test:int1 SET number = 1;
+		CREATE test:float1 SET number = 1.5;
+		CREATE test:int2 SET number = 2;
+		SELECT * FROM test WITH NOINDEX WHERE number > 0 AND number < 2 ORDER BY id;
+		SELECT * FROM test WHERE number > 0 AND number < 2 ORDER BY id;
+		SELECT * FROM test WHERE number > 0 AND number < 2 ORDER BY id EXPLAIN;
+		SELECT * FROM test WITH NOINDEX WHERE number > 0.1 AND number < 2 ORDER BY id;
+		SELECT * FROM test WHERE number > 0.1 AND number < 2 ORDER BY id;
+		SELECT * FROM test WHERE number > 0.1 AND number < 2 ORDER BY id EXPLAIN;
+		SELECT * FROM test WITH NOINDEX WHERE number > 0.1 AND number < 1.5 ORDER BY id;
+		SELECT * FROM test WHERE number > 0.1 AND number < 1.5 ORDER BY id;
+		SELECT * FROM test WHERE number > 0.1 AND number < 1.5 ORDER BY id EXPLAIN;
+		SELECT * FROM test WITH NOINDEX WHERE number > 0 AND number < 1.5 ORDER BY id;
+		SELECT * FROM test WHERE number > 0 AND number < 1.5 ORDER BY id;
+		SELECT * FROM test WHERE number > 0 AND number < 1.5 ORDER BY id EXPLAIN;
+		SELECT * FROM test WITH NOINDEX WHERE number > 0.1 ORDER BY id;
+		SELECT * FROM test WHERE number > 0.1 ORDER BY id;
+		SELECT * FROM test WHERE number > 0.1 ORDER BY id EXPLAIN;
+		SELECT * FROM test WITH NOINDEX WHERE number > 0 ORDER BY id;
+		SELECT * FROM test WHERE number > 0 ORDER BY id;
+		SELECT * FROM test WHERE number > 0 ORDER BY id EXPLAIN;
+		SELECT * FROM test WITH NOINDEX WHERE number < 2 ORDER BY id;
+		SELECT * FROM test WHERE number < 2 ORDER BY id;
+		SELECT * FROM test WHERE number < 2 ORDER BY id EXPLAIN;
+		SELECT * FROM test WITH NOINDEX WHERE number < 1.9 ORDER BY id;
+		SELECT * FROM test WHERE number < 1.9 ORDER BY id;
+		SELECT * FROM test WHERE number < 1.9 ORDER BY id EXPLAIN;
+		",
+		if unique {
+			"UNIQUE"
+		} else {
+			""
+		}
+	);
+	let mut t = Test::new(&sql).await?;
+	t.expect_size(30)?;
+	t.skip_ok(6)?;
+	// number > 0 AND number < 2
+	check_range(
+		&mut t,
+		"[
+					{
+						id: test:float0,
+						number: 0.5f
+					},
+					{
+						id: test:float1,
+						number: 1.5f
+					},
+					{
+						id: test:int1,
+						number: 1
+					}
+				]",
+		"[
+					{
+						detail: {
+							plan: {
+								from: {
+									inclusive: false,
+									value: 0
+								},
+								index: 'index',
+								to: {
+									inclusive: false,
+									value: 2
+								}
+							},
+							table: 'test'
+						},
+						operation: 'Iterate Index'
+					},
+					{
+						detail: {
+							type: 'Memory'
+						},
+						operation: 'Collector'
+					}
+				]",
+	)?;
+	// number > 0.1 AND number < 2
+	check_range(
+		&mut t,
+		"[
+					{
+						id: test:float0,
+						number: 0.5f
+					},
+					{
+						id: test:float1,
+						number: 1.5f
+					},
+					{
+						id: test:int1,
+						number: 1
+					}
+				]",
+		"[
+					{
+						detail: {
+							plan: {
+								from: {
+									inclusive: false,
+									value: 0.1f
+								},
+								index: 'index',
+								to: {
+									inclusive: false,
+									value: 2
+								}
+							},
+							table: 'test'
+						},
+						operation: 'Iterate Index'
+					},
+					{
+						detail: {
+							type: 'Memory'
+						},
+						operation: 'Collector'
+					}
+				]",
+	)?;
+	// number > 0.1 AND number < 1.5
+	check_range(
+		&mut t,
+		"[
+					{
+						id: test:float0,
+						number: 0.5f
+					},
+					{
+						id: test:int1,
+						number: 1
+					}
+				]",
+		"[
+					{
+						detail: {
+							plan: {
+								from: {
+									inclusive: false,
+									value: 0.1f
+								},
+								index: 'index',
+								to: {
+									inclusive: false,
+									value: 1.5f
+								}
+							},
+							table: 'test'
+						},
+						operation: 'Iterate Index'
+					},
+					{
+						detail: {
+							type: 'Memory'
+						},
+						operation: 'Collector'
+					}
+				]",
+	)?;
+	// number > 0 AND number < 1.5
+	check_range(
+		&mut t,
+		"[
+					{
+						id: test:float0,
+						number: 0.5f
+					},
+					{
+						id: test:int1,
+						number: 1
+					}
+				]",
+		"[
+					{
+						detail: {
+							plan: {
+								from: {
+									inclusive: false,
+									value: 0
+								},
+								index: 'index',
+								to: {
+									inclusive: false,
+									value: 1.5f
+								}
+							},
+							table: 'test'
+						},
+						operation: 'Iterate Index'
+					},
+					{
+						detail: {
+							type: 'Memory'
+						},
+						operation: 'Collector'
+					}
+				]",
+	)?;
+	// number > 0.1
+	check_range(
+		&mut t,
+		"[
+					{
+						id: test:float0,
+						number: 0.5f
+					},
+					{
+						id: test:float1,
+						number: 1.5f
+					},
+					{
+						id: test:int1,
+						number: 1
+					},
+					{
+						id: test:int2,
+						number: 2
+					}
+				]",
+		"[
+					{
+						detail: {
+							plan: {
+								from: {
+									inclusive: false,
+									value: 0.1f
+								},
+								index: 'index',
+								to: {
+									inclusive: false,
+									value: NONE
+								}
+							},
+							table: 'test'
+						},
+						operation: 'Iterate Index'
+					},
+					{
+						detail: {
+							type: 'Memory'
+						},
+						operation: 'Collector'
+					}
+				]",
+	)?;
+	// number > 0
+	check_range(
+		&mut t,
+		"[
+					{
+						id: test:float0,
+						number: 0.5f
+					},
+					{
+						id: test:float1,
+						number: 1.5f
+					},
+					{
+						id: test:int1,
+						number: 1
+					},
+					{
+						id: test:int2,
+						number: 2
+					}
+				]",
+		"[
+					{
+						detail: {
+							plan: {
+								from: {
+									inclusive: false,
+									value: 0
+								},
+								index: 'index',
+								to: {
+									inclusive: false,
+									value: NONE
+								}
+							},
+							table: 'test'
+						},
+						operation: 'Iterate Index'
+					},
+					{
+						detail: {
+							type: 'Memory'
+						},
+						operation: 'Collector'
+					}
+				]",
+	)?;
+	// number < 2
+	check_range(
+		&mut t,
+		"[
+					{
+						id: test:float0,
+						number: 0.5f
+					},
+					{
+						id: test:float1,
+						number: 1.5f
+					},
+					{
+						id: test:int0,
+						number: 0
+					},
+					{
+						id: test:int1,
+						number: 1
+					}
+				]",
+		"[
+					{
+						detail: {
+							plan: {
+								from: {
+									inclusive: false,
+									value: NONE
+								},
+								index: 'index',
+								to: {
+									inclusive: false,
+									value: 2
+								}
+							},
+							table: 'test'
+						},
+						operation: 'Iterate Index'
+					},
+					{
+						detail: {
+							type: 'Memory'
+						},
+						operation: 'Collector'
+					}
+				]",
+	)?;
+	// number < 1.9
+	check_range(
+		&mut t,
+		"[
+					{
+						id: test:float0,
+						number: 0.5f
+					},
+					{
+						id: test:float1,
+						number: 1.5f
+					},
+					{
+						id: test:int0,
+						number: 0
+					},
+					{
+						id: test:int1,
+						number: 1
+					}
+				]",
+		"[
+					{
+						detail: {
+							plan: {
+								from: {
+									inclusive: false,
+									value: NONE
+								},
+								index: 'index',
+								to: {
+									inclusive: false,
+									value: 1.9f
+								}
+							},
+							table: 'test'
+						},
+						operation: 'Iterate Index'
+					},
+					{
+						detail: {
+							type: 'Memory'
+						},
+						operation: 'Collector'
+					}
+				]",
+	)?;
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn define_statement_index_mixed_numbers_range() -> Result<(), Error> {
+	define_statement_mixed_numbers_range(false).await
+}
+
+#[tokio::test]
+async fn define_statement_unique_mixed_numbers_range() -> Result<(), Error> {
+	define_statement_mixed_numbers_range(true).await
+}
+
+#[tokio::test]
 async fn define_statement_index_concurrently() -> Result<(), Error> {
 	let sql = "
-		CREATE user:1 SET email = 'test@surrealdb.com';
-		CREATE user:2 SET email = 'test@surrealdb.com';
+		CREATE user:1 SET email = 'testA@surrealdb.com';
+		CREATE user:2 SET email = 'testA@surrealdb.com';
+		CREATE user:3 SET email = 'testB@surrealdb.com';
 		DEFINE INDEX test ON user FIELDS email CONCURRENTLY;
 		SLEEP 1s;
 		INFO FOR TABLE user;
 		INFO FOR INDEX test ON user;
+		SELECT * FROM user WHERE email = 'testA@surrealdb.com' EXPLAIN;
+		SELECT * FROM user WHERE email = 'testA@surrealdb.com';
+		SELECT * FROM user WHERE email = 'testB@surrealdb.com';
 	";
 	let mut t = Test::new(sql).await?;
-	t.skip_ok(4)?;
+	t.skip_ok(5)?;
 	t.expect_val(
 		"{
 			events: {},
@@ -713,7 +1320,135 @@ async fn define_statement_index_concurrently() -> Result<(), Error> {
 			building: { status: 'built' }
 		}",
 	)?;
+	t.expect_val(
+		" [
+				{
+					detail: {
+						plan: {
+							index: 'test',
+							operator: '=',
+							value: 'testA@surrealdb.com'
+						},
+						table: 'user'
+					},
+					operation: 'Iterate Index'
+				},
+				{
+					detail: {
+						type: 'Memory'
+					},
+					operation: 'Collector'
+				}
+			]",
+	)?;
+	t.expect_val(
+		"[
+				{
+					email: 'testA@surrealdb.com',
+					id: user:1
+				},
+				{
+					email: 'testA@surrealdb.com',
+					id: user:2
+				}
+			]",
+	)?;
+	t.expect_val(
+		"[
+				{
+					email: 'testB@surrealdb.com',
+					id: user:3
+				}
+			]",
+	)?;
+	Ok(())
+}
 
+#[test(tokio::test)]
+async fn define_statement_index_concurrently_building_status() -> Result<(), Error> {
+	let session = Session::owner().with_ns("test").with_db("test");
+	let ds = new_ds().await?;
+	// Populate initial records
+	let initial_count = *INDEXING_BATCH_SIZE * 3 / 2;
+	info!("Populate: {}", initial_count);
+	for i in 0..initial_count {
+		let mut responses = ds
+			.execute(
+				&format!("CREATE user:{i} SET email = 'test{i}@surrealdb.com';"),
+				&session,
+				None,
+			)
+			.await?;
+		skip_ok(&mut responses, 1)?;
+	}
+	// Create the index concurrently
+	info!("Indexing starts");
+	let mut r =
+		ds.execute("DEFINE INDEX test ON user FIELDS email CONCURRENTLY", &session, None).await?;
+	skip_ok(&mut r, 1)?;
+	//
+	let mut appending_count = *NORMAL_FETCH_SIZE * 3 / 2;
+	info!("Appending: {}", appending_count);
+	// Loop until the index is built
+	let now = SystemTime::now();
+	let mut initial_count = None;
+	let mut updates_count = None;
+	// While the concurrent indexing is running, we update and delete records
+	let time_out = Duration::from_secs(120);
+	loop {
+		if now.elapsed().map_err(|e| Error::Internal(e.to_string()))?.gt(&time_out) {
+			panic!("Time-out {time_out:?}");
+		}
+		if appending_count > 0 {
+			let sql = if appending_count % 2 != 0 {
+				format!("UPDATE user:{appending_count} SET email = 'new{appending_count}@surrealdb.com';")
+			} else {
+				format!("DELETE user:{appending_count}")
+			};
+			let mut responses = ds.execute(&sql, &session, None).await?;
+			skip_ok(&mut responses, 1)?;
+			appending_count -= 1;
+		}
+		// We monitor the status
+		let mut r = ds.execute("INFO FOR INDEX test ON user", &session, None).await?;
+		let tmp = r.remove(0).result?;
+		if let Value::Object(o) = &tmp {
+			if let Some(Value::Object(b)) = o.get("building") {
+				if let Some(v) = b.get("status") {
+					if Value::from("started").eq(v) {
+						continue;
+					}
+					let new_count = b.get("count").cloned();
+					if Value::from("initial").eq(v) {
+						if new_count != initial_count {
+							assert!(new_count > initial_count, "{new_count:?}");
+							info!("New initial count: {:?}", new_count);
+							initial_count = new_count;
+						}
+						continue;
+					}
+					if Value::from("updates").eq(v) {
+						if new_count != updates_count {
+							assert!(new_count > updates_count, "{new_count:?}");
+							info!("New updates count: {:?}", new_count);
+							updates_count = new_count;
+						}
+						continue;
+					}
+					let val = Value::parse(
+						"{
+										building: {
+											status: 'built'
+										}
+									}",
+					);
+					assert_eq!(format!("{tmp:#}"), format!("{val:#}"));
+					break;
+				}
+			}
+		}
+		panic!("Unexpected value {tmp:#}");
+	}
 	Ok(())
 }
 
@@ -1063,6 +1798,7 @@ async fn define_statement_analyzer() -> Result<(), Error> {
 				english: 'DEFINE ANALYZER english TOKENIZERS BLANK,CLASS FILTERS LOWERCASE,SNOWBALL(ENGLISH)',
 				htmlAnalyzer: 'DEFINE ANALYZER htmlAnalyzer FUNCTION fn::stripHtml TOKENIZERS BLANK,CLASS'
 			},
+			configs: {},
 			functions: {
 				stripHtml: "DEFINE FUNCTION fn::stripHtml($html: string) { RETURN string::replace($html, /<[^>]*>/, ''); } PERMISSIONS FULL"
 			},
@@ -1388,8 +2124,8 @@ async fn permissions_checks_define_function() {
 
 	// Define the expected results for the check statement when the test statement succeeded and when it failed
 	let check_results = [
-        vec!["{ accesses: {  }, analyzers: {  }, functions: { greet: \"DEFINE FUNCTION fn::greet() { RETURN 'Hello'; } PERMISSIONS FULL\" }, models: {  }, params: {  }, tables: {  }, users: {  } }"],
-		vec!["{ accesses: {  }, analyzers: {  }, functions: {  }, models: {  }, params: {  }, tables: {  }, users: {  } }"]
+        vec!["{ accesses: {  }, analyzers: {  }, configs: {  }, functions: { greet: \"DEFINE FUNCTION fn::greet() { RETURN 'Hello'; } PERMISSIONS FULL\" }, models: {  }, params: {  }, tables: {  }, users: {  } }"],
+		vec!["{ accesses: {  }, analyzers: {  }, configs: {  }, functions: {  }, models: {  }, params: {  }, tables: {  }, users: {  } }"]
     ];
 
 	let test_cases = [
@@ -1430,8 +2166,8 @@ async fn permissions_checks_define_analyzer() {
 
 	// Define the expected results for the check statement when the test statement succeeded and when it failed
 	let check_results = [
-        vec!["{ accesses: {  }, analyzers: { analyzer: 'DEFINE ANALYZER analyzer TOKENIZERS BLANK' }, functions: {  }, models: {  }, params: {  }, tables: {  }, users: {  } }"],
-		vec!["{ accesses: {  }, analyzers: {  }, functions: {  }, models: {  }, params: {  }, tables: {  }, users: {  } }"]
+        vec!["{ accesses: {  }, analyzers: { analyzer: 'DEFINE ANALYZER analyzer TOKENIZERS BLANK' }, configs: {  }, functions: {  }, models: {  }, params: {  }, tables: {  }, users: {  } }"],
+		vec!["{ accesses: {  }, analyzers: {  }, configs: {  }, functions: {  }, models: {  }, params: {  }, tables: {  }, users: {  } }"]
     ];
 
 	let test_cases = [
@@ -1556,8 +2292,8 @@ async fn permissions_checks_define_access_db() {
 
 	// Define the expected results for the check statement when the test statement succeeded and when it failed
 	let check_results = [
-        vec!["{ accesses: { access: \"DEFINE ACCESS access ON DATABASE TYPE JWT ALGORITHM HS512 KEY '[REDACTED]' WITH ISSUER KEY '[REDACTED]' DURATION FOR TOKEN 1h, FOR SESSION NONE\" }, analyzers: {  }, functions: {  }, models: {  }, params: {  }, tables: {  }, users: {  } }"],
-		vec!["{ accesses: {  }, analyzers: {  }, functions: {  }, models: {  }, params: {  }, tables: {  }, users: {  } }"]
+        vec!["{ accesses: { access: \"DEFINE ACCESS access ON DATABASE TYPE JWT ALGORITHM HS512 KEY '[REDACTED]' WITH ISSUER KEY '[REDACTED]' DURATION FOR TOKEN 1h, FOR SESSION NONE\" }, analyzers: {  }, configs: {  }, functions: {  }, models: {  }, params: {  }, tables: {  }, users: {  } }"],
+		vec!["{ accesses: {  }, analyzers: {  }, configs: {  }, functions: {  }, models: {  }, params: {  }, tables: {  }, users: {  } }"]
     ];
 
 	let test_cases = [
@@ -1682,8 +2418,8 @@ async fn permissions_checks_define_user_db() {
 
 	// Define the expected results for the check statement when the test statement succeeded and when it failed
 	let check_results = [
-        vec!["{ accesses: {  }, analyzers: {  }, functions: {  }, models: {  }, params: {  }, tables: {  }, users: { user: \"DEFINE USER user ON DATABASE PASSHASH 'secret' ROLES VIEWER DURATION FOR TOKEN 15m, FOR SESSION 6h\" } }"],
-		vec!["{ accesses: {  }, analyzers: {  }, functions: {  }, models: {  }, params: {  }, tables: {  }, users: {  } }"]
+        vec!["{ accesses: {  }, analyzers: {  }, configs: {  }, functions: {  }, models: {  }, params: {  }, tables: {  }, users: { user: \"DEFINE USER user ON DATABASE PASSHASH 'secret' ROLES VIEWER DURATION FOR TOKEN 15m, FOR SESSION 6h\" } }"],
+		vec!["{ accesses: {  }, analyzers: {  }, configs: {  }, functions: {  }, models: {  }, params: {  }, tables: {  }, users: {  } }"]
     ];
 
 	let test_cases = [
@@ -1724,8 +2460,8 @@ async fn permissions_checks_define_access_record() {
 
 	// Define the expected results for the check statement when the test statement succeeded and when it failed
 	let check_results = [
-        vec!["{ accesses: { account: \"DEFINE ACCESS account ON DATABASE TYPE RECORD WITH JWT ALGORITHM HS512 KEY '[REDACTED]' WITH ISSUER KEY '[REDACTED]' DURATION FOR TOKEN 15m, FOR SESSION 12h\" }, analyzers: {  }, functions: {  }, models: {  }, params: {  }, tables: {  }, users: {  } }"],
-		vec!["{ accesses: {  }, analyzers: {  }, functions: {  }, models: {  }, params: {  }, tables: {  }, users: {  } }"]
+        vec!["{ accesses: { account: \"DEFINE ACCESS account ON DATABASE TYPE RECORD WITH JWT ALGORITHM HS512 KEY '[REDACTED]' WITH ISSUER KEY '[REDACTED]' DURATION FOR TOKEN 15m, FOR SESSION 12h\" }, analyzers: {  }, configs: {  }, functions: {  }, models: {  }, params: {  }, tables: {  }, users: {  } }"],
+		vec!["{ accesses: {  }, analyzers: {  }, configs: {  }, functions: {  }, models: {  }, params: {  }, tables: {  }, users: {  } }"]
     ];
 
 	let test_cases = [
@@ -1766,8 +2502,8 @@ async fn permissions_checks_define_param() {
 
 	// Define the expected results for the check statement when the test statement succeeded and when it failed
 	let check_results = [
-        vec!["{ accesses: {  }, analyzers: {  }, functions: {  }, models: {  }, params: { param: \"DEFINE PARAM $param VALUE 'foo' PERMISSIONS FULL\" }, tables: {  }, users: {  } }"],
-		vec!["{ accesses: {  }, analyzers: {  }, functions: {  }, models: {  }, params: {  }, tables: {  }, users: {  } }"]
+        vec!["{ accesses: {  }, analyzers: {  }, configs: {  }, functions: {  }, models: {  }, params: { param: \"DEFINE PARAM $param VALUE 'foo' PERMISSIONS FULL\" }, tables: {  }, users: {  } }"],
+		vec!["{ accesses: {  }, analyzers: {  }, configs: {  }, functions: {  }, models: {  }, params: {  }, tables: {  }, users: {  } }"]
     ];
 
 	let test_cases = [
@@ -1805,8 +2541,8 @@ async fn permissions_checks_define_table() {
 
 	// Define the expected results for the check statement when the test statement succeeded and when it failed
 	let check_results = [
-        vec!["{ accesses: {  }, analyzers: {  }, functions: {  }, models: {  }, params: {  }, tables: { TB: 'DEFINE TABLE TB TYPE ANY SCHEMALESS PERMISSIONS NONE' }, users: {  } }"],
-		vec!["{ accesses: {  }, analyzers: {  }, functions: {  }, models: {  }, params: {  }, tables: {  }, users: {  } }"]
+        vec!["{ accesses: {  }, analyzers: {  }, configs: {  }, functions: {  }, models: {  }, params: {  }, tables: { TB: 'DEFINE TABLE TB TYPE ANY SCHEMALESS PERMISSIONS NONE' }, users: {  } }"],
+		vec!["{ accesses: {  }, analyzers: {  }, configs: {  }, functions: {  }, models: {  }, params: {  }, tables: {  }, users: {  } }"]
     ];
 
 	let test_cases = [
@@ -1992,6 +2728,7 @@ async fn define_statement_table_permissions() -> Result<(), Error> {
 		"{
 			accesses: {},
 			analyzers: {},
+ 			configs: {},
 			functions: {},
 			models: {},
 			params: {},
@@ -2396,6 +3133,7 @@ async fn define_table_relation_redefinition_info() -> Result<(), Error> {
 		"{
 			accesses: {},
 			analyzers: {},
+			configs: {},
 			functions: {},
 			models: {},
 			params: {},
@@ -2417,6 +3155,7 @@ async fn define_table_relation_redefinition_info() -> Result<(), Error> {
 		"{
 			accesses: {},
 			analyzers: {},
+			configs: {},
 			functions: {},
 			models: {},
 			params: {},
@@ -2438,6 +3177,7 @@ async fn define_table_relation_redefinition_info() -> Result<(), Error> {
 		"{
 			accesses: {},
 			analyzers: {},
+			configs: {},
 			functions: {},
 			models: {},
 			params: {},

@@ -49,6 +49,18 @@ macro_rules! transparent_wrapper{
 			pub fn into_inner(self) -> $inner{
 				self.0
 			}
+
+			#[doc(hidden)]
+			#[allow(dead_code)]
+			pub fn into_inner_ref(&self) -> &$inner{
+				&self.0
+			}
+
+			#[doc(hidden)]
+			#[allow(dead_code)]
+			pub fn into_inner_mut(&mut self) -> &mut $inner{
+				&mut self.0
+			}
 		}
 
 		impl std::fmt::Display for $name{
@@ -130,8 +142,7 @@ pub type Result<T> = std::result::Result<T, crate::Error>;
 // Channel for waiters
 type Waiter = (watch::Sender<Option<WaitFor>>, watch::Receiver<Option<WaitFor>>);
 
-const SUPPORTED_VERSIONS: (&str, &str) = (">=1.0.0, <3.0.0", "20230701.55918b7c");
-const REVISION_SUPPORTED_SERVER_VERSION: Version = Version::new(1, 2, 0);
+const SUPPORTED_VERSIONS: (&str, &str) = (">=1.2.0, <3.0.0", "20230701.55918b7c");
 
 /// Connection trait implemented by supported engines
 pub trait Connection: conn::Connection {}
@@ -193,18 +204,18 @@ where
 
 	fn into_future(self) -> Self::IntoFuture {
 		Box::pin(async move {
-			let mut endpoint = self.address?;
+			let endpoint = self.address?;
 			let endpoint_kind = EndpointKind::from(endpoint.url.scheme());
-			let mut client = Client::connect(endpoint.clone(), self.capacity).await?;
+			let client = Client::connect(endpoint, self.capacity).await?;
 			if endpoint_kind.is_remote() {
-				let mut version = client.version().await?;
-				// we would like to be able to connect to pre-releases too
-				version.pre = Default::default();
-				client.check_server_version(&version).await?;
-				if version >= REVISION_SUPPORTED_SERVER_VERSION && endpoint_kind.is_ws() {
-					// Switch to revision based serialisation
-					endpoint.supports_revision = true;
-					client = Client::connect(endpoint, self.capacity).await?;
+				match client.version().await {
+					Ok(mut version) => {
+						// we would like to be able to connect to pre-releases too
+						version.pre = Default::default();
+						client.check_server_version(&version).await?;
+					}
+					// TODO(raphaeldarley) don't error if Method Not allowed
+					Err(e) => return Err(e),
 				}
 			}
 			// Both ends of the channel are still alive at this point
@@ -227,18 +238,18 @@ where
 			if self.router.get().is_some() {
 				return Err(Error::AlreadyConnected.into());
 			}
-			let mut endpoint = self.address?;
+			let endpoint = self.address?;
 			let endpoint_kind = EndpointKind::from(endpoint.url.scheme());
-			let mut client = Client::connect(endpoint.clone(), self.capacity).await?;
+			let client = Client::connect(endpoint, self.capacity).await?;
 			if endpoint_kind.is_remote() {
-				let mut version = client.version().await?;
-				// we would like to be able to connect to pre-releases too
-				version.pre = Default::default();
-				client.check_server_version(&version).await?;
-				if version >= REVISION_SUPPORTED_SERVER_VERSION && endpoint_kind.is_ws() {
-					// Switch to revision based serialisation
-					endpoint.supports_revision = true;
-					client = Client::connect(endpoint, self.capacity).await?;
+				match client.version().await {
+					Ok(mut version) => {
+						// we would like to be able to connect to pre-releases too
+						version.pre = Default::default();
+						client.check_server_version(&version).await?;
+					}
+					// TODO(raphaeldarley) don't error if Method Not allowed
+					Err(e) => return Err(e),
 				}
 			}
 			let cell =

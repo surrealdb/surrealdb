@@ -282,6 +282,163 @@ async fn update_with_return_clause() -> Result<(), Error> {
 	Ok(())
 }
 
+#[tokio::test]
+async fn update_with_object_array_string_field_names() -> Result<(), Error> {
+	let sql = "
+		UPSERT person:one SET field.key = 'value';
+		UPSERT person:two SET field['key'] = 'value';
+	";
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 2);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
+			{
+				field: {
+					key: 'value'
+				},
+				id: person:one
+			}
+		]",
+	);
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
+			{
+				field: {
+					key: 'value'
+				},
+				id: person:two
+			}
+		]",
+	);
+	assert_eq!(tmp, val);
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn update_records_and_arrays_with_json_patch() -> Result<(), Error> {
+	let sql = "
+		UPSERT person:test CONTENT {
+			username: 'parsley',
+			bugs: [],
+			biscuits: [
+				{ name: 'Digestive' },
+				{ name: 'Choco Leibniz' }
+			]
+		};
+		UPDATE person:test PATCH [
+			{
+				op: 'add',
+				path: '/bugs',
+				value: 'rfc6902'
+			},
+			{
+				op: 'add',
+				path: '/biscuits/0',
+				value: { name: 'Ginger Nut' }
+			},
+			{
+				op: 'add',
+				path: '/test',
+				value: true,
+			}
+		];
+		UPSERT person:test PATCH [
+			{
+				op: 'add',
+				path: '/bugs/-',
+				value: 'rfc6903'
+			}
+		];
+	";
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 3);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
+			{
+				biscuits: [
+					{
+						name: 'Digestive'
+					},
+					{
+						name: 'Choco Leibniz'
+					}
+				],
+				bugs: [],
+				id: person:test,
+				username: 'parsley'
+			}
+		]",
+	);
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
+			{
+				biscuits: [
+					{
+						name: 'Ginger Nut'
+					},
+					{
+						name: 'Digestive'
+					},
+					{
+						name: 'Choco Leibniz'
+					}
+				],
+				bugs: [
+					'rfc6902'
+				],
+				id: person:test,
+				test: true,
+				username: 'parsley'
+			}
+		]",
+	);
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
+			{
+				biscuits: [
+					{
+						name: 'Ginger Nut'
+					},
+					{
+						name: 'Digestive'
+					},
+					{
+						name: 'Choco Leibniz'
+					}
+				],
+				bugs: [
+					'rfc6902',
+					'rfc6903'
+				],
+				id: person:test,
+				test: true,
+				username: 'parsley'
+			}
+		]",
+	);
+	assert_eq!(tmp, val);
+	//
+	Ok(())
+}
+
 //
 // Permissions
 //

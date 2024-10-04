@@ -16,13 +16,7 @@ use channel::Sender;
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::fmt::{self, Debug};
-#[cfg(any(
-	feature = "kv-mem",
-	feature = "kv-surrealkv",
-	feature = "kv-rocksdb",
-	feature = "kv-fdb",
-	feature = "kv-tikv",
-))]
+#[cfg(storage)]
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -70,13 +64,7 @@ pub struct MutableContext {
 	index_builder: Option<IndexBuilder>,
 	// Capabilities
 	capabilities: Arc<Capabilities>,
-	#[cfg(any(
-		feature = "kv-mem",
-		feature = "kv-surrealkv",
-		feature = "kv-rocksdb",
-		feature = "kv-fdb",
-		feature = "kv-tikv",
-	))]
+	#[cfg(storage)]
 	// The temporary directory
 	temporary_directory: Option<Arc<PathBuf>>,
 	// An optional transaction
@@ -116,14 +104,7 @@ impl MutableContext {
 		capabilities: Capabilities,
 		index_stores: IndexStores,
 		#[cfg(not(target_arch = "wasm32"))] index_builder: IndexBuilder,
-		#[cfg(any(
-			feature = "kv-mem",
-			feature = "kv-surrealkv",
-			feature = "kv-rocksdb",
-			feature = "kv-fdb",
-			feature = "kv-tikv",
-		))]
-		temporary_directory: Option<Arc<PathBuf>>,
+		#[cfg(storage)] temporary_directory: Option<Arc<PathBuf>>,
 	) -> Result<MutableContext, Error> {
 		let mut ctx = Self {
 			values: HashMap::default(),
@@ -138,13 +119,7 @@ impl MutableContext {
 			index_stores,
 			#[cfg(not(target_arch = "wasm32"))]
 			index_builder: Some(index_builder),
-			#[cfg(any(
-				feature = "kv-mem",
-				feature = "kv-surrealkv",
-				feature = "kv-rocksdb",
-				feature = "kv-fdb",
-				feature = "kv-tikv",
-			))]
+			#[cfg(storage)]
 			temporary_directory,
 			transaction: None,
 			isolated: false,
@@ -169,13 +144,7 @@ impl MutableContext {
 			index_stores: IndexStores::default(),
 			#[cfg(not(target_arch = "wasm32"))]
 			index_builder: None,
-			#[cfg(any(
-				feature = "kv-mem",
-				feature = "kv-surrealkv",
-				feature = "kv-rocksdb",
-				feature = "kv-fdb",
-				feature = "kv-tikv",
-			))]
+			#[cfg(storage)]
 			temporary_directory: None,
 			transaction: None,
 			isolated: false,
@@ -196,13 +165,7 @@ impl MutableContext {
 			index_stores: parent.index_stores.clone(),
 			#[cfg(not(target_arch = "wasm32"))]
 			index_builder: parent.index_builder.clone(),
-			#[cfg(any(
-				feature = "kv-mem",
-				feature = "kv-surrealkv",
-				feature = "kv-rocksdb",
-				feature = "kv-fdb",
-				feature = "kv-tikv",
-			))]
+			#[cfg(storage)]
 			temporary_directory: parent.temporary_directory.clone(),
 			transaction: parent.transaction.clone(),
 			isolated: false,
@@ -216,7 +179,7 @@ impl MutableContext {
 	pub(crate) fn unfreeze(ctx: Context) -> Result<MutableContext, Error> {
 		match Arc::try_unwrap(ctx) {
 			Ok(inner) => Ok(inner),
-			Err(_) => Err(Error::Unreachable("Context::unfreeze")),
+			Err(_) => Err(fail!("Tried to unfreeze a non-existent Context")),
 		}
 	}
 
@@ -234,13 +197,7 @@ impl MutableContext {
 			index_stores: parent.index_stores.clone(),
 			#[cfg(not(target_arch = "wasm32"))]
 			index_builder: parent.index_builder.clone(),
-			#[cfg(any(
-				feature = "kv-mem",
-				feature = "kv-surrealkv",
-				feature = "kv-rocksdb",
-				feature = "kv-fdb",
-				feature = "kv-tikv",
-			))]
+			#[cfg(storage)]
 			temporary_directory: parent.temporary_directory.clone(),
 			transaction: parent.transaction.clone(),
 			isolated: true,
@@ -262,13 +219,7 @@ impl MutableContext {
 			index_stores: from.index_stores.clone(),
 			#[cfg(not(target_arch = "wasm32"))]
 			index_builder: from.index_builder.clone(),
-			#[cfg(any(
-				feature = "kv-mem",
-				feature = "kv-surrealkv",
-				feature = "kv-rocksdb",
-				feature = "kv-fdb",
-				feature = "kv-tikv",
-			))]
+			#[cfg(storage)]
 			temporary_directory: from.temporary_directory.clone(),
 			transaction: None,
 			isolated: false,
@@ -403,13 +354,7 @@ impl MutableContext {
 		matches!(self.done(), Some(Reason::Timedout))
 	}
 
-	#[cfg(any(
-		feature = "kv-mem",
-		feature = "kv-surrealkv",
-		feature = "kv-rocksdb",
-		feature = "kv-fdb",
-		feature = "kv-tikv",
-	))]
+	#[cfg(storage)]
 	/// Return the location of the temporary directory if any
 	pub fn temporary_directory(&self) -> Option<&Arc<PathBuf>> {
 		self.temporary_directory.as_ref()
@@ -458,32 +403,39 @@ impl MutableContext {
 	#[allow(dead_code)]
 	pub fn check_allowed_scripting(&self) -> Result<(), Error> {
 		if !self.capabilities.allows_scripting() {
+			warn!("Capabilities denied scripting attempt");
 			return Err(Error::ScriptingNotAllowed);
 		}
+		trace!("Capabilities allowed scripting");
 		Ok(())
 	}
 
 	/// Check if a function is allowed
 	pub fn check_allowed_function(&self, target: &str) -> Result<(), Error> {
 		if !self.capabilities.allows_function_name(target) {
+			warn!("Capabilities denied function execution attempt, target: '{target}'");
 			return Err(Error::FunctionNotAllowed(target.to_string()));
 		}
+		trace!("Capabilities allowed function execution, target: '{target}'");
 		Ok(())
 	}
 
 	/// Check if a network target is allowed
 	#[cfg(feature = "http")]
-	pub fn check_allowed_net(&self, target: &Url) -> Result<(), Error> {
-		match target.host() {
-			Some(host)
-				if self.capabilities.allows_network_target(&NetTarget::Host(
-					host.to_owned(),
-					target.port_or_known_default(),
-				)) =>
-			{
+	pub fn check_allowed_net(&self, url: &Url) -> Result<(), Error> {
+		match url.host() {
+			Some(host) => {
+				let target = &NetTarget::Host(host.to_owned(), url.port_or_known_default());
+				if !self.capabilities.allows_network_target(target) {
+					warn!(
+						"Capabilities denied outgoing network connection attempt, target: '{target}'"
+					);
+					return Err(Error::NetTargetNotAllowed(target.to_string()));
+				}
+				trace!("Capabilities allowed outgoing network connection, target: '{target}'");
 				Ok(())
 			}
-			_ => Err(Error::NetTargetNotAllowed(target.to_string())),
+			_ => Err(Error::InvalidUrl(url.to_string())),
 		}
 	}
 }

@@ -172,9 +172,12 @@ pub trait RpcContext {
 			return Err(RpcError::InvalidParams);
 		};
 		let mut tmp_session = mem::take(self.session_mut());
-		crate::iam::verify::token(self.kvs(), &mut tmp_session, &token.0).await?;
+		let out: Result<(), RpcError> =
+			crate::iam::verify::token(self.kvs(), &mut tmp_session, &token.0)
+				.await
+				.map_err(Into::into);
 		*self.session_mut() = tmp_session;
-		Ok(Value::None.into())
+		out.map(|_| Value::None.into())
 	}
 
 	// ------------------------------
@@ -299,8 +302,6 @@ pub trait RpcContext {
 		let Ok((what, data)) = params.needs_two() else {
 			return Err(RpcError::InvalidParams);
 		};
-		// Return a single result?
-		let one = what.is_thing_single();
 		// Specify the SQL query string
 
 		let mut res = match what {
@@ -323,11 +324,7 @@ pub trait RpcContext {
 			}
 		};
 
-		// Extract the first query result
-		let res = match one {
-			true => res.remove(0).result?.first(),
-			false => res.remove(0).result?,
-		};
+		let res = res.remove(0).result?;
 		// Return the result to the client
 		Ok(res.into())
 	}
@@ -336,8 +333,6 @@ pub trait RpcContext {
 		let Ok((what, data)) = params.needs_two() else {
 			return Err(RpcError::InvalidParams);
 		};
-
-		let one = data.is_single();
 
 		let mut res = match what {
 			Value::None | Value::Null => {
@@ -360,10 +355,7 @@ pub trait RpcContext {
 			_ => return Err(RpcError::InvalidParams),
 		};
 
-		let res = match one {
-			true => res.remove(0).result?.first(),
-			false => res.remove(0).result?,
-		};
+		let res = res.remove(0).result?;
 		Ok(res)
 	}
 
@@ -375,8 +367,9 @@ pub trait RpcContext {
 		let Ok((what, data)) = params.needs_one_or_two() else {
 			return Err(RpcError::InvalidParams);
 		};
+		let what = what.could_be_table();
 		// Return a single result?
-		let one = what.is_thing_single();
+		let one = what.is_thing_single() || what.is_table();
 		// Specify the SQL query string
 		let sql = if data.is_none_or_null() {
 			"CREATE $what RETURN AFTER"
@@ -385,7 +378,7 @@ pub trait RpcContext {
 		};
 		// Specify the query parameters
 		let var = Some(map! {
-			String::from("what") => what.could_be_table(),
+			String::from("what") => what,
 			String::from("data") => data,
 			=> &self.vars()
 		});
@@ -540,7 +533,7 @@ pub trait RpcContext {
 			return Err(RpcError::InvalidParams);
 		};
 		// Return a single result?
-		let one = kind.is_thing_single();
+		let one = from.is_single() && to.is_single();
 		// Specify the SQL query string
 		let sql = if data.is_none_or_null() {
 			"RELATE $from->$kind->$to"
@@ -801,7 +794,7 @@ pub trait RpcContext {
 		let res = match query {
 			Value::Query(sql) => self.kvs().process(sql, self.session(), vars).await?,
 			Value::Strand(sql) => self.kvs().execute(&sql, self.session(), vars).await?,
-			_ => unreachable!(),
+			_ => return Err(fail!("Unexpected query type: {query:?}").into()),
 		};
 
 		// Post-process hooks for web layer

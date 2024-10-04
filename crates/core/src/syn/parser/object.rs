@@ -1,14 +1,14 @@
 use std::collections::BTreeMap;
 
-use geo_types::{LineString, MultiLineString, MultiPoint, MultiPolygon, Point, Polygon};
 use reblessive::Stk;
 
 use crate::{
-	enter_object_recursion,
-	sql::{Block, Geometry, Number, Object, Strand, Value},
+	sql::{Block, Geometry, Object, Strand, Value},
 	syn::{
-		parser::{mac::expected, ParseError, ParseErrorKind, ParseResult, Parser},
-		token::{t, Span, TokenKind},
+		error::bail,
+		lexer::compound,
+		parser::{enter_object_recursion, mac::expected, ParseResult, Parser},
+		token::{t, Glued, Span, TokenKind},
 	},
 };
 
@@ -30,11 +30,8 @@ impl Parser<'_> {
 			})
 		}
 
-		// glue possible complex tokens.
-		self.glue()?;
-
 		// Now check first if it can be an object.
-		if self.peek_token_at(1).kind == t!(":") {
+		if self.glue_and_peek1()?.kind == t!(":") {
 			enter_object_recursion!(this = self => {
 			   return this.parse_object_or_geometry(ctx, start).await;
 			})
@@ -52,7 +49,7 @@ impl Parser<'_> {
 	) -> ParseResult<Value> {
 		expected!(self, t!(":"));
 		// for it to be geometry the next value must be a strand like.
-		let (t!("\"") | t!("'")) = self.peek_kind() else {
+		let (t!("\"") | t!("'") | TokenKind::Glued(Glued::Strand)) = self.peek_kind() else {
 			return self
 				.parse_object_from_key(ctx, key, BTreeMap::new(), start)
 				.await
@@ -72,21 +69,36 @@ impl Parser<'_> {
 				// can still be wrong.
 				//
 				// we can unwrap strand since we just matched it to not be an err.
-				self.parse_geometry_after_type(ctx, start, key, type_value, Self::to_point, |x| {
-					Value::Geometry(Geometry::Point(x))
-				})
+				self.parse_geometry_after_type(
+					ctx,
+					start,
+					key,
+					type_value,
+					Geometry::array_to_point,
+					|x| Value::Geometry(Geometry::Point(x)),
+				)
 				.await
 			}
 			"LineString" => {
-				self.parse_geometry_after_type(ctx, start, key, type_value, Self::to_line, |x| {
-					Value::Geometry(Geometry::Line(x))
-				})
+				self.parse_geometry_after_type(
+					ctx,
+					start,
+					key,
+					type_value,
+					Geometry::array_to_line,
+					|x| Value::Geometry(Geometry::Line(x)),
+				)
 				.await
 			}
 			"Polygon" => {
-				self.parse_geometry_after_type(ctx, start, key, type_value, Self::to_polygon, |x| {
-					Value::Geometry(Geometry::Polygon(x))
-				})
+				self.parse_geometry_after_type(
+					ctx,
+					start,
+					key,
+					type_value,
+					Geometry::array_to_polygon,
+					|x| Value::Geometry(Geometry::Polygon(x)),
+				)
 				.await
 			}
 			"MultiPoint" => {
@@ -95,7 +107,7 @@ impl Parser<'_> {
 					start,
 					key,
 					type_value,
-					Self::to_multipoint,
+					Geometry::array_to_multipoint,
 					|x| Value::Geometry(Geometry::MultiPoint(x)),
 				)
 				.await
@@ -106,7 +118,7 @@ impl Parser<'_> {
 					start,
 					key,
 					type_value,
-					Self::to_multiline,
+					Geometry::array_to_multiline,
 					|x| Value::Geometry(Geometry::MultiLine(x)),
 				)
 				.await
@@ -117,7 +129,7 @@ impl Parser<'_> {
 					start,
 					key,
 					type_value,
-					Self::to_multipolygon,
+					Geometry::array_to_multipolygon,
 					|x| Value::Geometry(Geometry::MultiPolygon(x)),
 				)
 				.await
@@ -152,7 +164,7 @@ impl Parser<'_> {
 
 				expected!(self, t!(":"));
 
-				let value = ctx.run(|ctx| self.parse_value_field(ctx)).await?;
+				let value = ctx.run(|ctx| self.parse_value_inherit(ctx)).await?;
 
 				// check for an object end, if it doesn't end it is not a geometry.
 				if !self.eat(t!(",")) {
@@ -229,7 +241,7 @@ impl Parser<'_> {
 
 		// found coordinates field, next must be a coordinates value but we don't know
 		// which until we match type.
-		let value = ctx.run(|ctx| self.parse_value_field(ctx)).await?;
+		let value = ctx.run(|ctx| self.parse_value_inherit(ctx)).await?;
 
 		if !self.eat(t!(",")) {
 			// no comma object must end early.
@@ -267,42 +279,42 @@ impl Parser<'_> {
 		match type_value.as_str() {
 			"Point" => {
 				if self.eat(t!("}")) {
-					if let Some(point) = Self::to_point(&value) {
+					if let Some(point) = Geometry::array_to_point(&value) {
 						return Ok(Value::Geometry(Geometry::Point(point)));
 					}
 				}
 			}
 			"LineString" => {
 				if self.eat(t!("}")) {
-					if let Some(point) = Self::to_line(&value) {
+					if let Some(point) = Geometry::array_to_line(&value) {
 						return Ok(Value::Geometry(Geometry::Line(point)));
 					}
 				}
 			}
 			"Polygon" => {
 				if self.eat(t!("}")) {
-					if let Some(point) = Self::to_polygon(&value) {
+					if let Some(point) = Geometry::array_to_polygon(&value) {
 						return Ok(Value::Geometry(Geometry::Polygon(point)));
 					}
 				}
 			}
 			"MultiPoint" => {
 				if self.eat(t!("}")) {
-					if let Some(point) = Self::to_multipolygon(&value) {
+					if let Some(point) = Geometry::array_to_multipolygon(&value) {
 						return Ok(Value::Geometry(Geometry::MultiPolygon(point)));
 					}
 				}
 			}
 			"MultiLineString" => {
 				if self.eat(t!("}")) {
-					if let Some(point) = Self::to_multiline(&value) {
+					if let Some(point) = Geometry::array_to_multiline(&value) {
 						return Ok(Value::Geometry(Geometry::MultiLine(point)));
 					}
 				}
 			}
 			"MultiPolygon" => {
 				if self.eat(t!("}")) {
-					if let Some(point) = Self::to_multipolygon(&value) {
+					if let Some(point) = Geometry::array_to_multipolygon(&value) {
 						return Ok(Value::Geometry(Geometry::MultiPolygon(point)));
 					}
 				}
@@ -339,7 +351,7 @@ impl Parser<'_> {
 		// 'geometries' key can only happen in a GeometryCollection, so try to parse that.
 		expected!(self, t!(":"));
 
-		let value = ctx.run(|ctx| self.parse_value_field(ctx)).await?;
+		let value = ctx.run(|ctx| self.parse_value_inherit(ctx)).await?;
 
 		// if the object ends here, it is not a geometry.
 		if !self.eat(t!(",")) || self.peek_kind() == t!("}") {
@@ -471,18 +483,15 @@ impl Parser<'_> {
 				.map(Value::Object);
 		}
 		expected!(self, t!(":"));
-		let value = ctx.run(|ctx| self.parse_value_field(ctx)).await?;
+		let value = ctx.run(|ctx| self.parse_value_inherit(ctx)).await?;
 		let comma = self.eat(t!(","));
 		if !self.eat(t!("}")) {
 			// the object didn't end, either an error or not a geometry.
 			if !comma {
-				return Err(ParseError::new(
-					ParseErrorKind::UnclosedDelimiter {
-						expected: t!("}"),
-						should_close: start,
-					},
-					self.last_span(),
-				));
+				bail!("Unexpected token, expected delimiter `}}`",
+					@self.recent_span(),
+					@start => "expected this delimiter to close"
+				);
 			}
 
 			return self
@@ -506,82 +515,6 @@ impl Parser<'_> {
 		Ok(map(v))
 	}
 
-	fn to_multipolygon(v: &Value) -> Option<MultiPolygon<f64>> {
-		let mut res = Vec::new();
-		let Value::Array(v) = v else {
-			return None;
-		};
-		for x in v.iter() {
-			res.push(Self::to_polygon(x)?);
-		}
-		Some(MultiPolygon::new(res))
-	}
-
-	fn to_multiline(v: &Value) -> Option<MultiLineString<f64>> {
-		let mut res = Vec::new();
-		let Value::Array(v) = v else {
-			return None;
-		};
-		for x in v.iter() {
-			res.push(Self::to_line(x)?);
-		}
-		Some(MultiLineString::new(res))
-	}
-
-	fn to_multipoint(v: &Value) -> Option<MultiPoint<f64>> {
-		let mut res = Vec::new();
-		let Value::Array(v) = v else {
-			return None;
-		};
-		for x in v.iter() {
-			res.push(Self::to_point(x)?);
-		}
-		Some(MultiPoint::new(res))
-	}
-
-	fn to_polygon(v: &Value) -> Option<Polygon<f64>> {
-		let mut res = Vec::new();
-		let Value::Array(v) = v else {
-			return None;
-		};
-		if v.is_empty() {
-			return None;
-		}
-		let first = Self::to_line(&v[0])?;
-		for x in &v[1..] {
-			res.push(Self::to_line(x)?);
-		}
-		Some(Polygon::new(first, res))
-	}
-
-	fn to_line(v: &Value) -> Option<LineString<f64>> {
-		let mut res = Vec::new();
-		let Value::Array(v) = v else {
-			return None;
-		};
-		for x in v.iter() {
-			res.push(Self::to_point(x)?);
-		}
-		Some(LineString::from(res))
-	}
-
-	fn to_point(v: &Value) -> Option<Point<f64>> {
-		let Value::Array(v) = v else {
-			return None;
-		};
-		if v.len() != 2 {
-			return None;
-		}
-		// FIXME: This truncates decimals and large integers into a f64.
-		let Value::Number(ref a) = v.0[0] else {
-			return None;
-		};
-		let Value::Number(ref b) = v.0[1] else {
-			return None;
-		};
-		Some(Point::from((a.clone().try_into().ok()?, b.clone().try_into().ok()?)))
-	}
-
 	async fn parse_object_from_key(
 		&mut self,
 		ctx: &mut Stk,
@@ -589,7 +522,7 @@ impl Parser<'_> {
 		mut map: BTreeMap<String, Value>,
 		start: Span,
 	) -> ParseResult<Object> {
-		let v = ctx.run(|ctx| self.parse_value_field(ctx)).await?;
+		let v = ctx.run(|ctx| self.parse_value_inherit(ctx)).await?;
 		map.insert(key, v);
 		if !self.eat(t!(",")) {
 			self.expect_closing_delimiter(t!("}"), start)?;
@@ -660,39 +593,40 @@ impl Parser<'_> {
 	async fn parse_object_entry(&mut self, ctx: &mut Stk) -> ParseResult<(String, Value)> {
 		let text = self.parse_object_key()?;
 		expected!(self, t!(":"));
-		let value = ctx.run(|ctx| self.parse_value_field(ctx)).await?;
+		let value = ctx.run(|ctx| self.parse_value_inherit(ctx)).await?;
 		Ok((text, value))
 	}
 
 	/// Parses the key of an object, i.e. `field` in the object `{ field: 1 }`.
-	pub fn parse_object_key(&mut self) -> ParseResult<String> {
-		let token = self.glue()?;
+	pub(super) fn parse_object_key(&mut self) -> ParseResult<String> {
+		let token = self.peek();
 		match token.kind {
-			TokenKind::Keyword(_)
-			| TokenKind::Language(_)
-			| TokenKind::Algorithm(_)
-			| TokenKind::Distance(_)
-			| TokenKind::VectorType(_) => {
+			x if Self::kind_is_keyword_like(x) => {
 				self.pop_peek();
-				let str = self.lexer.reader.span(token.span);
-				// Lexer should ensure that the token is valid utf-8
-				let str = std::str::from_utf8(str).unwrap().to_owned();
-				Ok(str)
+				let str = self.lexer.span_str(token.span);
+				Ok(str.to_string())
 			}
 			TokenKind::Identifier => {
 				self.pop_peek();
 				let str = self.lexer.string.take().unwrap();
 				Ok(str)
 			}
-			t!("\"") | t!("'") | TokenKind::Strand => {
+			t!("\"") | t!("'") | TokenKind::Glued(Glued::Strand) => {
 				let str = self.next_token_value::<Strand>()?.0;
 				Ok(str)
 			}
-			TokenKind::Digits | TokenKind::Number(_) => {
-				let number = self.next_token_value::<Number>()?.to_string();
-				Ok(number)
+			TokenKind::Digits => {
+				self.pop_peek();
+				let span = self.lexer.lex_compound(token, compound::number)?.span;
+				let str = self.lexer.span_str(span);
+				Ok(str.to_string())
 			}
-			x => unexpected!(self, x, "an object key"),
+			TokenKind::Glued(Glued::Number) => {
+				self.pop_peek();
+				let str = self.lexer.span_str(token.span);
+				Ok(str.to_string())
+			}
+			_ => unexpected!(self, token, "an object key"),
 		}
 	}
 }

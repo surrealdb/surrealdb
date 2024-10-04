@@ -15,6 +15,7 @@
 mod api;
 mod batch;
 mod cache;
+mod cf;
 mod clock;
 mod ds;
 mod export;
@@ -31,11 +32,20 @@ mod indxdb;
 mod kv;
 mod mem;
 mod rocksdb;
+mod surrealcs;
 mod surrealkv;
 mod tikv;
 
 #[cfg(not(target_arch = "wasm32"))]
 mod index;
+#[cfg(any(
+	feature = "kv-mem",
+	feature = "kv-tikv",
+	feature = "kv-fdb",
+	feature = "kv-indxdb",
+	feature = "kv-surrealcs",
+))]
+mod savepoint;
 #[cfg(test)]
 mod tests;
 

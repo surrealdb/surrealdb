@@ -12,8 +12,8 @@ use crate::{
 };
 
 impl Parser<'_> {
-	pub async fn parse_if_stmt(&mut self, ctx: &mut Stk) -> ParseResult<IfelseStatement> {
-		let condition = ctx.run(|ctx| self.parse_value_field(ctx)).await?;
+	pub(crate) async fn parse_if_stmt(&mut self, ctx: &mut Stk) -> ParseResult<IfelseStatement> {
+		let condition = ctx.run(|ctx| self.parse_value_inherit(ctx)).await?;
 
 		let mut res = IfelseStatement {
 			exprs: Vec::new(),
@@ -23,7 +23,7 @@ impl Parser<'_> {
 		let next = self.next();
 		match next.kind {
 			t!("THEN") => {
-				let body = ctx.run(|ctx| self.parse_value_field(ctx)).await?;
+				let body = ctx.run(|ctx| self.parse_value_inherit(ctx)).await?;
 				self.eat(t!(";"));
 				res.exprs.push((condition, body));
 				self.parse_worded_tail(ctx, &mut res).await?;
@@ -33,7 +33,7 @@ impl Parser<'_> {
 				res.exprs.push((condition, body.into()));
 				self.parse_bracketed_tail(ctx, &mut res).await?;
 			}
-			x => unexpected!(self, x, "THEN or '{'"),
+			_ => unexpected!(self, next, "THEN or '{'"),
 		}
 
 		Ok(res)
@@ -45,24 +45,25 @@ impl Parser<'_> {
 		res: &mut IfelseStatement,
 	) -> ParseResult<()> {
 		loop {
-			match self.next().kind {
+			let next = self.next();
+			match next.kind {
 				t!("END") => return Ok(()),
 				t!("ELSE") => {
 					if self.eat(t!("IF")) {
-						let condition = ctx.run(|ctx| self.parse_value_field(ctx)).await?;
+						let condition = ctx.run(|ctx| self.parse_value_inherit(ctx)).await?;
 						expected!(self, t!("THEN"));
-						let body = ctx.run(|ctx| self.parse_value_field(ctx)).await?;
+						let body = ctx.run(|ctx| self.parse_value_inherit(ctx)).await?;
 						self.eat(t!(";"));
 						res.exprs.push((condition, body));
 					} else {
-						let value = ctx.run(|ctx| self.parse_value_field(ctx)).await?;
+						let value = ctx.run(|ctx| self.parse_value_inherit(ctx)).await?;
 						self.eat(t!(";"));
 						expected!(self, t!("END"));
 						res.close = Some(value);
 						return Ok(());
 					}
 				}
-				x => unexpected!(self, x, "if to end"),
+				_ => unexpected!(self, next, "if to end"),
 			}
 		}
 	}
@@ -77,7 +78,7 @@ impl Parser<'_> {
 				t!("ELSE") => {
 					self.pop_peek();
 					if self.eat(t!("IF")) {
-						let condition = ctx.run(|ctx| self.parse_value_field(ctx)).await?;
+						let condition = ctx.run(|ctx| self.parse_value_inherit(ctx)).await?;
 						let span = expected!(self, t!("{")).span;
 						let body = self.parse_block(ctx, span).await?;
 						res.exprs.push((condition, body.into()));

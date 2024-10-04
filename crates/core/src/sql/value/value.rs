@@ -500,6 +500,12 @@ impl From<Vec<f32>> for Value {
 	}
 }
 
+impl From<Vec<usize>> for Value {
+	fn from(v: Vec<usize>) -> Self {
+		Value::Array(Array::from(v))
+	}
+}
+
 impl From<Vec<Value>> for Value {
 	fn from(v: Vec<Value>) -> Self {
 		Value::Array(Array::from(v))
@@ -842,7 +848,7 @@ impl TryFrom<&Value> for Number {
 	type Error = Error;
 	fn try_from(value: &Value) -> Result<Self, Self::Error> {
 		match value {
-			Value::Number(x) => Ok(x.clone()),
+			Value::Number(x) => Ok(*x),
 			_ => Err(Error::TryFrom(value.to_string(), "Number")),
 		}
 	}
@@ -953,12 +959,12 @@ impl Value {
 			Value::Uuid(_) => true,
 			Value::Thing(_) => true,
 			Value::Geometry(_) => true,
+			Value::Datetime(_) => true,
 			Value::Array(v) => !v.is_empty(),
 			Value::Object(v) => !v.is_empty(),
-			Value::Strand(v) => !v.is_empty() && !v.eq_ignore_ascii_case("false"),
+			Value::Strand(v) => !v.is_empty(),
 			Value::Number(v) => v.is_truthy(),
 			Value::Duration(v) => v.as_nanos() > 0,
-			Value::Datetime(v) => v.timestamp() > 0,
 			_ => false,
 		}
 	}
@@ -1055,6 +1061,11 @@ impl Value {
 	/// Check if this Value is a Thing
 	pub fn is_record(&self) -> bool {
 		matches!(self, Value::Thing(_))
+	}
+
+	/// Check if this Value is a Closure
+	pub fn is_closure(&self) -> bool {
+		matches!(self, Value::Closure(_))
 	}
 
 	/// Check if this Value is a Thing, and belongs to a certain table
@@ -1157,7 +1168,7 @@ impl Value {
 	pub fn is_single(&self) -> bool {
 		match self {
 			Value::Object(_) => true,
-			Value::Array(a) if a.len() == 1 => true,
+			t @ Value::Thing(_) => t.is_thing_single(),
 			_ => false,
 		}
 	}
@@ -2817,9 +2828,11 @@ impl Value {
 		matches!(
 			self,
 			Value::None
-				| Value::Null | Value::Array(_)
+				| Value::Null
+				| Value::Array(_)
 				| Value::Block(_)
-				| Value::Bool(_) | Value::Datetime(_)
+				| Value::Bool(_)
+				| Value::Datetime(_)
 				| Value::Duration(_)
 				| Value::Geometry(_)
 				| Value::Number(_)
@@ -2878,9 +2891,25 @@ impl InfoStructure for Value {
 }
 
 impl Value {
+	/// Validate that a Value is computed or contains only computed Values
+	pub fn validate_computed(&self) -> Result<(), Error> {
+		use Value::*;
+		match self {
+			None | Null | Bool(_) | Number(_) | Strand(_) | Duration(_) | Datetime(_) | Uuid(_)
+			| Geometry(_) | Bytes(_) | Thing(_) => Ok(()),
+			Array(a) => a.validate_computed(),
+			Object(o) => o.validate_computed(),
+			Range(r) => r.validate_computed(),
+			_ => Err(Error::NonComputed),
+		}
+	}
+}
+
+impl Value {
 	/// Check if we require a writeable transaction
 	pub(crate) fn writeable(&self) -> bool {
 		match self {
+			Value::Cast(v) => v.writeable(),
 			Value::Block(v) => v.writeable(),
 			Value::Idiom(v) => v.writeable(),
 			Value::Array(v) => v.iter().any(Value::writeable),
@@ -2895,8 +2924,21 @@ impl Value {
 		}
 	}
 	/// Process this type returning a computed simple Value
-	///
-	/// Is used recursively.
+	pub(crate) async fn compute(
+		&self,
+		stk: &mut Stk,
+		ctx: &Context,
+		opt: &Options,
+		doc: Option<&CursorDoc>,
+	) -> Result<Value, Error> {
+		match self.compute_unbordered(stk, ctx, opt, doc).await {
+			Err(Error::Return {
+				value,
+			}) => Ok(value),
+			res => res,
+		}
+	}
+	/// Process this type returning a computed simple Value, without catching errors
 	pub(crate) async fn compute_unbordered(
 		&self,
 		stk: &mut Stk,
@@ -2925,21 +2967,6 @@ impl Value {
 			_ => Ok(self.to_owned()),
 		}
 	}
-
-	pub(crate) async fn compute(
-		&self,
-		stk: &mut Stk,
-		ctx: &Context,
-		opt: &Options,
-		doc: Option<&CursorDoc>,
-	) -> Result<Value, Error> {
-		match self.compute_unbordered(stk, ctx, opt, doc).await {
-			Err(Error::Return {
-				value,
-			}) => Ok(value),
-			res => res,
-		}
-	}
 }
 
 // ------------------------------
@@ -2954,10 +2981,10 @@ impl TryAdd for Value {
 	fn try_add(self, other: Self) -> Result<Self, Error> {
 		Ok(match (self, other) {
 			(Self::Number(v), Self::Number(w)) => Self::Number(v.try_add(w)?),
-			(Self::Strand(v), Self::Strand(w)) => Self::Strand(v + w),
-			(Self::Datetime(v), Self::Duration(w)) => Self::Datetime(w + v),
-			(Self::Duration(v), Self::Datetime(w)) => Self::Datetime(v + w),
-			(Self::Duration(v), Self::Duration(w)) => Self::Duration(v + w),
+			(Self::Strand(v), Self::Strand(w)) => Self::Strand(v.try_add(w)?),
+			(Self::Datetime(v), Self::Duration(w)) => Self::Datetime(w.try_add(v)?),
+			(Self::Duration(v), Self::Datetime(w)) => Self::Datetime(v.try_add(w)?),
+			(Self::Duration(v), Self::Duration(w)) => Self::Duration(v.try_add(w)?),
 			(v, w) => return Err(Error::TryAdd(v.to_raw_string(), w.to_raw_string())),
 		})
 	}
@@ -2967,7 +2994,7 @@ impl TryAdd for Value {
 
 pub(crate) trait TrySub<Rhs = Self> {
 	type Output;
-	fn try_sub(self, v: Self) -> Result<Self::Output, Error>;
+	fn try_sub(self, v: Rhs) -> Result<Self::Output, Error>;
 }
 
 impl TrySub for Value {
@@ -2975,10 +3002,10 @@ impl TrySub for Value {
 	fn try_sub(self, other: Self) -> Result<Self, Error> {
 		Ok(match (self, other) {
 			(Self::Number(v), Self::Number(w)) => Self::Number(v.try_sub(w)?),
-			(Self::Datetime(v), Self::Datetime(w)) => Self::Duration(v - w),
-			(Self::Datetime(v), Self::Duration(w)) => Self::Datetime(w - v),
-			(Self::Duration(v), Self::Datetime(w)) => Self::Datetime(v - w),
-			(Self::Duration(v), Self::Duration(w)) => Self::Duration(v - w),
+			(Self::Datetime(v), Self::Datetime(w)) => Self::Duration(v.try_sub(w)?),
+			(Self::Datetime(v), Self::Duration(w)) => Self::Datetime(w.try_sub(v)?),
+			(Self::Duration(v), Self::Datetime(w)) => Self::Datetime(v.try_sub(w)?),
+			(Self::Duration(v), Self::Duration(w)) => Self::Duration(v.try_sub(w)?),
 			(v, w) => return Err(Error::TrySub(v.to_raw_string(), w.to_raw_string())),
 		})
 	}
@@ -3013,6 +3040,23 @@ impl TryDiv for Value {
 	fn try_div(self, other: Self) -> Result<Self, Error> {
 		Ok(match (self, other) {
 			(Self::Number(v), Self::Number(w)) => Self::Number(v.try_div(w)?),
+			(v, w) => return Err(Error::TryDiv(v.to_raw_string(), w.to_raw_string())),
+		})
+	}
+}
+
+// ------------------------------
+
+pub(crate) trait TryFloatDiv<Rhs = Self> {
+	type Output;
+	fn try_float_div(self, v: Self) -> Result<Self::Output, Error>;
+}
+
+impl TryFloatDiv for Value {
+	type Output = Self;
+	fn try_float_div(self, other: Self) -> Result<Self::Output, Error> {
+		Ok(match (self, other) {
+			(Self::Number(v), Self::Number(w)) => Self::Number(v.try_float_div(w)?),
 			(v, w) => return Err(Error::TryDiv(v.to_raw_string(), w.to_raw_string())),
 		})
 	}
@@ -3072,6 +3116,8 @@ impl TryNeg for Value {
 #[cfg(test)]
 mod tests {
 
+	use chrono::TimeZone;
+
 	use super::*;
 	use crate::syn::Parse;
 
@@ -3119,10 +3165,11 @@ mod tests {
 		assert!(Value::from(1.1).is_truthy());
 		assert!(Value::from(-1.1).is_truthy());
 		assert!(Value::from("true").is_truthy());
-		assert!(!Value::from("false").is_truthy());
+		assert!(Value::from("false").is_truthy());
 		assert!(Value::from("falsey").is_truthy());
 		assert!(Value::from("something").is_truthy());
 		assert!(Value::from(Uuid::new()).is_truthy());
+		assert!(Value::from(Utc.with_ymd_and_hms(1948, 12, 3, 0, 0, 0).unwrap()).is_truthy());
 	}
 
 	#[test]

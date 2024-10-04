@@ -7,7 +7,12 @@ use crate::sql::value::Value;
 use reblessive::tree::Stk;
 
 impl Document {
-	pub async fn event(
+	/// Processes any DEFINE EVENT clauses which
+	/// have been defined for the table which this
+	/// record belongs to. This functions loops
+	/// through the events and processes them all
+	/// within the currently running transaction.
+	pub async fn process_table_events(
 		&mut self,
 		stk: &mut Stk,
 		ctx: &Context,

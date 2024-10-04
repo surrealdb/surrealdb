@@ -1,4 +1,4 @@
-use crate::ctx::Context;
+use crate::ctx::{Context, MutableContext};
 use crate::dbs::{Iterable, Iterator, Options, Statement};
 use crate::doc::CursorDoc;
 use crate::err::Error;
@@ -50,10 +50,19 @@ impl InsertStatement {
 		let version = self.version.as_ref().map(|v| v.to_u64());
 		// Ensure futures are stored
 		let opt = &opt.new_with_futures(false).with_projections(false).with_version(version);
+		// Check if there is a timeout
+		let ctx = match self.timeout.as_ref() {
+			Some(timeout) => {
+				let mut ctx = MutableContext::new(ctx);
+				ctx.add_timeout(*timeout.0)?;
+				ctx.freeze()
+			}
+			None => ctx.clone(),
+		};
 		// Parse the INTO expression
 		let into = match &self.into {
 			None => None,
-			Some(into) => match into.compute(stk, ctx, opt, doc).await? {
+			Some(into) => match into.compute(stk, &ctx, opt, doc).await? {
 				Value::Table(into) => Some(into),
 				v => {
 					return Err(Error::InsertStatement {
@@ -71,8 +80,8 @@ impl InsertStatement {
 					let mut o = Value::base();
 					// Set each field from the expression
 					for (k, v) in v.iter() {
-						let v = v.compute(stk, ctx, opt, None).await?;
-						o.set(stk, ctx, opt, k, v).await?;
+						let v = v.compute(stk, &ctx, opt, None).await?;
+						o.set(stk, &ctx, opt, k, v).await?;
 					}
 					// Specify the new table record id
 					let id = gen_id(&o, &into)?;
@@ -82,7 +91,7 @@ impl InsertStatement {
 			}
 			// Check if this is a modern statement
 			Data::SingleExpression(v) => {
-				let v = v.compute(stk, ctx, opt, doc).await?;
+				let v = v.compute(stk, &ctx, opt, doc).await?;
 				match v {
 					Value::Array(v) => {
 						for v in v {
@@ -105,12 +114,18 @@ impl InsertStatement {
 					}
 				}
 			}
-			_ => unreachable!(),
+			v => return Err(fail!("Unknown data clause type in INSERT statement: {v:?}")),
 		}
 		// Assign the statement
 		let stm = Statement::from(self);
+		// Process the statement
+		let res = i.output(stk, &ctx, opt, &stm).await?;
+		// Catch statement timeout
+		if ctx.is_timedout() {
+			return Err(Error::QueryTimedout);
+		}
 		// Output the results
-		i.output(stk, ctx, opt, &stm).await
+		Ok(res)
 	}
 }
 
@@ -126,7 +141,7 @@ impl fmt::Display for InsertStatement {
 		if let Some(into) = &self.into {
 			write!(f, " INTO {}", into)?;
 		}
-		write!(f, "{}", self.data)?;
+		write!(f, " {}", self.data)?;
 		if let Some(ref v) = self.update {
 			write!(f, " {v}")?
 		}
@@ -150,7 +165,7 @@ fn iterable(id: Thing, v: Value, relation: bool) -> Result<Iterable, Error> {
 	match relation {
 		false => Ok(Iterable::Mergeable(id, v)),
 		true => {
-			let _in = match v.pick(&*IN) {
+			let f = match v.pick(&*IN) {
 				Value::Thing(v) => v,
 				v => {
 					return Err(Error::InsertStatementIn {
@@ -158,7 +173,7 @@ fn iterable(id: Thing, v: Value, relation: bool) -> Result<Iterable, Error> {
 					})
 				}
 			};
-			let out = match v.pick(&*OUT) {
+			let w = match v.pick(&*OUT) {
 				Value::Thing(v) => v,
 				v => {
 					return Err(Error::InsertStatementOut {
@@ -166,7 +181,7 @@ fn iterable(id: Thing, v: Value, relation: bool) -> Result<Iterable, Error> {
 					})
 				}
 			};
-			Ok(Iterable::Relatable(_in, id, out, Some(v)))
+			Ok(Iterable::Relatable(f, id, w, Some(v)))
 		}
 	}
 }

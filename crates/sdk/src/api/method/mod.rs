@@ -92,6 +92,7 @@ pub use use_db::UseDb;
 pub use use_ns::UseNs;
 pub use version::Version;
 
+use super::opt::CreateResource;
 use super::opt::IntoResource;
 
 /// A alias for an often used type of future returned by async methods in this library.
@@ -132,7 +133,7 @@ where
 	/// Using a static, compile-time scheme
 	///
 	/// ```no_run
-	/// use once_cell::sync::Lazy;
+	/// use std::sync::LazyLock;
 	/// use serde::{Serialize, Deserialize};
 	/// use surrealdb::Surreal;
 	/// use surrealdb::opt::auth::Root;
@@ -140,7 +141,7 @@ where
 	/// use surrealdb::engine::remote::ws::Client;
 	///
 	/// // Creates a new static instance of the client
-	/// static DB: Lazy<Surreal<Client>> = Lazy::new(Surreal::init);
+	/// static DB: LazyLock<Surreal<Client>> = LazyLock::new(Surreal::init);
 	///
 	/// #[derive(Serialize, Deserialize)]
 	/// struct Person {
@@ -174,14 +175,14 @@ where
 	/// Using a dynamic, run-time scheme
 	///
 	/// ```no_run
-	/// use once_cell::sync::Lazy;
+	/// use std::sync::LazyLock;
 	/// use serde::{Serialize, Deserialize};
 	/// use surrealdb::Surreal;
 	/// use surrealdb::engine::any::Any;
 	/// use surrealdb::opt::auth::Root;
 	///
 	/// // Creates a new static instance of the client
-	/// static DB: Lazy<Surreal<Any>> = Lazy::new(Surreal::init);
+	/// static DB: LazyLock<Surreal<Any>> = LazyLock::new(Surreal::init);
 	///
 	/// #[derive(Serialize, Deserialize)]
 	/// struct Person {
@@ -733,7 +734,7 @@ where
 	/// db.use_ns("namespace").use_db("database").await?;
 	///
 	/// // Create a record with a random ID
-	/// let person: Vec<Person> = db.create("person").await?;
+	/// let person: Option<Person> = db.create("person").await?;
 	///
 	/// // Create a record with a specific ID
 	/// let record: Option<Person> = db.create(("person", "tobie"))
@@ -749,7 +750,7 @@ where
 	/// # Ok(())
 	/// # }
 	/// ```
-	pub fn create<R>(&self, resource: impl IntoResource<R>) -> Create<C, R> {
+	pub fn create<R>(&self, resource: impl CreateResource<R>) -> Create<C, R> {
 		Create {
 			client: Cow::Borrowed(self),
 			resource: resource.into_resource(),

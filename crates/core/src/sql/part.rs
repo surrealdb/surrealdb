@@ -137,7 +137,7 @@ impl fmt::Display for Part {
 // ------------------------------
 
 pub trait Next<'a> {
-	fn next(&'a self) -> &[Part];
+	fn next(&'a self) -> &'a [Part];
 }
 
 impl<'a> Next<'a> for &'a [Part] {
@@ -151,8 +151,23 @@ impl<'a> Next<'a> for &'a [Part] {
 
 // ------------------------------
 
+pub trait Skip<'a> {
+	fn skip(&'a self, amount: usize) -> &'a [Part];
+}
+
+impl<'a> Skip<'a> for &'a [Part] {
+	fn skip(&'a self, amount: usize) -> &'a [Part] {
+		match self.len() {
+			0 => &[],
+			_ => &self[amount..],
+		}
+	}
+}
+
+// ------------------------------
+
 pub trait NextMethod<'a> {
-	fn next_method(&'a self) -> &[Part];
+	fn next_method(&'a self) -> &'a [Part];
 }
 
 impl<'a> NextMethod<'a> for &'a [Part] {

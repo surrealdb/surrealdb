@@ -1,6 +1,7 @@
 mod parse;
 use parse::Parse;
 mod helpers;
+use crate::helpers::Test;
 use helpers::new_ds;
 use surrealdb::dbs::Session;
 use surrealdb::err::Error;
@@ -142,6 +143,72 @@ async fn insert_statement_on_duplicate_key() -> Result<(), Error> {
 	let val = Value::parse("[{ id: test:tester, test: true, something: 'else' }]");
 	assert_eq!(tmp, val);
 	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn insert_with_savepoint() -> Result<(), Error> {
+	let sql = "
+		DEFINE INDEX one ON pokemon FIELDS one UNIQUE;
+		DEFINE INDEX two ON pokemon FIELDS two UNIQUE;
+		-- This will INSERT a record with a specific id
+		INSERT INTO pokemon (id, two) VALUES (1, 'two');
+		-- This will INSERT a record with a random id
+		INSERT INTO pokemon (id, one) VALUES ('test', 'one');
+		-- This will fail, because a UNIQUE index value already exists
+		INSERT INTO pokemon (two) VALUES ('two');
+		-- This will fail, because a UNIQUE index value already exists
+		INSERT INTO pokemon (id, one, two) VALUES (2, 'one', 'two');
+		-- This will fail, because we are specifying a specific id even though we also have an ON DUPLICATE KEY UPDATE clause
+		INSERT INTO pokemon (id, one, two) VALUES (2, 'one', 'two') ON DUPLICATE KEY UPDATE two = 'changed';
+		-- This will succeed, because we are not specifying a specific id and we also have an ON DUPLICATE KEY UPDATE clause
+		INSERT INTO pokemon (one, two) VALUES ('one', 'two') ON DUPLICATE KEY UPDATE two = 'changed';
+		SELECT * FROM pokemon;
+	";
+	let mut t = Test::new(sql).await?;
+	t.expect_size(9)?;
+	t.skip_ok(2)?;
+	t.expect_val(
+		"[
+			{
+				id: pokemon:1,
+				two: 'two'
+			}
+		]",
+	)?;
+	t.expect_val(
+		"[
+			{
+				id: pokemon:test,
+				one: 'one'
+			}
+		]",
+	)?;
+	t.expect_error("Database index `two` already contains 'two', with record `pokemon:1`")?;
+	t.expect_error("Database index `one` already contains 'one', with record `pokemon:test`")?;
+	t.expect_error("Database index `one` already contains 'one', with record `pokemon:test`")?;
+	t.expect_val(
+		"[
+			{
+				id: pokemon:test,
+				one: 'one',
+				two: 'changed'
+			}
+		]",
+	)?;
+	t.expect_val(
+		"[
+			{
+				id: pokemon:1,
+				two: 'two'
+			},
+			{
+				id: pokemon:test,
+				one: 'one',
+				two: 'changed'
+			}
+		]",
+	)?;
 	Ok(())
 }
 
@@ -509,7 +576,14 @@ async fn insert_statement_unique_index() -> Result<(), Error> {
 	assert!(tmp.is_ok());
 	//
 	let tmp = res.remove(0).result;
-	assert!(tmp.is_ok());
+	match tmp {
+		Err(Error::IndexExists {
+			index,
+			value,
+			..
+		}) if index.eq("name") && value.eq("'SurrealDB'") => (),
+		found => panic!("Expected Err(Error::IndexExists), found '{:?}'", found),
+	}
 	//
 	let tmp = res.remove(0).result?;
 	let val = Value::parse("[ { count: 1 } ]");

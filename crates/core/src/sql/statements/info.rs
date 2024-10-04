@@ -4,14 +4,14 @@ use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::iam::Action;
 use crate::iam::ResourceKind;
-use crate::sql::{Base, Ident, Object, Value};
+use crate::sql::{Base, Ident, Object, Value, Version};
 use derive::Store;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::sync::Arc;
 
-#[revisioned(revision = 4)]
+#[revisioned(revision = 5)]
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
@@ -25,10 +25,10 @@ pub enum InfoStatement {
 	Ns(#[revision(start = 2)] bool),
 
 	#[revision(override(revision = 2, discriminant = 5), override(revision = 3, discriminant = 5))]
-	Db(#[revision(start = 2)] bool),
+	Db(#[revision(start = 2)] bool, #[revision(start = 5)] Option<Version>),
 
 	#[revision(override(revision = 2, discriminant = 7), override(revision = 3, discriminant = 7))]
-	Tb(Ident, #[revision(start = 2)] bool),
+	Tb(Ident, #[revision(start = 2)] bool, #[revision(start = 5)] Option<Version>),
 
 	#[revision(override(revision = 2, discriminant = 9), override(revision = 3, discriminant = 9))]
 	User(Ident, Option<Base>, #[revision(start = 2)] bool),
@@ -131,12 +131,14 @@ impl InfoStatement {
 					}),
 				})
 			}
-			InfoStatement::Db(structured) => {
+			InfoStatement::Db(structured, version) => {
 				// Allowed to run?
 				opt.is_allowed(Action::View, ResourceKind::Any, &Base::Db)?;
 				// Get the NS and DB
 				let ns = opt.ns()?;
 				let db = opt.db()?;
+				// Convert the version to u64 if present
+				let version = version.as_ref().map(|v| v.to_u64());
 				// Get the transaction
 				let txn = ctx.tx();
 				// Create the result set
@@ -147,8 +149,9 @@ impl InfoStatement {
 						"functions".to_string() => process(txn.all_db_functions(ns, db).await?),
 						"models".to_string() => process(txn.all_db_models(ns, db).await?),
 						"params".to_string() => process(txn.all_db_params(ns, db).await?),
-						"tables".to_string() => process(txn.all_tb(ns, db).await?),
+						"tables".to_string() => process(txn.all_tb(ns, db, version).await?),
 						"users".to_string() => process(txn.all_db_users(ns, db).await?),
+						"configs".to_string() => process(txn.all_db_configs(ns, db).await?),
 					}),
 					false => Value::from(map! {
 						"accesses".to_string() => {
@@ -188,7 +191,7 @@ impl InfoStatement {
 						},
 						"tables".to_string() => {
 							let mut out = Object::default();
-							for v in txn.all_tb(ns, db).await?.iter() {
+							for v in txn.all_tb(ns, db, version).await?.iter() {
 								out.insert(v.name.to_raw(), v.to_string().into());
 							}
 							out.into()
@@ -200,22 +203,31 @@ impl InfoStatement {
 							}
 							out.into()
 						},
+						"configs".to_string() => {
+							let mut out = Object::default();
+							for v in txn.all_db_configs(ns, db).await?.iter() {
+								out.insert(v.inner.name(), v.to_string().into());
+							}
+							out.into()
+						},
 					}),
 				})
 			}
-			InfoStatement::Tb(tb, structured) => {
+			InfoStatement::Tb(tb, structured, version) => {
 				// Allowed to run?
 				opt.is_allowed(Action::View, ResourceKind::Any, &Base::Db)?;
 				// Get the NS and DB
 				let ns = opt.ns()?;
 				let db = opt.db()?;
+				// Convert the version to u64 if present
+				let version = version.as_ref().map(|v| v.to_u64());
 				// Get the transaction
 				let txn = ctx.tx();
 				// Create the result set
 				Ok(match structured {
 					true => Value::from(map! {
 						"events".to_string() => process(txn.all_tb_events(ns, db, tb).await?),
-						"fields".to_string() => process(txn.all_tb_fields(ns, db, tb).await?),
+						"fields".to_string() => process(txn.all_tb_fields(ns, db, tb, version).await?),
 						"indexes".to_string() => process(txn.all_tb_indexes(ns, db, tb).await?),
 						"lives".to_string() => process(txn.all_tb_lives(ns, db, tb).await?),
 						"tables".to_string() => process(txn.all_tb_views(ns, db, tb).await?),
@@ -230,7 +242,7 @@ impl InfoStatement {
 						},
 						"fields".to_string() => {
 							let mut out = Object::default();
-							for v in txn.all_tb_fields(ns, db, tb).await?.iter() {
+							for v in txn.all_tb_fields(ns, db, tb, version).await?.iter() {
 								out.insert(v.name.to_string(), v.to_string().into());
 							}
 							out.into()
@@ -279,6 +291,7 @@ impl InfoStatement {
 					false => Value::from(res.to_string()),
 				})
 			}
+			#[allow(unused_variables)]
 			InfoStatement::Index(index, table, _structured) => {
 				// Allowed to run?
 				opt.is_allowed(Action::View, ResourceKind::Actor, &Base::Db)?;
@@ -308,10 +321,23 @@ impl fmt::Display for InfoStatement {
 			Self::Root(true) => f.write_str("INFO FOR ROOT STRUCTURE"),
 			Self::Ns(false) => f.write_str("INFO FOR NAMESPACE"),
 			Self::Ns(true) => f.write_str("INFO FOR NAMESPACE STRUCTURE"),
-			Self::Db(false) => f.write_str("INFO FOR DATABASE"),
-			Self::Db(true) => f.write_str("INFO FOR DATABASE STRUCTURE"),
-			Self::Tb(ref t, false) => write!(f, "INFO FOR TABLE {t}"),
-			Self::Tb(ref t, true) => write!(f, "INFO FOR TABLE {t} STRUCTURE"),
+			Self::Db(false, ref v) => match v {
+				Some(ref v) => write!(f, "INFO FOR DATABASE VERSION {v}"),
+				None => f.write_str("INFO FOR DATABASE"),
+			},
+			Self::Db(true, ref v) => match v {
+				Some(ref v) => write!(f, "INFO FOR DATABASE VERSION {v} STRUCTURE"),
+				None => f.write_str("INFO FOR DATABASE STRUCTURE"),
+			},
+			Self::Tb(ref t, false, ref v) => match v {
+				Some(ref v) => write!(f, "INFO FOR TABLE {t} VERSION {v}"),
+				None => write!(f, "INFO FOR TABLE {t}"),
+			},
+
+			Self::Tb(ref t, true, ref v) => match v {
+				Some(ref v) => write!(f, "INFO FOR TABLE {t} VERSION {v} STRUCTURE"),
+				None => write!(f, "INFO FOR TABLE {t} STRUCTURE"),
+			},
 			Self::User(ref u, ref b, false) => match b {
 				Some(ref b) => write!(f, "INFO FOR USER {u} ON {b}"),
 				None => write!(f, "INFO FOR USER {u}"),
@@ -335,10 +361,18 @@ impl InfoStatement {
 		match self {
 			InfoStatement::Root(_) => InfoStatement::Root(true),
 			InfoStatement::Ns(_) => InfoStatement::Ns(true),
-			InfoStatement::Db(_) => InfoStatement::Db(true),
-			InfoStatement::Tb(t, _) => InfoStatement::Tb(t, true),
+			InfoStatement::Db(_, v) => InfoStatement::Db(true, v),
+			InfoStatement::Tb(t, _, v) => InfoStatement::Tb(t, true, v),
 			InfoStatement::User(u, b, _) => InfoStatement::User(u, b, true),
 			InfoStatement::Index(i, t, _) => InfoStatement::Index(i, t, true),
+		}
+	}
+
+	pub(crate) fn versionize(self, v: Version) -> Self {
+		match self {
+			InfoStatement::Db(s, _) => InfoStatement::Db(s, Some(v)),
+			InfoStatement::Tb(t, s, _) => InfoStatement::Tb(t, s, Some(v)),
+			_ => self,
 		}
 	}
 }

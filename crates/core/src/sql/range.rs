@@ -26,6 +26,84 @@ pub struct Range {
 	pub end: Bound<Value>,
 }
 
+impl Range {
+	pub fn slice<'a, T>(&self, s: &'a [T]) -> Option<&'a [T]> {
+		let r = match self.end {
+			Bound::Included(ref x) => {
+				let Value::Number(ref x) = x else {
+					return None;
+				};
+				let x = x.to_usize();
+				s.get(..=x)?
+			}
+			Bound::Excluded(ref x) => {
+				let Value::Number(ref x) = x else {
+					return None;
+				};
+				let x = x.to_usize();
+				s.get(..x)?
+			}
+			Bound::Unbounded => s,
+		};
+		let r = match self.beg {
+			Bound::Included(ref x) => {
+				let Value::Number(ref x) = x else {
+					return None;
+				};
+				let x = x.to_usize();
+				r.get(x..)?
+			}
+			Bound::Excluded(ref x) => {
+				let Value::Number(ref x) = x else {
+					return None;
+				};
+				let x = x.to_usize().saturating_add(1);
+				r.get(x..)?
+			}
+			Bound::Unbounded => r,
+		};
+		Some(r)
+	}
+
+	pub fn slice_mut<'a, T>(&self, s: &'a mut [T]) -> Option<&'a mut [T]> {
+		let r = match self.end {
+			Bound::Included(ref x) => {
+				let Value::Number(ref x) = x else {
+					return None;
+				};
+				let x = x.to_usize();
+				s.get_mut(..x)?
+			}
+			Bound::Excluded(ref x) => {
+				let Value::Number(ref x) = x else {
+					return None;
+				};
+				let x = x.to_usize();
+				s.get_mut(..=x)?
+			}
+			Bound::Unbounded => s,
+		};
+		let r = match self.beg {
+			Bound::Included(ref x) => {
+				let Value::Number(ref x) = x else {
+					return None;
+				};
+				let x = x.to_usize();
+				r.get_mut(x..)?
+			}
+			Bound::Excluded(ref x) => {
+				let Value::Number(ref x) = x else {
+					return None;
+				};
+				let x = x.to_usize().saturating_add(1);
+				r.get_mut(x..)?
+			}
+			Bound::Unbounded => r,
+		};
+		Some(r)
+	}
+}
+
 impl FromStr for Range {
 	type Err = ();
 	fn from_str(s: &str) -> Result<Self, Self::Err> {
@@ -114,6 +192,20 @@ impl Range {
 				Bound::Unbounded => Bound::Unbounded,
 			},
 		})))
+	}
+
+	/// Validate that a Range contains only computed Values
+	pub fn validate_computed(&self) -> Result<(), Error> {
+		match &self.beg {
+			Bound::Included(ref v) | Bound::Excluded(ref v) => v.validate_computed()?,
+			Bound::Unbounded => {}
+		}
+		match &self.end {
+			Bound::Included(ref v) | Bound::Excluded(ref v) => v.validate_computed()?,
+			Bound::Unbounded => {}
+		}
+
+		Ok(())
 	}
 }
 

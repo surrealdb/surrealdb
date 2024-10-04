@@ -23,7 +23,6 @@ use serde::{Deserialize, Serialize};
 use std::{
 	fmt::{self, Display, Formatter, Write},
 	ops::Deref,
-	time::Duration,
 };
 
 #[revisioned(revision = 1)]
@@ -101,19 +100,6 @@ pub enum Statement {
 }
 
 impl Statement {
-	/// Get the statement timeout duration, if any
-	pub fn timeout(&self) -> Option<Duration> {
-		match self {
-			Self::Create(v) => v.timeout.as_ref().map(|v| *v.0),
-			Self::Delete(v) => v.timeout.as_ref().map(|v| *v.0),
-			Self::Insert(v) => v.timeout.as_ref().map(|v| *v.0),
-			Self::Relate(v) => v.timeout.as_ref().map(|v| *v.0),
-			Self::Select(v) => v.timeout.as_ref().map(|v| *v.0),
-			Self::Upsert(v) => v.timeout.as_ref().map(|v| *v.0),
-			Self::Update(v) => v.timeout.as_ref().map(|v| *v.0),
-			_ => None,
-		}
-	}
 	/// Check if we require a writeable transaction
 	pub(crate) fn writeable(&self) -> bool {
 		match self {
@@ -145,7 +131,7 @@ impl Statement {
 			Self::Upsert(v) => v.writeable(),
 			Self::Update(v) => v.writeable(),
 			Self::Use(_) => false,
-			_ => unreachable!(),
+			_ => false,
 		}
 	}
 	/// Process this type returning a computed simple Value
@@ -156,7 +142,23 @@ impl Statement {
 		opt: &Options,
 		doc: Option<&CursorDoc>,
 	) -> Result<Value, Error> {
-		match self {
+		let stm = match (opt.import, self) {
+			// All exports in SurrealDB 1.x are done with `UPDATE`, but
+			// because `UPDATE` works different in SurrealDB 2.x, we need
+			// to convert these statements into `UPSERT` statements.
+			(true, Self::Update(stm)) => &Statement::Upsert(UpsertStatement {
+				only: stm.only,
+				what: stm.what.to_owned(),
+				data: stm.data.to_owned(),
+				cond: stm.cond.to_owned(),
+				output: stm.output.to_owned(),
+				timeout: stm.timeout.to_owned(),
+				parallel: stm.parallel,
+			}),
+			(_, stm) => stm,
+		};
+
+		match stm {
 			Self::Access(v) => v.compute(ctx, opt, doc).await,
 			Self::Alter(v) => v.compute(stk, ctx, opt, doc).await,
 			Self::Analyze(v) => v.compute(ctx, opt, doc).await,
@@ -188,7 +190,7 @@ impl Statement {
 				// Process the output value
 				v.compute_unbordered(stk, ctx, opt, doc).await
 			}
-			_ => unreachable!(),
+			_ => Err(fail!("Unexpected statement type encountered: {self:?}")),
 		}
 	}
 }

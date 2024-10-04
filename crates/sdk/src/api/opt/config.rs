@@ -1,11 +1,5 @@
 use crate::opt::capabilities::Capabilities;
-#[cfg(any(
-	feature = "kv-mem",
-	feature = "kv-surrealkv",
-	feature = "kv-rocksdb",
-	feature = "kv-fdb",
-	feature = "kv-tikv",
-))]
+#[cfg(storage)]
 use std::path::PathBuf;
 use std::time::Duration;
 use surrealdb_core::{dbs::Capabilities as CoreCapabilities, iam::Level};
@@ -14,7 +8,6 @@ use surrealdb_core::{dbs::Capabilities as CoreCapabilities, iam::Level};
 #[derive(Debug, Clone, Default)]
 pub struct Config {
 	pub(crate) strict: bool,
-	pub(crate) notifications: bool,
 	pub(crate) query_timeout: Option<Duration>,
 	pub(crate) transaction_timeout: Option<Duration>,
 	#[cfg(any(feature = "native-tls", feature = "rustls"))]
@@ -24,16 +17,13 @@ pub struct Config {
 	pub(crate) auth: Level,
 	pub(crate) username: String,
 	pub(crate) password: String,
-	pub(crate) tick_interval: Option<Duration>,
 	pub(crate) capabilities: CoreCapabilities,
-	#[cfg(any(
-		feature = "kv-mem",
-		feature = "kv-surrealkv",
-		feature = "kv-rocksdb",
-		feature = "kv-fdb",
-		feature = "kv-tikv",
-	))]
+	#[cfg(storage)]
 	pub(crate) temporary_directory: Option<PathBuf>,
+	pub(crate) node_membership_refresh_interval: Option<Duration>,
+	pub(crate) node_membership_check_interval: Option<Duration>,
+	pub(crate) node_membership_cleanup_interval: Option<Duration>,
+	pub(crate) changefeed_gc_interval: Option<Duration>,
 }
 
 impl Config {
@@ -51,26 +41,6 @@ impl Config {
 	/// Enables `strict` server mode
 	pub fn strict(mut self) -> Self {
 		self.strict = true;
-		self
-	}
-
-	/// Set the notifications value of the config to the supplied value
-	#[deprecated(
-		since = "1.1.0",
-		note = "Moved to `Capabilities::with_live_query_notifications()`"
-	)]
-	pub fn set_notifications(mut self, notifications: bool) -> Self {
-		self.notifications = notifications;
-		self
-	}
-
-	/// Set the config to use notifications
-	#[deprecated(
-		since = "1.1.0",
-		note = "Moved to `Capabilities::with_live_query_notifications()`"
-	)]
-	pub fn notifications(mut self) -> Self {
-		self.notifications = true;
 		self
 	}
 
@@ -95,6 +65,9 @@ impl Config {
 	}
 
 	/// Use Rustls to configure TLS connections
+	///
+	/// WARNING: `rustls` is not stable yet. As we may need to upgrade this dependency from time to time
+	/// to keep up with its security fixes, this method is excluded from our stability guarantee.
 	#[cfg(feature = "rustls")]
 	#[cfg_attr(docsrs, doc(cfg(feature = "rustls")))]
 	pub fn rustls(mut self, config: rustls::ClientConfig) -> Self {
@@ -103,16 +76,13 @@ impl Config {
 	}
 
 	/// Use native TLS to configure TLS connections
+	///
+	/// WARNING: `native-tls` is not stable yet. As we may need to upgrade this dependency from time to time
+	/// to keep up with its security fixes, this method is excluded from our stability guarantee.
 	#[cfg(feature = "native-tls")]
 	#[cfg_attr(docsrs, doc(cfg(feature = "native-tls")))]
 	pub fn native_tls(mut self, config: native_tls::TlsConnector) -> Self {
 		self.tls_config = Some(super::Tls::Native(config));
-		self
-	}
-
-	/// Set the interval at which the database should run node maintenance tasks
-	pub fn tick_interval(mut self, interval: impl Into<Option<Duration>>) -> Self {
-		self.tick_interval = interval.into().filter(|x| !x.is_zero());
 		self
 	}
 
@@ -122,15 +92,39 @@ impl Config {
 		self
 	}
 
-	#[cfg(any(
-		feature = "kv-mem",
-		feature = "kv-surrealkv",
-		feature = "kv-rocksdb",
-		feature = "kv-fdb",
-		feature = "kv-tikv",
-	))]
+	#[cfg(storage)]
 	pub fn temporary_directory(mut self, path: Option<PathBuf>) -> Self {
 		self.temporary_directory = path;
+		self
+	}
+
+	/// Set the interval at which the database should run node maintenance tasks
+	pub fn node_membership_refresh_interval(
+		mut self,
+		interval: impl Into<Option<Duration>>,
+	) -> Self {
+		self.node_membership_refresh_interval = interval.into().filter(|x| !x.is_zero());
+		self
+	}
+
+	/// Set the interval at which the database should run node maintenance tasks
+	pub fn node_membership_check_interval(mut self, interval: impl Into<Option<Duration>>) -> Self {
+		self.node_membership_check_interval = interval.into().filter(|x| !x.is_zero());
+		self
+	}
+
+	/// Set the interval at which the database should run node maintenance tasks
+	pub fn node_membership_cleanup_interval(
+		mut self,
+		interval: impl Into<Option<Duration>>,
+	) -> Self {
+		self.node_membership_cleanup_interval = interval.into().filter(|x| !x.is_zero());
+		self
+	}
+
+	/// Set the interval at which the database should run node maintenance tasks
+	pub fn changefeed_gc_interval(mut self, interval: impl Into<Option<Duration>>) -> Self {
+		self.changefeed_gc_interval = interval.into().filter(|x| !x.is_zero());
 		self
 	}
 }

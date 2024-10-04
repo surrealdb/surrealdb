@@ -17,6 +17,8 @@ pub mod hi;
 pub mod hl;
 pub mod hs;
 pub mod hv;
+pub mod ia;
+pub mod ip;
 pub mod vm;
 
 use crate::key::category::Categorise;
@@ -170,13 +172,26 @@ impl<'a> Index<'a> {
 		beg.extend_from_slice(&[0xff]);
 		beg
 	}
+
+	pub fn prefix_ids_composite_beg(ns: &str, db: &str, tb: &str, ix: &str, fd: &Array) -> Vec<u8> {
+		let mut beg = Self::prefix_ids(ns, db, tb, ix, fd);
+		*beg.last_mut().unwrap() = 0x00;
+		beg
+	}
+
+	pub fn prefix_ids_composite_end(ns: &str, db: &str, tb: &str, ix: &str, fd: &Array) -> Vec<u8> {
+		let mut beg = Self::prefix_ids(ns, db, tb, ix, fd);
+		*beg.last_mut().unwrap() = 0xff;
+		beg
+	}
 }
 
 #[cfg(test)]
 mod tests {
+	use super::*;
+
 	#[test]
 	fn key() {
-		use super::*;
 		#[rustfmt::skip]
 		let fd = vec!["testfd1", "testfd2"].into();
 		let id = "testid".into();
@@ -189,5 +204,27 @@ mod tests {
 
 		let dec = Index::decode(&enc).unwrap();
 		assert_eq!(val, dec);
+	}
+
+	#[test]
+	fn key_none() {
+		let fd = vec!["testfd1", "testfd2"].into();
+		let val = Index::new("testns", "testdb", "testtb", "testix", &fd, None);
+		let enc = Index::encode(&val).unwrap();
+		assert_eq!(
+			enc,
+			b"/*testns\0*testdb\0*testtb\0+testix\0*\0\0\0\x04testfd1\0\0\0\0\x04testfd2\0\x01\0"
+		);
+	}
+
+	#[test]
+	fn check_composite() {
+		let fd = vec!["testfd1"].into();
+
+		let enc = Index::prefix_ids_composite_beg("testns", "testdb", "testtb", "testix", &fd);
+		assert_eq!(enc, b"/*testns\0*testdb\0*testtb\0+testix\0*\0\0\0\x04testfd1\0\x00");
+
+		let enc = Index::prefix_ids_composite_end("testns", "testdb", "testtb", "testix", &fd);
+		assert_eq!(enc, b"/*testns\0*testdb\0*testtb\0+testix\0*\0\0\0\x04testfd1\0\xff");
 	}
 }

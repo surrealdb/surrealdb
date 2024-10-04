@@ -3,6 +3,7 @@
 use reblessive::Stk;
 
 use crate::sql::Fetch;
+use crate::syn::error::bail;
 use crate::{
 	sql::{
 		changefeed::ChangeFeed,
@@ -12,13 +13,18 @@ use crate::{
 	},
 	syn::{
 		parser::{
-			error::MissingKind,
 			mac::{expected, unexpected},
-			ParseError, ParseErrorKind, ParseResult, Parser,
+			ParseResult, Parser,
 		},
 		token::{t, DistanceKind, Span, TokenKind, VectorTypeKind},
 	},
 };
+
+pub(crate) enum MissingKind {
+	Split,
+	Order,
+	Group,
+}
 
 impl Parser<'_> {
 	/// Parses a data production if the next token is a data keyword.
@@ -31,7 +37,7 @@ impl Parser<'_> {
 				loop {
 					let idiom = self.parse_plain_idiom(ctx).await?;
 					let operator = self.parse_assigner()?;
-					let value = ctx.run(|ctx| self.parse_value(ctx)).await?;
+					let value = ctx.run(|ctx| self.parse_value_field(ctx)).await?;
 					set_list.push((idiom, operator, value));
 					if !self.eat(t!(",")) {
 						break;
@@ -46,19 +52,19 @@ impl Parser<'_> {
 			}
 			t!("PATCH") => {
 				self.pop_peek();
-				Data::PatchExpression(ctx.run(|ctx| self.parse_value(ctx)).await?)
+				Data::PatchExpression(ctx.run(|ctx| self.parse_value_field(ctx)).await?)
 			}
 			t!("MERGE") => {
 				self.pop_peek();
-				Data::MergeExpression(ctx.run(|ctx| self.parse_value(ctx)).await?)
+				Data::MergeExpression(ctx.run(|ctx| self.parse_value_field(ctx)).await?)
 			}
 			t!("REPLACE") => {
 				self.pop_peek();
-				Data::ReplaceExpression(ctx.run(|ctx| self.parse_value(ctx)).await?)
+				Data::ReplaceExpression(ctx.run(|ctx| self.parse_value_field(ctx)).await?)
 			}
 			t!("CONTENT") => {
 				self.pop_peek();
-				Data::ContentExpression(ctx.run(|ctx| self.parse_value(ctx)).await?)
+				Data::ContentExpression(ctx.run(|ctx| self.parse_value_field(ctx)).await?)
 			}
 			_ => return Ok(None),
 		};
@@ -153,7 +159,7 @@ impl Parser<'_> {
 		Ok(Some(Cond(v)))
 	}
 
-	pub fn check_idiom<'a>(
+	pub(crate) fn check_idiom<'a>(
 		kind: MissingKind,
 		fields: &'a Fields,
 		field_span: Span,
@@ -193,16 +199,33 @@ impl Parser<'_> {
 			}
 		}
 
-		found.ok_or_else(|| {
-			ParseError::new(
-				ParseErrorKind::MissingField {
-					field: field_span,
-					idiom: idiom.to_string(),
-					kind,
-				},
-				idiom_span,
-			)
-		})
+		let Some(found) = found else {
+			match kind {
+				MissingKind::Split => {
+					bail!(
+						"Missing split idiom `{idiom}` in statement selection",
+						@idiom_span,
+						@field_span => "Idiom missing here",
+					)
+				}
+				MissingKind::Order => {
+					bail!(
+						"Missing order idiom `{idiom}` in statement selection",
+						@idiom_span,
+						@field_span => "Idiom missing here",
+					)
+				}
+				MissingKind::Group => {
+					bail!(
+						"Missing group idiom `{idiom}` in statement selection",
+						@idiom_span,
+						@field_span => "Idiom missing here",
+					)
+				}
+			};
+		};
+
+		Ok(found)
 	}
 
 	pub async fn try_parse_group(
@@ -251,26 +274,28 @@ impl Parser<'_> {
 	pub async fn parse_permission(
 		&mut self,
 		stk: &mut Stk,
-		permissive: bool,
+		field: bool,
 	) -> ParseResult<Permissions> {
-		match self.next().kind {
+		let next = self.next();
+		match next.kind {
 			t!("NONE") => Ok(Permissions::none()),
 			t!("FULL") => Ok(Permissions::full()),
 			t!("FOR") => {
-				let mut permission = if permissive {
+				let mut permission = if field {
 					Permissions::full()
 				} else {
 					Permissions::none()
 				};
-				stk.run(|stk| self.parse_specific_permission(stk, &mut permission)).await?;
+				stk.run(|stk| self.parse_specific_permission(stk, &mut permission, field)).await?;
 				self.eat(t!(","));
 				while self.eat(t!("FOR")) {
-					stk.run(|stk| self.parse_specific_permission(stk, &mut permission)).await?;
+					stk.run(|stk| self.parse_specific_permission(stk, &mut permission, field))
+						.await?;
 					self.eat(t!(","));
 				}
 				Ok(permission)
 			}
-			x => unexpected!(self, x, "'NONE', 'FULL' or 'FOR'"),
+			_ => unexpected!(self, next, "'NONE', 'FULL' or 'FOR'"),
 		}
 	}
 
@@ -284,6 +309,7 @@ impl Parser<'_> {
 		&mut self,
 		stk: &mut Stk,
 		permissions: &mut Permissions,
+		field: bool,
 	) -> ParseResult<()> {
 		let mut select = false;
 		let mut create = false;
@@ -291,7 +317,8 @@ impl Parser<'_> {
 		let mut delete = false;
 
 		loop {
-			match self.next().kind {
+			let next = self.next();
+			match next.kind {
 				t!("SELECT") => {
 					select = true;
 				}
@@ -302,9 +329,15 @@ impl Parser<'_> {
 					update = true;
 				}
 				t!("DELETE") => {
-					delete = true;
+					// TODO(gguillemas): Return a parse error instead of logging a warning in 3.0.0.
+					if field {
+						warn!("The DELETE permission has no effect on fields and is deprecated, but was found in a DEFINE FIELD statement.");
+					} else {
+						delete = true;
+					}
 				}
-				x => unexpected!(self, x, "'SELECT', 'CREATE', 'UPDATE' or 'DELETE'"),
+				_ if field => unexpected!(self, next, "'SELECT', 'CREATE' or 'UPDATE'"),
+				_ => unexpected!(self, next, "'SELECT', 'CREATE', 'UPDATE' or 'DELETE'"),
 			}
 			if !self.eat(t!(",")) {
 				break;
@@ -334,11 +367,12 @@ impl Parser<'_> {
 	///
 	/// Expects the parser to just have eaten either `SELECT`, `CREATE`, `UPDATE` or `DELETE`.
 	pub async fn parse_permission_value(&mut self, stk: &mut Stk) -> ParseResult<Permission> {
-		match self.next().kind {
+		let next = self.next();
+		match next.kind {
 			t!("NONE") => Ok(Permission::None),
 			t!("FULL") => Ok(Permission::Full),
 			t!("WHERE") => Ok(Permission::Specific(self.parse_value_field(stk).await?)),
-			x => unexpected!(self, x, "'NONE', 'FULL', or 'WHERE'"),
+			_ => unexpected!(self, next, "'NONE', 'FULL', or 'WHERE'"),
 		}
 	}
 
@@ -350,22 +384,23 @@ impl Parser<'_> {
 	/// # Parser state
 	/// Expects the next keyword to be a base.
 	pub fn parse_base(&mut self, scope_allowed: bool) -> ParseResult<Base> {
-		match self.next().kind {
-			t!("NAMESPACE") | t!("ns") => Ok(Base::Ns),
+		let next = self.next();
+		match next.kind {
+			t!("NAMESPACE") => Ok(Base::Ns),
 			t!("DATABASE") => Ok(Base::Db),
 			t!("ROOT") => Ok(Base::Root),
 			t!("SCOPE") => {
 				if !scope_allowed {
-					unexpected!(self, t!("SCOPE"), "a scope is not allowed here");
+					unexpected!(self, next, "a scope is not allowed here");
 				}
 				let name = self.next_token_value()?;
 				Ok(Base::Sc(name))
 			}
-			x => {
+			_ => {
 				if scope_allowed {
-					unexpected!(self, x, "'NAMEPSPACE', 'DATABASE', 'ROOT' or 'SCOPE'")
+					unexpected!(self, next, "'NAMEPSPACE', 'DATABASE', 'ROOT' or 'SCOPE'")
 				} else {
-					unexpected!(self, x, "'NAMEPSPACE', 'DATABASE' or 'ROOT'")
+					unexpected!(self, next, "'NAMEPSPACE', 'DATABASE' or 'ROOT'")
 				}
 			}
 		}
@@ -417,33 +452,33 @@ impl Parser<'_> {
 		})
 	}
 
-	pub fn convert_distance(&mut self, k: &DistanceKind) -> ParseResult<Distance> {
-		let dist = match k {
-			DistanceKind::Chebyshev => Distance::Chebyshev,
-			DistanceKind::Cosine => Distance::Cosine,
-			DistanceKind::Euclidean => Distance::Euclidean,
-			DistanceKind::Manhattan => Distance::Manhattan,
-			DistanceKind::Hamming => Distance::Hamming,
-			DistanceKind::Jaccard => Distance::Jaccard,
-
-			DistanceKind::Minkowski => {
-				let distance = self.next_token_value()?;
-				Distance::Minkowski(distance)
-			}
-			DistanceKind::Pearson => Distance::Pearson,
-		};
-		Ok(dist)
-	}
-
 	pub fn parse_distance(&mut self) -> ParseResult<Distance> {
-		match self.next().kind {
-			TokenKind::Distance(k) => self.convert_distance(&k),
-			x => unexpected!(self, x, "a distance measure"),
+		let next = self.next();
+		match next.kind {
+			TokenKind::Distance(k) => {
+				let dist = match k {
+					DistanceKind::Chebyshev => Distance::Chebyshev,
+					DistanceKind::Cosine => Distance::Cosine,
+					DistanceKind::Euclidean => Distance::Euclidean,
+					DistanceKind::Manhattan => Distance::Manhattan,
+					DistanceKind::Hamming => Distance::Hamming,
+					DistanceKind::Jaccard => Distance::Jaccard,
+
+					DistanceKind::Minkowski => {
+						let distance = self.next_token_value()?;
+						Distance::Minkowski(distance)
+					}
+					DistanceKind::Pearson => Distance::Pearson,
+				};
+				Ok(dist)
+			}
+			_ => unexpected!(self, next, "a distance measure"),
 		}
 	}
 
 	pub fn parse_vector_type(&mut self) -> ParseResult<VectorType> {
-		match self.next().kind {
+		let next = self.next();
+		match next.kind {
 			TokenKind::VectorType(x) => Ok(match x {
 				VectorTypeKind::F64 => VectorType::F64,
 				VectorTypeKind::F32 => VectorType::F32,
@@ -451,7 +486,7 @@ impl Parser<'_> {
 				VectorTypeKind::I32 => VectorType::I32,
 				VectorTypeKind::I16 => VectorType::I16,
 			}),
-			x => unexpected!(self, x, "a vector type"),
+			_ => unexpected!(self, next, "a vector type"),
 		}
 	}
 

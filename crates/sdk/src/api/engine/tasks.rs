@@ -1,60 +1,39 @@
 use crate::engine::IntervalStream;
+use crate::err::Error;
+#[cfg(not(target_arch = "wasm32"))]
+use core::future::Future;
 use futures::StreamExt;
+use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
 use surrealdb_core::{kvs::Datastore, options::EngineOptions};
-use tokio::sync::oneshot;
+use tokio_util::sync::CancellationToken;
 
 #[cfg(not(target_arch = "wasm32"))]
-use crate::Error as RootError;
+use tokio::spawn;
+#[cfg(target_arch = "wasm32")]
+use wasm_bindgen_futures::spawn_local as spawn;
+
 #[cfg(not(target_arch = "wasm32"))]
-use tokio::{spawn as spawn_future, task::JoinHandle};
+type Task = Pin<Box<dyn Future<Output = Result<(), tokio::task::JoinError>> + Send + 'static>>;
 
 #[cfg(target_arch = "wasm32")]
-use std::sync::atomic::{AtomicBool, Ordering};
-#[cfg(target_arch = "wasm32")]
-use wasm_bindgen_futures::spawn_local as spawn_future;
+type Task = Pin<Box<()>>;
 
-/// This will be true if a task has completed
-#[cfg(not(target_arch = "wasm32"))]
-type FutureTask = JoinHandle<()>;
-
-/// This will be true if a task has completed
-#[cfg(target_arch = "wasm32")]
-type FutureTask = Arc<AtomicBool>;
-
-pub struct Tasks {
-	pub nd: FutureTask,
-}
+pub struct Tasks(#[allow(dead_code)] Vec<Task>);
 
 impl Tasks {
+	#[cfg(target_arch = "wasm32")]
+	pub async fn resolve(self) -> Result<(), Error> {
+		Ok(())
+	}
 	#[cfg(not(target_arch = "wasm32"))]
-	pub async fn resolve(self) -> Result<(), RootError> {
-		match self.nd.await {
-			// cancelling this task is fine, and can happen when surrealdb exits.
-			Ok(_) => {}
-			Err(e) if e.is_cancelled() => {}
-			Err(e) => {
-				error!("Node agent task failed: {}", e);
-				let inner_err =
-					surrealdb_core::err::Error::NodeAgent("node task failed and has been logged");
-				return Err(RootError::Db(inner_err));
-			}
+	pub async fn resolve(self) -> Result<(), Error> {
+		for task in self.0.into_iter() {
+			let _ = task.await;
 		}
 		Ok(())
 	}
-}
-
-/// Starts tasks that are required for the correct running of the engine
-pub fn start_tasks(opt: &EngineOptions, dbs: Arc<Datastore>) -> (Tasks, [oneshot::Sender<()>; 1]) {
-	let nd = init(opt, dbs.clone());
-	let cancellation_channels = [nd.1];
-	(
-		Tasks {
-			nd: nd.0,
-		},
-		cancellation_channels,
-	)
 }
 
 // The init starts a long-running thread for periodically calling Datastore.tick.
@@ -63,48 +42,140 @@ pub fn start_tasks(opt: &EngineOptions, dbs: Arc<Datastore>) -> (Tasks, [oneshot
 //
 // This function needs to be called before after the dbs::init and before the net::init functions.
 // It needs to be before net::init because the net::init function blocks until the web server stops.
-fn init(opt: &EngineOptions, dbs: Arc<Datastore>) -> (FutureTask, oneshot::Sender<()>) {
-	let _init = surrealdb_core::dbs::LoggingLifecycle::new("node agent initialisation".to_string());
-	let tick_interval = opt.tick_interval;
+pub fn init(dbs: Arc<Datastore>, canceller: CancellationToken, opts: &EngineOptions) -> Tasks {
+	let task1 = spawn_task_node_membership_refresh(dbs.clone(), canceller.clone(), opts);
+	let task2 = spawn_task_node_membership_check(dbs.clone(), canceller.clone(), opts);
+	let task3 = spawn_task_node_membership_cleanup(dbs.clone(), canceller.clone(), opts);
+	let task4 = spawn_task_changefeed_cleanup(dbs.clone(), canceller.clone(), opts);
+	Tasks(vec![task1, task2, task3, task4])
+}
 
-	trace!("Ticker interval is {:?}", tick_interval);
-	#[cfg(target_arch = "wasm32")]
-	let completed_status = Arc::new(AtomicBool::new(false));
-	#[cfg(target_arch = "wasm32")]
-	let ret_status = completed_status.clone();
-
-	// We create a channel that can be streamed that will indicate termination
-	let (tx, mut rx) = oneshot::channel();
-
-	let _fut = spawn_future(async move {
-		let _lifecycle = surrealdb_core::dbs::LoggingLifecycle::new("heartbeat task".to_string());
-		let mut ticker = interval_ticker(tick_interval).await;
-
+fn spawn_task_node_membership_refresh(
+	dbs: Arc<Datastore>,
+	canceller: CancellationToken,
+	opts: &EngineOptions,
+) -> Task {
+	// Get the delay interval from the config
+	let delay = opts.node_membership_refresh_interval;
+	// Spawn a future
+	Box::pin(spawn(async move {
+		// Log the interval frequency
+		trace!("Updating node registration information every {delay:?}");
+		// Create a new time-based interval ticket
+		let mut ticker = interval_ticker(delay).await;
+		// Loop continuously until the task is cancelled
 		loop {
 			tokio::select! {
-				v = ticker.next() => {
-					// ticker will never return None;
-					let i = v.unwrap();
-					trace!("Node agent tick: {:?}", i);
-					if let Err(e) = dbs.tick().await {
-						error!("Error running node agent tick: {}", e);
+				biased;
+				// Check if this has shutdown
+				_ = canceller.cancelled() => break,
+				// Receive a notification on the channel
+				Some(_) = ticker.next() => {
+					if let Err(e) = dbs.node_membership_update().await {
+						error!("Error running node agent tick: {e}");
 						break;
 					}
 				}
-				_ = &mut rx => {
-					// termination requested
-					break
+			}
+		}
+		trace!("Background task exited: Updating node registration information");
+	}))
+}
+
+fn spawn_task_node_membership_check(
+	dbs: Arc<Datastore>,
+	canceller: CancellationToken,
+	opts: &EngineOptions,
+) -> Task {
+	// Get the delay interval from the config
+	let delay = opts.node_membership_check_interval;
+	// Spawn a future
+	Box::pin(spawn(async move {
+		// Log the interval frequency
+		trace!("Processing and archiving inactive nodes every {delay:?}");
+		// Create a new time-based interval ticket
+		let mut ticker = interval_ticker(delay).await;
+		// Loop continuously until the task is cancelled
+		loop {
+			tokio::select! {
+				biased;
+				// Check if this has shutdown
+				_ = canceller.cancelled() => break,
+				// Receive a notification on the channel
+				Some(_) = ticker.next() => {
+					if let Err(e) = dbs.node_membership_expire().await {
+						error!("Error running node agent tick: {e}");
+						break;
+					}
 				}
 			}
 		}
+		trace!("Background task exited: Processing and archiving inactive nodes");
+	}))
+}
 
-		#[cfg(target_arch = "wasm32")]
-		completed_status.store(true, Ordering::Relaxed);
-	});
-	#[cfg(not(target_arch = "wasm32"))]
-	return (_fut, tx);
-	#[cfg(target_arch = "wasm32")]
-	return (ret_status, tx);
+fn spawn_task_node_membership_cleanup(
+	dbs: Arc<Datastore>,
+	canceller: CancellationToken,
+	opts: &EngineOptions,
+) -> Task {
+	// Get the delay interval from the config
+	let delay = opts.node_membership_cleanup_interval;
+	// Spawn a future
+	Box::pin(spawn(async move {
+		// Log the interval frequency
+		trace!("Processing and cleaning archived nodes every {delay:?}");
+		// Create a new time-based interval ticket
+		let mut ticker = interval_ticker(delay).await;
+		// Loop continuously until the task is cancelled
+		loop {
+			tokio::select! {
+				biased;
+				// Check if this has shutdown
+				_ = canceller.cancelled() => break,
+				// Receive a notification on the channel
+				Some(_) = ticker.next() => {
+					if let Err(e) = dbs.node_membership_remove().await {
+						error!("Error running node agent tick: {e}");
+						break;
+					}
+				}
+			}
+		}
+		trace!("Background task exited: Processing and cleaning archived nodes");
+	}))
+}
+
+fn spawn_task_changefeed_cleanup(
+	dbs: Arc<Datastore>,
+	canceller: CancellationToken,
+	opts: &EngineOptions,
+) -> Task {
+	// Get the delay interval from the config
+	let delay = opts.changefeed_gc_interval;
+	// Spawn a future
+	Box::pin(spawn(async move {
+		// Log the interval frequency
+		trace!("Running changefeed garbage collection every {delay:?}");
+		// Create a new time-based interval ticket
+		let mut ticker = interval_ticker(delay).await;
+		// Loop continuously until the task is cancelled
+		loop {
+			tokio::select! {
+				biased;
+				// Check if this has shutdown
+				_ = canceller.cancelled() => break,
+				// Receive a notification on the channel
+				Some(_) = ticker.next() => {
+					if let Err(e) = dbs.changefeed_process().await {
+						error!("Error running node agent tick: {e}");
+						break;
+					}
+				}
+			}
+		}
+		trace!("Background task exited: Running changefeed garbage collection");
+	}))
 }
 
 async fn interval_ticker(interval: Duration) -> IntervalStream {
@@ -112,7 +183,7 @@ async fn interval_ticker(interval: Duration) -> IntervalStream {
 	use tokio::{time, time::MissedTickBehavior};
 	#[cfg(target_arch = "wasm32")]
 	use wasmtimer::{tokio as time, tokio::MissedTickBehavior};
-
+	// Create a new interval timer
 	let mut interval = time::interval(interval);
 	// Don't bombard the database if we miss some ticks
 	interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
@@ -123,31 +194,30 @@ async fn interval_ticker(interval: Duration) -> IntervalStream {
 #[cfg(test)]
 #[cfg(feature = "kv-mem")]
 mod test {
-	use crate::engine::tasks::start_tasks;
+	use crate::engine::tasks;
 	use std::sync::Arc;
 	use std::time::Duration;
 	use surrealdb_core::{kvs::Datastore, options::EngineOptions};
+	use tokio_util::sync::CancellationToken;
 
 	#[test_log::test(tokio::test)]
 	pub async fn tasks_complete() {
+		let can = CancellationToken::new();
 		let opt = EngineOptions::default();
 		let dbs = Arc::new(Datastore::new("memory").await.unwrap());
-		let (val, chans) = start_tasks(&opt, dbs.clone());
-		for chan in chans {
-			chan.send(()).unwrap();
-		}
-		val.resolve().await.unwrap();
+		let tasks = tasks::init(dbs.clone(), can.clone(), &opt);
+		can.cancel();
+		tasks.resolve().await.unwrap();
 	}
 
 	#[test_log::test(tokio::test)]
 	pub async fn tasks_complete_channel_closed() {
+		let can = CancellationToken::new();
 		let opt = EngineOptions::default();
 		let dbs = Arc::new(Datastore::new("memory").await.unwrap());
-		let val = {
-			let (val, _chans) = start_tasks(&opt, dbs.clone());
-			val
-		};
-		tokio::time::timeout(Duration::from_secs(10), val.resolve())
+		let tasks = tasks::init(dbs.clone(), can.clone(), &opt);
+		can.cancel();
+		tokio::time::timeout(Duration::from_secs(10), tasks.resolve())
 			.await
 			.map_err(|e| format!("Timed out after {e}"))
 			.unwrap()

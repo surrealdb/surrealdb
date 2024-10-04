@@ -17,6 +17,6 @@ impl Nearestrank for Sorted<&Vec<Number>> {
 			return Number::NAN;
 		}
 		let idx = self.0.len() as f64 * (perc * (1.0 / 100.0));
-		self.0[(idx as usize).min(self.0.len() - 1)].clone()
+		self.0[(idx as usize).min(self.0.len() - 1)]
 	}
 }

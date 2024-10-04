@@ -1,11 +1,14 @@
 use super::common::{self, Format, Socket, DB, NS, PASS, USER};
-use http::header::{HeaderMap, HeaderValue};
 use assert_fs::TempDir;
+use http::header::{HeaderMap, HeaderValue};
 use serde_json::json;
 use std::future::Future;
 use std::pin::Pin;
 use std::time::Duration;
 use test_log::test;
+
+const HDR_SURREAL: &str = "surreal-id";
+const HDR_REQUEST: &str = "x-request-id";
 
 #[test(tokio::test)]
 async fn ping() -> Result<(), Box<dyn std::error::Error>> {
@@ -345,13 +348,44 @@ async fn insert() -> Result<(), Box<dyn std::error::Error>> {
 	assert_eq!(res.len(), 1, "result: {res:?}");
 	assert_eq!(res[0]["name"], "foo", "result: {res:?}");
 	assert_eq!(res[0]["value"], "bar", "result: {res:?}");
+	// Send INSERT command trying to create multiple records
+	let res = socket
+		.send_request(
+			"insert",
+			json!([
+				"tester",
+				[
+					{
+						"name": "foo",
+						"value": "bar",
+					},
+					{
+						"name": "foo",
+						"value": "bar",
+					}
+				]
+			]),
+		)
+		.await?;
+	assert!(res.is_object(), "result: {res:?}");
+	assert!(res["result"].is_array(), "result: {res:?}");
+	let res = res["result"].as_array().unwrap();
+	assert_eq!(res.len(), 2, "result: {res:?}");
+	assert_eq!(res[0]["name"], "foo", "result: {res:?}");
+	assert_eq!(res[0]["value"], "bar", "result: {res:?}");
+	assert_eq!(res[1]["name"], "foo", "result: {res:?}");
+	assert_eq!(res[1]["value"], "bar", "result: {res:?}");
 	// Verify the data was inserted and can be queried
 	let res = socket.send_message_query("SELECT * FROM tester").await?;
 	assert!(res[0]["result"].is_array(), "result: {res:?}");
 	let res = res[0]["result"].as_array().unwrap();
-	assert_eq!(res.len(), 1, "result: {res:?}");
+	assert_eq!(res.len(), 3, "result: {res:?}");
 	assert_eq!(res[0]["name"], "foo", "result: {res:?}");
 	assert_eq!(res[0]["value"], "bar", "result: {res:?}");
+	assert_eq!(res[1]["name"], "foo", "result: {res:?}");
+	assert_eq!(res[1]["value"], "bar", "result: {res:?}");
+	assert_eq!(res[2]["name"], "foo", "result: {res:?}");
+	assert_eq!(res[2]["value"], "bar", "result: {res:?}");
 	// Test passed
 	server.finish().unwrap();
 	Ok(())
@@ -380,10 +414,9 @@ async fn create() -> Result<(), Box<dyn std::error::Error>> {
 		)
 		.await?;
 	assert!(res.is_object(), "result: {res:?}");
-	assert!(res["result"].is_array(), "result: {res:?}");
-	let res = res["result"].as_array().unwrap();
-	assert_eq!(res.len(), 1, "result: {res:?}");
-	assert_eq!(res[0]["value"], "bar", "result: {res:?}");
+	assert!(res["result"].is_object(), "result: {res:?}");
+	let res = res["result"].as_object().unwrap();
+	assert_eq!(res["value"], "bar", "result: {res:?}");
 	// Verify the data was created
 	let res = socket.send_message_query("SELECT * FROM tester").await?;
 	assert!(res[0]["result"].is_array(), "result: {res:?}");
@@ -1473,6 +1506,25 @@ async fn session_reauthentication_expired() {
 }
 
 #[test(tokio::test)]
+async fn session_failed_reauthentication() {
+	// Setup database server without authentication
+	let (addr, mut server) = common::start_server_without_auth().await.unwrap();
+	// Connect to WebSocket
+	let mut socket = Socket::connect(&addr, SERVER, FORMAT).await.unwrap();
+	// Specify a namespace and database to use
+	socket.send_message_use(Some(NS), Some(DB)).await.unwrap();
+	// Check that we have are have a database and namespace selected
+	socket.send_message_query("INFO FOR DB").await.unwrap();
+	// Authenticate using an invalid token
+	socket.send_request("authenticate", json!(["invalid",])).await.unwrap();
+	// Check to see if we still have a namespace and database selected
+	let res = socket.send_message_query("INFO FOR DB").await.unwrap();
+	assert_eq!(res[0]["status"], "OK", "result: {res:?}");
+	// Test passed
+	server.finish().unwrap();
+}
+
+#[test(tokio::test)]
 async fn session_use_change_database() {
 	// Setup database server
 	let (addr, mut server) = common::start_server_with_defaults().await.unwrap();
@@ -1731,7 +1783,7 @@ async fn relate_rpc() {
 	// test
 
 	let mut res = socket.send_message_query("RETURN foo:a->bar.val").await.unwrap();
-	let expected = json!(42);
+	let expected = json!([42]);
 	assert_eq!(res.remove(0)["result"], expected);
 
 	let mut res = socket.send_message_query("RETURN foo:a->bar->foo").await.unwrap();
@@ -1791,7 +1843,7 @@ async fn session_id_defined() {
 	let (addr, mut server) = common::start_server_with_defaults().await.unwrap();
 	// We specify a request identifier via a specific SurrealDB header
 	let mut headers = HeaderMap::new();
-	headers.insert("surreal-id", HeaderValue::from_static("00000000-0000-0000-0000-000000000000"));
+	headers.insert(HDR_SURREAL, HeaderValue::from_static("00000000-0000-0000-0000-000000000000"));
 	// Connect to WebSocket
 	let mut socket = Socket::connect_with_headers(&addr, SERVER, FORMAT, headers).await.unwrap();
 	// Authenticate the connection
@@ -1813,7 +1865,7 @@ async fn session_id_defined_generic() {
 	let (addr, mut server) = common::start_server_with_defaults().await.unwrap();
 	// We specify a request identifier via a generic header
 	let mut headers = HeaderMap::new();
-	headers.insert("x-request-id", HeaderValue::from_static("00000000-0000-0000-0000-000000000000"));
+	headers.insert(HDR_REQUEST, HeaderValue::from_static("00000000-0000-0000-0000-000000000000"));
 	// Connect to WebSocket
 	let mut socket = Socket::connect_with_headers(&addr, SERVER, FORMAT, headers).await.unwrap();
 	// Authenticate the connection
@@ -1835,8 +1887,8 @@ async fn session_id_defined_both() {
 	let (addr, mut server) = common::start_server_with_defaults().await.unwrap();
 	// We specify a request identifier via both headers
 	let mut headers = HeaderMap::new();
-	headers.insert("surreal-id", HeaderValue::from_static("00000000-0000-0000-0000-000000000000"));
-	headers.insert("x-request-id", HeaderValue::from_static("aaaaaaaa-aaaa-0000-0000-000000000000"));
+	headers.insert(HDR_SURREAL, HeaderValue::from_static("00000000-0000-0000-0000-000000000000"));
+	headers.insert(HDR_REQUEST, HeaderValue::from_static("aaaaaaaa-aaaa-0000-0000-000000000000"));
 	// Connect to WebSocket
 	let mut socket = Socket::connect_with_headers(&addr, SERVER, FORMAT, headers).await.unwrap();
 	// Authenticate the connection
@@ -1859,7 +1911,8 @@ async fn session_id_invalid() {
 	let (addr, mut server) = common::start_server_with_defaults().await.unwrap();
 	// We specify a request identifier via a specific SurrealDB header
 	let mut headers = HeaderMap::new();
-	headers.insert("surreal-id", HeaderValue::from_static("123")); // Not a valid UUIDv4
+	// Not a valid UUIDv4
+	headers.insert(HDR_SURREAL, HeaderValue::from_static("123"));
 	// Connect to WebSocket
 	let socket = Socket::connect_with_headers(&addr, SERVER, FORMAT, headers).await;
 	assert!(socket.is_err(), "unexpected success using connecting with invalid id header");

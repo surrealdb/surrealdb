@@ -27,7 +27,6 @@ pub mod record;
 pub mod script;
 pub mod search;
 pub mod session;
-pub mod shared;
 pub mod sleep;
 pub mod string;
 pub mod time;
@@ -46,16 +45,28 @@ pub async fn run(
 	args: Vec<Value>,
 ) -> Result<Value, Error> {
 	if name.eq("sleep")
-		|| name.starts_with("search")
+		|| name.eq("array::all")
+		|| name.eq("array::any")
+		|| name.eq("array::every")
+		|| name.eq("array::filter_index")
+		|| name.eq("array::filter")
+		|| name.eq("array::find_index")
+		|| name.eq("array::find")
+		|| name.eq("array::includes")
+		|| name.eq("array::index_of")
+		|| name.eq("array::map")
+		|| name.eq("array::some")
+		|| name.eq("record::exists")
+		|| name.eq("type::field")
+		|| name.eq("type::fields")
+		|| name.eq("value::diff")
+		|| name.eq("value::patch")
 		|| name.starts_with("http")
-		|| name.starts_with("type::field")
-		|| name.starts_with("type::fields")
+		|| name.starts_with("search")
 		|| name.starts_with("crypto::argon2")
 		|| name.starts_with("crypto::bcrypt")
 		|| name.starts_with("crypto::pbkdf2")
 		|| name.starts_with("crypto::scrypt")
-		|| name.starts_with("array::map")
-		|| name.starts_with("record::exists")
 	{
 		stk.run(|stk| asynchronous(stk, ctx, opt, doc, name, args)).await
 	} else {
@@ -99,9 +110,8 @@ pub fn synchronous(
 		name,
 		args,
 		"no such builtin function found",
+		//
 		"array::add" => array::add,
-		"array::all" => array::all,
-		"array::any" => array::any,
 		"array::append" => array::append,
 		"array::at" => array::at,
 		"array::boolean_and" => array::boolean_and,
@@ -115,8 +125,6 @@ pub fn synchronous(
 		"array::difference" => array::difference,
 		"array::distinct" => array::distinct,
 		"array::fill" => array::fill,
-		"array::filter_index" => array::filter_index,
-		"array::find_index" => array::find_index,
 		"array::first" => array::first,
 		"array::flatten" => array::flatten,
 		"array::group" => array::group,
@@ -186,6 +194,7 @@ pub fn synchronous(
 		"geo::distance" => geo::distance,
 		"geo::hash::decode" => geo::hash::decode,
 		"geo::hash::encode" => geo::hash::encode,
+		"geo::is::valid" => geo::is::valid,
 		//
 		"math::abs" => math::abs,
 		"math::acos" => math::acos,
@@ -229,6 +238,9 @@ pub fn synchronous(
 		"math::top" => math::top,
 		"math::trimean" => math::trimean,
 		"math::variance" => math::variance,
+		//
+		"meta::id" => record::id,
+		"meta::tb" => record::tb,
 		//
 		"not" => not::not,
 		//
@@ -276,7 +288,7 @@ pub fn synchronous(
 		//
 		"string::concat" => string::concat,
 		"string::contains" => string::contains,
-		"string::endsWith" => string::ends_with,
+		"string::ends_with" => string::ends_with,
 		"string::join" => string::join,
 		"string::len" => string::len,
 		"string::lowercase" => string::lowercase,
@@ -287,7 +299,7 @@ pub fn synchronous(
 		"string::slice" => string::slice,
 		"string::slug" => string::slug,
 		"string::split" => string::split,
-		"string::startsWith" => string::starts_with,
+		"string::starts_with" => string::starts_with,
 		"string::trim" => string::trim,
 		"string::uppercase" => string::uppercase,
 		"string::words" => string::words,
@@ -310,6 +322,7 @@ pub fn synchronous(
 		"string::is::numeric" => string::is::numeric,
 		"string::is::semver" => string::is::semver,
 		"string::is::url" => string::is::url,
+		"string::is::ulid" => string::is::ulid,
 		"string::is::uuid" => string::is::uuid,
 		"string::is::record" => string::is::record,
 		"string::similarity::fuzzy" => string::similarity::fuzzy,
@@ -352,7 +365,10 @@ pub fn synchronous(
 		"time::from::micros" => time::from::micros,
 		"time::from::millis" => time::from::millis,
 		"time::from::secs" => time::from::secs,
+		"time::from::ulid" => time::from::ulid,
 		"time::from::unix" => time::from::unix,
+		"time::from::uuid" => time::from::uuid,
+		"time::is::leap_year" => time::is::leap_year,
 		//
 		"type::array" => r#type::array,
 		"type::bool" => r#type::bool,
@@ -395,9 +411,6 @@ pub fn synchronous(
 		"type::is::string" => r#type::is::string,
 		"type::is::uuid" => r#type::is::uuid,
 		//
-		"value::diff" => value::diff,
-		"value::patch" => value::patch,
-		//
 		"vector::add" => vector::add,
 		"vector::angle" => vector::angle,
 		"vector::cross" => vector::cross,
@@ -423,6 +436,81 @@ pub fn synchronous(
 	)
 }
 
+/// Attempts to run any asynchronous function.
+pub async fn asynchronous(
+	stk: &mut Stk,
+	ctx: &Context,
+	opt: &Options,
+	doc: Option<&CursorDoc>,
+	name: &str,
+	args: Vec<Value>,
+) -> Result<Value, Error> {
+	// Wrappers return a function as opposed to a value so that the dispatch! method can always
+	// perform a function call.
+	#[cfg(not(target_arch = "wasm32"))]
+	fn cpu_intensive<R: Send + 'static>(
+		function: impl FnOnce() -> R + Send + 'static,
+	) -> impl FnOnce() -> executor::Task<R> {
+		|| crate::exe::spawn(async move { function() })
+	}
+
+	#[cfg(target_arch = "wasm32")]
+	fn cpu_intensive<R: Send + 'static>(
+		function: impl FnOnce() -> R + Send + 'static,
+	) -> impl FnOnce() -> std::future::Ready<R> {
+		|| std::future::ready(function())
+	}
+
+	dispatch!(
+		name,
+		args,
+		"no such builtin function found",
+		//
+		"array::all" => array::all((stk, ctx, Some(opt), doc)).await,
+		"array::any" => array::any((stk, ctx, Some(opt), doc)).await,
+		"array::every" => array::all((stk, ctx, Some(opt), doc)).await,
+		"array::filter" => array::filter((stk, ctx, Some(opt), doc)).await,
+		"array::filter_index" => array::filter_index((stk, ctx, Some(opt), doc)).await,
+		"array::find" => array::find((stk, ctx, Some(opt), doc)).await,
+		"array::find_index" => array::find_index((stk, ctx, Some(opt), doc)).await,
+		"array::includes" => array::any((stk, ctx, Some(opt), doc)).await,
+		"array::index_of" => array::find_index((stk, ctx, Some(opt), doc)).await,
+		"array::map" => array::map((stk, ctx, Some(opt), doc)).await,
+		"array::some" => array::any((stk, ctx, Some(opt), doc)).await,
+		//
+		"crypto::argon2::compare" => (cpu_intensive) crypto::argon2::cmp.await,
+		"crypto::argon2::generate" => (cpu_intensive) crypto::argon2::gen.await,
+		"crypto::bcrypt::compare" => (cpu_intensive) crypto::bcrypt::cmp.await,
+		"crypto::bcrypt::generate" => (cpu_intensive) crypto::bcrypt::gen.await,
+		"crypto::pbkdf2::compare" => (cpu_intensive) crypto::pbkdf2::cmp.await,
+		"crypto::pbkdf2::generate" => (cpu_intensive) crypto::pbkdf2::gen.await,
+		"crypto::scrypt::compare" => (cpu_intensive) crypto::scrypt::cmp.await,
+		"crypto::scrypt::generate" => (cpu_intensive) crypto::scrypt::gen.await,
+		//
+		"http::head" => http::head(ctx).await,
+		"http::get" => http::get(ctx).await,
+		"http::put" => http::put(ctx).await,
+		"http::post" =>  http::post(ctx).await,
+		"http::patch" => http::patch(ctx).await,
+		"http::delete" => http::delete(ctx).await,
+		//
+		"record::exists" => record::exists((stk, ctx, Some(opt), doc)).await,
+		//
+		"search::analyze" => search::analyze((stk, ctx, Some(opt))).await,
+		"search::score" => search::score((ctx, doc)).await,
+		"search::highlight" => search::highlight((ctx, doc)).await,
+		"search::offsets" => search::offsets((ctx, doc)).await,
+		//
+		"sleep" => sleep::sleep(ctx).await,
+		//
+		"type::field" => r#type::field((stk, ctx, Some(opt), doc)).await,
+		"type::fields" => r#type::fields((stk, ctx, Some(opt), doc)).await,
+		//
+		"value::diff" => value::diff((stk, ctx, Some(opt), doc)).await,
+		"value::patch" => value::patch((stk, ctx, Some(opt), doc)).await,
+	)
+}
+
 /// Attempts to run any synchronous function.
 pub async fn idiom(
 	stk: &mut Stk,
@@ -440,9 +528,10 @@ pub async fn idiom(
 				name,
 				args.clone(),
 				"no such method found for the array type",
+				//
 				"add" => array::add,
-				"all" => array::all,
-				"any" => array::any,
+				"all" => array::all((stk, ctx, Some(opt), doc)).await,
+				"any" => array::any((stk, ctx, Some(opt), doc)).await,
 				"append" => array::append,
 				"at" => array::at,
 				"boolean_and" => array::boolean_and,
@@ -455,12 +544,17 @@ pub async fn idiom(
 				"concat" => array::concat,
 				"difference" => array::difference,
 				"distinct" => array::distinct,
+				"every" => array::all((stk, ctx, Some(opt), doc)).await,
 				"fill" => array::fill,
-				"filter_index" => array::filter_index,
-				"find_index" => array::find_index,
+				"filter" => array::filter((stk, ctx, Some(opt), doc)).await,
+				"filter_index" => array::filter_index((stk, ctx, Some(opt), doc)).await,
+				"find" => array::find((stk, ctx, Some(opt), doc)).await,
+				"find_index" => array::find_index((stk, ctx, Some(opt), doc)).await,
 				"first" => array::first,
 				"flatten" => array::flatten,
 				"group" => array::group,
+				"includes" => array::any((stk, ctx, Some(opt), doc)).await,
+				"index_of" => array::find_index((stk, ctx, Some(opt), doc)).await,
 				"insert" => array::insert,
 				"intersect" => array::intersect,
 				"is_empty" => array::is_empty,
@@ -471,7 +565,7 @@ pub async fn idiom(
 				"logical_or" => array::logical_or,
 				"logical_xor" => array::logical_xor,
 				"matches" => array::matches,
-				"map" => array::map((stk, ctx, opt, doc)).await,
+				"map" => array::map((stk, ctx, Some(opt), doc)).await,
 				"max" => array::max,
 				"min" => array::min,
 				"pop" => array::pop,
@@ -481,6 +575,7 @@ pub async fn idiom(
 				"reverse" => array::reverse,
 				"shuffle" => array::shuffle,
 				"slice" => array::slice,
+				"some" => array::any((stk, ctx, Some(opt), doc)).await,
 				"sort" => array::sort,
 				"swap" => array::swap,
 				"transpose" => array::transpose,
@@ -518,6 +613,7 @@ pub async fn idiom(
 				name,
 				args.clone(),
 				"no such method found for the bytes type",
+				//
 				"len" => bytes::len,
 			)
 		}
@@ -526,6 +622,7 @@ pub async fn idiom(
 				name,
 				args.clone(),
 				"no such method found for the duration type",
+				//
 				"days" => duration::days,
 				"hours" => duration::hours,
 				"micros" => duration::micros,
@@ -542,12 +639,14 @@ pub async fn idiom(
 				name,
 				args.clone(),
 				"no such method found for the geometry type",
+				//
 				"area" => geo::area,
 				"bearing" => geo::bearing,
 				"centroid" => geo::centroid,
 				"distance" => geo::distance,
 				"hash_decode" => geo::hash::decode,
 				"hash_encode" => geo::hash::encode,
+				"is_valid" => geo::is::valid,
 			)
 		}
 		Value::Thing(_) => {
@@ -555,6 +654,7 @@ pub async fn idiom(
 				name,
 				args.clone(),
 				"no such method found for the record type",
+				//
 				"exists" => record::exists((stk, ctx, Some(opt), doc)).await,
 				"id" => record::id,
 				"table" => record::tb,
@@ -566,10 +666,38 @@ pub async fn idiom(
 				name,
 				args.clone(),
 				"no such method found for the object type",
+				//
 				"entries" => object::entries,
 				"keys" => object::keys,
 				"len" => object::len,
 				"values" => object::values,
+			)
+		}
+		Value::Number(_) => {
+			dispatch!(
+				name,
+				args.clone(),
+				"no such method found for the number type",
+				//
+				"abs" => math::abs,
+				"acos" => math::acos,
+				"acot" => math::acot,
+				"asin" => math::asin,
+				"atan" => math::atan,
+				"ceil" => math::ceil,
+				"cos" => math::cos,
+				"cot" => math::cot,
+				"deg2rad" => math::deg2rad,
+				"floor" => math::floor,
+				"ln" => math::ln,
+				"log" => math::log,
+				"log10" => math::log10,
+				"log2" => math::log2,
+				"rad2deg" => math::rad2deg,
+				"round" => math::round,
+				"sign" => math::sign,
+				"sin" => math::sin,
+				"tan" => math::tan,
 			)
 		}
 		Value::Strand(_) => {
@@ -577,9 +705,10 @@ pub async fn idiom(
 				name,
 				args.clone(),
 				"no such method found for the string type",
+				//
 				"concat" => string::concat,
 				"contains" => string::contains,
-				"endsWith" => string::ends_with,
+				"ends_with" => string::ends_with,
 				"join" => string::join,
 				"len" => string::len,
 				"lowercase" => string::lowercase,
@@ -590,7 +719,7 @@ pub async fn idiom(
 				"slice" => string::slice,
 				"slug" => string::slug,
 				"split" => string::split,
-				"startsWith" => string::starts_with,
+				"starts_with" => string::starts_with,
 				"trim" => string::trim,
 				"uppercase" => string::uppercase,
 				"words" => string::words,
@@ -613,6 +742,7 @@ pub async fn idiom(
 				"is_numeric" => string::is::numeric,
 				"is_semver" => string::is::semver,
 				"is_url" => string::is::url,
+				"is_ulid" => string::is::ulid,
 				"is_uuid" => string::is::uuid,
 				"is_record" => string::is::record,
 				"similarity_fuzzy" => string::similarity::fuzzy,
@@ -635,12 +765,14 @@ pub async fn idiom(
 				name,
 				args.clone(),
 				"no such method found for the datetime type",
+				//
 				"ceil" => time::ceil,
 				"day" => time::day,
 				"floor" => time::floor,
 				"format" => time::format,
 				"group" => time::group,
 				"hour" => time::hour,
+				"is_leap_year" => time::is::leap_year,
 				"micros" => time::micros,
 				"millis" => time::millis,
 				"minute" => time::minute,
@@ -711,77 +843,15 @@ pub async fn idiom(
 				"to_string" => r#type::string,
 				"to_uuid" => r#type::uuid,
 				//
-				"diff" => value::diff,
-				"patch" => value::patch,
+				"chain" => value::chain((stk, ctx, Some(opt), doc)).await,
+				"diff" => value::diff((stk, ctx, Some(opt), doc)).await,
+				"patch" => value::patch((stk, ctx, Some(opt), doc)).await,
 				//
 				"repeat" => array::repeat,
-				//
-				"chain" => shared::chain((stk, ctx, opt, doc)).await,
 			)
 		}
 		v => v,
 	}
-}
-
-/// Attempts to run any asynchronous function.
-pub async fn asynchronous(
-	stk: &mut Stk,
-	ctx: &Context,
-	opt: &Options,
-	doc: Option<&CursorDoc>,
-	name: &str,
-	args: Vec<Value>,
-) -> Result<Value, Error> {
-	// Wrappers return a function as opposed to a value so that the dispatch! method can always
-	// perform a function call.
-	#[cfg(not(target_arch = "wasm32"))]
-	fn cpu_intensive<R: Send + 'static>(
-		function: impl FnOnce() -> R + Send + 'static,
-	) -> impl FnOnce() -> executor::Task<R> {
-		|| crate::exe::spawn(async move { function() })
-	}
-
-	#[cfg(target_arch = "wasm32")]
-	fn cpu_intensive<R: Send + 'static>(
-		function: impl FnOnce() -> R + Send + 'static,
-	) -> impl FnOnce() -> std::future::Ready<R> {
-		|| std::future::ready(function())
-	}
-
-	dispatch!(
-		name,
-		args,
-		"no such builtin function found",
-		"array::map" => array::map((stk, ctx, opt, doc)).await,
-		//
-		"crypto::argon2::compare" => (cpu_intensive) crypto::argon2::cmp.await,
-		"crypto::argon2::generate" => (cpu_intensive) crypto::argon2::gen.await,
-		"crypto::bcrypt::compare" => (cpu_intensive) crypto::bcrypt::cmp.await,
-		"crypto::bcrypt::generate" => (cpu_intensive) crypto::bcrypt::gen.await,
-		"crypto::pbkdf2::compare" => (cpu_intensive) crypto::pbkdf2::cmp.await,
-		"crypto::pbkdf2::generate" => (cpu_intensive) crypto::pbkdf2::gen.await,
-		"crypto::scrypt::compare" => (cpu_intensive) crypto::scrypt::cmp.await,
-		"crypto::scrypt::generate" => (cpu_intensive) crypto::scrypt::gen.await,
-		//
-		"http::head" => http::head(ctx).await,
-		"http::get" => http::get(ctx).await,
-		"http::put" => http::put(ctx).await,
-		"http::post" =>  http::post(ctx).await,
-		"http::patch" => http::patch(ctx).await,
-		"http::delete" => http::delete(ctx).await,
-		//
-		"record::exists" => record::exists((stk, ctx, Some(opt), doc)).await,
-		//
-		"search::analyze" => search::analyze((stk, ctx, Some(opt))).await,
-		"search::score" => search::score((ctx, doc)).await,
-		"search::highlight" => search::highlight((ctx, doc)).await,
-		"search::offsets" => search::offsets((ctx, doc)).await,
-		//
-		"sleep" => sleep::sleep(ctx).await,
-		//
-		"type::field" => r#type::field((stk, ctx, Some(opt), doc)).await,
-		"type::fields" => r#type::fields((stk, ctx, Some(opt), doc)).await,
-	)
 }
 
 fn get_execution_context<'a>(
@@ -810,9 +880,6 @@ mod tests {
 
 	#[tokio::test]
 	async fn implementations_are_present() {
-		#[cfg(all(feature = "scripting", feature = "kv-mem"))]
-		let excluded_from_scripting = &["array::map"];
-
 		// Accumulate and display all problems at once to avoid a test -> fix -> test -> fix cycle.
 		let mut problems = Vec::new();
 
@@ -820,7 +887,7 @@ mod tests {
 		let fnc_mod = include_str!("mod.rs");
 
 		// Patch out idiom methods
-		let re = Regex::new(r"(?ms)pub async fn idiom\(.*}\n+///").unwrap();
+		let re = Regex::new(r"(?ms)pub async fn idiom\(.*}").unwrap();
 		let fnc_no_idiom = re.replace(fnc_mod, "");
 
 		for line in fnc_no_idiom.lines() {
@@ -862,10 +929,6 @@ mod tests {
 			#[cfg(all(feature = "scripting", feature = "kv-mem"))]
 			{
 				use crate::sql::Value;
-
-				if excluded_from_scripting.contains(&name) {
-					continue;
-				}
 
 				let name = name.replace("::", ".");
 				let sql =

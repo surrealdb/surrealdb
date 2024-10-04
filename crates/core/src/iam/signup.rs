@@ -19,6 +19,8 @@ pub async fn signup(
 	session: &mut Session,
 	vars: Object,
 ) -> Result<Option<String>, Error> {
+	// Check vars contains only computed values
+	vars.validate_computed()?;
 	// Parse the specified variables
 	let ns = vars.get("NS").or_else(|| vars.get("ns"));
 	let db = vars.get("DB").or_else(|| vars.get("db"));
@@ -75,7 +77,7 @@ pub async fn db_access(
 							sess.or.clone_from(&session.or);
 							// Compute the value with the params
 							match kvs.evaluate(val, &sess, vars).await {
-								// The signin value succeeded
+								// The signup value succeeded
 								Ok(val) => {
 									match val.record() {
 										// There is a record returned
@@ -111,7 +113,10 @@ pub async fn db_access(
 															// Update rid with result from AUTHENTICATE clause
 															rid = id;
 														}
-														_ => return Err(Error::InvalidAuth),
+														_ => {
+															debug!("Authentication attempt as record user rejected by AUTHENTICATE clause");
+															return Err(Error::InvalidAuth);
+														}
 													},
 													Err(e) => return match e {
 														Error::Thrown(_) => Err(e),
@@ -151,8 +156,14 @@ pub async fn db_access(
 								}
 								Err(e) => match e {
 									Error::Thrown(_) => Err(e),
-									e if *INSECURE_FORWARD_ACCESS_ERRORS => Err(e),
-									_ => Err(Error::AccessRecordSignupQueryFailed),
+									e => {
+										debug!("Record user signup query failed: {e}");
+										if *INSECURE_FORWARD_ACCESS_ERRORS {
+											Err(e)
+										} else {
+											Err(Error::AccessRecordSignupQueryFailed)
+										}
+									}
 								},
 							}
 						}

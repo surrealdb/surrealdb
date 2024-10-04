@@ -1,9 +1,9 @@
 use ascii::any_ascii as ascii;
-use once_cell::sync::Lazy;
 use regex::Regex;
+use std::sync::LazyLock;
 
-static SIMPLES: Lazy<Regex> = Lazy::new(|| Regex::new("[^a-z0-9-_]").unwrap());
-static HYPHENS: Lazy<Regex> = Lazy::new(|| Regex::new("-+").unwrap());
+static SIMPLES: LazyLock<Regex> = LazyLock::new(|| Regex::new("[^a-z0-9-_]").unwrap());
+static HYPHENS: LazyLock<Regex> = LazyLock::new(|| Regex::new("-+").unwrap());
 
 pub fn slug<S: AsRef<str>>(s: S) -> String {
 	// Get a reference

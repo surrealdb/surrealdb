@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::fmt::{Debug, Formatter};
+use std::fmt::{Debug, Display, Formatter};
 use std::future::Future;
 use std::sync::Arc;
 use std::thread::Builder;
@@ -313,7 +313,11 @@ impl Test {
 	/// Panics if the expected value is not equal to the actual value.
 	/// Compliant with NaN and Constants.
 	#[allow(dead_code)]
-	pub fn expect_value(&mut self, val: Value) -> Result<&mut Self, Error> {
+	pub fn expect_value_info<I: Display>(
+		&mut self,
+		val: Value,
+		info: I,
+	) -> Result<&mut Self, Error> {
 		let tmp = self.next_value()?;
 		// Then check they are indeed the same values
 		//
@@ -324,12 +328,17 @@ impl Test {
 			val
 		};
 		if val.is_nan() {
-			assert!(tmp.is_nan(), "Expected NaN but got: {tmp}");
+			assert!(tmp.is_nan(), "Expected NaN but got {info}: {tmp}");
 		} else {
-			assert_eq!(tmp, val, "{tmp:#}");
+			assert_eq!(tmp, val, "{info} {tmp:#}");
 		}
 		//
 		Ok(self)
+	}
+
+	#[allow(dead_code)]
+	pub fn expect_value(&mut self, val: Value) -> Result<&mut Self, Error> {
+		self.expect_value_info(val, "")
 	}
 
 	/// Expect values in the given slice to be present in the responses, following the same order.
@@ -344,7 +353,15 @@ impl Test {
 	/// Expect the given value to be equals to the next response.
 	#[allow(dead_code)]
 	pub fn expect_val(&mut self, val: &str) -> Result<&mut Self, Error> {
-		self.expect_value(value(val).unwrap())
+		self.expect_val_info(val, "")
+	}
+
+	#[allow(dead_code)]
+	pub fn expect_val_info<I: Display>(&mut self, val: &str, info: I) -> Result<&mut Self, Error> {
+		self.expect_value_info(
+			value(val).unwrap_or_else(|_| panic!("INVALID VALUE {info}:\n{val}")),
+			info,
+		)
 	}
 
 	#[allow(dead_code)]

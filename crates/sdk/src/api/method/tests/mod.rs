@@ -14,16 +14,16 @@ use crate::api::opt::auth::Root;
 use crate::api::opt::PatchOp;
 use crate::api::Response as QueryResponse;
 use crate::api::Surreal;
-use once_cell::sync::Lazy;
 use protocol::Client;
 use protocol::Test;
 use semver::Version;
 use std::ops::Bound;
+use std::sync::LazyLock;
 use surrealdb_core::sql::statements::{BeginStatement, CommitStatement};
 use types::User;
 use types::USER;
 
-static DB: Lazy<Surreal<Client>> = Lazy::new(Surreal::init);
+static DB: LazyLock<Surreal<Client>> = LazyLock::new(Surreal::init);
 
 #[tokio::test]
 async fn api() {
@@ -111,9 +111,9 @@ async fn api() {
 		.unwrap();
 
 	// create
-	let _: Vec<User> = DB.create(USER).await.unwrap();
+	let _: Option<User> = DB.create(USER).await.unwrap();
 	let _: Option<User> = DB.create((USER, "john")).await.unwrap();
-	let _: Vec<User> = DB.create(USER).content(User::default()).await.unwrap();
+	let _: Option<User> = DB.create(USER).content(User::default()).await.unwrap();
 	let _: Option<User> = DB.create((USER, "john")).content(User::default()).await.unwrap();
 
 	// select

@@ -1,6 +1,9 @@
 use thiserror::Error;
 
-use crate::syn::token::Span;
+use crate::syn::{
+	error::{error, SyntaxError},
+	token::Span,
+};
 use std::fmt;
 
 #[derive(Error, Debug)]
@@ -10,6 +13,17 @@ pub enum CharError {
 	Eof,
 	#[error("string is not valid utf-8")]
 	Unicode,
+}
+
+impl From<CharError> for SyntaxError {
+	fn from(value: CharError) -> Self {
+		let e = SyntaxError::new("Invalid, non valid UTF-8 bytes, in source");
+		if let CharError::Eof = value {
+			e.with_data_pending()
+		} else {
+			e
+		}
+	}
 }
 
 #[derive(Clone)]
@@ -75,6 +89,11 @@ impl<'a> BytesReader<'a> {
 	#[inline]
 	pub fn peek(&self) -> Option<u8> {
 		self.remaining().first().copied()
+	}
+
+	#[inline]
+	pub fn peek1(&self) -> Option<u8> {
+		self.remaining().get(1).copied()
 	}
 
 	#[inline]

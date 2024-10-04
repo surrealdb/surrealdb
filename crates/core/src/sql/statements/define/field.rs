@@ -81,7 +81,7 @@ impl DefineFieldStatement {
 		.await?;
 
 		// find existing field definitions.
-		let fields = txn.all_tb_fields(ns, db, &self.what).await.ok();
+		let fields = txn.all_tb_fields(ns, db, &self.what, None).await.ok();
 
 		// Process possible recursive_definitions.
 		if let Some(mut cur_kind) = self.kind.as_ref().and_then(|x| x.inner_kind()) {
@@ -225,7 +225,11 @@ impl Display for DefineFieldStatement {
 			f.write_char(' ')?;
 			None
 		};
-		write!(f, "{}", self.permissions)?;
+		// Alternate permissions display implementation ignores delete permission
+		// This display is used to show field permissions, where delete has no effect
+		// Displaying the permission could mislead users into thinking it has an effect
+		// Additionally, including the permission will cause a parsing error in 3.0.0
+		write!(f, "{:#}", self.permissions)?;
 		Ok(())
 	}
 }

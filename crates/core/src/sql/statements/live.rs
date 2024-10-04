@@ -162,6 +162,7 @@ mod tests {
 	use crate::kvs::Datastore;
 	use crate::kvs::LockType::Optimistic;
 	use crate::kvs::TransactionType::Write;
+	use crate::sql::Thing;
 	use crate::sql::Value;
 	use crate::syn::Parse;
 
@@ -180,7 +181,7 @@ mod tests {
 
 		// Create a new transaction and verify that there are no tables defined.
 		let tx = dbs.transaction(Write, Optimistic).await.unwrap();
-		let table_occurrences = &*(tx.all_tb(ns, db).await.unwrap());
+		let table_occurrences = &*(tx.all_tb(ns, db, None).await.unwrap());
 		assert!(table_occurrences.is_empty());
 		tx.cancel().await.unwrap();
 
@@ -196,21 +197,20 @@ mod tests {
 
 		// Verify that the table definition has been created.
 		let tx = dbs.transaction(Write, Optimistic).await.unwrap();
-		let table_occurrences = &*(tx.all_tb(ns, db).await.unwrap());
+		let table_occurrences = &*(tx.all_tb(ns, db, None).await.unwrap());
 		assert_eq!(table_occurrences.len(), 1);
 		assert_eq!(table_occurrences[0].name.0, tb);
 		tx.cancel().await.unwrap();
 
 		// Initiate a Create record
-		let create_statement = format!("CREATE {}:test_true SET condition = true", tb);
+		let create_statement = format!("CREATE {tb}:test_true SET condition = true");
 		let create_response = &mut dbs.execute(&create_statement, &ses, None).await.unwrap();
 		assert_eq!(create_response.len(), 1);
 		let expected_record = Value::parse(&format!(
 			"[{{
-				id: {}:test_true,
+				id: {tb}:test_true,
 				condition: true,
-			}}]",
-			tb
+			}}]"
 		));
 
 		let tmp = create_response.remove(0).result.unwrap();
@@ -218,7 +218,7 @@ mod tests {
 
 		// Create a new transaction to verify that the same table was used.
 		let tx = dbs.transaction(Write, Optimistic).await.unwrap();
-		let table_occurrences = &*(tx.all_tb(ns, db).await.unwrap());
+		let table_occurrences = &*(tx.all_tb(ns, db, None).await.unwrap());
 		assert_eq!(table_occurrences.len(), 1);
 		assert_eq!(table_occurrences[0].name.0, tb);
 		tx.cancel().await.unwrap();
@@ -231,12 +231,12 @@ mod tests {
 			Notification::new(
 				live_id,
 				Action::Create,
+				Value::Thing(Thing::from((tb, "test_true"))),
 				Value::parse(&format!(
 					"{{
-						id: {}:test_true,
+						id: {tb}:test_true,
 						condition: true,
-					}}",
-					tb
+					}}"
 				),),
 			)
 		);
@@ -250,7 +250,7 @@ mod tests {
 
 		// Create a new transaction and verify that there are no tables defined.
 		let tx = dbs.transaction(Write, Optimistic).await.unwrap();
-		let table_occurrences = &*(tx.all_tb(ns, db).await.unwrap());
+		let table_occurrences = &*(tx.all_tb(ns, db, None).await.unwrap());
 		assert!(table_occurrences.is_empty());
 		tx.cancel().await.unwrap();
 
@@ -260,7 +260,7 @@ mod tests {
 
 		// Create a new transaction and confirm that a new table is created.
 		let tx = dbs.transaction(Write, Optimistic).await.unwrap();
-		let table_occurrences = &*(tx.all_tb(ns, db).await.unwrap());
+		let table_occurrences = &*(tx.all_tb(ns, db, None).await.unwrap());
 		assert_eq!(table_occurrences.len(), 1);
 		assert_eq!(table_occurrences[0].name.0, tb);
 		tx.cancel().await.unwrap();
@@ -271,7 +271,7 @@ mod tests {
 
 		// Verify that the old table definition was used.
 		let tx = dbs.transaction(Write, Optimistic).await.unwrap();
-		let table_occurrences = &*(tx.all_tb(ns, db).await.unwrap());
+		let table_occurrences = &*(tx.all_tb(ns, db, None).await.unwrap());
 		assert_eq!(table_occurrences.len(), 1);
 		assert_eq!(table_occurrences[0].name.0, tb);
 		tx.cancel().await.unwrap();

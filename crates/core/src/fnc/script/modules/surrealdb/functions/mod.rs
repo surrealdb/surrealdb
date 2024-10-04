@@ -16,6 +16,7 @@ mod encoding;
 mod geo;
 mod http;
 mod math;
+mod meta;
 mod object;
 mod parse;
 mod rand;
@@ -43,6 +44,7 @@ impl_module_def!(
 	"geo" => (geo::Package),
 	"http" => (http::Package),
 	"math" => (math::Package),
+	"meta" => (meta::Package),
 	"not" => run,
 	"object" => (object::Package),
 	"parse" => (parse::Package),

@@ -9,13 +9,7 @@ use crate::syn::error::RenderedError as RenderedParserError;
 use crate::vs::Error as VersionstampError;
 use base64::DecodeError as Base64Error;
 use bincode::Error as BincodeError;
-#[cfg(any(
-	feature = "kv-mem",
-	feature = "kv-surrealkv",
-	feature = "kv-rocksdb",
-	feature = "kv-fdb",
-	feature = "kv-tikv",
-))]
+#[cfg(storage)]
 use ext_sort::SortError;
 use fst::Error as FstError;
 use jsonwebtoken::errors::Error as JWTError;
@@ -54,7 +48,7 @@ pub enum Error {
 
 	/// The database encountered unreachable logic
 	#[error("The database encountered unreachable logic: {0}")]
-	Unreachable(&'static str),
+	Unreachable(String),
 
 	/// Statement has been deprecated
 	#[error("{0}")]
@@ -228,6 +222,14 @@ pub enum Error {
 	},
 
 	/// The wrong quantity or magnitude of arguments was given for the specified function
+	#[error("Incorrect arguments for aggregate function {name}() on table '{table}'. {message}")]
+	InvalidAggregation {
+		name: String,
+		table: String,
+		message: String,
+	},
+
+	/// The wrong quantity or magnitude of arguments was given for the specified function
 	#[error("There was a problem running the {name} function. Expected this function to return a value of type {check}, but found {value}")]
 	FunctionCheck {
 		name: String,
@@ -351,12 +353,6 @@ pub enum Error {
 		value: String,
 	},
 
-	// The cluster node already exists
-	#[error("The node '{value}' already exists")]
-	ClAlreadyExists {
-		value: String,
-	},
-
 	// The cluster node does not exist
 	#[error("The node '{value}' does not exist")]
 	NdNotFound {
@@ -366,6 +362,12 @@ pub enum Error {
 	/// The requested param does not exist
 	#[error("The param '${value}' does not exist")]
 	PaNotFound {
+		value: String,
+	},
+
+	/// The requested config does not exist
+	#[error("The config for {value} does not exist")]
+	CgNotFound {
 		value: String,
 	},
 
@@ -558,7 +560,7 @@ pub enum Error {
 	/// A database entry for the specified record already exists
 	#[error("Database record `{thing}` already exists")]
 	RecordExists {
-		thing: String,
+		thing: Thing,
 	},
 
 	/// A database index entry for the specified record already exists
@@ -612,15 +614,58 @@ pub enum Error {
 		field: Idiom,
 	},
 
-	/// Found a record id for the record but we are creating a specific record
-	#[error("Found {value} for the id field, but a specific record has been specified")]
-	IdMismatch {
-		value: String,
+	/// The specified field on a SCHEMAFUL table was not defined
+	#[error("Found field '{field}', but no such field exists for table '{table}'")]
+	FieldUndefined {
+		table: String,
+		field: Idiom,
 	},
 
 	/// Found a record id for the record but this is not a valid id
 	#[error("Found {value} for the Record ID but this is not a valid id")]
 	IdInvalid {
+		value: String,
+	},
+
+	/// Found a record id for the record but we are creating a specific record
+	#[error("Found {value} for the `id` field, but a specific record has been specified")]
+	IdMismatch {
+		value: String,
+	},
+
+	/// Found a record id for the record but this is not a valid id
+	#[error("Found {value} for the incoming relation, but this is not a valid Record ID")]
+	InInvalid {
+		value: String,
+	},
+
+	/// Found a record id for the record but we are creating a specific record
+	#[error("Found {value} for the `in` field, but the value does not match the `in` record id")]
+	InMismatch {
+		value: String,
+	},
+
+	/// Found a record id for the record but we are creating a specific record
+	#[error("Found {value} for the `in` field, which does not match the existing field value")]
+	InOverride {
+		value: String,
+	},
+
+	/// Found a record id for the record but this is not a valid id
+	#[error("Found {value} for the outgoing relation, but this is not a valid Record ID")]
+	OutInvalid {
+		value: String,
+	},
+
+	/// Found a record id for the record but we are creating a specific record
+	#[error("Found {value} for the `out` field, but the value does not match the `out` record id")]
+	OutMismatch {
+		value: String,
+	},
+
+	/// Found a record id for the record but we are creating a specific record
+	#[error("Found {value} for the `out` field, which does not match the existing field value")]
+	OutOverride {
 		value: String,
 	},
 
@@ -839,6 +884,12 @@ pub enum Error {
 	#[error("The db is running without an available storage engine")]
 	MissingStorageEngine,
 
+	// The cluster node already exists
+	#[error("The node '{value}' already exists")]
+	ClAlreadyExists {
+		value: String,
+	},
+
 	/// The requested analyzer already exists
 	#[error("The analyzer '{value}' already exists")]
 	AzAlreadyExists {
@@ -893,6 +944,12 @@ pub enum Error {
 		value: String,
 	},
 
+	/// The requested config already exists
+	#[error("The config for {value} already exists")]
+	CgAlreadyExists {
+		value: String,
+	},
+
 	/// The requested table already exists
 	#[error("The table '{value}' already exists")]
 	TbAlreadyExists {
@@ -938,9 +995,11 @@ pub enum Error {
 		index: String,
 	},
 
-	/// The session has expired either because the token used
-	/// to establish it has expired or because an expiration
-	/// was explicitly defined when establishing it
+	/// The token has expired
+	#[error("The token has expired")]
+	ExpiredToken,
+
+	/// The session has expired
 	#[error("The session has expired")]
 	ExpiredSession,
 
@@ -1101,6 +1160,15 @@ pub enum Error {
 	/// There was an outdated storage version stored in the database
 	#[error("The data stored on disk is out-of-date with this version. Please follow the upgrade guides in the documentation")]
 	OutdatedStorageVersion,
+
+	#[error("Found a non-computed value where they are not allowed")]
+	NonComputed,
+
+	#[error("Size of query script exceeded maximum supported size of 4,294,967,295 bytes.")]
+	QueryTooLarge,
+	/// Represents a failure in timestamp arithmetic related to database internals
+	#[error("Failed to compute: \"{0}\", as the operation results in an overflow.")]
+	ArithmeticOverflow(String),
 }
 
 impl From<Error> for String {
@@ -1208,13 +1276,7 @@ impl From<reqwest::Error> for Error {
 	}
 }
 
-#[cfg(any(
-	feature = "kv-mem",
-	feature = "kv-surrealkv",
-	feature = "kv-rocksdb",
-	feature = "kv-fdb",
-	feature = "kv-tikv",
-))]
+#[cfg(storage)]
 impl<S, D, I> From<SortError<S, D, I>> for Error
 where
 	S: std::error::Error,

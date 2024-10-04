@@ -2,10 +2,8 @@ use super::{ParseResult, Parser};
 use crate::{
 	sql::{Constant, Function, Value},
 	syn::{
-		parser::{
-			mac::{expected, unexpected},
-			ParseError, ParseErrorKind,
-		},
+		error::MessageKind,
+		parser::{mac::expected, unexpected, SyntaxError},
 		token::{t, Span},
 	},
 };
@@ -97,12 +95,17 @@ pub(crate) static PATHS: phf::Map<UniCase<&'static str>, PathKind> = phf_map! {
 		UniCase::ascii("array::concat") => PathKind::Function,
 		UniCase::ascii("array::difference") => PathKind::Function,
 		UniCase::ascii("array::distinct") => PathKind::Function,
+		UniCase::ascii("array::every") => PathKind::Function,
 		UniCase::ascii("array::fill") => PathKind::Function,
+		UniCase::ascii("array::filter") => PathKind::Function,
 		UniCase::ascii("array::filter_index") => PathKind::Function,
+		UniCase::ascii("array::find") => PathKind::Function,
 		UniCase::ascii("array::find_index") => PathKind::Function,
 		UniCase::ascii("array::first") => PathKind::Function,
 		UniCase::ascii("array::flatten") => PathKind::Function,
 		UniCase::ascii("array::group") => PathKind::Function,
+		UniCase::ascii("array::includes") => PathKind::Function,
+		UniCase::ascii("array::index_of") => PathKind::Function,
 		UniCase::ascii("array::insert") => PathKind::Function,
 		UniCase::ascii("array::intersect") => PathKind::Function,
 		UniCase::ascii("array::is_empty") => PathKind::Function,
@@ -125,13 +128,14 @@ pub(crate) static PATHS: phf::Map<UniCase<&'static str>, PathKind> = phf_map! {
 		UniCase::ascii("array::reverse") => PathKind::Function,
 		UniCase::ascii("array::shuffle") => PathKind::Function,
 		UniCase::ascii("array::slice") => PathKind::Function,
-		UniCase::ascii("array::sort::asc") => PathKind::Function,
-		UniCase::ascii("array::sort::desc") => PathKind::Function,
+		UniCase::ascii("array::some") => PathKind::Function,
 		UniCase::ascii("array::sort") => PathKind::Function,
 		UniCase::ascii("array::swap") => PathKind::Function,
 		UniCase::ascii("array::transpose") => PathKind::Function,
 		UniCase::ascii("array::union") => PathKind::Function,
 		UniCase::ascii("array::windows") => PathKind::Function,
+		UniCase::ascii("array::sort::asc") => PathKind::Function,
+		UniCase::ascii("array::sort::desc") => PathKind::Function,
 		//
 		UniCase::ascii("bytes::len") => PathKind::Function,
 		//
@@ -178,6 +182,7 @@ pub(crate) static PATHS: phf::Map<UniCase<&'static str>, PathKind> = phf_map! {
 		UniCase::ascii("geo::distance") => PathKind::Function,
 		UniCase::ascii("geo::hash::decode") => PathKind::Function,
 		UniCase::ascii("geo::hash::encode") => PathKind::Function,
+		UniCase::ascii("geo::is::valid") => PathKind::Function,
 		//
 		UniCase::ascii("http::head") => PathKind::Function,
 		UniCase::ascii("http::get") => PathKind::Function,
@@ -228,6 +233,9 @@ pub(crate) static PATHS: phf::Map<UniCase<&'static str>, PathKind> = phf_map! {
 		UniCase::ascii("math::top") => PathKind::Function,
 		UniCase::ascii("math::trimean") => PathKind::Function,
 		UniCase::ascii("math::variance") => PathKind::Function,
+		//
+		UniCase::ascii("meta::id") => PathKind::Function,
+		UniCase::ascii("meta::tb") => PathKind::Function,
 		//
 		UniCase::ascii("not") => PathKind::Function,
 		//
@@ -284,7 +292,7 @@ pub(crate) static PATHS: phf::Map<UniCase<&'static str>, PathKind> = phf_map! {
 		//
 		UniCase::ascii("string::concat") => PathKind::Function,
 		UniCase::ascii("string::contains") => PathKind::Function,
-		UniCase::ascii("string::endsWith") => PathKind::Function,
+		UniCase::ascii("string::ends_with") => PathKind::Function,
 		UniCase::ascii("string::join") => PathKind::Function,
 		UniCase::ascii("string::len") => PathKind::Function,
 		UniCase::ascii("string::lowercase") => PathKind::Function,
@@ -294,7 +302,7 @@ pub(crate) static PATHS: phf::Map<UniCase<&'static str>, PathKind> = phf_map! {
 		UniCase::ascii("string::slice") => PathKind::Function,
 		UniCase::ascii("string::slug") => PathKind::Function,
 		UniCase::ascii("string::split") => PathKind::Function,
-		UniCase::ascii("string::startsWith") => PathKind::Function,
+		UniCase::ascii("string::starts_with") => PathKind::Function,
 		UniCase::ascii("string::trim") => PathKind::Function,
 		UniCase::ascii("string::uppercase") => PathKind::Function,
 		UniCase::ascii("string::words") => PathKind::Function,
@@ -317,6 +325,7 @@ pub(crate) static PATHS: phf::Map<UniCase<&'static str>, PathKind> = phf_map! {
 		UniCase::ascii("string::is::numeric") => PathKind::Function,
 		UniCase::ascii("string::is::semver") => PathKind::Function,
 		UniCase::ascii("string::is::url") => PathKind::Function,
+		UniCase::ascii("string::is::ulid") => PathKind::Function,
 		UniCase::ascii("string::is::uuid") => PathKind::Function,
 		UniCase::ascii("string::is::record") => PathKind::Function,
 		UniCase::ascii("string::semver::compare") => PathKind::Function,
@@ -360,7 +369,10 @@ pub(crate) static PATHS: phf::Map<UniCase<&'static str>, PathKind> = phf_map! {
 		UniCase::ascii("time::from::millis") => PathKind::Function,
 		UniCase::ascii("time::from::nanos") => PathKind::Function,
 		UniCase::ascii("time::from::secs") => PathKind::Function,
+		UniCase::ascii("time::from::ulid") => PathKind::Function,
 		UniCase::ascii("time::from::unix") => PathKind::Function,
+		UniCase::ascii("time::from::uuid") => PathKind::Function,
+		UniCase::ascii("time::is::leap_year") => PathKind::Function,
 		//
 		UniCase::ascii("type::array") => PathKind::Function,
 		UniCase::ascii("type::bool") => PathKind::Function,
@@ -452,23 +464,24 @@ pub(crate) static PATHS: phf::Map<UniCase<&'static str>, PathKind> = phf_map! {
 		UniCase::ascii("math::PI") => PathKind::Constant(Constant::MathPi),
 		UniCase::ascii("math::SQRT_2") => PathKind::Constant(Constant::MathSqrt2),
 		UniCase::ascii("math::TAU") => PathKind::Constant(Constant::MathTau),
+		UniCase::ascii("time::EPOCH") => PathKind::Constant(Constant::TimeEpoch)
 };
 
 impl Parser<'_> {
 	/// Parse a builtin path.
-	pub async fn parse_builtin(&mut self, stk: &mut Stk, start: Span) -> ParseResult<Value> {
+	pub(super) async fn parse_builtin(&mut self, stk: &mut Stk, start: Span) -> ParseResult<Value> {
 		let mut last_span = start;
 		while self.eat(t!("::")) {
-			let t = self.glue_ident(false)?;
-			if !t.kind.can_be_identifier() {
-				unexpected!(self, t.kind, "an identifier")
+			let peek = self.peek();
+			if !Self::kind_is_identifier(peek.kind) {
+				unexpected!(self, peek, "an identifier")
 			}
 			self.pop_peek();
 			last_span = self.last_span();
 		}
 
 		let span = start.covers(last_span);
-		let str = self.span_str(span);
+		let str = self.lexer.span_str(span);
 
 		match PATHS.get_entry(&UniCase::ascii(str)) {
 			Some((_, PathKind::Constant(x))) => Ok(Value::Constant(x.clone())),
@@ -491,29 +504,26 @@ impl Parser<'_> {
 					})
 					.map(|x| x.into_inner());
 
-				if cut_off == MAX_LEVENSTHEIN_CUT_OFF {
-					// couldn't find a value which lowered the cut off,
-					// any suggestion probably will be nonsensical so don't give any.
-					return Err(ParseError::new(
-						ParseErrorKind::InvalidPath {
-							possibly: None,
-						},
-						span,
-					));
+				if let Some(possibly) = possibly {
+					// If we couldn't find a value which lowered the cut off,
+					// any suggestion probably will be nonsensical so give an suggestion when the
+					// the cut_off was lowered.
+					if cut_off < MAX_LEVENSTHEIN_CUT_OFF {
+						return Err(SyntaxError::new(format_args!(
+							"Invalid function/constant path, did you maybe mean `{possibly}`"
+						))
+						.with_span(span, MessageKind::Error));
+					}
 				}
 
-				Err(ParseError::new(
-					ParseErrorKind::InvalidPath {
-						possibly,
-					},
-					span,
-				))
+				Err(SyntaxError::new("Invalid function/constant path")
+					.with_span(span, MessageKind::Error))
 			}
 		}
 	}
 
 	/// Parse a call to a builtin function.
-	pub async fn parse_builtin_function(
+	pub(super) async fn parse_builtin_function(
 		&mut self,
 		stk: &mut Stk,
 		name: String,
@@ -525,7 +535,7 @@ impl Parser<'_> {
 				break;
 			}
 
-			let arg = stk.run(|ctx| self.parse_value_field(ctx)).await?;
+			let arg = stk.run(|ctx| self.parse_value_inherit(ctx)).await?;
 			args.push(arg);
 
 			if !self.eat(t!(",")) {

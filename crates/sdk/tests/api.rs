@@ -1,7 +1,6 @@
 #[allow(unused_imports, dead_code)]
 mod api_integration {
 	use chrono::DateTime;
-	use once_cell::sync::Lazy;
 	use semver::Version;
 	use serde::Deserialize;
 	use serde::Serialize;
@@ -10,6 +9,7 @@ mod api_integration {
 	use std::borrow::Cow;
 	use std::ops::Bound;
 	use std::sync::Arc;
+	use std::sync::LazyLock;
 	use std::sync::Mutex;
 	use std::time::Duration;
 	use surrealdb::error::Api as ApiError;
@@ -38,7 +38,6 @@ mod api_integration {
 	const NS: &str = "test-ns";
 	const ROOT_USER: &str = "root";
 	const ROOT_PASS: &str = "root";
-	const TICK_INTERVAL: Duration = Duration::from_secs(1);
 
 	#[derive(Debug, Serialize)]
 	struct Record {
@@ -55,7 +54,7 @@ mod api_integration {
 		name: String,
 	}
 
-	#[derive(Debug, Clone, Deserialize, PartialEq, PartialOrd)]
+	#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, PartialOrd)]
 	struct RecordBuf {
 		id: RecordId,
 		name: String,
@@ -187,10 +186,7 @@ mod api_integration {
 				username: ROOT_USER,
 				password: ROOT_PASS,
 			};
-			let config = Config::new()
-				.user(root)
-				.tick_interval(TICK_INTERVAL)
-				.capabilities(Capabilities::all());
+			let config = Config::new().user(root).capabilities(Capabilities::all());
 			let db = Surreal::new::<Mem>(config).await.unwrap();
 			db.signin(root).await.unwrap();
 			(permit, db)
@@ -284,10 +280,7 @@ mod api_integration {
 				username: ROOT_USER,
 				password: ROOT_PASS,
 			};
-			let config = Config::new()
-				.user(root)
-				.tick_interval(TICK_INTERVAL)
-				.capabilities(Capabilities::all());
+			let config = Config::new().user(root).capabilities(Capabilities::all());
 			#[allow(deprecated)]
 			let db = Surreal::new::<File>((path, config)).await.unwrap();
 			db.signin(root).await.unwrap();
@@ -320,10 +313,7 @@ mod api_integration {
 				username: ROOT_USER,
 				password: ROOT_PASS,
 			};
-			let config = Config::new()
-				.user(root)
-				.tick_interval(TICK_INTERVAL)
-				.capabilities(Capabilities::all());
+			let config = Config::new().user(root).capabilities(Capabilities::all());
 			let db = Surreal::new::<RocksDb>((path, config)).await.unwrap();
 			db.signin(root).await.unwrap();
 			(permit, db)
@@ -354,10 +344,7 @@ mod api_integration {
 				username: ROOT_USER,
 				password: ROOT_PASS,
 			};
-			let config = Config::new()
-				.user(root)
-				.tick_interval(TICK_INTERVAL)
-				.capabilities(Capabilities::all());
+			let config = Config::new().user(root).capabilities(Capabilities::all());
 			let db = Surreal::new::<TiKv>(("127.0.0.1:2379", config)).await.unwrap();
 			db.signin(root).await.unwrap();
 			(permit, db)
@@ -387,10 +374,7 @@ mod api_integration {
 				username: ROOT_USER,
 				password: ROOT_PASS,
 			};
-			let config = Config::new()
-				.user(root)
-				.tick_interval(TICK_INTERVAL)
-				.capabilities(Capabilities::all());
+			let config = Config::new().user(root).capabilities(Capabilities::all());
 			let path = "/etc/foundationdb/fdb.cluster";
 			surrealdb::engine::any::connect((format!("fdb://{path}"), config.clone()))
 				.await
@@ -418,10 +402,7 @@ mod api_integration {
 				username: ROOT_USER,
 				password: ROOT_PASS,
 			};
-			let config = Config::new()
-				.user(root)
-				.tick_interval(TICK_INTERVAL)
-				.capabilities(Capabilities::all());
+			let config = Config::new().user(root).capabilities(Capabilities::all());
 			let db = Surreal::new::<SurrealKV>((path, config)).await.unwrap();
 			db.signin(root).await.unwrap();
 			(permit, db)
@@ -579,6 +560,72 @@ mod api_integration {
 				.unwrap();
 			let response: Option<String> = response.take("name").unwrap();
 			assert!(response.is_none());
+		}
+
+		#[test_log::test(tokio::test)]
+		async fn info_for_db_with_versioned_tables() {
+			let (permit, db) = new_db().await;
+			db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
+			drop(permit);
+
+			// Record the timestamp before creating a testing table.
+			let ts_before_create = chrono::Utc::now().to_rfc3339();
+
+			// Create the testing table.
+			let _ = db.query("DEFINE TABLE person").await.unwrap().check().unwrap();
+
+			// Record the timestamp after creating the testing table.
+			let ts_after_create = chrono::Utc::now().to_rfc3339();
+
+			// Check that historical query shows no table before it was created.
+			let q = format!("INFO FOR DB VERSION d'{}'", ts_before_create);
+			let mut response = db.query(q).await.unwrap().check().unwrap();
+			let info = response.take::<Value>(0).unwrap().to_string();
+			assert!(info.contains("tables: {  }"));
+
+			// Now check that the table shows up later.
+			let q = format!("INFO FOR DB VERSION d'{}'", ts_after_create);
+			let mut response = db.query(q).await.unwrap().check().unwrap();
+			let info = response.take::<Value>(0).unwrap().to_string();
+			assert!(info.contains(
+				"tables: { person: 'DEFINE TABLE person TYPE ANY SCHEMALESS PERMISSIONS NONE' }"
+			));
+		}
+
+		#[test_log::test(tokio::test)]
+		async fn info_for_table_with_versioned_fields() {
+			let (permit, db) = new_db().await;
+			db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
+			drop(permit);
+
+			// Create the testing table.
+			let _ = db.query("DEFINE TABLE person").await.unwrap().check().unwrap();
+
+			// Record the timestamp before creating a field.
+			let ts_before_field = chrono::Utc::now().to_rfc3339();
+			let _ = db
+				.query("DEFINE FIELD firstName ON TABLE person TYPE string")
+				.await
+				.unwrap()
+				.check()
+				.unwrap();
+
+			// Record the timestamp after creating the field.
+			let ts_after_field = chrono::Utc::now().to_rfc3339();
+
+			// Check that historical query shows no field before it was created.
+			let q = format!("INFO FOR TABLE person VERSION d'{}'", ts_before_field);
+			let mut response = db.query(q).await.unwrap().check().unwrap();
+			let info = response.take::<Value>(0).unwrap().to_string();
+			assert!(info.contains("fields: {  }"));
+
+			// Now check that the field shows up later.
+			let q = format!("INFO FOR TABLE person VERSION d'{}'", ts_after_field);
+			let mut response = db.query(q).await.unwrap().check().unwrap();
+			let info = response.take::<Value>(0).unwrap().to_string();
+			assert!(info.contains(
+				"fields: { firstName: 'DEFINE FIELD firstName ON person TYPE string PERMISSIONS FULL' }"
+			));
 		}
 
 		include!("api/mod.rs");

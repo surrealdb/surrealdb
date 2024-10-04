@@ -10,7 +10,6 @@ members = ["."]
 
 [dependencies]
 actix-web = { version = "4.4.0", features = ["macros"] }
-once_cell = "1.18.0"
-serde = { version = "1.0.193", features = ["derive"] }
+serde = { version = "1.0.209", features = ["derive"] }
 surrealdb = { path = "../.." }
-thiserror = "1.0.50"
+thiserror = "1.0.63"

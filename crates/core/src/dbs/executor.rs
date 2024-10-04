@@ -27,6 +27,8 @@ use trice::Instant;
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen_futures::spawn_local as spawn;
 
+const TARGET: &str = "surrealdb::core::dbs";
+
 pub(crate) struct Executor<'a> {
 	err: bool,
 	kvs: &'a Datastore,
@@ -42,8 +44,8 @@ impl<'a> Executor<'a> {
 		}
 	}
 
-	fn txn(&self) -> Arc<Transaction> {
-		self.txn.clone().expect("unreachable: txn was None after successful begin")
+	fn txn(&self) -> Result<Arc<Transaction>, Error> {
+		self.txn.clone().ok_or_else(|| fail!("txn was None after successful begin"))
 	}
 
 	/// # Return
@@ -184,7 +186,7 @@ impl<'a> Executor<'a> {
 		Ok(ctx.freeze())
 	}
 
-	#[instrument(level = "debug", name = "executor", skip_all)]
+	#[instrument(level = "debug", name = "executor", target = "surrealdb::core::dbs", skip_all)]
 	pub async fn execute(
 		&mut self,
 		mut ctx: Context,
@@ -207,7 +209,7 @@ impl<'a> Executor<'a> {
 		// Process all statements in query
 		for stm in qry.into_iter() {
 			// Log the statement
-			debug!("Executing: {}", stm);
+			trace!(target: TARGET, statement = %stm, "Executing statement");
 			// Reset errors
 			if self.txn.is_none() {
 				self.err = false;
@@ -303,7 +305,7 @@ impl<'a> Executor<'a> {
 						false => {
 							// ctx.set_transaction(txn)
 							let mut c = MutableContext::unfreeze(ctx)?;
-							c.set_transaction(self.txn());
+							c.set_transaction(self.txn()?);
 							ctx = c.freeze();
 							// Check the statement
 							match stack
@@ -364,45 +366,24 @@ impl<'a> Executor<'a> {
 							true => Err(Error::TxFailure),
 							// The transaction began successfully
 							false => {
+								// Create a new context for this statement
 								let mut ctx = MutableContext::new(&ctx);
+								// Set the transaction on the context
+								ctx.set_transaction(self.txn()?);
+								let c = ctx.freeze();
 								// Process the statement
-								let res = match stm.timeout() {
-									// There is a timeout clause
-									Some(timeout) => {
-										// Set statement timeout or propagate the error
-										if let Err(err) = ctx.add_timeout(timeout) {
-											Err(err)
-										} else {
-											ctx.set_transaction(self.txn());
-											let c = ctx.freeze();
-											// Process the statement
-											let res = stack
-												.enter(|stk| stm.compute(stk, &c, &opt, None))
-												.finish()
-												.await;
-											ctx = MutableContext::unfreeze(c)?;
-											// Catch statement timeout
-											match ctx.is_timedout() {
-												true => Err(Error::QueryTimedout),
-												false => res,
-											}
-										}
-									}
-									// There is no timeout clause
-									None => {
-										ctx.set_transaction(self.txn());
-										let c = ctx.freeze();
-										let r = stack
-											.enter(|stk| stm.compute(stk, &c, &opt, None))
-											.finish()
-											.await;
-										ctx = MutableContext::unfreeze(c)?;
-										r
-									}
-								};
+								let res = stack
+									.enter(|stk| stm.compute(stk, &c, &opt, None))
+									.finish()
+									.await;
+								ctx = MutableContext::unfreeze(c)?;
 								// Check if this is a RETURN statement
-								let can_return =
-									matches!(stm, Statement::Output(_) | Statement::Value(_));
+								let can_return = matches!(
+									stm,
+									Statement::Output(_)
+										| Statement::Value(_) | Statement::Ifelse(_)
+										| Statement::Foreach(_)
+								);
 								// Catch global timeout
 								let res = match ctx.is_timedout() {
 									true => Err(Error::QueryTimedout),
