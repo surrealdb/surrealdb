@@ -163,7 +163,7 @@ impl Executor {
 		&mut self,
 		kvs: &Datastore,
 		stmt: Statement,
-	) -> Result<Option<Value>, Error> {
+	) -> Result<Value, Error> {
 		// Don't even try to run if the query should already be finished.
 		match self.ctx.done() {
 			None => {}
@@ -177,8 +177,7 @@ impl Executor {
 
 		match stmt {
 			// These statements don't need a transaction.
-			Statement::Option(stmt) => self.execute_option_statement(stmt).map(|_| None),
-			Statement::Use(stmt) => self.execute_use_statement(stmt).map(|_| Some(Value::None)),
+			Statement::Use(stmt) => self.execute_use_statement(stmt).map(|_| Value::None),
 			stmt => {
 				let writeable = stmt.writeable();
 				let Ok(txn) = kvs.transaction(writeable.into(), LockType::Optimistic).await else {
@@ -204,7 +203,7 @@ impl Executor {
 						// has nothing to commit anyway.
 						if !writeable {
 							let _ = lock.cancel().await;
-							return Ok(Some(value));
+							return Ok(value);
 						}
 
 						if let Err(e) = lock.complete_changes(false).await {
@@ -235,7 +234,7 @@ impl Executor {
 							}
 						}
 
-						Ok(Some(value))
+						Ok(value)
 					}
 					Err(e) => {
 						let _ = txn.cancel().await;
@@ -564,6 +563,7 @@ impl Executor {
 			};
 
 			match stmt {
+				Statement::Option(stmt) => this.execute_option_statement(stmt)?,
 				// handle option here because it doesn't produce a result.
 				Statement::Begin(_) => {
 					if let Err(e) = this.execute_begin_statement(kvs, stream.as_mut()).await {
@@ -584,14 +584,12 @@ impl Executor {
 					};
 
 					let now = Instant::now();
-					let result = this.execute_bare_statement(kvs, stmt).await.transpose();
-					if let Some(result) = result {
-						this.results.push(Response {
-							time: now.elapsed(),
-							result,
-							query_type,
-						});
-					}
+					let result = this.execute_bare_statement(kvs, stmt).await;
+					this.results.push(Response {
+						time: now.elapsed(),
+						result,
+						query_type,
+					});
 				}
 			}
 		}

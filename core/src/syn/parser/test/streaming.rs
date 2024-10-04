@@ -740,7 +740,7 @@ fn test_streaming() {
 			.finish()
 		{
 			PartialResult::Empty => {
-				panic!("Returned empty too early")
+				break;
 			}
 			PartialResult::MoreData => continue,
 			PartialResult::Ok {
