@@ -456,6 +456,8 @@ impl super::api::Transaction for Transaction {
 		// Set the ReadOptions with the snapshot
 		let mut ro = ReadOptions::default();
 		ro.set_snapshot(&inner.snapshot());
+		ro.set_iterate_lower_bound(beg);
+		ro.set_iterate_upper_bound(end);
 		ro.set_async_io(true);
 		ro.fill_cache(true);
 		// Create the iterator
@@ -514,6 +516,8 @@ impl super::api::Transaction for Transaction {
 		// Set the ReadOptions with the snapshot
 		let mut ro = ReadOptions::default();
 		ro.set_snapshot(&inner.snapshot());
+		ro.set_iterate_lower_bound(beg);
+		ro.set_iterate_upper_bound(end);
 		ro.set_async_io(true);
 		ro.fill_cache(true);
 		// Create the iterator
