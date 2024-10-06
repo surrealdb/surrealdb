@@ -88,7 +88,7 @@ pub static RUNTIME_MAX_BLOCKING_THREADS: LazyLock<usize> =
 
 /// How many threads which can be started for blocking operations (defaults to 512)
 pub static TELEMETRY_PROVIDER: LazyLock<String> =
-	lazy_env_parse!("SURREAL_TELEMETRY_PROVIDER", String, String::new());
+	lazy_env_parse!("SURREAL_TELEMETRY_PROVIDER", String);
 
 /// The version identifier of this build
 pub static PKG_VERSION: LazyLock<String> =
