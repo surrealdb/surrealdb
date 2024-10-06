@@ -30,18 +30,21 @@ args = ["test", "--profile", "make", "--workspace", "--no-fail-fast"]
 [tasks.cargo-fmt]
 category = "LOCAL USAGE"
 command = "cargo"
+env = { RUSTFLAGS = "--cfg surrealdb_unstable" }
 args = ["fmt", "--all", "--check"]
 
 # Check
 [tasks.cargo-check]
 category = "LOCAL USAGE"
 command = "cargo"
+env = { RUSTFLAGS = "--cfg surrealdb_unstable" }
 args = ["check", "--profile", "make", "--workspace", "--all-targets", "--features", "${ALL_FEATURES}"]
 
 # Clippy
 [tasks.cargo-clippy]
 category = "LOCAL USAGE"
 command = "cargo"
+env = { RUSTFLAGS = "--cfg surrealdb_unstable" }
 args = ["clippy", "--profile", "make", "--workspace", "--all-targets", "--features", "${ALL_FEATURES}", "--", "-D", "warnings"]
 
 [tasks.check]
