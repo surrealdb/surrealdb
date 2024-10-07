@@ -82,7 +82,7 @@ pub fn numeric(lexer: &mut Lexer, start: Token) -> Result<Numeric, SyntaxError> 
 	match start.kind {
 		t!("-") | t!("+") => number(lexer, start).map(Numeric::Number),
 		TokenKind::Digits => match lexer.reader.peek() {
-			Some(b'n' | b'm' | b's' | b'h' | b'y' | b'w') => {
+			Some(b'n' | b'm' | b's' | b'h' | b'y' | b'w' | b'u') => {
 				duration(lexer, start).map(Numeric::Duration)
 			}
 			Some(b'd') => {
