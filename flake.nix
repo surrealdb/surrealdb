@@ -7,7 +7,6 @@
     flake-utils.url = "github:numtide/flake-utils/v1.0.0";
     crane = {
       url = "github:ipetkov/crane/v0.19.0";
-      inputs.nixpkgs.follows = "nixpkgs";
     };
     fenix = {
       url = "github:nix-community/fenix";
