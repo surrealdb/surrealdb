@@ -165,6 +165,59 @@ pub(crate) enum Permitted {
 }
 
 impl Document {
+	/// Initialise a new document
+	pub fn new(
+		id: Option<Arc<Thing>>,
+		ir: Option<Arc<IteratorRecord>>,
+		val: Arc<Value>,
+		extras: Workable,
+	) -> Self {
+		Document {
+			id: id.clone(),
+			extras,
+			current: CursorDoc::new(id.clone(), ir.clone(), val.clone()),
+			initial: CursorDoc::new(id.clone(), ir.clone(), val.clone()),
+			current_reduced: CursorDoc::new(id.clone(), ir.clone(), val.clone()),
+			initial_reduced: CursorDoc::new(id.clone(), ir.clone(), val.clone()),
+		}
+	}
+	/// Check if document has changed
+	pub fn changed(&self) -> bool {
+		self.initial.doc.as_ref() != self.current.doc.as_ref()
+	}
+
+	/// Check if document is being created
+	pub fn is_new(&self) -> bool {
+		self.initial.doc.as_ref().is_none()
+	}
+
+	/// Checks if permissions are required to be run
+	/// over a document. If permissions don't need to
+	/// be processed, then we don't process the initial
+	/// or current documents, and instead return
+	/// `false`. If permissions need to be processed,
+	/// then we take the initial or current documents,
+	/// and remove those fields which the user is not
+	/// allowed to view. We then use the `initial_reduced`
+	/// and `current_reduced` documents in the code when
+	/// processing the document that a user has access to.
+	///
+	/// The choice of which documents are reduced can be
+	/// specified by passing in a `Permitted` type, allowing
+	/// either `initial`, `current`, or `both` to be
+	/// processed in a single function execution.
+	///
+	/// This function is used both to reduce documents
+	/// to only the fields that are permitted by updating
+	/// the reduced fields of the Document structure as
+	/// well as to return whether or not they have been
+	/// reduced so that these reduced documents are used
+	/// instead of their non-reduced versions.
+	///
+	/// If there is no requirement to reduce a document
+	/// based on the permissions, then this function will
+	/// not have any performance impact by cloning the
+	/// full and reduced documents.
 	pub(crate) async fn reduced(
 		&mut self,
 		stk: &mut Stk,
@@ -227,34 +280,6 @@ impl Document {
 		}
 		// Return the permitted document
 		Ok(true)
-	}
-}
-
-impl Document {
-	/// Initialise a new document
-	pub fn new(
-		id: Option<Arc<Thing>>,
-		ir: Option<Arc<IteratorRecord>>,
-		val: Arc<Value>,
-		extras: Workable,
-	) -> Self {
-		Document {
-			id: id.clone(),
-			extras,
-			current: CursorDoc::new(id.clone(), ir.clone(), val.clone()),
-			initial: CursorDoc::new(id.clone(), ir.clone(), val.clone()),
-			current_reduced: CursorDoc::new(id.clone(), ir.clone(), val.clone()),
-			initial_reduced: CursorDoc::new(id.clone(), ir.clone(), val.clone()),
-		}
-	}
-	/// Check if document has changed
-	pub fn changed(&self) -> bool {
-		self.initial.doc.as_ref() != self.current.doc.as_ref()
-	}
-
-	/// Check if document is being created
-	pub fn is_new(&self) -> bool {
-		self.initial.doc.as_ref().is_none()
 	}
 
 	/// Retrieve the record id for this document

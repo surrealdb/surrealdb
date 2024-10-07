@@ -311,11 +311,14 @@ impl Document {
 		// Carry on
 		Ok(())
 	}
-	/// Checks the `PERMISSIONS` clause on the table
-	/// for this record, returning immediately if the
-	/// permissions are `NONE`. This function does not
-	/// check any custom advanced table permissions,
-	/// which should be checked at a later stage.
+	/// Checks the `PERMISSIONS` clause for viewing a
+	/// record, based on the `select` permissions for
+	/// the table that this record belongs to. This
+	/// function checks and evaluates `FULL`, `NONE`,
+	/// and specific permissions clauses on the table.
+	/// This function is used when outputting a record,
+	/// ensuring that a user has the permission to view
+	/// the record after it has been updated or modified.
 	pub async fn check_permissions_view(
 		&self,
 		stk: &mut Stk,
