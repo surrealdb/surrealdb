@@ -21,6 +21,9 @@ defaults:
   run:
     shell: bash
 
+env:
+  RUSTFLAGS: "--cfg surrealdb_unstable"
+
 jobs:
   format:
     name: Check format
