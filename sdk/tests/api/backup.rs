@@ -4,7 +4,7 @@
 use surrealdb_core::sql::Table;
 use tokio::fs::remove_file;
 
-#[test_log::test(tokio::test)]
+#[tokio::test]
 async fn export_import() {
 	let (permit, db) = new_db().await;
 	let db_name = Ulid::new().to_string();
