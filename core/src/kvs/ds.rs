@@ -424,7 +424,7 @@ impl Datastore {
 		})
 	}
 
-	/// Specify whether this Datastore should run in strict mode
+	/// Specify the unique ID of this datastore
 	pub fn with_node_id(mut self, id: Uuid) -> Self {
 		self.id = id;
 		self
