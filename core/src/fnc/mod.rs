@@ -56,6 +56,7 @@ pub async fn run(
 		|| name.eq("array::includes")
 		|| name.eq("array::index_of")
 		|| name.eq("array::map")
+		|| name.eq("array::reduce")
 		|| name.eq("array::some")
 		|| name.eq("record::exists")
 		|| name.eq("type::field")
@@ -478,6 +479,7 @@ pub async fn asynchronous(
 		"array::includes" => array::any((stk, ctx, Some(opt), doc)).await,
 		"array::index_of" => array::find_index((stk, ctx, Some(opt), doc)).await,
 		"array::map" => array::map((stk, ctx, Some(opt), doc)).await,
+		"array::reduce" => array::reduce((stk, ctx, Some(opt), doc)).await,
 		"array::some" => array::any((stk, ctx, Some(opt), doc)).await,
 		//
 		"crypto::argon2::compare" => (cpu_intensive) crypto::argon2::cmp.await,
@@ -574,6 +576,7 @@ pub async fn idiom(
 				"pop" => array::pop,
 				"prepend" => array::prepend,
 				"push" => array::push,
+				"reduce" => array::reduce((stk, ctx, Some(opt), doc)).await,
 				"remove" => array::remove,
 				"reverse" => array::reverse,
 				"shuffle" => array::shuffle,

@@ -566,6 +566,26 @@ pub fn range((start, count): (i64, i64)) -> Result<Value, Error> {
 	}
 }
 
+pub async fn reduce(
+	(stk, ctx, opt, doc): (&mut Stk, &Context, Option<&Options>, Option<&CursorDoc>),
+	(array, mapper): (Array, Closure),
+) -> Result<Value, Error> {
+	if let Some(opt) = opt {
+		// Get the first item
+		let mut iter = array.into_iter().enumerate();
+		let Some((_, mut accum)) = iter.next() else {
+			return Ok(Value::None);
+		};
+		for (i, val) in iter {
+			let fnc = Function::Anonymous(mapper.clone().into(), vec![accum, val, i.into()]);
+			accum = fnc.compute(stk, ctx, opt, doc).await?;
+		}
+		Ok(accum)
+	} else {
+		Ok(Value::None)
+	}
+}
+
 pub fn remove((mut array, mut index): (Array, i64)) -> Result<Value, Error> {
 	// Negative index means start from the back
 	if index < 0 {

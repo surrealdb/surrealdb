@@ -55,6 +55,7 @@ impl_module_def!(
 	"push" => run,
 	"prepend" => run,
 	"range" => run,
+	"reduce" => fut Async,
 	"remove" => run,
 	"repeat" => run,
 	"reverse" => run,
