@@ -143,7 +143,7 @@ async fn insert_objects(
 				let vector: Vec<Number> = random_object(&mut rng, vector_size);
 				// Insert the sample
 				let rid = Thing::from(("test", Id::from(i as i64)));
-				mt.index_document(stk, &tx, &rid, &vec![Value::from(vector)]).await.unwrap();
+				mt.index_document(stk, &tx, &rid, &[Value::from(vector)]).await.unwrap();
 			}
 		})
 		.finish()

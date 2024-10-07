@@ -959,12 +959,12 @@ impl Value {
 			Value::Uuid(_) => true,
 			Value::Thing(_) => true,
 			Value::Geometry(_) => true,
+			Value::Datetime(_) => true,
 			Value::Array(v) => !v.is_empty(),
 			Value::Object(v) => !v.is_empty(),
 			Value::Strand(v) => !v.is_empty(),
 			Value::Number(v) => v.is_truthy(),
 			Value::Duration(v) => v.as_nanos() > 0,
-			Value::Datetime(v) => v.timestamp() > 0,
 			_ => false,
 		}
 	}
@@ -3116,6 +3116,8 @@ impl TryNeg for Value {
 #[cfg(test)]
 mod tests {
 
+	use chrono::TimeZone;
+
 	use super::*;
 	use crate::syn::Parse;
 
@@ -3167,6 +3169,7 @@ mod tests {
 		assert!(Value::from("falsey").is_truthy());
 		assert!(Value::from("something").is_truthy());
 		assert!(Value::from(Uuid::new()).is_truthy());
+		assert!(Value::from(Utc.with_ymd_and_hms(1948, 12, 3, 0, 0, 0).unwrap()).is_truthy());
 	}
 
 	#[test]

@@ -279,10 +279,6 @@ criteria = "safe-to-deploy"
 version = "1.3.3"
 criteria = "safe-to-deploy"
 
-[[exemptions.bindgen]]
-version = "0.65.1"
-criteria = "safe-to-deploy"
-
 [[exemptions.bitmaps]]
 version = "3.2.1"
 criteria = "safe-to-deploy"
@@ -828,7 +824,7 @@ version = "0.1.3"
 criteria = "safe-to-deploy"
 
 [[exemptions.librocksdb-sys]]
-version = "0.11.0+8.1.1"
+version = "0.16.0+8.10.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.libz-sys]]
@@ -860,7 +856,7 @@ version = "0.12.3"
 criteria = "safe-to-deploy"
 
 [[exemptions.lz4-sys]]
-version = "1.9.4"
+version = "1.10.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.mac]]
@@ -1312,7 +1308,7 @@ version = "0.5.1"
 criteria = "safe-to-deploy"
 
 [[exemptions.rocksdb]]
-version = "0.21.0"
+version = "0.22.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.rquickjs]]
@@ -1547,10 +1543,6 @@ criteria = "safe-to-deploy"
 version = "0.5.2"
 criteria = "safe-to-deploy"
 
-[[exemptions.strsim]]
-version = "0.11.1"
-criteria = "safe-to-deploy"
-
 [[exemptions.strum]]
 version = "0.26.3"
 criteria = "safe-to-deploy"
@@ -1639,6 +1631,10 @@ criteria = "safe-to-deploy"
 version = "0.26.0"
 criteria = "safe-to-deploy"
 
+[[exemptions.tokio-stream]]
+version = "0.1.16"
+criteria = "safe-to-deploy"
+
 [[exemptions.tokio-tungstenite]]
 version = "0.21.0"
 criteria = "safe-to-deploy"
@@ -1672,7 +1668,7 @@ version = "0.10.2"
 criteria = "safe-to-deploy"
 
 [[exemptions.tonic]]
-version = "0.12.0"
+version = "0.12.3"
 criteria = "safe-to-deploy"
 
 [[exemptions.tower]]
@@ -1697,10 +1693,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.tracing-attributes]]
 version = "0.1.27"
-criteria = "safe-to-deploy"
-
-[[exemptions.tracing-core]]
-version = "0.1.32"
 criteria = "safe-to-deploy"
 
 [[exemptions.tracing-log]]

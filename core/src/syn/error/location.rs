@@ -28,7 +28,7 @@ impl Location {
 				let line_idx = line.chars().count().max(1);
 				(idx, line_idx)
 			})
-			.unwrap_or((0, 0));
+			.unwrap_or((1, 1));
 
 		Self {
 			line,
