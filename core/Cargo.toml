@@ -2,7 +2,7 @@
 name = "surrealdb-core"
 publish = true
 edition = "2021"
-version = "2.0.1"
+version = "2.0.3"
 rust-version = "1.80.1"
 readme = "../sdk/CARGO.md"
 authors = ["Tobie Morgan Hitchcock <tobie@surrealdb.com>"]
@@ -116,7 +116,7 @@ pin-project-lite = "0.2.13"
 quick_cache = "0.5.1"
 radix_trie = { version = "0.2.1", features = ["serde"] }
 rand = "0.8.5"
-reblessive = { version = "0.4.0", features = ["tree"] }
+reblessive = { version = "0.4.1", features = ["tree"] }
 regex = "1.10.6"
 regex-syntax = { version = "0.8.4", optional = true, features = ["arbitrary"] }
 reqwest = { version = "0.12.7", default-features = false, features = [
@@ -134,7 +134,7 @@ revision = { version = "0.10.0", features = [
 ] }
 rmpv = "1.0.1"
 roaring = { version = "0.10.6", features = ["serde"] }
-rocksdb = { version = "0.21.0", features = ["lz4", "snappy"], optional = true }
+rocksdb = { version = "0.22.0", features = ["lz4", "snappy"], optional = true }
 rust_decimal = { version = "1.36.0", features = ["maths", "serde-str"] }
 rust-stemmers = "1.2.0"
 scrypt = "0.11.0"
@@ -147,8 +147,8 @@ sha2 = "0.10.8"
 snap = "1.1.0"
 storekey = "0.5.0"
 subtle = "2.6"
-surrealcs = { version = "0.3.1", optional = true }
-surrealkv = { version = "0.3.6", optional = true }
+surrealcs = { version = "0.4.4", optional = true }
+surrealkv = { version = "0.3.7", optional = true }
 surrealml = { version = "0.1.1", optional = true, package = "surrealml-core" }
 tempfile = { version = "3.10.1", optional = true }
 thiserror = "1.0.63"

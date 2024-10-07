@@ -94,6 +94,13 @@ macro_rules! run {
 /// from the environment variable or the default value.
 #[macro_export]
 macro_rules! lazy_env_parse {
+	($key:expr, $t:ty) => {
+		std::sync::LazyLock::new(|| {
+			std::env::var($key)
+				.and_then(|s| Ok(s.parse::<$t>().unwrap_or_default()))
+				.unwrap_or_default()
+		})
+	};
 	($key:expr, $t:ty, $default:expr) => {
 		std::sync::LazyLock::new(|| {
 			std::env::var($key)
@@ -256,7 +263,7 @@ mod test {
 		let Error::Unreachable(msg) = fail!("Reached unreachable code") else {
 			panic!()
 		};
-		assert_eq!("core/src/mac/mod.rs:256: Reached unreachable code", msg);
+		assert_eq!("core/src/mac/mod.rs:263: Reached unreachable code", msg);
 	}
 
 	#[test]
@@ -264,6 +271,6 @@ mod test {
 		let Error::Unreachable(msg) = fail!("Found {} but expected {}", "test", "other") else {
 			panic!()
 		};
-		assert_eq!("core/src/mac/mod.rs:264: Found test but expected other", msg);
+		assert_eq!("core/src/mac/mod.rs:271: Found test but expected other", msg);
 	}
 }

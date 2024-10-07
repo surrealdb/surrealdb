@@ -177,7 +177,7 @@ mod tests {
 		let input_vector: Vec<Number> = vec![1, 2, 3, 4].into_iter().map(Number::Int).collect();
 		let scalar_int = Number::Int(2);
 
-		let result: Result<Value, Error> = scale((input_vector.clone(), scalar_int.clone()));
+		let result: Result<Value, Error> = scale((input_vector.clone(), scalar_int));
 
 		let expected_output: Vec<Number> = vec![2, 4, 6, 8].into_iter().map(Number::Int).collect();
 
@@ -190,7 +190,7 @@ mod tests {
 		let input_vector: Vec<Number> = vec![1, 2, 3, 4].into_iter().map(Number::Int).collect();
 		let scalar_float = Number::Float(1.51);
 
-		let result: Result<Value, Error> = scale((input_vector.clone(), scalar_float.clone()));
+		let result: Result<Value, Error> = scale((input_vector.clone(), scalar_float));
 		let expected_output: Vec<Number> =
 			vec![1.51, 3.02, 4.53, 6.04].into_iter().map(Number::Float).collect();
 		assert!(result.is_ok());
@@ -202,7 +202,7 @@ mod tests {
 		let input_vector: Vec<Number> = vec![1, 2, 3, 4].into_iter().map(Number::Int).collect();
 		let scalar_decimal = Number::Decimal(Decimal::new(3141, 3));
 
-		let result: Result<Value, Error> = scale((input_vector.clone(), scalar_decimal.clone()));
+		let result: Result<Value, Error> = scale((input_vector.clone(), scalar_decimal));
 		let expected_output: Vec<Number> = vec![
 			Number::Decimal(Decimal::new(3141, 3)),  // 3.141 * 1
 			Number::Decimal(Decimal::new(6282, 3)),  // 3.141 * 2

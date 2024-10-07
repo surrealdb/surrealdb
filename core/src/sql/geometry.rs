@@ -257,7 +257,7 @@ impl Geometry {
 		let Value::Number(ref b) = v.0[1] else {
 			return None;
 		};
-		Some(Point::from((a.clone().try_into().ok()?, b.clone().try_into().ok()?)))
+		Some(Point::from(((*a).try_into().ok()?, (*b).try_into().ok()?)))
 	}
 }
 

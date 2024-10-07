@@ -3890,6 +3890,25 @@ async fn function_string_is_url() -> Result<(), Error> {
 }
 
 #[tokio::test]
+async fn function_string_is_ulid() -> Result<(), Error> {
+	let sql = r#"
+		RETURN string::is::ulid("01J8G788MNX1VT3KE1TK40W350");
+		RETURN string::is::ulid("this is a test!");
+	"#;
+	let mut test = Test::new(sql).await?;
+	//
+	let tmp = test.next()?.result?;
+	let val = Value::Bool(true);
+	assert_eq!(tmp, val);
+	//
+	let tmp = test.next()?.result?;
+	let val = Value::Bool(false);
+	assert_eq!(tmp, val);
+	//
+	Ok(())
+}
+
+#[tokio::test]
 async fn function_string_is_uuid() -> Result<(), Error> {
 	let sql = r#"
 		RETURN string::is::uuid("e72bee20-f49b-11ec-b939-0242ac120002");
@@ -4844,6 +4863,20 @@ async fn function_time_from_secs() -> Result<(), Error> {
 }
 
 #[tokio::test]
+async fn function_time_from_ulid() -> Result<(), Error> {
+	let sql = r#"
+		RETURN time::from::ulid("01J8G788MNX1VT3KE1TK40W350");
+	"#;
+	let mut test = Test::new(sql).await?;
+	//
+	let tmp = test.next()?.result?;
+	let val = Value::parse("d'2024-09-23T19:55:34.933Z'");
+	assert_eq!(tmp, val);
+	//
+	Ok(())
+}
+
+#[tokio::test]
 async fn function_time_from_unix() -> Result<(), Error> {
 	let sql = r#"
 		RETURN time::from::unix(384053840);
@@ -4857,6 +4890,20 @@ async fn function_time_from_unix() -> Result<(), Error> {
 	//
 	let tmp = test.next()?.result?;
 	let val = Value::parse("d'2060-03-05T09:27:20Z'");
+	assert_eq!(tmp, val);
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn function_time_from_uuid() -> Result<(), Error> {
+	let sql = r#"
+		RETURN time::from::uuid(u'01922074-2295-7cf6-906f-bcd0810639b0');
+	"#;
+	let mut test = Test::new(sql).await?;
+	//
+	let tmp = test.next()?.result?;
+	let val = Value::parse("d'2024-09-23T19:55:34.933Z'");
 	assert_eq!(tmp, val);
 	//
 	Ok(())

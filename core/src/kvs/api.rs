@@ -50,7 +50,7 @@ pub trait Transaction {
 	async fn commit(&mut self) -> Result<(), Error>;
 
 	/// Check if a key exists in the datastore.
-	async fn exists<K>(&mut self, key: K) -> Result<bool, Error>
+	async fn exists<K>(&mut self, key: K, version: Option<u64>) -> Result<bool, Error>
 	where
 		K: Into<Key> + Sprintable + Debug;
 
@@ -91,7 +91,12 @@ pub trait Transaction {
 	/// Retrieve a specific range of keys from the datastore.
 	///
 	/// This function fetches the full range of keys without values, in a single request to the underlying datastore.
-	async fn keys<K>(&mut self, rng: Range<K>, limit: u32) -> Result<Vec<Key>, Error>
+	async fn keys<K>(
+		&mut self,
+		rng: Range<K>,
+		limit: u32,
+		version: Option<u64>,
+	) -> Result<Vec<Key>, Error>
 	where
 		K: Into<Key> + Sprintable + Debug;
 
@@ -257,7 +262,7 @@ pub trait Transaction {
 		let res = if values {
 			self.scan(beg..end.clone(), batch, version).await?
 		} else {
-			self.keys(beg..end.clone(), batch)
+			self.keys(beg..end.clone(), batch, version)
 				.await?
 				.into_iter()
 				.map(|k| (k, vec![]))

@@ -259,17 +259,11 @@ impl<'a> Executor<'a> {
 				}
 				// Begin a new transaction
 				Statement::Begin(_) => {
-					if opt.import {
-						continue;
-					}
 					self.begin(Write).await;
 					continue;
 				}
 				// Cancel a running transaction
 				Statement::Cancel(_) => {
-					if opt.import {
-						continue;
-					}
 					self.cancel(true).await;
 					self.clear(&ctx, recv.clone()).await;
 					buf = buf.into_iter().map(|v| self.buf_cancel(v)).collect();
@@ -280,9 +274,6 @@ impl<'a> Executor<'a> {
 				}
 				// Commit a running transaction
 				Statement::Commit(_) => {
-					if opt.import {
-						continue;
-					}
 					let commit_error = self.commit(true).await.err();
 					buf = buf.into_iter().map(|v| self.buf_commit(v, &commit_error)).collect();
 					self.flush(&ctx, recv.clone()).await;
@@ -387,8 +378,12 @@ impl<'a> Executor<'a> {
 									.await;
 								ctx = MutableContext::unfreeze(c)?;
 								// Check if this is a RETURN statement
-								let can_return =
-									matches!(stm, Statement::Output(_) | Statement::Value(_));
+								let can_return = matches!(
+									stm,
+									Statement::Output(_)
+										| Statement::Value(_) | Statement::Ifelse(_)
+										| Statement::Foreach(_)
+								);
 								// Catch global timeout
 								let res = match ctx.is_timedout() {
 									true => Err(Error::QueryTimedout),

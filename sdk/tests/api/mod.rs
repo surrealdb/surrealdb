@@ -503,6 +503,74 @@ async fn create_record_with_id_with_content() {
 }
 
 #[test_log::test(tokio::test)]
+async fn create_record_with_id_in_content() {
+	#[derive(Debug, Serialize, Deserialize)]
+	pub struct Person {
+		pub id: u32,
+		pub name: &'static str,
+		pub job: &'static str,
+	}
+
+	#[derive(Debug, Serialize, Deserialize)]
+	pub struct Record {
+		#[allow(dead_code)]
+		pub id: RecordId,
+	}
+
+	let (permit, db) = new_db().await;
+	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
+	drop(permit);
+
+	let record: Option<RecordBuf> = db
+		.create(("user", "john"))
+		.content(RecordBuf {
+			id: RecordId::from_table_key("user", "john"),
+			name: "John Doe".to_owned(),
+		})
+		.await
+		.unwrap();
+	assert_eq!(record.unwrap().id, "user:john".parse::<RecordId>().unwrap());
+
+	let error = db
+		.create::<Option<RecordBuf>>(("user", "john"))
+		.content(RecordBuf {
+			id: RecordId::from_table_key("user", "jane"),
+			name: "John Doe".to_owned(),
+		})
+		.await
+		.unwrap_err();
+	match error {
+		surrealdb::Error::Db(DbError::IdMismatch {
+			..
+		}) => {}
+		surrealdb::Error::Api(ApiError::Query {
+			..
+		}) => {}
+		error => panic!("unexpected error; {error:?}"),
+	}
+
+	let _: Option<Record> = db
+		.create("person")
+		.content(Person {
+			id: 1010,
+			name: "Max Mustermann",
+			job: "chef",
+		})
+		.await
+		.unwrap();
+
+	let _: Option<Record> = db
+		.update(("person", 1010))
+		.content(Person {
+			id: 1010,
+			name: "Max Mustermann",
+			job: "IT Tech",
+		})
+		.await
+		.unwrap();
+}
+
+#[test_log::test(tokio::test)]
 async fn insert_table() {
 	let (permit, db) = new_db().await;
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
