@@ -6,6 +6,15 @@ version = "2.0.3"
 license-file = "LICENSE"
 authors = ["Tobie Morgan Hitchcock <tobie@surrealdb.com>"]
 
+[workspace]
+members = [
+    "crates/core",
+    "crates/sdk",
+    "crates/sdk/examples/actix",
+    "crates/sdk/examples/axum",
+    "crates/sdk/examples/rocket",
+]
+
 [features]
 # Public features
 default = [
@@ -32,14 +41,6 @@ performance-profiler = ["dep:pprof"]
 storage-fdb-7_1 = ["surrealdb/kv-fdb-7_1"]
 storage-fdb-7_3 = ["surrealdb/kv-fdb-7_3"]
 
-[workspace]
-members = [
-    "core",
-    "sdk",
-    "sdk/examples/actix",
-    "sdk/examples/axum",
-    "sdk/examples/rocket",
-]
 
 [profile.release]
 lto = true
@@ -113,12 +114,12 @@ semver = "1.0.20"
 serde = { version = "1.0.209", features = ["derive"] }
 serde_json = "1.0.127"
 serde_pack = { version = "1.1.2", package = "rmp-serde" }
-surrealdb = { version = "2", path = "sdk", features = [
+surrealdb = { version = "2", path = "crates/sdk", features = [
     "protocol-http",
     "protocol-ws",
     "rustls",
 ] }
-surrealdb-core = { version = "2", path = "core" }
+surrealdb-core = { version = "2", path = "crates/core" }
 tempfile = "3.8.1"
 thiserror = "1.0.63"
 tokio = { version = "1.40.0", features = ["macros", "signal"] }
