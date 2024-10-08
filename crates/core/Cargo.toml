@@ -18,7 +18,7 @@ keywords = [
     "kv-store",
 ]
 categories = ["database-implementations", "data-structures", "embedded"]
-license-file = "../LICENSE"
+license-file = "../../LICENSE"
 resolver = "2"
 
 [features]

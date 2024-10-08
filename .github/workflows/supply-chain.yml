@@ -8,10 +8,10 @@ on:
     paths:
       - Cargo.lock
       - Cargo.toml
-      - core/Cargo.toml
-      - sdk/Cargo.toml
+      - crates/core/Cargo.toml
+      - crates/sdk/Cargo.toml
       - build.rs
-      - sdk/build.rs
+      - crates/sdk/build.rs
       - supply-chain/audits.toml
       - supply-chain/config.toml
       - supply-chain/imports.lock
@@ -23,10 +23,10 @@ on:
     paths:
       - Cargo.lock
       - Cargo.toml
-      - core/Cargo.toml
-      - sdk/Cargo.toml
+      - crates/core/Cargo.toml
+      - crates/sdk/Cargo.toml
       - build.rs
-      - sdk/build.rs
+      - crates/sdk/build.rs
       - supply-chain/audits.toml
       - supply-chain/config.toml
       - supply-chain/imports.lock
