@@ -205,3 +205,7 @@ harness = false
 [[bench]]
 name = "hashset_vs_vector"
 harness = false
+
+[[bench]]
+name = "with_or_without_index"
+harness = false
