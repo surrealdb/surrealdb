@@ -780,3 +780,66 @@ async fn check_permissions_auth_disabled() {
 		);
 	}
 }
+
+#[tokio::test]
+async fn update_upsert() -> Result<(), Error> {
+	let dbs = new_ds().await?;
+
+	let sql = r#"
+		DEFINE TABLE data PERMISSIONS FOR select, create, update, delete WHERE user_id == $auth.id;
+		CREATE data:1 SET user_id = user:1;
+
+		DEFINE ACCESS user ON DATABASE TYPE RECORD;
+		DEFINE TABLE user PERMISSIONS FULL;
+		CREATE user:1;
+	"#;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 5);
+	//
+	let _ = res.remove(0).result?;
+	let _ = res.remove(0).result?;
+	let _ = res.remove(0).result?;
+	let _ = res.remove(0).result?;
+	let _ = res.remove(0).result?;
+	//
+	let sql = r#"
+		UPDATE data:1
+	"#;
+	let ses = Session::for_record("test", "test", "user", Value::parse("user:1"));
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 1);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		r#"[
+			{
+				"id": data:1,
+				"user_id": user:1,
+			}
+		]"#,
+	);
+	assert_eq!(tmp, val);
+	//
+	let sql = r#"
+		UPSERT data:1
+	"#;
+	// This passes:
+	// let ses = Session::owner().with_ns("test").with_db("test");
+	// This fails:
+	let ses = Session::for_record("test", "test", "user", Value::parse("user:1"));
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 1);
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		r#"[
+			{
+				"id": data:1,
+				"user_id": user:1,
+			}
+		]"#,
+	);
+	assert_eq!(tmp, val);
+
+	Ok(())
+}
