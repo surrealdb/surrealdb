@@ -26,8 +26,8 @@ pub(crate) struct Document {
 	pub(super) extras: Workable,
 	pub(super) initial: CursorDoc,
 	pub(super) current: CursorDoc,
-	pub(super) initial_permitted: CursorDoc,
-	pub(super) current_permitted: CursorDoc,
+	pub(super) initial_reduced: CursorDoc,
+	pub(super) current_reduced: CursorDoc,
 }
 
 #[non_exhaustive]
@@ -158,7 +158,14 @@ impl From<&Document> for Vec<u8> {
 	}
 }
 
+pub(crate) enum Permitted {
+	Initial,
+	Current,
+	Both,
+}
+
 impl Document {
+	/// Initialise a new document
 	pub fn new(
 		id: Option<Arc<Thing>>,
 		ir: Option<Arc<IteratorRecord>>,
@@ -170,137 +177,10 @@ impl Document {
 			extras,
 			current: CursorDoc::new(id.clone(), ir.clone(), val.clone()),
 			initial: CursorDoc::new(id.clone(), ir.clone(), val.clone()),
-			current_permitted: CursorDoc::new(id.clone(), ir.clone(), val.clone()),
-			initial_permitted: CursorDoc::new(id.clone(), ir.clone(), val.clone()),
+			current_reduced: CursorDoc::new(id.clone(), ir.clone(), val.clone()),
+			initial_reduced: CursorDoc::new(id.clone(), ir.clone(), val.clone()),
 		}
 	}
-
-	/// Get the current document, as it is being modified
-	#[allow(unused)]
-	pub(crate) fn current_doc(&self) -> &Value {
-		&self.current.doc
-	}
-
-	/// Get the initial version of the document before it is modified
-	#[allow(unused)]
-	pub(crate) fn initial_doc(&self) -> &Value {
-		&self.initial.doc
-	}
-
-	pub(crate) async fn process_permitted_current(
-		&mut self,
-		stk: &mut Stk,
-		ctx: &Context,
-		opt: &Options,
-	) -> Result<(), Error> {
-		// Clone the fully permitted documents
-		self.current_permitted = self.current.clone();
-		// Check if this record exists
-		if self.id.is_some() {
-			// Should we run permissions checks?
-			if opt.check_perms(Action::View)? {
-				// Loop through all field statements
-				for fd in self.fd(ctx, opt).await?.iter() {
-					//
-					let mut out = self
-						.current
-						.doc
-						.as_ref()
-						.compute(stk, ctx, opt, Some(&self.current))
-						.await?;
-					// Loop over each field in document
-					for k in out.each(&fd.name).iter() {
-						// Process the field permissions
-						match &fd.permissions.select {
-							Permission::Full => (),
-							Permission::None => out.del(stk, ctx, opt, k).await?,
-							Permission::Specific(e) => {
-								// Disable permissions
-								let opt = &opt.new_with_perms(false);
-								// Get the current value
-								let val = Arc::new(self.current.doc.as_ref().pick(k));
-								// Configure the context
-								let mut ctx = MutableContext::new(ctx);
-								ctx.add_value("value", val);
-								let ctx = ctx.freeze();
-								// Process the PERMISSION clause
-								if !e
-									.compute(stk, &ctx, opt, Some(&self.current))
-									.await?
-									.is_truthy()
-								{
-									out.del(stk, &ctx, opt, k).await?
-								}
-							}
-						}
-					}
-					// Update the permitted document
-					self.current_permitted.doc = out.into();
-				}
-			}
-		}
-		// Carry on
-		Ok(())
-	}
-
-	pub(crate) async fn process_permitted_initial(
-		&mut self,
-		stk: &mut Stk,
-		ctx: &Context,
-		opt: &Options,
-	) -> Result<(), Error> {
-		// Clone the fully permitted documents
-		self.initial_permitted = self.initial.clone();
-		// Check if this record exists
-		if self.id.is_some() {
-			// Should we run permissions checks?
-			if opt.check_perms(Action::View)? {
-				// Loop through all field statements
-				for fd in self.fd(ctx, opt).await?.iter() {
-					//
-					let mut out = self
-						.initial
-						.doc
-						.as_ref()
-						.compute(stk, ctx, opt, Some(&self.initial))
-						.await?;
-					// Loop over each field in document
-					for k in out.each(&fd.name).iter() {
-						// Process the field permissions
-						match &fd.permissions.select {
-							Permission::Full => (),
-							Permission::None => out.del(stk, ctx, opt, k).await?,
-							Permission::Specific(e) => {
-								// Disable permissions
-								let opt = &opt.new_with_perms(false);
-								// Get the current value
-								let val = Arc::new(self.initial.doc.as_ref().pick(k));
-								// Configure the context
-								let mut ctx = MutableContext::new(ctx);
-								ctx.add_value("value", val);
-								let ctx = ctx.freeze();
-								// Process the PERMISSION clause
-								if !e
-									.compute(stk, &ctx, opt, Some(&self.initial))
-									.await?
-									.is_truthy()
-								{
-									out.del(stk, &ctx, opt, k).await?
-								}
-							}
-						}
-					}
-					// Update the permitted document
-					self.initial_permitted.doc = out.into();
-				}
-			}
-		}
-		// Carry on
-		Ok(())
-	}
-}
-
-impl Document {
 	/// Check if document has changed
 	pub fn changed(&self) -> bool {
 		self.initial.doc.as_ref() != self.current.doc.as_ref()
@@ -309,6 +189,97 @@ impl Document {
 	/// Check if document is being created
 	pub fn is_new(&self) -> bool {
 		self.initial.doc.as_ref().is_none()
+	}
+
+	/// Checks if permissions are required to be run
+	/// over a document. If permissions don't need to
+	/// be processed, then we don't process the initial
+	/// or current documents, and instead return
+	/// `false`. If permissions need to be processed,
+	/// then we take the initial or current documents,
+	/// and remove those fields which the user is not
+	/// allowed to view. We then use the `initial_reduced`
+	/// and `current_reduced` documents in the code when
+	/// processing the document that a user has access to.
+	///
+	/// The choice of which documents are reduced can be
+	/// specified by passing in a `Permitted` type, allowing
+	/// either `initial`, `current`, or `both` to be
+	/// processed in a single function execution.
+	///
+	/// This function is used both to reduce documents
+	/// to only the fields that are permitted by updating
+	/// the reduced fields of the Document structure as
+	/// well as to return whether or not they have been
+	/// reduced so that these reduced documents are used
+	/// instead of their non-reduced versions.
+	///
+	/// If there is no requirement to reduce a document
+	/// based on the permissions, then this function will
+	/// not have any performance impact by cloning the
+	/// full and reduced documents.
+	pub(crate) async fn reduced(
+		&mut self,
+		stk: &mut Stk,
+		ctx: &Context,
+		opt: &Options,
+		permitted: Permitted,
+	) -> Result<bool, Error> {
+		// Check if this record exists
+		if self.id.is_none() {
+			return Ok(false);
+		}
+		// Are permissions being skipped?
+		if !opt.check_perms(Action::View)? {
+			return Ok(false);
+		}
+		// Fetch the fields for the table
+		let fds = self.fd(ctx, opt).await?;
+		// Fetch the targets to process
+		let targets = match permitted {
+			Permitted::Initial => vec![(&self.initial, &mut self.initial_reduced)],
+			Permitted::Current => vec![(&self.current, &mut self.current_reduced)],
+			Permitted::Both => vec![
+				(&self.initial, &mut self.initial_reduced),
+				(&self.current, &mut self.current_reduced),
+			],
+		};
+		// Loop over the targets to process
+		for target in targets {
+			// Get the full document
+			let full = target.0;
+			// Process the full document
+			let mut out = full.doc.as_ref().compute(stk, ctx, opt, Some(full)).await?;
+			// Loop over each field in document
+			for fd in fds.iter() {
+				// Loop over each field in document
+				for k in out.each(&fd.name).iter() {
+					// Process the field permissions
+					match &fd.permissions.select {
+						Permission::Full => (),
+						Permission::None => out.cut(k),
+						Permission::Specific(e) => {
+							// Disable permissions
+							let opt = &opt.new_with_perms(false);
+							// Get the initial value
+							let val = Arc::new(full.doc.as_ref().pick(k));
+							// Configure the context
+							let mut ctx = MutableContext::new(ctx);
+							ctx.add_value("value", val);
+							let ctx = ctx.freeze();
+							// Process the PERMISSION clause
+							if !e.compute(stk, &ctx, opt, Some(full)).await?.is_truthy() {
+								out.cut(k);
+							}
+						}
+					}
+				}
+			}
+			// Update the permitted document
+			target.1.doc = out.into();
+		}
+		// Return the permitted document
+		Ok(true)
 	}
 
 	/// Retrieve the record id for this document
