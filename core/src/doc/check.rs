@@ -3,7 +3,9 @@ use crate::dbs::Options;
 use crate::dbs::Statement;
 use crate::dbs::Workable;
 use crate::doc::Document;
+use crate::doc::Permitted::*;
 use crate::err::Error;
+use crate::iam::Action;
 use crate::sql::paths::ID;
 use crate::sql::paths::IN;
 use crate::sql::paths::OUT;
@@ -295,12 +297,59 @@ impl Document {
 	) -> Result<(), Error> {
 		// Check where condition
 		if let Some(cond) = stm.conds() {
-			// Process the current permitted
-			self.process_permitted_current(stk, ctx, opt).await?;
+			// Process the permitted documents
+			let current = match self.reduced(stk, ctx, opt, Current).await? {
+				true => &self.current_reduced,
+				false => &self.current,
+			};
 			// Check if the expression is truthy
-			if !cond.compute(stk, ctx, opt, Some(&self.current_permitted)).await?.is_truthy() {
+			if !cond.compute(stk, ctx, opt, Some(current)).await?.is_truthy() {
 				// Ignore this document
 				return Err(Error::Ignore);
+			}
+		}
+		// Carry on
+		Ok(())
+	}
+	/// Checks the `PERMISSIONS` clause for viewing a
+	/// record, based on the `select` permissions for
+	/// the table that this record belongs to. This
+	/// function checks and evaluates `FULL`, `NONE`,
+	/// and specific permissions clauses on the table.
+	/// This function is used when outputting a record,
+	/// ensuring that a user has the permission to view
+	/// the record after it has been updated or modified.
+	pub async fn check_permissions_view(
+		&self,
+		stk: &mut Stk,
+		ctx: &Context,
+		opt: &Options,
+		stm: &Statement<'_>,
+	) -> Result<(), Error> {
+		// Check if this record exists
+		if self.id.is_some() {
+			// Should we run permissions checks?
+			if opt.check_perms(Action::View)? {
+				// Get the table for this document
+				let table = self.tb(ctx, opt).await?;
+				// Get the correct document to check
+				let doc = match stm.is_delete() {
+					true => &self.initial,
+					false => &self.current,
+				};
+				// Process the table permissions
+				match &table.permissions.select {
+					Permission::None => return Err(Error::Ignore),
+					Permission::Full => (),
+					Permission::Specific(e) => {
+						// Disable permissions
+						let opt = &opt.new_with_perms(false);
+						// Process the PERMISSION clause
+						if !e.compute(stk, ctx, opt, Some(doc)).await?.is_truthy() {
+							return Err(Error::Ignore);
+						}
+					}
+				}
 			}
 		}
 		// Carry on

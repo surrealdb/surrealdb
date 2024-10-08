@@ -2,6 +2,7 @@ use crate::ctx::{Context, MutableContext};
 use crate::dbs::Options;
 use crate::dbs::Statement;
 use crate::doc::Document;
+use crate::doc::Permitted::*;
 use crate::err::Error;
 use crate::iam::Action;
 use crate::sql::idiom::Idiom;
@@ -25,159 +26,171 @@ impl Document {
 	) -> Result<Value, Error> {
 		// Ensure futures are run
 		let opt = &opt.new_with_futures(true);
-		// Check if this record exists
-		if self.id.is_some() {
-			// Should we run permissions checks?
-			if opt.check_perms(Action::View)? {
-				// Get the table for this document
-				let table = self.tb(ctx, opt).await?;
-				// Get the permissions for this table
-				let perms = &table.permissions.select;
-				// Process the table permissions
-				match perms {
-					Permission::None => return Err(Error::Ignore),
-					Permission::Full => (),
-					Permission::Specific(e) => {
-						// Disable permissions
-						let opt = &opt.new_with_perms(false);
-						// Process the PERMISSION clause
-						if !e
-							.compute(
-								stk,
-								ctx,
-								opt,
-								Some(match stm.is_delete() {
-									true => &self.initial,
-									false => &self.current,
-								}),
-							)
-							.await?
-							.is_truthy()
-						{
-							return Err(Error::Ignore);
-						}
-					}
-				}
-			}
-		}
+		// Check if we can view the output
+		self.check_permissions_view(stk, ctx, opt, stm).await?;
 		// Process the desired output
 		let mut out = match stm.output() {
 			Some(v) => match v {
 				Output::None => Err(Error::Ignore),
 				Output::Null => Ok(Value::Null),
 				Output::Diff => {
-					// Process the current permitted
-					self.process_permitted_current(stk, ctx, opt).await?;
-					// Process the initial permitted
-					self.process_permitted_initial(stk, ctx, opt).await?;
+					// Process the permitted documents
+					let (initial, current) = match self.reduced(stk, ctx, opt, Both).await? {
+						true => (&self.initial_reduced, &self.current_reduced),
+						false => (&self.initial, &self.current),
+					};
 					// Output a DIFF of any changes applied to the document
-					Ok(self
-						.initial_permitted
-						.doc
-						.as_ref()
-						.diff(self.current_permitted.doc.as_ref(), Idiom::default())
-						.into())
+					Ok(initial.doc.as_ref().diff(current.doc.as_ref(), Idiom::default()).into())
 				}
 				Output::After => {
-					// Process the current permitted
-					self.process_permitted_current(stk, ctx, opt).await?;
-					// Output the full document after all changes were applied
-					self.current_permitted
-						.doc
-						.as_ref()
-						.compute(stk, ctx, opt, Some(&self.current_permitted))
-						.await
+					// Process the permitted documents
+					match self.reduced(stk, ctx, opt, Current).await? {
+						// This is an already processed reduced document
+						true => Ok(self.current_reduced.doc.as_ref().to_owned()),
+						// Output the full document before any changes were applied
+						false => {
+							self.current
+								.doc
+								.as_ref()
+								.compute(stk, ctx, opt, Some(&self.current))
+								.await
+						}
+					}
 				}
 				Output::Before => {
-					// Process the initial permitted
-					self.process_permitted_initial(stk, ctx, opt).await?;
-					// Output the full document before any changes were applied
-					self.initial_permitted
-						.doc
-						.as_ref()
-						.compute(stk, ctx, opt, Some(&self.initial_permitted))
-						.await
+					// Process the permitted documents
+					match self.reduced(stk, ctx, opt, Initial).await? {
+						// This is an already processed reduced document
+						true => Ok(self.initial_reduced.doc.as_ref().to_owned()),
+						// Output the full document before any changes were applied
+						false => {
+							self.initial
+								.doc
+								.as_ref()
+								.compute(stk, ctx, opt, Some(&self.initial))
+								.await
+						}
+					}
 				}
 				Output::Fields(v) => {
-					// Process the current permitted
-					self.process_permitted_current(stk, ctx, opt).await?;
-					// Process the initial permitted
-					self.process_permitted_initial(stk, ctx, opt).await?;
+					// Process the permitted documents
+					let (initial, current) = match self.reduced(stk, ctx, opt, Both).await? {
+						true => (&mut self.initial_reduced, &mut self.current_reduced),
+						false => (&mut self.initial, &mut self.current),
+					};
 					// Configure the context
 					let mut ctx = MutableContext::new(ctx);
-					ctx.add_value("after", self.current_permitted.doc.as_arc());
-					ctx.add_value("before", self.initial_permitted.doc.as_arc());
+					ctx.add_value("after", current.doc.as_arc());
+					ctx.add_value("before", initial.doc.as_arc());
 					let ctx = ctx.freeze();
 					// Output the specified fields
-					v.compute(stk, &ctx, opt, Some(&self.current_permitted), false).await
+					v.compute(stk, &ctx, opt, Some(current), false).await
 				}
 			},
 			None => match stm {
 				Statement::Live(s) => match s.expr.len() {
-					0 => Ok(self
-						.initial
-						.doc
-						.as_ref()
-						.diff(self.current.doc.as_ref(), Idiom::default())
-						.into()),
-					_ => s.expr.compute(stk, ctx, opt, Some(&self.current), false).await,
+					0 => {
+						// Process the permitted documents
+						let (initial, current) = match self.reduced(stk, ctx, opt, Both).await? {
+							true => (&self.initial_reduced, &self.current_reduced),
+							false => (&self.initial, &self.current),
+						};
+						// Output a DIFF of any changes applied to the document
+						Ok(initial.doc.as_ref().diff(current.doc.as_ref(), Idiom::default()).into())
+					}
+					_ => {
+						// Process the permitted documents
+						let current = match self.reduced(stk, ctx, opt, Current).await? {
+							true => &self.current_reduced,
+							false => &self.current,
+						};
+						// Process the LIVE SELECT statement fields
+						s.expr.compute(stk, ctx, opt, Some(current), false).await
+					}
 				},
 				Statement::Select(s) => {
-					// Process the current permitted
-					self.process_permitted_current(stk, ctx, opt).await?;
-					s.expr
-						.compute(stk, ctx, opt, Some(&self.current_permitted), s.group.is_some())
-						.await
+					// Process the permitted documents
+					let current = match self.reduced(stk, ctx, opt, Current).await? {
+						true => &self.current_reduced,
+						false => &self.current,
+					};
+					// Process the SELECT statement fields
+					s.expr.compute(stk, ctx, opt, Some(current), s.group.is_some()).await
 				}
 				Statement::Create(_) => {
-					// Process the current permitted
-					self.process_permitted_current(stk, ctx, opt).await?;
-					// Process the document output
-					self.current_permitted
-						.doc
-						.as_ref()
-						.compute(stk, ctx, opt, Some(&self.current_permitted))
-						.await
+					// Process the permitted documents
+					match self.reduced(stk, ctx, opt, Current).await? {
+						// This is an already processed reduced document
+						true => Ok(self.current_reduced.doc.as_ref().to_owned()),
+						// This is a full document, so process it
+						false => {
+							self.current
+								.doc
+								.as_ref()
+								.compute(stk, ctx, opt, Some(&self.current))
+								.await
+						}
+					}
 				}
 				Statement::Upsert(_) => {
-					// Process the current permitted
-					self.process_permitted_current(stk, ctx, opt).await?;
-					// Process the document output
-					self.current_permitted
-						.doc
-						.as_ref()
-						.compute(stk, ctx, opt, Some(&self.current_permitted))
-						.await
+					// Process the permitted documents
+					match self.reduced(stk, ctx, opt, Current).await? {
+						// This is an already processed reduced document
+						true => Ok(self.current_reduced.doc.as_ref().to_owned()),
+						// This is a full document, so process it
+						false => {
+							self.current
+								.doc
+								.as_ref()
+								.compute(stk, ctx, opt, Some(&self.current))
+								.await
+						}
+					}
 				}
 				Statement::Update(_) => {
-					// Process the current permitted
-					self.process_permitted_current(stk, ctx, opt).await?;
-					// Process the document output
-					self.current_permitted
-						.doc
-						.as_ref()
-						.compute(stk, ctx, opt, Some(&self.current_permitted))
-						.await
+					// Process the permitted documents
+					match self.reduced(stk, ctx, opt, Current).await? {
+						// This is an already processed reduced document
+						true => Ok(self.current_reduced.doc.as_ref().to_owned()),
+						// This is a full document, so process it
+						false => {
+							self.current
+								.doc
+								.as_ref()
+								.compute(stk, ctx, opt, Some(&self.current))
+								.await
+						}
+					}
 				}
 				Statement::Relate(_) => {
-					// Process the current permitted
-					self.process_permitted_current(stk, ctx, opt).await?;
-					// Process the document output
-					self.current_permitted
-						.doc
-						.as_ref()
-						.compute(stk, ctx, opt, Some(&self.current_permitted))
-						.await
+					// Process the permitted documents
+					match self.reduced(stk, ctx, opt, Current).await? {
+						// This is an already processed reduced document
+						true => Ok(self.current_reduced.doc.as_ref().to_owned()),
+						// This is a full document, so process it
+						false => {
+							self.current
+								.doc
+								.as_ref()
+								.compute(stk, ctx, opt, Some(&self.current))
+								.await
+						}
+					}
 				}
 				Statement::Insert(_) => {
-					// Process the current permitted
-					self.process_permitted_current(stk, ctx, opt).await?;
-					// Process the document output
-					self.current_permitted
-						.doc
-						.as_ref()
-						.compute(stk, ctx, opt, Some(&self.current_permitted))
-						.await
+					// Process the permitted documents
+					match self.reduced(stk, ctx, opt, Current).await? {
+						// This is an already processed reduced document
+						true => Ok(self.current_reduced.doc.as_ref().to_owned()),
+						// This is a full document, so process it
+						false => {
+							self.current
+								.doc
+								.as_ref()
+								.compute(stk, ctx, opt, Some(&self.current))
+								.await
+						}
+					}
 				}
 				_ => Err(Error::Ignore),
 			},
@@ -209,7 +222,7 @@ impl Document {
 									.await?
 									.is_truthy()
 								{
-									out.del(stk, &ctx, opt, k).await?
+									out.cut(k);
 								}
 							}
 						}
