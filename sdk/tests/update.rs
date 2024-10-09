@@ -837,8 +837,7 @@ async fn update_field_permissions() -> Result<(), Error> {
 	let val = Value::parse(
 		"[
 			{
-				id: data:1,
-				public: NONE
+				id: data:1
 			}
 		]",
 	);
