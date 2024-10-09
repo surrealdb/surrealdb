@@ -66,10 +66,7 @@ impl ShowStatement {
 		)
 		.await?;
 		// Return the changes
-		let mut a: Vec<Value> = Vec::new();
-		for r in r.iter() {
-			a.push(r.clone().into_value());
-		}
+		let a: Vec<Value> = r.iter().cloned().map(|x| x.into_value()).collect();
 		Ok(a.into())
 	}
 }

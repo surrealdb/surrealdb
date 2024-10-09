@@ -1169,6 +1169,9 @@ pub enum Error {
 	/// Represents a failure in timestamp arithmetic related to database internals
 	#[error("Failed to compute: \"{0}\", as the operation results in an overflow.")]
 	ArithmeticOverflow(String),
+
+	#[error("Recieved error while streaming query: {0}.")]
+	QueryStream(String),
 }
 
 impl From<Error> for String {

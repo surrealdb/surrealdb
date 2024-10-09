@@ -735,7 +735,13 @@ fn test_streaming() {
 		//println!("{}:{}", i, src);
 		parser = parser.change_source(partial_source);
 		parser.reset();
-		match stack.enter(|stk| parser.parse_partial_statement(stk)).finish() {
+		match stack
+			.enter(|stk| parser.parse_partial_statement(i == source_bytes.len(), stk))
+			.finish()
+		{
+			PartialResult::Empty {
+				..
+			} => continue,
 			PartialResult::MoreData => continue,
 			PartialResult::Ok {
 				value,
@@ -778,6 +784,6 @@ fn test_streaming() {
 		"failed to parse at {}\nAt statement {}\n\n{:?}",
 		src,
 		expected[current_stmt],
-		stack.enter(|stk| parser.parse_partial_statement(stk)).finish()
+		stack.enter(|stk| parser.parse_partial_statement(true, stk)).finish()
 	);
 }
