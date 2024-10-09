@@ -414,7 +414,6 @@ impl Parser<'_> {
 			}
 			t!("PURGE") => {
 				self.pop_peek();
-				// TODO(PR): Remove ALL and allow comma separation.
 				let (expired, revoked) = match self.peek_kind() {
 					t!("EXPIRED") => {
 						self.pop_peek();
@@ -424,11 +423,8 @@ impl Parser<'_> {
 						self.pop_peek();
 						(false, true)
 					}
-					t!("ALL") => {
-						self.pop_peek();
-						(true, true)
-					}
-					_ => unexpected!(self, peek, "one of EXPIRED, REVOKED or ALL"),
+					// By default, purge all stale grants.
+					_ => (true, true),
 				};
 				let grace = if self.eat(t!("FOR")) {
 					self.next_token_value()?
