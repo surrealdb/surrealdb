@@ -223,6 +223,7 @@ async fn access_bearer_namespace() {
 	);
 }
 
+// TODO(PR): Merge tests for each level into one.
 #[tokio::test]
 async fn access_bearer_root() {
 	// TODO(gguillemas): Remove this once bearer access is no longer experimental.

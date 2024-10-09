@@ -296,7 +296,6 @@ async fn compute_grant(
 			feature: format!("Grants for record on {base}"),
 		}),
 		AccessType::Bearer(at) => {
-			// TODO(PR): Move to `verify_grant_subject` function.
 			match &stmt.subject {
 				Some(Subject::User(user)) => {
 					// Grant subject must match access method subject.
@@ -323,7 +322,6 @@ async fn compute_grant(
 						return Err(Error::AccessGrantInvalidSubject);
 					}
 					// A grant can be created for a record that does not exist yet.
-					// TODO(PR): Consider the impact of this decision.
 				}
 				None => return Err(Error::AccessGrantInvalidSubject),
 			};
@@ -511,6 +509,8 @@ async fn compute_revoke(
 							.to_string(),
 					)),
 				};
+			// Vector for keeping track of revoked grants.
+			let mut revoked: Vec<Value> = vec![];
 			for gr in grs.iter() {
 				let mut gr = gr.clone();
 				if gr.revocation.is_some() {
@@ -545,26 +545,12 @@ async fn compute_revoke(
 							.to_string(),
 					)),
 				};
+				// Add grant to vector of revoked grants in redacted form.
+				revoked.push(Value::Object(gr.redacted().to_owned().into()));
 			}
-			// Get all grants after revocation.
-			// TODO(PR): Save them in a vector.
-			let grs =
-				match base {
-					Base::Root => txn.all_root_access_grants(&stmt.ac).await?,
-					Base::Ns => txn.all_ns_access_grants(opt.ns()?, &stmt.ac).await?,
-					Base::Db => txn.all_db_access_grants(opt.ns()?, opt.db()?, &stmt.ac).await?,
-					_ => return Err(Error::Unimplemented(
-						"Managing access methods outside of root, namespace and database levels"
-							.to_string(),
-					)),
-				};
-			// Return the grants in redacted form.
-			let grants = grs
-				.iter()
-				.map(|v| Value::Object(v.redacted().to_owned().into()))
-				.collect::<Array>();
 
-			Ok(Value::Array(grants))
+			// Return revoked grants.
+			Ok(Value::Array(revoked.into()))
 		}
 	}
 }
