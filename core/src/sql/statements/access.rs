@@ -357,24 +357,25 @@ async fn compute_grant(
 				// The contents of the grant.
 				grant: Grant::Bearer(grant),
 			};
-			// TODO(PR): Handle collisions.
-			// Process the statement.
-			match base {
+
+			// Create the grant.
+			// On the very unlikely event of a collision, "put" will return an error.
+			let res = match base {
 				Base::Root => {
 					let key = crate::key::root::access::gr::new(&gr.ac, &gr.id);
-					txn.set(key, &gr, None).await?;
+					txn.put(key, &gr, None).await
 				}
 				Base::Ns => {
 					let key = crate::key::namespace::access::gr::new(opt.ns()?, &gr.ac, &gr.id);
 					txn.get_or_add_ns(opt.ns()?, opt.strict).await?;
-					txn.set(key, &gr, None).await?;
+					txn.put(key, &gr, None).await
 				}
 				Base::Db => {
 					let key =
 						crate::key::database::access::gr::new(opt.ns()?, opt.db()?, &gr.ac, &gr.id);
 					txn.get_or_add_ns(opt.ns()?, opt.strict).await?;
 					txn.get_or_add_db(opt.ns()?, opt.db()?, opt.strict).await?;
-					txn.set(key, &gr, None).await?;
+					txn.put(key, &gr, None).await
 				}
 				_ => {
 					return Err(Error::Unimplemented(
@@ -383,6 +384,13 @@ async fn compute_grant(
 					))
 				}
 			};
+
+			// Check if a collision was found in order to log a specific error on the server.
+			// For an access method with a billion grants, this chance is of only one in 295 billion.
+			if let Err(Error::TxKeyAlreadyExists) = res {
+				error!("A collision was found when attempting to create a new grant. Purging stale grants is advised")
+			}
+			res?;
 
 			Ok(Value::Object(gr.into()))
 		}
@@ -516,7 +524,8 @@ async fn compute_revoke(
 				return Err(Error::AccessGrantRevoked);
 			}
 			grant.revocation = Some(Datetime::default());
-			// Process the statement.
+
+			// Revoke the grant.
 			match base {
 				Base::Root => {
 					let key = crate::key::root::access::gr::new(&stmt.ac, gr);
@@ -563,7 +572,8 @@ async fn compute_revoke(
 					continue;
 				}
 				gr.revocation = Some(Datetime::default());
-				// Process the statement.
+
+				// Revoke the grant.
 				match base {
 					Base::Root => {
 						let key = crate::key::root::access::gr::new(&stmt.ac, &gr.id);
