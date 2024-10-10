@@ -4,6 +4,7 @@ use axum::response::IntoResponse;
 use axum::routing::get;
 use axum::Extension;
 use axum::Router;
+use surrealdb::dbs::capabilities::RouteTarget;
 use surrealdb::kvs::{LockType::*, TransactionType::*};
 
 pub(super) fn router<S>() -> Router<S>
@@ -16,6 +17,11 @@ where
 async fn handler(Extension(state): Extension<AppState>) -> impl IntoResponse {
 	// Get the datastore reference
 	let db = &state.datastore;
+	// Check if capabilities allow querying the requested HTTP route
+	if !db.allows_http_route(&RouteTarget::Health) {
+		warn!("Capabilities denied HTTP route request attempt, target: '{}'", &RouteTarget::Health);
+		return Err(Error::ForbiddenRoute(RouteTarget::Health.to_string()));
+	}
 	// Attempt to open a transaction
 	match db.transaction(Read, Optimistic).await {
 		// The transaction failed to start
