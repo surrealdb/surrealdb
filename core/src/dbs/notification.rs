@@ -5,7 +5,7 @@ use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Debug, Display};
 
-#[revisioned(revision = 1)]
+#[revisioned(revision = 2)]
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "UPPERCASE")]
 #[non_exhaustive]
@@ -13,6 +13,8 @@ pub enum Action {
 	Create,
 	Update,
 	Delete,
+	#[revision(start = 2)]
+	Terminate,
 }
 
 impl Display for Action {
@@ -21,6 +23,7 @@ impl Display for Action {
 			Action::Create => write!(f, "CREATE"),
 			Action::Update => write!(f, "UPDATE"),
 			Action::Delete => write!(f, "DELETE"),
+			Action::Terminate => write!(f, "TERMINATE"),
 		}
 	}
 }
@@ -31,7 +34,7 @@ impl Display for Action {
 pub struct Notification {
 	/// The id of the LIVE query to which this notification belongs
 	pub id: Uuid,
-	/// The CREATE / UPDATE / DELETE action which caused this notification
+	/// The CREATE / UPDATE / DELETE / TERMINATE action which caused this notification
 	pub action: Action,
 	/// The id of the document to which this notification has been made
 	pub record: Value,

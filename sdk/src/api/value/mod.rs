@@ -331,6 +331,7 @@ pub enum Action {
 	Create,
 	Update,
 	Delete,
+	Terminate,
 }
 
 impl Action {
@@ -339,6 +340,7 @@ impl Action {
 			CoreAction::Create => Self::Create,
 			CoreAction::Update => Self::Update,
 			CoreAction::Delete => Self::Delete,
+			CoreAction::Terminate => Self::Terminate,
 			_ => panic!("unimplemented variant of action"),
 		}
 	}
