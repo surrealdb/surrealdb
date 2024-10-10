@@ -2554,6 +2554,7 @@ fn parse_access_show() {
 		Statement::Access(AccessStatement::Show(AccessStatementShow {
 			ac: Ident("a".to_string()),
 			base: None,
+			..Default::default()
 		}))
 	);
 }

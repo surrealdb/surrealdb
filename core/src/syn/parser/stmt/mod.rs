@@ -386,11 +386,67 @@ impl Parser<'_> {
 			}
 			t!("SHOW") => {
 				self.pop_peek();
-				// TODO(gguillemas): Implement rest of the syntax.
-				Ok(AccessStatement::Show(AccessStatementShow {
+
+				if self.eat(t!("GRANT")) {
+					return Ok(AccessStatement::Show(AccessStatementShow {
+						ac,
+						base,
+						id: Some(self.next_token_value()?),
+						..Default::default()
+					}));
+				}
+
+				let mut show = AccessStatementShow {
 					ac,
 					base,
-				}))
+					..Default::default()
+				};
+
+				loop {
+					match self.peek_kind() {
+						t!("FOR") => {
+							self.pop_peek();
+							match self.peek_kind() {
+								t!("USER") => {
+									self.pop_peek();
+									let user = self.next_token_value()?;
+									show.subject = Some(Subject::User(user));
+								}
+								t!("RECORD") => {
+									self.pop_peek();
+									let rid = ctx.run(|ctx| self.parse_thing(ctx)).await?;
+									show.subject = Some(Subject::Record(rid));
+								}
+								_ => unexpected!(self, peek, "either USER or RECORD"),
+							}
+						}
+						t!("AFTER") => {
+							self.pop_peek();
+							show.created_after = Some(self.next_token_value()?);
+						}
+						t!("BEFORE") => {
+							self.pop_peek();
+							show.created_before = Some(self.next_token_value()?);
+						}
+						t!("EXPIRED") => {
+							self.pop_peek();
+							show.expired = true;
+							if self.eat(t!("SINCE")) {
+								show.expired_since = Some(self.next_token_value()?);
+							}
+						}
+						t!("REVOKED") => {
+							self.pop_peek();
+							show.revoked = true;
+							if self.eat(t!("SINCE")) {
+								show.revoked_since = Some(self.next_token_value()?);
+							}
+						}
+						_ => break,
+					}
+				}
+
+				Ok(AccessStatement::Show(show))
 			}
 			t!("REVOKE") => {
 				self.pop_peek();

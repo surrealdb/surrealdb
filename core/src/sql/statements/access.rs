@@ -45,19 +45,20 @@ pub enum AccessStatement {
 // TODO(gguillemas): Document once bearer access is no longer experimental.
 #[doc(hidden)]
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub struct AccessStatementShow {
 	pub ac: Ident,
 	pub base: Option<Base>,
-	// TODO(PR): Implement filters.
-	// pub expired: bool,
-	// pub revoked: bool,
-	// pub created_after: Option<Datetime>,
-	// pub created_before: Option<Datetime>,
-	// pub subject: Option<Subject>,
-	// pub id: Option<Ident>,
+	pub expired: bool,
+	pub revoked: bool,
+	pub created_after: Option<Datetime>,
+	pub created_before: Option<Datetime>,
+	pub expired_since: Option<Datetime>,
+	pub revoked_since: Option<Datetime>,
+	pub subject: Option<Subject>,
+	pub id: Option<Ident>,
 }
 
 // TODO(gguillemas): Document once bearer access is no longer experimental.
@@ -138,6 +139,19 @@ impl AccessGrant {
 			}
 		};
 		ags
+	}
+
+	// Returns if the access grant is expired.
+	pub fn is_expired(&self) -> bool {
+		match &self.expiration {
+			Some(exp) => exp < &Datetime::default(),
+			None => false,
+		}
+	}
+
+	// Returns if the access grant is revoked.
+	pub fn is_revoked(&self) -> bool {
+		self.revocation.is_some()
 	}
 }
 
@@ -403,7 +417,25 @@ async fn compute_show(
 			))
 		}
 	};
-	// Get the grants for the access method.
+
+	// If a specific grant was provided, return the grant.
+	if let Some(id) = &stmt.id {
+		let gr = match base {
+			Base::Root => txn.get_root_access_grant(&stmt.ac, id).await?,
+			Base::Ns => txn.get_ns_access_grant(opt.ns()?, &stmt.ac, id).await?,
+			Base::Db => txn.get_db_access_grant(opt.ns()?, opt.db()?, &stmt.ac, id).await?,
+			_ => {
+				return Err(Error::Unimplemented(
+					"Managing access methods outside of root, namespace and database levels"
+						.to_string(),
+				))
+			}
+		};
+
+		return Ok(Value::Object(gr.redacted().into()));
+	};
+
+	// Otherwise, get all grants for the access method.
 	let grs = match base {
 		Base::Root => txn.all_root_access_grants(&stmt.ac).await?,
 		Base::Ns => txn.all_ns_access_grants(opt.ns()?, &stmt.ac).await?,
@@ -415,6 +447,20 @@ async fn compute_show(
 			))
 		}
 	};
+
+	// Apply the provided filters.
+	let grs: Vec<&AccessGrant> = grs
+		.iter()
+		.filter(|gr| {
+			stmt.subject == gr.subject
+				&& stmt.created_after.as_ref().map_or(true, |t| t < &gr.creation)
+				&& stmt.created_before.as_ref().map_or(true, |t| t > &gr.creation)
+				&& (stmt.expired && stmt.expired_since < gr.expiration)
+				|| !gr.is_expired() && (stmt.revoked && stmt.expired_since < gr.revocation)
+				|| !gr.is_revoked()
+		})
+		.collect();
+
 	// Return the grants in redacted form.
 	let grants =
 		grs.iter().map(|v| Value::Object(v.redacted().to_owned().into())).collect::<Array>();
