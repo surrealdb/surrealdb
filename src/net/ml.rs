@@ -18,6 +18,7 @@ use bytes::Bytes;
 use futures_util::StreamExt;
 #[cfg(feature = "ml")]
 use http::StatusCode;
+use surrealdb::dbs::capabilities::RouteTarget;
 use surrealdb::dbs::Session;
 #[cfg(feature = "ml")]
 use surrealdb::iam::check::check_ns_db;
@@ -55,6 +56,11 @@ async fn import(
 	let mut stream = body.into_data_stream();
 	// Get the datastore reference
 	let db = &state.datastore;
+	// Check if capabilities allow querying the requested HTTP route
+	if !db.allows_http_route(&RouteTarget::Ml) {
+		warn!("Capabilities denied HTTP route request attempt, target: '{}'", &RouteTarget::Ml);
+		return Err(Error::ForbiddenRoute(RouteTarget::Ml.to_string()));
+	}
 	// Ensure a NS and DB are set
 	let (nsv, dbv) = check_ns_db(&session)?;
 	// Check the permissions level
@@ -108,6 +114,11 @@ async fn export(
 ) -> Result<impl IntoResponse, Error> {
 	// Get the datastore reference
 	let db = &state.datastore;
+	// Check if capabilities allow querying the requested HTTP route
+	if !db.allows_http_route(&RouteTarget::Ml) {
+		warn!("Capabilities denied HTTP route request attempt, target: '{}'", &RouteTarget::Ml);
+		return Err(Error::ForbiddenRoute(RouteTarget::Ml.to_string()));
+	}
 	// Ensure a NS and DB are set
 	let (nsv, dbv) = check_ns_db(&session)?;
 	// Check the permissions level
@@ -136,19 +147,33 @@ async fn export(
 /// This endpoint allows the user to import a model into the database.
 #[cfg(not(feature = "ml"))]
 async fn import(
-	Extension(_): Extension<AppState>,
+	Extension(state): Extension<AppState>,
 	Extension(_): Extension<Session>,
 	_: Body,
 ) -> Result<(), impl IntoResponse> {
+	// Get the datastore reference
+	let db = &state.datastore;
+	// Check if capabilities allow querying the requested HTTP route
+	if !db.allows_http_route(&RouteTarget::Ml) {
+		warn!("Capabilities denied HTTP route request attempt, target: '{}'", &RouteTarget::Ml);
+		return Err(Error::ForbiddenRoute(RouteTarget::Ml.to_string()));
+	}
 	Err(Error::Request)
 }
 
 /// This endpoint allows the user to export a model from the database.
 #[cfg(not(feature = "ml"))]
 async fn export(
-	Extension(_): Extension<AppState>,
+	Extension(state): Extension<AppState>,
 	Extension(_): Extension<Session>,
 	Path((_, _)): Path<(String, String)>,
 ) -> Result<(), impl IntoResponse> {
+	// Get the datastore reference
+	let db = &state.datastore;
+	// Check if capabilities allow querying the requested HTTP route
+	if !db.allows_http_route(&RouteTarget::Ml) {
+		warn!("Capabilities denied HTTP route request attempt, target: '{}'", &RouteTarget::Ml);
+		return Err(Error::ForbiddenRoute(RouteTarget::Ml.to_string()));
+	}
 	Err(Error::Request)
 }
