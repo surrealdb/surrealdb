@@ -266,11 +266,12 @@ impl Transaction {
 		batch: u32,
 		values: bool,
 		version: Option<u64>,
+		scan_all_versions: bool,
 	) -> Result<Batch, Error>
 	where
 		K: Into<Key> + Debug,
 	{
-		self.lock().await.batch(rng, batch, values, version).await
+		self.lock().await.batch(rng, batch, values, version, scan_all_versions).await
 	}
 
 	/// Retrieve a stream over a specific range of keys in the datastore.

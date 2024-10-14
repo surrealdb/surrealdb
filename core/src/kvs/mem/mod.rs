@@ -399,6 +399,26 @@ impl super::api::Transaction for Transaction {
 		// Return result
 		Ok(res)
 	}
+
+	/// Retrieve all the versions from a range of keys from the databases
+	/// This is a no-op for the in-memory database
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.sprint()))]
+	async fn scan_all_versions<K>(
+		&mut self,
+		rng: Range<K>,
+		limit: u32,
+		version: Option<u64>,
+	) -> Result<Vec<(Key, Val)>, Error>
+	where
+		K: Into<Key> + Sprintable + Debug,
+	{
+		// Check to see if transaction is closed
+		if self.done {
+			return Err(Error::TxFinished);
+		}
+
+		Err(Error::UnsupportedVersionedQueries)
+	}
 }
 
 impl Transaction {

@@ -515,6 +515,25 @@ impl super::api::Transaction for Transaction {
 		// Return result
 		Ok(response.values)
 	}
+
+	/// Retrieve all the versions from a range of keys from the databases
+	/// This is a no-op for surrealcs.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.sprint()))]
+	async fn scan_all_versions<K>(
+		&mut self,
+		rng: Range<K>,
+		limit: u32,
+		version: Option<u64>,
+	) -> Result<Vec<(Key, Val)>, Error>
+	where
+		K: Into<Key> + Sprintable + Debug,
+	{
+		// Check to see if transaction is closed
+		if self.done {
+			return Err(Error::TxFinished);
+		}
+		Err(Error::UnsupportedVersionedQueries)
+	}
 }
 
 impl SavePointImpl for Transaction {

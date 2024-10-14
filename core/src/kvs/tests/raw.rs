@@ -297,7 +297,7 @@ async fn batch() {
 	tx.commit().await.unwrap();
 	// Create a readonly transaction
 	let mut tx = ds.transaction(Read, Optimistic).await.unwrap().inner();
-	let res = tx.batch("test1".as_bytes().."test9".as_bytes(), u32::MAX, true, None).await.unwrap();
+	let res = tx.batch("test1".as_bytes().."test9".as_bytes(), u32::MAX, true, None, false).await.unwrap();
 	let val = res.values;
 	assert_eq!(val.len(), 5);
 	assert_eq!(val[0].0, b"test1");
@@ -313,7 +313,7 @@ async fn batch() {
 	tx.cancel().await.unwrap();
 	// Create a readonly transaction
 	let mut tx = ds.transaction(Read, Optimistic).await.unwrap().inner();
-	let res = tx.batch("test2".as_bytes().."test4".as_bytes(), u32::MAX, true, None).await.unwrap();
+	let res = tx.batch("test2".as_bytes().."test4".as_bytes(), u32::MAX, true, None, false).await.unwrap();
 	let val = res.values;
 	assert_eq!(val.len(), 2);
 	assert_eq!(val[0].0, b"test2");
@@ -323,7 +323,7 @@ async fn batch() {
 	tx.cancel().await.unwrap();
 	// Create a readonly transaction
 	let mut tx = ds.transaction(Read, Optimistic).await.unwrap().inner();
-	let res = tx.batch("test2".as_bytes().."test4".as_bytes(), u32::MAX, true, None).await.unwrap();
+	let res = tx.batch("test2".as_bytes().."test4".as_bytes(), u32::MAX, true, None, false).await.unwrap();
 	let val = res.values;
 	assert_eq!(val.len(), 2);
 	assert_eq!(val[0].0, b"test2");

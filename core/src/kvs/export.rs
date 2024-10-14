@@ -15,6 +15,7 @@ pub struct Config {
 	pub functions: bool,
 	pub analyzers: bool,
 	pub tables: TableConfig,
+	pub versions: bool,
 }
 
 impl Default for Config {
@@ -26,6 +27,7 @@ impl Default for Config {
 			functions: true,
 			analyzers: true,
 			tables: TableConfig::default(),
+			versions: false,
 		}
 	}
 }
@@ -200,7 +202,8 @@ impl Transaction {
 					let mut next = Some(beg..end);
 					while let Some(rng) = next {
 						// Get the next batch of records
-						let batch = self.batch(rng, *EXPORT_BATCH_SIZE, true, None).await?;
+						let batch =
+							self.batch(rng, *EXPORT_BATCH_SIZE, true, None, cfg.versions).await?;
 						// Set the next scan range
 						next = batch.next;
 						// Check there are records

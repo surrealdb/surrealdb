@@ -413,6 +413,7 @@ impl Transactor {
 		batch: u32,
 		values: bool,
 		version: Option<u64>,
+		scan_all_versions: bool,
 	) -> Result<Batch, Error>
 	where
 		K: Into<Key> + Debug,
@@ -421,7 +422,7 @@ impl Transactor {
 		let end: Key = rng.end.into();
 		let rng = beg.as_slice()..end.as_slice();
 		trace!(target: TARGET, rng = rng.sprint(), values = values, version = version, "Batch");
-		expand_inner!(&mut self.inner, v => { v.batch(beg..end, batch, values, version).await })
+		expand_inner!(&mut self.inner, v => { v.batch(beg..end, batch, values, version, scan_all_versions).await })
 	}
 
 	/// Obtain a new change timestamp for a key
