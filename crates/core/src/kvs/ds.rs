@@ -67,6 +67,13 @@ const LQ_CHANNEL_SIZE: usize = 15_000;
 // The role assigned to the initial user created when starting the server with credentials for the first time
 const INITIAL_USER_ROLE: &str = "owner";
 
+#[derive(Clone, Debug)]
+pub struct TLSOptions {
+	pub ca: PathBuf,
+	pub crt: PathBuf,
+	pub key: PathBuf,
+}
+
 /// The underlying datastore instance which stores the dataset.
 #[non_exhaustive]
 pub struct Datastore {

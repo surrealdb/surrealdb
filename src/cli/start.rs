@@ -12,6 +12,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use surrealdb::engine::any;
 use surrealdb::engine::tasks;
+use surrealdb::kvs::TLSOptions;
 use surrealdb::options::EngineOptions;
 use tokio_util::sync::CancellationToken;
 
@@ -162,6 +163,7 @@ pub async fn init(
 		client_ip,
 		listen_addresses,
 		dbs,
+		kvs,
 		web,
 		node_membership_refresh_interval,
 		node_membership_check_interval,
@@ -184,6 +186,19 @@ pub async fn init(
 	} else {
 		endpoint.path
 	};
+	// Extract the certificates and key for a TLS connection with the KV store
+	let kvs = if let Some(val) = kvs {
+		match (val.kvs_ca, val.kvs_crt, val.kvs_key) {
+			(Some(ca), Some(crt), Some(key)) => Some(TLSOptions {
+				ca,
+				crt,
+				key,
+			}),
+			_ => None,
+		}
+	} else {
+		None
+	};
 	// Extract the certificate and key
 	let (crt, key) = if let Some(val) = web {
 		(val.web_crt, val.web_key)
@@ -204,6 +219,7 @@ pub async fn init(
 		path,
 		user,
 		pass,
+		kvs,
 		no_identification_headers,
 		engine,
 		crt,
