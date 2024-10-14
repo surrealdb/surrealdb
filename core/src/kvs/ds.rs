@@ -245,8 +245,8 @@ impl Datastore {
 	/// # Ok(())
 	/// # }
 	/// ```
-	pub async fn new(path: &str) -> Result<Self, Error> {
-		Self::new_with_clock(path, None).await
+	pub async fn new(path: &str, tls: Option<TLSOptions>) -> Result<Self, Error> {
+		Self::new_with_clock(path, None, tls).await
 	}
 
 	#[cfg(debug_assertions)]
@@ -276,6 +276,7 @@ impl Datastore {
 	pub async fn new_with_clock(
 		path: &str,
 		clock: Option<Arc<SizedClock>>,
+		tls: Option<TLSOptions>,
 	) -> Result<Datastore, Error> {
 		// Initiate the desired datastore
 		let (flavor, clock): (Result<DatastoreFlavor, Error>, Arc<SizedClock>) = match path {
@@ -377,7 +378,7 @@ impl Datastore {
 					info!(target: TARGET, "Connecting to kvs store at {}", path);
 					let s = s.trim_start_matches("tikv://");
 					let s = s.trim_start_matches("tikv:");
-					let v = super::tikv::Datastore::new(s).await.map(DatastoreFlavor::TiKV);
+					let v = super::tikv::Datastore::new(s, tls).await.map(DatastoreFlavor::TiKV);
 					let c = clock.unwrap_or_else(|| Arc::new(SizedClock::system()));
 					info!(target: TARGET, "Connected to kvs store at {}", path);
 					Ok((v, c))
