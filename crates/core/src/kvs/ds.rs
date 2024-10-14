@@ -1475,7 +1475,8 @@ mod test {
 		}
 		let val = stack.enter(|stk| build_query(stk, 1000)).finish();
 
-		let dbs = Datastore::new("memory").await.unwrap().with_capabilities(Capabilities::all());
+		let dbs =
+			Datastore::new("memory", None).await.unwrap().with_capabilities(Capabilities::all());
 
 		let opt = Options::default()
 			.with_id(dbs.id)
