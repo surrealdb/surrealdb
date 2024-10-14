@@ -112,6 +112,18 @@ pub trait Transaction {
 	where
 		K: Into<Key> + Sprintable + Debug;
 
+	/// Retrieve all the versions for a specific range of keys from the datastore.
+	///
+	/// This function fetches all the versions for the full range of key-value pairs, in a single request to the underlying datastore.
+	async fn scan_all_versions<K>(
+		&mut self,
+		rng: Range<K>,
+		limit: u32,
+		version: Option<u64>,
+	) -> Result<Vec<(Key, Val)>, Error>
+	where
+		K: Into<Key> + Sprintable + Debug;
+
 	/// Fetch many keys from the datastore.
 	///
 	/// This function fetches all matching keys pairs from the underlying datastore concurrently.
@@ -176,7 +188,7 @@ pub trait Transaction {
 		let end: Key = rng.end.into();
 		let mut next = Some(beg..end);
 		while let Some(rng) = next {
-			let res = self.batch(rng, *NORMAL_FETCH_SIZE, true, version).await?;
+			let res = self.batch(rng, *NORMAL_FETCH_SIZE, true, version, false).await?;
 			next = res.next;
 			for v in res.values.into_iter() {
 				out.push(v);
@@ -228,7 +240,7 @@ pub trait Transaction {
 		let end: Key = rng.end.into();
 		let mut next = Some(beg..end);
 		while let Some(rng) = next {
-			let res = self.batch(rng, *NORMAL_FETCH_SIZE, false, None).await?;
+			let res = self.batch(rng, *NORMAL_FETCH_SIZE, false, None, false).await?;
 			next = res.next;
 			for (k, _) in res.values.into_iter() {
 				self.del(k).await?;
@@ -247,6 +259,7 @@ pub trait Transaction {
 		batch: u32,
 		values: bool,
 		version: Option<u64>,
+		scan_all_versions: bool,
 	) -> Result<Batch, Error>
 	where
 		K: Into<Key> + Sprintable + Debug,
