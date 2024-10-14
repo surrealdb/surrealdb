@@ -2057,12 +2057,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 
 				// Revoke grant
 				ds.execute(
-					&format!(
-						r#"
-					ACCESS api ON {} REVOKE `{kid}`;
-					"#,
-						level.level
-					),
+					&format!("ACCESS api ON {} REVOKE GRANT {kid}", level.level),
 					&sess,
 					None,
 				)
