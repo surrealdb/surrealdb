@@ -1,5 +1,5 @@
 use crate::ctx::Context;
-use crate::dbs::Options;
+use crate::dbs::{Action as LiveAction, Notification, Options};
 use crate::err::Error;
 use crate::iam::{Action, ResourceKind};
 use crate::sql::{Base, Ident, Value};
@@ -24,6 +24,10 @@ impl RemoveTableStatement {
 		let future = async {
 			// Allowed to run?
 			opt.is_allowed(Action::Edit, ResourceKind::Table, &Base::Db)?;
+
+			// Notify live query subscribers
+			self.terminate_lives(ctx, opt).await?;
+
 			// Get the transaction
 			let txn = ctx.tx();
 			// Remove the index stores
@@ -57,6 +61,37 @@ impl RemoveTableStatement {
 			}) if self.if_exists => Ok(Value::None),
 			v => v,
 		}
+	}
+
+	async fn terminate_lives(&self, ctx: &Context, opt: &Options) -> Result<(), Error> {
+		// Check if we can send notifications
+		if let Some(chn) = &opt.sender {
+			// Get all live queries for this table
+			let lives = ctx.tx().all_tb_lives(opt.ns()?, opt.db()?, &self.name).await?;
+
+			for lv in lives.iter() {
+				// Create a new statement
+				let met = Value::from("TERMINATE");
+
+				let mut lqctx = match lv.construct_lq_context(ctx) {
+					Some(ctx) => ctx,
+					None => continue,
+				};
+
+				lqctx.add_value("event", met.into());
+
+				if opt.id()? == lv.node.0 {
+					chn.send(Notification {
+						id: lv.id,
+						action: LiveAction::Terminate,
+						result: Value::None,
+					})
+					.await?;
+				}
+			}
+		}
+
+		Ok(())
 	}
 }
 
