@@ -541,7 +541,7 @@ pub async fn init(
 	// Log the specified server capabilities
 	debug!("Server capabilities: {capabilities}");
 	// Parse and setup the desired kv datastore
-	let dbs = Datastore::new(&opt.path)
+	let dbs = Datastore::new(&opt.path, opt.kvs.clone())
 		.await?
 		.with_notifications()
 		.with_strict_mode(strict_mode)

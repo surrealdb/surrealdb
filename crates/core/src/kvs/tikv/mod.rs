@@ -6,6 +6,7 @@ use crate::err::Error;
 use crate::key::debug::Sprintable;
 use crate::kvs::Check;
 use crate::kvs::Key;
+use crate::kvs::TLSOptions;
 use crate::kvs::Val;
 use crate::kvs::savepoint::{SaveOperation, SavePoints, SavePrepare};
 use crate::vs::VersionStamp;
@@ -14,9 +15,7 @@ use std::ops::Range;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
-use tikv::TimestampExt;
-use tikv::TransactionOptions;
-use tikv::{CheckLevel, Config, TransactionClient};
+use tikv::{CheckLevel, Config, TransactionClient, TransactionOptions};
 
 const TARGET: &str = "surrealdb::core::kvs::tikv";
 
@@ -86,6 +85,11 @@ impl Datastore {
 		// Set the max decoding message size
 		let config =
 			config.with_grpc_max_decoding_message_size(*cnf::TIKV_GRPC_MAX_DECODING_MESSAGE_SIZE);
+		// Set the TLS security
+		let config = match tls {
+			None => config,
+			Some(tls) => config.with_security(tls.ca, tls.crt, tls.key),
+		};
 		// Create the client with the config
 		let client = TransactionClient::new_with_config(vec![path], config);
 		// Check for errors with the client
