@@ -202,8 +202,9 @@ impl Transaction {
 					let mut next = Some(beg..end);
 					while let Some(rng) = next {
 						// Get the next batch of records
-						let batch =
-							self.batch(rng, *EXPORT_BATCH_SIZE, true, None, cfg.versions).await?;
+						// let batch =
+						// 	self.batch(rng, *EXPORT_BATCH_SIZE, true, None, cfg.versions).await?;
+						let batch = self.batch(rng, *EXPORT_BATCH_SIZE, true, None).await?;
 						// Set the next scan range
 						next = batch.next;
 						// Check there are records
