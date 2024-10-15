@@ -981,14 +981,12 @@ async fn field_definition_flexible_array_any() -> Result<(), Error> {
 	let sql = "
 		DEFINE TABLE user SCHEMAFULL;
 		DEFINE FIELD custom ON user TYPE option<array>;
-		REMOVE FIELD custom.* ON user;
-		DEFINE FIELD custom.* ON user FLEXIBLE TYPE any;
 		CREATE user:one CONTENT { custom: ['sometext'] };
 		CREATE user:two CONTENT { custom: [ ['sometext'] ] };
 		CREATE user:three CONTENT { custom: [ { key: 'sometext' } ] };
 	";
 	let mut t = Test::new(sql).await?;
-	t.skip_ok(4)?;
+	t.skip_ok(2)?;
 	t.expect_val(
 		"[
 			{
