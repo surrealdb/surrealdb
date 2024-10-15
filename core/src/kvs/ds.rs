@@ -23,13 +23,17 @@ use crate::kvs::index::IndexBuilder;
 use crate::kvs::{LockType, LockType::*, TransactionType, TransactionType::*};
 use crate::sql::{statements::DefineUserStatement, Base, Query, Value};
 use crate::syn;
+use crate::syn::parser::{Parser, PartialResult};
+use bytes::Bytes;
 use channel::{Receiver, Sender};
-use futures::Future;
-use reblessive::TreeStack;
+use futures::{Future, Stream};
+use reblessive::{Stack, TreeStack};
 use std::fmt;
 #[cfg(storage)]
 use std::path::PathBuf;
+use std::pin::pin;
 use std::sync::Arc;
+use std::task::{ready, Poll};
 use std::time::Duration;
 #[cfg(not(target_arch = "wasm32"))]
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -744,6 +748,118 @@ impl Datastore {
 		self.process(ast, sess, vars).await
 	}
 
+	#[instrument(level = "debug", target = "surrealdb::core::kvs::ds", skip_all)]
+	pub async fn execute_import<S>(
+		&self,
+		sess: &Session,
+		vars: Variables,
+		query: S,
+	) -> Result<Vec<Response>, Error>
+	where
+		S: Stream<Item = Result<Bytes, Error>>,
+	{
+		// Check if the session has expired
+		if sess.expired() {
+			return Err(Error::ExpiredSession);
+		}
+
+		// Check if anonymous actors can execute queries when auth is enabled
+		// TODO(sgirones): Check this as part of the authorisation layer
+		self.check_anon(sess).map_err(|_| IamError::NotAllowed {
+			actor: "anonymous".to_string(),
+			action: "process".to_string(),
+			resource: "query".to_string(),
+		})?;
+
+		// Create a new query options
+		let opt = self.setup_options(sess);
+
+		// Create a default context
+		let mut ctx = self.setup_ctx()?;
+		// Start an execution context
+		sess.context(&mut ctx);
+		// Store the query variables
+		vars.attach(&mut ctx)?;
+		// Process all statements
+
+		let mut offset = 0;
+		// A threshold of data in the buffer to avoid running the parser too many times when the
+		// statements get too big.
+		let mut buffer_size_threshold = 4096;
+		let mut buffer = Vec::new();
+		let mut query = pin!(query);
+		let mut stack = Stack::new();
+		let mut complete = false;
+
+		let stream = futures::stream::poll_fn(move |ctx| loop {
+			if !complete && buffer.len() < buffer_size_threshold {
+				// if we aren't done loading the file and the buffer has less data then the
+				// threshold for running the parser then stream in more data.
+				let Some(bytes) = ready!(query.as_mut().poll_next(ctx)) else {
+					// stream return None, so no more data is available.
+					complete = true;
+					continue;
+				};
+				let bytes = match bytes {
+					Ok(bytes) => bytes,
+					Err(e) => return Poll::Ready(Some(Err(e))),
+				};
+
+				buffer.extend_from_slice(&bytes);
+				continue;
+			}
+
+			// try to parse a statement.
+			let res = stack
+				.enter(|ctx| async {
+					Parser::new(&buffer[offset..]).parse_partial_statement(complete, ctx).await
+				})
+				.finish();
+			// if we get a statement or error return it.
+			match res {
+				PartialResult::MoreData => {}
+				PartialResult::Empty {
+					used,
+				} => {
+					offset += used;
+					if complete {
+						return Poll::Ready(None);
+					}
+				}
+				PartialResult::Ok {
+					value,
+					used,
+				} => {
+					offset += used;
+					return Poll::Ready(Some(Ok(value)));
+				}
+				PartialResult::Err {
+					err,
+					used,
+				} => {
+					offset += used;
+					let error = err.render_on_bytes(&buffer[offset..]);
+					let err = Error::InvalidQuery(error);
+					return Poll::Ready(Some(Err(err)));
+				}
+			}
+
+			// remove the already used data.
+			if offset > 0 {
+				// we used some of the data.
+				let len = buffer.len() - offset;
+				buffer.copy_within(offset.., 0);
+				buffer.truncate(len);
+				offset = 0;
+			} else {
+				// we didn't use any of the data which means this buffer size is not sufficient.
+				buffer_size_threshold = buffer_size_threshold.saturating_mul(2);
+			}
+		});
+
+		Executor::execute_stream(self, Arc::new(ctx), opt, stream).await
+	}
+
 	/// Execute a pre-parsed SQL query
 	///
 	/// ```rust,no_run
@@ -783,8 +899,6 @@ impl Datastore {
 		// Create a new query options
 		let opt = self.setup_options(sess);
 
-		// Create a new query executor
-		let mut exe = Executor::new(self);
 		// Create a default context
 		let mut ctx = self.setup_ctx()?;
 		// Start an execution context
@@ -792,7 +906,7 @@ impl Datastore {
 		// Store the query variables
 		vars.attach(&mut ctx)?;
 		// Process all statements
-		exe.execute(ctx.freeze(), opt, ast).await
+		Executor::execute(self, ctx.freeze(), opt, ast).await
 	}
 
 	/// Ensure a SQL [`Value`] is fully computed
@@ -976,6 +1090,20 @@ impl Datastore {
 		}
 		// Execute the SQL import
 		self.execute(sql, sess, None).await
+	}
+
+	/// Performs a database import from SQL
+	#[instrument(level = "debug", target = "surrealdb::core::kvs::ds", skip_all)]
+	pub async fn import_stream<S>(&self, sess: &Session, stream: S) -> Result<Vec<Response>, Error>
+	where
+		S: Stream<Item = Result<Bytes, Error>>,
+	{
+		// Check if the session has expired
+		if sess.expired() {
+			return Err(Error::ExpiredSession);
+		}
+		// Execute the SQL import
+		self.execute_import(sess, None, stream).await
 	}
 
 	/// Performs a full database export as SQL
