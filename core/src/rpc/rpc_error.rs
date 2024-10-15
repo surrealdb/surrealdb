@@ -11,6 +11,8 @@ pub enum RpcError {
 	InvalidRequest,
 	#[error("Method not found")]
 	MethodNotFound,
+	#[error("Method not allowed")]
+	MethodNotAllowed,
 	#[error("Invalid params")]
 	InvalidParams,
 	#[error("There was a problem with the database: {0}")]

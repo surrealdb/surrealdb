@@ -121,3 +121,21 @@ fn parse_immediate_insert_subquery() {
 fn parse_inout_graph_select() {
 	test_parse!(parse_query, r#" SELECT ->likes<->person FROM person; "#).unwrap();
 }
+
+#[test]
+fn parse_what_primary_function() {
+	test_parse!(parse_query, r#" SELECT fn::foo() FROM person; "#).unwrap();
+}
+
+#[test]
+fn parse_what_primary_model() {
+	test_parse!(parse_query, r#" SELECT ml::foo<1.0.0>() FROM person; "#).unwrap();
+}
+
+#[test]
+fn micro_second_duration() {
+	let src = r#"
+		4us
+	"#;
+	test_parse!(parse_query, src).unwrap();
+}

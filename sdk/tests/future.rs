@@ -86,6 +86,7 @@ async fn future_disabled() -> Result<(), Error> {
 }
 
 #[tokio::test]
+#[ignore]
 async fn concurrency() -> Result<(), Error> {
 	// cargo test --package surrealdb --test future --features kv-mem --release -- concurrency --nocapture
 

@@ -281,7 +281,7 @@ pub async fn generate_schema(
 					})
 				},
 			)
-			.description(format!("{}", if let Some(ref c) = &tb.comment { format!("{c}") } else { format!("Generated from table `{}`\nallows querying a table with filters", tb.name) }))
+			.description(if let Some(ref c) = &tb.comment { format!("{c}") } else { format!("Generated from table `{}`\nallows querying a table with filters", tb.name) })
 			.argument(limit_input!())
 			.argument(start_input!())
 			.argument(InputValue::new("order", TypeRef::named(&table_order_name)))
@@ -290,54 +290,52 @@ pub async fn generate_schema(
 
 		let sess2 = session.to_owned();
 		let kvs2 = datastore.to_owned();
-		query = query.field(
-			Field::new(
-				format!("_get_{}", tb.name),
-				TypeRef::named(tb.name.to_string()),
-				move |ctx| {
-					let tb_name = second_tb_name.clone();
-					let kvs2 = kvs2.clone();
-					FieldFuture::new({
-						let sess2 = sess2.clone();
-						async move {
-							let gtx = GQLTx::new(&kvs2, &sess2).await?;
+		query =
+			query.field(
+				Field::new(
+					format!("_get_{}", tb.name),
+					TypeRef::named(tb.name.to_string()),
+					move |ctx| {
+						let tb_name = second_tb_name.clone();
+						let kvs2 = kvs2.clone();
+						FieldFuture::new({
+							let sess2 = sess2.clone();
+							async move {
+								let gtx = GQLTx::new(&kvs2, &sess2).await?;
 
-							let args = ctx.args.as_index_map();
-							let id = match args.get("id").and_then(GqlValueUtils::as_string) {
-								Some(i) => i,
-								None => {
-									return Err(internal_error(
-										"Schema validation failed: No id found in _get_",
-									)
-									.into());
-								}
-							};
-							let thing = match id.clone().try_into() {
-								Ok(t) => t,
-								Err(_) => Thing::from((tb_name, id)),
-							};
+								let args = ctx.args.as_index_map();
+								let id = match args.get("id").and_then(GqlValueUtils::as_string) {
+									Some(i) => i,
+									None => {
+										return Err(internal_error(
+											"Schema validation failed: No id found in _get_",
+										)
+										.into());
+									}
+								};
+								let thing = match id.clone().try_into() {
+									Ok(t) => t,
+									Err(_) => Thing::from((tb_name, id)),
+								};
 
-							match gtx.get_record_field(thing, "id").await? {
-								SqlValue::Thing(t) => {
-									let erased: ErasedRecord = (gtx, t);
-									Ok(Some(field_val_erase_owned(erased)))
+								match gtx.get_record_field(thing, "id").await? {
+									SqlValue::Thing(t) => {
+										let erased: ErasedRecord = (gtx, t);
+										Ok(Some(field_val_erase_owned(erased)))
+									}
+									_ => Ok(None),
 								}
-								_ => Ok(None),
 							}
-						}
-					})
-				},
-			)
-			.description(format!(
-				"{}",
-				if let Some(ref c) = &tb.comment {
+						})
+					},
+				)
+				.description(if let Some(ref c) = &tb.comment {
 					format!("{c}")
 				} else {
 					format!("Generated from table `{}`\nallows querying a single record in a table by ID", tb.name)
-				}
-			))
-			.argument(id_input!()),
-		);
+				})
+				.argument(id_input!()),
+			);
 
 		let mut table_ty_obj = Object::new(tb.name.to_string())
 			.field(Field::new(
@@ -376,14 +374,11 @@ pub async fn generate_schema(
 					fd_type,
 					make_table_field_resolver(fd_name.as_str(), fd.kind.clone()),
 				))
-				.description(format!(
-					"{}",
-					if let Some(ref c) = fd.comment {
-						format!("{c}")
-					} else {
-						"".to_string()
-					}
-				));
+				.description(if let Some(ref c) = fd.comment {
+					format!("{c}")
+				} else {
+					"".to_string()
+				});
 		}
 
 		types.push(Type::Object(table_ty_obj));
@@ -640,7 +635,7 @@ fn kind_to_type(kind: Kind, types: &mut Vec<Type>) -> Result<TypeRef, GqlError> 
 			let (ls, others): (Vec<Kind>, Vec<Kind>) =
 				ks.into_iter().partition(|k| matches!(k, Kind::Literal(Literal::String(_))));
 
-			let enum_ty = if ls.len() > 0 {
+			let enum_ty = if !ls.is_empty() {
 				let vals: Vec<String> = ls
 					.into_iter()
 					.map(|l| {
@@ -659,7 +654,7 @@ fn kind_to_type(kind: Kind, types: &mut Vec<Type>) -> Result<TypeRef, GqlError> 
 				let enum_ty = tmp.type_name().to_string();
 
 				types.push(Type::Enum(tmp));
-				if others.len() == 0 {
+				if others.is_empty() {
 					return Ok(TypeRef::named(enum_ty));
 				}
 				Some(enum_ty)
@@ -1071,7 +1066,7 @@ fn gql_to_sql_kind(val: &GqlValue, kind: Kind) -> Result<SqlValue, GqlError> {
 				}
 			}
 			GqlValue::String(s) => match syn::value(s) {
-				Ok(SqlValue::Number(n)) => Ok(SqlValue::Number(n.clone())),
+				Ok(SqlValue::Number(n)) => Ok(SqlValue::Number(n)),
 				_ => Err(type_error(kind, val)),
 			},
 			_ => Err(type_error(kind, val)),

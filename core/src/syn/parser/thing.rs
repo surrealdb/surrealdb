@@ -283,23 +283,34 @@ impl Parser<'_> {
 				)
 			}
 			t!("ULID") => {
-				self.pop_peek();
-				// TODO: error message about how to use `ulid` as an identifier.
-				expected!(self, t!("("));
-				expected!(self, t!(")"));
-				Ok(Id::Generate(Gen::Ulid))
+				let token = self.pop_peek();
+				if self.eat(t!("(")) {
+					expected!(self, t!(")"));
+					Ok(Id::Generate(Gen::Ulid))
+				} else {
+					let slice = self.lexer.span_str(token.span);
+					Ok(Id::String(slice.to_string()))
+				}
 			}
 			t!("UUID") => {
-				self.pop_peek();
-				expected!(self, t!("("));
-				expected!(self, t!(")"));
-				Ok(Id::Generate(Gen::Uuid))
+				let token = self.pop_peek();
+				if self.eat(t!("(")) {
+					expected!(self, t!(")"));
+					Ok(Id::Generate(Gen::Uuid))
+				} else {
+					let slice = self.lexer.span_str(token.span);
+					Ok(Id::String(slice.to_string()))
+				}
 			}
 			t!("RAND") => {
-				self.pop_peek();
-				expected!(self, t!("("));
-				expected!(self, t!(")"));
-				Ok(Id::Generate(Gen::Rand))
+				let token = self.pop_peek();
+				if self.eat(t!("(")) {
+					expected!(self, t!(")"));
+					Ok(Id::Generate(Gen::Rand))
+				} else {
+					let slice = self.lexer.span_str(token.span);
+					Ok(Id::String(slice.to_string()))
+				}
 			}
 			_ => {
 				let ident = if self.flexible_record_id {
@@ -569,5 +580,9 @@ mod tests {
 		assert_ident_parses_correctly("dec123");
 		assert_ident_parses_correctly("f123");
 		assert_ident_parses_correctly("e123");
+
+		assert_ident_parses_correctly("ulid");
+		assert_ident_parses_correctly("uuid");
+		assert_ident_parses_correctly("rand");
 	}
 }
