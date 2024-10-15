@@ -4,9 +4,7 @@ mod cnf;
 
 use crate::err::Error;
 use crate::key::debug::Sprintable;
-use crate::kvs::Check;
-use crate::kvs::Key;
-use crate::kvs::Val;
+use crate::kvs::{Check, Key, Val, Version};
 use rocksdb::{
 	DBCompactionStyle, DBCompressionType, FlushOptions, LogLevel, OptimisticTransactionDB,
 	OptimisticTransactionOptions, Options, ReadOptions, WriteOptions,
@@ -554,8 +552,7 @@ impl super::api::Transaction for Transaction {
 		&mut self,
 		rng: Range<K>,
 		limit: u32,
-		version: Option<u64>,
-	) -> Result<Vec<(Key, Val)>, Error>
+	) -> Result<Vec<(Key, Val, Version, bool)>, Error>
 	where
 		K: Into<Key> + Sprintable + Debug,
 	{

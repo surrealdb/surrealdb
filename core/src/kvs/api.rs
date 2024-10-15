@@ -3,9 +3,7 @@ use super::tr::Check;
 use crate::cnf::NORMAL_FETCH_SIZE;
 use crate::err::Error;
 use crate::key::debug::Sprintable;
-use crate::kvs::batch::Batch;
-use crate::kvs::Key;
-use crate::kvs::Val;
+use crate::kvs::{batch::Batch, Key, Val, Version};
 use crate::vs::Versionstamp;
 use std::fmt::Debug;
 use std::ops::Range;
@@ -119,8 +117,7 @@ pub trait Transaction {
 		&mut self,
 		rng: Range<K>,
 		limit: u32,
-		version: Option<u64>,
-	) -> Result<Vec<(Key, Val)>, Error>
+	) -> Result<Vec<(Key, Val, Version, bool)>, Error>
 	where
 		K: Into<Key> + Sprintable + Debug;
 
