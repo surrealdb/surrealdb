@@ -463,9 +463,8 @@ async fn compute_show(
 			stmt.subject == gr.subject
 				&& stmt.created_after.as_ref().map_or(true, |t| t < &gr.creation)
 				&& stmt.created_before.as_ref().map_or(true, |t| t > &gr.creation)
-				&& (stmt.expired && stmt.expired_since < gr.expiration)
-				|| !gr.is_expired() && (stmt.revoked && stmt.expired_since < gr.revocation)
-				|| !gr.is_revoked()
+				&& ((stmt.expired && stmt.expired_since < gr.expiration) || !gr.is_expired())
+				&& ((stmt.revoked && stmt.expired_since < gr.revocation) || !gr.is_revoked())
 		})
 		.collect();
 

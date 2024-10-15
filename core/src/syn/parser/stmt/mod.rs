@@ -435,6 +435,7 @@ impl Parser<'_> {
 								show.expired_since = Some(self.next_token_value()?);
 							}
 						}
+						// TODO(PR): This does not show revoked, it includes revoked!
 						t!("REVOKED") => {
 							self.pop_peek();
 							show.revoked = true;
