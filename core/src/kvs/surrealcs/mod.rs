@@ -4,10 +4,10 @@ mod cnf;
 
 use crate::err::Error;
 use crate::key::debug::Sprintable;
-use crate::kvs::savepoint::{SaveOperation, SavePointImpl, SavePoints};
-use crate::kvs::Check;
-use crate::kvs::Key;
-use crate::kvs::Val;
+use crate::kvs::{
+	savepoint::{SaveOperation, SavePointImpl, SavePoints},
+	Check, Key, Val, Version,
+};
 use futures::lock::Mutex;
 use std::fmt::Debug;
 use std::ops::Range;
@@ -519,8 +519,7 @@ impl super::api::Transaction for Transaction {
 		&mut self,
 		rng: Range<K>,
 		limit: u32,
-		version: Option<u64>,
-	) -> Result<Vec<(Key, Val)>, Error>
+	) -> Result<Vec<(Key, Val, Version, bool)>, Error>
 	where
 		K: Into<Key> + Sprintable + Debug,
 	{
