@@ -185,7 +185,7 @@ pub trait Transaction {
 		let end: Key = rng.end.into();
 		let mut next = Some(beg..end);
 		while let Some(rng) = next {
-			let res = self.batch(rng, *NORMAL_FETCH_SIZE, true, version, false).await?;
+			let res = self.batch(rng, *NORMAL_FETCH_SIZE, true, version).await?;
 			next = res.next;
 			for v in res.values.into_iter() {
 				out.push(v);
@@ -237,7 +237,7 @@ pub trait Transaction {
 		let end: Key = rng.end.into();
 		let mut next = Some(beg..end);
 		while let Some(rng) = next {
-			let res = self.batch(rng, *NORMAL_FETCH_SIZE, false, None, false).await?;
+			let res = self.batch(rng, *NORMAL_FETCH_SIZE, false, None).await?;
 			next = res.next;
 			for (k, _) in res.values.into_iter() {
 				self.del(k).await?;
@@ -256,7 +256,6 @@ pub trait Transaction {
 		batch: u32,
 		values: bool,
 		version: Option<u64>,
-		scan_all_versions: bool,
 	) -> Result<Batch, Error>
 	where
 		K: Into<Key> + Sprintable + Debug,
@@ -280,26 +279,20 @@ pub trait Transaction {
 		};
 		// Check if range is consumed
 		if res.len() < batch as usize && batch > 0 {
-			Ok(Batch {
-				next: None,
-				values: res,
-			})
+			Ok(Batch::new(None, res))
 		} else {
 			match res.last() {
-				Some((k, _)) => Ok(Batch {
-					next: Some(Range {
+				Some((k, _)) => Ok(Batch::new(
+					Some(Range {
 						start: k.clone().add(0x00),
 						end,
 					}),
-					values: res,
-				}),
+					res,
+				)),
 				// We have checked the length above, so
 				// there should be a last item in the
 				// vector, so we shouldn't arrive here
-				None => Ok(Batch {
-					next: None,
-					values: res,
-				}),
+				None => Ok(Batch::new(None, res)),
 			}
 		}
 	}
@@ -366,5 +359,41 @@ pub trait Transaction {
 		k.append(&mut ts.to_vec());
 		k.append(&mut suffix.into());
 		self.set(k, val, None).await
+	}
+
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.sprint()))]
+	async fn batch_all_versions<K>(&mut self, rng: Range<K>, batch: u32) -> Result<Batch, Error>
+	where
+		K: Into<Key> + Sprintable + Debug,
+	{
+		// Check to see if transaction is closed
+		if self.closed() {
+			return Err(Error::TxFinished);
+		}
+		// Continue with function logic
+		let beg: Key = rng.start.into();
+		let end: Key = rng.end.into();
+
+		// Scan for the next batch
+		let res = self.scan_all_versions(beg..end.clone(), batch).await?;
+
+		// Check if range is consumed
+		if res.len() < batch as usize && batch > 0 {
+			Ok(Batch::new_versioned(None, res))
+		} else {
+			match res.last() {
+				Some((k, _, _, _)) => Ok(Batch::new_versioned(
+					Some(Range {
+						start: k.clone().add(0x00),
+						end,
+					}),
+					res,
+				)),
+				// We have checked the length above, so
+				// there should be a last item in the
+				// vector, so we shouldn't arrive here
+				None => Ok(Batch::new_versioned(None, res)),
+			}
+		}
 	}
 }
