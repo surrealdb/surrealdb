@@ -12,7 +12,6 @@ use crate::sql::{Relation, TableType};
 use derive::Store;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
-use std::env::current_exe;
 use std::fmt::{self, Display, Write};
 
 #[revisioned(revision = 4)]
