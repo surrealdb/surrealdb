@@ -124,6 +124,12 @@ impl From<i64> for RecordIdKey {
 	}
 }
 
+impl From<Uuid> for RecordIdKey {
+	fn from(value: Uuid) -> Self {
+		Self(CoreId::Uuid(value.into()))
+	}
+}
+
 impl From<Vec<Value>> for RecordIdKey {
 	fn from(value: Vec<Value>) -> Self {
 		let res = Value::array_to_core(value);
