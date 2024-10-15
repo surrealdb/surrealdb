@@ -1,4 +1,5 @@
 use crate::Error;
+use chrono::{DateTime, Utc};
 use revision::revisioned;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use std::{
@@ -79,6 +80,12 @@ transparent_wrapper!(
 	#[derive( Clone, Eq, PartialEq, Ord, PartialOrd)]
 	pub struct Datetime(CoreDatetime)
 );
+
+impl From<DateTime<Utc>> for Datetime {
+	fn from(v: DateTime<Utc>) -> Self {
+		Self(v.into())
+	}
+}
 
 transparent_wrapper!(
 	/// The key of a [`RecordId`].
