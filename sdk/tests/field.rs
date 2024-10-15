@@ -1025,3 +1025,26 @@ async fn field_definition_flexible_array_any() -> Result<(), Error> {
 	)?;
 	Ok(())
 }
+
+#[tokio::test]
+async fn field_definition_array_any() -> Result<(), Error> {
+	let sql = "
+		DEFINE TABLE user SCHEMAFULL;
+		DEFINE FIELD custom ON user TYPE array<any>;
+		INFO FOR TABLE user;
+	";
+	let mut t = Test::new(sql).await?;
+	t.skip_ok(2)?;
+	t.expect_val(
+		"
+{
+	events: {  },
+	fields: { custom: 'DEFINE FIELD custom ON user TYPE array PERMISSIONS FULL' },
+	indexes: {  },
+	lives: {  },
+	tables: {  }
+}
+		",
+	)?;
+	Ok(())
+}

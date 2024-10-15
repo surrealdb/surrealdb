@@ -12,6 +12,7 @@ use crate::sql::{Relation, TableType};
 use derive::Store;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
+use std::env::current_exe;
 use std::fmt::{self, Display, Write};
 
 #[revisioned(revision = 4)]
@@ -87,7 +88,17 @@ impl DefineFieldStatement {
 		if let Some(mut cur_kind) = self.kind.as_ref().and_then(|x| x.inner_kind()) {
 			let mut name = self.name.clone();
 			loop {
+				if let Kind::Any = cur_kind {
+					// DEFINE FIELD foo ON bar TYPE array;
+					// Already implies
+					// DEFINE FIELD foo[*] ON bar TYPE any;
+					// so we don't need to write sub types if the sub types are essentially a non
+					// trait bound.
+					break;
+				}
+
 				let new_kind = cur_kind.inner_kind();
+
 				name.0.push(Part::All);
 
 				// Get the name of the field
