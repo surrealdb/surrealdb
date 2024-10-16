@@ -27,6 +27,8 @@ pub enum Method {
 	Run,
 	GraphQL,
 	InsertRelation,
+	UpsertMerge,
+	UpsertPatch,
 }
 
 impl Method {
@@ -60,6 +62,8 @@ impl Method {
 			"run" => Self::Run,
 			"graphql" => Self::GraphQL,
 			"insert_relation" => Self::InsertRelation,
+			"upsert_merge" => Self::UpsertMerge,
+			"upsert_patch" => Self::UpsertPatch,
 			_ => Self::Unknown,
 		}
 	}
@@ -94,6 +98,8 @@ impl Method {
 			Self::Run => "run",
 			Self::GraphQL => "graphql",
 			Self::InsertRelation => "insert_relation",
+			Self::UpsertMerge => "upsert_merge",
+			Self::UpsertPatch => "upsert_patch",
 		}
 	}
 }
@@ -128,6 +134,8 @@ impl Method {
 				| Method::GraphQL
 				| Method::InsertRelation
 				| Method::Unknown
+				| Method::UpsertMerge
+				| Method::UpsertPatch
 		)
 	}
 }
