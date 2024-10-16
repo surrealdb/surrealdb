@@ -31,9 +31,7 @@ defaults:
 jobs:
   common:
     name: Bench common
-    runs-on:
-      - self-hosted
-      - benches
+    runs-on: [runner-arm64-2xlarge]
     timeout-minutes: 60
     steps:
       - name: Install stable toolchain
@@ -92,9 +90,7 @@ jobs:
 
   engines:
     name: Benchmark engines
-    runs-on:
-      - self-hosted
-      - benches
+    runs-on: [runner-arm64-2xlarge]
     timeout-minutes: 60
     permissions:
       id-token: write

@@ -176,7 +176,7 @@ macro_rules! t {
 	};
 
 	("?") => {
-		$crate::syn::token::TokenKind::Operator($crate::syn::token::Operator::Like)
+		$crate::syn::token::TokenKind::Question
 	};
 	("?:") => {
 		$crate::syn::token::TokenKind::Operator($crate::syn::token::Operator::Tco)
