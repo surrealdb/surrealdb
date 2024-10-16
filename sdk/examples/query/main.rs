@@ -2,14 +2,13 @@ use serde::Deserialize;
 use serde::Serialize;
 use surrealdb::engine::remote::ws::Ws;
 use surrealdb::opt::auth::Root;
-use surrealdb::sql::thing;
-use surrealdb::sql::Thing;
+use surrealdb::RecordId;
 use surrealdb::Surreal;
 
 #[derive(Debug, Serialize, Deserialize)]
 #[allow(dead_code)]
 struct User {
-	id: Thing,
+	id: RecordId,
 	name: String,
 	company: String,
 }
@@ -31,7 +30,7 @@ async fn main() -> surrealdb::Result<()> {
 	let mut results = db
 		.query(sql)
 		.bind(User {
-			id: thing("user:john")?,
+			id: RecordId::from(("user", "john")),
 			name: "John Doe".to_owned(),
 			company: "ACME Corporation".to_owned(),
 		})

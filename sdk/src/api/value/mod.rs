@@ -76,9 +76,10 @@ impl From<Vec<u8>> for Bytes {
 }
 
 transparent_wrapper!(
-	#[derive( Clone, Eq, PartialEq, Ord, PartialOrd)]
+	#[derive( Clone, Eq, Default, PartialEq, Ord, PartialOrd)]
 	pub struct Datetime(CoreDatetime)
 );
+impl_serialize_wrapper!(Datetime);
 
 transparent_wrapper!(
 	/// The key of a [`RecordId`].
@@ -86,6 +87,7 @@ transparent_wrapper!(
 	#[non_exhaustive]
 	pub struct RecordIdKey(CoreId)
 );
+impl_serialize_wrapper!(RecordIdKey);
 
 impl From<Object> for RecordIdKey {
 	fn from(value: Object) -> Self {
