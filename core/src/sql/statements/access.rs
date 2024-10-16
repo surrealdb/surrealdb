@@ -51,6 +51,7 @@ pub enum AccessStatement {
 pub struct AccessStatementShow {
 	pub ac: Ident,
 	pub base: Option<Base>,
+	pub active: bool,
 	pub expired: bool,
 	pub revoked: bool,
 	pub created_after: Option<Datetime>,
@@ -152,6 +153,11 @@ impl AccessGrant {
 	// Returns if the access grant is revoked.
 	pub fn is_revoked(&self) -> bool {
 		self.revocation.is_some()
+	}
+
+	// Returns if the access grant is active.
+	pub fn is_active(&self) -> bool {
+		!(self.is_expired() || self.is_revoked())
 	}
 }
 
@@ -460,11 +466,12 @@ async fn compute_show(
 	let grs: Vec<&AccessGrant> = grs
 		.iter()
 		.filter(|gr| {
-			stmt.subject == gr.subject
+			(stmt.subject.is_none() || stmt.subject == gr.subject)
 				&& stmt.created_after.as_ref().map_or(true, |t| t < &gr.creation)
 				&& stmt.created_before.as_ref().map_or(true, |t| t > &gr.creation)
-				&& ((stmt.expired && stmt.expired_since < gr.expiration) || !gr.is_expired())
-				&& ((stmt.revoked && stmt.expired_since < gr.revocation) || !gr.is_revoked())
+				&& (stmt.active == gr.is_active()
+					|| (stmt.expired == gr.is_expired() && stmt.expired_since < gr.expiration)
+					|| (stmt.revoked == gr.is_revoked() && stmt.revoked_since < gr.revocation))
 		})
 		.collect();
 

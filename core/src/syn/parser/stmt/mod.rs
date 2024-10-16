@@ -402,6 +402,33 @@ impl Parser<'_> {
 					..Default::default()
 				};
 
+				match self.peek_kind() {
+					t!("ALL") => {
+						self.pop_peek();
+						show.active = true;
+						show.expired = true;
+						show.revoked = true;
+					}
+					t!("EXPIRED") => {
+						self.pop_peek();
+						show.expired = true;
+						if self.eat(t!("SINCE")) {
+							show.expired_since = Some(self.next_token_value()?);
+						}
+					}
+					t!("REVOKED") => {
+						self.pop_peek();
+						show.revoked = true;
+						if self.eat(t!("SINCE")) {
+							show.revoked_since = Some(self.next_token_value()?);
+						}
+					}
+					// By default, show only active grants.
+					_ => {
+						show.active = true;
+					}
+				};
+
 				loop {
 					match self.peek_kind() {
 						t!("FOR") => {
@@ -427,21 +454,6 @@ impl Parser<'_> {
 						t!("BEFORE") => {
 							self.pop_peek();
 							show.created_before = Some(self.next_token_value()?);
-						}
-						t!("EXPIRED") => {
-							self.pop_peek();
-							show.expired = true;
-							if self.eat(t!("SINCE")) {
-								show.expired_since = Some(self.next_token_value()?);
-							}
-						}
-						// TODO(PR): This does not show revoked, it includes revoked!
-						t!("REVOKED") => {
-							self.pop_peek();
-							show.revoked = true;
-							if self.eat(t!("SINCE")) {
-								show.revoked_since = Some(self.next_token_value()?);
-							}
 						}
 						_ => break,
 					}
@@ -480,7 +492,7 @@ impl Parser<'_> {
 						self.pop_peek();
 						(false, true)
 					}
-					// By default, purge all stale grants.
+					// By default, purge all inactive grants.
 					_ => (true, true),
 				};
 				let grace = if self.eat(t!("FOR")) {
