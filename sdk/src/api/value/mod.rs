@@ -1,4 +1,5 @@
 use crate::Error;
+use chrono::{DateTime, Utc};
 use revision::revisioned;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use std::{
@@ -81,6 +82,12 @@ transparent_wrapper!(
 );
 impl_serialize_wrapper!(Datetime);
 
+impl From<DateTime<Utc>> for Datetime {
+	fn from(v: DateTime<Utc>) -> Self {
+		Self(v.into())
+	}
+}
+
 transparent_wrapper!(
 	/// The key of a [`RecordId`].
 	#[derive( Clone, PartialEq, PartialOrd)]
@@ -116,6 +123,12 @@ impl From<&str> for RecordIdKey {
 impl From<i64> for RecordIdKey {
 	fn from(value: i64) -> Self {
 		Self(CoreId::Number(value))
+	}
+}
+
+impl From<Uuid> for RecordIdKey {
+	fn from(value: Uuid) -> Self {
+		Self(CoreId::Uuid(value.into()))
 	}
 }
 
