@@ -66,13 +66,13 @@ impl RelateStatement {
 							Value::Object(v) => match v.rid() {
 								Some(v) => out.push(v),
 								_ => {
-									return Err(Error::RelateStatementOut {
+									return Err(Error::RelateStatementIn {
 										value: v.to_string(),
 									})
 								}
 							},
 							v => {
-								return Err(Error::RelateStatementOut {
+								return Err(Error::RelateStatementIn {
 									value: v.to_string(),
 								})
 							}
@@ -82,13 +82,13 @@ impl RelateStatement {
 				Value::Object(v) => match v.rid() {
 					Some(v) => out.push(v),
 					None => {
-						return Err(Error::RelateStatementOut {
+						return Err(Error::RelateStatementIn {
 							value: v.to_string(),
 						})
 					}
 				},
 				v => {
-					return Err(Error::RelateStatementOut {
+					return Err(Error::RelateStatementIn {
 						value: v.to_string(),
 					})
 				}
