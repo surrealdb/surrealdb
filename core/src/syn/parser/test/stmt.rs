@@ -2512,7 +2512,257 @@ fn parse_access_grant() {
 				subject: Some(access::Subject::Record(Thing {
 					tb: "b".to_owned(),
 					id: Id::from("c"),
-				},)),
+				})),
+			}))
+		);
+	}
+}
+
+#[test]
+fn parse_access_show() {
+	// Default
+	{
+		let res = test_parse!(parse_stmt, r#"ACCESS a ON DATABASE SHOW"#).unwrap();
+		assert_eq!(
+			res,
+			Statement::Access(AccessStatement::Show(AccessStatementShow {
+				ac: Ident("a".to_string()),
+				base: Some(Base::Db),
+				active: true,
+				expired: false,
+				revoked: false,
+				created_after: None,
+				created_before: None,
+				expired_since: None,
+				revoked_since: None,
+				subject: None,
+				id: None,
+			}))
+		);
+	}
+	// Specific
+	{
+		let res =
+			test_parse!(parse_stmt, r#"ACCESS a ON DATABASE SHOW GRANT abcdef0123456789"#).unwrap();
+		assert_eq!(
+			res,
+			Statement::Access(AccessStatement::Show(AccessStatementShow {
+				ac: Ident("a".to_string()),
+				base: Some(Base::Db),
+				active: false,
+				expired: false,
+				revoked: false,
+				created_after: None,
+				created_before: None,
+				expired_since: None,
+				revoked_since: None,
+				subject: None,
+				id: Some("abcdef0123456789".into()),
+			}))
+		);
+	}
+	// For user
+	{
+		let res = test_parse!(parse_stmt, r#"ACCESS a ON DATABASE SHOW FOR USER b"#).unwrap();
+		assert_eq!(
+			res,
+			Statement::Access(AccessStatement::Show(AccessStatementShow {
+				ac: Ident("a".to_string()),
+				base: Some(Base::Db),
+				active: true,
+				expired: false,
+				revoked: false,
+				created_after: None,
+				created_before: None,
+				expired_since: None,
+				revoked_since: None,
+				subject: Some(access::Subject::User(Ident("b".to_string()))),
+				id: None,
+			}))
+		);
+	}
+	// For record
+	{
+		let res = test_parse!(parse_stmt, r#"ACCESS a ON DATABASE SHOW FOR RECORD b:c"#).unwrap();
+		assert_eq!(
+			res,
+			Statement::Access(AccessStatement::Show(AccessStatementShow {
+				ac: Ident("a".to_string()),
+				base: Some(Base::Db),
+				active: true,
+				expired: false,
+				revoked: false,
+				created_after: None,
+				created_before: None,
+				expired_since: None,
+				revoked_since: None,
+				subject: Some(access::Subject::Record(Thing {
+					tb: "b".to_owned(),
+					id: Id::from("c"),
+				})),
+				id: None,
+			}))
+		);
+	}
+	// Created in time range
+	{
+		let offset = Utc.fix();
+		let expected_datetime_after = offset
+			.from_local_datetime(
+				&NaiveDate::from_ymd_opt(2012, 4, 23)
+					.unwrap()
+					.and_hms_nano_opt(18, 25, 43, 51_100)
+					.unwrap(),
+			)
+			.earliest()
+			.unwrap()
+			.with_timezone(&Utc);
+		let expected_datetime_before = expected_datetime_after + *Duration::from_hours(24);
+		let res = test_parse!(parse_stmt, r#"ACCESS a ON DATABASE SHOW AFTER d'2012-04-23T18:25:43.0000511Z' BEFORE d'2012-04-24T18:25:43.0000511Z'"#).unwrap();
+		assert_eq!(
+			res,
+			Statement::Access(AccessStatement::Show(AccessStatementShow {
+				ac: Ident("a".to_string()),
+				base: Some(Base::Db),
+				active: true,
+				expired: false,
+				revoked: false,
+				created_after: Some(expected_datetime_after.into()),
+				created_before: Some(expected_datetime_before.into()),
+				expired_since: None,
+				revoked_since: None,
+				subject: None,
+				id: None,
+			}))
+		);
+	}
+	// All
+	{
+		let res = test_parse!(parse_stmt, r#"ACCESS a ON DATABASE SHOW ALL"#).unwrap();
+		assert_eq!(
+			res,
+			Statement::Access(AccessStatement::Show(AccessStatementShow {
+				ac: Ident("a".to_string()),
+				base: Some(Base::Db),
+				active: true,
+				expired: true,
+				revoked: true,
+				created_after: None,
+				created_before: None,
+				expired_since: None,
+				revoked_since: None,
+				subject: None,
+				id: None,
+			}))
+		);
+	}
+	// Expired
+	{
+		let res = test_parse!(parse_stmt, r#"ACCESS a ON DATABASE SHOW EXPIRED"#).unwrap();
+		assert_eq!(
+			res,
+			Statement::Access(AccessStatement::Show(AccessStatementShow {
+				ac: Ident("a".to_string()),
+				base: Some(Base::Db),
+				active: false,
+				expired: true,
+				revoked: false,
+				created_after: None,
+				created_before: None,
+				expired_since: None,
+				revoked_since: None,
+				subject: None,
+				id: None,
+			}))
+		);
+	}
+	// Revoked
+	{
+		let res = test_parse!(parse_stmt, r#"ACCESS a ON DATABASE SHOW REVOKED"#).unwrap();
+		assert_eq!(
+			res,
+			Statement::Access(AccessStatement::Show(AccessStatementShow {
+				ac: Ident("a".to_string()),
+				base: Some(Base::Db),
+				active: false,
+				expired: false,
+				revoked: true,
+				created_after: None,
+				created_before: None,
+				expired_since: None,
+				revoked_since: None,
+				subject: None,
+				id: None,
+			}))
+		);
+	}
+	// Expired since date
+	{
+		let offset = Utc.fix();
+		let expected_datetime = offset
+			.from_local_datetime(
+				&NaiveDate::from_ymd_opt(2012, 4, 23)
+					.unwrap()
+					.and_hms_nano_opt(18, 25, 43, 51_100)
+					.unwrap(),
+			)
+			.earliest()
+			.unwrap()
+			.with_timezone(&Utc);
+		let res = test_parse!(
+			parse_stmt,
+			r#"ACCESS a ON DATABASE SHOW EXPIRED SINCE d'2012-04-23T18:25:43.0000511Z'"#
+		)
+		.unwrap();
+		assert_eq!(
+			res,
+			Statement::Access(AccessStatement::Show(AccessStatementShow {
+				ac: Ident("a".to_string()),
+				base: Some(Base::Db),
+				active: false,
+				expired: true,
+				revoked: false,
+				created_after: None,
+				created_before: None,
+				expired_since: Some(expected_datetime.into()),
+				revoked_since: None,
+				subject: None,
+				id: None,
+			}))
+		);
+	}
+	// Revoked since date
+	{
+		let offset = Utc.fix();
+		let expected_datetime = offset
+			.from_local_datetime(
+				&NaiveDate::from_ymd_opt(2012, 4, 23)
+					.unwrap()
+					.and_hms_nano_opt(18, 25, 43, 51_100)
+					.unwrap(),
+			)
+			.earliest()
+			.unwrap()
+			.with_timezone(&Utc);
+		let res = test_parse!(
+			parse_stmt,
+			r#"ACCESS a ON DATABASE SHOW REVOKED SINCE d'2012-04-23T18:25:43.0000511Z'"#
+		)
+		.unwrap();
+		assert_eq!(
+			res,
+			Statement::Access(AccessStatement::Show(AccessStatementShow {
+				ac: Ident("a".to_string()),
+				base: Some(Base::Db),
+				active: false,
+				expired: false,
+				revoked: true,
+				created_after: None,
+				created_before: None,
+				expired_since: None,
+				revoked_since: Some(expected_datetime.into()),
+				subject: None,
+				id: None,
 			}))
 		);
 	}
@@ -2544,19 +2794,6 @@ fn parse_access_revoke() {
 			}))
 		);
 	}
-}
-
-#[test]
-fn parse_access_show() {
-	let res = test_parse!(parse_stmt, r#"ACCESS a SHOW"#).unwrap();
-	assert_eq!(
-		res,
-		Statement::Access(AccessStatement::Show(AccessStatementShow {
-			ac: Ident("a".to_string()),
-			base: None,
-			..Default::default()
-		}))
-	);
 }
 
 #[test]
