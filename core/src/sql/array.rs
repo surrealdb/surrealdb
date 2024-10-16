@@ -165,6 +165,7 @@ impl Array {
 		self.0.iter().all(|v| v.is_none_or_null())
 	}
 
+	/// Checks whether all array values are static values
 	pub(crate) fn is_static(&self) -> bool {
 		self.iter().all(Value::is_static)
 	}
