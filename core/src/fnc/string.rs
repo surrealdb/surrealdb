@@ -153,18 +153,18 @@ pub fn words((string,): (String,)) -> Result<Value, Error> {
 pub mod distance {
 
 	use crate::err::Error;
+	use crate::fnc::util::string::distance::StringDistance;
 	use crate::sql::Value;
 
-	pub fn hamming((_, _): (String, String)) -> Result<Value, Error> {
-		Err(Error::FeatureNotYetImplemented {
-			feature: "string::distance::hamming() function".to_string(),
+	pub fn hamming((a, b): (String, String)) -> Result<Value, Error> {
+		a.as_str().hamming(b.as_str()).map(Into::into).map_err(|_| Error::InvalidArguments {
+			name: "string::distance::hamming()".into(),
+			message: "Strings must be of equal length".into(),
 		})
 	}
 
-	pub fn levenshtein((_, _): (String, String)) -> Result<Value, Error> {
-		Err(Error::FeatureNotYetImplemented {
-			feature: "string::distance::levenshtein() function".to_string(),
-		})
+	pub fn levenshtein((a, b): (String, String)) -> Result<Value, Error> {
+		Ok(a.as_str().levenshtein(b.as_str()).into())
 	}
 }
 
