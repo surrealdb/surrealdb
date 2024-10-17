@@ -1,7 +1,5 @@
 use surrealdb::engine::remote::ws::Ws;
 use surrealdb::opt::auth::Root;
-use surrealdb::sql::statements::BeginStatement;
-use surrealdb::sql::statements::CommitStatement;
 use surrealdb::Surreal;
 
 #[tokio::main]
@@ -20,7 +18,7 @@ async fn main() -> surrealdb::Result<()> {
     let response = db
 
         // Start transaction
-        .query(BeginStatement::default())
+        .query("BEGIN")
 
         // Setup accounts
         .query("
@@ -35,7 +33,7 @@ async fn main() -> surrealdb::Result<()> {
         ")
 
         // Finalise
-        .query(CommitStatement::default())
+        .query("COMMIT")
         .await?;
 
 	// See if any errors were returned
