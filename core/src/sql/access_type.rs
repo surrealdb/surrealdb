@@ -64,7 +64,7 @@ impl Display for AccessType {
 			}
 			AccessType::Bearer(ac) => {
 				write!(f, "BEARER")?;
-				if let BearerAccessLevel::Record = ac.level {
+				if let BearerAccessSubject::Record = ac.subject {
 					write!(f, " FOR RECORD")?;
 				}
 			}
@@ -88,9 +88,9 @@ impl InfoStructure for AccessType {
 			}),
 			AccessType::Bearer(ac) => Value::from(map! {
 					"kind".to_string() => "BEARER".into(),
-					"level".to_string() => match ac.level {
-							BearerAccessLevel::Record => "RECORD",
-							BearerAccessLevel::User => "USER",
+					"subject".to_string() => match ac.subject {
+							BearerAccessSubject::Record => "RECORD",
+							BearerAccessSubject::User => "USER",
 			}.into(),
 					"jwt".to_string() => ac.jwt.structure(),
 				}),
@@ -344,14 +344,14 @@ impl Jwt for RecordAccess {
 #[derive(Debug, Serialize, Deserialize, Hash, Clone, Eq, PartialEq, PartialOrd)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct BearerAccess {
-	pub level: BearerAccessLevel,
+	pub subject: BearerAccessSubject,
 	pub jwt: JwtAccess,
 }
 
 impl Default for BearerAccess {
 	fn default() -> Self {
 		Self {
-			level: BearerAccessLevel::User,
+			subject: BearerAccessSubject::User,
 			jwt: JwtAccess {
 				..Default::default()
 			},
@@ -369,7 +369,7 @@ impl Jwt for BearerAccess {
 #[derive(Debug, Serialize, Deserialize, Hash, Clone, Eq, PartialEq, PartialOrd)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
-pub enum BearerAccessLevel {
+pub enum BearerAccessSubject {
 	Record,
 	User,
 }

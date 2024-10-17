@@ -159,7 +159,7 @@ impl Statement {
 		};
 
 		match stm {
-			Self::Access(v) => v.compute(ctx, opt, doc).await,
+			Self::Access(v) => v.compute(stk, ctx, opt, doc).await,
 			Self::Alter(v) => v.compute(stk, ctx, opt, doc).await,
 			Self::Analyze(v) => v.compute(ctx, opt, doc).await,
 			Self::Break(v) => v.compute(ctx, opt, doc).await,
