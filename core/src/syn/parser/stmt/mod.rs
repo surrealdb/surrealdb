@@ -386,33 +386,69 @@ impl Parser<'_> {
 			}
 			t!("SHOW") => {
 				self.pop_peek();
-				let cond = self.try_parse_condition(ctx).await?;
-				return Ok(AccessStatement::Show(AccessStatementShow {
-					ac,
-					base,
-					cond,
-					..Default::default()
-				}));
+				match self.peek_kind() {
+					t!("ALL") => {
+						self.pop_peek();
+						Ok(AccessStatement::Show(AccessStatementShow {
+							ac,
+							base,
+							..Default::default()
+						}))
+					}
+					t!("GRANT") => {
+						self.pop_peek();
+						let gr = Some(self.next_token_value()?);
+						Ok(AccessStatement::Show(AccessStatementShow {
+							ac,
+							base,
+							gr,
+							..Default::default()
+						}))
+					}
+					t!("WHERE") => {
+						let cond = self.try_parse_condition(ctx).await?;
+						Ok(AccessStatement::Show(AccessStatementShow {
+							ac,
+							base,
+							cond,
+							..Default::default()
+						}))
+					}
+					_ => unexpected!(self, peek, "one of ALL, GRANT or WHERE"),
+				}
 			}
 			t!("REVOKE") => {
 				self.pop_peek();
-				let gr = match self.peek_kind() {
-					t!("GRANT") => {
-						self.pop_peek();
-						Some(self.next_token_value()?)
-					}
+				match self.peek_kind() {
 					t!("ALL") => {
 						self.pop_peek();
-						None
+						Ok(AccessStatement::Revoke(AccessStatementRevoke {
+							ac,
+							base,
+							..Default::default()
+						}))
 					}
-					_ => unexpected!(self, peek, "either GRANT or ALL"),
-				};
-
-				Ok(AccessStatement::Revoke(AccessStatementRevoke {
-					ac,
-					base,
-					gr,
-				}))
+					t!("GRANT") => {
+						self.pop_peek();
+						let gr = Some(self.next_token_value()?);
+						Ok(AccessStatement::Revoke(AccessStatementRevoke {
+							ac,
+							base,
+							gr,
+							..Default::default()
+						}))
+					}
+					t!("WHERE") => {
+						let cond = self.try_parse_condition(ctx).await?;
+						Ok(AccessStatement::Revoke(AccessStatementRevoke {
+							ac,
+							base,
+							cond,
+							..Default::default()
+						}))
+					}
+					_ => unexpected!(self, peek, "one of ALL, GRANT or WHERE"),
+				}
 			}
 			t!("PURGE") => {
 				self.pop_peek();

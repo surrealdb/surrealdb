@@ -49,18 +49,6 @@ pub enum AccessStatement {
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
-pub struct AccessStatementShow {
-	pub ac: Ident,
-	pub base: Option<Base>,
-	pub cond: Option<Cond>,
-}
-
-// TODO(gguillemas): Document once bearer access is no longer experimental.
-#[doc(hidden)]
-#[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
 pub struct AccessStatementGrant {
 	pub ac: Ident,
 	pub base: Option<Base>,
@@ -70,20 +58,33 @@ pub struct AccessStatementGrant {
 // TODO(gguillemas): Document once bearer access is no longer experimental.
 #[doc(hidden)]
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
+#[non_exhaustive]
+pub struct AccessStatementShow {
+	pub ac: Ident,
+	pub base: Option<Base>,
+	pub gr: Option<Ident>,
+	pub cond: Option<Cond>,
+}
+
+// TODO(gguillemas): Document once bearer access is no longer experimental.
+#[doc(hidden)]
+#[revisioned(revision = 1)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub struct AccessStatementRevoke {
 	pub ac: Ident,
 	pub base: Option<Base>,
 	pub gr: Option<Ident>,
-	// TODO(PR): Allow arbitrary conditions here.
+	pub cond: Option<Cond>,
 }
 
 // TODO(gguillemas): Document once bearer access is no longer experimental.
 #[doc(hidden)]
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub struct AccessStatementPurge {
@@ -427,51 +428,75 @@ async fn compute_show(
 		}
 	};
 
-	let grs = match base {
-		Base::Root => txn.all_root_access_grants(&stmt.ac).await?,
-		Base::Ns => txn.all_ns_access_grants(opt.ns()?, &stmt.ac).await?,
-		Base::Db => txn.all_db_access_grants(opt.ns()?, opt.db()?, &stmt.ac).await?,
-		_ => {
-			return Err(Error::Unimplemented(
-				"Managing access methods outside of root, namespace and database levels"
-					.to_string(),
-			))
+	// Get the grants to show.
+	match &stmt.gr {
+		Some(gr) => {
+			let grant = match base {
+				Base::Root => (*txn.get_root_access_grant(&stmt.ac, gr).await?).clone(),
+				Base::Ns => (*txn.get_ns_access_grant(opt.ns()?, &stmt.ac, gr).await?).clone(),
+				Base::Db => {
+					(*txn.get_db_access_grant(opt.ns()?, opt.db()?, &stmt.ac, gr).await?).clone()
+				}
+				_ => {
+					return Err(Error::Unimplemented(
+						"Managing access methods outside of root, namespace and database levels"
+							.to_string(),
+					))
+				}
+			};
+
+			Ok(Value::Object(grant.redacted().into()))
 		}
-	};
+		None => {
+			// Get all grants.
+			let grs =
+				match base {
+					Base::Root => txn.all_root_access_grants(&stmt.ac).await?,
+					Base::Ns => txn.all_ns_access_grants(opt.ns()?, &stmt.ac).await?,
+					Base::Db => txn.all_db_access_grants(opt.ns()?, opt.db()?, &stmt.ac).await?,
+					_ => return Err(Error::Unimplemented(
+						"Managing access methods outside of root, namespace and database levels"
+							.to_string(),
+					)),
+				};
 
-	// Redact grants before allowing any filtering.
-	let grants =
-		grs.iter().map(|v| Value::Object(v.redacted().to_owned().into())).collect::<Array>();
+			let mut show = Vec::new();
+			for gr in grs.into_iter() {
+				// If provided, check if grant matches conditions.
+				if let Some(cond) = &stmt.cond {
+					// Redact grant before evaluating conditions.
+					let redacted_gr = Value::Object(gr.redacted().to_owned().into());
+					if !cond
+						.compute(
+							stk,
+							ctx,
+							opt,
+							Some(&CursorDoc {
+								rid: None,
+								ir: None,
+								doc: redacted_gr.into(),
+							}),
+						)
+						.await?
+						.is_truthy()
+					{
+						// Skip grant if it does not match the provided conditions.
+						continue;
+					}
+				}
 
-	// Apply any conditions, if provided.
-	if let Some(cond) = &stmt.cond {
-		let mut grants_cond = Vec::new();
-		for gr in grants.into_iter() {
-			if cond
-				.compute(
-					stk,
-					ctx,
-					opt,
-					Some(&CursorDoc {
-						rid: None,
-						ir: None,
-						doc: gr.clone().into(),
-					}),
-				)
-				.await?
-				.is_truthy()
-			{
-				grants_cond.push(gr);
+				// Store revoked version of the redacted grant.
+				show.push(Value::Object(gr.redacted().to_owned().into()));
 			}
-		}
-		return Ok(Value::Array(grants_cond.into()));
-	}
 
-	Ok(Value::Array(grants))
+			Ok(Value::Array(show.into()))
+		}
+	}
 }
 
 async fn compute_revoke(
 	stmt: &AccessStatementRevoke,
+	stk: &mut Stk,
 	ctx: &Context,
 	opt: &Options,
 	_doc: Option<&CursorDoc>,
@@ -498,10 +523,11 @@ async fn compute_revoke(
 			))
 		}
 	};
+
 	// Get the grants to revoke.
 	match &stmt.gr {
 		Some(gr) => {
-			let mut grant = match base {
+			let mut revoked = match base {
 				Base::Root => (*txn.get_root_access_grant(&stmt.ac, gr).await?).clone(),
 				Base::Ns => (*txn.get_ns_access_grant(opt.ns()?, &stmt.ac, gr).await?).clone(),
 				Base::Db => {
@@ -514,28 +540,28 @@ async fn compute_revoke(
 					))
 				}
 			};
-			if grant.revocation.is_some() {
+			if revoked.revocation.is_some() {
 				return Err(Error::AccessGrantRevoked);
 			}
-			grant.revocation = Some(Datetime::default());
+			revoked.revocation = Some(Datetime::default());
 
 			// Revoke the grant.
 			match base {
 				Base::Root => {
 					let key = crate::key::root::access::gr::new(&stmt.ac, gr);
-					txn.set(key, &grant, None).await?;
+					txn.set(key, &revoked, None).await?;
 				}
 				Base::Ns => {
 					let key = crate::key::namespace::access::gr::new(opt.ns()?, &stmt.ac, gr);
 					txn.get_or_add_ns(opt.ns()?, opt.strict).await?;
-					txn.set(key, &grant, None).await?;
+					txn.set(key, &revoked, None).await?;
 				}
 				Base::Db => {
 					let key =
 						crate::key::database::access::gr::new(opt.ns()?, opt.db()?, &stmt.ac, gr);
 					txn.get_or_add_ns(opt.ns()?, opt.strict).await?;
 					txn.get_or_add_db(opt.ns()?, opt.db()?, opt.strict).await?;
-					txn.set(key, &grant, None).await?;
+					txn.set(key, &revoked, None).await?;
 				}
 				_ => {
 					return Err(Error::Unimplemented(
@@ -545,9 +571,10 @@ async fn compute_revoke(
 				}
 			};
 
-			Ok(Value::Object(grant.redacted().into()))
+			Ok(Value::Object(revoked.redacted().into()))
 		}
 		None => {
+			// Get all grants.
 			let grs =
 				match base {
 					Base::Root => txn.all_root_access_grants(&stmt.ac).await?,
@@ -558,13 +585,38 @@ async fn compute_revoke(
 							.to_string(),
 					)),
 				};
-			// Vector for keeping track of revoked grants.
-			let mut revoked: Vec<Value> = vec![];
-			for gr in grs.iter() {
-				let mut gr = gr.clone();
+
+			let mut revoked = Vec::new();
+			for gr in grs.into_iter() {
+				// If the grant is already revoked, it cannot be revoked again.
 				if gr.revocation.is_some() {
 					continue;
 				}
+
+				// If provided, check if grant matches conditions.
+				if let Some(cond) = &stmt.cond {
+					// Redact grant before evaluating conditions.
+					let redacted_gr = Value::Object(gr.redacted().to_owned().into());
+					if !cond
+						.compute(
+							stk,
+							ctx,
+							opt,
+							Some(&CursorDoc {
+								rid: None,
+								ir: None,
+								doc: redacted_gr.into(),
+							}),
+						)
+						.await?
+						.is_truthy()
+					{
+						// Skip grant if it does not match the provided conditions.
+						continue;
+					}
+				}
+
+				let mut gr = gr.clone();
 				gr.revocation = Some(Datetime::default());
 
 				// Revoke the grant.
@@ -595,7 +647,8 @@ async fn compute_revoke(
 							.to_string(),
 					)),
 				};
-				// Add grant to vector of revoked grants in redacted form.
+
+				// Store revoked version of the redacted grant.
 				revoked.push(Value::Object(gr.redacted().to_owned().into()));
 			}
 
@@ -703,7 +756,7 @@ impl AccessStatement {
 		match self {
 			AccessStatement::Grant(stmt) => compute_grant(stmt, ctx, opt, _doc).await,
 			AccessStatement::Show(stmt) => compute_show(stmt, stk, ctx, opt, _doc).await,
-			AccessStatement::Revoke(stmt) => compute_revoke(stmt, ctx, opt, _doc).await,
+			AccessStatement::Revoke(stmt) => compute_revoke(stmt, stk, ctx, opt, _doc).await,
 			AccessStatement::Purge(stmt) => compute_purge(stmt, ctx, opt, _doc).await,
 		}
 	}
@@ -726,6 +779,13 @@ impl Display for AccessStatement {
 					write!(f, " ON {v}")?;
 				}
 				write!(f, " SHOW")?;
+				match &stmt.gr {
+					Some(v) => write!(f, " GRANT {v}")?,
+					None => match &stmt.cond {
+						Some(v) => write!(f, " {v}")?,
+						None => write!(f, " ALL")?,
+					},
+				};
 				Ok(())
 			}
 			Self::Revoke(stmt) => {
@@ -736,7 +796,10 @@ impl Display for AccessStatement {
 				write!(f, " REVOKE")?;
 				match &stmt.gr {
 					Some(v) => write!(f, " GRANT {v}")?,
-					None => write!(f, " ALL")?,
+					None => match &stmt.cond {
+						Some(v) => write!(f, " {v}")?,
+						None => write!(f, " ALL")?,
+					},
 				};
 				Ok(())
 			}
@@ -750,11 +813,11 @@ impl Display for AccessStatement {
 					(true, false) => write!(f, " EXPIRED")?,
 					(false, true) => write!(f, " REVOKED")?,
 					(true, true) => write!(f, " ALL")?,
-					// This case should not parse
+					// This case should not parse.
 					(false, false) => write!(f, " NONE")?,
 				};
 				if !stmt.grace.is_zero() {
-					write!(f, " SINCE {}", stmt.grace)?;
+					write!(f, " FOR {}", stmt.grace)?;
 				}
 				Ok(())
 			}

@@ -2520,19 +2520,33 @@ fn parse_access_grant() {
 
 #[test]
 fn parse_access_show() {
-	// Default
+	// All
 	{
-		let res = test_parse!(parse_stmt, r#"ACCESS a ON DATABASE SHOW"#).unwrap();
+		let res = test_parse!(parse_stmt, r#"ACCESS a ON DATABASE SHOW ALL"#).unwrap();
 		assert_eq!(
 			res,
 			Statement::Access(AccessStatement::Show(AccessStatementShow {
 				ac: Ident("a".to_string()),
 				base: Some(Base::Db),
+				gr: None,
 				cond: None,
 			}))
 		);
 	}
-	// Filtered
+	// Grant
+	{
+		let res = test_parse!(parse_stmt, r#"ACCESS a ON DATABASE SHOW GRANT b"#).unwrap();
+		assert_eq!(
+			res,
+			Statement::Access(AccessStatement::Show(AccessStatementShow {
+				ac: Ident("a".to_string()),
+				base: Some(Base::Db),
+				gr: Some(Ident("b".to_string())),
+				cond: None,
+			}))
+		);
+	}
+	// Condition
 	{
 		let res = test_parse!(parse_stmt, r#"ACCESS a ON DATABASE SHOW WHERE true"#).unwrap();
 		assert_eq!(
@@ -2540,6 +2554,7 @@ fn parse_access_show() {
 			Statement::Access(AccessStatement::Show(AccessStatementShow {
 				ac: Ident("a".to_string()),
 				base: Some(Base::Db),
+				gr: None,
 				cond: Some(Cond(Value::Bool(true))),
 			}))
 		);
@@ -2557,6 +2572,7 @@ fn parse_access_revoke() {
 				ac: Ident("a".to_string()),
 				base: Some(Base::Db),
 				gr: None,
+				cond: None,
 			}))
 		);
 	}
@@ -2569,6 +2585,20 @@ fn parse_access_revoke() {
 				ac: Ident("a".to_string()),
 				base: Some(Base::Db),
 				gr: Some(Ident("b".to_string())),
+				cond: None,
+			}))
+		);
+	}
+	// Condition
+	{
+		let res = test_parse!(parse_stmt, r#"ACCESS a ON DATABASE REVOKE WHERE true"#).unwrap();
+		assert_eq!(
+			res,
+			Statement::Access(AccessStatement::Revoke(AccessStatementRevoke {
+				ac: Ident("a".to_string()),
+				base: Some(Base::Db),
+				gr: Some(Ident("b".to_string())),
+				cond: Some(Cond(Value::Bool(true))),
 			}))
 		);
 	}
