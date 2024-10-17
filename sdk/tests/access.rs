@@ -49,15 +49,15 @@ async fn access_bearer_operations() {
 			ACCESS api ON {base} GRANT FOR USER tobie;
 			ACCESS api GRANT FOR USER tobie;
 			ACCESS api GRANT FOR USER tobie;
-			ACCESS api ON {base} SHOW;
-			ACCESS api SHOW;
+			ACCESS api ON {base} SHOW ALL;
+			ACCESS api SHOW ALL;
 			-- Should fail
 			ACCESS invalid ON {base} GRANT FOR USER tobie;
 			ACCESS invalid GRANT FOR USER tobie;
 			ACCESS api ON {base} GRANT FOR USER invalid;
 			ACCESS api GRANT FOR USER invalid;
-			ACCESS invalid ON {base} SHOW;
-			ACCESS invalid SHOW;
+			ACCESS invalid ON {base} SHOW ALL;
+			ACCESS invalid SHOW ALL;
 		"
 		);
 		let dbs = new_ds().await.unwrap();
@@ -216,9 +216,11 @@ async fn access_bearer_revoke() {
 			-- Initial setup
 			DEFINE ACCESS api ON {base} TYPE BEARER FOR USER;
 			DEFINE USER tobie ON {base} PASSWORD 'secret' ROLES EDITOR;
+			DEFINE USER jamie ON {base} PASSWORD 'secret' ROLES EDITOR;
 			ACCESS api ON {base} GRANT FOR USER tobie;
 			ACCESS api ON {base} GRANT FOR USER tobie;
 			ACCESS api ON {base} GRANT FOR USER tobie;
+			ACCESS api ON {base} GRANT FOR USER jamie;
 		"
 		);
 		let dbs = new_ds().await.unwrap();
@@ -232,13 +234,15 @@ async fn access_bearer_revoke() {
 		// Consume the results of the setup statements
 		res.remove(0).result.unwrap();
 		res.remove(0).result.unwrap();
+		res.remove(0).result.unwrap();
 		// Retrieve the first generated bearer grant
 		let tmp = res.remove(0).result.unwrap().to_string();
 		let re =
 			Regex::new(r"\{ ac: 'api', creation: .*?, expiration: NONE, grant: \{ id: '(.*?)', key: .*? \}, id: .*?, revocation: NONE, subject: \{ user: 'tobie' \} \}")
 					.unwrap();
 		let kid = re.captures(&tmp).unwrap().get(1).unwrap().as_str();
-		// Consume the results of the other two
+		// Consume the results of the other three
+		res.remove(0).result.unwrap();
 		res.remove(0).result.unwrap();
 		res.remove(0).result.unwrap();
 		// Revoke the first bearer grant
@@ -261,6 +265,17 @@ async fn access_bearer_revoke() {
 		let ok = Regex::new(&format!(
 			r"\[\{{ ac: 'api', .*?, id: '{kid}', revocation: d'.*?', .*? \}}\]"
 		))
+		.unwrap();
+		assert!(ok.is_match(&tmp), "Output '{}' doesn't match regex '{}'", tmp, ok);
+		// Revoke all bearer grants for a specific user
+		let res = &mut dbs
+			.execute(&format!("ACCESS api REVOKE WHERE subject.user = 'jamie'"), &ses, None)
+			.await
+			.unwrap();
+		let tmp = res.remove(0).result.unwrap().to_string();
+		let ok = Regex::new(
+			r"\[\{ ac: 'api', .*?, revocation: d'.*?', subject: \{ user: 'jamie' \} \}\]",
+		)
 		.unwrap();
 		assert!(ok.is_match(&tmp), "Output '{}' doesn't match regex '{}'", tmp, ok);
 		// Revoke the rest of the bearer grants
