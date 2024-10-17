@@ -3,6 +3,10 @@ use std::cmp::min;
 pub trait StringDistance {
 	/// Retrieve the levenshtein distance of this &str compared to another &str
 	fn levenshtein(&self, other: &str) -> i64;
+
+	/// Retrieve the hamming distance of this &str compared to another &str
+	/// Returns an Err if the lengths of this &str and the other &str are not equal
+	fn hamming(&self, other: &str) -> Result<i64, ()>;
 }
 
 impl StringDistance for str {
@@ -42,13 +46,21 @@ impl StringDistance for str {
 
 		return distance;
 	}
+
+	fn hamming(&self, other: &str) -> Result<i64, ()> {
+		if self.chars().count() != other.chars().count() {
+			return Err(());
+		}
+
+		Ok(self.chars().zip(other.chars()).map(|(a, b)| (a != b) as i64).sum::<i64>())
+	}
 }
 
 #[cfg(test)]
 mod tests {
 	use super::*;
 
-	// Levenshtein distance test cases from strsim, too.
+	// Levenshtein & Hamming distance test cases from the strsim crate
 
 	#[test]
 	fn levenshtein_empty() {
@@ -91,5 +103,39 @@ mod tests {
 	#[test]
 	fn levenshtein_second_empty() {
 		assert_eq!(6, "kitten".levenshtein(""));
+	}
+
+	fn assert_hamming_dist(dist: i64, str1: &str, str2: &str) {
+		assert_eq!(Ok(dist), str1.hamming(str2));
+	}
+
+	#[test]
+	fn hamming_empty() {
+		assert_hamming_dist(0, "", "")
+	}
+
+	#[test]
+	fn hamming_same() {
+		assert_hamming_dist(0, "hamming", "hamming")
+	}
+
+	#[test]
+	fn hamming_diff() {
+		assert_hamming_dist(3, "hamming", "hammers")
+	}
+
+	#[test]
+	fn hamming_diff_multibyte() {
+		assert_hamming_dist(2, "hamming", "h香mmüng");
+	}
+
+	#[test]
+	fn hamming_unequal_length() {
+		assert_eq!(Err(()), "ham".hamming("hamming"));
+	}
+
+	#[test]
+	fn hamming_names() {
+		assert_hamming_dist(14, "Friedrich Nietzs", "Jean-Paul Sartre")
 	}
 }
