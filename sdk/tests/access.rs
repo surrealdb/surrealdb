@@ -253,7 +253,10 @@ async fn access_bearer_revoke() {
 		let tmp = res.remove(0).result.unwrap_err();
 		assert_eq!(tmp.to_string(), "This access grant has been revoked");
 		// Ensure that only that bearer grant is revoked
-		let res = &mut dbs.execute(&format!("ACCESS api SHOW REVOKED"), &ses, None).await.unwrap();
+		let res = &mut dbs
+			.execute(&format!("ACCESS api SHOW WHERE revocation IS NOT NONE"), &ses, None)
+			.await
+			.unwrap();
 		let tmp = res.remove(0).result.unwrap().to_string();
 		let ok = Regex::new(&format!(
 			r"\[\{{ ac: 'api', .*?, id: '{kid}', revocation: d'.*?', .*? \}}\]"
@@ -269,7 +272,10 @@ async fn access_bearer_revoke() {
 		.unwrap();
 		assert!(ok.is_match(&tmp), "Output '{}' doesn't match regex '{}'", tmp, ok);
 		// Ensure that all bearer grants are now revoked
-		let res = &mut dbs.execute(&format!("ACCESS api SHOW REVOKED"), &ses, None).await.unwrap();
+		let res = &mut dbs
+			.execute(&format!("ACCESS api SHOW WHERE revocation IS NOT NONE"), &ses, None)
+			.await
+			.unwrap();
 		let tmp = res.remove(0).result.unwrap().to_string();
 		let ok = Regex::new(r"\[\{ ac: 'api', .*?, revocation: d'.*?', .*? \}, \{ ac: 'api', .*?, revocation: d'.*?', .*? \}, \{ ac: 'api', .*?, revocation: d'.*?', .*? \}\]").unwrap();
 

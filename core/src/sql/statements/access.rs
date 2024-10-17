@@ -77,6 +77,7 @@ pub struct AccessStatementRevoke {
 	pub ac: Ident,
 	pub base: Option<Base>,
 	pub gr: Option<Ident>,
+	// TODO(PR): Allow arbitrary conditions here.
 }
 
 // TODO(gguillemas): Document once bearer access is no longer experimental.
