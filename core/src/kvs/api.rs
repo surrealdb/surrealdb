@@ -362,7 +362,7 @@ pub trait Transaction {
 	}
 
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.sprint()))]
-	async fn batch_all_versions<K>(&mut self, rng: Range<K>, batch: u32) -> Result<Batch, Error>
+	async fn batch_versions<K>(&mut self, rng: Range<K>, batch: u32) -> Result<Batch, Error>
 	where
 		K: Into<Key> + Sprintable + Debug,
 	{
