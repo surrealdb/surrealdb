@@ -14,7 +14,7 @@ impl js::module::ModuleDef for Package {
 		decls.declare("bool")?;
 		decls.declare("enum")?;
 		decls.declare("float")?;
-		decls.declare("guid")?;
+		decls.declare("id")?;
 		decls.declare("int")?;
 		decls.declare("string")?;
 		decls.declare("time")?;
@@ -36,9 +36,9 @@ impl js::module::ModuleDef for Package {
 		let value = crate::fnc::script::modules::impl_module_def!(ctx, "rand", "float", run,);
 		exports.export("float", value.clone())?;
 		default.set("float", value)?;
-		let value = crate::fnc::script::modules::impl_module_def!(ctx, "rand", "guid", run,);
-		exports.export("guid", value.clone())?;
-		default.set("guid", value)?;
+		let value = crate::fnc::script::modules::impl_module_def!(ctx, "rand", "id", run,);
+		exports.export("id", value.clone())?;
+		default.set("id", value)?;
 		let value = crate::fnc::script::modules::impl_module_def!(ctx, "rand", "int", run,);
 		exports.export("int", value.clone())?;
 		default.set("int", value)?;
