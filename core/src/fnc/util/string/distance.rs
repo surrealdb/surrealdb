@@ -1,11 +1,11 @@
 use std::cmp::min;
 
-pub trait Levenshtein {
+pub trait StringDistance {
 	/// Retrieve the levenshtein distance of this &str compared to another &str
 	fn levenshtein(&self, other: &str) -> i64;
 }
 
-impl Levenshtein for str {
+impl StringDistance for str {
 	/// Retrieve the levenshtein distance of this &str compared to another &str
 	///
 	/// The implementation is loosely based on the implementation found in the

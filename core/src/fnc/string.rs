@@ -153,7 +153,7 @@ pub fn words((string,): (String,)) -> Result<Value, Error> {
 pub mod distance {
 
 	use crate::err::Error;
-	use crate::fnc::util::string::levenshtein::Levenshtein;
+	use crate::fnc::util::string::distance::StringDistance;
 	use crate::sql::Value;
 
 	pub fn hamming((_, _): (String, String)) -> Result<Value, Error> {
