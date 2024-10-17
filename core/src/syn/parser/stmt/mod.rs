@@ -386,80 +386,13 @@ impl Parser<'_> {
 			}
 			t!("SHOW") => {
 				self.pop_peek();
-
-				if self.eat(t!("GRANT")) {
-					return Ok(AccessStatement::Show(AccessStatementShow {
-						ac,
-						base,
-						id: Some(self.next_token_value()?),
-						..Default::default()
-					}));
-				}
-
-				let mut show = AccessStatementShow {
+				let cond = self.try_parse_condition(ctx).await?;
+				return Ok(AccessStatement::Show(AccessStatementShow {
 					ac,
 					base,
+					cond,
 					..Default::default()
-				};
-
-				match self.peek_kind() {
-					t!("ALL") => {
-						self.pop_peek();
-						show.active = true;
-						show.expired = true;
-						show.revoked = true;
-					}
-					t!("EXPIRED") => {
-						self.pop_peek();
-						show.expired = true;
-						if self.eat(t!("SINCE")) {
-							show.expired_since = Some(self.next_token_value()?);
-						}
-					}
-					t!("REVOKED") => {
-						self.pop_peek();
-						show.revoked = true;
-						if self.eat(t!("SINCE")) {
-							show.revoked_since = Some(self.next_token_value()?);
-						}
-					}
-					// By default, show only active grants.
-					_ => {
-						show.active = true;
-					}
-				};
-
-				loop {
-					match self.peek_kind() {
-						t!("FOR") => {
-							self.pop_peek();
-							match self.peek_kind() {
-								t!("USER") => {
-									self.pop_peek();
-									let user = self.next_token_value()?;
-									show.subject = Some(Subject::User(user));
-								}
-								t!("RECORD") => {
-									self.pop_peek();
-									let rid = ctx.run(|ctx| self.parse_thing(ctx)).await?;
-									show.subject = Some(Subject::Record(rid));
-								}
-								_ => unexpected!(self, peek, "either USER or RECORD"),
-							}
-						}
-						t!("AFTER") => {
-							self.pop_peek();
-							show.created_after = Some(self.next_token_value()?);
-						}
-						t!("BEFORE") => {
-							self.pop_peek();
-							show.created_before = Some(self.next_token_value()?);
-						}
-						_ => break,
-					}
-				}
-
-				Ok(AccessStatement::Show(show))
+				}));
 			}
 			t!("REVOKE") => {
 				self.pop_peek();

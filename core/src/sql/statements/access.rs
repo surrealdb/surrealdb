@@ -5,10 +5,11 @@ use crate::err::Error;
 use crate::iam::{Action, ResourceKind};
 use crate::sql::access_type::BearerAccessSubject;
 use crate::sql::{
-	AccessType, Array, Base, Datetime, Duration, Ident, Object, Strand, Thing, Uuid, Value,
+	AccessType, Array, Base, Cond, Datetime, Duration, Ident, Object, Strand, Thing, Uuid, Value,
 };
 use derive::Store;
 use rand::Rng;
+use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
@@ -51,15 +52,7 @@ pub enum AccessStatement {
 pub struct AccessStatementShow {
 	pub ac: Ident,
 	pub base: Option<Base>,
-	pub active: bool,
-	pub expired: bool,
-	pub revoked: bool,
-	pub created_after: Option<Datetime>,
-	pub created_before: Option<Datetime>,
-	pub expired_since: Option<Datetime>,
-	pub revoked_since: Option<Datetime>,
-	pub subject: Option<Subject>,
-	pub id: Option<Ident>,
+	pub cond: Option<Cond>,
 }
 
 // TODO(gguillemas): Document once bearer access is no longer experimental.
@@ -405,6 +398,7 @@ async fn compute_grant(
 
 async fn compute_show(
 	stmt: &AccessStatementShow,
+	stk: &mut Stk,
 	ctx: &Context,
 	opt: &Options,
 	_doc: Option<&CursorDoc>,
@@ -432,24 +426,6 @@ async fn compute_show(
 		}
 	};
 
-	// If a specific grant was provided, return the grant.
-	if let Some(id) = &stmt.id {
-		let gr = match base {
-			Base::Root => txn.get_root_access_grant(&stmt.ac, id).await?,
-			Base::Ns => txn.get_ns_access_grant(opt.ns()?, &stmt.ac, id).await?,
-			Base::Db => txn.get_db_access_grant(opt.ns()?, opt.db()?, &stmt.ac, id).await?,
-			_ => {
-				return Err(Error::Unimplemented(
-					"Managing access methods outside of root, namespace and database levels"
-						.to_string(),
-				))
-			}
-		};
-
-		return Ok(Value::Object(gr.redacted().into()));
-	};
-
-	// Otherwise, get all grants for the access method.
 	let grs = match base {
 		Base::Root => txn.all_root_access_grants(&stmt.ac).await?,
 		Base::Ns => txn.all_ns_access_grants(opt.ns()?, &stmt.ac).await?,
@@ -462,22 +438,33 @@ async fn compute_show(
 		}
 	};
 
-	// Apply the provided filters.
-	let grs: Vec<&AccessGrant> = grs
-		.iter()
-		.filter(|gr| {
-			(stmt.subject.is_none() || stmt.subject == gr.subject)
-				&& stmt.created_after.as_ref().map_or(true, |t| t < &gr.creation)
-				&& stmt.created_before.as_ref().map_or(true, |t| t > &gr.creation)
-				&& (stmt.active == gr.is_active()
-					|| (stmt.expired == gr.is_expired() && stmt.expired_since < gr.expiration)
-					|| (stmt.revoked == gr.is_revoked() && stmt.revoked_since < gr.revocation))
-		})
-		.collect();
-
-	// Return the grants in redacted form.
+	// Redact grants before allowing any filtering.
 	let grants =
 		grs.iter().map(|v| Value::Object(v.redacted().to_owned().into())).collect::<Array>();
+
+	// Apply any conditions, if provided.
+	if let Some(cond) = &stmt.cond {
+		let mut grants_cond = Vec::new();
+		for gr in grants.into_iter() {
+			if cond
+				.compute(
+					stk,
+					ctx,
+					opt,
+					Some(&CursorDoc {
+						rid: None,
+						ir: None,
+						doc: gr.clone().into(),
+					}),
+				)
+				.await?
+				.is_truthy()
+			{
+				grants_cond.push(gr);
+			}
+		}
+		return Ok(Value::Array(grants_cond.into()));
+	}
 
 	Ok(Value::Array(grants))
 }
@@ -707,13 +694,14 @@ impl AccessStatement {
 	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
+		stk: &mut Stk,
 		ctx: &Context,
 		opt: &Options,
 		_doc: Option<&CursorDoc>,
 	) -> Result<Value, Error> {
 		match self {
 			AccessStatement::Grant(stmt) => compute_grant(stmt, ctx, opt, _doc).await,
-			AccessStatement::Show(stmt) => compute_show(stmt, ctx, opt, _doc).await,
+			AccessStatement::Show(stmt) => compute_show(stmt, stk, ctx, opt, _doc).await,
 			AccessStatement::Revoke(stmt) => compute_revoke(stmt, ctx, opt, _doc).await,
 			AccessStatement::Purge(stmt) => compute_purge(stmt, ctx, opt, _doc).await,
 		}
