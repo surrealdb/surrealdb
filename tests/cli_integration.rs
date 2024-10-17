@@ -6,12 +6,16 @@ mod cli_integration {
 	use assert_fs::prelude::{FileTouch, FileWriteStr, PathChild};
 	use chrono::Duration as ChronoDuration;
 	use chrono::Utc;
+	#[cfg(unix)]
 	use common::Format;
+	#[cfg(unix)]
 	use common::Socket;
 	use jsonwebtoken::{encode, Algorithm, EncodingKey, Header};
 	use serde::{Deserialize, Serialize};
+	#[cfg(unix)]
 	use serde_json::json;
 	use std::fs::File;
+	#[cfg(unix)]
 	use std::time;
 	use std::time::Duration;
 	use surrealdb::fflags::FFLAGS;
@@ -1036,6 +1040,7 @@ mod cli_integration {
 		assert!(common::run_in_dir("validate", &temp_dir).output().is_err());
 	}
 
+	#[cfg(unix)]
 	#[test(tokio::test)]
 	async fn test_server_graceful_shutdown() {
 		let (_, mut server) = common::start_server_with_defaults().await.unwrap();
@@ -1063,6 +1068,7 @@ mod cli_integration {
 		}
 	}
 
+	#[cfg(unix)]
 	#[test(tokio::test)]
 	async fn test_server_second_signal_handling() {
 		let (addr, mut server) = common::start_server_without_auth().await.unwrap();
