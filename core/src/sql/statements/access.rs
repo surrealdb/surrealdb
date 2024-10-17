@@ -461,7 +461,7 @@ async fn compute_show(
 				};
 
 			let mut show = Vec::new();
-			for gr in grs.into_iter() {
+			for gr in grs.iter() {
 				// If provided, check if grant matches conditions.
 				if let Some(cond) = &stmt.cond {
 					// Redact grant before evaluating conditions.
@@ -587,7 +587,7 @@ async fn compute_revoke(
 				};
 
 			let mut revoked = Vec::new();
-			for gr in grs.into_iter() {
+			for gr in grs.iter() {
 				// If the grant is already revoked, it cannot be revoked again.
 				if gr.revocation.is_some() {
 					continue;

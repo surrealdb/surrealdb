@@ -2597,7 +2597,7 @@ fn parse_access_revoke() {
 			Statement::Access(AccessStatement::Revoke(AccessStatementRevoke {
 				ac: Ident("a".to_string()),
 				base: Some(Base::Db),
-				gr: Some(Ident("b".to_string())),
+				gr: None,
 				cond: Some(Cond(Value::Bool(true))),
 			}))
 		);
