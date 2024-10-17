@@ -153,6 +153,7 @@ pub fn words((string,): (String,)) -> Result<Value, Error> {
 pub mod distance {
 
 	use crate::err::Error;
+	use crate::fnc::util::string::levenshtein::Levenshtein;
 	use crate::sql::Value;
 
 	pub fn hamming((_, _): (String, String)) -> Result<Value, Error> {
@@ -161,10 +162,8 @@ pub mod distance {
 		})
 	}
 
-	pub fn levenshtein((_, _): (String, String)) -> Result<Value, Error> {
-		Err(Error::FeatureNotYetImplemented {
-			feature: "string::distance::levenshtein() function".to_string(),
-		})
+	pub fn levenshtein((a, b): (String, String)) -> Result<Value, Error> {
+		Ok(a.as_str().levenshtein(b.as_str()).into())
 	}
 }
 
