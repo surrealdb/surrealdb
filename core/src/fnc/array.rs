@@ -571,16 +571,30 @@ pub async fn reduce(
 	(array, mapper): (Array, Closure),
 ) -> Result<Value, Error> {
 	if let Some(opt) = opt {
-		// Get the first item
-		let mut iter = array.into_iter().enumerate();
-		let Some((_, mut accum)) = iter.next() else {
-			return Ok(Value::None);
-		};
-		for (i, val) in iter {
-			let fnc = Function::Anonymous(mapper.clone().into(), vec![accum, val, i.into()]);
-			accum = fnc.compute(stk, ctx, opt, doc).await?;
+		match array.len() {
+			0 => Ok(Value::None),
+			1 => {
+				let Some(val) = array.into_iter().next() else {
+					return Err(Error::Unreachable(
+						"Iterator should have an item at this point".into(),
+					));
+				};
+				Ok(val)
+			}
+			_ => {
+				// Get the first item
+				let mut iter = array.into_iter().enumerate();
+				let Some((_, mut accum)) = iter.next() else {
+					return Ok(Value::None);
+				};
+				for (i, val) in iter {
+					let fnc =
+						Function::Anonymous(mapper.clone().into(), vec![accum, val, i.into()]);
+					accum = fnc.compute(stk, ctx, opt, doc).await?;
+				}
+				Ok(accum)
+			}
 		}
-		Ok(accum)
 	} else {
 		Ok(Value::None)
 	}
