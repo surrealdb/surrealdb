@@ -7,8 +7,11 @@ use crate::{
 		filter::Filter,
 		index::{Distance, MTreeParams, SearchParams, VectorType},
 		language::Language,
+		order::{OrderList, Ordering},
 		statements::{
-			analyze::AnalyzeStatement, show::ShowSince, show::ShowStatement, sleep::SleepStatement,
+			analyze::AnalyzeStatement,
+			show::{ShowSince, ShowStatement},
+			sleep::SleepStatement,
 			BeginStatement, BreakStatement, CancelStatement, CommitStatement, ContinueStatement,
 			CreateStatement, DefineAccessStatement, DefineAnalyzerStatement,
 			DefineDatabaseStatement, DefineEventStatement, DefineFieldStatement,
@@ -22,7 +25,7 @@ use crate::{
 		tokenizer::Tokenizer,
 		Algorithm, Array, Base, Block, Cond, Data, Datetime, Dir, Duration, Edges, Explain,
 		Expression, Fetch, Fetchs, Field, Fields, Future, Graph, Group, Groups, Id, Ident, Idiom,
-		Idioms, Index, Kind, Limit, Number, Object, Operator, Order, Orders, Output, Param, Part,
+		Idioms, Index, Kind, Limit, Number, Object, Operator, Order, Output, Param, Part,
 		Permission, Permissions, Scoring, Split, Splits, Start, Statement, Strand, Subquery, Table,
 		TableType, Tables, Thing, Timeout, Uuid, Value, Values, Version, With,
 	},
@@ -499,13 +502,12 @@ fn statements() -> Vec<Statement> {
 				Group(Idiom(vec![Part::Field(Ident("foo".to_owned()))])),
 				Group(Idiom(vec![Part::Field(Ident("bar".to_owned()))])),
 			])),
-			order: Some(Orders(vec![Order {
-				order: Idiom(vec![Part::Field(Ident("foo".to_owned()))]),
-				random: false,
+			order: Some(Ordering::Order(OrderList(vec![Order {
+				value: Idiom(vec![Part::Field(Ident("foo".to_owned()))]),
 				collate: true,
 				numeric: true,
 				direction: true,
-			}])),
+			}]))),
 			limit: Some(Limit(Value::Thing(Thing {
 				tb: "a".to_owned(),
 				id: Id::from("b"),

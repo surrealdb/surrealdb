@@ -10,8 +10,9 @@ use crate::kvs::Transaction;
 use crate::sql::index::Index;
 use crate::sql::statements::{DefineFieldStatement, DefineIndexStatement};
 use crate::sql::{
-	Array, Cond, Expression, Idiom, Kind, Number, Operator, Order, Orders, Part, Subquery, Table,
-	Value, With,
+	order::{OrderList, Ordering},
+	Array, Cond, Expression, Idiom, Kind, Number, Operator, Order, Part, Subquery, Table, Value,
+	With,
 };
 use reblessive::tree::Stk;
 use std::collections::HashMap;
@@ -42,7 +43,7 @@ impl Tree {
 		table: &'a Table,
 		cond: Option<&Cond>,
 		with: Option<&With>,
-		order: Option<&Orders>,
+		order: Option<&Ordering>,
 	) -> Result<Self, Error> {
 		let mut b = TreeBuilder::new(ctx, opt, table, with, order);
 		if let Some(cond) = cond {
@@ -104,14 +105,14 @@ impl<'a> TreeBuilder<'a> {
 		opt: &'a Options,
 		table: &'a Table,
 		with: Option<&'a With>,
-		orders: Option<&'a Orders>,
+		orders: Option<&'a Ordering>,
 	) -> Self {
 		let with_indexes = match with {
 			Some(With::Index(ixs)) => Some(Vec::with_capacity(ixs.len())),
 			_ => None,
 		};
-		let first_order = if let Some(o) = orders {
-			o.0.first()
+		let first_order = if let Some(Ordering::Order(OrderList(o))) = orders {
+			o.first()
 		} else {
 			None
 		};
@@ -155,8 +156,8 @@ impl<'a> TreeBuilder<'a> {
 
 	async fn eval_order(&mut self) -> Result<(), Error> {
 		if let Some(o) = self.first_order {
-			if !o.random && o.direction {
-				if let Node::IndexedField(id, irf) = self.resolve_idiom(&o.order).await? {
+			if o.direction {
+				if let Node::IndexedField(id, irf) = self.resolve_idiom(&o.value).await? {
 					for (ix_ref, id_col) in &irf {
 						if *id_col == 0 {
 							self.index_map.order_limit = Some(IndexOption::new(

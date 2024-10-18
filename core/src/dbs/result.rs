@@ -6,7 +6,8 @@ use crate::dbs::store::file_store::FileCollector;
 use crate::dbs::store::MemoryCollector;
 use crate::dbs::{Options, Statement};
 use crate::err::Error;
-use crate::sql::{Orders, Value};
+use crate::sql::order::Ordering;
+use crate::sql::Value;
 use reblessive::tree::Stk;
 
 pub(super) enum Results {
@@ -59,7 +60,7 @@ impl Results {
 		Ok(())
 	}
 
-	pub(super) fn sort(&mut self, orders: &Orders) {
+	pub(super) fn sort(&mut self, orders: &Ordering) {
 		match self {
 			Self::Memory(m) => m.sort(orders),
 			#[cfg(storage)]
