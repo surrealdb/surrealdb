@@ -136,6 +136,10 @@ impl<'a> Statement<'a> {
 	pub fn is_retryable(&self) -> bool {
 		matches!(self, Statement::Insert(_) if self.data().is_some())
 	}
+	/// Returns whether the IGNORE clause is et
+	pub fn is_ignore(&self) -> bool {
+		matches!(self, Statement::Insert(i) if i.ignore)
+	}
 	/// Returns any query fields if specified
 	pub fn expr(&self) -> Option<&Fields> {
 		match self {
