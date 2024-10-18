@@ -67,13 +67,14 @@ impl Transaction {
 		cfg: Config,
 		chn: Sender<Vec<u8>>,
 	) -> Result<(), Error> {
-		self.export_header_sections(&cfg, &chn, &ns, &db).await?;
+		// Output USERS, ACCESSES, PARAMS, FUNCTIONS, ANALYZERS
+		self.export_metadata(&cfg, &chn, &ns, &db).await?;
 		// Output TABLES
 		self.export_tables(ns, db, &cfg, &chn).await?;
 		Ok(())
 	}
 
-	async fn export_header_sections(
+	async fn export_metadata(
 		&self,
 		cfg: &Config,
 		chn: &Sender<Vec<u8>>,
@@ -244,10 +245,11 @@ impl Transaction {
 		records_relate: &mut Vec<String>,
 		records_normal: &mut Vec<String>,
 		is_tombstone: Option<bool>,
-		ts: Option<u64>,
+		version: Option<u64>,
 	) -> String {
 		match (v.pick(&*EDGE), v.pick(&*IN), v.pick(&*OUT)) {
 			(Value::Bool(true), Value::Thing(_), Value::Thing(_)) => {
+				// TODO:: Check if relation also can be defined using version
 				records_relate.push(v.to_string());
 				String::new()
 			}
@@ -256,7 +258,11 @@ impl Transaction {
 					if is_tombstone {
 						format!("DELETE {};", v.pick(&*ID))
 					} else {
-						format!("INSERT {} VERSION d'{:?}';", v, Duration::from_nanos(ts.unwrap()))
+						format!(
+							"INSERT {} VERSION d'{:?}';",
+							v,
+							Duration::from_nanos(version.unwrap())
+						)
 					}
 				} else {
 					records_normal.push(v.to_string());
@@ -279,14 +285,14 @@ impl Transaction {
 
 		chn.send(bytes!("BEGIN")).await?;
 
-		for (_, v, ts, is_tombstone) in versioned_values {
+		for (_, v, version, is_tombstone) in versioned_values {
 			let v: Value = (&v).into();
 			let sql = Self::process_value(
 				v,
 				&mut records_relate,
 				&mut Vec::new(),
 				Some(is_tombstone),
-				Some(ts),
+				Some(version),
 			);
 			if !sql.is_empty() {
 				chn.send(bytes!(sql)).await?;
