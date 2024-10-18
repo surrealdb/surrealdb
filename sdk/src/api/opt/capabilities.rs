@@ -7,19 +7,19 @@ use surrealdb_core::dbs::capabilities::{
 	ParseNetTargetError, Targets,
 };
 
-/// Capabilities are used to limit what a user can do to the system.
+/// Capabilities are used to limit what users are allowed to do using queries.
 ///
-/// Capabilities are split into 4 categories:
-/// - Scripting: Whether or not the user can execute scripts
-/// - Guest access: Whether or not a non-authenticated user can execute queries on the system when authentication is enabled.
-/// - Functions: Whether or not the user can execute certain functions
-/// - Network: Whether or not the user can access certain network addresses
+/// Capabilities are split into categories:
+/// - Scripting: Whether or not users can execute scripts
+/// - Guest access: Whether or not unauthenticated users can execute queries
+/// - Functions: Whether or not users can execute certain functions
+/// - Network: Whether or not users can connect to certain network addresses
 ///
 /// Capabilities are configured globally. By default, capabilities are configured as:
 /// - Scripting: false
 /// - Guest access: false
 /// - Functions: All functions are allowed
-/// - Network: No network address is allowed nor denied, hence all network addresses are denied unless explicitly allowed
+/// - Network: No network address is allowed, all are impliticly denied
 ///
 /// The capabilities are defined using allow/deny lists for fine-grained control.
 ///

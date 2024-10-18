@@ -187,7 +187,6 @@ async fn update_complex_with_input() -> Result<(), Error> {
 			TYPE array
 			ASSERT array::len($value) > 0
 		;
-		REMOVE FIELD images.* ON product;
 		DEFINE FIELD images.* ON product TYPE string
 			VALUE string::trim($input)
 			ASSERT $input AND string::len($value) > 0
@@ -195,7 +194,7 @@ async fn update_complex_with_input() -> Result<(), Error> {
 		CREATE product:test SET images = [' test.png '];
 	";
 	let mut t = Test::new(sql).await?;
-	t.skip_ok(3)?;
+	t.skip_ok(2)?;
 	t.expect_val(
 		"[
 			{
@@ -779,4 +778,69 @@ async fn check_permissions_auth_disabled() {
 			res
 		);
 	}
+}
+
+#[tokio::test]
+async fn update_field_permissions() -> Result<(), Error> {
+	let dbs = new_ds().await?;
+
+	let sql = r#"
+		DEFINE TABLE data PERMISSIONS FULL;
+		DEFINE FIELD private ON data TYPE string PERMISSIONS FOR UPDATE FULL, FOR SELECT NONE;
+		CREATE data:1 SET public = "public", private = "private";
+
+		DEFINE ACCESS user ON DATABASE TYPE RECORD;
+		DEFINE TABLE user PERMISSIONS FULL;
+		CREATE user:1;
+	"#;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 6);
+	//
+	let _ = res.remove(0).result?;
+	let _ = res.remove(0).result?;
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
+			{
+				id: data:1,
+				public: 'public',
+				private: 'private'
+			}
+		]",
+	);
+	assert_eq!(tmp, val);
+	//
+	let _ = res.remove(0).result?;
+	let _ = res.remove(0).result?;
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
+			{
+				id: user:1
+			}
+		]",
+	);
+	assert_eq!(tmp, val);
+
+	let sql = r#"
+		UPDATE data:1 SET public = private;
+	"#;
+	let ses = Session::for_record("test", "test", "user", Value::parse("user:1"));
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 1);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
+			{
+				id: data:1
+			}
+		]",
+	);
+	assert_eq!(tmp, val);
+
+	Ok(())
 }

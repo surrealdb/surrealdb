@@ -187,7 +187,6 @@ async fn update_complex_with_input() -> Result<(), Error> {
 			TYPE array
 			ASSERT array::len($value) > 0
 		;
-		REMOVE FIELD images.* ON product;
 		DEFINE FIELD images.* ON product TYPE string
 			VALUE string::trim($input)
 			ASSERT $input AND string::len($value) > 0
@@ -195,7 +194,7 @@ async fn update_complex_with_input() -> Result<(), Error> {
 		CREATE product:test SET images = [' test.png '];
 	";
 	let mut t = Test::new(sql).await?;
-	t.skip_ok(3)?;
+	t.skip_ok(2)?;
 	t.expect_val(
 		"[
 			{

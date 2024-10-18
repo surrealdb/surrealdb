@@ -1298,3 +1298,90 @@ async fn select_field_from_graph_no_flattening() -> Result<(), Error> {
 	//
 	Ok(())
 }
+
+#[tokio::test]
+async fn select_field_value_permissions() -> Result<(), Error> {
+	let dbs = new_ds().await?;
+
+	let sql = r#"
+		DEFINE TABLE data PERMISSIONS FULL;
+		DEFINE FIELD private ON data TYPE string PERMISSIONS FOR SELECT NONE;
+		CREATE data:1 SET public = "public", private = "private";
+
+		DEFINE ACCESS user ON DATABASE TYPE RECORD;
+		DEFINE TABLE user PERMISSIONS FULL;
+		CREATE user:1;
+	"#;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 6);
+	//
+	let _ = res.remove(0).result?;
+	let _ = res.remove(0).result?;
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
+			{
+				id: data:1,
+				public: 'public',
+				private: 'private'
+			}
+		]",
+	);
+	assert_eq!(tmp, val);
+	//
+	let _ = res.remove(0).result?;
+	let _ = res.remove(0).result?;
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
+			{
+				id: user:1
+			}
+		]",
+	);
+	assert_eq!(tmp, val);
+
+	let sql = r#"
+		SELECT * FROM data WHERE id = data:1;
+		SELECT private AS public FROM data WHERE id = data:1;
+		SELECT public FROM data WHERE private = "private";
+		SELECT VALUE private FROM data WHERE id = data:1;
+	"#;
+	let ses = Session::for_record("test", "test", "user", Value::parse("user:1"));
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 4);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
+			{
+				id: data:1,
+				public: 'public'
+			}
+		]",
+	);
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
+			{
+				public: NONE
+			}
+		]",
+	);
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse("[]");
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse("[NONE]");
+	assert_eq!(tmp, val);
+
+	Ok(())
+}

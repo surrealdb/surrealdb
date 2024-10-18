@@ -1804,4 +1804,220 @@ mod http_integration {
 
 		Ok(())
 	}
+
+	#[test(tokio::test)]
+	async fn http_capabilities() {
+		use tokio::time;
+		// Deny some
+		{
+			// Start server disallowing routes for queries, exporting and importing
+			let (addr, _server) = common::start_server(StartServerArguments {
+				args: "--deny-http sql,export,import".to_string(),
+				// Auth disabled to ensure unauthorized errors are due to capabilities
+				auth: false,
+				..Default::default()
+			})
+			.await
+			.unwrap();
+
+			// Prepare HTTP client
+			let mut headers = reqwest::header::HeaderMap::new();
+			let ns = Ulid::new().to_string();
+			let db = Ulid::new().to_string();
+			headers.insert("surreal-ns", ns.parse().unwrap());
+			headers.insert("surreal-db", db.parse().unwrap());
+			headers.insert(header::ACCEPT, "application/json".parse().unwrap());
+			let client = reqwest::Client::builder()
+				.connect_timeout(Duration::from_millis(10))
+				.default_headers(headers)
+				.build()
+				.unwrap();
+			let base_url = &format!("http://{addr}");
+
+			// Check that denied routes are disallowed
+			let res = client
+				.post(format!("{base_url}/sql"))
+				.basic_auth(USER, Some(PASS))
+				.send()
+				.await
+				.unwrap();
+			assert_eq!(res.status(), 403, "body: {}", res.text().await.unwrap());
+			let res = client
+				.post(format!("{base_url}/import"))
+				.basic_auth(USER, Some(PASS))
+				.send()
+				.await
+				.unwrap();
+			assert_eq!(res.status(), 403, "body: {}", res.text().await.unwrap());
+			let res = client
+				.get(format!("{base_url}/export"))
+				.basic_auth(USER, Some(PASS))
+				.send()
+				.await
+				.unwrap();
+			assert_eq!(res.status(), 403, "body: {}", res.text().await.unwrap());
+
+			// Check that other routes are allowed
+			// GET
+			for route in ["status", "health", "version", "sync", "ml/export/test/1.0.0"] {
+				println!("Testing \"/{route}\" route...");
+
+				let res = client
+					.get(format!("{base_url}/{route}"))
+					.basic_auth(USER, Some(PASS))
+					.send()
+					.await
+					.unwrap();
+				assert_ne!(res.status(), 403, "body: {}", res.text().await.unwrap());
+			}
+			// POST
+			for route in ["signin", "signup", "key/test", "ml/import"] {
+				println!("Testing \"/{route}\" route...");
+
+				let res = client
+					.post(format!("{base_url}/{route}"))
+					.basic_auth(USER, Some(PASS))
+					.send()
+					.await
+					.unwrap();
+				assert_ne!(res.status(), 403, "body: {}", res.text().await.unwrap());
+			}
+			// WebSocket
+			println!("Testing \"/rpc\" route...");
+			client
+				.get(format!("{base_url}/rpc"))
+				.header(header::CONNECTION, "Upgrade")
+				.header(header::UPGRADE, "websocket")
+				.header(header::SEC_WEBSOCKET_VERSION, "13")
+				.header(header::SEC_WEBSOCKET_KEY, "dGhlIHNhbXBsZSBub25jZQ==")
+				.send()
+				.await
+				.unwrap()
+				.upgrade()
+				.await
+				.unwrap();
+		}
+		// Deny all
+		{
+			// Start server disallowing all routes except for RPC and health
+			let (addr, _server) = common::start_server(StartServerArguments {
+				args: "--deny-http --allow-http rpc,health".to_string(),
+				// Auth disabled to ensure unauthorized errors are due to capabilities
+				auth: false,
+				..Default::default()
+			})
+			.await
+			.unwrap();
+
+			// Prepare HTTP client
+			let mut headers = reqwest::header::HeaderMap::new();
+			let ns = Ulid::new().to_string();
+			let db = Ulid::new().to_string();
+			headers.insert("surreal-ns", ns.parse().unwrap());
+			headers.insert("surreal-db", db.parse().unwrap());
+			headers.insert(header::ACCEPT, "application/json".parse().unwrap());
+			let client = reqwest::Client::builder()
+				.connect_timeout(Duration::from_millis(10))
+				.default_headers(headers)
+				.build()
+				.unwrap();
+			let base_url = &format!("http://{addr}");
+
+			// Check that denied routes are disallowed
+			// GET
+			for route in ["version", "sync", "export", "ml/export/test/1.0.0"] {
+				println!("Testing \"/{route}\" route...");
+
+				let res = client
+					.get(format!("{base_url}/{route}"))
+					.basic_auth(USER, Some(PASS))
+					.send()
+					.await
+					.unwrap();
+				assert_eq!(res.status(), 403, "body: {}", res.text().await.unwrap());
+			}
+			// POST
+			for route in ["sql", "signin", "signup", "key/test", "import", "ml/import"] {
+				println!("Testing \"/{route}\" route...");
+
+				let res = client
+					.post(format!("{base_url}/{route}"))
+					.basic_auth(USER, Some(PASS))
+					.send()
+					.await
+					.unwrap();
+				assert_eq!(res.status(), 403, "body: {}", res.text().await.unwrap());
+			}
+			// WebSocket
+			println!("Testing \"/rpc\" route...");
+			client
+				.get(format!("{base_url}/rpc"))
+				.header(header::CONNECTION, "Upgrade")
+				.header(header::UPGRADE, "websocket")
+				.header(header::SEC_WEBSOCKET_VERSION, "13")
+				.header(header::SEC_WEBSOCKET_KEY, "dGhlIHNhbXBsZSBub25jZQ==")
+				.send()
+				.await
+				.unwrap()
+				.upgrade()
+				.await
+				.unwrap();
+		}
+		// Deny RPC and health endpoints
+		{
+			// Start server disallowing the RPC and health routes
+			let (addr, _server) = common::start_server(StartServerArguments {
+				args: "--deny-http rpc,health".to_string(),
+				// Auth disabled to ensure unauthorized errors are due to capabilities
+				auth: false,
+				// Ready check disabled as healtcheck is disallowed
+				wait_is_ready: false,
+				..Default::default()
+			})
+			.await
+			.unwrap();
+			// The "is-ready" command uses the RPC and health routes
+			// We must wait for server startup rudimentarily
+			// If this introduces flakiness, drop this test case
+			time::sleep(time::Duration::from_millis(5000)).await;
+
+			// Prepare HTTP client
+			let mut headers = reqwest::header::HeaderMap::new();
+			let ns = Ulid::new().to_string();
+			let db = Ulid::new().to_string();
+			headers.insert("surreal-ns", ns.parse().unwrap());
+			headers.insert("surreal-db", db.parse().unwrap());
+			headers.insert(header::ACCEPT, "application/json".parse().unwrap());
+			let client = reqwest::Client::builder()
+				.connect_timeout(Duration::from_millis(10))
+				.default_headers(headers)
+				.build()
+				.unwrap();
+			let base_url = &format!("http://{addr}");
+
+			// Check that health requests are disallowed
+			let res = client
+				.get(format!("{base_url}/health"))
+				.basic_auth(USER, Some(PASS))
+				.send()
+				.await
+				.unwrap();
+			assert_eq!(res.status(), 403, "body: {}", res.text().await.unwrap());
+
+			// Check that RPC requests are disallowed
+			println!("Testing \"/rpc\" route...");
+			let res = client
+				.get(format!("{base_url}/rpc"))
+				.header(header::CONNECTION, "Upgrade")
+				.header(header::UPGRADE, "websocket")
+				.header(header::SEC_WEBSOCKET_VERSION, "13")
+				.header(header::SEC_WEBSOCKET_KEY, "dGhlIHNhbXBsZSBub25jZQ==")
+				.send()
+				.await
+				.unwrap()
+				.upgrade()
+				.await;
+			assert!(res.is_err(), "Request to \"/rpc\" endpoint unexpectedly succeeded")
+		}
+	}
 }
