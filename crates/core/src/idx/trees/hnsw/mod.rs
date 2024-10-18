@@ -840,7 +840,7 @@ mod tests {
 		let collection: Arc<TestCollection> =
 			Arc::new(TestCollection::NonUnique(new_vectors_from_file(
 				p.vector_type,
-				&format!("../tests/data/{embeddings_file}"),
+				&format!("../../tests/data/{embeddings_file}"),
 				Some(ingest_limit),
 			)?));
 
@@ -859,7 +859,7 @@ mod tests {
 		info!("Build query collection");
 		let queries = Arc::new(TestCollection::NonUnique(new_vectors_from_file(
 			p.vector_type,
-			&format!("../tests/data/{queries_file}"),
+			&format!("../../tests/data/{queries_file}"),
 			Some(query_limit),
 		)?));
 

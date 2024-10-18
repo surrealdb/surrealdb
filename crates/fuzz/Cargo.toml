@@ -14,7 +14,7 @@ futures = "0.3.29"
 tokio = "1.33.0"
 
 [dependencies.surrealdb]
-path = ".."
+path = "../sdk"
 features = ["kv-mem", "arbitrary"]
 default-features = false
 
