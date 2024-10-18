@@ -646,6 +646,36 @@ async fn function_array_map() -> Result<(), Error> {
 }
 
 #[tokio::test]
+async fn function_array_fold() -> Result<(), Error> {
+	let sql = r#"
+		RETURN array::fold([1,2,3], 0, |$n, $i| $n + $i);
+	"#;
+	//
+	Test::new(sql).await?.expect_val("6")?;
+
+	let sql = r#"
+	RETURN (<array>1..=10).fold(0, |$acc, $num| IF $num % 2 == 0 { $acc + $num } else { $acc });
+	"#;
+	//
+	Test::new(sql).await?.expect_val("30")?;
+	//
+	let sql = r#"
+	"gnirts a tsuJ".split("").fold("", |$one, $two| $two + $one);
+	"#;
+	//
+	Test::new(sql).await?.expect_val("'Just a string'")?;
+
+	// The index can also be accessed in the same way as array::map
+	let sql = r#"
+	[10, 9, 8, 7, 6, 5, 4, 3, 2, 1].fold(0, |$one, $two, $three| $one + $two + $three);
+	"#;
+	Test::new(sql).await?.expect_val("100")?;
+	Ok(())
+}
+
+//(<array>1..=10).fold(0, |$acc, $num| IF $num % 2 == 0 { $acc + $num } else { $acc }); -- 30
+
+#[tokio::test]
 async fn function_array_matches() -> Result<(), Error> {
 	test_queries(
 		r#"RETURN array::matches([0, 1, 2], 1);
