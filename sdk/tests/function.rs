@@ -646,6 +646,75 @@ async fn function_array_map() -> Result<(), Error> {
 }
 
 #[tokio::test]
+async fn function_array_fold() -> Result<(), Error> {
+	let sql = r#"
+		RETURN array::fold([1,2,3,4,5], 0, |$n, $i| $n + $i);
+	"#;
+	//
+	Test::new(sql).await?.expect_val("15")?;
+
+	let sql = r#"
+	"gnirts a tsuJ".split("").fold("", |$one, $two| $two + $one);
+	"#;
+	//
+	Test::new(sql).await?.expect_val("'Just a string'")?;
+
+	// The index can also be accessed in the same way as array::map
+	let sql = r#"
+	[10, 9, 8, 7, 6, 5, 4, 3, 2, 1].fold(0, |$one, $two, $three| $one + $two + $three);
+	"#;
+	Test::new(sql).await?.expect_val("100")?;
+
+	let sql = r#"
+	[].fold(10, |$x, $y| $x + $y);
+	"#;
+	Test::new(sql).await?.expect_val("10")?;
+
+	let sql = r#"
+	[9].fold(10, |$x, $y| $x + $y);
+	"#;
+	Test::new(sql).await?.expect_val("19")?;
+
+	Ok(())
+}
+
+#[tokio::test]
+async fn function_array_reduce() -> Result<(), Error> {
+	let sql = r#"
+		RETURN array::reduce([1,2,3,4,5], |$n, $i| $n + $i);
+	"#;
+	//
+	Test::new(sql).await?.expect_val("15")?;
+
+	//
+	let sql = r#"
+	"gnirts a tsuJ".split("").reduce(|$one, $two| $two + $one);
+	"#;
+	//
+	Test::new(sql).await?.expect_val("'Just a string'")?;
+
+	// The index can also be accessed in the same way as array::map
+	let sql = r#"
+	[10, 9, 8, 7, 6, 5, 4, 3, 2, 1].reduce(|$one, $two, $three| $one + $two + $three);
+	"#;
+	Test::new(sql).await?.expect_val("100")?;
+
+	// No items in array: return NONE
+	let sql = r#"
+	[].reduce(|$x, $y, $z| $x + $y + $z);
+	"#;
+	Test::new(sql).await?.expect_val("NONE")?;
+
+	// 1 item in array: return single item
+	let sql = r#"
+	[9].reduce(|$x, $y, $z| $x + $y + $z);
+	"#;
+	Test::new(sql).await?.expect_val("9")?;
+
+	Ok(())
+}
+
+#[tokio::test]
 async fn function_array_matches() -> Result<(), Error> {
 	test_queries(
 		r#"RETURN array::matches([0, 1, 2], 1);
