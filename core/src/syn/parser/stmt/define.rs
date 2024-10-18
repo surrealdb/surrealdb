@@ -365,7 +365,6 @@ impl Parser<'_> {
 							let mut ac = access_type::BearerAccess {
 								..Default::default()
 							};
-
 							expected!(self, t!("FOR"));
 							match self.peek_kind() {
 								t!("USER") => {
@@ -385,7 +384,6 @@ impl Parser<'_> {
 									_ => unexpected!(self, peek, "USER"),
 								},
 							}
-
 							if self.eat(t!("WITH")) {
 								expected!(self, t!("JWT"));
 								ac.jwt = self.parse_jwt()?;

@@ -38,6 +38,7 @@ async fn access_bearer_operations() {
 
 	for level in &test_levels {
 		let base = level.base.to_string();
+		println!("Test level: {}", base);
 		let sql = format!(
 			"
 			-- Initial setup
@@ -187,6 +188,163 @@ async fn access_bearer_operations() {
 }
 
 #[tokio::test]
+async fn access_bearer_grant() {
+	// TODO(gguillemas): Remove this once bearer access is no longer experimental.
+	std::env::set_var("SURREAL_EXPERIMENTAL_BEARER_ACCESS", "true");
+
+	let test_levels = vec![
+		TestLevel {
+			base: Base::Root,
+			ns: None,
+			db: None,
+		},
+		TestLevel {
+			base: Base::Ns,
+			ns: Some("test"),
+			db: None,
+		},
+		TestLevel {
+			base: Base::Db,
+			ns: Some("test"),
+			db: Some("test"),
+		},
+	];
+
+	for level in &test_levels {
+		let base = level.base.to_string();
+		println!("Test level: {}", base);
+		let sql = format!(
+			"
+			-- Initial setup
+			DEFINE ACCESS srv ON {base} TYPE BEARER FOR USER;
+			DEFINE USER tobie ON {base} PASSWORD 'secret' ROLES EDITOR;
+			-- Should succeed
+			ACCESS srv ON {base} GRANT FOR USER tobie;
+			ACCESS srv GRANT FOR USER tobie;
+			-- Should fail
+			ACCESS srv ON {base} GRANT FOR USER jaime;
+			ACCESS srv GRANT FOR USER jaime;
+			ACCESS srv ON {base} GRANT FOR RECORD user:tobie;
+			ACCESS srv GRANT FOR RECORD user:tobie;
+		"
+		);
+		let dbs = new_ds().await.unwrap();
+		let ses = match level.base {
+			Base::Root => Session::owner(),
+			Base::Ns => Session::owner().with_ns(level.ns.unwrap()),
+			Base::Db => Session::owner().with_ns(level.ns.unwrap()).with_db(level.db.unwrap()),
+			_ => panic!("Invalid base"),
+		};
+		let res = &mut dbs.execute(&sql, &ses, None).await.unwrap();
+		assert_eq!(res.len(), 8);
+		// Consume the results of the setup statements
+		res.remove(0).result.unwrap();
+		res.remove(0).result.unwrap();
+		//
+		let tmp = res.remove(0).result.unwrap().to_string();
+		let ok =
+			Regex::new(r"\{ ac: 'srv', creation: .*, expiration: NONE, grant: \{ .* \}, id: .*, revocation: NONE, subject: \{ user: 'tobie' \} \}")
+					.unwrap();
+		assert!(ok.is_match(&tmp), "Output '{}' doesn't match regex '{}'", tmp, ok);
+		//
+		let tmp = res.remove(0).result.unwrap().to_string();
+		let ok =
+			Regex::new(r"\{ ac: 'srv', creation: .*, expiration: NONE, grant: \{ .* \}, id: .*, revocation: NONE, subject: \{ user: 'tobie' \} \}")
+					.unwrap();
+		assert!(ok.is_match(&tmp), "Output '{}' doesn't match regex '{}'", tmp, ok);
+		//
+		let tmp = res.remove(0).result.unwrap_err();
+		let expected = if matches!(level.base, Base::Root) {
+			"The root user 'jaime' does not exist".to_string()
+		} else {
+			format!(
+				"The user 'jaime' does not exist in the {} 'test'",
+				level.base.to_string().to_lowercase()
+			)
+		};
+		assert_eq!(tmp.to_string(), expected);
+		//
+		let tmp = res.remove(0).result.unwrap_err();
+		let expected = if matches!(level.base, Base::Root) {
+			"The root user 'jaime' does not exist".to_string()
+		} else {
+			format!(
+				"The user 'jaime' does not exist in the {} 'test'",
+				level.base.to_string().to_lowercase()
+			)
+		};
+		assert_eq!(tmp.to_string(), expected);
+		//
+		let tmp = res.remove(0).result.unwrap_err();
+		if let Base::Db = level.base {
+			assert_eq!(tmp.to_string(), "This access grant has an invalid subject");
+		} else {
+			assert_eq!(tmp.to_string(), "Specify a database to use");
+		}
+		//
+		let tmp = res.remove(0).result.unwrap_err();
+		if let Base::Db = level.base {
+			assert_eq!(tmp.to_string(), "This access grant has an invalid subject");
+		} else {
+			assert_eq!(tmp.to_string(), "Specify a database to use");
+		}
+		//
+		if let Base::Db = level.base {
+			let sql = format!(
+				"
+				-- Initial setup on database
+				DEFINE ACCESS api ON {base} TYPE BEARER FOR RECORD;
+				CREATE user:tobie;
+				-- Should succeed on database
+				ACCESS api ON {base} GRANT FOR RECORD user:tobie;
+				ACCESS api GRANT FOR RECORD user:tobie;
+				ACCESS api ON {base} GRANT FOR RECORD user:jaime;
+				ACCESS api GRANT FOR RECORD user:jaime;
+				-- Should fail on database
+				ACCESS api ON {base} GRANT FOR USER tobie;
+				ACCESS api GRANT FOR USER tobie;
+			"
+			);
+			let res = &mut dbs.execute(&sql, &ses, None).await.unwrap();
+			assert_eq!(res.len(), 8);
+			// Consume the results of the setup statements
+			res.remove(0).result.unwrap();
+			res.remove(0).result.unwrap();
+			//
+			let tmp = res.remove(0).result.unwrap().to_string();
+			let ok =
+				Regex::new(r"\{ ac: 'api', creation: .*, expiration: NONE, grant: \{ .* \}, id: .*, revocation: NONE, subject: \{ record: user:tobie \} \}")
+						.unwrap();
+			assert!(ok.is_match(&tmp), "Output '{}' doesn't match regex '{}'", tmp, ok);
+			//
+			let tmp = res.remove(0).result.unwrap().to_string();
+			let ok =
+				Regex::new(r"\{ ac: 'api', creation: .*, expiration: NONE, grant: \{ .* \}, id: .*, revocation: NONE, subject: \{ record: user:tobie \} \}")
+						.unwrap();
+			assert!(ok.is_match(&tmp), "Output '{}' doesn't match regex '{}'", tmp, ok);
+			//
+			let tmp = res.remove(0).result.unwrap().to_string();
+			let ok =
+				Regex::new(r"\{ ac: 'api', creation: .*, expiration: NONE, grant: \{ .* \}, id: .*, revocation: NONE, subject: \{ record: user:jaime \} \}")
+						.unwrap();
+			assert!(ok.is_match(&tmp), "Output '{}' doesn't match regex '{}'", tmp, ok);
+			//
+			let tmp = res.remove(0).result.unwrap().to_string();
+			let ok =
+				Regex::new(r"\{ ac: 'api', creation: .*, expiration: NONE, grant: \{ .* \}, id: .*, revocation: NONE, subject: \{ record: user:jaime \} \}")
+						.unwrap();
+			assert!(ok.is_match(&tmp), "Output '{}' doesn't match regex '{}'", tmp, ok);
+			//
+			let tmp = res.remove(0).result.unwrap_err();
+			assert_eq!(tmp.to_string(), "This access grant has an invalid subject");
+			//
+			let tmp = res.remove(0).result.unwrap_err();
+			assert_eq!(tmp.to_string(), "This access grant has an invalid subject");
+		}
+	}
+}
+
+#[tokio::test]
 async fn access_bearer_revoke() {
 	// TODO(gguillemas): Remove this once bearer access is no longer experimental.
 	std::env::set_var("SURREAL_EXPERIMENTAL_BEARER_ACCESS", "true");
@@ -211,16 +369,17 @@ async fn access_bearer_revoke() {
 
 	for level in &test_levels {
 		let base = level.base.to_string();
+		println!("Test level: {}", base);
 		let sql = format!(
 			r"
 			-- Initial setup
 			DEFINE ACCESS api ON {base} TYPE BEARER FOR USER;
 			DEFINE USER tobie ON {base} PASSWORD 'secret' ROLES EDITOR;
-			DEFINE USER jamie ON {base} PASSWORD 'secret' ROLES EDITOR;
+			DEFINE USER jaime ON {base} PASSWORD 'secret' ROLES EDITOR;
 			ACCESS api ON {base} GRANT FOR USER tobie;
 			ACCESS api ON {base} GRANT FOR USER tobie;
 			ACCESS api ON {base} GRANT FOR USER tobie;
-			ACCESS api ON {base} GRANT FOR USER jamie;
+			ACCESS api ON {base} GRANT FOR USER jaime;
 		"
 		);
 		let dbs = new_ds().await.unwrap();
@@ -269,12 +428,12 @@ async fn access_bearer_revoke() {
 		assert!(ok.is_match(&tmp), "Output '{}' doesn't match regex '{}'", tmp, ok);
 		// Revoke all bearer grants for a specific user
 		let res = &mut dbs
-			.execute(&format!("ACCESS api REVOKE WHERE subject.user = 'jamie'"), &ses, None)
+			.execute(&format!("ACCESS api REVOKE WHERE subject.user = 'jaime'"), &ses, None)
 			.await
 			.unwrap();
 		let tmp = res.remove(0).result.unwrap().to_string();
 		let ok = Regex::new(
-			r"\[\{ ac: 'api', .*?, revocation: d'.*?', subject: \{ user: 'jamie' \} \}\]",
+			r"\[\{ ac: 'api', .*?, revocation: d'.*?', subject: \{ user: 'jaime' \} \}\]",
 		)
 		.unwrap();
 		assert!(ok.is_match(&tmp), "Output '{}' doesn't match regex '{}'", tmp, ok);
@@ -311,6 +470,7 @@ async fn permissions_access_grant() {
 
 	for level in &test_levels {
 		let base = level.to_string();
+		println!("Test level: {}", base);
 
 		let tests = vec![
 			// Root level

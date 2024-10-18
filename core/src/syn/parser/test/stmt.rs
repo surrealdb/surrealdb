@@ -2,8 +2,8 @@ use crate::{
 	sql::{
 		access::AccessDuration,
 		access_type::{
-			AccessType, JwtAccess, JwtAccessIssue, JwtAccessVerify, JwtAccessVerifyJwks,
-			JwtAccessVerifyKey, RecordAccess,
+			AccessType, BearerAccess, BearerAccessSubject, JwtAccess, JwtAccessIssue,
+			JwtAccessVerify, JwtAccessVerifyJwks, JwtAccessVerifyKey, RecordAccess,
 		},
 		block::Entry,
 		changefeed::ChangeFeed,
@@ -1337,6 +1337,245 @@ fn parse_define_access_record_with_jwt() {
 }
 
 #[test]
+fn parse_define_access_bearer() {
+	// For user on database.
+	{
+		let res =
+			test_parse!(parse_stmt, r#"DEFINE ACCESS a ON DB TYPE BEARER FOR USER COMMENT "foo""#)
+				.unwrap();
+
+		// Manually compare since DefineAccessStatement for bearer access
+		// without explicit JWT will create a random signing key during parsing.
+		let Statement::Define(DefineStatement::Access(stmt)) = res else {
+			panic!()
+		};
+
+		assert_eq!(stmt.name, Ident("a".to_string()));
+		assert_eq!(stmt.base, Base::Db);
+		assert_eq!(stmt.authenticate, None);
+		assert_eq!(
+			stmt.duration,
+			// Default durations.
+			AccessDuration {
+				grant: None,
+				token: Some(Duration::from_hours(1)),
+				session: None,
+			}
+		);
+		assert_eq!(stmt.comment, Some(Strand("foo".to_string())));
+		assert!(!stmt.if_not_exists);
+		match stmt.kind {
+			AccessType::Bearer(ac) => {
+				assert_eq!(ac.subject, BearerAccessSubject::User);
+			}
+			_ => panic!(),
+		}
+	}
+	// For user on namespace.
+	{
+		let res =
+			test_parse!(parse_stmt, r#"DEFINE ACCESS a ON NS TYPE BEARER FOR USER COMMENT "foo""#)
+				.unwrap();
+
+		// Manually compare since DefineAccessStatement for bearer access
+		// without explicit JWT will create a random signing key during parsing.
+		let Statement::Define(DefineStatement::Access(stmt)) = res else {
+			panic!()
+		};
+
+		assert_eq!(stmt.name, Ident("a".to_string()));
+		assert_eq!(stmt.base, Base::Ns);
+		assert_eq!(stmt.authenticate, None);
+		assert_eq!(
+			stmt.duration,
+			// Default durations.
+			AccessDuration {
+				grant: None,
+				token: Some(Duration::from_hours(1)),
+				session: None,
+			}
+		);
+		assert_eq!(stmt.comment, Some(Strand("foo".to_string())));
+		assert!(!stmt.if_not_exists);
+		match stmt.kind {
+			AccessType::Bearer(ac) => {
+				assert_eq!(ac.subject, BearerAccessSubject::User);
+			}
+			_ => panic!(),
+		}
+	}
+	// For user on root.
+	{
+		let res = test_parse!(
+			parse_stmt,
+			r#"DEFINE ACCESS a ON ROOT TYPE BEARER FOR USER COMMENT "foo""#
+		)
+		.unwrap();
+
+		// Manually compare since DefineAccessStatement for bearer access
+		// without explicit JWT will create a random signing key during parsing.
+		let Statement::Define(DefineStatement::Access(stmt)) = res else {
+			panic!()
+		};
+
+		assert_eq!(stmt.name, Ident("a".to_string()));
+		assert_eq!(stmt.base, Base::Root);
+		assert_eq!(stmt.authenticate, None);
+		assert_eq!(
+			stmt.duration,
+			// Default durations.
+			AccessDuration {
+				grant: None,
+				token: Some(Duration::from_hours(1)),
+				session: None,
+			}
+		);
+		assert_eq!(stmt.comment, Some(Strand("foo".to_string())));
+		assert!(!stmt.if_not_exists);
+		match stmt.kind {
+			AccessType::Bearer(ac) => {
+				assert_eq!(ac.subject, BearerAccessSubject::User);
+			}
+			_ => panic!(),
+		}
+	}
+	// For record on database.
+	{
+		let res = test_parse!(
+			parse_stmt,
+			r#"DEFINE ACCESS a ON DB TYPE BEARER FOR RECORD COMMENT "foo""#
+		)
+		.unwrap();
+
+		// Manually compare since DefineAccessStatement for bearer access
+		// without explicit JWT will create a random signing key during parsing.
+		let Statement::Define(DefineStatement::Access(stmt)) = res else {
+			panic!()
+		};
+
+		assert_eq!(stmt.name, Ident("a".to_string()));
+		assert_eq!(stmt.base, Base::Db);
+		assert_eq!(
+			stmt.duration,
+			// Default durations.
+			AccessDuration {
+				grant: None,
+				token: Some(Duration::from_hours(1)),
+				session: None,
+			}
+		);
+		assert_eq!(stmt.comment, Some(Strand("foo".to_string())));
+		assert!(!stmt.if_not_exists);
+		match stmt.kind {
+			AccessType::Bearer(ac) => {
+				assert_eq!(ac.subject, BearerAccessSubject::Record);
+			}
+			_ => panic!(),
+		}
+	}
+	// For record on namespace.
+	{
+		let res = test_parse!(
+			parse_stmt,
+			r#"DEFINE ACCESS a ON NS TYPE BEARER FOR RECORD COMMENT "foo""#
+		);
+		assert!(
+			res.is_err(),
+			"Unexpected successful parsing of bearer access for record at namespace level: {:?}",
+			res
+		);
+	}
+	// For record on root.
+	{
+		let res = test_parse!(
+			parse_stmt,
+			r#"DEFINE ACCESS a ON ROOT TYPE BEARER FOR RECORD COMMENT "foo""#
+		);
+		assert!(
+			res.is_err(),
+			"Unexpected successful parsing of bearer access for record at root level: {:?}",
+			res
+		);
+	}
+	// For user. Grant, session and token duration. With JWT.
+	{
+		let res = test_parse!(
+			parse_stmt,
+			r#"DEFINE ACCESS a ON DB TYPE BEARER FOR USER WITH JWT ALGORITHM HS384 KEY "foo" DURATION FOR GRANT 90d, FOR TOKEN 10s, FOR SESSION 15m"#
+		)
+		.unwrap();
+		assert_eq!(
+			res,
+			Statement::Define(DefineStatement::Access(DefineAccessStatement {
+				name: Ident("a".to_string()),
+				base: Base::Db,
+				kind: AccessType::Bearer(BearerAccess {
+					subject: BearerAccessSubject::User,
+					jwt: JwtAccess {
+						verify: JwtAccessVerify::Key(JwtAccessVerifyKey {
+							alg: Algorithm::Hs384,
+							key: "foo".to_string(),
+						}),
+						issue: Some(JwtAccessIssue {
+							alg: Algorithm::Hs384,
+							// Issuer key matches verification key by default in symmetric algorithms.
+							key: "foo".to_string(),
+						}),
+					},
+				}),
+				authenticate: None,
+				duration: AccessDuration {
+					grant: Some(Duration::from_days(90)),
+					token: Some(Duration::from_secs(10)),
+					session: Some(Duration::from_secs(900)),
+				},
+				comment: None,
+				if_not_exists: false,
+				overwrite: false,
+			})),
+		)
+	}
+	// For record. Grant, session and token duration. With JWT.
+	{
+		let res = test_parse!(
+			parse_stmt,
+			r#"DEFINE ACCESS a ON DB TYPE BEARER FOR RECORD WITH JWT ALGORITHM HS384 KEY "foo" DURATION FOR GRANT 90d, FOR TOKEN 10s, FOR SESSION 15m"#
+		)
+		.unwrap();
+		assert_eq!(
+			res,
+			Statement::Define(DefineStatement::Access(DefineAccessStatement {
+				name: Ident("a".to_string()),
+				base: Base::Db,
+				kind: AccessType::Bearer(BearerAccess {
+					subject: BearerAccessSubject::Record,
+					jwt: JwtAccess {
+						verify: JwtAccessVerify::Key(JwtAccessVerifyKey {
+							alg: Algorithm::Hs384,
+							key: "foo".to_string(),
+						}),
+						issue: Some(JwtAccessIssue {
+							alg: Algorithm::Hs384,
+							// Issuer key matches verification key by default in symmetric algorithms.
+							key: "foo".to_string(),
+						}),
+					},
+				}),
+				authenticate: None,
+				duration: AccessDuration {
+					grant: Some(Duration::from_days(90)),
+					token: Some(Duration::from_secs(10)),
+					session: Some(Duration::from_secs(900)),
+				},
+				comment: None,
+				if_not_exists: false,
+				overwrite: false,
+			})),
+		)
+	}
+}
+
+#[test]
 fn parse_define_param() {
 	let res =
 		test_parse!(parse_stmt, r#"DEFINE PARAM $a VALUE { a: 1, "b": 3 } PERMISSIONS WHERE null"#)
@@ -2658,6 +2897,20 @@ fn parse_access_purge() {
 				base: Some(Base::Db),
 				expired: true,
 				revoked: false,
+				grace: Duration::from_days(90),
+			}))
+		);
+	}
+	// Revoked for 90 days
+	{
+		let res = test_parse!(parse_stmt, r#"ACCESS a ON DATABASE PURGE REVOKED FOR 90d"#).unwrap();
+		assert_eq!(
+			res,
+			Statement::Access(AccessStatement::Purge(AccessStatementPurge {
+				ac: Ident("a".to_string()),
+				base: Some(Base::Db),
+				expired: false,
+				revoked: true,
 				grace: Duration::from_days(90),
 			}))
 		);
