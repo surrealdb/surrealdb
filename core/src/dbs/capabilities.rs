@@ -3,6 +3,7 @@ use std::hash::Hash;
 use std::net::IpAddr;
 use std::{collections::HashSet, sync::Arc};
 
+use crate::rpc::method::Method;
 use ipnet::IpNet;
 use url::Url;
 
@@ -156,7 +157,7 @@ pub struct ParseNetTargetError;
 impl std::error::Error for ParseNetTargetError {}
 impl fmt::Display for ParseNetTargetError {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-		write!(f, "The provided network target is not a valid host, ip address or ip network")
+		write!(f, "The provided network target is not a valid host name, IP address or CIDR block")
 	}
 }
 
@@ -187,6 +188,122 @@ impl std::str::FromStr for NetTarget {
 		}
 
 		Err(ParseNetTargetError)
+	}
+}
+
+#[derive(Debug, Clone, Hash, Eq, PartialEq)]
+pub struct MethodTarget {
+	pub method: Method,
+}
+
+// impl display
+impl fmt::Display for MethodTarget {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		write!(f, "{}", self.method.to_str())
+	}
+}
+
+impl Target for MethodTarget {
+	fn matches(&self, elem: &Self) -> bool {
+		self.method == elem.method
+	}
+}
+
+#[derive(Debug)]
+pub struct ParseMethodTargetError;
+
+impl std::error::Error for ParseMethodTargetError {}
+impl fmt::Display for ParseMethodTargetError {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		write!(f, "The provided method target is not a valid RPC method")
+	}
+}
+
+impl std::str::FromStr for MethodTarget {
+	type Err = ParseMethodTargetError;
+
+	fn from_str(s: &str) -> Result<Self, Self::Err> {
+		match Method::parse(s) {
+			Method::Unknown => Err(ParseMethodTargetError),
+			method => Ok(MethodTarget {
+				method,
+			}),
+		}
+	}
+}
+
+#[derive(Debug, Clone, Hash, Eq, PartialEq)]
+#[non_exhaustive]
+pub enum RouteTarget {
+	Health,
+	Export,
+	Import,
+	Rpc,
+	Version,
+	Sync,
+	Sql,
+	Signin,
+	Signup,
+	Key,
+	Ml,
+	GraphQL,
+}
+
+// impl display
+impl fmt::Display for RouteTarget {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		match self {
+			RouteTarget::Health => write!(f, "health"),
+			RouteTarget::Export => write!(f, "export"),
+			RouteTarget::Import => write!(f, "import"),
+			RouteTarget::Rpc => write!(f, "rpc"),
+			RouteTarget::Version => write!(f, "version"),
+			RouteTarget::Sync => write!(f, "sync"),
+			RouteTarget::Sql => write!(f, "sql"),
+			RouteTarget::Signin => write!(f, "signin"),
+			RouteTarget::Signup => write!(f, "signup"),
+			RouteTarget::Key => write!(f, "key"),
+			RouteTarget::Ml => write!(f, "ml"),
+			RouteTarget::GraphQL => write!(f, "graphql"),
+		}
+	}
+}
+
+impl Target for RouteTarget {
+	fn matches(&self, elem: &Self) -> bool {
+		*self == *elem
+	}
+}
+
+#[derive(Debug)]
+pub struct ParseRouteTargetError;
+
+impl std::error::Error for ParseRouteTargetError {}
+impl fmt::Display for ParseRouteTargetError {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		write!(f, "The provided route target is not a valid HTTP route")
+	}
+}
+
+impl std::str::FromStr for RouteTarget {
+	type Err = ParseRouteTargetError;
+
+	fn from_str(s: &str) -> Result<Self, Self::Err> {
+		match s {
+			"health" => Ok(RouteTarget::Health),
+			"export" => Ok(RouteTarget::Export),
+			"import" => Ok(RouteTarget::Import),
+			"rpc" => Ok(RouteTarget::Rpc),
+			"version" => Ok(RouteTarget::Version),
+			"sync" => Ok(RouteTarget::Sync),
+			"sql" => Ok(RouteTarget::Sql),
+			"signin" => Ok(RouteTarget::Signin),
+			"signup" => Ok(RouteTarget::Signup),
+			"key" => Ok(RouteTarget::Key),
+			"ml" => Ok(RouteTarget::Ml),
+			"graphql" => Ok(RouteTarget::GraphQL),
+			_ => Err(ParseRouteTargetError),
+		}
 	}
 }
 
@@ -237,14 +354,18 @@ pub struct Capabilities {
 	deny_funcs: Arc<Targets<FuncTarget>>,
 	allow_net: Arc<Targets<NetTarget>>,
 	deny_net: Arc<Targets<NetTarget>>,
+	allow_rpc: Arc<Targets<MethodTarget>>,
+	deny_rpc: Arc<Targets<MethodTarget>>,
+	allow_http: Arc<Targets<RouteTarget>>,
+	deny_http: Arc<Targets<RouteTarget>>,
 }
 
 impl fmt::Display for Capabilities {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		write!(
             f,
-            "scripting={}, guest_access={}, live_query_notifications={}, allow_funcs={}, deny_funcs={}, allow_net={}, deny_net={}",
-            self.scripting, self.guest_access, self.live_query_notifications, self.allow_funcs, self.deny_funcs, self.allow_net, self.deny_net
+            "scripting={}, guest_access={}, live_query_notifications={}, allow_funcs={}, deny_funcs={}, allow_net={}, deny_net={}, allow_rpc={}, deny_rpc={}, allow_http={}, deny_http={}",
+            self.scripting, self.guest_access, self.live_query_notifications, self.allow_funcs, self.deny_funcs, self.allow_net, self.deny_net, self.allow_rpc, self.deny_rpc, self.allow_http, self.deny_http,
         )
 	}
 }
@@ -260,6 +381,10 @@ impl Default for Capabilities {
 			deny_funcs: Arc::new(Targets::None),
 			allow_net: Arc::new(Targets::None),
 			deny_net: Arc::new(Targets::None),
+			allow_rpc: Arc::new(Targets::All),
+			deny_rpc: Arc::new(Targets::None),
+			allow_http: Arc::new(Targets::All),
+			deny_http: Arc::new(Targets::None),
 		}
 	}
 }
@@ -275,6 +400,10 @@ impl Capabilities {
 			deny_funcs: Arc::new(Targets::None),
 			allow_net: Arc::new(Targets::All),
 			deny_net: Arc::new(Targets::None),
+			allow_rpc: Arc::new(Targets::All),
+			deny_rpc: Arc::new(Targets::None),
+			allow_http: Arc::new(Targets::All),
+			deny_http: Arc::new(Targets::None),
 		}
 	}
 
@@ -288,6 +417,10 @@ impl Capabilities {
 			deny_funcs: Arc::new(Targets::None),
 			allow_net: Arc::new(Targets::None),
 			deny_net: Arc::new(Targets::None),
+			allow_rpc: Arc::new(Targets::None),
+			deny_rpc: Arc::new(Targets::None),
+			allow_http: Arc::new(Targets::None),
+			deny_http: Arc::new(Targets::None),
 		}
 	}
 
@@ -326,6 +459,26 @@ impl Capabilities {
 		self
 	}
 
+	pub fn with_rpc_methods(mut self, allow_rpc: Targets<MethodTarget>) -> Self {
+		self.allow_rpc = Arc::new(allow_rpc);
+		self
+	}
+
+	pub fn without_rpc_methods(mut self, deny_rpc: Targets<MethodTarget>) -> Self {
+		self.deny_rpc = Arc::new(deny_rpc);
+		self
+	}
+
+	pub fn with_http_routes(mut self, allow_http: Targets<RouteTarget>) -> Self {
+		self.allow_http = Arc::new(allow_http);
+		self
+	}
+
+	pub fn without_http_routes(mut self, deny_http: Targets<RouteTarget>) -> Self {
+		self.deny_http = Arc::new(deny_http);
+		self
+	}
+
 	pub fn allows_scripting(&self) -> bool {
 		self.scripting
 	}
@@ -344,6 +497,14 @@ impl Capabilities {
 
 	pub fn allows_network_target(&self, target: &NetTarget) -> bool {
 		self.allow_net.matches(target) && !self.deny_net.matches(target)
+	}
+
+	pub fn allows_rpc_method(&self, target: &MethodTarget) -> bool {
+		self.allow_rpc.matches(target) && !self.deny_rpc.matches(target)
+	}
+
+	pub fn allows_http_route(&self, target: &RouteTarget) -> bool {
+		self.allow_http.matches(target) && !self.deny_http.matches(target)
 	}
 }
 
@@ -523,6 +684,22 @@ mod tests {
 	}
 
 	#[test]
+	fn test_method_target() {
+		assert!(MethodTarget::from_str("query")
+			.unwrap()
+			.matches(&MethodTarget::from_str("query").unwrap()));
+		assert!(MethodTarget::from_str("query")
+			.unwrap()
+			.matches(&MethodTarget::from_str("Query").unwrap()));
+		assert!(MethodTarget::from_str("query")
+			.unwrap()
+			.matches(&MethodTarget::from_str("QUERY").unwrap()));
+		assert!(!MethodTarget::from_str("query")
+			.unwrap()
+			.matches(&MethodTarget::from_str("ping").unwrap()));
+	}
+
+	#[test]
 	fn test_targets() {
 		assert!(Targets::<NetTarget>::All.matches(&NetTarget::from_str("example.com").unwrap()));
 		assert!(Targets::<FuncTarget>::All.matches("http::get"));
@@ -638,6 +815,103 @@ mod tests {
 			assert!(caps.allows_function_name("http::get"));
 			assert!(caps.allows_function_name("http::put"));
 			assert!(!caps.allows_function_name("http::post"));
+		}
+
+		// When all RPC methods are allowed
+		{
+			let caps = Capabilities::default()
+				.with_rpc_methods(Targets::<MethodTarget>::All)
+				.without_rpc_methods(Targets::<MethodTarget>::None);
+			assert!(caps.allows_rpc_method(&MethodTarget::from_str("ping").unwrap()));
+			assert!(caps.allows_rpc_method(&MethodTarget::from_str("select").unwrap()));
+			assert!(caps.allows_rpc_method(&MethodTarget::from_str("query").unwrap()));
+		}
+
+		// When all RPC methods are allowed and denied at the same time
+		{
+			let caps = Capabilities::default()
+				.with_rpc_methods(Targets::<MethodTarget>::All)
+				.without_rpc_methods(Targets::<MethodTarget>::All);
+			assert!(!caps.allows_rpc_method(&MethodTarget::from_str("ping").unwrap()));
+			assert!(!caps.allows_rpc_method(&MethodTarget::from_str("select").unwrap()));
+			assert!(!caps.allows_rpc_method(&MethodTarget::from_str("query").unwrap()));
+		}
+
+		// When some RPC methods are allowed and some are denied, deny overrides the allow rules
+		{
+			let caps = Capabilities::default()
+				.with_rpc_methods(Targets::<MethodTarget>::Some(
+					[
+						MethodTarget::from_str("select").unwrap(),
+						MethodTarget::from_str("create").unwrap(),
+						MethodTarget::from_str("insert").unwrap(),
+						MethodTarget::from_str("update").unwrap(),
+						MethodTarget::from_str("query").unwrap(),
+						MethodTarget::from_str("run").unwrap(),
+					]
+					.into(),
+				))
+				.without_rpc_methods(Targets::<MethodTarget>::Some(
+					[
+						MethodTarget::from_str("query").unwrap(),
+						MethodTarget::from_str("run").unwrap(),
+					]
+					.into(),
+				));
+
+			assert!(caps.allows_rpc_method(&MethodTarget::from_str("select").unwrap()));
+			assert!(caps.allows_rpc_method(&MethodTarget::from_str("create").unwrap()));
+			assert!(caps.allows_rpc_method(&MethodTarget::from_str("insert").unwrap()));
+			assert!(caps.allows_rpc_method(&MethodTarget::from_str("update").unwrap()));
+			assert!(!caps.allows_rpc_method(&MethodTarget::from_str("query").unwrap()));
+			assert!(!caps.allows_rpc_method(&MethodTarget::from_str("run").unwrap()));
+		}
+
+		// When all HTTP routes are allowed
+		{
+			let caps = Capabilities::default()
+				.with_http_routes(Targets::<RouteTarget>::All)
+				.without_http_routes(Targets::<RouteTarget>::None);
+			assert!(caps.allows_http_route(&RouteTarget::from_str("version").unwrap()));
+			assert!(caps.allows_http_route(&RouteTarget::from_str("export").unwrap()));
+			assert!(caps.allows_http_route(&RouteTarget::from_str("sql").unwrap()));
+		}
+
+		// When all HTTP routes are allowed and denied at the same time
+		{
+			let caps = Capabilities::default()
+				.with_http_routes(Targets::<RouteTarget>::All)
+				.without_http_routes(Targets::<RouteTarget>::All);
+			assert!(!caps.allows_http_route(&RouteTarget::from_str("version").unwrap()));
+			assert!(!caps.allows_http_route(&RouteTarget::from_str("export").unwrap()));
+			assert!(!caps.allows_http_route(&RouteTarget::from_str("sql").unwrap()));
+		}
+
+		// When some HTTP rotues are allowed and some are denied, deny overrides the allow rules
+		{
+			let caps = Capabilities::default()
+				.with_http_routes(Targets::<RouteTarget>::Some(
+					[
+						RouteTarget::from_str("version").unwrap(),
+						RouteTarget::from_str("import").unwrap(),
+						RouteTarget::from_str("export").unwrap(),
+						RouteTarget::from_str("key").unwrap(),
+						RouteTarget::from_str("sql").unwrap(),
+						RouteTarget::from_str("rpc").unwrap(),
+					]
+					.into(),
+				))
+				.without_http_routes(Targets::<RouteTarget>::Some(
+					[RouteTarget::from_str("sql").unwrap(), RouteTarget::from_str("rpc").unwrap()]
+						.into(),
+				));
+
+			assert!(caps.allows_http_route(&RouteTarget::from_str("version").unwrap()));
+			assert!(caps.allows_http_route(&RouteTarget::from_str("import").unwrap()));
+			assert!(caps.allows_http_route(&RouteTarget::from_str("export").unwrap()));
+			assert!(caps.allows_http_route(&RouteTarget::from_str("key").unwrap()));
+			assert!(!caps.allows_http_route(&RouteTarget::from_str("sql").unwrap()));
+			assert!(!caps.allows_http_route(&RouteTarget::from_str("rpc").unwrap()));
 		}
 	}
 }

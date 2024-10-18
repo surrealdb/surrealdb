@@ -520,9 +520,9 @@ dependencies = [
 
 [[package]]
 name = "async-graphql"
-version = "7.0.9"
+version = "7.0.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9d37c3e9ba322eb00e9e5e997d58f08e8b6de037325b9367ac59bca8e3cd46af"
+checksum = "a19415d9541f1758f39bdf0c732848beb7e2e39df9b32f90c6635882c3f9173a"
 dependencies = [
  "async-graphql-derive",
  "async-graphql-parser",
@@ -569,9 +569,9 @@ dependencies = [
 
 [[package]]
 name = "async-graphql-derive"
-version = "7.0.9"
+version = "7.0.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f1141703c11c6ad4fa9b3b0e1e476dea01dbd18a44db00f949b804afaab2f344"
+checksum = "a94c2d176893486bd37cd1b6defadd999f7357bf5804e92f510c08bcf16c538f"
 dependencies = [
  "Inflector",
  "async-graphql-parser",
@@ -586,9 +586,9 @@ dependencies = [
 
 [[package]]
 name = "async-graphql-parser"
-version = "7.0.9"
+version = "7.0.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2f66edcce4c38c18f7eb181fdf561c3d3aa2d644ce7358fc7a928c00a4ffef17"
+checksum = "79272bdbf26af97866e149f05b2b546edb5c00e51b5f916289931ed233e208ad"
 dependencies = [
  "async-graphql-value",
  "pest",
@@ -598,9 +598,9 @@ dependencies = [
 
 [[package]]
 name = "async-graphql-value"
-version = "7.0.9"
+version = "7.0.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3b0206011cad065420c27988f17dd7fe201a0e056b20c262209b7bffcd6fa176"
+checksum = "ef5ec94176a12a8cbe985cd73f2e54dc9c702c88c766bdef12f1f3a67cedbee1"
 dependencies = [
  "bytes",
  "indexmap 2.2.6",
@@ -973,7 +973,7 @@ dependencies = [
  "proc-macro2",
  "quote",
  "regex",
- "rustc-hash",
+ "rustc-hash 1.1.0",
  "shlex",
  "syn 2.0.77",
  "which",
@@ -3717,9 +3717,9 @@ checksum = "0ab1bc2a289d34bd04a330323ac98a1b4bc82c9d9fcb1e66b63caa84da26b575"
 
 [[package]]
 name = "openssl"
-version = "0.10.64"
+version = "0.10.66"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "95a0481286a310808298130d22dd1fef0fa571e05a8f44ec801801e84b216b1f"
+checksum = "9529f4786b70a3e8c61e11179af17ab6188ad8d0ded78c5529441ed39d4bd9c1"
 dependencies = [
  "bitflags 2.5.0",
  "cfg-if",
@@ -3749,9 +3749,9 @@ checksum = "ff011a302c396a5197692431fc1948019154afc178baf7d8e37367442a4601cf"
 
 [[package]]
 name = "openssl-sys"
-version = "0.9.102"
+version = "0.9.103"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c597637d56fbc83893a35eb0dd04b2b8e7a50c91e64e9493e398b5df4fb45fa2"
+checksum = "7f9e8deee91df40a943c71b917e5874b951d32a802526c85721ce3b776c929d6"
 dependencies = [
  "cc",
  "libc",
@@ -3788,7 +3788,7 @@ dependencies = [
  "prost 0.13.1",
  "thiserror",
  "tokio",
- "tonic 0.12.1",
+ "tonic 0.12.3",
 ]
 
 [[package]]
@@ -3802,7 +3802,7 @@ dependencies = [
  "opentelemetry_sdk",
  "prost 0.13.1",
  "serde",
- "tonic 0.12.1",
+ "tonic 0.12.3",
 ]
 
 [[package]]
@@ -4447,7 +4447,7 @@ dependencies = [
  "pin-project-lite",
  "quinn-proto",
  "quinn-udp",
- "rustc-hash",
+ "rustc-hash 1.1.0",
  "rustls 0.23.12",
  "thiserror",
  "tokio",
@@ -4456,14 +4456,14 @@ dependencies = [
 
 [[package]]
 name = "quinn-proto"
-version = "0.11.3"
+version = "0.11.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ddf517c03a109db8100448a4be38d498df8a210a99fe0e1b9eaf39e78c640efe"
+checksum = "ea0a9b3a42929fad8a7c3de7f86ce0814cfa893328157672680e9fb1145549c5"
 dependencies = [
  "bytes",
  "rand 0.8.5",
  "ring 0.17.8",
- "rustc-hash",
+ "rustc-hash 2.0.0",
  "rustls 0.23.12",
  "slab",
  "thiserror",
@@ -5170,6 +5170,12 @@ name = "rustc-hash"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "08d43f7aa6b08d49f382cde6a7982047c3426db949b1424bc4b7ec9ae12c6ce2"
+
+[[package]]
+name = "rustc-hash"
+version = "2.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "583034fd73374156e66797ed8e5b0d5690409c9226b22d87cb7f19821c05d152"
 
 [[package]]
 name = "rustc_lexer"
@@ -5885,7 +5891,7 @@ checksum = "13c2bddecc57b384dee18652358fb23172facb8a2c51ccc10d74c157bdea3292"
 
 [[package]]
 name = "surreal"
-version = "2.0.2"
+version = "2.0.4"
 dependencies = [
  "argon2",
  "assert_fs",
@@ -5941,7 +5947,7 @@ dependencies = [
  "tokio-stream",
  "tokio-tungstenite 0.23.1",
  "tokio-util",
- "tonic 0.12.1",
+ "tonic 0.12.3",
  "tower",
  "tower-http",
  "tower-service",
@@ -5956,9 +5962,9 @@ dependencies = [
 
 [[package]]
 name = "surrealcs"
-version = "0.4.2"
+version = "0.4.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "acb89fc8710a4492b0d4498113b7f4aa48be6e143def8dd027a04565cf467ed8"
+checksum = "2190f96d274f6e5cf137b6f96389ea3733cc784dd6aec2174d9648ab87c37ae6"
 dependencies = [
  "bytes",
  "chrono",
@@ -5976,9 +5982,9 @@ dependencies = [
 
 [[package]]
 name = "surrealcs-kernel"
-version = "0.4.2"
+version = "0.4.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6308bfa273a3ded6a31e3286010500593d925d5fc913ba4dc351b6c08f377e19"
+checksum = "cdb667b1f19485ad801d2cbcca5db5721add050b88526c7d788ebbd070a920b5"
 dependencies = [
  "bincode",
  "chrono",
@@ -5991,7 +5997,7 @@ dependencies = [
 
 [[package]]
 name = "surrealdb"
-version = "2.0.2"
+version = "2.0.4"
 dependencies = [
  "arrayvec",
  "async-channel 1.9.0",
@@ -6047,7 +6053,7 @@ dependencies = [
 
 [[package]]
 name = "surrealdb-core"
-version = "2.0.2"
+version = "2.0.4"
 dependencies = [
  "addr",
  "ahash 0.8.11",
@@ -6585,9 +6591,9 @@ dependencies = [
 
 [[package]]
 name = "tokio-stream"
-version = "0.1.15"
+version = "0.1.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "267ac89e0bec6e691e5813911606935d77c476ff49024f98abcea3e7b15e37af"
+checksum = "4f4e6ce100d0eb49a2734f8c0812bcd324cf357d21810932c5df6b96ef2b86f1"
 dependencies = [
  "futures-core",
  "pin-project-lite",
@@ -6726,9 +6732,9 @@ dependencies = [
 
 [[package]]
 name = "tonic"
-version = "0.12.1"
+version = "0.12.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "38659f4a91aba8598d27821589f5db7dddd94601e7a01b1e485a50e5484c7401"
+checksum = "877c5b330756d856ffcc4553ab34a5684481ade925ecc54bcd1bf02b1d0d4d52"
 dependencies = [
  "async-stream",
  "async-trait",

@@ -249,8 +249,8 @@ jobs:
 
   test:
     name: Test
-    needs: [ prepare-vars ]
-    runs-on: ubuntu-latest-16-cores
+    needs: [prepare-vars]
+    runs-on: [runner-amd64-2xlarge]
     steps:
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@master
@@ -294,8 +294,8 @@ jobs:
 
   lint:
     name: Lint
-    needs: [ prepare-vars ]
-    runs-on: ubuntu-latest
+    needs: [prepare-vars]
+    runs-on: [runner-amd64-2xlarge]
     steps:
       - name: Checkout sources
         uses: actions/checkout@v4
@@ -327,7 +327,7 @@ jobs:
   docker-builder:
     name: Prepare docker builder
     runs-on: ubuntu-latest
-    needs: [ prepare-vars ]
+    needs: [prepare-vars]
     outputs:
       name: ${{ steps.image.outputs.name }}
       tag: ${{ steps.image.outputs.tag }}
@@ -379,14 +379,14 @@ jobs:
 
   build:
     name: Build ${{ matrix.arch }} binary
-    needs: [ prepare-vars, docker-builder ]
+    needs: [prepare-vars, docker-builder]
     strategy:
       fail-fast: false
       matrix:
         include:
           # MacOS amd64
           - arch: x86_64-apple-darwin
-            runner: macos-latest-large
+            runner: macos-latest-xlarge
             file: surreal-${{ needs.prepare-vars.outputs.name }}.darwin-amd64
             build-step: |
               set -x
@@ -440,7 +440,7 @@ jobs:
 
           # Linux amd64
           - arch: x86_64-unknown-linux-gnu
-            runner: [ "self-hosted", "amd64", "builder" ]
+            runner: [runner-amd64-2xlarge]
             file: surreal-${{ needs.prepare-vars.outputs.name }}.linux-amd64
             build-step: |
               # Build
@@ -476,7 +476,7 @@ jobs:
 
           # Linux arm64
           - arch: aarch64-unknown-linux-gnu
-            runner: [ "self-hosted", "arm64", "builder" ]
+            runner: [runner-arm64-2xlarge]
             file: surreal-${{ needs.prepare-vars.outputs.name }}.linux-arm64
             build-step: |
               set -x
@@ -514,7 +514,7 @@ jobs:
 
           # Windows amd64
           - arch: x86_64-pc-windows-msvc
-            runner: windows-latest
+            runner: windows-latest-16-cores
             file: surreal-${{ needs.prepare-vars.outputs.name }}.windows-amd64
             build-step: |
               set -x
@@ -623,10 +623,10 @@ jobs:
 
   publish:
     name: Publish crate and artifacts binaries
-    needs: [ prepare-vars, test, lint, build ]
+    needs: [prepare-vars, test, lint, build]
     if: ${{ inputs.publish }}
     environment: ${{ inputs.environment }}
-    runs-on: ubuntu-latest
+    runs-on: [runner-amd64-2xlarge]
     steps:
       - name: Checkout sources
         uses: actions/checkout@v4
@@ -784,7 +784,7 @@ jobs:
 
   docker:
     name: Docker images
-    needs: [ prepare-vars, publish ]
+    needs: [prepare-vars, publish]
     uses: ./.github/workflows/reusable_docker.yml
     with:
       environment: ${{ inputs.environment }}
@@ -797,7 +797,7 @@ jobs:
 
   package-macos:
     name: Package and publish macOS universal binary
-    needs: [ prepare-vars, publish ]
+    needs: [prepare-vars, publish]
     runs-on: macos-latest
     env:
       FILE: surreal-${{ needs.prepare-vars.outputs.name }}.darwin-universal
@@ -837,7 +837,7 @@ jobs:
   propagate:
     name: Propagate binaries to all regions
     if: ${{ inputs.publish }}
-    needs: [ publish, package-macos ]
+    needs: [publish, package-macos]
     runs-on: ubuntu-latest
     steps:
       - name: Configure AWS

@@ -1199,9 +1199,7 @@ allow_unsafe = true
 allow_unsafe = true
 
 [pkg.actix-router]
-allow_apis = [
-    "net",
-]
+allow_apis = ["net"]
 
 [pkg.bitcode]
 allow_unsafe = true

@@ -2604,6 +2604,7 @@ impl Value {
 			Value::Bool(_) => true,
 			Value::Bytes(_) => true,
 			Value::Uuid(_) => true,
+			Value::Thing(_) => true,
 			Value::Number(_) => true,
 			Value::Strand(_) => true,
 			Value::Duration(_) => true,
@@ -2613,6 +2614,7 @@ impl Value {
 			Value::Object(v) => v.is_static(),
 			Value::Expression(v) => v.is_static(),
 			Value::Function(v) => v.is_static(),
+			Value::Cast(v) => v.is_static(),
 			Value::Constant(_) => true,
 			_ => false,
 		}

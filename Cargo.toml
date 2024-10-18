@@ -2,7 +2,7 @@
 name = "surreal"
 publish = false
 edition = "2021"
-version = "2.0.2"
+version = "2.0.4"
 license-file = "LICENSE"
 authors = ["Tobie Morgan Hitchcock <tobie@surrealdb.com>"]
 
@@ -174,7 +174,7 @@ temp-env = { version = "0.3.6", features = ["async_closure"] }
 test-log = { version = "0.2.13", features = ["trace"] }
 tokio-stream = { version = "0.1", features = ["net"] }
 tokio-tungstenite = { version = "0.23.1" }
-tonic = "0.12.1"
+tonic = "0.12.3"
 ulid = "1.1.0"
 wiremock = "0.6.0"
 
