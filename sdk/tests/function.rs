@@ -707,7 +707,7 @@ async fn function_array_reduce() -> Result<(), Error> {
 
 	// 1 item in array: return single item
 	let sql = r#"
-	[9].fold(|$x, $y, $z| $x + $y + $z);
+	[9].reduce(|$x, $y, $z| $x + $y + $z);
 	"#;
 	Test::new(sql).await?.expect_val("9")?;
 
