@@ -157,6 +157,18 @@ pub mod distance {
 
 	use strsim;
 
+	/// Calculate the Damerau-Levenshtein distance between two strings
+	/// via [`strsim::damerau_levenshtein`].
+	pub fn damerau_levenshtein((a, b): (String, String)) -> Result<Value, Error> {
+		Ok(strsim::damerau_levenshtein(&a, &b).into())
+	}
+
+	/// Calculate the normalized Damerau-Levenshtein distance between two strings
+	/// via [`strsim::normalized_damerau_levenshtein`].
+	pub fn damerau_levenshtein_normalized((a, b): (String, String)) -> Result<Value, Error> {
+		Ok(strsim::normalized_damerau_levenshtein(&a, &b).into())
+	}
+
 	/// Calculate the Hamming distance between two strings
 	/// via [`strsim::hamming`].
 	///
@@ -175,6 +187,19 @@ pub mod distance {
 	/// via [`strsim::levenshtein`].
 	pub fn levenshtein((a, b): (String, String)) -> Result<Value, Error> {
 		Ok(strsim::levenshtein(&a, &b).into())
+	}
+
+	/// Calculate the normalized Levenshtein distance between two strings
+	/// via [`strsim::normalized_levenshtein`].
+	pub fn levenshtein_normalized((a, b): (String, String)) -> Result<Value, Error> {
+		Ok(strsim::normalized_levenshtein(&a, &b).into())
+	}
+
+	/// Calculate the OSA distance &ndash; a variant of the Levenshtein distance
+	/// that allows for transposition of adjacent characters &ndash; between two strings
+	/// via [`strsim::osa_distance`].
+	pub fn osa((a, b): (String, String)) -> Result<Value, Error> {
+		Ok(strsim::osa_distance(&a, &b).into())
 	}
 }
 
@@ -307,18 +332,32 @@ pub mod similarity {
 	use crate::fnc::util::string::fuzzy::Fuzzy;
 	use crate::sql::Value;
 
+	use strsim;
+
 	pub fn fuzzy((a, b): (String, String)) -> Result<Value, Error> {
 		Ok(a.as_str().fuzzy_score(b.as_str()).into())
 	}
 
-	pub fn jaro((_, _): (String, String)) -> Result<Value, Error> {
-		Err(Error::FeatureNotYetImplemented {
-			feature: "string::similarity::jaro() function".to_string(),
-		})
+	/// Calculate the Jaro similarity between two strings
+	/// via [`strsim::jaro`].
+	pub fn jaro((a, b): (String, String)) -> Result<Value, Error> {
+		Ok(strsim::jaro(&a, &b).into())
+	}
+
+	/// Calculate the Jaro-Winkler similarity between two strings
+	/// via [`strsim::jaro_winkler`].
+	pub fn jaro_winkler((a, b): (String, String)) -> Result<Value, Error> {
+		Ok(strsim::jaro_winkler(&a, &b).into())
 	}
 
 	pub fn smithwaterman((a, b): (String, String)) -> Result<Value, Error> {
 		Ok(a.as_str().fuzzy_score(b.as_str()).into())
+	}
+
+	/// Calculate the Sørensen-Dice similarity between two strings
+	/// via [`strsim::sorensen_dice`].
+	pub fn sorensen_dice((a, b): (String, String)) -> Result<Value, Error> {
+		Ok(strsim::sorensen_dice(&a, &b).into())
 	}
 }
 

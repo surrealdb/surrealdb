@@ -306,8 +306,14 @@ pub(crate) static PATHS: phf::Map<UniCase<&'static str>, PathKind> = phf_map! {
 		UniCase::ascii("string::trim") => PathKind::Function,
 		UniCase::ascii("string::uppercase") => PathKind::Function,
 		UniCase::ascii("string::words") => PathKind::Function,
+		//
+		UniCase::ascii("string::distance::damerau_levenshtein") => PathKind::Function,
+		UniCase::ascii("string::distance::damerau_levenshtein_normalized") => PathKind::Function,
 		UniCase::ascii("string::distance::hamming") => PathKind::Function,
 		UniCase::ascii("string::distance::levenshtein") => PathKind::Function,
+		UniCase::ascii("string::distance::levenshtein_normalized") => PathKind::Function,
+		UniCase::ascii("string::distance::levenshtein_osa") => PathKind::Function,
+		//
 		UniCase::ascii("string::html::encode") => PathKind::Function,
 		UniCase::ascii("string::html::sanitize") => PathKind::Function,
 		UniCase::ascii("string::is::alphanum") => PathKind::Function,
@@ -338,9 +344,12 @@ pub(crate) static PATHS: phf::Map<UniCase<&'static str>, PathKind> = phf_map! {
 		UniCase::ascii("string::semver::set::major") => PathKind::Function,
 		UniCase::ascii("string::semver::set::minor") => PathKind::Function,
 		UniCase::ascii("string::semver::set::patch") => PathKind::Function,
+		//
 		UniCase::ascii("string::similarity::fuzzy") => PathKind::Function,
 		UniCase::ascii("string::similarity::jaro") => PathKind::Function,
+		UniCase::ascii("string::similarity::jaro_winkler") => PathKind::Function,
 		UniCase::ascii("string::similarity::smithwaterman") => PathKind::Function,
+		UniCase::ascii("string::similarity::sorensen_dice") => PathKind::Function,
 		UniCase::ascii("string::matches") => PathKind::Function,
 		//
 		UniCase::ascii("time::ceil") => PathKind::Function,
