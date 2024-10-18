@@ -94,8 +94,8 @@ impl fmt::Display for Order {
 			write!(f, " NUMERIC")?;
 		}
 		if !self.direction {
-			write!(f, " DESC")?
-		};
+			write!(f, " DESC")?;
+		}
 		Ok(())
 	}
 }
