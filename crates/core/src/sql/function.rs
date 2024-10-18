@@ -105,7 +105,7 @@ impl Function {
 		matches!(self, Self::Script(_, _))
 	}
 
-	/// Check if this function has static arguments
+	/// Check if all arguments are static values
 	pub fn is_static(&self) -> bool {
 		match self {
 			Self::Normal(_, a) => a.iter().all(Value::is_static),

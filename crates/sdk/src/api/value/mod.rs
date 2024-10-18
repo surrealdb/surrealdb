@@ -1,4 +1,5 @@
 use crate::Error;
+use chrono::{DateTime, Utc};
 use revision::revisioned;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use std::{
@@ -76,9 +77,16 @@ impl From<Vec<u8>> for Bytes {
 }
 
 transparent_wrapper!(
-	#[derive( Clone, Eq, PartialEq, Ord, PartialOrd)]
+	#[derive( Clone, Eq, Default, PartialEq, Ord, PartialOrd)]
 	pub struct Datetime(CoreDatetime)
 );
+impl_serialize_wrapper!(Datetime);
+
+impl From<DateTime<Utc>> for Datetime {
+	fn from(v: DateTime<Utc>) -> Self {
+		Self(v.into())
+	}
+}
 
 transparent_wrapper!(
 	/// The key of a [`RecordId`].
@@ -86,6 +94,7 @@ transparent_wrapper!(
 	#[non_exhaustive]
 	pub struct RecordIdKey(CoreId)
 );
+impl_serialize_wrapper!(RecordIdKey);
 
 impl From<Object> for RecordIdKey {
 	fn from(value: Object) -> Self {
@@ -114,6 +123,12 @@ impl From<&str> for RecordIdKey {
 impl From<i64> for RecordIdKey {
 	fn from(value: i64) -> Self {
 		Self(CoreId::Number(value))
+	}
+}
+
+impl From<Uuid> for RecordIdKey {
+	fn from(value: Uuid) -> Self {
+		Self(CoreId::Uuid(value.into()))
 	}
 }
 

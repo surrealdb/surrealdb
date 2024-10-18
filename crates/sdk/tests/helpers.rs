@@ -197,6 +197,7 @@ pub fn with_enough_stack(
 		.unwrap()
 }
 
+#[track_caller]
 #[allow(dead_code)]
 fn skip_ok_pos(res: &mut Vec<Response>, pos: usize) -> Result<(), Error> {
 	assert!(!res.is_empty(), "At position {pos} - No more result!");
@@ -209,6 +210,7 @@ fn skip_ok_pos(res: &mut Vec<Response>, pos: usize) -> Result<(), Error> {
 
 /// Skip the specified number of successful results from a vector of responses.
 /// This function will panic if there are not enough results in the vector or if an error occurs.
+#[track_caller]
 #[allow(dead_code)]
 pub fn skip_ok(res: &mut Vec<Response>, skip: usize) -> Result<(), Error> {
 	for i in 0..skip {
@@ -269,6 +271,7 @@ impl Test {
 
 	/// Checks if the number of responses matches the expected size.
 	/// Panics if the number of responses does not match the expected size
+	#[track_caller]
 	#[allow(dead_code)]
 	pub fn expect_size(&mut self, expected: usize) -> Result<&mut Self, Error> {
 		assert_eq!(
@@ -283,6 +286,7 @@ impl Test {
 	/// Retrieves the next response from the responses list.
 	/// This method will panic if the responses list is empty, indicating that there are no more responses to retrieve.
 	/// The panic message will include the last position in the responses list before it was emptied.
+	#[track_caller]
 	#[allow(dead_code)]
 	#[allow(clippy::should_implement_trait)]
 	pub fn next(&mut self) -> Result<Response, Error> {
@@ -294,12 +298,14 @@ impl Test {
 	/// Retrieves the next value from the responses list.
 	/// This method will panic if the responses list is empty, indicating that there are no more responses to retrieve.
 	/// The panic message will include the last position in the responses list before it was emptied.
+	#[track_caller]
 	pub fn next_value(&mut self) -> Result<Value, Error> {
 		self.next()?.result
 	}
 
 	/// Skips a specified number of elements from the beginning of the `responses` vector
 	/// and updates the position.
+	#[track_caller]
 	#[allow(dead_code)]
 	pub fn skip_ok(&mut self, skip: usize) -> Result<&mut Self, Error> {
 		for _ in 0..skip {
@@ -312,6 +318,7 @@ impl Test {
 	/// Expects the next value to be equal to the provided value.
 	/// Panics if the expected value is not equal to the actual value.
 	/// Compliant with NaN and Constants.
+	#[track_caller]
 	#[allow(dead_code)]
 	pub fn expect_value_info<I: Display>(
 		&mut self,
@@ -336,12 +343,14 @@ impl Test {
 		Ok(self)
 	}
 
+	#[track_caller]
 	#[allow(dead_code)]
 	pub fn expect_value(&mut self, val: Value) -> Result<&mut Self, Error> {
 		self.expect_value_info(val, "")
 	}
 
 	/// Expect values in the given slice to be present in the responses, following the same order.
+	#[track_caller]
 	#[allow(dead_code)]
 	pub fn expect_values(&mut self, values: &[Value]) -> Result<&mut Self, Error> {
 		for value in values {
@@ -351,11 +360,13 @@ impl Test {
 	}
 
 	/// Expect the given value to be equals to the next response.
+	#[track_caller]
 	#[allow(dead_code)]
 	pub fn expect_val(&mut self, val: &str) -> Result<&mut Self, Error> {
 		self.expect_val_info(val, "")
 	}
 
+	#[track_caller]
 	#[allow(dead_code)]
 	pub fn expect_val_info<I: Display>(&mut self, val: &str, info: I) -> Result<&mut Self, Error> {
 		self.expect_value_info(
@@ -364,6 +375,7 @@ impl Test {
 		)
 	}
 
+	#[track_caller]
 	#[allow(dead_code)]
 	/// Expect values in the given slice to be present in the responses, following the same order.
 	pub fn expect_vals(&mut self, vals: &[&str]) -> Result<&mut Self, Error> {
@@ -376,6 +388,7 @@ impl Test {
 	/// Expects the next result to be an error with the given check function returning true.
 	/// This function will panic if the next result is not an error or if the error
 	/// message does not pass the check.
+	#[track_caller]
 	#[allow(dead_code)]
 	pub fn expect_error_func<F: Fn(&Error) -> bool>(
 		&mut self,
@@ -393,12 +406,14 @@ impl Test {
 		Ok(self)
 	}
 
+	#[track_caller]
 	#[allow(dead_code)]
 	/// Expects the next result to be an error with the specified error message.
 	pub fn expect_error(&mut self, error: &str) -> Result<&mut Self, Error> {
 		self.expect_error_func(|e| e.to_string() == error)
 	}
 
+	#[track_caller]
 	#[allow(dead_code)]
 	pub fn expect_errors(&mut self, errors: &[&str]) -> Result<&mut Self, Error> {
 		for error in errors {
@@ -418,6 +433,7 @@ impl Test {
 	///
 	/// Panics if the next value is not a number or if the difference
 	/// between the expected and actual value exceeds the precision.
+	#[track_caller]
 	#[allow(dead_code)]
 	pub fn expect_float(&mut self, val: f64, precision: f64) -> Result<&mut Self, Error> {
 		let tmp = self.next_value()?;
@@ -433,6 +449,7 @@ impl Test {
 		Ok(self)
 	}
 
+	#[track_caller]
 	#[allow(dead_code)]
 	pub fn expect_floats(&mut self, vals: &[f64], precision: f64) -> Result<&mut Self, Error> {
 		for val in vals {

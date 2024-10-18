@@ -1,7 +1,7 @@
 use serde::Deserialize;
 use surrealdb::engine::remote::ws::Ws;
 use surrealdb::opt::auth::Root;
-use surrealdb::sql::Thing;
+use surrealdb::RecordId;
 use surrealdb::Surreal;
 
 const ACCOUNT: &str = "account";
@@ -9,7 +9,7 @@ const ACCOUNT: &str = "account";
 #[derive(Debug, Deserialize)]
 #[allow(dead_code)]
 struct Account {
-	id: Thing,
+	id: RecordId,
 	balance: String,
 }
 

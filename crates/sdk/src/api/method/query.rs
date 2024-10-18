@@ -237,8 +237,6 @@ where
 	/// Binding a key/value tuple
 	///
 	/// ```no_run
-	/// use surrealdb::sql;
-	///
 	/// # #[tokio::main]
 	/// # async fn main() -> surrealdb::Result<()> {
 	/// # let db = surrealdb::engine::any::connect("mem://").await?;
@@ -253,7 +251,6 @@ where
 	///
 	/// ```no_run
 	/// use serde::Serialize;
-	/// use surrealdb::sql;
 	///
 	/// #[derive(Serialize)]
 	/// struct User<'a> {
