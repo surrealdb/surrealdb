@@ -24,12 +24,13 @@ pub type NodeId = u64;
 pub type StoreGeneration = u64;
 
 #[non_exhaustive]
+#[allow(clippy::large_enum_variant)]
 pub enum TreeStore<N>
 where
 	N: TreeNode + Debug + Clone,
 {
 	/// caches every read nodes, and keeps track of updated and created nodes
-	Write(Box<TreeWrite<N>>),
+	Write(TreeWrite<N>),
 	/// caches read nodes in an LRU cache
 	Read(TreeRead<N>),
 }
@@ -41,7 +42,7 @@ where
 	pub async fn new(np: TreeNodeProvider, cache: Arc<TreeCache<N>>, tt: TransactionType) -> Self {
 		match tt {
 			TransactionType::Read => Self::Read(TreeRead::new(cache)),
-			TransactionType::Write => Self::Write(Box::new(TreeWrite::new(np, cache))),
+			TransactionType::Write => Self::Write(TreeWrite::new(np, cache)),
 		}
 	}
 
