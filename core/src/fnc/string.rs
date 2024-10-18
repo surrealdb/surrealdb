@@ -153,18 +153,28 @@ pub fn words((string,): (String,)) -> Result<Value, Error> {
 pub mod distance {
 
 	use crate::err::Error;
-	use crate::fnc::util::string::distance::StringDistance;
 	use crate::sql::Value;
 
+	use strsim;
+
+	/// Calculate the Hamming distance between two strings
+	/// via [`strsim::hamming`].
+	///
+	/// Will result in an [`Error::InvalidArguments`] if the given strings are of different lengths.
 	pub fn hamming((a, b): (String, String)) -> Result<Value, Error> {
-		a.as_str().hamming(b.as_str()).map(Into::into).map_err(|_| Error::InvalidArguments {
-			name: "string::distance::hamming()".into(),
-			message: "Strings must be of equal length".into(),
-		})
+		match strsim::hamming(&a, &b) {
+			Ok(v) => Ok(v.into()),
+			Err(_) => Err(Error::InvalidArguments {
+				name: "string::distance::hamming()".into(),
+				message: "Strings must be of equal length".into(),
+			}),
+		}
 	}
 
+	/// Calculate the Levenshtein distance between two strings
+	/// via [`strsim::levenshtein`].
 	pub fn levenshtein((a, b): (String, String)) -> Result<Value, Error> {
-		Ok(a.as_str().levenshtein(b.as_str()).into())
+		Ok(strsim::levenshtein(&a, &b).into())
 	}
 }
 
