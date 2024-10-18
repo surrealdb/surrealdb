@@ -29,7 +29,7 @@ where
 	N: TreeNode + Debug + Clone,
 {
 	/// caches every read nodes, and keeps track of updated and created nodes
-	Write(TreeWrite<N>),
+	Write(Box<TreeWrite<N>>),
 	/// caches read nodes in an LRU cache
 	Read(TreeRead<N>),
 }
@@ -41,7 +41,7 @@ where
 	pub async fn new(np: TreeNodeProvider, cache: Arc<TreeCache<N>>, tt: TransactionType) -> Self {
 		match tt {
 			TransactionType::Read => Self::Read(TreeRead::new(cache)),
-			TransactionType::Write => Self::Write(TreeWrite::new(np, cache)),
+			TransactionType::Write => Self::Write(Box::new(TreeWrite::new(np, cache))),
 		}
 	}
 
