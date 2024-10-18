@@ -16,15 +16,15 @@ use crate::idx::planner::plan::{Plan, PlanBuilder};
 use crate::idx::planner::tree::Tree;
 use crate::sql::statements::SelectStatement;
 use crate::sql::with::With;
-use crate::sql::{Cond, Fields, Groups, Orders, Table};
+use crate::sql::{order::Ordering, Cond, Fields, Groups, Table};
 use reblessive::tree::Stk;
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicU8, Ordering};
+use std::sync::atomic::{self, AtomicU8};
 
 pub(crate) struct QueryPlannerParams<'a> {
 	fields: &'a Fields,
 	with: Option<&'a With>,
-	order: Option<&'a Orders>,
+	order: Option<&'a Ordering>,
 	cond: Option<&'a Cond>,
 	group: Option<&'a Groups>,
 }
@@ -43,8 +43,13 @@ impl<'a> QueryPlannerParams<'a> {
 			}
 		}
 		if let Some(p) = self.order {
-			if !p.is_empty() {
-				return false;
+			match p {
+				Ordering::Random => {}
+				Ordering::Order(x) => {
+					if !x.0.is_empty() {
+						return false;
+					}
+				}
 			}
 		}
 		true
@@ -201,7 +206,7 @@ impl QueryPlanner {
 	}
 
 	pub(crate) async fn next_iteration_stage(&self) -> Option<IterationStage> {
-		let pos = self.iteration_index.fetch_add(1, Ordering::Relaxed);
+		let pos = self.iteration_index.fetch_add(1, atomic::Ordering::Relaxed);
 		match self.iteration_workflow.get(pos as usize) {
 			Some(IterationStage::BuildKnn) => {
 				Some(IterationStage::Iterate(Some(self.build_bruteforce_knn_results().await)))

@@ -2,9 +2,7 @@ use std::ops::Deref;
 
 use crate::sql::statements::define::config::graphql::TableConfig;
 use crate::sql::statements::DefineTableStatement;
-use crate::sql::{
-	statements::UseStatement, Cond, Ident, Idiom, Limit, Order, Orders, Part, Start, Table, Value,
-};
+use crate::sql::{statements::UseStatement, Cond, Ident, Idiom, Limit, Part, Start, Table, Value};
 
 pub trait IntoExt<T> {
 	fn intox(self) -> T;
@@ -37,21 +35,6 @@ where
 {
 	fn from(value: V) -> Self {
 		Self(value.into())
-	}
-}
-
-impl<I> FromExt<(I, bool, bool, bool, bool)> for Order
-where
-	I: Into<Idiom>,
-{
-	fn from((order, random, collate, numeric, direction): (I, bool, bool, bool, bool)) -> Self {
-		Self {
-			order: order.into(),
-			random,
-			collate,
-			numeric,
-			direction,
-		}
 	}
 }
 
@@ -95,12 +78,6 @@ where
 {
 	fn from(value: S) -> Self {
 		Table(value.into())
-	}
-}
-
-impl FromExt<Vec<Order>> for Orders {
-	fn from(value: Vec<Order>) -> Self {
-		Orders(value)
 	}
 }
 
