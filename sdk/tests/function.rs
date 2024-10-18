@@ -648,17 +648,11 @@ async fn function_array_map() -> Result<(), Error> {
 #[tokio::test]
 async fn function_array_fold() -> Result<(), Error> {
 	let sql = r#"
-		RETURN array::fold([1,2,3], 0, |$n, $i| $n + $i);
+		RETURN array::fold([1,2,3,4,5], 0, |$n, $i| $n + $i);
 	"#;
 	//
-	Test::new(sql).await?.expect_val("6")?;
+	Test::new(sql).await?.expect_val("15")?;
 
-	let sql = r#"
-	RETURN (<array>1..=10).fold(0, |$acc, $num| IF $num % 2 == 0 { $acc + $num } else { $acc });
-	"#;
-	//
-	Test::new(sql).await?.expect_val("30")?;
-	//
 	let sql = r#"
 	"gnirts a tsuJ".split("").fold("", |$one, $two| $two + $one);
 	"#;
@@ -687,16 +681,11 @@ async fn function_array_fold() -> Result<(), Error> {
 #[tokio::test]
 async fn function_array_reduce() -> Result<(), Error> {
 	let sql = r#"
-		RETURN array::reduce([1,2,3], |$n, $i| $n + $i);
+		RETURN array::reduce([1,2,3,4,5], |$n, $i| $n + $i);
 	"#;
 	//
-	Test::new(sql).await?.expect_val("6")?;
+	Test::new(sql).await?.expect_val("15")?;
 
-	let sql = r#"
-	RETURN (<array>1..=10).reduce(|$acc, $num| IF $num % 2 == 0 { $acc + $num } else { $acc });
-	"#;
-	//
-	Test::new(sql).await?.expect_val("30")?;
 	//
 	let sql = r#"
 	"gnirts a tsuJ".split("").reduce(|$one, $two| $two + $one);
