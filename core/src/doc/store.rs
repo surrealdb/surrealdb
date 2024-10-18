@@ -83,7 +83,7 @@ impl Document {
 				}
 			}
 			// Let's update the stored value for the specified key
-			_ => ctx.tx().set(key, self, None).await,
+			_ => ctx.tx().set(key, self, opt.version).await,
 		}?;
 		// Carry on
 		Ok(())

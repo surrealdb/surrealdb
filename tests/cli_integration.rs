@@ -486,6 +486,21 @@ mod cli_integration {
 				"auth level database requires providing a namespace and database: {output:?}"
 			);
 		}
+
+		info!("* Pass auth level without providing credentials");
+		{
+			let args = format!("sql --conn http://{addr} --ns {ns} --auth-level database");
+			let output = common::run(&args)
+				.input(format!("USE NS `{ns}` DB `{db}`; INFO FOR DB;\n").as_str())
+				.output();
+			assert!(
+				output
+					.clone()
+					.unwrap_err()
+					.contains("error: the following required arguments were not provided:\n  --password <PASSWORD>\n  --username <USERNAME>"),
+				"auth level database requires credentials: {output:?}"
+			);
+		}
 		server.finish().unwrap();
 	}
 
