@@ -159,13 +159,13 @@ pub mod distance {
 
 	/// Calculate the Damerau-Levenshtein distance between two strings
 	/// via [`strsim::damerau_levenshtein`].
-	pub fn damerau_levenshtein((a, b): (String, String)) -> Result<Value, Error> {
+	pub fn damerau((a, b): (String, String)) -> Result<Value, Error> {
 		Ok(strsim::damerau_levenshtein(&a, &b).into())
 	}
 
 	/// Calculate the normalized Damerau-Levenshtein distance between two strings
 	/// via [`strsim::normalized_damerau_levenshtein`].
-	pub fn damerau_levenshtein_normalized((a, b): (String, String)) -> Result<Value, Error> {
+	pub fn damerau_nrm((a, b): (String, String)) -> Result<Value, Error> {
 		Ok(strsim::normalized_damerau_levenshtein(&a, &b).into())
 	}
 
@@ -191,14 +191,14 @@ pub mod distance {
 
 	/// Calculate the normalized Levenshtein distance between two strings
 	/// via [`strsim::normalized_levenshtein`].
-	pub fn levenshtein_normalized((a, b): (String, String)) -> Result<Value, Error> {
+	pub fn levenshtein_nrm((a, b): (String, String)) -> Result<Value, Error> {
 		Ok(strsim::normalized_levenshtein(&a, &b).into())
 	}
 
 	/// Calculate the OSA distance &ndash; a variant of the Levenshtein distance
 	/// that allows for transposition of adjacent characters &ndash; between two strings
 	/// via [`strsim::osa_distance`].
-	pub fn osa((a, b): (String, String)) -> Result<Value, Error> {
+	pub fn levenshtein_osa((a, b): (String, String)) -> Result<Value, Error> {
 		Ok(strsim::osa_distance(&a, &b).into())
 	}
 }

@@ -304,11 +304,11 @@ pub fn synchronous(
 		"string::uppercase" => string::uppercase,
 		"string::words" => string::words,
 		//
-		"string::distance::damerau_levenshtein" => string::distance::damerau_levenshtein,
-		"string::distance::damerau_levenshtein_normalized" => string::distance::damerau_levenshtein_normalized,
+		"string::distance::damerau" => string::distance::damerau,
+		"string::distance::damerau_nrm" => string::distance::damerau_nrm,
 		"string::distance::hamming" => string::distance::hamming,
 		"string::distance::levenshtein" => string::distance::levenshtein,
-		"string::distance::levenshtein_normalized" => string::distance::levenshtein_nrm,
+		"string::distance::levenshtein_nrm" => string::distance::levenshtein_nrm,
 		"string::distance::levenshtein_osa" => string::distance::levenshtein_osa,
 		//
 		"string::html::encode" => string::html::encode,

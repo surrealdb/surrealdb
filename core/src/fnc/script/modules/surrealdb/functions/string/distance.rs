@@ -7,10 +7,10 @@ pub struct Package;
 impl_module_def!(
 	Package,
 	"string::distance",
-	"damerau_levenshtein" => run,
-	"damerau_levenshtein_normalized" => run,
+	"damerau" => run,
+	"damerau_nrm" => run,
 	"hamming" => run,
 	"levenshtein" => run,
-	"levenshtein_normalized" => run,
+	"levenshtein_nrm" => run,
 	"levenshtein_osa" => run
 );
