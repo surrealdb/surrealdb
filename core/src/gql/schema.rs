@@ -357,13 +357,9 @@ pub async fn generate_schema(
 			table_orderable = table_orderable.item(fd_name.to_string());
 			let type_filter_name = format!("_filter_{}", unwrap_type(fd_type.clone()));
 
-			let type_filter = Type::InputObject(filter_from_type(
-				kind.clone(),
-				type_filter_name.clone(),
-				&mut types,
-			)?);
-			trace!("\n{type_filter:?}\n");
-			types.push(type_filter);
+			let _ = filter_from_type(kind.clone(), type_filter_name.clone(), &mut types)?;
+			// trace!("\n{type_filter:?}\n");
+			// types.push(type_filter);
 
 			table_filter = table_filter
 				.field(InputValue::new(fd.name.to_string(), TypeRef::named(type_filter_name)));
@@ -683,7 +679,6 @@ fn kind_to_type(kind: Kind, types: &mut Vec<Type>) -> Result<TypeRef, GqlError> 
 		Kind::Array(k, _) => TypeRef::List(Box::new(kind_to_type(*k, types)?)),
 		Kind::Function(_, _) => return Err(schema_error("Kind::Function is not yet supported")),
 		Kind::Range => return Err(schema_error("Kind::Range is not yet supported")),
-		// TODO(raphaeldarley): check if union is of literals and generate enum
 		// generate custom scalar from other literals?
 		Kind::Literal(_) => return Err(schema_error("Kind::Literal is not yet supported")),
 	};
@@ -712,13 +707,24 @@ fn filter_from_type(
 	kind: Kind,
 	filter_name: String,
 	types: &mut Vec<Type>,
-) -> Result<InputObject, GqlError> {
-	let ty = match &kind {
+) -> Result<(), GqlError> {
+	let ty = match unwrap_kind(&kind) {
 		Kind::Record(ts) => match ts.len() {
-			1 => TypeRef::named(filter_name_from_table(
-				ts.first().expect("ts should have exactly one element").as_str(),
-			)),
-			_ => TypeRef::named(TypeRef::ID),
+			0 => TypeRef::named(TypeRef::ID),
+			// if this is a reference to a table included in the schema then the filter will be created elsewhere
+			1 => return Ok(()),
+			_ => {
+				let mut filter = InputObject::new(filter_name).oneof();
+
+				for t in ts {
+					filter = filter
+						.field(InputValue::new(&t.0, TypeRef::named(filter_name_from_table(t))))
+				}
+
+				types.push(Type::InputObject(filter));
+
+				return Ok(());
+			}
 		},
 		k => unwrap_type(kind_to_type(k.clone(), types)?),
 	};
@@ -752,13 +758,21 @@ fn filter_from_type(
 		Kind::Range => {}
 		Kind::Literal(_) => {}
 	};
-	Ok(filter)
+	types.push(Type::InputObject(filter));
+	Ok(())
 }
 
 fn unwrap_type(ty: TypeRef) -> TypeRef {
 	match ty {
 		TypeRef::NonNull(t) => unwrap_type(*t),
 		_ => ty,
+	}
+}
+
+fn unwrap_kind(kind: &Kind) -> &Kind {
+	match kind {
+		Kind::Option(inner) => &inner,
+		_ => kind,
 	}
 }
 
