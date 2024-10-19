@@ -1,4 +1,5 @@
 use crate::err::Error;
+use crate::idx::ft::analyzer::lemmatizer::Lemmatizer;
 use crate::idx::ft::analyzer::tokenizer::Tokens;
 use crate::idx::ft::offsets::Position;
 use crate::sql::filter::Filter as SqlFilter;
@@ -18,6 +19,7 @@ pub(super) enum Filter {
 	EdgeNgram(u16, u16),
 	Lowercase,
 	Uppercase,
+	Lemmatizer(Lemmatizer),
 }
 
 impl From<&SqlFilter> for Filter {
@@ -50,6 +52,7 @@ impl From<&SqlFilter> for Filter {
 				Filter::Stemmer(a)
 			}
 			SqlFilter::Uppercase => Filter::Uppercase,
+			SqlFilter::Lemme(path) => Filter::Lemmatizer(Lemmatizer::get(path)),
 		}
 	}
 }
@@ -95,38 +98,62 @@ impl Filter {
 			Filter::Ngram(min, max) => Self::ngram(c, *min, *max),
 			Filter::Stemmer(s) => Self::stem(s, c),
 			Filter::Uppercase => Self::uppercase(c),
-		}
-	}
-
-	#[inline]
-	fn check_term(c: &str, s: String) -> FilterResult {
-		if s.is_empty() {
-			FilterResult::Ignore
-		} else if s.eq(c) {
-			FilterResult::Term(Term::Unchanged)
-		} else {
-			FilterResult::Term(Term::NewTerm(s, 0))
+			Filter::Lemmatizer(l) => Self::lemme(l, c),
 		}
 	}
 
 	#[inline]
 	fn lowercase(c: &str) -> FilterResult {
-		Self::check_term(c, c.to_lowercase())
+		if c.is_empty() {
+			return FilterResult::Ignore;
+		}
+		let s = c.to_lowercase();
+		if s.eq(c) {
+			return FilterResult::Term(Term::Unchanged);
+		}
+		FilterResult::Term(Term::NewTerm(s, 0))
 	}
 
 	#[inline]
 	fn uppercase(c: &str) -> FilterResult {
-		Self::check_term(c, c.to_uppercase())
+		if c.is_empty() {
+			return FilterResult::Ignore;
+		}
+		let s = c.to_uppercase();
+		if s.eq(c) {
+			return FilterResult::Term(Term::Unchanged);
+		}
+		FilterResult::Term(Term::NewTerm(s, 0))
 	}
 
 	#[inline]
 	fn deunicode(c: &str) -> FilterResult {
-		Self::check_term(c, deunicode(c))
+		if c.is_empty() {
+			return FilterResult::Ignore;
+		}
+		let s = deunicode(c);
+		if s.eq(c) {
+			return FilterResult::Term(Term::Unchanged);
+		}
+		FilterResult::Term(Term::NewTerm(s, 0))
 	}
 
 	#[inline]
 	fn stem(s: &Stemmer, c: &str) -> FilterResult {
-		Self::check_term(c, s.stem(&c.to_lowercase()).into())
+		if c.is_empty() {
+			return FilterResult::Ignore;
+		}
+		let c = c.to_lowercase();
+		let s = s.stem(&c);
+		if s.eq(&c) {
+			return FilterResult::Term(Term::Unchanged);
+		}
+		FilterResult::Term(Term::NewTerm(s.to_string(), 0))
+	}
+
+	#[inline]
+	fn lemme(l: &Lemmatizer, c: &str) -> FilterResult {
+		l.lemme(&c.to_lowercase())
 	}
 
 	#[inline]
