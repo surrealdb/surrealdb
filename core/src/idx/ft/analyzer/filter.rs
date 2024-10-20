@@ -1,5 +1,5 @@
 use crate::err::Error;
-use crate::idx::ft::analyzer::lemmatizer::Lemmatizer;
+use crate::idx::ft::analyzer::mapper::Mapper;
 use crate::idx::ft::analyzer::tokenizer::Tokens;
 use crate::idx::ft::offsets::Position;
 use crate::sql::filter::Filter as SqlFilter;
@@ -19,7 +19,7 @@ pub(super) enum Filter {
 	EdgeNgram(u16, u16),
 	Lowercase,
 	Uppercase,
-	Lemmatizer(Lemmatizer),
+	Mapper(Mapper),
 }
 
 impl From<&SqlFilter> for Filter {
@@ -52,7 +52,7 @@ impl From<&SqlFilter> for Filter {
 				Filter::Stemmer(a)
 			}
 			SqlFilter::Uppercase => Filter::Uppercase,
-			SqlFilter::Lemme(path) => Filter::Lemmatizer(Lemmatizer::get(path)),
+			SqlFilter::Mapper(path) => Filter::Mapper(Mapper::get(path)),
 		}
 	}
 }
@@ -98,7 +98,7 @@ impl Filter {
 			Filter::Ngram(min, max) => Self::ngram(c, *min, *max),
 			Filter::Stemmer(s) => Self::stem(s, c),
 			Filter::Uppercase => Self::uppercase(c),
-			Filter::Lemmatizer(l) => Self::lemme(l, c),
+			Filter::Mapper(m) => m.map(c),
 		}
 	}
 
@@ -149,11 +149,6 @@ impl Filter {
 			return FilterResult::Term(Term::Unchanged);
 		}
 		FilterResult::Term(Term::NewTerm(s.to_string(), 0))
-	}
-
-	#[inline]
-	fn lemme(l: &Lemmatizer, c: &str) -> FilterResult {
-		l.lemme(&c.to_lowercase())
 	}
 
 	#[inline]

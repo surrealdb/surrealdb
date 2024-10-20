@@ -17,7 +17,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 mod filter;
-mod lemmatizer;
+mod mapper;
 mod tokenizer;
 
 #[derive(Clone)]

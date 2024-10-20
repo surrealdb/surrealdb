@@ -15,7 +15,7 @@ pub enum Filter {
 	Ngram(u16, u16),
 	Snowball(Language),
 	Uppercase,
-	Lemme(String),
+	Mapper(String),
 }
 
 impl Display for Filter {
@@ -27,7 +27,7 @@ impl Display for Filter {
 			Self::Ngram(min, max) => write!(f, "NGRAM({min},{max})"),
 			Self::Snowball(lang) => write!(f, "SNOWBALL({lang})"),
 			Self::Uppercase => f.write_str("UPPERCASE"),
-			Self::Lemme(path) => write!(f, "LEMME({path})"),
+			Self::Mapper(path) => write!(f, "MAPPER({path})"),
 		}
 	}
 }
