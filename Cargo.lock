@@ -3490,7 +3490,7 @@ dependencies = [
  "chrono",
  "futures",
  "paste",
- "revision 0.10.0",
+ "revision",
  "serde",
  "thiserror",
 ]
@@ -4789,18 +4789,6 @@ dependencies = [
 
 [[package]]
 name = "revision"
-version = "0.7.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4df61cfb2522f24fd6aa90ce3489c2c8660a181075e7bac3ae7bdf22287d238f"
-dependencies = [
- "bincode",
- "revision-derive 0.7.0",
- "serde",
- "thiserror",
-]
-
-[[package]]
-name = "revision"
 version = "0.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "22f53179a035f881adad8c4d58a2c599c6b4a8325b989c68d178d7a34d1b1e4c"
@@ -4808,23 +4796,10 @@ dependencies = [
  "chrono",
  "geo",
  "regex",
- "revision-derive 0.10.0",
+ "revision-derive",
  "roaring",
  "rust_decimal",
  "uuid",
-]
-
-[[package]]
-name = "revision-derive"
-version = "0.7.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "854ff0b6794d4e0aab5e4486870941caefe9f258e63cad2f21b49a6302377c85"
-dependencies = [
- "darling",
- "proc-macro-error",
- "proc-macro2",
- "quote",
- "syn 2.0.77",
 ]
 
 [[package]]
@@ -5928,7 +5903,7 @@ dependencies = [
  "rand 0.8.5",
  "rcgen",
  "reqwest",
- "revision 0.10.0",
+ "revision",
  "rmp-serde",
  "rmpv",
  "rust_decimal",
@@ -5989,7 +5964,7 @@ dependencies = [
  "bincode",
  "chrono",
  "nanoservices-utils",
- "revision 0.10.0",
+ "revision",
  "serde",
  "tokio",
  "tracing",
@@ -6021,7 +5996,7 @@ dependencies = [
  "reblessive",
  "regex",
  "reqwest",
- "revision 0.10.0",
+ "revision",
  "ring 0.17.8",
  "rust_decimal",
  "rustls 0.23.12",
@@ -6112,7 +6087,7 @@ dependencies = [
  "regex",
  "regex-syntax 0.8.4",
  "reqwest",
- "revision 0.10.0",
+ "revision",
  "ring 0.17.8",
  "rmpv",
  "roaring",
@@ -6197,9 +6172,9 @@ dependencies = [
 
 [[package]]
 name = "surrealkv"
-version = "0.3.7"
+version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f7d5229be1d8f2500842c02549665735ae3cf6265ba5afd0eab44fae7397e1b4"
+checksum = "58da1e2355c6e5239658e37ed67551871163df626a0d2f69d730718922f704cf"
 dependencies = [
  "ahash 0.8.11",
  "async-channel 2.2.0",
@@ -6210,7 +6185,7 @@ dependencies = [
  "lru",
  "parking_lot",
  "quick_cache 0.6.2",
- "revision 0.7.1",
+ "revision",
  "tokio",
  "vart",
 ]
@@ -7146,9 +7121,9 @@ checksum = "830b7e5d4d90034032940e4ace0d9a9a057e7a45cd94e6c007832e39edb82f6d"
 
 [[package]]
 name = "vart"
-version = "0.4.1"
+version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dd6bd87feca9f16f8ad061a454246178acd32881d188262ec377d4e170d63503"
+checksum = "1a8d5a909a58ae4ed6612e7efef7c70dcca222721c48b20ddbe55bc4ae06e07c"
 
 [[package]]
 name = "vcpkg"
