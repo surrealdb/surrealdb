@@ -334,9 +334,9 @@ pub struct FDb;
 /// # #[tokio::main]
 /// # async fn main() -> surrealdb::Result<()> {
 /// use surrealdb::Surreal;
-/// use surrealdb::engine::local::SurrealKV;
+/// use surrealdb::engine::local::SurrealKv;
 ///
-/// let db = Surreal::new::<SurrealKV>("path/to/database-folder").await?;
+/// let db = Surreal::new::<SurrealKv>("path/to/database-folder").await?;
 /// # Ok(())
 /// # }
 /// ```
@@ -348,17 +348,17 @@ pub struct FDb;
 /// # async fn main() -> surrealdb::Result<()> {
 /// use surrealdb::opt::Config;
 /// use surrealdb::Surreal;
-/// use surrealdb::engine::local::SurrealKV;
+/// use surrealdb::engine::local::SurrealKv;
 ///
 /// let config = Config::default().strict();
-/// let db = Surreal::new::<SurrealKV>(("path/to/database-folder", config)).await?;
+/// let db = Surreal::new::<SurrealKv>(("path/to/database-folder", config)).await?;
 /// # Ok(())
 /// # }
 /// ```
 #[cfg(feature = "kv-surrealkv")]
 #[cfg_attr(docsrs, doc(cfg(feature = "kv-surrealkv")))]
 #[derive(Debug)]
-pub struct SurrealKV;
+pub struct SurrealKv;
 
 /// SurrealCS database
 ///
