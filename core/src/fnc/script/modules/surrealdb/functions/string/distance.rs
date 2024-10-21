@@ -7,6 +7,10 @@ pub struct Package;
 impl_module_def!(
 	Package,
 	"string::distance",
+	"damerau" => run,
+	"damerau_nrm" => run,
 	"hamming" => run,
-	"levenshtein" => run
+	"levenshtein" => run,
+	"levenshtein_nrm" => run,
+	"levenshtein_osa" => run
 );
