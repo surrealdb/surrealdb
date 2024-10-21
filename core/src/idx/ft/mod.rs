@@ -164,7 +164,7 @@ impl FtIndex {
 			index_key_base,
 			bm25,
 			highlighting: p.hl,
-			analyzer: Analyzer::new(az),
+			analyzer: Analyzer::new(ixs, az),
 			doc_ids,
 			doc_lengths,
 			postings,

@@ -2,6 +2,7 @@ use crate::err::Error;
 use crate::idx::ft::analyzer::mapper::Mapper;
 use crate::idx::ft::analyzer::tokenizer::Tokens;
 use crate::idx::ft::offsets::Position;
+use crate::idx::trees::store::IndexStores;
 use crate::sql::filter::Filter as SqlFilter;
 use crate::sql::language::Language;
 use deunicode::deunicode;
@@ -22,8 +23,8 @@ pub(super) enum Filter {
 	Mapper(Mapper),
 }
 
-impl From<&SqlFilter> for Filter {
-	fn from(f: &SqlFilter) -> Self {
+impl Filter {
+	fn new(ixs: &IndexStores, f: &SqlFilter) -> Self {
 		match f {
 			SqlFilter::Ascii => Filter::Ascii,
 			SqlFilter::EdgeNgram(min, max) => Filter::EdgeNgram(*min, *max),
@@ -52,15 +53,13 @@ impl From<&SqlFilter> for Filter {
 				Filter::Stemmer(a)
 			}
 			SqlFilter::Uppercase => Filter::Uppercase,
-			SqlFilter::Mapper(path) => Filter::Mapper(Mapper::get(path)),
+			SqlFilter::Mapper(path) => Filter::Mapper(ixs.mappers().get(path)),
 		}
 	}
-}
 
-impl Filter {
-	pub(super) fn from(fs: &Option<Vec<SqlFilter>>) -> Option<Vec<Filter>> {
+	pub(super) fn from(ixs: &IndexStores, fs: &Option<Vec<SqlFilter>>) -> Option<Vec<Filter>> {
 		if let Some(fs) = fs {
-			let r = fs.iter().map(|f| f.into()).collect();
+			let r = fs.iter().map(|f| Self::new(ixs, f)).collect();
 			Some(r)
 		} else {
 			None

@@ -7,6 +7,7 @@ use crate::idx::ft::doclength::DocLength;
 use crate::idx::ft::offsets::{Offset, OffsetRecords};
 use crate::idx::ft::postings::TermFrequency;
 use crate::idx::ft::terms::{TermId, TermLen, Terms};
+use crate::idx::trees::store::IndexStores;
 use crate::sql::statements::DefineAnalyzerStatement;
 use crate::sql::Value;
 use crate::sql::{Function, Strand};
@@ -17,7 +18,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 mod filter;
-mod mapper;
+pub(in crate::idx) mod mapper;
 mod tokenizer;
 
 #[derive(Clone)]
@@ -50,9 +51,9 @@ impl TermsSet {
 }
 
 impl Analyzer {
-	pub(crate) fn new(az: Arc<DefineAnalyzerStatement>) -> Self {
+	pub(crate) fn new(ixs: &IndexStores, az: Arc<DefineAnalyzerStatement>) -> Self {
 		Self {
-			filters: Arc::new(Filter::from(&az.filters)),
+			filters: Arc::new(Filter::from(ixs, &az.filters)),
 			az,
 		}
 	}
