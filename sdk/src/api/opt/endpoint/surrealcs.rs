@@ -1,5 +1,5 @@
 use crate::api::engine::local::Db;
-use crate::api::engine::local::SurrealCS;
+use crate::api::engine::local::SurrealCs;
 use crate::api::opt::Config;
 use crate::api::opt::Endpoint;
 use crate::api::opt::IntoEndpoint;
@@ -11,7 +11,7 @@ use url::Url;
 macro_rules! endpoints {
 	($($name:ty),*) => {
 		$(
-			impl IntoEndpoint<SurrealCS> for $name {
+			impl IntoEndpoint<SurrealCs> for $name {
 				type Client = Db;
 
 				fn into_endpoint(self) -> Result<Endpoint> {
@@ -24,11 +24,11 @@ macro_rules! endpoints {
 				}
 			}
 
-			impl IntoEndpoint<SurrealCS> for ($name, Config) {
+			impl IntoEndpoint<SurrealCs> for ($name, Config) {
 				type Client = Db;
 
 				fn into_endpoint(self) -> Result<Endpoint> {
-					let mut endpoint = IntoEndpoint::<SurrealCS>::into_endpoint(self.0)?;
+					let mut endpoint = IntoEndpoint::<SurrealCs>::into_endpoint(self.0)?;
 					endpoint.config = self.1;
 					Ok(endpoint)
 				}
