@@ -5,9 +5,10 @@ use std::sync::Arc;
 use crate::dbs::Session;
 use crate::kvs::Datastore;
 use crate::sql::kind::Literal;
+use crate::sql::order::{OrderList, Ordering};
 use crate::sql::statements::define::config::graphql::TablesConfig;
 use crate::sql::statements::{DefineFieldStatement, SelectStatement};
-use crate::sql::{self, Table};
+use crate::sql::{self, Ident, Order, Part, Table};
 use crate::sql::{Cond, Fields};
 use crate::sql::{Expression, Geometry};
 use crate::sql::{Idiom, Kind};
@@ -58,20 +59,6 @@ macro_rules! id_input {
 	() => {
 		InputValue::new("id", TypeRef::named_nn(TypeRef::ID))
 	};
-}
-
-macro_rules! order {
-	(asc, $field:expr) => {{
-		let mut tmp = sql::Order::default();
-		tmp.order = $field.into();
-		tmp.direction = true;
-		tmp
-	}};
-	(desc, $field:expr) => {{
-		let mut tmp = sql::Order::default();
-		tmp.order = $field.into();
-		tmp
-	}};
 }
 
 fn filter_name_from_table(tb_name: impl Display) -> String {
@@ -188,10 +175,17 @@ pub async fn generate_schema(
 											return Err("Found both ASC and DESC in order".into());
 										}
 										(Some(GqlValue::Enum(a)), None) => {
-											orders.push(order!(asc, a.as_str()))
+											orders.push(Order{
+												direction: true,
+												value: Idiom(vec![Part::Field(Ident(a.to_string()))]),
+												..Default::default()
+											});
 										}
 										(None, Some(GqlValue::Enum(d))) => {
-											orders.push(order!(desc, d.as_str()))
+											orders.push(Order{
+												value: Idiom(vec![Part::Field(Ident(d.to_string()))]),
+												..Default::default()
+											});
 										}
 										(_, _) => {
 											break;
@@ -240,7 +234,7 @@ pub async fn generate_schema(
 									// this means the `value` keyword
 									true,
 								),
-								order: orders.map(IntoExt::intox),
+								order: orders.map(|x| Ordering::Order(OrderList(x))),
 								cond,
 								limit,
 								start,

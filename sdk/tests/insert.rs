@@ -769,3 +769,15 @@ async fn insert_without_into() -> Result<(), Error> {
 	//
 	Ok(())
 }
+
+#[tokio::test]
+async fn insert_ignore() -> Result<(), Error> {
+	let sql = "
+		INSERT INTO user { id: 1, name: 'foo' };
+		INSERT IGNORE INTO user { id: 1, name: 'bar' };
+		";
+	let mut t = Test::new(sql).await?;
+	t.expect_size(2)?;
+	t.expect_vals(&vec!["[{ id: user:1, name: 'foo' }]", "[]"])?;
+	Ok(())
+}

@@ -1,6 +1,8 @@
+use rand::seq::SliceRandom;
+
 use crate::dbs::plan::Explanation;
+use crate::sql::order::Ordering;
 use crate::sql::value::Value;
-use crate::sql::Orders;
 use std::mem;
 
 #[derive(Default)]
@@ -11,8 +13,13 @@ impl MemoryCollector {
 		self.0.push(val);
 	}
 
-	pub(super) fn sort(&mut self, orders: &Orders) {
-		self.0.sort_by(|a, b| orders.compare(a, b));
+	pub(super) fn sort(&mut self, ordering: &Ordering) {
+		match ordering {
+			Ordering::Random => self.0.shuffle(&mut rand::thread_rng()),
+			Ordering::Order(orders) => {
+				self.0.sort_by(|a, b| orders.compare(a, b));
+			}
+		}
 	}
 
 	pub(super) fn len(&self) -> usize {
@@ -58,8 +65,10 @@ pub(super) mod file_store {
 	use crate::cnf::EXTERNAL_SORTING_BUFFER_LIMIT;
 	use crate::dbs::plan::Explanation;
 	use crate::err::Error;
-	use crate::sql::{Orders, Value};
+	use crate::sql::order::Ordering;
+	use crate::sql::Value;
 	use ext_sort::{ExternalChunk, ExternalSorter, ExternalSorterBuilder, LimitedBufferBuilder};
+	use rand::seq::SliceRandom as _;
 	use revision::Revisioned;
 	use std::fs::{File, OpenOptions};
 	use std::io::{BufReader, BufWriter, Read, Seek, SeekFrom, Take, Write};
@@ -72,7 +81,7 @@ pub(super) mod file_store {
 		len: usize,
 		writer: Option<FileWriter>,
 		reader: Option<FileReader>,
-		orders: Option<Orders>,
+		orders: Option<Ordering>,
 		paging: FilePaging,
 	}
 
@@ -114,7 +123,7 @@ pub(super) mod file_store {
 			}
 			Ok(())
 		}
-		pub(in crate::dbs) fn sort(&mut self, orders: &Orders) {
+		pub(in crate::dbs) fn sort(&mut self, orders: &Ordering) {
 			self.orders = Some(orders.clone());
 		}
 
@@ -143,24 +152,44 @@ pub(super) mod file_store {
 		fn sort_and_take_vec(
 			&mut self,
 			reader: FileReader,
-			orders: Orders,
+			orders: Ordering,
 			start: u32,
 			num: u32,
 		) -> Result<Vec<Value>, Error> {
-			let sort_dir = self.dir.path().join(Self::SORT_DIRECTORY_NAME);
-			fs::create_dir(&sort_dir)?;
+			match orders {
+				Ordering::Random => {
+					let mut res: Vec<Value> = Vec::with_capacity(num as usize);
+					for r in reader.into_iter().skip(start as usize).take(num as usize) {
+						res.push(r?);
+					}
+					res.shuffle(&mut rand::thread_rng());
+					Ok(res)
+				}
+				Ordering::Order(orders) => {
+					let sort_dir = self.dir.path().join(Self::SORT_DIRECTORY_NAME);
+					fs::create_dir(&sort_dir)?;
 
-			let sorter: ExternalSorter<Value, Error, LimitedBufferBuilder, ValueExternalChunk> =
-				ExternalSorterBuilder::new()
-					.with_tmp_dir(&sort_dir)
-					.with_buffer(LimitedBufferBuilder::new(*EXTERNAL_SORTING_BUFFER_LIMIT, true))
-					.build()?;
+					let sorter: ExternalSorter<
+						Value,
+						Error,
+						LimitedBufferBuilder,
+						ValueExternalChunk,
+					> = ExternalSorterBuilder::new()
+						.with_tmp_dir(&sort_dir)
+						.with_buffer(LimitedBufferBuilder::new(
+							*EXTERNAL_SORTING_BUFFER_LIMIT,
+							true,
+						))
+						.build()?;
 
-			let sorted = sorter.sort_by(reader, |a, b| orders.compare(a, b))?;
-			let iter = sorted.map(Result::unwrap);
-			let r: Vec<Value> = iter.skip(start as usize).take(num as usize).collect();
-			Ok(r)
+					let sorted = sorter.sort_by(reader, |a, b| orders.compare(a, b))?;
+					let iter = sorted.map(Result::unwrap);
+					let r: Vec<Value> = iter.skip(start as usize).take(num as usize).collect();
+					Ok(r)
+				}
+			}
 		}
+
 		pub(in crate::dbs) fn explain(&self, exp: &mut Explanation) {
 			exp.add_collector("TempFiles", vec![]);
 		}

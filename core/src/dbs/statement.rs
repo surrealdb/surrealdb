@@ -5,7 +5,7 @@ use crate::sql::field::Fields;
 use crate::sql::group::Groups;
 use crate::sql::idiom::Idioms;
 use crate::sql::limit::Limit;
-use crate::sql::order::Orders;
+use crate::sql::order::Ordering;
 use crate::sql::output::Output;
 use crate::sql::split::Splits;
 use crate::sql::start::Start;
@@ -136,6 +136,10 @@ impl<'a> Statement<'a> {
 	pub fn is_retryable(&self) -> bool {
 		matches!(self, Statement::Insert(_) if self.data().is_some())
 	}
+	/// Returns whether the IGNORE clause is et
+	pub fn is_ignore(&self) -> bool {
+		matches!(self, Statement::Insert(i) if i.ignore)
+	}
 	/// Returns any query fields if specified
 	pub fn expr(&self) -> Option<&Fields> {
 		match self {
@@ -188,7 +192,7 @@ impl<'a> Statement<'a> {
 		}
 	}
 	/// Returns any ORDER clause if specified
-	pub fn order(&self) -> Option<&Orders> {
+	pub fn order(&self) -> Option<&Ordering> {
 		match self {
 			Statement::Select(v) => v.order.as_ref(),
 			_ => None,

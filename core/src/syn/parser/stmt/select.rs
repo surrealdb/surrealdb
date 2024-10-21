@@ -2,8 +2,10 @@ use reblessive::Stk;
 
 use crate::{
 	sql::{
-		statements::SelectStatement, Explain, Field, Fields, Ident, Idioms, Limit, Order, Orders,
-		Split, Splits, Start, Values, Version, With,
+		order::{OrderList, Ordering},
+		statements::SelectStatement,
+		Explain, Field, Fields, Ident, Idioms, Limit, Order, Split, Splits, Start, Values, Version,
+		With,
 	},
 	syn::{
 		parser::{
@@ -145,7 +147,7 @@ impl Parser<'_> {
 		ctx: &mut Stk,
 		fields: &Fields,
 		fields_span: Span,
-	) -> ParseResult<Option<Orders>> {
+	) -> ParseResult<Option<Ordering>> {
 		if !self.eat(t!("ORDER")) {
 			return Ok(None);
 		}
@@ -156,13 +158,7 @@ impl Parser<'_> {
 			self.pop_peek();
 			let start = expected!(self, t!("(")).span;
 			self.expect_closing_delimiter(t!(")"), start)?;
-			return Ok(Some(Orders(vec![Order {
-				order: Default::default(),
-				random: true,
-				collate: false,
-				numeric: false,
-				direction: true,
-			}])));
+			return Ok(Some(Ordering::Random));
 		};
 
 		let has_all = fields.contains(&Field::All);
@@ -171,7 +167,7 @@ impl Parser<'_> {
 		let order = self.parse_order(ctx).await?;
 		let order_span = before.covers(self.last_span());
 		if !has_all {
-			Self::check_idiom(MissingKind::Order, fields, fields_span, &order, order_span)?;
+			Self::check_idiom(MissingKind::Order, fields, fields_span, &order.value, order_span)?;
 		}
 
 		let mut orders = vec![order];
@@ -180,12 +176,18 @@ impl Parser<'_> {
 			let order = self.parse_order(ctx).await?;
 			let order_span = before.covers(self.last_span());
 			if !has_all {
-				Self::check_idiom(MissingKind::Order, fields, fields_span, &order, order_span)?;
+				Self::check_idiom(
+					MissingKind::Order,
+					fields,
+					fields_span,
+					&order.value,
+					order_span,
+				)?;
 			}
 			orders.push(order)
 		}
 
-		Ok(Some(Orders(orders)))
+		Ok(Some(Ordering::Order(OrderList(orders))))
 	}
 
 	async fn parse_order(&mut self, ctx: &mut Stk) -> ParseResult<Order> {
@@ -204,8 +206,7 @@ impl Parser<'_> {
 			_ => true,
 		};
 		Ok(Order {
-			order: start,
-			random: false,
+			value: start,
 			collate,
 			numeric,
 			direction,
