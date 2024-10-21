@@ -401,6 +401,11 @@ pub type SurrealKV = SurrealKv;
 #[derive(Debug)]
 pub struct SurrealCs;
 
+/// SurrealCS database
+#[deprecated(note = "Incorrect case, use SurrealCs instead")]
+#[cfg(feature = "kv-surrealcs")]
+pub type SurrealCS = SurrealCs;
+
 /// An embedded database
 #[derive(Debug, Clone)]
 pub struct Db(());
