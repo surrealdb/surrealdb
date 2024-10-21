@@ -18,16 +18,20 @@ impl Document {
 		stm: &Statement<'_>,
 		mut pro: Processed,
 	) -> Result<Value, Error> {
+		// Whether we are retrying
+		let mut retry = false;
 		// Loop over maximum two times
 		for _ in 0..2 {
 			// Setup a new workable
 			let ins = match pro.val {
 				Operable::Value(v) => (v, Workable::Normal),
-				Operable::Mergeable(v, o, u) => (v, Workable::Insert(o, u)),
-				Operable::Relatable(f, v, w, o, u) => (v, Workable::Relate(f, w, o, u)),
+				Operable::Insert(v, o) => (v, Workable::Insert(o)),
+				Operable::Relate(f, v, w, o) => (v, Workable::Relate(f, w, o)),
 			};
 			// Setup a new document
-			let mut doc = Document::new(pro.rid, pro.ir, ins.0, ins.1);
+			let mut doc = Document::new(pro.rid, pro.ir, pro.generate, ins.0, ins.1, retry);
+			// Generate a new document id if necessary
+			doc.generate_record_id(stk, ctx, opt, stm).await?;
 			// Optionally create a save point so we can roll back any upcoming changes
 			let is_save_point = if stm.is_retryable() {
 				ctx.tx().lock().await.new_save_point().await;
@@ -65,14 +69,17 @@ impl Document {
 						None => Value::None,
 					});
 					pro = Processed {
+						generate: None,
 						rid: Some(Arc::new(v)),
 						ir: None,
 						val: match doc.extras {
 							Workable::Normal => Operable::Value(val),
-							Workable::Insert(o, _) => Operable::Mergeable(val, o, true),
-							Workable::Relate(f, w, o, _) => Operable::Relatable(f, val, w, o, true),
+							Workable::Insert(o) => Operable::Insert(val, o),
+							Workable::Relate(f, w, o) => Operable::Relate(f, val, w, o),
 						},
 					};
+					// Mark this as retrying
+					retry = true;
 					// Go to top of loop
 					continue;
 				}

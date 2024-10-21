@@ -29,7 +29,7 @@ const TARGET: &str = "surrealdb::core::dbs";
 
 #[derive(Clone)]
 pub(crate) enum Iterable {
-	/// Any [Value] which does not exists in storage. This
+	/// Any [Value] which does not exist in storage. This
 	/// could be the result of a query, an arbritrary
 	/// SurrealQL value, object, or array of values.
 	Value(Value),
@@ -77,50 +77,44 @@ pub(crate) enum Iterable {
 #[derive(Debug)]
 pub(crate) enum Operable {
 	Value(Arc<Value>),
-	Mergeable(Arc<Value>, Arc<Value>, bool),
-	Relatable(Thing, Arc<Value>, Thing, Option<Arc<Value>>, bool),
+	Insert(Arc<Value>, Arc<Value>),
+	Relate(Thing, Arc<Value>, Thing, Option<Arc<Value>>),
 }
 
 #[derive(Debug)]
 pub(crate) enum Workable {
 	Normal,
-	Insert(Arc<Value>, bool),
-	Relate(Thing, Thing, Option<Arc<Value>>, bool),
+	Insert(Arc<Value>),
+	Relate(Thing, Thing, Option<Arc<Value>>),
 }
 
 #[derive(Debug)]
 pub(crate) struct Processed {
+	/// Whether this document needs to have an ID generated
+	pub(crate) generate: Option<Table>,
+	/// The record id for this document that should be processed
 	pub(crate) rid: Option<Arc<Thing>>,
-	pub(crate) ir: Option<Arc<IteratorRecord>>,
+	/// The record data for this document that should be processed
 	pub(crate) val: Operable,
-}
-
-impl Workable {
-	/// Check if this is the first iteration of an INSERT statement
-	pub(crate) fn is_insert_initial(&self) -> bool {
-		matches!(self, Self::Insert(_, false) | Self::Relate(_, _, _, false))
-	}
-	/// Check if this is an INSERT with a specific id field
-	pub(crate) fn is_insert_with_specific_id(&self) -> bool {
-		matches!(self, Self::Insert(v, _) if v.rid().is_some())
-	}
+	/// The record iterator for this document, used in index scans
+	pub(crate) ir: Option<Arc<IteratorRecord>>,
 }
 
 #[derive(Default)]
 pub(crate) struct Iterator {
-	// Iterator status
+	/// Iterator status
 	run: Canceller,
-	// Iterator limit value
+	/// Iterator limit value
 	limit: Option<u32>,
-	// Iterator start value
+	/// Iterator start value
 	start: Option<u32>,
-	// Iterator runtime error
+	/// Iterator runtime error
 	error: Option<Error>,
-	// Iterator output results
+	/// Iterator output results
 	results: Results,
-	// Iterator input values
+	/// Iterator input values
 	entries: Vec<Iterable>,
-	// Set if the iterator can be cancelled once it reaches start/limit
+	/// Set if the iterator can be cancelled once it reaches start/limit
 	cancel_on_limit: Option<u32>,
 }
 
@@ -175,7 +169,7 @@ impl Iterator {
 	/// Prepares a value for processing
 	pub(crate) fn prepare_table(&mut self, stm: &Statement<'_>, v: Table) -> Result<(), Error> {
 		// Add the record to the iterator
-		match stm.is_create() {
+		match stm.is_deferable() {
 			true => self.ingest(Iterable::Yield(v)),
 			false => self.ingest(Iterable::Table(v, false)),
 		}

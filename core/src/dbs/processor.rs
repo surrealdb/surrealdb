@@ -189,6 +189,7 @@ impl<'a> Processor<'a> {
 	) -> Result<(), Error> {
 		// Pass the value through
 		let pro = Processed {
+			generate: None,
 			rid: None,
 			ir: None,
 			val: Operable::Value(v.into()),
@@ -205,21 +206,12 @@ impl<'a> Processor<'a> {
 		stm: &Statement<'_>,
 		v: Table,
 	) -> Result<(), Error> {
-		// Fetch the record id if specified
-		let v = match stm.data() {
-			// There is a data clause so fetch a record id
-			Some(data) => match data.rid(stk, ctx, opt).await? {
-				// Generate a new id from the id field
-				Some(id) => id.generate(&v, false)?,
-				// Generate a new random table id
-				None => v.generate(),
-			},
-			// There is no data clause so create a record id
-			None => v.generate(),
-		};
+		// Check that the table exists
+		ctx.tx().check_ns_db_tb(opt.ns()?, opt.db()?, &v, opt.strict).await?;
 		// Pass the value through
 		let pro = Processed {
-			rid: Some(v.into()),
+			generate: Some(v),
+			rid: None,
 			ir: None,
 			val: Operable::Value(Value::None.into()),
 		};
@@ -239,6 +231,7 @@ impl<'a> Processor<'a> {
 		ctx.tx().check_ns_db_tb(opt.ns()?, opt.db()?, &v.tb, opt.strict).await?;
 		// Process the document record
 		let pro = Processed {
+			generate: None,
 			rid: Some(v.into()),
 			ir: None,
 			val: Operable::Value(Value::None.into()),
@@ -271,6 +264,7 @@ impl<'a> Processor<'a> {
 		);
 		// Process the document record
 		let pro = Processed {
+			generate: None,
 			rid: Some(v.into()),
 			ir: None,
 			val,
@@ -292,9 +286,10 @@ impl<'a> Processor<'a> {
 		ctx.tx().check_ns_db_tb(opt.ns()?, opt.db()?, &v.tb, opt.strict).await?;
 		// Process the document record
 		let pro = Processed {
+			generate: None,
 			rid: Some(v.into()),
 			ir: None,
-			val: Operable::Mergeable(Value::None.into(), o.into(), false),
+			val: Operable::Insert(Value::None.into(), o.into()),
 		};
 		self.process(stk, ctx, opt, stm, pro).await?;
 		// Everything ok
@@ -320,9 +315,10 @@ impl<'a> Processor<'a> {
 			None => Value::None,
 		};
 		// Create a new operable value
-		let val = Operable::Relatable(f, x.into(), w, o.map(|v| v.into()), false);
+		let val = Operable::Relate(f, x.into(), w, o.map(|v| v.into()));
 		// Process the document record
 		let pro = Processed {
+			generate: None,
 			rid: Some(v.into()),
 			ir: None,
 			val,
@@ -364,6 +360,7 @@ impl<'a> Processor<'a> {
 			let val = Operable::Value(val.into());
 			// Process the record
 			let pro = Processed {
+				generate: None,
 				rid: Some(rid.into()),
 				ir: None,
 				val,
@@ -403,6 +400,7 @@ impl<'a> Processor<'a> {
 			let rid = Thing::from((key.tb, key.id));
 			// Process the record
 			let pro = Processed {
+				generate: None,
 				rid: Some(rid.into()),
 				ir: None,
 				val: Operable::Value(Value::Null.into()),
@@ -474,6 +472,7 @@ impl<'a> Processor<'a> {
 			let val = Operable::Value(val.into());
 			// Process the record
 			let pro = Processed {
+				generate: None,
 				rid: Some(rid.into()),
 				ir: None,
 				val,
@@ -514,6 +513,7 @@ impl<'a> Processor<'a> {
 			let val = Operable::Value(val.into());
 			// Process the record
 			let pro = Processed {
+				generate: None,
 				rid: Some(rid.into()),
 				ir: None,
 				val,
@@ -629,6 +629,7 @@ impl<'a> Processor<'a> {
 				});
 				// Process the record
 				let pro = Processed {
+					generate: None,
 					rid: Some(rid.into()),
 					ir: None,
 					val,
@@ -700,6 +701,7 @@ impl<'a> Processor<'a> {
 				Iterable::fetch_thing(&txn, opt, &r.0).await?.into()
 			};
 			let p = Processed {
+				generate: None,
 				rid: Some(r.0),
 				ir: Some(r.1.into()),
 				val: Operable::Value(v),
