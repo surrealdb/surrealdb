@@ -94,10 +94,10 @@ impl Datastore {
 	/// for more information on cluster connection files.
 	pub(crate) async fn new(path: &str) -> Result<Datastore, Error> {
 		// Initialize the FoundationDB Client API
-		static FDBNET: LazyLock<Arc<foundationdb::api::NetworkAutoStop>> =
+		static NETWORK: LazyLock<Arc<foundationdb::api::NetworkAutoStop>> =
 			LazyLock::new(|| Arc::new(unsafe { foundationdb::boot() }));
 		// Store the network cancellation handle
-		let _fdbnet = (*FDBNET).clone();
+		let _fdbnet = (*NETWORK).clone();
 		// Configure and setup the database
 		match foundationdb::Database::from_path(path) {
 			Ok(db) => {
@@ -125,6 +125,11 @@ impl Datastore {
 			}
 			Err(e) => Err(Error::Ds(e.to_string())),
 		}
+	}
+	/// Shutdown the database
+	pub(crate) async fn shutdown(&self) -> Result<(), Error> {
+		// Nothing to do here
+		Ok(())
 	}
 	/// Start a new transaction
 	pub(crate) async fn transaction(&self, write: bool, lock: bool) -> Result<Transaction, Error> {

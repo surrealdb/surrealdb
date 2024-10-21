@@ -72,8 +72,7 @@ fn spawn_task_node_membership_refresh(
 				// Receive a notification on the channel
 				Some(_) = ticker.next() => {
 					if let Err(e) = dbs.node_membership_update().await {
-						error!("Error running node agent tick: {e}");
-						break;
+						error!("Error updating node registration information: {e}");
 					}
 				}
 			}
@@ -104,8 +103,7 @@ fn spawn_task_node_membership_check(
 				// Receive a notification on the channel
 				Some(_) = ticker.next() => {
 					if let Err(e) = dbs.node_membership_expire().await {
-						error!("Error running node agent tick: {e}");
-						break;
+						error!("Error processing and archiving inactive nodes: {e}");
 					}
 				}
 			}
@@ -136,8 +134,7 @@ fn spawn_task_node_membership_cleanup(
 				// Receive a notification on the channel
 				Some(_) = ticker.next() => {
 					if let Err(e) = dbs.node_membership_remove().await {
-						error!("Error running node agent tick: {e}");
-						break;
+						error!("Error processing and cleaning archived nodes: {e}");
 					}
 				}
 			}
@@ -168,8 +165,7 @@ fn spawn_task_changefeed_cleanup(
 				// Receive a notification on the channel
 				Some(_) = ticker.next() => {
 					if let Err(e) = dbs.changefeed_process().await {
-						error!("Error running node agent tick: {e}");
-						break;
+						error!("Error running changefeed garbage collection: {e}");
 					}
 				}
 			}

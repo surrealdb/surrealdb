@@ -83,7 +83,11 @@ impl Datastore {
 			}
 		}
 	}
-
+	/// Shutdown the database
+	pub(crate) async fn shutdown(&self) -> Result<(), Error> {
+		// Nothing to do here
+		Ok(())
+	}
 	/// Starts a new transaction.
 	///
 	/// # Arguments
