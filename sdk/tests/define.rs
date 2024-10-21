@@ -1777,25 +1777,19 @@ async fn define_statement_analyzer() -> Result<(), Error> {
             RETURN string::replace($html, /<[^>]*>/, "");
         };
         DEFINE ANALYZER htmlAnalyzer FUNCTION fn::stripHtml TOKENIZERS blank,class;
+        DEFINE ANALYZER englishLemmatizer TOKENIZERS blank,class FILTERS mapper('tests/data/lemmatization-en.txt');
 		INFO FOR DB;
 	"#;
-	let dbs = new_ds().await?;
-	let ses = Session::owner().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(sql, &ses, None).await?;
-	assert_eq!(res.len(), 5);
-	//
-	for _ in 0..4 {
-		let tmp = res.remove(0).result;
-		assert!(tmp.is_ok());
-	}
-	//
-	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let mut t = Test::new(sql).await?;
+	t.expect_size(6)?;
+	t.skip_ok(5)?;
+	t.expect_val(
 		r#"{
 			accesses: {},
 			analyzers: {
 				autocomplete: 'DEFINE ANALYZER autocomplete FILTERS LOWERCASE,EDGENGRAM(2,10)',
 				english: 'DEFINE ANALYZER english TOKENIZERS BLANK,CLASS FILTERS LOWERCASE,SNOWBALL(ENGLISH)',
+				englishLemmatizer: 'DEFINE ANALYZER englishLemmatizer TOKENIZERS BLANK,CLASS FILTERS MAPPER(tests/data/lemmatization-en.txt)',
 				htmlAnalyzer: 'DEFINE ANALYZER htmlAnalyzer FUNCTION fn::stripHtml TOKENIZERS BLANK,CLASS'
 			},
 			configs: {},
@@ -1807,8 +1801,7 @@ async fn define_statement_analyzer() -> Result<(), Error> {
 			tables: {},
 			users: {},
 		}"#,
-	);
-	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+	)?;
 	Ok(())
 }
 
