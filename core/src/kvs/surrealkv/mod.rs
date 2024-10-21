@@ -1,7 +1,5 @@
 #![cfg(feature = "kv-surrealkv")]
 
-mod cnf;
-
 use crate::err::Error;
 use crate::key::debug::Sprintable;
 use crate::kvs::Check;
@@ -65,8 +63,6 @@ impl Datastore {
 	pub(crate) async fn new(path: &str) -> Result<Datastore, Error> {
 		let mut opts = Options::new();
 		opts.dir = path.to_string().into();
-		opts.max_key_size = 10000;
-		opts.max_value_size = *cnf::SURREALKV_MAX_VALUE_SIZE;
 
 		match Store::new(opts) {
 			Ok(db) => Ok(Datastore {
@@ -281,7 +277,7 @@ impl super::api::Transaction for Transaction {
 			return Err(Error::TxReadonly);
 		}
 		// Remove the key
-		self.inner.delete(&key.into())?;
+		self.inner.soft_delete(&key.into())?;
 		// Return result
 		Ok(())
 	}
@@ -306,8 +302,8 @@ impl super::api::Transaction for Transaction {
 		let chk = chk.map(Into::into);
 		// Delete the key if valid
 		match (self.inner.get(&key)?, chk) {
-			(Some(v), Some(w)) if v == w => self.inner.delete(&key)?,
-			(None, None) => self.inner.delete(&key)?,
+			(Some(v), Some(w)) if v == w => self.inner.soft_delete(&key)?,
+			(None, None) => self.inner.soft_delete(&key)?,
 			_ => return Err(Error::TxConditionNotMet),
 		};
 		// Return result
