@@ -6,6 +6,7 @@ use regex::Regex;
 use surrealdb::dbs::Session;
 use surrealdb::iam::Role;
 use surrealdb::sql::{Base, Value};
+use tokio::time::Duration;
 
 struct TestLevel {
 	base: Base,
@@ -646,6 +647,143 @@ async fn access_bearer_show() {
 						.unwrap();
 			assert!(ok.is_match(&tmp), "Output '{}' doesn't match regex '{}'", tmp, ok);
 		}
+	}
+}
+
+#[tokio::test]
+async fn access_bearer_purge() {
+	// TODO(gguillemas): Remove this once bearer access is no longer experimental.
+	std::env::set_var("SURREAL_EXPERIMENTAL_BEARER_ACCESS", "true");
+
+	let test_levels = vec![
+		TestLevel {
+			base: Base::Root,
+			ns: None,
+			db: None,
+		},
+		TestLevel {
+			base: Base::Ns,
+			ns: Some("test"),
+			db: None,
+		},
+		TestLevel {
+			base: Base::Db,
+			ns: Some("test"),
+			db: Some("test"),
+		},
+	];
+
+	for level in &test_levels {
+		let base = level.base.to_string();
+		println!("Test level: {}", base);
+		let sql = format!(
+			r"
+			-- Initial setup
+			DEFINE ACCESS srv ON {base} TYPE BEARER FOR USER DURATION FOR GRANT 2s;
+			DEFINE USER tobie ON {base} PASSWORD 'secret' ROLES EDITOR;
+			DEFINE USER jaime ON {base} PASSWORD 'secret' ROLES EDITOR;
+			ACCESS srv ON {base} GRANT FOR USER tobie;
+			ACCESS srv ON {base} GRANT FOR USER tobie;
+			ACCESS srv ON {base} GRANT FOR USER tobie;
+			ACCESS srv ON {base} GRANT FOR USER jaime;
+			ACCESS srv ON {base} GRANT FOR USER jaime;
+			ACCESS srv ON {base} GRANT FOR USER jaime;
+		"
+		);
+		let dbs = new_ds().await.unwrap();
+		let ses = match level.base {
+			Base::Root => Session::owner(),
+			Base::Ns => Session::owner().with_ns(level.ns.unwrap()),
+			Base::Db => Session::owner().with_ns(level.ns.unwrap()).with_db(level.db.unwrap()),
+			_ => panic!("Invalid base"),
+		};
+		let res = &mut dbs.execute(&sql, &ses, None).await.unwrap();
+		// Consume the results of the setup statements
+		res.remove(0).result.unwrap();
+		res.remove(0).result.unwrap();
+		res.remove(0).result.unwrap();
+		// Retrieve the first generated bearer grant
+		let tmp = res.remove(0).result.unwrap().to_string();
+		let re =
+			Regex::new(r"\{ ac: 'srv', creation: .*?, expiration: d'.*?', grant: \{ id: '(.*?)', key: .*? \}, id: .*?, revocation: NONE, subject: \{ user: 'tobie' \}, type: 'bearer' \}")
+					.unwrap();
+		let kid = re.captures(&tmp).unwrap().get(1).unwrap().as_str();
+		// Consume the results of the other three
+		res.remove(0).result.unwrap();
+		res.remove(0).result.unwrap();
+		res.remove(0).result.unwrap();
+		res.remove(0).result.unwrap();
+		res.remove(0).result.unwrap();
+		// Revoke the first bearer grant
+		let res =
+			&mut dbs.execute(&format!("ACCESS srv REVOKE GRANT {kid}"), &ses, None).await.unwrap();
+		let tmp = res.remove(0).result.unwrap().to_string();
+		let ok =
+			Regex::new(&format!(r"\{{ ac: 'srv', .*?, id: '{kid}', revocation: d'.*?', .*? \}}"))
+				.unwrap();
+		assert!(ok.is_match(&tmp), "Output '{}' doesn't match regex '{}'", tmp, ok);
+		// Show revoked bearer grant
+		let res =
+			&mut dbs.execute(&format!("ACCESS srv SHOW GRANT {kid}"), &ses, None).await.unwrap();
+		let tmp = res.remove(0).result.unwrap().to_string();
+		let ok =
+			Regex::new(&format!(r"\{{ ac: 'srv', .*?, id: '{kid}', revocation: d'.*?', .*? \}}"))
+				.unwrap();
+		assert!(ok.is_match(&tmp), "Output '{}' doesn't match regex '{}'", tmp, ok);
+		// Wait for a second
+		std::thread::sleep(Duration::from_secs(1));
+		// Purge revoked bearer grants
+		let res = &mut dbs.execute(&format!("ACCESS srv PURGE REVOKED"), &ses, None).await.unwrap();
+		let tmp = res.remove(0).result.unwrap().to_string();
+		let ok = Regex::new(&format!(
+			r"\[\{{ ac: 'srv', .*?, id: '{kid}', revocation: d'.*?', .*? \}}\]"
+		))
+		.unwrap();
+		assert!(ok.is_match(&tmp), "Output '{}' doesn't match regex '{}'", tmp, ok);
+		// Ensure that only that bearer grant is purged
+		let res = &mut dbs.execute(&format!("ACCESS srv SHOW ALL"), &ses, None).await.unwrap();
+		let tmp = res.remove(0).result.unwrap().to_string();
+		let ok = Regex::new(&format!(
+			r"\[\{{ ac: 'srv', .*? \}}, \{{ ac: 'srv', .*? \}}, \{{ ac: 'srv', .*? \}}, \{{ ac: 'srv', .*? \}}, \{{ ac: 'srv', .*? \}}\]"
+		))
+		.unwrap();
+		assert!(ok.is_match(&tmp), "Output '{}' doesn't match regex '{}'", tmp, ok);
+		// Wait for all grants to expire
+		std::thread::sleep(Duration::from_secs(2));
+		// Purge grants expired for 2 seconds
+		let res = &mut dbs
+			.execute(&format!("ACCESS srv PURGE EXPIRED FOR 2s"), &ses, None)
+			.await
+			.unwrap();
+		let tmp = res.remove(0).result.unwrap().to_string();
+		let ok = Regex::new(&format!(r"\[\]")).unwrap();
+		assert!(ok.is_match(&tmp), "Output '{}' doesn't match regex '{}'", tmp, ok);
+		// Ensure that no grants have been purged
+		let res = &mut dbs.execute(&format!("ACCESS srv SHOW ALL"), &ses, None).await.unwrap();
+		let tmp = res.remove(0).result.unwrap().to_string();
+		let ok = Regex::new(&format!(
+			r"\[\{{ ac: 'srv', .*? \}}, \{{ ac: 'srv', .*? \}}, \{{ ac: 'srv', .*? \}}, \{{ ac: 'srv', .*? \}}, \{{ ac: 'srv', .*? \}}\]"
+		))
+		.unwrap();
+		assert!(ok.is_match(&tmp), "Output '{}' doesn't match regex '{}'", tmp, ok);
+		// Wait for grants to be expired for 2 seconds
+		std::thread::sleep(Duration::from_secs(2));
+		// Purge grants expired for 2 seconds
+		let res = &mut dbs
+			.execute(&format!("ACCESS srv PURGE EXPIRED FOR 2s"), &ses, None)
+			.await
+			.unwrap();
+		let tmp = res.remove(0).result.unwrap().to_string();
+		let ok = Regex::new(&format!(
+			r"\[\{{ ac: 'srv', .*? \}}, \{{ ac: 'srv', .*? \}}, \{{ ac: 'srv', .*? \}}, \{{ ac: 'srv', .*? \}}, \{{ ac: 'srv', .*? \}}\]"
+		))
+		.unwrap();
+		assert!(ok.is_match(&tmp), "Output '{}' doesn't match regex '{}'", tmp, ok);
+		// Ensure that all grants have been purged
+		let res = &mut dbs.execute(&format!("ACCESS srv SHOW ALL"), &ses, None).await.unwrap();
+		let tmp = res.remove(0).result.unwrap().to_string();
+		let ok = Regex::new(&format!(r"\[\]")).unwrap();
+		assert!(ok.is_match(&tmp), "Output '{}' doesn't match regex '{}'", tmp, ok);
 	}
 }
 

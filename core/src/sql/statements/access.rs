@@ -708,8 +708,9 @@ async fn compute_purge(
 		// Determine if the grant should purged based on expiration or revocation.
 		let now = Datetime::default();
 		// We can convert to unsigned integer as substraction is saturating.
-		// Expiration and revocation times should never exceed the current time.
-		// If for some reason they were, the grants will be purged.
+		// Revocation times should never exceed the current time.
+		// Grants expired or revoked at a future time will not be purged.
+		// Grants expired or revoked at exactly the current second will not be purged.
 		let purge_expired = stmt.expired
 			&& gr.expiration.as_ref().map_or(false, |exp| {
 				(now.timestamp().saturating_sub(exp.timestamp()) as u64) > stmt.grace.secs()

@@ -2846,7 +2846,8 @@ fn parse_access_revoke() {
 fn parse_access_purge() {
 	// All
 	{
-		let res = test_parse!(parse_stmt, r#"ACCESS a ON DATABASE PURGE ALL"#).unwrap();
+		let res =
+			test_parse!(parse_stmt, r#"ACCESS a ON DATABASE PURGE EXPIRED, REVOKED"#).unwrap();
 		assert_eq!(
 			res,
 			Statement::Access(AccessStatement::Purge(AccessStatementPurge {
@@ -2909,6 +2910,21 @@ fn parse_access_purge() {
 				ac: Ident("a".to_string()),
 				base: Some(Base::Db),
 				expired: false,
+				revoked: true,
+				grace: Duration::from_days(90),
+			}))
+		);
+	}
+	// Invalid for 90 days
+	{
+		let res = test_parse!(parse_stmt, r#"ACCESS a ON DATABASE PURGE REVOKED, EXPIRED FOR 90d"#)
+			.unwrap();
+		assert_eq!(
+			res,
+			Statement::Access(AccessStatement::Purge(AccessStatementPurge {
+				ac: Ident("a".to_string()),
+				base: Some(Base::Db),
+				expired: true,
 				revoked: true,
 				grace: Duration::from_days(90),
 			}))

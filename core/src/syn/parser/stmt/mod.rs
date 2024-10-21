@@ -452,18 +452,27 @@ impl Parser<'_> {
 			}
 			t!("PURGE") => {
 				self.pop_peek();
-				let (expired, revoked) = match self.peek_kind() {
-					t!("EXPIRED") => {
-						self.pop_peek();
-						(true, false)
+				let mut expired = false;
+				let mut revoked = false;
+				loop {
+					match self.peek_kind() {
+						t!("EXPIRED") => {
+							self.pop_peek();
+							expired = true;
+						}
+						t!("REVOKED") => {
+							self.pop_peek();
+							revoked = true;
+						}
+						_ => {
+							if !expired && !revoked {
+								unexpected!(self, peek, "EXPIRED, REVOKED or both");
+							}
+							break;
+						}
 					}
-					t!("REVOKED") => {
-						self.pop_peek();
-						(false, true)
-					}
-					// By default, purge all inactive grants.
-					_ => (true, true),
-				};
+					self.eat(t!(","));
+				}
 				let grace = if self.eat(t!("FOR")) {
 					self.next_token_value()?
 				} else {
