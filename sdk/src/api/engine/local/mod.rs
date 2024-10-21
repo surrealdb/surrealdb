@@ -375,9 +375,9 @@ pub type SurrealKV = SurrealKv;
 /// # #[tokio::main]
 /// # async fn main() -> surrealdb::Result<()> {
 /// use surrealdb::Surreal;
-/// use surrealdb::engine::local::SurrealCS;
+/// use surrealdb::engine::local::SurrealCs;
 ///
-/// let db = Surreal::new::<SurrealCS>("path/to/database-folder").await?;
+/// let db = Surreal::new::<SurrealCs>("path/to/database-folder").await?;
 /// # Ok(())
 /// # }
 /// ```
@@ -389,17 +389,17 @@ pub type SurrealKV = SurrealKv;
 /// # async fn main() -> surrealdb::Result<()> {
 /// use surrealdb::opt::Config;
 /// use surrealdb::Surreal;
-/// use surrealdb::engine::local::SurrealCS;
+/// use surrealdb::engine::local::SurrealCs;
 ///
 /// let config = Config::default().strict();
-/// let db = Surreal::new::<SurrealCS>(("path/to/database-folder", config)).await?;
+/// let db = Surreal::new::<SurrealCs>(("path/to/database-folder", config)).await?;
 /// # Ok(())
 /// # }
 /// ```
 #[cfg(feature = "kv-surrealcs")]
 #[cfg_attr(docsrs, doc(cfg(feature = "kv-surrealcs")))]
 #[derive(Debug)]
-pub struct SurrealCS;
+pub struct SurrealCs;
 
 /// An embedded database
 #[derive(Debug, Clone)]

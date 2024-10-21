@@ -130,7 +130,7 @@ pub enum EndpointKind {
 	TiKv,
 	Unsupported(String),
 	SurrealKv,
-	SurrealCS,
+	SurrealCs,
 }
 
 impl From<&str> for EndpointKind {
@@ -148,7 +148,7 @@ impl From<&str> for EndpointKind {
 			"rocksdb" => Self::RocksDb,
 			"tikv" => Self::TiKv,
 			"surrealkv" => Self::SurrealKv,
-			"surrealcs" => Self::SurrealCS,
+			"surrealcs" => Self::SurrealCs,
 			_ => Self::Unsupported(s.to_owned()),
 		}
 	}
