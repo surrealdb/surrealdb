@@ -663,7 +663,7 @@ impl Datastore {
 		Ok(())
 	}
 
-	/// Run the background task to perform changeed garbage collection
+	/// Run the background task to perform changefeed garbage collection
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::ds", skip(self))]
 	pub async fn changefeed_process(&self) -> Result<(), Error> {
 		// Output function invocation details to logs
@@ -683,7 +683,7 @@ impl Datastore {
 		Ok(())
 	}
 
-	/// Run the background task to perform changeed garbage collection
+	/// Run the background task to perform changefeed garbage collection
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::ds", skip(self))]
 	pub async fn changefeed_process_at(&self, ts: u64) -> Result<(), Error> {
 		// Output function invocation details to logs
@@ -696,7 +696,7 @@ impl Datastore {
 		Ok(())
 	}
 
-	/// Run the background task to perform changeed garbage collection
+	/// Run the datastore shutdown tasks, perfoming any necessary cleanup
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::ds", skip(self))]
 	pub async fn shutdown(&self) -> Result<(), Error> {
 		// Output function invocation details to logs
