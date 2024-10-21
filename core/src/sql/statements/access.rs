@@ -161,6 +161,11 @@ impl From<AccessGrant> for Object {
 		let mut res = Object::default();
 		res.insert("id".to_owned(), Value::from(grant.id.to_raw()));
 		res.insert("ac".to_owned(), Value::from(grant.ac.to_raw()));
+		match grant.grant {
+			Grant::Jwt(_) => res.insert("type".to_owned(), Value::from("jwt")),
+			Grant::Record(_) => res.insert("type".to_owned(), Value::from("record")),
+			Grant::Bearer(_) => res.insert("type".to_owned(), Value::from("bearer")),
+		};
 		res.insert("creation".to_owned(), Value::from(grant.creation));
 		res.insert("expiration".to_owned(), Value::from(grant.expiration));
 		res.insert("revocation".to_owned(), Value::from(grant.revocation));
@@ -168,7 +173,7 @@ impl From<AccessGrant> for Object {
 			let mut sub = Object::default();
 			match subject {
 				Subject::Record(id) => sub.insert("record".to_owned(), Value::from(id)),
-				Subject::User(name) => sub.insert("user".to_owned(), Value::from(name.to_string())),
+				Subject::User(name) => sub.insert("user".to_owned(), Value::from(name.to_raw())),
 			};
 			res.insert("subject".to_owned(), Value::from(sub));
 		}
