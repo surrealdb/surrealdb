@@ -45,6 +45,7 @@ impl Child {
 		a.map(|_ok| self)
 	}
 
+	#[cfg(unix)]
 	pub fn send_signal(&self, signal: nix::sys::signal::Signal) -> nix::Result<()> {
 		nix::sys::signal::kill(
 			nix::unistd::Pid::from_raw(self.inner.as_ref().unwrap().id() as i32),
