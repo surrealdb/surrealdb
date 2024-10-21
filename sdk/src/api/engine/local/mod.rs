@@ -360,6 +360,11 @@ pub struct FDb;
 #[derive(Debug)]
 pub struct SurrealKv;
 
+/// SurrealKV database
+#[deprecated(note = "Incorrect case, use SurrealKv instead")]
+#[cfg(feature = "kv-surrealkv")]
+pub type SurrealKV = SurrealKv;
+
 /// SurrealCS database
 ///
 /// # Examples
