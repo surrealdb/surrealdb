@@ -145,7 +145,7 @@ impl FtIndex {
 		let terms = Arc::new(RwLock::new(
 			Terms::new(ixs, txn, index_key_base.clone(), p.terms_order, tt, p.terms_cache).await?,
 		));
-		let termdocs = TermDocs::new(index_key_base.clone());
+		let term_docs = TermDocs::new(index_key_base.clone());
 		let offsets = Offsets::new(index_key_base.clone());
 		let mut bm25 = None;
 		if let Scoring::Bm {
@@ -158,18 +158,19 @@ impl FtIndex {
 				b,
 			});
 		}
+		let analyzer = Analyzer::new(ixs, az)?;
 		Ok(Self {
 			state,
 			state_key,
 			index_key_base,
 			bm25,
 			highlighting: p.hl,
-			analyzer: Analyzer::new(ixs, az),
+			analyzer,
 			doc_ids,
 			doc_lengths,
 			postings,
 			terms,
-			term_docs: termdocs,
+			term_docs,
 			offsets,
 		})
 	}

@@ -52,17 +52,13 @@ impl DefineAnalyzerStatement {
 		let key = crate::key::database::az::new(opt.ns()?, opt.db()?, &self.name);
 		txn.get_or_add_ns(opt.ns()?, opt.strict).await?;
 		txn.get_or_add_db(opt.ns()?, opt.db()?, opt.strict).await?;
-		txn.set(
-			key,
-			DefineAnalyzerStatement {
-				// Don't persist the `IF NOT EXISTS` clause to schema
-				if_not_exists: false,
-				overwrite: false,
-				..self.clone()
-			},
-			None,
-		)
-		.await?;
+		let az = DefineAnalyzerStatement {
+			// Don't persist the `IF NOT EXISTS` clause to schema
+			if_not_exists: false,
+			overwrite: false,
+			..self.clone()
+		};
+		txn.set(key, az, None).await?;
 		// Clear the cache
 		txn.clear();
 		// Ok all good

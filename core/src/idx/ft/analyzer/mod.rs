@@ -51,11 +51,11 @@ impl TermsSet {
 }
 
 impl Analyzer {
-	pub(crate) fn new(ixs: &IndexStores, az: Arc<DefineAnalyzerStatement>) -> Self {
-		Self {
-			filters: Arc::new(Filter::from(ixs, &az.filters)),
+	pub(crate) fn new(ixs: &IndexStores, az: Arc<DefineAnalyzerStatement>) -> Result<Self, Error> {
+		Ok(Self {
+			filters: Arc::new(Filter::try_from(ixs, &az.filters)?),
 			az,
-		}
+		})
 	}
 
 	pub(super) async fn extract_querying_terms(

@@ -24,8 +24,8 @@ pub(super) enum Filter {
 }
 
 impl Filter {
-	fn new(ixs: &IndexStores, f: &SqlFilter) -> Self {
-		match f {
+	fn new(ixs: &IndexStores, f: &SqlFilter) -> Result<Self, Error> {
+		let f = match f {
 			SqlFilter::Ascii => Filter::Ascii,
 			SqlFilter::EdgeNgram(min, max) => Filter::EdgeNgram(*min, *max),
 			SqlFilter::Lowercase => Filter::Lowercase,
@@ -53,16 +53,23 @@ impl Filter {
 				Filter::Stemmer(a)
 			}
 			SqlFilter::Uppercase => Filter::Uppercase,
-			SqlFilter::Mapper(path) => Filter::Mapper(ixs.mappers().get(path)),
-		}
+			SqlFilter::Mapper(path) => Filter::Mapper(ixs.mappers().get(path)?),
+		};
+		Ok(f)
 	}
 
-	pub(super) fn from(ixs: &IndexStores, fs: &Option<Vec<SqlFilter>>) -> Option<Vec<Filter>> {
+	pub(super) fn try_from(
+		ixs: &IndexStores,
+		fs: &Option<Vec<SqlFilter>>,
+	) -> Result<Option<Vec<Filter>>, Error> {
 		if let Some(fs) = fs {
-			let r = fs.iter().map(|f| Self::new(ixs, f)).collect();
-			Some(r)
+			let mut r = Vec::with_capacity(fs.len());
+			for f in fs {
+				r.push(Self::new(ixs, f)?);
+			}
+			Ok(Some(r))
 		} else {
-			None
+			Ok(None)
 		}
 	}
 

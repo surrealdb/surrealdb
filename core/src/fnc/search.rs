@@ -16,7 +16,7 @@ pub async fn analyze(
 		let az = Analyzer::new(
 			ctx.get_index_stores(),
 			ctx.tx().get_db_analyzer(opt.ns()?, opt.db()?, &az).await?,
-		);
+		)?;
 		az.analyze(stk, ctx, opt, val.0).await
 	} else {
 		Ok(Value::None)
