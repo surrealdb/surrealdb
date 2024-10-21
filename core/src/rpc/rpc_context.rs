@@ -79,6 +79,12 @@ pub trait RpcContext {
 			Method::InsertRelation => {
 				self.insert_relation(params).await.map(Into::into).map_err(Into::into)
 			}
+			Method::UpsertMerge => {
+				self.upsert_merge(params).await.map(Into::into).map_err(Into::into)
+			}
+			Method::UpsertPath => {
+				self.upsert_merge(params).await.map(Into::into).map_err(Into::into)
+			}
 			Method::Unknown => Err(RpcError::MethodNotFound),
 		}
 	}
@@ -110,6 +116,12 @@ pub trait RpcContext {
 			Method::GraphQL => self.graphql(params).await.map(Into::into).map_err(Into::into),
 			Method::InsertRelation => {
 				self.insert_relation(params).await.map(Into::into).map_err(Into::into)
+			}
+			Method::UpsertMerge => {
+				self.upsert_merge(params).await.map(Into::into).map_err(Into::into)
+			}
+			Method::UpsertPatch => {
+				self.upsert_patch(params).await.map(Into::into).map_err(Into::into)
 			}
 			Method::Unknown => Err(RpcError::MethodNotFound),
 			_ => Err(RpcError::MethodNotFound),
@@ -424,6 +436,71 @@ pub trait RpcContext {
 			"UPSERT $what RETURN AFTER"
 		} else {
 			"UPSERT $what CONTENT $data RETURN AFTER"
+		};
+		// Specify the query parameters
+		let var = Some(map! {
+			String::from("what") => what.could_be_table(),
+			String::from("data") => data,
+			=> &self.vars()
+		});
+		// Execute the query on the database
+		let mut res = self.kvs().execute(sql, self.session(), var).await?;
+		// Extract the first query result
+		let res = match one {
+			true => res.remove(0).result?.first(),
+			false => res.remove(0).result?,
+		};
+		// Return the result to the client
+		Ok(res.into())
+	}
+
+	// ------------------------------
+	// Methods for upsert merging
+	// ------------------------------
+
+	async fn upsert_merge(&self, params: Array) -> Result<Data, RpcError> {
+		let Ok((what, data)) = params.needs_one_or_two() else {
+			return Err(RpcError::InvalidParams);
+		};
+		// Return a single result?
+		let one = what.is_thing_single();
+		// Specify the SQL query string
+		let sql = if data.is_none_or_null() {
+			"UPSERT $what RETURN AFTER"
+		} else {
+			"UPSERT $what MERGE $data RETURN AFTER"
+		};
+		// Specify the query parameters
+		let var = Some(map! {
+			String::from("what") => what.could_be_table(),
+			String::from("data") => data,
+			=> &self.vars()
+		});
+		// Execute the query on the database
+		let mut res = self.kvs().execute(sql, self.session(), var).await?;
+		// Extract the first query result
+		let res = match one {
+			true => res.remove(0).result?.first(),
+			false => res.remove(0).result?,
+		};
+		// Return the result to the client
+		Ok(res.into())
+	}
+
+	// ------------------------------
+	// Methods for upsert patching
+	// ------------------------------
+
+	async fn upsert_patch(&self, params: Array) -> Result<Data, RpcError> {
+		let Ok((what, data, diff)) = params.needs_one_two_or_three() else {
+			return Err(RpcError::InvalidParams);
+		};
+		// Return a single result?
+		let one = what.is_thing_single();
+		// Specify the SQL query string
+		let sql = match diff.is_true() {
+			true => "UPSERT $what PATCH $data RETURN DIFF",
+			false => "UPSERT $what PATCH $data RETURN AFTER",
 		};
 		// Specify the query parameters
 		let var = Some(map! {
