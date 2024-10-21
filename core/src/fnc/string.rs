@@ -177,8 +177,8 @@ pub mod distance {
 		match strsim::hamming(&a, &b) {
 			Ok(v) => Ok(v.into()),
 			Err(_) => Err(Error::InvalidArguments {
-				name: "string::distance::hamming()".into(),
-				message: "Strings must be of equal length".into(),
+				name: "string::distance::hamming".into(),
+				message: "Strings must be of equal length.".into(),
 			}),
 		}
 	}
