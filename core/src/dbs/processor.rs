@@ -11,7 +11,7 @@ use crate::key::{graph, thing};
 use crate::kvs::Transaction;
 use crate::sql::dir::Dir;
 use crate::sql::id::range::IdRange;
-use crate::sql::{Edges, Table, Thing, Value};
+use crate::sql::{Edges, Permission, Table, Thing, Value};
 #[cfg(not(target_arch = "wasm32"))]
 use channel::Sender;
 use futures::StreamExt;
@@ -125,6 +125,31 @@ impl<'a> Processor<'a> {
 		Cow::Borrowed(ctx)
 	}
 
+	async fn check_keys_only_permissions(
+		ctx: &Context,
+		opt: &Options,
+		stm: &Statement<'_>,
+		tb: &Table,
+	) -> Result<bool, Error> {
+		// Should we run permissions checks?
+		if opt.check_perms(stm.into())? {
+			// Get the table for this document
+			let table = ctx.tx().get_tb(opt.ns()?, opt.db()?, tb).await?;
+			// Get the permissions for this table
+			let perms = if stm.is_delete() {
+				&table.permissions.delete
+			} else if stm.is_select() {
+				&table.permissions.select
+			} else {
+				&Permission::None
+			};
+			if perms.is_none() {
+				return Ok(false);
+			}
+		}
+		Ok(true)
+	}
+
 	async fn process_iterable(
 		&mut self,
 		stk: &mut Stk,
@@ -147,8 +172,11 @@ impl<'a> Processor<'a> {
 						self.process_range(stk, ctx, opt, stm, &tb, v).await?
 					}
 				}
-				Iterable::Table(v, keys_only) => {
+				Iterable::Table(v, mut keys_only) => {
 					let ctx = Self::check_query_planner_context(ctx, &v);
+					if keys_only {
+						keys_only = Self::check_keys_only_permissions(&ctx, opt, stm, &v).await?;
+					}
 					if keys_only {
 						self.process_table_keys(stk, &ctx, opt, stm, &v).await?
 					} else {

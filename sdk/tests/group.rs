@@ -7,6 +7,7 @@ use helpers::skip_ok;
 use surrealdb::dbs::Session;
 use surrealdb::err::Error;
 use surrealdb::sql::Value;
+use surrealdb_core::sql::Thing;
 
 #[tokio::test]
 async fn select_aggregate() -> Result<(), Error> {
@@ -816,6 +817,55 @@ async fn select_count_group_all() -> Result<(), Error> {
 }
 
 #[tokio::test]
+async fn select_count_group_all_permissions() -> Result<(), Error> {
+	// Define the permissions
+	let sql = r#"
+		DEFINE TABLE table PERMISSIONS FOR SELECT NONE;
+	"#;
+	let mut t = Test::new(sql).await?;
+	t.skip_ok(1)?;
+	// Create and select as a record user
+	let sql = r#"
+		CREATE table:baz CONTENT { bar: "hello", foo: "world"};
+		SELECT COUNT() FROM table GROUP ALL EXPLAIN;
+		SELECT COUNT() FROM table GROUP ALL;
+	"#;
+	let mut t = Test::new_ds_session(
+		t.ds,
+		Session::for_record("test", "test", "test", Thing::from(("table", "baz")).into()),
+		sql,
+	)
+	.await?;
+	t.expect_size(3)?;
+	t.skip_ok(1)?;
+	// The explain plan is still visible
+	t.expect_val(
+		r#"[
+				{
+					detail: {
+						table: 'table'
+					},
+					operation: 'Iterate Table Keys'
+				},
+				{
+					detail: {
+						idioms: {
+							count: [
+								'count'
+							]
+						},
+						type: 'Group'
+					},
+					operation: 'Collector'
+				}
+			]"#,
+	)?;
+	// No record is returned
+	t.expect_val("[]")?;
+	Ok(())
+}
+
+#[tokio::test]
 async fn select_count_range_keys_only() -> Result<(), Error> {
 	let sql = r#"
 		CREATE table:1 CONTENT { bar: "hello", foo: "Man"};
@@ -893,5 +943,50 @@ async fn select_count_range_keys_only() -> Result<(), Error> {
 				}
 			]"#,
 	)?;
+	Ok(())
+}
+
+#[tokio::test]
+async fn select_count_range_keys_only_permissions() -> Result<(), Error> {
+	// Define the permissions
+	let sql = r#"
+		DEFINE TABLE table PERMISSIONS FOR SELECT NONE;
+	"#;
+	let mut t = Test::new(sql).await?;
+	t.skip_ok(1)?;
+	// Create and select as a record user
+	let sql = r#"
+		CREATE table:1 CONTENT { bar: "hello", foo: "Man"};
+		SELECT COUNT() FROM table:1..4 EXPLAIN;
+		SELECT COUNT() FROM table:1..4;
+	"#;
+	let mut t = Test::new_ds_session(
+		t.ds,
+		Session::for_record("test", "test", "test", Thing::from(("table", "1")).into()),
+		sql,
+	)
+	.await?;
+	t.expect_size(3)?;
+	t.skip_ok(1)?;
+	// The explain plan is still accessible
+	t.expect_val(
+		r#"[
+					{
+						detail: {
+							range: 1..4,
+							table: 'table'
+						},
+						operation: 'Iterate Range Keys'
+					},
+					{
+						detail: {
+							type: 'Memory'
+						},
+						operation: 'Collector'
+					}
+				]"#,
+	)?;
+	// No record is returned
+	t.expect_val("[]")?;
 	Ok(())
 }
