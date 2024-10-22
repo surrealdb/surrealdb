@@ -135,8 +135,8 @@ impl<'a> Processor<'a> {
 		if opt.check_perms(stm.into())? {
 			// Get the table for this document
 			let table = ctx.tx().get_tb(opt.ns()?, opt.db()?, tb).await?;
-			// Check if select permissions is not none
-			if table.permissions.select.is_none() {
+			// Check if select permissions is full
+			if !table.permissions.select.is_full() {
 				return Ok(false);
 			}
 		}
