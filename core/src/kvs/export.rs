@@ -1,12 +1,11 @@
 use super::Transaction;
 use crate::cnf::EXPORT_BATCH_SIZE;
 use crate::err::Error;
+use crate::key::thing;
 use crate::sql::paths::EDGE;
-use crate::sql::paths::ID;
 use crate::sql::paths::IN;
 use crate::sql::paths::OUT;
 use crate::sql::statements::DefineTableStatement;
-use crate::sql::Duration;
 use crate::sql::Value;
 use channel::Sender;
 use chrono::prelude::Utc;
@@ -223,19 +222,21 @@ impl Transaction {
 				let batch = self.batch_versions(rng, *EXPORT_BATCH_SIZE).await?;
 				next = batch.next;
 				let values = batch.versioned_values;
-				self.export_versioned_data(values, chn).await?;
-				if next.is_none() {
+				if values.is_empty() {
 					break;
 				}
+				self.export_versioned_data(values, chn).await?;
 			} else {
 				let batch = self.batch(rng, *EXPORT_BATCH_SIZE, true, None).await?;
 				next = batch.next;
 				let values = batch.values;
-				self.export_regular_data(values, chn).await?;
-				if next.is_none() {
+				if values.is_empty() {
 					break;
 				}
+				self.export_regular_data(values, chn).await?;
 			}
+			// Fetch more records
+			continue;
 		}
 
 		chn.send(bytes!("")).await?;
@@ -259,6 +260,7 @@ impl Transaction {
 	///
 	/// * `String` - Returns the generated SQL command as a string. If no command is generated, returns an empty string.
 	fn process_value(
+		k: thing::Thing,
 		v: Value,
 		records_relate: &mut Vec<String>,
 		records_normal: &mut Vec<String>,
@@ -272,7 +274,9 @@ impl Transaction {
 				if let Some(version) = version {
 					// If a version exists, format the value as an INSERT RELATION VERSION command.
 					let ts = Utc.timestamp_nanos(version as i64);
-					format!("INSERT RELATION {} VERSION d'{:?}';", v, ts)
+					let sql = format!("INSERT RELATION {} VERSION d'{:?}';", v, ts);
+					records_relate.push(sql);
+					String::new()
 				} else {
 					// If no version exists, push the value to the records_relate vector.
 					records_relate.push(v.to_string());
@@ -284,7 +288,7 @@ impl Transaction {
 				if let Some(is_tombstone) = is_tombstone {
 					if is_tombstone {
 						// If the record is a tombstone, format it as a DELETE command.
-						format!("DELETE {};", v.pick(&*ID))
+						format!("DELETE {};", k.id)
 					} else {
 						// If the record is not a tombstone and a version exists, format it as an INSERT VERSION command.
 						let ts = Utc.timestamp_nanos(version.unwrap() as i64);
@@ -331,10 +335,16 @@ impl Transaction {
 		chn.send(bytes!("BEGIN")).await?;
 
 		// Process each versioned value.
-		for (_, v, version, is_tombstone) in versioned_values {
-			let v: Value = (&v).into();
+		for (k, v, version, is_tombstone) in versioned_values {
+			let k: thing::Thing = (&k).into();
+			let v: Value = if v.is_empty() {
+				Value::None
+			} else {
+				(&v).into()
+			};
 			// Process the value and generate the appropriate SQL command.
 			let sql = Self::process_value(
+				k,
 				v,
 				&mut records_relate,
 				&mut Vec::new(),
@@ -401,10 +411,11 @@ impl Transaction {
 		let mut records_relate = Vec::with_capacity(*EXPORT_BATCH_SIZE as usize);
 
 		// Process each regular value.
-		for (_, v) in regular_values {
+		for (k, v) in regular_values {
+			let k: thing::Thing = (&k).into();
 			let v: Value = (&v).into();
 			// Process the value and categorize it into records_relate or records_normal.
-			Self::process_value(v, &mut records_relate, &mut records_normal, None, None);
+			Self::process_value(k, v, &mut records_relate, &mut records_normal, None, None);
 		}
 
 		// If there are normal records, generate and send the INSERT SQL command.
