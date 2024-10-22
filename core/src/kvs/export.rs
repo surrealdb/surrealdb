@@ -240,6 +240,22 @@ impl Transaction {
 		Ok(())
 	}
 
+	/// Processes a value and generates the appropriate SQL command.
+	///
+	/// This function processes a value, categorizing it into either normal records or graph edge records,
+	/// and generates the appropriate SQL command based on the type of record and the presence of a version.
+	///
+	/// # Arguments
+	///
+	/// * `v` - The value to be processed.
+	/// * `records_relate` - A mutable reference to a vector that holds graph edge records.
+	/// * `records_normal` - A mutable reference to a vector that holds normal records.
+	/// * `is_tombstone` - An optional boolean indicating if the record is a tombstone.
+	/// * `version` - An optional version number for the record.
+	///
+	/// # Returns
+	///
+	/// * `String` - Returns the generated SQL command as a string. If no command is generated, returns an empty string.
 	fn process_value(
 		v: Value,
 		records_relate: &mut Vec<String>,
@@ -247,17 +263,27 @@ impl Transaction {
 		is_tombstone: Option<bool>,
 		version: Option<u64>,
 	) -> String {
+		// Match on the value to determine if it is a graph edge record or a normal record.
 		match (v.pick(&*EDGE), v.pick(&*IN), v.pick(&*OUT)) {
+			// If the value is a graph edge record (indicated by EDGE, IN, and OUT fields):
 			(Value::Bool(true), Value::Thing(_), Value::Thing(_)) => {
-				// TODO:: Check if relation also can be defined using version
-				records_relate.push(v.to_string());
-				String::new()
+				if let Some(version) = version {
+					// If a version exists, format the value as an INSERT RELATION VERSION command.
+					format!("INSERT RELATION {} VERSION d'{:?}';", v, Duration::from_nanos(version))
+				} else {
+					// If no version exists, push the value to the records_relate vector.
+					records_relate.push(v.to_string());
+					String::new()
+				}
 			}
+			// If the value is a normal record:
 			_ => {
 				if let Some(is_tombstone) = is_tombstone {
 					if is_tombstone {
+						// If the record is a tombstone, format it as a DELETE command.
 						format!("DELETE {};", v.pick(&*ID))
 					} else {
+						// If the record is not a tombstone and a version exists, format it as an INSERT VERSION command.
 						format!(
 							"INSERT {} VERSION d'{:?}';",
 							v,
@@ -265,6 +291,7 @@ impl Transaction {
 						)
 					}
 				} else {
+					// If no tombstone or version information is provided, push the value to the records_normal vector.
 					records_normal.push(v.to_string());
 					String::new()
 				}
@@ -272,21 +299,41 @@ impl Transaction {
 		}
 	}
 
+	/// Exports versioned data to the provided channel.
+	///
+	/// This function processes a list of versioned values, converting them into SQL commands
+	/// and sending them to the provided channel. It handles both normal records and graph edge records,
+	/// and ensures that the appropriate SQL commands are generated for each type of record.
+	///
+	/// # Arguments
+	///
+	/// * `versioned_values` - A vector of tuples containing the versioned values to be exported.
+	///   Each tuple consists of a key, value, version, and a boolean indicating if the record is a tombstone.
+	/// * `chn` - A reference to the channel to which the SQL commands will be sent.
+	///
+	/// # Returns
+	///
+	/// * `Result<(), Error>` - Returns `Ok(())` if the operation is successful, or an `Error` if an error occurs.
 	async fn export_versioned_data(
 		&self,
 		versioned_values: Vec<(Vec<u8>, Vec<u8>, u64, bool)>,
 		chn: &Sender<Vec<u8>>,
 	) -> Result<(), Error> {
+		// If there are no versioned values, return early.
 		if versioned_values.is_empty() {
 			return Ok(());
 		}
 
+		// Initialize a vector to hold graph edge records.
 		let mut records_relate = Vec::with_capacity(*EXPORT_BATCH_SIZE as usize);
 
+		// Begin a new transaction.
 		chn.send(bytes!("BEGIN")).await?;
 
+		// Process each versioned value.
 		for (_, v, version, is_tombstone) in versioned_values {
 			let v: Value = (&v).into();
+			// Process the value and generate the appropriate SQL command.
 			let sql = Self::process_value(
 				v,
 				&mut records_relate,
@@ -294,45 +341,75 @@ impl Transaction {
 				Some(is_tombstone),
 				Some(version),
 			);
+			// If the SQL command is not empty, send it to the channel.
 			if !sql.is_empty() {
 				chn.send(bytes!(sql)).await?;
 			}
 		}
 
+		// Commit the transaction.
 		chn.send(bytes!("COMMIT")).await?;
 
+		// Begin a new transaction for graph edge records.
+		chn.send(bytes!("BEGIN")).await?;
+
+		// If there are graph edge records, send them to the channel.
 		if !records_relate.is_empty() {
-			let values = records_relate.join(", ");
-			let sql = format!("INSERT RELATION [ {} ];", values);
-			chn.send(bytes!(sql)).await?;
+			for record in records_relate.iter() {
+				chn.send(bytes!(record)).await?;
+			}
 		}
+
+		// Commit the transaction for graph edge records.
+		chn.send(bytes!("COMMIT")).await?;
 
 		Ok(())
 	}
 
+	/// Exports regular data to the provided channel.
+	///
+	/// This function processes a list of regular values, converting them into SQL commands
+	/// and sending them to the provided channel. It handles both normal records and graph edge records,
+	/// and ensures that the appropriate SQL commands are generated for each type of record.
+	///
+	/// # Arguments
+	///
+	/// * `regular_values` - A vector of tuples containing the regular values to be exported.
+	///   Each tuple consists of a key and a value.
+	/// * `chn` - A reference to the channel to which the SQL commands will be sent.
+	///
+	/// # Returns
+	///
+	/// * `Result<(), Error>` - Returns `Ok(())` if the operation is successful, or an `Error` if an error occurs.
 	async fn export_regular_data(
 		&self,
 		regular_values: Vec<(Vec<u8>, Vec<u8>)>,
 		chn: &Sender<Vec<u8>>,
 	) -> Result<(), Error> {
+		// If there are no regular values, return early.
 		if regular_values.is_empty() {
 			return Ok(());
 		}
 
+		// Initialize vectors to hold normal records and graph edge records.
 		let mut records_normal = Vec::with_capacity(*EXPORT_BATCH_SIZE as usize);
 		let mut records_relate = Vec::with_capacity(*EXPORT_BATCH_SIZE as usize);
 
+		// Process each regular value.
 		for (_, v) in regular_values {
 			let v: Value = (&v).into();
+			// Process the value and categorize it into records_relate or records_normal.
 			Self::process_value(v, &mut records_relate, &mut records_normal, None, None);
 		}
 
+		// If there are normal records, generate and send the INSERT SQL command.
 		if !records_normal.is_empty() {
 			let values = records_normal.join(", ");
 			let sql = format!("INSERT [ {} ];", values);
 			chn.send(bytes!(sql)).await?;
 		}
 
+		// If there are graph edge records, generate and send the INSERT RELATION SQL command.
 		if !records_relate.is_empty() {
 			let values = records_relate.join(", ");
 			let sql = format!("INSERT RELATION [ {} ];", values);
