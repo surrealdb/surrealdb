@@ -8,7 +8,7 @@ use surrealdb_core::sql::{Object as CoreObject, Value as CoreValue};
 use super::Value;
 
 transparent_wrapper! {
-	#[derive( Clone, Eq, PartialEq, Ord, PartialOrd, Default)]
+	#[derive(Clone, Default, Eq, PartialEq, Ord, PartialOrd, Hash)]
 	pub struct Object(CoreObject)
 }
 impl_serialize_wrapper!(Object);
