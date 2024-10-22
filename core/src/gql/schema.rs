@@ -22,6 +22,7 @@ use async_graphql::dynamic::{Scalar, TypeRef};
 use async_graphql::indexmap::IndexMap;
 use async_graphql::Name;
 use async_graphql::Value as GqlValue;
+use geo::{CoordsIter, LinesIter};
 use rust_decimal::prelude::FromPrimitive;
 use rust_decimal::Decimal;
 use serde_json::Number;
@@ -477,6 +478,14 @@ pub async fn generate_schema(
 		"https://datatracker.ietf.org/doc/html/rfc4122"
 	);
 
+	scalar_debug_validated!(schema, "GeometryPoint", Kind::Geometry(vec!["point"]), "Latitude and Longitude", "https://datatracker.ietf.org/doc/html/rfc7946#section-3.1.2");
+	scalar_debug_validated!(schema, "GeometryLineString", Kind::Geometry(vec!["linestring"]), "Geometric path", "https://datatracker.ietf.org/doc/html/rfc7946#section-3.1.4");
+	scalar_debug_validated!(schema, "GeometryPolygon", Kind::Geometry(vec!["polygon"]), "Geometric area", "https://datatracker.ietf.org/doc/html/rfc7946#section-3.1.6");
+	scalar_debug_validated!(schema, "GeometryMultiPoint", Kind::Geometry(vec!["multipoint"]), "Multiple points", "https://datatracker.ietf.org/doc/html/rfc7946#section-3.1.3");
+	scalar_debug_validated!(schema, "GeometryMultiLineString", Kind::Geometry(vec!["multilinestring"]), "Multiple geometry lines", "https://datatracker.ietf.org/doc/html/rfc7946#section-3.1.5");
+	scalar_debug_validated!(schema, "GeometryMultiPolygon", Kind::Geometry(vec!["multipolygon"]), "Multiple geometric areas", "https://datatracker.ietf.org/doc/html/rfc7946#section-3.1.7");
+	scalar_debug_validated!(schema, "GeometryCollection", Kind::Geometry(vec!["collection"]), "Multiple different geometry types", "https://datatracker.ietf.org/doc/html/rfc7946#section-3.1.8");
+
 	scalar_debug_validated!(schema, "decimal", Kind::Decimal);
 	scalar_debug_validated!(schema, "number", Kind::Number);
 	scalar_debug_validated!(schema, "null", Kind::Null);
@@ -572,12 +581,65 @@ pub fn sql_value_to_gql_value(v: SqlValue) -> Result<GqlValue, GqlError> {
 				.map(|(k, v)| (Name::new(k), sql_value_to_gql_value(v).unwrap()))
 				.collect(),
 		),
-		SqlValue::Geometry(_) => return Err(resolver_error("unimplemented: Geometry types")),
+		SqlValue::Geometry(kind) => match kind {
+			Geometry::Point(point) => GqlValue::Object(
+				(Name::new("type"), GqlValue::String("Point")),
+				(Name::new("coordinates"), GqlValue::List(GqlValue::Number(point.x), GqlValue::Number(point.y)))
+			),
+			Geometry::Line(line) => GqlValue::Object(
+				(Name::new("type"), GqlValue::String("LineString")),
+				(Name::new("coordinates"), GqlValue::List(line.lines()
+					.map(| i_line |
+						GqlValue::List(GqlValue::Number(i_line.start), GqlValue::Number(i_line.end))
+					).collect()
+				))
+			),
+			// todo remove recursion
+			Geometry::MultiLine(multiline) => GqlValue::Object(
+				(Name::new("type"), GqlValue::String("MultiLineString")),
+				(Name::new("coordinates"), GqlValue::List(multiline.iter().map(| v |
+					sql_value_to_gql_value(v).unwrap()
+				).collect()))
+			),
+			// todo remove recursion
+			Geometry::MultiPoint(multipoint) => GqlValue::Object(
+				(Name::new("type"), GqlValue::String("MultiPoint")),
+				(Name::new("coordinates"), GqlValue::List(multipoint.iter().map(| v |
+					sql_value_to_gql_value(v).unwrap()
+				).collect()))
+			),
+			Geometry::Polygon(polygon) => GqlValue::Object(
+				(Name::new("type"), GqlValue::String("Polygon")),
+				(Name::new("coordinates"), GqlValue::List(GqlValue::List(polygon.coords_iter().map(| v | GqlValue::List(GqlValue::Number(v.x), GqlValue::Number(v.y))))))
+			),
+			// todo remove recursion
+			Geometry::MultiPolygon(multipolygon) => GqlValue::Object(
+				(Name::new("type"), GqlValue::String("MultiPolygon")),
+				(Name::new("coordinates"), GqlValue::List(multipolygon.iter().map(| v | sql_value_to_gql_value(v).unwrap()).collect()))
+			),
+			Geometry::Collection(collection) => GqlValue::Object(
+				(Name::new("type"), GqlValue::String("GeometryCollection")),
+				(Name::new("geometries"),  GqlValue::List(collection.iter().map(| v | sql_value_to_gql_value(v).unwrap()).collect()))
+			)
+		},
 		SqlValue::Bytes(b) => GqlValue::Binary(b.into_inner().into()),
 		SqlValue::Thing(t) => GqlValue::String(t.to_string()),
 		v => return Err(internal_error(format!("found unsupported value variant: {v:?}"))),
 	};
 	Ok(out)
+}
+
+fn geometry_union_type(types: &mut Vec<Type>) {
+	let mut geometry_union = Union::new("Geometry");
+	geometry_union.possible_type(TypeRef::named("GeometryPoint"));
+	geometry_union.possible_type(TypeRef::named("GeometryLineString"));
+	geometry_union.possible_type(TypeRef::named("GeometryPolygon"));
+	geometry_union.possible_type(TypeRef::named("GeometryMultiPoint"));
+	geometry_union.possible_type(TypeRef::named("GeometryMultiLineString"));
+	geometry_union.possible_type(TypeRef::named("GeometryMultiPolygon"));
+	geometry_union.possible_type(TypeRef::named("GeometryCollection"));
+
+	types.push(Type::Union(geometry_union));
 }
 
 fn kind_to_type(kind: Kind, types: &mut Vec<Type>) -> Result<TypeRef, GqlError> {
@@ -597,7 +659,7 @@ fn kind_to_type(kind: Kind, types: &mut Vec<Type>) -> Result<TypeRef, GqlError> 
 		Kind::Int => TypeRef::named(TypeRef::INT),
 		Kind::Number => TypeRef::named("number"),
 		Kind::Object => TypeRef::named("object"),
-		Kind::Point => return Err(schema_error("Kind::Point is not yet supported")),
+		Kind::Point => return Err(schema_error("Kind::Point is not yet supported, please use Geometry::Point")),
 		Kind::String => TypeRef::named(TypeRef::STRING),
 		Kind::Uuid => TypeRef::named("uuid"),
 		Kind::Record(mut r) => match r.len() {
@@ -617,7 +679,10 @@ fn kind_to_type(kind: Kind, types: &mut Vec<Type>) -> Result<TypeRef, GqlError> 
 				TypeRef::named(ty_name)
 			}
 		},
-		Kind::Geometry(_) => return Err(schema_error("Kind::Geometry is not yet supported")),
+		Kind::Geometry(g) => match g.len() {
+			0 => TypeRef::named("Geometry"),
+			_ => TypeRef::List(TypeRef::named("Geometry"))
+		},
 		Kind::Option(t) => {
 			let mut non_op_ty = *t;
 			while let Kind::Option(inner) = non_op_ty {
@@ -1111,8 +1176,20 @@ fn gql_to_sql_kind(val: &GqlValue, kind: Kind) -> Result<SqlValue, GqlError> {
 			},
 			_ => Err(type_error(kind, val)),
 		},
-		// TODO: add geometry
-		Kind::Geometry(_) => Err(resolver_error("Geometry is not yet supported")),
+		Kind::Geometry(_) => match val {
+			GqlValue::List(l) => match l.as_slice() {
+				// Point
+				[GqlValue::Number(x), GqlValue::Number(y)] => match (x.as_f64(), y.as_f64()) {
+					(Some(x), Some(y)) => Ok(SqlValue::Geometry(Geometry::Point((x, y).into()))),
+					_ => Err(type_error(kind, val)),
+				},
+				// MultiPoint
+				GqlValue::List(l2) => match l2.as_slice() {
+					_ => Err(type_error(kind, val)),
+				}
+ 			}
+			_ => Err(type_error(kind, val)),
+		},
 		Kind::Option(k) => match val {
 			GqlValue::Null => Ok(SqlValue::None),
 			v => gql_to_sql_kind(v, *k),
