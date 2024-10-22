@@ -818,7 +818,7 @@ impl Display for AccessStatement {
 				match (stmt.expired, stmt.revoked) {
 					(true, false) => write!(f, " EXPIRED")?,
 					(false, true) => write!(f, " REVOKED")?,
-					(true, true) => write!(f, " ALL")?,
+					(true, true) => write!(f, " EXPIRED, REVOKED")?,
 					// This case should not parse.
 					(false, false) => write!(f, " NONE")?,
 				};
