@@ -816,33 +816,32 @@ async fn select_count_group_all() -> Result<(), Error> {
 	Ok(())
 }
 
-#[tokio::test]
-async fn select_count_group_all_permissions() -> Result<(), Error> {
-	// Permissions are None
-	{
-		// Define the permissions
-		let sql = r#"
-			DEFINE TABLE table PERMISSIONS FOR SELECT NONE;
-		"#;
-		let mut t = Test::new(sql).await?;
-		t.skip_ok(1)?;
-		// Create and select as a record user
-		let sql = r#"
-			CREATE table:baz CONTENT { bar: "hello", foo: "world"};
+async fn select_count_group_all_permissions(perm: &str, expect: &str) -> Result<(), Error> {
+	// Define the permissions
+	let sql = format!(
+		r"
+				DEFINE TABLE table PERMISSIONS {perm};
+				CREATE table:baz CONTENT {{ bar: 'hello', foo: 'world'}};
+			"
+	);
+	let mut t = Test::new(&sql).await?;
+	t.expect_size(2)?;
+	t.skip_ok(2)?;
+	// Create and select as a record user
+	let sql = r"
 			SELECT COUNT() FROM table GROUP ALL EXPLAIN;
 			SELECT COUNT() FROM table GROUP ALL;
-		"#;
-		let mut t = Test::new_ds_session(
-			t.ds,
-			Session::for_record("test", "test", "test", Thing::from(("table", "baz")).into()),
-			sql,
-		)
-		.await?;
-		t.expect_size(3)?;
-		t.skip_ok(1)?;
-		// The explain plan is still visible
-		t.expect_val(
-			r#"[
+		";
+	let mut t = Test::new_ds_session(
+		t.ds,
+		Session::for_record("test", "test", "test", Thing::from(("table", "baz")).into()),
+		sql,
+	)
+	.await?;
+	t.expect_size(2)?;
+	// The explain plan is still visible
+	t.expect_val(
+		r"[
 					{
 						detail: {
 							table: 'table'
@@ -860,112 +859,27 @@ async fn select_count_group_all_permissions() -> Result<(), Error> {
 						},
 						operation: 'Collector'
 					}
-				]"#,
-		)?;
-		// No record is returned
-		t.expect_val("[]")?;
-	}
-	// Permissions are Specific
-	{
-		// Define the permissions
-		let sql = r#"
-			DEFINE TABLE table PERMISSIONS FOR SELECT WHERE false;
-		"#;
-		let mut t = Test::new(sql).await?;
-		t.skip_ok(1)?;
-		// Create and select as a record user
-		let sql = r#"
-			CREATE table:baz CONTENT { bar: "hello", foo: "world"};
-			SELECT COUNT() FROM table GROUP ALL EXPLAIN;
-			SELECT COUNT() FROM table GROUP ALL;
-		"#;
-		let mut t = Test::new_ds_session(
-			t.ds,
-			Session::for_record("test", "test", "test", Thing::from(("table", "baz")).into()),
-			sql,
-		)
-		.await?;
-		t.expect_size(3)?;
-		t.skip_ok(1)?;
-		// The explain plan is still visible
-		t.expect_val(
-			r#"[
-					{
-						detail: {
-							table: 'table'
-						},
-						operation: 'Iterate Table Keys'
-					},
-					{
-						detail: {
-							idioms: {
-								count: [
-									'count'
-								]
-							},
-							type: 'Group'
-						},
-						operation: 'Collector'
-					}
-				]"#,
-		)?;
-		// No record is returned
-		t.expect_val("[]")?;
-	}
-	// Permissions are Full
-	{
-		// Define the permissions
-		let sql = r#"
-			DEFINE TABLE table PERMISSIONS FOR SELECT FULL;
-		"#;
-		let mut t = Test::new(sql).await?;
-		t.skip_ok(1)?;
-		// Create and select as a record user
-		let sql = r#"
-			CREATE table:baz CONTENT { bar: "hello", foo: "world"};
-			SELECT COUNT() FROM table GROUP ALL EXPLAIN;
-			SELECT COUNT() FROM table GROUP ALL;
-		"#;
-		let mut t = Test::new_ds_session(
-			t.ds,
-			Session::for_record("test", "test", "test", Thing::from(("table", "baz")).into()),
-			sql,
-		)
-		.await?;
-		t.expect_size(3)?;
-		t.skip_ok(1)?;
-		// The explain plan is still visible
-		t.expect_val(
-			r#"[
-					{
-						detail: {
-							table: 'table'
-						},
-						operation: 'Iterate Table Keys'
-					},
-					{
-						detail: {
-							idioms: {
-								count: [
-									'count'
-								]
-							},
-							type: 'Group'
-						},
-						operation: 'Collector'
-					}
-				]"#,
-		)?;
-		// The count is returned
-		t.expect_val(
-			r#"[
-					{
-						count: 1
-					}
-				]"#,
-		)?;
-	}
+				]",
+	)?;
+	// Check what is returned
+	t.expect_val(expect)?;
+	//
 	Ok(())
+}
+
+#[tokio::test]
+async fn select_count_group_all_permissions_select_none() -> Result<(), Error> {
+	select_count_group_all_permissions("FOR SELECT NONE", "[]").await
+}
+
+#[tokio::test]
+async fn select_count_group_all_permissions_select_full() -> Result<(), Error> {
+	select_count_group_all_permissions("FOR SELECT FULL", "[{ count: 1}]").await
+}
+
+#[tokio::test]
+async fn select_count_group_all_permissions_select_where_false() -> Result<(), Error> {
+	select_count_group_all_permissions("FOR SELECT WHERE FALSE", "[]").await
 }
 
 #[tokio::test]
@@ -1049,33 +963,31 @@ async fn select_count_range_keys_only() -> Result<(), Error> {
 	Ok(())
 }
 
-#[tokio::test]
-async fn select_count_range_keys_only_permissions() -> Result<(), Error> {
-	// Permissions are None
-	{
-		// Define the permissions
-		let sql = r#"
-			DEFINE TABLE table PERMISSIONS FOR SELECT NONE;
-		"#;
-		let mut t = Test::new(sql).await?;
-		t.skip_ok(1)?;
-		// Create and select as a record user
-		let sql = r#"
-			CREATE table:1 CONTENT { bar: "hello", foo: "Man"};
+async fn select_count_range_keys_only_permissions(perms: &str, expect: &str) -> Result<(), Error> {
+	// Define the permissions
+	let sql = format!(
+		r"
+				DEFINE TABLE table PERMISSIONS {perms};
+				CREATE table:1 CONTENT {{ bar: 'hello', foo: 'world'}};
+			"
+	);
+	let mut t = Test::new(&sql).await?;
+	t.skip_ok(2)?;
+	// Create and select as a record user
+	let sql = r#"
 			SELECT COUNT() FROM table:1..4 EXPLAIN;
 			SELECT COUNT() FROM table:1..4;
 		"#;
-		let mut t = Test::new_ds_session(
-			t.ds,
-			Session::for_record("test", "test", "test", Thing::from(("table", "1")).into()),
-			sql,
-		)
-		.await?;
-		t.expect_size(3)?;
-		t.skip_ok(1)?;
-		// The explain plan is still accessible
-		t.expect_val(
-			r#"[
+	let mut t = Test::new_ds_session(
+		t.ds,
+		Session::for_record("test", "test", "test", Thing::from(("table", "1")).into()),
+		sql,
+	)
+	.await?;
+	t.expect_size(2)?;
+	// The explain plan is still accessible
+	t.expect_val(
+		r#"[
 						{
 							detail: {
 								range: 1..4,
@@ -1090,107 +1002,24 @@ async fn select_count_range_keys_only_permissions() -> Result<(), Error> {
 							operation: 'Collector'
 						}
 					]"#,
-		)?;
-		// No record is returned
-		t.expect_val("[]")?;
-	}
-	// Permissions are Specific
-	{
-		// Define the permissions
-		let sql = r#"
-			DEFINE TABLE table PERMISSIONS FOR SELECT NONE;
-		"#;
-		let mut t = Test::new(sql).await?;
-		t.skip_ok(1)?;
-		// Create and select as a record user
-		let sql = r#"
-			CREATE table:1 CONTENT { bar: "hello", foo: "Man"};
-			SELECT COUNT() FROM table:1..4 EXPLAIN;
-			SELECT COUNT() FROM table:1..4;
-		"#;
-		let mut t = Test::new_ds_session(
-			t.ds,
-			Session::for_record("test", "test", "test", Thing::from(("table", "1")).into()),
-			sql,
-		)
-		.await?;
-		t.expect_size(3)?;
-		t.skip_ok(1)?;
-		// The explain plan is still accessible
-		t.expect_val(
-			r#"[
-						{
-							detail: {
-								range: 1..4,
-								table: 'table'
-							},
-							operation: 'Iterate Range Keys'
-						},
-						{
-							detail: {
-								type: 'Memory'
-							},
-							operation: 'Collector'
-						}
-					]"#,
-		)?;
-		// No record is returned
-		t.expect_val("[]")?;
-	}
-	// Permissions are Full
-	{
-		// Define the permissions
-		let sql = r#"
-			DEFINE TABLE table PERMISSIONS FOR SELECT FULL;
-		"#;
-		let mut t = Test::new(sql).await?;
-		t.skip_ok(1)?;
-		// Create and select as a record user
-		let sql = r#"
-			CREATE table:1 CONTENT { bar: "hello", foo: "Man"};
-			SELECT COUNT() FROM table:1..4 EXPLAIN;
-			SELECT COUNT() FROM table:1..4;
-		"#;
-		let mut t = Test::new_ds_session(
-			t.ds,
-			Session::for_record("test", "test", "test", Thing::from(("table", "1")).into()),
-			sql,
-		)
-		.await?;
-		t.expect_size(3)?;
-		t.skip_ok(1)?;
-		// The explain plan is still accessible
-		t.expect_val(
-			r#"[
-						{
-							detail: {
-								range: 1..4,
-								table: 'table'
-							},
-							operation: 'Iterate Range Keys'
-						},
-						{
-							detail: {
-								type: 'Memory'
-							},
-							operation: 'Collector'
-						}
-					]"#,
-		)?;
-		// The count returned
-		t.expect_val(
-			r#"[
-					{
-						count: 1
-					},
-					{
-						count: 1
-					},
-					{
-						count: 1
-					}
-				]"#,
-		)?;
-	}
+	)?;
+	// Check what is returned
+	t.expect_val(expect)?;
+	//
 	Ok(())
+}
+
+#[tokio::test]
+async fn select_count_range_keys_only_permissions_select_none() -> Result<(), Error> {
+	select_count_range_keys_only_permissions("FOR SELECT NONE", "[]").await
+}
+
+#[tokio::test]
+async fn select_count_range_keys_only_permissions_select_full() -> Result<(), Error> {
+	select_count_range_keys_only_permissions("FOR SELECT FULL", "[{ count: 1 }]").await
+}
+
+#[tokio::test]
+async fn select_count_range_keys_only_permissions_select_where_false() -> Result<(), Error> {
+	select_count_range_keys_only_permissions("FOR SELECT WHERE FALSE", "[]").await
 }
