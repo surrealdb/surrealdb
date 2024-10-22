@@ -19,7 +19,7 @@ impl Document {
 	/// This only happens when a document does not
 	/// have a record id, because we are attempting
 	/// to create a new record, and are leaving the
-	/// id generation up to the pdocument processor.
+	/// id generation up to the document processor.
 	pub(crate) async fn generate_record_id(
 		&mut self,
 		stk: &mut Stk,
