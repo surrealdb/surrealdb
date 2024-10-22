@@ -61,15 +61,22 @@ impl Drop for Transaction {
 impl Datastore {
 	/// Open a new database
 	pub(crate) async fn new(path: &str) -> Result<Datastore, Error> {
+		// Create new configuration options
 		let mut opts = Options::new();
+		// Set the data storage directory
 		opts.dir = path.to_string().into();
-
+		// Create a new datastore
 		match Store::new(opts) {
 			Ok(db) => Ok(Datastore {
 				db,
 			}),
 			Err(e) => Err(Error::Ds(e.to_string())),
 		}
+	}
+	/// Shutdown the database
+	pub(crate) async fn shutdown(&self) -> Result<(), Error> {
+		// Nothing to do here
+		Ok(())
 	}
 	/// Start a new transaction
 	pub(crate) async fn transaction(&self, write: bool, _: bool) -> Result<Transaction, Error> {

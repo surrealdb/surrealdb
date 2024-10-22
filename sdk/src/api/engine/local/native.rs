@@ -192,5 +192,5 @@ pub(crate) async fn run_router(
 	// Wait for background tasks to finish
 	let _ = tasks.resolve().await;
 	// Delete this node from the cluster
-	let _ = kvs.delete_node(kvs.id()).await;
+	let _ = kvs.shutdown().await;
 }

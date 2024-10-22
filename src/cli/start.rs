@@ -225,8 +225,8 @@ pub async fn init(
 	canceller.cancel();
 	// Wait for background tasks to finish
 	nodetasks.resolve().await?;
-	// Delete this node from the cluster
-	datastore.delete_node(datastore.id()).await?;
+	// Shutdown the datastore
+	datastore.shutdown().await?;
 	// All ok
 	Ok(())
 }

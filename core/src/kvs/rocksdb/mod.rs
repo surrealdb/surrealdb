@@ -143,6 +143,11 @@ impl Datastore {
 			db: Arc::pin(OptimisticTransactionDB::open(&opts, path)?),
 		})
 	}
+	/// Shutdown the database
+	pub(crate) async fn shutdown(&self) -> Result<(), Error> {
+		// Nothing to do here
+		Ok(())
+	}
 	/// Start a new transaction
 	pub(crate) async fn transaction(&self, write: bool, _: bool) -> Result<Transaction, Error> {
 		// Set the transaction options
