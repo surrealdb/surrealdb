@@ -68,7 +68,7 @@ impl Transaction {
 		chn: Sender<Vec<u8>>,
 	) -> Result<(), Error> {
 		// Output USERS, ACCESSES, PARAMS, FUNCTIONS, ANALYZERS
-		self.export_metadata(&cfg, &chn, &ns, &db).await?;
+		self.export_metadata(&cfg, &chn, ns, db).await?;
 		// Output TABLES
 		self.export_tables(ns, db, &cfg, &chn).await?;
 		Ok(())
@@ -157,8 +157,8 @@ impl Transaction {
 				continue;
 			}
 
-			self.export_table_structure(ns, db, &table, chn).await?;
-			self.export_table_data(ns, db, &table, cfg, chn).await?;
+			self.export_table_structure(ns, db, table, chn).await?;
+			self.export_table_data(ns, db, table, cfg, chn).await?;
 		}
 
 		Ok(())
