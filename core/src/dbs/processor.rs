@@ -155,18 +155,18 @@ impl<'a> Processor<'a> {
 						self.process_table(stk, &ctx, opt, stm, &v).await?
 					}
 				}
-				Iterable::Index(t, irf) => {
+				Iterable::Index(v, irf) => {
 					if let Some(qp) = ctx.get_query_planner() {
-						if let Some(exe) = qp.get_query_executor(&t.0) {
+						if let Some(exe) = qp.get_query_executor(&v.0) {
 							// We set the query executor matching the current table in the Context
 							// Avoiding search in the hashmap of the query planner for each doc
 							let mut ctx = MutableContext::new(ctx);
 							ctx.set_query_executor(exe.clone());
 							let ctx = ctx.freeze();
-							return self.process_index(stk, &ctx, opt, stm, &t, irf).await;
+							return self.process_index(stk, &ctx, opt, stm, &v, irf).await;
 						}
 					}
-					self.process_index(stk, ctx, opt, stm, &t, irf).await?
+					self.process_index(stk, ctx, opt, stm, &v, irf).await?
 				}
 				Iterable::Mergeable(v, o) => {
 					self.process_mergeable(stk, ctx, opt, stm, (v, o)).await?
@@ -655,20 +655,19 @@ impl<'a> Processor<'a> {
 		if let Some(exe) = ctx.get_query_executor() {
 			if let Some(mut iterator) = exe.new_iterator(opt, irf).await? {
 				// Get the first batch
-				let mut to_process = Self::next_batch(ctx, opt, &mut iterator).await?;
-
-				while !to_process.is_empty() {
+				let mut batch = Self::next_batch(ctx, opt, &mut iterator).await?;
+				// Loop over the indexed records
+				while !batch.is_empty() {
 					// Check if the context is finished
 					if ctx.is_done() {
 						break;
 					}
 					// Process the records
-					// TODO: par_iter
-					for pro in to_process {
+					for pro in batch {
 						self.process(stk, ctx, opt, stm, pro).await?;
 					}
 					// Get the next batch
-					to_process = Self::next_batch(ctx, opt, &mut iterator).await?;
+					batch = Self::next_batch(ctx, opt, &mut iterator).await?;
 				}
 				// Everything ok
 				return Ok(());
