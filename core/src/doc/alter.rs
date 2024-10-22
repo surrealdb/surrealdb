@@ -39,6 +39,12 @@ impl Document {
 					// There is no data clause so create a record id
 					None => tb.generate(),
 				};
+				// The id field can not be a record range
+				if id.is_range() {
+					return Err(Error::IdInvalid {
+						value: id.to_string(),
+					});
+				}
 				//
 				self.id = Some(Arc::new(id));
 			}
