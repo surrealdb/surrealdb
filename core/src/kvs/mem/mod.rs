@@ -156,6 +156,10 @@ impl super::api::Transaction for Transaction {
 	where
 		K: Into<Key> + Sprintable + Debug,
 	{
+		// Memory does not support versioned queries.
+		if version.is_some() {
+			return Err(Error::UnsupportedVersionedQueries);
+		}
 		// Check to see if transaction is closed
 		if self.done {
 			return Err(Error::TxFinished);
@@ -172,17 +176,19 @@ impl super::api::Transaction for Transaction {
 	where
 		K: Into<Key> + Sprintable + Debug,
 	{
+		// Memory does not support versioned queries.
+		if version.is_some() {
+			return Err(Error::UnsupportedVersionedQueries);
+		}
 		// Check to see if transaction is closed
 		if self.done {
 			return Err(Error::TxFinished);
 		}
-
 		// Fetch the value from the database.
 		let res = match version {
 			Some(ts) => self.inner.get_at_ts(&key.into(), ts)?,
 			None => self.inner.get(&key.into())?,
 		};
-
 		// Return result
 		Ok(res)
 	}
@@ -194,6 +200,10 @@ impl super::api::Transaction for Transaction {
 		K: Into<Key> + Sprintable + Debug,
 		V: Into<Val> + Debug,
 	{
+		// Memory does not support versioned queries.
+		if version.is_some() {
+			return Err(Error::UnsupportedVersionedQueries);
+		}
 		// Check to see if transaction is closed
 		if self.done {
 			return Err(Error::TxFinished);
@@ -218,6 +228,10 @@ impl super::api::Transaction for Transaction {
 		K: Into<Key> + Sprintable + Debug,
 		V: Into<Val> + Debug,
 	{
+		// Memory does not support versioned queries.
+		if version.is_some() {
+			return Err(Error::UnsupportedVersionedQueries);
+		}
 		// Check to see if transaction is closed
 		if self.done {
 			return Err(Error::TxFinished);
@@ -330,6 +344,10 @@ impl super::api::Transaction for Transaction {
 	where
 		K: Into<Key> + Sprintable + Debug,
 	{
+		// Memory does not support versioned queries.
+		if version.is_some() {
+			return Err(Error::UnsupportedVersionedQueries);
+		}
 		// Check to see if transaction is closed
 		if self.done {
 			return Err(Error::TxFinished);
@@ -356,6 +374,10 @@ impl super::api::Transaction for Transaction {
 	where
 		K: Into<Key> + Sprintable + Debug,
 	{
+		// Memory does not support versioned queries.
+		if version.is_some() {
+			return Err(Error::UnsupportedVersionedQueries);
+		}
 		// Check to see if transaction is closed
 		if self.done {
 			return Err(Error::TxFinished);
@@ -364,7 +386,6 @@ impl super::api::Transaction for Transaction {
 		let beg = rng.start.into();
 		let end = rng.end.into();
 		let range = beg.as_slice()..end.as_slice();
-
 		// Retrieve the scan range
 		let res = match version {
 			Some(ts) => self.inner.scan_at_ts(range, ts, Some(limit as usize))?,
@@ -375,7 +396,7 @@ impl super::api::Transaction for Transaction {
 				.map(|kv| (kv.0, kv.1))
 				.collect(),
 		};
-
+		// Return result
 		Ok(res)
 	}
 }
