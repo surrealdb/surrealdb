@@ -15,7 +15,11 @@ use reblessive::tree::Stk;
 use std::sync::Arc;
 
 impl Document {
-	///
+	/// Generates a new record id for this document.
+	/// This only happens when a document does not
+	/// have a record id, because we are attempting
+	/// to create a new record, and are leaving the
+	/// id generation up to the pdocument processor.
 	pub(crate) async fn generate_record_id(
 		&mut self,
 		stk: &mut Stk,
@@ -45,7 +49,7 @@ impl Document {
 						value: id.to_string(),
 					});
 				}
-				//
+				// Set the document id
 				self.id = Some(Arc::new(id));
 			}
 			// This is a INSERT statement
