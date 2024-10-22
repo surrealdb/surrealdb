@@ -9,6 +9,8 @@ use crate::sql::statements::DefineTableStatement;
 use crate::sql::Duration;
 use crate::sql::Value;
 use channel::Sender;
+use chrono::prelude::Utc;
+use chrono::TimeZone;
 
 #[derive(Clone, Debug)]
 pub struct Config {
@@ -30,7 +32,7 @@ impl Default for Config {
 			functions: true,
 			analyzers: true,
 			tables: TableConfig::default(),
-			versions: false,
+			versions: true,
 		}
 	}
 }
@@ -269,7 +271,8 @@ impl Transaction {
 			(Value::Bool(true), Value::Thing(_), Value::Thing(_)) => {
 				if let Some(version) = version {
 					// If a version exists, format the value as an INSERT RELATION VERSION command.
-					format!("INSERT RELATION {} VERSION d'{:?}';", v, Duration::from_nanos(version))
+					let ts = Utc.timestamp_nanos(version as i64);
+					format!("INSERT RELATION {} VERSION d'{:?}';", v, ts)
 				} else {
 					// If no version exists, push the value to the records_relate vector.
 					records_relate.push(v.to_string());
@@ -284,11 +287,8 @@ impl Transaction {
 						format!("DELETE {};", v.pick(&*ID))
 					} else {
 						// If the record is not a tombstone and a version exists, format it as an INSERT VERSION command.
-						format!(
-							"INSERT {} VERSION d'{:?}';",
-							v,
-							Duration::from_nanos(version.unwrap())
-						)
+						let ts = Utc.timestamp_nanos(version.unwrap() as i64);
+						format!("INSERT {} VERSION d'{:?}';", v, ts)
 					}
 				} else {
 					// If no tombstone or version information is provided, push the value to the records_normal vector.
@@ -349,6 +349,11 @@ impl Transaction {
 
 		// Commit the transaction.
 		chn.send(bytes!("COMMIT")).await?;
+
+		// If there are no graph edge records, return early.
+		if records_relate.is_empty() {
+			return Ok(());
+		}
 
 		// Begin a new transaction for graph edge records.
 		chn.send(bytes!("BEGIN")).await?;
