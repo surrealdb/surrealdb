@@ -11,7 +11,7 @@ use crate::key::{graph, thing};
 use crate::kvs::Transaction;
 use crate::sql::dir::Dir;
 use crate::sql::id::range::IdRange;
-use crate::sql::{Edges, Permission, Table, Thing, Value};
+use crate::sql::{Edges, Table, Thing, Value};
 #[cfg(not(target_arch = "wasm32"))]
 use channel::Sender;
 use futures::StreamExt;
@@ -135,15 +135,8 @@ impl<'a> Processor<'a> {
 		if opt.check_perms(stm.into())? {
 			// Get the table for this document
 			let table = ctx.tx().get_tb(opt.ns()?, opt.db()?, tb).await?;
-			// Get the permissions for this table
-			let perms = if stm.is_delete() {
-				&table.permissions.delete
-			} else if stm.is_select() {
-				&table.permissions.select
-			} else {
-				&Permission::None
-			};
-			if perms.is_none() {
+			// Check if select permissions is not none
+			if table.permissions.select.is_none() {
 				return Ok(false);
 			}
 		}
