@@ -165,7 +165,7 @@ impl<'a> Statement<'a> {
 	/// UPSERT { id: some:thing } WHERE test = true;
 	pub(crate) fn is_deferable(&self) -> bool {
 		match self {
-			Statement::Upsert(ref v) if v.cond.is_none() => true,
+			Statement::Upsert(v) if v.cond.is_none() => true,
 			Statement::Create(_) => true,
 			_ => false,
 		}
@@ -180,10 +180,7 @@ impl<'a> Statement<'a> {
 	///
 	/// UPSERT some WHERE test = true;
 	pub(crate) fn is_guaranteed(&self) -> bool {
-		match self {
-			Statement::Upsert(ref v) if v.cond.is_some() => true,
-			_ => false,
-		}
+		matches!(self, Statement::Upsert(v) if v.cond.is_some())
 	}
 
 	/// Returns whether the document processing for

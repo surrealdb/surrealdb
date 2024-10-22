@@ -32,7 +32,7 @@ impl Document {
 					// There is a data clause so fetch a record id
 					Some(data) => match data.rid(stk, ctx, opt).await? {
 						// Generate a new id from the id field
-						Some(id) => id.generate(&tb, false)?,
+						Some(id) => id.generate(tb, false)?,
 						// Generate a new random table id
 						None => tb.generate(),
 					},
