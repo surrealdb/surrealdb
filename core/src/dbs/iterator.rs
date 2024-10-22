@@ -114,6 +114,8 @@ pub(crate) struct Iterator {
 	results: Results,
 	/// Iterator input values
 	entries: Vec<Iterable>,
+	/// Should we always return a record?
+	guaranteed: Option<Iterable>,
 	/// Set if the iterator can be cancelled once it reaches start/limit
 	cancel_on_limit: Option<u32>,
 }
@@ -127,6 +129,7 @@ impl Clone for Iterator {
 			error: None,
 			results: Results::default(),
 			entries: self.entries.clone(),
+			guaranteed: None,
 			cancel_on_limit: None,
 		}
 	}
@@ -171,7 +174,13 @@ impl Iterator {
 		// Add the record to the iterator
 		match stm.is_deferable() {
 			true => self.ingest(Iterable::Yield(v)),
-			false => self.ingest(Iterable::Table(v, false)),
+			false => match stm.is_guaranteed() {
+				false => self.ingest(Iterable::Table(v, false)),
+				true => {
+					self.guaranteed = Some(Iterable::Yield(v.clone()));
+					self.ingest(Iterable::Table(v, false))
+				}
+			},
 		}
 		// All ingested ok
 		Ok(())
@@ -323,6 +332,13 @@ impl Iterator {
 			// Return any document errors
 			if let Some(e) = self.error.take() {
 				return Err(e);
+			}
+			//
+			if self.results.is_empty() {
+				if let Some(guaranteed) = self.guaranteed.take() {
+					self.ingest(guaranteed);
+					self.iterate(stk, &cancel_ctx, opt, stm).await?;
+				}
 			}
 			// Process any SPLIT clause
 			self.output_split(stk, ctx, opt, stm).await?;
