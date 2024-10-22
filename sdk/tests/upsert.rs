@@ -281,6 +281,157 @@ async fn upsert_with_return_clause() -> Result<(), Error> {
 	Ok(())
 }
 
+#[tokio::test]
+async fn upsert_new_record_wwith_table() -> Result<(), Error> {
+	let sql = "
+		-- This will return the created record
+		UPSERT person SET one = 'one', two = 'two', three = 'three';
+		-- Select all created records
+		SELECT count() FROM person GROUP ALL;
+	";
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 2);
+	//
+	let tmp = res.remove(0).result?;
+	assert!(matches!(tmp, Value::Array(v) if v.len() == 1));
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
+			{
+				count: 1,
+			}
+		]",
+	);
+	assert_eq!(tmp, val);
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn upsert_new_records_with_thing_and_where_clause() -> Result<(), Error> {
+	let sql = "
+		-- This will return the created record as no matching records exist
+		UPSERT person:test SET name = 'Jaime' WHERE name = 'Jaime';
+		-- This will return the updated record, because a matching record exists, and the WHERE clause matches
+		UPSERT person:test SET name = 'Tobie' WHERE name = 'Jaime';
+		-- This will return a newly created record, because the WHERE clause does not match
+		UPSERT person:test SET name = 'Tobie' WHERE name = 'Jaime';
+		-- Select all created records
+		SELECT count() FROM person GROUP ALL;
+	";
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 4);
+	//
+	let tmp = res.remove(0).result?;
+	assert!(matches!(tmp, Value::Array(v) if v.len() == 1));
+	//
+	let tmp = res.remove(0).result?;
+	assert!(matches!(tmp, Value::Array(v) if v.len() == 1));
+	//
+	let tmp = res.remove(0).result?;
+	assert!(matches!(tmp, Value::Array(v) if v.len() == 0));
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
+			{
+				count: 1,
+			}
+		]",
+	);
+	assert_eq!(tmp, val);
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn upsert_new_records_with_table_and_where_clause() -> Result<(), Error> {
+	let sql = "
+		-- This will return the created record as no matching records exist
+		UPSERT person SET name = 'Jaime' WHERE name = 'Jaime';
+		-- This will return the updated record, because a matching record exists, and the WHERE clause matches
+		UPSERT person SET name = 'Tobie' WHERE name = 'Jaime';
+		-- This will return a newly created record, because the WHERE clause does not match
+		UPSERT person SET name = 'Tobie' WHERE name = 'Jaime';
+		-- Select all created records
+		SELECT count() FROM person GROUP ALL;
+	";
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 4);
+	//
+	let tmp = res.remove(0).result?;
+	assert!(matches!(tmp, Value::Array(v) if v.len() == 1));
+	//
+	let tmp = res.remove(0).result?;
+	assert!(matches!(tmp, Value::Array(v) if v.len() == 1));
+	//
+	let tmp = res.remove(0).result?;
+	assert!(matches!(tmp, Value::Array(v) if v.len() == 1));
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
+			{
+				count: 2,
+			}
+		]",
+	);
+	assert_eq!(tmp, val);
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn upsert_new_records_with_table_and_unique_index() -> Result<(), Error> {
+	let sql = "
+		-- This will define a unique index on the table
+		DEFINE INDEX OVERWRITE testing ON person FIELDS one, two, three UNIQUE;
+		-- This will create a record, and populate the unique index with this record id
+		UPSERT person SET one = 'something', two = 'something', three = 'something';
+		-- This will update the record, returning the same record id created in the statement above
+		UPSERT person SET one = 'something', two = 'something', three = 'something';
+		-- This will throw an error, because the unique index already has a record with a different record id
+		UPSERT person:test SET one = 'something', two = 'something', three = 'something';
+		-- Select all created records
+		SELECT count() FROM person GROUP ALL;
+	";
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 5);
+	//
+	let tmp = res.remove(0).result;
+	assert!(tmp.is_ok());
+	//
+	let tmp = res.remove(0).result?;
+	assert!(matches!(tmp, Value::Array(v) if v.len() == 1));
+	//
+	let tmp = res.remove(0).result?;
+	assert!(matches!(tmp, Value::Array(v) if v.len() == 1));
+	//
+	let tmp = res.remove(0).result;
+	assert!(tmp.is_err());
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
+			{
+				count: 1,
+			}
+		]",
+	);
+	assert_eq!(tmp, val);
+	//
+	Ok(())
+}
+
 //
 // Permissions
 //
