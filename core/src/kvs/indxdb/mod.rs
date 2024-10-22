@@ -2,10 +2,10 @@
 
 use crate::err::Error;
 use crate::key::debug::Sprintable;
-use crate::kvs::savepoint::{SavePointImpl, SavePoints};
-use crate::kvs::Check;
-use crate::kvs::Key;
-use crate::kvs::Val;
+use crate::kvs::{
+	savepoint::{SavePointImpl, SavePoints},
+	Check, Key, Val, Version,
+};
 use std::fmt::Debug;
 use std::ops::Range;
 
