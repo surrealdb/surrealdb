@@ -63,6 +63,10 @@ impl Datastore {
 	pub(crate) async fn new(path: &str) -> Result<Datastore, Error> {
 		// Create new configuration options
 		let mut opts = Options::new();
+		// Ensure versions are enabled
+		opts.enable_versions = true;
+		// Ensure persistence is enabled
+		opts.disk_persistence = true;
 		// Set the data storage directory
 		opts.dir = path.to_string().into();
 		// Create a new datastore
