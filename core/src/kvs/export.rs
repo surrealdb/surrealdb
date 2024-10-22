@@ -222,6 +222,7 @@ impl Transaction {
 				let batch = self.batch_versions(rng, *EXPORT_BATCH_SIZE).await?;
 				next = batch.next;
 				let values = batch.versioned_values;
+				// If there are no versioned values, return early.
 				if values.is_empty() {
 					break;
 				}
@@ -229,6 +230,7 @@ impl Transaction {
 			} else {
 				let batch = self.batch(rng, *EXPORT_BATCH_SIZE, true, None).await?;
 				next = batch.next;
+				// If there are no values, return early.
 				let values = batch.values;
 				if values.is_empty() {
 					break;
@@ -288,7 +290,7 @@ impl Transaction {
 				if let Some(is_tombstone) = is_tombstone {
 					if is_tombstone {
 						// If the record is a tombstone, format it as a DELETE command.
-						format!("DELETE {};", k.id)
+						format!("DELETE {}:{};", k.tb, k.id)
 					} else {
 						// If the record is not a tombstone and a version exists, format it as an INSERT VERSION command.
 						let ts = Utc.timestamp_nanos(version.unwrap() as i64);
@@ -323,16 +325,11 @@ impl Transaction {
 		versioned_values: Vec<(Vec<u8>, Vec<u8>, u64, bool)>,
 		chn: &Sender<Vec<u8>>,
 	) -> Result<(), Error> {
-		// If there are no versioned values, return early.
-		if versioned_values.is_empty() {
-			return Ok(());
-		}
-
 		// Initialize a vector to hold graph edge records.
 		let mut records_relate = Vec::with_capacity(*EXPORT_BATCH_SIZE as usize);
 
 		// Begin a new transaction.
-		chn.send(bytes!("BEGIN")).await?;
+		chn.send(bytes!("BEGIN;")).await?;
 
 		// Process each versioned value.
 		for (k, v, version, is_tombstone) in versioned_values {
@@ -358,7 +355,7 @@ impl Transaction {
 		}
 
 		// Commit the transaction.
-		chn.send(bytes!("COMMIT")).await?;
+		chn.send(bytes!("COMMIT;")).await?;
 
 		// If there are no graph edge records, return early.
 		if records_relate.is_empty() {
@@ -366,7 +363,7 @@ impl Transaction {
 		}
 
 		// Begin a new transaction for graph edge records.
-		chn.send(bytes!("BEGIN")).await?;
+		chn.send(bytes!("BEGIN;")).await?;
 
 		// If there are graph edge records, send them to the channel.
 		if !records_relate.is_empty() {
@@ -376,7 +373,7 @@ impl Transaction {
 		}
 
 		// Commit the transaction for graph edge records.
-		chn.send(bytes!("COMMIT")).await?;
+		chn.send(bytes!("COMMIT;")).await?;
 
 		Ok(())
 	}
@@ -401,11 +398,6 @@ impl Transaction {
 		regular_values: Vec<(Vec<u8>, Vec<u8>)>,
 		chn: &Sender<Vec<u8>>,
 	) -> Result<(), Error> {
-		// If there are no regular values, return early.
-		if regular_values.is_empty() {
-			return Ok(());
-		}
-
 		// Initialize vectors to hold normal records and graph edge records.
 		let mut records_normal = Vec::with_capacity(*EXPORT_BATCH_SIZE as usize);
 		let mut records_relate = Vec::with_capacity(*EXPORT_BATCH_SIZE as usize);
