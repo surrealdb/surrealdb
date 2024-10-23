@@ -831,6 +831,8 @@ async fn select_count_group_all_permissions(perm: &str, expect: &str) -> Result<
 	let sql = r"
 			SELECT COUNT() FROM table GROUP ALL EXPLAIN;
 			SELECT COUNT() FROM table GROUP ALL;
+			SELECT COUNT() FROM table:a..z EXPLAIN;
+			SELECT COUNT() FROM table:a..z;
 		";
 	let mut t = Test::new_ds_session(
 		t.ds,
@@ -838,7 +840,7 @@ async fn select_count_group_all_permissions(perm: &str, expect: &str) -> Result<
 		sql,
 	)
 	.await?;
-	t.expect_size(2)?;
+	t.expect_size(4)?;
 	// The explain plan is still visible
 	t.expect_val(
 		r"[
@@ -863,7 +865,26 @@ async fn select_count_group_all_permissions(perm: &str, expect: &str) -> Result<
 	)?;
 	// Check what is returned
 	t.expect_val(expect)?;
-	//
+	// The explain plan is still visible
+	t.expect_val(
+		r"[
+					{
+						detail: {
+							range: 'a'..'z',
+							table: 'table'
+						},
+						operation: 'Iterate Range Keys'
+					},
+					{
+						detail: {
+							type: 'Memory'
+						},
+						operation: 'Collector'
+					}
+				]",
+	)?;
+	// Check what is returned
+	t.expect_val(expect)?;
 	Ok(())
 }
 
@@ -967,45 +988,71 @@ async fn select_count_range_keys_only_permissions(perms: &str, expect: &str) -> 
 	// Define the permissions
 	let sql = format!(
 		r"
-				DEFINE TABLE table PERMISSIONS {perms};
-				CREATE table:1 CONTENT {{ bar: 'hello', foo: 'world'}};
-			"
+			DEFINE TABLE table PERMISSIONS {perms};
+			CREATE table:baz CONTENT {{ bar: 'hello', foo: 'world'}};
+		"
 	);
 	let mut t = Test::new(&sql).await?;
 	t.skip_ok(2)?;
 	// Create and select as a record user
-	let sql = r#"
-			SELECT COUNT() FROM table:1..4 EXPLAIN;
-			SELECT COUNT() FROM table:1..4;
-		"#;
+	let sql = r"
+			SELECT COUNT() FROM table:a..z GROUP ALL EXPLAIN;
+			SELECT COUNT() FROM table:a..z GROUP ALL;
+			SELECT COUNT() FROM table:a..z EXPLAIN;
+			SELECT COUNT() FROM table:a..z;
+		";
 	let mut t = Test::new_ds_session(
 		t.ds,
-		Session::for_record("test", "test", "test", Thing::from(("table", "1")).into()),
+		Session::for_record("test", "test", "test", Thing::from(("table", "baz")).into()),
 		sql,
 	)
 	.await?;
-	t.expect_size(2)?;
+	t.expect_size(4)?;
 	// The explain plan is still accessible
 	t.expect_val(
-		r#"[
-						{
-							detail: {
-								range: 1..4,
-								table: 'table'
-							},
-							operation: 'Iterate Range Keys'
+		r"[
+				{
+					detail: {
+						range: 'a'..'z',
+						table: 'table'
+					},
+					operation: 'Iterate Range Keys'
+				},
+				{
+					detail: {
+						idioms: {
+							count: [
+								'count'
+							]
 						},
-						{
-							detail: {
-								type: 'Memory'
-							},
-							operation: 'Collector'
-						}
-					]"#,
+						type: 'Group'
+					},
+					operation: 'Collector'
+				}
+			]",
 	)?;
 	// Check what is returned
 	t.expect_val(expect)?;
-	//
+	// The explain plan is still accessible
+	t.expect_val(
+		r#"[
+					{
+						detail: {
+							range: 'a'..'z',
+							table: 'table'
+						},
+						operation: 'Iterate Range Keys'
+					},
+					{
+						detail: {
+							type: 'Memory'
+						},
+						operation: 'Collector'
+					}
+				]"#,
+	)?;
+	// Check what is returned
+	t.expect_val(expect)?;
 	Ok(())
 }
 

@@ -125,24 +125,6 @@ impl<'a> Processor<'a> {
 		Cow::Borrowed(ctx)
 	}
 
-	async fn check_keys_only_permissions(
-		ctx: &Context,
-		opt: &Options,
-		stm: &Statement<'_>,
-		tb: &Table,
-	) -> Result<bool, Error> {
-		// Should we run permissions checks?
-		if opt.check_perms(stm.into())? {
-			// Get the table for this document
-			let table = ctx.tx().get_tb(opt.ns()?, opt.db()?, tb).await?;
-			// Check if select permissions is full
-			if !table.permissions.select.is_full() {
-				return Ok(false);
-			}
-		}
-		Ok(true)
-	}
-
 	async fn process_iterable(
 		&mut self,
 		stk: &mut Stk,
@@ -165,11 +147,8 @@ impl<'a> Processor<'a> {
 						self.process_range(stk, ctx, opt, stm, &tb, v).await?
 					}
 				}
-				Iterable::Table(v, mut keys_only) => {
+				Iterable::Table(v, keys_only) => {
 					let ctx = Self::check_query_planner_context(ctx, &v);
-					if keys_only {
-						keys_only = Self::check_keys_only_permissions(&ctx, opt, stm, &v).await?;
-					}
 					if keys_only {
 						self.process_table_keys(stk, &ctx, opt, stm, &v).await?
 					} else {
@@ -529,15 +508,12 @@ impl<'a> Processor<'a> {
 			// Parse the data from the store
 			let k = res?;
 			let key: thing::Thing = (&k).into();
-			let val = Value::Null;
 			let rid = Thing::from((key.tb, key.id));
-			// Create a new operable value
-			let val = Operable::Value(val.into());
 			// Process the record
 			let pro = Processed {
 				rid: Some(rid.into()),
 				ir: None,
-				val,
+				val: Operable::Value(Value::Null.into()),
 			};
 			self.process(stk, ctx, opt, stm, pro).await?;
 		}
