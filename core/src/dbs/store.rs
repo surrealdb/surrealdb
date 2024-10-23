@@ -15,6 +15,10 @@ impl MemoryCollector {
 		self.0.push(val);
 	}
 
+	/// This function determines the sorting strategy based on the size of the collection.
+	/// If the collection contains fewer than 1000 elements, it uses `small_sort`.
+	/// Otherwise, it uses `large_sort` which is asynchronous.
+	///
 	#[cfg(not(target_arch = "wasm32"))]
 	pub(super) async fn sort(&mut self, ordering: &Ordering) {
 		if self.0.len() < 1000 {
@@ -24,6 +28,17 @@ impl MemoryCollector {
 		}
 	}
 
+	#[cfg(not(target_arch = "wasm32"))]
+	/// Asynchronously sorts a large vector based on the given ordering.
+	///
+	/// The function performs the sorting operation in a blocking
+	/// manner to avoid occupying the async runtime,
+	/// and then awaits the completion of the sorting.
+	///
+	/// - For vectors with a length of 10,000 or more, the sorting is performed using `par_sort_unstable_by`
+	///   from the Rayon library for better performance through parallelism.
+	/// - For smaller vectors, standard `sort_by` is used.
+	///
 	async fn large_sort(&mut self, ordering: &Ordering) {
 		let mut vec = mem::take(&mut self.0);
 		let ordering = ordering.clone();
@@ -34,7 +49,7 @@ impl MemoryCollector {
 					if vec.len() >= 10000 {
 						vec.par_sort_unstable_by(|a, b| orders.compare(a, b));
 					} else {
-						vec.sort_by(|a, b| orders.compare(a, b));
+						vec.sort_unstable_by(|a, b| orders.compare(a, b));
 					}
 				}
 			};
@@ -49,7 +64,7 @@ impl MemoryCollector {
 		match ordering {
 			Ordering::Random => self.0.shuffle(&mut rand::thread_rng()),
 			Ordering::Order(orders) => {
-				self.0.sort_by(|a, b| orders.compare(a, b));
+				self.0.sort_unstable_by(|a, b| orders.compare(a, b));
 			}
 		}
 	}
