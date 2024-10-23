@@ -5,6 +5,8 @@ use crate::sql::order::Ordering;
 use crate::sql::value::Value;
 use rayon::slice::ParallelSliceMut;
 use std::mem;
+use tokio::task::spawn_blocking;
+
 #[derive(Default)]
 pub(super) struct MemoryCollector(Vec<Value>);
 
@@ -13,15 +15,40 @@ impl MemoryCollector {
 		self.0.push(val);
 	}
 
-	pub(super) fn sort(&mut self, ordering: &Ordering) {
+	#[cfg(not(target_arch = "wasm32"))]
+	pub(super) async fn sort(&mut self, ordering: &Ordering) {
+		if self.0.len() < 1000 {
+			self.small_sort(ordering);
+		} else {
+			self.large_sort(ordering).await;
+		}
+	}
+
+	async fn large_sort(&mut self, ordering: &Ordering) {
+		let mut vec = mem::take(&mut self.0);
+		let ordering = ordering.clone();
+		let vec = spawn_blocking(move || {
+			match ordering {
+				Ordering::Random => vec.shuffle(&mut rand::thread_rng()),
+				Ordering::Order(orders) => {
+					if vec.len() >= 10000 {
+						vec.par_sort_unstable_by(|a, b| orders.compare(a, b));
+					} else {
+						vec.sort_by(|a, b| orders.compare(a, b));
+					}
+				}
+			};
+			vec
+		})
+		.await
+		.unwrap();
+		self.0 = vec;
+	}
+
+	pub(super) fn small_sort(&mut self, ordering: &Ordering) {
 		match ordering {
 			Ordering::Random => self.0.shuffle(&mut rand::thread_rng()),
 			Ordering::Order(orders) => {
-				#[cfg(not(target_arch = "wasm32"))]
-				if self.0.len() >= 10000 {
-					self.0.par_sort_by(|a, b| orders.compare(a, b));
-					return;
-				}
 				self.0.sort_by(|a, b| orders.compare(a, b));
 			}
 		}

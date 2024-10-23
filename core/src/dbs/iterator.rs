@@ -339,6 +339,9 @@ impl Iterator {
 
 			// Process any ORDER clause
 			if let Some(orders) = stm.order() {
+				#[cfg(not(target_arch = "wasm32"))]
+				self.results.async_sort(orders).await;
+				#[cfg(target_arch = "wasm32")]
 				self.results.sort(orders);
 			}
 
