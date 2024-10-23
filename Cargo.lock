@@ -6125,6 +6125,7 @@ dependencies = [
  "unicase",
  "url",
  "uuid",
+ "vart 0.6.0",
  "wasm-bindgen-futures",
  "wasmtimer",
  "wiremock",
@@ -6187,7 +6188,7 @@ dependencies = [
  "quick_cache 0.6.2",
  "revision",
  "tokio",
- "vart",
+ "vart 0.4.1",
 ]
 
 [[package]]
@@ -7118,6 +7119,12 @@ name = "valuable"
 version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "830b7e5d4d90034032940e4ace0d9a9a057e7a45cd94e6c007832e39edb82f6d"
+
+[[package]]
+name = "vart"
+version = "0.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1a8d5a909a58ae4ed6612e7efef7c70dcca222721c48b20ddbe55bc4ae06e07c"
 
 [[package]]
 name = "vart"

@@ -1166,6 +1166,12 @@ impl Parser<'_> {
 								self.expect_closing_delimiter(t!(")"), open_span)?;
 								filters.push(Filter::Snowball(language))
 							}
+							t!("MAPPER") => {
+								let open_span = expected!(self, t!("(")).span;
+								let path: Strand = self.next_token_value()?;
+								self.expect_closing_delimiter(t!(")"), open_span)?;
+								filters.push(Filter::Mapper(path.into()))
+							}
 							_ => unexpected!(self, next, "a filter"),
 						}
 						if !self.eat(t!(",")) {

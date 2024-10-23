@@ -1,6 +1,8 @@
 use crate::err::Error;
+use crate::idx::ft::analyzer::mapper::Mapper;
 use crate::idx::ft::analyzer::tokenizer::Tokens;
 use crate::idx::ft::offsets::Position;
+use crate::idx::trees::store::IndexStores;
 use crate::sql::filter::Filter as SqlFilter;
 use crate::sql::language::Language;
 use deunicode::deunicode;
@@ -18,11 +20,12 @@ pub(super) enum Filter {
 	EdgeNgram(u16, u16),
 	Lowercase,
 	Uppercase,
+	Mapper(Mapper),
 }
 
-impl From<&SqlFilter> for Filter {
-	fn from(f: &SqlFilter) -> Self {
-		match f {
+impl Filter {
+	fn new(ixs: &IndexStores, f: &SqlFilter) -> Result<Self, Error> {
+		let f = match f {
 			SqlFilter::Ascii => Filter::Ascii,
 			SqlFilter::EdgeNgram(min, max) => Filter::EdgeNgram(*min, *max),
 			SqlFilter::Lowercase => Filter::Lowercase,
@@ -50,17 +53,23 @@ impl From<&SqlFilter> for Filter {
 				Filter::Stemmer(a)
 			}
 			SqlFilter::Uppercase => Filter::Uppercase,
-		}
+			SqlFilter::Mapper(path) => Filter::Mapper(ixs.mappers().get(path)?),
+		};
+		Ok(f)
 	}
-}
 
-impl Filter {
-	pub(super) fn from(fs: &Option<Vec<SqlFilter>>) -> Option<Vec<Filter>> {
+	pub(super) fn try_from(
+		ixs: &IndexStores,
+		fs: &Option<Vec<SqlFilter>>,
+	) -> Result<Option<Vec<Filter>>, Error> {
 		if let Some(fs) = fs {
-			let r = fs.iter().map(|f| f.into()).collect();
-			Some(r)
+			let mut r = Vec::with_capacity(fs.len());
+			for f in fs {
+				r.push(Self::new(ixs, f)?);
+			}
+			Ok(Some(r))
 		} else {
-			None
+			Ok(None)
 		}
 	}
 
@@ -95,38 +104,57 @@ impl Filter {
 			Filter::Ngram(min, max) => Self::ngram(c, *min, *max),
 			Filter::Stemmer(s) => Self::stem(s, c),
 			Filter::Uppercase => Self::uppercase(c),
-		}
-	}
-
-	#[inline]
-	fn check_term(c: &str, s: String) -> FilterResult {
-		if s.is_empty() {
-			FilterResult::Ignore
-		} else if s.eq(c) {
-			FilterResult::Term(Term::Unchanged)
-		} else {
-			FilterResult::Term(Term::NewTerm(s, 0))
+			Filter::Mapper(m) => m.map(c),
 		}
 	}
 
 	#[inline]
 	fn lowercase(c: &str) -> FilterResult {
-		Self::check_term(c, c.to_lowercase())
+		if c.is_empty() {
+			return FilterResult::Ignore;
+		}
+		let s = c.to_lowercase();
+		if s.eq(c) {
+			return FilterResult::Term(Term::Unchanged);
+		}
+		FilterResult::Term(Term::NewTerm(s, 0))
 	}
 
 	#[inline]
 	fn uppercase(c: &str) -> FilterResult {
-		Self::check_term(c, c.to_uppercase())
+		if c.is_empty() {
+			return FilterResult::Ignore;
+		}
+		let s = c.to_uppercase();
+		if s.eq(c) {
+			return FilterResult::Term(Term::Unchanged);
+		}
+		FilterResult::Term(Term::NewTerm(s, 0))
 	}
 
 	#[inline]
 	fn deunicode(c: &str) -> FilterResult {
-		Self::check_term(c, deunicode(c))
+		if c.is_empty() {
+			return FilterResult::Ignore;
+		}
+		let s = deunicode(c);
+		if s.eq(c) {
+			return FilterResult::Term(Term::Unchanged);
+		}
+		FilterResult::Term(Term::NewTerm(s, 0))
 	}
 
 	#[inline]
 	fn stem(s: &Stemmer, c: &str) -> FilterResult {
-		Self::check_term(c, s.stem(&c.to_lowercase()).into())
+		if c.is_empty() {
+			return FilterResult::Ignore;
+		}
+		let c = c.to_lowercase();
+		let s = s.stem(&c);
+		if s.eq(&c) {
+			return FilterResult::Term(Term::Unchanged);
+		}
+		FilterResult::Term(Term::NewTerm(s.to_string(), 0))
 	}
 
 	#[inline]
