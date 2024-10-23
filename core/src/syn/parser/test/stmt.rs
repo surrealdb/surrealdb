@@ -2735,7 +2735,7 @@ fn parse_access_grant() {
 			Statement::Access(AccessStatement::Grant(AccessStatementGrant {
 				ac: Ident("a".to_string()),
 				base: Some(Base::Ns),
-				subject: Some(access::Subject::User(Ident("b".to_string()))),
+				subject: access::Subject::User(Ident("b".to_string())),
 			}))
 		);
 	}
@@ -2747,10 +2747,10 @@ fn parse_access_grant() {
 			Statement::Access(AccessStatement::Grant(AccessStatementGrant {
 				ac: Ident("a".to_string()),
 				base: Some(Base::Ns),
-				subject: Some(access::Subject::Record(Thing {
+				subject: access::Subject::Record(Thing {
 					tb: "b".to_owned(),
 					id: Id::from("c"),
-				})),
+				}),
 			}))
 		);
 	}
