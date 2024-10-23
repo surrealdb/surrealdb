@@ -300,7 +300,7 @@ impl super::api::Transaction for Transaction {
 			return Err(Error::TxReadonly);
 		}
 		// Remove the key
-		self.inner.soft_delete(&key.into())?;
+		self.inner.delete(&key.into())?;
 		// Return result
 		Ok(())
 	}
@@ -325,8 +325,8 @@ impl super::api::Transaction for Transaction {
 		let chk = chk.map(Into::into);
 		// Delete the key if valid
 		match (self.inner.get(&key)?, chk) {
-			(Some(v), Some(w)) if v == w => self.inner.soft_delete(&key)?,
-			(None, None) => self.inner.soft_delete(&key)?,
+			(Some(v), Some(w)) if v == w => self.inner.delete(&key)?,
+			(None, None) => self.inner.delete(&key)?,
 			_ => return Err(Error::TxConditionNotMet),
 		};
 		// Return result
