@@ -3,8 +3,8 @@ use rand::seq::SliceRandom;
 use crate::dbs::plan::Explanation;
 use crate::sql::order::Ordering;
 use crate::sql::value::Value;
+use rayon::slice::ParallelSliceMut;
 use std::mem;
-
 #[derive(Default)]
 pub(super) struct MemoryCollector(Vec<Value>);
 
@@ -17,6 +17,11 @@ impl MemoryCollector {
 		match ordering {
 			Ordering::Random => self.0.shuffle(&mut rand::thread_rng()),
 			Ordering::Order(orders) => {
+				#[cfg(not(target_arch = "wasm32"))]
+				if self.0.len() >= 10000 {
+					self.0.par_sort_by(|a, b| orders.compare(a, b));
+					return;
+				}
 				self.0.sort_by(|a, b| orders.compare(a, b));
 			}
 		}
