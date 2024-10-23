@@ -255,7 +255,7 @@ pub async fn db_access(
 					// Authenticate bearer key against stored grant.
 					verify_grant_bearer(&gr, key)?;
 					// If the subject of the grant is a system user, get their roles.
-					let roles = if let Some(access::Subject::User(user)) = &gr.subject {
+					let roles = if let access::Subject::User(user) = &gr.subject {
 						// Create a new readonly transaction.
 						let tx = kvs.transaction(Read, Optimistic).await?;
 						// Fetch the specified user from storage.
@@ -283,18 +283,14 @@ pub async fn db_access(
 						db: Some(db.to_owned()),
 						ac: Some(ac.to_owned()),
 						id: match &gr.subject {
-							Some(access::Subject::User(user)) => Some(user.to_raw()),
-							Some(access::Subject::Record(rid)) => Some(rid.to_raw()),
-							// Return opaque error as this code should not be reachable.
-							None => return Err(Error::InvalidAuth),
+							access::Subject::User(user) => Some(user.to_raw()),
+							access::Subject::Record(rid) => Some(rid.to_raw()),
 						},
 						roles: match &gr.subject {
-							Some(access::Subject::User(_)) => {
+							access::Subject::User(_) => {
 								Some(roles.iter().map(|v| v.to_string()).collect())
 							}
-							Some(access::Subject::Record(_)) => Default::default(),
-							// Return opaque error as this code should not be reachable.
-							None => return Err(Error::InvalidAuth),
+							access::Subject::Record(_) => Default::default(),
 						},
 						..Claims::default()
 					};
@@ -318,14 +314,14 @@ pub async fn db_access(
 					session.ac = Some(ac.to_owned());
 					session.exp = expiration(av.duration.session)?;
 					match &gr.subject {
-						Some(access::Subject::User(user)) => {
+						access::Subject::User(user) => {
 							session.au = Arc::new(Auth::new(Actor::new(
 								user.to_string(),
 								roles.iter().map(Role::from).collect(),
 								Level::Database(ns, db),
 							)));
 						}
-						Some(access::Subject::Record(rid)) => {
+						access::Subject::Record(rid) => {
 							session.au = Arc::new(Auth::new(Actor::new(
 								rid.to_string(),
 								Default::default(),
@@ -333,8 +329,6 @@ pub async fn db_access(
 							)));
 							session.rd = Some(Value::from(rid.to_owned()));
 						}
-						// Return opaque error as this code should not be reachable.
-						None => return Err(Error::InvalidAuth),
 					};
 					// Check the authentication token.
 					match enc {
@@ -449,7 +443,7 @@ pub async fn ns_access(
 					// Authenticate bearer key against stored grant.
 					verify_grant_bearer(&gr, key)?;
 					// If the subject of the grant is a system user, get their roles.
-					let roles = if let Some(access::Subject::User(user)) = &gr.subject {
+					let roles = if let access::Subject::User(user) = &gr.subject {
 						// Create a new readonly transaction.
 						let tx = kvs.transaction(Read, Optimistic).await?;
 						// Fetch the specified user from storage.
@@ -477,12 +471,12 @@ pub async fn ns_access(
 						ns: Some(ns.to_owned()),
 						ac: Some(ac.to_owned()),
 						id: match &gr.subject {
-							Some(access::Subject::User(user)) => Some(user.to_raw()),
+							access::Subject::User(user) => Some(user.to_raw()),
 							// Return opaque error as this code should not be reachable.
 							_ => return Err(Error::InvalidAuth),
 						},
 						roles: match &gr.subject {
-							Some(access::Subject::User(_)) => {
+							access::Subject::User(_) => {
 								Some(roles.iter().map(|v| v.to_string()).collect())
 							}
 							// Return opaque error as this code should not be reachable.
@@ -509,7 +503,7 @@ pub async fn ns_access(
 					session.ac = Some(ac.to_owned());
 					session.exp = expiration(av.duration.session)?;
 					match &gr.subject {
-						Some(access::Subject::User(user)) => {
+						access::Subject::User(user) => {
 							session.au = Arc::new(Auth::new(Actor::new(
 								user.to_string(),
 								roles.iter().map(Role::from).collect(),
@@ -673,7 +667,7 @@ pub async fn root_access(
 					// Authenticate bearer key against stored grant.
 					verify_grant_bearer(&gr, key)?;
 					// If the subject of the grant is a system user, get their roles.
-					let roles = if let Some(access::Subject::User(user)) = &gr.subject {
+					let roles = if let access::Subject::User(user) = &gr.subject {
 						// Create a new readonly transaction.
 						let tx = kvs.transaction(Read, Optimistic).await?;
 						// Fetch the specified user from storage.
@@ -699,12 +693,12 @@ pub async fn root_access(
 						jti: Some(Uuid::new_v4().to_string()),
 						ac: Some(ac.to_owned()),
 						id: match &gr.subject {
-							Some(access::Subject::User(user)) => Some(user.to_raw()),
+							access::Subject::User(user) => Some(user.to_raw()),
 							// Return opaque error as this code should not be reachable.
 							_ => return Err(Error::InvalidAuth),
 						},
 						roles: match &gr.subject {
-							Some(access::Subject::User(_)) => {
+							access::Subject::User(_) => {
 								Some(roles.iter().map(|v| v.to_string()).collect())
 							}
 							// Return opaque error as this code should not be reachable.
@@ -730,7 +724,7 @@ pub async fn root_access(
 					session.ac = Some(ac.to_owned());
 					session.exp = expiration(av.duration.session)?;
 					match &gr.subject {
-						Some(access::Subject::User(user)) => {
+						access::Subject::User(user) => {
 							session.au = Arc::new(Auth::new(Actor::new(
 								user.to_string(),
 								roles.iter().map(Role::from).collect(),

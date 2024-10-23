@@ -369,7 +369,7 @@ impl Parser<'_> {
 						Ok(AccessStatement::Grant(AccessStatementGrant {
 							ac,
 							base,
-							subject: Some(Subject::User(user)),
+							subject: Subject::User(user),
 						}))
 					}
 					t!("RECORD") => {
@@ -378,7 +378,7 @@ impl Parser<'_> {
 						Ok(AccessStatement::Grant(AccessStatementGrant {
 							ac,
 							base,
-							subject: Some(Subject::Record(rid)),
+							subject: Subject::Record(rid),
 						}))
 					}
 					_ => unexpected!(self, peek, "either USER or RECORD"),

@@ -46,13 +46,13 @@ pub enum AccessStatement {
 // TODO(gguillemas): Document once bearer access is no longer experimental.
 #[doc(hidden)]
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub struct AccessStatementGrant {
 	pub ac: Ident,
 	pub base: Option<Base>,
-	pub subject: Option<Subject>,
+	pub subject: Subject,
 }
 
 // TODO(gguillemas): Document once bearer access is no longer experimental.
@@ -107,7 +107,7 @@ pub struct AccessGrant {
 	pub creation: Datetime,           // Grant creation time.
 	pub expiration: Option<Datetime>, // Grant expiration time, if any.
 	pub revocation: Option<Datetime>, // Grant revocation time, if any.
-	pub subject: Option<Subject>,     // Subject of the grant.
+	pub subject: Subject,             // Subject of the grant.
 	pub grant: Grant,                 // Grant data.
 }
 
@@ -161,22 +161,16 @@ impl From<AccessGrant> for Object {
 		let mut res = Object::default();
 		res.insert("id".to_owned(), Value::from(grant.id.to_raw()));
 		res.insert("ac".to_owned(), Value::from(grant.ac.to_raw()));
-		match grant.grant {
-			Grant::Jwt(_) => res.insert("type".to_owned(), Value::from("jwt")),
-			Grant::Record(_) => res.insert("type".to_owned(), Value::from("record")),
-			Grant::Bearer(_) => res.insert("type".to_owned(), Value::from("bearer")),
-		};
+		res.insert("type".to_owned(), Value::from(grant.grant.variant()));
 		res.insert("creation".to_owned(), Value::from(grant.creation));
 		res.insert("expiration".to_owned(), Value::from(grant.expiration));
 		res.insert("revocation".to_owned(), Value::from(grant.revocation));
-		if let Some(subject) = grant.subject {
-			let mut sub = Object::default();
-			match subject {
-				Subject::Record(id) => sub.insert("record".to_owned(), Value::from(id)),
-				Subject::User(name) => sub.insert("user".to_owned(), Value::from(name.to_raw())),
-			};
-			res.insert("subject".to_owned(), Value::from(sub));
-		}
+		let mut sub = Object::default();
+		match grant.subject {
+			Subject::Record(id) => sub.insert("record".to_owned(), Value::from(id)),
+			Subject::User(name) => sub.insert("user".to_owned(), Value::from(name.to_raw())),
+		};
+		res.insert("subject".to_owned(), Value::from(sub));
 
 		let mut gr = Object::default();
 		match grant.grant {
@@ -213,6 +207,16 @@ pub enum Subject {
 	User(Ident),
 }
 
+impl Subject {
+	// Returns the main identifier of a subject as a string.
+	pub fn id(&self) -> String {
+		match self {
+			Subject::Record(id) => id.to_raw(),
+			Subject::User(name) => name.to_raw(),
+		}
+	}
+}
+
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
@@ -221,6 +225,17 @@ pub enum Grant {
 	Jwt(GrantJwt),
 	Record(GrantRecord),
 	Bearer(GrantBearer),
+}
+
+impl Grant {
+	// Returns the type of the grant as a string.
+	pub fn variant(&self) -> &str {
+		match self {
+			Grant::Jwt(_) => "jwt",
+			Grant::Record(_) => "record",
+			Grant::Bearer(_) => "bearer",
+		}
+	}
 }
 
 #[revisioned(revision = 1)]
@@ -317,7 +332,7 @@ async fn compute_grant(
 		}),
 		AccessType::Bearer(at) => {
 			match &stmt.subject {
-				Some(Subject::User(user)) => {
+				Subject::User(user) => {
 					// Grant subject must match access method subject.
 					if !matches!(&at.subject, BearerAccessSubject::User) {
 						return Err(Error::AccessGrantInvalidSubject);
@@ -332,7 +347,7 @@ async fn compute_grant(
 						)),
 					};
 				}
-				Some(Subject::Record(_)) => {
+				Subject::Record(_) => {
 					// If the grant is being created for a record, a database must be selected.
 					if !matches!(base, Base::Db) {
 						return Err(Error::DbEmpty);
@@ -343,7 +358,6 @@ async fn compute_grant(
 					}
 					// A grant can be created for a record that does not exist yet.
 				}
-				None => return Err(Error::AccessGrantInvalidSubject),
 			};
 			// Create a new bearer key.
 			let grant = GrantBearer::new();
@@ -394,9 +408,18 @@ async fn compute_grant(
 			// Check if a collision was found in order to log a specific error on the server.
 			// For an access method with a billion grants, this chance is of only one in 295 billion.
 			if let Err(Error::TxKeyAlreadyExists) = res {
-				error!("A collision was found when attempting to create a new grant. Purging stale grants is advised")
+				error!("A collision was found when attempting to create a new grant. Purging inactive grants is advised")
 			}
 			res?;
+
+			info!(
+				"Access method '{}' was used to create grant '{}' of type '{}' for '{}' by '{}'",
+				gr.ac,
+				gr.id,
+				gr.grant.variant(),
+				gr.subject.id(),
+				opt.auth.id()
+			);
 
 			Ok(Value::Object(gr.into()))
 		}
@@ -576,6 +599,15 @@ async fn compute_revoke(
 				}
 			};
 
+			info!(
+				"Access method '{}' was used to revoke grant '{}' of type '{}' for '{}' by '{}'",
+				revoked.ac,
+				revoked.id,
+				revoked.grant.variant(),
+				revoked.subject.id(),
+				opt.auth.id()
+			);
+
 			Ok(Value::Object(revoked.redacted().into()))
 		}
 		None => {
@@ -652,6 +684,15 @@ async fn compute_revoke(
 							.to_string(),
 					)),
 				};
+
+				info!(
+					"Access method '{}' was used to revoke grant '{}' of type '{}' for '{}' by '{}'",
+					gr.ac,
+					gr.id,
+					gr.grant.variant(),
+					gr.subject.id(),
+					opt.auth.id()
+				);
 
 				// Store revoked version of the redacted grant.
 				revoked.push(Value::Object(gr.redacted().to_owned().into()));
@@ -743,6 +784,16 @@ async fn compute_purge(
 					))
 				}
 			};
+
+			info!(
+				"Access method '{}' was used to purge grant '{}' of type '{}' for '{}' by '{}'",
+				gr.ac,
+				gr.id,
+				gr.grant.variant(),
+				gr.subject.id(),
+				opt.auth.id()
+			);
+
 			purged = purged + Value::Object(gr.redacted().to_owned().into());
 		}
 	}
