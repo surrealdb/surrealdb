@@ -31,7 +31,7 @@ impl Default for Config {
 			functions: true,
 			analyzers: true,
 			tables: TableConfig::default(),
-			versions: true,
+			versions: false,
 		}
 	}
 }
