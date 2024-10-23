@@ -6123,8 +6123,7 @@ dependencies = [
 [[package]]
 name = "surrealkv"
 version = "0.4.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d1fd737b47319170abe4b792aa934aaf4f31e5e0407e9aad00ca6fb8d065469b"
+source = "git+https://github.com/surrealdb/surrealkv?branch=fix/wasm-build#aa2cc583f8e95cf82779436306054e43929db3b0"
 dependencies = [
  "ahash 0.8.11",
  "async-channel 2.2.0",
