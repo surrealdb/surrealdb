@@ -87,15 +87,11 @@ impl Document {
 				Err(Error::Ignore) => Err(Error::Ignore),
 				// Pass other errors through and return the error
 				Err(e) => {
-					if stm.is_ignore() && matches!(e, Error::RecordExists { .. }) {
-						Err(Error::Ignore)
-					} else {
-						// We roll back any change following the save point
-						if is_save_point {
-							ctx.tx().lock().await.rollback_to_save_point().await?;
-						}
-						Err(e)
+					// We roll back any change following the save point
+					if is_save_point {
+						ctx.tx().lock().await.rollback_to_save_point().await?;
 					}
+					Err(e)
 				}
 				// Otherwise the record creation succeeded
 				Ok(v) => {

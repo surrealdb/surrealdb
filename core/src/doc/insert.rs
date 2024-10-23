@@ -62,9 +62,12 @@ impl Document {
 					// There is an ON DUPLICATE KEY UPDATE clause
 					true => Err(Error::RetryWithId(thing)),
 					// There is no ON DUPLICATE KEY UPDATE clause
-					false => Err(Error::RecordExists {
-						thing,
-					}),
+					false => match stm.is_ignore() {
+						false => Err(Error::RecordExists {
+							thing,
+						}),
+						true => Err(Error::Ignore),
+					},
 				},
 				// If any other error was received, then let's
 				// pass that error through and return an error
