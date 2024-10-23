@@ -232,6 +232,8 @@ async fn export_import_versioned_records() {
     let db_name = Ulid::new().to_string();
     db.use_ns(NS).use_db(&db_name).await.unwrap();
 
+    let num_versions = (*EXPORT_BATCH_SIZE * 2) as usize;
+
     // Insert a user
     let _ = db
         .query(
@@ -246,7 +248,7 @@ async fn export_import_versioned_records() {
         .unwrap();
 
     // Update the user multiple times to create versions
-    for i in 1..=5 {
+    for i in 1..=num_versions {
         let _ = db
             .query(format!(
                 "
@@ -275,7 +277,7 @@ async fn export_import_versioned_records() {
     let Some(name): Option<String> = response.take("name").unwrap() else {
         panic!("query returned no record");
     };
-    assert_eq!(name, "Updated User 5");
+    assert_eq!(name, format!("Updated User {}", num_versions));
 
     // Clean up: remove the export file
     remove_file(export_file).await.unwrap();
