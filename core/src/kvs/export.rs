@@ -328,11 +328,16 @@ impl Transaction {
 		// Initialize a vector to hold graph edge records.
 		let mut records_relate = Vec::with_capacity(*EXPORT_BATCH_SIZE as usize);
 
-		// Begin a new transaction.
-		chn.send(bytes!("BEGIN;")).await?;
+		// Initialize a counter for the number of processed records.
+		let mut counter = 0;
 
 		// Process each versioned value.
 		for (k, v, version, is_tombstone) in versioned_values {
+			// Begin a new transaction at the beginning of each batch.
+			if counter % *EXPORT_BATCH_SIZE == 0 {
+				chn.send(bytes!("BEGIN;")).await?;
+			}
+
 			let k: thing::Thing = (&k).into();
 			let v: Value = if v.is_empty() {
 				Value::None
@@ -352,10 +357,20 @@ impl Transaction {
 			if !sql.is_empty() {
 				chn.send(bytes!(sql)).await?;
 			}
+
+			// Increment the counter.
+			counter += 1;
+
+			// Commit the transaction at the end of each batch.
+			if counter % *EXPORT_BATCH_SIZE == 0 {
+				chn.send(bytes!("COMMIT;")).await?;
+			}
 		}
 
-		// Commit the transaction.
-		chn.send(bytes!("COMMIT;")).await?;
+		// Commit any remaining records if the last batch was not full.
+		if counter % *EXPORT_BATCH_SIZE != 0 {
+			chn.send(bytes!("COMMIT;")).await?;
+		}
 
 		// If there are no graph edge records, return early.
 		if records_relate.is_empty() {
