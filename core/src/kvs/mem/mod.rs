@@ -63,9 +63,9 @@ impl Datastore {
 	pub(crate) async fn new() -> Result<Datastore, Error> {
 		// Create new configuration options
 		let mut opts = Options::new();
-		// Ensure versions are enabled
+		// Ensure versions are disabled
 		opts.enable_versions = false;
-		// Ensure persistence is enabled
+		// Ensure persistence is disabled
 		opts.disk_persistence = false;
 		// Create a new datastore
 		match Store::new(opts) {
