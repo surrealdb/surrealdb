@@ -52,7 +52,7 @@ impl Document {
 			// to store the record value, we must ensure that the
 			// key does not exist.  If the record value exists then we
 			// retry and attempt to update the record which exists.
-			Statement::Upsert(_) if self.is_new() => {
+			Statement::Upsert(_) if self.is_iteration_initial() => {
 				match ctx.tx().put(key, self, opt.version).await {
 					// The key already exists, so return an error
 					Err(Error::TxKeyAlreadyExists) => Err(Error::RecordExists {

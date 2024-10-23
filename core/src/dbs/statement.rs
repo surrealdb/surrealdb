@@ -165,7 +165,26 @@ impl<'a> Statement<'a> {
 	/// UPSERT { id: some:thing } WHERE test = true;
 	pub(crate) fn is_deferable(&self) -> bool {
 		match self {
-			Statement::Upsert(v) if v.cond.is_none() => true,
+			Statement::Upsert(v) if v.cond.is_none() => match v.data {
+				// We are setting the entire record content
+				// so there is no need to fetch the value
+				// from the storage engine, if it exists.
+				Some(Data::ContentExpression(_)) => true,
+				// We are setting the entire record content
+				// so there is no need to fetch the value
+				// from the storage engine, if it exists.
+				Some(Data::ReplaceExpression(_)) => true,
+				// We have no data clause, so we don't need
+				// to check if the record exists initially.
+				None => true,
+				// We likely have a MERGE or SET clause on
+				// this UPSERT statement, and so we might
+				// potentially need to access fields from
+				// the initial value already existing in
+				// the database. Therefore we need to fetch
+				// the initial value from storage.
+				_ => false,
+			},
 			Statement::Create(_) => true,
 			_ => false,
 		}
