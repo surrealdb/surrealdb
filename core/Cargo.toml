@@ -68,7 +68,7 @@ blake3 = "1.5.3"
 bytes = "1.5.0"
 castaway = "0.2.3"
 cedar-policy = "2.4.2"
-channel = { version = "1.9.0", package = "async-channel" }
+channel = { version = "2.3.1", package = "async-channel" }
 chrono = { version = "0.4.38", features = ["serde"] }
 ciborium = "0.2.1"
 dashmap = "5.5.3"
@@ -115,6 +115,7 @@ pin-project-lite = "0.2.13"
 quick_cache = "0.5.1"
 radix_trie = { version = "0.2.1", features = ["serde"] }
 rand = "0.8.5"
+rayon = "1.10.0"
 reblessive = { version = "0.4.1", features = ["tree"] }
 regex = "1.10.6"
 regex-syntax = { version = "0.8.4", optional = true, features = ["arbitrary"] }

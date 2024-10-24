@@ -69,7 +69,7 @@ targets = []
 [dependencies]
 arrayvec = "=0.7.4"
 bincode = "1.3.3"
-channel = { version = "1.9.0", package = "async-channel" }
+channel = { version = "2.3.1", package = "async-channel" }
 chrono = { version = "0.4.38", features = ["serde"] }
 dmp = "0.2.0"
 futures = "0.3.30"
@@ -208,4 +208,8 @@ harness = false
 
 [[bench]]
 name = "with_or_without_index"
+harness = false
+
+[[bench]]
+name = "sort"
 harness = false

@@ -1170,8 +1170,11 @@ pub enum Error {
 	#[error("Failed to compute: \"{0}\", as the operation results in an overflow.")]
 	ArithmeticOverflow(String),
 
-	#[error("Recieved error while streaming query: {0}.")]
+	#[error("Received error while streaming query: {0}.")]
 	QueryStream(String),
+
+	#[error("Error while ordering a result: {0}.")]
+	OrderingError(String),
 }
 
 impl From<Error> for String {
