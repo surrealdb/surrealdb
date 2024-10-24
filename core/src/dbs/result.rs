@@ -60,9 +60,21 @@ impl Results {
 		Ok(())
 	}
 
+	#[cfg(not(target_arch = "wasm32"))]
+	pub(super) async fn async_sort(&mut self, orders: &Ordering) -> Result<(), Error> {
+		match self {
+			Self::Memory(m) => m.sort(orders).await?,
+			#[cfg(storage)]
+			Self::File(f) => f.sort(orders),
+			_ => {}
+		}
+		Ok(())
+	}
+
+	#[cfg(target_arch = "wasm32")]
 	pub(super) fn sort(&mut self, orders: &Ordering) {
 		match self {
-			Self::Memory(m) => m.sort(orders),
+			Self::Memory(m) => m.small_sort(orders),
 			#[cfg(storage)]
 			Self::File(f) => f.sort(orders),
 			_ => {}

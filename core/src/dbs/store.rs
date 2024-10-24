@@ -1,8 +1,10 @@
 use rand::seq::SliceRandom;
 
 use crate::dbs::plan::Explanation;
+use crate::err::Error;
 use crate::sql::order::Ordering;
 use crate::sql::value::Value;
+use rayon::slice::ParallelSliceMut;
 use std::mem;
 
 #[derive(Default)]
@@ -13,11 +15,61 @@ impl MemoryCollector {
 		self.0.push(val);
 	}
 
-	pub(super) fn sort(&mut self, ordering: &Ordering) {
+	/// This function determines the sorting strategy based on the size of the collection.
+	/// If the collection contains fewer than 1000 elements, it uses `small_sort`.
+	/// Otherwise, it uses `large_sort`, which employs `rayon::spawn`.
+	/// We don't want to use `rayon::spawn` when sorting is very fast.
+	/// For tasks that complete very quickly (e.g., on the order of microseconds or a few milliseconds),
+	/// the overhead of `rayon::spawn` might be noticeable, as the cost of task handoff and scheduling
+	/// could be greater than the sorting execution time.
+	///
+	#[cfg(not(target_arch = "wasm32"))]
+	pub(super) async fn sort(&mut self, ordering: &Ordering) -> Result<(), Error> {
+		if self.0.len() < 1000 {
+			self.small_sort(ordering);
+			Ok(())
+		} else {
+			self.large_sort(ordering).await
+		}
+	}
+
+	#[cfg(not(target_arch = "wasm32"))]
+	/// Asynchronously sorts a large vector based on the given ordering.
+	///
+	/// The function performs the sorting operation in a blocking
+	/// manner to prevent occupying the async runtime,
+	/// and then awaits the completion of the sorting.
+	///
+	/// - For vectors with a length of 10,000 or more, the sorting is performed using `par_sort_unstable_by`
+	///   from the Rayon library for better performance through parallelism.
+	/// - For smaller vectors, the standard `sort_unstable_by` is used.
+	///
+	async fn large_sort(&mut self, ordering: &Ordering) -> Result<(), Error> {
+		let (send, recv) = tokio::sync::oneshot::channel();
+		let mut vec = mem::take(&mut self.0);
+		let ordering = ordering.clone();
+		rayon::spawn(move || {
+			match ordering {
+				Ordering::Random => vec.shuffle(&mut rand::thread_rng()),
+				Ordering::Order(orders) => {
+					if vec.len() >= 10000 {
+						vec.par_sort_unstable_by(|a, b| orders.compare(a, b));
+					} else {
+						vec.sort_unstable_by(|a, b| orders.compare(a, b));
+					}
+				}
+			};
+			let _ = send.send(vec);
+		});
+		self.0 = recv.await.map_err(|e| Error::OrderingError(format!("{e}")))?;
+		Ok(())
+	}
+
+	pub(super) fn small_sort(&mut self, ordering: &Ordering) {
 		match ordering {
 			Ordering::Random => self.0.shuffle(&mut rand::thread_rng()),
 			Ordering::Order(orders) => {
-				self.0.sort_by(|a, b| orders.compare(a, b));
+				self.0.sort_unstable_by(|a, b| orders.compare(a, b));
 			}
 		}
 	}

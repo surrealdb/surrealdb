@@ -209,3 +209,7 @@ harness = false
 [[bench]]
 name = "with_or_without_index"
 harness = false
+
+[[bench]]
+name = "sort"
+harness = false
