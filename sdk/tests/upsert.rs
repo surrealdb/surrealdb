@@ -504,7 +504,7 @@ async fn upsert_new_and_update_records_with_content_and_merge_with_readonly_fiel
 	let sql = "
 		-- Setup the schemaful table
 		DEFINE TABLE person SCHEMALESS;
-		DEFINE FIELD created ON tester TYPE datetime READONLY DEFAULT d'2024-01-01';
+		DEFINE FIELD created ON person TYPE datetime READONLY DEFAULT d'2024-01-01';
 		DEFINE FIELD age ON person TYPE number;
 		DEFINE FIELD data ON person FLEXIBLE TYPE object;
 		-- This record will be created successfully
