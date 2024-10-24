@@ -282,7 +282,7 @@ async fn upsert_with_return_clause() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn upsert_new_record_wwith_table() -> Result<(), Error> {
+async fn upsert_new_record_with_table() -> Result<(), Error> {
 	let sql = "
 		-- This will return the created record
 		UPSERT person SET one = 'one', two = 'two', three = 'three';
@@ -424,6 +424,72 @@ async fn upsert_new_records_with_table_and_unique_index() -> Result<(), Error> {
 		"[
 			{
 				count: 1,
+			}
+		]",
+	);
+	assert_eq!(tmp, val);
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn upsert_new_and_update_records_with_content_and_merge() -> Result<(), Error> {
+	let sql = "
+		-- Setup the schemaful table
+		DEFINE TABLE person SCHEMAFULL;
+		DEFINE FIELD age ON person TYPE number;
+		DEFINE FIELD metadata ON person FLEXIBLE TYPE any;
+		-- This record will be created successfully
+		CREATE person:test CONTENT { age: 18 };
+		-- This will succeed, because we are updating an already existing record
+		UPSERT person:test SET metadata = true, something = 'some';
+		-- This will succeed, because we are updating an already existing record
+		UPDATE person:test MERGE { metadata: false, something: 'thing' };
+	";
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 6);
+	//
+	let tmp = res.remove(0).result;
+	assert!(tmp.is_ok());
+	//
+	let tmp = res.remove(0).result;
+	assert!(tmp.is_ok());
+	//
+	let tmp = res.remove(0).result;
+	assert!(tmp.is_ok());
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
+			{
+				age: 18,
+				id: person:test
+			}
+		]",
+	);
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
+			{
+				age: 18,
+				id: person:test,
+				metadata: true
+			}
+		]",
+	);
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
+			{
+				age: 18,
+				id: person:test,
+				metadata: false
 			}
 		]",
 	);
