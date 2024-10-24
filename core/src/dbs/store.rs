@@ -120,7 +120,9 @@ impl From<Vec<Value>> for MemoryCollector {
 pub(super) mod file_store {
 	use crate::cnf::EXTERNAL_SORTING_BUFFER_LIMIT;
 	use crate::dbs::plan::Explanation;
+	use crate::dbs::rayon_spawn;
 	use crate::err::Error;
+	use crate::err::Error::OrderingError;
 	use crate::sql::order::Ordering;
 	use crate::sql::Value;
 	use ext_sort::{ExternalChunk, ExternalSorter, ExternalSorterBuilder, LimitedBufferBuilder};
@@ -192,12 +194,12 @@ pub(super) mod file_store {
 			self.paging.limit = limit;
 		}
 
-		pub(in crate::dbs) fn take_vec(&mut self) -> Result<Vec<Value>, Error> {
+		pub(in crate::dbs) async fn take_vec(&mut self) -> Result<Vec<Value>, Error> {
 			self.check_reader()?;
 			if let Some(mut reader) = self.reader.take() {
 				if let Some((start, num)) = self.paging.get_start_num(reader.len as u32) {
 					if let Some(orders) = self.orders.take() {
-						return self.sort_and_take_vec(reader, orders, start, num);
+						return self.sort_and_take_vec(reader, orders, start, num).await;
 					}
 					return reader.take_vec(start, num);
 				}
@@ -205,7 +207,7 @@ pub(super) mod file_store {
 			Ok(vec![])
 		}
 
-		fn sort_and_take_vec(
+		async fn sort_and_take_vec(
 			&mut self,
 			reader: FileReader,
 			orders: Ordering,
@@ -215,33 +217,48 @@ pub(super) mod file_store {
 			match orders {
 				Ordering::Random => {
 					let mut res: Vec<Value> = Vec::with_capacity(num as usize);
-					for r in reader.into_iter().skip(start as usize).take(num as usize) {
-						res.push(r?);
-					}
-					res.shuffle(&mut rand::thread_rng());
+					let res = rayon_spawn(
+						move || {
+							for r in reader.into_iter().skip(start as usize).take(num as usize) {
+								res.push(r?);
+							}
+							res.shuffle(&mut rand::thread_rng());
+							Ok(res)
+						},
+						|e| OrderingError(format!("{e}")),
+					)
+					.await?;
 					Ok(res)
 				}
 				Ordering::Order(orders) => {
 					let sort_dir = self.dir.path().join(Self::SORT_DIRECTORY_NAME);
-					fs::create_dir(&sort_dir)?;
+					let res = rayon_spawn(
+						move || {
+							fs::create_dir(&sort_dir)?;
 
-					let sorter: ExternalSorter<
-						Value,
-						Error,
-						LimitedBufferBuilder,
-						ValueExternalChunk,
-					> = ExternalSorterBuilder::new()
-						.with_tmp_dir(&sort_dir)
-						.with_buffer(LimitedBufferBuilder::new(
-							*EXTERNAL_SORTING_BUFFER_LIMIT,
-							true,
-						))
-						.build()?;
+							let sorter: ExternalSorter<
+								Value,
+								Error,
+								LimitedBufferBuilder,
+								ValueExternalChunk,
+							> = ExternalSorterBuilder::new()
+								.with_tmp_dir(&sort_dir)
+								.with_buffer(LimitedBufferBuilder::new(
+									*EXTERNAL_SORTING_BUFFER_LIMIT,
+									true,
+								))
+								.build()?;
 
-					let sorted = sorter.sort_by(reader, |a, b| orders.compare(a, b))?;
-					let iter = sorted.map(Result::unwrap);
-					let r: Vec<Value> = iter.skip(start as usize).take(num as usize).collect();
-					Ok(r)
+							let sorted = sorter.sort_by(reader, |a, b| orders.compare(a, b))?;
+							let iter = sorted.map(Result::unwrap);
+							let r: Vec<Value> =
+								iter.skip(start as usize).take(num as usize).collect();
+							Ok(r)
+						},
+						|e| OrderingError(format!("{e}")),
+					)
+					.await?;
+					Ok(res)
 				}
 			}
 		}

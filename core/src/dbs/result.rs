@@ -101,11 +101,11 @@ impl Results {
 		}
 	}
 
-	pub(super) fn take(&mut self) -> Result<Vec<Value>, Error> {
+	pub(super) async fn take(&mut self) -> Result<Vec<Value>, Error> {
 		Ok(match self {
 			Self::Memory(m) => m.take_vec(),
 			#[cfg(storage)]
-			Self::File(f) => f.take_vec()?,
+			Self::File(f) => f.take_vec().await?,
 			_ => vec![],
 		})
 	}
