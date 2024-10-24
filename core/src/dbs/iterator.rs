@@ -346,7 +346,7 @@ impl Iterator {
 			}
 
 			// Process any START & LIMIT clause
-			self.results.start_limit(self.start, self.limit);
+			self.results.start_limit(self.start, self.limit).await?;
 
 			if let Some(e) = &mut plan.explanation {
 				e.add_fetch(self.results.len());
@@ -357,7 +357,7 @@ impl Iterator {
 		}
 
 		// Extract the output from the result
-		let mut results = self.results.take()?;
+		let mut results = self.results.take().await?;
 
 		// Output the explanation if any
 		if let Some(e) = plan.explanation {
@@ -453,7 +453,7 @@ impl Iterator {
 			// Loop over each split clause
 			for split in splits.iter() {
 				// Get the query result
-				let res = self.results.take()?;
+				let res = self.results.take().await?;
 				// Loop over each value
 				for obj in &res {
 					// Get the value at the path
@@ -499,7 +499,7 @@ impl Iterator {
 				fetch.compute(stk, ctx, opt, &mut idioms).await?;
 			}
 			for i in &idioms {
-				let mut values = self.results.take()?;
+				let mut values = self.results.take().await?;
 				// Loop over each result value
 				for obj in &mut values {
 					// Fetch the value at the path

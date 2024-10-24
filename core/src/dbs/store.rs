@@ -1,6 +1,7 @@
 use rand::seq::SliceRandom;
 
 use crate::dbs::plan::Explanation;
+use crate::dbs::rayon_spawn;
 #[cfg(not(target_arch = "wasm32"))]
 use crate::err::Error;
 use crate::sql::order::Ordering;
@@ -8,6 +9,11 @@ use crate::sql::value::Value;
 #[cfg(not(target_arch = "wasm32"))]
 use rayon::slice::ParallelSliceMut;
 use std::mem;
+use std::sync::atomic::AtomicUsize;
+use std::sync::{atomic, Arc};
+use tokio::sync::mpsc;
+use tokio::sync::mpsc::Sender;
+use tokio::task::JoinHandle;
 
 #[derive(Default)]
 pub(super) struct MemoryCollector(Vec<Value>);
@@ -47,23 +53,26 @@ impl MemoryCollector {
 	/// - For smaller vectors, the standard `sort_unstable_by` is used.
 	///
 	async fn large_sort(&mut self, ordering: &Ordering) -> Result<(), Error> {
-		let (send, recv) = tokio::sync::oneshot::channel();
 		let mut vec = mem::take(&mut self.0);
 		let ordering = ordering.clone();
-		rayon::spawn(move || {
-			match ordering {
-				Ordering::Random => vec.shuffle(&mut rand::thread_rng()),
-				Ordering::Order(orders) => {
-					if vec.len() >= 10000 {
-						vec.par_sort_unstable_by(|a, b| orders.compare(a, b));
-					} else {
-						vec.sort_unstable_by(|a, b| orders.compare(a, b));
+		let vec = rayon_spawn(
+			move || {
+				match ordering {
+					Ordering::Random => vec.shuffle(&mut rand::thread_rng()),
+					Ordering::Order(orders) => {
+						if vec.len() >= 10000 {
+							vec.par_sort_unstable_by(|a, b| orders.compare(a, b));
+						} else {
+							vec.sort_unstable_by(|a, b| orders.compare(a, b));
+						}
 					}
-				}
-			};
-			let _ = send.send(vec);
-		});
-		self.0 = recv.await.map_err(|e| Error::OrderingError(format!("{e}")))?;
+				};
+				Ok(vec)
+			},
+			|e| Error::OrderingError(format!("{e}")),
+		)
+		.await?;
+		self.0 = vec;
 		Ok(())
 	}
 
@@ -80,23 +89,20 @@ impl MemoryCollector {
 		self.0.len()
 	}
 
-	pub(super) fn start_limit(&mut self, start: Option<u32>, limit: Option<u32>) {
+	fn vec_start_limit(start: Option<u32>, limit: Option<u32>, vec: &mut Vec<Value>) {
 		match (start, limit) {
 			(Some(start), Some(limit)) => {
-				self.0 = mem::take(&mut self.0)
-					.into_iter()
-					.skip(start as usize)
-					.take(limit as usize)
-					.collect()
+				*vec =
+					mem::take(vec).into_iter().skip(start as usize).take(limit as usize).collect()
 			}
-			(Some(start), None) => {
-				self.0 = mem::take(&mut self.0).into_iter().skip(start as usize).collect()
-			}
-			(None, Some(limit)) => {
-				self.0 = mem::take(&mut self.0).into_iter().take(limit as usize).collect()
-			}
+			(Some(start), None) => *vec = mem::take(vec).into_iter().skip(start as usize).collect(),
+			(None, Some(limit)) => *vec = mem::take(vec).into_iter().take(limit as usize).collect(),
 			(None, None) => {}
 		}
+	}
+
+	pub(super) fn start_limit(&mut self, start: Option<u32>, limit: Option<u32>) {
+		Self::vec_start_limit(start, limit, &mut self.0);
 	}
 
 	pub(super) fn take_vec(&mut self) -> Vec<Value> {
@@ -118,7 +124,9 @@ impl From<Vec<Value>> for MemoryCollector {
 pub(super) mod file_store {
 	use crate::cnf::EXTERNAL_SORTING_BUFFER_LIMIT;
 	use crate::dbs::plan::Explanation;
+	use crate::dbs::rayon_spawn;
 	use crate::err::Error;
+	use crate::err::Error::OrderingError;
 	use crate::sql::order::Ordering;
 	use crate::sql::Value;
 	use ext_sort::{ExternalChunk, ExternalSorter, ExternalSorterBuilder, LimitedBufferBuilder};
@@ -158,10 +166,18 @@ pub(super) mod file_store {
 				dir,
 			})
 		}
-		pub(in crate::dbs) fn push(&mut self, value: Value) -> Result<(), Error> {
-			if let Some(writer) = &mut self.writer {
-				writer.push(value)?;
+		pub(in crate::dbs) async fn push(&mut self, value: Value) -> Result<(), Error> {
+			if let Some(mut writer) = self.writer.take() {
+				let writer = rayon_spawn(
+					move || {
+						writer.push(value)?;
+						Ok(writer)
+					},
+					|e| Error::Internal(format!("{e}")),
+				)
+				.await?;
 				self.len += 1;
+				self.writer = Some(writer);
 				Ok(())
 			} else {
 				Err(Error::Internal("No FileWriter available.".to_string()))
@@ -190,12 +206,12 @@ pub(super) mod file_store {
 			self.paging.limit = limit;
 		}
 
-		pub(in crate::dbs) fn take_vec(&mut self) -> Result<Vec<Value>, Error> {
+		pub(in crate::dbs) async fn take_vec(&mut self) -> Result<Vec<Value>, Error> {
 			self.check_reader()?;
 			if let Some(mut reader) = self.reader.take() {
 				if let Some((start, num)) = self.paging.get_start_num(reader.len as u32) {
 					if let Some(orders) = self.orders.take() {
-						return self.sort_and_take_vec(reader, orders, start, num);
+						return self.sort_and_take_vec(reader, orders, start, num).await;
 					}
 					return reader.take_vec(start, num);
 				}
@@ -203,7 +219,7 @@ pub(super) mod file_store {
 			Ok(vec![])
 		}
 
-		fn sort_and_take_vec(
+		async fn sort_and_take_vec(
 			&mut self,
 			reader: FileReader,
 			orders: Ordering,
@@ -213,33 +229,48 @@ pub(super) mod file_store {
 			match orders {
 				Ordering::Random => {
 					let mut res: Vec<Value> = Vec::with_capacity(num as usize);
-					for r in reader.into_iter().skip(start as usize).take(num as usize) {
-						res.push(r?);
-					}
-					res.shuffle(&mut rand::thread_rng());
+					let res = rayon_spawn(
+						move || {
+							for r in reader.into_iter().skip(start as usize).take(num as usize) {
+								res.push(r?);
+							}
+							res.shuffle(&mut rand::thread_rng());
+							Ok(res)
+						},
+						|e| OrderingError(format!("{e}")),
+					)
+					.await?;
 					Ok(res)
 				}
 				Ordering::Order(orders) => {
 					let sort_dir = self.dir.path().join(Self::SORT_DIRECTORY_NAME);
-					fs::create_dir(&sort_dir)?;
+					let res = rayon_spawn(
+						move || {
+							fs::create_dir(&sort_dir)?;
 
-					let sorter: ExternalSorter<
-						Value,
-						Error,
-						LimitedBufferBuilder,
-						ValueExternalChunk,
-					> = ExternalSorterBuilder::new()
-						.with_tmp_dir(&sort_dir)
-						.with_buffer(LimitedBufferBuilder::new(
-							*EXTERNAL_SORTING_BUFFER_LIMIT,
-							true,
-						))
-						.build()?;
+							let sorter: ExternalSorter<
+								Value,
+								Error,
+								LimitedBufferBuilder,
+								ValueExternalChunk,
+							> = ExternalSorterBuilder::new()
+								.with_tmp_dir(&sort_dir)
+								.with_buffer(LimitedBufferBuilder::new(
+									*EXTERNAL_SORTING_BUFFER_LIMIT,
+									true,
+								))
+								.build()?;
 
-					let sorted = sorter.sort_by(reader, |a, b| orders.compare(a, b))?;
-					let iter = sorted.map(Result::unwrap);
-					let r: Vec<Value> = iter.skip(start as usize).take(num as usize).collect();
-					Ok(r)
+							let sorted = sorter.sort_by(reader, |a, b| orders.compare(a, b))?;
+							let iter = sorted.map(Result::unwrap);
+							let r: Vec<Value> =
+								iter.skip(start as usize).take(num as usize).collect();
+							Ok(r)
+						},
+						|e| OrderingError(format!("{e}")),
+					)
+					.await?;
+					Ok(res)
 				}
 			}
 		}
@@ -498,5 +529,104 @@ pub(super) mod file_store {
 				}
 			}
 		}
+	}
+}
+
+pub(super) struct OrderedParallelCollector {
+	tx: Option<Sender<Vec<Value>>>,
+	rx: Option<JoinHandle<Vec<Value>>>,
+	buffer: Vec<Value>,
+	len: Arc<AtomicUsize>,
+	merged: Vec<Value>,
+}
+
+impl OrderedParallelCollector {
+	const BUFFER_SIZE: usize = 100;
+	pub(super) fn new(ordering: &Ordering) -> Self {
+		let (tx, mut rx) = mpsc::channel(100);
+		let len = Arc::new(AtomicUsize::new(0));
+		let l = len.clone();
+		let ordering = ordering.clone();
+		let rx = tokio::spawn(async move {
+			let mut merged = Vec::new();
+			while let Some(buf) = rx.recv().await {
+				Self::merge_and_sort(&ordering, &mut merged, buf);
+				l.store(merged.len(), atomic::Ordering::Relaxed);
+			}
+			merged
+		});
+		Self {
+			tx: Some(tx),
+			rx: Some(rx),
+			buffer: Vec::with_capacity(Self::BUFFER_SIZE),
+			len,
+			merged: vec![],
+		}
+	}
+
+	pub fn merge_and_sort(ordering: &Ordering, merged: &mut Vec<Value>, buffer: Vec<Value>) {
+		// TODO better algo, we don't want to sort again the whole collection
+		merged.extend(buffer);
+		if let Ordering::Order(orders) = ordering {
+			merged.sort_unstable_by(|a, b| orders.compare(a, b));
+		};
+	}
+
+	pub(super) async fn push(&mut self, val: Value) -> Result<(), Error> {
+		self.buffer.push(val);
+		if self.buffer.len() >= Self::BUFFER_SIZE {
+			self.send_buffer().await?;
+		}
+		Ok(())
+	}
+
+	fn tx(&self) -> Result<&Sender<Vec<Value>>, Error> {
+		if let Some(tx) = &self.tx {
+			Ok(tx)
+		} else {
+			Err(Error::Internal("No channel".to_string()))
+		}
+	}
+
+	async fn send_buffer(&mut self) -> Result<(), Error> {
+		let buf = mem::replace(&mut self.buffer, Vec::with_capacity(Self::BUFFER_SIZE));
+		self.tx()?.send(buf).await.map_err(|e| Error::Internal(format!("{e}")))?;
+		Ok(())
+	}
+
+	pub(super) fn len(&self) -> usize {
+		self.len.load(atomic::Ordering::Relaxed)
+	}
+
+	async fn finalize(&mut self) -> Result<(), Error> {
+		if !self.buffer.is_empty() {
+			self.send_buffer().await?;
+		}
+		if let Some(tx) = self.tx.take() {
+			drop(tx);
+		}
+		if let Some(rx) = self.rx.take() {
+			self.merged = rx.await.map_err(|e| Error::Internal(format!("{e}")))?;
+		}
+		Ok(())
+	}
+
+	pub(super) async fn start_limit(
+		&mut self,
+		start: Option<u32>,
+		limit: Option<u32>,
+	) -> Result<(), Error> {
+		self.finalize().await?;
+		MemoryCollector::vec_start_limit(start, limit, &mut self.merged);
+		Ok(())
+	}
+
+	pub(super) async fn take_vec(&mut self) -> Result<Vec<Value>, Error> {
+		self.finalize().await?;
+		Ok(mem::take(&mut self.merged))
+	}
+
+	pub(super) fn explain(&self, exp: &mut Explanation) {
+		exp.add_collector("OrderedParallelCollector", vec![]);
 	}
 }

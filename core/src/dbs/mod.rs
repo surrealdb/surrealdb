@@ -21,17 +21,32 @@ pub mod capabilities;
 pub mod node;
 
 pub use self::capabilities::Capabilities;
+pub(crate) use self::executor::*;
+pub(crate) use self::iterator::*;
 pub use self::notification::*;
 pub use self::options::*;
 pub use self::response::*;
 pub use self::session::*;
-
-pub(crate) use self::executor::*;
-pub(crate) use self::iterator::*;
 pub(crate) use self::statement::*;
 pub(crate) use self::variables::*;
+use crate::err::Error;
+use tokio::sync::oneshot::error::RecvError;
 
 #[doc(hidden)]
 pub mod fuzzy_eq;
 #[cfg(test)]
 pub(crate) mod test;
+
+pub(super) async fn rayon_spawn<T, F, E>(f: F, e: E) -> Result<T, Error>
+where
+	F: FnOnce() -> Result<T, Error> + Send + 'static,
+	E: FnOnce(RecvError) -> Error,
+	T: Send + 'static,
+{
+	let (send, recv) = tokio::sync::oneshot::channel();
+	rayon::spawn(move || {
+		let res = f();
+		let _ = send.send(res);
+	});
+	recv.await.map_err(e)?
+}
