@@ -162,10 +162,18 @@ pub(super) mod file_store {
 				dir,
 			})
 		}
-		pub(in crate::dbs) fn push(&mut self, value: Value) -> Result<(), Error> {
-			if let Some(writer) = &mut self.writer {
-				writer.push(value)?;
+		pub(in crate::dbs) async fn push(&mut self, value: Value) -> Result<(), Error> {
+			if let Some(mut writer) = self.writer.take() {
+				let writer = rayon_spawn(
+					move || {
+						writer.push(value)?;
+						Ok(writer)
+					},
+					|e| Error::Internal(format!("{e}")),
+				)
+				.await?;
 				self.len += 1;
+				self.writer = Some(writer);
 				Ok(())
 			} else {
 				Err(Error::Internal("No FileWriter available.".to_string()))
@@ -517,5 +525,32 @@ pub(super) mod file_store {
 				}
 			}
 		}
+	}
+}
+
+#[derive(Default)]
+pub(super) struct OrderedParallelCollector {}
+
+impl OrderedParallelCollector {
+	pub(super) fn new(_ordering: &Ordering) -> Self {
+		Self {}
+	}
+	pub(super) async fn push(&mut self, _val: Value) -> Result<(), Error> {
+		todo!()
+	}
+	pub(super) fn len(&self) -> usize {
+		todo!()
+	}
+
+	pub(super) fn start_limit(&mut self, _start: Option<u32>, _limit: Option<u32>) {
+		todo!()
+	}
+
+	pub(super) fn take_vec(&mut self) -> Vec<Value> {
+		todo!()
+	}
+
+	pub(super) fn explain(&self, exp: &mut Explanation) {
+		exp.add_collector("OrderedParallelCollector", vec![]);
 	}
 }

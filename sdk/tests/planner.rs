@@ -3095,3 +3095,22 @@ async fn select_where_index_boolean_behaviour() -> Result<(), Error> {
 	}
 	Ok(())
 }
+
+#[tokio::test]
+async fn select_parallel_ordered_collector() -> Result<(), Error> {
+	let sql = r"
+		CREATE |i:100| SET v = rand::guid() RETURN NONE;
+		SELECT * FROM i ORDER BY v PARALLEL EXPLAIN;
+		SELECT * FROM i ORDER BY v PARALLEL;";
+	let mut t = Test::new(sql).await?;
+	t.expect_size(3)?;
+	t.skip_ok(1)?;
+	t.expect_val("{}")?;
+	let v = t.next_value()?;
+	if let Value::Array(a) = &v {
+		assert_eq!(a.len(), 100);
+	} else {
+		panic!("Expected a Value::Array but get: {v}");
+	}
+	Ok(())
+}

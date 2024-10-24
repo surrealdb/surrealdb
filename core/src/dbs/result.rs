@@ -3,7 +3,7 @@ use crate::dbs::group::GroupsCollector;
 use crate::dbs::plan::Explanation;
 #[cfg(storage)]
 use crate::dbs::store::file_store::FileCollector;
-use crate::dbs::store::MemoryCollector;
+use crate::dbs::store::{MemoryCollector, OrderedParallelCollector};
 use crate::dbs::{Options, Statement};
 use crate::err::Error;
 use crate::sql::order::Ordering;
@@ -13,6 +13,7 @@ use reblessive::tree::Stk;
 pub(super) enum Results {
 	None,
 	Memory(MemoryCollector),
+	OrderedParallel(OrderedParallelCollector),
 	#[cfg(storage)]
 	File(Box<FileCollector>),
 	Groups(GroupsCollector),
@@ -33,6 +34,11 @@ impl Results {
 				return Ok(Self::File(Box::new(FileCollector::new(temp_dir)?)));
 			}
 		}
+		if stm.parallel() {
+			if let Some(order) = stm.order() {
+				return Ok(Self::OrderedParallel(OrderedParallelCollector::new(order)));
+			}
+		}
 		Ok(Self::Memory(Default::default()))
 	}
 
@@ -49,9 +55,12 @@ impl Results {
 			Self::Memory(s) => {
 				s.push(val);
 			}
+			Self::OrderedParallel(c) => {
+				c.push(val).await?;
+			}
 			#[cfg(storage)]
 			Self::File(e) => {
-				e.push(val)?;
+				e.push(val).await?;
 			}
 			Self::Groups(g) => {
 				g.push(stk, ctx, opt, stm, val).await?;
@@ -85,6 +94,7 @@ impl Results {
 		match self {
 			Self::None => {}
 			Self::Memory(m) => m.start_limit(start, limit),
+			Self::OrderedParallel(c) => c.start_limit(start, limit),
 			#[cfg(storage)]
 			Self::File(f) => f.start_limit(start, limit),
 			Self::Groups(_) => {}
@@ -95,6 +105,7 @@ impl Results {
 		match self {
 			Self::None => 0,
 			Self::Memory(s) => s.len(),
+			Self::OrderedParallel(s) => s.len(),
 			#[cfg(storage)]
 			Self::File(e) => e.len(),
 			Self::Groups(g) => g.len(),
@@ -104,6 +115,7 @@ impl Results {
 	pub(super) async fn take(&mut self) -> Result<Vec<Value>, Error> {
 		Ok(match self {
 			Self::Memory(m) => m.take_vec(),
+			Self::OrderedParallel(c) => c.take_vec(),
 			#[cfg(storage)]
 			Self::File(f) => f.take_vec().await?,
 			_ => vec![],
@@ -116,6 +128,7 @@ impl Results {
 			Self::Memory(s) => {
 				s.explain(exp);
 			}
+			Self::OrderedParallel(c) => c.explain(exp),
 			#[cfg(storage)]
 			Self::File(e) => {
 				e.explain(exp);
