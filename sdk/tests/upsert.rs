@@ -498,6 +498,105 @@ async fn upsert_new_and_update_records_with_content_and_merge() -> Result<(), Er
 	Ok(())
 }
 
+#[tokio::test]
+async fn upsert_new_and_update_records_with_content_and_merge_with_readonly_fields(
+) -> Result<(), Error> {
+	let sql = "
+		-- Setup the schemaful table
+		DEFINE TABLE person SCHEMALESS;
+		DEFINE FIELD created ON tester TYPE datetime READONLY DEFAULT d'2024-01-01';
+		DEFINE FIELD age ON person TYPE number;
+		DEFINE FIELD data ON person FLEXIBLE TYPE object;
+		-- This record will be created successfully
+		UPSERT tester:something CONTENT { age: 1, data: { some: true, other: false } };
+		-- This record will be updated successfully, with the readonly field untouched
+		UPSERT tester:something CONTENT { age: 2, data: { nothing: true } };
+		-- This record will be updated successfully, with the readonly and flexible fields untouched
+		UPSERT tester:something MERGE { age: 3 };
+		-- This record will be updated successfully, with the readonly and flexible fields untouched
+		UPSERT tester:something SET age = 4, data.nothing = false;
+	";
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 8);
+	//
+	let tmp = res.remove(0).result;
+	assert!(tmp.is_ok());
+	//
+	let tmp = res.remove(0).result;
+	assert!(tmp.is_ok());
+	//
+	let tmp = res.remove(0).result;
+	assert!(tmp.is_ok());
+	//
+	let tmp = res.remove(0).result;
+	assert!(tmp.is_ok());
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
+			{
+				age: 1,
+				created: d'2024-01-01T00:00:00Z',
+				data: {
+					other: false,
+					some: true
+				},
+				id: tester:something
+			}
+		]",
+	);
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
+			{
+				age: 2,
+				created: d'2024-01-01T00:00:00Z',
+				data: {
+					nothing: true
+				},
+				id: tester:something
+			}
+		]",
+	);
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
+			{
+				age: 3,
+				created: d'2024-01-01T00:00:00Z',
+				data: {
+					nothing: true
+				},
+				id: tester:something
+			}
+		]",
+	);
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
+			{
+				age: 4,
+				created: d'2024-01-01T00:00:00Z',
+				data: {
+					nothing: false
+				},
+				id: tester:something
+			}
+		]",
+	);
+	assert_eq!(tmp, val);
+	//
+	Ok(())
+}
+
 //
 // Permissions
 //
