@@ -58,7 +58,7 @@ impl Document {
 				}
 			}
 			Statement::Insert(_) => match self.extras {
-				Workable::Relate(_, _, _, _) => {
+				Workable::Relate(_, _, _) => {
 					if !tb.allows_relation() {
 						return Err(Error::TableCheck {
 							thing: self.id()?.to_string(),
@@ -100,11 +100,15 @@ impl Document {
 		// Carry on
 		Ok(())
 	}
-	/// Checks that a specifically selected record
-	/// actually exists in the underlying datastore.
-	/// If the user specifies a record directly
-	/// using a Record ID, and that record does not
-	/// exist, then this function will exit early.
+	/// Checks that the fields of a document are
+	/// correct. If an `id` field is specified then
+	/// it will check that the `id` field does not
+	/// conflict with the specified `id` field for
+	/// this document process. In addition, it checks
+	/// that the `in` and `out` fields, if specified,
+	/// match the in and out values specified in the
+	/// statement, or present in any record which
+	/// is being updated.
 	pub async fn check_data_fields(
 		&self,
 		stk: &mut Stk,
@@ -114,6 +118,10 @@ impl Document {
 	) -> Result<(), Error> {
 		// Get the record id
 		let rid = self.id()?;
+		// Don't bother checking if we generated the document id
+		if self.gen.is_some() {
+			return Ok(());
+		}
 		// You cannot store a range id as the id field on a document
 		if rid.is_range() {
 			return Err(Error::IdInvalid {
@@ -148,7 +156,7 @@ impl Document {
 			}
 		}
 		// This is a RELATE statement
-		else if let Workable::Relate(l, r, v, _) = &self.extras {
+		else if let Workable::Relate(l, r, v) = &self.extras {
 			// This is a RELATE statement
 			if let Some(data) = stm.data() {
 				// Check that the 'id' field matches

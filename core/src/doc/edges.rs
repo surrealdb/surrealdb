@@ -26,7 +26,7 @@ impl Document {
 			return Ok(());
 		}
 		// Store the record edges
-		if let Workable::Relate(l, r, _, _) = &self.extras {
+		if let Workable::Relate(l, r, _) = &self.extras {
 			// Get the namespace
 			let ns = opt.ns()?;
 			// Get the database

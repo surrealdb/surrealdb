@@ -34,7 +34,7 @@ impl Document {
 			// at this point the current document is not empty so we
 			// set and update the key, without checking if the key
 			// already exists in the storage engine.
-			Statement::Insert(_) if self.extras.is_insert_initial() => {
+			Statement::Insert(_) if self.is_iteration_initial() => {
 				match ctx.tx().put(key, self, opt.version).await {
 					// The key already exists, so return an error
 					Err(Error::TxKeyAlreadyExists) => Err(Error::RecordExists {
@@ -52,7 +52,7 @@ impl Document {
 			// to store the record value, we must ensure that the
 			// key does not exist.  If the record value exists then we
 			// retry and attempt to update the record which exists.
-			Statement::Upsert(_) if self.is_new() => {
+			Statement::Upsert(_) if self.is_iteration_initial() => {
 				match ctx.tx().put(key, self, opt.version).await {
 					// The key already exists, so return an error
 					Err(Error::TxKeyAlreadyExists) => Err(Error::RecordExists {

@@ -1292,6 +1292,18 @@ impl Serialize for Error {
 	}
 }
 impl Error {
+	/// Check if this error is related to schema checks
+	pub fn is_schema_related(&self) -> bool {
+		matches!(
+			self,
+			Error::FieldCheck { .. }
+				| Error::FieldValue { .. }
+				| Error::FieldReadonly { .. }
+				| Error::FieldUndefined { .. }
+		)
+	}
+
+	/// Convert CoerceTo errors in LET statements
 	pub fn set_check_from_coerce(self, name: String) -> Error {
 		match self {
 			Error::CoerceTo {
@@ -1306,6 +1318,7 @@ impl Error {
 		}
 	}
 
+	/// Convert CoerceTo errors in functions and closures
 	pub fn function_check_from_coerce(self, name: impl Into<String>) -> Error {
 		match self {
 			Error::CoerceTo {

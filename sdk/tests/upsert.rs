@@ -281,6 +281,330 @@ async fn upsert_with_return_clause() -> Result<(), Error> {
 	Ok(())
 }
 
+#[tokio::test]
+async fn upsert_new_record_with_table() -> Result<(), Error> {
+	let sql = "
+		-- This will return the created record
+		UPSERT person SET one = 'one', two = 'two', three = 'three';
+		-- Select all created records
+		SELECT count() FROM person GROUP ALL;
+	";
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 2);
+	//
+	let tmp = res.remove(0).result?;
+	assert!(matches!(tmp, Value::Array(v) if v.len() == 1));
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
+			{
+				count: 1,
+			}
+		]",
+	);
+	assert_eq!(tmp, val);
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn upsert_new_records_with_thing_and_where_clause() -> Result<(), Error> {
+	let sql = "
+		-- This will return the created record as no matching records exist
+		UPSERT person:test SET name = 'Jaime' WHERE name = 'Jaime';
+		-- This will return the updated record, because a matching record exists, and the WHERE clause matches
+		UPSERT person:test SET name = 'Tobie' WHERE name = 'Jaime';
+		-- This will return a newly created record, because the WHERE clause does not match
+		UPSERT person:test SET name = 'Tobie' WHERE name = 'Jaime';
+		-- Select all created records
+		SELECT count() FROM person GROUP ALL;
+	";
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 4);
+	//
+	let tmp = res.remove(0).result?;
+	assert!(matches!(tmp, Value::Array(v) if v.len() == 1));
+	//
+	let tmp = res.remove(0).result?;
+	assert!(matches!(tmp, Value::Array(v) if v.len() == 1));
+	//
+	let tmp = res.remove(0).result?;
+	assert!(matches!(tmp, Value::Array(v) if v.len() == 0));
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
+			{
+				count: 1,
+			}
+		]",
+	);
+	assert_eq!(tmp, val);
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn upsert_new_records_with_table_and_where_clause() -> Result<(), Error> {
+	let sql = "
+		-- This will return the created record as no matching records exist
+		UPSERT person SET name = 'Jaime' WHERE name = 'Jaime';
+		-- This will return the updated record, because a matching record exists, and the WHERE clause matches
+		UPSERT person SET name = 'Tobie' WHERE name = 'Jaime';
+		-- This will return a newly created record, because the WHERE clause does not match
+		UPSERT person SET name = 'Tobie' WHERE name = 'Jaime';
+		-- Select all created records
+		SELECT count() FROM person GROUP ALL;
+	";
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 4);
+	//
+	let tmp = res.remove(0).result?;
+	assert!(matches!(tmp, Value::Array(v) if v.len() == 1));
+	//
+	let tmp = res.remove(0).result?;
+	assert!(matches!(tmp, Value::Array(v) if v.len() == 1));
+	//
+	let tmp = res.remove(0).result?;
+	assert!(matches!(tmp, Value::Array(v) if v.len() == 1));
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
+			{
+				count: 2,
+			}
+		]",
+	);
+	assert_eq!(tmp, val);
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn upsert_new_records_with_table_and_unique_index() -> Result<(), Error> {
+	let sql = "
+		-- This will define a unique index on the table
+		DEFINE INDEX OVERWRITE testing ON person FIELDS one, two, three UNIQUE;
+		-- This will create a record, and populate the unique index with this record id
+		UPSERT person SET one = 'something', two = 'something', three = 'something';
+		-- This will update the record, returning the same record id created in the statement above
+		UPSERT person SET one = 'something', two = 'something', three = 'something';
+		-- This will throw an error, because the unique index already has a record with a different record id
+		UPSERT person:test SET one = 'something', two = 'something', three = 'something';
+		-- Select all created records
+		SELECT count() FROM person GROUP ALL;
+	";
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 5);
+	//
+	let tmp = res.remove(0).result;
+	assert!(tmp.is_ok());
+	//
+	let tmp = res.remove(0).result?;
+	assert!(matches!(tmp, Value::Array(v) if v.len() == 1));
+	//
+	let tmp = res.remove(0).result?;
+	assert!(matches!(tmp, Value::Array(v) if v.len() == 1));
+	//
+	let tmp = res.remove(0).result;
+	assert!(tmp.is_err());
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
+			{
+				count: 1,
+			}
+		]",
+	);
+	assert_eq!(tmp, val);
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn upsert_new_and_update_records_with_content_and_merge() -> Result<(), Error> {
+	let sql = "
+		-- Setup the schemaful table
+		DEFINE TABLE person SCHEMAFULL;
+		DEFINE FIELD age ON person TYPE number;
+		DEFINE FIELD metadata ON person FLEXIBLE TYPE any;
+		-- This record will be created successfully
+		CREATE person:test CONTENT { age: 18 };
+		-- This will succeed, because we are updating an already existing record
+		UPSERT person:test SET metadata = true, something = 'some';
+		-- This will succeed, because we are updating an already existing record
+		UPDATE person:test MERGE { metadata: false, something: 'thing' };
+	";
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 6);
+	//
+	let tmp = res.remove(0).result;
+	assert!(tmp.is_ok());
+	//
+	let tmp = res.remove(0).result;
+	assert!(tmp.is_ok());
+	//
+	let tmp = res.remove(0).result;
+	assert!(tmp.is_ok());
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
+			{
+				age: 18,
+				id: person:test
+			}
+		]",
+	);
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
+			{
+				age: 18,
+				id: person:test,
+				metadata: true
+			}
+		]",
+	);
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
+			{
+				age: 18,
+				id: person:test,
+				metadata: false
+			}
+		]",
+	);
+	assert_eq!(tmp, val);
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn upsert_new_and_update_records_with_content_and_merge_with_readonly_fields(
+) -> Result<(), Error> {
+	let sql = "
+		-- Setup the schemaful table
+		DEFINE TABLE person SCHEMALESS;
+		DEFINE FIELD created ON person TYPE datetime READONLY DEFAULT d'2024-01-01';
+		DEFINE FIELD age ON person TYPE number;
+		DEFINE FIELD data ON person FLEXIBLE TYPE object;
+		-- This record will be created successfully
+		UPSERT person:test CONTENT { age: 1, data: { some: true, other: false } };
+		-- This record will be updated successfully, with the readonly field untouched
+		UPSERT person:test CONTENT { age: 2, data: { nothing: true } };
+		-- This record will be updated successfully, with the readonly and flexible fields untouched
+		UPSERT person:test MERGE { age: 3 };
+		-- This record will be updated successfully, with the readonly and flexible fields untouched
+		UPSERT person:test SET age = 4, data.nothing = false;
+		-- This will return an error, as the readonly field is modified
+		UPSERT person:test REPLACE { age: 5, data: { other: true } };
+	";
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 9);
+	//
+	let tmp = res.remove(0).result;
+	assert!(tmp.is_ok());
+	//
+	let tmp = res.remove(0).result;
+	assert!(tmp.is_ok());
+	//
+	let tmp = res.remove(0).result;
+	assert!(tmp.is_ok());
+	//
+	let tmp = res.remove(0).result;
+	assert!(tmp.is_ok());
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
+			{
+				age: 1,
+				created: d'2024-01-01T00:00:00Z',
+				data: {
+					other: false,
+					some: true
+				},
+				id: person:test
+			}
+		]",
+	);
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
+			{
+				age: 2,
+				created: d'2024-01-01T00:00:00Z',
+				data: {
+					nothing: true
+				},
+				id: person:test
+			}
+		]",
+	);
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
+			{
+				age: 3,
+				created: d'2024-01-01T00:00:00Z',
+				data: {
+					nothing: true
+				},
+				id: person:test
+			}
+		]",
+	);
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
+			{
+				age: 4,
+				created: d'2024-01-01T00:00:00Z',
+				data: {
+					nothing: false
+				},
+				id: person:test
+			}
+		]",
+	);
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result;
+	assert!(matches!(
+		tmp.err(),
+		Some(e) if e.to_string() == r#"Found changed value for field `created`, with record `person:test`, but field is readonly"#
+	));
+	//
+	Ok(())
+}
+
 //
 // Permissions
 //

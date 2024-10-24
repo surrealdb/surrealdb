@@ -12,6 +12,7 @@ use crate::sql::statements::define::DefineFieldStatement;
 use crate::sql::statements::define::DefineIndexStatement;
 use crate::sql::statements::define::DefineTableStatement;
 use crate::sql::statements::live::LiveStatement;
+use crate::sql::table::Table;
 use crate::sql::thing::Thing;
 use crate::sql::value::Value;
 use crate::sql::Base;
@@ -22,7 +23,12 @@ use std::ops::Deref;
 use std::sync::Arc;
 
 pub(crate) struct Document {
+	/// The record id of this document
 	pub(super) id: Option<Arc<Thing>>,
+	/// The table that we should generate a record id from
+	pub(super) gen: Option<Table>,
+	/// Whether this is the second iteration of the processing
+	pub(super) retry: bool,
 	pub(super) extras: Workable,
 	pub(super) initial: CursorDoc,
 	pub(super) current: CursorDoc,
@@ -169,11 +175,15 @@ impl Document {
 	pub fn new(
 		id: Option<Arc<Thing>>,
 		ir: Option<Arc<IteratorRecord>>,
+		gen: Option<Table>,
 		val: Arc<Value>,
 		extras: Workable,
+		retry: bool,
 	) -> Self {
 		Document {
 			id: id.clone(),
+			gen,
+			retry,
 			extras,
 			current: CursorDoc::new(id.clone(), ir.clone(), val.clone()),
 			initial: CursorDoc::new(id.clone(), ir.clone(), val.clone()),
@@ -181,6 +191,7 @@ impl Document {
 			initial_reduced: CursorDoc::new(id.clone(), ir.clone(), val.clone()),
 		}
 	}
+
 	/// Check if document has changed
 	pub fn changed(&self) -> bool {
 		self.initial.doc.as_ref() != self.current.doc.as_ref()
@@ -189,6 +200,54 @@ impl Document {
 	/// Check if document is being created
 	pub fn is_new(&self) -> bool {
 		self.initial.doc.as_ref().is_none()
+	}
+
+	/// Check if this is the first iteration. When
+	/// running an UPSERT or INSERT statement we don't
+	/// first fetch the value from the storage engine.
+	/// If there is an error when attempting to set the
+	/// value in the storage engine, then we retry the
+	/// document processing, and this will return false.
+	pub(crate) fn is_iteration_initial(&self) -> bool {
+		!self.retry && self.initial.doc.as_ref().is_none()
+	}
+
+	/// Check if the the record id for this document
+	/// has been specifically set upfront. This is true
+	/// in the following instances:
+	///
+	/// CREATE some:thing;
+	/// CREATE some SET id = some:thing;
+	/// CREATE some CONTENT { id: some:thing };
+	/// UPSERT some:thing;
+	/// UPSERT some SET id = some:thing;
+	/// UPSERT some CONTENT { id: some:thing };
+	/// INSERT some (id) VALUES (some:thing);
+	/// INSERT { id: some:thing };
+	/// INSERT [{ id: some:thing }];
+	/// RELATE from->some:thing->to;
+	/// RELATE from->some->to SET id = some:thing;
+	/// RELATE from->some->to CONTENT { id: some:thing };
+	///
+	/// In addition, when iterating over tables or ranges
+	/// the record id will also be specified before we
+	/// process the document in this module. So therefore
+	/// although this function is not used or checked in
+	/// these scenarios, this function will also be true
+	/// in the following instances:
+	///
+	/// UPDATE some;
+	/// UPDATE some:thing;
+	/// UPDATE some:from..to;
+	/// DELETE some;
+	/// DELETE some:thing;
+	/// DELETE some:from..to;
+	pub(crate) fn is_specific_record_id(&self) -> bool {
+		match self.extras {
+			Workable::Insert(ref v) if v.rid().is_some() => true,
+			Workable::Normal if self.gen.is_none() => true,
+			_ => false,
+		}
 	}
 
 	/// Checks if permissions are required to be run
@@ -284,8 +343,16 @@ impl Document {
 
 	/// Retrieve the record id for this document
 	pub fn id(&self) -> Result<Arc<Thing>, Error> {
-		match self.id.as_ref() {
-			Some(id) => Ok(id.clone()),
+		match self.id.clone() {
+			Some(id) => Ok(id),
+			_ => Err(fail!("Expected a document id to be present")),
+		}
+	}
+
+	/// Retrieve the record id for this document
+	pub fn inner_id(&self) -> Result<Thing, Error> {
+		match self.id.clone() {
+			Some(id) => Ok(Arc::unwrap_or_clone(id)),
 			_ => Err(fail!("Expected a document id to be present")),
 		}
 	}
@@ -319,6 +386,7 @@ impl Document {
 			Ok(tb) => Ok(tb),
 		}
 	}
+
 	/// Get the foreign tables for this document
 	pub async fn ft(
 		&self,
@@ -330,6 +398,7 @@ impl Document {
 		// Get the table definitions
 		ctx.tx().all_tb_views(opt.ns()?, opt.db()?, &id.tb).await
 	}
+
 	/// Get the events for this document
 	pub async fn ev(
 		&self,
@@ -341,6 +410,7 @@ impl Document {
 		// Get the event definitions
 		ctx.tx().all_tb_events(opt.ns()?, opt.db()?, &id.tb).await
 	}
+
 	/// Get the fields for this document
 	pub async fn fd(
 		&self,
@@ -352,6 +422,7 @@ impl Document {
 		// Get the field definitions
 		ctx.tx().all_tb_fields(opt.ns()?, opt.db()?, &id.tb, None).await
 	}
+
 	/// Get the indexes for this document
 	pub async fn ix(
 		&self,
@@ -363,6 +434,7 @@ impl Document {
 		// Get the index definitions
 		ctx.tx().all_tb_indexes(opt.ns()?, opt.db()?, &id.tb).await
 	}
+
 	// Get the lives for this document
 	pub async fn lv(&self, ctx: &Context, opt: &Options) -> Result<Arc<[LiveStatement]>, Error> {
 		// Get the record id

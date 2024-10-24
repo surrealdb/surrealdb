@@ -183,7 +183,7 @@ async fn update_all(
 	match surrealdb::sql::value(data) {
 		Ok(data) => {
 			// Specify the request statement
-			let sql = "UPSERT type::table($table) CONTENT $data";
+			let sql = "UPDATE type::table($table) CONTENT $data";
 			// Specify the request variables
 			let vars = map! {
 				String::from("table") => Value::from(table),
@@ -233,7 +233,7 @@ async fn modify_all(
 	match surrealdb::sql::value(data) {
 		Ok(data) => {
 			// Specify the request statement
-			let sql = "UPSERT type::table($table) MERGE $data";
+			let sql = "UPDATE type::table($table) MERGE $data";
 			// Specify the request variables
 			let vars = map! {
 				String::from("table") => Value::from(table),
