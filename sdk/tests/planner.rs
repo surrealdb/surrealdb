@@ -3105,7 +3105,22 @@ async fn select_parallel_ordered_collector() -> Result<(), Error> {
 	let mut t = Test::new(sql).await?;
 	t.expect_size(3)?;
 	t.skip_ok(1)?;
-	t.expect_val("{}")?;
+	t.expect_val(
+		"[
+				{
+					detail: {
+						table: 'i'
+					},
+					operation: 'Iterate Table'
+				},
+				{
+					detail: {
+						type: 'OrderedParallelCollector'
+					},
+					operation: 'Collector'
+				}
+			]",
+	)?;
 	let v = t.next_value()?;
 	if let Value::Array(a) = &v {
 		assert_eq!(a.len(), 100);

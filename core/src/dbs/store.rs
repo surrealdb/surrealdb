@@ -7,6 +7,10 @@ use crate::sql::order::Ordering;
 use crate::sql::value::Value;
 use rayon::slice::ParallelSliceMut;
 use std::mem;
+use std::sync::atomic::AtomicUsize;
+use std::sync::{atomic, Arc};
+use tokio::sync::mpsc::Sender;
+use tokio::sync::{mpsc, Mutex};
 
 #[derive(Default)]
 pub(super) struct MemoryCollector(Vec<Value>);
@@ -82,23 +86,20 @@ impl MemoryCollector {
 		self.0.len()
 	}
 
-	pub(super) fn start_limit(&mut self, start: Option<u32>, limit: Option<u32>) {
+	fn vec_start_limit(start: Option<u32>, limit: Option<u32>, vec: &mut Vec<Value>) {
 		match (start, limit) {
 			(Some(start), Some(limit)) => {
-				self.0 = mem::take(&mut self.0)
-					.into_iter()
-					.skip(start as usize)
-					.take(limit as usize)
-					.collect()
+				*vec =
+					mem::take(vec).into_iter().skip(start as usize).take(limit as usize).collect()
 			}
-			(Some(start), None) => {
-				self.0 = mem::take(&mut self.0).into_iter().skip(start as usize).collect()
-			}
-			(None, Some(limit)) => {
-				self.0 = mem::take(&mut self.0).into_iter().take(limit as usize).collect()
-			}
+			(Some(start), None) => *vec = mem::take(vec).into_iter().skip(start as usize).collect(),
+			(None, Some(limit)) => *vec = mem::take(vec).into_iter().take(limit as usize).collect(),
 			(None, None) => {}
 		}
+	}
+
+	pub(super) fn start_limit(&mut self, start: Option<u32>, limit: Option<u32>) {
+		Self::vec_start_limit(start, limit, &mut self.0);
 	}
 
 	pub(super) fn take_vec(&mut self) -> Vec<Value> {
@@ -528,26 +529,55 @@ pub(super) mod file_store {
 	}
 }
 
-#[derive(Default)]
-pub(super) struct OrderedParallelCollector {}
+pub(super) struct OrderedParallelCollector {
+	tx: Sender<Vec<Value>>,
+	buffer: Vec<Value>,
+	merged: Arc<Mutex<Vec<Value>>>,
+	len: Arc<AtomicUsize>,
+}
 
 impl OrderedParallelCollector {
+	const BUFFER_SIZE: usize = 100;
 	pub(super) fn new(_ordering: &Ordering) -> Self {
-		Self {}
+		let (tx, mut rx) = mpsc::channel(100);
+		let merged = Arc::new(Mutex::new(Vec::new()));
+		let len = Arc::new(AtomicUsize::new(0));
+		let m = merged.clone();
+		let l = len.clone();
+		tokio::spawn(async move {
+			while let Some(buf) = rx.recv().await {
+				let mut m = m.lock().await;
+				m.extend(buf);
+				l.store(m.len(), atomic::Ordering::Relaxed);
+			}
+		});
+		Self {
+			tx,
+			buffer: Vec::with_capacity(Self::BUFFER_SIZE),
+			merged,
+			len,
+		}
 	}
-	pub(super) async fn push(&mut self, _val: Value) -> Result<(), Error> {
-		todo!()
+	pub(super) async fn push(&mut self, val: Value) -> Result<(), Error> {
+		self.buffer.push(val);
+		if self.buffer.len() >= Self::BUFFER_SIZE {
+			let buf = mem::replace(&mut self.buffer, Vec::with_capacity(Self::BUFFER_SIZE));
+			self.tx.send(buf).await.map_err(|e| Error::Internal(format!("{e}")))?;
+		}
+		Ok(())
 	}
 	pub(super) fn len(&self) -> usize {
-		todo!()
+		self.len.load(atomic::Ordering::Relaxed)
 	}
 
-	pub(super) fn start_limit(&mut self, _start: Option<u32>, _limit: Option<u32>) {
-		todo!()
+	pub(super) async fn start_limit(&mut self, start: Option<u32>, limit: Option<u32>) {
+		let mut merged = self.merged.lock().await;
+		MemoryCollector::vec_start_limit(start, limit, &mut *merged)
 	}
 
-	pub(super) fn take_vec(&mut self) -> Vec<Value> {
-		todo!()
+	pub(super) async fn take_vec(&mut self) -> Vec<Value> {
+		let mut merged = self.merged.lock().await;
+		mem::take(&mut *merged)
 	}
 
 	pub(super) fn explain(&self, exp: &mut Explanation) {
