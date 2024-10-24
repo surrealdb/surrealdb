@@ -241,12 +241,8 @@ impl Debug for Test {
 }
 
 impl Test {
-	/// Creates a new instance of the `Self` struct with the given SQL query.
-	/// Arguments `sql` - A string slice representing the SQL query.
-	/// Panics if an error occurs.
 	#[allow(dead_code)]
-	pub async fn with_ds(ds: Datastore, sql: &str) -> Result<Self, Error> {
-		let session = Session::owner().with_ns("test").with_db("test");
+	pub async fn new_ds_session(ds: Datastore, session: Session, sql: &str) -> Result<Self, Error> {
 		let responses = ds.execute(sql, &session, None).await?;
 		Ok(Self {
 			ds,
@@ -257,8 +253,16 @@ impl Test {
 	}
 
 	#[allow(dead_code)]
+	pub async fn new_ds(ds: Datastore, sql: &str) -> Result<Self, Error> {
+		Self::new_ds_session(ds, Session::owner().with_ns("test").with_db("test"), sql).await
+	}
+
+	/// Creates a new instance of the `Self` struct with the given SQL query.
+	/// Arguments `sql` - A string slice representing the SQL query.
+	/// Panics if an error occurs.#[allow(dead_code)]
+	#[allow(dead_code)]
 	pub async fn new(sql: &str) -> Result<Self, Error> {
-		Self::with_ds(new_ds().await?, sql).await
+		Self::new_ds(new_ds().await?, sql).await
 	}
 
 	/// Simulates restarting the Datastore
@@ -266,7 +270,7 @@ impl Test {
 	/// - Flushing caches (jwks, IndexStore, ...)
 	#[allow(dead_code)]
 	pub async fn restart(self, sql: &str) -> Result<Self, Error> {
-		Self::with_ds(self.ds.restart(), sql).await
+		Self::new_ds(self.ds.restart(), sql).await
 	}
 
 	/// Checks if the number of responses matches the expected size.

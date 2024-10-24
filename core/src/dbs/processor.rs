@@ -508,15 +508,12 @@ impl<'a> Processor<'a> {
 			// Parse the data from the store
 			let k = res?;
 			let key: thing::Thing = (&k).into();
-			let val = Value::Null;
 			let rid = Thing::from((key.tb, key.id));
-			// Create a new operable value
-			let val = Operable::Value(val.into());
 			// Process the record
 			let pro = Processed {
 				rid: Some(rid.into()),
 				ir: None,
-				val,
+				val: Operable::Value(Value::Null.into()),
 			};
 			self.process(stk, ctx, opt, stm, pro).await?;
 		}
