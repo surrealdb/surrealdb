@@ -508,18 +508,20 @@ async fn upsert_new_and_update_records_with_content_and_merge_with_readonly_fiel
 		DEFINE FIELD age ON person TYPE number;
 		DEFINE FIELD data ON person FLEXIBLE TYPE object;
 		-- This record will be created successfully
-		UPSERT tester:something CONTENT { age: 1, data: { some: true, other: false } };
+		UPSERT person:test CONTENT { age: 1, data: { some: true, other: false } };
 		-- This record will be updated successfully, with the readonly field untouched
-		UPSERT tester:something CONTENT { age: 2, data: { nothing: true } };
+		UPSERT person:test CONTENT { age: 2, data: { nothing: true } };
 		-- This record will be updated successfully, with the readonly and flexible fields untouched
-		UPSERT tester:something MERGE { age: 3 };
+		UPSERT person:test MERGE { age: 3 };
 		-- This record will be updated successfully, with the readonly and flexible fields untouched
-		UPSERT tester:something SET age = 4, data.nothing = false;
+		UPSERT person:test SET age = 4, data.nothing = false;
+		-- This will return an error, as the readonly field is modified
+		UPSERT person:test REPLACE { age: 5, data: { other: true } };
 	";
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
-	assert_eq!(res.len(), 8);
+	assert_eq!(res.len(), 9);
 	//
 	let tmp = res.remove(0).result;
 	assert!(tmp.is_ok());
@@ -543,7 +545,7 @@ async fn upsert_new_and_update_records_with_content_and_merge_with_readonly_fiel
 					other: false,
 					some: true
 				},
-				id: tester:something
+				id: person:test
 			}
 		]",
 	);
@@ -558,7 +560,7 @@ async fn upsert_new_and_update_records_with_content_and_merge_with_readonly_fiel
 				data: {
 					nothing: true
 				},
-				id: tester:something
+				id: person:test
 			}
 		]",
 	);
@@ -573,7 +575,7 @@ async fn upsert_new_and_update_records_with_content_and_merge_with_readonly_fiel
 				data: {
 					nothing: true
 				},
-				id: tester:something
+				id: person:test
 			}
 		]",
 	);
@@ -588,11 +590,17 @@ async fn upsert_new_and_update_records_with_content_and_merge_with_readonly_fiel
 				data: {
 					nothing: false
 				},
-				id: tester:something
+				id: person:test
 			}
 		]",
 	);
 	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result;
+	assert!(matches!(
+		tmp.err(),
+		Some(e) if e.to_string() == r#"Found changed value for field `created`, with record `person:test`, but field is readonly"#
+	));
 	//
 	Ok(())
 }
