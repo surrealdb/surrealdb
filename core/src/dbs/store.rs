@@ -1,6 +1,7 @@
 use rand::seq::SliceRandom;
 
 use crate::dbs::plan::Explanation;
+use crate::dbs::rayon_spawn;
 use crate::err::Error;
 use crate::sql::order::Ordering;
 use crate::sql::value::Value;
@@ -45,23 +46,26 @@ impl MemoryCollector {
 	/// - For smaller vectors, the standard `sort_unstable_by` is used.
 	///
 	async fn large_sort(&mut self, ordering: &Ordering) -> Result<(), Error> {
-		let (send, recv) = tokio::sync::oneshot::channel();
 		let mut vec = mem::take(&mut self.0);
 		let ordering = ordering.clone();
-		rayon::spawn(move || {
-			match ordering {
-				Ordering::Random => vec.shuffle(&mut rand::thread_rng()),
-				Ordering::Order(orders) => {
-					if vec.len() >= 10000 {
-						vec.par_sort_unstable_by(|a, b| orders.compare(a, b));
-					} else {
-						vec.sort_unstable_by(|a, b| orders.compare(a, b));
+		let vec = rayon_spawn(
+			move || {
+				match ordering {
+					Ordering::Random => vec.shuffle(&mut rand::thread_rng()),
+					Ordering::Order(orders) => {
+						if vec.len() >= 10000 {
+							vec.par_sort_unstable_by(|a, b| orders.compare(a, b));
+						} else {
+							vec.sort_unstable_by(|a, b| orders.compare(a, b));
+						}
 					}
-				}
-			};
-			let _ = send.send(vec);
-		});
-		self.0 = recv.await.map_err(|e| Error::OrderingError(format!("{e}")))?;
+				};
+				Ok(vec)
+			},
+			|e| Error::OrderingError(format!("{e}")),
+		)
+		.await?;
+		self.0 = vec;
 		Ok(())
 	}
 
