@@ -90,15 +90,20 @@ impl Results {
 		}
 	}
 
-	pub(super) async fn start_limit(&mut self, start: Option<u32>, limit: Option<u32>) {
+	pub(super) async fn start_limit(
+		&mut self,
+		start: Option<u32>,
+		limit: Option<u32>,
+	) -> Result<(), Error> {
 		match self {
 			Self::None => {}
 			Self::Memory(m) => m.start_limit(start, limit),
-			Self::OrderedParallel(c) => c.start_limit(start, limit).await,
+			Self::OrderedParallel(c) => c.start_limit(start, limit).await?,
 			#[cfg(storage)]
 			Self::File(f) => f.start_limit(start, limit),
 			Self::Groups(_) => {}
 		}
+		Ok(())
 	}
 
 	pub(super) fn len(&self) -> usize {
@@ -115,7 +120,7 @@ impl Results {
 	pub(super) async fn take(&mut self) -> Result<Vec<Value>, Error> {
 		Ok(match self {
 			Self::Memory(m) => m.take_vec(),
-			Self::OrderedParallel(c) => c.take_vec().await,
+			Self::OrderedParallel(c) => c.take_vec().await?,
 			#[cfg(storage)]
 			Self::File(f) => f.take_vec().await?,
 			_ => vec![],

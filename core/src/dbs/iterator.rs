@@ -346,7 +346,7 @@ impl Iterator {
 			}
 
 			// Process any START & LIMIT clause
-			self.results.start_limit(self.start, self.limit).await;
+			self.results.start_limit(self.start, self.limit).await?;
 
 			if let Some(e) = &mut plan.explanation {
 				e.add_fetch(self.results.len());

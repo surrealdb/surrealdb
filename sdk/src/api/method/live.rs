@@ -164,7 +164,7 @@ pub struct Stream<R> {
 	// We no longer need the lifetime and the type parameter
 	// Leaving them in for backwards compatibility
 	pub(crate) id: Uuid,
-	pub(crate) rx: Option<Receiver<Notification<CoreValue>>>,
+	pub(crate) rx: Option<Pin<Box<Receiver<Notification<CoreValue>>>>>,
 	pub(crate) response_type: PhantomData<R>,
 }
 
@@ -176,7 +176,7 @@ impl<R> Stream<R> {
 	) -> Self {
 		Self {
 			id,
-			rx,
+			rx: rx.map(Box::pin),
 			client,
 			response_type: PhantomData,
 		}

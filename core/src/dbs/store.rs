@@ -2,15 +2,18 @@ use rand::seq::SliceRandom;
 
 use crate::dbs::plan::Explanation;
 use crate::dbs::rayon_spawn;
+#[cfg(not(target_arch = "wasm32"))]
 use crate::err::Error;
 use crate::sql::order::Ordering;
 use crate::sql::value::Value;
+#[cfg(not(target_arch = "wasm32"))]
 use rayon::slice::ParallelSliceMut;
 use std::mem;
 use std::sync::atomic::AtomicUsize;
 use std::sync::{atomic, Arc};
+use tokio::sync::mpsc;
 use tokio::sync::mpsc::Sender;
-use tokio::sync::{mpsc, Mutex};
+use tokio::task::JoinHandle;
 
 #[derive(Default)]
 pub(super) struct MemoryCollector(Vec<Value>);
@@ -530,54 +533,97 @@ pub(super) mod file_store {
 }
 
 pub(super) struct OrderedParallelCollector {
-	tx: Sender<Vec<Value>>,
+	tx: Option<Sender<Vec<Value>>>,
+	rx: Option<JoinHandle<Vec<Value>>>,
 	buffer: Vec<Value>,
-	merged: Arc<Mutex<Vec<Value>>>,
 	len: Arc<AtomicUsize>,
+	merged: Vec<Value>,
 }
 
 impl OrderedParallelCollector {
 	const BUFFER_SIZE: usize = 100;
-	pub(super) fn new(_ordering: &Ordering) -> Self {
+	pub(super) fn new(ordering: &Ordering) -> Self {
 		let (tx, mut rx) = mpsc::channel(100);
-		let merged = Arc::new(Mutex::new(Vec::new()));
 		let len = Arc::new(AtomicUsize::new(0));
-		let m = merged.clone();
 		let l = len.clone();
-		tokio::spawn(async move {
+		let ordering = ordering.clone();
+		let rx = tokio::spawn(async move {
+			let mut merged = Vec::new();
 			while let Some(buf) = rx.recv().await {
-				let mut m = m.lock().await;
-				m.extend(buf);
-				l.store(m.len(), atomic::Ordering::Relaxed);
+				Self::merge_and_sort(&ordering, &mut merged, buf);
+				l.store(merged.len(), atomic::Ordering::Relaxed);
 			}
+			merged
 		});
 		Self {
-			tx,
+			tx: Some(tx),
+			rx: Some(rx),
 			buffer: Vec::with_capacity(Self::BUFFER_SIZE),
-			merged,
 			len,
+			merged: vec![],
 		}
 	}
+
+	pub fn merge_and_sort(ordering: &Ordering, merged: &mut Vec<Value>, buffer: Vec<Value>) {
+		// TODO better algo, we don't want to sort again the whole collection
+		merged.extend(buffer);
+		if let Ordering::Order(orders) = ordering {
+			merged.sort_unstable_by(|a, b| orders.compare(a, b));
+		};
+	}
+
 	pub(super) async fn push(&mut self, val: Value) -> Result<(), Error> {
 		self.buffer.push(val);
 		if self.buffer.len() >= Self::BUFFER_SIZE {
-			let buf = mem::replace(&mut self.buffer, Vec::with_capacity(Self::BUFFER_SIZE));
-			self.tx.send(buf).await.map_err(|e| Error::Internal(format!("{e}")))?;
+			self.send_buffer().await?;
 		}
 		Ok(())
 	}
+
+	fn tx(&self) -> Result<&Sender<Vec<Value>>, Error> {
+		if let Some(tx) = &self.tx {
+			Ok(tx)
+		} else {
+			Err(Error::Internal("No channel".to_string()))
+		}
+	}
+
+	async fn send_buffer(&mut self) -> Result<(), Error> {
+		let buf = mem::replace(&mut self.buffer, Vec::with_capacity(Self::BUFFER_SIZE));
+		self.tx()?.send(buf).await.map_err(|e| Error::Internal(format!("{e}")))?;
+		Ok(())
+	}
+
 	pub(super) fn len(&self) -> usize {
 		self.len.load(atomic::Ordering::Relaxed)
 	}
 
-	pub(super) async fn start_limit(&mut self, start: Option<u32>, limit: Option<u32>) {
-		let mut merged = self.merged.lock().await;
-		MemoryCollector::vec_start_limit(start, limit, &mut *merged)
+	async fn finalize(&mut self) -> Result<(), Error> {
+		if !self.buffer.is_empty() {
+			self.send_buffer().await?;
+		}
+		if let Some(tx) = self.tx.take() {
+			drop(tx);
+		}
+		if let Some(rx) = self.rx.take() {
+			self.merged = rx.await.map_err(|e| Error::Internal(format!("{e}")))?;
+		}
+		Ok(())
 	}
 
-	pub(super) async fn take_vec(&mut self) -> Vec<Value> {
-		let mut merged = self.merged.lock().await;
-		mem::take(&mut *merged)
+	pub(super) async fn start_limit(
+		&mut self,
+		start: Option<u32>,
+		limit: Option<u32>,
+	) -> Result<(), Error> {
+		self.finalize().await?;
+		MemoryCollector::vec_start_limit(start, limit, &mut self.merged);
+		Ok(())
+	}
+
+	pub(super) async fn take_vec(&mut self) -> Result<Vec<Value>, Error> {
+		self.finalize().await?;
+		Ok(mem::take(&mut self.merged))
 	}
 
 	pub(super) fn explain(&self, exp: &mut Explanation) {
