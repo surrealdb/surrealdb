@@ -165,27 +165,68 @@ impl<'a> Statement<'a> {
 	/// UPSERT { id: some:thing } WHERE test = true;
 	pub(crate) fn is_deferable(&self) -> bool {
 		match self {
+			Statement::Upsert(v) if v.cond.is_none() => true,
+			Statement::Create(_) => true,
+			_ => false,
+		}
+	}
+
+	/// Returns whether the document retrieval for
+	/// this statement potentially depends on the
+	/// initial value for this document, and can
+	/// therefore be retried as an update. This will
+	/// be true in the following instances:
+	///
+	/// UPSERT some UNSET test;
+	/// UPSERT some SET test = true;
+	/// UPSERT some MERGE { test: true };
+	/// UPSERT some PATCH [{ op: 'replace', path: '/', value: { test: true } }];
+	/// UPSERT some:thing UNSET test;
+	/// UPSERT some:thing SET test = true;
+	/// UPSERT some:thing MERGE { test: true };
+	/// UPSERT some:thing PATCH [{ op: 'replace', path: '/', value: { test: true } }];
+	/// UPSERT |some:1000| UNSET test;
+	/// UPSERT |some:1000| SET test = true;
+	/// UPSERT |some:1000| MERGE { test: true };
+	/// UPSERT |some:1000| PATCH [{ op: 'replace', path: '/', value: { test: true } }];
+	/// UPSERT |some:1..1000| UNSET test;
+	/// UPSERT |some:1..1000| SET test = true;
+	/// UPSERT |some:1..1000| MERGE { test: true };
+	/// UPSERT |some:1..1000| PATCH [{ op: 'replace', path: '/', value: { test: true } }];
+	///
+	/// Importantly, when a WHERE clause condition is
+	/// specified on an UPSERT clause, then we do
+	/// first retrieve the document from storage, and
+	/// this function will return false in the
+	/// following instances:
+	///
+	/// UPSERT some WHERE test = true;
+	/// UPSERT some:thing WHERE test = true;
+	/// UPSERT |some:1000| WHERE test = true;
+	/// UPSERT |some:1..1000| WHERE test = true;
+	/// UPSERT { id: some:thing } WHERE test = true;
+	pub(crate) fn is_repeatable(&self) -> bool {
+		match self {
 			Statement::Upsert(v) if v.cond.is_none() => match v.data {
 				// We are setting the entire record content
 				// so there is no need to fetch the value
 				// from the storage engine, if it exists.
-				Some(Data::ContentExpression(_)) => true,
+				Some(Data::ContentExpression(_)) => false,
 				// We are setting the entire record content
 				// so there is no need to fetch the value
 				// from the storage engine, if it exists.
-				Some(Data::ReplaceExpression(_)) => true,
-				// We have no data clause, so we don't need
-				// to check if the record exists initially.
-				None => true,
+				Some(Data::ReplaceExpression(_)) => false,
 				// We likely have a MERGE or SET clause on
 				// this UPSERT statement, and so we might
 				// potentially need to access fields from
 				// the initial value already existing in
 				// the database. Therefore we need to fetch
 				// the initial value from storage.
-				_ => false,
+				Some(_) => true,
+				// We have no data clause, so we don't need
+				// to check if the record exists initially.
+				None => false,
 			},
-			Statement::Create(_) => true,
 			_ => false,
 		}
 	}
@@ -195,7 +236,9 @@ impl<'a> Statement<'a> {
 	/// existing document to update, or is guaranteed
 	/// to create a record, if none exists. This is
 	/// used in the following instances when the WHERE
-	/// clause does not find any matching documents:
+	/// clause does not find any matching documents in
+	/// the storage engine, and therefore a new record
+	/// must be upserted:
 	///
 	/// UPSERT some WHERE test = true;
 	pub(crate) fn is_guaranteed(&self) -> bool {

@@ -343,8 +343,16 @@ impl Document {
 
 	/// Retrieve the record id for this document
 	pub fn id(&self) -> Result<Arc<Thing>, Error> {
-		match self.id.as_ref() {
-			Some(id) => Ok(id.clone()),
+		match self.id.clone() {
+			Some(id) => Ok(id),
+			_ => Err(fail!("Expected a document id to be present")),
+		}
+	}
+
+	/// Retrieve the record id for this document
+	pub fn inner_id(&self) -> Result<Thing, Error> {
+		match self.id.clone() {
+			Some(id) => Ok(Arc::unwrap_or_clone(id)),
 			_ => Err(fail!("Expected a document id to be present")),
 		}
 	}

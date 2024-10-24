@@ -48,6 +48,17 @@ impl Document {
 				Err(Error::RecordExists {
 					thing,
 				}) => Err(Error::RetryWithId(thing)),
+				// If an error was received, but this statement
+				// is potentially retryable because it might
+				// depend on any initially stored value, then we
+				// need to retry and update the document. If this
+				// error was because of a schema issue then we
+				// need to presume that we might need to retry
+				// after fetching the initial record value
+				// from storage before processing schema again.
+				Err(e) if e.is_schema_related() && stm.is_repeatable() => {
+					Err(Error::RetryWithId(self.inner_id()?))
+				}
 				// If any other error was received, then let's
 				// pass that error through and return an error
 				Err(e) => Err(e),

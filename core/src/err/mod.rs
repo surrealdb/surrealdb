@@ -1300,6 +1300,16 @@ impl Serialize for Error {
 	}
 }
 impl Error {
+	pub fn is_schema_related(&self) -> bool {
+		matches!(
+			self,
+			Error::FieldCheck { .. }
+				| Error::FieldValue { .. }
+				| Error::FieldReadonly { .. }
+				| Error::FieldUndefined { .. }
+		)
+	}
+
 	pub fn set_check_from_coerce(self, name: String) -> Error {
 		match self {
 			Error::CoerceTo {
