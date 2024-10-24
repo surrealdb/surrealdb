@@ -1,7 +1,7 @@
 use std::{future::Future, pin::Pin};
 
 use channel::Receiver;
-use futures::{FutureExt, Stream, StreamExt};
+use futures::{Stream, StreamExt};
 
 /// A newtype struct over receiver implementing the [`Stream`] trait.
 #[non_exhaustive]
@@ -13,7 +13,9 @@ impl<R> Stream for ChannelStream<R> {
 		self: Pin<&mut Self>,
 		cx: &mut std::task::Context,
 	) -> std::task::Poll<Option<Self::Item>> {
-		self.0.recv().poll_unpin(cx).map(|x| x.ok())
+		let receiver = self.0.recv();
+		futures::pin_mut!(receiver);
+		receiver.poll(cx).map(Result::ok)
 	}
 }
 

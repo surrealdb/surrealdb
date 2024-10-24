@@ -176,10 +176,11 @@ impl Connection {
 	async fn write(
 		rpc: Arc<RwLock<Connection>>,
 		mut sender: SplitSink<WebSocket, Message>,
-		mut internal_receiver: Receiver<Message>,
+		internal_receiver: Receiver<Message>,
 	) {
 		// Clone the WebSocket cancellation token
 		let canceller = rpc.read().await.canceller.clone();
+		futures::pin_mut!(internal_receiver);
 		// Loop, and listen for messages to write
 		loop {
 			tokio::select! {
