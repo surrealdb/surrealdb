@@ -1,6 +1,7 @@
 use rand::seq::SliceRandom;
 
 use crate::dbs::plan::Explanation;
+use crate::err::Error;
 use crate::sql::order::Ordering;
 use crate::sql::value::Value;
 use rayon::slice::ParallelSliceMut;
@@ -17,14 +18,19 @@ impl MemoryCollector {
 
 	/// This function determines the sorting strategy based on the size of the collection.
 	/// If the collection contains fewer than 1000 elements, it uses `small_sort`.
-	/// Otherwise, it uses `large_sort` which is asynchronous.
+	/// Otherwise, it uses `large_sort`, which employs `tokio::task::spawn_blocking`.
+	/// We don't want to use `spawn_blocking` when sorting is very fast.
+	/// For tasks that complete very quickly (e.g., on the order of microseconds or a few milliseconds),
+	/// the overhead of `spawn_blocking` might be noticeable, as the cost of task handoff and scheduling
+	/// could be greater than the sorting execution time.
 	///
 	#[cfg(not(target_arch = "wasm32"))]
-	pub(super) async fn sort(&mut self, ordering: &Ordering) {
+	pub(super) async fn sort(&mut self, ordering: &Ordering) -> Result<(), Error> {
 		if self.0.len() < 1000 {
 			self.small_sort(ordering);
+			Ok(())
 		} else {
-			self.large_sort(ordering).await;
+			self.large_sort(ordering).await
 		}
 	}
 
@@ -32,14 +38,14 @@ impl MemoryCollector {
 	/// Asynchronously sorts a large vector based on the given ordering.
 	///
 	/// The function performs the sorting operation in a blocking
-	/// manner to avoid occupying the async runtime,
+	/// manner to prevent occupying the async runtime,
 	/// and then awaits the completion of the sorting.
 	///
 	/// - For vectors with a length of 10,000 or more, the sorting is performed using `par_sort_unstable_by`
 	///   from the Rayon library for better performance through parallelism.
-	/// - For smaller vectors, standard `sort_by` is used.
+	/// - For smaller vectors, the standard `sort_unstable_by` is used.
 	///
-	async fn large_sort(&mut self, ordering: &Ordering) {
+	async fn large_sort(&mut self, ordering: &Ordering) -> Result<(), Error> {
 		let mut vec = mem::take(&mut self.0);
 		let ordering = ordering.clone();
 		let vec = spawn_blocking(move || {
@@ -56,8 +62,9 @@ impl MemoryCollector {
 			vec
 		})
 		.await
-		.unwrap();
+		.map_err(|e| Error::OrderingError(format!("{e}")))?;
 		self.0 = vec;
+		Ok(())
 	}
 
 	pub(super) fn small_sort(&mut self, ordering: &Ordering) {
