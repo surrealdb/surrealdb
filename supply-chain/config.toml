@@ -167,6 +167,10 @@ criteria = "safe-to-deploy"
 version = "2.2.0"
 criteria = "safe-to-deploy"
 
+[[exemptions.async-channel]]
+version = "2.3.1"
+criteria = "safe-to-deploy"
+
 [[exemptions.async-compression]]
 version = "0.4.7"
 criteria = "safe-to-deploy"
@@ -403,6 +407,10 @@ criteria = "safe-to-deploy"
 version = "2.4.0"
 criteria = "safe-to-deploy"
 
+[[exemptions.concurrent-queue]]
+version = "2.5.0"
+criteria = "safe-to-deploy"
+
 [[exemptions.console_error_panic_hook]]
 version = "0.1.7"
 criteria = "safe-to-deploy"
@@ -553,6 +561,10 @@ criteria = "safe-to-deploy"
 
 [[exemptions.event-listener-strategy]]
 version = "0.5.1"
+criteria = "safe-to-deploy"
+
+[[exemptions.event-listener-strategy]]
+version = "0.5.2"
 criteria = "safe-to-deploy"
 
 [[exemptions.ext-sort]]
