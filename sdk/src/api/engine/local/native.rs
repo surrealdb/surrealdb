@@ -12,7 +12,6 @@ use crate::{
 	Action,
 };
 use channel::{Receiver, Sender};
-use futures::Future;
 use futures::{stream::poll_fn, StreamExt};
 use std::{
 	collections::{BTreeMap, HashMap, HashSet},
@@ -135,13 +134,9 @@ pub(crate) async fn run_router(
 	}
 	let tasks = tasks::init(kvs.clone(), canceller.clone(), &opt);
 
-	let notifications = kvs.notifications();
-	let mut notification_stream = poll_fn(move |cx| match &notifications {
-		Some(rx) => {
-			let receiver = rx.recv();
-			futures::pin_mut!(receiver);
-			receiver.poll(cx).map(|x| x.ok())
-		}
+	let mut notifications = kvs.notifications().map(Box::pin);
+	let mut notification_stream = poll_fn(move |cx| match &mut notifications {
+		Some(rx) => rx.poll_next_unpin(cx),
 		// return poll pending so that this future is never woken up again and therefore not
 		// constantly polled.
 		None => Poll::Pending,

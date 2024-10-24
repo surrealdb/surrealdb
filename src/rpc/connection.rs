@@ -180,7 +180,7 @@ impl Connection {
 	) {
 		// Clone the WebSocket cancellation token
 		let canceller = rpc.read().await.canceller.clone();
-		futures::pin_mut!(internal_receiver);
+		let mut internal_receiver = Box::pin(internal_receiver);
 		// Loop, and listen for messages to write
 		loop {
 			tokio::select! {
