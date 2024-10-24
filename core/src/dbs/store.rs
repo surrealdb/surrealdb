@@ -6,7 +6,6 @@ use crate::sql::order::Ordering;
 use crate::sql::value::Value;
 use rayon::slice::ParallelSliceMut;
 use std::mem;
-use tokio::task::spawn_blocking;
 
 #[derive(Default)]
 pub(super) struct MemoryCollector(Vec<Value>);
@@ -18,10 +17,10 @@ impl MemoryCollector {
 
 	/// This function determines the sorting strategy based on the size of the collection.
 	/// If the collection contains fewer than 1000 elements, it uses `small_sort`.
-	/// Otherwise, it uses `large_sort`, which employs `tokio::task::spawn_blocking`.
-	/// We don't want to use `spawn_blocking` when sorting is very fast.
+	/// Otherwise, it uses `large_sort`, which employs `rayon::spawn`.
+	/// We don't want to use `rayon::spawn` when sorting is very fast.
 	/// For tasks that complete very quickly (e.g., on the order of microseconds or a few milliseconds),
-	/// the overhead of `spawn_blocking` might be noticeable, as the cost of task handoff and scheduling
+	/// the overhead of `rayon::spawn` might be noticeable, as the cost of task handoff and scheduling
 	/// could be greater than the sorting execution time.
 	///
 	#[cfg(not(target_arch = "wasm32"))]
@@ -46,9 +45,10 @@ impl MemoryCollector {
 	/// - For smaller vectors, the standard `sort_unstable_by` is used.
 	///
 	async fn large_sort(&mut self, ordering: &Ordering) -> Result<(), Error> {
+		let (send, recv) = tokio::sync::oneshot::channel();
 		let mut vec = mem::take(&mut self.0);
 		let ordering = ordering.clone();
-		let vec = spawn_blocking(move || {
+		rayon::spawn(move || {
 			match ordering {
 				Ordering::Random => vec.shuffle(&mut rand::thread_rng()),
 				Ordering::Order(orders) => {
@@ -59,11 +59,9 @@ impl MemoryCollector {
 					}
 				}
 			};
-			vec
-		})
-		.await
-		.map_err(|e| Error::OrderingError(format!("{e}")))?;
-		self.0 = vec;
+			let _ = send.send(vec);
+		});
+		self.0 = recv.await.map_err(|e| Error::OrderingError(format!("{e}")))?;
 		Ok(())
 	}
 
