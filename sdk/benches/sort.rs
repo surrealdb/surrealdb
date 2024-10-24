@@ -5,6 +5,12 @@ use surrealdb::kvs::Datastore;
 use surrealdb_core::sql::Value;
 use tokio::runtime::Runtime;
 
+/// When ordering a query, the sort method can choose between
+/// single-threaded sorting or parallel sorting (Rayon::par_sort_unstable_by).
+/// Following several tests, a value of 10000 has been selected to decide when we use the parallel sort.
+/// This benchmark ensures that we start seeing a performance improvement.
+/// 9999 = sort_unstable_by
+/// >=10000 = par_sort_unstable_by
 fn bench_sort(c: &mut Criterion) {
 	let rt = Runtime::new().unwrap();
 
