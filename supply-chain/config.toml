@@ -160,14 +160,6 @@ version = "1.1.1"
 criteria = "safe-to-run"
 
 [[exemptions.async-channel]]
-version = "1.9.0"
-criteria = "safe-to-deploy"
-
-[[exemptions.async-channel]]
-version = "2.2.0"
-criteria = "safe-to-deploy"
-
-[[exemptions.async-channel]]
 version = "2.3.1"
 criteria = "safe-to-deploy"
 
@@ -375,10 +367,6 @@ criteria = "safe-to-deploy"
 version = "0.2.2"
 criteria = "safe-to-deploy"
 
-[[exemptions.cipher]]
-version = "0.4.4"
-criteria = "safe-to-deploy"
-
 [[exemptions.clang-sys]]
 version = "1.7.0"
 criteria = "safe-to-deploy"
@@ -401,10 +389,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.clipboard-win]]
 version = "4.5.0"
-criteria = "safe-to-deploy"
-
-[[exemptions.concurrent-queue]]
-version = "2.4.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.concurrent-queue]]
@@ -544,10 +528,6 @@ version = "2.3.1"
 criteria = "safe-to-deploy"
 
 [[exemptions.event-listener]]
-version = "2.5.3"
-criteria = "safe-to-deploy"
-
-[[exemptions.event-listener]]
 version = "4.0.3"
 criteria = "safe-to-deploy"
 
@@ -557,10 +537,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.event-listener-strategy]]
 version = "0.4.0"
-criteria = "safe-to-deploy"
-
-[[exemptions.event-listener-strategy]]
-version = "0.5.1"
 criteria = "safe-to-deploy"
 
 [[exemptions.event-listener-strategy]]
@@ -1461,10 +1437,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.serde_with_macros]]
 version = "3.7.0"
-criteria = "safe-to-deploy"
-
-[[exemptions.sha1]]
-version = "0.10.6"
 criteria = "safe-to-deploy"
 
 [[exemptions.sha2]]
