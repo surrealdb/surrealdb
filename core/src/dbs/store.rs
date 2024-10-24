@@ -1,9 +1,11 @@
 use rand::seq::SliceRandom;
 
 use crate::dbs::plan::Explanation;
+#[cfg(not(target_arch = "wasm32"))]
 use crate::err::Error;
 use crate::sql::order::Ordering;
 use crate::sql::value::Value;
+#[cfg(not(target_arch = "wasm32"))]
 use rayon::slice::ParallelSliceMut;
 use std::mem;
 

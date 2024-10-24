@@ -130,9 +130,13 @@ pub(crate) async fn run_router(
 	}
 	let tasks = tasks::init(kvs.clone(), canceller.clone(), &opt);
 
-	let mut notifications = kvs.notifications();
-	let mut notification_stream = poll_fn(move |cx| match &mut notifications {
-		Some(rx) => rx.poll_next_unpin(cx),
+	let notifications = kvs.notifications();
+	let mut notification_stream = poll_fn(move |cx| match &notifications {
+		Some(rx) => {
+			let receiver = rx.recv();
+			futures::pin_mut!(receiver);
+			receiver.poll(cx).map(|x| x.ok())
+		}
 		None => Poll::Pending,
 	});
 
