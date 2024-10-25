@@ -3115,7 +3115,7 @@ async fn select_parallel_ordered_collector() -> Result<(), Error> {
 				},
 				{
 					detail: {
-						type: 'OrderedParallelCollector'
+						type: 'SortedMemory'
 					},
 					operation: 'Collector'
 				}

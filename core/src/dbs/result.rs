@@ -4,7 +4,7 @@ use crate::dbs::plan::Explanation;
 #[cfg(storage)]
 use crate::dbs::store::file_store::FileCollector;
 #[cfg(not(target_arch = "wasm32"))]
-use crate::dbs::store::parallel_ordered::OrderedParallelCollector;
+use crate::dbs::store::sorted_memory::SortedMemory;
 use crate::dbs::store::MemoryCollector;
 use crate::dbs::{Options, Statement};
 use crate::err::Error;
@@ -15,7 +15,7 @@ use reblessive::tree::Stk;
 pub(super) enum Results {
 	None,
 	Memory(MemoryCollector),
-	OrderedParallel(OrderedParallelCollector),
+	SortedMemory(SortedMemory),
 	#[cfg(storage)]
 	File(Box<FileCollector>),
 	Groups(GroupsCollector),
@@ -39,7 +39,7 @@ impl Results {
 		#[cfg(not(target_arch = "wasm32"))]
 		if stm.parallel() {
 			if let Some(order) = stm.order() {
-				return Ok(Self::OrderedParallel(OrderedParallelCollector::new(order)));
+				return Ok(Self::SortedMemory(SortedMemory::new(order)));
 			}
 		}
 		Ok(Self::Memory(Default::default()))
@@ -58,7 +58,7 @@ impl Results {
 			Self::Memory(s) => {
 				s.push(val);
 			}
-			Self::OrderedParallel(c) => {
+			Self::SortedMemory(c) => {
 				c.push(val).await?;
 			}
 			#[cfg(storage)]
@@ -101,7 +101,7 @@ impl Results {
 		match self {
 			Self::None => {}
 			Self::Memory(m) => m.start_limit(start, limit),
-			Self::OrderedParallel(c) => c.start_limit(start, limit).await?,
+			Self::SortedMemory(c) => c.start_limit(start, limit).await?,
 			#[cfg(storage)]
 			Self::File(f) => f.start_limit(start, limit),
 			Self::Groups(_) => {}
@@ -113,7 +113,7 @@ impl Results {
 		match self {
 			Self::None => 0,
 			Self::Memory(s) => s.len(),
-			Self::OrderedParallel(s) => s.len(),
+			Self::SortedMemory(s) => s.len(),
 			#[cfg(storage)]
 			Self::File(e) => e.len(),
 			Self::Groups(g) => g.len(),
@@ -123,7 +123,7 @@ impl Results {
 	pub(super) async fn take(&mut self) -> Result<Vec<Value>, Error> {
 		Ok(match self {
 			Self::Memory(m) => m.take_vec(),
-			Self::OrderedParallel(c) => c.take_vec().await?,
+			Self::SortedMemory(c) => c.take_vec().await?,
 			#[cfg(storage)]
 			Self::File(f) => f.take_vec().await?,
 			_ => vec![],
@@ -136,7 +136,7 @@ impl Results {
 			Self::Memory(s) => {
 				s.explain(exp);
 			}
-			Self::OrderedParallel(c) => c.explain(exp),
+			Self::SortedMemory(c) => c.explain(exp),
 			#[cfg(storage)]
 			Self::File(e) => {
 				e.explain(exp);

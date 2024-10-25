@@ -316,7 +316,6 @@ pub(super) mod file_store {
 		}
 
 		fn push(&mut self, value: Value) -> Result<(), Error> {
-			debug!("PUSH {}", self.offset);
 			// Serialize the value in a buffer
 			let len = Self::write_value(&mut self.records, value)?;
 			// Increment the offset of the next record
@@ -384,7 +383,6 @@ pub(super) mod file_store {
 			// Collect the records
 			let mut res = Vec::with_capacity(num as usize);
 			for _ in 0..num {
-				debug!("READ");
 				if let Some(val) = iter.next() {
 					res.push(val?);
 				} else {
@@ -432,7 +430,6 @@ pub(super) mod file_store {
 		fn seek(&mut self, seek_pos: usize, pos: usize) -> Result<(), Error> {
 			self.check_reader()?;
 			if let Some(reader) = &mut self.reader {
-				debug!("SEEK {seek_pos}");
 				reader.seek(SeekFrom::Start(seek_pos as u64))?;
 				self.pos = pos;
 			}
@@ -482,7 +479,6 @@ pub(super) mod file_store {
 			} else {
 				max
 			};
-			debug!("FilePaging - START: {start} - NUM: {num}");
 			Some((start, num))
 		}
 	}
@@ -529,31 +525,32 @@ pub(super) mod file_store {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-pub(super) mod parallel_ordered {
+pub(super) mod sorted_memory {
 	use crate::dbs::plan::Explanation;
 	use crate::dbs::store::MemoryCollector;
 	use crate::err::Error;
 	use crate::sql::order::Ordering;
 	use crate::sql::Value;
-	use std::mem;
 	use std::sync::atomic::AtomicUsize;
 	use std::sync::{atomic, Arc};
+	use std::{cmp, mem};
 	use tokio::sync::mpsc;
 	use tokio::sync::mpsc::Sender;
 	use tokio::task::JoinHandle;
 
-	pub(in crate::dbs) struct OrderedParallelCollector {
+	pub(in crate::dbs) struct SortedMemory {
 		tx: Option<Sender<Vec<Value>>>,
 		rx: Option<JoinHandle<Vec<Value>>>,
-		buffer: Vec<Value>,
+		batch: Vec<Value>,
 		len: Arc<AtomicUsize>,
 		merged: Vec<Value>,
 	}
 
-	impl OrderedParallelCollector {
-		const BUFFER_SIZE: usize = 100;
+	impl SortedMemory {
+		const BATCH_SIZE: usize = 100;
+		const CHANNEL_BUFFER_SIZE: usize = 100;
 		pub(in crate::dbs) fn new(ordering: &Ordering) -> Self {
-			let (tx, mut rx) = mpsc::channel(100);
+			let (tx, mut rx) = mpsc::channel(Self::CHANNEL_BUFFER_SIZE);
 			let len = Arc::new(AtomicUsize::new(0));
 			let l = len.clone();
 			let ordering = ordering.clone();
@@ -568,23 +565,55 @@ pub(super) mod parallel_ordered {
 			Self {
 				tx: Some(tx),
 				rx: Some(rx),
-				buffer: Vec::with_capacity(Self::BUFFER_SIZE),
+				batch: Vec::with_capacity(Self::BATCH_SIZE),
 				len,
 				merged: vec![],
 			}
 		}
 
 		fn merge_and_sort(ordering: &Ordering, merged: &mut Vec<Value>, buffer: Vec<Value>) {
-			// TODO better algo, we don't want to sort again the whole collection
-			merged.extend(buffer);
 			if let Ordering::Order(orders) = ordering {
-				merged.sort_unstable_by(|a, b| orders.compare(a, b));
+				Self::incremental_binary_insertion(merged, buffer, |a, b| orders.compare(a, b));
 			};
 		}
 
+		fn incremental_binary_insertion<F>(merged: &mut Vec<Value>, batch: Vec<Value>, cmp: F)
+		where
+			F: Fn(&Value, &Value) -> cmp::Ordering,
+		{
+			// Ensure the batch is sorted
+			let mut small_vec = batch;
+			small_vec.sort_unstable();
+
+			if merged.is_empty() {
+				merged.extend(small_vec);
+				return;
+			}
+
+			// Reserve capacity in the merged vector
+			merged.reserve(small_vec.len());
+
+			// Starting index in merged for insertion
+			let mut start_idx = 0;
+
+			for elem in small_vec.into_iter() {
+				// Perform binary search between start_idx and merged.len()
+				let insert_pos = merged[start_idx..]
+					.binary_search_by(|a| cmp(a, &elem))
+					.map(|pos| start_idx + pos)
+					.unwrap_or_else(|pos| start_idx + pos);
+
+				// Insert the element at the found position
+				merged.insert(insert_pos, elem);
+
+				// Update start_idx for the next iteration
+				start_idx = insert_pos + 1; // +1 because we just inserted an element
+			}
+		}
+
 		pub(in crate::dbs) async fn push(&mut self, val: Value) -> Result<(), Error> {
-			self.buffer.push(val);
-			if self.buffer.len() >= Self::BUFFER_SIZE {
+			self.batch.push(val);
+			if self.batch.len() >= Self::BATCH_SIZE {
 				self.send_buffer().await?;
 			}
 			Ok(())
@@ -599,7 +628,7 @@ pub(super) mod parallel_ordered {
 		}
 
 		async fn send_buffer(&mut self) -> Result<(), Error> {
-			let buf = mem::replace(&mut self.buffer, Vec::with_capacity(Self::BUFFER_SIZE));
+			let buf = mem::replace(&mut self.batch, Vec::with_capacity(Self::BATCH_SIZE));
 			self.tx()?.send(buf).await.map_err(|e| Error::Internal(format!("{e}")))?;
 			Ok(())
 		}
@@ -609,7 +638,7 @@ pub(super) mod parallel_ordered {
 		}
 
 		async fn finalize(&mut self) -> Result<(), Error> {
-			if !self.buffer.is_empty() {
+			if !self.batch.is_empty() {
 				self.send_buffer().await?;
 			}
 			if let Some(tx) = self.tx.take() {
@@ -637,7 +666,60 @@ pub(super) mod parallel_ordered {
 		}
 
 		pub(in crate::dbs) fn explain(&self, exp: &mut Explanation) {
-			exp.add_collector("OrderedParallelCollector", vec![]);
+			exp.add_collector("SortedMemory", vec![]);
+		}
+	}
+
+	#[cfg(test)]
+	mod test {
+		use crate::dbs::store::sorted_memory::SortedMemory;
+		use crate::sql::Value;
+
+		#[test]
+		fn incremental_binary_insertion_test() {
+			let test = |mut main: Vec<Value>, buf: Vec<Value>, exp: Vec<Value>| {
+				SortedMemory::incremental_binary_insertion(&mut main, buf, Value::cmp);
+				assert_eq!(main, exp);
+			};
+			// All empty
+			test(vec![], vec![], vec![]);
+			// Merged empty
+			test(vec![], vec![2.into(), 1.into()], vec![1.into(), 2.into()]);
+			// Batch empty
+			test(vec![1.into(), 2.into()], vec![], vec![1.into(), 2.into()]);
+			// Batch before
+			test(
+				vec![3.into(), 4.into()],
+				vec![2.into(), 1.into()],
+				vec![1.into(), 2.into(), 3.into(), 4.into()],
+			);
+			// Batch after
+			test(
+				vec![3.into(), 4.into()],
+				vec![6.into(), 5.into()],
+				vec![3.into(), 4.into(), 5.into(), 6.into()],
+			);
+			// Batch interlaced
+			test(
+				vec![2.into(), 4.into()],
+				vec![5.into(), 1.into(), 3.into()],
+				vec![1.into(), 2.into(), 3.into(), 4.into(), 5.into()],
+			);
+			// Batch interlaced with duplicates
+			test(
+				vec![2.into(), 4.into(), 4.into()],
+				vec![3.into(), 2.into(), 5.into(), 3.into(), 1.into()],
+				vec![
+					1.into(),
+					2.into(),
+					2.into(),
+					3.into(),
+					3.into(),
+					4.into(),
+					4.into(),
+					5.into(),
+				],
+			);
 		}
 	}
 }
