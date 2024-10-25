@@ -15,6 +15,7 @@ use reblessive::tree::Stk;
 pub(super) enum Results {
 	None,
 	Memory(MemoryCollector),
+	#[cfg(not(target_arch = "wasm32"))]
 	SortedMemory(SortedMemory),
 	#[cfg(storage)]
 	File(Box<FileCollector>),
@@ -101,6 +102,7 @@ impl Results {
 		match self {
 			Self::None => {}
 			Self::Memory(m) => m.start_limit(start, limit),
+			#[cfg(not(target_arch = "wasm32"))]
 			Self::SortedMemory(c) => c.start_limit(start, limit).await?,
 			#[cfg(storage)]
 			Self::File(f) => f.start_limit(start, limit),
@@ -113,6 +115,8 @@ impl Results {
 		match self {
 			Self::None => true,
 			Self::Memory(s) => s.len() == 0,
+			#[cfg(not(target_arch = "wasm32"))]
+			Self::SortedMemory(s) => s.len() == 0,
 			#[cfg(storage)]
 			Self::File(e) => e.len() == 0,
 			Self::Groups(g) => g.len() == 0,
@@ -123,6 +127,7 @@ impl Results {
 		match self {
 			Self::None => 0,
 			Self::Memory(s) => s.len(),
+			#[cfg(not(target_arch = "wasm32"))]
 			Self::SortedMemory(s) => s.len(),
 			#[cfg(storage)]
 			Self::File(e) => e.len(),
@@ -133,6 +138,7 @@ impl Results {
 	pub(super) async fn take(&mut self) -> Result<Vec<Value>, Error> {
 		Ok(match self {
 			Self::Memory(m) => m.take_vec(),
+			#[cfg(not(target_arch = "wasm32"))]
 			Self::SortedMemory(c) => c.take_vec().await?,
 			#[cfg(storage)]
 			Self::File(f) => f.take_vec().await?,
@@ -146,6 +152,7 @@ impl Results {
 			Self::Memory(s) => {
 				s.explain(exp);
 			}
+			#[cfg(not(target_arch = "wasm32"))]
 			Self::SortedMemory(c) => c.explain(exp),
 			#[cfg(storage)]
 			Self::File(e) => {
