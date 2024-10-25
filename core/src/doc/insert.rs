@@ -20,7 +20,7 @@ impl Document {
 		// to create the record, if the record already exists
 		// then we will fetch the record from the storage
 		// engine, and will update the record subsequently
-		match self.extras.is_insert_initial() {
+		match self.is_iteration_initial() {
 			// We haven't yet checked if the record exists
 			// so let's assume that the record does not exist
 			// and attempt to create the record in the database
@@ -35,7 +35,7 @@ impl Document {
 					value,
 				}) => match stm.is_retryable() {
 					// There is an ON DUPLICATE KEY UPDATE clause
-					true => match self.extras.is_insert_with_specific_id() {
+					true => match self.is_specific_record_id() {
 						// No specific Record ID has been specified, so retry
 						false => Err(Error::RetryWithId(thing)),
 						// A specific Record ID was specified, so error
@@ -62,9 +62,12 @@ impl Document {
 					// There is an ON DUPLICATE KEY UPDATE clause
 					true => Err(Error::RetryWithId(thing)),
 					// There is no ON DUPLICATE KEY UPDATE clause
-					false => Err(Error::RecordExists {
-						thing,
-					}),
+					false => match stm.is_ignore() {
+						false => Err(Error::RecordExists {
+							thing,
+						}),
+						true => Err(Error::Ignore),
+					},
 				},
 				// If any other error was received, then let's
 				// pass that error through and return an error
@@ -79,7 +82,8 @@ impl Document {
 			false => self.insert_update(stk, ctx, opt, stm).await,
 		}
 	}
-	/// Attempt to run an INSERT clause
+	/// Attempt to run an INSERT statement to
+	/// create a record which does not exist
 	async fn insert_create(
 		&mut self,
 		stk: &mut Stk,
@@ -104,7 +108,8 @@ impl Document {
 		self.process_changefeeds(ctx, opt, stm).await?;
 		self.pluck(stk, ctx, opt, stm).await
 	}
-	/// Attempt to run an UPDATE clause
+	/// Attempt to run an INSERT statement to
+	/// update a record which already exists
 	async fn insert_update(
 		&mut self,
 		stk: &mut Stk,
