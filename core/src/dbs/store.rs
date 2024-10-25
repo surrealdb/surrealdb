@@ -1,6 +1,7 @@
 use rand::seq::SliceRandom;
 
 use crate::dbs::plan::Explanation;
+#[cfg(not(target_arch = "wasm32"))]
 use crate::dbs::rayon_spawn;
 #[cfg(not(target_arch = "wasm32"))]
 use crate::err::Error;

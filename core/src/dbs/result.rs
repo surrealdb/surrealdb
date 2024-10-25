@@ -3,6 +3,7 @@ use crate::dbs::group::GroupsCollector;
 use crate::dbs::plan::Explanation;
 #[cfg(storage)]
 use crate::dbs::store::file_store::FileCollector;
+#[cfg(not(target_arch = "wasm32"))]
 use crate::dbs::store::parallel_ordered::OrderedParallelCollector;
 use crate::dbs::store::MemoryCollector;
 use crate::dbs::{Options, Statement};
