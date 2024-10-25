@@ -109,6 +109,16 @@ impl Results {
 		Ok(())
 	}
 
+	pub(super) fn is_empty(&self) -> bool {
+		match self {
+			Self::None => true,
+			Self::Memory(s) => s.len() == 0,
+			#[cfg(storage)]
+			Self::File(e) => e.len() == 0,
+			Self::Groups(g) => g.len() == 0,
+		}
+	}
+
 	pub(super) fn len(&self) -> usize {
 		match self {
 			Self::None => 0,
