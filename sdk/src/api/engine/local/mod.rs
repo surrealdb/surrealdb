@@ -31,9 +31,12 @@ use crate::{
 	value::Notification,
 };
 use channel::Sender;
+#[cfg(not(target_arch = "wasm32"))]
 use futures::stream::poll_fn;
 use indexmap::IndexMap;
+#[cfg(not(target_arch = "wasm32"))]
 use std::pin::pin;
+#[cfg(not(target_arch = "wasm32"))]
 use std::task::{ready, Poll};
 use std::{
 	collections::{BTreeMap, HashMap},
@@ -54,6 +57,7 @@ use surrealdb_core::{
 		Data, Field, Output, Query, Statement, Value as CoreValue,
 	},
 };
+#[cfg(not(target_arch = "wasm32"))]
 use tokio_util::bytes::BytesMut;
 use uuid::Uuid;
 

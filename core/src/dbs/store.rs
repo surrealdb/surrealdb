@@ -123,6 +123,7 @@ pub(super) mod file_store {
 	#[cfg(not(target_arch = "wasm32"))]
 	use crate::dbs::rayon_spawn;
 	use crate::err::Error;
+	#[cfg(not(target_arch = "wasm32"))]
 	use crate::err::Error::OrderingError;
 	use crate::sql::order::Ordering;
 	use crate::sql::Value;
@@ -229,6 +230,7 @@ pub(super) mod file_store {
 			match orders {
 				Ordering::Random => {
 					let mut res: Vec<Value> = Vec::with_capacity(num as usize);
+					#[cfg(not(target_arch = "wasm32"))]
 					let res = rayon_spawn(
 						move || {
 							for r in reader.into_iter().skip(start as usize).take(num as usize) {
@@ -240,36 +242,41 @@ pub(super) mod file_store {
 						|e| OrderingError(format!("{e}")),
 					)
 					.await?;
+					#[cfg(target_arch = "wasm32")]
+					{
+						for r in reader.into_iter().skip(start as usize).take(num as usize) {
+							res.push(r?);
+						}
+						res.shuffle(&mut rand::thread_rng());
+					}
 					Ok(res)
 				}
 				Ordering::Order(orders) => {
 					let sort_dir = self.dir.path().join(Self::SORT_DIRECTORY_NAME);
-					let res = rayon_spawn(
-						move || {
-							fs::create_dir(&sort_dir)?;
+					let f = || -> Result<Vec<Value>, Error> {
+						fs::create_dir(&sort_dir)?;
+						let sorter: ExternalSorter<
+							Value,
+							Error,
+							LimitedBufferBuilder,
+							ValueExternalChunk,
+						> = ExternalSorterBuilder::new()
+							.with_tmp_dir(&sort_dir)
+							.with_buffer(LimitedBufferBuilder::new(
+								*EXTERNAL_SORTING_BUFFER_LIMIT,
+								true,
+							))
+							.build()?;
 
-							let sorter: ExternalSorter<
-								Value,
-								Error,
-								LimitedBufferBuilder,
-								ValueExternalChunk,
-							> = ExternalSorterBuilder::new()
-								.with_tmp_dir(&sort_dir)
-								.with_buffer(LimitedBufferBuilder::new(
-									*EXTERNAL_SORTING_BUFFER_LIMIT,
-									true,
-								))
-								.build()?;
-
-							let sorted = sorter.sort_by(reader, |a, b| orders.compare(a, b))?;
-							let iter = sorted.map(Result::unwrap);
-							let r: Vec<Value> =
-								iter.skip(start as usize).take(num as usize).collect();
-							Ok(r)
-						},
-						|e| OrderingError(format!("{e}")),
-					)
-					.await?;
+						let sorted = sorter.sort_by(reader, |a, b| orders.compare(a, b))?;
+						let iter = sorted.map(Result::unwrap);
+						let r: Vec<Value> = iter.skip(start as usize).take(num as usize).collect();
+						Ok(r)
+					};
+					#[cfg(not(target_arch = "wasm32"))]
+					let res = rayon_spawn(f, |e| OrderingError(format!("{e}"))).await?;
+					#[cfg(target_arch = "wasm32")]
+					let res = f()?;
 					Ok(res)
 				}
 			}
