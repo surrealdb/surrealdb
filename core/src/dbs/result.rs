@@ -3,7 +3,8 @@ use crate::dbs::group::GroupsCollector;
 use crate::dbs::plan::Explanation;
 #[cfg(storage)]
 use crate::dbs::store::file_store::FileCollector;
-use crate::dbs::store::{MemoryCollector, OrderedParallelCollector};
+use crate::dbs::store::parallel_ordered::OrderedParallelCollector;
+use crate::dbs::store::MemoryCollector;
 use crate::dbs::{Options, Statement};
 use crate::err::Error;
 use crate::sql::order::Ordering;
@@ -34,6 +35,7 @@ impl Results {
 				return Ok(Self::File(Box::new(FileCollector::new(temp_dir)?)));
 			}
 		}
+		#[cfg(not(target_arch = "wasm32"))]
 		if stm.parallel() {
 			if let Some(order) = stm.order() {
 				return Ok(Self::OrderedParallel(OrderedParallelCollector::new(order)));
