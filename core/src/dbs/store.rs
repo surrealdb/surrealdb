@@ -253,7 +253,7 @@ pub(super) mod file_store {
 				}
 				Ordering::Order(orders) => {
 					let sort_dir = self.dir.path().join(Self::SORT_DIRECTORY_NAME);
-					let f = || -> Result<Vec<Value>, Error> {
+					let f = move || -> Result<Vec<Value>, Error> {
 						fs::create_dir(&sort_dir)?;
 						let sorter: ExternalSorter<
 							Value,
