@@ -180,8 +180,11 @@ impl Executor {
 			Statement::Use(stmt) => self.execute_use_statement(stmt).map(|_| Value::None),
 			stmt => {
 				let writeable = stmt.writeable();
-				let Ok(txn) = kvs.transaction(writeable.into(), LockType::Optimistic).await else {
-					return Err(Error::TxFailure);
+				let txn = match kvs.transaction(writeable.into(), LockType::Optimistic).await {
+					Err(e) => {
+						return Err(e);
+					}
+					Ok(v) => v,
 				};
 				let txn = Arc::new(txn);
 
