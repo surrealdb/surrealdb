@@ -1201,14 +1201,17 @@ impl From<regex::Error> for Error {
 	}
 }
 
-#[cfg(feature = "kv-mem")]
-impl From<echodb::err::Error> for Error {
-	fn from(e: echodb::err::Error) -> Error {
-		match e {
-			echodb::err::Error::KeyAlreadyExists => Error::TxKeyAlreadyExists,
-			echodb::err::Error::ValNotExpectedValue => Error::TxConditionNotMet,
-			_ => Error::Tx(e.to_string()),
-		}
+#[cfg(any(feature = "kv-mem", feature = "kv-surrealkv"))]
+impl From<surrealkv::Error> for Error {
+	fn from(e: surrealkv::Error) -> Error {
+		Error::Tx(e.to_string())
+	}
+}
+
+#[cfg(feature = "kv-rocksdb")]
+impl From<rocksdb::Error> for Error {
+	fn from(e: rocksdb::Error) -> Error {
+		Error::Tx(e.to_string())
 	}
 }
 
@@ -1232,20 +1235,6 @@ impl From<tikv::Error> for Error {
 			tikv::Error::RegionError(re) if re.raft_entry_too_large.is_some() => Error::TxTooLarge,
 			_ => Error::Tx(e.to_string()),
 		}
-	}
-}
-
-#[cfg(feature = "kv-rocksdb")]
-impl From<rocksdb::Error> for Error {
-	fn from(e: rocksdb::Error) -> Error {
-		Error::Tx(e.to_string())
-	}
-}
-
-#[cfg(feature = "kv-surrealkv")]
-impl From<surrealkv::Error> for Error {
-	fn from(e: surrealkv::Error) -> Error {
-		Error::Tx(e.to_string())
 	}
 }
 

@@ -39,7 +39,6 @@ mod tikv;
 #[cfg(not(target_arch = "wasm32"))]
 mod index;
 #[cfg(any(
-	feature = "kv-mem",
 	feature = "kv-tikv",
 	feature = "kv-fdb",
 	feature = "kv-indxdb",
