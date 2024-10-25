@@ -553,13 +553,13 @@ pub(super) mod sorted_memory {
 		tx: Option<Sender<Vec<Value>>>,
 		rx: Option<JoinHandle<Vec<Value>>>,
 		batch: Vec<Value>,
-		len: Arc<AtomicUsize>,
 		merged: Vec<Value>,
+		len: usize,
 	}
 
 	impl SortedMemory {
-		const BATCH_SIZE: usize = 100;
-		const CHANNEL_BUFFER_SIZE: usize = 100;
+		const CHANNEL_BUFFER_SIZE: usize = 128;
+		const BATCH_MAX_SIZE: usize = 1024;
 		pub(in crate::dbs) fn new(ordering: &Ordering) -> Self {
 			let (tx, mut rx) = mpsc::channel(Self::CHANNEL_BUFFER_SIZE);
 			let len = Arc::new(AtomicUsize::new(0));
@@ -576,9 +576,9 @@ pub(super) mod sorted_memory {
 			Self {
 				tx: Some(tx),
 				rx: Some(rx),
-				batch: Vec::with_capacity(Self::BATCH_SIZE),
-				len,
+				batch: Vec::with_capacity(Self::BATCH_MAX_SIZE),
 				merged: vec![],
+				len: 0,
 			}
 		}
 
@@ -624,7 +624,7 @@ pub(super) mod sorted_memory {
 
 		pub(in crate::dbs) async fn push(&mut self, val: Value) -> Result<(), Error> {
 			self.batch.push(val);
-			if self.batch.len() >= Self::BATCH_SIZE {
+			if self.batch.len() >= Self::BATCH_MAX_SIZE {
 				self.send_buffer().await?;
 			}
 			Ok(())
@@ -639,13 +639,15 @@ pub(super) mod sorted_memory {
 		}
 
 		async fn send_buffer(&mut self) -> Result<(), Error> {
-			let buf = mem::replace(&mut self.batch, Vec::with_capacity(Self::BATCH_SIZE));
-			self.tx()?.send(buf).await.map_err(|e| Error::Internal(format!("{e}")))?;
+			let batch = mem::replace(&mut self.batch, Vec::with_capacity(Self::BATCH_MAX_SIZE));
+			let size = batch.len();
+			self.tx()?.send(batch).await.map_err(|e| Error::Internal(format!("{e}")))?;
+			self.len += size;
 			Ok(())
 		}
 
 		pub(in crate::dbs) fn len(&self) -> usize {
-			self.len.load(atomic::Ordering::Relaxed)
+			self.len
 		}
 
 		async fn finalize(&mut self) -> Result<(), Error> {

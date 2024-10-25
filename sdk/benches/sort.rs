@@ -3,7 +3,7 @@ use std::time::Duration;
 use surrealdb::dbs::Session;
 use surrealdb::kvs::Datastore;
 use surrealdb_core::sql::Value;
-use tokio::runtime::Runtime;
+use tokio::runtime::{Builder, Runtime};
 
 /// When ordering a query, the sort method can choose between
 /// single-threaded sorting or parallel sorting (Rayon::par_sort_unstable_by).
@@ -26,19 +26,32 @@ fn bench_sort(c: &mut Criterion) {
 	});
 
 	group.bench_function("sort-parallel", |b| {
-		b.to_async(Runtime::new().unwrap())
+		b.to_async(Builder::new_multi_thread().build().unwrap())
 			.iter(|| run(&i, "SELECT * FROM i ORDER BY v PARALLEL", 9999))
 	});
 
 	let i = rt.block_on(prepare_data(10000));
 
 	group.bench_function("sort-rayon", |b| {
-		b.to_async(Runtime::new().unwrap()).iter(|| run(&i, "SELECT * FROM i ORDER BY v", 10000))
+		b.to_async(Builder::new_multi_thread().build().unwrap())
+			.iter(|| run(&i, "SELECT * FROM i ORDER BY v", 10000))
 	});
 
 	group.bench_function("sort-rayon-parallel", |b| {
-		b.to_async(Runtime::new().unwrap())
+		b.to_async(Builder::new_multi_thread().build().unwrap())
 			.iter(|| run(&i, "SELECT * FROM i ORDER BY v PARALLEL", 10000))
+	});
+
+	let i = rt.block_on(prepare_data(1000000));
+
+	group.bench_function("sort-rayon-large", |b| {
+		b.to_async(Builder::new_multi_thread().build().unwrap())
+			.iter(|| run(&i, "SELECT * FROM i ORDER BY v", 1000000))
+	});
+
+	group.bench_function("sort-rayon-large-parallel", |b| {
+		b.to_async(Builder::new_multi_thread().build().unwrap())
+			.iter(|| run(&i, "SELECT * FROM i ORDER BY v PARALLEL", 100000))
 	});
 
 	group.finish();
