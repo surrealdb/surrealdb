@@ -778,6 +778,6 @@ async fn insert_ignore() -> Result<(), Error> {
 		";
 	let mut t = Test::new(sql).await?;
 	t.expect_size(2)?;
-	t.expect_vals(&vec!["[{ id: user:1, name: 'foo' }]", "[]"])?;
+	t.expect_vals(&["[{ id: user:1, name: 'foo' }]", "[]"])?;
 	Ok(())
 }
