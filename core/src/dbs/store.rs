@@ -120,6 +120,7 @@ impl From<Vec<Value>> for MemoryCollector {
 pub(super) mod file_store {
 	use crate::cnf::EXTERNAL_SORTING_BUFFER_LIMIT;
 	use crate::dbs::plan::Explanation;
+	#[cfg(not(target_arch = "wasm32"))]
 	use crate::dbs::rayon_spawn;
 	use crate::err::Error;
 	use crate::err::Error::OrderingError;
@@ -164,6 +165,7 @@ pub(super) mod file_store {
 		}
 		pub(in crate::dbs) async fn push(&mut self, value: Value) -> Result<(), Error> {
 			if let Some(mut writer) = self.writer.take() {
+				#[cfg(not(target_arch = "wasm32"))]
 				let writer = rayon_spawn(
 					move || {
 						writer.push(value)?;
@@ -172,6 +174,8 @@ pub(super) mod file_store {
 					|e| Error::Internal(format!("{e}")),
 				)
 				.await?;
+				#[cfg(target_arch = "wasm32")]
+				writer.push(value)?;
 				self.len += 1;
 				self.writer = Some(writer);
 				Ok(())

@@ -59,6 +59,7 @@ impl Results {
 			Self::Memory(s) => {
 				s.push(val);
 			}
+			#[cfg(not(target_arch = "wasm32"))]
 			Self::SortedMemory(c) => {
 				c.push(val).await?;
 			}
