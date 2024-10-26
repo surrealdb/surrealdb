@@ -4,7 +4,7 @@ use crate::dbs::plan::Explanation;
 #[cfg(storage)]
 use crate::dbs::store::file_store::FileCollector;
 #[cfg(not(target_arch = "wasm32"))]
-use crate::dbs::store::sorted_memory::SortedMemory;
+use crate::dbs::store::memory_ordered::MemoryOrdered;
 use crate::dbs::store::MemoryCollector;
 use crate::dbs::{Options, Statement};
 use crate::err::Error;
@@ -16,7 +16,7 @@ pub(super) enum Results {
 	None,
 	Memory(MemoryCollector),
 	#[cfg(not(target_arch = "wasm32"))]
-	SortedMemory(SortedMemory),
+	MemoryOrdered(MemoryOrdered),
 	#[cfg(storage)]
 	File(Box<FileCollector>),
 	Groups(GroupsCollector),
@@ -40,7 +40,7 @@ impl Results {
 		#[cfg(not(target_arch = "wasm32"))]
 		if stm.parallel() {
 			if let Some(order) = stm.order() {
-				return Ok(Self::SortedMemory(SortedMemory::new(order)));
+				return Ok(Self::MemoryOrdered(MemoryOrdered::new(order)));
 			}
 		}
 		Ok(Self::Memory(Default::default()))
@@ -60,7 +60,7 @@ impl Results {
 				s.push(val);
 			}
 			#[cfg(not(target_arch = "wasm32"))]
-			Self::SortedMemory(c) => {
+			Self::MemoryOrdered(c) => {
 				c.push(val).await?;
 			}
 			#[cfg(storage)]
@@ -104,7 +104,7 @@ impl Results {
 			Self::None => {}
 			Self::Memory(m) => m.start_limit(start, limit),
 			#[cfg(not(target_arch = "wasm32"))]
-			Self::SortedMemory(c) => c.start_limit(start, limit).await?,
+			Self::MemoryOrdered(c) => c.start_limit(start, limit).await?,
 			#[cfg(storage)]
 			Self::File(f) => f.start_limit(start, limit),
 			Self::Groups(_) => {}
@@ -121,7 +121,7 @@ impl Results {
 			Self::None => 0,
 			Self::Memory(s) => s.len(),
 			#[cfg(not(target_arch = "wasm32"))]
-			Self::SortedMemory(s) => s.len(),
+			Self::MemoryOrdered(s) => s.len(),
 			#[cfg(storage)]
 			Self::File(e) => e.len(),
 			Self::Groups(g) => g.len(),
@@ -132,7 +132,7 @@ impl Results {
 		Ok(match self {
 			Self::Memory(m) => m.take_vec(),
 			#[cfg(not(target_arch = "wasm32"))]
-			Self::SortedMemory(c) => c.take_vec().await?,
+			Self::MemoryOrdered(c) => c.take_vec().await?,
 			#[cfg(storage)]
 			Self::File(f) => f.take_vec().await?,
 			_ => vec![],
@@ -146,7 +146,7 @@ impl Results {
 				s.explain(exp);
 			}
 			#[cfg(not(target_arch = "wasm32"))]
-			Self::SortedMemory(c) => c.explain(exp),
+			Self::MemoryOrdered(c) => c.explain(exp),
 			#[cfg(storage)]
 			Self::File(e) => {
 				e.explain(exp);

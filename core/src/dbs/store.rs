@@ -536,95 +536,130 @@ pub(super) mod file_store {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-pub(super) mod sorted_memory {
+pub(super) mod memory_ordered {
 	use crate::dbs::plan::Explanation;
 	use crate::dbs::store::MemoryCollector;
 	use crate::err::Error;
-	use crate::sql::order::Ordering;
+	use crate::sql::order::{OrderList, Ordering};
 	use crate::sql::Value;
-	use std::sync::atomic::AtomicUsize;
-	use std::sync::{atomic, Arc};
+	use rand::prelude::SliceRandom;
+	use rand::{thread_rng, Rng};
 	use std::{cmp, mem};
 	use tokio::sync::mpsc;
 	use tokio::sync::mpsc::Sender;
 	use tokio::task::JoinHandle;
 
-	pub(in crate::dbs) struct SortedMemory {
+	const CHANNEL_BUFFER_SIZE: usize = 128;
+	const BATCH_MAX_SIZE: usize = 1024;
+
+	/// The struct MemoryOrdered represents an in-memory store that aggregates data in batches,
+	/// ordering the data, and allows for pushing the data asynchronously.
+	pub(in crate::dbs) struct MemoryOrdered {
+		/// Sender-side of asynchronous channel to send batches
 		tx: Option<Sender<Vec<Value>>>,
+		/// Handle for the merge task that processes incoming batches
 		rx: Option<JoinHandle<Vec<Value>>>,
+		/// Current batch of values to be merged once full
 		batch: Vec<Value>,
+		/// Vector containing merged and sorted values.
 		merged: Vec<Value>,
-		len: usize,
 	}
 
-	impl SortedMemory {
-		const CHANNEL_BUFFER_SIZE: usize = 128;
-		const BATCH_MAX_SIZE: usize = 1024;
+	impl MemoryOrdered {
 		pub(in crate::dbs) fn new(ordering: &Ordering) -> Self {
-			let (tx, mut rx) = mpsc::channel(Self::CHANNEL_BUFFER_SIZE);
-			let len = Arc::new(AtomicUsize::new(0));
-			let l = len.clone();
-			let ordering = ordering.clone();
-			let rx = tokio::spawn(async move {
-				let mut merged = Vec::new();
-				while let Some(buf) = rx.recv().await {
-					Self::merge_and_sort(&ordering, &mut merged, buf);
-					l.store(merged.len(), atomic::Ordering::Relaxed);
-				}
-				merged
-			});
+			let (tx, rx) = mpsc::channel(CHANNEL_BUFFER_SIZE);
+			// Spawns a merge task to process and merge incoming batches asynchronously.
+			let rx = match ordering {
+				Ordering::Random => tokio::spawn(Self::merge_random_task(rx)),
+				Ordering::Order(orders) => tokio::spawn(Self::merge_sort_task(rx, orders.clone())),
+			};
 			Self {
 				tx: Some(tx),
 				rx: Some(rx),
-				batch: Vec::with_capacity(Self::BATCH_MAX_SIZE),
+				batch: Vec::with_capacity(BATCH_MAX_SIZE),
 				merged: vec![],
-				len: 0,
 			}
 		}
 
-		fn merge_and_sort(ordering: &Ordering, merged: &mut Vec<Value>, buffer: Vec<Value>) {
-			if let Ordering::Order(orders) = ordering {
-				Self::incremental_binary_insertion(merged, buffer, |a, b| orders.compare(a, b));
-			};
+		async fn merge_sort_task(
+			mut rx: mpsc::Receiver<Vec<Value>>,
+			orders: OrderList,
+		) -> Vec<Value> {
+			let mut merged = Vec::new();
+			while let Some(batch) = rx.recv().await {
+				Self::incremental_sorted_insertion(&mut merged, batch, |a, b| orders.compare(a, b));
+			}
+			merged
 		}
 
-		fn incremental_binary_insertion<F>(merged: &mut Vec<Value>, batch: Vec<Value>, cmp: F)
+		async fn merge_random_task(mut rx: mpsc::Receiver<Vec<Value>>) -> Vec<Value> {
+			let mut merged = Vec::new();
+			while let Some(batch) = rx.recv().await {
+				Self::incremental_random_insertion(&mut merged, batch);
+			}
+			merged
+		}
+
+		fn incremental_sorted_insertion<F>(merged: &mut Vec<Value>, mut batch: Vec<Value>, cmp: F)
 		where
 			F: Fn(&Value, &Value) -> cmp::Ordering,
 		{
 			// Ensure the batch is sorted
-			let mut small_vec = batch;
-			small_vec.sort_unstable();
-
+			batch.sort_unstable();
+			// If merged is empty we just move the batch,
 			if merged.is_empty() {
-				merged.extend(small_vec);
+				*merged = batch;
 				return;
 			}
 
 			// Reserve capacity in the merged vector
-			merged.reserve(small_vec.len());
+			merged.reserve(batch.len());
 
-			// Starting index in merged for insertion
 			let mut start_idx = 0;
 
-			for elem in small_vec.into_iter() {
+			for val in batch.into_iter() {
 				// Perform binary search between start_idx and merged.len()
+				// As the batch is sorted, when a value is inserted,
+				// we know that the next value will be inserted after.
+				// Therefore we can reduce the scope of the next binary search.
 				let insert_pos = merged[start_idx..]
-					.binary_search_by(|a| cmp(a, &elem))
+					.binary_search_by(|a| cmp(a, &val))
 					.map(|pos| start_idx + pos)
 					.unwrap_or_else(|pos| start_idx + pos);
 
 				// Insert the element at the found position
-				merged.insert(insert_pos, elem);
+				merged.insert(insert_pos, val);
 
 				// Update start_idx for the next iteration
 				start_idx = insert_pos + 1; // +1 because we just inserted an element
 			}
 		}
 
+		fn incremental_random_insertion(merged: &mut Vec<Value>, batch: Vec<Value>) {
+			let mut rng = thread_rng();
+
+			if merged.is_empty() {
+				merged.extend(batch);
+				merged.shuffle(&mut rng);
+				return;
+			}
+
+			// Reserve capacity in the merged vector
+			merged.reserve(batch.len());
+
+			let mut len = merged.len() - 1;
+			for val in batch.into_iter() {
+				// Select a random insertion point
+				let insert_pos = rng.gen_range(0..len);
+				// Insert the value at the position
+				merged.insert(insert_pos, val);
+				len += 1;
+			}
+		}
+
 		pub(in crate::dbs) async fn push(&mut self, val: Value) -> Result<(), Error> {
 			self.batch.push(val);
-			if self.batch.len() >= Self::BATCH_MAX_SIZE {
+			if self.batch.len() >= BATCH_MAX_SIZE {
 				self.send_buffer().await?;
 			}
 			Ok(())
@@ -639,15 +674,13 @@ pub(super) mod sorted_memory {
 		}
 
 		async fn send_buffer(&mut self) -> Result<(), Error> {
-			let batch = mem::replace(&mut self.batch, Vec::with_capacity(Self::BATCH_MAX_SIZE));
-			let size = batch.len();
+			let batch = mem::replace(&mut self.batch, Vec::with_capacity(BATCH_MAX_SIZE));
 			self.tx()?.send(batch).await.map_err(|e| Error::Internal(format!("{e}")))?;
-			self.len += size;
 			Ok(())
 		}
 
 		pub(in crate::dbs) fn len(&self) -> usize {
-			self.len
+			self.merged.len()
 		}
 
 		async fn finalize(&mut self) -> Result<(), Error> {
@@ -679,20 +712,20 @@ pub(super) mod sorted_memory {
 		}
 
 		pub(in crate::dbs) fn explain(&self, exp: &mut Explanation) {
-			exp.add_collector("SortedMemory", vec![]);
+			exp.add_collector("MemoryOrdered", vec![]);
 		}
 	}
 
 	#[cfg(test)]
 	mod test {
-		use crate::dbs::store::sorted_memory::SortedMemory;
+		use crate::dbs::store::memory_ordered::MemoryOrdered;
 		use crate::sql::Value;
 
 		#[test]
-		fn incremental_binary_insertion_test() {
-			let test = |mut main: Vec<Value>, buf: Vec<Value>, exp: Vec<Value>| {
-				SortedMemory::incremental_binary_insertion(&mut main, buf, Value::cmp);
-				assert_eq!(main, exp);
+		fn incremental_sorted_insertion_test() {
+			let test = |mut merged: Vec<Value>, batch: Vec<Value>, expected: Vec<Value>| {
+				MemoryOrdered::incremental_sorted_insertion(&mut merged, batch, Value::cmp);
+				assert_eq!(merged, expected);
 			};
 			// All empty
 			test(vec![], vec![], vec![]);
@@ -734,5 +767,28 @@ pub(super) mod sorted_memory {
 				],
 			);
 		}
+	}
+
+	#[test]
+	fn incremental_random_insertion_test() {
+		let test = |mut merged: Vec<Value>, batch: Vec<Value>, expected: Vec<Value>| {
+			MemoryOrdered::incremental_random_insertion(&mut merged, batch);
+			assert_eq!(merged.len(), expected.len());
+			for v in expected {
+				assert!(merged.contains(&v));
+			}
+		};
+		// All empty
+		test(vec![], vec![], vec![]);
+		// Merged empty
+		test(vec![], vec![2.into(), 1.into()], vec![1.into(), 2.into()]);
+		// Batch empty
+		test(vec![1.into(), 2.into()], vec![], vec![1.into(), 2.into()]);
+		// Normal batch
+		test(
+			vec![3.into(), 4.into()],
+			vec![2.into(), 1.into()],
+			vec![1.into(), 2.into(), 3.into(), 4.into()],
+		);
 	}
 }

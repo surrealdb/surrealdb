@@ -2298,7 +2298,7 @@ async fn select_with_record_id_index() -> Result<(), Error> {
 	assert_eq!(res.len(), 15);
 	skip_ok(&mut res, 2)?;
 	//
-	for t in ["CONTAINS", "CONTAINSANY", "IN"] {
+	for _ in ["CONTAINS", "CONTAINSANY", "IN"] {
 		let tmp = res.remove(0).result?;
 		assert_eq!(format!("{:#}", tmp), format!("{:#}", expected), "{t}");
 		//
@@ -2532,7 +2532,7 @@ async fn select_with_non_boolean_expression() -> Result<(), Error> {
 	assert_eq!(res.len(), 15);
 	skip_ok(&mut res, 5)?;
 	//
-	for i in 0..5 {
+	for _ in 0..5 {
 		let tmp = res.remove(0).result?;
 		let val = Value::parse(
 			r#"[
@@ -3101,12 +3101,16 @@ async fn select_parallel_ordered_collector() -> Result<(), Error> {
 	let sql = r"
 		CREATE |i:100| SET v = rand::guid() RETURN NONE;
 		SELECT * FROM i ORDER BY v PARALLEL EXPLAIN;
-		SELECT * FROM i ORDER BY v PARALLEL;";
+		SELECT * FROM i ORDER BY RAND() PARALLEL EXPLAIN;
+		SELECT * FROM i ORDER BY v PARALLEL;
+		SELECT * FROM i ORDER BY RAND() PARALLEL;";
 	let mut t = Test::new(sql).await?;
-	t.expect_size(3)?;
+	t.expect_size(5)?;
 	t.skip_ok(1)?;
-	t.expect_val(
-		"[
+	// Check explain plans
+	for _ in 0..2 {
+		t.expect_val(
+			"[
 				{
 					detail: {
 						table: 'i'
@@ -3115,17 +3119,35 @@ async fn select_parallel_ordered_collector() -> Result<(), Error> {
 				},
 				{
 					detail: {
-						type: 'SortedMemory'
+						type: 'MemoryOrdered'
 					},
 					operation: 'Collector'
 				}
 			]",
-	)?;
-	let v = t.next_value()?;
-	if let Value::Array(a) = &v {
-		assert_eq!(a.len(), 100);
-	} else {
-		panic!("Expected a Value::Array but get: {v}");
+		)?;
 	}
+
+	// Extract the array from a value
+	let mut get_array = || {
+		let v = t.next_value()?;
+		if let Value::Array(a) = &v {
+			assert_eq!(a.len(), 100);
+			Ok::<_, Error>(a.to_vec())
+		} else {
+			panic!("Expected a Value::Array but get: {v}");
+		}
+	};
+
+	// Check that the values are sorted `ORDER BY v`
+	let a = get_array()?;
+	assert!(a.windows(2).all(|w| w[0] <= w[1]), "Values are not sorted: {a:?}");
+
+	// Check that the values are not sorted `ORDER BY RAND()`
+	let a = get_array()?;
+	assert!(a.windows(2).any(|w| w[0] <= w[1]), "Values are not random: {a:?}");
+	// With an array of 100, there is a probability of factorial 100! that `ORDER BY RAND()` returns a sorted array
+	// At a rate of one test per minute, we're SURE that approximately 1.77 × 10¹⁵³ years from now a test WILL fail.
+	// For perspective, this time frame vastly exceeds the age of the universe, but well, my apologies ¯\_(ツ)_/¯
+
 	Ok(())
 }

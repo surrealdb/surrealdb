@@ -54,6 +54,16 @@ fn bench_sort(c: &mut Criterion) {
 			.iter(|| run(&i, "SELECT * FROM i ORDER BY v PARALLEL", 100000))
 	});
 
+	group.bench_function("sort-rayon-large-random", |b| {
+		b.to_async(Builder::new_multi_thread().build().unwrap())
+			.iter(|| run(&i, "SELECT * FROM i ORDER BY RAND()", 1000000))
+	});
+
+	group.bench_function("sort-rayon-large-parallel", |b| {
+		b.to_async(Builder::new_multi_thread().build().unwrap())
+			.iter(|| run(&i, "SELECT * FROM i ORDER BY RAND() PARALLEL", 100000))
+	});
+
 	group.finish();
 }
 
