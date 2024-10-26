@@ -21,45 +21,41 @@ fn bench_sort(c: &mut Criterion) {
 
 	let i = rt.block_on(prepare_data(9999));
 
-	group.bench_function("sort", |b| {
-		b.to_async(Runtime::new().unwrap()).iter(|| run(&i, "SELECT * FROM i ORDER BY v", 9999))
-	});
-
-	group.bench_function("sort-parallel", |b| {
+	group.bench_function("sort 9.999 (Vec::sort_unstable_by)", |b| {
 		b.to_async(Builder::new_multi_thread().build().unwrap())
-			.iter(|| run(&i, "SELECT * FROM i ORDER BY v PARALLEL", 9999))
+			.iter(|| run(&i, "SELECT * FROM i ORDER BY v", 9999))
 	});
 
 	let i = rt.block_on(prepare_data(10000));
 
-	group.bench_function("sort-rayon", |b| {
+	group.bench_function("sort 10.000 (Rayon::par_sort_unstable_by)", |b| {
 		b.to_async(Builder::new_multi_thread().build().unwrap())
 			.iter(|| run(&i, "SELECT * FROM i ORDER BY v", 10000))
 	});
 
-	group.bench_function("sort-rayon-parallel", |b| {
+	group.bench_function("sort-parallel 10.000 (concurrent/incremental)", |b| {
 		b.to_async(Builder::new_multi_thread().build().unwrap())
 			.iter(|| run(&i, "SELECT * FROM i ORDER BY v PARALLEL", 10000))
 	});
 
 	let i = rt.block_on(prepare_data(1000000));
 
-	group.bench_function("sort-rayon-large", |b| {
+	group.bench_function("sort 1m (Rayon::par_sort_unstable_by)", |b| {
 		b.to_async(Builder::new_multi_thread().build().unwrap())
 			.iter(|| run(&i, "SELECT * FROM i ORDER BY v", 1000000))
 	});
 
-	group.bench_function("sort-rayon-large-parallel", |b| {
+	group.bench_function("sort 1m (concurrent/incremental)", |b| {
 		b.to_async(Builder::new_multi_thread().build().unwrap())
 			.iter(|| run(&i, "SELECT * FROM i ORDER BY v PARALLEL", 100000))
 	});
 
-	group.bench_function("sort-rayon-large-random", |b| {
+	group.bench_function("random 1m (Vec::shuffle)", |b| {
 		b.to_async(Builder::new_multi_thread().build().unwrap())
 			.iter(|| run(&i, "SELECT * FROM i ORDER BY RAND()", 1000000))
 	});
 
-	group.bench_function("sort-rayon-large-random-parallel", |b| {
+	group.bench_function("random 1m (concurrent/incremental)", |b| {
 		b.to_async(Builder::new_multi_thread().build().unwrap())
 			.iter(|| run(&i, "SELECT * FROM i ORDER BY RAND() PARALLEL", 100000))
 	});

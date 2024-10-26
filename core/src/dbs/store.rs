@@ -647,13 +647,12 @@ pub(super) mod memory_ordered {
 			// Reserve capacity in the merged vector
 			merged.reserve(batch.len());
 
-			let mut len = merged.len() - 1;
-			for val in batch.into_iter() {
-				// Select a random insertion point
-				let insert_pos = rng.gen_range(0..len);
-				// Insert the value at the position
-				merged.insert(insert_pos, val);
-				len += 1;
+			// Fisher-Yates shuffle to shuffle the elements as they are merged
+			for val in batch {
+				merged.push(val);
+				let i = merged.len() - 1;
+				let j = rng.gen_range(0..=i);
+				merged.swap(i, j);
 			}
 		}
 
