@@ -2298,7 +2298,7 @@ async fn select_with_record_id_index() -> Result<(), Error> {
 	assert_eq!(res.len(), 15);
 	skip_ok(&mut res, 2)?;
 	//
-	for _ in ["CONTAINS", "CONTAINSANY", "IN"] {
+	for t in ["CONTAINS", "CONTAINSANY", "IN"] {
 		let tmp = res.remove(0).result?;
 		assert_eq!(format!("{:#}", tmp), format!("{:#}", expected), "{t}");
 		//
@@ -2532,7 +2532,7 @@ async fn select_with_non_boolean_expression() -> Result<(), Error> {
 	assert_eq!(res.len(), 15);
 	skip_ok(&mut res, 5)?;
 	//
-	for _ in 0..5 {
+	for i in 0..5 {
 		let tmp = res.remove(0).result?;
 		let val = Value::parse(
 			r#"[
