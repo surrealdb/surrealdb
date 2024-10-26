@@ -334,7 +334,7 @@ async fn upsert_new_records_with_thing_and_where_clause() -> Result<(), Error> {
 	assert!(matches!(tmp, Value::Array(v) if v.len() == 1));
 	//
 	let tmp = res.remove(0).result?;
-	assert!(matches!(tmp, Value::Array(v) if v.len() == 0));
+	assert!(matches!(tmp, Value::Array(v) if v.is_empty()));
 	//
 	let tmp = res.remove(0).result?;
 	let val = Value::parse(
