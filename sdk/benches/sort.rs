@@ -33,7 +33,7 @@ fn bench_sort(c: &mut Criterion) {
 			.iter(|| run(&i, "SELECT * FROM i ORDER BY v", 10000))
 	});
 
-	group.bench_function("sort-parallel 10.000 (concurrent/incremental)", |b| {
+	group.bench_function("sort 10.000 (concurrent/incremental)", |b| {
 		b.to_async(Builder::new_multi_thread().build().unwrap())
 			.iter(|| run(&i, "SELECT * FROM i ORDER BY v PARALLEL", 10000))
 	});
