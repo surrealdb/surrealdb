@@ -10,7 +10,9 @@ use std::sync::Arc;
 use uuid::Uuid;
 
 /// An Options is passed around when processing a set of query
-/// statements. An Options contains specific information for how
+/// statements.
+///
+/// An Options contains specific information for how
 /// to process each particular statement, including the record
 /// version to retrieve, whether futures should be processed, and
 /// whether field/event/table queries should be processed (useful
@@ -178,8 +180,13 @@ impl Options {
 
 	/// Specify wether tables/events should re-run
 	pub fn with_force(mut self, force: Force) -> Self {
-		self.force = force;
+		self.set_force(force);
 		self
+	}
+
+	/// Specify wether tables/events should re-run
+	pub fn set_force(&mut self, force: Force) {
+		self.force = force;
 	}
 
 	/// Sepecify if we should error when a table does not exist
@@ -190,33 +197,41 @@ impl Options {
 
 	/// Specify if we are currently importing data
 	pub fn with_import(mut self, import: bool) -> Self {
-		self.import = import;
+		self.set_import(import);
 		self
+	}
+
+	/// Specify if we are currently importing data
+	pub fn set_import(&mut self, import: bool) {
+		self.import = import;
 	}
 
 	/// Specify if we should process futures
 	pub fn with_futures(mut self, futures: bool) -> Self {
+		self.set_futures(futures);
+		self
+	}
+
+	pub fn set_futures(&mut self, futures: bool) {
 		if matches!(self.futures, Futures::Never) {
-			return self;
+			return;
 		}
 
 		self.futures = match futures {
 			true => Futures::Enabled,
 			false => Futures::Disabled,
 		};
-		self
 	}
 
 	/// Specify if we should never process futures
 	pub fn with_futures_never(mut self) -> Self {
-		self.futures = Futures::Never;
+		self.set_futures_never();
 		self
 	}
 
-	/// Specify if we should process field projections
-	pub fn with_projections(mut self, projections: bool) -> Self {
-		self.projections = projections;
-		self
+	/// Specify if we should never process futures
+	pub fn set_futures_never(&mut self) {
+		self.futures = Futures::Never;
 	}
 
 	/// Create a new Options object with auth enabled
@@ -303,20 +318,6 @@ impl Options {
 					false => Futures::Disabled,
 				},
 			},
-			..*self
-		}
-	}
-
-	/// Create a new Options object for a subquery
-	pub fn new_with_projections(&self, projections: bool) -> Self {
-		Self {
-			sender: self.sender.clone(),
-			auth: self.auth.clone(),
-			ns: self.ns.clone(),
-			db: self.db.clone(),
-			force: self.force.clone(),
-			futures: self.futures.clone(),
-			projections,
 			..*self
 		}
 	}

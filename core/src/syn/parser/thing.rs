@@ -4,7 +4,7 @@ use super::{ParseResult, Parser};
 use crate::{
 	sql::{
 		id::{range::IdRange, Gen},
-		Id, Ident, Param, Range, Thing, Value,
+		Id, Ident, Param, Range, Thing,
 	},
 	syn::{
 		error::bail,
@@ -37,7 +37,7 @@ impl Parser<'_> {
 		&mut self,
 		stk: &mut Stk,
 		ident: String,
-	) -> ParseResult<Value> {
+	) -> ParseResult<Thing> {
 		expected_whitespace!(self, t!(":"));
 
 		// If self starts with a range operator self is a range with no start bound
@@ -52,13 +52,13 @@ impl Parser<'_> {
 			} else {
 				Bound::Unbounded
 			};
-			return Ok(Value::Thing(Thing {
+			return Ok(Thing {
 				tb: ident,
 				id: Id::Range(Box::new(IdRange {
 					beg: Bound::Unbounded,
 					end,
 				})),
-			}));
+			});
 		}
 
 		// Didn't eat range yet so we need to parse the id.
@@ -87,13 +87,13 @@ impl Parser<'_> {
 			} else {
 				Bound::Unbounded
 			};
-			Ok(Value::Thing(Thing {
+			Ok(Thing {
 				tb: ident,
 				id: Id::Range(Box::new(IdRange {
 					beg,
 					end,
 				})),
-			}))
+			})
 		} else {
 			let id = match beg {
 				Bound::Unbounded => {
@@ -114,10 +114,10 @@ impl Parser<'_> {
 				// We previously converted the `Id` value to `Value` so it's safe to unwrap here.
 				Bound::Included(v) => v,
 			};
-			Ok(Value::Thing(Thing {
+			Ok(Thing {
 				tb: ident,
 				id,
-			}))
+			})
 		}
 	}
 
@@ -156,6 +156,11 @@ impl Parser<'_> {
 			beg,
 			end,
 		})
+	}
+
+	pub(crate) async fn parse_thing_with_range(&mut self, ctx: &mut Stk) -> ParseResult<Thing> {
+		let ident = self.next_token_value::<Ident>()?.0;
+		self.parse_thing_or_range(ctx, ident).await
 	}
 
 	pub(crate) async fn parse_thing(&mut self, ctx: &mut Stk) -> ParseResult<Thing> {
@@ -278,23 +283,34 @@ impl Parser<'_> {
 				)
 			}
 			t!("ULID") => {
-				self.pop_peek();
-				// TODO: error message about how to use `ulid` as an identifier.
-				expected!(self, t!("("));
-				expected!(self, t!(")"));
-				Ok(Id::Generate(Gen::Ulid))
+				let token = self.pop_peek();
+				if self.eat(t!("(")) {
+					expected!(self, t!(")"));
+					Ok(Id::Generate(Gen::Ulid))
+				} else {
+					let slice = self.lexer.span_str(token.span);
+					Ok(Id::String(slice.to_string()))
+				}
 			}
 			t!("UUID") => {
-				self.pop_peek();
-				expected!(self, t!("("));
-				expected!(self, t!(")"));
-				Ok(Id::Generate(Gen::Uuid))
+				let token = self.pop_peek();
+				if self.eat(t!("(")) {
+					expected!(self, t!(")"));
+					Ok(Id::Generate(Gen::Uuid))
+				} else {
+					let slice = self.lexer.span_str(token.span);
+					Ok(Id::String(slice.to_string()))
+				}
 			}
 			t!("RAND") => {
-				self.pop_peek();
-				expected!(self, t!("("));
-				expected!(self, t!(")"));
-				Ok(Id::Generate(Gen::Rand))
+				let token = self.pop_peek();
+				if self.eat(t!("(")) {
+					expected!(self, t!(")"));
+					Ok(Id::Generate(Gen::Rand))
+				} else {
+					let slice = self.lexer.span_str(token.span);
+					Ok(Id::String(slice.to_string()))
+				}
 			}
 			_ => {
 				let ident = if self.flexible_record_id {
@@ -315,6 +331,7 @@ mod tests {
 	use super::*;
 	use crate::sql::array::Array;
 	use crate::sql::object::Object;
+	use crate::sql::Value;
 	use crate::syn::Parse as _;
 
 	fn thing(i: &str) -> ParseResult<Thing> {
@@ -563,5 +580,9 @@ mod tests {
 		assert_ident_parses_correctly("dec123");
 		assert_ident_parses_correctly("f123");
 		assert_ident_parses_correctly("e123");
+
+		assert_ident_parses_correctly("ulid");
+		assert_ident_parses_correctly("uuid");
+		assert_ident_parses_correctly("rand");
 	}
 }

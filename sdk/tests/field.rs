@@ -506,6 +506,79 @@ async fn field_selection_variable_fields_projection() -> Result<(), Error> {
 }
 
 #[tokio::test]
+async fn field_selection_and_modification_variable_fields_projection() -> Result<(), Error> {
+	let sql = "
+		DEFINE EVENT test ON person WHEN true THEN {
+			UPSERT log:test SET edit += 1, date = $after.now WHERE type::field('name') != 'test';
+		};
+		LET $field = 'name';
+		UPSERT person:test SET now = d'2023-01-01', name = 'one', embedded[$field] = 'post';
+		UPSERT person:test SET now = d'2024-01-01', name = 'two' RETURN type::field($field);
+		SELECT type::field($field) FROM person;
+		SELECT * FROM log;
+	";
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 6);
+	//
+	let tmp = res.remove(0).result;
+	assert!(tmp.is_ok());
+	//
+	let tmp = res.remove(0).result;
+	assert!(tmp.is_ok());
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
+			{
+				embedded: {
+					name: 'post'
+				},
+				id: person:test,
+				name: 'one',
+				now: d'2023-01-01T00:00:00Z'
+			}
+		]",
+	);
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
+			{
+				name: 'two'
+			}
+		]",
+	);
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
+			{
+				name: 'two'
+			}
+		]",
+	);
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
+			{
+				date: d'2024-01-01T00:00:00Z',
+				edit: 2,
+				id: log:test
+			}
+		]",
+	);
+	assert_eq!(tmp, val);
+	//
+	Ok(())
+}
+
+#[tokio::test]
 async fn field_definition_default_value() -> Result<(), Error> {
 	let sql = "
 		DEFINE TABLE product SCHEMAFULL;
@@ -981,14 +1054,13 @@ async fn field_definition_flexible_array_any() -> Result<(), Error> {
 	let sql = "
 		DEFINE TABLE user SCHEMAFULL;
 		DEFINE FIELD custom ON user TYPE option<array>;
-		REMOVE FIELD custom.* ON user;
 		DEFINE FIELD custom.* ON user FLEXIBLE TYPE any;
 		CREATE user:one CONTENT { custom: ['sometext'] };
 		CREATE user:two CONTENT { custom: [ ['sometext'] ] };
 		CREATE user:three CONTENT { custom: [ { key: 'sometext' } ] };
 	";
 	let mut t = Test::new(sql).await?;
-	t.skip_ok(4)?;
+	t.skip_ok(3)?;
 	t.expect_val(
 		"[
 			{
@@ -1022,6 +1094,29 @@ async fn field_definition_flexible_array_any() -> Result<(), Error> {
 				id: user:three
 			}
 		]",
+	)?;
+	Ok(())
+}
+
+#[tokio::test]
+async fn field_definition_array_any() -> Result<(), Error> {
+	let sql = "
+		DEFINE TABLE user SCHEMAFULL;
+		DEFINE FIELD custom ON user TYPE array<any>;
+		INFO FOR TABLE user;
+	";
+	let mut t = Test::new(sql).await?;
+	t.skip_ok(2)?;
+	t.expect_val(
+		"
+{
+	events: {  },
+	fields: { custom: 'DEFINE FIELD custom ON user TYPE array PERMISSIONS FULL' },
+	indexes: {  },
+	lives: {  },
+	tables: {  }
+}
+		",
 	)?;
 	Ok(())
 }

@@ -136,7 +136,7 @@ impl<'a> Stream for Scanner<'a, Key> {
 			// Clone the range to use when scanning
 			let range = self.range.clone();
 			// Prepare a future to scan for results
-			self.future = Some(Box::pin(self.store.keys(range, num)));
+			self.future = Some(Box::pin(self.store.keys(range, num, self.version)));
 		}
 		// Try to resolve the future
 		match self.future.as_mut().unwrap().poll_unpin(cx) {

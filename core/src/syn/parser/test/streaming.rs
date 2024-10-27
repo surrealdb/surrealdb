@@ -7,8 +7,11 @@ use crate::{
 		filter::Filter,
 		index::{Distance, MTreeParams, SearchParams, VectorType},
 		language::Language,
+		order::{OrderList, Ordering},
 		statements::{
-			analyze::AnalyzeStatement, show::ShowSince, show::ShowStatement, sleep::SleepStatement,
+			analyze::AnalyzeStatement,
+			show::{ShowSince, ShowStatement},
+			sleep::SleepStatement,
 			BeginStatement, BreakStatement, CancelStatement, CommitStatement, ContinueStatement,
 			CreateStatement, DefineAccessStatement, DefineAnalyzerStatement,
 			DefineDatabaseStatement, DefineEventStatement, DefineFieldStatement,
@@ -22,7 +25,7 @@ use crate::{
 		tokenizer::Tokenizer,
 		Algorithm, Array, Base, Block, Cond, Data, Datetime, Dir, Duration, Edges, Explain,
 		Expression, Fetch, Fetchs, Field, Fields, Future, Graph, Group, Groups, Id, Ident, Idiom,
-		Idioms, Index, Kind, Limit, Number, Object, Operator, Order, Orders, Output, Param, Part,
+		Idioms, Index, Kind, Limit, Number, Object, Operator, Order, Output, Param, Part,
 		Permission, Permissions, Scoring, Split, Splits, Start, Statement, Strand, Subquery, Table,
 		TableType, Tables, Thing, Timeout, Uuid, Value, Values, Version, With,
 	},
@@ -57,7 +60,7 @@ static SOURCE: &str = r#"
 	DEFINE PARAM $a VALUE { a: 1, "b": 3 } PERMISSIONS WHERE null;
 	DEFINE TABLE name DROP SCHEMAFUL CHANGEFEED 1s PERMISSIONS FOR SELECT WHERE a = 1 AS SELECT foo FROM bar GROUP BY foo;
 	DEFINE EVENT event ON TABLE table WHEN null THEN null,none;
-	DEFINE FIELD foo.*[*]... ON TABLE bar FLEX TYPE option<number | array<record<foo>,10>> VALUE null ASSERT true DEFAULT false PERMISSIONS FOR DELETE, UPDATE NONE, FOR create WHERE true;
+	DEFINE FIELD foo.*[*]... ON TABLE bar FLEX TYPE option<number | array<record<foo>,10>> VALUE null ASSERT true DEFAULT false PERMISSIONS FOR UPDATE NONE, FOR CREATE WHERE true;
 	DEFINE INDEX index ON TABLE table FIELDS a,b[*] SEARCH ANALYZER ana BM25 (0.1,0.2)
 			DOC_IDS_ORDER 1
 			DOC_LENGTHS_ORDER 2
@@ -310,7 +313,7 @@ fn statements() -> Vec<Statement> {
 			assert: Some(Value::Bool(true)),
 			default: Some(Value::Bool(false)),
 			permissions: Permissions {
-				delete: Permission::None,
+				delete: Permission::Full,
 				update: Permission::None,
 				create: Permission::Specific(Value::Bool(true)),
 				select: Permission::Full,
@@ -499,13 +502,12 @@ fn statements() -> Vec<Statement> {
 				Group(Idiom(vec![Part::Field(Ident("foo".to_owned()))])),
 				Group(Idiom(vec![Part::Field(Ident("bar".to_owned()))])),
 			])),
-			order: Some(Orders(vec![Order {
-				order: Idiom(vec![Part::Field(Ident("foo".to_owned()))]),
-				random: false,
+			order: Some(Ordering::Order(OrderList(vec![Order {
+				value: Idiom(vec![Part::Field(Ident("foo".to_owned()))]),
 				collate: true,
 				numeric: true,
 				direction: true,
-			}])),
+			}]))),
 			limit: Some(Limit(Value::Thing(Thing {
 				tb: "a".to_owned(),
 				id: Id::from("b"),
@@ -735,7 +737,13 @@ fn test_streaming() {
 		//println!("{}:{}", i, src);
 		parser = parser.change_source(partial_source);
 		parser.reset();
-		match stack.enter(|stk| parser.parse_partial_statement(stk)).finish() {
+		match stack
+			.enter(|stk| parser.parse_partial_statement(i == source_bytes.len(), stk))
+			.finish()
+		{
+			PartialResult::Empty {
+				..
+			} => continue,
 			PartialResult::MoreData => continue,
 			PartialResult::Ok {
 				value,
@@ -778,6 +786,6 @@ fn test_streaming() {
 		"failed to parse at {}\nAt statement {}\n\n{:?}",
 		src,
 		expected[current_stmt],
-		stack.enter(|stk| parser.parse_partial_statement(stk)).finish()
+		stack.enter(|stk| parser.parse_partial_statement(true, stk)).finish()
 	);
 }

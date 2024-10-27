@@ -4,8 +4,9 @@ use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::idx::planner::{QueryPlanner, QueryPlannerParams};
 use crate::sql::{
-	Cond, Explain, Fetchs, Field, Fields, Groups, Idioms, Limit, Orders, Splits, Start, Timeout,
-	Value, Values, Version, With,
+	order::{OldOrders, Order, OrderList, Ordering},
+	Cond, Explain, Fetchs, Field, Fields, Groups, Idioms, Limit, Splits, Start, Timeout, Value,
+	Values, Version, With,
 };
 use derive::Store;
 use reblessive::tree::Stk;
@@ -14,7 +15,7 @@ use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::sync::Arc;
 
-#[revisioned(revision = 3)]
+#[revisioned(revision = 4)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
@@ -30,7 +31,10 @@ pub struct SelectStatement {
 	pub cond: Option<Cond>,
 	pub split: Option<Splits>,
 	pub group: Option<Groups>,
-	pub order: Option<Orders>,
+	#[revision(end = 4, convert_fn = "convert_old_orders")]
+	pub old_order: Option<OldOrders>,
+	#[revision(start = 4)]
+	pub order: Option<Ordering>,
 	pub limit: Option<Limit>,
 	pub start: Option<Start>,
 	pub fetch: Option<Fetchs>,
@@ -43,6 +47,36 @@ pub struct SelectStatement {
 }
 
 impl SelectStatement {
+	fn convert_old_orders(
+		&mut self,
+		_rev: u16,
+		old_value: Option<OldOrders>,
+	) -> Result<(), revision::Error> {
+		let Some(x) = old_value else {
+			// nothing to do.
+			return Ok(());
+		};
+
+		if x.0.iter().any(|x| x.random) {
+			self.order = Some(Ordering::Random);
+			return Ok(());
+		}
+
+		let new_ord =
+			x.0.into_iter()
+				.map(|x| Order {
+					value: x.order,
+					collate: x.collate,
+					numeric: x.numeric,
+					direction: x.direction,
+				})
+				.collect();
+
+		self.order = Some(Ordering::Order(OrderList(new_ord)));
+
+		Ok(())
+	}
+
 	/// Check if we require a writeable transaction
 	pub(crate) fn writeable(&self) -> bool {
 		if self.expr.iter().any(|v| match v {
@@ -76,8 +110,7 @@ impl SelectStatement {
 		let mut i = Iterator::new();
 		// Ensure futures are stored and the version is set if specified
 		let version = self.version.as_ref().map(|v| v.to_u64());
-		let opt =
-			Arc::new(opt.new_with_futures(false).with_projections(true).with_version(version));
+		let opt = Arc::new(opt.new_with_futures(false).with_version(version));
 		// Extract the limit
 		let limit = i.setup_limit(stk, ctx, &opt, &stm).await?;
 		// Used for ONLY: is the limit 1?

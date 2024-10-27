@@ -20,6 +20,7 @@
 //! useful is to only enable the in-memory engine (`kv-mem`) during development. Besides letting you not
 //! worry about those dependencies on your dev machine, it allows you to keep compile times low
 //! during development while allowing you to test your code fully.
+use crate::api::err::Error;
 use crate::{
 	api::{
 		conn::{Command, DbResponse, RequestData},
@@ -30,13 +31,17 @@ use crate::{
 	value::Notification,
 };
 use channel::Sender;
+use futures::stream::poll_fn;
 use indexmap::IndexMap;
+use std::pin::pin;
+use std::task::{ready, Poll};
 use std::{
 	collections::{BTreeMap, HashMap},
 	marker::PhantomData,
 	mem,
 	sync::Arc,
 };
+use surrealdb_core::sql::Function;
 use surrealdb_core::{
 	dbs::{Response, Session},
 	iam,
@@ -49,19 +54,21 @@ use surrealdb_core::{
 		Data, Field, Output, Query, Statement, Value as CoreValue,
 	},
 };
+use tokio_util::bytes::BytesMut;
 use uuid::Uuid;
 
-use crate::api::err::Error;
 #[cfg(not(target_arch = "wasm32"))]
-use std::path::PathBuf;
-use surrealdb_core::sql::Function;
-#[cfg(feature = "ml")]
-use surrealdb_core::sql::Model;
+use std::{future::Future, path::PathBuf};
+#[cfg(not(target_arch = "wasm32"))]
+use surrealdb_core::err::Error as CoreError;
 #[cfg(not(target_arch = "wasm32"))]
 use tokio::{
 	fs::OpenOptions,
 	io::{self, AsyncReadExt, AsyncWriteExt},
 };
+
+#[cfg(feature = "ml")]
+use surrealdb_core::sql::Model;
 
 #[cfg(all(not(target_arch = "wasm32"), feature = "ml"))]
 use crate::api::conn::MlExportConfig;
@@ -327,9 +334,9 @@ pub struct FDb;
 /// # #[tokio::main]
 /// # async fn main() -> surrealdb::Result<()> {
 /// use surrealdb::Surreal;
-/// use surrealdb::engine::local::SurrealKV;
+/// use surrealdb::engine::local::SurrealKv;
 ///
-/// let db = Surreal::new::<SurrealKV>("path/to/database-folder").await?;
+/// let db = Surreal::new::<SurrealKv>("path/to/database-folder").await?;
 /// # Ok(())
 /// # }
 /// ```
@@ -341,17 +348,22 @@ pub struct FDb;
 /// # async fn main() -> surrealdb::Result<()> {
 /// use surrealdb::opt::Config;
 /// use surrealdb::Surreal;
-/// use surrealdb::engine::local::SurrealKV;
+/// use surrealdb::engine::local::SurrealKv;
 ///
 /// let config = Config::default().strict();
-/// let db = Surreal::new::<SurrealKV>(("path/to/database-folder", config)).await?;
+/// let db = Surreal::new::<SurrealKv>(("path/to/database-folder", config)).await?;
 /// # Ok(())
 /// # }
 /// ```
 #[cfg(feature = "kv-surrealkv")]
 #[cfg_attr(docsrs, doc(cfg(feature = "kv-surrealkv")))]
 #[derive(Debug)]
-pub struct SurrealKV;
+pub struct SurrealKv;
+
+/// SurrealKV database
+#[deprecated(note = "Incorrect case, use SurrealKv instead")]
+#[cfg(feature = "kv-surrealkv")]
+pub type SurrealKV = SurrealKv;
 
 /// SurrealCS database
 ///
@@ -363,9 +375,9 @@ pub struct SurrealKV;
 /// # #[tokio::main]
 /// # async fn main() -> surrealdb::Result<()> {
 /// use surrealdb::Surreal;
-/// use surrealdb::engine::local::SurrealCS;
+/// use surrealdb::engine::local::SurrealCs;
 ///
-/// let db = Surreal::new::<SurrealCS>("path/to/database-folder").await?;
+/// let db = Surreal::new::<SurrealCs>("path/to/database-folder").await?;
 /// # Ok(())
 /// # }
 /// ```
@@ -377,17 +389,22 @@ pub struct SurrealKV;
 /// # async fn main() -> surrealdb::Result<()> {
 /// use surrealdb::opt::Config;
 /// use surrealdb::Surreal;
-/// use surrealdb::engine::local::SurrealCS;
+/// use surrealdb::engine::local::SurrealCs;
 ///
 /// let config = Config::default().strict();
-/// let db = Surreal::new::<SurrealCS>(("path/to/database-folder", config)).await?;
+/// let db = Surreal::new::<SurrealCs>(("path/to/database-folder", config)).await?;
 /// # Ok(())
 /// # }
 /// ```
 #[cfg(feature = "kv-surrealcs")]
 #[cfg_attr(docsrs, doc(cfg(feature = "kv-surrealcs")))]
 #[derive(Debug)]
-pub struct SurrealCS;
+pub struct SurrealCs;
+
+/// SurrealCS database
+#[deprecated(note = "Incorrect case, use SurrealCs instead")]
+#[cfg(feature = "kv-surrealcs")]
+pub type SurrealCS = SurrealCs;
 
 /// An embedded database
 #[derive(Debug, Clone)]
@@ -932,16 +949,32 @@ async fn router(
 					.into());
 				}
 			};
-			let mut statements = String::new();
-			if let Err(error) = file.read_to_string(&mut statements).await {
-				return Err(Error::FileRead {
-					path,
-					error,
-				}
-				.into());
-			}
 
-			let responses = kvs.execute(&statements, &*session, Some(vars.clone())).await?;
+			let mut file = pin!(file);
+			let mut buffer = BytesMut::with_capacity(4096);
+
+			let stream = poll_fn(|ctx| {
+				// Doing it this way optimizes allocation.
+				// It is highly likely that the buffer we return from this stream will be dropped
+				// between calls to this function.
+				// If this is the case than instead of allocating new memory the call to reserve
+				// will instead reclaim the existing used memory.
+				if buffer.capacity() == 0 {
+					buffer.reserve(4096);
+				}
+
+				let future = pin!(file.read_buf(&mut buffer));
+				match ready!(future.poll(ctx)) {
+					Ok(0) => Poll::Ready(None),
+					Ok(_) => Poll::Ready(Some(Ok(buffer.split().freeze()))),
+					Err(e) => {
+						let error = CoreError::QueryStream(e.to_string());
+						Poll::Ready(Some(Err(error)))
+					}
+				}
+			});
+
+			let responses = kvs.execute_import(&*session, Some(vars.clone()), stream).await?;
 
 			for response in responses {
 				response.result?;

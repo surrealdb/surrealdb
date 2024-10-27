@@ -8,7 +8,7 @@ use crate::kvs::Check;
 use crate::kvs::Key;
 use crate::kvs::Val;
 use rocksdb::{
-	DBCompactionStyle, DBCompressionType, LogLevel, OptimisticTransactionDB,
+	DBCompactionStyle, DBCompressionType, FlushOptions, LogLevel, OptimisticTransactionDB,
 	OptimisticTransactionOptions, Options, ReadOptions, WriteOptions,
 };
 use std::fmt::Debug;
@@ -39,6 +39,19 @@ pub struct Transaction {
 	// the memory is kept alive. This pointer must
 	// be declared last, so that it is dropped last.
 	_db: Pin<Arc<OptimisticTransactionDB>>,
+}
+
+impl Drop for Datastore {
+	fn drop(&mut self) {
+		// Create new flush options
+		let mut opts = FlushOptions::default();
+		// Wait for the sync to finish
+		opts.set_wait(true);
+		// Flush the WAL to storage
+		let _ = self.db.flush_wal(true);
+		// Flush the memtables to SST
+		let _ = self.db.flush_opt(&opts);
+	}
 }
 
 impl Drop for Transaction {
@@ -80,30 +93,43 @@ impl Datastore {
 		opts.set_use_fsync(false);
 		// Only use warning log level
 		opts.set_log_level(LogLevel::Warn);
-		// Set the number of log files to keep
-		opts.set_keep_log_file_num(*cnf::ROCKSDB_KEEP_LOG_FILE_NUM);
 		// Create database if missing
 		opts.create_if_missing(true);
 		// Create column families if missing
 		opts.create_missing_column_families(true);
-		// Set the datastore compaction style
-		opts.set_compaction_style(DBCompactionStyle::Level);
+		// Set the number of log files to keep
+		opts.set_keep_log_file_num(*cnf::ROCKSDB_KEEP_LOG_FILE_NUM);
 		// Increase the background thread count
 		opts.increase_parallelism(*cnf::ROCKSDB_THREAD_COUNT);
-		// Set the maximum number of write buffers
-		opts.set_max_write_buffer_number(*cnf::ROCKSDB_MAX_WRITE_BUFFER_NUMBER);
+		// Specify the max concurrent background jobs
+		opts.set_max_background_jobs(*cnf::ROCKSDB_JOBS_COUNT);
 		// Set the amount of data to build up in memory
 		opts.set_write_buffer_size(*cnf::ROCKSDB_WRITE_BUFFER_SIZE);
-		// Set the target file size for compaction
-		opts.set_target_file_size_base(*cnf::ROCKSDB_TARGET_FILE_SIZE_BASE);
+		// Set the maximum number of write buffers
+		opts.set_max_write_buffer_number(*cnf::ROCKSDB_MAX_WRITE_BUFFER_NUMBER);
 		// Set minimum number of write buffers to merge
 		opts.set_min_write_buffer_number_to_merge(*cnf::ROCKSDB_MIN_WRITE_BUFFER_NUMBER_TO_MERGE);
+		// Set the target file size for compaction
+		opts.set_target_file_size_base(*cnf::ROCKSDB_TARGET_FILE_SIZE_BASE);
 		// Use separate write thread queues
 		opts.set_enable_pipelined_write(*cnf::ROCKSDB_ENABLE_PIPELINED_WRITES);
 		// Enable separation of keys and values
 		opts.set_enable_blob_files(*cnf::ROCKSDB_ENABLE_BLOB_FILES);
 		// Store 4KB values separate from keys
 		opts.set_min_blob_size(*cnf::ROCKSDB_MIN_BLOB_SIZE);
+		// Set the delete compaction factory
+		opts.add_compact_on_deletion_collector_factory(
+			*cnf::ROCKSDB_DELETION_FACTORY_WINDOW_SIZE,
+			*cnf::ROCKSDB_DELETION_FACTORY_DELETE_COUNT,
+			*cnf::ROCKSDB_DELETION_FACTORY_RATIO,
+		);
+		// Set the datastore compaction style
+		opts.set_compaction_style(
+			match cnf::ROCKSDB_COMPACTION_STYLE.to_ascii_lowercase().as_str() {
+				"universal" => DBCompactionStyle::Universal,
+				_ => DBCompactionStyle::Level,
+			},
+		);
 		// Set specific compression levels
 		opts.set_compression_per_level(&[
 			DBCompressionType::None,
@@ -116,6 +142,11 @@ impl Datastore {
 		Ok(Datastore {
 			db: Arc::pin(OptimisticTransactionDB::open(&opts, path)?),
 		})
+	}
+	/// Shutdown the database
+	pub(crate) async fn shutdown(&self) -> Result<(), Error> {
+		// Nothing to do here
+		Ok(())
 	}
 	/// Start a new transaction
 	pub(crate) async fn transaction(&self, write: bool, _: bool) -> Result<Transaction, Error> {
@@ -139,6 +170,7 @@ impl Datastore {
 				rocksdb::Transaction<'static, OptimisticTransactionDB>,
 			>(inner)
 		};
+		// Set the read options
 		let mut ro = ReadOptions::default();
 		ro.set_snapshot(&inner.snapshot());
 		ro.set_async_io(true);
@@ -218,10 +250,14 @@ impl super::api::Transaction for Transaction {
 
 	/// Check if a key exists
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
-	async fn exists<K>(&mut self, key: K) -> Result<bool, Error>
+	async fn exists<K>(&mut self, key: K, version: Option<u64>) -> Result<bool, Error>
 	where
 		K: Into<Key> + Sprintable + Debug,
 	{
+		// RocksDB does not support versioned queries.
+		if version.is_some() {
+			return Err(Error::UnsupportedVersionedQueries);
+		}
 		// Check to see if transaction is closed
 		if self.done {
 			return Err(Error::TxFinished);
@@ -242,7 +278,6 @@ impl super::api::Transaction for Transaction {
 		if version.is_some() {
 			return Err(Error::UnsupportedVersionedQueries);
 		}
-
 		// Check to see if transaction is closed
 		if self.done {
 			return Err(Error::TxFinished);
@@ -264,7 +299,6 @@ impl super::api::Transaction for Transaction {
 		if version.is_some() {
 			return Err(Error::UnsupportedVersionedQueries);
 		}
-
 		// Check to see if transaction is closed
 		if self.done {
 			return Err(Error::TxFinished);
@@ -290,7 +324,6 @@ impl super::api::Transaction for Transaction {
 		if version.is_some() {
 			return Err(Error::UnsupportedVersionedQueries);
 		}
-
 		// Check to see if transaction is closed
 		if self.done {
 			return Err(Error::TxFinished);
@@ -396,10 +429,19 @@ impl super::api::Transaction for Transaction {
 
 	/// Retrieve a range of keys from the databases
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.sprint()))]
-	async fn keys<K>(&mut self, rng: Range<K>, limit: u32) -> Result<Vec<Key>, Error>
+	async fn keys<K>(
+		&mut self,
+		rng: Range<K>,
+		limit: u32,
+		version: Option<u64>,
+	) -> Result<Vec<Key>, Error>
 	where
 		K: Into<Key> + Sprintable + Debug,
 	{
+		// RocksDB does not support versioned queries.
+		if version.is_some() {
+			return Err(Error::UnsupportedVersionedQueries);
+		}
 		// Check to see if transaction is closed
 		if self.done {
 			return Err(Error::TxFinished);
@@ -419,6 +461,8 @@ impl super::api::Transaction for Transaction {
 		// Set the ReadOptions with the snapshot
 		let mut ro = ReadOptions::default();
 		ro.set_snapshot(&inner.snapshot());
+		ro.set_iterate_lower_bound(beg);
+		ro.set_iterate_upper_bound(end);
 		ro.set_async_io(true);
 		ro.fill_cache(true);
 		// Create the iterator
@@ -458,7 +502,6 @@ impl super::api::Transaction for Transaction {
 		if version.is_some() {
 			return Err(Error::UnsupportedVersionedQueries);
 		}
-
 		// Check to see if transaction is closed
 		if self.done {
 			return Err(Error::TxFinished);
@@ -478,6 +521,8 @@ impl super::api::Transaction for Transaction {
 		// Set the ReadOptions with the snapshot
 		let mut ro = ReadOptions::default();
 		ro.set_snapshot(&inner.snapshot());
+		ro.set_iterate_lower_bound(beg);
+		ro.set_iterate_upper_bound(end);
 		ro.set_async_io(true);
 		ro.fill_cache(true);
 		// Create the iterator

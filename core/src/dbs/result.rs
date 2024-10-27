@@ -6,7 +6,8 @@ use crate::dbs::store::file_store::FileCollector;
 use crate::dbs::store::MemoryCollector;
 use crate::dbs::{Options, Statement};
 use crate::err::Error;
-use crate::sql::{Orders, Value};
+use crate::sql::order::Ordering;
+use crate::sql::Value;
 use reblessive::tree::Stk;
 
 pub(super) enum Results {
@@ -59,9 +60,21 @@ impl Results {
 		Ok(())
 	}
 
-	pub(super) fn sort(&mut self, orders: &Orders) {
+	#[cfg(not(target_arch = "wasm32"))]
+	pub(super) async fn async_sort(&mut self, orders: &Ordering) -> Result<(), Error> {
 		match self {
-			Self::Memory(m) => m.sort(orders),
+			Self::Memory(m) => m.sort(orders).await?,
+			#[cfg(storage)]
+			Self::File(f) => f.sort(orders),
+			_ => {}
+		}
+		Ok(())
+	}
+
+	#[cfg(target_arch = "wasm32")]
+	pub(super) fn sort(&mut self, orders: &Ordering) {
+		match self {
+			Self::Memory(m) => m.small_sort(orders),
 			#[cfg(storage)]
 			Self::File(f) => f.sort(orders),
 			_ => {}
@@ -75,6 +88,16 @@ impl Results {
 			#[cfg(storage)]
 			Self::File(f) => f.start_limit(start, limit),
 			Self::Groups(_) => {}
+		}
+	}
+
+	pub(super) fn is_empty(&self) -> bool {
+		match self {
+			Self::None => true,
+			Self::Memory(s) => s.len() == 0,
+			#[cfg(storage)]
+			Self::File(e) => e.len() == 0,
+			Self::Groups(g) => g.len() == 0,
 		}
 	}
 

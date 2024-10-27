@@ -177,10 +177,8 @@ impl MutableContext {
 	}
 
 	pub(crate) fn unfreeze(ctx: Context) -> Result<MutableContext, Error> {
-		match Arc::try_unwrap(ctx) {
-			Ok(inner) => Ok(inner),
-			Err(_) => Err(fail!("Tried to unfreeze a non-existent Context")),
-		}
+		Arc::into_inner(ctx)
+			.ok_or_else(|| fail!("Tried to unfreeze a Context with multiple references"))
 	}
 
 	/// Create a new child from a frozen context.
@@ -301,6 +299,10 @@ impl MutableContext {
 
 	pub fn notifications(&self) -> Option<Sender<Notification>> {
 		self.notifications.clone()
+	}
+
+	pub fn has_notifications(&self) -> bool {
+		self.notifications.is_some()
 	}
 
 	pub(crate) fn get_query_planner(&self) -> Option<&QueryPlanner> {

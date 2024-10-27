@@ -295,11 +295,15 @@ impl QueryExecutor {
 			Ok(Value::Bool(false))
 		} else {
 			if let Some((p, id, val, dist)) = self.0.knn_bruteforce_entries.get(exp) {
-				let v: Vec<Number> = id.compute(stk, ctx, opt, doc).await?.try_into()?;
-				let dist = dist.compute(&v, val.as_ref())?;
-				p.add(dist, thg).await;
+				let v = id.compute(stk, ctx, opt, doc).await?;
+				if let Ok(v) = v.try_into() {
+					if let Ok(dist) = dist.compute(&v, val.as_ref()) {
+						p.add(dist, thg).await;
+						return Ok(Value::Bool(true));
+					}
+				}
 			}
-			Ok(Value::Bool(true))
+			Ok(Value::Bool(false))
 		}
 	}
 

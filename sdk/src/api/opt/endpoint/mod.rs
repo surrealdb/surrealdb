@@ -129,8 +129,8 @@ pub enum EndpointKind {
 	File,
 	TiKv,
 	Unsupported(String),
-	SurrealKV,
-	SurrealCS,
+	SurrealKv,
+	SurrealCs,
 }
 
 impl From<&str> for EndpointKind {
@@ -147,8 +147,8 @@ impl From<&str> for EndpointKind {
 			"file" => Self::File,
 			"rocksdb" => Self::RocksDb,
 			"tikv" => Self::TiKv,
-			"surrealkv" => Self::SurrealKV,
-			"surrealcs" => Self::SurrealCS,
+			"surrealkv" => Self::SurrealKv,
+			"surrealcs" => Self::SurrealCs,
 			_ => Self::Unsupported(s.to_owned()),
 		}
 	}

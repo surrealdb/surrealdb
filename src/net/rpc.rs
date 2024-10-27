@@ -37,6 +37,7 @@ use super::headers::Accept;
 use super::headers::ContentType;
 use super::AppState;
 
+use surrealdb::dbs::capabilities::RouteTarget;
 use surrealdb::rpc::rpc_context::RpcContext;
 
 pub(super) fn router() -> Router<Arc<RpcState>> {
@@ -54,6 +55,13 @@ async fn get_handler(
 	State(rpc_state): State<Arc<RpcState>>,
 	headers: HeaderMap,
 ) -> Result<impl IntoResponse, impl IntoResponse> {
+	// Get the datastore reference
+	let db = &state.datastore;
+	// Check if capabilities allow querying the requested HTTP route
+	if !db.allows_http_route(&RouteTarget::Rpc) {
+		warn!("Capabilities denied HTTP route request attempt, target: '{}'", &RouteTarget::Rpc);
+		return Err(Error::ForbiddenRoute(RouteTarget::Rpc.to_string()));
+	}
 	// Check that a valid header has been specified
 	if headers.get(SEC_WEBSOCKET_PROTOCOL).is_none() {
 		warn!("A connection was made without a specified protocol.");
@@ -146,6 +154,13 @@ async fn post_handler(
 	content_type: TypedHeader<ContentType>,
 	body: Bytes,
 ) -> Result<impl IntoResponse, impl IntoResponse> {
+	// Get the datastore reference
+	let db = &state.datastore;
+	// Check if capabilities allow querying the requested HTTP route
+	if !db.allows_http_route(&RouteTarget::Rpc) {
+		warn!("Capabilities denied HTTP route request attempt, target: '{}'", &RouteTarget::Rpc);
+		return Err(Error::ForbiddenRoute(RouteTarget::Rpc.to_string()));
+	}
 	let fmt: Format = content_type.deref().into();
 	let out_fmt: Option<Format> = output.as_deref().map(Into::into);
 	if let Some(out_fmt) = out_fmt {

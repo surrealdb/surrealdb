@@ -234,6 +234,9 @@ pub(crate) static PATHS: phf::Map<UniCase<&'static str>, PathKind> = phf_map! {
 		UniCase::ascii("math::trimean") => PathKind::Function,
 		UniCase::ascii("math::variance") => PathKind::Function,
 		//
+		UniCase::ascii("meta::id") => PathKind::Function,
+		UniCase::ascii("meta::tb") => PathKind::Function,
+		//
 		UniCase::ascii("not") => PathKind::Function,
 		//
 		UniCase::ascii("object::entries") => PathKind::Function,
@@ -322,6 +325,7 @@ pub(crate) static PATHS: phf::Map<UniCase<&'static str>, PathKind> = phf_map! {
 		UniCase::ascii("string::is::numeric") => PathKind::Function,
 		UniCase::ascii("string::is::semver") => PathKind::Function,
 		UniCase::ascii("string::is::url") => PathKind::Function,
+		UniCase::ascii("string::is::ulid") => PathKind::Function,
 		UniCase::ascii("string::is::uuid") => PathKind::Function,
 		UniCase::ascii("string::is::record") => PathKind::Function,
 		UniCase::ascii("string::semver::compare") => PathKind::Function,
@@ -365,7 +369,9 @@ pub(crate) static PATHS: phf::Map<UniCase<&'static str>, PathKind> = phf_map! {
 		UniCase::ascii("time::from::millis") => PathKind::Function,
 		UniCase::ascii("time::from::nanos") => PathKind::Function,
 		UniCase::ascii("time::from::secs") => PathKind::Function,
+		UniCase::ascii("time::from::ulid") => PathKind::Function,
 		UniCase::ascii("time::from::unix") => PathKind::Function,
+		UniCase::ascii("time::from::uuid") => PathKind::Function,
 		UniCase::ascii("time::is::leap_year") => PathKind::Function,
 		//
 		UniCase::ascii("type::array") => PathKind::Function,

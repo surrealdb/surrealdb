@@ -1,3 +1,5 @@
+use std::ops::Deref;
+
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
@@ -42,10 +44,7 @@ pub async fn field(
 			// Parse the string as an Idiom
 			let idi = syn::idiom(&val)?;
 			// Return the Idiom or fetch the field
-			match opt.projections {
-				true => Ok(idi.compute(stk, ctx, opt, doc).await?),
-				false => Ok(idi.into()),
-			}
+			Ok(idi.compute(stk, ctx, opt, doc).await?)
 		}
 		_ => Ok(Value::None),
 	}
@@ -62,10 +61,7 @@ pub async fn fields(
 				// Parse the string as an Idiom
 				let idi = syn::idiom(&v)?;
 				// Return the Idiom or fetch the field
-				match opt.projections {
-					true => args.push(idi.compute(stk, ctx, opt, doc).await?),
-					false => args.push(idi.into()),
-				}
+				args.push(idi.compute(stk, ctx, opt, doc).await?);
 			}
 			Ok(args.into())
 		}
@@ -146,6 +142,7 @@ pub fn thing((arg1, arg2): (Value, Option<Value>)) -> Result<Value, Error> {
 				Value::Array(v) => v.into(),
 				Value::Object(v) => v.into(),
 				Value::Number(v) => v.into(),
+				Value::Range(v) => v.deref().to_owned().try_into()?,
 				v => v.as_string().into(),
 			},
 		})),

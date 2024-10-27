@@ -633,6 +633,12 @@ pub enum Error {
 		value: String,
 	},
 
+	/// Found a record id for the record but this is not a valid id
+	#[error("Found {value} for the incoming relation, but this is not a valid Record ID")]
+	InInvalid {
+		value: String,
+	},
+
 	/// Found a record id for the record but we are creating a specific record
 	#[error("Found {value} for the `in` field, but the value does not match the `in` record id")]
 	InMismatch {
@@ -642,6 +648,12 @@ pub enum Error {
 	/// Found a record id for the record but we are creating a specific record
 	#[error("Found {value} for the `in` field, which does not match the existing field value")]
 	InOverride {
+		value: String,
+	},
+
+	/// Found a record id for the record but this is not a valid id
+	#[error("Found {value} for the outgoing relation, but this is not a valid Record ID")]
+	OutInvalid {
 		value: String,
 	},
 
@@ -1151,6 +1163,18 @@ pub enum Error {
 
 	#[error("Found a non-computed value where they are not allowed")]
 	NonComputed,
+
+	#[error("Size of query script exceeded maximum supported size of 4,294,967,295 bytes.")]
+	QueryTooLarge,
+	/// Represents a failure in timestamp arithmetic related to database internals
+	#[error("Failed to compute: \"{0}\", as the operation results in an overflow.")]
+	ArithmeticOverflow(String),
+
+	#[error("Received error while streaming query: {0}.")]
+	QueryStream(String),
+
+	#[error("Error while ordering a result: {0}.")]
+	OrderingError(String),
 }
 
 impl From<Error> for String {
@@ -1177,14 +1201,17 @@ impl From<regex::Error> for Error {
 	}
 }
 
-#[cfg(feature = "kv-mem")]
-impl From<echodb::err::Error> for Error {
-	fn from(e: echodb::err::Error) -> Error {
-		match e {
-			echodb::err::Error::KeyAlreadyExists => Error::TxKeyAlreadyExists,
-			echodb::err::Error::ValNotExpectedValue => Error::TxConditionNotMet,
-			_ => Error::Tx(e.to_string()),
-		}
+#[cfg(any(feature = "kv-mem", feature = "kv-surrealkv"))]
+impl From<surrealkv::Error> for Error {
+	fn from(e: surrealkv::Error) -> Error {
+		Error::Tx(e.to_string())
+	}
+}
+
+#[cfg(feature = "kv-rocksdb")]
+impl From<rocksdb::Error> for Error {
+	fn from(e: rocksdb::Error) -> Error {
+		Error::Tx(e.to_string())
 	}
 }
 
@@ -1208,20 +1235,6 @@ impl From<tikv::Error> for Error {
 			tikv::Error::RegionError(re) if re.raft_entry_too_large.is_some() => Error::TxTooLarge,
 			_ => Error::Tx(e.to_string()),
 		}
-	}
-}
-
-#[cfg(feature = "kv-rocksdb")]
-impl From<rocksdb::Error> for Error {
-	fn from(e: rocksdb::Error) -> Error {
-		Error::Tx(e.to_string())
-	}
-}
-
-#[cfg(feature = "kv-surrealkv")]
-impl From<surrealkv::Error> for Error {
-	fn from(e: surrealkv::Error) -> Error {
-		Error::Tx(e.to_string())
 	}
 }
 
@@ -1279,6 +1292,18 @@ impl Serialize for Error {
 	}
 }
 impl Error {
+	/// Check if this error is related to schema checks
+	pub fn is_schema_related(&self) -> bool {
+		matches!(
+			self,
+			Error::FieldCheck { .. }
+				| Error::FieldValue { .. }
+				| Error::FieldReadonly { .. }
+				| Error::FieldUndefined { .. }
+		)
+	}
+
+	/// Convert CoerceTo errors in LET statements
 	pub fn set_check_from_coerce(self, name: String) -> Error {
 		match self {
 			Error::CoerceTo {
@@ -1293,6 +1318,7 @@ impl Error {
 		}
 	}
 
+	/// Convert CoerceTo errors in functions and closures
 	pub fn function_check_from_coerce(self, name: impl Into<String>) -> Error {
 		match self {
 			Error::CoerceTo {

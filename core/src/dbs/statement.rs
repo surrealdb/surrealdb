@@ -5,7 +5,7 @@ use crate::sql::field::Fields;
 use crate::sql::group::Groups;
 use crate::sql::idiom::Idioms;
 use crate::sql::limit::Limit;
-use crate::sql::order::Orders;
+use crate::sql::order::Ordering;
 use crate::sql::output::Output;
 use crate::sql::split::Splits;
 use crate::sql::start::Start;
@@ -117,42 +117,167 @@ impl<'a> fmt::Display for Statement<'a> {
 
 impl<'a> Statement<'a> {
 	/// Check if this is a SELECT statement
-	pub fn is_select(&self) -> bool {
+	pub(crate) fn is_select(&self) -> bool {
 		matches!(self, Statement::Select(_))
 	}
+
 	/// Check if this is a CREATE statement
-	pub fn is_create(&self) -> bool {
+	pub(crate) fn is_create(&self) -> bool {
 		matches!(self, Statement::Create(_))
 	}
+
 	/// Check if this is a DELETE statement
-	pub fn is_delete(&self) -> bool {
+	pub(crate) fn is_delete(&self) -> bool {
 		matches!(self, Statement::Delete(_))
 	}
-	/// Returns whether retrieval can be deferred
-	pub fn is_deferable(&self) -> bool {
-		matches!(self, Statement::Create(_) | Statement::Upsert(_))
+
+	/// Returns whether the IGNORE clause has
+	/// been specified on an INSERT statement
+	pub(crate) fn is_ignore(&self) -> bool {
+		matches!(self, Statement::Insert(i) if i.ignore)
 	}
-	/// Returns whether this requires savepoints
-	pub fn is_retryable(&self) -> bool {
-		matches!(self, Statement::Insert(_) if self.data().is_some())
+
+	/// Returns whether the document retrieval for
+	/// this statement can be deferred. This is used
+	/// in the following instances:
+	///
+	/// CREATE some;
+	/// CREATE some:thing;
+	/// CREATE |some:1000|;
+	/// CREATE |some:1..1000|;
+	/// CREATE { id: some:thing };
+	/// UPSERT some;
+	/// UPSERT some:thing;
+	/// UPSERT |some:1000|;
+	/// UPSERT |some:1..1000|;
+	/// UPSERT { id: some:thing };
+	///
+	/// Importantly, when a WHERE clause condition is
+	/// specified on an UPSERT clause, then we do
+	/// first retrieve the document from storage, and
+	/// this function will return false in the
+	/// following instances:
+	///
+	/// UPSERT some WHERE test = true;
+	/// UPSERT some:thing WHERE test = true;
+	/// UPSERT |some:1000| WHERE test = true;
+	/// UPSERT |some:1..1000| WHERE test = true;
+	/// UPSERT { id: some:thing } WHERE test = true;
+	pub(crate) fn is_deferable(&self) -> bool {
+		match self {
+			Statement::Upsert(v) if v.cond.is_none() => true,
+			Statement::Create(_) => true,
+			_ => false,
+		}
 	}
+
+	/// Returns whether the document retrieval for
+	/// this statement potentially depends on the
+	/// initial value for this document, and can
+	/// therefore be retried as an update. This will
+	/// be true in the following instances:
+	///
+	/// UPSERT some UNSET test;
+	/// UPSERT some SET test = true;
+	/// UPSERT some MERGE { test: true };
+	/// UPSERT some PATCH [{ op: 'replace', path: '/', value: { test: true } }];
+	/// UPSERT some:thing UNSET test;
+	/// UPSERT some:thing SET test = true;
+	/// UPSERT some:thing MERGE { test: true };
+	/// UPSERT some:thing PATCH [{ op: 'replace', path: '/', value: { test: true } }];
+	/// UPSERT |some:1000| UNSET test;
+	/// UPSERT |some:1000| SET test = true;
+	/// UPSERT |some:1000| MERGE { test: true };
+	/// UPSERT |some:1000| PATCH [{ op: 'replace', path: '/', value: { test: true } }];
+	/// UPSERT |some:1..1000| UNSET test;
+	/// UPSERT |some:1..1000| SET test = true;
+	/// UPSERT |some:1..1000| MERGE { test: true };
+	/// UPSERT |some:1..1000| PATCH [{ op: 'replace', path: '/', value: { test: true } }];
+	///
+	/// Importantly, when a WHERE clause condition is
+	/// specified on an UPSERT clause, then we do
+	/// first retrieve the document from storage, and
+	/// this function will return false in the
+	/// following instances:
+	///
+	/// UPSERT some WHERE test = true;
+	/// UPSERT some:thing WHERE test = true;
+	/// UPSERT |some:1000| WHERE test = true;
+	/// UPSERT |some:1..1000| WHERE test = true;
+	/// UPSERT { id: some:thing } WHERE test = true;
+	pub(crate) fn is_repeatable(&self) -> bool {
+		match self {
+			Statement::Upsert(v) if v.cond.is_none() => match v.data {
+				// We are setting the entire record content
+				// so there is no need to fetch the value
+				// from the storage engine, if it exists.
+				Some(Data::ContentExpression(_)) => false,
+				// We are setting the entire record content
+				// so there is no need to fetch the value
+				// from the storage engine, if it exists.
+				Some(Data::ReplaceExpression(_)) => false,
+				// We likely have a MERGE or SET clause on
+				// this UPSERT statement, and so we might
+				// potentially need to access fields from
+				// the initial value already existing in
+				// the database. Therefore we need to fetch
+				// the initial value from storage.
+				Some(_) => true,
+				// We have no data clause, so we don't need
+				// to check if the record exists initially.
+				None => false,
+			},
+			_ => false,
+		}
+	}
+
+	/// Returns whether the document retrieval for
+	/// this statement should attempt to loop over
+	/// existing document to update, or is guaranteed
+	/// to create a record, if none exists. This is
+	/// used in the following instances when the WHERE
+	/// clause does not find any matching documents in
+	/// the storage engine, and therefore a new record
+	/// must be upserted:
+	///
+	/// UPSERT some WHERE test = true;
+	pub(crate) fn is_guaranteed(&self) -> bool {
+		matches!(self, Statement::Upsert(v) if v.cond.is_some())
+	}
+
+	/// Returns whether the document processing for
+	/// this statement can be retried, and therefore
+	/// whether we need to use savepoints in this
+	/// transaction. This is specifically used in
+	/// UPSERT statements, and INSERT statements which
+	/// have an ON DUPLICATE KEY UPDATE clause.
+	pub(crate) fn is_retryable(&self) -> bool {
+		match self {
+			Statement::Insert(_) if self.data().is_some() => true,
+			Statement::Upsert(_) => true,
+			_ => false,
+		}
+	}
+
 	/// Returns any query fields if specified
-	pub fn expr(&self) -> Option<&Fields> {
+	pub(crate) fn expr(&self) -> Option<&Fields> {
 		match self {
 			Statement::Select(v) => Some(&v.expr),
 			Statement::Live(v) => Some(&v.expr),
 			_ => None,
 		}
 	}
+
 	/// Returns any OMIT clause if specified
-	pub fn omit(&self) -> Option<&Idioms> {
+	pub(crate) fn omit(&self) -> Option<&Idioms> {
 		match self {
 			Statement::Select(v) => v.omit.as_ref(),
 			_ => None,
 		}
 	}
+
 	/// Returns any SET, CONTENT, or MERGE clause if specified
-	pub fn data(&self) -> Option<&Data> {
+	pub(crate) fn data(&self) -> Option<&Data> {
 		match self {
 			Statement::Create(v) => v.data.as_ref(),
 			Statement::Upsert(v) => v.data.as_ref(),
@@ -162,8 +287,9 @@ impl<'a> Statement<'a> {
 			_ => None,
 		}
 	}
+
 	/// Returns any WHERE clause if specified
-	pub fn conds(&self) -> Option<&Cond> {
+	pub(crate) fn conds(&self) -> Option<&Cond> {
 		match self {
 			Statement::Live(v) => v.cond.as_ref(),
 			Statement::Select(v) => v.cond.as_ref(),
@@ -173,50 +299,57 @@ impl<'a> Statement<'a> {
 			_ => None,
 		}
 	}
+
 	/// Returns any SPLIT clause if specified
-	pub fn split(&self) -> Option<&Splits> {
+	pub(crate) fn split(&self) -> Option<&Splits> {
 		match self {
 			Statement::Select(v) => v.split.as_ref(),
 			_ => None,
 		}
 	}
+
 	/// Returns any GROUP clause if specified
-	pub fn group(&self) -> Option<&Groups> {
+	pub(crate) fn group(&self) -> Option<&Groups> {
 		match self {
 			Statement::Select(v) => v.group.as_ref(),
 			_ => None,
 		}
 	}
+
 	/// Returns any ORDER clause if specified
-	pub fn order(&self) -> Option<&Orders> {
+	pub(crate) fn order(&self) -> Option<&Ordering> {
 		match self {
 			Statement::Select(v) => v.order.as_ref(),
 			_ => None,
 		}
 	}
+
 	/// Returns any FETCH clause if specified
-	pub fn fetch(&self) -> Option<&Fetchs> {
+	pub(crate) fn fetch(&self) -> Option<&Fetchs> {
 		match self {
 			Statement::Select(v) => v.fetch.as_ref(),
 			_ => None,
 		}
 	}
+
 	/// Returns any START clause if specified
-	pub fn start(&self) -> Option<&Start> {
+	pub(crate) fn start(&self) -> Option<&Start> {
 		match self {
 			Statement::Select(v) => v.start.as_ref(),
 			_ => None,
 		}
 	}
+
 	/// Returns any LIMIT clause if specified
-	pub fn limit(&self) -> Option<&Limit> {
+	pub(crate) fn limit(&self) -> Option<&Limit> {
 		match self {
 			Statement::Select(v) => v.limit.as_ref(),
 			_ => None,
 		}
 	}
+
 	/// Returns any RETURN clause if specified
-	pub fn output(&self) -> Option<&Output> {
+	pub(crate) fn output(&self) -> Option<&Output> {
 		match self {
 			Statement::Create(v) => v.output.as_ref(),
 			Statement::Upsert(v) => v.output.as_ref(),
@@ -227,9 +360,10 @@ impl<'a> Statement<'a> {
 			_ => None,
 		}
 	}
+
 	/// Returns any PARALLEL clause if specified
 	#[cfg(not(target_arch = "wasm32"))]
-	pub fn parallel(&self) -> bool {
+	pub(crate) fn parallel(&self) -> bool {
 		match self {
 			Statement::Select(v) => v.parallel,
 			Statement::Create(v) => v.parallel,
@@ -241,16 +375,18 @@ impl<'a> Statement<'a> {
 			_ => false,
 		}
 	}
+
 	/// Returns any TEMPFILES clause if specified
 	#[cfg(storage)]
-	pub fn tempfiles(&self) -> bool {
+	pub(crate) fn tempfiles(&self) -> bool {
 		match self {
 			Statement::Select(v) => v.tempfiles,
 			_ => false,
 		}
 	}
+
 	/// Returns any EXPLAIN clause if specified
-	pub fn explain(&self) -> Option<&Explain> {
+	pub(crate) fn explain(&self) -> Option<&Explain> {
 		match self {
 			Statement::Select(v) => v.explain.as_ref(),
 			_ => None,

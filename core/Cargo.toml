@@ -2,7 +2,7 @@
 name = "surrealdb-core"
 publish = true
 edition = "2021"
-version = "2.0.1"
+version = "2.0.4"
 rust-version = "1.80.1"
 readme = "../sdk/CARGO.md"
 authors = ["Tobie Morgan Hitchcock <tobie@surrealdb.com>"]
@@ -24,7 +24,7 @@ resolver = "2"
 [features]
 # Public features
 default = ["kv-mem"]
-kv-mem = ["dep:echodb", "tokio/time", "dep:tempfile", "dep:ext-sort"]
+kv-mem = ["dep:surrealkv", "tokio/time", "dep:tempfile", "dep:ext-sort"]
 kv-indxdb = ["dep:indxdb"]
 kv-rocksdb = ["dep:rocksdb", "tokio/time", "dep:tempfile", "dep:ext-sort"]
 kv-tikv = ["dep:tikv", "tokio/time", "dep:tempfile", "dep:ext-sort"]
@@ -68,14 +68,13 @@ blake3 = "1.5.3"
 bytes = "1.5.0"
 castaway = "0.2.3"
 cedar-policy = "2.4.2"
-channel = { version = "1.9.0", package = "async-channel" }
+channel = { version = "2.3.1", package = "async-channel" }
 chrono = { version = "0.4.38", features = ["serde"] }
 ciborium = "0.2.1"
 dashmap = "5.5.3"
 derive = { version = "0.12.0", package = "surrealdb-derive" }
 deunicode = "1.4.1"
 dmp = "0.2.0"
-echodb = { version = "0.7.0", optional = true }
 executor = { version = "1.8.0", package = "async-executor" }
 ext-sort = { version = "^0.1.4", optional = true }
 foundationdb = { version = "0.9.0", default-features = false, features = [
@@ -116,7 +115,8 @@ pin-project-lite = "0.2.13"
 quick_cache = "0.5.1"
 radix_trie = { version = "0.2.1", features = ["serde"] }
 rand = "0.8.5"
-reblessive = { version = "0.4.0", features = ["tree"] }
+rayon = "1.10.0"
+reblessive = { version = "0.4.1", features = ["tree"] }
 regex = "1.10.6"
 regex-syntax = { version = "0.8.4", optional = true, features = ["arbitrary"] }
 reqwest = { version = "0.12.7", default-features = false, features = [
@@ -134,7 +134,7 @@ revision = { version = "0.10.0", features = [
 ] }
 rmpv = "1.0.1"
 roaring = { version = "0.10.6", features = ["serde"] }
-rocksdb = { version = "0.21.0", features = ["lz4", "snappy"], optional = true }
+rocksdb = { version = "0.22.0", features = ["lz4", "snappy"], optional = true }
 rust_decimal = { version = "1.36.0", features = ["maths", "serde-str"] }
 rust-stemmers = "1.2.0"
 scrypt = "0.11.0"
@@ -147,8 +147,8 @@ sha2 = "0.10.8"
 snap = "1.1.0"
 storekey = "0.5.0"
 subtle = "2.6"
-surrealcs = { version = "0.3.1", optional = true }
-surrealkv = { version = "0.3.6", optional = true }
+surrealcs = { version = "0.4.4", optional = true }
+surrealkv = { version = "0.4.4", optional = true }
 surrealml = { version = "0.1.1", optional = true, package = "surrealml-core" }
 tempfile = { version = "3.10.1", optional = true }
 thiserror = "1.0.63"

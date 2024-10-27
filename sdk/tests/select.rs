@@ -2,6 +2,7 @@ mod parse;
 use parse::Parse;
 mod helpers;
 use helpers::new_ds;
+use surrealdb::sql::Number;
 use surrealdb_core::dbs::Session;
 use surrealdb_core::err::Error;
 use surrealdb_core::iam::Role;
@@ -1296,5 +1297,135 @@ async fn select_field_from_graph_no_flattening() -> Result<(), Error> {
 	);
 	assert_eq!(tmp, val);
 	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn select_field_value_permissions() -> Result<(), Error> {
+	let dbs = new_ds().await?;
+
+	let sql = r#"
+		DEFINE TABLE data PERMISSIONS FULL;
+		DEFINE FIELD private ON data TYPE string PERMISSIONS FOR SELECT NONE;
+		CREATE data:1 SET public = "public", private = "private";
+
+		DEFINE ACCESS user ON DATABASE TYPE RECORD;
+		DEFINE TABLE user PERMISSIONS FULL;
+		CREATE user:1;
+	"#;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 6);
+	//
+	let _ = res.remove(0).result?;
+	let _ = res.remove(0).result?;
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
+			{
+				id: data:1,
+				public: 'public',
+				private: 'private'
+			}
+		]",
+	);
+	assert_eq!(tmp, val);
+	//
+	let _ = res.remove(0).result?;
+	let _ = res.remove(0).result?;
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
+			{
+				id: user:1
+			}
+		]",
+	);
+	assert_eq!(tmp, val);
+
+	let sql = r#"
+		SELECT * FROM data WHERE id = data:1;
+		SELECT private AS public FROM data WHERE id = data:1;
+		SELECT public FROM data WHERE private = "private";
+		SELECT VALUE private FROM data WHERE id = data:1;
+	"#;
+	let ses = Session::for_record("test", "test", "user", Value::parse("user:1"));
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 4);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
+			{
+				id: data:1,
+				public: 'public'
+			}
+		]",
+	);
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
+			{
+				public: NONE
+			}
+		]",
+	);
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse("[]");
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse("[NONE]");
+	assert_eq!(tmp, val);
+
+	Ok(())
+}
+
+#[tokio::test]
+async fn select_order_by_rand_large() -> Result<(), Error> {
+	let dbs = new_ds().await?;
+
+	let sql = r#"
+		let $array = <array> 0..1000;
+		SELECT * FROM $array ORDER BY RAND()
+	"#;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 2);
+	let _ = res.remove(0).result?;
+
+	let v = res.remove(0).result.unwrap();
+	let Value::Array(x) = v else {
+		panic!("not the right type");
+	};
+
+	let x: Vec<_> = x
+		.into_iter()
+		.map(|x| {
+			let Value::Number(Number::Int(x)) = x else {
+				panic!("not the right type");
+			};
+			x
+		})
+		.collect();
+
+	// It is technically possible that the array was shuffeled in such a way that it ends up
+	// with the original order but, if properly shuffeled, that chance should be so small the it
+	// will effectively never happens.
+	assert!(
+		!x.iter().enumerate().all(|(idx, v)| idx as i64 == *v),
+		"array was still in original order"
+	);
+
+	for i in 0..1000 {
+		assert!(x.contains(&i))
+	}
+
 	Ok(())
 }

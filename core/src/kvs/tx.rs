@@ -102,11 +102,11 @@ impl Transaction {
 
 	/// Check if a key exists in the datastore.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
-	pub async fn exists<K>(&self, key: K) -> Result<bool, Error>
+	pub async fn exists<K>(&self, key: K, version: Option<u64>) -> Result<bool, Error>
 	where
 		K: Into<Key> + Debug,
 	{
-		self.lock().await.exists(key).await
+		self.lock().await.exists(key, version).await
 	}
 
 	/// Fetch a key from the datastore.
@@ -228,11 +228,16 @@ impl Transaction {
 	///
 	/// This function fetches the full range of keys, in a single request to the underlying datastore.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
-	pub async fn keys<K>(&self, rng: Range<K>, limit: u32) -> Result<Vec<Key>, Error>
+	pub async fn keys<K>(
+		&self,
+		rng: Range<K>,
+		limit: u32,
+		version: Option<u64>,
+	) -> Result<Vec<Key>, Error>
 	where
 		K: Into<Key> + Debug,
 	{
-		self.lock().await.keys(rng, limit).await
+		self.lock().await.keys(rng, limit, version).await
 	}
 
 	/// Retrieve a specific range of keys from the datastore.
@@ -1608,7 +1613,7 @@ impl Transaction {
 						val
 					}
 					// Check to see that the hierarchy exists
-					Err(Error::TbNotFound {
+					Err(Error::DbNotFound {
 						value,
 					}) if strict => {
 						self.get_ns(ns).await?;

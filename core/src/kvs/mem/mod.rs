@@ -2,16 +2,18 @@
 
 use crate::err::Error;
 use crate::key::debug::Sprintable;
-use crate::kvs::savepoint::{SaveOperation, SavePointImpl, SavePoints};
 use crate::kvs::Check;
 use crate::kvs::Key;
 use crate::kvs::Val;
 use std::fmt::Debug;
 use std::ops::Range;
+use surrealkv::Options;
+use surrealkv::Store;
+use surrealkv::Transaction as Tx;
 
 #[non_exhaustive]
 pub struct Datastore {
-	db: echodb::Db<Key, Val>,
+	db: Store,
 }
 
 #[non_exhaustive]
@@ -23,9 +25,7 @@ pub struct Transaction {
 	/// Should we check unhandled transactions?
 	check: Check,
 	/// The underlying datastore transaction
-	inner: echodb::Tx<Key, Val>,
-	/// The save point implementation
-	save_points: SavePoints,
+	inner: Tx,
 }
 
 impl Drop for Transaction {
@@ -61,9 +61,24 @@ impl Drop for Transaction {
 impl Datastore {
 	/// Open a new database
 	pub(crate) async fn new() -> Result<Datastore, Error> {
-		Ok(Datastore {
-			db: echodb::db::new(),
-		})
+		// Create new configuration options
+		let mut opts = Options::new();
+		// Ensure versions are disabled
+		opts.enable_versions = false;
+		// Ensure persistence is disabled
+		opts.disk_persistence = false;
+		// Create a new datastore
+		match Store::new(opts) {
+			Ok(db) => Ok(Datastore {
+				db,
+			}),
+			Err(e) => Err(Error::Ds(e.to_string())),
+		}
+	}
+	/// Shutdown the database
+	pub(crate) async fn shutdown(&self) -> Result<(), Error> {
+		// Nothing to do here
+		Ok(())
 	}
 	/// Start a new transaction
 	pub(crate) async fn transaction(&self, write: bool, _: bool) -> Result<Transaction, Error> {
@@ -73,13 +88,12 @@ impl Datastore {
 		#[cfg(debug_assertions)]
 		let check = Check::Panic;
 		// Create a new transaction
-		match self.db.begin(write).await {
+		match self.db.begin() {
 			Ok(inner) => Ok(Transaction {
 				done: false,
 				check,
 				write,
 				inner,
-				save_points: Default::default(),
 			}),
 			Err(e) => Err(Error::Tx(e.to_string())),
 		}
@@ -102,22 +116,22 @@ impl super::api::Transaction for Transaction {
 		self.write
 	}
 
-	/// Cancel a transaction
+	/// Cancels the transaction.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self))]
 	async fn cancel(&mut self) -> Result<(), Error> {
 		// Check to see if transaction is closed
 		if self.done {
 			return Err(Error::TxFinished);
 		}
-		// Mark this transaction as done
+		// Mark the transaction as done.
 		self.done = true;
-		// Cancel this transaction
-		self.inner.cancel()?;
+		// Rollback the transaction.
+		self.inner.rollback();
 		// Continue
 		Ok(())
 	}
 
-	/// Commit a transaction
+	/// Commits the transaction.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self))]
 	async fn commit(&mut self) -> Result<(), Error> {
 		// Check to see if transaction is closed
@@ -128,26 +142,30 @@ impl super::api::Transaction for Transaction {
 		if !self.write {
 			return Err(Error::TxReadonly);
 		}
-		// Mark this transaction as done
+		// Mark the transaction as done.
 		self.done = true;
-		// Cancel this transaction
-		self.inner.commit()?;
+		// Commit the transaction.
+		self.inner.commit().await?;
 		// Continue
 		Ok(())
 	}
 
-	/// Check if a key exists
+	/// Checks if a key exists in the database.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
-	async fn exists<K>(&mut self, key: K) -> Result<bool, Error>
+	async fn exists<K>(&mut self, key: K, version: Option<u64>) -> Result<bool, Error>
 	where
 		K: Into<Key> + Sprintable + Debug,
 	{
+		// Memory does not support versioned queries.
+		if version.is_some() {
+			return Err(Error::UnsupportedVersionedQueries);
+		}
 		// Check to see if transaction is closed
 		if self.done {
 			return Err(Error::TxFinished);
 		}
 		// Check the key
-		let res = self.inner.exi(key.into())?;
+		let res = self.inner.get(&key.into())?.is_some();
 		// Return result
 		Ok(res)
 	}
@@ -158,17 +176,19 @@ impl super::api::Transaction for Transaction {
 	where
 		K: Into<Key> + Sprintable + Debug,
 	{
-		// MemDB does not support versioned queries.
+		// Memory does not support versioned queries.
 		if version.is_some() {
 			return Err(Error::UnsupportedVersionedQueries);
 		}
-
 		// Check to see if transaction is closed
 		if self.done {
 			return Err(Error::TxFinished);
 		}
-		// Get the key
-		let res = self.inner.get(key.into())?;
+		// Fetch the value from the database.
+		let res = match version {
+			Some(ts) => self.inner.get_at_ts(&key.into(), ts)?,
+			None => self.inner.get(&key.into())?,
+		};
 		// Return result
 		Ok(res)
 	}
@@ -180,11 +200,10 @@ impl super::api::Transaction for Transaction {
 		K: Into<Key> + Sprintable + Debug,
 		V: Into<Val> + Debug,
 	{
-		// MemDB does not support versioned queries.
+		// Memory does not support versioned queries.
 		if version.is_some() {
 			return Err(Error::UnsupportedVersionedQueries);
 		}
-
 		// Check to see if transaction is closed
 		if self.done {
 			return Err(Error::TxFinished);
@@ -193,19 +212,10 @@ impl super::api::Transaction for Transaction {
 		if !self.write {
 			return Err(Error::TxReadonly);
 		}
-		// Extract the key
-		let key = key.into();
-		// Prepare the savepoint if any
-		let prep = if self.save_points.is_some() {
-			self.save_point_prepare(&key, version, SaveOperation::Set).await?
-		} else {
-			None
-		};
 		// Set the key
-		self.inner.set(key, val.into())?;
-		// Confirm the save point
-		if let Some(prep) = prep {
-			self.save_points.save(prep);
+		match version {
+			Some(ts) => self.inner.set_at_ts(&key.into(), &val.into(), ts)?,
+			None => self.inner.set(&key.into(), &val.into())?,
 		}
 		// Return result
 		Ok(())
@@ -218,11 +228,10 @@ impl super::api::Transaction for Transaction {
 		K: Into<Key> + Sprintable + Debug,
 		V: Into<Val> + Debug,
 	{
-		// MemDB does not support versioned queries.
+		// Memory does not support versioned queries.
 		if version.is_some() {
 			return Err(Error::UnsupportedVersionedQueries);
 		}
-
 		// Check to see if transaction is closed
 		if self.done {
 			return Err(Error::TxFinished);
@@ -231,19 +240,17 @@ impl super::api::Transaction for Transaction {
 		if !self.write {
 			return Err(Error::TxReadonly);
 		}
-		// Extract the key
+		// Get the arguments
 		let key = key.into();
-		// Hydrate the savepoint if any
-		let prep = if self.save_points.is_some() {
-			self.save_point_prepare(&key, version, SaveOperation::Put).await?
+		let val = val.into();
+		// Set the key if empty
+		if let Some(ts) = version {
+			self.inner.set_at_ts(&key, &val, ts)?;
 		} else {
-			None
-		};
-		// Set the key
-		self.inner.put(key, val.into())?;
-		// Confirm the save point
-		if let Some(prep) = prep {
-			self.save_points.save(prep);
+			match self.inner.get(&key)? {
+				None => self.inner.set(&key, &val)?,
+				_ => return Err(Error::TxKeyAlreadyExists),
+			}
 		}
 		// Return result
 		Ok(())
@@ -264,25 +271,21 @@ impl super::api::Transaction for Transaction {
 		if !self.write {
 			return Err(Error::TxReadonly);
 		}
-		// Extract the key
+		// Get the arguments
 		let key = key.into();
-		// Hydrate the savepoint if any
-		let prep = if self.save_points.is_some() {
-			self.save_point_prepare(&key, None, SaveOperation::Put).await?
-		} else {
-			None
+		let val = val.into();
+		let chk = chk.map(Into::into);
+		// Set the key if valid
+		match (self.inner.get(&key)?, chk) {
+			(Some(v), Some(w)) if v == w => self.inner.set(&key, &val)?,
+			(None, None) => self.inner.set(&key, &val)?,
+			_ => return Err(Error::TxConditionNotMet),
 		};
-		// Set the key
-		self.inner.putc(key, val.into(), chk.map(Into::into))?;
-		// Confirm the save point
-		if let Some(prep) = prep {
-			self.save_points.save(prep);
-		}
 		// Return result
 		Ok(())
 	}
 
-	/// Delete a key
+	/// Deletes a key from the database.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
 	async fn del<K>(&mut self, key: K) -> Result<(), Error>
 	where
@@ -296,20 +299,8 @@ impl super::api::Transaction for Transaction {
 		if !self.write {
 			return Err(Error::TxReadonly);
 		}
-		// Extract the key
-		let key = key.into();
-		// Hydrate the savepoint if any
-		let prep = if self.save_points.is_some() {
-			self.save_point_prepare(&key, None, SaveOperation::Del).await?
-		} else {
-			None
-		};
 		// Remove the key
-		self.inner.del(key)?;
-		// Confirm the save point
-		if let Some(prep) = prep {
-			self.save_points.save(prep);
-		}
+		self.inner.delete(&key.into())?;
 		// Return result
 		Ok(())
 	}
@@ -329,46 +320,50 @@ impl super::api::Transaction for Transaction {
 		if !self.write {
 			return Err(Error::TxReadonly);
 		}
-		// Extract the key
+		// Get the arguments
 		let key = key.into();
-		// Hydrate the savepoint if any
-		let prep = if self.save_points.is_some() {
-			self.save_point_prepare(&key, None, SaveOperation::Del).await?
-		} else {
-			None
+		let chk = chk.map(Into::into);
+		// Delete the key if valid
+		match (self.inner.get(&key)?, chk) {
+			(Some(v), Some(w)) if v == w => self.inner.delete(&key)?,
+			(None, None) => self.inner.delete(&key)?,
+			_ => return Err(Error::TxConditionNotMet),
 		};
-		// Remove the key
-		self.inner.delc(key, chk.map(Into::into))?;
-		// Confirm the save point
-		if let Some(prep) = prep {
-			self.save_points.save(prep);
-		}
 		// Return result
 		Ok(())
 	}
 
-	/// Retrieve a range of keys from the databases
+	/// Retrieves a range of key-value pairs from the database.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.sprint()))]
-	async fn keys<K>(&mut self, rng: Range<K>, limit: u32) -> Result<Vec<Key>, Error>
+	async fn keys<K>(
+		&mut self,
+		rng: Range<K>,
+		limit: u32,
+		version: Option<u64>,
+	) -> Result<Vec<Key>, Error>
 	where
 		K: Into<Key> + Sprintable + Debug,
 	{
+		// Memory does not support versioned queries.
+		if version.is_some() {
+			return Err(Error::UnsupportedVersionedQueries);
+		}
 		// Check to see if transaction is closed
 		if self.done {
 			return Err(Error::TxFinished);
 		}
-		// Convert the range to bytes
-		let rng: Range<Key> = Range {
-			start: rng.start.into(),
-			end: rng.end.into(),
-		};
-		// Scan the keys
-		let res = self.inner.keys(rng, limit as usize)?;
+		// Set the key range
+		let beg = rng.start.into();
+		let end = rng.end.into();
+		// Retrieve the scan range
+		let res = self.inner.scan(beg.as_slice()..end.as_slice(), Some(limit as usize))?;
+		// Convert the keys and values
+		let res = res.into_iter().map(|kv| Key::from(kv.0)).collect();
 		// Return result
 		Ok(res)
 	}
 
-	/// Retrieve a range of keys from the databases
+	/// Retrieves a range of key-value pairs from the database.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.sprint()))]
 	async fn scan<K>(
 		&mut self,
@@ -379,29 +374,46 @@ impl super::api::Transaction for Transaction {
 	where
 		K: Into<Key> + Sprintable + Debug,
 	{
-		// MemDB does not support versioned queries.
+		// Memory does not support versioned queries.
 		if version.is_some() {
 			return Err(Error::UnsupportedVersionedQueries);
 		}
-
 		// Check to see if transaction is closed
 		if self.done {
 			return Err(Error::TxFinished);
 		}
-		// Convert the range to bytes
-		let rng: Range<Key> = Range {
-			start: rng.start.into(),
-			end: rng.end.into(),
+		// Set the key range
+		let beg = rng.start.into();
+		let end = rng.end.into();
+		let range = beg.as_slice()..end.as_slice();
+		// Retrieve the scan range
+		let res = match version {
+			Some(ts) => self.inner.scan_at_ts(range, ts, Some(limit as usize))?,
+			None => self
+				.inner
+				.scan(range, Some(limit as usize))?
+				.into_iter()
+				.map(|kv| (kv.0, kv.1))
+				.collect(),
 		};
-		// Scan the keys
-		let res = self.inner.scan(rng, limit as usize)?;
 		// Return result
 		Ok(res)
 	}
 }
 
-impl SavePointImpl for Transaction {
-	fn get_save_points(&mut self) -> &mut SavePoints {
-		&mut self.save_points
+impl Transaction {
+	pub(crate) fn new_save_point(&mut self) {
+		// Set the save point, the errors are ignored.
+		let _ = self.inner.set_savepoint();
+	}
+
+	pub(crate) async fn rollback_to_save_point(&mut self) -> Result<(), Error> {
+		// Rollback
+		self.inner.rollback_to_savepoint()?;
+		Ok(())
+	}
+
+	pub(crate) fn release_last_save_point(&mut self) -> Result<(), Error> {
+		Ok(())
 	}
 }

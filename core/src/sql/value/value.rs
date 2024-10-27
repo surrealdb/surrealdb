@@ -848,7 +848,7 @@ impl TryFrom<&Value> for Number {
 	type Error = Error;
 	fn try_from(value: &Value) -> Result<Self, Self::Error> {
 		match value {
-			Value::Number(x) => Ok(x.clone()),
+			Value::Number(x) => Ok(*x),
 			_ => Err(Error::TryFrom(value.to_string(), "Number")),
 		}
 	}
@@ -959,12 +959,12 @@ impl Value {
 			Value::Uuid(_) => true,
 			Value::Thing(_) => true,
 			Value::Geometry(_) => true,
+			Value::Datetime(_) => true,
 			Value::Array(v) => !v.is_empty(),
 			Value::Object(v) => !v.is_empty(),
 			Value::Strand(v) => !v.is_empty(),
 			Value::Number(v) => v.is_truthy(),
 			Value::Duration(v) => v.as_nanos() > 0,
-			Value::Datetime(v) => v.timestamp() > 0,
 			_ => false,
 		}
 	}
@@ -2604,6 +2604,7 @@ impl Value {
 			Value::Bool(_) => true,
 			Value::Bytes(_) => true,
 			Value::Uuid(_) => true,
+			Value::Thing(_) => true,
 			Value::Number(_) => true,
 			Value::Strand(_) => true,
 			Value::Duration(_) => true,
@@ -2613,6 +2614,7 @@ impl Value {
 			Value::Object(v) => v.is_static(),
 			Value::Expression(v) => v.is_static(),
 			Value::Function(v) => v.is_static(),
+			Value::Cast(v) => v.is_static(),
 			Value::Constant(_) => true,
 			_ => false,
 		}
@@ -2981,10 +2983,10 @@ impl TryAdd for Value {
 	fn try_add(self, other: Self) -> Result<Self, Error> {
 		Ok(match (self, other) {
 			(Self::Number(v), Self::Number(w)) => Self::Number(v.try_add(w)?),
-			(Self::Strand(v), Self::Strand(w)) => Self::Strand(v + w),
-			(Self::Datetime(v), Self::Duration(w)) => Self::Datetime(w + v),
-			(Self::Duration(v), Self::Datetime(w)) => Self::Datetime(v + w),
-			(Self::Duration(v), Self::Duration(w)) => Self::Duration(v + w),
+			(Self::Strand(v), Self::Strand(w)) => Self::Strand(v.try_add(w)?),
+			(Self::Datetime(v), Self::Duration(w)) => Self::Datetime(w.try_add(v)?),
+			(Self::Duration(v), Self::Datetime(w)) => Self::Datetime(v.try_add(w)?),
+			(Self::Duration(v), Self::Duration(w)) => Self::Duration(v.try_add(w)?),
 			(v, w) => return Err(Error::TryAdd(v.to_raw_string(), w.to_raw_string())),
 		})
 	}
@@ -2994,7 +2996,7 @@ impl TryAdd for Value {
 
 pub(crate) trait TrySub<Rhs = Self> {
 	type Output;
-	fn try_sub(self, v: Self) -> Result<Self::Output, Error>;
+	fn try_sub(self, v: Rhs) -> Result<Self::Output, Error>;
 }
 
 impl TrySub for Value {
@@ -3002,10 +3004,10 @@ impl TrySub for Value {
 	fn try_sub(self, other: Self) -> Result<Self, Error> {
 		Ok(match (self, other) {
 			(Self::Number(v), Self::Number(w)) => Self::Number(v.try_sub(w)?),
-			(Self::Datetime(v), Self::Datetime(w)) => Self::Duration(v - w),
-			(Self::Datetime(v), Self::Duration(w)) => Self::Datetime(w - v),
-			(Self::Duration(v), Self::Datetime(w)) => Self::Datetime(v - w),
-			(Self::Duration(v), Self::Duration(w)) => Self::Duration(v - w),
+			(Self::Datetime(v), Self::Datetime(w)) => Self::Duration(v.try_sub(w)?),
+			(Self::Datetime(v), Self::Duration(w)) => Self::Datetime(w.try_sub(v)?),
+			(Self::Duration(v), Self::Datetime(w)) => Self::Datetime(v.try_sub(w)?),
+			(Self::Duration(v), Self::Duration(w)) => Self::Duration(v.try_sub(w)?),
 			(v, w) => return Err(Error::TrySub(v.to_raw_string(), w.to_raw_string())),
 		})
 	}
@@ -3116,6 +3118,8 @@ impl TryNeg for Value {
 #[cfg(test)]
 mod tests {
 
+	use chrono::TimeZone;
+
 	use super::*;
 	use crate::syn::Parse;
 
@@ -3167,6 +3171,7 @@ mod tests {
 		assert!(Value::from("falsey").is_truthy());
 		assert!(Value::from("something").is_truthy());
 		assert!(Value::from(Uuid::new()).is_truthy());
+		assert!(Value::from(Utc.with_ymd_and_hms(1948, 12, 3, 0, 0, 0).unwrap()).is_truthy());
 	}
 
 	#[test]

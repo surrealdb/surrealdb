@@ -239,6 +239,9 @@ pub fn synchronous(
 		"math::trimean" => math::trimean,
 		"math::variance" => math::variance,
 		//
+		"meta::id" => record::id,
+		"meta::tb" => record::tb,
+		//
 		"not" => not::not,
 		//
 		"object::entries" => object::entries,
@@ -319,6 +322,7 @@ pub fn synchronous(
 		"string::is::numeric" => string::is::numeric,
 		"string::is::semver" => string::is::semver,
 		"string::is::url" => string::is::url,
+		"string::is::ulid" => string::is::ulid,
 		"string::is::uuid" => string::is::uuid,
 		"string::is::record" => string::is::record,
 		"string::similarity::fuzzy" => string::similarity::fuzzy,
@@ -361,7 +365,9 @@ pub fn synchronous(
 		"time::from::micros" => time::from::micros,
 		"time::from::millis" => time::from::millis,
 		"time::from::secs" => time::from::secs,
+		"time::from::ulid" => time::from::ulid,
 		"time::from::unix" => time::from::unix,
+		"time::from::uuid" => time::from::uuid,
 		"time::is::leap_year" => time::is::leap_year,
 		//
 		"type::array" => r#type::array,
@@ -736,6 +742,7 @@ pub async fn idiom(
 				"is_numeric" => string::is::numeric,
 				"is_semver" => string::is::semver,
 				"is_url" => string::is::url,
+				"is_ulid" => string::is::ulid,
 				"is_uuid" => string::is::uuid,
 				"is_record" => string::is::record,
 				"similarity_fuzzy" => string::similarity::fuzzy,
