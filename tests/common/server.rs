@@ -45,6 +45,7 @@ impl Child {
 		a.map(|_ok| self)
 	}
 
+	#[cfg(unix)]
 	pub fn send_signal(&self, signal: nix::sys::signal::Signal) -> nix::Result<()> {
 		nix::sys::signal::kill(
 			nix::unistd::Pid::from_raw(self.inner.as_ref().unwrap().id() as i32),
@@ -181,14 +182,6 @@ impl Default for StartServerArguments {
 pub async fn start_server_without_auth() -> Result<(String, Child), Box<dyn Error>> {
 	start_server(StartServerArguments {
 		auth: false,
-		..Default::default()
-	})
-	.await
-}
-
-pub async fn start_server_with_functions() -> Result<(String, Child), Box<dyn Error>> {
-	start_server(StartServerArguments {
-		args: "--allow-funcs".to_string(),
 		..Default::default()
 	})
 	.await

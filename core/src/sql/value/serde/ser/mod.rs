@@ -220,19 +220,19 @@ mod tests {
 	#[test]
 	fn number() {
 		let number = Number::Int(Default::default());
-		let value = to_value(number.clone()).unwrap();
+		let value = to_value(number).unwrap();
 		let expected = Value::Number(number);
 		assert_eq!(value, expected);
 		assert_eq!(expected.clone(), to_value(expected).unwrap());
 
 		let number = Number::Float(Default::default());
-		let value = to_value(number.clone()).unwrap();
+		let value = to_value(number).unwrap();
 		let expected = Value::Number(number);
 		assert_eq!(value, expected);
 		assert_eq!(expected.clone(), to_value(expected).unwrap());
 
 		let number = Number::Decimal(Default::default());
-		let value = to_value(number.clone()).unwrap();
+		let value = to_value(number).unwrap();
 		let expected = Value::Number(number);
 		assert_eq!(value, expected);
 		assert_eq!(expected.clone(), to_value(expected).unwrap());

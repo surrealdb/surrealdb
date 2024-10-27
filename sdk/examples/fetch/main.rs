@@ -2,8 +2,8 @@ use serde::{Deserialize, Serialize};
 use surrealdb::engine::remote::ws::Ws;
 use surrealdb::opt::auth::Root;
 use surrealdb::opt::Resource;
-use surrealdb::sql::{Datetime, Id, Thing};
 use surrealdb::Surreal;
+use surrealdb::{Datetime, RecordId};
 
 // Dance classes table name
 const DANCE: &str = "dance";
@@ -14,7 +14,7 @@ const STUDENT: &str = "student";
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct DanceClass {
-	id: Thing,
+	id: RecordId,
 	name: String,
 	created_at: Datetime,
 }
@@ -23,9 +23,9 @@ struct DanceClass {
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct Student {
-	id: Thing,
+	id: RecordId,
 	name: String,
-	classes: Vec<Thing>,
+	classes: Vec<RecordId>,
 	created_at: Datetime,
 }
 
@@ -34,7 +34,7 @@ struct Student {
 #[serde(rename_all = "camelCase")]
 #[allow(dead_code)]
 struct StudentClasses {
-	id: Thing,
+	id: RecordId,
 	name: String,
 	classes: Vec<DanceClass>,
 	created_at: Datetime,
@@ -59,7 +59,7 @@ async fn main() -> surrealdb::Result<()> {
 	let classes: Option<DanceClass> = db
 		.create(DANCE)
 		.content(DanceClass {
-			id: Thing::from((DANCE, Id::rand())),
+			id: RecordId::from((DANCE, "dc101")),
 			name: "Introduction to Dancing".to_owned(),
 			created_at: Datetime::default(),
 		})
@@ -71,7 +71,7 @@ async fn main() -> surrealdb::Result<()> {
 	// a `sql::Value` instead and ignore it.
 	db.create(Resource::from(STUDENT))
 		.content(Student {
-			id: Thing::from((STUDENT, Id::rand())),
+			id: RecordId::from((STUDENT, "jane")),
 			name: "Jane Doe".to_owned(),
 			classes: classes.into_iter().map(|class| class.id).collect(),
 			created_at: Datetime::default(),

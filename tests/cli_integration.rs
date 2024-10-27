@@ -6,12 +6,16 @@ mod cli_integration {
 	use assert_fs::prelude::{FileTouch, FileWriteStr, PathChild};
 	use chrono::Duration as ChronoDuration;
 	use chrono::Utc;
+	#[cfg(unix)]
 	use common::Format;
+	#[cfg(unix)]
 	use common::Socket;
 	use jsonwebtoken::{encode, Algorithm, EncodingKey, Header};
 	use serde::{Deserialize, Serialize};
+	#[cfg(unix)]
 	use serde_json::json;
 	use std::fs::File;
+	#[cfg(unix)]
 	use std::time;
 	use std::time::Duration;
 	use surrealdb::fflags::FFLAGS;
@@ -480,6 +484,21 @@ mod cli_integration {
 					.unwrap_err()
 					.contains("Database is needed for authentication but it was not provided"),
 				"auth level database requires providing a namespace and database: {output:?}"
+			);
+		}
+
+		info!("* Pass auth level without providing credentials");
+		{
+			let args = format!("sql --conn http://{addr} --ns {ns} --auth-level database");
+			let output = common::run(&args)
+				.input(format!("USE NS `{ns}` DB `{db}`; INFO FOR DB;\n").as_str())
+				.output();
+			assert!(
+				output
+					.clone()
+					.unwrap_err()
+					.contains("error: the following required arguments were not provided:\n  --password <PASSWORD>\n  --username <USERNAME>"),
+				"auth level database requires credentials: {output:?}"
 			);
 		}
 		server.finish().unwrap();
@@ -1036,6 +1055,7 @@ mod cli_integration {
 		assert!(common::run_in_dir("validate", &temp_dir).output().is_err());
 	}
 
+	#[cfg(unix)]
 	#[test(tokio::test)]
 	async fn test_server_graceful_shutdown() {
 		let (_, mut server) = common::start_server_with_defaults().await.unwrap();
@@ -1063,6 +1083,7 @@ mod cli_integration {
 		}
 	}
 
+	#[cfg(unix)]
 	#[test(tokio::test)]
 	async fn test_server_second_signal_handling() {
 		let (addr, mut server) = common::start_server_without_auth().await.unwrap();

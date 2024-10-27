@@ -1,25 +1,27 @@
-use crate::ctx::{Context, MutableContext};
+use crate::ctx::reason::Reason;
+use crate::ctx::Context;
 use crate::dbs::response::Response;
 use crate::dbs::Force;
-use crate::dbs::Notification;
 use crate::dbs::Options;
 use crate::dbs::QueryType;
 use crate::err::Error;
 use crate::iam::Action;
 use crate::iam::ResourceKind;
-use crate::kvs::Transaction;
+use crate::kvs::Datastore;
 use crate::kvs::TransactionType;
-use crate::kvs::{Datastore, LockType::*, TransactionType::*};
+use crate::kvs::{LockType, Transaction};
 use crate::sql::paths::DB;
 use crate::sql::paths::NS;
 use crate::sql::query::Query;
 use crate::sql::statement::Statement;
+use crate::sql::statements::{OptionStatement, UseStatement};
 use crate::sql::value::Value;
 use crate::sql::Base;
-use channel::Receiver;
-use futures::StreamExt;
+use futures::{Stream, StreamExt};
 use reblessive::TreeStack;
+use std::pin::{pin, Pin};
 use std::sync::Arc;
+use std::time::Duration;
 #[cfg(not(target_arch = "wasm32"))]
 use tokio::spawn;
 use tracing::instrument;
@@ -29,432 +31,565 @@ use wasm_bindgen_futures::spawn_local as spawn;
 
 const TARGET: &str = "surrealdb::core::dbs";
 
-pub(crate) struct Executor<'a> {
-	err: bool,
-	kvs: &'a Datastore,
-	txn: Option<Arc<Transaction>>,
+pub struct Executor {
+	stack: TreeStack,
+	results: Vec<Response>,
+	opt: Options,
+	ctx: Context,
 }
 
-impl<'a> Executor<'a> {
-	pub fn new(kvs: &'a Datastore) -> Executor<'a> {
+impl Executor {
+	pub fn new(ctx: Context, opt: Options) -> Self {
 		Executor {
-			kvs,
-			txn: None,
-			err: false,
+			stack: TreeStack::new(),
+			results: Vec::new(),
+			opt,
+			ctx,
 		}
 	}
 
-	fn txn(&self) -> Result<Arc<Transaction>, Error> {
-		self.txn.clone().ok_or_else(|| fail!("txn was None after successful begin"))
-	}
+	fn execute_use_statement(&mut self, stmt: UseStatement) -> Result<(), Error> {
+		let ctx_ref = Arc::get_mut(&mut self.ctx)
+			.ok_or_else(|| fail!("Tried to unfreeze a Context with multiple references"))?;
 
-	/// # Return
-	/// - true if a new transaction has begun
-	/// - false if
-	///   - couldn't create transaction (sets err flag)
-	///   - a transaction has already begun
-	async fn begin(&mut self, write: TransactionType) -> bool {
-		match self.txn.as_ref() {
-			Some(_) => false,
-			None => match self.kvs.transaction(write, Optimistic).await {
-				Ok(v) => {
-					self.txn = Some(Arc::new(v));
-					true
-				}
-				Err(_) => {
-					self.err = true;
-					false
-				}
-			},
+		if let Some(ns) = stmt.ns {
+			let mut session = ctx_ref.value("session").unwrap_or(&Value::None).clone();
+			self.opt.set_ns(Some(ns.as_str().into()));
+			session.put(NS.as_ref(), ns.into());
+			ctx_ref.add_value("session", session.into());
 		}
-	}
-
-	/// Commits the transaction if it is local.
-	///
-	/// # Return
-	///
-	/// An `Err` if the transaction could not be committed;
-	/// otherwise returns `Ok`.
-	async fn commit(&mut self, local: bool) -> Result<(), Error> {
-		if local {
-			// Extract the transaction
-			if let Some(txn) = self.txn.take() {
-				// Lock the transaction
-				let mut txn = txn.lock().await;
-				// Check for any errors
-				if self.err {
-					let _ = txn.cancel().await;
-				} else {
-					//
-					if let Err(e) = txn.complete_changes(false).await {
-						// Rollback the transaction
-						let _ = txn.cancel().await;
-						// Return the error message
-						self.err = true;
-						return Err(e);
-					}
-					if let Err(e) = txn.commit().await {
-						// Rollback the transaction
-						let _ = txn.cancel().await;
-						// Return the error message
-						self.err = true;
-						return Err(e);
-					};
-				}
-			}
+		if let Some(db) = stmt.db {
+			let mut session = ctx_ref.value("session").unwrap_or(&Value::None).clone();
+			self.opt.set_db(Some(db.as_str().into()));
+			session.put(DB.as_ref(), db.into());
+			ctx_ref.add_value("session", session.into());
 		}
 		Ok(())
 	}
 
-	async fn cancel(&mut self, local: bool) {
-		if local {
-			// Extract the transaction
-			if let Some(txn) = self.txn.take() {
-				if txn.cancel().await.is_err() {
-					self.err = true;
+	fn execute_option_statement(&mut self, stmt: OptionStatement) -> Result<(), Error> {
+		// Allowed to run?
+		self.opt.is_allowed(Action::Edit, ResourceKind::Option, &Base::Db)?;
+		// Convert to uppercase
+		let mut name = stmt.name.0;
+		name.make_ascii_uppercase();
+		// Process the option
+		match name.as_str() {
+			"IMPORT" => {
+				self.opt.set_import(stmt.what);
+			}
+			"FORCE" => {
+				let force = if stmt.what {
+					Force::All
+				} else {
+					Force::None
+				};
+				self.opt.force = force;
+			}
+			"FUTURES" => {
+				if stmt.what {
+					self.opt.set_futures(true);
+				} else {
+					self.opt.set_futures_never();
 				}
 			}
-		}
+			_ => {}
+		};
+		Ok(())
 	}
 
-	fn buf_cancel(&self, v: Response) -> Response {
-		Response {
-			time: v.time,
-			result: Err(Error::QueryCancelled),
-			query_type: QueryType::Other,
-		}
-	}
-
-	fn buf_commit(&self, v: Response, commit_error: &Option<Error>) -> Response {
-		match &self.err {
-			true => Response {
-				time: v.time,
-				result: match v.result {
-					Ok(_) => Err(commit_error
-						.as_ref()
-						.map(|e| Error::QueryNotExecutedDetail {
-							message: e.to_string(),
-						})
-						.unwrap_or(Error::QueryNotExecuted)),
-					Err(e) => Err(e),
-				},
-				query_type: QueryType::Other,
-			},
-			_ => v,
-		}
-	}
-
-	/// Consume the live query notifications
-	async fn clear(&self, _: &Context, mut rcv: Receiver<Notification>) {
-		spawn(async move {
-			while rcv.next().await.is_some() {
-				// Ignore notification
+	/// Executes a statement which needs a transaction with the supplied transaction.
+	#[instrument(level = "debug", name = "executor", target = "surrealdb::core::dbs", skip_all)]
+	async fn execute_transaction_statement(
+		&mut self,
+		txn: Arc<Transaction>,
+		stmt: Statement,
+	) -> Result<Value, Error> {
+		let res = match stmt {
+			Statement::Set(stm) => {
+				// Avoid moving in and out of the context via Arc::get_mut
+				Arc::get_mut(&mut self.ctx)
+					.ok_or_else(|| fail!("Tried to unfreeze a Context with multiple references"))?
+					.set_transaction(txn);
+				// Run the statement
+				match self
+					.stack
+					.enter(|stk| stm.compute(stk, &self.ctx, &self.opt, None))
+					.finish()
+					.await
+				{
+					// TODO: Maybe catch Error::Return?
+					// Currently unsure of if that should be handled here.
+					Ok(val) => {
+						// Set the parameter
+						Arc::get_mut(&mut self.ctx)
+							.ok_or_else(|| {
+								fail!("Tried to unfreeze a Context with multiple references")
+							})?
+							.add_value(stm.name, val.into());
+						// Finalise transaction, returning nothing unless it couldn't commit
+						Ok(Value::None)
+					}
+					Err(err) => Err(err),
+				}
 			}
-		});
+			// Process all other normal statements
+			stmt => {
+				// The transaction began successfully
+				Arc::get_mut(&mut self.ctx)
+					.ok_or_else(|| fail!("Tried to unfreeze a Context with multiple references"))?
+					.set_transaction(txn);
+				// Process the statement
+				self.stack.enter(|stk| stmt.compute(stk, &self.ctx, &self.opt, None)).finish().await
+			}
+		};
+
+		// Catch cancelation during running.
+		match self.ctx.done() {
+			None => {}
+			Some(Reason::Timedout) => {
+				return Err(Error::QueryTimedout);
+			}
+			Some(Reason::Canceled) => {
+				return Err(Error::QueryCancelled);
+			}
+		}
+
+		return res;
 	}
 
-	/// Flush notifications from a buffer channel (live queries) to the committed notification channel.
-	/// This is because we don't want to broadcast notifications to the user for failed transactions.
-	async fn flush(&self, ctx: &Context, mut rcv: Receiver<Notification>) {
-		let sender = ctx.notifications();
-		spawn(async move {
-			while let Some(notification) = rcv.next().await {
-				if let Some(chn) = &sender {
-					if chn.send(notification).await.is_err() {
-						break;
+	/// Execute a query not wrapped in a transaction block.
+	async fn execute_bare_statement(
+		&mut self,
+		kvs: &Datastore,
+		stmt: Statement,
+	) -> Result<Value, Error> {
+		// Don't even try to run if the query should already be finished.
+		match self.ctx.done() {
+			None => {}
+			Some(Reason::Timedout) => {
+				return Err(Error::QueryTimedout);
+			}
+			Some(Reason::Canceled) => {
+				return Err(Error::QueryCancelled);
+			}
+		}
+
+		match stmt {
+			// These statements don't need a transaction.
+			Statement::Use(stmt) => self.execute_use_statement(stmt).map(|_| Value::None),
+			stmt => {
+				let writeable = stmt.writeable();
+				let txn = Arc::new(kvs.transaction(writeable.into(), LockType::Optimistic).await?);
+				let receiver = self.ctx.has_notifications().then(|| {
+					let (send, recv) = channel::unbounded();
+					self.opt.sender = Some(send);
+					recv
+				});
+
+				match self.execute_transaction_statement(txn.clone(), stmt).await {
+					Ok(value)
+					| Err(Error::Return {
+						value,
+					}) => {
+						let mut lock = txn.lock().await;
+
+						// non-writable transactions might return an error on commit.
+						// So cancel them instead. This is fine since a non-writable transaction
+						// has nothing to commit anyway.
+						if !writeable {
+							let _ = lock.cancel().await;
+							return Ok(value);
+						}
+
+						if let Err(e) = lock.complete_changes(false).await {
+							let _ = lock.cancel().await;
+
+							return Err(Error::QueryNotExecutedDetail {
+								message: e.to_string(),
+							});
+						}
+
+						if let Err(e) = lock.commit().await {
+							return Err(Error::QueryNotExecutedDetail {
+								message: e.to_string(),
+							});
+						}
+
+						// flush notifications.
+						if let Some(recv) = receiver {
+							self.opt.sender = None;
+							if let Some(sink) = self.ctx.notifications() {
+								spawn(async move {
+									while let Ok(x) = recv.recv().await {
+										if sink.send(x).await.is_err() {
+											break;
+										}
+									}
+								});
+							}
+						}
+
+						Ok(value)
+					}
+					Err(e) => {
+						let _ = txn.cancel().await;
+						Err(e)
 					}
 				}
 			}
+		}
+	}
+
+	/// Execute the begin statement and all statements after which are within a transaction block.
+	async fn execute_begin_statement<S>(
+		&mut self,
+		kvs: &Datastore,
+		mut stream: Pin<&mut S>,
+	) -> Result<(), Error>
+	where
+		S: Stream<Item = Result<Statement, Error>>,
+	{
+		let Ok(txn) = kvs.transaction(TransactionType::Write, LockType::Optimistic).await else {
+			// couldn't create a transaction.
+			// Fast forward until we hit CANCEL or COMMIT
+			while let Some(stmt) = stream.next().await {
+				let stmt = stmt?;
+				if let Statement::Cancel(_) | Statement::Commit(_) = stmt {
+					return Ok(());
+				}
+
+				self.results.push(Response {
+					time: Duration::ZERO,
+					result: Err(Error::QueryNotExecuted),
+					query_type: QueryType::Other,
+				});
+			}
+
+			// Ran out of statements but still didn't hit a COMMIT or CANCEL
+			// Just break as we can't do anything else since the query is already
+			// effectively canceled.
+			return Ok(());
+		};
+
+		// Create a sender for this transaction only if the context allows for notifications.
+		let receiver = self.ctx.has_notifications().then(|| {
+			let (send, recv) = channel::unbounded();
+			self.opt.sender = Some(send);
+			recv
 		});
-	}
 
-	async fn set_ns(&self, ctx: Context, opt: &mut Options, ns: &str) -> Result<Context, Error> {
-		let mut ctx = MutableContext::unfreeze(ctx)?;
-		let mut session = ctx.value("session").unwrap_or(&Value::None).clone();
-		session.put(NS.as_ref(), ns.to_owned().into());
-		ctx.add_value("session", session.into());
-		opt.set_ns(Some(ns.into()));
-		Ok(ctx.freeze())
-	}
+		let txn = Arc::new(txn);
+		let start_results = self.results.len();
+		let mut skip_remaining = false;
 
-	async fn set_db(&self, ctx: Context, opt: &mut Options, db: &str) -> Result<Context, Error> {
-		let mut ctx = MutableContext::unfreeze(ctx)?;
-		let mut session = ctx.value("session").unwrap_or(&Value::None).clone();
-		session.put(DB.as_ref(), db.to_owned().into());
-		ctx.add_value("session", session.into());
-		opt.set_db(Some(db.into()));
-		Ok(ctx.freeze())
+		// loop over the statements until we hit a cancel or a commit statement.
+		while let Some(stmt) = stream.next().await {
+			let stmt = match stmt {
+				Ok(x) => x,
+				Err(e) => {
+					// make sure the transaction is properly canceled.
+					let _ = txn.cancel().await;
+					return Err(e);
+				}
+			};
+
+			// check for timeout and cancelation.
+			if let Some(done) = self.ctx.done() {
+				// a cancelation happend. Cancel the transaction, fast forward the remaining
+				// results and then return.
+				let _ = txn.cancel().await;
+
+				for res in &mut self.results[start_results..] {
+					res.query_type = QueryType::Other;
+					res.result = Err(Error::QueryCancelled);
+				}
+
+				while let Some(stmt) = stream.next().await {
+					let stmt = stmt?;
+					if let Statement::Cancel(_) | Statement::Commit(_) = stmt {
+						return Ok(());
+					}
+
+					self.results.push(Response {
+						time: Duration::ZERO,
+						result: Err(match done {
+							Reason::Timedout => Error::QueryTimedout,
+							Reason::Canceled => Error::QueryCancelled,
+						}),
+						query_type: QueryType::Other,
+					});
+				}
+
+				// Missing CANCEL/COMMIT statement, statement already canceled so nothing todo.
+				return Ok(());
+			}
+
+			if skip_remaining && !matches!(stmt, Statement::Cancel(_) | Statement::Commit(_)) {
+				continue;
+			}
+
+			trace!(target: TARGET, statement = %stmt, "Executing statement");
+
+			let query_type = match stmt {
+				Statement::Live(_) => QueryType::Live,
+				Statement::Kill(_) => QueryType::Kill,
+				_ => QueryType::Other,
+			};
+
+			let before = Instant::now();
+			let value = match stmt {
+				Statement::Begin(_) => {
+					let _ = txn.cancel().await;
+					// tried to begin a transaction within a transaction.
+
+					for res in &mut self.results[start_results..] {
+						res.query_type = QueryType::Other;
+						res.result = Err(Error::QueryNotExecuted);
+					}
+
+					self.results.push(Response {
+						time: Duration::ZERO,
+						result: Err(Error::QueryNotExecutedDetail {
+							message:
+								"Tried to start a transaction while another transaction was open"
+									.to_string(),
+						}),
+						query_type: QueryType::Other,
+					});
+
+					self.opt.sender = None;
+
+					while let Some(stmt) = stream.next().await {
+						let stmt = stmt?;
+						if let Statement::Cancel(_) | Statement::Commit(_) = stmt {
+							return Ok(());
+						}
+
+						self.results.push(Response {
+							time: Duration::ZERO,
+							result: Err(Error::QueryNotExecuted),
+							query_type: QueryType::Other,
+						});
+					}
+
+					// Missing CANCEL/COMMIT statement, statement already canceled so nothing todo.
+					return Ok(());
+				}
+				Statement::Cancel(_) => {
+					let _ = txn.cancel().await;
+
+					// update the results indicating cancelation.
+					for res in &mut self.results[start_results..] {
+						res.query_type = QueryType::Other;
+						res.result = Err(Error::QueryCancelled);
+					}
+
+					self.opt.sender = None;
+
+					return Ok(());
+				}
+				Statement::Commit(_) => {
+					let mut lock = txn.lock().await;
+
+					// complete_changes and then commit.
+					// If either error undo results.
+					let e = if let Err(e) = lock.complete_changes(false).await {
+						let _ = lock.cancel().await;
+						e
+					} else if let Err(e) = lock.commit().await {
+						e
+					} else {
+						// Successfully commited. everything is fine.
+
+						// flush notifications.
+						if let Some(recv) = receiver {
+							self.opt.sender = None;
+							if let Some(sink) = self.ctx.notifications() {
+								spawn(async move {
+									while let Ok(x) = recv.recv().await {
+										if sink.send(x).await.is_err() {
+											break;
+										}
+									}
+								});
+							}
+						}
+
+						return Ok(());
+					};
+
+					// failed to commit
+					for res in &mut self.results[start_results..] {
+						res.query_type = QueryType::Other;
+						res.result = Err(Error::QueryNotExecutedDetail {
+							message: e.to_string(),
+						});
+					}
+
+					self.opt.sender = None;
+
+					return Ok(());
+				}
+				Statement::Option(stmt) => match self.execute_option_statement(stmt) {
+					Ok(_) => {
+						// skip adding the value as executing an option statement doesn't produce
+						// results
+						continue;
+					}
+					Err(e) => Err(e),
+				},
+				Statement::Use(stmt) => self.execute_use_statement(stmt).map(|_| Value::None),
+				stmt => {
+					skip_remaining = matches!(stmt, Statement::Output(_));
+
+					let r = match self.execute_transaction_statement(txn.clone(), stmt).await {
+						Ok(x) => Ok(x),
+						Err(Error::Return {
+							value,
+						}) => {
+							skip_remaining = true;
+							Ok(value)
+						}
+						Err(e) => {
+							for res in &mut self.results[start_results..] {
+								res.query_type = QueryType::Other;
+								res.result = Err(Error::QueryNotExecuted);
+							}
+
+							// statement return an error. Consume all the other statement until we hit a cancel or commit.
+							self.results.push(Response {
+								time: before.elapsed(),
+								result: Err(e),
+								query_type,
+							});
+
+							let _ = txn.cancel().await;
+
+							self.opt.sender = None;
+
+							while let Some(stmt) = stream.next().await {
+								let stmt = stmt?;
+								if let Statement::Cancel(_) | Statement::Commit(_) = stmt {
+									return Ok(());
+								}
+
+								self.results.push(Response {
+									time: Duration::ZERO,
+									result: Err(Error::QueryNotExecuted),
+									query_type: QueryType::Other,
+								});
+							}
+
+							// ran out of statements before the transaction ended.
+							// Just break as we have nothing else we can do.
+							return Ok(());
+						}
+					};
+
+					if skip_remaining {
+						// If we skip the next values due to return then we need to clear the other
+						// results.
+						self.results.truncate(start_results)
+					}
+
+					r
+				}
+			};
+
+			self.results.push(Response {
+				time: before.elapsed(),
+				result: value,
+				query_type,
+			});
+		}
+
+		// we ran out of query but we still have an open transaction.
+		// Be conservative and treat this essentially as a CANCEL statement.
+		let _ = txn.cancel().await;
+
+		for res in &mut self.results[start_results..] {
+			res.query_type = QueryType::Other;
+			res.result = Err(Error::QueryNotExecutedDetail {
+				message: "Missing COMMIT statement".to_string(),
+			});
+		}
+
+		self.opt.sender = None;
+
+		Ok(())
 	}
 
 	#[instrument(level = "debug", name = "executor", target = "surrealdb::core::dbs", skip_all)]
 	pub async fn execute(
-		&mut self,
-		mut ctx: Context,
+		kvs: &Datastore,
+		ctx: Context,
 		opt: Options,
 		qry: Query,
 	) -> Result<Vec<Response>, Error> {
-		// The stack to run the executor in.
-		let mut stack = TreeStack::new();
-		// Create a notification channel
-		let (send, recv) = channel::unbounded();
-		// Set the notification channel
-		let mut opt = opt.new_with_sender(send);
-		// Initialise buffer of responses
-		let mut buf: Vec<Response> = vec![];
-		// Initialise array of responses
-		let mut out: Vec<Response> = vec![];
-		// Do we fast-forward a transaction?
-		// Set to true when we encounter a return statement in a transaction
-		let mut ff_txn = false;
-		// Process all statements in query
-		for stm in qry.into_iter() {
-			// Log the statement
-			trace!(target: TARGET, statement = %stm, "Executing statement");
-			// Reset errors
-			if self.txn.is_none() {
-				self.err = false;
-			}
-			// Get the statement start time
-			let now = Instant::now();
-			// Check if this is a LIVE statement
-			let is_stm_live = matches!(stm, Statement::Live(_));
-			// Check if this is a KILL statement
-			let is_stm_kill = matches!(stm, Statement::Kill(_));
-			// Check if this is a RETURN statement
-			let is_stm_output = matches!(stm, Statement::Output(_));
-			// Has this statement returned a value
-			let mut has_returned = false;
-			// Do we skip this statement?
-			if ff_txn && !matches!(stm, Statement::Commit(_) | Statement::Cancel(_)) {
-				debug!("Skipping statement due to fast forwarded transaction");
-				continue;
-			}
-			// Process a single statement
-			let res = match stm {
-				// Specify runtime options
-				Statement::Option(mut stm) => {
-					// Allowed to run?
-					opt.is_allowed(Action::Edit, ResourceKind::Option, &Base::Db)?;
-					// Convert to uppercase
-					stm.name.0.make_ascii_uppercase();
-					// Process the option
-					opt = match stm.name.0.as_str() {
-						"IMPORT" => opt.with_import(stm.what),
-						"FORCE" => opt.with_force(if stm.what {
-							Force::All
-						} else {
-							Force::None
-						}),
-						"FUTURES" => {
-							if stm.what {
-								opt.with_futures(true)
-							} else {
-								opt.with_futures_never()
-							}
-						}
-						_ => break,
-					};
-					// Continue
-					continue;
+		let stream = futures::stream::iter(qry.into_iter().map(Ok));
+		Self::execute_stream(kvs, ctx, opt, stream).await
+	}
+
+	#[instrument(level = "debug", name = "executor", target = "surrealdb::core::dbs", skip_all)]
+	pub async fn execute_stream<S>(
+		kvs: &Datastore,
+		ctx: Context,
+		opt: Options,
+		stream: S,
+	) -> Result<Vec<Response>, Error>
+	where
+		S: Stream<Item = Result<Statement, Error>>,
+	{
+		let mut this = Executor::new(ctx, opt);
+		let mut stream = pin!(stream);
+
+		while let Some(stmt) = stream.next().await {
+			let stmt = match stmt {
+				Ok(x) => x,
+				Err(e) => {
+					this.results.push(Response {
+						time: Duration::ZERO,
+						result: Err(e),
+						query_type: QueryType::Other,
+					});
+
+					return Ok(this.results);
 				}
-				// Begin a new transaction
-				Statement::Begin(_) => {
-					if opt.import {
-						continue;
-					}
-					self.begin(Write).await;
-					continue;
-				}
-				// Cancel a running transaction
-				Statement::Cancel(_) => {
-					if opt.import {
-						continue;
-					}
-					self.cancel(true).await;
-					self.clear(&ctx, recv.clone()).await;
-					buf = buf.into_iter().map(|v| self.buf_cancel(v)).collect();
-					out.append(&mut buf);
-					debug_assert!(self.txn.is_none(), "cancel(true) should have unset txn");
-					self.txn = None;
-					continue;
-				}
-				// Commit a running transaction
-				Statement::Commit(_) => {
-					if opt.import {
-						continue;
-					}
-					let commit_error = self.commit(true).await.err();
-					buf = buf.into_iter().map(|v| self.buf_commit(v, &commit_error)).collect();
-					self.flush(&ctx, recv.clone()).await;
-					out.append(&mut buf);
-					debug_assert!(self.txn.is_none(), "commit(true) should have unset txn");
-					self.txn = None;
-					ff_txn = false;
-					continue;
-				}
-				// Switch to a different NS or DB
-				Statement::Use(stm) => {
-					if let Some(ref ns) = stm.ns {
-						ctx = self.set_ns(ctx, &mut opt, ns).await?;
-					}
-					if let Some(ref db) = stm.db {
-						ctx = self.set_db(ctx, &mut opt, db).await?;
-					}
-					Ok(Value::None)
-				}
-				// Process param definition statements
-				Statement::Set(stm) => {
-					// Create a transaction
-					let loc = self.begin(stm.writeable().into()).await;
-					// Check the transaction
-					match self.err {
-						// We failed to create a transaction
-						true => Err(Error::TxFailure),
-						// The transaction began successfully
-						false => {
-							// ctx.set_transaction(txn)
-							let mut c = MutableContext::unfreeze(ctx)?;
-							c.set_transaction(self.txn()?);
-							ctx = c.freeze();
-							// Check the statement
-							match stack
-								.enter(|stk| stm.compute(stk, &ctx, &opt, None))
-								.finish()
-								.await
-							{
-								Ok(val) => {
-									// Check if writeable
-									let writeable = stm.writeable();
-									// Set the parameter
-									let mut c = MutableContext::unfreeze(ctx)?;
-									c.add_value(stm.name, val.into());
-									ctx = c.freeze();
-									// Finalise transaction, returning nothing unless it couldn't commit
-									if writeable {
-										match self.commit(loc).await {
-											Err(e) => {
-												// Clear live query notifications
-												self.clear(&ctx, recv.clone()).await;
-												Err(Error::QueryNotExecutedDetail {
-													message: e.to_string(),
-												})
-											}
-											Ok(_) => {
-												// Flush live query notifications
-												self.flush(&ctx, recv.clone()).await;
-												Ok(Value::None)
-											}
-										}
-									} else {
-										self.cancel(loc).await;
-										self.clear(&ctx, recv.clone()).await;
-										Ok(Value::None)
-									}
-								}
-								Err(err) => {
-									// Cancel transaction
-									self.cancel(loc).await;
-									// Return error
-									Err(err)
-								}
-							}
-						}
-					}
-				}
-				// Process all other normal statements
-				_ => match self.err {
-					// This transaction has failed
-					true => Err(Error::QueryNotExecuted),
-					// Compute the statement normally
-					false => {
-						// Create a transaction
-						let loc = self.begin(stm.writeable().into()).await;
-						// Check the transaction
-						match self.err {
-							// We failed to create a transaction
-							true => Err(Error::TxFailure),
-							// The transaction began successfully
-							false => {
-								// Create a new context for this statement
-								let mut ctx = MutableContext::new(&ctx);
-								// Set the transaction on the context
-								ctx.set_transaction(self.txn()?);
-								let c = ctx.freeze();
-								// Process the statement
-								let res = stack
-									.enter(|stk| stm.compute(stk, &c, &opt, None))
-									.finish()
-									.await;
-								ctx = MutableContext::unfreeze(c)?;
-								// Check if this is a RETURN statement
-								let can_return =
-									matches!(stm, Statement::Output(_) | Statement::Value(_));
-								// Catch global timeout
-								let res = match ctx.is_timedout() {
-									true => Err(Error::QueryTimedout),
-									false => match res {
-										Err(Error::Return {
-											value,
-										}) if can_return => {
-											has_returned = true;
-											Ok(value)
-										}
-										res => res,
-									},
-								};
-								let ctx = ctx.freeze();
-								// Finalise transaction and return the result.
-								if res.is_ok() && stm.writeable() {
-									if let Err(e) = self.commit(loc).await {
-										// Clear live query notification details
-										self.clear(&ctx, recv.clone()).await;
-										// The commit failed
-										Err(Error::QueryNotExecutedDetail {
-											message: e.to_string(),
-										})
-									} else {
-										// Flush the live query change notifications
-										self.flush(&ctx, recv.clone()).await;
-										res
-									}
-								} else {
-									self.cancel(loc).await;
-									// Clear live query notification details
-									self.clear(&ctx, recv.clone()).await;
-									// Return an error
-									res
-								}
-							}
-						}
-					}
-				},
 			};
 
-			self.err = res.is_err();
-			// Produce the response
-			let res = Response {
-				// Get the statement end time
-				time: now.elapsed(),
-				result: res,
-				query_type: match (is_stm_live, is_stm_kill) {
-					(true, _) => QueryType::Live,
-					(_, true) => QueryType::Kill,
-					_ => QueryType::Other,
-				},
-			};
-			// Output the response
-			if self.txn.is_some() {
-				if is_stm_output || has_returned {
-					buf.clear();
-					ff_txn = true;
+			match stmt {
+				Statement::Option(stmt) => this.execute_option_statement(stmt)?,
+				// handle option here because it doesn't produce a result.
+				Statement::Begin(_) => {
+					if let Err(e) = this.execute_begin_statement(kvs, stream.as_mut()).await {
+						this.results.push(Response {
+							time: Duration::ZERO,
+							result: Err(e),
+							query_type: QueryType::Other,
+						});
+
+						return Ok(this.results);
+					}
 				}
-				buf.push(res);
-			} else {
-				out.push(res)
+				stmt => {
+					let query_type = match stmt {
+						Statement::Live(_) => QueryType::Live,
+						Statement::Kill(_) => QueryType::Kill,
+						_ => QueryType::Other,
+					};
+
+					let now = Instant::now();
+					let result = this.execute_bare_statement(kvs, stmt).await;
+					this.results.push(Response {
+						time: now.elapsed(),
+						result,
+						query_type,
+					});
+				}
 			}
 		}
-		// Return responses
-		Ok(out)
+		Ok(this.results)
 	}
 }
 

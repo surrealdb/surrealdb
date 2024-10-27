@@ -232,6 +232,7 @@ impl Object {
 		Ok(Value::Object(Object(x)))
 	}
 
+	/// Checks whether all object values are static values
 	pub(crate) fn is_static(&self) -> bool {
 		self.values().all(Value::is_static)
 	}

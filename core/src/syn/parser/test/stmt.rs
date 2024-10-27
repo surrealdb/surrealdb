@@ -10,9 +10,9 @@ use crate::{
 		filter::Filter,
 		index::{Distance, HnswParams, MTreeParams, SearchParams, VectorType},
 		language::Language,
+		order::{OrderList, Ordering},
 		statements::{
-			access,
-			access::{AccessStatementGrant, AccessStatementList, AccessStatementRevoke},
+			access::{self, AccessStatementGrant, AccessStatementList, AccessStatementRevoke},
 			analyze::AnalyzeStatement,
 			show::{ShowSince, ShowStatement},
 			sleep::SleepStatement,
@@ -33,7 +33,7 @@ use crate::{
 		user::UserDuration,
 		Algorithm, Array, Base, Block, Cond, Data, Datetime, Dir, Duration, Edges, Explain,
 		Expression, Fetch, Fetchs, Field, Fields, Future, Graph, Group, Groups, Id, Ident, Idiom,
-		Idioms, Index, Kind, Limit, Number, Object, Operator, Order, Orders, Output, Param, Part,
+		Idioms, Index, Kind, Limit, Number, Object, Operator, Order, Output, Param, Part,
 		Permission, Permissions, Scoring, Split, Splits, Start, Statement, Strand, Subquery, Table,
 		TableType, Tables, Thing, Timeout, Uuid, Value, Values, Version, With,
 	},
@@ -1362,7 +1362,7 @@ fn parse_define_param() {
 #[test]
 fn parse_define_table() {
 	let res =
-		test_parse!(parse_stmt, r#"DEFINE TABLE name DROP SCHEMAFUL CHANGEFEED 1s INCLUDE ORIGINAL PERMISSIONS FOR SELECT WHERE a = 1 AS SELECT foo FROM bar GROUP BY foo"#)
+		test_parse!(parse_stmt, r#"DEFINE TABLE name DROP SCHEMAFUL CHANGEFEED 1s INCLUDE ORIGINAL PERMISSIONS FOR DELETE FULL, FOR SELECT WHERE a = 1 AS SELECT foo FROM bar GROUP BY foo"#)
 			.unwrap();
 
 	assert_eq!(
@@ -1394,7 +1394,7 @@ fn parse_define_table() {
 				))),
 				create: Permission::None,
 				update: Permission::None,
-				delete: Permission::None,
+				delete: Permission::Full,
 			},
 			changefeed: Some(ChangeFeed {
 				expiry: std::time::Duration::from_secs(1),
@@ -1430,41 +1430,76 @@ fn parse_define_event() {
 
 #[test]
 fn parse_define_field() {
-	let res = test_parse!(
-		parse_stmt,
-		r#"DEFINE FIELD foo.*[*]... ON TABLE bar FLEX TYPE option<number | array<record<foo>,10>> VALUE null ASSERT true DEFAULT false PERMISSIONS FOR DELETE, UPDATE NONE, FOR create WHERE true"#
-	).unwrap();
+	// General
+	{
+		let res = test_parse!(
+			parse_stmt,
+			r#"DEFINE FIELD foo.*[*]... ON TABLE bar FLEX TYPE option<number | array<record<foo>,10>> VALUE null ASSERT true DEFAULT false PERMISSIONS FOR UPDATE NONE, FOR CREATE WHERE true"#
+		).unwrap();
 
-	assert_eq!(
-		res,
-		Statement::Define(DefineStatement::Field(DefineFieldStatement {
-			name: Idiom(vec![
-				Part::Field(Ident("foo".to_owned())),
-				Part::All,
-				Part::All,
-				Part::Flatten,
-			]),
-			what: Ident("bar".to_owned()),
-			flex: true,
-			kind: Some(Kind::Option(Box::new(Kind::Either(vec![
-				Kind::Number,
-				Kind::Array(Box::new(Kind::Record(vec![Table("foo".to_owned())])), Some(10))
-			])))),
-			readonly: false,
-			value: Some(Value::Null),
-			assert: Some(Value::Bool(true)),
-			default: Some(Value::Bool(false)),
-			permissions: Permissions {
-				delete: Permission::None,
-				update: Permission::None,
-				create: Permission::Specific(Value::Bool(true)),
-				select: Permission::Full,
-			},
-			comment: None,
-			if_not_exists: false,
-			overwrite: false,
-		}))
-	)
+		assert_eq!(
+			res,
+			Statement::Define(DefineStatement::Field(DefineFieldStatement {
+				name: Idiom(vec![
+					Part::Field(Ident("foo".to_owned())),
+					Part::All,
+					Part::All,
+					Part::Flatten,
+				]),
+				what: Ident("bar".to_owned()),
+				flex: true,
+				kind: Some(Kind::Option(Box::new(Kind::Either(vec![
+					Kind::Number,
+					Kind::Array(Box::new(Kind::Record(vec![Table("foo".to_owned())])), Some(10))
+				])))),
+				readonly: false,
+				value: Some(Value::Null),
+				assert: Some(Value::Bool(true)),
+				default: Some(Value::Bool(false)),
+				permissions: Permissions {
+					delete: Permission::Full,
+					update: Permission::None,
+					create: Permission::Specific(Value::Bool(true)),
+					select: Permission::Full,
+				},
+				comment: None,
+				if_not_exists: false,
+				overwrite: false,
+			}))
+		)
+	}
+
+	// Invalid DELETE permission
+	{
+		// TODO(gguillemas): Providing the DELETE permission should return a parse error in 3.0.0.
+		// Currently, the DELETE permission is just ignored to maintain backward compatibility.
+		let res =
+			test_parse!(parse_stmt, r#"DEFINE FIELD foo ON TABLE bar PERMISSIONS FOR DELETE NONE"#)
+				.unwrap();
+
+		assert_eq!(
+			res,
+			Statement::Define(DefineStatement::Field(DefineFieldStatement {
+				name: Idiom(vec![Part::Field(Ident("foo".to_owned())),]),
+				what: Ident("bar".to_owned()),
+				flex: false,
+				kind: None,
+				readonly: false,
+				value: None,
+				assert: None,
+				default: None,
+				permissions: Permissions {
+					delete: Permission::Full,
+					update: Permission::Full,
+					create: Permission::Full,
+					select: Permission::Full,
+				},
+				comment: None,
+				if_not_exists: false,
+				overwrite: false,
+			}))
+		)
+	}
 }
 
 #[test]
@@ -1838,13 +1873,12 @@ SELECT bar as foo,[1,2],bar OMIT bar FROM ONLY a,1
 				Group(Idiom(vec![Part::Field(Ident("foo".to_owned()))])),
 				Group(Idiom(vec![Part::Field(Ident("bar".to_owned()))])),
 			])),
-			order: Some(Orders(vec![Order {
-				order: Idiom(vec![Part::Field(Ident("foo".to_owned()))]),
-				random: false,
+			order: Some(Ordering::Order(OrderList(vec![Order {
+				value: Idiom(vec![Part::Field(Ident("foo".to_owned()))]),
 				collate: true,
 				numeric: true,
 				direction: true,
-			}])),
+			}]))),
 			limit: Some(Limit(Value::Thing(Thing {
 				tb: "a".to_owned(),
 				id: Id::from("b"),
@@ -2485,4 +2519,9 @@ fn parse_access_list() {
 			base: None,
 		}))
 	);
+}
+
+#[test]
+fn parse_like_operator() {
+	test_parse!(parse_stmt, r#"SELECT * FROM "a" ~ "b"; "#).unwrap();
 }

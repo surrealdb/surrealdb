@@ -1,5 +1,6 @@
 use crate::engine::IntervalStream;
 use crate::err::Error;
+#[cfg(not(target_arch = "wasm32"))]
 use core::future::Future;
 use futures::StreamExt;
 use std::pin::Pin;
@@ -19,7 +20,7 @@ type Task = Pin<Box<dyn Future<Output = Result<(), tokio::task::JoinError>> + Se
 #[cfg(target_arch = "wasm32")]
 type Task = Pin<Box<()>>;
 
-pub struct Tasks(Vec<Task>);
+pub struct Tasks(#[allow(dead_code)] Vec<Task>);
 
 impl Tasks {
 	#[cfg(target_arch = "wasm32")]
@@ -71,8 +72,7 @@ fn spawn_task_node_membership_refresh(
 				// Receive a notification on the channel
 				Some(_) = ticker.next() => {
 					if let Err(e) = dbs.node_membership_update().await {
-						error!("Error running node agent tick: {e}");
-						break;
+						error!("Error updating node registration information: {e}");
 					}
 				}
 			}
@@ -103,8 +103,7 @@ fn spawn_task_node_membership_check(
 				// Receive a notification on the channel
 				Some(_) = ticker.next() => {
 					if let Err(e) = dbs.node_membership_expire().await {
-						error!("Error running node agent tick: {e}");
-						break;
+						error!("Error processing and archiving inactive nodes: {e}");
 					}
 				}
 			}
@@ -135,8 +134,7 @@ fn spawn_task_node_membership_cleanup(
 				// Receive a notification on the channel
 				Some(_) = ticker.next() => {
 					if let Err(e) = dbs.node_membership_remove().await {
-						error!("Error running node agent tick: {e}");
-						break;
+						error!("Error processing and cleaning archived nodes: {e}");
 					}
 				}
 			}
@@ -167,8 +165,7 @@ fn spawn_task_changefeed_cleanup(
 				// Receive a notification on the channel
 				Some(_) = ticker.next() => {
 					if let Err(e) = dbs.changefeed_process().await {
-						error!("Error running node agent tick: {e}");
-						break;
+						error!("Error running changefeed garbage collection: {e}");
 					}
 				}
 			}

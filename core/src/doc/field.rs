@@ -4,6 +4,7 @@ use crate::dbs::Statement;
 use crate::doc::Document;
 use crate::err::Error;
 use crate::iam::Action;
+use crate::sql::data::Data;
 use crate::sql::idiom::Idiom;
 use crate::sql::kind::Kind;
 use crate::sql::permission::Permission;
@@ -82,7 +83,7 @@ impl Document {
 		stk: &mut Stk,
 		ctx: &Context,
 		opt: &Options,
-		_stm: &Statement<'_>,
+		stm: &Statement<'_>,
 	) -> Result<(), Error> {
 		// Check import
 		if opt.import {
@@ -119,13 +120,36 @@ impl Document {
 				let old = Arc::new(self.initial.doc.as_ref().pick(&k));
 				// Get the input value
 				let inp = Arc::new(inp.pick(&k));
-				// Check for READONLY clause
-				if fd.readonly || fd.name.is_id() {
+				// Check for the `id` field
+				if fd.name.is_id() {
 					if !self.is_new() && val.ne(&old) {
 						return Err(Error::FieldReadonly {
 							field: fd.name.clone(),
 							thing: rid.to_string(),
 						});
+					} else if !self.is_new() {
+						continue;
+					}
+				}
+				// Check for READONLY clause
+				if fd.readonly {
+					if !self.is_new() && val.ne(&old) {
+						match stm.data() {
+							Some(Data::ContentExpression(_)) => {
+								self.current
+									.doc
+									.to_mut()
+									.set(stk, ctx, opt, &k, old.as_ref().clone())
+									.await?;
+								continue;
+							}
+							_ => {
+								return Err(Error::FieldReadonly {
+									field: fd.name.clone(),
+									thing: rid.to_string(),
+								});
+							}
+						}
 					} else if !self.is_new() {
 						continue;
 					}
@@ -186,8 +210,10 @@ impl Document {
 						})?;
 						// If this is the `id` field, check the inner type
 						if fd.name.is_id() {
-							if let Value::Thing(id) = val.clone() {
-								let inner = Value::from(id.id);
+							if let Value::Thing(id) = &val {
+								// Get the value of the ID only
+								let inner = Value::from(id.clone().id);
+								// Check the type of the ID part
 								inner.coerce_to(kind).map_err(|e| match e {
 									// There was a conversion error
 									Error::CoerceTo {
@@ -248,8 +274,8 @@ impl Document {
 						})?;
 						// If this is the `id` field, check the inner type
 						if fd.name.is_id() {
-							if let Value::Thing(id) = val.clone() {
-								let inner = Value::from(id.id);
+							if let Value::Thing(id) = &val {
+								let inner = Value::from(id.clone().id);
 								inner.coerce_to(kind).map_err(|e| match e {
 									// There was a conversion error
 									Error::CoerceTo {

@@ -116,13 +116,28 @@ async fn transaction_with_failure_and_return() -> Result<(), Error> {
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
-	assert_eq!(res.len(), 1);
+	assert_eq!(res.len(), 4);
 	//
 	let tmp = res.remove(0).result;
-	assert!(matches!(
-		tmp.err(),
-		Some(e) if e.to_string() == r#"The query was not executed due to a failed transaction"#
-	));
+	assert_eq!(
+		tmp.err().map(|x| x.to_string()),
+		Some(r#"The query was not executed due to a failed transaction"#.to_string())
+	);
+	let tmp = res.remove(0).result;
+	assert_eq!(
+		tmp.err().map(|x| x.to_string()),
+		Some(r#"The query was not executed due to a failed transaction"#.to_string())
+	);
+	let tmp = res.remove(0).result;
+	assert_eq!(
+		tmp.err().map(|x| x.to_string()),
+		Some(r#"Database record `person:tobie` already exists"#.to_string())
+	);
+	let tmp = res.remove(0).result;
+	assert_eq!(
+		tmp.err().map(|x| x.to_string()),
+		Some(r#"The query was not executed due to a failed transaction"#.to_string())
+	);
 	//
 	Ok(())
 }
@@ -175,7 +190,7 @@ async fn transaction_with_throw_and_return() -> Result<(), Error> {
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
-	assert_eq!(res.len(), 1);
+	assert_eq!(res.len(), 4);
 	//
 	let tmp = res.remove(0).result;
 	assert!(matches!(

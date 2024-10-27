@@ -381,7 +381,6 @@ where
 	///
 	/// ```no_run
 	/// use serde::Serialize;
-	/// use surrealdb::sql;
 	/// use surrealdb::opt::auth::Root;
 	/// use surrealdb::opt::auth::Record;
 	///
@@ -406,12 +405,12 @@ where
 	/// db.use_ns("namespace").use_db("database").await?;
 	///
 	/// // Define the user record access
-	/// let sql = r#"
+	/// let surql = r#"
 	///     DEFINE ACCESS user_access ON DATABASE TYPE RECORD DURATION 24h
 	///     SIGNUP ( CREATE user SET email = $email, password = crypto::argon2::generate($password) )
 	///     SIGNIN ( SELECT * FROM user WHERE email = $email AND crypto::argon2::compare(password, $password) )
 	/// "#;
-	/// db.query(sql).await?.check()?;
+	/// db.query(surql).await?.check()?;
 	///
 	/// // Sign a user up
 	/// db.signup(Record {
@@ -442,7 +441,6 @@ where
 	/// Namespace signin
 	///
 	/// ```no_run
-	/// use surrealdb::sql;
 	/// use surrealdb::opt::auth::Root;
 	/// use surrealdb::opt::auth::Namespace;
 	///
@@ -461,8 +459,8 @@ where
 	/// db.use_ns("namespace").use_db("database").await?;
 	///
 	/// // Define the user
-	/// let sql = "DEFINE USER johndoe ON NAMESPACE PASSWORD 'password123'";
-	/// db.query(sql).await?.check()?;
+	/// let surql = "DEFINE USER johndoe ON NAMESPACE PASSWORD 'password123'";
+	/// db.query(surql).await?.check()?;
 	///
 	/// // Sign a user in
 	/// db.signin(Namespace {
@@ -478,7 +476,6 @@ where
 	/// Database signin
 	///
 	/// ```no_run
-	/// use surrealdb::sql;
 	/// use surrealdb::opt::auth::Root;
 	/// use surrealdb::opt::auth::Database;
 	///
@@ -497,8 +494,8 @@ where
 	/// db.use_ns("namespace").use_db("database").await?;
 	///
 	/// // Define the user
-	/// let sql = "DEFINE USER johndoe ON DATABASE PASSWORD 'password123'";
-	/// db.query(sql).await?.check()?;
+	/// let surql = "DEFINE USER johndoe ON DATABASE PASSWORD 'password123'";
+	/// db.query(surql).await?.check()?;
 	///
 	/// // Sign a user in
 	/// db.signin(Database {
@@ -597,8 +594,6 @@ where
 	/// # Examples
 	///
 	/// ```no_run
-	/// use surrealdb::sql;
-	///
 	/// # #[derive(serde::Deserialize)]
 	/// # struct Person;
 	/// # #[tokio::main]
@@ -764,7 +759,7 @@ where
 	///
 	/// ```no_run
 	/// use serde::{Serialize, Deserialize};
-	/// use surrealdb::sql;
+	/// use surrealdb::RecordId;
 	///
 	/// # #[derive(Deserialize)]
 	/// # struct Person;
@@ -822,7 +817,7 @@ where
 	/// // Insert multiple records with pre-defined IDs
 	/// #[derive(Serialize)]
 	/// struct UserWithId<'a> {
-	///     id: sql::Thing,
+	///     id: RecordId,
 	///     name: &'a str,
 	///     settings: Settings,
 	/// }
@@ -830,7 +825,7 @@ where
 	/// let people: Vec<Person> = db.insert("person")
 	///     .content(vec![
 	///         UserWithId {
-	///             id: sql::thing("person:tobie")?,
+	///             id: ("person", "tobie").into(),
 	///             name: "Tobie",
 	///             settings: Settings {
 	///                 active: true,
@@ -838,7 +833,7 @@ where
 	///             },
 	///         },
 	///         UserWithId {
-	///             id: sql::thing("person:jaime")?,
+	///             id: ("person", "jaime").into(),
 	///             name: "Jaime",
 	///             settings: Settings {
 	///                 active: true,
@@ -851,18 +846,18 @@ where
 	/// // Insert multiple records into different tables
 	/// #[derive(Serialize)]
 	/// struct WithId<'a> {
-	///     id: sql::Thing,
+	///     id: RecordId,
 	///     name: &'a str,
 	/// }
 	///
 	/// let people: Vec<Person> = db.insert(())
 	///     .content(vec![
 	///         WithId {
-	///             id: sql::thing("person:tobie")?,
+	///             id: ("person", "tobie").into(),
 	///             name: "Tobie",
 	///         },
 	///         WithId {
-	///             id: sql::thing("company:surrealdb")?,
+	///             id: ("company", "surrealdb").into(),
 	///             name: "SurrealDB",
 	///         },
 	///     ])
@@ -873,20 +868,20 @@ where
 	/// #[derive(Serialize, Deserialize)]
 	/// struct Founded {
 	///     #[serde(rename = "in")]
-	///     founder: sql::Thing,
+	///     founder: RecordId,
 	///     #[serde(rename = "out")]
-	///     company: sql::Thing,
+	///     company: RecordId,
 	/// }
 	///
 	/// let founded: Vec<Founded> = db.insert("founded")
 	///     .relation(vec![
 	///         Founded {
-	///             founder: sql::thing("person:tobie")?,
-	///             company: sql::thing("company:surrealdb")?,
+	///             founder: ("person", "tobie").into(),
+	///             company: ("company", "surrealdb").into(),
 	///         },
 	///         Founded {
-	///             founder: sql::thing("person:jaime")?,
-	///             company: sql::thing("company:surrealdb")?,
+	///             founder: ("person", "jaime").into(),
+	///             company: ("company", "surrealdb").into(),
 	///         },
 	///     ])
 	///     .await?;
