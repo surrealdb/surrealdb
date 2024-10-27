@@ -3099,11 +3099,11 @@ async fn select_where_index_boolean_behaviour() -> Result<(), Error> {
 #[tokio::test]
 async fn select_parallel_ordered_collector() -> Result<(), Error> {
 	let sql = r"
-		CREATE |i:100| SET v = rand::guid() RETURN NONE;
-		SELECT * FROM i ORDER BY v PARALLEL EXPLAIN;
-		SELECT * FROM i ORDER BY RAND() PARALLEL EXPLAIN;
-		SELECT * FROM i ORDER BY v PARALLEL;
-		SELECT * FROM i ORDER BY RAND() PARALLEL;";
+		CREATE |i:1500| SET v = rand::guid() RETURN NONE;
+		SELECT v FROM i ORDER BY v PARALLEL EXPLAIN;
+		SELECT v FROM i ORDER BY RAND() PARALLEL EXPLAIN;
+		SELECT v FROM i ORDER BY v PARALLEL;
+		SELECT v FROM i ORDER BY RAND() PARALLEL;";
 	let mut t = Test::new(sql).await?;
 	t.expect_size(5)?;
 	t.skip_ok(1)?;
@@ -3131,7 +3131,7 @@ async fn select_parallel_ordered_collector() -> Result<(), Error> {
 	let mut get_array = || {
 		let v = t.next_value()?;
 		if let Value::Array(a) = &v {
-			assert_eq!(a.len(), 100);
+			assert_eq!(a.len(), 1500);
 			Ok::<_, Error>(a.to_vec())
 		} else {
 			panic!("Expected a Value::Array but get: {v}");
@@ -3145,9 +3145,9 @@ async fn select_parallel_ordered_collector() -> Result<(), Error> {
 	// Check that the values are not sorted `ORDER BY RAND()`
 	let a = get_array()?;
 	assert!(a.windows(2).any(|w| w[0] <= w[1]), "Values are not random: {a:?}");
-	// With an array of 100, there is a probability of factorial 100! that `ORDER BY RAND()` returns a sorted array
-	// At a rate of one test per minute, we're SURE that approximately 1.77 × 10¹⁵³ years from now a test WILL fail.
-	// For perspective, this time frame vastly exceeds the age of the universe, but well, my apologies ¯\_(ツ)_/¯
-
+	// With an array of 1500, there is a probability of factorial 1500! that `ORDER BY RAND()` returns a sorted array
+	// At a rate of one test per minute, we're SURE that approximately 10^4,104.8 years from now a test WILL fail.
+	// For perspective, this time frame is far longer than the age of the universe,
+	// but well, my apologies if that even happen ¯\_(ツ)_/¯
 	Ok(())
 }

@@ -14,19 +14,23 @@ use tokio::runtime::{Builder, Runtime};
 fn bench_sort(c: &mut Criterion) {
 	let rt = Runtime::new().unwrap();
 
+	let small_value = "rand::guid()";
+	let large_value =
+		"rand::guid() + rand::guid() + rand::guid() +rand::guid() + rand::guid() + rand::guid()";
+
 	let mut group = c.benchmark_group("sort");
 	group.throughput(Throughput::Elements(1));
 	group.sample_size(10);
 	group.measurement_time(Duration::from_secs(15));
 
-	let i = rt.block_on(prepare_data(9999));
+	let i = rt.block_on(prepare_data(9999, small_value));
 
 	group.bench_function("sort 9.999 (Vec::sort_unstable_by)", |b| {
 		b.to_async(Builder::new_multi_thread().build().unwrap())
 			.iter(|| run(&i, "SELECT * FROM i ORDER BY v", 9999))
 	});
 
-	let i = rt.block_on(prepare_data(10000));
+	let i = rt.block_on(prepare_data(10000, small_value));
 
 	group.bench_function("sort 10.000 (Rayon::par_sort_unstable_by)", |b| {
 		b.to_async(Builder::new_multi_thread().build().unwrap())
@@ -38,7 +42,7 @@ fn bench_sort(c: &mut Criterion) {
 			.iter(|| run(&i, "SELECT * FROM i ORDER BY v PARALLEL", 10000))
 	});
 
-	let i = rt.block_on(prepare_data(1000000));
+	let i = rt.block_on(prepare_data(1000000, small_value));
 
 	group.bench_function("sort 1m (Rayon::par_sort_unstable_by)", |b| {
 		b.to_async(Builder::new_multi_thread().build().unwrap())
@@ -60,6 +64,28 @@ fn bench_sort(c: &mut Criterion) {
 			.iter(|| run(&i, "SELECT * FROM i ORDER BY RAND() PARALLEL", 100000))
 	});
 
+	let i = rt.block_on(prepare_data(1000000, large_value));
+
+	group.bench_function("sort 1m (Rayon::par_sort_unstable_by) large", |b| {
+		b.to_async(Builder::new_multi_thread().build().unwrap())
+			.iter(|| run(&i, "SELECT * FROM i ORDER BY v", 1000000))
+	});
+
+	group.bench_function("sort 1m (concurrent/incremental) large", |b| {
+		b.to_async(Builder::new_multi_thread().build().unwrap())
+			.iter(|| run(&i, "SELECT * FROM i ORDER BY v PARALLEL", 100000))
+	});
+
+	group.bench_function("random 1m (Vec::shuffle) large", |b| {
+		b.to_async(Builder::new_multi_thread().build().unwrap())
+			.iter(|| run(&i, "SELECT * FROM i ORDER BY RAND()", 1000000))
+	});
+
+	group.bench_function("random 1m (concurrent/incremental) large", |b| {
+		b.to_async(Builder::new_multi_thread().build().unwrap())
+			.iter(|| run(&i, "SELECT * FROM i ORDER BY RAND() PARALLEL", 100000))
+	});
+
 	group.finish();
 }
 
@@ -68,10 +94,10 @@ struct Input {
 	ses: Session,
 }
 
-async fn prepare_data(n: usize) -> Input {
+async fn prepare_data(n: usize, value: &str) -> Input {
 	let dbs = Datastore::new("memory").await.unwrap();
 	let ses = Session::owner().with_ns("bench").with_db("bench");
-	let sql = format!(" CREATE |i:{n}| SET v = rand::guid() RETURN NONE");
+	let sql = format!(" CREATE |i:{n}| SET v = rand::guid(), d = {value} RETURN NONE");
 	let res = &mut dbs.execute(&sql, &ses, None).await.unwrap();
 	let _ = res.remove(0).result.is_ok();
 	Input {

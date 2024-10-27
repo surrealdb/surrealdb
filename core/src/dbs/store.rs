@@ -546,11 +546,32 @@ pub(super) mod memory_ordered {
 	use rand::{thread_rng, Rng};
 	use std::{cmp, mem};
 	use tokio::sync::mpsc;
-	use tokio::sync::mpsc::Sender;
+	use tokio::sync::mpsc::{Receiver, Sender};
 	use tokio::task::JoinHandle;
 
 	const CHANNEL_BUFFER_SIZE: usize = 128;
-	const BATCH_MAX_SIZE: usize = 1024;
+	const DEFAULT_BATCH_MAX_SIZE: usize = 1024;
+
+	struct OrderedResult {
+		values: Vec<Value>,
+		ordered: Vec<usize>,
+	}
+
+	impl OrderedResult {
+		fn with_capacity(capacity: usize) -> Self {
+			Self {
+				values: vec![], // The first batch is set using `*values = batch`, so we don't need any capacity here
+				ordered: Vec::with_capacity(capacity),
+			}
+		}
+		fn into_vec(mut self) -> Vec<Value> {
+			let mut vec = Vec::with_capacity(self.ordered.len());
+			for idx in self.ordered {
+				vec.push(mem::take(&mut self.values[idx]));
+			}
+			vec
+		}
+	}
 
 	/// The struct MemoryOrdered represents an in-memory store that aggregates data in batches,
 	/// ordering the data, and allows for pushing the data asynchronously.
@@ -558,107 +579,139 @@ pub(super) mod memory_ordered {
 		/// Sender-side of asynchronous channel to send batches
 		tx: Option<Sender<Vec<Value>>>,
 		/// Handle for the merge task that processes incoming batches
-		rx: Option<JoinHandle<Vec<Value>>>,
+		rx: Option<JoinHandle<OrderedResult>>,
 		/// Current batch of values to be merged once full
 		batch: Vec<Value>,
-		/// Vector containing merged and sorted values.
-		merged: Vec<Value>,
+		/// Vector containing ordered values
+		result: Vec<Value>,
+		/// The maximum size of a batch
+		batch_size: usize,
 	}
 
 	impl MemoryOrdered {
-		pub(in crate::dbs) fn new(ordering: &Ordering) -> Self {
+		pub(in crate::dbs) fn new(ordering: &Ordering, batch_size: Option<usize>) -> Self {
 			let (tx, rx) = mpsc::channel(CHANNEL_BUFFER_SIZE);
+			let batch_size = batch_size.unwrap_or(DEFAULT_BATCH_MAX_SIZE);
+			let result = OrderedResult::with_capacity(batch_size);
 			// Spawns a merge task to process and merge incoming batches asynchronously.
 			let rx = match ordering {
-				Ordering::Random => tokio::spawn(Self::merge_random_task(rx)),
-				Ordering::Order(orders) => tokio::spawn(Self::merge_sort_task(rx, orders.clone())),
+				Ordering::Random => tokio::spawn(Self::merge_random_task(result, rx)),
+				Ordering::Order(orders) => {
+					tokio::spawn(Self::merge_sort_task(result, rx, orders.clone()))
+				}
 			};
 			Self {
 				tx: Some(tx),
 				rx: Some(rx),
-				batch: Vec::with_capacity(BATCH_MAX_SIZE),
-				merged: vec![],
+				batch_size,
+				batch: Vec::with_capacity(batch_size),
+				result: vec![],
 			}
 		}
 
 		async fn merge_sort_task(
-			mut rx: mpsc::Receiver<Vec<Value>>,
+			mut result: OrderedResult,
+			mut rx: Receiver<Vec<Value>>,
 			orders: OrderList,
-		) -> Vec<Value> {
-			let mut merged = Vec::new();
+		) -> OrderedResult {
 			while let Some(batch) = rx.recv().await {
-				Self::incremental_sorted_insertion(&mut merged, batch, |a, b| orders.compare(a, b));
+				Self::incremental_sorted_insertion(&mut result, batch, |a, b| orders.compare(a, b));
 			}
-			merged
+			result
 		}
 
-		async fn merge_random_task(mut rx: mpsc::Receiver<Vec<Value>>) -> Vec<Value> {
-			let mut merged = Vec::new();
+		async fn merge_random_task(
+			mut result: OrderedResult,
+			mut rx: Receiver<Vec<Value>>,
+		) -> OrderedResult {
 			while let Some(batch) = rx.recv().await {
-				Self::incremental_random_insertion(&mut merged, batch);
+				Self::incremental_random_insertion(&mut result, batch);
 			}
-			merged
+			result
 		}
 
-		fn incremental_sorted_insertion<F>(merged: &mut Vec<Value>, mut batch: Vec<Value>, cmp: F)
-		where
+		fn incremental_sorted_insertion<F>(
+			result: &mut OrderedResult,
+			mut batch: Vec<Value>,
+			cmp: F,
+		) where
 			F: Fn(&Value, &Value) -> cmp::Ordering,
 		{
 			// Ensure the batch is sorted
 			batch.sort_unstable();
+			let batch_len = batch.len();
+
 			// If merged is empty we just move the batch,
-			if merged.is_empty() {
-				*merged = batch;
+			if result.values.is_empty() {
+				result.values = batch;
+				// This is the fastest way or inserting a range inside a vector
+				result.ordered = Vec::with_capacity(batch_len);
+				result.ordered.extend(0..batch_len);
 				return;
 			}
 
 			// Reserve capacity in the merged vector
-			merged.reserve(batch.len());
+			result.values.extend(batch);
+			result.ordered.reserve(batch_len);
 
 			let mut start_idx = 0;
+			let start = result.ordered.len();
+			let end = start + batch_len;
 
-			for val in batch.into_iter() {
+			// Iterator over the new values that must be ordered
+			for idx in start..end {
+				let val = &result.values[idx];
 				// Perform binary search between start_idx and merged.len()
 				// As the batch is sorted, when a value is inserted,
 				// we know that the next value will be inserted after.
-				// Therefore we can reduce the scope of the next binary search.
-				let insert_pos = merged[start_idx..]
-					.binary_search_by(|a| cmp(a, &val))
+				// Therefore, we can reduce the scope of the next binary search.
+				let insert_pos = result.ordered[start_idx..]
+					.binary_search_by(|a| cmp(&result.values[*a], val))
 					.map(|pos| start_idx + pos)
 					.unwrap_or_else(|pos| start_idx + pos);
 
 				// Insert the element at the found position
-				merged.insert(insert_pos, val);
+				result.ordered.insert(insert_pos, idx);
 
 				// Update start_idx for the next iteration
 				start_idx = insert_pos + 1; // +1 because we just inserted an element
 			}
 		}
 
-		fn incremental_random_insertion(merged: &mut Vec<Value>, batch: Vec<Value>) {
+		fn incremental_random_insertion(result: &mut OrderedResult, batch: Vec<Value>) {
 			let mut rng = thread_rng();
 
-			if merged.is_empty() {
-				merged.extend(batch);
-				merged.shuffle(&mut rng);
+			let batch_len = batch.len();
+
+			if result.ordered.is_empty() {
+				result.values = batch;
+				// This is the fastest way or inserting a range inside a vector
+				result.ordered = Vec::with_capacity(batch_len);
+				result.ordered.extend(0..batch_len);
+				// Then we just shuffle the order
+				result.ordered.shuffle(&mut rng);
 				return;
 			}
 
+			// Add the values
+			result.values.extend(batch);
 			// Reserve capacity in the merged vector
-			merged.reserve(batch.len());
+			result.ordered.reserve(batch_len);
+			let start = result.ordered.len();
+			let end = start + batch_len;
 
 			// Fisher-Yates shuffle to shuffle the elements as they are merged
-			for val in batch {
-				merged.push(val);
-				let i = merged.len() - 1;
+			for idx in start..end {
+				result.ordered.push(idx);
+				let i = result.ordered.len() - 1;
 				let j = rng.gen_range(0..=i);
-				merged.swap(i, j);
+				result.ordered.swap(i, j);
 			}
 		}
 
 		pub(in crate::dbs) async fn push(&mut self, val: Value) -> Result<(), Error> {
 			self.batch.push(val);
-			if self.batch.len() >= BATCH_MAX_SIZE {
+			if self.batch.len() >= self.batch_size {
 				self.send_buffer().await?;
 			}
 			Ok(())
@@ -673,13 +726,13 @@ pub(super) mod memory_ordered {
 		}
 
 		async fn send_buffer(&mut self) -> Result<(), Error> {
-			let batch = mem::replace(&mut self.batch, Vec::with_capacity(BATCH_MAX_SIZE));
+			let batch = mem::replace(&mut self.batch, Vec::with_capacity(self.batch_size));
 			self.tx()?.send(batch).await.map_err(|e| Error::Internal(format!("{e}")))?;
 			Ok(())
 		}
 
 		pub(in crate::dbs) fn len(&self) -> usize {
-			self.merged.len()
+			self.result.len()
 		}
 
 		async fn finalize(&mut self) -> Result<(), Error> {
@@ -690,7 +743,8 @@ pub(super) mod memory_ordered {
 				drop(tx);
 			}
 			if let Some(rx) = self.rx.take() {
-				self.merged = rx.await.map_err(|e| Error::Internal(format!("{e}")))?;
+				let result = rx.await.map_err(|e| Error::Internal(format!("{e}")))?;
+				self.result = result.into_vec();
 			}
 			Ok(())
 		}
@@ -701,13 +755,13 @@ pub(super) mod memory_ordered {
 			limit: Option<u32>,
 		) -> Result<(), Error> {
 			self.finalize().await?;
-			MemoryCollector::vec_start_limit(start, limit, &mut self.merged);
+			MemoryCollector::vec_start_limit(start, limit, &mut self.result);
 			Ok(())
 		}
 
 		pub(in crate::dbs) async fn take_vec(&mut self) -> Result<Vec<Value>, Error> {
 			self.finalize().await?;
-			Ok(mem::take(&mut self.merged))
+			Ok(mem::take(&mut self.result))
 		}
 
 		pub(in crate::dbs) fn explain(&self, exp: &mut Explanation) {
@@ -717,14 +771,23 @@ pub(super) mod memory_ordered {
 
 	#[cfg(test)]
 	mod test {
-		use crate::dbs::store::memory_ordered::MemoryOrdered;
+		use crate::dbs::store::memory_ordered::{MemoryOrdered, OrderedResult};
 		use crate::sql::Value;
 
+		impl From<Vec<Value>> for OrderedResult {
+			fn from(values: Vec<Value>) -> Self {
+				Self {
+					ordered: (0..values.len()).collect(),
+					values,
+				}
+			}
+		}
 		#[test]
 		fn incremental_sorted_insertion_test() {
-			let test = |mut merged: Vec<Value>, batch: Vec<Value>, expected: Vec<Value>| {
-				MemoryOrdered::incremental_sorted_insertion(&mut merged, batch, Value::cmp);
-				assert_eq!(merged, expected);
+			let test = |merged: Vec<Value>, batch: Vec<Value>, expected: Vec<Value>| {
+				let mut result = merged.into();
+				MemoryOrdered::incremental_sorted_insertion(&mut result, batch, Value::cmp);
+				assert_eq!(result.into_vec(), expected);
 			};
 			// All empty
 			test(vec![], vec![], vec![]);
@@ -770,11 +833,12 @@ pub(super) mod memory_ordered {
 
 	#[test]
 	fn incremental_random_insertion_test() {
-		let test = |mut merged: Vec<Value>, batch: Vec<Value>, expected: Vec<Value>| {
-			MemoryOrdered::incremental_random_insertion(&mut merged, batch);
-			assert_eq!(merged.len(), expected.len());
+		let test = |merged: Vec<Value>, batch: Vec<Value>, expected: Vec<Value>| {
+			let mut result = merged.into();
+			MemoryOrdered::incremental_random_insertion(&mut result, batch);
+			let result = result.into_vec();
 			for v in expected {
-				assert!(merged.contains(&v));
+				assert!(result.contains(&v));
 			}
 		};
 		// All empty
@@ -789,5 +853,27 @@ pub(super) mod memory_ordered {
 			vec![2.into(), 1.into()],
 			vec![1.into(), 2.into(), 3.into(), 4.into()],
 		);
+	}
+
+	#[test]
+	fn incremental_sorted_insertions() {
+		let mut result = OrderedResult::with_capacity(2);
+		MemoryOrdered::incremental_sorted_insertion(
+			&mut result,
+			vec![2.into(), 4.into()],
+			Value::cmp,
+		);
+		MemoryOrdered::incremental_sorted_insertion(
+			&mut result,
+			vec![5.into(), 3.into()],
+			Value::cmp,
+		);
+		MemoryOrdered::incremental_sorted_insertion(
+			&mut result,
+			vec![6.into(), 1.into()],
+			Value::cmp,
+		);
+		let result = result.into_vec();
+		assert_eq!(result, vec![1.into(), 2.into(), 3.into(), 4.into(), 5.into(), 6.into()]);
 	}
 }

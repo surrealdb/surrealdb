@@ -40,7 +40,7 @@ impl Results {
 		#[cfg(not(target_arch = "wasm32"))]
 		if stm.parallel() {
 			if let Some(order) = stm.order() {
-				return Ok(Self::MemoryOrdered(MemoryOrdered::new(order)));
+				return Ok(Self::MemoryOrdered(MemoryOrdered::new(order, None)));
 			}
 		}
 		Ok(Self::Memory(Default::default()))
