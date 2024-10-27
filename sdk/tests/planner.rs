@@ -2611,7 +2611,7 @@ async fn select_from_standard_index_ascending() -> Result<(), Error> {
 			},
 			{
 				detail: {
-					type: 'Memory'
+					type: 'MemoryOrdered'
 				},
 				operation: 'Collector'
 			}
@@ -2716,7 +2716,7 @@ async fn select_from_unique_index_ascending() -> Result<(), Error> {
 			},
 			{
 				detail: {
-					type: 'Memory'
+					type: 'MemoryOrdered'
 				},
 				operation: 'Collector'
 			}
@@ -2748,7 +2748,7 @@ async fn select_from_unique_index_ascending() -> Result<(), Error> {
 			},
 			{
 				detail: {
-					type: 'Memory'
+					type: 'MemoryOrdered'
 				},
 				operation: 'Collector'
 			}
@@ -2805,7 +2805,7 @@ async fn select_from_standard_index_descending() -> Result<(), Error> {
 			},
 			{
 				detail: {
-					type: 'Memory'
+					type: 'MemoryOrdered'
 				},
 				operation: 'Collector'
 			}
@@ -2837,7 +2837,7 @@ async fn select_from_standard_index_descending() -> Result<(), Error> {
 			},
 			{
 				detail: {
-					type: 'Memory'
+					type: 'MemoryOrdered'
 				},
 				operation: 'Collector'
 			}
@@ -2930,7 +2930,7 @@ async fn select_from_unique_index_descending() -> Result<(), Error> {
 			},
 			{
 				detail: {
-					type: 'Memory'
+					type: 'MemoryOrdered'
 				},
 				operation: 'Collector'
 			}
@@ -3097,15 +3097,19 @@ async fn select_where_index_boolean_behaviour() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn select_parallel_ordered_collector() -> Result<(), Error> {
+async fn select_memory_ordered_collector() -> Result<(), Error> {
 	let sql = r"
 		CREATE |i:1500| SET v = rand::guid() RETURN NONE;
+		SELECT v FROM i ORDER BY v EXPLAIN;
+		SELECT v FROM i ORDER BY RAND() EXPLAIN;
 		SELECT v FROM i ORDER BY v PARALLEL EXPLAIN;
 		SELECT v FROM i ORDER BY RAND() PARALLEL EXPLAIN;
+		SELECT v FROM i ORDER BY v;
 		SELECT v FROM i ORDER BY v PARALLEL;
+		SELECT v FROM i ORDER BY RAND();
 		SELECT v FROM i ORDER BY RAND() PARALLEL;";
 	let mut t = Test::new(sql).await?;
-	t.expect_size(5)?;
+	t.expect_size(9)?;
 	t.skip_ok(1)?;
 	// Check explain plans
 	for _ in 0..2 {
@@ -3126,6 +3130,24 @@ async fn select_parallel_ordered_collector() -> Result<(), Error> {
 			]",
 		)?;
 	}
+	for _ in 0..2 {
+		t.expect_val(
+			"[
+				{
+					detail: {
+						table: 'i'
+					},
+					operation: 'Iterate Table'
+				},
+				{
+					detail: {
+						type: 'AsyncMemoryOrdered'
+					},
+					operation: 'Collector'
+				}
+			]",
+		)?;
+	}
 
 	// Extract the array from a value
 	let mut get_array = || {
@@ -3139,12 +3161,16 @@ async fn select_parallel_ordered_collector() -> Result<(), Error> {
 	};
 
 	// Check that the values are sorted `ORDER BY v`
-	let a = get_array()?;
-	assert!(a.windows(2).all(|w| w[0] <= w[1]), "Values are not sorted: {a:?}");
+	for _ in 0..2 {
+		let a = get_array()?;
+		assert!(a.windows(2).all(|w| w[0] <= w[1]), "Values are not sorted: {a:?}");
+	}
 
 	// Check that the values are not sorted `ORDER BY RAND()`
-	let a = get_array()?;
-	assert!(a.windows(2).any(|w| w[0] <= w[1]), "Values are not random: {a:?}");
+	for _ in 0..2 {
+		let a = get_array()?;
+		assert!(a.windows(2).any(|w| w[0] <= w[1]), "Values are not random: {a:?}");
+	}
 	// With an array of 1500, there is a probability of factorial 1500! that `ORDER BY RAND()` returns a sorted array
 	// At a rate of one test per minute, we're SURE that approximately 10^4,104.8 years from now a test WILL fail.
 	// For perspective, this time frame is far longer than the age of the universe,

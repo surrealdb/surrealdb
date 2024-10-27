@@ -4,8 +4,8 @@ use crate::dbs::plan::Explanation;
 #[cfg(storage)]
 use crate::dbs::store::file_store::FileCollector;
 #[cfg(not(target_arch = "wasm32"))]
-use crate::dbs::store::memory_ordered::MemoryOrdered;
-use crate::dbs::store::MemoryCollector;
+use crate::dbs::store::AsyncMemoryOrdered;
+use crate::dbs::store::{MemoryCollector, MemoryOrdered};
 use crate::dbs::{Options, Statement};
 use crate::err::Error;
 use crate::sql::order::Ordering;
@@ -15,8 +15,9 @@ use reblessive::tree::Stk;
 pub(super) enum Results {
 	None,
 	Memory(MemoryCollector),
-	#[cfg(not(target_arch = "wasm32"))]
 	MemoryOrdered(MemoryOrdered),
+	#[cfg(not(target_arch = "wasm32"))]
+	AsyncMemoryOrdered(AsyncMemoryOrdered),
 	#[cfg(storage)]
 	File(Box<FileCollector>),
 	Groups(GroupsCollector),
@@ -40,8 +41,11 @@ impl Results {
 		#[cfg(not(target_arch = "wasm32"))]
 		if stm.parallel() {
 			if let Some(order) = stm.order() {
-				return Ok(Self::MemoryOrdered(MemoryOrdered::new(order, None)));
+				return Ok(Self::AsyncMemoryOrdered(AsyncMemoryOrdered::new(order, None)));
 			}
+		}
+		if let Some(order) = stm.order() {
+			return Ok(Self::MemoryOrdered(MemoryOrdered::new(order.clone(), None)));
 		}
 		Ok(Self::Memory(Default::default()))
 	}
@@ -59,8 +63,11 @@ impl Results {
 			Self::Memory(s) => {
 				s.push(val);
 			}
-			#[cfg(not(target_arch = "wasm32"))]
 			Self::MemoryOrdered(c) => {
+				c.push(val);
+			}
+			#[cfg(not(target_arch = "wasm32"))]
+			Self::AsyncMemoryOrdered(c) => {
 				c.push(val).await?;
 			}
 			#[cfg(storage)]
@@ -103,8 +110,9 @@ impl Results {
 		match self {
 			Self::None => {}
 			Self::Memory(m) => m.start_limit(start, limit),
+			Self::MemoryOrdered(m) => m.start_limit(start, limit),
 			#[cfg(not(target_arch = "wasm32"))]
-			Self::MemoryOrdered(c) => c.start_limit(start, limit).await?,
+			Self::AsyncMemoryOrdered(c) => c.start_limit(start, limit).await?,
 			#[cfg(storage)]
 			Self::File(f) => f.start_limit(start, limit),
 			Self::Groups(_) => {}
@@ -120,8 +128,9 @@ impl Results {
 		match self {
 			Self::None => 0,
 			Self::Memory(s) => s.len(),
-			#[cfg(not(target_arch = "wasm32"))]
 			Self::MemoryOrdered(s) => s.len(),
+			#[cfg(not(target_arch = "wasm32"))]
+			Self::AsyncMemoryOrdered(s) => s.len(),
 			#[cfg(storage)]
 			Self::File(e) => e.len(),
 			Self::Groups(g) => g.len(),
@@ -131,8 +140,9 @@ impl Results {
 	pub(super) async fn take(&mut self) -> Result<Vec<Value>, Error> {
 		Ok(match self {
 			Self::Memory(m) => m.take_vec(),
+			Self::MemoryOrdered(c) => c.take_vec(),
 			#[cfg(not(target_arch = "wasm32"))]
-			Self::MemoryOrdered(c) => c.take_vec().await?,
+			Self::AsyncMemoryOrdered(c) => c.take_vec().await?,
 			#[cfg(storage)]
 			Self::File(f) => f.take_vec().await?,
 			_ => vec![],
@@ -145,8 +155,9 @@ impl Results {
 			Self::Memory(s) => {
 				s.explain(exp);
 			}
-			#[cfg(not(target_arch = "wasm32"))]
 			Self::MemoryOrdered(c) => c.explain(exp),
+			#[cfg(not(target_arch = "wasm32"))]
+			Self::AsyncMemoryOrdered(c) => c.explain(exp),
 			#[cfg(storage)]
 			Self::File(e) => {
 				e.explain(exp);
