@@ -2,14 +2,12 @@ use rand::seq::SliceRandom;
 
 use crate::dbs::plan::Explanation;
 #[cfg(not(target_arch = "wasm32"))]
-use crate::dbs::rayon_spawn;
-#[cfg(not(target_arch = "wasm32"))]
 use crate::err::Error;
 use crate::sql::order::Ordering;
 use crate::sql::value::Value;
-#[cfg(not(target_arch = "wasm32"))]
-use rayon::slice::ParallelSliceMut;
 use std::mem;
+#[cfg(not(target_arch = "wasm32"))]
+use tokio::task::spawn_blocking;
 
 #[derive(Default)]
 pub(super) struct MemoryCollector(Vec<Value>);
@@ -19,66 +17,32 @@ impl MemoryCollector {
 		self.0.push(val);
 	}
 
-	/// This function determines the sorting strategy based on the size of the collection.
-	/// If the collection contains fewer than 1000 elements, it uses `small_sort`.
-	/// Otherwise, it uses `large_sort`, which employs `rayon::spawn`.
-	/// We don't want to use `rayon::spawn` when sorting is very fast.
-	/// For tasks that complete very quickly (e.g., on the order of microseconds or a few milliseconds),
-	/// the overhead of `rayon::spawn` might be noticeable, as the cost of task handoff and scheduling
-	/// could be greater than the sorting execution time.
-	///
-	#[cfg(not(target_arch = "wasm32"))]
-	pub(super) async fn sort(&mut self, ordering: &Ordering) -> Result<(), Error> {
-		if self.0.len() < 1000 {
-			self.small_sort(ordering);
-			Ok(())
-		} else {
-			self.large_sort(ordering).await
-		}
+	#[cfg(target_arch = "wasm32")]
+	pub(super) fn sort(&mut self, ordering: &Ordering) {
+		Self::sorting(&mut self.0, ordering)
 	}
 
-	#[cfg(not(target_arch = "wasm32"))]
-	/// Asynchronously sorts a large vector based on the given ordering.
-	///
-	/// The function performs the sorting operation in a blocking
-	/// manner to prevent occupying the async runtime,
-	/// and then awaits the completion of the sorting.
-	///
-	/// - For vectors with a length of 10,000 or more, the sorting is performed using `par_sort_unstable_by`
-	///   from the Rayon library for better performance through parallelism.
-	/// - For smaller vectors, the standard `sort_unstable_by` is used.
-	///
-	async fn large_sort(&mut self, ordering: &Ordering) -> Result<(), Error> {
-		let mut vec = mem::take(&mut self.0);
-		let ordering = ordering.clone();
-		let vec = rayon_spawn(
-			move || {
-				match ordering {
-					Ordering::Random => vec.shuffle(&mut rand::thread_rng()),
-					Ordering::Order(orders) => {
-						if vec.len() >= 10000 {
-							vec.par_sort_unstable_by(|a, b| orders.compare(a, b));
-						} else {
-							vec.sort_unstable_by(|a, b| orders.compare(a, b));
-						}
-					}
-				};
-				Ok(vec)
-			},
-			|e| Error::OrderingError(format!("{e}")),
-		)
-		.await?;
-		self.0 = vec;
-		Ok(())
-	}
-
-	pub(super) fn small_sort(&mut self, ordering: &Ordering) {
+	fn sorting(values: &mut Vec<Value>, ordering: &Ordering) {
 		match ordering {
-			Ordering::Random => self.0.shuffle(&mut rand::thread_rng()),
+			Ordering::Random => values.shuffle(&mut rand::thread_rng()),
 			Ordering::Order(orders) => {
-				self.0.sort_unstable_by(|a, b| orders.compare(a, b));
+				values.sort_unstable_by(|a, b| orders.compare(a, b));
 			}
 		}
+	}
+
+	#[cfg(not(target_arch = "wasm32"))]
+	pub(super) async fn async_sort(&mut self, ordering: &Ordering) -> Result<(), Error> {
+		let ordering = ordering.clone();
+		let mut values = mem::take(&mut self.0);
+		let values = spawn_blocking(move || {
+			Self::sorting(&mut values, &ordering);
+			values
+		})
+		.await
+		.map_err(|e| Error::Internal(format!("{e}")))?;
+		self.0 = values;
+		Ok(())
 	}
 
 	pub(super) fn len(&self) -> usize {
@@ -120,8 +84,6 @@ impl From<Vec<Value>> for MemoryCollector {
 pub(super) mod file_store {
 	use crate::cnf::EXTERNAL_SORTING_BUFFER_LIMIT;
 	use crate::dbs::plan::Explanation;
-	#[cfg(not(target_arch = "wasm32"))]
-	use crate::dbs::rayon_spawn;
 	use crate::err::Error;
 	#[cfg(not(target_arch = "wasm32"))]
 	use crate::err::Error::OrderingError;
@@ -135,6 +97,8 @@ pub(super) mod file_store {
 	use std::path::{Path, PathBuf};
 	use std::{fs, io, mem};
 	use tempfile::{Builder, TempDir};
+	#[cfg(not(target_arch = "wasm32"))]
+	use tokio::task::spawn_blocking;
 
 	pub(in crate::dbs) struct FileCollector {
 		dir: TempDir,
@@ -167,14 +131,12 @@ pub(super) mod file_store {
 		pub(in crate::dbs) async fn push(&mut self, value: Value) -> Result<(), Error> {
 			if let Some(mut writer) = self.writer.take() {
 				#[cfg(not(target_arch = "wasm32"))]
-				let writer = rayon_spawn(
-					move || {
-						writer.push(value)?;
-						Ok(writer)
-					},
-					|e| Error::Internal(format!("{e}")),
-				)
-				.await?;
+				let writer = spawn_blocking(move || {
+					writer.push(value)?;
+					Ok::<FileWriter, Error>(writer)
+				})
+				.await
+				.map_err(|e| Error::Internal(format!("{e}")))??;
 				#[cfg(target_arch = "wasm32")]
 				writer.push(value)?;
 				self.len += 1;
@@ -231,17 +193,15 @@ pub(super) mod file_store {
 				Ordering::Random => {
 					let mut res: Vec<Value> = Vec::with_capacity(num as usize);
 					#[cfg(not(target_arch = "wasm32"))]
-					let res = rayon_spawn(
-						move || {
-							for r in reader.into_iter().skip(start as usize).take(num as usize) {
-								res.push(r?);
-							}
-							res.shuffle(&mut rand::thread_rng());
-							Ok(res)
-						},
-						|e| OrderingError(format!("{e}")),
-					)
-					.await?;
+					let res = spawn_blocking(move || {
+						for r in reader.into_iter().skip(start as usize).take(num as usize) {
+							res.push(r?);
+						}
+						res.shuffle(&mut rand::thread_rng());
+						Ok::<_, Error>(res)
+					})
+					.await
+					.map_err(|e| OrderingError(format!("{e}")))??;
 					#[cfg(target_arch = "wasm32")]
 					{
 						for r in reader.into_iter().skip(start as usize).take(num as usize) {
@@ -274,7 +234,7 @@ pub(super) mod file_store {
 						Ok(r)
 					};
 					#[cfg(not(target_arch = "wasm32"))]
-					let res = rayon_spawn(f, |e| OrderingError(format!("{e}"))).await?;
+					let res = spawn_blocking(f).await.map_err(|e| OrderingError(format!("{e}")))??;
 					#[cfg(target_arch = "wasm32")]
 					let res = f()?;
 					Ok(res)

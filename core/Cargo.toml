@@ -115,7 +115,6 @@ pin-project-lite = "0.2.13"
 quick_cache = "0.5.1"
 radix_trie = { version = "0.2.1", features = ["serde"] }
 rand = "0.8.5"
-rayon = "1.10.0"
 reblessive = { version = "0.4.1", features = ["tree"] }
 regex = "1.10.6"
 regex-syntax = { version = "0.8.4", optional = true, features = ["arbitrary"] }
