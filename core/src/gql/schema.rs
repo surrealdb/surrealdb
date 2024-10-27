@@ -178,7 +178,9 @@ pub async fn generate_schema(
 
 						let limit = args.get("limit").and_then(|v| v.as_i64()).map(|l| l.intox());
 
-						let version = args.get("version");
+						let version = args.get("version")
+							.and_then(|v| v.as_string())
+							.map(|l| l.into());
 
 						let order = args.get("order");
 
