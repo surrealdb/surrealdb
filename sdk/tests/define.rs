@@ -959,7 +959,7 @@ async fn define_statement_mixed_numbers_range(unique: bool) -> Result<(), Error>
 					},
 					{
 						detail: {
-							type: 'Memory'
+							type: 'MemoryOrdered'
 						},
 						operation: 'Collector'
 					}
@@ -1002,7 +1002,7 @@ async fn define_statement_mixed_numbers_range(unique: bool) -> Result<(), Error>
 					},
 					{
 						detail: {
-							type: 'Memory'
+							type: 'MemoryOrdered'
 						},
 						operation: 'Collector'
 					}
@@ -1041,7 +1041,7 @@ async fn define_statement_mixed_numbers_range(unique: bool) -> Result<(), Error>
 					},
 					{
 						detail: {
-							type: 'Memory'
+							type: 'MemoryOrdered'
 						},
 						operation: 'Collector'
 					}
@@ -1080,7 +1080,7 @@ async fn define_statement_mixed_numbers_range(unique: bool) -> Result<(), Error>
 					},
 					{
 						detail: {
-							type: 'Memory'
+							type: 'MemoryOrdered'
 						},
 						operation: 'Collector'
 					}
@@ -1127,7 +1127,7 @@ async fn define_statement_mixed_numbers_range(unique: bool) -> Result<(), Error>
 					},
 					{
 						detail: {
-							type: 'Memory'
+							type: 'MemoryOrdered'
 						},
 						operation: 'Collector'
 					}
@@ -1174,7 +1174,7 @@ async fn define_statement_mixed_numbers_range(unique: bool) -> Result<(), Error>
 					},
 					{
 						detail: {
-							type: 'Memory'
+							type: 'MemoryOrdered'
 						},
 						operation: 'Collector'
 					}
@@ -1221,7 +1221,7 @@ async fn define_statement_mixed_numbers_range(unique: bool) -> Result<(), Error>
 					},
 					{
 						detail: {
-							type: 'Memory'
+							type: 'MemoryOrdered'
 						},
 						operation: 'Collector'
 					}
@@ -1268,7 +1268,7 @@ async fn define_statement_mixed_numbers_range(unique: bool) -> Result<(), Error>
 					},
 					{
 						detail: {
-							type: 'Memory'
+							type: 'MemoryOrdered'
 						},
 						operation: 'Collector'
 					}
