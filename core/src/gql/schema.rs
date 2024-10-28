@@ -5,6 +5,7 @@ use std::sync::Arc;
 use crate::dbs::Session;
 use crate::kvs::Datastore;
 use crate::sql::kind::Literal;
+use crate::sql::version::Version;
 use crate::sql::order::{OrderList, Ordering};
 use crate::sql::statements::define::config::graphql::TablesConfig;
 use crate::sql::statements::{DefineFieldStatement, SelectStatement};
@@ -36,6 +37,7 @@ use crate::gql::utils::{GQLTx, GqlValueUtils};
 use crate::kvs::LockType;
 use crate::kvs::TransactionType;
 use crate::sql::Value as SqlValue;
+use crate::syn;
 
 type ErasedRecord = (GQLTx, Thing);
 
@@ -166,8 +168,17 @@ pub async fn generate_schema(
 						let limit = args.get("limit").and_then(|v| v.as_i64()).map(|l| l.intox());
 
 						let version = args.get("version")
-							.and_then(|v| v.as_string())
-							.map(|l| l.into());
+							.and_then(|v| {
+								let val: &String = &v.clone().into_value().to_string()
+									.chars()
+									.filter(|&c| c != '"' && c != '\\')
+									.collect();
+
+								let dt = syn::datetime(&val)
+									.expect("Could not convert datetime to rfc3339");
+
+								Some(Version(dt.into()))
+							});
 
 						let order = args.get("order");
 
