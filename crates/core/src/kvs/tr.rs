@@ -11,7 +11,6 @@ use crate::key::debug::Sprintable;
 use crate::kvs::batch::Batch;
 use crate::kvs::clock::SizedClock;
 #[cfg(any(
-	feature = "kv-mem",
 	feature = "kv-tikv",
 	feature = "kv-fdb",
 	feature = "kv-indxdb",

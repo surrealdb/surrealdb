@@ -126,7 +126,6 @@ pub use self::object::Object;
 pub use self::operation::Operation;
 pub use self::operator::Operator;
 pub use self::order::Order;
-pub use self::order::Orders;
 pub use self::output::Output;
 pub use self::param::Param;
 pub use self::part::Part;

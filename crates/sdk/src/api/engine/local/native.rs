@@ -134,7 +134,7 @@ pub(crate) async fn run_router(
 	}
 	let tasks = tasks::init(kvs.clone(), canceller.clone(), &opt);
 
-	let mut notifications = kvs.notifications();
+	let mut notifications = kvs.notifications().map(Box::pin);
 	let mut notification_stream = poll_fn(move |cx| match &mut notifications {
 		Some(rx) => rx.poll_next_unpin(cx),
 		// return poll pending so that this future is never woken up again and therefore not
@@ -192,5 +192,5 @@ pub(crate) async fn run_router(
 	// Wait for background tasks to finish
 	let _ = tasks.resolve().await;
 	// Delete this node from the cluster
-	let _ = kvs.delete_node(kvs.id()).await;
+	let _ = kvs.shutdown().await;
 }

@@ -44,10 +44,7 @@ pub async fn field(
 			// Parse the string as an Idiom
 			let idi = syn::idiom(&val)?;
 			// Return the Idiom or fetch the field
-			match opt.projections {
-				true => Ok(idi.compute(stk, ctx, opt, doc).await?),
-				false => Ok(idi.into()),
-			}
+			Ok(idi.compute(stk, ctx, opt, doc).await?)
 		}
 		_ => Ok(Value::None),
 	}
@@ -64,10 +61,7 @@ pub async fn fields(
 				// Parse the string as an Idiom
 				let idi = syn::idiom(&v)?;
 				// Return the Idiom or fetch the field
-				match opt.projections {
-					true => args.push(idi.compute(stk, ctx, opt, doc).await?),
-					false => args.push(idi.into()),
-				}
+				args.push(idi.compute(stk, ctx, opt, doc).await?);
 			}
 			Ok(args.into())
 		}

@@ -180,11 +180,7 @@ impl Executor {
 			Statement::Use(stmt) => self.execute_use_statement(stmt).map(|_| Value::None),
 			stmt => {
 				let writeable = stmt.writeable();
-				let Ok(txn) = kvs.transaction(writeable.into(), LockType::Optimistic).await else {
-					return Err(Error::TxFailure);
-				};
-				let txn = Arc::new(txn);
-
+				let txn = Arc::new(kvs.transaction(writeable.into(), LockType::Optimistic).await?);
 				let receiver = self.ctx.has_notifications().then(|| {
 					let (send, recv) = channel::unbounded();
 					self.opt.sender = Some(send);

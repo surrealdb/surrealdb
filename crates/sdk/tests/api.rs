@@ -393,7 +393,7 @@ mod api_integration {
 	mod surrealkv {
 		use super::*;
 		use surrealdb::engine::local::Db;
-		use surrealdb::engine::local::SurrealKV;
+		use surrealdb::engine::local::SurrealKv;
 
 		async fn new_db() -> (SemaphorePermit<'static>, Surreal<Db>) {
 			let permit = PERMITS.acquire().await.unwrap();
@@ -403,7 +403,7 @@ mod api_integration {
 				password: ROOT_PASS,
 			};
 			let config = Config::new().user(root).capabilities(Capabilities::all());
-			let db = Surreal::new::<SurrealKV>((path, config)).await.unwrap();
+			let db = Surreal::new::<SurrealKv>((path, config)).await.unwrap();
 			db.signin(root).await.unwrap();
 			(permit, db)
 		}

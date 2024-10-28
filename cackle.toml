@@ -1222,3 +1222,6 @@ allow_apis = [
 allow_apis = [
     "net",
 ]
+
+[pkg.revision]
+allow_apis = ["fs"]
