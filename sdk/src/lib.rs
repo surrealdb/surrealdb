@@ -59,7 +59,7 @@
 //!     db.use_ns("namespace").use_db("database").await?;
 //!
 //!     // Create a new person with a random ID
-//!     let created: Vec<Person> = db.create("person")
+//!     let created: Option<Person> = db.create("person")
 //!         .content(Person {
 //!             title: "Founder & CEO".into(),
 //!             name: Name {
