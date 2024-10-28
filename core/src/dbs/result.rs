@@ -87,7 +87,9 @@ impl Results {
 			Self::Memory(m) => m.async_sort(orders).await?,
 			#[cfg(storage)]
 			Self::File(f) => f.sort(orders),
-			_ => {}
+			Self::MemoryOrdered(c) => c.finalize(),
+			Self::AsyncMemoryOrdered(c) => c.finalize().await?,
+			Self::None | Self::Groups(_) => {}
 		}
 		Ok(())
 	}
@@ -145,7 +147,7 @@ impl Results {
 			Self::AsyncMemoryOrdered(c) => c.take_vec().await?,
 			#[cfg(storage)]
 			Self::File(f) => f.take_vec().await?,
-			_ => vec![],
+			Self::None | Self::Groups(_) => vec![],
 		})
 	}
 

@@ -2647,7 +2647,7 @@ async fn select_from_standard_index_ascending() -> Result<(), Error> {
 			},
 			{
 				detail: {
-					type: 'Memory'
+					type: 'MemoryOrdered'
 				},
 				operation: 'Collector'
 			}
@@ -2902,7 +2902,7 @@ async fn select_from_unique_index_descending() -> Result<(), Error> {
 			},
 			{
 				detail: {
-					type: 'Memory'
+					type: 'MemoryOrdered'
 				},
 				operation: 'Collector'
 			}

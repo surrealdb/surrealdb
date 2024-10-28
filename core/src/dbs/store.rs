@@ -26,18 +26,18 @@ impl MemoryCollector {
 		self.0.push(val);
 	}
 
-	#[cfg(target_arch = "wasm32")]
-	pub(super) fn sort(&mut self, ordering: &Ordering) {
-		Self::sorting(&mut self.0, ordering)
-	}
-
 	fn sorting(values: &mut Vec<Value>, ordering: &Ordering) {
 		match ordering {
-			Ordering::Random => values.shuffle(&mut rand::thread_rng()),
+			Ordering::Random => values.shuffle(&mut thread_rng()),
 			Ordering::Order(orders) => {
 				values.sort_unstable_by(|a, b| orders.compare(a, b));
 			}
 		}
+	}
+
+	#[cfg(target_arch = "wasm32")]
+	pub(super) fn sort(&mut self, ordering: &Ordering) {
+		Self::sorting(&mut self.0, ordering)
 	}
 
 	#[cfg(not(target_arch = "wasm32"))]
@@ -537,7 +537,7 @@ pub(in crate::dbs) struct MemoryOrdered {
 	/// Current ordered results
 	ordered: OrderedResult,
 	/// Vector containing ordered values
-	result: Vec<Value>,
+	result: Option<Vec<Value>>,
 	/// The maximum size of a batch
 	batch_size: usize,
 }
@@ -550,7 +550,7 @@ impl MemoryOrdered {
 			batch_size,
 			batch: Vec::with_capacity(batch_size),
 			ordered: OrderedResult::with_capacity(batch_size),
-			result: vec![],
+			result: None,
 		}
 	}
 
@@ -559,15 +559,16 @@ impl MemoryOrdered {
 		F: Fn(&Value, &Value) -> cmp::Ordering,
 	{
 		// Ensure the batch is sorted
-		batch.sort_unstable();
+		batch.sort_unstable_by(|a, b| cmp(a, b));
 		let batch_len = batch.len();
 
-		// If merged is empty we just move the batch,
+		// If merged is empty, we just move the batch,
 		if result.values.is_empty() {
 			result.values = batch;
 			// This is the fastest way or inserting a range inside a vector
 			result.ordered = Vec::with_capacity(batch_len);
 			result.ordered.extend(0..batch_len);
+			assert_eq!(result.ordered.len(), result.values.len());
 			return;
 		}
 
@@ -597,6 +598,7 @@ impl MemoryOrdered {
 			// Update start_idx for the next iteration
 			start_idx = insert_pos + 1; // +1 because we just inserted an element
 		}
+		assert_eq!(result.ordered.len(), result.values.len());
 	}
 
 	fn incremental_random_insertion(result: &mut OrderedResult, batch: Vec<Value>) {
@@ -611,6 +613,7 @@ impl MemoryOrdered {
 			result.ordered.extend(0..batch_len);
 			// Then we just shuffle the order
 			result.ordered.shuffle(&mut rng);
+			assert_eq!(result.ordered.len(), result.values.len());
 			return;
 		}
 
@@ -628,15 +631,16 @@ impl MemoryOrdered {
 			let j = rng.gen_range(0..=i);
 			result.ordered.swap(i, j);
 		}
+		assert_eq!(result.ordered.len(), result.values.len());
 	}
 
 	pub(in crate::dbs) fn len(&self) -> usize {
-		if self.result.is_empty() {
+		if let Some(result) = &self.result {
+			// If we have a finalized result, we return its size
+			result.len()
+		} else {
 			// If we don't have a finalized result, we return the current size
 			self.ordered.values.len() + self.batch.len()
-		} else {
-			// If we have a finalized result, we return its size
-			self.result.len()
 		}
 	}
 
@@ -659,24 +663,26 @@ impl MemoryOrdered {
 		}
 	}
 
-	fn finalize(&mut self) {
-		if !self.batch.is_empty() {
-			self.send_batch();
-		}
-		if self.result.is_empty() {
+	pub(super) fn finalize(&mut self) {
+		if self.result.is_none() {
+			if !self.batch.is_empty() {
+				self.send_batch();
+			}
 			let o = mem::replace(&mut self.ordered, OrderedResult::with_capacity(0));
-			self.result = o.into_vec();
+			self.result = Some(o.into_vec());
 		}
 	}
 
 	pub(in crate::dbs) fn start_limit(&mut self, start: Option<u32>, limit: Option<u32>) {
 		self.finalize();
-		MemoryCollector::vec_start_limit(start, limit, &mut self.result);
+		if let Some(ref mut result) = self.result {
+			MemoryCollector::vec_start_limit(start, limit, result);
+		}
 	}
 
 	pub(in crate::dbs) fn take_vec(&mut self) -> Vec<Value> {
 		self.finalize();
-		mem::take(&mut self.result)
+		self.result.take().unwrap_or_default()
 	}
 
 	pub(in crate::dbs) fn explain(&self, exp: &mut Explanation) {
@@ -696,7 +702,7 @@ pub(in crate::dbs) struct AsyncMemoryOrdered {
 	/// Current batch of values to be merged once full
 	batch: Vec<Value>,
 	/// Vector containing ordered values after finalization
-	result: Vec<Value>,
+	result: Option<Vec<Value>>,
 	/// The maximum size of a batch
 	batch_size: usize,
 	/// Current len
@@ -709,7 +715,7 @@ impl AsyncMemoryOrdered {
 		let (tx, rx) = mpsc::channel(CHANNEL_BUFFER_SIZE);
 		let batch_size = batch_size.unwrap_or(DEFAULT_BATCH_MAX_SIZE);
 		let result = OrderedResult::with_capacity(batch_size);
-		// Spawns a merge task to process and merge incoming batches asynchronously.
+		// Spawns a merge task to process and merge incoming batches asynchronously.finalize
 		let rx = match ordering {
 			Ordering::Random => tokio::spawn(Self::merge_random_task(result, rx)),
 			Ordering::Order(orders) => {
@@ -721,7 +727,7 @@ impl AsyncMemoryOrdered {
 			rx: Some(rx),
 			batch_size,
 			batch: Vec::with_capacity(batch_size),
-			result: vec![],
+			result: None,
 			len: 0,
 		}
 	}
@@ -750,19 +756,19 @@ impl AsyncMemoryOrdered {
 	}
 
 	pub(in crate::dbs) fn len(&self) -> usize {
-		if self.result.is_empty() {
-			self.len()
+		if let Some(result) = &self.result {
+			result.len()
 		} else {
-			self.result.len()
+			self.len
 		}
 	}
 
 	pub(in crate::dbs) async fn push(&mut self, val: Value) -> Result<(), Error> {
 		self.batch.push(val);
+		self.len += 1;
 		if self.batch.len() >= self.batch_size {
 			self.send_batch().await?;
 		}
-		self.len += 1;
 		Ok(())
 	}
 
@@ -780,16 +786,18 @@ impl AsyncMemoryOrdered {
 		Ok(())
 	}
 
-	async fn finalize(&mut self) -> Result<(), Error> {
-		if !self.batch.is_empty() {
-			self.send_batch().await?;
-		}
-		if let Some(tx) = self.tx.take() {
-			drop(tx);
-		}
-		if let Some(rx) = self.rx.take() {
-			let result = rx.await.map_err(|e| Error::Internal(format!("{e}")))?;
-			self.result = result.into_vec();
+	pub(super) async fn finalize(&mut self) -> Result<(), Error> {
+		if self.result.is_none() {
+			if !self.batch.is_empty() {
+				self.send_batch().await?;
+			}
+			if let Some(tx) = self.tx.take() {
+				drop(tx);
+			}
+			if let Some(rx) = self.rx.take() {
+				let result = rx.await.map_err(|e| Error::Internal(format!("{e}")))?;
+				self.result = Some(result.into_vec());
+			}
 		}
 		Ok(())
 	}
@@ -800,13 +808,15 @@ impl AsyncMemoryOrdered {
 		limit: Option<u32>,
 	) -> Result<(), Error> {
 		self.finalize().await?;
-		MemoryCollector::vec_start_limit(start, limit, &mut self.result);
+		if let Some(ref mut result) = self.result {
+			MemoryCollector::vec_start_limit(start, limit, result);
+		}
 		Ok(())
 	}
 
 	pub(in crate::dbs) async fn take_vec(&mut self) -> Result<Vec<Value>, Error> {
 		self.finalize().await?;
-		Ok(mem::take(&mut self.result))
+		Ok(self.result.take().unwrap_or_default())
 	}
 
 	pub(in crate::dbs) fn explain(&self, exp: &mut Explanation) {
