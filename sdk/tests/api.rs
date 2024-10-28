@@ -8,6 +8,7 @@ mod api_integration {
 	use serial_test::serial;
 	use std::borrow::Cow;
 	use std::ops::Bound;
+	use std::path::PathBuf;
 	use std::sync::Arc;
 	use std::sync::LazyLock;
 	use std::sync::Mutex;
@@ -27,6 +28,7 @@ mod api_integration {
 	use surrealdb::sql::statements::CommitStatement;
 	use surrealdb::sql::thing;
 	use surrealdb::{Error, RecordId, Surreal, Value};
+	use temp_dir::TempDir;
 	use tokio::sync::Semaphore;
 	use tokio::sync::SemaphorePermit;
 	use tracing_subscriber::filter::EnvFilter;
@@ -38,6 +40,7 @@ mod api_integration {
 	const NS: &str = "test-ns";
 	const ROOT_USER: &str = "root";
 	const ROOT_PASS: &str = "root";
+	const TEMP_DIR: LazyLock<PathBuf> = LazyLock::new(|| TempDir::new().unwrap().child("sdb-test"));
 
 	#[derive(Debug, Serialize)]
 	struct Record {
@@ -267,21 +270,20 @@ mod api_integration {
 	}
 
 	#[cfg(feature = "kv-rocksdb")]
+	#[allow(deprecated)]
 	mod file {
 		use super::*;
 		use surrealdb::engine::local::Db;
-		#[allow(deprecated)]
 		use surrealdb::engine::local::File;
 
 		async fn new_db() -> (SemaphorePermit<'static>, Surreal<Db>) {
 			let permit = PERMITS.acquire().await.unwrap();
-			let path = format!("/tmp/{}.db", Ulid::new());
+			let path = TEMP_DIR.join(Ulid::new().to_string());
 			let root = Root {
 				username: ROOT_USER,
 				password: ROOT_PASS,
 			};
 			let config = Config::new().user(root).capabilities(Capabilities::all());
-			#[allow(deprecated)]
 			let db = Surreal::new::<File>((path, config)).await.unwrap();
 			db.signin(root).await.unwrap();
 			(permit, db)
@@ -289,10 +291,19 @@ mod api_integration {
 
 		#[test_log::test(tokio::test)]
 		async fn any_engine_can_connect() {
-			let path = format!("{}.db", Ulid::new());
-			surrealdb::engine::any::connect(format!("file://{path}")).await.unwrap();
-			surrealdb::engine::any::connect(format!("file:///tmp/{path}")).await.unwrap();
-			tokio::fs::remove_dir_all(path).await.unwrap();
+			let db_dir = Ulid::new().to_string();
+			// Create a database directory using an absolute path
+			surrealdb::engine::any::connect(format!(
+				"file://{}",
+				TEMP_DIR.join("absolute").join(&db_dir).display()
+			))
+			.await
+			.unwrap();
+			// Switch to the temporary directory, if possible, to test relative paths
+			if std::env::set_current_dir(&*TEMP_DIR).is_ok() {
+				// Create a database directory using a relative path
+				surrealdb::engine::any::connect(format!("file://relative/{db_dir}")).await.unwrap();
+			}
 		}
 
 		include!("api/mod.rs");
@@ -308,7 +319,7 @@ mod api_integration {
 
 		async fn new_db() -> (SemaphorePermit<'static>, Surreal<Db>) {
 			let permit = PERMITS.acquire().await.unwrap();
-			let path = format!("/tmp/{}.db", Ulid::new());
+			let path = TEMP_DIR.join(Ulid::new().to_string());
 			let root = Root {
 				username: ROOT_USER,
 				password: ROOT_PASS,
@@ -321,10 +332,21 @@ mod api_integration {
 
 		#[test_log::test(tokio::test)]
 		async fn any_engine_can_connect() {
-			let path = format!("{}.db", Ulid::new());
-			surrealdb::engine::any::connect(format!("rocksdb://{path}")).await.unwrap();
-			surrealdb::engine::any::connect(format!("rocksdb:///tmp/{path}")).await.unwrap();
-			tokio::fs::remove_dir_all(path).await.unwrap();
+			let db_dir = Ulid::new().to_string();
+			// Create a database directory using an absolute path
+			surrealdb::engine::any::connect(format!(
+				"rocksdb://{}",
+				TEMP_DIR.join("absolute").join(&db_dir).display()
+			))
+			.await
+			.unwrap();
+			// Switch to the temporary directory, if possible, to test relative paths
+			if std::env::set_current_dir(&*TEMP_DIR).is_ok() {
+				// Create a database directory using a relative path
+				surrealdb::engine::any::connect(format!("rocksdb://relative/{db_dir}"))
+					.await
+					.unwrap();
+			}
 		}
 
 		include!("api/mod.rs");
@@ -397,7 +419,7 @@ mod api_integration {
 
 		async fn new_db() -> (SemaphorePermit<'static>, Surreal<Db>) {
 			let permit = PERMITS.acquire().await.unwrap();
-			let path = format!("/tmp/{}.db", Ulid::new());
+			let path = TEMP_DIR.join(Ulid::new().to_string());
 			let root = Root {
 				username: ROOT_USER,
 				password: ROOT_PASS,
@@ -410,10 +432,21 @@ mod api_integration {
 
 		#[test_log::test(tokio::test)]
 		async fn any_engine_can_connect() {
-			let path = format!("{}.db", Ulid::new());
-			surrealdb::engine::any::connect(format!("surrealkv://{path}")).await.unwrap();
-			surrealdb::engine::any::connect(format!("surrealkv:///tmp/{path}")).await.unwrap();
-			tokio::fs::remove_dir_all(path).await.unwrap();
+			let db_dir = Ulid::new().to_string();
+			// Create a database directory using an absolute path
+			surrealdb::engine::any::connect(format!(
+				"surrealkv://{}",
+				TEMP_DIR.join("absolute").join(&db_dir).display()
+			))
+			.await
+			.unwrap();
+			// Switch to the temporary directory, if possible, to test relative paths
+			if std::env::set_current_dir(&*TEMP_DIR).is_ok() {
+				// Create a database directory using a relative path
+				surrealdb::engine::any::connect(format!("surrealkv://relative/{db_dir}"))
+					.await
+					.unwrap();
+			}
 		}
 
 		include!("api/mod.rs");
