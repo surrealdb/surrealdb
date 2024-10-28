@@ -155,18 +155,18 @@ impl<'a> Processor<'a> {
 						self.process_table(stk, &ctx, opt, stm, &v).await?
 					}
 				}
-				Iterable::Index(t, irf) => {
+				Iterable::Index(v, irf) => {
 					if let Some(qp) = ctx.get_query_planner() {
-						if let Some(exe) = qp.get_query_executor(&t.0) {
+						if let Some(exe) = qp.get_query_executor(&v.0) {
 							// We set the query executor matching the current table in the Context
 							// Avoiding search in the hashmap of the query planner for each doc
 							let mut ctx = MutableContext::new(ctx);
 							ctx.set_query_executor(exe.clone());
 							let ctx = ctx.freeze();
-							return self.process_index(stk, &ctx, opt, stm, &t, irf).await;
+							return self.process_index(stk, &ctx, opt, stm, &v, irf).await;
 						}
 					}
-					self.process_index(stk, ctx, opt, stm, &t, irf).await?
+					self.process_index(stk, ctx, opt, stm, &v, irf).await?
 				}
 				Iterable::Mergeable(v, o) => {
 					self.process_mergeable(stk, ctx, opt, stm, (v, o)).await?
@@ -189,6 +189,7 @@ impl<'a> Processor<'a> {
 	) -> Result<(), Error> {
 		// Pass the value through
 		let pro = Processed {
+			generate: None,
 			rid: None,
 			ir: None,
 			val: Operable::Value(v.into()),
@@ -205,21 +206,12 @@ impl<'a> Processor<'a> {
 		stm: &Statement<'_>,
 		v: Table,
 	) -> Result<(), Error> {
-		// Fetch the record id if specified
-		let v = match stm.data() {
-			// There is a data clause so fetch a record id
-			Some(data) => match data.rid(stk, ctx, opt).await? {
-				// Generate a new id from the id field
-				Some(id) => id.generate(&v, false)?,
-				// Generate a new random table id
-				None => v.generate(),
-			},
-			// There is no data clause so create a record id
-			None => v.generate(),
-		};
+		// Check that the table exists
+		ctx.tx().check_ns_db_tb(opt.ns()?, opt.db()?, &v, opt.strict).await?;
 		// Pass the value through
 		let pro = Processed {
-			rid: Some(v.into()),
+			generate: Some(v),
+			rid: None,
 			ir: None,
 			val: Operable::Value(Value::None.into()),
 		};
@@ -239,6 +231,7 @@ impl<'a> Processor<'a> {
 		ctx.tx().check_ns_db_tb(opt.ns()?, opt.db()?, &v.tb, opt.strict).await?;
 		// Process the document record
 		let pro = Processed {
+			generate: None,
 			rid: Some(v.into()),
 			ir: None,
 			val: Operable::Value(Value::None.into()),
@@ -271,6 +264,7 @@ impl<'a> Processor<'a> {
 		);
 		// Process the document record
 		let pro = Processed {
+			generate: None,
 			rid: Some(v.into()),
 			ir: None,
 			val,
@@ -292,9 +286,10 @@ impl<'a> Processor<'a> {
 		ctx.tx().check_ns_db_tb(opt.ns()?, opt.db()?, &v.tb, opt.strict).await?;
 		// Process the document record
 		let pro = Processed {
+			generate: None,
 			rid: Some(v.into()),
 			ir: None,
-			val: Operable::Mergeable(Value::None.into(), o.into(), false),
+			val: Operable::Insert(Value::None.into(), o.into()),
 		};
 		self.process(stk, ctx, opt, stm, pro).await?;
 		// Everything ok
@@ -320,9 +315,10 @@ impl<'a> Processor<'a> {
 			None => Value::None,
 		};
 		// Create a new operable value
-		let val = Operable::Relatable(f, x.into(), w, o.map(|v| v.into()), false);
+		let val = Operable::Relate(f, x.into(), w, o.map(|v| v.into()));
 		// Process the document record
 		let pro = Processed {
+			generate: None,
 			rid: Some(v.into()),
 			ir: None,
 			val,
@@ -364,6 +360,7 @@ impl<'a> Processor<'a> {
 			let val = Operable::Value(val.into());
 			// Process the record
 			let pro = Processed {
+				generate: None,
 				rid: Some(rid.into()),
 				ir: None,
 				val,
@@ -403,6 +400,7 @@ impl<'a> Processor<'a> {
 			let rid = Thing::from((key.tb, key.id));
 			// Process the record
 			let pro = Processed {
+				generate: None,
 				rid: Some(rid.into()),
 				ir: None,
 				val: Operable::Value(Value::Null.into()),
@@ -474,6 +472,7 @@ impl<'a> Processor<'a> {
 			let val = Operable::Value(val.into());
 			// Process the record
 			let pro = Processed {
+				generate: None,
 				rid: Some(rid.into()),
 				ir: None,
 				val,
@@ -511,6 +510,7 @@ impl<'a> Processor<'a> {
 			let rid = Thing::from((key.tb, key.id));
 			// Process the record
 			let pro = Processed {
+				generate: None,
 				rid: Some(rid.into()),
 				ir: None,
 				val: Operable::Value(Value::Null.into()),
@@ -626,6 +626,7 @@ impl<'a> Processor<'a> {
 				});
 				// Process the record
 				let pro = Processed {
+					generate: None,
 					rid: Some(rid.into()),
 					ir: None,
 					val,
@@ -651,20 +652,19 @@ impl<'a> Processor<'a> {
 		if let Some(exe) = ctx.get_query_executor() {
 			if let Some(mut iterator) = exe.new_iterator(opt, irf).await? {
 				// Get the first batch
-				let mut to_process = Self::next_batch(ctx, opt, &mut iterator).await?;
-
-				while !to_process.is_empty() {
+				let mut batch = Self::next_batch(ctx, opt, &mut iterator).await?;
+				// Loop over the indexed records
+				while !batch.is_empty() {
 					// Check if the context is finished
 					if ctx.is_done() {
 						break;
 					}
 					// Process the records
-					// TODO: par_iter
-					for pro in to_process {
+					for pro in batch {
 						self.process(stk, ctx, opt, stm, pro).await?;
 					}
 					// Get the next batch
-					to_process = Self::next_batch(ctx, opt, &mut iterator).await?;
+					batch = Self::next_batch(ctx, opt, &mut iterator).await?;
 				}
 				// Everything ok
 				return Ok(());
@@ -697,6 +697,7 @@ impl<'a> Processor<'a> {
 				Iterable::fetch_thing(&txn, opt, &r.0).await?.into()
 			};
 			let p = Processed {
+				generate: None,
 				rid: Some(r.0),
 				ir: Some(r.1.into()),
 				val: Operable::Value(v),

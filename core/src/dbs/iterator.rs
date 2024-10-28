@@ -29,7 +29,7 @@ const TARGET: &str = "surrealdb::core::dbs";
 
 #[derive(Clone)]
 pub(crate) enum Iterable {
-	/// Any [Value] which does not exists in storage. This
+	/// Any [Value] which does not exist in storage. This
 	/// could be the result of a query, an arbritrary
 	/// SurrealQL value, object, or array of values.
 	Value(Value),
@@ -77,50 +77,46 @@ pub(crate) enum Iterable {
 #[derive(Debug)]
 pub(crate) enum Operable {
 	Value(Arc<Value>),
-	Mergeable(Arc<Value>, Arc<Value>, bool),
-	Relatable(Thing, Arc<Value>, Thing, Option<Arc<Value>>, bool),
+	Insert(Arc<Value>, Arc<Value>),
+	Relate(Thing, Arc<Value>, Thing, Option<Arc<Value>>),
 }
 
 #[derive(Debug)]
 pub(crate) enum Workable {
 	Normal,
-	Insert(Arc<Value>, bool),
-	Relate(Thing, Thing, Option<Arc<Value>>, bool),
+	Insert(Arc<Value>),
+	Relate(Thing, Thing, Option<Arc<Value>>),
 }
 
 #[derive(Debug)]
 pub(crate) struct Processed {
+	/// Whether this document needs to have an ID generated
+	pub(crate) generate: Option<Table>,
+	/// The record id for this document that should be processed
 	pub(crate) rid: Option<Arc<Thing>>,
-	pub(crate) ir: Option<Arc<IteratorRecord>>,
+	/// The record data for this document that should be processed
 	pub(crate) val: Operable,
-}
-
-impl Workable {
-	/// Check if this is the first iteration of an INSERT statement
-	pub(crate) fn is_insert_initial(&self) -> bool {
-		matches!(self, Self::Insert(_, false) | Self::Relate(_, _, _, false))
-	}
-	/// Check if this is an INSERT with a specific id field
-	pub(crate) fn is_insert_with_specific_id(&self) -> bool {
-		matches!(self, Self::Insert(v, _) if v.rid().is_some())
-	}
+	/// The record iterator for this document, used in index scans
+	pub(crate) ir: Option<Arc<IteratorRecord>>,
 }
 
 #[derive(Default)]
 pub(crate) struct Iterator {
-	// Iterator status
+	/// Iterator status
 	run: Canceller,
-	// Iterator limit value
+	/// Iterator limit value
 	limit: Option<u32>,
-	// Iterator start value
+	/// Iterator start value
 	start: Option<u32>,
-	// Iterator runtime error
+	/// Iterator runtime error
 	error: Option<Error>,
-	// Iterator output results
+	/// Iterator output results
 	results: Results,
-	// Iterator input values
+	/// Iterator input values
 	entries: Vec<Iterable>,
-	// Set if the iterator can be cancelled once it reaches start/limit
+	/// Should we always return a record?
+	guaranteed: Option<Iterable>,
+	/// Set if the iterator can be cancelled once it reaches start/limit
 	cancel_on_limit: Option<u32>,
 }
 
@@ -133,6 +129,7 @@ impl Clone for Iterator {
 			error: None,
 			results: Results::default(),
 			entries: self.entries.clone(),
+			guaranteed: None,
 			cancel_on_limit: None,
 		}
 	}
@@ -175,9 +172,15 @@ impl Iterator {
 	/// Prepares a value for processing
 	pub(crate) fn prepare_table(&mut self, stm: &Statement<'_>, v: Table) -> Result<(), Error> {
 		// Add the record to the iterator
-		match stm.is_create() {
+		match stm.is_deferable() {
 			true => self.ingest(Iterable::Yield(v)),
-			false => self.ingest(Iterable::Table(v, false)),
+			false => match stm.is_guaranteed() {
+				false => self.ingest(Iterable::Table(v, false)),
+				true => {
+					self.guaranteed = Some(Iterable::Yield(v.clone()));
+					self.ingest(Iterable::Table(v, false))
+				}
+			},
 		}
 		// All ingested ok
 		Ok(())
@@ -325,30 +328,39 @@ impl Iterator {
 					};
 				}
 			}
+			// Process all documents
 			self.iterate(stk, &cancel_ctx, opt, stm).await?;
 			// Return any document errors
 			if let Some(e) = self.error.take() {
 				return Err(e);
 			}
-			// Process any SPLIT clause
-			self.output_split(stk, ctx, opt, stm).await?;
-			// Process any GROUP clause
-			if let Results::Groups(g) = &mut self.results {
-				self.results = Results::Memory(g.output(stk, ctx, opt, stm).await?);
+			// If no results, then create a record
+			if self.results.is_empty() {
+				// Check if a guaranteed record response is expected
+				if let Some(guaranteed) = self.guaranteed.take() {
+					// Ingest the pre-defined guaranteed record yield
+					self.ingest(guaranteed);
+					// Process the pre-defined guaranteed document
+					self.iterate(stk, &cancel_ctx, opt, stm).await?;
+				}
 			}
-
-			// Process any ORDER clause
+			// Process any SPLIT AT clause
+			self.output_split(stk, ctx, opt, stm).await?;
+			// Process any GROUP BY clause
+			self.output_group(stk, ctx, opt, stm).await?;
+			// Process any ORDER BY clause
 			if let Some(orders) = stm.order() {
+				#[cfg(not(target_arch = "wasm32"))]
+				self.results.async_sort(orders).await?;
+				#[cfg(target_arch = "wasm32")]
 				self.results.sort(orders);
 			}
-
 			// Process any START & LIMIT clause
 			self.results.start_limit(self.start, self.limit);
-
+			// Process any FETCH clause
 			if let Some(e) = &mut plan.explanation {
 				e.add_fetch(self.results.len());
 			} else {
-				// Process any FETCH clause
 				self.output_fetch(stk, ctx, opt, stm).await?;
 			}
 		}
@@ -438,7 +450,6 @@ impl Iterator {
 		}
 	}
 
-	#[inline]
 	async fn output_split(
 		&mut self,
 		stk: &mut Stk,
@@ -482,7 +493,21 @@ impl Iterator {
 		Ok(())
 	}
 
-	#[inline]
+	async fn output_group(
+		&mut self,
+		stk: &mut Stk,
+		ctx: &Context,
+		opt: &Options,
+		stm: &Statement<'_>,
+	) -> Result<(), Error> {
+		// Process any GROUP clause
+		if let Results::Groups(g) = &mut self.results {
+			self.results = Results::Memory(g.output(stk, ctx, opt, stm).await?);
+		}
+		// Everything ok
+		Ok(())
+	}
+
 	async fn output_fetch(
 		&mut self,
 		stk: &mut Stk,
@@ -569,15 +594,15 @@ impl Iterator {
 				let adocs = async {
 					// Process all prepared values
 					for v in vals {
+						// Clone the results channel for the async task
+						let chn = chn.clone();
 						// Distinct is passed only for iterators that really requires it
-						let chn_clone = chn.clone();
-						let distinct_clone = distinct.clone();
+						let distinct = distinct.clone();
+						// Spawn an asynchronous task to process the prepared value
 						e.spawn(async move {
 							let mut stack = TreeStack::new();
 							stack
-								.enter(|stk| {
-									v.channel(stk, ctx, opt, stm, chn_clone, distinct_clone)
-								})
+								.enter(|stk| v.channel(stk, ctx, opt, stm, chn, distinct))
 								.finish()
 								.await
 						})
@@ -593,11 +618,13 @@ impl Iterator {
 				let avals = async {
 					// Process all received values
 					while let Ok(pro) = docs.recv().await {
-						let chn_clone = chn.clone();
+						// Clone the results channel for the async task
+						let chn = chn.clone();
+						// Spawn an asynchronous task to process the received value
 						e.spawn(async move {
 							let mut stack = TreeStack::new();
 							stack
-								.enter(|stk| Document::compute(stk, ctx, opt, stm, chn_clone, pro))
+								.enter(|stk| Document::compute(stk, ctx, opt, stm, chn, pro))
 								.finish()
 								.await
 						})
