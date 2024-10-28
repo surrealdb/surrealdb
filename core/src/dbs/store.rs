@@ -122,7 +122,7 @@ pub(super) mod file_store {
 	use crate::sql::order::Ordering;
 	use crate::sql::Value;
 	use ext_sort::{ExternalChunk, ExternalSorter, ExternalSorterBuilder, LimitedBufferBuilder};
-	use rand::seq::{IteratorRandom as _, SliceRandom as _};
+	use rand::seq::SliceRandom as _;
 	use rand::Rng as _;
 	use revision::Revisioned;
 	use std::fs::{File, OpenOptions};
@@ -345,10 +345,6 @@ pub(super) mod file_store {
 				index,
 				records,
 			})
-		}
-
-		fn len(&self) -> usize {
-			self.len
 		}
 
 		fn read_value<R: Read>(reader: &mut R) -> Result<Value, Error> {
