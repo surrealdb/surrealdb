@@ -45,6 +45,8 @@ fn bench_group(c: &mut Criterion, samples: usize, n_value: usize) {
 	});
 
 	group.finish();
+
+	rt.block_on(async { drop(i) });
 }
 
 struct Input {
