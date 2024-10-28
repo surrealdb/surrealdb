@@ -94,12 +94,11 @@ pub(super) mod file_store {
 	use crate::cnf::EXTERNAL_SORTING_BUFFER_LIMIT;
 	use crate::dbs::plan::Explanation;
 	use crate::err::Error;
-	#[cfg(not(target_arch = "wasm32"))]
-	use crate::err::Error::OrderingError;
 	use crate::sql::order::Ordering;
 	use crate::sql::Value;
 	use ext_sort::{ExternalChunk, ExternalSorter, ExternalSorterBuilder, LimitedBufferBuilder};
 	use rand::seq::SliceRandom as _;
+	use rand::Rng as _;
 	use revision::Revisioned;
 	use std::fs::{File, OpenOptions};
 	use std::io::{BufReader, BufWriter, Read, Seek, SeekFrom, Take, Write};
@@ -200,30 +199,50 @@ pub(super) mod file_store {
 		) -> Result<Vec<Value>, Error> {
 			match orders {
 				Ordering::Random => {
-					let mut res: Vec<Value> = Vec::with_capacity(num as usize);
-					#[cfg(not(target_arch = "wasm32"))]
-					let res = spawn_blocking(move || {
-						for r in reader.into_iter().skip(start as usize).take(num as usize) {
+					let f = move || {
+						let mut rng = rand::thread_rng();
+						let mut iter = reader.into_iter();
+						// fill initial array
+						let mut res: Vec<Value> = Vec::with_capacity(num as usize);
+						for r in iter.by_ref().take(num as usize) {
 							res.push(r?);
 						}
-						res.shuffle(&mut rand::thread_rng());
-						Ok::<_, Error>(res)
-					})
-					.await
-					.map_err(|e| OrderingError(format!("{e}")))??;
+
+						// Then handle the remaining values as they might need to be part of the random
+						// sampling.
+						// This implementation is taken from the IteratorRandom::choose_multiple. It is
+						// emperically tested to produce n values uniformly sampled from the iterator.
+						// TODO (DelSkayn): Figure exactly out why this is guarenteed to produce a uniform
+						// sampling.
+						for (i, v) in iter.enumerate() {
+							let v = v?;
+							// pick an index to insert the value in, swapping existing values if it is
+							// within the range.
+							let idx = rng.gen_range(0..(i + 1 + num as usize));
+							if let Some(slot) = res.get_mut(idx as usize) {
+								*slot = v
+							}
+						}
+
+						// The above code does not create a random ordering.
+						// if for example only the first n values happened to be selected they are
+						// still in the original ordering. So shuffle the final result.
+						res.shuffle(&mut rng);
+						Ok(res)
+					};
 					#[cfg(target_arch = "wasm32")]
-					{
-						for r in reader.into_iter().skip(start as usize).take(num as usize) {
-							res.push(r?);
-						}
-						res.shuffle(&mut rand::thread_rng());
-					}
-					Ok(res)
+					let res = f();
+					#[cfg(not(target_arch = "wasm32"))]
+					let res = spawn_blocking(f).await.map_err(|e| Error::OrderingError(format!("{e}")))?;
+					//
+					res
 				}
 				Ordering::Order(orders) => {
 					let sort_dir = self.dir.path().join(Self::SORT_DIRECTORY_NAME);
-					let f = move || -> Result<Vec<Value>, Error> {
+
+					let f = move || {
 						fs::create_dir(&sort_dir)?;
+
 						let sorter: ExternalSorter<
 							Value,
 							Error,
@@ -242,11 +261,12 @@ pub(super) mod file_store {
 						let r: Vec<Value> = iter.skip(start as usize).take(num as usize).collect();
 						Ok(r)
 					};
-					#[cfg(not(target_arch = "wasm32"))]
-					let res = spawn_blocking(f).await.map_err(|e| OrderingError(format!("{e}")))??;
 					#[cfg(target_arch = "wasm32")]
-					let res = f()?;
-					Ok(res)
+					let res = f();
+					#[cfg(not(target_arch = "wasm32"))]
+					let res = spawn_blocking(f).await.map_err(|e| Error::OrderingError(format!("{e}")))?;
+					//
+					res
 				}
 			}
 		}
@@ -312,6 +332,7 @@ pub(super) mod file_store {
 	}
 
 	struct FileReader {
+		/// The amount of values present in the file of this reader.
 		len: usize,
 		index: PathBuf,
 		records: PathBuf,
@@ -438,6 +459,16 @@ pub(super) mod file_store {
 			} else {
 				None
 			}
+		}
+
+		fn size_hint(&self) -> (usize, Option<usize>) {
+			(self.len - self.pos, Some(self.len - self.pos))
+		}
+	}
+
+	impl ExactSizeIterator for FileRecordsIterator {
+		fn len(&self) -> usize {
+			self.len - self.pos
 		}
 	}
 
