@@ -24,11 +24,6 @@ fn bench_group(c: &mut Criterion, samples: usize, n_value: usize) {
 
 	group.throughput(Throughput::Elements(samples as u64));
 
-	group.bench_function("NO ORDER", |b| {
-		b.to_async(Builder::new_multi_thread().build().unwrap())
-			.iter(|| run(&i, "SELECT v FROM i LIMIT 1", samples))
-	});
-
 	group.bench_function("ORDER BY v", |b| {
 		b.to_async(Builder::new_multi_thread().build().unwrap())
 			.iter(|| run(&i, "SELECT * FROM i ORDER BY v LIMIT 1", samples))
