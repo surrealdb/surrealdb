@@ -40,7 +40,8 @@ mod api_integration {
 	const NS: &str = "test-ns";
 	const ROOT_USER: &str = "root";
 	const ROOT_PASS: &str = "root";
-	const TEMP_DIR: LazyLock<PathBuf> = LazyLock::new(|| TempDir::new().unwrap().child("sdb-test"));
+	static TEMP_DIR: LazyLock<PathBuf> =
+		LazyLock::new(|| TempDir::new().unwrap().child("sdb-test"));
 
 	#[derive(Debug, Serialize)]
 	struct Record {
@@ -142,6 +143,7 @@ mod api_integration {
 		}
 
 		include!("api/mod.rs");
+		include!("api/serialisation.rs");
 		include!("api/live.rs");
 	}
 
@@ -171,6 +173,7 @@ mod api_integration {
 		}
 
 		include!("api/mod.rs");
+		include!("api/serialisation.rs");
 		include!("api/backup.rs");
 	}
 
@@ -265,6 +268,7 @@ mod api_integration {
 		}
 
 		include!("api/mod.rs");
+		include!("api/serialisation.rs");
 		include!("api/live.rs");
 		include!("api/backup.rs");
 	}
@@ -307,6 +311,7 @@ mod api_integration {
 		}
 
 		include!("api/mod.rs");
+		include!("api/serialisation.rs");
 		include!("api/live.rs");
 		include!("api/backup.rs");
 	}
@@ -350,6 +355,7 @@ mod api_integration {
 		}
 
 		include!("api/mod.rs");
+		include!("api/serialisation.rs");
 		include!("api/live.rs");
 		include!("api/backup.rs");
 	}
@@ -380,6 +386,7 @@ mod api_integration {
 		}
 
 		include!("api/mod.rs");
+		include!("api/serialisation.rs");
 		include!("api/live.rs");
 		include!("api/backup.rs");
 	}
@@ -407,6 +414,7 @@ mod api_integration {
 		}
 
 		include!("api/mod.rs");
+		include!("api/serialisation.rs");
 		include!("api/live.rs");
 		include!("api/backup.rs");
 	}
@@ -450,6 +458,7 @@ mod api_integration {
 		}
 
 		include!("api/mod.rs");
+		include!("api/serialisation.rs");
 		include!("api/live.rs");
 		include!("api/version.rs");
 		include!("api/backup.rs");
@@ -473,6 +482,7 @@ mod api_integration {
 		}
 
 		include!("api/mod.rs");
+		include!("api/serialisation.rs");
 		include!("api/backup.rs");
 	}
 }
