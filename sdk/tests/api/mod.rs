@@ -571,6 +571,22 @@ async fn create_record_with_id_in_content() {
 }
 
 #[test_log::test(tokio::test)]
+async fn create_uuid() {
+	use uuid::Uuid;
+	#[derive(Debug, Serialize, Deserialize)]
+	struct Record {
+		uuid: Uuid,
+	}
+	let (permit, db) = new_db().await;
+	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
+	drop(permit);
+	let record = Record {
+		uuid: Uuid::now_v7(),
+	};
+	let _: Option<Record> = db.create("user").content(record).await.unwrap();
+}
+
+#[test_log::test(tokio::test)]
 async fn insert_table() {
 	let (permit, db) = new_db().await;
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
