@@ -6015,6 +6015,7 @@ dependencies = [
  "quick_cache 0.5.1",
  "radix_trie",
  "rand 0.8.5",
+ "rayon",
  "reblessive",
  "regex",
  "regex-syntax 0.8.4",

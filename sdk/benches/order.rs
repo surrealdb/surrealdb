@@ -14,7 +14,7 @@ fn bench_order(c: &mut Criterion) {
 }
 
 fn bench_group(c: &mut Criterion, samples: usize, n_value: usize) {
-	let mut group = c.benchmark_group(format!("{samples}"));
+	let mut group = c.benchmark_group(format!("{samples} - {n_value}"));
 	group.sample_size(10);
 	group.measurement_time(Duration::from_secs(15));
 
@@ -24,24 +24,29 @@ fn bench_group(c: &mut Criterion, samples: usize, n_value: usize) {
 
 	group.throughput(Throughput::Elements(samples as u64));
 
+	group.bench_function("NO ORDER", |b| {
+		b.to_async(Builder::new_multi_thread().build().unwrap())
+			.iter(|| run(&i, "SELECT v FROM i LIMIT 1", samples))
+	});
+
 	group.bench_function("ORDER BY v", |b| {
 		b.to_async(Builder::new_multi_thread().build().unwrap())
-			.iter(|| run(&i, "SELECT * FROM i ORDER BY v", samples))
+			.iter(|| run(&i, "SELECT * FROM i ORDER BY v LIMIT 1", samples))
 	});
 
 	group.bench_function("ORDER BY v PARALLEL", |b| {
 		b.to_async(Builder::new_multi_thread().build().unwrap())
-			.iter(|| run(&i, "SELECT * FROM i ORDER BY v PARALLEL", samples))
+			.iter(|| run(&i, "SELECT * FROM i ORDER BY v LIMIT 1 PARALLEL", samples))
 	});
 
 	group.bench_function("ORDER BY RAND()", |b| {
 		b.to_async(Builder::new_multi_thread().build().unwrap())
-			.iter(|| run(&i, "SELECT * FROM i ORDER BY RAND()", samples))
+			.iter(|| run(&i, "SELECT * FROM i ORDER BY RAND() LIMIT 1", samples))
 	});
 
 	group.bench_function("ORDER BY RAND() PARALLEL", |b| {
 		b.to_async(Builder::new_multi_thread().build().unwrap())
-			.iter(|| run(&i, "SELECT * FROM i ORDER BY RAND() PARALLEL", samples))
+			.iter(|| run(&i, "SELECT * FROM i ORDER BY RAND() LIMIT 1 PARALLEL", samples))
 	});
 
 	group.finish();

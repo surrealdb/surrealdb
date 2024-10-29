@@ -2,9 +2,9 @@ use crate::ctx::Context;
 use crate::dbs::group::GroupsCollector;
 use crate::dbs::plan::Explanation;
 #[cfg(storage)]
-use crate::dbs::store::file_store::FileCollector;
+use crate::dbs::store::file::FileCollector;
 #[cfg(not(target_arch = "wasm32"))]
-use crate::dbs::store::AsyncMemoryOrdered;
+use crate::dbs::store::parallel::AsyncMemoryOrdered;
 use crate::dbs::store::{MemoryCollector, MemoryOrdered};
 use crate::dbs::{Options, Statement};
 use crate::err::Error;
@@ -40,12 +40,12 @@ impl Results {
 		}
 		#[cfg(not(target_arch = "wasm32"))]
 		if stm.parallel() {
-			if let Some(order) = stm.order() {
-				return Ok(Self::AsyncMemoryOrdered(AsyncMemoryOrdered::new(order, None)));
+			if let Some(ordering) = stm.order() {
+				return Ok(Self::AsyncMemoryOrdered(AsyncMemoryOrdered::new(ordering, None)));
 			}
 		}
 		if let Some(order) = stm.order() {
-			return Ok(Self::MemoryOrdered(MemoryOrdered::new(order.clone(), None)));
+			return Ok(Self::MemoryOrdered(MemoryOrdered::new(order, None)));
 		}
 		Ok(Self::Memory(Default::default()))
 	}
@@ -84,12 +84,11 @@ impl Results {
 	#[cfg(not(target_arch = "wasm32"))]
 	pub(super) async fn async_sort(&mut self, orders: &Ordering) -> Result<(), Error> {
 		match self {
-			Self::Memory(m) => m.async_sort(orders).await?,
 			#[cfg(storage)]
 			Self::File(f) => f.sort(orders),
-			Self::MemoryOrdered(c) => c.finalize(),
+			Self::MemoryOrdered(c) => c.sort(orders).await?,
 			Self::AsyncMemoryOrdered(c) => c.finalize().await?,
-			Self::None | Self::Groups(_) => {}
+			Self::None | Self::Memory(_) | Self::Groups(_) => {}
 		}
 		Ok(())
 	}
@@ -97,10 +96,10 @@ impl Results {
 	#[cfg(target_arch = "wasm32")]
 	pub(super) fn sort(&mut self, orders: &Ordering) {
 		match self {
-			Self::Memory(m) => m.sort(orders),
+			Self::MemoryOrdered(c) => c.sort(orders),
 			#[cfg(storage)]
 			Self::File(f) => f.sort(orders),
-			_ => {}
+			Self::None | Self::Groups(_) | Self::Memory(_) => {}
 		}
 	}
 
