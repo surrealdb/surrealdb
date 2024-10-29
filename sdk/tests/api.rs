@@ -143,6 +143,7 @@ mod api_integration {
 		}
 
 		include!("api/mod.rs");
+		include!("api/serialisation.rs");
 		include!("api/live.rs");
 	}
 
@@ -172,6 +173,7 @@ mod api_integration {
 		}
 
 		include!("api/mod.rs");
+		include!("api/serialisation.rs");
 		include!("api/backup.rs");
 	}
 
@@ -266,6 +268,7 @@ mod api_integration {
 		}
 
 		include!("api/mod.rs");
+		include!("api/serialisation.rs");
 		include!("api/live.rs");
 		include!("api/backup.rs");
 	}
@@ -308,6 +311,7 @@ mod api_integration {
 		}
 
 		include!("api/mod.rs");
+		include!("api/serialisation.rs");
 		include!("api/live.rs");
 		include!("api/backup.rs");
 	}
@@ -351,6 +355,7 @@ mod api_integration {
 		}
 
 		include!("api/mod.rs");
+		include!("api/serialisation.rs");
 		include!("api/live.rs");
 		include!("api/backup.rs");
 	}
@@ -381,6 +386,7 @@ mod api_integration {
 		}
 
 		include!("api/mod.rs");
+		include!("api/serialisation.rs");
 		include!("api/live.rs");
 		include!("api/backup.rs");
 	}
@@ -408,6 +414,7 @@ mod api_integration {
 		}
 
 		include!("api/mod.rs");
+		include!("api/serialisation.rs");
 		include!("api/live.rs");
 		include!("api/backup.rs");
 	}
@@ -451,6 +458,7 @@ mod api_integration {
 		}
 
 		include!("api/mod.rs");
+		include!("api/serialisation.rs");
 		include!("api/live.rs");
 		include!("api/version.rs");
 		include!("api/backup.rs");
@@ -474,6 +482,7 @@ mod api_integration {
 		}
 
 		include!("api/mod.rs");
+		include!("api/serialisation.rs");
 		include!("api/backup.rs");
 	}
 }
