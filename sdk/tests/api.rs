@@ -40,7 +40,8 @@ mod api_integration {
 	const NS: &str = "test-ns";
 	const ROOT_USER: &str = "root";
 	const ROOT_PASS: &str = "root";
-	const TEMP_DIR: LazyLock<PathBuf> = LazyLock::new(|| TempDir::new().unwrap().child("sdb-test"));
+	static TEMP_DIR: LazyLock<PathBuf> =
+		LazyLock::new(|| TempDir::new().unwrap().child("sdb-test"));
 
 	#[derive(Debug, Serialize)]
 	struct Record {
