@@ -61,7 +61,7 @@ impl From<Vec<Value>> for MemoryCollector {
 	}
 }
 
-pub(super) const DEFAULT_BATCH_MAX_SIZE: usize = 4096;
+pub(super) const DEFAULT_BATCH_MAX_SIZE: usize = 1024;
 
 pub(super) struct OrderedResult {
 	values: Vec<Value>,
@@ -89,7 +89,7 @@ impl OrderedResult {
 		self.ordered.extend(pos..(pos + batch.len()));
 		self.values.extend(batch);
 	}
-	fn add_random_batch(&mut self, batch: Vec<Value>) {
+	fn add_random_batch(&mut self, mut batch: Vec<Value>) {
 		let mut rng = thread_rng();
 
 		let batch_len = batch.len();
@@ -105,7 +105,7 @@ impl OrderedResult {
 		}
 
 		// Add the values
-		self.values.extend(batch);
+		self.values.append(&mut batch);
 		// Reserve capacity in the merged vector
 		self.ordered.reserve(batch_len);
 		let start = self.ordered.len();

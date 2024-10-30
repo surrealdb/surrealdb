@@ -155,6 +155,7 @@ thiserror = "1.0.63"
 tikv = { version = "0.3.0-surreal.1", default-features = false, package = "surrealdb-tikv-client", optional = true }
 tracing = "0.1.40"
 trice = "0.4.0"
+typed-arena = "2.0.2"
 ulid = { version = "1.1.0", features = ["serde"] }
 unicase = "2.7.0"
 url = "2.5.0"

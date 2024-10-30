@@ -12,54 +12,6 @@ use tokio::task::JoinHandle;
 
 const CHANNEL_BUFFER_SIZE: usize = 128;
 
-// impl OrderedResult {
-// 	fn add_sorted_batch<F>(&mut self, mut batch: Vec<Value>, cmp: F)
-// 	where
-// 		F: Fn(&Value, &Value) -> cmp::Ordering,
-// 	{
-// 		// Ensure the batch is sorted
-// 		batch.sort_unstable_by(|a, b| cmp(a, b));
-// 		let batch_len = batch.len();
-//
-// 		// If merged is empty, we just move the batch,
-// 		if self.values.is_empty() {
-// 			self.values = batch;
-// 			// This is the fastest way or inserting a range inside a vector
-// 			self.ordered = Vec::with_capacity(batch_len);
-// 			self.ordered.extend(0..batch_len);
-// 			assert_eq!(self.ordered.len(), self.values.len());
-// 			return;
-// 		}
-//
-// 		// Reserve capacity in the merged vector
-// 		self.values.extend(batch);
-// 		self.ordered.reserve(batch_len);
-//
-// 		let mut start_idx = 0;
-// 		let start = self.ordered.len();
-// 		let end = start + batch_len;
-//
-// 		// Iterator over the new values that must be ordered
-// 		for idx in start..end {
-// 			let val = &self.values[idx];
-// 			// Perform binary search between start_idx and merged.len()
-// 			// As the batch is sorted, when a value is inserted,
-// 			// we know that the next value will be inserted after.
-// 			// Therefore, we can reduce the scope of the next binary search.
-// 			let insert_pos = self.ordered[start_idx..]
-// 				.binary_search_by(|a| cmp(&self.values[*a], val))
-// 				.map(|pos| start_idx + pos)
-// 				.unwrap_or_else(|pos| start_idx + pos);
-//
-// 			// Insert the element at the found position
-// 			self.ordered.insert(insert_pos, idx);
-//
-// 			// Update start_idx for the next iteration
-// 			start_idx = insert_pos + 1; // +1 because we just inserted an element
-// 		}
-// 	}
-// }
-
 pub(in crate::dbs) struct AsyncMemoryOrdered {
 	/// Sender-side of an asynchronous channel to send batches
 	tx: Option<Sender<Vec<Value>>>,
@@ -119,8 +71,12 @@ impl AsyncMemoryOrdered {
 				tree.insert(idx, idx, |a, b| orders.compare(&values[a], &values[b]));
 			}
 		}
+		let iter = tree.into_iter();
 		spawn_blocking(
-			move || Ok(tree.into_iter().map(|(_, v)| mem::take(&mut values[v])).collect()),
+			move || {
+				let vec = iter.map(|(_, v)| mem::take(&mut values[v])).collect();
+				Ok(vec)
+			},
 			|e| Error::OrderingError(format!("{e}")),
 		)
 		.await
