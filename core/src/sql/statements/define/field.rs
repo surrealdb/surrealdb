@@ -13,6 +13,7 @@ use derive::Store;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Write};
+use uuid::Uuid;
 
 #[revisioned(revision = 4)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
@@ -191,6 +192,18 @@ impl DefineFieldStatement {
 				}
 			}
 		}
+		// Refresh the cache id
+		let key = crate::key::database::tb::new(opt.ns()?, opt.db()?, &self.what);
+		let tb = txn.get_tb(opt.ns()?, opt.db()?, &self.what).await?;
+		txn.set(
+			key,
+			DefineTableStatement {
+				cache_fields_ts: Uuid::now_v7(),
+				..tb.as_ref().clone()
+			},
+			None,
+		)
+		.await?;
 		// Clear the cache
 		txn.clear();
 		// Ok all good

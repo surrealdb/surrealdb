@@ -79,19 +79,19 @@ pub(super) enum Entry {
 	/// A slice of DefineFunctionStatement specified on a database.
 	Fcs(Arc<[DefineFunctionStatement]>),
 	/// A slice of DefineTableStatement specified on a database.
-	Fts(Arc<[DefineTableStatement]>),
+	Tbs(Arc<[DefineTableStatement]>),
 	/// A slice of DefineModelStatement specified on a database.
 	Mls(Arc<[DefineModelStatement]>),
 	/// A slice of DefineConfigStatement specified on a database.
 	Cgs(Arc<[DefineConfigStatement]>),
 	/// A slice of DefineParamStatement specified on a database.
 	Pas(Arc<[DefineParamStatement]>),
-	/// A slice of DefineTableStatement specified on a database.
-	Tbs(Arc<[DefineTableStatement]>),
 	/// A slice of DefineEventStatement specified on a table.
 	Evs(Arc<[DefineEventStatement]>),
 	/// A slice of DefineFieldStatement specified on a table.
 	Fds(Arc<[DefineFieldStatement]>),
+	/// A slice of DefineTableStatement specified on a table.
+	Fts(Arc<[DefineTableStatement]>),
 	/// A slice of DefineIndexStatement specified on a table.
 	Ixs(Arc<[DefineIndexStatement]>),
 	/// A slice of LiveStatement specified on a table.

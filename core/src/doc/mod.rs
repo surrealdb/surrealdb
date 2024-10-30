@@ -12,6 +12,8 @@ mod document; // The entry point for a document to be processed
 mod compute; // The point at which a document is processed
 mod process; // The point at which a document is processed
 
+mod cache; // The cache implementation for the document layer
+
 mod create; // Processes a CREATE statement for this document
 mod delete; // Processes a DELETE statement for this document
 mod insert; // Processes a INSERT statement for this document
@@ -22,7 +24,7 @@ mod upsert; // Processes a UPSERT statement for this document
 
 mod alter; // Modifies and updates the fields in this document
 mod changefeeds; // Processes any change feeds relevant for this document
-mod check; // Checks whether the WHERE clauses matches this document
+mod check; // Data and condition checking for this document
 mod edges; // Attempts to store the edge data for this document
 mod event; // Processes any table events relevant for this document
 mod field; // Processes any schema-defined fields for this document

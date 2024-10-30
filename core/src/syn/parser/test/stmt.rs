@@ -1404,6 +1404,11 @@ fn parse_define_table() {
 			if_not_exists: false,
 			overwrite: false,
 			kind: TableType::Normal,
+			cache_fields_ts: uuid::Uuid::default(),
+			cache_events_ts: uuid::Uuid::default(),
+			cache_tables_ts: uuid::Uuid::default(),
+			cache_indexes_ts: uuid::Uuid::default(),
+			cache_lives_ts: uuid::Uuid::default(),
 		}))
 	);
 }

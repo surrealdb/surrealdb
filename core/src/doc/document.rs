@@ -1,3 +1,5 @@
+use super::cache::Entry;
+use super::cache::CACHE;
 use crate::ctx::Context;
 use crate::ctx::MutableContext;
 use crate::dbs::Options;
@@ -393,10 +395,24 @@ impl Document {
 		ctx: &Context,
 		opt: &Options,
 	) -> Result<Arc<[DefineTableStatement]>, Error> {
-		// Get the record id
-		let id = self.id()?;
-		// Get the table definitions
-		ctx.tx().all_tb_views(opt.ns()?, opt.db()?, &id.tb).await
+		// Get the NS + DB
+		let ns = opt.ns()?;
+		let db = opt.db()?;
+		// Get the document table
+		let tb = self.tb(ctx, opt).await?;
+		//  Get or update the cache entry
+		let key = super::cache::Fts::new(ns, db, &tb.name, tb.cache_tables_ts).encode()?;
+		let res = CACHE.get_value_or_guard_async(&key).await;
+		match res {
+			Ok(val) => val,
+			Err(cache) => {
+				let val = ctx.tx().all_tb_views(ns, db, &tb.name).await?;
+				let val = Entry::Fts(val.clone());
+				let _ = cache.insert(val.clone());
+				val
+			}
+		}
+		.try_into_fts()
 	}
 
 	/// Get the events for this document
@@ -405,10 +421,24 @@ impl Document {
 		ctx: &Context,
 		opt: &Options,
 	) -> Result<Arc<[DefineEventStatement]>, Error> {
-		// Get the record id
-		let id = self.id()?;
-		// Get the event definitions
-		ctx.tx().all_tb_events(opt.ns()?, opt.db()?, &id.tb).await
+		// Get the NS + DB
+		let ns = opt.ns()?;
+		let db = opt.db()?;
+		// Get the document table
+		let tb = self.tb(ctx, opt).await?;
+		//  Get or update the cache entry
+		let key = super::cache::Evs::new(ns, db, &tb.name, tb.cache_events_ts).encode()?;
+		let res = CACHE.get_value_or_guard_async(&key).await;
+		match res {
+			Ok(val) => val,
+			Err(cache) => {
+				let val = ctx.tx().all_tb_events(ns, db, &tb.name).await?;
+				let val = Entry::Evs(val.clone());
+				let _ = cache.insert(val.clone());
+				val
+			}
+		}
+		.try_into_evs()
 	}
 
 	/// Get the fields for this document
@@ -417,10 +447,24 @@ impl Document {
 		ctx: &Context,
 		opt: &Options,
 	) -> Result<Arc<[DefineFieldStatement]>, Error> {
-		// Get the record id
-		let id = self.id()?;
-		// Get the field definitions
-		ctx.tx().all_tb_fields(opt.ns()?, opt.db()?, &id.tb, None).await
+		// Get the NS + DB
+		let ns = opt.ns()?;
+		let db = opt.db()?;
+		// Get the document table
+		let tb = self.tb(ctx, opt).await?;
+		//  Get or update the cache entry
+		let key = super::cache::Fds::new(ns, db, &tb.name, tb.cache_fields_ts).encode()?;
+		let res = CACHE.get_value_or_guard_async(&key).await;
+		match res {
+			Ok(val) => val,
+			Err(cache) => {
+				let val = ctx.tx().all_tb_fields(ns, db, &tb.name, opt.version).await?;
+				let val = Entry::Fds(val.clone());
+				let _ = cache.insert(val.clone());
+				val
+			}
+		}
+		.try_into_fds()
 	}
 
 	/// Get the indexes for this document
@@ -429,17 +473,45 @@ impl Document {
 		ctx: &Context,
 		opt: &Options,
 	) -> Result<Arc<[DefineIndexStatement]>, Error> {
-		// Get the record id
-		let id = self.id()?;
-		// Get the index definitions
-		ctx.tx().all_tb_indexes(opt.ns()?, opt.db()?, &id.tb).await
+		// Get the NS + DB
+		let ns = opt.ns()?;
+		let db = opt.db()?;
+		// Get the document table
+		let tb = self.tb(ctx, opt).await?;
+		//  Get or update the cache entry
+		let key = super::cache::Ixs::new(ns, db, &tb.name, tb.cache_indexes_ts).encode()?;
+		let res = CACHE.get_value_or_guard_async(&key).await;
+		match res {
+			Ok(val) => val,
+			Err(cache) => {
+				let val = ctx.tx().all_tb_indexes(ns, db, &tb.name).await?;
+				let val = Entry::Ixs(val.clone());
+				let _ = cache.insert(val.clone());
+				val
+			}
+		}
+		.try_into_ixs()
 	}
 
 	// Get the lives for this document
 	pub async fn lv(&self, ctx: &Context, opt: &Options) -> Result<Arc<[LiveStatement]>, Error> {
-		// Get the record id
-		let id = self.id()?;
-		// Get the table definition
-		ctx.tx().all_tb_lives(opt.ns()?, opt.db()?, &id.tb).await
+		// Get the NS + DB
+		let ns = opt.ns()?;
+		let db = opt.db()?;
+		// Get the document table
+		let tb = self.tb(ctx, opt).await?;
+		//  Get or update the cache entry
+		let key = super::cache::Lvs::new(ns, db, &tb.name, tb.cache_lives_ts).encode()?;
+		let res = CACHE.get_value_or_guard_async(&key).await;
+		match res {
+			Ok(val) => val,
+			Err(cache) => {
+				let val = ctx.tx().all_tb_lives(ns, db, &tb.name).await?;
+				let val = Entry::Lvs(val.clone());
+				let _ = cache.insert(val.clone());
+				val
+			}
+		}
+		.try_into_lvs()
 	}
 }

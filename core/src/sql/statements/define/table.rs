@@ -19,8 +19,9 @@ use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Write};
 use std::sync::Arc;
+use uuid::Uuid;
 
-#[revisioned(revision = 4)]
+#[revisioned(revision = 5)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
@@ -37,8 +38,24 @@ pub struct DefineTableStatement {
 	pub if_not_exists: bool,
 	#[revision(start = 3)]
 	pub kind: TableType,
+	/// Should we overwrite the field definition if it already exists
 	#[revision(start = 4)]
 	pub overwrite: bool,
+	/// The last time that a DEFINE FIELD was added to this table
+	#[revision(start = 5)]
+	pub cache_fields_ts: Uuid,
+	/// The last time that a DEFINE EVENT was added to this table
+	#[revision(start = 5)]
+	pub cache_events_ts: Uuid,
+	/// The last time that a DEFINE TABLE was added to this table
+	#[revision(start = 5)]
+	pub cache_tables_ts: Uuid,
+	/// The last time that a DEFINE INDEX was added to this table
+	#[revision(start = 5)]
+	pub cache_indexes_ts: Uuid,
+	/// The last time that a LIVE query was added to this table
+	#[revision(start = 5)]
+	pub cache_lives_ts: Uuid,
 }
 
 impl DefineTableStatement {
@@ -109,6 +126,18 @@ impl DefineTableStatement {
 					..UpdateStatement::default()
 				};
 				stm.compute(stk, ctx, opt, doc).await?;
+				// Refresh the cache id
+				let key = crate::key::database::tb::new(opt.ns()?, opt.db()?, &v);
+				let tb = txn.get_tb(opt.ns()?, opt.db()?, &v).await?;
+				txn.set(
+					key,
+					DefineTableStatement {
+						cache_tables_ts: Uuid::now_v7(),
+						..tb.as_ref().clone()
+					},
+					None,
+				)
+				.await?;
 			}
 		}
 		// Clear the cache

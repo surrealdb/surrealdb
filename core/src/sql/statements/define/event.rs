@@ -3,8 +3,11 @@ use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::iam::{Action, ResourceKind};
+use crate::sql::statements::define::DefineTableStatement;
 use crate::sql::statements::info::InfoStructure;
 use crate::sql::{Base, Ident, Strand, Value, Values};
+use uuid::Uuid;
+
 use derive::Store;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -60,6 +63,18 @@ impl DefineEventStatement {
 				if_not_exists: false,
 				overwrite: false,
 				..self.clone()
+			},
+			None,
+		)
+		.await?;
+		// Refresh the cache id
+		let key = crate::key::database::tb::new(opt.ns()?, opt.db()?, &self.what);
+		let tb = txn.get_tb(opt.ns()?, opt.db()?, &self.what).await?;
+		txn.set(
+			key,
+			DefineTableStatement {
+				cache_events_ts: Uuid::now_v7(),
+				..tb.as_ref().clone()
 			},
 			None,
 		)
