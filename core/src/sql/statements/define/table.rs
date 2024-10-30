@@ -127,8 +127,8 @@ impl DefineTableStatement {
 				};
 				stm.compute(stk, ctx, opt, doc).await?;
 				// Refresh the cache id
-				let key = crate::key::database::tb::new(opt.ns()?, opt.db()?, &v);
-				let tb = txn.get_tb(opt.ns()?, opt.db()?, &v).await?;
+				let key = crate::key::database::tb::new(opt.ns()?, opt.db()?, v);
+				let tb = txn.get_tb(opt.ns()?, opt.db()?, v).await?;
 				txn.set(
 					key,
 					DefineTableStatement {
