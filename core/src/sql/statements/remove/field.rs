@@ -2,11 +2,13 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::err::Error;
 use crate::iam::{Action, ResourceKind};
+use crate::sql::statements::define::DefineTableStatement;
 use crate::sql::{Base, Ident, Idiom, Value};
 use derive::Store;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Formatter};
+use uuid::Uuid;
 
 #[revisioned(revision = 2)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
@@ -34,6 +36,18 @@ impl RemoveFieldStatement {
 			// Delete the definition
 			let key = crate::key::table::fd::new(opt.ns()?, opt.db()?, &fd.what, &na);
 			txn.del(key).await?;
+			// Refresh the cache id
+			let key = crate::key::database::tb::new(opt.ns()?, opt.db()?, &self.what);
+			let tb = txn.get_tb(opt.ns()?, opt.db()?, &self.what).await?;
+			txn.set(
+				key,
+				DefineTableStatement {
+					cache_fields_ts: Uuid::now_v7(),
+					..tb.as_ref().clone()
+				},
+				None,
+			)
+			.await?;
 			// Clear the cache
 			txn.clear();
 			// Ok all good

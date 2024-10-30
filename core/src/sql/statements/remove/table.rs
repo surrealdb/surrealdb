@@ -7,6 +7,8 @@ use derive::Store;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Formatter};
+use crate::sql::statements::define::DefineTableStatement;
+use uuid::Uuid;
 
 #[revisioned(revision = 2)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
@@ -43,6 +45,18 @@ impl RemoveTableStatement {
 					// Save the view config
 					let key = crate::key::table::ft::new(opt.ns()?, opt.db()?, v, &self.name);
 					txn.del(key).await?;
+					// Refresh the cache id
+					let key = crate::key::database::tb::new(opt.ns()?, opt.db()?, v);
+					let tb = txn.get_tb(opt.ns()?, opt.db()?, v).await?;
+					txn.set(
+						key,
+						DefineTableStatement {
+							cache_tables_ts: Uuid::now_v7(),
+							..tb.as_ref().clone()
+						},
+						None,
+					)
+					.await?;
 				}
 			}
 			// Clear the cache
