@@ -2,12 +2,12 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::err::Error;
 use crate::iam::{Action, ResourceKind};
+use crate::sql::statements::define::DefineTableStatement;
 use crate::sql::{Base, Ident, Value};
 use derive::Store;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Formatter};
-use crate::sql::statements::define::DefineTableStatement;
 use uuid::Uuid;
 
 #[revisioned(revision = 2)]
