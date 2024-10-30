@@ -29,13 +29,11 @@ impl LLRBTree {
 }
 
 #[derive(Default)]
-struct Nodes {
-	nodes: Vec<Node>,
-}
+struct Nodes(Vec<Node>);
 
 impl Nodes {
 	fn new_red_node(&mut self, key: usize, value: usize) -> usize {
-		let idx = self.nodes.len();
+		let idx = self.0.len();
 		let new_node = Node {
 			key,
 			value,
@@ -43,15 +41,15 @@ impl Nodes {
 			right: None,
 			is_red: true,
 		};
-		self.nodes.push(new_node);
+		self.0.push(new_node);
 		idx
 	}
 	fn node(&self, idx: usize) -> &Node {
-		&self.nodes[idx]
+		&self.0[idx]
 	}
 
 	fn node_mut(&mut self, idx: usize) -> &mut Node {
-		&mut self.nodes[idx]
+		&mut self.0[idx]
 	}
 
 	fn insert<C>(&mut self, h_idx: Option<usize>, key: usize, value: usize, cmp: C) -> Option<usize>
@@ -63,29 +61,29 @@ impl Nodes {
 			None => return Some(self.new_red_node(key, value)),
 		};
 
-		match cmp(key, self.nodes[h_idx].key) {
+		match cmp(key, self.node(h_idx).key) {
 			Ordering::Less => {
-				self.nodes[h_idx].left = self.insert(self.nodes[h_idx].left, key, value, cmp)
+				self.node_mut(h_idx).left = self.insert(self.node(h_idx).left, key, value, cmp)
 			}
-			Ordering::Equal => self.nodes[h_idx].value = value,
+			Ordering::Equal => self.node_mut(h_idx).value = value,
 			Ordering::Greater => {
-				self.nodes[h_idx].right = self.insert(self.nodes[h_idx].right, key, value, cmp)
+				self.node_mut(h_idx).right = self.insert(self.node(h_idx).right, key, value, cmp)
 			}
 		};
 
 		// Fix right-leaning reds on the way up
-		if self.is_red(self.nodes[h_idx].right) && !self.is_red(self.nodes[h_idx].left) {
+		if self.is_red(self.node(h_idx).right) && !self.is_red(self.node(h_idx).left) {
 			h_idx = self.rotate_left(h_idx);
 		}
 
-		if self.is_red(self.nodes[h_idx].left) {
-			let h_left_left = self.nodes[self.nodes[h_idx].left.unwrap()].left;
+		if self.is_red(self.node(h_idx).left) {
+			let h_left_left = self.node(self.node(h_idx).left.unwrap()).left;
 			if self.is_red(h_left_left) {
 				h_idx = self.rotate_right(h_idx);
 			}
 		}
 		let (l, r) = {
-			let h = &self.nodes[h_idx];
+			let h = &self.node(h_idx);
 			(h.left, h.right)
 		};
 		if self.is_red(l) && self.is_red(r) {
@@ -95,44 +93,44 @@ impl Nodes {
 		Some(h_idx)
 	}
 	fn is_red(&self, node_idx: Option<usize>) -> bool {
-		node_idx.map_or(false, |idx| self.nodes[idx].is_red)
+		node_idx.map_or(false, |idx| self.node(idx).is_red)
 	}
 
 	fn rotate_left(&mut self, h_idx: usize) -> usize {
-		let x_idx = self.node(h_idx).right.expect("rotate_left called on node with no right child");
+		let x_idx = self.node(h_idx).right.unwrap();
 
 		// Perform rotation
-		self.nodes[h_idx].right = self.nodes[x_idx].left;
-		self.nodes[x_idx].left = Some(h_idx);
+		self.node_mut(h_idx).right = self.node(x_idx).left;
+		self.node_mut(x_idx).left = Some(h_idx);
 
 		// Adjust colors
-		self.nodes[x_idx].is_red = self.nodes[h_idx].is_red;
-		self.nodes[h_idx].is_red = true;
+		self.node_mut(x_idx).is_red = self.node(h_idx).is_red;
+		self.node_mut(h_idx).is_red = true;
 
 		x_idx
 	}
 
 	fn rotate_right(&mut self, h_idx: usize) -> usize {
-		let x_idx = self.nodes[h_idx].left.expect("rotate_right called on node with no left child");
+		let x_idx = self.node(h_idx).left.unwrap();
 
 		// Perform rotation
-		self.nodes[h_idx].left = self.nodes[x_idx].right;
-		self.nodes[x_idx].right = Some(h_idx);
+		self.node_mut(h_idx).left = self.node(x_idx).right;
+		self.node_mut(x_idx).right = Some(h_idx);
 
 		// Adjust colors
-		self.nodes[x_idx].is_red = self.nodes[h_idx].is_red;
-		self.nodes[h_idx].is_red = true;
+		self.node_mut(x_idx).is_red = self.node(h_idx).is_red;
+		self.node_mut(h_idx).is_red = true;
 
 		x_idx
 	}
 
 	fn flip_colors(&mut self, h_idx: usize) {
-		self.nodes[h_idx].is_red = !self.nodes[h_idx].is_red;
-		if let Some(left_idx) = self.nodes[h_idx].left {
-			self.nodes[left_idx].is_red = !self.nodes[left_idx].is_red;
+		self.node_mut(h_idx).is_red = !self.node(h_idx).is_red;
+		if let Some(left_idx) = self.node(h_idx).left {
+			self.node_mut(left_idx).is_red = !self.node(left_idx).is_red;
 		}
-		if let Some(right_idx) = self.nodes[h_idx].right {
-			self.nodes[right_idx].is_red = !self.nodes[right_idx].is_red;
+		if let Some(right_idx) = self.node(h_idx).right {
+			self.node_mut(right_idx).is_red = !self.node(right_idx).is_red;
 		}
 	}
 }
