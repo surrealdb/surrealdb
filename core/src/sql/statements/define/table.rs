@@ -119,13 +119,6 @@ impl DefineTableStatement {
 			let opt = &opt.new_with_force(Force::Table(Arc::new([dt])));
 			// Process each foreign table
 			for v in view.what.0.iter() {
-				// Process the view data
-				let stm = UpdateStatement {
-					what: Values(vec![Value::Table(v.clone())]),
-					output: Some(Output::None),
-					..UpdateStatement::default()
-				};
-				stm.compute(stk, ctx, opt, doc).await?;
 				// Refresh the cache id
 				let key = crate::key::database::tb::new(opt.ns()?, opt.db()?, v);
 				let tb = txn.get_tb(opt.ns()?, opt.db()?, v).await?;
@@ -138,6 +131,18 @@ impl DefineTableStatement {
 					None,
 				)
 				.await?;
+			}
+			// Clear the cache
+			txn.clear();
+			// Process each foreign table
+			for v in view.what.0.iter() {
+				// Process the view data
+				let stm = UpdateStatement {
+					what: Values(vec![Value::Table(v.clone())]),
+					output: Some(Output::None),
+					..UpdateStatement::default()
+				};
+				stm.compute(stk, ctx, opt, doc).await?;
 			}
 		}
 		// Clear the cache
