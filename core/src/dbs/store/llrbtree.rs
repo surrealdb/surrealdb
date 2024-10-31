@@ -31,6 +31,13 @@ impl LLRBTree {
 #[derive(Default)]
 struct Nodes(Vec<Node>);
 
+struct Node {
+	key: usize,
+	value: usize,
+	left: Option<usize>,
+	right: Option<usize>,
+	is_red: bool,
+}
 impl Nodes {
 	fn new_red_node(&mut self, key: usize, value: usize) -> usize {
 		let idx = self.0.len();
@@ -135,21 +142,13 @@ impl Nodes {
 	}
 }
 
-struct Node {
-	key: usize,
-	value: usize,
-	left: Option<usize>,
-	right: Option<usize>,
-	is_red: bool,
-}
-
 // Consuming iterator implementation
-pub struct IntoIter {
+pub struct LLRBTreeIterator {
 	nodes: Nodes,
 	stack: Vec<usize>,
 }
 
-impl IntoIter {
+impl LLRBTreeIterator {
 	fn new(tree: LLRBTree) -> Self {
 		let mut stack = Vec::with_capacity(16);
 		let mut current = tree.root;
@@ -169,7 +168,7 @@ impl IntoIter {
 	}
 }
 
-impl Iterator for IntoIter {
+impl Iterator for LLRBTreeIterator {
 	type Item = (usize, usize);
 
 	fn next(&mut self) -> Option<Self::Item> {
@@ -195,10 +194,10 @@ impl Iterator for IntoIter {
 
 impl IntoIterator for LLRBTree {
 	type Item = (usize, usize);
-	type IntoIter = IntoIter;
+	type IntoIter = LLRBTreeIterator;
 
 	fn into_iter(self) -> Self::IntoIter {
-		IntoIter::new(self)
+		LLRBTreeIterator::new(self)
 	}
 }
 
@@ -207,7 +206,7 @@ mod test {
 	use crate::dbs::store::llrbtree::LLRBTree;
 
 	#[test]
-	fn llrbtree() {
+	fn insertion() {
 		let mut tree = LLRBTree::new();
 		let cmp = |a: usize, b: usize| a.cmp(&b);
 		tree.insert(5, 50, cmp);
