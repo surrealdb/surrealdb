@@ -80,6 +80,18 @@ impl DefineFieldStatement {
 			None,
 		)
 		.await?;
+		// Refresh the cache id
+		let key = crate::key::database::tb::new(ns, db, &self.what);
+		let tb = txn.get_tb(ns, db, &self.what).await?;
+		txn.set(
+			key,
+			DefineTableStatement {
+				cache_fields_ts: Uuid::now_v7(),
+				..tb.as_ref().clone()
+			},
+			None,
+		)
+		.await?;
 
 		// find existing field definitions.
 		let fields = txn.all_tb_fields(ns, db, &self.what, None).await.ok();
@@ -152,6 +164,7 @@ impl DefineFieldStatement {
 					if relation.from.as_ref() != self.kind.as_ref() {
 						let key = crate::key::database::tb::new(ns, db, &self.what);
 						let val = DefineTableStatement {
+							cache_fields_ts: Uuid::now_v7(),
 							kind: TableType::Relation(Relation {
 								from: self.kind.to_owned(),
 								..relation.to_owned()
@@ -159,6 +172,8 @@ impl DefineFieldStatement {
 							..tb.as_ref().to_owned()
 						};
 						txn.set(key, val, None).await?;
+						// Clear the cache
+						txn.clear();
 					}
 				}
 			}
@@ -181,6 +196,7 @@ impl DefineFieldStatement {
 					if relation.from.as_ref() != self.kind.as_ref() {
 						let key = crate::key::database::tb::new(ns, db, &self.what);
 						let val = DefineTableStatement {
+							cache_fields_ts: Uuid::now_v7(),
 							kind: TableType::Relation(Relation {
 								to: self.kind.to_owned(),
 								..relation.to_owned()
@@ -188,22 +204,12 @@ impl DefineFieldStatement {
 							..tb.as_ref().to_owned()
 						};
 						txn.set(key, val, None).await?;
+						// Clear the cache
+						txn.clear();
 					}
 				}
 			}
 		}
-		// Refresh the cache id
-		let key = crate::key::database::tb::new(opt.ns()?, opt.db()?, &self.what);
-		let tb = txn.get_tb(opt.ns()?, opt.db()?, &self.what).await?;
-		txn.set(
-			key,
-			DefineTableStatement {
-				cache_fields_ts: Uuid::now_v7(),
-				..tb.as_ref().clone()
-			},
-			None,
-		)
-		.await?;
 		// Clear the cache
 		txn.clear();
 		// Ok all good
