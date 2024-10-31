@@ -1,5 +1,5 @@
 use crate::syn::{
-	error::{bail, error, SyntaxError},
+	error::{bail, syntax_error, SyntaxError},
 	lexer::{
 		unicode::{byte, chars},
 		Lexer,
@@ -143,7 +143,7 @@ impl<'a> Lexer<'a> {
 					t!("&&")
 				}
 				_ => {
-					let error = error!("Invalid token `&`, single `&` are not a valid token, did you mean `&&`?",@self.current_span());
+					let error = syntax_error!("Invalid token `&`, single `&` are not a valid token, did you mean `&&`?",@self.current_span());
 					return self.invalid_token(error);
 				}
 			},
@@ -237,7 +237,7 @@ impl<'a> Lexer<'a> {
 							t!("+?=")
 						}
 						_ => {
-							let error = error!("Invalid token `+?` did you maybe mean `+?=` ?", @self.current_span());
+							let error = syntax_error!("Invalid token `+?` did you maybe mean `+?=` ?", @self.current_span());
 							return self.invalid_token(error);
 						}
 					}
@@ -376,7 +376,7 @@ impl<'a> Lexer<'a> {
 			}
 			//b'0'..=b'9' => return self.lex_number(byte),
 			x => {
-				let err = error!("Invalid token `{}`", x as char, @self.current_span());
+				let err = syntax_error!("Invalid token `{}`", x as char, @self.current_span());
 				return self.invalid_token(err);
 			}
 		};
