@@ -3,6 +3,7 @@ use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::kvs::Live;
+use crate::sql::statements::define::DefineTableStatement;
 use crate::sql::Value;
 use derive::Store;
 use reblessive::tree::Stk;
@@ -48,8 +49,6 @@ impl KillStatement {
 		let lid = lid.0;
 		// Get the transaction
 		let txn = ctx.tx();
-		// Lock the transaction
-		let mut txn = txn.lock().await;
 		// Fetch the live query key
 		let key = crate::key::node::lq::new(nid, lid);
 		// Fetch the live query key if it exists
@@ -63,6 +62,18 @@ impl KillStatement {
 				// Delete the table live query
 				let key = crate::key::table::lq::new(&val.ns, &val.db, &val.tb, lid);
 				txn.del(key).await?;
+				// Refresh the cache id
+				let key = crate::key::database::tb::new(&val.ns, &val.db, &val.tb);
+				let tb = txn.get_tb(&val.ns, &val.db, &val.tb).await?;
+				txn.set(
+					key,
+					DefineTableStatement {
+						cache_lives_ts: uuid::Uuid::now_v7(),
+						..tb.as_ref().clone()
+					},
+					None,
+				)
+				.await?;
 			}
 			None => {
 				return Err(Error::KillStatement {
