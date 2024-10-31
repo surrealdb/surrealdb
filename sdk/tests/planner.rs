@@ -3100,10 +3100,10 @@ async fn select_where_index_boolean_behaviour() -> Result<(), Error> {
 async fn select_memory_ordered_collector() -> Result<(), Error> {
 	let sql = r"
 		CREATE |i:1500| SET v = rand::guid() RETURN NONE;
-		SELECT v FROM i ORDER BY v EXPLAIN;
 		SELECT v FROM i ORDER BY RAND() EXPLAIN;
-		SELECT v FROM i ORDER BY v PARALLEL EXPLAIN;
+		SELECT v FROM i ORDER BY v EXPLAIN;
 		SELECT v FROM i ORDER BY RAND() PARALLEL EXPLAIN;
+		SELECT v FROM i ORDER BY v PARALLEL EXPLAIN;
 		SELECT v FROM i ORDER BY v;
 		SELECT v FROM i ORDER BY v PARALLEL;
 		SELECT v FROM i ORDER BY RAND();
@@ -3112,9 +3112,24 @@ async fn select_memory_ordered_collector() -> Result<(), Error> {
 	t.expect_size(9)?;
 	t.skip_ok(1)?;
 	// Check explain plans
-	for _ in 0..2 {
-		t.expect_val(
-			"[
+	t.expect_val(
+		"[
+				{
+					detail: {
+						table: 'i'
+					},
+					operation: 'Iterate Table'
+				},
+				{
+					detail: {
+						type: 'MemoryRandom'
+					},
+					operation: 'Collector'
+				}
+			]",
+	)?;
+	t.expect_val(
+		"[
 				{
 					detail: {
 						table: 'i'
@@ -3128,8 +3143,7 @@ async fn select_memory_ordered_collector() -> Result<(), Error> {
 					operation: 'Collector'
 				}
 			]",
-		)?;
-	}
+	)?;
 	for _ in 0..2 {
 		t.expect_val(
 			"[

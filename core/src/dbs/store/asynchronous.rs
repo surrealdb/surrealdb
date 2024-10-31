@@ -1,7 +1,7 @@
 use crate::dbs::plan::Explanation;
 use crate::dbs::spawn_blocking;
 use crate::dbs::store::llrbtree::LLRBTree;
-use crate::dbs::store::{MemoryCollector, OrderedResult, DEFAULT_BATCH_MAX_SIZE};
+use crate::dbs::store::{MemoryCollector, MemoryRandom, DEFAULT_BATCH_SIZE};
 use crate::err::Error;
 use crate::sql::order::{OrderList, Ordering};
 use crate::sql::Value;
@@ -30,10 +30,10 @@ pub(in crate::dbs) struct AsyncMemoryOrdered {
 impl AsyncMemoryOrdered {
 	pub(in crate::dbs) fn new(ordering: &Ordering, batch_size: Option<usize>) -> Self {
 		let (tx, rx) = mpsc::channel(CHANNEL_BUFFER_SIZE);
-		let batch_size = batch_size.unwrap_or(DEFAULT_BATCH_MAX_SIZE);
+		let batch_size = batch_size.unwrap_or(DEFAULT_BATCH_SIZE);
 		// Spawns a merge task to process and merge incoming batches asynchronously.finalize
 		let rx = match ordering {
-			Ordering::Random => tokio::spawn(Self::batch_random_task(batch_size, rx)),
+			Ordering::Random => tokio::spawn(Self::batch_random_task(rx)),
 			Ordering::Order(orders) => tokio::spawn(Self::batch_ordered_task(rx, orders.clone())),
 		};
 		Self {
@@ -46,15 +46,17 @@ impl AsyncMemoryOrdered {
 		}
 	}
 
-	async fn batch_random_task(
-		batch_size: usize,
-		mut rx: Receiver<Vec<Value>>,
-	) -> Result<Vec<Value>, Error> {
-		let mut result = OrderedResult::with_capacity(batch_size);
+	async fn batch_random_task(mut rx: Receiver<Vec<Value>>) -> Result<Vec<Value>, Error> {
+		let mut values = Vec::new();
+		let mut ordered = Vec::new();
 		while let Some(batch) = rx.recv().await {
-			result.add_random_batch(batch);
+			MemoryRandom::shuffle_batch(&mut values, &mut ordered, batch);
 		}
-		spawn_blocking(|| Ok(result.into_vec()), |e| Error::OrderingError(format!("{e}"))).await
+		spawn_blocking(
+			move || Ok(MemoryRandom::ordered_values_to_vec(&mut values, &ordered)),
+			|e| Error::OrderingError(format!("{e}")),
+		)
+		.await
 	}
 
 	async fn batch_ordered_task(
@@ -62,19 +64,19 @@ impl AsyncMemoryOrdered {
 		orders: OrderList,
 	) -> Result<Vec<Value>, Error> {
 		let values = Vec::new();
-		let mut tree = LLRBTree::new();
+		let mut tree = LLRBTree::default();
 		let mut values = values;
 		while let Some(batch) = rx.recv().await {
 			let new_idx = values.len()..(values.len() + batch.len());
 			values.extend(batch);
 			for idx in new_idx {
-				tree.insert(idx, idx, |a, b| orders.compare(&values[a], &values[b]));
+				tree.insert(idx, |a, b| orders.compare(&values[a], &values[b]));
 			}
 		}
 		let iter = tree.into_iter();
 		spawn_blocking(
 			move || {
-				let vec = iter.map(|(_, v)| mem::take(&mut values[v])).collect();
+				let vec = iter.map(|v| mem::take(&mut values[v])).collect();
 				Ok(vec)
 			},
 			|e| Error::OrderingError(format!("{e}")),

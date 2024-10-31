@@ -4,24 +4,18 @@ use std::cmp::Ordering;
 /// It is a red–black tree, a self-balancing binary search tree data structure
 /// noted for fast insertion and retrieval of ordered information.
 /// https://en.wikipedia.org/wiki/Left-leaning_red%E2%80%93black_tree
+#[derive(Default)]
 pub(super) struct LLRBTree {
 	root: Option<usize>,
 	nodes: Nodes,
 }
 
 impl LLRBTree {
-	pub(super) fn new() -> Self {
-		LLRBTree {
-			root: None,
-			nodes: Nodes::default(),
-		}
-	}
-
-	pub(super) fn insert<C>(&mut self, key: usize, value: usize, cmp: C)
+	pub(super) fn insert<C>(&mut self, val: usize, cmp: C)
 	where
 		C: Fn(usize, usize) -> Ordering,
 	{
-		self.root = self.nodes.insert(self.root.take(), key, value, cmp);
+		self.root = self.nodes.insert(self.root.take(), val, cmp);
 		if let Some(root) = self.root {
 			self.nodes.node_mut(root).is_red = false;
 		}
@@ -32,18 +26,16 @@ impl LLRBTree {
 struct Nodes(Vec<Node>);
 
 struct Node {
-	key: usize,
-	value: usize,
+	val: usize,
 	left: Option<usize>,
 	right: Option<usize>,
 	is_red: bool,
 }
 impl Nodes {
-	fn new_red_node(&mut self, key: usize, value: usize) -> usize {
+	fn new_red_node(&mut self, val: usize) -> usize {
 		let idx = self.0.len();
 		let new_node = Node {
-			key,
-			value,
+			val,
 			left: None,
 			right: None,
 			is_red: true,
@@ -59,22 +51,22 @@ impl Nodes {
 		&mut self.0[idx]
 	}
 
-	fn insert<C>(&mut self, h_idx: Option<usize>, key: usize, value: usize, cmp: C) -> Option<usize>
+	fn insert<C>(&mut self, h_idx: Option<usize>, val: usize, cmp: C) -> Option<usize>
 	where
 		C: Fn(usize, usize) -> Ordering,
 	{
 		let mut h_idx = match h_idx {
 			Some(h_idx) => h_idx,
-			None => return Some(self.new_red_node(key, value)),
+			None => return Some(self.new_red_node(val)),
 		};
 
-		match cmp(key, self.node(h_idx).key) {
+		match cmp(val, self.node(h_idx).val) {
 			Ordering::Less => {
-				self.node_mut(h_idx).left = self.insert(self.node(h_idx).left, key, value, cmp)
+				self.node_mut(h_idx).left = self.insert(self.node(h_idx).left, val, cmp)
 			}
-			Ordering::Equal => self.node_mut(h_idx).value = value,
+			Ordering::Equal => self.node_mut(h_idx).val = val,
 			Ordering::Greater => {
-				self.node_mut(h_idx).right = self.insert(self.node(h_idx).right, key, value, cmp)
+				self.node_mut(h_idx).right = self.insert(self.node(h_idx).right, val, cmp)
 			}
 		};
 
@@ -169,16 +161,15 @@ impl LLRBTreeIterator {
 }
 
 impl Iterator for LLRBTreeIterator {
-	type Item = (usize, usize);
+	type Item = usize;
 
 	fn next(&mut self) -> Option<Self::Item> {
 		// Pop the top node from the stack
 		let node_idx = self.stack.pop()?;
 		let node = self.nodes.node_mut(node_idx);
 
-		// Save the key and value to return
-		let key = node.key;
-		let value = node.value;
+		// Save value to return
+		let val = node.val;
 
 		// If the node has a right child, push all its left children onto the stack
 		let mut current = node.right.take();
@@ -188,12 +179,12 @@ impl Iterator for LLRBTreeIterator {
 			self.stack.push(n_idx);
 		}
 
-		Some((key, value))
+		Some(val)
 	}
 }
 
 impl IntoIterator for LLRBTree {
-	type Item = (usize, usize);
+	type Item = usize;
 	type IntoIter = LLRBTreeIterator;
 
 	fn into_iter(self) -> Self::IntoIter {
@@ -207,15 +198,15 @@ mod test {
 
 	#[test]
 	fn insertion() {
-		let mut tree = LLRBTree::new();
+		let mut tree = LLRBTree::default();
 		let cmp = |a: usize, b: usize| a.cmp(&b);
-		tree.insert(5, 50, cmp);
-		tree.insert(2, 20, cmp);
-		tree.insert(4, 40, cmp);
-		tree.insert(3, 30, cmp);
-		tree.insert(1, 10, cmp);
+		tree.insert(5, cmp);
+		tree.insert(2, cmp);
+		tree.insert(4, cmp);
+		tree.insert(3, cmp);
+		tree.insert(1, cmp);
 
 		let result = tree.into_iter().collect::<Vec<_>>();
-		assert_eq!(result, vec![(1, 10), (2, 20), (3, 30), (4, 40), (5, 50)]);
+		assert_eq!(result, vec![1, 2, 3, 4, 5]);
 	}
 }
