@@ -196,6 +196,20 @@ impl DefineTableStatement {
 				)
 				.await?;
 			}
+			// Refresh the cache id for the fields
+			{
+				let key = crate::key::database::tb::new(opt.ns()?, opt.db()?, &self.name);
+				let tb = txn.get_tb(opt.ns()?, opt.db()?, &self.name).await?;
+				txn.set(
+					key,
+					DefineTableStatement {
+						cache_fields_ts: Uuid::now_v7(),
+						..tb.as_ref().clone()
+					},
+					None,
+				)
+				.await?;
+			}
 		}
 		Ok(())
 	}
