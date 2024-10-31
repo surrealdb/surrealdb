@@ -3,7 +3,7 @@ use std::ops::RangeInclusive;
 use chrono::{DateTime, FixedOffset, NaiveDate, NaiveDateTime, NaiveTime, Offset, TimeZone, Utc};
 
 use crate::syn::{
-	error::{bail, error, SyntaxError},
+	error::{bail, syntax_error, SyntaxError},
 	lexer::Lexer,
 	token::{t, Token},
 };
@@ -45,7 +45,7 @@ pub fn datetime_inner(lexer: &mut Lexer) -> Result<DateTime<Utc>, SyntaxError> {
 	};
 
 	let date = NaiveDate::from_ymd_opt(year, month as u32, day as u32).ok_or_else(
-		|| error!("Invalid DateTime date: date outside of valid range", @lexer.span_since(date_start)),
+		|| syntax_error!("Invalid DateTime date: date outside of valid range", @lexer.span_since(date_start)),
 	)?;
 
 	if !lexer.eat_when(|x| x == b'T') {
@@ -105,7 +105,7 @@ pub fn datetime_inner(lexer: &mut Lexer) -> Result<DateTime<Utc>, SyntaxError> {
 
 	let time = NaiveTime::from_hms_nano_opt(hour as u32, minute as u32, second as u32, nanos)
 		.ok_or_else(
-			|| error!("Invalid DateTime time: time outside of valid range", @lexer.span_since(time_start)),
+			|| syntax_error!("Invalid DateTime time: time outside of valid range", @lexer.span_since(time_start)),
 		)?;
 
 	let timezone_start = lexer.reader.offset();

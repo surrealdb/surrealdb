@@ -3,7 +3,7 @@ use std::mem;
 use unicase::UniCase;
 
 use crate::syn::{
-	error::{error, SyntaxError},
+	error::{syntax_error, SyntaxError},
 	lexer::{keywords::KEYWORDS, Lexer},
 	token::{Token, TokenKind},
 };
@@ -108,7 +108,7 @@ impl<'a> Lexer<'a> {
 				} else {
 					'⟩'
 				};
-				let error = error!("Unexpected end of file, expected identifier to end with `{end_char}`", @self.current_span());
+				let error = syntax_error!("Unexpected end of file, expected identifier to end with `{end_char}`", @self.current_span());
 				return Err(error.with_data_pending());
 			};
 			if x.is_ascii() {
@@ -119,7 +119,7 @@ impl<'a> Lexer<'a> {
 					}
 					b'\0' => {
 						// null bytes not allowed
-						let err = error!("Invalid null byte in source, null bytes are not valid SurrealQL characters",@self.current_span());
+						let err = syntax_error!("Invalid null byte in source, null bytes are not valid SurrealQL characters",@self.current_span());
 						return Err(err);
 					}
 					b'\\' if is_backtick => {
@@ -132,7 +132,7 @@ impl<'a> Lexer<'a> {
 							} else {
 								'⟩'
 							};
-							let error = error!("Unexpected end of file, expected identifier to end with `{end_char}`", @self.current_span());
+							let error = syntax_error!("Unexpected end of file, expected identifier to end with `{end_char}`", @self.current_span());
 							return Err(error.with_data_pending());
 						};
 						match next {
@@ -166,9 +166,9 @@ impl<'a> Lexer<'a> {
 									if char == '⟩' {
 										self.scratch.push(char);
 									}
-									error!("Invalid escape character `{x}` for identifier, valid characters are `⟩`, `\\`, ```, `/`, `b`, `f`, `n`, `r`, or `t`", @self.current_span())
+									syntax_error!("Invalid escape character `{x}` for identifier, valid characters are `⟩`, `\\`, ```, `/`, `b`, `f`, `n`, `r`, or `t`", @self.current_span())
 								} else {
-									error!("Invalid escape character `{x}` for identifier, valid characters are `\\`, ```, `/`, `b`, `f`, `n`, `r`, or `t`", @self.current_span())
+									syntax_error!("Invalid escape character `{x}` for identifier, valid characters are `\\`, ```, `/`, `b`, `f`, `n`, `r`, or `t`", @self.current_span())
 								};
 								return Err(error);
 							}

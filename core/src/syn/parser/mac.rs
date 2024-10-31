@@ -15,7 +15,7 @@ macro_rules! unexpected {
 				return Err($parser.lexer.error.take().unwrap());
 			}
 			$crate::syn::token::TokenKind::Eof => {
-				let error = $crate::syn::error::error!("Unexpected end of file, expected {}",$expected, @__found.span $( $($t)* )?);
+				let error = $crate::syn::error::syntax_error!("Unexpected end of file, expected {}",$expected, @__found.span $( $($t)* )?);
 				return Err(error.with_data_pending())
 			}
 			$crate::syn::token::TokenKind::WhiteSpace => {
