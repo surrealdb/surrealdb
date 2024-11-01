@@ -191,7 +191,7 @@ impl TryFrom<Cbor> for Value {
 					TAG_RANGE => Ok(Value::Range(Box::new(Range::try_from(*v)?))),
 					TAG_FUTURE => match *v {
 						Data::Text(v) => {
-							let block = crate::syn::block(format!("{{{v}}}").as_str())
+							let block = crate::syn::block(v.as_str())
 								.map_err(|_| "Failed to parse block")?;
 							Ok(Value::Future(Box::new(Future(block))))
 						}
