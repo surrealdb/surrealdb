@@ -29,29 +29,8 @@ pub use self::response::*;
 pub use self::session::*;
 pub(crate) use self::statement::*;
 pub(crate) use self::variables::*;
-#[cfg(not(target_arch = "wasm32"))]
-use crate::err::Error;
-#[cfg(not(target_arch = "wasm32"))]
-use tokio::sync::oneshot::error::RecvError;
-#[cfg(not(target_arch = "wasm32"))]
-use tokio::task;
 
 #[doc(hidden)]
 pub mod fuzzy_eq;
 #[cfg(test)]
 pub(crate) mod test;
-
-#[cfg(not(target_arch = "wasm32"))]
-pub(super) async fn spawn_blocking<T, F, E>(f: F, e: E) -> Result<T, Error>
-where
-	F: FnOnce() -> Result<T, Error> + Send + 'static,
-	E: FnOnce(RecvError) -> Error,
-	T: Send + 'static,
-{
-	let (send, recv) = tokio::sync::oneshot::channel();
-	task::spawn_blocking(move || {
-		let res = f();
-		let _ = send.send(res);
-	});
-	recv.await.map_err(e)?
-}

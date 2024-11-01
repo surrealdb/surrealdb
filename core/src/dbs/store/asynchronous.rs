@@ -1,5 +1,4 @@
 use crate::dbs::plan::Explanation;
-use crate::dbs::spawn_blocking;
 use crate::dbs::store::llrbtree::LLRBTree;
 use crate::dbs::store::{MemoryCollector, MemoryRandom, DEFAULT_BATCH_SIZE};
 use crate::err::Error;
@@ -8,7 +7,7 @@ use crate::sql::Value;
 use std::mem;
 use tokio::sync::mpsc;
 use tokio::sync::mpsc::{Receiver, Sender};
-use tokio::task::JoinHandle;
+use tokio::task::{spawn_blocking, JoinHandle};
 
 const CHANNEL_BUFFER_SIZE: usize = 128;
 
@@ -52,11 +51,9 @@ impl AsyncMemoryOrdered {
 		while let Some(batch) = rx.recv().await {
 			MemoryRandom::shuffle_batch(&mut values, &mut ordered, batch);
 		}
-		spawn_blocking(
-			move || Ok(MemoryRandom::ordered_values_to_vec(&mut values, &ordered)),
-			|e| Error::OrderingError(format!("{e}")),
-		)
-		.await
+		spawn_blocking(move || Ok(MemoryRandom::ordered_values_to_vec(&mut values, &ordered)))
+			.await
+			.map_err(|e| Error::OrderingError(format!("{e}")))?
 	}
 
 	async fn batch_ordered_task(
@@ -74,14 +71,12 @@ impl AsyncMemoryOrdered {
 			}
 		}
 		let iter = tree.into_iter();
-		spawn_blocking(
-			move || {
-				let vec = iter.map(|v| mem::take(&mut values[v])).collect();
-				Ok(vec)
-			},
-			|e| Error::OrderingError(format!("{e}")),
-		)
+		spawn_blocking(move || {
+			let vec = iter.map(|v| mem::take(&mut values[v])).collect();
+			Ok(vec)
+		})
 		.await
+		.map_err(|e| Error::OrderingError(format!("{e}")))?
 	}
 
 	pub(in crate::dbs) fn len(&self) -> usize {

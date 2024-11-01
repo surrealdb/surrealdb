@@ -11,13 +11,13 @@ use crate::err::Error;
 use crate::sql::order::OrderList;
 use crate::sql::value::Value;
 
-#[cfg(not(target_arch = "wasm32"))]
-use crate::dbs::spawn_blocking;
 use rand::prelude::SliceRandom;
 use rand::{thread_rng, Rng};
 #[cfg(not(target_arch = "wasm32"))]
 use rayon::prelude::ParallelSliceMut;
 use std::mem;
+#[cfg(not(target_arch = "wasm32"))]
+use tokio::task::spawn_blocking;
 
 #[derive(Default)]
 pub(super) struct MemoryCollector(Vec<Value>);
@@ -251,15 +251,12 @@ impl MemoryOrdered {
 			let mut ordered = mem::take(&mut self.ordered);
 			let mut values = mem::take(&mut self.values);
 			let orders = self.orders.clone();
-			let result = spawn_blocking(
-				move || {
-					ordered.par_sort_unstable_by(|a, b| orders.compare(&values[*a], &values[*b]));
-					let res = MemoryRandom::ordered_values_to_vec(&mut values, &ordered);
-					Ok(res)
-				},
-				|e| Error::OrderingError(format!("{e}")),
-			)
-			.await?;
+			let result = spawn_blocking(move || {
+				ordered.par_sort_unstable_by(|a, b| orders.compare(&values[*a], &values[*b]));
+				MemoryRandom::ordered_values_to_vec(&mut values, &ordered)
+			})
+			.await
+			.map_err(|e| Error::OrderingError(format!("{e}")))?;
 			self.result = Some(result);
 		}
 		Ok(())
