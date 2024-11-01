@@ -36,7 +36,7 @@ impl RemoveFieldStatement {
 			// Delete the definition
 			let key = crate::key::table::fd::new(opt.ns()?, opt.db()?, &fd.what, &na);
 			txn.del(key).await?;
-			// Refresh the cache id
+			// Refresh the table cache
 			let key = crate::key::database::tb::new(opt.ns()?, opt.db()?, &self.what);
 			let tb = txn.get_tb(opt.ns()?, opt.db()?, &self.what).await?;
 			txn.set(

@@ -39,7 +39,7 @@ impl RemoveIndexStatement {
 			// Remove the index data
 			let key = crate::key::index::all::new(opt.ns()?, opt.db()?, &self.what, &self.name);
 			txn.delp(key).await?;
-			// Refresh the cache id
+			// Refresh the table cache
 			let key = crate::key::database::tb::new(opt.ns()?, opt.db()?, &self.what);
 			let tb = txn.get_tb(opt.ns()?, opt.db()?, &self.what).await?;
 			txn.set(

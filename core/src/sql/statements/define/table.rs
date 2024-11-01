@@ -106,22 +106,19 @@ impl DefineTableStatement {
 		}
 		// Check if table is a view
 		if let Some(view) = &self.view {
+			// Force queries to run
+			let opt = &opt.new_with_force(Force::Table(Arc::new([dt])));
 			// Remove the table data
 			let key = crate::key::table::all::new(opt.ns()?, opt.db()?, &self.name);
 			txn.delp(key).await?;
 			// Process each foreign table
-			for v in view.what.0.iter() {
+			for ft in view.what.0.iter() {
 				// Save the view config
-				let key = crate::key::table::ft::new(opt.ns()?, opt.db()?, v, &self.name);
+				let key = crate::key::table::ft::new(opt.ns()?, opt.db()?, ft, &self.name);
 				txn.set(key, self, None).await?;
-			}
-			// Force queries to run
-			let opt = &opt.new_with_force(Force::Table(Arc::new([dt])));
-			// Process each foreign table
-			for v in view.what.0.iter() {
-				// Refresh the cache id
-				let key = crate::key::database::tb::new(opt.ns()?, opt.db()?, v);
-				let tb = txn.get_tb(opt.ns()?, opt.db()?, v).await?;
+				// Refresh the table cache
+				let key = crate::key::database::tb::new(opt.ns()?, opt.db()?, ft);
+				let tb = txn.get_tb(opt.ns()?, opt.db()?, ft).await?;
 				txn.set(
 					key,
 					DefineTableStatement {
@@ -131,14 +128,11 @@ impl DefineTableStatement {
 					None,
 				)
 				.await?;
-			}
-			// Clear the cache
-			txn.clear();
-			// Process each foreign table
-			for v in view.what.0.iter() {
+				// Clear the cache
+				txn.clear();
 				// Process the view data
 				let stm = UpdateStatement {
-					what: Values(vec![Value::Table(v.clone())]),
+					what: Values(vec![Value::Table(ft.clone())]),
 					output: Some(Output::None),
 					..UpdateStatement::default()
 				};
@@ -201,7 +195,7 @@ impl DefineTableStatement {
 				)
 				.await?;
 			}
-			// Refresh the cache id for the fields
+			// Refresh the table cache for the fields
 			{
 				let key = crate::key::database::tb::new(opt.ns()?, opt.db()?, &self.name);
 				let tb = txn.get_tb(opt.ns()?, opt.db()?, &self.name).await?;

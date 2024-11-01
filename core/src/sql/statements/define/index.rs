@@ -93,7 +93,7 @@ impl DefineIndexStatement {
 			None,
 		)
 		.await?;
-		// Refresh the cache id
+		// Refresh the table cache
 		let key = crate::key::database::tb::new(opt.ns()?, opt.db()?, &self.what);
 		let tb = txn.get_tb(opt.ns()?, opt.db()?, &self.what).await?;
 		txn.set(

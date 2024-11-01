@@ -38,8 +38,8 @@ pub static TRANSACTION_CACHE_SIZE: LazyLock<usize> =
 	lazy_env_parse!("SURREAL_TRANSACTION_CACHE_SIZE", usize, 10_000);
 
 /// Specifies the number of table definitions which can be cached across transactions.
-pub static DOCUMENT_CACHE_SIZE: LazyLock<usize> =
-	lazy_env_parse!("SURREAL_DOCUMENT_CACHE_SIZE", usize, 1_000);
+pub static DEFINITION_CACHE_SIZE: LazyLock<usize> =
+	lazy_env_parse!("SURREAL_DEFINITION_CACHE_SIZE", usize, 1_000);
 
 /// The maximum number of keys that should be scanned at once in general queries.
 pub static NORMAL_FETCH_SIZE: LazyLock<u32> = lazy_env_parse!("SURREAL_NORMAL_FETCH_SIZE", u32, 50);

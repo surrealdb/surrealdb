@@ -32,31 +32,49 @@ impl RemoveTableStatement {
 			ctx.get_index_stores().table_removed(&txn, opt.ns()?, opt.db()?, &self.name).await?;
 			// Get the defined table
 			let tb = txn.get_tb(opt.ns()?, opt.db()?, &self.name).await?;
+			// Get the foreign tables
+			let fts = txn.all_tb_views(opt.ns()?, opt.db()?, &self.name).await?;
 			// Delete the definition
 			let key = crate::key::database::tb::new(opt.ns()?, opt.db()?, &self.name);
 			txn.del(key).await?;
 			// Remove the resource data
 			let key = crate::key::table::all::new(opt.ns()?, opt.db()?, &self.name);
 			txn.delp(key).await?;
+			// Process each attached foreign table
+			for ft in fts.iter() {
+				// Refresh the table cache
+				let key = crate::key::database::tb::new(opt.ns()?, opt.db()?, &ft.name);
+				let tb = txn.get_tb(opt.ns()?, opt.db()?, &ft.name).await?;
+				txn.set(
+					key,
+					DefineTableStatement {
+						view: None,
+						..tb.as_ref().clone()
+					},
+					None,
+				)
+				.await?;
+			}
 			// Check if this is a foreign table
 			if let Some(view) = &tb.view {
 				// Process each foreign table
-				for v in view.what.0.iter() {
+				for ft in view.what.0.iter() {
 					// Save the view config
-					let key = crate::key::table::ft::new(opt.ns()?, opt.db()?, v, &self.name);
+					let key = crate::key::table::ft::new(opt.ns()?, opt.db()?, ft, &self.name);
 					txn.del(key).await?;
-					// Refresh the cache id
-					let key = crate::key::database::tb::new(opt.ns()?, opt.db()?, v);
-					let tb = txn.get_tb(opt.ns()?, opt.db()?, v).await?;
-					txn.set(
-						key,
-						DefineTableStatement {
-							cache_tables_ts: Uuid::now_v7(),
-							..tb.as_ref().clone()
-						},
-						None,
-					)
-					.await?;
+					// Refresh the table cache
+					let key = crate::key::database::tb::new(opt.ns()?, opt.db()?, ft);
+					if let Ok(tb) = txn.get_tb(opt.ns()?, opt.db()?, ft).await {
+						txn.set(
+							key,
+							DefineTableStatement {
+								cache_tables_ts: Uuid::now_v7(),
+								..tb.as_ref().clone()
+							},
+							None,
+						)
+						.await?;
+					}
 				}
 			}
 			// Clear the cache

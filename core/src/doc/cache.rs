@@ -1,5 +1,5 @@
 use super::super::kvs::Key;
-use crate::cnf::DOCUMENT_CACHE_SIZE;
+use crate::cnf::DEFINITION_CACHE_SIZE;
 use crate::err::Error;
 use crate::sql::statements::DefineEventStatement;
 use crate::sql::statements::DefineFieldStatement;
@@ -14,7 +14,7 @@ use std::sync::LazyLock;
 use uuid::Uuid;
 
 pub static CACHE: LazyLock<Arc<Cache<Key, Entry>>> =
-	LazyLock::new(|| Arc::new(Cache::new(*DOCUMENT_CACHE_SIZE)));
+	LazyLock::new(|| Arc::new(Cache::new(*DEFINITION_CACHE_SIZE)));
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Key)]
 #[non_exhaustive]

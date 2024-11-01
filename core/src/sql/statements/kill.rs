@@ -62,7 +62,7 @@ impl KillStatement {
 				// Delete the table live query
 				let key = crate::key::table::lq::new(&val.ns, &val.db, &val.tb, lid);
 				txn.del(key).await?;
-				// Refresh the cache id
+				// Refresh the table cache
 				let key = crate::key::database::tb::new(&val.ns, &val.db, &val.tb);
 				let tb = txn.get_tb(&val.ns, &val.db, &val.tb).await?;
 				txn.set(
@@ -74,6 +74,8 @@ impl KillStatement {
 					None,
 				)
 				.await?;
+				// Clear the cache
+				txn.clear();
 			}
 			None => {
 				return Err(Error::KillStatement {

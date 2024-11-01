@@ -80,7 +80,7 @@ impl DefineFieldStatement {
 			None,
 		)
 		.await?;
-		// Refresh the cache id
+		// Refresh the table cache
 		let key = crate::key::database::tb::new(ns, db, &self.what);
 		let tb = txn.get_tb(ns, db, &self.what).await?;
 		txn.set(
@@ -92,33 +92,36 @@ impl DefineFieldStatement {
 			None,
 		)
 		.await?;
-
-		// find existing field definitions.
+		// Clear the cache
+		txn.clear();
+		// Find all existing field definitions
 		let fields = txn.all_tb_fields(ns, db, &self.what, None).await.ok();
-
-		// Process possible recursive_definitions.
+		// Process possible recursive_definitions
 		if let Some(mut cur_kind) = self.kind.as_ref().and_then(|x| x.inner_kind()) {
 			let mut name = self.name.clone();
 			loop {
+				// Check if the subtype is an `any` type
 				if let Kind::Any = cur_kind {
-					// DEFINE FIELD foo ON bar TYPE array;
-					// Already implies
-					// DEFINE FIELD foo[*] ON bar TYPE any;
-					// so we don't need to write sub types if the sub types are essentially a non
-					// trait bound.
+					// There is no need to add a subtype
+					// field definition if the type is
+					// just specified as an `array`. This
+					// is because the following query:
+					//  DEFINE FIELD foo ON bar TYPE array;
+					// already implies that the immediate
+					// subtype is an any:
+					//  DEFINE FIELD foo[*] ON bar TYPE any;
+					// so we skip the subtype field.
 					break;
 				}
-
+				// Get the kind of this sub field
 				let new_kind = cur_kind.inner_kind();
-
+				// Add a new subtype
 				name.0.push(Part::All);
-
-				// Get the name of the field
+				// Get the field name
 				let fd = name.to_string();
+				// Set the subtype `DEFINE FIELD` definition
 				let key = crate::key::table::fd::new(ns, db, &self.what, &fd);
-
-				// merge the new definition with possible existing definitions.
-				let statement = if let Some(existing) =
+				let val = if let Some(existing) =
 					fields.as_ref().and_then(|x| x.iter().find(|x| x.name == name))
 				{
 					DefineFieldStatement {
@@ -136,9 +139,8 @@ impl DefineFieldStatement {
 						..Default::default()
 					}
 				};
-
-				txn.set(key, statement, None).await?;
-
+				txn.set(key, val, None).await?;
+				// Process to any sub field
 				if let Some(new_kind) = new_kind {
 					cur_kind = new_kind;
 				} else {
