@@ -364,6 +364,22 @@ pub fn flatten((array,): (Array,)) -> Result<Value, Error> {
 	Ok(array.flatten().into())
 }
 
+pub async fn fold(
+	(stk, ctx, opt, doc): (&mut Stk, &Context, Option<&Options>, Option<&CursorDoc>),
+	(array, init, mapper): (Array, Value, Closure),
+) -> Result<Value, Error> {
+	if let Some(opt) = opt {
+		let mut accum = init;
+		for (i, val) in array.into_iter().enumerate() {
+			let fnc = Function::Anonymous(mapper.clone().into(), vec![accum, val, i.into()]);
+			accum = fnc.compute(stk, ctx, opt, doc).await?;
+		}
+		Ok(accum)
+	} else {
+		Ok(Value::None)
+	}
+}
+
 pub fn group((array,): (Array,)) -> Result<Value, Error> {
 	Ok(array.flatten().uniq().into())
 }
@@ -547,6 +563,40 @@ pub fn range((start, count): (i64, i64)) -> Result<Value, Error> {
 			name: String::from("array::range"),
 			message: String::from("The range overflowed the maximum value for an integer"),
 		})
+	}
+}
+
+pub async fn reduce(
+	(stk, ctx, opt, doc): (&mut Stk, &Context, Option<&Options>, Option<&CursorDoc>),
+	(array, mapper): (Array, Closure),
+) -> Result<Value, Error> {
+	if let Some(opt) = opt {
+		match array.len() {
+			0 => Ok(Value::None),
+			1 => {
+				let Some(val) = array.into_iter().next() else {
+					return Err(Error::Unreachable(
+						"Iterator should have an item at this point".into(),
+					));
+				};
+				Ok(val)
+			}
+			_ => {
+				// Get the first item
+				let mut iter = array.into_iter().enumerate();
+				let Some((_, mut accum)) = iter.next() else {
+					return Ok(Value::None);
+				};
+				for (i, val) in iter {
+					let fnc =
+						Function::Anonymous(mapper.clone().into(), vec![accum, val, i.into()]);
+					accum = fnc.compute(stk, ctx, opt, doc).await?;
+				}
+				Ok(accum)
+			}
+		}
+	} else {
+		Ok(Value::None)
 	}
 }
 
