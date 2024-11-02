@@ -1,4 +1,4 @@
-use super::common::{self, Format, Socket, DB, NS, PASS, USER, StartServerArguments};
+use super::common::{self, Format, Socket, StartServerArguments, DB, NS, PASS, USER};
 use assert_fs::TempDir;
 use http::header::{HeaderMap, HeaderValue};
 use serde_json::json;
@@ -1813,7 +1813,7 @@ async fn temporary_directory() {
 	// These selects use the memory collector
 	let mut res =
 		socket.send_message_query("SELECT * FROM test ORDER BY id DESC EXPLAIN").await.unwrap();
-	let expected = json!([{"detail": { "table": "test" }, "operation": "Iterate Table" }, { "detail": { "type": "Memory" }, "operation": "Collector" }]);
+	let expected = json!([{"detail": { "table": "test" }, "operation": "Iterate Table" }, { "detail": { "type": "MemoryOrdered" }, "operation": "Collector" }]);
 	assert_eq!(res.remove(0)["result"], expected);
 	// And return the correct result
 	let mut res = socket.send_message_query("SELECT * FROM test ORDER BY id DESC").await.unwrap();
@@ -1953,7 +1953,8 @@ async fn rpc_capability() {
 			auth: false,
 			..Default::default()
 		})
-		.await.unwrap();
+		.await
+		.unwrap();
 		// Connect to WebSocket
 		let mut socket = Socket::connect(&addr, SERVER, FORMAT).await.unwrap();
 		// Specify a namespace and database
@@ -1970,10 +1971,7 @@ async fn rpc_capability() {
 			let res = res.unwrap();
 			assert!(res.is_object(), "result: {res:?}");
 			let res = res.as_object().unwrap();
-			assert_eq!(
-				res["error"],
-				json!({"code": -32000, "message": "Method not allowed"})
-			);
+			assert_eq!(res["error"], json!({"code": -32000, "message": "Method not allowed"}));
 		}
 
 		// Test operations that SHOULD work with the provided capabilities
@@ -2064,7 +2062,8 @@ async fn rpc_capability() {
 			auth: false,
 			..Default::default()
 		})
-		.await.unwrap();
+		.await
+		.unwrap();
 		// Connect to WebSocket
 		let mut socket = Socket::connect(&addr, SERVER, FORMAT).await.unwrap();
 		// Specify a namespace and database
@@ -2141,10 +2140,7 @@ async fn rpc_capability() {
 			let res = res.unwrap();
 			assert!(res.is_object(), "result: {res:?}");
 			let res = res.as_object().unwrap();
-			assert_eq!(
-				res["error"],
-				json!({"code": -32000, "message": "Method not allowed"})
-			);
+			assert_eq!(res["error"], json!({"code": -32000, "message": "Method not allowed"}));
 		}
 
 		// Test operations that SHOULD work with the provided capabilities
