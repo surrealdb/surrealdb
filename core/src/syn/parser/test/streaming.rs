@@ -55,7 +55,7 @@ static SOURCE: &str = r#"
 	DEFINE DB a;
 	DEFINE FUNCTION fn::foo::bar($a: number, $b: array<bool,3>) {
 		RETURN a
-	} COMMENT 'test' PERMISSIONS FULL;
+	} COMMENT 'test' PERMISSIONS FULL AS ROLES tester, viewer;
 	DEFINE ACCESS a ON DATABASE TYPE RECORD WITH JWT ALGORITHM EDDSA KEY "foo" COMMENT "bar";
 	DEFINE PARAM $a VALUE { a: 1, "b": 3 } PERMISSIONS WHERE null;
 	DEFINE TABLE name DROP SCHEMAFUL CHANGEFEED 1s PERMISSIONS FOR SELECT WHERE a = 1 AS SELECT foo FROM bar GROUP BY foo;
@@ -204,6 +204,7 @@ fn statements() -> Vec<Statement> {
 			})]),
 			comment: Some(Strand("test".to_string())),
 			permissions: Permission::Full,
+			as_roles: vec![Ident("tester".to_string()), Ident("viewer".to_string())],
 			if_not_exists: false,
 			overwrite: false,
 			returns: None,

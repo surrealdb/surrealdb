@@ -186,6 +186,15 @@ impl Parser<'_> {
 					self.pop_peek();
 					res.permissions = ctx.run(|ctx| self.parse_permission_value(ctx)).await?;
 				}
+				t!("AS") => {
+					self.pop_peek();
+					if self.eat(t!("ROLES")) {
+						res.as_roles = vec![self.next_token_value()?];
+						while self.eat(t!(",")) {
+							res.as_roles.push(self.next_token_value()?);
+						}
+					}
+				}
 				_ => break,
 			}
 		}

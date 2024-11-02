@@ -3,7 +3,7 @@ use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::fnc;
-use crate::iam::Action;
+use crate::iam::{Action, Actor, Auth};
 use crate::sql::fmt::Fmt;
 use crate::sql::idiom::Idiom;
 use crate::sql::script::Script;
@@ -307,9 +307,20 @@ impl Function {
 				for (val, (name, kind)) in a.into_iter().zip(&val.args) {
 					ctx.add_value(name.to_raw(), val.coerce_to(kind)?.into());
 				}
+
+				let mut opt = opt.clone();
+				// Adjust context if as_roles is present
+				if !val.as_roles.is_empty() {
+					let actor = Actor::new(
+						"system_auth".into(),
+						val.as_roles.iter().map(Into::into).collect(),
+						(opt.ns()?, opt.db()?).into(),
+					);
+					opt = opt.with_auth(Auth::new(actor).into());
+				};
 				let ctx = ctx.freeze();
 				// Run the custom function
-				let result = match stk.run(|stk| val.block.compute(stk, &ctx, opt, doc)).await {
+				let result = match stk.run(|stk| val.block.compute(stk, &ctx, &opt, doc)).await {
 					Err(Error::Return {
 						value,
 					}) => Ok(value),

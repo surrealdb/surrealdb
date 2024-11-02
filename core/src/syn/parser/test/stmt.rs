@@ -195,7 +195,7 @@ fn parse_define_function() {
 		parse_stmt,
 		r#"DEFINE FUNCTION fn::foo::bar($a: number, $b: array<bool,3>) {
 			RETURN a
-		} COMMENT 'test' PERMISSIONS FULL
+		} COMMENT 'test' PERMISSIONS FULL AS ROLES owner
 		"#
 	)
 	.unwrap();
@@ -214,6 +214,7 @@ fn parse_define_function() {
 			})]),
 			comment: Some(Strand("test".to_string())),
 			permissions: Permission::Full,
+			as_roles: vec![Ident("owner".to_string())],
 			if_not_exists: false,
 			overwrite: false,
 			returns: None,
@@ -1376,7 +1377,7 @@ fn parse_define_table() {
 				expr: Fields(
 					vec![Field::Single {
 						expr: Value::Idiom(Idiom(vec![Part::Field(Ident("foo".to_owned()))])),
-						alias: None,
+						alias: None
 					}],
 					false
 				),

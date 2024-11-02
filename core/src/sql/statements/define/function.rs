@@ -11,7 +11,7 @@ use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Write};
 
-#[revisioned(revision = 4)]
+#[revisioned(revision = 5)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
@@ -27,6 +27,8 @@ pub struct DefineFunctionStatement {
 	pub overwrite: bool,
 	#[revision(start = 4)]
 	pub returns: Option<Kind>,
+	#[revision(start = 5)]
+	pub as_roles: Vec<Ident>,
 }
 
 impl DefineFunctionStatement {
@@ -104,6 +106,15 @@ impl fmt::Display for DefineFunctionStatement {
 			None
 		};
 		write!(f, "PERMISSIONS {}", self.permissions)?;
+		if !self.as_roles.is_empty() {
+			write!(f, " AS ROLES ")?;
+			for (i, role) in self.as_roles.iter().enumerate() {
+				if i > 0 {
+					f.write_str(", ")?;
+				}
+				write!(f, "{}", role)?;
+			}
+		}
 		Ok(())
 	}
 }
@@ -121,6 +132,11 @@ impl InfoStructure for DefineFunctionStatement {
 			"permissions".to_string() => self.permissions.structure(),
 			"comment".to_string(), if let Some(v) = self.comment => v.into(),
 			"returns".to_string(), if let Some(v) = self.returns => v.structure(),
+			"as_roles".to_string() => self.as_roles
+				.into_iter()
+				.map(|r| r.structure())
+				.collect::<Vec<Value>>()
+				.into(),
 		})
 	}
 }
