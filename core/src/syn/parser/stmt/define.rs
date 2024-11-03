@@ -6,7 +6,7 @@ use crate::sql::index::HnswParams;
 use crate::sql::statements::define::config::graphql::{GraphQLConfig, TableConfig};
 use crate::sql::statements::define::config::ConfigInner;
 use crate::sql::statements::define::DefineConfigStatement;
-use crate::sql::Value;
+use crate::sql::{RunAs, RunAsKind, Value};
 use crate::{
 	sql::{
 		access_type,
@@ -188,12 +188,30 @@ impl Parser<'_> {
 				}
 				t!("AS") => {
 					self.pop_peek();
-					if self.eat(t!("ROLES")) {
-						res.as_roles = vec![self.next_token_value()?];
+					let base = if self.eat(t!("ROOT")) {
+						Base::Root
+					} else if self.eat(t!("NAMESPACE")) {
+						Base::Ns
+					} else if self.eat(t!("DATABASE")) {
+						Base::Db
+					} else {
+						Base::Db // 默认值为 DATABASE
+					};
+					let kind = if self.eat(t!("ROLES")) {
+						let mut roles = vec![self.next_token_value()?];
 						while self.eat(t!(",")) {
-							res.as_roles.push(self.next_token_value()?);
+							roles.push(self.next_token_value()?);
 						}
-					}
+						RunAsKind::Roles(roles)
+					} else if self.eat(t!("USER")) {
+						RunAsKind::User(self.next_token_value()?)
+					} else {
+						unexpected!(self, self.peek(), "a token ROLES or USER")
+					};
+					res.run_as = Some(RunAs {
+						base,
+						kind,
+					});
 				}
 				_ => break,
 			}

@@ -5,7 +5,7 @@ use crate::err::Error;
 use crate::iam::{Action, ResourceKind};
 use crate::sql::fmt::{is_pretty, pretty_indent};
 use crate::sql::statements::info::InfoStructure;
-use crate::sql::{Base, Block, Ident, Kind, Permission, Strand, Value};
+use crate::sql::{Base, Block, Ident, Kind, Permission, RunAs, Strand, Value};
 use derive::Store;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -28,7 +28,7 @@ pub struct DefineFunctionStatement {
 	#[revision(start = 4)]
 	pub returns: Option<Kind>,
 	#[revision(start = 5)]
-	pub as_roles: Vec<Ident>,
+	pub run_as: Option<RunAs>,
 }
 
 impl DefineFunctionStatement {
@@ -106,14 +106,8 @@ impl fmt::Display for DefineFunctionStatement {
 			None
 		};
 		write!(f, "PERMISSIONS {}", self.permissions)?;
-		if !self.as_roles.is_empty() {
-			write!(f, " AS ROLES ")?;
-			for (i, role) in self.as_roles.iter().enumerate() {
-				if i > 0 {
-					f.write_str(", ")?;
-				}
-				write!(f, "{}", role)?;
-			}
+		if let Some(ref run_as) = self.run_as {
+			write!(f, " {}", run_as)?;
 		}
 		Ok(())
 	}
@@ -132,11 +126,7 @@ impl InfoStructure for DefineFunctionStatement {
 			"permissions".to_string() => self.permissions.structure(),
 			"comment".to_string(), if let Some(v) = self.comment => v.into(),
 			"returns".to_string(), if let Some(v) = self.returns => v.structure(),
-			"as_roles".to_string() => self.as_roles
-				.into_iter()
-				.map(|r| r.structure())
-				.collect::<Vec<Value>>()
-				.into(),
+			"run_as".to_string(), if let Some(run_as) = self.run_as => run_as.structure(),
 		})
 	}
 }
