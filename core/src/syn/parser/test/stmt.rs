@@ -2,8 +2,8 @@ use crate::{
 	sql::{
 		access::AccessDuration,
 		access_type::{
-			AccessType, JwtAccess, JwtAccessIssue, JwtAccessVerify, JwtAccessVerifyJwks,
-			JwtAccessVerifyKey, RecordAccess,
+			AccessType, BearerAccess, BearerAccessSubject, JwtAccess, JwtAccessIssue,
+			JwtAccessVerify, JwtAccessVerifyJwks, JwtAccessVerifyKey, RecordAccess,
 		},
 		block::Entry,
 		changefeed::ChangeFeed,
@@ -12,7 +12,10 @@ use crate::{
 		language::Language,
 		order::{OrderList, Ordering},
 		statements::{
-			access::{self, AccessStatementGrant, AccessStatementList, AccessStatementRevoke},
+			access::{
+				self, AccessStatementGrant, AccessStatementPurge, AccessStatementRevoke,
+				AccessStatementShow,
+			},
 			analyze::AnalyzeStatement,
 			show::{ShowSince, ShowStatement},
 			sleep::SleepStatement,
@@ -1334,6 +1337,245 @@ fn parse_define_access_record_with_jwt() {
 }
 
 #[test]
+fn parse_define_access_bearer() {
+	// For user on database.
+	{
+		let res =
+			test_parse!(parse_stmt, r#"DEFINE ACCESS a ON DB TYPE BEARER FOR USER COMMENT "foo""#)
+				.unwrap();
+
+		// Manually compare since DefineAccessStatement for bearer access
+		// without explicit JWT will create a random signing key during parsing.
+		let Statement::Define(DefineStatement::Access(stmt)) = res else {
+			panic!()
+		};
+
+		assert_eq!(stmt.name, Ident("a".to_string()));
+		assert_eq!(stmt.base, Base::Db);
+		assert_eq!(stmt.authenticate, None);
+		assert_eq!(
+			stmt.duration,
+			// Default durations.
+			AccessDuration {
+				grant: None,
+				token: Some(Duration::from_hours(1)),
+				session: None,
+			}
+		);
+		assert_eq!(stmt.comment, Some(Strand("foo".to_string())));
+		assert!(!stmt.if_not_exists);
+		match stmt.kind {
+			AccessType::Bearer(ac) => {
+				assert_eq!(ac.subject, BearerAccessSubject::User);
+			}
+			_ => panic!(),
+		}
+	}
+	// For user on namespace.
+	{
+		let res =
+			test_parse!(parse_stmt, r#"DEFINE ACCESS a ON NS TYPE BEARER FOR USER COMMENT "foo""#)
+				.unwrap();
+
+		// Manually compare since DefineAccessStatement for bearer access
+		// without explicit JWT will create a random signing key during parsing.
+		let Statement::Define(DefineStatement::Access(stmt)) = res else {
+			panic!()
+		};
+
+		assert_eq!(stmt.name, Ident("a".to_string()));
+		assert_eq!(stmt.base, Base::Ns);
+		assert_eq!(stmt.authenticate, None);
+		assert_eq!(
+			stmt.duration,
+			// Default durations.
+			AccessDuration {
+				grant: None,
+				token: Some(Duration::from_hours(1)),
+				session: None,
+			}
+		);
+		assert_eq!(stmt.comment, Some(Strand("foo".to_string())));
+		assert!(!stmt.if_not_exists);
+		match stmt.kind {
+			AccessType::Bearer(ac) => {
+				assert_eq!(ac.subject, BearerAccessSubject::User);
+			}
+			_ => panic!(),
+		}
+	}
+	// For user on root.
+	{
+		let res = test_parse!(
+			parse_stmt,
+			r#"DEFINE ACCESS a ON ROOT TYPE BEARER FOR USER COMMENT "foo""#
+		)
+		.unwrap();
+
+		// Manually compare since DefineAccessStatement for bearer access
+		// without explicit JWT will create a random signing key during parsing.
+		let Statement::Define(DefineStatement::Access(stmt)) = res else {
+			panic!()
+		};
+
+		assert_eq!(stmt.name, Ident("a".to_string()));
+		assert_eq!(stmt.base, Base::Root);
+		assert_eq!(stmt.authenticate, None);
+		assert_eq!(
+			stmt.duration,
+			// Default durations.
+			AccessDuration {
+				grant: None,
+				token: Some(Duration::from_hours(1)),
+				session: None,
+			}
+		);
+		assert_eq!(stmt.comment, Some(Strand("foo".to_string())));
+		assert!(!stmt.if_not_exists);
+		match stmt.kind {
+			AccessType::Bearer(ac) => {
+				assert_eq!(ac.subject, BearerAccessSubject::User);
+			}
+			_ => panic!(),
+		}
+	}
+	// For record on database.
+	{
+		let res = test_parse!(
+			parse_stmt,
+			r#"DEFINE ACCESS a ON DB TYPE BEARER FOR RECORD COMMENT "foo""#
+		)
+		.unwrap();
+
+		// Manually compare since DefineAccessStatement for bearer access
+		// without explicit JWT will create a random signing key during parsing.
+		let Statement::Define(DefineStatement::Access(stmt)) = res else {
+			panic!()
+		};
+
+		assert_eq!(stmt.name, Ident("a".to_string()));
+		assert_eq!(stmt.base, Base::Db);
+		assert_eq!(
+			stmt.duration,
+			// Default durations.
+			AccessDuration {
+				grant: None,
+				token: Some(Duration::from_hours(1)),
+				session: None,
+			}
+		);
+		assert_eq!(stmt.comment, Some(Strand("foo".to_string())));
+		assert!(!stmt.if_not_exists);
+		match stmt.kind {
+			AccessType::Bearer(ac) => {
+				assert_eq!(ac.subject, BearerAccessSubject::Record);
+			}
+			_ => panic!(),
+		}
+	}
+	// For record on namespace.
+	{
+		let res = test_parse!(
+			parse_stmt,
+			r#"DEFINE ACCESS a ON NS TYPE BEARER FOR RECORD COMMENT "foo""#
+		);
+		assert!(
+			res.is_err(),
+			"Unexpected successful parsing of bearer access for record at namespace level: {:?}",
+			res
+		);
+	}
+	// For record on root.
+	{
+		let res = test_parse!(
+			parse_stmt,
+			r#"DEFINE ACCESS a ON ROOT TYPE BEARER FOR RECORD COMMENT "foo""#
+		);
+		assert!(
+			res.is_err(),
+			"Unexpected successful parsing of bearer access for record at root level: {:?}",
+			res
+		);
+	}
+	// For user. Grant, session and token duration. With JWT.
+	{
+		let res = test_parse!(
+			parse_stmt,
+			r#"DEFINE ACCESS a ON DB TYPE BEARER FOR USER WITH JWT ALGORITHM HS384 KEY "foo" DURATION FOR GRANT 90d, FOR TOKEN 10s, FOR SESSION 15m"#
+		)
+		.unwrap();
+		assert_eq!(
+			res,
+			Statement::Define(DefineStatement::Access(DefineAccessStatement {
+				name: Ident("a".to_string()),
+				base: Base::Db,
+				kind: AccessType::Bearer(BearerAccess {
+					subject: BearerAccessSubject::User,
+					jwt: JwtAccess {
+						verify: JwtAccessVerify::Key(JwtAccessVerifyKey {
+							alg: Algorithm::Hs384,
+							key: "foo".to_string(),
+						}),
+						issue: Some(JwtAccessIssue {
+							alg: Algorithm::Hs384,
+							// Issuer key matches verification key by default in symmetric algorithms.
+							key: "foo".to_string(),
+						}),
+					},
+				}),
+				authenticate: None,
+				duration: AccessDuration {
+					grant: Some(Duration::from_days(90)),
+					token: Some(Duration::from_secs(10)),
+					session: Some(Duration::from_secs(900)),
+				},
+				comment: None,
+				if_not_exists: false,
+				overwrite: false,
+			})),
+		)
+	}
+	// For record. Grant, session and token duration. With JWT.
+	{
+		let res = test_parse!(
+			parse_stmt,
+			r#"DEFINE ACCESS a ON DB TYPE BEARER FOR RECORD WITH JWT ALGORITHM HS384 KEY "foo" DURATION FOR GRANT 90d, FOR TOKEN 10s, FOR SESSION 15m"#
+		)
+		.unwrap();
+		assert_eq!(
+			res,
+			Statement::Define(DefineStatement::Access(DefineAccessStatement {
+				name: Ident("a".to_string()),
+				base: Base::Db,
+				kind: AccessType::Bearer(BearerAccess {
+					subject: BearerAccessSubject::Record,
+					jwt: JwtAccess {
+						verify: JwtAccessVerify::Key(JwtAccessVerifyKey {
+							alg: Algorithm::Hs384,
+							key: "foo".to_string(),
+						}),
+						issue: Some(JwtAccessIssue {
+							alg: Algorithm::Hs384,
+							// Issuer key matches verification key by default in symmetric algorithms.
+							key: "foo".to_string(),
+						}),
+					},
+				}),
+				authenticate: None,
+				duration: AccessDuration {
+					grant: Some(Duration::from_days(90)),
+					token: Some(Duration::from_secs(10)),
+					session: Some(Duration::from_secs(900)),
+				},
+				comment: None,
+				if_not_exists: false,
+				overwrite: false,
+			})),
+		)
+	}
+}
+
+#[test]
 fn parse_define_param() {
 	let res =
 		test_parse!(parse_stmt, r#"DEFINE PARAM $a VALUE { a: 1, "b": 3 } PERMISSIONS WHERE null"#)
@@ -2490,40 +2732,209 @@ fn parse_upsert() {
 
 #[test]
 fn parse_access_grant() {
-	let res = test_parse!(parse_stmt, r#"ACCESS a ON NAMESPACE GRANT FOR USER b"#).unwrap();
-	assert_eq!(
-		res,
-		Statement::Access(AccessStatement::Grant(AccessStatementGrant {
-			ac: Ident("a".to_string()),
-			base: Some(Base::Ns),
-			subject: Some(access::Subject::User(Ident("b".to_string()))),
-		}))
-	);
+	// User
+	{
+		let res = test_parse!(parse_stmt, r#"ACCESS a ON NAMESPACE GRANT FOR USER b"#).unwrap();
+		assert_eq!(
+			res,
+			Statement::Access(AccessStatement::Grant(AccessStatementGrant {
+				ac: Ident("a".to_string()),
+				base: Some(Base::Ns),
+				subject: access::Subject::User(Ident("b".to_string())),
+			}))
+		);
+	}
+	// Record
+	{
+		let res = test_parse!(parse_stmt, r#"ACCESS a ON NAMESPACE GRANT FOR RECORD b:c"#).unwrap();
+		assert_eq!(
+			res,
+			Statement::Access(AccessStatement::Grant(AccessStatementGrant {
+				ac: Ident("a".to_string()),
+				base: Some(Base::Ns),
+				subject: access::Subject::Record(Thing {
+					tb: "b".to_owned(),
+					id: Id::from("c"),
+				}),
+			}))
+		);
+	}
+}
+
+#[test]
+fn parse_access_show() {
+	// All
+	{
+		let res = test_parse!(parse_stmt, r#"ACCESS a ON DATABASE SHOW ALL"#).unwrap();
+		assert_eq!(
+			res,
+			Statement::Access(AccessStatement::Show(AccessStatementShow {
+				ac: Ident("a".to_string()),
+				base: Some(Base::Db),
+				gr: None,
+				cond: None,
+			}))
+		);
+	}
+	// Grant
+	{
+		let res = test_parse!(parse_stmt, r#"ACCESS a ON DATABASE SHOW GRANT b"#).unwrap();
+		assert_eq!(
+			res,
+			Statement::Access(AccessStatement::Show(AccessStatementShow {
+				ac: Ident("a".to_string()),
+				base: Some(Base::Db),
+				gr: Some(Ident("b".to_string())),
+				cond: None,
+			}))
+		);
+	}
+	// Condition
+	{
+		let res = test_parse!(parse_stmt, r#"ACCESS a ON DATABASE SHOW WHERE true"#).unwrap();
+		assert_eq!(
+			res,
+			Statement::Access(AccessStatement::Show(AccessStatementShow {
+				ac: Ident("a".to_string()),
+				base: Some(Base::Db),
+				gr: None,
+				cond: Some(Cond(Value::Bool(true))),
+			}))
+		);
+	}
 }
 
 #[test]
 fn parse_access_revoke() {
-	let res = test_parse!(parse_stmt, r#"ACCESS a ON DATABASE REVOKE b"#).unwrap();
-	assert_eq!(
-		res,
-		Statement::Access(AccessStatement::Revoke(AccessStatementRevoke {
-			ac: Ident("a".to_string()),
-			base: Some(Base::Db),
-			gr: Ident("b".to_string()),
-		}))
-	);
+	// All
+	{
+		let res = test_parse!(parse_stmt, r#"ACCESS a ON DATABASE REVOKE ALL"#).unwrap();
+		assert_eq!(
+			res,
+			Statement::Access(AccessStatement::Revoke(AccessStatementRevoke {
+				ac: Ident("a".to_string()),
+				base: Some(Base::Db),
+				gr: None,
+				cond: None,
+			}))
+		);
+	}
+	// Grant
+	{
+		let res = test_parse!(parse_stmt, r#"ACCESS a ON DATABASE REVOKE GRANT b"#).unwrap();
+		assert_eq!(
+			res,
+			Statement::Access(AccessStatement::Revoke(AccessStatementRevoke {
+				ac: Ident("a".to_string()),
+				base: Some(Base::Db),
+				gr: Some(Ident("b".to_string())),
+				cond: None,
+			}))
+		);
+	}
+	// Condition
+	{
+		let res = test_parse!(parse_stmt, r#"ACCESS a ON DATABASE REVOKE WHERE true"#).unwrap();
+		assert_eq!(
+			res,
+			Statement::Access(AccessStatement::Revoke(AccessStatementRevoke {
+				ac: Ident("a".to_string()),
+				base: Some(Base::Db),
+				gr: None,
+				cond: Some(Cond(Value::Bool(true))),
+			}))
+		);
+	}
 }
 
 #[test]
-fn parse_access_list() {
-	let res = test_parse!(parse_stmt, r#"ACCESS a LIST"#).unwrap();
-	assert_eq!(
-		res,
-		Statement::Access(AccessStatement::List(AccessStatementList {
-			ac: Ident("a".to_string()),
-			base: None,
-		}))
-	);
+fn parse_access_purge() {
+	// All
+	{
+		let res =
+			test_parse!(parse_stmt, r#"ACCESS a ON DATABASE PURGE EXPIRED, REVOKED"#).unwrap();
+		assert_eq!(
+			res,
+			Statement::Access(AccessStatement::Purge(AccessStatementPurge {
+				ac: Ident("a".to_string()),
+				base: Some(Base::Db),
+				expired: true,
+				revoked: true,
+				grace: Duration::from_millis(0),
+			}))
+		);
+	}
+	// Expired
+	{
+		let res = test_parse!(parse_stmt, r#"ACCESS a ON DATABASE PURGE EXPIRED"#).unwrap();
+		assert_eq!(
+			res,
+			Statement::Access(AccessStatement::Purge(AccessStatementPurge {
+				ac: Ident("a".to_string()),
+				base: Some(Base::Db),
+				expired: true,
+				revoked: false,
+				grace: Duration::from_millis(0),
+			}))
+		);
+	}
+	// Revoked
+	{
+		let res = test_parse!(parse_stmt, r#"ACCESS a ON DATABASE PURGE REVOKED"#).unwrap();
+		assert_eq!(
+			res,
+			Statement::Access(AccessStatement::Purge(AccessStatementPurge {
+				ac: Ident("a".to_string()),
+				base: Some(Base::Db),
+				expired: false,
+				revoked: true,
+				grace: Duration::from_millis(0),
+			}))
+		);
+	}
+	// Expired for 90 days
+	{
+		let res = test_parse!(parse_stmt, r#"ACCESS a ON DATABASE PURGE EXPIRED FOR 90d"#).unwrap();
+		assert_eq!(
+			res,
+			Statement::Access(AccessStatement::Purge(AccessStatementPurge {
+				ac: Ident("a".to_string()),
+				base: Some(Base::Db),
+				expired: true,
+				revoked: false,
+				grace: Duration::from_days(90),
+			}))
+		);
+	}
+	// Revoked for 90 days
+	{
+		let res = test_parse!(parse_stmt, r#"ACCESS a ON DATABASE PURGE REVOKED FOR 90d"#).unwrap();
+		assert_eq!(
+			res,
+			Statement::Access(AccessStatement::Purge(AccessStatementPurge {
+				ac: Ident("a".to_string()),
+				base: Some(Base::Db),
+				expired: false,
+				revoked: true,
+				grace: Duration::from_days(90),
+			}))
+		);
+	}
+	// Invalid for 90 days
+	{
+		let res = test_parse!(parse_stmt, r#"ACCESS a ON DATABASE PURGE REVOKED, EXPIRED FOR 90d"#)
+			.unwrap();
+		assert_eq!(
+			res,
+			Statement::Access(AccessStatement::Purge(AccessStatementPurge {
+				ac: Ident("a".to_string()),
+				base: Some(Base::Db),
+				expired: true,
+				revoked: true,
+				grace: Duration::from_days(90),
+			}))
+		);
+	}
 }
 
 #[test]
