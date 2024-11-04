@@ -5,7 +5,7 @@ use rust_decimal::Decimal;
 use crate::{
 	sql::Number,
 	syn::{
-		error::{bail, error},
+		error::{bail, syntax_error},
 		lexer::compound::{self, NumberKind},
 		parser::{mac::unexpected, GluedValue, ParseResult, Parser},
 		token::{self, t, TokenKind},
@@ -97,18 +97,20 @@ impl TokenValue for Number {
 					NumberKind::Integer => number_str
 						.parse()
 						.map(Number::Int)
-						.map_err(|e| error!("Failed to parse number: {e}", @token.span)),
+						.map_err(|e| syntax_error!("Failed to parse number: {e}", @token.span)),
 					NumberKind::Float => number_str
 						.parse()
 						.map(Number::Float)
-						.map_err(|e| error!("Failed to parse number: {e}", @token.span)),
+						.map_err(|e| syntax_error!("Failed to parse number: {e}", @token.span)),
 					NumberKind::Decimal => {
 						let decimal = if number_str.contains(['e', 'E']) {
-							Decimal::from_scientific(number_str)
-								.map_err(|e| error!("Failed to parser decimal: {e}", @token.span))?
+							Decimal::from_scientific(number_str).map_err(
+								|e| syntax_error!("Failed to parser decimal: {e}", @token.span),
+							)?
 						} else {
-							Decimal::from_str(number_str)
-								.map_err(|e| error!("Failed to parser decimal: {e}", @token.span))?
+							Decimal::from_str(number_str).map_err(
+								|e| syntax_error!("Failed to parser decimal: {e}", @token.span),
+							)?
 						};
 						Ok(Number::Decimal(decimal))
 					}

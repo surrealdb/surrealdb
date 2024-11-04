@@ -16,13 +16,13 @@
 ///     //   |                       ^ your wrong here!
 /// }
 /// ```
-macro_rules! error {
+macro_rules! syntax_error {
 	($format:literal $(, $expr:expr)*
 		$(, @ $span:expr $(=> $label_format:literal $(, $label_expr:expr)* $(,)? )? )*
 	) => {{
 		let __error: $crate::syn::error::SyntaxError = $crate::syn::error::SyntaxError::new(format_args!($format $(, $expr)*));
 		$(
-			$crate::syn::error::error!(#label __error, $span $(=> $label_format$(, $label_expr)*  )?);
+			$crate::syn::error::syntax_error!(#label __error, $span $(=> $label_format$(, $label_expr)*  )?);
 		)*
 		__error
 	}};
@@ -39,10 +39,10 @@ macro_rules! error {
 /// Similar to [`error`] but immediately returns the error.
 macro_rules! bail {
 	($($t:tt)*) => {{
-		let __error = $crate::syn::error::error!($($t)*);
+		let __error = $crate::syn::error::syntax_error!($($t)*);
 		return Err(__error)
 	}};
 }
 
 pub(crate) use bail;
-pub(crate) use error;
+pub(crate) use syntax_error;

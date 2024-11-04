@@ -211,5 +211,5 @@ name = "with_or_without_index"
 harness = false
 
 [[bench]]
-name = "sort"
+name = "order"
 harness = false
