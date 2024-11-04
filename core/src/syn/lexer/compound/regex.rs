@@ -1,7 +1,7 @@
 use regex::Regex;
 
 use crate::syn::{
-	error::{bail, error, SyntaxError},
+	error::{bail, syntax_error, SyntaxError},
 	lexer::Lexer,
 	token::{t, Token},
 };
@@ -44,7 +44,7 @@ pub fn regex(lexer: &mut Lexer, start: Token) -> Result<Regex, SyntaxError> {
 	}
 
 	let span = lexer.current_span();
-	let regex = lexer.scratch.parse().map_err(|e| error!("Invalid regex: {e}", @span))?;
+	let regex = lexer.scratch.parse().map_err(|e| syntax_error!("Invalid regex: {e}", @span))?;
 	lexer.scratch.clear();
 	Ok(regex)
 }
