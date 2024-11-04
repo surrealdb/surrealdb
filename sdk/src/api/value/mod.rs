@@ -77,7 +77,7 @@ impl From<Vec<u8>> for Bytes {
 }
 
 transparent_wrapper!(
-	#[derive( Clone, Eq, Default, PartialEq, Ord, PartialOrd)]
+	#[derive(Clone, Default, Eq, PartialEq, Ord, PartialOrd, Hash)]
 	pub struct Datetime(CoreDatetime)
 );
 impl_serialize_wrapper!(Datetime);
@@ -90,7 +90,7 @@ impl From<DateTime<Utc>> for Datetime {
 
 transparent_wrapper!(
 	/// The key of a [`RecordId`].
-	#[derive( Clone, PartialEq, PartialOrd)]
+	#[derive(Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
 	#[non_exhaustive]
 	pub struct RecordIdKey(CoreId)
 );
@@ -196,7 +196,7 @@ transparent_wrapper!(
 	///
 	/// Record id's consist of a table name and a key.
 	/// For example the record id `user:tkwse1j5o0anqjxonvzx` has the table `user` and the key `tkwse1j5o0anqjxonvzx`.
-	#[derive( Clone, PartialEq, PartialOrd)]
+	#[derive(Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
 	pub struct RecordId(CoreThing)
 );
 impl_serialize_wrapper!(RecordId);
@@ -260,7 +260,7 @@ impl Number {
 }
 
 transparent_wrapper!(
-	#[derive( Clone, Default, PartialEq, PartialOrd)]
+	#[derive(Clone, Default, Eq, PartialEq, Ord, PartialOrd, Hash)]
 	pub struct Value(pub(crate) CoreValue)
 );
 impl_serialize_wrapper!(Value);

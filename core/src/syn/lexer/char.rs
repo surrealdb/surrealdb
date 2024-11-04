@@ -1,5 +1,5 @@
 use crate::syn::{
-	error::error,
+	error::syntax_error,
 	lexer::Lexer,
 	token::{t, Token},
 };
@@ -29,7 +29,7 @@ impl<'a> Lexer<'a> {
 			'×' => t!("×"),
 			'÷' => t!("÷"),
 			x => {
-				let err = error!("Invalid token `{x}`", @self.current_span());
+				let err = syntax_error!("Invalid token `{x}`", @self.current_span());
 				return self.invalid_token(err);
 			}
 		};

@@ -336,7 +336,7 @@ async fn select_mtree_knn_with_condition() -> Result<(), Error> {
 					},
 					{
 						detail: {
-							type: 'Memory'
+							type: 'MemoryOrdered'
 						},
 						operation: 'Collector'
 					}
@@ -408,7 +408,7 @@ async fn select_hnsw_knn_with_condition() -> Result<(), Error> {
 					},
 					{
 						detail: {
-							type: 'Memory'
+							type: 'MemoryOrdered'
 						},
 						operation: 'Collector'
 					}
@@ -474,7 +474,7 @@ async fn select_bruteforce_knn_with_condition() -> Result<(), Error> {
 				},
 				{
 					detail: {
-						type: 'Memory'
+						type: 'MemoryOrdered'
 					},
 					operation: 'Collector'
 				}

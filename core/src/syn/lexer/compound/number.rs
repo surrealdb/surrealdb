@@ -16,7 +16,7 @@ use crate::{
 		Number,
 	},
 	syn::{
-		error::{bail, error, SyntaxError},
+		error::{bail, syntax_error, SyntaxError},
 		lexer::Lexer,
 		token::{t, Span, Token, TokenKind},
 	},
@@ -156,22 +156,24 @@ pub fn number(lexer: &mut Lexer, start: Token) -> Result<Number, SyntaxError> {
 		NumberKind::Integer => number_str
 			.parse()
 			.map(Number::Int)
-			.map_err(|e| error!("Failed to parse number: {e}", @lexer.current_span())),
+			.map_err(|e| syntax_error!("Failed to parse number: {e}", @lexer.current_span())),
 		NumberKind::Float => {
 			let number_str = number_str.trim_end_matches('f');
 			number_str
 				.parse()
 				.map(Number::Float)
-				.map_err(|e| error!("Failed to parse number: {e}", @lexer.current_span()))
+				.map_err(|e| syntax_error!("Failed to parse number: {e}", @lexer.current_span()))
 		}
 		NumberKind::Decimal => {
 			let number_str = number_str.trim_end_matches("dec");
 			let decimal = if number_str.contains(['e', 'E']) {
-				Decimal::from_scientific(number_str)
-					.map_err(|e| error!("Failed to parser decimal: {e}", @lexer.current_span()))?
+				Decimal::from_scientific(number_str).map_err(
+					|e| syntax_error!("Failed to parser decimal: {e}", @lexer.current_span()),
+				)?
 			} else {
-				Decimal::from_str(number_str)
-					.map_err(|e| error!("Failed to parser decimal: {e}", @lexer.current_span()))?
+				Decimal::from_str(number_str).map_err(
+					|e| syntax_error!("Failed to parser decimal: {e}", @lexer.current_span()),
+				)?
 			};
 			Ok(Number::Decimal(decimal))
 		}
@@ -218,7 +220,7 @@ where
 
 	let span = lexer.current_span();
 	let str = prepare_number_str(lexer.span_str(span));
-	str.parse().map_err(|e| error!("Invalid integer: {e}", @span))
+	str.parse().map_err(|e| syntax_error!("Invalid integer: {e}", @span))
 }
 
 /// Generic integer parsing method,
@@ -261,7 +263,8 @@ where
 	}
 
 	let str = prepare_number_str(lexer.span_str(number_span));
-	str.parse().map_err(|e| error!("Invalid floating point number: {e}", @lexer.current_span()))
+	str.parse()
+		.map_err(|e| syntax_error!("Invalid floating point number: {e}", @lexer.current_span()))
 }
 
 pub fn duration(lexer: &mut Lexer, start: Token) -> Result<Duration, SyntaxError> {
@@ -278,7 +281,7 @@ pub fn duration(lexer: &mut Lexer, start: Token) -> Result<Duration, SyntaxError
 
 		let numeric_string = prepare_number_str(lexer.span_str(number_span));
 		let numeric_value: u64 = numeric_string.parse().map_err(
-			|e| error!("Invalid token, failed to parse duration digits: {e}",@lexer.current_span()),
+			|e| syntax_error!("Invalid token, failed to parse duration digits: {e}",@lexer.current_span()),
 		)?;
 
 		let addition = match suffix {
@@ -288,38 +291,38 @@ pub fn duration(lexer: &mut Lexer, start: Token) -> Result<Duration, SyntaxError
 			DurationSuffix::Second => Duration::from_secs(numeric_value),
 			DurationSuffix::Minute => {
 				let minutes = numeric_value.checked_mul(SECONDS_PER_MINUTE).ok_or_else(
-					|| error!("Invalid duartion, value overflowed maximum allowed value", @lexer.current_span()),
+					|| syntax_error!("Invalid duartion, value overflowed maximum allowed value", @lexer.current_span()),
 				)?;
 				Duration::from_secs(minutes)
 			}
 			DurationSuffix::Hour => {
 				let hours = numeric_value.checked_mul(SECONDS_PER_HOUR).ok_or_else(
-					|| error!("Invalid duartion, value overflowed maximum allowed value", @lexer.current_span()),
+					|| syntax_error!("Invalid duartion, value overflowed maximum allowed value", @lexer.current_span()),
 				)?;
 				Duration::from_secs(hours)
 			}
 			DurationSuffix::Day => {
 				let day = numeric_value.checked_mul(SECONDS_PER_DAY).ok_or_else(
-					|| error!("Invalid duartion, value overflowed maximum allowed value", @lexer.current_span()),
+					|| syntax_error!("Invalid duartion, value overflowed maximum allowed value", @lexer.current_span()),
 				)?;
 				Duration::from_secs(day)
 			}
 			DurationSuffix::Week => {
 				let week = numeric_value.checked_mul(SECONDS_PER_WEEK).ok_or_else(
-					|| error!("Invalid duartion, value overflowed maximum allowed value", @lexer.current_span()),
+					|| syntax_error!("Invalid duartion, value overflowed maximum allowed value", @lexer.current_span()),
 				)?;
 				Duration::from_secs(week)
 			}
 			DurationSuffix::Year => {
 				let year = numeric_value.checked_mul(SECONDS_PER_YEAR).ok_or_else(
-					|| error!("Invalid duartion, value overflowed maximum allowed value", @lexer.current_span()),
+					|| syntax_error!("Invalid duartion, value overflowed maximum allowed value", @lexer.current_span()),
 				)?;
 				Duration::from_secs(year)
 			}
 		};
 
 		duration = duration.checked_add(addition).ok_or_else(
-			|| error!("Invalid duration, value overflowed maximum allowed value", @lexer.current_span()),
+			|| syntax_error!("Invalid duration, value overflowed maximum allowed value", @lexer.current_span()),
 		)?;
 
 		match lexer.reader.peek() {
