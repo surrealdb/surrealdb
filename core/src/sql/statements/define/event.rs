@@ -6,12 +6,11 @@ use crate::iam::{Action, ResourceKind};
 use crate::sql::statements::define::DefineTableStatement;
 use crate::sql::statements::info::InfoStructure;
 use crate::sql::{Base, Ident, Strand, Value, Values};
-use uuid::Uuid;
-
 use derive::Store;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display};
+use std::ops::Add;
 
 #[revisioned(revision = 3)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
@@ -73,7 +72,7 @@ impl DefineEventStatement {
 		txn.set(
 			key,
 			DefineTableStatement {
-				cache_events_ts: Uuid::now_v7(),
+				cache_events_ts: tb.cache_events_ts.add(1),
 				..tb.as_ref().clone()
 			},
 			None,

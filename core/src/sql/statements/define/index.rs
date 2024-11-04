@@ -7,13 +7,12 @@ use crate::sql::statements::info::InfoStructure;
 use crate::sql::statements::DefineTableStatement;
 use crate::sql::statements::UpdateStatement;
 use crate::sql::{Base, Ident, Idioms, Index, Output, Part, Strand, Value, Values};
-use uuid::Uuid;
-
 use derive::Store;
 use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display};
+use std::ops::Add;
 use std::sync::Arc;
 
 #[revisioned(revision = 4)]
@@ -99,7 +98,7 @@ impl DefineIndexStatement {
 		txn.set(
 			key,
 			DefineTableStatement {
-				cache_indexes_ts: Uuid::now_v7(),
+				cache_indexes_ts: tb.cache_indexes_ts.add(1),
 				..tb.as_ref().clone()
 			},
 			None,

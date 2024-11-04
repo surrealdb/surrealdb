@@ -8,7 +8,7 @@ use derive::Store;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Formatter};
-use uuid::Uuid;
+use std::ops::Add;
 
 #[revisioned(revision = 2)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
@@ -45,7 +45,7 @@ impl RemoveIndexStatement {
 			txn.set(
 				key,
 				DefineTableStatement {
-					cache_indexes_ts: Uuid::now_v7(),
+					cache_indexes_ts: tb.cache_indexes_ts.add(1),
 					..tb.as_ref().clone()
 				},
 				None,

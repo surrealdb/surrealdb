@@ -11,7 +11,6 @@ use quick_cache::sync::Cache;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use std::sync::LazyLock;
-use uuid::Uuid;
 
 pub static CACHE: LazyLock<Arc<Cache<Key, Entry>>> =
 	LazyLock::new(|| Arc::new(Cache::new(*DEFINITION_CACHE_SIZE)));
@@ -24,11 +23,11 @@ pub(super) struct Evs<'a> {
 	pub ns: &'a str,
 	pub db: &'a str,
 	pub tb: &'a str,
-	pub cache: Uuid,
+	pub cache: u64,
 }
 
 impl<'a> Evs<'a> {
-	pub fn new(ns: &'a str, db: &'a str, tb: &'a str, cache: Uuid) -> Self {
+	pub fn new(ns: &'a str, db: &'a str, tb: &'a str, cache: u64) -> Self {
 		Self {
 			_a: b'e',
 			_b: b'v',
@@ -48,11 +47,11 @@ pub(super) struct Fds<'a> {
 	pub ns: &'a str,
 	pub db: &'a str,
 	pub tb: &'a str,
-	pub cache: Uuid,
+	pub cache: u64,
 }
 
 impl<'a> Fds<'a> {
-	pub fn new(ns: &'a str, db: &'a str, tb: &'a str, cache: Uuid) -> Self {
+	pub fn new(ns: &'a str, db: &'a str, tb: &'a str, cache: u64) -> Self {
 		Self {
 			_a: b'f',
 			_b: b'd',
@@ -72,11 +71,11 @@ pub(super) struct Fts<'a> {
 	pub ns: &'a str,
 	pub db: &'a str,
 	pub tb: &'a str,
-	pub cache: Uuid,
+	pub cache: u64,
 }
 
 impl<'a> Fts<'a> {
-	pub fn new(ns: &'a str, db: &'a str, tb: &'a str, cache: Uuid) -> Self {
+	pub fn new(ns: &'a str, db: &'a str, tb: &'a str, cache: u64) -> Self {
 		Self {
 			_a: b'f',
 			_b: b't',
@@ -96,11 +95,11 @@ pub(super) struct Ixs<'a> {
 	pub ns: &'a str,
 	pub db: &'a str,
 	pub tb: &'a str,
-	pub cache: Uuid,
+	pub cache: u64,
 }
 
 impl<'a> Ixs<'a> {
-	pub fn new(ns: &'a str, db: &'a str, tb: &'a str, cache: Uuid) -> Self {
+	pub fn new(ns: &'a str, db: &'a str, tb: &'a str, cache: u64) -> Self {
 		Self {
 			_a: b'i',
 			_b: b'x',
@@ -120,11 +119,11 @@ pub(super) struct Lvs<'a> {
 	pub ns: &'a str,
 	pub db: &'a str,
 	pub tb: &'a str,
-	pub cache: Uuid,
+	pub cache: u64,
 }
 
 impl<'a> Lvs<'a> {
-	pub fn new(ns: &'a str, db: &'a str, tb: &'a str, cache: Uuid) -> Self {
+	pub fn new(ns: &'a str, db: &'a str, tb: &'a str, cache: u64) -> Self {
 		Self {
 			_a: b'l',
 			_b: b'v',
