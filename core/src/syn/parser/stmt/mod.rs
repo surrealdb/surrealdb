@@ -7,11 +7,12 @@ use crate::sql::statements::show::{ShowSince, ShowStatement};
 use crate::sql::statements::sleep::SleepStatement;
 use crate::sql::statements::{
 	access::{
-		AccessStatement, AccessStatementGrant, AccessStatementList, AccessStatementRevoke, Subject,
+		AccessStatement, AccessStatementGrant, AccessStatementPurge, AccessStatementRevoke,
+		AccessStatementShow, Subject,
 	},
 	KillStatement, LiveStatement, OptionStatement, SetStatement, ThrowStatement,
 };
-use crate::sql::{Fields, Ident, Param};
+use crate::sql::{Duration, Fields, Ident, Param};
 use crate::syn::lexer::compound;
 use crate::syn::parser::enter_query_recursion;
 use crate::syn::token::{t, Glued, TokenKind};
@@ -94,7 +95,7 @@ impl Parser<'_> {
 					);
 				}
 				self.pop_peek();
-				self.parse_access().map(Statement::Access)
+				ctx.run(|ctx| self.parse_access(ctx)).await.map(Statement::Access)
 			}
 			t!("ALTER") => {
 				self.pop_peek();
@@ -353,42 +354,139 @@ impl Parser<'_> {
 	}
 
 	/// Parsers an access statement.
-	fn parse_access(&mut self) -> ParseResult<AccessStatement> {
+	async fn parse_access(&mut self, ctx: &mut Stk) -> ParseResult<AccessStatement> {
 		let ac = self.next_token_value()?;
 		let base = self.eat(t!("ON")).then(|| self.parse_base(false)).transpose()?;
 		let peek = self.peek();
 		match peek.kind {
 			t!("GRANT") => {
 				self.pop_peek();
-				// TODO(gguillemas): Implement rest of the syntax.
 				expected!(self, t!("FOR"));
-				expected!(self, t!("USER"));
-				let user = self.next_token_value()?;
-				Ok(AccessStatement::Grant(AccessStatementGrant {
-					ac,
-					base,
-					subject: Some(Subject::User(user)),
-				}))
+				match self.peek_kind() {
+					t!("USER") => {
+						self.pop_peek();
+						let user = self.next_token_value()?;
+						Ok(AccessStatement::Grant(AccessStatementGrant {
+							ac,
+							base,
+							subject: Subject::User(user),
+						}))
+					}
+					t!("RECORD") => {
+						self.pop_peek();
+						let rid = ctx.run(|ctx| self.parse_thing(ctx)).await?;
+						Ok(AccessStatement::Grant(AccessStatementGrant {
+							ac,
+							base,
+							subject: Subject::Record(rid),
+						}))
+					}
+					_ => unexpected!(self, peek, "either USER or RECORD"),
+				}
 			}
-			t!("LIST") => {
+			t!("SHOW") => {
 				self.pop_peek();
-				// TODO(gguillemas): Implement rest of the syntax.
-				Ok(AccessStatement::List(AccessStatementList {
-					ac,
-					base,
-				}))
+				match self.peek_kind() {
+					t!("ALL") => {
+						self.pop_peek();
+						Ok(AccessStatement::Show(AccessStatementShow {
+							ac,
+							base,
+							..Default::default()
+						}))
+					}
+					t!("GRANT") => {
+						self.pop_peek();
+						let gr = Some(self.next_token_value()?);
+						Ok(AccessStatement::Show(AccessStatementShow {
+							ac,
+							base,
+							gr,
+							..Default::default()
+						}))
+					}
+					t!("WHERE") => {
+						let cond = self.try_parse_condition(ctx).await?;
+						Ok(AccessStatement::Show(AccessStatementShow {
+							ac,
+							base,
+							cond,
+							..Default::default()
+						}))
+					}
+					_ => unexpected!(self, peek, "one of ALL, GRANT or WHERE"),
+				}
 			}
 			t!("REVOKE") => {
 				self.pop_peek();
-				let gr = self.next_token_value()?;
-				Ok(AccessStatement::Revoke(AccessStatementRevoke {
+				match self.peek_kind() {
+					t!("ALL") => {
+						self.pop_peek();
+						Ok(AccessStatement::Revoke(AccessStatementRevoke {
+							ac,
+							base,
+							..Default::default()
+						}))
+					}
+					t!("GRANT") => {
+						self.pop_peek();
+						let gr = Some(self.next_token_value()?);
+						Ok(AccessStatement::Revoke(AccessStatementRevoke {
+							ac,
+							base,
+							gr,
+							..Default::default()
+						}))
+					}
+					t!("WHERE") => {
+						let cond = self.try_parse_condition(ctx).await?;
+						Ok(AccessStatement::Revoke(AccessStatementRevoke {
+							ac,
+							base,
+							cond,
+							..Default::default()
+						}))
+					}
+					_ => unexpected!(self, peek, "one of ALL, GRANT or WHERE"),
+				}
+			}
+			t!("PURGE") => {
+				self.pop_peek();
+				let mut expired = false;
+				let mut revoked = false;
+				loop {
+					match self.peek_kind() {
+						t!("EXPIRED") => {
+							self.pop_peek();
+							expired = true;
+						}
+						t!("REVOKED") => {
+							self.pop_peek();
+							revoked = true;
+						}
+						_ => {
+							if !expired && !revoked {
+								unexpected!(self, peek, "EXPIRED, REVOKED or both");
+							}
+							break;
+						}
+					}
+					self.eat(t!(","));
+				}
+				let grace = if self.eat(t!("FOR")) {
+					self.next_token_value()?
+				} else {
+					Duration::default()
+				};
+				Ok(AccessStatement::Purge(AccessStatementPurge {
 					ac,
 					base,
-					gr,
+					expired,
+					revoked,
+					grace,
 				}))
 			}
-			// TODO(gguillemas): Implement rest of the statements.
-			_ => unexpected!(self, peek, "an implemented statement"),
+			_ => unexpected!(self, peek, "one of GRANT, LIST, REVOKE or PURGE"),
 		}
 	}
 
