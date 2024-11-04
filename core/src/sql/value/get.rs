@@ -283,6 +283,8 @@ impl Value {
 						// If we are chaining graph parts, we need to make sure to flatten the result
 						let mapped = match (path.first(), path.get(1)) {
 							(Some(Part::Graph(_)), Some(Part::Graph(_))) => mapped.flatten(),
+							(Some(Part::Graph(_)), Some(Part::Where(_))) => mapped.flatten(),
+							(Some(Part::Where(_)), Some(Part::Graph(_))) => mapped.flatten(),
 							_ => mapped,
 						};
 
