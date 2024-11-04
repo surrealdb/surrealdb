@@ -462,6 +462,7 @@ mod api_integration {
 		include!("api/live.rs");
 		include!("api/version.rs");
 		include!("api/backup.rs");
+		include!("api/backup_version.rs");
 	}
 
 	#[cfg(feature = "protocol-http")]
