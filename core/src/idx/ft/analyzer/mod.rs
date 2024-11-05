@@ -329,7 +329,7 @@ mod tests {
 		let Some(Statement::Define(DefineStatement::Analyzer(az))) = stmt.0 .0.pop() else {
 			panic!()
 		};
-		let a = Analyzer::new(Arc::new(az));
+		let a = Analyzer::new(ctx.get_index_stores(), Arc::new(az)).unwrap();
 
 		let mut stack = reblessive::TreeStack::new();
 
