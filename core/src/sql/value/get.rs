@@ -352,14 +352,14 @@ impl Value {
 											.run(|stk| v.get(stk, ctx, opt, None, path.next()))
 											.await?;
 										// We only want to flatten the results if the next part
-										// is a graph or where part. Reason being that if we flatten 
-										// fields, the results of those fields (which could be arrays) 
+										// is a graph or where part. Reason being that if we flatten
+										// fields, the results of those fields (which could be arrays)
 										// will be merged into each other. So [1, 2, 3], [4, 5, 6] would
 										// become [1, 2, 3, 4, 5, 6]. This slice access won't panic
 										// as we have already checked the length of the path.
 										Ok(match path[1] {
 											Part::Graph(_) | Part::Where(_) => res.flatten(),
-											_ => res
+											_ => res,
 										})
 									}
 								}

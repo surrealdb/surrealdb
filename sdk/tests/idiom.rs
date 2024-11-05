@@ -107,10 +107,12 @@ async fn idiom_graph_with_filter_should_be_flattened() -> Result<(), Error> {
 		.expect_val("[person:2]")?
 		.expect_val("[[person:2]]")?
 		.expect_val("[[person:3]]")?
-		.expect_val("[
+		.expect_val(
+			"[
 			{likes: [person:2]},
 			{likes: [person:3]},
 			{likes: []},
-		]")?;
+		]",
+		)?;
 	Ok(())
 }
