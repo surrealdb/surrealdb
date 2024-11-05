@@ -34,7 +34,7 @@ impl Mapper {
 				let key = VariableSizeKey::from_str(word)
 					.map_err(|_| Error::Internal(format!("Can't create key from {word}")))?;
 				terms
-					.insert(&key, lemme.to_string(), 0, 0)
+					.insert_unchecked(&key, lemme.to_string(), 0, 0)
 					.map_err(|e| Error::Internal(e.to_string()))?;
 			}
 		}
