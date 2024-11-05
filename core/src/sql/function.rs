@@ -275,7 +275,7 @@ impl Function {
 				// Adjust context if run_as is present
 				let mut opt = opt.clone();
 				if let Some(run_as) = &val.run_as {
-					let auth = run_as.to_auth(&ctx, &opt).await?;
+					let auth = run_as.to_auth(ctx, &opt).await?;
 					opt = opt.with_auth(auth.into());
 				}
 				// Get the number of function arguments

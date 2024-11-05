@@ -192,10 +192,8 @@ impl Parser<'_> {
 						Base::Root
 					} else if self.eat(t!("NAMESPACE")) {
 						Base::Ns
-					} else if self.eat(t!("DATABASE")) {
-						Base::Db
 					} else {
-						Base::Db // 默认值为 DATABASE
+						Base::Db // DATABASE is default level.
 					};
 					let kind = if self.eat(t!("ROLES")) {
 						let mut roles = vec![self.next_token_value()?];
