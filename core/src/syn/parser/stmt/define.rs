@@ -125,6 +125,7 @@ impl Parser<'_> {
 		Ok(res)
 	}
 
+	#[allow(clippy::if_same_then_else)]
 	pub async fn parse_define_function(
 		&mut self,
 		ctx: &mut Stk,
@@ -192,6 +193,8 @@ impl Parser<'_> {
 						Base::Root
 					} else if self.eat(t!("NAMESPACE")) {
 						Base::Ns
+					} else if self.eat(t!("DATABASE")) {
+						Base::Db
 					} else {
 						Base::Db // DATABASE is default level.
 					};
