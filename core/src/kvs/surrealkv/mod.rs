@@ -1,12 +1,8 @@
 #![cfg(feature = "kv-surrealkv")]
 
-mod cnf;
-
 use crate::err::Error;
 use crate::key::debug::Sprintable;
-use crate::kvs::Check;
-use crate::kvs::Key;
-use crate::kvs::Val;
+use crate::kvs::{Check, Key, Val, Version};
 use std::fmt::Debug;
 use std::ops::Range;
 use surrealkv::Options;
@@ -63,17 +59,26 @@ impl Drop for Transaction {
 impl Datastore {
 	/// Open a new database
 	pub(crate) async fn new(path: &str) -> Result<Datastore, Error> {
+		// Create new configuration options
 		let mut opts = Options::new();
+		// Ensure versions are enabled
+		opts.enable_versions = true;
+		// Ensure persistence is enabled
+		opts.disk_persistence = true;
+		// Set the data storage directory
 		opts.dir = path.to_string().into();
-		opts.max_key_size = 10000;
-		opts.max_value_size = *cnf::SURREALKV_MAX_VALUE_SIZE;
-
+		// Create a new datastore
 		match Store::new(opts) {
 			Ok(db) => Ok(Datastore {
 				db,
 			}),
 			Err(e) => Err(Error::Ds(e.to_string())),
 		}
+	}
+	/// Shutdown the database
+	pub(crate) async fn shutdown(&self) -> Result<(), Error> {
+		// Nothing to do here
+		Ok(())
 	}
 	/// Start a new transaction
 	pub(crate) async fn transaction(&self, write: bool, _: bool) -> Result<Transaction, Error> {
@@ -171,13 +176,11 @@ impl super::api::Transaction for Transaction {
 		if self.done {
 			return Err(Error::TxFinished);
 		}
-
 		// Fetch the value from the database.
 		let res = match version {
 			Some(ts) => self.inner.get_at_ts(&key.into(), ts)?,
 			None => self.inner.get(&key.into())?,
 		};
-
 		// Return result
 		Ok(res)
 	}
@@ -281,7 +284,7 @@ impl super::api::Transaction for Transaction {
 			return Err(Error::TxReadonly);
 		}
 		// Remove the key
-		self.inner.delete(&key.into())?;
+		self.inner.soft_delete(&key.into())?;
 		// Return result
 		Ok(())
 	}
@@ -306,8 +309,8 @@ impl super::api::Transaction for Transaction {
 		let chk = chk.map(Into::into);
 		// Delete the key if valid
 		match (self.inner.get(&key)?, chk) {
-			(Some(v), Some(w)) if v == w => self.inner.delete(&key)?,
-			(None, None) => self.inner.delete(&key)?,
+			(Some(v), Some(w)) if v == w => self.inner.soft_delete(&key)?,
+			(None, None) => self.inner.soft_delete(&key)?,
 			_ => return Err(Error::TxConditionNotMet),
 		};
 		// Return result
@@ -359,7 +362,6 @@ impl super::api::Transaction for Transaction {
 		let beg = rng.start.into();
 		let end = rng.end.into();
 		let range = beg.as_slice()..end.as_slice();
-
 		// Retrieve the scan range
 		let res = match version {
 			Some(ts) => self.inner.scan_at_ts(range, ts, Some(limit as usize))?,
@@ -370,6 +372,36 @@ impl super::api::Transaction for Transaction {
 				.map(|kv| (kv.0, kv.1))
 				.collect(),
 		};
+		// Return result
+		Ok(res)
+	}
+
+	/// Retrieve all the versions from a range of keys from the databases
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.sprint()))]
+	async fn scan_all_versions<K>(
+		&mut self,
+		rng: Range<K>,
+		limit: u32,
+	) -> Result<Vec<(Key, Val, Version, bool)>, Error>
+	where
+		K: Into<Key> + Sprintable + Debug,
+	{
+		if self.done {
+			return Err(Error::TxFinished);
+		}
+
+		// Set the key range
+		let beg = rng.start.into();
+		let end = rng.end.into();
+		let range = beg.as_slice()..end.as_slice();
+
+		// Retrieve the scan range
+		let res = self
+			.inner
+			.scan_all_versions(range, Some(limit as usize))?
+			.into_iter()
+			.map(|kv| (kv.0, kv.1, kv.2, kv.3))
+			.collect();
 
 		Ok(res)
 	}

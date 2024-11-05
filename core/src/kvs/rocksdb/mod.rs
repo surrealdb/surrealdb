@@ -4,9 +4,7 @@ mod cnf;
 
 use crate::err::Error;
 use crate::key::debug::Sprintable;
-use crate::kvs::Check;
-use crate::kvs::Key;
-use crate::kvs::Val;
+use crate::kvs::{Check, Key, Val, Version};
 use rocksdb::{
 	DBCompactionStyle, DBCompressionType, FlushOptions, LogLevel, OptimisticTransactionDB,
 	OptimisticTransactionOptions, Options, ReadOptions, WriteOptions,
@@ -142,6 +140,11 @@ impl Datastore {
 		Ok(Datastore {
 			db: Arc::pin(OptimisticTransactionDB::open(&opts, path)?),
 		})
+	}
+	/// Shutdown the database
+	pub(crate) async fn shutdown(&self) -> Result<(), Error> {
+		// Nothing to do here
+		Ok(())
 	}
 	/// Start a new transaction
 	pub(crate) async fn transaction(&self, write: bool, _: bool) -> Result<Transaction, Error> {
@@ -540,6 +543,24 @@ impl super::api::Transaction for Transaction {
 		}
 		// Return result
 		Ok(res)
+	}
+
+	/// Retrieve all the versions from a range of keys from the databases
+	/// This is a no-op for rocksdb database
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.sprint()))]
+	async fn scan_all_versions<K>(
+		&mut self,
+		rng: Range<K>,
+		limit: u32,
+	) -> Result<Vec<(Key, Val, Version, bool)>, Error>
+	where
+		K: Into<Key> + Sprintable + Debug,
+	{
+		// Check to see if transaction is closed
+		if self.done {
+			return Err(Error::TxFinished);
+		}
+		Err(Error::UnsupportedVersionedQueries)
 	}
 }
 

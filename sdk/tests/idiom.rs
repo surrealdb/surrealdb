@@ -83,3 +83,28 @@ async fn idiom_select_all_from_nested_array_prop() -> Result<(), Error> {
 		.expect_val("[{id: a:2}]")?;
 	Ok(())
 }
+
+#[tokio::test]
+async fn idiom_graph_with_filter_should_be_flattened() -> Result<(), Error> {
+	let sql = r#"
+    	CREATE person:1, person:2, person:3;
+		RELATE person:1->likes:1->person:2;
+		RELATE person:2->likes:2->person:3;
+		person:1->likes->person->likes->person;
+		person:1->likes->person[?true]->likes->person;
+		person:1->likes->person[?true];
+		[person:1][?true]->likes->person;
+		[person:1]->likes->person[?true]->likes->person;
+	"#;
+	Test::new(sql)
+		.await?
+		.expect_val("[{id: person:1}, {id: person:2}, {id: person:3}]")?
+		.expect_val("[{id: likes:1, in: person:1, out: person:2}]")?
+		.expect_val("[{id: likes:2, in: person:2, out: person:3}]")?
+		.expect_val("[person:3]")?
+		.expect_val("[person:3]")?
+		.expect_val("[person:2]")?
+		.expect_val("[[person:2]]")?
+		.expect_val("[[person:3]]")?;
+	Ok(())
+}

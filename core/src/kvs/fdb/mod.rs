@@ -8,6 +8,7 @@ use crate::kvs::savepoint::{SaveOperation, SavePointImpl, SavePoints, SavePrepar
 use crate::kvs::Check;
 use crate::kvs::Key;
 use crate::kvs::Val;
+use crate::kvs::Version;
 use crate::vs::Versionstamp;
 use foundationdb::options::DatabaseOption;
 use foundationdb::options::MutationType;
@@ -94,10 +95,10 @@ impl Datastore {
 	/// for more information on cluster connection files.
 	pub(crate) async fn new(path: &str) -> Result<Datastore, Error> {
 		// Initialize the FoundationDB Client API
-		static FDBNET: LazyLock<Arc<foundationdb::api::NetworkAutoStop>> =
+		static NETWORK: LazyLock<Arc<foundationdb::api::NetworkAutoStop>> =
 			LazyLock::new(|| Arc::new(unsafe { foundationdb::boot() }));
 		// Store the network cancellation handle
-		let _fdbnet = (*FDBNET).clone();
+		let _fdbnet = (*NETWORK).clone();
 		// Configure and setup the database
 		match foundationdb::Database::from_path(path) {
 			Ok(db) => {
@@ -125,6 +126,11 @@ impl Datastore {
 			}
 			Err(e) => Err(Error::Ds(e.to_string())),
 		}
+	}
+	/// Shutdown the database
+	pub(crate) async fn shutdown(&self) -> Result<(), Error> {
+		// Nothing to do here
+		Ok(())
 	}
 	/// Start a new transaction
 	pub(crate) async fn transaction(&self, write: bool, lock: bool) -> Result<Transaction, Error> {
@@ -645,6 +651,24 @@ impl super::api::Transaction for Transaction {
 		self.inner.as_ref().unwrap().atomic_op(&key, &val, MutationType::SetVersionstampedKey);
 		// Return result
 		Ok(())
+	}
+
+	/// Retrieve all the versions from a range of keys from the databases
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.sprint()))]
+	async fn scan_all_versions<K>(
+		&mut self,
+		rng: Range<K>,
+		limit: u32,
+	) -> Result<Vec<(Key, Val, Version, bool)>, Error>
+	where
+		K: Into<Key> + Sprintable + Debug,
+	{
+		// Check to see if transaction is closed
+		if self.done {
+			return Err(Error::TxFinished);
+		}
+
+		Err(Error::UnsupportedVersionedQueries)
 	}
 }
 

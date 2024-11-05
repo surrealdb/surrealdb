@@ -234,12 +234,6 @@ impl Options {
 		self.futures = Futures::Never;
 	}
 
-	/// Specify if we should process field projections
-	pub fn with_projections(mut self, projections: bool) -> Self {
-		self.projections = projections;
-		self
-	}
-
 	/// Create a new Options object with auth enabled
 	pub fn with_auth_enabled(mut self, auth_enabled: bool) -> Self {
 		self.auth_enabled = auth_enabled;
@@ -324,20 +318,6 @@ impl Options {
 					false => Futures::Disabled,
 				},
 			},
-			..*self
-		}
-	}
-
-	/// Create a new Options object for a subquery
-	pub fn new_with_projections(&self, projections: bool) -> Self {
-		Self {
-			sender: self.sender.clone(),
-			auth: self.auth.clone(),
-			ns: self.ns.clone(),
-			db: self.db.clone(),
-			force: self.force.clone(),
-			futures: self.futures.clone(),
-			projections,
 			..*self
 		}
 	}

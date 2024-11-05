@@ -44,7 +44,7 @@ impl RelateStatement {
 		// Create a new iterator
 		let mut i = Iterator::new();
 		// Ensure futures are stored
-		let opt = &opt.new_with_futures(false).with_projections(false);
+		let opt = &opt.new_with_futures(false);
 		// Check if there is a timeout
 		let ctx = match self.timeout.as_ref() {
 			Some(timeout) => {

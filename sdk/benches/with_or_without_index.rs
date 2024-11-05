@@ -37,7 +37,7 @@ struct Input {
 }
 
 async fn prepare_data() -> Input {
-	#[cfg(feature = "kv-mem")]
+	#[cfg(not(feature = "kv-rocksdb"))]
 	let path = "memory";
 	#[cfg(feature = "kv-rocksdb")]
 	let path = format!(

@@ -1226,7 +1226,6 @@ async fn changefeed() {
 	DEFINE TABLE user CHANGEFEED 1h;
 	";
 	let response = db.query(sql).await.unwrap();
-	drop(permit);
 	response.check().unwrap();
 	// Create and update users
 	let sql = "
@@ -1261,6 +1260,7 @@ async fn changefeed() {
         SHOW CHANGES FOR TABLE user SINCE 0 LIMIT 10;
     ";
 	let mut response = db.query(sql).await.unwrap();
+	drop(permit);
 	let v: Value = response.take(0).unwrap();
 	let CoreValue::Array(array) = v.into_inner() else {
 		panic!()

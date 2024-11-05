@@ -663,7 +663,7 @@ impl Datastore {
 		Ok(())
 	}
 
-	/// Run the background task to perform changeed garbage collection
+	/// Run the background task to perform changefeed garbage collection
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::ds", skip(self))]
 	pub async fn changefeed_process(&self) -> Result<(), Error> {
 		// Output function invocation details to logs
@@ -683,7 +683,7 @@ impl Datastore {
 		Ok(())
 	}
 
-	/// Run the background task to perform changeed garbage collection
+	/// Run the background task to perform changefeed garbage collection
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::ds", skip(self))]
 	pub async fn changefeed_process_at(&self, ts: u64) -> Result<(), Error> {
 		// Output function invocation details to logs
@@ -694,6 +694,34 @@ impl Datastore {
 		self.changefeed_cleanup(ts).await?;
 		// Everything ok
 		Ok(())
+	}
+
+	/// Run the datastore shutdown tasks, perfoming any necessary cleanup
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::ds", skip(self))]
+	pub async fn shutdown(&self) -> Result<(), Error> {
+		// Output function invocation details to logs
+		trace!(target: TARGET, "Running datastore shutdown operations");
+		// Delete this datastore from the cluster
+		self.delete_node(self.id).await?;
+		// Run any storag engine shutdown tasks
+		match self.transaction_factory.flavor.as_ref() {
+			#[cfg(feature = "kv-mem")]
+			DatastoreFlavor::Mem(v) => v.shutdown().await,
+			#[cfg(feature = "kv-rocksdb")]
+			DatastoreFlavor::RocksDB(v) => v.shutdown().await,
+			#[cfg(feature = "kv-indxdb")]
+			DatastoreFlavor::IndxDB(v) => v.shutdown().await,
+			#[cfg(feature = "kv-tikv")]
+			DatastoreFlavor::TiKV(v) => v.shutdown().await,
+			#[cfg(feature = "kv-fdb")]
+			DatastoreFlavor::FoundationDB(v) => v.shutdown().await,
+			#[cfg(feature = "kv-surrealkv")]
+			DatastoreFlavor::SurrealKV(v) => v.shutdown().await,
+			#[cfg(feature = "kv-surrealcs")]
+			DatastoreFlavor::SurrealCS(v) => v.shutdown().await,
+			#[allow(unreachable_patterns)]
+			_ => unreachable!(),
+		}
 	}
 
 	/// Create a new transaction on this datastore
@@ -1121,10 +1149,12 @@ impl Datastore {
 		let (ns, db) = crate::iam::check::check_ns_db(sess)?;
 		// Create a new readonly transaction
 		let txn = self.transaction(Read, Optimistic).await?;
+		// Create a default export config
+		let cfg = super::export::Config::default();
 		// Return an async export job
 		Ok(async move {
 			// Process the export
-			txn.export(&ns, &db, chn).await?;
+			txn.export(&ns, &db, cfg, chn).await?;
 			// Everything ok
 			Ok(())
 		})

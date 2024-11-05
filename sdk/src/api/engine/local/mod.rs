@@ -31,9 +31,12 @@ use crate::{
 	value::Notification,
 };
 use channel::Sender;
+#[cfg(not(target_arch = "wasm32"))]
 use futures::stream::poll_fn;
 use indexmap::IndexMap;
+#[cfg(not(target_arch = "wasm32"))]
 use std::pin::pin;
+#[cfg(not(target_arch = "wasm32"))]
 use std::task::{ready, Poll};
 use std::{
 	collections::{BTreeMap, HashMap},
@@ -54,6 +57,7 @@ use surrealdb_core::{
 		Data, Field, Output, Query, Statement, Value as CoreValue,
 	},
 };
+#[cfg(not(target_arch = "wasm32"))]
 use tokio_util::bytes::BytesMut;
 use uuid::Uuid;
 
@@ -334,9 +338,9 @@ pub struct FDb;
 /// # #[tokio::main]
 /// # async fn main() -> surrealdb::Result<()> {
 /// use surrealdb::Surreal;
-/// use surrealdb::engine::local::SurrealKV;
+/// use surrealdb::engine::local::SurrealKv;
 ///
-/// let db = Surreal::new::<SurrealKV>("path/to/database-folder").await?;
+/// let db = Surreal::new::<SurrealKv>("path/to/database-folder").await?;
 /// # Ok(())
 /// # }
 /// ```
@@ -348,17 +352,22 @@ pub struct FDb;
 /// # async fn main() -> surrealdb::Result<()> {
 /// use surrealdb::opt::Config;
 /// use surrealdb::Surreal;
-/// use surrealdb::engine::local::SurrealKV;
+/// use surrealdb::engine::local::SurrealKv;
 ///
 /// let config = Config::default().strict();
-/// let db = Surreal::new::<SurrealKV>(("path/to/database-folder", config)).await?;
+/// let db = Surreal::new::<SurrealKv>(("path/to/database-folder", config)).await?;
 /// # Ok(())
 /// # }
 /// ```
 #[cfg(feature = "kv-surrealkv")]
 #[cfg_attr(docsrs, doc(cfg(feature = "kv-surrealkv")))]
 #[derive(Debug)]
-pub struct SurrealKV;
+pub struct SurrealKv;
+
+/// SurrealKV database
+#[deprecated(note = "Incorrect case, use SurrealKv instead")]
+#[cfg(feature = "kv-surrealkv")]
+pub type SurrealKV = SurrealKv;
 
 /// SurrealCS database
 ///
@@ -370,9 +379,9 @@ pub struct SurrealKV;
 /// # #[tokio::main]
 /// # async fn main() -> surrealdb::Result<()> {
 /// use surrealdb::Surreal;
-/// use surrealdb::engine::local::SurrealCS;
+/// use surrealdb::engine::local::SurrealCs;
 ///
-/// let db = Surreal::new::<SurrealCS>("path/to/database-folder").await?;
+/// let db = Surreal::new::<SurrealCs>("path/to/database-folder").await?;
 /// # Ok(())
 /// # }
 /// ```
@@ -384,17 +393,22 @@ pub struct SurrealKV;
 /// # async fn main() -> surrealdb::Result<()> {
 /// use surrealdb::opt::Config;
 /// use surrealdb::Surreal;
-/// use surrealdb::engine::local::SurrealCS;
+/// use surrealdb::engine::local::SurrealCs;
 ///
 /// let config = Config::default().strict();
-/// let db = Surreal::new::<SurrealCS>(("path/to/database-folder", config)).await?;
+/// let db = Surreal::new::<SurrealCs>(("path/to/database-folder", config)).await?;
 /// # Ok(())
 /// # }
 /// ```
 #[cfg(feature = "kv-surrealcs")]
 #[cfg_attr(docsrs, doc(cfg(feature = "kv-surrealcs")))]
 #[derive(Debug)]
-pub struct SurrealCS;
+pub struct SurrealCs;
+
+/// SurrealCS database
+#[deprecated(note = "Incorrect case, use SurrealCs instead")]
+#[cfg(feature = "kv-surrealcs")]
+pub type SurrealCS = SurrealCs;
 
 /// An embedded database
 #[derive(Debug, Clone)]

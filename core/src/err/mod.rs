@@ -353,7 +353,7 @@ pub enum Error {
 		value: String,
 	},
 
-	// The cluster node does not exist
+	/// The cluster node does not exist
 	#[error("The node '{value}' does not exist")]
 	NdNotFound {
 		value: String,
@@ -1039,7 +1039,7 @@ pub enum Error {
 	},
 
 	/// The requested root access grant does not exist
-	#[error("The root access grant '{gr}' does not exist")]
+	#[error("The root access grant '{gr}' does not exist for '{ac}'")]
 	AccessGrantRootNotFound {
 		ac: String,
 		gr: String,
@@ -1053,7 +1053,7 @@ pub enum Error {
 	},
 
 	/// The requested namespace access grant does not exist
-	#[error("The access grant '{gr}' does not exist in the namespace '{ns}'")]
+	#[error("The access grant '{gr}' does not exist for '{ac}' in the namespace '{ns}'")]
 	AccessGrantNsNotFound {
 		ac: String,
 		gr: String,
@@ -1069,7 +1069,7 @@ pub enum Error {
 	},
 
 	/// The requested database access grant does not exist
-	#[error("The access grant '{gr}' does not exist in the database '{db}'")]
+	#[error("The access grant '{gr}' does not exist for '{ac}' in the database '{db}'")]
 	AccessGrantDbNotFound {
 		ac: String,
 		gr: String,
@@ -1170,8 +1170,11 @@ pub enum Error {
 	#[error("Failed to compute: \"{0}\", as the operation results in an overflow.")]
 	ArithmeticOverflow(String),
 
-	#[error("Recieved error while streaming query: {0}.")]
+	#[error("Received error while streaming query: {0}.")]
 	QueryStream(String),
+
+	#[error("Error while ordering a result: {0}.")]
+	OrderingError(String),
 }
 
 impl From<Error> for String {
@@ -1198,14 +1201,17 @@ impl From<regex::Error> for Error {
 	}
 }
 
-#[cfg(feature = "kv-mem")]
-impl From<echodb::err::Error> for Error {
-	fn from(e: echodb::err::Error) -> Error {
-		match e {
-			echodb::err::Error::KeyAlreadyExists => Error::TxKeyAlreadyExists,
-			echodb::err::Error::ValNotExpectedValue => Error::TxConditionNotMet,
-			_ => Error::Tx(e.to_string()),
-		}
+#[cfg(any(feature = "kv-mem", feature = "kv-surrealkv"))]
+impl From<surrealkv::Error> for Error {
+	fn from(e: surrealkv::Error) -> Error {
+		Error::Tx(e.to_string())
+	}
+}
+
+#[cfg(feature = "kv-rocksdb")]
+impl From<rocksdb::Error> for Error {
+	fn from(e: rocksdb::Error) -> Error {
+		Error::Tx(e.to_string())
 	}
 }
 
@@ -1229,20 +1235,6 @@ impl From<tikv::Error> for Error {
 			tikv::Error::RegionError(re) if re.raft_entry_too_large.is_some() => Error::TxTooLarge,
 			_ => Error::Tx(e.to_string()),
 		}
-	}
-}
-
-#[cfg(feature = "kv-rocksdb")]
-impl From<rocksdb::Error> for Error {
-	fn from(e: rocksdb::Error) -> Error {
-		Error::Tx(e.to_string())
-	}
-}
-
-#[cfg(feature = "kv-surrealkv")]
-impl From<surrealkv::Error> for Error {
-	fn from(e: surrealkv::Error) -> Error {
-		Error::Tx(e.to_string())
 	}
 }
 
@@ -1300,6 +1292,18 @@ impl Serialize for Error {
 	}
 }
 impl Error {
+	/// Check if this error is related to schema checks
+	pub fn is_schema_related(&self) -> bool {
+		matches!(
+			self,
+			Error::FieldCheck { .. }
+				| Error::FieldValue { .. }
+				| Error::FieldReadonly { .. }
+				| Error::FieldUndefined { .. }
+		)
+	}
+
+	/// Convert CoerceTo errors in LET statements
 	pub fn set_check_from_coerce(self, name: String) -> Error {
 		match self {
 			Error::CoerceTo {
@@ -1314,6 +1318,7 @@ impl Error {
 		}
 	}
 
+	/// Convert CoerceTo errors in functions and closures
 	pub fn function_check_from_coerce(self, name: impl Into<String>) -> Error {
 		match self {
 			Error::CoerceTo {
