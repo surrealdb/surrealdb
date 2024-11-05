@@ -109,52 +109,34 @@ impl Filter {
 	}
 
 	#[inline]
+	fn check_term(c: &str, s: String) -> FilterResult {
+		if s.is_empty() {
+			FilterResult::Ignore
+		} else if s.eq(c) {
+			FilterResult::Term(Term::Unchanged)
+		} else {
+			FilterResult::Term(Term::NewTerm(s, 0))
+		}
+	}
+
+	#[inline]
 	fn lowercase(c: &str) -> FilterResult {
-		if c.is_empty() {
-			return FilterResult::Ignore;
-		}
-		let s = c.to_lowercase();
-		if s.eq(c) {
-			return FilterResult::Term(Term::Unchanged);
-		}
-		FilterResult::Term(Term::NewTerm(s, 0))
+		Self::check_term(c, c.to_lowercase())
 	}
 
 	#[inline]
 	fn uppercase(c: &str) -> FilterResult {
-		if c.is_empty() {
-			return FilterResult::Ignore;
-		}
-		let s = c.to_uppercase();
-		if s.eq(c) {
-			return FilterResult::Term(Term::Unchanged);
-		}
-		FilterResult::Term(Term::NewTerm(s, 0))
+		Self::check_term(c, c.to_uppercase())
 	}
 
 	#[inline]
 	fn deunicode(c: &str) -> FilterResult {
-		if c.is_empty() {
-			return FilterResult::Ignore;
-		}
-		let s = deunicode(c);
-		if s.eq(c) {
-			return FilterResult::Term(Term::Unchanged);
-		}
-		FilterResult::Term(Term::NewTerm(s, 0))
+		Self::check_term(c, deunicode(c))
 	}
 
 	#[inline]
 	fn stem(s: &Stemmer, c: &str) -> FilterResult {
-		if c.is_empty() {
-			return FilterResult::Ignore;
-		}
-		let c = c.to_lowercase();
-		let s = s.stem(&c);
-		if s.eq(&c) {
-			return FilterResult::Term(Term::Unchanged);
-		}
-		FilterResult::Term(Term::NewTerm(s.to_string(), 0))
+		Self::check_term(c, s.stem(&c.to_lowercase()).into())
 	}
 
 	#[inline]
