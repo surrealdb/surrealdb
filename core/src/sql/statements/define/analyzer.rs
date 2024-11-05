@@ -58,6 +58,7 @@ impl DefineAnalyzerStatement {
 			overwrite: false,
 			..self.clone()
 		};
+		ctx.get_index_stores().mappers().preload(&az).await?;
 		txn.set(key, az, None).await?;
 		// Clear the cache
 		txn.clear();
