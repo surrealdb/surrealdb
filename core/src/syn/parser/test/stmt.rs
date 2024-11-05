@@ -191,35 +191,102 @@ fn parse_define_database() {
 
 #[test]
 fn parse_define_function() {
-	let res = test_parse!(
-		parse_stmt,
-		r#"DEFINE FUNCTION fn::foo::bar($a: number, $b: array<bool,3>) {
-			RETURN a
-		} COMMENT 'test' PERMISSIONS FULL AS ROLES owner
-		"#
-	)
-	.unwrap();
+	// AS default level (DATABASE) ROLES.
+	{
+		let res = test_parse!(
+			parse_stmt,
+			r#"DEFINE FUNCTION fn::foo::bar($a: number, $b: array<bool,3>) {
+				RETURN a
+			} COMMENT 'test' PERMISSIONS FULL AS ROLES Owner
+			"#
+		)
+		.unwrap();
 
-	assert_eq!(
-		res,
-		Statement::Define(DefineStatement::Function(DefineFunctionStatement {
-			name: Ident("foo::bar".to_string()),
-			args: vec![
-				(Ident("a".to_string()), Kind::Number),
-				(Ident("b".to_string()), Kind::Array(Box::new(Kind::Bool), Some(3)))
-			],
-			block: Block(vec![Entry::Output(OutputStatement {
-				what: ident_field("a"),
-				fetch: None,
-			})]),
-			comment: Some(Strand("test".to_string())),
-			permissions: Permission::Full,
-			run_as: RunAs::as_roles(["owner"]).into(),
-			if_not_exists: false,
-			overwrite: false,
-			returns: None,
-		}))
-	)
+		assert_eq!(
+			res,
+			Statement::Define(DefineStatement::Function(DefineFunctionStatement {
+				name: Ident("foo::bar".to_string()),
+				args: vec![
+					(Ident("a".to_string()), Kind::Number),
+					(Ident("b".to_string()), Kind::Array(Box::new(Kind::Bool), Some(3)))
+				],
+				block: Block(vec![Entry::Output(OutputStatement {
+					what: ident_field("a"),
+					fetch: None,
+				})]),
+				comment: Some(Strand("test".to_string())),
+				permissions: Permission::Full,
+				run_as: RunAs::as_roles(["Owner"]).into(),
+				if_not_exists: false,
+				overwrite: false,
+				returns: None,
+			}))
+		)
+	}
+	// AS NAMESPACE ROLES.
+	{
+		let res = test_parse!(
+			parse_stmt,
+			r#"DEFINE FUNCTION fn::foo::bar($a: number, $b: array<bool,3>) {
+				RETURN a
+			} COMMENT 'test' PERMISSIONS FULL AS NS ROLES Editor
+			"#
+		)
+		.unwrap();
+
+		assert_eq!(
+			res,
+			Statement::Define(DefineStatement::Function(DefineFunctionStatement {
+				name: Ident("foo::bar".to_string()),
+				args: vec![
+					(Ident("a".to_string()), Kind::Number),
+					(Ident("b".to_string()), Kind::Array(Box::new(Kind::Bool), Some(3)))
+				],
+				block: Block(vec![Entry::Output(OutputStatement {
+					what: ident_field("a"),
+					fetch: None,
+				})]),
+				comment: Some(Strand("test".to_string())),
+				permissions: Permission::Full,
+				run_as: RunAs::as_roles(["Editor"]).with_base(Base::Ns).into(),
+				if_not_exists: false,
+				overwrite: false,
+				returns: None,
+			}))
+		)
+	}
+	// AS ROOT USER.
+	{
+		let res = test_parse!(
+			parse_stmt,
+			r#"DEFINE FUNCTION fn::foo::bar($a: number, $b: array<bool,3>) {
+				RETURN a
+			} COMMENT 'test' PERMISSIONS FULL AS ROOT USER root
+			"#
+		)
+		.unwrap();
+
+		assert_eq!(
+			res,
+			Statement::Define(DefineStatement::Function(DefineFunctionStatement {
+				name: Ident("foo::bar".to_string()),
+				args: vec![
+					(Ident("a".to_string()), Kind::Number),
+					(Ident("b".to_string()), Kind::Array(Box::new(Kind::Bool), Some(3)))
+				],
+				block: Block(vec![Entry::Output(OutputStatement {
+					what: ident_field("a"),
+					fetch: None,
+				})]),
+				comment: Some(Strand("test".to_string())),
+				permissions: Permission::Full,
+				run_as: RunAs::as_user("root").with_base(Base::Root).into(),
+				if_not_exists: false,
+				overwrite: false,
+				returns: None,
+			}))
+		)
+	}
 }
 
 #[test]

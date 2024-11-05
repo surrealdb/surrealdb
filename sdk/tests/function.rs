@@ -5,7 +5,7 @@ use crate::helpers::Test;
 use helpers::new_ds;
 use surrealdb::dbs::Session;
 use surrealdb::err::Error;
-use surrealdb::sql::{self, Number, Value};
+use surrealdb::sql::{self, Base, Number, Value};
 
 async fn test_queries(sql: &str, desired_responses: &[&str]) -> Result<(), Error> {
 	Test::new(sql).await?.expect_vals(desired_responses)?;
@@ -6703,4 +6703,170 @@ async fn function_custom_typed_returns() -> Result<(), Error> {
 		.expect_val("2")?
 		.expect_error(error)?;
 	Ok(())
+}
+
+// tests for custom functions with AS clause.
+#[tokio::test]
+async fn test_as_system_roles() {
+	let bases = vec![Some(Base::Root), Some(Base::Ns), Some(Base::Db), None];
+	let roles = vec!["VIEWER", "EDITOR", "OWNER"];
+	let users = vec!["root", "ns_tester", "db_tester"];
+
+	let dbs = new_ds().await.unwrap();
+	let root_ses = Session::owner();
+	let user_id = "user:tobie";
+	let secret = "secret";
+	let sql = format!(
+		"
+		DEFINE USER root ON ROOT PASSWORD '{secret}' ROLES OWNER;
+		DEFINE NAMESPACE test;
+		USE NS test;
+		DEFINE USER ns_tester ON NAMESPACE PASSWORD '{secret}' ROLES EDITOR;
+		DEFINE DATABASE test;
+		USE DATABASE test;
+		DEFINE USER db_tester ON DATABASE PASSWORD '{secret}' ROLES VIEWER;
+		DEFINE TABLE user SCHEMALESS PERMISSIONS NONE;
+		CREATE {user_id} SET role = 'unknown', secret = '{secret}';
+		DEFINE ACCESS account ON DATABASE TYPE RECORD;
+		DEFINE FUNCTION fn::reset_role() {{
+			RETURN (UPDATE ONLY {user_id} SET role = 'unknown' RETURN VALUE role);
+		}} AS ROLES Editor;
+	"
+	);
+	dbs.execute(&sql, &root_ses, None).await.unwrap();
+	let db_ses = Session::owner().with_ns("test").with_db("test");
+	let user_ses = Session::for_record("test", "test", "account", user_id.into());
+	for base in &bases {
+		let base = if let Some(b) = &base {
+			b.to_string()
+		} else {
+			"".to_string()
+		};
+		for role in &roles {
+			let sql = format!(
+				"
+				DEFINE FUNCTION OVERWRITE fn::test_permission() {{
+					RETURN (SELECT VALUE role FROM ONLY {user_id});
+				}} PERMISSIONS NONE AS {base} USER {role};
+				DEFINE FUNCTION OVERWRITE fn::test_view() {{
+					RETURN (SELECT VALUE role FROM ONLY {user_id});
+				}} AS {base} ROLES {role};
+				DEFINE FUNCTION OVERWRITE fn::test_edit() {{
+					RETURN (UPDATE ONLY {user_id} SET role = '{role}' RETURN VALUE role);
+				}} AS {base} ROLES {role};
+				DEFINE FUNCTION OVERWRITE fn::test_own() {{
+					DEFINE FUNCTION OVERWRITE fn::temp_test() {{
+						REMOVE USER temp_tester ON DATABASE;
+						REMOVE FUNCTION fn::temp_test;
+						RETURN 'deleted';
+					}} AS ROOT ROLES Owner;
+					DEFINE USER temp_tester ON DATABASE PASSWORD '123456' ROLES Editor;
+					RETURN fn::temp_test();
+				}} AS {base} ROLES {role};
+			"
+			);
+			let res = dbs.execute(&sql, &db_ses, None).await.unwrap();
+			assert!(res.len() == 4);
+			let sql = "
+				fn::test_permission();
+				fn::reset_role();
+				fn::test_view();
+				fn::test_edit();
+				fn::test_own();
+			";
+			let res = &mut dbs.execute(sql, &user_ses, None).await.unwrap();
+			match *role {
+				"VIEWER" => {
+					assert!(matches!(res.remove(0).result, Err(Error::FunctionPermissions { .. })));
+					assert_eq!(res.remove(0).result.unwrap().to_string(), "'unknown'".to_string());
+					assert_eq!(res.remove(0).result.unwrap().to_string(), "'unknown'".to_string());
+					assert!(matches!(res.remove(0).result, Err(Error::SingleOnlyOutput)));
+					assert!(matches!(res.remove(0).result, Err(Error::IamError(_))));
+				}
+				"EDITOR" => {
+					assert!(matches!(res.remove(0).result, Err(Error::FunctionPermissions { .. })));
+					assert_eq!(res.remove(0).result.unwrap().to_string(), "'unknown'".to_string());
+					assert_eq!(res.remove(0).result.unwrap().to_string(), "'unknown'".to_string());
+					assert_eq!(res.remove(0).result.unwrap().to_string(), "'EDITOR'".to_string());
+					assert!(matches!(res.remove(0).result, Err(Error::IamError(_))));
+				}
+				"OWNER" => {
+					assert!(matches!(res.remove(0).result, Err(Error::FunctionPermissions { .. })));
+					assert_eq!(res.remove(0).result.unwrap().to_string(), "'unknown'".to_string());
+					assert_eq!(res.remove(0).result.unwrap().to_string(), "'unknown'".to_string());
+					assert_eq!(res.remove(0).result.unwrap().to_string(), "'OWNER'".to_string());
+					assert_eq!(res.remove(0).result.unwrap().to_string(), "'deleted'".to_string());
+				}
+				_ => unreachable!(),
+			}
+		}
+
+		for user in &users {
+			let sql = format!(
+				"
+				DEFINE FUNCTION OVERWRITE fn::test_permission() {{
+					RETURN (SELECT VALUE role FROM ONLY {user_id});
+				}} PERMISSIONS NONE AS {base} USER {user};
+				DEFINE FUNCTION OVERWRITE fn::test_view() {{
+					RETURN (SELECT VALUE role FROM ONLY {user_id});
+				}} AS {base} USER {user};
+				DEFINE FUNCTION OVERWRITE fn::test_edit() {{
+					RETURN (UPDATE ONLY {user_id} SET role = '{user}' RETURN VALUE role);
+				}} AS {base} USER {user};
+				DEFINE FUNCTION OVERWRITE fn::test_own() {{
+					DEFINE FUNCTION OVERWRITE fn::temp_test() {{
+						REMOVE USER temp_tester ON DATABASE;
+						REMOVE FUNCTION fn::temp_test;
+						RETURN 'deleted';
+					}} AS ROOT ROLES Owner;
+					DEFINE USER temp_tester ON DATABASE PASSWORD '123456' ROLES Editor;
+					RETURN fn::temp_test();
+				}} AS {base} USER {user};
+			"
+			);
+			let res = dbs.execute(&sql, &db_ses, None).await.unwrap();
+			assert!(res.len() == 4);
+			let sql = "
+				fn::test_permission();
+				fn::reset_role();
+				fn::test_view();
+				fn::test_edit();
+				fn::test_own();
+			";
+			let res = &mut dbs.execute(sql, &user_ses, None).await.unwrap();
+			match (base.as_str(), *user) {
+				("ROOT", "root") => {
+					assert!(matches!(res.remove(0).result, Err(Error::FunctionPermissions { .. })));
+					assert_eq!(res.remove(0).result.unwrap().to_string(), "'unknown'".to_string());
+					assert_eq!(res.remove(0).result.unwrap().to_string(), "'unknown'".to_string());
+					assert_eq!(res.remove(0).result.unwrap().to_string(), "'root'".to_string());
+					assert_eq!(res.remove(0).result.unwrap().to_string(), "'deleted'".to_string());
+				}
+				("NAMESPACE", "ns_tester") => {
+					assert!(matches!(res.remove(0).result, Err(Error::FunctionPermissions { .. })));
+					assert_eq!(res.remove(0).result.unwrap().to_string(), "'unknown'".to_string());
+					assert_eq!(res.remove(0).result.unwrap().to_string(), "'unknown'".to_string());
+					assert_eq!(
+						res.remove(0).result.unwrap().to_string(),
+						"'ns_tester'".to_string()
+					);
+					assert!(matches!(res.remove(0).result, Err(Error::IamError(_))));
+				}
+				("DATABASE" | "", "db_tester") => {
+					assert!(matches!(res.remove(0).result, Err(Error::FunctionPermissions { .. })));
+					assert_eq!(res.remove(0).result.unwrap().to_string(), "'unknown'".to_string());
+					assert_eq!(res.remove(0).result.unwrap().to_string(), "'unknown'".to_string());
+					assert!(matches!(res.remove(0).result, Err(Error::SingleOnlyOutput)));
+					assert!(matches!(res.remove(0).result, Err(Error::IamError(_))));
+				}
+				_ => {
+					assert!(matches!(res.remove(0).result, Err(Error::FunctionPermissions { .. })));
+					assert_eq!(res.remove(0).result.unwrap().to_string(), "'unknown'".to_string());
+					assert!(res.remove(0).result.is_err());
+					assert!(res.remove(0).result.is_err());
+					assert!(res.remove(0).result.is_err());
+				}
+			}
+		}
+	}
 }
