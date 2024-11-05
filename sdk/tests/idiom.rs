@@ -95,6 +95,7 @@ async fn idiom_graph_with_filter_should_be_flattened() -> Result<(), Error> {
 		person:1->likes->person[?true];
 		[person:1][?true]->likes->person;
 		[person:1]->likes->person[?true]->likes->person;
+		SELECT ->likes[?true]->person as likes FROM person;
 	"#;
 	Test::new(sql)
 		.await?
@@ -105,6 +106,11 @@ async fn idiom_graph_with_filter_should_be_flattened() -> Result<(), Error> {
 		.expect_val("[person:3]")?
 		.expect_val("[person:2]")?
 		.expect_val("[[person:2]]")?
-		.expect_val("[[person:3]]")?;
+		.expect_val("[[person:3]]")?
+		.expect_val("[
+			{likes: [person:2]},
+			{likes: [person:3]},
+			{likes: []},
+		]")?;
 	Ok(())
 }
