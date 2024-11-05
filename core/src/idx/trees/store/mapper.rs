@@ -2,6 +2,7 @@ use crate::err::Error;
 use crate::idx::ft::analyzer::mapper::Mapper;
 use crate::sql::statements::DefineAnalyzerStatement;
 use crate::sql::Filter;
+use ahash::HashSet;
 use dashmap::DashMap;
 use std::path::Path;
 
@@ -33,7 +34,22 @@ impl Mappers {
 		}
 	}
 
-	pub(crate) fn cleanup(&self, _azs: &[DefineAnalyzerStatement]) {
-		todo!()
+	pub(crate) fn cleanup(&self, azs: &[DefineAnalyzerStatement]) {
+		// Collect every existing mapper
+		let mut keys: HashSet<String> = self.0.iter().map(|e| e.key().to_string()).collect();
+		// Remove keys that still exist in the definitions
+		for az in azs {
+			if let Some(filters) = &az.filters {
+				for f in filters {
+					if let Filter::Mapper(path) = f {
+						keys.remove(path);
+					}
+				}
+			}
+		}
+		// Any left key can be removed
+		for key in keys {
+			self.0.remove(&key);
+		}
 	}
 }

@@ -725,12 +725,15 @@ async fn select_where_matches_analyser_with_mapper() -> Result<(), Error> {
 		DEFINE ANALYZER mapper TOKENIZERS blank,class FILTERS lowercase,mapper('../tests/data/lemmatization-en.txt');
 		CREATE t:1 SET text = 'He drives to work every day, taking the scenic route through town';
 		DEFINE INDEX search_idx ON TABLE t COLUMNS text SEARCH ANALYZER mapper BM25;
-		SELECT * FROM t WHERE text @@ 'driven';";
+		SELECT * FROM t WHERE text @@ 'driven';
+		REMOVE INDEX search_idx ON TABLE t;
+		REMOVE ANALYZER mapper;";
 	let mut t = Test::new(sql).await?;
-	t.expect_size(4)?;
+	t.expect_size(6)?;
 	t.skip_ok(3)?;
 	t.expect_val(
 		"[{ id: t:1, text: 'He drives to work every day, taking the scenic route through town' }]",
 	)?;
+	t.skip_ok(2)?;
 	Ok(())
 }
